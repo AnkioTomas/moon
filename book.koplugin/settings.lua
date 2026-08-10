@@ -57,7 +57,7 @@ function Settings.build(desktop)
             callback = function()
                 local n = UI.cycleScale()
                 UIManager:show(InfoMessage:new{
-                    text = T(_("字号已设为 %1%%"), n),
+                    text = T(_("字号已设为 %1%"), n),
                     timeout = 1.5,
                 })
                 desktop:rebuild()

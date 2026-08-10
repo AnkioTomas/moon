@@ -146,7 +146,7 @@ function Home.buildHeader(ctx, state)
     if Device.powerd then
         local ok, pct = pcall(function() return Device.powerd:getCapacity() end)
         if ok and type(pct) == "number" then
-            battery = T(_("  电量 %1%%"), pct)
+            battery = T(_("  电量 %1%"), pct)
         end
     end
 

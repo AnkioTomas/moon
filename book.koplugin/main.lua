@@ -688,7 +688,7 @@ function BookPlugin:pullCurrentProgress(show_msg)
         end
         if show_msg then
             UIManager:show(InfoMessage:new{
-                text = T(_("已跳转到约 %1%%"), string.format("%.1f", pct * 100)),
+                text = T(_("已跳转到约 %1%"), string.format("%.1f", pct * 100)),
                 timeout = 2,
             })
         end
