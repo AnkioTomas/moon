@@ -81,17 +81,48 @@ function Cover.ensure(api, plugin, filename)
     return nil
 end
 
---- 后台下载；已有缓存则立刻 callback(path)
+--- 后台下载；静默写缓存，不强制 callback 刷新 UI（避免连环 rebuild 崩进程）
 function Cover.ensureAsync(api, plugin, filename, callback)
     local cached = Cover.cachedPath(plugin, filename)
     if cached then
-        if callback then callback(cached) end
         return
     end
-    UIManager:scheduleIn(0, function()
-        local path = Cover.ensure(api, plugin, filename)
-        if callback then callback(path) end
-    end)
+    if not filename or filename == "" then
+        return
+    end
+    -- 串行队列，避免同一时刻打爆网络/内存
+    Cover._queue = Cover._queue or {}
+    table.insert(Cover._queue, {
+        api = api,
+        plugin = plugin,
+        filename = filename,
+        callback = callback,
+    })
+    if Cover._busy then
+        return
+    end
+    local function pump()
+        local job = table.remove(Cover._queue, 1)
+        if not job then
+            Cover._busy = false
+            return
+        end
+        Cover._busy = true
+        UIManager:scheduleIn(0.05, function()
+            local ok, path = pcall(Cover.ensure, job.api, job.plugin, job.filename)
+            if not ok then
+                logger.warn("book cover async failed", job.filename, path)
+                path = nil
+            end
+            -- 默认不 callback；只有显式需要时才通知（且由调用方自己防抖）
+            if job.callback and path then
+                pcall(job.callback, path)
+            end
+            Cover._busy = false
+            pump()
+        end)
+    end
+    pump()
 end
 
 function Cover.placeholder(w, h, title)

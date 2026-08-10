@@ -12,7 +12,6 @@ local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
-local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputDialog = require("ui/widget/inputdialog")
 local LineWidget = require("ui/widget/linewidget")
@@ -33,9 +32,9 @@ local Detail = require("detail")
 local UI = require("bookui")
 
 local TABS = {
-    { id = "library", text = _("图书馆"), icon = "library.svg" },
-    { id = "home", text = _("主页"), icon = "home.svg" },
-    { id = "settings", text = _("设置"), icon = "settings.svg" },
+    { id = "library", text = _("图书馆") },
+    { id = "home", text = _("主页") },
+    { id = "settings", text = _("设置") },
 }
 
 local Desktop = InputContainer:extend{
@@ -46,16 +45,6 @@ local Desktop = InputContainer:extend{
     tab = "home",
     filter = nil,
 }
-
-local function pluginIconDir()
-    local info = debug.getinfo(1, "S")
-    local src = info and info.source
-    if src and src:sub(1, 1) == "@" then
-        local dir = src:sub(2):match("(.*/)")
-        if dir then return dir .. "icons/" end
-    end
-    return "icons/"
-end
 
 local function barH()
     return UI.barH()
@@ -134,64 +123,36 @@ end
 function Desktop:buildBottomBar()
     local sw = Screen:getWidth()
     local bh = barH()
-    local icon_sz = UI.iconSz()
-    local icon_dir = pluginIconDir()
     local cell_w = math.floor(sw / #TABS)
-    local cells = {}
-    for i, tab in ipairs(TABS) do
+    local row = HorizontalGroup:new{ align = "center" }
+    for _, tab in ipairs(TABS) do
         local active = self.tab == tab.id
-        local icon_path = icon_dir .. tab.icon
-        local icon
-        local ok, img = pcall(function()
-            return ImageWidget:new{
-                file = icon_path,
-                width = icon_sz,
-                height = icon_sz,
-                alpha = true,
-            }
-        end)
-        if ok and img then
-            icon = img
-        else
-            icon = TextWidget:new{
-                text = "•",
-                face = UI.face("cfont", 18),
-                fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.gray(0.55),
-            }
-        end
         local label = TextWidget:new{
             text = tab.text,
-            face = UI.face("xx_smallinfofont", 12),
+            face = UI.face("xx_smallinfofont", active and 14 or 13),
             fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.gray(0.5),
         }
-        local col = VerticalGroup:new{
-            align = "center",
-            VerticalSpan:new{ width = UI.sz(6) },
-            icon,
-            VerticalSpan:new{ width = UI.sz(2) },
-            label,
-        }
-        local og = CenterContainer:new{
+        table.insert(row, CenterContainer:new{
             dimen = Geom:new{ w = cell_w, h = bh },
-            col,
-        }
-        og.overlap_offset = { (i - 1) * cell_w, 0 }
-        table.insert(cells, og)
-    end
-    return OverlapGroup:new{
-        dimen = Geom:new{ w = sw, h = bh },
-        FrameContainer:new{
-            bordersize = 0,
-            padding = 0,
-            background = Blitbuffer.COLOR_WHITE,
             VerticalGroup:new{
-                align = "left",
-                LineWidget:new{
-                    background = Blitbuffer.gray(0.7),
-                    dimen = Geom:new{ w = sw, h = Size.line.thin },
-                },
-                HorizontalGroup:new(cells),
+                align = "center",
+                VerticalSpan:new{ width = UI.sz(14) },
+                label,
             },
+        })
+    end
+    return FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        dimen = Geom:new{ w = sw, h = bh },
+        VerticalGroup:new{
+            align = "left",
+            LineWidget:new{
+                background = Blitbuffer.gray(0.7),
+                dimen = Geom:new{ w = sw, h = Size.line.thin },
+            },
+            row,
         },
     }
 end
@@ -321,9 +282,14 @@ function Desktop:scheduleClockTick()
     end
     if self._clock_scheduled then return end
     self._clock_scheduled = true
-    UIManager:scheduleIn(30, function()
+    UIManager:scheduleIn(60, function()
         self._clock_scheduled = false
-        if self._closed or self.tab ~= "home" then return end
+        if self._closed or self.tab ~= "home" or not self._home_loaded then return end
+        -- 仅在已加载且空闲时轻量刷新；避开封面下载高峰
+        if self._home_fetching then
+            self:scheduleClockTick()
+            return
+        end
         self:rebuild()
         self:scheduleClockTick()
     end)

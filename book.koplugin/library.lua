@@ -73,13 +73,14 @@ local function coverCell(ctx, book, cw, ch, on_open)
     local path = Cover.cachedPath(ctx.plugin, book.filename)
     local cover_w = Cover.widget(path, cw, ch, title)
     if not path then
-        Cover.ensureAsync(ctx.api, ctx.plugin, book.filename, function(p)
-            if p and ctx.desktop and ctx.desktop.requestLibraryRefresh then
-                ctx.desktop:requestLibraryRefresh("cover")
-            end
-        end)
+        Cover.ensureAsync(ctx.api, ctx.plugin, book.filename, nil)
     end
     local pct = tonumber(book.progressPercent) or 0
+    if type(book.progressPercent) == "string" then
+        pct = tonumber((book.progressPercent:gsub("%%", ""):match("[%d%.]+"))) or 0
+    end
+    if pct < 0 then pct = 0 end
+    if pct > 100 then pct = 100 end
     local sub = pct > 0 and string.format("%.0f%%", pct) or (book.author or "")
     local label_h = UI.sz(40)
     local tap = tappable(cw, ch + label_h, function()

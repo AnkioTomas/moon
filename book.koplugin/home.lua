@@ -46,7 +46,14 @@ local function bookAuthor(book)
 end
 
 local function bookPct(book)
-    return tonumber(book.progressPercent) or 0
+    local p = book and book.progressPercent
+    if type(p) == "string" then
+        p = p:gsub("%%", ""):match("[%d%.]+")
+    end
+    p = tonumber(p) or 0
+    if p < 0 then p = 0 end
+    if p > 100 then p = 100 end
+    return p
 end
 
 local function isFinished(book)
@@ -73,11 +80,10 @@ local function tappable(w, h, on_tap)
     return tap
 end
 
-local function scheduleCover(api, plugin, filename, on_done)
+-- 只预热缓存，不刷新 UI（刷新会连环 rebuild → 墨水屏直接崩）
+local function prefetchCover(api, plugin, filename)
     if not filename then return end
-    Cover.ensureAsync(api, plugin, filename, function(path)
-        if path and on_done then on_done(path) end
-    end)
+    Cover.ensureAsync(api, plugin, filename, nil)
 end
 
 function Home.buildHeader(ctx, state)
@@ -127,14 +133,9 @@ function Home.buildHeader(ctx, state)
     local date_str = string.format("%04d-%02d-%02d  %s",
         now.year, now.month, now.day, WEEKDAYS[(now.wday or 1)])
     local battery = ""
-    if Device.isKindle and not Device:isKindle() and Device.powerd then
+    if Device.powerd then
         local ok, pct = pcall(function() return Device.powerd:getCapacity() end)
-        if ok and pct then
-            battery = T(_("  电量 %1%%"), pct)
-        end
-    elseif Device.powerd then
-        local ok, pct = pcall(function() return Device.powerd:getCapacity() end)
-        if ok and pct then
+        if ok and type(pct) == "number" then
             battery = T(_("  电量 %1%%"), pct)
         end
     end
@@ -215,14 +216,11 @@ local function recentRow(ctx, book, on_open)
     local path = Cover.cachedPath(ctx.plugin, book.filename)
     local cover_w = Cover.widget(path, cw, ch, title)
     if not path then
-        scheduleCover(ctx.api, ctx.plugin, book.filename, function()
-            if ctx.desktop and ctx.desktop.requestHomeRefresh then
-                ctx.desktop:requestHomeRefresh("cover")
-            end
-        end)
+        prefetchCover(ctx.api, ctx.plugin, book.filename)
     end
 
-    local info_w = w - pad * 2 - cw - UI.sz(12)
+    local info_w = math.max(UI.sz(40), w - pad * 2 - cw - UI.sz(12))
+    local bar = UI.progressBar(info_w, UI.sz(8), pct)
     local info = VerticalGroup:new{
         align = "left",
         TextWidget:new{
@@ -239,7 +237,7 @@ local function recentRow(ctx, book, on_open)
             fgcolor = Blitbuffer.gray(0.45),
         },
         VerticalSpan:new{ width = UI.sz(10) },
-        UI.progressBar(info_w, UI.sz(8), pct),
+        bar,
         VerticalSpan:new{ width = UI.sz(4) },
         TextWidget:new{
             text = string.format("%.0f%%", pct),
@@ -276,11 +274,7 @@ local function readingCell(ctx, book, cw, ch, on_open)
     local path = Cover.cachedPath(ctx.plugin, book.filename)
     local cover_w = Cover.widget(path, cw, ch, title)
     if not path then
-        scheduleCover(ctx.api, ctx.plugin, book.filename, function()
-            if ctx.desktop and ctx.desktop.requestHomeRefresh then
-                ctx.desktop:requestHomeRefresh("cover")
-            end
-        end)
+        prefetchCover(ctx.api, ctx.plugin, book.filename)
     end
     local label_h = UI.sz(28)
     local bar_h = UI.sz(10)

@@ -69,36 +69,55 @@ function UI.menuFontSize()
     return math.max(16, math.floor(22 * UI.getScale() / 100 + 0.5))
 end
 
---- 简易进度条（0–100）
+--- 简易进度条（0–100）。优先 ProgressWidget；否则用 LineWidget，禁止空 FrameContainer。
 function UI.progressBar(width, height, percent)
     local Blitbuffer = require("ffi/blitbuffer")
-    local FrameContainer = require("ui/widget/container/framecontainer")
     local Geom = require("ui/geometry")
-    local HorizontalGroup = require("ui/widget/horizontalgroup")
+    local TextWidget = require("ui/widget/textwidget")
+    width = math.max(1, math.floor(tonumber(width) or 1))
+    height = math.max(1, math.floor(tonumber(height) or UI.sz(8)))
     percent = tonumber(percent) or 0
     if percent < 0 then percent = 0 end
     if percent > 100 then percent = 100 end
-    local h = height or UI.sz(8)
+
+    local ok, ProgressWidget = pcall(require, "ui/widget/progresswidget")
+    if ok and ProgressWidget then
+        local widget = ProgressWidget:new{
+            width = width,
+            height = height,
+            percentage = percent / 100,
+        }
+        if widget then
+            return widget
+        end
+    end
+
+    local LineWidget = require("ui/widget/linewidget")
+    local HorizontalGroup = require("ui/widget/horizontalgroup")
+    local FrameContainer = require("ui/widget/container/framecontainer")
     local fill_w = math.floor(width * percent / 100 + 0.5)
-    local empty_w = math.max(0, width - fill_w)
+    if fill_w < 0 then fill_w = 0 end
+    if fill_w > width then fill_w = width end
+    local empty_w = width - fill_w
     local row = HorizontalGroup:new{}
     if fill_w > 0 then
-        table.insert(row, FrameContainer:new{
-            bordersize = 0,
-            padding = 0,
-            margin = 0,
+        table.insert(row, LineWidget:new{
             background = Blitbuffer.COLOR_BLACK,
-            dimen = Geom:new{ w = fill_w, h = h },
+            dimen = Geom:new{ w = fill_w, h = height },
         })
     end
     if empty_w > 0 then
-        table.insert(row, FrameContainer:new{
-            bordersize = 0,
-            padding = 0,
-            margin = 0,
+        table.insert(row, LineWidget:new{
             background = Blitbuffer.gray(0.85),
-            dimen = Geom:new{ w = empty_w, h = h },
+            dimen = Geom:new{ w = empty_w, h = height },
         })
+    end
+    if #row == 0 then
+        return TextWidget:new{
+            text = string.format("%.0f%%", percent),
+            face = UI.face("xx_smallinfofont", 12),
+            fgcolor = Blitbuffer.gray(0.4),
+        }
     end
     return FrameContainer:new{
         bordersize = 1,
@@ -106,7 +125,7 @@ function UI.progressBar(width, height, percent)
         padding = 0,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = width, h = h + 2 },
+        dimen = Geom:new{ w = width + 2, h = height + 2 },
         row,
     }
 end

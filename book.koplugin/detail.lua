@@ -62,16 +62,16 @@ function Detail:rebuild()
     local path = Cover.cachedPath(self.plugin, book.filename)
     local cover_w = Cover.widget(path, cw, ch, title)
     if not path then
-        Cover.ensureAsync(self.api, self.plugin, book.filename, function(p)
-            if p and not self._closed then
-                self:rebuild()
-                UIManager:setDirty(self, "ui")
-            end
-        end)
+        Cover.ensureAsync(self.api, self.plugin, book.filename, nil)
     end
 
     local pct = tonumber(book.progressPercent) or 0
-    local info_w = w - pad * 2
+    if type(book.progressPercent) == "string" then
+        pct = tonumber((book.progressPercent:gsub("%%", ""):match("[%d%.]+"))) or 0
+    end
+    if pct < 0 then pct = 0 end
+    if pct > 100 then pct = 100 end
+    local info_w = math.max(UI.sz(40), w - pad * 2)
     local kids = {
         align = "center",
         cover_w,
