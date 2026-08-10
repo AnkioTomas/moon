@@ -444,22 +444,42 @@ end
 
 function Desktop:onClose()
     self._closed = true
-    Cover.setIdleHandler(nil)
+    self._clock_scheduled = false
+    self._home_refresh_pending = false
+    self._library_refresh_pending = false
+    self.ges_events = nil
+    Cover.stopAll()
     if self.detail then
-        UIManager:close(self.detail)
+        pcall(function()
+            self.detail._closed = true
+            self.detail.ges_events = nil
+            UIManager:close(self.detail)
+        end)
         self.detail = nil
     end
     if self._filter_menu then
-        UIManager:close(self._filter_menu)
+        pcall(UIManager.close, UIManager, self._filter_menu)
         self._filter_menu = nil
     end
     UIManager:close(self)
-    if self.close_callback then self.close_callback() end
+    if self.close_callback then
+        pcall(self.close_callback)
+    end
+    -- 全屏桌面盖过 FM 后，必须强制整屏刷新，否则顶栏点击会踩到残影/野指针
+    UIManager:nextTick(function()
+        UIManager:setDirty("all", "full")
+        local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
+        if ok and FileManager and FileManager.instance then
+            UIManager:setDirty(FileManager.instance, "full")
+        end
+    end)
     return true
 end
 
 function Desktop:onCloseWidget()
     self._closed = true
+    self.ges_events = nil
+    Cover.stopAll()
 end
 
 return Desktop

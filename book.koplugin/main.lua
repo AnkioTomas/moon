@@ -213,27 +213,39 @@ local function patchStartWithMenu()
     FMMenu.getStartWithMenuTable = function(self)
         local item = orig(self)
         if item and item.sub_item_table then
-            table.insert(item.sub_item_table, 1, {
-                text = _("Book 书库"),
-                checked_func = function()
-                    return G_reader_settings:readSetting("start_with") == START_WITH_ID
-                end,
-                callback = function()
-                    G_reader_settings:saveSetting("start_with", START_WITH_ID)
-                    local s = settings()
-                    s.open_on_start = true
-                    saveSettings(s)
-                end,
-                radio = true,
-            })
+            -- 避免重复插入
+            local already = false
             for _, row in ipairs(item.sub_item_table) do
-                if row.text ~= _("Book 书库") and row.callback then
-                    local prev = row.callback
-                    row.callback = function(...)
+                if row._book_startwith_item then
+                    already = true
+                    break
+                end
+            end
+            if not already then
+                table.insert(item.sub_item_table, 1, {
+                    _book_startwith_item = true,
+                    text = _("Book 书库"),
+                    checked_func = function()
+                        return G_reader_settings:readSetting("start_with") == START_WITH_ID
+                    end,
+                    callback = function()
+                        G_reader_settings:saveSetting("start_with", START_WITH_ID)
                         local s = settings()
-                        s.open_on_start = false
+                        s.open_on_start = true
                         saveSettings(s)
-                        return prev(...)
+                    end,
+                    radio = true,
+                })
+                for _, row in ipairs(item.sub_item_table) do
+                    if not row._book_startwith_item and row.callback and not row._book_startwith_wrapped then
+                        row._book_startwith_wrapped = true
+                        local prev = row.callback
+                        row.callback = function(...)
+                            local s = settings()
+                            s.open_on_start = false
+                            saveSettings(s)
+                            return prev(...)
+                        end
                     end
                 end
             end

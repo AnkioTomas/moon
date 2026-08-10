@@ -112,6 +112,17 @@ end
 
 function Cover.setIdleHandler(fn)
     Cover._idle_handler = fn
+    Cover._epoch = (Cover._epoch or 0) + 1
+end
+
+--- 桌面关闭时停掉队列，避免回到 FM 后异步回调踩死对象
+function Cover.stopAll()
+    Cover._queue = {}
+    Cover._queued = {}
+    Cover._busy = false
+    Cover._pending_refresh = false
+    Cover._idle_handler = nil
+    Cover._epoch = (Cover._epoch or 0) + 1
 end
 
 local function scheduleIdleNotify()
@@ -119,8 +130,12 @@ local function scheduleIdleNotify()
         return
     end
     Cover._idle_scheduled = true
+    local epoch = Cover._epoch or 0
     UIManager:scheduleIn(0.8, function()
         Cover._idle_scheduled = false
+        if epoch ~= (Cover._epoch or 0) then
+            return
+        end
         if Cover._pending_refresh and Cover._idle_handler then
             Cover._pending_refresh = false
             pcall(Cover._idle_handler)
@@ -137,7 +152,12 @@ local function pump()
         return
     end
     Cover._busy = true
+    local epoch = Cover._epoch or 0
     UIManager:scheduleIn(0.02, function()
+        if epoch ~= (Cover._epoch or 0) then
+            Cover._busy = false
+            return
+        end
         local ok, path = pcall(Cover.ensure, job.api, job.plugin, job.filename)
         if Cover._queued then
             Cover._queued[job.filename] = nil
