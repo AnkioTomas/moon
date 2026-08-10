@@ -44,12 +44,12 @@ local function settings()
             auto_sync = true,
             open_on_start = true,
             library_dir = DataStorage:getDataDir() .. "/books",
-            _ui_v = 3,
+            _ui_v = 4,
         }
         G_reader_settings:saveSetting(SETTINGS_KEY, s)
-    elseif (s._ui_v or 0) < 3 then
+    elseif (s._ui_v or 0) < 4 then
         s.open_on_start = true
-        s._ui_v = 3
+        s._ui_v = 4
         G_reader_settings:saveSetting(SETTINGS_KEY, s)
     end
     return s
@@ -65,7 +65,22 @@ local function ensureDir(path)
     end
 end
 
+-- 启动直进插件：open_on_start 默认开，且强制写 start_with（对齐 SimpleUI first-run）
+local function forceStartWithBook()
+    local s = settings()
+    if s.open_on_start == false then
+        return false
+    end
+    G_reader_settings:saveSetting("start_with", START_WITH_ID)
+    s.open_on_start = true
+    saveSettings(s)
+    return true
+end
+
 local function isStartWithBook()
+    if settings().open_on_start == false then
+        return false
+    end
     return G_reader_settings:readSetting("start_with", "filemanager") == START_WITH_ID
         or settings().open_on_start
 end
@@ -105,8 +120,8 @@ local function patchFileManager(plugin)
                     this._book_autoopen_pending = nil
                     UIManager:scheduleIn(0.15, function()
                         local inst = plugin
-                        if inst and inst.openBookshelf then
-                            inst:openBookshelf()
+                        if inst and inst.openDesktop then
+                            inst:openDesktop()
                         end
                     end)
                 end
@@ -182,23 +197,25 @@ end
 
 function BookPlugin:init()
     local ok, err = pcall(function()
+        -- 必须在 patch 之前写入 start_with，否则 setupLayout 读到旧值，桌面永远不自动开
+        forceStartWithBook()
+
         self:onDispatcherRegisterActions()
         if self.ui.menu and self.ui.menu.registerToMainMenu then
             self.ui.menu:registerToMainMenu(self)
         end
 
-        -- 首次：写入 start_with（对齐 simpleui first-run）
-        local s = settings()
-        if s.open_on_start and G_reader_settings:readSetting("start_with") ~= "last" then
-            if G_reader_settings:readSetting("book_plugin_start_set") == nil then
-                G_reader_settings:saveSetting("start_with", START_WITH_ID)
-                G_reader_settings:saveSetting("book_plugin_start_set", true)
-            end
-        end
-
         if self.ui.file_chooser then
             patchFileManager(self)
             patchStartWithMenu()
+            -- 双保险：若 onShow 已过，延迟再开一次
+            if isStartWithBook() then
+                UIManager:scheduleIn(0.4, function()
+                    if not self.desktop and self.ui and self.ui.file_chooser then
+                        self:openDesktop()
+                    end
+                end)
+            end
         end
     end)
     if not ok then

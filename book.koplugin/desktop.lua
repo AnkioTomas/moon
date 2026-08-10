@@ -1,14 +1,15 @@
 --[[--
-Book 桌面 — 对齐 SimpleUI 的壳，不做它的主题/模块系统：
-  首页：时间 + 最近阅读
-  底栏：首页 | 书库 | 分类 | 设置
+Book 桌面壳 — SimpleUI 同级能力（精简实现，不抄主题系统）：
+  - 底栏图标+文字：首页 / 书库 / 分类 / 设置
+  - 首页模块：时钟 + 最近阅读封面行
+  - 书库：封面网格
+  - 分类 / 设置
 
 @module koplugin.book.desktop
 --]]
 
 local BD = require("ui/bidi")
 local Blitbuffer = require("ffi/blitbuffer")
-local Button = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Font = require("ui/font")
@@ -19,10 +20,10 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local InfoMessage = require("ui/widget/infomessage")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputDialog = require("ui/widget/inputdialog")
-local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local Menu = require("ui/widget/menu")
 local NetworkMgr = require("ui/network/manager")
+local OverlapGroup = require("ui/widget/overlapgroup")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
@@ -33,13 +34,28 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 local Screen = Device.screen
 
-local BAR_H = Screen:scaleBySize(52)
+local Registry = require("modules/registry")
+local CoverGrid = require("modules/covergrid")
+
+local BAR_H = Screen:scaleBySize(56)
+local ICON_SZ = Screen:scaleBySize(22)
+
+-- 插件目录下 icons/（PluginLoader 把插件目录塞进 package.path，但不保证 cwd）
+local function pluginIconDir()
+    local info = debug.getinfo(1, "S")
+    local src = info and info.source
+    if src and src:sub(1, 1) == "@" then
+        local dir = src:sub(2):match("(.*/)")
+        if dir then return dir .. "icons/" end
+    end
+    return "icons/"
+end
 
 local TABS = {
-    { id = "home", text = _("首页") },
-    { id = "library", text = _("书库") },
-    { id = "category", text = _("分类") },
-    { id = "settings", text = _("设置") },
+    { id = "home", text = _("首页"), icon = "home.svg" },
+    { id = "library", text = _("书库"), icon = "library.svg" },
+    { id = "category", text = _("分类"), icon = "tags.svg" },
+    { id = "settings", text = _("设置"), icon = "settings.svg" },
 }
 
 local Desktop = InputContainer:extend{
@@ -55,32 +71,40 @@ function Desktop:init()
     self.filter = self.filter or {}
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.page = 1
-    self.page_size = 20
+    self.page_size = 12
     self.total = 0
     self._closed = false
     self.ges_events = {
         TapBar = {
             GestureRange:new{
                 ges = "tap",
-                range = Geom:new{
-                    x = 0,
-                    y = self.dimen.h - BAR_H,
-                    w = self.dimen.w,
-                    h = BAR_H,
-                },
+                range = function()
+                    return Geom:new{
+                        x = 0,
+                        y = Screen:getHeight() - BAR_H,
+                        w = Screen:getWidth(),
+                        h = BAR_H,
+                    }
+                end,
             },
         },
         Swipe = {
             GestureRange:new{
                 ges = "swipe",
-                range = self.dimen,
+                range = function()
+                    return Geom:new{
+                        x = 0, y = 0,
+                        w = Screen:getWidth(),
+                        h = Screen:getHeight(),
+                    }
+                end,
             },
         },
     }
     self:rebuild()
     UIManager:nextTick(function()
         if not self._closed and self.tab == "home" then
-            self:refreshClock()
+            self:scheduleClockTick()
         end
     end)
 end
@@ -89,21 +113,77 @@ function Desktop:contentHeight()
     return self.dimen.h - BAR_H
 end
 
+function Desktop:safeIcon(name)
+    local path = pluginIconDir() .. name
+    local ok, img = pcall(function()
+        local ImageWidget = require("ui/widget/imagewidget")
+        local w = ImageWidget:new{
+            file = path,
+            width = ICON_SZ,
+            height = ICON_SZ,
+            is_icon = true,
+            alpha = true,
+        }
+        if w._render then w:_render() end
+        return w
+    end)
+    if ok and img then return img end
+    -- 回退：KOReader 内置 icon
+    local fallback = ({
+        ["home.svg"] = "home",
+        ["library.svg"] = "appbar.cabinet",
+        ["tags.svg"] = "appbar.menu",
+        ["settings.svg"] = "appbar.settings",
+    })[name]
+    if fallback then
+        local ok2, iw = pcall(function()
+            return require("ui/widget/iconwidget"):new{
+                icon = fallback,
+                width = ICON_SZ,
+                height = ICON_SZ,
+                alpha = true,
+            }
+        end)
+        if ok2 and iw then return iw end
+    end
+    return TextWidget:new{
+        text = "•",
+        face = Font:getFace("cfont", 18),
+    }
+end
+
 function Desktop:buildBottomBar()
     local cells = {}
     local cell_w = math.floor(self.dimen.w / #TABS)
     for i, tab in ipairs(TABS) do
         local active = self.tab == tab.id
         local w = (i == #TABS) and (self.dimen.w - cell_w * (#TABS - 1)) or cell_w
-        table.insert(cells, CenterContainer:new{
-            dimen = Geom:new{ w = w, h = BAR_H },
-            TextWidget:new{
-                text = tab.text,
-                face = Font:getFace("cfont", active and 18 or 16),
-                bold = active,
-                fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.gray(0.45),
-            },
+        local vg = VerticalGroup:new{ align = "center" }
+        table.insert(vg, self:safeIcon(tab.icon))
+        table.insert(vg, VerticalSpan:new{ width = Screen:scaleBySize(2) })
+        table.insert(vg, TextWidget:new{
+            text = tab.text,
+            face = Font:getFace("xx_smallinfofont", 12),
+            bold = active,
+            fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.gray(0.45),
         })
+        local content = CenterContainer:new{
+            dimen = Geom:new{ w = w, h = BAR_H },
+            vg,
+        }
+        local og = OverlapGroup:new{
+            allow_mirroring = false,
+            dimen = Geom:new{ w = w, h = BAR_H },
+            content,
+        }
+        if active then
+            table.insert(og, LineWidget:new{
+                dimen = Geom:new{ w = w, h = Size.line.medium },
+                background = Blitbuffer.COLOR_BLACK,
+                overlap_offset = { 0, 0 },
+            })
+        end
+        table.insert(cells, og)
     end
     return FrameContainer:new{
         bordersize = 0,
@@ -121,12 +201,8 @@ function Desktop:buildBottomBar()
 end
 
 function Desktop:onTapBar(_, ges)
-    if not ges or not ges.pos then
-        return false
-    end
-    if ges.pos.y < self.dimen.h - BAR_H then
-        return false
-    end
+    if not ges or not ges.pos then return false end
+    if ges.pos.y < self.dimen.h - BAR_H then return false end
     local idx = math.floor(ges.pos.x * #TABS / self.dimen.w) + 1
     if idx < 1 then idx = 1 end
     if idx > #TABS then idx = #TABS end
@@ -135,16 +211,10 @@ function Desktop:onTapBar(_, ges)
 end
 
 function Desktop:onSwipe(_, ges_ev)
-    if type(ges_ev) ~= "table" or not ges_ev.direction then
-        return true
-    end
-    -- 底栏区域不翻页
-    if ges_ev.pos and ges_ev.pos.y >= self.dimen.h - BAR_H then
-        return true
-    end
+    if type(ges_ev) ~= "table" or not ges_ev.direction then return true end
+    if ges_ev.pos and ges_ev.pos.y >= self.dimen.h - BAR_H then return true end
     local direction = BD.flipDirectionIfMirroredUILayout(ges_ev.direction)
     if direction == "south" then
-        -- 下滑关闭桌面，回 FileManager（和 Menu 一致）
         self:onClose()
         return true
     end
@@ -153,44 +223,56 @@ function Desktop:onSwipe(_, ges_ev)
             local pages = math.max(1, math.ceil((self.total or 0) / self.page_size))
             if self.page < pages then
                 self.page = self.page + 1
+                self._library_books = nil
                 self:rebuild()
             end
-            return true
         elseif direction == "east" then
             if self.page > 1 then
                 self.page = self.page - 1
+                self._library_books = nil
                 self:rebuild()
             end
-            return true
         end
     end
     return true
 end
 
 function Desktop:switchTab(id)
-    if self.tab == id and id ~= "library" and id ~= "category" then
-        return
+    if id == "library" and self.tab ~= "library" then
+        self._library_books = nil
+        self.page = self.page or 1
     end
     self.tab = id
-    if id == "library" then
-        self.page = 1
+    if id == "home" then
+        self:scheduleClockTick()
     end
     self:rebuild()
 end
 
+function Desktop:ctx()
+    return {
+        width = self.dimen.w,
+        height = self:contentHeight(),
+        plugin = self.plugin,
+        api = self.api,
+        desktop = self,
+        filter = self.filter,
+    }
+end
+
 function Desktop:rebuild()
     local ok, err = pcall(function()
+        self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
         local content
         if self.tab == "home" then
             content = self:buildHome()
         elseif self.tab == "library" then
-            content = self:buildLibrary()
+            content = self:buildLibraryShell()
         elseif self.tab == "category" then
             content = self:buildCategories()
         else
             content = self:buildSettings()
         end
-
         self[1] = FrameContainer:new{
             background = Blitbuffer.COLOR_WHITE,
             bordersize = 0,
@@ -202,15 +284,6 @@ function Desktop:rebuild()
                 self:buildBottomBar(),
             },
         }
-        self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
-        if self.ges_events and self.ges_events.TapBar and self.ges_events.TapBar[1] then
-            self.ges_events.TapBar[1].range = Geom:new{
-                x = 0,
-                y = self.dimen.h - BAR_H,
-                w = self.dimen.w,
-                h = BAR_H,
-            }
-        end
     end)
     if not ok then
         logger.err("book desktop rebuild failed:", err)
@@ -220,168 +293,31 @@ function Desktop:rebuild()
     UIManager:setDirty(self, "ui")
 end
 
--- ---------------------------------------------------------------------------
--- 首页：时钟 + 最近阅读
--- ---------------------------------------------------------------------------
-
-function Desktop:recentBooks(limit)
-    limit = limit or 8
-    local list = {}
-    local ok, ReadHistory = pcall(require, "readhistory")
-    if ok and ReadHistory then
-        pcall(function()
-            if ReadHistory.reload then
-                ReadHistory:reload()
-            elseif ReadHistory._read then
-                ReadHistory:_read(true)
-            end
-        end)
-        local lib = nil
-        if self.plugin and self.plugin.localPathFor then
-            -- library_dir 前缀过滤；没有就全要
-            local s = G_reader_settings:readSetting("book_plugin") or {}
-            lib = s.library_dir
-        end
-        local map = G_reader_settings:readSetting("book_plugin_filemap") or {}
-        local function push(entry, path, mapped)
-            table.insert(list, {
-                title = entry.text or path:match("([^/\\]+)$") or path,
-                path = path,
-                filename = mapped or path:match("([^/\\]+)$"),
-                mandatory = entry.mandatory or "",
-                book = {
-                    filename = mapped or path:match("([^/\\]+)$"),
-                    bookName = entry.text,
-                },
-            })
-        end
-        for _, entry in ipairs(ReadHistory.hist or {}) do
-            if #list >= limit then break end
-            local path = entry.file
-            if path then
-                local mapped = map[path]
-                local in_lib = (not lib) or (lib ~= "" and path:sub(1, #lib) == lib)
-                if in_lib or mapped then
-                    push(entry, path, mapped)
-                end
-            end
-        end
-        -- 过滤后为空：退回全局最近，避免首页空白
-        if #list == 0 then
-            for _, entry in ipairs(ReadHistory.hist or {}) do
-                if #list >= limit then break end
-                local path = entry.file
-                if path then
-                    push(entry, path, map[path])
-                end
-            end
-        end
-    end
-    return list
-end
-
 function Desktop:buildHome()
     local h = self:contentHeight()
-    local w = self.dimen.w
-    local now = os.date("*t")
-    local time_str = string.format("%02d:%02d", now.hour, now.min)
-    local date_str = os.date("%Y-%m-%d %A")
-
-    local rows = {
-        VerticalSpan:new{ width = Screen:scaleBySize(36) },
-        CenterContainer:new{
-            dimen = Geom:new{ w = w, h = Screen:scaleBySize(72) },
-            TextWidget:new{
-                text = time_str,
-                face = Font:getFace("cfont", 64),
-                bold = true,
-            },
-        },
-        CenterContainer:new{
-            dimen = Geom:new{ w = w, h = Screen:scaleBySize(28) },
-            TextWidget:new{
-                text = date_str,
-                face = Font:getFace("xx_smallinfofont", 16),
-                fgcolor = Blitbuffer.gray(0.4),
-            },
-        },
-        VerticalSpan:new{ width = Screen:scaleBySize(24) },
-        LeftContainer:new{
-            dimen = Geom:new{ w = w, h = Screen:scaleBySize(30) },
-            TextWidget:new{
-                text = "  " .. _("最近阅读"),
-                face = Font:getFace("cfont", 18),
-                bold = true,
-            },
-        },
-        VerticalSpan:new{ width = Screen:scaleBySize(8) },
-    }
-
-    local recent = self:recentBooks(8)
-    if #recent == 0 then
-        table.insert(rows, LeftContainer:new{
-            dimen = Geom:new{ w = w, h = Screen:scaleBySize(40) },
-            TextWidget:new{
-                text = "  " .. _("暂无记录 · 去书库打开一本书"),
-                face = Font:getFace("xx_smallinfofont", 15),
-                fgcolor = Blitbuffer.gray(0.5),
-            },
-        })
-    else
-        for _, item in ipairs(recent) do
-            local book = item.book
-            table.insert(rows, FrameContainer:new{
-                bordersize = 0,
-                padding = 0,
-                margin = 0,
-                background = Blitbuffer.COLOR_WHITE,
-                Button:new{
-                    text = item.title,
-                    bordersize = 0,
-                    radius = 0,
-                    padding = Size.padding.large,
-                    text_font_face = "cfont",
-                    text_font_size = 17,
-                    width = w,
-                    align = "left",
-                    callback = function()
-                        if self.plugin and book then
-                            self.plugin:openBook(book)
-                        end
-                    end,
-                },
-            })
-        end
-    end
-
-    local vg = VerticalGroup:new{ align = "left" }
-    for _, r in ipairs(rows) do
-        table.insert(vg, r)
-    end
-
+    local body = Registry.buildHome(self:ctx())
     return FrameContainer:new{
         bordersize = 0,
         padding = 0,
         background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = w, h = h },
-        vg,
+        dimen = Geom:new{ w = self.dimen.w, h = h },
+        body,
     }
 end
 
-function Desktop:refreshClock()
-    if self._closed or self.tab ~= "home" then
-        return
-    end
-    self:rebuild()
+function Desktop:scheduleClockTick()
+    if self._clock_scheduled then return end
+    self._clock_scheduled = true
     UIManager:scheduleIn(30, function()
-        if self.refreshClock then
-            self:refreshClock()
-        end
+        self._clock_scheduled = false
+        if self._closed or self.tab ~= "home" then return end
+        self:rebuild()
+        self:scheduleClockTick()
     end)
 end
 
 -- ---------------------------------------------------------------------------
--- 书库
+-- 书库：封面网格（异步拉数）
 -- ---------------------------------------------------------------------------
 
 function Desktop:filterLabel()
@@ -397,78 +333,62 @@ function Desktop:filterLabel()
     elseif self.filter.finished == "0" then
         table.insert(parts, _("未读"))
     end
-    if #parts == 0 then
-        return _("全部")
-    end
+    if #parts == 0 then return _("全部") end
     return table.concat(parts, " · ")
 end
 
-function Desktop:embedMenu(menu)
-    -- 嵌入桌面：关闭按钮 / 下滑 / 多指滑 都关掉整个桌面，避免只拆掉 Menu 留下空洞
-    local desk = self
-    menu.onClose = function()
-        desk:onClose()
-        return true
-    end
-    menu.onCloseAllMenus = function()
-        desk:onClose()
-        return true
-    end
-    menu.onMultiSwipe = function()
-        desk:onClose()
-        return true
-    end
-    return menu
-end
-
-function Desktop:buildLibrary()
+function Desktop:buildLibraryShell()
     local h = self:contentHeight()
     local w = self.dimen.w
-    local items = {
-        { text = _("加载中…"), enabled = false },
+    -- 先放占位，nextTick 拉完再 rebuild 成网格
+    local placeholder = FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        dimen = Geom:new{ w = w, h = h },
+        CenterContainer:new{
+            dimen = Geom:new{ w = w, h = h },
+            TextWidget:new{
+                text = _("加载书库…"),
+                face = Font:getFace("cfont", 18),
+                fgcolor = Blitbuffer.gray(0.45),
+            },
+        },
     }
-    local menu = self:embedMenu(Menu:new{
-        title = T(_("书库 · %1"), self:filterLabel()),
-        item_table = items,
-        width = w,
-        height = h,
-        is_borderless = true,
-        is_popout = false,
-        covers_fullscreen = false,
-        show_parent = self,
-        title_bar_left_icon = "appbar.search",
-        close_callback = function() end,
-    })
-    menu.onLeftButtonTap = function()
-        self:showSearch()
+    if self._library_books then
+        local pages = math.max(1, math.ceil((self.total or 0) / self.page_size))
+        return CoverGrid.build(self:ctx(), self._library_books, {
+            header = T(_("书库 · %1"), self:filterLabel()),
+            page = self.page,
+            pages = pages,
+            empty_text = _("没有书籍"),
+        })
     end
     UIManager:nextTick(function()
         if self._closed or self.tab ~= "library" then return end
-        self:loadLibraryInto(menu)
+        self:fetchLibrary()
     end)
-    return menu
+    return placeholder
 end
 
-function Desktop:loadLibraryInto(menu)
-    local function apply(items, title)
+function Desktop:fetchLibrary()
+    local function done(books, err)
         if self._closed or self.tab ~= "library" then return end
-        menu:switchItemTable(title or menu.title, items)
-        UIManager:setDirty(self, "ui")
+        if not books then
+            self._library_books = {}
+            self.total = 0
+            UIManager:show(InfoMessage:new{ text = err or _("加载失败"), timeout = 3 })
+        else
+            self._library_books = books
+        end
+        self:rebuild()
     end
 
     local function fetch()
         if not self.api or not self.api:configured() then
-            apply({
-                {
-                    text = _("请先配置服务器与令牌"),
-                    callback = function()
-                        if self.plugin then self.plugin:showConfigDialog() end
-                    end,
-                },
-            }, _("书库"))
+            done(nil, _("请先在设置里配置服务器与令牌"))
             return
         end
-
         local res, err
         local ok, thrown = pcall(function()
             res, err = self.api:listBooks{
@@ -482,67 +402,15 @@ function Desktop:loadLibraryInto(menu)
             }
         end)
         if not ok then
-            apply({{ text = _("异常: ") .. tostring(thrown), enabled = false }}, _("书库"))
+            done(nil, tostring(thrown))
             return
         end
         if not res then
-            apply({
-                {
-                    text = err or _("加载失败 · 点此重试"),
-                    callback = function() self:rebuild() end,
-                },
-            }, _("书库"))
+            done(nil, err or _("加载失败"))
             return
         end
-
-        local books = res.data or {}
-        self.total = tonumber(res.count) or #books
-        local pages = math.max(1, math.ceil(self.total / self.page_size))
-        local label = self:filterLabel()
-        local items = {
-            {
-                text = T(_("▾ %1 · %2/%3 页 · 共 %4 本"), label, self.page, pages, self.total),
-                callback = function()
-                    self:showLibraryActions()
-                end,
-            },
-        }
-        if #books == 0 then
-            table.insert(items, { text = _("（没有书籍）"), enabled = false })
-        end
-        for _, book in ipairs(books) do
-            local title = book.bookName or book.filename or "?"
-            local author = book.author or ""
-            local pct = tonumber(book.progressPercent) or 0
-            if pct > 0 and pct <= 1 then pct = pct * 100 end
-            local b = book
-            table.insert(items, {
-                text = title,
-                mandatory = pct > 0 and string.format("%.0f%%", pct) or author,
-                callback = function()
-                    if self.plugin then self.plugin:openBook(b) end
-                end,
-            })
-        end
-        if self.page > 1 then
-            table.insert(items, {
-                text = _("上一页"),
-                callback = function()
-                    self.page = self.page - 1
-                    self:rebuild()
-                end,
-            })
-        end
-        if self.page < pages then
-            table.insert(items, {
-                text = _("下一页"),
-                callback = function()
-                    self.page = self.page + 1
-                    self:rebuild()
-                end,
-            })
-        end
-        apply(items, T(_("书库 · %1"), label))
+        self.total = tonumber(res.count) or 0
+        done(res.data or {})
     end
 
     if NetworkMgr.isOnline and NetworkMgr:isOnline() then
@@ -565,6 +433,7 @@ function Desktop:showSearch()
                     UIManager:close(dialog)
                     self.filter.search = ""
                     self.page = 1
+                    self._library_books = nil
                     self.tab = "library"
                     self:rebuild()
                 end,
@@ -572,9 +441,7 @@ function Desktop:showSearch()
             {
                 text = _("取消"),
                 id = "close",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
+                callback = function() UIManager:close(dialog) end,
             },
             {
                 text = _("搜索"),
@@ -583,6 +450,7 @@ function Desktop:showSearch()
                     self.filter.search = dialog:getInputText() or ""
                     UIManager:close(dialog)
                     self.page = 1
+                    self._library_books = nil
                     self.tab = "library"
                     self:rebuild()
                 end,
@@ -593,140 +461,98 @@ function Desktop:showSearch()
     dialog:onShowKeyboard()
 end
 
-function Desktop:showLibraryActions()
-    local ButtonDialog = require("ui/widget/buttondialog")
-    local dialog
-    dialog = ButtonDialog:new{
-        title = _("书库"),
-        buttons = {
-            {{ text = _("搜索"), callback = function()
-                UIManager:close(dialog); self:showSearch()
-            end }},
-            {{ text = _("未读"), callback = function()
-                UIManager:close(dialog); self.filter.finished = "0"; self.page = 1; self:rebuild()
-            end }},
-            {{ text = _("已读"), callback = function()
-                UIManager:close(dialog); self.filter.finished = "1"; self.page = 1; self:rebuild()
-            end }},
-            {{ text = _("清除筛选"), callback = function()
-                UIManager:close(dialog); self.filter = {}; self.page = 1; self:rebuild()
-            end }},
-            {{ text = _("刷新"), callback = function()
-                UIManager:close(dialog); self:rebuild()
-            end }},
-        },
-    }
-    UIManager:show(dialog)
-end
+-- ---------------------------------------------------------------------------
+-- 分类 / 设置（Menu 嵌入）
+-- ---------------------------------------------------------------------------
 
--- ---------------------------------------------------------------------------
--- 分类
--- ---------------------------------------------------------------------------
+function Desktop:embedMenu(menu)
+    local desk = self
+    menu.onClose = function() desk:onClose(); return true end
+    menu.onCloseAllMenus = function() desk:onClose(); return true end
+    menu.onMultiSwipe = function() desk:onClose(); return true end
+    return menu
+end
 
 function Desktop:buildCategories()
     local h = self:contentHeight()
     local w = self.dimen.w
-    local items = { { text = _("加载中…"), enabled = false } }
     local menu = self:embedMenu(Menu:new{
         title = _("分类"),
-        item_table = items,
-        width = w,
-        height = h,
-        is_borderless = true,
-        is_popout = false,
-        covers_fullscreen = false,
-        show_parent = self,
-        close_callback = function() end,
+        item_table = { { text = _("加载中…"), enabled = false } },
+        width = w, height = h,
+        is_borderless = true, is_popout = false, covers_fullscreen = false,
+        show_parent = self, close_callback = function() end,
     })
     UIManager:nextTick(function()
         if self._closed or self.tab ~= "category" then return end
-        self:loadCategoriesInto(menu)
+        local function apply(items)
+            menu:switchItemTable(_("分类"), items)
+            UIManager:setDirty(self, "ui")
+        end
+        local function fetch()
+            if not self.api or not self.api:configured() then
+                apply({{ text = _("请先配置服务器"), callback = function()
+                    self:switchTab("settings")
+                end }})
+                return
+            end
+            local res, err = self.api:filters()
+            if not res then
+                apply({{ text = err or _("加载失败"), callback = function() self:rebuild() end }})
+                return
+            end
+            local favorites = (res.data and res.data.favorites) or {}
+            local items = {{
+                text = _("全部分类"),
+                callback = function()
+                    self.filter.favorite = ""
+                    self.page = 1
+                    self._library_books = nil
+                    self:switchTab("library")
+                end,
+            }}
+            for _, name in ipairs(favorites) do
+                local cat = name
+                table.insert(items, {
+                    text = cat,
+                    callback = function()
+                        self.filter.favorite = cat
+                        self.page = 1
+                        self._library_books = nil
+                        self:switchTab("library")
+                    end,
+                })
+            end
+            if #favorites == 0 then
+                table.insert(items, { text = _("（暂无分类）"), enabled = false })
+            end
+            apply(items)
+        end
+        if NetworkMgr.isOnline and NetworkMgr:isOnline() then fetch()
+        else NetworkMgr:runWhenOnline(fetch) end
     end)
     return menu
 end
-
-function Desktop:loadCategoriesInto(menu)
-    local function apply(items)
-        if self._closed or self.tab ~= "category" then return end
-        menu:switchItemTable(_("分类"), items)
-        UIManager:setDirty(self, "ui")
-    end
-
-    local function fetch()
-        if not self.api or not self.api:configured() then
-            apply({{
-                text = _("请先配置服务器"),
-                callback = function()
-                    if self.plugin then self.plugin:showConfigDialog() end
-                end,
-            }})
-            return
-        end
-        local res, err = self.api:filters()
-        if not res then
-            apply({{
-                text = err or _("加载失败 · 点此重试"),
-                callback = function() self:rebuild() end,
-            }})
-            return
-        end
-        local favorites = (res.data and res.data.favorites) or {}
-        local items = {{
-            text = _("全部分类"),
-            callback = function()
-                self.filter.favorite = ""
-                self.page = 1
-                self:switchTab("library")
-            end,
-        }}
-        if #favorites == 0 then
-            table.insert(items, { text = _("（暂无分类）"), enabled = false })
-        end
-        for _, name in ipairs(favorites) do
-            local cat = name
-            table.insert(items, {
-                text = cat,
-                callback = function()
-                    self.filter.favorite = cat
-                    self.page = 1
-                    self:switchTab("library")
-                end,
-            })
-        end
-        apply(items)
-    end
-
-    if NetworkMgr.isOnline and NetworkMgr:isOnline() then
-        fetch()
-    else
-        NetworkMgr:runWhenOnline(fetch)
-    end
-end
-
--- ---------------------------------------------------------------------------
--- 设置
--- ---------------------------------------------------------------------------
 
 function Desktop:buildSettings()
     local h = self:contentHeight()
     local w = self.dimen.w
     local plugin = self.plugin
     local s = G_reader_settings:readSetting("book_plugin") or {}
-    local open_on = s.open_on_start
-        or G_reader_settings:readSetting("start_with") == "bookshelf_book"
+    local open_on = s.open_on_start ~= false
     local auto_sync = s.auto_sync ~= false
     local items = {
         {
             text = _("服务器与令牌"),
-            callback = function()
-                if plugin then plugin:showConfigDialog() end
-            end,
+            callback = function() if plugin then plugin:showConfigDialog() end end,
         },
         {
             text = _("测试连接"),
-            callback = function()
-                if plugin then plugin:testConnection() end
-            end,
+            callback = function() if plugin then plugin:testConnection() end end,
+        },
+        {
+            text = _("搜索书库"),
+            callback = function() self:showSearch() end,
         },
         {
             text = _("启动时打开桌面"),
@@ -737,7 +563,7 @@ function Desktop:buildSettings()
                 G_reader_settings:saveSetting("book_plugin", st)
                 if st.open_on_start then
                     G_reader_settings:saveSetting("start_with", "bookshelf_book")
-                elseif G_reader_settings:readSetting("start_with") == "bookshelf_book" then
+                else
                     G_reader_settings:saveSetting("start_with", "filemanager")
                 end
                 self:rebuild()
@@ -755,30 +581,22 @@ function Desktop:buildSettings()
         },
         {
             text = _("关闭桌面"),
-            callback = function()
-                self:onClose()
-            end,
+            callback = function() self:onClose() end,
         },
     }
     return self:embedMenu(Menu:new{
         title = _("设置"),
         item_table = items,
-        width = w,
-        height = h,
-        is_borderless = true,
-        is_popout = false,
-        covers_fullscreen = false,
-        show_parent = self,
-        close_callback = function() end,
+        width = w, height = h,
+        is_borderless = true, is_popout = false, covers_fullscreen = false,
+        show_parent = self, close_callback = function() end,
     })
 end
 
 function Desktop:onClose()
     self._closed = true
     UIManager:close(self)
-    if self.close_callback then
-        self.close_callback()
-    end
+    if self.close_callback then self.close_callback() end
     return true
 end
 
