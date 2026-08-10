@@ -23,7 +23,6 @@ local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
-local LeftContainer = require("ui/widget/container/leftcontainer")
 local Menu = require("ui/widget/menu")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
@@ -178,31 +177,6 @@ local function menuPager(page, pages, handlers)
     }
 end
 
---- 有筛选才返回摘要；无筛选返回 nil（避免「全部」噪音）
-local function filterChips(filter)
-    local parts = {}
-    if filter.search and filter.search ~= "" then
-        table.insert(parts, T(_("搜:%1"), filter.search))
-    end
-    for _, kind in ipairs(FILTER_ORDER) do
-        local def = FILTER_KINDS[kind]
-        local v = filter[def.query_key]
-        if v and v ~= "" then
-            table.insert(parts, def.label .. ":" .. v)
-        end
-    end
-    if #parts == 0 then return nil end
-    return table.concat(parts, " · ")
-end
-
-local function summaryText(filter, page, pages, total)
-    local chips = filterChips(filter)
-    if chips then
-        return chips .. "  ·  " .. T(_("共%1"), total)
-    end
-    return T(_("共%1  ·  %2/%3"), total, page, pages)
-end
-
 local function pickFilterList(data, def)
     if type(data) ~= "table" or not def then return {} end
     local list = data[def.list_key]
@@ -287,7 +261,6 @@ function Library.build(ctx, state, opts)
     local w = ctx.width
     local h = ctx.height
     local pad = UI.sz(12)
-    local filter = ctx.filter or {}
     local page = opts.page or 1
     local pages = opts.pages or 1
     local total = opts.total or 0
@@ -298,7 +271,7 @@ function Library.build(ctx, state, opts)
         end
     end
 
-    local toolbar = HorizontalGroup:new{
+    local tools = HorizontalGroup:new{
         textAction(_("搜索"), function()
             if ctx.desktop then ctx.desktop:showSearch() end
         end),
@@ -311,15 +284,19 @@ function Library.build(ctx, state, opts)
             if ctx.desktop then ctx.desktop:clearLibraryFilters() end
         end),
     }
-
-    local header = LeftContainer:new{
-        dimen = Geom:new{ w = w - pad * 2, h = UI.sz(26) },
-        TextWidget:new{
-            text = summaryText(filter, page, pages, total),
-            face = UI.face("xx_smallinfofont", 13),
-            max_width = w - pad * 2,
-            fgcolor = Blitbuffer.gray(0.4),
-        },
+    local total_label = TextWidget:new{
+        text = T(_("共%1"), total),
+        face = UI.face("xx_smallinfofont", 13),
+        fgcolor = Blitbuffer.gray(0.4),
+    }
+    local tools_w = tools:getSize().w
+    local total_w = total_label:getSize().w
+    local mid = math.max(UI.sz(8), (w - pad * 2) - tools_w - total_w)
+    local toolbar = HorizontalGroup:new{
+        align = "center",
+        tools,
+        HorizontalSpan:new{ width = mid },
+        total_label,
     }
 
     local pager = menuPager(page, pages, {
@@ -332,17 +309,12 @@ function Library.build(ctx, state, opts)
     local top = FrameContainer:new{
         bordersize = 0,
         padding = pad,
-        padding_bottom = UI.sz(2),
+        padding_bottom = UI.sz(4),
         background = Blitbuffer.COLOR_WHITE,
-        VerticalGroup:new{
-            align = "left",
-            toolbar,
-            VerticalSpan:new{ width = UI.sz(4) },
-            header,
-        },
+        toolbar,
     }
 
-    local top_h = UI.sz(68)
+    local top_h = UI.sz(48)
     -- 给底栏 Tab 留空隙；分页高度跟图标字号走
     local bottom_pad = UI.sz(10)
     local bottom_h = UI.iconSz() + UI.sz(28) + bottom_pad
