@@ -1,6 +1,6 @@
 --[[--
 书籍详情：顶栏 + 可滚动内容 + 底部固定按钮
-（长简介时按钮仍可点）
+（长简介时按钮仍可点；底部不露桌面底栏）
 
 @module koplugin.book.detail
 --]]
@@ -15,6 +15,7 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
+local OverlapGroup = require("ui/widget/overlapgroup")
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
@@ -133,6 +134,7 @@ function Detail:rebuild()
         Cover.ensureAsync(self.api, self.plugin, filename, nil)
     end
 
+    -- 顶栏只放书名；正文不再重复标题
     local title_bar = TitleBar:new{
         fullscreen = true,
         width = w,
@@ -173,34 +175,31 @@ function Detail:rebuild()
 
     local button_h = buttons:getSize().h
     local title_h = title_bar:getHeight()
-    local footer_h = button_h + pad * 2 + Size.line.medium + UI.sz(8)
-    local scroll_h = math.max(UI.sz(80), h - title_h - footer_h)
+    -- 底栏加高，确保盖住桌面 navbar；只用一条分隔线
+    local footer_pad_v = UI.sz(12)
+    local footer_h = button_h + footer_pad_v * 2 + Size.line.thin
+    local top_h = title_h
+    local scroll_h = math.max(UI.sz(80), h - top_h - footer_h)
 
     local meta_w = math.max(UI.sz(80), content_w - cw - UI.sz(14))
-    local meta_kids = {
-        align = "left",
-        TextBoxWidget:new{
-            text = title,
-            face = UI.face("cfont", 18),
-            width = meta_w,
-            alignment = "left",
-            fgcolor = Blitbuffer.COLOR_BLACK,
-        },
-        VerticalSpan:new{ width = UI.sz(10) },
-    }
+    local meta_kids = { align = "left" }
     local rows = {
         metaRow(_("作者"), book.author, meta_w),
         metaRow(_("分类"), book.category, meta_w),
         metaRow(_("系列"), book.series, meta_w),
         metaRow(_("进度"), string.format("%.0f%%", pct), meta_w),
     }
+    local first = true
     for _, row in ipairs(rows) do
         if row then
+            if not first then
+                table.insert(meta_kids, VerticalSpan:new{ width = UI.sz(6) })
+            end
+            first = false
             table.insert(meta_kids, row)
-            table.insert(meta_kids, VerticalSpan:new{ width = UI.sz(6) })
         end
     end
-    table.insert(meta_kids, VerticalSpan:new{ width = UI.sz(8) })
+    table.insert(meta_kids, VerticalSpan:new{ width = UI.sz(10) })
     table.insert(meta_kids, UI.progressBar(meta_w, UI.sz(8), pct))
 
     local header = HorizontalGroup:new{
@@ -222,7 +221,7 @@ function Detail:rebuild()
     if desc and desc ~= "" then
         table.insert(body_kids, VerticalSpan:new{ width = UI.sz(18) })
         table.insert(body_kids, LineWidget:new{
-            background = Blitbuffer.gray(0.8),
+            background = Blitbuffer.gray(0.85),
             dimen = Geom:new{ w = content_w, h = Size.line.thin },
         })
         table.insert(body_kids, VerticalSpan:new{ width = UI.sz(10) })
@@ -241,7 +240,7 @@ function Detail:rebuild()
     local body = VerticalGroup:new(body_kids)
     local body_size = body:getSize()
 
-    local inner
+    local scroll_area
     if ScrollableContainer then
         self.cropping_widget = ScrollableContainer:new{
             dimen = Geom:new{ w = w, h = scroll_h },
@@ -260,9 +259,9 @@ function Detail:rebuild()
                 },
             },
         }
-        inner = self.cropping_widget
+        scroll_area = self.cropping_widget
     else
-        inner = FrameContainer:new{
+        scroll_area = FrameContainer:new{
             bordersize = 0,
             padding = pad,
             padding_top = UI.sz(12),
@@ -272,40 +271,62 @@ function Detail:rebuild()
         }
     end
 
+    -- 上半部分：顶栏 + 滚动区（固定高度，不把底栏顶飞）
+    local upper = FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        margin = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        dimen = Geom:new{ w = w, h = top_h + scroll_h },
+        VerticalGroup:new{
+            align = "left",
+            title_bar,
+            scroll_area,
+        },
+    }
+    upper.overlap_offset = { 0, 0 }
+
+    -- 底栏：白底钉死屏幕底部，盖住桌面 navbar；只保留一条顶部分隔线
     local footer = FrameContainer:new{
         bordersize = 0,
         padding = 0,
+        margin = 0,
         background = Blitbuffer.COLOR_WHITE,
         dimen = Geom:new{ w = w, h = footer_h },
         VerticalGroup:new{
             align = "center",
             LineWidget:new{
-                background = Blitbuffer.gray(0.75),
-                dimen = Geom:new{ w = w, h = Size.line.medium },
+                background = Blitbuffer.gray(0.7),
+                dimen = Geom:new{ w = w, h = Size.line.thin },
             },
             FrameContainer:new{
                 bordersize = 0,
                 padding = pad,
-                padding_top = UI.sz(8),
-                padding_bottom = pad,
+                padding_top = footer_pad_v,
+                padding_bottom = footer_pad_v,
                 background = Blitbuffer.COLOR_WHITE,
                 buttons,
             },
         },
     }
+    footer.overlap_offset = { 0, h - footer_h }
 
-    self[1] = FrameContainer:new{
+    -- 全屏白底垫层，杜绝父页面透出
+    local backdrop = FrameContainer:new{
         bordersize = 0,
         padding = 0,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
         dimen = Geom:new{ w = w, h = h },
-        VerticalGroup:new{
-            align = "left",
-            title_bar,
-            inner,
-            footer,
-        },
+        VerticalSpan:new{ width = h },
+    }
+    backdrop.overlap_offset = { 0, 0 }
+
+    self[1] = OverlapGroup:new{
+        dimen = Geom:new{ w = w, h = h },
+        backdrop,
+        upper,
+        footer,
     }
     self.dimen = Geom:new{ x = 0, y = 0, w = w, h = h }
 end
