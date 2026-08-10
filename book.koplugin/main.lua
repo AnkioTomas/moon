@@ -43,13 +43,17 @@ local function settings()
             token = "",
             auto_sync = true,
             open_on_start = true,
+            ui_scale = 130,
             library_dir = DataStorage:getDataDir() .. "/books",
-            _ui_v = 4,
+            _ui_v = 5,
         }
         G_reader_settings:saveSetting(SETTINGS_KEY, s)
-    elseif (s._ui_v or 0) < 4 then
+    elseif (s._ui_v or 0) < 5 then
         s.open_on_start = true
-        s._ui_v = 4
+        if not s.ui_scale then
+            s.ui_scale = 130
+        end
+        s._ui_v = 5
         G_reader_settings:saveSetting(SETTINGS_KEY, s)
     end
     return s
@@ -87,63 +91,93 @@ end
 
 -- ---------------------------------------------------------------------------
 -- FileManager patch（对齐 simpleui：setupLayout 打标，onShow 再打开）
+-- 注意：插件 init 往往晚于 FM:setupLayout，必须同时打到「活实例」上。
 -- ---------------------------------------------------------------------------
+
+local function wrapFmOnShow(plugin, fm)
+    if not fm or fm._book_onshow_wrapped then
+        return
+    end
+    fm._book_onshow_wrapped = true
+    local orig_onShow = fm.onShow
+    fm.onShow = function(this)
+        if orig_onShow then
+            orig_onShow(this)
+        end
+        if this._book_autoopen_pending then
+            this._book_autoopen_pending = nil
+            UIManager:scheduleIn(0, function()
+                if plugin and plugin.openDesktop and not plugin.desktop then
+                    plugin:openDesktop()
+                end
+            end)
+        end
+    end
+end
+
+local function requestDesktopOpen(plugin, fm)
+    if not isStartWithBook() then
+        return
+    end
+    if fm then
+        fm._book_autoopen_pending = true
+        wrapFmOnShow(plugin, fm)
+    end
+    -- 无论 onShow 是否已过，都调度一次（活实例补丁的关键）
+    UIManager:scheduleIn(0.25, function()
+        if plugin and plugin.openDesktop and not plugin.desktop then
+            -- 仍在 FM（有 file_chooser）或 FM.instance 存在时才自动开
+            local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
+            local live = ok and FileManager and FileManager.instance
+            if (plugin.ui and plugin.ui.file_chooser) or live then
+                plugin:openDesktop()
+            end
+        end
+    end)
+end
 
 local function patchFileManager(plugin)
     local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
     if not ok or not FileManager then
         return
     end
-    if FileManager._book_plugin_patched then
-        return
-    end
-    FileManager._book_plugin_patched = true
 
-    local orig_setup = FileManager.setupLayout
-    FileManager.setupLayout = function(fm_self)
-        orig_setup(fm_self)
-        if not FileManager._book_boot_done then
-            FileManager._book_boot_done = true
-            if isStartWithBook() then
-                fm_self._book_autoopen_pending = true
+    if not FileManager._book_plugin_patched then
+        FileManager._book_plugin_patched = true
+
+        local orig_setup = FileManager.setupLayout
+        FileManager.setupLayout = function(fm_self)
+            orig_setup(fm_self)
+            wrapFmOnShow(plugin, fm_self)
+            if not FileManager._book_boot_done then
+                FileManager._book_boot_done = true
+                if isStartWithBook() then
+                    fm_self._book_autoopen_pending = true
+                end
             end
         end
 
-        local orig_onShow = fm_self.onShow
-        if not fm_self._book_onshow_wrapped then
-            fm_self._book_onshow_wrapped = true
-            fm_self.onShow = function(this)
-                if orig_onShow then
-                    orig_onShow(this)
-                end
-                if this._book_autoopen_pending then
-                    this._book_autoopen_pending = nil
-                    UIManager:scheduleIn(0.15, function()
-                        local inst = plugin
-                        if inst and inst.openDesktop then
-                            inst:openDesktop()
-                        end
-                    end)
-                end
+        if FileManager.getPlusDialogButtons and not FileManager._book_plus_patched then
+            FileManager._book_plus_patched = true
+            local orig_plus = FileManager.getPlusDialogButtons
+            FileManager.getPlusDialogButtons = function(fm)
+                local title, buttons = orig_plus(fm)
+                table.insert(buttons, 1, {{
+                    text = _("Book 桌面"),
+                    callback = function()
+                        UIManager:close(fm.plus_dialog)
+                        plugin:openDesktop()
+                    end,
+                }})
+                return title, buttons
             end
         end
     end
 
-    -- 「+」菜单首项
-    if FileManager.getPlusDialogButtons and not FileManager._book_plus_patched then
-        FileManager._book_plus_patched = true
-        local orig_plus = FileManager.getPlusDialogButtons
-        FileManager.getPlusDialogButtons = function(fm)
-            local title, buttons = orig_plus(fm)
-            table.insert(buttons, 1, {{
-                text = _("Book 桌面"),
-                callback = function()
-                    UIManager:close(fm.plus_dialog)
-                    plugin:openDesktop()
-                end,
-            }})
-            return title, buttons
-        end
+    -- 活实例：setupLayout 已经跑过，类补丁救不了，必须当场挂钩
+    if FileManager.instance then
+        wrapFmOnShow(plugin, FileManager.instance)
+        requestDesktopOpen(plugin, FileManager.instance)
     end
 end
 
@@ -197,7 +231,7 @@ end
 
 function BookPlugin:init()
     local ok, err = pcall(function()
-        -- 必须在 patch 之前写入 start_with，否则 setupLayout 读到旧值，桌面永远不自动开
+        -- 必须在任何 start_with 判断之前写入
         forceStartWithBook()
 
         self:onDispatcherRegisterActions()
@@ -205,17 +239,13 @@ function BookPlugin:init()
             self.ui.menu:registerToMainMenu(self)
         end
 
+        -- 始终打 FM 类补丁（不依赖当前 ui 是否已有 file_chooser）
+        patchFileManager(self)
+        patchStartWithMenu()
+
+        -- 当前就是 FM：立刻要桌面
         if self.ui.file_chooser then
-            patchFileManager(self)
-            patchStartWithMenu()
-            -- 双保险：若 onShow 已过，延迟再开一次
-            if isStartWithBook() then
-                UIManager:scheduleIn(0.4, function()
-                    if not self.desktop and self.ui and self.ui.file_chooser then
-                        self:openDesktop()
-                    end
-                end)
-            end
+            requestDesktopOpen(self, self.ui)
         end
     end)
     if not ok then
@@ -275,6 +305,23 @@ function BookPlugin:addToMainMenu(menu_items)
                 text = _("测试连接"),
                 callback = function()
                     self:testConnection()
+                end,
+            },
+            {
+                text_func = function()
+                    local UI = require("bookui")
+                    return T(_("界面字号 (%1%%)"), UI.getScale())
+                end,
+                callback = function()
+                    local UI = require("bookui")
+                    local n = UI.cycleScale()
+                    UIManager:show(InfoMessage:new{
+                        text = T(_("字号已设为 %1%%"), n),
+                        timeout = 1.5,
+                    })
+                    if self.desktop then
+                        self.desktop:rebuild()
+                    end
                 end,
             },
             {
@@ -374,7 +421,6 @@ end
 
 function BookPlugin:openDesktop(filter)
     local api = self:getApi()
-    -- 未配置也可以进桌面（设置页可配）；书库页会提示
     if self.desktop then
         UIManager:close(self.desktop)
         self.desktop = nil
@@ -390,6 +436,7 @@ function BookPlugin:openDesktop(filter)
             api = api,
             filter = filter or {},
             tab = "home",
+            covers_fullscreen = true,
             close_callback = function()
                 self.desktop = nil
             end,
@@ -404,6 +451,8 @@ function BookPlugin:openDesktop(filter)
     end
     self.desktop = desk
     UIManager:show(self.desktop)
+    -- 强制全屏刷新，盖住底下的 FM 目录
+    UIManager:setDirty(self.desktop, "full")
 end
 
 function BookPlugin:localPathFor(filename)

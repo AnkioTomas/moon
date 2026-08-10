@@ -1,24 +1,26 @@
 --[[--
-首页模块：最近阅读封面横滑行（SimpleUI recent / coverdeck 精简版）
+首页模块：最近阅读 — 只走 Book API（/index/book/recent）
 
 @module koplugin.book.modules.recent
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
-local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
+local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
+local NetworkMgr = require("ui/network/manager")
 local TextWidget = require("ui/widget/textwidget")
+local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local GestureRange = require("ui/gesturerange")
 local Cover = require("cover")
+local UI = require("bookui")
+local logger = require("logger")
 local _ = require("gettext")
 local Screen = Device.screen
 
@@ -27,45 +29,16 @@ local M = {
     title = "最近阅读",
 }
 
-local function recentList(limit)
-    limit = limit or 8
-    local list = {}
-    local ok, ReadHistory = pcall(require, "readhistory")
-    if not (ok and ReadHistory) then
-        return list
-    end
-    pcall(function()
-        if ReadHistory.reload then ReadHistory:reload()
-        elseif ReadHistory._read then ReadHistory:_read(true) end
-    end)
-    local map = G_reader_settings:readSetting("book_plugin_filemap") or {}
-    for _, entry in ipairs(ReadHistory.hist or {}) do
-        if #list >= limit then break end
-        local path = entry.file
-        if path then
-            local mapped = map[path]
-            table.insert(list, {
-                title = entry.text or path:match("([^/\\]+)$") or path,
-                path = path,
-                filename = mapped or path:match("([^/\\]+)$"),
-                book = {
-                    filename = mapped or path:match("([^/\\]+)$"),
-                    bookName = entry.text,
-                },
-            })
-        end
-    end
-    return list
-end
-
-local function coverCell(ctx, item, cw, ch)
+local function coverCell(ctx, book, cw, ch)
+    local title = book.bookName or book.filename or "?"
     local path = nil
-    if ctx.api and ctx.plugin and item.filename then
-        path = Cover.ensure(ctx.api, ctx.plugin, item.filename)
+    if ctx.api and ctx.plugin and book.filename then
+        path = Cover.ensure(ctx.api, ctx.plugin, book.filename)
     end
-    local cover_w = Cover.widget(path, cw, ch, item.title)
+    local cover_w = Cover.widget(path, cw, ch, title)
+    local label_h = UI.sz(36)
     local tap = InputContainer:new{
-        dimen = Geom:new{ w = cw, h = ch + Screen:scaleBySize(36) },
+        dimen = Geom:new{ w = cw, h = ch + label_h },
     }
     tap.ges_events = {
         TapCover = {
@@ -76,18 +49,18 @@ local function coverCell(ctx, item, cw, ch)
         },
     }
     tap.onTapCover = function()
-        if ctx.plugin and item.book then
-            ctx.plugin:openBook(item.book)
+        if ctx.plugin then
+            ctx.plugin:openBook(book)
         end
         return true
     end
     tap[1] = VerticalGroup:new{
         align = "center",
         cover_w,
-        VerticalSpan:new{ width = Screen:scaleBySize(4) },
+        VerticalSpan:new{ width = UI.sz(4) },
         TextWidget:new{
-            text = item.title,
-            face = Font:getFace("xx_smallinfofont", 12),
+            text = title,
+            face = UI.face("xx_smallinfofont", 14),
             max_width = cw,
             fgcolor = Blitbuffer.COLOR_BLACK,
         },
@@ -95,40 +68,46 @@ local function coverCell(ctx, item, cw, ch)
     return tap
 end
 
-function M.build(ctx)
+local function buildContent(ctx, books, status_text)
     local w = ctx.width
-    local pad = Screen:scaleBySize(12)
-    local cw = Screen:scaleBySize(90)
-    local ch = Screen:scaleBySize(130)
-    local items = recentList(8)
+    local pad = UI.sz(12)
+    local cw = UI.sz(100)
+    local ch = UI.sz(145)
+    local label_h = UI.sz(36)
 
     local header = LeftContainer:new{
-        dimen = Geom:new{ w = w, h = Screen:scaleBySize(28) },
+        dimen = Geom:new{ w = w, h = UI.sz(32) },
         TextWidget:new{
             text = "  " .. _("最近阅读"),
-            face = Font:getFace("cfont", 18),
+            face = UI.face("cfont", 20),
             bold = true,
         },
     }
 
     local row = HorizontalGroup:new{}
     table.insert(row, HorizontalSpan:new{ width = pad })
-    if #items == 0 then
+    if status_text then
         table.insert(row, TextWidget:new{
-            text = _("暂无记录 · 去书库打开一本书"),
-            face = Font:getFace("xx_smallinfofont", 14),
+            text = status_text,
+            face = UI.face("xx_smallinfofont", 16),
+            fgcolor = Blitbuffer.gray(0.5),
+        })
+    elseif not books or #books == 0 then
+        table.insert(row, TextWidget:new{
+            text = _("暂无进度 · 打开书库读一本就会出现在这里"),
+            face = UI.face("xx_smallinfofont", 16),
             fgcolor = Blitbuffer.gray(0.5),
         })
     else
-        for i, item in ipairs(items) do
-            table.insert(row, coverCell(ctx, item, cw, ch))
-            if i < #items then
-                table.insert(row, HorizontalSpan:new{ width = Screen:scaleBySize(10) })
+        for i, book in ipairs(books) do
+            table.insert(row, coverCell(ctx, book, cw, ch))
+            if i < #books then
+                table.insert(row, HorizontalSpan:new{ width = UI.sz(10) })
             end
         end
     end
 
-    local h = Screen:scaleBySize(28) + ch + Screen:scaleBySize(44)
+    local h = UI.sz(32) + ch + label_h + UI.sz(16)
     return FrameContainer:new{
         bordersize = 0,
         padding = 0,
@@ -137,10 +116,68 @@ function M.build(ctx)
         VerticalGroup:new{
             align = "left",
             header,
-            VerticalSpan:new{ width = Screen:scaleBySize(8) },
+            VerticalSpan:new{ width = UI.sz(8) },
             row,
         },
     }
+end
+
+local function fetchRecent(ctx)
+    local desk = ctx.desktop
+    if not desk or desk._closed then return end
+    if desk._recent_loading then return end
+    desk._recent_loading = true
+
+    local function done(books, err)
+        desk._recent_loading = false
+        if desk._closed or desk.tab ~= "home" then return end
+        desk._recent_books = books or {}
+        desk._recent_err = err
+        desk:rebuild()
+    end
+
+    local function fetch()
+        if not ctx.api or not ctx.api:configured() then
+            done({}, _("请先配置服务器"))
+            return
+        end
+        local res, err
+        local ok, thrown = pcall(function()
+            res, err = ctx.api:recentBooks(8)
+        end)
+        if not ok then
+            logger.err("book recent", thrown)
+            done({}, tostring(thrown))
+            return
+        end
+        if not res then
+            done({}, err or _("加载失败"))
+            return
+        end
+        done(res.data or {})
+    end
+
+    if NetworkMgr.isOnline and NetworkMgr:isOnline() then
+        fetch()
+    else
+        NetworkMgr:runWhenOnline(fetch)
+    end
+end
+
+function M.build(ctx)
+    local desk = ctx.desktop
+    if desk and desk._recent_books ~= nil then
+        local err = desk._recent_err
+        if err and #(desk._recent_books or {}) == 0 then
+            return buildContent(ctx, nil, err)
+        end
+        return buildContent(ctx, desk._recent_books)
+    end
+
+    UIManager:nextTick(function()
+        fetchRecent(ctx)
+    end)
+    return buildContent(ctx, nil, _("加载最近阅读…"))
 end
 
 return M

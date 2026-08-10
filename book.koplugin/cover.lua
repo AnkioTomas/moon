@@ -6,10 +6,10 @@
 
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local TextWidget = require("ui/widget/textwidget")
+local UI = require("bookui")
 local logger = require("logger")
 local lfs = require("libs/libkoreader-lfs")
 
@@ -20,27 +20,41 @@ local function safeName(filename)
 end
 
 function Cover.pathFor(plugin, filename)
-    return plugin:coverCacheDir() .. "/" .. safeName(filename) .. ".cover"
+    -- 无后缀：downloadCover 会按魔数改成 .jpg/.png
+    return plugin:coverCacheDir() .. "/" .. safeName(filename)
 end
 
 function Cover.ensure(api, plugin, filename)
     if not filename or filename == "" then
         return nil
     end
-    local path = Cover.pathFor(plugin, filename)
-    local attr = lfs.attributes(path)
-    if attr and attr.mode == "file" and attr.size and attr.size > 64 then
-        return path
+    local base = Cover.pathFor(plugin, filename)
+    for _, ext in ipairs({ ".jpg", ".jpeg", ".png", ".webp", ".gif", "" }) do
+        local path = base .. ext
+        local attr = lfs.attributes(path)
+        if attr and attr.mode == "file" and attr.size and attr.size > 64 then
+            return path
+        end
     end
     if not api or not api.configured or not api:configured() then
         return nil
     end
-    local ok, err = api:downloadCover(filename, path)
+    local ok, final_or_err = api:downloadCover(filename, base)
     if not ok then
-        logger.dbg("book cover download failed", filename, err)
+        logger.dbg("book cover download failed", filename, final_or_err)
         return nil
     end
-    return path
+    -- downloadCover 成功时第二个返回值是最终路径
+    if type(final_or_err) == "string" and lfs.attributes(final_or_err, "mode") == "file" then
+        return final_or_err
+    end
+    for _, ext in ipairs({ ".jpg", ".png", ".webp", ".gif" }) do
+        local path = base .. ext
+        if lfs.attributes(path, "mode") == "file" then
+            return path
+        end
+    end
+    return nil
 end
 
 function Cover.placeholder(w, h, title)
@@ -59,7 +73,7 @@ function Cover.placeholder(w, h, title)
             dimen = Geom:new{ w = w, h = h },
             TextWidget:new{
                 text = label,
-                face = Font:getFace("xx_smallinfofont", 12),
+                face = UI.face("xx_smallinfofont", 14),
                 max_width = w - 8,
                 fgcolor = Blitbuffer.gray(0.35),
             },

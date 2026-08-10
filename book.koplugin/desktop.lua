@@ -12,7 +12,6 @@ local BD = require("ui/bidi")
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
-local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
@@ -36,20 +35,7 @@ local Screen = Device.screen
 
 local Registry = require("modules/registry")
 local CoverGrid = require("modules/covergrid")
-
-local BAR_H = Screen:scaleBySize(56)
-local ICON_SZ = Screen:scaleBySize(22)
-
--- 插件目录下 icons/（PluginLoader 把插件目录塞进 package.path，但不保证 cwd）
-local function pluginIconDir()
-    local info = debug.getinfo(1, "S")
-    local src = info and info.source
-    if src and src:sub(1, 1) == "@" then
-        local dir = src:sub(2):match("(.*/)")
-        if dir then return dir .. "icons/" end
-    end
-    return "icons/"
-end
+local UI = require("bookui")
 
 local TABS = {
     { id = "home", text = _("首页"), icon = "home.svg" },
@@ -67,6 +53,20 @@ local Desktop = InputContainer:extend{
     filter = nil,
 }
 
+local function pluginIconDir()
+    local info = debug.getinfo(1, "S")
+    local src = info and info.source
+    if src and src:sub(1, 1) == "@" then
+        local dir = src:sub(2):match("(.*/)")
+        if dir then return dir .. "icons/" end
+    end
+    return "icons/"
+end
+
+local function barH()
+    return UI.barH()
+end
+
 function Desktop:init()
     self.filter = self.filter or {}
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
@@ -79,11 +79,12 @@ function Desktop:init()
             GestureRange:new{
                 ges = "tap",
                 range = function()
+                    local h = barH()
                     return Geom:new{
                         x = 0,
-                        y = Screen:getHeight() - BAR_H,
+                        y = Screen:getHeight() - h,
                         w = Screen:getWidth(),
-                        h = BAR_H,
+                        h = h,
                     }
                 end,
             },
@@ -110,17 +111,30 @@ function Desktop:init()
 end
 
 function Desktop:contentHeight()
-    return self.dimen.h - BAR_H
+    return math.max(1, Screen:getHeight() - barH())
+end
+
+-- 关键：FrameContainer:getSize() 跟子控件走，不跟 dimen。
+function Desktop:getSize()
+    if not self.dimen then
+        self.dimen = Geom:new{
+            x = 0, y = 0,
+            w = Screen:getWidth(),
+            h = Screen:getHeight(),
+        }
+    end
+    return Geom:new{ w = self.dimen.w, h = self.dimen.h }
 end
 
 function Desktop:safeIcon(name)
     local path = pluginIconDir() .. name
+    local icon_sz = UI.iconSz()
     local ok, img = pcall(function()
         local ImageWidget = require("ui/widget/imagewidget")
         local w = ImageWidget:new{
             file = path,
-            width = ICON_SZ,
-            height = ICON_SZ,
+            width = icon_sz,
+            height = icon_sz,
             is_icon = true,
             alpha = true,
         }
@@ -128,7 +142,6 @@ function Desktop:safeIcon(name)
         return w
     end)
     if ok and img then return img end
-    -- 回退：KOReader 内置 icon
     local fallback = ({
         ["home.svg"] = "home",
         ["library.svg"] = "appbar.cabinet",
@@ -139,8 +152,8 @@ function Desktop:safeIcon(name)
         local ok2, iw = pcall(function()
             return require("ui/widget/iconwidget"):new{
                 icon = fallback,
-                width = ICON_SZ,
-                height = ICON_SZ,
+                width = icon_sz,
+                height = icon_sz,
                 alpha = true,
             }
         end)
@@ -148,32 +161,34 @@ function Desktop:safeIcon(name)
     end
     return TextWidget:new{
         text = "•",
-        face = Font:getFace("cfont", 18),
+        face = UI.face("cfont", 18),
     }
 end
 
 function Desktop:buildBottomBar()
+    local sw = Screen:getWidth()
+    local bh = barH()
     local cells = {}
-    local cell_w = math.floor(self.dimen.w / #TABS)
+    local cell_w = math.floor(sw / #TABS)
     for i, tab in ipairs(TABS) do
         local active = self.tab == tab.id
-        local w = (i == #TABS) and (self.dimen.w - cell_w * (#TABS - 1)) or cell_w
+        local w = (i == #TABS) and (sw - cell_w * (#TABS - 1)) or cell_w
         local vg = VerticalGroup:new{ align = "center" }
         table.insert(vg, self:safeIcon(tab.icon))
-        table.insert(vg, VerticalSpan:new{ width = Screen:scaleBySize(2) })
+        table.insert(vg, VerticalSpan:new{ width = UI.sz(2) })
         table.insert(vg, TextWidget:new{
             text = tab.text,
-            face = Font:getFace("xx_smallinfofont", 12),
+            face = UI.face("xx_smallinfofont", 13),
             bold = active,
             fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.gray(0.45),
         })
         local content = CenterContainer:new{
-            dimen = Geom:new{ w = w, h = BAR_H },
+            dimen = Geom:new{ w = w, h = bh },
             vg,
         }
         local og = OverlapGroup:new{
             allow_mirroring = false,
-            dimen = Geom:new{ w = w, h = BAR_H },
+            dimen = Geom:new{ w = w, h = bh },
             content,
         }
         if active then
@@ -185,24 +200,28 @@ function Desktop:buildBottomBar()
         end
         table.insert(cells, og)
     end
-    return FrameContainer:new{
-        bordersize = 0,
-        padding = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        VerticalGroup:new{
-            align = "left",
-            LineWidget:new{
-                background = Blitbuffer.gray(0.7),
-                dimen = Geom:new{ w = self.dimen.w, h = Size.line.thin },
+    return OverlapGroup:new{
+        dimen = Geom:new{ w = sw, h = bh },
+        FrameContainer:new{
+            bordersize = 0,
+            padding = 0,
+            background = Blitbuffer.COLOR_WHITE,
+            VerticalGroup:new{
+                align = "left",
+                LineWidget:new{
+                    background = Blitbuffer.gray(0.7),
+                    dimen = Geom:new{ w = sw, h = Size.line.thin },
+                },
+                HorizontalGroup:new(cells),
             },
-            HorizontalGroup:new(cells),
         },
     }
 end
 
 function Desktop:onTapBar(_, ges)
     if not ges or not ges.pos then return false end
-    if ges.pos.y < self.dimen.h - BAR_H then return false end
+    local bh = barH()
+    if ges.pos.y < self.dimen.h - bh then return false end
     local idx = math.floor(ges.pos.x * #TABS / self.dimen.w) + 1
     if idx < 1 then idx = 1 end
     if idx > #TABS then idx = #TABS end
@@ -212,7 +231,7 @@ end
 
 function Desktop:onSwipe(_, ges_ev)
     if type(ges_ev) ~= "table" or not ges_ev.direction then return true end
-    if ges_ev.pos and ges_ev.pos.y >= self.dimen.h - BAR_H then return true end
+    if ges_ev.pos and ges_ev.pos.y >= self.dimen.h - barH() then return true end
     local direction = BD.flipDirectionIfMirroredUILayout(ges_ev.direction)
     if direction == "south" then
         self:onClose()
@@ -220,18 +239,9 @@ function Desktop:onSwipe(_, ges_ev)
     end
     if self.tab == "library" then
         if direction == "west" then
-            local pages = math.max(1, math.ceil((self.total or 0) / self.page_size))
-            if self.page < pages then
-                self.page = self.page + 1
-                self._library_books = nil
-                self:rebuild()
-            end
+            self:gotoLibraryPage(self.page + 1)
         elseif direction == "east" then
-            if self.page > 1 then
-                self.page = self.page - 1
-                self._library_books = nil
-                self:rebuild()
-            end
+            self:gotoLibraryPage(self.page - 1)
         end
     end
     return true
@@ -242,10 +252,14 @@ function Desktop:switchTab(id)
         self._library_books = nil
         self.page = self.page or 1
     end
-    self.tab = id
     if id == "home" then
+        -- 每次回首页重新拉 API 最近阅读
+        self._recent_books = nil
+        self._recent_err = nil
+        self._recent_loading = false
         self:scheduleClockTick()
     end
+    self.tab = id
     self:rebuild()
 end
 
@@ -262,7 +276,10 @@ end
 
 function Desktop:rebuild()
     local ok, err = pcall(function()
-        self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
+        local sw = Screen:getWidth()
+        local sh = Screen:getHeight()
+        self.dimen = Geom:new{ x = 0, y = 0, w = sw, h = sh }
+
         local content
         if self.tab == "home" then
             content = self:buildHome()
@@ -273,16 +290,32 @@ function Desktop:rebuild()
         else
             content = self:buildSettings()
         end
+
+        -- 内容区固定 content_h；底栏叠在底部（对齐 SimpleUI wrapWithNavbar）
+        local content_h = self:contentHeight()
+        if content.dimen then
+            content.dimen.w = sw
+            content.dimen.h = content_h
+        else
+            content.dimen = Geom:new{ w = sw, h = content_h }
+        end
+        content.overlap_offset = { 0, 0 }
+
+        local bar = self:buildBottomBar()
+        bar.overlap_offset = { 0, sh - barH() }
+
+        local root = OverlapGroup:new{
+            dimen = Geom:new{ w = sw, h = sh },
+            content,
+            bar,
+        }
+        -- 外层白底：OverlapGroup 认 dimen，FrameContainer 包它后 getSize 即全屏
         self[1] = FrameContainer:new{
-            background = Blitbuffer.COLOR_WHITE,
             bordersize = 0,
             padding = 0,
-            dimen = self.dimen,
-            VerticalGroup:new{
-                align = "left",
-                content,
-                self:buildBottomBar(),
-            },
+            margin = 0,
+            background = Blitbuffer.COLOR_WHITE,
+            root,
         }
     end)
     if not ok then
@@ -290,17 +323,22 @@ function Desktop:rebuild()
         UIManager:show(InfoMessage:new{ text = _("桌面构建失败:\n") .. tostring(err) })
         return
     end
-    UIManager:setDirty(self, "ui")
+    UIManager:setDirty(self, "full")
 end
 
 function Desktop:buildHome()
     local h = self:contentHeight()
+    local w = Screen:getWidth()
     local body = Registry.buildHome(self:ctx())
-    return FrameContainer:new{
-        bordersize = 0,
-        padding = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = self.dimen.w, h = h },
+    -- 白底撑满内容区，模块叠在上方（否则只有模块自然高度）
+    return OverlapGroup:new{
+        dimen = Geom:new{ w = w, h = h },
+        FrameContainer:new{
+            bordersize = 0,
+            padding = 0,
+            background = Blitbuffer.COLOR_WHITE,
+            VerticalSpan:new{ width = h },
+        },
         body,
     }
 end
@@ -337,38 +375,63 @@ function Desktop:filterLabel()
     return table.concat(parts, " · ")
 end
 
+function Desktop:libraryPages()
+    return math.max(1, math.ceil((self.total or 0) / (self.page_size or 12)))
+end
+
+function Desktop:gotoLibraryPage(page)
+    local pages = self:libraryPages()
+    page = math.max(1, math.min(pages, tonumber(page) or 1))
+    if page == self.page and self._library_books then
+        return
+    end
+    self.page = page
+    self._library_books = nil
+    self.tab = "library"
+    self:rebuild()
+end
+
 function Desktop:buildLibraryShell()
     local h = self:contentHeight()
-    local w = self.dimen.w
-    -- 先放占位，nextTick 拉完再 rebuild 成网格
-    local placeholder = FrameContainer:new{
-        bordersize = 0,
-        padding = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = w, h = h },
-        CenterContainer:new{
-            dimen = Geom:new{ w = w, h = h },
-            TextWidget:new{
-                text = _("加载书库…"),
-                face = Font:getFace("cfont", 18),
-                fgcolor = Blitbuffer.gray(0.45),
-            },
-        },
-    }
+    local w = Screen:getWidth()
     if self._library_books then
-        local pages = math.max(1, math.ceil((self.total or 0) / self.page_size))
+        local pages = self:libraryPages()
+        local desk = self
         return CoverGrid.build(self:ctx(), self._library_books, {
             header = T(_("书库 · %1"), self:filterLabel()),
             page = self.page,
             pages = pages,
+            total = self.total or 0,
             empty_text = _("没有书籍"),
+            on_prev = function()
+                desk:gotoLibraryPage(desk.page - 1)
+            end,
+            on_next = function()
+                desk:gotoLibraryPage(desk.page + 1)
+            end,
         })
     end
     UIManager:nextTick(function()
         if self._closed or self.tab ~= "library" then return end
         self:fetchLibrary()
     end)
-    return placeholder
+    return OverlapGroup:new{
+        dimen = Geom:new{ w = w, h = h },
+        FrameContainer:new{
+            bordersize = 0,
+            padding = 0,
+            background = Blitbuffer.COLOR_WHITE,
+            VerticalSpan:new{ width = h },
+        },
+        CenterContainer:new{
+            dimen = Geom:new{ w = w, h = h },
+            TextWidget:new{
+                text = _("加载书库…"),
+                face = UI.face("cfont", 18),
+                fgcolor = Blitbuffer.gray(0.45),
+            },
+        },
+    }
 end
 
 function Desktop:fetchLibrary()
@@ -473,16 +536,25 @@ function Desktop:embedMenu(menu)
     return menu
 end
 
+function Desktop:newMenu(opts)
+    opts = opts or {}
+    opts.items_font_size = opts.items_font_size or UI.menuFontSize()
+    opts.is_borderless = true
+    opts.is_popout = false
+    opts.covers_fullscreen = false
+    opts.show_parent = self
+    opts.close_callback = opts.close_callback or function() end
+    return self:embedMenu(Menu:new(opts))
+end
+
 function Desktop:buildCategories()
     local h = self:contentHeight()
     local w = self.dimen.w
-    local menu = self:embedMenu(Menu:new{
+    local menu = self:newMenu{
         title = _("分类"),
         item_table = { { text = _("加载中…"), enabled = false } },
         width = w, height = h,
-        is_borderless = true, is_popout = false, covers_fullscreen = false,
-        show_parent = self, close_callback = function() end,
-    })
+    }
     UIManager:nextTick(function()
         if self._closed or self.tab ~= "category" then return end
         local function apply(items)
@@ -541,6 +613,7 @@ function Desktop:buildSettings()
     local s = G_reader_settings:readSetting("book_plugin") or {}
     local open_on = s.open_on_start ~= false
     local auto_sync = s.auto_sync ~= false
+    local scale = UI.getScale()
     local items = {
         {
             text = _("服务器与令牌"),
@@ -553,6 +626,18 @@ function Desktop:buildSettings()
         {
             text = _("搜索书库"),
             callback = function() self:showSearch() end,
+        },
+        {
+            text = _("界面字号"),
+            mandatory = string.format("%d%%", scale),
+            callback = function()
+                local n = UI.cycleScale()
+                UIManager:show(InfoMessage:new{
+                    text = T(_("字号已设为 %1%%"), n),
+                    timeout = 1.5,
+                })
+                self:rebuild()
+            end,
         },
         {
             text = _("启动时打开桌面"),
@@ -584,13 +669,11 @@ function Desktop:buildSettings()
             callback = function() self:onClose() end,
         },
     }
-    return self:embedMenu(Menu:new{
+    return self:newMenu{
         title = _("设置"),
         item_table = items,
         width = w, height = h,
-        is_borderless = true, is_popout = false, covers_fullscreen = false,
-        show_parent = self, close_callback = function() end,
-    })
+    }
 end
 
 function Desktop:onClose()
