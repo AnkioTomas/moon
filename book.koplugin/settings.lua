@@ -110,6 +110,17 @@ function Settings.build(desktop)
                 desktop:onClose()
             end,
         },
+        {
+            text = _("关于"),
+            callback = function()
+                UIManager:show(InfoMessage:new{
+                    text = _([[Book 书库
+
+作者：AnkioTomas
+GitHub：https://github.com/AnkioTomas/moon]]),
+                })
+            end,
+        },
     }
 
     local menu = Menu:new{
