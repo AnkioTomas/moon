@@ -22,12 +22,16 @@ local lfs = require("libs/libkoreader-lfs")
 
 local Api = require("api")
 local Desktop = require("desktop")
+local ReaderFloatMenu = require("readermenu")
+local Device = require("device")
 
 local SETTINGS_KEY = "book_plugin_v2"
 local FILEMAP_KEY = "book_plugin_filemap_v2"
 local START_WITH_ID = "bookshelf_book"
 -- 本地缓存超过该天数未打开则清理（首次进首页触发）
 local LOCAL_BOOK_TTL = 90 * 24 * 60 * 60
+-- 阅读页关书后由 FM 侧插件实例打开桌面（模块级，跨实例）
+local pending_open_desktop = false
 
 local BookPlugin = WidgetContainer:extend{
     name = "book",
@@ -42,6 +46,7 @@ local function defaultSettings()
         open_on_start = true,
         home_header = "clock",
         ui_scale = 130,
+        reader_float_menu = true,
         library_dir = DataStorage:getDataDir() .. "/books",
     }
 end
@@ -90,6 +95,11 @@ end
 
 local function saveSettings(s)
     G_reader_settings:saveSetting(SETTINGS_KEY, s)
+end
+
+local function readerFloatMenuEnabled()
+    local s = settings()
+    return s.reader_float_menu ~= false
 end
 
 local function ensureDir(path)
@@ -149,6 +159,39 @@ local function isStartWithBook()
     return G_reader_settings:readSetting("start_with", "filemanager") == START_WITH_ID
 end
 
+local function openDesktopFromFileManager(fallback_plugin)
+    -- Reader 关闭后 PluginLoader 会重建实例；优先拿当前存活的 book
+    local ok_pl, PluginLoader = pcall(require, "pluginloader")
+    if ok_pl and PluginLoader and PluginLoader.getPluginInstance then
+        local book = PluginLoader:getPluginInstance("book")
+        if book and book.openDesktop then
+            book:openDesktop()
+            return true
+        end
+    end
+    local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
+    local fm = ok and FileManager and FileManager.instance
+    local book = fm and fm.book
+    if book and book.openDesktop then
+        book:openDesktop()
+        return true
+    end
+    if fm then
+        for _, child in ipairs(fm) do
+            if type(child) == "table" and child.name == "book" and child.openDesktop then
+                child:openDesktop()
+                return true
+            end
+        end
+    end
+    if fallback_plugin and fallback_plugin.openDesktop and fallback_plugin.ui
+        and fallback_plugin.ui.file_chooser then
+        fallback_plugin:openDesktop()
+        return true
+    end
+    return false
+end
+
 local function wrapFmOnShow(plugin, fm)
     if not fm or fm._book_onshow_wrapped then
         return
@@ -164,6 +207,14 @@ local function wrapFmOnShow(plugin, fm)
             UIManager:scheduleIn(0, function()
                 if plugin and plugin.openDesktop and not plugin.desktop then
                     plugin:openDesktop()
+                end
+            end)
+        end
+        if pending_open_desktop then
+            pending_open_desktop = false
+            UIManager:scheduleIn(0, function()
+                if not openDesktopFromFileManager(plugin) then
+                    logger.warn("book pending desktop open failed")
                 end
             end)
         end
@@ -318,6 +369,14 @@ function BookPlugin:init()
         patchStartWithMenu()
         if self.ui.file_chooser then
             requestDesktopOpen(self, self.ui)
+        end
+        if pending_open_desktop and self.ui.file_chooser then
+            pending_open_desktop = false
+            UIManager:scheduleIn(0.2, function()
+                if self and self.openDesktop and not self.desktop then
+                    self:openDesktop()
+                end
+            end)
         end
     end)
     if not ok then
@@ -723,13 +782,132 @@ function BookPlugin:pullCurrentProgress(show_msg)
     end)
 end
 
+function BookPlugin:closeReaderFloatMenu()
+    if self._reader_float_menu then
+        pcall(function()
+            self._reader_float_menu._closed = true
+            UIManager:close(self._reader_float_menu)
+        end)
+        self._reader_float_menu = nil
+    end
+end
+
+--- 阅读中部点击：打开 Book 悬浮菜单（覆盖左右翻页区中部）
+function BookPlugin:registerReaderFloatMenuZones()
+    if not self.ui or not self.ui.registerTouchZones then
+        return
+    end
+    if not Device:isTouchDevice() then
+        return
+    end
+    if not readerFloatMenuEnabled() then
+        return
+    end
+    -- 中部：宽 50% × 高 50%，避开顶部系统菜单与底部字体条
+    self.ui:registerTouchZones({
+        {
+            id = "book_reader_float_menu_tap",
+            ges = "tap",
+            screen_zone = {
+                ratio_x = 1 / 4,
+                ratio_y = 1 / 4,
+                ratio_w = 1 / 2,
+                ratio_h = 1 / 2,
+            },
+            overrides = {
+                "tap_forward",
+                "tap_backward",
+            },
+            handler = function()
+                return self:onTapBookReaderFloatMenu()
+            end,
+        },
+    })
+end
+
+function BookPlugin:onTapBookReaderFloatMenu()
+    if not readerFloatMenuEnabled() then
+        return false
+    end
+    if self._reader_float_menu and not self._reader_float_menu._closed then
+        return true
+    end
+    local plugin = self
+    local ok, menu = pcall(function()
+        return ReaderFloatMenu:new{
+            plugin = plugin,
+            covers_fullscreen = false,
+            close_callback = function()
+                plugin._reader_float_menu = nil
+            end,
+        }
+    end)
+    if not ok then
+        logger.err("book reader float menu failed:", menu)
+        return true
+    end
+    self._reader_float_menu = menu
+    UIManager:show(menu)
+    -- 刷全栈：下层阅读页 + 上层面板；面板外正文仍可见
+    UIManager:setDirty("all", "ui")
+    return true
+end
+
+--- 退出阅读并打开 Book 桌面（主页按钮）
+--- 路径对齐 KOReader：onClose → showFileManager → 再 openDesktop
+--- 只 onClose 会留下空栈（打开书时 FM/桌面已被关掉），看起来像“直接退出”
+function BookPlugin:exitReadingToDesktop()
+    self:closeReaderFloatMenu()
+    local ui = self.ui
+    if not (ui and ui.document) then
+        if not openDesktopFromFileManager(self) then
+            logger.warn("book exitReadingToDesktop: not in reader and no desktop host")
+        end
+        return
+    end
+    local file = ui.document.file
+    pending_open_desktop = true
+    local ok_fm, FileManager = pcall(require, "apps/filemanager/filemanager")
+    if ok_fm and FileManager and FileManager.instance then
+        wrapFmOnShow(self, FileManager.instance)
+    end
+    UIManager:nextTick(function()
+        if ui.onClose then
+            -- false：避免关书时强制全刷，随后我们自己刷桌面
+            ui:onClose(false)
+        end
+        if ui.showFileManager then
+            pcall(function()
+                ui:showFileManager(file)
+            end)
+        end
+        -- showFileManager 会重建 FM + 插件；下一拍再开桌面
+        UIManager:nextTick(function()
+            if not pending_open_desktop then
+                return
+            end
+            pending_open_desktop = false
+            if not openDesktopFromFileManager(nil) then
+                logger.warn("book exitReadingToDesktop: desktop not opened")
+            end
+        end)
+    end)
+end
+
 function BookPlugin:onReaderReady()
+    self:registerReaderFloatMenuZones()
     if settings().auto_sync then
         self:pullCurrentProgress(false)
     end
 end
 
+function BookPlugin:onSetDimensions()
+    -- 旋转/改分辨率后重挂中部热区
+    self:registerReaderFloatMenuZones()
+end
+
 function BookPlugin:onCloseDocument()
+    self:closeReaderFloatMenu()
     if settings().auto_sync then
         self:pushCurrentProgress(false)
     end

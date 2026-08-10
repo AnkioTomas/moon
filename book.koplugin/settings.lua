@@ -35,6 +35,7 @@ function Settings.build(desktop)
     local s = settings()
     local open_on = s.open_on_start ~= false
     local auto_sync = s.auto_sync ~= false
+    local float_menu = s.reader_float_menu ~= false
     local header_mode = s.home_header or "clock"
     local scale = UI.getScale()
 
@@ -84,6 +85,16 @@ function Settings.build(desktop)
             callback = function()
                 local st = settings()
                 st.auto_sync = not auto_sync
+                save(st)
+                desktop:rebuild()
+            end,
+        },
+        {
+            text = _("阅读中键菜单"),
+            mandatory = float_menu and _("开") or _("关"),
+            callback = function()
+                local st = settings()
+                st.reader_float_menu = not float_menu
                 save(st)
                 desktop:rebuild()
             end,
