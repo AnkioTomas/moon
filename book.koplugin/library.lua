@@ -278,11 +278,57 @@ local function coverCell(ctx, book, cw, ch, on_open)
     return tap, total_h
 end
 
+--- 按内容区尺寸算出网格容量；请求 pageSize 必须与此一致，否则多出来的书会被屏外丢掉
+function Library.gridMetrics(w, h)
+    w = math.max(1, tonumber(w) or 1)
+    h = math.max(1, tonumber(h) or 1)
+    local pad = UI.sz(12)
+    local top_h = UI.sz(48)
+    local bottom_pad = UI.sz(10)
+    local bottom_h = UI.iconSz() + UI.sz(28) + bottom_pad
+    local grid_h = math.max(1, h - top_h - bottom_h)
+    local gap = UI.sz(12)
+    local row_gap = UI.sz(12)
+    local avail = math.max(1, w - pad * 2)
+    local cols = 3
+    local cw = math.floor((avail - gap * (cols - 1)) / cols)
+    if cw < UI.sz(96) then
+        cols = 2
+        cw = math.floor((avail - gap * (cols - 1)) / cols)
+    end
+    cw = math.max(UI.sz(80), cw)
+    local ch = math.floor(cw * 3 / 2)
+    local cell_h = ch + UI.sz(4) + UI.sz(22)
+    local rows = 0
+    local used = 0
+    while used + cell_h <= grid_h do
+        rows = rows + 1
+        used = used + cell_h + row_gap
+    end
+    if rows < 1 then rows = 1 end
+    return {
+        pad = pad,
+        top_h = top_h,
+        bottom_pad = bottom_pad,
+        bottom_h = bottom_h,
+        grid_h = grid_h,
+        gap = gap,
+        row_gap = row_gap,
+        cols = cols,
+        rows = rows,
+        cw = cw,
+        ch = ch,
+        cell_h = cell_h,
+        page_size = cols * rows,
+    }
+end
+
 function Library.build(ctx, state, opts)
     opts = opts or {}
     local w = ctx.width
     local h = ctx.height
-    local pad = UI.sz(12)
+    local m = Library.gridMetrics(w, h)
+    local pad = m.pad
     local page = opts.page or 1
     local pages = opts.pages or 1
     local total = opts.total or 0
@@ -336,11 +382,10 @@ function Library.build(ctx, state, opts)
         toolbar,
     }
 
-    local top_h = UI.sz(48)
-    -- 给底栏 Tab 留空隙；分页高度跟图标字号走
-    local bottom_pad = UI.sz(10)
-    local bottom_h = UI.iconSz() + UI.sz(28) + bottom_pad
-    local grid_h = math.max(1, h - top_h - bottom_h)
+    local top_h = m.top_h
+    local bottom_pad = m.bottom_pad
+    local bottom_h = m.bottom_h
+    local grid_h = m.grid_h
 
     if not books then
         return FrameContainer:new{
@@ -390,27 +435,20 @@ function Library.build(ctx, state, opts)
         }
     end
 
-    -- 优先 3 列大封面；太窄再降到 2 列。封面比例 2:3。
-    local gap = UI.sz(12)
-    local avail = math.max(1, w - pad * 2)
-    local cols = 3
-    local cw = math.floor((avail - gap * (cols - 1)) / cols)
-    if cw < UI.sz(96) then
-        cols = 2
-        cw = math.floor((avail - gap) / cols)
-    end
-    cw = math.max(UI.sz(80), cw)
-    local ch = math.floor(cw * 3 / 2)
+    local gap = m.gap
+    local cols = m.cols
+    local cw = m.cw
+    local ch = m.ch
+    local row_gap = m.row_gap
+    local estimate_h = m.cell_h
 
     local grid = VerticalGroup:new{ align = "center" }
     local row = HorizontalGroup:new{}
     local col_i = 0
     local used_h = 0
     local cell_h
-    local row_gap = UI.sz(12)
-    -- 单行标题；先估高再解码
-    local estimate_h = ch + UI.sz(4) + UI.sz(22)
 
+    -- pageSize 已按容量请求；这里只兜底，正常应能画完本页全部
     for _, book in ipairs(books) do
         if col_i == 0 and used_h + estimate_h > grid_h then
             break
@@ -472,12 +510,15 @@ function Library.fetch(desktop)
             done({}, _("请先在设置里配置服务器与令牌"))
             return
         end
+        if desktop.syncLibraryPageSize then
+            desktop:syncLibraryPageSize()
+        end
         local f = desktop.filter or {}
         local res, err
         local ok, thrown = pcall(function()
             res, err = desktop.api:listBooks{
                 page = desktop.page or 1,
-                pageSize = desktop.page_size or 12,
+                pageSize = desktop.page_size or 1,
                 search = f.search or "",
                 favorite = f.favorite or "",
                 category = f.category or "",

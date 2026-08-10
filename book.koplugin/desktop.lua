@@ -353,8 +353,26 @@ function Desktop:requestHomeRefresh(reason)
     end)
 end
 
+function Desktop:syncLibraryPageSize()
+    local m = Library.gridMetrics(
+        (self.dimen and self.dimen.w) or Screen:getWidth(),
+        self:contentHeight()
+    )
+    local n = math.max(1, m.page_size or 1)
+    if self.page_size ~= n then
+        self.page_size = n
+        local pages = math.max(1, math.ceil((self.total or 0) / n))
+        if (self.page or 1) > pages then
+            self.page = pages
+            self._library_state = nil
+        end
+    end
+    return self.page_size
+end
+
 function Desktop:libraryPages()
-    return math.max(1, math.ceil((self.total or 0) / (self.page_size or 12)))
+    local ps = self:syncLibraryPageSize()
+    return math.max(1, math.ceil((self.total or 0) / ps))
 end
 
 function Desktop:gotoLibraryPage(page)
@@ -370,6 +388,16 @@ function Desktop:gotoLibraryPage(page)
 end
 
 function Desktop:buildLibrary()
+    local prev_ps = self.page_size
+    self:syncLibraryPageSize()
+    if prev_ps and prev_ps ~= self.page_size then
+        -- 字号/分辨率变了，容量变了，必须按新 pageSize 重拉
+        self._library_state = nil
+        local pages = self:libraryPages()
+        if (self.page or 1) > pages then
+            self.page = pages
+        end
+    end
     local state = self._library_state
     if not state then
         UIManager:nextTick(function()
