@@ -287,10 +287,30 @@ local function patchStartWithMenu()
     end
 end
 
+-- 把 Book 菜单项钉在「设置」顶部；只改 order 表，不碰 MenuSorter 本体
+local MENU_ITEM_ID = "book_library"
+local function pinBookInSettingsMenu()
+    for _, modname in ipairs({
+        "ui/elements/filemanager_menu_order",
+        "ui/elements/reader_menu_order",
+    }) do
+        local ok, order = pcall(require, modname)
+        if ok and type(order) == "table" and type(order.setting) == "table" then
+            for i = #order.setting, 1, -1 do
+                if order.setting[i] == MENU_ITEM_ID then
+                    table.remove(order.setting, i)
+                end
+            end
+            table.insert(order.setting, 1, MENU_ITEM_ID)
+        end
+    end
+end
+
 function BookPlugin:init()
     local ok, err = pcall(function()
         applyStartWithOnce()
         self:onDispatcherRegisterActions()
+        pinBookInSettingsMenu()
         if self.ui.menu and self.ui.menu.registerToMainMenu then
             self.ui.menu:registerToMainMenu(self)
         end
@@ -338,7 +358,8 @@ end
 function BookPlugin:addToMainMenu(menu_items)
     menu_items.book_library = {
         text = _("Book 桌面"),
-        sorting_hint = "tools",
+        -- order 表已置顶；sorting_hint 仅作 order 未命中时的兜底
+        sorting_hint = "setting",
         callback = function()
             self:openDesktop()
         end,
