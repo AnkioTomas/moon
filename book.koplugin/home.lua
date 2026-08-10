@@ -394,19 +394,31 @@ function Home.build(ctx, state)
             },
         })
     else
-        local cw = UI.sz(90)
-        local ch = UI.sz(130)
+        -- 按可用宽度均分列宽，避免固定封面宽导致两侧留白随字号变大
         local gap = UI.sz(10)
-        local cols = math.max(1, math.floor((w - pad * 2 + gap) / (cw + gap)))
+        local avail = math.max(1, w - pad * 2)
+        local cols = 3
+        local cw = math.floor((avail - gap * (cols - 1)) / cols)
+        if cw < UI.sz(72) then
+            cols = 2
+            cw = math.floor((avail - gap * (cols - 1)) / cols)
+        end
+        cw = math.max(UI.sz(64), cw)
+        local ch = math.floor(cw * 3 / 2)
         local cell_h
         local row_group = HorizontalGroup:new{}
-        local grid = VerticalGroup:new{ align = "center" }
+        local grid = VerticalGroup:new{ align = "left" }
         local col_i = 0
         local grid_h = 0
 
         local function pushRow(row)
             local rh = (cell_h or ch) + UI.sz(8)
-            table.insert(grid, CenterContainer:new{
+            table.insert(grid, FrameContainer:new{
+                bordersize = 0,
+                padding = 0,
+                padding_left = pad,
+                padding_right = pad,
+                margin = 0,
                 dimen = Geom:new{ w = w, h = rh },
                 row,
             })
@@ -434,9 +446,13 @@ function Home.build(ctx, state)
             end
         end
         if col_i > 0 and grid_h + (cell_h or 0) <= remain then
+            -- 末行不足整列时仍左对齐贴边，不居中拉出两侧空白
             pushRow(row_group)
         end
-        table.insert(col, CenterContainer:new{
+        table.insert(col, FrameContainer:new{
+            bordersize = 0,
+            padding = 0,
+            margin = 0,
             dimen = Geom:new{ w = w, h = math.max(grid_h, 1) },
             grid,
         })
