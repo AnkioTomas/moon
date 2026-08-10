@@ -113,7 +113,8 @@ function Settings.build(desktop)
     }
 
     local menu = Menu:new{
-        title = _("设置"),
+        -- 设置是底栏 Tab，不要标题栏关闭按钮；标题也多余
+        no_title = true,
         item_table = items,
         width = w,
         height = h,
@@ -124,9 +125,10 @@ function Settings.build(desktop)
         show_parent = desktop,
         close_callback = function() end,
     }
-    menu.onClose = function() desktop:onClose(); return true end
-    menu.onCloseAllMenus = function() desktop:onClose(); return true end
-    menu.onMultiSwipe = function() desktop:onClose(); return true end
+    -- 手势/返回不要关掉整个桌面（退出用「关闭桌面」项）
+    menu.onClose = function() return true end
+    menu.onCloseAllMenus = function() return true end
+    menu.onMultiSwipe = function() return true end
     return menu
 end
 
