@@ -19,8 +19,15 @@ local Cover = {}
 
 local EXTS = { ".jpg", ".jpeg", ".png", ".webp", ".gif" }
 
-local function safeName(filename)
-    return (filename or "unknown"):gsub("[^%w%._%-]+", "_")
+-- 缓存名与书籍文件名一致：保留中文/空格等，只取 basename，禁止路径穿越
+local function cacheName(filename)
+    filename = tostring(filename or "unknown")
+    filename = filename:match("([^/\\]+)$") or filename
+    filename = filename:gsub("%.%.", "_"):gsub("%z", "")
+    if filename == "" then
+        filename = "unknown"
+    end
+    return filename
 end
 
 local function sniffExt(path)
@@ -40,7 +47,7 @@ local function isImagePath(path)
 end
 
 function Cover.pathFor(plugin, filename)
-    return plugin:coverCacheDir() .. "/" .. safeName(filename)
+    return plugin:coverCacheDir() .. "/" .. cacheName(filename)
 end
 
 function Cover.cachedPath(plugin, filename)

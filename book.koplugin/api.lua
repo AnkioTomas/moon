@@ -282,12 +282,29 @@ local function sniffExt(path)
     return nil
 end
 
+-- /webdav/{filename}；按段编码，保留路径分隔
+local function webdavPath(filename)
+    filename = tostring(filename or ""):gsub("^/+", "")
+    local parts = {}
+    for seg in filename:gmatch("[^/]+") do
+        -- 路径段编码：空格必须是 %20，不能是 query 风格的 +
+        local enc = seg:gsub("([^%w%-%._~])", function(c)
+            return string.format("%%%02X", string.byte(c))
+        end)
+        table.insert(parts, enc)
+    end
+    return "/webdav/" .. table.concat(parts, "/")
+end
+
 function Api:downloadCover(filename, dest_path)
+    if not filename or filename == "" then
+        return nil, "无效文件名"
+    end
     local chunks = {}
     local ok, msg = self:_request(
         "GET",
-        "/index/book/cover",
-        { filename = filename },
+        webdavPath(filename),
+        nil,
         nil,
         ltn12.sink.table(chunks),
         true
@@ -311,10 +328,9 @@ function Api:downloadCover(filename, dest_path)
         pcall(os.remove, tmp)
         return nil, "封面不是图片"
     end
-    local final = dest_path
-    if not final:match("%.%w+$") then
-        final = dest_path .. ext
-    end
+    -- dest_path 是按书籍文件名生成的缓存基名，通常自带 .epub 等文档后缀。
+    -- 封面必须再追加实际图片后缀，ImageWidget 才能通过扩展名识别并解码。
+    local final = dest_path .. ext
     pcall(os.remove, final)
     local renamed, rename_err = os.rename(tmp, final)
     if not renamed then
