@@ -183,9 +183,14 @@ function Detail:rebuild()
 
     local meta_w = math.max(UI.sz(80), content_w - cw - UI.sz(14))
     local meta_kids = { align = "left" }
+    local tags = book.category
+    if type(tags) == "string" and tags ~= "" then
+        tags = tags:gsub("\n+", " · ")
+    end
     local rows = {
         metaRow(_("作者"), book.author, meta_w),
-        metaRow(_("分类"), book.category, meta_w),
+        metaRow(_("分类"), book.favorite, meta_w),
+        metaRow(_("标签"), tags, meta_w),
         metaRow(_("系列"), book.series, meta_w),
         metaRow(_("进度"), string.format("%.0f%%", pct), meta_w),
     }

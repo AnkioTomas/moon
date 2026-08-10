@@ -1,5 +1,11 @@
 --[[--
-图书馆：搜索 / 分类 / 系列 / 分页封面网格（异步封面）
+图书馆：搜索 / 分类 / 标签 / 系列 / 作者 / 分页封面网格
+
+筛选字段与 /index/book/filters 对齐：
+  favorites  → 分类（list 参数 favorite）
+  categories → 标签（list 参数 category）
+  groupNames → 系列（list 参数 series）
+  authors    → 作者（list 参数 author）
 
 @module koplugin.book.library
 --]]
@@ -26,6 +32,38 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 
 local Library = {}
+
+-- kind → UI 文案 / filters 响应键 / listBooks 查询键
+local FILTER_KINDS = {
+    favorite = {
+        title = _("选择分类"),
+        label = _("分类"),
+        list_key = "favorites",
+        query_key = "favorite",
+        aliases = { "favorites" },
+    },
+    category = {
+        title = _("选择标签"),
+        label = _("标签"),
+        list_key = "categories",
+        query_key = "category",
+        aliases = { "categories", "tags" },
+    },
+    series = {
+        title = _("选择系列"),
+        label = _("系列"),
+        list_key = "groupNames",
+        query_key = "series",
+        aliases = { "groupNames", "series" },
+    },
+    author = {
+        title = _("选择作者"),
+        label = _("作者"),
+        list_key = "authors",
+        query_key = "author",
+        aliases = { "authors", "author" },
+    },
+}
 
 local function bookTitle(book)
     return book.bookName or book.filename or "?"
@@ -55,17 +93,30 @@ local function filterLabel(filter)
     if filter.search and filter.search ~= "" then
         table.insert(parts, T(_("搜:%1"), filter.search))
     end
-    if filter.category and filter.category ~= "" then
-        table.insert(parts, filter.category)
-    end
-    if filter.series and filter.series ~= "" then
-        table.insert(parts, filter.series)
-    end
-    if filter.favorite and filter.favorite ~= "" then
-        table.insert(parts, filter.favorite)
+    for _, kind in ipairs({ "favorite", "category", "series", "author" }) do
+        local def = FILTER_KINDS[kind]
+        local v = filter[def.query_key]
+        if v and v ~= "" then
+            table.insert(parts, def.label .. ":" .. v)
+        end
     end
     if #parts == 0 then return _("全部") end
     return table.concat(parts, " · ")
+end
+
+local function pickFilterList(data, def)
+    if type(data) ~= "table" or not def then return {} end
+    local list = data[def.list_key]
+    if type(list) == "table" and #list > 0 then
+        return list
+    end
+    for _, alt in ipairs(def.aliases or {}) do
+        local alt_list = data[alt]
+        if type(alt_list) == "table" and #alt_list > 0 then
+            return alt_list
+        end
+    end
+    return type(list) == "table" and list or {}
 end
 
 local function bookFile(book)
@@ -117,11 +168,15 @@ local function toolButton(text, callback)
         text = text,
         bordersize = 1,
         margin = 0,
-        padding = UI.sz(6),
+        padding = UI.sz(5),
         text_font_face = "xx_smallinfofont",
-        text_font_size = math.max(12, math.floor(14 * UI.getScale() / 100 + 0.5)),
+        text_font_size = math.max(12, math.floor(13 * UI.getScale() / 100 + 0.5)),
         callback = callback,
     }
+end
+
+local function toolSpan()
+    return HorizontalSpan:new{ width = UI.sz(4) }
 end
 
 function Library.build(ctx, state, opts)
@@ -144,15 +199,23 @@ function Library.build(ctx, state, opts)
         toolButton(_("搜索"), function()
             if ctx.desktop then ctx.desktop:showSearch() end
         end),
-        HorizontalSpan:new{ width = UI.sz(6) },
+        toolSpan(),
         toolButton(_("分类"), function()
+            if ctx.desktop then ctx.desktop:showFilterPicker("favorite") end
+        end),
+        toolSpan(),
+        toolButton(_("标签"), function()
             if ctx.desktop then ctx.desktop:showFilterPicker("category") end
         end),
-        HorizontalSpan:new{ width = UI.sz(6) },
+        toolSpan(),
         toolButton(_("系列"), function()
             if ctx.desktop then ctx.desktop:showFilterPicker("series") end
         end),
-        HorizontalSpan:new{ width = UI.sz(6) },
+        toolSpan(),
+        toolButton(_("作者"), function()
+            if ctx.desktop then ctx.desktop:showFilterPicker("author") end
+        end),
+        toolSpan(),
         toolButton(_("清除"), function()
             if ctx.desktop then ctx.desktop:clearLibraryFilters() end
         end),
@@ -307,9 +370,6 @@ function Library.fetch(desktop)
             books = books or {},
             err = err,
         }
-        if books then
-            -- total 已在 fetch 内写入 desktop.total
-        end
         desktop:rebuild()
     end
 
@@ -318,16 +378,18 @@ function Library.fetch(desktop)
             done({}, _("请先在设置里配置服务器与令牌"))
             return
         end
+        local f = desktop.filter or {}
         local res, err
         local ok, thrown = pcall(function()
             res, err = desktop.api:listBooks{
                 page = desktop.page or 1,
                 pageSize = desktop.page_size or 12,
-                search = desktop.filter.search or "",
-                category = desktop.filter.category or "",
-                series = desktop.filter.series or "",
-                favorite = desktop.filter.favorite or "",
-                finished = desktop.filter.finished or "",
+                search = f.search or "",
+                favorite = f.favorite or "",
+                category = f.category or "",
+                series = f.series or "",
+                author = f.author or "",
+                finished = f.finished or "",
             }
         end)
         if not ok then
@@ -342,7 +404,6 @@ function Library.fetch(desktop)
         done(res.data or {})
     end
 
-    -- 直接拉；离线时 API 会报错，由 done 展示，避免卡在加载
     UIManager:scheduleIn(0, function()
         local ok, err = pcall(run)
         if not ok then
@@ -352,15 +413,19 @@ function Library.fetch(desktop)
 end
 
 function Library.showFilterPicker(desktop, kind)
-    local title = kind == "series" and _("选择系列") or _("选择分类")
-    local key = kind == "series" and "series" or "categories"
-    local filter_key = kind == "series" and "series" or "category"
+    local def = FILTER_KINDS[kind]
+    if not def then
+        logger.warn("book unknown filter kind", kind)
+        return
+    end
+    local title = def.title
+    local query_key = def.query_key
 
     local function applyList(names)
         local items = {{
             text = _("全部"),
             callback = function()
-                desktop.filter[filter_key] = ""
+                desktop.filter[query_key] = ""
                 desktop.page = 1
                 desktop._library_state = nil
                 UIManager:close(desktop._filter_menu)
@@ -370,11 +435,11 @@ function Library.showFilterPicker(desktop, kind)
             end,
         }}
         for _, name in ipairs(names or {}) do
-            local n = name
+            local n = tostring(name)
             table.insert(items, {
                 text = n,
                 callback = function()
-                    desktop.filter[filter_key] = n
+                    desktop.filter[query_key] = n
                     desktop.page = 1
                     desktop._library_state = nil
                     UIManager:close(desktop._filter_menu)
@@ -418,13 +483,7 @@ function Library.showFilterPicker(desktop, kind)
             applyList({})
             return
         end
-        local data = res.data or {}
-        local list = data[key] or data[filter_key] or {}
-        -- 兼容 favorites 当分类的旧字段
-        if kind == "category" and #list == 0 and data.favorites then
-            list = data.favorites
-        end
-        applyList(list)
+        applyList(pickFilterList(res.data or {}, def))
     end
 
     UIManager:scheduleIn(0, function()
