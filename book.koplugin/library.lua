@@ -2,6 +2,7 @@
 图书馆：封面优先书架
   顶栏：搜索 / 筛选 / 清除
   网格：大封面 + 细进度条 + 单行标题
+  筛选互斥：同一时刻只应用一个条件（搜索或分类/标签/系列/作者之一）
 
 筛选字段与 /index/book/filters 对齐：
   favorites  → 分类（list 参数 favorite）
@@ -13,7 +14,10 @@
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
+local BD = require("ui/bidi")
+local Button = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
+local Device = require("device")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
@@ -31,6 +35,7 @@ local UI = require("bookui")
 local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
+local Screen = Device.screen
 
 local Library = {}
 
@@ -90,7 +95,7 @@ local function tappable(w, h, on_tap)
     return tap
 end
 
---- 无边框文字入口（顶栏 / 分页共用）
+--- 无边框文字入口（顶栏共用）
 local function textAction(text, callback, face_size)
     local label = TextWidget:new{
         text = text,
@@ -108,6 +113,73 @@ local function textAction(text, callback, face_size)
         label,
     }
     return tap
+end
+
+--- 与官方 Menu 底栏一致：首/上/页码/下/末 + chevron 图标
+local function menuPager(page, pages, handlers)
+    handlers = handlers or {}
+    page = tonumber(page) or 1
+    pages = math.max(1, tonumber(pages) or 1)
+    local chevron_left = "chevron.left"
+    local chevron_right = "chevron.right"
+    local chevron_first = "chevron.first"
+    local chevron_last = "chevron.last"
+    if BD.mirroredUILayout() then
+        chevron_left, chevron_right = chevron_right, chevron_left
+        chevron_first, chevron_last = chevron_last, chevron_first
+    end
+    local spacer = HorizontalSpan:new{ width = Screen:scaleBySize(32) }
+    local first = Button:new{
+        icon = chevron_first,
+        bordersize = 0,
+        callback = function()
+            if handlers.on_first then handlers.on_first() end
+        end,
+    }
+    local left = Button:new{
+        icon = chevron_left,
+        bordersize = 0,
+        callback = function()
+            if handlers.on_prev then handlers.on_prev() end
+        end,
+    }
+    local right = Button:new{
+        icon = chevron_right,
+        bordersize = 0,
+        callback = function()
+            if handlers.on_next then handlers.on_next() end
+        end,
+    }
+    local last = Button:new{
+        icon = chevron_last,
+        bordersize = 0,
+        callback = function()
+            if handlers.on_last then handlers.on_last() end
+        end,
+    }
+    local info = Button:new{
+        text = T(_("Page %1 of %2"), page, pages),
+        text_font_bold = false,
+        bordersize = 0,
+    }
+    if info.disableWithoutDimming then
+        info:disableWithoutDimming()
+    end
+    first:enableDisable(page > 1)
+    left:enableDisable(page > 1)
+    right:enableDisable(page < pages)
+    last:enableDisable(page < pages)
+    return HorizontalGroup:new{
+        first,
+        spacer,
+        left,
+        spacer,
+        info,
+        spacer,
+        right,
+        spacer,
+        last,
+    }
 end
 
 --- 有筛选才返回摘要；无筛选返回 nil（避免「全部」噪音）
@@ -148,6 +220,18 @@ local function pickFilterList(data, def)
         end
     end
     return type(list) == "table" and list or {}
+end
+
+--- 筛选互斥：同一时刻只保留一个条件（含 search）
+function Library.applyExclusive(desktop, key, value)
+    desktop.filter = {}
+    if key and value and value ~= "" then
+        desktop.filter[key] = value
+    end
+    desktop.page = 1
+    desktop._library_state = nil
+    desktop.tab = "library"
+    desktop:rebuild()
 end
 
 local function bookFile(book)
@@ -242,21 +326,12 @@ function Library.build(ctx, state, opts)
         },
     }
 
-    local pager = HorizontalGroup:new{
-        textAction(_("‹ 上一页"), function()
-            if opts.on_prev then opts.on_prev() end
-        end, 14),
-        HorizontalSpan:new{ width = UI.sz(16) },
-        TextWidget:new{
-            text = string.format("%d / %d", page, pages),
-            face = UI.face("xx_smallinfofont", 14),
-            fgcolor = Blitbuffer.COLOR_BLACK,
-        },
-        HorizontalSpan:new{ width = UI.sz(16) },
-        textAction(_("下一页 ›"), function()
-            if opts.on_next then opts.on_next() end
-        end, 14),
-    }
+    local pager = menuPager(page, pages, {
+        on_prev = opts.on_prev,
+        on_next = opts.on_next,
+        on_first = opts.on_first,
+        on_last = opts.on_last,
+    })
 
     local top = FrameContainer:new{
         bordersize = 0,
@@ -476,13 +551,9 @@ function Library.showFilterPicker(desktop, kind)
         local items = {{
             text = _("全部"),
             callback = function()
-                desktop.filter[query_key] = ""
-                desktop.page = 1
-                desktop._library_state = nil
                 UIManager:close(desktop._filter_menu)
                 desktop._filter_menu = nil
-                desktop.tab = "library"
-                desktop:rebuild()
+                Library.applyExclusive(desktop, query_key, "")
             end,
         }}
         for _, name in ipairs(names or {}) do
@@ -490,13 +561,9 @@ function Library.showFilterPicker(desktop, kind)
             table.insert(items, {
                 text = n,
                 callback = function()
-                    desktop.filter[query_key] = n
-                    desktop.page = 1
-                    desktop._library_state = nil
                     UIManager:close(desktop._filter_menu)
                     desktop._filter_menu = nil
-                    desktop.tab = "library"
-                    desktop:rebuild()
+                    Library.applyExclusive(desktop, query_key, n)
                 end,
             })
         end

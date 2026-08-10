@@ -389,6 +389,12 @@ function Desktop:buildLibrary()
         on_next = function()
             desk:gotoLibraryPage(desk.page + 1)
         end,
+        on_first = function()
+            desk:gotoLibraryPage(1)
+        end,
+        on_last = function()
+            desk:gotoLibraryPage(desk:libraryPages())
+        end,
     })
 end
 
@@ -414,11 +420,7 @@ function Desktop:showSearch()
                 text = _("清除"),
                 callback = function()
                     UIManager:close(dialog)
-                    self.filter.search = ""
-                    self.page = 1
-                    self._library_state = nil
-                    self.tab = "library"
-                    self:rebuild()
+                    Library.applyExclusive(self, "search", "")
                 end,
             },
             {
@@ -430,12 +432,9 @@ function Desktop:showSearch()
                 text = _("搜索"),
                 is_enter_default = true,
                 callback = function()
-                    self.filter.search = dialog:getInputText() or ""
+                    local q = dialog:getInputText() or ""
                     UIManager:close(dialog)
-                    self.page = 1
-                    self._library_state = nil
-                    self.tab = "library"
-                    self:rebuild()
+                    Library.applyExclusive(self, "search", q)
                 end,
             },
         }},
