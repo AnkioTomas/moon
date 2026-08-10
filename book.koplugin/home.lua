@@ -37,8 +37,13 @@ local function settings()
     return G_reader_settings:readSetting(UI.settingsKey()) or {}
 end
 
+local function bookFile(book)
+    if not book then return nil end
+    return book.filename or book.file or book.name
+end
+
 local function bookTitle(book)
-    return book.bookName or book.filename or "?"
+    return book.bookName or book.title or bookFile(book) or "?"
 end
 
 local function bookAuthor(book)
@@ -80,7 +85,12 @@ local function tappable(w, h, on_tap)
     return tap
 end
 
--- 只预热缓存，不刷新 UI（刷新会连环 rebuild → 墨水屏直接崩）
+local function bookFile(book)
+    if type(book) ~= "table" then return nil end
+    return book.filename or book.fileName or book.file or book.path
+end
+
+-- 只预热缓存；成功后由 Cover idle handler 统一防抖刷新
 local function prefetchCover(api, plugin, filename)
     if not filename then return end
     Cover.ensureAsync(api, plugin, filename, nil)
@@ -213,10 +223,11 @@ local function recentRow(ctx, book, on_open)
     local title = bookTitle(book)
     local author = bookAuthor(book)
     local pct = bookPct(book)
-    local path = Cover.cachedPath(ctx.plugin, book.filename)
+    local filename = bookFile(book)
+    local path = Cover.cachedPath(ctx.plugin, filename)
     local cover_w = Cover.widget(path, cw, ch, title)
-    if not path then
-        prefetchCover(ctx.api, ctx.plugin, book.filename)
+    if not path and filename then
+        prefetchCover(ctx.api, ctx.plugin, filename)
     end
 
     local info_w = math.max(UI.sz(40), w - pad * 2 - cw - UI.sz(12))
@@ -271,10 +282,11 @@ end
 local function readingCell(ctx, book, cw, ch, on_open)
     local title = bookTitle(book)
     local pct = bookPct(book)
-    local path = Cover.cachedPath(ctx.plugin, book.filename)
+    local filename = bookFile(book)
+    local path = Cover.cachedPath(ctx.plugin, filename)
     local cover_w = Cover.widget(path, cw, ch, title)
-    if not path then
-        prefetchCover(ctx.api, ctx.plugin, book.filename)
+    if not path and filename then
+        prefetchCover(ctx.api, ctx.plugin, filename)
     end
     local label_h = UI.sz(28)
     local bar_h = UI.sz(10)

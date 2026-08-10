@@ -283,36 +283,29 @@ local function sniffExt(path)
 end
 
 function Api:downloadCover(filename, dest_path)
-    -- 最终路径带真实后缀；先下到临时文件再改名
-    local tmp = dest_path .. ".part"
-    local file, err = io.open(tmp, "wb")
-    if not file then
-        return nil, err or "无法创建封面文件"
-    end
+    local chunks = {}
     local ok, msg = self:_request(
         "GET",
         "/index/book/cover",
         { filename = filename },
         nil,
-        ltn12.sink.file(file),
+        ltn12.sink.table(chunks),
         true
     )
-    -- sink.file 会自行 close；失败时确保删掉半截文件
     if not ok then
-        pcall(os.remove, tmp)
         return nil, msg
     end
-    local attr_ok, size = pcall(function()
-        local f = io.open(tmp, "rb")
-        if not f then return nil end
-        local n = f:seek("end")
-        f:close()
-        return n
-    end)
-    if not attr_ok or not size or size < 64 then
-        pcall(os.remove, tmp)
+    local data = table.concat(chunks)
+    if not data or #data < 64 then
         return nil, "封面为空"
     end
+    local tmp = dest_path .. ".part"
+    local file, err = io.open(tmp, "wb")
+    if not file then
+        return nil, err or "无法创建封面文件"
+    end
+    file:write(data)
+    file:close()
     local ext = sniffExt(tmp)
     if not ext then
         pcall(os.remove, tmp)
@@ -325,8 +318,17 @@ function Api:downloadCover(filename, dest_path)
     pcall(os.remove, final)
     local renamed, rename_err = os.rename(tmp, final)
     if not renamed then
+        local rf = io.open(tmp, "rb")
+        local wf = rf and io.open(final, "wb")
+        if not (rf and wf) then
+            if rf then rf:close() end
+            pcall(os.remove, tmp)
+            return nil, rename_err or "封面改名失败"
+        end
+        wf:write(rf:read("*a") or "")
+        wf:close()
+        rf:close()
         pcall(os.remove, tmp)
-        return nil, rename_err or "封面改名失败"
     end
     return true, final
 end

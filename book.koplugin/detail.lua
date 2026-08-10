@@ -58,11 +58,12 @@ function Detail:rebuild()
     local pad = UI.sz(20)
     local cw = UI.sz(140)
     local ch = UI.sz(200)
-    local title = book.bookName or book.filename or "?"
-    local path = Cover.cachedPath(self.plugin, book.filename)
+    local title = book.bookName or book.filename or book.fileName or "?"
+    local filename = book.filename or book.fileName or book.file or book.path
+    local path = Cover.cachedPath(self.plugin, filename)
     local cover_w = Cover.widget(path, cw, ch, title)
-    if not path then
-        Cover.ensureAsync(self.api, self.plugin, book.filename, nil)
+    if not path and filename then
+        Cover.ensureAsync(self.api, self.plugin, filename, nil)
     end
 
     local pct = tonumber(book.progressPercent) or 0

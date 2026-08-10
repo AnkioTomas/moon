@@ -29,6 +29,7 @@ local Home = require("home")
 local Library = require("library")
 local Settings = require("settings")
 local Detail = require("detail")
+local Cover = require("cover")
 local UI = require("bookui")
 
 local TABS = {
@@ -87,6 +88,19 @@ function Desktop:init()
         },
     }
     self:rebuild()
+    local desk = self
+    Cover.setIdleHandler(function()
+        if desk._closed then return end
+        if desk.detail and not desk.detail._closed and desk.detail.rebuild then
+            desk.detail:rebuild()
+            UIManager:setDirty(desk.detail, "ui")
+        end
+        if desk.tab == "home" then
+            desk:requestHomeRefresh("covers")
+        elseif desk.tab == "library" then
+            desk:requestLibraryRefresh("covers")
+        end
+    end)
     UIManager:nextTick(function()
         if not self._closed and self.tab == "home" then
             self:scheduleClockTick()
@@ -299,7 +313,7 @@ function Desktop:requestHomeRefresh(reason)
     if self._closed or self.tab ~= "home" then return end
     if self._home_refresh_pending then return end
     self._home_refresh_pending = true
-    UIManager:scheduleIn(0.35, function()
+    UIManager:scheduleIn(0.5, function()
         self._home_refresh_pending = false
         if self._closed or self.tab ~= "home" then return end
         self:rebuild()
@@ -348,7 +362,7 @@ function Desktop:requestLibraryRefresh(reason)
     if self._closed or self.tab ~= "library" then return end
     if self._library_refresh_pending then return end
     self._library_refresh_pending = true
-    UIManager:scheduleIn(0.35, function()
+    UIManager:scheduleIn(0.6, function()
         self._library_refresh_pending = false
         if self._closed or self.tab ~= "library" then return end
         self:rebuild()
@@ -430,6 +444,7 @@ end
 
 function Desktop:onClose()
     self._closed = true
+    Cover.setIdleHandler(nil)
     if self.detail then
         UIManager:close(self.detail)
         self.detail = nil

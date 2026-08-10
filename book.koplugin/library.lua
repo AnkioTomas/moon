@@ -68,12 +68,18 @@ local function filterLabel(filter)
     return table.concat(parts, " · ")
 end
 
+local function bookFile(book)
+    if type(book) ~= "table" then return nil end
+    return book.filename or book.fileName or book.file or book.path
+end
+
 local function coverCell(ctx, book, cw, ch, on_open)
     local title = bookTitle(book)
-    local path = Cover.cachedPath(ctx.plugin, book.filename)
+    local filename = bookFile(book)
+    local path = Cover.cachedPath(ctx.plugin, filename)
     local cover_w = Cover.widget(path, cw, ch, title)
-    if not path then
-        Cover.ensureAsync(ctx.api, ctx.plugin, book.filename, nil)
+    if not path and filename then
+        Cover.ensureAsync(ctx.api, ctx.plugin, filename, nil)
     end
     local pct = tonumber(book.progressPercent) or 0
     if type(book.progressPercent) == "string" then
