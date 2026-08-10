@@ -230,8 +230,8 @@ function Cover.placeholder(w, h, title)
     }
 end
 
---- 按目标缩略图尺寸解码。禁止 ImageWidget{file=, scale_factor=0}：
---- 那种写法会先按原图像素整图进内存，图书馆一页十几张封面直接 OOM 崩进程。
+--- 按目标框等比解码并居中（letterbox），禁止拉伸变形。
+--- 禁止 ImageWidget{file=, scale_factor=0}：那会先整图进内存，图书馆一页直接 OOM。
 function Cover.widget(path, w, h, title)
     w = math.max(1, tonumber(w) or 1)
     h = math.max(1, tonumber(h) or 1)
@@ -244,13 +244,11 @@ function Cover.widget(path, w, h, title)
             if not bb then
                 error("renderImageFile failed")
             end
+            -- 用位图自身尺寸；scale_factor=1 不再二次拉伸填满格子
             return ImageWidget:new{
                 image = bb,
                 image_disposable = true,
-                width = inner_w,
-                height = inner_h,
-                -- 位图已是缩略图尺寸；nil = 拉伸填满格子，避免再走原图缩放路径
-                scale_factor = nil,
+                scale_factor = 1,
                 alpha = false,
             }
         end)
@@ -260,8 +258,12 @@ function Cover.widget(path, w, h, title)
                 color = Blitbuffer.gray(0.55),
                 padding = 0,
                 margin = 0,
+                background = Blitbuffer.COLOR_WHITE,
                 dimen = Geom:new{ w = w, h = h },
-                img,
+                CenterContainer:new{
+                    dimen = Geom:new{ w = w, h = h },
+                    img,
+                },
             }
         end
         logger.warn("book cover thumbnail failed", path, img)

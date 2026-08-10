@@ -1,5 +1,7 @@
 --[[--
-图书馆：搜索 / 分类 / 标签 / 系列 / 作者 / 分页封面网格
+图书馆：封面优先书架
+  顶栏：搜索 / 筛选 / 清除
+  网格：大封面 + 细进度条 + 单行标题
 
 筛选字段与 /index/book/filters 对齐：
   favorites  → 分类（list 参数 favorite）
@@ -11,7 +13,6 @@
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local Button = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -33,7 +34,6 @@ local T = require("ffi/util").template
 
 local Library = {}
 
--- kind → UI 文案 / filters 响应键 / listBooks 查询键
 local FILTER_KINDS = {
     favorite = {
         title = _("选择分类"),
@@ -65,6 +65,8 @@ local FILTER_KINDS = {
     },
 }
 
+local FILTER_ORDER = { "favorite", "category", "series", "author" }
+
 local function bookTitle(book)
     return book.bookName or book.filename or "?"
 end
@@ -88,20 +90,49 @@ local function tappable(w, h, on_tap)
     return tap
 end
 
-local function filterLabel(filter)
+--- 无边框文字入口（顶栏 / 分页共用）
+local function textAction(text, callback, face_size)
+    local label = TextWidget:new{
+        text = text,
+        face = UI.face("xx_smallinfofont", face_size or 15),
+        fgcolor = Blitbuffer.COLOR_BLACK,
+    }
+    local sz = label:getSize()
+    local pad_x = UI.sz(10)
+    local pad_y = UI.sz(6)
+    local tw = sz.w + pad_x * 2
+    local th = math.max(UI.sz(28), sz.h + pad_y * 2)
+    local tap = tappable(tw, th, callback)
+    tap[1] = CenterContainer:new{
+        dimen = Geom:new{ w = tw, h = th },
+        label,
+    }
+    return tap
+end
+
+--- 有筛选才返回摘要；无筛选返回 nil（避免「全部」噪音）
+local function filterChips(filter)
     local parts = {}
     if filter.search and filter.search ~= "" then
         table.insert(parts, T(_("搜:%1"), filter.search))
     end
-    for _, kind in ipairs({ "favorite", "category", "series", "author" }) do
+    for _, kind in ipairs(FILTER_ORDER) do
         local def = FILTER_KINDS[kind]
         local v = filter[def.query_key]
         if v and v ~= "" then
             table.insert(parts, def.label .. ":" .. v)
         end
     end
-    if #parts == 0 then return _("全部") end
+    if #parts == 0 then return nil end
     return table.concat(parts, " · ")
+end
+
+local function summaryText(filter, page, pages, total)
+    local chips = filterChips(filter)
+    if chips then
+        return chips .. "  ·  " .. T(_("共%1"), total)
+    end
+    return T(_("共%1  ·  %2/%3"), total, page, pages)
 end
 
 local function pickFilterList(data, def)
@@ -124,6 +155,16 @@ local function bookFile(book)
     return book.filename or book.fileName or book.file or book.path
 end
 
+local function bookPct(book)
+    local pct = tonumber(book.progressPercent) or 0
+    if type(book.progressPercent) == "string" then
+        pct = tonumber((book.progressPercent:gsub("%%", ""):match("[%d%.]+"))) or 0
+    end
+    if pct < 0 then pct = 0 end
+    if pct > 100 then pct = 100 end
+    return pct
+end
+
 local function coverCell(ctx, book, cw, ch, on_open)
     local title = bookTitle(book)
     local filename = bookFile(book)
@@ -132,58 +173,40 @@ local function coverCell(ctx, book, cw, ch, on_open)
     if not path and filename then
         Cover.ensureAsync(ctx.api, ctx.plugin, filename, nil)
     end
-    local pct = tonumber(book.progressPercent) or 0
-    if type(book.progressPercent) == "string" then
-        pct = tonumber((book.progressPercent:gsub("%%", ""):match("[%d%.]+"))) or 0
+
+    local pct = bookPct(book)
+    local bar_h = UI.sz(4)
+    local title_gap = UI.sz(4)
+    local title_h = UI.sz(22)
+    local kids = { align = "center", cover_w }
+    local extra = 0
+    if pct > 0 then
+        table.insert(kids, VerticalSpan:new{ width = UI.sz(3) })
+        table.insert(kids, UI.progressBar(cw, bar_h, pct))
+        extra = UI.sz(3) + bar_h
     end
-    if pct < 0 then pct = 0 end
-    if pct > 100 then pct = 100 end
-    local sub = pct > 0 and string.format("%.0f%%", pct) or (book.author or "")
-    local label_h = UI.sz(40)
-    local tap = tappable(cw, ch + label_h, function()
+    table.insert(kids, VerticalSpan:new{ width = title_gap })
+    table.insert(kids, TextWidget:new{
+        text = title,
+        face = UI.face("xx_smallinfofont", 13),
+        max_width = cw,
+        fgcolor = Blitbuffer.COLOR_BLACK,
+    })
+    extra = extra + title_gap + title_h
+
+    local total_h = ch + extra
+    local tap = tappable(cw, total_h, function()
         if on_open then on_open(book) end
     end)
-    tap[1] = VerticalGroup:new{
-        align = "center",
-        cover_w,
-        VerticalSpan:new{ width = UI.sz(4) },
-        TextWidget:new{
-            text = title,
-            face = UI.face("xx_smallinfofont", 13),
-            max_width = cw,
-            fgcolor = Blitbuffer.COLOR_BLACK,
-        },
-        TextWidget:new{
-            text = sub,
-            face = UI.face("xx_smallinfofont", 12),
-            max_width = cw,
-            fgcolor = Blitbuffer.gray(0.45),
-        },
-    }
-    return tap, ch + label_h
-end
-
-local function toolButton(text, callback)
-    return Button:new{
-        text = text,
-        bordersize = 1,
-        margin = 0,
-        padding = UI.sz(5),
-        text_font_face = "xx_smallinfofont",
-        text_font_size = math.max(12, math.floor(13 * UI.getScale() / 100 + 0.5)),
-        callback = callback,
-    }
-end
-
-local function toolSpan()
-    return HorizontalSpan:new{ width = UI.sz(4) }
+    tap[1] = VerticalGroup:new(kids)
+    return tap, total_h
 end
 
 function Library.build(ctx, state, opts)
     opts = opts or {}
     local w = ctx.width
     local h = ctx.height
-    local pad = UI.sz(10)
+    local pad = UI.sz(12)
     local filter = ctx.filter or {}
     local page = opts.page or 1
     local pages = opts.pages or 1
@@ -196,36 +219,23 @@ function Library.build(ctx, state, opts)
     end
 
     local toolbar = HorizontalGroup:new{
-        toolButton(_("搜索"), function()
+        textAction(_("搜索"), function()
             if ctx.desktop then ctx.desktop:showSearch() end
         end),
-        toolSpan(),
-        toolButton(_("分类"), function()
-            if ctx.desktop then ctx.desktop:showFilterPicker("favorite") end
+        HorizontalSpan:new{ width = UI.sz(8) },
+        textAction(_("筛选"), function()
+            if ctx.desktop then ctx.desktop:showFilterRoot() end
         end),
-        toolSpan(),
-        toolButton(_("标签"), function()
-            if ctx.desktop then ctx.desktop:showFilterPicker("category") end
-        end),
-        toolSpan(),
-        toolButton(_("系列"), function()
-            if ctx.desktop then ctx.desktop:showFilterPicker("series") end
-        end),
-        toolSpan(),
-        toolButton(_("作者"), function()
-            if ctx.desktop then ctx.desktop:showFilterPicker("author") end
-        end),
-        toolSpan(),
-        toolButton(_("清除"), function()
+        HorizontalSpan:new{ width = UI.sz(8) },
+        textAction(_("清除"), function()
             if ctx.desktop then ctx.desktop:clearLibraryFilters() end
         end),
     }
 
     local header = LeftContainer:new{
-        dimen = Geom:new{ w = w, h = UI.sz(28) },
+        dimen = Geom:new{ w = w - pad * 2, h = UI.sz(26) },
         TextWidget:new{
-            text = T(_("图书馆 · %1  ·  %2/%3  ·  共%4"),
-                filterLabel(filter), page, pages, total),
+            text = summaryText(filter, page, pages, total),
             face = UI.face("xx_smallinfofont", 13),
             max_width = w - pad * 2,
             fgcolor = Blitbuffer.gray(0.4),
@@ -233,36 +243,36 @@ function Library.build(ctx, state, opts)
     }
 
     local pager = HorizontalGroup:new{
-        toolButton(_("上一页"), function()
+        textAction(_("‹ 上一页"), function()
             if opts.on_prev then opts.on_prev() end
-        end),
-        HorizontalSpan:new{ width = UI.sz(12) },
+        end, 14),
+        HorizontalSpan:new{ width = UI.sz(16) },
         TextWidget:new{
             text = string.format("%d / %d", page, pages),
             face = UI.face("xx_smallinfofont", 14),
             fgcolor = Blitbuffer.COLOR_BLACK,
         },
-        HorizontalSpan:new{ width = UI.sz(12) },
-        toolButton(_("下一页"), function()
+        HorizontalSpan:new{ width = UI.sz(16) },
+        textAction(_("下一页 ›"), function()
             if opts.on_next then opts.on_next() end
-        end),
+        end, 14),
     }
 
     local top = FrameContainer:new{
         bordersize = 0,
         padding = pad,
-        padding_bottom = UI.sz(4),
+        padding_bottom = UI.sz(2),
         background = Blitbuffer.COLOR_WHITE,
         VerticalGroup:new{
             align = "left",
             toolbar,
-            VerticalSpan:new{ width = UI.sz(6) },
+            VerticalSpan:new{ width = UI.sz(4) },
             header,
         },
     }
 
-    local top_h = UI.sz(78)
-    local bottom_h = UI.sz(48)
+    local top_h = UI.sz(68)
+    local bottom_h = UI.sz(44)
     local grid_h = math.max(1, h - top_h - bottom_h)
 
     if not books then
@@ -309,18 +319,27 @@ function Library.build(ctx, state, opts)
         }
     end
 
-    local cw = UI.sz(100)
-    local ch = UI.sz(145)
-    local gap = UI.sz(10)
-    local cols = math.max(1, math.floor((w - pad * 2 + gap) / (cw + gap)))
+    -- 优先 3 列大封面；太窄再降到 2 列。封面比例 2:3。
+    local gap = UI.sz(12)
+    local avail = math.max(1, w - pad * 2)
+    local cols = 3
+    local cw = math.floor((avail - gap * (cols - 1)) / cols)
+    if cw < UI.sz(96) then
+        cols = 2
+        cw = math.floor((avail - gap) / cols)
+    end
+    cw = math.max(UI.sz(80), cw)
+    local ch = math.floor(cw * 3 / 2)
+
     local grid = VerticalGroup:new{ align = "center" }
     local row = HorizontalGroup:new{}
     local col_i = 0
     local used_h = 0
     local cell_h
+    local row_gap = UI.sz(12)
+    -- 进度条可选 + 单行标题；先估高再解码
+    local estimate_h = ch + UI.sz(3) + UI.sz(4) + UI.sz(22)
 
-    -- 标题+副标题行高固定，先估高再解码，避免屏外封面白烧内存
-    local estimate_h = ch + UI.sz(40)
     for _, book in ipairs(books) do
         if col_i == 0 and used_h + estimate_h > grid_h then
             break
@@ -334,8 +353,8 @@ function Library.build(ctx, state, opts)
         col_i = col_i + 1
         if col_i >= cols then
             table.insert(grid, row)
-            table.insert(grid, VerticalSpan:new{ width = UI.sz(8) })
-            used_h = used_h + th + UI.sz(8)
+            table.insert(grid, VerticalSpan:new{ width = row_gap })
+            used_h = used_h + th + row_gap
             row = HorizontalGroup:new{}
             col_i = 0
         end
@@ -410,6 +429,38 @@ function Library.fetch(desktop)
             done({}, tostring(err))
         end
     end)
+end
+
+function Library.showFilterRoot(desktop)
+    local items = {}
+    for _, kind in ipairs(FILTER_ORDER) do
+        local def = FILTER_KINDS[kind]
+        local k = kind
+        table.insert(items, {
+            text = def.label,
+            callback = function()
+                if desktop._filter_root then
+                    UIManager:close(desktop._filter_root)
+                    desktop._filter_root = nil
+                end
+                Library.showFilterPicker(desktop, k)
+            end,
+        })
+    end
+
+    local menu = Menu:new{
+        title = _("筛选"),
+        item_table = items,
+        is_borderless = true,
+        is_popout = false,
+        covers_fullscreen = true,
+        items_font_size = UI.menuFontSize(),
+        close_callback = function()
+            desktop._filter_root = nil
+        end,
+    }
+    desktop._filter_root = menu
+    UIManager:show(menu)
 end
 
 function Library.showFilterPicker(desktop, kind)

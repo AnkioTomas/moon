@@ -448,6 +448,10 @@ function Desktop:showFilterPicker(kind)
     Library.showFilterPicker(self, kind)
 end
 
+function Desktop:showFilterRoot()
+    Library.showFilterRoot(self)
+end
+
 function Desktop:clearLibraryFilters()
     self.filter = {}
     self.page = 1
@@ -490,6 +494,10 @@ function Desktop:onClose()
             UIManager:close(self.detail)
         end)
         self.detail = nil
+    end
+    if self._filter_root then
+        pcall(UIManager.close, UIManager, self._filter_root)
+        self._filter_root = nil
     end
     if self._filter_menu then
         pcall(UIManager.close, UIManager, self._filter_menu)
