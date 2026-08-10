@@ -230,10 +230,11 @@ local function coverCell(ctx, book, cw, ch, on_open)
     end
 
     local pct = bookPct(book)
-    -- 有进度才叠右上角角标；封面下不再放进度条
+    -- 有进度才叠右上角角标（黑底白字 + 白边，深浅封面都可读）
     if pct > 0 then
         local badge = FrameContainer:new{
-            bordersize = 0,
+            bordersize = math.max(1, UI.line()),
+            color = Blitbuffer.COLOR_WHITE,
             padding = UI.sz(2),
             padding_left = UI.sz(4),
             padding_right = UI.sz(4),
