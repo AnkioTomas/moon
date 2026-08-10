@@ -1,7 +1,7 @@
 --[[--
 图书馆：封面优先书架
-  顶栏：搜索 / 筛选 / 清除
-  网格：大封面 + 细进度条 + 单行标题
+  顶栏：搜索 / 筛选 / 清除 + 右上角总数
+  网格：大封面（进度%叠右上角）+ 单行标题
   筛选互斥：同一时刻只应用一个条件（搜索或分类/标签/系列/作者之一）
 
 筛选字段与 /index/book/filters 对齐：
@@ -24,6 +24,7 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local Menu = require("ui/widget/menu")
+local OverlapGroup = require("ui/widget/overlapgroup")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -229,30 +230,50 @@ local function coverCell(ctx, book, cw, ch, on_open)
     end
 
     local pct = bookPct(book)
-    local bar_h = UI.sz(4)
+    -- 有进度才叠右上角角标；封面下不再放进度条
+    if pct > 0 then
+        local badge = FrameContainer:new{
+            bordersize = 0,
+            padding = UI.sz(2),
+            padding_left = UI.sz(4),
+            padding_right = UI.sz(4),
+            background = Blitbuffer.COLOR_BLACK,
+            TextWidget:new{
+                text = string.format("%.0f%%", pct),
+                face = UI.face("xx_smallinfofont", 11),
+                fgcolor = Blitbuffer.COLOR_WHITE,
+            },
+        }
+        local bz = badge:getSize()
+        local inset = UI.sz(3)
+        badge.overlap_offset = {
+            math.max(0, cw - bz.w - inset),
+            inset,
+        }
+        cover_w = OverlapGroup:new{
+            dimen = Geom:new{ w = cw, h = ch },
+            cover_w,
+            badge,
+        }
+    end
+
     local title_gap = UI.sz(4)
     local title_h = UI.sz(22)
-    local kids = { align = "center", cover_w }
-    local extra = 0
-    if pct > 0 then
-        table.insert(kids, VerticalSpan:new{ width = UI.sz(3) })
-        table.insert(kids, UI.progressBar(cw, bar_h, pct))
-        extra = UI.sz(3) + bar_h
-    end
-    table.insert(kids, VerticalSpan:new{ width = title_gap })
-    table.insert(kids, TextWidget:new{
-        text = title,
-        face = UI.face("xx_smallinfofont", 13),
-        max_width = cw,
-        fgcolor = Blitbuffer.COLOR_BLACK,
-    })
-    extra = extra + title_gap + title_h
-
-    local total_h = ch + extra
+    local total_h = ch + title_gap + title_h
     local tap = tappable(cw, total_h, function()
         if on_open then on_open(book) end
     end)
-    tap[1] = VerticalGroup:new(kids)
+    tap[1] = VerticalGroup:new{
+        align = "center",
+        cover_w,
+        VerticalSpan:new{ width = title_gap },
+        TextWidget:new{
+            text = title,
+            face = UI.face("xx_smallinfofont", 13),
+            max_width = cw,
+            fgcolor = Blitbuffer.COLOR_BLACK,
+        },
+    }
     return tap, total_h
 end
 
@@ -386,8 +407,8 @@ function Library.build(ctx, state, opts)
     local used_h = 0
     local cell_h
     local row_gap = UI.sz(12)
-    -- 进度条可选 + 单行标题；先估高再解码
-    local estimate_h = ch + UI.sz(3) + UI.sz(4) + UI.sz(22)
+    -- 单行标题；先估高再解码
+    local estimate_h = ch + UI.sz(4) + UI.sz(22)
 
     for _, book in ipairs(books) do
         if col_i == 0 and used_h + estimate_h > grid_h then
