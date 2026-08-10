@@ -59,6 +59,8 @@ function Api:_request(method, path, query, body_tbl, sink_file, binary)
         ["Authorization"] = "Bearer " .. self.token,
         ["Accept"] = binary and "*/*" or "application/json",
         ["User-Agent"] = socketutil.USER_AGENT,
+        -- 二进制下载必须 close：服务端若缺 Content-Length，keep-alive 会挂死/超时
+        ["Connection"] = binary and "close" or "keep-alive",
     }
 
     local source
@@ -226,14 +228,14 @@ end
 
 local function sniffExt(path)
     local f = io.open(path, "rb")
-    if not f then return ".jpg" end
+    if not f then return nil end
     local head = f:read(16) or ""
     f:close()
     if head:sub(1, 3) == "\255\216\255" then return ".jpg" end
     if head:sub(1, 8) == "\137PNG\r\n\26\n" then return ".png" end
     if head:sub(1, 4) == "RIFF" and head:sub(9, 12) == "WEBP" then return ".webp" end
     if head:sub(1, 6) == "GIF87a" or head:sub(1, 6) == "GIF89a" then return ".gif" end
-    return ".jpg"
+    return nil
 end
 
 function Api:downloadCover(filename, dest_path)
@@ -251,28 +253,37 @@ function Api:downloadCover(filename, dest_path)
         ltn12.sink.file(file),
         true
     )
+    -- sink.file 会自行 close；失败时确保删掉半截文件
     if not ok then
-        os.remove(tmp)
+        pcall(os.remove, tmp)
         return nil, msg
     end
-    local f = io.open(tmp, "rb")
-    if not f then
-        os.remove(tmp)
+    local attr_ok, size = pcall(function()
+        local f = io.open(tmp, "rb")
+        if not f then return nil end
+        local n = f:seek("end")
+        f:close()
+        return n
+    end)
+    if not attr_ok or not size or size < 64 then
+        pcall(os.remove, tmp)
         return nil, "封面为空"
     end
-    local size = f:seek("end")
-    f:close()
-    if not size or size < 64 then
-        os.remove(tmp)
-        return nil, "封面无效"
-    end
     local ext = sniffExt(tmp)
+    if not ext then
+        pcall(os.remove, tmp)
+        return nil, "封面不是图片"
+    end
     local final = dest_path
     if not final:match("%.%w+$") then
         final = dest_path .. ext
     end
-    os.remove(final)
-    os.rename(tmp, final)
+    pcall(os.remove, final)
+    local renamed, rename_err = os.rename(tmp, final)
+    if not renamed then
+        pcall(os.remove, tmp)
+        return nil, rename_err or "封面改名失败"
+    end
     return true, final
 end
 

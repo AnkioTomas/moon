@@ -19,6 +19,18 @@ local function safeName(filename)
     return (filename or "unknown"):gsub("[^%w%._%-]+", "_")
 end
 
+local function isImagePath(path)
+    local f = io.open(path, "rb")
+    if not f then return false end
+    local head = f:read(16) or ""
+    f:close()
+    if head:sub(1, 3) == "\255\216\255" then return true end
+    if head:sub(1, 8) == "\137PNG\r\n\26\n" then return true end
+    if head:sub(1, 4) == "RIFF" and head:sub(9, 12) == "WEBP" then return true end
+    if head:sub(1, 6) == "GIF87a" or head:sub(1, 6) == "GIF89a" then return true end
+    return false
+end
+
 function Cover.pathFor(plugin, filename)
     -- 无后缀：downloadCover 会按魔数改成 .jpg/.png
     return plugin:coverCacheDir() .. "/" .. safeName(filename)
@@ -33,7 +45,11 @@ function Cover.ensure(api, plugin, filename)
         local path = base .. ext
         local attr = lfs.attributes(path)
         if attr and attr.mode == "file" and attr.size and attr.size > 64 then
-            return path
+            if isImagePath(path) then
+                return path
+            end
+            -- 以前把 HTML/半截响应当封面缓存了，清掉重下
+            pcall(os.remove, path)
         end
     end
     if not api or not api.configured or not api:configured() then
@@ -41,18 +57,13 @@ function Cover.ensure(api, plugin, filename)
     end
     local ok, final_or_err = api:downloadCover(filename, base)
     if not ok then
-        logger.dbg("book cover download failed", filename, final_or_err)
+        logger.warn("book cover download failed", filename, final_or_err)
         return nil
     end
-    -- downloadCover 成功时第二个返回值是最终路径
-    if type(final_or_err) == "string" and lfs.attributes(final_or_err, "mode") == "file" then
+    if type(final_or_err) == "string"
+        and lfs.attributes(final_or_err, "mode") == "file"
+        and isImagePath(final_or_err) then
         return final_or_err
-    end
-    for _, ext in ipairs({ ".jpg", ".png", ".webp", ".gif" }) do
-        local path = base .. ext
-        if lfs.attributes(path, "mode") == "file" then
-            return path
-        end
     end
     return nil
 end
@@ -82,17 +93,23 @@ function Cover.placeholder(w, h, title)
 end
 
 function Cover.widget(path, w, h, title)
-    if path and lfs.attributes(path, "mode") == "file" then
+    if path and lfs.attributes(path, "mode") == "file" and isImagePath(path) then
         local ok, img = pcall(function()
+            -- 直接走 RenderImage，避开 DocumentRegistry 后缀白名单
+            local RenderImage = require("ui/renderimage")
             local ImageWidget = require("ui/widget/imagewidget")
+            local bb = RenderImage:renderImageFile(path, false)
+            if not bb then
+                error("renderImageFile failed")
+            end
             local widget = ImageWidget:new{
-                file = path,
+                image = bb,
+                image_disposable = true,
                 width = w - 2,
                 height = h - 2,
                 scale_factor = 0,
                 alpha = false,
             }
-            -- 提前渲染：坏图在这里炸，而不是 paintTo
             if widget._render then
                 widget:_render()
             end
