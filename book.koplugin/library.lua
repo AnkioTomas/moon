@@ -347,7 +347,9 @@ function Library.build(ctx, state, opts)
     }
 
     local top_h = UI.sz(68)
-    local bottom_h = UI.sz(44)
+    -- 给底栏 Tab 留空隙，分页不要贴死
+    local bottom_pad = UI.sz(10)
+    local bottom_h = UI.sz(52) + bottom_pad
     local grid_h = math.max(1, h - top_h - bottom_h)
 
     if not books then
@@ -388,7 +390,11 @@ function Library.build(ctx, state, opts)
                 },
                 CenterContainer:new{
                     dimen = Geom:new{ w = w, h = bottom_h },
-                    pager,
+                    VerticalGroup:new{
+                        align = "center",
+                        pager,
+                        VerticalSpan:new{ width = bottom_pad },
+                    },
                 },
             },
         }
@@ -451,7 +457,11 @@ function Library.build(ctx, state, opts)
             },
             CenterContainer:new{
                 dimen = Geom:new{ w = w, h = bottom_h },
-                pager,
+                VerticalGroup:new{
+                    align = "center",
+                    pager,
+                    VerticalSpan:new{ width = bottom_pad },
+                },
             },
         },
     }
