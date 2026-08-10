@@ -26,6 +26,8 @@ local Desktop = require("desktop")
 local SETTINGS_KEY = "book_plugin_v2"
 local FILEMAP_KEY = "book_plugin_filemap_v2"
 local START_WITH_ID = "bookshelf_book"
+-- 本地缓存超过该天数未打开则清理（首次进首页触发）
+local LOCAL_BOOK_TTL = 90 * 24 * 60 * 60
 
 local BookPlugin = WidgetContainer:extend{
     name = "book",
@@ -94,6 +96,37 @@ local function ensureDir(path)
     if lfs.attributes(path, "mode") ~= "directory" then
         lfs.mkdir(path)
     end
+end
+
+local function readFileMap()
+    local map = G_reader_settings:readSetting(FILEMAP_KEY)
+    if type(map) ~= "table" then
+        return {}
+    end
+    return map
+end
+
+local function writeFileMap(map)
+    G_reader_settings:saveSetting(FILEMAP_KEY, map)
+end
+
+-- filemap 兼容：旧值是 filename 字符串；新值是 { filename, last_open }
+local function fileMapGet(map, path)
+    local v = map[path]
+    if type(v) == "table" then
+        return v.filename, tonumber(v.last_open)
+    end
+    if type(v) == "string" then
+        return v, nil
+    end
+    return nil, nil
+end
+
+local function fileMapSet(map, path, filename, last_open)
+    map[path] = {
+        filename = filename,
+        last_open = last_open or os.time(),
+    }
 end
 
 -- 仅在用户开启时写入 start_with；关掉就尊重，不再每次强制改写
@@ -418,6 +451,96 @@ function BookPlugin:localPathFor(filename)
     return s.library_dir .. "/" .. (filename:match("([^/\\]+)$") or filename)
 end
 
+--- 记录本地书最近打开时间（供过期清理）
+function BookPlugin:touchLocalBook(path, filename)
+    if not path or path == "" or not filename or filename == "" then
+        return
+    end
+    local map = readFileMap()
+    fileMapSet(map, path, filename, os.time())
+    writeFileMap(map)
+end
+
+--- 清理长期未打开的本地下载缓存；返回删除文件数
+function BookPlugin:cleanupStaleLocalBooks()
+    local s = settings()
+    local dir = s.library_dir
+    if not dir or dir == "" then
+        return 0
+    end
+    if lfs.attributes(dir, "mode") ~= "directory" then
+        return 0
+    end
+
+    local now = os.time()
+    local map = readFileMap()
+    local removed = 0
+    local dirty = false
+
+    local function lastOpenOf(path, mapped_last)
+        if mapped_last and mapped_last > 0 then
+            return mapped_last
+        end
+        local attr = lfs.attributes(path)
+        if not attr then
+            return 0
+        end
+        return tonumber(attr.access) or tonumber(attr.modification) or 0
+    end
+
+    local function removeCover(filename)
+        if not filename or filename == "" then
+            return
+        end
+        local ok, Cover = pcall(require, "cover")
+        if not ok or not Cover then
+            return
+        end
+        local cached = Cover.cachedPath(self, filename)
+        if cached then
+            pcall(os.remove, cached)
+        end
+        local base = Cover.pathFor(self, filename)
+        for _, ext in ipairs({ ".jpg", ".jpeg", ".png", ".webp", ".gif", "", ".part" }) do
+            pcall(os.remove, base .. ext)
+        end
+    end
+
+    for name in lfs.dir(dir) do
+        if name ~= "." and name ~= ".." and name ~= ".covers" then
+            local path = dir .. "/" .. name
+            if lfs.attributes(path, "mode") == "file" then
+                local filename, last_open = fileMapGet(map, path)
+                filename = filename or name
+                local t = lastOpenOf(path, last_open)
+                if t > 0 and (now - t) >= LOCAL_BOOK_TTL then
+                    local ok = pcall(os.remove, path)
+                    if ok and lfs.attributes(path, "mode") ~= "file" then
+                        removed = removed + 1
+                        if map[path] ~= nil then
+                            map[path] = nil
+                            dirty = true
+                        end
+                        removeCover(filename)
+                        logger.info("book cleaned stale local", path)
+                    end
+                end
+            end
+        end
+    end
+
+    for path, _ in pairs(map) do
+        if lfs.attributes(path, "mode") ~= "file" then
+            map[path] = nil
+            dirty = true
+        end
+    end
+    if dirty then
+        writeFileMap(map)
+    end
+    return removed
+end
+
 function BookPlugin:openBook(book)
     local filename = book.filename
     if not filename or filename == "" then
@@ -426,9 +549,7 @@ function BookPlugin:openBook(book)
     end
     local path = self:localPathFor(filename)
     local function doOpen()
-        local map = G_reader_settings:readSetting(FILEMAP_KEY) or {}
-        map[path] = filename
-        G_reader_settings:saveSetting(FILEMAP_KEY, map)
+        self:touchLocalBook(path, filename)
         if self.desktop then
             if self.desktop.detail then
                 UIManager:close(self.desktop.detail)
@@ -462,8 +583,9 @@ function BookPlugin:remoteFilenameForCurrent()
         return nil
     end
     local path = self.ui.document.file
-    local map = G_reader_settings:readSetting(FILEMAP_KEY) or {}
-    return map[path] or path:match("([^/\\]+)$")
+    local map = readFileMap()
+    local filename = fileMapGet(map, path)
+    return filename or path:match("([^/\\]+)$")
 end
 
 function BookPlugin:currentFraction()

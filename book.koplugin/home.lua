@@ -475,6 +475,24 @@ function Home.fetch(desktop)
     end
     desktop._home_fetching = true
 
+    -- 本会话首次进首页：清理长期未打开的本地下载缓存（不挡 UI）
+    if not desktop._local_cleanup_done then
+        desktop._local_cleanup_done = true
+        UIManager:scheduleIn(0.3, function()
+            if desktop._closed then return end
+            local plugin = desktop.plugin
+            if not plugin or not plugin.cleanupStaleLocalBooks then return end
+            local ok, n = pcall(function()
+                return plugin:cleanupStaleLocalBooks()
+            end)
+            if ok and n and n > 0 then
+                logger.info("book cleaned stale local books:", n)
+            elseif not ok then
+                logger.warn("book local cleanup failed", n)
+            end
+        end)
+    end
+
     local api = desktop.api
 
     -- 立刻离开「加载主页…」，避免任何网络阻塞把 UI 钉死
