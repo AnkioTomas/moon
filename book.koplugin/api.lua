@@ -150,40 +150,10 @@ function Api:listBooks(opts)
     })
 end
 
---- 最近阅读；若 /recent 未部署则回退 list + progressTimestamp 排序
+--- 最近阅读：只走云端 /recent，不做 list 回退（避免语义混杂）
 function Api:recentBooks(limit)
     limit = limit or 8
-    local res, err = self:_request("GET", "/index/book/recent", { limit = limit })
-    if res then
-        return res
-    end
-
-    logger.warn("book.api recent fallback to list:", err)
-    local list, err2 = self:listBooks{ page = 1, pageSize = math.max(50, limit * 6) }
-    if not list then
-        return nil, err or err2
-    end
-    local rows = list.data or {}
-    table.sort(rows, function(a, b)
-        local ta = tonumber(a.progressTimestamp) or 0
-        local tb = tonumber(b.progressTimestamp) or 0
-        if ta == tb then
-            local pa = tonumber(a.progressPercent) or 0
-            local pb = tonumber(b.progressPercent) or 0
-            return pa > pb
-        end
-        return ta > tb
-    end)
-    local out = {}
-    for _, row in ipairs(rows) do
-        local ts = tonumber(row.progressTimestamp) or 0
-        local pct = tonumber(row.progressPercent) or 0
-        if ts > 0 or pct > 0 then
-            table.insert(out, row)
-            if #out >= limit then break end
-        end
-    end
-    return { code = 200, msg = "success", data = out, count = #out }
+    return self:_request("GET", "/index/book/recent", { limit = limit })
 end
 
 function Api:filters()
