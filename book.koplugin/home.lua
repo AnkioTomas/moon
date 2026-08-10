@@ -400,9 +400,18 @@ function Home.build(ctx, state)
         local cols = math.max(1, math.floor((w - pad * 2 + gap) / (cw + gap)))
         local cell_h
         local row_group = HorizontalGroup:new{}
-        local grid = VerticalGroup:new{ align = "left" }
+        local grid = VerticalGroup:new{ align = "center" }
         local col_i = 0
         local grid_h = 0
+
+        local function pushRow(row)
+            local rh = (cell_h or ch) + UI.sz(8)
+            table.insert(grid, CenterContainer:new{
+                dimen = Geom:new{ w = w, h = rh },
+                row,
+            })
+            grid_h = grid_h + rh
+        end
 
         for _, book in ipairs(reading) do
             local cell, th = readingCell(ctx, book, cw, ch, on_open)
@@ -419,28 +428,18 @@ function Home.build(ctx, state)
                 if grid_h + cell_h > remain then
                     break
                 end
-                table.insert(grid, FrameContainer:new{
-                    bordersize = 0,
-                    padding = pad,
-                    padding_top = UI.sz(4),
-                    padding_bottom = 0,
-                    row_group,
-                })
-                grid_h = grid_h + cell_h + UI.sz(4)
+                pushRow(row_group)
                 row_group = HorizontalGroup:new{}
                 col_i = 0
             end
         end
         if col_i > 0 and grid_h + (cell_h or 0) <= remain then
-            table.insert(grid, FrameContainer:new{
-                bordersize = 0,
-                padding = pad,
-                padding_top = UI.sz(4),
-                padding_bottom = 0,
-                row_group,
-            })
+            pushRow(row_group)
         end
-        table.insert(col, grid)
+        table.insert(col, CenterContainer:new{
+            dimen = Geom:new{ w = w, h = math.max(grid_h, 1) },
+            grid,
+        })
     end
 
     return FrameContainer:new{
