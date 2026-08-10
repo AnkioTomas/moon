@@ -12,6 +12,7 @@ local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
+local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local InputDialog = require("ui/widget/inputdialog")
 local LineWidget = require("ui/widget/linewidget")
@@ -33,9 +34,9 @@ local Cover = require("cover")
 local UI = require("bookui")
 
 local TABS = {
-    { id = "library", text = _("图书馆") },
-    { id = "home", text = _("主页") },
-    { id = "settings", text = _("设置") },
+    { id = "library", text = _("图书馆"), icon = "library.svg" },
+    { id = "home", text = _("主页"), icon = "home.svg" },
+    { id = "settings", text = _("设置"), icon = "settings.svg" },
 }
 
 local Desktop = InputContainer:extend{
@@ -46,6 +47,16 @@ local Desktop = InputContainer:extend{
     tab = "home",
     filter = nil,
 }
+
+local function pluginIconDir()
+    local info = debug.getinfo(1, "S")
+    local src = info and info.source
+    if src and src:sub(1, 1) == "@" then
+        local dir = src:sub(2):match("(.*/)")
+        if dir then return dir .. "icons/" end
+    end
+    return "icons/"
+end
 
 local function barH()
     return UI.barH()
@@ -137,20 +148,43 @@ end
 function Desktop:buildBottomBar()
     local sw = Screen:getWidth()
     local bh = barH()
+    local icon_sz = UI.iconSz()
+    local icon_dir = pluginIconDir()
     local cell_w = math.floor(sw / #TABS)
     local row = HorizontalGroup:new{ align = "center" }
     for _, tab in ipairs(TABS) do
         local active = self.tab == tab.id
+        local icon
+        local ok, img = pcall(function()
+            -- SVG：传 width/height 且 scale_factor 保持 nil，按目标尺寸渲染
+            return ImageWidget:new{
+                file = icon_dir .. tab.icon,
+                width = icon_sz,
+                height = icon_sz,
+                alpha = true,
+            }
+        end)
+        if ok and img then
+            icon = img
+        else
+            icon = TextWidget:new{
+                text = "•",
+                face = UI.face("cfont", 18),
+                fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.gray(0.55),
+            }
+        end
         local label = TextWidget:new{
             text = tab.text,
-            face = UI.face("xx_smallinfofont", active and 14 or 13),
+            face = UI.face("xx_smallinfofont", 12),
             fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.gray(0.5),
         }
         table.insert(row, CenterContainer:new{
             dimen = Geom:new{ w = cell_w, h = bh },
             VerticalGroup:new{
                 align = "center",
-                VerticalSpan:new{ width = UI.sz(14) },
+                VerticalSpan:new{ width = UI.sz(6) },
+                icon,
+                VerticalSpan:new{ width = UI.sz(2) },
                 label,
             },
         })
