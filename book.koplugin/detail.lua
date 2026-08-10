@@ -175,9 +175,9 @@ function Detail:rebuild()
 
     local button_h = buttons:getSize().h
     local title_h = title_bar:getHeight()
-    -- 底栏加高，确保盖住桌面 navbar；只用一条分隔线
+    -- 底栏至少盖住桌面 navbar 高度；去掉顶部分隔线避免双线
     local footer_pad_v = UI.sz(12)
-    local footer_h = button_h + footer_pad_v * 2 + Size.line.thin
+    local footer_h = math.max(UI.barH(), button_h + footer_pad_v * 2)
     local top_h = title_h
     local scroll_h = math.max(UI.sz(80), h - top_h - footer_h)
 
@@ -286,27 +286,21 @@ function Detail:rebuild()
     }
     upper.overlap_offset = { 0, 0 }
 
-    -- 底栏：白底钉死屏幕底部，盖住桌面 navbar；只保留一条顶部分隔线
+    -- 底栏：白底钉死屏幕底部，盖住桌面 navbar；不画顶部分隔线
     local footer = FrameContainer:new{
         bordersize = 0,
         padding = 0,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
         dimen = Geom:new{ w = w, h = footer_h },
-        VerticalGroup:new{
-            align = "center",
-            LineWidget:new{
-                background = Blitbuffer.gray(0.7),
-                dimen = Geom:new{ w = w, h = Size.line.thin },
-            },
-            FrameContainer:new{
-                bordersize = 0,
-                padding = pad,
-                padding_top = footer_pad_v,
-                padding_bottom = footer_pad_v,
-                background = Blitbuffer.COLOR_WHITE,
-                buttons,
-            },
+        FrameContainer:new{
+            bordersize = 0,
+            padding = pad,
+            padding_top = footer_pad_v,
+            padding_bottom = footer_pad_v,
+            background = Blitbuffer.COLOR_WHITE,
+            dimen = Geom:new{ w = w, h = footer_h },
+            buttons,
         },
     }
     footer.overlap_offset = { 0, h - footer_h }

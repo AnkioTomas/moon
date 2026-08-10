@@ -150,10 +150,31 @@ function Api:listBooks(opts)
     })
 end
 
---- 最近阅读：只走云端 /recent，不做 list 回退（避免语义混杂）
+--- 最近阅读：只走云端 /recent；成功结果缓存 5 分钟
+local RECENT_TTL = 5 * 60
+local _recent_cache = { t = 0, limit = nil, data = nil }
+
+function Api.clearRecentCache()
+    _recent_cache.t = 0
+    _recent_cache.limit = nil
+    _recent_cache.data = nil
+end
+
 function Api:recentBooks(limit)
     limit = limit or 8
-    return self:_request("GET", "/index/book/recent", { limit = limit })
+    local now = os.time()
+    if _recent_cache.data
+        and _recent_cache.limit == limit
+        and (now - (_recent_cache.t or 0)) < RECENT_TTL then
+        return _recent_cache.data
+    end
+    local res, err = self:_request("GET", "/index/book/recent", { limit = limit })
+    if res then
+        _recent_cache.t = now
+        _recent_cache.limit = limit
+        _recent_cache.data = res
+    end
+    return res, err
 end
 
 function Api:filters()
@@ -211,13 +232,17 @@ function Api:getProgress(filename)
 end
 
 function Api:updateProgress(filename, frac, spine, page, percent_text)
-    return self:_request("POST", "/index/book/progressUpdate", nil, {
+    local res, err = self:_request("POST", "/index/book/progressUpdate", nil, {
         filename = filename,
         frac = frac,
         spine = spine or 0,
         page = page or 0,
         percent = percent_text or (string.format("%.2f", (frac or 0) * 100) .. "%"),
     })
+    if res then
+        Api.clearRecentCache()
+    end
+    return res, err
 end
 
 function Api:downloadBook(filename, dest_path)
