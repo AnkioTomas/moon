@@ -1,5 +1,6 @@
 --[[--
-封面缓存与安全 ImageWidget 构造（pcall，坏图不崩）
+封面缓存与安全 ImageWidget 构造。
+build 路径只用 cachedPath；ensure / ensureAsync 负责下载。
 
 @module koplugin.book.cover
 --]]
@@ -9,6 +10,7 @@ local CenterContainer = require("ui/widget/container/centercontainer")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local TextWidget = require("ui/widget/textwidget")
+local UIManager = require("ui/uimanager")
 local UI = require("bookui")
 local logger = require("logger")
 local lfs = require("libs/libkoreader-lfs")
@@ -32,12 +34,12 @@ local function isImagePath(path)
 end
 
 function Cover.pathFor(plugin, filename)
-    -- 无后缀：downloadCover 会按魔数改成 .jpg/.png
     return plugin:coverCacheDir() .. "/" .. safeName(filename)
 end
 
-function Cover.ensure(api, plugin, filename)
-    if not filename or filename == "" then
+--- 只查本地缓存，不发起网络请求
+function Cover.cachedPath(plugin, filename)
+    if not filename or filename == "" or not plugin then
         return nil
     end
     local base = Cover.pathFor(plugin, filename)
@@ -48,13 +50,24 @@ function Cover.ensure(api, plugin, filename)
             if isImagePath(path) then
                 return path
             end
-            -- 以前把 HTML/半截响应当封面缓存了，清掉重下
             pcall(os.remove, path)
         end
+    end
+    return nil
+end
+
+function Cover.ensure(api, plugin, filename)
+    local cached = Cover.cachedPath(plugin, filename)
+    if cached then
+        return cached
+    end
+    if not filename or filename == "" then
+        return nil
     end
     if not api or not api.configured or not api:configured() then
         return nil
     end
+    local base = Cover.pathFor(plugin, filename)
     local ok, final_or_err = api:downloadCover(filename, base)
     if not ok then
         logger.warn("book cover download failed", filename, final_or_err)
@@ -66,6 +79,19 @@ function Cover.ensure(api, plugin, filename)
         return final_or_err
     end
     return nil
+end
+
+--- 后台下载；已有缓存则立刻 callback(path)
+function Cover.ensureAsync(api, plugin, filename, callback)
+    local cached = Cover.cachedPath(plugin, filename)
+    if cached then
+        if callback then callback(cached) end
+        return
+    end
+    UIManager:scheduleIn(0, function()
+        local path = Cover.ensure(api, plugin, filename)
+        if callback then callback(path) end
+    end)
 end
 
 function Cover.placeholder(w, h, title)
@@ -95,7 +121,6 @@ end
 function Cover.widget(path, w, h, title)
     if path and lfs.attributes(path, "mode") == "file" and isImagePath(path) then
         local ok, img = pcall(function()
-            -- 直接走 RenderImage，避开 DocumentRegistry 后缀白名单
             local RenderImage = require("ui/renderimage")
             local ImageWidget = require("ui/widget/imagewidget")
             local bb = RenderImage:renderImageFile(path, false)

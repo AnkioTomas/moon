@@ -190,6 +190,50 @@ function Api:filters()
     return self:_request("GET", "/index/book/filters")
 end
 
+--- 藏书统计（服务端新增）；失败由调用方降级显示
+function Api:stats()
+    return self:_request("GET", "/index/book/stats")
+end
+
+--- 每日一言（独立公网接口，不走 Book 服务器）
+function Api.hitokoto()
+    local url = "https://api.ankio.net/hitokoto"
+    local chunks = {}
+    local request = {
+        url = url,
+        method = "GET",
+        headers = {
+            ["Accept"] = "application/json",
+            ["User-Agent"] = socketutil.USER_AGENT,
+            ["Connection"] = "close",
+        },
+        sink = ltn12.sink.table(chunks),
+    }
+    socketutil:set_timeout(8, 15)
+    local code = socket.skip(1, http.request(request))
+    socketutil:reset_timeout()
+    if not code or tonumber(code) == nil then
+        return nil, "一言请求失败"
+    end
+    code = tonumber(code)
+    local raw = table.concat(chunks)
+    if raw:sub(1, 3) == "\239\187\191" then
+        raw = raw:sub(4)
+    end
+    local jok, data = pcall(JSON.decode, raw)
+    if not jok or type(data) ~= "table" then
+        return nil, "一言响应不是 JSON"
+    end
+    if code ~= 200 or (data.code and data.code ~= 200) then
+        return nil, data.msg or ("一言 HTTP " .. tostring(code))
+    end
+    local row = data.data or data
+    if type(row) ~= "table" or not row.hitokoto then
+        return nil, "一言数据为空"
+    end
+    return { code = 200, data = row }
+end
+
 function Api:getProgress(filename)
     return self:_request("GET", "/index/book/progress", {
         filename = filename,

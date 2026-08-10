@@ -1,6 +1,6 @@
 --[[--
 Book 桌面 UI 缩放 — 字号 / 间距统一从这里走。
-设置键：book_plugin.ui_scale（百分比，默认 130）
+设置键：book_plugin_v2.ui_scale（百分比，默认 130）
 
 @module koplugin.book.bookui
 --]]
@@ -11,13 +11,18 @@ local Screen = Device.screen
 
 local UI = {}
 
+local SETTINGS_KEY = "book_plugin_v2"
 local DEFAULT_SCALE = 130
 local MIN_SCALE = 100
 local MAX_SCALE = 180
 local STEP = 10
 
+function UI.settingsKey()
+    return SETTINGS_KEY
+end
+
 function UI.getScale()
-    local s = G_reader_settings:readSetting("book_plugin") or {}
+    local s = G_reader_settings:readSetting(SETTINGS_KEY) or {}
     local n = tonumber(s.ui_scale) or DEFAULT_SCALE
     if n < MIN_SCALE then n = MIN_SCALE end
     if n > MAX_SCALE then n = MAX_SCALE end
@@ -28,11 +33,10 @@ function UI.setScale(n)
     n = tonumber(n) or DEFAULT_SCALE
     if n < MIN_SCALE then n = MIN_SCALE end
     if n > MAX_SCALE then n = MAX_SCALE end
-    -- 对齐步进
     n = math.floor((n + STEP / 2) / STEP) * STEP
-    local s = G_reader_settings:readSetting("book_plugin") or {}
+    local s = G_reader_settings:readSetting(SETTINGS_KEY) or {}
     s.ui_scale = n
-    G_reader_settings:saveSetting("book_plugin", s)
+    G_reader_settings:saveSetting(SETTINGS_KEY, s)
     return n
 end
 
@@ -62,8 +66,49 @@ function UI.iconSz()
 end
 
 function UI.menuFontSize()
-    -- KOReader Menu 默认大约 22；按比例放大
     return math.max(16, math.floor(22 * UI.getScale() / 100 + 0.5))
+end
+
+--- 简易进度条（0–100）
+function UI.progressBar(width, height, percent)
+    local Blitbuffer = require("ffi/blitbuffer")
+    local FrameContainer = require("ui/widget/container/framecontainer")
+    local Geom = require("ui/geometry")
+    local HorizontalGroup = require("ui/widget/horizontalgroup")
+    percent = tonumber(percent) or 0
+    if percent < 0 then percent = 0 end
+    if percent > 100 then percent = 100 end
+    local h = height or UI.sz(8)
+    local fill_w = math.floor(width * percent / 100 + 0.5)
+    local empty_w = math.max(0, width - fill_w)
+    local row = HorizontalGroup:new{}
+    if fill_w > 0 then
+        table.insert(row, FrameContainer:new{
+            bordersize = 0,
+            padding = 0,
+            margin = 0,
+            background = Blitbuffer.COLOR_BLACK,
+            dimen = Geom:new{ w = fill_w, h = h },
+        })
+    end
+    if empty_w > 0 then
+        table.insert(row, FrameContainer:new{
+            bordersize = 0,
+            padding = 0,
+            margin = 0,
+            background = Blitbuffer.gray(0.85),
+            dimen = Geom:new{ w = empty_w, h = h },
+        })
+    end
+    return FrameContainer:new{
+        bordersize = 1,
+        color = Blitbuffer.gray(0.55),
+        padding = 0,
+        margin = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        dimen = Geom:new{ w = width, h = h + 2 },
+        row,
+    }
 end
 
 UI.DEFAULT_SCALE = DEFAULT_SCALE

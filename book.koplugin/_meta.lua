@@ -2,5 +2,5 @@ local _ = require("gettext")
 return {
     name = "book",
     fullname = _("Book 书库"),
-    description = _([[Book 桌面：启动直进插件。首页时钟+最近阅读封面，底栏图标（首页/书库/分类/设置），书库封面网格。]]),
+    description = _([[Book 桌面：图书馆 / 主页 / 设置。封面书库、详情阅读、进度同步。]]),
 }

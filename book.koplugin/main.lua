@@ -1,8 +1,8 @@
 --[[--
-Book 书库 — 参考 simpleui.koplugin 的生命周期：
-  - init 全程 pcall
-  - 启动打开桌面（首页时钟+最近阅读，底栏：首页/书库/分类/设置）
-  - patch FileManager + 注入 start_with = "bookshelf_book"
+Book 书库插件 — 三栏桌面（图书馆 / 主页 / 设置）
+  - 展示数据全部来自 API
+  - 本地目录仅作下载缓存与封面缓存
+  - 点书先进详情，再决定阅读
 
 @module koplugin.book
 --]]
@@ -23,7 +23,8 @@ local lfs = require("libs/libkoreader-lfs")
 local Api = require("api")
 local Desktop = require("desktop")
 
-local SETTINGS_KEY = "book_plugin"
+local SETTINGS_KEY = "book_plugin_v2"
+local FILEMAP_KEY = "book_plugin_filemap_v2"
 local START_WITH_ID = "bookshelf_book"
 
 local BookPlugin = WidgetContainer:extend{
@@ -31,30 +32,56 @@ local BookPlugin = WidgetContainer:extend{
     is_doc_only = false,
 }
 
--- ---------------------------------------------------------------------------
--- settings
--- ---------------------------------------------------------------------------
+local function defaultSettings()
+    return {
+        base_url = "",
+        token = "",
+        auto_sync = true,
+        open_on_start = true,
+        home_header = "clock",
+        ui_scale = 130,
+        library_dir = DataStorage:getDataDir() .. "/books",
+    }
+end
 
 local function settings()
     local s = G_reader_settings:readSetting(SETTINGS_KEY)
+    local old = G_reader_settings:readSetting("book_plugin")
     if type(s) ~= "table" then
-        s = {
-            base_url = "",
-            token = "",
-            auto_sync = true,
-            open_on_start = true,
-            ui_scale = 130,
-            library_dir = DataStorage:getDataDir() .. "/books",
-            _ui_v = 5,
-        }
-        G_reader_settings:saveSetting(SETTINGS_KEY, s)
-    elseif (s._ui_v or 0) < 5 then
-        s.open_on_start = true
-        if not s.ui_scale then
-            s.ui_scale = 130
+        s = defaultSettings()
+        if type(old) == "table" then
+            if old.base_url and old.base_url ~= "" then s.base_url = old.base_url end
+            if old.token and old.token ~= "" then s.token = old.token end
+            if old.library_dir and old.library_dir ~= "" then s.library_dir = old.library_dir end
+            if old.ui_scale then s.ui_scale = old.ui_scale end
+            if old.auto_sync ~= nil then s.auto_sync = old.auto_sync end
+            if old.open_on_start ~= nil then s.open_on_start = old.open_on_start end
         end
-        s._ui_v = 5
         G_reader_settings:saveSetting(SETTINGS_KEY, s)
+    elseif type(old) == "table" then
+        -- v2 已存在但空：补一次旧配置
+        local dirty = false
+        if (not s.base_url or s.base_url == "") and old.base_url and old.base_url ~= "" then
+            s.base_url = old.base_url
+            dirty = true
+        end
+        if (not s.token or s.token == "") and old.token and old.token ~= "" then
+            s.token = old.token
+            dirty = true
+        end
+        if (not s.library_dir or s.library_dir == "") and old.library_dir and old.library_dir ~= "" then
+            s.library_dir = old.library_dir
+            dirty = true
+        end
+        if dirty then
+            G_reader_settings:saveSetting(SETTINGS_KEY, s)
+        end
+    end
+    if not s.library_dir or s.library_dir == "" then
+        s.library_dir = DataStorage:getDataDir() .. "/books"
+    end
+    if s.home_header ~= "hitokoto" then
+        s.home_header = s.home_header or "clock"
     end
     return s
 end
@@ -69,30 +96,25 @@ local function ensureDir(path)
     end
 end
 
--- 启动直进插件：open_on_start 默认开，且强制写 start_with（对齐 SimpleUI first-run）
-local function forceStartWithBook()
+-- 仅在用户开启时写入 start_with；关掉就尊重，不再每次强制改写
+local function applyStartWithOnce()
     local s = settings()
     if s.open_on_start == false then
         return false
     end
-    G_reader_settings:saveSetting("start_with", START_WITH_ID)
-    s.open_on_start = true
-    saveSettings(s)
+    if G_reader_settings:readSetting("start_with") ~= START_WITH_ID then
+        G_reader_settings:saveSetting("start_with", START_WITH_ID)
+    end
     return true
 end
 
 local function isStartWithBook()
-    if settings().open_on_start == false then
+    local s = settings()
+    if s.open_on_start == false then
         return false
     end
     return G_reader_settings:readSetting("start_with", "filemanager") == START_WITH_ID
-        or settings().open_on_start
 end
-
--- ---------------------------------------------------------------------------
--- FileManager patch（对齐 simpleui：setupLayout 打标，onShow 再打开）
--- 注意：插件 init 往往晚于 FM:setupLayout，必须同时打到「活实例」上。
--- ---------------------------------------------------------------------------
 
 local function wrapFmOnShow(plugin, fm)
     if not fm or fm._book_onshow_wrapped then
@@ -123,10 +145,8 @@ local function requestDesktopOpen(plugin, fm)
         fm._book_autoopen_pending = true
         wrapFmOnShow(plugin, fm)
     end
-    -- 无论 onShow 是否已过，都调度一次（活实例补丁的关键）
     UIManager:scheduleIn(0.25, function()
         if plugin and plugin.openDesktop and not plugin.desktop then
-            -- 仍在 FM（有 file_chooser）或 FM.instance 存在时才自动开
             local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
             local live = ok and FileManager and FileManager.instance
             if (plugin.ui and plugin.ui.file_chooser) or live then
@@ -174,7 +194,6 @@ local function patchFileManager(plugin)
         end
     end
 
-    -- 活实例：setupLayout 已经跑过，类补丁救不了，必须当场挂钩
     if FileManager.instance then
         wrapFmOnShow(plugin, FileManager.instance)
         requestDesktopOpen(plugin, FileManager.instance)
@@ -182,7 +201,6 @@ local function patchFileManager(plugin)
 end
 
 local function patchStartWithMenu()
-    -- 往「启动时打开」里塞一项（simpleui 同思路）
     local ok, FMMenu = pcall(require, "apps/filemanager/filemanagermenu")
     if not ok or not FMMenu or not FMMenu.getStartWithMenuTable then
         return
@@ -208,7 +226,6 @@ local function patchStartWithMenu()
                 end,
                 radio = true,
             })
-            -- 选其它启动项时关掉我们的 open_on_start
             for _, row in ipairs(item.sub_item_table) do
                 if row.text ~= _("Book 书库") and row.callback then
                     local prev = row.callback
@@ -225,25 +242,15 @@ local function patchStartWithMenu()
     end
 end
 
--- ---------------------------------------------------------------------------
--- lifecycle
--- ---------------------------------------------------------------------------
-
 function BookPlugin:init()
     local ok, err = pcall(function()
-        -- 必须在任何 start_with 判断之前写入
-        forceStartWithBook()
-
+        applyStartWithOnce()
         self:onDispatcherRegisterActions()
         if self.ui.menu and self.ui.menu.registerToMainMenu then
             self.ui.menu:registerToMainMenu(self)
         end
-
-        -- 始终打 FM 类补丁（不依赖当前 ui 是否已有 file_chooser）
         patchFileManager(self)
         patchStartWithMenu()
-
-        -- 当前就是 FM：立刻要桌面
         if self.ui.file_chooser then
             requestDesktopOpen(self, self.ui)
         end
@@ -264,7 +271,7 @@ function BookPlugin:onDispatcherRegisterActions()
 end
 
 function BookPlugin:onBookOpenShelf()
-    self:openBookshelf()
+    self:openDesktop()
     return true
 end
 
@@ -291,69 +298,6 @@ function BookPlugin:addToMainMenu(menu_items)
             self:openDesktop()
         end,
     }
-    menu_items.book_library_settings = {
-        text = _("Book 书库设置"),
-        sorting_hint = "tools",
-        sub_item_table = {
-            {
-                text = _("服务器与令牌"),
-                callback = function()
-                    self:showConfigDialog()
-                end,
-            },
-            {
-                text = _("测试连接"),
-                callback = function()
-                    self:testConnection()
-                end,
-            },
-            {
-                text_func = function()
-                    local UI = require("bookui")
-                    return T(_("界面字号 (%1%%)"), UI.getScale())
-                end,
-                callback = function()
-                    local UI = require("bookui")
-                    local n = UI.cycleScale()
-                    UIManager:show(InfoMessage:new{
-                        text = T(_("字号已设为 %1%%"), n),
-                        timeout = 1.5,
-                    })
-                    if self.desktop then
-                        self.desktop:rebuild()
-                    end
-                end,
-            },
-            {
-                text = _("启动时打开桌面"),
-                checked_func = function()
-                    return settings().open_on_start
-                        or G_reader_settings:readSetting("start_with") == START_WITH_ID
-                end,
-                callback = function()
-                    local s = settings()
-                    s.open_on_start = not s.open_on_start
-                    saveSettings(s)
-                    if s.open_on_start then
-                        G_reader_settings:saveSetting("start_with", START_WITH_ID)
-                    elseif G_reader_settings:readSetting("start_with") == START_WITH_ID then
-                        G_reader_settings:saveSetting("start_with", "filemanager")
-                    end
-                end,
-            },
-            {
-                text = _("自动同步进度"),
-                checked_func = function()
-                    return settings().auto_sync
-                end,
-                callback = function()
-                    local s = settings()
-                    s.auto_sync = not s.auto_sync
-                    saveSettings(s)
-                end,
-            },
-        },
-    }
 end
 
 function BookPlugin:showConfigDialog()
@@ -362,9 +306,9 @@ function BookPlugin:showConfigDialog()
     dialog = MultiInputDialog:new{
         title = _("Book 服务器配置"),
         fields = {
-            { text = s.base_url, hint = _("https://book.example.com") },
-            { text = s.token, hint = _("bk_… 长期令牌"), text_type = "password" },
-            { text = s.library_dir, hint = _("本地书库目录") },
+            { text = s.base_url or "", hint = _("https://book.example.com") },
+            { text = s.token or "", hint = _("bk_… 长期令牌"), text_type = "password" },
+            { text = s.library_dir or "", hint = _("本地下载缓存目录") },
         },
         buttons = {{
             {
@@ -387,7 +331,13 @@ function BookPlugin:showConfigDialog()
                     saveSettings(s)
                     UIManager:close(dialog)
                     UIManager:show(InfoMessage:new{ text = _("已保存"), timeout = 2 })
-                    self:openBookshelf()
+                    if self.desktop then
+                        self.desktop.api = self:getApi()
+                        self.desktop._home_state = nil
+                        self.desktop._home_loaded = false
+                        self.desktop._library_state = nil
+                        self.desktop:rebuild()
+                    end
                 end,
             },
         }},
@@ -425,10 +375,6 @@ function BookPlugin:openDesktop(filter)
         UIManager:close(self.desktop)
         self.desktop = nil
     end
-    if self.bookshelf then
-        UIManager:close(self.bookshelf)
-        self.bookshelf = nil
-    end
 
     local ok, desk = pcall(function()
         return Desktop:new{
@@ -451,7 +397,6 @@ function BookPlugin:openDesktop(filter)
     end
     self.desktop = desk
     UIManager:show(self.desktop)
-    -- 强制全屏刷新，盖住底下的 FM 目录
     UIManager:setDirty(self.desktop, "full")
 end
 
@@ -469,16 +414,16 @@ function BookPlugin:openBook(book)
     end
     local path = self:localPathFor(filename)
     local function doOpen()
-        local map = G_reader_settings:readSetting("book_plugin_filemap") or {}
+        local map = G_reader_settings:readSetting(FILEMAP_KEY) or {}
         map[path] = filename
-        G_reader_settings:saveSetting("book_plugin_filemap", map)
+        G_reader_settings:saveSetting(FILEMAP_KEY, map)
         if self.desktop then
+            if self.desktop.detail then
+                UIManager:close(self.desktop.detail)
+                self.desktop.detail = nil
+            end
             UIManager:close(self.desktop)
             self.desktop = nil
-        end
-        if self.bookshelf then
-            UIManager:close(self.bookshelf)
-            self.bookshelf = nil
         end
         local ReaderUI = require("apps/reader/readerui")
         UIManager:nextTick(function()
@@ -505,7 +450,7 @@ function BookPlugin:remoteFilenameForCurrent()
         return nil
     end
     local path = self.ui.document.file
-    local map = G_reader_settings:readSetting("book_plugin_filemap") or {}
+    local map = G_reader_settings:readSetting(FILEMAP_KEY) or {}
     return map[path] or path:match("([^/\\]+)$")
 end
 
