@@ -245,17 +245,46 @@ function Api:updateProgress(filename, frac, spine, page, percent_text)
     return res, err
 end
 
-function Api:downloadBook(filename, dest_path)
+--- HEAD 探测 Content-Length；服务端不支持则返回 nil
+function Api:probeFileSize(filename)
+    if not filename or filename == "" then
+        return nil
+    end
+    local ok, headers = self:_request(
+        "HEAD",
+        "/index/book/file",
+        { filename = filename },
+        nil,
+        ltn12.sink.null(),
+        true
+    )
+    if not ok or type(headers) ~= "table" then
+        return nil
+    end
+    local cl = headers["content-length"] or headers["Content-Length"]
+    local n = tonumber(cl)
+    if n and n > 0 then
+        return n
+    end
+    return nil
+end
+
+--- on_progress(bytes) 可选；在阻塞下载过程中回调已写入字节数
+function Api:downloadBook(filename, dest_path, on_progress)
     local file, err = io.open(dest_path, "wb")
     if not file then
         return nil, err or "无法创建本地文件"
+    end
+    local sink = ltn12.sink.file(file)
+    if on_progress and socketutil.chainSinkWithProgressCallback then
+        sink = socketutil.chainSinkWithProgressCallback(sink, on_progress)
     end
     local ok, msg = self:_request(
         "GET",
         "/index/book/file",
         { filename = filename },
         nil,
-        ltn12.sink.file(file),
+        sink,
         true
     )
     if not ok then

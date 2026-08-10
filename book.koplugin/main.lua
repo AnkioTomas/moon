@@ -589,8 +589,36 @@ function BookPlugin:openBook(book)
         return
     end
     self:withNetwork(function()
-        UIManager:show(InfoMessage:new{ text = _("正在下载…"), timeout = 1 })
-        local ok, err = self:getApi():downloadBook(filename, path)
+        local api = self:getApi()
+        local title = book.bookName or book.title
+            or (filename:match("([^/\\]+)$") or filename)
+        local size = tonumber(book.fileSize or book.filesize or book.size or book.file_size)
+        if not size or size <= 0 then
+            size = api:probeFileSize(filename)
+        end
+
+        local dialog
+        local ok_dlg, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
+        if ok_dlg and ProgressbarDialog then
+            dialog = ProgressbarDialog:new{
+                title = _("正在下载…"),
+                subtitle = title,
+                progress_max = (size and size > 0) and size or nil,
+                refresh_time_seconds = 1,
+                dismissable = false,
+            }
+            dialog:show()
+        else
+            UIManager:show(InfoMessage:new{ text = _("正在下载…") })
+        end
+
+        local ok, err = api:downloadBook(filename, path, dialog and function(bytes)
+            dialog:reportProgress(bytes)
+        end or nil)
+
+        if dialog then
+            dialog:close()
+        end
         if not ok then
             UIManager:show(InfoMessage:new{ text = err or _("下载失败") })
             return
