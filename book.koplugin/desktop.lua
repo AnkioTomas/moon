@@ -17,7 +17,6 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local InputDialog = require("ui/widget/inputdialog")
 local LineWidget = require("ui/widget/linewidget")
 local OverlapGroup = require("ui/widget/overlapgroup")
-local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -198,7 +197,7 @@ function Desktop:buildBottomBar()
             align = "left",
             LineWidget:new{
                 background = Blitbuffer.gray(0.7),
-                dimen = Geom:new{ w = sw, h = Size.line.thin },
+                dimen = Geom:new{ w = sw, h = UI.line() },
             },
             row,
         },

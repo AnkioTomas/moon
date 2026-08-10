@@ -211,8 +211,9 @@ function Cover.placeholder(w, h, title)
     if type(label) == "string" and #label > 24 then
         label = label:sub(1, 24) .. "…"
     end
+    local border = UI.line()
     return FrameContainer:new{
-        bordersize = 1,
+        bordersize = border,
         color = Blitbuffer.gray(0.6),
         padding = 0,
         margin = 0,
@@ -223,7 +224,7 @@ function Cover.placeholder(w, h, title)
             TextWidget:new{
                 text = label,
                 face = UI.face("xx_smallinfofont", 14),
-                max_width = math.max(8, w - 8),
+                max_width = math.max(8, w - UI.sz(8)),
                 fgcolor = Blitbuffer.gray(0.35),
             },
         },
@@ -236,8 +237,9 @@ function Cover.widget(path, w, h, title)
     w = math.max(1, tonumber(w) or 1)
     h = math.max(1, tonumber(h) or 1)
     if path and lfs.attributes(path, "mode") == "file" and isImagePath(path) then
-        local inner_w = math.max(1, w - 2)
-        local inner_h = math.max(1, h - 2)
+        local border = UI.line()
+        local inner_w = math.max(1, w - border * 2)
+        local inner_h = math.max(1, h - border * 2)
         local ok, img = pcall(function()
             local RenderImage = require("ui/renderimage")
             local bb = RenderImage:renderImageFile(path, false, inner_w, inner_h)
@@ -254,7 +256,7 @@ function Cover.widget(path, w, h, title)
         end)
         if ok and img then
             return FrameContainer:new{
-                bordersize = 1,
+                bordersize = border,
                 color = Blitbuffer.gray(0.55),
                 padding = 0,
                 margin = 0,

@@ -17,7 +17,6 @@ local Blitbuffer = require("ffi/blitbuffer")
 local BD = require("ui/bidi")
 local Button = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local Device = require("device")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
@@ -35,7 +34,6 @@ local UI = require("bookui")
 local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
-local Screen = Device.screen
 
 local Library = {}
 
@@ -115,7 +113,7 @@ local function textAction(text, callback, face_size)
     return tap
 end
 
---- 与官方 Menu 底栏一致：首/上/页码/下/末 + chevron 图标
+--- 与官方 Menu 底栏一致：首/上/页码/下/末 + chevron 图标（尺寸跟 ui_scale）
 local function menuPager(page, pages, handlers)
     handlers = handlers or {}
     page = tonumber(page) or 1
@@ -128,39 +126,37 @@ local function menuPager(page, pages, handlers)
         chevron_left, chevron_right = chevron_right, chevron_left
         chevron_first, chevron_last = chevron_last, chevron_first
     end
-    local spacer = HorizontalSpan:new{ width = Screen:scaleBySize(32) }
-    local first = Button:new{
-        icon = chevron_first,
-        bordersize = 0,
-        callback = function()
-            if handlers.on_first then handlers.on_first() end
-        end,
-    }
-    local left = Button:new{
-        icon = chevron_left,
-        bordersize = 0,
-        callback = function()
-            if handlers.on_prev then handlers.on_prev() end
-        end,
-    }
-    local right = Button:new{
-        icon = chevron_right,
-        bordersize = 0,
-        callback = function()
-            if handlers.on_next then handlers.on_next() end
-        end,
-    }
-    local last = Button:new{
-        icon = chevron_last,
-        bordersize = 0,
-        callback = function()
-            if handlers.on_last then handlers.on_last() end
-        end,
-    }
+    local icon_sz = UI.iconSz()
+    local spacer = HorizontalSpan:new{ width = UI.sz(32) }
+    local function chev(icon, cb)
+        return Button:new{
+            icon = icon,
+            icon_width = icon_sz,
+            icon_height = icon_sz,
+            bordersize = 0,
+            padding = UI.sz(2),
+            callback = cb,
+        }
+    end
+    local first = chev(chevron_first, function()
+        if handlers.on_first then handlers.on_first() end
+    end)
+    local left = chev(chevron_left, function()
+        if handlers.on_prev then handlers.on_prev() end
+    end)
+    local right = chev(chevron_right, function()
+        if handlers.on_next then handlers.on_next() end
+    end)
+    local last = chev(chevron_last, function()
+        if handlers.on_last then handlers.on_last() end
+    end)
     local info = Button:new{
         text = T(_("Page %1 of %2"), page, pages),
+        text_font_face = "xx_smallinfofont",
+        text_font_size = UI.fontSize(16),
         text_font_bold = false,
         bordersize = 0,
+        padding = UI.sz(2),
     }
     if info.disableWithoutDimming then
         info:disableWithoutDimming()
@@ -347,9 +343,9 @@ function Library.build(ctx, state, opts)
     }
 
     local top_h = UI.sz(68)
-    -- 给底栏 Tab 留空隙，分页不要贴死
+    -- 给底栏 Tab 留空隙；分页高度跟图标字号走
     local bottom_pad = UI.sz(10)
-    local bottom_h = UI.sz(52) + bottom_pad
+    local bottom_h = UI.iconSz() + UI.sz(28) + bottom_pad
     local grid_h = math.max(1, h - top_h - bottom_h)
 
     if not books then

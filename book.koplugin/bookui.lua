@@ -1,6 +1,13 @@
 --[[--
-Book 桌面 UI 缩放 — 字号 / 间距统一从这里走。
+Book 桌面 UI 缩放 — 字号 / 间距 / 图标统一从这里走。
 设置键：book_plugin_v2.ui_scale（百分比，默认 130）
+
+约定：
+  UI.sz(n)       间距、控件几何（含 DPI + ui_scale）
+  UI.face(...)   文本字号（ui_scale）
+  UI.fontSize(n) 交给 Button/Menu 的数字字号
+  UI.iconSz()    图标边长
+  UI.line()      分割线粗细
 
 @module koplugin.book.bookui
 --]]
@@ -51,22 +58,47 @@ function UI.sz(n)
     return math.max(1, math.floor(Screen:scaleBySize(n) * UI.getScale() / 100 + 0.5))
 end
 
---- Font:getFace 的缩放包装
-function UI.face(name, size)
-    local scaled = math.max(10, math.floor((size or 16) * UI.getScale() / 100 + 0.5))
-    return Font:getFace(name, scaled)
+--- 纯数字字号（Font / Button.text_font_size / Menu.items_font_size）
+function UI.fontSize(size)
+    return math.max(10, math.floor((size or 16) * UI.getScale() / 100 + 0.5))
 end
 
-function UI.barH()
-    return UI.sz(56)
+--- Font:getFace 的缩放包装
+function UI.face(name, size)
+    return Font:getFace(name, UI.fontSize(size))
+end
+
+function UI.line()
+    return math.max(1, UI.sz(1))
 end
 
 function UI.iconSz()
     return UI.sz(24)
 end
 
+--- TitleBar 关闭等图标：把目标边长折算成 size_ratio
+function UI.titleIconRatio(base_ratio)
+    base_ratio = base_ratio or 0.6
+    local ok, defaults = pcall(function()
+        return G_defaults:readSetting("DGENERIC_ICON_SIZE")
+    end)
+    local base = (ok and tonumber(defaults)) or 32
+    local native = Screen:scaleBySize(base * base_ratio)
+    if native < 1 then native = 1 end
+    return UI.iconSz() / native * base_ratio
+end
+
+function UI.barH()
+    -- 图标 + 文字 + 上下空隙，随字号一起长
+    return math.max(UI.sz(56), UI.iconSz() + UI.sz(32))
+end
+
 function UI.menuFontSize()
-    return math.max(16, math.floor(22 * UI.getScale() / 100 + 0.5))
+    return UI.fontSize(22)
+end
+
+function UI.buttonFontSize()
+    return UI.fontSize(20)
 end
 
 --- 简易进度条（0–100）。优先 ProgressWidget；否则用 LineWidget，禁止空 FrameContainer。
@@ -119,13 +151,14 @@ function UI.progressBar(width, height, percent)
             fgcolor = Blitbuffer.gray(0.4),
         }
     end
+    local border = UI.line()
     return FrameContainer:new{
-        bordersize = 1,
+        bordersize = border,
         color = Blitbuffer.gray(0.55),
         padding = 0,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = width + 2, h = height + 2 },
+        dimen = Geom:new{ w = width + border * 2, h = height + border * 2 },
         row,
     }
 end

@@ -16,7 +16,6 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local OverlapGroup = require("ui/widget/overlapgroup")
-local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
 local TitleBar = require("ui/widget/titlebar")
@@ -142,23 +141,28 @@ function Detail:rebuild()
         with_bottom_line = true,
         title = title,
         title_face = UI.face("cfont", 18),
+        button_padding = UI.sz(11),
+        right_icon_size_ratio = UI.titleIconRatio(0.6),
         close_callback = function()
             self:onClose()
         end,
         show_parent = self,
     }
 
+    local btn_font = UI.buttonFontSize()
     local buttons = ButtonTable:new{
         width = content_w,
         buttons = {{
             {
                 text = _("返回"),
+                font_size = btn_font,
                 callback = function()
                     self:onClose()
                 end,
             },
             {
                 text = _("开始阅读"),
+                font_size = btn_font,
                 callback = function()
                     local plugin = self.plugin
                     local b = self.book
@@ -227,7 +231,7 @@ function Detail:rebuild()
         table.insert(body_kids, VerticalSpan:new{ width = UI.sz(18) })
         table.insert(body_kids, LineWidget:new{
             background = Blitbuffer.gray(0.85),
-            dimen = Geom:new{ w = content_w, h = Size.line.thin },
+            dimen = Geom:new{ w = content_w, h = UI.line() },
         })
         table.insert(body_kids, VerticalSpan:new{ width = UI.sz(10) })
         table.insert(body_kids, sectionTitle(_("简介"), content_w))
