@@ -256,21 +256,20 @@ function Library.build(ctx, state, opts)
     local used_h = 0
     local cell_h
 
+    -- 标题+副标题行高固定，先估高再解码，避免屏外封面白烧内存
+    local estimate_h = ch + UI.sz(40)
     for _, book in ipairs(books) do
-        local cell, th = coverCell(ctx, book, cw, ch, on_open)
-        cell_h = th
-        if col_i == 0 and used_h + th > grid_h then
+        if col_i == 0 and used_h + estimate_h > grid_h then
             break
         end
+        local cell, th = coverCell(ctx, book, cw, ch, on_open)
+        cell_h = th
         if col_i > 0 then
             table.insert(row, HorizontalSpan:new{ width = gap })
         end
         table.insert(row, cell)
         col_i = col_i + 1
         if col_i >= cols then
-            if used_h + th > grid_h then
-                break
-            end
             table.insert(grid, row)
             table.insert(grid, VerticalSpan:new{ width = UI.sz(8) })
             used_h = used_h + th + UI.sz(8)

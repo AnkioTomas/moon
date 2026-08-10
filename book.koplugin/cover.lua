@@ -1,5 +1,5 @@
 --[[--
-封面：下载缓存 + ImageWidget 显示（对齐 simpleui 的 file= 路径，不走 RenderImage）
+封面：下载缓存 + 按格子尺寸解码缩略图（禁止原图像素进内存）
 
 @module koplugin.book.cover
 --]]
@@ -230,7 +230,8 @@ function Cover.placeholder(w, h, title)
     }
 end
 
---- 对齐 simpleui：优先 ImageWidget{ file = path }
+--- 按目标缩略图尺寸解码。禁止 ImageWidget{file=, scale_factor=0}：
+--- 那种写法会先按原图像素整图进内存，图书馆一页十几张封面直接 OOM 崩进程。
 function Cover.widget(path, w, h, title)
     w = math.max(1, tonumber(w) or 1)
     h = math.max(1, tonumber(h) or 1)
@@ -238,11 +239,18 @@ function Cover.widget(path, w, h, title)
         local inner_w = math.max(1, w - 2)
         local inner_h = math.max(1, h - 2)
         local ok, img = pcall(function()
+            local RenderImage = require("ui/renderimage")
+            local bb = RenderImage:renderImageFile(path, false, inner_w, inner_h)
+            if not bb then
+                error("renderImageFile failed")
+            end
             return ImageWidget:new{
-                file = path,
+                image = bb,
+                image_disposable = true,
                 width = inner_w,
                 height = inner_h,
-                scale_factor = 0, -- 等比适应
+                -- 位图已是缩略图尺寸；nil = 拉伸填满格子，避免再走原图缩放路径
+                scale_factor = nil,
                 alpha = false,
             }
         end)
@@ -256,35 +264,7 @@ function Cover.widget(path, w, h, title)
                 img,
             }
         end
-        logger.warn("book cover ImageWidget(file) failed", path, img)
-
-        -- 兜底：RenderImage → ImageWidget(image=)
-        local ok2, img2 = pcall(function()
-            local RenderImage = require("ui/renderimage")
-            local bb = RenderImage:renderImageFile(path, false)
-            if not bb then
-                error("renderImageFile failed")
-            end
-            return ImageWidget:new{
-                image = bb,
-                image_disposable = true,
-                width = inner_w,
-                height = inner_h,
-                scale_factor = 0,
-                alpha = false,
-            }
-        end)
-        if ok2 and img2 then
-            return FrameContainer:new{
-                bordersize = 1,
-                color = Blitbuffer.gray(0.55),
-                padding = 0,
-                margin = 0,
-                dimen = Geom:new{ w = w, h = h },
-                img2,
-            }
-        end
-        logger.warn("book cover RenderImage failed", path, img2)
+        logger.warn("book cover thumbnail failed", path, img)
     end
     return Cover.placeholder(w, h, title)
 end
