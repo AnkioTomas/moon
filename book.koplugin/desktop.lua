@@ -169,13 +169,13 @@ function Desktop:buildBottomBar()
             icon = TextWidget:new{
                 text = "•",
                 face = UI.face("cfont", 18),
-                fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.gray(0.55),
+                fgcolor = active and Blitbuffer.COLOR_BLACK or UI.dim(),
             }
         end
         local label = TextWidget:new{
             text = tab.text,
             face = UI.face("xx_smallinfofont", 12),
-            fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.gray(0.5),
+            fgcolor = active and Blitbuffer.COLOR_BLACK or UI.muted(),
         }
         table.insert(row, CenterContainer:new{
             dimen = Geom:new{ w = cell_w, h = bh },
@@ -196,7 +196,7 @@ function Desktop:buildBottomBar()
         VerticalGroup:new{
             align = "left",
             LineWidget:new{
-                background = Blitbuffer.gray(0.7),
+                background = UI.rule(),
                 dimen = Geom:new{ w = sw, h = UI.line() },
             },
             row,
@@ -314,7 +314,7 @@ function Desktop:buildHome()
                 TextWidget:new{
                     text = _("加载主页…"),
                     face = UI.face("cfont", 18),
-                    fgcolor = Blitbuffer.gray(0.45),
+                    fgcolor = UI.muted(),
                 },
             },
         }

@@ -223,10 +223,10 @@ function Cover.placeholder(w, h, title)
     local border = UI.line()
     return FrameContainer:new{
         bordersize = border,
-        color = Blitbuffer.gray(0.6),
+        color = UI.rule(),
         padding = 0,
         margin = 0,
-        background = Blitbuffer.gray(0.92),
+        background = Blitbuffer.COLOR_WHITE,
         dimen = Geom:new{ w = w, h = h },
         CenterContainer:new{
             dimen = Geom:new{ w = w, h = h },
@@ -234,7 +234,7 @@ function Cover.placeholder(w, h, title)
                 text = label,
                 face = UI.face("xx_smallinfofont", 14),
                 max_width = math.max(8, w - UI.sz(8)),
-                fgcolor = Blitbuffer.gray(0.35),
+                fgcolor = UI.muted(),
             },
         },
     }
@@ -266,7 +266,7 @@ function Cover.widget(path, w, h, title)
         if ok and img then
             return FrameContainer:new{
                 bordersize = border,
-                color = Blitbuffer.gray(0.55),
+                color = UI.rule(),
                 padding = 0,
                 margin = 0,
                 background = Blitbuffer.COLOR_WHITE,

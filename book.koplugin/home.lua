@@ -146,7 +146,7 @@ local function sectionTitle(text, width, pad)
             TextWidget:new{
                 text = text,
                 face = UI.face("cfont", 13),
-                fgcolor = Blitbuffer.gray(0.4),
+                fgcolor = UI.muted(),
             },
         },
     }
@@ -204,7 +204,7 @@ function Home.buildHeader(ctx, state)
                     text = "— " .. from,
                     face = UI.face("xx_smallinfofont", 13),
                     max_width = inner_w,
-                    fgcolor = Blitbuffer.gray(0.4),
+                    fgcolor = UI.muted(),
                 },
             })
         end
@@ -245,7 +245,7 @@ function Home.buildHeader(ctx, state)
                 text = date_str,
                 face = UI.face("xx_smallinfofont", 14),
                 max_width = math.floor((w - pad * 2) * 0.62),
-                fgcolor = Blitbuffer.gray(0.4),
+                fgcolor = UI.muted(),
             },
         },
         RightContainer:new{
@@ -253,7 +253,7 @@ function Home.buildHeader(ctx, state)
             TextWidget:new{
                 text = battery,
                 face = UI.face("xx_smallinfofont", 14),
-                fgcolor = Blitbuffer.gray(0.4),
+                fgcolor = UI.muted(),
             },
         },
     }
@@ -305,7 +305,7 @@ function Home.buildStats(ctx, state)
                     text = T("%1 %2", label, tostring(v)),
                     face = UI.face("xx_smallinfofont", 14),
                     max_width = math.max(UI.sz(20), cell_w - icon_sz - UI.sz(10)),
-                    fgcolor = Blitbuffer.gray(0.35),
+                    fgcolor = UI.muted(),
                 },
             },
         }
@@ -393,7 +393,7 @@ local function recentRow(ctx, book, on_open, on_read, grid_cw, avail, pad)
             text = author ~= "" and author or _("未知作者"),
             face = UI.face("xx_smallinfofont", 14),
             max_width = info_w,
-            fgcolor = Blitbuffer.gray(0.45),
+            fgcolor = UI.muted(),
         },
         VerticalSpan:new{ width = UI.sz(14) },
         UI.progressBar(info_w, UI.sz(8), pct),
@@ -402,7 +402,7 @@ local function recentRow(ctx, book, on_open, on_read, grid_cw, avail, pad)
             text = progress_text,
             face = UI.face("xx_smallinfofont", 13),
             max_width = info_w,
-            fgcolor = Blitbuffer.gray(0.4),
+            fgcolor = UI.muted(),
         },
     }
     local meta_h = meta:getSize().h
@@ -542,7 +542,7 @@ function Home.build(ctx, state)
             TextWidget:new{
                 text = state.recent_err or _("暂无最近阅读"),
                 face = UI.face("xx_smallinfofont", 14),
-                fgcolor = Blitbuffer.gray(0.5),
+                fgcolor = UI.muted(),
             },
         })
         used = used + empty_h
@@ -563,7 +563,7 @@ function Home.build(ctx, state)
             TextWidget:new{
                 text = _("没有在读的书"),
                 face = UI.face("xx_smallinfofont", 14),
-                fgcolor = Blitbuffer.gray(0.5),
+                fgcolor = UI.muted(),
             },
         })
     else

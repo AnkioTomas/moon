@@ -393,7 +393,7 @@ function Library.build(ctx, state, opts)
     local total_label = TextWidget:new{
         text = T(_("共%1"), total),
         face = UI.face("xx_smallinfofont", 13),
-        fgcolor = Blitbuffer.gray(0.4),
+        fgcolor = UI.muted(),
     }
     local tools_w = tools:getSize().w
     local total_w = total_label:getSize().w
@@ -438,7 +438,7 @@ function Library.build(ctx, state, opts)
                     TextWidget:new{
                         text = _("加载图书馆…"),
                         face = UI.face("cfont", 18),
-                        fgcolor = Blitbuffer.gray(0.45),
+                        fgcolor = UI.muted(),
                     },
                 },
             },
@@ -458,7 +458,7 @@ function Library.build(ctx, state, opts)
                     TextWidget:new{
                         text = state.err or _("没有书籍"),
                         face = UI.face("cfont", 16),
-                        fgcolor = Blitbuffer.gray(0.45),
+                        fgcolor = UI.muted(),
                     },
                 },
                 CenterContainer:new{

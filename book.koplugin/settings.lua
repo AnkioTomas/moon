@@ -105,7 +105,7 @@ local function insetDivider(width)
     return CenterContainer:new{
         dimen = Geom:new{ w = width, h = UI.sz(1) },
         LineWidget:new{
-            background = Blitbuffer.gray(0.9),
+            background = UI.rule(),
             dimen = Geom:new{ w = line_w, h = 1 },
         },
     }
@@ -138,7 +138,7 @@ local function settingRow(width, opts)
             text = opts.subtitle,
             face = UI.face("xx_smallinfofont", 12),
             max_width = text_w,
-            fgcolor = Blitbuffer.gray(0.45),
+            fgcolor = UI.muted(),
         })
     end
 
@@ -148,7 +148,7 @@ local function settingRow(width, opts)
             text = opts.status,
             face = UI.face("cfont", 15),
             max_width = status_w,
-            fgcolor = opts.status_on and Blitbuffer.COLOR_BLACK or Blitbuffer.gray(0.45),
+            fgcolor = opts.status_on and Blitbuffer.COLOR_BLACK or UI.muted(),
         })
     end
     if opts.chevron ~= false then
@@ -158,7 +158,7 @@ local function settingRow(width, opts)
         table.insert(right, TextWidget:new{
             text = "›",
             face = UI.face("cfont", 20),
-            fgcolor = Blitbuffer.gray(0.4),
+            fgcolor = UI.muted(),
         })
     end
 
@@ -205,7 +205,7 @@ local function sectionBlock(width, title, row_builders)
             text = title,
             face = UI.face("cfont", 13),
             max_width = width,
-            fgcolor = Blitbuffer.gray(0.4),
+            fgcolor = UI.muted(),
         },
     })
     table.insert(kids, VerticalSpan:new{ width = UI.sz(4) })

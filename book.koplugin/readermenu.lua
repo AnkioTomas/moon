@@ -339,7 +339,7 @@ local function metaRow(label, value, width)
             TextWidget:new{
                 text = label,
                 face = UI.face("xx_smallinfofont", 12),
-                fgcolor = Blitbuffer.gray(0.45),
+                fgcolor = UI.muted(),
             },
         },
         TextWidget:new{
@@ -620,7 +620,7 @@ function ReaderFloatMenu:buildFontRow(width, face_name, on_tap)
             TextWidget:new{
                 text = "›",
                 face = UI.face("cfont", 20),
-                fgcolor = Blitbuffer.gray(0.4),
+                fgcolor = UI.muted(),
             },
         },
     }
@@ -757,7 +757,7 @@ function ReaderFloatMenu:buildDetail(content_w)
             width = content_w,
             height = UI.sz(48),
             alignment = "left",
-            fgcolor = Blitbuffer.gray(0.35),
+            fgcolor = UI.muted(),
         })
     end
     return col
@@ -912,7 +912,7 @@ function ReaderFloatMenu:rebuild()
         table.insert(body_kids, TextWidget:new{
             text = _("阅读设置"),
             face = UI.face("cfont", 14),
-            fgcolor = Blitbuffer.gray(0.4),
+            fgcolor = UI.muted(),
         })
         table.insert(body_kids, VerticalSpan:new{ width = UI.sz(8) })
         table.insert(body_kids, controls)
@@ -974,7 +974,7 @@ function ReaderFloatMenu:rebuild()
 
     local panel = FrameContainer:new{
         bordersize = UI.line(),
-        color = Blitbuffer.gray(0.55),
+        color = UI.rule(),
         padding = pad,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,

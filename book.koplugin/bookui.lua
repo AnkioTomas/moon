@@ -14,6 +14,7 @@ Book 桌面 UI 缩放 — 字号 / 间距 / 图标统一从这里走。
 
 local Device = require("device")
 local Font = require("ui/font")
+local Blitbuffer = require("ffi/blitbuffer")
 local Screen = Device.screen
 
 local UI = {}
@@ -74,6 +75,33 @@ end
 
 function UI.iconSz()
     return UI.sz(24)
+end
+
+--[[ 墨水屏色阶（Blitbuffer.gray：0=白，1=黑！）
+  ink   主文字
+  muted 次要文字：够黑，水墨屏可读
+  dim   未激活底栏
+  rule  分割线 / 细边框
+  track 进度条未填充（浅，但不能太白）
+]]
+function UI.ink()
+    return Blitbuffer.COLOR_BLACK
+end
+
+function UI.muted()
+    return Blitbuffer.COLOR_GRAY_3 -- 0x33，深灰接近黑
+end
+
+function UI.dim()
+    return Blitbuffer.COLOR_GRAY_4 -- 0x44
+end
+
+function UI.rule()
+    return Blitbuffer.COLOR_GRAY_5 -- 0x55，分割线可见
+end
+
+function UI.track()
+    return Blitbuffer.COLOR_LIGHT_GRAY -- 0xCC，空轨浅但不飘
 end
 
 --- TitleBar 关闭等图标：把目标边长折算成 size_ratio
@@ -140,7 +168,7 @@ function UI.progressBar(width, height, percent)
     end
     if empty_w > 0 then
         table.insert(row, LineWidget:new{
-            background = Blitbuffer.gray(0.85),
+            background = UI.track(),
             dimen = Geom:new{ w = empty_w, h = height },
         })
     end
@@ -148,13 +176,13 @@ function UI.progressBar(width, height, percent)
         return TextWidget:new{
             text = string.format("%.0f%%", percent),
             face = UI.face("xx_smallinfofont", 12),
-            fgcolor = Blitbuffer.gray(0.4),
+            fgcolor = UI.muted(),
         }
     end
     local border = UI.line()
     return FrameContainer:new{
         bordersize = border,
-        color = Blitbuffer.gray(0.55),
+        color = UI.rule(),
         padding = 0,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,

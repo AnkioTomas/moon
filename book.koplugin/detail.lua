@@ -65,7 +65,7 @@ local function metaRow(label, value, width)
             TextWidget:new{
                 text = label,
                 face = UI.face("xx_smallinfofont", 14),
-                fgcolor = Blitbuffer.gray(0.45),
+                fgcolor = UI.muted(),
             },
         },
         TextWidget:new{
@@ -230,7 +230,7 @@ function Detail:rebuild()
     if desc and desc ~= "" then
         table.insert(body_kids, VerticalSpan:new{ width = UI.sz(18) })
         table.insert(body_kids, LineWidget:new{
-            background = Blitbuffer.gray(0.85),
+            background = UI.rule(),
             dimen = Geom:new{ w = content_w, h = UI.line() },
         })
         table.insert(body_kids, VerticalSpan:new{ width = UI.sz(10) })
@@ -241,7 +241,7 @@ function Detail:rebuild()
             face = UI.face("xx_smallinfofont", 14),
             width = content_w,
             alignment = "left",
-            fgcolor = Blitbuffer.gray(0.3),
+            fgcolor = UI.muted(),
         })
     end
     table.insert(body_kids, VerticalSpan:new{ width = UI.sz(20) })
