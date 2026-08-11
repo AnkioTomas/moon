@@ -331,29 +331,24 @@ function Home.buildStats(ctx, state)
     }
 end
 
---- 与「在读」网格同一套封面尺度（含最大高度）
-local function coverMetrics(width, pad)
-    local gap = UI.sz(12)
+--- 与「在读」网格同一套封面尺度（列铺满 + 封面 2:3）
+local function coverMetrics(width, pad, area_h)
     local avail = math.max(1, width - pad * 2)
-    local cols = 3
-    local cw = math.floor((avail - gap * (cols - 1)) / cols)
-    if cw < UI.sz(72) then
-        cols = 2
-        cw = math.floor((avail - gap * (cols - 1)) / cols)
-    end
-    cw = math.max(UI.sz(64), cw)
-    local ch
-    cw, ch = UI.coverDim(cw, "grid")
-    return cw, ch, cols, gap, avail
+    local slot_w, cw, ch, cols, gap = UI.coverGridMetrics(avail, area_h, {
+        min_cw = UI.sz(56),
+        min_cols = 2,
+        max_cols = 5,
+    })
+    return slot_w, cw, ch, cols, gap, avail
 end
 
 local function recentRow(ctx, book, on_open, on_read, grid_cw, avail, pad)
     local w = ctx.width
-    -- 主角封面：略大于在读格，但受 coverMaxH("hero") 约束
-    local cw = math.min(math.floor(grid_cw * 1.4), math.floor(avail * 0.42))
+    -- 主角封面：略大于在读封面，但受屏高上限约束
+    local cw = math.min(math.floor(grid_cw * 1.25), math.floor(avail * 0.36))
     cw = math.max(grid_cw, cw)
     local ch
-    cw, ch = UI.coverDim(cw, "hero")
+    cw, ch = UI.coverDim(cw)
     local gap = UI.sz(16)
     local title = bookTitle(book)
     local author = bookAuthor(book)
@@ -457,37 +452,40 @@ local function recentRow(ctx, book, on_open, on_read, grid_cw, avail, pad)
     }, row_h + pad
 end
 
-local function readingCell(ctx, book, cw, ch, on_open)
+local function readingCell(ctx, book, slot_w, cw, ch, on_open)
     local title = bookTitle(book)
     local pct = bookPct(book)
     local filename = bookFile(book)
     local path = Cover.cachedPath(ctx.plugin, filename)
-    local cover_w = Cover.widget(path, cw, ch, title)
+    local cover = Cover.widget(path, cw, ch, title)
     if not path and filename then
         prefetchCover(ctx.api, ctx.plugin, filename)
     end
     local badge = progressBadge(cw, pct)
     if badge then
-        cover_w = OverlapGroup:new{
+        cover = OverlapGroup:new{
             dimen = Geom:new{ w = cw, h = ch },
-            cover_w,
+            cover,
             badge,
         }
     end
     local title_gap = UI.sz(6)
     local title_h = UI.sz(36)
     local total_h = ch + title_gap + title_h
-    local tap = tappable(cw, total_h, function()
+    local tap = tappable(slot_w, total_h, function()
         if on_open then on_open(book) end
     end)
     tap[1] = VerticalGroup:new{
         align = "center",
-        cover_w,
+        CenterContainer:new{
+            dimen = Geom:new{ w = slot_w, h = ch },
+            cover,
+        },
         VerticalSpan:new{ width = title_gap },
         TextWidget:new{
             text = title,
             face = UI.face("xx_smallinfofont", 13),
-            max_width = cw,
+            max_width = slot_w,
             fgcolor = Blitbuffer.COLOR_BLACK,
         },
     }
@@ -515,7 +513,7 @@ function Home.build(ctx, state)
 
     local col = VerticalGroup:new{ align = "left" }
     local used = 0
-    local grid_cw, grid_ch, grid_cols, grid_gap, avail = coverMetrics(w, pad)
+    local _grid_slot, grid_cw, _grid_ch, _grid_cols, _grid_gap, avail = coverMetrics(w, pad, math.floor(h * 0.45))
 
     local header = Home.buildHeader(ctx, state)
     table.insert(col, header)
@@ -569,7 +567,7 @@ function Home.build(ctx, state)
             },
         })
     else
-        local cw, ch, cols, gap = grid_cw, grid_ch, grid_cols, grid_gap
+        local slot_w, cw, ch, cols, gap = coverMetrics(w, pad, math.max(1, remain))
         local cell_h
         local row_group = HorizontalGroup:new{}
         local grid = VerticalGroup:new{ align = "left" }
@@ -591,7 +589,7 @@ function Home.build(ctx, state)
         end
 
         for _, book in ipairs(reading) do
-            local cell, th = readingCell(ctx, book, cw, ch, on_open)
+            local cell, th = readingCell(ctx, book, slot_w, cw, ch, on_open)
             cell_h = th
             if col_i == 0 and grid_h + cell_h > remain then
                 break

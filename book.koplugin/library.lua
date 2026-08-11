@@ -258,11 +258,11 @@ local function bookPct(book)
     return pct
 end
 
-local function coverCell(ctx, book, cw, ch, on_open)
+local function coverCell(ctx, book, slot_w, cw, ch, on_open)
     local title = bookTitle(book)
     local filename = bookFile(book)
     local path = Cover.cachedPath(ctx.plugin, filename)
-    local cover_w = Cover.widget(path, cw, ch, title)
+    local cover = Cover.widget(path, cw, ch, title)
     if not path and filename then
         Cover.ensureAsync(ctx.api, ctx.plugin, filename, nil)
     end
@@ -289,9 +289,9 @@ local function coverCell(ctx, book, cw, ch, on_open)
             math.max(0, cw - bz.w - inset),
             inset,
         }
-        cover_w = OverlapGroup:new{
+        cover = OverlapGroup:new{
             dimen = Geom:new{ w = cw, h = ch },
-            cover_w,
+            cover,
             badge,
         }
     end
@@ -299,17 +299,20 @@ local function coverCell(ctx, book, cw, ch, on_open)
     local title_gap = UI.sz(4)
     local title_h = UI.sz(22)
     local total_h = ch + title_gap + title_h
-    local tap = tappable(cw, total_h, function()
+    local tap = tappable(slot_w, total_h, function()
         if on_open then on_open(book) end
     end)
     tap[1] = VerticalGroup:new{
         align = "center",
-        cover_w,
+        CenterContainer:new{
+            dimen = Geom:new{ w = slot_w, h = ch },
+            cover,
+        },
         VerticalSpan:new{ width = title_gap },
         TextWidget:new{
             text = title,
             face = UI.face("xx_smallinfofont", 13),
-            max_width = cw,
+            max_width = slot_w,
             fgcolor = Blitbuffer.COLOR_BLACK,
         },
     }
@@ -325,18 +328,13 @@ function Library.gridMetrics(w, h)
     local bottom_pad = UI.sz(10)
     local bottom_h = UI.iconSz() + UI.sz(28) + bottom_pad
     local grid_h = math.max(1, h - top_h - bottom_h)
-    local gap = UI.sz(12)
     local row_gap = UI.sz(12)
     local avail = math.max(1, w - pad * 2)
-    local cols = 3
-    local cw = math.floor((avail - gap * (cols - 1)) / cols)
-    if cw < UI.sz(96) then
-        cols = 2
-        cw = math.floor((avail - gap * (cols - 1)) / cols)
-    end
-    cw = math.max(UI.sz(80), cw)
-    local ch
-    cw, ch = UI.coverDim(cw, "grid")
+    local slot_w, cw, ch, cols, gap = UI.coverGridMetrics(avail, grid_h, {
+        min_cw = UI.sz(56),
+        min_cols = 2,
+        max_cols = 5,
+    })
     local cell_h = ch + UI.sz(4) + UI.sz(22)
     local rows = 0
     local used = 0
@@ -355,6 +353,7 @@ function Library.gridMetrics(w, h)
         row_gap = row_gap,
         cols = cols,
         rows = rows,
+        slot_w = slot_w,
         cw = cw,
         ch = ch,
         cell_h = cell_h,
@@ -476,6 +475,7 @@ function Library.build(ctx, state, opts)
 
     local gap = m.gap
     local cols = m.cols
+    local slot_w = m.slot_w or m.cw
     local cw = m.cw
     local ch = m.ch
     local row_gap = m.row_gap
@@ -492,7 +492,7 @@ function Library.build(ctx, state, opts)
         if col_i == 0 and used_h + estimate_h > grid_h then
             break
         end
-        local cell, th = coverCell(ctx, book, cw, ch, on_open)
+        local cell, th = coverCell(ctx, book, slot_w, cw, ch, on_open)
         cell_h = th
         if col_i > 0 then
             table.insert(row, HorizontalSpan:new{ width = gap })
