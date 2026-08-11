@@ -1,23 +1,30 @@
 --[[--
-阅读页悬浮菜单：点屏幕中部弹出
-  顶部书籍信息 · 目录 / 字体 / 主页（退出阅读回 Book 桌面）
+阅读页悬浮面板（底部大面板）
+  详情 · 常用排版调节 · 目录/更多/首页/关闭
+
+常用项对齐 KOReader 底部条：字体、字号、行距、字重、对比度、
+左右/上下边距、分页/滚动；其余通过「更多」进系统配置条。
 
 @module koplugin.book.readermenu
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local ButtonTable = require("ui/widget/buttontable")
+local Button = require("ui/widget/button")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Event = require("ui/event")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
+local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local Menu = require("ui/widget/menu")
+local OverlapGroup = require("ui/widget/overlapgroup")
+local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -25,11 +32,177 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Cover = require("cover")
 local UI = require("bookui")
 local _ = require("gettext")
+local T = require("ffi/util").template
 local Screen = Device.screen
 
---- 打开真正的字体列表（EPUB/CRE）；PDF 等退到顶部排版页，不再误开底部条
-local function showFontSettings(ui)
+local ScrollableContainer
+do
+    local ok, mod = pcall(require, "ui/widget/container/scrollablecontainer")
+    if ok then ScrollableContainer = mod end
+end
+
+local WEIGHT_STEPS = { -1, -0.5, 0, 0.5, 1, 1.5, 3 }
+local GAMMA_STEPS = { 10, 15, 25, 30, 36, 43, 49, 56 }
+local LINE_MIN, LINE_MAX, LINE_STEP = 50, 200, 5
+local FONT_MIN, FONT_MAX, FONT_STEP = 12, 255, 1
+
+-- 左右边距预设 {left, right}；优先读 G_defaults
+local H_MARGINS = {
+    { 5, 5 }, { 10, 10 }, { 15, 15 }, { 20, 20 }, { 30, 30 },
+    { 50, 50 }, { 70, 70 }, { 100, 100 }, { 140, 140 },
+}
+local V_MARGINS = { 5, 10, 15, 20, 30, 50, 70, 100, 140 }
+do
+    local keys_h = {
+        "DCREREADER_CONFIG_H_MARGIN_SIZES_SMALL",
+        "DCREREADER_CONFIG_H_MARGIN_SIZES_MEDIUM",
+        "DCREREADER_CONFIG_H_MARGIN_SIZES_LARGE",
+        "DCREREADER_CONFIG_H_MARGIN_SIZES_X_LARGE",
+        "DCREREADER_CONFIG_H_MARGIN_SIZES_XX_LARGE",
+        "DCREREADER_CONFIG_H_MARGIN_SIZES_XXX_LARGE",
+        "DCREREADER_CONFIG_H_MARGIN_SIZES_HUGE",
+        "DCREREADER_CONFIG_H_MARGIN_SIZES_X_HUGE",
+        "DCREREADER_CONFIG_H_MARGIN_SIZES_XX_HUGE",
+    }
+    local keys_v = {
+        "DCREREADER_CONFIG_T_MARGIN_SIZES_SMALL",
+        "DCREREADER_CONFIG_T_MARGIN_SIZES_MEDIUM",
+        "DCREREADER_CONFIG_T_MARGIN_SIZES_LARGE",
+        "DCREREADER_CONFIG_T_MARGIN_SIZES_X_LARGE",
+        "DCREREADER_CONFIG_T_MARGIN_SIZES_XX_LARGE",
+        "DCREREADER_CONFIG_T_MARGIN_SIZES_XXX_LARGE",
+        "DCREREADER_CONFIG_T_MARGIN_SIZES_HUGE",
+        "DCREREADER_CONFIG_T_MARGIN_SIZES_X_HUGE",
+        "DCREREADER_CONFIG_T_MARGIN_SIZES_XX_HUGE",
+    }
+    local list_h, list_v = {}, {}
+    for _, k in ipairs(keys_h) do
+        local ok, v = pcall(function() return G_defaults:readSetting(k) end)
+        if ok and type(v) == "table" then table.insert(list_h, v) end
+    end
+    for _, k in ipairs(keys_v) do
+        local ok, v = pcall(function() return G_defaults:readSetting(k) end)
+        if ok and type(v) == "number" then table.insert(list_v, v) end
+    end
+    if #list_h > 0 then H_MARGINS = list_h end
+    if #list_v > 0 then V_MARGINS = list_v end
+end
+
+local function pluginIconDir()
+    local info = debug.getinfo(1, "S")
+    local src = info and info.source
+    if src and src:sub(1, 1) == "@" then
+        local dir = src:sub(2):match("(.*/)")
+        if dir then return dir .. "icons/" end
+    end
+    return "icons/"
+end
+
+local function loadIcon(name, size)
+    size = size or UI.iconSz()
+    local ok, img = pcall(function()
+        return ImageWidget:new{
+            file = pluginIconDir() .. name,
+            width = size,
+            height = size,
+            alpha = true,
+        }
+    end)
+    if ok and img then return img end
+    return TextWidget:new{
+        text = "·",
+        face = UI.face("cfont", 16),
+        fgcolor = Blitbuffer.COLOR_BLACK,
+    }
+end
+
+local function nearestIndex(list, value, cmp)
+    local best, best_d = 1, math.huge
+    for i, v in ipairs(list) do
+        local d = cmp and cmp(v, value) or math.abs((tonumber(v) or 0) - (tonumber(value) or 0))
+        if d < best_d then best, best_d = i, d end
+    end
+    return best
+end
+
+local function stepList(list, value, delta, cmp)
+    local i = nearestIndex(list, value, cmp)
+    return list[math.max(1, math.min(#list, i + delta))]
+end
+
+local function stepNum(value, delta, min_v, max_v, step)
+    local v = (tonumber(value) or 0) + delta * step
+    if v < min_v then v = min_v end
+    if v > max_v then v = max_v end
+    return v
+end
+
+local function hMarginCmp(a, b)
+    local al = type(a) == "table" and (tonumber(a[1]) or 0) or 0
+    local bl = type(b) == "table" and (tonumber(b[1]) or 0) or tonumber(b) or 0
+    return math.abs(al - bl)
+end
+
+local function formatWeight(v)
+    v = tonumber(v) or 0
+    if v == 0 then return "0" end
+    if v == math.floor(v) then return string.format("%+d", v) end
+    return string.format("%+.1f", v)
+end
+
+local function formatGamma(v)
+    local labels = {
+        [10] = "0.8", [15] = "1.0", [25] = "1.45", [30] = "1.9",
+        [36] = "2.5", [43] = "4", [49] = "8", [56] = "15",
+    }
+    local n = tonumber(v) or 15
+    return labels[n] or tostring(n)
+end
+
+--- 包装字体菜单：选中叶子项后关闭菜单并回调（回到悬浮面板）
+local function wrapFontItemTable(items, on_pick)
+    if type(items) ~= "table" then
+        return items
+    end
+    local out = {}
+    for k, v in pairs(items) do
+        if type(k) ~= "number" then
+            out[k] = v
+        end
+    end
+    for i, item in ipairs(items) do
+        if type(item) ~= "table" then
+            out[i] = item
+        else
+            local copy = {}
+            for k, v in pairs(item) do
+                copy[k] = v
+            end
+            if copy.sub_item_table then
+                copy.sub_item_table = wrapFontItemTable(copy.sub_item_table, on_pick)
+            elseif type(copy.sub_item_table_func) == "function" then
+                local orig_func = copy.sub_item_table_func
+                copy.sub_item_table_func = function(...)
+                    return wrapFontItemTable(orig_func(...) or {}, on_pick)
+                end
+            elseif type(copy.callback) == "function" then
+                local orig = copy.callback
+                copy.callback = function(...)
+                    local ret = orig(...)
+                    if on_pick then on_pick() end
+                    return ret
+                end
+            end
+            out[i] = copy
+        end
+    end
+    return out
+end
+
+--- on_done: 字体菜单关闭后回调（用于重新打开悬浮面板）
+local function showFontSettings(ui, on_done)
     if not ui then
+        if on_done then on_done() end
         return
     end
     local font = ui.font
@@ -44,84 +217,164 @@ local function showFontSettings(ui)
                 items = font.face_table
             end
             if type(items) == "table" and #items > 0 then
-                UIManager:show(Menu:new{
+                local font_menu
+                local finished = false
+                local function finish()
+                    if finished then return end
+                    finished = true
+                    if font_menu then
+                        UIManager:close(font_menu)
+                        font_menu = nil
+                    end
+                    if on_done then
+                        UIManager:nextTick(on_done)
+                    end
+                end
+                font_menu = Menu:new{
                     title = _("字体"),
-                    item_table = items,
+                    item_table = wrapFontItemTable(items, finish),
                     is_borderless = true,
                     is_popout = false,
                     covers_fullscreen = true,
                     items_font_size = UI.menuFontSize(),
-                    close_callback = function() end,
-                })
+                    close_callback = function()
+                        if finished then return end
+                        finished = true
+                        font_menu = nil
+                        if on_done then
+                            UIManager:nextTick(on_done)
+                        end
+                    end,
+                }
+                UIManager:show(font_menu)
                 return
             end
         end
     end
-    -- 无字体模块：打开顶部菜单「排版」页（通常是第 2 项）
     if ui.menu and ui.menu.onShowMenu then
-        local idx = 2
-        if ui.menu.tab_item_table == nil and ui.menu.setUpdateItemTable then
-            pcall(function() ui.menu:setUpdateItemTable() end)
-        end
-        local tabs = ui.menu.tab_item_table
-        if type(tabs) == "table" then
-            for i, tab in ipairs(tabs) do
-                if tab and (tab.id == "typeset" or tab.name == "typeset") then
-                    idx = i
-                    break
-                end
-            end
-        end
-        ui.menu:onShowMenu(idx)
+        ui.menu:onShowMenu(2)
         return
     end
-    -- 最后兜底才是底部配置条（字号等）
     ui:handleEvent(Event:new("ShowConfigMenu"))
+    if on_done then
+        UIManager:nextTick(on_done)
+    end
 end
 
-local ReaderFloatMenu = InputContainer:extend{
-    name = "book_reader_float_menu",
-    -- false：下层阅读页继续参与绘制，面板外仍能看到正文
-    covers_fullscreen = false,
-    plugin = nil,
-}
+local function docProps(ui)
+    local doc = ui and ui.document
+    if not doc or not doc.getProps then return {} end
+    return doc:getProps() or {}
+end
 
 local function docTitle(ui)
-    local doc = ui and ui.document
-    if not doc then
-        return _("未知书籍")
-    end
-    local props = doc.getProps and doc:getProps() or {}
-    if props.title and props.title ~= "" then
-        return props.title
-    end
-    local file = doc.file or ""
+    local props = docProps(ui)
+    if props.title and props.title ~= "" then return props.title end
+    local file = ui and ui.document and ui.document.file or ""
     return file:match("([^/\\]+)$") or file or _("未知书籍")
 end
 
 local function docAuthor(ui)
-    local doc = ui and ui.document
-    if not doc or not doc.getProps then
-        return ""
-    end
-    local props = doc:getProps() or {}
+    local props = docProps(ui)
     local a = props.authors or props.author or ""
-    if type(a) == "table" then
-        a = table.concat(a, ", ")
-    end
+    if type(a) == "table" then a = table.concat(a, ", ") end
     return tostring(a)
 end
 
-function ReaderFloatMenu:init()
-    self.dimen = Geom:new{
-        x = 0, y = 0,
-        w = Screen:getWidth(),
-        h = Screen:getHeight(),
+local function docSeries(ui)
+    local props = docProps(ui)
+    return props.series or props.series_name or ""
+end
+
+local function docKeywords(ui)
+    local props = docProps(ui)
+    local k = props.keywords or props.tags or ""
+    if type(k) == "table" then k = table.concat(k, " · ") end
+    return tostring(k):gsub("\n+", " · ")
+end
+
+local function docDescription(ui)
+    local props = docProps(ui)
+    return tostring(props.description or props.summary or props.comments or "")
+end
+
+local function currentPageText(ui, plugin)
+    local pct = 0
+    if plugin and plugin.currentFraction then
+        pct = math.floor((plugin:currentFraction() or 0) * 100 + 0.5)
+    end
+    if ui and ui.getCurrentPage and ui.document and ui.document.getPageCount then
+        local page = ui:getCurrentPage()
+        local total = ui.document:getPageCount()
+        if page and total and total > 0 then
+            return T(_("第 %1 / %2 页 · %3%"), page, total, pct), pct
+        end
+    end
+    return string.format("%d%%", pct), pct
+end
+
+local function tappable(w, h, on_tap)
+    local tap = InputContainer:new{ dimen = Geom:new{ w = w, h = h } }
+    tap.ges_events = {
+        TapFloat = {
+            GestureRange:new{
+                ges = "tap",
+                range = function() return tap.dimen end,
+            },
+        },
     }
+    tap.onTapFloat = function()
+        if on_tap then on_tap() end
+        return true
+    end
+    return tap
+end
+
+local function metaRow(label, value, width)
+    if not value or value == "" then return nil end
+    local label_w = UI.sz(56)
+    local value_w = math.max(UI.sz(40), width - label_w - UI.sz(4))
+    return HorizontalGroup:new{
+        LeftContainer:new{
+            dimen = Geom:new{ w = label_w, h = UI.sz(24) },
+            TextWidget:new{
+                text = label,
+                face = UI.face("xx_smallinfofont", 12),
+                fgcolor = Blitbuffer.gray(0.45),
+            },
+        },
+        TextWidget:new{
+            text = tostring(value),
+            face = UI.face("cfont", 13),
+            max_width = value_w,
+            fgcolor = Blitbuffer.COLOR_BLACK,
+        },
+    }
+end
+
+local function sectionLine(width)
+    return LineWidget:new{
+        background = Blitbuffer.gray(0.82),
+        dimen = Geom:new{ w = width, h = UI.line() },
+    }
+end
+
+local function isPageView(cfg)
+    local v = cfg and cfg.view_mode
+    if v == "scroll" or v == 1 then return false end
+    return true
+end
+
+local ReaderFloatMenu = InputContainer:extend{
+    name = "book_reader_float_menu",
+    covers_fullscreen = false,
+    plugin = nil,
+}
+
+function ReaderFloatMenu:init()
+    self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     if Device:hasKeys() then
-        self.key_events = {
-            Close = { { Device.input.group.Back } },
-        }
+        self.key_events = { Close = { { Device.input.group.Back } } }
     end
     self:rebuild()
 end
@@ -134,15 +387,12 @@ function ReaderFloatMenu:onClose()
     self._closed = true
     local region = self._panel_dimen
     UIManager:close(self)
-    -- 只刷面板区域，避免整屏闪；下层阅读页露出来
     if region then
         UIManager:setDirty("all", "ui", region)
     else
         UIManager:setDirty("all", "ui")
     end
-    if self.close_callback then
-        self.close_callback()
-    end
+    if self.close_callback then self.close_callback() end
     return true
 end
 
@@ -150,137 +400,519 @@ function ReaderFloatMenu:onCloseWidget()
     self._closed = true
 end
 
-function ReaderFloatMenu:rebuild()
+function ReaderFloatMenu:refreshPanel()
+    if self._closed then return end
+    self:rebuild()
+    UIManager:setDirty(self, "ui", self._panel_dimen)
+end
+
+function ReaderFloatMenu:applyCre(event_name, value)
+    local ui = self.plugin and self.plugin.ui
+    if not ui then return end
+    ui:handleEvent(Event:new(event_name, value))
+    self:refreshPanel()
+    UIManager:setDirty("all", "partial")
+end
+
+function ReaderFloatMenu:applyCreBatch(events)
+    local ui = self.plugin and self.plugin.ui
+    if not ui then return end
+    for _, ev in ipairs(events) do
+        ui:handleEvent(Event:new(ev[1], ev[2]))
+    end
+    self:refreshPanel()
+    UIManager:setDirty("all", "partial")
+end
+
+function ReaderFloatMenu:hasCreControls()
+    local ui = self.plugin and self.plugin.ui
+    return ui and ui.font and ui.document and ui.document.configurable
+        and not ui.document.koptinterface
+end
+
+--- 半宽紧凑步进（两列网格用）
+function ReaderFloatMenu:buildCompactStep(width, icon_name, label, value_text, on_minus, on_plus)
+    local btn_w = UI.sz(36)
+    local btn_h = UI.sz(32)
+    local row_h = UI.sz(52)
+    local icon = loadIcon(icon_name, UI.sz(18))
+    local minus = Button:new{
+        text = "−",
+        text_font_size = UI.fontSize(20),
+        bordersize = UI.line(),
+        margin = 0,
+        padding = 0,
+        width = btn_w,
+        height = btn_h,
+        callback = on_minus,
+        show_parent = self,
+    }
+    local plus = Button:new{
+        text = "+",
+        text_font_size = UI.fontSize(20),
+        bordersize = UI.line(),
+        margin = 0,
+        padding = 0,
+        width = btn_w,
+        height = btn_h,
+        callback = on_plus,
+        show_parent = self,
+    }
+    local mid_w = math.max(UI.sz(48), width - UI.sz(8) * 2 - btn_w * 2 - UI.sz(22))
+    local head = HorizontalGroup:new{
+        align = "center",
+        icon,
+        HorizontalSpan:new{ width = UI.sz(4) },
+        TextWidget:new{
+            text = label,
+            face = UI.face("xx_smallinfofont", 11),
+            fgcolor = Blitbuffer.gray(0.45),
+            max_width = width - UI.sz(28),
+        },
+    }
+    local controls = HorizontalGroup:new{
+        align = "center",
+        minus,
+        CenterContainer:new{
+            dimen = Geom:new{ w = mid_w, h = btn_h },
+            TextWidget:new{
+                text = value_text,
+                face = UI.face("cfont", 15),
+                fgcolor = Blitbuffer.COLOR_BLACK,
+            },
+        },
+        plus,
+    }
+    return FrameContainer:new{
+        bordersize = UI.line(),
+        color = Blitbuffer.gray(0.7),
+        padding = UI.sz(6),
+        margin = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        dimen = Geom:new{ w = width, h = row_h },
+        VerticalGroup:new{
+            align = "center",
+            head,
+            VerticalSpan:new{ width = UI.sz(4) },
+            controls,
+        },
+    }
+end
+
+function ReaderFloatMenu:buildFontRow(width, face_name, on_tap)
+    local border = UI.line()
+    local pad = UI.sz(8)
+    local row_h = UI.sz(42)
+    local icon_w = UI.sz(26)
+    local chev_w = UI.sz(16)
+    local label_w = math.max(UI.sz(40), width - border * 2 - pad * 2 - icon_w - UI.sz(6) - chev_w)
+    local inner = HorizontalGroup:new{
+        align = "center",
+        CenterContainer:new{
+            dimen = Geom:new{ w = icon_w, h = row_h - pad * 2 },
+            loadIcon("font.svg", UI.sz(20)),
+        },
+        HorizontalSpan:new{ width = UI.sz(6) },
+        LeftContainer:new{
+            dimen = Geom:new{ w = label_w, h = row_h - pad * 2 },
+            TextWidget:new{
+                text = T(_("字体  %1"), face_name or _("默认")),
+                face = UI.face("cfont", 15),
+                max_width = label_w,
+                fgcolor = Blitbuffer.COLOR_BLACK,
+            },
+        },
+        CenterContainer:new{
+            dimen = Geom:new{ w = chev_w, h = row_h - pad * 2 },
+            TextWidget:new{
+                text = "›",
+                face = UI.face("cfont", 20),
+                fgcolor = Blitbuffer.gray(0.4),
+            },
+        },
+    }
+    local tap = tappable(width, row_h, on_tap)
+    tap[1] = FrameContainer:new{
+        bordersize = border,
+        color = Blitbuffer.COLOR_BLACK,
+        padding = pad,
+        margin = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        dimen = Geom:new{ w = width, h = row_h },
+        inner,
+    }
+    return tap
+end
+
+function ReaderFloatMenu:buildViewToggle(width, is_page, on_page, on_scroll)
+    local gap = UI.sz(8)
+    local icon_slot = UI.sz(30)
+    local btn_w = math.floor((width - icon_slot - gap) / 2)
+    local btn_h = UI.sz(36)
+    local function chip(text, active, cb)
+        return Button:new{
+            text = text,
+            text_font_size = UI.fontSize(15),
+            text_font_bold = active,
+            bordersize = active and math.max(2, UI.line()) or UI.line(),
+            margin = 0,
+            padding = UI.sz(4),
+            width = btn_w,
+            height = btn_h,
+            callback = cb,
+            show_parent = self,
+        }
+    end
+    return FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        margin = 0,
+        dimen = Geom:new{ w = width, h = btn_h },
+        HorizontalGroup:new{
+            align = "center",
+            CenterContainer:new{
+                dimen = Geom:new{ w = icon_slot, h = btn_h },
+                loadIcon("view.svg", UI.sz(18)),
+            },
+            chip(_("分页"), is_page, on_page),
+            HorizontalSpan:new{ width = gap },
+            chip(_("滚动"), not is_page, on_scroll),
+        },
+    }
+end
+
+function ReaderFloatMenu:buildActionCell(cell_w, icon_name, text, callback)
+    local h = UI.iconSz() + UI.sz(26)
+    local tap = tappable(cell_w, h, callback)
+    tap[1] = CenterContainer:new{
+        dimen = Geom:new{ w = cell_w, h = h },
+        VerticalGroup:new{
+            align = "center",
+            loadIcon(icon_name, UI.iconSz()),
+            VerticalSpan:new{ width = UI.sz(3) },
+            TextWidget:new{
+                text = text,
+                face = UI.face("xx_smallinfofont", 12),
+                fgcolor = Blitbuffer.COLOR_BLACK,
+            },
+        },
+    }
+    return tap, h
+end
+
+function ReaderFloatMenu:buildDetail(content_w)
     local plugin = self.plugin
     local ui = plugin and plugin.ui
-    local w = Screen:getWidth()
-    local h = Screen:getHeight()
-    local pad = UI.sz(16)
-    local panel_w = math.min(w - pad * 2, UI.sz(420))
     local title = docTitle(ui)
     local author = docAuthor(ui)
-    local pct = 0
-    if plugin and plugin.currentFraction then
-        pct = math.floor((plugin:currentFraction() or 0) * 100 + 0.5)
-    end
-
+    local series = docSeries(ui)
+    local keywords = docKeywords(ui)
+    local desc = docDescription(ui)
+    local page_text, pct = currentPageText(ui, plugin)
     local filename = plugin and plugin.remoteFilenameForCurrent and plugin:remoteFilenameForCurrent()
-    local cw, ch = UI.sz(72), UI.sz(100)
+
+    local cw, ch = UI.sz(76), UI.sz(108)
     local path = Cover.cachedPath(plugin, filename)
     local cover_w = Cover.widget(path, cw, ch, title)
     if not path and filename and plugin and plugin.getApi then
         Cover.ensureAsync(plugin:getApi(), plugin, filename, nil)
     end
 
-    local info_w = math.max(UI.sz(40), panel_w - pad * 2 - cw - UI.sz(12))
-    local info = VerticalGroup:new{
-        align = "left",
-        TextWidget:new{
-            text = title,
-            face = UI.face("cfont", 18),
-            max_width = info_w,
-            fgcolor = Blitbuffer.COLOR_BLACK,
-        },
-        VerticalSpan:new{ width = UI.sz(6) },
-        TextWidget:new{
-            text = author ~= "" and author or _("未知作者"),
-            face = UI.face("xx_smallinfofont", 14),
-            max_width = info_w,
-            fgcolor = Blitbuffer.gray(0.45),
-        },
-        VerticalSpan:new{ width = UI.sz(10) },
-        UI.progressBar(info_w, UI.sz(8), pct),
-        VerticalSpan:new{ width = UI.sz(4) },
-        TextWidget:new{
-            text = string.format("%d%%", pct),
-            face = UI.face("xx_smallinfofont", 13),
-            fgcolor = Blitbuffer.gray(0.4),
-        },
-    }
-
-    local header = HorizontalGroup:new{
-        align = "top",
-        cover_w,
-        HorizontalSpan:new{ width = UI.sz(12) },
-        LeftContainer:new{
-            dimen = Geom:new{ w = info_w, h = math.max(ch, UI.sz(100)) },
-            info,
-        },
-    }
-
-    local btn_font = UI.buttonFontSize()
-    local function afterClose(fn)
-        return function()
-            self:onClose()
-            UIManager:nextTick(fn)
+    local info_w = math.max(UI.sz(40), content_w - cw - UI.sz(10))
+    local kids = { align = "left" }
+    table.insert(kids, TextWidget:new{
+        text = title,
+        face = UI.face("cfont", 17),
+        max_width = info_w,
+        fgcolor = Blitbuffer.COLOR_BLACK,
+    })
+    for _, row in ipairs({
+        metaRow(_("作者"), author ~= "" and author or _("未知作者"), info_w),
+        metaRow(_("系列"), series, info_w),
+        metaRow(_("标签"), keywords, info_w),
+        metaRow(_("进度"), page_text, info_w),
+    }) do
+        if row then
+            table.insert(kids, VerticalSpan:new{ width = UI.sz(3) })
+            table.insert(kids, row)
         end
     end
+    table.insert(kids, VerticalSpan:new{ width = UI.sz(6) })
+    table.insert(kids, UI.progressBar(info_w, UI.sz(7), pct))
 
-    local buttons = ButtonTable:new{
-        width = panel_w - pad * 2,
-        buttons = {
-            {
-                {
-                    text = _("目录"),
-                    font_size = btn_font,
-                    callback = afterClose(function()
-                        if ui and ui.toc and ui.toc.onShowToc then
-                            ui.toc:onShowToc()
-                        end
-                    end),
-                },
-                {
-                    text = _("字体"),
-                    font_size = btn_font,
-                    callback = afterClose(function()
-                        showFontSettings(ui)
-                    end),
-                },
-            },
-            {
-                {
-                    text = _("主页"),
-                    font_size = btn_font,
-                    callback = afterClose(function()
-                        if plugin and plugin.exitReadingToDesktop then
-                            plugin:exitReadingToDesktop()
-                        end
-                    end),
-                },
-                {
-                    text = _("关闭"),
-                    font_size = btn_font,
-                    callback = function()
-                        self:onClose()
-                    end,
-                },
+    local col = VerticalGroup:new{
+        align = "left",
+        HorizontalGroup:new{
+            align = "top",
+            cover_w,
+            HorizontalSpan:new{ width = UI.sz(10) },
+            LeftContainer:new{
+                dimen = Geom:new{ w = info_w, h = math.max(ch, UI.sz(100)) },
+                VerticalGroup:new(kids),
             },
         },
-        zero_sep = true,
-        show_parent = self,
     }
+    if desc ~= "" then
+        table.insert(col, VerticalSpan:new{ width = UI.sz(8) })
+        table.insert(col, TextBoxWidget:new{
+            text = desc,
+            face = UI.face("xx_smallinfofont", 12),
+            width = content_w,
+            height = UI.sz(48),
+            alignment = "left",
+            fgcolor = Blitbuffer.gray(0.35),
+        })
+    end
+    return col
+end
 
-    local body = VerticalGroup:new{
-        align = "center",
-        header,
-        VerticalSpan:new{ width = UI.sz(14) },
-        LineWidget:new{
-            background = Blitbuffer.gray(0.8),
-            dimen = Geom:new{ w = panel_w - pad * 2, h = UI.line() },
-        },
-        VerticalSpan:new{ width = UI.sz(14) },
-        buttons,
+function ReaderFloatMenu:buildControls(content_w)
+    local ui = self.plugin and self.plugin.ui
+    if not self:hasCreControls() then
+        return nil
+    end
+    local cfg = ui.document.configurable
+    local face = (ui.font and ui.font.font_face) or _("默认")
+    local size = tonumber(cfg.font_size) or 22
+    local spacing = tonumber(cfg.line_spacing) or 100
+    local weight = tonumber(cfg.font_base_weight) or 0
+    local gamma = tonumber(cfg.font_gamma) or 15
+    local h_margins = cfg.h_page_margins or { 10, 10 }
+    local t_margin = tonumber(cfg.t_page_margin) or 10
+    local page_mode = isPageView(cfg)
+
+    local gap = UI.sz(8)
+    local half = math.floor((content_w - gap) / 2)
+    local pair_w = half * 2 + gap
+    local step_h = UI.sz(52)
+    local menu = self
+
+    -- 双栏行：在 content_w 内水平居中
+    local function pair(a, b)
+        local row = HorizontalGroup:new{
+            a,
+            HorizontalSpan:new{ width = gap },
+            b,
+        }
+        return CenterContainer:new{
+            dimen = Geom:new{ w = content_w, h = step_h },
+            FrameContainer:new{
+                bordersize = 0,
+                padding = 0,
+                margin = 0,
+                dimen = Geom:new{ w = pair_w, h = step_h },
+                row,
+            },
+        }
+    end
+
+    local col = VerticalGroup:new{ align = "center" }
+
+    -- 字体：选完后关字体页并重新打开本悬浮面板
+    table.insert(col, self:buildFontRow(content_w, face, function()
+        local plugin = menu.plugin
+        menu:onClose()
+        UIManager:nextTick(function()
+            showFontSettings(ui, function()
+                if plugin and plugin.onTapBookReaderFloatMenu then
+                    plugin:onTapBookReaderFloatMenu()
+                end
+            end)
+        end)
+    end))
+    table.insert(col, VerticalSpan:new{ width = UI.sz(8) })
+
+    -- 分页 / 滚动
+    table.insert(col, self:buildViewToggle(content_w, page_mode,
+        function()
+            if not page_mode then menu:applyCre("SetViewMode", "page") end
+        end,
+        function()
+            if page_mode then menu:applyCre("SetViewMode", "scroll") end
+        end))
+    table.insert(col, VerticalSpan:new{ width = UI.sz(8) })
+
+    -- 两列：字号 | 行距
+    table.insert(col, pair(
+        self:buildCompactStep(half, "font_size.svg", _("字号"), string.format("%g", size),
+            function() menu:applyCre("SetFontSize", stepNum(size, -1, FONT_MIN, FONT_MAX, FONT_STEP)) end,
+            function() menu:applyCre("SetFontSize", stepNum(size, 1, FONT_MIN, FONT_MAX, FONT_STEP)) end),
+        self:buildCompactStep(half, "line_spacing.svg", _("行距"), string.format("%d%%", spacing),
+            function() menu:applyCre("SetLineSpace", stepNum(spacing, -1, LINE_MIN, LINE_MAX, LINE_STEP)) end,
+            function() menu:applyCre("SetLineSpace", stepNum(spacing, 1, LINE_MIN, LINE_MAX, LINE_STEP)) end)
+    ))
+    table.insert(col, VerticalSpan:new{ width = gap })
+
+    -- 两列：字重 | 对比度
+    table.insert(col, pair(
+        self:buildCompactStep(half, "font_weight.svg", _("字重"), formatWeight(weight),
+            function() menu:applyCre("SetFontBaseWeight", stepList(WEIGHT_STEPS, weight, -1)) end,
+            function() menu:applyCre("SetFontBaseWeight", stepList(WEIGHT_STEPS, weight, 1)) end),
+        self:buildCompactStep(half, "contrast.svg", _("对比度"), formatGamma(gamma),
+            function() menu:applyCre("SetFontGamma", stepList(GAMMA_STEPS, gamma, -1)) end,
+            function() menu:applyCre("SetFontGamma", stepList(GAMMA_STEPS, gamma, 1)) end)
+    ))
+    table.insert(col, VerticalSpan:new{ width = gap })
+
+    -- 两列：左右边距 | 上下边距
+    local h_val = tonumber(h_margins[1]) or 10
+    table.insert(col, pair(
+        self:buildCompactStep(half, "margin.svg", _("左右边距"), tostring(h_val),
+            function()
+                menu:applyCre("SetPageHorizMargins", stepList(H_MARGINS, h_margins, -1, hMarginCmp))
+            end,
+            function()
+                menu:applyCre("SetPageHorizMargins", stepList(H_MARGINS, h_margins, 1, hMarginCmp))
+            end),
+        self:buildCompactStep(half, "margin.svg", _("上下边距"), tostring(t_margin),
+            function()
+                local v = stepList(V_MARGINS, t_margin, -1)
+                menu:applyCreBatch({
+                    { "SetPageTopMargin", v },
+                    { "SetPageBottomMargin", v },
+                })
+            end,
+            function()
+                local v = stepList(V_MARGINS, t_margin, 1)
+                menu:applyCreBatch({
+                    { "SetPageTopMargin", v },
+                    { "SetPageBottomMargin", v },
+                })
+            end)
+    ))
+
+    return col
+end
+
+function ReaderFloatMenu:buildActions(content_w)
+    local plugin = self.plugin
+    local ui = plugin and plugin.ui
+    local n = 4
+    local cell_w = math.floor(content_w / n)
+    local menu = self
+    local items = {
+        { "toc.svg", _("目录"), function()
+            menu:onClose()
+            UIManager:nextTick(function()
+                if ui and ui.toc and ui.toc.onShowToc then ui.toc:onShowToc() end
+            end)
+        end },
+        { "more.svg", _("更多"), function()
+            menu:onClose()
+            UIManager:nextTick(function()
+                if ui then ui:handleEvent(Event:new("ShowConfigMenu")) end
+            end)
+        end },
+        { "home.svg", _("首页"), function()
+            menu:onClose()
+            UIManager:nextTick(function()
+                if plugin and plugin.exitReadingToDesktop then
+                    plugin:exitReadingToDesktop()
+                end
+            end)
+        end },
+        { "close.svg", _("关闭"), function() menu:onClose() end },
     }
+    local row = HorizontalGroup:new{}
+    local h = 0
+    for _, it in ipairs(items) do
+        local cell, ch = self:buildActionCell(cell_w, it[1], it[2], it[3])
+        table.insert(row, cell)
+        if ch > h then h = ch end
+    end
+    return FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        margin = 0,
+        dimen = Geom:new{ w = content_w, h = h },
+        row,
+    }, h
+end
+
+function ReaderFloatMenu:rebuild()
+    local w = Screen:getWidth()
+    local h = Screen:getHeight()
+    local pad = UI.sz(12)
+    local panel_w = w - pad * 2
+    local content_w = panel_w - pad * 2
+    local max_h = math.floor(h * 0.88)
+
+    local detail = self:buildDetail(content_w)
+    local controls = self:buildControls(content_w)
+    local actions = self:buildActions(content_w)
+
+    local body_kids = { align = "left", detail }
+    table.insert(body_kids, VerticalSpan:new{ width = UI.sz(10) })
+    table.insert(body_kids, sectionLine(content_w))
+
+    if controls then
+        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(8) })
+        table.insert(body_kids, TextWidget:new{
+            text = _("阅读设置"),
+            face = UI.face("cfont", 14),
+            fgcolor = Blitbuffer.COLOR_BLACK,
+        })
+        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(6) })
+        table.insert(body_kids, controls)
+        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(10) })
+        table.insert(body_kids, sectionLine(content_w))
+    else
+        -- PDF：无 CRE 控件，给系统配置入口
+        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(8) })
+        local tap = tappable(content_w, UI.sz(42), function()
+            self:onClose()
+            UIManager:nextTick(function()
+                local ui = self.plugin and self.plugin.ui
+                if ui then ui:handleEvent(Event:new("ShowConfigMenu")) end
+            end)
+        end)
+        tap[1] = FrameContainer:new{
+            bordersize = UI.line(),
+            color = Blitbuffer.COLOR_BLACK,
+            padding = UI.sz(8),
+            background = Blitbuffer.COLOR_WHITE,
+            dimen = Geom:new{ w = content_w, h = UI.sz(42) },
+            HorizontalGroup:new{
+                align = "center",
+                loadIcon("more.svg", UI.sz(20)),
+                HorizontalSpan:new{ width = UI.sz(8) },
+                TextWidget:new{
+                    text = _("排版与显示设置"),
+                    face = UI.face("cfont", 15),
+                    fgcolor = Blitbuffer.COLOR_BLACK,
+                },
+            },
+        }
+        table.insert(body_kids, tap)
+        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(10) })
+        table.insert(body_kids, sectionLine(content_w))
+    end
+
+    table.insert(body_kids, VerticalSpan:new{ width = UI.sz(6) })
+    table.insert(body_kids, actions)
+
+    local body = VerticalGroup:new(body_kids)
     local body_h = body:getSize().h
-    local panel_h = body_h + pad * 2
-    local panel_x = math.floor((w - panel_w) / 2)
-    local panel_y = math.floor((h - panel_h) / 2)
-    self._panel_dimen = Geom:new{
-        x = panel_x,
-        y = panel_y,
-        w = panel_w,
-        h = panel_h,
-    }
+    local panel_h = math.min(max_h, body_h + pad * 2)
+    local scroll_h = panel_h - pad * 2
+    local content, inner_h
+
+    if ScrollableContainer and body_h > scroll_h then
+        self.cropping_widget = ScrollableContainer:new{
+            dimen = Geom:new{ w = content_w, h = scroll_h },
+            show_parent = self,
+            LeftContainer:new{
+                dimen = Geom:new{ w = content_w, h = body_h },
+                body,
+            },
+        }
+        content = self.cropping_widget
+        inner_h = scroll_h
+    else
+        content = body
+        panel_h = body_h + pad * 2
+        inner_h = body_h
+    end
 
     local panel = FrameContainer:new{
         bordersize = math.max(2, UI.line()),
@@ -289,11 +921,29 @@ function ReaderFloatMenu:rebuild()
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
         dimen = Geom:new{ w = panel_w, h = panel_h },
-        body,
+        LeftContainer:new{
+            dimen = Geom:new{ w = content_w, h = inner_h },
+            content,
+        },
     }
 
-    -- 只画居中面板，不铺全屏白底；阅读页在四周保持可见
-    self[1] = CenterContainer:new{
+    local panel_x = math.floor((w - panel_w) / 2)
+    -- 底部留白加大，避免贴底；垂直略偏下但仍居中感
+    local bottom_gap = UI.sz(56)
+    local top_gap = UI.sz(24)
+    local panel_y = h - panel_h - bottom_gap
+    if panel_y < top_gap then
+        panel_y = top_gap
+    end
+    -- 若高度有余，再往上抬一点（整体垂直居中偏下）
+    local slack = h - panel_h - bottom_gap - top_gap
+    if slack > 0 then
+        panel_y = top_gap + math.floor(slack * 0.35)
+    end
+    self._panel_dimen = Geom:new{ x = panel_x, y = panel_y, w = panel_w, h = panel_h }
+    panel.overlap_offset = { panel_x, panel_y }
+
+    self[1] = OverlapGroup:new{
         dimen = Geom:new{ w = w, h = h },
         panel,
     }

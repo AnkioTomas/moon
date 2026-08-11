@@ -46,7 +46,7 @@ local function defaultSettings()
         open_on_start = true,
         home_header = "clock",
         ui_scale = 130,
-        reader_float_menu = true,
+        reader_float_menu = true, -- 注入阅读页中键悬浮菜单，默认开
         library_dir = DataStorage:getDataDir() .. "/books",
     }
 end
@@ -848,8 +848,13 @@ function BookPlugin:onTapBookReaderFloatMenu()
     end
     self._reader_float_menu = menu
     UIManager:show(menu)
-    -- 刷全栈：下层阅读页 + 上层面板；面板外正文仍可见
-    UIManager:setDirty("all", "ui")
+    -- 下层阅读页 + 面板；优先刷面板区域
+    if menu._panel_dimen then
+        UIManager:setDirty("all", "ui", menu._panel_dimen)
+        UIManager:setDirty("all", "ui")
+    else
+        UIManager:setDirty("all", "ui")
+    end
     return true
 end
 
