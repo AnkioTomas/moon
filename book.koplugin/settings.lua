@@ -27,6 +27,14 @@ local UI = require("bookui")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+local function pluginVersion()
+    local ok, ver = pcall(require, "bookversion")
+    if ok and type(ver) == "string" and ver ~= "" then
+        return ver
+    end
+    return "0.0.0-dev"
+end
+
 local ScrollableContainer
 do
     local ok, mod = pcall(require, "ui/widget/container/scrollablecontainer")
@@ -411,16 +419,18 @@ function Settings.build(desktop)
             })
         end,
         function(iw)
+            local ver = pluginVersion()
             return settingRow(iw, {
                 icon = "about.svg",
                 title = _("关于"),
-                subtitle = _("作者与项目地址"),
+                subtitle = T(_("版本 %1"), ver),
                 callback = function()
                     UIManager:show(InfoMessage:new{
-                        text = _([[Book 书库
+                        text = T(_([[Book 书库
+版本：%1
 
 作者：AnkioTomas
-GitHub：https://github.com/AnkioTomas/moon]]),
+GitHub：https://github.com/AnkioTomas/moon]]), ver),
                     })
                 end,
             })

@@ -86,6 +86,21 @@ Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供�
 
 首次进入主页时，插件会异步删除连续 90 天未打开的本地书籍及相应封面。**设置 → 清理缓存** 会删除该目录中的全部书籍与封面并重置本地映射，但不会删除服务器端内容。
 
+## 版本号
+
+插件版本写在 `book.koplugin/bookversion.lua`（故意不用 `version.lua`，以免和 KOReader 自带模块冲突）。未注入时为 `0.0.0-dev`；设置页 **关于** 会显示该版本。
+
+外部打包时注入示例：
+
+```bash
+# 整文件覆盖（推荐）
+VERSION=1.2.3
+printf 'return "%s"\n' "$VERSION" > book.koplugin/bookversion.lua
+
+# 或替换占位符
+sed -i.bak "s/@VERSION@/${VERSION}/g" book.koplugin/bookversion.lua
+```
+
 ## 许可证
 
 本仓库当前未提供许可证文件。使用、分发或修改前请先向项目维护者确认授权条件。

@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.+-].*)?$ ]]; then
+            echo "Invalid version tag: ${TAG} (expected vMAJOR.MINOR.PATCH)"
+            exit 1
+          fi
+
+          PRERELEASE=false
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE=true
+          fi
+
+          {
+            echo "tag=${TAG}"
+            echo "version=${VERSION}"
+            echo "prerelease=${PRERELEASE}"
+            echo "asset=book.koplugin-${TAG}.zip"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Inject version and package
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          ASSET="${{ steps.ver.outputs.asset }}"
+
+          # 与 README / bookversion.lua 约定一致：整文件覆盖注入
+          printf 'return "%s"\n' "$VERSION" > book.koplugin/bookversion.lua
+
+          zip -r "$ASSET" book.koplugin \
+            -x "*.DS_Store" \
+            -x "*/.DS_Store" \
+            -x "*~"
+
+          echo "Packaged ${ASSET} (version ${VERSION})"
+          unzip -l "$ASSET" | head -n 30
+
+      - name: Build release notes
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+
+          PREV="$(git tag --list 'v*' --sort=-version:refname \
+            | grep -Fxv "$TAG" \
+            | head -n 1 || true)"
+
+          if [ -n "$PREV" ]; then
+            RANGE="${PREV}..${TAG}"
+          else
+            RANGE="${TAG}"
+          fi
+
+          {
+            echo "## Book ${TAG}"
+            echo
+            echo "KOReader 插件包：\`${{ steps.ver.outputs.asset }}\`"
+            echo
+            echo "安装：解压后将 \`book.koplugin\` 复制到 KOReader 的 \`plugins\` 目录，然后重启。"
+            echo
+            echo "### 更新内容"
+            echo
+
+            if [ -n "$PREV" ]; then
+              echo "相对上一版本 \`${PREV}\`："
+            else
+              echo "首个发布版本。"
+            fi
+            echo
+
+            dump_group() {
+              local title="$1"
+              local pattern="$2"
+              local lines
+              lines="$(git log --no-merges --pretty=format:'- %s (%h)' "$RANGE" \
+                | grep -E "$pattern" || true)"
+              if [ -n "$lines" ]; then
+                echo "#### ${title}"
+                echo
+                printf '%s\n' "$lines"
+                echo
+              fi
+            }
+
+            # 本仓库常用 :emoji: 约定 + 常规 conventional commits
+            dump_group "新功能" '(:sparkles:|^feat(\(.+\))?!:|^feat(\(.+\))?:)'
+            dump_group "修复" '(:bug:|^fix(\(.+\))?!:|^fix(\(.+\))?:)'
+            dump_group "界面" '(:lipstick:|:art:|^style(\(.+\))?:)'
+            dump_group "性能" '(:zap:|^perf(\(.+\))?:)'
+            dump_group "重构" '(:recycle:|^refactor(\(.+\))?:)'
+            dump_group "文档" '(:memo:|^docs(\(.+\))?:)'
+            dump_group "其他" '(:wrench:|:construction:|:package:|^chore(\(.+\))?:|^ci(\(.+\))?:|^build(\(.+\))?:)'
+
+            KNOWN='(:sparkles:|:bug:|:lipstick:|:art:|:zap:|:recycle:|:memo:|:wrench:|:construction:|:package:|^feat(\(.+\))?!:|^feat(\(.+\))?:|^fix(\(.+\))?!:|^fix(\(.+\))?:|^style(\(.+\))?:|^perf(\(.+\))?:|^refactor(\(.+\))?:|^docs(\(.+\))?:|^chore(\(.+\))?:|^ci(\(.+\))?:|^build(\(.+\))?:)'
+            REST="$(git log --no-merges --pretty=format:'- %s (%h)' "$RANGE" \
+              | grep -Ev "$KNOWN" || true)"
+            if [ -n "$REST" ]; then
+              echo "#### 变更"
+              echo
+              printf '%s\n' "$REST"
+              echo
+            fi
+
+            if ! git log --no-merges --pretty=format:'x' "$RANGE" | grep -q .; then
+              echo "- （无提交记录）"
+              echo
+            fi
+
+            if [ -n "$PREV" ]; then
+              echo "### 完整对比"
+              echo
+              echo "${{ github.server_url }}/${{ github.repository }}/compare/${PREV}...${TAG}"
+              echo
+            fi
+          } > RELEASE_NOTES.md
+
+          cat RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          ASSET="${{ steps.ver.outputs.asset }}"
+          ARGS=(release create "$TAG" "$ASSET" --title "Book ${TAG}" --notes-file RELEASE_NOTES.md)
+
+          if [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
+            ARGS+=(--prerelease)
+          fi
+
+          gh "${ARGS[@]}"
