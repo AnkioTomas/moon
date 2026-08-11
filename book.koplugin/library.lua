@@ -22,6 +22,7 @@ local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local Menu = require("ui/widget/menu")
 local OverlapGroup = require("ui/widget/overlapgroup")
@@ -70,6 +71,36 @@ local FILTER_KINDS = {
 
 local FILTER_ORDER = { "favorite", "category", "series", "author" }
 
+local function pluginIconDir()
+    local info = debug.getinfo(1, "S")
+    local src = info and info.source
+    if src and src:sub(1, 1) == "@" then
+        local dir = src:sub(2):match("(.*/)")
+        if dir then return dir .. "icons/" end
+    end
+    return "icons/"
+end
+
+local function loadIcon(name, size)
+    size = size or UI.sz(18)
+    local ok, img = pcall(function()
+        return ImageWidget:new{
+            file = pluginIconDir() .. name,
+            width = size,
+            height = size,
+            alpha = true,
+        }
+    end)
+    if ok and img then
+        return img
+    end
+    return TextWidget:new{
+        text = "·",
+        face = UI.face("cfont", 14),
+        fgcolor = Blitbuffer.COLOR_BLACK,
+    }
+end
+
 local function bookTitle(book)
     return book.bookName or book.filename or "?"
 end
@@ -93,22 +124,29 @@ local function tappable(w, h, on_tap)
     return tap
 end
 
---- 无边框文字入口（顶栏共用）
-local function textAction(text, callback, face_size)
+--- 顶栏入口：图标 + 文字，无边框
+local function iconAction(icon_name, text, callback)
+    local icon_sz = UI.sz(18)
     local label = TextWidget:new{
         text = text,
-        face = UI.face("xx_smallinfofont", face_size or 15),
+        face = UI.face("xx_smallinfofont", 15),
         fgcolor = Blitbuffer.COLOR_BLACK,
     }
-    local sz = label:getSize()
-    local pad_x = UI.sz(10)
+    local pad_x = UI.sz(8)
     local pad_y = UI.sz(6)
-    local tw = sz.w + pad_x * 2
-    local th = math.max(UI.sz(28), sz.h + pad_y * 2)
+    local gap = UI.sz(4)
+    local label_sz = label:getSize()
+    local tw = pad_x * 2 + icon_sz + gap + label_sz.w
+    local th = math.max(UI.sz(32), icon_sz, label_sz.h) + pad_y * 2
     local tap = tappable(tw, th, callback)
     tap[1] = CenterContainer:new{
         dimen = Geom:new{ w = tw, h = th },
-        label,
+        HorizontalGroup:new{
+            align = "center",
+            loadIcon(icon_name, icon_sz),
+            HorizontalSpan:new{ width = gap },
+            label,
+        },
     }
     return tap
 end
@@ -283,7 +321,7 @@ function Library.gridMetrics(w, h)
     w = math.max(1, tonumber(w) or 1)
     h = math.max(1, tonumber(h) or 1)
     local pad = UI.sz(12)
-    local top_h = UI.sz(48)
+    local top_h = UI.sz(52)
     local bottom_pad = UI.sz(10)
     local bottom_h = UI.iconSz() + UI.sz(28) + bottom_pad
     local grid_h = math.max(1, h - top_h - bottom_h)
@@ -340,15 +378,15 @@ function Library.build(ctx, state, opts)
     end
 
     local tools = HorizontalGroup:new{
-        textAction(_("搜索"), function()
+        iconAction("search.svg", _("搜索"), function()
             if ctx.desktop then ctx.desktop:showSearch() end
         end),
         HorizontalSpan:new{ width = UI.sz(8) },
-        textAction(_("筛选"), function()
+        iconAction("filter.svg", _("筛选"), function()
             if ctx.desktop then ctx.desktop:showFilterRoot() end
         end),
         HorizontalSpan:new{ width = UI.sz(8) },
-        textAction(_("清除"), function()
+        iconAction("clear.svg", _("清除"), function()
             if ctx.desktop then ctx.desktop:clearLibraryFilters() end
         end),
     }

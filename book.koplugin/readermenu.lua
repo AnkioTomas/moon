@@ -21,7 +21,6 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
-local LineWidget = require("ui/widget/linewidget")
 local Menu = require("ui/widget/menu")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local TextBoxWidget = require("ui/widget/textboxwidget")
@@ -352,11 +351,8 @@ local function metaRow(label, value, width)
     }
 end
 
-local function sectionLine(width)
-    return LineWidget:new{
-        background = Blitbuffer.gray(0.82),
-        dimen = Geom:new{ w = width, h = UI.line() },
-    }
+local function sectionGap()
+    return VerticalSpan:new{ width = UI.sz(16) }
 end
 
 local function isPageView(cfg)
@@ -430,12 +426,20 @@ function ReaderFloatMenu:hasCreControls()
         and not ui.document.koptinterface
 end
 
---- 半宽紧凑步进（两列网格用）
-function ReaderFloatMenu:buildCompactStep(width, icon_name, label, value_text, on_minus, on_plus)
-    local btn_w = UI.sz(36)
-    local btn_h = UI.sz(32)
+--- 全宽步进行：图标 · 标签 · 数值 · −/+，无行框，只留按钮细边
+function ReaderFloatMenu:buildStepRow(width, icon_name, label, value_text, on_minus, on_plus)
+    local pad_x = UI.sz(4)
+    local pad_y = UI.sz(8)
     local row_h = UI.sz(52)
-    local icon = loadIcon(icon_name, UI.sz(18))
+    local btn_w = UI.sz(40)
+    local btn_h = UI.sz(36)
+    local icon_sz = UI.sz(20)
+    local icon_col = icon_sz + UI.sz(4)
+    local label_w = UI.sz(88)
+    local value_w = UI.sz(72)
+    local gap = UI.sz(8)
+    local inner_h = row_h - pad_y * 2
+
     local minus = Button:new{
         text = "−",
         text_font_size = UI.fontSize(20),
@@ -458,63 +462,72 @@ function ReaderFloatMenu:buildCompactStep(width, icon_name, label, value_text, o
         callback = on_plus,
         show_parent = self,
     }
-    local mid_w = math.max(UI.sz(48), width - UI.sz(8) * 2 - btn_w * 2 - UI.sz(22))
-    local head = HorizontalGroup:new{
+
+    local used = icon_col + gap + label_w + gap + value_w + gap + btn_w + gap + btn_w
+    local spacer = math.max(UI.sz(4), width - pad_x * 2 - used)
+
+    local inner = HorizontalGroup:new{
         align = "center",
-        icon,
-        HorizontalSpan:new{ width = UI.sz(4) },
-        TextWidget:new{
-            text = label,
-            face = UI.face("xx_smallinfofont", 11),
-            fgcolor = Blitbuffer.gray(0.45),
-            max_width = width - UI.sz(28),
-        },
-    }
-    local controls = HorizontalGroup:new{
-        align = "center",
-        minus,
         CenterContainer:new{
-            dimen = Geom:new{ w = mid_w, h = btn_h },
+            dimen = Geom:new{ w = icon_col, h = inner_h },
+            loadIcon(icon_name, icon_sz),
+        },
+        HorizontalSpan:new{ width = gap },
+        LeftContainer:new{
+            dimen = Geom:new{ w = label_w, h = inner_h },
             TextWidget:new{
-                text = value_text,
+                text = label,
                 face = UI.face("cfont", 15),
+                max_width = label_w,
                 fgcolor = Blitbuffer.COLOR_BLACK,
             },
         },
+        HorizontalSpan:new{ width = spacer },
+        CenterContainer:new{
+            dimen = Geom:new{ w = value_w, h = inner_h },
+            TextWidget:new{
+                text = value_text,
+                face = UI.face("cfont", 16),
+                max_width = value_w,
+                fgcolor = Blitbuffer.COLOR_BLACK,
+            },
+        },
+        HorizontalSpan:new{ width = gap },
+        minus,
+        HorizontalSpan:new{ width = gap },
         plus,
     }
+
     return FrameContainer:new{
-        bordersize = UI.line(),
-        color = Blitbuffer.gray(0.7),
-        padding = UI.sz(6),
+        bordersize = 0,
+        padding = 0,
+        padding_left = pad_x,
+        padding_right = pad_x,
+        padding_top = pad_y,
+        padding_bottom = pad_y,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
         dimen = Geom:new{ w = width, h = row_h },
-        VerticalGroup:new{
-            align = "center",
-            head,
-            VerticalSpan:new{ width = UI.sz(4) },
-            controls,
-        },
+        inner,
     }
 end
 
 function ReaderFloatMenu:buildFontRow(width, face_name, on_tap)
-    local border = UI.line()
-    local pad = UI.sz(8)
-    local row_h = UI.sz(42)
-    local icon_w = UI.sz(26)
-    local chev_w = UI.sz(16)
-    local label_w = math.max(UI.sz(40), width - border * 2 - pad * 2 - icon_w - UI.sz(6) - chev_w)
+    local pad_x = UI.sz(4)
+    local pad_y = UI.sz(10)
+    local row_h = UI.sz(48)
+    local icon_w = UI.sz(28)
+    local chev_w = UI.sz(18)
+    local label_w = math.max(UI.sz(40), width - pad_x * 2 - icon_w - UI.sz(8) - chev_w)
     local inner = HorizontalGroup:new{
         align = "center",
         CenterContainer:new{
-            dimen = Geom:new{ w = icon_w, h = row_h - pad * 2 },
+            dimen = Geom:new{ w = icon_w, h = row_h - pad_y * 2 },
             loadIcon("font.svg", UI.sz(20)),
         },
-        HorizontalSpan:new{ width = UI.sz(6) },
+        HorizontalSpan:new{ width = UI.sz(8) },
         LeftContainer:new{
-            dimen = Geom:new{ w = label_w, h = row_h - pad * 2 },
+            dimen = Geom:new{ w = label_w, h = row_h - pad_y * 2 },
             TextWidget:new{
                 text = T(_("字体  %1"), face_name or _("默认")),
                 face = UI.face("cfont", 15),
@@ -523,7 +536,7 @@ function ReaderFloatMenu:buildFontRow(width, face_name, on_tap)
             },
         },
         CenterContainer:new{
-            dimen = Geom:new{ w = chev_w, h = row_h - pad * 2 },
+            dimen = Geom:new{ w = chev_w, h = row_h - pad_y * 2 },
             TextWidget:new{
                 text = "›",
                 face = UI.face("cfont", 20),
@@ -533,9 +546,12 @@ function ReaderFloatMenu:buildFontRow(width, face_name, on_tap)
     }
     local tap = tappable(width, row_h, on_tap)
     tap[1] = FrameContainer:new{
-        bordersize = border,
-        color = Blitbuffer.COLOR_BLACK,
-        padding = pad,
+        bordersize = 0,
+        padding = 0,
+        padding_left = pad_x,
+        padding_right = pad_x,
+        padding_top = pad_y,
+        padding_bottom = pad_y,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
         dimen = Geom:new{ w = width, h = row_h },
@@ -545,18 +561,19 @@ function ReaderFloatMenu:buildFontRow(width, face_name, on_tap)
 end
 
 function ReaderFloatMenu:buildViewToggle(width, is_page, on_page, on_scroll)
-    local gap = UI.sz(8)
-    local icon_slot = UI.sz(30)
+    local gap = UI.sz(12)
+    local icon_slot = UI.sz(32)
     local btn_w = math.floor((width - icon_slot - gap) / 2)
-    local btn_h = UI.sz(36)
+    local btn_h = UI.sz(40)
     local function chip(text, active, cb)
         return Button:new{
             text = text,
             text_font_size = UI.fontSize(15),
             text_font_bold = active,
-            bordersize = active and math.max(2, UI.line()) or UI.line(),
+            -- 未选中无框，选中只留细线
+            bordersize = active and UI.line() or 0,
             margin = 0,
-            padding = UI.sz(4),
+            padding = UI.sz(6),
             width = btn_w,
             height = btn_h,
             callback = cb,
@@ -681,35 +698,20 @@ function ReaderFloatMenu:buildControls(content_w)
     local t_margin = tonumber(cfg.t_page_margin) or 10
     local page_mode = isPageView(cfg)
 
-    local gap = UI.sz(8)
-    local half = math.floor((content_w - gap) / 2)
-    local pair_w = half * 2 + gap
-    local step_h = UI.sz(52)
+    local row_gap = UI.sz(6)
     local menu = self
-
-    -- 双栏行：在 content_w 内水平居中
-    local function pair(a, b)
-        local row = HorizontalGroup:new{
-            a,
-            HorizontalSpan:new{ width = gap },
-            b,
-        }
-        return CenterContainer:new{
-            dimen = Geom:new{ w = content_w, h = step_h },
-            FrameContainer:new{
-                bordersize = 0,
-                padding = 0,
-                margin = 0,
-                dimen = Geom:new{ w = pair_w, h = step_h },
-                row,
-            },
-        }
+    local col = VerticalGroup:new{ align = "left" }
+    local first = true
+    local function add(row)
+        if not first then
+            table.insert(col, VerticalSpan:new{ width = row_gap })
+        end
+        first = false
+        table.insert(col, row)
     end
 
-    local col = VerticalGroup:new{ align = "center" }
-
     -- 字体：选完后关字体页并重新打开本悬浮面板
-    table.insert(col, self:buildFontRow(content_w, face, function()
+    add(self:buildFontRow(content_w, face, function()
         local plugin = menu.plugin
         menu:onClose()
         UIManager:nextTick(function()
@@ -720,66 +722,55 @@ function ReaderFloatMenu:buildControls(content_w)
             end)
         end)
     end))
-    table.insert(col, VerticalSpan:new{ width = UI.sz(8) })
 
-    -- 分页 / 滚动
-    table.insert(col, self:buildViewToggle(content_w, page_mode,
+    add(self:buildViewToggle(content_w, page_mode,
         function()
             if not page_mode then menu:applyCre("SetViewMode", "page") end
         end,
         function()
             if page_mode then menu:applyCre("SetViewMode", "scroll") end
         end))
-    table.insert(col, VerticalSpan:new{ width = UI.sz(8) })
 
-    -- 两列：字号 | 行距
-    table.insert(col, pair(
-        self:buildCompactStep(half, "font_size.svg", _("字号"), string.format("%g", size),
-            function() menu:applyCre("SetFontSize", stepNum(size, -1, FONT_MIN, FONT_MAX, FONT_STEP)) end,
-            function() menu:applyCre("SetFontSize", stepNum(size, 1, FONT_MIN, FONT_MAX, FONT_STEP)) end),
-        self:buildCompactStep(half, "line_spacing.svg", _("行距"), string.format("%d%%", spacing),
-            function() menu:applyCre("SetLineSpace", stepNum(spacing, -1, LINE_MIN, LINE_MAX, LINE_STEP)) end,
-            function() menu:applyCre("SetLineSpace", stepNum(spacing, 1, LINE_MIN, LINE_MAX, LINE_STEP)) end)
-    ))
-    table.insert(col, VerticalSpan:new{ width = gap })
+    add(self:buildStepRow(content_w, "font_size.svg", _("字号"), string.format("%g", size),
+        function() menu:applyCre("SetFontSize", stepNum(size, -1, FONT_MIN, FONT_MAX, FONT_STEP)) end,
+        function() menu:applyCre("SetFontSize", stepNum(size, 1, FONT_MIN, FONT_MAX, FONT_STEP)) end))
 
-    -- 两列：字重 | 对比度
-    table.insert(col, pair(
-        self:buildCompactStep(half, "font_weight.svg", _("字重"), formatWeight(weight),
-            function() menu:applyCre("SetFontBaseWeight", stepList(WEIGHT_STEPS, weight, -1)) end,
-            function() menu:applyCre("SetFontBaseWeight", stepList(WEIGHT_STEPS, weight, 1)) end),
-        self:buildCompactStep(half, "contrast.svg", _("对比度"), formatGamma(gamma),
-            function() menu:applyCre("SetFontGamma", stepList(GAMMA_STEPS, gamma, -1)) end,
-            function() menu:applyCre("SetFontGamma", stepList(GAMMA_STEPS, gamma, 1)) end)
-    ))
-    table.insert(col, VerticalSpan:new{ width = gap })
+    add(self:buildStepRow(content_w, "line_spacing.svg", _("行距"), string.format("%d%%", spacing),
+        function() menu:applyCre("SetLineSpace", stepNum(spacing, -1, LINE_MIN, LINE_MAX, LINE_STEP)) end,
+        function() menu:applyCre("SetLineSpace", stepNum(spacing, 1, LINE_MIN, LINE_MAX, LINE_STEP)) end))
 
-    -- 两列：左右边距 | 上下边距
+    add(self:buildStepRow(content_w, "font_weight.svg", _("字重"), formatWeight(weight),
+        function() menu:applyCre("SetFontBaseWeight", stepList(WEIGHT_STEPS, weight, -1)) end,
+        function() menu:applyCre("SetFontBaseWeight", stepList(WEIGHT_STEPS, weight, 1)) end))
+
+    add(self:buildStepRow(content_w, "contrast.svg", _("对比度"), formatGamma(gamma),
+        function() menu:applyCre("SetFontGamma", stepList(GAMMA_STEPS, gamma, -1)) end,
+        function() menu:applyCre("SetFontGamma", stepList(GAMMA_STEPS, gamma, 1)) end))
+
     local h_val = tonumber(h_margins[1]) or 10
-    table.insert(col, pair(
-        self:buildCompactStep(half, "margin.svg", _("左右边距"), tostring(h_val),
-            function()
-                menu:applyCre("SetPageHorizMargins", stepList(H_MARGINS, h_margins, -1, hMarginCmp))
-            end,
-            function()
-                menu:applyCre("SetPageHorizMargins", stepList(H_MARGINS, h_margins, 1, hMarginCmp))
-            end),
-        self:buildCompactStep(half, "margin.svg", _("上下边距"), tostring(t_margin),
-            function()
-                local v = stepList(V_MARGINS, t_margin, -1)
-                menu:applyCreBatch({
-                    { "SetPageTopMargin", v },
-                    { "SetPageBottomMargin", v },
-                })
-            end,
-            function()
-                local v = stepList(V_MARGINS, t_margin, 1)
-                menu:applyCreBatch({
-                    { "SetPageTopMargin", v },
-                    { "SetPageBottomMargin", v },
-                })
-            end)
-    ))
+    add(self:buildStepRow(content_w, "margin.svg", _("左右边距"), tostring(h_val),
+        function()
+            menu:applyCre("SetPageHorizMargins", stepList(H_MARGINS, h_margins, -1, hMarginCmp))
+        end,
+        function()
+            menu:applyCre("SetPageHorizMargins", stepList(H_MARGINS, h_margins, 1, hMarginCmp))
+        end))
+
+    add(self:buildStepRow(content_w, "margin.svg", _("上下边距"), tostring(t_margin),
+        function()
+            local v = stepList(V_MARGINS, t_margin, -1)
+            menu:applyCreBatch({
+                { "SetPageTopMargin", v },
+                { "SetPageBottomMargin", v },
+            })
+        end,
+        function()
+            local v = stepList(V_MARGINS, t_margin, 1)
+            menu:applyCreBatch({
+                { "SetPageTopMargin", v },
+                { "SetPageBottomMargin", v },
+            })
+        end))
 
     return col
 end
@@ -832,9 +823,18 @@ end
 function ReaderFloatMenu:rebuild()
     local w = Screen:getWidth()
     local h = Screen:getHeight()
-    local pad = UI.sz(12)
+    local pad = UI.sz(14)
     local panel_w = w - pad * 2
-    local content_w = panel_w - pad * 2
+    local sb_gutter = 0
+    if ScrollableContainer then
+        if ScrollableContainer.getScrollbarWidth then
+            sb_gutter = ScrollableContainer:getScrollbarWidth()
+        else
+            sb_gutter = 3 * Screen:scaleBySize(6)
+        end
+    end
+    local viewport_w = math.max(UI.sz(120), panel_w - pad * 2)
+    local content_w = math.max(UI.sz(100), viewport_w - sb_gutter)
     local max_h = math.floor(h * 0.88)
 
     local detail = self:buildDetail(content_w)
@@ -842,24 +842,20 @@ function ReaderFloatMenu:rebuild()
     local actions = self:buildActions(content_w)
 
     local body_kids = { align = "left", detail }
-    table.insert(body_kids, VerticalSpan:new{ width = UI.sz(10) })
-    table.insert(body_kids, sectionLine(content_w))
+    table.insert(body_kids, sectionGap())
 
     if controls then
-        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(8) })
         table.insert(body_kids, TextWidget:new{
             text = _("阅读设置"),
             face = UI.face("cfont", 14),
-            fgcolor = Blitbuffer.COLOR_BLACK,
+            fgcolor = Blitbuffer.gray(0.4),
         })
-        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(6) })
+        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(8) })
         table.insert(body_kids, controls)
-        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(10) })
-        table.insert(body_kids, sectionLine(content_w))
+        table.insert(body_kids, sectionGap())
     else
         -- PDF：无 CRE 控件，给系统配置入口
-        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(8) })
-        local tap = tappable(content_w, UI.sz(42), function()
+        local tap = tappable(content_w, UI.sz(48), function()
             self:onClose()
             UIManager:nextTick(function()
                 local ui = self.plugin and self.plugin.ui
@@ -867,11 +863,10 @@ function ReaderFloatMenu:rebuild()
             end)
         end)
         tap[1] = FrameContainer:new{
-            bordersize = UI.line(),
-            color = Blitbuffer.COLOR_BLACK,
-            padding = UI.sz(8),
+            bordersize = 0,
+            padding = UI.sz(10),
             background = Blitbuffer.COLOR_WHITE,
-            dimen = Geom:new{ w = content_w, h = UI.sz(42) },
+            dimen = Geom:new{ w = content_w, h = UI.sz(48) },
             HorizontalGroup:new{
                 align = "center",
                 loadIcon("more.svg", UI.sz(20)),
@@ -884,11 +879,9 @@ function ReaderFloatMenu:rebuild()
             },
         }
         table.insert(body_kids, tap)
-        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(10) })
-        table.insert(body_kids, sectionLine(content_w))
+        table.insert(body_kids, sectionGap())
     end
 
-    table.insert(body_kids, VerticalSpan:new{ width = UI.sz(6) })
     table.insert(body_kids, actions)
 
     local body = VerticalGroup:new(body_kids)
@@ -899,7 +892,7 @@ function ReaderFloatMenu:rebuild()
 
     if ScrollableContainer and body_h > scroll_h then
         self.cropping_widget = ScrollableContainer:new{
-            dimen = Geom:new{ w = content_w, h = scroll_h },
+            dimen = Geom:new{ w = viewport_w, h = scroll_h },
             show_parent = self,
             LeftContainer:new{
                 dimen = Geom:new{ w = content_w, h = body_h },
@@ -909,20 +902,21 @@ function ReaderFloatMenu:rebuild()
         content = self.cropping_widget
         inner_h = scroll_h
     else
+        self.cropping_widget = nil
         content = body
         panel_h = body_h + pad * 2
         inner_h = body_h
     end
 
     local panel = FrameContainer:new{
-        bordersize = math.max(2, UI.line()),
-        color = Blitbuffer.COLOR_BLACK,
+        bordersize = UI.line(),
+        color = Blitbuffer.gray(0.55),
         padding = pad,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
         dimen = Geom:new{ w = panel_w, h = panel_h },
         LeftContainer:new{
-            dimen = Geom:new{ w = content_w, h = inner_h },
+            dimen = Geom:new{ w = viewport_w, h = inner_h },
             content,
         },
     }

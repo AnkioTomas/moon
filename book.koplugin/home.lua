@@ -215,11 +215,28 @@ function Home.buildStats(ctx, state)
     }
 end
 
-local function recentRow(ctx, book, on_open)
+--- 与「在读」网格同一套封面尺度：按屏宽均分，不跟字号缩成邮票。
+local function coverMetrics(width, pad)
+    local gap = UI.sz(10)
+    local avail = math.max(1, width - pad * 2)
+    local cols = 3
+    local cw = math.floor((avail - gap * (cols - 1)) / cols)
+    if cw < UI.sz(72) then
+        cols = 2
+        cw = math.floor((avail - gap * (cols - 1)) / cols)
+    end
+    cw = math.max(UI.sz(64), cw)
+    local ch = math.floor(cw * 3 / 2)
+    return cw, ch, cols, gap
+end
+
+local function recentRow(ctx, book, on_open, cw, ch)
     local w = ctx.width
     local pad = UI.sz(12)
-    local cw = UI.sz(72)
-    local ch = UI.sz(100)
+    -- 最近阅读用与在读相同的单格封面，避免字号缩小时比例崩掉
+    cw = cw or UI.sz(96)
+    ch = ch or math.floor(cw * 3 / 2)
+    local gap = UI.sz(14)
     local title = bookTitle(book)
     local author = bookAuthor(book)
     local pct = bookPct(book)
@@ -230,34 +247,34 @@ local function recentRow(ctx, book, on_open)
         prefetchCover(ctx.api, ctx.plugin, filename)
     end
 
-    local info_w = math.max(UI.sz(40), w - pad * 2 - cw - UI.sz(12))
-    local bar = UI.progressBar(info_w, UI.sz(8), pct)
+    local info_w = math.max(UI.sz(40), w - pad * 2 - cw - gap)
+    local bar = UI.progressBar(info_w, UI.sz(10), pct)
     local info = VerticalGroup:new{
         align = "left",
         TextWidget:new{
             text = title,
-            face = UI.face("cfont", 18),
+            face = UI.face("cfont", 20),
             max_width = info_w,
             fgcolor = Blitbuffer.COLOR_BLACK,
         },
-        VerticalSpan:new{ width = UI.sz(4) },
+        VerticalSpan:new{ width = UI.sz(6) },
         TextWidget:new{
             text = author ~= "" and author or _("未知作者"),
-            face = UI.face("xx_smallinfofont", 14),
+            face = UI.face("xx_smallinfofont", 15),
             max_width = info_w,
             fgcolor = Blitbuffer.gray(0.45),
         },
-        VerticalSpan:new{ width = UI.sz(10) },
+        VerticalSpan:new{ width = UI.sz(12) },
         bar,
-        VerticalSpan:new{ width = UI.sz(4) },
+        VerticalSpan:new{ width = UI.sz(6) },
         TextWidget:new{
             text = string.format("%.0f%%", pct),
-            face = UI.face("xx_smallinfofont", 13),
+            face = UI.face("xx_smallinfofont", 14),
             fgcolor = Blitbuffer.gray(0.4),
         },
     }
 
-    local row_h = math.max(ch, UI.sz(110))
+    local row_h = math.max(ch, UI.sz(120))
     local tap = tappable(w, row_h + pad, function()
         if on_open then on_open(book) end
     end)
@@ -269,7 +286,7 @@ local function recentRow(ctx, book, on_open)
         dimen = Geom:new{ w = w, h = row_h + pad },
         HorizontalGroup:new{
             cover_w,
-            HorizontalSpan:new{ width = UI.sz(12) },
+            HorizontalSpan:new{ width = gap },
             LeftContainer:new{
                 dimen = Geom:new{ w = info_w, h = row_h },
                 info,
@@ -322,6 +339,7 @@ function Home.build(ctx, state)
 
     local col = VerticalGroup:new{ align = "left" }
     local used = 0
+    local grid_cw, grid_ch, grid_cols, grid_gap = coverMetrics(w, pad)
 
     local header = Home.buildHeader(ctx, state)
     table.insert(col, header)
@@ -331,7 +349,7 @@ function Home.build(ctx, state)
     table.insert(col, stats)
     used = used + (stats.dimen and stats.dimen.h or UI.sz(80))
 
-    -- section: 最近阅读
+    -- section: 最近阅读（封面尺度与下方在读网格一致）
     local recent = state.recent
     table.insert(col, LeftContainer:new{
         dimen = Geom:new{ w = w, h = UI.sz(28) },
@@ -350,7 +368,7 @@ function Home.build(ctx, state)
     used = used + UI.sz(28)
 
     if recent then
-        local row, rh = recentRow(ctx, recent, on_open)
+        local row, rh = recentRow(ctx, recent, on_open, grid_cw, grid_ch)
         table.insert(col, row)
         used = used + rh
     else
@@ -394,17 +412,7 @@ function Home.build(ctx, state)
             },
         })
     else
-        -- 按可用宽度均分列宽，避免固定封面宽导致两侧留白随字号变大
-        local gap = UI.sz(10)
-        local avail = math.max(1, w - pad * 2)
-        local cols = 3
-        local cw = math.floor((avail - gap * (cols - 1)) / cols)
-        if cw < UI.sz(72) then
-            cols = 2
-            cw = math.floor((avail - gap * (cols - 1)) / cols)
-        end
-        cw = math.max(UI.sz(64), cw)
-        local ch = math.floor(cw * 3 / 2)
+        local cw, ch, cols, gap = grid_cw, grid_ch, grid_cols, grid_gap
         local cell_h
         local row_group = HorizontalGroup:new{}
         local grid = VerticalGroup:new{ align = "left" }

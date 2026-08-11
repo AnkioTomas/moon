@@ -1,6 +1,6 @@
 --[[--
 设置页（桌面 Tab）
-  分区 + 图标行；明确「注入阅读页」开关
+  分区卡片 + 图标行；明确「注入阅读页」开关
 
 @module koplugin.book.settings
 --]]
@@ -98,26 +98,31 @@ local function tappable(w, h, on_tap)
     return tap
 end
 
-local function sectionTitle(text, width)
-    return LeftContainer:new{
-        dimen = Geom:new{ w = width, h = UI.sz(32) },
-        TextWidget:new{
-            text = text,
-            face = UI.face("cfont", 14),
-            fgcolor = Blitbuffer.gray(0.4),
+local function insetDivider(width)
+    local inset = UI.sz(16)
+    local line_w = math.max(UI.sz(40), width - inset * 2)
+    return CenterContainer:new{
+        dimen = Geom:new{ w = width, h = UI.sz(1) },
+        LineWidget:new{
+            background = Blitbuffer.gray(0.9),
+            dimen = Geom:new{ w = line_w, h = 1 },
         },
     }
 end
 
 --- 设置行：图标 + 标题(+副标题) + 右侧状态/箭头
+--- width 必须是最终占用宽度，内部几何一次性扣干净，禁止再溢出。
 local function settingRow(width, opts)
-    local icon_sz = UI.sz(22)
-    local pad_x = UI.sz(12)
-    local pad_y = UI.sz(10)
-    local row_h = opts.subtitle and UI.sz(64) or UI.sz(52)
-    local chev_w = UI.sz(20)
-    local status_w = opts.status and UI.sz(72) or 0
-    local text_w = math.max(UI.sz(40), width - pad_x * 2 - icon_sz - UI.sz(10) - status_w - chev_w)
+    local icon_sz = UI.sz(24)
+    local pad_x = UI.sz(8)
+    local pad_y = UI.sz(16)
+    local row_h = opts.subtitle and UI.sz(78) or UI.sz(62)
+    local icon_col = icon_sz + UI.sz(6)
+    local icon_gap = UI.sz(12)
+    local chev_w = opts.chevron == false and 0 or UI.sz(18)
+    local status_w = opts.status and UI.sz(56) or 0
+    local inner_w = math.max(1, width - pad_x * 2)
+    local text_w = math.max(UI.sz(40), inner_w - icon_col - icon_gap - status_w - chev_w)
 
     local title = TextWidget:new{
         text = opts.title,
@@ -127,7 +132,7 @@ local function settingRow(width, opts)
     }
     local text_col = VerticalGroup:new{ align = "left", title }
     if opts.subtitle and opts.subtitle ~= "" then
-        table.insert(text_col, VerticalSpan:new{ width = UI.sz(3) })
+        table.insert(text_col, VerticalSpan:new{ width = UI.sz(6) })
         table.insert(text_col, TextWidget:new{
             text = opts.subtitle,
             face = UI.face("xx_smallinfofont", 12),
@@ -140,12 +145,15 @@ local function settingRow(width, opts)
     if opts.status then
         table.insert(right, TextWidget:new{
             text = opts.status,
-            face = UI.face("xx_smallinfofont", 14),
+            face = UI.face("cfont", 15),
+            max_width = status_w,
             fgcolor = opts.status_on and Blitbuffer.COLOR_BLACK or Blitbuffer.gray(0.45),
         })
-        table.insert(right, HorizontalSpan:new{ width = UI.sz(4) })
     end
     if opts.chevron ~= false then
+        if opts.status then
+            table.insert(right, HorizontalSpan:new{ width = UI.sz(4) })
+        end
         table.insert(right, TextWidget:new{
             text = "›",
             face = UI.face("cfont", 20),
@@ -153,19 +161,20 @@ local function settingRow(width, opts)
         })
     end
 
+    local right_w = status_w + chev_w
     local inner = HorizontalGroup:new{
         align = "center",
         CenterContainer:new{
-            dimen = Geom:new{ w = icon_sz + UI.sz(4), h = row_h - pad_y * 2 },
+            dimen = Geom:new{ w = icon_col, h = row_h - pad_y * 2 },
             loadIcon(opts.icon, icon_sz),
         },
-        HorizontalSpan:new{ width = UI.sz(10) },
+        HorizontalSpan:new{ width = icon_gap },
         LeftContainer:new{
             dimen = Geom:new{ w = text_w, h = row_h - pad_y * 2 },
             text_col,
         },
         RightContainer:new{
-            dimen = Geom:new{ w = status_w + chev_w, h = row_h - pad_y * 2 },
+            dimen = Geom:new{ w = right_w, h = row_h - pad_y * 2 },
             right,
         },
     }
@@ -183,14 +192,29 @@ local function settingRow(width, opts)
         dimen = Geom:new{ w = width, h = row_h },
         inner,
     }
-    return tap, row_h
+    return tap
 end
 
-local function divider(width)
-    return LineWidget:new{
-        background = Blitbuffer.gray(0.85),
-        dimen = Geom:new{ w = width, h = UI.line() },
-    }
+--- 分区：标题 + 行列表，无外框，靠留白区分
+local function sectionBlock(width, title, row_builders)
+    local kids = { align = "left" }
+    table.insert(kids, LeftContainer:new{
+        dimen = Geom:new{ w = width, h = UI.sz(32) },
+        TextWidget:new{
+            text = title,
+            face = UI.face("cfont", 13),
+            max_width = width,
+            fgcolor = Blitbuffer.gray(0.4),
+        },
+    })
+    table.insert(kids, VerticalSpan:new{ width = UI.sz(4) })
+    for i, build in ipairs(row_builders) do
+        if i > 1 then
+            table.insert(kids, insetDivider(width))
+        end
+        table.insert(kids, build(width))
+    end
+    return VerticalGroup:new(kids)
 end
 
 function Settings.build(desktop)
@@ -203,8 +227,21 @@ function Settings.build(desktop)
     local float_menu = s.reader_float_menu ~= false
     local header_mode = s.home_header or "clock"
     local scale = UI.getScale()
-    local pad = UI.sz(12)
-    local content_w = w - pad * 2
+    local page_pad = UI.sz(16)
+    local avail_w = math.max(UI.sz(120), w - page_pad * 2)
+    -- ScrollableContainer 一旦出现竖条，会再扣 3*scroll_bar_width；
+    -- 内容若仍按 avail_w 排，就会误开横向滚动条。内容先让出这条槽。
+    local sb_gutter = 0
+    if ScrollableContainer then
+        if ScrollableContainer.getScrollbarWidth then
+            sb_gutter = ScrollableContainer:getScrollbarWidth()
+        else
+            local Device = require("device")
+            sb_gutter = 3 * Device.screen:scaleBySize(6)
+        end
+    end
+    local card_w = math.max(UI.sz(100), avail_w - sb_gutter)
+    local section_gap = UI.sz(28)
 
     local function on_toggle_float()
         local st = settings()
@@ -220,180 +257,187 @@ function Settings.build(desktop)
     end
 
     local col = VerticalGroup:new{ align = "left" }
+    table.insert(col, VerticalSpan:new{ width = UI.sz(8) })
 
-    -- —— 连接 ——
-    table.insert(col, sectionTitle(_("连接"), content_w))
-    local r1 = settingRow(content_w, {
-        icon = "server.svg",
-        title = _("服务器与令牌"),
-        subtitle = _("Book 服务地址、访问令牌、本地下载目录"),
-        callback = function()
-            if plugin then plugin:showConfigDialog() end
-        end,
-    })
-    table.insert(col, r1)
-    table.insert(col, divider(content_w))
-    local r2 = settingRow(content_w, {
-        icon = "link.svg",
-        title = _("测试连接"),
-        subtitle = _("验证服务器与令牌是否可用"),
-        callback = function()
-            if plugin then plugin:testConnection() end
-        end,
-    })
-    table.insert(col, r2)
-
-    table.insert(col, VerticalSpan:new{ width = UI.sz(14) })
-
-    -- —— 阅读 ——
-    table.insert(col, sectionTitle(_("阅读"), content_w))
-    local r3 = settingRow(content_w, {
-        icon = "reader.svg",
-        title = _("注入阅读页菜单"),
-        subtitle = _("中部点击弹出 Book 悬浮面板（目录/字体/边距等）"),
-        status = float_menu and _("开") or _("关"),
-        status_on = float_menu,
-        chevron = false,
-        callback = on_toggle_float,
-    })
-    table.insert(col, r3)
-    table.insert(col, divider(content_w))
-    local r4 = settingRow(content_w, {
-        icon = "sync.svg",
-        title = _("自动同步进度"),
-        subtitle = _("打开/关闭书籍与休眠时与服务器同步"),
-        status = auto_sync and _("开") or _("关"),
-        status_on = auto_sync,
-        chevron = false,
-        callback = function()
-            local st = settings()
-            st.auto_sync = not auto_sync
-            save(st)
-            desktop:rebuild()
-        end,
-    })
-    table.insert(col, r4)
-
-    table.insert(col, VerticalSpan:new{ width = UI.sz(14) })
-
-    -- —— 界面 ——
-    table.insert(col, sectionTitle(_("界面"), content_w))
-    local r5 = settingRow(content_w, {
-        icon = "font_size.svg",
-        title = _("界面字号"),
-        subtitle = _("桌面与悬浮面板统一缩放"),
-        status = string.format("%d%%", scale),
-        status_on = true,
-        chevron = false,
-        callback = function()
-            local n = UI.cycleScale()
-            UIManager:show(InfoMessage:new{
-                text = T(_("字号已设为 %1%"), n),
-                timeout = 1.5,
+    table.insert(col, sectionBlock(card_w, _("连接"), {
+        function(iw)
+            return settingRow(iw, {
+                icon = "server.svg",
+                title = _("服务器与令牌"),
+                subtitle = _("服务地址、访问令牌、本地下载目录"),
+                callback = function()
+                    if plugin then plugin:showConfigDialog() end
+                end,
             })
-            desktop:rebuild()
         end,
-    })
-    table.insert(col, r5)
-    table.insert(col, divider(content_w))
-    local r6 = settingRow(content_w, {
-        icon = "home.svg",
-        title = _("首页顶部"),
-        subtitle = _("时钟或每日一言"),
-        status = header_mode == "hitokoto" and _("一言") or _("时钟"),
-        status_on = true,
-        chevron = false,
-        callback = function()
-            local st = settings()
-            if (st.home_header or "clock") == "hitokoto" then
-                st.home_header = "clock"
-            else
-                st.home_header = "hitokoto"
-            end
-            save(st)
-            desktop._home_state = nil
-            desktop._home_loaded = false
-            desktop:rebuild()
+        function(iw)
+            return settingRow(iw, {
+                icon = "link.svg",
+                title = _("测试连接"),
+                subtitle = _("验证服务器与令牌是否可用"),
+                callback = function()
+                    if plugin then plugin:testConnection() end
+                end,
+            })
         end,
-    })
-    table.insert(col, r6)
-    table.insert(col, divider(content_w))
-    local r7 = settingRow(content_w, {
-        icon = "view.svg",
-        title = _("启动时打开桌面"),
-        subtitle = _("KOReader 启动后直接进入 Book 桌面"),
-        status = open_on and _("开") or _("关"),
-        status_on = open_on,
-        chevron = false,
-        callback = function()
-            local st = settings()
-            st.open_on_start = not open_on
-            save(st)
-            if st.open_on_start then
-                G_reader_settings:saveSetting("start_with", START_WITH_ID)
-            elseif G_reader_settings:readSetting("start_with") == START_WITH_ID then
-                G_reader_settings:saveSetting("start_with", "filemanager")
-            end
-            desktop:rebuild()
-        end,
-    })
-    table.insert(col, r7)
+    }))
+    table.insert(col, VerticalSpan:new{ width = section_gap })
 
-    table.insert(col, VerticalSpan:new{ width = UI.sz(14) })
+    table.insert(col, sectionBlock(card_w, _("阅读"), {
+        function(iw)
+            return settingRow(iw, {
+                icon = "reader.svg",
+                title = _("注入阅读页菜单"),
+                subtitle = _("中部点击弹出 Book 悬浮面板"),
+                status = float_menu and _("开") or _("关"),
+                status_on = float_menu,
+                chevron = false,
+                callback = on_toggle_float,
+            })
+        end,
+        function(iw)
+            return settingRow(iw, {
+                icon = "sync.svg",
+                title = _("自动同步进度"),
+                subtitle = _("打开、关闭与休眠时同步进度"),
+                status = auto_sync and _("开") or _("关"),
+                status_on = auto_sync,
+                chevron = false,
+                callback = function()
+                    local st = settings()
+                    st.auto_sync = not auto_sync
+                    save(st)
+                    desktop:rebuild()
+                end,
+            })
+        end,
+    }))
+    table.insert(col, VerticalSpan:new{ width = section_gap })
 
-    -- —— 其他 ——
-    table.insert(col, sectionTitle(_("其他"), content_w))
-    local r8 = settingRow(content_w, {
-        icon = "about.svg",
-        title = _("关于"),
-        subtitle = _("作者与项目地址"),
-        callback = function()
-            UIManager:show(InfoMessage:new{
-                text = _([[Book 书库
+    table.insert(col, sectionBlock(card_w, _("界面"), {
+        function(iw)
+            return settingRow(iw, {
+                icon = "font_size.svg",
+                title = _("界面字号"),
+                subtitle = _("桌面与悬浮面板统一缩放"),
+                status = string.format("%d%%", scale),
+                status_on = true,
+                chevron = false,
+                callback = function()
+                    local n = UI.cycleScale()
+                    UIManager:show(InfoMessage:new{
+                        text = T(_("字号已设为 %1%"), n),
+                        timeout = 1.5,
+                    })
+                    desktop:rebuild()
+                end,
+            })
+        end,
+        function(iw)
+            return settingRow(iw, {
+                icon = "home.svg",
+                title = _("首页顶部"),
+                subtitle = _("时钟或每日一言"),
+                status = header_mode == "hitokoto" and _("一言") or _("时钟"),
+                status_on = true,
+                chevron = false,
+                callback = function()
+                    local st = settings()
+                    if (st.home_header or "clock") == "hitokoto" then
+                        st.home_header = "clock"
+                    else
+                        st.home_header = "hitokoto"
+                    end
+                    save(st)
+                    desktop._home_state = nil
+                    desktop._home_loaded = false
+                    desktop:rebuild()
+                end,
+            })
+        end,
+        function(iw)
+            return settingRow(iw, {
+                icon = "view.svg",
+                title = _("启动时打开桌面"),
+                subtitle = _("启动后直接进入 Book 桌面"),
+                status = open_on and _("开") or _("关"),
+                status_on = open_on,
+                chevron = false,
+                callback = function()
+                    local st = settings()
+                    st.open_on_start = not open_on
+                    save(st)
+                    if st.open_on_start then
+                        G_reader_settings:saveSetting("start_with", START_WITH_ID)
+                    elseif G_reader_settings:readSetting("start_with") == START_WITH_ID then
+                        G_reader_settings:saveSetting("start_with", "filemanager")
+                    end
+                    desktop:rebuild()
+                end,
+            })
+        end,
+    }))
+    table.insert(col, VerticalSpan:new{ width = section_gap })
+
+    table.insert(col, sectionBlock(card_w, _("其他"), {
+        function(iw)
+            return settingRow(iw, {
+                icon = "about.svg",
+                title = _("关于"),
+                subtitle = _("作者与项目地址"),
+                callback = function()
+                    UIManager:show(InfoMessage:new{
+                        text = _([[Book 书库
 
 作者：AnkioTomas
 GitHub：https://github.com/AnkioTomas/moon]]),
+                    })
+                end,
             })
         end,
-    })
-    table.insert(col, r8)
-    table.insert(col, divider(content_w))
-    local r9 = settingRow(content_w, {
-        icon = "close.svg",
-        title = _("关闭桌面"),
-        subtitle = _("返回 KOReader 文件管理器"),
-        callback = function()
-            desktop:onClose()
+        function(iw)
+            return settingRow(iw, {
+                icon = "close.svg",
+                title = _("关闭桌面"),
+                subtitle = _("返回 KOReader 文件管理器"),
+                callback = function()
+                    desktop:onClose()
+                end,
+            })
         end,
-    })
-    table.insert(col, r9)
-    table.insert(col, VerticalSpan:new{ width = UI.sz(20) })
+    }))
+    table.insert(col, VerticalSpan:new{ width = UI.sz(28) })
 
-    local body = VerticalGroup:new(col)
-    local body_h = body:getSize().h
-    local scroll_h = h - pad * 2
+    local col_widget = VerticalGroup:new(col)
+    local body_h = col_widget:getSize().h
+    -- 强制上报宽度 = card_w，杜绝 FrameContainer 边框把 getSize().w 撑破
+    local body = LeftContainer:new{
+        dimen = Geom:new{ w = card_w, h = body_h },
+        col_widget,
+    }
+    local scroll_h = h - page_pad * 2
     local content
     if ScrollableContainer and body_h > scroll_h then
+        -- 视口用满 avail_w（右侧留给竖条）；内容只有 card_w → 不会再出横条
         content = ScrollableContainer:new{
-            dimen = Geom:new{ w = content_w, h = scroll_h },
+            dimen = Geom:new{ w = avail_w, h = scroll_h },
             show_parent = desktop,
-            LeftContainer:new{
-                dimen = Geom:new{ w = content_w, h = body_h },
-                body,
-            },
+            body,
         }
+        desktop.cropping_widget = content
     else
+        desktop.cropping_widget = nil
         content = body
     end
 
     return FrameContainer:new{
         bordersize = 0,
-        padding = pad,
+        padding = page_pad,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
         dimen = Geom:new{ w = w, h = h },
         LeftContainer:new{
-            dimen = Geom:new{ w = content_w, h = math.min(body_h, scroll_h) },
+            dimen = Geom:new{ w = avail_w, h = math.min(body_h, scroll_h) },
             content,
         },
     }
