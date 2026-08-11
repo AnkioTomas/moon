@@ -233,6 +233,7 @@ function Settings.build(desktop)
     local s = settings()
     local open_on = s.open_on_start ~= false
     local auto_sync = s.auto_sync ~= false
+    local auto_stats = s.auto_stats ~= false
     local float_menu = s.reader_float_menu ~= false
     local header_mode = s.home_header or "clock"
     local scale = UI.getScale()
@@ -317,6 +318,34 @@ function Settings.build(desktop)
                     st.auto_sync = not auto_sync
                     save(st)
                     desktop:rebuild()
+                end,
+            })
+        end,
+        function(iw)
+            return settingRow(iw, {
+                icon = "sync.svg",
+                title = _("自动上报阅读统计"),
+                subtitle = _("依赖 KOReader 阅读统计；关闭/休眠时上传"),
+                status = auto_stats and _("开") or _("关"),
+                status_on = auto_stats,
+                chevron = false,
+                callback = function()
+                    local st = settings()
+                    st.auto_stats = not auto_stats
+                    save(st)
+                    desktop:rebuild()
+                end,
+            })
+        end,
+        function(iw)
+            return settingRow(iw, {
+                icon = "sync.svg",
+                title = _("立即上报阅读统计"),
+                subtitle = _("后台上传；显示进度条"),
+                callback = function()
+                    if plugin then
+                        plugin:pushReadingStats(true, true)
+                    end
                 end,
             })
         end,

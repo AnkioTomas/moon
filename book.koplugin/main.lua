@@ -24,6 +24,8 @@ local Api = require("api")
 local Desktop = require("desktop")
 local ReaderFloatMenu = require("readermenu")
 local Device = require("device")
+local StatsSync = require("stats_sync")
+local StatsDb = require("stats_db")
 
 local SETTINGS_KEY = "book_plugin_v2"
 local FILEMAP_KEY = "book_plugin_filemap_v2"
@@ -44,6 +46,7 @@ local function defaultSettings()
         base_url = "",
         token = "",
         auto_sync = true,
+        auto_stats = true,
         open_on_start = true,
         home_header = "clock",
         ui_scale = 130,
@@ -585,6 +588,8 @@ function BookPlugin:touchLocalBook(path, filename)
     local map = readFileMap()
     fileMapSet(map, path, filename, os.time())
     writeFileMap(map)
+    -- 统计上报用：md5 -> 远端 filename
+    StatsDb.rememberPathFilename(path, filename)
 end
 
 --- 清理长期未打开的本地下载缓存；返回删除文件数
@@ -879,6 +884,79 @@ function BookPlugin:pushCurrentProgress(show_msg)
     end)
 end
 
+--- 上报 KOReader 阅读统计（page_stat）到 /index/stats/import
+--- 自动/手动均后台分步执行；手动显示 ProgressbarDialog
+function BookPlugin:pushReadingStats(show_msg, force)
+    if settings().auto_stats == false and not force then
+        return
+    end
+    if StatsSync.isBusy() then
+        if show_msg then
+            UIManager:show(InfoMessage:new{
+                text = _("阅读统计正在上报…"),
+                timeout = 2,
+            })
+        end
+        return
+    end
+
+    self:withNetwork(function()
+        -- 联网成功后再弹进度条，避免取消 Wi-Fi 后对话框挂死
+        local dialog
+        if show_msg then
+            local ok_dlg, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
+            if ok_dlg and ProgressbarDialog then
+                dialog = ProgressbarDialog:new{
+                    title = _("正在上报阅读统计…"),
+                    subtitle = _("读取本地统计并上传"),
+                    progress_max = StatsSync.progressMax(),
+                    refresh_time_seconds = 0.05,
+                    dismissable = false,
+                }
+                dialog:show()
+            else
+                UIManager:show(InfoMessage:new{
+                    text = _("正在上报阅读统计…"),
+                    timeout = 1,
+                })
+            end
+        end
+
+        StatsSync.pushAsync(self:getApi(), {
+            force = force,
+            on_progress = function(step)
+                if dialog then
+                    dialog:reportProgress(step)
+                end
+            end,
+            on_done = function(ok, err)
+                if dialog then
+                    if ok and err ~= "throttled" then
+                        dialog:reportProgress(StatsSync.progressMax())
+                    end
+                    dialog:close()
+                    dialog = nil
+                end
+                if show_msg then
+                    local text
+                    if ok and err == "throttled" then
+                        text = _("统计上报已节流，稍后再试")
+                    elseif ok then
+                        text = _("阅读统计已上传")
+                    elseif err == "busy" then
+                        text = _("阅读统计正在上报…")
+                    else
+                        text = err or _("统计上传失败")
+                    end
+                    UIManager:show(InfoMessage:new{ text = text, timeout = 2 })
+                elseif not ok and err ~= "throttled" and err ~= "busy" then
+                    logger.warn("book push reading stats failed", err)
+                end
+            end,
+        })
+    end)
+end
+
 function BookPlugin:pullCurrentProgress(show_msg)
     local filename = self:remoteFilenameForCurrent()
     if not filename then
@@ -1045,6 +1123,11 @@ function BookPlugin:onReaderReady()
     if settings().auto_sync then
         self:pullCurrentProgress(false)
     end
+    if settings().auto_stats ~= false then
+        self:withNetwork(function()
+            StatsSync.registerDevice(self:getApi())
+        end)
+    end
 end
 
 function BookPlugin:onSetDimensions()
@@ -1057,11 +1140,17 @@ function BookPlugin:onCloseDocument()
     if settings().auto_sync then
         self:pushCurrentProgress(false)
     end
+    if settings().auto_stats ~= false then
+        self:pushReadingStats(false, false)
+    end
 end
 
 function BookPlugin:onSuspend()
     if settings().auto_sync and self.ui.document then
         self:pushCurrentProgress(false)
+    end
+    if settings().auto_stats ~= false and self.ui.document then
+        self:pushReadingStats(false, false)
     end
 end
 

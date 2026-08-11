@@ -41,7 +41,8 @@ function Api:configured()
 end
 
 --- binary=true 时不要求 JSON，Accept */*
-function Api:_request(method, path, query, body_tbl, sink_file, binary)
+--- as_json=true 时 body 以 application/json 发送（统计上报用）；默认仍为 form
+function Api:_request(method, path, query, body_tbl, sink_file, binary, as_json)
     if not self:configured() then
         return nil, "未配置服务器或令牌"
     end
@@ -65,12 +66,22 @@ function Api:_request(method, path, query, body_tbl, sink_file, binary)
 
     local source
     if body_tbl then
-        local payload = {}
-        for k, v in pairs(body_tbl) do
-            table.insert(payload, tostring(k) .. "=" .. socketurl.escape(tostring(v)))
+        local body
+        if as_json then
+            local ok, encoded = pcall(JSON.encode, body_tbl)
+            if not ok or type(encoded) ~= "string" then
+                return nil, "JSON 编码失败"
+            end
+            body = encoded
+            headers["Content-Type"] = "application/json"
+        else
+            local payload = {}
+            for k, v in pairs(body_tbl) do
+                table.insert(payload, tostring(k) .. "=" .. socketurl.escape(tostring(v)))
+            end
+            body = table.concat(payload, "&")
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
         end
-        local body = table.concat(payload, "&")
-        headers["Content-Type"] = "application/x-www-form-urlencoded"
         headers["Content-Length"] = tostring(#body)
         source = ltn12.source.string(body)
     end
@@ -184,6 +195,26 @@ end
 --- 藏书统计（服务端新增）；失败由调用方降级显示
 function Api:stats()
     return self:_request("GET", "/index/book/stats")
+end
+
+--- 注册阅读设备（高维统计）
+--- body: { id, model }
+function Api:registerReadingDevice(device_id, model)
+    return self:_request("POST", "/index/stats/device", nil, {
+        id = device_id,
+        model = model or "Unknown",
+    }, nil, false, true)
+end
+
+--- 上报阅读统计（KOReader page_stat 语义）
+--- body: { books = {}, stats = {}, device_id? }
+function Api:importReadingStats(payload)
+    return self:_request("POST", "/index/stats/import", nil, payload or {}, nil, false, true)
+end
+
+--- 阅读活动汇总 KPI
+function Api:readingSummary()
+    return self:_request("GET", "/index/stats/summary")
 end
 
 --- 每日一言（独立公网接口，不走 Book 服务器）
