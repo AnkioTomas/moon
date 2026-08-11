@@ -402,6 +402,41 @@ function ReaderFloatMenu:refreshPanel()
     UIManager:setDirty(self, "ui", self._panel_dimen)
 end
 
+--- 对齐 ConfigDialog：先写 configurable，再发事件（边距事件本身不回写配置）
+function ReaderFloatMenu:applyCreOption(name, value, event_name)
+    local ui = self.plugin and self.plugin.ui
+    if not ui or not ui.document or not ui.document.configurable then
+        return
+    end
+    local cfg = ui.document.configurable
+    if type(value) == "table" then
+        -- 禁止把预设表引用写进 configurable（避免污染 G_defaults 表）
+        local copy = {}
+        for i, v in ipairs(value) do
+            copy[i] = v
+        end
+        value = copy
+    end
+    cfg[name] = value
+    ui:handleEvent(Event:new("ConfigChange", name, value))
+    if event_name then
+        -- typeset 边距依赖 unscaled_margins；异常时从 configurable 重建
+        local typeset = ui.typeset
+        if typeset and not typeset.unscaled_margins then
+            local hm = cfg.h_page_margins or { 10, 10 }
+            typeset.unscaled_margins = {
+                tonumber(hm[1]) or 10,
+                tonumber(cfg.t_page_margin) or 10,
+                tonumber(hm[2]) or 10,
+                tonumber(cfg.b_page_margin) or 10,
+            }
+        end
+        ui:handleEvent(Event:new(event_name, value))
+    end
+    self:refreshPanel()
+    UIManager:setDirty("all", "partial")
+end
+
 function ReaderFloatMenu:applyCre(event_name, value)
     local ui = self.plugin and self.plugin.ui
     if not ui then return end
@@ -415,6 +450,51 @@ function ReaderFloatMenu:applyCreBatch(events)
     if not ui then return end
     for _, ev in ipairs(events) do
         ui:handleEvent(Event:new(ev[1], ev[2]))
+    end
+    self:refreshPanel()
+    UIManager:setDirty("all", "partial")
+end
+
+--- 左右边距：写 h_page_margins + SetPageHorizMargins
+function ReaderFloatMenu:applyHorizMargins(delta)
+    local ui = self.plugin and self.plugin.ui
+    if not ui or not ui.document or not ui.document.configurable then
+        return
+    end
+    local cfg = ui.document.configurable
+    local cur = cfg.h_page_margins or { 10, 10 }
+    local next_v = stepList(H_MARGINS, cur, delta, hMarginCmp)
+    self:applyCreOption("h_page_margins", next_v, "SetPageHorizMargins")
+end
+
+--- 上下边距：同步写 t/b，再发事件真正改排版
+function ReaderFloatMenu:applyVertMargins(delta)
+    local ui = self.plugin and self.plugin.ui
+    if not ui or not ui.document or not ui.document.configurable then
+        return
+    end
+    local cfg = ui.document.configurable
+    local cur = tonumber(cfg.t_page_margin) or tonumber(cfg.b_page_margin) or 10
+    local next_v = stepList(V_MARGINS, cur, delta)
+    cfg.t_page_margin = next_v
+    cfg.b_page_margin = next_v
+    ui:handleEvent(Event:new("ConfigChange", "t_page_margin", next_v))
+    ui:handleEvent(Event:new("ConfigChange", "b_page_margin", next_v))
+    local typeset = ui.typeset
+    if typeset and not typeset.unscaled_margins then
+        local hm = cfg.h_page_margins or { 10, 10 }
+        typeset.unscaled_margins = {
+            tonumber(hm[1]) or 10,
+            next_v,
+            tonumber(hm[2]) or 10,
+            next_v,
+        }
+    end
+    if typeset and typeset.onSetPageTopAndBottomMargin then
+        ui:handleEvent(Event:new("SetPageTopAndBottomMargin", { next_v, next_v }))
+    else
+        ui:handleEvent(Event:new("SetPageTopMargin", next_v))
+        ui:handleEvent(Event:new("SetPageBottomMargin", next_v))
     end
     self:refreshPanel()
     UIManager:setDirty("all", "partial")
@@ -749,28 +829,12 @@ function ReaderFloatMenu:buildControls(content_w)
 
     local h_val = tonumber(h_margins[1]) or 10
     add(self:buildStepRow(content_w, "margin.svg", _("左右边距"), tostring(h_val),
-        function()
-            menu:applyCre("SetPageHorizMargins", stepList(H_MARGINS, h_margins, -1, hMarginCmp))
-        end,
-        function()
-            menu:applyCre("SetPageHorizMargins", stepList(H_MARGINS, h_margins, 1, hMarginCmp))
-        end))
+        function() menu:applyHorizMargins(-1) end,
+        function() menu:applyHorizMargins(1) end))
 
     add(self:buildStepRow(content_w, "margin.svg", _("上下边距"), tostring(t_margin),
-        function()
-            local v = stepList(V_MARGINS, t_margin, -1)
-            menu:applyCreBatch({
-                { "SetPageTopMargin", v },
-                { "SetPageBottomMargin", v },
-            })
-        end,
-        function()
-            local v = stepList(V_MARGINS, t_margin, 1)
-            menu:applyCreBatch({
-                { "SetPageTopMargin", v },
-                { "SetPageBottomMargin", v },
-            })
-        end))
+        function() menu:applyVertMargins(-1) end,
+        function() menu:applyVertMargins(1) end))
 
     return col
 end
