@@ -491,6 +491,9 @@ function Desktop:showDetail(book)
         UIManager:close(self.detail)
         self.detail = nil
     end
+    if self.plugin and self.plugin.rememberBookMeta then
+        self.plugin:rememberBookMeta(book)
+    end
     local desk = self
     self.detail = Detail:new{
         book = book,

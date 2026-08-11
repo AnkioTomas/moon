@@ -27,6 +27,7 @@ local Device = require("device")
 
 local SETTINGS_KEY = "book_plugin_v2"
 local FILEMAP_KEY = "book_plugin_filemap_v2"
+local METAMAP_KEY = "book_plugin_meta_v2"
 local START_WITH_ID = "bookshelf_book"
 -- 本地缓存超过该天数未打开则清理（首次进首页触发）
 local LOCAL_BOOK_TTL = 90 * 24 * 60 * 60
@@ -136,6 +137,51 @@ local function fileMapSet(map, path, filename, last_open)
     map[path] = {
         filename = filename,
         last_open = last_open or os.time(),
+    }
+end
+
+local function readMetaMap()
+    local map = G_reader_settings:readSetting(METAMAP_KEY)
+    if type(map) ~= "table" then
+        return {}
+    end
+    return map
+end
+
+local function writeMetaMap(map)
+    G_reader_settings:saveSetting(METAMAP_KEY, map)
+end
+
+local function bookFilenameOf(book)
+    if type(book) ~= "table" then
+        return nil
+    end
+    local f = book.filename or book.fileName or book.file or book.path
+    if type(f) ~= "string" or f == "" then
+        return nil
+    end
+    return f:match("([^/\\]+)$") or f
+end
+
+--- 从 API 书籍对象抽出悬浮层/详情要用的字段（不存 KOReader 文档解析结果）
+local function metaFromBook(book)
+    if type(book) ~= "table" then
+        return nil
+    end
+    local filename = bookFilenameOf(book)
+    if not filename then
+        return nil
+    end
+    local desc = book.description or book.intro or book.summary
+    return {
+        filename = filename,
+        bookName = book.bookName or book.title,
+        author = book.author,
+        favorite = book.favorite,
+        category = book.category,
+        series = book.series,
+        description = desc,
+        progressPercent = book.progressPercent,
     }
 end
 
@@ -666,8 +712,53 @@ function BookPlugin:clearLocalCache()
     end
 
     writeFileMap({})
+    writeMetaMap({})
     logger.info("book cache cleared", books, covers)
     return books, covers
+end
+
+--- 缓存 API 书籍元数据（按 filename）；打开书 / 列表刷新时写入
+function BookPlugin:rememberBookMeta(book)
+    local meta = metaFromBook(book)
+    if not meta then
+        return
+    end
+    local map = readMetaMap()
+    map[meta.filename] = meta
+    writeMetaMap(map)
+end
+
+function BookPlugin:rememberBooksMeta(books)
+    if type(books) ~= "table" then
+        return
+    end
+    local map = readMetaMap()
+    local dirty = false
+    for _, book in ipairs(books) do
+        local meta = metaFromBook(book)
+        if meta then
+            map[meta.filename] = meta
+            dirty = true
+        end
+    end
+    if dirty then
+        writeMetaMap(map)
+    end
+end
+
+--- 当前阅读书 / 指定 filename 的 API 元数据缓存；没有就返回空表
+function BookPlugin:getCachedBookMeta(filename)
+    filename = filename or self:remoteFilenameForCurrent()
+    if type(filename) ~= "string" or filename == "" then
+        return {}
+    end
+    filename = filename:match("([^/\\]+)$") or filename
+    local map = readMetaMap()
+    local meta = map[filename]
+    if type(meta) == "table" then
+        return meta
+    end
+    return { filename = filename }
 end
 
 function BookPlugin:openBook(book)
@@ -676,6 +767,7 @@ function BookPlugin:openBook(book)
         UIManager:show(InfoMessage:new{ text = _("无效文件名") })
         return
     end
+    self:rememberBookMeta(book)
     local path = self:localPathFor(filename)
     local function doOpen()
         self:touchLocalBook(path, filename)

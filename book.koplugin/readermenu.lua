@@ -260,41 +260,49 @@ local function showFontSettings(ui, on_done)
     end
 end
 
-local function docProps(ui)
-    local doc = ui and ui.document
-    if not doc or not doc.getProps then return {} end
-    return doc:getProps() or {}
+--- 悬浮层书目信息只信 API 缓存；本地文件名仅作书名最后兜底
+local function apiBookMeta(plugin)
+    if plugin and plugin.getCachedBookMeta then
+        return plugin:getCachedBookMeta() or {}
+    end
+    return {}
 end
 
-local function docTitle(ui)
-    local props = docProps(ui)
-    if props.title and props.title ~= "" then return props.title end
+local function bookTitle(plugin, ui)
+    local meta = apiBookMeta(plugin)
+    if meta.bookName and meta.bookName ~= "" then
+        return meta.bookName
+    end
+    if meta.filename and meta.filename ~= "" then
+        return meta.filename
+    end
     local file = ui and ui.document and ui.document.file or ""
     return file:match("([^/\\]+)$") or file or _("未知书籍")
 end
 
-local function docAuthor(ui)
-    local props = docProps(ui)
-    local a = props.authors or props.author or ""
+local function bookAuthor(plugin)
+    local a = apiBookMeta(plugin).author or ""
     if type(a) == "table" then a = table.concat(a, ", ") end
     return tostring(a)
 end
 
-local function docSeries(ui)
-    local props = docProps(ui)
-    return props.series or props.series_name or ""
+local function bookSeries(plugin)
+    return tostring(apiBookMeta(plugin).series or "")
 end
 
-local function docKeywords(ui)
-    local props = docProps(ui)
-    local k = props.keywords or props.tags or ""
+local function bookFavorite(plugin)
+    return tostring(apiBookMeta(plugin).favorite or "")
+end
+
+local function bookCategory(plugin)
+    local k = apiBookMeta(plugin).category or ""
     if type(k) == "table" then k = table.concat(k, " · ") end
     return tostring(k):gsub("\n+", " · ")
 end
 
-local function docDescription(ui)
-    local props = docProps(ui)
-    return tostring(props.description or props.summary or props.comments or "")
+local function bookDescription(plugin)
+    local meta = apiBookMeta(plugin)
+    return tostring(meta.description or meta.intro or meta.summary or "")
 end
 
 local function currentPageText(ui, plugin)
@@ -700,11 +708,12 @@ end
 function ReaderFloatMenu:buildDetail(content_w)
     local plugin = self.plugin
     local ui = plugin and plugin.ui
-    local title = docTitle(ui)
-    local author = docAuthor(ui)
-    local series = docSeries(ui)
-    local keywords = docKeywords(ui)
-    local desc = docDescription(ui)
+    local title = bookTitle(plugin, ui)
+    local author = bookAuthor(plugin)
+    local series = bookSeries(plugin)
+    local favorite = bookFavorite(plugin)
+    local category = bookCategory(plugin)
+    local desc = bookDescription(plugin)
     local page_text, pct = currentPageText(ui, plugin)
     local filename = plugin and plugin.remoteFilenameForCurrent and plugin:remoteFilenameForCurrent()
 
@@ -725,8 +734,9 @@ function ReaderFloatMenu:buildDetail(content_w)
     })
     for _, row in ipairs({
         metaRow(_("作者"), author ~= "" and author or _("未知作者"), info_w),
+        metaRow(_("分类"), favorite, info_w),
+        metaRow(_("标签"), category, info_w),
         metaRow(_("系列"), series, info_w),
-        metaRow(_("标签"), keywords, info_w),
         metaRow(_("进度"), page_text, info_w),
     }) do
         if row then
