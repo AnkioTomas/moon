@@ -621,6 +621,55 @@ function BookPlugin:cleanupStaleLocalBooks()
     return removed
 end
 
+--- 手动清空插件下载的书籍与封面缓存；返回 books, covers
+function BookPlugin:clearLocalCache()
+    local s = settings()
+    local dir = s.library_dir
+    local books, covers = 0, 0
+    if not dir or dir == "" or dir == "/" then
+        return books, covers
+    end
+    if lfs.attributes(dir, "mode") ~= "directory" then
+        return books, covers
+    end
+
+    local ok_cover, Cover = pcall(require, "cover")
+    if ok_cover and Cover and Cover.abortPending then
+        Cover.abortPending()
+    end
+
+    for name in lfs.dir(dir) do
+        if name ~= "." and name ~= ".." and name ~= ".covers" then
+            local path = dir .. "/" .. name
+            if lfs.attributes(path, "mode") == "file" then
+                local ok = pcall(os.remove, path)
+                if ok and lfs.attributes(path, "mode") ~= "file" then
+                    books = books + 1
+                end
+            end
+        end
+    end
+
+    local cover_dir = dir .. "/.covers"
+    if lfs.attributes(cover_dir, "mode") == "directory" then
+        for name in lfs.dir(cover_dir) do
+            if name ~= "." and name ~= ".." then
+                local path = cover_dir .. "/" .. name
+                if lfs.attributes(path, "mode") == "file" then
+                    local ok = pcall(os.remove, path)
+                    if ok and lfs.attributes(path, "mode") ~= "file" then
+                        covers = covers + 1
+                    end
+                end
+            end
+        end
+    end
+
+    writeFileMap({})
+    logger.info("book cache cleared", books, covers)
+    return books, covers
+end
+
 function BookPlugin:openBook(book)
     local filename = book.filename
     if not filename or filename == "" then

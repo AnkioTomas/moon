@@ -125,6 +125,15 @@ function Cover.stopAll()
     Cover._epoch = (Cover._epoch or 0) + 1
 end
 
+--- 丢弃未完成下载任务（清缓存时用）；保留 idle handler
+function Cover.abortPending()
+    Cover._queue = {}
+    Cover._queued = {}
+    Cover._busy = false
+    Cover._pending_refresh = false
+    Cover._epoch = (Cover._epoch or 0) + 1
+end
+
 local function scheduleIdleNotify()
     if Cover._idle_scheduled then
         return

@@ -14,6 +14,7 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local ImageWidget = require("ui/widget/imagewidget")
 local InfoMessage = require("ui/widget/infomessage")
+local ConfirmBox = require("ui/widget/confirmbox")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
@@ -380,6 +381,35 @@ function Settings.build(desktop)
     table.insert(col, VerticalSpan:new{ width = section_gap })
 
     table.insert(col, sectionBlock(card_w, _("其他"), {
+        function(iw)
+            return settingRow(iw, {
+                icon = "trash.svg",
+                title = _("清理缓存"),
+                subtitle = _("删除本地下载的书籍与封面"),
+                callback = function()
+                    UIManager:show(ConfirmBox:new{
+                        text = _("将删除插件下载的书籍文件和封面缓存，不影响服务器数据。确定清理？"),
+                        ok_text = _("清理"),
+                        ok_callback = function()
+                            local books, covers = 0, 0
+                            if plugin and plugin.clearLocalCache then
+                                books, covers = plugin:clearLocalCache()
+                            end
+                            if desktop then
+                                desktop._home_state = nil
+                                desktop._home_loaded = false
+                                desktop._library_state = nil
+                                desktop:rebuild()
+                            end
+                            UIManager:show(InfoMessage:new{
+                                text = T(_("已清理：书籍 %1，封面 %2"), books, covers),
+                                timeout = 2.5,
+                            })
+                        end,
+                    })
+                end,
+            })
+        end,
         function(iw)
             return settingRow(iw, {
                 icon = "about.svg",
