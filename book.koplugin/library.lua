@@ -335,7 +335,8 @@ function Library.gridMetrics(w, h)
         cw = math.floor((avail - gap * (cols - 1)) / cols)
     end
     cw = math.max(UI.sz(80), cw)
-    local ch = math.floor(cw * 3 / 2)
+    local ch
+    cw, ch = UI.coverDim(cw, "grid")
     local cell_h = ch + UI.sz(4) + UI.sz(22)
     local rows = 0
     local used = 0
@@ -574,7 +575,12 @@ function Library.fetch(desktop)
             return
         end
         desktop.total = tonumber(res.count) or 0
-        done(res.data or {})
+        local books = res.data or {}
+        local plugin = desktop.plugin
+        if plugin and plugin.rememberBooksMeta then
+            plugin:rememberBooksMeta(books)
+        end
+        done(books)
     end
 
     UIManager:scheduleIn(0, function()

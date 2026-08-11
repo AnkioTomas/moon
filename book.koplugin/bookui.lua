@@ -129,6 +129,28 @@ function UI.buttonFontSize()
     return UI.fontSize(20)
 end
 
+--- 封面最大高度。宽屏 / 大 ui_scale 下按宽推 3:2 会撑爆整屏。
+--- role: "grid"（默认，主页在读 / 图书馆）| "hero"（最近阅读主角）
+function UI.coverMaxH(role)
+    local screen_h = Screen:getHeight()
+    if role == "hero" then
+        return math.max(UI.sz(96), math.min(UI.sz(168), math.floor(screen_h * 0.28)))
+    end
+    return math.max(UI.sz(80), math.min(UI.sz(132), math.floor(screen_h * 0.22)))
+end
+
+--- 由目标宽度算出封面框。超高则压高度并回缩宽度，保持约 2:3，避免扁盒子。
+function UI.coverDim(cw, role)
+    cw = math.max(1, math.floor(tonumber(cw) or 1))
+    local ch = math.floor(cw * 3 / 2)
+    local max_h = UI.coverMaxH(role)
+    if ch > max_h then
+        ch = max_h
+        cw = math.max(1, math.floor(ch * 2 / 3))
+    end
+    return cw, ch
+end
+
 --- 简易进度条（0–100）。优先 ProgressWidget；否则用 LineWidget，禁止空 FrameContainer。
 function UI.progressBar(width, height, percent)
     local Blitbuffer = require("ffi/blitbuffer")

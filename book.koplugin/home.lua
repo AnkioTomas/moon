@@ -331,7 +331,7 @@ function Home.buildStats(ctx, state)
     }
 end
 
---- 与「在读」网格同一套封面尺度
+--- 与「在读」网格同一套封面尺度（含最大高度）
 local function coverMetrics(width, pad)
     local gap = UI.sz(12)
     local avail = math.max(1, width - pad * 2)
@@ -342,16 +342,18 @@ local function coverMetrics(width, pad)
         cw = math.floor((avail - gap * (cols - 1)) / cols)
     end
     cw = math.max(UI.sz(64), cw)
-    local ch = math.floor(cw * 3 / 2)
+    local ch
+    cw, ch = UI.coverDim(cw, "grid")
     return cw, ch, cols, gap, avail
 end
 
 local function recentRow(ctx, book, on_open, on_read, grid_cw, avail, pad)
     local w = ctx.width
-    -- 主角封面：大于在读格，但给右侧文字留足空间
+    -- 主角封面：略大于在读格，但受 coverMaxH("hero") 约束
     local cw = math.min(math.floor(grid_cw * 1.4), math.floor(avail * 0.42))
     cw = math.max(grid_cw, cw)
-    local ch = math.floor(cw * 3 / 2)
+    local ch
+    cw, ch = UI.coverDim(cw, "hero")
     local gap = UI.sz(16)
     local title = bookTitle(book)
     local author = bookAuthor(book)
@@ -712,6 +714,10 @@ function Home.fetch(desktop)
                 end
             end
             state.reading = reading
+            local plugin = desktop.plugin
+            if plugin and plugin.rememberBooksMeta then
+                plugin:rememberBooksMeta(rows)
+            end
         end
 
         local ok_s, sres_or_err, serr = pcall(function()
