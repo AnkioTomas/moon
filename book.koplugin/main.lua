@@ -766,6 +766,27 @@ function BookPlugin:getCachedBookMeta(filename)
     return { filename = filename }
 end
 
+--- 按 filename（完整路径或 basename）查找已缓存元数据；未缓存返回 nil
+function BookPlugin:findCachedBookMeta(filename)
+    if type(filename) ~= "string" or filename == "" then
+        return nil
+    end
+    local map = readMetaMap()
+    local meta = map[filename]
+    if type(meta) ~= "table" then
+        local base = filename:match("([^/\\]+)$") or filename
+        meta = map[base]
+    end
+    if type(meta) ~= "table" then
+        return nil
+    end
+    -- 至少要有书名，才算能进详情的有效缓存（避免空壳 {filename}）
+    if meta.bookName or meta.title then
+        return meta
+    end
+    return nil
+end
+
 function BookPlugin:openBook(book)
     local filename = book.filename
     if not filename or filename == "" then

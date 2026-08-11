@@ -24,6 +24,7 @@ local UI = require("bookui")
 local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
+local InfoMessage = require("ui/widget/infomessage")
 
 local ScrollableContainer
 do
@@ -380,6 +381,138 @@ local function buildCalendar(desktop, state, width)
     }
 end
 
+local function filenamesMatch(a, b)
+    if type(a) ~= "string" or type(b) ~= "string" or a == "" or b == "" then
+        return false
+    end
+    if a == b then
+        return true
+    end
+    local ba = a:match("([^/\\]+)$") or a
+    local bb = b:match("([^/\\]+)$") or b
+    return ba == bb
+end
+
+--- 统计页点书：有本地元数据进详情；否则网络拉取（有加载提示），失败提示没有书
+function Insight.openBookDetail(desktop, hint)
+    if not desktop or desktop._closed then
+        return
+    end
+    if desktop._insight_opening then
+        return
+    end
+    local filename = hint and (hint.filename or hint.fileName)
+    if type(filename) ~= "string" or filename == "" then
+        UIManager:show(InfoMessage:new{ text = _("没有这本书"), timeout = 2 })
+        return
+    end
+
+    local plugin = desktop.plugin
+    local cached = plugin and plugin.findCachedBookMeta and plugin:findCachedBookMeta(filename)
+    if cached then
+        if hint.progress ~= nil and (cached.progressPercent == nil or cached.progressPercent == 0) then
+            cached = {
+                filename = cached.filename or filename,
+                bookName = cached.bookName or cached.title,
+                author = cached.author,
+                favorite = cached.favorite,
+                category = cached.category,
+                series = cached.series,
+                description = cached.description,
+                progressPercent = tonumber(hint.progress) or cached.progressPercent,
+            }
+        end
+        desktop:showDetail(cached)
+        return
+    end
+
+    local api = desktop.api
+    if not api or not api.configured or not api:configured() then
+        UIManager:show(InfoMessage:new{ text = _("请先配置服务器"), timeout = 2 })
+        return
+    end
+
+    local title = hint.title or hint.bookName or ""
+    local search = title
+    if search == "" then
+        local base = filename:match("([^/\\]+)$") or filename
+        search = base:gsub("%.[^%.]+$", "")
+    end
+    if search == "" then
+        UIManager:show(InfoMessage:new{ text = _("没有这本书"), timeout = 2 })
+        return
+    end
+
+    local function doFetch()
+        if desktop._closed or desktop._insight_opening then
+            return
+        end
+        desktop._insight_opening = true
+        local loading = InfoMessage:new{ text = _("正在拉取书籍信息…") }
+        UIManager:show(loading)
+
+        local function finish(book, err_text)
+            desktop._insight_opening = false
+            pcall(function() UIManager:close(loading) end)
+            if desktop._closed then
+                return
+            end
+            if book then
+                desktop:showDetail(book)
+            else
+                UIManager:show(InfoMessage:new{
+                    text = err_text or _("没有这本书"),
+                    timeout = 2,
+                })
+            end
+        end
+
+        UIManager:scheduleIn(0, function()
+            local ok, err = pcall(function()
+                local res, req_err = api:listBooks{
+                    page = 1,
+                    pageSize = 50,
+                    search = search,
+                }
+                if not res then
+                    finish(nil, req_err or _("拉取失败"))
+                    return
+                end
+                local rows = res.data or {}
+                if type(rows) ~= "table" then
+                    rows = {}
+                end
+                local found
+                for _, row in ipairs(rows) do
+                    local fn = row.filename or row.fileName or row.file
+                    if filenamesMatch(fn, filename) then
+                        found = row
+                        break
+                    end
+                end
+                if not found then
+                    finish(nil, _("没有这本书"))
+                    return
+                end
+                if plugin and plugin.rememberBookMeta then
+                    plugin:rememberBookMeta(found)
+                end
+                finish(found)
+            end)
+            if not ok then
+                logger.err("book insight open detail failed:", err)
+                finish(nil, tostring(err))
+            end
+        end)
+    end
+
+    if plugin and plugin.withNetwork then
+        plugin:withNetwork(doFetch)
+    else
+        doFetch()
+    end
+end
+
 --- 当日书单：小封面 + 书名/作者 + 时长 + 细进度条
 local function buildDayDetail(desktop, state, width)
     local selected = state.selected or ""
@@ -477,15 +610,7 @@ local function buildDayDetail(desktop, state, width)
         }
 
         local tap = tappable(width, ch, function()
-            if filename and desktop.showDetail then
-                desktop:showDetail({
-                    filename = filename,
-                    bookName = book.title,
-                    title = book.title,
-                    author = book.authors,
-                    progressPercent = pct,
-                })
-            end
+            Insight.openBookDetail(desktop, book)
         end)
         tap[1] = row
         table.insert(col, tap)
