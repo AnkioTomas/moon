@@ -115,4 +115,4 @@ sed -i.bak "s/@VERSION@/${VERSION}/g" book.koplugin/bookversion.lua
 
 ## 许可证
 
-本仓库当前未提供许可证文件。使用、分发或修改前请先向项目维护者确认授权条件。
+本项目采用 [MIT License](LICENSE)。
