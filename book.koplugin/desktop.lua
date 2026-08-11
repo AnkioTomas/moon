@@ -1,5 +1,5 @@
 --[[--
-Book 桌面壳 — 底栏三栏：图书馆 / 主页 / 设置
+Book 桌面壳 — 底栏四栏：图书馆 / 主页 / 统计 / 设置
 
 @module koplugin.book.desktop
 --]]
@@ -27,6 +27,7 @@ local Screen = Device.screen
 
 local Home = require("home")
 local Library = require("library")
+local Insight = require("insight")
 local Settings = require("settings")
 local Detail = require("detail")
 local Cover = require("cover")
@@ -35,6 +36,7 @@ local UI = require("bookui")
 local TABS = {
     { id = "library", text = _("图书馆"), icon = "library.svg" },
     { id = "home", text = _("主页"), icon = "home.svg" },
+    { id = "stats", text = _("统计"), icon = "stats.svg" },
     { id = "settings", text = _("设置"), icon = "settings.svg" },
 }
 
@@ -109,6 +111,8 @@ function Desktop:init()
             desk:requestHomeRefresh("covers")
         elseif desk.tab == "library" then
             desk:requestLibraryRefresh("covers")
+        elseif desk.tab == "stats" then
+            desk:requestInsightRefresh("covers")
         end
     end)
     UIManager:nextTick(function()
@@ -243,6 +247,11 @@ function Desktop:switchTab(id)
         self._home_loaded = false
         self:scheduleClockTick()
     end
+    if id == "stats" and self.tab ~= "stats" then
+        -- 进入统计页时重拉；同页点刷新也走 _insight_loaded=false
+        self._insight_loaded = false
+        self._insight_state = nil
+    end
     self.tab = id
     self:rebuild()
 end
@@ -258,6 +267,8 @@ function Desktop:rebuild()
             content = self:buildHome()
         elseif self.tab == "library" then
             content = self:buildLibrary()
+        elseif self.tab == "stats" then
+            content = self:buildInsight()
         else
             content = Settings.build(self)
         end
@@ -320,6 +331,43 @@ function Desktop:buildHome()
         }
     end
     return Home.build(self:ctx(), self._home_state or {})
+end
+
+function Desktop:buildInsight()
+    local h = self:contentHeight()
+    local w = Screen:getWidth()
+    if not self._insight_loaded then
+        UIManager:nextTick(function()
+            if self._closed or self.tab ~= "stats" then return end
+            Insight.fetch(self)
+        end)
+        return FrameContainer:new{
+            bordersize = 0,
+            padding = 0,
+            background = Blitbuffer.COLOR_WHITE,
+            dimen = Geom:new{ w = w, h = h },
+            CenterContainer:new{
+                dimen = Geom:new{ w = w, h = h },
+                TextWidget:new{
+                    text = _("加载统计…"),
+                    face = UI.face("cfont", 18),
+                    fgcolor = UI.muted(),
+                },
+            },
+        }
+    end
+    return Insight.build(self)
+end
+
+function Desktop:requestInsightRefresh(reason)
+    if self._closed or self.tab ~= "stats" then return end
+    if self._insight_refresh_pending then return end
+    self._insight_refresh_pending = true
+    UIManager:scheduleIn(0.5, function()
+        self._insight_refresh_pending = false
+        if self._closed or self.tab ~= "stats" or not self._insight_loaded then return end
+        self:rebuild()
+    end)
 end
 
 function Desktop:scheduleClockTick()
@@ -514,6 +562,7 @@ function Desktop:onClose()
     self._clock_scheduled = false
     self._home_refresh_pending = false
     self._library_refresh_pending = false
+    self._insight_refresh_pending = false
     self.ges_events = nil
     Cover.stopAll()
     if self.detail then

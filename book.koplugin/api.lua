@@ -217,6 +217,11 @@ function Api:readingSummary()
     return self:_request("GET", "/index/stats/summary")
 end
 
+--- 多维统计：KPI + 月/星期分布 + 日历 perDay
+function Api:readingInsight()
+    return self:_request("GET", "/index/stats/insight")
+end
+
 --- 每日一言（独立公网接口，不走 Book 服务器）
 function Api.hitokoto()
     local url = "https://api.ankio.net/hitokoto"
