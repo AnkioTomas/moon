@@ -339,23 +339,28 @@ end
 
 local function metaRow(label, value, width)
     if not value or value == "" then return nil end
-    local label_w = UI.sz(56)
-    local value_w = math.max(UI.sz(40), width - label_w - UI.sz(4))
+    local face = UI.face("xx_smallinfofont", 12)
+    local label_w = UI.sz(44)
+    local value_w = math.max(UI.sz(32), width - label_w - UI.sz(2))
+    local label_tw = TextWidget:new{
+        text = label,
+        face = face,
+        fgcolor = UI.muted(),
+    }
+    local value_tw = TextWidget:new{
+        text = tostring(value),
+        face = face,
+        max_width = value_w,
+        fgcolor = Blitbuffer.COLOR_BLACK,
+    }
+    local h = math.max(label_tw:getSize().h, value_tw:getSize().h)
     return HorizontalGroup:new{
+        align = "center",
         LeftContainer:new{
-            dimen = Geom:new{ w = label_w, h = UI.sz(24) },
-            TextWidget:new{
-                text = label,
-                face = UI.face("xx_smallinfofont", 12),
-                fgcolor = UI.muted(),
-            },
+            dimen = Geom:new{ w = label_w, h = h },
+            label_tw,
         },
-        TextWidget:new{
-            text = tostring(value),
-            face = UI.face("cfont", 13),
-            max_width = value_w,
-            fgcolor = Blitbuffer.COLOR_BLACK,
-        },
+        value_tw,
     }
 end
 
@@ -717,7 +722,8 @@ function ReaderFloatMenu:buildDetail(content_w)
     local page_text, pct = currentPageText(ui, plugin)
     local filename = plugin and plugin.remoteFilenameForCurrent and plugin:remoteFilenameForCurrent()
 
-    local cw, ch = UI.sz(76), UI.sz(108)
+    -- 封面略放大，右侧元信息有更多等高空间；保持约 2:3
+    local cw, ch = UI.sz(84), UI.sz(126)
     local path = Cover.cachedPath(plugin, filename)
     local cover_w = Cover.widget(path, cw, ch, title)
     if not path and filename and plugin and plugin.getApi then
@@ -725,28 +731,46 @@ function ReaderFloatMenu:buildDetail(content_w)
     end
 
     local info_w = math.max(UI.sz(40), content_w - cw - UI.sz(10))
-    local kids = { align = "left" }
-    table.insert(kids, TextWidget:new{
+    local row_gap = math.max(1, UI.sz(1))
+    local bar_gap = UI.sz(3)
+    local progress = UI.progressBar(info_w, UI.sz(6), pct)
+    local progress_h = progress:getSize().h
+
+    local title_tw = TextWidget:new{
         text = title,
-        face = UI.face("cfont", 17),
+        face = UI.face("cfont", 15),
         max_width = info_w,
         fgcolor = Blitbuffer.COLOR_BLACK,
-    })
-    for _, row in ipairs({
+    }
+
+    -- 优先级：作者 > 进度文案 > 分类 > 标签 > 系列；装不下就丢后面的
+    local candidates = {
         metaRow(_("作者"), author ~= "" and author or _("未知作者"), info_w),
+        metaRow(_("进度"), page_text, info_w),
         metaRow(_("分类"), favorite, info_w),
         metaRow(_("标签"), category, info_w),
         metaRow(_("系列"), series, info_w),
-        metaRow(_("进度"), page_text, info_w),
-    }) do
+    }
+
+    local kids = { align = "left", title_tw }
+    local used = title_tw:getSize().h
+    local reserve = bar_gap + progress_h
+    for _, row in ipairs(candidates) do
         if row then
-            table.insert(kids, VerticalSpan:new{ width = UI.sz(3) })
-            table.insert(kids, row)
+            local rh = row:getSize().h
+            local need = row_gap + rh
+            if used + need + reserve <= ch then
+                table.insert(kids, VerticalSpan:new{ width = row_gap })
+                table.insert(kids, row)
+                used = used + need
+            end
         end
     end
-    table.insert(kids, VerticalSpan:new{ width = UI.sz(6) })
-    table.insert(kids, UI.progressBar(info_w, UI.sz(7), pct))
+    table.insert(kids, VerticalSpan:new{ width = bar_gap })
+    table.insert(kids, progress)
 
+    local info_col = VerticalGroup:new(kids)
+    -- 右栏高度锁死封面高，禁止撑破横向头图区
     local col = VerticalGroup:new{
         align = "left",
         HorizontalGroup:new{
@@ -754,18 +778,18 @@ function ReaderFloatMenu:buildDetail(content_w)
             cover_w,
             HorizontalSpan:new{ width = UI.sz(10) },
             LeftContainer:new{
-                dimen = Geom:new{ w = info_w, h = math.max(ch, UI.sz(100)) },
-                VerticalGroup:new(kids),
+                dimen = Geom:new{ w = info_w, h = ch },
+                info_col,
             },
         },
     }
     if desc ~= "" then
-        table.insert(col, VerticalSpan:new{ width = UI.sz(8) })
+        table.insert(col, VerticalSpan:new{ width = UI.sz(6) })
         table.insert(col, TextBoxWidget:new{
             text = desc,
             face = UI.face("xx_smallinfofont", 12),
             width = content_w,
-            height = UI.sz(48),
+            height = UI.sz(40),
             alignment = "left",
             fgcolor = UI.muted(),
         })
