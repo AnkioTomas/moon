@@ -2,6 +2,18 @@
 
 Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供连接远端 Book 服务的书库桌面。它将图书馆、主页和设置整合为全屏界面，可下载并打开书籍、缓存封面，以及同步阅读进度。
 
+配套服务端：[AnkioTomas/book](https://github.com/AnkioTomas/book)（静读天下 Web 管理）。本插件通过其 HTTP API 拉取书库、封面与进度；请先部署该服务，再在插件设置中填写服务器地址与令牌。
+
+## 截图
+
+| 主页 | 图书馆 |
+| --- | --- |
+| ![主页](screenshots/home.png) | ![图书馆](screenshots/library.png) |
+
+| 设置 | 阅读页悬浮面板 |
+| --- | --- |
+| ![设置](screenshots/settings.png) | ![阅读页悬浮面板](screenshots/reader-menu.png) |
+
 ## 功能
 
 - **封面书库**：以响应式网格展示书籍、阅读进度和总数，支持分页。
@@ -60,7 +72,7 @@ Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供�
 
 ## 服务端接口
 
-插件以 `Authorization: Bearer <token>` 请求服务器。除封面和书籍下载外，接口应返回 JSON；成功响应使用 `code: 200`，业务错误应提供 `msg` 字段。
+默认对接 [AnkioTomas/book](https://github.com/AnkioTomas/book)。插件以 `Authorization: Bearer <token>` 请求服务器。除封面和书籍下载外，接口应返回 JSON；成功响应使用 `code: 200`，业务错误应提供 `msg` 字段。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
