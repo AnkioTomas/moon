@@ -209,7 +209,11 @@ end
 --- 上报阅读统计（KOReader page_stat 语义）
 --- body: { books = {}, stats = {}, device_id? }
 function Api:importReadingStats(payload)
-    return self:_request("POST", "/index/stats/import", nil, payload or {}, nil, false, true)
+    local res, err = self:_request("POST", "/index/stats/import", nil, payload or {}, nil, false, true)
+    if res then
+        Api.clearInsightCache()
+    end
+    return res, err
 end
 
 --- 阅读活动汇总 KPI
@@ -217,9 +221,26 @@ function Api:readingSummary()
     return self:_request("GET", "/index/stats/summary")
 end
 
---- 多维统计：KPI + 月/星期分布 + 日历 perDay
+--- 多维统计：成功结果缓存 30 分钟
+local INSIGHT_TTL = 30 * 60
+local _insight_cache = { t = 0, data = nil }
+
+function Api.clearInsightCache()
+    _insight_cache.t = 0
+    _insight_cache.data = nil
+end
+
 function Api:readingInsight()
-    return self:_request("GET", "/index/stats/insight")
+    local now = os.time()
+    if _insight_cache.data and (now - (_insight_cache.t or 0)) < INSIGHT_TTL then
+        return _insight_cache.data
+    end
+    local res, err = self:_request("GET", "/index/stats/insight")
+    if res then
+        _insight_cache.t = now
+        _insight_cache.data = res
+    end
+    return res, err
 end
 
 --- 每日一言（独立公网接口，不走 Book 服务器）

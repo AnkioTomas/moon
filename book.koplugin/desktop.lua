@@ -247,11 +247,7 @@ function Desktop:switchTab(id)
         self._home_loaded = false
         self:scheduleClockTick()
     end
-    if id == "stats" and self.tab ~= "stats" then
-        -- 进入统计页时重拉；同页点刷新也走 _insight_loaded=false
-        self._insight_loaded = false
-        self._insight_state = nil
-    end
+    -- 统计页：保留内存态；过期由 Api insight TTL / 手动刷新处理
     self.tab = id
     self:rebuild()
 end

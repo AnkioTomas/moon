@@ -106,6 +106,8 @@ local function dayTitle(ymd, duration_text)
 end
 
 local function refreshInsight(desktop)
+    local Api = require("api")
+    Api.clearInsightCache()
     desktop._insight_state = nil
     desktop._insight_loaded = false
     desktop:rebuild()
