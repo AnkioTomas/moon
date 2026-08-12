@@ -39,48 +39,41 @@ Book 是一个运行在 [KOReader](https://koreader.rocks/) Lua 环境中的插�
 ```text
 moon/                           # 仓库根目录
 ├── book.koplugin/              # 插件目录（部署时整个复制到 KOReader plugins/）
-│   ├── _meta.lua               # 插件元数据（name, fullname, description）
-│   ├── main.lua                # 入口：BookPlugin 类、生命周期、事件钩子
-│   ├── bookversion.lua         # 版本号（CI 注入，开发时显示 0.0.0-dev）
+│   ├── _meta.lua / main.lua / bookversion.lua
+│   ├── stats_db.lua / stats_sync.lua
 │   │
-│   ├── desktop.lua             # 桌面壳：四栏底栏 + Tab 切换 + 内容区调度
-│   ├── home.lua                # 主页 Tab：时钟/一言、统计卡片、最近阅读、在读网格
-│   ├── library.lua             # 图书馆 Tab：搜索/筛选/分页、封面网格
-│   ├── insight.lua             # 统计 Tab：KPI 大字、日历热力图、当日书单
-│   ├── detail.lua              # 书籍详情浮层：封面 + 元信息 + 阅读按钮
-│   ├── readermenu.lua          # 阅读页悬浮面板：排版调节、目录、首页
+│   ├── ui/                     # 全部界面（勿与 KOReader 的 ui/* 模块同名冲突）
+│   │   ├── desktop.lua         # 桌面壳：动态底栏 + Tab
+│   │   ├── home.lua            # 首页
+│   │   ├── library.lua         # 图书馆
+│   │   ├── store.lua           # 书城
+│   │   ├── insight.lua         # 统计
+│   │   ├── detail.lua          # 书籍详情
+│   │   ├── readermenu.lua      # 阅读页悬浮面板
+│   │   ├── settings.lua        # 设置 Tab
+│   │   └── components/         # 可复用组件
+│   │       ├── bookui.lua      # 缩放 / 色阶 / iconDir / 网格度量
+│   │       └── cover.lua       # 封面缓存与缩略图
 │   │
-│   ├── api.lua                 # HTTP API 客户端（socket.http + Bearer Token）
-│   ├── cover.lua               # 封面下载/缓存/异步队列/缩略图解码
-│   ├── bookui.lua              # UI 工具：缩放系数、色阶常量、网格度量、进度条
-│   ├── stats_db.lua            # 读取 KOReader statistics.sqlite3
-│   ├── stats_sync.lua          # 阅读统计后台上报（注册设备 + import）
+│   ├── source/                 # 统一数据源
+│   │   ├── contract.lua / registry.lua
+│   │   ├── moon/{init.lua,api.lua}
+│   │   ├── webdav/ / wechat/ / legado/   # 空壳
 │   │
-│   ├── moon/                   # 子模块命名空间
-│   │   ├── settings.lua        # 配置持久化（$DATA/.moon/settings/config.lua）
-│   │   └── ui/
-│   │       └── settings.lua    # 设置 Tab UI 渲染
-│   │
-│   ├── icons/                  # SVG 图标（底栏、设置、阅读面板等）
-│   ├── http/                   # 保留目录（当前为空）
-│   ├── ui/components/          # 保留目录（当前为空）
-│   └── source/                 # 保留目录（webdav/、wechat/ 均为空）
+│   ├── moon/settings.lua       # 配置持久化（非 UI）
+│   └── icons/
 │
-├── koreader/                   # Git submodule → koreader/koreader（IDE 补全 + 本机模拟器）
-├── screenshots/                # README 截图
-├── .github/workflows/
-│   └── release.yml             # CI：打 tag → 注入版本 → zip → GitHub Release
-├── README.md
-├── DEVELOPMENT.md              # 本文件：架构与开发环境
-├── LICENSE                     # MIT
+├── koreader/                   # Git submodule（IDE 补全 + 本机模拟器）
+├── README.md / DEVELOPMENT.md / LICENSE
 └── .gitmodules
 ```
 
 **关键规则**：
 
-- `source/`、`http/`、`ui/components/` 是预留目录，当前为空
-- `koreader/` 子模块用于 IDE 补全，以及在本机编译/运行模拟器；**不会打包进插件**
-- 部署产物是 `book.koplugin/` 目录本身
+- UI 全部在 `ui/`；可复用组件只放 `ui/components/`
+- UI 只依赖 `source` 契约；Book HTTP 仅 `source/moon/api.lua`
+- 插件 `require("ui.xxx")` 用点号；KOReader 内置仍用 `require("ui/uimanager")` 斜杠路径，互不抢名
+- 同时只激活一个数据源；书城 Tab 按 `capabilities.store` 动态出现
 
 ---
 
@@ -89,30 +82,22 @@ moon/                           # 仓库根目录
 ```text
 ┌──────────────────────────────────────────────────────────┐
 │  KOReader 宿主                                           │
-│  ├─ FileManager（文件管理器实例）                          │
-│  │   └─ BookPlugin (main.lua)  ← WidgetContainer 子类    │
-│  └─ ReaderUI（阅读器实例）                                │
-│      └─ BookPlugin (main.lua)  ← 同一个类，不同实例       │
+│  ├─ FileManager → BookPlugin (main.lua)                  │
+│  └─ ReaderUI    → BookPlugin (main.lua)                  │
 └──────────────────────────────────────────────────────────┘
-         │
-         │ openDesktop()
+         │ openDesktop() → getSource()
          ▼
 ┌──────────────────────────────────────────────────────────┐
-│  Desktop (desktop.lua)  ← InputContainer，全屏覆盖       │
-│  ├─ 底栏：图书馆 / 主页 / 统计 / 设置                     │
-│  ├─ 内容区由 tab 决定：                                   │
-│  │   ├─ "home"     → Home.build(ctx)                     │
-│  │   ├─ "library"  → Library.build(ctx)                  │
-│  │   ├─ "stats"    → Insight.build(ctx)                  │
-│  │   └─ "settings" → Settings.build(desktop)             │
-│  └─ 浮层：Detail (detail.lua)                            │
+│  Desktop                                                 │
+│  底栏：图书馆 / [书城?] / 首页 / 统计 / 设置               │
+│  ctx.source → Home / Library / Store / Insight / Settings│
 └──────────────────────────────────────────────────────────┘
          │
-         │ 阅读页中部点击
          ▼
 ┌──────────────────────────────────────────────────────────┐
-│  ReaderFloatMenu (readermenu.lua) ← InputContainer       │
-│  底部半屏面板：排版调节 / 目录 / 更多 / 首页              │
+│  source.registry → 单活跃 Source                         │
+│  ├─ moon → source/moon/{init,api}.lua  ✅               │
+│  ├─ webdav / wechat / legado           🚧 空壳           │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -120,7 +105,7 @@ moon/                           # 仓库根目录
 
 1. KOReader 启动 → PluginLoader 加载 `book.koplugin/` → 创建 `BookPlugin` 实例
 2. BookPlugin 存在两种上下文：FM（文件管理器）实例和 Reader（阅读器）实例
-3. `openDesktop()` 创建 `Desktop` 全屏 widget 并 `UIManager:show()`
+3. `openDesktop()` 经 `SourceRegistry.getActive()` 取源，创建 `Desktop` 并 `UIManager:show()`
 4. 关闭桌面时 `UIManager:close()` 回到 FM
 5. 阅读器中，BookPlugin 通过 `registerTouchZones` 注册中部点击热区，触发悬浮面板
 
@@ -133,7 +118,7 @@ moon/                           # 仓库根目录
 | 职责 | 说明 |
 |------|------|
 | 生命周期 | `init()` → 注册菜单、Dispatcher、patch FM |
-| 事件钩子 | `onReaderReady`、`onCloseDocument`、`onSuspend`、`onSetDimensions` |
+| 数据源 | `getSource()` / `onSourceChanged()`；`getApi()` 为过渡期别名 |
 | 桌面管理 | `openDesktop(filter)` → 创建/关闭 Desktop |
 | 书籍操作 | `openBook(book)` → 下载 + 打开阅读器 |
 | 进度同步 | `pushCurrentProgress()`、`pullCurrentProgress()` |
@@ -142,67 +127,42 @@ moon/                           # 仓库根目录
 | 元数据缓存 | `rememberBookMeta()`、`getCachedBookMeta()` |
 | 文件映射 | `fileMap`（本地路径 ↔ 远端 filename + 最后打开时间） |
 
-### api.lua — HTTP 客户端
+### source/ — 统一数据源
 
-纯函数式 API 封装，无状态（除 recent/insight 内存缓存）。
+- `contract.lua`：能力位默认值、`normalizeBook`（补齐 id/title 等别名，保留原字段）
+- `registry.lua`：`list` / `create` / `getActive` / `setActive` / `invalidate`
+- 适配器方法：`listLibrary`、`listStore`、`recentBooks`、`filters`、`libraryStats`、`readingInsight`、`getProgress` / `updateProgress`、`downloadBook` / `downloadCover`、`ping`、`capabilities`
+
+### source/moon — Book HTTP + 适配器
+
+- `source/moon/init.lua`：实现 Source 契约，对外唯一入口
+- `source/moon/api.lua`：Book 服务 HTTP（`listBooks`、进度、封面、insight 等），**仅 moon 内部 require**
 
 ```lua
-local api = Api:new{ base_url = "https://...", token = "bk_..." }
-local data, err = api:listBooks{ page = 1, search = "三体" }
+local Api = require("source.moon.api")  -- 仅允许在 source/moon 内
 ```
-
-**设计要点**：
-
-- 统一走 `_request()` 方法，自动处理 JSON 解析、BOM 去除、401、超时
-- 二进制下载（书籍/封面）通过 `sink_file` 参数区分，`Connection: close` 防挂死
-- `as_json` 参数控制 POST body 格式（form vs JSON）
-- 内存缓存有 TTL（recent 5 分钟，insight 30 分钟），可手动清除
 
 ### desktop.lua — 桌面壳
 
-- 继承 `InputContainer`，`covers_fullscreen = true`
-- 管理四个 Tab 的构建和切换
-- 通过 `ctx()` 方法向各 Tab 传递上下文（width, height, plugin, api, desktop, filter）
-- 底栏手势判定：按 x 坐标计算点中哪个 Tab
-- 左右滑动翻页（图书馆），下滑关闭
+- 路径：`ui/desktop.lua`（`require("ui.desktop")`）
+- `buildTabs(source)`：基线图书馆/首页/统计/设置；`capabilities.store` 时插入书城
+- `ctx()` 传 `source`（并保留 `api` 别名）
+- 左右滑动翻页（图书馆/书城），下滑关闭
 
-### home.lua / library.lua / insight.lua — 页面模块
+### home / library / store / insight / settings / detail / readermenu
 
-**统一模式**：模块导出 `Module.build(ctx)` 函数，返回一个 widget 树。
+路径均在 `ui/` 下，例如 `require("ui.home")`、`require("ui.settings")`。
 
-- **Home**：时钟/一言 + 统计卡片（已读/未读可点击跳转图书馆）+ 最近阅读封面 + 在读网格
-- **Library**：顶栏（搜索/筛选/清除/总数）+ 封面网格 + 分页。筛选互斥：同时只有一个条件
-- **Insight**：从 `/index/stats/insight` 拉数据，渲染 KPI 大字 + 月度日历热力图 + 当日书单
+- **Home**：继续阅读 + 馆藏统计卡片 + 在读网格
+- **Library**：`listLibrary`
+- **Store**：`listStore`（moon 不显示该 Tab）
+- **Insight**：`readingInsight`
+- **Settings**：数据源切换 + 通用开关（原 `moon/ui/settings.lua`）
 
-### cover.lua — 封面管理
+### ui/components — 可复用组件
 
-- `cachedPath()` → 查找本地缓存（按后缀探测 jpg/png/webp/gif）
-- `ensure()` → 同步下载并嗅探格式
-- `ensureAsync()` → 异步队列（`pump` 串行执行，避免并发 HTTP）
-- `widget()` → 解码缩略图（`RenderImage:renderImageFile`），**禁止原图进内存**
-- `placeholder()` → 无封面时的文字占位框
-
-### bookui.lua — UI 工具
-
-提供所有 UI 模块共用的度量和色阶：
-
-| 函数 | 用途 |
-|------|------|
-| `UI.sz(n)` | 逻辑像素 → 物理像素，考虑 DPI + `ui_scale` |
-| `UI.fontSize(n)` | 字号缩放 |
-| `UI.face(name, size)` | 获取缩放后的 Font Face |
-| `UI.iconSz()` | 图标统一边长 |
-| `UI.barH()` | 底栏高度 |
-| `UI.ink()` / `muted()` / `dim()` / `rule()` / `track()` | 墨水屏色阶 |
-| `UI.coverGridMetrics(w, h)` | 计算网格列宽/封面尺寸/列数 |
-| `UI.progressBar(w, h, pct)` | 简易进度条 widget |
-
-### readermenu.lua — 阅读页悬浮面板
-
-- 底部半屏面板，覆盖在阅读页之上
-- 排版调节项：字体、字号、行距、字重、对比度、边距、分页/滚动
-- 操作按钮：目录、更多设置、首页（关书回桌面）、关闭
-- 读取/修改 KOReader CRe 引擎参数（通过 `document.configurable` 和 `Event`）
+- `bookui.lua`：缩放、色阶、`UI.iconDir()` / `UI.pluginRoot()`、网格度量、进度条
+- `cover.lua`：封面缓存 / 异步下载 / 缩略图（禁止原图进内存）
 
 ### stats_db.lua + stats_sync.lua — 统计上报
 
@@ -221,10 +181,10 @@ local data, err = api:listBooks{ page = 1, search = "三体" }
   → Desktop:switchTab("library")
   → Desktop:buildLibrary()
   → Library.build(ctx)
-  → ctx.api:listBooks(opts)        ← HTTP GET /index/book/list
-  → 返回 JSON { data: { records: [...], total: N } }
+  → ctx.source:listLibrary(opts)   ← moon → GET /index/book/list
+  → 返回 JSON { data: [...], count: N }
   → Library 渲染封面网格
-  → Cover.ensureAsync() 异步下载缺失封面
+  → Cover.ensureAsync(source, ...) 异步下载缺失封面
   → 下载完成 → Cover idle handler → 刷新当前页
 ```
 
@@ -341,19 +301,21 @@ $KOREADER_DATA/.moon/settings/config.lua
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_url` | string | `""` | 服务器地址 |
-| `token` | string | `""` | Bearer 令牌 |
+| `active_source` | string | `"moon"` | 当前数据源 id |
+| `sources.moon` | table | `{base_url,token}` | Book 源凭证 |
+| `sources.webdav/wechat/legado` | table | `{}` | 预留 |
+| `base_url` / `token` | string | `""` | 与 `sources.moon` 双向同步（兼容旧配置） |
 | `library_dir` | string | `$DATA/books` | 本地下载缓存目录 |
 | `auto_sync` | boolean | `true` | 自动同步进度 |
 | `auto_stats` | boolean | `true` | 自动上报阅读统计 |
 | `open_on_start` | boolean | `true` | 启动时打开桌面 |
-| `home_header` | string | `"clock"` | 主页顶部：`"clock"` 或 `"hitokoto"` |
+| `home_header` | string | `"clock"` | 首页顶部：`"clock"` 或 `"hitokoto"` |
 | `ui_scale` | number | `130` | 界面缩放百分比 (100–180) |
 | `reader_float_menu` | boolean | `true` | 阅读页悬浮菜单 |
 
 ### 迁移机制
 
-首次打开新配置文件时，自动从 `G_reader_settings` 的旧键 `book_plugin_v2` / `book_plugin` 迁移，迁移后删除旧键。
+首次打开新配置文件时，自动从 `G_reader_settings` 的旧键 `book_plugin_v2` / `book_plugin` 迁移，迁移后删除旧键。已有配置若只有顶层 `base_url`/`token`，会同步进 `sources.moon`。
 
 ---
 
@@ -387,14 +349,13 @@ local Device = require("device")
 local UIManager = require("ui/uimanager")
 local Font = require("ui/font")
 
--- 插件内部模块：直接用文件名（KOReader 把插件目录加入了 package.path）
-local Api = require("api")
-local Cover = require("cover")
-local UI = require("bookui")
-
--- 子目录模块：用 . 分隔
+-- 插件内部模块：点号路径
+local Cover = require("ui.components.cover")
+local UI = require("ui.components.bookui")
+local Desktop = require("ui.desktop")
+local SourceRegistry = require("source.registry")
 local MoonSettings = require("moon.settings")
-local Settings = require("moon.ui.settings")
+-- Book HTTP 仅允许：require("source.moon.api")  -- 在 source/moon 内
 ```
 
 ### 错误处理
@@ -535,7 +496,7 @@ git submodule update --init --recursive
 
 - `koreader/frontend/` — KOReader 核心框架
 - `koreader/plugins/` — KOReader 内置插件（参考实现）
-- `book.koplugin/` — 本插件
+- `book.koplugin/` — 本插件（含 `ui/`、`ui/components/`、`source/`）
 
 ### 3. 挂接插件（软链接）
 
