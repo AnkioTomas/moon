@@ -12,8 +12,6 @@ local Paths = require("moon.paths")
 
 local M = {}
 
-local SOURCE_IDS = { "moon", "webdav", "wechat", "legado" }
-
 local _common_ls = nil
 local _source_ls = {}
 
@@ -70,7 +68,6 @@ local function openCommon()
     if _common_ls then
         return _common_ls
     end
-    Paths.ensureLayout()
     _common_ls = openFile(Paths.commonPath())
     local dirty = fillDefaults(_common_ls.data, commonDefaults())
     normalizeCommon(_common_ls.data)
@@ -85,7 +82,6 @@ local function openSource(id)
     if _source_ls[id] then
         return _source_ls[id]
     end
-    Paths.ensureLayout()
     local ls = openFile(Paths.sourcePath(id))
     local dirty = fillDefaults(ls.data, sourceDefaults(id))
     if dirty then
@@ -95,12 +91,10 @@ local function openSource(id)
     return ls
 end
 
---- 通用设置（与磁盘同一引用）；改完必须 save / saveCommon
+--- 通用设置（与磁盘同一引用）；改完必须 save
 function M.get()
     return normalizeCommon(openCommon().data)
 end
-
-M.getCommon = M.get
 
 function M.save(s)
     local ls = openCommon()
@@ -111,8 +105,6 @@ function M.save(s)
     end
     ls:flush()
 end
-
-M.saveCommon = M.save
 
 --- 数据源专用设置
 function M.getSource(id)
@@ -135,16 +127,6 @@ end
 function M.activeSourceId()
     local c = M.get()
     return c.active_source or "moon"
-end
-
-function M.sourceIds()
-    return SOURCE_IDS
-end
-
-function M.reload()
-    _common_ls = nil
-    _source_ls = {}
-    return M.get()
 end
 
 return M

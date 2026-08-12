@@ -22,8 +22,6 @@ function Legado.new(cfg)
     return self
 end
 
-function Source:id() return "legado" end
-function Source:name() return _("Legado 阅读") end
 function Source:capabilities()
     local c = Contract.defaultCapabilities()
     c.store = true
@@ -36,7 +34,6 @@ function Source:listStore() return nil, _("Legado 数据源尚未实现") end
 function Source:recentBooks() return nil, _("Legado 数据源尚未实现") end
 function Source:filters() return nil, _("Legado 数据源尚未实现") end
 function Source:libraryStats() return nil, _("Legado 数据源尚未实现") end
-function Source:stats() return self:libraryStats() end
 function Source:readingInsight() return nil, _("当前数据源不支持统计") end
 function Source:clearCaches() end
 function Source:getProgress() return nil, _("Legado 数据源尚未实现") end

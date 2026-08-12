@@ -30,17 +30,13 @@ function Store.fetch(desktop)
     end
 
     local function run()
-        local source = desktop.source or desktop.api
+        local source = desktop.source
         if not source or not source.configured or not source:configured() then
             done({}, _("请先在设置里配置当前数据源"))
             return
         end
-        if desktop.syncStorePageSize then
-            desktop:syncStorePageSize()
-        elseif desktop.syncLibraryPageSize then
-            desktop:syncLibraryPageSize()
-        end
-        local f = desktop.store_filter or desktop.filter or {}
+        desktop:syncStorePageSize()
+        local f = desktop.filter or {}
         local res, err
         local ok, thrown = pcall(function()
             res, err = source:listStore{

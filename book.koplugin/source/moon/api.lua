@@ -219,11 +219,6 @@ function Api:importReadingStats(payload)
     return res, err
 end
 
---- 阅读活动汇总 KPI
-function Api:readingSummary()
-    return self:_request("GET", "/index/stats/summary")
-end
-
 --- 多维统计：成功结果缓存 30 分钟
 local INSIGHT_TTL = 30 * 60
 local _insight_cache = { t = 0, data = nil }

@@ -31,6 +31,10 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Cover = require("ui.components.cover")
 local UI = require("ui.components.bookui")
 local Cache = require("moon.cache")
+local Progress = require("moon.progress")
+local MoonSettings = require("moon.settings")
+local Host = require("moon.host")
+local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
 local Screen = Device.screen
@@ -300,11 +304,8 @@ local function bookDescription(plugin)
     return tostring(meta.description or meta.intro or meta.summary or "")
 end
 
-local function currentPageText(ui, plugin)
-    local pct = 0
-    if plugin and plugin.currentFraction then
-        pct = math.floor((plugin:currentFraction() or 0) * 100 + 0.5)
-    end
+local function currentPageText(ui)
+    local pct = math.floor((Progress.fraction(ui) or 0) * 100 + 0.5)
     if ui and ui.getCurrentPage and ui.document and ui.document.getPageCount then
         local page = ui:getCurrentPage()
         local total = ui.document:getPageCount()
@@ -449,16 +450,6 @@ function ReaderFloatMenu:applyCre(event_name, value)
     local ui = self.plugin and self.plugin.ui
     if not ui then return end
     ui:handleEvent(Event:new(event_name, value))
-    self:refreshPanel()
-    UIManager:setDirty("all", "partial")
-end
-
-function ReaderFloatMenu:applyCreBatch(events)
-    local ui = self.plugin and self.plugin.ui
-    if not ui then return end
-    for _, ev in ipairs(events) do
-        ui:handleEvent(Event:new(ev[1], ev[2]))
-    end
     self:refreshPanel()
     UIManager:setDirty("all", "partial")
 end
@@ -714,7 +705,7 @@ function ReaderFloatMenu:buildDetail(content_w)
     local favorite = bookFavorite(plugin)
     local category = bookCategory(plugin)
     local desc = bookDescription(plugin)
-    local page_text, pct = currentPageText(ui, plugin)
+    local page_text, pct = currentPageText(ui)
     local filename
     local file = plugin and plugin.ui and plugin.ui.document and plugin.ui.document.file
     if file then
@@ -829,9 +820,7 @@ function ReaderFloatMenu:buildControls(content_w)
         menu:onClose()
         UIManager:nextTick(function()
             showFontSettings(ui, function()
-                if plugin and plugin.onTapBookReaderFloatMenu then
-                    plugin:onTapBookReaderFloatMenu()
-                end
+                ReaderFloatMenu.onTap(plugin)
             end)
         end)
     end))
@@ -894,9 +883,7 @@ function ReaderFloatMenu:buildActions(content_w)
         { "home.svg", _("首页"), function()
             menu:onClose()
             UIManager:nextTick(function()
-                if plugin and plugin.exitReadingToDesktop then
-                    plugin:exitReadingToDesktop()
-                end
+                ReaderFloatMenu.exitToDesktop(plugin)
             end)
         end },
         { "close.svg", _("关闭"), function() menu:onClose() end },
@@ -1039,6 +1026,112 @@ function ReaderFloatMenu:rebuild()
         panel,
     }
     self.dimen = Geom:new{ x = 0, y = 0, w = w, h = h }
+end
+
+-- ── 插件侧生命周期（热区 / 实例 / 回桌面）────────────────
+
+function ReaderFloatMenu.enabled()
+    return MoonSettings.get().reader_float_menu ~= false
+end
+
+function ReaderFloatMenu.detach(plugin)
+    if not plugin or not plugin._reader_float_menu then
+        return
+    end
+    pcall(function()
+        plugin._reader_float_menu._closed = true
+        UIManager:close(plugin._reader_float_menu)
+    end)
+    plugin._reader_float_menu = nil
+end
+
+--- 阅读中部热区：覆盖左右翻页区中部（宽 50% × 高 50%）
+function ReaderFloatMenu.attach(plugin)
+    if not plugin or not plugin.ui or not plugin.ui.registerTouchZones then
+        return
+    end
+    if not Device:isTouchDevice() then
+        return
+    end
+    if not ReaderFloatMenu.enabled() then
+        return
+    end
+    plugin.ui:registerTouchZones({
+        {
+            id = "book_reader_float_menu_tap",
+            ges = "tap",
+            screen_zone = {
+                ratio_x = 1 / 4,
+                ratio_y = 1 / 4,
+                ratio_w = 1 / 2,
+                ratio_h = 1 / 2,
+            },
+            overrides = {
+                "tap_forward",
+                "tap_backward",
+            },
+            handler = function()
+                return ReaderFloatMenu.onTap(plugin)
+            end,
+        },
+    })
+end
+
+--- 中部热区 handler。返回 true 表示已消费，KOReader 不再翻页。
+function ReaderFloatMenu.onTap(plugin)
+    if not plugin or not ReaderFloatMenu.enabled() then
+        return false
+    end
+    if plugin._reader_float_menu and not plugin._reader_float_menu._closed then
+        return true
+    end
+    local ok, menu = pcall(function()
+        return ReaderFloatMenu:new{
+            plugin = plugin,
+            covers_fullscreen = false,
+            close_callback = function()
+                plugin._reader_float_menu = nil
+            end,
+        }
+    end)
+    if not ok then
+        logger.err("book reader float menu failed:", menu)
+        return true
+    end
+    plugin._reader_float_menu = menu
+    UIManager:show(menu)
+    if menu._panel_dimen then
+        UIManager:setDirty("all", "ui", menu._panel_dimen)
+        UIManager:setDirty("all", "ui")
+    else
+        UIManager:setDirty("all", "ui")
+    end
+    return true
+end
+
+--- 退出阅读并打开 Book 桌面。
+--- 路径：onClose → showFileManager → Host 消费 pending 开桌面。
+function ReaderFloatMenu.exitToDesktop(plugin)
+    ReaderFloatMenu.detach(plugin)
+    local ui = plugin and plugin.ui
+    if not (ui and ui.document) then
+        if not Host.openFromFileManager(plugin) then
+            logger.warn("book exitToDesktop: not in reader and no desktop host")
+        end
+        return
+    end
+    local file = ui.document.file
+    Host.scheduleDesktopOpen()
+    UIManager:nextTick(function()
+        if ui.onClose then
+            ui:onClose(false)
+        end
+        if ui.showFileManager then
+            pcall(function()
+                ui:showFileManager(file)
+            end)
+        end
+    end)
 end
 
 return ReaderFloatMenu

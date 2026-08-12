@@ -56,7 +56,7 @@ function Cover.cachedPath(_, filename)
     if not filename or filename == "" then
         return nil
     end
-    local base = Cover.pathFor(plugin, filename)
+    local base = Cover.pathFor(_, filename)
     for _, ext in ipairs(EXTS) do
         local path = base .. ext
         local attr = lfs.attributes(path)
