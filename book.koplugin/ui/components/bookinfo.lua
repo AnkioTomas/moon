@@ -179,6 +179,7 @@ function BookInfo.hero(plugin, source, book, opts)
         text = title,
         face = UI.face("cfont", 16),
         max_width = info_w,
+        bold = true,
         fgcolor = Blitbuffer.COLOR_BLACK,
     }
     local author_w = TextWidget:new{
