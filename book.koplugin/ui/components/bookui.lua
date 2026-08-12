@@ -140,6 +140,21 @@ function UI.barH()
     return math.max(UI.sz(56), UI.iconSz() + UI.sz(32))
 end
 
+--- 各页统一内容边距（首页 / 书架 / 统计 / 设置 / 详情）
+function UI.pagePad()
+    return UI.sz(16)
+end
+
+--- 节与节之间的垂直间距
+function UI.sectionGap()
+    return UI.sz(18)
+end
+
+--- Desktop 顶部系统状态条高度（容纳小图标 + 分段电池）
+function UI.topBarH()
+    return math.max(UI.sz(32), UI.fontSize(12) + UI.sz(16))
+end
+
 function UI.menuFontSize()
     return UI.fontSize(22)
 end
