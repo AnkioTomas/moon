@@ -39,7 +39,6 @@ local Detail = InputContainer:extend{
     book = nil,
     plugin = nil,
     source = nil,
-    api = nil,
     desktop = nil,
 }
 
@@ -131,7 +130,7 @@ function Detail:rebuild()
     local path = Cover.cachedPath(self.plugin, filename)
     local cover_w = Cover.widget(path, cw, ch, title)
     if not path and filename then
-        Cover.ensureAsync(self.source or self.api, self.plugin, filename, nil)
+        Cover.ensureAsync(self.source, self.plugin, filename, nil)
     end
 
     -- 顶栏只放书名；正文不再重复标题

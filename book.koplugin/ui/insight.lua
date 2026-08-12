@@ -109,10 +109,8 @@ local function dayTitle(ymd, duration_text)
 end
 
 local function refreshInsight(desktop)
-    local source = desktop.source or desktop.api
-    if source and source.clearInsightCache then
-        source:clearInsightCache()
-    elseif source and source.clearCaches then
+    local source = desktop.source
+    if source and source.clearCaches then
         source:clearCaches()
     end
     desktop._insight_state = nil
@@ -431,7 +429,7 @@ function Insight.openBookDetail(desktop, hint)
         return
     end
 
-    local api = desktop.source or desktop.api
+    local api = desktop.source
     if not api or not api.configured or not api:configured() then
         UIManager:show(InfoMessage:new{ text = _("请先配置数据源"), timeout = 2 })
         return
@@ -544,7 +542,7 @@ local function buildDayDetail(desktop, state, width)
     local ch = UI.sz(60)
     local gap = UI.sz(12)
     local plugin = desktop.plugin
-    local api = desktop.source or desktop.api
+    local api = desktop.source
 
     for i, book in ipairs(info.books) do
         if i > 1 then
@@ -697,7 +695,7 @@ end
 function Insight.fetch(desktop)
     if desktop._insight_fetching then return end
     desktop._insight_fetching = true
-    local source = desktop.source or desktop.api
+    local source = desktop.source
 
     local function finish(state)
         desktop._insight_fetching = false

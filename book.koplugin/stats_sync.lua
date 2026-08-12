@@ -8,8 +8,11 @@
 
 local Device = require("device")
 local UIManager = require("ui/uimanager")
+local InfoMessage = require("ui/widget/infomessage")
+local NetworkMgr = require("ui/network/manager")
 local logger = require("logger")
 local StatsDb = require("stats_db")
+local MoonSettings = require("moon.settings")
 local _ = require("gettext")
 
 local StatsSync = {}
@@ -35,10 +38,6 @@ local function ensureDeviceId()
     )
     G_reader_settings:saveSetting("device_id", id)
     return id
-end
-
-function StatsSync.deviceId()
-    return ensureDeviceId()
 end
 
 function StatsSync.deviceModel()
@@ -167,52 +166,79 @@ function StatsSync.pushAsync(api, opts)
     return true
 end
 
---- 兼容旧调用：同步上报（仍走 busy 锁；优先用 pushAsync）
---- @param force boolean 忽略节流
-function StatsSync.push(api, force)
-    if busy then
-        return false, "busy"
+--- 带 UI 的上报：自动/手动都走后台分步；手动才弹进度条。
+--- @param api table 数据源
+--- @param show_msg boolean 是否提示用户
+--- @param force boolean 忽略节流与「自动上报」开关
+function StatsSync.pushWithUi(api, show_msg, force)
+    if MoonSettings.get().auto_stats == false and not force then
+        return
     end
-    if not api or not api.configured or not api:configured() then
-        return false, _("未配置")
-    end
-    if not StatsDb.available() then
-        return false, _("无阅读统计数据（请启用 KOReader 阅读统计插件）")
-    end
-
-    local now = os.time()
-    if not force and (now - last_push_at) < MIN_INTERVAL then
-        return true, "throttled"
-    end
-
-    busy = true
-    local device_id = ensureDeviceId()
-    StatsSync.registerDevice(api)
-
-    local books = StatsDb.bookData()
-    local stats = StatsDb.pageStatData(device_id, books)
-    if #books == 0 and #stats == 0 then
-        busy = false
-        return false, _("统计库为空或无法解析 filename（请从 Book 桌面打开过对应书籍）")
+    if StatsSync.isBusy() then
+        if show_msg then
+            UIManager:show(InfoMessage:new{
+                text = _("阅读统计正在上报…"),
+                timeout = 2,
+            })
+        end
+        return
     end
 
-    local res, err = api:importReadingStats({
-        books = buildPayloadBooks(books),
-        stats = stats,
-        device_id = device_id,
-    })
-    busy = false
-    if not res then
-        logger.warn("book.stats_sync import failed", err)
-        return false, err
-    end
-    last_push_at = now
-    logger.info(string.format(
-        "book.stats_sync imported books=%d stats=%d",
-        #books,
-        #stats
-    ))
-    return true, res
+    NetworkMgr:runWhenOnline(function()
+        -- 联网成功后再弹进度条，避免取消 Wi-Fi 后对话框挂死
+        local dialog
+        if show_msg then
+            local ok_dlg, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
+            if ok_dlg and ProgressbarDialog then
+                dialog = ProgressbarDialog:new{
+                    title = _("正在上报阅读统计…"),
+                    subtitle = _("读取本地统计并上传"),
+                    progress_max = StatsSync.progressMax(),
+                    refresh_time_seconds = 0.05,
+                    dismissable = false,
+                }
+                dialog:show()
+            else
+                UIManager:show(InfoMessage:new{
+                    text = _("正在上报阅读统计…"),
+                    timeout = 1,
+                })
+            end
+        end
+
+        StatsSync.pushAsync(api, {
+            force = force,
+            on_progress = function(step)
+                if dialog then
+                    dialog:reportProgress(step)
+                end
+            end,
+            on_done = function(ok, err)
+                if dialog then
+                    if ok and err ~= "throttled" then
+                        dialog:reportProgress(StatsSync.progressMax())
+                    end
+                    dialog:close()
+                    dialog = nil
+                end
+                if show_msg then
+                    local text
+                    if ok and err == "throttled" then
+                        text = _("统计上报已节流，稍后再试")
+                    elseif ok then
+                        text = _("阅读统计已上传")
+                    elseif err == "busy" then
+                        text = _("阅读统计正在上报…")
+                    else
+                        text = err or _("统计上传失败")
+                    end
+                    UIManager:show(InfoMessage:new{ text = text, timeout = 2 })
+                elseif not ok and err ~= "throttled" and err ~= "busy" then
+                    logger.warn("book push reading stats failed", err)
+                end
+            end,
+        })
+    end)
 end
 
 return StatsSync

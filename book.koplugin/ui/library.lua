@@ -256,7 +256,7 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open)
     local path = Cover.cachedPath(ctx.plugin, filename)
     local cover = Cover.widget(path, cw, ch, title)
     if not path and filename then
-        Cover.ensureAsync(ctx.source or ctx.api, ctx.plugin, filename, nil)
+        Cover.ensureAsync(ctx.source, ctx.plugin, filename, nil)
     end
 
     local pct = bookPct(book)
@@ -375,7 +375,7 @@ function Library.build(ctx, state, opts)
         end),
         HorizontalSpan:new{ width = UI.sz(8) },
         iconAction("filter.svg", _("筛选"), function()
-            if ctx.desktop then ctx.desktop:showFilterRoot() end
+            if ctx.desktop then Library.showFilterRoot(ctx.desktop) end
         end),
         HorizontalSpan:new{ width = UI.sz(8) },
         iconAction("clear.svg", _("清除"), function()
@@ -537,14 +537,12 @@ function Library.fetch(desktop)
     end
 
     local function run()
-        local source = desktop.source or desktop.api
+        local source = desktop.source
         if not source or not source.configured or not source:configured() then
             done({}, _("请先在设置里配置当前数据源"))
             return
         end
-        if desktop.syncLibraryPageSize then
-            desktop:syncLibraryPageSize()
-        end
+        desktop:syncLibraryPageSize()
         local f = desktop.filter or {}
         local res, err
         local ok, thrown = pcall(function()
@@ -666,7 +664,7 @@ function Library.showFilterPicker(desktop, kind)
     UIManager:show(menu)
 
     local function fetch()
-        local source = desktop.source or desktop.api
+        local source = desktop.source
         if not source or not source.configured or not source:configured() then
             applyList({})
             return

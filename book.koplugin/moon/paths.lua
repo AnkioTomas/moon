@@ -69,6 +69,4 @@ function P.ensureLayout()
     ensureDir(P.settingsDir())
 end
 
-P.ensureDir = ensureDir
-
 return P

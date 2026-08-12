@@ -31,14 +31,6 @@ function Moon.new(cfg)
     return self
 end
 
-function Source:id()
-    return "moon"
-end
-
-function Source:name()
-    return _("Book 服务")
-end
-
 function Source:capabilities()
     return {
         store = false,
@@ -78,10 +70,6 @@ function Source:libraryStats()
     return self._api:stats()
 end
 
-function Source:stats()
-    return self:libraryStats()
-end
-
 function Source:registerReadingDevice(device_id, model)
     return self._api:registerReadingDevice(device_id, model)
 end
@@ -90,20 +78,8 @@ function Source:importReadingStats(payload)
     return self._api:importReadingStats(payload)
 end
 
-function Source:readingSummary()
-    return self._api:readingSummary()
-end
-
 function Source:readingInsight()
     return self._api:readingInsight()
-end
-
-function Source:clearInsightCache()
-    Api.clearInsightCache()
-end
-
-function Source:clearRecentCache()
-    Api.clearRecentCache()
 end
 
 function Source:clearCaches()

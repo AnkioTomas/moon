@@ -56,20 +56,13 @@ local Desktop = InputContainer:extend{
     covers_fullscreen = true,
     plugin = nil,
     source = nil,
-    api = nil, -- 过渡期别名，指向 source
     tab = "home",
     filter = nil,
 }
 
 
-local function barH()
-    return UI.barH()
-end
-
 function Desktop:init()
     self.filter = self.filter or {}
-    self.source = self.source or self.api
-    self.api = self.source
     self._tabs = buildTabs(self.source)
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.page = 1
@@ -93,7 +86,7 @@ function Desktop:init()
             GestureRange:new{
                 ges = "tap",
                 range = function()
-                    local h = barH()
+                    local h = UI.barH()
                     return Geom:new{
                         x = 0,
                         y = Screen:getHeight() - h,
@@ -110,7 +103,7 @@ function Desktop:init()
                     return Geom:new{
                         x = 0, y = 0,
                         w = Screen:getWidth(),
-                        h = Screen:getHeight() - barH(),
+                        h = Screen:getHeight() - UI.barH(),
                     }
                 end,
             },
@@ -125,13 +118,13 @@ function Desktop:init()
             UIManager:setDirty(desk.detail, "ui")
         end
         if desk.tab == "home" then
-            desk:requestHomeRefresh("covers")
+            desk:requestHomeRefresh()
         elseif desk.tab == "library" then
-            desk:requestLibraryRefresh("covers")
+            desk:requestLibraryRefresh()
         elseif desk.tab == "store" then
-            desk:requestStoreRefresh("covers")
+            desk:requestStoreRefresh()
         elseif desk.tab == "stats" then
-            desk:requestInsightRefresh("covers")
+            desk:requestInsightRefresh()
         end
     end)
     UIManager:nextTick(function()
@@ -142,12 +135,12 @@ function Desktop:init()
 end
 
 function Desktop:tabs()
-    self._tabs = buildTabs(self.source or self.api)
+    self._tabs = buildTabs(self.source)
     return self._tabs
 end
 
 function Desktop:contentHeight()
-    return math.max(1, Screen:getHeight() - barH())
+    return math.max(1, Screen:getHeight() - UI.barH())
 end
 
 function Desktop:getSize()
@@ -162,13 +155,12 @@ function Desktop:getSize()
 end
 
 function Desktop:ctx()
-    local source = self.source or self.api
+    local source = self.source
     return {
         width = self.dimen.w,
         height = self:contentHeight(),
         plugin = self.plugin,
         source = source,
-        api = source, -- 过渡期：旧代码仍读 api
         desktop = self,
         filter = self.filter,
     }
@@ -177,7 +169,7 @@ end
 function Desktop:buildBottomBar()
     local tabs = self:tabs()
     local sw = Screen:getWidth()
-    local bh = barH()
+    local bh = UI.barH()
     local icon_sz = UI.iconSz()
     local icon_dir = UI.iconDir()
     local cell_w = math.floor(sw / #tabs)
@@ -238,7 +230,7 @@ end
 function Desktop:onTapBar(_, ges)
     if not ges or not ges.pos then return false end
     local tabs = self:tabs()
-    local bh = barH()
+    local bh = UI.barH()
     if ges.pos.y < self.dimen.h - bh then return false end
     local idx = math.floor(ges.pos.x * #tabs / self.dimen.w) + 1
     if idx < 1 then idx = 1 end
@@ -249,7 +241,7 @@ end
 
 function Desktop:onSwipe(_, ges_ev)
     if type(ges_ev) ~= "table" or not ges_ev.direction then return true end
-    if ges_ev.pos and ges_ev.pos.y >= self.dimen.h - barH() then return true end
+    if ges_ev.pos and ges_ev.pos.y >= self.dimen.h - UI.barH() then return true end
     local direction = BD.flipDirectionIfMirroredUILayout(ges_ev.direction)
     if direction == "south" then
         self:onClose()
@@ -319,7 +311,7 @@ function Desktop:rebuild()
         content.overlap_offset = { 0, 0 }
 
         local bar = self:buildBottomBar()
-        bar.overlap_offset = { 0, sh - barH() }
+        bar.overlap_offset = { 0, sh - UI.barH() }
 
         local root = OverlapGroup:new{
             dimen = Geom:new{ w = sw, h = sh },
@@ -395,7 +387,7 @@ function Desktop:buildInsight()
     return Insight.build(self)
 end
 
-function Desktop:requestInsightRefresh(reason)
+function Desktop:requestInsightRefresh()
     if self._closed or self.tab ~= "stats" then return end
     if self._insight_refresh_pending then return end
     self._insight_refresh_pending = true
@@ -426,7 +418,7 @@ function Desktop:scheduleClockTick()
     end)
 end
 
-function Desktop:requestHomeRefresh(reason)
+function Desktop:requestHomeRefresh()
     if self._closed or self.tab ~= "home" then return end
     if self._home_refresh_pending then return end
     self._home_refresh_pending = true
@@ -572,7 +564,7 @@ function Desktop:buildStore()
     })
 end
 
-function Desktop:requestStoreRefresh(reason)
+function Desktop:requestStoreRefresh()
     if self._closed or self.tab ~= "store" then return end
     if self._store_refresh_pending then return end
     self._store_refresh_pending = true
@@ -583,7 +575,7 @@ function Desktop:requestStoreRefresh(reason)
     end)
 end
 
-function Desktop:requestLibraryRefresh(reason)
+function Desktop:requestLibraryRefresh()
     if self._closed or self.tab ~= "library" then return end
     if self._library_refresh_pending then return end
     self._library_refresh_pending = true
@@ -628,14 +620,6 @@ function Desktop:showSearch()
     dialog:onShowKeyboard()
 end
 
-function Desktop:showFilterPicker(kind)
-    Library.showFilterPicker(self, kind)
-end
-
-function Desktop:showFilterRoot()
-    Library.showFilterRoot(self)
-end
-
 function Desktop:clearLibraryFilters()
     self.filter = {}
     self.page = 1
@@ -654,8 +638,7 @@ function Desktop:showDetail(book)
     self.detail = Detail:new{
         book = book,
         plugin = self.plugin,
-        source = self.source or self.api,
-        api = self.source or self.api,
+        source = self.source,
         desktop = self,
         covers_fullscreen = true,
         close_callback = function()

@@ -29,6 +29,7 @@ local UI = require("ui.components.bookui")
 local MoonSettings = require("moon.settings")
 local SourceRegistry = require("source.registry")
 local Cache = require("moon.cache")
+local Host = require("moon.host")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -47,8 +48,6 @@ do
 end
 
 local Settings = {}
-
-local START_WITH_ID = "bookshelf_book"
 
 local function showServerDialog(plugin)
     local moon = MoonSettings.getSource("moon")
@@ -302,7 +301,7 @@ function Settings.build(desktop)
     end
 
     local sources = SourceRegistry.list()
-    local active_id = SourceRegistry.activeId()
+    local active_id = MoonSettings.activeSourceId()
     local active_name = active_id
     for _, meta in ipairs(sources) do
         if meta.id == active_id then
@@ -485,8 +484,8 @@ function Settings.build(desktop)
                     st.open_on_start = not open_on
                     MoonSettings.save(st)
                     if st.open_on_start then
-                        G_reader_settings:saveSetting("start_with", START_WITH_ID)
-                    elseif G_reader_settings:readSetting("start_with") == START_WITH_ID then
+                        G_reader_settings:saveSetting("start_with", Host.OPEN_ON_START_ID)
+                    elseif G_reader_settings:readSetting("start_with") == Host.OPEN_ON_START_ID then
                         G_reader_settings:saveSetting("start_with", "filemanager")
                     end
                     desktop:rebuild()

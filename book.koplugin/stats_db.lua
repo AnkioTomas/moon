@@ -60,7 +60,7 @@ local function writeStatMap(map)
 end
 
 --- 打开书时记录 md5 -> filename，供上报解析
-function StatsDb.rememberMd5Filename(md5, filename)
+local function rememberMd5Filename(md5, filename)
     if type(md5) ~= "string" or md5 == "" then
         return
     end
@@ -92,7 +92,7 @@ end
 function StatsDb.rememberPathFilename(path, filename)
     local md5 = partialMd5(path)
     if md5 then
-        StatsDb.rememberMd5Filename(md5, filename)
+        rememberMd5Filename(md5, filename)
     end
 end
 
@@ -109,8 +109,6 @@ local function buildResolvers()
                 if type(title) == "string" and title ~= "" then
                     by_title[title] = filename
                 end
-            elseif type(filename) == "string" then
-                -- ignore
             end
         end
     end

@@ -107,17 +107,6 @@ function UI.iconSz()
     return UI.sz(24)
 end
 
---[[ 墨水屏色阶（Blitbuffer.gray：0=白，1=黑！）
-  ink   主文字
-  muted 次要文字：够黑，水墨屏可读
-  dim   未激活底栏
-  rule  分割线 / 细边框
-  track 进度条未填充（浅，但不能太白）
-]]
-function UI.ink()
-    return Blitbuffer.COLOR_BLACK
-end
-
 function UI.muted()
     return Blitbuffer.COLOR_GRAY_3 -- 0x33，深灰接近黑
 end
@@ -252,7 +241,6 @@ end
 
 --- 简易进度条（0–100）。优先 ProgressWidget；否则用 LineWidget，禁止空 FrameContainer。
 function UI.progressBar(width, height, percent)
-    local Blitbuffer = require("ffi/blitbuffer")
     local Geom = require("ui/geometry")
     local TextWidget = require("ui/widget/textwidget")
     width = math.max(1, math.floor(tonumber(width) or 1))
@@ -311,10 +299,5 @@ function UI.progressBar(width, height, percent)
         row,
     }
 end
-
-UI.DEFAULT_SCALE = DEFAULT_SCALE
-UI.MIN_SCALE = MIN_SCALE
-UI.MAX_SCALE = MAX_SCALE
-UI.STEP = STEP
 
 return UI

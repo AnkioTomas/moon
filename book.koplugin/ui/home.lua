@@ -38,11 +38,6 @@ local WEEKDAYS = {
     _("星期四"), _("星期五"), _("星期六"),
 }
 
-local function settings()
-    return MoonSettings.get()
-end
-
-
 local function loadIcon(name, size)
     size = size or UI.sz(16)
     local ok, img = pcall(function()
@@ -173,7 +168,7 @@ end
 
 function Home.buildHeader(ctx, state)
     local w = ctx.width
-    local s = settings()
+    local s = MoonSettings.get()
     local mode = s.home_header or "clock"
     local pad = UI.sz(16)
 
@@ -350,7 +345,7 @@ local function recentRow(ctx, book, on_open, on_read, grid_cw, avail, pad)
     local path = Cover.cachedPath(ctx.plugin, filename)
     local cover_w = Cover.widget(path, cw, ch, title)
     if not path and filename then
-        prefetchCover(ctx.source or ctx.api, ctx.plugin, filename)
+        prefetchCover(ctx.source, ctx.plugin, filename)
     end
     local badge = progressBadge(cw, pct)
     if badge then
@@ -452,7 +447,7 @@ local function readingCell(ctx, book, slot_w, cw, ch, on_open)
     local path = Cover.cachedPath(ctx.plugin, filename)
     local cover = Cover.widget(path, cw, ch, title)
     if not path and filename then
-        prefetchCover(ctx.source or ctx.api, ctx.plugin, filename)
+        prefetchCover(ctx.source, ctx.plugin, filename)
     end
     local badge = progressBadge(cw, pct)
     if badge then
@@ -644,7 +639,7 @@ function Home.fetch(desktop)
         end)
     end
 
-    local source = desktop.source or desktop.api
+    local source = desktop.source
 
     -- 立刻离开「加载主页…」，避免任何网络阻塞把 UI 钉死
     if not desktop._home_loaded then
@@ -705,10 +700,7 @@ function Home.fetch(desktop)
         end
 
         local ok_s, sres_or_err, serr = pcall(function()
-            if source.libraryStats then
-                return source:libraryStats()
-            end
-            return source:stats()
+            return source:libraryStats()
         end)
         if ok_s and sres_or_err and sres_or_err.data then
             state.stats = {
@@ -721,7 +713,7 @@ function Home.fetch(desktop)
             state.stats = {}
         end
 
-        local mode = (settings().home_header) or "clock"
+        local mode = (MoonSettings.get().home_header) or "clock"
         if mode == "hitokoto" then
             local ok_h, hres_or_err, herr = pcall(function()
                 if not source.hitokoto then

@@ -23,14 +23,10 @@ local ORDER = { "moon", "webdav", "wechat", "legado" }
 local _active = nil
 local _active_id = nil
 
-local function factoryFor(id)
-    return FACTORIES[id]
-end
-
 function Registry.list()
     local out = {}
     for _, id in ipairs(ORDER) do
-        local fac = factoryFor(id)
+        local fac = FACTORIES[id]
         if fac then
             local ok, mod = pcall(fac)
             if ok and mod and mod.meta then
@@ -44,7 +40,7 @@ function Registry.list()
 end
 
 function Registry.create(id, cfg)
-    local fac = factoryFor(id)
+    local fac = FACTORIES[id]
     if not fac then
         return nil, T(_("未知数据源: %1"), tostring(id))
     end
@@ -81,18 +77,14 @@ function Registry.getActive()
 end
 
 function Registry.setActive(id)
-    if not factoryFor(id) then
+    if not FACTORIES[id] then
         return nil, T(_("未知数据源: %1"), tostring(id))
     end
-    local common = MoonSettings.getCommon()
+    local common = MoonSettings.get()
     common.active_source = id
-    MoonSettings.saveCommon(common)
+    MoonSettings.save(common)
     Registry.invalidate()
     return Registry.getActive()
-end
-
-function Registry.activeId()
-    return MoonSettings.activeSourceId()
 end
 
 return Registry
