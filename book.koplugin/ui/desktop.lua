@@ -335,6 +335,18 @@ function Desktop:onClose()
         UIManager:unschedule(self._clock_tick)
         self._clock_tick = nil
     end
+    for _, key in ipairs({
+        "_home_fetch_cancel",
+        "_library_fetch_cancel",
+        "_store_fetch_cancel",
+        "_insight_fetch_cancel",
+    }) do
+        local cancel = self[key]
+        if type(cancel) == "function" then
+            pcall(cancel)
+        end
+        self[key] = nil
+    end
     self._home_refresh_pending = false
     self._library_refresh_pending = false
     self._insight_refresh_pending = false
