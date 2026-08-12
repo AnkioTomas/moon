@@ -323,6 +323,9 @@ function Desktop:showDetail(book)
         covers_fullscreen = true,
         close_callback = function()
             desk.detail = nil
+            if not desk._closed then
+                UIManager:setDirty(desk, "full")
+            end
         end,
     }
     UIManager:show(self.detail)
