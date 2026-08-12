@@ -7,6 +7,7 @@
 
 local DataStorage = require("datastorage")
 local logger = require("logger")
+local _ = require("gettext")
 
 local StatsDb = {}
 
@@ -18,15 +19,15 @@ local FILEMAP_KEY = "book_plugin_filemap_v2"
 local function openDb()
     local ok, SQ3 = pcall(require, "lua-ljsqlite3/init")
     if not ok or not SQ3 then
-        return nil, "无 sqlite 模块"
+        return nil, _("无 sqlite 模块")
     end
     local attr_ok, lfs = pcall(require, "libs/libkoreader-lfs")
     if attr_ok and lfs and lfs.attributes(DB_PATH, "mode") ~= "file" then
-        return nil, "无统计数据库"
+        return nil, _("无统计数据库")
     end
     local conn = SQ3.open(DB_PATH)
     if not conn then
-        return nil, "打开统计库失败"
+        return nil, _("打开统计库失败")
     end
     return conn
 end

@@ -10,6 +10,7 @@ local Device = require("device")
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
 local StatsDb = require("stats_db")
+local _ = require("gettext")
 
 local StatsSync = {}
 
@@ -55,7 +56,7 @@ end
 --- 注册设备（失败只记日志）
 function StatsSync.registerDevice(api)
     if not api or not api.configured or not api:configured() then
-        return false, "未配置"
+        return false, _("未配置")
     end
     local id = ensureDeviceId()
     local res, err = api:registerReadingDevice(id, StatsSync.deviceModel())
@@ -112,10 +113,10 @@ function StatsSync.pushAsync(api, opts)
 
     schedule(function()
         if not api or not api.configured or not api:configured() then
-            return finish(opts, false, "未配置")
+            return finish(opts, false, _("未配置"))
         end
         if not StatsDb.available() then
-            return finish(opts, false, "无阅读统计数据（请启用 KOReader 阅读统计插件）")
+            return finish(opts, false, _("无阅读统计数据（请启用 KOReader 阅读统计插件）"))
         end
 
         local now = os.time()
@@ -135,7 +136,7 @@ function StatsSync.pushAsync(api, opts)
                 local device_id = ensureDeviceId()
                 local stats = StatsDb.pageStatData(device_id, books)
                 if #books == 0 and #stats == 0 then
-                    return finish(opts, false, "统计库为空或无法解析 filename（请从 Book 桌面打开过对应书籍）")
+                    return finish(opts, false, _("统计库为空或无法解析 filename（请从 Book 桌面打开过对应书籍）"))
                 end
 
                 schedule(function()
@@ -173,10 +174,10 @@ function StatsSync.push(api, force)
         return false, "busy"
     end
     if not api or not api.configured or not api:configured() then
-        return false, "未配置"
+        return false, _("未配置")
     end
     if not StatsDb.available() then
-        return false, "无阅读统计数据（请启用 KOReader 阅读统计插件）"
+        return false, _("无阅读统计数据（请启用 KOReader 阅读统计插件）")
     end
 
     local now = os.time()
@@ -192,7 +193,7 @@ function StatsSync.push(api, force)
     local stats = StatsDb.pageStatData(device_id, books)
     if #books == 0 and #stats == 0 then
         busy = false
-        return false, "统计库为空或无法解析 filename（请从 Book 桌面打开过对应书籍）"
+        return false, _("统计库为空或无法解析 filename（请从 Book 桌面打开过对应书籍）")
     end
 
     local res, err = api:importReadingStats({
