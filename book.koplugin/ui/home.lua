@@ -41,7 +41,7 @@ local function openLibrary(desktop)
     desktop:switchTab("library")
 end
 
---- 封面-only 格子（参考图无题下文字）
+--- 封面-only 格子
 local function coverCell(ctx, book, slot_w, cw, ch, on_open)
     local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, { badge = true }))
     local tap = BookInfo.tappable(slot_w, ch, function()
