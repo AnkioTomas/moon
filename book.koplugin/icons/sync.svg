@@ -1,8 +1,3 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="48" height="48" viewBox="0 0 48 48">
-  <path style="fill:none;stroke:#000000;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"
-        d="M14,18 C14,12 19,8 24,8 C29,8 34,12 34,18 C38,18 42,21 42,26 C42,31 38,34 34,34 L16,34 C11,34 8,30 8,26 C8,22 11,19 14,19"/>
-  <polyline style="fill:none;stroke:#000000;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"
-            points="20,28 24,32 28,28"/>
-  <line style="fill:none;stroke:#000000;stroke-width:2;stroke-linecap:round" x1="24" y1="22" x2="24" y2="32"/>
+<svg xmlns="http://www.w3.org/2000/svg" height="24" width="24" viewBox="0 -960 960 960">
+  <path fill="#000000" d="M160-160v-80h110l-16-14q-52-46-73-105t-21-119q0-111 66.5-197.5T400-790v84q-72 26-116 88.5T240-478q0 45 17 87.5t53 78.5l10 10v-98h80v240H160Zm400-10v-84q72-26 116-88.5T720-482q0-45-17-87.5T650-648l-10-10v98h-80v-240h240v80H690l16 14q49 49 71.5 106.5T800-482q0 111-66.5 197.5T560-170Z"/>
 </svg>
