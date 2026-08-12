@@ -42,6 +42,8 @@ Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供�
 
 > 插件运行在 KOReader 的 Lua 环境中，不需要单独安装 Java、Node.js 或其他项目依赖。
 
+开发、本机模拟器调试与贡献流程见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+
 ## 配置
 
 首次打开后，进入底部 **设置** 标签页，选择 **服务器与令牌**，填写：
