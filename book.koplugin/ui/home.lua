@@ -54,39 +54,9 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open)
     return tap, ch
 end
 
---- 网格尺度：默认 4 列；横向紧凑、纵向留白
-local function denseMetrics(avail_w, budget_h)
-    local gap = UI.sz(8)
-    local cols = 4
-    local function slotFor(c)
-        return math.floor((avail_w - gap * (c - 1)) / c)
-    end
-    local slot_w = slotFor(cols)
-    if slot_w < UI.sz(52) then
-        cols = 3
-        slot_w = slotFor(cols)
-    end
-    local cw = slot_w
-    local ch = math.floor(cw * 3 / 2)
-    -- 行距明显大于列距，封面上下不贴死
-    local row_gap = UI.sz(14)
-    if budget_h > 0 and ch * 2 + row_gap > budget_h then
-        local fit = math.floor((budget_h - row_gap) / 2)
-        if fit >= UI.sz(64) then
-            ch = fit
-            cw = math.max(1, math.floor(ch * 2 / 3))
-            if cw > slot_w then
-                cw = slot_w
-                ch = math.floor(cw * 3 / 2)
-            end
-        end
-    end
-    return slot_w, cw, ch, cols, gap, row_gap
-end
-
 local function buildGrid(ctx, books, w, pad, budget_h, page, on_open)
     local avail = math.max(1, w - pad * 2)
-    local slot_w, cw, ch, cols, cgap, row_gap = denseMetrics(avail, budget_h)
+    local slot_w, cw, ch, cols, cgap, row_gap = UI.denseCoverMetrics(avail, budget_h)
     local rows = math.max(1, math.floor((budget_h + row_gap) / (ch + row_gap)))
     local page_size = math.max(1, cols * rows)
     local pages = math.max(1, math.ceil(#books / page_size))

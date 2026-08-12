@@ -23,7 +23,7 @@ local Pager = {}
 
 --- 底部分页带高度（含贴底 padding）
 function Pager.bandH()
-    return UI.iconSz() + UI.sz(20)
+    return UI.iconSz() + UI.sz(32)
 end
 
 --- 与官方 Menu 底栏一致：首/上/页码/下/末
@@ -91,9 +91,9 @@ function Pager.widget(page, pages, handlers)
     }
 end
 
---- 固定高度的分页带：控件贴底，紧挨底栏上方
+--- 固定高度的分页带：控件贴底，与桌面底栏留出空隙
 function Pager.band(width, page, pages, handlers)
-    local bottom_pad = UI.sz(4)
+    local bottom_pad = UI.sz(14)
     local band_h = Pager.bandH()
     return BottomContainer:new{
         dimen = Geom:new{ w = width, h = band_h },
