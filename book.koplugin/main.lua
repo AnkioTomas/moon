@@ -1,19 +1,6 @@
 --[[--
 Book 书库插件入口 — 事件接线板。
 
-只做三件事：
-  1. 响应 KOReader 生命周期事件
-  2. 持有 desktop 实例
-  3. 把动作转发给 moon.* / ui.* / StatsSync
-
-业务实现不在这里：
-  - 本地缓存 → moon.cache
-  - 宿主钩子 → moon.host
-  - 进度推拉 → moon.progress
-  - 下载开书 → moon.open
-  - 统计上报 → stats_sync
-  - 阅读悬浮菜单 → ui.readermenu
-
 KOReader 会为 FileManager 和 Reader 各建一个插件实例；
 关书后 FM 侧实例才是开桌面的宿主。
 
@@ -38,7 +25,7 @@ local Host = require("moon.host")
 local Progress = require("moon.progress")
 local Open = require("moon.open")
 
-local BookPlugin = WidgetContainer:extend{
+local BookPlugin = WidgetContainer:extend {
     name = "book",
     is_doc_only = false,
 }
@@ -47,19 +34,20 @@ local BookPlugin = WidgetContainer:extend{
 
 function BookPlugin:init()
     local ok, err = pcall(function()
-        Host.syncOpenOnStart()
-        self:onDispatcherRegisterActions()
-        if self.ui.menu and self.ui.menu.registerToMainMenu then
-            self.ui.menu:registerToMainMenu(self)
-        end
-        Host.install(self)
+        self:tryRegisterMenu()
+        Host.attach(self)
     end)
     if not ok then
         logger.err("book plugin init failed:", err)
     end
 end
 
-function BookPlugin:onDispatcherRegisterActions()
+--- FM 显示时同步接管（避免 FileManager 先闪一帧）
+function BookPlugin:onShow()
+    Host.onShow(self)
+end
+
+function BookPlugin:tryRegisterMenu()
     Dispatcher:registerAction("book_open_shelf", {
         category = "none",
         event = "BookOpenShelf",
@@ -67,6 +55,10 @@ function BookPlugin:onDispatcherRegisterActions()
         general = true,
         filemanager = true,
     })
+
+    if self.ui.menu and self.ui.menu.registerToMainMenu then
+        self.ui.menu:registerToMainMenu(self)
+    end
 end
 
 function BookPlugin:onBookOpenShelf()
@@ -170,7 +162,7 @@ function BookPlugin:openDesktop(filter)
     end
 
     local ok, desk = pcall(function()
-        return Desktop:new{
+        return Desktop:new {
             plugin = self,
             source = source,
             filter = filter or {},
@@ -183,7 +175,7 @@ function BookPlugin:openDesktop(filter)
     end)
     if not ok then
         logger.err("book desktop create failed:", desk)
-        UIManager:show(InfoMessage:new{
+        UIManager:show(InfoMessage:new {
             text = _("桌面打开失败:\n") .. tostring(desk),
         })
         return
