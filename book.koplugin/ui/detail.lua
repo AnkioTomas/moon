@@ -1,6 +1,6 @@
 --[[--
-书籍详情：顶栏 + 可滚动内容 + 底部固定按钮
-（长简介时按钮仍可点；底部不露桌面底栏）
+书籍详情：顶栏 + 封面/元信息/简介 + 底部按钮
+  单页；简介超出可视高度截断。禁止 ScrollableContainer，也不分页。
 
 @module koplugin.book.ui.detail
 --]]
@@ -14,24 +14,15 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
-local LineWidget = require("ui/widget/linewidget")
-local OverlapGroup = require("ui/widget/overlapgroup")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
 local TitleBar = require("ui/widget/titlebar")
-local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local Cover = require("ui.components.cover")
+local BookInfo = require("ui.components.bookinfo")
 local UI = require("ui.components.bookui")
 local _ = require("gettext")
 local Screen = Device.screen
-
-local ScrollableContainer
-do
-    local ok, mod = pcall(require, "ui/widget/container/scrollablecontainer")
-    if ok then ScrollableContainer = mod end
-end
 
 local Detail = InputContainer:extend{
     name = "book_detail",
@@ -41,17 +32,6 @@ local Detail = InputContainer:extend{
     source = nil,
     desktop = nil,
 }
-
-local function bookPct(book)
-    local p = book and book.progressPercent
-    if type(p) == "string" then
-        p = p:gsub("%%", ""):match("[%d%.]+")
-    end
-    p = tonumber(p) or 0
-    if p < 0 then p = 0 end
-    if p > 100 then p = 100 end
-    return p
-end
 
 local function metaRow(label, value, width)
     if not value or value == "" then
@@ -77,17 +57,6 @@ local function metaRow(label, value, width)
     }
 end
 
-local function sectionTitle(text, width)
-    return LeftContainer:new{
-        dimen = Geom:new{ w = width, h = UI.sz(30) },
-        TextWidget:new{
-            text = text,
-            face = UI.face("cfont", 15),
-            fgcolor = Blitbuffer.COLOR_BLACK,
-        },
-    }
-end
-
 function Detail:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     if Device:hasKeys() then
@@ -104,36 +73,41 @@ end
 
 function Detail:onClose()
     self._closed = true
+    local UIManager = require("ui/uimanager")
+    local desk = self.desktop
     UIManager:close(self)
-    if self.close_callback then
-        self.close_callback()
-    end
+    -- 全屏详情盖住桌面，关掉后必须强制重绘下层，否则残影/白板
+    UIManager:nextTick(function()
+        if desk and not desk._closed then
+            UIManager:setDirty(desk, "full")
+        else
+            UIManager:setDirty("all", "full")
+        end
+    end)
     return true
 end
 
 function Detail:onCloseWidget()
     self._closed = true
+    local cb = self.close_callback
+    self.close_callback = nil
+    if cb then
+        cb()
+    end
 end
 
 function Detail:rebuild()
     local book = self.book or {}
     local w = Screen:getWidth()
     local h = Screen:getHeight()
-    local pad = UI.sz(16)
+    local pad = UI.pagePad()
     local content_w = w - pad * 2
-    local title = book.bookName or book.filename or book.fileName or _("书籍详情")
-    local filename = book.filename or book.fileName or book.file or book.path
-    local pct = bookPct(book)
+    local title = BookInfo.title(book)
+    if title == "?" then title = _("书籍详情") end
 
-    local cw = UI.sz(120)
-    local ch = UI.sz(170)
-    local path = Cover.cachedPath(self.plugin, filename)
-    local cover_w = Cover.widget(path, cw, ch, title)
-    if not path and filename then
-        Cover.ensureAsync(self.source, self.plugin, filename, nil)
-    end
+    local cw, ch = UI.sz(120), UI.sz(170)
+    local cover_w = select(1, BookInfo.cover(self.plugin, self.source, book, cw, ch, { badge = false }))
 
-    -- 顶栏只放书名；正文不再重复标题
     local title_bar = TitleBar:new{
         fullscreen = true,
         width = w,
@@ -177,39 +151,33 @@ function Detail:rebuild()
         show_parent = self,
     }
 
-    local button_h = buttons:getSize().h
-    local title_h = title_bar:getHeight()
-    -- 底栏至少盖住桌面 navbar 高度；去掉顶部分隔线避免双线
     local footer_pad_v = UI.sz(12)
-    local footer_h = math.max(UI.barH(), button_h + footer_pad_v * 2)
-    local top_h = title_h
-    local scroll_h = math.max(UI.sz(80), h - top_h - footer_h)
+    local footer_h = buttons:getSize().h + footer_pad_v * 2
+    local title_h = title_bar:getHeight()
+    local body_h = math.max(UI.sz(80), h - title_h - footer_h)
+    local body_inner_h = math.max(UI.sz(60), body_h - pad - UI.sz(12))
 
     local meta_w = math.max(UI.sz(80), content_w - cw - UI.sz(14))
-    local meta_kids = { align = "left" }
     local tags = book.category
     if type(tags) == "string" and tags ~= "" then
         tags = tags:gsub("\n+", " · ")
     end
-    local rows = {
-        metaRow(_("作者"), book.author, meta_w),
+    local meta_kids = { align = "left" }
+    for _, row in ipairs({
+        metaRow(_("作者"), BookInfo.author(book), meta_w),
         metaRow(_("分类"), book.favorite, meta_w),
         metaRow(_("标签"), tags, meta_w),
         metaRow(_("系列"), book.series, meta_w),
-        metaRow(_("进度"), string.format("%.0f%%", pct), meta_w),
-    }
-    local first = true
-    for _, row in ipairs(rows) do
+    }) do
         if row then
-            if not first then
+            if #meta_kids >= 1 then
                 table.insert(meta_kids, VerticalSpan:new{ width = UI.sz(6) })
             end
-            first = false
             table.insert(meta_kids, row)
         end
     end
     table.insert(meta_kids, VerticalSpan:new{ width = UI.sz(10) })
-    table.insert(meta_kids, UI.progressBar(meta_w, UI.sz(8), pct))
+    table.insert(meta_kids, (BookInfo.progressRow(meta_w, BookInfo.pct(book))))
 
     local header = HorizontalGroup:new{
         align = "top",
@@ -221,115 +189,61 @@ function Detail:rebuild()
         },
     }
 
-    local body_kids = {
-        align = "left",
-        header,
-    }
-
-    local desc = book.description or book.intro or book.summary
-    if desc and desc ~= "" then
-        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(18) })
-        table.insert(body_kids, LineWidget:new{
-            background = UI.rule(),
-            dimen = Geom:new{ w = content_w, h = UI.line() },
+    local body_kids = { align = "left", header }
+    local desc = BookInfo.desc(book)
+    if desc ~= "" then
+        local gap = UI.sz(12)
+        local title_h_block = UI.sz(30) + UI.sz(6)
+        local avail_desc_h = math.max(UI.sz(40), body_inner_h - header:getSize().h - gap - title_h_block)
+        table.insert(body_kids, VerticalSpan:new{ width = gap })
+        table.insert(body_kids, LeftContainer:new{
+            dimen = Geom:new{ w = content_w, h = UI.sz(30) },
+            TextWidget:new{
+                text = _("简介"),
+                face = UI.face("cfont", 15),
+                fgcolor = Blitbuffer.COLOR_BLACK,
+            },
         })
-        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(10) })
-        table.insert(body_kids, sectionTitle(_("简介"), content_w))
         table.insert(body_kids, VerticalSpan:new{ width = UI.sz(6) })
         table.insert(body_kids, TextBoxWidget:new{
             text = desc,
             face = UI.face("xx_smallinfofont", 14),
             width = content_w,
+            height = avail_desc_h,
             alignment = "left",
             fgcolor = UI.muted(),
         })
     end
-    table.insert(body_kids, VerticalSpan:new{ width = UI.sz(20) })
 
-    local body = VerticalGroup:new(body_kids)
-    local body_size = body:getSize()
-
-    local scroll_area
-    if ScrollableContainer then
-        self.cropping_widget = ScrollableContainer:new{
-            dimen = Geom:new{ w = w, h = scroll_h },
-            show_parent = self,
+    self[1] = FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        dimen = Geom:new{ w = w, h = h },
+        VerticalGroup:new{
+            align = "left",
+            title_bar,
             FrameContainer:new{
                 bordersize = 0,
                 padding = pad,
                 padding_top = UI.sz(12),
                 background = Blitbuffer.COLOR_WHITE,
+                dimen = Geom:new{ w = w, h = body_h },
                 LeftContainer:new{
-                    dimen = Geom:new{
-                        w = content_w,
-                        h = math.max(body_size.h, 1),
-                    },
-                    body,
+                    dimen = Geom:new{ w = content_w, h = body_inner_h },
+                    VerticalGroup:new(body_kids),
                 },
             },
-        }
-        scroll_area = self.cropping_widget
-    else
-        scroll_area = FrameContainer:new{
-            bordersize = 0,
-            padding = pad,
-            padding_top = UI.sz(12),
-            background = Blitbuffer.COLOR_WHITE,
-            dimen = Geom:new{ w = w, h = scroll_h },
-            body,
-        }
-    end
-
-    -- 上半部分：顶栏 + 滚动区（固定高度，不把底栏顶飞）
-    local upper = FrameContainer:new{
-        bordersize = 0,
-        padding = 0,
-        margin = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = w, h = top_h + scroll_h },
-        VerticalGroup:new{
-            align = "left",
-            title_bar,
-            scroll_area,
+            FrameContainer:new{
+                bordersize = 0,
+                padding = pad,
+                padding_top = footer_pad_v,
+                padding_bottom = footer_pad_v,
+                background = Blitbuffer.COLOR_WHITE,
+                dimen = Geom:new{ w = w, h = footer_h },
+                buttons,
+            },
         },
-    }
-    upper.overlap_offset = { 0, 0 }
-
-    -- 底栏：白底钉死屏幕底部，盖住桌面 navbar；不画顶部分隔线
-    local footer = FrameContainer:new{
-        bordersize = 0,
-        padding = 0,
-        margin = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = w, h = footer_h },
-        FrameContainer:new{
-            bordersize = 0,
-            padding = pad,
-            padding_top = footer_pad_v,
-            padding_bottom = footer_pad_v,
-            background = Blitbuffer.COLOR_WHITE,
-            dimen = Geom:new{ w = w, h = footer_h },
-            buttons,
-        },
-    }
-    footer.overlap_offset = { 0, h - footer_h }
-
-    -- 全屏白底垫层，杜绝父页面透出
-    local backdrop = FrameContainer:new{
-        bordersize = 0,
-        padding = 0,
-        margin = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = w, h = h },
-        VerticalSpan:new{ width = h },
-    }
-    backdrop.overlap_offset = { 0, 0 }
-
-    self[1] = OverlapGroup:new{
-        dimen = Geom:new{ w = w, h = h },
-        backdrop,
-        upper,
-        footer,
     }
     self.dimen = Geom:new{ x = 0, y = 0, w = w, h = h }
 end
