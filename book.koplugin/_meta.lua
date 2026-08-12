@@ -1,3 +1,4 @@
+require("l10n")
 local _ = require("gettext")
 return {
     name = "book",
