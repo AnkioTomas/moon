@@ -181,59 +181,83 @@ function UI.gridCoverMaxH(area_h)
     return max_h
 end
 
+--- 密铺封面网格：按可用宽度选列数，封面约 2:3。
+--- opts:
+---   title_extra — 格子额外高度（书名行等），默认 0
+---   min_cols / max_cols / min_cw / target_cw / gap / row_gap
+--- 返回 slot_w, cw, ch, cols, gap, row_gap, cell_h
+function UI.denseCoverMetrics(avail_w, budget_h, opts)
+    opts = opts or {}
+    avail_w = math.max(1, math.floor(tonumber(avail_w) or 1))
+    budget_h = math.max(0, math.floor(tonumber(budget_h) or 0))
+    local gap = opts.gap or UI.sz(8)
+    local row_gap = opts.row_gap or UI.sz(14)
+    local min_cw = opts.min_cw or UI.sz(52)
+    local target_cw = opts.target_cw or UI.sz(72)
+    local min_cols = opts.min_cols or 3
+    local max_cols = opts.max_cols or 5
+    local title_extra = opts.title_extra or 0
+    local max_h = opts.max_h or UI.gridCoverMaxH(budget_h > 0 and budget_h or nil)
+
+    local function slotFor(c)
+        return math.floor((avail_w - gap * (c - 1)) / c)
+    end
+
+    -- 按目标列宽估列数，再夹到 [min,max]，并保证 slot >= min_cw
+    local cols = math.floor((avail_w + gap) / (target_cw + gap) + 0.5)
+    if cols < min_cols then cols = min_cols end
+    if cols > max_cols then cols = max_cols end
+    while cols > min_cols and slotFor(cols) < min_cw do
+        cols = cols - 1
+    end
+    -- 封面按列宽算出的高度仍超上限 → 加列压矮
+    while cols < max_cols and math.floor(slotFor(cols) * 3 / 2) > max_h do
+        if slotFor(cols + 1) < min_cw then
+            break
+        end
+        cols = cols + 1
+    end
+
+    local slot_w = math.max(1, slotFor(cols))
+    local cw = slot_w
+    local ch = math.floor(cw * 3 / 2)
+    local cell_h = ch + title_extra
+
+    -- 垂直方向不够两行时，压封面高度（保持约 2:3，不超出格子宽）
+    if budget_h > 0 and cell_h * 2 + row_gap > budget_h then
+        local fit = math.floor((budget_h - row_gap) / 2) - title_extra
+        if fit >= UI.sz(64) then
+            ch = fit
+            cw = math.max(1, math.floor(ch * 2 / 3))
+            if cw > slot_w then
+                cw = slot_w
+                ch = math.floor(cw * 3 / 2)
+            end
+            cell_h = ch + title_extra
+        end
+    end
+
+    return slot_w, cw, ch, cols, gap, row_gap, cell_h
+end
+
 --- 网格尺度：列宽铺满屏幕；封面在格子里保持 2:3。
 --- 返回 slot_w, cover_w, cover_h, cols, gap
 ---   slot_w  — 格子宽（列均分，吃满 avail）
 ---   cover_* — 真实封面框（始终约 2:3，居中放进格子）
 function UI.coverGridMetrics(avail_w, area_h, opts)
     opts = opts or {}
-    avail_w = math.max(1, math.floor(tonumber(avail_w) or 1))
-    local gap = opts.gap or UI.sz(12)
-    local min_cw = opts.min_cw or UI.sz(56)
-    local min_cols = opts.min_cols or 2
-    local max_cols = opts.max_cols or 5
-    local max_h = UI.gridCoverMaxH(area_h)
-
-    local function widthFor(c)
-        return math.floor((avail_w - gap * (c - 1)) / c)
-    end
-
-    local cols = 3
-    if cols < min_cols then cols = min_cols end
-    if cols > max_cols then cols = max_cols end
-
-    local slot_w = widthFor(cols)
-    if slot_w < min_cw and cols > min_cols then
-        cols = min_cols
-        slot_w = widthFor(cols)
-    end
-
-    -- 列宽对应的 3:2 仍超高 → 加列，尽量让封面能铺满格子
-    while math.floor(slot_w * 3 / 2) > max_h and cols < max_cols do
-        local next_w = widthFor(cols + 1)
-        if next_w < min_cw then
-            break
-        end
-        cols = cols + 1
-        slot_w = next_w
-    end
-
-    -- 格子里能放下的最大 2:3 封面
-    local cover_h = math.min(max_h, math.floor(slot_w * 3 / 2))
-    local cover_w = math.max(1, math.floor(cover_h * 2 / 3))
-    if cover_w > slot_w then
-        cover_w = slot_w
-        cover_h = math.floor(cover_w * 3 / 2)
-        if cover_h > max_h then
-            cover_h = max_h
-            cover_w = math.max(1, math.floor(cover_h * 2 / 3))
-        end
-    end
-
-    slot_w = math.max(1, slot_w)
-    cover_w = math.max(1, cover_w)
-    cover_h = math.max(1, cover_h)
-    return slot_w, cover_w, cover_h, cols, gap
+    local title_extra = opts.title_extra or 0
+    local slot_w, cw, ch, cols, gap = UI.denseCoverMetrics(avail_w, area_h, {
+        gap = opts.gap or UI.sz(12),
+        min_cw = opts.min_cw,
+        min_cols = opts.min_cols,
+        max_cols = opts.max_cols,
+        target_cw = opts.target_cw or opts.min_cw or UI.sz(56),
+        title_extra = title_extra,
+        row_gap = opts.row_gap,
+        max_h = opts.max_h,
+    })
+    return slot_w, cw, ch, cols, gap
 end
 
 --- 最近阅读主角封面最大高度
