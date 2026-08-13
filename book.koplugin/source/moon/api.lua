@@ -18,6 +18,7 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 
 local Api = {}
+---@cast Api MoonApi
 
 local function trim_slash(url)
     return (url or ""):gsub("/+$", "")
@@ -30,6 +31,8 @@ local function previewBody(raw)
     return (raw:gsub("%s+", " "):sub(1, 120))
 end
 
+---@param o MoonSourceConfig|table|nil
+---@return MoonApi
 function Api:new(o)
     o = o or {}
     setmetatable(o, self)
@@ -39,6 +42,7 @@ function Api:new(o)
     return o
 end
 
+---@return boolean
 function Api:configured()
     return self.base_url ~= "" and self.token ~= ""
 end
@@ -146,10 +150,13 @@ function Api:_request(method, path, query, body_tbl, sink_file, binary, as_json)
     return data
 end
 
+---@return table|nil, string|nil
 function Api:ping()
     return self:_request("GET", "/index/auth/ping")
 end
 
+---@param opts BookListOpts|nil
+---@return BookListResult|nil, string|nil
 function Api:listBooks(opts)
     opts = opts or {}
     return self:_request("GET", "/index/book/list", {
@@ -174,6 +181,18 @@ function Api.clearRecentCache()
     _recent_cache.data = nil
 end
 
+--- 子进程拉完后回填父进程缓存（fork 写不到父进程内存）
+---@param limit number|nil
+---@param res BookListResult|nil
+function Api.primeRecentCache(limit, res)
+    if type(res) ~= "table" then return end
+    _recent_cache.t = os.time()
+    _recent_cache.limit = limit or 8
+    _recent_cache.data = res
+end
+
+---@param limit number|nil
+---@return BookListResult|nil, string|nil
 function Api:recentBooks(limit)
     limit = limit or 8
     local now = os.time()
@@ -191,17 +210,22 @@ function Api:recentBooks(limit)
     return res, err
 end
 
+---@return BookFiltersResult|nil, string|nil
 function Api:filters()
     return self:_request("GET", "/index/book/filters")
 end
 
 --- 藏书统计（服务端新增）；失败由调用方降级显示
+---@return BookLibraryStats|nil, string|nil
 function Api:stats()
     return self:_request("GET", "/index/book/stats")
 end
 
 --- 注册阅读设备（高维统计）
 --- body: { id, model }
+---@param device_id string
+---@param model string|nil
+---@return table|nil, string|nil
 function Api:registerReadingDevice(device_id, model)
     return self:_request("POST", "/index/stats/device", nil, {
         id = device_id,
@@ -211,6 +235,8 @@ end
 
 --- 上报阅读统计（KOReader page_stat 语义）
 --- body: { books = {}, stats = {}, device_id? }
+---@param payload BookStatsPayload|nil
+---@return table|nil, string|nil
 function Api:importReadingStats(payload)
     local res, err = self:_request("POST", "/index/stats/import", nil, payload or {}, nil, false, true)
     if res then
@@ -228,6 +254,14 @@ function Api.clearInsightCache()
     _insight_cache.data = nil
 end
 
+---@param res BookInsightResult|nil
+function Api.primeInsightCache(res)
+    if type(res) ~= "table" then return end
+    _insight_cache.t = os.time()
+    _insight_cache.data = res
+end
+
+---@return BookInsightResult|nil, string|nil
 function Api:readingInsight()
     local now = os.time()
     if _insight_cache.data and (now - (_insight_cache.t or 0)) < INSIGHT_TTL then
@@ -242,6 +276,7 @@ function Api:readingInsight()
 end
 
 --- 每日一言（独立公网接口，不走 Book 服务器）
+---@return BookHitokotoResult|nil, string|nil
 function Api.hitokoto()
     local url = "https://api.ankio.net/hitokoto"
     local chunks = {}
@@ -280,12 +315,20 @@ function Api.hitokoto()
     return { code = 200, data = row }
 end
 
+---@param filename string
+---@return BookProgressResult|nil, string|nil
 function Api:getProgress(filename)
     return self:_request("GET", "/index/book/progress", {
         filename = filename,
     })
 end
 
+---@param filename string
+---@param frac number
+---@param spine number|nil
+---@param page number|nil
+---@param percent_text string|nil
+---@return table|nil, string|nil
 function Api:updateProgress(filename, frac, spine, page, percent_text)
     local res, err = self:_request("POST", "/index/book/progressUpdate", nil, {
         filename = filename,
@@ -301,6 +344,8 @@ function Api:updateProgress(filename, frac, spine, page, percent_text)
 end
 
 --- HEAD 探测 Content-Length；服务端不支持则返回 nil
+---@param filename string
+---@return number|nil
 function Api:probeFileSize(filename)
     if not filename or filename == "" then
         return nil
@@ -325,6 +370,10 @@ function Api:probeFileSize(filename)
 end
 
 --- on_progress(bytes) 可选；在阻塞下载过程中回调已写入字节数
+---@param filename string
+---@param dest_path string
+---@param on_progress fun(bytes: number)|nil
+---@return boolean|nil, string|nil
 function Api:downloadBook(filename, dest_path, on_progress)
     local file, err = io.open(dest_path, "wb")
     if not file then
@@ -375,6 +424,9 @@ local function webdavPath(filename)
     return "/webdav/" .. table.concat(parts, "/")
 end
 
+---@param filename string
+---@param dest_path string
+---@return boolean|nil, string|nil
 function Api:downloadCover(filename, dest_path)
     if not filename or filename == "" then
         return nil, _("无效文件名")

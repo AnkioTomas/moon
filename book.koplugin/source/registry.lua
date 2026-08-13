@@ -11,6 +11,7 @@ local T = require("ffi/util").template
 
 local Registry = {}
 
+---@type table<MoonSourceId, fun(): table>
 local FACTORIES = {
     moon = function() return require("source.moon") end,
     webdav = function() return require("source.webdav") end,
@@ -20,32 +21,53 @@ local FACTORIES = {
 
 local ORDER = { "moon", "webdav", "wechat", "legado" }
 
+---@type BookSource|nil
 local _active = nil
+---@type MoonSourceId|nil
 local _active_id = nil
 
+--- 只取 meta，不构造 Source 实例
+---@param id MoonSourceId
+---@return BookSourceMeta|nil
+function Registry.meta(id)
+    local fac = FACTORIES[id]
+    if not fac then
+        return nil
+    end
+    local ok, mod = pcall(fac)
+    if ok and mod and mod.meta then
+        return mod.meta()
+    end
+    return { id = id, name = id }
+end
+
+---@return BookSourceMeta[]
 function Registry.list()
     local out = {}
     for _, id in ipairs(ORDER) do
-        local fac = FACTORIES[id]
-        if fac then
-            local ok, mod = pcall(fac)
-            if ok and mod and mod.meta then
-                table.insert(out, mod.meta())
-            else
-                table.insert(out, { id = id, name = id })
-            end
+        local meta = Registry.meta(id)
+        if meta then
+            table.insert(out, meta)
         end
     end
     return out
 end
 
+---@param id MoonSourceId
+---@param cfg MoonSourceConfig|table|nil
+---@return BookSource|nil, string|nil
 function Registry.create(id, cfg)
     local fac = FACTORIES[id]
     if not fac then
         return nil, T(_("未知数据源: %1"), tostring(id))
     end
     local ok, mod = pcall(fac)
-    if not ok or not mod or not mod.new then
+    if not ok then
+        -- 以前吞掉 pcall 错误，日志里只剩「加载失败」看不出 module not found
+        logger.warn("book.source require failed", id, mod)
+        return nil, T(_("数据源加载失败: %1"), tostring(id))
+    end
+    if not mod or not mod.new then
         return nil, T(_("数据源加载失败: %1"), tostring(id))
     end
     return mod.new(cfg or {})
@@ -57,6 +79,7 @@ function Registry.invalidate()
 end
 
 --- 按当前配置构造（或返回缓存）活跃源
+---@return BookSource|nil
 function Registry.getActive()
     local id = MoonSettings.activeSourceId()
     if _active and _active_id == id then
@@ -76,6 +99,8 @@ function Registry.getActive()
     return _active
 end
 
+---@param id MoonSourceId
+---@return BookSource|nil, string|nil
 function Registry.setActive(id)
     if not FACTORIES[id] then
         return nil, T(_("未知数据源: %1"), tostring(id))

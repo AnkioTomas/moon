@@ -21,7 +21,6 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
-local Menu = require("ui/widget/menu")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
@@ -30,6 +29,8 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Cover = require("ui.components.cover")
 local UI = require("ui.components.bookui")
+local Pager = require("ui.components.pager")
+local Popup = require("ui.components.popup")
 local Cache = require("moon.cache")
 local Progress = require("moon.progress")
 local MoonSettings = require("moon.settings")
@@ -38,12 +39,6 @@ local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
 local Screen = Device.screen
-
-local ScrollableContainer
-do
-    local ok, mod = pcall(require, "ui/widget/container/scrollablecontainer")
-    if ok then ScrollableContainer = mod end
-end
 
 local WEIGHT_STEPS = { -1, -0.5, 0, 0.5, 1, 1.5, 3 }
 local GAMMA_STEPS = { 10, 15, 25, 30, 36, 43, 49, 56 }
@@ -212,36 +207,32 @@ local function showFontSettings(ui, on_done)
                 items = font.face_table
             end
             if type(items) == "table" and #items > 0 then
-                local font_menu
+                local menu
                 local finished = false
                 local function finish()
                     if finished then return end
                     finished = true
-                    if font_menu then
-                        UIManager:close(font_menu)
-                        font_menu = nil
+                    if menu then
+                        UIManager:close(menu)
+                        menu = nil
                     end
                     if on_done then
                         UIManager:nextTick(on_done)
                     end
                 end
-                font_menu = Menu:new{
+                menu = Popup.list{
                     title = _("字体"),
-                    item_table = wrapFontItemTable(items, finish),
-                    is_borderless = true,
-                    is_popout = false,
-                    covers_fullscreen = true,
-                    items_font_size = UI.menuFontSize(),
+                    raw = true,
+                    items = wrapFontItemTable(items, finish),
                     close_callback = function()
                         if finished then return end
                         finished = true
-                        font_menu = nil
+                        menu = nil
                         if on_done then
                             UIManager:nextTick(on_done)
                         end
                     end,
                 }
-                UIManager:show(font_menu)
                 return
             end
         end
@@ -668,7 +659,7 @@ function ReaderFloatMenu:buildViewToggle(width, is_page, on_page, on_scroll)
             align = "center",
             CenterContainer:new{
                 dimen = Geom:new{ w = icon_slot, h = btn_h },
-                loadIcon("view.svg", UI.sz(18)),
+                loadIcon("reader.svg", UI.sz(18)),
             },
             chip(_("分页"), is_page, on_page),
             HorizontalSpan:new{ width = gap },
@@ -907,38 +898,30 @@ end
 function ReaderFloatMenu:rebuild()
     local w = Screen:getWidth()
     local h = Screen:getHeight()
-    local pad = UI.sz(14)
+    local pad = UI.pagePad()
     local panel_w = w - pad * 2
-    local sb_gutter = 0
-    if ScrollableContainer then
-        if ScrollableContainer.getScrollbarWidth then
-            sb_gutter = ScrollableContainer:getScrollbarWidth()
-        else
-            sb_gutter = 3 * Screen:scaleBySize(6)
-        end
-    end
-    local viewport_w = math.max(UI.sz(120), panel_w - pad * 2)
-    local content_w = math.max(UI.sz(100), viewport_w - sb_gutter)
+    local content_w = math.max(UI.sz(100), panel_w - pad * 2)
     local max_h = math.floor(h * 0.88)
+    local band_h = Pager.bandH()
+    local body_h = math.max(UI.sz(80), max_h - pad * 2 - band_h)
 
     local detail = self:buildDetail(content_w)
     local controls = self:buildControls(content_w)
     local actions = self:buildActions(content_w)
 
-    local body_kids = { align = "left", detail }
-    table.insert(body_kids, sectionGap())
-
+    local blocks = { detail }
     if controls then
-        table.insert(body_kids, TextWidget:new{
-            text = _("阅读设置"),
-            face = UI.face("cfont", 14),
-            fgcolor = UI.muted(),
+        table.insert(blocks, VerticalGroup:new{
+            align = "left",
+            TextWidget:new{
+                text = _("阅读设置"),
+                face = UI.face("cfont", 14),
+                fgcolor = UI.muted(),
+            },
+            VerticalSpan:new{ width = UI.sz(8) },
+            controls,
         })
-        table.insert(body_kids, VerticalSpan:new{ width = UI.sz(8) })
-        table.insert(body_kids, controls)
-        table.insert(body_kids, sectionGap())
     else
-        -- PDF：无 CRE 控件，给系统配置入口
         local tap = tappable(content_w, UI.sz(48), function()
             self:onClose()
             UIManager:nextTick(function()
@@ -962,36 +945,56 @@ function ReaderFloatMenu:rebuild()
                 },
             },
         }
-        table.insert(body_kids, tap)
-        table.insert(body_kids, sectionGap())
+        table.insert(blocks, tap)
+    end
+    table.insert(blocks, actions)
+
+    local packed = {}
+    for i, block in ipairs(blocks) do
+        if i > 1 then
+            table.insert(packed, VerticalSpan:new{ width = UI.sz(16) })
+        end
+        table.insert(packed, block)
     end
 
-    table.insert(body_kids, actions)
+    local pages_kids = Pager.pack(packed, body_h)
+    local pages = #pages_kids
+    local page = Pager.clamp(self._menu_page, pages)
+    self._menu_page = page
+    self.cropping_widget = nil
 
-    local body = VerticalGroup:new(body_kids)
-    local body_h = body:getSize().h
-    local panel_h = math.min(max_h, body_h + pad * 2)
-    local scroll_h = panel_h - pad * 2
-    local content, inner_h
+    local page_body = LeftContainer:new{
+        dimen = Geom:new{ w = content_w, h = body_h },
+        VerticalGroup:new(pages_kids[page]),
+    }
 
-    if ScrollableContainer and body_h > scroll_h then
-        self.cropping_widget = ScrollableContainer:new{
-            dimen = Geom:new{ w = viewport_w, h = scroll_h },
-            show_parent = self,
-            LeftContainer:new{
-                dimen = Geom:new{ w = content_w, h = body_h },
-                body,
-            },
-        }
-        content = self.cropping_widget
-        inner_h = scroll_h
-    else
-        self.cropping_widget = nil
-        content = body
-        panel_h = body_h + pad * 2
-        inner_h = body_h
-    end
+    local inner = VerticalGroup:new{
+        align = "left",
+        CenterContainer:new{
+            dimen = Geom:new{ w = content_w, h = body_h },
+            page_body,
+        },
+        Pager.band(content_w, page, pages, {
+            on_prev = function()
+                self._menu_page = page - 1
+                self:rebuild()
+            end,
+            on_next = function()
+                self._menu_page = page + 1
+                self:rebuild()
+            end,
+            on_first = function()
+                self._menu_page = 1
+                self:rebuild()
+            end,
+            on_last = function()
+                self._menu_page = pages
+                self:rebuild()
+            end,
+        }),
+    }
 
+    local panel_h = body_h + band_h + pad * 2
     local panel = FrameContainer:new{
         bordersize = UI.line(),
         color = UI.rule(),
@@ -1000,20 +1003,18 @@ function ReaderFloatMenu:rebuild()
         background = Blitbuffer.COLOR_WHITE,
         dimen = Geom:new{ w = panel_w, h = panel_h },
         LeftContainer:new{
-            dimen = Geom:new{ w = viewport_w, h = inner_h },
-            content,
+            dimen = Geom:new{ w = content_w, h = body_h + band_h },
+            inner,
         },
     }
 
     local panel_x = math.floor((w - panel_w) / 2)
-    -- 底部留白加大，避免贴底；垂直略偏下但仍居中感
     local bottom_gap = UI.sz(56)
     local top_gap = UI.sz(24)
     local panel_y = h - panel_h - bottom_gap
     if panel_y < top_gap then
         panel_y = top_gap
     end
-    -- 若高度有余，再往上抬一点（整体垂直居中偏下）
     local slack = h - panel_h - bottom_gap - top_gap
     if slack > 0 then
         panel_y = top_gap + math.floor(slack * 0.35)
@@ -1110,18 +1111,18 @@ function ReaderFloatMenu.onTap(plugin)
 end
 
 --- 退出阅读并打开 Book 桌面。
---- 路径：onClose → showFileManager → Host 消费 pending 开桌面。
+--- 已在 FM：立刻开。在 Reader：关书 → showFileManager → Host.onShow 消费 want。
 function ReaderFloatMenu.exitToDesktop(plugin)
     ReaderFloatMenu.detach(plugin)
     local ui = plugin and plugin.ui
     if not (ui and ui.document) then
-        if not Host.openFromFileManager(plugin) then
-            logger.warn("book exitToDesktop: not in reader and no desktop host")
+        if not Host.requestDesktop(plugin) then
+            logger.warn("book exitToDesktop: no desktop host")
         end
         return
     end
     local file = ui.document.file
-    Host.scheduleDesktopOpen()
+    Host.requestDesktop()
     UIManager:nextTick(function()
         if ui.onClose then
             ui:onClose(false)
