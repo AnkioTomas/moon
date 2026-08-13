@@ -1,0 +1,258 @@
+--[[--
+微信读书源设置 UI（扫码登录由本模块自绘）。
+读写：utils.settings.getSource / saveSource("wechat")
+
+@module koplugin.book.source.wechat.setting
+--]]
+
+local _ = require("gettext")
+local T = require("ffi/util").template
+
+local SOURCE_ID = "wechat"
+
+local Setting = {}
+
+---@return string status, boolean status_on
+function Setting.rowStatus()
+    local Auth = require("source.wechat.auth")
+    local cfg = require("utils.settings").getSource(SOURCE_ID)
+    if Auth.hasSession() then
+        return Auth.userLabel() or cfg.user_id or _("已登录"), true
+    end
+    return _("未登录 · 点此扫码"), false
+end
+
+local function afterAuthChanged(plugin)
+    require("source.registry").invalidate()
+    if plugin and plugin.onSourceChanged then
+        plugin:onSourceChanged()
+    end
+end
+
+local function showQrLogin(plugin)
+    local Auth = require("source.wechat.auth")
+    local Promise = require("utils.promise")
+    local NetworkMgr = require("ui/network/manager")
+    local UIManager = require("ui/uimanager")
+    local InfoMessage = require("ui/widget/infomessage")
+    local QRWidget = require("ui/widget/qrwidget")
+    local Screen = require("device").screen
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local TextWidget = require("ui/widget/textwidget")
+    local CenterContainer = require("ui/widget/container/centercontainer")
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local Geom = require("ui/geometry")
+    local UI = require("ui.components.bookui")
+
+    NetworkMgr:runWhenOnline(function()
+        local cancelled = false
+        local dialog
+        local begin_job, wait_job
+        local qr_size = math.floor(math.min(Screen:getWidth(), Screen:getHeight()) * 0.55)
+
+        local function closeDialog()
+            if dialog then
+                UIManager:close(dialog)
+                dialog = nil
+            end
+        end
+
+        dialog = ButtonDialog:new{
+            title = _("微信扫码登录"),
+            buttons = {{
+                {
+                    text = _("取消"),
+                    callback = function()
+                        cancelled = true
+                        if begin_job then
+                            begin_job:cancel()
+                            begin_job = nil
+                        end
+                        if wait_job then
+                            wait_job:cancel()
+                            wait_job = nil
+                        end
+                        closeDialog()
+                    end,
+                },
+            }},
+        }
+        if dialog.addWidget then
+            dialog:addWidget(CenterContainer:new{
+                dimen = Geom:new{ w = Screen:getWidth() * 0.9, h = qr_size + UI.sz(40) },
+                VerticalGroup:new{
+                    align = "center",
+                    TextWidget:new{
+                        text = _("正在获取二维码…"),
+                        face = UI.face("xx_smallinfofont", 14),
+                    },
+                },
+            })
+        end
+        UIManager:show(dialog)
+
+        local function startWait(uid, qr_payload)
+            closeDialog()
+            local qr = QRWidget:new{
+                text = qr_payload,
+                width = qr_size,
+                height = qr_size,
+            }
+            dialog = ButtonDialog:new{
+                title = _("微信扫码登录"),
+                buttons = {{
+                    {
+                        text = _("取消"),
+                        callback = function()
+                            cancelled = true
+                            if wait_job then
+                                wait_job:cancel()
+                                wait_job = nil
+                            end
+                            closeDialog()
+                        end,
+                    },
+                }},
+            }
+            if dialog.addWidget then
+                dialog:addWidget(CenterContainer:new{
+                    dimen = Geom:new{ w = Screen:getWidth() * 0.9, h = qr_size + UI.sz(40) },
+                    VerticalGroup:new{
+                        align = "center",
+                        qr,
+                    },
+                })
+            end
+            UIManager:show(dialog)
+
+            wait_job = Promise:new(function()
+                local info, err, status = Auth.waitQrLogin(uid)
+                if status == "ok" and info then
+                    return info
+                end
+                return nil, err or _("二维码已失效，请重新登录")
+            end)
+                :next(function(info)
+                    wait_job = nil
+                    if cancelled then
+                        return
+                    end
+                    closeDialog()
+                    local user, e2 = Auth.completeQrLogin(info)
+                    if not user then
+                        UIManager:show(InfoMessage:new{ text = e2 or _("登录失败") })
+                        return
+                    end
+                    UIManager:show(InfoMessage:new{
+                        text = T(_("已登录：%1"), user.user_name ~= "" and user.user_name or user.user_id),
+                        timeout = 2,
+                    })
+                    afterAuthChanged(plugin)
+                end)
+                :fail(function(err)
+                    wait_job = nil
+                    if cancelled then
+                        return
+                    end
+                    closeDialog()
+                    UIManager:show(InfoMessage:new{
+                        text = err or _("二维码已失效，请重新登录"),
+                    })
+                end)
+        end
+
+        begin_job = Promise:new(function()
+            local started, err = Auth.beginQrLogin()
+            if not started then
+                return nil, err or _("无法开始登录")
+            end
+            return started
+        end)
+            :next(function(started)
+                begin_job = nil
+                if cancelled then
+                    return
+                end
+                startWait(started.uid, started.qr_payload)
+            end)
+            :fail(function(err)
+                begin_job = nil
+                if cancelled then
+                    return
+                end
+                closeDialog()
+                UIManager:show(InfoMessage:new{
+                    text = err or _("无法开始登录"),
+                })
+            end)
+    end)
+end
+
+--- 自绘账号菜单（未登录直接扫码；已登录：扫码 / 续期 / 退出）
+---@param plugin table|nil
+function Setting.open(plugin)
+    local Auth = require("source.wechat.auth")
+    if not Auth.hasSession() then
+        showQrLogin(plugin)
+        return
+    end
+
+    local NetworkMgr = require("ui/network/manager")
+    local UIManager = require("ui/uimanager")
+    local InfoMessage = require("ui/widget/infomessage")
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local dialog
+    local cfg = require("utils.settings").getSource(SOURCE_ID)
+    local title = _("微信读书账号") .. " · " .. (Auth.userLabel() or cfg.user_id or "")
+    dialog = ButtonDialog:new{
+        title = title,
+        buttons = {
+            {
+                {
+                    text = _("重新扫码登录"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        showQrLogin(plugin)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("续期会话"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        NetworkMgr:runWhenOnline(function()
+                            local ok, err = Auth.renewCookie()
+                            UIManager:show(InfoMessage:new{
+                                text = ok and _("已续期") or (err or _("续期失败")),
+                                timeout = 2,
+                            })
+                        end)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("退出登录"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        Auth.clearSession()
+                        UIManager:show(InfoMessage:new{ text = _("已退出"), timeout = 2 })
+                        afterAuthChanged(plugin)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("取消"),
+                    callback = function()
+                        UIManager:close(dialog)
+                    end,
+                },
+            },
+        },
+    }
+    UIManager:show(dialog)
+end
+
+return Setting

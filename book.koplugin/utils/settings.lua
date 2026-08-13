@@ -2,9 +2,9 @@
 配置存储（通用 + 各源文件）
 
   .moon/settings/common.lua     跨源通用
-  .moon/settings/<sourceId>.lua 各源专用（原始表；缺省由 source.<id>.setting.load）
+  .moon/settings/<sourceId>.lua 各源专用
 
-本模块只负责读写磁盘。源业务缺省不在这里填。
+本模块只负责读写磁盘。
 打开文件只调 Paths.ensureSettings，禁止 ensureLayout（循环依赖）。
 
 @module koplugin.book.utils.settings
@@ -100,7 +100,7 @@ function M.save(s)
     logger.dbg("book.settings save common", ls.data.active_source)
 end
 
---- 源文件原始表（无 defaults）。业务请用 source.<id>.setting.load()
+--- 源配置表
 ---@param id SourceId|nil
 ---@return table
 function M.getSource(id)
