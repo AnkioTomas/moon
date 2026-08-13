@@ -14,24 +14,26 @@ UI 线程 Promise（不用 fork：HTTPS/SSL 状态被子进程继承会挂死）
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
 
--- LuaJIT/5.1 无 table.pack
-local function pack(...)
-    return { n = select("#", ...), ... }
-end
-
+---@class MoonPromise
 local Promise = {}
 Promise.__index = Promise
 
+--- 未完成实例集合（供 cancelAll）
 local _pending = {}
 
+---@param p MoonPromise
 local function retain(p)
     _pending[p] = true
 end
 
+---@param p MoonPromise
 local function release(p)
     _pending[p] = nil
 end
 
+--- 置为 fulfilled，同步跑已注册的 next 回调
+---@param p MoonPromise
+---@param value any
 local function settle_next(p, value)
     if p._state ~= "pending" then
         return
@@ -50,6 +52,9 @@ local function settle_next(p, value)
     end
 end
 
+--- 置为 rejected，同步跑已注册的 fail 回调
+---@param p MoonPromise
+---@param err any
 local function settle_fail(p, err)
     if p._state ~= "pending" then
         return
@@ -68,10 +73,17 @@ local function settle_fail(p, err)
     end
 end
 
---- 构造并调度 task；opts.delay > 0 则延时
--- @param task fun(): any, any
--- @param opts MoonPromiseOpts|nil
--- @return MoonPromise
+
+---@class MoonPromiseOpts
+---@field delay number|nil 延迟启动秒数
+
+
+--- 构造并调度 task；opts.delay > 0 则延时，否则 nextTick。
+--- task 约定：`return result, err`；`err ~= nil` → fail，否则 next(result)。
+--- task 抛错亦走 fail（err 为错误字符串）。
+---@param task fun(): any, any
+---@param opts MoonPromiseOpts|nil
+---@return MoonPromise
 function Promise:new(task, opts)
     local o = setmetatable({
         _state = "pending",
@@ -88,21 +100,17 @@ function Promise:new(task, opts)
         if o._state ~= "pending" then
             return
         end
-        local packed
-        local ok, boom = pcall(function()
-            packed = pack(task())
-        end)
+        -- pcall 直接接住 task 的多返回：ok, result, err
+        local ok, value, err = pcall(task)
         if o._state ~= "pending" then
             return
         end
         if not ok then
-            logger.dbg("book.promise task boom", boom)
-            settle_fail(o, tostring(boom))
+            logger.dbg("book.promise task boom", value)
+            settle_fail(o, tostring(value))
             return
         end
-        local value = packed[1]
-        local err = packed[2]
-        if packed.n >= 2 and err ~= nil then
+        if err ~= nil then
             settle_fail(o, err)
             return
         end
@@ -119,9 +127,9 @@ function Promise:new(task, opts)
     return o
 end
 
---- 成功：next(result)。已 settled 则下一拍补调。返回 self。
--- @param fn fun(result: any)
--- @return MoonPromise
+--- 注册成功回调：next(result)。已 fulfilled 则下一拍补调。返回 self。
+---@param fn fun(result: any)
+---@return MoonPromise
 function Promise:next(fn)
     if type(fn) ~= "function" then
         return self
@@ -140,9 +148,9 @@ function Promise:next(fn)
     return self
 end
 
---- 失败：fail(err)。已 settled 则下一拍补调。返回 self。
--- @param fn fun(err: any)
--- @return MoonPromise
+--- 注册失败回调：fail(err)。已 rejected 则下一拍补调。返回 self。
+---@param fn fun(err: any)
+---@return MoonPromise
 function Promise:fail(fn)
     if type(fn) ~= "function" then
         return self
@@ -161,7 +169,8 @@ function Promise:fail(fn)
     return self
 end
 
---- 取消：不再回调 next/fail
+--- 取消本实例：不再回调 next/fail；已 settled 则无操作。
+---@return nil
 function Promise:cancel()
     if self._state ~= "pending" then
         return
@@ -176,7 +185,8 @@ function Promise:cancel()
     end
 end
 
---- 取消全部未完成 Promise
+--- 取消全部未完成 Promise（模块函数，非实例方法）。
+---@return nil
 function Promise.cancelAll()
     local list = {}
     for p in pairs(_pending) do
