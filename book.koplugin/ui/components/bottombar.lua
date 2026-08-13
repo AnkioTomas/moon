@@ -2,6 +2,10 @@
 Desktop 底栏 Tab：首页 / 图书馆 / [书城] / 统计 / 设置
   书城仅当 source.capabilities.store 时插入
 
+选中态（墨水屏优先对比）：
+  图标不 dim、标签加粗加大、底部短粗指示条
+未选中：图标 dim、标签浅灰缩小
+
 @module koplugin.book.ui.components.bottombar
 --]]
 
@@ -13,13 +17,14 @@ local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local ImageWidget = require("ui/widget/imagewidget")
 local LineWidget = require("ui/widget/linewidget")
-local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local TextWidget = require("ui/widget/textwidget")
 local _ = require("gettext")
 local Screen = Device.screen
 
 local UI = require("ui.components.bookui")
+local Image = require("ui.components.image")
 
 local BottomBar = {}
 
@@ -37,6 +42,29 @@ function BottomBar.tabs(source)
     return tabs
 end
 
+local function tabIcon(name, sz, active)
+    local path = Image.resolve(name)
+    if path then
+        local ok, img = pcall(function()
+            return ImageWidget:new{
+                file = path,
+                width = sz,
+                height = sz,
+                alpha = true,
+                dim = not active,
+            }
+        end)
+        if ok and img then
+            return img
+        end
+    end
+    return TextWidget:new{
+        text = "•",
+        face = UI.face("cfont", active and 18 or 16),
+        fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_6,
+    }
+end
+
 --- @param desktop table Desktop 实例（读 tab / source）
 function BottomBar.build(desktop)
     local tabs = BottomBar.tabs(desktop.source)
@@ -44,34 +72,18 @@ function BottomBar.build(desktop)
     local sw = Screen:getWidth()
     local bh = UI.barH()
     local icon_sz = UI.iconSz()
-    local icon_dir = UI.iconDir()
     local cell_w = math.floor(sw / #tabs)
-    local underline_h = UI.sz(2)
+    local underline_h = UI.sz(3)
+    -- 选中指示条：短粗，避免通栏细线「像分割线」
+    local indicator_w = math.min(cell_w - UI.sz(20), math.max(UI.sz(28), icon_sz + UI.sz(12)))
     local row = HorizontalGroup:new{ align = "center" }
     for _, tab in ipairs(tabs) do
         local active = desktop.tab == tab.id
-        local icon
-        local ok, img = pcall(function()
-            return ImageWidget:new{
-                file = icon_dir .. tab.icon,
-                width = icon_sz,
-                height = icon_sz,
-                alpha = true,
-            }
-        end)
-        if ok and img then
-            icon = img
-        else
-            icon = TextWidget:new{
-                text = "•",
-                face = UI.face("cfont", 18),
-                fgcolor = active and Blitbuffer.COLOR_BLACK or UI.dim(),
-            }
-        end
+        local icon = tabIcon(tab.icon, icon_sz, active)
         local label = TextWidget:new{
             text = tab.text,
-            face = UI.face(active and "cfont" or "xx_smallinfofont", active and 13 or 12),
-            fgcolor = active and Blitbuffer.COLOR_BLACK or UI.muted(),
+            face = UI.face(active and "cfont" or "xx_smallinfofont", active and 14 or 11),
+            fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_6,
         }
         local content_h = math.max(1, bh - underline_h)
         local cell = VerticalGroup:new{
@@ -86,9 +98,15 @@ function BottomBar.build(desktop)
                     label,
                 },
             },
-            LineWidget:new{
-                background = active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
+            CenterContainer:new{
                 dimen = Geom:new{ w = cell_w, h = underline_h },
+                LineWidget:new{
+                    background = active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
+                    dimen = Geom:new{
+                        w = active and indicator_w or 1,
+                        h = underline_h,
+                    },
+                },
             },
         }
         table.insert(row, cell)
