@@ -1,23 +1,28 @@
 --[[--
 统一「Page X of Y」翻页条。桌面各页禁止 ScrollableContainer，溢出用本组件。
 
+间距按可用宽度收缩，避免超大分辨率 / 大 ui_scale 下两侧按钮溢出。
+
 @module koplugin.book.ui.components.pager
 --]]
 
 local BD = require("ui/bidi")
 local Button = require("ui/widget/button")
 local BottomContainer = require("ui/widget/container/bottomcontainer")
-local CenterContainer = require("ui/widget/container/centercontainer")
+local Device = require("device")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local TopContainer = require("ui/widget/container/topcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Blitbuffer = require("ffi/blitbuffer")
 local UI = require("ui.components.bookui")
 local _ = require("gettext")
 local T = require("ffi/util").template
+
+local Screen = Device.screen
 
 local Pager = {}
 
@@ -26,8 +31,43 @@ function Pager.bandH()
     return UI.iconSz() + UI.sz(32)
 end
 
+--- 按 avail_w 算图标边长与间距，保证 4 键 + 页码不撑破宽度
+local function fitMetrics(avail_w, info_w)
+    avail_w = math.max(1, tonumber(avail_w) or Screen:getWidth())
+    info_w = math.max(0, tonumber(info_w) or 0)
+    local pad = UI.sz(2)
+    local prefer_icon = UI.iconSz()
+    local prefer_gap = UI.sz(32)
+    local min_icon = math.max(1, Screen:scaleBySize(14))
+    local min_gap = 0
+
+    local function total(icon, gap)
+        return 4 * (icon + pad * 2) + 4 * gap + info_w
+    end
+
+    local icon = prefer_icon
+    local gap = prefer_gap
+    if total(icon, gap) > avail_w then
+        gap = math.floor((avail_w - 4 * (icon + pad * 2) - info_w) / 4)
+        if gap < min_gap then
+            gap = min_gap
+            icon = math.floor((avail_w - info_w - 4 * gap) / 4) - pad * 2
+            if icon < min_icon then
+                icon = min_icon
+            end
+            if icon > prefer_icon then
+                icon = prefer_icon
+            end
+        elseif gap > prefer_gap then
+            gap = prefer_gap
+        end
+    end
+    return icon, gap, pad
+end
+
 --- 与官方 Menu 底栏一致：首/上/页码/下/末
-function Pager.widget(page, pages, handlers)
+-- @param width number|nil 可用宽度；缺省用屏宽
+function Pager.widget(page, pages, handlers, width)
     handlers = handlers or {}
     page = tonumber(page) or 1
     pages = math.max(1, tonumber(pages) or 1)
@@ -39,15 +79,33 @@ function Pager.widget(page, pages, handlers)
         chevron_left, chevron_right = chevron_right, chevron_left
         chevron_first, chevron_last = chevron_last, chevron_first
     end
-    local icon_sz = UI.iconSz()
-    local spacer = HorizontalSpan:new{ width = UI.sz(32) }
+
+    local info = Button:new{
+        text = handlers.info_text or T(_("Page %1 of %2"), page, pages),
+        text_font_face = "xx_smallinfofont",
+        text_font_size = UI.fontSize(16),
+        text_font_bold = false,
+        bordersize = 0,
+        padding = UI.sz(2),
+    }
+    if info.disableWithoutDimming then
+        info:disableWithoutDimming()
+    end
+
+    local avail = tonumber(width) or Screen:getWidth()
+    local icon_sz, gap, pad = fitMetrics(avail, info:getSize().w)
+    local spacers = {}
+    for i = 1, 4 do
+        spacers[i] = HorizontalSpan:new{ width = gap }
+    end
+
     local function chev(icon, cb)
         return Button:new{
             icon = icon,
             icon_width = icon_sz,
             icon_height = icon_sz,
             bordersize = 0,
-            padding = UI.sz(2),
+            padding = pad,
             callback = cb,
         }
     end
@@ -63,32 +121,31 @@ function Pager.widget(page, pages, handlers)
     local last = chev(chevron_last, function()
         if handlers.on_last then handlers.on_last() end
     end)
-    local info = Button:new{
-        text = handlers.info_text or T(_("Page %1 of %2"), page, pages),
-        text_font_face = "xx_smallinfofont",
-        text_font_size = UI.fontSize(16),
-        text_font_bold = false,
-        bordersize = 0,
-        padding = UI.sz(2),
-    }
-    if info.disableWithoutDimming then
-        info:disableWithoutDimming()
-    end
     first:enableDisable(page > 1)
     left:enableDisable(page > 1)
     right:enableDisable(page < pages)
     last:enableDisable(page < pages)
-    return HorizontalGroup:new{
+
+    local row = HorizontalGroup:new{
         first,
-        spacer,
+        spacers[1],
         left,
-        spacer,
+        spacers[2],
         info,
-        spacer,
+        spacers[3],
         right,
-        spacer,
+        spacers[4],
         last,
     }
+    -- 按钮真实宽度可能大于估算，再收一档
+    local row_w = row:getSize().w
+    if row_w > avail and gap > 0 then
+        gap = math.max(0, gap - math.ceil((row_w - avail) / 4))
+        for i = 1, 4 do
+            spacers[i].width = gap
+        end
+    end
+    return row
 end
 
 --- 固定高度的分页带：控件贴底，与桌面底栏留出空隙
@@ -99,7 +156,7 @@ function Pager.band(width, page, pages, handlers)
         dimen = Geom:new{ w = width, h = band_h },
         VerticalGroup:new{
             align = "center",
-            Pager.widget(page, pages, handlers),
+            Pager.widget(page, pages, handlers, width),
             VerticalSpan:new{ width = bottom_pad },
         },
     }
@@ -159,7 +216,8 @@ function Pager.frame(width, height, opts)
     if top then
         table.insert(kids, top)
     end
-    table.insert(kids, CenterContainer:new{
+    -- 内容顶对齐，分页条贴底（与 home 一致；禁止垂直居中）
+    table.insert(kids, TopContainer:new{
         dimen = Geom:new{ w = width, h = body_h },
         body or VerticalSpan:new{ width = body_h },
     })
