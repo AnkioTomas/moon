@@ -30,7 +30,7 @@ function Download.toFile(url, dest, opts)
     if opts.on_progress and socketutil.chainSinkWithProgressCallback then
         sink = socketutil.chainSinkWithProgressCallback(sink, opts.on_progress)
     end
-    local code, _, err = Request.send({
+    local code, _headers, err = Request.send({
         url = url,
         method = "GET",
         headers = Header.forDownload(opts.headers),
