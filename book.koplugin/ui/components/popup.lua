@@ -8,9 +8,10 @@
 items 统一形状：
   { text = "...", callback = fn }           -- 点按执行并关闭
   { text = "...", value = x }               -- 配合 on_select(value, item)
-  { text = "...", icon = "foo.svg" }        -- 左侧图标
-  { image = "https://...", value = x }      -- 文案替换为图（省略 text）
-  { image = "https://...", headers = {...} } -- 网络图额外请求头
+  { text = "...", icon = "foo.svg" }        -- 左侧/右侧小图标（正方形）
+  { text = "...", image = "https://..." }   -- 预览图（可非正方形，见 image_w/h）
+  { text = "...", widget = w, widget_w = n } -- 自定义 state 控件（字体预览等）
+  { image = "https://...", image_only = true } -- 文案替换为图
   { text = "...", enabled = false }         -- 不可点
   { text = "...", separator = true }        -- sheet 里作为分隔（空行）
 
@@ -41,9 +42,8 @@ local function normalizeItems(items, close_fn, on_select, opts)
         if raw.sub_item_table or raw.sub_item_table_func then
             table.insert(out, raw)
         else
-            -- image：可替换文案；icon：左侧小图标（无 text 时用 value 作文案）
+            -- image：可替换文案；icon：小图标；widget：自定义 state（如字体样张）
             local image_only = raw.image and (raw.text == nil or raw.text == false or raw.image_only)
-            local src = raw.image or raw.icon
             local item = {
                 text = image_only and "" or (raw.text or tostring(raw.value or "")),
                 select_enabled = raw.enabled ~= false,
@@ -63,17 +63,30 @@ local function normalizeItems(items, close_fn, on_select, opts)
                     end
                 end
             end
-            if src then
-                local sz = image_only and image_sz or icon_sz
-                local img = Image.widget{
-                    src = src,
-                    width = sz,
-                    height = sz,
-                    headers = raw.headers or opts.headers,
-                }
-                if img then
-                    item.state = img
-                    max_state_w = math.max(max_state_w, sz)
+            if raw.widget then
+                item.state = raw.widget
+                local ww = tonumber(raw.widget_w) or (raw.widget.getSize and raw.widget:getSize().w) or image_sz
+                max_state_w = math.max(max_state_w, ww)
+            else
+                local src = raw.image or raw.icon
+                if src then
+                    local iw = tonumber(raw.image_w) or (image_only and (opts.image_w or image_sz)) or icon_sz
+                    local ih = tonumber(raw.image_h) or (image_only and (opts.image_h or image_sz)) or icon_sz
+                    if not raw.image then
+                        iw, ih = icon_sz, icon_sz
+                    end
+                    local img = Image.widget{
+                        src = src,
+                        width = iw,
+                        height = ih,
+                        alpha = raw.alpha ~= false,
+                        headers = raw.headers or opts.headers,
+                        fallback = raw.fallback,
+                    }
+                    if img then
+                        item.state = img
+                        max_state_w = math.max(max_state_w, iw)
+                    end
                 end
             end
             table.insert(out, item)
