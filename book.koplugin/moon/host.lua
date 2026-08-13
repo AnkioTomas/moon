@@ -148,6 +148,9 @@ end
 
 --- 插件 init：挂钩菜单；FM 侧按 start_with 决定是否自动开桌面
 function Host.attach(plugin)
+    pcall(function()
+        require("moon.font").applyCurrent()
+    end)
     registerMenu(plugin)
     pinSettingsMenu()
     patchStartWithMenu()
