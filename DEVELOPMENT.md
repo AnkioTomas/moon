@@ -37,40 +37,45 @@ Book 是一个运行在 [KOReader](https://koreader.rocks/) Lua 环境中的插�
 ## 目录结构
 
 ```text
-moon/                           # 仓库根目录
+moon/                           # 仓库根目录（只版本控制插件本身）
 ├── book.koplugin/              # 插件目录（部署时整个复制到 KOReader plugins/）
 │   ├── _meta.lua / main.lua / bookversion.lua
 │   ├── stats_db.lua / stats_sync.lua
+│   ├── l10n.lua / l10n/        # 本地化
 │   │
 │   ├── ui/                     # 全部界面（勿与 KOReader 的 ui/* 模块同名冲突）
 │   │   ├── desktop.lua         # 桌面壳：动态底栏 + Tab
-│   │   ├── home.lua            # 首页
-│   │   ├── library.lua         # 图书馆
-│   │   ├── store.lua           # 书城
-│   │   ├── insight.lua         # 统计
-│   │   ├── detail.lua          # 书籍详情
 │   │   ├── readermenu.lua      # 阅读页悬浮面板
-│   │   ├── settings.lua        # 设置 Tab
-│   │   └── components/         # 可复用组件
-│   │       ├── bookui.lua      # 缩放 / 色阶 / iconDir / 网格度量
-│   │       └── cover.lua       # 封面缓存与缩略图
+│   │   ├── desktop/            # 桌面各 Tab / 详情页
+│   │   │   ├── home.lua / library.lua / store.lua
+│   │   │   ├── insight.lua / settings.lua / detail.lua
+│   │   ├── components/         # 可复用组件
+│   │   │   ├── bookui.lua      # 缩放 / 色阶 / iconDir / 网格度量
+│   │   │   ├── image.lua / popup.lua / bookinfo.lua
+│   │   │   ├── topbar.lua / bottombar.lua / settingrow.lua
+│   │   │   └── ...
+│   │   └── content/            # 内容相关（按需扩展）
 │   │
 │   ├── source/                 # 统一数据源
 │   │   ├── contract.lua / registry.lua
-│   │   ├── moon/{init.lua,api.lua}
-│   │   ├── webdav/ / wechat/ / legado/   # 空壳
+│   │   ├── moon.lua / moon/{api.lua,meta.lua}
+│   │   ├── webdav.lua / wechat.lua / legado.lua   # 空壳
 │   │
-│   ├── moon/settings.lua       # 配置持久化（非 UI）
+│   ├── moon/                   # 非 UI 运行时（settings / cache / paths / bus …）
+│   ├── types/                  # EmmyLua 类型注解
 │   └── icons/
 │
-├── koreader/                   # Git submodule（IDE 补全 + 本机模拟器）
+├── koreader/                   # 外部库（gitignore；不进仓库）
+│                               # 本机自行 clone，供 IDE 补全 + 模拟器
+├── run.sh                      # 确保软链接后启动 koreader 模拟器
 ├── README.md / DEVELOPMENT.md / LICENSE
-└── .gitmodules
+└── .luarc.json                 # Lua LS 工作区路径（指向本地 koreader/）
 ```
 
 **关键规则**：
 
-- UI 全部在 `ui/`；可复用组件只放 `ui/components/`
+- 仓库真相只有 `book.koplugin/`；`koreader/` 是外部宿主，改了也别提交
+- UI 全部在 `ui/`；桌面页在 `ui/desktop/`；可复用组件只放 `ui/components/`
 - UI 只依赖 `source` 契约；Book HTTP 仅 `source/moon/api.lua`
 - 插件 `require("ui.xxx")` 用点号；KOReader 内置仍用 `require("ui/uimanager")` 斜杠路径，互不抢名
 - 同时只激活一个数据源；书城 Tab 按 `capabilities.store` 动态出现
@@ -96,7 +101,7 @@ moon/                           # 仓库根目录
          ▼
 ┌──────────────────────────────────────────────────────────┐
 │  source.registry → 单活跃 Source                         │
-│  ├─ moon → source/moon/{init,api}.lua  ✅               │
+│  ├─ moon → source/moon.lua + moon/api.lua ✅            │
 │  ├─ webdav / wechat / legado           🚧 空壳           │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -131,7 +136,7 @@ moon/                           # 仓库根目录
 
 - `contract.lua`：能力位默认值、`normalizeBook`（补齐 id/title 等别名，保留原字段）
 - `registry.lua`：`list` / `create` / `getActive` / `setActive` / `invalidate`
-- 适配器方法：`listLibrary`、`listStore`、`recentBooks`、`filters`、`libraryStats`、`readingInsight`、`getProgress` / `updateProgress`、`downloadBook` / `downloadCover`、`ping`、`capabilities`
+- 适配器方法：`listLibrary`、`listStore`、`recentBooks`、`filters`、`libraryStats`、`readingInsight`、`getProgress` / `updateProgress`、`downloadBook` / `coverRequest`、`ping`、`capabilities`
 
 ### source/moon — Book HTTP + 适配器
 
@@ -162,7 +167,8 @@ local Api = require("source.moon.api")  -- 仅允许在 source/moon 内
 ### ui/components — 可复用组件
 
 - `bookui.lua`：缩放、色阶、`UI.iconDir()` / `UI.pluginRoot()`、网格度量、进度条
-- `cover.lua`：封面缓存 / 异步下载 / 缩略图（禁止原图进内存）
+- `image.lua`：icons / 网络图 / 封面（`fit=letterbox` + Flight 自更新；禁止原图整图进内存）
+- `bookinfo.lua`：书名字段、封面角标、英雄卡
 
 ### stats_db.lua + stats_sync.lua — 统计上报
 
@@ -183,9 +189,8 @@ local Api = require("source.moon.api")  -- 仅允许在 source/moon 内
   → Library.build(ctx)
   → ctx.source:listLibrary(opts)   ← moon → GET /index/book/list
   → 返回 JSON { data: [...], count: N }
-  → Library 渲染封面网格
-  → Cover.ensureAsync(source, ...) 异步下载缺失封面
-  → 下载完成 → Cover idle handler → 刷新当前页
+  → Library → BookInfo.cover → Image.widget{ src=coverUrl, fit=letterbox }
+  → 缺图时 Image 占位；Flight 下载完成后只刷新该格子
 ```
 
 ### 打开书籍
@@ -280,7 +285,7 @@ UIManager:nextTick(callback)              -- 下一帧执行
 
 ### 墨水屏适配要点
 
-1. **避免频繁刷新**：封面异步下载完成后合并刷新（`Cover.setIdleHandler` + 0.8s 去抖）
+1. **避免频繁刷新**：封面经 Image/Flight 单格子自更新，禁止整页 rebuild 刷封面
 2. **禁止大图进内存**：封面必须用 `RenderImage:renderImageFile(path, false, w, h)` 按目标尺寸解码
 3. **色阶有限**：只用黑、深灰 (0x33)、灰 (0x44)、中灰 (0x55)、浅灰 (0xCC)、白
 4. **所有尺寸走 `UI.sz()`**：保证不同 DPI 和用户字号偏好下的一致性
@@ -350,7 +355,7 @@ local UIManager = require("ui/uimanager")
 local Font = require("ui/font")
 
 -- 插件内部模块：点号路径
-local Cover = require("ui.components.cover")
+local Image = require("ui.components.image")
 local UI = require("ui.components.bookui")
 local Desktop = require("ui.desktop")
 local SourceRegistry = require("source.registry")
@@ -416,7 +421,7 @@ ImageWidget:new{
 1. **所有尺寸走 `UI.sz()`**，不要硬编码像素值
 2. **所有字号走 `UI.fontSize()` 或 `UI.face()`**
 3. **所有颜色走 `UI.ink()`、`UI.muted()` 等色阶函数**
-4. **封面渲染必须走 `Cover.widget()`**，禁止直接 `ImageWidget{file=, scale_factor=0}`
+4. **封面渲染必须走 `Image.widget{ fit="letterbox" }`（或 `BookInfo.cover`）**，禁止直接 `ImageWidget{file=, scale_factor=0}`
 5. **页面模块导出 `Module.build(ctx)` 函数**，返回 widget 树
 6. **配置读写一律走 `MoonSettings`**，不要直接操作 `G_reader_settings`（filemap/metamap 除外）
 
@@ -427,7 +432,7 @@ ImageWidget:new{
 ### 本地打包
 
 ```bash
-# 手动打 zip（不含 koreader 子模块、screenshots、.git 等）
+# 手动打 zip（只打 book.koplugin；koreader 本就不在仓库里）
 zip -r book.koplugin.zip book.koplugin \
     -x "*.DS_Store" -x "*/.DS_Store" -x "*~"
 ```
@@ -459,33 +464,31 @@ zip -r book.koplugin.zip book.koplugin \
 
 ## 开发环境搭建
 
-### 1. 克隆仓库
+### 1. 克隆仓库与外部库
 
 ```bash
-git clone --recurse-submodules https://github.com/AnkioTomas/moon.git
+git clone https://github.com/AnkioTomas/moon.git
 cd moon
+
+# KOReader 是外部库，不进本仓库；放在仓库根目录下的 koreader/
+git clone --recurse-submodules https://github.com/koreader/koreader.git koreader
 ```
 
-若已克隆但子模块为空：
+`koreader/` 用途（本地 external，已被 `.gitignore` 忽略）：
 
-```bash
-git submodule update --init --recursive
-```
-
-`koreader/` 子模块用途：
-
-- IDE 代码补全与跳转
+- IDE 代码补全与跳转（配合 `.luarc.json`）
 - 本机编译并运行 KOReader 模拟器（Mac / Linux）
 
 插件发布物仍只有 `book.koplugin/`，不会把 `koreader/` 打进包。
+在 `koreader/` 里怎么改都不会进入 moon 的 `git status`——那是它自己的仓库。
 
-网络不稳定时（尤其国内拉 GitHub），可临时开代理后再拉子模块：
+网络不稳定时（尤其国内拉 GitHub），可临时开代理后再 clone：
 
 ```bash
 export all_proxy=http://127.0.0.1:7890
 export http_proxy=http://127.0.0.1:7890
 export https_proxy=http://127.0.0.1:7890
-git submodule update --init --recursive
+git clone --recurse-submodules https://github.com/koreader/koreader.git koreader
 ```
 
 ### 2. IDE 配置
@@ -612,7 +615,7 @@ cat /mnt/onboard/.adds/koreader/crash.log
 5. **`os.rename` 跨设备**：部分设备 `/tmp` 和 SD 卡不在同一文件系统，`os.rename` 会失败，需要回退到读写复制
 6. **macOS `./kodev` 报 bash 版本过旧**：系统 `/bin/bash` 是 3.2，必须让 Homebrew `bash` 排在 `PATH` 前面
 7. **编译缺 `wget`**：第三方下载脚本硬依赖 `wget`，不是 `curl`；`brew install wget`
-8. **子模块拉到一半失败**：清掉残缺目录后带代理重试 `git submodule update --init --force -- <path>`
+8. **koreader clone 拉到一半失败**：删掉残缺的 `koreader/` 后带代理重试 `git clone --recurse-submodules ...`
 
 ---
 
