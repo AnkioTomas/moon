@@ -5,6 +5,9 @@ HTTP 请求原语（luasocket）
   Request.get(url, opts?) → body, err
   Request.post(url, body, opts?) → body, err
   Request.ok(code) → boolean
+  Request.clearCache(url_substr?) → 清 http.cache
+
+GET JSON 缓存见 http.cache（由 moon.api 等按 URL+TTL 写入）。
 
 @module koplugin.book.http.request
 --]]
@@ -15,10 +18,17 @@ local ltn12 = require("ltn12")
 local socket = require("socket")
 local socketutil = require("socketutil")
 local Header = require("http.header")
+local Cache = require("http.cache")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
 local Request = {}
+
+--- 清空 HTTP URL 缓存（强制刷新）
+---@param url_substr string|nil 只清包含该子串的键；nil=全部
+function Request.clearCache(url_substr)
+    Cache.clear(url_substr)
+end
 
 local function isTimeout(code)
     return code == socketutil.TIMEOUT_CODE
