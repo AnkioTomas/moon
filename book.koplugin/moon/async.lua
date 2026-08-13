@@ -1,17 +1,14 @@
---[[
-  Deferred background work for UI.
+--[[--
+UI 线程延迟任务（不用 fork：HTTPS/SSL 状态被子进程继承会挂死）。
 
-  KOReader fork-subprocess + HTTPS often hangs (SSL state inherited by child),
-  so the UI stuck on "loading" forever. We schedule work on the next UI tick:
-  1) caller paints loading / rebuilds
-  2) UIManager paints
-  3) task runs (may block briefly on network)
-  4) callback rebuilds with real data
+流程：先画 loading → 下一拍跑 task → cb 刷新。
+返回 cancel()。
 
-  Returns a cancel() function.
-]]
+@module koplugin.book.moon.async
+--]]
 
 local UIManager = require("ui/uimanager")
+local logger = require("logger")
 
 local Async = {
     _tickets = {},
@@ -25,12 +22,11 @@ local function release(ticket)
     Async._tickets[ticket] = nil
 end
 
---- Run task after the current UI frame; invoke cb(ok, result, err).
--- task may return (result, err). Returns cancel().
----@param task fun(): any, string|nil
----@param cb fun(ok: boolean, result: any, err: string|nil)
----@param opts MoonAsyncOpts|nil
----@return MoonAsyncCancel
+--- 当前帧结束后跑 task；cb(ok, result, err)
+-- @param task fun(): any, string|nil
+-- @param cb fun(ok: boolean, result: any, err: string|nil)
+-- @param opts MoonAsyncOpts|nil
+-- @return MoonAsyncCancel
 function Async.run(task, cb, opts)
     local ticket = {
         cancelled = false,
@@ -51,6 +47,7 @@ function Async.run(task, cb, opts)
             return
         end
         if not ok then
+            logger.dbg("book.async task boom", err)
             cb(false, nil, tostring(err))
             return
         end
@@ -75,18 +72,20 @@ function Async.run(task, cb, opts)
     return cancel
 end
 
----@param cancel_fn MoonAsyncCancel|nil
+--- 取消单个 ticket
 function Async.cancel(cancel_fn)
     if type(cancel_fn) == "function" then
         cancel_fn()
     end
 end
 
+--- 取消全部未完成任务
 function Async.cancelAll()
     local list = {}
     for ticket in pairs(Async._tickets) do
         list[#list + 1] = ticket
     end
+    logger.dbg("book.async cancelAll", #list)
     for i = 1, #list do
         local t = list[i]
         if t and t.cancel then
