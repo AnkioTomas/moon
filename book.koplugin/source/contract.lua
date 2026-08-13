@@ -1,5 +1,5 @@
 --[[--
-Source 契约（文档约定；Lua 无 interface）
+Source 契约（文档约定 + EmmyLua 类型）
 
 统一字段（适配器可在原字段旁补充别名，勿删服务端字段）：
   id, title, authors, cover_id, progress, finished, extra
@@ -14,6 +14,7 @@ Source 契约（文档约定；Lua 无 interface）
 
 local Contract = {}
 
+---@return BookCapabilities
 function Contract.defaultCapabilities()
     return {
         store = false,
@@ -26,6 +27,8 @@ function Contract.defaultCapabilities()
 end
 
 --- 在不破坏原字段的前提下补齐统一别名
+---@param book Book|table|nil
+---@return Book|table|nil
 function Contract.normalizeBook(book)
     if type(book) ~= "table" then
         return book
@@ -44,6 +47,8 @@ function Contract.normalizeBook(book)
     return book
 end
 
+---@param res BookListResult|table|nil
+---@return BookListResult|table|nil
 function Contract.normalizeList(res)
     if type(res) ~= "table" then
         return res

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime": {
+    "version": "LuaJIT",
+    "path": [
+      "book.koplugin/?.lua",
+      "book.koplugin/?/init.lua",
+      "koreader/frontend/?.lua",
+      "koreader/frontend/?/init.lua",
+      "koreader/base/?.lua",
+      "koreader/base/?/init.lua"
+    ]
+  },
+  "workspace": {
+    "library": [
+      "koreader/frontend",
+      "koreader/base",
+      "book.koplugin/types"
+    ],
+    "ignoreDir": [
+      ".git",
+      "screenshots",
+      "koreader/base/thirdparty",
+      "koreader/platform",
+      "koreader/test",
+      "koreader/spec",
+      "koreader/l10n",
+      "koreader/plugins/book.koplugin"
+    ],
+    "checkThirdParty": "Disable"
+  },
+  "diagnostics": {
+    "globals": [
+      "G_reader_settings",
+      "G_defaults"
+    ],
+    "disable": [
+      "lowercase-global",
+      "duplicate-set-field"
+    ]
+  },
+  "completion": {
+    "callSnippet": "Replace"
+  }
+}

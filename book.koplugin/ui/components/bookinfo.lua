@@ -24,25 +24,35 @@ local _ = require("gettext")
 
 local BookInfo = {}
 
+---@param book Book|table|nil
+---@return string|nil
 function BookInfo.file(book)
     if type(book) ~= "table" then return nil end
     return book.filename or book.fileName or book.file or book.path or book.name
 end
 
+---@param book Book|table|nil
+---@return string
 function BookInfo.title(book)
     return (book and (book.bookName or book.title)) or BookInfo.file(book) or "?"
 end
 
+---@param book Book|table|nil
+---@return string
 function BookInfo.author(book)
     if type(book) ~= "table" then return "" end
     return book.author or book.authors or ""
 end
 
+---@param book Book|table|nil
+---@return string
 function BookInfo.desc(book)
     if type(book) ~= "table" then return "" end
     return tostring(book.description or book.intro or book.summary or "")
 end
 
+---@param book Book|table|nil
+---@return number
 function BookInfo.pct(book)
     local p = book and book.progressPercent
     if type(p) == "string" then

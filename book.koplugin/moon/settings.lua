@@ -15,18 +15,20 @@ local M = {}
 local _common_ls = nil
 local _source_ls = {}
 
+---@return MoonCommonSettings
 local function commonDefaults()
     return {
         active_source = "moon",
         auto_sync = true,
         auto_stats = true,
-        open_on_start = true,
         home_header = "clock",
         ui_scale = 130,
         reader_float_menu = true,
     }
 end
 
+---@param id MoonSourceId|nil
+---@return MoonSourceConfig
 local function sourceDefaults(id)
     if id == "moon" then
         return { base_url = "", token = "" }
@@ -92,10 +94,12 @@ local function openSource(id)
 end
 
 --- 通用设置（与磁盘同一引用）；改完必须 save
+---@return MoonCommonSettings
 function M.get()
     return normalizeCommon(openCommon().data)
 end
 
+---@param s MoonCommonSettings|table|nil
 function M.save(s)
     local ls = openCommon()
     if type(s) == "table" and s ~= ls.data then
@@ -107,10 +111,14 @@ function M.save(s)
 end
 
 --- 数据源专用设置
+---@param id MoonSourceId|nil
+---@return MoonSourceConfig
 function M.getSource(id)
     return openSource(id or "moon").data
 end
 
+---@param id MoonSourceId|nil
+---@param s MoonSourceConfig|table|nil
 function M.saveSource(id, s)
     id = id or "moon"
     local ls = openSource(id)
@@ -124,6 +132,7 @@ function M.saveSource(id, s)
     ls:flush()
 end
 
+---@return MoonSourceId
 function M.activeSourceId()
     local c = M.get()
     return c.active_source or "moon"

@@ -64,7 +64,7 @@ function Pager.widget(page, pages, handlers)
         if handlers.on_last then handlers.on_last() end
     end)
     local info = Button:new{
-        text = T(_("Page %1 of %2"), page, pages),
+        text = handlers.info_text or T(_("Page %1 of %2"), page, pages),
         text_font_face = "xx_smallinfofont",
         text_font_size = UI.fontSize(16),
         text_font_bold = false,

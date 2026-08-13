@@ -27,6 +27,10 @@ end
 
 --- Run task after the current UI frame; invoke cb(ok, result, err).
 -- task may return (result, err). Returns cancel().
+---@param task fun(): any, string|nil
+---@param cb fun(ok: boolean, result: any, err: string|nil)
+---@param opts MoonAsyncOpts|nil
+---@return MoonAsyncCancel
 function Async.run(task, cb, opts)
     local ticket = {
         cancelled = false,
@@ -71,6 +75,7 @@ function Async.run(task, cb, opts)
     return cancel
 end
 
+---@param cancel_fn MoonAsyncCancel|nil
 function Async.cancel(cancel_fn)
     if type(cancel_fn) == "function" then
         cancel_fn()
