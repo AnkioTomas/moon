@@ -14,7 +14,16 @@ UI 线程 Promise（不用 fork：HTTPS/SSL 状态被子进程继承会挂死）
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
 
+---@class MoonPromiseOpts
+---@field delay number|nil 延迟启动秒数
+
+--- UI 线程 Promise 实例
 ---@class MoonPromise
+---@field new fun(self: MoonPromise, task: (fun(): any, any), opts: MoonPromiseOpts|nil): MoonPromise 创建；task 返回 result, err
+---@field next fun(self: MoonPromise, fn: fun(result: any)): MoonPromise 成功回调，返回 self
+---@field fail fun(self: MoonPromise, fn: fun(err: any)): MoonPromise 失败回调，返回 self
+---@field cancel fun(self: MoonPromise) 取消本实例
+---@field cancelAll fun() 取消全部未完成（模块函数 Promise.cancelAll）
 local Promise = {}
 Promise.__index = Promise
 
@@ -72,11 +81,6 @@ local function settle_fail(p, err)
         end
     end
 end
-
-
----@class MoonPromiseOpts
----@field delay number|nil 延迟启动秒数
-
 
 --- 构造并调度 task；opts.delay > 0 则延时，否则 nextTick。
 --- task 约定：`return result, err`；`err ~= nil` → fail，否则 next(result)。
