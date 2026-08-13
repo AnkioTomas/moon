@@ -17,6 +17,7 @@ KOReader 宿主钩子：启动项菜单 + 桌面接管。
 
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Host = {}
 
@@ -72,6 +73,7 @@ local function patchStartWithMenu()
     end
     FMMenu._book_startwith_patched = true
 
+    local book_label = _("Book 书库")
     local orig = FMMenu.getStartWithMenuTable
     FMMenu.getStartWithMenuTable = function(self)
         local item = orig(self)
@@ -85,13 +87,23 @@ local function patchStartWithMenu()
         end
         table.insert(item.sub_item_table, 1, {
             _book_item = true,
-            text = _("Book 书库"),
+            text = book_label,
             checked_func = isOpenOnStart,
             callback = function()
                 G_reader_settings:saveSetting("start_with", Host.OPEN_ON_START_ID)
             end,
             radio = true,
         })
+        -- 原 text_func 只扫系统 id；选 Book 时对不上 → 返回 nil
+        local orig_text_func = item.text_func
+        item.text_func = function()
+            if isOpenOnStart() then
+                return T(_("Start with: %1"), book_label)
+            end
+            if orig_text_func then
+                return orig_text_func()
+            end
+        end
         return item
     end
 end
