@@ -1,12 +1,17 @@
 ---@meta
 
---- 列表卡 / 封面格。id = stable_id；percent ∈ 0–100。
+--- 列表卡 / 封面格用的统一书籍对象。
+--- 由 `Contract.normalizeBook` 从各源 wire 产出；页面只读本结构。
+---
+--- 铁律：
+---   id = stable_id（缓存键、进度同步、打开书籍均用此身份）
+---   percent ∈ [0, 100] 整数；缺进度为 0，禁止伪造 1%
 ---@class Book
----@field id string
----@field title string|nil
----@field authors string|nil
----@field percent number
----@field category string|nil
----@field favorite any
----@field series string|nil
----@field cover string
+---@field id string 稳定书身份（stable_id）
+---@field title string|nil 书名
+---@field authors string|nil 作者（多作者由源侧拼接）
+---@field percent number 阅读进度 0–100
+---@field category string|nil 标签 / 分类文案（详情「标签」行）
+---@field favorite any 收藏 / 置顶标记（详情「分类」行；语义由源定义）
+---@field series string|nil 系列 / 书单名
+---@field cover string|nil 封面 URL（有则可供 coverRequest 缓存；无则按 id 回源）
