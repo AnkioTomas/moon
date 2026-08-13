@@ -26,9 +26,8 @@ local InfoMessage = require("ui/widget/infomessage")
 local NetworkMgr = require("ui/network/manager")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
-local Async = require("moon.async")
-local Flight = require("moon.flight")
-local MoonFont = require("moon.font")
+local Promise = require("utils.promise")
+local MoonFont = require("utils.font")
 local Popup = require("ui.components.popup")
 local UI = require("ui.components.bookui")
 local _ = require("gettext")
@@ -111,7 +110,6 @@ end
 local function downloadAndSave(opts, item)
     local id = item.id or ""
     local name = item.name or id
-    local key = "font:" .. tostring(id)
     local zip_max = tonumber(item.zip_size) or 0
     local size = formatZipMb(zip_max)
     local dialog
@@ -132,34 +130,36 @@ local function downloadAndSave(opts, item)
         })
     end
 
-    Flight.watch(key, function(result)
-        if dialog then
-            if result and result.ok and zip_max > 0 then
-                dialog:reportProgress(zip_max)
-            end
-            dialog:close()
-            dialog = nil
-        end
-        if type(result) ~= "table" or not result.ok then
-            UIManager:show(InfoMessage:new{
-                text = (result and result.err) or _("字体下载失败"),
-            })
-            return
-        end
-        saveSelection(opts, id, name)
-    end)
-
-    Flight.run(key, function()
+    Promise:new(function()
         local ok, err = MoonFont.ensureInstalled(item, function(bytes)
             if dialog and zip_max > 0 then
                 dialog:reportProgress(bytes)
             end
         end)
-        if ok then
-            return { ok = true }
+        if not ok then
+            return nil, err or _("字体下载失败")
         end
-        return { ok = false, err = err or _("字体下载失败") }
+        return true
     end)
+        :next(function()
+            if dialog then
+                if zip_max > 0 then
+                    dialog:reportProgress(zip_max)
+                end
+                dialog:close()
+                dialog = nil
+            end
+            saveSelection(opts, id, name)
+        end)
+        :fail(function(err)
+            if dialog then
+                dialog:close()
+                dialog = nil
+            end
+            UIManager:show(InfoMessage:new{
+                text = err or _("字体下载失败"),
+            })
+        end)
 end
 
 ---@param opts FontPickerOpts
@@ -237,7 +237,7 @@ function FontPicker.open(opts)
     opts = opts or {}
     local loading = InfoMessage:new{ text = _("正在加载字体列表…") }
     UIManager:show(loading)
-    Async.run(function()
+    Promise:new(function()
         local cached = MoonFont.list(false)
         local need_weread = (not MoonFont.hasWereadCache()) or wereadMissingPreview(cached)
         if need_weread and NetworkMgr:isOnline() then
@@ -247,14 +247,19 @@ function FontPicker.open(opts)
             end
         end
         return cached
-    end, function(ok, items)
-        UIManager:close(loading)
-        if not ok or not items then
-            UIManager:show(InfoMessage:new{ text = _("字体列表加载失败") })
-            return
-        end
-        showPicker(opts, items)
     end)
+        :next(function(items)
+            UIManager:close(loading)
+            if not items then
+                UIManager:show(InfoMessage:new{ text = _("字体列表加载失败") })
+                return
+            end
+            showPicker(opts, items)
+        end)
+        :fail(function()
+            UIManager:close(loading)
+            UIManager:show(InfoMessage:new{ text = _("字体列表加载失败") })
+        end)
 end
 
 return FontPicker
