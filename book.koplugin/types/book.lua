@@ -1,4 +1,5 @@
 ---@meta
+--- 仅 EmmyLua 类型注释，运行时不要 require。
 
 --- 列表卡 / 封面格用的统一书籍对象。
 --- 由 `Contract.normalizeBook` 从各源 wire 产出；页面只读本结构。

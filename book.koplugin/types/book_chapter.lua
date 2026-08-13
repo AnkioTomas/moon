@@ -1,4 +1,5 @@
 ---@meta
+--- 仅 EmmyLua 类型注释，运行时不要 require。
 
 --- 目录中的一章（capabilities.chapters）。
 --- idx 给按章打开 / 跳转；uid 给源侧拉正文（如微信 reader）。

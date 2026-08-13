@@ -1,4 +1,5 @@
 ---@meta
+--- 仅 EmmyLua 类型注释，运行时不要 require。
 
 --- 日历某一天的阅读摘要。
 ---@class StatsCalendarDay
