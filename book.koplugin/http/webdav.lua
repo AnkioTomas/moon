@@ -10,8 +10,6 @@ WebDAV 客户端（HTTP Basic）
   dav:mkdir(path)            → true, err      MKCOL
   dav:delete(path)           → true, err
 
-entry: { name, path, href, is_dir, size, mtime }
-
 @module koplugin.book.http.webdav
 --]]
 
@@ -24,6 +22,29 @@ local Header = require("http.header")
 local Request = require("http.request")
 local _ = require("gettext")
 local T = require("ffi/util").template
+
+--- PROPFIND 列表项
+---@class WebdavEntry
+---@field name string 显示名
+---@field path string 相对 base 的路径
+---@field href string 原始 href
+---@field is_dir boolean 是否目录
+---@field size number|nil 字节数
+---@field mtime string|nil Last-Modified 原文
+
+---@class WebdavClient
+---@field url string 根 URL（已去尾斜杠）
+---@field username string
+---@field password string
+---@field join fun(self: WebdavClient, path: string|nil, as_dir: boolean|nil): string 拼接 URL
+---@field send fun(self: WebdavClient, req: table, timeout: number|nil, block_timeout: number|nil): (any, table|nil, string|nil) 底层请求
+---@field ping fun(self: WebdavClient): (boolean|nil, string|nil) Depth:0 探测
+---@field list fun(self: WebdavClient, path: string|nil): (WebdavEntry[]|nil, string|nil) 列目录
+---@field get fun(self: WebdavClient, path: string, dest: string, opts: table|nil): (boolean|nil, string|nil) 下载到本地
+---@field put fun(self: WebdavClient, path: string, local_path: string, opts: table|nil): (boolean|nil, string|nil) 上传本地文件
+---@field putBody fun(self: WebdavClient, path: string, body: string, opts: table|nil): (boolean|nil, string|nil) 上传字符串
+---@field mkdir fun(self: WebdavClient, path: string): (boolean|nil, string|nil) MKCOL
+---@field delete fun(self: WebdavClient, path: string): (boolean|nil, string|nil) 删除
 
 local Webdav = {}
 Webdav.__index = Webdav
@@ -179,7 +200,7 @@ end
 
 --- 列出目录（PROPFIND Depth:1）
 ---@param path string|nil 相对 base 的路径
----@return table|nil entries, string|nil err
+---@return WebdavEntry[]|nil, string|nil
 function Webdav:list(path)
     path = trimSlashes(path or "")
     local url = self:join(path, true)
