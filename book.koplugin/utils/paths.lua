@@ -4,7 +4,9 @@ Moon 目录布局（$DATA/.moon）
   .moon/
     cache/
       <source>/
-        book/            书籍文件
+        meta/            书元数据（按 bookKey，非 .lua）
+        toc/             目录缓存（按 bookKey）
+        book/<bookKey>/  整本 book.epub 或章节 N.epub
         image/           网络图片 / 封面
     settings/
       common.lua
@@ -24,6 +26,8 @@ local P = {}
 
 local KIND_BOOK = "book"
 local KIND_IMAGE = "image"
+local KIND_META = "meta"
+local KIND_TOC = "toc"
 
 --- 递归创建目录（已存在则跳过）
 local function ensureDir(path)
@@ -86,6 +90,19 @@ function P.imageDir(id)
     return P.sourceCacheDir(id) .. "/" .. KIND_IMAGE
 end
 
+function P.metaDir(id)
+    return P.sourceCacheDir(id) .. "/" .. KIND_META
+end
+
+function P.tocDir(id)
+    return P.sourceCacheDir(id) .. "/" .. KIND_TOC
+end
+
+--- cache/<source>/book/<bookKey>/
+function P.bookWorkDir(book_key, id)
+    return P.bookDir(id) .. "/" .. tostring(book_key or "")
+end
+
 function P.settingsDir()
     return P.root() .. "/settings"
 end
@@ -124,7 +141,15 @@ function P.ensureLayout(id)
     ensureDir(P.sourceCacheDir(id))
     ensureDir(P.bookDir(id))
     ensureDir(P.imageDir(id))
+    ensureDir(P.metaDir(id))
+    ensureDir(P.tocDir(id))
     logger.dbg("book.paths ensureLayout", id)
+end
+
+--- 确保某书的工作目录存在
+function P.ensureBookWork(book_key, id)
+    P.ensureLayout(id)
+    ensureDir(P.bookWorkDir(book_key, id))
 end
 
 return P
