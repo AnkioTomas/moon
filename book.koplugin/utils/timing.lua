@@ -18,6 +18,10 @@
 
 local UIManager = require("ui/uimanager")
 
+--- Timing.debounce / throttle 返回值；可调用且可 :cancel()
+---@class MoonTimingHandle
+---@field cancel fun(self: MoonTimingHandle) 取消已调度任务
+
 local Timing = {}
 
 --- 防抖（trailing）：连续调用只保留最后一次，安静 wait 秒后执行。
@@ -119,7 +123,3 @@ function Timing.throttle(wait, fn)
 end
 
 return Timing
-
---- Timing.debounce / throttle 返回值；可调用且可 :cancel()
----@class MoonTimingHandle
----@field cancel fun(self: MoonTimingHandle) 取消已调度任务
