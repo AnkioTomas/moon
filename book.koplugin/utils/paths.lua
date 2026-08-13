@@ -2,10 +2,9 @@
 Moon 目录布局（$DATA/.moon）
 
   .moon/
+    book.sqlite3         结构化数据（books/tocs/opens/http）
     cache/
       <source>/
-        meta/            书元数据（按 bookKey，非 .lua）
-        toc/             目录缓存（按 bookKey）
         book/<bookKey>/  整本 book.epub 或章节 N.epub
         image/           网络图片 / 封面
     settings/
@@ -26,8 +25,6 @@ local P = {}
 
 local KIND_BOOK = "book"
 local KIND_IMAGE = "image"
-local KIND_META = "meta"
-local KIND_TOC = "toc"
 
 --- 递归创建目录（已存在则跳过）
 local function ensureDir(path)
@@ -69,53 +66,73 @@ function P.sanitizeSourceId(id)
 end
 
 --- $DATA/.moon
+---@return string
 function P.root()
     return DataStorage:getDataDir() .. "/.moon"
 end
 
+--- 缓存根：$DATA/.moon/cache
+---@return string
 function P.cacheDir()
     return P.root() .. "/cache"
 end
 
---- cache/<source>/
+--- 某源的缓存目录：cache/<source>/
+---@param id string|nil
+---@return string
 function P.sourceCacheDir(id)
     return P.cacheDir() .. "/" .. P.sanitizeSourceId(id)
 end
 
+--- 正文 epub 根目录：cache/<source>/book/
+---@param id string|nil
+---@return string
 function P.bookDir(id)
     return P.sourceCacheDir(id) .. "/" .. KIND_BOOK
 end
 
+--- 封面/网络图目录：cache/<source>/image/
+---@param id string|nil
+---@return string
 function P.imageDir(id)
     return P.sourceCacheDir(id) .. "/" .. KIND_IMAGE
 end
 
-function P.metaDir(id)
-    return P.sourceCacheDir(id) .. "/" .. KIND_META
-end
-
-function P.tocDir(id)
-    return P.sourceCacheDir(id) .. "/" .. KIND_TOC
-end
-
---- cache/<source>/book/<bookKey>/
+--- 单书工作目录：cache/<source>/book/<bookKey>/
+---@param book_key string|nil
+---@param id string|nil
+---@return string
 function P.bookWorkDir(book_key, id)
     return P.bookDir(id) .. "/" .. tostring(book_key or "")
 end
 
+--- 插件 SQLite 路径：$DATA/.moon/book.sqlite3
+---@return string
+function P.dbPath()
+    return P.root() .. "/book.sqlite3"
+end
+
+--- settings 目录
+---@return string
 function P.settingsDir()
     return P.root() .. "/settings"
 end
 
+--- UI 字体目录
+---@return string
 function P.fontsDir()
     return P.root() .. "/fonts"
 end
 
+--- 通用配置文件路径 common.lua
+---@return string
 function P.commonPath()
     return P.settingsDir() .. "/common.lua"
 end
 
---- settings/<id>.lua
+--- 源专用配置路径：settings/<id>.lua
+---@param id string|nil
+---@return string
 function P.sourcePath(id)
     id = tostring(id or "moon")
     return P.settingsDir() .. "/" .. id .. ".lua"
@@ -127,13 +144,14 @@ function P.ensureSettings()
     ensureDir(P.settingsDir())
 end
 
+--- 保证 fonts 目录存在
 function P.ensureFonts()
     ensureDir(P.root())
     ensureDir(P.fontsDir())
 end
 
---- 确保 .moon 与指定源（默认当前活跃源）的缓存目录存在
--- @param id string|nil
+--- 确保 .moon 与指定源（默认当前活跃源）的 cache/book/image 目录存在
+---@param id string|nil
 function P.ensureLayout(id)
     P.ensureSettings()
     ensureDir(P.cacheDir())
@@ -141,12 +159,12 @@ function P.ensureLayout(id)
     ensureDir(P.sourceCacheDir(id))
     ensureDir(P.bookDir(id))
     ensureDir(P.imageDir(id))
-    ensureDir(P.metaDir(id))
-    ensureDir(P.tocDir(id))
     logger.dbg("book.paths ensureLayout", id)
 end
 
---- 确保某书的工作目录存在
+--- 确保某书的工作目录存在：cache/<source>/book/<bookKey>/
+---@param book_key string
+---@param id string|nil
 function P.ensureBookWork(book_key, id)
     P.ensureLayout(id)
     ensureDir(P.bookWorkDir(book_key, id))
