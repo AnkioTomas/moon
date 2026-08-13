@@ -7,8 +7,12 @@
                               -- 下载完经 Flight 只刷新该占位组件
     headers = { Authorization = "Bearer …" },  -- 仅网络请求
     width = n, height = n,
-    alpha = true,
-    fallback = "…",   -- 未就绪/失败时显示文案；空/省略则空白占位
+    alpha = true,             -- 图标默认 true；封面用 false
+    fit = "fill",             -- "fill" | "letterbox"（封面：按框解码，禁止原图进内存）
+    border = false,           -- letterbox 封面边框
+    fallback = "…",           -- 未就绪/失败文案；空/省略则空白占位
+    show_parent = desk,       -- 窗口级父；嵌套 setDirty 必须靠它
+    on_ready = function(path) end,  -- 可选：下载并替换完成后
   }
 
   Image.ensureAsync(url, headers)
@@ -19,8 +23,12 @@
 下载直写磁盘，禁止整图进内存。单飞/waiter 见 moon.flight。
 --]]
 
+local Blitbuffer = require("ffi/blitbuffer")
+local CenterContainer = require("ui/widget/container/centercontainer")
+local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local ImageWidget = require("ui/widget/imagewidget")
+local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local Widget = require("ui/widget/widget")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
@@ -62,9 +70,9 @@ local function isHttp(src)
     return type(src) == "string" and (src:match("^https?://") ~= nil)
 end
 
-local function cacheBase(url)
-    Paths.ensureLayout()
-    return Paths.imageDir() .. "/" .. md5(url)
+local function cacheBase(url, source_id)
+    Paths.ensureLayout(source_id)
+    return Paths.imageDir(source_id) .. "/" .. md5(url)
 end
 
 local function mergeHeaders(extra)
@@ -83,7 +91,75 @@ local function mergeHeaders(extra)
     return headers
 end
 
-local function decodeFile(path, w, h, alpha)
+local function truncFallback(fb)
+    local label = fb or "?"
+    if type(label) ~= "string" then
+        label = tostring(label)
+    end
+    if #label > 24 then
+        label = label:sub(1, 24) .. "…"
+    end
+    return label
+end
+
+--- 空白或文案占位；border 时带边框（封面格子）
+local function placeholder(w, h, fb, border)
+    w = math.max(1, tonumber(w) or 1)
+    h = math.max(1, tonumber(h) or 1)
+    local child
+    if type(fb) == "string" and fb ~= "" then
+        child = TextWidget:new{
+            text = truncFallback(fb),
+            face = UI.face("xx_smallinfofont", 14),
+            max_width = math.max(8, w - UI.sz(8)),
+            fgcolor = UI.muted(),
+        }
+    else
+        child = Widget:new{ dimen = Geom:new{ w = w, h = h } }
+    end
+    local centered = CenterContainer:new{
+        dimen = Geom:new{ w = w, h = h },
+        child,
+    }
+    if not border then
+        return centered
+    end
+    local line = UI.line()
+    return FrameContainer:new{
+        bordersize = line,
+        color = UI.rule(),
+        padding = 0,
+        margin = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        dimen = Geom:new{ w = w, h = h },
+        centered,
+    }
+end
+
+--- 按目标框等比解码（letterbox）；禁止 ImageWidget{file=, scale_factor=0} 整图进内存
+local function decodeLetterbox(path, w, h, alpha)
+    local ok, img = pcall(function()
+        local RenderImage = require("ui/renderimage")
+        local bb = RenderImage:renderImageFile(path, false, w, h)
+        if not bb then
+            error("renderImageFile failed")
+        end
+        return ImageWidget:new{
+            image = bb,
+            image_disposable = true,
+            scale_factor = 1,
+            alpha = alpha and true or false,
+        }
+    end)
+    if ok and img then
+        logger.dbg("book image letterbox ok", path, w, h)
+        return img
+    end
+    logger.warn("book image letterbox failed", path, img)
+    return nil
+end
+
+local function decodeFill(path, w, h, alpha)
     local ok, img = pcall(function()
         return ImageWidget:new{
             file = path,
@@ -100,8 +176,41 @@ local function decodeFile(path, w, h, alpha)
     return nil
 end
 
+local function decodeFile(path, w, h, alpha, fit)
+    if fit == "letterbox" then
+        return decodeLetterbox(path, w, h, alpha)
+    end
+    return decodeFill(path, w, h, alpha)
+end
+
+local function wrapFrame(child, w, h, border)
+    if not child then
+        return nil
+    end
+    local centered = CenterContainer:new{
+        dimen = Geom:new{ w = w, h = h },
+        child,
+    }
+    if not border then
+        return centered
+    end
+    local line = UI.line()
+    return FrameContainer:new{
+        bordersize = line,
+        color = UI.rule(),
+        padding = 0,
+        margin = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        dimen = Geom:new{ w = w, h = h },
+        centered,
+    }
+end
+
 --- 已缓存的网络图路径；未命中返回 nil
 function Image.cachedPath(url)
+    if type(url) ~= "string" or url == "" then
+        return nil
+    end
     local base = cacheBase(url)
     for _, ext in ipairs(EXTS) do
         local path = base .. ext
@@ -244,33 +353,81 @@ function Image.abortPending()
     Flight.abortAll()
 end
 
---- 未缓存网络图：固定尺寸占位，下载完只替换自身。
-local function pendingBox(url, headers, w, h, alpha, fb)
-    logger.dbg("book image pending", url, w, h, fb)
-    local child
-    if type(fb) == "string" and fb ~= "" then
-        child = UI.text{ text = fb, size = 12 }
-    else
-        child = Widget:new{ dimen = Geom:new{ w = w, h = h } }
+--- 嵌套占位不是 window-level widget；必须脏 show_parent。
+--- WidgetContainer 不会把 dimen 写成屏幕绝对坐标，必须靠 paintTo 记下 _screen。
+local function requestPaint(box)
+    if not box then
+        return
     end
+    local host = box.show_parent
+    if not host then
+        host = UIManager:getTopmostVisibleWidget()
+    end
+    if not host then
+        host = "all"
+    end
+    local region = box._screen
+    if region then
+        UIManager:setDirty(host, function()
+            return "ui", box._screen
+        end)
+    else
+        -- 尚未 paint（同步缓存命中等）：只能脏整窗，禁止用相对 dimen 瞎刷
+        UIManager:setDirty(host, "ui")
+    end
+end
 
+local function present(path, w, h, alpha, fit, border, fb)
+    local inner_w, inner_h = w, h
+    if border then
+        local line = UI.line()
+        inner_w = math.max(1, w - line * 2)
+        inner_h = math.max(1, h - line * 2)
+    end
+    local img = path and decodeFile(path, inner_w, inner_h, alpha, fit)
+    if img then
+        return wrapFrame(img, w, h, border)
+    end
+    return placeholder(w, h, fb, border)
+end
+
+--- 未缓存网络图：固定尺寸占位，下载完只替换自身。
+local function pendingBox(url, headers, w, h, alpha, fit, border, fb, show_parent, on_ready)
+    logger.dbg("book image pending", url, w, h, fb)
     local box = WidgetContainer:new{
-        dimen = Geom:new{ w = w, h = h },
+        dimen = Geom:new{ x = 0, y = 0, w = w, h = h },
         align = "center",
-        child,
+        show_parent = show_parent,
+        placeholder(w, h, fb, border),
     }
+
+    -- 记录屏幕绝对位置；勿写回 dimen.x/y（WidgetContainer:paintTo 会再加一次）
+    function box:paintTo(bb, x, y)
+        self._screen = Geom:new{ x = x, y = y, w = self.dimen.w, h = self.dimen.h }
+        WidgetContainer.paintTo(self, bb, x, y)
+    end
 
     local unwatch = Flight.watch(url, function(path)
         logger.dbg("book image apply", url, path)
-        local img = decodeFile(path, w, h, alpha)
-        if not img then
+        local ok, next_w = pcall(present, path, w, h, alpha, fit, border, fb)
+        if not ok then
+            logger.warn("book image apply boom", url, next_w)
+            return
+        end
+        if not next_w then
             return
         end
         if box[1] and box[1].free then
             box[1]:free()
         end
-        box[1] = img
-        UIManager:setDirty(box, "ui")
+        box[1] = next_w
+        if not box.show_parent and show_parent then
+            box.show_parent = show_parent
+        end
+        requestPaint(box)
+        if type(on_ready) == "function" then
+            pcall(on_ready, path)
+        end
     end)
 
     function box:free(full)
@@ -286,43 +443,54 @@ local function pendingBox(url, headers, w, h, alpha, fb)
     return box
 end
 
---- 构建 ImageWidget；网络未缓存时返回自更新占位。
+--- 构建图片 widget；网络未缓存时返回自更新占位。
 -- @param opts table|nil
--- @param opts.src string|nil  icons/ 相对名或 http(s) URL
--- @param opts.headers table|nil  仅网络请求
--- @param opts.width number|nil  默认 UI.iconSz()
--- @param opts.height number|nil  默认与 width 相同
--- @param opts.alpha boolean|nil  默认 true
--- @param opts.fallback string|nil  未就绪文案；非空显示文案，空/省略则空白占位
+-- @param opts.src string|nil
+-- @param opts.headers table|nil
+-- @param opts.width number|nil
+-- @param opts.height number|nil
+-- @param opts.alpha boolean|nil
+-- @param opts.fit string|nil  "fill"|"letterbox"
+-- @param opts.border boolean|nil
+-- @param opts.fallback string|nil
+-- @param opts.show_parent widget|nil  窗口级父（Desktop/Dialog）；不传则用 topmost/"all"
+-- @param opts.on_ready fun(path: string)|nil  下载并替换完成后回调
 -- @return widget|nil
 function Image.widget(opts)
     opts = opts or {}
     local src = opts.src
     local headers = opts.headers
-    local w = opts.width or UI.iconSz()
-    local h = opts.height or w
+    local w = math.max(1, tonumber(opts.width) or UI.iconSz())
+    local h = math.max(1, tonumber(opts.height) or w)
     local alpha = opts.alpha
     if alpha == nil then
         alpha = true
     end
+    local fit = opts.fit or "fill"
+    local border = opts.border and true or false
     local fb = opts.fallback
+    local show_parent = opts.show_parent
+    local on_ready = opts.on_ready
 
     local path = Image.resolve(src)
     if path then
-        local img = decodeFile(path, w, h, alpha)
-        if img then
+        local ready = present(path, w, h, alpha, fit, border, fb)
+        if ready then
             logger.dbg("book image widget ready", src, path)
-            return img
+            if type(on_ready) == "function" then
+                -- 同步命中：下一拍回调，避免构建期重入
+                UIManager:nextTick(function()
+                    pcall(on_ready, path)
+                end)
+            end
+            return ready
         end
     end
     if isHttp(src) then
-        return pendingBox(src, headers, w, h, alpha, fb)
+        return pendingBox(src, headers, w, h, alpha, fit, border, fb, show_parent, on_ready)
     end
     logger.dbg("book image widget empty", src, fb)
-    if type(fb) == "string" and fb ~= "" then
-        return UI.text{ text = fb, size = 12 }
-    end
-    return nil
+    return placeholder(w, h, fb, border)
 end
 
 return Image
