@@ -14,6 +14,7 @@
 --]]
 
 local Async = require("moon.async")
+local logger = require("logger")
 
 local Flight = {
     _inflight = {},
@@ -43,6 +44,7 @@ function Flight.watch(key, fn)
         Flight._waiters[key] = q
     end
     q[#q + 1] = fn
+    logger.dbg("book.flight watch", key, #q)
     local alive = true
     return function()
         if not alive then
@@ -61,6 +63,7 @@ function Flight.watch(key, fn)
         if #cur == 0 then
             Flight._waiters[key] = nil
         end
+        logger.dbg("book.flight unwatch", key, cur and #cur or 0)
     end
 end
 
@@ -71,10 +74,15 @@ function Flight.resolve(key, result)
     local q = Flight._waiters[key]
     Flight._waiters[key] = nil
     if not q then
+        logger.dbg("book.flight resolve no waiter", key)
         return
     end
+    logger.dbg("book.flight resolve", key, #q)
     for i = 1, #q do
-        pcall(q[i], result)
+        local ok, err = pcall(q[i], result)
+        if not ok then
+            logger.warn("book.flight waiter boom", key, err)
+        end
     end
 end
 
@@ -86,9 +94,11 @@ function Flight.run(key, task)
         return
     end
     if Flight._inflight[key] then
+        logger.dbg("book.flight run coalesced", key)
         return
     end
     Flight._inflight[key] = true
+    logger.dbg("book.flight run", key)
 
     local async_cancel
     local function cancel()
@@ -97,12 +107,14 @@ function Flight.run(key, task)
         Async.cancel(async_cancel)
     end
 
-    async_cancel = Async.run(task, function(ok, result)
+    async_cancel = Async.run(task, function(ok, result, err)
         Flight._inflight[key] = nil
         dropCancel(cancel)
         -- 失败不 resolve：waiter 保留，可被下次 run 命中
         if ok and result ~= nil then
             Flight.resolve(key, result)
+        else
+            logger.dbg("book.flight run miss", key, ok, err)
         end
     end)
     Flight._cancels[#Flight._cancels + 1] = cancel
@@ -110,6 +122,8 @@ end
 
 --- 取消全部在飞任务并丢弃 waiters
 function Flight.abortAll()
+    local n = #Flight._cancels
+    logger.dbg("book.flight abortAll", n)
     local list = Flight._cancels
     Flight._cancels = {}
     Flight._inflight = {}
