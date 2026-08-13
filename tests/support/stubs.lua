@@ -3,6 +3,8 @@ KOReader 模块替身：让插件逻辑在裸 LuaJIT 下可 require。
 
 只 stub 测试真正碰到的模块；缺什么再补，别提前造整棵 UI 树。
 
+数据目录：datastorage 指向仓库根 `config` 软链（见 support.config）。
+
 @module tests.support.stubs
 --]]
 
@@ -81,11 +83,59 @@ local function installSocketutil()
     end
 end
 
+local function installJson()
+    -- Api/Auth 顶层 require("json")；离线测用不到真实编解码时顶个空壳即可
+    package.preload["json"] = function()
+        return {
+            encode = function(v)
+                error("json.encode not stubbed for this test: " .. type(v), 2)
+            end,
+            decode = function(v)
+                error("json.decode not stubbed for this test", 2)
+            end,
+        }
+    end
+end
+
+--- 把 DataStorage 指到仓库根 config/（模拟器数据目录）
+local function installDataStorage()
+    package.preload["datastorage"] = function()
+        local Config = require("support.config")
+        local dir = Config.dir()
+        local DS = {}
+        function DS:getDataDir()
+            return dir
+        end
+        function DS:getSettingsDir()
+            return dir .. "/settings"
+        end
+        function DS:getDocSettingsDir()
+            return dir .. "/docsettings"
+        end
+        function DS:getDocSettingsHashDir()
+            return dir .. "/hashdocsettings"
+        end
+        function DS:getHistoryDir()
+            return dir .. "/history"
+        end
+        function DS:getPatchesDir()
+            return dir .. "/patches"
+        end
+        return DS
+    end
+end
+
 function Stubs.install()
+    -- 先接线数据目录与 native 库，再装其它 stub
+    local Config = require("support.config")
+    Config.setupNativePath()
+    Config.installUtilStub()
     installUIManager()
     installLogger()
     installGettext()
     installSocketutil()
+    installJson()
+    installDataStorage()
     clearQueue()
 end
 
