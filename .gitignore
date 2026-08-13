@@ -1,3 +1,6 @@
 # IDE
 .idea/
 *.iml
+
+# KOReader 外部库（本机克隆，不纳入版本控制；内部一切更改一律忽略）
+/koreader/
