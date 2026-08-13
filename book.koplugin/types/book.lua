@@ -1,0 +1,12 @@
+---@meta
+
+--- 列表卡 / 封面格。id = stable_id；percent ∈ 0–100。
+---@class Book
+---@field id string
+---@field title string|nil
+---@field authors string|nil
+---@field percent number
+---@field category string|nil
+---@field favorite any
+---@field series string|nil
+---@field cover string
