@@ -1,26 +1,18 @@
 --[[--
-Book 桌面 UI 字体（微信读书字库）
+Book 插件 UI 字体
 
-  列表：https://weread.qq.com/feconfig/font/list?type=web_v2
-  文件：.moon/fonts/<id>.woff
-  缓存：.moon/fonts/list.json
-  配置：common.ui_font / ui_font_name
+职责拆开（不要混）：
+  set(id, name)       只写 common.ui_font / ui_font_name，绝不碰 Font.fontmap
+  applyCurrent()      唯一改 Font.fontmap 的入口；由 Desktop / Reader 在重建时调用
+  list / ensureInstalled / isInstalled  列表与下载
 
-只改插件 UI 字族（Font.fontmap 中 UI_FACES），不动阅读正文字体。
+字源：
+  id == ""                         系统默认（恢复首次备份的 fontmap）
+  .moon/fonts/<id>.woff 存在       微信读书已下载
+  FontList 里 basename == id       KOReader fonts/（及外部字库路径）
 
-公开 API：
-  list(force)                         字体列表（内存 + 磁盘缓存）
-  isInstalled(id)                     本地是否已有 .woff
-  currentId() / currentName()         当前配置
-  ensureInstalled(item, on_progress)  下载 zip → 解出 .woff
-  set(id, name)                       写配置并应用到 fontmap
-  applyCurrent()                      启动时按配置应用（缺文件回退默认）
-
-ensureInstalled / list 项（MoonFontItem）：
-  id        string     字体 id（作文件名；会 sanitize）
-  url       string     zip 下载地址（ensureInstalled 必填）
-  name      string     展示名（缺省用 id）
-  zip_size  number     压缩包字节数（0=未知；UI 进度条用）
+配置：common.ui_font / ui_font_name
+只改插件 UI 字族（UI_FACES），不动阅读正文字体。
 
 @module koplugin.book.moon.font
 --]]
@@ -41,7 +33,7 @@ local M = {}
 
 local LIST_URL = "https://weread.qq.com/feconfig/font/list?type=web_v2"
 
---- 插件 UI 字族键；等宽面（如 mono）不在此列，故意不动
+--- 插件 UI 字族键；等宽面故意不动
 local UI_FACES = {
     "cfont", "tfont", "smalltfont", "x_smalltfont",
     "ffont", "smallffont", "largeffont",
@@ -50,10 +42,17 @@ local UI_FACES = {
     "x_smallinfofont", "xx_smallinfofont",
 }
 
---- 首次 apply 前备份的系统 Font.fontmap 片段；用于 id="" 恢复默认
 local _defaults = nil
---- list() 内存缓存（与 list.json 同形：MoonFontItem[]）
-local _list_cache = nil
+local _weread_cache = nil
+
+---@class MoonFontItem
+---@field id string 写入 ui_font；空=系统默认
+---@field name string 展示名
+---@field kind string "local"|"weread"
+---@field url string|nil weread 下载地址
+---@field preview string|nil weread SVG 预览 URL
+---@field zip_size number|nil weread 压缩包字节
+---@field path string|nil local 绝对路径
 
 local function saveFontmapDefaults()
     if _defaults then
@@ -65,14 +64,11 @@ local function saveFontmapDefaults()
     end
 end
 
---- 去掉空白，非法字符改成 `_`，避免路径注入
 local function sanitizeId(id)
     return tostring(id or ""):gsub("%s+", ""):gsub("[^%w%._%-]", "_")
 end
 
----@param id string|nil
----@return string|nil 绝对路径；id 空则 nil
-local function localPath(id)
+local function wereadPath(id)
     id = sanitizeId(id)
     if id == "" then
         return nil
@@ -80,21 +76,16 @@ local function localPath(id)
     return Paths.fontsDir() .. "/" .. id .. ".woff"
 end
 
---- 本地是否已有对应 .woff
----@param id string|nil
----@return boolean
-function M.isInstalled(id)
-    local path = localPath(id)
-    return path and lfs.attributes(path, "mode") == "file"
+local function basename(path)
+    return (tostring(path or ""):match("([^/\\]+)$")) or tostring(path or "")
 end
 
---- 当前字体 id；空字符串 = 系统默认
+--- 当前配置 id；空=系统默认
 ---@return string
 function M.currentId()
     return tostring(MoonSettings.get().ui_font or "")
 end
 
---- 设置页展示名：优先 ui_font_name，否则 id，再否则「系统默认」
 ---@return string
 function M.currentName()
     local s = MoonSettings.get()
@@ -105,30 +96,83 @@ function M.currentName()
     return id ~= "" and id or _("系统默认")
 end
 
+--- 本地是否可用：local 恒 true；weread 看 .woff
+---@param id_or_item string|MoonFontItem|nil
+---@return boolean
+function M.isInstalled(id_or_item)
+    if type(id_or_item) == "table" then
+        if id_or_item.kind == "local" then
+            return true
+        end
+        id_or_item = id_or_item.id
+    end
+    local path = wereadPath(id_or_item)
+    return path ~= nil and lfs.attributes(path, "mode") == "file"
+end
+
+--- 是否已有 weread 磁盘列表缓存（不影响 local）
+---@return boolean
+function M.hasWereadCache()
+    if _weread_cache then
+        return true
+    end
+    local f = io.open(Paths.fontsDir() .. "/list.json", "r")
+    if not f then
+        return false
+    end
+    f:close()
+    return true
+end
+
+--- KOReader FontList（fonts/ + 外部目录）→ MoonFontItem[]
+---@return MoonFontItem[]
+local function listLocal()
+    local out = {}
+    local seen = {}
+    FontList:getFontList()
+    for _, path in ipairs(FontList.fontlist or {}) do
+        local base = basename(path)
+        if base ~= "" and not seen[base] then
+            -- 跳过已登记的微信读书 .woff（走 weread 项）
+            if not base:lower():match("%.woff2?$") then
+                seen[base] = true
+                local name = base:gsub("%.[^%.]+$", "")
+                table.insert(out, {
+                    id = base,
+                    name = name,
+                    kind = "local",
+                    path = path,
+                    zip_size = 0,
+                })
+            end
+        end
+    end
+    table.sort(out, function(a, b)
+        return (a.name or "") < (b.name or "")
+    end)
+    return out
+end
+
 local function listCachePath()
     return Paths.fontsDir() .. "/list.json"
 end
 
----@class MoonFontItem
----@field id string
----@field name string
----@field url string
----@field zip_size number
-
---- 兼容 API 原始字段（font/fontName/zipSize）与已规范化缓存
 ---@param raw_items table|nil
 ---@return MoonFontItem[]
-local function normalizeItems(raw_items)
+local function normalizeWeread(raw_items)
     local out = {}
     for _, it in ipairs(raw_items or {}) do
         if type(it) == "table" then
             local id = it.id or it.font
             local url = it.url
             if id and url then
+                local preview = it.preview or it.previewImageUrl or it.preview_image_url
                 table.insert(out, {
                     id = tostring(id),
                     name = tostring(it.name or it.fontName or id),
+                    kind = "weread",
                     url = tostring(url),
+                    preview = preview and tostring(preview) or nil,
                     zip_size = tonumber(it.zip_size or it.zipSize) or 0,
                 })
             end
@@ -141,7 +185,7 @@ local function normalizeItems(raw_items)
 end
 
 ---@return MoonFontItem[]|nil
-local function readListCache()
+local function readWereadCache()
     local f = io.open(listCachePath(), "r")
     if not f then
         return nil
@@ -153,13 +197,13 @@ local function readListCache()
     end
     local ok, data = pcall(JSON.decode, raw)
     if ok and type(data) == "table" and type(data.items) == "table" then
-        return normalizeItems(data.items)
+        return normalizeWeread(data.items)
     end
     return nil
 end
 
 ---@param items MoonFontItem[]
-local function writeListCache(items)
+local function writeWereadCache(items)
     Paths.ensureFonts()
     local f = io.open(listCachePath(), "w")
     if not f then
@@ -172,20 +216,17 @@ local function writeListCache(items)
     f:close()
 end
 
---- 拉取字体列表
----
---- force=false / nil：只读内存 → 磁盘；都没有则 nil, err（不联网）
---- force=true：联网刷新并写缓存；失败时若有磁盘缓存则降级返回缓存
+--- 仅微信读书列表（不含 local）
 ---@param force boolean|nil
 ---@return MoonFontItem[]|nil, string|nil
-function M.list(force)
-    if not force and _list_cache then
-        return _list_cache
+local function listWeread(force)
+    if not force and _weread_cache then
+        return _weread_cache
     end
-    local disk = readListCache()
+    local disk = readWereadCache()
     if not force then
         if disk then
-            _list_cache = disk
+            _weread_cache = disk
             return disk
         end
         return nil, _("无本地字体列表缓存")
@@ -193,7 +234,7 @@ function M.list(force)
     local raw, err = Request.get(LIST_URL, { accept = "application/json" })
     if not raw then
         if disk then
-            _list_cache = disk
+            _weread_cache = disk
             return disk
         end
         return nil, err
@@ -202,13 +243,25 @@ function M.list(force)
     if not ok or type(data) ~= "table" or type(data.items) ~= "table" then
         return nil, _("字体列表解析失败")
     end
-    _list_cache = normalizeItems(data.items)
-    writeListCache(_list_cache)
-    return _list_cache
+    _weread_cache = normalizeWeread(data.items)
+    writeWereadCache(_weread_cache)
+    return _weread_cache
 end
 
---- 把 .woff 插到 FontList 最前，供 Font 解析 basename
----@param path string
+--- 合并列表：local 在前，weread 在后。永远返回 table（至少含 local）。
+---@param force boolean|nil force=true 时联网刷新 weread
+---@return MoonFontItem[], string|nil weread 错误（有 local 仍成功）
+function M.list(force)
+    local out = listLocal()
+    local weread, err = listWeread(force)
+    if weread then
+        for _, it in ipairs(weread) do
+            table.insert(out, it)
+        end
+    end
+    return out, err
+end
+
 local function registerFontPath(path)
     FontList:getFontList()
     for _, p in ipairs(FontList.fontlist) do
@@ -219,8 +272,30 @@ local function registerFontPath(path)
     table.insert(FontList.fontlist, 1, path)
 end
 
---- 改 UI_FACES 对应 Font.fontmap；清空 Font.faces 强制重建
----@param id string|nil 空=恢复首次备份的默认
+--- 解析 id → fontmap 用的 basename；失败返回 nil, err
+---@param id string|nil
+---@return string|nil, string|nil
+local function resolveBasename(id)
+    id = sanitizeId(id or "")
+    if id == "" then
+        return ""
+    end
+    local woff = wereadPath(id)
+    if woff and lfs.attributes(woff, "mode") == "file" then
+        registerFontPath(woff)
+        return basename(woff)
+    end
+    FontList:getFontList()
+    for _, path in ipairs(FontList.fontlist or {}) do
+        if basename(path) == id then
+            return id
+        end
+    end
+    return nil, _("字体文件不存在")
+end
+
+--- 改 UI_FACES 的 Font.fontmap；清空 Font.faces。id 空=恢复默认。
+---@param id string|nil
 ---@return boolean|nil, string|nil
 local function apply(id)
     saveFontmapDefaults()
@@ -233,42 +308,50 @@ local function apply(id)
         logger.dbg("book.font apply default")
         return true
     end
-    local path = localPath(id)
-    if not path or lfs.attributes(path, "mode") ~= "file" then
-        return nil, _("字体文件不存在，请先下载")
+    local base, err = resolveBasename(id)
+    if not base then
+        return nil, err
     end
-    registerFontPath(path)
-    local basename = path:match("([^/]+)$") or path
     for _, key in ipairs(UI_FACES) do
-        Font.fontmap[key] = basename
+        Font.fontmap[key] = base
     end
     Font.faces = {}
-    logger.info("book.font apply", id, basename)
+    logger.info("book.font apply", id, base)
     return true
 end
 
---- 按 common.ui_font 应用；已配置但文件缺失则回退系统默认（不改写配置）
+--- 按配置打 fontmap。缺文件则回退系统默认（不改写配置）。
+--- 调用方：Desktop:rebuild / ReaderFloatMenu:rebuild / Host.attach
 ---@return boolean|nil, string|nil
 function M.applyCurrent()
     local id = M.currentId()
-    if id ~= "" and not M.isInstalled(id) then
-        logger.warn("book.font missing file, fallback default", id)
-        id = ""
+    if id ~= "" then
+        local base = resolveBasename(id)
+        if not base then
+            logger.warn("book.font missing, fallback default", id)
+            id = ""
+        end
     end
     return apply(id)
 end
 
---- 确保本地有 .woff：已存在直接 true；否则下载 zip，取包内首个 .woff/.woff2 写到 dest
----@param item MoonFontItem 必填 id、url；name / zip_size 可选
----@param on_progress fun(bytes: number)|nil 已下载字节回调（交给 Download.toFile）
+--- 下载 weread zip → .moon/fonts/<id>.woff。local 项直接 true。
+---@param item MoonFontItem
+---@param on_progress fun(bytes: number)|nil
 ---@return boolean|nil, string|nil
 function M.ensureInstalled(item, on_progress)
-    if type(item) ~= "table" or not item.id or not item.url then
+    if type(item) ~= "table" or not item.id then
+        return nil, _("无效字体项")
+    end
+    if item.kind == "local" then
+        return true
+    end
+    if not item.url then
         return nil, _("无效字体项")
     end
     local id = sanitizeId(item.id)
     Paths.ensureFonts()
-    local dest = localPath(id)
+    local dest = wereadPath(id)
     if dest and lfs.attributes(dest, "mode") == "file" then
         return true
     end
@@ -310,17 +393,18 @@ function M.ensureInstalled(item, on_progress)
     return true
 end
 
---- 写入 ui_font / ui_font_name 并 apply
----@param id string|nil 空=系统默认（同时清空 ui_font_name）
----@param name string|nil 展示名；仅 id 非空时写入
----@return boolean|nil, string|nil
+--- 只写配置，不 apply。真正生效等 Desktop/Reader rebuild → applyCurrent。
+---@param id string|nil 空=系统默认
+---@param name string|nil
+---@return boolean
 function M.set(id, name)
     id = sanitizeId(id or "")
     local s = MoonSettings.get()
     s.ui_font = id
     s.ui_font_name = (id ~= "" and name) and tostring(name) or ""
     MoonSettings.save(s)
-    return apply(id)
+    logger.info("book.font set", id, s.ui_font_name)
+    return true
 end
 
 return M
