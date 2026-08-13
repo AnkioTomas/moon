@@ -18,13 +18,13 @@ local logger = require("logger")
 local _ = require("gettext")
 local Screen = Device.screen
 
-local Home = require("ui.home")
-local Library = require("ui.library")
-local Store = require("ui.store")
-local Insight = require("ui.insight")
-local Settings = require("ui.settings")
-local Detail = require("ui.detail")
-local Cover = require("ui.components.cover")
+local Home = require("ui.desktop.home")
+local Library = require("ui.desktop.library")
+local Store = require("ui.desktop.store")
+local Insight = require("ui.desktop.insight")
+local Settings = require("ui.desktop.settings")
+local Detail = require("ui.desktop.detail")
+local Image = require("ui.components.image")
 local TopBar = require("ui.components.topbar")
 local BottomBar = require("ui.components.bottombar")
 local UI = require("ui.components.bookui")
@@ -39,17 +39,7 @@ local Desktop = InputContainer:extend{
     filter = nil,
 }
 
---- 防抖 rebuild；Cover idle / 各 Tab 局部刷新共用
-local function deferredRebuild(self, flag, tab, delay)
-    if self._closed or self.tab ~= tab or self[flag] then return end
-    self[flag] = true
-    UIManager:scheduleIn(delay, function()
-        self[flag] = false
-        if self._closed or self.tab ~= tab then return end
-        self:rebuild()
-    end)
-end
-
+--- 初始化手势区与默认分页状态，立刻 rebuild
 function Desktop:init()
     self.filter = self.filter or {}
     self._tabs = BottomBar.tabs(self.source)
@@ -100,23 +90,6 @@ function Desktop:init()
         },
     }
     self:rebuild()
-    local desk = self
-    Cover.setIdleHandler(function()
-        if desk._closed then return end
-        if desk.detail and not desk.detail._closed and desk.detail.rebuild then
-            desk.detail:rebuild()
-            UIManager:setDirty(desk.detail, "ui")
-        end
-        if desk.tab == "home" then
-            deferredRebuild(desk, "_home_refresh_pending", "home", 0.5)
-        elseif desk.tab == "library" then
-            deferredRebuild(desk, "_library_refresh_pending", "library", 0.6)
-        elseif desk.tab == "store" then
-            deferredRebuild(desk, "_store_refresh_pending", "store", 0.6)
-        elseif desk.tab == "stats" then
-            deferredRebuild(desk, "_insight_refresh_pending", "stats", 0.5)
-        end
-    end)
     UIManager:nextTick(function()
         if not self._closed then
             self:scheduleClockTick()
@@ -124,6 +97,7 @@ function Desktop:init()
     end)
 end
 
+--- 内容区高度（扣除顶栏 + 底栏）
 function Desktop:contentHeight()
     return math.max(1, Screen:getHeight() - UI.barH() - UI.topBarH())
 end
@@ -139,6 +113,7 @@ function Desktop:getSize()
     return self.dimen
 end
 
+--- 传给各 Tab 的上下文：plugin / source / desktop / filter
 function Desktop:ctx()
     return {
         width = self.dimen.w,
@@ -185,6 +160,7 @@ function Desktop:onSwipe(_, ges_ev)
 end
 
 function Desktop:switchTab(id)
+    logger.dbg("book.desktop switchTab", self.tab, "->", id)
     if id == "library" and self.tab ~= "library" then
         self._library_state = nil
         self.page = self.page or 1
@@ -209,7 +185,12 @@ function Desktop:switchTab(id)
     self:rebuild()
 end
 
+--- 重建顶栏 + 内容 + 底栏
 function Desktop:rebuild()
+    logger.dbg("book.desktop rebuild", self.tab)
+    pcall(function()
+        require("moon.font").applyCurrent()
+    end)
     local ok, err = pcall(function()
         local sw = Screen:getWidth()
         local sh = Screen:getHeight()
@@ -308,7 +289,9 @@ function Desktop:scheduleClockTick()
     UIManager:scheduleIn(delay, self._clock_tick)
 end
 
+--- 打开书籍详情浮层
 function Desktop:showDetail(book)
+    logger.dbg("book.desktop showDetail", book and (book.id or book.title))
     if self.detail then
         UIManager:close(self.detail)
         self.detail = nil
@@ -332,7 +315,9 @@ function Desktop:showDetail(book)
     UIManager:setDirty(self.detail, "full")
 end
 
+--- 关闭桌面：取消在飞请求、中止图片下载、回 FM
 function Desktop:onClose()
+    logger.info("book.desktop close")
     self._closed = true
     if self._clock_tick then
         UIManager:unschedule(self._clock_tick)
@@ -344,9 +329,11 @@ function Desktop:onClose()
         "_store_fetch_cancel",
         "_insight_fetch_cancel",
     }) do
-        local cancel = self[key]
-        if type(cancel) == "function" then
-            pcall(cancel)
+        local job = self[key]
+        if type(job) == "table" and type(job.cancel) == "function" then
+            pcall(function() job:cancel() end)
+        elseif type(job) == "function" then
+            pcall(job)
         end
         self[key] = nil
     end
@@ -354,8 +341,9 @@ function Desktop:onClose()
     self._library_refresh_pending = false
     self._insight_refresh_pending = false
     self._store_refresh_pending = false
+    self._settings_refresh_pending = false
     self.ges_events = nil
-    Cover.stopAll()
+    Image.abortPending()
     if self.detail then
         pcall(function()
             self.detail._closed = true
@@ -394,7 +382,7 @@ function Desktop:onCloseWidget()
         self._clock_tick = nil
     end
     self.ges_events = nil
-    Cover.stopAll()
+    Image.abortPending()
 end
 
 return Desktop
