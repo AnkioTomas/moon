@@ -69,7 +69,7 @@ local function requestBody(method, url, body, opts)
         end
         source = ltn12.source.string(body)
     end
-    local code, _, err = Request.send({
+    local code, _headers, err = Request.send({
         url = url,
         method = method,
         headers = headers,
