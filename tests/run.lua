@@ -1,10 +1,13 @@
 --[[--
 零依赖测试运行器（LuaJIT）。
 
-  luajit tests/run.lua
-  luajit tests/run.lua tests/contract_spec.lua
+  ./tests/run.sh
+  ./tests/run.sh tests/contract_spec.lua
 
 不启 KOReader；需要宿主模块的用例靠 tests/support/stubs.lua 顶替。
+
+真配置：仓库根 `config` 软链；DataStorage → config/；
+读配置用 moon.settings（见 tests/support/config.lua），不要 loadfile。
 
 @module tests.run
 --]]
@@ -18,6 +21,8 @@ if ROOT:match("/tests$") or ROOT == "tests" then
     end
 end
 
+_G.BOOK_TEST_ROOT = ROOT
+
 package.path = table.concat({
     ROOT .. "/book.koplugin/?.lua",
     ROOT .. "/book.koplugin/?/init.lua",
@@ -26,7 +31,7 @@ package.path = table.concat({
     package.path,
 }, ";")
 
--- 若本机有 koreader 树，挂上（protocol 等可能用到 ffi/sha2）
+-- 若本机有 koreader 树，挂上 frontend + base（ffi/sha2 等）
 local ko = ROOT .. "/koreader"
 local f = io.open(ko .. "/frontend/ui/uimanager.lua", "r")
 if f then
@@ -34,6 +39,8 @@ if f then
     package.path = table.concat({
         ko .. "/frontend/?.lua",
         ko .. "/frontend/?/init.lua",
+        ko .. "/base/?.lua",
+        ko .. "/base/?/init.lua",
         package.path,
     }, ";")
 end
