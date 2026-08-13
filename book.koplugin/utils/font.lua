@@ -25,8 +25,8 @@ local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local Request = require("http.request")
 local Download = require("http.download")
-local Paths = require("moon.paths")
-local MoonSettings = require("moon.settings")
+local Paths = require("utils.paths")
+local MoonSettings = require("utils.settings")
 local _ = require("gettext")
 
 local M = {}
@@ -45,6 +45,7 @@ local UI_FACES = {
 local _defaults = nil
 local _weread_cache = nil
 
+--- 字体选择项（本地 FontList / 微信读书列表）
 ---@class MoonFontItem
 ---@field id string 写入 ui_font；空=系统默认
 ---@field name string 展示名
