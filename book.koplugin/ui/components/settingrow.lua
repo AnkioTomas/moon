@@ -25,9 +25,9 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local RightContainer = require("ui/widget/container/rightcontainer")
-local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
 local Image = require("ui.components.image")
 
@@ -67,9 +67,16 @@ function SettingRow.build(width, opts)
     local icon_col = icon_sz + UI.sz(4)
     local icon_gap = UI.sz(10)
     local chev_w = show_chevron and UI.sz(16) or 0
-    local status_w = opts.status and UI.sz(48) or 0
+    local chev_gap = (show_chevron and opts.status) and UI.sz(2) or 0
     local inner_w = math.max(1, width - pad_x * 2)
-    local text_w = math.max(UI.sz(40), inner_w - icon_col - icon_gap - status_w - chev_w)
+    -- 状态至少占内容宽 40%，标题侧至少留 UI.sz(40)
+    local status_w = 0
+    if opts.status then
+        local reserved = icon_col + icon_gap + chev_w + chev_gap + UI.sz(40)
+        status_w = math.max(UI.sz(48), math.floor(inner_w * 0.40))
+        status_w = math.min(status_w, math.max(UI.sz(48), inner_w - reserved))
+    end
+    local text_w = math.max(UI.sz(40), inner_w - icon_col - icon_gap - status_w - chev_gap - chev_w)
 
     local title = TextWidget:new{
         text = opts.title,
@@ -99,7 +106,7 @@ function SettingRow.build(width, opts)
     end
     if show_chevron then
         if opts.status then
-            table.insert(right, HorizontalSpan:new{ width = UI.sz(2) })
+            table.insert(right, HorizontalSpan:new{ width = chev_gap })
         end
         table.insert(right, TextWidget:new{
             text = "›",
@@ -108,7 +115,7 @@ function SettingRow.build(width, opts)
         })
     end
 
-    local right_w = status_w + chev_w
+    local right_w = status_w + chev_gap + chev_w
     local inner = HorizontalGroup:new{
         align = "center",
         CenterContainer:new{
