@@ -1,4 +1,5 @@
 ---@meta
+--- 仅 EmmyLua 类型注释，运行时不要 require。
 
 --- 单本远端阅读进度（拉取结果）。
 --- percent 一律 0–100；`updateProgress` 入参仍用 frac∈[0,1]。

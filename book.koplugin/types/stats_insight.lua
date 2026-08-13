@@ -1,4 +1,5 @@
 ---@meta
+--- 仅 EmmyLua 类型注释，运行时不要 require。
 
 --- 阅读洞察整页数据（总览 KPI + 日历）。
 --- 由 `Contract.normalizeInsight` 从 moon wire 产出。
