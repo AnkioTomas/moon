@@ -28,18 +28,16 @@ local CenterContainer = require("ui/widget/container/centercontainer")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local ImageWidget = require("ui/widget/imagewidget")
-local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local Widget = require("ui/widget/widget")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
-local http = require("socket.http")
-pcall(require, "ssl.https")
+local TextWidget = require("ui/widget/textwidget")
 local ltn12 = require("ltn12")
-local socket = require("socket")
-local socketutil = require("socketutil")
 local md5 = require("ffi/sha2").md5
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
+local Header = require("http.header")
+local Request = require("http.request")
 local UI = require("ui.components.bookui")
 local Paths = require("moon.paths")
 local Flight = require("moon.flight")
@@ -73,22 +71,6 @@ end
 local function cacheBase(url, source_id)
     Paths.ensureLayout(source_id)
     return Paths.imageDir(source_id) .. "/" .. md5(url)
-end
-
-local function mergeHeaders(extra)
-    local headers = {
-        ["Accept"] = "*/*",
-        ["User-Agent"] = socketutil.USER_AGENT,
-        ["Connection"] = "close",
-    }
-    if type(extra) == "table" then
-        for k, v in pairs(extra) do
-            if v ~= nil then
-                headers[k] = v
-            end
-        end
-    end
-    return headers
 end
 
 local function truncFallback(fb)
@@ -237,30 +219,18 @@ local function download(url, headers)
     if not file then
         return nil, err or "write failed"
     end
-    local code
-    socketutil:set_timeout(10, 30)
-    local ok_req, req_err = pcall(function()
-        code = socket.skip(1, http.request({
-            url = url,
-            method = "GET",
-            headers = mergeHeaders(headers),
-            sink = ltn12.sink.file(file),
-        }))
-    end)
-    socketutil:reset_timeout()
-    if not ok_req then
+    local code, _, req_err = Request.send({
+        url = url,
+        method = "GET",
+        headers = Header.forDownload(headers),
+        sink = ltn12.sink.file(file),
+    })
+    if req_err then
         pcall(function() file:close() end)
         pcall(os.remove, tmp)
-        return nil, tostring(req_err)
+        return nil, req_err
     end
-    if code == socketutil.TIMEOUT_CODE
-        or code == socketutil.SSL_HANDSHAKE_CODE
-        or code == socketutil.SINK_TIMEOUT_CODE then
-        pcall(os.remove, tmp)
-        return nil, "timeout"
-    end
-    local status = tonumber(code)
-    if not status or status < 200 or status >= 300 then
+    if not Request.ok(code) then
         pcall(os.remove, tmp)
         return nil, "http " .. tostring(code)
     end
@@ -368,11 +338,13 @@ local function requestPaint(box)
     end
     local region = box._screen
     if region then
+        logger.dbg("book image paint region", region.x, region.y, region.w, region.h)
         UIManager:setDirty(host, function()
             return "ui", box._screen
         end)
     else
         -- 尚未 paint（同步缓存命中等）：只能脏整窗，禁止用相对 dimen 瞎刷
+        logger.dbg("book image paint full host")
         UIManager:setDirty(host, "ui")
     end
 end
