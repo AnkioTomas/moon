@@ -73,8 +73,9 @@ local function wrapXhtml(title, body)
 <title>%s</title>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
 <style type="text/css">
-body{margin:1em;line-height:1.6;}
-p{text-indent:2em;margin:0.6em 0;}
+body{margin:5%%;line-height:1.8;text-align:justify;}
+h1{font-size:1.5em;text-align:center;margin:2em 0 1.5em;page-break-after:avoid;}
+p{text-indent:2em;margin:0.45em 0;orphans:2;widows:2;}
 img{max-width:100%%;}
 </style>
 </head>
