@@ -39,6 +39,17 @@ local Desktop = InputContainer:extend{
     filter = nil,
 }
 
+--- 当前 tab 不在 tabs 列表中则回退 home（换源 / 能力变化后调用）。
+---@param self table
+local function clampTab(self)
+    for _, t in ipairs(self._tabs) do
+        if t.id == self.tab then
+            return
+        end
+    end
+    self.tab = "home"
+end
+
 --- 初始化手势区与默认分页状态，立刻 rebuild。
 function Desktop:init()
     self.filter = self.filter or {}
@@ -50,14 +61,9 @@ function Desktop:init()
     self.store_page = 1
     self.store_page_size = 12
     self.store_total = 0
+    self.source_generation = self.source_generation or 0
     self.tab = self.tab or "home"
-    local ok_tab = false
-    for _, t in ipairs(self._tabs) do
-        if t.id == self.tab then ok_tab = true break end
-    end
-    if not ok_tab then
-        self.tab = "home"
-    end
+    clampTab(self)
     self._closed = false
     self.ges_events = {
         -- 顶栏纯展示：不注册 tap/swipe，避免误触关桌面或抢原生区
@@ -174,7 +180,6 @@ end
 --- 切换底栏 Tab 并重建；进页时清对应缓存状态。
 ---@param id string
 function Desktop:switchTab(id)
-    logger.dbg("book.desktop switchTab", self.tab, "->", id)
     if id == "library" and self.tab ~= "library" then
         self._library_state = nil
         self.page = self.page or 1
@@ -191,6 +196,7 @@ function Desktop:switchTab(id)
     end
     if id == "settings" then
         self._settings_page = 1
+        self._cache_size_label = nil
     end
     if id == "stats" then
         self._insight_ui_page = 1
@@ -199,9 +205,38 @@ function Desktop:switchTab(id)
     self:rebuild()
 end
 
+--- 数据源切换：取消在飞请求、清各 Tab 缓存、回退不支持的 Tab 并重建。
+---@param source BookSource|nil
+function Desktop:sourceChanged(source)
+    self.source_generation = (self.source_generation or 0) + 1
+    for _, key in ipairs({
+        "_home_fetch_cancel",
+        "_library_fetch_cancel",
+        "_store_fetch_cancel",
+        "_insight_fetch_cancel",
+    }) do
+        local job = self[key]
+        if type(job) == "table" and type(job.cancel) == "function" then
+            pcall(function() job:cancel() end)
+        end
+        self[key] = nil
+    end
+    Image.abortPending()
+    self.source = source
+    self._tabs = BottomBar.tabs(source)
+    clampTab(self)
+    self._home_state = nil
+    self._home_loaded = false
+    self._library_state = nil
+    self._store_state = nil
+    self._insight_state = nil
+    self._insight_loaded = false
+    self.filter = nil
+    self:rebuild()
+end
+
 --- 重建顶栏 + 内容 + 底栏。
 function Desktop:rebuild()
-    logger.dbg("book.desktop rebuild", self.tab)
     pcall(function()
         require("utils.font").applyCurrent()
     end)
@@ -222,7 +257,6 @@ function Desktop:rebuild()
         else
             content = Settings.build(self)
         end
-
         local content_h = self:contentHeight()
         local top_h = UI.topBarH()
         if content.dimen then
@@ -307,7 +341,6 @@ end
 --- 打开书籍详情浮层。
 ---@param book table
 function Desktop:showDetail(book)
-    logger.dbg("book.desktop showDetail", book and ((book.ref and book.ref.stable_id) or book.title))
     if self.detail then
         UIManager:close(self.detail)
         self.detail = nil
@@ -345,6 +378,9 @@ function Desktop:onClose()
         "_library_fetch_cancel",
         "_store_fetch_cancel",
         "_insight_fetch_cancel",
+        "_cache_size_job",
+        "_cache_clear_job",
+        "_local_cleanup_job",
     }) do
         local job = self[key]
         if type(job) == "table" and type(job.cancel) == "function" then
