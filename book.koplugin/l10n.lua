@@ -8,7 +8,6 @@
 --]]
 
 local GetText = require("gettext")
-local logger = require("logger")
 
 local M = {}
 local applied_for
@@ -61,7 +60,6 @@ function M.apply()
                     GetText.translation[msgid] = msgstr
                 end
             end
-            logger.dbg("book.l10n loaded", cand, "for", lang)
             return
         end
     end
