@@ -73,8 +73,18 @@ end
 local failed = 0
 local passed = 0
 
+local function relName(path)
+    if ROOT == "." then
+        return path:gsub("^%./", "")
+    end
+    if path:sub(1, #ROOT + 1) == ROOT .. "/" then
+        return path:sub(#ROOT + 2)
+    end
+    return path
+end
+
 for _, path in ipairs(specs) do
-    local name = path:gsub("^" .. ROOT .. "/?", "")
+    local name = relName(path)
     io.write("→ " .. name .. "\n")
     local chunk, err = loadfile(path)
     if not chunk then

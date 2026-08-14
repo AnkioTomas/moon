@@ -18,7 +18,6 @@ package.preload["utils.settings"] = function()
     }
 end
 package.preload["source.base"] = sourceBase
-package.preload["source.error"] = function() return {} end
 package.preload["source.contract"] = function()
     return {
         clampFraction = function(n) return n end,
