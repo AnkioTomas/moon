@@ -1,8 +1,13 @@
 --[[--
 Material Icons Outlined 字体图标。
 
-  Icon.widget{ name = "home", size = UI.iconSz(), color = ..., dim = false }
+  Icon.widget{ name = "home", size = 24, color = ..., dim = false }
   Icon.label{ name = "home", text = "首页", direction = "row"|"column", ... }
+
+size 是逻辑值，和 UI.face(name, size) 的 size 同一层：
+Font:getFace 内部会 Screen:scaleBySize，所以这里只能过 UI.fontSize（乘 ui_scale），
+绝不能传 UI.sz() 的结果，否则 DPI 缩放两次，图标会比文字大一圈。
+占位方盒用 UI.sz(size)，与外部按 UI.sz(size) 算的布局对齐。
 
 字体：fonts/MaterialIconsOutlined-Regular.otf
 字面：Font.fontmap["moon_icon"]（独立于 UI_FACES，换 UI 字不影响图标）
@@ -34,6 +39,8 @@ local Icon = {}
 
 local FACE = "moon_icon"
 local FONT_FILE = "MaterialIconsOutlined-Regular.otf"
+--- 默认图标逻辑尺寸（对应 UI.iconSz() 的 UI.sz(24)）
+local DEFAULT_SIZE = 24
 
 local _ensured = false
 
@@ -62,7 +69,7 @@ function Icon.ensure()
     return true
 end
 
---- 纯图标 TextWidget（默认包成 size×size 方盒）。
+--- 纯图标 TextWidget（默认包成 UI.sz(size) 方盒）。
 ---@param opts table|nil
 ---@return table|nil
 function Icon.widget(opts)
@@ -74,23 +81,23 @@ function Icon.widget(opts)
     if not _ensured then
         Icon.ensure()
     end
-    local size = math.max(1, tonumber(opts.size) or UI.iconSz())
+    local size = math.max(1, tonumber(opts.size) or DEFAULT_SIZE)
     local color = opts.color
     if opts.dim then
         color = UI.muted()
     end
-    -- 图标尺寸已是 UI.sz() 结果，不能再过 UI.fontSize 乘一次 ui_scale
     local tw = TextWidget:new{
         text = name,
-        face = Font:getFace(FACE, size),
+        face = Font:getFace(FACE, UI.fontSize(size)),
         fgcolor = color or Blitbuffer.COLOR_BLACK,
         use_xtext = true,
     }
     if opts.box == false then
         return tw
     end
+    local box = UI.sz(size)
     return CenterContainer:new{
-        dimen = Geom:new{ w = size, h = size },
+        dimen = Geom:new{ w = box, h = box },
         tw,
     }
 end
@@ -100,7 +107,7 @@ end
 ---@return table
 function Icon.label(opts)
     opts = opts or {}
-    local size = math.max(1, tonumber(opts.size) or UI.iconSz())
+    local size = math.max(1, tonumber(opts.size) or DEFAULT_SIZE)
     local gap = tonumber(opts.gap) or UI.sz(4)
     local color = opts.color
     if opts.dim then
