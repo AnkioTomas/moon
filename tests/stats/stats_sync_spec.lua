@@ -15,13 +15,9 @@ end
 package.preload["ui/network/manager"] = function()
     return { runWhenOnline = function(_, fn) fn() end }
 end
-package.preload["libs/libkoreader-lfs"] = function()
-    return { attributes = function() return "file" end }
-end
 package.loaded["device"] = nil
 package.loaded["ui/widget/infomessage"] = nil
 package.loaded["ui/network/manager"] = nil
-package.loaded["libs/libkoreader-lfs"] = nil
 package.loaded["stats.stats_sync"] = nil
 
 local StatsSync = require("stats.stats_sync")

@@ -62,6 +62,12 @@ package.preload["utils.db.open"] = function()
         clear = function() end,
     }
 end
+package.preload["utils.db.queue"] = function()
+    return {
+        run = function(worker, opts) end,
+        clear = function() end,
+    }
+end
 
 local Store = require("book.store")
 
@@ -95,6 +101,7 @@ for _, k in ipairs({
     "utils.db.book",
     "utils.db.toc",
     "utils.db.open",
+    "utils.db.queue",
     "book.store",
     "libs/libkoreader-lfs",
 }) do

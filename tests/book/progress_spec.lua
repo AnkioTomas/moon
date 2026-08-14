@@ -44,6 +44,19 @@ package.preload["utils.db.progress"] = function()
     }
 end
 
+package.preload["utils.db.queue"] = function()
+    return {
+        run = function(worker, opts)
+            -- 测试环境同步执行 worker（无 write_fd），然后回调 on_done
+            worker(nil)
+            if opts and opts.on_done then
+                opts.on_done(nil)
+            end
+        end,
+        clear = function() end,
+    }
+end
+
 package.preload["ui/widget/infomessage"] = function()
     return { new = function() return {} end }
 end

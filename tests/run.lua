@@ -91,6 +91,30 @@ for _, path in ipairs(specs) do
         io.stderr:write("  LOAD FAIL: " .. tostring(err) .. "\n")
         failed = failed + 1
     else
+        -- 保存 FFI/原生模块，避免被测试清理后重新加载导致 FFI cdef 重复定义
+        local saved_ffi = {}
+        for k in pairs(package.loaded) do
+            if k:match("^ffi/") or k:match("^libs/") or k:match("^socket%.") or
+               k:match("^turbo%.") or k:match("^util$") or k:match("^mime$") then
+                saved_ffi[k] = package.loaded[k]
+            end
+        end
+
+        local Stubs = require("support.stubs")
+        Stubs.reset()
+        for k in pairs(package.loaded) do
+            if k:match("^book%.") or k:match("^source%.") or k:match("^http%.") or
+               k:match("^utils%.") or k:match("^convert%.") or k:match("^stats%.") or
+               k:match("^l10n$") or k:match("^book$") then
+                package.loaded[k] = nil
+            end
+        end
+        -- 恢复 FFI/原生模块
+        for k, v in pairs(saved_ffi) do
+            package.loaded[k] = v
+        end
+        require("support.stubs").install()
+
         local ok, boom = xpcall(function()
             chunk(Assert)
         end, debug.traceback)
