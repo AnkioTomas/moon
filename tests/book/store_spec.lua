@@ -26,20 +26,40 @@ Paths.bookWorkDir = function(key, id)
 end
 
 package.loaded["book.store"] = nil
-package.loaded["utils.db"] = nil
-package.preload["utils.db"] = function()
+package.loaded["utils.db.base"] = nil
+package.loaded["utils.db.book"] = nil
+package.loaded["utils.db.toc"] = nil
+package.loaded["utils.db.open"] = nil
+package.preload["utils.db.base"] = function()
+    return { open = function() return true end }
+end
+package.preload["utils.db.book"] = function()
     return {
-        open = function() return true end,
-        getBook = function() return nil end,
-        upsertBook = function() return true end,
-        putToc = function() return true end,
-        getToc = function() return nil end,
-        upsertOpen = function() return true end,
-        getOpen = function() return nil end,
-        setBookMd5 = function() end,
-        setBookMd5ByKey = function() end,
+        get = function() return nil end,
+        upsert = function() return true end,
+        setMd5 = function() end,
+        setMd5ByKey = function() end,
         md5Map = function() return {} end,
-        filenameByMd5 = function() return nil end,
+        expireBefore = function() end,
+        stripMeta = function() end,
+    }
+end
+package.preload["utils.db.toc"] = function()
+    return {
+        put = function() return true end,
+        get = function() return nil end,
+        delete = function() end,
+        deleteExpired = function() end,
+        clear = function() end,
+    }
+end
+package.preload["utils.db.open"] = function()
+    return {
+        upsert = function() return true end,
+        get = function() return nil end,
+        all = function() return {} end,
+        delete = function() end,
+        clear = function() end,
     }
 end
 
@@ -67,11 +87,22 @@ do
     Assert.is_true(a ~= b)
 end
 
+do
+    Assert.eq(Store.bookFilePath("key", "webdav", "books/a.pdf"), "/tmp/webdav/key/book.pdf")
+    Assert.eq(Store.bookFilePath("key", "webdav", "books/a.unknown"), "/tmp/webdav/key/book.epub")
+end
+
 Paths.sanitizeSourceId = orig_sanitize
 Paths.ensureBookWork = orig_ensure
 Paths.bookWorkDir = orig_work
-package.preload["utils.db"] = nil
-package.loaded["utils.db"] = nil
-package.loaded["book.store"] = nil
-package.preload["libs/libkoreader-lfs"] = nil
-package.loaded["libs/libkoreader-lfs"] = nil
+for _, k in ipairs({
+    "utils.db.base",
+    "utils.db.book",
+    "utils.db.toc",
+    "utils.db.open",
+    "book.store",
+    "libs/libkoreader-lfs",
+}) do
+    package.preload[k] = nil
+    package.loaded[k] = nil
+end
