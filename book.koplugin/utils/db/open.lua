@@ -24,23 +24,22 @@ function OpenDB.upsert(path, row)
         return false
     end
     Base.ensure()
-    local sql = string.format(
+    return Base.exec(
         [[INSERT INTO opens (path, book_key, source_id, stable_id, chapter_idx, last_open)
-          VALUES (%s,%s,%s,%s,%s,%s)
+          VALUES (?,?,?,?,?,?)
           ON CONFLICT(path) DO UPDATE SET
             book_key=excluded.book_key,
             source_id=excluded.source_id,
             stable_id=excluded.stable_id,
             chapter_idx=excluded.chapter_idx,
             last_open=excluded.last_open;]],
-        Base.sqlQuote(path),
-        Base.sqlQuote(tostring(row.book_key)),
-        Base.sqlQuote(source_id),
-        Base.sqlQuote(tostring(row.stable_id)),
-        Base.sqlQuote(row.chapter_idx),
-        Base.sqlQuote(tonumber(row.last_open) or os.time())
-    )
-    return Base.exec(sql) ~= nil
+        path,
+        tostring(row.book_key),
+        source_id,
+        tostring(row.stable_id),
+        row.chapter_idx,
+        tonumber(row.last_open) or os.time()
+    ) ~= nil
 end
 
 --- 按本地路径取打开记录
@@ -51,10 +50,10 @@ function OpenDB.get(path)
         return nil
     end
     Base.ensure()
-    local p, book_key, source_id, stable_id, chapter_idx, last_open = Base.rowexec(string.format(
-        [[SELECT path, book_key, source_id, stable_id, chapter_idx, last_open FROM opens WHERE path=%s LIMIT 1;]],
-        Base.sqlQuote(path)
-    ))
+    local p, book_key, source_id, stable_id, chapter_idx, last_open = Base.rowexec(
+        [[SELECT path, book_key, source_id, stable_id, chapter_idx, last_open FROM opens WHERE path=? LIMIT 1;]],
+        path
+    )
     if not p then
         return nil
     end
@@ -101,10 +100,7 @@ function OpenDB.delete(path)
         return false
     end
     Base.ensure()
-    return Base.exec(string.format(
-        [[DELETE FROM opens WHERE path=%s;]],
-        Base.sqlQuote(path)
-    )) ~= nil
+    return Base.exec([[DELETE FROM opens WHERE path=?;]], path) ~= nil
 end
 
 --- 清空全部打开记录

@@ -23,25 +23,24 @@ function ProgressDB.upsert(source_id, stable_id, pos)
         return false
     end
     Base.ensure()
-    local sql = string.format(
+    return Base.exec(
         [[INSERT INTO pending_progress
             (source_id, stable_id, fraction, chapter_idx, chapter_fraction, locator, updated_at)
-          VALUES (%s,%s,%s,%s,%s,%s,%s)
+          VALUES (?,?,?,?,?,?,?)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             fraction=excluded.fraction,
             chapter_idx=excluded.chapter_idx,
             chapter_fraction=excluded.chapter_fraction,
             locator=excluded.locator,
             updated_at=excluded.updated_at;]],
-        Base.sqlQuote(source_id),
-        Base.sqlQuote(stable_id),
-        Base.sqlQuote(frac),
-        Base.sqlQuote(pos.chapter_idx),
-        Base.sqlQuote(pos.chapter_fraction),
-        Base.sqlQuote(pos.locator),
-        Base.sqlQuote(os.time())
-    )
-    return Base.exec(sql) ~= nil
+        source_id,
+        stable_id,
+        frac,
+        pos.chapter_idx,
+        pos.chapter_fraction,
+        pos.locator,
+        os.time()
+    ) ~= nil
 end
 
 --- 列出待上传进度（可按 source_id 过滤）
@@ -51,16 +50,18 @@ function ProgressDB.all(source_id)
     Base.ensure()
     local sql
     if type(source_id) == "string" and source_id ~= "" then
-        sql = string.format(
-            [[SELECT source_id, stable_id, fraction, chapter_idx, chapter_fraction, locator, updated_at
-              FROM pending_progress WHERE source_id=%s ORDER BY updated_at ASC;]],
-            Base.sqlQuote(source_id)
-        )
+        sql = [[SELECT source_id, stable_id, fraction, chapter_idx, chapter_fraction, locator, updated_at
+                 FROM pending_progress WHERE source_id=? ORDER BY updated_at ASC;]]
     else
         sql = [[SELECT source_id, stable_id, fraction, chapter_idx, chapter_fraction, locator, updated_at
                 FROM pending_progress ORDER BY updated_at ASC;]]
     end
-    local result, nrows = Base.query(sql)
+    local result, nrows
+    if type(source_id) == "string" and source_id ~= "" then
+        result, nrows = Base.query(sql, source_id)
+    else
+        result, nrows = Base.query(sql)
+    end
     local out = {}
     if result and nrows and nrows > 0 then
         for i = 1, nrows do
@@ -88,11 +89,11 @@ function ProgressDB.delete(source_id, stable_id)
         return false
     end
     Base.ensure()
-    return Base.exec(string.format(
-        [[DELETE FROM pending_progress WHERE source_id=%s AND stable_id=%s;]],
-        Base.sqlQuote(source_id),
-        Base.sqlQuote(stable_id)
-    )) ~= nil
+    return Base.exec(
+        [[DELETE FROM pending_progress WHERE source_id=? AND stable_id=?;]],
+        source_id,
+        stable_id
+    ) ~= nil
 end
 
 return ProgressDB

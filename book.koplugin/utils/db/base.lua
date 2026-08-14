@@ -40,35 +40,30 @@ local function openSqlite()
     return c
 end
 
---- 值转 SQL 字面量（NULL / 数字 / 布尔 / 转义字符串）
----@param v any
----@return string
-function Base.sqlQuote(v)
-    if v == nil then
-        return "NULL"
-    end
-    if type(v) == "number" then
-        if v ~= v then
-            return "NULL"
-        end
-        return tostring(v)
-    end
-    if type(v) == "boolean" then
-        return v and "1" or "0"
-    end
-    return "'" .. tostring(v):gsub("'", "''") .. "'"
-end
-
 --- 执行无返回行的 SQL
 ---@param sql string
+---@param ... any 绑定到 ? 占位符的值
 ---@return boolean|nil, any
-function Base.exec(sql)
+function Base.exec(sql, ...)
     if not conn then
         return nil
     end
+    local argc = select("#", ...)
+    local args = { ... }
+    local stmt
     local ok, err = pcall(function()
-        conn:exec(sql)
+        if argc == 0 then
+            conn:exec(sql)
+            return
+        end
+        stmt = conn:prepare(sql)
+        stmt:bind(unpack(args, 1, argc)):step()
     end)
+    if stmt then
+        pcall(function()
+            stmt:close()
+        end)
+    end
     if not ok then
         logger.warn("book.db exec failed", err, sql and sql:sub(1, 120))
         return nil, err
@@ -78,31 +73,61 @@ end
 
 --- 执行并取一行多列（失败返回 nil）
 ---@param sql string
+---@param ... any 绑定到 ? 占位符的值
 ---@return any ...
-function Base.rowexec(sql)
+function Base.rowexec(sql, ...)
     if not conn then
         return nil
     end
-    local ok, a, b, c, d, e, f, g, h, i, j, k, l, m, n = pcall(function()
-        return conn:rowexec(sql)
+    local argc = select("#", ...)
+    local args = { ... }
+    local stmt
+    local ok, row, names = pcall(function()
+        stmt = conn:prepare(sql)
+        if argc > 0 then
+            stmt:bind(unpack(args, 1, argc))
+        end
+        return stmt:step({}, {})
     end)
+    if stmt then
+        pcall(function()
+            stmt:close()
+        end)
+    end
     if not ok then
-        logger.warn("book.db rowexec failed", a, sql and sql:sub(1, 120))
+        logger.warn("book.db rowexec failed", row, sql and sql:sub(1, 120))
         return nil
     end
-    return a, b, c, d, e, f, g, h, i, j, k, l, m, n
+    if not row then
+        return nil
+    end
+    return unpack(row, 1, names and #names or #row)
 end
 
 --- 多行查询（conn:exec）；失败返回 nil, 0
 ---@param sql string
+---@param ... any 绑定到 ? 占位符的值
 ---@return table|nil, number
-function Base.query(sql)
+function Base.query(sql, ...)
     if not conn then
         return nil, 0
     end
+    local argc = select("#", ...)
+    local args = { ... }
+    local stmt
     local ok, result, nrows = pcall(function()
+        if argc > 0 then
+            stmt = conn:prepare(sql)
+            stmt:bind(unpack(args, 1, argc))
+            return stmt:resultset()
+        end
         return conn:exec(sql)
     end)
+    if stmt then
+        pcall(function()
+            stmt:close()
+        end)
+    end
     if not ok then
         logger.warn("book.db query failed", result, sql and sql:sub(1, 120))
         return nil, 0
