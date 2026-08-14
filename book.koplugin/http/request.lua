@@ -30,9 +30,43 @@ local input_timeouts = 0
 --- 写盘切片。太大单拍卡；太小 nextTick 开销高。
 local WRITE_CHUNK = 64 * 1024
 
+--- Turbo/LuaSec 即使 verify_ca=false 仍会加载默认 CA
+--- （/etc/ssl/certs/ca-certificates.crt），macOS 等设备上不存在会直接炸。
+local ssl_patched = false
+
 ------------------------------------------------------------------------
 -- 内部
 ------------------------------------------------------------------------
+
+--- 忽略校验时不传 cafile，避免「error loading CA locations」。
+local function patchTurboSsl()
+    if ssl_patched then
+        return
+    end
+    ssl_patched = true
+    local ok, crypto = pcall(require, "turbo.crypto")
+    if not ok or type(crypto.ssl_create_client_context) ~= "function" then
+        return
+    end
+    local orig = crypto.ssl_create_client_context
+    crypto.ssl_create_client_context = function(cert_file, prv_file, ca_cert_path, verify, sslv)
+        if verify then
+            return orig(cert_file, prv_file, ca_cert_path, verify, sslv)
+        end
+        local ssl = require("ssl")
+        local ctx, err = ssl.newcontext({
+            mode = "client",
+            protocol = "sslv23",
+            key = prv_file,
+            certificate = cert_file,
+            options = {"all"},
+        })
+        if not ctx then
+            return -1, err
+        end
+        return 0, ctx
+    end
+end
 
 ---@param res table|nil
 ---@return string|nil
@@ -161,6 +195,7 @@ function Request.request(opts, cb)
         local turbo = require("turbo")
         turbo.log.categories.success = false
         turbo.log.categories.warning = false
+        patchTurboSsl()
 
         local client = turbo.async.HTTPClient({ verify_ca = false })
         local res = coroutine.yield(client:fetch(opts.url, {
