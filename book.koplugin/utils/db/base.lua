@@ -4,8 +4,7 @@
 表由 open → ensureSchema 一次 CREATE IF NOT EXISTS。
 不做 schema/legacy 迁移。
 
-只允许在 Task 子进程内 open（Task.inSubProcess()）。
-主进程禁止碰库。
+使用 WAL 模式 + busy_timeout=5000，主/子进程均可安全访问。
 
 @module koplugin.book.utils.db.base
 --]]
@@ -16,6 +15,7 @@ local Paths = require("utils.paths")
 local Base = {}
 
 local conn = nil
+local conn_is_subprocess_owned = false
 
 --- 插件 SQLite 文件路径
 ---@return string
@@ -200,16 +200,31 @@ CREATE TABLE IF NOT EXISTS pending_progress (
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (source_id, stable_id)
 );
+
+CREATE TABLE IF NOT EXISTS reading_stats (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_id   TEXT NOT NULL,
+  stable_id   TEXT NOT NULL,
+  page        INTEGER NOT NULL DEFAULT 0,
+  start_time  INTEGER NOT NULL,
+  duration    INTEGER NOT NULL DEFAULT 0,
+  total_pages INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_reading_stats_source ON reading_stats(source_id);
 ]])
 end
 
 --- 打开（或复用）全局 SQLite 连接并确保 schema。
---- 仅 Task 子进程可调用。
+--- WAL 模式 + busy_timeout=5000。
+--- 读操作可在主进程直接调用（WAL 读读安全）；写操作应走 utils.db.queue 串行化。
+--- 子进程必须重新 open：fork 后继承的 conn 是父进程连接，跨进程使用会损坏 SQLite。
 ---@return userdata|nil, string|nil
 function Base.open()
+    -- fork 后子进程必须重新打开：conn 是父进程连接，不能跨进程使用
+    -- conn_is_subprocess_owned 标记 conn 是否是当前子进程自己创建的
     local Task = require("utils.task")
-    if not Task.inSubProcess() then
-        error("book.db: open() only allowed inside Task subprocess", 2)
+    if Task.inSubProcess() and conn and not conn_is_subprocess_owned then
+        Base.close()
     end
     if conn then
         return conn
@@ -220,8 +235,10 @@ function Base.open()
         return nil, err
     end
     conn = c
+    conn_is_subprocess_owned = Task.inSubProcess()
     pcall(function()
         conn:exec("PRAGMA journal_mode=WAL;")
+        conn:exec("PRAGMA busy_timeout=5000;")
     end)
     ensureSchema()
     return conn
@@ -235,10 +252,12 @@ function Base.close()
             conn:close()
         end)
         conn = nil
+        conn_is_subprocess_owned = false
     end
 end
 
---- 确保连接可用（未开则 Base.open）
+--- 确保连接可用（未开则 Base.open）。
+--- 读操作可在主进程直接调用；写操作应走 utils.db.queue 串行化。
 ---@return userdata|nil, string|nil
 function Base.ensure()
     if conn then

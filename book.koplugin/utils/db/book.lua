@@ -123,48 +123,6 @@ function BookDB.get(book_key)
     }
 end
 
---- 按 filename/stable_id 写入或更新 md5
----@param filename string
----@param digest string
----@param filename_out string|nil
----@param source_id string
----@return boolean
-function BookDB.setMd5(filename, digest, filename_out, source_id)
-    if type(digest) ~= "string" or digest == "" then
-        return false
-    end
-    if type(filename) ~= "string" or filename == "" then
-        return false
-    end
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return false
-    end
-    Base.ensure()
-    filename_out = filename_out or filename
-    local existing = Base.rowexec(
-        [[SELECT book_key FROM books WHERE filename=? OR stable_id=? LIMIT 1;]],
-        filename,
-        filename
-    )
-    if existing then
-        return Base.exec(
-            [[UPDATE books SET md5=?, filename=? WHERE book_key=?;]],
-            digest,
-            filename_out,
-            existing
-        ) ~= nil
-    end
-    return BookDB.upsert({
-        book_key = BookRef.keyOf(source_id, filename),
-        source_id = source_id,
-        stable_id = filename,
-        filename = filename_out,
-        md5 = digest,
-        fetched_at = 0,
-    })
-end
-
 --- 按 book_key 更新 md5（可选同步 filename）
 ---@param book_key string
 ---@param digest string
@@ -193,32 +151,34 @@ function BookDB.setMd5ByKey(book_key, digest, filename)
     return false
 end
 
---- 指定数据源的 md5 → filename 映射。
+--- 取某源全部 book_key
 ---@param source_id string
----@return table<string, string>
-function BookDB.md5Map(source_id)
-    if type(source_id) ~= "string" or source_id == "" then
+---@return string[]
+function BookDB.keysBySource(source_id)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id then
         return {}
     end
     Base.ensure()
-    local result, nrows = Base.query([[
-SELECT md5, filename FROM books
-WHERE source_id=? AND md5 IS NOT NULL AND md5 != '' AND filename IS NOT NULL AND filename != ''
-ORDER BY fetched_at DESC, book_key ASC;
-]], source_id)
-    local map = {}
+    local result, nrows = Base.query([[SELECT book_key FROM books WHERE source_id=?;]], source_id)
+    local out = {}
     if result and nrows and nrows > 0 then
         for i = 1, nrows do
-            local digest = result[1][i]
-            local filename = result[2][i]
-            if map[digest] == nil
-                and type(digest) == "string" and digest ~= ""
-                and type(filename) == "string" and filename ~= "" then
-                map[digest] = filename
-            end
+            out[#out + 1] = result[1][i]
         end
     end
-    return map
+    return out
+end
+
+--- 按 book_key 删除 books 行（不动 reading_stats）
+---@param book_key string
+---@return boolean
+function BookDB.remove(book_key)
+    if type(book_key) ~= "string" or book_key == "" then
+        return false
+    end
+    Base.ensure()
+    return Base.exec([[DELETE FROM books WHERE book_key=?;]], book_key) ~= nil
 end
 
 --- 清空全部书籍展示元数据（保留键与 md5）
