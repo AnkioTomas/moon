@@ -28,6 +28,9 @@ local Image = require("ui.components.image")
 
 local BottomBar = {}
 
+--- 按数据源能力生成底栏 Tab 列表。
+---@param source table|nil
+---@return table
 function BottomBar.tabs(source)
     local tabs = {
         { id = "home", text = _("首页"), icon = "home.svg" },
@@ -37,11 +40,18 @@ function BottomBar.tabs(source)
     if caps.store then
         table.insert(tabs, { id = "store", text = _("书城"), icon = "store.svg" })
     end
-    table.insert(tabs, { id = "stats", text = _("统计"), icon = "stats.svg" })
+    if caps.insight then
+        table.insert(tabs, { id = "stats", text = _("统计"), icon = "stats.svg" })
+    end
     table.insert(tabs, { id = "settings", text = _("设置"), icon = "settings.svg" })
     return tabs
 end
 
+--- 底栏 Tab 图标；失败回退圆点文字。
+---@param name string
+---@param sz number
+---@param active boolean
+---@return table
 local function tabIcon(name, sz, active)
     local path = Image.resolve(name)
     if path then
@@ -65,7 +75,9 @@ local function tabIcon(name, sz, active)
     }
 end
 
---- @param desktop table Desktop 实例（读 tab / source）
+--- 构建底栏 widget。
+---@param desktop table Desktop 实例（读 tab / source）
+---@return table
 function BottomBar.build(desktop)
     local tabs = BottomBar.tabs(desktop.source)
     desktop._tabs = tabs

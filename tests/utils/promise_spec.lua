@@ -22,6 +22,37 @@ do
     Assert.eq(got, 42)
 end
 
+-- requireAsync：task 内通过，外层抛错
+do
+    Assert.is_false(Promise.inAsync())
+    local ok_out, err = pcall(Promise.requireAsync, "test")
+    Assert.is_false(ok_out)
+    Assert.is_true(tostring(err):find("must run inside Promise", 1, true) ~= nil)
+
+    local saw
+    Promise:new(function()
+        Assert.is_true(Promise.inAsync())
+        Promise.requireAsync("test")
+        saw = true
+        return 1
+    end)
+    Stubs.flush()
+    Assert.is_true(saw)
+    Assert.is_false(Promise.inAsync())
+end
+
+-- next/fail 不算 inAsync（只认 task）
+do
+    local in_next = true
+    Promise:new(function()
+        return 1
+    end):next(function()
+        in_next = Promise.inAsync()
+    end)
+    Stubs.flush()
+    Assert.is_false(in_next)
+end
+
 -- 失败：return nil, err
 do
     local got

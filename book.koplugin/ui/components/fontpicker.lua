@@ -40,6 +40,9 @@ local FontPicker = {}
 ---@field title string|nil
 ---@field on_done fun(id: string, name: string)|nil
 
+--- 把字节数格式化为 MB 文案。
+---@param n number|nil
+---@return string
 local function formatZipMb(n)
     n = tonumber(n) or 0
     if n <= 0 then
@@ -48,6 +51,8 @@ local function formatZipMb(n)
     return string.format("%.1fMB", n / (1024 * 1024))
 end
 
+--- 字体预览区域宽高。
+---@return number, number
 local function previewSize()
     local w = math.max(UI.sz(120), math.floor(Screen:getWidth() * 0.48))
     local h = UI.sz(36)
@@ -55,7 +60,7 @@ local function previewSize()
 end
 
 --- 本地字体样张：用候选文件的 face，不用当前 UI 字。
----@param it MoonFontItem
+---@param it MoonFontItem|table
 ---@return table|nil, number|nil
 local function localPreview(it)
     if it.kind ~= "local" or not it.id or it.id == "" then
@@ -75,15 +80,18 @@ local function localPreview(it)
     return tw, math.min(pw, tw:getSize().w)
 end
 
---- 左侧文案：✓ + 来源（本地/在线）
+--- 左侧文案：✓ + 来源（本地/在线）。
+---@param it table
+---@param cur string
+---@return string, string
 local function rowMeta(it, cur)
     local mark = (it.id == cur) and "✓ " or ""
     local kind = it.kind == "local" and _("本地") or _("在线")
     return mark, kind
 end
 
---- 写配置 + 提示；不 apply
----@param opts FontPickerOpts
+--- 写配置 + 提示；不 apply。
+---@param opts FontPickerOpts|table
 ---@param id string
 ---@param name string
 local function saveSelection(opts, id, name)
@@ -104,9 +112,9 @@ local function saveSelection(opts, id, name)
     end
 end
 
---- 下载 weread 字体后 saveSelection
----@param opts FontPickerOpts
----@param item MoonFontItem
+--- 下载 weread 字体后 saveSelection。
+---@param opts FontPickerOpts|table
+---@param item MoonFontItem|table
 local function downloadAndSave(opts, item)
     local id = item.id or ""
     local name = item.name or id
@@ -162,8 +170,9 @@ local function downloadAndSave(opts, item)
         end)
 end
 
----@param opts FontPickerOpts
----@param items MoonFontItem[]|nil
+--- 弹出字体选择列表。
+---@param opts FontPickerOpts|table
+---@param items MoonFontItem[]|table|nil
 local function showPicker(opts, items)
     local cur = MoonFont.currentId()
     local pw, ph = previewSize()
@@ -218,6 +227,9 @@ local function showPicker(opts, items)
     }
 end
 
+--- 是否存在 weread 项但全部缺预览图。
+---@param items table|nil
+---@return boolean
 local function wereadMissingPreview(items)
     local saw = false
     for _, it in ipairs(items or {}) do
@@ -232,7 +244,7 @@ local function wereadMissingPreview(items)
 end
 
 --- 先加载页，再弹列表。
----@param opts FontPickerOpts|nil
+---@param opts FontPickerOpts|table|nil
 function FontPicker.open(opts)
     opts = opts or {}
     local loading = InfoMessage:new{ text = _("正在加载字体列表…") }

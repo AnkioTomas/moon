@@ -13,24 +13,29 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
-local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local BookInfo = require("ui.components.bookinfo")
 local UI = require("ui.components.bookui")
 local Pager = require("ui.components.pager")
-local Cache = require("moon.cache")
+local Store = require("book.store")
 local NetworkMgr = require("ui/network/manager")
 local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
 local InfoMessage = require("ui/widget/infomessage")
+local TextWidget = require("ui/widget/textwidget")
 
 local Insight = {}
 
 local DOW = { _("日"), _("一"), _("二"), _("三"), _("四"), _("五"), _("六") }
 
+--- 灰色弱化文案。
+---@param text string
+---@param width number
+---@param size number|nil
+---@return table
 local function muted(text, width, size)
     return TextWidget:new{
         text = text,
@@ -40,6 +45,10 @@ local function muted(text, width, size)
     }
 end
 
+--- 年月字符串按月偏移。
+---@param ym string
+---@param delta number
+---@return string
 local function shiftYm(ym, delta)
     local y, m = ym:match("^(%d%d%d%d)%-(%d%d)$")
     y, m = tonumber(y), tonumber(m)
@@ -50,12 +59,19 @@ local function shiftYm(ym, delta)
     return string.format("%04d-%02d", y, m)
 end
 
+--- 年月显示文案。
+---@param ym string
+---@return string
 local function ymLabel(ym)
     local y, m = ym:match("^(%d%d%d%d)%-(%d%d)$")
     if not y then return ym end
     return T(_("%1年%2月"), y, tonumber(m))
 end
 
+--- 日期标题（可附带时长）。
+---@param ymd string
+---@param duration_text string|nil
+---@return string
 local function dayTitle(ymd, duration_text)
     local _y, m, d = ymd:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
     if not m then return ymd end
@@ -66,7 +82,12 @@ local function dayTitle(ymd, duration_text)
     return date
 end
 
---- 日历格对应的真实年月日；out_month=跨月灰格
+--- 日历格对应的真实年月日；out_month=跨月灰格。
+---@param y number
+---@param m number
+---@param day_num number
+---@param days_in_month number
+---@return number, number, number, boolean
 local function resolveDay(y, m, day_num, days_in_month)
     if day_num >= 1 and day_num <= days_in_month then
         return y, m, day_num, false
@@ -82,6 +103,8 @@ local function resolveDay(y, m, day_num, days_in_month)
     return ny, nm, day_num - days_in_month, true
 end
 
+--- 清缓存并强制重新拉取统计。
+---@param desktop table
 local function refreshInsight(desktop)
     local source = desktop.source
     if source and source.clearCaches then
@@ -92,11 +115,16 @@ local function refreshInsight(desktop)
     desktop:rebuild()
 end
 
+--- 构建总时长英雄区。
+---@param desktop table
+---@param state table
+---@param width number
+---@return table
 local function buildHero(desktop, state, width)
-    local kpi = (state.readingActivity or {}).kpi or {}
-    local total = kpi.totalReadingTime
-    local activity = state.readingActivity or {}
-    if state.error or not state.hasData or not activity.hasData or total == nil or total == "" then
+    local total_obj = state.total or {}
+    local total = total_obj.total_text
+    local has = state.has_data
+    if state.error or not has or not total_obj.has_data or total == nil or total == "" then
         total = "—"
     end
     local hero_h = UI.sz(96)
@@ -120,12 +148,16 @@ local function buildHero(desktop, state, width)
     return tap
 end
 
+--- 构建次级 KPI 三列。
+---@param state table
+---@param width number
+---@return table
 local function buildSecondary(state, width)
-    local kpi = (state.readingActivity or {}).kpi or {}
+    local total_obj = state.total or {}
     local items = {
-        { _("近7天"), kpi.last7DaysReadTime },
-        { _("最长日"), kpi.longestDay },
-        { _("总页数"), kpi.totalPagesRead },
+        { _("近7天"), total_obj.last7_text },
+        { _("最长日"), total_obj.longest_day_text },
+        { _("总页数"), total_obj.total_pages },
     }
     local row_h = UI.sz(48)
     local cell_w = math.floor(width / #items)
@@ -157,6 +189,14 @@ local function buildSecondary(state, width)
     }
 end
 
+--- 日历单格。
+---@param size number
+---@param day_num number
+---@param has_read boolean
+---@param out_month boolean
+---@param selected boolean
+---@param on_tap fun()|nil
+---@return table
 local function calCell(size, day_num, has_read, out_month, selected, on_tap)
     local border = selected and UI.sz(2) or 0
     local kids = VerticalGroup:new{
@@ -189,6 +229,12 @@ local function calCell(size, day_num, has_read, out_month, selected, on_tap)
     return tap
 end
 
+--- 日历月份导航按钮。
+---@param label string
+---@param w number
+---@param h number
+---@param on_tap fun()|nil
+---@return table
 local function navBtn(label, w, h, on_tap)
     local tap = BookInfo.tappable(w, h, on_tap)
     tap[1] = CenterContainer:new{
@@ -202,9 +248,14 @@ local function navBtn(label, w, h, on_tap)
     return tap
 end
 
+--- 构建月历网格。
+---@param desktop table
+---@param state table
+---@param width number
+---@return table
 local function buildCalendar(desktop, state, width)
-    local perDay = state.perDay or {}
-    local ym = state.ym or state.initialYm or os.date("%Y-%m")
+    local perDay = (state.calendar and state.calendar.days) or {}
+    local ym = state.ym or (state.calendar and state.calendar.initial_ym) or os.date("%Y-%m")
     local selected = state.selected or ""
     local y, m = ym:match("^(%d%d%d%d)%-(%d%d)$")
     y, m = tonumber(y), tonumber(m)
@@ -267,7 +318,8 @@ local function buildCalendar(desktop, state, width)
         local cy, cm, cd, out = resolveDay(y, m, start_day + i, dim)
         local key = string.format("%04d-%02d-%02d", cy, cm, cd)
         local info = perDay[key]
-        local cell = calCell(size, cd, info and (info.duration or 0) > 0, out, key == selected, function()
+        local secs = info and (tonumber(info.duration_seconds) or 0) or 0
+        local cell = calCell(size, cd, secs > 0, out, key == selected, function()
             state.selected = key
             if out then state.ym = string.format("%04d-%02d", cy, cm) end
             desktop._insight_ui_page = 2
@@ -290,31 +342,36 @@ local function buildCalendar(desktop, state, width)
     }
 end
 
+--- 取路径末段文件名。
+---@param path string|nil
+---@return string|nil
 local function basename(path)
     return (type(path) == "string" and path:match("([^/\\]+)$")) or path
 end
 
---- 统计页点书：本地元数据优先，否则按文件名搜图书馆
+--- 统计页点书：本地元数据优先，否则按 id 搜图书馆。
+---@param desktop table
+---@param hint table
 function Insight.openBookDetail(desktop, hint)
     if not desktop or desktop._closed or desktop._insight_opening then return end
-    local filename = hint and (hint.filename or hint.fileName)
-    if type(filename) ~= "string" or filename == "" then
+    local sid = hint and hint.id
+    if type(sid) ~= "string" or sid == "" then
         UIManager:show(InfoMessage:new{ text = _("没有这本书"), timeout = 2 })
         return
     end
 
-    local cached = Cache.findMeta(filename)
+    local cached = Store.findMeta(sid)
     if cached then
-        if hint.progress ~= nil and (cached.progressPercent == nil or cached.progressPercent == 0) then
+        if hint.percent ~= nil and (not cached.percent or cached.percent == 0) then
             cached = {
-                filename = cached.filename or filename,
-                bookName = cached.bookName or cached.title,
-                author = cached.author,
+                id = cached.id or sid,
+                title = cached.title,
+                authors = cached.authors,
                 favorite = cached.favorite,
                 category = cached.category,
                 series = cached.series,
-                description = cached.description,
-                progressPercent = tonumber(hint.progress) or cached.progressPercent,
+                intro = cached.intro,
+                percent = tonumber(hint.percent) or cached.percent or 0,
             }
         end
         desktop:showDetail(cached)
@@ -327,9 +384,9 @@ function Insight.openBookDetail(desktop, hint)
         return
     end
 
-    local search = hint.title or hint.bookName or ""
+    local search = hint.title or ""
     if search == "" then
-        search = (basename(filename) or ""):gsub("%.[^%.]+$", "")
+        search = (basename(sid) or ""):gsub("%.[^%.]+$", "")
     end
     if search == "" then
         UIManager:show(InfoMessage:new{ text = _("没有这本书"), timeout = 2 })
@@ -341,6 +398,9 @@ function Insight.openBookDetail(desktop, hint)
         desktop._insight_opening = true
         local loading = InfoMessage:new{ text = _("正在拉取书籍信息…") }
         UIManager:show(loading)
+        --- 打开详情结束：关 loading 或报错。
+        ---@param book table|nil
+        ---@param err_text string|nil
         local function finish(book, err_text)
             desktop._insight_opening = false
             pcall(function() UIManager:close(loading) end)
@@ -353,15 +413,15 @@ function Insight.openBookDetail(desktop, hint)
         end
         UIManager:scheduleIn(0, function()
             local ok, err = pcall(function()
-                local res, req_err = api:listLibrary{ page = 1, pageSize = 50, search = search }
+                local res, req_err = api:listLibrary{ page = 1, page_size = 50, search = search }
                 if not res then
                     finish(nil, req_err or _("拉取失败"))
                     return
                 end
-                local want = basename(filename)
+                local want = basename(sid)
                 for _, row in ipairs(res.data or {}) do
                     if basename(BookInfo.file(row)) == want then
-                        Cache.remember(row)
+                        Store.remember(row)
                         finish(row)
                         return
                     end
@@ -376,18 +436,28 @@ function Insight.openBookDetail(desktop, hint)
     end)
 end
 
+--- 构建当日书单详情页。
+---@param desktop table
+---@param state table
+---@param width number
+---@param avail_h number|nil
+---@return table
 local function buildDayDetail(desktop, state, width, avail_h)
     local selected = state.selected or ""
-    local info = selected ~= "" and (state.perDay or {})[selected] or nil
+    local days = (state.calendar and state.calendar.days) or {}
+    local info = selected ~= "" and days[selected] or nil
     local col = VerticalGroup:new{ align = "left" }
     local used = 0
+    --- 追加子控件并累计已用高度。
+    ---@param w table
+    ---@param wh number|nil
     local function push(w, wh)
         table.insert(col, w)
         used = used + (wh or 0)
     end
 
     local title = selected == "" and _("选择日期")
-        or dayTitle(selected, info and info.durationText or nil)
+        or dayTitle(selected, info and info.duration_text or nil)
     local title_w = TextWidget:new{
         text = title,
         face = UI.face("cfont", 15),
@@ -413,20 +483,18 @@ local function buildDayDetail(desktop, state, width, avail_h)
         if avail_h and used + need + reserve > avail_h then break end
         if shown > 0 then push(VerticalSpan:new{ width = row_gap }, row_gap) end
 
-        local filename = book.filename
-        local title_t = book.title or filename or "?"
+        local sid = book.ref and book.ref.stable_id or nil
+        local title_t = book.title or sid or "?"
         local author_t = (book.authors and book.authors ~= "") and book.authors or _("未知作者")
-        local pct = tonumber(book.progress) or 0
+        local pct = tonumber(book.percent) or 0
         if pct < 0 then pct = 0 elseif pct > 100 then pct = 100 end
 
-        local cover = select(1, BookInfo.cover(plugin, api, {
-            filename = filename,
-            bookName = title_t,
-            progressPercent = pct,
-        }, cw, ch, { badge = false }))
+        local cover = select(1, BookInfo.cover(plugin, api, book, cw, ch, {
+            badge = false,
+            show_parent = desktop,
+        }))
 
         local meta_w = math.max(1, width - cw - gap)
-        local bar_w = math.max(1, meta_w - UI.sz(64))
         local meta = VerticalGroup:new{
             align = "left",
             TextWidget:new{
@@ -438,15 +506,7 @@ local function buildDayDetail(desktop, state, width, avail_h)
             VerticalSpan:new{ width = UI.sz(4) },
             muted(author_t, meta_w, 12),
             VerticalSpan:new{ width = UI.sz(8) },
-            HorizontalGroup:new{
-                align = "center",
-                CenterContainer:new{
-                    dimen = Geom:new{ w = bar_w, h = UI.sz(10) },
-                    UI.progressBar(bar_w, UI.sz(6), pct),
-                },
-                HorizontalSpan:new{ width = UI.sz(8) },
-                muted(tostring(book.durationText or ""), UI.sz(56), 12),
-            },
+            UI.progressBar(meta_w, UI.sz(6), pct),
         }
         local tap = BookInfo.tappable(width, ch, function()
             Insight.openBookDetail(desktop, book)
@@ -470,6 +530,11 @@ local function buildDayDetail(desktop, state, width, avail_h)
     return col
 end
 
+--- 构建概览页（KPI + 日历）。
+---@param desktop table
+---@param state table
+---@param content_w number
+---@return table
 local function buildOverview(desktop, state, content_w)
     local col = VerticalGroup:new{ align = "left", buildHero(desktop, state, content_w) }
     if state.error then
@@ -478,7 +543,7 @@ local function buildOverview(desktop, state, content_w)
             dimen = Geom:new{ w = content_w, h = UI.sz(24) },
             muted(state.error, content_w),
         })
-    elseif not state.hasData then
+    elseif not state.has_data then
         table.insert(col, VerticalSpan:new{ width = UI.sz(12) })
         table.insert(col, CenterContainer:new{
             dimen = Geom:new{ w = content_w, h = UI.sz(40) },
@@ -495,6 +560,9 @@ local function buildOverview(desktop, state, content_w)
     return col
 end
 
+--- 构建统计 Tab 整页 UI。
+---@param desktop table
+---@return table
 function Insight.build(desktop)
     local h = desktop:contentHeight()
     local w = desktop.dimen.w
@@ -504,7 +572,7 @@ function Insight.build(desktop)
     local body_h = math.max(1, h - Pager.bandH())
     local inner_h = math.max(1, body_h - page_pad * 2)
 
-    local has_day = state.hasData and not state.error
+    local has_day = state.has_data and not state.error
     local pages = has_day and 2 or 1
     local page = Pager.clamp(desktop._insight_ui_page, pages)
     desktop._insight_ui_page = page
@@ -545,15 +613,19 @@ function Insight.build(desktop)
     }
 end
 
+--- 异步拉取阅读统计 insight。
+---@param desktop table
 function Insight.fetch(desktop)
     if desktop._insight_fetching then return end
     desktop._insight_fetching = true
     if desktop._insight_fetch_cancel then
-        desktop._insight_fetch_cancel()
+        desktop._insight_fetch_cancel:cancel()
         desktop._insight_fetch_cancel = nil
     end
     local source = desktop.source
 
+    --- 写入统计状态并重建。
+    ---@param state table|nil
     local function finish(state)
         desktop._insight_fetching = false
         desktop._insight_fetch_cancel = nil
@@ -564,61 +636,74 @@ function Insight.fetch(desktop)
     end
 
     if not source or not source.configured or not source:configured() then
-        finish({ hasData = false, error = _("请先配置数据源") })
+        finish({ has_data = false, error = _("请先配置数据源") })
         return
     end
     local caps = source.capabilities and source:capabilities() or {}
-    if caps.stats == false then
-        finish({ hasData = false, error = _("当前数据源不支持统计") })
+    if caps.insight == false then
+        finish({ has_data = false, error = _("当前数据源不支持统计") })
         return
     end
 
-    local Async = require("moon.async")
-    desktop._insight_fetch_cancel = Async.run(function()
+    local Promise = require("utils.promise")
+    desktop._insight_fetch_cancel = Promise:new(function()
         return source:readingInsight()
-    end, function(ok, res, err)
-        if desktop._closed then
-            desktop._insight_fetching = false
-            desktop._insight_fetch_cancel = nil
-            return
-        end
-        if not ok or not res then
-            finish({ hasData = false, error = err or _("加载失败") })
-            return
-        end
-        local applied, boom = pcall(function()
-            local data = res.data or res
-            if type(data) ~= "table" then
-                finish({ hasData = false, error = _("响应数据无效") })
+    end)
+        :next(function(res)
+            if desktop._closed then
+                desktop._insight_fetching = false
+                desktop._insight_fetch_cancel = nil
                 return
             end
-            local perDay = data.perDay or {}
-            local days = {}
-            for day in pairs(perDay) do table.insert(days, day) end
-            table.sort(days)
-            local selected = days[#days] or ""
-            local ym = data.initialYm or os.date("%Y-%m")
-            local yy, mm = selected:match("^(%d%d%d%d)%-(%d%d)")
-            if yy and mm then ym = yy .. "-" .. mm end
-            finish({
-                hasData = not not data.hasData,
-                initialYm = data.initialYm,
-                readingActivity = data.readingActivity or {},
-                perDay = perDay,
-                ym = ym,
-                selected = selected,
-            })
-            if source.primeInsightCache then
-                source:primeInsightCache(res)
+            if not res then
+                finish({ has_data = false, error = _("加载失败") })
+                return
+            end
+            local applied, boom = pcall(function()
+                local raw = res.data or res
+                if type(raw) ~= "table" then
+                    finish({ has_data = false, error = _("响应数据无效") })
+                    return
+                end
+                local data = raw
+                if type(raw.total) ~= "table" or type(raw.calendar) ~= "table" then
+                    finish({ has_data = false, error = _("响应数据无效") })
+                    return
+                end
+                local perDay = (data.calendar and data.calendar.days) or {}
+                local days = {}
+                for day in pairs(perDay) do table.insert(days, day) end
+                table.sort(days)
+                local selected = days[#days] or ""
+                local ym = (data.calendar and data.calendar.initial_ym) or os.date("%Y-%m")
+                local yy, mm = selected:match("^(%d%d%d%d)%-(%d%d)")
+                if yy and mm then ym = yy .. "-" .. mm end
+                finish({
+                    has_data = not not data.has_data,
+                    total = data.total,
+                    calendar = data.calendar,
+                    ym = ym,
+                    selected = selected,
+                })
+            end)
+            if not applied then
+                logger.err("book insight fetch apply failed:", boom)
+                finish({ has_data = false, error = tostring(boom) })
             end
         end)
-        if not applied then
-            logger.err("book insight fetch apply failed:", boom)
-            finish({ hasData = false, error = tostring(boom) })
-        end
-    end)
+        :fail(function(err)
+            if desktop._closed then
+                desktop._insight_fetching = false
+                desktop._insight_fetch_cancel = nil
+                return
+            end
+            finish({ has_data = false, error = err or _("加载失败") })
+        end)
 end
 
+--- Desktop rebuild 入口：未加载则触发 fetch。
+---@param desktop table
+---@return table
 function Insight.page(desktop)
     local h = desktop:contentHeight()
     local w = desktop.dimen.w

@@ -27,13 +27,12 @@ local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
-local ImageWidget = require("ui/widget/imagewidget")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local RightContainer = require("ui/widget/container/rightcontainer")
-local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
+local TextWidget = require("ui/widget/textwidget")
 local datetime = require("datetime")
 local NetworkMgr = require("ui/network/manager")
 local util = require("util")
@@ -41,7 +40,8 @@ local _ = require("gettext")
 local Screen = Device.screen
 
 local UI = require("ui.components.bookui")
-local MoonSettings = require("moon.settings")
+local Image = require("ui.components.image")
+local MoonSettings = require("utils.settings")
 local SourceRegistry = require("source.registry")
 
 local TopBar = {}
@@ -49,49 +49,43 @@ local TopBar = {}
 --- 电池分段数（整格点亮，墨水屏可见）
 local SEGMENTS = 5
 
---- 顶栏小图标边长（小于底栏 UI.iconSz）
+--- 顶栏小图标边长（小于底栏 UI.iconSz）。
+---@return number
 local function iconSz()
     return UI.sz(14)
 end
 
---- 加载 icons/ 下 SVG；缺文件或解码失败返回 nil（指标退化为纯文字）
-local function loadIcon(name, sz)
-    sz = sz or iconSz()
-    local ok, img = pcall(function()
-        return ImageWidget:new{
-            file = UI.iconDir() .. name,
-            width = sz,
-            height = sz,
-            alpha = true,
-        }
-    end)
-    if ok and img then
-        return img
-    end
-    return nil
-end
-
---- 通用「图标 + 文案」指标行；text 空则整项省略
-local function metric(icon_name, text, face)
+--- 通用「图标 + 文案」指标行；text 空则整项省略；图标失败则纯文字。
+---@param icon_name string
+---@param text string|nil
+---@return table|nil
+local function metric(icon_name, text)
     if not text or text == "" then
         return nil
     end
     local row = HorizontalGroup:new{ align = "center" }
-    local icon = loadIcon(icon_name)
+    local sz = iconSz()
+    local icon = Image.widget{
+        src = icon_name,
+        width = sz,
+        height = sz,
+    }
     if icon then
         table.insert(row, icon)
         table.insert(row, HorizontalSpan:new{ width = UI.sz(3) })
     end
     table.insert(row, TextWidget:new{
         text = text,
-        face = face,
+        face = UI.face("xx_smallinfofont", 12),
         fgcolor = Blitbuffer.COLOR_BLACK,
     })
     return row
 end
 
---- 电池外形 + 分段填充。
--- pct 0–100；charging 时外壳浅底。低电反色便于墨水屏辨认。
+--- 电池外形 + 分段填充。pct 0–100；charging 时外壳浅底；低电反色便于墨水屏辨认。
+---@param pct number|nil
+---@param charging boolean|nil
+---@return table
 local function batteryGlyph(pct, charging)
     pct = tonumber(pct) or 0
     if pct < 0 then pct = 0 end
@@ -171,8 +165,11 @@ local function batteryGlyph(pct, charging)
     }
 end
 
---- 电池指标：分段图标 +「[+ ]NN%」
-local function batteryMetric(pct, charging, face)
+--- 电池指标：分段图标 +「[+ ]NN%」。
+---@param pct number
+---@param charging boolean|nil
+---@return table
+local function batteryMetric(pct, charging)
     local row = HorizontalGroup:new{ align = "center" }
     table.insert(row, batteryGlyph(pct, charging))
     table.insert(row, HorizontalSpan:new{ width = UI.sz(3) })
@@ -182,13 +179,14 @@ local function batteryMetric(pct, charging, face)
     end
     table.insert(row, TextWidget:new{
         text = label,
-        face = face,
+        face = UI.face("xx_smallinfofont", 12),
         fgcolor = Blitbuffer.COLOR_BLACK,
     })
     return row
 end
 
---- 当前活跃源显示名（只取 meta，不构造 Source 实例）
+--- 当前活跃源显示名（只取 meta，不构造 Source 实例）。
+---@return string
 local function sourceName()
     local id = MoonSettings.activeSourceId()
     local meta = id and SourceRegistry.meta(id)
@@ -198,12 +196,12 @@ local function sourceName()
     return id or _("未知源")
 end
 
---- 构建一整条顶栏 widget（无缓存；调用方负责挂到 Desktop 并 setDirty）
+--- 构建一整条顶栏 widget（无缓存；调用方负责挂到 Desktop 并 setDirty）。
+---@return table
 function TopBar.build()
     local sw = Screen:getWidth()
     local th = UI.topBarH()
     local pad = UI.pagePad()
-    local face = UI.face("xx_smallinfofont", 12)
     local gap_w = UI.sz(10)
     local line_h = UI.line()
     local inner_h = th - line_h
@@ -211,14 +209,18 @@ function TopBar.build()
 
     -- 左：当前源（过长截断，最多约占内容宽 42%）
     local left = HorizontalGroup:new{ align = "center" }
-    local src_icon = loadIcon("source.svg")
+    local src_icon = Image.widget{
+        src = "source.svg",
+        width = iconSz(),
+        height = iconSz(),
+    }
     if src_icon then
         table.insert(left, src_icon)
         table.insert(left, HorizontalSpan:new{ width = UI.sz(4) })
     end
     table.insert(left, TextWidget:new{
         text = sourceName(),
-        face = face,
+        face = UI.face("xx_smallinfofont", 12),
         fgcolor = Blitbuffer.COLOR_BLACK,
         max_width = math.floor(inner_w * 0.42),
     })
@@ -226,6 +228,8 @@ function TopBar.build()
     -- 右：监控项；缺能力/读失败则跳过该项（不占位）
     local right = HorizontalGroup:new{ align = "center" }
     local n = 0
+    --- 向右侧指标行追加一项。
+    ---@param widget table|nil
     local function add(widget)
         if not widget then
             return
@@ -242,29 +246,29 @@ function TopBar.build()
     mem_avail, mem_total = tonumber(mem_avail), tonumber(mem_total)
     if mem_avail and mem_total and mem_total > 0 then
         local mib = math.floor(mem_avail / (1024 * 1024) + 0.5)
-        add(metric("memory.svg", string.format("%d MiB", mib), face))
+        add(metric("memory.svg", string.format("%d MiB", mib)))
     end
 
     if Device:hasBattery() and Device.powerd then
         local pct = Device.powerd:getCapacity()
         if type(pct) == "number" then
-            add(batteryMetric(pct, Device.powerd:isCharging(), face))
+            add(batteryMetric(pct, Device.powerd:isCharging()))
         end
     end
 
     if Device:hasFrontlight() and Device.powerd and Device.powerd.frontlightIntensity then
         local lvl = Device.powerd:frontlightIntensity()
         if type(lvl) == "number" then
-            add(metric("brightness.svg", string.format("%d%%", lvl), face))
+            add(metric("brightness.svg", string.format("%d%%", lvl)))
         end
     end
 
     local wifi_on = NetworkMgr:isWifiOn()
-    add(metric(wifi_on and "wifi.svg" or "wifi_off.svg", wifi_on and _("Wi‑Fi") or _("离线"), face))
+    add(metric(wifi_on and "wifi.svg" or "wifi_off.svg", wifi_on and _("Wi‑Fi") or _("离线")))
 
     -- 跟随 KOReader 12/24 小时制设置
     local clock = datetime.secondsToHour(os.time(), G_reader_settings:isTrue("twelve_hour_clock"))
-    add(metric("schedule.svg", clock, face))
+    add(metric("schedule.svg", clock))
 
     -- 左右叠在同一行：左贴左、右贴右
     local row = OverlapGroup:new{

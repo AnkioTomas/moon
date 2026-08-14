@@ -12,6 +12,7 @@ local SOURCE_ID = "webdav"
 local Setting = {}
 
 
+--- 设置行状态文案与高亮开关。
 ---@return string status, boolean status_on
 function Setting.rowStatus()
     local cfg = require("utils.settings").getSource(SOURCE_ID)
@@ -21,7 +22,7 @@ function Setting.rowStatus()
     return _("未配置"), false
 end
 
---- 自绘连接表单
+--- 自绘连接表单。
 ---@param plugin table|nil
 function Setting.open(plugin)
     local UIManager = require("ui/uimanager")

@@ -1,10 +1,11 @@
 --[[--
 Book 桌面 UI 缩放 — 字号 / 间距 / 图标统一从这里走。
 缩放值存 moon.settings（$DATA/.moon/settings/common.lua 的 ui_scale）
+字体族存 common.ui_font，经 moon.font 改 Font.fontmap；UI.face 解析字族。
 
 约定：
   UI.sz(n)       间距、控件几何（含 DPI + ui_scale）
-  UI.face(...)   文本字号（ui_scale）
+  UI.face(...)   Font:getFace 包装（TextWidget / TitleBar / TextBox 用）
   UI.fontSize(n) 交给 Button/Menu 的数字字号
   UI.iconSz()    图标边长
   UI.line()      分割线粗细
@@ -16,14 +17,15 @@ Book 桌面 UI 缩放 — 字号 / 间距 / 图标统一从这里走。
 local Device = require("device")
 local Font = require("ui/font")
 local Blitbuffer = require("ffi/blitbuffer")
-local MoonSettings = require("moon.settings")
+local MoonSettings = require("utils.settings")
 local Screen = Device.screen
 
 local UI = {}
 
 local _plugin_root
 
---- 插件根目录（…/book.koplugin/），带尾斜杠
+--- 插件根目录（…/book.koplugin/），带尾斜杠。
+---@return string
 function UI.pluginRoot()
     if _plugin_root then
         return _plugin_root
@@ -50,6 +52,8 @@ function UI.pluginRoot()
     return _plugin_root
 end
 
+--- 图标目录路径（pluginRoot/icons/）。
+---@return string
 function UI.iconDir()
     return UI.pluginRoot() .. "icons/"
 end
@@ -59,6 +63,26 @@ local MIN_SCALE = 100
 local MAX_SCALE = 180
 local STEP = 10
 
+--- UI 缩放下限（百分比）。
+---@return number
+function UI.scaleMin()
+    return MIN_SCALE
+end
+
+--- UI 缩放上限（百分比）。
+---@return number
+function UI.scaleMax()
+    return MAX_SCALE
+end
+
+--- UI 缩放步进（百分比）。
+---@return number
+function UI.scaleStep()
+    return STEP
+end
+
+--- 读取当前 UI 缩放百分比。
+---@return number
 function UI.getScale()
     local s = MoonSettings.get()
     local n = tonumber(s.ui_scale) or DEFAULT_SCALE
@@ -67,6 +91,9 @@ function UI.getScale()
     return n
 end
 
+--- 写入并夹紧 UI 缩放百分比。
+---@param n number|nil
+---@return number
 function UI.setScale(n)
     n = tonumber(n) or DEFAULT_SCALE
     if n < MIN_SCALE then n = MIN_SCALE end
@@ -78,52 +105,75 @@ function UI.setScale(n)
     return n
 end
 
+--- 循环切换到下一档缩放。
+---@return number
 function UI.cycleScale()
     local n = UI.getScale() + STEP
     if n > MAX_SCALE then n = MIN_SCALE end
     return UI.setScale(n)
 end
 
---- 逻辑像素 → 物理像素，再乘 ui_scale
+--- 逻辑像素 → 物理像素，再乘 ui_scale。
+---@param n number
+---@return number
 function UI.sz(n)
     return math.max(1, math.floor(Screen:scaleBySize(n) * UI.getScale() / 100 + 0.5))
 end
 
---- 纯数字字号（Font / Button.text_font_size / Menu.items_font_size）
+--- 纯数字字号（Font / Button.text_font_size / Menu.items_font_size）。
+---@param size number|nil
+---@return number
 function UI.fontSize(size)
     return math.max(10, math.floor((size or 16) * UI.getScale() / 100 + 0.5))
 end
 
---- Font:getFace 的缩放包装
+--- Font:getFace 的缩放包装（字族经 Font.fontmap，含 ui_font）。
+---@param name string
+---@param size number|nil
+---@return table
 function UI.face(name, size)
     return Font:getFace(name, UI.fontSize(size))
 end
 
+--- 分割线粗细（至少 1px）。
+---@return number
 function UI.line()
     return math.max(1, UI.sz(1))
 end
 
+--- 标准图标边长。
+---@return number
 function UI.iconSz()
     return UI.sz(24)
 end
 
+--- 弱化文字色（深灰接近黑）。
+---@return any
 function UI.muted()
     return Blitbuffer.COLOR_GRAY_3 -- 0x33，深灰接近黑
 end
 
+--- 更淡的弱化色。
+---@return any
 function UI.dim()
     return Blitbuffer.COLOR_GRAY_4 -- 0x44
 end
 
+--- 分割线颜色。
+---@return any
 function UI.rule()
     return Blitbuffer.COLOR_GRAY_5 -- 0x55，分割线可见
 end
 
+--- 进度条空轨颜色。
+---@return any
 function UI.track()
     return Blitbuffer.COLOR_LIGHT_GRAY -- 0xCC，空轨浅但不飘
 end
 
---- TitleBar 关闭等图标：把目标边长折算成 size_ratio
+--- TitleBar 关闭等图标：把目标边长折算成 size_ratio。
+---@param base_ratio number|nil
+---@return number
 function UI.titleIconRatio(base_ratio)
     base_ratio = base_ratio or 0.6
     local ok, defaults = pcall(function()
@@ -135,35 +185,46 @@ function UI.titleIconRatio(base_ratio)
     return UI.iconSz() / native * base_ratio
 end
 
+--- 底栏高度。
+---@return number
 function UI.barH()
     -- 图标 + 文字 + 上下空隙，随字号一起长
     return math.max(UI.sz(56), UI.iconSz() + UI.sz(32))
 end
 
---- 各页统一内容边距（首页 / 书架 / 统计 / 设置 / 详情）
+--- 各页统一内容边距（首页 / 书架 / 统计 / 设置 / 详情）。
+---@return number
 function UI.pagePad()
     return UI.sz(16)
 end
 
---- 节与节之间的垂直间距
+--- 节与节之间的垂直间距。
+---@return number
 function UI.sectionGap()
     return UI.sz(18)
 end
 
---- Desktop 顶部系统状态条高度（容纳小图标 + 分段电池）
+--- Desktop 顶部系统状态条高度（容纳小图标 + 分段电池）。
+---@return number
 function UI.topBarH()
     return math.max(UI.sz(32), UI.fontSize(12) + UI.sz(16))
 end
 
+--- 菜单项字号。
+---@return number
 function UI.menuFontSize()
     return UI.fontSize(22)
 end
 
+--- 按钮字号。
+---@return number
 function UI.buttonFontSize()
     return UI.fontSize(20)
 end
 
 --- 网格封面高度上限：跟屏高走，避免宽屏三列把封面撑到半屏。
+---@param area_h number|nil
+---@return number
 function UI.gridCoverMaxH(area_h)
     local screen_h = Screen:getHeight()
     area_h = tonumber(area_h) or screen_h
@@ -182,10 +243,11 @@ function UI.gridCoverMaxH(area_h)
 end
 
 --- 密铺封面网格：按可用宽度选列数，封面约 2:3。
---- opts:
----   title_extra — 格子额外高度（书名行等），默认 0
----   min_cols / max_cols / min_cw / target_cw / gap / row_gap
---- 返回 slot_w, cw, ch, cols, gap, row_gap, cell_h
+--- opts: title_extra / min_cols / max_cols / min_cw / target_cw / gap / row_gap
+---@param avail_w number
+---@param budget_h number
+---@param opts table|nil
+---@return number, number, number, number, number, number, number
 function UI.denseCoverMetrics(avail_w, budget_h, opts)
     opts = opts or {}
     avail_w = math.max(1, math.floor(tonumber(avail_w) or 1))
@@ -199,6 +261,9 @@ function UI.denseCoverMetrics(avail_w, budget_h, opts)
     local title_extra = opts.title_extra or 0
     local max_h = opts.max_h or UI.gridCoverMaxH(budget_h > 0 and budget_h or nil)
 
+    --- 给定列数时的格子宽。
+    ---@param c number
+    ---@return number
     local function slotFor(c)
         return math.floor((avail_w - gap * (c - 1)) / c)
     end
@@ -242,8 +307,10 @@ end
 
 --- 网格尺度：列宽铺满屏幕；封面在格子里保持 2:3。
 --- 返回 slot_w, cover_w, cover_h, cols, gap
----   slot_w  — 格子宽（列均分，吃满 avail）
----   cover_* — 真实封面框（始终约 2:3，居中放进格子）
+---@param avail_w number
+---@param area_h number
+---@param opts table|nil
+---@return number, number, number, number, number
 function UI.coverGridMetrics(avail_w, area_h, opts)
     opts = opts or {}
     local title_extra = opts.title_extra or 0
@@ -260,13 +327,16 @@ function UI.coverGridMetrics(avail_w, area_h, opts)
     return slot_w, cw, ch, cols, gap
 end
 
---- 最近阅读主角封面最大高度
+--- 最近阅读主角封面最大高度。
+---@return number
 function UI.coverMaxH()
     local screen_h = Screen:getHeight()
     return math.max(UI.sz(104), math.min(UI.sz(172), math.floor(screen_h * 0.26)))
 end
 
---- 主角封面：超高则压高度并回缩宽度，保持约 2:3
+--- 主角封面：超高则压高度并回缩宽度，保持约 2:3。
+---@param cw number
+---@return number, number
 function UI.coverDim(cw)
     cw = math.max(1, math.floor(tonumber(cw) or 1))
     local ch = math.floor(cw * 3 / 2)
@@ -279,9 +349,12 @@ function UI.coverDim(cw)
 end
 
 --- 简易进度条（0–100）。优先 ProgressWidget；否则用 LineWidget，禁止空 FrameContainer。
+---@param width number
+---@param height number|nil
+---@param percent number|nil
+---@return table
 function UI.progressBar(width, height, percent)
     local Geom = require("ui/geometry")
-    local TextWidget = require("ui/widget/textwidget")
     width = math.max(1, math.floor(tonumber(width) or 1))
     height = math.max(1, math.floor(tonumber(height) or UI.sz(8)))
     percent = tonumber(percent) or 0
@@ -321,6 +394,7 @@ function UI.progressBar(width, height, percent)
         })
     end
     if #row == 0 then
+        local TextWidget = require("ui/widget/textwidget")
         return TextWidget:new{
             text = string.format("%.0f%%", percent),
             face = UI.face("xx_smallinfofont", 12),

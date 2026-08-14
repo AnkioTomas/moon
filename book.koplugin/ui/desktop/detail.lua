@@ -15,10 +15,10 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local TextBoxWidget = require("ui/widget/textboxwidget")
-local TextWidget = require("ui/widget/textwidget")
 local TitleBar = require("ui/widget/titlebar")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local TextWidget = require("ui/widget/textwidget")
 local BookInfo = require("ui.components.bookinfo")
 local UI = require("ui.components.bookui")
 local _ = require("gettext")
@@ -33,6 +33,11 @@ local Detail = InputContainer:extend{
     desktop = nil,
 }
 
+--- 元信息一行：左侧标签 + 右侧值；值为空则返回 nil。
+---@param label string
+---@param value string|nil
+---@param width number
+---@return table|nil
 local function metaRow(label, value, width)
     if not value or value == "" then
         return nil
@@ -57,6 +62,7 @@ local function metaRow(label, value, width)
     }
 end
 
+--- 初始化全屏尺寸、返回键，并 rebuild。
 function Detail:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     if Device:hasKeys() then
@@ -67,10 +73,14 @@ function Detail:init()
     self:rebuild()
 end
 
+--- 返回详情页尺寸。
+---@return table
 function Detail:getSize()
     return self.dimen
 end
 
+--- 关闭详情并强制重绘下层桌面。
+---@return boolean
 function Detail:onClose()
     self._closed = true
     local UIManager = require("ui/uimanager")
@@ -87,6 +97,7 @@ function Detail:onClose()
     return true
 end
 
+--- Widget 关闭时触发 close_callback。
 function Detail:onCloseWidget()
     self._closed = true
     local cb = self.close_callback
@@ -96,6 +107,7 @@ function Detail:onCloseWidget()
     end
 end
 
+--- 重建封面、元信息、简介与底部按钮。
 function Detail:rebuild()
     local book = self.book or {}
     local w = Screen:getWidth()
@@ -106,7 +118,10 @@ function Detail:rebuild()
     if title == "?" then title = _("书籍详情") end
 
     local cw, ch = UI.sz(120), UI.sz(170)
-    local cover_w = select(1, BookInfo.cover(self.plugin, self.source, book, cw, ch, { badge = false }))
+    local cover_w = select(1, BookInfo.cover(self.plugin, self.source, book, cw, ch, {
+        badge = false,
+        show_parent = self,
+    }))
 
     local title_bar = TitleBar:new{
         fullscreen = true,
@@ -137,6 +152,11 @@ function Detail:rebuild()
             {
                 text = _("开始阅读"),
                 font_size = btn_font,
+                enabled = (function()
+                    local src = self.source
+                    local caps = src and src.capabilities and src:capabilities() or {}
+                    return caps.whole_book == true or caps.chapters == true
+                end)(),
                 callback = function()
                     local plugin = self.plugin
                     local b = self.book

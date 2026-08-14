@@ -18,18 +18,18 @@ local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
-local ImageWidget = require("ui/widget/imagewidget")
-local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local InputDialog = require("ui/widget/inputdialog")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local TextWidget = require("ui/widget/textwidget")
 local Device = require("device")
 local BookInfo = require("ui.components.bookinfo")
 local UI = require("ui.components.bookui")
+local Image = require("ui.components.image")
 local Pager = require("ui.components.pager")
 local Popup = require("ui.components.popup")
-local Cache = require("moon.cache")
+local Store = require("book.store")
 local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -70,27 +70,11 @@ local FILTER_KINDS = {
 
 local FILTER_ORDER = { "favorite", "category", "series", "author" }
 
-local function loadIcon(name, size)
-    size = size or UI.sz(18)
-    local ok, img = pcall(function()
-        return ImageWidget:new{
-            file = UI.iconDir() .. name,
-            width = size,
-            height = size,
-            alpha = true,
-        }
-    end)
-    if ok and img then
-        return img
-    end
-    return TextWidget:new{
-        text = "·",
-        face = UI.face("cfont", 14),
-        fgcolor = Blitbuffer.COLOR_BLACK,
-    }
-end
-
---- 顶栏入口：图标 + 文字，无边框
+--- 顶栏入口：图标 + 文字，无边框。
+---@param icon_name string
+---@param text string
+---@param callback fun()|nil
+---@return table
 local function iconAction(icon_name, text, callback)
     local icon_sz = UI.sz(18)
     local label = TextWidget:new{
@@ -109,7 +93,11 @@ local function iconAction(icon_name, text, callback)
         dimen = Geom:new{ w = tw, h = th },
         HorizontalGroup:new{
             align = "center",
-            loadIcon(icon_name, icon_sz),
+            Image.widget{
+                src = icon_name,
+                width = icon_sz,
+                height = icon_sz,
+            },
             HorizontalSpan:new{ width = gap },
             label,
         },
@@ -117,6 +105,10 @@ local function iconAction(icon_name, text, callback)
     return tap
 end
 
+--- 从 filters 响应里按定义取列表（含别名回退）。
+---@param data table|nil
+---@param def table|nil
+---@return table
 local function pickFilterList(data, def)
     if type(data) ~= "table" or not def then return {} end
     local list = data[def.list_key]
@@ -132,7 +124,10 @@ local function pickFilterList(data, def)
     return type(list) == "table" and list or {}
 end
 
---- 筛选互斥：同一时刻只保留一个条件（含 search）
+--- 筛选互斥：同一时刻只保留一个条件（含 search）。
+---@param desktop table
+---@param key string|nil
+---@param value string|nil
 function Library.applyExclusive(desktop, key, value)
     desktop.filter = {}
     if key and value and value ~= "" then
@@ -144,9 +139,19 @@ function Library.applyExclusive(desktop, key, value)
     desktop:rebuild()
 end
 
---- 封面 + 单行书名
+--- 封面 + 单行书名。
+---@param ctx table
+---@param book table
+---@param slot_w number
+---@param cw number
+---@param ch number
+---@param on_open fun(book: table)|nil
+---@return table, number
 local function coverCell(ctx, book, slot_w, cw, ch, on_open)
-    local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, { badge = true }))
+    local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, {
+        badge = true,
+        show_parent = ctx.desktop,
+    }))
     local title_gap = UI.sz(4)
     local title_h = UI.sz(22)
     local total_h = ch + title_gap + title_h
@@ -170,7 +175,10 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open)
     return tap, total_h
 end
 
---- 按内容区尺寸算出网格容量；请求 pageSize 必须与此一致
+--- 按内容区尺寸算出网格容量；请求 page_size 必须与此一致。
+---@param w number
+---@param h number
+---@return table
 function Library.gridMetrics(w, h)
     w = math.max(1, tonumber(w) or 1)
     h = math.max(1, tonumber(h) or 1)
@@ -200,6 +208,12 @@ function Library.gridMetrics(w, h)
     }
 end
 
+--- 按网格度量铺满一页封面格子。
+---@param ctx table
+---@param books table
+---@param m table
+---@param on_open fun(book: table)|nil
+---@return table, number
 local function buildGrid(ctx, books, m, on_open)
     local pad, gap, row_gap = m.pad, m.gap, m.row_gap
     local cols, slot_w, cw, ch = m.cols, m.slot_w, m.cw, m.ch
@@ -212,6 +226,7 @@ local function buildGrid(ctx, books, m, on_open)
     local row_n = 0
     local grid_used = 0
 
+    --- 冲刷当前行进网格。
     local function flushRow()
         if row_n > 0 then
             table.insert(grid, VerticalSpan:new{ width = row_gap })
@@ -251,6 +266,11 @@ local function buildGrid(ctx, books, m, on_open)
     return grid, grid_used
 end
 
+--- 构建图书馆页 UI（工具栏 + 网格 + 分页）。
+---@param ctx table
+---@param state table
+---@param opts table|nil
+---@return table
 function Library.build(ctx, state, opts)
     opts = opts or {}
     local w = ctx.width
@@ -267,19 +287,31 @@ function Library.build(ctx, state, opts)
         end
     end
 
-    local tools = HorizontalGroup:new{
-        iconAction("search.svg", _("搜索"), function()
+    local tools_kids = { align = "center" }
+    local caps = (ctx.source and ctx.source.capabilities and ctx.source:capabilities()) or {}
+    local has_tool = false
+    if caps.search then
+        table.insert(tools_kids, iconAction("search.svg", _("搜索"), function()
             if ctx.desktop then Library.showSearch(ctx.desktop) end
-        end),
-        HorizontalSpan:new{ width = UI.sz(8) },
-        iconAction("filter.svg", _("筛选"), function()
+        end))
+        has_tool = true
+    end
+    if caps.filters then
+        if has_tool then
+            table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
+        end
+        table.insert(tools_kids, iconAction("filter.svg", _("筛选"), function()
             if ctx.desktop then Library.showFilterRoot(ctx.desktop) end
-        end),
-        HorizontalSpan:new{ width = UI.sz(8) },
-        iconAction("clear.svg", _("清除"), function()
+        end))
+        has_tool = true
+    end
+    if has_tool then
+        table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
+        table.insert(tools_kids, iconAction("clear.svg", _("清除"), function()
             if ctx.desktop then Library.clearFilters(ctx.desktop) end
-        end),
-    }
+        end))
+    end
+    local tools = HorizontalGroup:new(tools_kids)
     local total_label = TextWidget:new{
         text = T(_("共%1"), total),
         face = UI.face("xx_smallinfofont", 13),
@@ -312,6 +344,8 @@ function Library.build(ctx, state, opts)
     local used = m.top_h
     local band_h = m.bottom_h
 
+    --- 空态/加载占位。
+    ---@param msg string
     local function placeholder(msg)
         local ph = math.max(1, h - band_h - used)
         table.insert(kids, CenterContainer:new{
@@ -351,7 +385,12 @@ function Library.build(ctx, state, opts)
     }
 end
 
+--- 异步拉取图书馆列表。
+---@param desktop table
 function Library.fetch(desktop)
+    --- 写入图书馆状态并重建。
+    ---@param books table|nil
+    ---@param err string|nil
     local function done(books, err)
         if desktop._closed or desktop.tab ~= "library" then return end
         desktop._library_state = {
@@ -362,7 +401,7 @@ function Library.fetch(desktop)
     end
 
     if desktop._library_fetch_cancel then
-        desktop._library_fetch_cancel()
+        desktop._library_fetch_cancel:cancel()
         desktop._library_fetch_cancel = nil
     end
 
@@ -378,14 +417,14 @@ function Library.fetch(desktop)
     local author = f.author or ""
     local finished = f.finished or ""
 
-    local Async = require("moon.async")
-    desktop._library_fetch_cancel = Async.run(function()
+    local Promise = require("utils.promise")
+    desktop._library_fetch_cancel = Promise:new(function()
         if not source or not source.configured or not source:configured() then
             return nil, _("请先在设置里配置当前数据源")
         end
         return source:listLibrary{
             page = page,
-            pageSize = page_size,
+            page_size = page_size,
             search = search,
             favorite = favorite,
             category = category,
@@ -393,22 +432,32 @@ function Library.fetch(desktop)
             author = author,
             finished = finished,
         }
-    end, function(ok, res, err)
-        desktop._library_fetch_cancel = nil
-        if desktop._closed or desktop.tab ~= "library" then
-            return
-        end
-        if not ok or not res then
-            done({}, err or _("加载失败"))
-            return
-        end
-        desktop.total = tonumber(res.count) or 0
-        local books = res.data or {}
-        Cache.rememberMany(books)
-        done(books)
     end)
+        :next(function(res)
+            desktop._library_fetch_cancel = nil
+            if desktop._closed or desktop.tab ~= "library" then
+                return
+            end
+            if not res then
+                done({}, _("加载失败"))
+                return
+            end
+            desktop.total = tonumber(res.count) or 0
+            local books = res.data or {}
+            Store.rememberMany(books)
+            done(books)
+        end)
+        :fail(function(err)
+            desktop._library_fetch_cancel = nil
+            if desktop._closed or desktop.tab ~= "library" then
+                return
+            end
+            done({}, err or _("加载失败"))
+        end)
 end
 
+--- 弹出筛选根菜单（分类/标签/系列/作者）。
+---@param desktop table
 function Library.showFilterRoot(desktop)
     local items = {}
     for _, kind in ipairs(FILTER_ORDER) do
@@ -431,6 +480,9 @@ function Library.showFilterRoot(desktop)
     }
 end
 
+--- 弹出某一类筛选值选择器。
+---@param desktop table
+---@param kind string
 function Library.showFilterPicker(desktop, kind)
     local def = FILTER_KINDS[kind]
     if not def then
@@ -440,6 +492,8 @@ function Library.showFilterPicker(desktop, kind)
     local title = def.title
     local query_key = def.query_key
 
+    --- 用筛选名列表刷新菜单项。
+    ---@param names table|nil
     local function applyList(names)
         local items = {{
             text = _("全部"),
@@ -470,6 +524,7 @@ function Library.showFilterPicker(desktop, kind)
         end,
     }
 
+    --- 拉取 filters 并填充选择器。
     local function fetch()
         local source = desktop.source
         if not source or not source.configured or not source:configured() then
@@ -494,6 +549,9 @@ function Library.showFilterPicker(desktop, kind)
     end)
 end
 
+--- 按当前网格容量同步 page_size。
+---@param desktop table
+---@return number
 function Library.syncPageSize(desktop)
     local m = Library.gridMetrics(
         (desktop.dimen and desktop.dimen.w) or Screen:getWidth(),
@@ -511,11 +569,17 @@ function Library.syncPageSize(desktop)
     return desktop.page_size
 end
 
+--- 计算图书馆总页数。
+---@param desktop table
+---@return number
 function Library.pages(desktop)
     local ps = Library.syncPageSize(desktop)
     return math.max(1, math.ceil((desktop.total or 0) / ps))
 end
 
+--- 跳转到指定页并重建。
+---@param desktop table
+---@param page number
 function Library.gotoPage(desktop, page)
     local pages = Library.pages(desktop)
     page = math.max(1, math.min(pages, tonumber(page) or 1))
@@ -528,6 +592,8 @@ function Library.gotoPage(desktop, page)
     desktop:rebuild()
 end
 
+--- 清除全部筛选条件。
+---@param desktop table
 function Library.clearFilters(desktop)
     desktop.filter = {}
     desktop.page = 1
@@ -536,6 +602,8 @@ function Library.clearFilters(desktop)
     desktop:rebuild()
 end
 
+--- 弹出搜索输入框。
+---@param desktop table
 function Library.showSearch(desktop)
     local dialog
     dialog = InputDialog:new{
@@ -570,7 +638,9 @@ function Library.showSearch(desktop)
     dialog:onShowKeyboard()
 end
 
---- Desktop rebuild 入口：同步 pageSize、缺态触发 fetch、拼分页 UI
+--- Desktop rebuild 入口：同步 page_size、缺态触发 fetch、拼分页 UI。
+---@param desktop table
+---@return table
 function Library.page(desktop)
     local prev_ps = desktop.page_size
     Library.syncPageSize(desktop)

@@ -14,56 +14,67 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local TextBoxWidget = require("ui/widget/textboxwidget")
-local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local TextWidget = require("ui/widget/textwidget")
 local GestureRange = require("ui/gesturerange")
-local Cover = require("ui.components.cover")
+local Image = require("ui.components.image")
 local UI = require("ui.components.bookui")
+local logger = require("logger")
 local _ = require("gettext")
 
 local BookInfo = {}
 
+--- 取书籍 stable_id（文件身份）。
 ---@param book Book|table|nil
 ---@return string|nil
 function BookInfo.file(book)
     if type(book) ~= "table" then return nil end
-    return book.filename or book.fileName or book.file or book.path or book.name
+    if type(book.ref) == "table" and type(book.ref.stable_id) == "string" then
+        return book.ref.stable_id
+    end
+    return nil
 end
 
+--- 取书名；缺省回退文件 id 或「?」。
 ---@param book Book|table|nil
 ---@return string
 function BookInfo.title(book)
-    return (book and (book.bookName or book.title)) or BookInfo.file(book) or "?"
+    return (book and book.title) or BookInfo.file(book) or "?"
 end
 
+--- 取作者。
 ---@param book Book|table|nil
 ---@return string
 function BookInfo.author(book)
     if type(book) ~= "table" then return "" end
-    return book.author or book.authors or ""
+    return book.authors or ""
 end
 
----@param book Book|table|nil
+--- 取简介。
+---@param book Book|BookDetail|table|nil
 ---@return string
 function BookInfo.desc(book)
     if type(book) ~= "table" then return "" end
-    return tostring(book.description or book.intro or book.summary or "")
+    return tostring(book.intro or "")
 end
 
+--- 取阅读进度百分比（0–100）。
 ---@param book Book|table|nil
 ---@return number
 function BookInfo.pct(book)
-    local p = book and book.progressPercent
-    if type(p) == "string" then
-        p = p:gsub("%%", ""):match("[%d%.]+")
-    end
-    p = tonumber(p) or 0
+    if type(book) ~= "table" then return 0 end
+    local p = tonumber(book.percent) or 0
     if p < 0 then p = 0 end
     if p > 100 then p = 100 end
     return p
 end
 
+--- 包一层可点击容器。
+---@param w number
+---@param h number
+---@param on_tap fun()|nil
+---@return table
 function BookInfo.tappable(w, h, on_tap)
     local tap = InputContainer:new{
         dimen = Geom:new{ w = w, h = h },
@@ -83,7 +94,10 @@ function BookInfo.tappable(w, h, on_tap)
     return tap
 end
 
---- 封面右上角进度角标；pct≤0 返回 nil
+--- 封面右上角进度角标；pct≤0 返回 nil。
+---@param cw number
+---@param pct number|nil
+---@return table|nil
 function BookInfo.progressBadge(cw, pct)
     if not pct or pct <= 0 then return nil end
     local badge = FrameContainer:new{
@@ -108,7 +122,10 @@ function BookInfo.progressBadge(cw, pct)
     return badge
 end
 
---- 「NN%」+ 进度条；百分比在左
+--- 「NN%」+ 进度条；百分比在左。
+---@param width number
+---@param pct number|nil
+---@return table, number
 function BookInfo.progressRow(width, pct)
     pct = tonumber(pct) or 0
     local label = TextWidget:new{
@@ -129,22 +146,49 @@ function BookInfo.progressRow(width, pct)
     return row, math.max(label:getSize().h, bar_h)
 end
 
---- 封面 widget；opts.badge=true 叠进度角标；缺图则 ensureAsync
+--- 封面 widget；opts.badge=true 叠进度角标；缺图由 Image 自更新占位。
+--- opts.show_parent: 窗口级父（Desktop / Detail / ReaderFloatMenu）
+--- opts.on_ready: 图片就绪回调
+---@param plugin table|nil
+---@param source table|nil
+---@param book table|nil
+---@param cw number
+---@param ch number
+---@param opts table|nil
+---@return table, number, number
 function BookInfo.cover(plugin, source, book, cw, ch, opts)
     opts = opts or {}
     local title = BookInfo.title(book)
     local filename = BookInfo.file(book)
     local pct = BookInfo.pct(book)
-    local path = Cover.cachedPath(plugin, filename)
-    local cover = Cover.widget(path, cw, ch, title)
-    if not path and filename then
-        Cover.ensureAsync(source, plugin, filename, nil)
+    local ref = type(book) == "table" and book.ref or nil
+    local req
+    if source and type(source.coverRequest) == "function" and type(ref) == "table" then
+        req = select(1, source:coverRequest(ref))
     end
+    if req and req.url then
+        logger.dbg("book.bookinfo cover url", filename, req.url)
+    else
+        logger.dbg("book.bookinfo cover no url", filename)
+    end
+    local cover = Image.widget{
+        src = req and req.url or nil,
+        headers = req and req.headers or nil,
+        width = cw,
+        height = ch,
+        alpha = false,
+        fit = "letterbox",
+        border = true,
+        fallback = title,
+        show_parent = opts.show_parent,
+        on_ready = opts.on_ready,
+    }
     if opts.badge then
         local badge = BookInfo.progressBadge(cw, pct)
         if badge then
             cover = OverlapGroup:new{
                 dimen = Geom:new{ w = cw, h = ch },
+                show_parent = opts.show_parent,
                 cover,
                 badge,
             }
@@ -154,10 +198,14 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
 end
 
 --- 英雄卡：左封面，右栏高度对齐封面。
--- 上：书名/作者/简介（简介吃满中间余量，不写死行数）
--- 下：进度条始终贴底
--- opts: width, pad, on_tap
--- 返回 widget, height
+--- 上：书名/作者/简介（简介吃满中间余量，不写死行数）
+--- 下：进度条始终贴底
+--- opts: width, pad, on_tap；返回 widget, height
+---@param plugin table|nil
+---@param source table|nil
+---@param book table|nil
+---@param opts table|nil
+---@return table, number
 function BookInfo.hero(plugin, source, book, opts)
     opts = opts or {}
     local w = opts.width or 1
@@ -167,7 +215,11 @@ function BookInfo.hero(plugin, source, book, opts)
     local cw = math.min(UI.sz(80), math.floor(avail * 0.22))
     local ch = math.floor(cw * 3 / 2)
 
-    local cover = select(1, BookInfo.cover(plugin, source, book, cw, ch, { badge = false }))
+    local cover = select(1, BookInfo.cover(plugin, source, book, cw, ch, {
+        badge = false,
+        show_parent = opts.show_parent,
+        on_ready = opts.on_ready,
+    }))
     local cover_box = cover
     if opts.on_tap then
         cover_box = BookInfo.tappable(cw, ch, opts.on_tap)

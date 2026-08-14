@@ -52,6 +52,9 @@ Webdav.__index = Webdav
 local PROPFIND_PING = [[<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>]]
 local PROPFIND_LIST = [[<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/></d:prop></d:propfind>]]
 
+--- 去掉首尾斜杠
+---@param s string|nil
+---@return string
 local function trimSlashes(s)
     s = tostring(s or "")
     local from = s:match("^/*()")
@@ -61,6 +64,9 @@ local function trimSlashes(s)
     return s:match(".*[^/]", from) or ""
 end
 
+--- 去掉尾部斜杠
+---@param s string|nil
+---@return string
 local function rtrimSlashes(s)
     s = tostring(s or "")
     local n = #s
@@ -70,6 +76,9 @@ local function rtrimSlashes(s)
     return s:sub(1, n)
 end
 
+--- HTTP 状态码转用户可读错误文案
+---@param code any
+---@return string
 local function statusErr(code)
     local n = tonumber(code)
     if not n then
@@ -81,6 +90,7 @@ local function statusErr(code)
     return T(_("HTTP %1"), tostring(n))
 end
 
+--- 构造 WebDAV 客户端
 ---@param cfg { url: string, username: string|nil, password: string|nil, user: string|nil }|nil
 ---@return WebdavClient
 function Webdav.new(cfg)
@@ -107,6 +117,7 @@ function Webdav:join(path, as_dir)
     return url
 end
 
+--- 带 Basic 认证转发 Request.send
 ---@param req table
 ---@param timeout number|nil
 ---@param block_timeout number|nil
@@ -269,6 +280,7 @@ function Webdav:get(path, dest, opts)
     return true
 end
 
+--- PUT 任意 ltn12 source
 ---@param path string
 ---@param source any ltn12 source
 ---@param length number

@@ -55,6 +55,8 @@ local _weread_cache = nil
 ---@field zip_size number|nil weread 压缩包字节
 ---@field path string|nil local 绝对路径
 
+--- 首次备份 UI_FACES 对应的 Font.fontmap（只做一次）
+---@return nil
 local function saveFontmapDefaults()
     if _defaults then
         return
@@ -65,10 +67,16 @@ local function saveFontmapDefaults()
     end
 end
 
+--- 消毒字体 id（去空白，非法字符变 _）
+---@param id string|nil
+---@return string
 local function sanitizeId(id)
     return tostring(id or ""):gsub("%s+", ""):gsub("[^%w%._%-]", "_")
 end
 
+--- 微信读书字体本地路径：.moon/fonts/<id>.woff
+---@param id string|nil
+---@return string|nil
 local function wereadPath(id)
     id = sanitizeId(id)
     if id == "" then
@@ -77,6 +85,9 @@ local function wereadPath(id)
     return Paths.fontsDir() .. "/" .. id .. ".woff"
 end
 
+--- 路径末段文件名
+---@param path string|nil
+---@return string
 local function basename(path)
     return (tostring(path or ""):match("([^/\\]+)$")) or tostring(path or "")
 end
@@ -87,6 +98,7 @@ function M.currentId()
     return tostring(MoonSettings.get().ui_font or "")
 end
 
+--- 当前字体展示名
 ---@return string
 function M.currentName()
     local s = MoonSettings.get()
@@ -154,10 +166,13 @@ local function listLocal()
     return out
 end
 
+--- 微信字体列表磁盘缓存路径
+---@return string
 local function listCachePath()
     return Paths.fontsDir() .. "/list.json"
 end
 
+--- 微信原始列表项 → MoonFontItem[]
 ---@param raw_items table|nil
 ---@return MoonFontItem[]
 local function normalizeWeread(raw_items)
@@ -185,6 +200,7 @@ local function normalizeWeread(raw_items)
     return out
 end
 
+--- 读磁盘微信字体列表缓存
 ---@return MoonFontItem[]|nil
 local function readWereadCache()
     local f = io.open(listCachePath(), "r")
@@ -203,7 +219,9 @@ local function readWereadCache()
     return nil
 end
 
+--- 写磁盘微信字体列表缓存
 ---@param items MoonFontItem[]
+---@return nil
 local function writeWereadCache(items)
     Paths.ensureFonts()
     local f = io.open(listCachePath(), "w")
@@ -263,6 +281,9 @@ function M.list(force)
     return out, err
 end
 
+--- 将字体路径插入 FontList.fontlist 头部（已存在则跳过）
+---@param path string
+---@return nil
 local function registerFontPath(path)
     FontList:getFontList()
     for _, p in ipairs(FontList.fontlist) do

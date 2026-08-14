@@ -18,23 +18,23 @@ local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
-local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local TextBoxWidget = require("ui/widget/textboxwidget")
-local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local Cover = require("ui.components.cover")
+local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
+local Image = require("ui.components.image")
 local Pager = require("ui.components.pager")
 local Popup = require("ui.components.popup")
-local Cache = require("moon.cache")
-local Progress = require("moon.progress")
-local MoonSettings = require("moon.settings")
-local Host = require("moon.host")
+local Store = require("book.store")
+local Progress = require("book.progress")
+local MoonSettings = require("utils.settings")
+local Host = require("host")
+local BookInfo = require("ui.components.bookinfo")
 local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -88,24 +88,24 @@ do
 end
 
 
+--- 加载 icons/ 下图标为 Image widget。
+---@param name string
+---@param size number|nil
+---@return table|nil
 local function loadIcon(name, size)
     size = size or UI.iconSz()
-    local ok, img = pcall(function()
-        return ImageWidget:new{
-            file = UI.iconDir() .. name,
-            width = size,
-            height = size,
-            alpha = true,
-        }
-    end)
-    if ok and img then return img end
-    return TextWidget:new{
-        text = "·",
-        face = UI.face("cfont", 16),
-        fgcolor = Blitbuffer.COLOR_BLACK,
+    return Image.widget{
+        src = name,
+        width = size,
+        height = size,
     }
 end
 
+--- 在列表中找与 value 最近的下标。
+---@param list table
+---@param value any
+---@param cmp fun(a: any, b: any): number|nil
+---@return number
 local function nearestIndex(list, value, cmp)
     local best, best_d = 1, math.huge
     for i, v in ipairs(list) do
@@ -115,11 +115,24 @@ local function nearestIndex(list, value, cmp)
     return best
 end
 
+--- 按 delta 在预设列表中步进取值。
+---@param list table
+---@param value any
+---@param delta number
+---@param cmp fun(a: any, b: any): number|nil
+---@return any
 local function stepList(list, value, delta, cmp)
     local i = nearestIndex(list, value, cmp)
     return list[math.max(1, math.min(#list, i + delta))]
 end
 
+--- 数值步进并夹到 [min_v, max_v]。
+---@param value number|nil
+---@param delta number
+---@param min_v number
+---@param max_v number
+---@param step number
+---@return number
 local function stepNum(value, delta, min_v, max_v, step)
     local v = (tonumber(value) or 0) + delta * step
     if v < min_v then v = min_v end
@@ -127,12 +140,19 @@ local function stepNum(value, delta, min_v, max_v, step)
     return v
 end
 
+--- 左右边距预设比较：取左缘距离差。
+---@param a table|number|nil
+---@param b table|number|nil
+---@return number
 local function hMarginCmp(a, b)
     local al = type(a) == "table" and (tonumber(a[1]) or 0) or 0
     local bl = type(b) == "table" and (tonumber(b[1]) or 0) or tonumber(b) or 0
     return math.abs(al - bl)
 end
 
+--- 格式化字重显示文案。
+---@param v number|nil
+---@return string
 local function formatWeight(v)
     v = tonumber(v) or 0
     if v == 0 then return "0" end
@@ -140,6 +160,9 @@ local function formatWeight(v)
     return string.format("%+.1f", v)
 end
 
+--- 格式化对比度（gamma）显示文案。
+---@param v number|nil
+---@return string
 local function formatGamma(v)
     local labels = {
         [10] = "0.8", [15] = "1.0", [25] = "1.45", [30] = "1.9",
@@ -149,7 +172,10 @@ local function formatGamma(v)
     return labels[n] or tostring(n)
 end
 
---- 包装字体菜单：选中叶子项后关闭菜单并回调（回到悬浮面板）
+--- 包装字体菜单：选中叶子项后关闭菜单并回调（回到悬浮面板）。
+---@param items table
+---@param on_pick fun()|nil
+---@return table
 local function wrapFontItemTable(items, on_pick)
     if type(items) ~= "table" then
         return items
@@ -189,7 +215,9 @@ local function wrapFontItemTable(items, on_pick)
     return out
 end
 
---- on_done: 字体菜单关闭后回调（用于重新打开悬浮面板）
+--- 打开字体设置菜单；on_done 在关闭后回调（用于重新打开悬浮面板）。
+---@param ui table|nil
+---@param on_done fun()|nil
 local function showFontSettings(ui, on_done)
     if not ui then
         if on_done then on_done() end
@@ -209,6 +237,7 @@ local function showFontSettings(ui, on_done)
             if type(items) == "table" and #items > 0 then
                 local menu
                 local finished = false
+                --- 关闭字体菜单并回调 on_done。
                 local function finish()
                     if finished then return end
                     finished = true
@@ -247,54 +276,85 @@ local function showFontSettings(ui, on_done)
     end
 end
 
---- 悬浮层书目信息只信 API 缓存；本地文件名仅作书名最后兜底
+--- 悬浮层书目信息只信 API 缓存；本地文件名仅作书名最后兜底。
+---@param plugin table|nil
+---@return table
 local function apiBookMeta(plugin)
     local ui = plugin and plugin.ui
     local file = ui and ui.document and ui.document.file
-    local filename = file and Cache.remoteFilename(file)
+    if not file then
+        return {}
+    end
+    local id = Store.identityFor(file)
+    if id and id.book_key then
+        return Store.getMeta(id.book_key) or {}
+    end
+    local filename = Store.remoteFilename(file)
     if filename then
-        return Cache.getMeta(filename)
+        return Store.getMeta(filename) or Store.findMeta(filename) or { id = filename }
     end
     return {}
 end
 
+--- 取书名：API 元数据优先，否则用文件名。
+---@param plugin table|nil
+---@param ui table|nil
+---@return string
 local function bookTitle(plugin, ui)
     local meta = apiBookMeta(plugin)
-    if meta.bookName and meta.bookName ~= "" then
-        return meta.bookName
+    if meta.title and meta.title ~= "" then
+        return meta.title
     end
-    if meta.filename and meta.filename ~= "" then
-        return meta.filename
+    if meta.id and meta.id ~= "" then
+        return meta.id
     end
     local file = ui and ui.document and ui.document.file or ""
     return file:match("([^/\\]+)$") or file or _("未知书籍")
 end
 
+--- 取作者文案。
+---@param plugin table|nil
+---@return string
 local function bookAuthor(plugin)
-    local a = apiBookMeta(plugin).author or ""
+    local a = apiBookMeta(plugin).authors or ""
     if type(a) == "table" then a = table.concat(a, ", ") end
     return tostring(a)
 end
 
+--- 取系列文案。
+---@param plugin table|nil
+---@return string
 local function bookSeries(plugin)
     return tostring(apiBookMeta(plugin).series or "")
 end
 
+--- 取分类（favorite）文案。
+---@param plugin table|nil
+---@return string
 local function bookFavorite(plugin)
     return tostring(apiBookMeta(plugin).favorite or "")
 end
 
+--- 取标签（category）文案。
+---@param plugin table|nil
+---@return string
 local function bookCategory(plugin)
     local k = apiBookMeta(plugin).category or ""
     if type(k) == "table" then k = table.concat(k, " · ") end
     return tostring(k):gsub("\n+", " · ")
 end
 
+--- 取简介文案。
+---@param plugin table|nil
+---@return string
 local function bookDescription(plugin)
     local meta = apiBookMeta(plugin)
-    return tostring(meta.description or meta.intro or meta.summary or "")
+    return tostring(meta.intro or "")
 end
 
+--- 当前页码与进度百分比文案。
+---@param ui table|nil
+---@return string, number
 local function currentPageText(ui)
     local pct = math.floor((Progress.fraction(ui) or 0) * 100 + 0.5)
     if ui and ui.getCurrentPage and ui.document and ui.document.getPageCount then
@@ -307,6 +367,11 @@ local function currentPageText(ui)
     return string.format("%d%%", pct), pct
 end
 
+--- 包一层可点击容器。
+---@param w number
+---@param h number
+---@param on_tap fun()|nil
+---@return table
 local function tappable(w, h, on_tap)
     local tap = InputContainer:new{ dimen = Geom:new{ w = w, h = h } }
     tap.ges_events = {
@@ -324,19 +389,23 @@ local function tappable(w, h, on_tap)
     return tap
 end
 
+--- 元信息一行；值为空返回 nil。
+---@param label string
+---@param value string|nil
+---@param width number
+---@return table|nil
 local function metaRow(label, value, width)
     if not value or value == "" then return nil end
-    local face = UI.face("xx_smallinfofont", 12)
     local label_w = UI.sz(44)
     local value_w = math.max(UI.sz(32), width - label_w - UI.sz(2))
     local label_tw = TextWidget:new{
         text = label,
-        face = face,
+        face = UI.face("xx_smallinfofont", 12),
         fgcolor = UI.muted(),
     }
     local value_tw = TextWidget:new{
         text = tostring(value),
-        face = face,
+        face = UI.face("xx_smallinfofont", 12),
         max_width = value_w,
         fgcolor = Blitbuffer.COLOR_BLACK,
     }
@@ -351,10 +420,15 @@ local function metaRow(label, value, width)
     }
 end
 
+--- 区块垂直间距。
+---@return table
 local function sectionGap()
     return VerticalSpan:new{ width = UI.sz(16) }
 end
 
+--- 是否为分页视图（非 scroll）。
+---@param cfg table|nil
+---@return boolean
 local function isPageView(cfg)
     local v = cfg and cfg.view_mode
     if v == "scroll" or v == 1 then return false end
@@ -367,6 +441,7 @@ local ReaderFloatMenu = InputContainer:extend{
     plugin = nil,
 }
 
+--- 初始化尺寸、返回键并 rebuild。
 function ReaderFloatMenu:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     if Device:hasKeys() then
@@ -375,10 +450,14 @@ function ReaderFloatMenu:init()
     self:rebuild()
 end
 
+--- 返回悬浮菜单尺寸。
+---@return table
 function ReaderFloatMenu:getSize()
     return self.dimen
 end
 
+--- 关闭悬浮面板并区域刷新。
+---@return boolean
 function ReaderFloatMenu:onClose()
     self._closed = true
     local region = self._panel_dimen
@@ -392,17 +471,22 @@ function ReaderFloatMenu:onClose()
     return true
 end
 
+--- Widget 关闭标记。
 function ReaderFloatMenu:onCloseWidget()
     self._closed = true
 end
 
+--- 重建面板并局部脏刷新。
 function ReaderFloatMenu:refreshPanel()
     if self._closed then return end
     self:rebuild()
     UIManager:setDirty(self, "ui", self._panel_dimen)
 end
 
---- 对齐 ConfigDialog：先写 configurable，再发事件（边距事件本身不回写配置）
+--- 对齐 ConfigDialog：先写 configurable，再发事件（边距事件本身不回写配置）。
+---@param name string
+---@param value any
+---@param event_name string|nil
 function ReaderFloatMenu:applyCreOption(name, value, event_name)
     local ui = self.plugin and self.plugin.ui
     if not ui or not ui.document or not ui.document.configurable then
@@ -437,6 +521,9 @@ function ReaderFloatMenu:applyCreOption(name, value, event_name)
     UIManager:setDirty("all", "partial")
 end
 
+--- 直接向 Reader 发 CRE 配置事件并刷新面板。
+---@param event_name string
+---@param value any
 function ReaderFloatMenu:applyCre(event_name, value)
     local ui = self.plugin and self.plugin.ui
     if not ui then return end
@@ -445,7 +532,8 @@ function ReaderFloatMenu:applyCre(event_name, value)
     UIManager:setDirty("all", "partial")
 end
 
---- 左右边距：写 h_page_margins + SetPageHorizMargins
+--- 左右边距：写 h_page_margins + SetPageHorizMargins。
+---@param delta number
 function ReaderFloatMenu:applyHorizMargins(delta)
     local ui = self.plugin and self.plugin.ui
     if not ui or not ui.document or not ui.document.configurable then
@@ -457,7 +545,8 @@ function ReaderFloatMenu:applyHorizMargins(delta)
     self:applyCreOption("h_page_margins", next_v, "SetPageHorizMargins")
 end
 
---- 上下边距：同步写 t/b，再发事件真正改排版
+--- 上下边距：同步写 t/b，再发事件真正改排版。
+---@param delta number
 function ReaderFloatMenu:applyVertMargins(delta)
     local ui = self.plugin and self.plugin.ui
     if not ui or not ui.document or not ui.document.configurable then
@@ -490,13 +579,22 @@ function ReaderFloatMenu:applyVertMargins(delta)
     UIManager:setDirty("all", "partial")
 end
 
+--- 当前文档是否支持 CRE 排版控件。
+---@return boolean|nil
 function ReaderFloatMenu:hasCreControls()
     local ui = self.plugin and self.plugin.ui
     return ui and ui.font and ui.document and ui.document.configurable
         and not ui.document.koptinterface
 end
 
---- 全宽步进行：图标 · 标签 · 数值 · −/+，无行框，只留按钮细边
+--- 全宽步进行：图标 · 标签 · 数值 · −/+，无行框，只留按钮细边。
+---@param width number
+---@param icon_name string
+---@param label string
+---@param value_text string
+---@param on_minus fun()
+---@param on_plus fun()
+---@return table
 function ReaderFloatMenu:buildStepRow(width, icon_name, label, value_text, on_minus, on_plus)
     local pad_x = UI.sz(4)
     local pad_y = UI.sz(8)
@@ -582,6 +680,11 @@ function ReaderFloatMenu:buildStepRow(width, icon_name, label, value_text, on_mi
     }
 end
 
+--- 字体选择行（点击打开字体菜单）。
+---@param width number
+---@param face_name string|nil
+---@param on_tap fun()
+---@return table
 function ReaderFloatMenu:buildFontRow(width, face_name, on_tap)
     local pad_x = UI.sz(4)
     local pad_y = UI.sz(10)
@@ -630,11 +733,22 @@ function ReaderFloatMenu:buildFontRow(width, face_name, on_tap)
     return tap
 end
 
+--- 分页 / 滚动视图切换条。
+---@param width number
+---@param is_page boolean
+---@param on_page fun()
+---@param on_scroll fun()
+---@return table
 function ReaderFloatMenu:buildViewToggle(width, is_page, on_page, on_scroll)
     local gap = UI.sz(12)
     local icon_slot = UI.sz(32)
     local btn_w = math.floor((width - icon_slot - gap) / 2)
     local btn_h = UI.sz(40)
+    --- 构建分页/滚动切换芯片按钮。
+    ---@param text string
+    ---@param active boolean
+    ---@param cb fun()|nil
+    ---@return table
     local function chip(text, active, cb)
         return Button:new{
             text = text,
@@ -668,6 +782,12 @@ function ReaderFloatMenu:buildViewToggle(width, is_page, on_page, on_scroll)
     }
 end
 
+--- 底部动作格：图标 + 文案。
+---@param cell_w number
+---@param icon_name string
+---@param text string
+---@param callback fun()|nil
+---@return table, number
 function ReaderFloatMenu:buildActionCell(cell_w, icon_name, text, callback)
     local h = UI.iconSz() + UI.sz(26)
     local tap = tappable(cell_w, h, callback)
@@ -687,6 +807,9 @@ function ReaderFloatMenu:buildActionCell(cell_w, icon_name, text, callback)
     return tap, h
 end
 
+--- 构建详情区（封面 + 元信息 + 简介）。
+---@param content_w number
+---@return table
 function ReaderFloatMenu:buildDetail(content_w)
     local plugin = self.plugin
     local ui = plugin and plugin.ui
@@ -698,18 +821,25 @@ function ReaderFloatMenu:buildDetail(content_w)
     local desc = bookDescription(plugin)
     local page_text, pct = currentPageText(ui)
     local filename
+    local cover_book = {
+        title = title,
+        percent = pct,
+    }
     local file = plugin and plugin.ui and plugin.ui.document and plugin.ui.document.file
     if file then
-        filename = Cache.remoteFilename(file)
+        filename = Store.remoteFilename(file)
+        local id = Store.identityFor(file)
+        if id and id.ref then
+            cover_book.ref = id.ref
+        end
     end
 
     -- 封面略放大，右侧元信息有更多等高空间；保持约 2:3
     local cw, ch = UI.sz(84), UI.sz(126)
-    local path = Cover.cachedPath(plugin, filename)
-    local cover_w = Cover.widget(path, cw, ch, title)
-    if not path and filename and plugin and plugin.getSource then
-        Cover.ensureAsync(plugin:getSource(), plugin, filename, nil)
-    end
+    local source = plugin and plugin.getSource and plugin:getSource() or nil
+    local cover_w = select(1, BookInfo.cover(plugin, source, cover_book, cw, ch, {
+        show_parent = self,
+    }))
 
     local info_w = math.max(UI.sz(40), content_w - cw - UI.sz(10))
     local row_gap = math.max(1, UI.sz(1))
@@ -778,6 +908,9 @@ function ReaderFloatMenu:buildDetail(content_w)
     return col
 end
 
+--- 构建排版控制区；非 CRE 返回 nil。
+---@param content_w number
+---@return table|nil
 function ReaderFloatMenu:buildControls(content_w)
     local ui = self.plugin and self.plugin.ui
     if not self:hasCreControls() then
@@ -797,6 +930,8 @@ function ReaderFloatMenu:buildControls(content_w)
     local menu = self
     local col = VerticalGroup:new{ align = "left" }
     local first = true
+    --- 向控制列追加一行（自动加间距）。
+    ---@param row table
     local function add(row)
         if not first then
             table.insert(col, VerticalSpan:new{ width = row_gap })
@@ -852,33 +987,60 @@ function ReaderFloatMenu:buildControls(content_w)
     return col
 end
 
+--- 构建底部动作行（目录/更多/首页等）。
+---@param content_w number
+---@return table, number
 function ReaderFloatMenu:buildActions(content_w)
     local plugin = self.plugin
     local ui = plugin and plugin.ui
     local n = 4
     local cell_w = math.floor(content_w / n)
     local menu = self
-    local items = {
-        { "toc.svg", _("目录"), function()
-            menu:onClose()
-            UIManager:nextTick(function()
-                if ui and ui.toc and ui.toc.onShowToc then ui.toc:onShowToc() end
-            end)
-        end },
-        { "more.svg", _("更多"), function()
-            menu:onClose()
-            UIManager:nextTick(function()
-                if ui then ui:handleEvent(Event:new("ShowConfigMenu")) end
-            end)
-        end },
-        { "home.svg", _("首页"), function()
-            menu:onClose()
-            UIManager:nextTick(function()
-                ReaderFloatMenu.exitToDesktop(plugin)
-            end)
-        end },
-        { "close.svg", _("关闭"), function() menu:onClose() end },
-    }
+    local Chapter = require("book.chapter")
+    --- 关闭面板并打开目录。
+    local function openToc()
+        menu:onClose()
+        UIManager:nextTick(function()
+            if Chapter.isActive() and Chapter.showTocMenu() then
+                return
+            end
+            if ui and ui.toc and ui.toc.onShowToc then ui.toc:onShowToc() end
+        end)
+    end
+    --- 关闭面板并回 Book 桌面。
+    local function goHome()
+        menu:onClose()
+        UIManager:nextTick(function()
+            ReaderFloatMenu.exitToDesktop(plugin)
+        end)
+    end
+    local items
+    if Chapter.isActive() then
+        items = {
+            { "toc.svg", _("目录"), openToc },
+            { "margin.svg", _("上一章"), function()
+                menu:onClose()
+                UIManager:nextTick(function() Chapter.prev() end)
+            end },
+            { "margin.svg", _("下一章"), function()
+                menu:onClose()
+                UIManager:nextTick(function() Chapter.next() end)
+            end },
+            { "home.svg", _("首页"), goHome },
+        }
+    else
+        items = {
+            { "toc.svg", _("目录"), openToc },
+            { "more.svg", _("更多"), function()
+                menu:onClose()
+                UIManager:nextTick(function()
+                    if ui then ui:handleEvent(Event:new("ShowConfigMenu")) end
+                end)
+            end },
+            { "home.svg", _("首页"), goHome },
+            { "close.svg", _("关闭"), function() menu:onClose() end },
+        }
+    end
     local row = HorizontalGroup:new{}
     local h = 0
     for _, it in ipairs(items) do
@@ -895,7 +1057,11 @@ function ReaderFloatMenu:buildActions(content_w)
     }, h
 end
 
+--- 重建整块悬浮面板并分页。
 function ReaderFloatMenu:rebuild()
+    pcall(function()
+        require("utils.font").applyCurrent()
+    end)
     local w = Screen:getWidth()
     local h = Screen:getHeight()
     local pad = UI.pagePad()
@@ -1031,10 +1197,14 @@ end
 
 -- ── 插件侧生命周期（热区 / 实例 / 回桌面）────────────────
 
+--- 阅读悬浮菜单是否启用。
+---@return boolean
 function ReaderFloatMenu.enabled()
     return MoonSettings.get().reader_float_menu ~= false
 end
 
+--- 关闭并摘掉插件上的悬浮菜单实例。
+---@param plugin table|nil
 function ReaderFloatMenu.detach(plugin)
     if not plugin or not plugin._reader_float_menu then
         return
@@ -1046,7 +1216,8 @@ function ReaderFloatMenu.detach(plugin)
     plugin._reader_float_menu = nil
 end
 
---- 阅读中部热区：覆盖左右翻页区中部（宽 50% × 高 50%）
+--- 阅读中部热区：覆盖左右翻页区中部（宽 50% × 高 50%）。
+---@param plugin table|nil
 function ReaderFloatMenu.attach(plugin)
     if not plugin or not plugin.ui or not plugin.ui.registerTouchZones then
         return
@@ -1079,6 +1250,8 @@ function ReaderFloatMenu.attach(plugin)
 end
 
 --- 中部热区 handler。返回 true 表示已消费，KOReader 不再翻页。
+---@param plugin table|nil
+---@return boolean
 function ReaderFloatMenu.onTap(plugin)
     if not plugin or not ReaderFloatMenu.enabled() then
         return false
@@ -1112,6 +1285,7 @@ end
 
 --- 退出阅读并打开 Book 桌面。
 --- 已在 FM：立刻开。在 Reader：关书 → showFileManager → Host.onShow 消费 want。
+---@param plugin table|nil
 function ReaderFloatMenu.exitToDesktop(plugin)
     ReaderFloatMenu.detach(plugin)
     local ui = plugin and plugin.ui

@@ -1,12 +1,9 @@
 --[[--
 Book (moon) HTTP 客户端（Bearer Token）
 
-JSON：解码后返回 table（含 data.code 语义）；GET 可按完整 URL 走 http.cache。
-二进制：download / HEAD 走 sink，不解析 JSON。
-封面：只拼 WebDAV 请求描述，不发请求。
-不做：契约字段转换、normalize*、业务语义。
+只返回 wire；不做契约字段转换。
 
-@module koplugin.book.source.moon.api
+@module koplugin.book.source.moon.client
 --]]
 
 local ltn12 = require("ltn12")
@@ -20,12 +17,18 @@ local Header = require("http.header")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
-local Api = {}
+local Client = {}
 
+--- 去掉 URL 末尾多余斜杠。
+---@param url string|nil
+---@return string
 local function trim_slash(url)
     return (url or ""):gsub("/+$", "")
 end
 
+--- 将表编码为 application/x-www-form-urlencoded（键排序）。
+---@param tbl table
+---@return string
 local function encode_form(tbl)
     local keys = {}
     for k in pairs(tbl) do
@@ -41,9 +44,10 @@ local function encode_form(tbl)
     return table.concat(parts, "&")
 end
 
+--- 构造 Moon HTTP 客户端。
 ---@param o { base_url: string|nil, token: string|nil }|table|nil
----@return MoonApi
-function Api:new(o)
+---@return MoonClient
+function Client:new(o)
     o = o or {}
     setmetatable(o, self)
     self.__index = self
@@ -52,15 +56,17 @@ function Api:new(o)
     return o
 end
 
+--- 是否已配置服务器与令牌。
 ---@return boolean
-function Api:configured()
+function Client:configured()
     return self.base_url ~= "" and self.token ~= ""
 end
 
+--- 拼接 API URL（含 query）。
 ---@param path string
 ---@param query table|nil
 ---@return string|nil, string|nil
-function Api:_url(path, query)
+function Client:_url(path, query)
     if not self:configured() then
         return nil, _("未配置服务器或令牌")
     end
@@ -76,7 +82,7 @@ end
 ---@param path string
 ---@param opts { query: table|nil, body: table|nil, json: boolean|nil, cache_ttl: number|nil }|nil
 ---@return table|nil, string|nil
-function Api:_json(method, path, opts)
+function Client:_json(method, path, opts)
     opts = opts or {}
     local url, cfg_err = self:_url(path, opts.query)
     if not url then
@@ -170,7 +176,7 @@ end
 ---@param path string
 ---@param opts { query: table|nil, sink: function }
 ---@return true|nil, table|string|nil
-function Api:_raw(method, path, opts)
+function Client:_raw(method, path, opts)
     local url, cfg_err = self:_url(path, opts.query)
     if not url then
         return nil, cfg_err
@@ -199,43 +205,49 @@ function Api:_raw(method, path, opts)
     return true, headers_resp
 end
 
+--- 探测 Moon 鉴权连通性。
 ---@return table|nil, string|nil
-function Api:ping()
+function Client:ping()
     return self:_json("GET", "/index/auth/ping")
 end
 
+--- 请求书库列表 wire。
 ---@param query table|nil
 ---@return table|nil, string|nil
-function Api:listBooks(query)
+function Client:listBooks(query)
     return self:_json("GET", "/index/book/list", {
         query = query or {},
         cache_ttl = 5 * 60,
     })
 end
 
+--- 请求最近阅读 wire。
 ---@param limit number|nil
 ---@return table|nil, string|nil
-function Api:recentBooks(limit)
+function Client:recentBooks(limit)
     return self:_json("GET", "/index/book/recent", {
         query = { limit = limit or 8 },
         cache_ttl = 5 * 60,
     })
 end
 
+--- 请求筛选条件 wire。
 ---@return table|nil, string|nil
-function Api:filters()
+function Client:filters()
     return self:_json("GET", "/index/book/filters", { cache_ttl = 5 * 60 })
 end
 
+--- 注册阅读设备。
 ---@param body table
 ---@return table|nil, string|nil
-function Api:registerReadingDevice(body)
+function Client:registerReadingDevice(body)
     return self:_json("POST", "/index/stats/device", { body = body or {}, json = true })
 end
 
+--- 导入阅读统计。
 ---@param body table
 ---@return table|nil, string|nil
-function Api:importReadingStats(body)
+function Client:importReadingStats(body)
     local res, err = self:_json("POST", "/index/stats/import", { body = body or {}, json = true })
     if res then
         Request.clearCache("/index/stats/insight")
@@ -243,22 +255,25 @@ function Api:importReadingStats(body)
     return res, err
 end
 
+--- 请求阅读统计洞察 wire。
 ---@return table|nil, string|nil
-function Api:readingInsight()
+function Client:readingInsight()
     return self:_json("GET", "/index/stats/insight", { cache_ttl = 30 * 60 })
 end
 
+--- 请求书籍进度 wire。
 ---@param filename string
 ---@return table|nil, string|nil
-function Api:getProgress(filename)
+function Client:getProgress(filename)
     return self:_json("GET", "/index/book/progress", {
         query = { filename = filename },
     })
 end
 
+--- 上报书籍进度。
 ---@param body table
 ---@return table|nil, string|nil
-function Api:updateProgress(body)
+function Client:updateProgress(body)
     local res, err = self:_json("POST", "/index/book/progressUpdate", { body = body or {} })
     if res then
         Request.clearCache("/index/book/recent")
@@ -267,9 +282,10 @@ function Api:updateProgress(body)
     return res, err
 end
 
+--- HEAD 探测书籍文件大小。
 ---@param filename string
 ---@return number|nil
-function Api:probeFileSize(filename)
+function Client:probeFileSize(filename)
     if not filename or filename == "" then
         return nil
     end
@@ -287,12 +303,14 @@ function Api:probeFileSize(filename)
     return nil
 end
 
+--- 下载到 temp_path（通常为最终路径.part）；成功后由调用方原子改名。
 ---@param filename string
----@param dest_path string
+---@param temp_path string
 ---@param on_progress fun(bytes: number)|nil
 ---@return boolean|nil, string|nil
-function Api:downloadBook(filename, dest_path, on_progress)
-    local file, err = io.open(dest_path, "wb")
+function Client:downloadBook(filename, temp_path, on_progress)
+    os.remove(temp_path)
+    local file, err = io.open(temp_path, "wb")
     if not file then
         return nil, err or _("无法创建本地文件")
     end
@@ -305,12 +323,20 @@ function Api:downloadBook(filename, dest_path, on_progress)
         sink = sink,
     })
     if not ok then
-        os.remove(dest_path)
+        os.remove(temp_path)
         return nil, msg
+    end
+    local attr = require("libs/libkoreader-lfs").attributes(temp_path)
+    if not attr or not attr.size or attr.size <= 0 then
+        os.remove(temp_path)
+        return nil, _("下载文件为空")
     end
     return true
 end
 
+--- 把 filename 编成 WebDAV 封面路径（分段 percent-encode）。
+---@param filename string|nil
+---@return string
 local function webdavPath(filename)
     filename = tostring(filename or ""):gsub("^/+", "")
     local parts = {}
@@ -323,9 +349,10 @@ local function webdavPath(filename)
     return "/webdav/" .. table.concat(parts, "/")
 end
 
+--- 构造封面 HTTP 请求。
 ---@param filename string
 ---@return { url: string, headers: table }|nil, string|nil
-function Api:coverRequest(filename)
+function Client:coverRequest(filename)
     if not filename or filename == "" then
         return nil, _("无效文件名")
     end
@@ -340,8 +367,8 @@ function Api:coverRequest(filename)
             ["Connection"] = "close",
         },
     }
-    logger.dbg("book.api coverRequest", filename, req.url)
+    logger.dbg("book.moon.client coverRequest", filename, req.url)
     return req
 end
 
-return Api
+return Client

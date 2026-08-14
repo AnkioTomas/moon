@@ -20,7 +20,7 @@ local Screen = Device.screen
 
 local Home = require("ui.desktop.home")
 local Library = require("ui.desktop.library")
-local Store = require("ui.desktop.store")
+local StorePage = require("ui.desktop.store")
 local Insight = require("ui.desktop.insight")
 local Settings = require("ui.desktop.settings")
 local Detail = require("ui.desktop.detail")
@@ -28,7 +28,7 @@ local Image = require("ui.components.image")
 local TopBar = require("ui.components.topbar")
 local BottomBar = require("ui.components.bottombar")
 local UI = require("ui.components.bookui")
-local Cache = require("moon.cache")
+local BookStore = require("book.store")
 
 local Desktop = InputContainer:extend{
     name = "book_desktop",
@@ -39,7 +39,7 @@ local Desktop = InputContainer:extend{
     filter = nil,
 }
 
---- 初始化手势区与默认分页状态，立刻 rebuild
+--- 初始化手势区与默认分页状态，立刻 rebuild。
 function Desktop:init()
     self.filter = self.filter or {}
     self._tabs = BottomBar.tabs(self.source)
@@ -97,11 +97,14 @@ function Desktop:init()
     end)
 end
 
---- 内容区高度（扣除顶栏 + 底栏）
+--- 内容区高度（扣除顶栏 + 底栏）。
+---@return number
 function Desktop:contentHeight()
     return math.max(1, Screen:getHeight() - UI.barH() - UI.topBarH())
 end
 
+--- 返回桌面全屏尺寸（必要时懒建 dimen）。
+---@return table
 function Desktop:getSize()
     if not self.dimen then
         self.dimen = Geom:new{
@@ -113,7 +116,8 @@ function Desktop:getSize()
     return self.dimen
 end
 
---- 传给各 Tab 的上下文：plugin / source / desktop / filter
+--- 传给各 Tab 的上下文：plugin / source / desktop / filter。
+---@return table
 function Desktop:ctx()
     return {
         width = self.dimen.w,
@@ -125,6 +129,10 @@ function Desktop:ctx()
     }
 end
 
+--- 底栏点击：按 x 落点切换 Tab。
+---@param _ any
+---@param ges table|nil
+---@return boolean
 function Desktop:onTapBar(_, ges)
     if not ges or not ges.pos then return false end
     local tabs = BottomBar.tabs(self.source)
@@ -138,6 +146,10 @@ function Desktop:onTapBar(_, ges)
     return true
 end
 
+--- 内容区左右滑：图书馆/书城翻页（不消费底栏区）。
+---@param _ any
+---@param ges_ev table|nil
+---@return boolean
 function Desktop:onSwipe(_, ges_ev)
     if type(ges_ev) ~= "table" or not ges_ev.direction then return true end
     if ges_ev.pos and ges_ev.pos.y >= self.dimen.h - UI.barH() then return true end
@@ -151,14 +163,16 @@ function Desktop:onSwipe(_, ges_ev)
         end
     elseif self.tab == "store" then
         if direction == "west" then
-            Store.gotoPage(self, (self.store_page or 1) + 1)
+            StorePage.gotoPage(self, (self.store_page or 1) + 1)
         elseif direction == "east" then
-            Store.gotoPage(self, (self.store_page or 1) - 1)
+            StorePage.gotoPage(self, (self.store_page or 1) - 1)
         end
     end
     return true
 end
 
+--- 切换底栏 Tab 并重建；进页时清对应缓存状态。
+---@param id string
 function Desktop:switchTab(id)
     logger.dbg("book.desktop switchTab", self.tab, "->", id)
     if id == "library" and self.tab ~= "library" then
@@ -185,11 +199,11 @@ function Desktop:switchTab(id)
     self:rebuild()
 end
 
---- 重建顶栏 + 内容 + 底栏
+--- 重建顶栏 + 内容 + 底栏。
 function Desktop:rebuild()
     logger.dbg("book.desktop rebuild", self.tab)
     pcall(function()
-        require("moon.font").applyCurrent()
+        require("utils.font").applyCurrent()
     end)
     local ok, err = pcall(function()
         local sw = Screen:getWidth()
@@ -202,7 +216,7 @@ function Desktop:rebuild()
         elseif self.tab == "library" then
             content = Library.page(self)
         elseif self.tab == "store" then
-            content = Store.page(self)
+            content = StorePage.page(self)
         elseif self.tab == "stats" then
             content = Insight.page(self)
         else
@@ -248,7 +262,7 @@ function Desktop:rebuild()
     UIManager:setDirty(self, "full")
 end
 
---- 只换顶栏并区域刷新；分钟心跳禁止整页 rebuild / full flash
+--- 只换顶栏并区域刷新；分钟心跳禁止整页 rebuild / full flash。
 function Desktop:refreshTopBar()
     local root = self[1] and self[1][1]
     if not root or not root[2] then
@@ -276,6 +290,7 @@ function Desktop:refreshTopBar()
     })
 end
 
+--- 按分钟对齐调度顶栏时钟刷新。
 function Desktop:scheduleClockTick()
     if self._clock_tick then
         UIManager:unschedule(self._clock_tick)
@@ -289,14 +304,15 @@ function Desktop:scheduleClockTick()
     UIManager:scheduleIn(delay, self._clock_tick)
 end
 
---- 打开书籍详情浮层
+--- 打开书籍详情浮层。
+---@param book table
 function Desktop:showDetail(book)
-    logger.dbg("book.desktop showDetail", book and (book.id or book.title))
+    logger.dbg("book.desktop showDetail", book and ((book.ref and book.ref.stable_id) or book.title))
     if self.detail then
         UIManager:close(self.detail)
         self.detail = nil
     end
-    Cache.remember(book)
+    BookStore.remember(book)
     local desk = self
     self.detail = Detail:new{
         book = book,
@@ -315,7 +331,8 @@ function Desktop:showDetail(book)
     UIManager:setDirty(self.detail, "full")
 end
 
---- 关闭桌面：取消在飞请求、中止图片下载、回 FM
+--- 关闭桌面：取消在飞请求、中止图片下载、回 FM。
+---@return boolean
 function Desktop:onClose()
     logger.info("book.desktop close")
     self._closed = true
@@ -375,6 +392,7 @@ function Desktop:onClose()
     return true
 end
 
+--- Widget 关闭回调：停时钟、清手势、中止图片下载。
 function Desktop:onCloseWidget()
     self._closed = true
     if self._clock_tick then

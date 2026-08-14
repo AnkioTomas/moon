@@ -2,7 +2,7 @@
 --- 仅 EmmyLua 类型注释，运行时不要 require。
 
 --- 阅读洞察整页数据（总览 KPI + 日历）。
---- 由 `Contract.normalizeInsight` 从 moon wire 产出。
+--- 由 source.moon.mapper.insight 从 moon wire 产出。
 ---@class StatsInsight
 ---@field has_data boolean 是否有统计；false 时 insight 页显示空态
 ---@field total StatsTotal 总览 KPI

@@ -13,14 +13,14 @@ local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local LeftContainer = require("ui/widget/container/leftcontainer")
-local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local TextWidget = require("ui/widget/textwidget")
 local BookInfo = require("ui.components.bookinfo")
 local UI = require("ui.components.bookui")
 local Pager = require("ui.components.pager")
-local Cache = require("moon.cache")
+local Store = require("book.store")
 local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -28,11 +28,8 @@ local Screen = Device.screen
 
 local Home = {}
 
-local function isFinished(book)
-    local f = book.finished
-    return f == true or f == 1 or f == "1"
-end
-
+--- 清空筛选并切到图书馆 Tab。
+---@param desktop table|nil
 local function openLibrary(desktop)
     if not desktop or not desktop.switchTab then return end
     desktop.filter = {}
@@ -41,9 +38,19 @@ local function openLibrary(desktop)
     desktop:switchTab("library")
 end
 
---- 封面-only 格子
+--- 封面-only 格子。
+---@param ctx table
+---@param book table
+---@param slot_w number
+---@param cw number
+---@param ch number
+---@param on_open fun(book: table)|nil
+---@return table, number
 local function coverCell(ctx, book, slot_w, cw, ch, on_open)
-    local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, { badge = true }))
+    local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, {
+        badge = true,
+        show_parent = ctx.desktop,
+    }))
     local tap = BookInfo.tappable(slot_w, ch, function()
         if on_open then on_open(book) end
     end)
@@ -54,6 +61,15 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open)
     return tap, ch
 end
 
+--- 按预算高度铺封面网格并分页切片。
+---@param ctx table
+---@param books table
+---@param w number
+---@param pad number
+---@param budget_h number
+---@param page number
+---@param on_open fun(book: table)|nil
+---@return table, number, number, number
 local function buildGrid(ctx, books, w, pad, budget_h, page, on_open)
     local avail = math.max(1, w - pad * 2)
     local slot_w, cw, ch, cols, cgap, row_gap = UI.denseCoverMetrics(avail, budget_h)
@@ -71,6 +87,7 @@ local function buildGrid(ctx, books, w, pad, budget_h, page, on_open)
     local grid_h = 0
 
     -- FrameContainer 的 dimen.h 不参与 getSize；行距必须用 padding / Span
+    --- 冲刷当前行进网格。
     local function flushRow()
         if row_n > 0 then
             table.insert(grid, VerticalSpan:new{ width = row_gap })
@@ -107,6 +124,10 @@ local function buildGrid(ctx, books, w, pad, budget_h, page, on_open)
     return grid, grid_h, page, pages
 end
 
+--- 构建主页：英雄卡 + 最近阅读网格。
+---@param ctx table
+---@param state table
+---@return table
 function Home.build(ctx, state)
     local w = ctx.width
     local h = ctx.height
@@ -134,6 +155,7 @@ function Home.build(ctx, state)
         local row, rh = BookInfo.hero(ctx.plugin, ctx.source, recent, {
             width = w,
             pad = pad,
+            show_parent = ctx.desktop,
             on_tap = function() on_read(recent) end,
         })
         table.insert(kids, row)
@@ -245,12 +267,14 @@ function Home.build(ctx, state)
     }
 end
 
+--- 异步拉取最近阅读列表。
+---@param desktop table
 function Home.fetch(desktop)
     if desktop._home_fetching then return end
     desktop._home_fetching = true
 
     if desktop._home_fetch_cancel then
-        desktop._home_fetch_cancel()
+        desktop._home_fetch_cancel:cancel()
         desktop._home_fetch_cancel = nil
     end
 
@@ -258,7 +282,7 @@ function Home.fetch(desktop)
         desktop._local_cleanup_done = true
         UIManager:scheduleIn(0.3, function()
             if desktop._closed then return end
-            local ok, n = pcall(Cache.cleanupStale)
+            local ok, n = pcall(Store.cleanupStale)
             if ok and n and n > 0 then
                 logger.info("book cleaned stale local books:", n)
             elseif not ok then
@@ -276,6 +300,8 @@ function Home.fetch(desktop)
         end
     end
 
+    --- 写入主页状态并重建。
+    ---@param state table|nil
     local function finish(state)
         desktop._home_fetching = false
         desktop._home_fetch_cancel = nil
@@ -285,53 +311,60 @@ function Home.fetch(desktop)
         desktop:rebuild()
     end
 
-    local Async = require("moon.async")
-    desktop._home_fetch_cancel = Async.run(function()
+    local Promise = require("utils.promise")
+    desktop._home_fetch_cancel = Promise:new(function()
         if not source or not source.configured or not source:configured() then
             return nil, _("请先配置数据源")
         end
         return source:recentBooks(24)
-    end, function(ok, res, err)
-        if desktop._closed then
-            desktop._home_fetching = false
-            desktop._home_fetch_cancel = nil
-            return
-        end
-        if not ok then
-            finish({ recent_err = err or _("加载失败"), reading = {} })
-            return
-        end
-        local applied, boom = pcall(function()
-            if not res then
-                finish({
-                    recent = nil,
-                    recent_err = err or _("加载失败"),
-                    reading = {},
-                })
+    end)
+        :next(function(res)
+            if desktop._closed then
+                desktop._home_fetching = false
+                desktop._home_fetch_cancel = nil
                 return
             end
-            local rows = res.data or {}
-            local recent = rows[1]
-            local skip = recent and BookInfo.file(recent)
-            local reading = {}
-            for _, book in ipairs(rows) do
-                if BookInfo.file(book) ~= skip and not isFinished(book) and BookInfo.pct(book) > 0 then
-                    table.insert(reading, book)
+            local applied, boom = pcall(function()
+                if not res then
+                    finish({
+                        recent = nil,
+                        recent_err = _("加载失败"),
+                        reading = {},
+                    })
+                    return
                 end
+                local rows = res.data or {}
+                local recent = rows[1]
+                local skip = recent and BookInfo.file(recent)
+                local reading = {}
+                -- 「最近阅读」= 接口列表（去掉英雄位那本），不要再按 finished 过滤：
+                -- 微信读书 getRecentBooks 的 finished 是作品完结态，用户读完才是 finishReading。
+                for _, book in ipairs(rows) do
+                    if BookInfo.file(book) ~= skip then
+                        table.insert(reading, book)
+                    end
+                end
+                Store.rememberMany(rows)
+                finish({ recent = recent, reading = reading })
+            end)
+            if not applied then
+                logger.err("book home fetch apply failed:", boom)
+                finish({ recent_err = tostring(boom), reading = {} })
             end
-            Cache.rememberMany(rows)
-            if source.primeRecentCache then
-                source:primeRecentCache(24, res)
-            end
-            finish({ recent = recent, reading = reading })
         end)
-        if not applied then
-            logger.err("book home fetch apply failed:", boom)
-            finish({ recent_err = tostring(boom), reading = {} })
-        end
-    end)
+        :fail(function(err)
+            if desktop._closed then
+                desktop._home_fetching = false
+                desktop._home_fetch_cancel = nil
+                return
+            end
+            finish({ recent_err = err or _("加载失败"), reading = {} })
+        end)
 end
 
+--- Desktop rebuild 入口：未加载则触发 fetch。
+---@param desktop table
+---@return table
 function Home.page(desktop)
     local h = desktop:contentHeight()
     local w = (desktop.dimen and desktop.dimen.w) or Screen:getWidth()

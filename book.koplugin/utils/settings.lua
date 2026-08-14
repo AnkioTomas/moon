@@ -23,7 +23,8 @@ local logger = require("logger")
 
 local M = {}
 
---- Default common settings
+--- 通用配置默认值
+---@return MoonCommonSettings
 local function commonDefaults()
     return {
         active_source = "moon",
@@ -34,7 +35,10 @@ local function commonDefaults()
     }
 end
 
---- Fill missing defaults, returns true if any key added
+--- 补齐缺失默认键；有写入则返回 true
+---@param data table
+---@param defaults table
+---@return boolean
 local function fillDefaults(data, defaults)
     local dirty = false
     for k, v in pairs(defaults) do
@@ -46,18 +50,25 @@ local function fillDefaults(data, defaults)
     return dirty
 end
 
--- internal helper to open a settings file
+--- 打开配置文件（先 ensureSettings）
+---@param path string
+---@return table LuaSettings 实例
 local function openFile(path)
     Paths.ensureSettings()
     logger.dbg("book.settings open", path)
     return LuaSettings:open(path)
 end
--- Open source-specific settings file
+
+--- 打开源专用配置文件
+---@param id SourceId|nil
+---@return table LuaSettings 实例
 local function openSource(id)
     id = id or "moon"
     return openFile(Paths.sourcePath(id))
 end
---- Common configuration -----------------------------------------------------
+
+--- 读通用配置表（缺键则补默认并 flush）
+---@return MoonCommonSettings
 function M.getCommon()
     local ls = openFile(Paths.commonPath())
     local dirty = false
@@ -75,6 +86,8 @@ function M.getCommon()
     return ls.data
 end
 
+--- 打开通用配置 LuaSettings（缺键则补默认并 flush）
+---@return table LuaSettings 实例
 local function openCommon()
     local ls = openFile(Paths.commonPath())
     local dirty = fillDefaults(ls.data, commonDefaults())
@@ -85,12 +98,15 @@ local function openCommon()
     return ls
 end
 
+--- 读通用配置（data 表）
 ---@return MoonCommonSettings
 function M.get()
     return openCommon().data
 end
 
+--- 写通用配置
 ---@param s MoonCommonSettings|table|nil
+---@return nil
 function M.save(s)
     local ls = openCommon()
     if type(s) == "table" then
@@ -100,15 +116,17 @@ function M.save(s)
     logger.dbg("book.settings save common", ls.data.active_source)
 end
 
---- 源配置表
+--- 读源配置表
 ---@param id SourceId|nil
 ---@return table
 function M.getSource(id)
     return openSource(id or M.activeSourceId()).data
 end
 
+--- 写源配置表
 ---@param id SourceId|nil
 ---@param s table|nil
+---@return nil
 function M.saveSource(id, s)
     id = id or M.activeSourceId()
     local ls = openSource(id)
@@ -119,13 +137,15 @@ function M.saveSource(id, s)
     logger.dbg("book.settings save source", id)
 end
 
+--- 当前活跃数据源 id
 ---@return SourceId
 function M.activeSourceId()
     local c = M.get()
     return c.active_source or "moon"
 end
 
-
+--- 确保 G_reader_settings.device_id 存在（缺失则生成并持久化）
+---@return string
 function M.ensureDeviceId()
     local id = G_reader_settings:readSetting("device_id")
     if type(id) == "string" and id ~= "" then

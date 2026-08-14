@@ -26,10 +26,14 @@ local Request = {}
 
 --- 清空 HTTP URL 缓存（强制刷新）
 ---@param url_substr string|nil 只清包含该子串的键；nil=全部
+---@return nil
 function Request.clearCache(url_substr)
     Cache.clear(url_substr)
 end
 
+--- 是否 luasocket/ssl 超时类错误码
+---@param code any
+---@return boolean
 local function isTimeout(code)
     return code == socketutil.TIMEOUT_CODE
         or code == socketutil.SSL_HANDSHAKE_CODE
@@ -64,6 +68,12 @@ function Request.send(req, timeout, block_timeout)
     return code, headers, nil
 end
 
+--- 发请求并拼接响应体；非 2xx 返回 err
+---@param method string
+---@param url string
+---@param body string|nil
+---@param opts table|nil
+---@return string|nil body, string|nil err
 local function requestBody(method, url, body, opts)
     opts = opts or {}
     local chunks = {}
