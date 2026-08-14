@@ -8,7 +8,7 @@
 items 统一形状：
   { text = "...", callback = fn }           -- 点按执行并关闭
   { text = "...", value = x }               -- 配合 on_select(value, item)
-  { text = "...", icon = "foo.svg" }        -- 左侧/右侧小图标（正方形）
+  { text = "...", icon = "home" }           -- Material Icons 名（字体图标）
   { text = "...", image = "https://..." }   -- 预览图（可非正方形，见 image_w/h）
   { text = "...", widget = w, widget_w = n } -- 自定义 state 控件（字体预览等）
   { image = "https://...", image_only = true } -- 文案替换为图
@@ -24,6 +24,7 @@ local SpinWidget = require("ui/widget/spinwidget")
 local UIManager = require("ui/uimanager")
 local UI = require("ui.components.bookui")
 local Image = require("ui.components.image")
+local Icon = require("ui.components.icon")
 
 local Popup = {}
 
@@ -73,26 +74,26 @@ local function normalizeItems(items, close_fn, on_select, opts)
                 item.state = raw.widget
                 local ww = tonumber(raw.widget_w) or (raw.widget.getSize and raw.widget:getSize().w) or image_sz
                 max_state_w = math.max(max_state_w, ww)
-            else
-                local src = raw.image or raw.icon
-                if src then
-                    local iw = tonumber(raw.image_w) or (image_only and (opts.image_w or image_sz)) or icon_sz
-                    local ih = tonumber(raw.image_h) or (image_only and (opts.image_h or image_sz)) or icon_sz
-                    if not raw.image then
-                        iw, ih = icon_sz, icon_sz
-                    end
-                    local img = Image.widget{
-                        src = src,
-                        width = iw,
-                        height = ih,
-                        alpha = raw.alpha ~= false,
-                        headers = raw.headers or opts.headers,
-                        fallback = raw.fallback,
-                    }
-                    if img then
-                        item.state = img
-                        max_state_w = math.max(max_state_w, iw)
-                    end
+            elseif raw.image then
+                local iw = tonumber(raw.image_w) or (image_only and (opts.image_w or image_sz)) or icon_sz
+                local ih = tonumber(raw.image_h) or (image_only and (opts.image_h or image_sz)) or icon_sz
+                local img = Image.widget{
+                    src = raw.image,
+                    width = iw,
+                    height = ih,
+                    alpha = raw.alpha ~= false,
+                    headers = raw.headers or opts.headers,
+                    fallback = raw.fallback,
+                }
+                if img then
+                    item.state = img
+                    max_state_w = math.max(max_state_w, iw)
+                end
+            elseif raw.icon then
+                local icon = Icon.widget{ name = raw.icon }
+                if icon then
+                    item.state = icon
+                    max_state_w = math.max(max_state_w, icon_sz)
                 end
             end
             table.insert(out, item)
@@ -107,14 +108,11 @@ end
 function Popup.list(opts)
     opts = opts or {}
     local holder = { menu = nil }
-    --- 关闭当前 list 菜单。
+    --- 关闭当前 list 菜单（仅关闭，不触发回调——Menu 的 close_callback 会处理）。
     local function close()
         if holder.menu then
             UIManager:close(holder.menu)
             holder.menu = nil
-        end
-        if opts.close_callback then
-            opts.close_callback()
         end
     end
 
@@ -259,11 +257,8 @@ function Popup.setListItems(menu, title, items, on_select, opts)
     if not menu then
         return
     end
-    --- 关闭目标菜单。
-    local function close()
-        UIManager:close(menu)
-    end
-    local normalized, state_w = normalizeItems(items, close, on_select, opts)
+    -- setListItems 不应关闭菜单，只需更新内容
+    local normalized, state_w = normalizeItems(items, function() end, on_select, opts)
     if state_w and state_w > 0 then
         menu.state_w = state_w
     end

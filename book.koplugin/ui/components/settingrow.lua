@@ -2,7 +2,7 @@
 设置行：图标 + 标题(+副标题) + 右侧状态/箭头
 
   SettingRow.build(width, {
-    icon = "source.svg",
+    icon = "source",
     title = "...",
     subtitle = "...",
     kind = "nav"|"toggle"|"action",  -- 默认 nav
@@ -29,7 +29,7 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
-local Image = require("ui.components.image")
+local Icon = require("ui.components.icon")
 
 local SettingRow = {}
 
@@ -46,7 +46,7 @@ local function tappable(w, h, on_tap)
         TapSettingRow = {
             GestureRange:new{
                 ges = "tap",
-                range = function() return tap.dimen end,
+                range = function() return tap:getSize() end,
             },
         },
     }
@@ -125,15 +125,12 @@ function SettingRow.build(width, opts)
     end
 
     local right_w = status_w + chev_gap + chev_w
+    local icon_w = Icon.widget{ name = opts.icon }
     local inner = HorizontalGroup:new{
         align = "center",
         CenterContainer:new{
             dimen = Geom:new{ w = icon_col, h = row_h - pad_y * 2 },
-            Image.widget{
-                src = opts.icon,
-                width = icon_sz,
-                height = icon_sz,
-            },
+            icon_w or HorizontalSpan:new{ width = 0 },
         },
         HorizontalSpan:new{ width = icon_gap },
         LeftContainer:new{

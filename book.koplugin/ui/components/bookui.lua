@@ -9,7 +9,7 @@ Book 桌面 UI 缩放 — 字号 / 间距 / 图标统一从这里走。
   UI.fontSize(n) 交给 Button/Menu 的数字字号
   UI.iconSz()    图标边长
   UI.line()      分割线粗细
-  UI.pluginRoot() / UI.iconDir()  插件根路径与 icons/
+  UI.pluginRoot()  插件根路径（图标字体等资源）
 
 @module koplugin.book.ui.components.bookui
 --]]
@@ -50,12 +50,6 @@ function UI.pluginRoot()
     end
     _plugin_root = ""
     return _plugin_root
-end
-
---- 图标目录路径（pluginRoot/icons/）。
----@return string
-function UI.iconDir()
-    return UI.pluginRoot() .. "icons/"
 end
 
 local DEFAULT_SCALE = 130
