@@ -144,12 +144,18 @@ function P.ensureFonts()
     ensureDir(P.fontsDir())
 end
 
+--- 只保证共享缓存根存在；清理流程不能凭空猜测活跃 source_id。
+---@return nil
+function P.ensureCacheRoot()
+    P.ensureSettings()
+    ensureDir(P.cacheDir())
+end
+
 --- 确保 .moon 与指定源的 cache/book/image 目录存在
 ---@param id string|nil
 ---@return nil
 function P.ensureLayout(id)
-    P.ensureSettings()
-    ensureDir(P.cacheDir())
+    P.ensureCacheRoot()
     id = P.sanitizeSourceId(id)
     ensureDir(P.sourceCacheDir(id))
     ensureDir(P.bookDir(id))
