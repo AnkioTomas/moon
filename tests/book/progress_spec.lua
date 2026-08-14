@@ -1,10 +1,11 @@
 --[[--
-book.progress flushPending 离线用例（stub Db / UI）
+book.progress flushPending 离线用例（stub ProgressDB / UI）
 
 @module tests.book.progress_spec
 --]]
 
 local Assert = require("support.assert")
+local Stubs = require("support.stubs")
 
 local pending = {
     {
@@ -22,9 +23,9 @@ local pending = {
 }
 local deleted = {}
 
-package.preload["utils.db"] = function()
+package.preload["utils.db.progress"] = function()
     return {
-        allPendingProgress = function(source_id)
+        all = function(source_id)
             local out = {}
             for _, r in ipairs(pending) do
                 if r.source_id == source_id then
@@ -33,11 +34,11 @@ package.preload["utils.db"] = function()
             end
             return out
         end,
-        deletePendingProgress = function(source_id, stable_id)
+        delete = function(source_id, stable_id)
             deleted[#deleted + 1] = source_id .. ":" .. stable_id
             return true
         end,
-        upsertPendingProgress = function()
+        upsert = function()
             return true
         end,
     }
@@ -63,7 +64,7 @@ package.preload["book.store"] = function()
 end
 
 package.loaded["book.progress"] = nil
-package.loaded["utils.db"] = nil
+package.loaded["utils.db.progress"] = nil
 package.loaded["ui/widget/infomessage"] = nil
 package.loaded["source.contract"] = nil
 
@@ -77,25 +78,39 @@ local source = {
     end,
     putProgress = function(_, ref, pos)
         pushed[#pushed + 1] = { ref.stable_id, pos.fraction }
-        return true
+        return { cancel = function() end }
     end,
 }
 
-local n = Progress.flushPending(source, false)
+source.putProgressAsync = function(_, ref, pos, cb)
+    pushed[#pushed + 1] = { ref.stable_id, pos.fraction }
+    cb(true)
+    return { cancel = function() end }
+end
+
+local n
+Progress.flushPendingAsync(source, false, function(count)
+    n = count
+end)
+Stubs.flush()
 Assert.eq(n, 2)
 Assert.eq(#pushed, 2)
 Assert.eq(pushed[1][1], "a.epub")
 Assert.eq(#deleted, 2)
 
-Assert.eq(Progress.flushPending({
+local no_push
+Progress.flushPendingAsync({
     id = "moon",
     capabilities = function()
         return { progress_push = false }
     end,
-}, false), 0)
+}, false, function(count)
+    no_push = count
+end)
+Assert.eq(no_push, 0)
 
 for _, k in ipairs({
-    "utils.db",
+    "utils.db.progress",
     "ui/widget/infomessage",
     "ui/event",
     "ui/network/manager",

@@ -25,13 +25,23 @@ package.loaded["book.content"] = nil
 
 local Content = require("book.content")
 
-local tmp = os.tmpname()
+local tmp = os.tmpname() .. ".epub"
 do
     local f = io.open(tmp, "wb")
     f:write("PK\003\004rest")
     f:close()
     sizes[tmp] = 8
-    Assert.is_true(Content.isValidEpub(tmp))
+    Assert.is_true(Content.isValidBook(tmp))
+end
+
+do
+    local partial = tmp .. ".part"
+    local f = io.open(partial, "wb")
+    f:write("PK\003\004rest")
+    f:close()
+    sizes[partial] = 8
+    Assert.is_true(Content.isValidBook(partial, tmp))
+    os.remove(partial)
 end
 
 do
@@ -40,11 +50,22 @@ do
     f:write("XXXX")
     f:close()
     sizes[bad] = 4
-    Assert.is_false(Content.isValidEpub(bad))
+    Assert.is_false(Content.isValidBook(bad))
     os.remove(bad)
 end
 
-Assert.is_false(Content.isValidEpub("/no/such/file"))
+do
+    local pdf = tmp .. ".pdf"
+    local f = io.open(pdf, "wb")
+    f:write("%PDF-1.7")
+    f:close()
+    sizes[pdf] = 8
+    Assert.is_true(Content.isValidBook(pdf))
+    os.remove(pdf)
+end
+
+Assert.is_false(Content.isValidBook("/no/such/file"))
+Assert.is_nil(Content.isValidEpub)
 
 -- in-flight：finish 延迟，保证第二次订阅合并
 do
