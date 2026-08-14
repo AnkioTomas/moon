@@ -66,8 +66,9 @@ end
 
 --- HTTP 状态码转用户可读错误文案
 ---@param code any
+---@param detail string|nil
 ---@return string
-local function statusErr(code)
+local function statusErr(code, detail)
     local n = tonumber(code)
     if not n then
         return T(_("请求失败: %1"), tostring(code))
@@ -75,7 +76,11 @@ local function statusErr(code)
     if n == 401 or n == 403 then
         return _("认证失败，请检查用户名或密码")
     end
-    return T(_("HTTP %1"), tostring(n))
+    local base = T(_("HTTP %1"), tostring(n))
+    if type(detail) == "string" and detail ~= "" then
+        return base .. ": " .. detail
+    end
+    return base
 end
 
 --- 构造 WebDAV 客户端
@@ -240,7 +245,8 @@ function Webdav:getAsync(path, dest, opts, cb)
         if ok then
             cb(true)
         elseif res and res.code and not Request.ok(res.code) then
-            cb(nil, statusErr(res.code))
+            local body_msg = type(res.body) == "string" and res.body:sub(1, 200) or nil
+            cb(nil, statusErr(res.code, body_msg))
         else
             cb(nil, err)
         end
