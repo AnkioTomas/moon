@@ -37,9 +37,7 @@ package.preload["utils.db.book"] = function()
     return {
         get = function() return nil end,
         upsert = function() return true end,
-        setMd5 = function() end,
         setMd5ByKey = function() end,
-        md5Map = function() return {} end,
         expireBefore = function() end,
         stripMeta = function() end,
     }

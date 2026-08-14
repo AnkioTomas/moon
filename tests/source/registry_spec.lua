@@ -77,6 +77,18 @@ do
     Assert.is_true(ids.moon)
     Assert.is_true(ids.wechat)
     Assert.is_true(ids.webdav)
+    Assert.is_true(ids["local"])
+end
+
+do
+    local src, err = Registry.create("local")
+    Assert.is_true(src ~= nil, err)
+    Assert.eq(src.id, "local")
+    local caps = src:capabilities()
+    Assert.is_true(caps.whole_book)
+    Assert.is_false(caps.stats_import)
+    Assert.is_false(caps.progress_push)
+    Assert.is_false(src:configured())
 end
 
 do
