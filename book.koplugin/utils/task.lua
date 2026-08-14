@@ -3,8 +3,9 @@
 
   local Task = require("utils.task")
 
-  local job = Task.run(function(write_fd)
-      -- 只在子进程跑；勿闭包捕获主进程 userdata / Db.conn
+  local job = Task.run(function(pid, write_fd)
+      -- 此处已在子进程；Task.inSubProcess() == true
+      -- 勿闭包捕获主进程 userdata。
   end, {
       pipe = true,              -- 可选；结果经 FD 回传
       timeout = 30,             -- 秒；超时 abort 并 on_failed("timeout")
@@ -28,11 +29,20 @@ local Task = {}
 --- 内部固定轮询间隔（秒），不对外暴露。
 local POLL_INTERVAL = 0.1
 
+--- 仅子进程 worker 内为 true（fork 后子进程自己的 Lua 状态）。
+local in_subprocess = false
+
+--- 当前是否在 Task 拉起的子进程里。
+---@return boolean
+function Task.inSubProcess()
+    return in_subprocess
+end
+
 ---@class MoonTask
 ---@field abort fun(self: MoonTask|nil)
 
 --- 在子进程跑 worker，主进程轮询直到结束、超时或 abort。
----@param worker fun(write_fd: any|nil)
+---@param worker fun(pid: number, write_fd: any|nil, read_fd: any|nil)
 ---@param opts {
 ---   pipe?: boolean,
 ---   timeout?: number,
@@ -107,7 +117,10 @@ function Task.run(worker, opts)
     end
 
     local second
-    pid, second = ffiUtil.runInSubProcess(worker, use_pipe or nil)
+    pid, second = ffiUtil.runInSubProcess(function(...)
+        in_subprocess = true
+        return worker(...)
+    end, use_pipe or nil)
     if not pid then
         UIManager:nextTick(function()
             settleFailed(second)
