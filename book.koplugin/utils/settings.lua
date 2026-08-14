@@ -4,7 +4,7 @@
   .moon/settings/common.lua     跨源通用
   .moon/settings/<sourceId>.lua 各源专用
 
-本模块只负责读写磁盘。
+本模块只负责读写磁盘。每个文件进程内只打开一次，之后读走内存、写走 flush。
 打开文件只调 Paths.ensureSettings，禁止 ensureLayout（循环依赖）。
 
 @module koplugin.book.utils.settings
@@ -12,7 +12,6 @@
 
 local LuaSettings = require("luasettings")
 local Paths = require("utils.paths")
-local logger = require("logger")
 
 ---@class MoonCommonSettings
 ---@field active_source SourceId 当前数据源 id
@@ -50,50 +49,25 @@ local function fillDefaults(data, defaults)
     return dirty
 end
 
---- 打开配置文件（先 ensureSettings）
+--- 已打开的配置文件：path → LuaSettings。
+--- LuaSettings:open 每次都 dofile 重新解析文件，而 UI.sz/UI.face 每次调用都要读
+--- ui_scale，一个页面就是几百次。实例必须常驻，不能每次读配置都重开文件。
+local _files = {}
+
+--- 打开配置文件（进程内只开一次；首次补齐默认键）
 ---@param path string
+---@param defaults table|nil
 ---@return table LuaSettings 实例
-local function openFile(path)
+local function openFile(path, defaults)
+    local ls = _files[path]
+    if ls then
+        return ls
+    end
     Paths.ensureSettings()
-    logger.dbg("book.settings open", path)
-    return LuaSettings:open(path)
-end
-
---- 打开源专用配置文件
----@param id SourceId|nil
----@return table LuaSettings 实例
-local function openSource(id)
-    id = id or "moon"
-    return openFile(Paths.sourcePath(id))
-end
-
---- 读通用配置表（缺键则补默认并 flush）
----@return MoonCommonSettings
-function M.getCommon()
-    local ls = openFile(Paths.commonPath())
-    local dirty = false
-    -- ensure defaults exist
-    for k, v in pairs(commonDefaults()) do
-        if ls.data[k] == nil then
-            ls.data[k] = v
-            dirty = true
-        end
-    end
-    if dirty then
+    ls = LuaSettings:open(path)
+    _files[path] = ls
+    if defaults and fillDefaults(ls.data, defaults) then
         ls:flush()
-        logger.dbg("book.settings common defaults flushed")
-    end
-    return ls.data
-end
-
---- 打开通用配置 LuaSettings（缺键则补默认并 flush）
----@return table LuaSettings 实例
-local function openCommon()
-    local ls = openFile(Paths.commonPath())
-    local dirty = fillDefaults(ls.data, commonDefaults())
-    if dirty then
-        ls:flush()
-        logger.dbg("book.settings common defaults flushed")
     end
     return ls
 end
@@ -101,26 +75,25 @@ end
 --- 读通用配置（data 表）
 ---@return MoonCommonSettings
 function M.get()
-    return openCommon().data
+    return openFile(Paths.commonPath(), commonDefaults()).data
 end
 
 --- 写通用配置
 ---@param s MoonCommonSettings|table|nil
 ---@return nil
 function M.save(s)
-    local ls = openCommon()
-    if type(s) == "table" then
+    local ls = openFile(Paths.commonPath(), commonDefaults())
+    if type(s) == "table" and s ~= ls.data then
         ls:reset(s)
     end
     ls:flush()
-    logger.dbg("book.settings save common", ls.data.active_source)
 end
 
 --- 读源配置表
 ---@param id SourceId|nil
 ---@return table
 function M.getSource(id)
-    return openSource(id or M.activeSourceId()).data
+    return openFile(Paths.sourcePath(id or M.activeSourceId())).data
 end
 
 --- 写源配置表
@@ -129,12 +102,11 @@ end
 ---@return nil
 function M.saveSource(id, s)
     id = id or M.activeSourceId()
-    local ls = openSource(id)
+    local ls = openFile(Paths.sourcePath(id))
     if type(s) == "table" and s ~= ls.data then
         ls:reset(s)
     end
     ls:flush()
-    logger.dbg("book.settings save source", id)
 end
 
 --- 当前活跃数据源 id
