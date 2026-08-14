@@ -16,7 +16,6 @@ local Paths = require("utils.paths")
 ---@class MoonCommonSettings
 ---@field active_source SourceId 当前数据源 id
 ---@field ui_scale number UI 缩放百分比（默认 130）
----@field reader_float_menu boolean 阅读器中部点击悬浮菜单
 ---@field ui_font string|nil 界面字体 id：空=系统默认；本地为 basename；微信为 weread id
 ---@field ui_font_name string|nil 界面字体展示名
 
@@ -28,7 +27,6 @@ local function commonDefaults()
     return {
         active_source = "moon",
         ui_scale = 130,
-        reader_float_menu = true,
         ui_font = "",
         ui_font_name = "",
     }
