@@ -411,27 +411,22 @@ function Insight.openBookDetail(desktop, hint)
                 UIManager:show(InfoMessage:new{ text = err_text or _("没有这本书"), timeout = 2 })
             end
         end
-        UIManager:scheduleIn(0, function()
-            local ok, err = pcall(function()
-                local res, req_err = api:listLibrary{ page = 1, page_size = 50, search = search }
-                if not res then
-                    finish(nil, req_err or _("拉取失败"))
+        local search_job
+        search_job = api:listLibraryAsync({ page = 1, page_size = 50, search = search }, function(res, req_err)
+            if desktop._closed then return end
+            if not res then
+                finish(nil, req_err or _("拉取失败"))
+                return
+            end
+            local want = basename(sid)
+            for _, row in ipairs(res.data or {}) do
+                if basename(BookInfo.file(row)) == want then
+                    Store.remember(row)
+                    finish(row)
                     return
                 end
-                local want = basename(sid)
-                for _, row in ipairs(res.data or {}) do
-                    if basename(BookInfo.file(row)) == want then
-                        Store.remember(row)
-                        finish(row)
-                        return
-                    end
-                end
-                finish(nil, _("没有这本书"))
-            end)
-            if not ok then
-                logger.err("book insight open detail failed:", err)
-                finish(nil, tostring(err))
             end
+            finish(nil, _("没有这本书"))
         end)
     end)
 end
@@ -623,6 +618,7 @@ function Insight.fetch(desktop)
         desktop._insight_fetch_cancel = nil
     end
     local source = desktop.source
+    local generation = desktop.source_generation or 0
 
     --- 写入统计状态并重建。
     ---@param state table|nil
@@ -645,60 +641,51 @@ function Insight.fetch(desktop)
         return
     end
 
-    local Promise = require("utils.promise")
-    desktop._insight_fetch_cancel = Promise:new(function()
-        return source:readingInsight()
-    end)
-        :next(function(res)
-            if desktop._closed then
-                desktop._insight_fetching = false
-                desktop._insight_fetch_cancel = nil
-                return
-            end
-            if not res then
-                finish({ has_data = false, error = _("加载失败") })
-                return
-            end
-            local applied, boom = pcall(function()
-                local raw = res.data or res
-                if type(raw) ~= "table" then
-                    finish({ has_data = false, error = _("响应数据无效") })
-                    return
-                end
-                local data = raw
-                if type(raw.total) ~= "table" or type(raw.calendar) ~= "table" then
-                    finish({ has_data = false, error = _("响应数据无效") })
-                    return
-                end
-                local perDay = (data.calendar and data.calendar.days) or {}
-                local days = {}
-                for day in pairs(perDay) do table.insert(days, day) end
-                table.sort(days)
-                local selected = days[#days] or ""
-                local ym = (data.calendar and data.calendar.initial_ym) or os.date("%Y-%m")
-                local yy, mm = selected:match("^(%d%d%d%d)%-(%d%d)")
-                if yy and mm then ym = yy .. "-" .. mm end
-                finish({
-                    has_data = not not data.has_data,
-                    total = data.total,
-                    calendar = data.calendar,
-                    ym = ym,
-                    selected = selected,
-                })
-            end)
-            if not applied then
-                logger.err("book insight fetch apply failed:", boom)
-                finish({ has_data = false, error = tostring(boom) })
-            end
-        end)
-        :fail(function(err)
-            if desktop._closed then
-                desktop._insight_fetching = false
-                desktop._insight_fetch_cancel = nil
-                return
-            end
+    if not source.readingInsightAsync then
+        finish({ has_data = false, error = _("当前数据源不支持统计") })
+        return
+    end
+    desktop._insight_fetch_cancel = source:readingInsightAsync(function(res, err)
+        if desktop._closed or desktop.source ~= source
+            or (desktop.source_generation or 0) ~= generation then
+            return
+        end
+        if not res then
             finish({ has_data = false, error = err or _("加载失败") })
+            return
+        end
+        local applied, boom = pcall(function()
+            local raw = res.data or res
+            if type(raw) ~= "table" then
+                finish({ has_data = false, error = _("响应数据无效") })
+                return
+            end
+            local data = raw
+            if type(raw.total) ~= "table" or type(raw.calendar) ~= "table" then
+                finish({ has_data = false, error = _("响应数据无效") })
+                return
+            end
+            local perDay = (data.calendar and data.calendar.days) or {}
+            local days = {}
+            for day in pairs(perDay) do table.insert(days, day) end
+            table.sort(days)
+            local selected = days[#days] or ""
+            local ym = (data.calendar and data.calendar.initial_ym) or os.date("%Y-%m")
+            local yy, mm = selected:match("^(%d%d%d%d)%-(%d%d)")
+            if yy and mm then ym = yy .. "-" .. mm end
+            finish({
+                has_data = not not data.has_data,
+                total = data.total,
+                calendar = data.calendar,
+                ym = ym,
+                selected = selected,
+            })
         end)
+        if not applied then
+            logger.err("book insight fetch apply failed:", boom)
+            finish({ has_data = false, error = tostring(boom) })
+        end
+    end)
 end
 
 --- Desktop rebuild 入口：未加载则触发 fetch。

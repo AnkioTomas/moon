@@ -6,7 +6,7 @@
 --]]
 
 local Library = require("ui.desktop.library")
-local Store = require("book.store")
+local BookStore = require("book.store")
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 
@@ -80,42 +80,38 @@ function Store.fetch(desktop)
 
     Store.syncPageSize(desktop)
     local source = desktop.source
+    local generation = desktop.source_generation or 0
     local page = desktop.store_page or desktop.page or 1
     local page_size = desktop.store_page_size or desktop.page_size or 1
     local search = (desktop.filter and desktop.filter.search) or ""
 
-    local Promise = require("utils.promise")
-    desktop._store_fetch_cancel = Promise:new(function()
-        if not source or not source.configured or not source:configured() then
-            return nil, _("请先在设置里配置当前数据源")
+    if not source or not source.configured or not source:configured() then
+        done({}, _("请先在设置里配置当前数据源"))
+        return
+    end
+    if not source.listStoreAsync then
+        done({}, _("当前数据源不支持书城"))
+        return
+    end
+    desktop._store_fetch_cancel = source:listStoreAsync({
+        page = page,
+        page_size = page_size,
+        search = search,
+    }, function(res, err)
+        if desktop._closed or desktop.tab ~= "store"
+            or desktop.source ~= source or (desktop.source_generation or 0) ~= generation then
+            return
         end
-        return source:listStore{
-            page = page,
-            page_size = page_size,
-            search = search,
-        }
-    end)
-        :next(function(res)
-            desktop._store_fetch_cancel = nil
-            if desktop._closed or desktop.tab ~= "store" then
-                return
-            end
-            if not res then
-                done({}, _("加载失败"))
-                return
-            end
-            desktop.store_total = tonumber(res.count) or 0
-            local books = res.data or {}
-            Store.rememberMany(books)
-            done(books)
-        end)
-        :fail(function(err)
-            desktop._store_fetch_cancel = nil
-            if desktop._closed or desktop.tab ~= "store" then
-                return
-            end
+        desktop._store_fetch_cancel = nil
+        if not res then
             done({}, err or _("加载失败"))
-        end)
+            return
+        end
+        desktop.store_total = tonumber(res.count) or 0
+        local books = res.data or {}
+        BookStore.rememberMany(books)
+        done(books)
+    end)
 end
 
 --- Desktop rebuild 入口。

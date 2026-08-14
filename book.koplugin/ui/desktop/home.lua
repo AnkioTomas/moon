@@ -278,26 +278,24 @@ function Home.fetch(desktop)
         desktop._home_fetch_cancel = nil
     end
 
+    local source = desktop.source
+    local generation = desktop.source_generation or 0
+    local function valid()
+        return not desktop._closed
+            and desktop.source == source
+            and (desktop.source_generation or 0) == generation
+    end
+
     if not desktop._local_cleanup_done then
         desktop._local_cleanup_done = true
-        UIManager:scheduleIn(0.3, function()
-            if desktop._closed then return end
-            local ok, n = pcall(Store.cleanupStale)
+        desktop._local_cleanup_job = Store.cleanupStaleAsync(function(ok, n)
+            desktop._local_cleanup_job = nil
             if ok and n and n > 0 then
                 logger.info("book cleaned stale local books:", n)
             elseif not ok then
-                logger.warn("book local cleanup failed", n)
+                logger.warn("book local cleanup failed")
             end
         end)
-    end
-
-    local source = desktop.source
-    if not desktop._home_loaded then
-        desktop._home_state = { recent_err = _("加载中…"), reading = {} }
-        desktop._home_loaded = true
-        if not desktop._closed and desktop.tab == "home" then
-            desktop:rebuild()
-        end
     end
 
     --- 写入主页状态并重建。
@@ -307,59 +305,52 @@ function Home.fetch(desktop)
         desktop._home_fetch_cancel = nil
         desktop._home_state = state or {}
         desktop._home_loaded = true
-        if desktop._closed or desktop.tab ~= "home" then return end
+        if not valid() or desktop.tab ~= "home" then
+            return
+        end
         desktop:rebuild()
     end
 
-    local Promise = require("utils.promise")
-    desktop._home_fetch_cancel = Promise:new(function()
-        if not source or not source.configured or not source:configured() then
-            return nil, _("请先配置数据源")
+    if not source or not source.configured or not source:configured() then
+        finish({ recent_err = _("请先配置数据源"), reading = {} })
+        return
+    end
+    if not source.recentBooksAsync then
+        finish({ recent_err = _("当前数据源不支持最近阅读"), reading = {} })
+        return
+    end
+    desktop._home_fetch_cancel = source:recentBooksAsync(24, function(res, err)
+        if not valid() then
+            return
         end
-        return source:recentBooks(24)
+        local applied, boom = pcall(function()
+            if not res then
+                finish({
+                    recent = nil,
+                    recent_err = err or _("加载失败"),
+                    reading = {},
+                })
+                return
+            end
+            local rows = res.data or {}
+            local recent = rows[1]
+            local skip = recent and BookInfo.file(recent)
+            local reading = {}
+            -- 「最近阅读」= 接口列表（去掉英雄位那本），不要再按 finished 过滤：
+            -- 微信读书 getRecentBooks 的 finished 是作品完结态，用户读完才是 finishReading。
+            for _, book in ipairs(rows) do
+                if BookInfo.file(book) ~= skip then
+                    table.insert(reading, book)
+                end
+            end
+            Store.rememberMany(rows)
+            finish({ recent = recent, reading = reading })
+        end)
+        if not applied then
+            logger.err("book home fetch apply failed:", boom)
+            finish({ recent_err = tostring(boom), reading = {} })
+        end
     end)
-        :next(function(res)
-            if desktop._closed then
-                desktop._home_fetching = false
-                desktop._home_fetch_cancel = nil
-                return
-            end
-            local applied, boom = pcall(function()
-                if not res then
-                    finish({
-                        recent = nil,
-                        recent_err = _("加载失败"),
-                        reading = {},
-                    })
-                    return
-                end
-                local rows = res.data or {}
-                local recent = rows[1]
-                local skip = recent and BookInfo.file(recent)
-                local reading = {}
-                -- 「最近阅读」= 接口列表（去掉英雄位那本），不要再按 finished 过滤：
-                -- 微信读书 getRecentBooks 的 finished 是作品完结态，用户读完才是 finishReading。
-                for _, book in ipairs(rows) do
-                    if BookInfo.file(book) ~= skip then
-                        table.insert(reading, book)
-                    end
-                end
-                Store.rememberMany(rows)
-                finish({ recent = recent, reading = reading })
-            end)
-            if not applied then
-                logger.err("book home fetch apply failed:", boom)
-                finish({ recent_err = tostring(boom), reading = {} })
-            end
-        end)
-        :fail(function(err)
-            if desktop._closed then
-                desktop._home_fetching = false
-                desktop._home_fetch_cancel = nil
-                return
-            end
-            finish({ recent_err = err or _("加载失败"), reading = {} })
-        end)
 end
 
 --- Desktop rebuild 入口：未加载则触发 fetch。
@@ -369,6 +360,7 @@ function Home.page(desktop)
     local h = desktop:contentHeight()
     local w = (desktop.dimen and desktop.dimen.w) or Screen:getWidth()
     if not desktop._home_loaded then
+        desktop._home_loaded = true
         UIManager:nextTick(function()
             if desktop._closed or desktop.tab ~= "home" then return end
             Home.fetch(desktop)

@@ -23,7 +23,7 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
-local Image = require("ui.components.image")
+local Icon = require("ui.components.icon")
 local Pager = require("ui.components.pager")
 local Popup = require("ui.components.popup")
 local SettingRow = require("ui.components.settingrow")
@@ -31,6 +31,7 @@ local FontPicker = require("ui.components.fontpicker")
 local MoonSettings = require("utils.settings")
 local MoonFont = require("utils.font")
 local SourceRegistry = require("source.registry")
+local StatsSync = require("stats.stats_sync")
 local Store = require("book.store")
 local Host = require("host")
 local _ = require("gettext")
@@ -77,13 +78,10 @@ local function showAbout()
     }
 
     local avail_w = dialog:getAddedWidgetAvailableWidth()
-    local icon_sz = UI.sz(44)
     local body = VerticalGroup:new{ align = "center" }
-    local icon = Image.widget{
-        src = "about.svg",
-        width = icon_sz,
-        height = icon_sz,
-        alpha = true,
+    local icon = Icon.widget{
+        name = "info",
+        size = 44,
     }
     if icon then
         table.insert(body, icon)
@@ -149,16 +147,24 @@ local function testConnection(plugin)
         return
     end
     NetworkMgr:runWhenOnline(function()
-        local res, err = plugin:getSource():ping()
-        if not res then
-            UIManager:show(InfoMessage:new{ text = err or _("连接失败") })
+        local source = plugin:getSource()
+        if not source or not source.pingAsync then
+            UIManager:show(InfoMessage:new{ text = _("连接失败") })
             return
         end
-        local name = res.data and (res.data.display_name or res.data.username) or "?"
-        UIManager:show(InfoMessage:new{
-            text = T(_("连接成功：%1"), name),
-            timeout = 3,
-        })
+        source:pingAsync(function(res, err)
+            if not res then
+                UIManager:show(InfoMessage:new{
+                    text = err or _("连接失败"),
+                })
+                return
+            end
+            local name = res.data and (res.data.display_name or res.data.username) or "?"
+            UIManager:show(InfoMessage:new{
+                text = T(_("连接成功：%1"), name),
+                timeout = 3,
+            })
+        end)
     end)
 end
 
@@ -221,7 +227,7 @@ local function sourceServiceRows(active_id, plugin)
         rows[#rows + 1] = function(iw)
             return SettingRow.build(iw, {
                 kind = "nav",
-                icon = (mod.rowIcon and mod.rowIcon()) or "server.svg",
+                icon = (mod.rowIcon and mod.rowIcon()) or "dns",
                 title = (mod.rowTitle and mod.rowTitle()) or _("配置"),
                 status = status,
                 status_on = status_on,
@@ -235,7 +241,7 @@ local function sourceServiceRows(active_id, plugin)
     rows[#rows + 1] = function(iw)
         return SettingRow.build(iw, {
             kind = "action",
-            icon = "link.svg",
+            icon = "link",
             title = _("测试连接"),
             callback = function()
                 testConnection(plugin)
@@ -247,7 +253,7 @@ local function sourceServiceRows(active_id, plugin)
         rows[#rows + 1] = function(iw)
             return SettingRow.build(iw, {
                 kind = "action",
-                icon = "sync.svg",
+                icon = "sync",
                 title = _("立即同步进度"),
                 callback = function()
                     local Progress = require("book.progress")
@@ -256,7 +262,7 @@ local function sourceServiceRows(active_id, plugin)
                         return
                     end
                     NetworkMgr:runWhenOnline(function()
-                        Progress.flushPending(src, true)
+                        Progress.flushPendingAsync(src, true)
                     end)
                 end,
             })
@@ -267,12 +273,11 @@ local function sourceServiceRows(active_id, plugin)
         rows[#rows + 1] = function(iw)
             return SettingRow.build(iw, {
                 kind = "action",
-                icon = "stats.svg",
+                icon = "bar_chart",
                 title = _("立即上报统计"),
                 callback = function()
-                    if plugin and plugin.pushReadingStats then
-                        plugin:pushReadingStats(true, true)
-                    end
+                    local src = plugin and plugin.getSource and plugin:getSource()
+                    StatsSync.pushWithUi(src, true, true)
                 end,
             })
         end
@@ -289,27 +294,12 @@ function Settings.build(desktop)
     local w = desktop.dimen.w
     local plugin = desktop.plugin
     local open_on = G_reader_settings:readSetting("start_with") == Host.OPEN_ON_START_ID
-    local float_menu = MoonSettings.get().reader_float_menu ~= false
     local scale = UI.getScale()
     local font_name = MoonFont.currentName()
     local page_pad = UI.pagePad()
     local card_w = math.max(UI.sz(100), w - page_pad * 2)
     local band_h = Pager.bandH()
     local body_h = math.max(1, h - band_h)
-
-    --- 切换阅读页悬浮菜单开关。
-    local function on_toggle_float()
-        local st = MoonSettings.get()
-        st.reader_float_menu = not float_menu
-        MoonSettings.save(st)
-        UIManager:show(InfoMessage:new{
-            text = st.reader_float_menu ~= false
-                and _("已开启阅读页菜单")
-                or _("已关闭阅读页菜单"),
-            timeout = 2,
-        })
-        desktop:rebuild()
-    end
 
     local sources = SourceRegistry.list()
     local active_id = MoonSettings.activeSourceId()
@@ -368,7 +358,7 @@ function Settings.build(desktop)
         function(iw)
             return SettingRow.build(iw, {
                 kind = "nav",
-                icon = "source.svg",
+                icon = "source",
                 title = _("数据源"),
                 status = active_name,
                 status_on = true,
@@ -385,18 +375,8 @@ function Settings.build(desktop)
     appendSection(packed, card_w, _("显示"), {
         function(iw)
             return SettingRow.build(iw, {
-                kind = "toggle",
-                icon = "reader.svg",
-                title = _("阅读页菜单"),
-                status = float_menu and _("开") or _("关"),
-                status_on = float_menu,
-                callback = on_toggle_float,
-            })
-        end,
-        function(iw)
-            return SettingRow.build(iw, {
                 kind = "nav",
-                icon = "font.svg",
+                icon = "text_fields",
                 title = _("字体"),
                 status = font_name,
                 status_on = true,
@@ -413,7 +393,7 @@ function Settings.build(desktop)
         function(iw)
             return SettingRow.build(iw, {
                 kind = "nav",
-                icon = "font_size.svg",
+                icon = "format_size",
                 title = _("字号"),
                 status = string.format("%d%%", scale),
                 status_on = true,
@@ -441,7 +421,7 @@ function Settings.build(desktop)
         function(iw)
             return SettingRow.build(iw, {
                 kind = "toggle",
-                icon = "view.svg",
+                icon = "visibility",
                 title = _("启动打开桌面"),
                 status = open_on and _("开") or _("关"),
                 status_on = open_on,
@@ -458,10 +438,23 @@ function Settings.build(desktop)
     })
     appendSection(packed, card_w, _("维护"), {
         function(iw)
-            local cache_size = Store.sizeLabel()
+            local cache_size = desktop._cache_size_label or _("计算中…")
+            -- 扫完就置 label；只认 job 会让回调里的 rebuild 再次开扫，死循环
+            if desktop._cache_size_label == nil and not desktop._cache_size_job then
+                desktop._cache_size_job = Store.sizeLabelAsync(function(label)
+                    desktop._cache_size_job = nil
+                    if desktop._closed then
+                        return
+                    end
+                    desktop._cache_size_label = label
+                    if desktop.tab == "settings" then
+                        desktop:rebuild()
+                    end
+                end)
+            end
             return SettingRow.build(iw, {
                 kind = "action",
-                icon = "trash.svg",
+                icon = "delete",
                 title = _("清理缓存"),
                 status = cache_size,
                 status_on = true,
@@ -470,17 +463,30 @@ function Settings.build(desktop)
                         text = T(_("删除 .moon/cache（%1）？"), cache_size),
                         ok_text = _("清理"),
                         ok_callback = function()
-                            local ok = Store.clear()
-                            if desktop then
-                                desktop._home_state = nil
-                                desktop._home_loaded = false
-                                desktop._library_state = nil
-                                desktop:rebuild()
+                            if desktop._cache_clear_job then
+                                return
                             end
                             UIManager:show(InfoMessage:new{
-                                text = ok and _("已清理") or _("清理失败"),
-                                timeout = 2,
+                                text = _("正在清理缓存…"),
+                                timeout = 1,
                             })
+                            desktop._cache_clear_job = Store.clearAsync(function(ok)
+                                desktop._cache_clear_job = nil
+                                if desktop._closed then
+                                    return
+                                end
+                                if ok then
+                                    desktop._cache_size_label = "0"
+                                    desktop._home_state = nil
+                                    desktop._home_loaded = false
+                                    desktop._library_state = nil
+                                    desktop:rebuild()
+                                end
+                                UIManager:show(InfoMessage:new{
+                                    text = ok and _("已清理") or _("清理失败"),
+                                    timeout = 2,
+                                })
+                            end)
                         end,
                     })
                 end,
@@ -489,7 +495,7 @@ function Settings.build(desktop)
         function(iw)
             return SettingRow.build(iw, {
                 kind = "nav",
-                icon = "about.svg",
+                icon = "info",
                 title = _("关于"),
                 status = pluginVersion(),
                 status_on = true,
@@ -499,7 +505,7 @@ function Settings.build(desktop)
         function(iw)
             return SettingRow.build(iw, {
                 kind = "action",
-                icon = "close.svg",
+                icon = "close",
                 title = _("关闭桌面"),
                 callback = function()
                     desktop:onClose()
