@@ -10,7 +10,7 @@ local Stubs = require("support.stubs")
 Stubs.install()
 Stubs.reset()
 
-local Html2Epub = require("html2epub")
+local Html2Epub = require("convert.html2epub")
 
 -- xmlEscape
 do
@@ -60,7 +60,7 @@ do
         archiver_preload = package.preload["ffi/archiver"],
         task_loaded = package.loaded["utils.task"],
         task_preload = package.preload["utils.task"],
-        html2epub = package.loaded["html2epub"],
+        html2epub = package.loaded["convert.html2epub"],
     }
 
     package.loaded["ffi/archiver"] = nil
@@ -113,9 +113,8 @@ do
         }
     end
 
-    package.loaded["html2epub"] = nil
-    package.loaded["html2epub.init"] = nil
-    local M = require("html2epub")
+    package.loaded["convert.html2epub"] = nil
+    local M = require("convert.html2epub")
 
     local got_ok, got_err
     local chapter_calls = 0
@@ -172,6 +171,5 @@ do
     package.loaded["ffi/archiver"] = saved.archiver_loaded
     package.preload["utils.task"] = saved.task_preload
     package.loaded["utils.task"] = saved.task_loaded
-    package.loaded["html2epub"] = saved.html2epub
-    package.loaded["html2epub.init"] = nil
+    package.loaded["convert.html2epub"] = saved.html2epub
 end

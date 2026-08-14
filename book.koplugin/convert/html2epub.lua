@@ -7,7 +7,7 @@ HTML → EPUB（多章节、内嵌图片、元数据）。
   - 打包走子进程（utils.task），不堵 UI。
   - 逐章 / 逐图之间用 nextTick 让出事件循环。
 
-  local Html2Epub = require("html2epub")
+  local Html2Epub = require("convert.html2epub")
   local job = Html2Epub.build({
       dest = "/path/book.epub",
       title = "书名",
@@ -18,7 +18,7 @@ HTML → EPUB（多章节、内嵌图片、元数据）。
   }, function(ok, err) end)
   job.cancel()
 
-@module koplugin.book.html2epub
+@module koplugin.book.convert.html2epub
 --]]
 
 local UIManager = require("ui/uimanager")

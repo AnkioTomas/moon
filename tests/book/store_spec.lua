@@ -5,7 +5,7 @@ book.store BookRef 身份离线用例
 --]]
 
 local Assert = require("support.assert")
-local Contract = require("source.contract")
+local BookRef = require("types.book").BookRef
 
 -- stub db / paths / lfs 最小集
 package.preload["libs/libkoreader-lfs"] = function()
@@ -66,25 +66,20 @@ end
 local Store = require("book.store")
 
 do
-    local ref = Contract.makeRef("moon", "a.epub")
+    local ref = BookRef.new("moon", "a.epub")
     local book = { ref = ref, title = "t", percent = 1 }
     Assert.eq(Store.refOf(book).book_key, ref.book_key)
-    local key, sid, source = Store.keyForBook(book)
-    Assert.eq(key, ref.book_key)
-    Assert.eq(sid, "a.epub")
-    Assert.eq(source, "moon")
 end
 
 do
     Assert.is_nil(Store.refOf({ id = "legacy" }))
-    Assert.is_nil(Store.bookKey(nil, "a"))
-    Assert.is_nil(Store.bookKey("moon", nil))
 end
 
 do
-    local a = Store.bookKey("moon", "same")
-    local b = Store.bookKey("wechat", "same")
+    local a = BookRef.keyOf("moon", "same")
+    local b = BookRef.keyOf("wechat", "same")
     Assert.is_true(a ~= b)
+    Assert.eq(a, BookRef.new("moon", "same").book_key)
 end
 
 do
