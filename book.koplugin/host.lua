@@ -50,9 +50,6 @@ end
 ---@return boolean
 local function openNow(plugin)
     if not isFileManager(plugin) or not plugin.openDesktop or plugin.desktop then
-        logger.dbg("book.host openNow skip",
-            isFileManager(plugin),
-            plugin and plugin.desktop ~= nil)
         return false
     end
     want = false
@@ -74,11 +71,9 @@ local function registerMenu(plugin)
             general = true,
             filemanager = true,
         })
-        logger.dbg("book.host dispatcher registered")
     end
     if plugin.ui and plugin.ui.menu and plugin.ui.menu.registerToMainMenu then
         plugin.ui.menu:registerToMainMenu(plugin)
-        logger.dbg("book.host registerToMainMenu", isFileManager(plugin) and "fm" or "reader")
     end
 end
 
@@ -98,7 +93,6 @@ local function pinSettingsMenu()
                 end
             end
             table.insert(order.setting, 1, MENU_ITEM_ID)
-            logger.dbg("book.host pinSettingsMenu", modname)
         end
     end
 end
@@ -150,7 +144,6 @@ local function patchStartWithMenu()
         end
         return item
     end
-    logger.dbg("book.host patchStartWithMenu ok")
 end
 
 --- 插件 init：挂钩菜单；FM 侧按 start_with 决定是否自动开桌面
@@ -167,12 +160,10 @@ function Host.attach(plugin)
     pinSettingsMenu()
     patchStartWithMenu()
     if not isFileManager(plugin) then
-        logger.dbg("book.host attach reader skip auto-open")
         return
     end
     if want == nil then
         want = isOpenOnStart()
-        logger.dbg("book.host attach want", want)
     end
     UIManager:nextTick(function()
         Host.onShow(plugin)
@@ -186,7 +177,6 @@ function Host.onShow(plugin)
     if want ~= true then
         return false
     end
-    logger.dbg("book.host onShow try open")
     return openNow(plugin)
 end
 
@@ -198,7 +188,6 @@ function Host.requestDesktop(plugin)
         return true
     end
     want = true
-    logger.dbg("book.host requestDesktop deferred")
     return false
 end
 
