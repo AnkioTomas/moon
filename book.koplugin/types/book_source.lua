@@ -1,5 +1,4 @@
----@meta
---- 本文件仅 EmmyLua 类型注释，运行时不要 require。
+--- Source 接口与能力表。可 require：仅 SourceCapabilities.defaults 为运行时。
 
 ---@alias SourceId "moon"|"webdav"|"wechat"|string
 
@@ -14,6 +13,7 @@
 ---@field recent boolean
 ---@field search boolean
 ---@field filters boolean
+---@field refresh boolean 支持手动强制重扫书库（本地源）
 ---@field detail boolean
 ---@field cover boolean
 ---@field whole_book boolean
@@ -24,22 +24,37 @@
 ---@field stats_import boolean
 ---@field store boolean
 
----@alias SourceErrorCode "not_configured"|"unauthorized"|"unsupported"|"offline"|"not_found"|"protocol"|"io"
+local SourceCapabilities = {}
 
----@class SourceError
----@field code SourceErrorCode
----@field message string
----@field retryable boolean
----@field cause string|nil
+--- 返回全 false 的默认能力表。
+---@return SourceCapabilities
+function SourceCapabilities.defaults()
+    return {
+        library = false,
+        recent = false,
+        search = false,
+        filters = false,
+        refresh = false,
+        detail = false,
+        cover = false,
+        whole_book = false,
+        chapters = false,
+        progress_pull = false,
+        progress_push = false,
+        insight = false,
+        stats_import = false,
+        store = false,
+    }
+end
 
 ---@class BookFiltersResult
 ---@field data table|nil
 
 ---@class BookStatsBook
----@field md5 string
+---@field stable_id string
 
 ---@class BookStatsRow
----@field md5 string
+---@field stable_id string
 ---@field page number
 ---@field start_time number
 ---@field duration number
@@ -57,28 +72,47 @@
 
 ---@alias SourceConfigurationState "ready"|"needs_login"|"needs_config"|"unavailable"
 
---- 统一数据源实例接口。失败一律 (data|nil, SourceError|nil)。
+--- 统一数据源实例接口。失败一律 (data|nil, string|nil)。
 ---@class BookSource
 ---@field id SourceId|nil
 ---@field name string|nil
+---@field onEvent fun(self: BookSource, event: string, payload: table|nil)|nil 生命周期事件（见 source.base 注释）
 ---@field capabilities fun(self: BookSource): SourceCapabilities
 ---@field configurationState fun(self: BookSource): SourceConfigurationState
 ---@field configured fun(self: BookSource): boolean
----@field ping fun(self: BookSource): (table|nil, SourceError|nil)
----@field listLibrary fun(self: BookSource, opts: BookListOpts|nil): (BookListResult|nil, SourceError|nil)
----@field listStore fun(self: BookSource, opts: BookListOpts|nil): (BookListResult|nil, SourceError|nil)
----@field recentBooks fun(self: BookSource, limit: number|nil): (BookListResult|nil, SourceError|nil)
----@field filters fun(self: BookSource): (BookFiltersResult|nil, SourceError|nil)
----@field readingInsight fun(self: BookSource): (BookInsightResult|nil, SourceError|nil)
+---@field ping fun(self: BookSource): (table|nil, string|nil)
+---@field pingAsync fun(self: BookSource, cb: fun(data: table|nil, err: string|nil)): table|nil
+---@field listLibrary fun(self: BookSource, opts: BookListOpts|nil): (BookListResult|nil, string|nil)
+---@field listLibraryAsync fun(self: BookSource, opts: BookListOpts|nil, cb: fun(data: BookListResult|nil, err: string|nil)): table|nil
+---@field listStore fun(self: BookSource, opts: BookListOpts|nil): (BookListResult|nil, string|nil)
+---@field listStoreAsync fun(self: BookSource, opts: BookListOpts|nil, cb: fun(data: BookListResult|nil, err: string|nil)): table|nil
+---@field recentBooks fun(self: BookSource, limit: number|nil): (BookListResult|nil, string|nil)
+---@field recentBooksAsync fun(self: BookSource, limit: number|nil, cb: fun(data: BookListResult|nil, err: string|nil)): table|nil
+---@field filters fun(self: BookSource): (BookFiltersResult|nil, string|nil)
+---@field filtersAsync fun(self: BookSource, cb: fun(data: BookFiltersResult|nil, err: string|nil)): table|nil
+---@field readingInsight fun(self: BookSource): (BookInsightResult|nil, string|nil)
+---@field readingInsightAsync fun(self: BookSource, cb: fun(data: BookInsightResult|nil, err: string|nil)): table|nil
 ---@field clearCaches fun(self: BookSource)
 ---@field close fun(self: BookSource)|nil
----@field getDetail fun(self: BookSource, ref: BookRef): (BookDetail|nil, SourceError|nil)
----@field getProgress fun(self: BookSource, ref: BookRef): (ProgressPosition|nil, SourceError|nil)
----@field putProgress fun(self: BookSource, ref: BookRef, pos: ProgressPosition): (boolean|nil, SourceError|nil)
----@field getToc fun(self: BookSource, ref: BookRef): (BookChapter[]|nil, SourceError|nil)
----@field materializeWhole fun(self: BookSource, ref: BookRef, temp_path: string, on_progress: (fun(bytes: number)|nil)): (boolean|nil, SourceError|nil)
----@field materializeChapter fun(self: BookSource, ref: BookRef, chapter: BookChapter, temp_path: string): (boolean|nil, SourceError|nil)
----@field coverRequest fun(self: BookSource, ref: BookRef): (BookCoverRequest|nil, SourceError|nil)
+---@field getDetail fun(self: BookSource, ref: BookRef): (BookDetail|nil, string|nil)
+---@field getDetailAsync fun(self: BookSource, ref: BookRef, cb: fun(data: BookDetail|nil, err: string|nil)): table|nil
+---@field getProgress fun(self: BookSource, ref: BookRef): (ProgressPosition|nil, string|nil)
+---@field getProgressAsync fun(self: BookSource, ref: BookRef, cb: fun(data: ProgressPosition|nil, err: string|nil)): table|nil
+---@field putProgress fun(self: BookSource, ref: BookRef, pos: ProgressPosition): (boolean|nil, string|nil)
+---@field putProgressAsync fun(self: BookSource, ref: BookRef, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil)): table|nil
+---@field getToc fun(self: BookSource, ref: BookRef): (BookChapter[]|nil, string|nil)
+---@field getTocAsync fun(self: BookSource, ref: BookRef, cb: fun(data: BookChapter[]|nil, err: string|nil)): table|nil
+---@field materializeWhole fun(self: BookSource, ref: BookRef, temp_path: string, on_progress: (fun(bytes: number)|nil)): (boolean|nil, string|nil)
+---@field materializeWholeAsync fun(self: BookSource, ref: BookRef, temp_path: string, on_progress: (fun(bytes: number)|nil), cb: fun(ok: boolean|nil, err: string|nil)): table|nil
+---@field materializeChapter fun(self: BookSource, ref: BookRef, chapter: BookChapter, temp_path: string): (boolean|nil, string|nil)
+---@field materializeChapterAsync fun(self: BookSource, ref: BookRef, chapter: BookChapter, temp_path: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil
+---@field coverRequest fun(self: BookSource, ref: BookRef): (BookCoverRequest|nil, string|nil)
 ---@field probeFileSize fun(self: BookSource, ref: BookRef): number|nil
----@field registerReadingDevice fun(self: BookSource, device_id: string, model: string|nil): (table|nil, SourceError|nil)
----@field importReadingStats fun(self: BookSource, payload: BookStatsPayload): (table|nil, SourceError|nil)
+---@field registerReadingDevice fun(self: BookSource, device_id: string, model: string|nil): (table|nil, string|nil)
+---@field registerReadingDeviceAsync fun(self: BookSource, device_id: string, model: string|nil, cb: fun(data: table|nil, err: string|nil)): table|nil
+---@field importReadingStats fun(self: BookSource, payload: BookStatsPayload): (table|nil, string|nil)
+---@field importReadingStatsAsync fun(self: BookSource, payload: BookStatsPayload, cb: fun(data: table|nil, err: string|nil)): table|nil
+
+return {
+    SourceCapabilities = SourceCapabilities,
+}

@@ -1,5 +1,4 @@
----@meta
---- 仅 EmmyLua 类型注释，运行时不要 require。
+--- 图书馆 / 书城列表查询与响应。
 
 --- 图书馆 / 书城列表查询参数。
 --- 未使用的筛选项传 nil 或空串；源不支持的项可忽略。
@@ -13,8 +12,33 @@
 ---@field favorite string|nil 按分类 / 收藏筛选
 ---@field finished string|nil 按是否读完筛选（moon 列表参数）
 ---@field author string|nil 按作者筛选
+---@field force boolean|nil 强制重扫、忽略扫描缓存（本地源手动刷新）
 
 --- 列表响应（图书馆 / 书城 / 最近阅读）。
 ---@class BookListResult
 ---@field count number|nil 符合条件的总条数（分页用）
 ---@field data Book[]|nil 本页书籍；无数据时为空表
+
+local BookListResult = {}
+
+--- 构造标准 BookListResult。
+---@param books Book[]|nil
+---@param count number|nil
+---@return BookListResult
+function BookListResult.new(books, count)
+    local data = books or {}
+    return {
+        data = data,
+        count = tonumber(count) or #data,
+    }
+end
+
+--- 空列表（可带已有 books）。
+---@param books Book[]|nil
+---@param count number|nil
+---@return BookListResult
+function BookListResult.empty(books, count)
+    return BookListResult.new(books, count)
+end
+
+return BookListResult
