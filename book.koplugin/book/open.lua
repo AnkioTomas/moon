@@ -9,7 +9,6 @@ local InfoMessage = require("ui/widget/infomessage")
 local NetworkMgr = require("ui/network/manager")
 local logger = require("logger")
 local Store = require("book.store")
-local SourceError = require("source.error")
 local Content = require("book.content")
 local _ = require("gettext")
 
@@ -30,10 +29,17 @@ local function closeDesktop(plugin)
 end
 
 --- 下一拍打开阅读器。
+--- 若用户已打开其他文档则跳过，避免下载回调强行切走。
+--- 检查放在执行时而非排队时，防止排队到执行之间状态变化。
 ---@param path string
 local function showReader(path)
     local ReaderUI = require("apps/reader/readerui")
     UIManager:nextTick(function()
+        local ui = ReaderUI.instance
+        if ui and ui.document and ui.document.file ~= path then
+            logger.dbg("book.open showReader skip: user reading other doc")
+            return
+        end
         ReaderUI:showReader(path)
     end)
 end
@@ -55,19 +61,17 @@ local function openWholeBook(plugin, book, source, ref)
     local Chapter = require("book.chapter")
     Chapter.clear()
     Store.remember(book)
-    local path = Store.bookFilePath(ref.book_key, ref.source_id)
-    logger.dbg("book.open whole", ref.stable_id, path)
+    local path = Store.bookFilePath(ref.book_key, ref.source_id, ref.stable_id)
 
     --- 登记并进入阅读器。
     local function doOpen()
-        Store.touch(path, ref)
+        Store.touchAsync(path, ref)
         closeDesktop(plugin)
         logger.info("book.open reader", path)
         showReader(path)
     end
 
-    if Content.isValidEpub(path) then
-        logger.dbg("book.open cache hit", path)
+    if Content.isValidBook(path) then
         doOpen()
         return
     end
@@ -80,9 +84,6 @@ local function openWholeBook(plugin, book, source, ref)
             local title = book.title
                 or (ref.stable_id:match("([^/\\]+)$") or ref.stable_id)
             local size = tonumber(book.fileSize or book.filesize or book.size or book.file_size)
-            if (not size or size <= 0) and source.probeFileSize then
-                size = source:probeFileSize(ref)
-            end
 
             local dialog
             local ok_dlg, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
@@ -100,34 +101,38 @@ local function openWholeBook(plugin, book, source, ref)
             end
 
             local tmp = path .. ".part"
-            local ok, err = source:materializeWhole(ref, tmp, dialog and function(bytes)
+            if not source.materializeWholeAsync then
+                finish(false, nil, _("当前数据源不支持整本下载"))
+                return
+            end
+            source:materializeWholeAsync(ref, tmp, dialog and function(bytes)
                 dialog:reportProgress(bytes)
-            end or nil)
-
-            if dialog then
-                dialog:close()
-            end
-            if not ok then
-                os.remove(tmp)
-                finish(false, nil, err)
-                return
-            end
-            if not Content.isValidEpub(tmp) then
-                os.remove(tmp)
-                finish(false, nil, SourceError.io(_("下载文件校验失败")))
-                return
-            end
-            os.remove(path)
-            if not os.rename(tmp, path) then
-                os.remove(tmp)
-                finish(false, nil, SourceError.io(_("无法保存文件")))
-                return
-            end
-            finish(true, path)
+            end or nil, function(ok, err)
+                if dialog then
+                    dialog:close()
+                end
+                if not ok then
+                    os.remove(tmp)
+                    finish(false, nil, err)
+                    return
+                end
+                if not Content.isValidBook(tmp, path) then
+                    os.remove(tmp)
+                    finish(false, nil, _("下载文件校验失败"))
+                    return
+                end
+                os.remove(path)
+                if not os.rename(tmp, path) then
+                    os.remove(tmp)
+                    finish(false, nil, _("无法保存文件"))
+                    return
+                end
+                finish(true, path)
+            end)
         end, function(ok, _path, err)
             if not ok then
-                logger.warn("book.open download failed", ref.stable_id, SourceError.message(err))
-                UIManager:show(InfoMessage:new{ text = SourceError.message(err) or _("下载失败") })
+                logger.warn("book.open download failed", ref.stable_id, err)
+                UIManager:show(InfoMessage:new{ text = err or _("下载失败") })
                 return
             end
             logger.info("book.open download ok", ref.stable_id)
@@ -149,13 +154,13 @@ local function openChapterBook(plugin, book, source, ref)
         local Chapter = require("book.chapter")
         Chapter.prepareOpenAsync(source, book, ref, function(ok, prep, err)
             if not ok or not prep then
-                UIManager:show(InfoMessage:new{ text = SourceError.message(err) or err or _("无法获取目录") })
+                UIManager:show(InfoMessage:new{ text = err or _("无法获取目录") })
                 return
             end
             local start_idx = prep.start_idx or 1
             Chapter.ensureAsync(source, ref, start_idx, prep.toc, function(eok, path, e2)
                 if not eok or not path then
-                    UIManager:show(InfoMessage:new{ text = SourceError.message(e2) or e2 or _("章节下载失败") })
+                    UIManager:show(InfoMessage:new{ text = e2 or _("章节下载失败") })
                     return
                 end
                 Chapter.bind({
@@ -166,7 +171,7 @@ local function openChapterBook(plugin, book, source, ref)
                     toc = prep.toc,
                     idx = start_idx,
                 })
-                Store.touch(path, ref, { chapter_idx = start_idx })
+                Store.touchAsync(path, ref, { chapter_idx = start_idx })
                 closeDesktop(plugin)
                 logger.info("book.open chapter", ref.stable_id, start_idx, path)
                 showReader(path)

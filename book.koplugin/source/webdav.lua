@@ -1,14 +1,12 @@
 --[[--
-WebDAV 数据源门面：列目录 + 整本下载。
+WebDAV 数据源门面：列目录 + 整本下载（仅异步）。
 
 @module koplugin.book.source.webdav
 --]]
 
 local SourceBase = require("source.base")
-local SourceError = require("source.error")
 local Client = require("source.webdav.client")
 local Mapper = require("source.webdav.mapper")
-local logger = require("logger")
 local _ = require("gettext")
 
 local WebDAV = {}
@@ -74,57 +72,48 @@ function Source:configurationState()
     return "needs_config"
 end
 
---- 探测 WebDAV 连通性。
----@return table|nil, SourceError|nil
-function Source:ping()
-    if not self:configured() then
-        return nil, SourceError.not_configured(_("未配置 WebDAV 地址或用户名"))
-    end
-    local ok, err = self._client:ping()
-    if not ok then
-        logger.warn("book.webdav ping failed", err)
-        return nil, SourceError.wrap(err, "offline")
-    end
-    local user = self.cfg.username or ""
-    return {
-        data = {
-            display_name = user ~= "" and user or "WebDAV",
-            username = user,
-        },
-    }
-end
-
---- 列出 WebDAV 目录中的书籍。
----@param opts BookListOpts|nil
----@return BookListResult|nil, SourceError|nil
-function Source:listLibrary(opts)
-    opts = opts or {}
-    local path = opts.path or opts.series or ""
-    local entries, err = self._client:list(path)
-    if not entries then
-        return nil, SourceError.wrap(err, "offline")
-    end
-    return Mapper.list(entries, path)
-end
-
 --- 根据引用构造 WebDAV 书籍详情。
 ---@param ref BookRef
----@return BookDetail|nil, SourceError|nil
+---@return BookDetail|nil, string|nil
 function Source:getDetail(ref)
     return Mapper.detailFromRef(ref)
 end
 
---- 将 WebDAV 整本书落盘到临时路径。
----@param ref BookRef
----@param temp_path string
----@param on_progress fun(bytes: number)|nil
----@return boolean|nil, SourceError|nil
-function Source:materializeWhole(ref, temp_path, on_progress)
-    local ok, err = self._client:download(ref.stable_id, temp_path, on_progress)
-    if not ok then
-        return nil, SourceError.wrap(err, "io")
+function Source:pingAsync(cb)
+    if not self:configured() then
+        cb(nil, _("未配置 WebDAV 地址或用户名"))
+        return nil
     end
-    return true
+    return self._client:pingAsync(function(ok, err)
+        if not ok then
+            cb(nil, (type(err) == "table" and err.message) or err)
+            return
+        end
+        local user = self.cfg.username or ""
+        cb({ data = { display_name = user ~= "" and user or "WebDAV", username = user } })
+    end)
+end
+
+function Source:listLibraryAsync(opts, cb)
+    opts = opts or {}
+    local path = opts.path or opts.series or ""
+    return self._client:listAsync(path, function(entries, err)
+        if entries then
+            cb(Mapper.list(entries, path))
+        else
+            cb(nil, (type(err) == "table" and err.message) or err)
+        end
+    end)
+end
+
+function Source:materializeWholeAsync(ref, temp_path, on_progress, cb)
+    return self._client:downloadAsync(ref.stable_id, temp_path, on_progress, function(ok, err)
+        if ok then
+            cb(true)
+        else
+            cb(nil, (type(err) == "table" and err.message) or err)
+        end
+    end)
 end
 
 return WebDAV

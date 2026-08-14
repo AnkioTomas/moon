@@ -8,10 +8,11 @@ local lfs = require("libs/libkoreader-lfs")
 
 local Content = {}
 
---- 最小 EPUB/ZIP 校验：非空且魔数为 PK\\x03\\x04 或 PK\\x05\\x06
+--- 最小书籍文件校验：按落盘扩展名检查可识别的格式。
 ---@param path string
+---@param format_path string|nil 用于确定格式的最终落盘路径
 ---@return boolean
-function Content.isValidEpub(path)
+function Content.isValidBook(path, format_path)
     if type(path) ~= "string" or path == "" then
         return false
     end
@@ -25,29 +26,36 @@ function Content.isValidEpub(path)
     end
     local head = f:read(4) or ""
     f:close()
-    -- ZIP local file header / empty archive
-    if head == "PK\003\004" or head == "PK\005\006" then
+    local ext = (format_path or path):match("%.([^.]+)$")
+    ext = ext and string.lower(ext) or nil
+    if ext == "txt" then
         return true
     end
-    -- PDF
-    if head:sub(1, 4) == "%PDF" then
-        return true
+    if ext == "mobi" or ext == "azw3" then
+        -- PalmDB magic: offset 60-67 = "BOOKMOBI" (Mobi) or "TEXtREAd" (PalmDoc)
+        if attr.size >= 68 then
+            local f2 = io.open(path, "rb")
+            if f2 then
+                f2:seek("set", 60)
+                local palm = f2:read(8) or ""
+                f2:close()
+                if palm == "BOOKMOBI" or palm == "TEXtREAd" then
+                    return true
+                end
+            end
+        end
+        return false
     end
-    -- 其它支持格式：仅非空即可（cbz 也是 zip）
-    local ext = path:match("%.([^.]+)$")
-    if ext then
-        ext = string.lower(ext)
-        if ext == "txt" or ext == "mobi" or ext == "azw3" then
-            return attr.size > 0
-        end
-        if ext == "cbz" or ext == "cbr" or ext == "epub" then
-            return head:sub(1, 2) == "PK"
-        end
-        if ext == "pdf" then
-            return head:sub(1, 4) == "%PDF"
-        end
+    if ext == "epub" or ext == "cbz" then
+        return head == "PK\003\004" or head == "PK\005\006"
     end
-    return head:sub(1, 2) == "PK" or head:sub(1, 4) == "%PDF"
+    if ext == "cbr" then
+        return head == "Rar!" or head == "PK\003\004"
+    end
+    if ext == "pdf" then
+        return head == "%PDF"
+    end
+    return false
 end
 
 ---@type table<string, { waiters: function[], done: boolean, ok: boolean|nil, path: string|nil, err: any }>
@@ -80,7 +88,7 @@ function Content.sharedJob(key, start_fn, cb)
         local waiters = job.waiters
         inflight[key] = nil
         for i = 1, #waiters do
-            waiters[i](ok, path, err)
+            pcall(waiters[i], ok, path, err)
         end
     end)
 end

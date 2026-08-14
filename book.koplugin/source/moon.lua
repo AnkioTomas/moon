@@ -1,6 +1,6 @@
 --[[--
 Book (moon) 数据源门面
-  client：HTTP wire
+  client：HTTP wire（仅异步）
   mapper：wire → 领域对象
 
 @module koplugin.book.source.moon
@@ -9,8 +9,8 @@ Book (moon) 数据源门面
 local Client = require("source.moon.client")
 local Mapper = require("source.moon.mapper")
 local SourceBase = require("source.base")
-local SourceError = require("source.error")
-local Contract = require("source.contract")
+local BookRef = require("types.book").BookRef
+local ProgressPosition = require("types.book_progress")
 local _ = require("gettext")
 
 local Moon = {}
@@ -20,7 +20,7 @@ local Moon = {}
 function Moon.meta()
     return {
         id = "moon",
-        name = _("Book 服务"),
+        name = _("Book 书库"),
     }
 end
 
@@ -47,8 +47,6 @@ end
 ---@return SourceCapabilities
 function Source:capabilities()
     return {
-        library = true,
-        recent = true,
         search = false,
         filters = true,
         detail = true,
@@ -69,6 +67,20 @@ function Source:configured()
     return self._client:configured()
 end
 
+--- 生命周期事件：阅读统计上报时机由本源自决。
+--- StatsSync/NetworkMgr 拖 KOReader UI 依赖链，必须函数内延迟加载（离线测试会 require 本文件）。
+---@param event string
+---@param _payload table|nil
+function Source:onEvent(event, _payload)
+    if event == "reader_ready" then
+        require("ui/network/manager"):runWhenOnline(function()
+            require("stats.stats_sync").registerDeviceAsync(self, function() end)
+        end)
+    elseif event == "document_close" or event == "suspend" then
+        require("stats.stats_sync").pushWithUi(self, false, false)
+    end
+end
+
 --- 返回 Moon 源配置状态。
 ---@return SourceConfigurationState
 function Source:configurationState()
@@ -76,16 +88,6 @@ function Source:configurationState()
         return "ready"
     end
     return "needs_config"
-end
-
---- 探测 Moon 服务连通性。
----@return table|nil, SourceError|nil
-function Source:ping()
-    local wire, err = self._client:ping()
-    if not wire then
-        return nil, SourceError.wrap(err, self:configured() and "offline" or "not_configured")
-    end
-    return wire
 end
 
 --- 把 BookListOpts 转成 Moon list API 的 query 表。
@@ -105,38 +107,6 @@ local function listQuery(opts)
     }
 end
 
---- 列出 Moon 书库。
----@param opts BookListOpts|nil
----@return BookListResult|nil, SourceError|nil
-function Source:listLibrary(opts)
-    local wire, err = self._client:listBooks(listQuery(opts))
-    if not wire then
-        return nil, SourceError.wrap(err, "offline")
-    end
-    return Mapper.list(wire)
-end
-
---- 列出 Moon 最近阅读。
----@param limit number|nil
----@return BookListResult|nil, SourceError|nil
-function Source:recentBooks(limit)
-    local wire, err = self._client:recentBooks(limit)
-    if not wire then
-        return nil, SourceError.wrap(err, "offline")
-    end
-    return Mapper.list(wire)
-end
-
---- 获取 Moon 筛选条件。
----@return BookFiltersResult|nil, SourceError|nil
-function Source:filters()
-    local wire, err = self._client:filters()
-    if not wire then
-        return nil, SourceError.wrap(err, "offline")
-    end
-    return { data = wire.data or wire }
-end
-
 --- 清空 Moon 书库/统计相关 HTTP 缓存。
 function Source:clearCaches()
     local ok, Request = pcall(require, "http.request")
@@ -146,42 +116,95 @@ function Source:clearCaches()
     end
 end
 
---- 向 Moon 注册阅读设备。
----@param device_id string
----@param model string|nil
----@return table|nil, SourceError|nil
-function Source:registerReadingDevice(device_id, model)
-    local wire, err = self._client:registerReadingDevice({
-        device_id = device_id,
-        model = model or "",
-    })
-    if not wire then
-        return nil, SourceError.wrap(err, "protocol")
+--- 构造 Moon 封面请求。
+---@param ref BookRef
+---@return BookCoverRequest|nil, string|nil
+function Source:coverRequest(ref)
+    local req, err = self._client:coverRequest(ref.stable_id)
+    if not req then
+        return nil, (type(err) == "table" and err.message) or err
     end
-    return wire
+    return req
 end
 
---- 向 Moon 导入阅读统计。
----@param payload BookStatsPayload
----@return table|nil, SourceError|nil
-function Source:importReadingStats(payload)
-    payload = payload or {}
-    local Store = require("book.store")
-    local md5_map = Store.md5FilenameMap()
+--- 获取 Moon 书籍详情。
+---@param ref BookRef
+---@return BookDetail|nil, string|nil
+function Source:getDetail(ref)
+    -- Moon 列表行即详情；无独立 detail API 时用 filename 构造最小详情
+    return {
+        ref = BookRef.new("moon", ref.stable_id),
+        title = ref.stable_id,
+        percent = 0,
+    }
+end
 
-    local books = {}
-    local seen = {}
+function Source:pingAsync(cb)
+    return self._client:pingAsync(function(wire, err)
+        if not wire then
+            cb(nil, (type(err) == "table" and err.message) or err)
+            return
+        end
+        cb(wire)
+    end)
+end
+
+function Source:listLibraryAsync(opts, cb)
+    return self._client:listBooksAsync(listQuery(opts), function(wire, err)
+        if wire then
+            cb(Mapper.list(wire))
+        else
+            cb(nil, (type(err) == "table" and err.message) or err)
+        end
+    end)
+end
+
+function Source:recentBooksAsync(limit, cb)
+    return self._client:recentBooksAsync(limit, function(wire, err)
+        if wire then
+            cb(Mapper.list(wire))
+        else
+            cb(nil, (type(err) == "table" and err.message) or err)
+        end
+    end)
+end
+
+function Source:filtersAsync(cb)
+    return self._client:filtersAsync(function(wire, err)
+        if wire then
+            cb({ data = wire.data or wire })
+        else
+            cb(nil, (type(err) == "table" and err.message) or err)
+        end
+    end)
+end
+
+function Source:registerReadingDeviceAsync(device_id, model, cb)
+    return self._client:registerReadingDeviceAsync({
+        device_id = device_id,
+        model = model or "",
+    }, function(wire, err)
+        if wire then
+            cb(wire)
+        else
+            cb(nil, (type(err) == "table" and err.message) or err)
+        end
+    end)
+end
+
+function Source:importReadingStatsAsync(payload, cb)
+    payload = payload or {}
+    -- 本地统计身份即 stable_id（moon 源 = filename），直接透传服务器契约
+    local books, stats, seen = {}, {}, {}
     for _, b in ipairs(payload.books or {}) do
-        local filename = md5_map[b.md5]
+        local filename = b.stable_id
         if type(filename) == "string" and filename ~= "" and not seen[filename] then
             seen[filename] = true
             books[#books + 1] = { filename = filename }
         end
     end
-
-    local stats = {}
     for _, s in ipairs(payload.stats or {}) do
-        local filename = md5_map[s.md5]
+        local filename = s.stable_id
         if type(filename) == "string" and filename ~= "" then
             stats[#stats + 1] = {
                 filename = filename,
@@ -193,108 +216,74 @@ function Source:importReadingStats(payload)
             }
         end
     end
-
     if #books == 0 and #stats == 0 then
-        return nil, SourceError.not_found(_("无已下载书籍的统计可上报（请从 Book 桌面打开过对应书籍）"))
+        cb(nil, _("无阅读统计数据"))
+        return nil
     end
-
-    local wire, err = self._client:importReadingStats({
+    return self._client:importReadingStatsAsync({
         books = books,
         stats = stats,
         device_id = payload.device_id,
-    })
-    if not wire then
-        return nil, SourceError.wrap(err, "protocol")
-    end
-    return wire
+    }, function(wire, err)
+        if wire then
+            cb(wire)
+        else
+            cb(nil, (type(err) == "table" and err.message) or err)
+        end
+    end)
 end
 
---- 获取 Moon 阅读统计洞察。
----@return BookInsightResult|nil, SourceError|nil
-function Source:readingInsight()
-    local wire, err = self._client:readingInsight()
-    if not wire then
-        return nil, SourceError.wrap(err, "offline")
-    end
-    return { data = Mapper.insight(wire.data or wire) }
+function Source:readingInsightAsync(cb)
+    return self._client:readingInsightAsync(function(wire, err)
+        if wire then
+            cb({ data = Mapper.insight(wire.data or wire) })
+        else
+            cb(nil, (type(err) == "table" and err.message) or err)
+        end
+    end)
 end
 
---- 拉取 Moon 阅读进度。
----@param ref BookRef
----@return ProgressPosition|nil, SourceError|nil
-function Source:getProgress(ref)
-    local wire, err = self._client:getProgress(ref.stable_id)
-    if not wire then
-        return nil, SourceError.wrap(err, "offline")
-    end
-    local pos = Mapper.progress(wire)
-    if not pos then
-        return nil, SourceError.not_found(_("进度为空"))
-    end
-    return pos
+function Source:getProgressAsync(ref, cb)
+    return self._client:getProgressAsync(ref.stable_id, function(wire, err)
+        if not wire then
+            cb(nil, (type(err) == "table" and err.message) or err)
+            return
+        end
+        local pos = Mapper.progress(wire)
+        if pos then
+            cb(pos)
+        else
+            cb(nil, _("进度为空"))
+        end
+    end)
 end
 
---- 上报 Moon 阅读进度。
----@param ref BookRef
----@param pos ProgressPosition
----@return boolean|nil, SourceError|nil
-function Source:putProgress(ref, pos)
+function Source:putProgressAsync(ref, pos, cb)
     pos = pos or {}
-    local frac = Contract.clampFraction(pos.fraction)
-    local wire, err = self._client:updateProgress({
+    local frac = ProgressPosition.clampFraction(pos.fraction)
+    return self._client:updateProgressAsync({
         filename = ref.stable_id,
         frac = frac,
         spine = pos.chapter_idx or 0,
         page = 0,
         percent = string.format("%.2f", frac * 100) .. "%",
-    })
-    if not wire then
-        return nil, SourceError.wrap(err, "offline")
-    end
-    return true
+    }, function(wire, err)
+        if wire then
+            cb(true)
+        else
+            cb(nil, (type(err) == "table" and err.message) or err)
+        end
+    end)
 end
 
---- 探测 Moon 书籍文件大小。
----@param ref BookRef
----@return number|nil
-function Source:probeFileSize(ref)
-    return self._client:probeFileSize(ref.stable_id)
-end
-
---- 将整本书落盘到临时路径。
----@param ref BookRef
----@param temp_path string
----@param on_progress fun(bytes: number)|nil
----@return boolean|nil, SourceError|nil
-function Source:materializeWhole(ref, temp_path, on_progress)
-    local ok, err = self._client:downloadBook(ref.stable_id, temp_path, on_progress)
-    if not ok then
-        return nil, SourceError.wrap(err, "io")
-    end
-    return true
-end
-
---- 构造 Moon 封面请求。
----@param ref BookRef
----@return BookCoverRequest|nil, SourceError|nil
-function Source:coverRequest(ref)
-    local req, err = self._client:coverRequest(ref.stable_id)
-    if not req then
-        return nil, SourceError.wrap(err, "not_found")
-    end
-    return req
-end
-
---- 获取 Moon 书籍详情。
----@param ref BookRef
----@return BookDetail|nil, SourceError|nil
-function Source:getDetail(ref)
-    -- Moon 列表行即详情；无独立 detail API 时用 filename 构造最小详情
-    return {
-        ref = Contract.makeRef("moon", ref.stable_id),
-        title = ref.stable_id,
-        percent = 0,
-    }
+function Source:materializeWholeAsync(ref, temp_path, on_progress, cb)
+    return self._client:downloadBookAsync(ref.stable_id, temp_path, on_progress, function(ok, err)
+        if ok then
+            cb(true)
+        else
+            cb(nil, (type(err) == "table" and err.message) or err)
+        end
+    end)
 end
 
 return Moon
