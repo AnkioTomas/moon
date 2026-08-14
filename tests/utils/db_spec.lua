@@ -1,5 +1,5 @@
 --[[--
-utils.db：open 仅子进程 + BookDB.md5Map
+utils.db：open 仅子进程 + reading_stats CRUD
 
 @module tests.utils.db_spec
 --]]
@@ -38,6 +38,7 @@ local function clearMods()
         "ffi/sha2",
         "utils.db.base",
         "utils.db.book",
+        "utils.db.stats",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -149,27 +150,36 @@ do
     clearMods()
 end
 
--- ── md5Map：DESC 结果保留首条 ───────────────────────────
+-- ── reading_stats：add / count / all / delete 全参数化 ──
 do
-    local prepared_sql
-    local bound_source
+    local calls = {}
     local connection = {
-        exec = function()
-            return nil, 0
-        end,
+        exec = function() end,
         close = function() end,
         prepare = function(_, sql)
-            prepared_sql = sql
+            local call = { sql = sql }
+            calls[#calls + 1] = call
             return {
-                bind = function(self, source_id)
-                    bound_source = source_id
+                bind = function(self, ...)
+                    call.argc = select("#", ...)
+                    call.args = { ... }
                     return self
+                end,
+                step = function()
+                    if sql:find("COUNT", 1, true) then
+                        return { 2 }, { "COUNT(*)" }
+                    end
+                    return nil
                 end,
                 resultset = function()
                     return {
-                        { "shared", "shared", "unique" },
-                        { "new.epub", "old.epub", "only.epub" },
-                    }, 3
+                        { 7, 8 },
+                        { "a.epub", "b.epub" },
+                        { 3, 4 },
+                        { 1000, 2000 },
+                        { 30, 45 },
+                        { 300, 400 },
+                    }, 2
                 end,
                 close = function() end,
             }
@@ -182,15 +192,48 @@ do
         return { open = function() return connection end }
     end
     package.loaded["utils.db.base"] = nil
-    package.loaded["utils.db.book"] = nil
+    package.loaded["utils.db.stats"] = nil
 
     local DbBase = require("utils.db.base")
-    local BookDB = require("utils.db.book")
-    local map = BookDB.md5Map("moon")
-    Assert.is_true(prepared_sql:find("source_id=?", 1, true) ~= nil)
-    Assert.eq(bound_source, "moon")
-    Assert.eq(map.shared, "new.epub")
-    Assert.eq(map.unique, "only.epub")
+    local StatsDB = require("utils.db.stats")
+    DbBase.open()
+
+    Assert.is_true(StatsDB.add({
+        source_id = "moon",
+        stable_id = "a.epub",
+        page = 3,
+        start_time = 1000,
+        duration = 30,
+        total_pages = 300,
+    }))
+    local insert = calls[#calls]
+    Assert.is_true(insert.sql:find("INSERT INTO reading_stats", 1, true) ~= nil)
+    Assert.eq(insert.argc, 6)
+    Assert.eq(insert.args[1], "moon")
+    Assert.eq(insert.args[2], "a.epub")
+    Assert.eq(insert.args[4], 1000)
+
+    -- 非法输入在碰 DB 前拒绝
+    Assert.is_false(StatsDB.add({ source_id = "moon", stable_id = "", start_time = 1, duration = 1 }))
+    Assert.is_false(StatsDB.add({ source_id = "moon", stable_id = "a", start_time = 1, duration = 0 }))
+
+    Assert.eq(StatsDB.countBySource("moon"), 2)
+
+    local rows = StatsDB.allBySource("moon")
+    Assert.eq(#rows, 2)
+    Assert.eq(rows[1].id, 7)
+    Assert.eq(rows[1].stable_id, "a.epub")
+    Assert.eq(rows[1].start_time, 1000)
+    Assert.eq(rows[2].duration, 45)
+
+    Assert.is_true(StatsDB.deleteIds({ 7, 8 }))
+    local deletes = 0
+    for _, c in ipairs(calls) do
+        if c.sql:find("DELETE FROM reading_stats", 1, true) then
+            deletes = deletes + 1
+        end
+    end
+    Assert.eq(deletes, 2)
 
     DbBase.close()
     clearMods()
