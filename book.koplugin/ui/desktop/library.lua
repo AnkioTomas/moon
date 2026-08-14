@@ -26,7 +26,7 @@ local TextWidget = require("ui/widget/textwidget")
 local Device = require("device")
 local BookInfo = require("ui.components.bookinfo")
 local UI = require("ui.components.bookui")
-local Image = require("ui.components.image")
+local Icon = require("ui.components.icon")
 local Pager = require("ui.components.pager")
 local Popup = require("ui.components.popup")
 local Store = require("book.store")
@@ -76,31 +76,22 @@ local FILTER_ORDER = { "favorite", "category", "series", "author" }
 ---@param callback fun()|nil
 ---@return table
 local function iconAction(icon_name, text, callback)
-    local icon_sz = UI.sz(18)
-    local label = TextWidget:new{
+    local content = Icon.label{
+        name = icon_name,
         text = text,
-        face = UI.face("xx_smallinfofont", 15),
-        fgcolor = Blitbuffer.COLOR_BLACK,
+        size = 18,
+        font_size = 15,
+        gap = UI.sz(4),
     }
     local pad_x = UI.sz(8)
     local pad_y = UI.sz(6)
-    local gap = UI.sz(4)
-    local label_sz = label:getSize()
-    local tw = pad_x * 2 + icon_sz + gap + label_sz.w
-    local th = math.max(UI.sz(32), icon_sz, label_sz.h) + pad_y * 2
+    local cs = content:getSize()
+    local tw = pad_x * 2 + cs.w
+    local th = math.max(UI.sz(32), cs.h) + pad_y * 2
     local tap = BookInfo.tappable(tw, th, callback)
     tap[1] = CenterContainer:new{
         dimen = Geom:new{ w = tw, h = th },
-        HorizontalGroup:new{
-            align = "center",
-            Image.widget{
-                src = icon_name,
-                width = icon_sz,
-                height = icon_sz,
-            },
-            HorizontalSpan:new{ width = gap },
-            label,
-        },
+        content,
     }
     return tap
 end
@@ -291,7 +282,7 @@ function Library.build(ctx, state, opts)
     local caps = (ctx.source and ctx.source.capabilities and ctx.source:capabilities()) or {}
     local has_tool = false
     if caps.search then
-        table.insert(tools_kids, iconAction("search.svg", _("搜索"), function()
+        table.insert(tools_kids, iconAction("search", _("搜索"), function()
             if ctx.desktop then Library.showSearch(ctx.desktop) end
         end))
         has_tool = true
@@ -300,14 +291,14 @@ function Library.build(ctx, state, opts)
         if has_tool then
             table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
         end
-        table.insert(tools_kids, iconAction("filter.svg", _("筛选"), function()
+        table.insert(tools_kids, iconAction("filter_list", _("筛选"), function()
             if ctx.desktop then Library.showFilterRoot(ctx.desktop) end
         end))
         has_tool = true
     end
     if has_tool then
         table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
-        table.insert(tools_kids, iconAction("clear.svg", _("清除"), function()
+        table.insert(tools_kids, iconAction("clear", _("清除"), function()
             if ctx.desktop then Library.clearFilters(ctx.desktop) end
         end))
     end
@@ -392,7 +383,9 @@ function Library.fetch(desktop)
     ---@param books table|nil
     ---@param err string|nil
     local function done(books, err)
-        if desktop._closed or desktop.tab ~= "library" then return end
+        if desktop._closed or desktop.tab ~= "library" then
+            return
+        end
         desktop._library_state = {
             books = books or {},
             err = err,
@@ -407,6 +400,7 @@ function Library.fetch(desktop)
 
     Library.syncPageSize(desktop)
     local source = desktop.source
+    local generation = desktop.source_generation or 0
     local page = desktop.page or 1
     local page_size = desktop.page_size or 1
     local f = desktop.filter or {}
@@ -417,43 +411,38 @@ function Library.fetch(desktop)
     local author = f.author or ""
     local finished = f.finished or ""
 
-    local Promise = require("utils.promise")
-    desktop._library_fetch_cancel = Promise:new(function()
-        if not source or not source.configured or not source:configured() then
-            return nil, _("请先在设置里配置当前数据源")
+    if not source or not source.configured or not source:configured() then
+        done({}, _("请先在设置里配置当前数据源"))
+        return
+    end
+    if not source.listLibraryAsync then
+        done({}, _("当前数据源不支持书库"))
+        return
+    end
+    desktop._library_fetch_cancel = source:listLibraryAsync({
+        page = page,
+        page_size = page_size,
+        search = search,
+        favorite = favorite,
+        category = category,
+        series = series,
+        author = author,
+        finished = finished,
+    }, function(res, err)
+        if desktop._closed or desktop.tab ~= "library"
+            or desktop.source ~= source or (desktop.source_generation or 0) ~= generation then
+            return
         end
-        return source:listLibrary{
-            page = page,
-            page_size = page_size,
-            search = search,
-            favorite = favorite,
-            category = category,
-            series = series,
-            author = author,
-            finished = finished,
-        }
-    end)
-        :next(function(res)
-            desktop._library_fetch_cancel = nil
-            if desktop._closed or desktop.tab ~= "library" then
-                return
-            end
-            if not res then
-                done({}, _("加载失败"))
-                return
-            end
-            desktop.total = tonumber(res.count) or 0
-            local books = res.data or {}
-            Store.rememberMany(books)
-            done(books)
-        end)
-        :fail(function(err)
-            desktop._library_fetch_cancel = nil
-            if desktop._closed or desktop.tab ~= "library" then
-                return
-            end
+        desktop._library_fetch_cancel = nil
+        if not res then
             done({}, err or _("加载失败"))
-        end)
+            return
+        end
+        desktop.total = tonumber(res.count) or 0
+        local books = res.data or {}
+        Store.rememberMany(books)
+        done(books)
+    end)
 end
 
 --- 弹出筛选根菜单（分类/标签/系列/作者）。
@@ -524,27 +513,23 @@ function Library.showFilterPicker(desktop, kind)
         end,
     }
 
-    --- 拉取 filters 并填充选择器。
-    local function fetch()
-        local source = desktop.source
-        if not source or not source.configured or not source:configured() then
-            applyList({})
+    local source = desktop.source
+    local generation = desktop.source_generation or 0
+    if not source or not source.configured or not source:configured() or not source.filtersAsync then
+        applyList({})
+        return
+    end
+    source:filtersAsync(function(res, err)
+        if desktop._closed or desktop.source ~= source
+            or (desktop.source_generation or 0) ~= generation then
             return
         end
-        local res, err = source:filters()
         if not res then
             logger.warn("book filters failed", err)
             applyList({})
-            return
         end
-        applyList(pickFilterList(res.data or {}, def))
-    end
-
-    UIManager:scheduleIn(0, function()
-        local ok, err = pcall(fetch)
-        if not ok then
-            logger.warn("book filters picker failed", err)
-            applyList({})
+        if res then
+            applyList(pickFilterList(res.data or {}, def))
         end
     end)
 end
@@ -642,15 +627,7 @@ end
 ---@param desktop table
 ---@return table
 function Library.page(desktop)
-    local prev_ps = desktop.page_size
     Library.syncPageSize(desktop)
-    if prev_ps and prev_ps ~= desktop.page_size then
-        desktop._library_state = nil
-        local pages = Library.pages(desktop)
-        if (desktop.page or 1) > pages then
-            desktop.page = pages
-        end
-    end
     local state = desktop._library_state
     if not state then
         UIManager:nextTick(function()
