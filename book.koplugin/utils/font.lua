@@ -350,7 +350,6 @@ local function apply(id)
             Font.fontmap[key] = val
         end
         Font.faces = {}
-        logger.dbg("book.font apply default")
         return true
     end
     local base, err = resolveBasename(id)
@@ -361,12 +360,11 @@ local function apply(id)
         Font.fontmap[key] = base
     end
     Font.faces = {}
-    logger.info("book.font apply", id, base)
     return true
 end
 
 --- 按配置打 fontmap。缺文件则回退系统默认（不改写配置）。
---- 调用方：Desktop:rebuild / ReaderFloatMenu:rebuild / Host.attach
+--- 调用方：Desktop:rebuild / Host.attach
 ---@return boolean|nil, string|nil
 function M.applyCurrent()
     local id = M.currentId()
