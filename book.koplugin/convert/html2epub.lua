@@ -587,14 +587,17 @@ function Html2Epub.build(opts, cb)
             images = images,
         }
         local Task = require("utils.task")
-        pack_task = Task.run(function(write_fd)
+        pack_task = Task.run(function(pid, write_fd, read_fd)
             local ok, err = writeEpubPackage(pack_opts, dest)
             local payload = ok and "ok" or ("err:" .. tostring(err or "pack failed"))
+            local ffiUtil = require("ffi/util")
             if type(write_fd) == "function" then
                 write_fd(payload)
-            elseif write_fd then
-                local ffiUtil = require("ffi/util")
+            else
                 ffiUtil.writeToFD(write_fd, payload, true)
+            end
+            if read_fd and type(read_fd) ~= "function" then
+                ffiUtil.closeFD(read_fd)
             end
         end, {
             pipe = true,
