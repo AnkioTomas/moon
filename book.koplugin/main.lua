@@ -40,6 +40,13 @@ local BookPlugin = WidgetContainer:extend {
 --- 插件初始化：挂接 Host（菜单 / 开机打开等）
 ---@return nil
 function BookPlugin:init()
+    -- HTTP 依赖 Turbo ioloop；必须在 UIManager:run() 前打开 DUSE_TURBO_LIB
+    local ok_turbo, err_turbo = pcall(function()
+        require("http.request").ensureTurbo()
+    end)
+    if not ok_turbo then
+        logger.err("book turbo init failed:", err_turbo)
+    end
     local ok, err = pcall(function()
         Host.attach(self)
     end)
@@ -80,7 +87,7 @@ function BookPlugin:onReaderReady()
     ReaderFloatMenu.attach(self)
     Progress.pull(self.ui, self:getSource(), false)
     NetworkMgr:runWhenOnline(function()
-        StatsSync.registerDevice(self:getSource())
+        StatsSync.registerDeviceAsync(self:getSource(), function() end)
     end)
 end
 
@@ -148,6 +155,7 @@ end
 ---@return nil
 function BookPlugin:onSourceChanged()
     logger.info("book onSourceChanged")
+    StatsSync.invalidate()
     local source = SourceRegistry.current()
     if source and source.clearCaches then
         source:clearCaches()

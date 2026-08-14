@@ -4,6 +4,7 @@ HTTP 请求原语（Turbo，非阻塞，唯一网络栈）
 禁止 luasocket / socket.http / socketutil 超时路径。
 网络请求只有这一条：回调 + `{ cancel }`。
 
+  Request.ensureTurbo() → boolean  -- 须在 UIManager:run 前调用
   Request.request(opts, cb) → { cancel }
   Request.get(url, opts, cb) → { cancel }
   Request.post(url, body, opts, cb) → { cancel }
@@ -109,6 +110,25 @@ function Request.header(res, name)
 end
 
 ------------------------------------------------------------------------
+-- Turbo ioloop
+------------------------------------------------------------------------
+
+--- 打开 Turbo ioloop（会话级）。必须在 UIManager:run() 进入主循环之前调用，
+--- 否则主循环走 classic 路径，looper:add_callback 永远不会被泵。
+--- KOReader 默认 DUSE_TURBO_LIB=false；本插件 HTTP 只走 Turbo。
+---@return boolean
+function Request.ensureTurbo()
+    if UIManager.looper then
+        return true
+    end
+    if G_defaults and not G_defaults:isTrue("DUSE_TURBO_LIB") then
+        G_defaults:saveSetting("DUSE_TURBO_LIB", true)
+    end
+    UIManager:initLooper()
+    return UIManager.looper ~= nil
+end
+
+------------------------------------------------------------------------
 -- 请求
 ------------------------------------------------------------------------
 
@@ -125,7 +145,15 @@ function Request.request(opts, cb)
     opts = opts or {}
     local state = { cancelled = false }
 
-    UIManager:initLooper()
+    if not Request.ensureTurbo() then
+        UIManager:nextTick(function()
+            if not state.cancelled then
+                cb(nil, "turbo looper unavailable")
+            end
+        end)
+        return makeJob(state)
+    end
+
     UIManager.looper:add_callback(function()
         UIManager:setInputTimeout()
         input_timeouts = input_timeouts + 1
