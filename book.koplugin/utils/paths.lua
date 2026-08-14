@@ -19,7 +19,6 @@ Moon 目录布局（$DATA/.moon）
 
 local DataStorage = require("datastorage")
 local lfs = require("libs/libkoreader-lfs")
-local logger = require("logger")
 
 local P = {}
 
@@ -160,7 +159,6 @@ function P.ensureLayout(id)
     ensureDir(P.sourceCacheDir(id))
     ensureDir(P.bookDir(id))
     ensureDir(P.imageDir(id))
-    logger.dbg("book.paths ensureLayout", id)
 end
 
 --- 确保某书的工作目录存在：cache/<source>/book/<bookKey>/
