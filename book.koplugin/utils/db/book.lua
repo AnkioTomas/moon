@@ -6,6 +6,7 @@ books 表：BookRef + 展示元数据 + 统计 md5
 
 local JSON = require("json")
 local Base = require("utils.db.base")
+local BookRef = require("types.book").BookRef
 
 local BookDB = {}
 
@@ -47,10 +48,7 @@ function BookDB.upsert(row)
     end
     local book_key = row.book_key
     if type(book_key) ~= "string" or book_key == "" then
-        book_key = Base.bookKeyFor(source_id, stable_id)
-    end
-    if not book_key then
-        return false
+        book_key = BookRef.keyOf(source_id, stable_id)
     end
     local filename = row.filename or stable_id
     if filename ~= nil then
@@ -158,7 +156,7 @@ function BookDB.setMd5(filename, digest, filename_out, source_id)
         ) ~= nil
     end
     return BookDB.upsert({
-        book_key = Base.bookKeyFor(source_id, filename),
+        book_key = BookRef.keyOf(source_id, filename),
         source_id = source_id,
         stable_id = filename,
         filename = filename_out,

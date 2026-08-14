@@ -11,7 +11,6 @@
 --]]
 
 local logger = require("logger")
-local md5 = require("ffi/sha2").md5
 local Paths = require("utils.paths")
 
 local Base = {}
@@ -135,29 +134,14 @@ function Base.query(sql, ...)
     return result, nrows or 0
 end
 
---- 校验并消毒 source_id；非法返回 nil
+--- 校验 source_id；非法返回 nil
 ---@param source_id string
 ---@return string|nil
 function Base.requireSourceId(source_id)
     if type(source_id) ~= "string" or source_id == "" then
         return nil
     end
-    return Paths.sanitizeSourceId(source_id)
-end
-
---- 由 source_id + stable_id 生成 book_key（md5）
----@param source_id string
----@param stable_id string
----@return string|nil
-function Base.bookKeyFor(source_id, stable_id)
-    if type(stable_id) ~= "string" or stable_id == "" then
-        return nil
-    end
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return nil
-    end
-    return md5(source_id .. ":" .. stable_id)
+    return source_id
 end
 
 --- 首次打开时 CREATE IF NOT EXISTS 全表
