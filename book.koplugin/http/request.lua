@@ -188,10 +188,10 @@ function Request.request(opts, cb)
         return makeJob(state)
     end
 
-    UIManager.looper:add_callback(function()
-        UIManager:setInputTimeout()
-        input_timeouts = input_timeouts + 1
+    UIManager:setInputTimeout(1000)
+    input_timeouts = input_timeouts + 1
 
+    UIManager.looper:add_callback(function()
         local turbo = require("turbo")
         turbo.log.categories.success = false
         turbo.log.categories.warning = false
