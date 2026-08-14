@@ -56,11 +56,11 @@ function BookDB.upsert(row)
     if filename ~= nil then
         filename = tostring(filename)
     end
-    local sql = string.format(
+    return Base.exec(
         [[INSERT INTO books (
             book_key, source_id, stable_id, filename, md5, title, authors,
             percent, category, favorite, series, intro, fetched_at
-          ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(book_key) DO UPDATE SET
             source_id=excluded.source_id,
             stable_id=excluded.stable_id,
@@ -74,38 +74,37 @@ function BookDB.upsert(row)
             series=excluded.series,
             intro=excluded.intro,
             fetched_at=excluded.fetched_at;]],
-        Base.sqlQuote(book_key),
-        Base.sqlQuote(source_id),
-        Base.sqlQuote(stable_id),
-        Base.sqlQuote(filename),
-        Base.sqlQuote(row.md5),
-        Base.sqlQuote(row.title),
-        Base.sqlQuote(row.authors),
-        Base.sqlQuote(tonumber(row.percent) or 0),
-        Base.sqlQuote(row.category),
-        Base.sqlQuote(favoriteToDb(row.favorite)),
-        Base.sqlQuote(row.series),
-        Base.sqlQuote(row.intro),
-        Base.sqlQuote(tonumber(row.fetched_at) or os.time())
-    )
-    return Base.exec(sql) ~= nil
+        book_key,
+        source_id,
+        stable_id,
+        filename,
+        row.md5,
+        row.title,
+        row.authors,
+        tonumber(row.percent) or 0,
+        row.category,
+        favoriteToDb(row.favorite),
+        row.series,
+        row.intro,
+        tonumber(row.fetched_at) or os.time()
+    ) ~= nil
 end
 
 --- 按 book_key 取 books 行
 ---@param book_key string
----@return table|nil
+---@return Book
 function BookDB.get(book_key)
     if type(book_key) ~= "string" or book_key == "" then
         return nil
     end
     Base.ensure()
     local book_key_r, source_id, stable_id, filename, digest, title, authors, percent, category, favorite, series, intro, fetched_at =
-        Base.rowexec(string.format(
+        Base.rowexec(
             [[SELECT book_key, source_id, stable_id, filename, md5, title, authors,
                      percent, category, favorite, series, intro, fetched_at
-              FROM books WHERE book_key=%s LIMIT 1;]],
-            Base.sqlQuote(book_key)
-        ))
+              FROM books WHERE book_key=? LIMIT 1;]],
+            book_key
+        )
     if not book_key_r then
         return nil
     end
@@ -145,18 +144,18 @@ function BookDB.setMd5(filename, digest, filename_out, source_id)
     end
     Base.ensure()
     filename_out = filename_out or filename
-    local existing = Base.rowexec(string.format(
-        [[SELECT book_key FROM books WHERE filename=%s OR stable_id=%s LIMIT 1;]],
-        Base.sqlQuote(filename),
-        Base.sqlQuote(filename)
-    ))
+    local existing = Base.rowexec(
+        [[SELECT book_key FROM books WHERE filename=? OR stable_id=? LIMIT 1;]],
+        filename,
+        filename
+    )
     if existing then
-        return Base.exec(string.format(
-            [[UPDATE books SET md5=%s, filename=%s WHERE book_key=%s;]],
-            Base.sqlQuote(digest),
-            Base.sqlQuote(filename_out),
-            Base.sqlQuote(existing)
-        )) ~= nil
+        return Base.exec(
+            [[UPDATE books SET md5=?, filename=? WHERE book_key=?;]],
+            digest,
+            filename_out,
+            existing
+        ) ~= nil
     end
     return BookDB.upsert({
         book_key = Base.bookKeyFor(source_id, filename),
@@ -181,20 +180,17 @@ function BookDB.setMd5ByKey(book_key, digest, filename)
         return false
     end
     Base.ensure()
-    local sets = string.format("md5=%s", Base.sqlQuote(digest))
-    if type(filename) == "string" and filename ~= "" then
-        sets = sets .. string.format(", filename=%s", Base.sqlQuote(filename))
-    end
-    local n = Base.rowexec(string.format(
-        [[SELECT 1 FROM books WHERE book_key=%s LIMIT 1;]],
-        Base.sqlQuote(book_key)
-    ))
+    local n = Base.rowexec([[SELECT 1 FROM books WHERE book_key=? LIMIT 1;]], book_key)
     if n then
-        return Base.exec(string.format(
-            [[UPDATE books SET %s WHERE book_key=%s;]],
-            sets,
-            Base.sqlQuote(book_key)
-        )) ~= nil
+        if type(filename) == "string" and filename ~= "" then
+            return Base.exec(
+                [[UPDATE books SET md5=?, filename=? WHERE book_key=?;]],
+                digest,
+                filename,
+                book_key
+            ) ~= nil
+        end
+        return Base.exec([[UPDATE books SET md5=? WHERE book_key=?;]], digest, book_key) ~= nil
     end
     return false
 end
@@ -207,11 +203,11 @@ function BookDB.md5Map(source_id)
         return {}
     end
     Base.ensure()
-    local result, nrows = Base.query(string.format([[
+    local result, nrows = Base.query([[
 SELECT md5, filename FROM books
-WHERE source_id=%s AND md5 IS NOT NULL AND md5 != '' AND filename IS NOT NULL AND filename != ''
+WHERE source_id=? AND md5 IS NOT NULL AND md5 != '' AND filename IS NOT NULL AND filename != ''
 ORDER BY fetched_at DESC, book_key ASC;
-]], Base.sqlQuote(source_id)))
+]], source_id)
     local map = {}
     if result and nrows and nrows > 0 then
         for i = 1, nrows do
@@ -244,12 +240,12 @@ end
 function BookDB.expireBefore(before_ts)
     before_ts = tonumber(before_ts) or 0
     Base.ensure()
-    return Base.exec(string.format([[
+    return Base.exec([[
 UPDATE books SET
   title=NULL, authors=NULL, percent=0, category=NULL,
   favorite=NULL, series=NULL, intro=NULL, fetched_at=0
-WHERE fetched_at > 0 AND fetched_at < %d;
-]], before_ts)) ~= nil
+WHERE fetched_at > 0 AND fetched_at < ?;
+]], before_ts) ~= nil
 end
 
 return BookDB

@@ -16,10 +16,10 @@ function HttpDB.get(key)
         return nil
     end
     Base.ensure()
-    local value, expires = Base.rowexec(string.format(
-        [[SELECT value, expires FROM http WHERE key=%s LIMIT 1;]],
-        Base.sqlQuote(key)
-    ))
+    local value, expires = Base.rowexec(
+        [[SELECT value, expires FROM http WHERE key=? LIMIT 1;]],
+        key
+    )
     if type(value) ~= "string" then
         return nil
     end
@@ -37,18 +37,17 @@ function HttpDB.set(key, value_json, expires, source_id)
         return false
     end
     Base.ensure()
-    local sql = string.format(
-        [[INSERT INTO http (key, value, expires, source_id) VALUES (%s,%s,%s,%s)
+    return Base.exec(
+        [[INSERT INTO http (key, value, expires, source_id) VALUES (?,?,?,?)
           ON CONFLICT(key) DO UPDATE SET
             value=excluded.value,
             expires=excluded.expires,
             source_id=COALESCE(excluded.source_id, http.source_id);]],
-        Base.sqlQuote(key),
-        Base.sqlQuote(value_json),
-        Base.sqlQuote(tonumber(expires) or 0),
-        Base.sqlQuote(source_id)
-    )
-    return Base.exec(sql) ~= nil
+        key,
+        value_json,
+        tonumber(expires) or 0,
+        source_id
+    ) ~= nil
 end
 
 --- 删除一条 HTTP 缓存
@@ -59,10 +58,7 @@ function HttpDB.delete(key)
         return false
     end
     Base.ensure()
-    return Base.exec(string.format(
-        [[DELETE FROM http WHERE key=%s;]],
-        Base.sqlQuote(key)
-    )) ~= nil
+    return Base.exec([[DELETE FROM http WHERE key=?;]], key) ~= nil
 end
 
 --- 清空 HTTP 缓存；有子串则只删 key 含该子串的行
@@ -74,10 +70,7 @@ function HttpDB.clear(url_substr)
         return Base.exec([[DELETE FROM http;]]) ~= nil
     end
     local pat = url_substr:gsub("([%%_])", "%%%1")
-    return Base.exec(string.format(
-        [[DELETE FROM http WHERE key LIKE %s;]],
-        Base.sqlQuote("%" .. pat .. "%")
-    )) ~= nil
+    return Base.exec([[DELETE FROM http WHERE key LIKE ?;]], "%" .. pat .. "%") ~= nil
 end
 
 --- 删除已过期的 HTTP 缓存行
@@ -86,10 +79,7 @@ end
 function HttpDB.deleteExpired(now_ts)
     now_ts = tonumber(now_ts) or os.time()
     Base.ensure()
-    return Base.exec(string.format(
-        [[DELETE FROM http WHERE expires <= %d;]],
-        now_ts
-    )) ~= nil
+    return Base.exec([[DELETE FROM http WHERE expires <= ?;]], now_ts) ~= nil
 end
 
 return HttpDB

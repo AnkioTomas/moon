@@ -37,21 +37,20 @@ function TocDB.put(book_key, source_id, toc)
             raw_json = encoded
         end
     end
-    local sql = string.format(
+    return Base.exec(
         [[INSERT INTO tocs (book_key, source_id, fetched_at, chapters, raw)
-          VALUES (%s,%s,%s,%s,%s)
+          VALUES (?,?,?,?,?)
           ON CONFLICT(book_key) DO UPDATE SET
             source_id=excluded.source_id,
             fetched_at=excluded.fetched_at,
             chapters=excluded.chapters,
             raw=excluded.raw;]],
-        Base.sqlQuote(book_key),
-        Base.sqlQuote(source_id),
-        Base.sqlQuote(tonumber(toc.fetched_at) or os.time()),
-        Base.sqlQuote(chapters_json),
-        Base.sqlQuote(raw_json)
-    )
-    return Base.exec(sql) ~= nil
+        book_key,
+        source_id,
+        tonumber(toc.fetched_at) or os.time(),
+        chapters_json,
+        raw_json
+    ) ~= nil
 end
 
 --- 按 book_key 取目录缓存
@@ -62,10 +61,10 @@ function TocDB.get(book_key)
         return nil
     end
     Base.ensure()
-    local bk, source_id, fetched_at, chapters_json, raw_json = Base.rowexec(string.format(
-        [[SELECT book_key, source_id, fetched_at, chapters, raw FROM tocs WHERE book_key=%s LIMIT 1;]],
-        Base.sqlQuote(book_key)
-    ))
+    local bk, source_id, fetched_at, chapters_json, raw_json = Base.rowexec(
+        [[SELECT book_key, source_id, fetched_at, chapters, raw FROM tocs WHERE book_key=? LIMIT 1;]],
+        book_key
+    )
     if not bk then
         return nil
     end
@@ -100,10 +99,7 @@ function TocDB.delete(book_key)
         return false
     end
     Base.ensure()
-    return Base.exec(string.format(
-        [[DELETE FROM tocs WHERE book_key=%s;]],
-        Base.sqlQuote(book_key)
-    )) ~= nil
+    return Base.exec([[DELETE FROM tocs WHERE book_key=?;]], book_key) ~= nil
 end
 
 --- 删除过期目录缓存
@@ -112,10 +108,7 @@ end
 function TocDB.deleteExpired(before_ts)
     before_ts = tonumber(before_ts) or 0
     Base.ensure()
-    return Base.exec(string.format(
-        [[DELETE FROM tocs WHERE fetched_at < %d;]],
-        before_ts
-    )) ~= nil
+    return Base.exec([[DELETE FROM tocs WHERE fetched_at < ?;]], before_ts) ~= nil
 end
 
 --- 清空全部目录缓存
