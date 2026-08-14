@@ -1,0 +1,12 @@
+---@meta
+--- 仅 EmmyLua 类型注释，运行时不要 require。
+--- 对应表 pending_progress：待上传进度（一书一条）
+
+---@class PendingProgress
+---@field source_id string PRIMARY KEY 与 stable_id 复合主键
+---@field stable_id string PRIMARY KEY 与 source_id 复合主键
+---@field fraction number 全书比例
+---@field chapter_idx integer|nil 章节序号
+---@field chapter_fraction number|nil 章内比例
+---@field locator string|nil XPointer/CFI 等精确定位
+---@field updated_at integer 更新时间戳

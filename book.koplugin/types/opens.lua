@@ -1,0 +1,11 @@
+---@meta
+--- 仅 EmmyLua 类型注释，运行时不要 require。
+--- 对应表 opens：最近打开记录
+
+---@class Open
+---@field path string PRIMARY KEY 本地打开路径
+---@field book_key string
+---@field source_id string
+---@field stable_id string
+---@field chapter_idx integer|nil 章节序号
+---@field last_open integer 最近打开时间戳
