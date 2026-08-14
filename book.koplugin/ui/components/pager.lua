@@ -26,12 +26,16 @@ local Screen = Device.screen
 
 local Pager = {}
 
---- 底部分页带高度（含贴底 padding）
+--- 底部分页带高度（含贴底 padding）。
+---@return number
 function Pager.bandH()
     return UI.iconSz() + UI.sz(32)
 end
 
---- 按 avail_w 算图标边长与间距，保证 4 键 + 页码不撑破宽度
+--- 按 avail_w 算图标边长与间距，保证 4 键 + 页码不撑破宽度。
+---@param avail_w number
+---@param info_w number
+---@return number, number, number
 local function fitMetrics(avail_w, info_w)
     avail_w = math.max(1, tonumber(avail_w) or Screen:getWidth())
     info_w = math.max(0, tonumber(info_w) or 0)
@@ -41,6 +45,10 @@ local function fitMetrics(avail_w, info_w)
     local min_icon = math.max(1, Screen:scaleBySize(14))
     local min_gap = 0
 
+    --- 估算整行占用宽度。
+    ---@param icon number
+    ---@param gap number
+    ---@return number
     local function total(icon, gap)
         return 4 * (icon + pad * 2) + 4 * gap + info_w
     end
@@ -65,8 +73,12 @@ local function fitMetrics(avail_w, info_w)
     return icon, gap, pad
 end
 
---- 与官方 Menu 底栏一致：首/上/页码/下/末
--- @param width number|nil 可用宽度；缺省用屏宽
+--- 与官方 Menu 底栏一致：首/上/页码/下/末。
+---@param page number
+---@param pages number
+---@param handlers table|nil
+---@param width number|nil 可用宽度；缺省用屏宽
+---@return table
 function Pager.widget(page, pages, handlers, width)
     handlers = handlers or {}
     page = tonumber(page) or 1
@@ -99,6 +111,10 @@ function Pager.widget(page, pages, handlers, width)
         spacers[i] = HorizontalSpan:new{ width = gap }
     end
 
+    --- 构建翻页箭头按钮。
+    ---@param icon string
+    ---@param cb fun()|nil
+    ---@return table
     local function chev(icon, cb)
         return Button:new{
             icon = icon,
@@ -148,7 +164,12 @@ function Pager.widget(page, pages, handlers, width)
     return row
 end
 
---- 固定高度的分页带：控件贴底，与桌面底栏留出空隙
+--- 固定高度的分页带：控件贴底，与桌面底栏留出空隙。
+---@param width number
+---@param page number
+---@param pages number
+---@param handlers table|nil
+---@return table
 function Pager.band(width, page, pages, handlers)
     local bottom_pad = UI.sz(14)
     local band_h = Pager.bandH()
@@ -162,7 +183,10 @@ function Pager.band(width, page, pages, handlers)
     }
 end
 
---- 把已测量的 widget 列表按 avail_h 切成多页（每页一个 VerticalGroup 的 kids 表）
+--- 把已测量的 widget 列表按 avail_h 切成多页（每页一个 VerticalGroup 的 kids 表）。
+---@param widgets table|nil
+---@param avail_h number
+---@return table
 function Pager.pack(widgets, avail_h)
     avail_h = math.max(1, tonumber(avail_h) or 1)
     local pages = {}
@@ -186,7 +210,10 @@ function Pager.pack(widgets, avail_h)
     return pages
 end
 
---- 规范化页码到 [1, pages]
+--- 规范化页码到 [1, pages]。
+---@param page number|nil
+---@param pages number|nil
+---@return number, number
 function Pager.clamp(page, pages)
     page = tonumber(page) or 1
     pages = math.max(1, tonumber(pages) or 1)
@@ -195,7 +222,11 @@ function Pager.clamp(page, pages)
     return page, pages
 end
 
---- 三带布局：顶(可选) + 内容区 + 分页带
+--- 三带布局：顶(可选) + 内容区 + 分页带。
+---@param width number
+---@param height number
+---@param opts table|nil
+---@return table, number
 function Pager.frame(width, height, opts)
     opts = opts or {}
     local page, pages = Pager.clamp(opts.page, opts.pages)

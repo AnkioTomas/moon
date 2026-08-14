@@ -27,6 +27,12 @@ local Image = require("ui.components.image")
 
 local Popup = {}
 
+--- 把调用方 items 规范成 Menu/ButtonDialog 可用结构。
+---@param items table|nil
+---@param close_fn fun()
+---@param on_select fun(value: any, item: table)|nil
+---@param opts table|nil
+---@return table, number
 local function normalizeItems(items, close_fn, on_select, opts)
     opts = opts or {}
     local icon_sz = opts.icon_size or UI.iconSz()
@@ -95,17 +101,13 @@ local function normalizeItems(items, close_fn, on_select, opts)
     return out, max_state_w
 end
 
---- 全屏选项列表（翻页，不滚动）
--- @param opts.title string
--- @param opts.items table
--- @param opts.on_select function|nil  -- function(value, item)
--- @param opts.close_callback function|nil
--- @param opts.icon_size number|nil
--- @param opts.image_size number|nil
--- @return menu widget
+--- 全屏选项列表（翻页，不滚动）。
+---@param opts table|nil
+---@return table
 function Popup.list(opts)
     opts = opts or {}
     local holder = { menu = nil }
+    --- 关闭当前 list 菜单。
     local function close()
         if holder.menu then
             UIManager:close(holder.menu)
@@ -145,15 +147,13 @@ function Popup.list(opts)
     return menu
 end
 
---- 居中动作表（少量选项）
--- @param opts.title string|nil
--- @param opts.items table
--- @param opts.on_select function|nil
--- @param opts.close_callback function|nil
--- @return dialog widget
+--- 居中动作表（少量选项）。
+---@param opts table|nil
+---@return table
 function Popup.sheet(opts)
     opts = opts or {}
     local holder = { dialog = nil }
+    --- 关闭当前 sheet 对话框。
     local function close()
         if holder.dialog then
             UIManager:close(holder.dialog)
@@ -207,11 +207,9 @@ function Popup.sheet(opts)
     return dialog
 end
 
---- 数值增减框
--- @param opts.title / value / value_min / value_max / value_step / unit / precision
--- @param opts.callback function(spin)  -- 点 Apply 后；spin.value 为新值
--- @param opts.close_callback function|nil
--- @return spin widget
+--- 数值增减框（SpinWidget）。
+---@param opts table|nil
+---@return table
 function Popup.spin(opts)
     opts = opts or {}
     local holder = { spin = nil }
@@ -251,11 +249,17 @@ function Popup.spin(opts)
     return spin
 end
 
---- 更新已打开的 list 菜单内容（异步加载筛选结果时用）
+--- 更新已打开的 list 菜单内容（异步加载筛选结果时用）。
+---@param menu table|nil
+---@param title string|nil
+---@param items table|nil
+---@param on_select fun(value: any, item: table)|nil
+---@param opts table|nil
 function Popup.setListItems(menu, title, items, on_select, opts)
     if not menu then
         return
     end
+    --- 关闭目标菜单。
     local function close()
         UIManager:close(menu)
     end

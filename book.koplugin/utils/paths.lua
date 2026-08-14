@@ -27,6 +27,8 @@ local KIND_BOOK = "book"
 local KIND_IMAGE = "image"
 
 --- 递归创建目录（已存在则跳过）
+---@param path string|nil
+---@return nil
 local function ensureDir(path)
     if not path or path == "" then
         return
@@ -41,26 +43,16 @@ local function ensureDir(path)
     lfs.mkdir(path)
 end
 
---- 惰性取活跃源，避免与 moon.settings 顶层循环依赖
-local function activeSourceId()
-    local ok, Settings = pcall(require, "moon.settings")
-    if ok and Settings and Settings.activeSourceId then
-        local id = Settings.activeSourceId()
-        if id and id ~= "" then
-            return tostring(id)
-        end
-    end
-    return "moon"
-end
-
---- 源 id 用作目录名：只留安全字符
--- @param id string|nil
--- @return string
+--- 源 id 用作目录名：只留安全字符；缺参直接失败（禁止猜活跃源）
+---@param id string
+---@return string
 function P.sanitizeSourceId(id)
-    id = tostring(id or activeSourceId())
+    if type(id) ~= "string" or id == "" then
+        error("sanitizeSourceId: source_id required")
+    end
     id = id:gsub("[^%w%._%-]", "_")
     if id == "" then
-        id = "moon"
+        error("sanitizeSourceId: empty after sanitize")
     end
     return id
 end
@@ -139,19 +131,22 @@ function P.sourcePath(id)
 end
 
 --- 只保证 settings 树存在。打开配置文件必须走这里，不能调 ensureLayout。
+---@return nil
 function P.ensureSettings()
     ensureDir(P.root())
     ensureDir(P.settingsDir())
 end
 
 --- 保证 fonts 目录存在
+---@return nil
 function P.ensureFonts()
     ensureDir(P.root())
     ensureDir(P.fontsDir())
 end
 
---- 确保 .moon 与指定源（默认当前活跃源）的 cache/book/image 目录存在
+--- 确保 .moon 与指定源的 cache/book/image 目录存在
 ---@param id string|nil
+---@return nil
 function P.ensureLayout(id)
     P.ensureSettings()
     ensureDir(P.cacheDir())
@@ -165,6 +160,7 @@ end
 --- 确保某书的工作目录存在：cache/<source>/book/<bookKey>/
 ---@param book_key string
 ---@param id string|nil
+---@return nil
 function P.ensureBookWork(book_key, id)
     P.ensureLayout(id)
     ensureDir(P.bookWorkDir(book_key, id))

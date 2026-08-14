@@ -18,11 +18,10 @@ local _ = require("gettext")
 local SourceRegistry = require("source.registry")
 local Desktop = require("ui.desktop")
 local ReaderFloatMenu = require("ui.readermenu")
-local StatsSync = require("stats_sync")
-local MoonSettings = require("utils.settings")
-local Host = require("moon.host")
-local Progress = require("moon.progress")
-local Open = require("moon.open")
+local StatsSync = require("stats.stats_sync")
+local Host = require("host")
+local Progress = require("book.progress")
+local Open = require("book.open")
 
 --- Book 插件实例（FM / Reader 各一份）
 ---@class BookPlugin : WidgetContainer
@@ -75,18 +74,14 @@ function BookPlugin:addToMainMenu(menu_items)
     }
 end
 
---- 阅读器就绪：挂悬浮菜单；按设置拉进度 / 注册统计设备
+--- 阅读器就绪：挂悬浮菜单；拉进度 / 注册统计设备
 ---@return nil
 function BookPlugin:onReaderReady()
     ReaderFloatMenu.attach(self)
-    if MoonSettings.autoSync() then
-        Progress.pull(self.ui, self:getSource(), false)
-    end
-    if MoonSettings.autoStats() then
-        NetworkMgr:runWhenOnline(function()
-            StatsSync.registerDevice(self:getSource())
-        end)
-    end
+    Progress.pull(self.ui, self:getSource(), false)
+    NetworkMgr:runWhenOnline(function()
+        StatsSync.registerDevice(self:getSource())
+    end)
 end
 
 --- 屏幕尺寸变化：重新挂接悬浮菜单（旋转 / 分栏等）
@@ -95,17 +90,13 @@ function BookPlugin:onSetDimensions()
     ReaderFloatMenu.attach(self)
 end
 
---- 关文档：卸悬浮菜单；按设置推进度 / 上报统计；清按章会话
+--- 关文档：卸悬浮菜单；推进度 / 上报统计；清按章会话
 ---@return nil
 function BookPlugin:onCloseDocument()
     ReaderFloatMenu.detach(self)
-    if MoonSettings.autoSync() then
-        Progress.push(self.ui, self:getSource(), false)
-    end
-    if MoonSettings.autoStats() then
-        StatsSync.pushWithUi(self:getSource(), false, false)
-    end
-    local ok, Chapter = pcall(require, "moon.chapter")
+    Progress.push(self.ui, self:getSource(), false)
+    StatsSync.pushWithUi(self:getSource(), false, false)
+    local ok, Chapter = pcall(require, "book.chapter")
     if ok and Chapter and Chapter.clear then
         Chapter.clear()
     end
@@ -117,27 +108,23 @@ function BookPlugin:onSuspend()
     if not self.ui.document then
         return
     end
-    if MoonSettings.autoSync() then
-        Progress.push(self.ui, self:getSource(), false)
-    end
-    if MoonSettings.autoStats() then
-        StatsSync.pushWithUi(self:getSource(), false, false)
-    end
+    Progress.push(self.ui, self:getSource(), false)
+    StatsSync.pushWithUi(self:getSource(), false, false)
 end
 
 -- ── 对外动作（UI / 设置页调用）───────────────────────
 
---- 当前活跃数据源（经 SourceRegistry 缓存）
----@return BookSource
+--- 当前活跃数据源（经 SourceRegistry；失败返回 nil）
+---@return BookSource|nil
 function BookPlugin:getSource()
-    return SourceRegistry.getActive()
+    return SourceRegistry.current()
 end
 
 --- 下载（如需）并打开书籍
----@param book Book|table 书籍（含 stable_id / filename 等）
+---@param book Book
 ---@return nil
 function BookPlugin:openBook(book)
-    Open.book(self, book)
+    Open.book(self, book, self:getSource())
 end
 
 --- 上报阅读统计
@@ -145,33 +132,55 @@ end
 ---@param force boolean|nil 忽略节流与「自动上报」开关
 ---@return nil
 function BookPlugin:pushReadingStats(show_msg, force)
-    StatsSync.pushWithUi(self:getSource(), show_msg, force)
+    local source = self:getSource()
+    if not source then
+        return
+    end
+    local caps = source:capabilities() or {}
+    if not caps.stats_import then
+        return
+    end
+    StatsSync.pushWithUi(source, show_msg, force)
 end
 
---- 数据源切换后清缓存并重建桌面
+--- 数据源切换后：取消旧请求、回退 Tab、重建桌面
+--- 注意：Registry.setActive 已原子激活新源，此处不再 invalidate。
 ---@return nil
 function BookPlugin:onSourceChanged()
     logger.info("book onSourceChanged")
-    SourceRegistry.invalidate()
-    local source = self:getSource()
+    local source = SourceRegistry.current()
     if source and source.clearCaches then
         source:clearCaches()
     end
     if not self.desktop then
         return
     end
-    self.desktop.source = source
-    self.desktop._home_state = nil
-    self.desktop._home_loaded = false
-    self.desktop._library_state = nil
-    self.desktop._store_state = nil
-    self.desktop._insight_state = nil
-    self.desktop._insight_loaded = false
-    local caps = source:capabilities() or {}
-    if self.desktop.tab == "store" and not caps.store then
-        self.desktop.tab = "home"
+    local desk = self.desktop
+    desk.source_generation = (desk.source_generation or 0) + 1
+    if desk._home_fetch_cancel then pcall(desk._home_fetch_cancel) end
+    if desk._library_fetch_cancel then pcall(desk._library_fetch_cancel) end
+    if desk._store_fetch_cancel then pcall(desk._store_fetch_cancel) end
+    if desk._insight_fetch_cancel then pcall(desk._insight_fetch_cancel) end
+    local Image = require("ui.components.image")
+    if Image.abortPending then
+        pcall(Image.abortPending)
     end
-    self.desktop:rebuild()
+    desk.source = source
+    desk._home_state = nil
+    desk._home_loaded = false
+    desk._library_state = nil
+    desk._store_state = nil
+    desk._insight_state = nil
+    desk._insight_loaded = false
+    desk.filter = nil
+    local caps = source and source:capabilities() or {}
+    if desk.tab == "store" and not caps.store then
+        desk.tab = "home"
+    end
+    if desk.tab == "stats" and not caps.insight then
+        desk.tab = "home"
+    end
+    desk:rebuild()
 end
 
 --- 打开全屏 Book 桌面
@@ -179,8 +188,12 @@ end
 ---@return nil
 function BookPlugin:openDesktop(filter)
     local source = self:getSource()
+    if not source then
+        UIManager:show(InfoMessage:new{ text = _("当前数据源不可用") })
+        return
+    end
     require("utils.paths").ensureLayout(source.id)
-    logger.info("book openDesktop", source and (source.id or MoonSettings.activeSourceId()))
+    logger.info("book openDesktop", source.id)
     if self.desktop then
         UIManager:close(self.desktop)
         self.desktop = nil

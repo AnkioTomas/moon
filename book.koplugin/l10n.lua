@@ -13,10 +13,16 @@ local logger = require("logger")
 local M = {}
 local applied_for
 
+--- 是否繁体中文语言码（zh_TW / zh_HK）
+---@param lang string
+---@return string|nil
 local function isTraditionalChinese(lang)
     return lang:match("^zh_TW") or lang:match("^zh_HK")
 end
 
+--- 按当前语言生成待加载的 l10n 目录候选列表
+---@param lang string|nil
+---@return string[]
 local function candidates(lang)
     lang = tostring(lang or "")
     lang = lang:gsub("%.utf8$", ""):gsub("%.UTF%-8$", "")
@@ -39,6 +45,8 @@ local function candidates(lang)
     return out
 end
 
+--- 按 KOReader 当前语言加载翻译并合并进 gettext（同语言只做一次）
+---@return nil
 function M.apply()
     local lang = GetText.current_lang or "C"
     if applied_for == lang then

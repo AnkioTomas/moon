@@ -12,6 +12,7 @@ local SOURCE_ID = "wechat"
 
 local Setting = {}
 
+--- 设置行状态文案与高亮开关。
 ---@return string status, boolean status_on
 function Setting.rowStatus()
     local Auth = require("source.wechat.auth")
@@ -22,6 +23,8 @@ function Setting.rowStatus()
     return _("未登录 · 点此扫码"), false
 end
 
+--- 认证状态变更后失效活跃源并通知插件刷新。
+---@param plugin table|nil
 local function afterAuthChanged(plugin)
     require("source.registry").invalidate()
     if plugin and plugin.onSourceChanged then
@@ -29,6 +32,8 @@ local function afterAuthChanged(plugin)
     end
 end
 
+--- 展示微信读书扫码登录流程。
+---@param plugin table|nil
 local function showQrLogin(plugin)
     local Auth = require("source.wechat.auth")
     local Promise = require("utils.promise")
@@ -50,6 +55,7 @@ local function showQrLogin(plugin)
         local begin_job, wait_job
         local qr_size = math.floor(math.min(Screen:getWidth(), Screen:getHeight()) * 0.55)
 
+        --- 关闭当前登录对话框。
         local function closeDialog()
             if dialog then
                 UIManager:close(dialog)
@@ -91,6 +97,9 @@ local function showQrLogin(plugin)
         end
         UIManager:show(dialog)
 
+        --- 展示二维码并长连接等待扫码结果。
+        ---@param uid string
+        ---@param qr_payload string
         local function startWait(uid, qr_payload)
             closeDialog()
             local qr = QRWidget:new{

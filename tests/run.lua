@@ -2,18 +2,14 @@
 零依赖测试运行器（LuaJIT）。
 
   ./tests/run.sh
-  ./tests/run.sh tests/contract_spec.lua
+  ./tests/run.sh tests/source/contract_spec.lua
 
-不启 KOReader；需要宿主模块的用例靠 tests/support/stubs.lua 顶替。
-
-真配置：仓库根 `config` 软链；DataStorage → config/；
-读配置用 moon.settings（见 tests/support/config.lua），不要 loadfile。
+递归扫描 tests/ 下全部 *_spec.lua（镜像 book.koplugin 目录）。
 
 @module tests.run
 --]]
 
 local ROOT = arg[0]:match("(.+)/[^/]+$") or "."
--- arg[0] 可能是 tests/run.lua；仓库根是上一级
 if ROOT:match("/tests$") or ROOT == "tests" then
     ROOT = ROOT:gsub("/?tests$", "")
     if ROOT == "" then
@@ -31,7 +27,6 @@ package.path = table.concat({
     package.path,
 }, ";")
 
--- 若本机有 koreader 树，挂上 frontend + base（ffi/sha2 等）
 local ko = ROOT .. "/koreader"
 local f = io.open(ko .. "/frontend/ui/uimanager.lua", "r")
 if f then
@@ -49,16 +44,15 @@ require("support.stubs").install()
 
 local Assert = require("support.assert")
 
-local function listSpecs(dir)
+local function listSpecsRecursive(dir)
     local out = {}
-    local p = io.popen('ls "' .. dir .. '"/*_spec.lua 2>/dev/null')
+    local p = io.popen('find "' .. dir .. '" -type f -name "*_spec.lua" 2>/dev/null | sort')
     if p then
         for line in p:lines() do
             out[#out + 1] = line
         end
         p:close()
     end
-    table.sort(out)
     return out
 end
 
@@ -68,7 +62,7 @@ if arg[1] then
         specs[#specs + 1] = arg[i]
     end
 else
-    specs = listSpecs(ROOT .. "/tests")
+    specs = listSpecsRecursive(ROOT .. "/tests")
 end
 
 if #specs == 0 then
@@ -80,7 +74,7 @@ local failed = 0
 local passed = 0
 
 for _, path in ipairs(specs) do
-    local name = path:match("([^/]+)$") or path
+    local name = path:gsub("^" .. ROOT .. "/?", "")
     io.write("→ " .. name .. "\n")
     local chunk, err = loadfile(path)
     if not chunk then

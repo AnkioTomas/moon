@@ -33,6 +33,11 @@ local Image = require("ui.components.image")
 
 local SettingRow = {}
 
+--- 包一层可点击容器。
+---@param w number
+---@param h number
+---@param on_tap fun()|nil
+---@return table
 local function tappable(w, h, on_tap)
     local tap = InputContainer:new{
         dimen = Geom:new{ w = w, h = h },
@@ -52,6 +57,10 @@ local function tappable(w, h, on_tap)
     return tap
 end
 
+--- 构建设置行（图标 + 标题 + 状态/箭头）。
+---@param width number
+---@param opts table|nil
+---@return table
 function SettingRow.build(width, opts)
     opts = opts or {}
     local kind = opts.kind or "nav"

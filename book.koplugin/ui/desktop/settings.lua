@@ -31,14 +31,16 @@ local FontPicker = require("ui.components.fontpicker")
 local MoonSettings = require("utils.settings")
 local MoonFont = require("utils.font")
 local SourceRegistry = require("source.registry")
-local Cache = require("moon.cache")
-local Host = require("moon.host")
+local Store = require("book.store")
+local Host = require("host")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
 local REPO_URL = "https://github.com/AnkioTomas/moon"
 local REPO_HOST = "github.com/AnkioTomas/moon"
 
+--- 读取插件版本号（bookversion 模块）。
+---@return string
 local function pluginVersion()
     local ok, ver = pcall(require, "bookversion")
     if ok and type(ver) == "string" and ver ~= "" then
@@ -47,6 +49,7 @@ local function pluginVersion()
     return "0.0.0-dev"
 end
 
+--- 弹出关于对话框。
 local function showAbout()
     local ver = pluginVersion()
     local dialog
@@ -128,7 +131,8 @@ end
 
 local Settings = {}
 
----@param id SourceId
+--- 按源 id 加载 source.<id>.setting 模块。
+---@param id string
 ---@return table|nil
 local function loadSourceSetting(id)
     local ok, mod = pcall(require, "source." .. tostring(id) .. ".setting")
@@ -138,6 +142,8 @@ local function loadSourceSetting(id)
     return nil
 end
 
+--- 在线测试当前数据源连接。
+---@param plugin table|nil
 local function testConnection(plugin)
     if not plugin or not plugin.getSource then
         return
@@ -156,6 +162,9 @@ local function testConnection(plugin)
     end)
 end
 
+--- 设置分组内的缩进分割线。
+---@param width number
+---@return table
 local function insetDivider(width)
     local inset = UI.sz(8)
     local line_w = math.max(UI.sz(40), width - inset * 2)
@@ -168,7 +177,11 @@ local function insetDivider(width)
     }
 end
 
---- 分组标题 + 各行展平进 out；标题与 item 同等参与 Pager.pack 切页
+--- 分组标题 + 各行展平进 out；标题与 item 同等参与 Pager.pack 切页。
+---@param out table
+---@param width number
+---@param title string
+---@param row_builders table
 local function appendSection(out, width, title, row_builders)
     if #out > 0 then
         table.insert(out, VerticalSpan:new{ width = UI.sectionGap() })
@@ -190,10 +203,15 @@ local function appendSection(out, width, title, row_builders)
     end
 end
 
---- 当前源专属入口 + 通用测试连接 / 统计上报
+--- 当前源专属入口 + 通用测试连接 / 同步 / 统计上报。
+---@param active_id string
+---@param plugin table|nil
+---@return table
 local function sourceServiceRows(active_id, plugin)
     local mod = loadSourceSetting(active_id)
     local rows = {}
+    local source = plugin and plugin.getSource and plugin:getSource() or nil
+    local caps = source and source.capabilities and source:capabilities() or {}
 
     if mod and type(mod.open) == "function" then
         local status, status_on
@@ -225,9 +243,47 @@ local function sourceServiceRows(active_id, plugin)
         })
     end
 
+    if caps.progress_push then
+        rows[#rows + 1] = function(iw)
+            return SettingRow.build(iw, {
+                kind = "action",
+                icon = "sync.svg",
+                title = _("立即同步进度"),
+                callback = function()
+                    local Progress = require("book.progress")
+                    local src = plugin and plugin.getSource and plugin:getSource()
+                    if not src then
+                        return
+                    end
+                    NetworkMgr:runWhenOnline(function()
+                        Progress.flushPending(src, true)
+                    end)
+                end,
+            })
+        end
+    end
+
+    if caps.stats_import then
+        rows[#rows + 1] = function(iw)
+            return SettingRow.build(iw, {
+                kind = "action",
+                icon = "stats.svg",
+                title = _("立即上报统计"),
+                callback = function()
+                    if plugin and plugin.pushReadingStats then
+                        plugin:pushReadingStats(true, true)
+                    end
+                end,
+            })
+        end
+    end
+
     return rows
 end
 
+--- 构建设置页（服务 / 显示 / 维护，分页）。
+---@param desktop table
+---@return table
 function Settings.build(desktop)
     local h = desktop:contentHeight()
     local w = desktop.dimen.w
@@ -241,6 +297,7 @@ function Settings.build(desktop)
     local band_h = Pager.bandH()
     local body_h = math.max(1, h - band_h)
 
+    --- 切换阅读页悬浮菜单开关。
     local function on_toggle_float()
         local st = MoonSettings.get()
         st.reader_float_menu = not float_menu
@@ -264,6 +321,7 @@ function Settings.build(desktop)
         end
     end
 
+    --- 弹出数据源选择 sheet。
     local function pickSource()
         if #sources == 0 then return end
         local items = {}
@@ -400,7 +458,7 @@ function Settings.build(desktop)
     })
     appendSection(packed, card_w, _("维护"), {
         function(iw)
-            local cache_size = Cache.sizeLabel()
+            local cache_size = Store.sizeLabel()
             return SettingRow.build(iw, {
                 kind = "action",
                 icon = "trash.svg",
@@ -412,7 +470,7 @@ function Settings.build(desktop)
                         text = T(_("删除 .moon/cache（%1）？"), cache_size),
                         ok_text = _("清理"),
                         ok_callback = function()
-                            local ok = Cache.clear()
+                            local ok = Store.clear()
                             if desktop then
                                 desktop._home_state = nil
                                 desktop._home_loaded = false

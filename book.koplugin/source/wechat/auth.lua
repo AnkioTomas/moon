@@ -16,7 +16,6 @@ local ltn12 = require("ltn12")
 local logger = require("logger")
 local Request = require("http.request")
 local Header = require("http.header")
-local MoonSettings = require("moon.settings")
 local _ = require("gettext")
 
 local Auth = {}
@@ -32,6 +31,9 @@ local SESSION_COOKIE_KEYS = { "wr_gid", "wr_fp", "wr_vid", "wr_skey", "wr_ql", "
 --- 扫码会话 guest cookie（仅内存，不落盘）
 local login_jar = {}
 
+--- 合并浏览器默认请求头。
+---@param extra table|nil
+---@return table
 local function browserHeaders(extra)
     return Header.merge(extra, {
         ["User-Agent"] = BROWSER_UA,
@@ -44,12 +46,18 @@ local function browserHeaders(extra)
     })
 end
 
---- 按 keys 顺序拼 Cookie；keys 为 nil 时：优先 wr_gid/wr_fp，再其余
+--- 按 keys 顺序拼 Cookie；keys 为 nil 时：优先 wr_gid/wr_fp，再其余。
+---@param map table|nil
+---@param keys string[]|nil
+---@return string|nil
 local function cookieFrom(map, keys)
     if type(map) ~= "table" then
         return nil
     end
     local parts = {}
+    --- 追加单个 Cookie 键值。
+    ---@param k string
+    ---@param v any
     local function add(k, v)
         if type(v) == "string" and v ~= "" then
             parts[#parts + 1] = k .. "=" .. v
@@ -76,6 +84,9 @@ local function cookieFrom(map, keys)
     return table.concat(parts, "; ")
 end
 
+--- 从响应头解析 Set-Cookie 为键值表。
+---@param headers table|nil
+---@return table<string, string>
 local function parseSetCookie(headers)
     local out = {}
     if type(headers) ~= "table" then
@@ -97,6 +108,9 @@ local function parseSetCookie(headers)
     return out
 end
 
+--- URL 解码（含 + → 空格）。
+---@param s string|nil
+---@return string|nil
 local function urlDecode(s)
     if type(s) ~= "string" then
         return s
@@ -108,19 +122,24 @@ local function urlDecode(s)
     return s
 end
 
+--- 把响应 Set-Cookie 合并进扫码 guest jar。
+---@param headers table|nil
 local function jarMerge(headers)
     for k, v in pairs(parseSetCookie(headers)) do
         login_jar[k] = v
     end
 end
 
+--- 扫码登录请求头（浏览器头 + guest Cookie）。
+---@param extra table|nil
+---@return table
 local function loginRequestHeaders(extra)
     return browserHeaders(Header.merge(extra, {
         ["Cookie"] = cookieFrom(login_jar),
     }))
 end
 
---- 访问首页补齐 wr_gid / wr_fp
+--- 访问首页补齐 wr_gid / wr_fp。
 local function ensureGuestCookies()
     login_jar = {}
     local chunks = {}
@@ -139,18 +158,26 @@ local function ensureGuestCookies()
     end
 end
 
+--- 读取微信读书源配置。
+---@return table
 local function cfg()
-    return MoonSettings.getSource("wechat") or {}
+    return require("utils.settings").getSource("wechat")
 end
 
+--- 合并 patch 并落盘微信读书源配置。
+---@param patch table
 local function saveCfg(patch)
-    local c = cfg()
+    local MoonSettings = require("utils.settings")
+    local c = MoonSettings.getSource("wechat")
     for k, v in pairs(patch) do
         c[k] = v
     end
     MoonSettings.saveSource("wechat", c)
 end
 
+--- 从配置构造会话 Cookie 字段映射。
+---@param c table|nil
+---@return table
 local function sessionMap(c)
     c = c or cfg()
     local ql = c.wr_ql
@@ -167,7 +194,8 @@ local function sessionMap(c)
     }
 end
 
---- Cookie 以字段为准拼装；旧配置仅有整段 cookie 时回退
+--- Cookie 以字段为准拼装；旧配置仅有整段 cookie 时回退。
+---@return string|nil
 function Auth.cookieHeader()
     local c = cfg()
     local built = cookieFrom(sessionMap(c), SESSION_COOKIE_KEYS)
@@ -180,7 +208,9 @@ function Auth.cookieHeader()
     return nil
 end
 
---- 已登录请求头：Cookie + X-Vid + X-Skey
+--- 已登录请求头：Cookie + X-Vid + X-Skey。
+---@param extra table|nil
+---@return table
 function Auth.sessionHeaders(extra)
     local c = cfg()
     local vid = c.wr_vid or c.user_id
@@ -192,12 +222,16 @@ function Auth.sessionHeaders(extra)
     }))
 end
 
+--- 是否已有可用会话（wr_skey 或旧 cookie 串）。
+---@return boolean
 function Auth.hasSession()
     local c = cfg()
     return (type(c.wr_skey) == "string" and c.wr_skey ~= "")
         or (type(c.cookie) == "string" and c.cookie:find("wr_skey=", 1, true) ~= nil)
 end
 
+--- 展示用用户标签（昵称优先，否则 user_id）。
+---@return string|nil
 function Auth.userLabel()
     local c = cfg()
     if c.user_name and c.user_name ~= "" then
@@ -209,6 +243,8 @@ function Auth.userLabel()
     return nil
 end
 
+--- 当前用户 vid。
+---@return string|nil
 function Auth.userVid()
     local c = cfg()
     local vid = c.wr_vid or c.user_id
@@ -221,6 +257,7 @@ function Auth.userVid()
     return nil
 end
 
+--- 清除本地会话与派生 Cookie 字段。
 function Auth.clearSession()
     saveCfg({
         cookie = "",
@@ -237,7 +274,12 @@ function Auth.clearSession()
     })
 end
 
---- 字段是真相；cookie 字符串只是派生落盘（兼容旧读法）
+--- 字段是真相；cookie 字符串只是派生落盘（兼容旧读法）。
+---@param vid string|number|nil
+---@param skey string|nil
+---@param rt string|nil
+---@param name string|nil
+---@param extras table|nil
 local function applySession(vid, skey, rt, name, extras)
     extras = extras or {}
     vid = tostring(vid or "")
@@ -264,6 +306,10 @@ local function applySession(vid, skey, rt, name, extras)
     })
 end
 
+--- 相对路径拼到 base；已是绝对 URL 则原样返回。
+---@param base string
+---@param path_query string
+---@return string
 local function absUrl(base, path_query)
     if path_query:find("^https?://") then
         return path_query
@@ -271,6 +317,9 @@ local function absUrl(base, path_query)
     return base .. path_query
 end
 
+--- 解码 JSON 文本为 table。
+---@param raw string
+---@return table|nil, string|nil
 local function decodeJson(raw)
     local ok, data = pcall(JSON.decode, raw)
     if not ok or type(data) ~= "table" then
@@ -279,6 +328,9 @@ local function decodeJson(raw)
     return data
 end
 
+--- 检查微信读书 errcode；非 0 则返回错误信息。
+---@param data table
+---@return table|nil, string|nil
 local function checkWereadErr(data)
     local errcode = tonumber(data.errcode or data.errCode)
     if errcode and errcode ~= 0 then
@@ -287,7 +339,10 @@ local function checkWereadErr(data)
     return data
 end
 
---- 带会话头的 GET
+--- 带会话头的 GET。
+---@param url string
+---@param opts table|nil
+---@return string|nil, string|nil
 function Auth.webGet(url, opts)
     opts = opts or {}
     if not Auth.hasSession() then
@@ -301,6 +356,11 @@ function Auth.webGet(url, opts)
     })
 end
 
+--- 带会话头的 POST。
+---@param url string
+---@param body string|nil
+---@param opts table|nil
+---@return string|nil, string|nil
 function Auth.webPost(url, body, opts)
     opts = opts or {}
     if not Auth.hasSession() then
@@ -315,6 +375,11 @@ function Auth.webPost(url, body, opts)
     })
 end
 
+--- GET 并解析 JSON；可选检查微信 errcode。
+---@param base string
+---@param path_query string
+---@param check_err boolean|nil
+---@return table|nil, string|nil
 local function jsonGet(base, path_query, check_err)
     local raw, err = Auth.webGet(absUrl(base, path_query))
     if not raw then
@@ -330,11 +395,17 @@ local function jsonGet(base, path_query, check_err)
     return data
 end
 
---- GET JSON（默认 i.weread.qq.com；绝对 URL 原样）
+--- GET JSON（默认 i.weread.qq.com；绝对 URL 原样）。
+---@param path_query string
+---@return table|nil, string|nil
 function Auth.apiGet(path_query)
     return jsonGet(API, path_query, true)
 end
 
+--- POST JSON 到 i.weread.qq.com 并检查 errcode。
+---@param path string
+---@param body_tbl table|nil
+---@return table|nil, string|nil
 function Auth.apiPost(path, body_tbl)
     local raw, err = Auth.webPost(absUrl(API, path), JSON.encode(body_tbl or {}))
     if not raw then
@@ -347,12 +418,17 @@ function Auth.apiPost(path, body_tbl)
     return checkWereadErr(data)
 end
 
---- weread.qq.com Web API GET JSON
+--- weread.qq.com Web API GET JSON。
+---@param path_query string
+---@return table|nil, string|nil
 function Auth.webApiGet(path_query)
     return jsonGet(WEB, path_query, false)
 end
 
---- weread.qq.com Web API POST JSON（不强制 errCode；Web 接口常无此字段）
+--- weread.qq.com Web API POST JSON（不强制 errCode；Web 接口常无此字段）。
+---@param path string
+---@param body_tbl table|nil
+---@return table|nil, string|nil
 function Auth.webApiPost(path, body_tbl)
     local raw, err = Auth.webPost(absUrl(WEB, path), JSON.encode(body_tbl or {}))
     if not raw then
@@ -361,7 +437,8 @@ function Auth.webApiPost(path, body_tbl)
     return decodeJson(raw)
 end
 
---- 开始扫码：getLoginUid → 本地 confirm QR；返回 { uid, qr_payload }
+--- 开始扫码：getLoginUid → 本地 confirm QR；返回 { uid, qr_payload }。
+---@return { uid: string, qr_payload: string }|nil, string|nil
 function Auth.beginQrLogin()
     ensureGuestCookies()
 
@@ -387,7 +464,8 @@ function Auth.beginQrLogin()
     return { uid = uid, qr_payload = WEB .. "/web/confirm?pf=2&uid=" .. uid }
 end
 
---- 长连接等待扫码；失败/超时 = 二维码失效
+--- 长连接等待扫码；失败/超时 = 二维码失效。
+---@param uid string
 ---@return table|nil info, string|nil err, string|nil status ok|error
 function Auth.waitQrLogin(uid)
     if not uid or uid == "" then
@@ -432,7 +510,9 @@ function Auth.waitQrLogin(uid)
     }, nil, "ok"
 end
 
---- 落盘会话 + 拉 userInfo 取昵称
+--- 落盘会话 + 拉 userInfo 取昵称。
+---@param info table|nil
+---@return { user_id: string, user_name: string }|nil, string|nil
 function Auth.completeQrLogin(info)
     if type(info) ~= "table" then
         return nil, _("无登录信息")
@@ -467,7 +547,8 @@ function Auth.completeQrLogin(info)
     }
 end
 
---- 刷新 Cookie（访问首页拿 Set-Cookie）
+--- 刷新 Cookie（访问首页拿 Set-Cookie）。
+---@return boolean|nil, string|nil
 function Auth.renewCookie()
     if not Auth.hasSession() then
         return nil, _("请先扫码登录微信读书")

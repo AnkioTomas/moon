@@ -1,18 +1,24 @@
 ---@meta
 --- 仅 EmmyLua 类型注释，运行时不要 require。
 
+--- 跨层书籍身份。stable_id 仅源内唯一；跨源主键为 source_id + stable_id。
+---@class BookRef
+---@field source_id string
+---@field stable_id string
+---@field book_key string -- md5(source_id .. ":" .. stable_id)
+
 --- 列表卡 / 封面格用的统一书籍对象。
---- 由 `Contract.normalizeBook` 从各源 wire 产出；页面只读本结构。
+--- 由各源 mapper 产出；页面只读本结构。
 ---
 --- 铁律：
----   id = stable_id（缓存键、进度同步、打开书籍均用此身份）
+---   身份只认 ref
 ---   percent ∈ [0, 100] 整数；缺进度为 0，禁止伪造 1%
 ---@class Book
----@field id string 稳定书身份（stable_id）
+---@field ref BookRef
 ---@field title string|nil 书名
 ---@field authors string|nil 作者（多作者由源侧拼接）
 ---@field percent number 阅读进度 0–100
----@field category string|nil 标签 / 分类文案（详情「标签」行）
----@field favorite any 收藏 / 置顶标记（详情「分类」行；语义由源定义）
+---@field category string|nil 标签 / 分类文案
+---@field favorite any 收藏 / 置顶标记
 ---@field series string|nil 系列 / 书单名
----@field cover string|nil 封面 URL（有则可供 coverRequest 缓存；无则按 id 回源）
+---@field cover string|nil 封面 URL（有则可供 coverRequest 缓存）

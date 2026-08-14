@@ -40,6 +40,8 @@ function Timing.debounce(wait, fn)
     local last_args
     local handle = {}
 
+    --- 执行最后一次参数并清空调度状态
+    ---@return nil
     local function fire()
         scheduled = nil
         local n, args = last_n, last_args
@@ -51,6 +53,7 @@ function Timing.debounce(wait, fn)
     end
 
     --- 取消已调度的 trailing 回调，并丢弃待执行参数
+    ---@return nil
     function handle:cancel()
         if scheduled then
             UIManager:unschedule(scheduled)
@@ -93,11 +96,14 @@ function Timing.throttle(wait, fn)
     local locked = false
     local handle = {}
 
+    --- 解除节流锁定
+    ---@return nil
     local function on_unlock()
         locked = false
     end
 
     --- 取消锁定窗口，允许立即再次触发
+    ---@return nil
     function handle:cancel()
         if locked then
             UIManager:unschedule(on_unlock)

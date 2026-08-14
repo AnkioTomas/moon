@@ -13,7 +13,7 @@ KOReader 宿主钩子：启动项菜单 + 桌面接管。
   pinSettingsMenu     — 设置里「Book 桌面」置顶
   patchStartWithMenu  — 系统启动项插入 Book 书库
 
-@module koplugin.book.moon.host
+@module koplugin.book.host
 --]]
 
 local Dispatcher = require("dispatcher")
@@ -33,17 +33,21 @@ local want = nil
 local dispatcher_registered = false
 
 --- 是否 FileManager 上下文（非 Reader）
+---@param plugin table|nil
+---@return boolean|nil
 local function isFileManager(plugin)
     return plugin and plugin.ui and not plugin.ui.document
 end
 
 --- 启动项是否选中 Book 书库
+---@return boolean
 local function isOpenOnStart()
     return G_reader_settings:readSetting("start_with", "filemanager") == Host.OPEN_ON_START_ID
 end
 
 --- 立刻开桌面；成功则 want=false
--- @return boolean
+---@param plugin table
+---@return boolean
 local function openNow(plugin)
     if not isFileManager(plugin) or not plugin.openDesktop or plugin.desktop then
         logger.dbg("book.host openNow skip",
@@ -58,7 +62,8 @@ local function openNow(plugin)
 end
 
 --- Dispatcher 全局注册一次；主菜单按 FM/Reader 实例各挂一次
--- 回调仍走 plugin:addToMainMenu / plugin:onBookOpenShelf
+---@param plugin table
+---@return nil
 local function registerMenu(plugin)
     if not dispatcher_registered then
         dispatcher_registered = true
@@ -78,6 +83,7 @@ local function registerMenu(plugin)
 end
 
 --- 设置菜单里把「Book 桌面」置顶（只做一次）
+---@return nil
 local function pinSettingsMenu()
     for _, modname in ipairs({
         "ui/elements/filemanager_menu_order",
@@ -98,6 +104,7 @@ local function pinSettingsMenu()
 end
 
 --- 系统「启动时打开」插入 Book 书库，并修补 text_func（否则选中后标题为 nil）
+---@return nil
 local function patchStartWithMenu()
     local ok, FMMenu = pcall(require, "apps/filemanager/filemanagermenu")
     if not ok or not FMMenu or not FMMenu.getStartWithMenuTable then
@@ -147,9 +154,11 @@ local function patchStartWithMenu()
 end
 
 --- 插件 init：挂钩菜单；FM 侧按 start_with 决定是否自动开桌面
+---@param plugin table
+---@return nil
 function Host.attach(plugin)
     pcall(function()
-        require("moon.font").applyCurrent()
+        require("utils.font").applyCurrent()
     end)
     registerMenu(plugin)
     pinSettingsMenu()
@@ -168,7 +177,8 @@ function Host.attach(plugin)
 end
 
 --- FM onShow：want==true 时开桌面
--- @return boolean
+---@param plugin table
+---@return boolean
 function Host.onShow(plugin)
     if want ~= true then
         return false
@@ -178,7 +188,8 @@ function Host.onShow(plugin)
 end
 
 --- 请求开桌面；当前开不了则标记 want，等下次 FM onShow
--- @return boolean 是否已打开
+---@param plugin table
+---@return boolean 是否已打开
 function Host.requestDesktop(plugin)
     if openNow(plugin) then
         return true

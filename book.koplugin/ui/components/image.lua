@@ -4,7 +4,7 @@
   Image.widget{
     src = "settings.svg",     -- icons/ 相对名
     -- src = "https://...",   -- 网络 URL → 缓存命中直接显；未命中先占位，
-                              -- 下载完经 Flight 只刷新该占位组件
+                              -- 下载完只刷新该占位组件
     headers = { Authorization = "Bearer …" },  -- 仅网络请求
     width = n, height = n,
     alpha = true,             -- 图标默认 true；封面用 false
@@ -20,7 +20,7 @@
   Image.resolve(src)
   Image.abortPending()
 
-下载直写磁盘，禁止整图进内存。单飞/waiter 见 moon.flight。
+下载直写磁盘，禁止整图进内存。网络图用 utils.promise。
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -39,15 +39,41 @@ local logger = require("logger")
 local Header = require("http.header")
 local Request = require("http.request")
 local UI = require("ui.components.bookui")
-local Paths = require("moon.paths")
-local Flight = require("moon.flight")
+local Paths = require("utils.paths")
+local Promise = require("utils.promise")
 
 local Image = {}
 
 local EXTS = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg" }
 
 Image._dl_seq = 0
+Image._jobs = {}
 
+--- 登记在飞下载 Promise。
+---@param job table|nil
+local function rememberJob(job)
+    if not job then
+        return
+    end
+    Image._jobs[#Image._jobs + 1] = job
+end
+
+--- 从在飞列表移除 Promise。
+---@param job table|nil
+local function forgetJob(job)
+    if not job then
+        return
+    end
+    for i = #Image._jobs, 1, -1 do
+        if Image._jobs[i] == job then
+            table.remove(Image._jobs, i)
+        end
+    end
+end
+
+--- 按文件头嗅探图片扩展名。
+---@param path string
+---@return string|nil
 local function sniffExt(path)
     local f = io.open(path, "rb")
     if not f then return nil end
@@ -64,15 +90,25 @@ local function sniffExt(path)
     return nil
 end
 
+--- 是否 HTTP(S) URL。
+---@param src any
+---@return boolean
 local function isHttp(src)
     return type(src) == "string" and (src:match("^https?://") ~= nil)
 end
 
+--- 网络图缓存路径前缀（无扩展名）。
+---@param url string
+---@param source_id string|nil
+---@return string
 local function cacheBase(url, source_id)
     Paths.ensureLayout(source_id)
     return Paths.imageDir(source_id) .. "/" .. md5(url)
 end
 
+--- 截断占位文案。
+---@param fb any
+---@return string
 local function truncFallback(fb)
     local label = fb or "?"
     if type(label) ~= "string" then
@@ -84,7 +120,12 @@ local function truncFallback(fb)
     return label
 end
 
---- 空白或文案占位；border 时带边框（封面格子）
+--- 空白或文案占位；border 时带边框（封面格子）。
+---@param w number
+---@param h number
+---@param fb any
+---@param border boolean|nil
+---@return table
 local function placeholder(w, h, fb, border)
     w = math.max(1, tonumber(w) or 1)
     h = math.max(1, tonumber(h) or 1)
@@ -118,7 +159,12 @@ local function placeholder(w, h, fb, border)
     }
 end
 
---- 按目标框等比解码（letterbox）；禁止 ImageWidget{file=, scale_factor=0} 整图进内存
+--- 按目标框等比解码（letterbox）；禁止 ImageWidget{file=, scale_factor=0} 整图进内存。
+---@param path string
+---@param w number
+---@param h number
+---@param alpha boolean|nil
+---@return table|nil
 local function decodeLetterbox(path, w, h, alpha)
     local ok, img = pcall(function()
         local RenderImage = require("ui/renderimage")
@@ -141,6 +187,12 @@ local function decodeLetterbox(path, w, h, alpha)
     return nil
 end
 
+--- 按目标尺寸填充解码。
+---@param path string
+---@param w number
+---@param h number
+---@param alpha boolean|nil
+---@return table|nil
 local function decodeFill(path, w, h, alpha)
     local ok, img = pcall(function()
         return ImageWidget:new{
@@ -158,6 +210,13 @@ local function decodeFill(path, w, h, alpha)
     return nil
 end
 
+--- 按 fit 模式解码文件。
+---@param path string
+---@param w number
+---@param h number
+---@param alpha boolean|nil
+---@param fit string|nil
+---@return table|nil
 local function decodeFile(path, w, h, alpha, fit)
     if fit == "letterbox" then
         return decodeLetterbox(path, w, h, alpha)
@@ -165,6 +224,12 @@ local function decodeFile(path, w, h, alpha, fit)
     return decodeFill(path, w, h, alpha)
 end
 
+--- 居中并可选加边框包裹子控件。
+---@param child table|nil
+---@param w number
+---@param h number
+---@param border boolean|nil
+---@return table|nil
 local function wrapFrame(child, w, h, border)
     if not child then
         return nil
@@ -188,7 +253,9 @@ local function wrapFrame(child, w, h, border)
     }
 end
 
---- 已缓存的网络图路径；未命中返回 nil
+--- 已缓存的网络图路径；未命中返回 nil。
+---@param url string
+---@return string|nil
 function Image.cachedPath(url)
     if type(url) ~= "string" or url == "" then
         return nil
@@ -206,7 +273,11 @@ function Image.cachedPath(url)
 end
 
 --- 同步下载到缓存；成功返回最终路径。直写 .part，禁止整图进 RAM。
+---@param url string
+---@param headers table|nil
+---@return string|nil, string|nil
 local function download(url, headers)
+    require("utils.promise").requireAsync("image.download")
     local cached = Image.cachedPath(url)
     if cached then
         return cached
@@ -281,6 +352,8 @@ local function download(url, headers)
 end
 
 --- 解析为可读路径。HTTP 只查缓存；其余一律当 icons/ 相对名。
+---@param src string
+---@return string|nil
 function Image.resolve(src)
     if type(src) ~= "string" or src == "" then
         return nil
@@ -297,34 +370,47 @@ function Image.resolve(src)
     return nil
 end
 
---- 异步确保网络图入缓存；完成后经 Flight 通知该 url 的占位组件。
--- @param url string
--- @param headers table|nil
+--- 异步确保网络图入缓存（无 UI；占位组件自管 Promise）。
+---@param url string
+---@param headers table|nil
 function Image.ensureAsync(url, headers)
     local cached = Image.cachedPath(url)
     if cached then
         logger.dbg("book image ensure cached", url, cached)
-        Flight.resolve(url, cached)
         return
     end
     logger.dbg("book image ensure async", url)
-    Flight.run(url, function()
+    local job
+    job = Promise:new(function()
         local path, err = download(url, headers)
         if not path then
             logger.warn("book image async failed", url, err)
+            return nil, err or "download failed"
         end
-        return path, err
+        return path
     end)
+        :next(function()
+            forgetJob(job)
+        end)
+        :fail(function()
+            forgetJob(job)
+        end)
+    rememberJob(job)
 end
 
---- 取消在飞下载（桌面关闭 / 清缓存）
+--- 取消在飞下载（桌面关闭 / 清缓存）。
 function Image.abortPending()
-    logger.dbg("book image abort pending")
-    Flight.abortAll()
+    logger.dbg("book image abort pending", #Image._jobs)
+    local list = Image._jobs
+    Image._jobs = {}
+    for i = 1, #list do
+        list[i]:cancel()
+    end
 end
 
 --- 嵌套占位不是 window-level widget；必须脏 show_parent。
 --- WidgetContainer 不会把 dimen 写成屏幕绝对坐标，必须靠 paintTo 记下 _screen。
+---@param box table|nil
 local function requestPaint(box)
     if not box then
         return
@@ -349,6 +435,15 @@ local function requestPaint(box)
     end
 end
 
+--- 解码并呈现图片，失败则占位。
+---@param path string|nil
+---@param w number
+---@param h number
+---@param alpha boolean|nil
+---@param fit string|nil
+---@param border boolean|nil
+---@param fb any
+---@return table
 local function present(path, w, h, alpha, fit, border, fb)
     local inner_w, inner_h = w, h
     if border then
@@ -364,6 +459,17 @@ local function present(path, w, h, alpha, fit, border, fb)
 end
 
 --- 未缓存网络图：固定尺寸占位，下载完只替换自身。
+---@param url string
+---@param headers table|nil
+---@param w number
+---@param h number
+---@param alpha boolean|nil
+---@param fit string|nil
+---@param border boolean|nil
+---@param fb any
+---@param show_parent table|nil
+---@param on_ready fun(path: string)|nil
+---@return table
 local function pendingBox(url, headers, w, h, alpha, fit, border, fb, show_parent, on_ready)
     logger.dbg("book image pending", url, w, h, fb)
     local box = WidgetContainer:new{
@@ -373,13 +479,24 @@ local function pendingBox(url, headers, w, h, alpha, fit, border, fb, show_paren
         placeholder(w, h, fb, border),
     }
 
-    -- 记录屏幕绝对位置；勿写回 dimen.x/y（WidgetContainer:paintTo 会再加一次）
+    --- 记录屏幕绝对位置；勿写回 dimen.x/y（WidgetContainer:paintTo 会再加一次）。
+    ---@param bb any
+    ---@param x number
+    ---@param y number
     function box:paintTo(bb, x, y)
         self._screen = Geom:new{ x = x, y = y, w = self.dimen.w, h = self.dimen.h }
         WidgetContainer.paintTo(self, bb, x, y)
     end
 
-    local unwatch = Flight.watch(url, function(path)
+    local alive = true
+    local job
+
+    --- 下载完成后替换占位内容。
+    ---@param path string|nil
+    local function apply(path)
+        if not alive or not path then
+            return
+        end
         logger.dbg("book image apply", url, path)
         local ok, next_w = pcall(present, path, w, h, alpha, fit, border, fb)
         if not ok then
@@ -400,34 +517,53 @@ local function pendingBox(url, headers, w, h, alpha, fit, border, fb, show_paren
         if type(on_ready) == "function" then
             pcall(on_ready, path)
         end
-    end)
+    end
 
+    --- 释放占位并取消在飞下载。
+    ---@param full any
     function box:free(full)
         logger.dbg("book image pending free", url)
-        if unwatch then
-            unwatch()
-            unwatch = nil
+        alive = false
+        if job then
+            job:cancel()
+            forgetJob(job)
+            job = nil
         end
         WidgetContainer.free(self, full)
     end
 
-    Image.ensureAsync(url, headers)
+    local cached = Image.cachedPath(url)
+    if cached then
+        UIManager:nextTick(function()
+            apply(cached)
+        end)
+    else
+        job = Promise:new(function()
+            local path, err = download(url, headers)
+            if not path then
+                logger.warn("book image async failed", url, err)
+                return nil, err or "download failed"
+            end
+            return path
+        end)
+            :next(function(path)
+                forgetJob(job)
+                job = nil
+                apply(path)
+            end)
+            :fail(function(err)
+                forgetJob(job)
+                job = nil
+                logger.warn("book image async failed", url, err)
+            end)
+        rememberJob(job)
+    end
     return box
 end
 
 --- 构建图片 widget；网络未缓存时返回自更新占位。
--- @param opts table|nil
--- @param opts.src string|nil
--- @param opts.headers table|nil
--- @param opts.width number|nil
--- @param opts.height number|nil
--- @param opts.alpha boolean|nil
--- @param opts.fit string|nil  "fill"|"letterbox"
--- @param opts.border boolean|nil
--- @param opts.fallback string|nil
--- @param opts.show_parent widget|nil  窗口级父（Desktop/Dialog）；不传则用 topmost/"all"
--- @param opts.on_ready fun(path: string)|nil  下载并替换完成后回调
--- @return widget|nil
+---@param opts table|nil
+---@return table|nil
 function Image.widget(opts)
     opts = opts or {}
     local src = opts.src

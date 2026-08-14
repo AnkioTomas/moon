@@ -8,6 +8,9 @@ UI 线程 Promise（不用 fork：HTTPS/SSL 状态被子进程继承会挂死）
       :fail(function(err) ... end)
       :cancel()
 
+  -- 同步 worker 入口强制只能在 Promise:new(task) 里跑：
+  Promise.requireAsync("Chapter.ensure")
+
 @module koplugin.book.utils.promise
 --]]
 
@@ -19,25 +22,48 @@ local logger = require("logger")
 
 --- UI 线程 Promise 实例
 ---@class MoonPromise
----@field new fun(self: MoonPromise, task: (fun(): any, any), opts: MoonPromiseOpts|nil): MoonPromise 创建；task 返回 result, err
----@field next fun(self: MoonPromise, fn: fun(result: any)): MoonPromise 成功回调，返回 self
----@field fail fun(self: MoonPromise, fn: fun(err: any)): MoonPromise 失败回调，返回 self
----@field cancel fun(self: MoonPromise) 取消本实例
----@field cancelAll fun() 取消全部未完成（模块函数 Promise.cancelAll）
+---@field new fun(self: MoonPromise, task: (fun(): any, any), opts: MoonPromiseOpts|nil): MoonPromise
+---@field next fun(self: MoonPromise, fn: fun(result: any)): MoonPromise
+---@field fail fun(self: MoonPromise, fn: fun(err: any)): MoonPromise
+---@field cancel fun(self: MoonPromise)
+---@field cancelAll fun()
+---@field inAsync fun(): boolean
+---@field requireAsync fun(who: string|nil)
 local Promise = {}
 Promise.__index = Promise
 
 --- 未完成实例集合（供 cancelAll）
 local _pending = {}
 
+--- Promise:new(task) 执行深度；仅 task，不含 next/fail
+local _task_depth = 0
+
+--- 登记未完成 Promise
 ---@param p MoonPromise
 local function retain(p)
     _pending[p] = true
 end
 
+--- 从未完成集合移除
 ---@param p MoonPromise
 local function release(p)
     _pending[p] = nil
+end
+
+--- 当前是否在 Promise:new 的 task 回调栈内
+---@return boolean
+function Promise.inAsync()
+    return _task_depth > 0
+end
+
+--- 强制异步：不在 task 内则 error（供同步 worker 入口调用）
+---@param who string|nil 函数名，便于日志
+function Promise.requireAsync(who)
+    if _task_depth > 0 then
+        return
+    end
+    who = (type(who) == "string" and who ~= "") and who or "?"
+    error("book.promise: " .. who .. " must run inside Promise:new(task)", 2)
 end
 
 --- 置为 fulfilled，同步跑已注册的 next 回调
@@ -84,7 +110,6 @@ end
 
 --- 构造并调度 task；opts.delay > 0 则延时，否则 nextTick。
 --- task 约定：`return result, err`；`err ~= nil` → fail，否则 next(result)。
---- task 抛错亦走 fail（err 为错误字符串）。
 ---@param task fun(): any, any
 ---@param opts MoonPromiseOpts|nil
 ---@return MoonPromise
@@ -100,12 +125,15 @@ function Promise:new(task, opts)
 
     local delay = opts and opts.delay
 
+    --- 执行 task 并 settle；已非 pending 则跳过
     local function work()
         if o._state ~= "pending" then
             return
         end
+        _task_depth = _task_depth + 1
         -- pcall 直接接住 task 的多返回：ok, result, err
         local ok, value, err = pcall(task)
+        _task_depth = _task_depth - 1
         if o._state ~= "pending" then
             return
         end
@@ -174,7 +202,6 @@ function Promise:fail(fn)
 end
 
 --- 取消本实例：不再回调 next/fail；已 settled 则无操作。
----@return nil
 function Promise:cancel()
     if self._state ~= "pending" then
         return
@@ -190,7 +217,6 @@ function Promise:cancel()
 end
 
 --- 取消全部未完成 Promise（模块函数，非实例方法）。
----@return nil
 function Promise.cancelAll()
     local list = {}
     for p in pairs(_pending) do

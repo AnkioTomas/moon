@@ -1,15 +1,9 @@
 ---@meta
 --- 仅 EmmyLua 类型注释，运行时不要 require。
 
---- 单本远端阅读进度（拉取结果）。
---- percent 一律 0–100；`updateProgress` 入参仍用 frac∈[0,1]。
---- 按章源用 chapter_* 定位；整本源可只用 percent / spine。
----@class BookProgress
----@field percent number 全书进度 0–100
----@field chapter_uid string|number|nil 源侧章节身份（如微信 chapterUid）
----@field chapter_idx number|nil 连续章序号（1-based，与 BookChapter.idx 对齐）
----@field spine number|nil 整本打开时的 spine / 分卷下标（无章时作回退）
-
---- getProgress 返回包装；失败走第二返回值 err，不用 code/msg。
----@class BookProgressResult
----@field data BookProgress|nil 进度体；无远端进度时可为 nil
+--- 统一阅读位置（拉/推进度唯一形态）。
+---@class ProgressPosition
+---@field fraction number 全书比例 0..1，必填
+---@field chapter_idx integer|nil 连续章序号（1-based）
+---@field chapter_fraction number|nil 章内比例 0..1
+---@field locator string|nil XPointer/CFI 等精确定位
