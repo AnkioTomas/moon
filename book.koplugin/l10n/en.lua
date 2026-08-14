@@ -41,6 +41,7 @@ return {
     ["搜索书籍"] = "Search books",
     ["书名或作者"] = "Title or author",
     ["清除"] = "Clear",
+    ["刷新"] = "Refresh",
     ["搜索"] = "Search",
     ["已开启：阅读页中部点击将打开 Book 菜单"] = "On: tap the center of a book to open the Book menu",
     ["已关闭：阅读页恢复系统默认中部翻页"] = "Off: center tap turns pages as usual",
