@@ -36,7 +36,6 @@ end
 ---@param plugin table|nil
 local function showQrLogin(plugin)
     local Auth = require("source.wechat.auth")
-    local Promise = require("utils.promise")
     local NetworkMgr = require("ui/network/manager")
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
@@ -71,11 +70,11 @@ local function showQrLogin(plugin)
                     callback = function()
                         cancelled = true
                         if begin_job then
-                            begin_job:cancel()
+                            begin_job.cancel()
                             begin_job = nil
                         end
                         if wait_job then
-                            wait_job:cancel()
+                            wait_job.cancel()
                             wait_job = nil
                         end
                         closeDialog()
@@ -115,7 +114,7 @@ local function showQrLogin(plugin)
                         callback = function()
                             cancelled = true
                             if wait_job then
-                                wait_job:cancel()
+                                wait_job.cancel()
                                 wait_job = nil
                             end
                             closeDialog()
@@ -134,20 +133,23 @@ local function showQrLogin(plugin)
             end
             UIManager:show(dialog)
 
-            wait_job = Promise:new(function()
-                local info, err, status = Auth.waitQrLogin(uid)
-                if status == "ok" and info then
-                    return info
+            wait_job = Auth.waitQrLoginAsync(uid, function(info, err, status)
+                wait_job = nil
+                if cancelled then
+                    return
                 end
-                return nil, err or _("二维码已失效，请重新登录")
-            end)
-                :next(function(info)
-                    wait_job = nil
+                if status ~= "ok" or not info then
+                    closeDialog()
+                    UIManager:show(InfoMessage:new{
+                        text = err or _("二维码已失效，请重新登录"),
+                    })
+                    return
+                end
+                closeDialog()
+                Auth.completeQrLoginAsync(info, function(user, e2)
                     if cancelled then
                         return
                     end
-                    closeDialog()
-                    local user, e2 = Auth.completeQrLogin(info)
                     if not user then
                         UIManager:show(InfoMessage:new{ text = e2 or _("登录失败") })
                         return
@@ -158,42 +160,23 @@ local function showQrLogin(plugin)
                     })
                     afterAuthChanged(plugin)
                 end)
-                :fail(function(err)
-                    wait_job = nil
-                    if cancelled then
-                        return
-                    end
-                    closeDialog()
-                    UIManager:show(InfoMessage:new{
-                        text = err or _("二维码已失效，请重新登录"),
-                    })
-                end)
+            end)
         end
 
-        begin_job = Promise:new(function()
-            local started, err = Auth.beginQrLogin()
-            if not started then
-                return nil, err or _("无法开始登录")
+        begin_job = Auth.beginQrLoginAsync(function(started, err)
+            begin_job = nil
+            if cancelled then
+                return
             end
-            return started
-        end)
-            :next(function(started)
-                begin_job = nil
-                if cancelled then
-                    return
-                end
+            if started then
                 startWait(started.uid, started.qr_payload)
-            end)
-            :fail(function(err)
-                begin_job = nil
-                if cancelled then
-                    return
-                end
-                closeDialog()
-                UIManager:show(InfoMessage:new{
-                    text = err or _("无法开始登录"),
-                })
-            end)
+                return
+            end
+            closeDialog()
+            UIManager:show(InfoMessage:new{
+                text = err or _("无法开始登录"),
+            })
+        end)
     end)
 end
 
@@ -231,11 +214,12 @@ function Setting.open(plugin)
                     callback = function()
                         UIManager:close(dialog)
                         NetworkMgr:runWhenOnline(function()
-                            local ok, err = Auth.renewCookie()
+                            Auth.renewCookieAsync(function(ok, err)
                             UIManager:show(InfoMessage:new{
                                 text = ok and _("已续期") or (err or _("续期失败")),
                                 timeout = 2,
                             })
+                            end)
                         end)
                     end,
                 },

@@ -8,17 +8,21 @@
   → GET /api/auth/getLoginInfo?uid=&otp  长挂起
   → GET /api/userInfo?userVid=
 
+网络仅异步：Request.request。
+
 @module koplugin.book.source.wechat.auth
 --]]
 
 local JSON = require("json")
-local ltn12 = require("ltn12")
 local logger = require("logger")
 local Request = require("http.request")
 local Header = require("http.header")
+local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 
 local Auth = {}
+local jsonGetAsync
+local ensureGuestCookiesAsync
 
 local WEB = "https://weread.qq.com"
 local API = "https://i.weread.qq.com"
@@ -122,6 +126,13 @@ local function urlDecode(s)
     return s
 end
 
+--- Normalize Turbo response headers for the cookie parser.
+---@param res table|nil
+---@return table
+local function asyncHeaders(res)
+    return { ["set-cookie"] = Request.header(res, "Set-Cookie") }
+end
+
 --- 把响应 Set-Cookie 合并进扫码 guest jar。
 ---@param headers table|nil
 local function jarMerge(headers)
@@ -137,25 +148,6 @@ local function loginRequestHeaders(extra)
     return browserHeaders(Header.merge(extra, {
         ["Cookie"] = cookieFrom(login_jar),
     }))
-end
-
---- 访问首页补齐 wr_gid / wr_fp。
-local function ensureGuestCookies()
-    login_jar = {}
-    local chunks = {}
-    local _code, headers = Request.send({
-        url = WEB .. "/",
-        method = "GET",
-        headers = Header.forRequest(browserHeaders()),
-        sink = ltn12.sink.table(chunks),
-    }, 15, 30)
-    jarMerge(headers)
-    if type(login_jar.wr_fp) ~= "string" or login_jar.wr_fp == "" then
-        login_jar.wr_fp = tostring(math.random(100000000, 2147483647))
-    end
-    if type(login_jar.wr_gid) ~= "string" or login_jar.wr_gid == "" then
-        login_jar.wr_gid = tostring(math.random(100000000, 999999999))
-    end
 end
 
 --- 读取微信读书源配置。
@@ -339,250 +331,316 @@ local function checkWereadErr(data)
     return data
 end
 
---- 带会话头的 GET。
+--- Nonblocking authenticated GET.
 ---@param url string
 ---@param opts table|nil
----@return string|nil, string|nil
-function Auth.webGet(url, opts)
+---@param cb fun(raw: string|nil, err: string|nil, res: table|nil)
+---@return { cancel: fun() }|nil
+function Auth.webGetAsync(url, opts, cb)
     opts = opts or {}
     if not Auth.hasSession() then
-        return nil, _("请先扫码登录微信读书")
+        cb(nil, _("请先扫码登录微信读书"))
+        return nil
     end
-    return Request.get(url, {
+    return Request.request({
+        url = url,
+        method = "GET",
         headers = Auth.sessionHeaders(opts.headers),
-        accept = opts.accept or "application/json",
-        timeout = opts.timeout or 15,
-        block_timeout = opts.block_timeout or 45,
-    })
+        timeout = opts.block_timeout or 45,
+    }, function(res, err)
+        if err then
+            cb(nil, err, res)
+        elseif not Request.ok(res and res.code) then
+            cb(nil, "HTTP " .. tostring(res and res.code), res)
+        else
+            cb(res.body or "", nil, res)
+        end
+    end)
 end
 
---- 带会话头的 POST。
+--- Nonblocking authenticated POST.
 ---@param url string
 ---@param body string|nil
 ---@param opts table|nil
----@return string|nil, string|nil
-function Auth.webPost(url, body, opts)
+---@param cb fun(raw: string|nil, err: string|nil, res: table|nil)
+---@return { cancel: fun() }|nil
+function Auth.webPostAsync(url, body, opts, cb)
     opts = opts or {}
     if not Auth.hasSession() then
-        return nil, _("请先扫码登录微信读书")
+        cb(nil, _("请先扫码登录微信读书"))
+        return nil
     end
-    return Request.post(url, body, {
-        headers = Auth.sessionHeaders(opts.headers),
-        content_type = opts.content_type or "application/json",
-        accept = opts.accept or "application/json",
-        timeout = opts.timeout or 15,
-        block_timeout = opts.block_timeout or 45,
-    })
+    local headers = Auth.sessionHeaders(opts.headers)
+    headers["Content-Type"] = opts.content_type or "application/json"
+    return Request.request({
+        url = url,
+        method = "POST",
+        body = body,
+        headers = headers,
+        timeout = opts.block_timeout or 45,
+    }, function(res, err)
+        if err then
+            cb(nil, err, res)
+        elseif not Request.ok(res and res.code) then
+            cb(nil, "HTTP " .. tostring(res and res.code), res)
+        else
+            cb(res.body or "", nil, res)
+        end
+    end)
 end
 
---- GET 并解析 JSON；可选检查微信 errcode。
+--- Async JSON GET helper.
 ---@param base string
 ---@param path_query string
 ---@param check_err boolean|nil
----@return table|nil, string|nil
-local function jsonGet(base, path_query, check_err)
-    local raw, err = Auth.webGet(absUrl(base, path_query))
-    if not raw then
-        return nil, err
-    end
-    local data, e = decodeJson(raw)
-    if not data then
-        return nil, e
-    end
-    if check_err then
-        return checkWereadErr(data)
-    end
-    return data
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+jsonGetAsync = function(base, path_query, check_err, cb)
+    return Auth.webGetAsync(absUrl(base, path_query), nil, function(raw, err)
+        if not raw then
+            cb(nil, err)
+            return
+        end
+        local data, decode_err = decodeJson(raw)
+        if not data then
+            cb(nil, decode_err)
+        elseif check_err then
+            cb(checkWereadErr(data))
+        else
+            cb(data)
+        end
+    end)
 end
 
---- GET JSON（默认 i.weread.qq.com；绝对 URL 原样）。
----@param path_query string
----@return table|nil, string|nil
-function Auth.apiGet(path_query)
-    return jsonGet(API, path_query, true)
+function Auth.apiGetAsync(path_query, cb)
+    return jsonGetAsync(API, path_query, true, cb)
 end
 
---- POST JSON 到 i.weread.qq.com 并检查 errcode。
----@param path string
----@param body_tbl table|nil
----@return table|nil, string|nil
-function Auth.apiPost(path, body_tbl)
-    local raw, err = Auth.webPost(absUrl(API, path), JSON.encode(body_tbl or {}))
-    if not raw then
-        return nil, err
-    end
-    local data, e = decodeJson(raw)
-    if not data then
-        return nil, e
-    end
-    return checkWereadErr(data)
+function Auth.apiPostAsync(path, body_tbl, cb)
+    return Auth.webPostAsync(absUrl(API, path), JSON.encode(body_tbl or {}), nil, function(raw, err)
+        if not raw then
+            cb(nil, err)
+            return
+        end
+        local data, decode_err = decodeJson(raw)
+        if data then
+            cb(checkWereadErr(data))
+        else
+            cb(nil, decode_err)
+        end
+    end)
 end
 
---- weread.qq.com Web API GET JSON。
----@param path_query string
----@return table|nil, string|nil
-function Auth.webApiGet(path_query)
-    return jsonGet(WEB, path_query, false)
+function Auth.webApiGetAsync(path_query, cb)
+    return jsonGetAsync(WEB, path_query, false, cb)
 end
 
---- weread.qq.com Web API POST JSON（不强制 errCode；Web 接口常无此字段）。
----@param path string
----@param body_tbl table|nil
----@return table|nil, string|nil
-function Auth.webApiPost(path, body_tbl)
-    local raw, err = Auth.webPost(absUrl(WEB, path), JSON.encode(body_tbl or {}))
-    if not raw then
-        return nil, err
-    end
-    return decodeJson(raw)
+function Auth.webApiPostAsync(path, body_tbl, cb)
+    return Auth.webPostAsync(absUrl(WEB, path), JSON.encode(body_tbl or {}), nil, function(raw, err)
+        if not raw then
+            cb(nil, err)
+            return
+        end
+        cb(decodeJson(raw))
+    end)
 end
 
---- 开始扫码：getLoginUid → 本地 confirm QR；返回 { uid, qr_payload }。
----@return { uid: string, qr_payload: string }|nil, string|nil
-function Auth.beginQrLogin()
-    ensureGuestCookies()
-
-    local chunks = {}
-    local http_code, headers, err = Request.send({
-        url = WEB .. "/api/auth/getLoginUid",
+ensureGuestCookiesAsync = function(cb)
+    login_jar = {}
+    return Request.request({
+        url = WEB .. "/",
         method = "GET",
-        headers = Header.forRequest(loginRequestHeaders(), "*/*"),
-        sink = ltn12.sink.table(chunks),
-    }, 15, 30)
-    jarMerge(headers)
-    if err then
-        return nil, err
-    end
-    if not Request.ok(http_code) then
-        return nil, _("获取登录 uid 失败")
-    end
-    local data, e = decodeJson(table.concat(chunks))
-    if not data or not data.uid then
-        return nil, e or _("获取登录 uid 失败")
-    end
-    local uid = tostring(data.uid)
-    return { uid = uid, qr_payload = WEB .. "/web/confirm?pf=2&uid=" .. uid }
+        headers = browserHeaders(),
+        timeout = 30,
+    }, function(res, _err)
+        jarMerge(asyncHeaders(res))
+        if type(login_jar.wr_fp) ~= "string" or login_jar.wr_fp == "" then
+            login_jar.wr_fp = tostring(math.random(100000000, 2147483647))
+        end
+        if type(login_jar.wr_gid) ~= "string" or login_jar.wr_gid == "" then
+            login_jar.wr_gid = tostring(math.random(100000000, 999999999))
+        end
+        cb(true)
+    end)
 end
 
---- 长连接等待扫码；失败/超时 = 二维码失效。
----@param uid string
----@return table|nil info, string|nil err, string|nil status ok|error
-function Auth.waitQrLogin(uid)
-    if not uid or uid == "" then
-        return nil, _("无效 uid"), "error"
-    end
-    local url = WEB .. "/api/auth/getLoginInfo?uid=" .. tostring(uid) .. "&otp"
-    local chunks = {}
-    local http_code, headers, err = Request.send({
-        url = url,
-        method = "GET",
-        headers = Header.forRequest(loginRequestHeaders(), "*/*"),
-        sink = ltn12.sink.table(chunks),
-    }, 60, 90)
-    if err then
-        return nil, err or _("二维码已失效，请重新登录"), "error"
-    end
-    if not Request.ok(http_code) then
-        return nil, _("二维码已失效，请重新登录"), "error"
-    end
-    jarMerge(headers)
-    local data, e = decodeJson(table.concat(chunks))
-    if not data then
-        return nil, e or _("长连接等待返回异常"), "error"
-    end
-    if data.succeed ~= true and data.logicCode ~= "LOGIN_SUCCESS" then
-        return nil, data.errmsg or _("二维码已失效，请重新登录"), "error"
-    end
-    local set = parseSetCookie(headers or {})
-    local vid = set.wr_vid or data.webLoginVid or data.vid
-    local skey = set.wr_skey or data.accessToken
-    local rt = data.refreshToken or urlDecode(set.wr_rt or "")
-    if not vid or not skey or tostring(skey) == "" then
-        return nil, _("登录未拿到会话密钥"), "error"
-    end
+function Auth.beginQrLoginAsync(cb)
+    local cancelled = false
+    local first, second
+    first = ensureGuestCookiesAsync(function()
+        if cancelled then
+            return
+        end
+        second = Request.request({
+            url = WEB .. "/api/auth/getLoginUid",
+            method = "GET",
+            headers = loginRequestHeaders(),
+            timeout = 30,
+        }, function(res, err)
+            if cancelled then
+                return
+            end
+            jarMerge(asyncHeaders(res))
+            if err then
+                cb(nil, err)
+                return
+            end
+            if not Request.ok(res and res.code) then
+                cb(nil, _("获取登录 uid 失败"))
+                return
+            end
+            local data, decode_err = decodeJson(res.body or "")
+            if not data or not data.uid then
+                cb(nil, decode_err or _("获取登录 uid 失败"))
+                return
+            end
+            local uid = tostring(data.uid)
+            cb({ uid = uid, qr_payload = WEB .. "/web/confirm?pf=2&uid=" .. uid })
+        end)
+    end)
     return {
-        vid = tostring(vid),
-        accessToken = tostring(skey),
-        refreshToken = tostring(rt or ""),
-        wr_ql = set.wr_ql or "0",
-        wr_gid = login_jar.wr_gid,
-        wr_fp = login_jar.wr_fp,
-    }, nil, "ok"
+        cancel = function()
+            cancelled = true
+            if first then first.cancel() end
+            if second then second.cancel() end
+        end,
+    }
 end
 
---- 落盘会话 + 拉 userInfo 取昵称。
----@param info table|nil
----@return { user_id: string, user_name: string }|nil, string|nil
-function Auth.completeQrLogin(info)
+function Auth.waitQrLoginAsync(uid, cb)
+    if not uid or uid == "" then
+        cb(nil, _("无效 uid"), "error")
+        return { cancel = function() end }
+    end
+    local cancelled = false
+    local deadline = os.time() + 90
+    local request_job
+    local url = WEB .. "/api/auth/getLoginInfo?uid=" .. tostring(uid) .. "&otp"
+    local function poll()
+        if cancelled then
+            return
+        end
+        request_job = Request.request({
+            url = url,
+            method = "GET",
+            headers = loginRequestHeaders(),
+            timeout = math.max(1, math.min(20, deadline - os.time())),
+        }, function(res, err)
+            if cancelled then
+                return
+            end
+            if err and os.time() < deadline then
+                -- 网络错误：延迟 3 秒再重试，避免轰炸服务器
+                UIManager:scheduleIn(3, poll)
+                return
+            end
+            if err or not Request.ok(res and res.code) then
+                cb(nil, err or _("二维码已失效，请重新登录"), "error")
+                return
+            end
+            jarMerge(asyncHeaders(res))
+            local data, decode_err = decodeJson(res.body or "")
+            if not data then
+                cb(nil, decode_err or _("长连接等待返回异常"), "error")
+                return
+            end
+            if data.succeed ~= true and data.logicCode ~= "LOGIN_SUCCESS" then
+                cb(nil, data.errmsg or _("二维码已失效，请重新登录"), "error")
+                return
+            end
+            local headers = asyncHeaders(res)
+            local set = parseSetCookie(headers)
+            local vid = set.wr_vid or data.webLoginVid or data.vid
+            local skey = set.wr_skey or data.accessToken
+            local rt = data.refreshToken or urlDecode(set.wr_rt or "")
+            if not vid or not skey or tostring(skey) == "" then
+                cb(nil, _("登录未拿到会话密钥"), "error")
+                return
+            end
+            cb({
+                vid = tostring(vid),
+                accessToken = tostring(skey),
+                refreshToken = tostring(rt or ""),
+                wr_ql = set.wr_ql or "0",
+                wr_gid = login_jar.wr_gid,
+                wr_fp = login_jar.wr_fp,
+            }, nil, "ok")
+        end)
+    end
+    poll()
+    return {
+        cancel = function()
+            cancelled = true
+            if request_job then request_job.cancel() end
+        end,
+    }
+end
+
+function Auth.completeQrLoginAsync(info, cb)
     if type(info) ~= "table" then
-        return nil, _("无登录信息")
+        cb(nil, _("无登录信息"))
+        return nil
     end
     local vid = tostring(info.vid or "")
     local skey = tostring(info.accessToken or info.skey or "")
     local rt = tostring(info.refreshToken or "")
     if vid == "" or skey == "" then
-        return nil, _("无登录信息")
+        cb(nil, _("无登录信息"))
+        return nil
     end
-    local extras = {
-        wr_gid = info.wr_gid,
-        wr_fp = info.wr_fp,
-        wr_ql = info.wr_ql,
-    }
+    local extras = { wr_gid = info.wr_gid, wr_fp = info.wr_fp, wr_ql = info.wr_ql }
     applySession(vid, skey, rt, "", extras)
     login_jar = {}
-
-    local name = ""
-    local raw = Auth.webGet(WEB .. "/api/userInfo?userVid=" .. vid)
-    if raw then
-        local data = decodeJson(raw)
-        if data and type(data.name) == "string" then
-            name = data.name
-            applySession(vid, skey, rt, name, extras)
+    return Auth.webGetAsync(WEB .. "/api/userInfo?userVid=" .. vid, nil, function(raw)
+        local name = ""
+        if raw then
+            local data = decodeJson(raw)
+            if data and type(data.name) == "string" then
+                name = data.name
+                applySession(vid, skey, rt, name, extras)
+            end
         end
-    end
-    logger.info("weread login ok", vid, name)
-    return {
-        user_id = vid,
-        user_name = name,
-    }
+        logger.info("weread login ok", vid, name)
+        cb({ user_id = vid, user_name = name })
+    end)
 end
 
---- 刷新 Cookie（访问首页拿 Set-Cookie）。
----@return boolean|nil, string|nil
-function Auth.renewCookie()
+function Auth.renewCookieAsync(cb)
     if not Auth.hasSession() then
-        return nil, _("请先扫码登录微信读书")
+        cb(nil, _("请先扫码登录微信读书"))
+        return nil
     end
-    local chunks = {}
-    local code, headers, err = Request.send({
+    return Request.request({
         url = WEB .. "/",
         method = "HEAD",
-        headers = Header.forRequest(Auth.sessionHeaders()),
-        sink = ltn12.sink.table(chunks),
-    }, 10, 20)
-    if err then
-        return nil, err
-    end
-    local set = parseSetCookie(headers or {})
-    if set.wr_skey or set.wr_rt then
-        local c = cfg()
-        applySession(
-            set.wr_vid or c.wr_vid or c.user_id,
-            set.wr_skey or c.wr_skey,
-            urlDecode(set.wr_rt or c.wr_rt or ""),
-            c.user_name,
-            {
-                wr_gid = set.wr_gid or c.wr_gid,
-                wr_fp = set.wr_fp or c.wr_fp,
-                wr_ql = set.wr_ql or c.wr_ql,
-            }
-        )
-        return true
-    end
-    if not Request.ok(code) then
-        return nil, _("续期失败 HTTP ") .. tostring(code)
-    end
-    return true
+        headers = Auth.sessionHeaders(),
+        timeout = 20,
+    }, function(res, err)
+        if err then
+            cb(nil, err)
+            return
+        end
+        local set = parseSetCookie(asyncHeaders(res))
+        if set.wr_skey or set.wr_rt then
+            local c = cfg()
+            applySession(
+                set.wr_vid or c.wr_vid or c.user_id,
+                set.wr_skey or c.wr_skey,
+                urlDecode(set.wr_rt or c.wr_rt or ""),
+                c.user_name,
+                {
+                    wr_gid = set.wr_gid or c.wr_gid,
+                    wr_fp = set.wr_fp or c.wr_fp,
+                    wr_ql = set.wr_ql or c.wr_ql,
+                }
+            )
+            cb(true)
+        elseif not Request.ok(res and res.code) then
+            cb(nil, _("续期失败 HTTP ") .. tostring(res and res.code))
+        else
+            cb(true)
+        end
+    end)
 end
 
 return Auth

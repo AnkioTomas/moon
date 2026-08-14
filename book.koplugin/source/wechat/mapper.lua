@@ -4,7 +4,10 @@
 @module koplugin.book.source.wechat.mapper
 --]]
 
-local Contract = require("source.contract")
+local BookRef = require("types.book").BookRef
+local Book = require("types.book").Book
+local ProgressPosition = require("types.book_progress")
+local BookListResult = require("types.book_list")
 
 local Mapper = {}
 
@@ -75,10 +78,10 @@ function Mapper.book(row)
     local finished = userFinished(book)
     local cover = type(book.cover) == "string" and book.cover or nil
     local out = {
-        ref = Contract.makeRef(SOURCE_ID, id),
+        ref = BookRef.new(SOURCE_ID, id),
         title = book.title or book.bookName or book.name,
         authors = book.authors or book.author,
-        percent = Contract.clampPercent(
+        percent = Book.clampPercent(
             book.percent or book.progress or book.progressPercent or book.readProgress,
             finished
         ),
@@ -113,10 +116,10 @@ function Mapper.albumBook(album)
     local cover = type(info.cover) == "string" and info.cover or nil
     local finished = info.finish == 1 or info.finish == true or info.finishStatus == "已完结"
     return {
-        ref = Contract.makeRef(SOURCE_ID, tostring(id)),
+        ref = BookRef.new(SOURCE_ID, tostring(id)),
         title = info.name or info.title,
         authors = info.authorName or info.author,
-        percent = Contract.clampPercent(0, finished),
+        percent = Book.clampPercent(0, finished),
         favorite = type(extra) == "table" and extra.isTop == 1 or nil,
         cover = cover,
     }, cover
@@ -132,7 +135,7 @@ function Mapper.applyProgress(book, p)
     end
     local prog = tonumber(p.progress)
     if prog then
-        book.percent = Contract.clampPercent(prog, false)
+        book.percent = Book.clampPercent(prog, false)
     end
     if p.finishReading == 1 or p.finishReading == true then
         book.percent = 100
@@ -192,7 +195,7 @@ function Mapper.shelfList(shelf, on_cover)
             books[#books + 1] = b
         end
     end
-    return Contract.listResult(books)
+    return BookListResult.new(books)
 end
 
 --- 最近阅读 wire → BookListResult。
@@ -213,7 +216,7 @@ function Mapper.recentList(data, shelf, on_cover)
             books[#books + 1] = b
         end
     end
-    return Contract.listResult(books)
+    return BookListResult.new(books)
 end
 
 --- 搜索结果 wire → BookListResult。
@@ -252,7 +255,7 @@ function Mapper.searchList(data, on_cover)
             books[#books + 1] = b
         end
     end
-    return Contract.listResult(books)
+    return BookListResult.new(books)
 end
 
 --- 章节列表 wire → BookChapter[]。
@@ -326,13 +329,13 @@ function Mapper.progress(data)
         node = data.data
     end
     local finished = userFinished(node) or userFinished(data)
-    local percent = Contract.clampPercent(
+    local percent = Book.clampPercent(
         node.percent or node.progress or node.progressPercent or node.readingProgress,
         finished
     )
     local chapter_uid = node.chapter_uid or node.chapterUid
     return {
-        fraction = Contract.clampFraction(percent / 100),
+        fraction = ProgressPosition.clampFraction(percent / 100),
         chapter_idx = tonumber(node.chapter_idx or node.chapterIdx),
         chapter_fraction = tonumber(node.chapter_fraction or node.chapterOffset),
         locator = node.locator,

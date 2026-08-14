@@ -1,5 +1,5 @@
 --[[--
-微信读书协议客户端：只返回 wire，不做领域转换。
+微信读书协议客户端：只返回 wire，不做领域转换（仅异步）。
 
 @module koplugin.book.source.wechat.client
 --]]
@@ -42,114 +42,98 @@ function Client:configured()
     return Auth.hasSession()
 end
 
---- 拉取 userInfo 探测会话是否有效。
----@return table|nil, string|nil
-function Client:ping()
+--- 当前会话请求头（封面下载等复用）。
+---@return table
+function Client.sessionHeaders()
+    return Auth.sessionHeaders()
+end
+
+function Client:pingAsync(cb)
     local vid = Auth.userVid()
     if not vid then
-        return nil, _("请先扫码登录微信读书")
+        cb(nil, _("请先扫码登录微信读书"))
+        return nil
     end
-    local data, err = Auth.webApiGet("/api/userInfo?userVid=" .. tostring(vid))
-    if not data then
-        return nil, err
-    end
-    return data
+    return Auth.webApiGetAsync("/api/userInfo?userVid=" .. tostring(vid), cb)
 end
 
---- 同步书架 wire。
----@return table|nil, string|nil
-function Client:shelfSync()
-    local data, err = Auth.webApiGet("/web/shelf/sync?" .. encodeQuery({
+function Client:shelfSyncAsync(cb)
+    return Auth.webApiGetAsync("/web/shelf/sync?" .. encodeQuery({
         synckey = 0,
         teenmode = 0,
-    }))
-    if not data then
-        data, err = Auth.apiGet("/shelf/sync")
-    end
-    if not data then
-        local vid = Auth.userVid()
-        if vid then
-            data, err = Auth.apiGet("/shelf/friendCommon?" .. encodeQuery({ userVid = vid }))
+    }), function(data, err)
+        if data then
+            cb(data)
+            return
         end
-    end
-    return data, err
+        Auth.apiGetAsync("/shelf/sync", function(fallback, fallback_err)
+            cb(fallback, fallback_err or err)
+        end)
+    end)
 end
 
---- 最近阅读书籍 wire。
----@param limit number|nil
----@return table|nil, string|nil
-function Client:recentBooks(limit)
+function Client:recentBooksAsync(limit, cb)
     limit = tonumber(limit) or 8
-    return Auth.webApiGet("/api/storyfeed/getRecentBooks?count=" .. tostring(limit))
+    return Auth.webApiGetAsync("/api/storyfeed/getRecentBooks?count=" .. tostring(limit), cb)
 end
 
---- 书城搜索。
----@param keyword string
----@param count number|nil
----@param scope number|nil
----@return table|nil, string|nil
-function Client:search(keyword, count, scope)
+function Client:searchAsync(keyword, count, scope, cb)
     keyword = tostring(keyword or "")
     if keyword == "" then
-        return { books = {} }
+        cb({ books = {} })
+        return nil
     end
     count = tonumber(count) or 20
     scope = tonumber(scope) or 10
-    local data, err = Auth.apiGet("/store/search?" .. encodeQuery({
+    return Auth.apiGetAsync("/store/search?" .. encodeQuery({
         keyword = keyword,
         count = count,
         scope = scope,
         v = 2,
-    }))
-    if not data then
-        data, err = Auth.apiPost("/store/search", {
+    }), function(data, err)
+        if data then
+            cb(data)
+            return
+        end
+        Auth.apiPostAsync("/store/search", {
             keyword = keyword,
             count = count,
             scope = scope,
-        })
-    end
-    return data, err
+        }, function(fallback, fallback_err)
+            cb(fallback, fallback_err or err)
+        end)
+    end)
 end
 
---- 书籍详情 wire。
----@param bookId string
----@return table|nil, string|nil
-function Client:bookInfo(bookId)
+function Client:bookInfoAsync(bookId, cb)
     bookId = tostring(bookId or "")
-    return Auth.webApiGet("/web/book/info?" .. encodeQuery({ bookId = bookId }))
+    return Auth.webApiGetAsync("/web/book/info?" .. encodeQuery({ bookId = bookId }), cb)
 end
 
---- 章节目录 wire。
----@param bookId string
----@return table|nil, string|nil
-function Client:chapterInfos(bookId)
+function Client:chapterInfosAsync(bookId, cb)
     bookId = tostring(bookId or "")
-    return Auth.webApiPost("/web/book/chapterInfos", {
+    return Auth.webApiPostAsync("/web/book/chapterInfos", {
         bookIds = { bookId },
-    })
+    }, cb)
 end
 
---- 拉取阅读进度 wire。
----@param bookId string
----@return table|nil, string|nil
-function Client:getProgress(bookId)
+function Client:getProgressAsync(bookId, cb)
     bookId = tostring(bookId or "")
-    local data, err = Auth.webApiGet("/web/book/getProgress?" .. encodeQuery({
+    return Auth.webApiGetAsync("/web/book/getProgress?" .. encodeQuery({
         bookId = bookId,
         _ = tostring(os.time() * 1000),
-    }))
-    if not data then
-        data, err = Auth.apiGet("/book/getprogress?" .. encodeQuery({ bookId = bookId }))
-    end
-    return data, err
+    }), function(data, err)
+        if data then
+            cb(data)
+            return
+        end
+        Auth.apiGetAsync("/book/getprogress?" .. encodeQuery({ bookId = bookId }), function(fallback, fallback_err)
+            cb(fallback, fallback_err or err)
+        end)
+    end)
 end
 
---- 上传阅读进度。
----@param bookId string
----@param progress_percent integer 0..100
----@param chapter_uid string|number|nil
----@return table|nil, string|nil
-function Client:putProgress(bookId, progress_percent, chapter_uid)
+function Client:putProgressAsync(bookId, progress_percent, chapter_uid, cb)
     bookId = tostring(bookId or "")
     local body = {
         appId = "webapp",
@@ -160,18 +144,14 @@ function Client:putProgress(bookId, progress_percent, chapter_uid)
     if chapter_uid then
         body.chapterUid = chapter_uid
     end
-    local raw, err = Auth.webPost("https://i.weread.qq.com/book/progress", JSON.encode(body))
-    if not raw then
-        logger.warn("weread putProgress", err)
-        return nil, err or _("进度上传失败")
-    end
-    return { ok = true }
-end
-
---- 当前会话请求头（封面下载等复用）。
----@return table
-function Client.sessionHeaders()
-    return Auth.sessionHeaders()
+    return Auth.webPostAsync("https://i.weread.qq.com/book/progress", JSON.encode(body), nil, function(raw, err)
+        if not raw then
+            logger.warn("weread putProgress", err)
+            cb(nil, err or _("进度上传失败"))
+        else
+            cb({ ok = true })
+        end
+    end)
 end
 
 return Client

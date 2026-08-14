@@ -281,6 +281,14 @@ function Library.build(ctx, state, opts)
     local tools_kids = { align = "center" }
     local caps = (ctx.source and ctx.source.capabilities and ctx.source:capabilities()) or {}
     local has_tool = false
+    if caps.refresh then
+        table.insert(tools_kids, iconAction("refresh", _("刷新"), function()
+            if ctx.desktop then Library.rescan(ctx.desktop) end
+        end))
+        if caps.search or caps.filters then
+            table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
+        end
+    end
     if caps.search then
         table.insert(tools_kids, iconAction("search", _("搜索"), function()
             if ctx.desktop then Library.showSearch(ctx.desktop) end
@@ -410,6 +418,8 @@ function Library.fetch(desktop)
     local series = f.series or ""
     local author = f.author or ""
     local finished = f.finished or ""
+    local force = desktop._library_force == true
+    desktop._library_force = nil
 
     if not source or not source.configured or not source:configured() then
         done({}, _("请先在设置里配置当前数据源"))
@@ -428,6 +438,7 @@ function Library.fetch(desktop)
         series = series,
         author = author,
         finished = finished,
+        force = force,
     }, function(res, err)
         if desktop._closed or desktop.tab ~= "library"
             or desktop.source ~= source or (desktop.source_generation or 0) ~= generation then
@@ -572,6 +583,15 @@ function Library.gotoPage(desktop, page)
         return
     end
     desktop.page = page
+    desktop._library_state = nil
+    desktop.tab = "library"
+    desktop:rebuild()
+end
+
+--- 手动强制重扫书库（本地源：真实扫盘并清理失效书）。
+---@param desktop table
+function Library.rescan(desktop)
+    desktop._library_force = true
     desktop._library_state = nil
     desktop.tab = "library"
     desktop:rebuild()

@@ -4,19 +4,17 @@
 @module koplugin.book.book.chapter
 --]]
 
-local logger = require("logger")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local NetworkMgr = require("ui/network/manager")
 local Store = require("book.store")
-local Promise = require("utils.promise")
-local SourceError = require("source.error")
 local Content = require("book.content")
-local Contract = require("source.contract")
+local ProgressPosition = require("types.book_progress")
 local _ = require("gettext")
 
 local Chapter = {
     _session = nil,
+    _ensure_inflight = {},
 }
 
 --- 取当前按章阅读会话。
@@ -66,6 +64,7 @@ end
 --- 绑定按章阅读会话。
 ---@param opts table
 function Chapter.bind(opts)
+    Chapter._generation_counter = (Chapter._generation_counter or 0) + 1
     Chapter._session = {
         plugin = opts.plugin,
         source = opts.source,
@@ -73,46 +72,13 @@ function Chapter.bind(opts)
         ref = opts.ref,
         toc = opts.toc,
         idx = opts.idx or 1,
-        generation = opts.generation or 0,
+        generation = Chapter._generation_counter,
     }
 end
 
 --- 清除按章阅读会话。
 function Chapter.clear()
     Chapter._session = nil
-end
-
---- 拉/缓存目录（同步 worker）
----@param source BookSource
----@param ref BookRef
----@return BookChapter[]|nil, any
-function Chapter.loadToc(source, ref)
-    require("utils.promise").requireAsync("book.chapter.loadToc")
-    local cached = Store.getToc(ref.book_key)
-    if cached and cached.chapters and #cached.chapters > 0 then
-        return cached.chapters
-    end
-    if not source or not source.getToc then
-        return nil, SourceError.unsupported(_("数据源不支持目录"))
-    end
-    local chapters, err = source:getToc(ref)
-    if not chapters then
-        return nil, err
-    end
-    if type(chapters) ~= "table" or #chapters == 0 then
-        return nil, SourceError.not_found(_("目录为空"))
-    end
-    local normalized = {}
-    for i, ch in ipairs(chapters) do
-        normalized[#normalized + 1] = {
-            idx = tonumber(ch.idx) or i,
-            source_idx = ch.source_idx,
-            uid = ch.uid,
-            title = (ch.title and ch.title ~= "") and ch.title or tostring(i),
-        }
-    end
-    Store.putToc(ref.book_key, { chapters = normalized }, ref.source_id)
-    return normalized
 end
 
 --- 异步拉/缓存目录；回调 cb(ok, chapters, err)。
@@ -130,19 +96,33 @@ function Chapter.loadTocAsync(source, ref, cb)
         end)
         return
     end
-    Promise:new(function()
-        local toc, err = Chapter.loadToc(source, ref)
-        if not toc then
-            return nil, err or _("无法获取目录")
-        end
-        return toc
-    end)
-        :next(function(toc)
-            cb(true, toc)
+    if not source or not source.getTocAsync then
+        UIManager:nextTick(function()
+            cb(false, nil, _("数据源不支持目录"))
         end)
-        :fail(function(err)
+        return
+    end
+    source:getTocAsync(ref, function(chapters, err)
+        if not chapters then
             cb(false, nil, err or _("无法获取目录"))
-        end)
+            return
+        end
+        if type(chapters) ~= "table" or #chapters == 0 then
+            cb(false, nil, _("目录为空"))
+            return
+        end
+        local normalized = {}
+        for i, ch in ipairs(chapters) do
+            normalized[#normalized + 1] = {
+                idx = tonumber(ch.idx) or i,
+                source_idx = ch.source_idx,
+                uid = ch.uid,
+                title = (ch.title and ch.title ~= "") and ch.title or tostring(i),
+            }
+        end
+        Store.putTocAsync(ref.book_key, { chapters = normalized }, ref.source_id)
+        cb(true, normalized)
+    end)
 end
 
 --- 按 idx 在目录中找章节；找不到则回退 toc[idx]。
@@ -161,50 +141,8 @@ local function findChapter(toc, idx)
     return toc[idx]
 end
 
---- 确保章节 epub（写 .part 再改名由 source 负责；此处 temp=final.part）
----@param source BookSource
----@param ref BookRef
----@param idx number|string
----@param toc BookChapter[]|nil
----@return string|nil, any
-function Chapter.ensure(source, ref, idx, toc)
-    require("utils.promise").requireAsync("book.chapter.ensure")
-    idx = tonumber(idx) or 1
-    local path = Store.chapterPath(ref.book_key, idx, ref.source_id)
-    if Content.isValidEpub(path) then
-        return path
-    end
-    pcall(os.remove, path)
-    if not source or not source.materializeChapter then
-        return nil, SourceError.unsupported(_("数据源不支持按章下载"))
-    end
-    toc = toc or (Store.getToc(ref.book_key) and Store.getToc(ref.book_key).chapters)
-    local ch = findChapter(toc, idx)
-    if not ch then
-        ch = { idx = idx, title = tostring(idx) }
-    end
-    local tmp = path .. ".part"
-    local ok, err = source:materializeChapter(ref, ch, tmp)
-    if not ok then
-        pcall(os.remove, tmp)
-        return nil, err
-    end
-    if not Content.isValidEpub(tmp) then
-        pcall(os.remove, tmp)
-        return nil, SourceError.io(_("章节文件校验失败"))
-    end
-    os.remove(path)
-    if not os.rename(tmp, path) then
-        os.remove(tmp)
-        return nil, SourceError.io(_("无法保存章节文件"))
-    end
-    if not Content.isValidEpub(path) then
-        return nil, SourceError.io(_("章节文件未生成"))
-    end
-    return path
-end
-
 --- 异步确保章节 epub；回调 cb(ok, path, err)。
+--- 同书同章并发请求合并，避免多写者交错写同一 .part 文件。
 ---@param source BookSource
 ---@param ref BookRef
 ---@param idx number|string
@@ -216,25 +154,68 @@ function Chapter.ensureAsync(source, ref, idx, toc, cb)
     end
     idx = tonumber(idx) or 1
     local path = Store.chapterPath(ref.book_key, idx, ref.source_id)
-    if Content.isValidEpub(path) then
+    if Content.isValidBook(path) then
         UIManager:nextTick(function()
             cb(true, path)
         end)
         return
     end
-    Promise:new(function()
-        local p, err = Chapter.ensure(source, ref, idx, toc)
-        if not p then
-            return nil, err or _("章节下载失败")
+    if not source or not source.materializeChapterAsync then
+        UIManager:nextTick(function()
+            cb(false, nil, _("数据源不支持按章下载"))
+        end)
+        return
+    end
+
+    -- in-flight 合并：同 key 已有下载在飞，排队等结果
+    local key = ref.book_key .. ":" .. idx
+    local inflight = Chapter._ensure_inflight[key]
+    if inflight then
+        table.insert(inflight.waiters, cb)
+        return
+    end
+
+    Chapter._ensure_inflight[key] = { waiters = { cb } }
+
+    toc = toc or (Store.getToc(ref.book_key) and Store.getToc(ref.book_key).chapters)
+    local ch = findChapter(toc, idx) or { idx = idx, title = tostring(idx) }
+    local tmp = path .. ".part"
+    source:materializeChapterAsync(ref, ch, tmp, function(ok, err)
+        local job = Chapter._ensure_inflight[key]
+        Chapter._ensure_inflight[key] = nil
+        local waiters = job and job.waiters or { cb }
+        if not ok then
+            pcall(os.remove, tmp)
+            for _, w in ipairs(waiters) do
+                pcall(w, false, nil, err or _("章节下载失败"))
+            end
+            return
         end
-        return p
+        if not Content.isValidBook(tmp, path) then
+            pcall(os.remove, tmp)
+            for _, w in ipairs(waiters) do
+                pcall(w, false, nil, _("章节文件校验失败"))
+            end
+            return
+        end
+        os.remove(path)
+        if not os.rename(tmp, path) then
+            os.remove(tmp)
+            for _, w in ipairs(waiters) do
+                pcall(w, false, nil, _("无法保存章节文件"))
+            end
+            return
+        end
+        if not Content.isValidBook(path) then
+            for _, w in ipairs(waiters) do
+                pcall(w, false, nil, _("章节文件未生成"))
+            end
+            return
+        end
+        for _, w in ipairs(waiters) do
+            pcall(w, true, path)
+        end
     end)
-        :next(function(p)
-            cb(true, p)
-        end)
-        :fail(function(err)
-            cb(false, nil, err or _("章节下载失败"))
-        end)
 end
 
 --- 打开/切换到章节文件阅读器。
@@ -273,22 +254,35 @@ function Chapter.gotoChapter(idx, opts)
     ---@return boolean
     local function openPath(path)
         s.idx = idx
-        Store.touch(path, ref, { chapter_idx = idx })
+        Store.touchAsync(path, ref, { chapter_idx = idx })
         showReader(path)
         Chapter.prefetchAround(idx)
+        if s.plugin then
+            s.plugin:emitToSource("chapter_changed", {
+                ref = ref,
+                chapter_idx = idx,
+                book = s.book,
+            })
+        end
         return true
     end
 
     local path = Store.chapterPath(ref.book_key, idx, ref.source_id)
-    if Content.isValidEpub(path) then
+    if Content.isValidBook(path) then
         return openPath(path)
     end
 
     NetworkMgr:runWhenOnline(function()
         UIManager:show(InfoMessage:new{ text = _("正在加载章节…"), timeout = 1 })
+        local gen = s.generation or 0
         Chapter.ensureAsync(source, ref, idx, s.toc, function(ok, p, err)
+            -- generation 已变：用户已退出或打开另一本书，不再做任何 UI 操作
+            local cur = session()
+            if not cur or (cur.generation or 0) ~= gen then
+                return
+            end
             if not ok or not p then
-                UIManager:show(InfoMessage:new{ text = SourceError.message(err) or err or _("章节下载失败") })
+                UIManager:show(InfoMessage:new{ text = err or _("章节下载失败") })
                 return
             end
             openPath(p)
@@ -340,14 +334,8 @@ function Chapter.prefetchAround(idx)
     local toc = s.toc
     for _, tidx in ipairs(targets) do
         local path = Store.chapterPath(ref.book_key, tidx, ref.source_id)
-        if not Content.isValidEpub(path) then
-            Chapter.ensureAsync(source, ref, tidx, toc, function(ok, p, err)
-                if not ok then
-                    logger.dbg("book.chapter prefetch fail", tidx, SourceError.message(err))
-                else
-                    logger.dbg("book.chapter prefetch ok", tidx, p)
-                end
-            end)
+        if not Content.isValidBook(path) then
+            Chapter.ensureAsync(source, ref, tidx, toc, function() end)
         end
     end
 end
@@ -361,56 +349,48 @@ function Chapter.prepareOpenAsync(source, book, ref, cb)
     if type(cb) ~= "function" then
         return
     end
-    Promise:new(function()
-        local b = book
-        if source.getDetail then
-            local detail = source:getDetail(ref)
-            if detail then
-                Store.remember(detail)
-                b = detail
+    local function prepareWithBook(book2)
+        Chapter.loadTocAsync(source, ref, function(tok, toc, terr)
+            if not tok or not toc or #toc == 0 then
+                cb(false, nil, terr or _("无法获取目录"))
+                return
             end
-        end
-        return b
-    end)
-        :next(function(book2)
-            book2 = book2 or book
-            Chapter.loadTocAsync(source, ref, function(tok, toc, terr)
-                if not tok or not toc or #toc == 0 then
-                    cb(false, nil, terr or _("无法获取目录"))
-                    return
-                end
-                Promise:new(function()
-                    local start_idx = 1
-                    if source.getProgress then
-                        local pos = source:getProgress(ref)
-                        if pos then
-                            start_idx = tonumber(pos.chapter_idx) or start_idx
-                            if not pos.chapter_idx then
-                                local pct = Contract.clampFraction(pos.fraction)
-                                local count = #toc
-                                if count > 0 and pct > 0 then
-                                    start_idx = math.max(1, math.min(count, math.floor(pct * count) + 1))
-                                end
-                            end
+            local function finish(pos)
+                local start_idx = 1
+                if pos then
+                    start_idx = tonumber(pos.chapter_idx) or start_idx
+                    if not pos.chapter_idx then
+                        local pct = ProgressPosition.clampFraction(pos.fraction)
+                        if #toc > 0 and pct > 0 then
+                            start_idx = math.max(1, math.min(#toc, math.floor(pct * #toc) + 1))
                         end
                     end
-                    return start_idx
+                end
+                cb(true, {
+                    book = book2,
+                    toc = toc,
+                    start_idx = tonumber(start_idx) or 1,
+                })
+            end
+            if source and source.getProgressAsync then
+                source:getProgressAsync(ref, function(pos)
+                    finish(pos)
                 end)
-                    :next(function(start_idx)
-                        cb(true, {
-                            book = book2,
-                            toc = toc,
-                            start_idx = tonumber(start_idx) or 1,
-                        })
-                    end)
-                    :fail(function(perr)
-                        cb(false, nil, perr or _("准备失败"))
-                    end)
-            end)
+            else
+                finish(nil)
+            end
         end)
-        :fail(function(err)
-            cb(false, nil, err or _("准备失败"))
+    end
+    if source and source.getDetailAsync then
+        source:getDetailAsync(ref, function(detail)
+            if detail then
+                Store.remember(detail)
+            end
+            prepareWithBook(detail or book)
         end)
+    else
+        prepareWithBook(book)
+    end
 end
 
 --- 弹出目录菜单并跳转选中章。

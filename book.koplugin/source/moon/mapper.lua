@@ -4,7 +4,10 @@ Moon wire → 领域对象
 @module koplugin.book.source.moon.mapper
 --]]
 
-local Contract = require("source.contract")
+local BookRef = require("types.book").BookRef
+local Book = require("types.book").Book
+local ProgressPosition = require("types.book_progress")
+local BookListResult = require("types.book_list")
 
 local Mapper = {}
 
@@ -57,10 +60,10 @@ function Mapper.book(row)
     end
     local finished = userFinished(row)
     return {
-        ref = Contract.makeRef(SOURCE_ID, sid),
+        ref = BookRef.new(SOURCE_ID, sid),
         title = row.title or row.bookName or row.name,
         authors = row.authors or row.author,
-        percent = Contract.clampPercent(
+        percent = Book.clampPercent(
             row.percent or row.progress or row.progressPercent or row.readProgress,
             finished
         ),
@@ -91,7 +94,7 @@ end
 ---@return BookListResult
 function Mapper.list(wire)
     if type(wire) ~= "table" then
-        return Contract.emptyList()
+        return BookListResult.empty()
     end
     local list = wire.data or wire.list or wire.books or {}
     local out = {}
@@ -103,7 +106,7 @@ function Mapper.list(wire)
             end
         end
     end
-    return Contract.listResult(out, tonumber(wire.count) or #out)
+    return BookListResult.new(out, tonumber(wire.count) or #out)
 end
 
 --- Moon 进度 wire → ProgressPosition
@@ -118,10 +121,10 @@ function Mapper.progress(wire)
         if type(wire.data) == "table" then
             node = wire.data
         elseif type(wire.data) == "number" then
-            return { fraction = Contract.clampFraction(wire.data) }
+            return { fraction = ProgressPosition.clampFraction(wire.data) }
         end
     elseif type(wire) == "number" then
-        return { fraction = Contract.clampFraction(wire) }
+        return { fraction = ProgressPosition.clampFraction(wire) }
     else
         return nil
     end
@@ -129,12 +132,12 @@ function Mapper.progress(wire)
         return nil
     end
     local finished = userFinished(node)
-    local percent = Contract.clampPercent(
+    local percent = Book.clampPercent(
         node.percent or node.progress or node.progressPercent or node.readingProgress,
         finished
     )
     return {
-        fraction = Contract.clampFraction(percent / 100),
+        fraction = ProgressPosition.clampFraction(percent / 100),
         chapter_idx = tonumber(node.chapter_idx or node.chapterIdx or node.spine),
         locator = node.locator,
     }

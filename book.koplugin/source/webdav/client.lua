@@ -1,5 +1,5 @@
 --[[--
-WebDAV 协议客户端包装 http.webdav
+WebDAV 协议客户端包装 http.webdav（仅异步）
 
 @module koplugin.book.source.webdav.client
 --]]
@@ -33,28 +33,18 @@ function Client:configured()
     return url ~= "" and user ~= ""
 end
 
---- 探测 WebDAV 连通性。
----@return boolean|nil, string|nil
-function Client:ping()
-    return self._dav:ping()
+function Client:pingAsync(cb)
+    return self._dav:pingAsync(cb)
 end
 
---- 列出远程目录条目。
----@param path string|nil
----@return table[]|nil, string|nil
-function Client:list(path)
-    return self._dav:list(path)
+function Client:listAsync(path, cb)
+    return self._dav:listAsync(path, cb)
 end
 
---- 下载远程文件到本地临时路径。
----@param remote_path string
----@param temp_path string
----@param on_progress fun(bytes: number)|nil
----@return boolean|nil, string|nil
-function Client:download(remote_path, temp_path, on_progress)
-    return self._dav:get(remote_path, temp_path, {
+function Client:downloadAsync(remote_path, temp_path, on_progress, cb)
+    return self._dav:getAsync(remote_path, temp_path, {
         on_progress = on_progress,
-    })
+    }, cb)
 end
 
 return Client

@@ -4,7 +4,8 @@ WebDAV entry → Book
 @module koplugin.book.source.webdav.mapper
 --]]
 
-local Contract = require("source.contract")
+local BookRef = require("types.book").BookRef
+local BookListResult = require("types.book_list")
 
 local Mapper = {}
 
@@ -55,7 +56,7 @@ function Mapper.list(entries, base_path)
             if path ~= "" then
                 local title = e.name or path:match("([^/]+)$") or path
                 books[#books + 1] = {
-                    ref = Contract.makeRef(SOURCE_ID, path),
+                    ref = BookRef.new(SOURCE_ID, path),
                     title = title,
                     authors = nil,
                     percent = 0,
@@ -63,7 +64,7 @@ function Mapper.list(entries, base_path)
             end
         end
     end
-    return Contract.listResult(books)
+    return BookListResult.new(books)
 end
 
 --- 由 BookRef 构造最小详情。
