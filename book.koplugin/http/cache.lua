@@ -1,16 +1,19 @@
 --[[--
 HTTP GET 响应缓存（键 = METHOD + path + 规范化 query，TTL 秒）。
 
-持久化在 utils.db 的 http 表（JSON 文本 + expires）。
+持久化在 utils.db.http（JSON 文本 + expires）。
 只存成功响应；调用方传入 ttl>0 才写入。
 写操作后应 Request.clearCache() 或 Cache.clear() 失效。
+
+读/写均经 Task 子进程碰库（主进程禁止 SQLite）。
 
 @module koplugin.book.http.cache
 --]]
 
 local JSON = require("json")
 local logger = require("logger")
-local Db = require("utils.db")
+local UIManager = require("ui/uimanager")
+local Task = require("utils.task")
 
 local Cache = {}
 
@@ -52,30 +55,72 @@ function Cache.key(method, url, query)
     return method .. " " .. url
 end
 
---- 读取缓存；过期或 JSON 损坏则删行并返回 nil
+--- 异步读取缓存；过期或 JSON 损坏则删行并 cb(nil)
 ---@param key string
----@return any|nil 解码后的响应体（通常为 table）
-function Cache.get(key)
+---@param cb fun(value: any|nil)
+---@return { cancel: fun() }
+function Cache.getAsync(key, cb)
     if type(key) ~= "string" or key == "" then
-        return nil
+        UIManager:nextTick(function()
+            cb(nil)
+        end)
+        return { cancel = function() end }
     end
-    local value_json, expires = Db.httpGet(key)
-    if not value_json then
-        return nil
-    end
-    if (expires or 0) <= os.time() then
-        Db.httpDelete(key)
-        return nil
-    end
-    local ok, value = pcall(JSON.decode, value_json)
-    if not ok then
-        Db.httpDelete(key)
-        return nil
-    end
-    return value
+
+    local cancelled = false
+    local task = Task.run(function(_, write_fd)
+        local HttpDB = require("utils.db.http")
+        local ffiUtil = require("ffi/util")
+        local value_json, expires = HttpDB.get(key)
+        local out = ""
+        if value_json then
+            if (expires or 0) <= os.time() then
+                HttpDB.delete(key)
+            else
+                local ok = pcall(JSON.decode, value_json)
+                if not ok then
+                    HttpDB.delete(key)
+                else
+                    out = value_json
+                end
+            end
+        end
+        if write_fd then
+            ffiUtil.writeToFD(write_fd, out, true)
+        end
+    end, {
+        pipe = true,
+        on_done = function(raw)
+            if cancelled then
+                return
+            end
+            if type(raw) ~= "string" or raw == "" then
+                cb(nil)
+                return
+            end
+            local ok, value = pcall(JSON.decode, raw)
+            if not ok then
+                cb(nil)
+                return
+            end
+            cb(value)
+        end,
+        on_failed = function()
+            if not cancelled then
+                cb(nil)
+            end
+        end,
+    })
+
+    return {
+        cancel = function()
+            cancelled = true
+            task:abort()
+        end,
+    }
 end
 
---- 写入缓存；ttl<=0 或 value 无法 JSON 编码则跳过
+--- 写入缓存；ttl<=0 或 value 无法 JSON 编码则跳过（子进程落库，不堵 UI）
 ---@param key string
 ---@param value any
 ---@param ttl number 存活秒数
@@ -90,14 +135,21 @@ function Cache.set(key, value, ttl)
         logger.warn("book.http.cache encode failed", key)
         return
     end
-    Db.httpSet(key, encoded, os.time() + ttl)
+    local expires = os.time() + ttl
+    Task.run(function()
+        local HttpDB = require("utils.db.http")
+        HttpDB.set(key, encoded, expires)
+    end)
 end
 
---- 清空全部缓存；传 url_substr 则只失效 key 含该子串的条目
+--- 清空全部缓存；传 url_substr 则只失效 key 含该子串的条目（子进程执行）
 ---@param url_substr string|nil
 ---@return nil
 function Cache.clear(url_substr)
-    Db.httpClear(url_substr)
+    Task.run(function()
+        local HttpDB = require("utils.db.http")
+        HttpDB.clear(url_substr)
+    end)
 end
 
 return Cache
