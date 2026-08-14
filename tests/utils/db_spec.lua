@@ -44,7 +44,7 @@ local function clearMods()
     end
 end
 
--- ── 主进程 open 必须失败 ────────────────────────────────
+-- ── 主进程 open 应成功（WAL 模式 + busy_timeout，读操作安全）───
 do
     stubTask(false)
     stubDbDeps()
@@ -54,9 +54,9 @@ do
     package.loaded["utils.db.base"] = nil
 
     local DbBase = require("utils.db.base")
-    local ok, err = pcall(DbBase.open)
-    Assert.is_true(not ok)
-    Assert.is_true(type(err) == "string" and err:find("Task subprocess", 1, true) ~= nil)
+    local ok, conn = pcall(DbBase.open)
+    Assert.is_true(ok)
+    Assert.is_true(conn ~= nil)
     clearMods()
 end
 

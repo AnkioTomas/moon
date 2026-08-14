@@ -98,9 +98,10 @@ do
         return {
             run = function(worker, opts)
                 local write_buf
-                local ok, err = pcall(worker, function(data)
+                -- 传正确的 (pid, write_fd, read_fd) 签名
+                local ok, err = pcall(worker, 123, function(data)
                     write_buf = data
-                end)
+                end, nil)
                 if not ok then
                     if opts and opts.on_failed then
                         opts.on_failed(err)

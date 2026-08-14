@@ -180,7 +180,6 @@ end
 package.preload["http.cache"] = function()
     return { key = function() return "" end, get = function() end, set = function() end }
 end
-package.preload["ffi/util"] = function() return { template = function(s) return s end } end
 package.loaded["source.moon.client"] = nil
 
 local client = require("source.moon.client"):new{}
@@ -196,7 +195,6 @@ for _, name in ipairs({
     "socket.url",
     "http.request",
     "http.cache",
-    "ffi/util",
     "source.moon.client",
 }) do
     package.preload[name] = nil
