@@ -13,7 +13,7 @@ HTTP GET 响应缓存（键 = METHOD + path + 规范化 query，TTL 秒）。
 local JSON = require("json")
 local logger = require("logger")
 local UIManager = require("ui/uimanager")
-local Task = require("utils.task")
+local DbQueue = require("utils.db.queue")
 
 local Cache = {}
 
@@ -68,54 +68,35 @@ function Cache.getAsync(key, cb)
     end
 
     local cancelled = false
-    local task = Task.run(function(_, write_fd)
+
+    UIManager:nextTick(function()
+        if cancelled then
+            return
+        end
         local HttpDB = require("utils.db.http")
-        local ffiUtil = require("ffi/util")
         local value_json, expires = HttpDB.get(key)
-        local out = ""
-        if value_json then
-            if (expires or 0) <= os.time() then
+        if value_json and (expires or 0) > os.time() then
+            local ok, value = pcall(JSON.decode, value_json)
+            if ok then
+                cb(value)
+                return
+            end
+            -- JSON 损坏，删除（写操作走队列）
+            DbQueue.run(function()
                 HttpDB.delete(key)
-            else
-                local ok = pcall(JSON.decode, value_json)
-                if not ok then
-                    HttpDB.delete(key)
-                else
-                    out = value_json
-                end
-            end
+            end)
+        elseif value_json then
+            -- 过期，删除（写操作走队列）
+            DbQueue.run(function()
+                HttpDB.delete(key)
+            end)
         end
-        if write_fd then
-            ffiUtil.writeToFD(write_fd, out, true)
-        end
-    end, {
-        pipe = true,
-        on_done = function(raw)
-            if cancelled then
-                return
-            end
-            if type(raw) ~= "string" or raw == "" then
-                cb(nil)
-                return
-            end
-            local ok, value = pcall(JSON.decode, raw)
-            if not ok then
-                cb(nil)
-                return
-            end
-            cb(value)
-        end,
-        on_failed = function()
-            if not cancelled then
-                cb(nil)
-            end
-        end,
-    })
+        cb(nil)
+    end)
 
     return {
         cancel = function()
             cancelled = true
-            task:abort()
         end,
     }
 end
@@ -136,20 +117,28 @@ function Cache.set(key, value, ttl)
         return
     end
     local expires = os.time() + ttl
-    Task.run(function()
+    DbQueue.run(function()
         local HttpDB = require("utils.db.http")
         HttpDB.set(key, encoded, expires)
-    end)
+    end, {
+        on_failed = function(err)
+            logger.warn("book.http cache set failed", key, err)
+        end,
+    })
 end
 
 --- 清空全部缓存；传 url_substr 则只失效 key 含该子串的条目（子进程执行）
 ---@param url_substr string|nil
 ---@return nil
 function Cache.clear(url_substr)
-    Task.run(function()
+    DbQueue.run(function()
         local HttpDB = require("utils.db.http")
         HttpDB.clear(url_substr)
-    end)
+    end, {
+        on_failed = function(err)
+            logger.warn("book.http cache clear failed", url_substr, err)
+        end,
+    })
 end
 
 return Cache
