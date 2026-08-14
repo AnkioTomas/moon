@@ -194,7 +194,6 @@ local function decodeFile(path, w, h, alpha, fit)
         }
     end)
     if ok and img then
-        logger.dbg(letterbox and "book image letterbox ok" or "book image decode ok", path, w, h)
         return img
     end
     logger.warn(letterbox and "book image letterbox failed" or "book image decode failed", path, img)
@@ -213,7 +212,6 @@ local function cachedPath(url)
         local path = base .. ext
         local attr = lfs.attributes(path)
         if attr and attr.mode == "file" and attr.size and attr.size > 0 then
-            logger.dbg("book image cache hit", url, path, attr.size)
             return path
         end
     end
@@ -233,7 +231,6 @@ local function downloadAsync(url, headers, cb)
         end)
         return { cancel = function() end }
     end
-    logger.dbg("book image download start", url)
     local base = cacheBase(url)
     dl_seq = dl_seq + 1
     local tmp = string.format("%s.%d.part", base, dl_seq)
@@ -280,7 +277,6 @@ local function downloadAsync(url, headers, cb)
             cb(nil, "rename failed")
             return
         end
-        logger.dbg("book image download ok", url, final, attr.size)
         cb(final)
     end)
 end
@@ -302,13 +298,11 @@ local function resolve(src)
     if lfs.attributes(path, "mode") == "file" then
         return path
     end
-    logger.dbg("book image resolve miss", src)
     return nil
 end
 
 --- 取消在飞下载（桌面关闭 / 清缓存）。
 function Image.abortPending()
-    logger.dbg("book image abort pending", #jobs)
     local list = jobs
     jobs = {}
     for i = 1, #list do
@@ -329,13 +323,11 @@ local function requestPaint(box)
     end
     local region = box._screen
     if region then
-        logger.dbg("book image paint region", region.x, region.y, region.w, region.h)
         UIManager:setDirty(host, function()
             return "ui", box._screen
         end)
     else
         -- 尚未 paint（同步缓存命中等）：只能脏整窗，禁止用相对 dimen 瞎刷
-        logger.dbg("book image paint full host")
         UIManager:setDirty(host, "ui")
     end
 end
@@ -376,7 +368,6 @@ end
 ---@param on_ready fun(path: string)|nil
 ---@return table
 local function pendingBox(url, headers, w, h, alpha, fit, border, fb, show_parent, on_ready)
-    logger.dbg("book image pending", url, w, h, fb)
     local box = WidgetContainer:new{
         dimen = Geom:new{ x = 0, y = 0, w = w, h = h },
         align = "center",
@@ -402,7 +393,6 @@ local function pendingBox(url, headers, w, h, alpha, fit, border, fb, show_paren
         if not alive or not path then
             return
         end
-        logger.dbg("book image apply", url, path)
         local ok, next_w = pcall(present, path, w, h, alpha, fit, border, fb)
         if not ok then
             logger.warn("book image apply boom", url, next_w)
@@ -421,7 +411,6 @@ local function pendingBox(url, headers, w, h, alpha, fit, border, fb, show_paren
     --- 释放占位并取消在飞下载。
     ---@param full any
     function box:free(full)
-        logger.dbg("book image pending free", url)
         alive = false
         if job then
             job.cancel()
@@ -467,7 +456,6 @@ function Image.widget(opts)
     if path then
         local ready = present(path, w, h, alpha, fit, border, fb)
         if ready then
-            logger.dbg("book image widget ready", src, path)
             if type(on_ready) == "function" then
                 -- 同步命中：下一拍回调，避免构建期重入
                 UIManager:nextTick(function()
@@ -480,7 +468,6 @@ function Image.widget(opts)
     if isHttp(src) then
         return pendingBox(src, headers, w, h, alpha, fit, border, fb, show_parent, on_ready)
     end
-    logger.dbg("book image widget empty", src, fb)
     return placeholder(w, h, fb, border)
 end
 

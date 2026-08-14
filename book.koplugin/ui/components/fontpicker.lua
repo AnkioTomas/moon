@@ -9,7 +9,7 @@
 打开时先出加载页，再弹列表。
 
 只负责选中后 MoonFont.set（写配置）；不碰 Font.fontmap。
-真正 apply 在 Desktop:rebuild / ReaderFloatMenu:rebuild（及 Host.attach）。
+真正 apply 在 Desktop:rebuild（及 Host.attach）。
 
   FontPicker.open{
     title   = _("界面字体"),
@@ -26,7 +26,6 @@ local InfoMessage = require("ui/widget/infomessage")
 local NetworkMgr = require("ui/network/manager")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
-local Promise = require("utils.promise")
 local MoonFont = require("utils.font")
 local Popup = require("ui.components.popup")
 local UI = require("ui.components.bookui")
@@ -138,18 +137,12 @@ local function downloadAndSave(opts, item)
         })
     end
 
-    Promise:new(function()
-        local ok, err = MoonFont.ensureInstalled(item, function(bytes)
-            if dialog and zip_max > 0 then
-                dialog:reportProgress(bytes)
-            end
-        end)
-        if not ok then
-            return nil, err or _("字体下载失败")
+    MoonFont.ensureInstalledAsync(item, function(bytes)
+        if dialog and zip_max > 0 then
+            dialog:reportProgress(bytes)
         end
-        return true
-    end)
-        :next(function()
+    end, function(ok, err)
+        if ok then
             if dialog then
                 if zip_max > 0 then
                     dialog:reportProgress(zip_max)
@@ -158,8 +151,7 @@ local function downloadAndSave(opts, item)
                 dialog = nil
             end
             saveSelection(opts, id, name)
-        end)
-        :fail(function(err)
+        else
             if dialog then
                 dialog:close()
                 dialog = nil
@@ -167,7 +159,8 @@ local function downloadAndSave(opts, item)
             UIManager:show(InfoMessage:new{
                 text = err or _("字体下载失败"),
             })
-        end)
+        end
+    end)
 end
 
 --- 弹出字体选择列表。
@@ -249,29 +242,35 @@ function FontPicker.open(opts)
     opts = opts or {}
     local loading = InfoMessage:new{ text = _("正在加载字体列表…") }
     UIManager:show(loading)
-    Promise:new(function()
-        local cached = MoonFont.list(false)
-        local need_weread = (not MoonFont.hasWereadCache()) or wereadMissingPreview(cached)
-        if need_weread and NetworkMgr:isOnline() then
-            local fresh = MoonFont.list(true)
-            if fresh then
-                return fresh
+    local cached = MoonFont.list(false)
+    local need_weread = (not MoonFont.hasWereadCache()) or wereadMissingPreview(cached)
+    local cancelled = false
+    local function finish(items)
+        if cancelled then return end
+        UIManager:close(loading)
+        if not items then
+            UIManager:show(InfoMessage:new{ text = _("字体列表加载失败") })
+            return
+        end
+        showPicker(opts, items)
+    end
+    local fetch_job
+    if need_weread and NetworkMgr:isOnline() then
+        fetch_job = MoonFont.listAsync(true, function(items)
+            finish(items or cached)
+        end)
+        -- loading 关闭时取消 fetch
+        loading.dismiss_callback = function()
+            cancelled = true
+            if fetch_job and fetch_job.cancel then
+                fetch_job.cancel()
             end
         end
-        return cached
-    end)
-        :next(function(items)
-            UIManager:close(loading)
-            if not items then
-                UIManager:show(InfoMessage:new{ text = _("字体列表加载失败") })
-                return
-            end
-            showPicker(opts, items)
+    else
+        UIManager:nextTick(function()
+            finish(cached)
         end)
-        :fail(function()
-            UIManager:close(loading)
-            UIManager:show(InfoMessage:new{ text = _("字体列表加载失败") })
-        end)
+    end
 end
 
 return FontPicker

@@ -15,7 +15,6 @@ local Device = require("device")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
-local ImageWidget = require("ui/widget/imagewidget")
 local LineWidget = require("ui/widget/linewidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -24,7 +23,7 @@ local _ = require("gettext")
 local Screen = Device.screen
 
 local UI = require("ui.components.bookui")
-local Image = require("ui.components.image")
+local Icon = require("ui.components.icon")
 
 local BottomBar = {}
 
@@ -33,46 +32,18 @@ local BottomBar = {}
 ---@return table
 function BottomBar.tabs(source)
     local tabs = {
-        { id = "home", text = _("首页"), icon = "home.svg" },
-        { id = "library", text = _("图书馆"), icon = "library.svg" },
+        { id = "home", text = _("首页"), icon = "home" },
+        { id = "library", text = _("图书馆"), icon = "local_library" },
     }
     local caps = source and source.capabilities and source:capabilities() or {}
     if caps.store then
-        table.insert(tabs, { id = "store", text = _("书城"), icon = "store.svg" })
+        table.insert(tabs, { id = "store", text = _("书城"), icon = "storefront" })
     end
     if caps.insight then
-        table.insert(tabs, { id = "stats", text = _("统计"), icon = "stats.svg" })
+        table.insert(tabs, { id = "stats", text = _("统计"), icon = "bar_chart" })
     end
-    table.insert(tabs, { id = "settings", text = _("设置"), icon = "settings.svg" })
+    table.insert(tabs, { id = "settings", text = _("设置"), icon = "settings" })
     return tabs
-end
-
---- 底栏 Tab 图标；失败回退圆点文字。
----@param name string
----@param sz number
----@param active boolean
----@return table
-local function tabIcon(name, sz, active)
-    local path = Image.resolve(name)
-    if path then
-        local ok, img = pcall(function()
-            return ImageWidget:new{
-                file = path,
-                width = sz,
-                height = sz,
-                alpha = true,
-                dim = not active,
-            }
-        end)
-        if ok and img then
-            return img
-        end
-    end
-    return TextWidget:new{
-        text = "•",
-        face = UI.face("cfont", active and 18 or 16),
-        fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_6,
-    }
 end
 
 --- 构建底栏 widget。
@@ -91,7 +62,10 @@ function BottomBar.build(desktop)
     local row = HorizontalGroup:new{ align = "center" }
     for _, tab in ipairs(tabs) do
         local active = desktop.tab == tab.id
-        local icon = tabIcon(tab.icon, icon_sz, active)
+        local icon = Icon.widget{
+            name = tab.icon,
+            dim = not active,
+        }
         local label = TextWidget:new{
             text = tab.text,
             face = UI.face(active and "cfont" or "xx_smallinfofont", active and 14 or 11),

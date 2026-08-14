@@ -20,7 +20,6 @@ local TextWidget = require("ui/widget/textwidget")
 local GestureRange = require("ui/gesturerange")
 local Image = require("ui.components.image")
 local UI = require("ui.components.bookui")
-local logger = require("logger")
 local _ = require("gettext")
 
 local BookInfo = {}
@@ -83,7 +82,7 @@ function BookInfo.tappable(w, h, on_tap)
         TapBookInfo = {
             GestureRange:new{
                 ges = "tap",
-                range = function() return tap.dimen end,
+                range = function() return tap:getSize() end,
             },
         },
     }
@@ -147,7 +146,7 @@ function BookInfo.progressRow(width, pct)
 end
 
 --- 封面 widget；opts.badge=true 叠进度角标；缺图由 Image 自更新占位。
---- opts.show_parent: 窗口级父（Desktop / Detail / ReaderFloatMenu）
+--- opts.show_parent: 窗口级父（Desktop / Detail）
 --- opts.on_ready: 图片就绪回调
 ---@param plugin table|nil
 ---@param source table|nil
@@ -159,17 +158,11 @@ end
 function BookInfo.cover(plugin, source, book, cw, ch, opts)
     opts = opts or {}
     local title = BookInfo.title(book)
-    local filename = BookInfo.file(book)
     local pct = BookInfo.pct(book)
     local ref = type(book) == "table" and book.ref or nil
     local req
     if source and type(source.coverRequest) == "function" and type(ref) == "table" then
         req = select(1, source:coverRequest(ref))
-    end
-    if req and req.url then
-        logger.dbg("book.bookinfo cover url", filename, req.url)
-    else
-        logger.dbg("book.bookinfo cover no url", filename)
     end
     local cover = Image.widget{
         src = req and req.url or nil,
