@@ -51,6 +51,18 @@ function Session.ref()
     return s and s.ref or nil
 end
 
+---@return BookSource|nil
+function Session.source()
+    local s = Session._session
+    return s and s.source or nil
+end
+
+---@return Book|nil
+function Session.book()
+    local s = Session._session
+    return s and s.book or nil
+end
+
 ---@return number
 function Session.generation()
     local s = Session._session

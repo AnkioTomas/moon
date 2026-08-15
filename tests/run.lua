@@ -106,6 +106,7 @@ for _, path in ipairs(specs) do
             if k:match("^book%.") or k:match("^chapters%.") or k:match("^chapters$") or
                k:match("^source%.") or k:match("^http%.") or
                k:match("^utils%.") or k:match("^convert%.") or k:match("^stats%.") or
+               k:match("^reader%.") or
                k:match("^l10n$") or k:match("^book$") then
                 package.loaded[k] = nil
             end

@@ -70,6 +70,9 @@ function SourceBase:close() end
 ---   fm_open         — FileManager 主界面显示
 ---   desktop_open    — Book 桌面打开并可见，payload = Desktop 实例
 ---   suspend         — 设备休眠前（有打开文档时）
+---   page_changed    — 翻页（仅源身份书籍），payload = { ref, book, page, total_pages, percent, chapter_idx }
+---   book_info_request — 阅读面板详情页请求书籍信息，payload = { ref, book, refresh }
+---     （源可拉最新详情写 Store.putMetaAsync 后调 refresh() 重绘面板；基类空操作即可）
 ---@param _event string
 ---@param _payload table|nil
 function SourceBase:onEvent(_event, _payload) end

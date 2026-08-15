@@ -2,7 +2,7 @@
 
 Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供连接远端阅读服务的书库桌面。它将图书馆、首页、统计和设置整合为全屏界面，可下载并打开书籍、缓存封面，以及同步阅读进度。
 
-架构上通过统一 **Source** 接口支持多数据源扩展（Book 服务、微信读书、WebDAV、Legado 等）；**当前仅实现 Book 服务（moon）**，其余为空壳。同时只激活一个数据源；书城 Tab 按源能力动态显示（Book 源默认不显示书城）。
+架构上通过统一 **Source** 接口支持多数据源扩展（Book 服务、微信读书、WebDAV）；**Book 服务（moon）完整实现**；**微信读书支持书架/按章阅读**（扫码登录即可，正文通道为逆向协议，可能随时失效）；WebDAV 仅配置+连接测试。同时只激活一个数据源；书城 Tab 按源能力动态显示。
 
 配套服务端：[AnkioTomas/book](https://github.com/AnkioTomas/book)（静读天下 Web 管理）。本插件通过其 HTTP API 拉取书库、封面与进度；请先部署该服务，再在插件设置中填写服务器地址与令牌。
 
@@ -20,10 +20,11 @@ Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供�
 
 - **封面书库**：以响应式网格展示书籍、阅读进度和总数，支持分页。
 - **搜索与筛选**：按书名/作者搜索，或按分类、标签、系列、作者筛选。
-- **主页概览**：显示时钟或每日一言、可跳转的藏书统计、最近阅读和在读书籍。
+- **主页概览**：最近阅读和在读书籍。
 - **多维统计**：从服务端拉取阅读 KPI、月度/星期分布与日历热力，点选日期查看当日书单。
 - **书籍详情**：查看作者、分类、标签、系列、进度和简介后再开始阅读。
-- **下载与缓存**：首次打开时显示下载进度并保存书籍；已下载的书籍可直接打开。封面独立缓存并以缩略图加载，避免大封面造成内存压力。
+- **下载与缓存**：书籍按 `bookKey=md5(source:stableId)` 落盘到 `.moon/cache/<source>/book/<key>/`（整本 `book.*` 或章节 `N.html`）；元数据 / 目录 / 打开映射 / HTTP 缓存在 `.moon/book.sqlite3`（meta TTL 7 天 / toc TTL 1 天）。首次打开可显示下载进度。按章源通过 `fetchChapterContentAsync` 交标准正文，宿主统一写 HTML 并支持章末/章首连续换章与前1后3预取。
+- **微信读书按章阅读**：拉取详情与目录后按章生成 EPUB；阅读中支持上一章/下一章与后台预取（前 1 后 3）。仅供个人学习研究，请遵守微信读书用户协议。
 - **进度同步**：可在打开书籍时拉取远端进度，并在关闭书籍或设备休眠时上传进度。
   - **阅读统计上报**：复用 KOReader「阅读统计」插件的 `statistics.sqlite3`，在关闭/休眠时将页停留时长与页数上报到服务端高维统计接口（可手动立即上报）。
 - **阅读页面板**：触摸设备可在阅读页中部点按打开 Book 悬浮面板，快速调整字体、字号、行距、字重、对比度、边距和滚动/分页模式，并可进入目录、系统更多设置或返回书库。
@@ -86,7 +87,7 @@ Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供�
 - `books[]`: `{ filename, title?, authors? }`
 - `stats[]`: `{ filename, page, start_time, duration, total_pages, device_id? }`
 
-插件通过 filemap / 元数据缓存 / 局部 MD5 映射解析 filename；服务端用 filename 匹配书库书名与作者，匹配不到才用上报回退值。
+插件通过 `books.md5`→`books.filename` 与 opens 映射解析远端 filename；服务端用 filename 匹配书库书名与作者，匹配不到才用上报回退值。
 
 前置条件：
 
@@ -105,7 +106,6 @@ Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供�
 | `GET` | `/index/book/list` | 分页书籍列表；支持 `page`、`pageSize`、`search`、`series`、`category`、`favorite`、`finished`、`author` 查询参数。 |
 | `GET` | `/index/book/recent` | 最近阅读书籍，使用 `limit` 参数。 |
 | `GET` | `/index/book/filters` | 分类、标签、系列和作者筛选项。 |
-| `GET` | `/index/book/stats` | 藏书、已读和未读统计。 |
 | `GET` | `/index/book/progress` | 获取书籍进度，使用 `filename` 参数。 |
 | `POST` | `/index/book/progressUpdate` | 更新进度，表单字段包括 `filename`、`frac`、`spine`、`page`、`percent`。 |
 | `GET` | `/index/book/file` | 下载书籍文件，使用 `filename` 参数。 |
@@ -118,15 +118,13 @@ Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供�
 
 下载前，插件会尝试以 `HEAD /index/book/file?filename=...` 获取 `Content-Length` 以显示进度；服务端不支持 `HEAD` 或未返回长度时，下载仍可正常进行。
 
-主页的“每日一言”模式还会访问 `https://api.ankio.net/hitokoto`，该请求不经过 Book 服务。
-
 书籍列表中的常用字段包括 `filename`、`bookName`、`author`、`favorite`、`category`、`series`、`description` 和 `progressPercent`。最近阅读接口返回的数据用于主页的最近阅读和在读区域。
 
 ## 本地数据
 
-插件设置保存于 KOReader 的 `book_plugin_v2` 设置项。书籍下载到配置的本地目录，封面保存在其中的 `.covers` 子目录；本地文件与远端文件名及最近打开时间的映射保存于 `book_plugin_filemap_v2`，用于进度同步和过期缓存清理。
+插件配置在 `$DATA/.moon/settings/`（`common.lua` 与各源文件）。结构化数据在 `$DATA/.moon/book.sqlite3`（`books` / `tocs` / `opens` / `http`）。正文与封面在 `$DATA/.moon/cache/<source>/`。
 
-首次进入主页时，插件会异步删除连续 90 天未打开的本地书籍及相应封面。**设置 → 清理缓存** 会删除该目录中的全部书籍与封面并重置本地映射，但不会删除服务器端内容。
+首次进入主页时，插件会异步删除连续 90 天未打开的本地书籍及相应封面。**设置 → 清理缓存** 会清空缓存目录与 tocs/opens/meta 字段，但保留 `books.filename` / `books.md5`，也不会删除服务器端内容。
 
 ## 版本号
 

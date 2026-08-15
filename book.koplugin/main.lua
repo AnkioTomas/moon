@@ -17,9 +17,7 @@ local _ = require("gettext")
 local SourceRegistry = require("source.registry")
 local Desktop = require("ui.desktop")
 local StatsSync = require("stats.stats_sync")
-local Tracker = require("stats.tracker")
 local Host = require("host")
-local Progress = require("book.progress")
 local Open = require("book.open")
 
 --- Book 插件实例（FM / Reader 各一份）
@@ -80,35 +78,22 @@ function BookPlugin:addToMainMenu(menu_items)
     }
 end
 
---- 阅读器就绪：开始统计计时；拉进度；按章落点；通知源
+--- 阅读器就绪：建阅读会话；统计计时；拉进度；按章落点；挂阅读页；通知源
 ---@return nil
 function BookPlugin:onReaderReady()
-    Tracker.start(self.ui)
-    local Chapter = require("book.chapter")
-    if Chapter.isActive() then
-        require("chapters.patches").enable()
-        require("chapters.patches").wrapReaderUi(self.ui)
-        Chapter.onReaderReady(self.ui)
-    end
-    Progress.pull(self.ui, self:getSource(), false)
-    self:emitToSource("reader_ready")
+    require("reader.session").onReaderReady(self)
 end
 
 --- 关文档：推进度；结清统计；通知源；切章则保留会话，真关书才清
 ---@return nil
 function BookPlugin:onCloseDocument()
-    Progress.push(self.ui, self:getSource(), false)
-    Tracker.stop()
-    self:emitToSource("document_close")
-    local closed = self.ui and self.ui.document and self.ui.document.file
-    require("book.chapter").onCloseDocument(closed)
+    require("reader.session").onCloseDocument(self)
 end
 
 --- 章末：按章会话自动下一章
 ---@return boolean|nil
 function BookPlugin:onEndOfBook()
-    local Chapter = require("book.chapter")
-    if Chapter.onEndOfBook() then
+    if require("reader.session").onEndOfBook() then
         return true
     end
 end
@@ -116,8 +101,7 @@ end
 --- 章首：按章会话自动上一章（由 chapters.patches 触发）
 ---@return boolean|nil
 function BookPlugin:onStartOfBook()
-    local Chapter = require("book.chapter")
-    if Chapter.onStartOfBook() then
+    if require("reader.session").onStartOfBook() then
         return true
     end
 end
@@ -125,36 +109,28 @@ end
 --- 休眠前：有打开文档时推进度 / 结清统计并通知源
 ---@return nil
 function BookPlugin:onSuspend()
-    if not self.ui.document then
-        return
-    end
-    Progress.push(self.ui, self:getSource(), false)
-    Tracker.stop()
-    self:emitToSource("suspend")
+    require("reader.session").onSuspend(self)
 end
 
 --- 唤醒：恢复阅读统计计时
 ---@return nil
 function BookPlugin:onResume()
-    if not self.ui.document then
-        return
-    end
-    Tracker.start(self.ui)
+    require("reader.session").onResume(self)
 end
 
---- 翻页（分页视图）：统计换页
+--- 翻页（分页视图）：统计换页；分发 page_changed
 ---@param page number
 ---@return nil
 function BookPlugin:onPageUpdate(page)
-    Tracker.onPage(self.ui, page)
+    require("reader.session").onPageUpdate(self, page)
 end
 
---- 翻页（滚动视图）：统计换页
+--- 翻页（滚动视图）：统计换页；分发 page_changed
 ---@param _pos any
 ---@param page number|nil
 ---@return nil
 function BookPlugin:onPosUpdate(_pos, page)
-    Tracker.onPage(self.ui, page)
+    require("reader.session").onPosUpdate(self, page)
 end
 
 -- ── 对外动作（UI / 设置页调用）───────────────────────
