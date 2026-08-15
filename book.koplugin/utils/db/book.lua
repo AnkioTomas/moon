@@ -159,23 +159,25 @@ function BookDB.renameStableId(source_id, old_stable_id, new_stable_id)
         return true
     end
     Base.ensure()
-    Base.exec(
+    -- 四表身份必须同生共死：包事务，任何一步失败整体回滚
+    if not Base.exec([[BEGIN IMMEDIATE;]]) then
+        return false
+    end
+    local ok = Base.exec(
         [[UPDATE books SET stable_id=? WHERE source_id=? AND stable_id=?;]],
         new_stable_id, source_id, old_stable_id
-    )
-    Base.exec(
+    ) and Base.exec(
         [[UPDATE opens SET stable_id=? WHERE source_id=? AND stable_id=?;]],
         new_stable_id, source_id, old_stable_id
-    )
-    Base.exec(
+    ) and Base.exec(
         [[UPDATE reading_stats SET stable_id=? WHERE source_id=? AND stable_id=?;]],
         new_stable_id, source_id, old_stable_id
-    )
-    Base.exec(
+    ) and Base.exec(
         [[UPDATE pending_progress SET stable_id=? WHERE source_id=? AND stable_id=?;]],
         new_stable_id, source_id, old_stable_id
     )
-    return true
+    Base.exec(ok and [[COMMIT;]] or [[ROLLBACK;]])
+    return ok == true
 end
 
 --- 取某源全部 stable_id

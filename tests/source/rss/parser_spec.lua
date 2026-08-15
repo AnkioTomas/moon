@@ -75,6 +75,8 @@ do
         "https://example.com/feed")
     Assert.eq(Parser.normalizeUrl("HTTPS://EXAMPLE.COM/Feed"),
         "https://example.com/Feed")
+    -- 非 http(s) scheme 拒绝（先验 scheme 再补 https，ftp 不会被拼成 https://ftp://…）
+    Assert.is_nil(Parser.normalizeUrl("ftp://example.com/x"))
     Assert.eq(Parser.absoluteUrl("https://example.com/a/b.xml", "../x"),
         "https://example.com/x")
     Assert.eq(Parser.absoluteUrl("https://example.com/a/b.xml?old=1", "?new=1"),
