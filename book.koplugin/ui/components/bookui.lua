@@ -3,6 +3,13 @@ Book 桌面 UI 缩放 — 字号 / 间距 / 图标统一从这里走。
 缩放值存 moon.settings（$DATA/.moon/settings/common.lua 的 ui_scale）
 字体族存 common.ui_font，经 moon.font 改 Font.fontmap；UI.face 解析字族。
 
+无自绘页面布局；本模块只吐尺寸/颜色/进度条积木：
+  +------------------------+
+  |  [====····] progressBar|
+  |  ─ line / rule 色      |
+  |  sz / face / iconSz …  |
+  +------------------------+
+
 约定：
   UI.sz(n)       间距、控件几何（含 DPI + ui_scale）
   UI.face(...)   Font:getFace 包装（TextWidget / TitleBar / TextBox 用）

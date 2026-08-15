@@ -5,6 +5,18 @@
   Popup.sheet  — 居中动作表（ButtonDialog，适合少量动作）
   Popup.spin   — 数值增减（SpinWidget）
 
+布局：
+
+  list（全屏 Menu）              sheet（居中）           spin
+  +------------------+           +-------------+         +-------------+
+  | title            |           |   title     |         |   title     |
+  |------------------|           |-------------|         |  [-] N [+]  |
+  | [i] item     ›   |           |  action 1   |         |  cancel  ok |
+  | [i] item     ›   |           |  action 2   |         +-------------+
+  | …                |           |  cancel     |
+  | Page N of M      |           +-------------+
+  +------------------+
+
 items 统一形状：
   { text = "...", callback = fn }           -- 点按执行并关闭
   { text = "...", value = x }               -- 配合 on_select(value, item)

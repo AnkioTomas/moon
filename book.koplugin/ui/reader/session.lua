@@ -4,6 +4,14 @@
 收编 main.lua 的阅读期编排（Tracker / Progress / Chapters / 源事件），
 并维护当前阅读状态供阅读页管理器（ui.reader）与进度条（ui.reader.bars）查询。
 
+无自绘布局；状态机：
+
+  openDocument ──► _cur 活跃 ──► bars/panel 可读
+       │                │
+       │           page_changed / 切章
+       │                │
+  CloseDocument ──► _cur = nil（bars 停画）
+
 身份来源：章会话（chapters）优先——换源后仍读旧书时 registry.current 已不对；
 否则 Store.identityFor(document.file)。都没有 → 会话不活跃，无身份文档行为零变化。
 

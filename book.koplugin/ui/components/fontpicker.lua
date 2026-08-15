@@ -11,6 +11,17 @@
 只负责选中后 MoonFont.set（写配置）；不碰 Font.fontmap。
 真正 apply 在 Desktop:rebuild（及 Host.attach）。
 
+布局（走 Popup.list）：
+  +----------------------------------+
+  | 界面字体                         |
+  |----------------------------------|
+  | ✓ 系统默认                       |
+  | ✓ 本地   [样张 TextWidget]        |
+  |   在线   [==== 预览图 ====]       |
+  | …                                |
+  | Page N of M                      |
+  +----------------------------------+
+
   FontPicker.open{
     title   = _("界面字体"),
     on_done = function(id, name) end,

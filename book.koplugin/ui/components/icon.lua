@@ -1,6 +1,13 @@
 --[[--
 Material Icons Outlined 字体图标。
 
+布局：
+  widget（方盒居中）     label row              label column
+  +----+                 +----------+           +----+
+  | 🏠 |                 | 🏠 文案  |           | 🏠 |
+  +----+                 +----------+           |文案|
+                                                +----+
+
   Icon.widget{ name = "home", size = 24, color = ..., dim = false }
   Icon.label{ name = "home", text = "首页", direction = "row"|"column", ... }
 
