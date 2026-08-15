@@ -91,6 +91,28 @@ function Config.installUtilStub()
                 fh:close()
                 return true
             end,
+            -- 与 koreader/frontend/util.lua 同实现（http/webdav.lua 需要）
+            urlEncode = function(url, preserve_chars)
+                local char_to_hex = function(c)
+                    return string.format("%%%02X", string.byte(c))
+                end
+                preserve_chars = preserve_chars or ""
+                local pattern = string.format("([%s%s])", "^%w%-%._~", preserve_chars)
+                if url == nil then
+                    return
+                end
+                url = url:gsub("\n", "\r\n")
+                url = url:gsub(pattern, char_to_hex)
+                return url
+            end,
+            urlDecode = function(url)
+                if url == nil then
+                    return
+                end
+                return (url:gsub("%%(%x%x)", function(x)
+                    return string.char(tonumber(x, 16))
+                end))
+            end,
         }
     end
 end
