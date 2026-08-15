@@ -15,8 +15,9 @@ local Setting = {}
 ---@return string status, boolean status_on
 function Setting.rowStatus()
     local cfg = require("utils.settings").getSource(SOURCE_ID)
-    if (cfg.path or "") ~= "" then
-        return _("已配置"), true
+    local path = cfg.path or ""
+    if path ~= "" then
+        return path, true
     end
     return _("未配置"), false
 end
