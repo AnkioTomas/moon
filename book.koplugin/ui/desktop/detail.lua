@@ -85,6 +85,15 @@ function Detail:init()
         }
     end
     self:rebuild()
+    if self.book and self.book.ref and self.book.ref.source_id == "zlib" then
+        self._store_detail_job = require("zlib.init").getDetailAsync(self.book, function(detail)
+            self._store_detail_job = nil
+            if self._closed or not detail then return end
+            self.book = detail
+            self:rebuild()
+            require("ui/uimanager"):setDirty(self, "full")
+        end)
+    end
 end
 
 --- 返回详情页尺寸。
@@ -97,6 +106,9 @@ end
 ---@return boolean
 function Detail:onClose()
     self._closed = true
+    if self._store_detail_job and self._store_detail_job.cancel then self._store_detail_job.cancel() end
+    if self._install_job and self._install_job.cancel then self._install_job.cancel() end
+    self._store_detail_job, self._install_job = nil, nil
     local UIManager = require("ui/uimanager")
     local desk = self.desktop
     UIManager:close(self)
@@ -197,17 +209,60 @@ function Detail:rebuild()
             end,
         })
     end
+    local store_book = book.ref and book.ref.source_id == "zlib"
     table.insert(button_row, {
-        text = _("开始阅读"),
+        text = store_book and _("加入书库") or _("开始阅读"),
         font_size = btn_font,
-        enabled = caps.whole_book == true or caps.chapters == true,
+        enabled = store_book and type(self.source and self.source.importBookAsync) == "function"
+            or (not store_book and (caps.whole_book == true or caps.chapters == true)),
         callback = function()
+            if store_book then
+                if self._install_job then return end
+                if not require("zlib.init").hasCredentials() then
+                    require("zlib.setting").open(self.plugin)
+                    return
+                end
+                local ProgressbarDialog = require("ui/widget/progressbardialog")
+                local UIManager = require("ui/uimanager")
+                local InfoMessage = require("ui/widget/infomessage")
+                local dialog = ProgressbarDialog:new{
+                    title = _("正在加入书库…"),
+                    subtitle = book.title,
+                    progress_max = tonumber(book.filesize),
+                    dismissable = false,
+                }
+                dialog:show()
+                require("ui/network/manager"):runWhenOnline(function()
+                    if self._closed then dialog:close(); return end
+                    self._install_job = require("zlib.init").installAsync(self.source, book, function(bytes)
+                        dialog:reportProgress(bytes)
+                    end, function(ok, err, filename)
+                        self._install_job = nil
+                        dialog:close()
+                        if self._closed then return end
+                        if not ok then
+                            UIManager:show(InfoMessage:new{ text = err or _("下载失败") })
+                            return
+                        end
+                        local desk = self.desktop
+                        self:onClose()
+                        UIManager:show(InfoMessage:new{
+                            text = _("已加入书库：") .. tostring(filename or book.title),
+                            timeout = 3,
+                        })
+                        if desk and not desk._closed then
+                            desk._library_state = nil
+                            desk.page = 1
+                            desk:switchTab("library")
+                        end
+                    end)
+                end)
+                return
+            end
             local plugin = self.plugin
             local b = self.book
             self:onClose()
-            if plugin and plugin.openBook then
-                plugin:openBook(b)
-            end
+            if plugin and plugin.openBook then plugin:openBook(b) end
         end,
     })
     local buttons = ButtonTable:new{

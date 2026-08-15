@@ -1,6 +1,6 @@
 --[[--
-书城 Tab：浏览目录（listStore）
-  UI 复用 Library 网格；仅当 source.capabilities.store 时出现在底栏
+书城 Tab：浏览目录。
+  local / webdav 使用全局 Z-Library；自带书城能力的源仍走 source.listStoreAsync。
 
 布局（同 Library.build）：
   +-----------------------------------------------+
@@ -99,11 +99,12 @@ function Store.fetch(desktop)
         done({}, _("请先在设置里配置当前数据源"))
         return
     end
-    if not source.listStoreAsync then
+    local backend = type(source.importBookAsync) == "function" and require("zlib.init") or source
+    if not backend.listStoreAsync then
         done({}, _("当前数据源不支持书城"))
         return
     end
-    desktop._store_fetch_cancel = source:listStoreAsync({
+    desktop._store_fetch_cancel = backend:listStoreAsync({
         page = page,
         page_size = page_size,
         search = search,
@@ -119,7 +120,9 @@ function Store.fetch(desktop)
         end
         desktop.store_total = tonumber(res.count) or 0
         local books = res.data or {}
-        BookStore.rememberMany(books)
+        if backend == source then
+            BookStore.rememberMany(books)
+        end
         done(books)
     end)
 end
