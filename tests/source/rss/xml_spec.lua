@@ -76,6 +76,18 @@ do
     Assert.eq(div.children[2].attr.src, "a.jpg")
 end
 
+-- Xml.parse：引号包裹的属性值内的 > 不截断标签
+do
+    local root = Xml.parse('<a title="x>y">t</a>')
+    local a = root.children[1]
+    Assert.eq(a.name, "a")
+    Assert.eq(a.attr.title, "x>y")
+    Assert.eq(a.children[1], "t")
+    -- 单引号同理
+    local root2 = Xml.parse("<a title='x>y'>t</a>")
+    Assert.eq(root2.children[1].attr.title, "x>y")
+end
+
 -- Xml.parse：CDATA 原文保留（不做实体解码），注释/PI/DOCTYPE 跳过
 do
     local root = Xml.parse(

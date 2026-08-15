@@ -205,6 +205,23 @@ do
     Assert.eq(done[2].start_idx, 4)
 end
 
+-- chapter_idx 越界：与 fraction 路径一样 clamp 到目录范围
+do
+    local done
+    Materialize.prepareOpenAsync(makeSource({ chapter_idx = 99 }), {}, {}, function(ok, prep)
+        done = { ok, prep }
+    end)
+    Assert.eq(done[1], true)
+    Assert.eq(done[2].start_idx, 10)
+
+    done = nil
+    Materialize.prepareOpenAsync(makeSource({ chapter_idx = 0 }), {}, {}, function(ok, prep)
+        done = { ok, prep }
+    end)
+    Assert.eq(done[1], true)
+    Assert.eq(done[2].start_idx, 1)
+end
+
 -- 只有 fraction：按目录长度换算（floor(pct * n) + 1）
 do
     local done
@@ -359,6 +376,20 @@ end
 do
     fetched = {}
     Session.clear()
+    Materialize.prefetchAround(5)
+    Stubs.flush()
+    Assert.len(fetched, 0)
+end
+
+-- 会话无目录（count=0）：前 1 也不预取（该章可能不存在）
+do
+    fetched = {}
+    Session.bind({
+        source = makeFetchSource(),
+        ref = { source_id = "wechat", stable_id = "pf6" },
+        toc = {},
+        idx = 5,
+    })
     Materialize.prefetchAround(5)
     Stubs.flush()
     Assert.len(fetched, 0)
