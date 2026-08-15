@@ -118,6 +118,7 @@ end
 ---@field coverRequest fun(self: BookSource, ref: BookRef): (BookCoverRequest|nil, string|nil)
 ---@field localPathFor fun(self: BookSource, ref: BookRef): string|nil 本地源专用：原文件直开路径（存在才返回，命中则不下载不复制）
 ---@field probeFileSize fun(self: BookSource, ref: BookRef): number|nil
+---@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 书城导入目标（local 移入 / webdav 上传）
 ---@field registerReadingDevice fun(self: BookSource, device_id: string, model: string|nil): (table|nil, string|nil)
 ---@field registerReadingDeviceAsync fun(self: BookSource, device_id: string, model: string|nil, cb: fun(data: table|nil, err: string|nil)): table|nil
 ---@field importReadingStats fun(self: BookSource, payload: BookStatsPayload): (table|nil, string|nil)
