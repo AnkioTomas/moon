@@ -18,6 +18,7 @@
 UI 图标请用 ui.components.icon（Material Icons 字体），不要走本组件。
 
   Image.abortPending()
+  Image.fetchAsync(url, headers, function(path, err) end)  -- 只下载不显示（刮削封面）
 
 下载直写磁盘，网络图用 KOReader Turbo 事件循环。
 --]]
@@ -218,12 +219,12 @@ local function cachedPath(url)
     return nil
 end
 
---- 异步下载到缓存；成功回调最终路径。
+--- 异步下载到缓存；成功回调最终路径（已缓存则下一拍直接回调）。
 ---@param url string
 ---@param headers table|nil
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return { cancel: fun() }
-local function downloadAsync(url, headers, cb)
+function Image.fetchAsync(url, headers, cb)
     local cached = cachedPath(url)
     if cached then
         UIManager:nextTick(function()
@@ -420,7 +421,7 @@ local function pendingBox(url, headers, w, h, alpha, fit, border, fb, show_paren
         WidgetContainer.free(self, full)
     end
 
-    job = downloadAsync(url, headers, function(path, err)
+    job = Image.fetchAsync(url, headers, function(path, err)
         forgetJob(job)
         job = nil
         if path then

@@ -1,7 +1,7 @@
 --[[--
 刮削 UI 流程
 
-用户确认书名 -> 搜索 -> 选择结果 -> 写入 books 表
+用户确认书名 -> 搜索 -> 选择结果 -> 写 books 表 + 下封面 -> 通知调用方刷新
 
 @module koplugin.book.scrape.ui
 --]]
@@ -9,110 +9,119 @@
 local UIManager = require("ui/uimanager")
 local InputDialog = require("ui/widget/inputdialog")
 local InfoMessage = require("ui/widget/infomessage")
-local Popup = require("ui.components.popup")
+local Results = require("scrape.results")
 local Search = require("scrape.search")
+local Image = require("ui.components.image")
 local BookDB = require("utils.db.book")
 local DbQueue = require("utils.db.queue")
+local Paths = require("utils.paths")
 local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
 local ScrapeUI = {}
 
---- 格式化搜索结果为显示文本
----@param result table
----@return string
-local function formatResult(result)
-    local parts = {}
-    if result.title and result.title ~= "" then
-        parts[#parts + 1] = result.title
+--- 原样复制文件（先写 .part 再改名，避免半截封面被读到）。
+---@param from string
+---@param to string
+---@return boolean
+local function copyFile(from, to)
+    local src = io.open(from, "rb")
+    if not src then
+        return false
     end
-    if result.author and result.author ~= "" then
-        parts[#parts + 1] = "作者: " .. result.author
+    local data = src:read("*a")
+    src:close()
+    local tmp = to .. ".part"
+    local dst = io.open(tmp, "wb")
+    if not dst then
+        return false
     end
-    if result.rating and result.rating ~= "" then
-        parts[#parts + 1] = "评分: " .. result.rating
+    dst:write(data)
+    dst:close()
+    os.remove(to)
+    if os.rename(tmp, to) then
+        return true
     end
-    if result.year and result.year ~= "" then
-        parts[#parts + 1] = result.year
-    end
-    if result.publisher and result.publisher ~= "" then
-        parts[#parts + 1] = result.publisher
-    end
-    if result.source then
-        local source_name = result.source == "douban" and "豆瓣" or "微信读书"
-        parts[#parts + 1] = "[" .. source_name .. "]"
-    end
-    return table.concat(parts, " · ")
+    os.remove(tmp)
+    return false
 end
 
---- 将搜索结果写入 books 表
----@param book_key string
----@param source_id string
----@param stable_id string
----@param result table
-local function saveToBooks(book_key, source_id, stable_id, result)
-    DbQueue.run(function()
-        local tags = result.tags
-        local category = ""
-        if type(tags) == "table" and #tags > 0 then
-            category = table.concat(tags, ",")
+--- 下载封面并落进本源封面缓存；books 表不存链接，UI 只认本地文件。
+---@param ref BookRef
+---@param url string
+---@param headers table|nil 源站防盗链头（豆瓣必须带 Referer）
+---@param done fun()
+local function saveCover(ref, url, headers, done)
+    if url == "" then
+        done()
+        return
+    end
+    Image.fetchAsync(url, headers, function(path, err)
+        if path then
+            Paths.ensureLayout(ref.source_id)
+            copyFile(path, Paths.coverPath(ref.book_key, ref.source_id))
+        else
+            logger.warn("scrape cover download failed:", url, err)
         end
-
-        BookDB.upsert({
-            book_key = book_key,
-            source_id = source_id,
-            stable_id = stable_id,
-            title = result.title,
-            authors = result.author,
-            intro = result.intro or result.full_intro,
-            category = category ~= "" and category or nil,
-            series = result.series,
-            fetched_at = os.time(),
-        })
+        done()
     end)
 end
 
---- 显示搜索结果选择对话框
+--- 写 books 表 + 拉封面，两件事都落地后回调。
+---@param ref BookRef
+---@param result table
+---@param done fun()
+local function applyResult(ref, result, done)
+    DbQueue.run(function()
+        -- 分类归本地目录/用户，刮削只补元数据，不覆盖
+        local existing = BookDB.get(ref.book_key)
+        BookDB.upsert({
+            book_key = ref.book_key,
+            source_id = ref.source_id,
+            stable_id = ref.stable_id,
+            title = result.title,
+            authors = result.author,
+            intro = result.intro,
+            category = existing and existing.category or nil,
+            series = result.series,
+            percent = existing and existing.percent or 0,
+            favorite = existing and existing.favorite or nil,
+            filename = existing and existing.filename or nil,
+            md5 = existing and existing.md5 or nil,
+            fetched_at = os.time(),
+        })
+    end, {
+        on_done = function()
+            saveCover(ref, result.cover_url, result.cover_headers, done)
+        end,
+    })
+end
+
+--- 显示搜索结果选择页
 ---@param ref BookRef
 ---@param results table[]
+---@param source string
 ---@param on_close fun()|nil
-local function showResults(ref, results, on_close)
-    if not results or #results == 0 then
-        UIManager:show(InfoMessage:new{
-            text = _("未找到匹配的书籍"),
-            timeout = 2,
-        })
-        if on_close then on_close() end
-        return
-    end
-
-    local items = {}
-    for _, result in ipairs(results) do
-        local item = {
-            text = formatResult(result),
-            callback = function()
-                saveToBooks(ref.book_key, ref.source_id, ref.stable_id, result)
+local function showResults(ref, results, source, on_close)
+    local page = Results:new{
+        results = results,
+        source = source,
+        -- 选中后落库与下封面都是异步：全部完成才通知调用方刷新
+        on_pick = function(result)
+            applyResult(ref, result, function()
                 UIManager:show(InfoMessage:new{
                     text = _("元数据已更新"),
                     timeout = 1.5,
                 })
                 if on_close then on_close() end
-            end,
-        }
-        if result.cover_url and result.cover_url ~= "" then
-            item.image = result.cover_url
-            item.image_w = 60
-            item.image_h = 80
-        end
-        items[#items + 1] = item
-    end
-
-    Popup.list{
-        title = _("选择匹配的书籍"),
-        items = items,
+            end)
+        end,
         close_callback = on_close,
     }
+    UIManager:show(page)
+    -- 全屏页盖住详情页：不强制整屏刷新，只会有零星区域被重画
+    UIManager:setDirty(page, "full")
 end
 
 --- 执行搜索
@@ -120,9 +129,8 @@ end
 ---@param query string
 ---@param on_close fun()|nil
 local function performSearch(ref, query, on_close)
-    local info = UIManager:show(InfoMessage:new{
-        text = _("搜索中..."),
-    })
+    local info = InfoMessage:new{ text = _("搜索中...") }
+    UIManager:show(info)
 
     Search.searchAsync(query, function(results, err, source)
         UIManager:close(info)
@@ -137,12 +145,8 @@ local function performSearch(ref, query, on_close)
             return
         end
 
-        if source then
-            local source_name = source == "douban" and "豆瓣" or "微信读书"
-            logger.info("scrape: got results from", source_name)
-        end
-
-        showResults(ref, results, on_close)
+        logger.info("scrape: got results from", source)
+        showResults(ref, results, source, on_close)
     end)
 end
 
