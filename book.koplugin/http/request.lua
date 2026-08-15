@@ -12,6 +12,8 @@ HTTP 请求原语（Turbo，非阻塞，唯一网络栈）
   Request.ok(code) → boolean
   Request.header(res, name) → any
   Request.clearCache(url_substr?) → 清 http.cache
+  Request.randomUA() → string
+  Request.randomIP() → string
 
 @module koplugin.book.http.request
 --]]
@@ -398,6 +400,28 @@ function Request.download(opts, dest, cb)
             write_job.cancel()
         end
     end)
+end
+
+--- 生成随机 User-Agent（刮削 / 伪装浏览器用）。
+---@return string
+function Request.randomUA()
+    local uas = {
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    return uas[math.random(#uas)]
+end
+
+--- 生成随机 IP（X-Forwarded-For）。
+---@return string
+function Request.randomIP()
+    return string.format("%d.%d.%d.%d",
+        math.random(1, 223),
+        math.random(0, 255),
+        math.random(0, 255),
+        math.random(1, 254)
+    )
 end
 
 return Request

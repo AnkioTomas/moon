@@ -66,7 +66,9 @@ function SourceBase:close() end
 ---   reader_ready    — 文档加载渲染完毕（= 文档打开 / 阅读就绪；切章会再次触发）
 ---   document_close  — 关闭文档
 ---   chapter_changed — 按章会话切换章节，payload = { ref, chapter_idx, book }
+---   （切章会关旧文档再开新文档：CloseDocument 不清会话，reader_ready 会再触发）
 ---   fm_open         — FileManager 主界面显示
+---   desktop_open    — Book 桌面打开并可见，payload = Desktop 实例
 ---   suspend         — 设备休眠前（有打开文档时）
 ---@param _event string
 ---@param _payload table|nil

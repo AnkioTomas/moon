@@ -30,7 +30,6 @@ end
 
 --- 下一拍打开阅读器。
 --- 若用户已打开其他文档则跳过，避免下载回调强行切走。
---- 检查放在执行时而非排队时，防止排队到执行之间状态变化。
 ---@param path string
 local function showReader(path)
     local ReaderUI = require("apps/reader/readerui")
@@ -61,25 +60,35 @@ local function openWholeBook(plugin, book, source, ref)
     local Chapter = require("book.chapter")
     Chapter.clear()
     Store.remember(book)
-    local path = Store.bookFilePath(ref.book_key, ref.source_id, ref.stable_id)
 
     --- 登记并进入阅读器。
-    local function doOpen()
+    ---@param path string
+    local function doOpen(path)
         Store.touchAsync(path, ref)
         closeDesktop(plugin)
         logger.info("book.open reader", path)
         showReader(path)
     end
 
+    -- 本地源：直开原文件，不下载不复制
+    if source.localPathFor then
+        local direct = source:localPathFor(ref)
+        if direct then
+            doOpen(direct)
+            return
+        end
+    end
+
+    local path = Store.bookFilePath(ref.stable_id, ref.source_id)
     if Content.isValidBook(path) then
-        doOpen()
+        doOpen(path)
         return
     end
     -- 半截/损坏缓存不当命中
     pcall(os.remove, path)
 
     NetworkMgr:runWhenOnline(function()
-        local job_key = "whole:" .. ref.book_key
+        local job_key = "whole:" .. ref.source_id .. ":" .. ref.stable_id
         Content.sharedJob(job_key, function(finish)
             local title = book.title
                 or (ref.stable_id:match("([^/\\]+)$") or ref.stable_id)
@@ -136,7 +145,7 @@ local function openWholeBook(plugin, book, source, ref)
                 return
             end
             logger.info("book.open download ok", ref.stable_id)
-            doOpen()
+            doOpen(path)
         end)
     end)
 end
@@ -152,13 +161,22 @@ local function openChapterBook(plugin, book, source, ref)
     NetworkMgr:runWhenOnline(function()
         UIManager:show(InfoMessage:new{ text = _("正在准备章节…"), timeout = 1 })
         local Chapter = require("book.chapter")
+        -- 打开令牌：期间若 clear/换书则作废回调
+        local open_token = {}
+        Chapter._open_token = open_token
         Chapter.prepareOpenAsync(source, book, ref, function(ok, prep, err)
+            if Chapter._open_token ~= open_token then
+                return
+            end
             if not ok or not prep then
                 UIManager:show(InfoMessage:new{ text = err or _("无法获取目录") })
                 return
             end
             local start_idx = prep.start_idx or 1
             Chapter.ensureAsync(source, ref, start_idx, prep.toc, function(eok, path, e2)
+                if Chapter._open_token ~= open_token then
+                    return
+                end
                 if not eok or not path then
                     UIManager:show(InfoMessage:new{ text = e2 or _("章节下载失败") })
                     return
@@ -174,7 +192,7 @@ local function openChapterBook(plugin, book, source, ref)
                 Store.touchAsync(path, ref, { chapter_idx = start_idx })
                 closeDesktop(plugin)
                 logger.info("book.open chapter", ref.stable_id, start_idx, path)
-                showReader(path)
+                Chapter.showInitial(path)
                 Chapter.prefetchAround(start_idx)
             end)
         end)

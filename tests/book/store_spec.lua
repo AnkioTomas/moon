@@ -21,14 +21,13 @@ local orig_sanitize = Paths.sanitizeSourceId
 local orig_ensure = Paths.ensureBookWork
 local orig_work = Paths.bookWorkDir
 Paths.ensureBookWork = function() end
-Paths.bookWorkDir = function(key, id)
-    return "/tmp/" .. tostring(id) .. "/" .. tostring(key)
+Paths.bookWorkDir = function(stable_id, id)
+    return "/tmp/" .. tostring(id) .. "/" .. tostring(stable_id)
 end
 
 package.loaded["book.store"] = nil
 package.loaded["utils.db.base"] = nil
 package.loaded["utils.db.book"] = nil
-package.loaded["utils.db.toc"] = nil
 package.loaded["utils.db.open"] = nil
 package.preload["utils.db.base"] = function()
     return { open = function() return true end }
@@ -41,19 +40,11 @@ package.preload["utils.db.book"] = function()
         stripMeta = function() end,
     }
 end
-package.preload["utils.db.toc"] = function()
-    return {
-        put = function() return true end,
-        get = function() return nil end,
-        delete = function() end,
-        deleteExpired = function() end,
-        clear = function() end,
-    }
-end
 package.preload["utils.db.open"] = function()
     return {
         upsert = function() return true end,
         get = function() return nil end,
+        getByPath = function() return nil end,
         all = function() return {} end,
         delete = function() end,
         clear = function() end,
@@ -71,7 +62,9 @@ local Store = require("book.store")
 do
     local ref = BookRef.new("moon", "a.epub")
     local book = { ref = ref, title = "t", percent = 1 }
-    Assert.eq(Store.refOf(book).book_key, ref.book_key)
+    local got = Store.refOf(book)
+    Assert.eq(got.source_id, ref.source_id)
+    Assert.eq(got.stable_id, ref.stable_id)
 end
 
 do
@@ -79,15 +72,8 @@ do
 end
 
 do
-    local a = BookRef.keyOf("moon", "same")
-    local b = BookRef.keyOf("wechat", "same")
-    Assert.is_true(a ~= b)
-    Assert.eq(a, BookRef.new("moon", "same").book_key)
-end
-
-do
-    Assert.eq(Store.bookFilePath("key", "webdav", "books/a.pdf"), "/tmp/webdav/key/book.pdf")
-    Assert.eq(Store.bookFilePath("key", "webdav", "books/a.unknown"), "/tmp/webdav/key/book.epub")
+    Assert.eq(Store.bookFilePath("books/a.pdf", "webdav"), "/tmp/webdav/books/a.pdf/book.pdf")
+    Assert.eq(Store.bookFilePath("books/a.unknown", "webdav"), "/tmp/webdav/books/a.unknown/book.epub")
 end
 
 Paths.sanitizeSourceId = orig_sanitize
@@ -96,7 +82,6 @@ Paths.bookWorkDir = orig_work
 for _, k in ipairs({
     "utils.db.base",
     "utils.db.book",
-    "utils.db.toc",
     "utils.db.open",
     "utils.db.queue",
     "book.store",

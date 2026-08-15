@@ -266,9 +266,7 @@ do
                         return { { "sub", "zeta" } }, 2
                     end
                     return {
-                        { "k1" },
                         { "/books/a.epub" },
-                        { "a.epub" },
                         { "书名" },
                         { "作者" },
                         { 42 },
@@ -382,7 +380,7 @@ do
     Assert.eq(rows[2].title, "书名B")
     local q = calls[#calls]
     Assert.is_true(q.sql:find("LEFT JOIN books", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("GROUP BY o.stable_id", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("ORDER BY o.last_open DESC", 1, true) ~= nil)
     Assert.eq(q.args[1], "local")
     Assert.eq(q.args[2], 24)
 

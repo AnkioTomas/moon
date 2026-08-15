@@ -4,14 +4,12 @@ books 表：BookRef + 展示元数据 + 统计 md5
 @module koplugin.book.utils.db.book
 --]]
 
-local JSON = require("json")
 local Base = require("utils.db.base")
-local BookRef = require("types.book").BookRef
 
 local BookDB = {}
 
---- favorite 字段写入 DB 的字符串形式
----@param v any
+--- favorite 字段写入 DB 的字符串形式（契约：nil / string / boolean，见 types/book.lua）
+---@param v nil|string|boolean
 ---@return string|nil
 local function favoriteToDb(v)
     if v == nil then
@@ -19,13 +17,6 @@ local function favoriteToDb(v)
     end
     if type(v) == "string" then
         return v
-    end
-    if type(v) == "number" or type(v) == "boolean" then
-        return tostring(v)
-    end
-    local ok, encoded = pcall(JSON.encode, v)
-    if ok and encoded then
-        return encoded
     end
     return tostring(v)
 end
@@ -39,30 +30,19 @@ function BookDB.upsert(row)
     end
     Base.ensure()
     local source_id = Base.requireSourceId(row.source_id)
-    local stable_id = row.stable_id or row.filename
+    local stable_id = row.stable_id
     if type(stable_id) == "number" then
         stable_id = tostring(stable_id)
     end
     if not source_id or type(stable_id) ~= "string" or stable_id == "" then
         return false
     end
-    local book_key = row.book_key
-    if type(book_key) ~= "string" or book_key == "" then
-        book_key = BookRef.keyOf(source_id, stable_id)
-    end
-    local filename = row.filename or stable_id
-    if filename ~= nil then
-        filename = tostring(filename)
-    end
     return Base.exec(
         [[INSERT INTO books (
-            book_key, source_id, stable_id, filename, md5, title, authors,
+            source_id, stable_id, md5, title, authors,
             percent, category, favorite, series, intro, fetched_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(book_key) DO UPDATE SET
-            source_id=excluded.source_id,
-            stable_id=excluded.stable_id,
-            filename=COALESCE(excluded.filename, books.filename),
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(source_id, stable_id) DO UPDATE SET
             md5=COALESCE(excluded.md5, books.md5),
             title=excluded.title,
             authors=excluded.authors,
@@ -72,10 +52,8 @@ function BookDB.upsert(row)
             series=excluded.series,
             intro=excluded.intro,
             fetched_at=excluded.fetched_at;]],
-        book_key,
         source_id,
         stable_id,
-        filename,
         row.md5,
         row.title,
         row.authors,
@@ -88,29 +66,30 @@ function BookDB.upsert(row)
     ) ~= nil
 end
 
---- 按 book_key 取 books 行
----@param book_key string
----@return Book
-function BookDB.get(book_key)
-    if type(book_key) ~= "string" or book_key == "" then
+--- 按 (source_id, stable_id) 取 books 行
+---@param source_id string
+---@param stable_id string
+---@return Book|nil
+function BookDB.get(source_id, stable_id)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
         return nil
     end
     Base.ensure()
-    local book_key_r, source_id, stable_id, filename, digest, title, authors, percent, category, favorite, series, intro, fetched_at =
+    local source_id_r, stable_id_r, digest, title, authors, percent, category, favorite, series, intro, fetched_at =
         Base.rowexec(
-            [[SELECT book_key, source_id, stable_id, filename, md5, title, authors,
+            [[SELECT source_id, stable_id, md5, title, authors,
                      percent, category, favorite, series, intro, fetched_at
-              FROM books WHERE book_key=? LIMIT 1;]],
-            book_key
+              FROM books WHERE source_id=? AND stable_id=? LIMIT 1;]],
+            source_id,
+            stable_id
         )
-    if not book_key_r then
+    if not source_id_r then
         return nil
     end
     return {
-        book_key = book_key_r,
-        source_id = source_id,
-        stable_id = stable_id,
-        filename = filename,
+        source_id = source_id_r,
+        stable_id = stable_id_r,
         md5 = digest,
         title = title,
         authors = authors,
@@ -123,44 +102,92 @@ function BookDB.get(book_key)
     }
 end
 
---- 按 book_key 更新 md5（可选同步 filename）
----@param book_key string
----@param digest string
----@param filename string|nil
----@return boolean
-function BookDB.setMd5ByKey(book_key, digest, filename)
-    if type(book_key) ~= "string" or book_key == "" then
-        return false
-    end
-    if type(digest) ~= "string" or digest == "" then
-        return false
+--- 按 (source_id, md5) 找已入库的行（本地源用内容摘要识别文件改名/移动）。
+---@param source_id string
+---@param md5 string
+---@return Book|nil
+function BookDB.getByMd5(source_id, md5)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id or type(md5) ~= "string" or md5 == "" then
+        return nil
     end
     Base.ensure()
-    local n = Base.rowexec([[SELECT 1 FROM books WHERE book_key=? LIMIT 1;]], book_key)
-    if n then
-        if type(filename) == "string" and filename ~= "" then
-            return Base.exec(
-                [[UPDATE books SET md5=?, filename=? WHERE book_key=?;]],
-                digest,
-                filename,
-                book_key
-            ) ~= nil
-        end
-        return Base.exec([[UPDATE books SET md5=? WHERE book_key=?;]], digest, book_key) ~= nil
+    local source_id_r, stable_id_r, digest, title, authors, percent, category, favorite, series, intro, fetched_at =
+        Base.rowexec(
+            [[SELECT source_id, stable_id, md5, title, authors,
+                     percent, category, favorite, series, intro, fetched_at
+              FROM books WHERE source_id=? AND md5=? LIMIT 1;]],
+            source_id,
+            md5
+        )
+    if not source_id_r then
+        return nil
     end
-    return false
+    return {
+        source_id = source_id_r,
+        stable_id = stable_id_r,
+        md5 = digest,
+        title = title,
+        authors = authors,
+        percent = tonumber(percent) or 0,
+        category = category,
+        favorite = favorite,
+        series = series,
+        intro = intro,
+        fetched_at = tonumber(fetched_at) or 0,
+    }
 end
 
---- 取某源全部 book_key
+--- 改名/移动：把某本书的 stable_id 换成新值（本地源文件路径变化，身份仍由 md5 认定）。
+--- 同步改写 opens / reading_stats / pending_progress 里对旧 stable_id 的引用。
+---@param source_id string
+---@param old_stable_id string
+---@param new_stable_id string
+---@return boolean
+function BookDB.renameStableId(source_id, old_stable_id, new_stable_id)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id then
+        return false
+    end
+    if type(old_stable_id) ~= "string" or old_stable_id == "" then
+        return false
+    end
+    if type(new_stable_id) ~= "string" or new_stable_id == "" then
+        return false
+    end
+    if old_stable_id == new_stable_id then
+        return true
+    end
+    Base.ensure()
+    Base.exec(
+        [[UPDATE books SET stable_id=? WHERE source_id=? AND stable_id=?;]],
+        new_stable_id, source_id, old_stable_id
+    )
+    Base.exec(
+        [[UPDATE opens SET stable_id=? WHERE source_id=? AND stable_id=?;]],
+        new_stable_id, source_id, old_stable_id
+    )
+    Base.exec(
+        [[UPDATE reading_stats SET stable_id=? WHERE source_id=? AND stable_id=?;]],
+        new_stable_id, source_id, old_stable_id
+    )
+    Base.exec(
+        [[UPDATE pending_progress SET stable_id=? WHERE source_id=? AND stable_id=?;]],
+        new_stable_id, source_id, old_stable_id
+    )
+    return true
+end
+
+--- 取某源全部 stable_id
 ---@param source_id string
 ---@return string[]
-function BookDB.keysBySource(source_id)
+function BookDB.stableIdsBySource(source_id)
     source_id = Base.requireSourceId(source_id)
     if not source_id then
         return {}
     end
     Base.ensure()
-    local result, nrows = Base.query([[SELECT book_key FROM books WHERE source_id=?;]], source_id)
+    local result, nrows = Base.query([[SELECT stable_id FROM books WHERE source_id=?;]], source_id)
     local out = {}
     if result and nrows and nrows > 0 then
         for i = 1, nrows do
@@ -170,15 +197,106 @@ function BookDB.keysBySource(source_id)
     return out
 end
 
---- 按 book_key 删除 books 行（不动 reading_stats）
----@param book_key string
+--- 按源分页查询书库（图书馆直查数据库；排序与扫盘序一致 = stable_id）。
+---@param source_id string
+---@param opts { category: string|nil, search: string|nil, limit: number|nil, offset: number|nil }|nil
+---@return table[] rows, number count
+function BookDB.listBySource(source_id, opts)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id then
+        return {}, 0
+    end
+    opts = opts or {}
+    Base.ensure()
+    local where = "source_id=?"
+    local args = { source_id }
+    if type(opts.category) == "string" and opts.category ~= "" then
+        where = where .. " AND category=?"
+        args[#args + 1] = opts.category
+    end
+    if type(opts.search) == "string" and opts.search ~= "" then
+        -- 转义 LIKE 通配符：用户输入的 % _ 是字面量
+        where = where .. [[ AND (title LIKE ? ESCAPE '\' OR authors LIKE ? ESCAPE '\' OR stable_id LIKE ? ESCAPE '\')]]
+        local like = "%" .. opts.search:gsub("([%%_\\])", "\\%1") .. "%"
+        args[#args + 1] = like
+        args[#args + 1] = like
+        args[#args + 1] = like
+    end
+    local total = Base.rowexec(
+        "SELECT COUNT(*) FROM books WHERE " .. where .. ";",
+        unpack(args)
+    )
+    total = tonumber(total) or 0
+    if total == 0 then
+        return {}, 0
+    end
+    local limit = tonumber(opts.limit) or 0
+    local offset = tonumber(opts.offset) or 0
+    local sel = [[SELECT stable_id, title, authors, percent,
+                        category, intro, fetched_at FROM books WHERE ]]
+        .. where .. " ORDER BY stable_id"
+    if limit > 0 then
+        sel = sel .. " LIMIT ? OFFSET ?"
+        args[#args + 1] = limit
+        args[#args + 1] = math.max(0, offset)
+    end
+    local result, nrows = Base.query(sel .. ";", unpack(args))
+    local rows = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            rows[#rows + 1] = {
+                source_id = source_id,
+                stable_id = result[1][i],
+                title = result[2][i],
+                authors = result[3][i],
+                percent = tonumber(result[4][i]) or 0,
+                category = result[5][i],
+                intro = result[6][i],
+                fetched_at = tonumber(result[7][i]) or 0,
+            }
+        end
+    end
+    return rows, total
+end
+
+--- 某源的书库分类列表（DISTINCT category，非空，字典序）。
+---@param source_id string
+---@return string[]
+function BookDB.categoriesBySource(source_id)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id then
+        return {}
+    end
+    Base.ensure()
+    local result, nrows = Base.query(
+        [[SELECT DISTINCT category FROM books
+          WHERE source_id=? AND category IS NOT NULL AND category<>''
+          ORDER BY category;]],
+        source_id
+    )
+    local out = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            out[#out + 1] = result[1][i]
+        end
+    end
+    return out
+end
+
+--- 按 (source_id, stable_id) 删除 books 行（不动 reading_stats）
+---@param source_id string
+---@param stable_id string
 ---@return boolean
-function BookDB.remove(book_key)
-    if type(book_key) ~= "string" or book_key == "" then
+function BookDB.remove(source_id, stable_id)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
         return false
     end
     Base.ensure()
-    return Base.exec([[DELETE FROM books WHERE book_key=?;]], book_key) ~= nil
+    return Base.exec(
+        [[DELETE FROM books WHERE source_id=? AND stable_id=?;]],
+        source_id, stable_id
+    ) ~= nil
 end
 
 --- 清空全部书籍展示元数据（保留键与 md5）

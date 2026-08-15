@@ -2,10 +2,10 @@
 Moon 目录布局（$DATA/.moon）
 
   .moon/
-    book.sqlite3         结构化数据（books/tocs/opens/http）
+    book.sqlite3         结构化数据（books/opens/http）
     cache/
       <source>/
-        book/<bookKey>/  整本 book.epub 或章节 N.epub
+        book/<slug>/     整本 book.* 或章节 N.html；slug 由 stable_id 派生
         image/           网络图片 / 封面
     settings/
       common.lua
@@ -19,6 +19,7 @@ Moon 目录布局（$DATA/.moon）
 
 local DataStorage = require("datastorage")
 local lfs = require("libs/libkoreader-lfs")
+local md5 = require("ffi/sha2").md5
 
 local P = {}
 
@@ -89,12 +90,30 @@ function P.imageDir(id)
     return P.sourceCacheDir(id) .. "/" .. KIND_IMAGE
 end
 
---- 单书工作目录：cache/<source>/book/<bookKey>/
----@param book_key string|nil
+--- stable_id → 文件系统安全的目录/文件名片段。
+--- stable_id 本身可能含 / 等路径分隔符（webdav 远程路径），不能直接当目录名用；
+--- 目录已按 source 分段，这里只需保证同源内不同 stable_id 不冲突。
+---@param stable_id string
+---@return string
+function P.slugFor(stable_id)
+    return md5(tostring(stable_id or ""))
+end
+
+--- 单书封面缓存：cache/<source>/image/<slug>.png
+--- 扫描提取与刮削下载共用；文件存在即封面可用，不入库。
+---@param stable_id string
 ---@param id string|nil
 ---@return string
-function P.bookWorkDir(book_key, id)
-    return P.bookDir(id) .. "/" .. tostring(book_key or "")
+function P.coverPath(stable_id, id)
+    return P.imageDir(id) .. "/" .. P.slugFor(stable_id) .. ".png"
+end
+
+--- 单书工作目录：cache/<source>/book/<slug>/
+---@param stable_id string
+---@param id string|nil
+---@return string
+function P.bookWorkDir(stable_id, id)
+    return P.bookDir(id) .. "/" .. P.slugFor(stable_id)
 end
 
 --- 插件 SQLite 路径：$DATA/.moon/book.sqlite3
@@ -161,13 +180,13 @@ function P.ensureLayout(id)
     ensureDir(P.imageDir(id))
 end
 
---- 确保某书的工作目录存在：cache/<source>/book/<bookKey>/
----@param book_key string
+--- 确保某书的工作目录存在：cache/<source>/book/<slug>/
+---@param stable_id string
 ---@param id string|nil
 ---@return nil
-function P.ensureBookWork(book_key, id)
+function P.ensureBookWork(stable_id, id)
     P.ensureLayout(id)
-    ensureDir(P.bookWorkDir(book_key, id))
+    ensureDir(P.bookWorkDir(stable_id, id))
 end
 
 return P

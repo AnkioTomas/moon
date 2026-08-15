@@ -31,6 +31,10 @@ function Content.isValidBook(path, format_path)
     if ext == "txt" then
         return true
     end
+    if ext == "html" or ext == "htm" or ext == "xhtml" then
+        -- 非空即可；按章阅读用 HTML，不做 zip 魔数校验
+        return attr.size >= 4
+    end
     if ext == "mobi" or ext == "azw3" then
         -- PalmDB magic: offset 60-67 = "BOOKMOBI" (Mobi) or "TEXtREAd" (PalmDoc)
         if attr.size >= 68 then

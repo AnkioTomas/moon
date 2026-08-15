@@ -80,21 +80,46 @@ function BookPlugin:addToMainMenu(menu_items)
     }
 end
 
---- 阅读器就绪：开始统计计时；拉进度；通知源（文档打开 / 阅读就绪）
+--- 阅读器就绪：开始统计计时；拉进度；按章落点；通知源
 ---@return nil
 function BookPlugin:onReaderReady()
     Tracker.start(self.ui)
+    local Chapter = require("book.chapter")
+    if Chapter.isActive() then
+        require("chapters.patches").enable()
+        require("chapters.patches").wrapReaderUi(self.ui)
+        Chapter.onReaderReady(self.ui)
+    end
     Progress.pull(self.ui, self:getSource(), false)
     self:emitToSource("reader_ready")
 end
 
---- 关文档：推进度；结清统计；通知源；清按章会话
+--- 关文档：推进度；结清统计；通知源；切章则保留会话，真关书才清
 ---@return nil
 function BookPlugin:onCloseDocument()
     Progress.push(self.ui, self:getSource(), false)
     Tracker.stop()
     self:emitToSource("document_close")
-    require("book.chapter").clear()
+    local closed = self.ui and self.ui.document and self.ui.document.file
+    require("book.chapter").onCloseDocument(closed)
+end
+
+--- 章末：按章会话自动下一章
+---@return boolean|nil
+function BookPlugin:onEndOfBook()
+    local Chapter = require("book.chapter")
+    if Chapter.onEndOfBook() then
+        return true
+    end
+end
+
+--- 章首：按章会话自动上一章（由 chapters.patches 触发）
+---@return boolean|nil
+function BookPlugin:onStartOfBook()
+    local Chapter = require("book.chapter")
+    if Chapter.onStartOfBook() then
+        return true
+    end
 end
 
 --- 休眠前：有打开文档时推进度 / 结清统计并通知源

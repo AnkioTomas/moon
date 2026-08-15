@@ -15,6 +15,7 @@
 ---@field filters boolean
 ---@field refresh boolean 支持手动强制重扫书库（本地源）
 ---@field detail boolean
+---@field scrape boolean 支持把外部元数据写入本地书籍记录
 ---@field cover boolean
 ---@field whole_book boolean
 ---@field chapters boolean
@@ -36,6 +37,7 @@ function SourceCapabilities.defaults()
         filters = false,
         refresh = false,
         detail = false,
+        scrape = false,
         cover = false,
         whole_book = false,
         chapters = false,
@@ -72,6 +74,12 @@ end
 
 ---@alias SourceConfigurationState "ready"|"needs_login"|"needs_config"|"unavailable"
 
+--- 按章正文载荷：Source 只交内容，宿主写 HTML。
+---@class ChapterContentPayload
+---@field title string|nil
+---@field html string|nil HTML/XHTML 正文片段（优先）
+---@field text string|nil 纯文本（无 html 时由宿主转段落）
+
 --- 统一数据源实例接口。失败一律 (data|nil, string|nil)。
 ---@class BookSource
 ---@field id SourceId|nil
@@ -102,11 +110,13 @@ end
 ---@field putProgressAsync fun(self: BookSource, ref: BookRef, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil)): table|nil
 ---@field getToc fun(self: BookSource, ref: BookRef): (BookChapter[]|nil, string|nil)
 ---@field getTocAsync fun(self: BookSource, ref: BookRef, cb: fun(data: BookChapter[]|nil, err: string|nil)): table|nil
+---@field fetchChapterContentAsync fun(self: BookSource, ref: BookRef, chapter: BookChapter, cb: fun(payload: ChapterContentPayload|nil, err: string|nil)): table|nil
 ---@field materializeWhole fun(self: BookSource, ref: BookRef, temp_path: string, on_progress: (fun(bytes: number)|nil)): (boolean|nil, string|nil)
 ---@field materializeWholeAsync fun(self: BookSource, ref: BookRef, temp_path: string, on_progress: (fun(bytes: number)|nil), cb: fun(ok: boolean|nil, err: string|nil)): table|nil
----@field materializeChapter fun(self: BookSource, ref: BookRef, chapter: BookChapter, temp_path: string): (boolean|nil, string|nil)
----@field materializeChapterAsync fun(self: BookSource, ref: BookRef, chapter: BookChapter, temp_path: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil
+---@field materializeChapter fun(self: BookSource, ref: BookRef, chapter: BookChapter, temp_path: string): (boolean|nil, string|nil)|nil 已废弃：按章阅读改用 fetchChapterContentAsync
+---@field materializeChapterAsync fun(self: BookSource, ref: BookRef, chapter: BookChapter, temp_path: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil|nil 已废弃
 ---@field coverRequest fun(self: BookSource, ref: BookRef): (BookCoverRequest|nil, string|nil)
+---@field localPathFor fun(self: BookSource, ref: BookRef): string|nil 本地源专用：原文件直开路径（存在才返回，命中则不下载不复制）
 ---@field probeFileSize fun(self: BookSource, ref: BookRef): number|nil
 ---@field registerReadingDevice fun(self: BookSource, device_id: string, model: string|nil): (table|nil, string|nil)
 ---@field registerReadingDeviceAsync fun(self: BookSource, device_id: string, model: string|nil, cb: fun(data: table|nil, err: string|nil)): table|nil

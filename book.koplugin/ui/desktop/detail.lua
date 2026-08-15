@@ -21,7 +21,6 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local TextWidget = require("ui/widget/textwidget")
 local BookInfo = require("ui.components.bookinfo")
 local UI = require("ui.components.bookui")
-local ScrapeUI = require("scrape.ui")
 local _ = require("gettext")
 local Screen = Device.screen
 
@@ -98,6 +97,28 @@ function Detail:onClose()
     return true
 end
 
+--- 刮削结束后重读 books 行并重绘：元数据与封面都只在 rebuild 时取，
+--- 光 setDirty 只会把旧数据再画一遍。
+function Detail:reload()
+    local ref = self.book.ref
+    local row
+    require("utils.db.queue").run(function()
+        row = require("utils.db.book").get(ref.source_id, ref.stable_id)
+    end, {
+        on_done = function()
+            if self._closed then
+                return
+            end
+            if row then
+                row.ref = self.book.ref
+                self.book = row
+            end
+            self:rebuild()
+            require("ui/uimanager"):setDirty(self, "full")
+        end,
+    })
+end
+
 --- Widget 关闭时触发 close_callback。
 function Detail:onCloseWidget()
     self._closed = true
@@ -139,49 +160,45 @@ function Detail:rebuild()
         show_parent = self,
     }
 
+    local caps = self.source and self.source:capabilities() or {}
     local btn_font = UI.buttonFontSize()
+    local button_row = {
+        {
+            text = _("返回"),
+            font_size = btn_font,
+            callback = function()
+                self:onClose()
+            end,
+        },
+    }
+    if caps.scrape == true and type(book.ref) == "table"
+        and type(book.ref.source_id) == "string" and type(book.ref.stable_id) == "string" then
+        table.insert(button_row, {
+            text = _("刮削"),
+            font_size = btn_font,
+            callback = function()
+                require("scrape.ui").start(self.book.ref, self.book.title, function()
+                    self:reload()
+                end)
+            end,
+        })
+    end
+    table.insert(button_row, {
+        text = _("开始阅读"),
+        font_size = btn_font,
+        enabled = caps.whole_book == true or caps.chapters == true,
+        callback = function()
+            local plugin = self.plugin
+            local b = self.book
+            self:onClose()
+            if plugin and plugin.openBook then
+                plugin:openBook(b)
+            end
+        end,
+    })
     local buttons = ButtonTable:new{
         width = content_w,
-        buttons = {{
-            {
-                text = _("返回"),
-                font_size = btn_font,
-                callback = function()
-                    self:onClose()
-                end,
-            },
-            {
-                text = _("刮削"),
-                font_size = btn_font,
-                callback = function()
-                    local b = self.book
-                    if not b or not b.ref then
-                        return
-                    end
-                    local UIManager = require("ui/uimanager")
-                    ScrapeUI.start(b.ref, b.title, function()
-                        UIManager:setDirty(self, "ui")
-                    end)
-                end,
-            },
-            {
-                text = _("开始阅读"),
-                font_size = btn_font,
-                enabled = (function()
-                    local src = self.source
-                    local caps = src and src.capabilities and src:capabilities() or {}
-                    return caps.whole_book == true or caps.chapters == true
-                end)(),
-                callback = function()
-                    local plugin = self.plugin
-                    local b = self.book
-                    self:onClose()
-                    if plugin and plugin.openBook then
-                        plugin:openBook(b)
-                    end
-                end,
-            },
-        }},
+        buttons = { button_row },
         zero_sep = true,
         show_parent = self,
     }
@@ -193,34 +210,40 @@ function Detail:rebuild()
     local body_inner_h = math.max(UI.sz(60), body_h - pad - UI.sz(12))
 
     local meta_w = math.max(UI.sz(80), content_w - cw - UI.sz(14))
-    local tags = book.category
-    if type(tags) == "string" and tags ~= "" then
-        tags = tags:gsub("\n+", " · ")
+    local category = book.category
+    if type(category) == "string" and category ~= "" then
+        category = category:gsub("[,\n]+", " · ")
     end
+    local author = BookInfo.author(book)
     local meta_kids = { align = "left" }
     for _, row in ipairs({
-        metaRow(_("作者"), BookInfo.author(book), meta_w),
-        metaRow(_("分类"), book.favorite, meta_w),
-        metaRow(_("标签"), tags, meta_w),
+        metaRow(_("作者"), author ~= "" and author or _("未知作者"), meta_w),
+        metaRow(_("分类"), category, meta_w),
         metaRow(_("系列"), book.series, meta_w),
     }) do
         if row then
-            if #meta_kids >= 1 then
+            if #meta_kids > 0 then
                 table.insert(meta_kids, VerticalSpan:new{ width = UI.sz(6) })
             end
             table.insert(meta_kids, row)
         end
     end
-    table.insert(meta_kids, VerticalSpan:new{ width = UI.sz(10) })
-    table.insert(meta_kids, (BookInfo.progressRow(meta_w, BookInfo.pct(book))))
+    local metadata = VerticalGroup:new(meta_kids)
+    local progress = BookInfo.progressRow(meta_w, BookInfo.pct(book))
+    local filler = math.max(UI.sz(8), ch - metadata:getSize().h - progress:getSize().h)
 
     local header = HorizontalGroup:new{
         align = "top",
         cover_w,
         HorizontalSpan:new{ width = UI.sz(14) },
         LeftContainer:new{
-            dimen = Geom:new{ w = meta_w, h = math.max(ch, UI.sz(120)) },
-            VerticalGroup:new(meta_kids),
+            dimen = Geom:new{ w = meta_w, h = ch },
+            VerticalGroup:new{
+                align = "left",
+                metadata,
+                VerticalSpan:new{ width = filler },
+                progress,
+            },
         },
     }
 
