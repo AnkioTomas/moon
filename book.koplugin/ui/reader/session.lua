@@ -131,8 +131,12 @@ end
 ---@return nil
 function Session.onCloseDocument(plugin)
     local ui = plugin and plugin.ui
+    local cur = Session._cur
     require("book.progress").push(ui, plugin:getSource(), false)
     require("stats.tracker").stop()
+    if cur then
+        require("annotations.sync").push(ui, cur.source, cur.ref)
+    end
     plugin:emitToSource("document_close")
     local closed = ui and ui.document and ui.document.file
     require("chapters.init").onCloseDocument(closed)
@@ -188,6 +192,10 @@ function Session.onSuspend(plugin)
     end
     require("book.progress").push(ui, plugin:getSource(), false)
     require("stats.tracker").stop()
+    local cur = Session._cur
+    if cur then
+        require("annotations.sync").push(ui, cur.source, cur.ref)
+    end
     plugin:emitToSource("suspend")
 end
 
