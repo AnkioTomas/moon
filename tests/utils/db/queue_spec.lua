@@ -165,6 +165,23 @@ do
     Assert.is_true(ran)
 end
 
+-- 回调自身抛错被隔离：不卡死队列，后续任务照常执行
+do
+    local order = {}
+    Queue.run(function()
+    end, {
+        on_done = function()
+            order[#order + 1] = "cb"
+            error("callback boom")
+        end,
+    })
+    Queue.run(function()
+        order[#order + 1] = "next"
+    end)
+    Stubs.flush()
+    Assert.eq(table.concat(order, ","), "cb,next")
+end
+
 -- flush 幂等：空队列冲刷无副作用
 do
     Stubs.flush()

@@ -291,8 +291,9 @@ end
 
 do
     Assert.is_true(freshAuth({ wr_skey = "s" }).hasSession())
-    -- 旧 cookie 串含 wr_skey= 即算有会话
+    -- 旧 cookie 串含非空 wr_skey= 才算有会话；空值不算
     Assert.is_true(freshAuth({ cookie = "wr_gid=1; wr_skey=abc" }).hasSession())
+    Assert.is_false(freshAuth({ cookie = "wr_skey=; wr_gid=1" }).hasSession())
     Assert.is_false(freshAuth({ wr_skey = "" }).hasSession())
     Assert.is_false(freshAuth({ cookie = "wr_gid=1" }).hasSession())
     Assert.is_false(freshAuth({}).hasSession())

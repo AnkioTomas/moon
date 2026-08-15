@@ -194,12 +194,23 @@ do
     getToc()
     Assert.is_true(fileExists(TMP .. "/1.html"))
 
+    -- 指纹 rename 失败：清掉 .part 残留，下次对账按首次重写自愈
+    setItems({ "u9" })
+    local real_rename = os.rename
+    os.rename = function() return nil, "read-only fs" end
+    getToc()
+    os.rename = real_rename
+    Assert.is_false(fileExists(fingerprint_path .. ".part"))
+    Assert.is_false(fileExists(fingerprint_path))
+    getToc()
+    Assert.eq(readFile(fingerprint_path), "u9")
+
     -- 空目录：报错且不动指纹
     setItems({})
     local empty_chapters, empty_err = getToc()
     Assert.is_nil(empty_chapters)
     Assert.eq(empty_err, "RSS 暂无文章")
-    Assert.eq(readFile(fingerprint_path), "u2\nu3")
+    Assert.eq(readFile(fingerprint_path), "u9")
 end
 
 -- 清理：删除本 spec 独有的临时目录，还原 preload/loaded

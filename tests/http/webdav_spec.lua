@@ -225,6 +225,28 @@ do
     Assert.eq(listErr("nope"), "请求失败: nope")
 end
 
+-- ── putFileAsync：PUT 文件内容与 Basic 凭据 ───────────────
+do
+    local path = os.tmpname()
+    local file = assert(io.open(path, "wb"))
+    file:write("epub-data")
+    file:close()
+    canned_res = { code = 201, body = "" }
+    canned_err = nil
+    local dav = Webdav.new({ url = "http://example.com/dav/", username = "u", password = "p" })
+    local ok, err
+    dav:putFileAsync("书.epub", path, function(v, e) ok, err = v, e end)
+    os.remove(path)
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    local req = captured[#captured]
+    Assert.eq(req.method, "PUT")
+    Assert.eq(req.url, "http://example.com/dav/%E4%B9%A6.epub")
+    Assert.eq(req.body, "epub-data")
+    Assert.eq(req.auth_username, "u")
+    Assert.eq(req.auth_password, "p")
+end
+
 -- ── 还原现场（不影响后续 spec 文件）────────────────────────
 package.preload["http.request"] = nil
 package.loaded["http.request"] = nil

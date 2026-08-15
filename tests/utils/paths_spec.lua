@@ -65,10 +65,10 @@ do
     Assert.len(Paths.slugFor(s), 32)
     Assert.matches(Paths.slugFor(s), "^[0-9a-f]+$")
     Assert.is_nil(Paths.slugFor(s):find("/", 1, true))
-    -- 空串的已知 md5 向量
-    Assert.eq(Paths.slugFor(""), "d41d8cd98f00b204e9800998ecf8427e")
-    -- nil 与空串同 slug（tostring(stable_id or "")）
-    Assert.eq(Paths.slugFor(nil), Paths.slugFor(""))
+    -- 缺参直接失败：nil/空串会撞到一个固定 slug，多本书共用工作目录
+    Assert.errors(function() Paths.slugFor(nil) end, "stable_id required")
+    Assert.errors(function() Paths.slugFor("") end, "stable_id required")
+    Assert.errors(function() Paths.slugFor(123) end, "stable_id required")
 end
 
 -- 路径拼接正确性
