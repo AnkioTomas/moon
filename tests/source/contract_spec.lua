@@ -13,6 +13,7 @@ do
     Assert.is_false(c.insight)
     Assert.is_false(c.stats_import)
     Assert.is_false(c.whole_book)
+    Assert.is_false(c.scrape)
     Assert.is_nil(c.stats)
 end
 

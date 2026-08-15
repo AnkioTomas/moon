@@ -67,7 +67,7 @@ package.loaded["source.wechat"] = nil
 local wechat = require("source.wechat").new()
 for _, name in ipairs({
     "pingAsync", "listLibraryAsync", "listStoreAsync", "recentBooksAsync",
-    "getDetailAsync", "getTocAsync", "materializeChapterAsync",
+    "getDetailAsync", "getTocAsync", "fetchChapterContentAsync",
     "getProgressAsync", "putProgressAsync",
 }) do
     Assert.eq(type(wechat[name]), "function")

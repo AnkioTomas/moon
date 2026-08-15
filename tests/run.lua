@@ -103,7 +103,8 @@ for _, path in ipairs(specs) do
         local Stubs = require("support.stubs")
         Stubs.reset()
         for k in pairs(package.loaded) do
-            if k:match("^book%.") or k:match("^source%.") or k:match("^http%.") or
+            if k:match("^book%.") or k:match("^chapters%.") or k:match("^chapters$") or
+               k:match("^source%.") or k:match("^http%.") or
                k:match("^utils%.") or k:match("^convert%.") or k:match("^stats%.") or
                k:match("^l10n$") or k:match("^book$") then
                 package.loaded[k] = nil

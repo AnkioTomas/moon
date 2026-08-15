@@ -86,6 +86,7 @@ do
     Assert.eq(src.id, "local")
     local caps = src:capabilities()
     Assert.is_true(caps.whole_book)
+    Assert.is_true(caps.scrape)
     Assert.is_false(caps.stats_import)
     Assert.is_false(caps.progress_push)
     Assert.is_false(src:configured())
@@ -99,6 +100,7 @@ do
     Assert.is_true(caps.whole_book)
     Assert.is_true(caps.insight)
     Assert.is_false(caps.chapters)
+    Assert.is_false(caps.scrape)
 end
 
 do
