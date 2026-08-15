@@ -25,25 +25,11 @@ package.preload["source.moon.client"] = function()
     }
 end
 
--- onEvent 延迟加载的 UI 依赖：记录调用、可控在线行为
-local net = { online_calls = 0, online_now = true }
-local sync = { register_calls = 0, push_calls = 0, last_source = nil, push_args = nil }
-
-package.preload["ui/network/manager"] = function()
-    return {
-        runWhenOnline = function(_, fn)
-            net.online_calls = net.online_calls + 1
-            if net.online_now then fn() end
-        end,
-    }
-end
+-- onEvent 延迟加载的 UI 依赖：记录调用
+local sync = { push_calls = 0, last_source = nil, push_args = nil }
 
 package.preload["stats.stats_sync"] = function()
     return {
-        registerDeviceAsync = function(self, _cb)
-            sync.register_calls = sync.register_calls + 1
-            sync.last_source = self
-        end,
         pushWithUi = function(self, a, b)
             sync.push_calls = sync.push_calls + 1
             sync.last_source = self
@@ -164,23 +150,9 @@ do
     Assert.eq(err, "网络故障")
 end
 
--- onEvent：reader_ready 在线时注册设备；document_close/suspend 推统计；未知事件无动作
+-- onEvent：document_close/suspend 推统计；其余事件无动作
 do
-    net.online_calls = 0
-    sync.register_calls = 0
     sync.push_calls = 0
-
-    net.online_now = true
-    src:onEvent("reader_ready")
-    Assert.eq(net.online_calls, 1)
-    Assert.eq(sync.register_calls, 1)
-    Assert.eq(sync.last_source, src)
-
-    -- 离线：runWhenOnline 不执行回调，不注册
-    net.online_now = false
-    src:onEvent("reader_ready")
-    Assert.eq(net.online_calls, 2)
-    Assert.eq(sync.register_calls, 1)
 
     src:onEvent("document_close")
     Assert.eq(sync.push_calls, 1)
@@ -191,9 +163,8 @@ do
     src:onEvent("suspend")
     Assert.eq(sync.push_calls, 2)
 
+    src:onEvent("reader_ready")
     src:onEvent("page_changed")
-    Assert.eq(net.online_calls, 2)
-    Assert.eq(sync.register_calls, 1)
     Assert.eq(sync.push_calls, 2)
 end
 

@@ -55,16 +55,16 @@ end
 local SEED1 = "https://z-library.sk"
 local SEED2 = "https://thai-books.sk"
 
--- ping：默认走第一个种子镜像，无 Basic 门禁
+-- 默认走第一个种子镜像，无 Basic 门禁
 do
     captured = {}
     queue = {}
     enqueue({ code = 200, body = '{"success":1}' })
     local client = fresh()
-    local ok
-    client:pingAsync(function(v) ok = v end)
-    Assert.is_true(ok)
-    Assert.eq(captured[1].url, SEED1 .. "/eapi/info/ok")
+    local wire
+    client:listPopularAsync(function(v) wire = v end)
+    Assert.not_nil(wire)
+    Assert.eq(captured[1].url, SEED1 .. "/eapi/book/most-popular")
     Assert.is_nil(captured[1].auth_username)
     Assert.eq(captured[1].method, "GET")
 end
@@ -75,10 +75,10 @@ do
     queue = {}
     enqueue({ code = 200, body = '{"success":1}' })
     local client = fresh({ base_url = "https://my-mirror.example.com/" })
-    local ok
-    client:pingAsync(function(v) ok = v end)
-    Assert.is_true(ok)
-    Assert.eq(captured[1].url, "https://my-mirror.example.com/eapi/info/ok")
+    local wire
+    client:listPopularAsync(function(v) wire = v end)
+    Assert.not_nil(wire)
+    Assert.eq(captured[1].url, "https://my-mirror.example.com/eapi/book/most-popular")
 end
 
 -- 传输失败 → 故障转移到下一个种子；成功的镜像被钉住（后续请求直接用它）
@@ -88,17 +88,17 @@ do
     enqueue({ err = { error = { code = -5, message = "Connect timed out after 30 secs" } } })
     enqueue({ code = 200, body = '{"success":1}' })
     local client = fresh()
-    local ok
-    client:pingAsync(function(v) ok = v end)
-    Assert.is_true(ok)
-    Assert.eq(captured[1].url, SEED1 .. "/eapi/info/ok")
-    Assert.eq(captured[2].url, SEED2 .. "/eapi/info/ok")
+    local wire
+    client:listPopularAsync(function(v) wire = v end)
+    Assert.not_nil(wire)
+    Assert.eq(captured[1].url, SEED1 .. "/eapi/book/most-popular")
+    Assert.eq(captured[2].url, SEED2 .. "/eapi/book/most-popular")
 
     -- 钉住生效：同一模块内的新客户端直接用成功的镜像
     enqueue({ code = 200, body = '{"success":1}' })
     local client2 = Client.new({})
-    client2:pingAsync(function(v) ok = v end)
-    Assert.eq(captured[3].url, SEED2 .. "/eapi/info/ok")
+    client2:listPopularAsync(function(v) wire = v end)
+    Assert.eq(captured[3].url, SEED2 .. "/eapi/book/most-popular")
 end
 
 -- 全部候选都失败：报最后的传输错误
@@ -110,7 +110,7 @@ do
     end
     local client = fresh()
     local ok, err
-    client:pingAsync(function(v, e) ok, err = v, e end)
+    client:listPopularAsync(function(v, e) ok, err = v, e end)
     Assert.is_nil(ok)
     Assert.eq(err, "连接超时，请检查网络")
 end
@@ -173,7 +173,7 @@ do
     end
     local client = fresh()
     local ok, err
-    client:pingAsync(function(v, e) ok, err = v, e end)
+    client:listPopularAsync(function(v, e) ok, err = v, e end)
     Assert.is_nil(ok)
     Assert.eq(err, "重定向过多")
 end
@@ -185,10 +185,10 @@ do
     enqueue({ code = 513, body = '<html><head>Just a moment...</head><script>__cf_chl</script></html>' })
     enqueue({ code = 200, body = '{"success":1}' })
     local client = fresh()
-    local ok
-    client:pingAsync(function(v) ok = v end)
-    Assert.is_true(ok)
-    Assert.eq(captured[2].url, SEED2 .. "/eapi/info/ok")
+    local wire
+    client:listPopularAsync(function(v) wire = v end)
+    Assert.not_nil(wire)
+    Assert.eq(captured[2].url, SEED2 .. "/eapi/book/most-popular")
 end
 
 -- 200 但内容是挑战页（WAF 用 200 回拦截页）：同样换镜像
@@ -198,9 +198,9 @@ do
     enqueue({ code = 200, body = '<html>Verifying your browser</html>' })
     enqueue({ code = 200, body = '{"success":1}' })
     local client = fresh()
-    local ok
-    client:pingAsync(function(v) ok = v end)
-    Assert.is_true(ok)
+    local wire
+    client:listPopularAsync(function(v) wire = v end)
+    Assert.not_nil(wire)
     Assert.len(captured, 2)
 end
 
