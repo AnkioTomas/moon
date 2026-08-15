@@ -34,8 +34,8 @@ package.preload["source.moon.mapper"] = function() return {} end
 package.loaded["source.moon"] = nil
 local moon = require("source.moon").new()
 for _, name in ipairs({
-    "pingAsync", "listLibraryAsync", "recentBooksAsync", "filtersAsync",
-    "registerReadingDeviceAsync", "importReadingStatsAsync",
+    "listLibraryAsync", "recentBooksAsync", "filtersAsync",
+    "importReadingStatsAsync",
     "readingInsightAsync", "getProgressAsync", "putProgressAsync",
     "materializeWholeAsync",
 }) do
@@ -48,7 +48,7 @@ end
 package.preload["source.webdav.mapper"] = function() return {} end
 package.loaded["source.webdav"] = nil
 local webdav = require("source.webdav").new()
-for _, name in ipairs({ "pingAsync", "listLibraryAsync", "materializeWholeAsync" }) do
+for _, name in ipairs({ "listLibraryAsync", "materializeWholeAsync" }) do
     Assert.eq(type(webdav[name]), "function")
 end
 
@@ -66,7 +66,7 @@ package.preload["source.wechat.mapper"] = function() return {} end
 package.loaded["source.wechat"] = nil
 local wechat = require("source.wechat").new()
 for _, name in ipairs({
-    "pingAsync", "listLibraryAsync", "listStoreAsync", "recentBooksAsync",
+    "listLibraryAsync", "listStoreAsync", "recentBooksAsync",
     "getDetailAsync", "getTocAsync", "fetchChapterContentAsync",
     "getProgressAsync", "putProgressAsync",
 }) do
@@ -184,8 +184,8 @@ package.loaded["source.moon.client"] = nil
 
 local client = require("source.moon.client"):new{}
 for _, name in ipairs({
-    "_jsonAsync", "pingAsync", "listBooksAsync", "recentBooksAsync", "filtersAsync",
-    "registerReadingDeviceAsync", "importReadingStatsAsync", "readingInsightAsync",
+    "_jsonAsync", "listBooksAsync", "recentBooksAsync", "filtersAsync",
+    "importReadingStatsAsync", "readingInsightAsync",
     "getProgressAsync", "updateProgressAsync", "downloadBookAsync",
 }) do
     Assert.eq(type(client[name]), "function")

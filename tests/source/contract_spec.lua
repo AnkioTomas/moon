@@ -11,6 +11,8 @@ do
     Assert.is_false(c.store)
     Assert.is_false(c.insight)
     Assert.is_false(c.scrape)
+    Assert.is_nil(c.library)
+    Assert.is_nil(c.detail)
     Assert.is_nil(c.filters)
     Assert.is_nil(c.recent)
     Assert.is_nil(c.cover)

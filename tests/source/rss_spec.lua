@@ -94,16 +94,14 @@ do
     Assert.eq(books.data[2].ref.stable_id, "https://b.example.com/rss")
 end
 
--- configured / configurationState：有无有效订阅
+-- configured：有无有效订阅
 do
     cfg.feeds = {}
     local src = RSS.new()
     Assert.is_false(src:configured())
-    Assert.eq(src:configurationState(), "needs_config")
 
     cfg.feeds = { { url = "https://a.example.com/feed" } }
     Assert.is_true(src:configured())
-    Assert.eq(src:configurationState(), "ready")
 end
 
 -- findFeed：stable_id 双侧规范化匹配；未命中报「订阅不存在」（经 getDetailAsync 观察）
