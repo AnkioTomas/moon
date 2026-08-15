@@ -38,6 +38,7 @@ local function clearMods()
         "ffi/sha2",
         "utils.db.base",
         "utils.db.book",
+        "utils.db.open",
         "utils.db.stats",
     }) do
         package.preload[name] = nil
@@ -234,6 +235,241 @@ do
         end
     end
     Assert.eq(deletes, 2)
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── books 表：listBySource 分页/筛选/搜索 + categoriesBySource ──
+do
+    local calls = {}
+    local connection = {
+        exec = function() end,
+        close = function() end,
+        prepare = function(_, sql)
+            local call = { sql = sql }
+            calls[#calls + 1] = call
+            return {
+                bind = function(self, ...)
+                    call.argc = select("#", ...)
+                    call.args = { ... }
+                    return self
+                end,
+                step = function()
+                    if sql:find("COUNT", 1, true) then
+                        return { 7 }, { "COUNT(*)" }
+                    end
+                    return nil
+                end,
+                resultset = function()
+                    if sql:find("DISTINCT category", 1, true) then
+                        return { { "sub", "zeta" } }, 2
+                    end
+                    return {
+                        { "k1" },
+                        { "/books/a.epub" },
+                        { "a.epub" },
+                        { "书名" },
+                        { "作者" },
+                        { 42 },
+                        { "sub" },
+                        { "介绍" },
+                        { 1000 },
+                    }, 1
+                end,
+                close = function() end,
+            }
+        end,
+    }
+
+    stubTask(true)
+    stubDbDeps()
+    package.preload["lua-ljsqlite3/init"] = function()
+        return { open = function() return connection end }
+    end
+    package.loaded["utils.db.base"] = nil
+    package.loaded["utils.db.book"] = nil
+
+    local DbBase = require("utils.db.base")
+    local BookDB = require("utils.db.book")
+    DbBase.open()
+
+    -- 无筛选：仅 source_id；LIMIT/OFFSET 绑定
+    local rows, count = BookDB.listBySource("local", { limit = 24, offset = 48 })
+    Assert.eq(count, 7)
+    Assert.eq(#rows, 1)
+    Assert.eq(rows[1].stable_id, "/books/a.epub")
+    Assert.eq(rows[1].title, "书名")
+    Assert.eq(rows[1].percent, 42)
+    local count_q = calls[#calls - 1]
+    Assert.is_true(count_q.sql:find("WHERE source_id=%?", 1) ~= nil or count_q.sql:find("source_id=?", 1, true) ~= nil)
+    Assert.is_false(count_q.sql:find("category=", 1, true) ~= nil)
+    local list_q = calls[#calls]
+    Assert.is_true(list_q.sql:find("LIMIT ? OFFSET ?", 1, true) ~= nil)
+    Assert.eq(list_q.args[#list_q.args - 1], 24)
+    Assert.eq(list_q.args[#list_q.args], 48)
+
+    -- 分类 + 搜索：AND 条件与 LIKE 参数
+    calls = {}
+    rows, count = BookDB.listBySource("local", { category = "sub", search = "鲁", limit = 10, offset = 0 })
+    Assert.eq(count, 7)
+    count_q = calls[1]
+    Assert.is_true(count_q.sql:find("AND category=?", 1, true) ~= nil)
+    Assert.is_true(count_q.sql:find("title LIKE ?", 1, true) ~= nil)
+    Assert.eq(count_q.args[1], "local")
+    Assert.eq(count_q.args[2], "sub")
+    Assert.eq(count_q.args[3], "%鲁%")
+    Assert.eq(count_q.args[4], "%鲁%")
+    Assert.eq(count_q.args[5], "%鲁%")
+
+    -- 分类列表
+    local cats = BookDB.categoriesBySource("local")
+    Assert.eq(#cats, 2)
+    Assert.eq(cats[1], "sub")
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── opens 表：recentBySource 联表去重 ──
+do
+    local calls = {}
+    local connection = {
+        exec = function() end,
+        close = function() end,
+        prepare = function(_, sql)
+            local call = { sql = sql }
+            calls[#calls + 1] = call
+            return {
+                bind = function(self, ...)
+                    call.args = { ... }
+                    return self
+                end,
+                step = function() return nil end,
+                resultset = function()
+                    return {
+                        { "/books/a.epub", "/books/b.epub" },
+                        { 200, 100 },
+                        { "书名A", "书名B" },
+                        { "作者A", nil },
+                        { "sub", nil },
+                        { "介绍A", nil },
+                        { 10, 0 },
+                    }, 2
+                end,
+                close = function() end,
+            }
+        end,
+    }
+
+    stubTask(true)
+    stubDbDeps()
+    package.preload["lua-ljsqlite3/init"] = function()
+        return { open = function() return connection end }
+    end
+    package.loaded["utils.db.base"] = nil
+    package.loaded["utils.db.open"] = nil
+
+    local DbBase = require("utils.db.base")
+    local OpenDB = require("utils.db.open")
+    DbBase.open()
+
+    local rows = OpenDB.recentBySource("local", 24)
+    Assert.eq(#rows, 2)
+    Assert.eq(rows[1].stable_id, "/books/a.epub")
+    Assert.eq(rows[1].last_open, 200)
+    Assert.eq(rows[1].title, "书名A")
+    Assert.eq(rows[2].title, "书名B")
+    local q = calls[#calls]
+    Assert.is_true(q.sql:find("LEFT JOIN books", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("GROUP BY o.stable_id", 1, true) ~= nil)
+    Assert.eq(q.args[1], "local")
+    Assert.eq(q.args[2], 24)
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── reading_stats 聚合查询（本地洞察）──
+do
+    local calls = {}
+    local connection = {
+        exec = function() end,
+        close = function() end,
+        prepare = function(_, sql)
+            local call = { sql = sql }
+            calls[#calls + 1] = call
+            return {
+                bind = function(self, ...)
+                    call.args = { ... }
+                    return self
+                end,
+                step = function()
+                    if sql:find("COALESCE(SUM(duration),0), COUNT(*)", 1, true) then
+                        return { 3600, 42 }, { "s", "c" }
+                    end
+                    if sql:find("start of day", 1, true) then
+                        return { 600 }, { "s" }
+                    end
+                    if sql:find("MAX(day_total)", 1, true) then
+                        return { 1200 }, { "s" }
+                    end
+                    return nil
+                end,
+                resultset = function()
+                    if sql:find("GROUP BY day, stable_id", 1, true) then
+                        return {
+                            { "2026-08-15" },
+                            { "/books/a.epub" },
+                            { 600 },
+                            { 10 },
+                            { 20 },
+                        }, 1
+                    end
+                    return {
+                        { "2026-08-14", "2026-08-15" },
+                        { 300, 600 },
+                        { 5, 10 },
+                    }, 2
+                end,
+                close = function() end,
+            }
+        end,
+    }
+
+    stubTask(true)
+    stubDbDeps()
+    package.preload["lua-ljsqlite3/init"] = function()
+        return { open = function() return connection end }
+    end
+    package.loaded["utils.db.base"] = nil
+    package.loaded["utils.db.stats"] = nil
+
+    local DbBase = require("utils.db.base")
+    local StatsDB = require("utils.db.stats")
+    DbBase.open()
+
+    local s = StatsDB.summaryBySource("local")
+    Assert.eq(s.total_seconds, 3600)
+    Assert.eq(s.total_pages, 42)
+    Assert.eq(s.last7_seconds, 600)
+    Assert.eq(s.longest_day_seconds, 1200)
+
+    local daily = StatsDB.dailyBySource("local")
+    Assert.eq(#daily, 2)
+    Assert.eq(daily[1].ymd, "2026-08-14")
+    Assert.eq(daily[2].seconds, 600)
+
+    local books = StatsDB.dailyBooksBySource("local")
+    Assert.eq(#books, 1)
+    Assert.eq(books[1].stable_id, "/books/a.epub")
+    Assert.eq(books[1].max_page, 10)
+    Assert.eq(books[1].max_total_pages, 20)
+
+    -- 全部参数化：source_id 绑定，不以字面量拼进 SQL
+    for _, c in ipairs(calls) do
+        Assert.is_false(c.sql:find("'local'", 1, true) ~= nil)
+    end
 
     DbBase.close()
     clearMods()

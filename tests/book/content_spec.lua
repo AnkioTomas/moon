@@ -64,6 +64,16 @@ do
     os.remove(pdf)
 end
 
+do
+    local html = tmp .. ".html"
+    local f = io.open(html, "wb")
+    f:write("<!DOCTYPE html><html><body><p>x</p></body></html>")
+    f:close()
+    sizes[html] = 48
+    Assert.is_true(Content.isValidBook(html))
+    os.remove(html)
+end
+
 Assert.is_false(Content.isValidBook("/no/such/file"))
 Assert.is_nil(Content.isValidEpub)
 
