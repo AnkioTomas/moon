@@ -151,7 +151,7 @@ end
 function Panel:buildToc(w, h)
     local items = {}
     local ui = self.plugin and self.plugin.ui
-    local Chapter = require("book.chapter")
+    local Chapter = require("chapters.init")
     if Chapter.isActive() and type(Chapter.toc()) == "table" then
         local cur_idx = Chapter.currentIdx()
         for _, ch in ipairs(Chapter.toc()) do

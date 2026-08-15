@@ -32,7 +32,7 @@ local MoonSettings = require("utils.settings")
 local MoonFont = require("utils.font")
 local SourceRegistry = require("source.registry")
 local StatsSync = require("stats.stats_sync")
-local Store = require("book.store")
+local Cache = require("book.cache")
 local Host = require("host")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -441,7 +441,7 @@ function Settings.build(desktop)
             local cache_size = desktop._cache_size_label or _("计算中…")
             -- 扫完就置 label；只认 job 会让回调里的 rebuild 再次开扫，死循环
             if desktop._cache_size_label == nil and not desktop._cache_size_job then
-                desktop._cache_size_job = Store.sizeLabelAsync(function(label)
+                desktop._cache_size_job = Cache.sizeLabelAsync(function(label)
                     desktop._cache_size_job = nil
                     if desktop._closed then
                         return
@@ -470,7 +470,7 @@ function Settings.build(desktop)
                                 text = _("正在清理缓存…"),
                                 timeout = 1,
                             })
-                            desktop._cache_clear_job = Store.clearAsync(function(ok)
+                            desktop._cache_clear_job = Cache.clearAsync(function(ok)
                                 desktop._cache_clear_job = nil
                                 if desktop._closed then
                                     return

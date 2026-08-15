@@ -65,7 +65,7 @@ function Progress.fraction(ui)
     if not id or not id.chapter_idx then
         return doc_frac
     end
-    local Chapter = require("book.chapter")
+    local Chapter = require("chapters.init")
     local count = Chapter.chapterCount()
     local idx = tonumber(id.chapter_idx) or 1
     if not count or count <= 0 then
@@ -123,7 +123,6 @@ local function enqueue(ref, pos)
     local locator = pos.locator
     local updated_at = pos.updated_at or os.time()
     DbQueue.run(function()
-        local ProgressDB = require("utils.db.progress")
         ProgressDB.upsert(source_id, stable_id, {
             fraction = fraction,
             chapter_idx = chapter_idx,
@@ -191,7 +190,6 @@ function Progress.flushPendingAsync(source, show_msg, cb)
                 local src_id = row.source_id
                 local s_id = row.stable_id
                 DbQueue.run(function()
-                    local ProgressDB = require("utils.db.progress")
                     ProgressDB.delete(src_id, s_id)
                 end)
                 ok_n = ok_n + 1
@@ -249,7 +247,6 @@ function Progress.push(ui, source, show_msg)
                         local src_id = id.ref.source_id
                         local s_id = id.ref.stable_id
                         DbQueue.run(function()
-                            local ProgressDB = require("utils.db.progress")
                             ProgressDB.delete(src_id, s_id)
                         end)
                         break
@@ -312,7 +309,7 @@ function Progress.pull(ui, source, show_msg)
                         return
                     end
 
-                    local Chapter = require("book.chapter")
+                    local Chapter = require("chapters.init")
                     local chapter_mode = id.chapter_idx and Chapter.isActive()
                     if chapter_mode then
                         local count = Chapter.chapterCount() or 1

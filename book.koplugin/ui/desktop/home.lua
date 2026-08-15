@@ -288,7 +288,7 @@ function Home.fetch(desktop)
 
     if not desktop._local_cleanup_done then
         desktop._local_cleanup_done = true
-        desktop._local_cleanup_job = Store.cleanupStaleAsync(function(ok, n)
+        desktop._local_cleanup_job = require("book.cache").cleanupStaleAsync(function(ok, n)
             desktop._local_cleanup_job = nil
             if ok and n and n > 0 then
                 logger.info("book cleaned stale local books:", n)

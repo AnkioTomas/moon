@@ -57,7 +57,7 @@ end
 ---@param source BookSource
 ---@param ref BookRef
 local function openWholeBook(plugin, book, source, ref)
-    local Chapter = require("book.chapter")
+    local Chapter = require("chapters.init")
     Chapter.clear()
     Store.remember(book)
 
@@ -160,7 +160,7 @@ local function openChapterBook(plugin, book, source, ref)
 
     NetworkMgr:runWhenOnline(function()
         UIManager:show(InfoMessage:new{ text = _("正在准备章节…"), timeout = 1 })
-        local Chapter = require("book.chapter")
+        local Chapter = require("chapters.init")
         -- 打开令牌：期间若 clear/换书则作废回调
         local open_token = {}
         Chapter._open_token = open_token
