@@ -109,19 +109,6 @@ function Desktop:contentHeight()
     return math.max(1, Screen:getHeight() - UI.barH() - UI.topBarH())
 end
 
---- 返回桌面全屏尺寸（必要时懒建 dimen）。
----@return table
-function Desktop:getSize()
-    if not self.dimen then
-        self.dimen = Geom:new{
-            x = 0, y = 0,
-            w = Screen:getWidth(),
-            h = Screen:getHeight(),
-        }
-    end
-    return self.dimen
-end
-
 --- 传给各 Tab 的上下文：plugin / source / desktop / filter。
 ---@return table
 function Desktop:ctx()
@@ -182,11 +169,9 @@ end
 function Desktop:switchTab(id)
     if id == "library" and self.tab ~= "library" then
         self._library_state = nil
-        self.page = self.page or 1
     end
     if id == "store" and self.tab ~= "store" then
         self._store_state = nil
-        self.store_page = self.store_page or 1
     end
     if id == "home" then
         self._home_state = nil
