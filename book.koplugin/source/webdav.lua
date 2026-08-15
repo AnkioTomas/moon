@@ -46,6 +46,7 @@ function Source:capabilities()
         search = false,
         filters = false,
         detail = true,
+        scrape = false,
         cover = false,
         whole_book = true,
         chapters = false,

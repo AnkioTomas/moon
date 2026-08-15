@@ -294,7 +294,9 @@ function Progress.pull(ui, source, show_msg)
             source:getProgressAsync(id.ref, function(pos, err)
                 -- 校验当前文档身份：若用户已切换到其他书，跳过进度应用
                 local cur_id = Progress.identityFor(ui)
-                if not cur_id or not cur_id.ref or cur_id.ref.book_key ~= id.ref.book_key then
+                if not cur_id or not cur_id.ref
+                    or cur_id.ref.source_id ~= id.ref.source_id
+                    or cur_id.ref.stable_id ~= id.ref.stable_id then
                     logger.dbg("book.progress pull skip: document changed")
                     return
                 end
@@ -311,7 +313,8 @@ function Progress.pull(ui, source, show_msg)
                     end
 
                     local Chapter = require("book.chapter")
-                    if id.chapter_idx and Chapter.isActive() then
+                    local chapter_mode = id.chapter_idx and Chapter.isActive()
+                    if chapter_mode then
                         local count = Chapter.chapterCount() or 1
                         local target_idx = pos.chapter_idx
                         local within = pos.chapter_fraction or pct
@@ -330,8 +333,8 @@ function Progress.pull(ui, source, show_msg)
                                 within = 0
                             end
                         end
-                        if target_idx ~= id.chapter_idx then
-                            Chapter.gotoChapter(target_idx, { within = within, plugin = ui })
+                        if Chapter.isActive() and target_idx ~= id.chapter_idx then
+                            Chapter.gotoChapter(target_idx, { within = within })
                             if show_msg then
                                 UIManager:show(InfoMessage:new{
                                     text = T(_("已跳转到约 %1%"), string.format("%.1f", pct * 100)),

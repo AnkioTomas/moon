@@ -50,6 +50,7 @@ function Source:capabilities()
         search = false,
         filters = true,
         detail = true,
+        scrape = false,
         cover = true,
         whole_book = true,
         chapters = false,

@@ -39,6 +39,16 @@ local function openSqlite()
     return c
 end
 
+--- stmt 用完即关，close 本身失败不影响主流程
+---@param stmt userdata|nil
+local function closeStmt(stmt)
+    if stmt then
+        pcall(function()
+            stmt:close()
+        end)
+    end
+end
+
 --- 执行无返回行的 SQL
 ---@param sql string
 ---@param ... any 绑定到 ? 占位符的值
@@ -58,11 +68,7 @@ function Base.exec(sql, ...)
         stmt = conn:prepare(sql)
         stmt:bind(unpack(args, 1, argc)):step()
     end)
-    if stmt then
-        pcall(function()
-            stmt:close()
-        end)
-    end
+    closeStmt(stmt)
     if not ok then
         logger.warn("book.db exec failed", err, sql and sql:sub(1, 120))
         return nil, err
@@ -88,11 +94,7 @@ function Base.rowexec(sql, ...)
         end
         return stmt:step({}, {})
     end)
-    if stmt then
-        pcall(function()
-            stmt:close()
-        end)
-    end
+    closeStmt(stmt)
     if not ok then
         logger.warn("book.db rowexec failed", row, sql and sql:sub(1, 120))
         return nil
@@ -122,11 +124,7 @@ function Base.query(sql, ...)
         end
         return conn:exec(sql)
     end)
-    if stmt then
-        pcall(function()
-            stmt:close()
-        end)
-    end
+    closeStmt(stmt)
     if not ok then
         logger.warn("book.db query failed", result, sql and sql:sub(1, 120))
         return nil, 0
@@ -149,10 +147,8 @@ end
 local function ensureSchema()
     Base.exec([[
 CREATE TABLE IF NOT EXISTS books (
-  book_key   TEXT PRIMARY KEY,
   source_id  TEXT NOT NULL,
   stable_id  TEXT NOT NULL,
-  filename   TEXT,
   md5        TEXT,
   title      TEXT,
   authors    TEXT,
@@ -162,32 +158,23 @@ CREATE TABLE IF NOT EXISTS books (
   series     TEXT,
   intro      TEXT,
   fetched_at INTEGER NOT NULL DEFAULT 0,
-  UNIQUE(source_id, stable_id)
+  PRIMARY KEY (source_id, stable_id)
 );
-CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(md5);
-
-CREATE TABLE IF NOT EXISTS tocs (
-  book_key   TEXT PRIMARY KEY,
-  source_id  TEXT NOT NULL,
-  fetched_at INTEGER NOT NULL,
-  chapters   TEXT NOT NULL,
-  raw        TEXT
-);
+CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(source_id, md5);
 
 CREATE TABLE IF NOT EXISTS opens (
-  path        TEXT PRIMARY KEY,
-  book_key    TEXT NOT NULL,
   source_id   TEXT NOT NULL,
   stable_id   TEXT NOT NULL,
+  path        TEXT NOT NULL,
   chapter_idx INTEGER,
-  last_open   INTEGER NOT NULL
+  last_open   INTEGER NOT NULL,
+  PRIMARY KEY (source_id, stable_id)
 );
 
 CREATE TABLE IF NOT EXISTS http (
   key       TEXT PRIMARY KEY,
   value     TEXT NOT NULL,
-  expires   INTEGER NOT NULL,
-  source_id TEXT
+  expires   INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS pending_progress (

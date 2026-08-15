@@ -349,84 +349,79 @@ local function basename(path)
     return (type(path) == "string" and path:match("([^/\\]+)$")) or path
 end
 
---- 统计页点书：本地元数据优先，否则按 id 搜图书馆。
+--- 统计页点书：本地元数据优先（(source_id, stable_id) 查缓存），否则按 stable_id 搜图书馆。
 ---@param desktop table
----@param hint table
+---@param hint table 洞察日书单条目，必须有 ref
 function Insight.openBookDetail(desktop, hint)
     if not desktop or desktop._closed or desktop._insight_opening then return end
-    local sid = hint and hint.id
-    if type(sid) ~= "string" or sid == "" then
+    local ref = hint and hint.ref
+    if type(ref) ~= "table" then
         UIManager:show(InfoMessage:new{ text = _("没有这本书"), timeout = 2 })
         return
     end
+    local sid = ref.stable_id
 
-    local cached = Store.findMeta(sid)
-    if cached then
-        if hint.percent ~= nil and (not cached.percent or cached.percent == 0) then
-            cached = {
-                id = cached.id or sid,
-                title = cached.title,
-                authors = cached.authors,
-                favorite = cached.favorite,
-                category = cached.category,
-                series = cached.series,
-                intro = cached.intro,
-                percent = tonumber(hint.percent) or cached.percent or 0,
-            }
-        end
-        desktop:showDetail(cached)
-        return
-    end
-
-    local api = desktop.source
-    if not api or not api.configured or not api:configured() then
-        UIManager:show(InfoMessage:new{ text = _("请先配置数据源"), timeout = 2 })
-        return
-    end
-
-    local search = hint.title or ""
-    if search == "" then
-        search = (basename(sid) or ""):gsub("%.[^%.]+$", "")
-    end
-    if search == "" then
-        UIManager:show(InfoMessage:new{ text = _("没有这本书"), timeout = 2 })
-        return
-    end
-
-    NetworkMgr:runWhenOnline(function()
-        if desktop._closed or desktop._insight_opening then return end
-        desktop._insight_opening = true
-        local loading = InfoMessage:new{ text = _("正在拉取书籍信息…") }
-        UIManager:show(loading)
-        --- 打开详情结束：关 loading 或报错。
-        ---@param book table|nil
-        ---@param err_text string|nil
-        local function finish(book, err_text)
-            desktop._insight_opening = false
-            pcall(function() UIManager:close(loading) end)
-            if desktop._closed then return end
-            if book then
-                desktop:showDetail(book)
-            else
-                UIManager:show(InfoMessage:new{ text = err_text or _("没有这本书"), timeout = 2 })
+    Store.findMetaAsync(ref, function(cached)
+        if desktop._closed then return end
+        if cached then
+            -- 统计页进度比缓存新时直接改缓存副本；勿重建表（会丢 ref 等字段）
+            if hint.percent ~= nil and (not cached.percent or cached.percent == 0) then
+                cached.percent = tonumber(hint.percent) or cached.percent or 0
             end
+            desktop:showDetail(cached)
+            return
         end
-        local search_job
-        search_job = api:listLibraryAsync({ page = 1, page_size = 50, search = search }, function(res, req_err)
-            if desktop._closed then return end
-            if not res then
-                finish(nil, req_err or _("拉取失败"))
-                return
-            end
-            local want = basename(sid)
-            for _, row in ipairs(res.data or {}) do
-                if basename(BookInfo.file(row)) == want then
-                    Store.remember(row)
-                    finish(row)
-                    return
+
+        local api = desktop.source
+        if not api or not api.configured or not api:configured() then
+            UIManager:show(InfoMessage:new{ text = _("请先配置数据源"), timeout = 2 })
+            return
+        end
+
+        local search = hint.title or ""
+        if search == "" then
+            search = (basename(sid) or ""):gsub("%.[^%.]+$", "")
+        end
+        if search == "" then
+            UIManager:show(InfoMessage:new{ text = _("没有这本书"), timeout = 2 })
+            return
+        end
+
+        NetworkMgr:runWhenOnline(function()
+            if desktop._closed or desktop._insight_opening then return end
+            desktop._insight_opening = true
+            local loading = InfoMessage:new{ text = _("正在拉取书籍信息…") }
+            UIManager:show(loading)
+            --- 打开详情结束：关 loading 或报错。
+            ---@param book table|nil
+            ---@param err_text string|nil
+            local function finish(book, err_text)
+                desktop._insight_opening = false
+                pcall(function() UIManager:close(loading) end)
+                if desktop._closed then return end
+                if book then
+                    desktop:showDetail(book)
+                else
+                    UIManager:show(InfoMessage:new{ text = err_text or _("没有这本书"), timeout = 2 })
                 end
             end
-            finish(nil, _("没有这本书"))
+            local search_job
+            search_job = api:listLibraryAsync({ page = 1, page_size = 50, search = search }, function(res, req_err)
+                if desktop._closed then return end
+                if not res then
+                    finish(nil, req_err or _("拉取失败"))
+                    return
+                end
+                local want = basename(sid)
+                for _, row in ipairs(res.data or {}) do
+                    if basename(BookInfo.file(row)) == want then
+                        Store.remember(row)
+                        finish(row)
+                        return
+                    end
+                end
+                finish(nil, _("没有这本书"))
+            end)
         end)
     end)
 end

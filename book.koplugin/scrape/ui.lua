@@ -60,7 +60,7 @@ local function saveCover(ref, url, headers, done)
     Image.fetchAsync(url, headers, function(path, err)
         if path then
             Paths.ensureLayout(ref.source_id)
-            copyFile(path, Paths.coverPath(ref.book_key, ref.source_id))
+            copyFile(path, Paths.coverPath(ref.stable_id, ref.source_id))
         else
             logger.warn("scrape cover download failed:", url, err)
         end
@@ -75,9 +75,8 @@ end
 local function applyResult(ref, result, done)
     DbQueue.run(function()
         -- 分类归本地目录/用户，刮削只补元数据，不覆盖
-        local existing = BookDB.get(ref.book_key)
+        local existing = BookDB.get(ref.source_id, ref.stable_id)
         BookDB.upsert({
-            book_key = ref.book_key,
             source_id = ref.source_id,
             stable_id = ref.stable_id,
             title = result.title,
@@ -87,7 +86,6 @@ local function applyResult(ref, result, done)
             series = result.series,
             percent = existing and existing.percent or 0,
             favorite = existing and existing.favorite or nil,
-            filename = existing and existing.filename or nil,
             md5 = existing and existing.md5 or nil,
             fetched_at = os.time(),
         })
@@ -155,7 +153,7 @@ end
 ---@param default_title string|nil 默认书名
 ---@param on_close fun()|nil 完成回调
 function ScrapeUI.start(ref, default_title, on_close)
-    if not ref or not ref.book_key then
+    if not ref or type(ref.source_id) ~= "string" or type(ref.stable_id) ~= "string" then
         logger.warn("scrape: invalid book ref")
         return
     end

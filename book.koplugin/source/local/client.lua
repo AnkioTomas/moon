@@ -1,20 +1,21 @@
 --[[--
 本地目录扫描客户端（仅异步）
 
+数据流：扫描器只负责把目录状态写进 books 表（增/改/删 + 封面 PNG），
+书库/筛选/搜索/最近阅读/统计一律直查数据库，不做内存缓存。
+
 扫描规则：
 - 最多探测 2 层：根目录直属书（无分类）+ 一级子目录内书（目录名即分类）；更深不识别
 - 跳过一切 . 前缀项（.moon 是本插件配置/缓存目录，隐藏项本就不该进书库）
 - 书库目录不得落在插件数据目录内（自己的数据不入库）
-- 每本书解析元数据（书名/作者/介绍），缓存进 books 表；命中缓存跳过解析
-- 扫描结果缓存 5 分钟；TTL 内直接返回缓存，不扫盘、不清理失效书
-- opts.force 手动强扫：真实扫盘，并删除 books 表本次未扫到的本源记录（保留阅读统计）
+- 每本书解析元数据（书名/作者/介绍）与封面，缓存进 books 表 / image 目录；命中缓存跳过解析
+- 扫描结束删除 books 表本次未扫到的本源记录（保留阅读统计），并删对应封面
 
 @module koplugin.book.source.local.client
 --]]
 
 local lfs = require("libs/libkoreader-lfs")
 local UIManager = require("ui/uimanager")
-local BookRef = require("types.book").BookRef
 local _ = require("gettext")
 
 local Client = {}
@@ -22,8 +23,13 @@ Client.__index = Client
 
 local SOURCE_ID = "local"
 
---- 扫描结果缓存 TTL（秒）
-local SCAN_TTL = 5 * 60
+--- 自动扫描最小间隔（秒）：桌面反复打开不重复扫盘
+local AUTO_SCAN_MIN_INTERVAL = 60
+
+--- 封面缓存最大宽度（等比缩放，控制缓存体积）
+local COVER_MAX_W = 320
+--- 封面缓存最大高度
+local COVER_MAX_H = 480
 
 local BOOK_EXT = {
     pdf = true,
@@ -54,12 +60,38 @@ local function isBookFile(name)
     return BOOK_EXT[string.lower(ext)] == true
 end
 
+--- 文件内容 partialMD5（非均匀采样：头部权重大，尾部权重小，避免整本读入）。
+--- 失败（文件不可读）返回 nil。
+---@param path string
+---@return string|nil
+local function fileMd5(path)
+    local md5 = require("ffi/sha2").md5
+    local bit = require("bit")
+    local f = io.open(path, "rb")
+    if not f then
+        return nil
+    end
+    local step, size = 1024, 1024
+    local update = md5()
+    for i = -1, 10 do
+        f:seek("set", bit.lshift(step, 2 * i))
+        local sample = f:read(size)
+        if sample then
+            update(sample)
+        else
+            break
+        end
+    end
+    f:close()
+    return update()
+end
+
 --- 从配置构造本地客户端。
 ---@param cfg table|nil
 ---@return LocalClient
 function Client.new(cfg)
     cfg = cfg or {}
-    return setmetatable({ cfg = cfg, _cache = { at = 0, files = nil } }, Client)
+    return setmetatable({ cfg = cfg, _auto_scan_at = 0 }, Client)
 end
 
 --- 是否已配置本地路径。
@@ -104,11 +136,55 @@ function Client:pingAsync(cb)
     return nil
 end
 
---- 解析单本书元数据；失败返回 nil（损坏 / 无引擎）。
+--- 封面缓存路径（存在即封面可用，无需入库）。
+---@param stable_id string
+---@return string
+local function coverPath(stable_id)
+    return require("utils.paths").coverPath(stable_id, SOURCE_ID)
+end
+
+--- 把封面 blitbuffer 缩放落盘为 PNG。
+---@param bb any
+---@param stable_id string
+local function saveCover(bb, stable_id)
+    if not bb then
+        return
+    end
+    local w = tonumber(bb.getWidth and bb:getWidth()) or 0
+    local h = tonumber(bb.getHeight and bb:getHeight()) or 0
+    if w <= 0 or h <= 0 then
+        return
+    end
+    if w > COVER_MAX_W or h > COVER_MAX_H then
+        local ok_r, RenderImage = pcall(require, "ui/renderimage")
+        if ok_r and RenderImage and RenderImage.scaleBlitBuffer then
+            local scaled = RenderImage:scaleBlitBuffer(bb, COVER_MAX_W, COVER_MAX_H)
+            if scaled and scaled ~= bb then
+                pcall(function() bb:free() end)
+                bb = scaled
+            end
+        end
+    end
+    local path = coverPath(stable_id)
+    local tmp = path .. ".part"
+    local ok = pcall(function() bb:writePNG(tmp) end)
+    pcall(function() bb:free() end)
+    if not ok then
+        pcall(os.remove, tmp)
+        return
+    end
+    pcall(os.remove, path)
+    if not os.rename(tmp, path) then
+        pcall(os.remove, tmp)
+    end
+end
+
+--- 解析单本书元数据 + 封面；失败返回 nil（损坏 / 无引擎）。
 --- crengine 需 loadDocument(false) 仅载元数据；close 后注册表引用归零自动清。
 ---@param path string
+---@param stable_id string
 ---@return { title: string|nil, authors: string|nil, intro: string|nil }|nil
-local function parseBookProps(path)
+local function parseBookProps(path, stable_id)
     local ok, props = pcall(function()
         local DocumentRegistry = require("document/documentregistry")
         if not DocumentRegistry:hasProvider(path) then
@@ -124,6 +200,15 @@ local function parseBookProps(path)
             return nil
         end
         local p = doc:getProps()
+        -- 封面：与元数据同会话提取（无封面的格式返回 nil）
+        if lfs.attributes(coverPath(stable_id), "mode") ~= "file" then
+            local ok_cover, cover_bb = pcall(function()
+                return doc:getCoverPageImage()
+            end)
+            if ok_cover and cover_bb then
+                saveCover(cover_bb, stable_id)
+            end
+        end
         pcall(function() doc:close() end)
         return p
     end)
@@ -177,8 +262,6 @@ local function scanFiles(root, is_cancelled, cb)
                                 files[#files + 1] = {
                                     name = name,
                                     path = path,
-                                    size = attr.size or 0,
-                                    mtime = attr.modification or 0,
                                     category = task.category,
                                 }
                             end
@@ -199,8 +282,30 @@ local function scanFiles(root, is_cancelled, cb)
     UIManager:nextTick(step)
 end
 
---- 逐本解析元数据（每 tick 一本，解析重活不堵 UI），写入 f.title/authors/intro。
---- 命中 books 表缓存（title 非空）则跳过解析。
+--- 从文件名解析标题与作者（引擎解析失败时的兜底，保证扫到的书都入库）。
+--- 支持格式："作者 - 书名.ext" / "书名 - 作者.ext" / "书名.ext"
+---@param filename string
+---@return string title, string|nil authors
+local function parseFilename(filename)
+    local name = filename:gsub("%.[^.]+$", "")
+    name = name:gsub("[%[%(].-[%]%)]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    -- "作者 - 书名"（含空格的分隔符优先）
+    local a, b = name:match("^(.+)%s+%-%s+(.+)$")
+    if a and b then
+        return b, a
+    end
+    -- "书名 - 作者"（无空格分隔符）
+    a, b = name:match("^(.+)%-(.+)$")
+    if a and b then
+        return a, b
+    end
+    return name, nil
+end
+
+--- 逐本解析元数据（每 tick 一本，解析重活不堵 UI），写入 books 表。
+--- 命中 books 表缓存（title 非空）则跳过解析。路径未命中时按内容 md5 找旧行：
+--- 命中说明文件被移动/改名，原地把 stable_id 换成新路径（身份以 md5 为准，不当新书）；
+--- 否则才是真新书，解析引擎失败回退文件名。
 ---@param files table[]
 ---@param is_cancelled fun(): boolean
 ---@param cb fun()
@@ -218,103 +323,78 @@ local function resolveMeta(files, is_cancelled, cb)
             cb()
             return
         end
-        local ref = BookRef.new(SOURCE_ID, f.path)
-        local cached = BookDB.get(ref.book_key)
+        local cached = BookDB.get(SOURCE_ID, f.path)
         if cached and type(cached.title) == "string" and cached.title ~= "" then
-            f.title = cached.title
-            f.authors = cached.authors
-            f.intro = cached.intro
-        else
-            local props = parseBookProps(f.path)
-            if props then
-                f.title = props.title
-                f.authors = props.authors
-                f.intro = props.intro
-                DbQueue.run(function()
-                    BookDB.upsert({
-                        book_key = ref.book_key,
-                        source_id = SOURCE_ID,
-                        stable_id = f.path,
-                        filename = f.name,
-                        title = props.title,
-                        authors = props.authors,
-                        intro = props.intro,
-                        category = f.category,
-                        fetched_at = os.time(),
-                    })
-                end)
+            UIManager:nextTick(step)
+            return
+        end
+        local digest = fileMd5(f.path)
+        local moved_from = nil
+        if digest then
+            local by_md5 = BookDB.getByMd5(SOURCE_ID, digest)
+            if by_md5 and by_md5.stable_id ~= f.path then
+                moved_from = by_md5.stable_id
             end
         end
+        if moved_from then
+            DbQueue.run(function()
+                BookDB.renameStableId(SOURCE_ID, moved_from, f.path)
+            end)
+            local old_cover, new_cover = coverPath(moved_from), coverPath(f.path)
+            if lfs.attributes(old_cover, "mode") == "file" then
+                pcall(os.rename, old_cover, new_cover)
+            end
+            UIManager:nextTick(step)
+            return
+        end
+        local props = parseBookProps(f.path, f.path) or {}
+        local title, authors, intro = props.title, props.authors, props.intro
+        if not title or title == "" then
+            title, authors = parseFilename(f.name)
+        end
+        DbQueue.run(function()
+            BookDB.upsert({
+                source_id = SOURCE_ID,
+                stable_id = f.path,
+                md5 = digest,
+                title = title,
+                authors = authors,
+                intro = intro,
+                category = f.category,
+                fetched_at = os.time(),
+            })
+        end)
         UIManager:nextTick(step)
     end
     UIManager:nextTick(step)
 end
 
---- 按筛选条件过滤文件列表（当前仅分类，UI「分类」对应 opts.favorite）。
----@param files table[]
----@param opts table|nil
----@return table[]
-local function applyFilter(files, opts)
-    local category = opts and opts.favorite
-    if type(category) ~= "string" or category == "" then
-        return files
-    end
-    local out = {}
-    for _, f in ipairs(files) do
-        if f.category == category then
-            out[#out + 1] = f
-        end
-    end
-    return out
-end
-
---- 手动强扫后清理失效书籍：books 表本源的、本次未扫到的记录删除（不动 reading_stats）。
+--- 扫描后清理失效书籍：books 表本源的、本次未扫到的记录删除（不动 reading_stats），连同封面。
+--- 改名/移动的书已在 resolveMeta 里原地更新 stable_id，这里的 keep 集合天然包含它们。
 ---@param files table[]
 local function pruneMissing(files)
     local keep = {}
     for _, f in ipairs(files) do
-        keep[BookRef.keyOf(SOURCE_ID, f.path)] = true
+        keep[f.path] = true
     end
     local BookDB = require("utils.db.book")
     local DbQueue = require("utils.db.queue")
     DbQueue.run(function()
-        for _, key in ipairs(BookDB.keysBySource(SOURCE_ID)) do
-            if not keep[key] then
-                BookDB.remove(key)
+        for _, stable_id in ipairs(BookDB.stableIdsBySource(SOURCE_ID)) do
+            if not keep[stable_id] then
+                BookDB.remove(SOURCE_ID, stable_id)
+                pcall(os.remove, coverPath(stable_id))
             end
         end
     end)
 end
 
---- 扫描目录下的书籍文件（异步）：遍历 → 解析元数据（缓存进 db）。
---- TTL 内直接返回缓存结果（不扫盘、不清理）；opts.force 强扫并清理失效书。
----@param opts table|nil { force: boolean|nil, favorite: string|nil }
----@param cb fun(files: table[]|nil, err: any)
----@return { cancel: fun() }|nil
-function Client:listAsync(opts, cb)
-    local ok, err = self:validatePath()
-    if not ok then
-        UIManager:nextTick(function()
-            cb(nil, err)
-        end)
-        return nil
-    end
-
-    local force = type(opts) == "table" and opts.force == true
-    local cache = self._cache
-    if not force and cache.files and (os.time() - cache.at) < SCAN_TTL then
-        UIManager:nextTick(function()
-            cb(applyFilter(cache.files, opts))
-        end)
-        return nil
-    end
-
-    local root = (self.cfg.path or ""):gsub("%s+$", ""):gsub("/+$", "")
-    local cancelled = false
-    local function is_cancelled()
-        return cancelled
-    end
-
+--- 真实扫盘并写库：遍历 → 解析元数据/封面 → 清失效。
+---@param root string
+---@param is_cancelled fun(): boolean
+---@param cb fun()
+local function scanIntoDb(root, is_cancelled, cb)
+    require("utils.paths").ensureLayout(SOURCE_ID)
     scanFiles(root, is_cancelled, function(files)
         if is_cancelled() then
             return
@@ -323,14 +403,59 @@ function Client:listAsync(opts, cb)
             if is_cancelled() then
                 return
             end
-            self._cache = { at = os.time(), files = files }
-            if force then
-                pruneMissing(files)
-            end
-            cb(applyFilter(files, opts))
+            pruneMissing(files)
+            cb()
         end)
     end)
+end
 
+--- 直查 books 表（图书馆分页/分类/搜索）。
+---@param opts table|nil { page, page_size, favorite, search }
+---@param cb fun(rows: table[]|nil, count: number, err: any)
+local function queryDb(opts, cb)
+    opts = opts or {}
+    local page = math.max(1, tonumber(opts.page) or 1)
+    local page_size = math.max(1, tonumber(opts.page_size) or 24)
+    UIManager:nextTick(function()
+        local BookDB = require("utils.db.book")
+        local rows, count = BookDB.listBySource(SOURCE_ID, {
+            category = opts.favorite,
+            search = opts.search,
+            limit = page_size,
+            offset = (page - 1) * page_size,
+        })
+        cb(rows, count)
+    end)
+end
+
+--- 书库查询（异步）：默认直查数据库；opts.force 先真实扫盘写库再查。
+---@param opts table|nil { force, page, page_size, favorite, search }
+---@param cb fun(rows: table[]|nil, count: number, err: any)
+---@return { cancel: fun() }|nil
+function Client:listAsync(opts, cb)
+    local ok, err = self:validatePath()
+    if not ok then
+        UIManager:nextTick(function()
+            cb(nil, 0, err)
+        end)
+        return nil
+    end
+
+    if not (type(opts) == "table" and opts.force == true) then
+        queryDb(opts, cb)
+        return nil
+    end
+
+    local root = (self.cfg.path or ""):gsub("%s+$", ""):gsub("/+$", "")
+    local cancelled = false
+    scanIntoDb(root, function()
+        return cancelled
+    end, function()
+        if cancelled then
+            return
+        end
+        queryDb(opts, cb)
+    end)
     return {
         cancel = function()
             cancelled = true
@@ -338,64 +463,94 @@ function Client:listAsync(opts, cb)
     }
 end
 
---- 聚合扫描结果的一级目录名为分类列表（经 listAsync，TTL 内走缓存）。
---- UI「分类」筛选读 favorites 键。
+--- 打开桌面时的自动扫描（节流 AUTO_SCAN_MIN_INTERVAL 秒）：扫盘写库 + 清失效。
+---@param cb fun(scanned: boolean)|nil
+---@return { cancel: fun() }|nil
+function Client:autoScanAsync(cb)
+    cb = cb or function() end
+    local ok = self:validatePath()
+    if not ok then
+        UIManager:nextTick(function()
+            cb(false)
+        end)
+        return nil
+    end
+    local now = os.time()
+    if now - (self._auto_scan_at or 0) < AUTO_SCAN_MIN_INTERVAL then
+        UIManager:nextTick(function()
+            cb(false)
+        end)
+        return nil
+    end
+    self._auto_scan_at = now
+    local root = (self.cfg.path or ""):gsub("%s+$", ""):gsub("/+$", "")
+    local cancelled = false
+    scanIntoDb(root, function()
+        return cancelled
+    end, function()
+        if not cancelled then
+            cb(true)
+        end
+    end)
+    return {
+        cancel = function()
+            cancelled = true
+        end,
+    }
+end
+
+--- 分类列表（DISTINCT 直查数据库）。
 ---@param cb fun(data: BookFiltersResult|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:filtersAsync(cb)
-    return self:listAsync({}, function(files, err)
-        if not files then
+    local ok, err = self:validatePath()
+    UIManager:nextTick(function()
+        if not ok then
             cb(nil, err)
             return
         end
-        local seen, categories = {}, {}
-        for _, f in ipairs(files) do
-            local c = f.category
-            if c and not seen[c] then
-                seen[c] = true
-                categories[#categories + 1] = c
-            end
-        end
-        table.sort(categories)
-        cb({ data = { favorites = categories } })
+        cb({ data = { favorites = require("utils.db.book").categoriesBySource(SOURCE_ID) } })
     end)
+    return nil
 end
 
---- 本地文件不需要下载，直接复制到缓存目录（保持接口一致）。
----@param local_path string
----@param temp_path string
----@param _on_progress fun(bytes: number)|nil
----@param cb fun(ok: boolean|nil, err: any)
+--- 最近阅读（opens 表按 last_open 倒序）。
+---@param limit number|nil
+---@param cb fun(rows: table[])
 ---@return nil
-function Client:downloadAsync(local_path, temp_path, _on_progress, cb)
-    local ok, err = pcall(function()
-        local src = io.open(local_path, "rb")
-        if not src then
-            error("cannot read: " .. local_path)
-        end
-        local dst = io.open(temp_path, "wb")
-        if not dst then
-            src:close()
-            error("cannot write: " .. temp_path)
-        end
-        local chunk_size = 64 * 1024
-        while true do
-            local chunk = src:read(chunk_size)
-            if not chunk then
-                break
-            end
-            dst:write(chunk)
-        end
-        src:close()
-        dst:close()
-    end)
+function Client:recentAsync(limit, cb)
     UIManager:nextTick(function()
-        if ok then
-            cb(true)
-        else
-            cb(nil, tostring(err))
-        end
+        cb(require("utils.db.open").recentBySource(SOURCE_ID, limit or 24))
     end)
+    return nil
+end
+
+--- 阅读统计聚合（reading_stats 表）。
+---@param cb fun(summary: table, daily: table[], daily_books: table[])
+---@return nil
+function Client:insightAsync(cb)
+    UIManager:nextTick(function()
+        local StatsDB = require("utils.db.stats")
+        cb(
+            StatsDB.summaryBySource(SOURCE_ID),
+            StatsDB.dailyBySource(SOURCE_ID),
+            StatsDB.dailyBooksBySource(SOURCE_ID)
+        )
+    end)
+    return nil
+end
+
+--- 封面缓存路径（已存在才返回；绝不现提取，coverRequest 在 UI 线程同步调用）。
+---@param stable_id string
+---@return string|nil
+function Client:cachedCoverPath(stable_id)
+    if type(stable_id) ~= "string" or stable_id == "" then
+        return nil
+    end
+    local path = coverPath(stable_id)
+    if lfs.attributes(path, "mode") == "file" then
+        return path
+    end
     return nil
 end
 

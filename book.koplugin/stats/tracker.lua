@@ -1,7 +1,8 @@
 --[[--
 阅读统计采集：阅读开始计时、翻页结清、暂停落盘，写入 reading_stats。
 
-只统计有源身份（BookRef）的文档；本地书无源可报，直接跳过。
+只统计有源身份（BookRef，经 opens 表登记）的文档；无身份文档直接跳过。
+本地源（local）的统计留在本表供洞察页直查；远端源由 stats_sync 上报后删除。
 一页一条：duration 为该页停留秒数，过短（< 1s）丢弃。
 
 接线（main.lua）：reader_ready / resume → start；page/pos update → onPage；

@@ -30,23 +30,20 @@ end
 ---@param key string
 ---@param value_json string
 ---@param expires number
----@param source_id string|nil
 ---@return boolean
-function HttpDB.set(key, value_json, expires, source_id)
+function HttpDB.set(key, value_json, expires)
     if type(key) ~= "string" or key == "" or type(value_json) ~= "string" then
         return false
     end
     Base.ensure()
     return Base.exec(
-        [[INSERT INTO http (key, value, expires, source_id) VALUES (?,?,?,?)
+        [[INSERT INTO http (key, value, expires) VALUES (?,?,?)
           ON CONFLICT(key) DO UPDATE SET
             value=excluded.value,
-            expires=excluded.expires,
-            source_id=COALESCE(excluded.source_id, http.source_id);]],
+            expires=excluded.expires;]],
         key,
         value_json,
-        tonumber(expires) or 0,
-        source_id
+        tonumber(expires) or 0
     ) ~= nil
 end
 
@@ -71,15 +68,6 @@ function HttpDB.clear(url_substr)
     end
     local pat = url_substr:gsub("([%%_])", "%%%1")
     return Base.exec([[DELETE FROM http WHERE key LIKE ?;]], "%" .. pat .. "%") ~= nil
-end
-
---- 删除已过期的 HTTP 缓存行
----@param now_ts number|nil
----@return boolean
-function HttpDB.deleteExpired(now_ts)
-    now_ts = tonumber(now_ts) or os.time()
-    Base.ensure()
-    return Base.exec([[DELETE FROM http WHERE expires <= ?;]], now_ts) ~= nil
 end
 
 return HttpDB

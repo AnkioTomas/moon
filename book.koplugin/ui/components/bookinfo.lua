@@ -148,6 +148,7 @@ end
 --- 封面 widget；opts.badge=true 叠进度角标；缺图由 Image 自更新占位。
 --- opts.show_parent: 窗口级父（Desktop / Detail）
 --- opts.on_ready: 图片就绪回调
+--- opts.src / opts.headers: 直接指定封面（刮削结果没有 source.coverRequest）
 ---@param plugin table|nil
 ---@param source table|nil
 ---@param book table|nil
@@ -161,7 +162,11 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
     local pct = BookInfo.pct(book)
     local ref = type(book) == "table" and book.ref or nil
     local req
-    if source and type(source.coverRequest) == "function" and type(ref) == "table" then
+    if type(opts.src) == "string" and opts.src ~= "" then
+        req = { url = opts.src, headers = opts.headers }
+    elseif type(book) == "table" and type(book.cover_url) == "string" and book.cover_url ~= "" then
+        req = { url = book.cover_url, headers = book.cover_headers }
+    elseif source and type(source.coverRequest) == "function" and type(ref) == "table" then
         req = select(1, source:coverRequest(ref))
     end
     local cover = Image.widget{
@@ -191,9 +196,9 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
 end
 
 --- 英雄卡：左封面，右栏高度对齐封面。
---- 上：书名/作者/简介（简介吃满中间余量，不写死行数）
---- 下：进度条始终贴底
---- opts: width, pad, on_tap；返回 widget, height
+--- 上：书名/作者[/副文案]/简介（简介吃满中间余量，不写死行数）
+--- 下：进度条贴底（opts.show_progress=false 时隐藏，刮削结果用）
+--- opts: width, pad, on_tap, show_progress, subtitle, src, headers；返回 widget, height
 ---@param plugin table|nil
 ---@param source table|nil
 ---@param book table|nil
@@ -207,11 +212,14 @@ function BookInfo.hero(plugin, source, book, opts)
     local gap = UI.sz(8)
     local cw = math.min(UI.sz(80), math.floor(avail * 0.22))
     local ch = math.floor(cw * 3 / 2)
+    local show_progress = opts.show_progress ~= false
 
     local cover = select(1, BookInfo.cover(plugin, source, book, cw, ch, {
         badge = false,
         show_parent = opts.show_parent,
         on_ready = opts.on_ready,
+        src = opts.src,
+        headers = opts.headers,
     }))
     local cover_box = cover
     if opts.on_tap then
@@ -224,11 +232,16 @@ function BookInfo.hero(plugin, source, book, opts)
     local author = BookInfo.author(book)
     local desc = BookInfo.desc(book)
     local pct = BookInfo.pct(book)
+    local subtitle = opts.subtitle
 
-    local progress, progress_h = BookInfo.progressRow(info_w, pct)
+    local progress_h = 0
+    local progress
+    if show_progress then
+        progress, progress_h = BookInfo.progressRow(info_w, pct)
+    end
     local gap_head = UI.sz(2)
     local gap_desc = UI.sz(3)
-    local gap_foot = UI.sz(4)
+    local gap_foot = show_progress and UI.sz(4) or 0
 
     local title_w = TextWidget:new{
         text = title,
@@ -245,14 +258,25 @@ function BookInfo.hero(plugin, source, book, opts)
     }
 
     local head_h = title_w:getSize().h + gap_head + author_w:getSize().h
-    local mid_budget = math.max(0, ch - head_h - gap_foot - progress_h)
-
     local top_kids = {
         align = "left",
         title_w,
         VerticalSpan:new{ width = gap_head },
         author_w,
     }
+    if type(subtitle) == "string" and subtitle ~= "" then
+        local sub_w = TextWidget:new{
+            text = subtitle,
+            face = UI.face("xx_smallinfofont", 11),
+            max_width = info_w,
+            fgcolor = UI.dim(),
+        }
+        table.insert(top_kids, VerticalSpan:new{ width = gap_head })
+        table.insert(top_kids, sub_w)
+        head_h = head_h + gap_head + sub_w:getSize().h
+    end
+
+    local mid_budget = math.max(0, ch - head_h - gap_foot - progress_h)
     if desc ~= "" and mid_budget > gap_desc then
         table.insert(top_kids, VerticalSpan:new{ width = gap_desc })
         table.insert(top_kids, TextBoxWidget:new{
@@ -268,13 +292,16 @@ function BookInfo.hero(plugin, source, book, opts)
     end
 
     local filler = math.max(0, ch - head_h - gap_foot - progress_h)
-    local info = VerticalGroup:new{
+    local info_kids = {
         align = "left",
         VerticalGroup:new(top_kids),
         VerticalSpan:new{ width = filler },
-        VerticalSpan:new{ width = gap_foot },
-        progress,
     }
+    if show_progress then
+        table.insert(info_kids, VerticalSpan:new{ width = gap_foot })
+        table.insert(info_kids, progress)
+    end
+    local info = VerticalGroup:new(info_kids)
 
     if opts.on_tap then
         local tap = BookInfo.tappable(info_w, ch, opts.on_tap)

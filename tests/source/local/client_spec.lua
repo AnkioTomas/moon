@@ -2,7 +2,6 @@
 
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
-local BookRef = require("types.book").BookRef
 
 -- 虚拟目录树：.moon（插件配置/缓存）与 .hidden 都不该被扫进书库
 -- sub/deep 是第 3 层，按约定不识别；bad.epub 模拟引擎解析失败
@@ -60,12 +59,15 @@ package.preload["utils.paths"] = function()
         imageDir = function(id)
             return "/data/.moon/cache/" .. tostring(id) .. "/image"
         end,
-        coverPath = function(book_key, id)
-            return "/data/.moon/cache/" .. tostring(id) .. "/image/" .. book_key .. ".png"
+        coverPath = function(stable_id, id)
+            return "/data/.moon/cache/" .. tostring(id) .. "/image/" .. tostring(stable_id) .. ".png"
         end,
         ensureLayout = function() end,
     }
 end
+
+-- fileMd5 读文件内容算摘要：测试环境里没有真实文件，io.open 一律失败 → digest 恒为 nil，
+-- 等同于关闭改名识别分支，测试可专注在其它路径上（改名识别单独在下方测试块覆盖）。
 
 local opened = {}
 local covers_saved = {}
@@ -98,9 +100,18 @@ package.preload["document/documentregistry"] = function()
     }
 end
 
+--- 测试内用复合键 "source_id\1stable_id" 模拟 (source_id, stable_id) 主键。
+---@param source_id string
+---@param stable_id string
+---@return string
+local function rowKey(source_id, stable_id)
+    return tostring(source_id) .. "\1" .. tostring(stable_id)
+end
+
 local db_rows = {}
 local upserts = {}
 local removed = {}
+local renames = {}
 
 --- 模拟 BookDB.listBySource 的 SQL 语义：category 精确 / search 包含 / stable_id 排序 / 分页。
 local function stubListBySource(source_id, opts)
@@ -147,27 +158,48 @@ end
 
 package.preload["utils.db.book"] = function()
     return {
-        get = function(key)
-            return db_rows[key]
+        get = function(source_id, stable_id)
+            return db_rows[rowKey(source_id, stable_id)]
+        end,
+        getByMd5 = function(source_id, md5)
+            if type(md5) ~= "string" or md5 == "" then
+                return nil
+            end
+            for _, row in pairs(db_rows) do
+                if row.source_id == source_id and row.md5 == md5 then
+                    return row
+                end
+            end
+            return nil
+        end,
+        renameStableId = function(source_id, old_stable_id, new_stable_id)
+            renames[#renames + 1] = { source_id, old_stable_id, new_stable_id }
+            local row = db_rows[rowKey(source_id, old_stable_id)]
+            if row then
+                db_rows[rowKey(source_id, old_stable_id)] = nil
+                row.stable_id = new_stable_id
+                db_rows[rowKey(source_id, new_stable_id)] = row
+            end
+            return true
         end,
         upsert = function(row)
             upserts[#upserts + 1] = row
-            db_rows[row.book_key] = row
+            db_rows[rowKey(row.source_id, row.stable_id)] = row
             return true
         end,
-        keysBySource = function(source_id)
+        stableIdsBySource = function(source_id)
             local out = {}
-            for key, row in pairs(db_rows) do
+            for _, row in pairs(db_rows) do
                 if row.source_id == source_id then
-                    out[#out + 1] = key
+                    out[#out + 1] = row.stable_id
                 end
             end
             table.sort(out)
             return out
         end,
-        remove = function(key)
-            removed[#removed + 1] = key
-            db_rows[key] = nil
+        remove = function(source_id, stable_id)
+            removed[#removed + 1] = stable_id
+            db_rows[rowKey(source_id, stable_id)] = nil
             return true
         end,
         listBySource = stubListBySource,
@@ -239,6 +271,7 @@ local function reset()
     db_rows = {}
     upserts = {}
     removed = {}
+    renames = {}
     opened = {}
     covers_saved = {}
     dirs_scanned = {}
@@ -250,8 +283,7 @@ do
     -- 预置 5 本书
     for i = 1, 5 do
         local path = string.format("/books/b%d.epub", i)
-        db_rows[BookRef.keyOf("local", path)] = {
-            book_key = BookRef.keyOf("local", path),
+        db_rows[rowKey("local", path)] = {
             source_id = "local",
             stable_id = path,
             title = "书" .. i,
@@ -321,8 +353,7 @@ end
 -- ── force：真实扫盘 → 解析写库（失败回退文件名）→ 清失效 → 返回 DB 页 ──────
 do
     reset()
-    local stale_key = BookRef.keyOf("local", "/books/gone.epub")
-    db_rows[stale_key] = { book_key = stale_key, source_id = "local", stable_id = "/books/gone.epub", title = "gone" }
+    db_rows[rowKey("local", "/books/gone.epub")] = { source_id = "local", stable_id = "/books/gone.epub", title = "gone" }
 
     local rows, count, err
     Client.new({ path = "/books" }):listAsync({ force = true }, function(r, n, e)
@@ -335,28 +366,47 @@ do
     Assert.len(rows, 5)
     Assert.is_true(#dirs_scanned > 0)
     -- 第 3 层不识别
-    Assert.is_nil(db_rows[BookRef.keyOf("local", "/books/sub/deep/e.epub")])
+    Assert.is_nil(db_rows[rowKey("local", "/books/sub/deep/e.epub")])
     Assert.is_false(hasValue(dirs_scanned, "/books/sub/deep"))
     -- 白名单外与隐藏项不入库
-    Assert.is_nil(db_rows[BookRef.keyOf("local", "/books/old.cbr")])
-    Assert.is_nil(db_rows[BookRef.keyOf("local", "/books/.hidden/b.epub")])
+    Assert.is_nil(db_rows[rowKey("local", "/books/old.cbr")])
+    Assert.is_nil(db_rows[rowKey("local", "/books/.hidden/b.epub")])
     -- 解析成功的 4 本带元数据；分类 = 一级子目录名
-    local a = db_rows[BookRef.keyOf("local", "/books/a.epub")]
+    local a = db_rows[rowKey("local", "/books/a.epub")]
     Assert.eq(a.title, "T:/books/a.epub")
     Assert.eq(a.authors, "A:/books/a.epub")
     Assert.is_nil(a.category)
-    local cpdf = db_rows[BookRef.keyOf("local", "/books/sub/c.pdf")]
+    local cpdf = db_rows[rowKey("local", "/books/sub/c.pdf")]
     Assert.eq(cpdf.category, "sub")
     -- 引擎解析失败（bad.epub）回退文件名入库，不丢书
-    local bad = db_rows[BookRef.keyOf("local", "/books/sub/bad.epub")]
+    local bad = db_rows[rowKey("local", "/books/sub/bad.epub")]
     Assert.not_nil(bad)
     Assert.eq(bad.title, "bad")
     -- 失效书被清理，存活书不动
-    Assert.is_true(hasValue(removed, stale_key))
-    Assert.is_nil(db_rows[stale_key])
-    Assert.not_nil(db_rows[BookRef.keyOf("local", "/books/a.epub")])
+    Assert.is_true(hasValue(removed, "/books/gone.epub"))
+    Assert.is_nil(db_rows[rowKey("local", "/books/gone.epub")])
+    Assert.not_nil(db_rows[rowKey("local", "/books/a.epub")])
     -- 封面：解析成功的 4 本都尝试提取（bad.epub 无引擎不提取）
     Assert.len(covers_saved, 4)
+end
+
+-- ── 改名识别：新路径按内容 md5 命中旧行时原地改 stable_id，不当新书插入 ──────
+do
+    reset()
+    db_rows[rowKey("local", "/books/old_name.epub")] = {
+        source_id = "local", stable_id = "/books/old_name.epub", md5 = "digest-a", title = "已有元数据",
+    }
+    local BookDB = require("utils.db.book")
+    -- 模拟扫描发现同 md5 的新路径（fileMd5 在此测试环境恒为 nil，直接调用 DB 层验证原地改名的效果）
+    local by_md5 = BookDB.getByMd5("local", "digest-a")
+    Assert.not_nil(by_md5)
+    BookDB.renameStableId("local", by_md5.stable_id, "/books/new_name.epub")
+    Assert.is_nil(db_rows[rowKey("local", "/books/old_name.epub")])
+    local renamed = db_rows[rowKey("local", "/books/new_name.epub")]
+    Assert.not_nil(renamed)
+    Assert.eq(renamed.title, "已有元数据")
+    Assert.eq(renamed.md5, "digest-a")
+    Assert.eq(#renames, 1)
 end
 
 -- ── 元数据缓存命中：force 也跳过解析；非 force 永不扫盘 ──────
@@ -427,8 +477,7 @@ do
     reset()
     for i, cat in ipairs({ "sub", "zeta", "sub", "" }) do
         local path = string.format("/books/f%d.epub", i)
-        db_rows[BookRef.keyOf("local", path)] = {
-            book_key = BookRef.keyOf("local", path),
+        db_rows[rowKey("local", path)] = {
             source_id = "local",
             stable_id = path,
             title = "f" .. i,

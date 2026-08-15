@@ -1,10 +1,11 @@
 --[[--
 本地书库门面（store）
 
-  books/tocs/opens → utils.db.*（book.sqlite3）
-  epub 落盘：.moon/cache/<source>/book/<bookKey>/
+  books/opens → utils.db.*（book.sqlite3）
+  epub/html 落盘：.moon/cache/<source>/book/<slug>/
+  （整本 book.*；按章 N.html）
 
-  filename + md5 一书一值；清文件缓存时保留身份行
+  身份 = (source_id, stable_id)；md5 是本地源的内容摘要，用于识别改名/移动
 
 @module koplugin.book.book.store
 --]]
@@ -15,7 +16,6 @@ local UIManager = require("ui/uimanager")
 local Paths = require("utils.paths")
 local DbBase = require("utils.db.base")
 local BookDB = require("utils.db.book")
-local TocDB = require("utils.db.toc")
 local OpenDB = require("utils.db.open")
 local DbQueue = require("utils.db.queue")
 local Task = require("utils.task")
@@ -23,7 +23,6 @@ local Task = require("utils.task")
 local Store = {}
 
 local META_TTL = 7 * 24 * 60 * 60
-local TOC_TTL = 1 * 24 * 60 * 60
 local LOCAL_BOOK_TTL = 90 * 24 * 60 * 60
 local BookRef = require("types.book").BookRef
 
@@ -35,24 +34,6 @@ local function basename(path)
         return nil
     end
     return path:match("([^/\\]+)$") or path
-end
-
---- 与 KOReader statistics 一致的内容 partialMD5（用于统计上报映射）
----@param path string
----@return string|nil
-local function partialMd5(path)
-    if type(path) ~= "string" or path == "" then
-        return nil
-    end
-    local ok, util = pcall(require, "util")
-    if not ok or not util or not util.partialMD5 then
-        return nil
-    end
-    local mok, digest = pcall(util.partialMD5, path)
-    if mok and type(digest) == "string" and digest ~= "" then
-        return digest
-    end
-    return nil
 end
 
 --- fetched_at 是否已超过 ttl（fetched_at<=0 视为已过期）
@@ -96,87 +77,43 @@ local function bookExtension(stable_id)
 end
 
 --- 整本书落盘路径；保留远端格式以供 KOReader 选择对应文档引擎。
----@param book_key string
+---@param stable_id string
 ---@param source_id string
----@param stable_id string|nil
 ---@return string
-function Store.bookFilePath(book_key, source_id, stable_id)
-    Paths.ensureBookWork(book_key, source_id)
-    return Paths.bookWorkDir(book_key, source_id) .. "/book." .. bookExtension(stable_id)
+function Store.bookFilePath(stable_id, source_id)
+    Paths.ensureBookWork(stable_id, source_id)
+    return Paths.bookWorkDir(stable_id, source_id) .. "/book." .. bookExtension(stable_id)
 end
 
---- 单章 epub 路径
----@param book_key string
+--- 单章 HTML 路径（在线按章阅读落盘）
+---@param stable_id string
 ---@param idx number|string
 ---@param source_id string
 ---@return string
-function Store.chapterPath(book_key, idx, source_id)
-    Paths.ensureBookWork(book_key, source_id)
+function Store.chapterPath(stable_id, idx, source_id)
+    Paths.ensureBookWork(stable_id, source_id)
     idx = tonumber(idx) or 0
-    return Paths.bookWorkDir(book_key, source_id) .. "/" .. tostring(idx) .. ".epub"
-end
-
---- 写入 books 元数据（刷新 fetched_at）；TTL 由 getMeta 判断。
---- 必须在 Task 子进程内调用（通过 putMetaAsync 间接使用）。
----@param book_key string
----@param meta table
----@param source_id string
----@return boolean
-local function putMetaSync(book_key, meta, source_id)
-    if type(book_key) ~= "string" or book_key == "" or type(meta) ~= "table" then
-        return false
-    end
-    if type(source_id) ~= "string" or source_id == "" then
-        return false
-    end
-    local stable = meta.stable_id or meta.filename
-    if stable ~= nil then
-        stable = tostring(stable)
-    end
-    local filename = meta.filename or stable
-    local ok = BookDB.upsert({
-        book_key = book_key,
-        source_id = source_id,
-        stable_id = stable or book_key,
-        filename = filename and tostring(filename) or nil,
-        md5 = meta.md5,
-        title = meta.title or meta.bookName,
-        authors = meta.authors or meta.author,
-        percent = tonumber(meta.percent or meta.progressPercent or meta.progress) or 0,
-        category = meta.category,
-        favorite = meta.favorite,
-        series = meta.series,
-        intro = meta.intro or meta.description,
-        fetched_at = os.time(),
-    })
-    if not ok then
-        logger.warn("book.cache putMeta failed", book_key)
-        return false
-    end
-    return true
+    return Paths.bookWorkDir(stable_id, source_id) .. "/" .. tostring(idx) .. ".html"
 end
 
 --- 异步写入 books 元数据（fire-and-forget，不堵 UI）
----@param book_key string
+---@param ref BookRef
 ---@param meta table
----@param source_id string
-function Store.putMetaAsync(book_key, meta, source_id)
-    if type(book_key) ~= "string" or book_key == "" or type(meta) ~= "table" then
+function Store.putMetaAsync(ref, meta)
+    if type(ref) ~= "table" or type(meta) ~= "table" then
         return
     end
+    local source_id = ref.source_id
+    local stable_id = ref.stable_id
     if type(source_id) ~= "string" or source_id == "" then
         return
     end
-    local stable = meta.stable_id or meta.filename
-    if stable ~= nil then
-        stable = tostring(stable)
+    if type(stable_id) ~= "string" or stable_id == "" then
+        return
     end
-    local filename = meta.filename or stable
     local payload = {
-        book_key = book_key,
         source_id = source_id,
-        stable_id = stable or book_key,
-        filename = filename and tostring(filename) or nil,
+        stable_id = stable_id,
         md5 = meta.md5,
         title = meta.title or meta.bookName,
         authors = meta.authors or meta.author,
@@ -191,46 +128,35 @@ function Store.putMetaAsync(book_key, meta, source_id)
         local BookDB = require("utils.db.book")
         local ok = BookDB.upsert(payload)
         if not ok then
-            logger.warn("book.cache putMetaAsync failed", book_key)
+            logger.warn("book.cache putMetaAsync failed", source_id, stable_id)
         end
     end)
 end
 
---- 写入 books 元数据（已废弃，请使用 putMetaAsync）
----@deprecated 使用 Store.putMetaAsync 代替
----@param book_key string
----@param meta table
----@param source_id string
----@return boolean
-function Store.putMeta(book_key, meta, source_id)
-    return putMetaSync(book_key, meta, source_id)
-end
-
 --- 读 books 元数据；过 TTL（7 天）或 fetched_at=0 返回 nil。
 --- 必须在 Task 子进程内调用（通过 getMetaAsync 间接使用）。
----@param book_key string
+---@param source_id string
+---@param stable_id string
 ---@return table|nil
-local function getMetaSync(book_key)
-    if type(book_key) ~= "string" or book_key == "" then
+local function getMetaSync(source_id, stable_id)
+    if type(source_id) ~= "string" or source_id == "" then
+        return nil
+    end
+    if type(stable_id) ~= "string" or stable_id == "" then
         return nil
     end
     DbBase.open()
-    local data = BookDB.get(book_key)
+    local data = BookDB.get(source_id, stable_id)
     if not data then
         return nil
     end
     if isExpired(data.fetched_at, META_TTL) then
         return nil
     end
-    local stable = data.stable_id or data.filename
-    if stable ~= nil then
-        stable = tostring(stable)
-    end
     return {
-        ref = stable and data.source_id and BookRef.new(data.source_id, stable) or nil,
-        stable_id = stable,
+        ref = BookRef.new(data.source_id, data.stable_id),
+        stable_id = data.stable_id,
         source_id = data.source_id,
-        filename = data.filename,
         md5 = data.md5,
         title = data.title,
         authors = data.authors,
@@ -239,17 +165,16 @@ local function getMetaSync(book_key)
         favorite = data.favorite,
         series = data.series,
         intro = data.intro,
-        book_key = data.book_key or book_key,
         fetched_at = data.fetched_at,
     }
 end
 
 --- 异步读 books 元数据；回调 fun(meta: table|nil)
----@param book_key string
+---@param ref BookRef
 ---@param cb fun(meta: table|nil)
 ---@return { cancel: fun() }
-function Store.getMetaAsync(book_key, cb)
-    if type(book_key) ~= "string" or book_key == "" then
+function Store.getMetaAsync(ref, cb)
+    if type(ref) ~= "table" or type(ref.source_id) ~= "string" or type(ref.stable_id) ~= "string" then
         UIManager:nextTick(function()
             cb(nil)
         end)
@@ -258,95 +183,17 @@ function Store.getMetaAsync(book_key, cb)
 
     local cancelled = false
     local job = { cancel = function() cancelled = true end }
+    local source_id, stable_id = ref.source_id, ref.stable_id
 
     UIManager:nextTick(function()
         if cancelled then
             return
         end
-        local meta = getMetaSync(book_key)
+        local meta = getMetaSync(source_id, stable_id)
         cb(meta)
     end)
 
     return job
-end
-
---- 同步读 books 元数据（仅内部使用，必须在 Task 子进程内调用）。
---- 外部调用请使用 Store.getMetaAsync。
----@deprecated 使用 Store.getMetaAsync 代替
----@param book_key string
----@return table|nil
-function Store.getMeta(book_key)
-    return getMetaSync(book_key)
-end
-
---- 异步写入 tocs（目录）；fire-and-forget，不堵 UI
----@param book_key string
----@param toc table chapters 数组，或带 chapters/raw 的表
----@param source_id string
-function Store.putTocAsync(book_key, toc, source_id)
-    if type(book_key) ~= "string" or book_key == "" or type(toc) ~= "table" then
-        return
-    end
-    if type(source_id) ~= "string" or source_id == "" then
-        return
-    end
-    local chapters = toc.chapters or toc
-    local raw = toc.raw
-    local fetched_at = os.time()
-    DbQueue.run(function()
-        local TocDB = require("utils.db.toc")
-        local ok = TocDB.put(book_key, source_id, {
-            chapters = chapters,
-            raw = raw,
-            fetched_at = fetched_at,
-        })
-        if not ok then
-            logger.warn("book.cache putTocAsync failed", book_key)
-        end
-    end)
-end
-
---- 写入 tocs（目录）；刷新 fetched_at（已废弃，请使用 putTocAsync）
----@deprecated 使用 Store.putTocAsync 代替
----@param book_key string
----@param toc table chapters 数组，或带 chapters/raw 的表
----@param source_id string
----@return boolean
-function Store.putToc(book_key, toc, source_id)
-    if type(book_key) ~= "string" or book_key == "" or type(toc) ~= "table" then
-        return false
-    end
-    if type(source_id) ~= "string" or source_id == "" then
-        return false
-    end
-    local ok = TocDB.put(book_key, source_id, {
-        chapters = toc.chapters or toc,
-        raw = toc.raw,
-        fetched_at = os.time(),
-    })
-    if not ok then
-        logger.warn("book.cache putToc failed", book_key)
-        return false
-    end
-    return true
-end
-
---- 读目录；过 TTL（1 天）则删行并返回 nil
----@param book_key string
----@return table|nil
-function Store.getToc(book_key)
-    if type(book_key) ~= "string" or book_key == "" then
-        return nil
-    end
-    local data = TocDB.get(book_key)
-    if not data then
-        return nil
-    end
-    if isExpired(data.fetched_at, TOC_TTL) then
-        TocDB.delete(book_key)
-        return nil
-    end
-    return data
 end
 
 --- 从契约 Book 抽出可入库的 meta 字段
@@ -358,8 +205,6 @@ local function metaFromBook(book)
         return nil
     end
     return {
-        stable_id = ref.stable_id,
-        filename = ref.stable_id,
         title = book.title,
         authors = book.authors,
         percent = tonumber(book.percent) or 0,
@@ -378,7 +223,7 @@ function Store.remember(book)
     if not ref or not meta then
         return
     end
-    Store.putMetaAsync(ref.book_key, meta, ref.source_id)
+    Store.putMetaAsync(ref, meta)
 end
 
 --- 批量 remember
@@ -393,11 +238,8 @@ function Store.rememberMany(books)
         local meta = metaFromBook(book)
         if ref and meta then
             payload[#payload + 1] = {
-                book_key = ref.book_key,
                 source_id = ref.source_id,
                 stable_id = ref.stable_id,
-                filename = meta.filename or ref.stable_id,
-                md5 = meta.md5,
                 title = meta.title,
                 authors = meta.authors,
                 percent = meta.percent,
@@ -421,11 +263,11 @@ function Store.rememberMany(books)
 end
 
 --- 异步查找带 title 的 meta；回调 fun(meta: table|nil)
----@param book_key string
+---@param ref BookRef
 ---@param cb fun(meta: table|nil)
 ---@return { cancel: fun() }
-function Store.findMetaAsync(book_key, cb)
-    return Store.getMetaAsync(book_key, function(meta)
+function Store.findMetaAsync(ref, cb)
+    return Store.getMetaAsync(ref, function(meta)
         if meta and meta.title then
             cb(meta)
         else
@@ -434,118 +276,31 @@ function Store.findMetaAsync(book_key, cb)
     end)
 end
 
---- 查找带 title 的 meta（已废弃，请使用 findMetaAsync）
----@deprecated 使用 Store.findMetaAsync 代替
----@param book_key string
----@return table|nil
-function Store.findMeta(book_key)
-    local meta = Store.getMeta(book_key)
-    if meta and meta.title then
-        return meta
-    end
-    return nil
-end
-
 --- 异步打开/下载后登记（fire-and-forget）
----@param path string 本地 epub 路径
+--- ref 由 BookRef.new 构造，两字段必有；不再重复校验。
+---@param path string 本地 epub/html 路径
 ---@param ref BookRef
 ---@param opts { chapter_idx: number|nil }|nil
 function Store.touchAsync(path, ref, opts)
     if not path or path == "" or type(ref) ~= "table" then
         return
     end
-    if type(ref.book_key) ~= "string" or ref.book_key == "" then
-        return
-    end
-    if type(ref.source_id) ~= "string" or ref.source_id == "" then
-        return
-    end
     local path_copy = path
     local ref_copy = {
-        book_key = ref.book_key,
         source_id = ref.source_id,
         stable_id = ref.stable_id,
     }
     local opts_copy = opts and { chapter_idx = opts.chapter_idx } or nil
     DbQueue.run(function()
         local OpenDB = require("utils.db.open")
-        local BookDB = require("utils.db.book")
-        local filename = ref_copy.stable_id
-        OpenDB.upsert(path_copy, {
-            book_key = ref_copy.book_key,
+        OpenDB.upsert({
             source_id = ref_copy.source_id,
-            stable_id = filename,
+            stable_id = ref_copy.stable_id,
+            path = path_copy,
             chapter_idx = opts_copy and opts_copy.chapter_idx,
             last_open = os.time(),
         })
     end)
-end
-
---- 打开/下载后登记：写 opens；有 partialMD5 则更新 books.md5/filename（已废弃）
----@deprecated 使用 Store.touchAsync 代替
----@param path string 本地 epub 路径
----@param ref BookRef
----@param opts { chapter_idx: number|nil }|nil
-function Store.touch(path, ref, opts)
-    if not path or path == "" or type(ref) ~= "table" then
-        return
-    end
-    if type(ref.book_key) ~= "string" or ref.book_key == "" then
-        return
-    end
-    if type(ref.source_id) ~= "string" or ref.source_id == "" then
-        return
-    end
-    opts = opts or {}
-    local filename = ref.stable_id
-    OpenDB.upsert(path, {
-        book_key = ref.book_key,
-        source_id = ref.source_id,
-        stable_id = filename,
-        chapter_idx = opts.chapter_idx,
-        last_open = os.time(),
-    })
-    local digest = partialMd5(path)
-    if digest and filename then
-        BookDB.setMd5ByKey(ref.book_key, digest, filename)
-        return
-    end
-    if digest then
-        BookDB.setMd5ByKey(ref.book_key, digest, nil)
-        return
-    end
-    if not filename then
-        return
-    end
-    local row = BookDB.get(ref.book_key)
-    if row then
-        if row.filename == filename then
-            return
-        end
-        BookDB.upsert({
-            book_key = ref.book_key,
-            source_id = row.source_id or ref.source_id,
-            stable_id = row.stable_id or filename,
-            filename = filename,
-            md5 = row.md5,
-            title = row.title,
-            authors = row.authors,
-            percent = row.percent,
-            category = row.category,
-            favorite = row.favorite,
-            series = row.series,
-            intro = row.intro,
-            fetched_at = row.fetched_at or 0,
-        })
-        return
-    end
-    BookDB.upsert({
-        book_key = ref.book_key,
-        source_id = ref.source_id,
-        stable_id = filename,
-        filename = filename,
-        fetched_at = 0,
-    })
 end
 
 --- 本地路径 → opens 条目
@@ -555,26 +310,7 @@ function Store.entryFor(path)
     if type(path) ~= "string" or path == "" then
         return nil
     end
-    local v = OpenDB.get(path)
-    if not v then
-        return nil
-    end
-    return {
-        book_key = v.book_key,
-        source_id = v.source_id,
-        stable_id = v.stable_id,
-        filename = v.stable_id,
-        chapter_idx = v.chapter_idx,
-        last_open = v.last_open,
-    }
-end
-
---- 本地路径 → book_key
----@param path string
----@return string|nil
-function Store.bookKeyFor(path)
-    local v = Store.entryFor(path)
-    return v and v.book_key or nil
+    return OpenDB.getByPath(path)
 end
 
 --- 本地路径 → 远端 stable_id
@@ -582,16 +318,8 @@ end
 ---@return string|nil
 function Store.remoteFilename(path)
     local v = Store.entryFor(path)
-    if v then
-        if type(v.stable_id) == "string" and v.stable_id ~= "" then
-            return v.stable_id
-        end
-        if v.book_key then
-            local book = BookDB.get(v.book_key)
-            if book and type(book.filename) == "string" and book.filename ~= "" then
-                return book.filename
-            end
-        end
+    if v and type(v.stable_id) == "string" and v.stable_id ~= "" then
+        return v.stable_id
     end
     return basename(path)
 end
@@ -601,19 +329,11 @@ end
 ---@return { ref: BookRef, chapter_idx: number|nil }|nil
 function Store.identityFor(path)
     local v = Store.entryFor(path)
-    if not v or not v.stable_id then
-        return nil
-    end
-    local source_id = v.source_id
-    if (not source_id or source_id == "") and v.book_key then
-        local book = BookDB.get(v.book_key)
-        source_id = book and book.source_id
-    end
-    if not source_id or source_id == "" then
+    if not v or not v.stable_id or not v.source_id then
         return nil
     end
     return {
-        ref = BookRef.new(source_id, v.stable_id),
+        ref = BookRef.new(v.source_id, v.stable_id),
         chapter_idx = v.chapter_idx,
     }
 end
@@ -647,16 +367,21 @@ local function lastOpenForBookDir(book_dir, map)
     return attr and (tonumber(attr.modification) or 0) or 0
 end
 
---- 清理过期 meta/toc，并删掉连续 90 天未打开的书目录；顺带清失效 opens
+--- 清理过期 meta，并删掉连续 90 天未打开的书目录；顺带清失效 opens
 ---@return number 删除的目录/文件数
 function Store.cleanupStale()
     Paths.ensureCacheRoot()
     DbBase.open()
     local now = os.time()
     BookDB.expireBefore(now - META_TTL)
-    TocDB.deleteExpired(now - TOC_TTL)
 
-    local map = OpenDB.all()
+    local rows = OpenDB.all()
+    local map = {}
+    for _, row in ipairs(rows) do
+        if type(row.path) == "string" then
+            map[row.path] = row
+        end
+    end
     local removed = 0
     local cache_root = Paths.cacheDir()
     if lfs.attributes(cache_root, "mode") ~= "directory" then
@@ -691,7 +416,9 @@ function Store.cleanupStale()
                                 if last_open > 0 and (now - last_open) >= LOCAL_BOOK_TTL then
                                     if pcall(os.remove, book_dir) then
                                         removed = removed + 1
-                                        OpenDB.delete(book_dir)
+                                        if v then
+                                            OpenDB.delete(v.source_id, v.stable_id)
+                                        end
                                     end
                                 end
                             end
@@ -702,10 +429,10 @@ function Store.cleanupStale()
         end
     end
 
-    for path, _ in pairs(map) do
-        local mode = lfs.attributes(path, "mode")
+    for _, row in ipairs(rows) do
+        local mode = type(row.path) == "string" and lfs.attributes(row.path, "mode") or nil
         if mode ~= "file" and mode ~= "directory" then
-            OpenDB.delete(path)
+            OpenDB.delete(row.source_id, row.stable_id)
         end
     end
     return removed
@@ -926,7 +653,7 @@ function Store.sizeLabelAsync(cb)
     end)
 end
 
---- Clear file cache + tocs/opens without monopolising the UI thread.
+--- Clear file cache + opens without monopolising the UI thread.
 ---@param cb fun(ok: boolean, err: any)|nil
 ---@return { cancel: fun() }
 function Store.clearAsync(cb)
@@ -942,7 +669,6 @@ function Store.clearAsync(cb)
     -- 先清 DB 再删文件：即使文件删除失败，DB 记录已干净，不会产生孤立引用
     db_job = Task.run(function()
         DbBase.open()
-        TocDB.clear()
         OpenDB.clear()
         BookDB.stripMeta()
     end, {

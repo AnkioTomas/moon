@@ -52,6 +52,8 @@ local function installUIManager()
                 end
             end
         end
+        function UIManager:show(widget)
+        end
         return UIManager
     end
 end

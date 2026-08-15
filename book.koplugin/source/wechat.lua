@@ -63,6 +63,7 @@ function Source:capabilities()
         search = true,
         filters = false,
         detail = true,
+        scrape = false,
         cover = true,
         whole_book = false,
         chapters = true,
@@ -220,10 +221,10 @@ function Source:getTocAsync(ref, cb)
     end)
 end
 
-function Source:materializeChapterAsync(ref, chapter, temp_path, cb)
-    return WChapter.ensureAsync(ref.stable_id, chapter.idx, temp_path, chapter, function(ok, err)
-        if ok then
-            cb(true)
+function Source:fetchChapterContentAsync(ref, chapter, cb)
+    return WChapter.fetchContentAsync(ref.stable_id, chapter, function(payload, err)
+        if payload then
+            cb(payload)
         else
             cb(nil, (type(err) == "table" and err.message) or err)
         end

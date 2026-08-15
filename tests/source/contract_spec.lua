@@ -21,10 +21,6 @@ do
     local ref = BookTypes.BookRef.new("moon", "a.epub")
     Assert.eq(ref.source_id, "moon")
     Assert.eq(ref.stable_id, "a.epub")
-    Assert.eq(type(ref.book_key), "string")
-    Assert.is_true(#ref.book_key > 0)
-    local ref2 = BookTypes.BookRef.new("wechat", "a.epub")
-    Assert.is_true(ref.book_key ~= ref2.book_key)
 end
 
 Assert.eq(BookTypes.Book.clampPercent(42), 42)
