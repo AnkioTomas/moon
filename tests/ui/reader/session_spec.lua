@@ -1,7 +1,7 @@
 --[[--
-reader.session 离线用例：身份自举 / 快照 / page_changed 分发 / 会话清理。
+ui.reader.session 离线用例：身份自举 / 快照 / page_changed 分发 / 会话清理。
 
-@module tests.reader.session_spec
+@module tests.ui.reader.session_spec
 --]]
 
 local Assert = require("support.assert")
@@ -93,7 +93,7 @@ package.preload["chapters.patches"] = function()
     }
 end
 
-package.preload["reader.reader"] = function()
+package.preload["ui.reader"] = function()
     return {
         attach = function(plugin)
             calls.reader[#calls.reader + 1] = { "attach" }
@@ -104,7 +104,7 @@ package.preload["reader.reader"] = function()
     }
 end
 
-local Session = require("reader.session")
+local Session = require("ui.reader.session")
 
 ---@param path string
 local function mkPlugin(path)
@@ -206,9 +206,9 @@ end
 -- 不卸会污染后续 spec（如 stats/tracker_spec 需要真 stats.tracker）
 for _, name in ipairs({
     "book.store", "stats.tracker", "book.progress",
-    "book.chapter", "chapters.patches", "reader.reader",
+    "book.chapter", "chapters.patches", "ui.reader",
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil
 end
-package.loaded["reader.session"] = nil
+package.loaded["ui.reader.session"] = nil

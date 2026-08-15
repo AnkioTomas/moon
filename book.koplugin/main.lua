@@ -81,44 +81,44 @@ end
 --- 阅读器就绪：建阅读会话；统计计时；拉进度；按章落点；挂阅读页；通知源
 ---@return nil
 function BookPlugin:onReaderReady()
-    require("reader.session").onReaderReady(self)
+    require("ui.reader.session").onReaderReady(self)
 end
 
 --- 关文档：推进度；结清统计；通知源；切章则保留会话，真关书才清
 ---@return nil
 function BookPlugin:onCloseDocument()
-    require("reader.session").onCloseDocument(self)
+    require("ui.reader.session").onCloseDocument(self)
 end
 
 --- 章末：按章会话自动下一章
 ---@return boolean
 function BookPlugin:onEndOfBook()
-    return require("reader.session").onEndOfBook()
+    return require("ui.reader.session").onEndOfBook()
 end
 
 --- 章首：按章会话自动上一章（由 chapters.patches 触发）
 ---@return boolean
 function BookPlugin:onStartOfBook()
-    return require("reader.session").onStartOfBook()
+    return require("ui.reader.session").onStartOfBook()
 end
 
 --- 休眠前：有打开文档时推进度 / 结清统计并通知源
 ---@return nil
 function BookPlugin:onSuspend()
-    require("reader.session").onSuspend(self)
+    require("ui.reader.session").onSuspend(self)
 end
 
 --- 唤醒：恢复阅读统计计时
 ---@return nil
 function BookPlugin:onResume()
-    require("reader.session").onResume(self)
+    require("ui.reader.session").onResume(self)
 end
 
 --- 翻页（分页视图）：统计换页；分发 page_changed
 ---@param page number
 ---@return nil
 function BookPlugin:onPageUpdate(page)
-    require("reader.session").onPageUpdate(self, page)
+    require("ui.reader.session").onPageUpdate(self, page)
 end
 
 --- 翻页（滚动视图）：统计换页；分发 page_changed
@@ -126,7 +126,7 @@ end
 ---@param page number|nil
 ---@return nil
 function BookPlugin:onPosUpdate(_pos, page)
-    require("reader.session").onPosUpdate(self, page)
+    require("ui.reader.session").onPosUpdate(self, page)
 end
 
 -- ── 对外动作（UI / 设置页调用）───────────────────────

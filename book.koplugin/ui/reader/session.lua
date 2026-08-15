@@ -2,7 +2,7 @@
 书籍级阅读会话：打开 → 阅读 → 关闭 的统一编排。
 
 收编 main.lua 的阅读期编排（Tracker / Progress / Chapters / 源事件），
-并维护当前阅读状态供阅读页管理器（reader.reader）与进度条（reader.bars）查询。
+并维护当前阅读状态供阅读页管理器（ui.reader）与进度条（ui.reader.bars）查询。
 
 身份来源：章会话（chapters）优先——换源后仍读旧书时 registry.current 已不对；
 否则 Store.identityFor(document.file)。都没有 → 会话不活跃，无身份文档行为零变化。
@@ -10,7 +10,7 @@
 切章（switchDocument）会关旧文档再开新文档：CloseDocument 清状态，
 ReaderReady 依章会话重建——期间 bars/panel 短暂不活跃属正常。
 
-@module koplugin.book.reader.session
+@module koplugin.book.ui.reader.session
 --]]
 
 local Store = require("book.store")
@@ -114,7 +114,7 @@ function Session.onReaderReady(plugin)
         Session._cur = nil
     end
 
-    require("reader.reader").attach(plugin)
+    require("ui.reader").attach(plugin)
     plugin:emitToSource("reader_ready")
 end
 
@@ -143,7 +143,7 @@ local function onPage(plugin, page)
         return
     end
     snapshot(ui, page)
-    require("reader.reader").refresh(plugin)
+    require("ui.reader").refresh(plugin)
     cur.plugin:emitToSource("page_changed", {
         ref = cur.ref,
         book = cur.book,

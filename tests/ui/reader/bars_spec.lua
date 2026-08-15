@@ -1,7 +1,7 @@
 --[[--
-reader.bars 离线用例：时间 / 进度文案生成。
+ui.reader.bars 离线用例：时间 / 进度文案生成。
 
-@module tests.reader.bars_spec
+@module tests.ui.reader.bars_spec
 --]]
 
 local Assert = require("support.assert")
@@ -9,7 +9,7 @@ local Stubs = require("support.stubs")
 Stubs.install()
 Stubs.reset()
 
-local Bars = require("reader.bars")
+local Bars = require("ui.reader.bars")
 
 -- timeText：HH:MM
 Assert.is_true(Bars.timeText(0):match("^%d%d:%d%d$") ~= nil)

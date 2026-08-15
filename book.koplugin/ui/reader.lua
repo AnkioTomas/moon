@@ -4,7 +4,7 @@
 attach 幂等：tap zone 与 view module 常驻 ReaderUI 实例；
 无身份文档（Session 不活跃）时点按自动放行翻页、进度条不绘制，无需 detach。
 
-@module koplugin.book.reader.reader
+@module koplugin.book.ui.reader
 --]]
 
 local UIManager = require("ui/uimanager")
@@ -32,7 +32,7 @@ function Reader.attach(plugin)
                 screen_zone = { ratio_x = 1 / 4, ratio_y = 1 / 4, ratio_w = 1 / 2, ratio_h = 1 / 2 },
                 overrides = { "tap_forward", "tap_backward" },
                 handler = function()
-                    if not require("reader.session").isActive() then
+                    if not require("ui.reader.session").isActive() then
                         return false -- 落回默认翻页
                     end
                     Reader.showPanel(plugin)
@@ -42,8 +42,8 @@ function Reader.attach(plugin)
         })
     end
     if ui.view and ui.view.registerViewModule then
-        ui.view:registerViewModule("book_bars", require("reader.bars"))
-        require("reader.bars").startClock()
+        ui.view:registerViewModule("book_bars", require("ui.reader.bars"))
+        require("ui.reader.bars").startClock()
     end
 end
 
@@ -55,7 +55,7 @@ function Reader.showPanel(plugin)
         UIManager:close(Reader._panel)
         Reader._panel = nil
     end
-    local panel = require("reader.panel"):new{
+    local panel = require("ui.reader.panel"):new{
         plugin = plugin,
         close_callback = function()
             Reader._panel = nil
