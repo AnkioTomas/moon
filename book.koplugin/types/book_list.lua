@@ -8,10 +8,7 @@
 ---@field search string|nil 关键词搜索
 ---@field scope number|nil 书城搜索范围（wechat：0 全部 / 10 电子书 / 16 网文 / 14 听书 等）
 ---@field series string|nil 按系列筛选
----@field category string|nil 按标签筛选
----@field favorite string|nil 按分类 / 收藏筛选
----@field finished string|nil 按是否读完筛选（moon 列表参数）
----@field author string|nil 按作者筛选
+---@field category string|nil 按分类筛选
 ---@field force boolean|nil 强制重扫、忽略扫描缓存（本地源手动刷新）
 
 --- 列表响应（图书馆 / 书城 / 最近阅读）。

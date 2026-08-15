@@ -9,7 +9,6 @@ Book (moon) 数据源门面
 local Client = require("source.moon.client")
 local Mapper = require("source.moon.mapper")
 local SourceBase = require("source.base")
-local BookRef = require("types.book").BookRef
 local ProgressPosition = require("types.book_progress")
 local _ = require("gettext")
 
@@ -21,6 +20,7 @@ function Moon.meta()
     return {
         id = "moon",
         name = _("Book 书库"),
+        type = "book",
     }
 end
 
@@ -38,6 +38,7 @@ function Moon.new()
     local self = setmetatable({
         id = meta.id,
         name = meta.name,
+        type = meta.type,
         _client = Client:new(cfg),
     }, Source)
     return self
@@ -48,16 +49,8 @@ end
 function Source:capabilities()
     return {
         search = false,
-        filters = true,
-        detail = true,
         scrape = false,
-        cover = true,
-        whole_book = true,
-        chapters = false,
-        progress_pull = true,
-        progress_push = true,
         insight = true,
-        stats_import = true,
         store = false,
     }
 end
@@ -69,26 +62,13 @@ function Source:configured()
 end
 
 --- 生命周期事件：阅读统计上报时机由本源自决。
---- StatsSync/NetworkMgr 拖 KOReader UI 依赖链，必须函数内延迟加载（离线测试会 require 本文件）。
+--- StatsSync 拖 KOReader UI 依赖链，必须函数内延迟加载（离线测试会 require 本文件）。
 ---@param event string
 ---@param _payload table|nil
 function Source:onEvent(event, _payload)
-    if event == "reader_ready" then
-        require("ui/network/manager"):runWhenOnline(function()
-            require("stats.stats_sync").registerDeviceAsync(self, function() end)
-        end)
-    elseif event == "document_close" or event == "suspend" then
+    if event == "document_close" or event == "suspend" then
         require("stats.stats_sync").pushWithUi(self, false, false)
     end
-end
-
---- 返回 Moon 源配置状态。
----@return SourceConfigurationState
-function Source:configurationState()
-    if self:configured() then
-        return "ready"
-    end
-    return "needs_config"
 end
 
 --- 把 BookListOpts 转成 Moon list API 的 query 表。
@@ -102,9 +82,6 @@ local function listQuery(opts)
         search = opts.search or "",
         series = opts.series or "",
         category = opts.category or "",
-        favorite = opts.favorite or "",
-        finished = opts.finished or "",
-        author = opts.author or "",
     }
 end
 
@@ -126,28 +103,6 @@ function Source:coverRequest(ref)
         return nil, (type(err) == "table" and err.message) or err
     end
     return req
-end
-
---- 获取 Moon 书籍详情。
----@param ref BookRef
----@return BookDetail|nil, string|nil
-function Source:getDetail(ref)
-    -- Moon 列表行即详情；无独立 detail API 时用 filename 构造最小详情
-    return {
-        ref = BookRef.new("moon", ref.stable_id),
-        title = ref.stable_id,
-        percent = 0,
-    }
-end
-
-function Source:pingAsync(cb)
-    return self._client:pingAsync(function(wire, err)
-        if not wire then
-            cb(nil, (type(err) == "table" and err.message) or err)
-            return
-        end
-        cb(wire)
-    end)
 end
 
 function Source:listLibraryAsync(opts, cb)
@@ -173,20 +128,13 @@ end
 function Source:filtersAsync(cb)
     return self._client:filtersAsync(function(wire, err)
         if wire then
-            cb({ data = wire.data or wire })
-        else
-            cb(nil, (type(err) == "table" and err.message) or err)
-        end
-    end)
-end
-
-function Source:registerReadingDeviceAsync(device_id, model, cb)
-    return self._client:registerReadingDeviceAsync({
-        device_id = device_id,
-        model = model or "",
-    }, function(wire, err)
-        if wire then
-            cb(wire)
+            local data = wire.data or wire
+            cb({
+                data = {
+                    category = data.categories or data.category or {},
+                    series = data.groupNames or data.series or {},
+                },
+            })
         else
             cb(nil, (type(err) == "table" and err.message) or err)
         end

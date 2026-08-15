@@ -1,8 +1,7 @@
 --[[--
 按章阅读公共层：标准正文 → HTML 落盘 + 换章 + 预取。
 
-任何实现 getTocAsync + fetchChapterContentAsync 且 capabilities.chapters
-的 Source，自动获得本章能力。
+online / article Source 通过 getTocAsync + fetchChapterContentAsync 提供正文。
 
 @module koplugin.book.chapters
 --]]

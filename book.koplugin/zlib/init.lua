@@ -25,10 +25,6 @@ function Zlib.hasCredentials()
     return (cfg.email or "") ~= "" and (cfg.password or "") ~= ""
 end
 
-function Zlib.pingAsync(cb)
-    return client():pingAsync(cb)
-end
-
 function Zlib:listStoreAsync(opts, cb)
     opts = opts or {}
     local api = client()

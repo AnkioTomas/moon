@@ -328,12 +328,6 @@ function Client:_jsonAsync(method, path, opts, cb)
     return result
 end
 
-function Client:pingAsync(cb)
-    return self:_jsonAsync("GET", "/eapi/info/ok", nil, function(data, err)
-        if data and tonumber(data.success) == 1 then cb(true) else cb(nil, err or apiError(data, _("连接失败"))) end
-    end)
-end
-
 function Client:listPopularAsync(cb)
     return self:_jsonAsync("GET", "/eapi/book/most-popular", { session = true }, function(data, err)
         if data and tonumber(data.success) == 1 then cb(data) else cb(nil, err or apiError(data, _("加载失败"))) end

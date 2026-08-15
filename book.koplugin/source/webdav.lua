@@ -14,7 +14,7 @@ local WebDAV = {}
 --- 返回 WebDAV 源元信息。
 ---@return BookSourceMeta
 function WebDAV.meta()
-    return { id = "webdav", name = _("WebDAV"), preview = false }
+    return { id = "webdav", name = _("WebDAV"), type = "book" }
 end
 
 ---@class WebdavSource : SourceBase
@@ -31,6 +31,7 @@ function WebDAV.new()
     local self = setmetatable({
         id = meta.id,
         name = meta.name,
+        type = meta.type,
         cfg = cfg,
         _client = Client.new(cfg),
     }, Source)
@@ -41,19 +42,9 @@ end
 ---@return SourceCapabilities
 function Source:capabilities()
     return {
-        library = true,
-        recent = false,
         search = false,
-        filters = false,
-        detail = true,
         scrape = false,
-        cover = false,
-        whole_book = true,
-        chapters = false,
-        progress_pull = false,
-        progress_push = false,
         insight = false,
-        stats_import = false,
         store = false,
     }
 end
@@ -62,37 +53,6 @@ end
 ---@return boolean
 function Source:configured()
     return self._client:configured()
-end
-
---- 返回 WebDAV 源配置状态。
----@return SourceConfigurationState
-function Source:configurationState()
-    if self:configured() then
-        return "ready"
-    end
-    return "needs_config"
-end
-
---- 根据引用构造 WebDAV 书籍详情。
----@param ref BookRef
----@return BookDetail|nil, string|nil
-function Source:getDetail(ref)
-    return Mapper.detailFromRef(ref)
-end
-
-function Source:pingAsync(cb)
-    if not self:configured() then
-        cb(nil, _("未配置 WebDAV 地址或用户名"))
-        return nil
-    end
-    return self._client:pingAsync(function(ok, err)
-        if not ok then
-            cb(nil, (type(err) == "table" and err.message) or err)
-            return
-        end
-        local user = self.cfg.username or ""
-        cb({ data = { display_name = user ~= "" and user or "WebDAV", username = user } })
-    end)
 end
 
 function Source:listLibraryAsync(opts, cb)

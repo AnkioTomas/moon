@@ -33,10 +33,6 @@ function Client:configured()
     return url ~= "" and user ~= ""
 end
 
-function Client:pingAsync(cb)
-    return self._dav:pingAsync(cb)
-end
-
 function Client:listAsync(path, cb)
     return self._dav:listAsync(path, cb)
 end

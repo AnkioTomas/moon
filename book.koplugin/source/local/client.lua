@@ -122,20 +122,6 @@ function Client:validatePath()
     return true
 end
 
-function Client:pingAsync(cb)
-    local ok, err = self:validatePath()
-    if not ok then
-        UIManager:nextTick(function()
-            cb(nil, err)
-        end)
-        return nil
-    end
-    UIManager:nextTick(function()
-        cb({ data = { display_name = _("本地书籍"), username = "" } })
-    end)
-    return nil
-end
-
 --- 封面缓存路径（存在即封面可用，无需入库）。
 ---@param stable_id string
 ---@return string
@@ -409,8 +395,8 @@ local function scanIntoDb(root, is_cancelled, cb)
     end)
 end
 
---- 直查 books 表（图书馆分页/分类/搜索）。
----@param opts table|nil { page, page_size, favorite, search }
+--- 直查 books 表（图书馆分页/分类/系列/搜索）。
+---@param opts table|nil { page, page_size, category, series, search }
 ---@param cb fun(rows: table[]|nil, count: number, err: any)
 local function queryDb(opts, cb)
     opts = opts or {}
@@ -419,7 +405,8 @@ local function queryDb(opts, cb)
     UIManager:nextTick(function()
         local BookDB = require("utils.db.book")
         local rows, count = BookDB.listBySource(SOURCE_ID, {
-            category = opts.favorite,
+            category = opts.category,
+            series = opts.series,
             search = opts.search,
             limit = page_size,
             offset = (page - 1) * page_size,
@@ -429,7 +416,7 @@ local function queryDb(opts, cb)
 end
 
 --- 书库查询（异步）：默认直查数据库；opts.force 先真实扫盘写库再查。
----@param opts table|nil { force, page, page_size, favorite, search }
+---@param opts table|nil { force, page, page_size, category, series, search }
 ---@param cb fun(rows: table[]|nil, count: number, err: any)
 ---@return { cancel: fun() }|nil
 function Client:listAsync(opts, cb)
@@ -499,7 +486,7 @@ function Client:autoScanAsync(cb)
     }
 end
 
---- 分类列表（DISTINCT 直查数据库）。
+--- 分类和系列列表（DISTINCT 直查数据库）。
 ---@param cb fun(data: BookFiltersResult|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:filtersAsync(cb)
@@ -509,7 +496,13 @@ function Client:filtersAsync(cb)
             cb(nil, err)
             return
         end
-        cb({ data = { favorites = require("utils.db.book").categoriesBySource(SOURCE_ID) } })
+        local BookDB = require("utils.db.book")
+        cb({
+            data = {
+                category = BookDB.categoriesBySource(SOURCE_ID),
+                series = BookDB.seriesBySource(SOURCE_ID),
+            },
+        })
     end)
     return nil
 end
