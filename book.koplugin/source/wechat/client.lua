@@ -48,15 +48,6 @@ function Client.sessionHeaders()
     return Auth.sessionHeaders()
 end
 
-function Client:pingAsync(cb)
-    local vid = Auth.userVid()
-    if not vid then
-        cb(nil, _("请先扫码登录微信读书"))
-        return nil
-    end
-    return Auth.webApiGetAsync("/api/userInfo?userVid=" .. tostring(vid), cb)
-end
-
 function Client:shelfSyncAsync(cb)
     return Auth.webApiGetAsync("/web/shelf/sync?" .. encodeQuery({
         synckey = 0,

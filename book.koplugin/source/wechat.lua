@@ -18,7 +18,7 @@ local WeChat = {}
 --- 返回微信读书源元信息。
 ---@return BookSourceMeta
 function WeChat.meta()
-    return { id = "wechat", name = _("微信读书") }
+    return { id = "wechat", name = _("微信读书"), type = "online" }
 end
 
 ---@class WechatSource : SourceBase
@@ -37,6 +37,7 @@ function WeChat.new()
     local self = setmetatable({
         id = meta.id,
         name = meta.name,
+        type = meta.type,
         cfg = cfg,
         _client = Client:new(cfg),
         _covers = {},
@@ -58,19 +59,9 @@ end
 ---@return SourceCapabilities
 function Source:capabilities()
     return {
-        library = true,
-        recent = true,
         search = true,
-        filters = false,
-        detail = true,
         scrape = false,
-        cover = true,
-        whole_book = false,
-        chapters = true,
-        progress_pull = true,
-        progress_push = true,
         insight = false,
-        stats_import = false,
         store = true,
     }
 end
@@ -79,15 +70,6 @@ end
 ---@return boolean
 function Source:configured()
     return Auth.hasSession()
-end
-
---- 返回微信读书源配置状态。
----@return SourceConfigurationState
-function Source:configurationState()
-    if Auth.hasSession() then
-        return "ready"
-    end
-    return "needs_login"
 end
 
 --- 清空封面 URL 缓存。
@@ -112,22 +94,6 @@ function Source:coverRequest(ref)
         url = url,
         headers = Client.sessionHeaders(),
     }
-end
-
-function Source:pingAsync(cb)
-    return self._client:pingAsync(function(data, err)
-        if not data then
-            cb(nil, (type(err) == "table" and err.message) or err)
-            return
-        end
-        if type(data.name) == "string" and data.name ~= "" then
-            local MoonSettings = require("utils.settings")
-            local c = MoonSettings.getSource("wechat")
-            c.user_name = data.name
-            MoonSettings.saveSource("wechat", c)
-        end
-        cb({ ok = true, user = Auth.userLabel() })
-    end)
 end
 
 function Source:listLibraryAsync(opts, cb)

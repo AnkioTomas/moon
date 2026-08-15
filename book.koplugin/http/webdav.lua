@@ -2,7 +2,6 @@
 WebDAV 客户端（HTTP Basic，仅异步）
 
   local dav = Webdav.new{ url=, username=, password= }
-  dav:pingAsync(cb)
   dav:listAsync(path?, cb)           → entries, err
   dav:getAsync(path, dest, opts?, cb) → true, err
 
@@ -30,7 +29,6 @@ local T = require("ffi/util").template
 ---@field username string
 ---@field password string
 ---@field join fun(self: WebdavClient, path: string|nil, as_dir: boolean|nil): string 拼接 URL
----@field pingAsync fun(self: WebdavClient, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }
 ---@field listAsync fun(self: WebdavClient, path: string|nil, cb: fun(entries: WebdavEntry[]|nil, err: string|nil)): { cancel: fun() }
 ---@field getAsync fun(self: WebdavClient, path: string, dest: string, opts: table|nil, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }
 ---@field putFileAsync fun(self: WebdavClient, path: string, local_path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
@@ -38,7 +36,6 @@ local T = require("ffi/util").template
 local Webdav = {}
 Webdav.__index = Webdav
 
-local PROPFIND_PING = [[<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>]]
 local PROPFIND_LIST = [[<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/></d:prop></d:propfind>]]
 
 --- 去掉首尾斜杠
@@ -164,36 +161,6 @@ local function parseList(xml, folder_url, folder_path)
         return (a.name or "") < (b.name or "")
     end)
     return entries
-end
-
---- Nonblocking Depth:0 probe.
----@param cb fun(ok: boolean|nil, err: string|nil)
----@return { cancel: fun() }
-function Webdav:pingAsync(cb)
-    if self.url == "" then
-        cb(nil, _("未配置 WebDAV 地址"))
-        return { cancel = function() end }
-    end
-    return Request.request({
-        url = self:join("", true),
-        method = "PROPFIND",
-        headers = {
-            ["Content-Type"] = "application/xml; charset=utf-8",
-            ["Depth"] = "0",
-            ["Content-Length"] = tostring(#PROPFIND_PING),
-        },
-        body = PROPFIND_PING,
-        auth_username = self.username,
-        auth_password = self.password,
-    }, function(res, err)
-        if err then
-            cb(nil, err)
-        elseif not Request.ok(res and res.code) then
-            cb(nil, statusErr(res and res.code))
-        else
-            cb(true)
-        end
-    end)
 end
 
 --- Nonblocking Depth:1 directory listing.

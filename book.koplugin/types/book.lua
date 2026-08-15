@@ -39,7 +39,8 @@ end
 ---@field intro string|nil 简介
 ---@field fetched_at integer 元数据拉取时间戳；0 表示仅身份行
 ---@field ref BookRef|nil 运行时由身份列派生，不入库
----@field cover string|nil 封面 URL，不入库（下载走 Source.coverRequest）
+---@field cover string|nil 封面 URL，不入库；存在时 UI 直接下载
+---@field cover_headers table|nil 封面请求头
 
 local Book = {}
 

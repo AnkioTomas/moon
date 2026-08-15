@@ -13,7 +13,7 @@ local _ = require("gettext")
 local RSS = {}
 
 function RSS.meta()
-    return { id = "rss", name = _("RSS 订阅") }
+    return { id = "rss", name = _("RSS 订阅"), type = "article" }
 end
 
 ---@class RssSource : SourceBase
@@ -27,6 +27,7 @@ function RSS.new()
     return setmetatable({
         id = meta.id,
         name = meta.name,
+        type = meta.type,
         cfg = require("utils.settings").getSource("rss"),
         _client = Client.new(),
     }, Source)
@@ -34,20 +35,10 @@ end
 
 function Source:capabilities()
     return {
-        library = true,
-        recent = false,
         search = false,
-        filters = false,
         refresh = true,
-        detail = true,
         scrape = false,
-        cover = false,
-        whole_book = false,
-        chapters = true,
-        progress_pull = false,
-        progress_push = false,
         insight = false,
-        stats_import = false,
         store = false,
     }
 end
@@ -70,10 +61,6 @@ end
 
 function Source:configured()
     return #configuredFeeds(self.cfg) > 0
-end
-
-function Source:configurationState()
-    return self:configured() and "ready" or "needs_config"
 end
 
 function Source:clearCaches()
@@ -132,21 +119,6 @@ local function reconcileChapterCache(ref, chapters)
             end
         end
     end
-end
-
-function Source:pingAsync(cb)
-    local feed = configuredFeeds(self.cfg)[1]
-    if not feed then
-        cb(nil, _("请先添加 RSS 订阅"))
-        return { cancel = function() end }
-    end
-    return self._client:fetchAsync(feed.url, { force = true }, function(data, err)
-        if data then
-            cb({ ok = true, title = data.title })
-        else
-            cb(nil, err)
-        end
-    end)
 end
 
 function Source:listLibraryAsync(opts, cb)

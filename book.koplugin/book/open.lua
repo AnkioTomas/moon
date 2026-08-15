@@ -43,12 +43,12 @@ local function showReader(path)
     end)
 end
 
---- 数据源是否支持整本或按章阅读。
+--- 数据源是否具有已知阅读形态。
 ---@param source BookSource|nil
 ---@return boolean
 local function canRead(source)
-    local caps = source and source.capabilities and source:capabilities() or {}
-    return caps.whole_book == true or caps.chapters == true
+    return source ~= nil
+        and (source.type == "book" or source.type == "online" or source.type == "article")
 end
 
 --- 整本下载/缓存后打开。
@@ -218,11 +218,10 @@ function Open.book(plugin, book, source)
         UIManager:show(InfoMessage:new{ text = _("当前数据源不支持阅读") })
         return
     end
-    local caps = source:capabilities() or {}
-    if caps.chapters then
-        openChapterBook(plugin, book, source, ref)
-    else
+    if source.type == "book" then
         openWholeBook(plugin, book, source, ref)
+    else
+        openChapterBook(plugin, book, source, ref)
     end
 end
 

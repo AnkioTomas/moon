@@ -214,7 +214,10 @@ function Detail:rebuild()
         text = store_book and _("加入书库") or _("开始阅读"),
         font_size = btn_font,
         enabled = store_book and type(self.source and self.source.importBookAsync) == "function"
-            or (not store_book and (caps.whole_book == true or caps.chapters == true)),
+            or (not store_book and self.source ~= nil
+                and (self.source.type == "book"
+                    or self.source.type == "online"
+                    or self.source.type == "article")),
         callback = function()
             if store_book then
                 if self._install_job then return end

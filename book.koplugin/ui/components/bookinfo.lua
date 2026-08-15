@@ -184,6 +184,8 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
         req = { url = opts.src, headers = opts.headers }
     elseif type(book) == "table" and type(book.cover_url) == "string" and book.cover_url ~= "" then
         req = { url = book.cover_url, headers = book.cover_headers }
+    elseif type(book) == "table" and type(book.cover) == "string" and book.cover ~= "" then
+        req = { url = book.cover, headers = book.cover_headers }
     elseif source and type(source.coverRequest) == "function" and type(ref) == "table" then
         req = select(1, source:coverRequest(ref))
     end

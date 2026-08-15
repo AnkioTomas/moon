@@ -53,6 +53,7 @@ local function bookFromRow(row)
         authors = row.authors,
         intro = row.intro,
         category = row.category,
+        series = row.series,
         percent = tonumber(row.percent) or 0,
     }
 end

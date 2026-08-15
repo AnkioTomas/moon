@@ -5,7 +5,6 @@
 @module koplugin.book.stats.stats_sync
 --]]
 
-local Device = require("device")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local NetworkMgr = require("ui/network/manager")
@@ -23,13 +22,7 @@ local generation = 0
 local active_token = nil
 local active_job = nil
 local active_opts = nil
-local PROGRESS_MAX = 3
-
---- 设备型号字符串。
----@return string
-function StatsSync.deviceModel()
-    return tostring(Device.model or Device.device_name or "KOReader")
-end
+local PROGRESS_MAX = 2
 
 --- 是否正在上报。
 ---@return boolean
@@ -47,8 +40,8 @@ end
 ---@param api table|nil
 ---@return boolean
 function StatsSync.supportsImport(api)
-    local caps = api and api.capabilities and api:capabilities() or {}
-    return caps.stats_import == true
+    return api ~= nil
+        and type(api.importReadingStatsAsync) == "function"
 end
 
 --- 确保本地 device_id 存在（无则生成并写入设置）。
@@ -65,34 +58,6 @@ local function ensureDeviceId()
     )
     G_reader_settings:saveSetting("device_id", id)
     return id
-end
-
---- Register device through the source's nonblocking transport.
----@param api table
----@param cb fun(ok: boolean, err: any)
----@return table|nil
-function StatsSync.registerDeviceAsync(api, cb)
-    if not StatsSync.supportsImport(api) then
-        cb(false, "unsupported")
-        return nil
-    end
-    if not api or not api.configured or not api:configured() then
-        cb(false, _("未配置"))
-        return nil
-    end
-    if not api.registerReadingDeviceAsync then
-        cb(false, "unsupported")
-        return nil
-    end
-    local id = ensureDeviceId()
-    return api:registerReadingDeviceAsync(id, StatsSync.deviceModel(), function(res, err)
-        if not res then
-            logger.warn("book.stats_sync register device failed", err)
-            cb(false, err)
-            return
-        end
-        cb(true)
-    end)
 end
 
 --- 回调上报进度（若 opts.on_progress 存在）。
@@ -217,52 +182,32 @@ function StatsSync.pushAsync(api, opts)
         return true
     end
 
-    reportProgress(opts, 1, "register")
+    reportProgress(opts, 1, "upload")
     local device_id = ensureDeviceId()
-    local register_job = StatsSync.registerDeviceAsync(api, function(registered, register_err)
+    local books, stats, ids = buildPayload(source_id, device_id)
+    active_job = api:importReadingStatsAsync({
+        books = books,
+        stats = stats,
+        device_id = device_id,
+    }, function(res, err)
         if active_token ~= token or api.id ~= source_id then
             return
         end
-        if not registered then
-            on_err(register_err)
+        if not res then
+            on_err(err)
             return
         end
-        reportProgress(opts, 2, "upload")
-        -- register 的网络往返后重读：关书时刚落盘的最后一条也能搭上
-        local books, stats, ids = buildPayload(source_id, device_id)
-        if #stats == 0 then
-            on_err(_("无阅读统计数据"))
-            return
-        end
-        active_job = api:importReadingStatsAsync({
-            books = books,
-            stats = stats,
-            device_id = device_id,
-        }, function(res, err)
-            if active_token ~= token or api.id ~= source_id then
-                return
-            end
-            if not res then
-                on_err(err)
-                return
-            end
-            last_push_at = os.time()
-            DbQueue.run(function()
-                StatsDB.deleteIds(ids)
-            end)
-            reportProgress(opts, 3, "done")
-            logger.info(string.format(
-                "book.stats_sync imported books=%d stats=%d",
-                #books, #stats
-            ))
-            finish(opts, token, true, res)
+        last_push_at = os.time()
+        DbQueue.run(function()
+            StatsDB.deleteIds(ids)
         end)
+        reportProgress(opts, 2, "done")
+        logger.info(string.format(
+            "book.stats_sync imported books=%d stats=%d",
+            #books, #stats
+        ))
+        finish(opts, token, true, res)
     end)
-    -- Async source implementations normally invoke the callback later. Do not
-    -- overwrite a child job when a validation failure invokes it immediately.
-    if active_token == token and active_job == nil then
-        active_job = register_job
-    end
 
     return true
 end

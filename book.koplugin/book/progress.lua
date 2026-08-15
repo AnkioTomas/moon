@@ -143,8 +143,7 @@ function Progress.flushPendingAsync(source, show_msg, cb)
         if cb then cb(0) end
         return nil
     end
-    local caps = source.capabilities and source:capabilities() or {}
-    if not caps.progress_push or not source.putProgressAsync then
+    if not source.putProgressAsync then
         if cb then cb(0) end
         return nil
     end
@@ -220,8 +219,7 @@ function Progress.push(ui, source, show_msg)
     if not id or not id.ref or not source then
         return
     end
-    local caps = source.capabilities and source:capabilities() or {}
-    if not caps.progress_push then
+    if not source.putProgressAsync then
         return
     end
     local pos = Progress.position(ui)
@@ -232,9 +230,6 @@ function Progress.push(ui, source, show_msg)
     local queued_at = pos.updated_at or os.time()
     local queued_frac = pos.fraction
     NetworkMgr:runWhenOnline(function()
-        if not source.putProgressAsync then
-            return
-        end
         source:putProgressAsync(id.ref, pos, function(res, err)
             if res then
                 -- 校验：队列中若仍有相同进度（同一版本），才删除；
@@ -279,15 +274,11 @@ function Progress.pull(ui, source, show_msg)
     if not id or not id.ref or not source then
         return
     end
-    local caps = source.capabilities and source:capabilities() or {}
-    if not caps.progress_pull then
+    if not source.getProgressAsync then
         return
     end
     NetworkMgr:runWhenOnline(function()
         local function getRemote()
-            if not source.getProgressAsync then
-                return
-            end
             source:getProgressAsync(id.ref, function(pos, err)
                 -- 校验当前文档身份：若用户已切换到其他书，跳过进度应用
                 local cur_id = Progress.identityFor(ui)

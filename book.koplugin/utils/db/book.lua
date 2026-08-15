@@ -201,7 +201,7 @@ end
 
 --- 按源分页查询书库（图书馆直查数据库；排序与扫盘序一致 = stable_id）。
 ---@param source_id string
----@param opts { category: string|nil, search: string|nil, limit: number|nil, offset: number|nil }|nil
+---@param opts { category: string|nil, series: string|nil, search: string|nil, limit: number|nil, offset: number|nil }|nil
 ---@return table[] rows, number count
 function BookDB.listBySource(source_id, opts)
     source_id = Base.requireSourceId(source_id)
@@ -215,6 +215,10 @@ function BookDB.listBySource(source_id, opts)
     if type(opts.category) == "string" and opts.category ~= "" then
         where = where .. " AND category=?"
         args[#args + 1] = opts.category
+    end
+    if type(opts.series) == "string" and opts.series ~= "" then
+        where = where .. " AND series=?"
+        args[#args + 1] = opts.series
     end
     if type(opts.search) == "string" and opts.search ~= "" then
         -- 转义 LIKE 通配符：用户输入的 % _ 是字面量
@@ -235,7 +239,7 @@ function BookDB.listBySource(source_id, opts)
     local limit = tonumber(opts.limit) or 0
     local offset = tonumber(opts.offset) or 0
     local sel = [[SELECT stable_id, title, authors, percent,
-                        category, intro, fetched_at FROM books WHERE ]]
+                        category, series, intro, fetched_at FROM books WHERE ]]
         .. where .. " ORDER BY stable_id"
     if limit > 0 then
         sel = sel .. " LIMIT ? OFFSET ?"
@@ -253,8 +257,9 @@ function BookDB.listBySource(source_id, opts)
                 authors = result[3][i],
                 percent = tonumber(result[4][i]) or 0,
                 category = result[5][i],
-                intro = result[6][i],
-                fetched_at = tonumber(result[7][i]) or 0,
+                series = result[6][i],
+                intro = result[7][i],
+                fetched_at = tonumber(result[8][i]) or 0,
             }
         end
     end
@@ -274,6 +279,30 @@ function BookDB.categoriesBySource(source_id)
         [[SELECT DISTINCT category FROM books
           WHERE source_id=? AND category IS NOT NULL AND category<>''
           ORDER BY category;]],
+        source_id
+    )
+    local out = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            out[#out + 1] = result[1][i]
+        end
+    end
+    return out
+end
+
+--- 某源的书库系列列表（DISTINCT series，非空，字典序）。
+---@param source_id string
+---@return string[]
+function BookDB.seriesBySource(source_id)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id then
+        return {}
+    end
+    Base.ensure()
+    local result, nrows = Base.query(
+        [[SELECT DISTINCT series FROM books
+          WHERE source_id=? AND series IS NOT NULL AND series<>''
+          ORDER BY series;]],
         source_id
     )
     local out = {}

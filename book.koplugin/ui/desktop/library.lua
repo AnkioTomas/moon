@@ -1,7 +1,7 @@
 --[[--
 图书馆：封面优先书架（封面+进度角标+单行书名；尺度参考主页）
   顶栏：搜索 / 筛选 / 清除 + 右上角总数
-  筛选互斥：同一时刻只应用一个条件（搜索或分类/标签/系列/作者之一）
+  筛选互斥：同一时刻只应用一个条件（搜索、分类或系列）
 
 布局：
   +-----------------------------------------------+
@@ -14,11 +14,9 @@
   |  |«  ‹   Page N of M   ›  »|                  |
   +-----------------------------------------------+
 
-筛选字段与 /index/book/filters 对齐：
-  favorites  → 分类（list 参数 favorite）
-  categories → 标签（list 参数 category）
-  groupNames → 系列（list 参数 series）
-  authors    → 作者（list 参数 author）
+筛选字段固定为：
+  category → 分类
+  series   → 系列
 
 @module koplugin.book.ui.library
 --]]
@@ -49,37 +47,19 @@ local Screen = Device.screen
 local Library = {}
 
 local FILTER_KINDS = {
-    favorite = {
+    category = {
         title = _("选择分类"),
         label = _("分类"),
-        list_key = "favorites",
-        query_key = "favorite",
-        aliases = { "favorites" },
-    },
-    category = {
-        title = _("选择标签"),
-        label = _("标签"),
-        list_key = "categories",
         query_key = "category",
-        aliases = { "categories", "tags" },
     },
     series = {
         title = _("选择系列"),
         label = _("系列"),
-        list_key = "groupNames",
         query_key = "series",
-        aliases = { "groupNames", "series" },
-    },
-    author = {
-        title = _("选择作者"),
-        label = _("作者"),
-        list_key = "authors",
-        query_key = "author",
-        aliases = { "authors", "author" },
     },
 }
 
-local FILTER_ORDER = { "favorite", "category", "series", "author" }
+local FILTER_ORDER = { "category", "series" }
 
 --- 顶栏入口：图标 + 文字，无边框。
 ---@param icon_name string
@@ -107,22 +87,13 @@ local function iconAction(icon_name, text, callback)
     return tap
 end
 
---- 从 filters 响应里按定义取列表（含别名回退）。
+--- 从 filters 响应里取标准字段列表。
 ---@param data table|nil
 ---@param def table|nil
 ---@return table
 local function pickFilterList(data, def)
     if type(data) ~= "table" or not def then return {} end
-    local list = data[def.list_key]
-    if type(list) == "table" and #list > 0 then
-        return list
-    end
-    for _, alt in ipairs(def.aliases or {}) do
-        local alt_list = data[alt]
-        if type(alt_list) == "table" and #alt_list > 0 then
-            return alt_list
-        end
-    end
+    local list = data[def.query_key]
     return type(list) == "table" and list or {}
 end
 
@@ -291,12 +262,13 @@ function Library.build(ctx, state, opts)
 
     local tools_kids = { align = "center" }
     local caps = (ctx.source and ctx.source.capabilities and ctx.source:capabilities()) or {}
+    local has_filters = type(ctx.source and ctx.source.filtersAsync) == "function"
     local has_tool = false
     if caps.refresh then
         table.insert(tools_kids, iconAction("refresh", _("刷新"), function()
             if ctx.desktop then Library.rescan(ctx.desktop) end
         end))
-        if caps.search or caps.filters then
+        if caps.search or has_filters then
             table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
         end
     end
@@ -306,7 +278,7 @@ function Library.build(ctx, state, opts)
         end))
         has_tool = true
     end
-    if caps.filters then
+    if has_filters then
         if has_tool then
             table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
         end
@@ -424,11 +396,8 @@ function Library.fetch(desktop)
     local page_size = desktop.page_size or 1
     local f = desktop.filter or {}
     local search = f.search or ""
-    local favorite = f.favorite or ""
     local category = f.category or ""
     local series = f.series or ""
-    local author = f.author or ""
-    local finished = f.finished or ""
     local force = desktop._library_force == true
     desktop._library_force = nil
 
@@ -444,11 +413,8 @@ function Library.fetch(desktop)
         page = page,
         page_size = page_size,
         search = search,
-        favorite = favorite,
         category = category,
         series = series,
-        author = author,
-        finished = finished,
         force = force,
     }, function(res, err)
         if desktop._closed or desktop.tab ~= "library"
@@ -467,7 +433,7 @@ function Library.fetch(desktop)
     end)
 end
 
---- 弹出筛选根菜单（分类/标签/系列/作者）。
+--- 弹出筛选根菜单（分类/系列）。
 ---@param desktop table
 function Library.showFilterRoot(desktop)
     local items = {}

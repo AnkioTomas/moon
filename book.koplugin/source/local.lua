@@ -14,7 +14,7 @@ local Local = {}
 --- 返回本地源元信息。
 ---@return BookSourceMeta
 function Local.meta()
-    return { id = "local", name = _("本地书籍"), preview = false }
+    return { id = "local", name = _("本地书籍"), type = "book" }
 end
 
 ---@class LocalSource : SourceBase
@@ -31,6 +31,7 @@ function Local.new()
     local self = setmetatable({
         id = meta.id,
         name = meta.name,
+        type = meta.type,
         cfg = cfg,
         _client = Client.new(cfg),
     }, Source)
@@ -41,20 +42,10 @@ end
 ---@return SourceCapabilities
 function Source:capabilities()
     return {
-        library = true,
-        recent = true,
         search = true,
-        filters = true,
         refresh = true,
-        detail = true,
         scrape = true,
-        cover = true,
-        whole_book = true,
-        chapters = false,
-        progress_pull = false,
-        progress_push = false,
         insight = true,
-        stats_import = false,
         store = false,
     }
 end
@@ -63,22 +54,6 @@ end
 ---@return boolean
 function Source:configured()
     return self._client:configured()
-end
-
---- 返回本地源配置状态。
----@return SourceConfigurationState
-function Source:configurationState()
-    if self:configured() then
-        return "ready"
-    end
-    return "needs_config"
-end
-
---- 根据引用构造本地书籍详情。
----@param ref BookRef
----@return BookDetail|nil, string|nil
-function Source:getDetail(ref)
-    return Mapper.detailFromRef(ref)
 end
 
 --- 本地文件直开路径（文件存在才返回；open 流程命中则不下载不复制）。
@@ -103,10 +78,6 @@ function Source:coverRequest(ref)
         return { url = path, headers = nil }
     end
     return nil, _("无封面")
-end
-
-function Source:pingAsync(cb)
-    return self._client:pingAsync(cb)
 end
 
 function Source:listLibraryAsync(opts, cb)

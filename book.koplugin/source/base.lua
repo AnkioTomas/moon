@@ -14,6 +14,7 @@ local _ = require("gettext")
 ---@class SourceBase : BookSource
 ---@field id SourceId
 ---@field name string|nil
+---@field type BookSourceType
 local SourceBase = {}
 SourceBase.__index = SourceBase
 
@@ -33,25 +34,10 @@ function SourceBase:capabilities()
     return SourceCapabilities.defaults()
 end
 
---- 返回配置状态。
----@return SourceConfigurationState
-function SourceBase:configurationState()
-    if self:configured() then
-        return "ready"
-    end
-    return "needs_config"
-end
-
 --- 是否已配置。
 ---@return boolean
 function SourceBase:configured()
     return false
-end
-
---- 探测连通（基类失败）。
----@return nil, string
-function SourceBase:ping()
-    return nil, _("数据源未配置")
 end
 
 --- 清空数据源侧缓存（基类空操作）。
@@ -77,11 +63,35 @@ function SourceBase:close() end
 ---@param _payload table|nil
 function SourceBase:onEvent(_event, _payload) end
 
---- 探测文件大小（基类）。
----@param _ref BookRef
----@return number|nil
-function SourceBase:probeFileSize(_ref)
-    return nil
+--- 最近阅读默认从本地打开记录读取；需要远端最近列表的源可覆盖。
+---@param limit number|nil
+---@param cb fun(data: BookListResult|nil, err: string|nil)
+---@return table
+function SourceBase:recentBooksAsync(limit, cb)
+    local cancelled = false
+    require("ui/uimanager"):nextTick(function()
+        if cancelled then
+            return
+        end
+        local BookRef = require("types.book").BookRef
+        local books = {}
+        for _, row in ipairs(require("utils.db.open").recentBySource(self.id, limit)) do
+            books[#books + 1] = {
+                ref = BookRef.new(self.id, row.stable_id),
+                title = row.title,
+                authors = row.authors,
+                intro = row.intro,
+                category = row.category,
+                percent = tonumber(row.percent) or 0,
+            }
+        end
+        cb(require("types.book_list").new(books))
+    end)
+    return {
+        cancel = function()
+            cancelled = true
+        end,
+    }
 end
 
 --- 基类不支持封面请求。

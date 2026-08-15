@@ -233,10 +233,6 @@ function Client:_jsonAsync(method, path, opts, cb)
     }
 end
 
-function Client:pingAsync(cb)
-    return self:_jsonAsync("GET", "/index/auth/ping", nil, cb)
-end
-
 function Client:listBooksAsync(query, cb)
     return self:_jsonAsync("GET", "/index/book/list", {
         query = query or {},
@@ -253,10 +249,6 @@ end
 
 function Client:filtersAsync(cb)
     return self:_jsonAsync("GET", "/index/book/filters", { cache_ttl = 5 * 60 }, cb)
-end
-
-function Client:registerReadingDeviceAsync(body, cb)
-    return self:_jsonAsync("POST", "/index/stats/device", { body = body or {}, json = true }, cb)
 end
 
 function Client:importReadingStatsAsync(body, cb)

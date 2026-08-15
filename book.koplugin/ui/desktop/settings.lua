@@ -1,6 +1,6 @@
 --[[--
 设置页 UI（桌面 Tab）
-  通用：数据源切换 / 显示与启动 / 维护 / 测试连接
+  通用：数据源切换 / 显示与启动 / 维护
   源专属：source.<id>.setting.open 自绘；本页只画入口行
 
 布局（SettingRow 列表 + Pager.frame）：
@@ -47,7 +47,6 @@ local FontPicker = require("ui.components.fontpicker")
 local MoonSettings = require("utils.settings")
 local MoonFont = require("utils.font")
 local SourceRegistry = require("source.registry")
-local StatsSync = require("stats.stats_sync")
 local Cache = require("book.cache")
 local Host = require("host")
 local _ = require("gettext")
@@ -156,34 +155,6 @@ local function loadSourceSetting(id)
     return nil
 end
 
---- 在线测试当前数据源连接。
----@param plugin table|nil
-local function testConnection(plugin)
-    if not plugin or not plugin.getSource then
-        return
-    end
-    NetworkMgr:runWhenOnline(function()
-        local source = plugin:getSource()
-        if not source or not source.pingAsync then
-            UIManager:show(InfoMessage:new{ text = _("连接失败") })
-            return
-        end
-        source:pingAsync(function(res, err)
-            if not res then
-                UIManager:show(InfoMessage:new{
-                    text = err or _("连接失败"),
-                })
-                return
-            end
-            local name = res.data and (res.data.display_name or res.data.username) or "?"
-            UIManager:show(InfoMessage:new{
-                text = T(_("连接成功：%1"), name),
-                timeout = 3,
-            })
-        end)
-    end)
-end
-
 --- 设置分组内的缩进分割线。
 ---@param width number
 ---@return table
@@ -225,7 +196,7 @@ local function appendSection(out, width, title, row_builders)
     end
 end
 
---- 当前源专属入口 + 通用测试连接 / 同步 / 统计上报。
+--- 当前源专属入口 + 通用进度同步。
 ---@param active_id string
 ---@param plugin table|nil
 ---@return table
@@ -233,7 +204,6 @@ local function sourceServiceRows(active_id, plugin)
     local mod = loadSourceSetting(active_id)
     local rows = {}
     local source = plugin and plugin.getSource and plugin:getSource() or nil
-    local caps = source and source.capabilities and source:capabilities() or {}
 
     if mod and type(mod.open) == "function" then
         local status, status_on
@@ -271,18 +241,7 @@ local function sourceServiceRows(active_id, plugin)
         end
     end
 
-    rows[#rows + 1] = function(iw)
-        return SettingRow.build(iw, {
-            kind = "action",
-            icon = "link",
-            title = _("测试连接"),
-            callback = function()
-                testConnection(plugin)
-            end,
-        })
-    end
-
-    if caps.progress_push then
+    if type(source and source.putProgressAsync) == "function" then
         rows[#rows + 1] = function(iw)
             return SettingRow.build(iw, {
                 kind = "action",
@@ -297,20 +256,6 @@ local function sourceServiceRows(active_id, plugin)
                     NetworkMgr:runWhenOnline(function()
                         Progress.flushPendingAsync(src, true)
                     end)
-                end,
-            })
-        end
-    end
-
-    if caps.stats_import then
-        rows[#rows + 1] = function(iw)
-            return SettingRow.build(iw, {
-                kind = "action",
-                icon = "bar_chart",
-                title = _("立即上报统计"),
-                callback = function()
-                    local src = plugin and plugin.getSource and plugin:getSource()
-                    StatsSync.pushWithUi(src, true, true)
                 end,
             })
         end

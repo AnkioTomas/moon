@@ -36,7 +36,6 @@ local FACTORIES = {
 
 -- 正式源（WebDAV 已具备列目录+下载）
 local ORDER = { "moon", "wechat", "webdav", "rss", "local" }
-local PREVIEW_ORDER = {}
 
 ---@type BookSource|nil
 local _active = nil
@@ -58,27 +57,13 @@ function Registry.meta(id)
     return { id = id, name = id }
 end
 
---- 列出正式数据源元信息。
+--- 列出数据源元信息。
 ---@return BookSourceMeta[]
 function Registry.list()
     local out = {}
     for _, id in ipairs(ORDER) do
         local meta = Registry.meta(id)
         if meta then
-            out[#out + 1] = meta
-        end
-    end
-    return out
-end
-
---- 列出预览数据源元信息。
----@return BookSourceMeta[]
-function Registry.listPreview()
-    local out = {}
-    for _, id in ipairs(PREVIEW_ORDER) do
-        local meta = Registry.meta(id)
-        if meta then
-            meta.preview = true
             out[#out + 1] = meta
         end
     end
