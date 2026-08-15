@@ -119,10 +119,17 @@ local function reconcileChapterCache(ref, chapters)
         local tmp = fingerprint_path .. ".part"
         local out = io.open(tmp, "wb")
         if out then
-            out:write(fingerprint)
+            -- 写失败/rename 失败都清掉 .part 残留；指纹丢失无妨，下次按首次对账重写
+            local wok = out:write(fingerprint) ~= nil
             out:close()
-            os.remove(fingerprint_path)
-            os.rename(tmp, fingerprint_path)
+            if wok then
+                os.remove(fingerprint_path)
+                if not os.rename(tmp, fingerprint_path) then
+                    os.remove(tmp)
+                end
+            else
+                os.remove(tmp)
+            end
         end
     end
 end

@@ -47,4 +47,8 @@ function Client:downloadAsync(remote_path, temp_path, on_progress, cb)
     }, cb)
 end
 
+function Client:uploadAsync(remote_path, local_path, cb)
+    return self._dav:putFileAsync(remote_path, local_path, cb)
+end
+
 return Client

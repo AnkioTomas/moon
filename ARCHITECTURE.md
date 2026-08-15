@@ -54,6 +54,7 @@ ui/desktop 书库UI   ui/reader/session 阅读编排   source/* 数据源
 - **书籍列表**：`Library.fetch`（`ui/desktop/library.lua:400`）→ `source:listLibraryAsync({page, page_size, search, ...}, cb)` → 回调校验源代际后 `Store.rememberMany(books)`（写 `books` 表）→ rebuild。契约返回 `{count, data}`。
 - **主页**：`Home.fetch` → `source:recentBooksAsync(24, cb)`；首次加载还触发 `book.cache.cleanupStaleAsync`（子进程扫盘清理）。
 - **详情**：点封面 → `Desktop:showDetail`（先 `Store.remember(book)`）→ 「开始阅读」→ `plugin:openBook(book)`。
+- **书城页**（`ui/desktop/store.lua`）：全局书城走 `zlib/`（非 BookSource）：镜像种子列表 + 故障转移 + 30x 手动跟随（`zlib/client.lua`），下载后经当前源的 `importBookAsync` 导入书库。
 
 ## 3. 打开一本书（opens 表的写入点）
 

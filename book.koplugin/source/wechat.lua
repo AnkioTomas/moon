@@ -273,7 +273,8 @@ function Source:putProgressAsync(ref, pos, cb)
     pos = pos or {}
     local frac = ProgressPosition.clampFraction(pos.fraction)
     local progress = math.max(0, math.min(100, math.floor(frac * 100 + 0.5)))
-    local chapter_uid = pos.locator or pos.chapter_idx
+    -- 只传显式 chapter_uid：locator 是 XPointer、chapter_idx 是目录序号，都不是微信 chapterUid
+    local chapter_uid = pos.chapter_uid
     return self._client:putProgressAsync(ref.stable_id, progress, chapter_uid, function(wire, err)
         if wire then
             cb(true)

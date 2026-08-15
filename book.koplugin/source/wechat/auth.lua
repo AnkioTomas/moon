@@ -167,6 +167,17 @@ local function saveCfg(patch)
     MoonSettings.saveSource("wechat", c)
 end
 
+--- 有效 vid：wr_vid 优先；空串在 Lua 里为真，不能让它遮蔽 user_id
+---@param c table
+---@return any
+local function vidOf(c)
+    local vid = c.wr_vid
+    if vid == nil or vid == "" then
+        vid = c.user_id
+    end
+    return vid
+end
+
 --- 从配置构造会话 Cookie 字段映射。
 ---@param c table|nil
 ---@return table
@@ -179,7 +190,7 @@ local function sessionMap(c)
     return {
         wr_gid = c.wr_gid,
         wr_fp = c.wr_fp,
-        wr_vid = c.wr_vid or c.user_id,
+        wr_vid = vidOf(c),
         wr_skey = c.wr_skey,
         wr_ql = ql,
         wr_rt = c.wr_rt,
@@ -205,11 +216,11 @@ end
 ---@return table
 function Auth.sessionHeaders(extra)
     local c = cfg()
-    local vid = c.wr_vid or c.user_id
+    local vid = vidOf(c)
     local skey = c.wr_skey
     return browserHeaders(Header.merge(extra, {
         ["Cookie"] = Auth.cookieHeader(),
-        ["X-Vid"] = vid and tostring(vid) or nil,
+        ["X-Vid"] = (vid ~= nil and vid ~= "") and tostring(vid) or nil,
         ["X-Skey"] = (type(skey) == "string" and skey ~= "") and skey or nil,
     }))
 end
@@ -218,8 +229,12 @@ end
 ---@return boolean
 function Auth.hasSession()
     local c = cfg()
-    return (type(c.wr_skey) == "string" and c.wr_skey ~= "")
-        or (type(c.cookie) == "string" and c.cookie:find("wr_skey=", 1, true) ~= nil)
+    if type(c.wr_skey) == "string" and c.wr_skey ~= "" then
+        return true
+    end
+    -- 旧 cookie 串：wr_skey= 必须带非空值（"wr_skey=; …" 这种空值不算会话）
+    local legacy = type(c.cookie) == "string" and c.cookie:match("wr_skey=([^;]*)") or nil
+    return type(legacy) == "string" and legacy ~= ""
 end
 
 --- 展示用用户标签（昵称优先，否则 user_id）。
@@ -238,8 +253,7 @@ end
 --- 当前用户 vid。
 ---@return string|nil
 function Auth.userVid()
-    local c = cfg()
-    local vid = c.wr_vid or c.user_id
+    local vid = vidOf(cfg())
     if type(vid) == "string" and vid ~= "" then
         return vid
     end
@@ -261,8 +275,9 @@ function Auth.clearSession()
         wr_ql = "",
         user_id = "",
         user_name = "",
-        api_key = nil,
-        skill_version = nil,
+        -- 表构造器里 nil 值键不存在，pairs 看不到，必须置空串才真正清掉
+        api_key = "",
+        skill_version = "",
     })
 end
 
