@@ -28,6 +28,7 @@ function Setting.open(plugin)
         fields = {
             { text = tostring(cfg.email or ""), hint = _("邮箱") },
             { text = tostring(cfg.password or ""), hint = _("密码"), text_type = "password" },
+            { text = tostring(cfg.base_url or ""), hint = _("镜像地址（可选，留空自动选择）") },
         },
         buttons = {{
             { text = _("取消"), id = "close", callback = function() UIManager:close(dialog) end },
@@ -35,6 +36,8 @@ function Setting.open(plugin)
                 local values = dialog:getFields()
                 cfg.email = (values[1] or ""):match("^%s*(.-)%s*$")
                 cfg.password = values[2] or ""
+                local base_url = (values[3] or ""):match("^%s*(.-)%s*$")
+                cfg.base_url = base_url ~= "" and base_url or nil
                 cfg.user_id, cfg.user_key = nil, nil
                 Settings.saveSource("zlib", cfg)
                 UIManager:close(dialog)

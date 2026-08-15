@@ -9,13 +9,36 @@ local Request = require("http.request")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
-local BASE_URL = "https://zh.iread.ink"
-local BASIC_USER = "iread"
-local BASIC_PASSWORD = "DGvG2h3JMOvEoS"
-local USER_AGENT = "KOReader/MoonBook Z-Library"
+-- 官方种子镜像（不带尾斜杠）。仅保留本机探测 eAPI /info/ok 可用的；
+-- 主站优先，其余按实测延迟升序，方便故障转移前 3 个命中快镜像。
+local SEED_URLS = {
+    "https://z-library.sk",
+    "https://thai-books.sk",
+    "https://frenchbooks.sk",
+    "https://portuguese-books.sk",
+    "https://urdu-books.sk",
+    "https://z-library.ec",
+    "https://spanish-books.sk",
+    "https://italian-books.sk",
+    "https://czechbooks.sk",
+    "https://z-lib.sk",
+    "https://german-books.sk",
+}
+
+local USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
+
+local MAX_REDIRECT_HOPS = 5
+local MAX_BASE_ATTEMPTS = 3
+
+-- 钉住的镜像 origin（重定向跨主机或故障转移成功时更新，本次会话有效）
+local pinned_base
 
 local Client = {}
 Client.__index = Client
+
+-- ---------------------------------------------------------------------------
+-- URL 工具
+-- ---------------------------------------------------------------------------
 
 local function urlEncode(value)
     return tostring(value):gsub("([^%w%-_%.~])", function(char)
@@ -33,22 +56,108 @@ local function form(data)
     return table.concat(out, "&")
 end
 
-local function decode(body)
-    if type(body) ~= "string" or body == "" then return nil, _("响应为空") end
-    local ok, data = pcall(JSON.decode, body)
-    if not ok or type(data) ~= "table" then return nil, _("无效响应格式") end
-    return data
+--- 取 URL 的 origin（scheme://host[:port]）与其组成部分
+---@return string|nil origin, string|nil scheme, string|nil host
+local function originOf(url)
+    local scheme, host, port = tostring(url or ""):match("^([hH][tT][tT][pP][sS]?)://([^/:]+):?(%d*)")
+    if not scheme then return nil end
+    local origin = scheme:lower() .. "://" .. host
+    if port ~= "" then origin = origin .. ":" .. port end
+    return origin, scheme:lower(), host
 end
 
-local function apiError(data, fallback)
-    local err = type(data) == "table" and data.error or nil
-    if type(err) == "table" then err = err.message end
-    if err ~= nil and tostring(err) ~= "" then return tostring(err) end
-    if type(data) == "table" and type(data.message) == "string" and data.message ~= "" then
-        return data.message
-    end
-    return fallback
+--- 30x 的 Location 允许是相对地址（RFC 9110）：相对当前 URL 解析成绝对地址
+---@return string|nil
+local function absoluteUrl(current_url, location)
+    if type(location) ~= "string" or location == "" then return nil end
+    if location:match("^[hH][tT][tT][pP][sS]?://") then return location end
+    local origin, scheme = originOf(current_url)
+    if not origin then return nil end
+    if location:sub(1, 2) == "//" then return scheme .. ":" .. location end
+    if location:sub(1, 1) == "/" then return origin .. location end
+    local dir = current_url:match("^(https?://.*/)") or (origin .. "/")
+    return dir .. location
 end
+
+-- ---------------------------------------------------------------------------
+-- 镜像选择与故障转移
+-- ---------------------------------------------------------------------------
+
+--- 候选 base 列表：用户配置 > 钉住 > 种子；去重，最多 MAX_BASE_ATTEMPTS 个
+---@return string[]
+local function baseCandidates(cfg)
+    local out, seen = {}, {}
+    local function add(u)
+        if type(u) ~= "string" then return end
+        u = u:gsub("%s+", ""):gsub("/+$", "")
+        if u == "" then return end
+        if not u:match("^[hH][tT][tT][pP][sS]?://") then u = "https://" .. u end
+        if not seen[u] then
+            seen[u] = true
+            out[#out + 1] = u
+        end
+    end
+    add(cfg and cfg.base_url)
+    add(pinned_base)
+    for _, seed in ipairs(SEED_URLS) do add(seed) end
+    local capped = {}
+    for i = 1, math.min(MAX_BASE_ATTEMPTS, #out) do capped[i] = out[i] end
+    return capped
+end
+
+-- WAF/风控的「验证浏览器」拦截页：不是故障，重试没意义，换镜像才有用
+local CHALLENGE_MARKERS = {
+    "Verifying your browser",
+    "DiamWall",
+    "/cdn-cgi/mitigation/",
+    "__cf_chl",
+    "Just a moment",
+    "Checking your browser",
+}
+
+local function looksLikeChallenge(body)
+    if type(body) ~= "string" or body == "" then return false end
+    local head = body:sub(1, 4096)
+    if not head:find("<", 1, true) then return false end
+    for _, marker in ipairs(CHALLENGE_MARKERS) do
+        if head:find(marker, 1, true) then return true end
+    end
+    return false
+end
+
+--- 传输层错误分类（Turbo res.error.code / message）
+---@return string
+local function classifyTransportError(res, err)
+    local code = type(res and res.error) == "table" and res.error.code or nil
+    local msg = tostring(type(res and res.error) == "table" and res.error.message or err or "")
+    if code == -5 or code == -6 then -- CONNECT_TIMEOUT / REQUEST_TIMEOUT
+        return _("连接超时，请检查网络")
+    end
+    if msg:lower():find("resolve") or msg:lower():find("name") then
+        return _("找不到服务器地址，镜像可能已失效")
+    end
+    return msg ~= "" and msg or _("网络请求失败")
+end
+
+local REDIRECT_CODES = { [301] = true, [302] = true, [303] = true, [307] = true, [308] = true }
+
+--- 告诉用户当前在试哪个镜像。UI 延迟加载：离线测试 / 无 UI 环境直接跳过。
+local function toastTrying(base)
+    local host = tostring(base or ""):match("^https?://([^/:]+)") or base
+    if not host or host == "" then return end
+    pcall(function()
+        local UIManager = require("ui/uimanager")
+        local InfoMessage = require("ui/widget/infomessage")
+        UIManager:show(InfoMessage:new{
+            text = T(_("正在尝试镜像：%1"), host),
+            timeout = 2,
+        })
+    end)
+end
+
+-- ---------------------------------------------------------------------------
+-- 客户端
+-- ---------------------------------------------------------------------------
 
 function Client.new(cfg)
     cfg = cfg or {}
@@ -80,33 +189,143 @@ function Client:headers(with_session)
     return headers
 end
 
+local function decode(body)
+    if type(body) ~= "string" or body == "" then return nil, _("响应为空") end
+    local ok, data = pcall(JSON.decode, body)
+    if not ok or type(data) ~= "table" then return nil, _("无效响应格式") end
+    return data
+end
+
+local function apiError(data, fallback)
+    local err = type(data) == "table" and data.error or nil
+    if type(err) == "table" then err = err.message end
+    if err ~= nil and tostring(err) ~= "" then return tostring(err) end
+    if type(data) == "table" and type(data.message) == "string" and data.message ~= "" then
+        return data.message
+    end
+    return fallback
+end
+
+--- 带镜像故障转移与 30x 手动跟随的 JSON 请求。
+--- 成功 cb(data)；最终失败 cb(nil, err)。
 function Client:_jsonAsync(method, path, opts, cb)
     opts = opts or {}
-    local body = opts.form and form(opts.form) or nil
-    local headers = self:headers(opts.session)
-    if body then
-        headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
-        headers["Content-Length"] = tostring(#body)
-        headers["X-Requested-With"] = "XMLHttpRequest"
+    local bases = baseCandidates(self.cfg)
+    local cancelled = false
+    local job
+    local result = {}
+    function result.cancel()
+        cancelled = true
+        if job and job.cancel then job.cancel() end
     end
-    return Request.request({
-        url = BASE_URL .. path,
-        method = method,
-        body = body,
-        headers = headers,
-        auth_username = BASIC_USER,
-        auth_password = BASIC_PASSWORD,
-        timeout = opts.timeout or 45,
-    }, function(res, err)
-        if err then cb(nil, err); return end
-        local data, decode_err = decode(res and res.body)
-        if not Request.ok(res and res.code) then
-            cb(nil, apiError(data, T(_("HTTP %1"), tostring(res and res.code))))
+
+    local body = opts.form and form(opts.form) or nil
+    local last_err = _("网络请求失败")
+    local bi = 0
+    local current_base
+
+    local issue
+    local function tryNextBase()
+        if cancelled then return end
+        bi = bi + 1
+        if bi > #bases then
+            cb(nil, last_err)
             return
         end
-        if not data then cb(nil, decode_err); return end
-        cb(data)
-    end)
+        current_base = bases[bi]
+        toastTrying(current_base)
+        local url = current_base .. path
+        issue(url, method, body, self:headers(opts.session), { [url] = true }, 0)
+    end
+
+    ---@param seen table 已请求过的 URL（重定向循环检测）
+    ---@param hops number 已跟随的跳数
+    issue = function(url, m, req_body, headers, seen, hops)
+        job = Request.request({
+            url = url,
+            method = m,
+            body = req_body,
+            headers = headers,
+            timeout = opts.timeout or 30,
+        }, function(res, err)
+            if cancelled then return end
+            local code = res and tonumber(res.code) or nil
+
+            -- 传输层失败：换下一个候选镜像
+            if not code then
+                if current_base == pinned_base then pinned_base = nil end
+                last_err = classifyTransportError(res, err)
+                tryNextBase()
+                return
+            end
+
+            -- 30x：手动跟随（Turbo 默认不跟随）
+            if REDIRECT_CODES[code] then
+                local target = absoluteUrl(url, Request.header(res, "location"))
+                if not target then
+                    last_err = T(_("HTTP %1"), code)
+                    tryNextBase()
+                    return
+                end
+                if seen[target] or hops + 1 > MAX_REDIRECT_HOPS then
+                    cb(nil, _("重定向过多"))
+                    return
+                end
+                seen[target] = true
+                -- 跨主机 = 镜像迁移：钉住新 origin，后续请求直接用它
+                local new_origin = originOf(target)
+                local is_mirror_move = new_origin and new_origin ~= originOf(url)
+                if is_mirror_move then
+                    pinned_base = new_origin
+                end
+                if is_mirror_move and m ~= "GET" then
+                    -- 镜像迁移：在新 origin 上重发原始请求（POST 不能退化成 GET）
+                    issue(new_origin .. path, m, req_body, headers, seen, hops + 1)
+                elseif code ~= 307 and code ~= 308 and m ~= "GET" then
+                    -- 站内 301/302/303：转 GET 丢 body 及 Content-* 头
+                    local kept = {}
+                    for k, v in pairs(headers) do
+                        local lk = k:lower()
+                        if lk ~= "content-type" and lk ~= "content-length" then
+                            kept[k] = v
+                        end
+                    end
+                    issue(target, "GET", nil, kept, seen, hops + 1)
+                else
+                    issue(target, m, req_body, headers, seen, hops + 1)
+                end
+                return
+            end
+
+            -- 5xx 是镜像自己病了：换下一个
+            if code >= 500 then
+                last_err = T(_("HTTP %1"), code)
+                tryNextBase()
+                return
+            end
+
+            -- bot 挑战页：不是 JSON，是拦截页；换镜像才可能有用
+            if looksLikeChallenge(res.body) then
+                last_err = _("服务器拒绝自动访问，正在尝试其它镜像")
+                tryNextBase()
+                return
+            end
+
+            -- 这个 base 能用：钉住（故障转移选中的镜像，下次直接用）
+            pinned_base = current_base
+
+            local data, decode_err = decode(res.body)
+            if not Request.ok(code) then
+                cb(nil, apiError(data, T(_("HTTP %1"), code)))
+                return
+            end
+            if not data then cb(nil, decode_err); return end
+            cb(data)
+        end)
+    end
+
+    tryNextBase()
+    return result
 end
 
 function Client:pingAsync(cb)
@@ -202,6 +421,8 @@ function Client:downloadAsync(id, hash, dest, on_progress, cb)
             method = "GET",
             headers = self:headers(true),
             timeout = 180,
+            -- CDN 直链常带 301/302：允许 Turbo 自动跟随
+            allow_redirects = true,
             on_progress = on_progress,
         }, dest, function(ok, err, res)
             if not ok then pcall(os.remove, dest); finish(nil, err); return end
