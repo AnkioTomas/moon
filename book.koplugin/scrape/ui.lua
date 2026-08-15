@@ -59,7 +59,6 @@ local function saveCover(ref, url, headers, done)
     end
     Image.fetchAsync(url, headers, function(path, err)
         if path then
-            Paths.ensureLayout(ref.source_id)
             copyFile(path, Paths.coverPath(ref.stable_id, ref.source_id))
         else
             logger.warn("scrape cover download failed:", url, err)

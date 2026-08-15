@@ -62,7 +62,6 @@ package.preload["utils.paths"] = function()
         coverPath = function(stable_id, id)
             return "/data/.moon/cache/" .. tostring(id) .. "/image/" .. tostring(stable_id) .. ".png"
         end,
-        ensureLayout = function() end,
     }
 end
 
@@ -159,6 +158,29 @@ local function stubListBySource(source_id, opts)
     return matched, count
 end
 
+-- 扫描改走子进程（utils.task）：离线测试不 fork，worker 就地同步跑，
+-- on_done 经 nextTick 保持异步语义；子进程语义（自开 DB 连接）在真机覆盖。
+package.preload["utils.task"] = function()
+    return {
+        run = function(worker, opts)
+            opts = opts or {}
+            local ok, err = pcall(worker)
+            require("ui/uimanager"):nextTick(function()
+                if ok then
+                    if opts.on_done then
+                        opts.on_done(nil)
+                    end
+                elseif opts.on_failed then
+                    opts.on_failed(err)
+                end
+            end)
+            return { abort = function() end }
+        end,
+        inSubProcess = function()
+            return false
+        end,
+    }
+end
 package.preload["utils.db.book"] = function()
     return {
         get = function(source_id, stable_id)
@@ -233,13 +255,6 @@ package.preload["utils.db.book"] = function()
         end,
     }
 end
-package.preload["utils.db.queue"] = function()
-    return {
-        run = function(worker)
-            worker()
-        end,
-    }
-end
 package.preload["utils.db.open"] = function()
     return {
         recentBySource = function(source_id, limit)
@@ -267,10 +282,10 @@ for _, name in ipairs({
     "libs/libkoreader-lfs",
     "utils.paths",
     "document/documentregistry",
+    "utils.task",
     "utils.db.book",
     "utils.db.open",
     "utils.db.stats",
-    "utils.db.queue",
     "source.local.client",
 }) do
     package.loaded[name] = nil
@@ -595,10 +610,10 @@ for _, name in ipairs({
     "libs/libkoreader-lfs",
     "utils.paths",
     "document/documentregistry",
+    "utils.task",
     "utils.db.book",
     "utils.db.open",
     "utils.db.stats",
-    "utils.db.queue",
     "source.local.client",
 }) do
     package.preload[name] = nil
