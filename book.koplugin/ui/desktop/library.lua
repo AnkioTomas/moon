@@ -533,10 +533,10 @@ function Library.syncPageSize(desktop)
     local n = math.max(1, m.page_size or 1)
     if desktop.page_size ~= n then
         desktop.page_size = n
+        desktop._library_state = nil
         local pages = math.max(1, math.ceil((desktop.total or 0) / n))
         if (desktop.page or 1) > pages then
             desktop.page = pages
-            desktop._library_state = nil
         end
     end
     return desktop.page_size

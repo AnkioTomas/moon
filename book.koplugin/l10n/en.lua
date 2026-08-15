@@ -312,6 +312,7 @@ return {
     ["立即上报"] = "Upload now",
     ["字体"] = "Font",
     ["字号"] = "Font size",
+    ["网格最大列数"] = "Maximum grid columns",
     ["启动打开桌面"] = "Open on start",
     ["清除「%1」本地缓存？"] = "Clear local cache for “%1”?",
     ["删除 .moon/cache？"] = "Delete .moon/cache?",
