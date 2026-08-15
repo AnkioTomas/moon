@@ -2,9 +2,8 @@
 KOReader 宿主钩子：启动项菜单 + 桌面接管。
 
 对外：
-  attach(plugin)         — init（菜单 + 启动项 + 可选自动开桌面）
-  onShow(plugin)         — FM 显示且 want 则开桌面
-  requestDesktop(plugin) — 要开桌面（能开就开，否则 want=true）
+  attach(plugin) — init（菜单 + 启动项 + 可选自动开桌面）
+  onShow(plugin) — FM 显示且 want 则开桌面
 
 状态只要 want：nil 未见过 FM / true 待开 / false 不自动开
 
@@ -178,17 +177,6 @@ function Host.onShow(plugin)
         return false
     end
     return openNow(plugin)
-end
-
---- 请求开桌面；当前开不了则标记 want，等下次 FM onShow
----@param plugin table
----@return boolean 是否已打开
-function Host.requestDesktop(plugin)
-    if openNow(plugin) then
-        return true
-    end
-    want = true
-    return false
 end
 
 return Host

@@ -91,19 +91,15 @@ function BookPlugin:onCloseDocument()
 end
 
 --- 章末：按章会话自动下一章
----@return boolean|nil
+---@return boolean
 function BookPlugin:onEndOfBook()
-    if require("reader.session").onEndOfBook() then
-        return true
-    end
+    return require("reader.session").onEndOfBook()
 end
 
 --- 章首：按章会话自动上一章（由 chapters.patches 触发）
----@return boolean|nil
+---@return boolean
 function BookPlugin:onStartOfBook()
-    if require("reader.session").onStartOfBook() then
-        return true
-    end
+    return require("reader.session").onStartOfBook()
 end
 
 --- 休眠前：有打开文档时推进度 / 结清统计并通知源
