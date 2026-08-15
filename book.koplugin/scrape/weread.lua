@@ -18,15 +18,14 @@ local Weread = {}
 local SEARCH_URL = "https://weread.qq.com/web/search/global"
 local DEFAULT_COUNT = 10
 
---- 生成随机 User-Agent
+--- 去首尾空白；nil 视为空字符串。
+---@param s any
 ---@return string
-local function randomUA()
-    local uas = {
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    }
-    return uas[math.random(#uas)] .. " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+local function trim(s)
+    return (s or ""):gsub("^%s+", ""):gsub("%s+$", "")
 end
+
+local mapBook
 
 --- 搜索微信读书
 ---@param query string
@@ -50,7 +49,7 @@ function Weread.searchAsync(query, count, cb)
         url = url,
         method = "GET",
         headers = {
-            ["User-Agent"] = randomUA(),
+            ["User-Agent"] = Request.randomUA(),
             ["Accept"] = "application/json, text/plain, */*",
             ["Accept-Language"] = "zh-CN,zh;q=0.9,en;q=0.8",
             ["Referer"] = "https://weread.qq.com/",
@@ -83,7 +82,7 @@ function Weread.searchAsync(query, count, cb)
             local info = row.bookInfo
             if type(info) == "table" and info.title and info.title ~= "" then
                 if tonumber(info.soldout) ~= 1 then
-                    local mapped = Weread._mapBook(info, row)
+                    local mapped = mapBook(info, row)
                     if mapped then
                         results[#results + 1] = mapped
                     end
@@ -98,15 +97,15 @@ end
 ---@param info table
 ---@param row table
 ---@return table|nil
-function Weread._mapBook(info, row)
-    local title = (info.title or ""):gsub("^%s+", ""):gsub("%s+$", "")
+function mapBook(info, row)
+    local title = trim(info.title)
     if title == "" then return nil end
 
     local rawRating = tonumber(info.newRating or row.newRating) or 0
     local rating10 = rawRating > 0 and (math.floor(rawRating / 10 + 0.5) / 10) or 0
 
-    local intro = (info.intro or ""):gsub("^%s+", ""):gsub("%s+$", "")
-    local category = (info.category or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local intro = trim(info.intro)
+    local category = trim(info.category)
     local tags = {}
     if category ~= "" then
         for p in category:gmatch("[^-／/|、,，]+") do
@@ -128,7 +127,7 @@ function Weread._mapBook(info, row)
     local year = publishTime:match("(%d%d%d%d)")
 
     local bookId = info.bookId or ""
-    local url = (info.deepLink or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    local url = trim(info.deepLink)
     if url == "" and bookId ~= "" then
         url = "https://weread.qq.com/web/reader/" .. bookId
     end
@@ -138,16 +137,16 @@ function Weread._mapBook(info, row)
 
     return {
         title = title,
-        author = (info.author or ""):gsub("^%s+", ""):gsub("%s+$", ""),
-        publisher = (info.publisher or ""):gsub("^%s+", ""):gsub("%s+$", ""),
+        author = trim(info.author),
+        publisher = trim(info.publisher),
         year = year or "",
-        isbn = (info.isbn or ""):gsub("^%s+", ""):gsub("%s+$", ""),
+        isbn = trim(info.isbn),
         rating = rating10 > 0 and tostring(rating10) or "",
         intro = intro,
         tags = tags,
-        cover_url = (info.cover or ""):gsub("^%s+", ""):gsub("%s+$", ""),
+        cover_url = trim(info.cover),
         url = url,
-        series = (info.lPushName or ""):gsub("^%s+", ""):gsub("%s+$", ""),
+        series = trim(info.lPushName),
         price = price and tostring(price) or "",
         source = "weread",
         bookId = bookId,
