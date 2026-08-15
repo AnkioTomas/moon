@@ -1,6 +1,5 @@
 --[[--
-Desktop 底栏 Tab：首页 / 图书馆 / [书城] / 统计 / 设置
-  书城仅当 source.capabilities.store 时插入
+通用底栏 Tab 渲染（纯构建，不绑 Desktop / 业务 Tab 列表）。
 
 选中态（墨水屏优先对比）：
   图标不 dim、标签加粗加大、底部短粗指示条
@@ -9,11 +8,15 @@ Desktop 底栏 Tab：首页 / 图书馆 / [书城] / 统计 / 设置
 布局：
   +-----------------------------------------------+
   | ──────────── 通栏分割线 ───────────────────── |
-  |  [🏠]   [📚]   [🏪?]  [📊?]  [⚙]             |
-  |  首页   图书馆  书城    统计    设置            |
+  |  [icon]  [icon]  [icon]  …                    |
+  |  文案    文案    文案                         |
   |   ━━━                                    ←选中 |
   +-----------------------------------------------+
-  （? = 按 source.capabilities 动态插入）
+
+调用方提供 tabs：
+  { id = "home", text = _("首页"), icon = "home" }
+
+  BottomBar.build(tabs, active_id)
 
 @module koplugin.book.ui.components.bottombar
 --]]
@@ -28,7 +31,6 @@ local LineWidget = require("ui/widget/linewidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local TextWidget = require("ui/widget/textwidget")
-local _ = require("gettext")
 local Screen = Device.screen
 
 local UI = require("ui.components.bookui")
@@ -36,49 +38,31 @@ local Icon = require("ui.components.icon")
 
 local BottomBar = {}
 
---- 按数据源能力生成底栏 Tab 列表。
----@param source table|nil
----@return table
-function BottomBar.tabs(source)
-    local tabs = {
-        { id = "home", text = _("首页"), icon = "home" },
-        { id = "library", text = _("图书馆"), icon = "local_library" },
-    }
-    local caps = source and source.capabilities and source:capabilities() or {}
-    if caps.store then
-        table.insert(tabs, { id = "store", text = _("书城"), icon = "storefront" })
-    end
-    if caps.insight then
-        table.insert(tabs, { id = "stats", text = _("统计"), icon = "bar_chart" })
-    end
-    table.insert(tabs, { id = "settings", text = _("设置"), icon = "settings" })
-    return tabs
-end
-
 --- 构建底栏 widget。
----@param desktop table Desktop 实例（读 tab / source）
+---@param tabs table[] { id, text, icon }
+---@param active string|nil 当前选中 tab id
 ---@return table
-function BottomBar.build(desktop)
-    local tabs = BottomBar.tabs(desktop.source)
-    desktop._tabs = tabs
+function BottomBar.build(tabs, active)
+    tabs = tabs or {}
     local sw = Screen:getWidth()
     local bh = UI.barH()
     local icon_sz = UI.iconSz()
-    local cell_w = math.floor(sw / #tabs)
+    local n = math.max(1, #tabs)
+    local cell_w = math.floor(sw / n)
     local underline_h = UI.sz(3)
     -- 选中指示条：短粗，避免通栏细线「像分割线」
     local indicator_w = math.min(cell_w - UI.sz(20), math.max(UI.sz(28), icon_sz + UI.sz(12)))
     local row = HorizontalGroup:new{ align = "center" }
     for _, tab in ipairs(tabs) do
-        local active = desktop.tab == tab.id
+        local is_active = active == tab.id
         local icon = Icon.widget{
             name = tab.icon,
-            dim = not active,
+            dim = not is_active,
         }
         local label = TextWidget:new{
             text = tab.text,
-            face = UI.face(active and "cfont" or "xx_smallinfofont", active and 14 or 11),
-            fgcolor = active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_6,
+            face = UI.face(is_active and "cfont" or "xx_smallinfofont", is_active and 14 or 11),
+            fgcolor = is_active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_6,
         }
         local content_h = math.max(1, bh - underline_h)
         local cell = VerticalGroup:new{
@@ -96,9 +80,9 @@ function BottomBar.build(desktop)
             CenterContainer:new{
                 dimen = Geom:new{ w = cell_w, h = underline_h },
                 LineWidget:new{
-                    background = active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
+                    background = is_active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
                     dimen = Geom:new{
-                        w = active and indicator_w or 1,
+                        w = is_active and indicator_w or 1,
                         h = underline_h,
                     },
                 },
