@@ -7,3 +7,6 @@
 # 模拟器配置目录软链 → koreader/.../koreader
 /config
 .env
+
+# Agent instructions (local only)
+AGENTS.md
