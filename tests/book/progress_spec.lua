@@ -86,9 +86,6 @@ local Progress = require("book.progress")
 local pushed = {}
 local source = {
     id = "moon",
-    capabilities = function()
-        return { progress_push = true, progress_pull = true }
-    end,
     putProgress = function(_, ref, pos)
         pushed[#pushed + 1] = { ref.stable_id, pos.fraction }
         return { cancel = function() end }
@@ -114,9 +111,6 @@ Assert.eq(#deleted, 2)
 local no_push
 Progress.flushPendingAsync({
     id = "moon",
-    capabilities = function()
-        return { progress_push = false }
-    end,
 }, false, function(count)
     no_push = count
 end)

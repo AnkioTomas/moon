@@ -113,7 +113,7 @@ local upserts = {}
 local removed = {}
 local renames = {}
 
---- 模拟 BookDB.listBySource 的 SQL 语义：category 精确 / search 包含 / stable_id 排序 / 分页。
+--- 模拟 BookDB.listBySource 的 SQL 语义：category/series 精确 / search 包含 / stable_id 排序 / 分页。
 local function stubListBySource(source_id, opts)
     opts = opts or {}
     local matched = {}
@@ -121,6 +121,9 @@ local function stubListBySource(source_id, opts)
         if row.source_id == source_id then
             local keep = true
             if type(opts.category) == "string" and opts.category ~= "" and row.category ~= opts.category then
+                keep = false
+            end
+            if type(opts.series) == "string" and opts.series ~= "" and row.series ~= opts.series then
                 keep = false
             end
             if keep and type(opts.search) == "string" and opts.search ~= "" then
@@ -215,6 +218,19 @@ package.preload["utils.db.book"] = function()
             table.sort(out)
             return out
         end,
+        seriesBySource = function(source_id)
+            local seen, out = {}, {}
+            for _, row in pairs(db_rows) do
+                local series = row.series
+                if row.source_id == source_id and type(series) == "string"
+                    and series ~= "" and not seen[series] then
+                    seen[series] = true
+                    out[#out + 1] = series
+                end
+            end
+            table.sort(out)
+            return out
+        end,
     }
 end
 package.preload["utils.db.queue"] = function()
@@ -300,6 +316,7 @@ do
             title = "书" .. i,
             authors = i == 3 and "鲁迅" or "别人",
             category = i <= 3 and "sub" or "other",
+            series = i <= 2 and "第一辑" or "第二辑",
         }
     end
     local c = Client.new({ path = "/books" })
@@ -334,14 +351,23 @@ do
     Assert.len(rows, 1)
     Assert.eq(rows[1].stable_id, "/books/b5.epub")
 
-    -- 分类筛选（UI「分类」= favorite 参数）
+    -- 分类筛选
     rows, count = nil, nil
-    c:listAsync({ favorite = "sub" }, function(r, n)
+    c:listAsync({ category = "sub" }, function(r, n)
         rows, count = r, n
     end)
     Stubs.flush()
     Assert.eq(count, 3)
     Assert.len(rows, 3)
+
+    -- 系列筛选
+    rows, count = nil, nil
+    c:listAsync({ series = "第一辑" }, function(r, n)
+        rows, count = r, n
+    end)
+    Stubs.flush()
+    Assert.eq(count, 2)
+    Assert.len(rows, 2)
 
     -- 搜索：命中作者
     rows, count = nil, nil
@@ -483,7 +509,7 @@ do
     Assert.is_true(#dirs_scanned > 0)
 end
 
--- ── filtersAsync：分类 DISTINCT 直查 DB ───────
+-- ── filtersAsync：分类/系列 DISTINCT 直查 DB ───────
 do
     reset()
     for i, cat in ipairs({ "sub", "zeta", "sub", "" }) do
@@ -493,6 +519,7 @@ do
             stable_id = path,
             title = "f" .. i,
             category = cat,
+            series = i <= 2 and "系列 A" or "系列 B",
         }
     end
     local res
@@ -501,9 +528,12 @@ do
     end)
     Stubs.flush()
     Assert.not_nil(res)
-    Assert.len(res.data.favorites, 2)
-    Assert.eq(res.data.favorites[1], "sub")
-    Assert.eq(res.data.favorites[2], "zeta")
+    Assert.len(res.data.category, 2)
+    Assert.eq(res.data.category[1], "sub")
+    Assert.eq(res.data.category[2], "zeta")
+    Assert.len(res.data.series, 2)
+    Assert.eq(res.data.series[1], "系列 A")
+    Assert.eq(res.data.series[2], "系列 B")
 end
 
 -- ── recentAsync / insightAsync：透传 DB 结果 ──────

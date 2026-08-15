@@ -1,5 +1,5 @@
 --[[--
-utils.db.book：books 表 CRUD（listBySource / categoriesBySource 已在 db_spec 覆盖）
+utils.db.book：books 表 CRUD（listBySource / 分类与系列查询已在 db_spec 覆盖）
 
 重点：favoriteToDb 三态契约 —— nil→NULL / string→原样 / boolean→"true"/"false"
 

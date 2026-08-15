@@ -240,7 +240,7 @@ do
     clearMods()
 end
 
--- ── books 表：listBySource 分页/筛选/搜索 + categoriesBySource ──
+-- ── books 表：listBySource 分页/筛选/搜索 + 分类/系列列表 ──
 do
     local calls = {}
     local connection = {
@@ -265,12 +265,16 @@ do
                     if sql:find("DISTINCT category", 1, true) then
                         return { { "sub", "zeta" } }, 2
                     end
+                    if sql:find("DISTINCT series", 1, true) then
+                        return { { "第一辑", "第二辑" } }, 2
+                    end
                     return {
                         { "/books/a.epub" },
                         { "书名" },
                         { "作者" },
                         { 42 },
                         { "sub" },
+                        { "第一辑" },
                         { "介绍" },
                         { 1000 },
                     }, 1
@@ -299,6 +303,7 @@ do
     Assert.eq(rows[1].stable_id, "/books/a.epub")
     Assert.eq(rows[1].title, "书名")
     Assert.eq(rows[1].percent, 42)
+    Assert.eq(rows[1].series, "第一辑")
     local count_q = calls[#calls - 1]
     Assert.is_true(count_q.sql:find("WHERE source_id=%?", 1) ~= nil or count_q.sql:find("source_id=?", 1, true) ~= nil)
     Assert.is_false(count_q.sql:find("category=", 1, true) ~= nil)
@@ -307,23 +312,34 @@ do
     Assert.eq(list_q.args[#list_q.args - 1], 24)
     Assert.eq(list_q.args[#list_q.args], 48)
 
-    -- 分类 + 搜索：AND 条件与 LIKE 参数
+    -- 分类 + 系列 + 搜索：AND 条件与 LIKE 参数
     calls = {}
-    rows, count = BookDB.listBySource("local", { category = "sub", search = "鲁", limit = 10, offset = 0 })
+    rows, count = BookDB.listBySource("local", {
+        category = "sub",
+        series = "第一辑",
+        search = "鲁",
+        limit = 10,
+        offset = 0,
+    })
     Assert.eq(count, 7)
     count_q = calls[1]
     Assert.is_true(count_q.sql:find("AND category=?", 1, true) ~= nil)
+    Assert.is_true(count_q.sql:find("AND series=?", 1, true) ~= nil)
     Assert.is_true(count_q.sql:find("title LIKE ?", 1, true) ~= nil)
     Assert.eq(count_q.args[1], "local")
     Assert.eq(count_q.args[2], "sub")
-    Assert.eq(count_q.args[3], "%鲁%")
+    Assert.eq(count_q.args[3], "第一辑")
     Assert.eq(count_q.args[4], "%鲁%")
     Assert.eq(count_q.args[5], "%鲁%")
+    Assert.eq(count_q.args[6], "%鲁%")
 
     -- 分类列表
     local cats = BookDB.categoriesBySource("local")
     Assert.eq(#cats, 2)
     Assert.eq(cats[1], "sub")
+    local series = BookDB.seriesBySource("local")
+    Assert.eq(#series, 2)
+    Assert.eq(series[1], "第一辑")
 
     DbBase.close()
     clearMods()
