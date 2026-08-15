@@ -66,7 +66,7 @@ package.preload["utils.paths"] = function()
     }
 end
 
--- fileMd5 读文件内容算摘要：测试环境里没有真实文件，io.open 一律失败 → digest 恒为 nil，
+-- util.partialMD5 读文件内容算摘要：测试环境里没有真实文件，io.open 一律失败 → digest 恒为 nil，
 -- 等同于关闭改名识别分支，测试可专注在其它路径上（改名识别单独在下方测试块覆盖）。
 
 local opened = {}
@@ -434,7 +434,7 @@ do
         source_id = "local", stable_id = "/books/old_name.epub", md5 = "digest-a", title = "已有元数据",
     }
     local BookDB = require("utils.db.book")
-    -- 模拟扫描发现同 md5 的新路径（fileMd5 在此测试环境恒为 nil，直接调用 DB 层验证原地改名的效果）
+    -- 模拟扫描发现同 md5 的新路径（partialMD5 在此测试环境恒为 nil，直接调用 DB 层验证原地改名的效果）
     local by_md5 = BookDB.getByMd5("local", "digest-a")
     Assert.not_nil(by_md5)
     BookDB.renameStableId("local", by_md5.stable_id, "/books/new_name.epub")
