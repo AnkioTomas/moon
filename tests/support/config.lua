@@ -113,6 +113,31 @@ function Config.installUtilStub()
                     return string.char(tonumber(x, 16))
                 end))
             end,
+            -- 与 koreader/frontend/util.lua partialMD5 同实现
+            partialMD5 = function(filepath)
+                if not filepath then
+                    return
+                end
+                local file = io.open(filepath, "rb")
+                if not file then
+                    return
+                end
+                local md5 = require("ffi/sha2").md5
+                local bit = require("bit")
+                local step, size = 1024, 1024
+                local update = md5()
+                for i = -1, 10 do
+                    file:seek("set", bit.lshift(step, 2 * i))
+                    local sample = file:read(size)
+                    if sample then
+                        update(sample)
+                    else
+                        break
+                    end
+                end
+                file:close()
+                return update()
+            end,
         }
     end
 end
