@@ -273,6 +273,7 @@ function Settings.build(desktop)
     local plugin = desktop.plugin
     local open_on = G_reader_settings:readSetting("start_with") == Host.OPEN_ON_START_ID
     local scale = UI.getScale()
+    local grid_max_cols = UI.getGridMaxCols()
     local font_name = MoonFont.currentName()
     local page_pad = UI.pagePad()
     local card_w = math.max(UI.sz(100), w - page_pad * 2)
@@ -390,6 +391,31 @@ function Settings.build(desktop)
                                 text = string.format("%d%%", n),
                                 timeout = 1.5,
                             })
+                            desktop:rebuild()
+                        end,
+                    }
+                end,
+            })
+        end,
+        function(iw)
+            return SettingRow.build(iw, {
+                kind = "nav",
+                icon = "grid_view",
+                title = _("网格最大列数"),
+                status = tostring(grid_max_cols),
+                status_on = true,
+                callback = function()
+                    Popup.spin{
+                        title = _("网格最大列数"),
+                        value = UI.getGridMaxCols(),
+                        value_min = UI.gridMaxColsMin(),
+                        value_max = UI.gridMaxColsMax(),
+                        value_step = 1,
+                        ok_always_enabled = true,
+                        callback = function(spin)
+                            UI.setGridMaxCols(spin.value)
+                            desktop._library_state = nil
+                            desktop._store_state = nil
                             desktop:rebuild()
                         end,
                     }

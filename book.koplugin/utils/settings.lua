@@ -18,6 +18,7 @@ local Paths = require("utils.paths")
 ---@field ui_scale number UI 缩放百分比（默认 130）
 ---@field ui_font string|nil 界面字体 id：空=系统默认；本地为 basename；微信为 weread id
 ---@field ui_font_name string|nil 界面字体展示名
+---@field grid_max_cols number 网格最大列数（2～6，默认 4）
 
 local M = {}
 
@@ -29,6 +30,7 @@ local function commonDefaults()
         ui_scale = 130,
         ui_font = "",
         ui_font_name = "",
+        grid_max_cols = 4,
     }
 end
 

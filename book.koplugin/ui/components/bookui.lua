@@ -63,6 +63,9 @@ local DEFAULT_SCALE = 130
 local MIN_SCALE = 100
 local MAX_SCALE = 180
 local STEP = 10
+local DEFAULT_GRID_MAX_COLS = 4
+local MIN_GRID_MAX_COLS = 2
+local MAX_GRID_MAX_COLS = 6
 
 --- UI 缩放下限（百分比）。
 ---@return number
@@ -112,6 +115,37 @@ function UI.cycleScale()
     local n = UI.getScale() + STEP
     if n > MAX_SCALE then n = MIN_SCALE end
     return UI.setScale(n)
+end
+
+--- 网格最大列数下限。
+---@return number
+function UI.gridMaxColsMin()
+    return MIN_GRID_MAX_COLS
+end
+
+--- 网格最大列数上限。
+---@return number
+function UI.gridMaxColsMax()
+    return MAX_GRID_MAX_COLS
+end
+
+--- 读取网格最大列数。
+---@return number
+function UI.getGridMaxCols()
+    local n = math.floor(tonumber(MoonSettings.get().grid_max_cols) or DEFAULT_GRID_MAX_COLS)
+    return math.max(MIN_GRID_MAX_COLS, math.min(MAX_GRID_MAX_COLS, n))
+end
+
+--- 写入并夹紧网格最大列数。
+---@param n number|nil
+---@return number
+function UI.setGridMaxCols(n)
+    n = math.floor(tonumber(n) or DEFAULT_GRID_MAX_COLS)
+    n = math.max(MIN_GRID_MAX_COLS, math.min(MAX_GRID_MAX_COLS, n))
+    local s = MoonSettings.get()
+    s.grid_max_cols = n
+    MoonSettings.save(s)
+    return n
 end
 
 --- 逻辑像素 → 物理像素，再乘 ui_scale。
@@ -257,8 +291,8 @@ function UI.denseCoverMetrics(avail_w, budget_h, opts)
     local row_gap = opts.row_gap or UI.sz(14)
     local min_cw = opts.min_cw or UI.sz(52)
     local target_cw = opts.target_cw or UI.sz(72)
-    local min_cols = opts.min_cols or 3
-    local max_cols = opts.max_cols or 5
+    local max_cols = opts.max_cols or UI.getGridMaxCols()
+    local min_cols = math.min(opts.min_cols or 3, max_cols)
     local title_extra = opts.title_extra or 0
     local max_h = opts.max_h or UI.gridCoverMaxH(budget_h > 0 and budget_h or nil)
 
