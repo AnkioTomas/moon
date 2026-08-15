@@ -215,6 +215,8 @@ function BookPlugin:openDesktop(filter)
     self.desktop = desk
     UIManager:show(self.desktop)
     UIManager:setDirty(self.desktop, "full")
+    -- 桌面已可见；源可趁后台做自动维护（本地源：扫描写库 + 清失效）
+    self:emitToSource("desktop_open", self.desktop)
 end
 
 return BookPlugin
