@@ -247,7 +247,18 @@ package.preload["utils.db.stats"] = function()
         end,
     }
 end
-package.loaded["source.local.client"] = nil
+for _, name in ipairs({
+    "libs/libkoreader-lfs",
+    "utils.paths",
+    "document/documentregistry",
+    "utils.db.book",
+    "utils.db.open",
+    "utils.db.stats",
+    "utils.db.queue",
+    "source.local.client",
+}) do
+    package.loaded[name] = nil
+end
 
 local Client = require("source.local.client")
 

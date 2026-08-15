@@ -30,11 +30,12 @@ local FACTORIES = {
     moon = function() return require("source.moon") end,
     webdav = function() return require("source.webdav") end,
     wechat = function() return require("source.wechat") end,
+    rss = function() return require("source.rss") end,
     ["local"] = function() return require("source.local") end,
 }
 
 -- 正式源（WebDAV 已具备列目录+下载）
-local ORDER = { "moon", "wechat", "webdav", "local" }
+local ORDER = { "moon", "wechat", "webdav", "rss", "local" }
 local PREVIEW_ORDER = {}
 
 ---@type BookSource|nil
