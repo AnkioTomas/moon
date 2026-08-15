@@ -32,16 +32,6 @@ function Session.current()
     return Session._cur
 end
 
---- 向当前源分发阅读事件（仅活跃会话）。
----@param event string
----@param payload table|nil
-function Session.emit(event, payload)
-    local cur = Session._cur
-    if cur and cur.plugin then
-        cur.plugin:emitToSource(event, payload)
-    end
-end
-
 --- 当前文档页数（取不到按 0）。
 ---@param ui table|nil
 ---@return number
@@ -154,7 +144,7 @@ local function onPage(plugin, page)
     end
     snapshot(ui, page)
     require("reader.reader").refresh(plugin)
-    Session.emit("page_changed", {
+    cur.plugin:emitToSource("page_changed", {
         ref = cur.ref,
         book = cur.book,
         page = cur.page,
