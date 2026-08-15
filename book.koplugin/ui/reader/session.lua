@@ -58,7 +58,7 @@ local function snapshot(ui, page)
     if ui then
         cur.percent = require("book.progress").fraction(ui) * 100
     end
-    local Chapter = require("book.chapter")
+    local Chapter = require("chapters.init")
     if Chapter.isActive() then
         cur.chapter_idx = Chapter.currentIdx()
         cur.chapter_count = Chapter.chapterCount()
@@ -75,7 +75,7 @@ function Session.onReaderReady(plugin)
     if not ui or not ui.document then
         return
     end
-    local Chapter = require("book.chapter")
+    local Chapter = require("chapters.init")
     local ref, chapter_idx, book, source
     if Chapter.isActive() then
         ref = Chapter.ref()
@@ -127,7 +127,7 @@ function Session.onCloseDocument(plugin)
     require("stats.tracker").stop()
     plugin:emitToSource("document_close")
     local closed = ui and ui.document and ui.document.file
-    require("book.chapter").onCloseDocument(closed)
+    require("chapters.init").onCloseDocument(closed)
     Session._cur = nil
 end
 
@@ -197,13 +197,13 @@ end
 --- 章末：按章会话自动下一章。
 ---@return boolean handled
 function Session.onEndOfBook()
-    return require("book.chapter").onEndOfBook()
+    return require("chapters.init").onEndOfBook()
 end
 
 --- 章首：按章会话自动上一章。
 ---@return boolean handled
 function Session.onStartOfBook()
-    return require("book.chapter").onStartOfBook()
+    return require("chapters.init").onStartOfBook()
 end
 
 return Session
