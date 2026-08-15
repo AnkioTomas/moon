@@ -123,6 +123,7 @@ end
 ---@field registerReadingDeviceAsync fun(self: BookSource, device_id: string, model: string|nil, cb: fun(data: table|nil, err: string|nil)): table|nil
 ---@field importReadingStats fun(self: BookSource, payload: BookStatsPayload): (table|nil, string|nil)
 ---@field importReadingStatsAsync fun(self: BookSource, payload: BookStatsPayload, cb: fun(data: table|nil, err: string|nil)): table|nil
+---@field syncAnnotationsAsync fun(self: BookSource, payload: table, cb: fun(data: table|nil, err: string|nil)): table|nil
 
 return {
     SourceCapabilities = SourceCapabilities,

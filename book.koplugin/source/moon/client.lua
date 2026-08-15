@@ -268,6 +268,13 @@ function Client:importReadingStatsAsync(body, cb)
     end)
 end
 
+function Client:syncAnnotationsAsync(body, cb)
+    return self:_jsonAsync("POST", "/index/stats/annotations", {
+        body = body or {},
+        json = true,
+    }, cb)
+end
+
 function Client:readingInsightAsync(cb)
     return self:_jsonAsync("GET", "/index/stats/insight", { cache_ttl = 30 * 60 }, cb)
 end

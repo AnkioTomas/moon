@@ -234,6 +234,26 @@ function Source:importReadingStatsAsync(payload, cb)
     end)
 end
 
+function Source:syncAnnotationsAsync(payload, cb)
+    payload = payload or {}
+    local filename = payload.filename
+    if type(filename) ~= "string" or filename == "" or type(payload.annotations) ~= "table" then
+        cb(nil, _("无效的注解数据"))
+        return nil
+    end
+    return self._client:syncAnnotationsAsync({
+        filename = filename,
+        device_id = payload.device_id,
+        annotations = payload.annotations,
+    }, function(wire, err)
+        if wire then
+            cb(wire)
+        else
+            cb(nil, (type(err) == "table" and err.message) or err)
+        end
+    end)
+end
+
 function Source:readingInsightAsync(cb)
     return self._client:readingInsightAsync(function(wire, err)
         if wire then
