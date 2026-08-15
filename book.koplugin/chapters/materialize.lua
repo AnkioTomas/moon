@@ -172,7 +172,8 @@ function Materialize.prefetchAround(idx)
     idx = tonumber(idx) or s.idx or 1
     local count = Session.chapterCount() or 0
     local targets = {}
-    if idx - 1 >= 1 then
+    -- 与后 3 一样以目录为界：count=0（无目录）时不预取可能不存在的章
+    if count > 0 and idx - 1 >= 1 then
         targets[#targets + 1] = idx - 1
     end
     for d = 1, 3 do
@@ -209,18 +210,21 @@ function Materialize.prepareOpenAsync(source, book, ref, cb)
             local function finish(pos)
                 local start_idx = 1
                 if pos then
-                    start_idx = tonumber(pos.chapter_idx) or start_idx
-                    if not pos.chapter_idx then
+                    if tonumber(pos.chapter_idx) then
+                        start_idx = tonumber(pos.chapter_idx)
+                    else
                         local pct = ProgressPosition.clampFraction(pos.fraction)
-                        if #toc > 0 and pct > 0 then
-                            start_idx = math.max(1, math.min(#toc, math.floor(pct * #toc) + 1))
+                        if pct > 0 then
+                            start_idx = math.floor(pct * #toc) + 1
                         end
                     end
                 end
+                -- chapter_idx 与 fraction 两条路径统一 clamp 到目录范围
+                start_idx = math.max(1, math.min(#toc, start_idx))
                 cb(true, {
                     book = book2,
                     toc = toc,
-                    start_idx = tonumber(start_idx) or 1,
+                    start_idx = start_idx,
                 })
             end
             if source and source.getProgressAsync then
