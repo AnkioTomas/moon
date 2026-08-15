@@ -205,6 +205,8 @@ function Request.request(opts, cb)
             body = opts.body,
             request_timeout = opts.timeout or 30,
             connect_timeout = opts.connect_timeout or 10,
+            -- 显式 true 才跟随 301/302（turbo 对 307/308 本来就不跟）；默认不跟随
+            allow_redirects = opts.allow_redirects,
             auth_username = opts.auth_username,
             auth_password = opts.auth_password,
             on_headers = function(headers)
