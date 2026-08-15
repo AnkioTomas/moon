@@ -46,9 +46,9 @@ end
 package.loaded["zlib.client"] = nil
 package.loaded["utils.settings"] = nil
 package.loaded["utils.paths"] = nil
-package.loaded["zlib"] = nil
+package.loaded["zlib.init"] = nil
 
-local Zlib = require("zlib")
+local Zlib = require("zlib.init")
 local result
 Zlib:listStoreAsync({ page = 2, page_size = 2 }, function(v) result = v end)
 Assert.eq(result.count, 3)
@@ -86,4 +86,4 @@ for _, name in ipairs({ "zlib.client", "utils.settings", "utils.paths" }) do
     package.preload[name] = original_preload[name]
     package.loaded[name] = nil
 end
-package.loaded["zlib"] = nil
+package.loaded["zlib.init"] = nil
