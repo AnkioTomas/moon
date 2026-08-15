@@ -103,7 +103,6 @@ end
 ---@param url string
 ---@return string
 local function cacheBase(url)
-    Paths.ensureLayout("image")
     return Paths.imageDir("image") .. "/" .. md5(url)
 end
 

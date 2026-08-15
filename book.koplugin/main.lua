@@ -184,6 +184,7 @@ function BookPlugin:openDesktop(filter)
         return
     end
     require("utils.paths").ensureLayout(source.id)
+    require("utils.paths").ensureLayout("image") -- 网络图缓存命名空间（非书源）
     logger.info("book openDesktop", source.id)
     if self.desktop then
         UIManager:close(self.desktop)
