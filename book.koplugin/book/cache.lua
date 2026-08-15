@@ -97,7 +97,8 @@ function Cache.cleanupStale()
                                     last_open = attr and (tonumber(attr.modification) or 0) or 0
                                 end
                                 if last_open > 0 and (now - last_open) >= LOCAL_BOOK_TTL then
-                                    if pcall(os.remove, book_dir) then
+                                    -- os.remove 失败返回 nil, err 不抛错，pcall 恒真会误计数
+                                    if os.remove(book_dir) then
                                         removed = removed + 1
                                         if v then
                                             OpenDB.delete(v.source_id, v.stable_id)
