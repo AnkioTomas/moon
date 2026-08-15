@@ -10,7 +10,7 @@
   d:cancel()
 
   local t = Timing.throttle(function()
-      -- 立刻执行；wait 秒内再调丢弃
+      -- 立刻执行；wait 秒内（墙钟）再调丢弃
   end, 60)
   t()
   t:cancel()
@@ -79,7 +79,8 @@ function Timing.debounce(fn, wait)
     end)
 end
 
---- 节流（leading）：立刻执行；wait 秒内后续调用丢弃。
+--- 节流（leading）：立刻执行；wait 秒内（os.time 墙钟）后续调用丢弃。
+--- 适合「最小间隔」类限流；亚秒精度勿用（os.time 粒度 1s）。
 ---@param fn function
 ---@param wait number 秒（>= 0）
 ---@return TimingHandle
@@ -92,22 +93,17 @@ function Timing.throttle(fn, wait)
         error("Timing.throttle: wait must be >= 0", 2)
     end
 
-    local locked = false
-    local unlock
-    unlock = function()
-        locked = false
-    end
+    local last_at = nil
 
     return handle(function(...)
-        if locked then
+        local now = os.time()
+        if last_at and now - last_at < wait then
             return
         end
-        locked = true
-        UIManager:scheduleIn(wait, unlock)
+        last_at = now
         return fn(...)
     end, function()
-        UIManager:unschedule(unlock)
-        locked = false
+        last_at = nil
     end)
 end
 
