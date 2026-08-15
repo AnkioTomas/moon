@@ -12,6 +12,12 @@ Stubs.install()
 package.loaded["utils.timing"] = nil
 local Timing = require("utils.timing")
 
+local real_time = os.time
+local now = 1000
+os.time = function()
+    return now
+end
+
 -- debounce：多次调用只执行最后一次
 do
     Stubs.reset()
@@ -41,31 +47,33 @@ do
     Assert.is_true(not called)
 end
 
--- throttle：窗口内第二次丢弃；flush 解锁后可再跑
+-- throttle：窗口内第二次丢弃；墙钟过期后可再跑
 do
-    Stubs.reset()
+    now = 1000
     local n = 0
     local t = Timing.throttle(function()
         n = n + 1
         return n
-    end, 1)
+    end, 60)
     Assert.eq(t(), 1)
+    now = 1030
     Assert.is_nil(t())
     Assert.eq(n, 1)
-    Stubs.flush()
+    now = 1060
     Assert.eq(t(), 2)
     Assert.eq(n, 2)
 end
 
 -- throttle：cancel 解除锁定
 do
-    Stubs.reset()
+    now = 2000
     local n = 0
     local t = Timing.throttle(function()
         n = n + 1
-    end, 1)
+    end, 60)
     t()
     Assert.eq(n, 1)
+    now = 2010
     t:cancel()
     t()
     Assert.eq(n, 2)
@@ -78,3 +86,5 @@ end)
 Assert.errors(function()
     Timing.throttle(function() end, -1)
 end)
+
+os.time = real_time
