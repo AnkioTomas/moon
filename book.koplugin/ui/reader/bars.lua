@@ -4,7 +4,7 @@
 纯绘制，不注册 touch zone，不影响输入；仅活跃阅读会话（源身份书籍）绘制。
 view / ui 由 ReaderView:registerViewModule 注入。
 
-@module koplugin.book.reader.bars
+@module koplugin.book.ui.reader.bars
 --]]
 
 local _ = require("gettext")
@@ -56,7 +56,7 @@ function Bars:startClock()
         if require("apps/reader/readerui").instance ~= self.ui then
             return
         end
-        if self.ui and require("reader.session").isActive() then
+        if self.ui and require("ui.reader.session").isActive() then
             UIManager:setDirty(self.ui.dialog, "ui")
         end
         self:startClock()
@@ -70,7 +70,7 @@ end
 ---@param y number
 ---@return nil
 function Bars:paintTo(bb, x, y)
-    local cur = require("reader.session").current()
+    local cur = require("ui.reader.session").current()
     if not cur then
         return
     end

@@ -7,7 +7,7 @@
 
 布局参照 ui.desktop.detail：TitleBar + Tab 行 + 内容区，禁止滚动容器。
 
-@module koplugin.book.reader.panel
+@module koplugin.book.ui.reader.panel
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -26,7 +26,7 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local BookInfo = require("ui.components.bookinfo")
 local UI = require("ui.components.bookui")
-local Session = require("reader.session")
+local Session = require("ui.reader.session")
 local Store = require("book.store")
 local _ = require("gettext")
 local Screen = Device.screen
