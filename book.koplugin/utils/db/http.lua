@@ -66,8 +66,9 @@ function HttpDB.clear(url_substr)
     if type(url_substr) ~= "string" or url_substr == "" then
         return Base.exec([[DELETE FROM http;]]) ~= nil
     end
-    local pat = url_substr:gsub("([%%_])", "%%%1")
-    return Base.exec([[DELETE FROM http WHERE key LIKE ?;]], "%" .. pat .. "%") ~= nil
+    -- 与 book.lua 搜索一致：\ 转义 + ESCAPE 子句，否则 % _ 仍是通配符
+    local pat = url_substr:gsub("([%%_\\])", "\\%1")
+    return Base.exec([[DELETE FROM http WHERE key LIKE ? ESCAPE '\';]], "%" .. pat .. "%") ~= nil
 end
 
 return HttpDB
