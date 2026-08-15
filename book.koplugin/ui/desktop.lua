@@ -60,7 +60,7 @@ local function desktopTabs(source)
         { id = "library", text = _("图书馆"), icon = "local_library" },
     }
     local caps = source and source.capabilities and source:capabilities() or {}
-    if caps.store then
+    if caps.store or (source and type(source.importBookAsync) == "function") then
         table.insert(tabs, { id = "store", text = _("书城"), icon = "storefront" })
     end
     if caps.insight then
@@ -362,7 +362,9 @@ function Desktop:showDetail(book)
         UIManager:close(self.detail)
         self.detail = nil
     end
-    BookStore.remember(book)
+    if book.ref and book.ref.source_id ~= "zlib" then
+        BookStore.remember(book)
+    end
     local desk = self
     self.detail = Detail:new{
         book = book,

@@ -254,6 +254,23 @@ local function sourceServiceRows(active_id, plugin)
         end
     end
 
+    if type(source and source.importBookAsync) == "function" then
+        local store_setting = require("zlib.setting")
+        local status, status_on = store_setting.rowStatus()
+        rows[#rows + 1] = function(iw)
+            return SettingRow.build(iw, {
+                kind = "nav",
+                icon = "storefront",
+                title = _("Z-Library 账号"),
+                status = status,
+                status_on = status_on,
+                callback = function()
+                    store_setting.open(plugin)
+                end,
+            })
+        end
+    end
+
     rows[#rows + 1] = function(iw)
         return SettingRow.build(iw, {
             kind = "action",
