@@ -21,6 +21,7 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local TextWidget = require("ui/widget/textwidget")
 local BookInfo = require("ui.components.bookinfo")
 local UI = require("ui.components.bookui")
+local ScrapeUI = require("scrape.ui")
 local _ = require("gettext")
 local Screen = Device.screen
 
@@ -147,6 +148,20 @@ function Detail:rebuild()
                 font_size = btn_font,
                 callback = function()
                     self:onClose()
+                end,
+            },
+            {
+                text = _("刮削"),
+                font_size = btn_font,
+                callback = function()
+                    local b = self.book
+                    if not b or not b.ref then
+                        return
+                    end
+                    local UIManager = require("ui/uimanager")
+                    ScrapeUI.start(b.ref, b.title, function()
+                        UIManager:setDirty(self, "ui")
+                    end)
                 end,
             },
             {
