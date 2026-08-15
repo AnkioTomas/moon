@@ -18,7 +18,7 @@ function Setting.rowTitle()
 end
 
 function Setting.rowStatus()
-    local _, list = feeds()
+    local list = select(2, feeds())
     if #list > 0 then
         return string.format(_("已订阅 %d 个"), #list), true
     end
