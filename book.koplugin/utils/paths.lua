@@ -50,11 +50,8 @@ function P.sanitizeSourceId(id)
     if type(id) ~= "string" or id == "" then
         error("sanitizeSourceId: source_id required")
     end
-    id = id:gsub("[^%w%._%-]", "_")
-    if id == "" then
-        error("sanitizeSourceId: empty after sanitize")
-    end
-    return id
+    -- 非法字符一对一换成 _，长度不变，不可能变空
+    return (id:gsub("[^%w%._%-]", "_"))
 end
 
 --- $DATA/.moon
@@ -96,7 +93,11 @@ end
 ---@param stable_id string
 ---@return string
 function P.slugFor(stable_id)
-    return md5(tostring(stable_id or ""))
+    -- 缺参直接失败：nil/空串会撞到一个固定 slug，多本书共用工作目录
+    if type(stable_id) ~= "string" or stable_id == "" then
+        error("slugFor: stable_id required")
+    end
+    return md5(stable_id)
 end
 
 --- 单书封面缓存：cache/<source>/image/<slug>.png
