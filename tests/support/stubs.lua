@@ -54,6 +54,10 @@ local function installUIManager()
         end
         function UIManager:show(widget)
         end
+        function UIManager:close(widget)
+        end
+        function UIManager:setDirty(widget, refresh)
+        end
         return UIManager
     end
 end

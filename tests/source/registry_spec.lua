@@ -84,11 +84,12 @@ do
     local src, err = Registry.create("local")
     Assert.is_true(src ~= nil, err)
     Assert.eq(src.id, "local")
+    Assert.eq(src.type, "book")
     local caps = src:capabilities()
-    Assert.is_true(caps.whole_book)
     Assert.is_true(caps.scrape)
-    Assert.is_false(caps.stats_import)
-    Assert.is_false(caps.progress_push)
+    Assert.is_nil(caps.whole_book)
+    Assert.is_true(type(src.recentBooksAsync) == "function")
+    Assert.is_true(type(src.coverRequest) == "function")
     Assert.is_false(src:configured())
 end
 
@@ -96,11 +97,15 @@ do
     local src, err = Registry.create("moon")
     Assert.is_true(src ~= nil, err)
     Assert.eq(src.id, "moon")
+    Assert.eq(src.type, "book")
     local caps = src:capabilities()
-    Assert.is_true(caps.whole_book)
     Assert.is_true(caps.insight)
-    Assert.is_false(caps.chapters)
     Assert.is_false(caps.scrape)
+end
+
+do
+    Assert.eq(Registry.meta("wechat").type, "online")
+    Assert.eq(Registry.meta("rss").type, "article")
 end
 
 do

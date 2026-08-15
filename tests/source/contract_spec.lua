@@ -9,12 +9,16 @@ local BookListResult = require("types.book_list")
 do
     local c = SourceCapabilities.defaults()
     Assert.is_false(c.store)
-    Assert.is_false(c.chapters)
     Assert.is_false(c.insight)
-    Assert.is_false(c.stats_import)
-    Assert.is_false(c.whole_book)
     Assert.is_false(c.scrape)
-    Assert.is_nil(c.stats)
+    Assert.is_nil(c.filters)
+    Assert.is_nil(c.recent)
+    Assert.is_nil(c.cover)
+    Assert.is_nil(c.whole_book)
+    Assert.is_nil(c.chapters)
+    Assert.is_nil(c.progress_pull)
+    Assert.is_nil(c.progress_push)
+    Assert.is_nil(c.stats_import)
 end
 
 do

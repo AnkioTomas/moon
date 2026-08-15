@@ -50,9 +50,6 @@ local register_callback
 local cancelled = false
 local api = {
     id = "moon",
-    capabilities = function()
-        return { stats_import = true }
-    end,
     configured = function()
         return true
     end,

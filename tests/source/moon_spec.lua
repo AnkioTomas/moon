@@ -63,6 +63,11 @@ function client:listBooksAsync(query, cb)
     return { cancel = function() end }
 end
 
+function client:filtersAsync(cb)
+    cb(rec.filters_wire, rec.filters_err)
+    return { cancel = function() end }
+end
+
 function client:getProgressAsync(stable_id, cb)
     rec.progress_id = stable_id
     cb(rec.progress_wire, rec.progress_err)
@@ -95,9 +100,9 @@ do
     Assert.eq(rec.query.search, "")
     Assert.eq(rec.query.series, "")
     Assert.eq(rec.query.category, "")
-    Assert.eq(rec.query.favorite, "")
-    Assert.eq(rec.query.finished, "")
-    Assert.eq(rec.query.author, "")
+    Assert.is_nil(rec.query.favorite)
+    Assert.is_nil(rec.query.finished)
+    Assert.is_nil(rec.query.author)
 end
 
 -- listQuery：opts 全字段 → 键名映射（page_size → pageSize）
@@ -114,22 +119,35 @@ do
         search = "科幻",
         series = "s",
         category = "c",
-        favorite = "1",
-        finished = "0",
-        author = "au",
     }, function(r) result = r end)
     Assert.eq(rec.query.page, 3)
     Assert.eq(rec.query.pageSize, 10)
     Assert.eq(rec.query.search, "科幻")
     Assert.eq(rec.query.series, "s")
     Assert.eq(rec.query.category, "c")
-    Assert.eq(rec.query.favorite, "1")
-    Assert.eq(rec.query.finished, "0")
-    Assert.eq(rec.query.author, "au")
     -- wire 经 Mapper.list 映射
     Assert.eq(result.count, 1)
     Assert.eq(result.data[1].ref.stable_id, "a.epub")
     Assert.eq(result.data[1].percent, 42)
+end
+
+-- filtersAsync：服务端字段收口成 category / series。
+do
+    resetRec()
+    rec.filters_wire = {
+        data = {
+            categories = { "小说", "技术" },
+            groupNames = { "第一辑" },
+            authors = { "不应透传" },
+        },
+    }
+    local result
+    src:filtersAsync(function(r) result = r end)
+    Assert.len(result.data.category, 2)
+    Assert.eq(result.data.category[1], "小说")
+    Assert.len(result.data.series, 1)
+    Assert.eq(result.data.series[1], "第一辑")
+    Assert.is_nil(result.data.authors)
 end
 
 -- listLibraryAsync 错误：{ message = ... } 取 message，字符串原样透传
