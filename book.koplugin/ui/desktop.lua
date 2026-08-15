@@ -51,6 +51,25 @@ local Desktop = InputContainer:extend{
     filter = nil,
 }
 
+--- 按数据源能力生成 Desktop 底栏 Tab。
+---@param source table|nil
+---@return table
+local function desktopTabs(source)
+    local tabs = {
+        { id = "home", text = _("首页"), icon = "home" },
+        { id = "library", text = _("图书馆"), icon = "local_library" },
+    }
+    local caps = source and source.capabilities and source:capabilities() or {}
+    if caps.store then
+        table.insert(tabs, { id = "store", text = _("书城"), icon = "storefront" })
+    end
+    if caps.insight then
+        table.insert(tabs, { id = "stats", text = _("统计"), icon = "bar_chart" })
+    end
+    table.insert(tabs, { id = "settings", text = _("设置"), icon = "settings" })
+    return tabs
+end
+
 --- 当前 tab 不在 tabs 列表中则回退 home（换源 / 能力变化后调用）。
 ---@param self table
 local function clampTab(self)
@@ -65,7 +84,7 @@ end
 --- 初始化手势区与默认分页状态，立刻 rebuild。
 function Desktop:init()
     self.filter = self.filter or {}
-    self._tabs = BottomBar.tabs(self.source)
+    self._tabs = desktopTabs(self.source)
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.page = 1
     self.page_size = 12
@@ -140,8 +159,7 @@ end
 ---@return boolean
 function Desktop:onTapBar(_, ges)
     if not ges or not ges.pos then return false end
-    local tabs = BottomBar.tabs(self.source)
-    self._tabs = tabs
+    local tabs = self._tabs or desktopTabs(self.source)
     local bh = UI.barH()
     if ges.pos.y < self.dimen.h - bh then return false end
     local idx = math.floor(ges.pos.x * #tabs / self.dimen.w) + 1
@@ -220,7 +238,7 @@ function Desktop:sourceChanged(source)
     end
     Image.abortPending()
     self.source = source
-    self._tabs = BottomBar.tabs(source)
+    self._tabs = desktopTabs(source)
     clampTab(self)
     self._home_state = nil
     self._home_loaded = false
@@ -267,7 +285,9 @@ function Desktop:rebuild()
         local top = TopBar.build()
         top.overlap_offset = { 0, 0 }
 
-        local bar = BottomBar.build(self)
+        self._tabs = desktopTabs(self.source)
+        clampTab(self)
+        local bar = BottomBar.build(self._tabs, self.tab)
         bar.overlap_offset = { 0, sh - UI.barH() }
 
         local root = OverlapGroup:new{
