@@ -108,7 +108,9 @@ function mapBook(info, row)
     local category = trim(info.category)
     local tags = {}
     if category ~= "" then
-        for p in category:gmatch("[^-／/|、,，]+") do
+        -- 多字节分隔符先归一成逗号：Lua 字符类按字节匹配，直接放类里会切碎 UTF-8
+        category = category:gsub("／", ","):gsub("、", ","):gsub("，", ",")
+        for p in category:gmatch("[^%-,/|]+") do
             local part = p:gsub("^%s+", ""):gsub("%s+$", "")
             if part ~= "" then tags[#tags + 1] = part end
         end

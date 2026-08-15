@@ -71,7 +71,7 @@ local function extractSubjectId(block, url)
     return block:match("sid:%s*(%d+)")
 end
 
---- 解析 subject-cast：作者 / 译者 / 出版社 / 年份
+--- 解析 subject-cast：作者 / [译者 /] 出版社 / 年份或日期 / [价格]
 ---@param cast string|nil
 ---@return string, string, string
 local function parseCast(cast)
@@ -87,13 +87,20 @@ local function parseCast(cast)
         end
     end
     if #parts > 0 then author = parts[1] end
-    if #parts > 2 then publisher = parts[#parts - 1] end
+    -- 真实格式年份段可能是日期（2012-8-1）：认前 4 位数字；出版社取年份前一段
+    local year_idx
     for i = 1, #parts do
-        local y = parts[i]:match("^(%d%d%d%d)$")
+        local y = parts[i]:match("^(%d%d%d%d)$") or parts[i]:match("^(%d%d%d%d)%-")
         if y then
             year = y
+            year_idx = i
             break
         end
+    end
+    if year_idx and year_idx > 2 then
+        publisher = parts[year_idx - 1]
+    elseif not year_idx and #parts > 2 then
+        publisher = parts[#parts - 1]
     end
     return author, publisher, year
 end
