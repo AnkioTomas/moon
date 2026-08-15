@@ -51,7 +51,7 @@ package.preload["book.progress"] = function()
 end
 
 local chapter_state = { active = false }
-package.preload["book.chapter"] = function()
+package.preload["chapters.init"] = function()
     return {
         isActive = function()
             return chapter_state.active
@@ -206,7 +206,7 @@ end
 -- 不卸会污染后续 spec（如 stats/tracker_spec 需要真 stats.tracker）
 for _, name in ipairs({
     "book.store", "stats.tracker", "book.progress",
-    "book.chapter", "chapters.patches", "ui.reader",
+    "chapters.init", "chapters.patches", "ui.reader",
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil

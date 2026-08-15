@@ -71,9 +71,17 @@ end
 
 local function installGettext()
     package.preload["gettext"] = function()
-        return function(s)
-            return s
-        end
+        -- 可索引 callable table：current_lang/translation 供 l10n 模块与测试读写；
+        -- __call 保持恒等（返回源串），避免 en 目录合并后污染其它测试的文案断言
+        local GetText = {
+            current_lang = "C",
+            translation = {},
+        }
+        return setmetatable(GetText, {
+            __call = function(_, s)
+                return s
+            end,
+        })
     end
 end
 

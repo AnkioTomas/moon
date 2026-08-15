@@ -72,6 +72,53 @@ end
 
 local failed = 0
 local passed = 0
+local total_asserts = 0
+
+-- 环境基线：stubs 首次安装后的干净状态。每个 spec 前恢复到基线，
+-- 堵住跨文件泄漏（残留的 package.preload 桩、被替换的 os/io 全局函数等）。
+local function snapshot(t)
+    local s = {}
+    for k, v in pairs(t) do
+        s[k] = v
+    end
+    return s
+end
+
+local base_preload = snapshot(package.preload)
+local base_loaded = snapshot(package.loaded)
+local base_os = snapshot(os)
+local base_io = snapshot(io)
+
+local function restoreTable(t, base)
+    for k in pairs(t) do
+        if base[k] == nil then
+            t[k] = nil
+        end
+    end
+    for k, v in pairs(base) do
+        if t[k] ~= v then
+            t[k] = v
+        end
+    end
+end
+
+local function restoreEnv()
+    restoreTable(package.preload, base_preload)
+    restoreTable(os, base_os)
+    restoreTable(io, base_io)
+    -- 卸载上个 spec 加载的一切模块（ffi/turbo 保留：重新 require 会 ffi.cdef 重复定义）。
+    -- C 模块（libs/* lfs 等）重新 dlopen 无副作用，不保留——上个 spec 可能留了假桩。
+    for k in pairs(package.loaded) do
+        if base_loaded[k] == nil and not (k:match("^ffi") or k:match("^turbo%.")) then
+            package.loaded[k] = nil
+        end
+    end
+    for k, v in pairs(base_loaded) do
+        if package.loaded[k] ~= v then
+            package.loaded[k] = v
+        end
+    end
+end
 
 local function relName(path)
     if ROOT == "." then
@@ -91,44 +138,29 @@ for _, path in ipairs(specs) do
         io.stderr:write("  LOAD FAIL: " .. tostring(err) .. "\n")
         failed = failed + 1
     else
-        -- 保存 FFI/原生模块，避免被测试清理后重新加载导致 FFI cdef 重复定义
-        local saved_ffi = {}
-        for k in pairs(package.loaded) do
-            if k:match("^ffi/") or k:match("^libs/") or k:match("^socket%.") or
-               k:match("^turbo%.") or k:match("^util$") or k:match("^mime$") then
-                saved_ffi[k] = package.loaded[k]
-            end
-        end
-
+        restoreEnv()
         local Stubs = require("support.stubs")
         Stubs.reset()
-        for k in pairs(package.loaded) do
-            if k:match("^book%.") or k:match("^chapters%.") or k:match("^chapters$") or
-               k:match("^source%.") or k:match("^http%.") or
-               k:match("^utils%.") or k:match("^convert%.") or k:match("^stats%.") or
-               k:match("^reader%.") or
-               k:match("^l10n$") or k:match("^book$") then
-                package.loaded[k] = nil
-            end
-        end
-        -- 恢复 FFI/原生模块
-        for k, v in pairs(saved_ffi) do
-            package.loaded[k] = v
-        end
-        require("support.stubs").install()
+        Stubs.install()
 
+        Assert.reset_count()
         local ok, boom = xpcall(function()
             chunk(Assert)
         end, debug.traceback)
         if not ok then
             io.stderr:write("  FAIL\n" .. tostring(boom) .. "\n")
             failed = failed + 1
+        elseif Assert.count == 0 then
+            -- 0 断言 = 假绿（借鉴 koassistant：nil return 被 harness 当 PASS 的教训）
+            io.stderr:write("  FAIL: no assertions (false green)\n")
+            failed = failed + 1
         else
-            io.write("  ok\n")
+            io.write("  ok (" .. Assert.count .. " assertions)\n")
             passed = passed + 1
+            total_asserts = total_asserts + Assert.count
         end
     end
 end
 
-io.write(string.format("\n%d passed, %d failed\n", passed, failed))
+io.write(string.format("\n%d passed, %d failed (%d assertions)\n", passed, failed, total_asserts))
 os.exit(failed == 0 and 0 or 1)
