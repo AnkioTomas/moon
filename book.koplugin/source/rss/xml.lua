@@ -96,7 +96,24 @@ function Xml.parse(raw)
             if not close then return nil, "unterminated doctype" end
             pos = close + 1
         else
-            local close = raw:find(">", lt + 1, true)
+            -- 找标签结束符：引号包裹的属性值内的 > 不算（如 <a title="x>y">）
+            local close
+            local quote
+            local i = lt + 1
+            while i <= #raw do
+                local ch = raw:sub(i, i)
+                if quote then
+                    if ch == quote then
+                        quote = nil
+                    end
+                elseif ch == '"' or ch == "'" then
+                    quote = ch
+                elseif ch == ">" then
+                    close = i
+                    break
+                end
+                i = i + 1
+            end
             if not close then return nil, "unterminated tag" end
             local tag = raw:sub(lt + 1, close - 1)
             if tag:sub(1, 1) == "/" then
