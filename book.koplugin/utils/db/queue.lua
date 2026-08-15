@@ -14,6 +14,7 @@
 --]]
 
 local UIManager = require("ui/uimanager")
+local logger = require("logger")
 
 local Queue = {}
 
@@ -30,10 +31,13 @@ local function flush()
     local ok, err = pcall(item.worker)
     running = false
 
-    if not ok and item.on_failed then
-        item.on_failed(err)
-    elseif ok and item.on_done then
-        item.on_done(nil)
+    -- 回调自身抛错不能卡死队列：隔离之，剩余任务照常调度
+    local cb = ok and item.on_done or item.on_failed
+    if cb then
+        local cb_ok, cb_err = pcall(cb, ok and nil or err)
+        if not cb_ok then
+            logger.warn("book.db queue callback failed", cb_err)
+        end
     end
 
     if #pending > 0 then
