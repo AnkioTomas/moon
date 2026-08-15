@@ -106,10 +106,11 @@ local function restoreEnv()
     restoreTable(package.preload, base_preload)
     restoreTable(os, base_os)
     restoreTable(io, base_io)
-    -- 卸载上个 spec 加载的一切模块（ffi/turbo 保留：重新 require 会 ffi.cdef 重复定义）。
-    -- C 模块（libs/* lfs 等）重新 dlopen 无副作用，不保留——上个 spec 可能留了假桩。
+    -- 卸载上个 spec 加载的一切非基线模块。同名 cdef 重复定义 LuaJIT 是放行的
+    -- （实测 ffi/sha2 重 require 无错），保留例外反而会让假桩（如 spec 桩的
+    -- ffi/util）漏给后续文件。
     for k in pairs(package.loaded) do
-        if base_loaded[k] == nil and not (k:match("^ffi") or k:match("^turbo%.")) then
+        if base_loaded[k] == nil then
             package.loaded[k] = nil
         end
     end

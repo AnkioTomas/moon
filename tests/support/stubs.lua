@@ -146,6 +146,12 @@ function Stubs.install()
     installSocketutil()
     installJson()
     installDataStorage()
+    -- 离线 LuaJIT 无 LUA52COMPAT，缺 table.pack（ffi/util.template 需要）
+    if not table.pack then
+        table.pack = function(...)
+            return { n = select("#", ...), ... }
+        end
+    end
     clearQueue()
 end
 
