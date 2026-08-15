@@ -29,15 +29,19 @@ end
 function Parser.normalizeUrl(raw)
     local value = tostring(raw or ""):match("^%s*(.-)%s*$") or ""
     if value == "" then return nil end
-    if not value:match("^[hH][tT][tT][pP][sS]?://") then
+    -- 先验 scheme 再补 https：顺序反了白名单就是死代码（ftp:// 会被拼成 https://ftp://…）
+    local scheme = value:match("^([%a][%w+%.%-]*)://")
+    if scheme then
+        scheme = string.lower(scheme)
+        if scheme ~= "http" and scheme ~= "https" then return nil end
+    else
         value = "https://" .. value
     end
-    local scheme, host, rest = value:match("^([%a]+)://([^/]+)(.*)$")
-    scheme = scheme and string.lower(scheme)
-    if scheme ~= "http" and scheme ~= "https" then return nil end
+    local _, host, rest = value:match("^([%a]+)://([^/]+)(.*)$")
+    if not host then return nil end
     rest = rest == "" and "/" or rest
     if rest ~= "/" then rest = rest:gsub("/+$", "") end
-    return string.lower(scheme) .. "://" .. string.lower(host) .. rest
+    return (scheme or "https") .. "://" .. string.lower(host) .. rest
 end
 
 --- 相对 URL → 绝对 URL。
