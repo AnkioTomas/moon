@@ -33,6 +33,7 @@ local T = require("ffi/util").template
 ---@field pingAsync fun(self: WebdavClient, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }
 ---@field listAsync fun(self: WebdavClient, path: string|nil, cb: fun(entries: WebdavEntry[]|nil, err: string|nil)): { cancel: fun() }
 ---@field getAsync fun(self: WebdavClient, path: string, dest: string, opts: table|nil, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }
+---@field putFileAsync fun(self: WebdavClient, path: string, local_path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
 
 local Webdav = {}
 Webdav.__index = Webdav
@@ -249,6 +250,45 @@ function Webdav:getAsync(path, dest, opts, cb)
             cb(nil, statusErr(res.code, body_msg))
         else
             cb(nil, err)
+        end
+    end)
+end
+
+--- 上传本地文件到 WebDAV。
+---@param path string
+---@param local_path string
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Webdav:putFileAsync(path, local_path, cb)
+    local file, open_err = io.open(local_path, "rb")
+    if not file then
+        cb(nil, open_err or _("无法读取待上传文件"))
+        return nil
+    end
+    local body = file:read("*a")
+    file:close()
+    if type(body) ~= "string" or body == "" then
+        cb(nil, _("待上传文件为空"))
+        return nil
+    end
+    return Request.request({
+        url = self:join(path, false),
+        method = "PUT",
+        headers = Header.forRequest({
+            ["Content-Type"] = "application/octet-stream",
+            ["Content-Length"] = tostring(#body),
+        }),
+        body = body,
+        auth_username = self.username,
+        auth_password = self.password,
+        timeout = 300,
+    }, function(res, err)
+        if err then
+            cb(nil, err)
+        elseif not Request.ok(res and res.code) then
+            cb(nil, statusErr(res and res.code))
+        else
+            cb(true)
         end
     end)
 end
