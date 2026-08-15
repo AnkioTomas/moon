@@ -117,4 +117,17 @@ function Source:materializeWholeAsync(ref, temp_path, on_progress, cb)
     end)
 end
 
+--- 把书城下载文件上传到 WebDAV 根目录。
+---@param local_path string
+---@param filename string
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return table|nil
+function Source:importBookAsync(local_path, filename, cb)
+    if not self._client:configured() then
+        cb(nil, _("未配置 WebDAV 地址或用户名"))
+        return nil
+    end
+    return self._client:uploadAsync(filename, local_path, cb)
+end
+
 return WebDAV
