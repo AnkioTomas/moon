@@ -337,4 +337,7 @@ return {
     ["网络请求失败"] = "Network request failed",
     ["响应为空"] = "Response is empty",
     ["无搜索结果"] = "No search results",
+    ["%1分钟"] = "%1 min",
+    ["%1小时%2分钟"] = "%1 h %2 min",
+    ["无封面"] = "No cover",
 }
