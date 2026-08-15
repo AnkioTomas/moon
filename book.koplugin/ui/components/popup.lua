@@ -1,36 +1,49 @@
 --[[--
 弹出层选项。
 
-  Popup.list   — 全屏列表（Menu，自带 Page of；支持 icon / 纯 image）
+  Popup.list   — 全屏列表（Menu，自带 Page of；支持单选/多选、icon / 纯 image）
   Popup.sheet  — 居中动作表（ButtonDialog，适合少量动作）
   Popup.spin   — 数值增减（SpinWidget）
 
 布局：
 
-  list（全屏 Menu）              sheet（居中）           spin
-  +------------------+           +-------------+         +-------------+
-  | title            |           |   title     |         |   title     |
-  |------------------|           |-------------|         |  [-] N [+]  |
-  | [i] item     ›   |           |  action 1   |         |  cancel  ok |
-  | [i] item     ›   |           |  action 2   |         +-------------+
-  | …                |           |  cancel     |
-  | Page N of M      |           +-------------+
-  +------------------+
+  list 单选（全屏 Menu）         list 多选                  sheet（居中）           spin
+  +------------------+          +------------------+       +-------------+         +-------------+
+  | title            |          | title            |       |   title     |         |   title     |
+  | subtitle         |          | subtitle         |       |-------------|         |  [-] N [+]  |
+  |------------------|          |------------------|       |  action 1   |         |  cancel  ok |
+  | [i] item     ›   |          | [✓] item     ›   |       |  action 2   |         +-------------+
+  | [i] item（加粗） |          | [▢] item     ›   |       |  cancel     |
+  | …                |          | …                |       +-------------+
+  | Page N of M      |          | Page N of M      |
+  +------------------+          +------------------+
 
 items 统一形状：
-  { text = "...", callback = fn }           -- 点按执行并关闭
-  { text = "...", value = x }               -- 配合 on_select(value, item)
+  { text = "...", callback = fn }           -- 点按执行并关闭（多选时不关闭，回调拿到 checked）
+  { text = "...", value = x }               -- 配合 on_select(value, item) / on_toggle
   { text = "...", icon = "home" }           -- Material Icons 名（字体图标）
   { text = "...", image = "https://..." }   -- 预览图（可非正方形，见 image_w/h）
   { text = "...", widget = w, widget_w = n } -- 自定义 state 控件（字体预览等）
   { image = "https://...", image_only = true } -- 文案替换为图
-  { text = "...", enabled = false }         -- 不可点
+  { text = "...", enabled = false }         -- 不可点（置灰；多选时勾选框同样置灰）
+  { text = "...", checked = true }          -- 选中态：单选=当前项（加粗+跳页），多选=已勾选
+  { text = "...", mandatory = "..." }       -- 右侧弱化小字（当前值/状态提示）
+  { text = "...", bold = true, dim = true } -- 加粗 / 置灰透传
   { text = "...", separator = true }        -- sheet 里作为分隔（空行）
+
+list 选择语义：
+  select_mode = "single"（默认）点按即关闭；opts.current = value 或项上 checked=true
+    标记当前项——Menu 自动跳到所在页并加粗。
+  select_mode = "multi" 点按只切换勾选、不关闭；on_toggle(value, checked, item, selected)
+    每次切换触发（selected 为当前全部勾选值列表）；最终结果在 close_callback 里读取。
 
 @module koplugin.book.ui.components.popup
 --]]
 
 local ButtonDialog = require("ui/widget/buttondialog")
+local CheckMark = require("ui/widget/checkmark")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local Menu = require("ui/widget/menu")
 local SpinWidget = require("ui/widget/spinwidget")
 local UIManager = require("ui/uimanager")
@@ -40,18 +53,83 @@ local Icon = require("ui.components.icon")
 
 local Popup = {}
 
---- 把调用方 items 规范成 Menu/ButtonDialog 可用结构。
+--- 勾选框与 state 控件之间的间距。
+---@return number
+local function checkGap()
+    return UI.sz(6)
+end
+
+--- 把调用方 items 规范成 Menu 可用结构。
+--- ctx: { close, refresh, on_select, on_toggle }；opts 同 Popup.list。
 ---@param items table|nil
----@param close_fn fun()
----@param on_select fun(value: any, item: table)|nil
+---@param ctx table
 ---@param opts table|nil
----@return table, number
-local function normalizeItems(items, close_fn, on_select, opts)
+---@return table out, number max_state_w, number|nil current_idx
+local function normalizeItems(items, ctx, opts)
     opts = opts or {}
     local icon_sz = opts.icon_size or UI.iconSz()
     local image_sz = opts.image_size or UI.sz(40)
+    local multi = opts.select_mode == "multi"
     local out = {}
+    local raws = {} -- 可选中的原始项（selectedValues 的数据源）
     local max_state_w = 0
+    local current_idx
+
+    --- 当前全部勾选值（multi 的 on_toggle 第 4 参）。
+    ---@return table
+    local function selectedValues()
+        local t = {}
+        for _, r in ipairs(raws) do
+            if r.checked and r.value ~= nil then
+                t[#t + 1] = r.value
+            end
+        end
+        return t
+    end
+
+    --- 构造 state 控件：multi 前置勾选框，可与 icon/image/widget 并存。
+    ---@param raw table
+    ---@param image_only boolean
+    ---@return table|nil state, number state_w
+    local function buildState(raw, image_only)
+        local inner, inner_w
+        if raw.widget then
+            inner = raw.widget
+            inner_w = tonumber(raw.widget_w) or (raw.widget.getSize and raw.widget:getSize().w) or image_sz
+        elseif raw.image then
+            local iw = tonumber(raw.image_w) or (image_only and (opts.image_w or image_sz)) or icon_sz
+            local ih = tonumber(raw.image_h) or (image_only and (opts.image_h or image_sz)) or icon_sz
+            inner = Image.widget{
+                src = raw.image,
+                width = iw,
+                height = ih,
+                alpha = raw.alpha ~= false,
+                headers = raw.headers or opts.headers,
+                fallback = raw.fallback,
+            }
+            inner_w = inner and iw or 0
+        elseif raw.icon then
+            inner = Icon.widget{ name = raw.icon }
+            inner_w = inner and icon_sz or 0
+        end
+        if not multi then
+            return inner, inner_w or 0
+        end
+        local cm = CheckMark:new{
+            checked = raw.checked == true,
+            enabled = raw.enabled ~= false,
+        }
+        local cm_w = cm:getSize().w
+        if not inner then
+            return cm, cm_w
+        end
+        return HorizontalGroup:new{
+            align = "center",
+            cm,
+            HorizontalSpan:new{ width = checkGap() },
+            inner,
+        }, cm_w + checkGap() + inner_w
+    end
 
     for _, raw in ipairs(items or {}) do
         if type(raw) == "string" then
@@ -66,55 +144,61 @@ local function normalizeItems(items, close_fn, on_select, opts)
             local item = {
                 text = image_only and "" or (raw.text or tostring(raw.value or "")),
                 select_enabled = raw.enabled ~= false,
+                bold = raw.bold,
+                dim = raw.dim or raw.enabled == false,
+                mandatory = raw.mandatory,
             }
+            raws[#raws + 1] = raw
+            local state, state_w = buildState(raw, image_only)
+            item.state = state
+            max_state_w = math.max(max_state_w, state_w or 0)
+
             if raw.enabled == false then
                 item.enabled = false
                 item.select_enabled = false
             else
                 local value = raw.value
                 local user_cb = raw.callback
-                item.callback = function()
-                    close_fn()
-                    if user_cb then
-                        user_cb()
-                    elseif on_select then
-                        on_select(value, raw)
+                if multi then
+                    -- 多选：点按只切换勾选并重绘当前页，不关闭
+                    item.callback = function()
+                        raw.checked = not raw.checked
+                        item.state = buildState(raw, image_only)
+                        ctx.refresh()
+                        if user_cb then
+                            user_cb(raw.checked, raw)
+                        end
+                        if ctx.on_toggle then
+                            ctx.on_toggle(value, raw.checked, raw, selectedValues())
+                        end
+                    end
+                else
+                    item.callback = function()
+                        ctx.close()
+                        if user_cb then
+                            user_cb()
+                        elseif ctx.on_select then
+                            ctx.on_select(value, raw)
+                        end
                     end
                 end
             end
-            if raw.widget then
-                item.state = raw.widget
-                local ww = tonumber(raw.widget_w) or (raw.widget.getSize and raw.widget:getSize().w) or image_sz
-                max_state_w = math.max(max_state_w, ww)
-            elseif raw.image then
-                local iw = tonumber(raw.image_w) or (image_only and (opts.image_w or image_sz)) or icon_sz
-                local ih = tonumber(raw.image_h) or (image_only and (opts.image_h or image_sz)) or icon_sz
-                local img = Image.widget{
-                    src = raw.image,
-                    width = iw,
-                    height = ih,
-                    alpha = raw.alpha ~= false,
-                    headers = raw.headers or opts.headers,
-                    fallback = raw.fallback,
-                }
-                if img then
-                    item.state = img
-                    max_state_w = math.max(max_state_w, iw)
-                end
-            elseif raw.icon then
-                local icon = Icon.widget{ name = raw.icon }
-                if icon then
-                    item.state = icon
-                    max_state_w = math.max(max_state_w, icon_sz)
+            table.insert(out, item)
+            -- 单选当前项：显式 current 值优先，其次项上 checked=true
+            if not multi and not current_idx then
+                if (opts.current ~= nil and raw.value ~= nil and raw.value == opts.current)
+                    or raw.checked == true then
+                    current_idx = #out
                 end
             end
-            table.insert(out, item)
         end
     end
-    return out, max_state_w
+    return out, max_state_w, current_idx
 end
 
 --- 全屏选项列表（翻页，不滚动）。
+--- opts: title / subtitle / items / select_mode("single"|"multi") / current
+---       / on_select / on_toggle / close_callback / icon_size / image_size …
 ---@param opts table|nil
 ---@return table
 function Popup.list(opts)
@@ -127,22 +211,39 @@ function Popup.list(opts)
             holder.menu = nil
         end
     end
+    --- 重绘当前页（多选勾选切换用）。
+    local function refresh()
+        if holder.menu then
+            holder.menu:updateItems(nil, true)
+        end
+    end
 
-    local items, state_w
+    local items, state_w, current_idx
     if opts.raw then
         items = opts.items or {}
         state_w = opts.state_w or 0
+        current_idx = opts.current_idx
     else
-        items, state_w = normalizeItems(opts.items, close, opts.on_select, opts)
+        items, state_w, current_idx = normalizeItems(opts.items, {
+            close = close,
+            refresh = refresh,
+            on_select = opts.on_select,
+            on_toggle = opts.on_toggle,
+        }, opts)
+    end
+    if current_idx then
+        items.current = current_idx -- Menu init 自动跳到该页并把当前项加粗
     end
 
     local menu = Menu:new{
         title = opts.title or "",
+        subtitle = opts.subtitle,
         item_table = items,
         is_borderless = true,
         is_popout = false,
         covers_fullscreen = true,
         items_font_size = UI.menuFontSize(),
+        title_shrink_font_to_fit = true,
         state_w = (state_w and state_w > 0) and state_w or nil,
         close_callback = function()
             holder.menu = nil
@@ -260,6 +361,8 @@ function Popup.spin(opts)
 end
 
 --- 更新已打开的 list 菜单内容（异步加载筛选结果时用）。
+--- 不关闭菜单；opts 可带 select_mode / on_toggle / current / subtitle，
+--- 单选给了 current 时会跳到当前项所在页。
 ---@param menu table|nil
 ---@param title string|nil
 ---@param items table|nil
@@ -269,13 +372,24 @@ function Popup.setListItems(menu, title, items, on_select, opts)
     if not menu then
         return
     end
-    -- setListItems 不应关闭菜单，只需更新内容
-    local normalized, state_w = normalizeItems(items, function() end, on_select, opts)
+    opts = opts or {}
+    -- setListItems 不应关闭菜单，只需更新内容（选中不关闭是既有行为）
+    local normalized, state_w, current_idx = normalizeItems(items, {
+        close = function() end,
+        refresh = function()
+            menu:updateItems(nil, true)
+        end,
+        on_select = on_select,
+        on_toggle = opts.on_toggle,
+    }, opts)
+    if current_idx then
+        normalized.current = current_idx
+    end
     if state_w and state_w > 0 then
         menu.state_w = state_w
     end
     if menu.switchItemTable then
-        menu:switchItemTable(title or menu.title, normalized)
+        menu:switchItemTable(title or menu.title, normalized, current_idx, nil, opts.subtitle)
         UIManager:setDirty(menu, "ui")
     end
 end
