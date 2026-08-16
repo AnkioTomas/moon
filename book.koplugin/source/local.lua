@@ -7,7 +7,6 @@
 local SourceBase = require("source.base")
 local Client = require("source.local.client")
 local Mapper = require("source.local.mapper")
-local Text = require("utils.text")
 local _ = require("gettext")
 
 local Local = {}
@@ -114,66 +113,14 @@ function Source:readingInsightAsync(cb)
     end)
 end
 
---- 把书城下载文件移入本地书库根目录，并立即重扫。
+
+--- 把书城下载文件移入本地书库根目录，并单本入库（不重扫）。
 ---@param temp_path string
 ---@param filename string
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return table|nil
 function Source:importBookAsync(temp_path, filename, cb)
-    local valid, path_err = self._client:validatePath()
-    if not valid then
-        cb(nil, path_err)
-        return nil
-    end
-    local root = Text.rtrimSlashes(self.cfg.path)
-    filename = tostring(filename or ""):gsub("[/\\]", "_")
-    if filename == "" then
-        cb(nil, _("无效文件名"))
-        return nil
-    end
-    local lfs = require("libs/libkoreader-lfs")
-    local stem, ext = filename:match("^(.*)(%.[^.]*)$")
-    stem, ext = stem or filename, ext or ""
-    local target, n = root .. "/" .. filename, 2
-    while lfs.attributes(target) do
-        target = string.format("%s/%s (%d)%s", root, stem, n, ext)
-        n = n + 1
-    end
-    local moved = os.rename(temp_path, target)
-    if not moved then
-        local input, copy_err = io.open(temp_path, "rb")
-        local output
-        if input then
-            output, copy_err = io.open(target, "wb")
-        end
-        if not input or not output then
-            if input then input:close() end
-            pcall(os.remove, target)
-            cb(nil, tostring(copy_err))
-            return nil
-        end
-        while true do
-            local chunk = input:read(64 * 1024)
-            if not chunk then break end
-            local written, write_err = output:write(chunk)
-            if not written then
-                input:close()
-                output:close()
-                pcall(os.remove, target)
-                cb(nil, tostring(write_err))
-                return nil
-            end
-        end
-        input:close()
-        output:close()
-    end
-    return self._client:listAsync({ force = true, page = 1, page_size = 1 }, function(_, _, err)
-        if err then
-            cb(nil, err)
-        else
-            cb(true)
-        end
-    end)
+    return self._client:importAsync(temp_path, filename, cb)
 end
 
 --- 插件生命周期事件：桌面打开时自动扫描（节流在 client 内）。

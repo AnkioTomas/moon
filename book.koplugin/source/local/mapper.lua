@@ -140,28 +140,4 @@ function Mapper.insight(summary, daily, daily_books)
     }
 end
 
---- 由 BookRef 构造详情：优先 books 表缓存（含介绍），否则文件名。
----@param ref BookRef
----@return BookDetail
-function Mapper.detailFromRef(ref)
-    local cached = require("utils.db.book").get(ref.source_id, ref.stable_id)
-    if cached and type(cached.title) == "string" and cached.title ~= "" then
-        return {
-            ref = ref,
-            title = cached.title,
-            authors = cached.authors,
-            intro = cached.intro,
-            category = cached.category,
-            percent = 0,
-        }
-    end
-    local title = ref.stable_id:match("([^/]+)$") or ref.stable_id
-    title = title:gsub("%.[^.]+$", "")
-    return {
-        ref = ref,
-        title = title,
-        percent = 0,
-    }
-end
-
 return Mapper
