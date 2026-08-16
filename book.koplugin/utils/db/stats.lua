@@ -118,6 +118,64 @@ function StatsDB.summaryBySource(source_id)
     }
 end
 
+--- 汇总单本书阅读统计：总时长/已读页数/上次阅读时间（详情页用）。
+--- 注意：远端源统计上报成功即删，这里只剩未上报部分；本地源完整保留。
+---@param source_id string
+---@param stable_id string
+---@return { total_seconds: number, pages: number, last_read: number }
+function StatsDB.summaryByBook(source_id, stable_id)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
+        return { total_seconds = 0, pages = 0, last_read = 0 }
+    end
+    Base.ensure()
+    local total_seconds, pages, last_read = Base.rowexec(
+        [[SELECT COALESCE(SUM(duration),0), COUNT(*), COALESCE(MAX(start_time),0)
+          FROM reading_stats WHERE source_id=? AND stable_id=?;]],
+        source_id,
+        stable_id
+    )
+    return {
+        total_seconds = tonumber(total_seconds) or 0,
+        pages = tonumber(pages) or 0,
+        last_read = tonumber(last_read) or 0,
+    }
+end
+
+--- 单本书按天聚合（详情页「最近几天」卡片用，最近在前）。
+--- 注意：远端源统计上报成功即删，这里只剩未上报部分；本地源完整保留。
+---@param source_id string
+---@param stable_id string
+---@param limit number|nil 最多返回天数，默认 5
+---@return table[] rows { ymd, seconds, pages }（日期倒序）
+function StatsDB.dailyByBook(source_id, stable_id, limit)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
+        return {}
+    end
+    Base.ensure()
+    local result, nrows = Base.query(
+        [[SELECT date(start_time,'unixepoch','localtime') AS day,
+                 SUM(duration), COUNT(*)
+          FROM reading_stats WHERE source_id=? AND stable_id=?
+          GROUP BY day ORDER BY day DESC LIMIT ?;]],
+        source_id,
+        stable_id,
+        tonumber(limit) or 5
+    )
+    local rows = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            rows[#rows + 1] = {
+                ymd = result[1][i],
+                seconds = tonumber(result[2][i]) or 0,
+                pages = tonumber(result[3][i]) or 0,
+            }
+        end
+    end
+    return rows
+end
+
 --- 按天聚合某源阅读统计（本地洞察日历用）。
 ---@param source_id string
 ---@return table[] rows { ymd, seconds, pages }（按日期升序）
