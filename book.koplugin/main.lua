@@ -45,6 +45,8 @@ function BookPlugin:init()
     end
     Host.attach(self)
     require("lockscreen.init").bootstrap()
+    require("remote.init").bootstrap()
+    require("pinyin.init").bootstrap()
     if self.ui and self.ui.document then
         self:emitToSource("reader_open")
     end
@@ -103,17 +105,25 @@ function BookPlugin:onStartOfBook()
     return require("ui.reader.session").onStartOfBook()
 end
 
---- 休眠前：有打开文档时推进度 / 结清统计并通知源
+--- 休眠前：有打开文档时推进度 / 结清统计并通知源；远程传书停服（resume 恢复）
 ---@return nil
 function BookPlugin:onSuspend()
     require("ui.reader.session").onSuspend(self)
+    require("remote.init").onSuspend()
 end
 
---- 唤醒：恢复阅读统计计时；按日刷新摸鱼日报（供下次锁屏）
+--- 唤醒：恢复阅读统计计时；按日刷新摸鱼日报（供下次锁屏）；恢复远程传书
 ---@return nil
 function BookPlugin:onResume()
     require("ui.reader.session").onResume(self)
     require("lockscreen.init").refreshInBackground()
+    require("remote.init").onResume()
+end
+
+--- 退出：停远程传书服务
+---@return nil
+function BookPlugin:onExit()
+    require("remote.init").onExit()
 end
 
 --- 网络恢复：后台补齐或按日刷新锁屏图。
