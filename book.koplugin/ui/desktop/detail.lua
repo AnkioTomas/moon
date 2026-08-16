@@ -268,7 +268,9 @@ end
 
 --- 刮削/编辑结束后重读 books 行并重绘：元数据与封面都只在 rebuild 时取，
 --- 光 setDirty 只会把旧数据再画一遍。
+--- 走到这说明底层数据已变，打脏标记，关闭详情时桌面要清缓存重建而不是纯重绘。
 function Detail:reload()
+    self._dirty = true
     local ref = self.book.ref
     local row
     require("utils.db.queue").run(function()
