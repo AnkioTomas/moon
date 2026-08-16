@@ -139,12 +139,15 @@ function BookDB.getByMd5(source_id, md5)
 end
 
 --- 改名/移动：把某本书的 stable_id 换成新值（本地源文件路径变化，身份仍由 md5 认定）。
+--- category/series 由文件所在目录派生，随新位置一并刷新（传 nil 即清除）。
 --- 同步改写 opens / reading_stats / pending_progress 里对旧 stable_id 的引用。
 ---@param source_id string
 ---@param old_stable_id string
 ---@param new_stable_id string
+---@param category string|nil
+---@param series string|nil
 ---@return boolean
-function BookDB.renameStableId(source_id, old_stable_id, new_stable_id)
+function BookDB.renameStableId(source_id, old_stable_id, new_stable_id, category, series)
     source_id = Base.requireSourceId(source_id)
     if not source_id then
         return false
@@ -164,8 +167,8 @@ function BookDB.renameStableId(source_id, old_stable_id, new_stable_id)
         return false
     end
     local ok = Base.exec(
-        [[UPDATE books SET stable_id=? WHERE source_id=? AND stable_id=?;]],
-        new_stable_id, source_id, old_stable_id
+        [[UPDATE books SET stable_id=?, category=?, series=? WHERE source_id=? AND stable_id=?;]],
+        new_stable_id, category, series, source_id, old_stable_id
     ) and Base.exec(
         [[UPDATE opens SET stable_id=? WHERE source_id=? AND stable_id=?;]],
         new_stable_id, source_id, old_stable_id

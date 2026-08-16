@@ -4,14 +4,15 @@ local Assert = require("support.assert")
 local Stubs = require("support.stubs")
 
 -- 虚拟目录树：.moon（插件配置/缓存）与 .hidden 都不该被扫进书库
--- sub/deep 是第 3 层，按约定不识别；bad.epub 模拟引擎解析失败
+-- sub 是第 2 层（分类）；sub/deep 是第 3 层（系列）；x4 是第 4 层，按约定不识别；bad.epub 模拟引擎解析失败
 local TREE = {
     ["/books"] = { "a.epub", ".moon", ".hidden", "sub", "note.md", "old.cbr", "x.azw3" },
     ["/books/.moon"] = { "cache" },
     ["/books/.moon/cache"] = { "cached.epub" },
     ["/books/.hidden"] = { "b.epub" },
     ["/books/sub"] = { "c.pdf", "d.djvu", "deep", "bad.epub" },
-    ["/books/sub/deep"] = { "e.epub" },
+    ["/books/sub/deep"] = { "e.epub", "x4" },
+    ["/books/sub/deep/x4"] = { "f.epub" },
 }
 local DIRS = {
     ["/books"] = true,
@@ -20,6 +21,7 @@ local DIRS = {
     ["/books/.hidden"] = true,
     ["/books/sub"] = true,
     ["/books/sub/deep"] = true,
+    ["/books/sub/deep/x4"] = true,
 }
 
 local dirs_scanned = {}
@@ -197,12 +199,14 @@ package.preload["utils.db.book"] = function()
             end
             return nil
         end,
-        renameStableId = function(source_id, old_stable_id, new_stable_id)
+        renameStableId = function(source_id, old_stable_id, new_stable_id, category, series)
             renames[#renames + 1] = { source_id, old_stable_id, new_stable_id }
             local row = db_rows[rowKey(source_id, old_stable_id)]
             if row then
                 db_rows[rowKey(source_id, old_stable_id)] = nil
                 row.stable_id = new_stable_id
+                row.category = category
+                row.series = series
                 db_rows[rowKey(source_id, new_stable_id)] = row
             end
             return true
@@ -413,23 +417,30 @@ do
     end)
     Stubs.flush()
     Assert.is_nil(err)
-    -- 白名单内 5 本：a.epub / note.md / c.pdf / d.djvu / bad.epub
-    Assert.eq(count, 5)
-    Assert.len(rows, 5)
+    -- 白名单内 6 本：a.epub / note.md / c.pdf / d.djvu / bad.epub / e.epub（第 3 层）
+    Assert.eq(count, 6)
+    Assert.len(rows, 6)
     Assert.is_true(#dirs_scanned > 0)
-    -- 第 3 层不识别
-    Assert.is_nil(db_rows[rowKey("local", "/books/sub/deep/e.epub")])
-    Assert.is_false(hasValue(dirs_scanned, "/books/sub/deep"))
+    -- 第 4 层不识别
+    Assert.is_nil(db_rows[rowKey("local", "/books/sub/deep/x4/f.epub")])
+    Assert.is_false(hasValue(dirs_scanned, "/books/sub/deep/x4"))
     -- 白名单外与隐藏项不入库
     Assert.is_nil(db_rows[rowKey("local", "/books/old.cbr")])
     Assert.is_nil(db_rows[rowKey("local", "/books/.hidden/b.epub")])
-    -- 解析成功的 4 本带元数据；分类 = 一级子目录名
+    -- 解析成功的 5 本带元数据；第 1 层无分类，第 2 层分类 = 一级子目录名
     local a = db_rows[rowKey("local", "/books/a.epub")]
     Assert.eq(a.title, "T:/books/a.epub")
     Assert.eq(a.authors, "A:/books/a.epub")
     Assert.is_nil(a.category)
+    Assert.is_nil(a.series)
     local cpdf = db_rows[rowKey("local", "/books/sub/c.pdf")]
     Assert.eq(cpdf.category, "sub")
+    Assert.is_nil(cpdf.series)
+    -- 第 3 层：category 继承一级目录，series = 二级子目录名
+    local e = db_rows[rowKey("local", "/books/sub/deep/e.epub")]
+    Assert.not_nil(e)
+    Assert.eq(e.category, "sub")
+    Assert.eq(e.series, "deep")
     -- 引擎解析失败（bad.epub）回退文件名入库，不丢书
     local bad = db_rows[rowKey("local", "/books/sub/bad.epub")]
     Assert.not_nil(bad)
@@ -438,8 +449,8 @@ do
     Assert.is_true(hasValue(removed, "/books/gone.epub"))
     Assert.is_nil(db_rows[rowKey("local", "/books/gone.epub")])
     Assert.not_nil(db_rows[rowKey("local", "/books/a.epub")])
-    -- 封面：解析成功的 4 本都尝试提取（bad.epub 无引擎不提取）
-    Assert.len(covers_saved, 4)
+    -- 封面：解析成功的 5 本都尝试提取（bad.epub 无引擎不提取）
+    Assert.len(covers_saved, 5)
 end
 
 -- ── 改名识别：新路径按内容 md5 命中旧行时原地改 stable_id，不当新书插入 ──────
@@ -452,12 +463,15 @@ do
     -- 模拟扫描发现同 md5 的新路径（partialMD5 在此测试环境恒为 nil，直接调用 DB 层验证原地改名的效果）
     local by_md5 = BookDB.getByMd5("local", "digest-a")
     Assert.not_nil(by_md5)
-    BookDB.renameStableId("local", by_md5.stable_id, "/books/new_name.epub")
+    -- 文件移进 sub/deep：category/series 由新位置派生，随 stable_id 一并刷新
+    BookDB.renameStableId("local", by_md5.stable_id, "/books/sub/deep/new_name.epub", "sub", "deep")
     Assert.is_nil(db_rows[rowKey("local", "/books/old_name.epub")])
-    local renamed = db_rows[rowKey("local", "/books/new_name.epub")]
+    local renamed = db_rows[rowKey("local", "/books/sub/deep/new_name.epub")]
     Assert.not_nil(renamed)
     Assert.eq(renamed.title, "已有元数据")
     Assert.eq(renamed.md5, "digest-a")
+    Assert.eq(renamed.category, "sub")
+    Assert.eq(renamed.series, "deep")
     Assert.eq(#renames, 1)
 end
 
@@ -467,7 +481,7 @@ do
     local c = Client.new({ path = "/books" })
     c:listAsync({ force = true }, function() end)
     Stubs.flush()
-    Assert.len(opened, 4)
+    Assert.len(opened, 5)
 
     opened = {}
     upserts = {}
@@ -485,7 +499,7 @@ do
         rows = r
     end)
     Stubs.flush()
-    Assert.len(rows, 5)
+    Assert.len(rows, 6)
     Assert.len(dirs_scanned, 0)
 end
 
