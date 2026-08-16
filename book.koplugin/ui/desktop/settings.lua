@@ -40,6 +40,7 @@ local SettingRow = require("ui.components.settingrow")
 local FontPicker = require("ui.components.fontpicker")
 local MoonSettings = require("utils.settings")
 local MoonFont = require("utils.font")
+local LockScreen = require("lockscreen.init")
 local SourceRegistry = require("source.registry")
 local Cache = require("book.cache")
 local Host = require("host")
@@ -406,6 +407,44 @@ local function sourcesRows(desktop, plugin, active_id, active_name)
     return rows
 end
 
+--- 弹出锁屏显示单选。
+---@param desktop table
+---@param current string
+local function pickLockScreen(desktop, current)
+    Popup.list{
+        title = _("锁屏显示"),
+        current = current,
+        items = {
+            { text = _("跟随 KOReader"), value = LockScreen.MODE_KO },
+            { text = _("摸鱼日报"), value = LockScreen.MODE_MYRL },
+        },
+        on_select = function(mode)
+            if not mode or mode == current then
+                return
+            end
+            -- 先落盘：联网失败也要保住用户的选择，之后自动补下
+            LockScreen.setMode(mode)
+            desktop:rebuild()
+            if mode ~= LockScreen.MODE_MYRL then
+                return
+            end
+            NetworkMgr:runWhenOnline(function()
+                UIManager:show(InfoMessage:new{
+                    text = _("正在下载锁屏图…"),
+                    timeout = 2,
+                })
+                LockScreen.refresh(function(ok, err)
+                    UIManager:show(InfoMessage:new{
+                        text = ok and _("已设为摸鱼日报")
+                            or T(_("下载失败: %1"), tostring(err or "")),
+                        timeout = 2,
+                    })
+                end)
+            end)
+        end,
+    }
+end
+
 --- 显示子页行。
 ---@param desktop table
 ---@param font_name string
@@ -414,6 +453,7 @@ end
 ---@param open_on boolean
 ---@return table
 local function displayRows(desktop, font_name, scale, grid_max_cols, open_on)
+    local lock_mode = LockScreen.mode()
     return {
         function(iw)
             return SettingRow.build(iw, {
@@ -482,6 +522,18 @@ local function displayRows(desktop, font_name, scale, grid_max_cols, open_on)
                             desktop:rebuild()
                         end,
                     }
+                end,
+            })
+        end,
+        function(iw)
+            return SettingRow.build(iw, {
+                kind = "nav",
+                icon = "wallpaper",
+                title = _("锁屏显示"),
+                status = LockScreen.label(lock_mode),
+                status_on = lock_mode == LockScreen.MODE_MYRL,
+                callback = function()
+                    pickLockScreen(desktop, lock_mode)
                 end,
             })
         end,

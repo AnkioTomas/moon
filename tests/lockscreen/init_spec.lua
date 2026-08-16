@@ -79,12 +79,14 @@ local common = MoonSettings.get()
 local prev_lock = common.lock_screen
 local prev_type = common.lock_screen_prev_type
 local prev_cover = common.lock_screen_prev_cover
+local prev_show_message = common.lock_screen_prev_show_message
 local prev_day = common.lock_screen_myrl_day
 
 local function cleanup()
     common.lock_screen = prev_lock
     common.lock_screen_prev_type = prev_type
     common.lock_screen_prev_cover = prev_cover
+    common.lock_screen_prev_show_message = prev_show_message
     common.lock_screen_myrl_day = prev_day
     MoonSettings.save()
     pcall(os.remove, LockScreen.imagePath())
@@ -102,9 +104,10 @@ local ok_run, err_run = pcall(function()
     Assert.eq(LockScreen.mode(), LockScreen.MODE_KO)
     Assert.eq(LockScreen.label(), "跟随 KOReader")
 
-    -- 用户原锁屏
+    -- 用户原锁屏（开着「Sleeping」提示文字）
     saved.screensaver_type = "cover"
     saved.screensaver_document_cover = "/old/cover.png"
+    saved.screensaver_show_message = true
 
     LockScreen.setMode(LockScreen.MODE_MYRL)
     -- 模式落盘不依赖网络
@@ -120,6 +123,8 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(ok_dl)
     Assert.eq(saved.screensaver_type, "document_cover")
     Assert.eq(saved.screensaver_document_cover, LockScreen.imagePath())
+    -- 接管时关掉 KOReader 自带锁屏提示
+    Assert.is_false(saved.screensaver_show_message)
     Assert.is_true(last_download.url:find("api%.ankio%.net/myrl", 1, false) ~= nil)
     Assert.is_true(last_download.url:find("width=480", 1, true) ~= nil)
     Assert.is_true(last_download.url:find("height=800", 1, true) ~= nil)
@@ -127,6 +132,7 @@ local ok_run, err_run = pcall(function()
     -- 备份了原设置
     Assert.eq(MoonSettings.get().lock_screen_prev_type, "cover")
     Assert.eq(MoonSettings.get().lock_screen_prev_cover, "/old/cover.png")
+    Assert.is_true(MoonSettings.get().lock_screen_prev_show_message)
 
     -- 配置仍为今日但文件被删：bootstrap 必须在后台重新下载
     pcall(os.remove, LockScreen.imagePath())
@@ -146,6 +152,19 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(refreshed)
     Assert.is_nil(last_download.url)
 
+    -- 跨天：标记是昨天的，文件还在也要重下（日报每日更新）
+    common.lock_screen_myrl_day = "2000-01-01"
+    MoonSettings.save()
+    last_download.url = nil
+    refreshed = nil
+    LockScreen.refresh(function(ok)
+        refreshed = ok
+    end)
+    Stubs.flush()
+    Assert.is_true(refreshed)
+    Assert.not_nil(last_download.url)
+    Assert.eq(MoonSettings.get().lock_screen_myrl_day, os.date("%Y-%m-%d"))
+
     -- 离线选中：仍然落盘，只是不下载，等联网事件补
     online = false
     LockScreen.setMode(LockScreen.MODE_KO)
@@ -162,13 +181,15 @@ local ok_run, err_run = pcall(function()
     Assert.not_nil(last_download.url)
     Assert.eq(saved.screensaver_document_cover, LockScreen.imagePath())
 
-    -- 切回跟随：恢复
+    -- 切回跟随：恢复（含锁屏提示设置）
     LockScreen.setMode(LockScreen.MODE_KO)
     Stubs.flush()
     Assert.eq(LockScreen.mode(), LockScreen.MODE_KO)
     Assert.eq(saved.screensaver_type, "cover")
     Assert.eq(saved.screensaver_document_cover, "/old/cover.png")
+    Assert.is_true(saved.screensaver_show_message)
     Assert.is_nil(MoonSettings.get().lock_screen_prev_type)
+    Assert.is_nil(MoonSettings.get().lock_screen_prev_show_message)
 end)
 
 cleanup()
