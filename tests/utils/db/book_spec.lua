@@ -247,7 +247,7 @@ do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection)
 
-    Assert.is_true(BookDB.renameStableId("local", "/old.a'epub", "/new.epub"))
+    Assert.is_true(BookDB.renameStableId("local", "/old.a'epub", "/new.epub", "小说", "第一辑"))
     -- 四表更新包在事务里：BEGIN 在首个 UPDATE 之前，末条是 COMMIT
     local first_update
     for i, c in ipairs(calls) do
@@ -265,15 +265,25 @@ do
         end
     end
     Assert.eq(#updates, 4)
-    Assert.is_true(updates[1].sql:find("UPDATE books SET stable_id=?", 1, true) ~= nil)
+    Assert.is_true(updates[1].sql:find("UPDATE books SET stable_id=?, category=?, series=?", 1, true) ~= nil)
     Assert.is_true(updates[2].sql:find("UPDATE opens SET stable_id=?", 1, true) ~= nil)
     Assert.is_true(updates[3].sql:find("UPDATE reading_stats SET stable_id=?", 1, true) ~= nil)
     Assert.is_true(updates[4].sql:find("UPDATE pending_progress SET stable_id=?", 1, true) ~= nil)
-    for _, u in ipairs(updates) do
+    -- books 更新带 category/series（位置派生字段随新路径刷新），其余三表只改 stable_id
+    Assert.eq(updates[1].argc, 5)
+    Assert.eq(updates[1].args[1], "/new.epub")
+    Assert.eq(updates[1].args[2], "小说")
+    Assert.eq(updates[1].args[3], "第一辑")
+    Assert.eq(updates[1].args[4], "local")
+    Assert.eq(updates[1].args[5], "/old.a'epub")
+    for i = 2, 4 do
+        local u = updates[i]
         Assert.eq(u.argc, 3)
         Assert.eq(u.args[1], "/new.epub")
         Assert.eq(u.args[2], "local")
         Assert.eq(u.args[3], "/old.a'epub")
+    end
+    for _, u in ipairs(updates) do
         Assert.is_false(u.sql:find("/new.epub", 1, true) ~= nil)
         Assert.is_false(u.sql:find("/old.a'epub", 1, true) ~= nil)
     end

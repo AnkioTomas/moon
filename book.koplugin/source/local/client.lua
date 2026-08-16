@@ -4,32 +4,23 @@
 数据流：扫描器只负责把目录状态写进 books 表（增/改/删 + 封面 PNG），
 书库/筛选/搜索/最近阅读/统计一律直查数据库，不做内存缓存。
 
-扫描规则：
-- 最多探测 2 层：根目录直属书（无分类）+ 一级子目录内书（目录名即分类）；更深不识别
-- 跳过一切 . 前缀项（.moon 是本插件配置/缓存目录，隐藏项本就不该进书库）
-- 书库目录不得落在插件数据目录内（自己的数据不入库）
-- 每本书解析元数据（书名/作者/介绍）与封面，缓存进 books 表 / image 目录；命中缓存跳过解析
-- 扫描结束删除 books 表本次未扫到的本源记录（保留阅读统计），并删对应封面
 
 @module koplugin.book.source.local.client
 --]]
 
 local lfs = require("libs/libkoreader-lfs")
 local UIManager = require("ui/uimanager")
+local util = require("util")
 local _ = require("gettext")
+local Task = require("utils.task")
 
 local Client = {}
 Client.__index = Client
 
 local SOURCE_ID = "local"
 
---- 自动扫描最小间隔（秒）：桌面反复打开不重复扫盘
-local AUTO_SCAN_MIN_INTERVAL = 60
-
---- 封面缓存最大宽度（等比缩放，控制缓存体积）
-local COVER_MAX_W = 320
---- 封面缓存最大高度
-local COVER_MAX_H = 480
+--- 自动扫描节流间隔（秒）：桌面反复打开不重复扫盘
+local AUTO_SCAN_INTERVAL = 60
 
 local BOOK_EXT = {
     pdf = true,
@@ -60,38 +51,21 @@ local function isBookFile(name)
     return BOOK_EXT[string.lower(ext)] == true
 end
 
---- 文件内容 partialMD5（非均匀采样：头部权重大，尾部权重小，避免整本读入）。
---- 失败（文件不可读）返回 nil。
----@param path string
----@return string|nil
-local function fileMd5(path)
-    local md5 = require("ffi/sha2").md5
-    local bit = require("bit")
-    local f = io.open(path, "rb")
-    if not f then
-        return nil
-    end
-    local step, size = 1024, 1024
-    local update = md5()
-    for i = -1, 10 do
-        f:seek("set", bit.lshift(step, 2 * i))
-        local sample = f:read(size)
-        if sample then
-            update(sample)
-        else
-            break
-        end
-    end
-    f:close()
-    return update()
+--- 书库根目录：去尾部空白与斜杠。
+---@param cfg table|nil
+---@return string
+local function rootPath(cfg)
+    return (((cfg and cfg.path) or ""):gsub("%s+$", ""):gsub("/+$", ""))
 end
+
+
 
 --- 从配置构造本地客户端。
 ---@param cfg table|nil
 ---@return LocalClient
 function Client.new(cfg)
     cfg = cfg or {}
-    return setmetatable({ cfg = cfg, _auto_scan_at = 0 }, Client)
+    return setmetatable({ cfg = cfg }, Client)
 end
 
 --- 是否已配置本地路径。
@@ -104,7 +78,7 @@ end
 --- 本地路径是否有效（存在、是目录、且不在插件数据目录内）。
 ---@return boolean, string|nil
 function Client:validatePath()
-    local path = (self.cfg.path or ""):gsub("%s+$", ""):gsub("/+$", "")
+    local path = rootPath(self.cfg)
     if path == "" then
         return false, _("未配置本地路径")
     end
@@ -129,48 +103,32 @@ local function coverPath(stable_id)
     return require("utils.paths").coverPath(stable_id, SOURCE_ID)
 end
 
---- 把封面 blitbuffer 缩放落盘为 PNG。
+--- 把封面 blitbuffer 落盘为 PNG（os.remove/os.rename 不抛异常，无需 pcall）。
 ---@param bb any
 ---@param stable_id string
 local function saveCover(bb, stable_id)
     if not bb then
         return
     end
-    local w = tonumber(bb.getWidth and bb:getWidth()) or 0
-    local h = tonumber(bb.getHeight and bb:getHeight()) or 0
-    if w <= 0 or h <= 0 then
-        return
-    end
-    if w > COVER_MAX_W or h > COVER_MAX_H then
-        local ok_r, RenderImage = pcall(require, "ui/renderimage")
-        if ok_r and RenderImage and RenderImage.scaleBlitBuffer then
-            local scaled = RenderImage:scaleBlitBuffer(bb, COVER_MAX_W, COVER_MAX_H)
-            if scaled and scaled ~= bb then
-                pcall(function() bb:free() end)
-                bb = scaled
-            end
-        end
-    end
     local path = coverPath(stable_id)
     local tmp = path .. ".part"
     local ok = pcall(function() bb:writePNG(tmp) end)
     pcall(function() bb:free() end)
     if not ok then
-        pcall(os.remove, tmp)
+        os.remove(tmp)
         return
     end
-    pcall(os.remove, path)
+    os.remove(path)
     if not os.rename(tmp, path) then
-        pcall(os.remove, tmp)
+        os.remove(tmp)
     end
 end
 
 --- 解析单本书元数据 + 封面；失败返回 nil（损坏 / 无引擎）。
 --- crengine 需 loadDocument(false) 仅载元数据；close 后注册表引用归零自动清。
----@param path string
----@param stable_id string
+---@param path string 书路径，即 stable_id
 ---@return { title: string|nil, authors: string|nil, intro: string|nil }|nil
-local function parseBookProps(path, stable_id)
+local function parseBookProps(path)
     local ok, props = pcall(function()
         local DocumentRegistry = require("document/documentregistry")
         if not DocumentRegistry:hasProvider(path) then
@@ -187,12 +145,12 @@ local function parseBookProps(path, stable_id)
         end
         local p = doc:getProps()
         -- 封面：与元数据同会话提取（无封面的格式返回 nil）
-        if lfs.attributes(coverPath(stable_id), "mode") ~= "file" then
+        if lfs.attributes(coverPath(path), "mode") ~= "file" then
             local ok_cover, cover_bb = pcall(function()
                 return doc:getCoverPageImage()
             end)
             if ok_cover and cover_bb then
-                saveCover(cover_bb, stable_id)
+                saveCover(cover_bb, path)
             end
         end
         pcall(function() doc:close() end)
@@ -215,57 +173,48 @@ local function parseBookProps(path, stable_id)
     }
 end
 
---- 目录遍历（协程式分片，最多 2 层），产出书籍文件列表。
---- 根目录直属文件 category=nil；一级子目录内文件 category=目录名；更深忽略。
+--- 目录遍历（最多 3 层），产出按路径排序的书籍文件列表。
+--- 根目录直属文件无分类无系列；一级子目录名 = 分类；二级子目录名 = 系列；更深忽略。
+--- 同步阻塞，只在子进程里跑。
 ---@param root string
----@param is_cancelled fun(): boolean
----@param cb fun(files: table[])
-local function scanFiles(root, is_cancelled, cb)
+---@return table[]
+local function scanFiles(root)
     local files = {}
-    local queue = { { path = root, category = nil, depth = 1 } }
-    local budget = 32
-    local function step()
-        if is_cancelled() then
+    local function walk(dir, category, series, depth)
+        local iter_ok, iter, state = pcall(lfs.dir, dir)
+        if not (iter_ok and iter) then
             return
         end
-        local n = 0
-        while n < budget and #queue > 0 do
-            n = n + 1
-            local task = table.remove(queue)
-            local iter_ok, iter, state = pcall(lfs.dir, task.path)
-            if iter_ok and iter then
-                for name in iter, state do
-                    -- 跳过 . .. 及一切 . 前缀项（.moon 等隐藏目录/文件）
-                    if name:sub(1, 1) ~= "." then
-                        local path = task.path .. "/" .. name
-                        local attr = lfs.attributes(path)
-                        if attr then
-                            if attr.mode == "directory" then
-                                if task.depth < 2 then
-                                    queue[#queue + 1] = { path = path, category = name, depth = 2 }
-                                end
-                            elseif attr.mode == "file" and isBookFile(name) then
-                                files[#files + 1] = {
-                                    name = name,
-                                    path = path,
-                                    category = task.category,
-                                }
-                            end
+        for name in iter, state do
+            -- 跳过 . .. 及一切 . 前缀项（.moon 等隐藏目录/文件）
+            if name:sub(1, 1) ~= "." then
+                local path = dir .. "/" .. name
+                local attr = lfs.attributes(path)
+                if attr then
+                    if attr.mode == "directory" then
+                        -- 下钻：根下的一级目录名是分类，分类下的二级目录名是系列
+                        if depth == 1 then
+                            walk(path, name, nil, depth + 1)
+                        elseif depth == 2 then
+                            walk(path, category, name, depth + 1)
                         end
+                    elseif attr.mode == "file" and isBookFile(name) then
+                        files[#files + 1] = {
+                            name = name,
+                            path = path,
+                            category = category,
+                            series = series,
+                        }
                     end
                 end
             end
         end
-        if #queue > 0 then
-            UIManager:nextTick(step)
-        else
-            table.sort(files, function(a, b)
-                return a.path < b.path
-            end)
-            cb(files)
-        end
     end
-    UIManager:nextTick(step)
+    walk(root, nil, nil, 1)
+    table.sort(files, function(a, b)
+        return a.path < b.path
+    end)
+    return files
 end
 
 --- 从文件名解析标题与作者（引擎解析失败时的兜底，保证扫到的书都入库）。
@@ -288,75 +237,55 @@ local function parseFilename(filename)
     return name, nil
 end
 
---- 逐本解析元数据（每 tick 一本，解析重活不堵 UI），写入 books 表。
+--- 解析单本书并写入 books 表。同步阻塞，只在子进程里跑（BookDB 自带 ensure，首用即开子进程连接）。
 --- 命中 books 表缓存（title 非空）则跳过解析。路径未命中时按内容 md5 找旧行：
---- 命中说明文件被移动/改名，原地把 stable_id 换成新路径（身份以 md5 为准，不当新书）；
+--- 命中说明文件被移动/改名，原地把 stable_id 换成新路径（身份以 md5 为准，不当新书），
+--- category/series 由所在目录派生，随新位置一并刷新；
 --- 否则才是真新书，解析引擎失败回退文件名。
----@param files table[]
----@param is_cancelled fun(): boolean
----@param cb fun()
-local function resolveMeta(files, is_cancelled, cb)
+---@param f table 扫描产物 { name, path, category, series }
+local function resolveOne(f)
     local BookDB = require("utils.db.book")
-    local DbQueue = require("utils.db.queue")
-    local i = 0
-    local function step()
-        if is_cancelled() then
-            return
-        end
-        i = i + 1
-        local f = files[i]
-        if not f then
-            cb()
-            return
-        end
-        local cached = BookDB.get(SOURCE_ID, f.path)
-        if cached and type(cached.title) == "string" and cached.title ~= "" then
-            UIManager:nextTick(step)
-            return
-        end
-        local digest = fileMd5(f.path)
-        local moved_from = nil
-        if digest then
-            local by_md5 = BookDB.getByMd5(SOURCE_ID, digest)
-            if by_md5 and by_md5.stable_id ~= f.path then
-                moved_from = by_md5.stable_id
-            end
-        end
-        if moved_from then
-            DbQueue.run(function()
-                BookDB.renameStableId(SOURCE_ID, moved_from, f.path)
-            end)
-            local old_cover, new_cover = coverPath(moved_from), coverPath(f.path)
-            if lfs.attributes(old_cover, "mode") == "file" then
-                pcall(os.rename, old_cover, new_cover)
-            end
-            UIManager:nextTick(step)
-            return
-        end
-        local props = parseBookProps(f.path, f.path) or {}
-        local title, authors, intro = props.title, props.authors, props.intro
-        if not title or title == "" then
-            title, authors = parseFilename(f.name)
-        end
-        DbQueue.run(function()
-            BookDB.upsert({
-                source_id = SOURCE_ID,
-                stable_id = f.path,
-                md5 = digest,
-                title = title,
-                authors = authors,
-                intro = intro,
-                category = f.category,
-                fetched_at = os.time(),
-            })
-        end)
-        UIManager:nextTick(step)
+    local cached = BookDB.get(SOURCE_ID, f.path)
+    if cached and type(cached.title) == "string" and cached.title ~= "" then
+        return
     end
-    UIManager:nextTick(step)
+    local digest = util.partialMD5(f.path)
+    local moved_from = nil
+    if digest then
+        local by_md5 = BookDB.getByMd5(SOURCE_ID, digest)
+        if by_md5 and by_md5.stable_id ~= f.path then
+            moved_from = by_md5.stable_id
+        end
+    end
+    if moved_from then
+        BookDB.renameStableId(SOURCE_ID, moved_from, f.path, f.category, f.series)
+        local old_cover = coverPath(moved_from)
+        if lfs.attributes(old_cover, "mode") == "file" then
+            os.rename(old_cover, coverPath(f.path))
+        end
+        return
+    end
+    local props = parseBookProps(f.path) or {}
+    local title, authors, intro = props.title, props.authors, props.intro
+    if not title or title == "" then
+        title, authors = parseFilename(f.name)
+    end
+    BookDB.upsert({
+        source_id = SOURCE_ID,
+        stable_id = f.path,
+        md5 = digest,
+        title = title,
+        authors = authors,
+        intro = intro,
+        category = f.category,
+        series = f.series,
+        fetched_at = os.time(),
+    })
 end
 
 --- 扫描后清理失效书籍：books 表本源的、本次未扫到的记录删除（不动 reading_stats），连同封面。
---- 改名/移动的书已在 resolveMeta 里原地更新 stable_id，这里的 keep 集合天然包含它们。
+--- 改名/移动的书已在 resolveOne 里原地更新 stable_id，这里的 keep 集合天然包含它们。
+--- 同步阻塞，只在子进程里跑。
 ---@param files table[]
 local function pruneMissing(files)
     local keep = {}
@@ -364,35 +293,38 @@ local function pruneMissing(files)
         keep[f.path] = true
     end
     local BookDB = require("utils.db.book")
-    local DbQueue = require("utils.db.queue")
-    DbQueue.run(function()
-        for _, stable_id in ipairs(BookDB.stableIdsBySource(SOURCE_ID)) do
-            if not keep[stable_id] then
-                BookDB.remove(SOURCE_ID, stable_id)
-                pcall(os.remove, coverPath(stable_id))
-            end
+    for _, stable_id in ipairs(BookDB.stableIdsBySource(SOURCE_ID)) do
+        if not keep[stable_id] then
+            BookDB.remove(SOURCE_ID, stable_id)
+            os.remove(coverPath(stable_id))
         end
-    end)
+    end
 end
 
---- 真实扫盘并写库：遍历 → 解析元数据/封面 → 清失效。
+--- 扫盘任务：重活全在子进程，cancel 杀子进程。
+--- 扫描成败都调 on_done：子进程崩溃/启动失败时库里是旧数据，照查，不让 UI 空转。
 ---@param root string
----@param is_cancelled fun(): boolean
----@param cb fun()
-local function scanIntoDb(root, is_cancelled, cb)
-    require("utils.paths").ensureLayout(SOURCE_ID)
-    scanFiles(root, is_cancelled, function(files)
-        if is_cancelled() then
-            return
+---@param on_done fun()
+---@return { cancel: fun() }
+local function scanJob(root, on_done)
+    local job = Task.run(function()
+        local files = scanFiles(root)
+        for _, f in ipairs(files) do
+            resolveOne(f)
         end
-        resolveMeta(files, is_cancelled, function()
-            if is_cancelled() then
-                return
-            end
-            pruneMissing(files)
-            cb()
-        end)
-    end)
+        pruneMissing(files)
+    end, {
+        on_done = on_done,
+        on_failed = function(err)
+            require("logger").warn("book local scan failed", err)
+            on_done()
+        end,
+    })
+    return {
+        cancel = function()
+            job:abort()
+        end,
+    }
 end
 
 --- 直查 books 表（图书馆分页/分类/系列/搜索）。
@@ -433,57 +365,34 @@ function Client:listAsync(opts, cb)
         return nil
     end
 
-    local root = (self.cfg.path or ""):gsub("%s+$", ""):gsub("/+$", "")
-    local cancelled = false
-    scanIntoDb(root, function()
-        return cancelled
-    end, function()
-        if cancelled then
-            return
-        end
+    local root = rootPath(self.cfg)
+    return scanJob(root, function()
         queryDb(opts, cb)
     end)
-    return {
-        cancel = function()
-            cancelled = true
-        end,
-    }
 end
 
---- 打开桌面时的自动扫描（节流 AUTO_SCAN_MIN_INTERVAL 秒）：扫盘写库 + 清失效。
----@param cb fun(scanned: boolean)|nil
+--- 打开桌面时的自动扫描（节流 AUTO_SCAN_INTERVAL 秒）：扫盘写库 + 清失效。
+---@param cb fun(scanned: boolean)
 ---@return { cancel: fun() }|nil
 function Client:autoScanAsync(cb)
-    cb = cb or function() end
-    local ok = self:validatePath()
-    if not ok then
-        UIManager:nextTick(function()
-            cb(false)
-        end)
+    if not self:validatePath() then
+        cb(false)
         return nil
     end
-    local now = os.time()
-    if now - (self._auto_scan_at or 0) < AUTO_SCAN_MIN_INTERVAL then
-        UIManager:nextTick(function()
-            cb(false)
-        end)
+    if not self._auto_scan then
+        -- 门闩：窗口内再调返回 nil
+        self._auto_scan = require("utils.timing").throttle(function()
+            return true
+        end, AUTO_SCAN_INTERVAL)
+    end
+    if not self._auto_scan() then
+        cb(false)
         return nil
     end
-    self._auto_scan_at = now
-    local root = (self.cfg.path or ""):gsub("%s+$", ""):gsub("/+$", "")
-    local cancelled = false
-    scanIntoDb(root, function()
-        return cancelled
-    end, function()
-        if not cancelled then
-            cb(true)
-        end
+    local root = rootPath(self.cfg)
+    return scanJob(root, function()
+        cb(true)
     end)
-    return {
-        cancel = function()
-            cancelled = true
-        end,
-    }
 end
 
 --- 分类和系列列表（DISTINCT 直查数据库）。
