@@ -1,8 +1,8 @@
 --[[--
-http.request 离线用例：ok / header / writeResponseToFile（纯本地，无网络）
+http.request 离线用例：ok / header / writeResponseToFile / SNI 补丁（纯本地，无网络）
 
-request/get/post/download/ensureTurbo/patchTurboSsl/randomUA/randomIP
-依赖 Turbo 与网络，不在离线范围。
+request/get/post/download/ensureTurbo 的真实网络路径不在离线范围；
+SNI 补丁经 stub 的 turbo/turbo.crypto 间接验证。
 
 @module tests.http.request_spec
 --]]
@@ -232,4 +232,74 @@ for _, name in ipairs({
     "writefail.tmp",
 }) do
     pcall(os.remove, tmp(name))
+end
+
+-- ── SNI 补丁：turbo 握手前对域名补 SNI（无 SNI 时 Cloudflare 类主机直接挂起到超时）──
+do
+    local UIManager = require("ui/uimanager")
+    UIManager.setInputTimeout = function() end
+    UIManager.resetInputTimeout = function() end
+    -- looper:add_callback 里的 fn 会 yield fetch 结果，用协程模拟 turbo 的 _resume_coroutine
+    UIManager.looper = {
+        add_callback = function(_, fn)
+            local co = coroutine.create(fn)
+            local _, res = coroutine.resume(co)
+            if coroutine.status(co) == "suspended" then
+                coroutine.resume(co, res)
+            end
+        end,
+    }
+    package.preload["turbo"] = function()
+        return {
+            log = { categories = {} },
+            async = {
+                HTTPClient = function()
+                    return {
+                        fetch = function()
+                            return { code = 200, body = "ok" }
+                        end,
+                    }
+                end,
+            },
+        }
+    end
+    local handshake_calls = 0
+    package.preload["turbo.crypto"] = function()
+        return {
+            ssl_create_client_context = function()
+                return 0, {}
+            end,
+            ssl_do_handshake = function()
+                handshake_calls = handshake_calls + 1
+                return true
+            end,
+        }
+    end
+
+    -- 触发一次请求让 patchTurboSsl 装上补丁
+    local got_code
+    Request.request({ url = "https://api.ankio.net/myrl" }, function(res)
+        got_code = res and res.code
+    end)
+    Assert.eq(got_code, 200)
+
+    local crypto = require("turbo.crypto")
+    local sni_hosts = {}
+    local fake_sock = {
+        sni = function(_, host)
+            sni_hosts[#sni_hosts + 1] = host
+        end,
+    }
+    -- 域名：握手前设 SNI，且只设一次
+    local stream = { _ssl = fake_sock, _ssl_hostname = "api.ankio.net" }
+    crypto.ssl_do_handshake(stream)
+    crypto.ssl_do_handshake(stream)
+    Assert.eq(#sni_hosts, 1)
+    Assert.eq(sni_hosts[1], "api.ankio.net")
+    -- IPv4 / IPv6 字面量不发 SNI
+    crypto.ssl_do_handshake({ _ssl = fake_sock, _ssl_hostname = "1.2.3.4" })
+    crypto.ssl_do_handshake({ _ssl = fake_sock, _ssl_hostname = "2001:db8::1" })
+    Assert.eq(#sni_hosts, 1)
+    -- 原始握手都被透传
+    Assert.eq(handshake_calls, 4)
 end

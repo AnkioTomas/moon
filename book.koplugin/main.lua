@@ -44,6 +44,7 @@ function BookPlugin:init()
         logger.err("book turbo init failed:", err_turbo)
     end
     Host.attach(self)
+    require("lockscreen.init").bootstrap()
     if self.ui and self.ui.document then
         self:emitToSource("reader_open")
     end
@@ -108,10 +109,17 @@ function BookPlugin:onSuspend()
     require("ui.reader.session").onSuspend(self)
 end
 
---- 唤醒：恢复阅读统计计时
+--- 唤醒：恢复阅读统计计时；按日刷新摸鱼日报（供下次锁屏）
 ---@return nil
 function BookPlugin:onResume()
     require("ui.reader.session").onResume(self)
+    require("lockscreen.init").refreshInBackground()
+end
+
+--- 网络恢复：后台补齐或按日刷新锁屏图。
+---@return nil
+function BookPlugin:onNetworkConnected()
+    require("lockscreen.init").refreshInBackground()
 end
 
 --- 翻页（分页视图）：统计换页；分发 page_changed
