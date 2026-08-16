@@ -6,6 +6,7 @@ WebDAV entry → Book
 
 local BookRef = require("types.book").BookRef
 local BookListResult = require("types.book_list")
+local Text = require("utils.text")
 
 local Mapper = {}
 
@@ -38,10 +39,7 @@ end
 --- 规范化路径：去首尾斜杠。
 ---@param path string|nil
 ---@return string
-local function normalizePath(path)
-    path = tostring(path or ""):gsub("^/+", ""):gsub("/+$", "")
-    return path
-end
+local normalizePath = Text.trimSlashes
 
 --- WebDAV 目录项 → BookListResult。
 ---@param entries table[]

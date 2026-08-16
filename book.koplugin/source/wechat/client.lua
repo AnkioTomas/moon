@@ -7,25 +7,11 @@
 local JSON = require("json")
 local logger = require("logger")
 local Auth = require("source.wechat.auth")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local Client = {}
 Client.__index = Client
-
---- 编码 query 表为 application/x-www-form-urlencoded 风格。
----@param tbl table|nil
----@return string
-local function encodeQuery(tbl)
-    local parts = {}
-    for k, v in pairs(tbl or {}) do
-        if v ~= nil then
-            parts[#parts + 1] = tostring(k) .. "=" .. tostring(v):gsub("[^%w%-_%.~]", function(c)
-                return string.format("%%%02X", string.byte(c))
-            end)
-        end
-    end
-    return table.concat(parts, "&")
-end
 
 --- 构造微信读书客户端实例。
 ---@param o table|nil
@@ -49,7 +35,7 @@ function Client.sessionHeaders()
 end
 
 function Client:shelfSyncAsync(cb)
-    return Auth.webApiGetAsync("/web/shelf/sync?" .. encodeQuery({
+    return Auth.webApiGetAsync("/web/shelf/sync?" .. Text.formEncode({
         synckey = 0,
         teenmode = 0,
     }), function(data, err)
@@ -76,7 +62,7 @@ function Client:searchAsync(keyword, count, scope, cb)
     end
     count = tonumber(count) or 20
     scope = tonumber(scope) or 10
-    return Auth.apiGetAsync("/store/search?" .. encodeQuery({
+    return Auth.apiGetAsync("/store/search?" .. Text.formEncode({
         keyword = keyword,
         count = count,
         scope = scope,
@@ -98,7 +84,7 @@ end
 
 function Client:bookInfoAsync(bookId, cb)
     bookId = tostring(bookId or "")
-    return Auth.webApiGetAsync("/web/book/info?" .. encodeQuery({ bookId = bookId }), cb)
+    return Auth.webApiGetAsync("/web/book/info?" .. Text.formEncode({ bookId = bookId }), cb)
 end
 
 function Client:chapterInfosAsync(bookId, cb)
@@ -110,7 +96,7 @@ end
 
 function Client:getProgressAsync(bookId, cb)
     bookId = tostring(bookId or "")
-    return Auth.webApiGetAsync("/web/book/getProgress?" .. encodeQuery({
+    return Auth.webApiGetAsync("/web/book/getProgress?" .. Text.formEncode({
         bookId = bookId,
         _ = tostring(os.time() * 1000),
     }), function(data, err)
@@ -118,7 +104,7 @@ function Client:getProgressAsync(bookId, cb)
             cb(data)
             return
         end
-        Auth.apiGetAsync("/book/getprogress?" .. encodeQuery({ bookId = bookId }), function(fallback, fallback_err)
+        Auth.apiGetAsync("/book/getprogress?" .. Text.formEncode({ bookId = bookId }), function(fallback, fallback_err)
             cb(fallback, fallback_err or err)
         end)
     end)

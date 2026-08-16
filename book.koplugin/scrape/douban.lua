@@ -10,9 +10,12 @@
 local Request = require("http.request")
 local socketurl = require("socket.url")
 local logger = require("logger")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local Douban = {}
+
+local trim = Text.trim
 
 local SEARCH_URL = "https://www.douban.com/search"
 
@@ -81,7 +84,7 @@ local function parseCast(cast)
     end
     local parts = {}
     for p in cast:gmatch("[^/]+") do
-        local part = p:gsub("^%s+", ""):gsub("%s+$", "")
+        local part = trim(p)
         if part ~= "" then
             parts[#parts + 1] = part
         end
@@ -118,7 +121,7 @@ local function parseBlock(block, query)
         return nil, "no_title"
     end
 
-    title = title:gsub("^%s+", ""):gsub("%s+$", "")
+    title = trim(title)
     local subject_id = extractSubjectId(block, url)
     if not subject_id then
         return nil, "no_id"
@@ -135,12 +138,12 @@ local function parseBlock(block, query)
     local cover = block:match('<img%s+[^>]*src="([^"]+)"')
     local rating = block:match('<span class="rating_nums">([^<]+)</span>')
     if rating then
-        rating = rating:gsub("^%s+", ""):gsub("%s+$", "")
+        rating = trim(rating)
     end
 
     local intro = block:match("<p>([^<]+)</p>")
     if intro then
-        intro = intro:gsub("^%s+", ""):gsub("%s+$", "")
+        intro = trim(intro)
     end
 
     return {
@@ -219,7 +222,7 @@ end
 ---@param cb fun(results: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Douban.searchAsync(query, cb)
-    query = (query or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    query = trim(query)
     if query == "" then
         cb(nil, _("搜索关键词为空"))
         return nil

@@ -15,6 +15,7 @@ local Image = require("ui.components.image")
 local BookDB = require("utils.db.book")
 local DbQueue = require("utils.db.queue")
 local Paths = require("utils.paths")
+local Text = require("utils.text")
 local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -175,8 +176,7 @@ function ScrapeUI.start(ref, default_title, on_close)
                 text = _("搜索"),
                 is_enter_default = true,
                 callback = function()
-                    local query = dialog:getInputText()
-                    query = (query or ""):gsub("^%s+", ""):gsub("%s+$", "")
+                    local query = Text.trim(dialog:getInputText())
                     UIManager:close(dialog)
                     if query == "" then
                         UIManager:show(InfoMessage:new{

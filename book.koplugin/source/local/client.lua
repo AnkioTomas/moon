@@ -11,6 +11,7 @@
 local lfs = require("libs/libkoreader-lfs")
 local UIManager = require("ui/uimanager")
 local util = require("util")
+local Text = require("utils.text")
 local _ = require("gettext")
 local Task = require("utils.task")
 
@@ -55,7 +56,7 @@ end
 ---@param cfg table|nil
 ---@return string
 local function rootPath(cfg)
-    return (((cfg and cfg.path) or ""):gsub("%s+$", ""):gsub("/+$", ""))
+    return Text.rtrimSlashes(Text.rtrim(cfg and cfg.path))
 end
 
 
@@ -71,8 +72,7 @@ end
 --- 是否已配置本地路径。
 ---@return boolean
 function Client:configured()
-    local path = (self.cfg.path or ""):gsub("%s+", "")
-    return path ~= ""
+    return Text.stripWhitespace(self.cfg.path) ~= ""
 end
 
 --- 本地路径是否有效（存在、是目录、且不在插件数据目录内）。
@@ -163,7 +163,7 @@ local function parseBookProps(path)
         if type(s) ~= "string" then
             return nil
         end
-        s = s:gsub("^%s+", ""):gsub("%s+$", "")
+        s = Text.trim(s)
         return s ~= "" and s or nil
     end
     return {
@@ -223,7 +223,7 @@ end
 ---@return string title, string|nil authors
 local function parseFilename(filename)
     local name = filename:gsub("%.[^.]+$", "")
-    name = name:gsub("[%[%(].-[%]%)]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+    name = Text.trim(name:gsub("[%[%(].-[%]%)]", ""))
     -- "作者 - 书名"（含空格的分隔符优先）
     local a, b = name:match("^(.+)%s+%-%s+(.+)$")
     if a and b then

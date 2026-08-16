@@ -17,25 +17,13 @@
 
 local UIManager = require("ui/uimanager")
 local Html2Epub = require("convert.html2epub")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local Text2Epub = {}
 
----@param value any
----@return string
-local function trim(value)
-    return tostring(value or ""):match("^%s*(.-)%s*$") or ""
-end
-
----@param value any
----@return string
-local function xmlEscape(value)
-    return tostring(value or "")
-        :gsub("&", "&amp;")
-        :gsub("<", "&lt;")
-        :gsub(">", "&gt;")
-        :gsub('"', "&quot;")
-end
+local trim = Text.trim
+local xmlEscape = Text.xmlEscape
 
 ---@param line string
 ---@return boolean
@@ -93,7 +81,7 @@ end
 ---@return { title: string, author: string|nil, chapters: { title: string, html: string }[] }
 function Text2Epub.parse(text, opts)
     opts = opts or {}
-    text = tostring(text or ""):gsub("^\239\187\191", ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+    text = Text.stripBom(Text.normalizeNewlines(text))
 
     local lines = {}
     for line in (text .. "\n"):gmatch("(.-)\n") do

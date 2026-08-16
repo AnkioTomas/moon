@@ -9,6 +9,7 @@
 
 local bit = require("bit")
 local md5 = require("ffi/sha2").md5
+local Text = require("utils.text")
 
 local Protocol = {}
 
@@ -19,7 +20,7 @@ local function isDigitString(s)
     return tostring(s):match("^%d+$") ~= nil
 end
 
---- 对参数值做 URL 编码。
+--- 对参数值做 URL 编码（微信侧布尔/nil 字面量 coercion 保留在本层）。
 ---@param value any
 ---@return string
 local function urlencode(value)
@@ -29,12 +30,8 @@ local function urlencode(value)
         value = "false"
     elseif value == nil then
         value = "null"
-    else
-        value = tostring(value)
     end
-    return (value:gsub("([^%w%-_%.~])", function(ch)
-        return string.format("%%%02X", ch:byte())
-    end))
+    return Text.urlEncode(value)
 end
 
 --- 把字符串每个字节编成十六进制拼接。

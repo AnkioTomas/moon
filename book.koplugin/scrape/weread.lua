@@ -11,6 +11,7 @@ local JSON = require("json")
 local Request = require("http.request")
 local socketurl = require("socket.url")
 local logger = require("logger")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local Weread = {}
@@ -18,12 +19,7 @@ local Weread = {}
 local SEARCH_URL = "https://weread.qq.com/web/search/global"
 local DEFAULT_COUNT = 10
 
---- 去首尾空白；nil 视为空字符串。
----@param s any
----@return string
-local function trim(s)
-    return (s or ""):gsub("^%s+", ""):gsub("%s+$", "")
-end
+local trim = Text.trim
 
 local mapBook
 
@@ -33,7 +29,7 @@ local mapBook
 ---@param cb fun(results: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Weread.searchAsync(query, count, cb)
-    query = (query or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    query = trim(query)
     if query == "" then
         cb(nil, _("搜索关键词为空"))
         return nil
@@ -111,7 +107,7 @@ function mapBook(info, row)
         -- 多字节分隔符先归一成逗号：Lua 字符类按字节匹配，直接放类里会切碎 UTF-8
         category = category:gsub("／", ","):gsub("、", ","):gsub("，", ",")
         for p in category:gmatch("[^%-,/|]+") do
-            local part = p:gsub("^%s+", ""):gsub("%s+$", "")
+            local part = trim(p)
             if part ~= "" then tags[#tags + 1] = part end
         end
     end

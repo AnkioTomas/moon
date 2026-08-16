@@ -18,6 +18,7 @@ local logger = require("logger")
 local Request = require("http.request")
 local Header = require("http.header")
 local UIManager = require("ui/uimanager")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local Auth = {}
@@ -110,20 +111,6 @@ local function parseSetCookie(headers)
         end
     end
     return out
-end
-
---- URL 解码（含 + → 空格）。
----@param s string|nil
----@return string|nil
-local function urlDecode(s)
-    if type(s) ~= "string" then
-        return s
-    end
-    s = s:gsub("%+", " ")
-    s = s:gsub("%%(%x%x)", function(h)
-        return string.char(tonumber(h, 16))
-    end)
-    return s
 end
 
 --- Normalize Turbo response headers for the cookie parser.
@@ -567,7 +554,7 @@ function Auth.waitQrLoginAsync(uid, cb)
             local set = parseSetCookie(headers)
             local vid = set.wr_vid or data.webLoginVid or data.vid
             local skey = set.wr_skey or data.accessToken
-            local rt = data.refreshToken or urlDecode(set.wr_rt or "")
+            local rt = data.refreshToken or Text.urlDecode(set.wr_rt or "")
             if not vid or not skey or tostring(skey) == "" then
                 cb(nil, _("登录未拿到会话密钥"), "error")
                 return
@@ -641,7 +628,7 @@ function Auth.renewCookieAsync(cb)
             applySession(
                 set.wr_vid or c.wr_vid or c.user_id,
                 set.wr_skey or c.wr_skey,
-                urlDecode(set.wr_rt or c.wr_rt or ""),
+                Text.urlDecode(set.wr_rt or c.wr_rt or ""),
                 c.user_name,
                 {
                     wr_gid = set.wr_gid or c.wr_gid,

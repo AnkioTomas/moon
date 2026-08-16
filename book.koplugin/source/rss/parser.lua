@@ -8,6 +8,7 @@ RSS 2.0 / Atom 解析与正文清理。
 
 local Xml = require("source.rss.xml")
 local H = require("source.rss.xml_handler")
+local Text = require("utils.text")
 
 local Parser = {}
 
@@ -27,7 +28,7 @@ end
 ---@param raw string|nil
 ---@return string|nil
 function Parser.normalizeUrl(raw)
-    local value = tostring(raw or ""):match("^%s*(.-)%s*$") or ""
+    local value = Text.trim(raw)
     if value == "" then return nil end
     -- 先验 scheme 再补 https：顺序反了白名单就是死代码（ftp:// 会被拼成 https://ftp://…）
     local scheme = value:match("^([%a][%w+%.%-]*)://")
@@ -49,7 +50,7 @@ end
 ---@param ref string|nil
 ---@return string
 function Parser.absoluteUrl(base, ref)
-    ref = tostring(ref or ""):match("^%s*(.-)%s*$") or ""
+    ref = Text.trim(ref)
     if ref == "" or ref:match("^[%a][%w+%.%-]*:") then
         return ref
     end

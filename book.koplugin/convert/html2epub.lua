@@ -24,6 +24,7 @@ HTML → EPUB（多章节、内嵌图片、元数据）。
 local UIManager = require("ui/uimanager")
 local logger = require("logger")
 local Header = require("http.header")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local Html2Epub = {}
@@ -32,32 +33,15 @@ local Html2Epub = {}
 -- 小工具
 ------------------------------------------------------------------------
 
----@param s any
----@return string
-local function xmlEscape(s)
-    s = tostring(s or "")
-    return s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;")
-end
-
 --- 粗判是否像 HTML；否则包成段落。
 ---@param s string|nil
 ---@return string
 local function ensureHtmlBody(s)
     s = tostring(s or "")
-    local head = s:sub(1, 256):lower()
-    if head:find("<html") or head:find("<!doctype") or head:find("<p")
-        or head:find("<div") or head:find("<img") or head:find("<h%d") then
+    if Text.looksLikeHtml(s) then
         return s
     end
-    s = s:gsub("\r\n", "\n"):gsub("\r", "\n")
-    local parts = {}
-    for line in (s .. "\n"):gmatch("(.-)\n") do
-        line = line:match("^(.-)%s*$") or ""
-        if line ~= "" then
-            parts[#parts + 1] = "<p>" .. xmlEscape(line) .. "</p>"
-        end
-    end
-    return table.concat(parts, "\n")
+    return Text.textToBody(s)
 end
 
 --- 从 HTML body 抽出完整文档外壳。
@@ -83,7 +67,7 @@ img{max-width:100%%;}
 %s
 </body>
 </html>
-]], xmlEscape(title), body)
+]], Text.xmlEscape(title), body)
 end
 
 local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -203,7 +187,7 @@ local function collectImageSrcs(html)
     local list = {}
     local seen = {}
     local function add(src)
-        src = tostring(src or ""):match("^%s*(.-)%s*$") or ""
+        src = Text.trim(src)
         if src == "" or seen[src] then
             return
         end
@@ -305,7 +289,7 @@ local function writeEpubPackage(opts, dest)
     <navPoint id="n%d" playOrder="%d">
       <navLabel><text>%s</text></navLabel>
       <content src="%s"/>
-    </navPoint>]], i, i, xmlEscape(ch.title or id), ch.href)
+    </navPoint>]], i, i, Text.xmlEscape(ch.title or id), ch.href)
     end
     for i, img in ipairs(images) do
         local id = string.format("img%d", i)
@@ -317,7 +301,7 @@ local function writeEpubPackage(opts, dest)
 
     local creator = ""
     if author ~= "" then
-        creator = string.format("\n    <dc:creator>%s</dc:creator>", xmlEscape(author))
+        creator = string.format("\n    <dc:creator>%s</dc:creator>", Text.xmlEscape(author))
     end
 
     local opf = string.format([[
@@ -335,7 +319,7 @@ local function writeEpubPackage(opts, dest)
 %s
   </spine>
 </package>
-]], xmlEscape(title), creator, xmlEscape(language), xmlEscape(identifier),
+]], Text.xmlEscape(title), creator, Text.xmlEscape(language), Text.xmlEscape(identifier),
         table.concat(manifest, "\n"), table.concat(spine, "\n"))
     epub:addFileFromMemory("OEBPS/content.opf", opf, mtime)
 
@@ -348,7 +332,7 @@ local function writeEpubPackage(opts, dest)
 %s
   </navMap>
 </ncx>
-]], xmlEscape(identifier), xmlEscape(title), table.concat(nav, "\n"))
+]], Text.xmlEscape(identifier), Text.xmlEscape(title), table.concat(nav, "\n"))
     epub:addFileFromMemory("OEBPS/toc.ncx", ncx, mtime)
 
     for _, ch in ipairs(chapters) do
@@ -706,7 +690,6 @@ function Html2Epub.build(opts, cb)
 end
 
 -- 测试可见的纯函数
-Html2Epub._xmlEscape = xmlEscape
 Html2Epub._collectImageSrcs = collectImageSrcs
 Html2Epub._rewriteImageSrcs = rewriteImageSrcs
 Html2Epub._ensureHtmlBody = ensureHtmlBody

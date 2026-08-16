@@ -5,15 +5,11 @@ OPML 订阅导入。
 --]]
 
 local DataStorage = require("datastorage")
+local Text = require("utils.text")
 
 local OPML = {
     DEFAULT_IMPORT_PATH = DataStorage:getDataDir() .. "/feeds.opml",
 }
-
-local function decode(s)
-    return tostring(s or ""):gsub("&lt;", "<"):gsub("&gt;", ">")
-        :gsub("&quot;", '"'):gsub("&apos;", "'"):gsub("&amp;", "&")
-end
 
 local function attr(tag, name)
     local lower = string.lower(tag)
@@ -22,7 +18,7 @@ local function attr(tag, name)
     local rest = tag:sub(end_pos + 1)
     local quote = rest:match("^%s*([\"'])")
     if not quote then return nil end
-    return decode(rest:match("^%s*[\"'](.-)" .. quote) or "")
+    return Text.xmlDecode(rest:match("^%s*[\"'](.-)" .. quote) or "")
 end
 
 ---@param path string|nil

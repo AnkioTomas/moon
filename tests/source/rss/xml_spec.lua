@@ -7,33 +7,34 @@ source.rss.xml / xml_handler 离线用例：纯 XML 解析、查询与序列化�
 local Assert = require("support.assert")
 local Xml = require("source.rss.xml")
 local Handler = require("source.rss.xml_handler")
+local Text = require("utils.text")
 
--- Xml.decode：命名实体
+-- 实体解码已迁 Text.xmlDecode（详见 tests/utils/text_spec.lua）
 do
-    Assert.eq(Xml.decode("&lt;a&gt; &amp; &quot;b&quot; &apos;c&apos;"),
+    Assert.eq(Text.xmlDecode("&lt;a&gt; &amp; &quot;b&quot; &apos;c&apos;"),
         [[<a> & "b" 'c']])
-    Assert.eq(Xml.decode("无实体"), "无实体")
+    Assert.eq(Text.xmlDecode("无实体"), "无实体")
 end
 
--- Xml.decode：数字实体（十进制/十六进制）与多码点 UTF-8
+-- 数字实体（十进制/十六进制）与多码点 UTF-8
 do
-    Assert.eq(Xml.decode("&#65;"), "A")
-    Assert.eq(Xml.decode("&#x41;&#X41;"), "AA")
-    Assert.eq(Xml.decode("&#228;"), "\195\164")           -- U+00E4，2 字节
-    Assert.eq(Xml.decode("&#x4E2D;"), "\228\184\173")     -- U+4E2D 中，3 字节
-    Assert.eq(Xml.decode("&#128512;"), "\240\159\152\128") -- U+1F600，4 字节
+    Assert.eq(Text.xmlDecode("&#65;"), "A")
+    Assert.eq(Text.xmlDecode("&#x41;&#X41;"), "AA")
+    Assert.eq(Text.xmlDecode("&#228;"), "\195\164")           -- U+00E4，2 字节
+    Assert.eq(Text.xmlDecode("&#x4E2D;"), "\228\184\173")     -- U+4E2D 中，3 字节
+    Assert.eq(Text.xmlDecode("&#128512;"), "\240\159\152\128") -- U+1F600，4 字节
 end
 
--- Xml.decode：&amp; 最后解码，&amp;lt; 只解一层
+-- &amp; 最后解码，&amp;lt; 只解一层
 do
-    Assert.eq(Xml.decode("&amp;lt;"), "&lt;")
-    Assert.eq(Xml.decode("&amp;amp;"), "&amp;")
+    Assert.eq(Text.xmlDecode("&amp;lt;"), "&lt;")
+    Assert.eq(Text.xmlDecode("&amp;amp;"), "&amp;")
 end
 
--- Xml.decode：容错输入
+-- 容错输入
 do
-    Assert.eq(Xml.decode(nil), "")
-    Assert.eq(Xml.decode("&#x110000;"), "") -- 超出 Unicode 范围的码点
+    Assert.eq(Text.xmlDecode(nil), "")
+    Assert.eq(Text.xmlDecode("&#x110000;"), "") -- 超出 Unicode 范围的码点
 end
 
 -- Xml.parse：空输入与非字符串

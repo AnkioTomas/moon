@@ -6,47 +6,14 @@ RSS 用的最小非验证 XML 解析器。
 @module koplugin.book.source.rss.xml
 --]]
 
+local Text = require("utils.text")
+
 local Xml = {}
-
-local function utf8char(cp)
-    if cp < 0x80 then
-        return string.char(cp)
-    elseif cp < 0x800 then
-        return string.char(0xC0 + math.floor(cp / 0x40), 0x80 + cp % 0x40)
-    elseif cp < 0x10000 then
-        return string.char(
-            0xE0 + math.floor(cp / 0x1000),
-            0x80 + math.floor(cp / 0x40) % 0x40,
-            0x80 + cp % 0x40)
-    elseif cp < 0x110000 then
-        return string.char(
-            0xF0 + math.floor(cp / 0x40000),
-            0x80 + math.floor(cp / 0x1000) % 0x40,
-            0x80 + math.floor(cp / 0x40) % 0x40,
-            0x80 + cp % 0x40)
-    end
-    return ""
-end
-
-function Xml.decode(s)
-    s = tostring(s or "")
-    s = s:gsub("&#(%d+);", function(n)
-        return utf8char(tonumber(n) or 0)
-    end)
-    s = s:gsub("&#[xX](%x+);", function(n)
-        return utf8char(tonumber(n, 16) or 0)
-    end)
-    return s:gsub("&lt;", "<")
-        :gsub("&gt;", ">")
-        :gsub("&quot;", '"')
-        :gsub("&apos;", "'")
-        :gsub("&amp;", "&")
-end
 
 local function parseAttrs(raw)
     local attrs = {}
     raw:gsub("([%w_:%.%-]+)%s*=%s*([\"'])(.-)%2", function(name, _, value)
-        attrs[string.lower(name)] = Xml.decode(value)
+        attrs[string.lower(name)] = Text.xmlDecode(value)
     end)
     return attrs
 end
@@ -58,7 +25,7 @@ function Xml.parse(raw)
     if type(raw) ~= "string" or raw == "" then
         return nil, "empty XML"
     end
-    raw = raw:gsub("^\239\187\191", "")
+    raw = Text.stripBom(raw)
     local root = { name = "#document", attr = {}, children = {} }
     local stack = { root }
     local pos = 1
@@ -66,7 +33,7 @@ function Xml.parse(raw)
     local function appendText(text, decode)
         if text ~= "" then
             local node = stack[#stack]
-            node.children[#node.children + 1] = decode and Xml.decode(text) or text
+            node.children[#node.children + 1] = decode and Text.xmlDecode(text) or text
         end
     end
 

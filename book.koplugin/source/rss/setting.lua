@@ -4,6 +4,7 @@ RSS 订阅设置：增删 feed、从 OPML 导入。
 @module koplugin.book.source.rss.setting
 --]]
 
+local Text = require("utils.text")
 local _ = require("gettext")
 local SOURCE_ID = "rss"
 local Setting = {}
@@ -73,7 +74,7 @@ local function addFeed(plugin, parent, reopen)
                     end
                     list[#list + 1] = {
                         url = url,
-                        title = (values[2] or ""):match("^%s*(.-)%s*$"),
+                        title = Text.trim(values[2]),
                     }
                     save(plugin, cfg, list)
                     UIManager:close(dialog)

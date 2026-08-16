@@ -5,6 +5,7 @@ Moon 源设置 UI（服务器/令牌表单由本模块自绘）。
 @module koplugin.book.source.moon.setting
 --]]
 
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local SOURCE_ID = "moon"
@@ -56,8 +57,8 @@ function Setting.open(plugin)
                 text = _("保存"),
                 callback = function()
                     local values = dialog:getFields()
-                    cfg.base_url = (values[1] or ""):gsub("%s+", "")
-                    cfg.token = (values[2] or ""):gsub("%s+", "")
+                    cfg.base_url = Text.stripWhitespace(values[1])
+                    cfg.token = Text.stripWhitespace(values[2])
                     MoonSettings.saveSource(SOURCE_ID, cfg)
                     require("source.registry").invalidate()
                     UIManager:close(dialog)

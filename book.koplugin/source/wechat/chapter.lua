@@ -10,43 +10,10 @@ local JSON = require("json")
 local logger = require("logger")
 local Auth = require("source.wechat.auth")
 local Protocol = require("source.wechat.protocol")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local Chapter = {}
-
---- XML/HTML 特殊字符转义。
----@param s any
----@return string
-local function xmlEscape(s)
-    s = tostring(s or "")
-    return s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;")
-end
-
---- 粗判文本是否像 HTML/XHTML。
----@param s string|nil
----@return boolean
-local function looksLikeHtml(s)
-    if type(s) ~= "string" then
-        return false
-    end
-    local head = s:sub(1, 256):lower()
-    return head:find("<html") or head:find("<!doctype") or head:find("<p") or head:find("<div")
-end
-
---- 纯文本按行包成 xhtml 段落。
----@param text string|nil
----@return string
-local function txtToXhtml(text)
-    text = tostring(text or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
-    local parts = {}
-    for line in (text .. "\n"):gmatch("(.-)\n") do
-        line = line:match("^(.-)%s*$") or ""
-        if line ~= "" then
-            parts[#parts + 1] = "<p>" .. xmlEscape(line) .. "</p>"
-        end
-    end
-    return table.concat(parts, "\n")
-end
 
 --- 从 reader HTML 抽 psvts（优先 __INITIAL_STATE__）。
 ---@param html string|nil
@@ -151,7 +118,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                         if not plain then
                             fail(decode_err or _("txt 章节解码失败"))
                         else
-                            cb(txtToXhtml(plain))
+                            cb(Text.textToBody(plain))
                         end
                     end)
                 end)
@@ -170,10 +137,10 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                     local xhtml, decode_err = Protocol.decodeShards(e0, e1, e3)
                     if not xhtml then
                         fail(decode_err or _("章节解码失败"))
-                    elseif looksLikeHtml(xhtml) then
+                    elseif Text.looksLikeHtml(xhtml) then
                         cb(xhtml)
                     else
-                        cb(txtToXhtml(xhtml))
+                        cb(Text.textToBody(xhtml))
                     end
                 end)
             end)

@@ -4,6 +4,8 @@ RSS XML 树查询与序列化。
 @module koplugin.book.source.rss.xml_handler
 --]]
 
+local Text = require("utils.text")
+
 local Handler = {}
 
 local function localName(name)
@@ -38,19 +40,14 @@ function Handler.text(node)
         end
     end
     walk(node)
-    return table.concat(out):match("^%s*(.-)%s*$") or ""
-end
-
-local function escape(s)
-    return tostring(s or ""):gsub("&", "&amp;")
-        :gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;")
+    return Text.trim(table.concat(out))
 end
 
 local function serialize(node)
     if type(node) == "string" then return node end
     local attrs = {}
     for name, value in pairs(node.attr or {}) do
-        attrs[#attrs + 1] = string.format(' %s="%s"', name, escape(value))
+        attrs[#attrs + 1] = string.format(' %s="%s"', name, Text.xmlEscape(value))
     end
     table.sort(attrs)
     local body = {}
