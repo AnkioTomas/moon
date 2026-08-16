@@ -419,6 +419,9 @@ do
                     return self
                 end,
                 step = function()
+                    if sql:find("MAX(start_time)", 1, true) then
+                        return { 3660, 3, 2000 }, { "s", "c", "m" }
+                    end
                     if sql:find("COALESCE(SUM(duration),0), COUNT(*)", 1, true) then
                         return { 3600, 42 }, { "s", "c" }
                     end
@@ -439,6 +442,13 @@ do
                             { 10 },
                             { 20 },
                         }, 1
+                    end
+                    if sql:find("ORDER BY day DESC", 1, true) then
+                        return {
+                            { "2026-08-15", "2026-08-14" },
+                            { 600, 300 },
+                            { 10, 5 },
+                        }, 2
                     end
                     return {
                         { "2026-08-14", "2026-08-15" },
@@ -479,6 +489,38 @@ do
     Assert.eq(books[1].stable_id, "/books/a.epub")
     Assert.eq(books[1].max_page, 10)
     Assert.eq(books[1].max_total_pages, 20)
+
+    -- 按书聚合（详情页阅读情况）
+    local sb = StatsDB.summaryByBook("local", "/books/a.epub")
+    Assert.eq(sb.total_seconds, 3660)
+    Assert.eq(sb.pages, 3)
+    Assert.eq(sb.last_read, 2000)
+    local sb_q = calls[#calls]
+    Assert.is_true(sb_q.sql:find("AND stable_id=?", 1, true) ~= nil)
+    Assert.eq(sb_q.args[1], "local")
+    Assert.eq(sb_q.args[2], "/books/a.epub")
+
+    -- 非法身份在碰 DB 前拒绝
+    local empty = StatsDB.summaryByBook("", "/books/a.epub")
+    Assert.eq(empty.pages, 0)
+    Assert.eq(empty.last_read, 0)
+    empty = StatsDB.summaryByBook("local", "")
+    Assert.eq(empty.total_seconds, 0)
+
+    -- 按书按天聚合（详情页最近几天卡片）：日期倒序 + LIMIT 绑定
+    local bd = StatsDB.dailyByBook("local", "/books/a.epub", 5)
+    Assert.eq(#bd, 2)
+    Assert.eq(bd[1].ymd, "2026-08-15")
+    Assert.eq(bd[1].seconds, 600)
+    Assert.eq(bd[1].pages, 10)
+    Assert.eq(bd[2].ymd, "2026-08-14")
+    local bd_q = calls[#calls]
+    Assert.is_true(bd_q.sql:find("AND stable_id=?", 1, true) ~= nil)
+    Assert.is_true(bd_q.sql:find("LIMIT ?", 1, true) ~= nil)
+    Assert.eq(bd_q.args[1], "local")
+    Assert.eq(bd_q.args[2], "/books/a.epub")
+    Assert.eq(bd_q.args[3], 5)
+    Assert.eq(#StatsDB.dailyByBook("", "/books/a.epub"), 0)
 
     -- 全部参数化：source_id 绑定，不以字面量拼进 SQL
     for _, c in ipairs(calls) do

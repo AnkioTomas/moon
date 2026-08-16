@@ -123,6 +123,15 @@ function Source:importBookAsync(temp_path, filename, cb)
     return self._client:importAsync(temp_path, filename, cb)
 end
 
+--- 手动改分类/系列 = 移动文件（分类/系列即目录层级），stable_id 跟着变。
+---@param stable_id string 当前文件绝对路径
+---@param category string|nil
+---@param series string|nil
+---@return string|nil new_stable_id, string|nil err
+function Source:moveBook(stable_id, category, series)
+    return self._client:moveBook(stable_id, category, series)
+end
+
 --- 插件生命周期事件：桌面打开时自动扫描（节流在 client 内）。
 --- 扫描会改库，扫完后若桌面正停在图书馆页则置态重建。
 ---@param event string

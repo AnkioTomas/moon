@@ -192,11 +192,14 @@ local function scanFiles(root)
                 local attr = lfs.attributes(path)
                 if attr then
                     if attr.mode == "directory" then
-                        -- 下钻：根下的一级目录名是分类，分类下的二级目录名是系列
-                        if depth == 1 then
-                            walk(path, name, nil, depth + 1)
-                        elseif depth == 2 then
-                            walk(path, category, name, depth + 1)
+                        -- KOReader 的 .sdr 边车目录不是书籍分类，不下钻
+                        if name:sub(-4) ~= ".sdr" then
+                            -- 下钻：根下的一级目录名是分类，分类下的二级目录名是系列
+                            if depth == 1 then
+                                walk(path, name, nil, depth + 1)
+                            elseif depth == 2 then
+                                walk(path, category, name, depth + 1)
+                            end
                         end
                     elseif attr.mode == "file" and isBookFile(name) then
                         files[#files + 1] = {
@@ -262,6 +265,11 @@ local function resolveOne(f)
         local old_cover = coverPath(moved_from)
         if lfs.attributes(old_cover, "mode") == "file" then
             os.rename(old_cover, coverPath(f.path))
+        end
+        -- KOReader 的 .sdr 目录（阅读进度/书签/笔记）跟着书走
+        local old_sdr = moved_from .. ".sdr"
+        if lfs.attributes(old_sdr, "mode") == "directory" then
+            os.rename(old_sdr, f.path .. ".sdr")
         end
         return
     end
@@ -401,6 +409,82 @@ function Client:importAsync(temp_path, filename, cb)
         output:close()
     end
     return self:indexOneAsync(target, cb)
+end
+
+--- 手动改分类/系列 = 移动文件：分类是一级目录、系列是二级目录（无分类则系列无意义，丢弃）。
+--- stable_id 即文件绝对路径，移动后跟着变；四表身份经 renameStableId 迁移，
+--- 封面缓存与 KOReader 的 .sdr 目录（阅读进度/书签/笔记）改名跟随。
+--- 编辑对话框保存时经 DbQueue 调用（renameStableId 写库）；FS 操作同步快，不另起子进程。
+---@param stable_id string 当前文件绝对路径
+---@param category string|nil
+---@param series string|nil
+---@return string|nil new_stable_id 位置没变返回原值；失败返回 nil + err
+function Client:moveBook(stable_id, category, series)
+    local root = rootPath(self.cfg)
+    if root == "" then
+        return nil, _("未配置本地路径")
+    end
+    local filename = type(stable_id) == "string" and stable_id:match("([^/]+)$")
+    if not filename then
+        return nil, _("无效路径")
+    end
+    --- 单级目录名：去空白；含路径分隔符或以 . 开头（隐藏目录/逃逸书库根）拒绝。
+    ---@param s any
+    ---@return string|nil, boolean|nil
+    local function dirName(s)
+        s = Text.trim(type(s) == "string" and s or "")
+        if s == "" then
+            return nil
+        end
+        if s:find("[/\\]") or s:sub(1, 1) == "." then
+            return nil, true
+        end
+        return s
+    end
+    local cat, bad_cat = dirName(category)
+    local ser, bad_ser = dirName(series)
+    if bad_cat or bad_ser then
+        return nil, _("目录名不能含斜杠或以点开头")
+    end
+    if not cat then
+        ser = nil
+    end
+    local dir = root
+    if cat then
+        dir = dir .. "/" .. cat
+    end
+    if ser then
+        dir = dir .. "/" .. ser
+    end
+    local new_path = dir .. "/" .. filename
+    if new_path == stable_id then
+        return stable_id
+    end
+    if lfs.attributes(new_path) then
+        return nil, _("目标位置已有同名文件：") .. filename
+    end
+    -- lfs.mkdir 不递归，逐级建；目录已存在会失败，忽略（os.rename 会做最终裁决）
+    if cat then
+        lfs.mkdir(root .. "/" .. cat)
+    end
+    if ser then
+        lfs.mkdir(dir)
+    end
+    local moved, move_err = os.rename(stable_id, new_path)
+    if not moved then
+        return nil, _("移动失败：") .. tostring(move_err)
+    end
+    local old_cover = coverPath(stable_id)
+    if lfs.attributes(old_cover, "mode") == "file" then
+        os.rename(old_cover, coverPath(new_path))
+    end
+    -- KOReader 的 .sdr 目录（阅读进度/书签/笔记）跟着书走
+    local old_sdr = stable_id .. ".sdr"
+    if lfs.attributes(old_sdr, "mode") == "directory" then
+        os.rename(old_sdr, new_path .. ".sdr")
+    end
+    require("utils.db.book").renameStableId(SOURCE_ID, stable_id, new_path, cat, ser)
+    return new_path
 end
 
 --- 单文件入库（不扫盘、不清失效）。同步解析在子进程跑。

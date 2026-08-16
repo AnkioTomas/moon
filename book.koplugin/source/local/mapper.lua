@@ -40,6 +40,9 @@ local function formatDuration(seconds)
     return T(_("%1分钟"), math.max(1, m))
 end
 
+-- 详情页阅读情况区也复用同一时长文案
+Mapper.formatDuration = formatDuration
+
 --- books 表行 → Book。
 ---@param row table
 ---@return Book|nil
