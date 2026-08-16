@@ -347,6 +347,104 @@ local function queryDb(opts, cb)
     end)
 end
 
+--- 把外部文件收进书库根目录并单本入库（不重扫）。
+--- 防重名加 " (n)"；os.rename 失败（跨设备）退化为流式复制，失败不留半截文件。
+---@param temp_path string
+---@param filename string
+---@param cb fun(ok: boolean|nil, err: any)
+---@return { cancel: fun() }|nil
+function Client:importAsync(temp_path, filename, cb)
+    local ok, path_err = self:validatePath()
+    if not ok then
+        cb(nil, path_err)
+        return nil
+    end
+    local root = rootPath(self.cfg)
+    filename = tostring(filename or ""):gsub("[/\\]", "_")
+    if filename == "" then
+        cb(nil, _("无效文件名"))
+        return nil
+    end
+    local stem, ext = filename:match("^(.*)(%.[^.]*)$")
+    stem, ext = stem or filename, ext or ""
+    local target, n = root .. "/" .. filename, 2
+    while lfs.attributes(target) do
+        target = string.format("%s/%s (%d)%s", root, stem, n, ext)
+        n = n + 1
+    end
+    local moved = os.rename(temp_path, target)
+    if not moved then
+        local input, copy_err = io.open(temp_path, "rb")
+        local output
+        if input then
+            output, copy_err = io.open(target, "wb")
+        end
+        if not input or not output then
+            if input then input:close() end
+            pcall(os.remove, target)
+            cb(nil, tostring(copy_err))
+            return nil
+        end
+        while true do
+            local chunk = input:read(64 * 1024)
+            if not chunk then break end
+            local written, write_err = output:write(chunk)
+            if not written then
+                input:close()
+                output:close()
+                pcall(os.remove, target)
+                cb(nil, tostring(write_err))
+                return nil
+            end
+        end
+        input:close()
+        output:close()
+    end
+    return self:indexOneAsync(target, cb)
+end
+
+--- 单文件入库（不扫盘、不清失效）。同步解析在子进程跑。
+--- 导入落根目录，category/series 恒为 nil（与扫盘根层语义一致）。
+---@param path string 绝对路径（即 stable_id）
+---@param cb fun(ok: boolean|nil, err: any)
+---@return { cancel: fun() }|nil
+function Client:indexOneAsync(path, cb)
+    if type(path) ~= "string" or path == "" then
+        UIManager:nextTick(function()
+            cb(nil, _("无效路径"))
+        end)
+        return nil
+    end
+    local name = path:match("([^/]+)$") or path
+    if not isBookFile(name) then
+        UIManager:nextTick(function()
+            cb(nil, _("不支持的文件格式"))
+        end)
+        return nil
+    end
+    local job = Task.run(function()
+        resolveOne({
+            name = name,
+            path = path,
+            category = nil,
+            series = nil,
+        })
+    end, {
+        on_done = function()
+            cb(true)
+        end,
+        on_failed = function(err)
+            require("logger").warn("book local index failed", err)
+            cb(nil, err)
+        end,
+    })
+    return {
+        cancel = function()
+            job:abort()
+        end,
+    }
+end
+
 --- 书库查询（异步）：默认直查数据库；opts.force 先真实扫盘写库再查。
 ---@param opts table|nil { force, page, page_size, category, series, search }
 ---@param cb fun(rows: table[]|nil, count: number, err: any)
