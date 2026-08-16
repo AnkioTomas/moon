@@ -1,4 +1,4 @@
---[[-- source.local.client：扫描写库 / 直查 DB 分页筛选 / force 清理 / 自动扫描节流 / 封面 / 最近阅读 / 统计 --]]
+--[[-- source.local.client：扫描写库 / 直查 DB 分页筛选 / force 清理 / 单本入库 / 自动扫描节流 / 封面 / 最近阅读 / 统计 --]]
 
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
@@ -501,6 +501,118 @@ do
     Stubs.flush()
     Assert.len(rows, 6)
     Assert.len(dirs_scanned, 0)
+end
+
+-- ── 单本入库：只解析目标文件，不扫盘、不清失效 ──────
+do
+    reset()
+    db_rows[rowKey("local", "/books/gone.epub")] = {
+        source_id = "local", stable_id = "/books/gone.epub", title = "gone",
+    }
+    local ok, err
+    Client.new({ path = "/books" }):indexOneAsync("/books/a.epub", function(o, e)
+        ok, err = o, e
+    end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.len(dirs_scanned, 0)
+    Assert.len(opened, 1)
+    Assert.eq(opened[1], "/books/a.epub")
+    local a = db_rows[rowKey("local", "/books/a.epub")]
+    Assert.not_nil(a)
+    Assert.eq(a.title, "T:/books/a.epub")
+    Assert.is_nil(a.category)
+    Assert.is_nil(a.series)
+    -- 其它库内行不受影响（无 prune）
+    Assert.not_nil(db_rows[rowKey("local", "/books/gone.epub")])
+    Assert.len(removed, 0)
+
+    -- 非法扩展名 / 空路径
+    ok, err = true, nil
+    Client.new({ path = "/books" }):indexOneAsync("/books/old.cbr", function(o, e)
+        ok, err = o, e
+    end)
+    Stubs.flush()
+    Assert.is_nil(ok)
+    Assert.not_nil(err)
+
+    ok, err = true, nil
+    Client.new({ path = "/books" }):indexOneAsync("", function(o, e)
+        ok, err = o, e
+    end)
+    Stubs.flush()
+    Assert.is_nil(ok)
+    Assert.not_nil(err)
+end
+
+-- ── importAsync：文件名消毒 + 重名避让 + 入库；rename 由 os.rename 打桩 ──────
+do
+    reset()
+    local real_rename = os.rename
+    local renamed = {}
+    os.rename = function(from, to)
+        -- 只记书籍落位（封面 PNG 的 .part→.png 改名也在此钩子上，滤掉）
+        if tostring(to):match("%.epub$") then
+            renamed[#renamed + 1] = { from, to }
+        end
+        return true
+    end
+
+    -- 文件名含路径分隔符 → 消毒下划线
+    local ok, err
+    Client.new({ path = "/books" }):importAsync("/tmp/dl.epub", "sub/a.epub", function(o, e)
+        ok, err = o, e
+    end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(#renamed, 1)
+    Assert.eq(renamed[1][1], "/tmp/dl.epub")
+    Assert.eq(renamed[1][2], "/books/sub_a.epub")
+    local row = db_rows[rowKey("local", "/books/sub_a.epub")]
+    Assert.not_nil(row)
+    Assert.is_nil(row.category)
+    Assert.is_nil(row.series)
+
+    -- 与库内已有文件重名 → 加 " (2)"
+    ok, err = nil, nil
+    Client.new({ path = "/books" }):importAsync("/tmp/dl2.epub", "a.epub", function(o, e)
+        ok, err = o, e
+    end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.eq(#renamed, 2)
+    Assert.eq(renamed[2][2], "/books/a (2).epub")
+    Assert.not_nil(db_rows[rowKey("local", "/books/a (2).epub")])
+
+    -- 未配置路径：直接报错，不碰文件
+    ok, err = true, nil
+    Client.new({}):importAsync("/tmp/dl.epub", "x.epub", function(o, e)
+        ok, err = o, e
+    end)
+    Assert.is_nil(ok)
+    Assert.not_nil(err)
+    Assert.eq(#renamed, 2)
+
+    -- 空文件名：消毒前即为空，同步报错
+    ok, err = true, nil
+    Client.new({ path = "/books" }):importAsync("/tmp/dl.epub", "", function(o, e)
+        ok, err = o, e
+    end)
+    Assert.is_nil(ok)
+    Assert.eq(err, "无效文件名")
+
+    -- 无扩展名文件名：落位后由 indexOneAsync 拒绝（异步）
+    ok, err = true, nil
+    Client.new({ path = "/books" }):importAsync("/tmp/dl.epub", "  ", function(o, e)
+        ok, err = o, e
+    end)
+    Stubs.flush()
+    Assert.is_nil(ok)
+    Assert.eq(err, "不支持的文件格式")
+
+    os.rename = real_rename
 end
 
 -- ── 自动扫描：首次扫，节流期内跳过，过期重扫 ──────

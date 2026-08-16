@@ -2,7 +2,7 @@
 source.local.mapper 离线用例
 
 目标模块顶部零硬依赖（只 require types 和 gettext）；
-insight / detailFromRef 在函数内 require("utils.db.book")，
+insight 在函数内 require("utils.db.book")，
 真实实现会开 sqlite，这里用 package.preload 换成可控假库。
 
 formatDuration 是模块内 local 函数，经由 insight 输出的文案间接覆盖。
@@ -202,42 +202,6 @@ do -- max_total_pages 为 0 / nil 时 percent 为 0；无 daily 时 days 为空
 
     local no_daily = Mapper.insight({ total_seconds = 10 }, nil, nil)
     Assert.is_nil(next(no_daily.calendar.days))
-end
-
--- ===== detailFromRef =====
-
-do -- 命中 books 表缓存：用缓存元数据，percent 恒 0
-    FakeBooks["local\n/books/cached.epub"] = {
-        title = "缓存书名",
-        authors = "某作者",
-        intro = "简介",
-        category = "小说",
-    }
-    local ref = { source_id = "local", stable_id = "/books/cached.epub" }
-    local d = Mapper.detailFromRef(ref)
-    Assert.eq(d.ref, ref)
-    Assert.eq(d.title, "缓存书名")
-    Assert.eq(d.authors, "某作者")
-    Assert.eq(d.intro, "简介")
-    Assert.eq(d.category, "小说")
-    Assert.eq(d.percent, 0)
-end
-
-do -- 缓存标题为空串视为未命中，回退文件名
-    FakeBooks["local\n/books/空标题.epub"] = { title = "", authors = "忽略我" }
-    local d = Mapper.detailFromRef({ source_id = "local", stable_id = "/books/空标题.epub" })
-    Assert.eq(d.title, "空标题")
-    Assert.is_nil(d.authors)
-    Assert.eq(d.percent, 0)
-end
-
-do -- 无缓存：文件名去目录去扩展名
-    local d = Mapper.detailFromRef({ source_id = "local", stable_id = "/a/b/书名.txt" })
-    Assert.eq(d.title, "书名")
-    Assert.eq(d.percent, 0)
-
-    local no_ext = Mapper.detailFromRef({ source_id = "local", stable_id = "noext" })
-    Assert.eq(no_ext.title, "noext")
 end
 
 -- 收尾：不影响同进程内后续用例

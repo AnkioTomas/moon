@@ -70,6 +70,65 @@ function Registry.list()
     return out
 end
 
+--- 源是否启用。common.enabled_sources 为 nil = 全部启用（兼容旧配置）；
+--- 活跃源恒 true（配置被手改的兜底，picker/设置页都依赖这条）。
+---@param id SourceId
+---@return boolean
+function Registry.isEnabled(id)
+    if id == MoonSettings.activeSourceId() then
+        return true
+    end
+    local enabled = MoonSettings.get().enabled_sources
+    if type(enabled) ~= "table" then
+        return true
+    end
+    return enabled[id] == true
+end
+
+--- 列出启用源元信息（picker 与设置页只显示这些）。
+---@return BookSourceMeta[]
+function Registry.listEnabled()
+    local out = {}
+    for _, meta in ipairs(Registry.list()) do
+        if Registry.isEnabled(meta.id) then
+            out[#out + 1] = meta
+        end
+    end
+    return out
+end
+
+--- 启用/禁用源并持久化。禁止禁用活跃源（UI 层也该用 enabled=false 挡住）。
+--- 首次写入时以「当前全部启用」初始化集合，保持 nil = 全开的语义边界。
+---@param id SourceId
+---@param on boolean
+---@return boolean ok, string|nil err
+function Registry.setEnabled(id, on)
+    if not FACTORIES[id] then
+        return false, T(_("未知数据源: %1"), tostring(id))
+    end
+    if not on and id == MoonSettings.activeSourceId() then
+        return false, _("不能禁用当前使用的数据源")
+    end
+    local common = MoonSettings.get()
+    local enabled = common.enabled_sources
+    if type(enabled) ~= "table" then
+        enabled = {}
+        for _, known in ipairs(ORDER) do
+            enabled[known] = true
+        end
+    else
+        local copy = {}
+        for k, v in pairs(enabled) do
+            copy[k] = v
+        end
+        enabled = copy
+    end
+    enabled[id] = on and true or false
+    common.enabled_sources = enabled
+    MoonSettings.save(common)
+    return true
+end
+
 --- 按 id 创建数据源实例。
 ---@param id SourceId
 ---@return BookSource|nil, string|nil

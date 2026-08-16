@@ -211,6 +211,7 @@ function Desktop:switchTab(id)
     end
     if id == "settings" then
         self._settings_page = 1
+        self._settings_sub = nil
         self._cache_size_label = nil
     end
     if id == "stats" then

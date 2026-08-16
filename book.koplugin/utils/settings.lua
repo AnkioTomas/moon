@@ -15,6 +15,7 @@ local Paths = require("utils.paths")
 
 ---@class MoonCommonSettings
 ---@field active_source SourceId 当前数据源 id
+---@field enabled_sources table<SourceId, boolean>|nil 启用源集合；nil = 全部启用（兼容旧配置）
 ---@field ui_scale number UI 缩放百分比（默认 130）
 ---@field ui_font string|nil 界面字体 id：空=系统默认；本地为 basename；微信为 weread id
 ---@field ui_font_name string|nil 界面字体展示名

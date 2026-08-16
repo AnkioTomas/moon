@@ -7,16 +7,16 @@ source.registry 离线用例
 local Assert = require("support.assert")
 
 package.preload["utils.settings"] = function()
-    local active = "moon"
+    local common = { active_source = "moon" }
     return {
         activeSourceId = function()
-            return active
+            return common.active_source
         end,
         get = function()
-            return { active_source = active }
+            return common
         end,
         save = function(s)
-            active = s.active_source
+            common = s
         end,
         getSource = function()
             return { url = "http://x", token = "t", username = "u", password = "p" }
@@ -112,6 +112,33 @@ do
     local src, err = Registry.create("nope")
     Assert.is_nil(src)
     Assert.is_true(type(err) == "string")
+end
+
+-- 启用源：默认全开；禁用/启用非活跃源；活跃源禁止禁用
+do
+    -- 无 enabled_sources（旧配置）：全真，listEnabled == list
+    Assert.is_true(Registry.isEnabled("rss"))
+    Assert.is_true(Registry.isEnabled("moon"))
+    Assert.eq(#Registry.listEnabled(), #Registry.list())
+
+    -- 禁用非活跃源：首次写入以全开初始化集合
+    Assert.is_true(Registry.setEnabled("rss", false))
+    Assert.is_false(Registry.isEnabled("rss"))
+    Assert.eq(#Registry.listEnabled(), #Registry.list() - 1)
+
+    -- 再启用回来
+    Assert.is_true(Registry.setEnabled("rss", true))
+    Assert.is_true(Registry.isEnabled("rss"))
+    Assert.eq(#Registry.listEnabled(), #Registry.list())
+
+    -- 活跃源（stub 固定 moon）禁止禁用；isEnabled 兜底恒 true
+    local ok, err = Registry.setEnabled("moon", false)
+    Assert.is_false(ok)
+    Assert.not_nil(err)
+    Assert.is_true(Registry.isEnabled("moon"))
+
+    -- 未知源
+    Assert.is_false(Registry.setEnabled("nope", true))
 end
 
 -- 清理 preload，避免污染后续用例
