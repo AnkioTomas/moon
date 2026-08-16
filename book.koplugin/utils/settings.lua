@@ -24,6 +24,9 @@ local Paths = require("utils.paths")
 ---@field lock_screen_prev_type string|nil 接管前的 screensaver_type
 ---@field lock_screen_prev_cover string|nil 接管前的 screensaver_document_cover（空串=无）
 ---@field lock_screen_myrl_day string|nil 摸鱼日报上次成功下载日 YYYY-MM-DD
+---@field remote_port number 远程传书端口（默认 9528）
+---@field remote_autostart boolean 远程传书开机自启
+---@field pinyin_enabled boolean 拼音候选输入（默认关闭）
 
 local M = {}
 
@@ -37,6 +40,9 @@ local function commonDefaults()
         ui_font_name = "",
         grid_max_cols = 4,
         lock_screen = "ko",
+        remote_port = 9528,
+        remote_autostart = false,
+        pinyin_enabled = false,
     }
 end
 

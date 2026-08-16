@@ -41,6 +41,8 @@ local FontPicker = require("ui.components.fontpicker")
 local MoonSettings = require("utils.settings")
 local MoonFont = require("utils.font")
 local LockScreen = require("lockscreen.init")
+local Remote = require("remote.init")
+local Pinyin = require("pinyin.init")
 local SourceRegistry = require("source.registry")
 local Cache = require("book.cache")
 local Host = require("host")
@@ -667,7 +669,7 @@ function Settings.build(desktop)
 
     local packed = {}
     local sub = desktop._settings_sub
-    if sub ~= "sources" and sub ~= "display" and sub ~= "maintenance" then
+    if sub ~= "sources" and sub ~= "display" and sub ~= "maintenance" and sub ~= "remote" then
         -- 未知子页（状态损坏）：归一化回主菜单
         sub = nil
         desktop._settings_sub = nil
@@ -700,11 +702,49 @@ function Settings.build(desktop)
             end,
             function(iw)
                 return SettingRow.build(iw, {
+                    kind = "toggle",
+                    icon = "translate",
+                    title = _("拼音输入"),
+                    status = Pinyin.isEnabled() and _("开") or _("关"),
+                    status_on = Pinyin.isEnabled(),
+                    callback = function()
+                        local on = not Pinyin.isEnabled()
+                        Pinyin.setEnabled(on)
+                        if on then
+                            local ok = Pinyin.bootstrap()
+                            UIManager:show(InfoMessage:new{
+                                text = ok and _("拼音输入已开启") or _("拼音输入开启失败"),
+                                timeout = 2,
+                            })
+                        else
+                            UIManager:show(InfoMessage:new{
+                                text = _("拼音输入已关闭"),
+                                timeout = 2,
+                            })
+                        end
+                        desktop:rebuild()
+                    end,
+                })
+            end,
+            function(iw)
+                return SettingRow.build(iw, {
                     kind = "nav",
                     icon = "build",
                     title = _("维护"),
                     callback = function()
                         gotoSub(desktop, "maintenance")
+                    end,
+                })
+            end,
+            function(iw)
+                return SettingRow.build(iw, {
+                    kind = "nav",
+                    icon = "folder",
+                    title = _("文件管理"),
+                    status = Remote.isRunning() and _("运行中") or nil,
+                    status_on = Remote.isRunning(),
+                    callback = function()
+                        gotoSub(desktop, "remote")
                     end,
                 })
             end,
@@ -717,6 +757,8 @@ function Settings.build(desktop)
         elseif sub == "display" then
             appendSection(packed, card_w, _("显示"),
                 displayRows(desktop, font_name, scale, grid_max_cols, open_on))
+        elseif sub == "remote" then
+            appendSection(packed, card_w, _("文件管理"), Remote.menuRows(desktop))
         else
             appendSection(packed, card_w, _("维护"), maintenanceRows(desktop))
         end
