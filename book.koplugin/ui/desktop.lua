@@ -374,8 +374,18 @@ function Desktop:showDetail(book)
         desktop = self,
         covers_fullscreen = true,
         close_callback = function()
+            local dirty = desk.detail and desk.detail._dirty
             desk.detail = nil
-            if not desk._closed then
+            if desk._closed then
+                return
+            end
+            if dirty then
+                -- 详情里改过数据（编辑/刮削）：列表与首页缓存已失效，重建触发重拉
+                desk._library_state = nil
+                desk._home_state = nil
+                desk._home_loaded = false
+                desk:rebuild()
+            else
                 UIManager:setDirty(desk, "full")
             end
         end,
