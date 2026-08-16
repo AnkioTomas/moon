@@ -5,47 +5,9 @@
 --]]
 
 local _ = require("gettext")
+local Text = require("utils.text")
 
 local Html = {}
-
---- XML/HTML 特殊字符转义。
----@param s any
----@return string
-function Html.xmlEscape(s)
-    s = tostring(s or "")
-    return s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;")
-end
-
---- 粗判是否已是 HTML 片段/文档。
----@param s string|nil
----@return boolean
-function Html.looksLikeHtml(s)
-    if type(s) ~= "string" then
-        return false
-    end
-    local head = s:sub(1, 256):lower()
-    return head:find("<html", 1, true)
-        or head:find("<!doctype", 1, true)
-        or head:find("<p", 1, true)
-        or head:find("<div", 1, true)
-        or head:find("<img", 1, true)
-        or head:find("<h%d") ~= nil
-end
-
---- 纯文本按行包成段落。
----@param text string|nil
----@return string
-function Html.textToBody(text)
-    text = tostring(text or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
-    local parts = {}
-    for line in (text .. "\n"):gmatch("(.-)\n") do
-        line = line:match("^(.-)%s*$") or ""
-        if line ~= "" then
-            parts[#parts + 1] = "<p>" .. Html.xmlEscape(line) .. "</p>"
-        end
-    end
-    return table.concat(parts, "\n")
-end
 
 --- 确保得到可嵌入 body 的 HTML。
 ---@param payload { title: string|nil, html: string|nil, text: string|nil }|string|nil
@@ -62,11 +24,11 @@ function Html.normalizeBody(payload)
         if type(payload.html) == "string" and payload.html ~= "" then
             body = payload.html
         elseif type(payload.text) == "string" and payload.text ~= "" then
-            body = Html.textToBody(payload.text)
+            body = Text.textToBody(payload.text)
         end
     end
-    if body ~= "" and not Html.looksLikeHtml(body) then
-        body = Html.textToBody(body)
+    if body ~= "" and not Text.looksLikeHtml(body) then
+        body = Text.textToBody(body)
     end
     return body, title
 end
@@ -94,7 +56,7 @@ img{max-width:100%%;}
 %s
 </body>
 </html>
-]], Html.xmlEscape(title), Html.xmlEscape(title), body)
+]], Text.xmlEscape(title), Text.xmlEscape(title), body)
 end
 
 --- 章节文件是否可用（非空 HTML）。

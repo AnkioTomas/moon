@@ -5,6 +5,7 @@ WebDAV 源设置 UI（连接表单由本模块自绘）。
 @module koplugin.book.source.webdav.setting
 --]]
 
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local SOURCE_ID = "webdav"
@@ -60,8 +61,8 @@ function Setting.open(plugin)
                 text = _("保存"),
                 callback = function()
                     local values = dialog:getFields()
-                    cfg.url = (values[1] or ""):gsub("%s+", "")
-                    cfg.username = (values[2] or ""):gsub("%s+", "")
+                    cfg.url = Text.stripWhitespace(values[1])
+                    cfg.username = Text.stripWhitespace(values[2])
                     cfg.password = values[3] or ""
                     MoonSettings.saveSource(SOURCE_ID, cfg)
                     require("source.registry").invalidate()

@@ -4,6 +4,7 @@ Z-Library 下载账号设置。
 @module koplugin.book.zlib.setting
 --]]
 
+local Text = require("utils.text")
 local _ = require("gettext")
 local Setting = {}
 
@@ -34,9 +35,9 @@ function Setting.open(plugin)
             { text = _("取消"), id = "close", callback = function() UIManager:close(dialog) end },
             { text = _("保存"), callback = function()
                 local values = dialog:getFields()
-                cfg.email = (values[1] or ""):match("^%s*(.-)%s*$")
+                cfg.email = Text.trim(values[1])
                 cfg.password = values[2] or ""
-                local base_url = (values[3] or ""):match("^%s*(.-)%s*$")
+                local base_url = Text.trim(values[3])
                 cfg.base_url = base_url ~= "" and base_url or nil
                 cfg.user_id, cfg.user_key = nil, nil
                 Settings.saveSource("zlib", cfg)

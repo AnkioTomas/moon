@@ -12,6 +12,7 @@ local util = require("util")
 local ffiUtil = require("ffi/util")
 local Header = require("http.header")
 local Request = require("http.request")
+local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -41,26 +42,12 @@ local PROPFIND_LIST = [[<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop>
 --- 去掉首尾斜杠
 ---@param s string|nil
 ---@return string
-local function trimSlashes(s)
-    s = tostring(s or "")
-    local from = s:match("^/*()")
-    if from > #s then
-        return ""
-    end
-    return s:match(".*[^/]", from) or ""
-end
+local trimSlashes = Text.trimSlashes
 
 --- 去掉尾部斜杠
 ---@param s string|nil
 ---@return string
-local function rtrimSlashes(s)
-    s = tostring(s or "")
-    local n = #s
-    while n > 0 and s:sub(n, n) == "/" do
-        n = n - 1
-    end
-    return s:sub(1, n)
-end
+local rtrimSlashes = Text.rtrimSlashes
 
 --- HTTP 状态码转用户可读错误文案
 ---@param code any

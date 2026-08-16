@@ -7,40 +7,15 @@ Book (moon) HTTP 客户端（Bearer Token）
 @module koplugin.book.source.moon.client
 --]]
 
-local socketurl = require("socket.url")
 local JSON = require("json")
 local logger = require("logger")
 local Request = require("http.request")
 local Cache = require("http.cache")
+local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
 local Client = {}
-
---- 去掉 URL 末尾多余斜杠。
----@param url string|nil
----@return string
-local function trim_slash(url)
-    return (url or ""):gsub("/+$", "")
-end
-
---- 将表编码为 application/x-www-form-urlencoded（键排序）。
----@param tbl table
----@return string
-local function encode_form(tbl)
-    local keys = {}
-    for k in pairs(tbl) do
-        keys[#keys + 1] = k
-    end
-    table.sort(keys, function(a, b)
-        return tostring(a) < tostring(b)
-    end)
-    local parts = {}
-    for _, k in ipairs(keys) do
-        parts[#parts + 1] = tostring(k) .. "=" .. socketurl.escape(tostring(tbl[k]))
-    end
-    return table.concat(parts, "&")
-end
 
 --- 构造 Moon HTTP 客户端。
 ---@param o { base_url: string|nil, token: string|nil }|table|nil
@@ -49,7 +24,7 @@ function Client:new(o)
     o = o or {}
     setmetatable(o, self)
     self.__index = self
-    o.base_url = trim_slash(o.base_url or "")
+    o.base_url = Text.rtrimSlashes(o.base_url or "")
     o.token = o.token or ""
     return o
 end
@@ -70,7 +45,7 @@ function Client:_url(path, query)
     end
     local url = self.base_url .. path
     if query and next(query) then
-        url = url .. "?" .. encode_form(query)
+        url = url .. "?" .. Text.formEncode(query)
     end
     return url
 end
@@ -79,13 +54,10 @@ end
 ---@param filename string|nil
 ---@return string
 local function webdavPath(filename)
-    filename = tostring(filename or ""):gsub("^/+", "")
+    filename = Text.trimSlashes(filename)
     local parts = {}
     for seg in filename:gmatch("[^/]+") do
-        local enc = seg:gsub("([^%w%-%._~])", function(c)
-            return string.format("%%%02X", string.byte(c))
-        end)
-        parts[#parts + 1] = enc
+        parts[#parts + 1] = Text.urlEncode(seg)
     end
     return "/webdav/" .. table.concat(parts, "/")
 end
@@ -147,7 +119,7 @@ function Client:_jsonAsync(method, path, opts, cb)
             end
             headers["Content-Type"] = "application/json"
         else
-            encoded = encode_form(opts.body)
+            encoded = Text.formEncode(opts.body)
             headers["Content-Type"] = "application/x-www-form-urlencoded"
         end
         body = encoded
@@ -181,10 +153,7 @@ function Client:_jsonAsync(method, path, opts, cb)
                 cb(nil, T(_("请求失败: %1"), tostring(res and res.code)))
                 return
             end
-            local raw = res.body or ""
-            if raw:sub(1, 3) == "\239\187\191" then
-                raw = raw:sub(4)
-            end
+            local raw = Text.stripBom(res.body or "")
             local ok, data = pcall(JSON.decode, raw)
             if not ok or type(data) ~= "table" then
                 cb(nil, T(_("响应不是 JSON (HTTP %1) %2"), tostring(code), (raw:gsub("%s+", " ")):sub(1, 120)))

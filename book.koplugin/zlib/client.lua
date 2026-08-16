@@ -6,6 +6,7 @@ Z-Library eAPI 客户端（HTTP Basic 门禁 + Z-Library 账号会话，仅异�
 
 local JSON = require("json")
 local Request = require("http.request")
+local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -39,22 +40,6 @@ Client.__index = Client
 -- ---------------------------------------------------------------------------
 -- URL 工具
 -- ---------------------------------------------------------------------------
-
-local function urlEncode(value)
-    return tostring(value):gsub("([^%w%-_%.~])", function(char)
-        return string.format("%%%02X", string.byte(char))
-    end)
-end
-
-local function form(data)
-    local keys, out = {}, {}
-    for key in pairs(data or {}) do keys[#keys + 1] = key end
-    table.sort(keys)
-    for _, key in ipairs(keys) do
-        out[#out + 1] = urlEncode(key) .. "=" .. urlEncode(data[key])
-    end
-    return table.concat(out, "&")
-end
 
 --- 取 URL 的 origin（scheme://host[:port]）与其组成部分
 ---@return string|nil origin, string|nil scheme, string|nil host
@@ -219,7 +204,7 @@ function Client:_jsonAsync(method, path, opts, cb)
         if job and job.cancel then job.cancel() end
     end
 
-    local body = opts.form and form(opts.form) or nil
+    local body = opts.form and Text.formEncode(opts.form) or nil
     local last_err = _("网络请求失败")
     local bi = 0
     local current_base

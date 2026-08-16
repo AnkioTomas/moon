@@ -6,6 +6,7 @@ Z-Library wire → 书城展示对象。
 
 local BookRef = require("types.book").BookRef
 local BookListResult = require("types.book_list")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local Mapper = {}
@@ -33,7 +34,7 @@ function Mapper.book(row)
     local cover = coverUrl(row.cover)
     local description = row.description or row.intro
     if type(description) == "string" then
-        description = description:gsub("<[^>]+>", " "):gsub("%s+", " "):match("^%s*(.-)%s*$")
+        description = Text.trim(description:gsub("<[^>]+>", " "):gsub("%s+", " "))
     end
     return {
         ref = BookRef.new("zlib", stable_id),

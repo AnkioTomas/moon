@@ -12,11 +12,6 @@ Stubs.reset()
 
 local Html2Epub = require("convert.html2epub")
 
--- xmlEscape
-do
-    Assert.eq(Html2Epub._xmlEscape([[a<b>"c"&]]), [[a&lt;b&gt;&quot;c&quot;&amp;]])
-end
-
 -- collect / rewrite image srcs
 do
     local html = [[<p>x</p><img src="https://a/x.png"><img src='https://b/y.jpg' alt="y"><img src=foo.png>]]

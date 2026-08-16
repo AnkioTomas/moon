@@ -7,6 +7,7 @@
 local SourceBase = require("source.base")
 local Client = require("source.local.client")
 local Mapper = require("source.local.mapper")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local Local = {}
@@ -124,7 +125,7 @@ function Source:importBookAsync(temp_path, filename, cb)
         cb(nil, path_err)
         return nil
     end
-    local root = tostring(self.cfg.path or ""):gsub("/+$", "")
+    local root = Text.rtrimSlashes(self.cfg.path)
     filename = tostring(filename or ""):gsub("[/\\]", "_")
     if filename == "" then
         cb(nil, _("无效文件名"))

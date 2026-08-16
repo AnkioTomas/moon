@@ -12,15 +12,7 @@ Stubs.reset()
 package.loaded["chapters.html"] = nil
 local Html = require("chapters.html")
 
-Assert.eq(Html.xmlEscape([[a<b>"c"&]]), [[a&lt;b&gt;&quot;c&quot;&amp;]])
-Assert.is_true(Html.looksLikeHtml("<p>hi</p>"))
-Assert.is_false(Html.looksLikeHtml("plain line"))
-
-do
-    local body = Html.textToBody("hello\nworld")
-    Assert.is_true(body:find("<p>hello</p>", 1, true) ~= nil)
-    Assert.is_true(body:find("<p>world</p>", 1, true) ~= nil)
-end
+-- xmlEscape / looksLikeHtml / textToBody 已迁 utils.text，由 tests/utils/text_spec.lua 覆盖
 
 do
     local body, title = Html.normalizeBody({ title = "T1", text = "line" })

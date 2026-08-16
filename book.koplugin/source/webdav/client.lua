@@ -5,6 +5,7 @@ WebDAV 协议客户端包装 http.webdav（仅异步）
 --]]
 
 local Webdav = require("http.webdav")
+local Text = require("utils.text")
 
 local Client = {}
 Client.__index = Client
@@ -28,9 +29,8 @@ end
 --- 是否已配置 URL 与用户名。
 ---@return boolean
 function Client:configured()
-    local url = (self.cfg.url or ""):gsub("%s+", "")
-    local user = (self.cfg.username or ""):gsub("%s+", "")
-    return url ~= "" and user ~= ""
+    return Text.stripWhitespace(self.cfg.url) ~= ""
+        and Text.stripWhitespace(self.cfg.username) ~= ""
 end
 
 function Client:listAsync(path, cb)

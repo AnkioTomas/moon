@@ -27,6 +27,7 @@ local Request = require("http.request")
 local Paths = require("utils.paths")
 local MoonSettings = require("utils.settings")
 local Task = require("utils.task")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local M = {}
@@ -71,7 +72,7 @@ end
 ---@param id string|nil
 ---@return string
 local function sanitizeId(id)
-    return tostring(id or ""):gsub("%s+", ""):gsub("[^%w%._%-]", "_")
+    return (Text.stripWhitespace(id):gsub("[^%w%._%-]", "_"))
 end
 
 --- 微信读书字体本地路径：.moon/fonts/<id>.woff
