@@ -408,4 +408,13 @@ return {
     ["服务器拒绝自动访问，正在尝试其它镜像"] = "Server refused automated access; trying another mirror",
     ["正在尝试镜像：%1"] = "Trying mirror: %1",
     ["镜像地址（可选，留空自动选择）"] = "Mirror URL (optional, auto if empty)",
+    ["文件管理"] = "File Manager",
+    ["文件管理服务"] = "File manager service",
+    ["未运行"] = "Not running",
+    ["运行中"] = "Running",
+    ["端口"] = "Port",
+    ["开机自启"] = "Start on launch",
+    ["服务已启动：%1"] = "Service started: %1",
+    ["启动失败：%1"] = "Failed to start: %1",
+    ["本机IP"] = "device IP",
 }
