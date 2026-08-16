@@ -169,6 +169,13 @@ local function fakeHandlers(dirs)
         is_protected = function()
             return false
         end,
+        get_input = function()
+            return { active = false }
+        end,
+        set_input = function(text)
+            calls.input = text
+            return true
+        end,
         temp_path = function()
             return os.tmpname()
         end,
@@ -540,4 +547,57 @@ do
     server:stop()
     Assert.is_true(client.closed)
     Assert.eq(#server._conns, 0)
+end
+
+
+-- ── 远程输入 ──────────────────────────────────────────
+
+do
+    -- GET 激活状态：默认未激活 / 覆盖为激活
+    local c1 = newClient({ "GET /api/input HTTP/1.1\r\n\r\n" })
+    drain(serve(c1))
+    local d1 = require("support.json_stub").decode(select(2, parseResponse(c1:output())))
+    Assert.is_false(d1.active)
+
+    local h2 = fakeHandlers({})
+    h2.get_input = function()
+        return { active = true }
+    end
+    local c2 = newClient({ "GET /api/input HTTP/1.1\r\n\r\n" })
+    drain(serve(c2, h2))
+    local d2 = require("support.json_stub").decode(select(2, parseResponse(c2:output())))
+    Assert.is_true(d2.active)
+
+    -- POST：分片送达的中文整段，完整注入
+    local h3, calls3 = fakeHandlers({})
+    local text = "第一段话。\n第二段话：中文 English 123"
+    local c3 = newClient({
+        "POST /api/input HTTP/1.1\r\nContent-Length: " .. #text .. "\r\n\r\n" .. text:sub(1, 10),
+        text:sub(11),
+    })
+    drain(serve(c3, h3))
+    Assert.eq(calls3.input, text, "text_mode body 必须完整拼接")
+    Assert.eq((parseResponse(c3:output())), 200)
+
+    -- POST：无激活输入框 → 409
+    local h4 = fakeHandlers({})
+    h4.set_input = function()
+        return nil, "no active input"
+    end
+    local c4 = newClient({ "POST /api/input HTTP/1.1\r\nContent-Length: 2\r\n\r\nhi" })
+    drain(serve(c4, h4))
+    Assert.eq((parseResponse(c4:output())), 409)
+
+    -- POST：无 Content-Length → 411；超限 → 413
+    local c5 = newClient({ "POST /api/input HTTP/1.1\r\n\r\n" })
+    drain(serve(c5))
+    Assert.eq((parseResponse(c5:output())), 411)
+    local c6 = newClient({ "POST /api/input HTTP/1.1\r\nContent-Length: 70000\r\n\r\n" })
+    drain(serve(c6))
+    Assert.eq((parseResponse(c6:output())), 413)
+
+    -- GET 用错方法组合外的动词 → 405
+    local c7 = newClient({ "DELETE /api/input HTTP/1.1\r\n\r\n" })
+    drain(serve(c7))
+    Assert.eq((parseResponse(c7:output())), 405)
 end
