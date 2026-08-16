@@ -82,12 +82,17 @@ function Config.installUtilStub()
     end
     package.preload["util"] = function()
         return {
-            writeToFile = function(content, file)
+            -- 与 frontend/util.lua 同语义：lua_dofile_ready 时包成可 dofile 的
+            -- "-- path\nreturn <data>"（漏掉这层会让模拟器下次读到"损坏"配置）
+            writeToFile = function(data, file, _force_flush, lua_dofile_ready)
+                if lua_dofile_ready then
+                    data = table.concat({ "-- ", file, "\nreturn ", data, "\n" })
+                end
                 local fh, err = io.open(file, "w")
                 if not fh then
                     error(err or ("cannot write " .. tostring(file)))
                 end
-                fh:write(content)
+                fh:write(data)
                 fh:close()
                 return true
             end,
