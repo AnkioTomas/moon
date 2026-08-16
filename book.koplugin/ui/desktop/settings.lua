@@ -1,21 +1,15 @@
 --[[--
-设置页 UI（桌面 Tab）
-  通用：数据源切换 / 显示与启动 / 维护
-  源专属：source.<id>.setting.open 自绘；本页只画入口行
+设置页 UI（桌面 Tab）：主菜单 + 二级子菜单。
+
+  主菜单：数据源 / 显示 / 维护
+  子页首行固定「返回」；数据源子页收口一切源相关入口：
+  当前数据源（picker 只列启用源）/ 启用源多选 / 各启用源专属设置 / Z-Library 账号 / 同步进度。
 
 布局（SettingRow 列表 + Pager.frame）：
   +-----------------------------------------------+
-  | 数据源                                        |
-  | [icon] 当前源名                        ›      |
-  | [icon] 源专属设置…                     ›      |
-  | 显示与启动                                    |
-  | [icon] 界面字体                        ›      |
-  | [icon] 字号                            130% › |
-  | [icon] 启动打开桌面                      开   |
-  | 维护                                          |
-  | [icon] 清理缓存                         12M   |
-  | [icon] 关于                         1.2.3 ›  |
-  | [icon] 关闭桌面                               |
+  | [icon] 数据源            微信读书           › |
+  | [icon] 显示                  130%           › |
+  | [icon] 维护                                 › |
   |  |«  ‹   Page N of M   ›  »|                  |
   +-----------------------------------------------+
 
@@ -196,34 +190,182 @@ local function appendSection(out, width, title, row_builders)
     end
 end
 
---- 当前源专属入口 + 通用进度同步。
----@param active_id string
----@param plugin table|nil
----@return table
-local function sourceServiceRows(active_id, plugin)
-    local mod = loadSourceSetting(active_id)
-    local rows = {}
-    local source = plugin and plugin.getSource and plugin:getSource() or nil
-
-    if mod and type(mod.open) == "function" then
-        local status, status_on
-        if type(mod.rowStatus) == "function" then
-            status, status_on = mod.rowStatus()
+--- 无标题行列表（行间缩进分割线）。
+---@param out table
+---@param width number
+---@param row_builders table
+local function appendRowList(out, width, row_builders)
+    for i, build in ipairs(row_builders) do
+        if i > 1 then
+            table.insert(out, insetDivider(width))
         end
-        rows[#rows + 1] = function(iw)
-            return SettingRow.build(iw, {
-                kind = "nav",
-                icon = (mod.rowIcon and mod.rowIcon()) or "dns",
-                title = (mod.rowTitle and mod.rowTitle()) or _("配置"),
-                status = status,
-                status_on = status_on,
-                callback = function()
-                    mod.open(plugin)
-                end,
+        table.insert(out, build(width))
+    end
+end
+
+--- 进入子页 / 回主菜单（重置分页）。
+---@param desktop table
+---@param sub string|nil
+local function gotoSub(desktop, sub)
+    desktop._settings_sub = sub
+    desktop._settings_page = 1
+    desktop:rebuild()
+end
+
+--- 子页首行：返回主菜单。
+---@param desktop table
+---@return table
+local function backRow(desktop)
+    return function(iw)
+        return SettingRow.build(iw, {
+            kind = "action",
+            icon = "arrow_back",
+            title = _("返回"),
+            callback = function()
+                gotoSub(desktop, nil)
+            end,
+        })
+    end
+end
+
+--- 弹出数据源选择 sheet（只列启用源）。
+---@param desktop table
+---@param plugin table|nil
+---@param active_id string
+local function pickSource(desktop, plugin, active_id)
+    local sources = SourceRegistry.listEnabled()
+    if #sources == 0 then return end
+    local items = {}
+    for _, meta in ipairs(sources) do
+        local id = meta.id
+        local name = meta.name or meta.id
+        local label = name
+        if id == active_id then
+            label = "✓ " .. name
+        end
+        table.insert(items, {
+            text = label,
+            value = id,
+        })
+    end
+    Popup.sheet{
+        title = _("选择数据源"),
+        items = items,
+        on_select = function(id)
+            if not id or id == active_id then
+                return
+            end
+            SourceRegistry.setActive(id)
+            if plugin and plugin.onSourceChanged then
+                plugin:onSourceChanged()
+            end
+            local name = id
+            for _, meta in ipairs(sources) do
+                if meta.id == id then
+                    name = meta.name or meta.id
+                    break
+                end
+            end
+            UIManager:show(InfoMessage:new{
+                text = T(_("已切换数据源：%1"), name),
+                timeout = 2,
             })
+            desktop:rebuild()
+        end,
+    }
+end
+
+--- 启用源多选（活跃源强制勾选且不可点，见 Registry.setEnabled 的兜底拒绝）。
+---@param desktop table
+local function pickEnabledSources(desktop)
+    local active_id = MoonSettings.activeSourceId()
+    local items = {}
+    for _, meta in ipairs(SourceRegistry.list()) do
+        local id = meta.id
+        items[#items + 1] = {
+            text = meta.name or meta.id,
+            value = id,
+            checked = SourceRegistry.isEnabled(id),
+            enabled = id ~= active_id,
+        }
+    end
+    Popup.list{
+        title = _("启用源"),
+        select_mode = "multi",
+        items = items,
+        on_toggle = function(id, on)
+            SourceRegistry.setEnabled(id, on)
+        end,
+        close_callback = function()
+            desktop:rebuild()
+        end,
+    }
+end
+
+--- 数据源子页行：当前源 / 启用源 / 各启用源专属设置 / Z-Library 账号 / 同步进度。
+---@param desktop table
+---@param plugin table|nil
+---@param active_id string
+---@param active_name string
+---@return table
+local function sourcesRows(desktop, plugin, active_id, active_name)
+    local source = plugin and plugin.getSource and plugin:getSource() or nil
+    local enabled = SourceRegistry.listEnabled()
+
+    local rows = {}
+
+    rows[#rows + 1] = function(iw)
+        return SettingRow.build(iw, {
+            kind = "nav",
+            icon = "source",
+            title = _("当前数据源"),
+            status = active_name,
+            status_on = true,
+            callback = function()
+                pickSource(desktop, plugin, active_id)
+            end,
+        })
+    end
+
+    local enabled_n = #enabled
+    local total_n = #SourceRegistry.list()
+    rows[#rows + 1] = function(iw)
+        return SettingRow.build(iw, {
+            kind = "nav",
+            icon = "checklist",
+            title = _("启用源"),
+            status = T(_("已启用 %1/%2"), enabled_n, total_n),
+            status_on = true,
+            callback = function()
+                pickEnabledSources(desktop)
+            end,
+        })
+    end
+
+    -- 各启用源的专属设置入口（不再只看活跃源）
+    for _, meta in ipairs(enabled) do
+        local mod = loadSourceSetting(meta.id)
+        if mod and type(mod.open) == "function" then
+            local status, status_on
+            if type(mod.rowStatus) == "function" then
+                status, status_on = mod.rowStatus()
+            end
+            rows[#rows + 1] = function(iw)
+                return SettingRow.build(iw, {
+                    kind = "nav",
+                    icon = (mod.rowIcon and mod.rowIcon()) or "dns",
+                    title = (mod.rowTitle and mod.rowTitle()) or meta.name or meta.id,
+                    status = status,
+                    status_on = status_on,
+                    callback = function()
+                        mod.open(plugin)
+                    end,
+                })
+            end
         end
     end
 
+    -- Z-Library 是全局书城账号（不是源）：跟随活跃源的导入能力，同原语义
     if type(source and source.importBookAsync) == "function" then
         local store_setting = require("zlib.setting")
         local status, status_on = store_setting.rowStatus()
@@ -264,94 +406,15 @@ local function sourceServiceRows(active_id, plugin)
     return rows
 end
 
---- 构建设置页（服务 / 显示 / 维护，分页）。
+--- 显示子页行。
 ---@param desktop table
+---@param font_name string
+---@param scale number
+---@param grid_max_cols number
+---@param open_on boolean
 ---@return table
-function Settings.build(desktop)
-    local h = desktop:contentHeight()
-    local w = desktop.dimen.w
-    local plugin = desktop.plugin
-    local open_on = G_reader_settings:readSetting("start_with") == Host.OPEN_ON_START_ID
-    local scale = UI.getScale()
-    local grid_max_cols = UI.getGridMaxCols()
-    local font_name = MoonFont.currentName()
-    local page_pad = UI.pagePad()
-    local card_w = math.max(UI.sz(100), w - page_pad * 2)
-    local band_h = Pager.bandH()
-    local body_h = math.max(1, h - band_h)
-
-    local sources = SourceRegistry.list()
-    local active_id = MoonSettings.activeSourceId()
-    local active_name = active_id
-    for _, meta in ipairs(sources) do
-        if meta.id == active_id then
-            active_name = meta.name or meta.id
-            break
-        end
-    end
-
-    --- 弹出数据源选择 sheet。
-    local function pickSource()
-        if #sources == 0 then return end
-        local items = {}
-        for _, meta in ipairs(sources) do
-            local id = meta.id
-            local name = meta.name or meta.id
-            local label = name
-            if id == active_id then
-                label = "✓ " .. name
-            end
-            table.insert(items, {
-                text = label,
-                value = id,
-            })
-        end
-        Popup.sheet{
-            title = _("选择数据源"),
-            items = items,
-            on_select = function(id)
-                if not id or id == active_id then
-                    return
-                end
-                SourceRegistry.setActive(id)
-                if plugin and plugin.onSourceChanged then
-                    plugin:onSourceChanged()
-                end
-                local name = id
-                for _, meta in ipairs(sources) do
-                    if meta.id == id then
-                        name = meta.name or meta.id
-                        break
-                    end
-                end
-                UIManager:show(InfoMessage:new{
-                    text = T(_("已切换数据源：%1"), name),
-                    timeout = 2,
-                })
-                desktop:rebuild()
-            end,
-        }
-    end
-
-    local service_rows = {
-        function(iw)
-            return SettingRow.build(iw, {
-                kind = "nav",
-                icon = "source",
-                title = _("数据源"),
-                status = active_name,
-                status_on = true,
-                callback = pickSource,
-            })
-        end,
-    }
-    for _, build in ipairs(sourceServiceRows(active_id, plugin)) do
-        table.insert(service_rows, build)
-    end
-
-    local packed = {}
-    appendSection(packed, card_w, _("服务"), service_rows)
-    appendSection(packed, card_w, _("显示"), {
+local function displayRows(desktop, font_name, scale, grid_max_cols, open_on)
+    return {
         function(iw)
             return SettingRow.build(iw, {
                 kind = "nav",
@@ -439,8 +502,14 @@ function Settings.build(desktop)
                 end,
             })
         end,
-    })
-    appendSection(packed, card_w, _("维护"), {
+    }
+end
+
+--- 维护子页行。
+---@param desktop table
+---@return table
+local function maintenanceRows(desktop)
+    return {
         function(iw)
             local cache_size = desktop._cache_size_label or _("计算中…")
             -- 扫完就置 label；只认 job 会让回调里的 rebuild 再次开扫，死循环
@@ -516,7 +585,90 @@ function Settings.build(desktop)
                 end,
             })
         end,
-    })
+    }
+end
+
+--- 构建设置页（主菜单 / 数据源 / 显示 / 维护，分页）。
+---@param desktop table
+---@return table
+function Settings.build(desktop)
+    local h = desktop:contentHeight()
+    local w = desktop.dimen.w
+    local plugin = desktop.plugin
+    local open_on = G_reader_settings:readSetting("start_with") == Host.OPEN_ON_START_ID
+    local scale = UI.getScale()
+    local grid_max_cols = UI.getGridMaxCols()
+    local font_name = MoonFont.currentName()
+    local page_pad = UI.pagePad()
+    local card_w = math.max(UI.sz(100), w - page_pad * 2)
+    local band_h = Pager.bandH()
+    local body_h = math.max(1, h - band_h)
+
+    local active_id = MoonSettings.activeSourceId()
+    local active_name = active_id
+    for _, meta in ipairs(SourceRegistry.list()) do
+        if meta.id == active_id then
+            active_name = meta.name or meta.id
+            break
+        end
+    end
+
+    local packed = {}
+    local sub = desktop._settings_sub
+    if sub ~= "sources" and sub ~= "display" and sub ~= "maintenance" then
+        -- 未知子页（状态损坏）：归一化回主菜单
+        sub = nil
+        desktop._settings_sub = nil
+    end
+    if sub == nil then
+        appendRowList(packed, card_w, {
+            function(iw)
+                return SettingRow.build(iw, {
+                    kind = "nav",
+                    icon = "source",
+                    title = _("数据源"),
+                    status = active_name,
+                    status_on = true,
+                    callback = function()
+                        gotoSub(desktop, "sources")
+                    end,
+                })
+            end,
+            function(iw)
+                return SettingRow.build(iw, {
+                    kind = "nav",
+                    icon = "display_settings",
+                    title = _("显示"),
+                    status = string.format("%d%%", scale),
+                    status_on = true,
+                    callback = function()
+                        gotoSub(desktop, "display")
+                    end,
+                })
+            end,
+            function(iw)
+                return SettingRow.build(iw, {
+                    kind = "nav",
+                    icon = "build",
+                    title = _("维护"),
+                    callback = function()
+                        gotoSub(desktop, "maintenance")
+                    end,
+                })
+            end,
+        })
+    else
+        table.insert(packed, backRow(desktop)(card_w))
+        if sub == "sources" then
+            appendSection(packed, card_w, _("数据源"),
+                sourcesRows(desktop, plugin, active_id, active_name))
+        elseif sub == "display" then
+            appendSection(packed, card_w, _("显示"),
+                displayRows(desktop, font_name, scale, grid_max_cols, open_on))
+        else
+            appendSection(packed, card_w, _("维护"), maintenanceRows(desktop))
+        end
+    end
 
     local pages_kids = Pager.pack(packed, body_h)
     local pages = #pages_kids
