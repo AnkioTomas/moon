@@ -40,6 +40,29 @@ local ssl_patched = false
 -- 内部
 ------------------------------------------------------------------------
 
+--- Turbo 的 SSLIOStream 存了 _ssl_hostname 却从不设置 SNI；
+--- Cloudflare 等按 SNI 分流的服务器直接拒绝无 SNI 握手（然后无限等 read，表现为超时）。
+--- 握手前用 luasec 的 sni() 补上；IP 直连不发 SNI。
+---@param crypto table turbo.crypto 模块
+local function patchTurboSni(crypto)
+    if type(crypto.ssl_do_handshake) ~= "function" then
+        return
+    end
+    local orig = crypto.ssl_do_handshake
+    crypto.ssl_do_handshake = function(stream)
+        local sock = stream and stream._ssl
+        if sock and not stream._sni_done and type(sock.sni) == "function" then
+            stream._sni_done = true
+            local host = stream._ssl_hostname
+            -- IP 字面量（v4 纯数字点 / v6 含冒号）不是合法 SNI，只有域名才发
+            if type(host) == "string" and not host:find(":") and not host:match("^[%d%.]+$") then
+                pcall(sock.sni, sock, host)
+            end
+        end
+        return orig(stream)
+    end
+end
+
 --- 忽略校验时不传 cafile，避免「error loading CA locations」。
 local function patchTurboSsl()
     if ssl_patched then
@@ -47,7 +70,11 @@ local function patchTurboSsl()
     end
     ssl_patched = true
     local ok, crypto = pcall(require, "turbo.crypto")
-    if not ok or type(crypto.ssl_create_client_context) ~= "function" then
+    if not ok then
+        return
+    end
+    patchTurboSni(crypto)
+    if type(crypto.ssl_create_client_context) ~= "function" then
         return
     end
     local orig = crypto.ssl_create_client_context
