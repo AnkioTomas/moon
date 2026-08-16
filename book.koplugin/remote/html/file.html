@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<!-- 文件管理页（静态路由；逻辑在 /file.js，共享函数在 /js.js，配置经 /api/config） -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>文件管理 - 远程管理</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<h1><a href="/">远程管理</a> / 文件管理</h1>
+<div id="bar">
+<button id="back">← 返回</button>
+<span id="quick"></span>
+</div>
+<div id="path"></div>
+<p class="note" id="booktip">书籍根目录约定：第 2 级目录为分类，第 3 级目录为系列（分类 / 系列 / 书籍）。</p>
+<div id="bar">
+<input type="file" id="file" multiple style="max-width:14em">
+<button id="up" class="primary">上传到当前目录</button>
+<button id="mk">新建文件夹</button>
+</div>
+<pre id="log"></pre>
+<table><thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th></th></tr></thead><tbody id="list"></tbody></table>
+<div id="ov"><div id="dlg">
+<h2 id="dt"></h2>
+<p id="dm"></p>
+<input id="di" style="display:none">
+<div class="btns"><button id="dc">取消</button><button id="dk" class="primary">确定</button></div>
+</div></div>
+<script src="/js.js"></script>
+<script src="/file.js"></script>
+</body>
+</html>
