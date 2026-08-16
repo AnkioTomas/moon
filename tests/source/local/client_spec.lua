@@ -5,8 +5,10 @@ local Stubs = require("support.stubs")
 
 -- 虚拟目录树：.moon（插件配置/缓存）与 .hidden 都不该被扫进书库
 -- sub 是第 2 层（分类）；sub/deep 是第 3 层（系列）；x4 是第 4 层，按约定不识别；bad.epub 模拟引擎解析失败
+-- a.epub.sdr 模拟 KOReader 边车目录：扫盘不当下钻，moveBook 时跟随书籍迁移
 local TREE = {
-    ["/books"] = { "a.epub", ".moon", ".hidden", "sub", "note.md", "old.cbr", "x.azw3" },
+    ["/books"] = { "a.epub", "a.epub.sdr", ".moon", ".hidden", "sub", "note.md", "old.cbr", "x.azw3" },
+    ["/books/a.epub.sdr"] = { "metadata.epub.lua" },
     ["/books/.moon"] = { "cache" },
     ["/books/.moon/cache"] = { "cached.epub" },
     ["/books/.hidden"] = { "b.epub" },
@@ -16,6 +18,7 @@ local TREE = {
 }
 local DIRS = {
     ["/books"] = true,
+    ["/books/a.epub.sdr"] = true,
     ["/books/.moon"] = true,
     ["/books/.moon/cache"] = true,
     ["/books/.hidden"] = true,
@@ -36,19 +39,32 @@ package.preload["libs/libkoreader-lfs"] = function()
                 return entries[i]
             end, {}
         end,
-        attributes = function(path)
+        attributes = function(path, request)
+            local attr
             if DIRS[path] then
-                return { mode = "directory", size = 0, modification = 0 }
-            end
-            for dir, entries in pairs(TREE) do
-                for _, name in ipairs(entries) do
-                    if dir .. "/" .. name == path then
-                        return { mode = "file", size = 10, modification = 0 }
+                attr = { mode = "directory", size = 0, modification = 0 }
+            else
+                for dir, entries in pairs(TREE) do
+                    for _, name in ipairs(entries) do
+                        if dir .. "/" .. name == path then
+                            attr = { mode = "file", size = 10, modification = 0 }
+                            break
+                        end
+                    end
+                    if attr then
+                        break
                     end
                 end
             end
+            -- 与真实 lfs 一致：第二参为字段名时只回该字段
+            if attr and type(request) == "string" then
+                return attr[request]
+            end
             -- 封面缓存等其它路径一律不存在
-            return nil
+            return attr
+        end,
+        mkdir = function()
+            return true
         end,
     }
 end
@@ -424,6 +440,9 @@ do
     -- 第 4 层不识别
     Assert.is_nil(db_rows[rowKey("local", "/books/sub/deep/x4/f.epub")])
     Assert.is_false(hasValue(dirs_scanned, "/books/sub/deep/x4"))
+    -- KOReader .sdr 边车目录不下钻、不入库
+    Assert.is_false(hasValue(dirs_scanned, "/books/a.epub.sdr"))
+    Assert.is_nil(db_rows[rowKey("local", "/books/a.epub.sdr/metadata.epub.lua")])
     -- 白名单外与隐藏项不入库
     Assert.is_nil(db_rows[rowKey("local", "/books/old.cbr")])
     Assert.is_nil(db_rows[rowKey("local", "/books/.hidden/b.epub")])
@@ -615,7 +634,79 @@ do
     os.rename = real_rename
 end
 
--- ── 自动扫描：首次扫，节流期内跳过，过期重扫 ──────
+-- ── moveBook：改分类/系列 = 移动文件；四表迁移 + 重名/非法目录名拒绝 ──────
+do
+    reset()
+    db_rows[rowKey("local", "/books/a.epub")] = {
+        source_id = "local",
+        stable_id = "/books/a.epub",
+        title = "A",
+    }
+    local real_rename = os.rename
+    local renamed = {}
+    os.rename = function(from, to)
+        renamed[#renamed + 1] = { from, to }
+        return true
+    end
+
+    -- 根目录的书给分类+系列 → 移到 root/分类/系列/ 下，身份迁移；.sdr 边车目录跟随
+    local c = Client.new({ path = "/books" })
+    local new_id, err = c:moveBook("/books/a.epub", "科幻", "三部曲")
+    Assert.is_nil(err)
+    Assert.eq(new_id, "/books/科幻/三部曲/a.epub")
+    Assert.eq(#renamed, 2)
+    Assert.eq(renamed[1][1], "/books/a.epub")
+    Assert.eq(renamed[1][2], "/books/科幻/三部曲/a.epub")
+    Assert.eq(renamed[2][1], "/books/a.epub.sdr")
+    Assert.eq(renamed[2][2], "/books/科幻/三部曲/a.epub.sdr")
+    Assert.eq(#renames, 1)
+    Assert.eq(renames[1][2], "/books/a.epub")
+    Assert.eq(renames[1][3], "/books/科幻/三部曲/a.epub")
+    Assert.is_nil(db_rows[rowKey("local", "/books/a.epub")])
+    local row = db_rows[rowKey("local", "/books/科幻/三部曲/a.epub")]
+    Assert.not_nil(row)
+    Assert.eq(row.category, "科幻")
+    Assert.eq(row.series, "三部曲")
+
+    -- 位置没变（分类即现目录）：原样返回，不动文件不动库
+    local before_files, before_renames = #renamed, #renames
+    new_id, err = c:moveBook("/books/sub/c.pdf", "sub", nil)
+    Assert.eq(new_id, "/books/sub/c.pdf")
+    Assert.is_nil(err)
+    Assert.eq(#renamed, before_files)
+    Assert.eq(#renames, before_renames)
+
+    -- 只有系列没有分类：系列丢弃（扫盘模型里系列必须挂在分类下），落根目录
+    new_id, err = c:moveBook("/books/sub/c.pdf", nil, "孤立系列")
+    Assert.is_nil(err)
+    Assert.eq(new_id, "/books/c.pdf")
+    Assert.eq(renamed[#renamed][2], "/books/c.pdf")
+
+    -- 非法目录名（路径分隔符 / 点开头）：拒绝，不碰文件
+    before_files = #renamed
+    new_id, err = c:moveBook("/books/a.epub", "科/幻", nil)
+    Assert.is_nil(new_id)
+    Assert.not_nil(err)
+    new_id, err = c:moveBook("/books/a.epub", ".hidden", nil)
+    Assert.is_nil(new_id)
+    Assert.not_nil(err)
+    Assert.eq(#renamed, before_files)
+
+    -- 目标位置已有同名文件：拒绝（虚拟目录树里临时塞一个冲突文件）
+    table.insert(TREE["/books/sub"], "a.epub")
+    new_id, err = c:moveBook("/books/a.epub", "sub", nil)
+    Assert.is_nil(new_id)
+    Assert.not_nil(err)
+    Assert.eq(#renamed, before_files)
+    TREE["/books/sub"][#TREE["/books/sub"]] = nil
+
+    -- 未配置路径：直接报错
+    new_id, err = Client.new({}):moveBook("/books/a.epub", "科幻", nil)
+    Assert.is_nil(new_id)
+    Assert.not_nil(err)
+
+    os.rename = real_rename
+end
 do
     reset()
     local c = Client.new({ path = "/books" })
