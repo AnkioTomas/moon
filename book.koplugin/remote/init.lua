@@ -369,12 +369,20 @@ local function activeInputWidget()
     return nil
 end
 
----@return { active: boolean }
+---@return { active: boolean, text: string|nil }
 local function getInput()
-    return { active = activeInputWidget() ~= nil }
+    local widget = activeInputWidget()
+    if not widget then
+        return { active = false }
+    end
+    -- 共享剪贴板：带全文的把设备文本拉到网页端；getText 失败不拖垮状态查询
+    local ok, text = pcall(function()
+        return widget:getText() or ""
+    end)
+    return { active = true, text = ok and text or "" }
 end
 
---- 整段文本注入激活输入框（addChars 走正常键入路径，含撤销/重绘）。
+--- 远程输入：经 addChars 在光标处追加（正常键入路径，含撤销/重绘）。
 ---@param text string
 ---@return boolean|nil, any
 local function setInput(text)
@@ -385,6 +393,53 @@ local function setInput(text)
     widget:addChars(text)
     require("ui/uimanager"):setDirty(widget, "ui")
     return true
+end
+
+-- ── 共享剪贴板 ────────────────────────────────────────
+--
+-- 设备侧一切「复制」都汇到 Device.input.setClipboardText（阅读划线复制、
+-- 链接复制、输入框长按复制、翻译复制……），在这里包一层镜像到 _clip，
+-- GET /api/clipboard 读的就是它；setClipboard 写回并同步进激活输入框。
+-- 直接读 Device.input.getClipboardText 会穿透到平台层（SDL/Android 系统
+-- 剪贴板），拿不到内部复制历史，所以必须自己镜像。
+
+local _clip = "" ---@type string 设备最后复制的文本镜像
+local _clip_hooked = false
+
+local function hookClipboard()
+    if _clip_hooked then
+        return
+    end
+    local Device = require("device")
+    if not (Device:hasClipboard() and Device.input) then
+        return
+    end
+    local orig = Device.input.setClipboardText
+    Device.input.setClipboardText = function(text)
+        _clip = text or ""
+        return orig(text)
+    end
+    _clip_hooked = true
+end
+
+---@return { text: string }
+local function getClipboard()
+    return { text = _clip }
+end
+
+--- 网页 → 设备：写设备剪贴板 + 同步进激活输入框（无激活框只写剪贴板）。
+---@param text string
+local function setClipboard(text)
+    _clip = text or ""
+    local ok, Device = pcall(require, "device")
+    if ok and Device:hasClipboard() and Device.input then
+        pcall(Device.input.setClipboardText, text)
+    end
+    local widget = activeInputWidget()
+    if widget then
+        widget:setText(text)
+        require("ui/uimanager"):setDirty(widget, "ui")
+    end
 end
 
 local function tempPath(_name)
@@ -443,12 +498,15 @@ function Remote.start()
             is_protected = isProtected,
             get_input = getInput,
             set_input = setInput,
+            get_clipboard = getClipboard,
+            set_clipboard = setClipboard,
         },
     }
     local started, serr = server:start()
     if not started then
         return false, serr
     end
+    hookClipboard()
     kindleHole(true)
     _server = server
     require("ui/uimanager"):insertZMQ(server)

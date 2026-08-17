@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 远程输入页（静态路由；逻辑在 /input.js，共享函数在 /js.js） -->
+<!-- 远程输入 / 共享剪贴板页（静态路由；逻辑在 /input.js，共享函数在 /js.js） -->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -9,13 +9,24 @@
 </head>
 <body>
 <h1><a href="/">远程管理</a> / 远程输入</h1>
-<div id="ri">
+<div class="ri">
+<h2>共享剪贴板</h2>
+<div id="cbstate"></div>
+<textarea id="cbtext" rows="8" placeholder="设备上还没有复制过文本"></textarea>
+<div class="btns">
+<button id="cbpull">从设备拉取</button>
+<button id="cbpush" class="primary">写入设备</button>
+<button id="cbcopy">复制到本机</button>
+<button id="cbclear" class="danger">清空设备剪贴板</button>
+</div>
+</div>
+<div class="ri">
 <h2>远程输入</h2>
 <div id="ristate">检测中…</div>
-<textarea id="ritext" rows="6" disabled placeholder="设备上没有激活的输入框"></textarea>
-<button id="risend" class="primary" disabled>发送到设备</button>
+<textarea id="ritext" rows="5" disabled placeholder="设备上没有激活的输入框"></textarea>
+<button id="risend" class="primary" disabled>追加到光标处</button>
 </div>
-<p class="note">设备上打开任意输入框（搜索、重命名等）后，这里即可编辑发送；文本在点击发送时整段注入，不实时传输。</p>
+<p class="note">共享剪贴板：设备上复制的任何文本（阅读划线复制、链接复制等）都会出现在这里，随时拉取/覆盖，与输入框是否激活无关。远程输入：设备上打开输入框（搜索、重命名等）后，把整段文本追加到光标处。文本都在点击时整段传输，不实时同步。</p>
 <script src="/js.js"></script>
 <script src="/input.js"></script>
 </body>
