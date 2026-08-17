@@ -46,8 +46,10 @@ local STATUS = {
 ---@field rename fun(path: string, to: string): boolean|nil, any
 ---@field temp_path fun(name: string): string 上传临时落盘路径
 ---@field is_protected fun(path: string): boolean 重要路径及其祖先不可删除/移动
----@field get_input fun(): { active: boolean } 设备上是否有激活的输入框
----@field set_input fun(text: string): boolean|nil, any 注入文本到激活输入框；无激活框返回 nil, err
+---@field get_input fun(): { active: boolean, text: string|nil } 设备激活输入框状态与当前文本
+---@field set_input fun(text: string): boolean|nil, any 光标处追加注入（addChars 路径）；无激活框返回 nil, err
+---@field get_clipboard fun(): { text: string } 设备共享剪贴板（最后复制的文本）
+---@field set_clipboard fun(text: string) 写入设备剪贴板并同步进激活输入框
 
 --- 一切非 2xx 响应都是 JSON {"error": msg}：页面能把真实原因显示出来，
 --- 而不是 r.json() 解析纯文本炸出 SyntaxError 掩盖问题。
@@ -65,6 +67,7 @@ Server._routeUpload = File.upload
 Server._routeMutate = File.mutate
 Server._routeRename = File.rename
 Server._routeInput = Input.route
+Server._routeClipboard = Input.clipboard
 
 ---@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil }
 ---@return table
@@ -360,7 +363,9 @@ function Server:_route(conn, head)
     elseif path == "/api/delete" then
         return self:_routeMutate(conn, method, query.path, self.handlers.delete)
     elseif path == "/api/input" then
-        return self:_routeInput(conn, method, headers)
+        return self:_routeInput(conn, method, headers, query)
+    elseif path == "/api/clipboard" then
+        return self:_routeClipboard(conn, method, headers, query)
     elseif path == "/api/rename" then
         return self:_routeRename(conn, method, query)
     end
@@ -399,9 +404,18 @@ function Server:_readBody(conn)
         return true
     end
     if conn.text_mode then
-        -- 远程输入：注入同步完成，直接回（无激活输入框 → 409）
+        -- 文本通道收尾：text_mode 是路由标记（"append" 输入框 / "clipboard" 剪贴板）。
+        -- 注入同步完成直接回；无激活输入框 → 409（剪贴板写入不受输入框影响）。
         local text = table.concat(conn.text_buf)
+        local mode = conn.text_mode
         conn.text_buf = nil
+        conn.text_mode = nil
+        if mode == "clipboard" then
+            self.handlers.set_clipboard(text)
+            return self:_queueResponse(conn, {
+                code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
+            })
+        end
         local ok, err = self.handlers.set_input(text)
         if not ok then
             return self:_fail(conn, 409, err)

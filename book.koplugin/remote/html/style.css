@@ -50,8 +50,9 @@ tr.d a{font-weight:600}
 #dlg p{font-size:.85em;overflow-wrap:anywhere;margin:.4em 0}
 #dlg input{width:100%;margin:.3em 0}
 #dlg .btns{display:flex;justify-content:flex-end;gap:.5em;margin-top:.8em}
-#ri{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.8em;margin:.5em 0}
-#ri h2{font-size:.95em;margin:0 0 .4em}
-#ristate{font-size:.78em;margin-bottom:.5em;color:var(--mut)}
+.ri{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.8em;margin:.5em 0}
+.ri h2{font-size:.95em;margin:0 0 .4em}
+#cbstate,#ristate{font-size:.78em;margin-bottom:.5em;color:var(--mut)}
 #ristate.on{color:var(--ok)}
-#ritext{width:100%;resize:vertical;margin-bottom:.5em}
+.ri textarea{width:100%;resize:vertical;margin-bottom:.5em}
+.ri .btns{display:flex;gap:.5em;flex-wrap:wrap}
