@@ -8,25 +8,32 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<h1><a href="/">远程管理</a> / 远程输入</h1>
-<div class="ri">
-<h2>共享剪贴板</h2>
-<div id="cbstate"></div>
+<header class="page-header">
+<h1><a href="/">远程管理</a> <span class="crumb">/</span> 远程输入</h1>
+</header>
+
+<section class="panel" aria-labelledby="cb-title">
+<h2 id="cb-title">共享剪贴板</h2>
+<div id="cbstate" class="state" role="status" aria-live="polite"></div>
+<label class="visually-hidden" for="cbtext">剪贴板文本</label>
 <textarea id="cbtext" rows="8" placeholder="设备上还没有复制过文本"></textarea>
 <div class="btns">
-<button id="cbpull">从设备拉取</button>
-<button id="cbpush" class="primary">写入设备</button>
-<button id="cbcopy">复制到本机</button>
-<button id="cbclear" class="danger">清空设备剪贴板</button>
+<button type="button" id="cbpull">从设备拉取</button>
+<button type="button" id="cbpush" class="primary">写入设备</button>
+<button type="button" id="cbcopy">复制到本机</button>
+<button type="button" id="cbclear" class="danger">清空设备剪贴板</button>
 </div>
-</div>
-<div class="ri">
-<h2>远程输入</h2>
-<div id="ristate">检测中…</div>
+</section>
+
+<section class="panel" aria-labelledby="ri-title">
+<h2 id="ri-title">远程输入</h2>
+<div id="ristate" class="state" role="status" aria-live="polite">检测中…</div>
+<label class="visually-hidden" for="ritext">待发送文本</label>
 <textarea id="ritext" rows="5" disabled placeholder="设备上没有激活的输入框"></textarea>
-<button id="risend" class="primary" disabled>追加到光标处</button>
-</div>
-<p class="note">共享剪贴板：设备上复制的任何文本（阅读划线复制、链接复制等）都会出现在这里，随时拉取/覆盖，与输入框是否激活无关。远程输入：设备上打开输入框（搜索、重命名等）后，把整段文本追加到光标处。文本都在点击时整段传输，不实时同步。</p>
+<button type="button" id="risend" class="primary" disabled>追加到光标处</button>
+</section>
+
+
 <script src="/js.js"></script>
 <script src="/input.js"></script>
 </body>
