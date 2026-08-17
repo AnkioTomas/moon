@@ -317,7 +317,7 @@ function BookDB.seriesBySource(source_id)
     return out
 end
 
---- 按 (source_id, stable_id) 删除 books 行（不动 reading_stats）
+--- 按 (source_id, stable_id) 删除 books 行（不动 reading_stats），连带清目录缓存
 ---@param source_id string
 ---@param stable_id string
 ---@return boolean
@@ -327,6 +327,7 @@ function BookDB.remove(source_id, stable_id)
         return false
     end
     Base.ensure()
+    require("utils.db.toc").delete(source_id, stable_id)
     return Base.exec(
         [[DELETE FROM books WHERE source_id=? AND stable_id=?;]],
         source_id, stable_id
