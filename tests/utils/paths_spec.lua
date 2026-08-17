@@ -17,6 +17,19 @@ for _, name in ipairs({ "libs/libkoreader-lfs", "ffi/sha2", "utils.paths" }) do
     package.loaded[name] = nil
 end
 
+-- 全局 json 桩只会 error；身份伴生文件需要真编码，换个最小可用实现
+package.preload["json"] = function()
+    return {
+        encode = function(v)
+            local parts = {}
+            for k, val in pairs(v) do
+                parts[#parts + 1] = string.format("%q:%q", tostring(k), tostring(val))
+            end
+            return "{" .. table.concat(parts, ",") .. "}"
+        end,
+    }
+end
+
 local lfs = require("libs/libkoreader-lfs")
 local Paths = require("utils.paths")
 
@@ -25,6 +38,7 @@ local TEST_SOURCE = "test_paths_spec"
 --- 仅清理本测试创建的 test_paths_spec 子树（目录为空才删得掉，不碰 config/ 其它数据）
 --- 用 lfs.rmdir 而非 os.remove：nav_spec 等会把 os.remove 换成内存假桩且不还原
 local function cleanup()
+    os.remove(Paths.identityFilePath(Paths.bookWorkDir("stable/id", TEST_SOURCE)))
     lfs.rmdir(Paths.bookWorkDir("stable/id", TEST_SOURCE))
     lfs.rmdir(Paths.imageDir(TEST_SOURCE))
     lfs.rmdir(Paths.bookDir(TEST_SOURCE))
@@ -104,11 +118,35 @@ do
     Assert.eq(lfs.attributes(Paths.sourceCacheDir(TEST_SOURCE), "mode"), "directory")
 end
 
--- ensureBookWork：在 ensureLayout 基础上再建 book/<slug>/
+-- ensureBookWork：在 ensureLayout 基础上再建 book/<slug>/，并落身份伴生文件
 do
     Paths.ensureBookWork("stable/id", TEST_SOURCE)
     Assert.eq(lfs.attributes(Paths.bookWorkDir("stable/id", TEST_SOURCE), "mode"), "directory")
     Assert.eq(lfs.attributes(Paths.bookDir(TEST_SOURCE), "mode"), "directory")
+    local dir = Paths.bookWorkDir("stable/id", TEST_SOURCE)
+    local sidecar = Paths.identityFilePath(dir)
+    Assert.eq(lfs.attributes(sidecar, "mode"), "file", "身份伴生文件必须落盘")
+    local f = assert(io.open(sidecar, "rb"))
+    local raw = f:read("*a")
+    f:close()
+    Assert.matches(raw, TEST_SOURCE)
+    Assert.matches(raw, "stable/id")
+    -- 幂等：重复调用不重写不报错
+    Paths.ensureBookWork("stable/id", TEST_SOURCE)
+end
+
+-- splitBookWorkPath：只认 cache/<source>/book/<slug>/<file> 布局
+do
+    local dir = Paths.bookWorkDir("stable/id", TEST_SOURCE)
+    local d, f = Paths.splitBookWorkPath(dir .. "/3.html")
+    Assert.eq(d, dir)
+    Assert.eq(f, "3.html")
+    local d2, f2 = Paths.splitBookWorkPath(dir .. "/book.epub")
+    Assert.eq(d2, dir)
+    Assert.eq(f2, "book.epub")
+    Assert.is_nil(Paths.splitBookWorkPath("/other/plain.epub"))
+    Assert.is_nil(Paths.splitBookWorkPath(Paths.imageDir(TEST_SOURCE) .. "/x.png"), "image 段不算书籍工作目录")
+    Assert.is_nil(Paths.splitBookWorkPath(dir .. "/sub/3.html"), "更深层级不算")
 end
 
 -- 只删本测试创建的目录（空目录才能删，天然保护误删）
