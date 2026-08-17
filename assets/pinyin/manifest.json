@@ -1,0 +1,49 @@
+{
+  "tag": "main",
+  "built_at": "2026-08-17 16:56:08",
+  "entries": 2335413,
+  "raw_sha256": "541567f4bcd963c6f4a4c759e2c57bb2f740f7e4965cf3ba409df54f5c2e581e",
+  "raw_size": 156672000,
+  "parts": [
+    {
+      "file": "dictionary.sqlite3.gz.001",
+      "size": 8187360
+    },
+    {
+      "file": "dictionary.sqlite3.gz.002",
+      "size": 7193901
+    },
+    {
+      "file": "dictionary.sqlite3.gz.003",
+      "size": 5768088
+    },
+    {
+      "file": "dictionary.sqlite3.gz.004",
+      "size": 5658458
+    },
+    {
+      "file": "dictionary.sqlite3.gz.005",
+      "size": 5706269
+    },
+    {
+      "file": "dictionary.sqlite3.gz.006",
+      "size": 5660463
+    },
+    {
+      "file": "dictionary.sqlite3.gz.007",
+      "size": 5903157
+    },
+    {
+      "file": "dictionary.sqlite3.gz.008",
+      "size": 5928306
+    },
+    {
+      "file": "dictionary.sqlite3.gz.009",
+      "size": 5883777
+    },
+    {
+      "file": "dictionary.sqlite3.gz.010",
+      "size": 5599278
+    }
+  ]
+}
