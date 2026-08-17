@@ -43,11 +43,38 @@ function ProgressDB.upsert(source_id, stable_id, pos)
     ) ~= nil
 end
 
+--- 按 (source_id, stable_id) 取单条待上传进度（本地进度判读用）
+---@param source_id string
+---@param stable_id string
+---@return table|nil { fraction, chapter_idx, chapter_fraction, locator, updated_at }
+function ProgressDB.get(source_id, stable_id)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
+        return nil
+    end
+    Base.ensure()
+    local fraction, chapter_idx, chapter_fraction, locator, updated_at = Base.rowexec(
+        [[SELECT fraction, chapter_idx, chapter_fraction, locator, updated_at
+          FROM pending_progress WHERE source_id=? AND stable_id=? LIMIT 1;]],
+        source_id,
+        stable_id
+    )
+    if fraction == nil then
+        return nil
+    end
+    return {
+        fraction = tonumber(fraction) or 0,
+        chapter_idx = chapter_idx ~= nil and tonumber(chapter_idx) or nil,
+        chapter_fraction = chapter_fraction ~= nil and tonumber(chapter_fraction) or nil,
+        locator = locator,
+        updated_at = tonumber(updated_at) or 0,
+    }
+end
+
 --- 列出待上传进度（可按 source_id 过滤）
 ---@param source_id string|nil
 ---@return table[]
-function ProgressDB.all(source_id)
-    Base.ensure()
+function ProgressDB.all(source_id)    Base.ensure()
     local sql
     if type(source_id) == "string" and source_id ~= "" then
         sql = [[SELECT source_id, stable_id, fraction, chapter_idx, chapter_fraction, locator, updated_at

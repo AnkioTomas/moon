@@ -198,6 +198,14 @@ CREATE TABLE IF NOT EXISTS reading_stats (
   total_pages INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_reading_stats_source ON reading_stats(source_id);
+
+CREATE TABLE IF NOT EXISTS toc (
+  source_id  TEXT NOT NULL,
+  stable_id  TEXT NOT NULL,
+  payload    TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL,
+  PRIMARY KEY (source_id, stable_id)
+);
 ]])
 end
 

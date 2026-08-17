@@ -20,13 +20,14 @@ local Paths = require("utils.paths")
 ---@field ui_font string|nil 界面字体 id：空=系统默认；本地为 basename；微信为 weread id
 ---@field ui_font_name string|nil 界面字体展示名
 ---@field grid_max_cols number 网格最大列数（2～6，默认 4）
----@field lock_screen string|nil 锁屏显示：ko=跟随系统；myrl=摸鱼日报
+---@field lock_screen string|nil 锁屏显示：ko=跟随系统；其余为已注册样式 id（lockscreen/styles/）
 ---@field lock_screen_prev_type string|nil 接管前的 screensaver_type
 ---@field lock_screen_prev_cover string|nil 接管前的 screensaver_document_cover（空串=无）
----@field lock_screen_myrl_day string|nil 摸鱼日报上次成功下载日 YYYY-MM-DD
+---@field lock_screen_day string|nil 当前样式上次成功下载日 YYYY-MM-DD
 ---@field remote_port number 远程传书端口（默认 9528）
 ---@field remote_autostart boolean 远程传书开机自启
 ---@field pinyin_enabled boolean 中文键盘入口（开启即把 zh_CN 加入 KOReader 键盘布局列表，默认关闭）
+---@field pinyin_dict_source string|nil 拼音词库来源 tag（rime-ice release），nil=未下载
 
 local M = {}
 
