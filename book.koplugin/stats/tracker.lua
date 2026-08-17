@@ -72,13 +72,14 @@ end
 
 --- 开始/恢复阅读计时（reader_ready / resume）。非源书籍不统计。
 ---@param ui table
+---@param identity { ref: BookRef }|nil 调用方已解析的身份；缺省自行 identityFor
 ---@return nil
-function Tracker.start(ui)
+function Tracker.start(ui, identity)
     flush() -- 兜底结清上一段（异常路径）
     if not ui or not ui.document or not ui.document.file then
         return
     end
-    local id = Store.identityFor(ui.document.file)
+    local id = identity or Store.identityFor(ui.document.file)
     if not id or not id.ref then
         return
     end

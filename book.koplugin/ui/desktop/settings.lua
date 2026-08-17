@@ -416,10 +416,7 @@ local function pickLockScreen(desktop, current)
     Popup.list{
         title = _("锁屏显示"),
         current = current,
-        items = {
-            { text = _("跟随 KOReader"), value = LockScreen.MODE_KO },
-            { text = _("摸鱼日报"), value = LockScreen.MODE_MYRL },
-        },
+        items = LockScreen.options(),
         on_select = function(mode)
             if not mode or mode == current then
                 return
@@ -427,7 +424,7 @@ local function pickLockScreen(desktop, current)
             -- 先落盘：联网失败也要保住用户的选择，之后自动补下
             LockScreen.setMode(mode)
             desktop:rebuild()
-            if mode ~= LockScreen.MODE_MYRL then
+            if mode == "ko" then
                 return
             end
             NetworkMgr:runWhenOnline(function()
@@ -437,7 +434,7 @@ local function pickLockScreen(desktop, current)
                 })
                 LockScreen.refresh(function(ok, err)
                     UIManager:show(InfoMessage:new{
-                        text = ok and _("已设为摸鱼日报")
+                        text = ok and T(_("已设为%1"), LockScreen.label(mode))
                             or T(_("下载失败: %1"), tostring(err or "")),
                         timeout = 2,
                     })
@@ -533,7 +530,7 @@ local function displayRows(desktop, font_name, scale, grid_max_cols, open_on)
                 icon = "wallpaper",
                 title = _("锁屏显示"),
                 status = LockScreen.label(lock_mode),
-                status_on = lock_mode == LockScreen.MODE_MYRL,
+                status_on = lock_mode ~= "ko",
                 callback = function()
                     pickLockScreen(desktop, lock_mode)
                 end,
@@ -715,6 +712,32 @@ function Settings.build(desktop)
                             timeout = 3,
                         })
                         desktop:rebuild()
+                    end,
+                })
+            end,
+            function(iw)
+                return SettingRow.build(iw, {
+                    kind = "nav",
+                    icon = "dictionary",
+                    title = _("拼音词库"),
+                    status = Pinyin.dictStatus(),
+                    status_on = require("pinyin.dictionary").isAvailable(),
+                    callback = function()
+                        if require("pinyin.download").downloading() then
+                            return
+                        end
+                        UIManager:show(InfoMessage:new{
+                            text = _("正在下载拼音词库…"),
+                            timeout = 2,
+                        })
+                        Pinyin.downloadDict(function(ok, err)
+                            UIManager:show(InfoMessage:new{
+                                text = ok and _("拼音词库已就绪")
+                                    or T(_("下载失败: %1"), tostring(err or "")),
+                                timeout = 2,
+                            })
+                            desktop:rebuild()
+                        end)
                     end,
                 })
             end,
