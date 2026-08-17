@@ -13,7 +13,7 @@ local MoonSettings = require("utils.settings")
 
 local M = {}
 
----@return string|nil style id；nil = 跟随 KOReader
+---@return string|nil style id；"ko"/nil = 跟随 KOReader
 function M.mode()
     return MoonSettings.get().lock_screen
 end
@@ -21,7 +21,9 @@ end
 ---@param mode string|nil
 function M.setMode(mode)
     local c = MoonSettings.get()
-    c.lock_screen = mode
+    -- nil 只代表旧配置缺失；用户明确选择「跟随」必须持久化为 ko，
+    -- 否则下次启动会被默认 myrl 重新补上。
+    c.lock_screen = mode or "ko"
     MoonSettings.save()
 end
 

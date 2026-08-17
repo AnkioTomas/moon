@@ -1,9 +1,9 @@
 --[[--
-设置页 UI（桌面 Tab）：主菜单 + 二级子菜单。
+设置页 UI（桌面 Tab）：十项主菜单 + 分类二级页。
 
-  主菜单：数据源 / 显示 / 维护
-  子页首行固定「返回」；数据源子页收口一切源相关入口：
-  当前数据源（picker 只列启用源）/ 启用源多选 / 各启用源专属设置 / Z-Library 账号 / 同步进度。
+  数据源 / 显示 / 锁屏 / 桌面 / 语言与输入 / 远程管理 /
+  清理缓存 / 关于 / 关闭桌面 / 检查更新。
+  子页首行固定「返回」；数据源子页再按源显示小标题。
 
 布局（SettingRow 列表 + Pager.frame）：
   +-----------------------------------------------+
@@ -305,19 +305,18 @@ local function pickEnabledSources(desktop)
     }
 end
 
---- 数据源子页行：当前源 / 启用源 / 各启用源专属设置 / Z-Library 账号 / 同步进度。
+--- 数据源子页分组：通用、本地、各启用源、同步与书城。
 ---@param desktop table
 ---@param plugin table|nil
 ---@param active_id string
 ---@param active_name string
 ---@return table
-local function sourcesRows(desktop, plugin, active_id, active_name)
+local function sourceSections(desktop, plugin, active_id, active_name)
     local source = plugin and plugin.getSource and plugin:getSource() or nil
     local enabled = SourceRegistry.listEnabled()
+    local common_rows = {}
 
-    local rows = {}
-
-    rows[#rows + 1] = function(iw)
+    common_rows[#common_rows + 1] = function(iw)
         return SettingRow.build(iw, {
             kind = "nav",
             icon = "source",
@@ -332,11 +331,11 @@ local function sourcesRows(desktop, plugin, active_id, active_name)
 
     local enabled_n = #enabled
     local total_n = #SourceRegistry.list()
-    rows[#rows + 1] = function(iw)
+    common_rows[#common_rows + 1] = function(iw)
         return SettingRow.build(iw, {
             kind = "nav",
             icon = "checklist",
-            title = _("启用源"),
+            title = _("已启用的数据源"),
             status = T(_("已启用 %1/%2"), enabled_n, total_n),
             status_on = true,
             callback = function()
@@ -345,34 +344,71 @@ local function sourcesRows(desktop, plugin, active_id, active_name)
         })
     end
 
-    -- 各启用源的专属设置入口（不再只看活跃源）
+    local sections = {
+        { title = _("数据源"), rows = common_rows },
+    }
+
+    -- 本地目录固定可配置，不因本地源暂时停用而消失。
+    local local_setting = loadSourceSetting("local")
+    if local_setting and type(local_setting.open) == "function" then
+        local status, status_on = local_setting.rowStatus()
+        sections[#sections + 1] = {
+            title = _("本地"),
+            rows = {
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "nav",
+                        icon = "folder",
+                        title = _("本地目录"),
+                        status = status,
+                        status_on = status_on,
+                        callback = function()
+                            local_setting.open(plugin)
+                        end,
+                    })
+                end,
+            },
+        }
+    end
+
+    -- 其余已启用源继续保留原有配置入口。
     for _, meta in ipairs(enabled) do
-        local mod = loadSourceSetting(meta.id)
-        if mod and type(mod.open) == "function" then
-            local status, status_on
-            if type(mod.rowStatus) == "function" then
-                status, status_on = mod.rowStatus()
-            end
-            rows[#rows + 1] = function(iw)
-                return SettingRow.build(iw, {
-                    kind = "nav",
-                    icon = (mod.rowIcon and mod.rowIcon()) or "dns",
-                    title = (mod.rowTitle and mod.rowTitle()) or meta.name or meta.id,
-                    status = status,
-                    status_on = status_on,
-                    callback = function()
-                        mod.open(plugin)
-                    end,
-                })
+        if meta.id ~= "local" then
+            local mod = loadSourceSetting(meta.id)
+            if mod and type(mod.open) == "function" then
+                local status, status_on
+                if type(mod.rowStatus) == "function" then
+                    status, status_on = mod.rowStatus()
+                end
+                local title = (mod.rowTitle and mod.rowTitle()) or _("源设置")
+                local icon = (mod.rowIcon and mod.rowIcon()) or "dns"
+                sections[#sections + 1] = {
+                    title = meta.name or meta.id,
+                    rows = {
+                        function(iw)
+                            return SettingRow.build(iw, {
+                                kind = "nav",
+                                icon = icon,
+                                title = title,
+                                status = status,
+                                status_on = status_on,
+                                callback = function()
+                                    mod.open(plugin)
+                                end,
+                            })
+                        end,
+                    },
+                }
             end
         end
     end
 
-    -- Z-Library 是全局书城账号（不是源）：跟随活跃源的导入能力，同原语义
+    local extra_rows = {}
+    -- Z-Library 是全局书城账号（不是源）：跟随活跃源的导入能力，同原语义。
     if type(source and source.importBookAsync) == "function" then
         local store_setting = require("zlib.setting")
         local status, status_on = store_setting.rowStatus()
-        rows[#rows + 1] = function(iw)
+        extra_rows[#extra_rows + 1] = function(iw)
             return SettingRow.build(iw, {
                 kind = "nav",
                 icon = "storefront",
@@ -387,7 +423,7 @@ local function sourcesRows(desktop, plugin, active_id, active_name)
     end
 
     if type(source and source.putProgressAsync) == "function" then
-        rows[#rows + 1] = function(iw)
+        extra_rows[#extra_rows + 1] = function(iw)
             return SettingRow.build(iw, {
                 kind = "action",
                 icon = "sync",
@@ -405,8 +441,14 @@ local function sourcesRows(desktop, plugin, active_id, active_name)
             })
         end
     end
+    if #extra_rows > 0 then
+        sections[#sections + 1] = {
+            title = _("同步与书城"),
+            rows = extra_rows,
+        }
+    end
 
-    return rows
+    return sections
 end
 
 --- 弹出锁屏显示单选。
@@ -449,10 +491,8 @@ end
 ---@param font_name string
 ---@param scale number
 ---@param grid_max_cols number
----@param open_on boolean
 ---@return table
-local function displayRows(desktop, font_name, scale, grid_max_cols, open_on)
-    local lock_mode = LockScreen.mode()
+local function displayRows(desktop, font_name, scale, grid_max_cols)
     return {
         function(iw)
             return SettingRow.build(iw, {
@@ -524,18 +564,41 @@ local function displayRows(desktop, font_name, scale, grid_max_cols, open_on)
                 end,
             })
         end,
+    }
+end
+
+local function placeholderRow()
+    return function(iw)
+        return SettingRow.build(iw, {
+            kind = "action",
+            icon = "more_horiz",
+            title = _("其他"),
+            status = _("敬请期待"),
+        })
+    end
+end
+
+local function lockscreenRows(desktop)
+    local mode = LockScreen.mode()
+    return {
         function(iw)
             return SettingRow.build(iw, {
                 kind = "nav",
                 icon = "wallpaper",
                 title = _("锁屏显示"),
-                status = LockScreen.label(lock_mode),
-                status_on = lock_mode ~= "ko",
+                status = LockScreen.label(mode),
+                status_on = mode ~= "ko",
                 callback = function()
-                    pickLockScreen(desktop, lock_mode)
+                    pickLockScreen(desktop, mode)
                 end,
             })
         end,
+        placeholderRow(),
+    }
+end
+
+local function desktopRows(desktop, open_on)
+    return {
         function(iw)
             return SettingRow.build(iw, {
                 kind = "toggle",
@@ -553,15 +616,128 @@ local function displayRows(desktop, font_name, scale, grid_max_cols, open_on)
                 end,
             })
         end,
+        placeholderRow(),
     }
 end
 
---- 维护子页行。
----@param desktop table
----@return table
-local function maintenanceRows(desktop)
+local function pickLanguage()
+    local Language = require("ui/language")
+    local items = {}
+    for _, item in ipairs(Language:getLangMenuTable().sub_item_table or {}) do
+        items[#items + 1] = {
+            text = item.text,
+            checked = item.checked_func and item.checked_func(),
+            callback = item.callback,
+        }
+    end
+    Popup.list{
+        title = _("语言"),
+        items = items,
+    }
+end
+
+local function downloadPinyin(desktop)
+    if require("pinyin.download").downloading() then
+        return
+    end
+    local dialog
+    local function closeDialog()
+        if dialog then
+            dialog:close()
+            dialog = nil
+        end
+    end
+    Pinyin.downloadDict(function(ok, err)
+        closeDialog()
+        UIManager:show(InfoMessage:new{
+            text = ok and _("拼音词库已就绪")
+                or T(_("下载失败: %1"), tostring(err or "")),
+            timeout = 2,
+        })
+        desktop:rebuild()
+    end, function(stage, done_bytes, total, _idx, count)
+        if stage == "part" and total and total > 0 then
+            if not dialog then
+                local ok_dlg, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
+                if not ok_dlg then
+                    return
+                end
+                dialog = ProgressbarDialog:new{
+                    title = _("正在下载拼音词库…"),
+                    subtitle = T(_("共 %1 片"), count)
+                        .. string.format(" · %.1f MB", total / 1048576),
+                    progress_max = total,
+                    refresh_time_seconds = 1,
+                    dismissable = false,
+                }
+                dialog:show()
+            else
+                dialog:reportProgress(done_bytes)
+            end
+        elseif stage == "manifest" then
+            UIManager:show(InfoMessage:new{
+                text = _("获取词库信息…"),
+                timeout = 2,
+            })
+        elseif stage == "assemble" then
+            closeDialog()
+            UIManager:show(InfoMessage:new{
+                text = _("解压校验词库…"),
+                timeout = 2,
+            })
+        end
+    end)
+end
+
+local function languageRows(desktop)
+    local Language = require("ui/language")
+    local lang = G_reader_settings:readSetting("language") or "C"
     return {
         function(iw)
+            return SettingRow.build(iw, {
+                kind = "nav",
+                icon = "language",
+                title = _("语言"),
+                status = Language:getLanguageName(lang),
+                status_on = true,
+                callback = pickLanguage,
+            })
+        end,
+        function(iw)
+            return SettingRow.build(iw, {
+                kind = "toggle",
+                icon = "translate",
+                title = _("中文键盘"),
+                status = Pinyin.isEnabled() and _("开") or _("关"),
+                status_on = Pinyin.isEnabled(),
+                callback = function()
+                    local on = Pinyin.setEnabled(not Pinyin.isEnabled())
+                    UIManager:show(InfoMessage:new{
+                        text = on and _("中文键盘已启用，点键盘上的 🌐 键切换中英文")
+                            or _("中文键盘已停用"),
+                        timeout = 3,
+                    })
+                    desktop:rebuild()
+                end,
+            })
+        end,
+        function(iw)
+            return SettingRow.build(iw, {
+                kind = "nav",
+                icon = "spellcheck",
+                title = _("拼音词库"),
+                status = Pinyin.dictStatus(),
+                status_on = require("pinyin.dictionary").isAvailable(),
+                callback = function()
+                    downloadPinyin(desktop)
+                end,
+            })
+        end,
+    }
+end
+
+local function cacheRow(desktop)
+    return function(iw)
             local cache_size = desktop._cache_size_label or _("计算中…")
             -- 扫完就置 label；只认 job 会让回调里的 rebuild 再次开扫，死循环
             if desktop._cache_size_label == nil and not desktop._cache_size_job then
@@ -615,8 +791,11 @@ local function maintenanceRows(desktop)
                     })
                 end,
             })
-        end,
-        function(iw)
+        end
+end
+
+local function aboutRow()
+    return function(iw)
             return SettingRow.build(iw, {
                 kind = "nav",
                 icon = "info",
@@ -625,8 +804,11 @@ local function maintenanceRows(desktop)
                 status_on = true,
                 callback = showAbout,
             })
-        end,
-        function(iw)
+        end
+end
+
+local function closeRow(desktop)
+    return function(iw)
             return SettingRow.build(iw, {
                 kind = "action",
                 icon = "close",
@@ -635,11 +817,30 @@ local function maintenanceRows(desktop)
                     desktop:onClose()
                 end,
             })
-        end,
-    }
+        end
 end
 
---- 构建设置页（主菜单 / 数据源 / 显示 / 维护，分页）。
+local function updateRow()
+    return function(iw)
+        return SettingRow.build(iw, {
+            kind = "action",
+            icon = "system_update",
+            title = _("检查更新"),
+            status = pluginVersion(),
+            status_on = true,
+            callback = function()
+                local url = REPO_URL .. "/releases/latest"
+                if Device:canOpenLink() then
+                    Device:openLink(url)
+                else
+                    UIManager:show(InfoMessage:new{ text = url })
+                end
+            end,
+        })
+    end
+end
+
+--- 构建设置页（十项主菜单 + 六个分类子页，分页）。
 ---@param desktop table
 ---@return table
 function Settings.build(desktop)
@@ -666,7 +867,15 @@ function Settings.build(desktop)
 
     local packed = {}
     local sub = desktop._settings_sub
-    if sub ~= "sources" and sub ~= "display" and sub ~= "maintenance" and sub ~= "remote" then
+    local valid_sub = {
+        sources = true,
+        display = true,
+        lockscreen = true,
+        desktop = true,
+        language = true,
+        remote = true,
+    }
+    if sub ~= nil and not valid_sub[sub] then
         -- 未知子页（状态损坏）：归一化回主菜单
         sub = nil
         desktop._settings_sub = nil
@@ -699,55 +908,38 @@ function Settings.build(desktop)
             end,
             function(iw)
                 return SettingRow.build(iw, {
-                    kind = "toggle",
-                    icon = "translate",
-                    title = _("中文键盘（拼音）"),
-                    status = Pinyin.isEnabled() and _("开") or _("关"),
-                    status_on = Pinyin.isEnabled(),
+                    kind = "nav",
+                    icon = "wallpaper",
+                    title = _("锁屏"),
+                    status = LockScreen.label(LockScreen.mode()),
+                    status_on = LockScreen.mode() ~= "ko",
                     callback = function()
-                        local on = Pinyin.setEnabled(not Pinyin.isEnabled())
-                        UIManager:show(InfoMessage:new{
-                            text = on and _("中文键盘已启用，点键盘上的 🌐 键切换中英文")
-                                or _("中文键盘已停用"),
-                            timeout = 3,
-                        })
-                        desktop:rebuild()
+                        gotoSub(desktop, "lockscreen")
                     end,
                 })
             end,
             function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav",
-                    icon = "dictionary",
-                    title = _("拼音词库"),
-                    status = Pinyin.dictStatus(),
-                    status_on = require("pinyin.dictionary").isAvailable(),
+                    icon = "desktop_windows",
+                    title = _("桌面"),
+                    status = open_on and _("开") or _("关"),
+                    status_on = open_on,
                     callback = function()
-                        if require("pinyin.download").downloading() then
-                            return
-                        end
-                        UIManager:show(InfoMessage:new{
-                            text = _("正在下载拼音词库…"),
-                            timeout = 2,
-                        })
-                        Pinyin.downloadDict(function(ok, err)
-                            UIManager:show(InfoMessage:new{
-                                text = ok and _("拼音词库已就绪")
-                                    or T(_("下载失败: %1"), tostring(err or "")),
-                                timeout = 2,
-                            })
-                            desktop:rebuild()
-                        end)
+                        gotoSub(desktop, "desktop")
                     end,
                 })
             end,
             function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav",
-                    icon = "build",
-                    title = _("维护"),
+                    icon = "language",
+                    title = _("语言与输入"),
+                    status = require("ui/language"):getLanguageName(
+                        G_reader_settings:readSetting("language") or "C"),
+                    status_on = true,
                     callback = function()
-                        gotoSub(desktop, "maintenance")
+                        gotoSub(desktop, "language")
                     end,
                 })
             end,
@@ -755,7 +947,7 @@ function Settings.build(desktop)
                 return SettingRow.build(iw, {
                     kind = "nav",
                     icon = "folder",
-                    title = _("文件管理"),
+                    title = _("远程管理"),
                     status = Remote.isRunning() and _("运行中") or nil,
                     status_on = Remote.isRunning(),
                     callback = function()
@@ -763,19 +955,28 @@ function Settings.build(desktop)
                     end,
                 })
             end,
+            cacheRow(desktop),
+            aboutRow(),
+            closeRow(desktop),
+            updateRow(),
         })
     else
         table.insert(packed, backRow(desktop)(card_w))
         if sub == "sources" then
-            appendSection(packed, card_w, _("数据源"),
-                sourcesRows(desktop, plugin, active_id, active_name))
+            for _, section in ipairs(sourceSections(desktop, plugin, active_id, active_name)) do
+                appendSection(packed, card_w, section.title, section.rows)
+            end
         elseif sub == "display" then
             appendSection(packed, card_w, _("显示"),
-                displayRows(desktop, font_name, scale, grid_max_cols, open_on))
+                displayRows(desktop, font_name, scale, grid_max_cols))
+        elseif sub == "lockscreen" then
+            appendSection(packed, card_w, _("锁屏"), lockscreenRows(desktop))
+        elseif sub == "desktop" then
+            appendSection(packed, card_w, _("桌面"), desktopRows(desktop, open_on))
+        elseif sub == "language" then
+            appendSection(packed, card_w, _("语言与输入"), languageRows(desktop))
         elseif sub == "remote" then
-            appendSection(packed, card_w, _("文件管理"), Remote.menuRows(desktop))
-        else
-            appendSection(packed, card_w, _("维护"), maintenanceRows(desktop))
+            appendSection(packed, card_w, _("远程管理"), Remote.menuRows(desktop))
         end
     end
 
