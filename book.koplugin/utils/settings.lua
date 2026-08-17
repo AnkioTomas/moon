@@ -20,7 +20,7 @@ local Paths = require("utils.paths")
 ---@field ui_font string|nil 界面字体 id：空=系统默认；本地为 basename；微信为 weread id
 ---@field ui_font_name string|nil 界面字体展示名
 ---@field grid_max_cols number 网格最大列数（2～6，默认 4）
----@field lock_screen string|nil 锁屏显示：ko=跟随系统；其余为已注册样式 id（lockscreen/styles/）
+---@field lock_screen string|nil 锁屏显示：默认 myrl；ko=跟随系统；其余为已注册样式 id
 ---@field lock_screen_prev_type string|nil 接管前的 screensaver_type
 ---@field lock_screen_prev_cover string|nil 接管前的 screensaver_document_cover（空串=无）
 ---@field lock_screen_day string|nil 当前样式上次成功下载日 YYYY-MM-DD
@@ -40,7 +40,7 @@ local function commonDefaults()
         ui_font = "",
         ui_font_name = "",
         grid_max_cols = 4,
-        lock_screen = "ko",
+        lock_screen = "myrl",
         remote_port = 9528,
         remote_autostart = false,
         pinyin_enabled = false,

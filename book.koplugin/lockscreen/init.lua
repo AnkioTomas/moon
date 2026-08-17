@@ -160,6 +160,8 @@ function M.bootstrap()
     if style == nil then
         return
     end
+    -- 新安装默认启用样式，也必须先保存用户原有 KOReader 锁屏配置。
+    Settings.backupIfNeeded()
     if fileOk(style.path()) then
         Settings.applyCover(style.path())
     end
