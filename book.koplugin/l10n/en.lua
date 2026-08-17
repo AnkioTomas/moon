@@ -417,4 +417,7 @@ return {
     ["服务已启动：%1"] = "Service started: %1",
     ["启动失败：%1"] = "Failed to start: %1",
     ["本机IP"] = "device IP",
+    ["中文键盘（拼音）"] = "Chinese keyboard (pinyin)",
+    ["中文键盘已启用，点键盘上的 🌐 键切换中英文"] = "Chinese keyboard enabled. Tap 🌐 on the keyboard to switch between Chinese and English",
+    ["中文键盘已停用"] = "Chinese keyboard disabled",
 }
