@@ -176,6 +176,12 @@ local function fakeHandlers(dirs)
             calls.input = text
             return true
         end,
+        get_clipboard = function()
+            return { text = calls.clipboard or "" }
+        end,
+        set_clipboard = function(text)
+            calls.clipboard = text
+        end,
         temp_path = function()
             return os.tmpname()
         end,
@@ -199,6 +205,7 @@ local function serve(client, handlers, opts)
         handlers = handlers,
         root = opts and opts.root or "/",
         roots = opts and opts.roots,
+        home = opts and opts.home,
         shortcuts = opts and opts.shortcuts,
         slice = opts and opts.slice,
     })
@@ -231,21 +238,69 @@ local function parseResponse(out)
     return code, out:sub(split + 4), head
 end
 
--- ── GET / ─────────────────────────────────────────────
+-- ── 静态页面/资源 + /api/config ───────────────────────
 
 do
+    -- 入口页：远程管理，链接两个功能页
     local client = newClient({ "GET / HTTP/1.1\r\nHost: x\r\n\r\n" })
     local server = serve(client, nil, {
         root = "/managed",
-        shortcuts = { { label = "KOReader 字体", path = "/managed/koreader/fonts" } },
+        home = "/managed/books",
+        shortcuts = { { label = "书籍根目录", path = "/managed/books" } },
     })
     drain(server)
-    local code, body = parseResponse(client:output())
+    local code, body, head = parseResponse(client:output())
     Assert.eq(code, 200)
-    has(body, "文件管理")
-    has(body, "KOReader 字体")
-    has(body, '"/managed"')
+    has(head, "text/html")
+    has(body, "远程管理")
+    has(body, "/file.html")
+    has(body, "/input.html")
     Assert.is_true(client.closed, "Connection: close 后 socket 必须关闭")
+
+    -- 静态资源：ctype 正确 + 内容命中；夜间模式媒体查询在 css 里
+    local c_css = newClient({ "GET /style.css HTTP/1.1\r\n\r\n" })
+    drain(serve(c_css))
+    local _, b_css, h_css = parseResponse(c_css:output())
+    has(h_css, "text/css")
+    has(b_css, "--blue")
+    has(b_css, "prefers-color-scheme: dark")
+
+    local c_js = newClient({ "GET /js.js HTTP/1.1\r\n\r\n" })
+    drain(serve(c_js))
+    local _, b_js, h_js = parseResponse(c_js:output())
+    has(h_js, "application/javascript")
+    has(b_js, "jfetch")
+
+    local c_f = newClient({ "GET /file.html HTTP/1.1\r\n\r\n" })
+    drain(serve(c_f))
+    local _, b_f = parseResponse(c_f:output())
+    has(b_f, "文件管理")
+    has(b_f, "第 2 级目录为分类") -- 书籍根目录约定说明
+    has(b_f, "/js.js")
+
+    local c_i = newClient({ "GET /input.html HTTP/1.1\r\n\r\n" })
+    drain(serve(c_i))
+    local _, b_i = parseResponse(c_i:output())
+    has(b_i, "远程输入")
+    has(b_i, "/input.js")
+
+    -- 静态路由非 GET → 405；未知路径 → 404
+    local c_p = newClient({ "POST /style.css HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c_p))
+    Assert.eq((parseResponse(c_p:output())), 405)
+
+    -- /api/config：实例配置免注入下发
+    local c_cfg = newClient({ "GET /api/config HTTP/1.1\r\n\r\n" })
+    drain(serve(c_cfg, nil, {
+        root = "/managed",
+        home = "/managed/books",
+        shortcuts = { { label = "书籍根目录", path = "/managed/books" } },
+    }))
+    local _, b_cfg = parseResponse(c_cfg:output())
+    local cfg = require("support.json_stub").decode(b_cfg)
+    Assert.eq(cfg.root, "/managed")
+    Assert.eq(cfg.home, "/managed/books")
+    Assert.eq(cfg.shortcuts[1].label, "书籍根目录")
 end
 
 -- ── GET /api/list ─────────────────────────────────────
@@ -550,7 +605,7 @@ do
 end
 
 
--- ── 远程输入 ──────────────────────────────────────────
+-- ── 远程输入（光标处追加）──────────────────────────────
 
 do
     -- GET 激活状态：默认未激活 / 覆盖为激活
@@ -559,14 +614,16 @@ do
     local d1 = require("support.json_stub").decode(select(2, parseResponse(c1:output())))
     Assert.is_false(d1.active)
 
+    -- 激活时带设备输入框全文（网页端光标预览）
     local h2 = fakeHandlers({})
     h2.get_input = function()
-        return { active = true }
+        return { active = true, text = "设备上已有文本" }
     end
     local c2 = newClient({ "GET /api/input HTTP/1.1\r\n\r\n" })
     drain(serve(c2, h2))
     local d2 = require("support.json_stub").decode(select(2, parseResponse(c2:output())))
     Assert.is_true(d2.active)
+    Assert.eq(d2.text, "设备上已有文本", "GET 必须带设备当前文本")
 
     -- POST：分片送达的中文整段，完整注入
     local h3, calls3 = fakeHandlers({})
@@ -579,25 +636,80 @@ do
     Assert.eq(calls3.input, text, "text_mode body 必须完整拼接")
     Assert.eq((parseResponse(c3:output())), 200)
 
+    -- POST 空 body = 无操作，不碰 handler，直接 200
+    local h4, calls4 = fakeHandlers({})
+    local c4 = newClient({ "POST /api/input HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c4, h4))
+    Assert.is_nil(calls4.input)
+    Assert.eq((parseResponse(c4:output())), 200)
+
     -- POST：无激活输入框 → 409
-    local h4 = fakeHandlers({})
-    h4.set_input = function()
+    local h5 = fakeHandlers({})
+    h5.set_input = function()
         return nil, "no active input"
     end
-    local c4 = newClient({ "POST /api/input HTTP/1.1\r\nContent-Length: 2\r\n\r\nhi" })
-    drain(serve(c4, h4))
-    Assert.eq((parseResponse(c4:output())), 409)
+    local c5 = newClient({ "POST /api/input HTTP/1.1\r\nContent-Length: 2\r\n\r\nhi" })
+    drain(serve(c5, h5))
+    Assert.eq((parseResponse(c5:output())), 409)
 
     -- POST：无 Content-Length → 411；超限 → 413
-    local c5 = newClient({ "POST /api/input HTTP/1.1\r\n\r\n" })
-    drain(serve(c5))
-    Assert.eq((parseResponse(c5:output())), 411)
-    local c6 = newClient({ "POST /api/input HTTP/1.1\r\nContent-Length: 70000\r\n\r\n" })
+    local c6 = newClient({ "POST /api/input HTTP/1.1\r\n\r\n" })
     drain(serve(c6))
-    Assert.eq((parseResponse(c6:output())), 413)
+    Assert.eq((parseResponse(c6:output())), 411)
+    local c7 = newClient({ "POST /api/input HTTP/1.1\r\nContent-Length: 300000\r\n\r\n" })
+    drain(serve(c7))
+    Assert.eq((parseResponse(c7:output())), 413)
 
     -- GET 用错方法组合外的动词 → 405
-    local c7 = newClient({ "DELETE /api/input HTTP/1.1\r\n\r\n" })
+    local c8 = newClient({ "DELETE /api/input HTTP/1.1\r\n\r\n" })
+    drain(serve(c8))
+    Assert.eq((parseResponse(c8:output())), 405)
+end
+
+-- ── 共享剪贴板（设备最后复制的文本）────────────────────
+
+do
+    -- GET：默认空剪贴板
+    local c1 = newClient({ "GET /api/clipboard HTTP/1.1\r\n\r\n" })
+    drain(serve(c1))
+    local d1 = require("support.json_stub").decode(select(2, parseResponse(c1:output())))
+    Assert.eq(d1.text, "")
+
+    -- GET：读到设备端复制过的文本（阅读划线复制等经 handler 镜像进来）
+    local h2, calls2 = fakeHandlers({})
+    calls2.clipboard = "阅读里划的一段话"
+    local c2 = newClient({ "GET /api/clipboard HTTP/1.1\r\n\r\n" })
+    drain(serve(c2, h2))
+    local d2 = require("support.json_stub").decode(select(2, parseResponse(c2:output())))
+    Assert.eq(d2.text, "阅读里划的一段话")
+
+    -- POST：网页整段写入设备剪贴板（分片送达，完整拼接）
+    local h3, calls3 = fakeHandlers({})
+    local text = "网页复制的第一行\n第二行：中文 English 123"
+    local c3 = newClient({
+        "POST /api/clipboard HTTP/1.1\r\nContent-Length: " .. #text .. "\r\n\r\n" .. text:sub(1, 9),
+        text:sub(10),
+    })
+    drain(serve(c3, h3))
+    Assert.eq(calls3.clipboard, text, "text_mode body 必须完整拼接")
+    Assert.eq((parseResponse(c3:output())), 200)
+
+    -- POST 空 body = 清空设备剪贴板
+    local h4, calls4 = fakeHandlers({})
+    calls4.clipboard = "旧内容"
+    local c4 = newClient({ "POST /api/clipboard HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c4, h4))
+    Assert.eq(calls4.clipboard, "", "空 body 必须清空剪贴板")
+    Assert.eq((parseResponse(c4:output())), 200)
+
+    -- 无 Content-Length → 411；超限 → 413；多余动词 → 405
+    local c5 = newClient({ "POST /api/clipboard HTTP/1.1\r\n\r\n" })
+    drain(serve(c5))
+    Assert.eq((parseResponse(c5:output())), 411)
+    local c6 = newClient({ "POST /api/clipboard HTTP/1.1\r\nContent-Length: 300000\r\n\r\n" })
+    drain(serve(c6))
+    Assert.eq((parseResponse(c6:output())), 413)
+    local c7 = newClient({ "DELETE /api/clipboard HTTP/1.1\r\n\r\n" })
     drain(serve(c7))
     Assert.eq((parseResponse(c7:output())), 405)
 end
