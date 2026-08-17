@@ -40,6 +40,7 @@ local function clearMods()
         "ffi/sha2",
         "utils.db.base",
         "utils.db.book",
+        "utils.db.toc",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -421,6 +422,36 @@ do
 
     Assert.is_true(BookDB.expireBefore("not-a-number"))
     Assert.eq(calls[#calls].args[1], 0)
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── remove：连带清目录缓存（toc.delete），非法参数不连带 ──
+do
+    local toc_deleted = {}
+    package.preload["utils.db.toc"] = function()
+        return {
+            delete = function(source_id, stable_id)
+                toc_deleted[#toc_deleted + 1] = { source_id = source_id, stable_id = stable_id }
+                return true
+            end,
+        }
+    end
+    local connection, calls = makeConn()
+    local DbBase, BookDB = loadBook(connection)
+
+    Assert.is_true(BookDB.remove("moon", "b'1"))
+    Assert.eq(#toc_deleted, 1)
+    Assert.eq(toc_deleted[1].source_id, "moon")
+    Assert.eq(toc_deleted[1].stable_id, "b'1")
+    -- 连带清缓存不挡主删除：books 的 DELETE 照常执行
+    Assert.eq(calls[#calls].sql, "DELETE FROM books WHERE source_id=? AND stable_id=?;")
+
+    -- 参数校验在连带删除之前：非法输入不触 toc.delete
+    Assert.is_false(BookDB.remove("", "b1"))
+    Assert.is_false(BookDB.remove("moon", ""))
+    Assert.eq(#toc_deleted, 1)
 
     DbBase.close()
     clearMods()

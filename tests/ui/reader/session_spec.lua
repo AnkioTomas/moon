@@ -13,7 +13,7 @@ local calls = { tracker = {}, progress = {}, chapter = {}, reader = {} }
 
 package.preload["book.store"] = function()
     return {
-        identityFor = function(path)
+        ensureIdentity = function(path)
             if path == "/x/book.epub" then
                 return { ref = { source_id = "moon", stable_id = "b1" }, chapter_idx = nil }
             end
@@ -22,10 +22,21 @@ package.preload["book.store"] = function()
     }
 end
 
+-- 属主源工厂：记录 create 调用，按 id 返回非活跃实例
+local registry_created = {}
+package.preload["source.registry"] = function()
+    return {
+        create = function(id)
+            registry_created[#registry_created + 1] = id
+            return { id = id }
+        end,
+    }
+end
+
 package.preload["stats.tracker"] = function()
     return {
-        start = function(ui)
-            calls.tracker[#calls.tracker + 1] = { "start", ui }
+        start = function(ui, identity)
+            calls.tracker[#calls.tracker + 1] = { "start", ui, identity }
         end,
         stop = function()
             calls.tracker[#calls.tracker + 1] = { "stop" }
@@ -43,6 +54,9 @@ package.preload["book.progress"] = function()
         end,
         push = function(ui, source, show_msg)
             calls.progress[#calls.progress + 1] = { "push", source }
+        end,
+        clearConflicts = function()
+            calls.progress[#calls.progress + 1] = { "clearConflicts" }
         end,
         fraction = function(ui)
             return 0.25
@@ -76,6 +90,7 @@ package.preload["chapters.init"] = function()
         end,
         onCloseDocument = function(path)
             calls.chapter[#calls.chapter + 1] = { "close", path }
+            return true -- 真关书（非切章）
         end,
         onEndOfBook = function()
             return false
@@ -107,7 +122,8 @@ end
 local Session = require("ui.reader.session")
 
 ---@param path string
-local function mkPlugin(path)
+---@param current_id string|nil 当前活跃源 id（缺省 moon）
+local function mkPlugin(path, current_id)
     local emitted = {}
     local plugin = {
         ui = {
@@ -122,10 +138,10 @@ local function mkPlugin(path)
             end,
         },
         getSource = function()
-            return { id = "moon" }
+            return { id = current_id or "moon" }
         end,
-        emitToSource = function(_, ev, payload)
-            emitted[#emitted + 1] = { ev = ev, payload = payload }
+        emitToSource = function(_, ev, payload, source)
+            emitted[#emitted + 1] = { ev = ev, payload = payload, source = source }
         end,
     }
     return plugin, emitted
@@ -153,6 +169,12 @@ do
     Assert.eq(cur.total_pages, 200)
     Assert.eq(cur.percent, 25)
     Assert.is_nil(cur.chapter_count, "整本书无章数")
+    Assert.eq(cur.source.id, "moon", "current 即属主源时直接用 current")
+    Assert.eq(#registry_created, 0, "同源不必另建实例")
+    -- 统计拿到的是内存身份（DB 写入异步，同 tick 查不到）
+    local start_call = calls.tracker[#calls.tracker]
+    Assert.eq(start_call[1], "start")
+    Assert.eq(start_call[3].ref.stable_id, "b1")
 
     -- 翻页：更新快照 + 刷新 + 分发 page_changed
     Session.onPageUpdate(plugin, 6)
@@ -169,10 +191,11 @@ do
     Session.onPosUpdate(plugin, 7)
     Assert.eq(emitted[#emitted].payload.page, 7)
 
-    -- 关文档：推进度/结清/通知源/清会话
+    -- 关文档：推进度/结清/通知源/清会话（真关书还会清进度冲突记忆）
     Session.onCloseDocument(plugin)
     Assert.is_false(Session.isActive(), "关书清会话")
-    Assert.eq(calls.progress[#calls.progress][1], "push")
+    Assert.eq(calls.progress[#calls.progress - 1][1], "push")
+    Assert.eq(calls.progress[#calls.progress][1], "clearConflicts")
     Assert.eq(calls.tracker[#calls.tracker][1], "stop")
     Assert.eq(emitted[#emitted].ev, "document_close")
     Assert.eq(calls.chapter[#calls.chapter][1], "close")
@@ -202,11 +225,31 @@ do
     chapter_state.active = false
 end
 
+-- 换源后继续读旧书：源跟 ref 走（属主源），不许用 current（串书修复）
+do
+    registry_created = {}
+    local plugin, emitted = mkPlugin("/x/book.epub", "wechat") -- current=wechat，书是 moon:b1
+    Session.onReaderReady(plugin)
+    local cur = Session.current()
+    Assert.eq(cur.source.id, "moon", "源必须按 ref.source_id 解析")
+    Assert.eq(registry_created[#registry_created], "moon", "非活跃属主源经 registry.create 建实例")
+    -- 拉进度收到属主源而不是 current
+    local pull = calls.progress[#calls.progress]
+    Assert.eq(pull[1], "pull")
+    Assert.eq(pull[2].id, "moon", "pull 不许拿 wechat 拉 moon 的书")
+    Assert.eq(emitted[#emitted].source.id, "moon", "reader_ready 事件路由到属主源")
+    Session.onCloseDocument(plugin)
+    local push = calls.progress[#calls.progress - 1]
+    Assert.eq(push[1], "push")
+    Assert.eq(push[2].id, "moon", "push 不许把 moon 的书推给 wechat")
+    Assert.eq(emitted[#emitted].source.id, "moon", "document_close 事件路由到属主源")
+end
+
 -- 清理：fake 经 package.preload 安装，runner 只清 package.loaded，
 -- 不卸会污染后续 spec（如 stats/tracker_spec 需要真 stats.tracker）
 for _, name in ipairs({
     "book.store", "stats.tracker", "book.progress",
-    "chapters.init", "chapters.patches", "ui.reader",
+    "chapters.init", "chapters.patches", "ui.reader", "source.registry",
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil
