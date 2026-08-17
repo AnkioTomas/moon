@@ -46,6 +46,7 @@ function BookPlugin:init()
     Host.attach(self)
     require("lockscreen.init").bootstrap()
     require("remote.init").bootstrap()
+    require("pinyin.init").bootstrap()
     if self.ui and self.ui.document then
         self:emitToSource("reader_open")
     end
@@ -154,12 +155,13 @@ function BookPlugin:getSource()
     return SourceRegistry.current()
 end
 
---- 向当前源转发生命周期事件；源实现抛错只记日志，不阻断阅读主流程。
+--- 向源转发生命周期事件；源实现抛错只记日志，不阻断阅读主流程。
 ---@param event string
 ---@param payload table|nil
+---@param source BookSource|nil 指定属主源；缺省取当前活跃源
 ---@return nil
-function BookPlugin:emitToSource(event, payload)
-    local source = self:getSource()
+function BookPlugin:emitToSource(event, payload, source)
+    source = source or self:getSource()
     if not source then
         return
     end

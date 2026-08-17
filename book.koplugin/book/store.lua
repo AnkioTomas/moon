@@ -319,18 +319,117 @@ function Store.remoteFilename(path)
     return basename(path)
 end
 
---- 进度/面板用身份：完整 BookRef + chapter_idx
+--- 缓存目录身份伴生文件 → 身份；章节号取文件名 N.html。
+---@param dir string
+---@param file string|nil
+---@return { ref: BookRef, chapter_idx: number|nil }|nil
+local function identityFromCache(dir, file)
+    local f = io.open(Paths.identityFilePath(dir), "rb")
+    if not f then
+        return nil -- 老安装无伴生文件：保持原行为（无身份、会话不活跃）
+    end
+    local raw = f:read("*a")
+    f:close()
+    local ok, data = pcall(function()
+        return require("json").decode(raw)
+    end)
+    if not ok or type(data) ~= "table"
+        or type(data.source_id) ~= "string" or data.source_id == ""
+        or type(data.stable_id) ~= "string" or data.stable_id == "" then
+        return nil
+    end
+    local idx = file and file:match("^(%d+)%.html$")
+    return {
+        ref = BookRef.new(data.source_id, data.stable_id),
+        chapter_idx = idx and tonumber(idx) or nil,
+    }
+end
+
+--- 本地文件 → books 身份：filepath 直查，未中按内容 md5 反查（改名/移动）。
+---@param path string
+---@return { ref: BookRef, chapter_idx: nil }|nil
+local function identityFromBooks(path)
+    local row = BookDB.get("local", path)
+    if row then
+        return { ref = BookRef.new("local", row.stable_id) }
+    end
+    local ok, digest = pcall(function()
+        return require("ffi/util").partialMD5(path)
+    end)
+    if not ok or not digest then
+        return nil
+    end
+    local by_md5 = BookDB.getByMd5("local", digest)
+    if by_md5 then
+        return { ref = BookRef.new("local", by_md5.stable_id) }
+    end
+    return nil
+end
+
+--- 进度/面板用身份：完整 BookRef + chapter_idx。
+--- 解析顺序：opens 快路径 → 缓存目录身份伴生文件（任意章/整本缓存文件可反推）
+--- → 本地书按 filepath / 内容 md5 找 books（识别改名/移动）。
 ---@param path string
 ---@return { ref: BookRef, chapter_idx: number|nil }|nil
 function Store.identityFor(path)
     local v = Store.entryFor(path)
-    if not v or not v.stable_id or not v.source_id then
+    if v and v.stable_id and v.source_id then
+        return {
+            ref = BookRef.new(v.source_id, v.stable_id),
+            chapter_idx = v.chapter_idx,
+        }
+    end
+    local dir, file = Paths.splitBookWorkPath(path)
+    if dir then
+        return identityFromCache(dir, file)
+    end
+    return identityFromBooks(path)
+end
+
+--- 打开时确保身份：能解析则补齐 opens 记录（最近阅读/快路径）；
+--- 完全未入库的本地文件当本地书登记（统计/进度挂到 local 源）。
+--- DB 写入走队列异步落，返回的是内存身份，同 tick 再查 identityFor 不一定中。
+---@param path string
+---@return { ref: BookRef, chapter_idx: number|nil }|nil
+function Store.ensureIdentity(path)
+    if type(path) ~= "string" or path == "" then
         return nil
     end
-    return {
-        ref = BookRef.new(v.source_id, v.stable_id),
-        chapter_idx = v.chapter_idx,
-    }
+    local id = Store.identityFor(path)
+    if id then
+        Store.touchAsync(path, id.ref, { chapter_idx = id.chapter_idx })
+        return id
+    end
+    if Paths.splitBookWorkPath(path) then
+        return nil -- 插件缓存文件但无身份伴生：不登记成本地书
+    end
+    if require("libs/libkoreader-lfs").attributes(path, "mode") ~= "file" then
+        return nil
+    end
+    -- 未入库 → 当本地书登记（标题取文件名；md5 供后续改名识别）
+    local ok, digest = pcall(function()
+        return require("ffi/util").partialMD5(path)
+    end)
+    local name = basename(path) or path
+    local title = name:gsub("%.[^%.]+$", "")
+    local path_copy = path
+    local digest_copy = ok and digest or nil
+    DbQueue.run(function()
+        BookDB.upsert({
+            source_id = "local",
+            stable_id = path_copy,
+            md5 = digest_copy,
+            title = title,
+            fetched_at = os.time(),
+        })
+        OpenDB.upsert({
+            source_id = "local",
+            stable_id = path_copy,
+            path = path_copy,
+            last_open = os.time(),
+        })
+    end)
+    return { ref = BookRef.new("local", path), chapter_idx = nil }
 end
 
 return Store

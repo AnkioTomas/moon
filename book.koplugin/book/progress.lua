@@ -20,6 +20,15 @@ local T = require("ffi/util").template
 
 local Progress = {}
 
+--- 进度冲突已询问记忆（key = source_id:stable_id）；真关书时由 session 清掉
+local _resolved_conflicts = {}
+
+--- 真关书后清冲突记忆：下次开书若仍不一致会重新询问
+---@return nil
+function Progress.clearConflicts()
+    _resolved_conflicts = {}
+end
+
 --- 当前文档身份 { ref, chapter_idx? }
 ---@param ui table
 ---@return { ref: BookRef, chapter_idx: number|nil }|nil
@@ -265,6 +274,87 @@ function Progress.push(ui, source, show_msg)
     end)
 end
 
+--- 把云端进度应用到当前文档（按章书跳章，整本书跳比例）。
+--- 调用前提：已确认 pos 与本地不一致且文档身份未变。
+---@param ui table
+---@param id { ref: BookRef, chapter_idx: number|nil }
+---@param pos ProgressPosition
+---@param pct number clamp 后的全书比例
+---@param show_msg boolean|nil
+local function applyRemotePos(ui, id, pos, pct, show_msg)
+    local Chapter = require("chapters.init")
+    local chapter_mode = id.chapter_idx and Chapter.isActive()
+    if chapter_mode then
+        local count = Chapter.chapterCount() or 1
+        local target_idx = pos.chapter_idx
+        local within = pos.chapter_fraction or pct
+        if not target_idx then
+            local p = pct * count
+            target_idx = math.max(1, math.min(count, math.floor(p) + 1))
+            within = p - (target_idx - 1)
+        elseif pos.chapter_fraction then
+            within = pos.chapter_fraction
+        else
+            local p = pct * count
+            local expect = math.floor(p) + 1
+            if expect == target_idx then
+                within = p - (target_idx - 1)
+            else
+                within = 0
+            end
+        end
+        if Chapter.isActive() and target_idx ~= id.chapter_idx then
+            Chapter.gotoChapter(target_idx, { within = within })
+            if show_msg then
+                UIManager:show(InfoMessage:new{
+                    text = T(_("已跳转到约 %1%"), string.format("%.1f", pct * 100)),
+                    timeout = 2,
+                })
+            end
+            return
+        end
+        applyFractionToDoc(ui, within)
+    else
+        applyFractionToDoc(ui, pct)
+    end
+    if show_msg then
+        UIManager:show(InfoMessage:new{
+            text = T(_("已跳转到约 %1%"), string.format("%.1f", pct * 100)),
+            timeout = 2,
+        })
+    end
+end
+
+--- 本地与云端进度不一致：询问用户用哪个（本次阅读会话只问一次）。
+--- 选云端 → 跳转；选本地 → 把本地推上去收敛，避免下次再问。
+---@param ui table
+---@param source BookSource
+---@param id { ref: BookRef, chapter_idx: number|nil }
+---@param pos ProgressPosition
+---@param pct number
+---@param local_frac number
+local function askProgressConflict(ui, source, id, pos, pct, local_frac)
+    local key = id.ref.source_id .. ":" .. id.ref.stable_id
+    if _resolved_conflicts[key] then
+        return
+    end
+    _resolved_conflicts[key] = true
+    local ConfirmBox = require("ui/widget/confirmbox")
+    local remote_label = T(_("云端 %1%"), string.format("%.1f", pct * 100))
+    local local_label = T(_("本地 %1%"), string.format("%.1f", local_frac * 100))
+    UIManager:show(ConfirmBox:new{
+        text = T(_("本地与云端进度不一致（%1 / %2），跳转到哪个？"), local_label, remote_label),
+        ok_text = remote_label,
+        cancel_text = local_label,
+        ok_callback = function()
+            applyRemotePos(ui, id, pos, pct, true)
+        end,
+        cancel_callback = function()
+            Progress.push(ui, source, false)
+        end,
+    })
+end
+
 --- 从数据源拉取进度并应用到当前文档
 ---@param ui table
 ---@param source BookSource
@@ -293,55 +383,13 @@ function Progress.pull(ui, source, show_msg)
                         UIManager:show(InfoMessage:new{ text = err or _("拉取失败") })
                     end
                     return
-                else
-                    local pct = ProgressPosition.clampFraction(pos.fraction)
-                    local local_frac = Progress.fraction(ui)
-                    if math.abs(local_frac - pct) < 0.01 then
-                        return
-                    end
-
-                    local Chapter = require("chapters.init")
-                    local chapter_mode = id.chapter_idx and Chapter.isActive()
-                    if chapter_mode then
-                        local count = Chapter.chapterCount() or 1
-                        local target_idx = pos.chapter_idx
-                        local within = pos.chapter_fraction or pct
-                        if not target_idx then
-                            local p = pct * count
-                            target_idx = math.max(1, math.min(count, math.floor(p) + 1))
-                            within = p - (target_idx - 1)
-                        elseif pos.chapter_fraction then
-                            within = pos.chapter_fraction
-                        else
-                            local p = pct * count
-                            local expect = math.floor(p) + 1
-                            if expect == target_idx then
-                                within = p - (target_idx - 1)
-                            else
-                                within = 0
-                            end
-                        end
-                        if Chapter.isActive() and target_idx ~= id.chapter_idx then
-                            Chapter.gotoChapter(target_idx, { within = within })
-                            if show_msg then
-                                UIManager:show(InfoMessage:new{
-                                    text = T(_("已跳转到约 %1%"), string.format("%.1f", pct * 100)),
-                                    timeout = 2,
-                                })
-                            end
-                            return
-                        end
-                        applyFractionToDoc(ui, within)
-                    else
-                        applyFractionToDoc(ui, pct)
-                    end
-                    if show_msg then
-                        UIManager:show(InfoMessage:new{
-                            text = T(_("已跳转到约 %1%"), string.format("%.1f", pct * 100)),
-                            timeout = 2,
-                        })
-                    end
                 end
+                local pct = ProgressPosition.clampFraction(pos.fraction)
+                local local_frac = Progress.fraction(ui)
+                if math.abs(local_frac - pct) < 0.01 then
+                    return
+                end
+                askProgressConflict(ui, source, id, pos, pct, local_frac)
             end)
         end
         Progress.flushPendingAsync(source, false, getRemote)

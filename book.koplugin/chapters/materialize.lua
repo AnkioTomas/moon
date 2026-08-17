@@ -13,6 +13,8 @@ local _ = require("gettext")
 
 local Materialize = {
     _ensure_inflight = {},
+    --- 目录缓存 TTL（秒）：6 小时
+    TOC_TTL = 6 * 60 * 60,
 }
 
 --- 清掉所有 in-flight waiter（关书/换书后迟到回调不得落盘 UI）。
@@ -36,12 +38,15 @@ local function findChapter(toc, idx)
     return toc[idx]
 end
 
---- 异步拉目录；回调 cb(ok, chapters, err)。
---- 目录只在当次阅读会话内存里存一份（Session.toc），不落盘；换书/关书即丢，下次重新拉。
+--- 异步拉目录；回调 cb(ok, chapters, err, from_cache)。
+--- online 源目录落 toc 表缓存（6 小时）：开书不再每次重拉；命中时 from_cache=true。
+--- article(rss) 不缓存：目录会头插新文章，feed 自身已有 15 分钟内存缓存 +
+--- 指纹对账（rss.reconcileChapterCache），每次现拉廉价且正确。
 ---@param source BookSource
 ---@param ref BookRef
----@param cb fun(ok: boolean, chapters: BookChapter[]|nil, err: any)
-function Materialize.loadTocAsync(source, ref, cb)
+---@param cb fun(ok: boolean, chapters: BookChapter[]|nil, err: any, from_cache: boolean|nil)
+---@param no_cache boolean|nil 跳过缓存直拉（缓存偏旧重拉用）
+function Materialize.loadTocAsync(source, ref, cb, no_cache)
     if type(cb) ~= "function" then
         return
     end
@@ -50,6 +55,22 @@ function Materialize.loadTocAsync(source, ref, cb)
             cb(false, nil, _("数据源不支持目录"))
         end)
         return
+    end
+    local use_cache = not no_cache and source.type == "online"
+        and type(ref) == "table" and ref.source_id and ref.stable_id
+    if use_cache then
+        local payload = require("utils.db.toc").get(ref.source_id, ref.stable_id, Materialize.TOC_TTL)
+        if payload then
+            local ok, cached = pcall(function()
+                return require("json").decode(payload)
+            end)
+            if ok and type(cached) == "table" and #cached > 0 then
+                UIManager:nextTick(function()
+                    cb(true, cached, nil, true)
+                end)
+                return
+            end
+        end
     end
     source:getTocAsync(ref, function(chapters, err)
         if not chapters then
@@ -68,6 +89,17 @@ function Materialize.loadTocAsync(source, ref, cb)
                 uid = ch.uid,
                 title = (ch.title and ch.title ~= "") and ch.title or tostring(i),
             }
+        end
+        if use_cache then
+            local ok, payload = pcall(function()
+                return require("json").encode(normalized)
+            end)
+            if ok and payload then
+                local source_id, stable_id = ref.source_id, ref.stable_id
+                require("utils.db.queue").run(function()
+                    require("utils.db.toc").upsert(source_id, stable_id, payload)
+                end)
+            end
         end
         cb(true, normalized)
     end)
@@ -192,7 +224,31 @@ function Materialize.prefetchAround(idx)
     end
 end
 
+--- 本地已知的阅读位置：pending_progress（未同步的本地进度）→ opens.chapter_idx（上次读到的章）。
+---@param ref BookRef
+---@return ProgressPosition|nil
+local function localPosition(ref)
+    if type(ref) ~= "table" or not ref.source_id or not ref.stable_id then
+        return nil
+    end
+    local p = require("utils.db.progress").get(ref.source_id, ref.stable_id)
+    if p and (tonumber(p.chapter_idx) or (tonumber(p.fraction) or 0) > 0) then
+        return {
+            fraction = p.fraction,
+            chapter_idx = p.chapter_idx,
+            chapter_fraction = p.chapter_fraction,
+        }
+    end
+    local o = require("utils.db.open").get(ref.source_id, ref.stable_id)
+    if o and tonumber(o.chapter_idx) then
+        return { chapter_idx = tonumber(o.chapter_idx) }
+    end
+    return nil
+end
+
 --- 异步准备按章打开；回调 cb(ok, prep, err)。
+--- 起始章本地优先（pending/opens），都没有才用云端进度；
+--- 本地与云端不一致由 ReaderReady 的 Progress.pull 弹窗询问。
 ---@param source BookSource
 ---@param book Book
 ---@param ref BookRef
@@ -202,12 +258,24 @@ function Materialize.prepareOpenAsync(source, book, ref, cb)
         return
     end
     local function prepareWithBook(book2)
-        Materialize.loadTocAsync(source, ref, function(tok, toc, terr)
+        Materialize.loadTocAsync(source, ref, function(tok, toc, terr, from_cache)
             if not tok or not toc or #toc == 0 then
                 cb(false, nil, terr or _("无法获取目录"))
                 return
             end
-            local function finish(pos)
+            local function finish(pos, cur_toc, cur_cached, reloaded)
+                -- 缓存目录偏旧（连载加章）：进度指向的章超出目录，弃缓存重拉一次
+                local ci = pos and tonumber(pos.chapter_idx)
+                if cur_cached and not reloaded and ci and ci > #cur_toc then
+                    Materialize.loadTocAsync(source, ref, function(tok2, toc2)
+                        if tok2 and toc2 and #toc2 > 0 then
+                            finish(pos, toc2, nil, true)
+                            return
+                        end
+                        finish(pos, cur_toc, nil, true) -- 重拉失败仍用缓存目录（clamp 兜底）
+                    end, true)
+                    return
+                end
                 local start_idx = 1
                 if pos then
                     if tonumber(pos.chapter_idx) then
@@ -215,24 +283,27 @@ function Materialize.prepareOpenAsync(source, book, ref, cb)
                     else
                         local pct = ProgressPosition.clampFraction(pos.fraction)
                         if pct > 0 then
-                            start_idx = math.floor(pct * #toc) + 1
+                            start_idx = math.floor(pct * #cur_toc) + 1
                         end
                     end
                 end
                 -- chapter_idx 与 fraction 两条路径统一 clamp 到目录范围
-                start_idx = math.max(1, math.min(#toc, start_idx))
+                start_idx = math.max(1, math.min(#cur_toc, start_idx))
                 cb(true, {
                     book = book2,
-                    toc = toc,
+                    toc = cur_toc,
                     start_idx = start_idx,
                 })
             end
-            if source and source.getProgressAsync then
+            local lpos = localPosition(ref)
+            if lpos then
+                finish(lpos, toc, from_cache)
+            elseif source and source.getProgressAsync then
                 source:getProgressAsync(ref, function(pos)
-                    finish(pos)
+                    finish(pos, toc, from_cache)
                 end)
             else
-                finish(nil)
+                finish(nil, toc, from_cache)
             end
         end)
     end

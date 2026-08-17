@@ -13,7 +13,8 @@
   CloseDocument ──► _cur = nil（bars 停画）
 
 身份来源：章会话（chapters）优先——换源后仍读旧书时 registry.current 已不对；
-否则 Store.identityFor(document.file)。都没有 → 会话不活跃，无身份文档行为零变化。
+否则 Store.ensureIdentity(document.file)（解析/登记身份），源实例按 ref.source_id
+解析（owningSource），绝不拿 current 操作旧书。都没有 → 会话不活跃，无身份文档行为零变化。
 
 切章（switchDocument）会关旧文档再开新文档：CloseDocument 清状态，
 ReaderReady 依章会话重建——期间 bars/panel 短暂不活跃属正常。
@@ -27,6 +28,29 @@ local Session = {
     ---@type { plugin: table, source: table|nil, ref: BookRef|nil, book: table|nil, chapter_idx: number|nil, chapter_count: number|nil, page: number, total_pages: number, percent: number }|nil
     _cur = nil,
 }
+
+--- 属主源解析：ref 属于哪个源就用哪个源实例。
+--- 章会话的 source 是 bind 时捕获的（已对）；整本书在这里按 ref.source_id 建非活跃实例。
+--- 属主源不可用返回 nil：跳过源相关同步，也不许错用 current（串书根因）。
+---@param plugin table
+---@param ref BookRef|nil
+---@return BookSource|nil
+local function owningSource(plugin, ref)
+    local current = plugin:getSource()
+    if not ref then
+        return current
+    end
+    if current and current.id == ref.source_id then
+        return current
+    end
+    local ok, src = pcall(function()
+        return require("source.registry").create(ref.source_id)
+    end)
+    if ok then
+        return src
+    end
+    return nil
+end
 
 --- 是否有活跃阅读会话（仅源身份书籍）。
 ---@return boolean
@@ -84,32 +108,35 @@ function Session.onReaderReady(plugin)
         return
     end
     local Chapter = require("chapters.init")
-    local ref, chapter_idx, book, source
+    local ref, chapter_idx, book, source, identity
     if Chapter.isActive() then
         ref = Chapter.ref()
         source = Chapter.source()
         book = Chapter.book()
         chapter_idx = Chapter.currentIdx()
     else
-        local id = Store.identityFor(ui.document.file)
-        if id then
-            ref = id.ref
-            chapter_idx = id.chapter_idx
+        identity = Store.ensureIdentity(ui.document.file)
+        if identity then
+            ref = identity.ref
+            chapter_idx = identity.chapter_idx
+            -- 源跟 ref 走，不跟 current 走：换源后继续读旧书，用属主源实例
+            -- （current 是新源，直接拿它拉/推旧 stable_id 就是「串书」根因）
+            source = owningSource(plugin, ref)
         end
     end
 
-    require("stats.tracker").start(ui)
+    require("stats.tracker").start(ui, identity or (ref and { ref = ref }))
     if Chapter.isActive() then
         require("chapters.patches").enable()
         require("chapters.patches").wrapReaderUi(ui)
         Chapter.onReaderReady(ui)
     end
-    require("book.progress").pull(ui, plugin:getSource(), false)
+    require("book.progress").pull(ui, source, false)
 
     if ref then
         Session._cur = {
             plugin = plugin,
-            source = source or plugin:getSource(),
+            source = source,
             ref = ref,
             book = book,
             chapter_idx = chapter_idx,
@@ -123,7 +150,7 @@ function Session.onReaderReady(plugin)
     end
 
     require("ui.reader").attach(plugin)
-    plugin:emitToSource("reader_ready")
+    plugin:emitToSource("reader_ready", nil, source)
 end
 
 --- CloseDocument：推进度；结清统计；通知源；切章由 ReaderReady 重建会话。
@@ -132,14 +159,17 @@ end
 function Session.onCloseDocument(plugin)
     local ui = plugin and plugin.ui
     local cur = Session._cur
-    require("book.progress").push(ui, plugin:getSource(), false)
+    require("book.progress").push(ui, cur and cur.source or nil, false)
     require("stats.tracker").stop()
     if cur then
         require("annotations.sync").push(ui, cur.source, cur.ref)
     end
-    plugin:emitToSource("document_close")
+    plugin:emitToSource("document_close", nil, cur and cur.source or nil)
     local closed = ui and ui.document and ui.document.file
-    require("chapters.init").onCloseDocument(closed)
+    -- 真关书才清进度冲突记忆；切章（switchDocument）不算，否则会每章重复询问
+    if require("chapters.init").onCloseDocument(closed) then
+        require("book.progress").clearConflicts()
+    end
     Session._cur = nil
 end
 
@@ -163,7 +193,7 @@ local function onPage(plugin, page)
         total_pages = cur.total_pages,
         percent = cur.percent,
         chapter_idx = cur.chapter_idx,
-    })
+    }, cur.source)
 end
 
 --- 翻页（分页视图）。
@@ -190,13 +220,13 @@ function Session.onSuspend(plugin)
     if not ui or not ui.document then
         return
     end
-    require("book.progress").push(ui, plugin:getSource(), false)
-    require("stats.tracker").stop()
     local cur = Session._cur
+    require("book.progress").push(ui, cur and cur.source or nil, false)
+    require("stats.tracker").stop()
     if cur then
         require("annotations.sync").push(ui, cur.source, cur.ref)
     end
-    plugin:emitToSource("suspend")
+    plugin:emitToSource("suspend", nil, cur and cur.source or nil)
 end
 
 --- 唤醒：恢复阅读统计计时。
