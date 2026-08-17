@@ -46,7 +46,6 @@ function BookPlugin:init()
     Host.attach(self)
     require("lockscreen.init").bootstrap()
     require("remote.init").bootstrap()
-    require("pinyin.init").bootstrap()
     if self.ui and self.ui.document then
         self:emitToSource("reader_open")
     end

@@ -26,7 +26,7 @@ local Paths = require("utils.paths")
 ---@field lock_screen_myrl_day string|nil 摸鱼日报上次成功下载日 YYYY-MM-DD
 ---@field remote_port number 远程传书端口（默认 9528）
 ---@field remote_autostart boolean 远程传书开机自启
----@field pinyin_enabled boolean 拼音候选输入（默认关闭）
+---@field pinyin_enabled boolean 中文键盘入口（开启即把 zh_CN 加入 KOReader 键盘布局列表，默认关闭）
 
 local M = {}
 
