@@ -704,24 +704,16 @@ function Settings.build(desktop)
                 return SettingRow.build(iw, {
                     kind = "toggle",
                     icon = "translate",
-                    title = _("拼音输入"),
+                    title = _("中文键盘（拼音）"),
                     status = Pinyin.isEnabled() and _("开") or _("关"),
                     status_on = Pinyin.isEnabled(),
                     callback = function()
-                        local on = not Pinyin.isEnabled()
-                        Pinyin.setEnabled(on)
-                        if on then
-                            local ok = Pinyin.bootstrap()
-                            UIManager:show(InfoMessage:new{
-                                text = ok and _("拼音输入已开启") or _("拼音输入开启失败"),
-                                timeout = 2,
-                            })
-                        else
-                            UIManager:show(InfoMessage:new{
-                                text = _("拼音输入已关闭"),
-                                timeout = 2,
-                            })
-                        end
+                        local on = Pinyin.setEnabled(not Pinyin.isEnabled())
+                        UIManager:show(InfoMessage:new{
+                            text = on and _("中文键盘已启用，点键盘上的 🌐 键切换中英文")
+                                or _("中文键盘已停用"),
+                            timeout = 3,
+                        })
                         desktop:rebuild()
                     end,
                 })
