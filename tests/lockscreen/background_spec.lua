@@ -11,9 +11,8 @@ local download
 
 package.preload["utils.paths"] = function()
     return {
-        lockScreenCustomPath = function() return "/moon/lock_screen/custom.png" end,
-        lockScreenDir = function() return "/moon/lock_screen" end,
-        ensureLockScreenDir = function() end,
+        screensaverDir = function() return "/moon/screensaver" end,
+        ensureScreensaverDir = function() end,
     }
 end
 package.preload["utils.settings"] = function()

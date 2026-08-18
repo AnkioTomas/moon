@@ -1,5 +1,5 @@
 --[[--
-lockscreen：模式切换 / 接管与恢复 / 下载落盘
+lockscreen：模式切换 / 接管 / 下载落盘
 
 不碰真网络：stub http.request.download 写本地 PNG。
 
@@ -73,32 +73,30 @@ _G.G_reader_settings = {
 local MoonSettings = require("utils.settings")
 local LockScreen = require("lockscreen.init")
 local Myrl = require("lockscreen.styles.myrl")
+local Reading = require("lockscreen.styles.reading")
+local Bill = require("lockscreen.styles.bill")
+local Quote = require("lockscreen.styles.quote")
 
 -- 隔离本测对 common 的改动
 local common = MoonSettings.get()
 local prev_lock = common.lock_screen
-local prev_type = common.lock_screen_prev_type
-local prev_cover = common.lock_screen_prev_cover
-local prev_show_message = common.lock_screen_prev_show_message
 local prev_day = common.lock_screen_day
 
 local function cleanup()
     common.lock_screen = prev_lock
-    common.lock_screen_prev_type = prev_type
-    common.lock_screen_prev_cover = prev_cover
-    common.lock_screen_prev_show_message = prev_show_message
     common.lock_screen_day = prev_day
     MoonSettings.save()
     pcall(os.remove, Myrl.path())
     pcall(os.remove, Myrl.path() .. ".part")
+    pcall(os.remove, Reading.path())
+    pcall(os.remove, Bill.path())
+    pcall(os.remove, Quote.path())
     _G.G_reader_settings = previous_settings
 end
 
 local ok_run, err_run = pcall(function()
     -- 默认跟随
     common.lock_screen = nil
-    common.lock_screen_prev_type = nil
-    common.lock_screen_prev_cover = nil
     common.lock_screen_day = nil
     MoonSettings.save()
     Assert.eq(LockScreen.mode(), "ko")
@@ -114,24 +112,22 @@ local ok_run, err_run = pcall(function()
     Assert.eq(opts[5].value, "quote")
     Assert.eq(LockScreen.label("myrl"), "摸鱼日报")
 
-    -- 用户原锁屏（开着「Sleeping」提示文字）
+    -- 既有 KOReader 配置不应被备份或恢复。
     saved.screensaver_type = "cover"
     saved.screensaver_document_cover = "/old/cover.png"
     saved.screensaver_show_message = true
 
-    -- 新安装默认 myrl 由 bootstrap 接管，也必须先备份 KOReader 原配置。
+    -- 新安装默认 myrl 由 bootstrap 接管。
     common.lock_screen = "myrl"
     MoonSettings.save()
     LockScreen.bootstrap()
-    Assert.eq(common.lock_screen_prev_type, "cover")
-    Assert.eq(common.lock_screen_prev_cover, "/old/cover.png")
     LockScreen.setMode("ko")
     Assert.eq(common.lock_screen, "ko", "明确选择跟随必须覆盖默认 myrl")
 
     LockScreen.setMode("myrl")
     -- 模式落盘不依赖网络
     Assert.eq(LockScreen.mode(), "myrl")
-    -- 新风格尚未生成时必须撤下旧封面，不能残留上一种锁屏图。
+    -- 新风格尚未生成时保留当前锁屏配置，显示准备提示。
     Assert.eq(saved.screensaver_type, "disable")
     Assert.is_nil(saved.screensaver_document_cover)
     Assert.is_true(saved.screensaver_show_message)
@@ -152,11 +148,6 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(last_download.url:find("width=480", 1, true) ~= nil)
     Assert.is_true(last_download.url:find("height=800", 1, true) ~= nil)
 
-    -- 备份了原设置
-    Assert.eq(MoonSettings.get().lock_screen_prev_type, "cover")
-    Assert.eq(MoonSettings.get().lock_screen_prev_cover, "/old/cover.png")
-    Assert.is_true(MoonSettings.get().lock_screen_prev_show_message)
-
     -- 配置仍为今日但文件被删：bootstrap 必须在后台重新下载
     pcall(os.remove, Myrl.path())
     last_download.url = nil
@@ -175,7 +166,7 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(refreshed)
     Assert.is_nil(last_download.url)
 
-    -- 下一次锁屏预生成可显式绕过同一时间桶缓存。
+    -- 下一次锁屏预生成可显式绕过当天缓存。
     LockScreen.refresh(nil, true)
     Stubs.flush()
     Assert.not_nil(last_download.url)
@@ -209,15 +200,13 @@ local ok_run, err_run = pcall(function()
     Assert.not_nil(last_download.url)
     Assert.eq(saved.screensaver_document_cover, Myrl.path())
 
-    -- 切回跟随：恢复（含锁屏提示设置）
+    -- 切回跟随：恢复 KOReader 默认锁屏语义。
     LockScreen.setMode("ko")
     Stubs.flush()
     Assert.eq(LockScreen.mode(), "ko")
-    Assert.eq(saved.screensaver_type, "cover")
-    Assert.eq(saved.screensaver_document_cover, "/old/cover.png")
+    Assert.eq(saved.screensaver_type, "disable")
+    Assert.is_nil(saved.screensaver_document_cover)
     Assert.is_true(saved.screensaver_show_message)
-    Assert.is_nil(MoonSettings.get().lock_screen_prev_type)
-    Assert.is_nil(MoonSettings.get().lock_screen_prev_show_message)
 
     -- 未注册 id 回落到跟随系统，不留脏状态
     common.lock_screen = "no-such-style"

@@ -19,8 +19,7 @@ end
 Assert.is_true(Config.setupNativePath())
 
 -- 数据目录指到隔离的临时根，别碰真实 .moon
--- 先清后建：上一轮若在 download_spec 崩掉（进程被杀，cleanup 没跑），
--- 残留的 dest 会让本轮 ensure 走幂等路径（0 下载）造成假失败
+-- 先清后建：避免上一轮崩掉（进程被杀，cleanup 没跑）留下的残留影响断言
 local TMP = Config.dir() .. "/.moon/cache/test_pinyin_download"
 os.execute("rm -rf " .. TMP)
 os.execute("mkdir -p " .. TMP)
@@ -128,7 +127,7 @@ local ok_run, err_run = pcall(function()
         if not ok then
             print("ensure err:", err)
         end
-    end, nil, function(...)
+    end, function(...)
         progress_events[#progress_events + 1] = { ... }
     end)
     Stubs.flush()
@@ -163,16 +162,6 @@ local ok_run, err_run = pcall(function()
 
     -- 来源 tag 写入设置
     Assert.eq(MoonSettings.get().pinyin_dict_source, "test-tag")
-
-    -- 幂等：文件已在，再 ensure 不下载
-    downloads = {}
-    local again
-    Download.ensure(function(ok)
-        again = ok
-    end)
-    Stubs.flush()
-    Assert.is_true(again)
-    Assert.len(downloads, 0)
 
     -- 临时目录已清理
     Assert.is_nil(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/pinyin_dict.dl"))

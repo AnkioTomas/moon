@@ -39,7 +39,7 @@ package.preload["json"] = function()
     }
 end
 package.preload["utils.paths"] = function()
-    return { lockScreenDir = function() return "/lock" end }
+    return { screensaverDir = function() return "/lock" end }
 end
 package.preload["utils.settings"] = function()
     return { get = function() return settings end, save = function() end }
