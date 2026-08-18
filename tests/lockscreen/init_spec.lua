@@ -116,6 +116,15 @@ local ok_run, err_run = pcall(function()
     saved.screensaver_document_cover = "/old/cover.png"
     saved.screensaver_show_message = true
 
+    -- 新安装默认 myrl 由 bootstrap 接管，也必须先备份 KOReader 原配置。
+    common.lock_screen = "myrl"
+    MoonSettings.save()
+    LockScreen.bootstrap()
+    Assert.eq(common.lock_screen_prev_type, "cover")
+    Assert.eq(common.lock_screen_prev_cover, "/old/cover.png")
+    LockScreen.setMode("ko")
+    Assert.eq(common.lock_screen, "ko", "明确选择跟随必须覆盖默认 myrl")
+
     LockScreen.setMode("myrl")
     -- 模式落盘不依赖网络
     Assert.eq(LockScreen.mode(), "myrl")
