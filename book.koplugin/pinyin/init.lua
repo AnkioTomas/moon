@@ -1,45 +1,49 @@
 --[[--
 中文键盘入口 + 拼音候选栏。
 
-开关只存 Book 通用设置（沿用旧键 pinyin_enabled，兼容已有配置）。
-开启 = 把 zh_CN（以及 en，用于一键切回）补进 KOReader 键盘布局列表，
-用户点键盘上的 🌐 键在中英之间循环切换。
-
-候选栏（pinyin/candidate_bar）：zh_CN 布局下字母绕过原生 IME 行内提示，
-词库整词/单字候选直接显示在键盘首行；词库缺失时全部透传，回退原生行为。
-
 @module koplugin.book.pinyin
 --]]
 
 local Settings = require("utils.settings")
+local _ = require("gettext")
 require("l10n").apply()
 
 local Pinyin = {}
+local PREVIOUS_LAYOUTS_KEY = "book_pinyin_previous_keyboard_layouts"
 
 --- 当前是否启用中文键盘入口。
----@return boolean
 function Pinyin.isEnabled()
     return Settings.get().pinyin_enabled == true
 end
 
---- 把 en / zh_CN 补进 KOReader 键盘布局列表（保留用户已有布局与顺序）。
----@return nil
-local function ensureLayouts()
-    local layouts = G_reader_settings:readSetting("keyboard_layouts", {})
-    local have = {}
-    for _, l in ipairs(layouts) do
-        have[l] = true
+local function copyLayouts(layouts)
+    local copy = {}
+    for i, layout in ipairs(layouts or {}) do
+        copy[i] = layout
     end
-    if not have.en then
-        table.insert(layouts, "en")
-    end
-    if not have.zh_CN then
-        table.insert(layouts, "zh_CN")
-    end
-    G_reader_settings:saveSetting("keyboard_layouts", layouts)
+    return copy
 end
 
---- 写入开关；开启时补键盘布局 + 装候选栏（词库按用户确认后下载）。
+-- 中文输入启用时仅保留 en / zh_CN 布局，并保存启用前的布局列表。
+local function ensureLayouts()
+    if G_reader_settings:readSetting(PREVIOUS_LAYOUTS_KEY) == nil then
+        local layouts = G_reader_settings:readSetting("keyboard_layouts", {})
+        G_reader_settings:saveSetting(PREVIOUS_LAYOUTS_KEY, copyLayouts(layouts))
+    end
+    G_reader_settings:saveSetting("keyboard_layouts", { "en", "zh_CN" })
+end
+
+-- 关闭拼音时恢复启用前的布局；没有快照时保持现状。
+local function restoreLayouts()
+    local layouts = G_reader_settings:readSetting(PREVIOUS_LAYOUTS_KEY)
+    if layouts == nil then
+        return
+    end
+    G_reader_settings:saveSetting("keyboard_layouts", layouts)
+    G_reader_settings:delSetting(PREVIOUS_LAYOUTS_KEY)
+end
+
+--- 写入开关；词库不可用时拒绝开启，避免留下无效键盘入口。
 ---@param value boolean
 ---@return boolean
 function Pinyin.setEnabled(value)
@@ -52,11 +56,13 @@ function Pinyin.setEnabled(value)
     if settings.pinyin_enabled then
         ensureLayouts()
         require("pinyin.candidate_bar").install({ enabled = Pinyin.isEnabled })
+    else
+        restoreLayouts()
     end
     return settings.pinyin_enabled
 end
 
---- 插件启动：已开启则装候选栏（词库已在即时生效，没在等后台下载后下次键盘激活）。
+--- 插件启动时恢复已启用的候选栏钩子。
 function Pinyin.bootstrap()
     if not Pinyin.isEnabled() then
         return
@@ -64,16 +70,14 @@ function Pinyin.bootstrap()
     require("pinyin.candidate_bar").install({ enabled = Pinyin.isEnabled })
 end
 
---- 词库状态（设置页显示）：未下载 / 下载中 / N 条（tag）。
----@return string
+--- 设置页词库状态：未下载、下载中、不可用或词条数与来源。
 function Pinyin.dictStatus()
-    local _ = require("gettext")
     if require("pinyin.download").downloading() then
         return _("下载中…")
     end
     local Dict = require("pinyin.dictionary")
     if not Dict.isAvailable() then
-        if Dict.fileExists and Dict.fileExists() then
+        if Dict.fileExists() then
             return _("词库文件存在但不可用")
         end
         return _("未下载")
@@ -83,13 +87,13 @@ function Pinyin.dictStatus()
     return string.format("%s · %s", entries, tag)
 end
 
---- 手动下载 / 更新词库（设置页点击）。
+--- 手动下载或更新词库；网络不可用时由 NetworkMgr 延后执行。
 ---@param cb fun(ok: boolean, err: any)|nil
 ---@param on_progress fun(stage: string, done: number|nil, total: number|nil, idx: number|nil, count: number|nil)|nil
 function Pinyin.downloadDict(cb, on_progress)
     local NetworkMgr = require("ui/network/manager")
     NetworkMgr:runWhenOnline(function()
-        require("pinyin.download").ensure(cb, true, on_progress) -- force：按最新 manifest 重拉
+        require("pinyin.download").ensure(cb, on_progress)
     end)
 end
 

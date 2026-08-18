@@ -30,6 +30,9 @@ _G.G_reader_settings = {
     saveSetting = function(_, k, v)
         saved[k] = v
     end,
+    delSetting = function(_, k)
+        saved[k] = nil
+    end,
 }
 
 -- candidate_bar 假实现：记录 install
@@ -106,6 +109,9 @@ local layouts = saved.keyboard_layouts
 Assert.eq(#layouts, 2)
 Assert.eq(layouts[1], "en")
 Assert.eq(layouts[2], "zh_CN")
+Assert.eq(saved.book_pinyin_previous_keyboard_layouts[1], "de")
+Assert.eq(saved.book_pinyin_previous_keyboard_layouts[2], "en")
+Assert.eq(saved.book_pinyin_previous_keyboard_layouts[3], "ru")
 Assert.eq(ensure_calls, 0)
 Assert.eq(install_calls, 2)
 
@@ -117,6 +123,11 @@ Assert.eq(#saved.keyboard_layouts, n_layouts, "布局列表幂等")
 -- 关闭不下载、不动布局
 Pinyin.setEnabled(false)
 Assert.eq(ensure_calls, 0, "开关不应触发下载")
+Assert.eq(#saved.keyboard_layouts, 3)
+Assert.eq(saved.keyboard_layouts[1], "de")
+Assert.eq(saved.keyboard_layouts[2], "en")
+Assert.eq(saved.keyboard_layouts[3], "ru")
+Assert.is_nil(saved.book_pinyin_previous_keyboard_layouts)
 
 -- ── dictStatus：未下载 / 下载中 / 词条数·tag ──────────
 dict_available = false

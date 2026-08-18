@@ -23,7 +23,7 @@ local Paths = require("utils.paths")
 local MoonSettings = require("utils.settings")
 local Task = require("utils.task")
 
--- 与 ui/desktop/settings.lua 的 REPO_HOST 同仓库；jsdelivr 按仓库 main 拉原始文件
+-- 与桌面设置页使用同一仓库；jsdelivr 按 main 分发原始分片。
 local BASE_URL = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/pinyin"
 
 local M = {}
@@ -31,28 +31,15 @@ local M = {}
 local _job -- 当前在飞 job（Request job 或 Task job）
 local _downloading = false
 
--- 前向声明：ensure → downloadParts → assembleInTask 链式互调
+-- 下载和拼接相互递归，先声明以保持主流程顺序。
 local downloadParts
 local assembleInTask
 
----@return boolean
+--- 是否有下载或拼接任务在运行。
 function M.downloading()
     return _downloading
 end
 
---- 进度回报（可选）：stage = "manifest" | "part" | "assemble"。
---- part 阶段带字节进度（done/total）与分片序号（idx/count）；其余阶段只有 stage。
----@param on_progress fun(stage: string, done: number|nil, total: number|nil, idx: number|nil, count: number|nil)|nil
----@return fun(...)
-local function makeReporter(on_progress)
-    return function(...)
-        if on_progress then
-            pcall(on_progress, ...)
-        end
-    end
-end
-
----@return string
 local function tmpDir()
     return Paths.root() .. "/pinyin_dict.dl"
 end
@@ -67,12 +54,7 @@ local function cleanupTmp()
     os.remove(dir)
 end
 
---- 子进程：逐片校验后直接拼接 → 校验总长度 → 原子落位。
---- fork 复制主进程内存，闭包上值（manifest/dir/dest）安全；返回 nil 或错误串。
----@param manifest table
----@param dir string
----@param dest string
----@return string|nil
+-- 子进程中校验、拼接并原子落位，避免大文件 IO 阻塞 UI。
 local function assemble(manifest, dir, dest)
     local out_tmp = dest .. ".part"
     local ok, err = pcall(function()
@@ -93,7 +75,6 @@ local function assemble(manifest, dir, dest)
         if manifest.raw_size and total ~= tonumber(manifest.raw_size) then
             error(string.format("size mismatch: got %d, want %d", total, manifest.raw_size))
         end
-        os.remove(dest)
         assert(os.rename(out_tmp, dest))
     end)
     if not ok then
@@ -103,26 +84,22 @@ local function assemble(manifest, dir, dest)
     return nil
 end
 
---- 下载主流程。已下载且文件在 → 直接 cb(true)；force=true 强制按 manifest 重拉。
+--- 按 manifest 下载有更新的分片并落位。重复请求通过 cb 返回失败，不并发写同一目标。
 ---@param cb fun(ok: boolean, err: any)|nil
----@param force boolean|nil
 ---@param on_progress fun(stage: string, done: number|nil, total: number|nil, idx: number|nil, count: number|nil)|nil
-function M.ensure(cb, force, on_progress)
+function M.ensure(cb, on_progress)
     cb = cb or function() end
     if _downloading then
         cb(false, "already downloading")
         return
     end
     local dest = Paths.pinyinDictPath()
-    if not force then
-        local attr = lfs.attributes(dest)
-        if attr and attr.mode == "file" and (attr.size or 0) > 0 then
-            cb(true)
-            return
+    _downloading = true
+    local function report(...)
+        if on_progress then
+            on_progress(...)
         end
     end
-    _downloading = true
-    local report = makeReporter(on_progress)
     local done_called = false
     local function done(ok, err)
         if done_called then
@@ -146,25 +123,32 @@ function M.ensure(cb, force, on_progress)
             done(false, "bad manifest")
             return
         end
+        local attr = lfs.attributes(dest)
+        local settings = MoonSettings.get()
+        if attr and attr.mode == "file" and (attr.size or 0) > 0
+            and (not manifest.raw_size or attr.size == tonumber(manifest.raw_size))
+            and manifest.raw_sha256 and settings.pinyin_dict_sha256 == manifest.raw_sha256 then
+            done(true)
+            return
+        end
         local total = 0
         for _, p in ipairs(manifest.parts) do
             total = total + (tonumber(p.size) or 0)
         end
         report("manifest", 0, total, 0, #manifest.parts)
+        Paths.ensureSettings() -- 内含 ensureDir(root)
+        lfs.mkdir(tmpDir())
         downloadParts(manifest, 1, dest, done, report, 0, total)
     end)
 end
 
--- 前向声明的实现
+-- 前向声明的实现。
 downloadParts = function(manifest, idx, dest, done, report, done_bytes, total)
     local parts = manifest.parts
     if idx > #parts then
         assembleInTask(manifest, dest, done, report)
         return
     end
-    lfs.mkdir(Paths.root())
-    Paths.ensureSettings() -- 递归建好 .moon 树，tmpDir 在 .moon 下
-    lfs.mkdir(tmpDir())
     local part = parts[idx]
     _job = Request.download({
         url = BASE_URL .. "/" .. part.file,
@@ -203,12 +187,10 @@ assembleInTask = function(manifest, dest, done, report)
                 done(false, "dictionary file missing: " .. dest)
                 return
             end
-            -- 词库文件已换：清字典模块的连接/负缓存，设置页状态与候选立即可见新库
-            pcall(function()
-                require("pinyin.dictionary").reset()
-            end)
+            require("pinyin.dictionary").reset()
             local c = MoonSettings.get()
             c.pinyin_dict_source = manifest.tag or "unknown"
+            c.pinyin_dict_sha256 = manifest.raw_sha256
             MoonSettings.save()
             logger.info("book.pinyin dict installed:", manifest.tag, manifest.entries)
             done(true)
@@ -221,7 +203,7 @@ assembleInTask = function(manifest, dest, done, report)
     })
 end
 
---- 中止在飞下载。
+--- 中止当前网络或拼接任务，并清理临时分片。
 function M.cancel()
     if _job then
         if _job.abort then
