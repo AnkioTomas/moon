@@ -68,6 +68,17 @@ function P.cacheDir()
     return P.root() .. "/cache"
 end
 
+--- 锁屏资源目录：$DATA/.moon/screensaver
+---@return string
+function P.screensaverDir()
+    return P.root() .. "/screensaver"
+end
+
+---@return nil
+function P.ensureScreensaverDir()
+    ensureDir(P.screensaverDir())
+end
+
 --- 某源的缓存目录：cache/<source>/
 ---@param id string|nil
 ---@return string
@@ -176,6 +187,7 @@ end
 function P.ensureCacheRoot()
     P.ensureSettings()
     ensureDir(P.cacheDir())
+    P.ensureScreensaverDir()
 end
 
 --- 确保 .moon 与指定源的 cache/book/image 目录存在
