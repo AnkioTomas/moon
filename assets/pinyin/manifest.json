@@ -7,43 +7,53 @@
   "parts": [
     {
       "file": "dictionary.sqlite3.part.001",
-      "size": 15728640
+      "size": 15728640,
+      "sha256": "4ef0799710438caae97fc822847d6cde16b319d60cbdf8071a4d319faca7aa27"
     },
     {
       "file": "dictionary.sqlite3.part.002",
-      "size": 15728640
+      "size": 15728640,
+      "sha256": "3440d9c9c1ea5b8d2fe19842f7544b5cfea3805929c78fa13eb3a595c7cdf1a0"
     },
     {
       "file": "dictionary.sqlite3.part.003",
-      "size": 15728640
+      "size": 15728640,
+      "sha256": "17c11b09896cae16b959f7a9a40b1f9afb1eb1320333a620b3420a5c80b8b19f"
     },
     {
       "file": "dictionary.sqlite3.part.004",
-      "size": 15728640
+      "size": 15728640,
+      "sha256": "605c117f8978f34219eeae5664638c98826e425e1a9a42ac785bdc2898848d8b"
     },
     {
       "file": "dictionary.sqlite3.part.005",
-      "size": 15728640
+      "size": 15728640,
+      "sha256": "7cc6efb404e0a37e36c167577b709f6f9cca121897ab6a970b432d8afe756e2d"
     },
     {
       "file": "dictionary.sqlite3.part.006",
-      "size": 15728640
+      "size": 15728640,
+      "sha256": "06a5fb3069042426a024cf0123feda5f07804ede1ddc74750dae4b04482adc38"
     },
     {
       "file": "dictionary.sqlite3.part.007",
-      "size": 15728640
+      "size": 15728640,
+      "sha256": "dedb6d71744939ccb666cd821e261e07981559c8146be7261fae47652ba637eb"
     },
     {
       "file": "dictionary.sqlite3.part.008",
-      "size": 15728640
+      "size": 15728640,
+      "sha256": "b2e57a1e8f1b16d16f6391ed6ed5e71738c6ceb9a48d8fba4fbc33a7ed74f2b3"
     },
     {
       "file": "dictionary.sqlite3.part.009",
-      "size": 15728640
+      "size": 15728640,
+      "sha256": "02464c808adeac4afd9f88a977a027ad8f10c21dee2766a992d2baab0b295dd7"
     },
     {
       "file": "dictionary.sqlite3.part.010",
-      "size": 15114240
+      "size": 15114240,
+      "sha256": "c6224d28d66665ab3fd471527eabab3a3387a9e494bf56b775a66600c5ea431a"
     }
   ]
 }
