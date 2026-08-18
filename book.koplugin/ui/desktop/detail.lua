@@ -166,7 +166,7 @@ function Detail:init()
             if self._closed or not detail then return end
             self.book = detail
             self:rebuild()
-            require("ui/uimanager"):setDirty(self, "full")
+            require("ui/uimanager"):setDirty(self, "ui")
         end)
     end
 end
@@ -240,7 +240,7 @@ function Detail:fetchStats()
             self._stats = stats
             self._daily = daily
             self:rebuild()
-            require("ui/uimanager"):setDirty(self, "full")
+            require("ui/uimanager"):setDirty(self, "ui")
         end,
     })
 end
@@ -255,12 +255,12 @@ function Detail:onClose()
     local UIManager = require("ui/uimanager")
     local desk = self.desktop
     UIManager:close(self)
-    -- 全屏详情盖住桌面，关掉后必须强制重绘下层，否则残影/白板
+    -- 全屏详情关闭后重绘下层桌面；无需为普通 UI 切换强制闪屏。
     UIManager:nextTick(function()
         if desk and not desk._closed then
-            UIManager:setDirty(desk, "full")
+            UIManager:setDirty(desk, "ui")
         else
-            UIManager:setDirty("all", "full")
+            UIManager:setDirty("all", "ui")
         end
     end)
     return true
@@ -285,7 +285,7 @@ function Detail:reload()
                 self.book = row
             end
             self:rebuild()
-            require("ui/uimanager"):setDirty(self, "full")
+            require("ui/uimanager"):setDirty(self, "ui")
         end,
     })
 end
@@ -307,6 +307,56 @@ function Detail:openBook()
     local b = self.book
     self:onClose()
     if plugin and plugin.openBook then plugin:openBook(b) end
+end
+
+--- 将本地 TXT 转为带目录和物理切片的 EPUB，再以原书身份打开。
+function Detail:reflowText()
+    local book = self.book or {}
+    local ref = book.ref
+    if self._reflow_job or self._closed
+        or not ref
+        or ref.source_id ~= "local"
+        or type(ref.stable_id) ~= "string"
+        or not ref.stable_id:lower():match("%.txt$")
+    then
+        return
+    end
+
+    local UIManager = require("ui/uimanager")
+    local InfoMessage = require("ui/widget/infomessage")
+    local dialog = InfoMessage:new{ text = _("正在优化排版…") }
+    UIManager:show(dialog)
+    self._reflow_job = { pending = true }
+    UIManager:nextTick(function()
+        if self._closed then
+            UIManager:close(dialog)
+            return
+        end
+        local Paths = require("utils.paths")
+        Paths.ensureBookWork(ref.stable_id, ref.source_id)
+        local dest = Paths.bookWorkDir(ref.stable_id, ref.source_id) .. "/reflow.epub"
+        self._reflow_job = require("convert.text2epub").build({
+            dest = dest,
+            source = ref.stable_id,
+            title = book.title,
+            author = book.authors,
+            identifier = "moon-reflow-" .. Paths.slugFor(ref.stable_id),
+            reflow = true,
+        }, function(ok, err)
+            self._reflow_job = nil
+            UIManager:close(dialog)
+            if self._closed then
+                return
+            end
+            if not ok then
+                UIManager:show(InfoMessage:new{ text = err or _("排版失败") })
+                return
+            end
+            require("book.store").touchAsync(dest, ref)
+            self:onClose()
+            require("apps/reader/readerui"):showReader(dest)
+        end)
+    end)
 end
 
 --- 书城书「加入书库」：无凭据先开设置；否则弹进度条下载并导入当前源。
@@ -642,6 +692,9 @@ function Detail:rebuild()
         and (self.source.type == "book"
             or self.source.type == "online"
             or self.source.type == "article")
+    local can_reflow = not store_book and self.source and self.source.id == "local"
+        and book.ref and type(book.ref.stable_id) == "string"
+        and book.ref.stable_id:lower():match("%.txt$") ~= nil
 
     local title_bar, title_h = self:buildTopBar(w)
 
@@ -675,6 +728,11 @@ function Detail:rebuild()
         if can_scrape then
             table.insert(defs, { icon = "search", text = _("刮削"), fn = function()
                 self:startScrape()
+            end })
+        end
+        if can_reflow then
+            table.insert(defs, { icon = "auto_fix_high", text = _("优化排版"), fn = function()
+                self:reflowText()
             end })
         end
         if can_read then
