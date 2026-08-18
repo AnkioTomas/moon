@@ -28,6 +28,7 @@ local Paths = require("utils.paths")
 ---@field remote_autostart boolean 远程传书开机自启
 ---@field pinyin_enabled boolean 中文键盘入口（开启即把 zh_CN 加入 KOReader 键盘布局列表，默认关闭）
 ---@field pinyin_dict_source string|nil 拼音词库来源 tag（rime-ice release），nil=未下载
+---@field debug_enabled boolean 启用 KOReader DEBUG 日志并写入 .moon/logs/koreader.log
 
 local M = {}
 
@@ -44,6 +45,7 @@ local function commonDefaults()
         remote_port = 9528,
         remote_autostart = false,
         pinyin_enabled = false,
+        debug_enabled = false,
     }
 end
 

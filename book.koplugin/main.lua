@@ -36,6 +36,7 @@ local BookPlugin = WidgetContainer:extend {
 --- 插件初始化：挂接 Host（菜单 / 开机打开等）
 ---@return nil
 function BookPlugin:init()
+    require("debug.init").apply()
     -- HTTP 依赖 Turbo ioloop；必须在 UIManager:run() 前打开 DUSE_TURBO_LIB
     local ok_turbo, err_turbo = pcall(function()
         require("http.request").ensureTurbo()

@@ -636,7 +636,7 @@ local function pickLanguage()
     }
 end
 
-local function downloadPinyin(desktop)
+local function downloadPinyin(desktop, enable_after)
     if require("pinyin.download").downloading() then
         return
     end
@@ -651,19 +651,22 @@ local function downloadPinyin(desktop)
         closeDialog()
         UIManager:show(InfoMessage:new{
             text = ok and _("拼音词库已就绪")
-                or T(_("下载失败: %1"), tostring(err or "")),
+                or T(_("下载失败: %1"), tostring(err or "未知错误")),
             timeout = 2,
         })
+        if ok and enable_after then
+            Pinyin.setEnabled(true)
+        end
         desktop:rebuild()
     end, function(stage, done_bytes, total, _idx, count)
-        if stage == "part" and total and total > 0 then
+        if (stage == "manifest" or stage == "part") and total and total > 0 then
             if not dialog then
                 local ok_dlg, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
                 if not ok_dlg then
                     return
                 end
                 dialog = ProgressbarDialog:new{
-                    title = _("正在下载拼音词库…"),
+                    title = stage == "manifest" and _("正在准备下载拼音词库…") or _("正在下载拼音词库…"),
                     subtitle = T(_("共 %1 片"), count)
                         .. string.format(" · %.1f MB", total / 1048576),
                     progress_max = total,
@@ -672,21 +675,28 @@ local function downloadPinyin(desktop)
                 }
                 dialog:show()
             else
-                dialog:reportProgress(done_bytes)
+                if stage == "part" then
+                    dialog:reportProgress(done_bytes)
+                end
             end
-        elseif stage == "manifest" then
-            UIManager:show(InfoMessage:new{
-                text = _("获取词库信息…"),
-                timeout = 2,
-            })
         elseif stage == "assemble" then
             closeDialog()
             UIManager:show(InfoMessage:new{
-                text = _("解压校验词库…"),
+                text = _("拼接校验词库…"),
                 timeout = 2,
             })
         end
     end)
+end
+
+local function confirmDownloadPinyin(desktop, enable_after)
+    UIManager:show(ConfirmBox:new{
+        text = _("下载拼音词库后，候选词更丰富、输入体验更好。词库约 150 MB，是否现在下载？"),
+        ok_text = _("下载"),
+        ok_callback = function()
+            downloadPinyin(desktop, enable_after)
+        end,
+    })
 end
 
 local function languageRows(desktop)
@@ -707,10 +717,14 @@ local function languageRows(desktop)
             return SettingRow.build(iw, {
                 kind = "toggle",
                 icon = "translate",
-                title = _("中文键盘"),
+                title = _("拼音输入增强"),
                 status = Pinyin.isEnabled() and _("开") or _("关"),
                 status_on = Pinyin.isEnabled(),
                 callback = function()
+                    if not Pinyin.isEnabled() and not require("pinyin.dictionary").isAvailable() then
+                        confirmDownloadPinyin(desktop, true)
+                        return
+                    end
                     local on = Pinyin.setEnabled(not Pinyin.isEnabled())
                     UIManager:show(InfoMessage:new{
                         text = on and _("中文键盘已启用，点键盘上的 🌐 键切换中英文")
@@ -729,7 +743,7 @@ local function languageRows(desktop)
                 status = Pinyin.dictStatus(),
                 status_on = require("pinyin.dictionary").isAvailable(),
                 callback = function()
-                    downloadPinyin(desktop)
+                    confirmDownloadPinyin(desktop)
                 end,
             })
         end,
@@ -805,6 +819,26 @@ local function aboutRow()
                 callback = showAbout,
             })
         end
+end
+
+local function debugRow(desktop)
+    return function(iw)
+        local enabled = MoonSettings.get().debug_enabled == true
+        return SettingRow.build(iw, {
+            kind = "toggle",
+            icon = "settings",
+            title = _("KOReader 调试日志"),
+            status = enabled and _("开") or _("关"),
+            status_on = enabled,
+            callback = function()
+                local settings = MoonSettings.get()
+                settings.debug_enabled = not enabled
+                MoonSettings.save(settings)
+                if settings.debug_enabled then require("debug.init").apply() end
+                desktop:rebuild()
+            end,
+        })
+    end
 end
 
 local function closeRow(desktop)
@@ -956,6 +990,7 @@ function Settings.build(desktop)
                 })
             end,
             cacheRow(desktop),
+            debugRow(desktop),
             aboutRow(),
             closeRow(desktop),
             updateRow(),
