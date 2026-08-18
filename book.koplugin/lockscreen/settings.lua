@@ -1,8 +1,8 @@
 --[[--
-锁屏设置：模式读写，接管 / 恢复 KOReader screensaver_* 配置。
+锁屏设置：模式读写与 KOReader screensaver_* 配置。
 
-首次接管时备份用户原锁屏设置（lock_screen_prev_*，只备份一次，直到恢复）；
-选回跟随系统或数据损坏时恢复。
+不保留接管前的 KOReader 屏保配置。跟随 KOReader 的固定默认行为是：
+不设置屏保图片，显示锁屏信息。
 screensaver_* 在选中 / 启动 / 下载成功时就写好：休眠时 KOReader 已经建好锁屏
 widget（Screensaver:setup 早于 Suspend 事件），那时再写对本次锁屏无效。
 
@@ -10,6 +10,7 @@ widget（Screensaver:setup 早于 Suspend 事件），那时再写对本次锁�
 --]]
 
 local MoonSettings = require("utils.settings")
+local lfs = require("libs/libkoreader-lfs")
 
 local M = {}
 
@@ -18,7 +19,8 @@ function M.mode()
     return MoonSettings.get().lock_screen
 end
 
----@param mode string|nil
+---@param mode string|nil 样式 id；nil 表示跟随 KOReader
+---@return nil
 function M.setMode(mode)
     local c = MoonSettings.get()
     -- nil 只代表旧配置缺失；用户明确选择「跟随」必须持久化为 ko，
@@ -27,59 +29,36 @@ function M.setMode(mode)
     MoonSettings.save()
 end
 
---- 写入 KOReader 锁屏配置：document_cover 指向样式图片，并关掉自带的「Sleeping」提示文字。
----@param path string
+--- 写入 KOReader 锁屏配置；图片不存在时恢复默认锁屏配置。
+---@param path string 有效图片路径
+---@return nil
 function M.applyCover(path)
+    local attr = lfs.attributes(path)
+    if not attr or attr.mode ~= "file" or (attr.size or 0) == 0 then
+        -- 保留上一张可用锁屏图，只恢复 KOReader 的准备中提示。
+        G_reader_settings:saveSetting("screensaver_show_message", true)
+        return
+    end
     G_reader_settings:saveSetting("screensaver_type", "document_cover")
     G_reader_settings:saveSetting("screensaver_document_cover", path)
     G_reader_settings:saveSetting("screensaver_show_message", false)
 end
 
---- 首次接管时备份用户原锁屏设置（只备份一次，直到恢复）。
-function M.backupIfNeeded()
-    local c = MoonSettings.get()
-    if c.lock_screen_prev_type ~= nil then
-        return
-    end
-    local screensaver_type = G_reader_settings:readSetting("screensaver_type")
-    c.lock_screen_prev_type = screensaver_type or "disable"
-    local cover = G_reader_settings:readSetting("screensaver_document_cover")
-    c.lock_screen_prev_cover = (type(cover) == "string" and cover ~= "") and cover or ""
-    local show_message = G_reader_settings:readSetting("screensaver_show_message")
-    -- KOReader's uninitialized defaults are disable + the standard message.
-    c.lock_screen_prev_show_message = show_message == nil and true or show_message
-    MoonSettings.save()
+--- 新图片尚未生成时撤下插件旧封面，显示 KOReader 默认透明提示态。
+---@return nil
+function M.clearCover()
+    G_reader_settings:saveSetting("screensaver_type", "disable")
+    G_reader_settings:delSetting("screensaver_document_cover")
+    G_reader_settings:saveSetting("screensaver_show_message", true)
 end
 
---- 恢复接管前的 screensaver_*。
-function M.restorePrev()
-    local c = MoonSettings.get()
-    local t = c.lock_screen_prev_type
-    if type(t) == "string" and t ~= "" then
-        G_reader_settings:saveSetting("screensaver_type", t)
-    end
-    local cover = c.lock_screen_prev_cover
-    if type(cover) == "string" and cover ~= "" then
-        G_reader_settings:saveSetting("screensaver_document_cover", cover)
-    else
-        G_reader_settings:delSetting("screensaver_document_cover")
-    end
-    G_reader_settings:saveSetting(
-        "screensaver_show_message",
-        c.lock_screen_prev_show_message == nil and true or c.lock_screen_prev_show_message
-    )
-    c.lock_screen_prev_type = nil
-    c.lock_screen_prev_cover = nil
-    c.lock_screen_prev_show_message = nil
-    MoonSettings.save()
-end
-
----@return string|nil
+---@return string|nil 成功生成样式的日期标记
 function M.savedDay()
     return MoonSettings.get().lock_screen_day
 end
 
----@param day string|nil
+---@param day string|nil 当前样式成功生成的日期标记
+---@return nil
 function M.setSavedDay(day)
     local c = MoonSettings.get()
     c.lock_screen_day = day
