@@ -62,7 +62,7 @@ local ok_run, err_run = pcall(function()
     Settings.setMode("myrl")
     Assert.eq(Settings.mode(), "myrl")
     Settings.setMode(nil)
-    Assert.is_nil(Settings.mode())
+    Assert.eq(Settings.mode(), "ko")
 
     -- applyCover：document_cover 接管并关掉提示文字
     Settings.applyCover("/tmp/a.png")
@@ -99,6 +99,20 @@ local ok_run, err_run = pcall(function()
     MoonSettings.save()
     Settings.restorePrev()
     Assert.is_nil(saved.screensaver_document_cover)
+
+    -- KOReader 尚未初始化 screensaver_* 时，恢复仍应回到透明背景 + 提示框默认行为。
+    saved = {}
+    common.lock_screen_prev_type = nil
+    common.lock_screen_prev_cover = nil
+    common.lock_screen_prev_show_message = nil
+    MoonSettings.save()
+    Settings.backupIfNeeded()
+    Assert.eq(common.lock_screen_prev_type, "disable")
+    Assert.is_true(common.lock_screen_prev_show_message)
+    saved.screensaver_show_message = false
+    Settings.restorePrev()
+    Assert.eq(saved.screensaver_type, "disable")
+    Assert.is_true(saved.screensaver_show_message)
 
     -- 下载日标记读写
     Assert.is_nil(Settings.savedDay())

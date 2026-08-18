@@ -41,10 +41,13 @@ function M.backupIfNeeded()
     if c.lock_screen_prev_type ~= nil then
         return
     end
-    c.lock_screen_prev_type = G_reader_settings:readSetting("screensaver_type") or "disable"
+    local screensaver_type = G_reader_settings:readSetting("screensaver_type")
+    c.lock_screen_prev_type = screensaver_type or "disable"
     local cover = G_reader_settings:readSetting("screensaver_document_cover")
     c.lock_screen_prev_cover = (type(cover) == "string" and cover ~= "") and cover or ""
-    c.lock_screen_prev_show_message = G_reader_settings:readSetting("screensaver_show_message")
+    local show_message = G_reader_settings:readSetting("screensaver_show_message")
+    -- KOReader's uninitialized defaults are disable + the standard message.
+    c.lock_screen_prev_show_message = show_message == nil and true or show_message
     MoonSettings.save()
 end
 
@@ -61,10 +64,10 @@ function M.restorePrev()
     else
         G_reader_settings:delSetting("screensaver_document_cover")
     end
-    local show_message = c.lock_screen_prev_show_message
-    if show_message ~= nil then
-        G_reader_settings:saveSetting("screensaver_show_message", show_message)
-    end
+    G_reader_settings:saveSetting(
+        "screensaver_show_message",
+        c.lock_screen_prev_show_message == nil and true or c.lock_screen_prev_show_message
+    )
     c.lock_screen_prev_type = nil
     c.lock_screen_prev_cover = nil
     c.lock_screen_prev_show_message = nil
