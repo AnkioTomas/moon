@@ -22,7 +22,7 @@ local Paths = require("utils.paths")
 
 local M = {}
 
-local MAX_CANDI = 12 -- 单次查词返回上限（原生候选栏只展示前几条）
+local MAX_CANDI = 100 -- 候选栏分页展示，单次最多保留 100 条
 
 -- 拼音音节表（无声调，ü=v）。用于把连写码切成音节序列。
 -- 来自现代汉语拼音方案全音节集合；宁可多不可少（多切不出词条只是无结果，不少）。
@@ -109,6 +109,27 @@ end
 ---@return boolean
 function M.isAvailable()
     return ensureOpen() ~= nil
+end
+
+--- 词库文件是否已经落盘。与 isAvailable 分开，便于设置页区分“未下载”和“文件损坏/依赖缺失”。
+---@return boolean
+function M.fileExists()
+    local attr = lfs.attributes(Paths.pinyinDictPath())
+    return attr and attr.mode == "file" and (attr.size or 0) > 0 or false
+end
+
+--- 词库文件变更后调用（下载/更新落盘）：关旧连接、清缓存，下次访问重新打开。
+--- 否则负缓存（_conn=false）会把「不可用」记到进程结束，设置页状态永远不刷新；
+--- 已打开的旧连接也会继续读已删除的旧文件。
+---@return nil
+function M.reset()
+    if _conn and _conn ~= false then
+        pcall(function()
+            _conn:close()
+        end)
+    end
+    _conn = nil
+    _meta = nil
 end
 
 --- 读 meta 键；库不可用返回 nil。
@@ -226,6 +247,21 @@ function M.lookup(code)
     end)
     if not ok then
         return {}
+    end
+    if #out == 0 and #code >= 2 then
+        local pattern = code:sub(1, 1) .. "%"
+        for i = 2, #code do
+            pattern = pattern .. " " .. code:sub(i, i) .. "%"
+        end
+        pcall(function()
+            local stmt = conn:prepare(
+                "SELECT word FROM words WHERE pinyin LIKE ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
+            )
+            if not stmt then return end
+            stmt:bind1(1, pattern)
+            for row in stmt:rows() do out[#out + 1] = row[1] end
+            stmt:close()
+        end)
     end
     return out
 end

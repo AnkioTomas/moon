@@ -1,8 +1,8 @@
 --[[--
-pinyin.download：manifest → 分片下载 → 解压拼接 → 校验落位
+pinyin.download：manifest → 原始分片下载 → 拼接 → 校验落位
 
 不碰真网络：stub http.request（download 写假分片 / get 给 manifest），
-stub utils.task 让 assemble 在主进程同步跑。gzinflate 用真实现测真实解压。
+stub utils.task 让 assemble 在主进程同步跑。
 
 @module tests.pinyin.download_spec
 --]]
@@ -39,24 +39,8 @@ package.preload["utils.settings"] = function()
     }
 end
 
--- 分片用系统 gzip 预生成真 gzip 流（assemble 里走真 gzinflate 解压）。
-local function makeGz(s)
-    local tmp = TMP .. "/src_" .. #s
-    os.execute("mkdir -p " .. TMP)
-    local f = assert(io.open(tmp, "wb"))
-    f:write(s)
-    f:close()
-    os.execute("gzip -c " .. tmp .. " > " .. tmp .. ".gz")
-    local g = assert(io.open(tmp .. ".gz", "rb"))
-    local data = g:read("*a")
-    g:close()
-    os.remove(tmp)
-    os.remove(tmp .. ".gz")
-    return data
-end
-
-local part1 = makeGz("hello ")
-local part2 = makeGz("pinyin dict")
+local part1 = "hello "
+local part2 = "pinyin dict"
 local raw = "hello pinyin dict"
 local sha = require("ffi/sha2")
 local raw_sha = sha.sha256(raw)
@@ -66,8 +50,8 @@ local manifest = {
     entries = 2,
     raw_sha256 = raw_sha,
     parts = {
-        { file = "p.001", size = #part1 },
-        { file = "p.002", size = #part2 },
+        { file = "dictionary.sqlite3.part.001", size = #part1, sha256 = sha.sha256(part1) },
+        { file = "dictionary.sqlite3.part.002", size = #part2, sha256 = sha.sha256(part2) },
     },
 }
 
@@ -76,8 +60,9 @@ package.preload["json"] = function()
     return dofile("config/common/dkjson.lua")
 end
 
--- stub http.request：get 给 manifest，download 写对应分片
+-- stub http.request：get 给 manifest，download 写对应分片（并回报一次写字节进度）
 local downloads = {}
+local progress_events = {}
 package.preload["http.request"] = function()
     return {
         get = function(url, opts, cb)
@@ -90,10 +75,13 @@ package.preload["http.request"] = function()
         end,
         download = function(opts, dest, cb)
             downloads[#downloads + 1] = opts.url
-            local data = dest:match("p%.001$") and part1 or part2
+            local data = dest:match("part%.001$") and part1 or part2
             local f = assert(io.open(dest, "wb"))
             f:write(data)
             f:close()
+            if opts.on_progress then
+                opts.on_progress(#data)
+            end
             require("ui/uimanager"):nextTick(function()
                 cb(true)
             end)
@@ -140,6 +128,8 @@ local ok_run, err_run = pcall(function()
         if not ok then
             print("ensure err:", err)
         end
+    end, nil, function(...)
+        progress_events[#progress_events + 1] = { ... }
     end)
     Stubs.flush()
     Assert.is_true(done)
@@ -148,7 +138,23 @@ local ok_run, err_run = pcall(function()
     -- 两片都下了，URL 走 jsdelivr
     Assert.len(downloads, 2)
     Assert.is_true(downloads[1]:find("cdn%.jsdelivr%.net") ~= nil)
-    Assert.is_true(downloads[1]:find("p%.001") ~= nil)
+    Assert.is_true(downloads[1]:find("part%.001") ~= nil)
+
+    -- manifest 在拿到大小后再次回报，进度框可无缝接到分片下载。
+    local total = #part1 + #part2
+    Assert.eq(progress_events[1][1], "manifest")
+    Assert.eq(progress_events[2][1], "manifest")
+    Assert.eq(progress_events[2][2], 0)
+    Assert.eq(progress_events[2][3], total)
+    Assert.eq(progress_events[2][5], 2)
+    Assert.eq(progress_events[3][1], "part")
+    Assert.eq(progress_events[3][2], #part1, "第一片完成后累计字节")
+    Assert.eq(progress_events[3][3], total)
+    Assert.eq(progress_events[3][4], 1)
+    Assert.eq(progress_events[4][1], "part")
+    Assert.eq(progress_events[4][2], total, "第二片完成后累计=总量")
+    Assert.eq(progress_events[4][4], 2)
+    Assert.eq(progress_events[5][1], "assemble")
 
     -- 落位文件 = 解压拼接结果
     local f = assert(io.open(dest, "rb"))
