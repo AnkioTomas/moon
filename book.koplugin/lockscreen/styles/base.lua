@@ -15,13 +15,33 @@
 --]]
 
 local Myrl = require("lockscreen.styles.myrl")
+local Reading = require("lockscreen.styles.reading")
+local Bill = require("lockscreen.styles.bill")
+local Quote = require("lockscreen.styles.quote")
 
 local M = {}
 
---- 已注册样式（顺序即设置页选项顺序）。
-M.styles = { Myrl }
+local Device = require("device")
 
----@param id string
+--- 竖屏宽高（锁屏会强制竖屏显示图片）。
+---@return number, number
+function M.portraitSize()
+    local w, h = Device.screen:getWidth(), Device.screen:getHeight()
+    if w > h then
+        return h, w
+    end
+    return w, h
+end
+
+---@return string 当前日期 YYYY-MM-DD
+function M.dayKey()
+    return os.date("%Y-%m-%d")
+end
+
+--- 已注册样式（顺序即设置页选项顺序）。
+M.styles = { Myrl, Reading, Bill, Quote }
+
+---@param id string|nil
 ---@return table|nil
 function M.find(id)
     for _, style in ipairs(M.styles) do
