@@ -70,6 +70,11 @@ local ok_run, err_run = pcall(function()
     Assert.eq(saved.screensaver_document_cover, "/tmp/a.png")
     Assert.is_false(saved.screensaver_show_message)
 
+    Settings.clearCover()
+    Assert.eq(saved.screensaver_type, "disable")
+    Assert.is_nil(saved.screensaver_document_cover)
+    Assert.is_true(saved.screensaver_show_message)
+
     -- 备份只发生一次
     saved.screensaver_type = "cover"
     saved.screensaver_document_cover = "/old/cover.png"

@@ -15,9 +15,31 @@ local Assert = require("support.assert")
 -- ── 桩：UI 基础件 ────────────────────────────────────
 
 package.preload["ui/uimanager"] = function()
+    local q = {}
     return {
         setDirty = function() end,
-        nextTick = function(f) f() end,
+        nextTick = function(f)
+            q[#q + 1] = f
+        end,
+        scheduleIn = function(_, _delay, f)
+            q[#q + 1] = f
+        end,
+        unschedule = function(_, f)
+            for i = #q, 1, -1 do
+                if q[i] == f then
+                    table.remove(q, i)
+                end
+            end
+        end,
+        _flush = function()
+            while #q > 0 do
+                local batch = q
+                q = {}
+                for i = 1, #batch do
+                    batch[i]()
+                end
+            end
+        end,
     }
 end
 package.preload["ui/size"] = function()
@@ -35,6 +57,9 @@ local WORDS = { "你好", "你好吗", "内耗", "拟合", "泥沼", "尼龙", "
 package.preload["pinyin.dictionary"] = function()
     return {
         isAvailable = function()
+            return dict_available
+        end,
+        fileExists = function()
             return dict_available
         end,
         lookup = function(code)
@@ -144,6 +169,7 @@ end
 
 local VK = {
     addKeys = function(self)
+        self._addKeys_count = (self._addKeys_count or 0) + 1
         self.layout = {}
         for _, row in ipairs(self.KEYS) do
             local widgets = {}
@@ -182,6 +208,10 @@ local pinyin_on = true
 local Bar = require("pinyin.candidate_bar")
 Bar.install({ enabled = function() return pinyin_on end })
 
+local function flush()
+    require("ui/uimanager")._flush()
+end
+
 local function newKeyboard()
     local kb = setmetatable({ inputbox = fakeInputBox() }, { __index = VK })
     kb:init() -- 走包装后的 init：同步候选行 + addKeys 绑定 + 替换包装表 func
@@ -192,6 +222,12 @@ local function typeCode(kb, code)
     for i = 1, #code do
         VK.addChar(kb, code:sub(i, i))
     end
+end
+
+--- 打完字并冲刷防抖 → 子进程查库回调
+local function typeAndLookup(kb, code)
+    typeCode(kb, code)
+    flush()
 end
 
 local function rowLabels(kb)
@@ -215,17 +251,37 @@ do
     Assert.is_nil(kb.layout[1][2].swipe_callback, "候选键没有 key_chars，划动回调必须摘掉")
 end
 
+-- setKeyText 必须把被压小的 face 恢复成 VirtualKey.face（真机字号回归）
+do
+    local kb = newKeyboard()
+    local key = kb.layout[1][2]
+    local tw = key[1][1][1]
+    key.face = { name = "keyboard" }
+    tw.face = { name = "shrunk-to-8" }
+    typeAndLookup(kb, "nihao")
+    Assert.eq(tw.face, key.face, "写候选字时必须恢复键盘字号")
+    Assert.eq(tw.text, "你好")
+    for i = #lookup_calls, 1, -1 do
+        lookup_calls[i] = nil
+    end
+end
+
 -- 字母输入：拼音码进输入框，候选按宽度分页显示。
 do
     local kb = newKeyboard()
     typeCode(kb, "nihao")
     Assert.eq(text(kb), "nihao", "拼音码应先显示在输入框")
+    Assert.eq(#lookup_calls, 0, "防抖未到期不得查库")
+    Assert.eq(rowLabels(kb)[2], "nihao", "停键前候选行只显示拼音码")
+    flush()
     Assert.eq(lookup_calls[#lookup_calls], "nihao")
+    Assert.eq(#lookup_calls, 1, "连打只查最后一次")
     Assert.eq(#native_adds, 0, "激活时字母不进原生 IME")
+    Assert.eq(kb._addKeys_count, 1, "打字只改键宽，不得 addKeys 重建键盘")
     local labels = rowLabels(kb)
     Assert.eq(labels[2], "你好")
-    Assert.eq(labels[5], "拟合")
-    Assert.eq(labels[6], "")
+    Assert.eq(labels[3], "你好吗")
+    Assert.eq(labels[4], "", "加宽后首页只放得下两个词")
     Assert.eq(labels[9], "", "空档键无文本")
 end
 
@@ -243,7 +299,7 @@ end
 -- 点候选：插整词，候选行清空
 do
     local kb = newKeyboard()
-    typeCode(kb, "nihao")
+    typeAndLookup(kb, "nihao")
     kb.layout[1][3].callback() -- 第 2 个候选「你好吗」
     Assert.eq(text(kb), "你好吗")
     Assert.eq(rowLabels(kb)[2], "", "提交后候选行清空")
@@ -252,7 +308,7 @@ end
 -- 换层：addKeys 重建全部键位（Shift/Sym、number 输入框切字母层），候选行必须重绑
 do
     local kb = newKeyboard()
-    typeCode(kb, "nihao")
+    typeAndLookup(kb, "nihao")
     kb:addKeys() -- 换层
     Assert.eq(rowLabels(kb)[2], "你好", "换层后候选必须画在新键位上")
     kb.layout[1][2].callback() -- 新键位上的候选可点
@@ -262,12 +318,12 @@ end
 -- 翻页：候选按文本宽度分页；▶ 翻页、◀ 回翻
 do
     local kb = newKeyboard()
-    typeCode(kb, "nihao")
+    typeAndLookup(kb, "nihao")
     kb.layout[1][10].callback() -- ▶
     local labels = rowLabels(kb)
-    Assert.eq(labels[2], "泥沼")
-    Assert.eq(labels[5], "逆转")
-    Assert.eq(labels[6], "", "第二页四个候选")
+    Assert.eq(labels[2], "内耗")
+    Assert.eq(labels[4], "泥沼")
+    Assert.eq(labels[5], "", "加宽后第二页三个候选")
     kb.layout[1][1].callback() -- ◀
     Assert.eq(rowLabels(kb)[2], "你好")
 end
@@ -275,9 +331,11 @@ end
 -- 退格：有输入码时逐字母回退；码空后删普通文本
 do
     local kb = newKeyboard()
-    typeCode(kb, "nihao")
+    typeAndLookup(kb, "nihao")
     VK.delChar(kb)
     Assert.eq(text(kb), "niha")
+    Assert.eq(lookup_calls[#lookup_calls], "nihao", "退格后防抖未到期不查库")
+    flush()
     Assert.eq(lookup_calls[#lookup_calls], "niha")
     for _ = 1, 4 do
         VK.delChar(kb) -- 删空剩余字母
@@ -289,7 +347,7 @@ end
 -- 拼音码不属于输入框文本：移动光标后点候选仍在当前位置提交。
 do
     local kb = newKeyboard()
-    typeCode(kb, "nihao")
+    typeAndLookup(kb, "nihao")
     kb.inputbox.charpos = 1 -- 用户点了文本别处
     kb.layout[1][2].callback()
     Assert.eq(text(kb), "nihao", "光标移走后不应错误替换文本")
@@ -300,7 +358,7 @@ end
 do
     local before = #native_adds
     local kb = newKeyboard()
-    typeCode(kb, "nihao")
+    typeAndLookup(kb, "nihao")
     VK.addChar(kb, "，")
     Assert.eq(#native_adds, before + 1, "非字母走原路进原生通道")
     Assert.eq(text(kb), "nihao，", "拼音码和标点应保留")
@@ -335,7 +393,7 @@ end
 do
     local kb = newKeyboard()
     Assert.is_true(zh_keys[1]._pinyin_bar == true, "词库可用后候选行回来")
-    typeCode(kb, "nihao")
+    typeAndLookup(kb, "nihao")
     Assert.eq(rowLabels(kb)[2], "你好")
 end
 

@@ -2,7 +2,7 @@
 pinyin.dictionary：音节切分 / 前缀查询 / 降级
 
 ljsqlite3 用内存假库 mock（对齐 tests/utils/db/ 先例），不碰真 sqlite 文件；
-只验证 SQL 形态、绑定参数、边界过滤、不可用降级。
+只验证 SQL 形态、绑定参数、音节边界、不可用降级。
 
 @module tests.pinyin.dictionary_spec
 --]]
@@ -37,32 +37,67 @@ package.preload["lua-ljsqlite3/init"] = function()
                     captured[#captured + 1] = sql
                     if sql:find("FROM meta") then
                         return {
-                            rows = function()
-                                local data = { { "entries", "3" }, { "source_tag", "test" } }
-                                local i = 0
-                                return function()
-                                    i = i + 1
-                                    return data[i]
-                                end
-                            end,
-                            close = function() end,
-                        }
-                    end
-                    return {
-                        bind1 = function(self, i, v)
-                            captured[#captured + 1] = v
-                            return self
-                        end,
                         rows = function()
                             local data = {
-                                { "你好", "ni hao" },
-                                { "你好吗", "ni hao ma" },
-                                { "牛奶", "niu nai" }, -- 前缀不匹配 "ni hao%"，仅对照
+                                { "entries", "3" }, { "source_tag", "test" },
                             }
                             local i = 0
                             return function()
                                 i = i + 1
                                 return data[i]
+                            end
+                        end,
+                            close = function() end,
+                        }
+                    end
+                    return {
+                        bind1 = function(self, i, v)
+                            self._bound = self._bound or {}
+                            self._bound[i] = v
+                            captured[#captured + 1] = v
+                            return self
+                        end,
+                        rows = function(self)
+                            local data = {
+                                { "你", "ni" },
+                                { "你好", "ni hao" },
+                                { "你好吗", "ni hao ma" },
+                                { "牛奶", "niu nai" },
+                            }
+                            local bind = self._bound[1]
+                            local function hit(py)
+                                if type(bind) ~= "string" then
+                                    return false
+                                end
+                                if not bind:find("%", 1, true) then
+                                    return py == bind
+                                end
+                                -- SQL LIKE：% → .*（测试桩只需要通配符）
+                                local parts, start = {}, 1
+                                while true do
+                                    local s = bind:find("%", start, true)
+                                    if not s then
+                                        parts[#parts + 1] = bind:sub(start)
+                                        break
+                                    end
+                                    parts[#parts + 1] = bind:sub(start, s - 1)
+                                    start = s + 1
+                                end
+                                for i = 1, #parts do
+                                    parts[i] = parts[i]:gsub("(%W)", "%%%1")
+                                end
+                                return py:find("^" .. table.concat(parts, ".*") .. "$") ~= nil
+                            end
+                            local i = 0
+                            local filtered = {}
+                            for _, row in ipairs(data) do
+                                if hit(row[2]) then
+                                    filtered[#filtered + 1] = { row[1] }
+                                end
+                            end
+                            return function()
+                                i = i + 1
+                                return filtered[i]
                             end
                         end,
                         close = function() end,
@@ -75,40 +110,58 @@ end
 
 local Dict = require("pinyin.dictionary")
 
--- ── 纯逻辑：音节切分与边界 ─────────────────────────────
-Assert.eq(Dict.toPrefix("nihao"), "ni hao")
+-- ── 纯逻辑：音节切分 ────────────────────────────────
+local p, complete = Dict.toPrefix("nihao")
+Assert.eq(p, "ni hao")
+Assert.is_true(complete)
 Assert.eq(Dict.toPrefix("zhongguo"), "zhong guo")
 Assert.eq(Dict.toPrefix("ni"), "ni")
-Assert.eq(Dict.toPrefix("nih"), "ni h") -- 输到一半的音节
+p, complete = Dict.toPrefix("nih")
+Assert.eq(p, "ni h")
+Assert.is_false(complete, "半截音节 complete=false")
 Assert.eq(Dict.toPrefix("beijing"), "bei jing")
+p, complete = Dict.toPrefix("n")
+Assert.eq(p, "n")
+Assert.is_false(complete)
 
--- 边界：完整段严格相等，末段可为前缀
-Assert.is_true(Dict._boundaryOk("ni hao", "ni hao"))
-Assert.is_true(Dict._boundaryOk("ni hao", "ni h"))
-Assert.is_true(Dict._boundaryOk("ni huai", "ni h"))
-Assert.is_true(Dict._boundaryOk("ni", "ni"))           -- 单段相等
-Assert.is_true(Dict._boundaryOk("niu", "ni"))          -- 单段前缀（输到一半）
-Assert.is_false(Dict._boundaryOk("niu nai", "ni n"))   -- 首段 niu ≠ ni
-Assert.is_false(Dict._boundaryOk("niu", "ni h"))       -- 段数不够
-
--- ── 查询：LIKE 前缀 + 边界过滤 + 按权重序 ─────────────
+-- ── 查询：完整音节走 = / LIKE 'x %'；半截走 LIKE 'x%' ──
 Assert.is_true(Dict.isAvailable())
 Assert.eq(Dict.entries(), "3")
 Assert.eq(Dict.sourceTag(), "test")
 
 local words = Dict.lookup("nihao")
--- 绑定参数是空格分隔前缀 + %
-local bound
-for _, v in ipairs(captured) do
-    if type(v) == "string" and v:match("%%$") then
-        bound = v
-    end
-end
-Assert.eq(bound, "ni hao%")
--- mock 返回的三行里，"niu nai" 不满足 LIKE 'ni hao%'（真实库不会返回）；
--- 这里直接断言边界过滤对 LIKE 结果集的二次校验不删正确行
+Assert.eq(captured[#captured], "ni hao %", "双音节再补 LIKE 'prefix %'")
 Assert.eq(words[1], "你好")
 Assert.eq(words[2], "你好吗")
+Assert.eq(#words, 2, "nihao 不得命中 niu")
+
+local ni = Dict.lookup("ni")
+local have = {}
+for _, w in ipairs(ni) do
+    have[w] = true
+end
+Assert.is_true(have["你"], "完整 ni 命中单字")
+Assert.is_nil(have["你好"], "单音节不做 LIKE 'ni %'（那是全库扫描）")
+Assert.is_nil(have["牛奶"], "ni 不得命中 niu")
+
+Assert.len(Dict.lookup("n"), 0, "单字母半截不查库")
+
+local nih = Dict.lookup("nih")
+Assert.eq(nih[1], "你好")
+Assert.eq(nih[2], "你好吗")
+
+-- 简拼：切不成音节 → LIKE 'n% h%'
+local nh = Dict.lookup("nh")
+Assert.eq(captured[#captured], "n% h%")
+Assert.eq(nh[1], "你好")
+Assert.eq(nh[2], "你好吗")
+Assert.is_nil((function()
+    for _, w in ipairs(nh) do
+        if w == "牛奶" then
+            return true
+        end
+    end
+end)(), "nh 不得命中 niu nai")
 
 -- 非字母输入直接空
 Assert.len(Dict.lookup("ni3"), 0)

@@ -222,12 +222,30 @@ package.preload["pinyin.dictionary"] = function()
         isAvailable = function()
             return dict_available
         end,
+        fileExists = function()
+            return dict_available
+        end,
         lookup = function(code)
             lookup_calls[#lookup_calls + 1] = code
             if code == "ni" or code == "nihao" then
                 return WORDS
             end
             return {}
+        end,
+    }
+end
+
+-- 集成用例不测防抖调度：debounce 立即触发
+package.preload["utils.timing"] = function()
+    return {
+        debounce = function(fn)
+            local h = {}
+            function h:cancel() end
+            return setmetatable(h, {
+                __call = function(_, ...)
+                    return fn(...)
+                end,
+            })
         end,
     }
 end
