@@ -22,25 +22,28 @@ function Setting.rowStatus()
     return _("未配置"), false
 end
 
---- 目录选择列表：逐层浏览，长按目录名选定（墨水屏不打字）。
+--- 目录选择列表：逐层浏览，右上确认当前目录。
 ---@param plugin table|nil
 function Setting.open(plugin)
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
-    local PathChooser = require("ui/widget/pathchooser")
+    local Popup = require("ui.components.popup")
     local MoonSettings = require("utils.settings")
     local cfg = MoonSettings.getSource(SOURCE_ID)
     local start_path = cfg.path
     if type(start_path) ~= "string" or start_path == "" then
-        start_path = G_reader_settings:readSetting("home_dir") or "/"
+        local home = G_reader_settings:readSetting("home_dir")
+        start_path = type(home) == "string" and home:match("^(.*)/[^/]+/?$") or nil
+        if not start_path or start_path == "" then
+            local ffiUtil = require("ffi/util")
+            local data = require("datastorage"):getFullDataDir()
+            start_path = ffiUtil.dirname(ffiUtil.realpath(data) or data)
+        end
     end
-    UIManager:show(PathChooser:new{
-        title = _("选择书库目录（长按目录名选定）"),
-        select_directory = true,
-        select_file = false,
-        show_files = false,
+    Popup.directory{
+        title = _("选择书库目录"),
         path = start_path,
-        onConfirm = function(path)
+        on_select = function(path)
             cfg.path = path
             MoonSettings.saveSource(SOURCE_ID, cfg)
             require("source.registry").invalidate()
@@ -49,7 +52,7 @@ function Setting.open(plugin)
                 plugin:onSourceChanged()
             end
         end,
-    })
+    }
 end
 
 return Setting
