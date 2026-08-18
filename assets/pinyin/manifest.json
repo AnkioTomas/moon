@@ -6,44 +6,44 @@
   "raw_size": 156672000,
   "parts": [
     {
-      "file": "dictionary.sqlite3.gz.001",
-      "size": 8187360
+      "file": "dictionary.sqlite3.part.001",
+      "size": 15728640
     },
     {
-      "file": "dictionary.sqlite3.gz.002",
-      "size": 7193901
+      "file": "dictionary.sqlite3.part.002",
+      "size": 15728640
     },
     {
-      "file": "dictionary.sqlite3.gz.003",
-      "size": 5768088
+      "file": "dictionary.sqlite3.part.003",
+      "size": 15728640
     },
     {
-      "file": "dictionary.sqlite3.gz.004",
-      "size": 5658458
+      "file": "dictionary.sqlite3.part.004",
+      "size": 15728640
     },
     {
-      "file": "dictionary.sqlite3.gz.005",
-      "size": 5706269
+      "file": "dictionary.sqlite3.part.005",
+      "size": 15728640
     },
     {
-      "file": "dictionary.sqlite3.gz.006",
-      "size": 5660463
+      "file": "dictionary.sqlite3.part.006",
+      "size": 15728640
     },
     {
-      "file": "dictionary.sqlite3.gz.007",
-      "size": 5903157
+      "file": "dictionary.sqlite3.part.007",
+      "size": 15728640
     },
     {
-      "file": "dictionary.sqlite3.gz.008",
-      "size": 5928306
+      "file": "dictionary.sqlite3.part.008",
+      "size": 15728640
     },
     {
-      "file": "dictionary.sqlite3.gz.009",
-      "size": 5883777
+      "file": "dictionary.sqlite3.part.009",
+      "size": 15728640
     },
     {
-      "file": "dictionary.sqlite3.gz.010",
-      "size": 5599278
+      "file": "dictionary.sqlite3.part.010",
+      "size": 15114240
     }
   ]
 }
