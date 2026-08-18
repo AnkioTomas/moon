@@ -17,7 +17,7 @@ Desktop 顶部状态条（纯构建、无内部状态）。
   Desktop:rebuild() 会整页重建并再次调用 TopBar.build()。
   定时：Desktop:scheduleClockTick() 每分钟只调用 refreshTopBar()（换顶栏 + 区域 ui 刷新，不整页 rebuild）。
   事件：切源、切 tab、设置改完、封面 idle 回调等凡触发 rebuild 的路径也会刷新顶栏。
-  交互：顶栏纯展示，不注册点击/滑动（避免误触）。
+  交互：本组件仍只负责展示；Desktop 在顶栏高度范围注册点击和向下滑手势。
 
 @module koplugin.book.ui.components.topbar
 --]]

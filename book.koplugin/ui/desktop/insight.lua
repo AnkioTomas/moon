@@ -429,7 +429,7 @@ function Insight.openBookDetail(desktop, hint)
                 local want = basename(sid)
                 for _, row in ipairs(res.data or {}) do
                     if basename(BookInfo.file(row)) == want then
-                        Store.remember(row)
+                        Store.rememberMany({ row })
                         finish(row)
                         return
                     end
