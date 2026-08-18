@@ -10,9 +10,10 @@ schema（tools/build_pinyin_dict.py 生成）：
   INDEX idx_pinyin(pinyin, weight DESC)
 
 查询模型：IME 给的输入码是连写拼音（"nihao"），词库键是空格分隔（"ni hao"）。
-本模块把连写码按音节边界贪心切成空格分隔前缀，做 LIKE 'prefix%' 匹配，
-再按音节边界过滤掉跨音节误命中（"ni" 不能命中 "niu"/"nie"）。
-单字（8105 字表）与整词（base/ext/tencent）同库，前缀天然混合排序。
+连写码按音节贪心切开后走索引等值查询，禁止 OR：
+完整单音节只用 `pinyin = ?`；第二音节才 `LIKE 'a b %'`。
+半截用 `LIKE 'ni h%'`。切不成音节走简拼（`nh` → `n% h%`）。
+单字母半截不查（`LIKE 'n%'` 会扫库）。单字与整词同库。
 
 @module koplugin.book.pinyin.dictionary
 --]]
@@ -22,10 +23,9 @@ local Paths = require("utils.paths")
 
 local M = {}
 
-local MAX_CANDI = 100 -- 候选栏分页展示，单次最多保留 100 条
+local MAX_CANDI = 21 -- 候选栏约 3 页，多了也翻不到
 
--- 拼音音节表（无声调，ü=v）。用于把连写码切成音节序列。
--- 来自现代汉语拼音方案全音节集合；宁可多不可少（多切不出词条只是无结果，不少）。
+-- 拼音音节表（无声调，ü=v），用于把连写输入切为词库的空格分隔形式。
 local SYLLABLES = {
     "a", "ai", "an", "ang", "ao",
     "ba", "bai", "ban", "bang", "bao", "bei", "ben", "beng", "bi", "bian", "biao", "bie", "bin", "bing", "bo", "bu",
@@ -67,7 +67,7 @@ local SYLLABLES = {
     "zha", "zhai", "zhan", "zhang", "zhao", "zhe", "zhei", "zhen", "zheng", "zhi", "zhong", "zhou", "zhu", "zhua",
     "zhuai", "zhuan", "zhuang", "zhui", "zhun", "zhuo",
 }
--- 最长音节 6（chuang/shuang）；建长度→集合 索引供贪心匹配
+-- 按长度索引，供最长音节优先的贪心匹配。
 local SYL_BY_LEN = {}
 local MAX_SYL_LEN = 0
 for _, s in ipairs(SYLLABLES) do
@@ -77,12 +77,18 @@ for _, s in ipairs(SYLLABLES) do
         MAX_SYL_LEN = #s
     end
 end
+-- 用于区分不完整音节和简拼。
+local SYL_PREFIX = {}
+for _, s in ipairs(SYLLABLES) do
+    for i = 1, #s do
+        SYL_PREFIX[s:sub(1, i)] = true
+    end
+end
 
 local _conn -- lua-ljsqlite3 连接；false = 已判定不可用
 local _meta -- meta 缓存
 
---- 打开只读连接（只试一次；失败即标记不可用，后续直接走降级）。
----@return userdata|nil
+-- 只尝试打开一次；失败缓存为不可用，直到 reset 后重试。
 local function ensureOpen()
     if _conn ~= nil then
         return _conn or nil
@@ -105,23 +111,18 @@ local function ensureOpen()
     return _conn
 end
 
---- 词库是否可用（文件在且能打开）。
----@return boolean
+--- 词库是否可用（文件存在且可打开）。
 function M.isAvailable()
     return ensureOpen() ~= nil
 end
 
---- 词库文件是否已经落盘。与 isAvailable 分开，便于设置页区分“未下载”和“文件损坏/依赖缺失”。
----@return boolean
+--- 词库文件是否已落盘，供设置页区分未下载与不可用。
 function M.fileExists()
     local attr = lfs.attributes(Paths.pinyinDictPath())
-    return attr and attr.mode == "file" and (attr.size or 0) > 0 or false
+    return attr ~= nil and attr.mode == "file" and (attr.size or 0) > 0
 end
 
---- 词库文件变更后调用（下载/更新落盘）：关旧连接、清缓存，下次访问重新打开。
---- 否则负缓存（_conn=false）会把「不可用」记到进程结束，设置页状态永远不刷新；
---- 已打开的旧连接也会继续读已删除的旧文件。
----@return nil
+--- 下载或更新落盘后调用，使连接和负缓存失效。
 function M.reset()
     if _conn and _conn ~= false then
         pcall(function()
@@ -132,9 +133,7 @@ function M.reset()
     _meta = nil
 end
 
---- 读 meta 键；库不可用返回 nil。
----@param k string
----@return string|nil
+-- 首次读取时缓存完整 meta 表；词库不可用或查询失败时返回 nil。
 local function metaValue(k)
     if _meta then
         return _meta[k]
@@ -161,22 +160,21 @@ local function metaValue(k)
     return _meta[k]
 end
 
---- 词条总数（设置页状态显示用）；不可用返回 nil。
----@return string|nil
+--- 词条总数，词库不可用时返回 nil。
 function M.entries()
     return metaValue("entries")
 end
 
---- 来源 tag（rime-ice release）；不可用返回 nil。
----@return string|nil
+--- rime-ice 来源 tag，词库不可用时返回 nil。
 function M.sourceTag()
     return metaValue("source_tag")
 end
 
 --- 连写码 → 空格分隔前缀（贪心最长匹配音节）。
---- "nihao" → "ni hao"；"ni h"（输到一半）→ "ni h"。切不出完整首音节返回 nil。
+--- "nihao" → "ni hao", true；"nih" → "ni h", false。
 ---@param code string 纯小写连写拼音
----@return string|nil
+---@return string prefix
+---@return boolean complete 全部切成完整音节（末段不是半截）
 function M.toPrefix(code)
     local parts = {}
     local i = 1
@@ -191,21 +189,35 @@ function M.toPrefix(code)
                 break
             end
         end
-        if matched then
-            parts[#parts + 1] = matched
-            i = i + #matched
-        else
-            -- 最后一个不完整音节（用户还在敲）：原样收尾
+        if not matched then
             parts[#parts + 1] = code:sub(i)
-            break
+            return table.concat(parts, " "), false
+        end
+        parts[#parts + 1] = matched
+        i = i + #matched
+    end
+    return table.concat(parts, " "), true
+end
+
+--- 简拼：每个声母（含 zh/ch/sh）对一个音节。「nh」→「n% h%」命中「ni hao」。
+local function abbrevPattern(code)
+    local parts = {}
+    local i = 1
+    local n = #code
+    while i <= n do
+        local two = i < n and code:sub(i, i + 1)
+        if two == "zh" or two == "ch" or two == "sh" then
+            parts[#parts + 1] = two .. "%"
+            i = i + 2
+        else
+            parts[#parts + 1] = code:sub(i, i) .. "%"
+            i = i + 1
         end
     end
     return table.concat(parts, " ")
 end
-
---- 前缀查词：连写输入码 → 候选词列表，按权重降序。
---- 音节边界过滤：词库拼音的前缀必须与输入码的切分逐段兼容——
---- 输入码 "ni" 只允许命中 "ni" 或 "ni X..."，不允许 "niu"/"nie"（不同音节）。
+--- 连写输入码转候选词，按词频降序。
+--- 完整音节优先等值查询；半截和简拼才走 LIKE，避免 `OR` 使 SQLite 放弃索引。
 ---@param code string 连写拼音（纯小写）
 ---@return string[]
 function M.lookup(code)
@@ -216,96 +228,67 @@ function M.lookup(code)
     if not conn then
         return {}
     end
-    local prefix = M.toPrefix(code)
-    if not prefix or prefix == "" then
-        return {}
-    end
-    -- 音节数：输入码切出几段
-    local syl_count = select(2, prefix:gsub(" ", "")) + 1
-    local out = {}
-    local ok = pcall(function()
-        -- LIKE 前缀走索引；% 转义不需要（拼音无 %/_）
-        local stmt = conn:prepare(
-            "SELECT word, pinyin FROM words WHERE pinyin LIKE ? ORDER BY weight DESC LIMIT " .. (MAX_CANDI * 8)
-        )
+    local prefix, complete = M.toPrefix(code)
+
+    local function fetch(sql, bind)
+        local stmt = conn:prepare(sql)
         if not stmt then
-            return
+            return {}
         end
-        stmt:bind1(1, prefix .. "%")
+        stmt:bind1(1, bind)
+        local rows = {}
         for row in stmt:rows() do
-            -- 音节边界校验：词库拼音第 syl_count 段必须以输入码末段开头，
-            -- 且其后的边界必须落在空格或词尾（防 "ni" 命中 "niu"）
-            local py = row[2]
-            if M._boundaryOk(py, prefix) then
-                out[#out + 1] = row[1]
-                if #out >= MAX_CANDI then
-                    break
-                end
+            rows[#rows + 1] = row[1]
+            if #rows >= MAX_CANDI then
+                break
             end
         end
         stmt:close()
+        return rows
+    end
+
+    local sql_eq = "SELECT word FROM words WHERE pinyin = ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
+    local sql_like = "SELECT word FROM words WHERE pinyin LIKE ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
+    local out = {}
+    local ok = pcall(function()
+        if complete then
+            out = fetch(sql_eq, prefix)
+            if #out < MAX_CANDI and prefix:find(" ", 1, true) then
+                local seen = {}
+                for i = 1, #out do
+                    seen[out[i]] = true
+                end
+                for _, w in ipairs(fetch(sql_like, prefix .. " %")) do
+                    if not seen[w] then
+                        out[#out + 1] = w
+                        if #out >= MAX_CANDI then
+                            break
+                        end
+                    end
+                end
+            end
+            return
+        end
+        -- 半截拼音（末段仍是音节前缀）：「nih」→「ni h%」
+        local last = prefix:match("([^ ]+)$") or prefix
+        local has_space = prefix:find(" ", 1, true) ~= nil
+        if has_space or SYL_PREFIX[last] then
+            if #code < 3 and not has_space then
+                return -- 「n」「zh」全库扫描，跳过
+            end
+            out = fetch(sql_like, prefix .. "%")
+            return
+        end
+        -- 简拼：切不成音节（「nh」「zgr」）
+        if #code < 2 then
+            return
+        end
+        out = fetch(sql_like, abbrevPattern(code))
     end)
     if not ok then
         return {}
     end
-    if #out == 0 and #code >= 2 then
-        local pattern = code:sub(1, 1) .. "%"
-        for i = 2, #code do
-            pattern = pattern .. " " .. code:sub(i, i) .. "%"
-        end
-        pcall(function()
-            local stmt = conn:prepare(
-                "SELECT word FROM words WHERE pinyin LIKE ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
-            )
-            if not stmt then return end
-            stmt:bind1(1, pattern)
-            for row in stmt:rows() do out[#out + 1] = row[1] end
-            stmt:close()
-        end)
-    end
     return out
-end
-
---- 校验词库拼音 py 是否与输入前缀 prefix 在音节边界上兼容。
---- prefix 由 toPrefix 生成（空格分隔，末段可能不完整）。
---- 规则：py 必须以 prefix 为前缀；且 prefix 的每个完整段与 py 对应段严格相等
---- （"ni" 不允许命中 "niu"），末段允许是 py 对应段的前缀（"ni h" 命中 "ni hao"）。
----@param py string 词库拼音（"ni hao"）
----@param prefix string 输入前缀（"ni h"）
----@return boolean
-function M._boundaryOk(py, prefix)
-    if py:sub(1, #prefix) ~= prefix then
-        return false
-    end
-    -- 逐段校验：除末段外，prefix 的每段必须等于 py 对应段
-    local pi = 1
-    local segs = {}
-    for seg in prefix:gmatch("[^ ]+") do
-        segs[#segs + 1] = seg
-    end
-    for idx, seg in ipairs(segs) do
-        local sp = py:find(" ", pi, true)
-        local py_seg = py:sub(pi, sp and (sp - 1) or #py)
-        if idx < #segs then
-            -- 完整段：严格相等
-            if py_seg ~= seg then
-                return false
-            end
-            if not sp then
-                return false -- py 段数少于 prefix 完整段数
-            end
-        else
-            -- 末段：py 段以 seg 开头即可（含相等）
-            if py_seg:sub(1, #seg) ~= seg then
-                return false
-            end
-        end
-        if not sp then
-            break
-        end
-        pi = sp + 1
-    end
-    return true
 end
 
 return M

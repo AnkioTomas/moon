@@ -6,20 +6,21 @@
 wrapInputBox 包装表的 func——那依赖 generic_ime 包装结构的内部细节，
 结构对不上就静默退回原生 IME（候选混进输入框文本），已经在真机上踩过。
 
-不同之处：候选来源是 Book 词库（pinyin.dictionary，rime-ice 词频序），
-不是 zh_pinyin_data 单字码表；标签更新走 TextWidget:setText/setMaxWidth 公开 API；
-固定键宽（◀ 1.0 + 7×1.1 候选 + 0.3 空档 + ▶ 1.0 = 10 单位，与字母行对齐）。
+候选来自 Book 词库（pinyin.dictionary，rime-ice 词频序）。候选格按字数调整
+已有 VirtualKey 的 dimen，总宽仍为 10 单位；不得调用 addKeys 重建整张键盘。
 
-激活时（开关开 + 词库在 + 当前 zh_CN 布局）：小写字母不进原生 IME，
+激活时（开关开 + 词库在 + 当前 zh_CN 布局）：字母不进原生 IME，
 原样写进输入框（所见即所输），词库候选显示在键盘首行；
 点候选 = 删掉已输入字母、插入整词。退格逐字母回退。
-大写字母与非字母结束本次拼写（已输入字母留作普通文本），按键走原路。
+连打走 utils.timing.debounce，查库在 scheduleIn 回调里跑（不在按键路径）。
+KOReader 没有 Lua 线程；不能用 Task.run fork（父进程 sqlite 连接 + fork = 闪退）。
+非字母结束本次拼写，按键走原路。大写字母并进输入码（按小写查词）。
 
 已知取舍：物理键盘 / SDL 文本输入（InputText:onTextInput → inputbox:addChars）
 不经过 VirtualKeyboard.addChar，仍走原生 IME——与 pinyinplus 行为一致。
 目标设备（Android）用的是屏幕键盘，不受影响。
 
-两条硬约束（踩过坑）：
+关键约束：
 - 候选行只在真能用（开关开 + 词库在）时插进 zh_CN 布局，其余情况必须摘掉：
   否则留下一整行按不动的 ◀▶ 幽灵行，而输入还是原生 IME 行内候选。
 - 键位绑定跟着 VirtualKeyboard:addKeys 走，不是 init：换层（Shift/Sym、number 输入框
@@ -30,28 +31,33 @@ wrapInputBox 包装表的 func——那依赖 generic_ime 包装结构的内部�
 
 local Bar = {}
 
-local ZH_MODULE = "ui/data/keyboardlayouts/zh_CN_keyboard"
-local CANDIDATE_SLOT_COUNT = 7
+local Blitbuffer = require("ffi/blitbuffer")
+local Size = require("ui/size")
 
-local _enabled ---@type fun(): boolean 由 install 注入（pinyin.init 的开关判定）
+local ZH_MODULE = "ui/data/keyboardlayouts/zh_CN_keyboard"
+local SLOT_COUNT = 7
+local NAV_WIDTH = 1.0
+local AREA = 8.0 -- 10 - 2*NAV；空档至少 0.3，候选合计最多 7.7
+local MIN_SPACER = 0.3
+
+local _enabled
 local _hooked = false
 
--- 输入会话状态
-local _want = false ---@type boolean 本次键盘：开关开且词库可用（决定候选行在不在）
-local _active = false ---@type boolean 当前布局是 zh_CN 且 want：拦截字母输入
-local _keyboard ---@type table|nil 当前 VirtualKeyboard 实例
+local _want = false
+local _active = false
+local _keyboard
 local _code = ""
 local _pages = {}
 local _page = 1
 local _prev_key, _next_key, _spacer_key
 local _cand_keys = {}
 local _width_signature
+local _requestLookup
+local stopSearch
 
 -- ── 基础工具 ─────────────────────────────────────────
 
---- 绕过 IME 包装直写输入框：是 wrapMethod 包装表就走 raw_method_call，否则直调。
----@param inputbox table
----@param chars string
+-- 绕过 IME 包装直写输入框，避免候选字再次进入原生 IME。
 local function rawAddChars(inputbox, chars)
     local f = inputbox.addChars
     if type(f) == "table" and f.raw_method_call then
@@ -61,7 +67,6 @@ local function rawAddChars(inputbox, chars)
     end
 end
 
----@param inputbox table
 local function rawDelChar(inputbox)
     local f = inputbox.delChar
     if type(f) == "table" and f.raw_method_call then
@@ -73,10 +78,9 @@ end
 
 --- 候选行随 want 插入/摘除 zh_CN 布局数据（幂等）。
 --- 必须在 VirtualKeyboard:init 读 keys 之前调用——键盘高度按行数算。
----@param want boolean
 local function syncRow(want)
     if not (want or package.loaded[ZH_MODULE]) then
-        return -- 从没插过行，不必为了摘行去加载布局模块
+        return
     end
     local keys = require(ZH_MODULE).keys
     if type(keys) ~= "table" then
@@ -89,122 +93,175 @@ local function syncRow(want)
         table.remove(keys, 1)
         return
     end
+    -- 候选格初始必须有正常宽度。VirtualKey 在 width≈0 时会把空标签字号压到 8，
+    -- 之后只改 dimen 不改 face，汉字会一直是蚂蚁字。
     local row = { _pinyin_bar = true }
     for i = 1, 10 do
-        row[i] = { label = "", width = (i == 1 or i == 10) and 1.0 or 0 }
+        local w = NAV_WIDTH
+        if i >= 2 and i <= 8 then
+            w = 1.0
+        elseif i == 9 then
+            w = AREA - SLOT_COUNT -- 1.0 空档
+        end
+        row[i] = { label = "", width = w }
     end
     row[1].label = "◀"
-    row[9].width = 8.0
     row[10].label = "▶"
     table.insert(keys, 1, row)
 end
 
---- 更新候选键文本。
----@param key table VirtualKey 实例（结构：[1]=FrameContainer [1]=CenterContainer [1]=TextWidget）
----@param text string
----@param gray boolean|nil
+-- VirtualKey 的文本节点在三层容器内；同时恢复空键被压小的字号。
 local function setKeyText(key, text, gray)
     key.label = text
     key.callback = nil
     local tw = key[1][1][1]
-    local Blitbuffer = require("ffi/blitbuffer")
+    -- 兜底：若键仍带着被压小的 face，恢复 VirtualKey 自己的键盘字号
+    if key.face and tw.face ~= key.face then
+        tw.face = key.face
+        tw._face_adjusted = nil
+    end
     tw.fgcolor = gray and Blitbuffer.COLOR_GRAY or Blitbuffer.COLOR_BLACK
     tw:setText(text)
 end
 
-local function redraw()
-    if _keyboard then
-        require("ui/uimanager"):setDirty(_keyboard, function()
-            return "ui", _keyboard.dimen
-        end)
+-- 只改已有键的像素宽；绘制实际读取 dimen，不会重建键盘。
+local function setKeyPixelWidth(key, px)
+    px = math.max(0, px)
+    key.width = px
+    if key.dimen then
+        key.dimen.w = px
     end
+    local frame = key[1]
+    if type(frame) ~= "table" then
+        return
+    end
+    if frame.dimen then
+        frame.dimen.w = px
+    end
+    local b = key.bordersize or 0
+    local center = frame[1]
+    if type(center) == "table" and center.dimen then
+        center.dimen.w = math.max(0, px - 2 * b)
+    end
+    local tw = center and center[1]
+    if type(tw) == "table" and tw.setMaxWidth then
+        tw:setMaxWidth(math.max(8, px - 2 * Size.padding.small))
+    end
+end
+
+local function redraw()
+    if not _keyboard then
+        return
+    end
+    -- 只标记脏区，让 UIManager 在本轮 forceRePaint 里画。
+    -- 按键回调里自行 widgetRepaint 候选行会跟 VirtualKey 的 invert/forceRePaint 抢 buffer，真机闪退。
+    require("ui/uimanager"):setDirty(_keyboard, function()
+        return "fast", _keyboard.dimen
+    end)
 end
 
 -- ── 候选状态 ─────────────────────────────────────────
 
 local function clearCode()
+    if stopSearch then
+        stopSearch()
+    end
     _code = ""
     _pages = {}
     _page = 1
 end
 
 local function charCount(s)
-    local _, n = tostring(s):gsub("[^\128-\191]", "")
+    local _, n = s:gsub("[^\128-\191]", "")
     return n
 end
 
 local function makePages(words)
+    local max_used = AREA - MIN_SPACER
     local pages, page, used = {}, {}, 0
     for _, word in ipairs(words) do
-        local width = math.min(7.7, 0.7 + charCount(word) * 0.5)
-        if #page > 0 and (used + width > 7.7 or #page == CANDIDATE_SLOT_COUNT) then
+        local width = math.min(max_used, math.max(1.1, charCount(word) * 1.2))
+        if #page > 0 and (used + width > max_used or #page == SLOT_COUNT) then
             pages[#pages + 1], page, used = page, {}, 0
         end
         page[#page + 1], used = { word = word, width = width }, used + width
     end
-    if #page > 0 then pages[#pages + 1] = page end
+    if #page > 0 then
+        pages[#pages + 1] = page
+    end
     return pages
 end
 
-local function reload()
-    if _code == "" then
-        _pages = {}
-    else
-        local words = require("pinyin.dictionary").lookup(_code) or {}
-        if #words == 0 then words = { _code } end
-        _pages = makePages(words)
-    end
-    _page = 1
-end
-
+-- 原地更新当前页的键宽；行总宽不变，避免 addKeys 释放整张键盘。
 local function applyWidths(page)
-    local widths = { 1.0 }
+    local widths = { NAV_WIDTH }
     local used = 0
-    for i = 1, CANDIDATE_SLOT_COUNT do
+    for i = 1, SLOT_COUNT do
         local item = page[i]
         widths[1 + i] = item and item.width or 0
         used = used + widths[1 + i]
     end
-    widths[9] = math.max(0.3, 7.7 - used)
-    widths[10] = 1.0
+    widths[9] = math.max(MIN_SPACER, AREA - used)
+    widths[10] = NAV_WIDTH
     local signature = table.concat(widths, ",")
-    if signature == _width_signature then return false end
+    if signature == _width_signature then
+        return
+    end
     _width_signature = signature
-    for i = 1, 10 do _keyboard.KEYS[1][i].width = widths[i] end
-    _keyboard:addKeys()
-    return true
+    local kb = _keyboard
+    local defs = kb.KEYS[1]
+    for i = 1, 10 do
+        defs[i].width = widths[i]
+    end
+    local n = #defs
+    local pad = kb.key_padding
+    local kb_w = kb.width
+    local row = kb.layout and kb.layout[1]
+    if not (n > 0 and pad and kb_w and row and #row >= 10) then
+        return -- 测试桩没有像素几何，只同步 KEYS 宽度因子
+    end
+    local base = math.floor((kb_w - (n + 1) * pad - 2 * (kb.padding or 0)) / n)
+    for i = 1, 10 do
+        setKeyPixelWidth(row[i], math.max(1, math.floor((base + pad) * widths[i]) - pad))
+    end
+    -- HorizontalGroup 缓存了偏移；keyboard[1]=BottomContainer → frame → center → VerticalGroup
+    local vg = kb[1] and kb[1][1] and kb[1][1][1] and kb[1][1][1][1]
+    local hg = vg and vg[1]
+    if hg and hg.resetLayout then
+        hg:resetLayout()
+    end
 end
 
 local function codeAtCursor(inputbox)
     local pos = inputbox.charpos
-    if not pos then return false end
+    if not pos then
+        return false
+    end
     for i = #_code, 1, -1 do
         pos = pos - 1
-        if inputbox.charlist[pos] ~= _code:sub(i, i) then return false end
+        if inputbox.charlist[pos] ~= _code:sub(i, i) then
+            return false
+        end
     end
     return true
 end
 
---- 点候选：插整词、清空本次拼写。
----@param word string
 local function commit(word)
     local inputbox = _keyboard and _keyboard.inputbox
-    if not inputbox then
-        return
-    end
-    if _code == "" then
+    if not inputbox or _code == "" then
         return
     end
     if not codeAtCursor(inputbox) then
         clearCode()
         return
     end
-    for _ = 1, #_code do rawDelChar(inputbox) end
+    for _ = 1, #_code do
+        rawDelChar(inputbox)
+    end
     rawAddChars(inputbox, word)
     clearCode()
 end
 
---- 把当前页候选/翻页键写到键盘首行并刷新。
 local function refresh()
     if not _prev_key then
         return
@@ -213,7 +270,7 @@ local function refresh()
         setKeyText(_prev_key, "")
         setKeyText(_next_key, "")
         setKeyText(_spacer_key, "")
-        for i = 1, CANDIDATE_SLOT_COUNT do
+        for i = 1, SLOT_COUNT do
             setKeyText(_cand_keys[i], "")
         end
         return
@@ -223,7 +280,7 @@ local function refresh()
         _page = pages
     end
     local page = _pages[_page] or {}
-    if applyWidths(page) then return end
+    applyWidths(page)
     setKeyText(_prev_key, "◀", _page <= 1)
     if _page > 1 then
         _prev_key.callback = function()
@@ -241,7 +298,7 @@ local function refresh()
         end
     end
     setKeyText(_spacer_key, "")
-    for i = 1, CANDIDATE_SLOT_COUNT do
+    for i = 1, SLOT_COUNT do
         local item = page[i]
         local word = item and item.word
         local key = _cand_keys[i]
@@ -258,12 +315,10 @@ local function refresh()
     end
 end
 
---- 绑定键盘实例首行的候选键引用（仅 zh_CN 候选行存在时）。
----@param kb table VirtualKeyboard 实例
----@return boolean
 local function bindKeys(kb)
     _prev_key, _next_key, _spacer_key = nil, nil, nil
     _cand_keys = {}
+    _width_signature = nil -- 键是新的，下一轮 refresh 必须把宽度写上去
     local row = kb.layout and kb.layout[1]
     if not (kb.KEYS and kb.KEYS[1] and kb.KEYS[1]._pinyin_bar and row and #row >= 10) then
         return false
@@ -275,7 +330,7 @@ local function bindKeys(kb)
         row[i].swipe_callback = nil
     end
     _prev_key = row[1]
-    for i = 1, CANDIDATE_SLOT_COUNT do
+    for i = 1, SLOT_COUNT do
         _cand_keys[i] = row[1 + i]
     end
     _spacer_key = row[9]
@@ -287,48 +342,86 @@ end
 
 local orig_init, orig_addKeys, orig_addChar, orig_delChar
 
---- 键位重建（init / 换层 / 换布局都经这里）：重新绑定候选行并刷新。
---- 绑 init 会在换层后拿到死引用——换层只走 addKeys。
+local LOOKUP_WAIT = 0.15 -- 连打只查最后一次；查库在 UIManager 调度里跑，不在按键回调里
+
+stopSearch = function()
+    if _requestLookup then
+        _requestLookup:cancel()
+    end
+end
+
+local function showCodeOnly()
+    if _code == "" then
+        _pages = {}
+    else
+        _pages = makePages({ _code })
+    end
+    _page = 1
+end
+
+-- 查询经 debounce 移出按键回调。不能用 Task.run：fork 会复制已有 sqlite
+-- 连接，设备上可能 SIGSEGV。
+local function startLookup(code)
+    if code == "" or code ~= _code then
+        return
+    end
+    local words = require("pinyin.dictionary").lookup(code)
+    if code ~= _code then
+        return
+    end
+    if type(words) ~= "table" or #words == 0 then
+        words = { code }
+    end
+    _pages = makePages(words)
+    _page = 1
+    refresh()
+    redraw()
+end
+
+local function requestLookup(code)
+    if not _requestLookup then
+        _requestLookup = require("utils.timing").debounce(startLookup, LOOKUP_WAIT)
+    end
+    _requestLookup(code)
+end
+
+-- init、换层和换布局都会重建键位。绑定失败时必须停用拦截，避免吞掉原生输入。
 local function wrappedAddKeys(self, ...)
     orig_addKeys(self, ...)
     _keyboard = self
-    local zh = self.KEYS[1] and self.KEYS[1]._pinyin_bar == true
-    local bound = bindKeys(self) -- 无论激活与否都要重绑：旧键位已经废了
-    _active = _want and zh or false
-    if zh and not bound then
-        -- 输入拦截仍生效（候选行显示不了而已）；真机上出现过，留日志好定位
-        require("logger").warn("book.pinyin candidate row present but key bind failed")
-    end
+    _active = _want and bindKeys(self)
     refresh()
 end
 
 local function wrappedInit(self, ...)
-    -- 布局装配前决定候选行在不在（键盘高度按行数算，必须先于 orig_init）
-    _want = (_enabled and _enabled() and require("pinyin.dictionary").isAvailable()) and true or false
+    _want = not not (_enabled() and require("pinyin.dictionary").fileExists())
     syncRow(_want)
     clearCode()
-    orig_init(self, ...) -- 内部 addKeys → wrappedAddKeys 完成绑定
+    orig_init(self, ...)
 end
 
---- 拼写会话主入口：每个虚拟键敲击都经过 VirtualKeyboard:addChar。
---- 激活时小写字母就地拦截（原生 IME 根本看不到字母，输入框不会出现行内候选）。
 local function wrappedAddChar(self, key)
     _keyboard = self
+    -- 候选行空槽位是没有 key_chars 的 VirtualKey，点按会以 nil 键调到这里；
+    -- 必须吞掉，透传给原生会 addChars(nil) 直接崩（见 candidate_bar_spec）。
     if type(key) ~= "string" then
-        return -- 候选行空键会给 nil（未激活时重建的键），addChars(nil) 会崩，吞掉
+        return
     end
     if not _active then
         return orig_addChar(self, key)
     end
+    if _code ~= "" and not codeAtCursor(self.inputbox) then
+        clearCode()
+    end
     if key:match("^%a$") then
         _code = _code .. key:lower()
         rawAddChars(self.inputbox, key:lower())
-        reload()
+        showCodeOnly()
         refresh()
         redraw()
+        requestLookup(_code)
         return
     end
-    -- 非字母：结束本次拼写，按键走原路
     if _code ~= "" then
         clearCode()
         refresh()
@@ -337,24 +430,27 @@ local function wrappedAddChar(self, key)
     return orig_addChar(self, key)
 end
 
---- 退格：有输入码逐字母回退，码空走原路（原生删普通文本）。
 local function wrappedDelChar(self)
     _keyboard = self
-    if _active then
-        if _code ~= "" then
-            _code = _code:sub(1, -2)
-            rawDelChar(self.inputbox)
-            reload()
+    if _active and _code ~= "" then
+        if not codeAtCursor(self.inputbox) then
+            clearCode()
             refresh()
             redraw()
-            return
+            return orig_delChar(self)
         end
+        _code = _code:sub(1, -2)
+        rawDelChar(self.inputbox)
+        showCodeOnly()
+        refresh()
+        redraw()
+        requestLookup(_code)
+        return
     end
     return orig_delChar(self)
 end
 
---- 安装 VirtualKeyboard hook（幂等）。词库后续下载完成无需重装：
---- 候选行与激活判定都在每次键盘 init 时重算。
+--- 安装 VirtualKeyboard 钩子；重复安装不重复包装方法。
 ---@param opts { enabled: fun(): boolean }
 function Bar.install(opts)
     _enabled = opts.enabled
