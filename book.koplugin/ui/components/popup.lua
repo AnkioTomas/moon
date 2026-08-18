@@ -1,13 +1,14 @@
 --[[--
 弹出层选项。
 
-  Popup.list   — 全屏列表（Menu，自带 Page of；支持单选/多选、icon / 纯 image）
+  Popup.list   — 列表（支持居中单选/多选与 Material 选择图标）
   Popup.sheet  — 居中动作表（ButtonDialog，适合少量动作）
   Popup.spin   — 数值增减（SpinWidget）
+  Popup.directory — 插件内目录选择（左上取消，右上确认）
 
 布局：
 
-  list 单选（全屏 Menu）         list 多选                  sheet（居中）           spin
+  list 单选/多选（可居中）       sheet（居中）              directory
   +------------------+          +------------------+       +-------------+         +-------------+
   | title            |          | title            |       |   title     |         |   title     |
   | subtitle         |          | subtitle         |       |-------------|         |  [-] N [+]  |
@@ -26,22 +27,21 @@ items 统一形状：
   { text = "...", widget = w, widget_w = n } -- 自定义 state 控件（字体预览等）
   { image = "https://...", image_only = true } -- 文案替换为图
   { text = "...", enabled = false }         -- 不可点（置灰；多选时勾选框同样置灰）
-  { text = "...", checked = true }          -- 选中态：单选=当前项（加粗+跳页），多选=已勾选
+  { text = "...", checked = true }          -- 选中态：使用 Material 选择图标
   { text = "...", mandatory = "..." }       -- 右侧弱化小字（当前值/状态提示）
-  { text = "...", bold = true, dim = true } -- 加粗 / 置灰透传
+  { text = "...", dim = true }              -- 置灰；选项文字不加粗
   { text = "...", separator = true }        -- sheet 里作为分隔（空行）
 
 list 选择语义：
   select_mode = "single"（默认）点按即关闭；opts.current = value 或项上 checked=true
-    标记当前项——Menu 自动跳到所在页并加粗。
-  select_mode = "multi" 点按只切换勾选、不关闭；on_toggle(value, checked, item, selected)
+    opts.choice_icons=true 显示 Material 单选图标；centered=true 使用居中 Menu。
+  select_mode = "multi" 点按只切换 Material 勾选图标、不关闭；on_toggle(value, checked, item, selected)
     每次切换触发（selected 为当前全部勾选值列表）；最终结果在 close_callback 里读取。
 
 @module koplugin.book.ui.components.popup
 --]]
 
 local ButtonDialog = require("ui/widget/buttondialog")
-local CheckMark = require("ui/widget/checkmark")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local Menu = require("ui/widget/menu")
@@ -70,6 +70,7 @@ local function normalizeItems(items, ctx, opts)
     local icon_sz = opts.icon_size or UI.iconSz()
     local image_sz = opts.image_size or UI.sz(40)
     local multi = opts.select_mode == "multi"
+    local choice_icons = multi or opts.choice_icons == true
     local out = {}
     local raws = {} -- 可选中的原始项（selectedValues 的数据源）
     local max_state_w = 0
@@ -112,14 +113,13 @@ local function normalizeItems(items, ctx, opts)
             inner = Icon.widget{ name = raw.icon }
             inner_w = inner and icon_sz or 0
         end
-        if not multi then
+        if not choice_icons then
             return inner, inner_w or 0
         end
-        local cm = CheckMark:new{
-            checked = raw.checked == true,
-            enabled = raw.enabled ~= false,
-        }
-        local cm_w = cm:getSize().w
+        local selected = raw.checked == true or (not multi and opts.current ~= nil and raw.value == opts.current)
+        local cm = Icon.widget{ name = multi and (selected and "check_box" or "check_box_outline_blank")
+            or (selected and "radio_button_checked" or "radio_button_unchecked") }
+        local cm_w = icon_sz
         if not inner then
             return cm, cm_w
         end
@@ -144,7 +144,7 @@ local function normalizeItems(items, ctx, opts)
             local item = {
                 text = image_only and "" or (raw.text or tostring(raw.value or "")),
                 select_enabled = raw.enabled ~= false,
-                bold = raw.bold,
+                bold = nil,
                 dim = raw.dim or raw.enabled == false,
                 mandatory = raw.mandatory,
             }
@@ -239,9 +239,12 @@ function Popup.list(opts)
         title = opts.title or "",
         subtitle = opts.subtitle,
         item_table = items,
-        is_borderless = true,
-        is_popout = false,
-        covers_fullscreen = true,
+        is_borderless = not opts.centered,
+        is_popout = opts.centered == true,
+        covers_fullscreen = opts.centered ~= true,
+        width = opts.centered and (opts.width or UI.sz(420)) or opts.width,
+        height = opts.centered and (opts.height or UI.sz(600)) or opts.height,
+        title_bar_left_icon = opts.title_icon,
         items_font_size = UI.menuFontSize(),
         title_shrink_font_to_fit = true,
         state_w = (state_w and state_w > 0) and state_w or nil,
@@ -392,6 +395,71 @@ function Popup.setListItems(menu, title, items, on_select, opts)
         menu:switchItemTable(title or menu.title, normalized, current_idx, nil, opts.subtitle)
         UIManager:setDirty(menu, "ui")
     end
+end
+
+--- 目录选择器。只在给定根目录下浏览；左上取消，右上确认当前目录。
+---@param opts table { path: string, root: string|nil, title: string|nil, on_select: fun(path: string)|nil, on_cancel: fun()|nil }
+---@return table
+function Popup.directory(opts)
+    opts = opts or {}
+    local lfs = require("libs/libkoreader-lfs")
+    local TitleBar = require("ui/widget/titlebar")
+    local root = opts.root or "/"
+    local function isWithin(path)
+        return path == root or root == "/" or path:sub(1, #root + 1) == root .. "/"
+    end
+    local function parent(path)
+        if path == root then return path end
+        return path:match("^(.*)/[^/]+$") or root
+    end
+    local function open(path)
+        local holder = { menu = nil }
+        local function close(cancelled)
+            if holder.menu then UIManager:close(holder.menu) end
+            if cancelled and opts.on_cancel then opts.on_cancel() end
+        end
+        local title_bar = TitleBar:new{
+            fullscreen = "true", align = "center", title = opts.title or "选择目录", subtitle = path,
+            left_icon = "exit", left_icon_tap_callback = function() close(true) end,
+            right_icon = "check", right_icon_tap_callback = function()
+                close(false)
+                if opts.on_select then opts.on_select(path) end
+            end,
+        }
+        local entries = {}
+        if path ~= root then
+            entries[#entries + 1] = { text = "..", icon = "arrow_upward", callback = function()
+                close(false)
+                open(parent(path))
+            end }
+        end
+        local names = {}
+        for name in lfs.dir(path) do
+            if name ~= "." and name ~= ".." then
+                local full = path == "/" and "/" .. name or path .. "/" .. name
+                if lfs.attributes(full, "mode") == "directory" then names[#names + 1] = name end
+            end
+        end
+        table.sort(names)
+        for _, name in ipairs(names) do
+            entries[#entries + 1] = { text = name, icon = "folder", callback = function()
+                close(false)
+                open(path == "/" and "/" .. name or path .. "/" .. name)
+            end }
+        end
+        local directory_items, state_w = normalizeItems(entries, { close = function() close(false) end, refresh = function() end }, {})
+        holder.menu = Menu:new{
+            custom_title_bar = title_bar, title = opts.title or "选择目录", subtitle = path,
+            item_table = directory_items, state_w = state_w,
+            is_borderless = true, is_popout = false, covers_fullscreen = true,
+            items_font_size = UI.menuFontSize(), title_shrink_font_to_fit = true,
+        }
+        UIManager:show(holder.menu)
+        return holder.menu
+    end
+    local path = opts.path or root
+    if not isWithin(path) or lfs.attributes(path, "mode") ~= "directory" then path = root end
+    return open(path)
 end
 
 return Popup
