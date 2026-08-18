@@ -215,23 +215,21 @@ do
             toggles[#toggles + 1] = { v = v, checked = checked, n = #selected }
         end,
     }
-    -- 初始勾选体现在 state 勾选框上
-    Assert.is_true(menu.item_table[2].state._checkmark)
-    Assert.is_true(menu.item_table[2].state.checked)
-    Assert.is_true(menu.item_table[1].state._checkmark)
-    Assert.is_true(menu.item_table[1].state.checked == false)
+    -- 初始勾选体现在 Material 图标上
+    Assert.eq(menu.item_table[2].state._icon, "check_box")
+    Assert.eq(menu.item_table[1].state._icon, "check_box_outline_blank")
 
     local before = menu._updates
     menu.item_table[1].callback() -- 勾上 A
     Assert.eq(#closed_widgets, 0) -- 多选不关闭
     Assert.eq(menu._updates, before + 1) -- 重绘当前页
-    Assert.is_true(menu.item_table[1].state.checked)
+    Assert.eq(menu.item_table[1].state._icon, "check_box")
     Assert.eq(toggles[1].v, "a")
     Assert.is_true(toggles[1].checked)
     Assert.eq(toggles[1].n, 2) -- a + 初始的 b
 
     menu.item_table[1].callback() -- 再点取消
-    Assert.is_true(menu.item_table[1].state.checked == false)
+    Assert.eq(menu.item_table[1].state._icon, "check_box_outline_blank")
     Assert.eq(toggles[2].n, 1)
 end
 
@@ -243,8 +241,7 @@ do
     }
     local item = menu.item_table[1]
     Assert.is_nil(item.callback)
-    Assert.is_true(item.state._checkmark)
-    Assert.is_true(item.state.enabled == false)
+    Assert.eq(item.state._icon, "check_box")
 end
 
 -- 多选 + 图标：勾选框与图标并存（HorizontalGroup 组合）
@@ -255,9 +252,9 @@ do
     }
     local state = menu.item_table[1].state
     Assert.is_true(state._hgroup)
-    Assert.is_true(state[1]._checkmark)
+    Assert.eq(state[1]._icon, "check_box")
     Assert.is_true(state[3]._icon == "home")
-    Assert.eq(menu.state_w, 10 + 6 + 24) -- 勾选框 + 间距 + 图标
+    Assert.eq(menu.state_w, 24 + 6 + 24) -- Material 选择图标 + 间距 + 图标
 end
 
 -- —— setListItems：更新内容不关闭，current 跳页 ——

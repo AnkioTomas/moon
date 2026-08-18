@@ -39,7 +39,7 @@ package.preload["lockscreen.render"] = function()
     }
 end
 package.preload["utils.paths"] = function()
-    return { lockScreenDir = function() return "/lock" end }
+    return { screensaverDir = function() return "/lock" end }
 end
 package.preload["ffi/util"] = function()
     return {

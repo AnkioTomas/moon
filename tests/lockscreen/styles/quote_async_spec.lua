@@ -42,7 +42,7 @@ package.preload["json"] = function()
     return { decode = function() return { data = { hitokoto = "异步一言" } } end }
 end
 package.preload["utils.paths"] = function()
-    return { lockScreenDir = function() return "/lock" end }
+    return { screensaverDir = function() return "/lock" end }
 end
 package.preload["utils.settings"] = function()
     local settings = { lock_screen_quote_mode = "hitokoto" }
