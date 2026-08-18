@@ -84,6 +84,7 @@ function Bars:paintTo(bb, x, y)
     if not cur then
         return
     end
+    local common = require("utils.settings").get()
     local UI = require("ui.components.bookui")
     local TextWidget = require("ui/widget/textwidget")
     local Blitbuffer = require("ffi/blitbuffer")
@@ -91,29 +92,33 @@ function Bars:paintTo(bb, x, y)
     local w, h = dimen.w, dimen.h
     local pad = UI.sz(8)
 
-    -- 顶条：右上时间
-    local time = TextWidget:new{
-        text = Bars.timeText(),
-        face = UI.face("xx_smallinfofont", 12),
-        fgcolor = UI.muted(),
-    }
-    local ts = time:getSize()
-    time:paintTo(bb, x + w - ts.w - pad, y + pad)
+    -- 顶条：右上时间（控制台打开时由顶栏接管）
+    if common.book_reader_show_top_time ~= false and not require("ui.reader").isToolbarOpen() then
+        local time = TextWidget:new{
+            text = Bars.timeText(),
+            face = UI.face("xx_smallinfofont", 12),
+            fgcolor = UI.muted(),
+        }
+        local ts = time:getSize()
+        time:paintTo(bb, x + w - ts.w - pad, y + pad)
+    end
 
     -- 底条：细进度线贴底，进度文案在线上方右对齐
-    local pct = math.max(0, math.min(100, tonumber(cur.percent) or 0))
-    local line_h = UI.line()
-    local fill_w = math.floor(w * pct / 100 + 0.5)
-    if fill_w > 0 then
-        bb:paintRect(x, y + h - line_h, fill_w, line_h, Blitbuffer.COLOR_GRAY_3)
+    if common.book_reader_show_bottom_progress ~= false and not require("ui.reader").isToolbarOpen() then
+        local pct = math.max(0, math.min(100, tonumber(cur.percent) or 0))
+        local line_h = UI.line()
+        local fill_w = math.floor(w * pct / 100 + 0.5)
+        if fill_w > 0 then
+            bb:paintRect(x, y + h - line_h, fill_w, line_h, Blitbuffer.COLOR_GRAY_3)
+        end
+        local info = TextWidget:new{
+            text = Bars.progressText(cur),
+            face = UI.face("xx_smallinfofont", 12),
+            fgcolor = UI.muted(),
+        }
+        local is = info:getSize()
+        info:paintTo(bb, x + w - is.w - pad, y + h - line_h - is.h - UI.sz(2))
     end
-    local info = TextWidget:new{
-        text = Bars.progressText(cur),
-        face = UI.face("xx_smallinfofont", 12),
-        fgcolor = UI.muted(),
-    }
-    local is = info:getSize()
-    info:paintTo(bb, x + w - is.w - pad, y + h - line_h - is.h - UI.sz(2))
 end
 
 return Bars

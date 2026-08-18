@@ -1,71 +1,264 @@
 --[[--
-阅读面板：阅读页点按中间弹出的全屏窗口 — 详情 / 目录 / 视觉 三个 Tab。
+阅读控制台：顶部的阅读风格、字体、阅读设置，和底部的目录、书签、注解。
 
-  详情 — 本地缓存 meta 先行渲染，同时发 book_info_request 交 Source 更新
-  目录 — 章会话列章节（跳转 gotoChapter）；整本书列 ui.toc（GotoXPointer/GotoPage）
-  视觉 — 阅读外观入口（桥接 KOReader 排版设置 / 阅读器菜单）
-
-布局参照 ui.desktop.detail：TitleBar + Tab 行 + 内容区，禁止滚动容器。
-
-  +-----------------------------------------------+
-  | ← 书名……                                  ✕  |
-  |-----------------------------------------------|
-  | [• 详情]  [目录]  [视觉]                      |
-  |-----------------------------------------------|
-  | 详情：BookInfo.hero                           |
-  | 目录：章节/TOC 列表（Menu）                   |
-  | 视觉：外观入口按钮组                          |
-  +-----------------------------------------------+
+这里不重写 KOReader 的目录、书签、注解或排版状态，只提供固定、轻量的
+Kindle 风格入口。弹出原生窗口前关闭控制台，避免全屏层叠和输入遮挡。
 
 @module koplugin.book.ui.reader.panel
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local ButtonTable = require("ui/widget/buttontable")
+local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local Event = require("ui/event")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
+local GestureRange = require("ui/gesturerange")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LeftContainer = require("ui/widget/container/leftcontainer")
-local Menu = require("ui/widget/menu")
+local BottomContainer = require("ui/widget/container/bottomcontainer")
+local OverlapGroup = require("ui/widget/overlapgroup")
+local TopContainer = require("ui/widget/container/topcontainer")
 local TextWidget = require("ui/widget/textwidget")
-local TitleBar = require("ui/widget/titlebar")
 local UIManager = require("ui/uimanager")
-local VerticalGroup = require("ui/widget/verticalgroup")
-local VerticalSpan = require("ui/widget/verticalspan")
-local BookInfo = require("ui.components.bookinfo")
+local Icon = require("ui.components.icon")
+local Popup = require("ui.components.popup")
 local UI = require("ui.components.bookui")
 local Session = require("ui.reader.session")
-local Store = require("book.store")
+local Settings = require("utils.settings")
 local _ = require("gettext")
 local Screen = Device.screen
 
 local Panel = InputContainer:extend{
-    name = "book_reader_panel",
-    covers_fullscreen = true,
+    name = "book_reader_toolbar",
+    covers_fullscreen = false,
     plugin = nil,
-    tab = "detail",
-    book = nil,
 }
 
---- Tab 定义（顺序即展示顺序）。
-local TABS = {
-    { id = "detail", text = _("详情") },
-    { id = "toc", text = _("目录") },
-    { id = "visual", text = _("视觉") },
-}
+---@param width number
+---@param height number
+---@param icon string
+---@param label string
+---@param callback fun()
+---@param active boolean|nil
+---@return table
+local function action(width, height, icon, label, callback, active)
+    local tap = InputContainer:new{ dimen = Geom:new{ w = width, h = height } }
+    tap.ges_events = {
+        TapBookReaderAction = {
+            GestureRange:new{ ges = "tap", range = function() return tap:getSize() end },
+        },
+    }
+    tap.onTapBookReaderAction = function()
+        callback()
+        return true
+    end
+    local color = Blitbuffer.COLOR_BLACK
+    tap[1] = FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        width = width,
+        height = height,
+        CenterContainer:new{
+            dimen = Geom:new{ w = width, h = height },
+            Icon.label{
+                name = icon,
+                text = label,
+                direction = "column",
+                color = color,
+                face = active and "cfont" or "xx_smallinfofont",
+                font_size = active and 12 or 11,
+                max_width = math.max(UI.sz(36), width - UI.sz(6)),
+                gap = UI.sz(2),
+            },
+        },
+    }
+    return tap
+end
 
---- 初始化全屏尺寸、返回键，拉书籍信息并 rebuild。
-function Panel:init()
-    self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
-    if Device:hasKeys() then
-        self.key_events = {
-            Close = { { Device.input.group.Back } },
+---@param ui table|nil
+---@return boolean
+local function isReflowable(ui)
+    return ui and ui.rolling and ui.font and ui.font.onSetFont and ui.font.onSetFontSize
+end
+
+---@param panel table
+local function showReaderSettings(panel)
+    panel:onClose()
+    local common = Settings.get()
+    local ui = panel.plugin and panel.plugin.ui
+    Popup.list{
+        title = _("阅读设置"),
+        select_mode = "multi",
+        items = {
+            { text = _("顶部时间"), value = "top_time", checked = common.book_reader_show_top_time ~= false },
+            { text = _("底部进度"), value = "bottom_progress", checked = common.book_reader_show_bottom_progress ~= false },
+            {
+                text = _("翻页动画"), value = "page_animation",
+                checked = G_reader_settings:isTrue("swipe_animations"),
+                enabled = ui ~= nil and ui.view ~= nil
+                    and ui.view.onTogglePageChangeAnimation ~= nil,
+            },
+            {
+                text = _("OCR 语言数据"),
+                mandatory_func = function() return require("ui.reader.ocr").status() end,
+                sub_item_table = {
+                    {
+                        text = _("安装或选择 OCR 语言"),
+                        callback = function() require("ui.reader.ocr").open(ui) end,
+                    },
+                },
+            },
+        },
+        on_toggle = function(value, checked)
+            local settings = Settings.get()
+            if value == "top_time" then
+                settings.book_reader_show_top_time = checked
+                Settings.save(settings)
+            elseif value == "bottom_progress" then
+                settings.book_reader_show_bottom_progress = checked
+                Settings.save(settings)
+            elseif value == "page_animation" and ui and ui.view then
+                ui.view:onTogglePageChangeAnimation()
+            end
+            require("ui.reader").refresh(panel.plugin)
+        end,
+    }
+end
+
+---@param ui table
+local function showFontFaces(ui)
+    local ok, cre = pcall(function()
+        return require("document/credocument"):engineInit()
+    end)
+    if not ok or not cre then
+        return
+    end
+    local items = {}
+    for _, face in ipairs(cre.getFontFaces() or {}) do
+        items[#items + 1] = { text = face, value = face }
+    end
+    Popup.list{
+        title = _("阅读字体"),
+        items = items,
+        current = ui.font.font_face,
+        choice_icons = true,
+        on_select = function(face)
+            ui.font:onSetFont(face)
+        end,
+    }
+end
+
+---@param panel table
+local function showTypography(panel)
+    panel:onClose()
+    local ui = panel.plugin and panel.plugin.ui
+    if not isReflowable(ui) then
+        UIManager:show(require("ui/widget/infomessage"):new{
+            text = _("当前文档不支持字体与排版调整"),
+        })
+        return
+    end
+    local font = ui.font
+    local config = font.configurable
+    local function spin(title, value, min, max, step, unit, callback)
+        Popup.spin{
+            title = title,
+            value = value,
+            value_min = min,
+            value_max = max,
+            value_step = step,
+            unit = unit,
+            ok_always_enabled = true,
+            callback = function(widget)
+                callback(widget.value)
+            end,
         }
     end
-    self:loadBook()
+    Popup.list{
+        title = _("阅读字体"),
+        items = {
+            {
+                text = _("字体"), mandatory = font.font_face,
+                callback = function() showFontFaces(ui) end,
+            },
+            {
+                text = _("字号"), mandatory = string.format("%.1f", tonumber(config.font_size) or 0),
+                callback = function()
+                    spin(_("字号"), config.font_size, 12, 255, 0.5, "pt", function(value)
+                        font:onSetFontSize(value)
+                    end)
+                end,
+            },
+            {
+                text = _("行距"), mandatory = string.format("%d%%", tonumber(config.line_spacing) or 100),
+                callback = function()
+                    spin(_("行距"), config.line_spacing, 50, 200, 1, "%", function(value)
+                        font:onSetLineSpace(value)
+                    end)
+                end,
+            },
+            {
+                text = _("字重"), mandatory = string.format("%+.2f", tonumber(config.font_base_weight) or 0),
+                callback = function()
+                    spin(_("字重"), config.font_base_weight, -3, 5.5, 0.25, nil, function(value)
+                        font:onSetFontBaseWeight(value)
+                    end)
+                end,
+            },
+            {
+                text = _("字间扩展"), mandatory = string.format("%d%%", tonumber(config.word_expansion) or 0),
+                callback = function()
+                    spin(_("字间扩展"), config.word_expansion, 0, 20, 1, "%", function(value)
+                        font:onSetWordExpansion(value)
+                    end)
+                end,
+            },
+        },
+    }
+end
+
+---@param panel table
+local function showToc(panel)
+    local ui = panel.plugin and panel.plugin.ui
+    panel:onClose()
+    local Chapter = require("chapters.init")
+    if Chapter.isActive() then
+        local items = {}
+        local current = Chapter.currentIdx()
+        for _, chapter in ipairs(Chapter.toc() or {}) do
+            local idx = tonumber(chapter.idx) or 0
+            items[#items + 1] = {
+                text = chapter.title or ("#" .. idx),
+                value = idx,
+                checked = idx == current,
+            }
+        end
+        Popup.list{
+            title = _("目录"), items = items, choice_icons = true,
+            on_select = function(idx) Chapter.gotoChapter(idx) end,
+        }
+    elseif ui and ui.toc and ui.toc.onShowToc then
+        ui.toc:onShowToc()
+    end
+end
+
+function Panel:init()
+    self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self:rebuild()
+    self:registerTouchZones({
+        {
+            id = "book_reader_toolbar_close",
+            ges = "tap",
+            screen_zone = { ratio_x = 0, ratio_y = 0.16, ratio_w = 1, ratio_h = 0.68 },
+            handler = function()
+                self:onClose()
+                return true
+            end,
+        },
+    })
 end
 
 ---@return table
@@ -73,286 +266,109 @@ function Panel:getSize()
     return self.dimen
 end
 
---- 关面板并强制重绘下层阅读页（全屏盖住，否则残影）。
----@return boolean
 function Panel:onClose()
+    if self._closed then
+        return true
+    end
     self._closed = true
     UIManager:close(self)
-    local ui = self.plugin and self.plugin.ui
-    UIManager:nextTick(function()
-        UIManager:setDirty(ui and ui.dialog or "all", "full")
-    end)
+    local callback = self.close_callback
+    self.close_callback = nil
+    if callback then
+        callback()
+    end
     return true
 end
 
---- Widget 关闭时触发 close_callback。
 function Panel:onCloseWidget()
     self._closed = true
-    local cb = self.close_callback
+    local callback = self.close_callback
     self.close_callback = nil
-    if cb then
-        cb()
+    if callback then
+        callback()
     end
 end
 
---- 重读缓存 meta 并重绘（Source 更新缓存后的 refresh 也走这里）。
-function Panel:reload()
-    local cur = Session.current()
-    if not cur or not cur.ref then
-        return
-    end
-    Store.getMetaAsync(cur.ref, function(meta)
-        if self._closed then
-            return
-        end
-        if meta then
-            meta.ref = cur.ref
-            self.book = meta
-        end
-        self:rebuild()
-        UIManager:setDirty(self, "full")
-    end)
-end
-
---- 详情数据：先用会话 book / 本地缓存，再发事件交 Source 更新。
-function Panel:loadBook()
-    local cur = Session.current()
-    if not cur then
-        return
-    end
-    self.book = cur.book
-    if cur.ref then
-        self:reload()
-    end
-    if self.plugin then
-        self.plugin:emitToSource("book_info_request", {
-            ref = cur.ref,
-            book = cur.book,
-            refresh = function()
-                if not self._closed then
-                    self:reload()
-                end
-            end,
-        })
-    end
-end
-
---- 详情 Tab：紧凑英雄卡（封面 / 书名 / 作者 / 简介 / 进度）。
----@param w number
----@return table
-function Panel:buildDetail(w)
-    local cur = Session.current()
-    local book = self.book or (cur and cur.book) or {}
-    if cur and cur.ref and type(book) == "table" and not book.ref then
-        book.ref = cur.ref
-    end
-    local source = (cur and cur.source) or (self.plugin and self.plugin:getSource())
-    return BookInfo.hero(self.plugin, source, book, {
-        width = w,
-        show_progress = true,
-        show_parent = self,
-    })
-end
-
---- 目录 Tab：章会话列章节；整本书列 ui.toc。点击跳转并关窗。
----@param w number
----@param h number
----@return table
-function Panel:buildToc(w, h)
-    local items = {}
-    local ui = self.plugin and self.plugin.ui
-    local Chapter = require("chapters.init")
-    if Chapter.isActive() and type(Chapter.toc()) == "table" then
-        local cur_idx = Chapter.currentIdx()
-        for _, ch in ipairs(Chapter.toc()) do
-            local i = tonumber(ch.idx) or 0
-            items[#items + 1] = {
-                text = (i == cur_idx and "• " or "") .. (ch.title or ("#" .. i)),
-                callback = function()
-                    self:onClose()
-                    Chapter.gotoChapter(i)
-                end,
-            }
-        end
-    elseif ui and ui.toc and type(ui.toc.toc) == "table" then
-        for _, entry in ipairs(ui.toc.toc) do
-            local depth = tonumber(entry.depth) or 1
-            items[#items + 1] = {
-                text = string.rep("  ", math.max(0, depth - 1)) .. (entry.title or "?"),
-                callback = function()
-                    self:onClose()
-                    if ui.link then
-                        ui.link:addCurrentLocationToStack()
-                    end
-                    if entry.xpointer then
-                        ui:handleEvent(Event:new("GotoXPointer", entry.xpointer, entry.xpointer))
-                    elseif entry.page then
-                        ui:handleEvent(Event:new("GotoPage", entry.page))
-                    end
-                end,
-            }
-        end
-    end
-    if #items == 0 then
-        return LeftContainer:new{
-            dimen = Geom:new{ w = w, h = h },
-            TextWidget:new{
-                text = _("暂无目录"),
-                face = UI.face("cfont", 15),
-                fgcolor = UI.muted(),
-            },
-        }
-    end
-    return Menu:new{
-        item_table = items,
-        no_title = true,
-        is_borderless = true,
-        is_popout = false,
-        covers_fullscreen = false,
-        width = w,
-        height = h,
-        items_font_size = UI.fontSize(16),
-        show_parent = self,
-    }
-end
-
---- 视觉 Tab：阅读外观入口（桥接 KOReader 自带设置，不自造排版 UI）。
----@param w number
----@return table
-function Panel:buildVisual(w)
-    local ui = self.plugin and self.plugin.ui
-    --- 整行可点动作。
-    ---@param text string
-    ---@param fn fun()
-    ---@return table
-    local function action(text, fn)
-        local row_h = UI.sz(48)
-        local tap = BookInfo.tappable(w, row_h, fn)
-        tap[1] = LeftContainer:new{
-            dimen = Geom:new{ w = w, h = row_h },
-            TextWidget:new{
-                text = text,
-                face = UI.face("cfont", 16),
-                fgcolor = Blitbuffer.COLOR_BLACK,
-            },
-        }
-        return tap
-    end
-    return VerticalGroup:new{
-        align = "left",
-        action(_("排版与字体"), function()
-            self:onClose()
-            if ui then
-                ui:handleEvent(Event:new("ShowConfigMenu"))
-            end
-        end),
-        action(_("阅读器菜单"), function()
-            self:onClose()
-            if ui then
-                ui:handleEvent(Event:new("ShowMenu"))
-            end
-        end),
-    }
-end
-
---- 切换 Tab 并重建内容区。
----@param id string
-function Panel:switchTab(id)
-    if self.tab == id then
-        return
-    end
-    self.tab = id
-    self:rebuild()
-    UIManager:setDirty(self, "ui")
-end
-
---- 重建 TitleBar、Tab 行与内容区。
 function Panel:rebuild()
-    local w = Screen:getWidth()
-    local h = Screen:getHeight()
-    local pad = UI.pagePad()
-    local content_w = w - pad * 2
-    local title = BookInfo.title(self.book)
-    if title == "?" then
-        title = _("阅读")
+    local w, h = Screen:getWidth(), Screen:getHeight()
+    local top_h = UI.barH()
+    local bottom_h = UI.barH()
+    local current = Session.current() or {}
+    local ui = self.plugin and self.plugin.ui
+    local title = (current.book and current.book.title) or _("阅读")
+    if current.chapter_idx and current.chapter_count then
+        title = string.format(_("第 %d/%d 章"), current.chapter_idx, current.chapter_count)
     end
-
-    local title_bar = TitleBar:new{
-        fullscreen = true,
-        width = w,
-        align = "center",
-        with_bottom_line = true,
-        title = title,
-        title_face = UI.face("cfont", 18),
-        button_padding = UI.sz(11),
-        right_icon_size_ratio = UI.titleIconRatio(0.6),
-        close_callback = function()
-            self:onClose()
-        end,
-        show_parent = self,
-    }
-
-    local tab_row = {}
-    for _, t in ipairs(TABS) do
-        tab_row[#tab_row + 1] = {
-            text = (self.tab == t.id and "• " or "") .. t.text,
-            font_size = UI.buttonFontSize(),
-            callback = function()
-                self:switchTab(t.id)
-            end,
-        }
-    end
-    local tabs = ButtonTable:new{
-        width = content_w,
-        buttons = { tab_row },
-        zero_sep = true,
-        show_parent = self,
-    }
-
-    local title_h = title_bar:getHeight()
-    local tabs_h = tabs:getSize().h + UI.sz(8)
-    local body_h = math.max(UI.sz(80), h - title_h - tabs_h)
-
-    local content
-    if self.tab == "toc" then
-        content = self:buildToc(content_w, body_h - pad)
-    elseif self.tab == "visual" then
-        content = self:buildVisual(content_w)
-    else
-        content = self:buildDetail(content_w)
-    end
-
-    self[1] = FrameContainer:new{
+    local title_w = math.floor(w * 0.42)
+    local action_w = math.floor((w - title_w) / 3)
+    local top = FrameContainer:new{
         bordersize = 0,
         padding = 0,
         background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = w, h = h },
-        VerticalGroup:new{
-            align = "left",
-            title_bar,
-            FrameContainer:new{
-                bordersize = 0,
-                padding = pad,
-                padding_top = UI.sz(8),
-                padding_bottom = 0,
-                background = Blitbuffer.COLOR_WHITE,
-                dimen = Geom:new{ w = w, h = tabs_h },
-                tabs,
-            },
-            FrameContainer:new{
-                bordersize = 0,
-                padding = pad,
-                padding_top = 0,
-                background = Blitbuffer.COLOR_WHITE,
-                dimen = Geom:new{ w = w, h = body_h },
-                LeftContainer:new{
-                    dimen = Geom:new{ w = content_w, h = body_h - pad },
-                    VerticalGroup:new{ align = "left", content, VerticalSpan:new{ width = 0 } },
+        width = w,
+        height = top_h,
+        HorizontalGroup:new{
+            align = "center",
+            LeftContainer:new{
+                dimen = Geom:new{ w = title_w, h = top_h },
+                TextWidget:new{
+                    text = title,
+                    face = UI.face("cfont", 15),
+                    fgcolor = Blitbuffer.COLOR_BLACK,
+                    max_width = title_w - UI.sz(12),
                 },
             },
+            action(action_w, top_h, "format_paint", _("阅读风格"), function()
+                self:onClose()
+                if ui then ui:handleEvent(Event:new("ShowConfigMenu")) end
+            end),
+            action(action_w, top_h, "text_fields", _("阅读字体"), function()
+                showTypography(self)
+            end),
+            action(action_w, top_h, "settings", _("阅读设置"), function()
+                showReaderSettings(self)
+            end),
         },
     }
-    self.dimen = Geom:new{ x = 0, y = 0, w = w, h = h }
+    local bottom_w = math.floor(w / 3)
+    local bookmarked = ui and ui.bookmark and ui.bookmark.isPageBookmarked
+        and ui.bookmark:isPageBookmarked() or false
+    local bottom = FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        width = w,
+        height = bottom_h,
+        HorizontalGroup:new{
+            action(bottom_w, bottom_h, "toc", _("目录"), function()
+                showToc(self)
+            end),
+            action(bottom_w, bottom_h, bookmarked and "bookmark" or "bookmark_border", _("书签"), function()
+                if ui and ui.bookmark and ui.bookmark.onToggleBookmark then
+                    ui.bookmark:onToggleBookmark()
+                    self:rebuild()
+                    UIManager:setDirty(self, "ui")
+                end
+            end, bookmarked),
+            action(w - bottom_w * 2, bottom_h, "format_quote", _("书签与高亮"), function()
+                self:onClose()
+                if ui and ui.bookmark and ui.bookmark.onShowBookmark then
+                    ui.bookmark:onShowBookmark()
+                end
+            end),
+        },
+    }
+    self[1] = OverlapGroup:new{
+        dimen = self.dimen,
+        TopContainer:new{
+            dimen = Geom:new{ w = w, h = h },
+            top,
+        },
+        BottomContainer:new{
+            dimen = Geom:new{ w = w, h = h },
+            bottom,
+        },
+    }
 end
 
 return Panel

@@ -70,7 +70,7 @@ do
                         end,
                         setZipCompression = function() return true end,
                         addFileFromMemory = function(_, path, content)
-                            added[#added + 1] = { path = path, n = #tostring(content) }
+                            added[#added + 1] = { path = path, content = tostring(content) }
                             return true
                         end,
                         close = function() end,
@@ -122,7 +122,7 @@ do
         author = "作者甲",
         chapters = {
             { title = "第一章" },
-            { title = "第二章" },
+            { title = "第二章", toc = false },
         },
         get_chapter = function(i, ch, cb)
             chapter_calls = chapter_calls + 1
@@ -151,6 +151,12 @@ do
     Assert.is_true(paths["OEBPS/toc.ncx"])
     Assert.is_true(paths["OEBPS/chapter_001.xhtml"])
     Assert.is_true(paths["OEBPS/chapter_002.xhtml"])
+    for _, it in ipairs(added) do
+        if it.path == "OEBPS/toc.ncx" then
+            Assert.is_true(it.content:find("第一章", 1, true) ~= nil)
+            Assert.is_true(it.content:find("第二章", 1, true) == nil)
+        end
+    end
 
     local saw_chapter = false
     local saw_pack = false

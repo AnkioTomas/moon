@@ -69,13 +69,13 @@ package.preload["lua-ljsqlite3/init"] = function()
                                 if type(bind) ~= "string" then
                                     return false
                                 end
-                                if not bind:find("%", 1, true) then
+                                if not bind:find("*", 1, true) then
                                     return py == bind
                                 end
-                                -- SQL LIKE：% → .*（测试桩只需要通配符）
+                                -- SQL GLOB：* → .*（测试桩只需要通配符）
                                 local parts, start = {}, 1
                                 while true do
-                                    local s = bind:find("%", start, true)
+                                    local s = bind:find("*", start, true)
                                     if not s then
                                         parts[#parts + 1] = bind:sub(start)
                                         break
@@ -124,13 +124,14 @@ p, complete = Dict.toPrefix("n")
 Assert.eq(p, "n")
 Assert.is_false(complete)
 
--- ── 查询：完整音节走 = / LIKE 'x %'；半截走 LIKE 'x%' ──
+-- ── 查询：完整音节走 = / GLOB 'x *'；半截走 GLOB 'x*' ──
 Assert.is_true(Dict.isAvailable())
 Assert.eq(Dict.entries(), "3")
 Assert.eq(Dict.sourceTag(), "test")
 
 local words = Dict.lookup("nihao")
-Assert.eq(captured[#captured], "ni hao %", "双音节再补 LIKE 'prefix %'")
+Assert.eq(captured[#captured], "ni hao *", "双音节再补 GLOB 'prefix *'")
+Assert.matches(captured[#captured - 1], "pinyin GLOB %?", "前缀查询必须保持 GLOB，避免 LIKE 全表扫描")
 Assert.eq(words[1], "你好")
 Assert.eq(words[2], "你好吗")
 Assert.eq(#words, 2, "nihao 不得命中 niu")
@@ -141,7 +142,7 @@ for _, w in ipairs(ni) do
     have[w] = true
 end
 Assert.is_true(have["你"], "完整 ni 命中单字")
-Assert.is_nil(have["你好"], "单音节不做 LIKE 'ni %'（那是全库扫描）")
+Assert.is_nil(have["你好"], "单音节不做 GLOB 'ni *'（那是全库扫描）")
 Assert.is_nil(have["牛奶"], "ni 不得命中 niu")
 
 Assert.len(Dict.lookup("n"), 0, "单字母半截不查库")
@@ -150,9 +151,9 @@ local nih = Dict.lookup("nih")
 Assert.eq(nih[1], "你好")
 Assert.eq(nih[2], "你好吗")
 
--- 简拼：切不成音节 → LIKE 'n% h%'
+-- 简拼：切不成音节 → GLOB 'n* h*'
 local nh = Dict.lookup("nh")
-Assert.eq(captured[#captured], "n% h%")
+Assert.eq(captured[#captured], "n* h*")
 Assert.eq(nh[1], "你好")
 Assert.eq(nh[2], "你好吗")
 Assert.is_nil((function()

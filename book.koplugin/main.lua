@@ -44,6 +44,7 @@ function BookPlugin:init()
         logger.err("book turbo init failed:", err_turbo)
     end
     Host.attach(self)
+    require("ui.desktop.panel.native").install(self.ui)
     require("lockscreen.init").bootstrap()
     require("remote.init").bootstrap()
     require("pinyin.init").bootstrap()
@@ -236,7 +237,7 @@ function BookPlugin:openDesktop(filter)
     end
     self.desktop = desk
     UIManager:show(self.desktop)
-    UIManager:setDirty(self.desktop, "full")
+    UIManager:setDirty(self.desktop, "ui")
     -- 桌面已可见；源可趁后台做自动维护（本地源：扫描写库 + 清失效）
     self:emitToSource("desktop_open", self.desktop)
 end

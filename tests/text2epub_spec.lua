@@ -39,6 +39,43 @@ do
     Assert.is_true(book.chapters[2].html:find("&lt;特殊字符&gt; &amp; 内容", 1, true) ~= nil)
 end
 
+-- 连续软换行合并为一个段落，空行仍保留段落边界
+do
+    local book = Text2Epub.parse("这是第一行\n这是第二行\n\n这是第二段", {
+        title = "测试",
+        reflow = true,
+    })
+    Assert.is_true(book.chapters[1].html:find("<p>这是第一行这是第二行</p>", 1, true) ~= nil)
+    Assert.is_true(book.chapters[1].html:find("<p>这是第二段</p>", 1, true) ~= nil)
+end
+
+do
+    local book = Text2Epub.parse("测试\nhello,\nworld", { title = "测试", reflow = true })
+    Assert.is_true(book.chapters[1].html:find("hello, world", 1, true) ~= nil)
+end
+
+-- 超长章节切成多个物理片，但目录只保留首片
+do
+    local book = Text2Epub.parse("第一章\naaa\n\nbbb\n\nccc", {
+        max_part_chars = 4,
+        reflow = true,
+    })
+    Assert.eq(#book.chapters, 3)
+    Assert.is_true(book.chapters[1].toc)
+    Assert.is_false(book.chapters[2].toc)
+    Assert.is_false(book.chapters[3].toc)
+end
+
+-- 单一超长段落也必须在 UTF-8 字符边界切片
+do
+    local book = Text2Epub.parse("第一章\n" .. string.rep("甲", 8), {
+        max_part_chars = 8,
+        reflow = true,
+    })
+    Assert.eq(#book.chapters, 4)
+    Assert.is_true(book.chapters[1].html:find("甲甲", 1, true) ~= nil)
+end
+
 -- 正文中的“作者：”不是元数据，不能被误删
 do
     local book = Text2Epub.parse("书名：对话\n第一章\n作者：你是谁？")
@@ -81,4 +118,18 @@ do
     Assert.is_true(Text2Epub._isChapterTitle("序章"))
     Assert.is_true(Text2Epub._isChapterTitle("Chapter IV - Return"))
     Assert.is_false(Text2Epub._isChapterTitle("这只是普通正文"))
+end
+
+-- build 拒绝非 UTF-8，不能悄悄生成损坏 XHTML
+do
+    local ok, err
+    Text2Epub.build({
+        dest = "/tmp/invalid.epub",
+        text = "\255",
+    }, function(value, reason)
+        ok, err = value, reason
+    end)
+    Stubs.flush()
+    Assert.is_nil(ok)
+    Assert.eq(err, "仅支持 UTF-8 编码的文本")
 end

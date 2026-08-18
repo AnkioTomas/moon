@@ -16,8 +16,11 @@ local Assert = require("support.assert")
 
 package.preload["ui/uimanager"] = function()
     local q = {}
+    local dirty_calls = 0
     return {
-        setDirty = function() end,
+        setDirty = function()
+            dirty_calls = dirty_calls + 1
+        end,
         nextTick = function(f)
             q[#q + 1] = f
         end,
@@ -39,6 +42,9 @@ package.preload["ui/uimanager"] = function()
                     batch[i]()
                 end
             end
+        end,
+        _dirtyCalls = function()
+            return dirty_calls
         end,
     }
 end
@@ -269,13 +275,16 @@ end
 -- 字母输入：拼音码进输入框，候选按宽度分页显示。
 do
     local kb = newKeyboard()
+    local dirty_before = require("ui/uimanager")._dirtyCalls()
     typeCode(kb, "nihao")
     Assert.eq(text(kb), "nihao", "拼音码应先显示在输入框")
     Assert.eq(#lookup_calls, 0, "防抖未到期不得查库")
     Assert.eq(rowLabels(kb)[2], "nihao", "停键前候选行只显示拼音码")
+    Assert.eq(require("ui/uimanager")._dirtyCalls(), dirty_before, "连打期间不得每键重绘整块键盘")
     flush()
     Assert.eq(lookup_calls[#lookup_calls], "nihao")
     Assert.eq(#lookup_calls, 1, "连打只查最后一次")
+    Assert.eq(require("ui/uimanager")._dirtyCalls(), dirty_before + 1, "查询完成后只重绘一次候选行")
     Assert.eq(#native_adds, 0, "激活时字母不进原生 IME")
     Assert.eq(kb._addKeys_count, 1, "打字只改键宽，不得 addKeys 重建键盘")
     local labels = rowLabels(kb)
