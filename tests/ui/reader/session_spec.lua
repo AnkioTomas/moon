@@ -17,6 +17,15 @@ package.preload["book.store"] = function()
             if path == "/x/book.epub" then
                 return { ref = { source_id = "moon", stable_id = "b1" }, chapter_idx = nil }
             end
+            if path == "/other/3.html" then
+                return { ref = { source_id = "moon", stable_id = "b2" }, chapter_idx = 3 }
+            end
+            if path == "/other/plain.epub" then
+                return {
+                    ref = { source_id = "local", stable_id = "/other/plain.epub" },
+                    chapter_idx = nil,
+                }
+            end
             return nil
         end,
     }
@@ -116,6 +125,9 @@ package.preload["ui.reader"] = function()
         refresh = function(plugin)
             calls.reader[#calls.reader + 1] = { "refresh" }
         end,
+        closeToolbar = function()
+            calls.reader[#calls.reader + 1] = { "closeToolbar" }
+        end,
     }
 end
 
@@ -147,15 +159,54 @@ local function mkPlugin(path, current_id)
     return plugin, emitted
 end
 
--- 无身份文档：会话不活跃，行为零变化（统计/拉进度/reader_ready 照常）
+-- .moon 外文档统一归 local，并按 local 属主源分发
 do
     local plugin, emitted = mkPlugin("/other/plain.epub")
     Session.onReaderReady(plugin)
-    Assert.is_false(Session.isActive(), "无身份不建会话")
+    Assert.is_true(Session.isActive())
+    Assert.eq(Session.current().ref.source_id, "local")
+    Assert.eq(Session.current().source.id, "local")
     Assert.eq(calls.tracker[1][1], "start")
     Assert.eq(calls.progress[1][1], "pull")
     Assert.eq(calls.reader[#calls.reader][1], "attach")
     Assert.eq(emitted[#emitted].ev, "reader_ready")
+    Assert.eq(emitted[#emitted].source.id, "local")
+    registry_created = {}
+end
+
+-- .moon 内未知文件不是本地书：提示从 Book 桌面打开，且不分发源事件
+do
+    package.preload["utils.paths"] = function()
+        return {
+            isMoonPath = function(path)
+                return path == "/.moon/cache/moon/book/unknown/1.html"
+            end,
+        }
+    end
+    package.loaded["utils.paths"] = nil
+    package.preload["ui/widget/infomessage"] = function()
+        return {
+            new = function(_, opts)
+                return opts
+            end,
+        }
+    end
+    local UIManager = require("ui/uimanager")
+    local shown = {}
+    local old_show = UIManager.show
+    UIManager.show = function(_, widget)
+        shown[#shown + 1] = widget
+    end
+
+    local plugin, emitted = mkPlugin("/.moon/cache/moon/book/unknown/1.html")
+    Session.onReaderReady(plugin)
+    Assert.is_false(Session.isActive())
+    Assert.eq(#shown, 1)
+    Assert.eq(shown[1].text, "请从 Book 桌面打开此书")
+    Assert.eq(#emitted, 0)
+    Session.onCloseDocument(plugin)
+    Assert.eq(#emitted, 0, "未知 .moon 文档关闭时不通知当前源")
+    UIManager.show = old_show
 end
 
 -- 有身份文档：建会话并快照页码/页数/百分比
@@ -194,6 +245,7 @@ do
     -- 关文档：推进度/结清/通知源/清会话（真关书还会清进度冲突记忆）
     Session.onCloseDocument(plugin)
     Assert.is_false(Session.isActive(), "关书清会话")
+    Assert.eq(calls.reader[#calls.reader][1], "closeToolbar")
     Assert.eq(calls.progress[#calls.progress - 1][1], "push")
     Assert.eq(calls.progress[#calls.progress][1], "clearConflicts")
     Assert.eq(calls.tracker[#calls.tracker][1], "stop")
@@ -250,6 +302,7 @@ end
 for _, name in ipairs({
     "book.store", "stats.tracker", "book.progress",
     "chapters.init", "chapters.patches", "ui.reader", "source.registry",
+    "utils.paths", "ui/widget/infomessage",
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil

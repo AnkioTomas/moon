@@ -36,6 +36,7 @@ local StorePage = require("ui.desktop.store")
 local Insight = require("ui.desktop.insight")
 local Settings = require("ui.desktop.settings")
 local Detail = require("ui.desktop.detail")
+local NativePanel = require("ui.desktop.panel.native")
 local Image = require("ui.components.image")
 local TopBar = require("ui.components.topbar")
 local BottomBar = require("ui.components.bottombar")
@@ -97,7 +98,32 @@ function Desktop:init()
     clampTab(self)
     self._closed = false
     self.ges_events = {
-        -- 顶栏纯展示：不注册 tap/swipe，避免误触关桌面或抢原生区
+        SwipeTopBar = {
+            GestureRange:new{
+                ges = "swipe",
+                range = function()
+                    return Geom:new{
+                        x = 0,
+                        y = 0,
+                        w = Screen:getWidth(),
+                        h = UI.topBarH(),
+                    }
+                end,
+            },
+        },
+        TapTopBar = {
+            GestureRange:new{
+                ges = "tap",
+                range = function()
+                    return Geom:new{
+                        x = 0,
+                        y = 0,
+                        w = Screen:getWidth(),
+                        h = UI.topBarH(),
+                    }
+                end,
+            },
+        },
         TapBar = {
             GestureRange:new{
                 ges = "tap",
@@ -132,6 +158,27 @@ function Desktop:init()
             self:scheduleClockTick()
         end
     end)
+end
+
+--- 顶栏向下滑：打开 KOReader 原生菜单的 Book 快捷 Tab。
+---@param _ any
+---@param ges_ev table|nil
+---@return boolean
+function Desktop:onSwipeTopBar(_, ges_ev)
+    if type(ges_ev) ~= "table" or ges_ev.direction ~= "south" then
+        return true
+    end
+    NativePanel.show()
+    return true
+end
+
+--- 顶栏点击：与下滑一致，直接打开原生快捷面板 Tab。
+---@param _ any
+---@param _ges table|nil
+---@return boolean
+function Desktop:onTapTopBar(_, _ges)
+    NativePanel.show()
+    return true
 end
 
 --- 内容区高度（扣除顶栏 + 底栏）。
@@ -311,7 +358,7 @@ function Desktop:rebuild()
         UIManager:show(InfoMessage:new{ text = _("桌面构建失败:\n") .. tostring(err) })
         return
     end
-    UIManager:setDirty(self, "full")
+    UIManager:setDirty(self, "ui")
 end
 
 --- 只换顶栏并区域刷新；分钟心跳禁止整页 rebuild / full flash。
@@ -364,7 +411,7 @@ function Desktop:showDetail(book)
         self.detail = nil
     end
     if book.ref and book.ref.source_id ~= "zlib" then
-        BookStore.remember(book)
+        BookStore.rememberMany({ book })
     end
     local desk = self
     self.detail = Detail:new{
@@ -386,12 +433,12 @@ function Desktop:showDetail(book)
                 desk._home_loaded = false
                 desk:rebuild()
             else
-                UIManager:setDirty(desk, "full")
+                UIManager:setDirty(desk, "ui")
             end
         end,
     }
     UIManager:show(self.detail)
-    UIManager:setDirty(self.detail, "full")
+    UIManager:setDirty(self.detail, "ui")
 end
 
 --- 关闭桌面：取消在飞请求、中止图片下载、回 FM。
@@ -427,6 +474,11 @@ function Desktop:onClose()
     self._settings_refresh_pending = false
     self.ges_events = nil
     Image.abortPending()
+    if self.panel then
+        local panel = self.panel
+        self.panel = nil
+        pcall(UIManager.close, UIManager, panel)
+    end
     if self.detail then
         pcall(function()
             self.detail._closed = true
@@ -447,12 +499,12 @@ function Desktop:onClose()
     if self.close_callback then
         pcall(self.close_callback)
     end
-    -- 全屏桌面盖过 FM 后，必须强制整屏刷新，否则顶栏点击会踩到残影/野指针
+    -- 桌面关闭后重绘 FileManager；这是普通 UI 切换，不能触发 Kindle 全屏闪烁。
     UIManager:nextTick(function()
-        UIManager:setDirty("all", "full")
+        UIManager:setDirty("all", "ui")
         local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
         if ok and FileManager and FileManager.instance then
-            UIManager:setDirty(FileManager.instance, "full")
+            UIManager:setDirty(FileManager.instance, "ui")
         end
     end)
     return true
@@ -466,6 +518,11 @@ function Desktop:onCloseWidget()
         self._clock_tick = nil
     end
     self.ges_events = nil
+    if self.panel then
+        local panel = self.panel
+        self.panel = nil
+        pcall(UIManager.close, UIManager, panel)
+    end
     Image.abortPending()
 end
 

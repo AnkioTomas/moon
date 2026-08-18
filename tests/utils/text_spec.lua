@@ -47,6 +47,11 @@ do
 
     Assert.eq(Text.normalizeNewlines("a\r\nb\rc\nd"), "a\nb\nc\nd")
     Assert.eq(Text.normalizeNewlines(nil), "")
+
+    Assert.is_true(Text.isValidUtf8("hello 中文"))
+    Assert.is_true(Text.isValidUtf8("\240\159\152\128"))
+    Assert.is_false(Text.isValidUtf8("\255"))
+    Assert.is_false(Text.isValidUtf8("\226\130"))
 end
 
 -- ── xmlEscape / xmlDecode ─────────────────────────────

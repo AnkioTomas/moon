@@ -1,20 +1,8 @@
 --[[--
-阅读页管理器：注入中间点按面板与上下进度条，驱动阅读期 UI 刷新。
+阅读控制台：用上下边缘点按唤出 Kindle 风格的顶部与底部操作栏。
 
-attach 幂等：tap zone 与 view module 常驻 ReaderUI 实例；
-无身份文档（Session 不活跃）时点按自动放行翻页、进度条不绘制，无需 detach。
-
-布局（本文件不自绘，只挂载子件）：
-  +-----------------------------------------------+
-  |                           12:34  ← bars 顶条  |
-  |                                               |
-  |         ┌─────────────┐                       |
-  |         │  中心点按区  │ → showPanel          |
-  |         └─────────────┘                       |
-  |                                               |
-  |              NN% · 第 p/t 页 · 第 c/n 章      |
-  | ████████████········  ← bars 底进度线         |
-  +-----------------------------------------------+
+正文不再有插件中间点按区；控制台未显示时，正文点按仍完全交给
+KOReader 的翻页手势。活跃 Book 阅读会话之外不接管任何输入。
 
 @module koplugin.book.ui.reader
 --]]
@@ -22,13 +10,42 @@ attach 幂等：tap zone 与 view module 常驻 ReaderUI 实例；
 local UIManager = require("ui/uimanager")
 
 local Reader = {
-    ---@type table|nil 当前打开的阅读面板
-    _panel = nil,
+    ---@type table|nil
+    _toolbar = nil,
 }
 
---- 给当前 ReaderUI 装中间点按与进度条（每个 ReaderUI 实例只装一次）。
+---@return boolean
+function Reader.isToolbarOpen()
+    return Reader._toolbar ~= nil
+end
+
 ---@param plugin table
+function Reader.showToolbar(plugin)
+    if Reader._toolbar then
+        return
+    end
+    local toolbar = require("ui.reader.panel"):new{
+        plugin = plugin,
+        close_callback = function()
+            Reader._toolbar = nil
+            Reader.refresh(plugin)
+        end,
+    }
+    Reader._toolbar = toolbar
+    UIManager:show(toolbar)
+    Reader.refresh(plugin)
+end
+
 ---@return nil
+function Reader.closeToolbar()
+    if Reader._toolbar then
+        UIManager:close(Reader._toolbar)
+        Reader._toolbar = nil
+    end
+end
+
+--- 给当前 ReaderUI 装上下边缘点按与常驻阅读状态条。
+---@param plugin table
 function Reader.attach(plugin)
     local ui = plugin and plugin.ui
     if not ui or ui._book_reader_attached then
@@ -37,17 +54,35 @@ function Reader.attach(plugin)
     ui._book_reader_attached = true
 
     if ui.registerTouchZones then
+        local overrides = {
+            "tap_forward", "tap_backward",
+            "readermenu_tap", "readermenu_ext_tap",
+            "readerconfigmenu_tap", "readerconfigmenu_ext_tap",
+        }
         ui:registerTouchZones({
             {
-                id = "book_center_tap",
+                id = "book_reader_top_tap",
                 ges = "tap",
-                screen_zone = { ratio_x = 1 / 4, ratio_y = 1 / 4, ratio_w = 1 / 2, ratio_h = 1 / 2 },
-                overrides = { "tap_forward", "tap_backward" },
+                screen_zone = { ratio_x = 0, ratio_y = 0, ratio_w = 1, ratio_h = 0.15 },
+                overrides = overrides,
                 handler = function()
                     if not require("ui.reader.session").isActive() then
-                        return false -- 落回默认翻页
+                        return false
                     end
-                    Reader.showPanel(plugin)
+                    Reader.showToolbar(plugin)
+                    return true
+                end,
+            },
+            {
+                id = "book_reader_bottom_tap",
+                ges = "tap",
+                screen_zone = { ratio_x = 0, ratio_y = 0.85, ratio_w = 1, ratio_h = 0.15 },
+                overrides = overrides,
+                handler = function()
+                    if not require("ui.reader.session").isActive() then
+                        return false
+                    end
+                    Reader.showToolbar(plugin)
                     return true
                 end,
             },
@@ -60,27 +95,7 @@ function Reader.attach(plugin)
     require("lockscreen.init").refreshInBackground()
 end
 
---- 打开阅读面板（详情 / 目录 / 视觉）；重复打开先关旧实例。
 ---@param plugin table
----@return nil
-function Reader.showPanel(plugin)
-    if Reader._panel then
-        UIManager:close(Reader._panel)
-        Reader._panel = nil
-    end
-    local panel = require("ui.reader.panel"):new{
-        plugin = plugin,
-        close_callback = function()
-            Reader._panel = nil
-        end,
-    }
-    Reader._panel = panel
-    UIManager:show(panel)
-end
-
---- 请求阅读页重绘（进度条在 view_modules 绘制链里自动重画）。
----@param plugin table
----@return nil
 function Reader.refresh(plugin)
     local ui = plugin and plugin.ui
     if ui then
