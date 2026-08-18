@@ -24,9 +24,11 @@ end
 
 local captured = {}
 local open_ok = true
+local open_count = 0
 package.preload["lua-ljsqlite3/init"] = function()
     return {
         open = function()
+            open_count = open_count + 1
             if not open_ok then
                 return nil
             end
@@ -119,5 +121,19 @@ local Dict2 = require("pinyin.dictionary")
 Assert.is_false(Dict2.isAvailable())
 Assert.eq(Dict2.entries(), nil)
 Assert.len(Dict2.lookup("nihao"), 0)
+
+-- ── reset：负缓存/旧连接不清掉，下载落新库后状态永远不刷新 ──
+do
+    open_ok = true -- 模拟词库已下载落盘
+    Assert.is_false(Dict2.isAvailable(), "负缓存：不 reset 永远判定不可用")
+    local before = open_count
+    Dict2.reset()
+    Assert.is_true(Dict2.isAvailable(), "reset 后必须重开连接")
+    Assert.eq(open_count, before + 1)
+    -- 再 reset：连接已开，close 后下次访问重开
+    Dict2.reset()
+    Assert.is_true(Dict2.isAvailable())
+    Assert.eq(open_count, before + 2)
+end
 
 Stubs.flush()

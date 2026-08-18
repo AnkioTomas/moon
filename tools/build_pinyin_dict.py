@@ -256,14 +256,14 @@ def main():
             data = buf
             with open(os.path.join(out_dir, name), "wb") as fo:
                 fo.write(data)
-            parts.append({"file": name, "size": len(data)})
+            parts.append({"file": name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
             buf = b""
         if buf:
             name = f"dictionary.sqlite3.part.{len(parts) + 1:03d}"
             data = buf
             with open(os.path.join(out_dir, name), "wb") as fo:
                 fo.write(data)
-            parts.append({"file": name, "size": len(data)})
+            parts.append({"file": name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
     os.remove(raw_path)
 
     manifest = {

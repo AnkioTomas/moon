@@ -1,8 +1,8 @@
 --[[--
-pinyin.init：IME hook 候选合并 / 开关编排
+pinyin.init：开关编排（布局 / 候选栏安装 / 词库下载 / 状态文案）
 
-generic_ime 用 package.preload 注入假原型表；dictionary 用假查询；
-只验证 hook 合并顺序、zh_CN 实例过滤、词库降级透传、setEnabled 触发下载。
+candidate_bar / download / dictionary 全部 stub；只验证编排逻辑：
+开关行为、bootstrap 时机、dictStatus 文案。候选合并本身见 candidate_bar_spec。
 
 @module tests.pinyin.init_spec
 --]]
@@ -32,16 +32,41 @@ _G.G_reader_settings = {
     end,
 }
 
--- dictionary 假实现：可开关可用性、固定词表
-local dict_available = true
-local dict_words = {}
+-- candidate_bar 假实现：记录 install
+local install_calls = 0
+local install_opts
+package.preload["pinyin.candidate_bar"] = function()
+    return {
+        install = function(opts)
+            install_calls = install_calls + 1
+            install_opts = opts
+        end,
+    }
+end
+
+-- download 假实现：记录 ensure 调用
+local ensure_calls = 0
+local downloading_now = false
+package.preload["pinyin.download"] = function()
+    return {
+        ensure = function(cb)
+            ensure_calls = ensure_calls + 1
+            if cb then
+                cb(true)
+            end
+        end,
+        downloading = function()
+            return downloading_now
+        end,
+    }
+end
+
+-- dictionary 假实现：可开关可用性
+local dict_available = false
 package.preload["pinyin.dictionary"] = function()
     return {
         isAvailable = function()
             return dict_available
-        end,
-        lookup = function(code)
-            return dict_words[code] or {}
         end,
         entries = function()
             return "100"
@@ -52,79 +77,26 @@ package.preload["pinyin.dictionary"] = function()
     }
 end
 
--- download 假实现：记录 ensure 调用
-local ensure_calls = 0
-package.preload["pinyin.download"] = function()
-    return {
-        ensure = function(cb)
-            ensure_calls = ensure_calls + 1
-            if cb then
-                cb(true)
-            end
-        end,
-        downloading = function()
-            return false
-        end,
-    }
-end
-
--- generic_ime 假原型：getCandiFromMap 返回原生单字
-local IME = {}
-function IME.getCandiFromMap(self, code)
-    return self._native[code]
-end
-package.preload["ui/data/keyboardlayouts/generic_ime"] = function()
-    return IME
-end
-
 local Pinyin = require("pinyin.init")
 
--- ── hook 未装前：原生透传 ─────────────────────────────
-local zh = { switch_char = "→", switch_char_prev = "←", _native = { ni = { "你", "呢" } } }
-Assert.eq(IME.getCandiFromMap(zh, "ni")[1], "你")
-
--- ── bootstrap：开启后才装 hook ────────────────────────
+-- ── bootstrap：关闭时不装候选栏 ───────────────────────
 fake_settings.pinyin_enabled = false
 Pinyin.bootstrap()
-dict_words.ni = { "你好", "年级" }
-Assert.eq(IME.getCandiFromMap(zh, "ni")[1], "你") -- 未装 hook，仍原生
+Assert.eq(install_calls, 0, "关闭时 bootstrap 不装候选栏")
 
+-- ── bootstrap：开启后装候选栏，enabled 判定跟随开关 ────
 fake_settings.pinyin_enabled = true
 Pinyin.bootstrap()
--- 词库整词在前，原生单字在后，去重
-local merged = IME.getCandiFromMap(zh, "ni")
-Assert.eq(merged[1], "你好")
-Assert.eq(merged[2], "年级")
-Assert.eq(merged[3], "你")
-Assert.eq(merged[4], "呢")
-Assert.len(merged, 4)
+Assert.eq(install_calls, 1)
+Assert.is_true(type(install_opts.enabled) == "function")
+Assert.is_true(install_opts.enabled(), "enabled 必须读到开启状态")
+fake_settings.pinyin_enabled = false
+Assert.is_false(install_opts.enabled(), "enabled 必须跟随开关变化")
+fake_settings.pinyin_enabled = true
 
--- 词库无结果 → 原生
-dict_words.ni = nil
-local r = IME.getCandiFromMap(zh, "ni")
-Assert.eq(r[1], "你")
-Assert.len(r, 2)
-
--- 词库不可用 → 原生透传
-dict_words.ni = { "你好" }
-dict_available = false
-r = IME.getCandiFromMap(zh, "ni")
-Assert.eq(r[1], "你")
-Assert.len(r, 2)
+-- ── setEnabled(true)：补布局 + 装候选栏，不自动下载词库 ──
+Assert.is_false(Pinyin.setEnabled(true), "词库不存在时不允许开启")
 dict_available = true
-
--- 非 zh_CN 实例（ja 布局共用原型，switch_char 不同）→ 零影响
-local ja = { switch_char = "↔", switch_char_prev = "↔", _native = { ni = { "に" } } }
-r = IME.getCandiFromMap(ja, "ni")
-Assert.eq(r[1], "に")
-Assert.len(r, 1)
-
--- 非纯字母码 → 透传
-r = IME.getCandiFromMap(zh, "ni3")
-Assert.is_nil(r) -- 原生 _native 无此键
-
--- ── setEnabled(true)：补布局 + 触发词库下载 ──────────
-ensure_calls = 0
 Pinyin.setEnabled(true)
 local layouts = saved.keyboard_layouts
 local have = {}
@@ -133,10 +105,25 @@ for _, l in ipairs(layouts) do
 end
 Assert.is_true(have.en)
 Assert.is_true(have.zh_CN)
-Assert.eq(ensure_calls, 1)
+Assert.eq(ensure_calls, 0)
+Assert.eq(install_calls, 2)
+
+-- 重复开启不重复下载布局（have 已存在则 keep 顺序幂等）
+local n_layouts = #layouts
+Pinyin.setEnabled(true)
+Assert.eq(#saved.keyboard_layouts, n_layouts, "布局列表幂等")
 
 -- 关闭不下载、不动布局
 Pinyin.setEnabled(false)
-Assert.eq(ensure_calls, 1)
+Assert.eq(ensure_calls, 0, "开关不应触发下载")
+
+-- ── dictStatus：未下载 / 下载中 / 词条数·tag ──────────
+dict_available = false
+Assert.eq(Pinyin.dictStatus(), "未下载")
+downloading_now = true
+Assert.eq(Pinyin.dictStatus(), "下载中…")
+downloading_now = false
+dict_available = true
+Assert.eq(Pinyin.dictStatus(), "100 · test")
 
 Stubs.flush()
