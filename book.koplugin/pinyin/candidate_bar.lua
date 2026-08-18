@@ -12,7 +12,7 @@ wrapInputBox 包装表的 func——那依赖 generic_ime 包装结构的内部�
 激活时（开关开 + 词库在 + 当前 zh_CN 布局）：字母不进原生 IME，
 原样写进输入框（所见即所输），词库候选显示在键盘首行；
 点候选 = 删掉已输入字母、插入整词。退格逐字母回退。
-连打走 utils.timing.debounce，查库在 scheduleIn 回调里跑（不在按键路径）。
+连打走 utils.timing.debounce，查库和候选绘制在 scheduleIn 回调里跑（不在按键路径）。
 KOReader 没有 Lua 线程；不能用 Task.run fork（父进程 sqlite 连接 + fork = 闪退）。
 非字母结束本次拼写，按键走原路。大写字母并进输入码（按小写查词）。
 
@@ -342,7 +342,8 @@ end
 
 local orig_init, orig_addKeys, orig_addChar, orig_delChar
 
-local LOOKUP_WAIT = 0.15 -- 连打只查最后一次；查库在 UIManager 调度里跑，不在按键回调里
+-- 连打只查最后一次；查询和候选行重绘都在 UIManager 调度里跑，不在按键路径。
+local LOOKUP_WAIT = 0.15
 
 stopSearch = function()
     if _requestLookup then
@@ -418,7 +419,6 @@ local function wrappedAddChar(self, key)
         rawAddChars(self.inputbox, key:lower())
         showCodeOnly()
         refresh()
-        redraw()
         requestLookup(_code)
         return
     end
@@ -443,7 +443,6 @@ local function wrappedDelChar(self)
         rawDelChar(self.inputbox)
         showCodeOnly()
         refresh()
-        redraw()
         requestLookup(_code)
         return
     end
