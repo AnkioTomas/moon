@@ -113,11 +113,11 @@ function BookPlugin:onSuspend()
     require("remote.init").onSuspend()
 end
 
---- 唤醒：恢复阅读统计计时；按日刷新摸鱼日报（供下次锁屏）；恢复远程传书
+--- 唤醒：恢复阅读统计计时；预生成下一次锁屏；恢复远程传书
 ---@return nil
 function BookPlugin:onResume()
     require("ui.reader.session").onResume(self)
-    require("lockscreen.init").refreshInBackground()
+    require("lockscreen.init").onResume()
     require("remote.init").onResume()
 end
 
@@ -146,6 +146,11 @@ end
 ---@return nil
 function BookPlugin:onPosUpdate(_pos, page)
     require("ui.reader.session").onPosUpdate(self, page)
+end
+
+--- 高亮变化：预生成高亮锁屏，供本次休眠使用。
+function BookPlugin:onAnnotationsModified()
+    require("lockscreen.init").onAnnotationsModified()
 end
 
 -- ── 对外动作（UI / 设置页调用）───────────────────────
