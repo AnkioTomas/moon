@@ -11,9 +11,11 @@ schema（tools/build_pinyin_dict.py 生成）：
 
 查询模型：IME 给的输入码是连写拼音（"nihao"），词库键是空格分隔（"ni hao"）。
 连写码按音节贪心切开后走索引等值查询，禁止 OR：
-完整单音节只用 `pinyin = ?`；第二音节才 `LIKE 'a b %'`。
-半截用 `LIKE 'ni h%'`。切不成音节走简拼（`nh` → `n% h%`）。
-单字母半截不查（`LIKE 'n%'` 会扫库）。单字与整词同库。
+完整单音节只用 `pinyin = ?`；第二音节才 `GLOB 'a b *'`。
+半截用 `GLOB 'ni h*'`。切不成音节走简拼（`nh` → `n* h*`）。
+输入码只允许小写 ASCII，GLOB 与 LIKE 的匹配语义相同，却能稳定走
+前缀索引，不会因 SQLite 默认大小写不敏感的 LIKE 退化为全表扫描。
+单字母半截不查（`GLOB 'n*'` 会扫库）。单字与整词同库。
 
 @module koplugin.book.pinyin.dictionary
 --]]
@@ -199,7 +201,7 @@ function M.toPrefix(code)
     return table.concat(parts, " "), true
 end
 
---- 简拼：每个声母（含 zh/ch/sh）对一个音节。「nh」→「n% h%」命中「ni hao」。
+--- 简拼：每个声母（含 zh/ch/sh）对一个音节。「nh」→「n* h*」命中「ni hao」。
 local function abbrevPattern(code)
     local parts = {}
     local i = 1
@@ -207,17 +209,17 @@ local function abbrevPattern(code)
     while i <= n do
         local two = i < n and code:sub(i, i + 1)
         if two == "zh" or two == "ch" or two == "sh" then
-            parts[#parts + 1] = two .. "%"
+            parts[#parts + 1] = two .. "*"
             i = i + 2
         else
-            parts[#parts + 1] = code:sub(i, i) .. "%"
+            parts[#parts + 1] = code:sub(i, i) .. "*"
             i = i + 1
         end
     end
     return table.concat(parts, " ")
 end
 --- 连写输入码转候选词，按词频降序。
---- 完整音节优先等值查询；半截和简拼才走 LIKE，避免 `OR` 使 SQLite 放弃索引。
+--- 完整音节优先等值查询；半截和简拼才走 GLOB 前缀查询，避免全表扫描。
 ---@param code string 连写拼音（纯小写）
 ---@return string[]
 function M.lookup(code)
@@ -248,7 +250,7 @@ function M.lookup(code)
     end
 
     local sql_eq = "SELECT word FROM words WHERE pinyin = ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
-    local sql_like = "SELECT word FROM words WHERE pinyin LIKE ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
+    local sql_glob = "SELECT word FROM words WHERE pinyin GLOB ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
     local out = {}
     local ok = pcall(function()
         if complete then
@@ -258,7 +260,7 @@ function M.lookup(code)
                 for i = 1, #out do
                     seen[out[i]] = true
                 end
-                for _, w in ipairs(fetch(sql_like, prefix .. " %")) do
+                for _, w in ipairs(fetch(sql_glob, prefix .. " *")) do
                     if not seen[w] then
                         out[#out + 1] = w
                         if #out >= MAX_CANDI then
@@ -269,21 +271,21 @@ function M.lookup(code)
             end
             return
         end
-        -- 半截拼音（末段仍是音节前缀）：「nih」→「ni h%」
+        -- 半截拼音（末段仍是音节前缀）：「nih」→「ni h*」
         local last = prefix:match("([^ ]+)$") or prefix
         local has_space = prefix:find(" ", 1, true) ~= nil
         if has_space or SYL_PREFIX[last] then
             if #code < 3 and not has_space then
                 return -- 「n」「zh」全库扫描，跳过
             end
-            out = fetch(sql_like, prefix .. "%")
+            out = fetch(sql_glob, prefix .. "*")
             return
         end
         -- 简拼：切不成音节（「nh」「zgr」）
         if #code < 2 then
             return
         end
-        out = fetch(sql_like, abbrevPattern(code))
+        out = fetch(sql_glob, abbrevPattern(code))
     end)
     if not ok then
         return {}
