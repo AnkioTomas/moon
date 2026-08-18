@@ -235,6 +235,13 @@ function Popup.list(opts)
         items.current = current_idx -- Menu init 自动跳到该页并把当前项加粗
     end
 
+    local centered_height
+    local screen
+    if opts.centered then
+        screen = require("device").screen
+        local max_height = screen:getHeight() - UI.sz(32)
+        centered_height = math.min(max_height, UI.sz(72 + #items * 52))
+    end
     local menu = Menu:new{
         title = opts.title or "",
         subtitle = opts.subtitle,
@@ -243,11 +250,12 @@ function Popup.list(opts)
         is_popout = opts.centered == true,
         covers_fullscreen = opts.centered ~= true,
         width = opts.centered and (opts.width or UI.sz(420)) or opts.width,
-        height = opts.centered and (opts.height or UI.sz(600)) or opts.height,
+        height = opts.centered and (opts.height or centered_height) or opts.height,
         title_bar_left_icon = opts.title_icon,
         items_font_size = UI.menuFontSize(),
         title_shrink_font_to_fit = true,
         state_w = (state_w and state_w > 0) and state_w or nil,
+        items_per_page = opts.centered and math.max(1, #items) or nil,
         close_callback = function()
             holder.menu = nil
             if opts.close_callback then
@@ -257,7 +265,23 @@ function Popup.list(opts)
     }
     holder.menu = menu
 
-    UIManager:show(menu)
+    if opts.centered then
+        menu.page_info_text:setText("")
+        menu.page_info_text:hide()
+        menu.page_info_left_chev:hide()
+        menu.page_info_right_chev:hide()
+        menu.page_info_first_chev:hide()
+        menu.page_info_last_chev:hide()
+        menu.page_return_arrow:hide()
+    end
+
+    if opts.centered then
+        UIManager:show(menu, nil, nil,
+            math.floor((screen:getWidth() - menu.dimen.w) / 2),
+            math.floor((screen:getHeight() - menu.dimen.h) / 2))
+    else
+        UIManager:show(menu)
+    end
     return menu
 end
 
