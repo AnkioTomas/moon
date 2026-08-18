@@ -50,6 +50,47 @@ function Text.stripBom(s)
     return (tostring(s or ""):gsub("^\239\187\191", ""))
 end
 
+--- 是否为有效 UTF-8 字节序列。
+---@param s string|nil
+---@return boolean
+function Text.isValidUtf8(s)
+    s = tostring(s or "")
+    local i, n = 1, #s
+    local function continuation(pos)
+        local b = string.byte(s, pos)
+        return b and b >= 0x80 and b <= 0xBF
+    end
+    while i <= n do
+        local b = string.byte(s, i)
+        if b < 0x80 then
+            i = i + 1
+        elseif b >= 0xC2 and b <= 0xDF and continuation(i + 1) then
+            i = i + 2
+        elseif b == 0xE0 and continuation(i + 1) and string.byte(s, i + 1) >= 0xA0
+            and continuation(i + 2) then
+            i = i + 3
+        elseif b >= 0xE1 and b <= 0xEC and continuation(i + 1) and continuation(i + 2) then
+            i = i + 3
+        elseif b == 0xED and continuation(i + 1) and string.byte(s, i + 1) <= 0x9F
+            and continuation(i + 2) then
+            i = i + 3
+        elseif b >= 0xEE and b <= 0xEF and continuation(i + 1) and continuation(i + 2) then
+            i = i + 3
+        elseif b == 0xF0 and continuation(i + 1) and string.byte(s, i + 1) >= 0x90
+            and continuation(i + 2) and continuation(i + 3) then
+            i = i + 4
+        elseif b >= 0xF1 and b <= 0xF3 and continuation(i + 1) and continuation(i + 2) and continuation(i + 3) then
+            i = i + 4
+        elseif b == 0xF4 and continuation(i + 1) and string.byte(s, i + 1) <= 0x8F
+            and continuation(i + 2) and continuation(i + 3) then
+            i = i + 4
+        else
+            return false
+        end
+    end
+    return true
+end
+
 --- 换行符规范化：\r\n / \r → \n。
 ---@param s any
 ---@return string

@@ -25,8 +25,6 @@ local P = {}
 
 local KIND_BOOK = "book"
 local KIND_IMAGE = "image"
---- 书籍工作目录身份伴生文件名：从缓存文件反推 (source_id, stable_id) 用
-local KIND_IDENTITY = "identity.json"
 
 --- 递归创建目录（已存在则跳过）
 ---@param path string|nil
@@ -66,6 +64,17 @@ end
 ---@return string
 function P.cacheDir()
     return P.root() .. "/cache"
+end
+
+--- 路径是否位于插件自己的 .moon 数据目录。
+---@param path string|nil
+---@return boolean
+function P.isMoonPath(path)
+    if type(path) ~= "string" then
+        return false
+    end
+    local root = P.root()
+    return path == root or path:sub(1, #root + 1) == root .. "/"
 end
 
 --- 锁屏资源目录：$DATA/.moon/screensaver
@@ -128,6 +137,16 @@ end
 ---@return string
 function P.bookWorkDir(stable_id, id)
     return P.bookDir(id) .. "/" .. P.slugFor(stable_id)
+end
+
+--- 单章 HTML 路径（在线按章阅读落盘）。
+---@param stable_id string
+---@param idx number|string
+---@param id string
+---@return string
+function P.chapterPath(stable_id, idx, id)
+    P.ensureBookWork(stable_id, id)
+    return P.bookWorkDir(stable_id, id) .. "/" .. tostring(tonumber(idx) or 0) .. ".html"
 end
 
 --- 插件 SQLite 路径：$DATA/.moon/book.sqlite3
@@ -201,9 +220,8 @@ function P.ensureLayout(id)
     ensureDir(P.imageDir(id))
 end
 
---- 确保某书的工作目录存在：cache/<source>/book/<slug>/
---- 同时落身份伴生文件 identity.json（{source_id, stable_id}）：
---- slug 是 md5(stable_id) 不可逆，KOReader 历史/文件管理器直开缓存文件时靠它反推书籍身份。
+--- 确保某书的工作目录存在：cache/<source>/book/<slug>/。
+--- slug 是 md5(stable_id)，阅读时通过 books 表反查，不落额外身份文件。
 ---@param stable_id string
 ---@param id string|nil
 ---@return nil
@@ -211,31 +229,12 @@ function P.ensureBookWork(stable_id, id)
     P.ensureLayout(id)
     local dir = P.bookWorkDir(stable_id, id)
     ensureDir(dir)
-    local sidecar = dir .. "/" .. KIND_IDENTITY
-    if lfs.attributes(sidecar, "mode") == "file" then
-        return
-    end
-    -- 失败无妨：下次 ensure 再写；反推不走这里时还有 opens 表兜底。
-    -- 先编码再开文件：编码失败不残留空文件（空伴生会挡掉后续重写）。
-    pcall(function()
-        local JSON = require("json")
-        local body = JSON.encode({ source_id = tostring(id), stable_id = stable_id })
-        if type(body) ~= "string" or body == "" then
-            return
-        end
-        local f = io.open(sidecar, "wb")
-        if not f then
-            return
-        end
-        f:write(body)
-        f:close()
-    end)
 end
 
 --- 解析书籍工作目录内的文件路径 → dir, filename；不在工作目录内返回 nil。
 --- 布局：cache/<source>/book/<slug>/<file>（file = book.<ext> 或 N.html）。
 ---@param path string|nil
----@return string|nil dir, string|nil filename
+---@return string|nil dir, string|nil filename, string|nil source_id, string|nil slug
 function P.splitBookWorkPath(path)
     if type(path) ~= "string" then
         return nil
@@ -248,14 +247,7 @@ function P.splitBookWorkPath(path)
     if not file or kind ~= KIND_BOOK then
         return nil
     end
-    return root .. seg .. "/" .. kind .. "/" .. slug, file
-end
-
---- 工作目录身份伴生文件路径（splitBookWorkPath 的 dir 配合用）
----@param dir string
----@return string
-function P.identityFilePath(dir)
-    return dir .. "/" .. KIND_IDENTITY
+    return root .. seg .. "/" .. kind .. "/" .. slug, file, seg, slug
 end
 
 return P
