@@ -64,7 +64,7 @@ local function addFeed(plugin, parent, reopen)
                         return
                     end
                     local cfg, list = feeds()
-                    for _, feed in ipairs(list) do
+                    for _i, feed in ipairs(list) do
                         if Parser.normalizeUrl(feed.url) == url then
                             UIManager:show(InfoMessage:new{
                                 text = _("该订阅已存在"), timeout = 2,
