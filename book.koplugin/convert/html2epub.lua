@@ -335,14 +335,14 @@ local function writeEpubPackage(opts, dest)
 ]], Text.xmlEscape(identifier), Text.xmlEscape(title), table.concat(nav, "\n"))
     epub:addFileFromMemory("OEBPS/toc.ncx", ncx, mtime)
 
-    for _, ch in ipairs(chapters) do
+    for _i, ch in ipairs(chapters) do
         if not epub:addFileFromMemory("OEBPS/" .. ch.href, ch.xhtml, mtime) then
             epub:close()
             pcall(os.remove, tmp)
             return nil, epub.err or _("写入章节失败")
         end
     end
-    for _, img in ipairs(images) do
+    for _i, img in ipairs(images) do
         if not epub:addFileFromMemory("OEBPS/" .. img.href, img.bytes, mtime) then
             epub:close()
             pcall(os.remove, tmp)

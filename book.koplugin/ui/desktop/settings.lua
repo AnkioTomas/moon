@@ -372,7 +372,7 @@ local function sourceSections(desktop, plugin, active_id, active_name)
     end
 
     -- 其余已启用源继续保留原有配置入口。
-    for _, meta in ipairs(enabled) do
+    for _idx, meta in ipairs(enabled) do
         if meta.id ~= "local" then
             local mod = loadSourceSetting(meta.id)
             if mod and type(mod.open) == "function" then
