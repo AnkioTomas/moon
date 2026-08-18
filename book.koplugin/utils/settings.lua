@@ -36,6 +36,10 @@ local Paths = require("utils.paths")
 ---@field pinyin_enabled boolean 中文键盘入口（开启即把 zh_CN 加入 KOReader 键盘布局列表，默认关闭）
 ---@field pinyin_dict_source string|nil 拼音词库来源 tag（rime-ice release），nil=未下载
 ---@field pinyin_dict_sha256 string|nil 已安装词库的原始文件 SHA-256，用于检查云端更新
+---@field quick_panel_actions string[]|nil 快捷面板启用的可配置系统动作 id（按显示顺序）
+---@field quick_panel_icons table<string, string>|nil 快捷面板动作的 Material Icons 覆盖值
+---@field book_reader_show_top_time boolean 阅读页顶部时间
+---@field book_reader_show_bottom_progress boolean 阅读页底部进度
 
 local M = {}
 
@@ -57,6 +61,10 @@ local function commonDefaults()
         remote_port = 9528,
         remote_autostart = false,
         pinyin_enabled = false,
+        quick_panel_actions = { "native_menu" },
+        quick_panel_icons = {},
+        book_reader_show_top_time = true,
+        book_reader_show_bottom_progress = true,
     }
 end
 
