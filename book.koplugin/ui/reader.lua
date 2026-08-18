@@ -57,6 +57,7 @@ function Reader.attach(plugin)
         ui.view:registerViewModule("book_bars", require("ui.reader.bars"))
         require("ui.reader.bars").startClock()
     end
+    require("lockscreen.init").refreshInBackground()
 end
 
 --- 打开阅读面板（详情 / 目录 / 视觉）；重复打开先关旧实例。
@@ -85,6 +86,7 @@ function Reader.refresh(plugin)
     if ui then
         UIManager:setDirty(ui.dialog, "ui")
     end
+    require("lockscreen.init").refreshInBackground()
 end
 
 return Reader

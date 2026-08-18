@@ -236,6 +236,97 @@ function StatsDB.dailyBooksBySource(source_id)
     return rows
 end
 
+--- 指定时间范围内某源的账单汇总。
+---@param source_id string
+---@param start_ts number
+---@param end_ts number
+---@return { total_seconds: number, book_count: number, pages: number }
+function StatsDB.periodSummary(source_id, start_ts, end_ts)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id then
+        return { total_seconds = 0, book_count = 0, pages = 0 }
+    end
+    Base.ensure()
+    local seconds, books, pages = Base.rowexec(
+        [[SELECT COALESCE(SUM(duration),0), COUNT(DISTINCT stable_id), COUNT(*)
+          FROM reading_stats WHERE source_id=? AND start_time>=? AND start_time<?;]],
+        source_id, tonumber(start_ts) or 0, tonumber(end_ts) or 0
+    )
+    return {
+        total_seconds = tonumber(seconds) or 0,
+        book_count = tonumber(books) or 0,
+        pages = tonumber(pages) or 0,
+    }
+end
+
+--- 指定时间范围内某源阅读时长最多的书。
+---@param source_id string
+---@param start_ts number
+---@param end_ts number
+---@param limit number|nil
+---@return table[] rows { stable_id, title, authors, percent, seconds, pages }
+function StatsDB.periodBooks(source_id, start_ts, end_ts, limit)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id then
+        return {}
+    end
+    Base.ensure()
+    local result, nrows = Base.query(
+        [[SELECT r.stable_id, b.title, b.authors, b.percent,
+                 SUM(r.duration), COUNT(*)
+          FROM reading_stats r LEFT JOIN books b
+            ON b.source_id=r.source_id AND b.stable_id=r.stable_id
+          WHERE r.source_id=? AND r.start_time>=? AND r.start_time<?
+          GROUP BY r.stable_id ORDER BY 5 DESC LIMIT ?;]],
+        source_id, tonumber(start_ts) or 0, tonumber(end_ts) or 0,
+        math.max(1, tonumber(limit) or 5)
+    )
+    local rows = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            rows[#rows + 1] = {
+                stable_id = result[1][i],
+                title = result[2][i],
+                authors = result[3][i],
+                percent = tonumber(result[4][i]) or 0,
+                seconds = tonumber(result[5][i]) or 0,
+                pages = tonumber(result[6][i]) or 0,
+            }
+        end
+    end
+    return rows
+end
+
+--- 指定时间范围内某源的逐日统计。
+---@param source_id string
+---@param start_ts number
+---@param end_ts number
+---@return table[] rows { ymd, seconds, pages }
+function StatsDB.periodDays(source_id, start_ts, end_ts)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id then
+        return {}
+    end
+    Base.ensure()
+    local result, nrows = Base.query(
+        [[SELECT date(start_time,'unixepoch','localtime'), SUM(duration), COUNT(*)
+          FROM reading_stats WHERE source_id=? AND start_time>=? AND start_time<?
+          GROUP BY 1 ORDER BY 1;]],
+        source_id, tonumber(start_ts) or 0, tonumber(end_ts) or 0
+    )
+    local rows = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            rows[#rows + 1] = {
+                ymd = result[1][i],
+                seconds = tonumber(result[2][i]) or 0,
+                pages = tonumber(result[3][i]) or 0,
+            }
+        end
+    end
+    return rows
+end
+
 --- 删除已上传记录。
 ---@param ids number[]
 ---@return boolean

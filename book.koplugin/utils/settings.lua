@@ -21,14 +21,21 @@ local Paths = require("utils.paths")
 ---@field ui_font_name string|nil 界面字体展示名
 ---@field grid_max_cols number 网格最大列数（2～6，默认 4）
 ---@field lock_screen string|nil 锁屏显示：默认 myrl；ko=跟随系统；其余为已注册样式 id
----@field lock_screen_prev_type string|nil 接管前的 screensaver_type
----@field lock_screen_prev_cover string|nil 接管前的 screensaver_document_cover（空串=无）
 ---@field lock_screen_day string|nil 当前样式上次成功下载日 YYYY-MM-DD
+---@field lock_screen_bill_period string 阅读账单周期：today/7d/30d/month
+---@field lock_screen_quote_cache string|nil 最近成功的一言
+---@field lock_screen_quote_source_cache string|nil 最近成功一言的作者与出处
+---@field lock_screen_quote_index number|nil 高亮轮换位置
+---@field lock_screen_bing_day string|nil 必应背景下载日
+---@field lock_screen_background string 背景：custom/bing/none
+---@field lock_screen_quote_mode string 一言样式内容：highlight/hitokoto
+---@field lock_screen_quote_position string 一言位置
+---@field lock_screen_quote_wide boolean 一言是否宽屏
 ---@field remote_port number 远程传书端口（默认 9528）
 ---@field remote_autostart boolean 远程传书开机自启
 ---@field pinyin_enabled boolean 中文键盘入口（开启即把 zh_CN 加入 KOReader 键盘布局列表，默认关闭）
 ---@field pinyin_dict_source string|nil 拼音词库来源 tag（rime-ice release），nil=未下载
----@field debug_enabled boolean 启用 KOReader DEBUG 日志并写入 .moon/logs/koreader.log
+---@field pinyin_dict_sha256 string|nil 已安装词库的原始文件 SHA-256，用于检查云端更新
 
 local M = {}
 
@@ -42,10 +49,14 @@ local function commonDefaults()
         ui_font_name = "",
         grid_max_cols = 4,
         lock_screen = "myrl",
+        lock_screen_bill_period = "7d",
+        lock_screen_background = "bing",
+        lock_screen_quote_mode = "highlight",
+        lock_screen_quote_position = "center-center",
+        lock_screen_quote_wide = true,
         remote_port = 9528,
         remote_autostart = false,
         pinyin_enabled = false,
-        debug_enabled = false,
     }
 end
 

@@ -48,6 +48,7 @@ local manifest = {
     tag = "test-tag",
     entries = 2,
     raw_sha256 = raw_sha,
+    raw_size = #raw,
     parts = {
         { file = "dictionary.sqlite3.part.001", size = #part1, sha256 = sha.sha256(part1) },
         { file = "dictionary.sqlite3.part.002", size = #part2, sha256 = sha.sha256(part2) },
@@ -162,9 +163,22 @@ local ok_run, err_run = pcall(function()
 
     -- 来源 tag 写入设置
     Assert.eq(MoonSettings.get().pinyin_dict_source, "test-tag")
+    Assert.eq(MoonSettings.get().pinyin_dict_sha256, raw_sha)
 
     -- 临时目录已清理
     Assert.is_nil(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/pinyin_dict.dl"))
+
+    -- manifest 未变时只检查 manifest，不重复下载或拼接词库。
+    local downloads_before = #downloads
+    local done_again, ok_again
+    Download.ensure(function(ok)
+        done_again = true
+        ok_again = ok
+    end)
+    Stubs.flush()
+    Assert.is_true(done_again)
+    Assert.is_true(ok_again)
+    Assert.eq(#downloads, downloads_before)
 end)
 
 cleanup()

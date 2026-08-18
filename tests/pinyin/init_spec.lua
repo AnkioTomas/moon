@@ -97,21 +97,19 @@ fake_settings.pinyin_enabled = false
 Assert.is_false(install_opts.enabled(), "enabled 必须跟随开关变化")
 fake_settings.pinyin_enabled = true
 
--- ── setEnabled(true)：补布局 + 装候选栏，不自动下载词库 ──
+-- ── setEnabled(true)：替代布局 + 装候选栏，不自动下载词库 ──
 Assert.is_false(Pinyin.setEnabled(true), "词库不存在时不允许开启")
 dict_available = true
+saved.keyboard_layouts = { "de", "en", "ru" }
 Pinyin.setEnabled(true)
 local layouts = saved.keyboard_layouts
-local have = {}
-for _, l in ipairs(layouts) do
-    have[l] = true
-end
-Assert.is_true(have.en)
-Assert.is_true(have.zh_CN)
+Assert.eq(#layouts, 2)
+Assert.eq(layouts[1], "en")
+Assert.eq(layouts[2], "zh_CN")
 Assert.eq(ensure_calls, 0)
 Assert.eq(install_calls, 2)
 
--- 重复开启不重复下载布局（have 已存在则 keep 顺序幂等）
+-- 重复开启仍为相同布局。
 local n_layouts = #layouts
 Pinyin.setEnabled(true)
 Assert.eq(#saved.keyboard_layouts, n_layouts, "布局列表幂等")
