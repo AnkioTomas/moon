@@ -285,11 +285,13 @@ local function writeEpubPackage(opts, dest)
             id, ch.href
         )
         spine[#spine + 1] = string.format('    <itemref idref="%s"/>', id)
-        nav[#nav + 1] = string.format([[
+        if ch.toc ~= false then
+            nav[#nav + 1] = string.format([[
     <navPoint id="n%d" playOrder="%d">
       <navLabel><text>%s</text></navLabel>
       <content src="%s"/>
-    </navPoint>]], i, i, Text.xmlEscape(ch.title or id), ch.href)
+    </navPoint>]], #nav + 1, #nav + 1, Text.xmlEscape(ch.title or id), ch.href)
+        end
     end
     for i, img in ipairs(images) do
         local id = string.format("img%d", i)
@@ -374,7 +376,7 @@ end
 ---   author: string|nil,
 ---   language: string|nil,
 ---   identifier: string|nil,
----   chapters: { title: string, html: string|nil }[],
+---   chapters: { title: string, html: string|nil, toc: boolean|nil }[],
 ---   get_chapter: (fun(index: number, chapter: table, cb: fun(html: string|nil, err: any)))|nil,
 ---   image_headers: table|nil,
 ---   image_headers_for: (fun(url: string): table|nil)|nil,
@@ -635,6 +637,7 @@ function Html2Epub.build(opts, cb)
                 local href = string.format("chapter_%03d.xhtml", index)
                 out_chapters[#out_chapters + 1] = {
                     title = title,
+                    toc = meta.toc,
                     href = href,
                     xhtml = wrapXhtml(title, body),
                 }

@@ -24,6 +24,7 @@ local Text2Epub = {}
 
 local trim = Text.trim
 local xmlEscape = Text.xmlEscape
+local DEFAULT_PART_CHARS = 256 * 1024
 
 ---@param line string
 ---@return boolean
@@ -49,18 +50,150 @@ local function isChapterTitle(line)
     return false
 end
 
+--- 判断一行是否应当保留为独立段落（列表或对话）。
+---@param line string
+---@return boolean
+local function isHardLine(line)
+    return line:match("^%s*[-*•·●○]") ~= nil
+        or line:match("^%s*%d+[%.、)]") ~= nil
+        or line:match("^%s*[“\"「『]") ~= nil
+end
+
+--- 将物理行合并为段落。TXT 的换行常是编辑器软换行，不能逐行生成 p。
+---@param lines string[]
+---@param reflow boolean|nil
+---@return string[][]
+local function paragraphsFromLines(lines, reflow)
+    local paragraphs = {}
+    if not reflow then
+        for _, raw in ipairs(lines or {}) do
+            local line = trim(raw)
+            if line ~= "" then
+                paragraphs[#paragraphs + 1] = { line }
+            end
+        end
+        return paragraphs
+    end
+    local current = {}
+    local function flush()
+        if #current > 0 then
+            paragraphs[#paragraphs + 1] = current
+            current = {}
+        end
+    end
+    for _, raw in ipairs(lines or {}) do
+        local line = Text.rtrim(raw)
+        if trim(line) == "" then
+            flush()
+        elseif isHardLine(line) then
+            flush()
+            paragraphs[#paragraphs + 1] = { trim(line) }
+        else
+            if #current > 0 and current[#current]:match("[。！？!?；;]$") then
+                flush()
+            end
+            current[#current + 1] = trim(line)
+        end
+    end
+    flush()
+    return paragraphs
+end
+
+---@param paragraph string[]
+---@return string
+local function paragraphText(paragraph)
+    local out = paragraph[1] or ""
+    for i = 2, #paragraph do
+        local next_line = paragraph[i]
+        local left = out:sub(-1)
+        local right = next_line:sub(1, 1)
+        local ascii_word = left:match("[%w]$") and right:match("^[%w]")
+        local after_punctuation = left:match("[,.;:!?%)%]}'\"]$")
+            and right:match("^[A-Za-z0-9]")
+        if ascii_word or after_punctuation then
+            out = out .. " " .. next_line
+        else
+            out = out .. next_line
+        end
+    end
+    return out
+end
+
+--- 在 UTF-8 字符边界前截断，避免把多字节字符拆坏。
+---@param text string
+---@param start number
+---@param limit number
+---@return number
+local function splitAtUtf8Boundary(text, start, limit)
+    local last = math.min(#text, start + limit - 1)
+    if last >= #text then
+        return #text
+    end
+    while last > start and string.byte(text, last + 1) >= 0x80 and string.byte(text, last + 1) <= 0xBF do
+        last = last - 1
+    end
+    return math.max(last, start)
+end
+
+---@param title string
+---@param lines string[]
+---@param max_chars number|nil
+---@param reflow boolean|nil
+---@return string[]
+local function chapterParts(title, lines, max_chars, reflow)
+    local paragraphs = paragraphsFromLines(lines, reflow)
+    local limit = tonumber(max_chars) or DEFAULT_PART_CHARS
+    if limit < 1 then
+        limit = DEFAULT_PART_CHARS
+    end
+    local parts, body = {}, {}
+    local body_chars = 0
+    local function flush()
+        if #body == 0 then
+            return
+        end
+        local out = {}
+        if #parts == 0 then
+            out[#out + 1] = "<h1>" .. xmlEscape(title) .. "</h1>"
+        end
+        for _, p in ipairs(body) do
+            out[#out + 1] = "<p>" .. xmlEscape(p) .. "</p>"
+        end
+        parts[#parts + 1] = table.concat(out, "\n")
+        body, body_chars = {}, 0
+    end
+    for _, paragraph in ipairs(paragraphs) do
+        local text = paragraphText(paragraph)
+        local start = 1
+        while #text - start + 1 > limit do
+            if body_chars > 0 then
+                flush()
+            end
+            local last = splitAtUtf8Boundary(text, start, limit)
+            body[#body + 1] = text:sub(start, last)
+            body_chars = last - start + 1
+            flush()
+            start = last + 1
+        end
+        text = text:sub(start)
+        if body_chars > 0 and body_chars + #text > limit then
+            flush()
+        end
+        body[#body + 1] = text
+        body_chars = body_chars + #text
+    end
+    flush()
+    if #parts == 0 then
+        parts[1] = "<h1>" .. xmlEscape(title) .. "</h1>"
+    end
+    return parts
+end
+
 ---@param title string
 ---@param lines string[]
 ---@return string
 local function chapterHtml(title, lines)
-    local out = { "<h1>" .. xmlEscape(title) .. "</h1>" }
-    for _index, line in ipairs(lines) do
-        line = trim(line)
-        if line ~= "" then
-            out[#out + 1] = "<p>" .. xmlEscape(line) .. "</p>"
-        end
-    end
-    return table.concat(out, "\n")
+    return chapterParts(title, lines, math.huge, false)[1]
 end
 
 ---@param source string|nil
@@ -173,11 +306,16 @@ function Text2Epub.parse(text, opts)
     end
 
     local chapters = {}
+    local max_part_chars = opts.max_part_chars or DEFAULT_PART_CHARS
     for _index, section in ipairs(sections) do
-        chapters[#chapters + 1] = {
-            title = section.title,
-            html = chapterHtml(section.title, section.lines),
-        }
+        local parts = chapterParts(section.title, section.lines, max_part_chars, opts.reflow == true)
+        for part_index, html in ipairs(parts) do
+            chapters[#chapters + 1] = {
+                title = section.title,
+                html = html,
+                toc = part_index == 1,
+            }
+        end
     end
 
     return {
@@ -208,6 +346,8 @@ end
 ---   author: string|nil,
 ---   language: string|nil,
 ---   identifier: string|nil,
+---   reflow: boolean|nil,
+---   max_part_chars: number|nil,
 ---   on_progress: (fun(ev: table))|nil,
 --- }
 ---@param cb fun(ok: boolean|nil, err: any)
@@ -235,6 +375,12 @@ function Text2Epub.build(opts, cb)
         end)
         return { cancel = function() end }
     end
+    if not Text.isValidUtf8(text) then
+        UIManager:nextTick(function()
+            cb(nil, _("仅支持 UTF-8 编码的文本"))
+        end)
+        return { cancel = function() end }
+    end
 
     local book = Text2Epub.parse(text, opts)
     return Html2Epub.build({
@@ -250,5 +396,7 @@ end
 
 Text2Epub._isChapterTitle = isChapterTitle
 Text2Epub._chapterHtml = chapterHtml
+Text2Epub._paragraphsFromLines = paragraphsFromLines
+Text2Epub._chapterParts = chapterParts
 
 return Text2Epub
