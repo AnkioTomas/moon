@@ -29,6 +29,12 @@ local Session = {
     _cur = nil,
 }
 
+--- 当前阅读会话快照；锁屏等只读消费者使用。
+---@return table|nil
+function Session.current()
+    return Session._cur
+end
+
 --- 属主源解析：ref 属于哪个源就用哪个源实例。
 --- 章会话的 source 是 bind 时捕获的（已对）；整本书在这里按 ref.source_id 建非活跃实例。
 --- 属主源不可用返回 nil：跳过源相关同步，也不许错用 current（串书根因）。
