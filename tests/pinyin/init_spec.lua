@@ -68,6 +68,9 @@ package.preload["pinyin.dictionary"] = function()
         isAvailable = function()
             return dict_available
         end,
+        fileExists = function()
+            return false
+        end,
         entries = function()
             return "100"
         end,

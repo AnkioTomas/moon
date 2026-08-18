@@ -106,9 +106,12 @@ local ok_run, err_run = pcall(function()
 
     -- 选项 = 跟随系统 + 已注册样式（摸鱼日报在内）
     local opts = LockScreen.options()
-    Assert.len(opts, 2)
+    Assert.len(opts, 5)
     Assert.eq(opts[1].value, "ko")
     Assert.eq(opts[2].value, "myrl")
+    Assert.eq(opts[3].value, "reading")
+    Assert.eq(opts[4].value, "bill")
+    Assert.eq(opts[5].value, "quote")
     Assert.eq(LockScreen.label("myrl"), "摸鱼日报")
 
     -- 用户原锁屏（开着「Sleeping」提示文字）
@@ -128,6 +131,10 @@ local ok_run, err_run = pcall(function()
     LockScreen.setMode("myrl")
     -- 模式落盘不依赖网络
     Assert.eq(LockScreen.mode(), "myrl")
+    -- 新风格尚未生成时必须撤下旧封面，不能残留上一种锁屏图。
+    Assert.eq(saved.screensaver_type, "disable")
+    Assert.is_nil(saved.screensaver_document_cover)
+    Assert.is_true(saved.screensaver_show_message)
 
     local done, ok_dl
     LockScreen.refresh(function(ok)
@@ -167,6 +174,11 @@ local ok_run, err_run = pcall(function()
     Stubs.flush()
     Assert.is_true(refreshed)
     Assert.is_nil(last_download.url)
+
+    -- 下一次锁屏预生成可显式绕过同一时间桶缓存。
+    LockScreen.refresh(nil, true)
+    Stubs.flush()
+    Assert.not_nil(last_download.url)
 
     -- 跨天：标记是昨天的，文件还在也要重下（日报每日更新）
     common.lock_screen_day = "2000-01-01"
