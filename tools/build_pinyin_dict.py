@@ -9,15 +9,13 @@
 
 产物（--out-dir 下）：
 
-  dictionary.sqlite3.gz.001 / .002 / ...   每片独立 gzip（各自可解压），按序拼出原始 sqlite
+  dictionary.sqlite3.part.001 / .002 / ... 原始 SQLite 二进制分片，按序拼接
   manifest.json                            { tag, built_at, entries, raw_sha256, raw_size,
                                              parts: [{file, size}] }
 
-设备端（pinyin/download.lua）按 manifest 逐片下载，逐片 inflate 解压拼出原始库、
+设备端（pinyin/download.lua）按 manifest 逐片下载，直接拼出原始库、
 校验 raw_sha256 后落盘成 $DATA/.moon/dictionary.sqlite3。
-每片独立 gzip 是为了设备端可以流式解压（libz 无 gzopen，inflate 按片做），
-避免整库 gzip 解压时 143MB 的内存峰值；切片是因为整库 gzip 后 ~55MB，
-超过 jsdelivr ~20MB 单文件上限。
+不压缩避免设备端解压和额外内存占用；切片是因为 jsdelivr 有单文件大小上限。
 
 解压后的 sqlite schema：
 
@@ -32,7 +30,6 @@ tencent.dict.yaml 无拼音列，按 8105 字表逐字注音（笛卡尔积）�
 """
 
 import argparse
-import gzip
 import hashlib
 import itertools
 import json
@@ -255,15 +252,15 @@ def main():
                 if not chunk:
                     break
                 continue
-            name = f"dictionary.sqlite3.gz.{len(parts) + 1:03d}"
-            data = gzip.compress(buf, compresslevel=9)
+            name = f"dictionary.sqlite3.part.{len(parts) + 1:03d}"
+            data = buf
             with open(os.path.join(out_dir, name), "wb") as fo:
                 fo.write(data)
             parts.append({"file": name, "size": len(data)})
             buf = b""
         if buf:
-            name = f"dictionary.sqlite3.gz.{len(parts) + 1:03d}"
-            data = gzip.compress(buf, compresslevel=9)
+            name = f"dictionary.sqlite3.part.{len(parts) + 1:03d}"
+            data = buf
             with open(os.path.join(out_dir, name), "wb") as fo:
                 fo.write(data)
             parts.append({"file": name, "size": len(data)})
@@ -280,12 +277,11 @@ def main():
     with open(os.path.join(out_dir, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
-    gz_size = sum(p["size"] for p in parts)
     print(f"\ntotal entries: {len(rows)}")
     for name, (count, skipped) in stats.items():
         print(f"  {name}: {count} 条（跳过 {skipped}）")
-    print(f"gzip: {gz_size / 1024 / 1024:.1f} MB (解压后 {raw_size / 1024 / 1024:.1f} MB)")
-    print(f"parts: {len(parts)} 片 → {out_dir}/dictionary.sqlite3.gz.NNN")
+    print(f"raw: {raw_size / 1024 / 1024:.1f} MB")
+    print(f"parts: {len(parts)} 片 → {out_dir}/dictionary.sqlite3.part.NNN")
     print(f"manifest: {out_dir}/manifest.json  raw_sha256={raw_sha.hexdigest()[:16]}…")
 
 
