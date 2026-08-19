@@ -19,9 +19,11 @@
 
 解压后的 sqlite schema：
 
-  meta(k TEXT PRIMARY KEY, v TEXT)            -- source_tag / built_at / entries
-  words(word TEXT, pinyin TEXT, weight INT)   -- pinyin 无声调、空格分隔音节、ü=v
-  INDEX idx_pinyin ON words(pinyin, weight DESC)
+  meta(k TEXT PRIMARY KEY, v TEXT)                 -- schema_version / source_tag / built_at / entries
+  words(word TEXT, code TEXT, initials TEXT, weight INT)
+  quick(mode TEXT, code TEXT, rank INT, word_id INT) -- 高频短码的构建期 Top 21
+  INDEX idx_code ON words(code, weight DESC)
+  INDEX idx_initials ON words(initials, weight DESC)
 
 tencent.dict.yaml 无拼音列，按 8105 字表逐字注音（笛卡尔积）；
 读音组合 >=16 的词跳过（组合爆炸截断，统计里可见）。
@@ -46,6 +48,10 @@ CDN = "https://cdn.jsdelivr.net/gh/{repo}@{tag}/cn_dicts/{name}.dict.yaml"
 DICT_FILES = ["8105", "base", "ext", "others", "tencent"]
 MAX_COMBOS = 16         # tencent 单词读音组合上限（达到即弃）
 SLICE_MB = 15           # 切片大小（jsdelivr 单文件上限 ~20MB，留余量）
+SCHEMA_VERSION = "2"
+MAX_CANDI = 21
+QUICK_DIRECT_LENGTHS = (3, 4, 5, 6)
+QUICK_ABBREV_LENGTHS = (2, 3, 4, 5)
 
 UA = {"User-Agent": "moon-pinyin-dict-builder"}
 
@@ -138,6 +144,67 @@ def valid_pinyin(pinyin):
     return all(s.isalpha() and s.islower() for s in pinyin.split(" "))
 
 
+def initials(pinyin):
+    """空格拼音转标准简拼：每个音节只取首字母。"""
+    return "".join(syllable[0] for syllable in pinyin.split(" "))
+
+
+def split_code(code, syllables, syllable_prefixes, max_syllable_len):
+    """与设备端最长音节贪心切分一致，返回 (parts, complete)。"""
+    parts = []
+    i = 0
+    while i < len(code):
+        matched = None
+        for length in range(min(max_syllable_len, len(code) - i), 0, -1):
+            segment = code[i:i + length]
+            if segment in syllables:
+                matched = segment
+                break
+        if matched is None:
+            parts.append(code[i:])
+            return parts, False
+        parts.append(matched)
+        i += len(matched)
+    return parts, True
+
+
+def lookup_kind(code, syllables, syllable_prefixes, max_syllable_len):
+    """返回设备端会使用的检索路径：exact / direct / abbrev / None。"""
+    parts, complete = split_code(code, syllables, syllable_prefixes, max_syllable_len)
+    if complete:
+        return "direct" if len(parts) > 1 else "exact"
+    last = parts[-1]
+    has_prefix = len(parts) > 1
+    if has_prefix or last in syllable_prefixes:
+        return "direct" if len(code) >= 3 or has_prefix else None
+    return "abbrev" if len(code) >= 2 else None
+
+
+class TopCandidates:
+    """固定 21 个唯一词。构建期裁剪，避免短码索引按所有前缀爆炸。"""
+
+    def __init__(self):
+        self.words = {}
+
+    def add(self, word, weight):
+        old_weight = self.words.get(word)
+        if old_weight is not None:
+            if weight > old_weight:
+                self.words[word] = weight
+            return
+        if len(self.words) < MAX_CANDI:
+            self.words[word] = weight
+            return
+        worst_weight = min(self.words.values())
+        worst_word = max(word for word, candidate_weight in self.words.items() if candidate_weight == worst_weight)
+        if weight > worst_weight or (weight == worst_weight and word < worst_word):
+            del self.words[worst_word]
+            self.words[word] = weight
+
+    def ranked(self):
+        return sorted(self.words.items(), key=lambda item: (-item[1], item[0]))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default=None)
@@ -205,31 +272,79 @@ def main():
     out_dir = args.out_dir
     os.makedirs(out_dir, exist_ok=True)
     raw_path = os.path.join(out_dir, "dictionary.sqlite3")
+    for name in os.listdir(out_dir):
+        if name.startswith("dictionary.sqlite3.part."):
+            os.remove(os.path.join(out_dir, name))
     if os.path.exists(raw_path):
         os.remove(raw_path)
+
+    # 词条拼音本身就是构建期可见的完整音节集合。用它复刻设备端的最长贪心切分，
+    # 只给实际会进入前缀/简拼分支的短码建 Top 21，不能把所有词的所有前缀落盘。
+    syllables = {syllable for _, pinyin in rows for syllable in pinyin.split(" ")}
+    syllable_prefixes = {
+        syllable[:length]
+        for syllable in syllables
+        for length in range(1, len(syllable) + 1)
+    }
+    max_syllable_len = max(len(syllable) for syllable in syllables)
+    quick = {}
+    for (word, pinyin), weight in rows.items():
+        code = pinyin.replace(" ", "")
+        for length in QUICK_DIRECT_LENGTHS:
+            key = code[:length]
+            if len(key) == length and lookup_kind(key, syllables, syllable_prefixes, max_syllable_len) == "direct":
+                quick.setdefault(("direct", key), TopCandidates()).add(word, weight)
+        short = initials(pinyin)
+        for length in QUICK_ABBREV_LENGTHS:
+            key = short[:length]
+            if len(key) == length and lookup_kind(key, syllables, syllable_prefixes, max_syllable_len) == "abbrev":
+                quick.setdefault(("abbrev", key), TopCandidates()).add(word, weight)
+
+    # quick 里不重复存 UTF-8 词文本，只保存 words 的一个稳定 rowid。一个词有多音时
+    # 指向任一同词行即可，读取时只需要 word 文本；这把数百万条短码索引缩到整数 payload。
+    word_ids = {}
+    for rowid, ((word, _), _) in enumerate(rows.items(), 1):
+        word_ids.setdefault(word, rowid)
+
     conn = sqlite3.connect(raw_path)
     conn.execute("PRAGMA journal_mode=OFF")
     conn.execute("PRAGMA synchronous=OFF")
     conn.execute("CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT)")
     conn.execute(
-        "CREATE TABLE words(word TEXT NOT NULL, pinyin TEXT NOT NULL,"
+        "CREATE TABLE words(word TEXT NOT NULL, code TEXT NOT NULL, initials TEXT NOT NULL,"
         " weight INTEGER NOT NULL DEFAULT 0)"
     )
     conn.executemany(
-        "INSERT INTO words(word, pinyin, weight) VALUES (?, ?, ?)",
-        ((w, p, wt) for (w, p), wt in rows.items()),
+        "INSERT INTO words(rowid, word, code, initials, weight) VALUES (?, ?, ?, ?, ?)",
+        (
+            (rowid, w, p.replace(" ", ""), initials(p), wt)
+            for rowid, ((w, p), wt) in enumerate(rows.items(), 1)
+        ),
+    )
+    conn.execute(
+        "CREATE TABLE quick(mode TEXT NOT NULL, code TEXT NOT NULL, rank INTEGER NOT NULL,"
+        " word_id INTEGER NOT NULL, PRIMARY KEY(mode, code, rank)) WITHOUT ROWID"
+    )
+    conn.executemany(
+        "INSERT INTO quick(mode, code, rank, word_id) VALUES (?, ?, ?, ?)",
+        (
+            (mode, code, rank, word_ids[word])
+            for (mode, code), candidates in quick.items()
+            for rank, (word, _) in enumerate(candidates.ranked(), 1)
+        ),
     )
     print("create index ...")
-    # 前缀索引：连写输入码（如 "nihao"）经 Lua 侧分隔猜测转成 "ni hao" 后做
-    # LIKE 'prefix%' 前缀匹配；(pinyin, weight DESC) 让前缀扫描按权重有序早停
-    conn.execute("CREATE INDEX idx_pinyin ON words(pinyin, weight DESC)")
+    conn.execute("CREATE INDEX idx_code ON words(code, weight DESC)")
+    conn.execute("CREATE INDEX idx_initials ON words(initials, weight DESC)")
     built_at = time.strftime("%Y-%m-%d %H:%M:%S")
     conn.executemany(
         "INSERT INTO meta(k, v) VALUES (?, ?)",
         [
+            ("schema_version", SCHEMA_VERSION),
             ("source_tag", tag),
             ("built_at", built_at),
             ("entries", str(len(rows))),
+            ("quick_entries", str(sum(len(candidates.words) for candidates in quick.values()))),
         ],
     )
     conn.commit()

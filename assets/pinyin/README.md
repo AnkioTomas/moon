@@ -18,6 +18,13 @@ $DATA/.moon/dictionary.sqlite3。切片是因为单片超 jsdelivr
 
 schema（解压后的 sqlite）：
 
-  meta(k PRIMARY KEY, v)            -- source_tag / built_at / entries
-  words(word, pinyin, weight)       -- pinyin 无声调、空格分隔音节（"ni hao"）
-  INDEX idx_pinyin(pinyin, weight DESC)
+  meta(k PRIMARY KEY, v)                    -- schema_version / source_tag / built_at / entries
+  words(word, code, initials, weight)       -- code="nihao"，initials="nh"
+  quick(mode, code, rank, word_id)          -- 高频短码的构建期 Top 21
+  INDEX idx_code(code, weight DESC)
+  INDEX idx_initials(initials, weight DESC)
+
+运行时先用 quick 的主键等值查询：直接拼音 3-6 位、简拼 2-5 位都不排序。
+简拼是每个音节的首字母，例如 `jfyhdcm` 对应「江枫渔火对愁眠」。
+超过该范围才用 words 的前缀索引；此时候选集合已经很小。quick 只存 words 的
+rowid，避免为每个短码重复保存 UTF-8 词文本。

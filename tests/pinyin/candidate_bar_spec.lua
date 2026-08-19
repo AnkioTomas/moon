@@ -58,6 +58,7 @@ end
 -- ── 桩：词库 ─────────────────────────────────────────
 
 local dict_available = true
+local dict_file_exists = true
 local lookup_calls = {}
 local WORDS = { "你好", "你好吗", "内耗", "拟合", "泥沼", "尼龙", "匿迹", "逆转", "匿名", "溺爱" }
 package.preload["pinyin.dictionary"] = function()
@@ -66,7 +67,7 @@ package.preload["pinyin.dictionary"] = function()
             return dict_available
         end,
         fileExists = function()
-            return dict_available
+            return dict_file_exists
         end,
         lookup = function(code)
             lookup_calls[#lookup_calls + 1] = code
@@ -95,6 +96,7 @@ end
 
 local native_adds = {}
 local native_dels = 0
+local layout_rebuilds = 0
 
 local function fakeTextWidget()
     return {
@@ -115,6 +117,7 @@ local function fakeKey(width)
         label = "",
         width = width or 60,
         callback = nil,
+        flash_keyboard = true,
         hold_callback = function() end,
         swipe_callback = function() end,
         { { fakeTextWidget() } },
@@ -123,7 +126,7 @@ end
 
 --- 假输入框：charlist/charpos 照 InputText 语义（候选栏靠它校验输入码没脱节）
 local function fakeInputBox()
-    return {
+    local inputbox = {
         charlist = {},
         charpos = 1,
         addChars = function(self, s)
@@ -139,6 +142,10 @@ local function fakeInputBox()
             end
         end,
     }
+    function inputbox:initTextBox()
+        layout_rebuilds = layout_rebuilds + 1
+    end
+    return inputbox
 end
 
 local function text(kb)
@@ -254,6 +261,7 @@ do
     Assert.eq(#zh_keys, 2, "原字母行保留")
     Assert.eq(rowLabels(kb)[1], "◀")
     Assert.eq(rowLabels(kb)[10], "▶")
+    Assert.is_false(kb.layout[2][1].flash_keyboard, "启用时所有布局键必须跳过阻塞式闪烁")
     Assert.is_nil(kb.layout[1][2].swipe_callback, "候选键没有 key_chars，划动回调必须摘掉")
 end
 
@@ -272,7 +280,7 @@ do
     end
 end
 
--- 字母输入：拼音码进输入框，候选按宽度分页显示。
+-- 字母输入：拼音码进输入框，候选行只更新文本，不改键几何。
 do
     local kb = newKeyboard()
     local dirty_before = require("ui/uimanager")._dirtyCalls()
@@ -290,8 +298,12 @@ do
     local labels = rowLabels(kb)
     Assert.eq(labels[2], "你好")
     Assert.eq(labels[3], "你好吗")
-    Assert.eq(labels[4], "", "加宽后首页只放得下两个词")
+    Assert.eq(labels[4], "内耗")
     Assert.eq(labels[9], "", "空档键无文本")
+    for i = 1, 10 do
+        Assert.eq(kb.KEYS[1][i].width, 1.0, "候选变化不得修改键宽")
+    end
+    Assert.eq(kb.layout[1][2][1][1][1].max_width, 52, "候选文本必须在固定键宽内截断")
 end
 
 -- 物理键盘 / SDL 文本输入：直调 inputbox 包装表，不经过 VirtualKeyboard.addChar，
@@ -309,9 +321,34 @@ end
 do
     local kb = newKeyboard()
     typeAndLookup(kb, "nihao")
+    local rebuilds_before = layout_rebuilds
     kb.layout[1][3].callback() -- 第 2 个候选「你好吗」
     Assert.eq(text(kb), "你好吗")
+    Assert.eq(layout_rebuilds, rebuilds_before + 1, "候选提交只能重建一次文本布局")
     Assert.eq(rowLabels(kb)[2], "", "提交后候选行清空")
+end
+
+-- 空格提交首选：查词完成后提交首个词，不把空格写进输入框。
+do
+    local before = #native_adds
+    local kb = newKeyboard()
+    typeAndLookup(kb, "nihao")
+    VK.addChar(kb, " ")
+    Assert.eq(text(kb), "你好")
+    Assert.eq(#native_adds, before, "拼写中的空格不应进入原生 IME")
+    Assert.eq(rowLabels(kb)[2], "", "空格提交后候选行清空")
+end
+
+-- 空格不等待查词：候选尚未返回时提交当前拼音，也不留下空格。
+do
+    local before = #native_adds
+    local kb = newKeyboard()
+    typeCode(kb, "ni")
+    VK.addChar(kb, " ")
+    Assert.eq(text(kb), "ni")
+    Assert.eq(#native_adds, before, "查词未完成时空格也不应透传")
+    flush()
+    Assert.eq(rowLabels(kb)[2], "", "已提交的拼写不得被延迟查词重新显示")
 end
 
 -- 换层：addKeys 重建全部键位（Shift/Sym、number 输入框切字母层），候选行必须重绑
@@ -324,15 +361,15 @@ do
     Assert.eq(text(kb), "你好")
 end
 
--- 翻页：候选按文本宽度分页；▶ 翻页、◀ 回翻
+-- 翻页：固定七个候选槽；▶ 翻页、◀ 回翻
 do
     local kb = newKeyboard()
     typeAndLookup(kb, "nihao")
     kb.layout[1][10].callback() -- ▶
     local labels = rowLabels(kb)
-    Assert.eq(labels[2], "内耗")
-    Assert.eq(labels[4], "泥沼")
-    Assert.eq(labels[5], "", "加宽后第二页三个候选")
+    Assert.eq(labels[2], "逆转")
+    Assert.eq(labels[4], "溺爱")
+    Assert.eq(labels[5], "", "第二页只剩三个候选")
     kb.layout[1][1].callback() -- ◀
     Assert.eq(rowLabels(kb)[2], "你好")
 end
@@ -384,12 +421,26 @@ do
     Assert.eq(#native_adds, before, "空键必须吞掉")
 end
 
+-- 词库文件存在但 SQLite 不可用：不得接管输入，也不得插入幽灵候选行。
+do
+    dict_available = false
+    dict_file_exists = true
+    local before = #native_adds
+    local kb = newKeyboard()
+    Assert.is_nil(zh_keys[1]._pinyin_bar, "损坏词库时候选行必须摘掉")
+    Assert.is_true(kb.layout[1][1].flash_keyboard, "损坏词库时不得改变原生键盘反馈")
+    VK.addChar(kb, "n")
+    Assert.eq(#native_adds, before + 1, "损坏词库时字母必须透传原生 IME")
+    dict_available = true
+end
+
 -- 词库不可用：候选行必须摘掉（不留按不动的幽灵行），输入全透传原生 IME
 do
     dict_available = false
     local before = #native_adds
     local kb = newKeyboard()
     Assert.is_nil(zh_keys[1]._pinyin_bar, "词库缺失时候选行必须摘掉")
+    Assert.is_true(kb.layout[1][1].flash_keyboard, "词库缺失时不得改变原生键盘反馈")
     Assert.eq(#zh_keys, 1)
     Assert.eq(#kb.layout, 1, "键盘少一行")
     typeCode(kb, "ni")

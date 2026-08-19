@@ -5,17 +5,15 @@
 文件缺失 / 打不开 / 查询失败一律降级为空结果，绝不影响原生单字候选。
 
 schema（tools/build_pinyin_dict.py 生成）：
-  meta(k PRIMARY KEY, v)           -- source_tag / built_at / entries
-  words(word, pinyin, weight)      -- pinyin 无声调、空格分隔音节（"ni hao"）
-  INDEX idx_pinyin(pinyin, weight DESC)
+  meta(k PRIMARY KEY, v)                    -- schema_version / source_tag / built_at / entries
+  words(word, code, initials, weight)       -- code="nihao"，initials="nh"
+  quick(mode, code, rank, word_id)          -- 高频短码已在构建期排好前 21 候选
+  INDEX idx_code(code, weight DESC)
+  INDEX idx_initials(initials, weight DESC)
 
-查询模型：IME 给的输入码是连写拼音（"nihao"），词库键是空格分隔（"ni hao"）。
-连写码按音节贪心切开后走索引等值查询，禁止 OR：
-完整单音节只用 `pinyin = ?`；第二音节才 `GLOB 'a b *'`。
-半截用 `GLOB 'ni h*'`。切不成音节走简拼（`nh` → `n* h*`）。
-输入码只允许小写 ASCII，GLOB 与 LIKE 的匹配语义相同，却能稳定走
-前缀索引，不会因 SQLite 默认大小写不敏感的 LIKE 退化为全表扫描。
-单字母半截不查（`GLOB 'n*'` 会扫库）。单字与整词同库。
+查询模型：短码是输入最高频路径，构建期已把其候选按权重排好，设备只做
+`mode + code` 的等值读取。长码命中集合已足够小，才退回 `code GLOB 'nihao*'`
+或 `initials GLOB 'nhg*'`。输入码只允许小写 ASCII；单字母半截不查。
 
 @module koplugin.book.pinyin.dictionary
 --]]
@@ -26,6 +24,9 @@ local Paths = require("utils.paths")
 local M = {}
 
 local MAX_CANDI = 21 -- 候选栏约 3 页，多了也翻不到
+local SCHEMA_VERSION = "2"
+local QUICK_DIRECT_MAX = 6
+local QUICK_ABBREV_MAX = 5
 
 -- 拼音音节表（无声调，ü=v），用于把连写输入切为词库的空格分隔形式。
 local SYLLABLES = {
@@ -89,6 +90,7 @@ end
 
 local _conn -- lua-ljsqlite3 连接；false = 已判定不可用
 local _meta -- meta 缓存
+local _statements -- 高频查询的预编译语句，跟连接同生命周期
 
 -- 只尝试打开一次；失败缓存为不可用，直到 reset 后重试。
 local function ensureOpen()
@@ -109,7 +111,20 @@ local function ensureOpen()
     if not ok2 or not c then
         return nil
     end
+    local schema_ok = pcall(function()
+        local stmt = c:prepare("SELECT v FROM meta WHERE k = 'schema_version'")
+        local row = stmt:step()
+        stmt:close()
+        assert(row and row[1] == SCHEMA_VERSION)
+    end)
+    if not schema_ok then
+        pcall(function()
+            c:close()
+        end)
+        return nil
+    end
     _conn = c
+    _statements = {}
     return _conn
 end
 
@@ -133,6 +148,7 @@ function M.reset()
     end
     _conn = nil
     _meta = nil
+    _statements = nil
 end
 
 -- 首次读取时缓存完整 meta 表；词库不可用或查询失败时返回 nil。
@@ -201,25 +217,45 @@ function M.toPrefix(code)
     return table.concat(parts, " "), true
 end
 
---- 简拼：每个声母（含 zh/ch/sh）对一个音节。「nh」→「n* h*」命中「ni hao」。
-local function abbrevPattern(code)
-    local parts = {}
+--- 简拼：默认每个音节取首字母，也接受 zh/ch/sh 展开的声母。
+--- 「jfyhdcm」和「jfyhdchm」都可命中「江枫渔火对愁眠」。
+local function abbrevCode(code)
+    local out = {}
     local i = 1
     local n = #code
     while i <= n do
-        local two = i < n and code:sub(i, i + 1)
-        if two == "zh" or two == "ch" or two == "sh" then
-            parts[#parts + 1] = two .. "*"
+        local pair = code:sub(i, i + 1)
+        if pair == "zh" or pair == "ch" or pair == "sh" then
+            out[#out + 1] = pair:sub(1, 1)
             i = i + 2
         else
-            parts[#parts + 1] = code:sub(i, i) .. "*"
+            out[#out + 1] = code:sub(i, i)
             i = i + 1
         end
     end
-    return table.concat(parts, " ")
+    return table.concat(out)
+end
+
+--- 输入码应走哪张索引。保持单音节仅精确匹配的历史语义。
+---@param code string
+---@return "exact"|"direct"|"abbrev"|nil
+local function lookupKind(code)
+    local prefix, complete = M.toPrefix(code)
+    if complete then
+        return prefix:find(" ", 1, true) and "direct" or "exact"
+    end
+    local last = prefix:match("([^ ]+)$") or prefix
+    local has_space = prefix:find(" ", 1, true) ~= nil
+    if has_space or SYL_PREFIX[last] then
+        if #code < 3 and not has_space then
+            return nil
+        end
+        return "direct"
+    end
+    return #code >= 2 and "abbrev" or nil
 end
 --- 连写输入码转候选词，按词频降序。
---- 完整音节优先等值查询；半截和简拼才走 GLOB 前缀查询，避免全表扫描。
+--- 高频短码走构建期排序结果；长码才走原始索引前缀查询。
 ---@param code string 连写拼音（纯小写）
 ---@return string[]
 function M.lookup(code)
@@ -230,14 +266,21 @@ function M.lookup(code)
     if not conn then
         return {}
     end
-    local prefix, complete = M.toPrefix(code)
+    local kind = lookupKind(code)
+    if not kind then
+        return {}
+    end
 
-    local function fetch(sql, bind)
-        local stmt = conn:prepare(sql)
+    local function fetch(name, sql, ...)
+        local stmt = _statements[name]
         if not stmt then
-            return {}
+            stmt = conn:prepare(sql)
+            _statements[name] = stmt
         end
-        stmt:bind1(1, bind)
+        stmt:clearbind():reset()
+        for i = 1, select("#", ...) do
+            stmt:bind1(i, select(i, ...))
+        end
         local rows = {}
         for row in stmt:rows() do
             rows[#rows + 1] = row[1]
@@ -245,49 +288,46 @@ function M.lookup(code)
                 break
             end
         end
-        stmt:close()
+        -- rows() 只有迭代到 SQLITE_DONE 才会自动 reset；LIMIT 恰好命中时循环
+        -- 会提前结束，下一次查询必须显式清理游标和绑定值。
+        stmt:clearbind():reset()
         return rows
     end
 
-    local sql_eq = "SELECT word FROM words WHERE pinyin = ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
-    local sql_glob = "SELECT word FROM words WHERE pinyin GLOB ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
+    local sql_quick = "SELECT words.word FROM quick JOIN words ON words.rowid = quick.word_id"
+        .. " WHERE quick.mode = ? AND quick.code = ? ORDER BY quick.rank LIMIT " .. MAX_CANDI
+    local sql_exact = "SELECT word FROM words WHERE code = ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
+    local sql_direct = "SELECT word FROM words WHERE code GLOB ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
+    local sql_abbrev = "SELECT word FROM words WHERE initials GLOB ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
     local out = {}
     local ok = pcall(function()
-        if complete then
-            out = fetch(sql_eq, prefix)
-            if #out < MAX_CANDI and prefix:find(" ", 1, true) then
-                local seen = {}
-                for i = 1, #out do
-                    seen[out[i]] = true
-                end
-                for _, w in ipairs(fetch(sql_glob, prefix .. " *")) do
-                    if not seen[w] then
-                        out[#out + 1] = w
-                        if #out >= MAX_CANDI then
-                            break
-                        end
-                    end
-                end
+        if kind == "exact" then
+            out = fetch("exact", sql_exact, code)
+            return
+        end
+
+        local quick_mode = kind == "direct" and "direct" or "abbrev"
+        local quick_limit = kind == "direct" and QUICK_DIRECT_MAX or QUICK_ABBREV_MAX
+        if #code <= quick_limit then
+            out = fetch("quick", sql_quick, quick_mode, code)
+            if #out > 0 then
+                return
             end
-            return
         end
-        -- 半截拼音（末段仍是音节前缀）：「nih」→「ni h*」
-        local last = prefix:match("([^ ]+)$") or prefix
-        local has_space = prefix:find(" ", 1, true) ~= nil
-        if has_space or SYL_PREFIX[last] then
-            if #code < 3 and not has_space then
-                return -- 「n」「zh」全库扫描，跳过
-            end
-            out = fetch(sql_glob, prefix .. "*")
-            return
+
+        if kind == "direct" then
+            out = fetch("direct", sql_direct, code .. "*")
+        else
+            out = fetch("abbrev", sql_abbrev, abbrevCode(code) .. "*")
         end
-        -- 简拼：切不成音节（「nh」「zgr」）
-        if #code < 2 then
-            return
-        end
-        out = fetch(sql_glob, abbrevPattern(code))
     end)
     if not ok then
+        -- 查询异常后语句可能停在 SQLITE_ROW；重置缓存语句，下一次输入仍可正常查词。
+        for _, stmt in pairs(_statements or {}) do
+            pcall(function()
+                stmt:clearbind():reset()
+            end)
+        end
         return {}
     end
     return out
