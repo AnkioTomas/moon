@@ -1,59 +1,94 @@
 {
   "tag": "main",
-  "built_at": "2026-08-17 16:56:08",
+  "built_at": "2026-08-19 13:17:06",
   "entries": 2335413,
-  "raw_sha256": "541567f4bcd963c6f4a4c759e2c57bb2f740f7e4965cf3ba409df54f5c2e581e",
-  "raw_size": 156672000,
+  "raw_sha256": "7d94caf0a756c93641610f43ec43549831d255099b5ec7ebff4ca9613f1f9a6f",
+  "raw_size": 267210752,
   "parts": [
     {
       "file": "dictionary.sqlite3.part.001",
       "size": 15728640,
-      "sha256": "4ef0799710438caae97fc822847d6cde16b319d60cbdf8071a4d319faca7aa27"
+      "sha256": "0e859d4b6f5e9227e6cd27cccc7b21b393f0528fd8f8f9aa7dc2656ab0c5d8fc"
     },
     {
       "file": "dictionary.sqlite3.part.002",
       "size": 15728640,
-      "sha256": "3440d9c9c1ea5b8d2fe19842f7544b5cfea3805929c78fa13eb3a595c7cdf1a0"
+      "sha256": "5834dca5c4fbc4306f7dc9204bbd05d4bdd9435292d58b428c45e997ab787fd2"
     },
     {
       "file": "dictionary.sqlite3.part.003",
       "size": 15728640,
-      "sha256": "17c11b09896cae16b959f7a9a40b1f9afb1eb1320333a620b3420a5c80b8b19f"
+      "sha256": "7f0ab61ede0535fb6f744c1fe54ed3d26a9af5a4632f7c967d726b6283e07dc0"
     },
     {
       "file": "dictionary.sqlite3.part.004",
       "size": 15728640,
-      "sha256": "605c117f8978f34219eeae5664638c98826e425e1a9a42ac785bdc2898848d8b"
+      "sha256": "3a17008c9c914a676d6b5ba10f5f12d7374264717bdc72f197da982659389ac1"
     },
     {
       "file": "dictionary.sqlite3.part.005",
       "size": 15728640,
-      "sha256": "7cc6efb404e0a37e36c167577b709f6f9cca121897ab6a970b432d8afe756e2d"
+      "sha256": "45f166de530c71f9ccfc62dbac65988c1bd04fd5db9f0a29f342fa2ade29e56a"
     },
     {
       "file": "dictionary.sqlite3.part.006",
       "size": 15728640,
-      "sha256": "06a5fb3069042426a024cf0123feda5f07804ede1ddc74750dae4b04482adc38"
+      "sha256": "a761c44d9eed31b33b88bf64f7c9c9a99c7ae77a52fa4bb06fd41d2d5ffd63f2"
     },
     {
       "file": "dictionary.sqlite3.part.007",
       "size": 15728640,
-      "sha256": "dedb6d71744939ccb666cd821e261e07981559c8146be7261fae47652ba637eb"
+      "sha256": "a4a951f4b0d4457033535882b7434d70a7eddc698121fc90151cde240940b7a0"
     },
     {
       "file": "dictionary.sqlite3.part.008",
       "size": 15728640,
-      "sha256": "b2e57a1e8f1b16d16f6391ed6ed5e71738c6ceb9a48d8fba4fbc33a7ed74f2b3"
+      "sha256": "47c98ff96a7daa7f0454a9b7e59b5838f98c50c003b87ed0fd10f3cd6f82016e"
     },
     {
       "file": "dictionary.sqlite3.part.009",
       "size": 15728640,
-      "sha256": "02464c808adeac4afd9f88a977a027ad8f10c21dee2766a992d2baab0b295dd7"
+      "sha256": "bbb0b173a74d8bf382f6762dc1083c8917e7b6d23fdfaaa7a744074bf4810633"
     },
     {
       "file": "dictionary.sqlite3.part.010",
-      "size": 15114240,
-      "sha256": "c6224d28d66665ab3fd471527eabab3a3387a9e494bf56b775a66600c5ea431a"
+      "size": 15728640,
+      "sha256": "4862d22fce6d76e72ef30500523a10c5e17b2008db8a313e6c7641deb50eed20"
+    },
+    {
+      "file": "dictionary.sqlite3.part.011",
+      "size": 15728640,
+      "sha256": "be229a29ab7d88b821aa283938e477880cd65de5d92fcfd162e3feffca6f5749"
+    },
+    {
+      "file": "dictionary.sqlite3.part.012",
+      "size": 15728640,
+      "sha256": "546d212a4654b7e177619f8551f1f6f6e5e80a88c1a82e2664565b8918f7c4b7"
+    },
+    {
+      "file": "dictionary.sqlite3.part.013",
+      "size": 15728640,
+      "sha256": "adf7bd03d8657b54d35753ac3890f66370cb4e0cfe599574d1776e2e5d52f931"
+    },
+    {
+      "file": "dictionary.sqlite3.part.014",
+      "size": 15728640,
+      "sha256": "cbcd14c0cb3df4d0be7e3374f940a2576b3baef732ccaa71a62eeacc7223cf8c"
+    },
+    {
+      "file": "dictionary.sqlite3.part.015",
+      "size": 15728640,
+      "sha256": "c38953d7e404ab5fc20894b3e7abdd1abdeb3aabaefd136dded29b52b20bcef9"
+    },
+    {
+      "file": "dictionary.sqlite3.part.016",
+      "size": 15728640,
+      "sha256": "126c6d6143cbf688abb7acf535d273ef018d54d1d87bc2cc23794050bc210144"
+    },
+    {
+      "file": "dictionary.sqlite3.part.017",
+      "size": 15552512,
+      "sha256": "74172a689c5ad4e2803588d61670133ca629c40d06a86ae8f5fcaf1669c3908d"
     }
   ]
 }

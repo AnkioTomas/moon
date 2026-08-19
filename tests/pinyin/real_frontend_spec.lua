@@ -256,6 +256,7 @@ local function fakeInputBox()
     local ib = {
         charlist = {},
         charpos = 1,
+        layout_rebuilds = 0,
     }
     ib.addChars = function(self, s)
         for c in tostring(s):gmatch("[%z\1-\127\194-\244][\128-\191]*") do
@@ -268,6 +269,9 @@ local function fakeInputBox()
             self.charpos = self.charpos - 1
             table.remove(self.charlist, self.charpos)
         end
+    end
+    ib.initTextBox = function(self)
+        self.layout_rebuilds = self.layout_rebuilds + 1
     end
     -- wrapInputBox 还会包这些（导航/清空类，本用例不触发）
     for _, name in ipairs({
@@ -321,6 +325,7 @@ do
     Assert.eq(#kb.layout, 6, "真实 addKeys 必须造出 6 行 VirtualKey")
     Assert.eq(rowKey(kb, 1).text, "◀")
     Assert.eq(rowKey(kb, 10).text, "▶")
+    Assert.is_false(kb.layout[2][1].flash_keyboard, "启用时所有布局键必须跳过阻塞式闪烁")
     local ac = kb.inputbox.addChars
     Assert.eq(type(ac), "table", "zh_CN wrapInputBox 把 addChars 包成 wrapMethod 表")
     Assert.is_true(type(ac.raw_method_call) == "function", "raw 直写通道必须可用")
@@ -339,8 +344,10 @@ do
     Assert.eq(text(kb.inputbox), "n")
     Assert.eq(lookup_calls[#lookup_calls], "n")
     kb:addChar("i")
+    local rebuilds_before = kb.inputbox.layout_rebuilds
     kb.layout[1][2].callback() -- 点「你好」
     Assert.eq(text(kb.inputbox), "你好", "点候选：插整词")
+    Assert.eq(kb.inputbox.layout_rebuilds, rebuilds_before + 1, "候选提交只能重建一次文本布局")
     Assert.eq(rowKey(kb, 2).text, "", "提交后候选行清空")
 end
 
@@ -348,7 +355,9 @@ end
 do
     local kb = newKeyboard(4) -- input_type="number" 的起点层
     Assert.eq(#kb.layout, 6, "符号层也有候选行")
+    Assert.is_false(kb.layout[2][1].flash_keyboard, "数字层必须跳过阻塞式闪烁")
     kb:setLayer("ABC") -- 切到字母层（initLayer → addKeys 全量重建键位）
+    Assert.is_false(kb.layout[2][1].flash_keyboard, "换层重建后仍须跳过阻塞式闪烁")
     kb:addChar("n")
     kb:addChar("i")
     Assert.eq(text(kb.inputbox), "ni")
@@ -362,6 +371,7 @@ do
     local kb = newKeyboard()
     kb:setKeyboardLayout("en") -- 真实 init：uwrap_func revert 掉 zh 的包装
     Assert.eq(type(kb.inputbox.addChars), "function", "en 布局下 addChars 必须是未包装的原生函数")
+    Assert.is_false(kb.layout[1][1].flash_keyboard, "英文布局必须跳过阻塞式闪烁")
     kb:addChar("x")
     Assert.eq(text(kb.inputbox), "x", "en 布局输入完全原生")
     kb:setKeyboardLayout("zh_CN") -- 重新包装 + 候选栏重新接管
@@ -380,6 +390,7 @@ do
     local kb = newKeyboard()
     Assert.eq(#kb.KEYS, 5, "词库缺失时候选行必须摘掉")
     Assert.is_nil(ZH.keys[1]._pinyin_bar, "布局里的候选行标记必须移除")
+    Assert.is_true(kb.layout[1][1].flash_keyboard, "词库缺失时不得改变原生键盘反馈")
     Assert.eq(zh_rows_before, 6)
     kb:addChar("n") -- 走原生 generic_ime（真身），不得崩
     kb:addChar("i")
