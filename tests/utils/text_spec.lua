@@ -52,6 +52,11 @@ do
     Assert.is_true(Text.isValidUtf8("\240\159\152\128"))
     Assert.is_false(Text.isValidUtf8("\255"))
     Assert.is_false(Text.isValidUtf8("\226\130"))
+
+    Assert.eq(Text.truncateUtf8("abcdef", 4), "abcd")
+    Assert.eq(Text.truncateUtf8("中文abc", 4), "中")
+    Assert.eq(Text.truncateUtf8("中文", 6), "中文")
+    Assert.eq(Text.truncateUtf8("中文", 0), "")
 end
 
 -- ── xmlEscape / xmlDecode ─────────────────────────────

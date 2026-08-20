@@ -58,12 +58,13 @@ Assert.is_true(NoteDB.upsert("moon", "book'1", nil, "[{}]"))
 local q = calls[#calls]
 Assert.is_true(q.sql:find("INSERT INTO notes", 1, true) ~= nil)
 Assert.is_true(q.sql:find("ON CONFLICT(source_id, stable_id, chapter_idx)", 1, true) ~= nil)
-Assert.eq(q.argc, 5)
+Assert.eq(q.argc, 6)
 Assert.eq(q.args[1], "moon")
 Assert.eq(q.args[2], "book'1")
 Assert.eq(q.args[3], 0)
 Assert.eq(q.args[4], "[{}]")
 Assert.eq(type(q.args[5]), "number")
+Assert.eq(q.args[6], 0)
 Assert.is_false(q.sql:find("book'1", 1, true) ~= nil)
 
 local before = #calls
@@ -73,6 +74,37 @@ Assert.is_false(NoteDB.upsert("moon", "b", -1, "[]"))
 Assert.is_false(NoteDB.upsert("moon", "b", 1.5, "[]"))
 Assert.is_false(NoteDB.upsert("moon", "b", nil, nil))
 Assert.eq(#calls, before)
+
+-- get：身份参数化查询，并且 chapter_idx=nil 与整本记录的 0 对齐。
+connection.prepare = function(_, sql)
+    local call = { sql = sql }
+    calls[#calls + 1] = call
+    return {
+        bind = function(self, ...)
+            call.args = { ... }
+            call.argc = select("#", ...)
+            return self
+        end,
+        step = function()
+            return { "moon", "book'1", 0, "[{}]", 123, 0 }, {
+                "source_id", "stable_id", "chapter_idx", "payload", "updated_at", "sync_status",
+            }
+        end,
+        close = function() end,
+    }
+end
+local row = NoteDB.get("moon", "book'1", nil)
+q = calls[#calls]
+Assert.eq(q.argc, 3)
+Assert.eq(q.args[1], "moon")
+Assert.eq(q.args[2], "book'1")
+Assert.eq(q.args[3], 0)
+Assert.is_false(q.sql:find("book'1", 1, true) ~= nil)
+Assert.eq(row.payload, "[{}]")
+Assert.eq(row.sync_status, 0)
+Assert.is_nil(NoteDB.get("", "book", nil))
+Assert.is_nil(NoteDB.get("moon", "", nil))
+Assert.is_nil(NoteDB.get("moon", "book", -1))
 
 Base.close()
 clearMods()

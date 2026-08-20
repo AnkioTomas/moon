@@ -9,7 +9,7 @@ local original_json_preload = package.preload["json"]
 local original_socketutil_preload = package.preload["socketutil"]
 
 local function sourceBase()
-    return { openBookAsync = function() end }
+    return {}
 end
 
 package.preload["utils.settings"] = function()
@@ -35,9 +35,10 @@ package.loaded["source.moon"] = nil
 local moon = require("source.moon").new()
 for _, name in ipairs({
     "listLibraryAsync", "recentBooksAsync", "filtersAsync",
-    "importReadingStatsAsync",
+    "syncStatsAsync",
+    "pullStatsAsync",
     "readingInsightAsync", "getProgressAsync", "putProgressAsync",
-    "openBookAsync", "materializeWholeAsync",
+    "openBookAsync",
 }) do
     Assert.eq(type(moon[name]), "function")
 end
@@ -48,7 +49,7 @@ end
 package.preload["source.webdav.mapper"] = function() return {} end
 package.loaded["source.webdav"] = nil
 local webdav = require("source.webdav").new()
-for _, name in ipairs({ "listLibraryAsync", "openBookAsync", "materializeWholeAsync" }) do
+for _, name in ipairs({ "listLibraryAsync", "openBookAsync" }) do
     Assert.eq(type(webdav[name]), "function")
 end
 
@@ -185,7 +186,7 @@ package.loaded["source.moon.client"] = nil
 local client = require("source.moon.client"):new{}
 for _, name in ipairs({
     "_jsonAsync", "listBooksAsync", "recentBooksAsync", "filtersAsync",
-    "importReadingStatsAsync", "readingInsightAsync",
+    "syncStatsAsync", "getBookStatsAsync", "readingInsightAsync",
     "getProgressAsync", "updateProgressAsync", "downloadBookAsync",
 }) do
     Assert.eq(type(client[name]), "function")

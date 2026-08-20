@@ -96,35 +96,42 @@ end
 
 package.preload["book.note"] = function()
     return {
-        save = function(identity, annotations)
+        save = function(ui, identity, cb)
             calls.notes = calls.notes or {}
-            calls.notes[#calls.notes + 1] = { identity, annotations }
+            calls.notes[#calls.notes + 1] = { identity, ui }
+            if cb then cb(true) end
+        end,
+        pull = function(ui, identity)
+            calls.notes = calls.notes or {}
+            calls.notes[#calls.notes + 1] = { identity, "pull" }
         end,
         push = function(ui, identity)
             calls.notes = calls.notes or {}
-            calls.notes[#calls.notes + 1] = { identity, "push" }
+            calls.notes[#calls.notes + 1] = { identity, "push", ui }
         end,
     }
 end
 
 package.preload["book.progress"] = function()
     return {
-        pull = function(ui, identity, show_msg)
-            calls.progress[#calls.progress + 1] = { "pull", identity }
+        pull = function(snapshot)
+            calls.progress[#calls.progress + 1] = { "pull", snapshot and snapshot.identity }
         end,
-        save = function(ui, identity, cb)
-            calls.progress[#calls.progress + 1] = { "save", identity }
-            cb(true)
-        end,
-        push = function(ui, source, show_msg)
-            calls.progress[#calls.progress + 1] = { "push", source }
+        push = function(ui, identity)
+            calls.progress[#calls.progress + 1] = { "push", identity }
         end,
         clearConflicts = function()
             calls.progress[#calls.progress + 1] = { "clearConflicts" }
         end,
-        fraction = function(ui, identity)
-            calls.progress_fraction_identity = identity
-            return identity and identity.chapter_idx and 0.75 or 0.25
+        position = function(snapshot)
+            local identity = snapshot and snapshot.identity
+            calls.progress_position_identity = identity
+            local fraction = identity and identity.chapter_idx and 0.75 or 0.25
+            return {
+                fraction = fraction,
+                chapter_idx = identity and identity.chapter_idx,
+                chapter_fraction = identity and identity.chapter_idx and 0.5 or nil,
+            }
         end,
     }
 end
@@ -263,7 +270,7 @@ do
     Assert.eq(calls.reader[#calls.reader][1], "attach")
 end
 
--- 注解事件只由活动 ReaderSession 以当前身份保存完整内存快照。
+-- 注解事件只由活动 ReaderSession 以当前身份保存完整文档快照。
 do
     local plugin = mkPlugin("/x/book.epub")
     plugin.ui.annotation = { annotations = { { text = "高亮" } } }
@@ -271,7 +278,7 @@ do
     Session.onAnnotationsModified(plugin, { { text = "变更描述" } })
     local saved = calls.notes[#calls.notes]
     Assert.eq(saved[1].stable_id, "b1")
-    Assert.eq(saved[2][1].text, "高亮")
+    Assert.eq(saved[2], plugin.ui)
     Session.onCloseDocument(plugin)
 end
 
@@ -338,7 +345,7 @@ do
     -- 统计拿到的是内存身份（DB 写入异步，同 tick 查不到）
     local start_call = calls.tracker[#calls.tracker]
     Assert.eq(start_call[1], "start")
-    Assert.eq(start_call[3].stable_id, "b1")
+    Assert.eq(start_call[2].identity.stable_id, "b1")
 
     -- 翻页：更新快照 + 刷新 + 分发 page_changed
     Session.onPageChanged(plugin, 6)
@@ -364,12 +371,12 @@ do
     tracker_stop_done = nil
     defer_tracker_stop = false
     Assert.is_nil(Session.current(), "关书清会话")
-    Assert.eq(calls.progress[#calls.progress - 2][1], "save")
     Assert.eq(calls.progress[#calls.progress - 1][1], "push")
     Assert.eq(calls.progress[#calls.progress][1], "clearConflicts")
     Assert.eq(calls.tracker[#calls.tracker][1], "stop")
     Assert.eq(emitted[#emitted].ev, "document_close")
     Assert.eq(calls.notes[#calls.notes][1].stable_id, "b1", "注解同步复用阅读身份")
+    Assert.eq(calls.notes[#calls.notes][2], "push", "注解保存成功后才触发推送")
     Assert.is_nil(Session.current(), "关闭文档清理阅读状态")
 
     -- 不活跃时翻页：统计照收，源不收事件
@@ -394,7 +401,7 @@ do
     Assert.eq(cur.identity.book.title, "旧章书")
     Assert.eq(cur.identity.source.id, "moon")
     Assert.eq(cur.percent, 75, "章节快照使用当前会话身份计算全书进度")
-    Assert.eq(calls.progress_fraction_identity, cur.identity)
+    Assert.eq(calls.progress_position_identity, cur.identity)
     Assert.is_nil(calls.chapter[#calls.chapter], "章节落点不再由 chapters 门面处理")
     Session.onCloseDocument(plugin)
     Assert.is_false(Session.gotoChapter(1), "真关书清除目录状态")
@@ -431,7 +438,7 @@ do
     Session.onCloseDocument(plugin)
     local push = calls.progress[#calls.progress - 1]
     Assert.eq(push[1], "push")
-    Assert.is_nil(push[2], "push 从数据库队列解析源，不携带当前书身份")
+    Assert.eq(push[2].source_id, "moon", "保存当前书后再冲刷数据库队列")
     Assert.eq(emitted[#emitted].source.id, "moon", "document_close 事件路由到属主源")
 end
 

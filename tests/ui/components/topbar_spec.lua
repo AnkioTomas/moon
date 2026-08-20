@@ -25,7 +25,6 @@ local powerd = {
 package.preload["ffi/blitbuffer"] = function()
     return { COLOR_BLACK = 0, COLOR_WHITE = 255 }
 end
-package.preload["ui/widget/container/centercontainer"] = widget
 package.preload["ui/widget/container/framecontainer"] = widget
 package.preload["ui/geometry"] = widget
 package.preload["ui/widget/horizontalgroup"] = widget
@@ -65,9 +64,31 @@ package.preload["ui/network/manager"] = function()
         isWifiOn = function() return false end,
     }
 end
+package.preload["datastorage"] = function()
+    return {
+        getDataDir = function() return "/tmp/moon-data" end,
+    }
+end
+package.preload["ffi/util"] = function()
+    return {
+        df = function()
+            return 64 * 1000 * 1000 * 1000, 12 * 1000 * 1000 * 1000, 10 * 1000 * 1000 * 1000
+        end,
+    }
+end
 package.preload["util"] = function()
     return {
-        calcFreeMem = function() return 256, 1024 end,
+        -- 256 MiB 可用 / 1 GiB 总量（字节）
+        calcFreeMem = function() return 256 * 1024 * 1024, 1024 * 1024 * 1024 end,
+        getFriendlySize = function(bytes)
+            if bytes >= 1000 * 1000 * 1000 then
+                return string.format("%.1f GB", bytes / 1000 / 1000 / 1000)
+            end
+            if bytes >= 1000 * 1000 then
+                return string.format("%.1f MB", bytes / 1000 / 1000)
+            end
+            return tostring(bytes) .. " B"
+        end,
     }
 end
 package.preload["ui.components.bookui"] = function()
@@ -124,11 +145,13 @@ TopBar.build()
 
 Assert.eq(icon_calls[1].name, "source")
 Assert.eq(icon_calls[2].name, "memory")
-Assert.eq(icon_calls[3].name, "wifi_off")
-Assert.eq(icon_calls[4].name, "brightness_6")
-Assert.eq(icon_calls[5].name, "battery_android_full")
-Assert.eq(icon_calls[2].text, "75%")
-Assert.eq(icon_calls[5].text, "100%")
+Assert.eq(icon_calls[2].text, "268.4 MB")
+Assert.eq(icon_calls[3].name, "hard_drive")
+Assert.eq(icon_calls[3].text, "10.0 GB")
+Assert.eq(icon_calls[4].name, "wifi_off")
+Assert.eq(icon_calls[5].name, "brightness_6")
+Assert.eq(icon_calls[6].name, "battery_android_full")
+Assert.eq(icon_calls[6].text, "100%")
 Assert.contains(text_calls, "1:23 PM")
 
 local normal_levels = {
@@ -145,7 +168,7 @@ for _, case in ipairs(normal_levels) do
     powerd.capacity = case[1]
     powerd.charging = false
     TopBar.build()
-    Assert.eq(icon_calls[5].name, case[2])
+    Assert.eq(icon_calls[6].name, case[2])
 end
 
 local charging_levels = {
@@ -161,5 +184,30 @@ for _, case in ipairs(charging_levels) do
     powerd.capacity = case[1]
     powerd.charging = true
     TopBar.build()
-    Assert.eq(icon_calls[5].name, case[2])
+    Assert.eq(icon_calls[6].name, case[2])
 end
+
+-- 电量越界：图标与文字共用钳制后的值
+icon_calls = {}
+powerd.capacity = 150
+powerd.charging = false
+TopBar.build()
+Assert.eq(icon_calls[6].name, "battery_android_full")
+Assert.eq(icon_calls[6].text, "100%")
+
+-- df 失败：存储指标省略，不炸
+package.loaded["ffi/util"] = nil
+package.preload["ffi/util"] = function()
+    return {
+        df = function()
+            return nil, "statvfs is not available"
+        end,
+    }
+end
+package.loaded["ui.components.topbar"] = nil
+TopBar = require("ui.components.topbar")
+icon_calls = {}
+TopBar.build()
+Assert.eq(icon_calls[1].name, "source")
+Assert.eq(icon_calls[2].name, "memory")
+Assert.eq(icon_calls[3].name, "wifi_off")

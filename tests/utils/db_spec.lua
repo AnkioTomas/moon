@@ -181,6 +181,7 @@ do
                         { 1000, 2000 },
                         { 30, 45 },
                         { 300, 400 },
+                        { 0, 1 },
                     }, 2
                 end,
                 close = function() end,
@@ -210,10 +211,11 @@ do
     }))
     local insert = calls[#calls]
     Assert.is_true(insert.sql:find("INSERT INTO reading_stats", 1, true) ~= nil)
-    Assert.eq(insert.argc, 6)
+    Assert.eq(insert.argc, 7)
     Assert.eq(insert.args[1], "moon")
     Assert.eq(insert.args[2], "a.epub")
     Assert.eq(insert.args[4], 1000)
+    Assert.eq(insert.args[7], 0)
 
     -- 非法输入在碰 DB 前拒绝
     Assert.is_false(StatsDB.add({ source_id = "moon", stable_id = "", start_time = 1, duration = 1 }))
@@ -227,15 +229,18 @@ do
     Assert.eq(rows[1].stable_id, "a.epub")
     Assert.eq(rows[1].start_time, 1000)
     Assert.eq(rows[2].duration, 45)
+    Assert.eq(rows[2].sync_status, 1)
 
-    Assert.is_true(StatsDB.deleteIds({ 7, 8 }))
-    local deletes = 0
+    local pending = StatsDB.unsyncedBySource("moon")
+    Assert.eq(#pending, 2)
+    Assert.is_true(StatsDB.markSynced({ 7, 8 }))
+    local updates = 0
     for _, c in ipairs(calls) do
-        if c.sql:find("DELETE FROM reading_stats", 1, true) then
-            deletes = deletes + 1
+        if c.sql:find("UPDATE reading_stats SET sync_status=1", 1, true) then
+            updates = updates + 1
         end
     end
-    Assert.eq(deletes, 2)
+    Assert.eq(updates, 2)
 
     DbBase.close()
     clearMods()

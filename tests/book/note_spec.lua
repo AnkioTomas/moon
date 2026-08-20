@@ -24,6 +24,9 @@ package.preload["utils.db.note"] = function()
         end,
     }
 end
+package.preload["book.store"] = function()
+    return {}
+end
 package.preload["utils.db.queue"] = function()
     return {
         run = function(worker, opts)
@@ -37,9 +40,20 @@ end
 package.loaded["book.note"] = nil
 
 local Note = require("book.note")
-local annotations = { { text = "高亮", page = 3 } }
-Note.save({ source_id = "moon", stable_id = "b'1", chapter_idx = 2 }, annotations)
-Assert.eq(encoded, annotations, "必须在事件当下编码，不能把可变表交给异步队列")
+local annotations = { { datetime = "2026-08-20", text = "高亮", page = 3 } }
+local ui = {
+    document = { getPageCount = function() return 100 end },
+    doc_settings = {
+        flush = function() end,
+        readSetting = function(_, key)
+            return key == "annotations" and annotations or nil
+        end,
+    },
+}
+local identity = { source_id = "moon", stable_id = "b'1", chapter_idx = 2 }
+Note.save(ui, identity)
+Assert.eq(encoded[1].text, "高亮", "必须在事件当下编码，不能把可变表交给异步队列")
+Assert.eq(encoded[1].total_pages, 100)
 Assert.len(queued, 1)
 annotations[1].text = "已修改"
 queued[1].worker()
@@ -50,10 +64,10 @@ Assert.eq(writes[1][3], 2)
 Assert.eq(writes[1][4], "[snapshot]")
 
 fail_encode = true
-Note.save({ source_id = "moon", stable_id = "b2" }, {})
+Note.save(ui, { source_id = "moon", stable_id = "b2" })
 Assert.len(queued, 1, "编码失败不能写入不完整快照")
 
-for _, name in ipairs({ "json", "utils.db.note", "utils.db.queue", "logger", "book.note" }) do
+for _, name in ipairs({ "json", "utils.db.note", "utils.db.queue", "logger", "book.store", "book.note" }) do
     package.preload[name] = nil
     package.loaded[name] = nil
 end

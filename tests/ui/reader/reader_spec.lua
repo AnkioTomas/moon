@@ -54,7 +54,7 @@ local plugin = { ui = ui }
 
 local Reader = require("ui.reader")
 local actions = Reader.actions(ui)
-Assert.len(actions, 6)
+Assert.len(actions, 13)
 Assert.eq(actions[1].id, "toc")
 Assert.eq(actions[1].icon, "toc")
 Assert.eq(actions[2].id, "bookmark")
@@ -62,6 +62,13 @@ Assert.eq(actions[3].id, "highlights")
 Assert.eq(actions[4].id, "sync")
 Assert.eq(actions[5].id, "ocr")
 Assert.eq(actions[6].id, "dictionary")
+Assert.eq(actions[7].id, "ai_analysis")
+Assert.eq(actions[8].id, "ai_summary")
+Assert.eq(actions[9].id, "ai_graph")
+Assert.eq(actions[10].id, "xray_characters")
+Assert.eq(actions[11].id, "xray_locations")
+Assert.eq(actions[12].id, "xray_timeline")
+Assert.eq(actions[13].id, "xray_lookup")
 
 local closed, refreshed = 0, 0
 Assert.is_true(Reader.executeAction("bookmark", ui, {

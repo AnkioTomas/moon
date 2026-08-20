@@ -12,6 +12,10 @@ local Assert = require("support.assert")
 -- 假客户端：记录入参、回放预设响应
 local rec = {}
 local client = {}
+local lfs = require("libs/libkoreader-lfs")
+local open_dir = os.tmpname() .. ".moon-open"
+os.remove(open_dir)
+assert(lfs.mkdir(open_dir))
 
 package.preload["utils.settings"] = function()
     return {
@@ -25,15 +29,64 @@ package.preload["source.moon.client"] = function()
     }
 end
 
+package.preload["utils.paths"] = function()
+    return {
+        ensureBookWork = function() end,
+        bookWorkDir = function() return open_dir end,
+    }
+end
+
+package.preload["utils.db.book"] = function()
+    return { stableIdsBySource = function() return { "a.epub", "b.epub" } end }
+end
+
+package.preload["ui/network/manager"] = function()
+    return {
+        runWhenOnline = function(_, fn) fn() end,
+    }
+end
+
+local dialog = { shown = 0, closed = 0, progress = nil }
+package.preload["ui/widget/progressbardialog"] = function()
+    return {
+        new = function(_, opts)
+            return {
+                show = function() dialog.shown = dialog.shown + 1 end,
+                close = function() dialog.closed = dialog.closed + 1 end,
+                reportProgress = function(_, bytes) dialog.progress = bytes end,
+                opts = opts,
+            }
+        end,
+    }
+end
+package.preload["ui/widget/infomessage"] = function()
+    return { new = function(_, opts) return opts end }
+end
+
+local touches = {}
+package.preload["book.store"] = function()
+    return {
+        touchAsync = function(path, identity, _, cb)
+            touches[#touches + 1] = { path = path, identity = identity }
+            cb(true)
+        end,
+    }
+end
+
 -- onEvent 延迟加载的 UI 依赖：记录调用
 local sync = { push_calls = 0, last_source = nil, push_args = nil }
 
 package.preload["book.stats"] = function()
     return {
-        pushWithUi = function(self, a, b)
+        push = function(self, cb)
             sync.push_calls = sync.push_calls + 1
             sync.last_source = self
-            sync.push_args = { a, b }
+            if cb then cb(true, { ok = true }) end
+        end,
+        pull = function(self, cb)
+            sync.pull_calls = (sync.pull_calls or 0) + 1
+            sync.last_source = self
+            if cb then cb(true, { imported = 0 }) end
         end,
     }
 end
@@ -70,6 +123,44 @@ function client:updateProgressAsync(payload, cb)
     return { cancel = function() end }
 end
 
+function client:syncAnnotationsAsync(payload, cb)
+    rec.annotations_payload = payload
+    cb({ ok = true })
+    return { cancel = function() end }
+end
+
+function client:syncStatsAsync(payload, cb)
+    rec.stats_payload = payload
+    cb({ ok = true })
+    return { cancel = function() end }
+end
+
+function client:getBookStatsAsync(stable_id, cb)
+    rec.stats_ids = rec.stats_ids or {}
+    rec.stats_ids[#rec.stats_ids + 1] = stable_id
+    cb({ data = { page_stat = {
+        { page = #rec.stats_ids, start_time = 1000 + #rec.stats_ids, duration = 30, total_pages = 100 },
+    } } })
+    return { cancel = function() end }
+end
+
+function client:downloadBookAsync(stable_id, path, on_progress, cb)
+    rec.download_count = (rec.download_count or 0) + 1
+    rec.download_id = stable_id
+    rec.download_path = path
+    if rec.defer_download then
+        rec.download_done = cb
+        rec.download_progress = on_progress
+        return { cancel = function() end }
+    end
+    local file = assert(io.open(path, "wb"))
+    file:write(rec.download_body or "PK\003\004book")
+    file:close()
+    if on_progress then on_progress(8) end
+    cb(rec.download_ok ~= false, rec.download_err)
+    return { cancel = function() end }
+end
+
 local Moon = require("source.moon")
 local src = Moon.new()
 
@@ -89,6 +180,63 @@ do
     Assert.is_nil(rec.query.favorite)
     Assert.is_nil(rec.query.finished)
     Assert.is_nil(rec.query.author)
+end
+
+
+-- openBookAsync：Moon 自己完成缓存、下载、校验、并发合并和落库。
+do
+    local path = open_dir .. "/book.epub"
+    os.remove(path)
+    os.remove(path .. ".part")
+    resetRec()
+    touches = {}
+    dialog.shown, dialog.closed, dialog.progress = 0, 0, nil
+
+    local opened, open_err
+    src:openBookAsync({
+        source_id = "moon",
+        stable_id = "library/a.epub",
+        book = { title = "A", fileSize = 8 },
+    }, nil, function(p, err) opened, open_err = p, err end)
+    Assert.eq(rec.download_count, 1)
+    Assert.eq(rec.download_id, "library/a.epub")
+    Assert.eq(rec.download_path, path .. ".part")
+    Assert.eq(dialog.progress, 8)
+    Assert.eq(opened, path)
+    Assert.is_nil(open_err)
+    Assert.eq(touches[1].path, path)
+
+    resetRec()
+    opened = nil
+    src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p)
+        opened = p
+    end)
+    Assert.is_nil(rec.download_count)
+    Assert.eq(opened, path)
+
+    os.remove(path)
+    resetRec()
+    rec.defer_download = true
+    local first, second
+    src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p) first = p end)
+    src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p) second = p end)
+    Assert.eq(rec.download_count, 1)
+    local file = assert(io.open(path .. ".part", "wb"))
+    file:write("PK\003\004book")
+    file:close()
+    rec.download_done(true)
+    Assert.eq(first, path)
+    Assert.eq(second, path)
+
+    os.remove(path)
+    resetRec()
+    rec.download_body = "XXXX"
+    src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p, err)
+        opened, open_err = p, err
+    end)
+    Assert.is_nil(opened)
+    Assert.eq(open_err, "下载文件校验失败")
+    Assert.is_nil(lfs.attributes(path .. ".part"))
 end
 
 -- listQuery：opts 全字段 → 键名映射（page_size → pageSize）
@@ -157,14 +305,16 @@ do
     src:onEvent("document_close")
     Assert.eq(sync.push_calls, 1)
     Assert.eq(sync.last_source, src)
-    Assert.is_false(sync.push_args[1])
-    Assert.is_false(sync.push_args[2])
 
     src:onEvent("suspend")
     Assert.eq(sync.push_calls, 2)
 
     src:onEvent("page_changed")
     Assert.eq(sync.push_calls, 2)
+
+    src:onEvent("stats_sync_request")
+    Assert.eq(sync.pull_calls, 1)
+    Assert.eq(sync.push_calls, 3)
 end
 
 -- getProgressAsync：wire 表 → ProgressPosition（percent/100、chapter_idx、locator）
@@ -240,14 +390,65 @@ do
     Assert.eq(err, "网络故障")
 end
 
+-- 注解同步：领域层只传 identity + annotations，Moon 源才映射后端 filename。
+do
+    resetRec()
+    local ok
+    src:syncAnnotationsAsync({ source_id = "moon", stable_id = "a.epub", chapter_idx = 2 }, {
+        { datetime = "2026-08-20", page = "/p" },
+    }, function(res)
+        ok = res
+    end)
+    Assert.not_nil(ok)
+    Assert.eq(rec.annotations_payload.filename, "a.epub")
+    Assert.is_nil(rec.annotations_payload.device_id)
+    Assert.eq(rec.annotations_payload.annotations[1].page, "/p")
+end
+
+-- 统计同步：book.stats 只传领域记录，Moon 源负责 wire 与设备字段。
+do
+    resetRec()
+    local response
+    src:syncStatsAsync({
+        { stable_id = "a.epub", page = 3, start_time = 1000, duration = 30, total_pages = 100 },
+    }, function(res) response = res end)
+    Assert.not_nil(response)
+    Assert.eq(rec.stats_payload.books[1].filename, "a.epub")
+    Assert.eq(rec.stats_payload.stats[1].filename, "a.epub")
+    Assert.is_nil(rec.stats_payload.stats[1].stable_id)
+end
+
+-- 统计拉取：Moon 源逐本请求并映射成带身份的领域记录。
+do
+    resetRec()
+    local rows
+    src:pullStatsAsync(function(value) rows = value end)
+    Assert.len(rec.stats_ids, 2)
+    Assert.eq(rec.stats_ids[1], "a.epub")
+    Assert.eq(rec.stats_ids[2], "b.epub")
+    Assert.len(rows, 2)
+    Assert.eq(rows[1].source_id, "moon")
+    Assert.eq(rows[1].stable_id, "a.epub")
+    Assert.eq(rows[2].stable_id, "b.epub")
+    Assert.eq(rows[2].duration, 30)
+end
+
 -- 还原 preload/loaded，避免影响本文件之后的用例
 for _, name in ipairs({
     "utils.settings",
+    "utils.paths",
+    "utils.db.book",
     "source.moon.client",
     "ui/network/manager",
+    "ui/widget/progressbardialog",
+    "ui/widget/infomessage",
+    "book.store",
     "book.stats",
     "source.moon",
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil
 end
+os.remove(open_dir .. "/book.epub")
+os.remove(open_dir .. "/book.epub.part")
+lfs.rmdir(open_dir)
