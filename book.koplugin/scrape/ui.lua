@@ -49,18 +49,18 @@ local function copyFile(from, to)
 end
 
 --- 下载封面并落进本源封面缓存；books 表不存链接，UI 只认本地文件。
----@param ref BookRef
+---@param identity BookIdentity
 ---@param url string
 ---@param headers table|nil 源站防盗链头（豆瓣必须带 Referer）
 ---@param done fun()
-local function saveCover(ref, url, headers, done)
+local function saveCover(identity, url, headers, done)
     if url == "" then
         done()
         return
     end
     Image.fetchAsync(url, headers, function(path, err)
         if path then
-            copyFile(path, Paths.coverPath(ref.stable_id, ref.source_id))
+            copyFile(path, Paths.coverPath(identity.stable_id, identity.source_id))
         else
             logger.warn("scrape cover download failed:", url, err)
         end
@@ -69,16 +69,16 @@ local function saveCover(ref, url, headers, done)
 end
 
 --- 写 books 表 + 拉封面，两件事都落地后回调。
----@param ref BookRef
+---@param identity BookIdentity
 ---@param result table
 ---@param done fun()
-local function applyResult(ref, result, done)
+local function applyResult(identity, result, done)
     DbQueue.run(function()
         -- 分类归本地目录/用户，刮削只补元数据，不覆盖
-        local existing = BookDB.get(ref.source_id, ref.stable_id)
+        local existing = BookDB.get(identity.source_id, identity.stable_id)
         BookDB.upsert({
-            source_id = ref.source_id,
-            stable_id = ref.stable_id,
+            source_id = identity.source_id,
+            stable_id = identity.stable_id,
             title = result.title,
             authors = result.author,
             intro = result.intro,
@@ -91,23 +91,23 @@ local function applyResult(ref, result, done)
         })
     end, {
         on_done = function()
-            saveCover(ref, result.cover_url, result.cover_headers, done)
+            saveCover(identity, result.cover_url, result.cover_headers, done)
         end,
     })
 end
 
 --- 显示搜索结果选择页
----@param ref BookRef
+---@param identity BookIdentity
 ---@param results table[]
 ---@param source string
 ---@param on_close fun()|nil
-local function showResults(ref, results, source, on_close)
+local function showResults(identity, results, source, on_close)
     local page = Results:new{
         results = results,
         source = source,
         -- 选中后落库与下封面都是异步：全部完成才通知调用方刷新
         on_pick = function(result)
-            applyResult(ref, result, function()
+            applyResult(identity, result, function()
                 UIManager:show(InfoMessage:new{
                     text = _("元数据已更新"),
                     timeout = 1.5,
@@ -123,10 +123,10 @@ local function showResults(ref, results, source, on_close)
 end
 
 --- 执行搜索
----@param ref BookRef
+---@param identity BookIdentity
 ---@param query string
 ---@param on_close fun()|nil
-local function performSearch(ref, query, on_close)
+local function performSearch(identity, query, on_close)
     local info = InfoMessage:new{ text = _("搜索中...") }
     UIManager:show(info)
 
@@ -144,17 +144,17 @@ local function performSearch(ref, query, on_close)
         end
 
         logger.info("scrape: got results from", source)
-        showResults(ref, results, source, on_close)
+        showResults(identity, results, source, on_close)
     end)
 end
 
 --- 启动刮削流程
----@param ref BookRef
+---@param identity BookIdentity
 ---@param default_title string|nil 默认书名
 ---@param on_close fun()|nil 完成回调
-function ScrapeUI.start(ref, default_title, on_close)
-    if not ref or type(ref.source_id) ~= "string" or type(ref.stable_id) ~= "string" then
-        logger.warn("scrape: invalid book ref")
+function ScrapeUI.start(identity, default_title, on_close)
+    if not identity or type(identity.source_id) ~= "string" or type(identity.stable_id) ~= "string" then
+        logger.warn("scrape: invalid book identity")
         return
     end
 
@@ -186,7 +186,7 @@ function ScrapeUI.start(ref, default_title, on_close)
                         if on_close then on_close() end
                         return
                     end
-                    performSearch(ref, query, on_close)
+                    performSearch(identity, query, on_close)
                 end,
             },
         }},
