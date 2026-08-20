@@ -6,13 +6,20 @@ Z-Library eAPI 客户端（HTTP Basic 门禁 + Z-Library 账号会话，仅异�
 
 local JSON = require("json")
 local Request = require("http.request")
+local Cache = require("http.cache")
 local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
--- 官方种子镜像（不带尾斜杠）。仅保留本机探测 eAPI /info/ok 可用的；
--- 主站优先，其余按实测延迟升序，方便故障转移前 3 个命中快镜像。
+-- 官方种子镜像（不带尾斜杠）。前排入口来自上游域名清单，并经
+-- eAPI /info/ok 实测可用；旧入口保留作地区性回退。
 local SEED_URLS = {
+    "https://librella.tw",
+    "https://bookabooki.tw",
+    "https://librella.fi",
+    "https://lexlib.tw",
+    "https://lexlib.fi",
+    "https://bookabooki.fi",
     "https://z-library.sk",
     "https://thai-books.sk",
     "https://frenchbooks.sk",
@@ -42,6 +49,7 @@ Client.__index = Client
 -- ---------------------------------------------------------------------------
 
 --- 取 URL 的 origin（scheme://host[:port]）与其组成部分
+---@param url string|nil
 ---@return string|nil origin, string|nil scheme, string|nil host
 local function originOf(url)
     local scheme, host, port = tostring(url or ""):match("^([hH][tT][tT][pP][sS]?)://([^/:]+):?(%d*)")
@@ -52,6 +60,8 @@ local function originOf(url)
 end
 
 --- 30x 的 Location 允许是相对地址（RFC 9110）：相对当前 URL 解析成绝对地址
+---@param current_url string
+---@param location string|nil
 ---@return string|nil
 local function absoluteUrl(current_url, location)
     if type(location) ~= "string" or location == "" then return nil end
@@ -60,6 +70,9 @@ local function absoluteUrl(current_url, location)
     if not origin then return nil end
     if location:sub(1, 2) == "//" then return scheme .. ":" .. location end
     if location:sub(1, 1) == "/" then return origin .. location end
+    if location:sub(1, 1) == "?" then
+        return (current_url:match("^[^?#]*") or current_url) .. location
+    end
     local dir = current_url:match("^(https?://.*/)") or (origin .. "/")
     return dir .. location
 end
@@ -69,6 +82,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- 候选 base 列表：用户配置 > 钉住 > 种子；去重，最多 MAX_BASE_ATTEMPTS 个
+---@param cfg table|nil
 ---@return string[]
 local function baseCandidates(cfg)
     local out, seen = {}, {}
@@ -100,6 +114,9 @@ local CHALLENGE_MARKERS = {
     "Checking your browser",
 }
 
+--- 判断响应体是否为 WAF 或浏览器验证页，而非 eAPI JSON。
+---@param body any
+---@return boolean
 local function looksLikeChallenge(body)
     if type(body) ~= "string" or body == "" then return false end
     local head = body:sub(1, 4096)
@@ -111,6 +128,8 @@ local function looksLikeChallenge(body)
 end
 
 --- 传输层错误分类（Turbo res.error.code / message）
+---@param res table|nil
+---@param err any
 ---@return string
 local function classifyTransportError(res, err)
     local code = type(res and res.error) == "table" and res.error.code or nil
@@ -126,54 +145,49 @@ end
 
 local REDIRECT_CODES = { [301] = true, [302] = true, [303] = true, [307] = true, [308] = true }
 
---- 告诉用户当前在试哪个镜像。UI 延迟加载：离线测试 / 无 UI 环境直接跳过。
-local function toastTrying(base)
-    local host = tostring(base or ""):match("^https?://([^/:]+)") or base
-    if not host or host == "" then return end
-    pcall(function()
-        local UIManager = require("ui/uimanager")
-        local InfoMessage = require("ui/widget/infomessage")
-        UIManager:show(InfoMessage:new{
-            text = T(_("正在尝试镜像：%1"), host),
-            timeout = 2,
-        })
-    end)
-end
-
 -- ---------------------------------------------------------------------------
 -- 客户端
 -- ---------------------------------------------------------------------------
 
+--- 创建客户端；配置表由调用方拥有，登录成功后会原地写入会话字段。
+---@param cfg table|nil
+---@return table
 function Client.new(cfg)
-    cfg = cfg or {}
-    return setmetatable({
-        cfg = cfg,
-        email = cfg.email or "",
-        password = cfg.password or "",
-        user_id = cfg.user_id or "",
-        user_key = cfg.user_key or "",
-    }, Client)
+    return setmetatable({ cfg = cfg or {} }, Client)
 end
 
+--- 判断是否已有可用于下载的 Z-Library 会话。
+---@return boolean
 function Client:hasSession()
-    return self.user_id ~= "" and self.user_key ~= ""
+    local cfg = self.cfg
+    return (cfg.user_id or "") ~= "" and (cfg.user_key or "") ~= ""
 end
 
+--- 判断是否具备登录所需的邮箱和密码。
+---@return boolean
 function Client:hasCredentials()
-    return self.email ~= "" and self.password ~= ""
+    local cfg = self.cfg
+    return (cfg.email or "") ~= "" and (cfg.password or "") ~= ""
 end
 
+--- 构造 API 或下载请求头。
+---@param with_session boolean|nil 是否附带 remix 会话 Cookie
+---@return table<string, string>
 function Client:headers(with_session)
     local headers = {
         ["Accept"] = "application/json, text/javascript, */*; q=0.01",
         ["User-Agent"] = USER_AGENT,
     }
     if with_session and self:hasSession() then
-        headers["Cookie"] = string.format("remix_userid=%s; remix_userkey=%s", self.user_id, self.user_key)
+        headers["Cookie"] = string.format("remix_userid=%s; remix_userkey=%s", self.cfg.user_id, self.cfg.user_key)
     end
     return headers
 end
 
+--- 解码 eAPI JSON 响应。
+---@param body any
+---@return table|nil data
+---@return string|nil err
 local function decode(body)
     if type(body) ~= "string" or body == "" then return nil, _("响应为空") end
     local ok, data = pcall(JSON.decode, body)
@@ -181,6 +195,10 @@ local function decode(body)
     return data
 end
 
+--- 从 eAPI 响应提取可展示的错误文案。
+---@param data table|nil
+---@param fallback string
+---@return string
 local function apiError(data, fallback)
     local err = type(data) == "table" and data.error or nil
     if type(err) == "table" then err = err.message end
@@ -193,23 +211,38 @@ end
 
 --- 带镜像故障转移与 30x 手动跟随的 JSON 请求。
 --- 成功 cb(data)；最终失败 cb(nil, err)。
+---@param method string
+---@param path string eAPI 路径（以 / 开头）
+---@param opts table|nil session、form、cache_ttl、timeout
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
 function Client:_jsonAsync(method, path, opts, cb)
     opts = opts or {}
     local bases = baseCandidates(self.cfg)
     local cancelled = false
     local job
+    local cache_job
     local result = {}
     function result.cancel()
         cancelled = true
+        if cache_job and cache_job.cancel then cache_job.cancel() end
         if job and job.cancel then job.cancel() end
     end
 
     local body = opts.form and Text.formEncode(opts.form) or nil
+    local cache_ttl = tonumber(opts.cache_ttl) or 0
+    local cache_key = cache_ttl > 0 and Cache.key(method, "zlib://api" .. path, opts.form) or nil
+    local headers = self:headers(opts.session)
+    if body then
+        headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
+        headers["X-Requested-With"] = "XMLHttpRequest"
+    end
     local last_err = _("网络请求失败")
     local bi = 0
     local current_base
 
     local issue
+    --- 请求下一个候选镜像；候选耗尽时只回调一次最终错误。
     local function tryNextBase()
         if cancelled then return end
         bi = bi + 1
@@ -218,12 +251,16 @@ function Client:_jsonAsync(method, path, opts, cb)
             return
         end
         current_base = bases[bi]
-        toastTrying(current_base)
         local url = current_base .. path
-        issue(url, method, body, self:headers(opts.session), { [url] = true }, 0)
+        issue(url, method, body, headers, { [url] = true }, 0)
     end
 
-    ---@param seen table 已请求过的 URL（重定向循环检测）
+    --- 发出单次请求或继续跟随重定向。
+    ---@param url string
+    ---@param m string
+    ---@param req_body string|nil
+    ---@param headers table<string, string>
+    ---@param seen table<string, boolean> 已请求过的 URL（重定向循环检测）
     ---@param hops number 已跟随的跳数
     issue = function(url, m, req_body, headers, seen, hops)
         job = Request.request({
@@ -238,7 +275,7 @@ function Client:_jsonAsync(method, path, opts, cb)
 
             -- 传输层失败：换下一个候选镜像
             if not code then
-                if current_base == pinned_base then pinned_base = nil end
+                if originOf(url) == pinned_base then pinned_base = nil end
                 last_err = classifyTransportError(res, err)
                 tryNextBase()
                 return
@@ -257,15 +294,13 @@ function Client:_jsonAsync(method, path, opts, cb)
                     return
                 end
                 seen[target] = true
-                -- 跨主机 = 镜像迁移：钉住新 origin，后续请求直接用它
+                -- 跨主机 = 镜像迁移；成功后按实际请求 URL 钉住新 origin。
+                -- Location 的路径和查询是服务端给出的请求目标，不能丢掉。
                 local new_origin = originOf(target)
                 local is_mirror_move = new_origin and new_origin ~= originOf(url)
-                if is_mirror_move then
-                    pinned_base = new_origin
-                end
                 if is_mirror_move and m ~= "GET" then
-                    -- 镜像迁移：在新 origin 上重发原始请求（POST 不能退化成 GET）
-                    issue(new_origin .. path, m, req_body, headers, seen, hops + 1)
+                    -- 镜像迁移：保持 POST 和 body，但跟随完整的 Location。
+                    issue(target, m, req_body, headers, seen, hops + 1)
                 elseif code ~= 307 and code ~= 308 and m ~= "GET" then
                     -- 站内 301/302/303：转 GET 丢 body 及 Content-* 头
                     local kept = {}
@@ -297,7 +332,7 @@ function Client:_jsonAsync(method, path, opts, cb)
             end
 
             -- 这个 base 能用：钉住（故障转移选中的镜像，下次直接用）
-            pinned_base = current_base
+            pinned_base = originOf(url) or current_base
 
             local data, decode_err = decode(res.body)
             if not Request.ok(code) then
@@ -305,29 +340,64 @@ function Client:_jsonAsync(method, path, opts, cb)
                 return
             end
             if not data then cb(nil, decode_err); return end
+            if cache_key then Cache.set(cache_key, data, cache_ttl) end
             cb(data)
         end)
     end
 
-    tryNextBase()
+    if cache_key then
+        cache_job = Cache.getAsync(cache_key, function(hit)
+            if cancelled then return end
+            if hit ~= nil then
+                cb(hit)
+            else
+                tryNextBase()
+            end
+        end)
+    else
+        tryNextBase()
+    end
     return result
 end
 
+--- 拉取默认热门书单。
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
 function Client:listPopularAsync(cb)
-    return self:_jsonAsync("GET", "/eapi/book/most-popular", { session = true }, function(data, err)
+    return self:_jsonAsync("GET", "/eapi/book/most-popular", {
+        session = true,
+        cache_ttl = 30 * 60,
+    }, function(data, err)
         if data and tonumber(data.success) == 1 then cb(data) else cb(nil, err or apiError(data, _("加载失败"))) end
     end)
 end
 
-function Client:searchAsync(query, page, limit, cb)
+--- 搜索书籍；空关键词可按语言获取默认书城。
+---@param query string|nil
+---@param page number|nil
+---@param limit number|nil
+---@param cb fun(data: table|nil, err: string|nil)
+---@param language string|nil Z-Library 搜索语言键
+---@return { cancel: fun() }
+function Client:searchAsync(query, page, limit, cb, language)
+    local form = { message = query or "", page = page or 1, limit = limit or 12 }
+    if type(language) == "string" and language ~= "" then
+        form["languages[0]"] = language
+    end
     return self:_jsonAsync("POST", "/eapi/book/search", {
         session = true,
-        form = { message = query or "", page = page or 1, limit = limit or 12 },
+        form = form,
+        cache_ttl = (query or "") == "" and 30 * 60 or 5 * 60,
     }, function(data, err)
         if data and not data.error then cb(data) else cb(nil, err or apiError(data, _("搜索失败"))) end
     end)
 end
 
+--- 拉取单本书的原始详情。
+---@param id string
+---@param hash string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
 function Client:detailAsync(id, hash, cb)
     return self:_jsonAsync("GET", string.format("/eapi/book/%s/%s", id, hash), { session = true }, function(data, err)
         if data and tonumber(data.success) == 1 and type(data.book) == "table" then
@@ -338,13 +408,17 @@ function Client:detailAsync(id, hash, cb)
     end)
 end
 
+--- 用配置中的账号登录，并持久化返回的会话 Cookie 字段。
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Client:loginAsync(cb)
     if not self:hasCredentials() then
         cb(nil, _("请先在设置里填写 Z-Library 邮箱和密码"))
         return nil
     end
+    local cfg = self.cfg
     return self:_jsonAsync("POST", "/eapi/user/login", {
-        form = { email = self.email, password = self.password },
+        form = { email = cfg.email or "", password = cfg.password or "" },
     }, function(data, err)
         if not data or tonumber(data.success) ~= 1 then
             cb(nil, err or apiError(data, _("登录失败")))
@@ -354,18 +428,17 @@ function Client:loginAsync(cb)
         local id = tostring(user.id or user.user_id or "")
         local key = tostring(user.remix_userkey or user.user_key or "")
         if id == "" or key == "" then cb(nil, _("登录失败：无效会话")); return end
-        self.user_id, self.user_key = id, key
-        self.cfg.user_id, self.cfg.user_key = id, key
-        require("utils.settings").saveSource("zlib", self.cfg)
+        cfg.user_id, cfg.user_key = id, key
+        require("utils.settings").saveSource("zlib", cfg)
         cb(true)
     end)
 end
 
-function Client:ensureSessionAsync(cb)
-    if self:hasSession() then cb(true); return nil end
-    return self:loginAsync(cb)
-end
-
+--- 获取带会话授权的 CDN 下载直链。
+---@param id string
+---@param hash string
+---@param cb fun(link: string|nil, err: string|nil)
+---@return { cancel: fun() }
 function Client:downloadLinkAsync(id, hash, cb)
     return self:_jsonAsync("GET", string.format("/eapi/book/%s/%s/file", id, hash), {
         session = true,
@@ -381,6 +454,13 @@ function Client:downloadLinkAsync(id, hash, cb)
     end)
 end
 
+--- 下载书籍到临时路径；会话失效时仅自动重新登录一次。
+---@param id string
+---@param hash string
+---@param dest string
+---@param on_progress fun(bytes: number)|nil
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }
 function Client:downloadAsync(id, hash, dest, on_progress, cb)
     local cancelled, job, retried = false, nil, false
     local result = {}
@@ -389,9 +469,14 @@ function Client:downloadAsync(id, hash, dest, on_progress, cb)
         if job and job.cancel then job.cancel() end
         pcall(os.remove, dest)
     end
+    --- 在未取消时交付最终下载结果。
+    ---@param ok boolean|nil
+    ---@param err string|nil
     local function finish(ok, err)
         if not cancelled then cb(ok, err) end
     end
+    --- 下载已授权的 CDN 文件，并拒绝错误返回的 HTML 页面。
+    ---@param link string
     local function fetchFile(link)
         if cancelled then return end
         pcall(os.remove, dest)
@@ -414,13 +499,13 @@ function Client:downloadAsync(id, hash, dest, on_progress, cb)
             finish(true)
         end)
     end
+    --- 获取直链；发现会话失效时清空旧会话并重登一次。
     local function getLink()
         job = self:downloadLinkAsync(id, hash, function(link, err)
             if link then fetchFile(link); return end
             if not retried and type(err) == "string"
                 and (err:find("Please login", 1, true) or err:find("请登录", 1, true)) then
                 retried = true
-                self.user_id, self.user_key = "", ""
                 self.cfg.user_id, self.cfg.user_key = nil, nil
                 require("utils.settings").saveSource("zlib", self.cfg)
                 job = self:loginAsync(function(ok, login_err)
@@ -431,9 +516,13 @@ function Client:downloadAsync(id, hash, dest, on_progress, cb)
             finish(nil, err)
         end)
     end
-    job = self:ensureSessionAsync(function(ok, err)
-        if ok then getLink() else finish(nil, err) end
-    end)
+    if self:hasSession() then
+        getLink()
+    else
+        job = self:loginAsync(function(ok, err)
+            if ok then getLink() else finish(nil, err) end
+        end)
+    end
     return result
 end
 
