@@ -8,6 +8,9 @@ local Text = require("utils.text")
 local _ = require("gettext")
 local Setting = {}
 
+--- 返回设置入口的状态文案与已登录标记。
+---@return string
+---@return boolean
 function Setting.rowStatus()
     local cfg = require("utils.settings").getSource("zlib")
     if (cfg.user_id or "") ~= "" and (cfg.user_key or "") ~= "" then
@@ -17,6 +20,8 @@ function Setting.rowStatus()
     return _("浏览可用 · 下载需登录"), false
 end
 
+--- 打开账号和可选镜像地址的编辑对话框。
+---@param plugin table|nil 用于保存后刷新桌面
 function Setting.open(plugin)
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
