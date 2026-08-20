@@ -39,24 +39,14 @@ end
 ---@class BookFiltersResult
 ---@field data { category: string[]|nil, series: string[]|nil }|nil
 
---- 统计上报中的书籍身份（源内 stable_id）。
----@class BookStatsBook
----@field stable_id string 源内稳定身份；moon 即为 filename
-
 --- 单条阅读会话统计（落盘 reading_stats 后上报）。
 ---@class BookStatsRow
+---@field source_id string 源标识
 ---@field stable_id string 源内书籍身份
 ---@field page number 结束页
 ---@field start_time number 会话开始时间戳（秒）
 ---@field duration number 阅读时长（秒）
 ---@field total_pages number 全书页数
----@field device_id string|nil 采集设备 ID
-
---- importReadingStatsAsync 载荷。
----@class BookStatsPayload
----@field books BookStatsBook[]|nil 涉及的书籍身份去重列表
----@field stats BookStatsRow[]|nil 会话明细
----@field device_id string|nil 上报设备 ID
 
 --- 封面 HTTP 请求描述（UI 线程同步取，再异步下载）。
 ---@class BookCoverRequest
@@ -86,17 +76,16 @@ end
 ---@field recentBooksAsync fun(self: BookSource, limit: number|nil, cb: fun(data: BookListResult|nil, err: string|nil)): table|nil 最近阅读
 ---@field filtersAsync fun(self: BookSource, cb: fun(data: BookFiltersResult|nil, err: string|nil)): table|nil 筛选项
 ---@field readingInsightAsync fun(self: BookSource, cb: fun(data: BookInsightResult|nil, err: string|nil)): table|nil 阅读洞察
----@field getDetailAsync fun(self: BookSource, ref: BookRef, cb: fun(data: BookDetail|nil, err: string|nil)): table|nil 书籍详情
----@field getProgressAsync fun(self: BookSource, ref: BookRef, cb: fun(data: ProgressPosition|nil, err: string|nil)): table|nil 拉取远端进度
----@field putProgressAsync fun(self: BookSource, ref: BookRef, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 推送进度
----@field getTocAsync fun(self: BookSource, ref: BookRef, cb: fun(data: BookChapter[]|nil, err: string|nil)): table|nil 目录
----@field fetchChapterContentAsync fun(self: BookSource, ref: BookRef, chapter: BookChapter, cb: fun(payload: ChapterContentPayload|nil, err: string|nil)): table|nil 按章正文
----@field materializeWholeAsync fun(self: BookSource, ref: BookRef, temp_path: string, on_progress: (fun(bytes: number)|nil), cb: fun(ok: boolean|nil, err: string|nil)): table|nil 整本下载到 temp_path
----@field coverRequest fun(self: BookSource, ref: BookRef): (BookCoverRequest|nil, string|nil) 封面请求描述（纯构造，无 IO）
----@field localPathFor fun(self: BookSource, ref: BookRef): string|nil 本地源专用：原文件直开路径（存在才返回，命中则不下载不复制）
+---@field getDetailAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: BookDetail|nil, err: string|nil)): table|nil 书籍详情
+---@field openBookAsync fun(self: BookSource, identity: BookIdentity, opts: table|nil, cb: fun(path: string|nil, err: string|nil)): table|nil 根据书籍身份解析、落盘并登记物理文档；按章源通过 opts.chapter_idx 指定章节；取消后不回调
+---@field getProgressAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: ProgressPosition|nil, err: string|nil)): table|nil 拉取远端进度
+---@field putProgressAsync fun(self: BookSource, identity: BookIdentity, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 推送进度
+---@field coverRequest fun(self: BookSource, identity: BookIdentity): (BookCoverRequest|nil, string|nil) 封面请求描述（纯构造，无 IO）
 ---@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 书城导入目标（local 移入 / webdav 上传）
----@field importReadingStatsAsync fun(self: BookSource, payload: BookStatsPayload, cb: fun(data: table|nil, err: string|nil)): table|nil 上报阅读统计
----@field syncAnnotationsAsync fun(self: BookSource, payload: table, cb: fun(data: table|nil, err: string|nil)): table|nil 同步划线/书签（moon）
+---@field syncStatsAsync fun(self: BookSource, rows: BookStatsRow[], cb: fun(data: table|nil, err: string|nil)): table|nil 上报领域统计记录；协议细节由源处理
+---@field pullStatsAsync fun(self: BookSource, cb: fun(rows: BookStatsRow[]|nil, err: string|nil)): table|nil 拉取领域统计记录
+---@field syncAnnotationsAsync fun(self: BookSource, identity: BookIdentity, annotations: table[], cb: fun(data: table|nil, err: string|nil)): table|nil 同步划线/书签（moon）
+---@field getAnnotationsAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: table|nil, err: string|nil)): table|nil 拉取划线/书签（moon）
 
 return {
     SourceCapabilities = SourceCapabilities,

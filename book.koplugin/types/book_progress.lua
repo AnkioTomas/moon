@@ -5,6 +5,7 @@
 ---@field chapter_idx integer|nil 连续章序号（1-based）
 ---@field chapter_fraction number|nil 章内比例 0..1
 ---@field locator string|nil XPointer/CFI 等精确定位
+---@field updated_at integer|nil 待上传版本号，仅本地队列使用
 
 local ProgressPosition = {}
 
