@@ -10,3 +10,4 @@
 ---@field chapter_fraction number|nil 章内比例
 ---@field locator string|nil XPointer/CFI 等精确定位
 ---@field updated_at integer 更新时间戳
+---@field sync_status integer 0=待同步，1=已同步
