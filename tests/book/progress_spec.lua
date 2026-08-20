@@ -97,7 +97,7 @@ sources.wechat = {
 }
 
 -- push 不看当前书：两个源的所有未同步项均被尝试，只有明确 true 才确认。
-Progress.push({})
+Progress.push()
 Stubs.flush()
 Assert.len(pushed, 2)
 Assert.eq(#marked, 1)
@@ -112,8 +112,13 @@ local ui = {
     document = { getPageCount = function() return 100 end },
     getCurrentPage = function() return 25 end,
 }
+local snapshot = {
+    ui = ui,
+    identity = { source_id = "moon", stable_id = "current.epub" },
+    doc_fraction = 0.25,
+}
 local saved_ok
-Progress.save(ui, { source_id = "moon", stable_id = "current.epub" }, function(ok) saved_ok = ok end)
+Progress.save(snapshot, function(ok) saved_ok = ok end)
 Assert.is_true(saved_ok)
 Assert.len(saved, 1)
 Assert.eq(saved[1].pos.fraction, 0.25)

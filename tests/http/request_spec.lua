@@ -256,17 +256,38 @@ do
                 HTTPClient = function()
                     return {
                         fetch = function(self, _url, opts)
-                            local added = {}
-                            opts.on_headers({
-                                add = function(_, name, value)
-                                    added[name] = value
+                            local fields = {
+                                { "Host", "api.ankio.net" },
+                                { "User-Agent", "Turbo Client v2.0.0" },
+                            }
+                            local headers = {
+                                get = function(_, name, ci)
+                                    for _, field in ipairs(fields) do
+                                        if (ci and field[1]:lower() == name:lower())
+                                                or (not ci and field[1] == name) then
+                                            return field[2]
+                                        end
+                                    end
                                 end,
-                            })
+                                set = function(_, name, value, ci)
+                                    for i = #fields, 1, -1 do
+                                        if (ci and fields[i][1]:lower() == name:lower())
+                                                or (not ci and fields[i][1] == name) then
+                                            table.remove(fields, i)
+                                        end
+                                    end
+                                    fields[#fields + 1] = { name, value }
+                                end,
+                                add = function(_, name, value)
+                                    fields[#fields + 1] = { name, value }
+                                end,
+                            }
+                            opts.on_headers(headers)
                             Assert.eq(opts.user_agent, "BookTestAgent")
-                            Assert.eq(added["Accept"], "application/json")
-                            Assert.eq(added["X-Test"], "yes")
-                            Assert.is_nil(added["User-Agent"])
-                            Assert.is_nil(added["Content-Length"])
+                            Assert.eq(headers:get("Accept", true), "application/json")
+                            Assert.eq(headers:get("X-Test", true), "yes")
+                            Assert.eq(headers:get("User-Agent", true), "BookTestAgent")
+                            Assert.is_nil(headers:get("Content-Length", true))
                             return { code = 200, body = "ok" }
                         end,
                     }

@@ -114,4 +114,52 @@ function JsonStub.decode(body)
     return parse(body)
 end
 
+local function encodeValue(value, buf)
+    local t = type(value)
+    if value == nil then
+        buf[#buf + 1] = "null"
+    elseif t == "boolean" then
+        buf[#buf + 1] = value and "true" or "false"
+    elseif t == "number" then
+        buf[#buf + 1] = tostring(value)
+    elseif t == "string" then
+        buf[#buf + 1] = '"' .. value:gsub("[\\\"\n\r\t]", {
+            ["\\"] = "\\\\", ['"'] = '\\"', ["\n"] = "\\n", ["\r"] = "\\r", ["\t"] = "\\t",
+        }) .. '"'
+    elseif t == "table" then
+        local is_array = #value > 0
+        if is_array then
+            buf[#buf + 1] = "["
+            for i, item in ipairs(value) do
+                if i > 1 then buf[#buf + 1] = "," end
+                encodeValue(item, buf)
+            end
+            buf[#buf + 1] = "]"
+        else
+            buf[#buf + 1] = "{"
+            local first = true
+            for k, v in pairs(value) do
+                if type(k) == "string" then
+                    if not first then buf[#buf + 1] = "," end
+                    first = false
+                    encodeValue(k, buf)
+                    buf[#buf + 1] = ":"
+                    encodeValue(v, buf)
+                end
+            end
+            buf[#buf + 1] = "}"
+        end
+    else
+        error("cannot encode " .. t)
+    end
+end
+
+---@param value any
+---@return string
+function JsonStub.encode(value)
+    local buf = {}
+    encodeValue(value, buf)
+    return table.concat(buf)
+end
+
 return JsonStub
