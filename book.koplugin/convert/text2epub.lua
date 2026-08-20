@@ -25,29 +25,67 @@ local Text2Epub = {}
 local trim = Text.trim
 local xmlEscape = Text.xmlEscape
 local DEFAULT_PART_CHARS = 256 * 1024
+local CHINESE_NUMBER_CHARS = { "零", "〇", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "百", "千", "万", "两" }
+local INVALID_VOLUME_SUFFIX = { ["门"] = true, ["队"] = true, ["属"] = true, ["分"] = true, ["件"] = true, ["落"] = true }
+
+---@param value string
+---@return boolean
+local function isNumberToken(value)
+    value = value:gsub("%s+", "")
+    if value == "" or value:match("^%d+$") or value:match("^[IVXLCDMivxlcdm]+$") then
+        return value ~= ""
+    end
+    local rest = value
+    for _, char in ipairs(CHINESE_NUMBER_CHARS) do
+        rest = rest:gsub(char, "")
+    end
+    return rest == ""
+end
 
 ---@param line string
----@return boolean
-local function isChapterTitle(line)
-    if line:match("^[Cc][Hh][Aa][Pp][Tt][Ee][Rr]%s+[%dIVXLCDMivxlcdm]+[%s:%.%-]?.*$") then
-        return true
+---@return string|nil
+local function chapterTitle(line)
+    line = trim(line)
+    -- 常见 TXT 章节会用 === 包裹标题；这里只剥离等号，避免吞掉正文。
+    line = line:gsub("^=+%s*", ""):gsub("%s*=+$", "")
+
+    if line:match("^[Cc][Hh][Aa][Pp][Tt][Ee][Rr]%s+[%wIVXLCDMivxlcdm]+[%s:%.%-]?.*$")
+        or line:match("^[Ss][Ee][Cc][Tt][Ii][Oo][Nn]%s+[%wIVXLCDMivxlcdm]+[%s:%.%-]?.*$")
+        or line:match("^[Pp][Aa][Gg][Ee]%s+%d+[%s:%.%-]?.*$")
+    then
+        return line
     end
 
-    for _index, marker in ipairs({ "章", "回", "节", "卷", "部", "篇" }) do
-        if line:match("^第%s*.-" .. marker .. "%s*.*$") then
-            return true
+    if line:sub(1, 3) == "第" then
+        for _, marker in ipairs({ "章", "回", "节", "集", "幕", "卷", "部", "篇" }) do
+            local number, suffix = line:match("^第%s*(.-)%s*" .. marker .. "(.*)$")
+            if number and isNumberToken(number) then
+                -- “第一部门/部队”是正文，不是“第一部”章节。
+                if marker ~= "部" or not INVALID_VOLUME_SUFFIX[suffix:sub(1, 3)]
+                then
+                    return line
+                end
+            end
         end
     end
 
-    for _index, title in ipairs({ "序章", "序言", "前言", "楔子", "引子", "尾声", "后记", "番外" }) do
+    for _index, title in ipairs({
+        "序章", "序言", "前言", "楔子", "引子", "尾声", "后记", "番外", "终章", "最终章", "完本感言",
+    }) do
         if line == title
             or line:match("^" .. title .. "[%s:%-].+$")
             or line:match("^" .. title .. "：.+$")
         then
-            return true
+            return line
         end
     end
-    return false
+    return nil
+end
+
+---@param line string
+---@return boolean
+local function isChapterTitle(line)
+    return chapterTitle(line) ~= nil
 end
 
 --- 判断一行是否应当保留为独立段落（列表或对话）。
@@ -197,13 +235,20 @@ local function chapterHtml(title, lines)
 end
 
 ---@param source string|nil
----@return string|nil
-local function titleFromPath(source)
+---@return string|nil, string|nil
+local function metadataFromPath(source)
     local name = type(source) == "string" and source:match("([^/\\]+)$") or nil
     if not name then
         return nil
     end
     name = name:gsub("%.[^%.]+$", "")
+    local title, author = name:match("^《(.-)》.-作者%s*：(.+)$")
+    if not title then
+        title, author = name:match("^《(.-)》.-作者%s*:(.+)$")
+    end
+    if title and trim(title) ~= "" and trim(author) ~= "" then
+        return trim(title), trim(author)
+    end
     return trim(name) ~= "" and trim(name) or nil
 end
 
@@ -228,7 +273,7 @@ function Text2Epub.parse(text, opts)
 
     for index, raw in ipairs(lines) do
         local line = trim(raw)
-        if line ~= "" and isChapterTitle(line) then
+        if line ~= "" and chapterTitle(line) then
             metadata_open = false
         end
         local metadata_title
@@ -254,8 +299,12 @@ function Text2Epub.parse(text, opts)
         end
     end
 
+    local path_title, path_author = metadataFromPath(opts.source)
     if title == "" then
-        title = titleFromPath(opts.source) or ""
+        title = path_title or ""
+    end
+    if author == "" then
+        author = path_author or ""
     end
     if title == "" then
         for i, raw in ipairs(content) do
@@ -289,8 +338,9 @@ function Text2Epub.parse(text, opts)
 
     for _index, raw in ipairs(content) do
         local line = trim(raw)
-        if line ~= "" and isChapterTitle(line) then
-            startSection(line)
+        local heading = line ~= "" and chapterTitle(line)
+        if heading then
+            startSection(heading)
         elseif current then
             current.lines[#current.lines + 1] = raw
         elseif line ~= "" then
@@ -395,6 +445,7 @@ function Text2Epub.build(opts, cb)
 end
 
 Text2Epub._isChapterTitle = isChapterTitle
+Text2Epub._metadataFromPath = metadataFromPath
 Text2Epub._chapterHtml = chapterHtml
 Text2Epub._paragraphsFromLines = paragraphsFromLines
 Text2Epub._chapterParts = chapterParts
