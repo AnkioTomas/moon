@@ -1,5 +1,5 @@
 --[[--
-Material Icons Outlined 字体图标。
+Material Symbols Outlined 字体图标。
 
 布局：
   widget（方盒居中）     label row              label column
@@ -16,7 +16,7 @@ Font:getFace 内部会 Screen:scaleBySize，所以这里只能过 UI.fontSize（
 绝不能传 UI.sz() 的结果，否则 DPI 缩放两次，图标会比文字大一圈。
 占位方盒用 UI.sz(size)，与外部按 UI.sz(size) 算的布局对齐。
 
-字体：fonts/MaterialIconsOutlined-Regular.otf
+字体：fonts/MaterialSymbolsOutlined-Regular.ttf（Google Material Symbols Outlined）。
 字面：Font.fontmap["moon_icon"]（独立于 UI_FACES，换 UI 字不影响图标）
 
 name 直接写 Material Icons 原名（home / settings / chevron_left …）：
@@ -45,16 +45,17 @@ local UI = require("ui.components.bookui")
 local Icon = {}
 
 local FACE = "moon_icon"
-local FONT_FILE = "MaterialIconsOutlined-Regular.otf"
+local FONT_FILE = "MaterialSymbolsOutlined-Regular.ttf"
 --- 默认图标逻辑尺寸（对应 UI.iconSz() 的 UI.sz(24)）
 local DEFAULT_SIZE = 24
 
 local _ensured = false
 
---- 登记图标字体路径，并固定 moon_icon 字面。
+---@param face string
+---@param filename string
 ---@return boolean
-function Icon.ensure()
-    local path = UI.pluginRoot() .. "fonts/" .. FONT_FILE
+local function ensureFont(face, filename)
+    local path = UI.pluginRoot() .. "fonts/" .. filename
     if lfs.attributes(path, "mode") ~= "file" then
         logger.err("book.icon missing font", path)
         return false
@@ -70,10 +71,18 @@ function Icon.ensure()
     if not listed then
         table.insert(FontList.fontlist, 1, path)
     end
-    -- MoonFont.applyCurrent 只改 UI_FACES 并清 Font.faces，不碰这里
-    Font.fontmap[FACE] = FONT_FILE
-    _ensured = true
+    Font.fontmap[face] = filename
     return true
+end
+
+--- 登记图标字体路径，并固定 moon_icon 字面。
+---@return boolean
+function Icon.ensure()
+    if not _ensured then
+        -- MoonFont.applyCurrent 只改 UI_FACES 并清 Font.faces，不碰这里
+        _ensured = ensureFont(FACE, FONT_FILE)
+    end
+    return _ensured
 end
 
 --- 纯图标 TextWidget（默认包成 UI.sz(size) 方盒）。
@@ -85,8 +94,8 @@ function Icon.widget(opts)
     if type(name) ~= "string" or name == "" then
         return nil
     end
-    if not _ensured then
-        Icon.ensure()
+    if not Icon.ensure() then
+        return nil
     end
     local size = math.max(1, tonumber(opts.size) or DEFAULT_SIZE)
     local color = opts.color
