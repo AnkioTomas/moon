@@ -1,29 +1,13 @@
---- Book / BookRef 领域类型。
+--- Book 领域类型。
 --- stable_id 仅源内唯一；跨源身份 = (source_id, stable_id)。
 
---- 跨层书籍身份：业务全程传 BookRef，不派生额外主键。
----@class BookRef
+--- 路径解析出的阅读身份（Store.identityFor / ensureIdentity 返回值）。
+---@class BookIdentity
 ---@field source_id string 源标识（moon / webdav / wechat / local 等）
----@field stable_id string 源内稳定身份；禁止跨源比较或合并
-
-local BookRef = {}
-
---- 构造书籍身份。
----@param source_id string
----@param stable_id string
----@return BookRef
-function BookRef.new(source_id, stable_id)
-    if type(source_id) ~= "string" or source_id == "" then
-        error("BookRef.source_id required")
-    end
-    if type(stable_id) ~= "string" or stable_id == "" then
-        error("BookRef.stable_id required")
-    end
-    return {
-        source_id = source_id,
-        stable_id = stable_id,
-    }
-end
+---@field stable_id string 源内稳定身份
+---@field chapter_idx number|nil 章节文件时为章号；整本书为 nil
+---@field book Book|nil books 表元数据行；刚登记/未入库时可能为内存行或 nil
+---@field source BookSource|nil 属主源实例；仅 ensureIdentity（打开时）解析，identityFor 不挂
 
 --- 对应表 books：身份列 + 展示元数据 + 统计 md5。
 ---@class Book
@@ -38,7 +22,9 @@ end
 ---@field series string|nil 系列名
 ---@field intro string|nil 简介
 ---@field fetched_at integer 元数据拉取时间戳；0 表示仅身份行
----@field ref BookRef|nil 运行时由身份列派生，不入库
+---@field path string|nil 本地文件路径；身份解析唯一入口（下载/登记后由各源收口更新）
+---@field last_open integer 最近打开时间戳；0 表示未打开过
+---@field last_chapter_idx integer|nil 最近读到的章（按章书籍）
 ---@field cover string|nil 封面 URL，不入库；存在时 UI 直接下载
 ---@field cover_headers table|nil 封面请求头
 
@@ -68,6 +54,5 @@ function Book.clampPercent(raw, finished, as_frac)
 end
 
 return {
-    BookRef = BookRef,
     Book = Book,
 }
