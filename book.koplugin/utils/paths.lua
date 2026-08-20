@@ -231,23 +231,4 @@ function P.ensureBookWork(stable_id, id)
     ensureDir(dir)
 end
 
---- 解析书籍工作目录内的文件路径 → dir, filename；不在工作目录内返回 nil。
---- 布局：cache/<source>/book/<slug>/<file>（file = book.<ext> 或 N.html）。
----@param path string|nil
----@return string|nil dir, string|nil filename, string|nil source_id, string|nil slug
-function P.splitBookWorkPath(path)
-    if type(path) ~= "string" then
-        return nil
-    end
-    local root = P.cacheDir() .. "/"
-    if path:sub(1, #root) ~= root then
-        return nil
-    end
-    local seg, kind, slug, file = path:sub(#root + 1):match("^([^/]+)/([^/]+)/([^/]+)/([^/]+)$")
-    if not file or kind ~= KIND_BOOK then
-        return nil
-    end
-    return root .. seg .. "/" .. kind .. "/" .. slug, file, seg, slug
-end
-
 return P
