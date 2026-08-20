@@ -4,7 +4,7 @@ Book 桌面壳 — 顶栏 + 底栏 + Tab 内容拼装。
 
 布局（OverlapGroup 叠层）：
   +-----------------------------------------------+
-  | TopBar（源名 · 内存/电量/光/Wi‑Fi/时钟）       |
+  | TopBar（时钟 · 源名 · 剩余内存/存储/Wi‑Fi/亮度/电量） |
   |-----------------------------------------------|
   |                                               |
   |          Tab 内容区（contentHeight）           |
@@ -410,7 +410,7 @@ function Desktop:showDetail(book)
         UIManager:close(self.detail)
         self.detail = nil
     end
-    if book.ref and book.ref.source_id ~= "zlib" then
+    if book.source_id and book.source_id ~= "zlib" then
         BookStore.rememberMany({ book })
     end
     local desk = self
