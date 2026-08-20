@@ -47,8 +47,8 @@ local BookInfo = {}
 ---@return string|nil
 function BookInfo.file(book)
     if type(book) ~= "table" then return nil end
-    if type(book.ref) == "table" and type(book.ref.stable_id) == "string" then
-        return book.ref.stable_id
+    if type(book.stable_id) == "string" then
+        return book.stable_id
     end
     return nil
 end
@@ -178,7 +178,6 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
     opts = opts or {}
     local title = BookInfo.title(book)
     local pct = BookInfo.pct(book)
-    local ref = type(book) == "table" and book.ref or nil
     local req
     if type(opts.src) == "string" and opts.src ~= "" then
         req = { url = opts.src, headers = opts.headers }
@@ -186,8 +185,9 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
         req = { url = book.cover_url, headers = book.cover_headers }
     elseif type(book) == "table" and type(book.cover) == "string" and book.cover ~= "" then
         req = { url = book.cover, headers = book.cover_headers }
-    elseif source and type(source.coverRequest) == "function" and type(ref) == "table" then
-        req = select(1, source:coverRequest(ref))
+    elseif source and type(source.coverRequest) == "function"
+        and type(book) == "table" and type(book.stable_id) == "string" then
+        req = select(1, source:coverRequest(book))
     end
     local cover = Image.widget{
         src = req and req.url or nil,
