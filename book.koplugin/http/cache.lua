@@ -1,5 +1,5 @@
 --[[--
-HTTP GET 响应缓存（键 = METHOD + path + 规范化 query，TTL 秒）。
+HTTP 响应缓存（键 = METHOD + path + 规范化参数，TTL 秒）。
 
 持久化在 utils.db.http（JSON 文本 + expires）。
 只存成功响应；调用方传入 ttl>0 才写入。
