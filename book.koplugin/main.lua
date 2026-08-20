@@ -16,7 +16,6 @@ local _ = require("gettext")
 
 local SourceRegistry = require("source.registry")
 local Desktop = require("ui.desktop")
-local StatsSync = require("stats.stats_sync")
 local Host = require("host")
 local Open = require("book.open")
 
@@ -44,6 +43,7 @@ function BookPlugin:init()
         logger.err("book turbo init failed:", err_turbo)
     end
     Host.attach(self)
+    require("translate.edge").install()
     require("ui.desktop.panel.native").install(self.ui)
     require("lockscreen.init").bootstrap()
     require("remote.init").bootstrap()
@@ -82,7 +82,7 @@ function BookPlugin:addToMainMenu(menu_items)
     }
 end
 
---- 阅读器就绪：建阅读会话；统计计时；拉进度；按章落点；挂阅读页；通知源
+--- 阅读器就绪：建阅读会话；统计计时；拉进度；按章落点；挂阅读页
 ---@return nil
 function BookPlugin:onReaderReady()
     require("ui.reader.session").onReaderReady(self)
@@ -97,13 +97,13 @@ end
 --- 章末：按章会话自动下一章
 ---@return boolean
 function BookPlugin:onEndOfBook()
-    return require("ui.reader.session").onEndOfBook()
+    return require("ui.reader.session").onChapterBoundary(1)
 end
 
---- 章首：按章会话自动上一章（由 chapters.patches 触发）
+--- 章首：按章会话自动上一章（由阅读会话边界处理触发）
 ---@return boolean
 function BookPlugin:onStartOfBook()
-    return require("ui.reader.session").onStartOfBook()
+    return require("ui.reader.session").onChapterBoundary(-1)
 end
 
 --- 休眠前：有打开文档时推进度 / 结清统计并通知源；远程传书停服（resume 恢复）
@@ -127,9 +127,10 @@ function BookPlugin:onExit()
     require("remote.init").onExit()
 end
 
---- 网络恢复：后台补齐或按日刷新锁屏图。
+--- 网络恢复：通知当前源重试持久化队列，并刷新锁屏图。
 ---@return nil
 function BookPlugin:onNetworkConnected()
+    self:emitToSource("network_connected")
     require("lockscreen.init").refreshInBackground()
 end
 
@@ -137,7 +138,7 @@ end
 ---@param page number
 ---@return nil
 function BookPlugin:onPageUpdate(page)
-    require("ui.reader.session").onPageUpdate(self, page)
+    require("ui.reader.session").onPageChanged(self, page)
 end
 
 --- 翻页（滚动视图）：统计换页；分发 page_changed
@@ -145,11 +146,13 @@ end
 ---@param page number|nil
 ---@return nil
 function BookPlugin:onPosUpdate(_pos, page)
-    require("ui.reader.session").onPosUpdate(self, page)
+    require("ui.reader.session").onPageChanged(self, page)
 end
 
---- 高亮变化：预生成高亮锁屏，供本次休眠使用。
-function BookPlugin:onAnnotationsModified()
+--- 注解变化：由阅读会话按当前身份持久化，并预生成高亮锁屏。
+---@param items table KOReader 变更描述
+function BookPlugin:onAnnotationsModified(items)
+    require("ui.reader.session").onAnnotationsModified(self, items)
     require("lockscreen.init").onAnnotationsModified()
 end
 
@@ -181,7 +184,7 @@ end
 ---@param book Book
 ---@return nil
 function BookPlugin:openBook(book)
-    Open.book(self, book, self:getSource())
+    Open.book(self, book)
 end
 
 --- 数据源切换后：取消旧请求、回退 Tab、重建桌面
@@ -189,13 +192,13 @@ end
 ---@return nil
 function BookPlugin:onSourceChanged()
     logger.info("book onSourceChanged")
-    StatsSync.invalidate()
     local source = SourceRegistry.current()
     if source and source.clearCaches then
         source:clearCaches()
     end
     if self.desktop then
         self.desktop:sourceChanged(source)
+        self:emitToSource("desktop_open", self.desktop, source)
     end
 end
 
