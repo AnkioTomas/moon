@@ -177,6 +177,21 @@ function Store.identityFor(path)
     return nil
 end
 
+--- 判断异步操作发起后，ReaderUI 是否仍打开同一物理文档。
+---@param ui table|nil ReaderUI 实例
+---@param identity BookIdentity|nil 发起操作时的文档身份
+---@return boolean
+function Store.isCurrentDocument(ui, identity)
+    if not ui or not ui.document or not ui.document.file or not identity then
+        return false
+    end
+    local current = Store.identityFor(ui.document.file)
+    return current ~= nil
+        and current.source_id == identity.source_id
+        and current.stable_id == identity.stable_id
+        and current.chapter_idx == identity.chapter_idx
+end
+
 --- 打开时确保身份：能解析则补登记打开记录；
 --- .moon 内未知文件返回 nil（必须从 Book 桌面打开）；
 --- .moon 外未入库文件一律当本地书登记（统计/进度挂到 local 源）。
