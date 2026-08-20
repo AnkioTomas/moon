@@ -42,6 +42,7 @@ package.preload["lua-ljsqlite3/init"] = function()
                         rows = function()
                             local data = {
                                 { "schema_version", "2" }, { "entries", "3" }, { "source_tag", "test" },
+                                { "built_at", "2026-08-19 13:17:06" },
                             }
                             local i = 0
                             return function()
@@ -151,6 +152,7 @@ Assert.is_false(complete)
 Assert.is_true(Dict.isAvailable())
 Assert.eq(Dict.entries(), "3")
 Assert.eq(Dict.sourceTag(), "test")
+Assert.eq(Dict.builtAt(), "2026-08-19 13:17:06")
 
 local words = Dict.lookup("nihao")
 Assert.eq(captured[#captured], "nihao", "六位以内的直接拼音必须等值命中 quick")

@@ -71,7 +71,8 @@ local source = {
 }
 local installed
 Zlib.installAsync(source, {
-    ref = { source_id = "zlib", stable_id = "10:hash10" },
+    source_id = "zlib",
+    stable_id = "10:hash10",
     title = "列表书",
 }, nil, function(ok, err, filename)
     installed = { ok, err, filename }

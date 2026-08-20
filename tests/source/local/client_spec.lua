@@ -273,11 +273,7 @@ package.preload["utils.db.book"] = function()
             table.sort(out)
             return out
         end,
-    }
-end
-package.preload["utils.db.open"] = function()
-    return {
-        recentBySource = function(source_id, limit)
+        recentBySource = function()
             return {
                 { stable_id = "/books/a.epub", last_open = 200, title = "T:/books/a.epub" },
                 { stable_id = "/books/note.md", last_open = 100, title = "note" },
@@ -304,7 +300,6 @@ for _, name in ipairs({
     "document/documentregistry",
     "utils.task",
     "utils.db.book",
-    "utils.db.open",
     "utils.db.stats",
     "source.local.client",
 }) do
@@ -450,6 +445,7 @@ do
     local a = db_rows[rowKey("local", "/books/a.epub")]
     Assert.eq(a.title, "T:/books/a.epub")
     Assert.eq(a.authors, "A:/books/a.epub")
+    Assert.eq(a.path, "/books/a.epub")
     Assert.is_nil(a.category)
     Assert.is_nil(a.series)
     local cpdf = db_rows[rowKey("local", "/books/sub/c.pdf")]
@@ -541,6 +537,7 @@ do
     local a = db_rows[rowKey("local", "/books/a.epub")]
     Assert.not_nil(a)
     Assert.eq(a.title, "T:/books/a.epub")
+    Assert.eq(a.path, "/books/a.epub")
     Assert.is_nil(a.category)
     Assert.is_nil(a.series)
     -- 其它库内行不受影响（无 prune）
@@ -591,6 +588,7 @@ do
     Assert.eq(renamed[1][2], "/books/sub_a.epub")
     local row = db_rows[rowKey("local", "/books/sub_a.epub")]
     Assert.not_nil(row)
+    Assert.eq(row.path, "/books/sub_a.epub")
     Assert.is_nil(row.category)
     Assert.is_nil(row.series)
 
@@ -829,7 +827,6 @@ for _, name in ipairs({
     "document/documentregistry",
     "utils.task",
     "utils.db.book",
-    "utils.db.open",
     "utils.db.stats",
     "source.local.client",
 }) do

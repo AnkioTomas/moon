@@ -1,78 +1,85 @@
---[[-- ui.reader：上下边缘接管与控制台生命周期。 --]]
+--[[-- ui.reader：阅读图标动作与 ReaderUI 接线。 --]]
 
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
 Stubs.install()
 Stubs.reset()
 
-local active = false
-local shown = {}
-local dirty = 0
-
-package.preload["ui.reader.session"] = function()
-    return { isActive = function() return active end }
+local native_ui
+package.preload["ui.reader.native"] = function()
+    return { install = function(ui) native_ui = ui end }
 end
+
+local active = true
+package.preload["ui.reader.session"] = function()
+    return {
+        current = function()
+            return active and { identity = { source = {} } } or nil
+        end,
+        toc = function() return nil end,
+    }
+end
+
+local registered_module
 package.preload["ui.reader.bars"] = function()
     return { startClock = function() end }
 end
 package.preload["lockscreen.init"] = function()
     return { refreshInBackground = function() end }
 end
-package.preload["ui.reader.panel"] = function()
-    return {
-        new = function(_, opts)
-            return { close_callback = opts.close_callback }
+
+local bookmarked, toggles = false, 0
+local ui = {
+    dialog = {},
+    toc = { onShowToc = function() end },
+    bookmark = {
+        isPageBookmarked = function() return bookmarked end,
+        onToggleBookmark = function()
+            bookmarked = not bookmarked
+            toggles = toggles + 1
         end,
-    }
-end
-
-local UIManager = require("ui/uimanager")
-UIManager.show = function(_, widget)
-    shown[#shown + 1] = widget
-end
-UIManager.close = function(_, widget)
-    if widget.close_callback then
-        widget.close_callback()
-    end
-end
-UIManager.setDirty = function()
-    dirty = dirty + 1
-end
-
-local Reader = require("ui.reader")
-local zones
-local view_modules = {}
-local plugin = {
-    ui = {
-        dialog = {},
-        registerTouchZones = function(_, registered) zones = registered end,
-        view = {
-            registerViewModule = function(_, name, module) view_modules[name] = module end,
-        },
+        onShowBookmark = function() end,
+    },
+    dictionary = {
+        onShowDictionaryLookup = function() end,
+        showDictionariesMenu = function() end,
+    },
+    view = {
+        registerViewModule = function(_, name, module)
+            registered_module = { name = name, module = module }
+        end,
     },
 }
+local plugin = { ui = ui }
+
+local Reader = require("ui.reader")
+local actions = Reader.actions(ui)
+Assert.len(actions, 6)
+Assert.eq(actions[1].id, "toc")
+Assert.eq(actions[1].icon, "toc")
+Assert.eq(actions[2].id, "bookmark")
+Assert.eq(actions[3].id, "highlights")
+Assert.eq(actions[4].id, "sync")
+Assert.eq(actions[5].id, "ocr")
+Assert.eq(actions[6].id, "dictionary")
+
+local closed, refreshed = 0, 0
+Assert.is_true(Reader.executeAction("bookmark", ui, {
+    close = function() closed = closed + 1 end,
+    refresh = function() refreshed = refreshed + 1 end,
+}))
+Assert.eq(toggles, 1)
+Assert.eq(closed, 0)
+Assert.eq(refreshed, 1)
+Assert.is_true(Reader.actions(ui)[2].active)
+Assert.eq(Reader.actions(ui)[2].icon, "bookmark")
+Assert.is_false(Reader.executeAction("missing", ui))
 
 Reader.attach(plugin)
-Assert.eq(#zones, 2)
-Assert.eq(zones[1].id, "book_reader_top_tap")
-Assert.eq(zones[1].screen_zone.ratio_y, 0)
-Assert.eq(zones[2].id, "book_reader_bottom_tap")
-Assert.eq(zones[2].screen_zone.ratio_y, 0.85)
-Assert.is_nil(plugin.ui._zones, "不应注册正文中间点按区")
-Assert.is_true(view_modules.book_bars ~= nil)
+Assert.eq(native_ui, ui)
+Assert.eq(registered_module.name, "book_bars")
+Assert.is_nil(ui._zones, "不应注册覆盖原生菜单的触摸区")
 
-Assert.is_false(zones[1].handler(), "非 Book 会话放行原生手势")
-Assert.eq(#shown, 0)
-
-active = true
-Assert.is_true(zones[1].handler())
-Assert.is_true(Reader.isToolbarOpen())
-Assert.eq(#shown, 1)
-
-Assert.is_true(zones[2].handler())
-Assert.eq(#shown, 1, "已打开时不重复创建控制台")
-
-Reader.closeToolbar()
-Assert.is_false(Reader.isToolbarOpen())
-Assert.is_true(dirty > 0)
-
+native_ui = nil
+Reader.attach(plugin)
+Assert.is_nil(native_ui, "同一 ReaderUI 不应重复安装")

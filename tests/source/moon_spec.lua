@@ -28,7 +28,7 @@ end
 -- onEvent 延迟加载的 UI 依赖：记录调用
 local sync = { push_calls = 0, last_source = nil, push_args = nil }
 
-package.preload["stats.stats_sync"] = function()
+package.preload["book.stats"] = function()
     return {
         pushWithUi = function(self, a, b)
             sync.push_calls = sync.push_calls + 1
@@ -113,7 +113,7 @@ do
     Assert.eq(rec.query.category, "c")
     -- wire 经 Mapper.list 映射
     Assert.eq(result.count, 1)
-    Assert.eq(result.data[1].ref.stable_id, "a.epub")
+    Assert.eq(result.data[1].stable_id, "a.epub")
     Assert.eq(result.data[1].percent, 42)
 end
 
@@ -150,7 +150,7 @@ do
     Assert.eq(err, "网络故障")
 end
 
--- onEvent：document_close/suspend 推统计；其余事件无动作
+-- onEvent：document_close/suspend 推统计
 do
     sync.push_calls = 0
 
@@ -163,7 +163,6 @@ do
     src:onEvent("suspend")
     Assert.eq(sync.push_calls, 2)
 
-    src:onEvent("reader_ready")
     src:onEvent("page_changed")
     Assert.eq(sync.push_calls, 2)
 end
@@ -246,7 +245,7 @@ for _, name in ipairs({
     "utils.settings",
     "source.moon.client",
     "ui/network/manager",
-    "stats.stats_sync",
+    "book.stats",
     "source.moon",
 }) do
     package.preload[name] = nil

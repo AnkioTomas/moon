@@ -1,5 +1,5 @@
 --[[--
-utils.db：open 仅子进程 + reading_stats CRUD
+utils.db：open 仅子进程 + wipeIfStale 清库重建 + reading_stats CRUD
 
 @module tests.utils.db_spec
 --]]
@@ -38,7 +38,6 @@ local function clearMods()
         "ffi/sha2",
         "utils.db.base",
         "utils.db.book",
-        "utils.db.open",
         "utils.db.stats",
     }) do
         package.preload[name] = nil
@@ -130,13 +129,15 @@ do
 
     local DbBase = require("utils.db.base")
     DbBase.open()
+    -- open 时 wipeIfStale 先查 user_version：首个 prepare 固定是这条 PRAGMA
+    Assert.eq(calls[1].sql, "PRAGMA user_version;")
     local text = "line1\nline2's"
     Assert.is_true(DbBase.exec("INSERT INTO sample VALUES (?,?,?)", text, nil, 3) ~= nil)
-    Assert.eq(calls[1].sql, "INSERT INTO sample VALUES (?,?,?)")
-    Assert.eq(calls[1].argc, 3)
-    Assert.eq(calls[1].args[1], text)
-    Assert.eq(calls[1].args[2], nil)
-    Assert.eq(calls[1].args[3], 3)
+    Assert.eq(calls[2].sql, "INSERT INTO sample VALUES (?,?,?)")
+    Assert.eq(calls[2].argc, 3)
+    Assert.eq(calls[2].args[1], text)
+    Assert.eq(calls[2].args[2], nil)
+    Assert.eq(calls[2].args[3], 3)
 
     local got_text, got_nil, got_number = DbBase.rowexec(
         "SELECT text, nullable, number FROM sample WHERE text=?",
@@ -145,7 +146,7 @@ do
     Assert.eq(got_text, text)
     Assert.eq(got_nil, nil)
     Assert.eq(got_number, 3)
-    Assert.eq(calls[2].args[1], text)
+    Assert.eq(calls[3].args[1], text)
 
     DbBase.close()
     clearMods()
@@ -345,63 +346,64 @@ do
     clearMods()
 end
 
--- ── opens 表：recentBySource 联表去重 ──
+-- ── wipeIfStale：user_version 不匹配清库重建，匹配则不动 ──
 do
-    local calls = {}
-    local connection = {
-        exec = function() end,
-        close = function() end,
-        prepare = function(_, sql)
-            local call = { sql = sql }
-            calls[#calls + 1] = call
-            return {
-                bind = function(self, ...)
-                    call.args = { ... }
-                    return self
-                end,
-                step = function() return nil end,
-                resultset = function()
-                    return {
-                        { "/books/a.epub", "/books/b.epub" },
-                        { 200, 100 },
-                        { "书名A", "书名B" },
-                        { "作者A", nil },
-                        { "sub", nil },
-                        { "介绍A", nil },
-                        { 10, 0 },
-                    }, 2
-                end,
-                close = function() end,
-            }
-        end,
-    }
-
-    stubTask(true)
-    stubDbDeps()
-    package.preload["lua-ljsqlite3/init"] = function()
-        return { open = function() return connection end }
+    -- 用指定 user_version 打开一次，返回是否执行了 DROP
+    local function openWith(version)
+        local execs = {}
+        local connection = {
+            exec = function(_, sql)
+                execs[#execs + 1] = sql
+            end,
+            close = function() end,
+            prepare = function(_, sql)
+                return {
+                    bind = function(self)
+                        return self
+                    end,
+                    step = function()
+                        if sql:find("user_version", 1, true) then
+                            return { version }, { "user_version" }
+                        end
+                        return nil
+                    end,
+                    close = function() end,
+                }
+            end,
+        }
+        stubTask(true)
+        stubDbDeps()
+        package.preload["lua-ljsqlite3/init"] = function()
+            return { open = function() return connection end }
+        end
+        package.loaded["utils.db.base"] = nil
+        local DbBase = require("utils.db.base")
+        DbBase.open()
+        local dropped = false
+        for _, sql in ipairs(execs) do
+            if sql:find("DROP TABLE IF EXISTS books", 1, true) then
+                dropped = true
+                break
+            end
+        end
+        DbBase.close()
+        clearMods()
+        local created_notes = false
+        for _, sql in ipairs(execs) do
+            if sql:find("CREATE TABLE IF NOT EXISTS notes", 1, true) then
+                created_notes = true
+                break
+            end
+        end
+        return dropped, created_notes
     end
-    package.loaded["utils.db.base"] = nil
-    package.loaded["utils.db.open"] = nil
 
-    local DbBase = require("utils.db.base")
-    local OpenDB = require("utils.db.open")
-    DbBase.open()
-
-    local rows = OpenDB.recentBySource("local", 24)
-    Assert.eq(#rows, 2)
-    Assert.eq(rows[1].stable_id, "/books/a.epub")
-    Assert.eq(rows[1].last_open, 200)
-    Assert.eq(rows[1].title, "书名A")
-    Assert.eq(rows[2].title, "书名B")
-    local q = calls[#calls]
-    Assert.is_true(q.sql:find("LEFT JOIN books", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("ORDER BY o.last_open DESC", 1, true) ~= nil)
-    Assert.eq(q.args[1], "local")
-    Assert.eq(q.args[2], 24)
-
-    DbBase.close()
-    clearMods()
+    local dropped, created_notes = openWith(1)
+    Assert.is_false(dropped) -- 版本匹配：不清库
+    Assert.is_true(created_notes)
+    dropped, created_notes = openWith(0)
+    Assert.is_true(dropped) -- 旧库/新库：DROP 全部旧表后重建
+    Assert.is_true(created_notes)
 end
 
 -- ── reading_stats 聚合查询（本地洞察）──

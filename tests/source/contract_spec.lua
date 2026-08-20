@@ -24,9 +24,9 @@ do
 end
 
 do
-    local ref = BookTypes.BookRef.new("moon", "a.epub")
-    Assert.eq(ref.source_id, "moon")
-    Assert.eq(ref.stable_id, "a.epub")
+    local identity = { source_id = "moon", stable_id = "a.epub" }
+    Assert.eq(identity.source_id, "moon")
+    Assert.eq(identity.stable_id, "a.epub")
 end
 
 Assert.eq(BookTypes.Book.clampPercent(42), 42)

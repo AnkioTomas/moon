@@ -255,7 +255,18 @@ do
             async = {
                 HTTPClient = function()
                     return {
-                        fetch = function()
+                        fetch = function(self, _url, opts)
+                            local added = {}
+                            opts.on_headers({
+                                add = function(_, name, value)
+                                    added[name] = value
+                                end,
+                            })
+                            Assert.eq(opts.user_agent, "BookTestAgent")
+                            Assert.eq(added["Accept"], "application/json")
+                            Assert.eq(added["X-Test"], "yes")
+                            Assert.is_nil(added["User-Agent"])
+                            Assert.is_nil(added["Content-Length"])
                             return { code = 200, body = "ok" }
                         end,
                     }
@@ -278,7 +289,15 @@ do
 
     -- 触发一次请求让 patchTurboSsl 装上补丁
     local got_code
-    Request.request({ url = "https://api.ankio.net/myrl" }, function(res)
+    Request.request({
+        url = "https://api.ankio.net/myrl",
+        headers = {
+            ["Accept"] = "application/json",
+            ["User-Agent"] = "BookTestAgent",
+            ["Content-Length"] = "3",
+            ["X-Test"] = "yes",
+        },
+    }, function(res)
         got_code = res and res.code
     end)
     Assert.eq(got_code, 200)

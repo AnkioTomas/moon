@@ -77,8 +77,8 @@ package.preload["pinyin.dictionary"] = function()
         entries = function()
             return "100"
         end,
-        sourceTag = function()
-            return "test"
+        builtAt = function()
+            return "2026-08-19 13:17:06"
         end,
     }
 end
@@ -129,13 +129,13 @@ Assert.eq(saved.keyboard_layouts[2], "en")
 Assert.eq(saved.keyboard_layouts[3], "ru")
 Assert.is_nil(saved.book_pinyin_previous_keyboard_layouts)
 
--- ── dictStatus：未下载 / 下载中 / 词条数·tag ──────────
+-- ── dictStatus：未下载 / 下载中 / 词条数·manifest built_at ──
 dict_available = false
 Assert.eq(Pinyin.dictStatus(), "未下载")
 downloading_now = true
 Assert.eq(Pinyin.dictStatus(), "下载中…")
 downloading_now = false
 dict_available = true
-Assert.eq(Pinyin.dictStatus(), "100 · test")
+Assert.eq(Pinyin.dictStatus(), "100 · 2026-08-19 13:17:06")
 
 Stubs.flush()

@@ -82,6 +82,14 @@ function Config.installUtilStub()
     end
     package.preload["util"] = function()
         return {
+            -- 与 frontend/util.lua 同语义（输入框 charlist 按 UTF-8 字符存储）
+            splitToChars = function(text)
+                local chars = {}
+                for char in tostring(text or ""):gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+                    chars[#chars + 1] = char
+                end
+                return chars
+            end,
             -- 与 frontend/util.lua 同语义：lua_dofile_ready 时包成可 dofile 的
             -- "-- path\nreturn <data>"（漏掉这层会让模拟器下次读到"损坏"配置）
             writeToFile = function(data, file, _force_flush, lua_dofile_ready)

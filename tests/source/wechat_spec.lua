@@ -18,6 +18,8 @@ end
 
 -- 可控假 client：每个用例按需覆写方法
 local fake_client = {}
+local chapter_open = {}
+local progress_ui = { shown = 0, closed = 0, progress = {} }
 
 stub("utils.settings", function()
     return {
@@ -38,11 +40,68 @@ stub("source.wechat.client", function()
     }
 end)
 stub("source.wechat.chapter", function() return {} end)
+stub("ui/network/manager", function()
+    return { runWhenOnline = function(_, fn) fn() end }
+end)
+stub("ui/widget/progressbardialog", function()
+    return {
+        new = function(_, opts)
+            return {
+                show = function() progress_ui.shown = progress_ui.shown + 1 end,
+                close = function() progress_ui.closed = progress_ui.closed + 1 end,
+                reportProgress = function(_, step)
+                    progress_ui.progress[#progress_ui.progress + 1] = step
+                end,
+            }
+        end,
+    }
+end)
+stub("source.chapter", function()
+    return {
+        openWithUi = function(_, _, _, _, ops, cb)
+            local dialog = require("ui/widget/progressbardialog"):new{}
+            dialog:show()
+            ops.progress = function(step) dialog:reportProgress(step) end
+            ops.progress(1)
+            ops.progress(4)
+            dialog:close()
+            cb(chapter_open.path, chapter_open.err)
+            return { cancel = function() chapter_open.cancelled = true end }
+        end,
+    }
+end)
 
 package.loaded["source.wechat"] = nil
 local WeChat = require("source.wechat")
 
-local REF = { source_id = "wechat", stable_id = "b1" }
+local REF = { source_id = "wechat", stable_id = "b1", book = { title = "微信书" } }
+
+-- openBookAsync：源自己管理联网/进度 UI，成功首参只返回已入库物理路径。
+do
+    chapter_open.path = "/cache/wechat/b1/2.html"
+    chapter_open.err = nil
+    local src = WeChat.new()
+    local path, err, extra
+    src:openBookAsync(REF, { chapter_idx = 2 }, function(...)
+        path, err, extra = ...
+    end)
+    Assert.eq(path, "/cache/wechat/b1/2.html")
+    Assert.is_nil(err)
+    Assert.is_nil(extra, "源打开回调不得泄露章节上下文")
+    Assert.eq(progress_ui.shown, 1)
+    Assert.eq(progress_ui.closed, 1)
+    Assert.eq(progress_ui.progress[#progress_ui.progress], 4)
+
+    chapter_open.path = nil
+    chapter_open.err = "下载失败"
+    src:openBookAsync(REF, nil, function(p, e)
+        path, err = p, e
+    end)
+    Assert.is_nil(path)
+    Assert.eq(err, "下载失败")
+    Assert.eq(progress_ui.shown, 2)
+    Assert.eq(progress_ui.closed, 2)
+end
 
 -- putProgressAsync：fraction → percent（0/1 边界、四舍五入、缺进度兜底）
 do
@@ -139,31 +198,6 @@ do
     pos = get()
     Assert.eq(pos.chapter_idx, 7)
     Assert.eq(pos.fraction, 0.1)
-end
-
--- getProgressAsync：只有 chapter_uid 时拉目录匹配 chapter_idx
-do
-    fake_client.getProgressAsync = function(_, _, cb)
-        cb({ percent = 25, chapterUid = "9" })
-        return { cancel = function() end }
-    end
-    local src = WeChat.new()
-    src.getTocAsync = function(_, _, cb)
-        cb({ { uid = 3, idx = 1 }, { uid = 9, idx = 4 } })
-    end
-    local pos
-    src:getProgressAsync(REF, function(p) pos = p end)
-    Assert.eq(pos.fraction, 0.25)
-    Assert.eq(pos.chapter_idx, 4)
-
-    -- 目录里匹配不到：chapter_idx 保持空，但仍回调 pos
-    src.getTocAsync = function(_, _, cb)
-        cb({ { uid = 1, idx = 1 } })
-    end
-    pos = nil
-    src:getProgressAsync(REF, function(p) pos = p end)
-    Assert.not_nil(pos)
-    Assert.is_nil(pos.chapter_idx)
 end
 
 -- getProgressAsync：网络失败错误透传；取消后迟到的回调被丢弃

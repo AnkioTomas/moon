@@ -113,6 +113,7 @@ do
     local q = calls[#calls]
     Assert.is_true(q.sql:find("INSERT INTO pending_progress", 1, true) ~= nil)
     Assert.is_true(q.sql:find("ON CONFLICT(source_id, stable_id) DO UPDATE", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("sync_status=0", 1, true) ~= nil)
     Assert.eq(q.argc, 7)
     Assert.eq(q.args[1], "moon")
     Assert.eq(q.args[2], "book'1")
@@ -130,6 +131,9 @@ do
     Assert.eq(q.args[4], nil)
     Assert.eq(q.args[5], nil)
     Assert.eq(q.args[6], nil)
+
+    Assert.is_true(ProgressDB.upsert("moon", "b3", { fraction = 0.2, updated_at = 1234 }))
+    Assert.eq(calls[#calls].args[7], 1234)
 
     DbBase.close()
     clearMods()
@@ -167,6 +171,7 @@ do
                 { 0.25, nil },
                 { "/loc/1", nil },
                 { 1000, 2000 },
+                { 0, 1 },
             }, 2
         end,
     })
@@ -181,10 +186,12 @@ do
     Assert.eq(rows[1].chapter_fraction, 0.25)
     Assert.eq(rows[1].locator, "/loc/1")
     Assert.eq(rows[1].updated_at, 1000)
+    Assert.eq(rows[1].sync_status, 0)
     Assert.eq(rows[2].fraction, 0.75) -- 字符串 fraction 被 tonumber
     Assert.is_nil(rows[2].chapter_idx) -- NULL 保持 nil，不变成 0
     Assert.is_nil(rows[2].chapter_fraction)
     Assert.is_nil(rows[2].locator)
+    Assert.eq(rows[2].sync_status, 1)
     local q = calls[#calls]
     Assert.is_true(q.sql:find("WHERE source_id=?", 1, true) ~= nil)
     Assert.is_true(q.sql:find("ORDER BY updated_at ASC", 1, true) ~= nil)
@@ -215,24 +222,50 @@ do
     clearMods()
 end
 
--- ── delete：双键绑定；非法输入拒绝且不碰 DB ──────────────
+-- ── markSynced：版本键绑定；非法输入拒绝且不碰 DB ─────────
 do
     local connection, calls = makeConn()
     local DbBase, ProgressDB = loadProgress(connection)
 
-    Assert.is_true(ProgressDB.delete("moon", "a'); DROP TABLE pending_progress;--"))
+    Assert.is_true(ProgressDB.markSynced("moon", "a'); DROP TABLE pending_progress;--", 1234))
     local q = calls[#calls]
-    Assert.eq(q.sql, "DELETE FROM pending_progress WHERE source_id=? AND stable_id=?;")
-    Assert.eq(q.argc, 2)
+    Assert.is_true(q.sql:find("UPDATE pending_progress SET sync_status=1", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("source_id=? AND stable_id=? AND updated_at=?", 1, true) ~= nil)
+    Assert.eq(q.argc, 3)
     Assert.eq(q.args[1], "moon")
     Assert.eq(q.args[2], "a'); DROP TABLE pending_progress;--")
+    Assert.eq(q.args[3], 1234)
     Assert.is_false(q.sql:find("DROP TABLE", 1, true) ~= nil)
 
     local before = #calls
-    Assert.is_false(ProgressDB.delete("", "a"))
-    Assert.is_false(ProgressDB.delete("moon", ""))
-    Assert.is_false(ProgressDB.delete("moon", nil))
+    Assert.is_false(ProgressDB.markSynced("", "a", 1))
+    Assert.is_false(ProgressDB.markSynced("moon", "", 1))
+    Assert.is_false(ProgressDB.markSynced("moon", nil, 1))
+    Assert.is_false(ProgressDB.markSynced("moon", "a", nil))
     Assert.eq(#calls, before)
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── unsynced：状态列过滤与参数化 ───────────────────────────
+do
+    local connection, calls = makeConn({
+        resultset = function()
+            return {
+                { "moon" }, { "queued.epub" }, { 0.3 }, { nil }, { nil }, { nil }, { 99 }, { 0 },
+            }, 1
+        end,
+    })
+    local DbBase, ProgressDB = loadProgress(connection)
+
+    local rows = ProgressDB.unsynced("moon")
+    Assert.len(rows, 1)
+    Assert.eq(rows[1].stable_id, "queued.epub")
+    Assert.eq(rows[1].sync_status, 0)
+    local q = calls[#calls]
+    Assert.is_true(q.sql:find("sync_status=0", 1, true) ~= nil)
+    Assert.eq(q.args[1], "moon")
 
     DbBase.close()
     clearMods()

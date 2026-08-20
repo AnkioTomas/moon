@@ -21,8 +21,8 @@ do
         cover = "http://x/c.jpg",
         progressPercent = 42,
     })
-    Assert.eq(b.ref.source_id, "wechat")
-    Assert.eq(b.ref.stable_id, "wx-1")
+    Assert.eq(b.source_id, "wechat")
+    Assert.eq(b.stable_id, "wx-1")
     Assert.eq(b.title, "三体")
     Assert.eq(b.percent, 42)
     Assert.eq(cover, "http://x/c.jpg")

@@ -1,4 +1,4 @@
---[[-- annotations.sync 上报完整快照，包括空快照删除传播。 --]]
+--[[-- book.note 上报完整快照，包括空快照删除传播。 --]]
 
 local Assert = require("support.assert")
 
@@ -17,8 +17,36 @@ package.preload["ui/network/manager"] = function()
         end,
     }
 end
+package.preload["utils.db.note"] = function()
+    return {
+        upsert = function() return true end,
+        delete = function() return true end,
+        all = function() return {} end,
+    }
+end
+package.preload["json"] = function()
+    return {
+        encode = function() return "[snapshot]" end,
+        decode = function() return {} end,
+    }
+end
+package.preload["utils.db.queue"] = function()
+    return {
+        run = function(worker, opts)
+            local ok, err = pcall(worker)
+            if ok then
+                if opts.on_done then opts.on_done() end
+            elseif opts.on_failed then
+                opts.on_failed(err)
+            end
+        end,
+    }
+end
 package.loaded["ui/network/manager"] = nil
-package.loaded["annotations.sync"] = nil
+package.loaded["utils.db.note"] = nil
+package.loaded["utils.db.queue"] = nil
+package.loaded["json"] = nil
+package.loaded["book.note"] = nil
 
 local sent = {}
 local source = {
@@ -59,10 +87,14 @@ local ui = {
         end,
     },
 }
-local ref = { source_id = "moon", stable_id = "小说.epub" }
-local Sync = require("annotations.sync")
+local identity = {
+    source_id = "moon",
+    stable_id = "小说.epub",
+    source = source,
+}
+local Note = require("book.note")
 
-Sync.push(ui, source, ref)
+Note.push(ui, identity)
 Assert.eq(#sent, 1)
 Assert.eq(sent[1].filename, "小说.epub")
 Assert.eq(sent[1].device_id, "device-1")
@@ -71,7 +103,7 @@ Assert.eq(sent[1].annotations[1].text, "高亮文字")
 Assert.eq(sent[1].annotations[1].ignored, nil)
 
 annotations = {}
-Sync.push(ui, source, ref)
+Note.push(ui, identity)
 Assert.eq(#sent, 2)
 Assert.eq(#sent[2].annotations, 0, "空快照必须上报以传播删除")
 

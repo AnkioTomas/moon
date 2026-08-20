@@ -34,10 +34,13 @@ package.preload["ui.reader.session"] = function()
     return {
         current = function()
             return {
-                ref = { source_id = "moon", stable_id = "b1" },
+                identity = { source_id = "moon", stable_id = "b1" },
                 percent = 35, page = 7, total_pages = 20,
-                plugin = { ui = { annotation = { annotations = annotations } } },
+                ui = { annotation = { annotations = annotations } },
             }
+        end,
+        toc = function()
+            return nil
         end,
     }
 end

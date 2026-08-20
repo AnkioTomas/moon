@@ -15,7 +15,7 @@ do
         { name = "x.pdf", path = "books/x.pdf", is_dir = false },
     })
     Assert.eq(#list.data, 3)
-    Assert.eq(list.data[1].ref.source_id, "webdav")
-    Assert.eq(list.data[1].ref.stable_id, "books/a.epub")
+    Assert.eq(list.data[1].source_id, "webdav")
+    Assert.eq(list.data[1].stable_id, "books/a.epub")
     Assert.is_nil(list.data[1].id)
 end
