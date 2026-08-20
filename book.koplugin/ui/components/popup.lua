@@ -147,6 +147,7 @@ local function normalizeItems(items, ctx, opts)
                 bold = nil,
                 dim = raw.dim or raw.enabled == false,
                 mandatory = raw.mandatory,
+                keep_menu_open = raw.keep_menu_open,
             }
             raws[#raws + 1] = raw
             local state, state_w = buildState(raw, image_only)
@@ -174,7 +175,9 @@ local function normalizeItems(items, ctx, opts)
                     end
                 else
                     item.callback = function()
-                        ctx.close()
+                        if not raw.keep_menu_open then
+                            ctx.close()
+                        end
                         if user_cb then
                             user_cb()
                         elseif ctx.on_select then
