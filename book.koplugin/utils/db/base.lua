@@ -2,7 +2,7 @@
 插件 SQLite 连接与通用原语（$DATA/.moon/book.sqlite3）
 
 表由 open → ensureSchema 一次 CREATE IF NOT EXISTS。
-不做 schema/legacy 迁移。
+不做数据迁移：PRAGMA user_version 与 SCHEMA_VERSION 不一致时清库重建。
 
 使用 WAL 模式 + busy_timeout=5000，主/子进程均可安全访问。
 
@@ -142,6 +142,32 @@ function Base.requireSourceId(source_id)
     return source_id
 end
 
+--- schema 版本：不一致即清库重建（不做数据迁移）
+local SCHEMA_VERSION = 1
+
+--- user_version 不匹配时 DROP 全部旧表
+---@return nil
+local function wipeIfStale()
+    local v = tonumber((Base.rowexec("PRAGMA user_version;"))) or 0
+    if v == SCHEMA_VERSION then
+        return
+    end
+    Base.exec([[
+DROP TABLE IF EXISTS books;
+DROP TABLE IF EXISTS opens;
+DROP TABLE IF EXISTS chapters;
+DROP TABLE IF EXISTS http;
+DROP TABLE IF EXISTS pending_progress;
+DROP TABLE IF EXISTS reading_stats;
+DROP TABLE IF EXISTS notes;
+DROP TABLE IF EXISTS toc;
+DROP TABLE IF EXISTS ai_analysis;
+DROP TABLE IF EXISTS xray_entities;
+DROP TABLE IF EXISTS xray_timeline;
+DROP TABLE IF EXISTS xray_meta;
+]])
+end
+
 --- 首次打开时 CREATE IF NOT EXISTS 全表
 ---@return nil
 local function ensureSchema()
@@ -158,17 +184,20 @@ CREATE TABLE IF NOT EXISTS books (
   series     TEXT,
   intro      TEXT,
   fetched_at INTEGER NOT NULL DEFAULT 0,
+  path        TEXT,
+  last_open   INTEGER NOT NULL DEFAULT 0,
+  last_chapter_idx INTEGER,
   PRIMARY KEY (source_id, stable_id)
 );
 CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(source_id, md5);
+CREATE INDEX IF NOT EXISTS idx_books_path ON books(path);
 
-CREATE TABLE IF NOT EXISTS opens (
+CREATE TABLE IF NOT EXISTS chapters (
+  path        TEXT PRIMARY KEY,
   source_id   TEXT NOT NULL,
   stable_id   TEXT NOT NULL,
-  path        TEXT NOT NULL,
-  chapter_idx INTEGER,
-  last_open   INTEGER NOT NULL,
-  PRIMARY KEY (source_id, stable_id)
+  chapter_idx INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS http (
@@ -185,6 +214,7 @@ CREATE TABLE IF NOT EXISTS pending_progress (
   chapter_fraction REAL,
   locator TEXT,
   updated_at INTEGER NOT NULL,
+  sync_status INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (source_id, stable_id)
 );
 
@@ -195,9 +225,20 @@ CREATE TABLE IF NOT EXISTS reading_stats (
   page        INTEGER NOT NULL DEFAULT 0,
   start_time  INTEGER NOT NULL,
   duration    INTEGER NOT NULL DEFAULT 0,
-  total_pages INTEGER NOT NULL DEFAULT 0
+  total_pages INTEGER NOT NULL DEFAULT 0,
+  sync_status INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_reading_stats_source ON reading_stats(source_id);
+
+CREATE TABLE IF NOT EXISTS notes (
+  source_id   TEXT NOT NULL,
+  stable_id   TEXT NOT NULL,
+  chapter_idx INTEGER NOT NULL DEFAULT 0,
+  payload     TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  sync_status INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (source_id, stable_id, chapter_idx)
+);
 
 CREATE TABLE IF NOT EXISTS toc (
   source_id  TEXT NOT NULL,
@@ -206,7 +247,101 @@ CREATE TABLE IF NOT EXISTS toc (
   fetched_at INTEGER NOT NULL,
   PRIMARY KEY (source_id, stable_id)
 );
+
+CREATE TABLE IF NOT EXISTS ai_analysis (
+  source_id   TEXT NOT NULL,
+  stable_id   TEXT NOT NULL,
+  chapter_idx INTEGER NOT NULL DEFAULT 0,
+  context_key TEXT NOT NULL,
+  page        INTEGER NOT NULL DEFAULT 0,
+  payload     TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (source_id, stable_id, chapter_idx, context_key)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_analysis_book
+  ON ai_analysis(source_id, stable_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS xray_entities (
+  source_id    TEXT NOT NULL,
+  stable_id    TEXT NOT NULL,
+  kind         TEXT NOT NULL,
+  name         TEXT NOT NULL,
+  aliases_json TEXT NOT NULL DEFAULT '[]',
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  updated_at   INTEGER NOT NULL,
+  PRIMARY KEY (source_id, stable_id, kind, name)
+);
+CREATE INDEX IF NOT EXISTS idx_xray_entities_book
+  ON xray_entities(source_id, stable_id, kind);
+
+CREATE TABLE IF NOT EXISTS xray_timeline (
+  source_id  TEXT NOT NULL,
+  stable_id  TEXT NOT NULL,
+  chapter    TEXT NOT NULL,
+  event      TEXT NOT NULL,
+  page       INTEGER NOT NULL DEFAULT 0,
+  sort_idx   INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (source_id, stable_id, chapter)
+);
+CREATE INDEX IF NOT EXISTS idx_xray_timeline_book
+  ON xray_timeline(source_id, stable_id, sort_idx);
+
+CREATE TABLE IF NOT EXISTS xray_meta (
+  source_id       TEXT NOT NULL,
+  stable_id       TEXT NOT NULL,
+  last_fetch_page INTEGER NOT NULL DEFAULT 0,
+  book_type       TEXT,
+  updated_at      INTEGER NOT NULL,
+  PRIMARY KEY (source_id, stable_id)
+);
 ]])
+    local columns, nrows = Base.query("PRAGMA table_info(pending_progress);")
+    local has_sync_status = false
+    if columns and columns[2] then
+        for i = 1, nrows do
+            if columns[2][i] == "sync_status" then
+                has_sync_status = true
+                break
+            end
+        end
+    end
+    if not has_sync_status then
+        Base.exec("ALTER TABLE pending_progress ADD COLUMN sync_status INTEGER NOT NULL DEFAULT 0;")
+    end
+    local stats_columns, stats_nrows = Base.query("PRAGMA table_info(reading_stats);")
+    local stats_have_sync_status = false
+    if stats_columns and stats_columns[2] then
+        for i = 1, stats_nrows do
+            if stats_columns[2][i] == "sync_status" then
+                stats_have_sync_status = true
+                break
+            end
+        end
+    end
+    if not stats_have_sync_status then
+        Base.exec("ALTER TABLE reading_stats ADD COLUMN sync_status INTEGER NOT NULL DEFAULT 0;")
+    end
+    Base.exec([[DELETE FROM reading_stats WHERE id NOT IN (
+        SELECT MIN(id) FROM reading_stats
+        GROUP BY source_id, stable_id, page, start_time, duration, total_pages
+    );]])
+    Base.exec([[CREATE UNIQUE INDEX IF NOT EXISTS idx_reading_stats_identity
+        ON reading_stats(source_id, stable_id, page, start_time, duration, total_pages);]])
+    local note_columns, note_nrows = Base.query("PRAGMA table_info(notes);")
+    local notes_have_sync_status = false
+    if note_columns and note_columns[2] then
+        for i = 1, note_nrows do
+            if note_columns[2][i] == "sync_status" then
+                notes_have_sync_status = true
+                break
+            end
+        end
+    end
+    if not notes_have_sync_status then
+        Base.exec("ALTER TABLE notes ADD COLUMN sync_status INTEGER NOT NULL DEFAULT 0;")
+    end
+    Base.exec("PRAGMA user_version=" .. SCHEMA_VERSION .. ";")
 end
 
 --- 打开（或复用）全局 SQLite 连接并确保 schema。
@@ -235,6 +370,7 @@ function Base.open()
         conn:exec("PRAGMA journal_mode=WAL;")
         conn:exec("PRAGMA busy_timeout=5000;")
     end)
+    wipeIfStale()
     ensureSchema()
     return conn
 end
