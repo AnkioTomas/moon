@@ -1,275 +1,442 @@
 --[[--
-书籍级阅读会话：打开 → 阅读 → 关闭 的统一编排。
+书籍级阅读会话。
 
-收编 main.lua 的阅读期编排（Tracker / Progress / Chapters / 源事件），
-并维护当前阅读状态供阅读页管理器（ui.reader）与进度条（ui.reader.bars）查询。
-
-无自绘布局；状态机：
-
-  openDocument ──► _cur 活跃 ──► bars/panel 可读
-       │                │
-       │           page_changed / 切章
-       │                │
-  CloseDocument ──► _cur = nil（bars 停画）
-
-身份来源：所有文档统一由 Store.ensureIdentity(document.file) 反向解析；
-章节会话只提供书籍元数据和章节编排。源实例按 ref.source_id 解析（owningSource），
-绝不拿 current 操作旧书。插件缓存内找不到身份时提示从 Book 桌面打开。
-
-切章（switchDocument）会关旧文档再开新文档：CloseDocument 清状态，
-ReaderReady 依章会话重建——期间 bars/panel 短暂不活跃属正常。
+ReaderSessionSnapshot 随单个文档 ReaderReady/CloseDocument 创建和销毁；
+ReaderChapterSession 跨 switchDocument 保留到真正关书。物理路径解析出的 BookIdentity
+是身份真相，目录、下载和入库由属主源负责，本模块只编排阅读生命周期与切章。
 
 @module koplugin.book.ui.reader.session
 --]]
 
 local Store = require("book.store")
+local _ = require("gettext")
 
-local function promptOpenFromDesktop()
-    local UIManager = require("ui/uimanager")
-    local InfoMessage = require("ui/widget/infomessage")
-    local _ = require("gettext")
-    UIManager:show(InfoMessage:new{ text = _("请从 Book 桌面打开此书") })
+local Session = {}
+
+---@class ReaderSessionSnapshot
+---@field ui table 当前 ReaderUI
+---@field identity BookIdentity 当前物理文档身份
+---@field page integer 当前文档页码
+---@field total_pages integer 当前文档页数
+---@field doc_fraction number 当前文档阅读比例（0..1）
+---@field fraction number 全书阅读比例（0..1）
+---@field chapter_fraction number|nil 当前章节阅读比例（0..1）
+---@field percent number 全书阅读百分比（0..100）
+---@field chapter ReaderChapterSession|nil 当前文档的章节上下文
+
+---@class ReaderChapterSession
+---@field identity BookIdentity 书籍身份与属主源
+---@field toc BookChapter[] 从 toc 表恢复的目录快照
+---@field transition { cancel: fun() }|{ path: string, within: number|nil, direction: "prev"|"next"|nil }|nil 在途任务或待打开目标
+
+---@type ReaderSessionSnapshot|nil
+local current_session
+---@type ReaderChapterSession|nil
+local chapter_session
+
+--- 清除当前 ReaderUI 的章节导航状态。
+local function clearActiveChapter()
+    local chapter = chapter_session
+    chapter_session = nil
+    if current_session then current_session.chapter = nil end
+    local transition = chapter and chapter.transition
+    if transition and transition.cancel then transition.cancel() end
 end
 
-local Session = {
-    ---@type { plugin: table, source: table|nil, ref: BookRef|nil, book: table|nil, chapter_idx: number|nil, chapter_count: number|nil, page: number, total_pages: number, percent: number }|nil
-    _cur = nil,
-}
+--- 清除章节状态并取消源侧任务。
+local function clearChapter()
+    clearActiveChapter()
+end
 
---- 当前阅读会话快照；锁屏等只读消费者使用。
----@return table|nil
+--- 返回绑定当前物理文档的章节状态。
+---@return ReaderChapterSession|nil
+local function activeChapter()
+    return current_session and current_session.chapter
+end
+
+--- 当前阅读快照；调用方只读，不得修改其字段。
+---@return ReaderSessionSnapshot|nil
 function Session.current()
-    return Session._cur
+    return current_session
 end
 
---- 属主源解析：ref 属于哪个源就用哪个源实例。
---- 章会话的 source 是 bind 时捕获的（已对）；整本书在这里按 ref.source_id 建非活跃实例。
---- 属主源不可用返回 nil：跳过源相关同步，也不许错用 current（串书根因）。
----@param plugin table
----@param ref BookRef|nil
----@return BookSource|nil
-local function owningSource(plugin, ref)
-    local current = plugin:getSource()
-    if not ref then
-        return current
-    end
-    if current and current.id == ref.source_id then
-        return current
-    end
-    local ok, src = pcall(function()
-        return require("source.registry").create(ref.source_id)
-    end)
-    if ok then
-        return src
-    end
-    return nil
+--- 当前活跃章节书的目录；整本书或目录未落库时返回 nil。
+---@return BookChapter[]|nil
+function Session.toc()
+    local chapter = activeChapter()
+    return chapter and chapter.toc or nil
 end
 
---- 是否有活跃阅读会话（仅源身份书籍）。
+--- 当前会话是否仍绑定指定身份；用于异步回调丢弃旧文档结果。
+---@param identity BookIdentity|nil
 ---@return boolean
-function Session.isActive()
-    return Session._cur ~= nil
+function Session.isCurrent(identity)
+    local current = current_session
+    local current_id = current and current.identity
+    return current_id ~= nil and identity ~= nil
+        and current_id.source_id == identity.source_id
+        and current_id.stable_id == identity.stable_id
+        and current_id.chapter_idx == identity.chapter_idx
 end
 
---- 当前文档页数（取不到按 0）。
+--- 当前会话的进度位置快照。
+---@return ProgressPosition|nil
+function Session.position()
+    local current = current_session
+    if not current then return nil end
+    return require("book.progress").position(current)
+end
+
+--- 根据已确认打开的目标章定位新文档，并清掉切换状态。
+---@param chapter ReaderChapterSession
+---@param ui table
+local function applyChapterTarget(chapter, ui)
+    local target = chapter.transition
+    chapter.transition = nil
+    if target.within == nil and target.direction == nil then return end
+    local within, direction = target.within, target.direction
+
+    require("ui/uimanager"):nextTick(function()
+        if activeChapter() ~= chapter or ui.document.file ~= target.path then return end
+        local page
+        if within ~= nil and within > 0 and within < 1 then
+            within = require("types.book_progress").clampFraction(within)
+            if ui.document.getXPointerFromProportion then
+                local xptr = ui.document:getXPointerFromProportion(within)
+                if xptr and ui.rolling then
+                    ui.rolling:onGotoXPointer(xptr)
+                    return
+                elseif xptr and ui.link then
+                    ui.link:onGotoXPointer(xptr)
+                    return
+                end
+            end
+            if ui.document.getPageCount then
+                local total = ui.document:getPageCount() or 1
+                page = math.max(1, math.min(total, math.floor(within * total + 0.5)))
+            end
+        elseif direction == "prev" then
+            local total
+            if ui.document.getPageCount then
+                total = ui.document:getPageCount()
+            end
+            if total and total > 1 then
+                page = total
+            end
+        elseif direction == "next" then
+            page = 1
+        end
+        if not page then return end
+        if ui.link then
+            ui.link:addCurrentLocationToStack()
+        end
+        ui:handleEvent(require("ui/event"):new("GotoPage", page))
+    end)
+end
+
+--- 章节 ReaderUI 实例只挂一次首边界处理。
+---@param ui table ReaderUI
+local function wrapBoundary(view, position, atStart)
+    local original = view and view.onGotoViewRel
+    if not original then return end
+    view.onGotoViewRel = function(self, diff)
+        if not activeChapter() then return original(self, diff) end
+        local before = position(self)
+        local result = original(self, diff)
+        if diff < 0 and atStart(before, position(self)) then
+            self.ui:handleEvent(require("ui/event"):new("StartOfBook"))
+        end
+        return result
+    end
+end
+
+local function wrapChapterReaderUi(ui)
+    if not ui or ui.name ~= "ReaderUI" or ui._book_chapters_wrapped then return end
+    ui._book_chapters_wrapped = true
+    wrapBoundary(ui.rolling, function(view)
+        if view.view and view.view.view_mode == "scroll" then
+            return view.current_pos
+        end
+        return view.current_page
+    end, function(before, after)
+        return before == after
+    end)
+    wrapBoundary(ui.paging, function(view)
+        return view.getTopPage and view:getTopPage() or view.current_page
+    end, function(before, after)
+        return before == 1 and after == before
+    end)
+end
+
+local function validNumber(value, minimum)
+    value = tonumber(value)
+    if not value or value ~= value or value == math.huge or value == -math.huge then
+        return nil
+    end
+    if minimum and value < minimum then return nil end
+    return value
+end
+
+--- 读取 ReaderUI 当前页；读取失败时保留上一份快照，初始值为 0（未知）。
 ---@param ui table|nil
+---@param hint number|string|nil
+---@param previous number|nil
 ---@return number
-local function totalPages(ui)
-    local doc = ui and ui.document
-    if doc and doc.getPageCount then
-        return tonumber(doc:getPageCount()) or 0
+local function readPage(ui, hint, previous)
+    local page = validNumber(hint, 1)
+    if not page and ui and type(ui.getCurrentPage) == "function" then
+        local ok, value = pcall(ui.getCurrentPage, ui)
+        if ok then page = validNumber(value, 1) end
+    end
+    return page and math.floor(page) or previous or 0
+end
+
+--- 读取文档总页数；读取失败时保留上一份快照，初始值为 0（未知）。
+---@param ui table|nil
+---@param previous number|nil
+---@return number
+local function readTotalPages(ui, previous)
+    local document = ui and ui.document
+    if document and type(document.getPageCount) == "function" then
+        local ok, value = pcall(document.getPageCount, document)
+        value = ok and validNumber(value, 0) or nil
+        if value then return math.floor(value) end
+    end
+    return previous or 0
+end
+
+--- 读取当前文档比例；优先使用 XPointer，页码仅作兼容回退。
+---@param ui table|nil
+---@param page number
+---@param total number
+---@return number
+local function readDocumentFraction(ui, page, total)
+    local document = ui and ui.document
+    if document and type(document.getXPointer) == "function"
+        and type(document.getProportionFromXPointer) == "function" then
+        local ok, value = pcall(function()
+            return document:getProportionFromXPointer(document:getXPointer())
+        end)
+        value = ok and validNumber(value, 0) or nil
+        if value then return math.min(1, value) end
+    end
+    if total > 0 and page > 0 then
+        return math.max(0, math.min(1, page / total))
     end
     return 0
 end
 
---- 刷新会话的页码 / 百分比 / 章号快照。
----@param ui table|nil
----@param page number|nil
-local function snapshot(ui, page)
-    local cur = Session._cur
-    if not cur then
-        return
-    end
-    cur.page = tonumber(page)
-        or (ui and ui.getCurrentPage and tonumber(ui:getCurrentPage()))
-        or cur.page
-    cur.total_pages = totalPages(ui)
-    if ui then
-        cur.percent = require("book.progress").fraction(ui) * 100
-    end
-    local Chapter = require("chapters.init")
-    if Chapter.isActive() then
-        cur.chapter_idx = Chapter.currentIdx()
-        cur.chapter_count = Chapter.chapterCount()
-    else
-        cur.chapter_count = nil
-    end
+--- 刷新页码、页数和全书百分比快照。
+---@param session ReaderSessionSnapshot
+---@param page number|nil KOReader 事件给出的页码；缺省时读取 ReaderUI
+local function snapshot(session, page)
+    local ui = session.ui
+    session.page = readPage(ui, page, session.page)
+    session.total_pages = readTotalPages(ui, session.total_pages)
+    session.doc_fraction = readDocumentFraction(ui, session.page, session.total_pages)
+    local position = require("book.progress").position(session)
+    session.fraction = position.fraction
+    session.chapter_fraction = position.chapter_fraction
+    session.percent = position.fraction * 100
 end
 
---- ReaderReady：建会话；统计计时；按章落点；拉进度；挂阅读页管理器；通知源。
----@param plugin table
----@return nil
+--- ReaderReady：按物理路径重建阅读快照并启动统计、进度和阅读 UI。
+---@param plugin table Book 插件实例
 function Session.onReaderReady(plugin)
-    local ui = plugin and plugin.ui
-    if not ui or not ui.document then
+    -- KOReader 切文档时不保证先派发 CloseDocument，旧快照必须先作废。
+    current_session = nil
+    local ui = plugin.ui
+    local identity = Store.ensureIdentity(ui.document.file)
+    if not identity then
+        clearChapter()
+        local UIManager = require("ui/uimanager")
+        local ConfirmBox = require("ui/widget/confirmbox")
+        UIManager:show(ConfirmBox:new{
+            text = _("无法识别此书，请从 Book 桌面打开。"),
+            ok_text = _("关闭文档"),
+            ok_callback = function() ui:onClose() end,
+            cancel_text = _("仍要阅读"),
+        })
         return
     end
-    local Chapter = require("chapters.init")
-    local ref, chapter_idx, book, source, identity
-    identity = Store.ensureIdentity(ui.document.file)
-    if not identity and require("utils.paths").isMoonPath(ui.document.file) then
-        Session._cur = nil
-        promptOpenFromDesktop()
-        return
-    end
-    if identity then
-        ref = identity.ref
-        chapter_idx = identity.chapter_idx
-        -- 章节会话只补充元数据；身份仍以物理路径解析结果为准。
-        if Chapter.isActive() then
-            book = Chapter.book()
+
+    current_session = {
+        ui = ui,
+        identity = identity,
+        page = 0,
+        total_pages = 0,
+        doc_fraction = 0,
+        fraction = 0,
+        chapter_fraction = nil,
+        percent = 0,
+    }
+    local toc = identity.chapter_idx and Store.toc(identity)
+    if toc then
+        local transition = chapter_session and chapter_session.transition
+        if transition and transition.path == ui.document.file then
+            chapter_session.transition = nil
+        else
+            transition = { path = ui.document.file }
         end
-        -- 源跟 ref 走，不跟 current 走：换源后继续读旧书，用属主源实例
-        -- （current 是新源，直接拿它拉/推旧 stable_id 就是「串书」根因）
-        source = owningSource(plugin, ref)
-    end
-
-    require("stats.tracker").start(ui, identity or (ref and { ref = ref }))
-    if Chapter.isActive() then
-        require("chapters.patches").enable()
-        require("chapters.patches").wrapReaderUi(ui)
-        Chapter.onReaderReady(ui)
-    end
-    if source then
-        require("book.progress").pull(ui, source, false)
-    end
-
-    if ref then
-        Session._cur = {
-            plugin = plugin,
-            source = source,
-            ref = ref,
-            book = book,
-            chapter_idx = chapter_idx,
-            page = 1,
-            total_pages = 0,
-            percent = 0,
-        }
-        snapshot(ui)
+        clearActiveChapter()
+        local chapter = { identity = identity, toc = toc, transition = transition }
+        chapter_session = chapter
+        current_session.chapter = chapter
+        applyChapterTarget(chapter, ui)
+        wrapChapterReaderUi(ui)
     else
-        Session._cur = nil
+        clearChapter()
     end
 
+    snapshot(current_session)
+    require("book.stats").start(current_session)
     require("ui.reader").attach(plugin)
-    if source then
-        plugin:emitToSource("reader_ready", nil, source)
-    end
+    require("book.progress").pull(current_session)
+    require("book.note").pull(ui, identity)
 end
 
---- CloseDocument：推进度；结清统计；通知源；切章由 ReaderReady 重建会话。
+--- 推送当前进度和注解，并向属主源发送生命周期事件。
 ---@param plugin table
----@return nil
-function Session.onCloseDocument(plugin)
-    local ui = plugin and plugin.ui
-    local cur = Session._cur
-    require("ui.reader").closeToolbar()
-    require("stats.tracker").stop()
-    if cur and cur.source then
-        require("book.progress").push(ui, cur.source, false)
-        require("annotations.sync").push(ui, cur.source, cur.ref)
-        plugin:emitToSource("document_close", nil, cur.source)
+---@param event string
+local function syncReading(plugin, event)
+    local identity = current_session and current_session.identity
+    local source = identity and identity.source
+    if identity and source and source.putProgressAsync then
+        require("book.progress").push(plugin.ui, identity)
     end
-    local closed = ui and ui.document and ui.document.file
-    -- 真关书才清进度冲突记忆；切章（switchDocument）不算，否则会每章重复询问
-    if require("chapters.init").onCloseDocument(closed) then
+    if source and identity then
+        require("book.note").push(plugin.ui, identity)
+    end
+    require("book.stats").stop(function()
+        if source then
+            plugin:emitToSource(event, nil, source)
+        end
+    end)
+end
+
+--- CloseDocument：结清阅读状态；切章保留目录，真正关书清除全部章节状态。
+---@param plugin table Book 插件实例
+function Session.onCloseDocument(plugin)
+    syncReading(plugin, "document_close")
+    local transition = chapter_session and chapter_session.transition
+    if not (transition and transition.path) then
+        clearChapter()
         require("book.progress").clearConflicts()
     end
-    if not cur then
-        Session._cur = nil
-        return
-    end
-    Session._cur = nil
+    current_session = nil
 end
 
---- 翻页：统计换页；更新快照；刷新进度条；分发 page_changed。
----@param plugin table
+--- 页码变化：结清上一页统计、刷新快照和阅读 UI，并通知属主源。
+--- 分页视图与滚动视图都走同一入口。
+---@param plugin table Book 插件实例
 ---@param page number|nil
----@return nil
-local function onPage(plugin, page)
-    local ui = plugin and plugin.ui
-    require("stats.tracker").onPage(ui, page)
-    local cur = Session._cur
-    if not cur then
+function Session.onPageChanged(plugin, page)
+    local session = current_session
+    if not session then
+        require("book.stats").onPage(nil)
         return
     end
-    snapshot(ui, page)
+    snapshot(session, page)
+    require("book.stats").onPage(session)
     require("ui.reader").refresh(plugin)
-    if cur.source then
-        cur.plugin:emitToSource("page_changed", {
-            ref = cur.ref,
-            book = cur.book,
-            page = cur.page,
-            total_pages = cur.total_pages,
-            percent = cur.percent,
-            chapter_idx = cur.chapter_idx,
-        }, cur.source)
+    local source = session.identity.source
+    if source then
+        plugin:emitToSource("page_changed", {
+            identity = session.identity,
+            page = session.page,
+            total_pages = session.total_pages,
+            percent = session.percent,
+        }, source)
     end
 end
 
---- 翻页（分页视图）。
----@param plugin table
----@param page number
----@return nil
-function Session.onPageUpdate(plugin, page)
-    onPage(plugin, page)
+--- 注解变化：按当前阅读身份保存完整快照。
+---@param plugin table Book 插件实例
+---@param _items table KOReader 变更描述；完整数据从 annotation.annotations 读取
+function Session.onAnnotationsModified(plugin, _items)
+    if current_session then
+        require("book.note").save(plugin.ui, current_session.identity)
+    end
 end
 
---- 翻页（滚动视图）。
----@param plugin table
----@param page number|nil
----@return nil
-function Session.onPosUpdate(plugin, page)
-    onPage(plugin, page)
-end
-
---- 休眠前：推进度；结清统计；通知源。
----@param plugin table
----@return nil
+--- 休眠前：结清计时并同步当前进度、注解和源事件；会话继续保留。
+---@param plugin table Book 插件实例
 function Session.onSuspend(plugin)
-    local ui = plugin and plugin.ui
-    if not ui or not ui.document then
-        return
-    end
-    local cur = Session._cur
-    require("stats.tracker").stop()
-    if cur and cur.source then
-        require("book.progress").push(ui, cur.source, false)
-        require("annotations.sync").push(ui, cur.source, cur.ref)
-        plugin:emitToSource("suspend", nil, cur.source)
-    end
+    if not plugin.ui.document then return end
+    syncReading(plugin, "suspend")
 end
 
---- 唤醒：恢复阅读统计计时。
----@param plugin table
----@return nil
+--- 唤醒后恢复当前阅读会话的统计计时。
+---@param plugin table Book 插件实例
 function Session.onResume(plugin)
-    local ui = plugin and plugin.ui
-    if not ui or not ui.document then
-        return
+    if plugin.ui.document and current_session then
+        require("book.stats").start(current_session)
     end
-    require("stats.tracker").start(ui)
 end
 
---- 章末：按章会话自动下一章。
----@return boolean handled
-function Session.onEndOfBook()
-    return require("chapters.init").onEndOfBook()
+--- 请求属主源打开目标章，并在成功后切换 ReaderUI 文档。
+---@param chapter ReaderChapterSession 发起请求时的章节状态，用于丢弃迟到回调
+---@param idx integer
+---@param opts { within: number|nil, direction: "prev"|"next"|nil }
+local function requestChapter(chapter, idx, opts)
+    local current_idx = current_session.identity.chapter_idx
+    local identity = chapter.identity
+    chapter.transition = identity.source:openBookAsync(identity, { chapter_idx = idx }, function(path, err)
+        chapter.transition = nil
+        if not path then
+            require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
+                text = err or _("章节打开失败"),
+            })
+            return
+        end
+
+        local within = opts.within
+        local direction = within == nil and opts.direction
+        if within == nil and direction == nil and idx ~= current_idx then
+            direction = idx < current_idx and "prev" or "next"
+        end
+        chapter.transition = {
+            path = path,
+            within = within,
+            direction = direction,
+        }
+
+        local ReaderUI = require("apps/reader/readerui")
+        if ReaderUI.instance then
+            ReaderUI.instance:switchDocument(path, true)
+        else
+            require("ui/uimanager"):nextTick(function()
+                ReaderUI:showReader(path, nil, true)
+            end)
+        end
+    end)
 end
 
---- 章首：按章会话自动上一章。
+--- 从目录或其他阅读 UI 切换到指定章节。
+---@param idx integer 目标章节序号
+---@param opts { within: number|nil, direction: "prev"|"next"|nil }|nil
+---@return boolean started
+function Session.gotoChapter(idx, opts)
+    local chapter = activeChapter()
+    if not chapter or chapter.transition or idx < 1 or idx > #chapter.toc then
+        return false
+    end
+    requestChapter(chapter, idx, opts or {})
+    return true
+end
+
+--- 从页首/页尾边界发起相邻章节切换，并立即锁住重复边界事件。
+---@param delta integer -1 表示上一章，1 表示下一章
 ---@return boolean handled
-function Session.onStartOfBook()
-    return require("chapters.init").onStartOfBook()
+function Session.onChapterBoundary(delta)
+    local chapter = activeChapter()
+    if not chapter or chapter.transition then
+        return false
+    end
+    local target = current_session.identity.chapter_idx + delta
+    if target < 1 or target > #chapter.toc then return false end
+    requestChapter(chapter, target, { direction = delta < 0 and "prev" or "next" })
+    return true
 end
 
 return Session
