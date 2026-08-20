@@ -8,6 +8,7 @@ HTTP 请求原语（Turbo，非阻塞，唯一网络栈）
   Request.request(opts, cb) → { cancel }
   Request.get(url, opts, cb) → { cancel }
   Request.post(url, body, opts, cb) → { cancel }
+  Request.stream(opts, handlers) → { cancel }  -- 增量 body（SSE / chunked）
   Request.download(opts, dest, cb) → { cancel }
   Request.ok(code) → boolean
   Request.header(res, name) → any
@@ -112,12 +113,39 @@ local function responseError(res)
     return tostring(res.error)
 end
 
----@param headers any
+--- Turbo appends these after on_headers; adding one in the callback duplicates it.
+local TURBO_SKIP_HEADERS = {
+    ["content-length"] = true,
+}
+
+---@param values table|nil
+---@param name string
+---@return any
+local function getHeader(values, name)
+    name = name:lower()
+    for key, value in pairs(values or {}) do
+        if type(key) == "string" and key:lower() == name then
+            return value
+        end
+    end
+end
+
+---@param headers any Turbo HTTPHeaders
 ---@param values table|nil
 local function addHeaders(headers, values)
     for name, value in pairs(values or {}) do
         if type(name) == "string" and value ~= nil then
-            headers:add(name, tostring(value))
+            local lower_name = name:lower()
+            if not TURBO_SKIP_HEADERS[lower_name] then
+                local text = tostring(value)
+                -- Host/User-Agent already exist at this point. Replace those
+                -- fields; add() is intentionally kept for new/multi-value headers.
+                if headers:get(name, true) ~= nil then
+                    headers:set(name, text, true)
+                else
+                    headers:add(name, text)
+                end
+            end
         end
     end
 end
@@ -207,6 +235,7 @@ end
 function Request.request(opts, cb)
     opts = opts or {}
     local state = { cancelled = false }
+    local user_agent = getHeader(opts.headers, "User-Agent")
 
     if not Request.ensureTurbo() then
         UIManager:nextTick(function()
@@ -236,6 +265,7 @@ function Request.request(opts, cb)
             allow_redirects = opts.allow_redirects,
             auth_username = opts.auth_username,
             auth_password = opts.auth_password,
+            user_agent = user_agent and tostring(user_agent) or nil,
             on_headers = function(headers)
                 addHeaders(headers, opts.headers)
             end,
@@ -291,7 +321,6 @@ function Request.post(url, body, opts, cb)
     local headers = Header.forRequest(opts.headers, opts.accept)
     if body ~= nil then
         body = tostring(body)
-        headers["Content-Length"] = tostring(#body)
         headers["Content-Type"] = opts.content_type
             or headers["Content-Type"]
             or "application/x-www-form-urlencoded"
@@ -312,6 +341,212 @@ function Request.post(url, body, opts, cb)
             cb(nil, T(_("HTTP %1"), tostring(res and res.code)), res)
         else
             cb(res.body or "", nil, res)
+        end
+    end)
+end
+
+--- 流式 HTTP：body 字节到达即 on_data，结束时 on_done(err)。
+--- 用于 SSE / chunked；仍走 Turbo，不引入第二网络栈。
+---
+--- opts：同 request（url/method/body/headers/timeout/…）
+--- handlers：
+---   on_headers(code, headers) 可选
+---   on_data(chunk) 原始 body 增量
+---   on_done(err) err 为 nil 表示成功收完
+---
+---@param opts table
+---@param handlers { on_headers?: fun(code: any, headers: any), on_data?: fun(chunk: string), on_done?: fun(err: any) }
+---@return { cancel: fun() }
+function Request.stream(opts, handlers)
+    opts = opts or {}
+    handlers = handlers or {}
+    local state = { cancelled = false, done = false, client = nil }
+    local user_agent = getHeader(opts.headers, "User-Agent")
+
+    local function finish(err)
+        if state.done then
+            return
+        end
+        state.done = true
+        input_timeouts = input_timeouts - 1
+        if input_timeouts == 0 then
+            UIManager:resetInputTimeout()
+        end
+        if handlers.on_done then
+            handlers.on_done(err)
+        end
+    end
+
+    local function emit(chunk)
+        if state.cancelled or state.done then
+            return
+        end
+        if type(chunk) == "string" and #chunk > 0 and handlers.on_data then
+            handlers.on_data(chunk)
+        end
+    end
+
+    if not Request.ensureTurbo() then
+        UIManager:nextTick(function()
+            if state.done then
+                return
+            end
+            state.done = true
+            if handlers.on_done then
+                handlers.on_done(state.cancelled and "cancelled" or "turbo looper unavailable")
+            end
+        end)
+        return makeJob(state, function()
+            if state.done then
+                return
+            end
+            state.done = true
+            if handlers.on_done then
+                handlers.on_done("cancelled")
+            end
+        end)
+    end
+
+    UIManager:setInputTimeout(1000)
+    input_timeouts = input_timeouts + 1
+
+    UIManager.looper:add_callback(function()
+        if state.cancelled then
+            finish("cancelled")
+            return
+        end
+
+        local turbo = require("turbo")
+        turbo.log.categories.success = false
+        turbo.log.categories.warning = false
+        patchTurboSsl()
+
+        local httputil = require("turbo.httputil")
+        local buffer = require("turbo.structs.buffer")
+        local client = turbo.async.HTTPClient({ verify_ca = false })
+        state.client = client
+
+        local HTTPClient = getmetatable(client)
+        HTTPClient = HTTPClient and HTTPClient.__index or turbo.async.HTTPClient
+        local orig_chunked = HTTPClient._chunked_data
+        local orig_body = HTTPClient._handle_body
+        local orig_finalize = HTTPClient._finalize_request
+
+        client._chunked_data = function(self, data)
+            if data and data:len() > 2 then
+                emit(data:sub(1, data:len() - 2))
+            end
+            return orig_chunked(self, data)
+        end
+
+        client._handle_body = function(self, data)
+            emit(data)
+            return orig_body(self, data)
+        end
+
+        client._finalize_request = function(self)
+            orig_finalize(self)
+            if state.done or state.cancelled then
+                return
+            end
+            local code = self.response_headers
+                and self.response_headers.get_status_code
+                and self.response_headers:get_status_code()
+            local err
+            if self.s_error then
+                err = self.error_str or "network request failed"
+            elseif not Request.ok(code) then
+                err = T(_("HTTP %1"), tostring(code))
+            end
+            finish(err)
+        end
+
+        client._handle_headers = function(self, data)
+            if not data then
+                self:_throw_error(turbo.async.errors.NO_HEADERS,
+                    "No data receive after connect. Expected HTTP headers.")
+                return
+            end
+            local status, headers = xpcall(httputil.HTTPParser, function() end,
+                data, httputil.hdr_t["HTTP_RESPONSE"])
+            if status == false then
+                self:_throw_error(turbo.async.errors.PARSE_ERROR_HEADERS,
+                    "Could not parse HTTP response header")
+                return
+            end
+            self.response_headers = headers
+            local code = self.response_headers:get_status_code()
+            if code == 101 then
+                self:_finalize_request()
+                return
+            elseif 100 <= code and code < 200 then
+                self.iostream:read_until_pattern("\r?\n\r?\n", self._handle_headers, self)
+                return
+            end
+
+            if not state.cancelled and handlers.on_headers then
+                handlers.on_headers(code, self.response_headers)
+            end
+
+            local content_length = self.response_headers:get("Content-Length", true)
+            local transfer = self.response_headers:get("Transfer-Encoding", true)
+            if transfer and tostring(transfer):lower() == "chunked" and self.kwargs.method ~= "HEAD" then
+                self._chunked = true
+                self._read_buffer = buffer()
+                self.iostream:read_until("\r\n", self._handle_chunked_encoding, self)
+                return
+            end
+            if content_length and tonumber(content_length) and tonumber(content_length) > 0
+                and self.kwargs.method ~= "HEAD" then
+                self.iostream:read_bytes(tonumber(content_length), self._handle_body, self)
+                return
+            end
+            -- 无 Content-Length / 非 chunked：按连接关闭读（SSE 常见）
+            if self.kwargs.method == "HEAD" then
+                self:_finalize_request()
+                return
+            end
+            self.iostream:read_until_close(function(self_, final_data)
+                if final_data and #final_data > 0 then
+                    -- streaming_callback 已推送过的部分可能重复；只补尚未发出的尾部
+                    emit(final_data)
+                end
+                self_.payload = final_data or ""
+                self_:_finalize_request()
+            end, self, function(_, chunk)
+                emit(chunk)
+            end, self)
+        end
+
+        local res = coroutine.yield(client:fetch(opts.url, {
+            method = opts.method or "GET",
+            body = opts.body,
+            request_timeout = opts.timeout or 180,
+            connect_timeout = opts.connect_timeout or 10,
+            allow_redirects = opts.allow_redirects,
+            auth_username = opts.auth_username,
+            auth_password = opts.auth_password,
+            user_agent = user_agent and tostring(user_agent) or nil,
+            on_headers = function(headers)
+                addHeaders(headers, opts.headers)
+            end,
+        }))
+
+        -- finalize 通常已调 finish；兜底：yield 返回但未 finalize 时仍收口
+        if not state.done then
+            finish(responseError(res))
+        end
+    end)
+
+    return makeJob(state, function()
+        local client = state.client
+        if client and client.iostream and not client.iostream:closed() then
+            pcall(function()
+                client.iostream:close()
+            end)
+        end
+        if not state.done then
+            finish("cancelled")
         end
     end)
 end
