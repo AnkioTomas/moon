@@ -1,7 +1,7 @@
 --[[--
 章节 HTML：正文归一化与原子落盘。
 
-@module koplugin.book.chapters.html
+@module koplugin.book.convert.html
 --]]
 
 local _ = require("gettext")
