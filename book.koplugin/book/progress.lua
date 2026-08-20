@@ -9,7 +9,6 @@ local Event = require("ui/event")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local logger = require("logger")
-local Store = require("book.store")
 local ProgressDB = require("utils.db.progress")
 local DbQueue = require("utils.db.queue")
 local ProgressPosition = require("types.book_progress")
@@ -19,41 +18,15 @@ local Progress = {}
 
 
 
---- 当前打开文档内的阅读比例 0..1
----@param ui table
----@return number
-local function docFraction(ui)
-    if not ui or not ui.document then
-        return 0
-    end
-    local doc = ui.document
-    if doc.getXPointer and doc.getProportionFromXPointer then
-        local ok, p = pcall(function()
-            return doc:getProportionFromXPointer(doc:getXPointer())
-        end)
-        if ok and type(p) == "number" then
-            return math.max(0, math.min(1, p))
-        end
-    end
-    if ui.getCurrentPage and doc.getPageCount then
-        local page = ui:getCurrentPage() or 1
-        local total = doc:getPageCount() or 1
-        if total > 0 then
-            return math.max(0, math.min(1, page / total))
-        end
-    end
-    return 0
-end
-
 --- 把文档内比例合成为全书比例。
 ---@param doc_frac number
 ---@param id BookIdentity|nil
+---@param toc BookChapter[]|nil
 ---@return number
-local function wholeFraction(doc_frac, id)
+local function wholeFraction(doc_frac, id, toc)
     if not id or not id.chapter_idx then
         return doc_frac
     end
-    local toc = require("ui.reader.session").toc()
     local count = toc and #toc
     local idx = tonumber(id.chapter_idx) or 1
     if not count or count <= 0 then
@@ -62,22 +35,25 @@ local function wholeFraction(doc_frac, id)
     return math.max(0, math.min(1, ((idx - 1) + doc_frac) / count))
 end
 
---- 全书阅读比例 0..1（按章源会合成）。
----@param ui table
----@param id BookIdentity
+--- 从阅读快照取得全书阅读比例 0..1（按章源会合成）。
+---@param snapshot ReaderSessionSnapshot
 ---@return number
-function Progress.fraction(ui, id)
-    return wholeFraction(docFraction(ui), id)
+function Progress.fraction(snapshot)
+    if not snapshot then return 0 end
+    local doc_frac = tonumber(snapshot.doc_fraction) or 0
+    local identity = snapshot.identity
+    local chapter = snapshot.chapter
+    return wholeFraction(doc_frac, identity, chapter and chapter.toc)
 end
 
---- 当前 ProgressPosition；调用方传入已解析身份，避免重复查库/算 md5。
----@param ui table
----@param id BookIdentity
+--- 当前 ProgressPosition；位置完全来自 ReaderSession 快照。
+---@param snapshot ReaderSessionSnapshot
 ---@return ProgressPosition
-local function position(ui, id)
-    local doc_frac = docFraction(ui)
+function Progress.position(snapshot)
+    local id = snapshot and snapshot.identity or {}
+    local doc_frac = snapshot and tonumber(snapshot.doc_fraction) or 0
     return {
-        fraction = wholeFraction(doc_frac, id),
+        fraction = Progress.fraction(snapshot),
         chapter_idx = id.chapter_idx,
         chapter_fraction = id.chapter_idx and doc_frac or nil,
     }
@@ -121,15 +97,15 @@ local function confirm(source_id, stable_id, revision, done)
 end
 
 --- 保存当前文档进度。写入完成前不发网络请求，避免同步旧快照。
----@param ui table
----@param id BookIdentity
+---@param snapshot ReaderSessionSnapshot
 ---@param cb fun(ok: boolean)|nil
-function Progress.save(ui, id, cb)
+function Progress.save(snapshot, cb)
+    local id = snapshot and snapshot.identity
     if not id or not id.source_id or not id.stable_id then
         if cb then cb(false) end
         return
     end
-    local pos = position(ui, id)
+    local pos = Progress.position(snapshot)
     pos.updated_at = os.time()
     DbQueue.run(function()
         assert(ProgressDB.upsert(id.source_id, id.stable_id, pos), "failed to save progress")
@@ -237,7 +213,7 @@ end
 ---@param pos ProgressPosition
 ---@param pct number
 ---@param local_frac number
-local function askProgressConflict(ui, id, pos, pct, local_frac)
+local function askProgressConflict(id, pos, pct, local_frac)
     local ConfirmBox = require("ui/widget/confirmbox")
     local remote_label = T(_("云端 %1%"), string.format("%.1f", pct * 100))
     local local_label = T(_("本地 %1%"), string.format("%.1f", local_frac * 100))
@@ -246,8 +222,10 @@ local function askProgressConflict(ui, id, pos, pct, local_frac)
         ok_text = remote_label,
         cancel_text = local_label,
         ok_callback = function()
-            if Store.isCurrentDocument(ui, id) then
-                applyRemotePos(ui, id, pos, pct, true)
+            local Session = require("ui.reader.session")
+            local current = Session.current()
+            if current and Session.isCurrent(id) then
+                applyRemotePos(current.ui, current.identity, pos, pct, true)
             end
         end,
         cancel_callback = function()
@@ -256,20 +234,22 @@ local function askProgressConflict(ui, id, pos, pct, local_frac)
 end
 
 --- 从数据源拉取进度并应用到当前文档
----@param ui table
----@param id BookIdentity
-function Progress.pull(ui, id)
+---@param snapshot ReaderSessionSnapshot
+function Progress.pull(snapshot)
+    local id = snapshot and snapshot.identity
+    if not id then return end
     local source = id.source
     if not source or not source.getProgressAsync then
         return
     end
-    Progress.save(ui, id, function(ok)
+    Progress.save(snapshot, function(ok)
         if not ok then
             return
         end
         source:getProgressAsync(id, function(pos, err)
             -- 校验当前文档身份：若用户已切换到其他书，跳过进度应用
-            if not Store.isCurrentDocument(ui, id) then
+            local Session = require("ui.reader.session")
+            if not Session.isCurrent(id) then
                 logger.dbg("book.progress pull skip: document changed")
                 return
             end
@@ -277,11 +257,12 @@ function Progress.pull(ui, id)
                 UIManager:show(InfoMessage:new{ text = err or _("拉取失败") })
                 return
             end
-            local local_frac = wholeFraction(docFraction(ui), id)
+            local local_position = Session.position()
+            local local_frac = local_position and local_position.fraction or 0
             if math.abs(local_frac - pos.fraction) < 0.01 then
                 return
             end
-            askProgressConflict(ui, id, pos, pos.fraction, local_frac)
+            askProgressConflict(id, pos, pos.fraction, local_frac)
         end)
     end)
 end
