@@ -20,8 +20,8 @@ local book = Mapper.book({
     cover = "https://img.example/a.jpg",
     description = "<p> 简介 </p>",
 })
-Assert.eq(book.ref.source_id, "zlib")
-Assert.eq(book.ref.stable_id, "12:abc")
+Assert.eq(book.source_id, "zlib")
+Assert.eq(book.stable_id, "12:abc")
 Assert.eq(book.authors, "作者")
 Assert.eq(book.filesize, 1234)
 Assert.eq(book.format, "epub")
@@ -38,4 +38,4 @@ local result = Mapper.list({
 })
 Assert.eq(result.count, 99)
 Assert.len(result.data, 2)
-Assert.eq(result.data[2].ref.stable_id, "2:b")
+Assert.eq(result.data[2].stable_id, "2:b")

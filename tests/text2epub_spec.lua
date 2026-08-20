@@ -116,8 +116,39 @@ end
 do
     Assert.is_true(Text2Epub._isChapterTitle("第十二卷 风起"))
     Assert.is_true(Text2Epub._isChapterTitle("序章"))
+    Assert.is_true(Text2Epub._isChapterTitle("最终章 归途"))
     Assert.is_true(Text2Epub._isChapterTitle("Chapter IV - Return"))
+    Assert.is_true(Text2Epub._isChapterTitle("Section 12: Return"))
+    Assert.is_true(Text2Epub._isChapterTitle("===第001章 养母婉娘==="))
+    Assert.is_true(Text2Epub._isChapterTitle("第一部 风起"))
+    Assert.is_false(Text2Epub._isChapterTitle("第一部门负责审批"))
+    Assert.is_false(Text2Epub._isChapterTitle("第二天傍晚，我来到夜总会"))
     Assert.is_false(Text2Epub._isChapterTitle("这只是普通正文"))
+end
+
+-- 带装饰符的章节标题应去掉装饰后写入目录。
+do
+    local book = Text2Epub.parse("《测试》\n===第001章 开始===\n正文\n第二天继续写正文")
+    Assert.len(book.chapters, 1)
+    Assert.eq(book.chapters[1].title, "第001章 开始")
+    Assert.is_true(book.chapters[1].html:find("<p>第二天继续写正文</p>", 1, true) ~= nil)
+end
+
+-- 知轩藏书式文件名可补全元数据；调用方显式提供的值仍优先。
+do
+    local book = Text2Epub.parse("第一章\n正文", {
+        source = "/books/《希灵帝国》（校对版全本）作者：远瞳.txt",
+    })
+    Assert.eq(book.title, "希灵帝国")
+    Assert.eq(book.author, "远瞳")
+
+    book = Text2Epub.parse("第一章\n正文", {
+        source = "/books/《希灵帝国》作者：远瞳.txt",
+        title = "自定义书名",
+        author = "自定义作者",
+    })
+    Assert.eq(book.title, "自定义书名")
+    Assert.eq(book.author, "自定义作者")
 end
 
 -- build 拒绝非 UTF-8，不能悄悄生成损坏 XHTML

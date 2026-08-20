@@ -9,7 +9,7 @@ local original_json_preload = package.preload["json"]
 local original_socketutil_preload = package.preload["socketutil"]
 
 local function sourceBase()
-    return {}
+    return { openBookAsync = function() end }
 end
 
 package.preload["utils.settings"] = function()
@@ -37,7 +37,7 @@ for _, name in ipairs({
     "listLibraryAsync", "recentBooksAsync", "filtersAsync",
     "importReadingStatsAsync",
     "readingInsightAsync", "getProgressAsync", "putProgressAsync",
-    "materializeWholeAsync",
+    "openBookAsync", "materializeWholeAsync",
 }) do
     Assert.eq(type(moon[name]), "function")
 end
@@ -48,7 +48,7 @@ end
 package.preload["source.webdav.mapper"] = function() return {} end
 package.loaded["source.webdav"] = nil
 local webdav = require("source.webdav").new()
-for _, name in ipairs({ "listLibraryAsync", "materializeWholeAsync" }) do
+for _, name in ipairs({ "listLibraryAsync", "openBookAsync", "materializeWholeAsync" }) do
     Assert.eq(type(webdav[name]), "function")
 end
 
@@ -67,7 +67,7 @@ package.loaded["source.wechat"] = nil
 local wechat = require("source.wechat").new()
 for _, name in ipairs({
     "listLibraryAsync", "listStoreAsync", "recentBooksAsync",
-    "getDetailAsync", "getTocAsync", "fetchChapterContentAsync",
+    "getDetailAsync", "openBookAsync",
     "getProgressAsync", "putProgressAsync",
 }) do
     Assert.eq(type(wechat[name]), "function")

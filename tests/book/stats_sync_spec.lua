@@ -18,6 +18,7 @@ local pending_rows = {
     { id = 1, stable_id = "a.epub", page = 1, start_time = 1000, duration = 30, total_pages = 300 },
 }
 local deleted = false
+local delete_ok = true
 package.preload["utils.db.stats"] = function()
     return {
         countBySource = function()
@@ -27,15 +28,17 @@ package.preload["utils.db.stats"] = function()
             return pending_rows
         end,
         deleteIds = function()
-            deleted = true
-            return true
+            if delete_ok then deleted = true end
+            return delete_ok
         end,
     }
 end
 package.preload["utils.db.queue"] = function()
     return {
-        run = function(worker)
-            worker()
+        run = function(worker, opts)
+            local ok, err = pcall(worker)
+            local cb = ok and opts and opts.on_done or opts and opts.on_failed
+            if cb then cb(ok and nil or err) end
         end,
     }
 end
@@ -43,9 +46,10 @@ package.loaded["ui/widget/infomessage"] = nil
 package.loaded["ui/network/manager"] = nil
 package.loaded["utils.db.stats"] = nil
 package.loaded["utils.db.queue"] = nil
-package.loaded["stats.stats_sync"] = nil
+package.loaded["book.stats"] = nil
+package.loaded["book.stats_sync"] = nil
 
-local StatsSync = require("stats.stats_sync")
+local StatsSync = require("book.stats")
 local import_callback
 local cancelled = false
 local api = {
@@ -77,11 +81,40 @@ import_callback({ ok = true })
 Assert.is_true(not StatsSync.isBusy())
 Assert.is_true(not deleted)
 
+-- 服务端确认且本地对应 ID 删除完成，才算上报成功。
+local success_ok
+Assert.is_true(StatsSync.pushAsync(api, {
+    force = true,
+    on_done = function(ok) success_ok = ok end,
+}))
+import_callback({ ok = true })
+Assert.is_true(success_ok)
+Assert.is_true(deleted)
+
+-- 本地确认删除失败时保留记录，并把本次上报标成失败。
+deleted = false
+delete_ok = false
+pending_rows = {
+    { id = 2, stable_id = "b.epub", page = 2, start_time = 2000, duration = 20, total_pages = 200 },
+}
+local delete_done, delete_err
+Assert.is_true(StatsSync.pushAsync(api, {
+    force = true,
+    on_done = function(ok, err)
+        delete_done, delete_err = ok, err
+    end,
+}))
+import_callback({ ok = true })
+Assert.is_false(delete_done)
+Assert.not_nil(delete_err)
+Assert.is_false(deleted)
+delete_ok = true
+
 -- 无本地统计：快速失败，不打扰网络
 pending_rows = {}
 local empty_ok, empty_err = StatsSync.pushAsync(api, { force = true })
-Assert.is_true(not empty_ok)
-Assert.eq(empty_err, "无阅读统计数据")
+Assert.is_true(empty_ok)
+Assert.eq(empty_err, "empty")
 
 _G.G_reader_settings = previous_settings
 for _, name in ipairs({
@@ -91,7 +124,7 @@ for _, name in ipairs({
     "utils.paths",
     "utils.db.stats",
     "utils.db.queue",
-    "stats.stats_sync",
+    "book.stats", "book.stats_sync",
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil

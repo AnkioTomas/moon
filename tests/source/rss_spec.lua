@@ -1,8 +1,8 @@
 --[[--
-source.rss 门面离线用例：configuredFeeds / findFeed / reconcileChapterCache。
+source.rss 门面离线用例：configuredFeeds / findFeed / 源侧章节打开。
 
 local 函数经导出入口驱动：configuredFeeds 走 listLibraryAsync/configured，
-findFeed 走 getDetailAsync，reconcileChapterCache 走 getTocAsync（观察文件系统副作用）。
+findFeed 走 getDetailAsync；章节打开验证源自己管理联网与进度 UI。
 
 @module tests.source.rss_spec
 --]]
@@ -16,6 +16,8 @@ local cfg = { feeds = {} }
 
 -- 假客户端：fetchAsync 直接回放 client_state 里的数据
 local client_state = { data = nil, err = nil, cleared = 0 }
+local chapter_open = {}
+local progress_ui = { shown = 0, closed = 0, progress = {} }
 
 package.preload["utils.settings"] = function()
     return {
@@ -39,6 +41,36 @@ package.preload["source.rss.client"] = function()
         end,
     }
 end
+package.preload["ui/network/manager"] = function()
+    return { runWhenOnline = function(_, fn) fn() end }
+end
+package.preload["ui/widget/progressbardialog"] = function()
+    return {
+        new = function()
+            return {
+                show = function() progress_ui.shown = progress_ui.shown + 1 end,
+                close = function() progress_ui.closed = progress_ui.closed + 1 end,
+                reportProgress = function(_, step)
+                    progress_ui.progress[#progress_ui.progress + 1] = step
+                end,
+            }
+        end,
+    }
+end
+package.preload["source.chapter"] = function()
+    return {
+        openWithUi = function(_, _, _, _, ops, cb)
+            local dialog = require("ui/widget/progressbardialog"):new{}
+            dialog:show()
+            ops.progress = function(step) dialog:reportProgress(step) end
+            ops.progress(1)
+            ops.progress(4)
+            dialog:close()
+            cb(chapter_open.path, chapter_open.err)
+            return { cancel = function() end }
+        end,
+    }
+end
 
 -- reconcileChapterCache 写章节缓存目录；指到带本区域前缀的临时目录，结束清理
 local TMP = Config.dir() .. "/.moon/cache/test_rss_spec"
@@ -57,6 +89,23 @@ package.preload["utils.paths"] = function()
 end
 
 local RSS = require("source.rss")
+
+-- openBookAsync：RSS 源自己管理联网/进度 UI，回调首参为物理路径。
+do
+    chapter_open.path = "/cache/rss/feed/1.html"
+    local src = RSS.new()
+    local path, err, extra
+    src:openBookAsync({ source_id = "rss", stable_id = "https://example.com/feed",
+        book = { title = "订阅" } }, nil, function(...)
+            path, err, extra = ...
+        end)
+    Assert.eq(path, "/cache/rss/feed/1.html")
+    Assert.is_nil(err)
+    Assert.is_nil(extra, "源打开回调不得泄露章节上下文")
+    Assert.eq(progress_ui.shown, 1)
+    Assert.eq(progress_ui.closed, 1)
+    Assert.eq(progress_ui.progress[#progress_ui.progress], 4)
+end
 
 local function writeFile(path, content)
     local f = assert(io.open(path, "wb"))
@@ -89,9 +138,9 @@ do
     src:listLibraryAsync({}, function(result) books = result end)
     Assert.len(books.data, 2)
     Assert.eq(books.data[1].title, "甲")
-    Assert.eq(books.data[1].ref.stable_id, "https://example.com/feed")
+    Assert.eq(books.data[1].stable_id, "https://example.com/feed")
     Assert.eq(books.data[2].title, "乙")
-    Assert.eq(books.data[2].ref.stable_id, "https://b.example.com/rss")
+    Assert.eq(books.data[2].stable_id, "https://b.example.com/rss")
 end
 
 -- configured：有无有效订阅
@@ -117,7 +166,7 @@ do
     end)
     Assert.is_nil(detail_err)
     Assert.eq(detail.title, "甲")
-    Assert.eq(detail.ref.stable_id, "https://example.com/feed")
+    Assert.eq(detail.stable_id, "https://example.com/feed")
 
     -- 未规范化的 stable_id 同样命中
     local detail2
@@ -132,102 +181,28 @@ do
     Assert.eq(missing_err, "订阅不存在")
 end
 
--- getTocAsync 拉取失败：错误透传
-do
-    cfg.feeds = { { url = "https://a.example.com/feed" } }
-    client_state.data = nil
-    client_state.err = "网络故障"
-    local src = RSS.new()
-    local chapters, err
-    src:getTocAsync({ stable_id = "https://a.example.com/feed" }, function(c, e)
-        chapters, err = c, e
-    end)
-    Assert.is_nil(chapters)
-    Assert.eq(err, "网络故障")
-end
-
--- reconcileChapterCache：目录身份序列（uid 列表）变化才清 N.html 章节缓存
-do
-    cfg.feeds = { { url = "https://a.example.com/feed" } }
-    client_state.err = nil
-    local src = RSS.new()
-    local ref = { stable_id = "https://a.example.com/feed", source_id = "rss" }
-    local fingerprint_path = TMP .. "/rss-catalog"
-
-    local function setItems(uids)
-        local items = {}
-        for _, uid in ipairs(uids) do
-            items[#items + 1] = { uid = uid, link = "https://a.example.com/" .. uid, title = uid }
-        end
-        client_state.data = { title = "f", items = items }
-    end
-
-    local function getToc()
-        local chapters, err
-        src:getTocAsync(ref, function(c, e) chapters, err = c, e end)
-        return chapters, err
-    end
-
-    -- 首次对账：无旧指纹，只写指纹不清缓存
-    setItems({ "u1", "u2" })
-    local chapters = getToc()
-    Assert.len(chapters, 2)
-    Assert.eq(readFile(fingerprint_path), "u1\nu2")
-
-    -- 目录变化：删除 N.html / N.html.part，保留其它文件，更新指纹
-    writeFile(TMP .. "/1.html", "a")
-    writeFile(TMP .. "/2.html", "b")
-    writeFile(TMP .. "/3.html.part", "c")
-    writeFile(TMP .. "/keep.txt", "d")
-    setItems({ "u2", "u3" })
-    getToc()
-    Assert.is_false(fileExists(TMP .. "/1.html"))
-    Assert.is_false(fileExists(TMP .. "/2.html"))
-    Assert.is_false(fileExists(TMP .. "/3.html.part"))
-    Assert.is_true(fileExists(TMP .. "/keep.txt"))
-    Assert.eq(readFile(fingerprint_path), "u2\nu3")
-
-    -- 目录不变：缓存保留
-    writeFile(TMP .. "/1.html", "a")
-    getToc()
-    Assert.is_true(fileExists(TMP .. "/1.html"))
-
-    -- 指纹 rename 失败：清掉 .part 残留，下次对账按首次重写自愈
-    setItems({ "u9" })
-    local real_rename = os.rename
-    os.rename = function() return nil, "read-only fs" end
-    getToc()
-    os.rename = real_rename
-    Assert.is_false(fileExists(fingerprint_path .. ".part"))
-    Assert.is_false(fileExists(fingerprint_path))
-    getToc()
-    Assert.eq(readFile(fingerprint_path), "u9")
-
-    -- 空目录：报错且不动指纹
-    setItems({})
-    local empty_chapters, empty_err = getToc()
-    Assert.is_nil(empty_chapters)
-    Assert.eq(empty_err, "RSS 暂无文章")
-    Assert.eq(readFile(fingerprint_path), "u9")
-end
-
 -- 清理：删除本 spec 独有的临时目录，还原 preload/loaded
 -- 注意先收集再删除：lfs.dir 迭代中途删文件会跳过条目
 do
-    local names = {}
-    for name in lfs.dir(TMP) do
-        if name ~= "." and name ~= ".." then
-            names[#names + 1] = name
+    if lfs.attributes(TMP, "mode") == "directory" then
+        local names = {}
+        for name in lfs.dir(TMP) do
+            if name ~= "." and name ~= ".." then
+                names[#names + 1] = name
+            end
         end
+        for _, name in ipairs(names) do
+            os.remove(TMP .. "/" .. name)
+        end
+        lfs.rmdir(TMP)
     end
-    for _, name in ipairs(names) do
-        os.remove(TMP .. "/" .. name)
-    end
-    lfs.rmdir(TMP)
     for _, name in ipairs({
         "utils.settings",
         "source.rss.client",
         "utils.paths",
+        "ui/network/manager",
+        "ui/widget/progressbardialog",
+        "source.chapter",
         "source.rss",
     }) do
         package.preload[name] = nil

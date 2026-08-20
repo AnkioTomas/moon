@@ -39,8 +39,8 @@ do -- 全字段行 → Book 逐项映射
     })
     Assert.eq(list.count, 1)
     local b = list.data[1]
-    Assert.eq(b.ref.source_id, "local")
-    Assert.eq(b.ref.stable_id, "/books/三体.epub")
+    Assert.eq(b.source_id, "local")
+    Assert.eq(b.stable_id, "/books/三体.epub")
     Assert.eq(b.title, "三体")
     Assert.eq(b.authors, "刘慈欣")
     Assert.eq(b.intro, "科幻小说")
@@ -51,7 +51,7 @@ end
 do -- 缺字段兜底：只有 stable_id 的行
     local list = Mapper.list({ { stable_id = "a.txt" } })
     local b = list.data[1]
-    Assert.eq(b.ref.stable_id, "a.txt")
+    Assert.eq(b.stable_id, "a.txt")
     Assert.is_nil(b.title)
     Assert.is_nil(b.authors)
     Assert.is_nil(b.intro)
@@ -76,7 +76,7 @@ do -- 非法行被过滤：无 stable_id / 空 stable_id / 非表
         { stable_id = "ok" },
     })
     Assert.eq(#list.data, 1)
-    Assert.eq(list.data[1].ref.stable_id, "ok")
+    Assert.eq(list.data[1].stable_id, "ok")
 end
 
 do -- count 参数：显式传入优先，否则取 books 数量；rows 为 nil 时为空列表
@@ -98,7 +98,7 @@ do -- recent 与 list 同构（无显式 count）
         { stable_id = "y" },
     })
     Assert.eq(r.count, 2)
-    Assert.eq(r.data[1].ref.source_id, "local")
+    Assert.eq(r.data[1].source_id, "local")
     Assert.eq(r.data[1].title, "最近读")
 end
 
@@ -171,7 +171,7 @@ do -- summary / daily / daily_books → 卡片结构
     Assert.eq(d14.duration_seconds, 3600)
     Assert.eq(d14.duration_text, "1小时0分钟")
     Assert.eq(#d14.books, 1) -- ghost / 空 stable_id 都不进
-    Assert.eq(d14.books[1].ref.stable_id, "/books/三体.epub")
+    Assert.eq(d14.books[1].stable_id, "/books/三体.epub")
     Assert.eq(d14.books[1].title, "三体") -- 命中 books 表缓存
     Assert.eq(d14.books[1].authors, "刘慈欣")
     Assert.eq(d14.books[1].percent, 30) -- floor(30*100/100 + 0.5)

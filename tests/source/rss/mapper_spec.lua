@@ -27,8 +27,8 @@ do
         { url = "" },
     })
     Assert.eq(result.count, 1)
-    Assert.eq(result.data[1].ref.source_id, "rss")
-    Assert.eq(result.data[1].ref.stable_id, "https://example.com/feed")
+    Assert.eq(result.data[1].source_id, "rss")
+    Assert.eq(result.data[1].stable_id, "https://example.com/feed")
     Assert.eq(result.data[1].title, "Override")
 end
 

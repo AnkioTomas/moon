@@ -179,6 +179,21 @@ do
     clearMods()
 end
 
+-- ── get：省略 TTL 时读取持久目录快照，不按新鲜度丢弃 ────
+do
+    local connection = makeConn({
+        step = function()
+            return { "saved-payload", os.time() - 7200 }, { "payload", "fetched_at" }
+        end,
+    })
+    local DbBase, TocDB = loadToc(connection)
+
+    Assert.eq(TocDB.get("moon", "b1"), "saved-payload")
+
+    DbBase.close()
+    clearMods()
+end
+
 -- ── get：缺失（无行）即 miss；非法参数不碰 DB ────────────
 do
     local connection, calls = makeConn()

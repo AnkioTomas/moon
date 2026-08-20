@@ -1,264 +1,471 @@
 --[[--
-book.store BookRef 身份离线用例
+book.store 路径精确查库身份解析离线用例
+
+唯一规则：章节文件查 chapters 表 → 整本书查 books.path；
+未中时 .moon 内拒开、.moon 外登记 local 书。
 
 @module tests.book.store_spec
 --]]
 
 local Assert = require("support.assert")
-local BookRef = require("types.book").BookRef
 
--- stub db / paths / lfs 最小集（数据驱动：各用例块自行填表）
-local lfs_modes = {} -- path → "file"/"directory"
-package.preload["libs/libkoreader-lfs"] = function()
+-- stub db / paths / ffi 最小集（数据驱动：各用例块自行填表）
+local moon_paths = {} -- path → true（.moon 内）
+package.preload["utils.paths"] = function()
     return {
-        attributes = function(path, what)
-            if what == "mode" then
-                return lfs_modes[path]
-            end
-            return nil
+        isMoonPath = function(path)
+            return moon_paths[path] == true
         end,
-        mkdir = function() return true end,
-        dir = function() return function() end end,
     }
 end
 
-local Paths = require("utils.paths")
-local orig_sanitize = Paths.sanitizeSourceId
-local orig_ensure = Paths.ensureBookWork
-local orig_work = Paths.bookWorkDir
-local orig_split = Paths.splitBookWorkPath
-Paths.ensureBookWork = function() end
-Paths.bookWorkDir = function(stable_id, id)
-    return "/tmp/" .. tostring(id) .. "/" .. tostring(stable_id)
-end
--- 缓存工作目录识别由用例填表控制
-local work_paths = {} -- path → { dir=, file= }
-Paths.splitBookWorkPath = function(path)
-    local hit = work_paths[path]
-    if hit then
-        return hit.dir, hit.file, hit.source_id, hit.slug
-    end
-    return nil
+local db_sql = {}
+package.preload["utils.db.base"] = function()
+    return {
+        ensure = function() return true end,
+        exec = function(sql)
+            db_sql[#db_sql + 1] = sql
+            return true
+        end,
+    }
 end
 
-package.loaded["book.store"] = nil
-package.loaded["utils.db.base"] = nil
-package.loaded["utils.db.book"] = nil
-package.loaded["utils.db.open"] = nil
-package.preload["utils.db.base"] = function()
-    return { open = function() return true end }
+local chapter_rows = {} -- path → chapters 行
+local chapter_upserts = {}
+local chapter_upsert_ok = true
+package.preload["utils.db.chapter"] = function()
+    return {
+        get = function(path)
+            return chapter_rows[path]
+        end,
+        upsert = function(row)
+            chapter_upserts[#chapter_upserts + 1] = row
+            return chapter_upsert_ok
+        end,
+    }
 end
-local book_rows = {} -- "sid\0stid" → books 行
-local md5_index = {} -- "sid\0md5" → books 行
-local stable_ids_by_source = {} -- source_id → stable_id[]
-local open_paths = {} -- path → opens 行
-local book_upserts = {}
-local open_upserts = {}
-package.preload["utils.db.book"] = function()
+
+local toc_rows = {}
+local toc_upserts = {}
+package.preload["utils.db.toc"] = function()
     return {
         get = function(source_id, stable_id)
-            return book_rows[source_id .. "\0" .. tostring(stable_id)]
+            return toc_rows[source_id .. "\0" .. stable_id]
         end,
-        getByMd5 = function(source_id, digest)
-            return md5_index[source_id .. "\0" .. tostring(digest)]
+        upsert = function(source_id, stable_id, payload)
+            toc_upserts[#toc_upserts + 1] = {
+                source_id = source_id, stable_id = stable_id, payload = payload,
+            }
+            toc_rows[source_id .. "\0" .. stable_id] = payload
+            return true
         end,
-        stableIdsBySource = function(source_id)
-            return stable_ids_by_source[source_id] or {}
+    }
+end
+
+local json_values = {}
+package.preload["json"] = function()
+    return {
+        encode = function(value)
+            local payload = "toc:" .. tostring(#toc_upserts + 1)
+            json_values[payload] = value
+            return payload
+        end,
+        decode = function(payload) return json_values[payload] end,
+    }
+end
+
+local book_rows_by_path = {} -- path → books 行
+local book_rows_by_id = {} -- "sid\0stid" → books 行
+local book_upserts = {}
+local touch_calls = {} -- { source_id, stable_id, path, chapter_idx }
+local touch_ok = true
+package.preload["utils.db.book"] = function()
+    return {
+        getByPath = function(path)
+            return book_rows_by_path[path]
+        end,
+        get = function(source_id, stable_id)
+            return book_rows_by_id[source_id .. "\0" .. tostring(stable_id)]
         end,
         upsert = function(row)
             book_upserts[#book_upserts + 1] = row
             return true
         end,
-        expireBefore = function() end,
-        stripMeta = function() end,
+        touchPath = function(source_id, stable_id, path, chapter_idx)
+            touch_calls[#touch_calls + 1] = {
+                source_id = source_id,
+                stable_id = stable_id,
+                path = path,
+                chapter_idx = chapter_idx,
+            }
+            return touch_ok
+        end,
     }
 end
-package.preload["utils.db.open"] = function()
-    return {
-        upsert = function(row)
-            open_upserts[#open_upserts + 1] = row
-            return true
-        end,
-        get = function() return nil end,
-        getByPath = function(path)
-            return open_paths[path]
-        end,
-        all = function() return {} end,
-        delete = function() end,
-        clear = function() end,
-    }
-end
+
 package.preload["utils.db.queue"] = function()
     return {
         -- 同步执行 worker：登记结果当断言即可见
         run = function(worker, opts)
-            worker(nil)
-            if opts and opts.on_done then
-                opts.on_done(nil)
+            local ok, err = pcall(worker)
+            if ok and opts and opts.on_done then
+                opts.on_done()
+            elseif not ok and opts and opts.on_failed then
+                opts.on_failed(err)
             end
         end,
         clear = function() end,
     }
 end
--- partialMD5 由用例按路径填表控制
+
+-- partialMD5 由用例按路径填表控制；值 "ERR" 模拟计算失败（pcall 兜底）
 local md5_by_path = {}
 package.preload["ffi/util"] = function()
     return {
         partialMD5 = function(path)
-            return md5_by_path[path]
+            local digest = md5_by_path[path]
+            if digest == "ERR" then
+                error("io error")
+            end
+            return digest
+        end,
+    }
+end
+
+-- 属主源解析由用例控制：current 命中直接用，否则 create 建实例
+local registry_current = nil
+local registry_created = {}
+package.preload["source.registry"] = function()
+    return {
+        current = function()
+            return registry_current
+        end,
+        create = function(id)
+            registry_created[#registry_created + 1] = id
+            return { id = id }
+        end,
+        resolve = function(id)
+            if registry_current and registry_current.id == id then
+                return registry_current
+            end
+            registry_created[#registry_created + 1] = id
+            return { id = id }
         end,
     }
 end
 
 local Store = require("book.store")
 
-do
-    local ref = BookRef.new("moon", "a.epub")
-    local book = { ref = ref, title = "t", percent = 1 }
-    local got = Store.refOf(book)
-    Assert.eq(got.source_id, ref.source_id)
-    Assert.eq(got.stable_id, ref.stable_id)
-end
-
-do
-    Assert.is_nil(Store.refOf({ id = "legacy" }))
-end
-
-do
-    Assert.eq(Store.bookFilePath("books/a.pdf", "webdav"), "/tmp/webdav/books/a.pdf/book.pdf")
-    Assert.eq(Store.bookFilePath("books/a.unknown", "webdav"), "/tmp/webdav/books/a.unknown/book.epub")
-end
-
--- ── identityFor：opens 快路径优先于缓存目录反查 ──────────
-do
-    open_paths["/x/book.epub"] = { source_id = "moon", stable_id = "s1", chapter_idx = 2 }
-    -- 同时伪造缓存路径：opens 命中就必须赢
-    work_paths["/x/book.epub"] = { dir = "/d1", file = "book.epub" }
-    local id = Store.identityFor("/x/book.epub")
-    Assert.eq(id.ref.source_id, "moon")
-    Assert.eq(id.ref.stable_id, "s1")
-    Assert.eq(id.chapter_idx, 2)
-    open_paths["/x/book.epub"] = nil
-    work_paths["/x/book.epub"] = nil
-end
-
--- ── identityFor：缓存目录父级 slug 可反查 books（无 opens/伴生文件）──
+-- ── identityFor：chapters 命中 → 章节身份（优先于 books.path）──
 do
     local path = "/cache/moon/book/slug/3.html"
-    work_paths[path] = {
-        dir = "/cache/moon/book/slug",
-        file = "3.html",
-        source_id = "moon",
-        slug = Paths.slugFor("s-parent"),
-    }
-    stable_ids_by_source.moon = { "other", "s-parent" }
+    chapter_rows[path] = { source_id = "moon", stable_id = "s1", chapter_idx = 3 }
+    -- 同时伪造 books.path 命中：chapters 必须赢
+    book_rows_by_path[path] = { source_id = "other", stable_id = "sX" }
+    book_rows_by_id["moon\0s1"] = { source_id = "moon", stable_id = "s1", title = "章书元数据" }
     local id = Store.identityFor(path)
-    Assert.eq(id.ref.source_id, "moon")
-    Assert.eq(id.ref.stable_id, "s-parent")
+    Assert.eq(id.source_id, "moon")
+    Assert.eq(id.stable_id, "s1")
     Assert.eq(id.chapter_idx, 3)
-    work_paths[path] = nil
-    stable_ids_by_source.moon = nil
+    Assert.eq(id.book.title, "章书元数据")
+    chapter_rows[path] = nil
+    book_rows_by_path[path] = nil
+    book_rows_by_id["moon\0s1"] = nil
 end
 
--- ── identityFor：缓存父级 slug 未命中 → nil（不回退本地书反查）──
+-- isCurrentDocument：同一书籍且同一章节才允许异步回调继续
 do
-    work_paths["/cache/moon/book/gone/1.html"] = { dir = "/cache/moon/book/gone", file = "1.html" }
-    Assert.is_nil(Store.identityFor("/cache/moon/book/gone/1.html"))
-    work_paths["/cache/moon/book/gone/1.html"] = nil
+    local path = "/lib/current.epub"
+    book_rows_by_path[path] = { source_id = "moon", stable_id = "current" }
+    local ui = { document = { file = path } }
+    Assert.is_true(Store.isCurrentDocument(ui, {
+        source_id = "moon", stable_id = "current", chapter_idx = nil,
+    }))
+    Assert.is_false(Store.isCurrentDocument(ui, {
+        source_id = "wechat", stable_id = "current", chapter_idx = nil,
+    }))
+    book_rows_by_path[path] = nil
 end
 
--- ── identityFor：本地书 filepath 直中 books ─────────────
+-- ── identityFor：books.path 命中 → 整本书身份（chapter_idx=nil）──
 do
-    book_rows["local\0/lib/a.epub"] = { source_id = "local", stable_id = "/lib/a.epub", md5 = "m1" }
+    book_rows_by_path["/lib/a.epub"] = { source_id = "moon", stable_id = "s2", title = "整本书" }
     local id = Store.identityFor("/lib/a.epub")
-    Assert.eq(id.ref.source_id, "local")
-    Assert.eq(id.ref.stable_id, "/lib/a.epub")
+    Assert.eq(id.source_id, "moon")
+    Assert.eq(id.stable_id, "s2")
     Assert.is_nil(id.chapter_idx)
-    book_rows["local\0/lib/a.epub"] = nil
+    Assert.eq(id.book.title, "整本书")
+    book_rows_by_path["/lib/a.epub"] = nil
 end
 
--- ── identityFor：filepath 未中按内容 md5 反查（改名/移动）──
+-- ── identityFor：两表都未中 → nil ────────────────────────
 do
-    md5_by_path["/lib/moved.epub"] = "digest-1"
-    md5_index["local\0digest-1"] = { source_id = "local", stable_id = "/lib/original.epub" }
-    local id = Store.identityFor("/lib/moved.epub")
-    Assert.eq(id.ref.source_id, "local")
-    Assert.eq(id.ref.stable_id, "/lib/original.epub") -- 用行里的 stable_id
-    md5_by_path["/lib/moved.epub"] = nil
-    md5_index["local\0digest-1"] = nil
+    Assert.is_nil(Store.identityFor("/nowhere/gone.epub"))
 end
 
--- ── ensureIdentity：命中已有身份 → 补 opens 记录（touchAsync）──
+-- ── ensureIdentity：命中章节身份 → touchAsync 补登记（books + chapters）──
 do
-    open_paths["/lib/known.epub"] = { source_id = "moon", stable_id = "sk", chapter_idx = 5 }
-    local id = Store.ensureIdentity("/lib/known.epub")
-    Assert.eq(id.ref.stable_id, "sk")
+    local path = "/cache/moon/book/slug/5.html"
+    chapter_rows[path] = { source_id = "moon", stable_id = "sk", chapter_idx = 5 }
+    local id = Store.ensureIdentity(path)
+    Assert.eq(id.source_id, "moon")
+    Assert.eq(id.stable_id, "sk")
     Assert.eq(id.chapter_idx, 5)
-    Assert.eq(#open_upserts, 1)
-    Assert.eq(open_upserts[1].source_id, "moon")
-    Assert.eq(open_upserts[1].stable_id, "sk")
-    Assert.eq(open_upserts[1].chapter_idx, 5)
-    Assert.eq(open_upserts[1].path, "/lib/known.epub")
-    open_paths["/lib/known.epub"] = nil
-    open_upserts = {}
+    Assert.eq(#touch_calls, 1)
+    Assert.eq(touch_calls[1].source_id, "moon")
+    Assert.eq(touch_calls[1].stable_id, "sk")
+    Assert.eq(touch_calls[1].path, path)
+    Assert.eq(touch_calls[1].chapter_idx, 5)
+    Assert.eq(#chapter_upserts, 1)
+    Assert.eq(chapter_upserts[1].path, path)
+    Assert.eq(chapter_upserts[1].source_id, "moon")
+    Assert.eq(chapter_upserts[1].stable_id, "sk")
+    Assert.eq(chapter_upserts[1].chapter_idx, 5)
+    Assert.eq(#book_upserts, 0) -- 命中身份不写 books 元数据
+    Assert.eq(id.source.id, "moon") -- ensureIdentity 附属主源
+    chapter_rows[path] = nil
+    touch_calls = {}
+    chapter_upserts = {}
+    registry_created = {}
 end
 
--- ── ensureIdentity：未入库本地文件 → 当 local 源书登记 ────
+-- ── ensureIdentity：命中整本书身份 → 只 touch books，不写 chapters ──
+-- current 即属主源：直接用 current，不另建实例
 do
-    lfs_modes["/lib/new.book.epub"] = "file"
+    book_rows_by_path["/lib/known.epub"] = { source_id = "moon", stable_id = "s3" }
+    registry_current = { id = "moon" }
+    local id = Store.ensureIdentity("/lib/known.epub")
+    Assert.eq(id.stable_id, "s3")
+    Assert.is_nil(id.chapter_idx)
+    Assert.eq(id.source, registry_current)
+    Assert.eq(#registry_created, 0)
+    Assert.eq(#touch_calls, 1)
+    Assert.eq(touch_calls[1].stable_id, "s3")
+    Assert.is_nil(touch_calls[1].chapter_idx)
+    Assert.eq(#chapter_upserts, 0)
+    book_rows_by_path["/lib/known.epub"] = nil
+    touch_calls = {}
+end
+
+-- ── ensureIdentity：current 不是属主源 → 按身份 source_id 建实例 ──
+do
+    book_rows_by_path["/lib/old.epub"] = { source_id = "moon", stable_id = "s4" }
+    registry_current = { id = "wechat" } -- current 是别的源：不许拿它操作 moon 的书
+    local id = Store.ensureIdentity("/lib/old.epub")
+    Assert.eq(registry_created[#registry_created], "moon")
+    Assert.eq(id.source.id, "moon")
+    registry_current = nil
+    registry_created = {}
+    book_rows_by_path["/lib/old.epub"] = nil
+    touch_calls = {}
+end
+
+-- ── identityFor：纯读路径，不解析源（registry 零调用）──
+do
+    book_rows_by_path["/lib/ro.epub"] = { source_id = "moon", stable_id = "s5" }
+    local id = Store.identityFor("/lib/ro.epub")
+    Assert.eq(id.stable_id, "s5")
+    Assert.is_nil(id.source)
+    Assert.eq(#registry_created, 0)
+    book_rows_by_path["/lib/ro.epub"] = nil
+end
+
+-- ── ensureIdentity：.moon 内未知文件 → nil 且不写库 ──────
+do
+    moon_paths["/data/.moon/cache/moon/book/noid/2.html"] = true
+    Assert.is_nil(Store.ensureIdentity("/data/.moon/cache/moon/book/noid/2.html"))
+    Assert.eq(#book_upserts, 0)
+    Assert.eq(#touch_calls, 0)
+    Assert.eq(#chapter_upserts, 0)
+    moon_paths["/data/.moon/cache/moon/book/noid/2.html"] = nil
+end
+
+-- ── ensureIdentity：.moon 外未入库 → 当 local 源书登记 ────
+do
     md5_by_path["/lib/new.book.epub"] = "digest-new"
     local id = Store.ensureIdentity("/lib/new.book.epub")
-    Assert.eq(id.ref.source_id, "local")
-    Assert.eq(id.ref.stable_id, "/lib/new.book.epub")
+    Assert.eq(id.source_id, "local")
+    Assert.eq(id.stable_id, "/lib/new.book.epub")
     Assert.is_nil(id.chapter_idx)
+    Assert.eq(id.book.title, "new.book")
+    Assert.eq(id.book.path, "/lib/new.book.epub")
     Assert.eq(#book_upserts, 1)
     Assert.eq(book_upserts[1].source_id, "local")
     Assert.eq(book_upserts[1].stable_id, "/lib/new.book.epub")
     Assert.eq(book_upserts[1].md5, "digest-new")
     Assert.eq(book_upserts[1].title, "new.book") -- 文件名只去末尾扩展名
-    Assert.eq(#open_upserts, 1)
-    Assert.eq(open_upserts[1].source_id, "local")
-    Assert.eq(open_upserts[1].stable_id, "/lib/new.book.epub")
-    Assert.eq(open_upserts[1].path, "/lib/new.book.epub")
-    lfs_modes["/lib/new.book.epub"] = nil
+    Assert.eq(book_upserts[1].path, "/lib/new.book.epub")
+    Assert.is_true(type(book_upserts[1].fetched_at) == "number")
+    Assert.eq(#touch_calls, 1)
+    Assert.eq(touch_calls[1].source_id, "local")
+    Assert.eq(touch_calls[1].stable_id, "/lib/new.book.epub")
+    Assert.eq(touch_calls[1].path, "/lib/new.book.epub")
+    Assert.is_nil(touch_calls[1].chapter_idx)
+    Assert.eq(registry_created[#registry_created], "local")
+    Assert.eq(id.source.id, "local")
     md5_by_path["/lib/new.book.epub"] = nil
     book_upserts = {}
-    open_upserts = {}
+    touch_calls = {}
+    registry_created = {}
 end
 
--- ── ensureIdentity：缓存路径无伴生 → nil 且不写库 ────────
+-- ── ensureIdentity：local 已登记 → 不覆盖元数据，只补 path ──
 do
-    work_paths["/cache/moon/book/noid/2.html"] = { dir = "/cache/moon/book/noid", file = "2.html" }
-    lfs_modes["/cache/moon/book/noid/2.html"] = "file" -- 即使是真实文件也不登记
-    Assert.is_nil(Store.ensureIdentity("/cache/moon/book/noid/2.html"))
-    Assert.eq(#book_upserts, 0)
-    Assert.eq(#open_upserts, 0)
-    work_paths["/cache/moon/book/noid/2.html"] = nil
-    lfs_modes["/cache/moon/book/noid/2.html"] = nil
+    book_rows_by_id["local\0/lib/scanned.epub"] = {
+        source_id = "local",
+        stable_id = "/lib/scanned.epub",
+        title = "扫盘解析的标题",
+    }
+    local id = Store.ensureIdentity("/lib/scanned.epub")
+    Assert.eq(id.source_id, "local")
+    Assert.eq(id.stable_id, "/lib/scanned.epub")
+    Assert.eq(#book_upserts, 0) -- 已有行不 upsert，元数据不被覆盖
+    Assert.eq(#touch_calls, 1) -- 但仍无条件补 path
+    Assert.eq(touch_calls[1].path, "/lib/scanned.epub")
+    book_rows_by_id["local\0/lib/scanned.epub"] = nil
+    touch_calls = {}
 end
 
--- ── ensureIdentity：.moon 外路径一律归 local，不依赖文件存在性 ──
+-- ── ensureIdentity：partialMD5 失败 → md5=nil，仍登记 ────
 do
-    local id = Store.ensureIdentity("/lib/ghost.epub")
-    Assert.eq(id.ref.source_id, "local")
-    Assert.eq(id.ref.stable_id, "/lib/ghost.epub")
+    md5_by_path["/lib/broken.epub"] = "ERR"
+    local id = Store.ensureIdentity("/lib/broken.epub")
+    Assert.eq(id.source_id, "local")
     Assert.eq(#book_upserts, 1)
-    Assert.eq(#open_upserts, 1)
+    Assert.is_nil(book_upserts[1].md5)
+    Assert.eq(book_upserts[1].title, "broken")
+    Assert.eq(#touch_calls, 1)
+    md5_by_path["/lib/broken.epub"] = nil
     book_upserts = {}
-    open_upserts = {}
+    touch_calls = {}
 end
 
-Paths.sanitizeSourceId = orig_sanitize
-Paths.ensureBookWork = orig_ensure
-Paths.bookWorkDir = orig_work
-Paths.splitBookWorkPath = orig_split
+-- ── touchAsync：章节详情、目录和路径在同一事务登记 ──
+do
+    local identity = { source_id = "moon", stable_id = "s9" }
+    local toc = { { idx = 1, title = "一" }, { idx = 2, title = "二" } }
+    local callback_ok
+    Store.touchAsync("/cache/moon/book/slug/7.html", identity, {
+        chapter_idx = 7,
+        toc = toc,
+        book = { title = "最新详情" },
+    }, function(ok)
+        callback_ok = ok
+    end)
+    Assert.is_true(callback_ok)
+    Assert.eq(#touch_calls, 1)
+    Assert.eq(touch_calls[1].source_id, "moon")
+    Assert.eq(touch_calls[1].stable_id, "s9")
+    Assert.eq(touch_calls[1].path, "/cache/moon/book/slug/7.html")
+    Assert.eq(touch_calls[1].chapter_idx, 7)
+    Assert.eq(#chapter_upserts, 1)
+    Assert.eq(chapter_upserts[1].path, "/cache/moon/book/slug/7.html")
+    Assert.eq(chapter_upserts[1].chapter_idx, 7)
+    Assert.eq(toc_upserts[1].source_id, "moon")
+    Assert.eq(toc_upserts[1].stable_id, "s9")
+    Assert.eq(Store.toc(identity), toc)
+    Assert.eq(book_upserts[#book_upserts].source_id, "moon")
+    Assert.eq(book_upserts[#book_upserts].stable_id, "s9")
+    Assert.eq(book_upserts[#book_upserts].title, "最新详情")
+    Assert.eq(db_sql[1], "BEGIN IMMEDIATE;")
+    Assert.eq(db_sql[#db_sql], "COMMIT;")
+    touch_calls = {}
+    chapter_upserts = {}
+    toc_upserts = {}
+    book_upserts = {}
+    db_sql = {}
+end
+
+-- ── touchAsync：任一登记失败都走失败回调 ────────────────
+do
+    local identity = { source_id = "moon", stable_id = "broken" }
+    chapter_upsert_ok = false
+    local ok, err
+    Store.touchAsync("/cache/moon/book/slug/8.html", identity, { chapter_idx = 8 }, function(v, e)
+        ok, err = v, e
+    end)
+    Assert.is_nil(ok)
+    Assert.matches(tostring(err), "failed to register chapter path")
+    Assert.eq(db_sql[#db_sql], "ROLLBACK;")
+    chapter_upsert_ok = true
+    touch_calls = {}
+    chapter_upserts = {}
+    db_sql = {}
+
+    touch_ok = false
+    Store.touchAsync("/lib/broken.epub", identity, nil, function(v, e)
+        ok, err = v, e
+    end)
+    Assert.is_nil(ok)
+    Assert.matches(tostring(err), "failed to register book path")
+    touch_ok = true
+    touch_calls = {}
+end
+
+-- ── touchAsync：不带 chapter_idx（opts=nil / opts={}）→ 只登记 books ──
+do
+    local identity = { source_id = "moon", stable_id = "s10" }
+    Store.touchAsync("/lib/whole.epub", identity, nil)
+    Store.touchAsync("/lib/whole2.epub", identity, {})
+    Assert.eq(#touch_calls, 2)
+    Assert.eq(touch_calls[1].path, "/lib/whole.epub")
+    Assert.is_nil(touch_calls[1].chapter_idx)
+    Assert.eq(touch_calls[2].path, "/lib/whole2.epub")
+    Assert.is_nil(touch_calls[2].chapter_idx)
+    Assert.eq(#chapter_upserts, 0)
+    touch_calls = {}
+end
+
+-- ── rememberMany：有身份列逐条 upsert，无身份条目跳过 ────────
+do
+    Store.rememberMany({
+        {
+            source_id = "moon",
+            stable_id = "a.epub",
+            md5 = "m1",
+            title = "标题",
+            authors = "作者",
+            percent = 12,
+            category = "分类",
+            favorite = true,
+            series = "系列",
+            intro = "简介",
+            path = "/should/not/persist.epub", -- rememberMany 不写 path
+        },
+        { title = "无身份临时条目" },
+    })
+    Assert.eq(#book_upserts, 1)
+    Assert.eq(book_upserts[1].source_id, "moon")
+    Assert.eq(book_upserts[1].stable_id, "a.epub")
+    Assert.eq(book_upserts[1].md5, "m1")
+    Assert.eq(book_upserts[1].title, "标题")
+    Assert.eq(book_upserts[1].authors, "作者")
+    Assert.eq(book_upserts[1].percent, 12)
+    Assert.eq(book_upserts[1].category, "分类")
+    Assert.eq(book_upserts[1].favorite, true)
+    Assert.eq(book_upserts[1].series, "系列")
+    Assert.eq(book_upserts[1].intro, "简介")
+    Assert.is_true(type(book_upserts[1].fetched_at) == "number")
+    Assert.is_nil(book_upserts[1].path) -- path 由 touchPath 单独维护
+    book_upserts = {}
+end
+
+-- ── rememberMany：全部无身份 → 一条都不写 ────────────────
+do
+    Store.rememberMany({ { title = "x" }, { title = "y" } })
+    Store.rememberMany({})
+    Assert.eq(#book_upserts, 0)
+end
+
 for _, k in ipairs({
+    "utils.paths",
     "utils.db.base",
     "utils.db.book",
-    "utils.db.open",
+    "utils.db.chapter",
+    "utils.db.toc",
     "utils.db.queue",
+    "source.registry",
     "book.store",
-    "libs/libkoreader-lfs",
     "ffi/util",
 }) do
     package.preload[k] = nil

@@ -14,8 +14,8 @@ do
         author = "刘慈欣",
         progress = 42,
     })
-    Assert.eq(b.ref.source_id, "moon")
-    Assert.eq(b.ref.stable_id, "a.epub")
+    Assert.eq(b.source_id, "moon")
+    Assert.eq(b.stable_id, "a.epub")
     Assert.eq(b.title, "三体")
     Assert.eq(b.authors, "刘慈欣")
     Assert.eq(b.percent, 42)
@@ -33,7 +33,7 @@ do
         data = { { filename = "a.epub", title = "t" } },
     })
     Assert.eq(list.count, 1)
-    Assert.eq(list.data[1].ref.stable_id, "a.epub")
+    Assert.eq(list.data[1].stable_id, "a.epub")
 end
 
 do

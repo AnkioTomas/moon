@@ -9,8 +9,7 @@ utils.paths 离线用例
 
 local Assert = require("support.assert")
 
--- 其它 spec（如 chapters/ensure、chapters/nav）会把 libs/libkoreader-lfs 的假桩
--- 泄进 package.preload/package.loaded 且不清理，runner 还会在文件间原样传递；
+-- 其它 spec 可能把 libs/libkoreader-lfs 的假桩泄进 package.preload/package.loaded；
 -- 本文件必须用真实 native lfs / sha2 验证建目录与 md5，先强制清掉再 require。
 for _, name in ipairs({ "libs/libkoreader-lfs", "ffi/sha2", "utils.paths" }) do
     package.preload[name] = nil
@@ -113,23 +112,11 @@ do
     Assert.eq(lfs.attributes(dir, "mode"), "directory")
     -- 幂等：重复调用不重写不报错
     Paths.ensureBookWork("stable/id", TEST_SOURCE)
+    Assert.eq(Paths.chapterPath("stable/id", 3, TEST_SOURCE), dir .. "/3.html")
 end
 
--- splitBookWorkPath：只认 cache/<source>/book/<slug>/<file> 布局
+-- isMoonPath：只认插件自己的 .moon 数据目录前缀
 do
-    local dir = Paths.bookWorkDir("stable/id", TEST_SOURCE)
-    local d, f = Paths.splitBookWorkPath(dir .. "/3.html")
-    Assert.eq(d, dir)
-    Assert.eq(f, "3.html")
-    local _, _, source_id, slug = Paths.splitBookWorkPath(dir .. "/3.html")
-    Assert.eq(source_id, TEST_SOURCE)
-    Assert.eq(slug, Paths.slugFor("stable/id"))
-    local d2, f2 = Paths.splitBookWorkPath(dir .. "/book.epub")
-    Assert.eq(d2, dir)
-    Assert.eq(f2, "book.epub")
-    Assert.is_nil(Paths.splitBookWorkPath("/other/plain.epub"))
-    Assert.is_nil(Paths.splitBookWorkPath(Paths.imageDir(TEST_SOURCE) .. "/x.png"), "image 段不算书籍工作目录")
-    Assert.is_nil(Paths.splitBookWorkPath(dir .. "/sub/3.html"), "更深层级不算")
     Assert.is_true(Paths.isMoonPath(Paths.root() .. "/cache/unknown/file"))
     Assert.is_false(Paths.isMoonPath(Paths.root() .. "-other/file"))
 end
