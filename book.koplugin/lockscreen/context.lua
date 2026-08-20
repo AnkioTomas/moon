@@ -18,19 +18,21 @@ end
 ---@return table|nil 当前书籍及阅读统计；无阅读会话时返回 nil
 function M.currentBook()
     local cur = currentSession()
-    if not cur or not cur.ref then
+    local identity = cur and cur.identity
+    if not identity or not cur then
         return nil
     end
-    local book = cur.book or BookDB.get(cur.ref.source_id, cur.ref.stable_id) or {}
-    local stats = StatsDB.summaryByBook(cur.ref.source_id, cur.ref.stable_id)
+    local book = identity.book or BookDB.get(identity.source_id, identity.stable_id) or {}
+    local stats = StatsDB.summaryByBook(identity.source_id, identity.stable_id)
+    local toc = require("ui.reader.session").toc()
     return {
-        title = book.title or cur.ref.stable_id,
+        title = book.title or identity.stable_id,
         authors = book.authors or "",
         percent = tonumber(cur.percent) or tonumber(book.percent) or 0,
         page = tonumber(cur.page) or 0,
         total_pages = tonumber(cur.total_pages) or 0,
-        chapter_idx = tonumber(cur.chapter_idx),
-        chapter_count = tonumber(cur.chapter_count),
+        chapter_idx = tonumber(identity.chapter_idx),
+        chapter_count = toc and #toc or nil,
         total_seconds = stats.total_seconds,
     }
 end
@@ -39,6 +41,7 @@ end
 ---@return number 当地时区当天零点时间戳
 local function dayStart(ts)
     local t = os.date("*t", ts or os.time())
+    ---@cast t osdate
     t.hour, t.min, t.sec = 0, 0, 0
     return os.time(t)
 end
@@ -54,6 +57,7 @@ function M.billRange(period)
         return dayStart(now) - 29 * 86400, finish
     elseif period == "month" then
         local t = os.date("*t", now)
+        ---@cast t osdate
         t.day, t.hour, t.min, t.sec = 1, 0, 0, 0
         return os.time(t), finish
     end
@@ -79,8 +83,7 @@ end
 ---@return string|nil 下一条高亮文本；没有可用高亮时返回 nil
 function M.highlight()
     local cur = currentSession()
-    local annotations = cur and cur.plugin and cur.plugin.ui and cur.plugin.ui.annotation
-        and cur.plugin.ui.annotation.annotations
+    local annotations = cur and cur.ui.annotation and cur.ui.annotation.annotations
     if type(annotations) ~= "table" then
         return nil
     end
