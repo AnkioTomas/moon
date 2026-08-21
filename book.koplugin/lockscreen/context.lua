@@ -66,58 +66,8 @@ local function buildBook(opts)
         chapter_idx = opts.chapter_idx ~= nil and tonumber(opts.chapter_idx) or nil,
         chapter_count = chapter_count,
         total_seconds = stats.total_seconds,
+        pages = stats.pages or 0,
     }
-end
-
---- 无阅读会话时：按 last_open 取最近一本（优先未读完）。
----@return table|nil
-local function latestReadingBook()
-    local recent = BookDB.recent(16)
-    if #recent == 0 then
-        return nil
-    end
-    local row
-    for _, book in ipairs(recent) do
-        if (tonumber(book.percent) or 0) < 100 then
-            row = book
-            break
-        end
-    end
-    row = row or recent[1]
-    local progress = require("utils.db.progress").get(row.source_id, row.stable_id)
-    -- 全书进度以 books.percent 为准；pending_progress 只补章节下标
-    local chapter_idx = (progress and progress.chapter_idx) or row.last_chapter_idx
-    return buildBook({
-        source_id = row.source_id,
-        stable_id = row.stable_id,
-        title = row.title,
-        authors = row.authors,
-        percent = tonumber(row.percent) or 0,
-        chapter_idx = chapter_idx,
-    })
-end
-
----@return table|nil 最近正在阅读的书及统计；无最近打开记录时返回 nil
-function M.currentBook()
-    local cur = currentSession()
-    local identity = cur and cur.identity
-    if identity and cur then
-        local book = identity.book or BookDB.get(identity.source_id, identity.stable_id) or {}
-        local toc = require("ui.reader.session").toc()
-        return buildBook({
-            source_id = identity.source_id,
-            stable_id = identity.stable_id,
-            title = book.title or identity.stable_id,
-            authors = book.authors,
-            percent = tonumber(cur.percent) or tonumber(book.percent) or 0,
-            page = tonumber(cur.page) or 0,
-            total_pages = tonumber(cur.total_pages) or 0,
-            chapter_idx = identity.chapter_idx,
-            chapter_count = toc and #toc or nil,
-        })
-    end
-    -- 锁屏多在无 Reader 会话时生成（熄屏/桌面刷新）：回退到 last_open 最近一本
-    return latestReadingBook()
 end
 
 ---@param ts number|nil Unix 时间戳；省略时使用当前时间
@@ -127,24 +77,6 @@ local function dayStart(ts)
     ---@cast t osdate
     t.hour, t.min, t.sec = 0, 0, 0
     return os.time(t)
-end
-
----@param period string|nil today/7d/30d/month；未知值按 7d 处理
----@return number start_ts, number end_ts 账单查询时间范围
-function M.billRange(period)
-    local now = os.time()
-    local finish = now + 1
-    if period == "today" then
-        return dayStart(now), finish
-    elseif period == "30d" then
-        return dayStart(now) - 29 * 86400, finish
-    elseif period == "month" then
-        local t = os.date("*t", now)
-        ---@cast t osdate
-        t.day, t.hour, t.min, t.sec = 1, 0, 0, 0
-        return os.time(t), finish
-    end
-    return dayStart(now) - 6 * 86400, finish
 end
 
 --- 补齐逐日桶：从 start 到 end（左闭右开）每天一格，无数据为 0。
@@ -181,6 +113,92 @@ local function fillDayBuckets(rows, start_ts, end_ts)
         cursor = os.time({ year = n.year, month = n.month, day = n.day + 1, hour = 12 })
     end
     return buckets
+end
+
+--- 给当前书挂上近 7 日阅读桶（阅读统计柱图用）。
+---@param book table|nil
+---@return table|nil
+local function withRecentBuckets(book)
+    if not book then
+        return nil
+    end
+    local end_ts = os.time() + 1
+    local start_ts = dayStart() - 6 * 86400
+    book.buckets = fillDayBuckets(
+        StatsDB.dailyByBook(book.source_id, book.stable_id, 7),
+        start_ts,
+        end_ts
+    )
+    return book
+end
+
+--- 无阅读会话时：按 last_open 取最近一本（优先未读完）。
+---@return table|nil
+local function latestReadingBook()
+    local recent = BookDB.recent(16)
+    if #recent == 0 then
+        return nil
+    end
+    local row
+    for _, book in ipairs(recent) do
+        if (tonumber(book.percent) or 0) < 100 then
+            row = book
+            break
+        end
+    end
+    row = row or recent[1]
+    local progress = require("utils.db.progress").get(row.source_id, row.stable_id)
+    -- 全书进度以 books.percent 为准；pending_progress 只补章节下标
+    local chapter_idx = (progress and progress.chapter_idx) or row.last_chapter_idx
+    return withRecentBuckets(buildBook({
+        source_id = row.source_id,
+        stable_id = row.stable_id,
+        title = row.title,
+        authors = row.authors,
+        percent = tonumber(row.percent) or 0,
+        chapter_idx = chapter_idx,
+    }))
+end
+
+---@return table|nil 最近正在阅读的书及统计；无最近打开记录时返回 nil
+function M.currentBook()
+    local cur = currentSession()
+    local identity = cur and cur.identity
+    if identity and cur then
+        local book = identity.book or BookDB.get(identity.source_id, identity.stable_id) or {}
+        local toc = require("ui.reader.session").toc()
+        return withRecentBuckets(buildBook({
+            source_id = identity.source_id,
+            stable_id = identity.stable_id,
+            title = book.title or identity.stable_id,
+            authors = book.authors,
+            percent = tonumber(cur.percent) or tonumber(book.percent) or 0,
+            page = tonumber(cur.page) or 0,
+            total_pages = tonumber(cur.total_pages) or 0,
+            chapter_idx = identity.chapter_idx,
+            chapter_count = toc and #toc or nil,
+        }))
+    end
+    -- 锁屏多在无 Reader 会话时生成（熄屏/桌面刷新）：回退到 last_open 最近一本
+    return latestReadingBook()
+end
+
+---@param period string|nil today/7d/30d/month；未知值按 7d 处理
+---@return number start_ts, number end_ts 账单查询时间范围
+function M.billRange(period)
+    local now = os.time()
+    local finish = now + 1
+    if period == "today" then
+        return dayStart(now), finish
+    elseif period == "30d" then
+        return dayStart(now) - 29 * 86400, finish
+    elseif period == "month" then
+        local t = os.date("*t", now)
+        ---@cast t osdate
+        t.day, t.hour, t.min, t.sec = 1, 0, 0, 0
+        return os.time(t), finish
+    end
+    return dayStart(now) - 6 * 86400, finish
 end
 
 --- 补齐逐小时桶：本地时区 0–23，无数据为 0。
