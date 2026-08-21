@@ -203,7 +203,32 @@ end
 --- 进度条空轨颜色。
 ---@return any
 function UI.track()
-    return Blitbuffer.COLOR_LIGHT_GRAY -- 0xCC，空轨浅但不飘
+    return Blitbuffer.COLOR_GRAY_E -- 0xEE，空轨保持轻量对比
+end
+
+--- 卡片浅背景；比页面白底低一个层级。
+---@return any
+function UI.surface()
+    return Blitbuffer.COLOR_GRAY_E
+end
+
+--- 按钮激活态背景；保留对比度但避免纯黑块破坏整体层次。
+---@return any
+function UI.actionSurface()
+    return Blitbuffer.COLOR_GRAY_D
+end
+
+--- 卡片圆角。
+---@return number
+function UI.cardRadius()
+    return UI.sz(8)
+end
+
+--- 胶囊按钮圆角；调用方传入实际高度，保证两端完整半圆。
+---@param height number
+---@return number
+function UI.pillRadius(height)
+    return math.max(1, math.floor((tonumber(height) or UI.sz(1)) / 2))
 end
 
 --- TitleBar 关闭等图标：把目标边长折算成 size_ratio。
@@ -383,68 +408,46 @@ function UI.coverDim(cw)
     return cw, ch
 end
 
---- 简易进度条（0–100）。优先 ProgressWidget；否则用 LineWidget，禁止空 FrameContainer。
+--- 简易圆角进度条（0–100），统一轨道与填充的视觉样式。
 ---@param width number
 ---@param height number|nil
 ---@param percent number|nil
 ---@return table
 function UI.progressBar(width, height, percent)
     local Geom = require("ui/geometry")
+    local FrameContainer = require("ui/widget/container/framecontainer")
+    local OverlapGroup = require("ui/widget/overlapgroup")
+    local Widget = require("ui/widget/widget")
     width = math.max(1, math.floor(tonumber(width) or 1))
     height = math.max(1, math.floor(tonumber(height) or UI.sz(8)))
     percent = tonumber(percent) or 0
     if percent < 0 then percent = 0 end
     if percent > 100 then percent = 100 end
 
-    local ok, ProgressWidget = pcall(require, "ui/widget/progresswidget")
-    if ok and ProgressWidget then
-        local widget = ProgressWidget:new{
-            width = width,
-            height = height,
-            percentage = percent / 100,
-        }
-        if widget then
-            return widget
-        end
-    end
-
-    local LineWidget = require("ui/widget/linewidget")
-    local HorizontalGroup = require("ui/widget/horizontalgroup")
-    local FrameContainer = require("ui/widget/container/framecontainer")
     local fill_w = math.floor(width * percent / 100 + 0.5)
     if fill_w < 0 then fill_w = 0 end
     if fill_w > width then fill_w = width end
-    local empty_w = width - fill_w
-    local row = HorizontalGroup:new{}
-    if fill_w > 0 then
-        table.insert(row, LineWidget:new{
-            background = Blitbuffer.COLOR_BLACK,
-            dimen = Geom:new{ w = fill_w, h = height },
-        })
-    end
-    if empty_w > 0 then
-        table.insert(row, LineWidget:new{
-            background = UI.track(),
-            dimen = Geom:new{ w = empty_w, h = height },
-        })
-    end
-    if #row == 0 then
-        local TextWidget = require("ui/widget/textwidget")
-        return TextWidget:new{
-            text = string.format("%.0f%%", percent),
-            face = UI.face("xx_smallinfofont", 12),
-            fgcolor = UI.muted(),
+    local radius = UI.pillRadius(height)
+    local function bar(w, color)
+        return FrameContainer:new{
+            bordersize = 0,
+            padding = 0,
+            margin = 0,
+            radius = radius,
+            background = color,
+            width = w,
+            height = height,
+            dimen = Geom:new{ w = w, h = height },
+            -- FrameContainer 绘制圆角背景；空 Widget 只提供尺寸，避免矩形子项盖平圆角。
+            Widget:new{ dimen = Geom:new{ w = w, h = height } },
         }
     end
-    local border = UI.line()
-    return FrameContainer:new{
-        bordersize = border,
-        color = UI.rule(),
-        padding = 0,
-        margin = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = width + border * 2, h = height + border * 2 },
-        row,
+    local track = bar(width, UI.track())
+    local fill = fill_w > 0 and bar(fill_w, Blitbuffer.COLOR_BLACK) or nil
+    return OverlapGroup:new{
+        dimen = Geom:new{ w = width, h = height },
+        track,
+        fill,
     }
 end
 

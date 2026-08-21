@@ -36,6 +36,7 @@ local Device = require("device")
 local BookInfo = require("ui.components.bookinfo")
 local UI = require("ui.components.bookui")
 local Icon = require("ui.components.icon")
+local Surface = require("ui.components.surface")
 local Pager = require("ui.components.pager")
 local Popup = require("ui.components.popup")
 local Store = require("book.store")
@@ -82,7 +83,12 @@ local function iconAction(icon_name, text, callback)
     local tap = BookInfo.tappable(tw, th, callback)
     tap[1] = CenterContainer:new{
         dimen = Geom:new{ w = tw, h = th },
-        content,
+        Surface.pill(content, {
+            padding = UI.sz(6),
+            width = tw,
+            height = th,
+            shadow = false,
+        }),
     }
     return tap
 end

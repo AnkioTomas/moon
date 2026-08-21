@@ -24,7 +24,6 @@
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
@@ -38,6 +37,7 @@ local TextWidget = require("ui/widget/textwidget")
 local GestureRange = require("ui/gesturerange")
 local Image = require("ui.components.image")
 local UI = require("ui.components.bookui")
+local Surface = require("ui.components.surface")
 local _ = require("gettext")
 
 local BookInfo = {}
@@ -117,19 +117,17 @@ end
 ---@return table|nil
 function BookInfo.progressBadge(cw, pct)
     if not pct or pct <= 0 then return nil end
-    local badge = FrameContainer:new{
-        bordersize = math.max(1, UI.line()),
-        color = Blitbuffer.COLOR_WHITE,
-        padding = UI.sz(2),
-        padding_left = UI.sz(4),
-        padding_right = UI.sz(4),
-        background = Blitbuffer.COLOR_BLACK,
-        TextWidget:new{
+    local badge = Surface.pill(TextWidget:new{
             text = string.format("%.0f%%", pct),
             face = UI.face("xx_smallinfofont", 11),
             fgcolor = Blitbuffer.COLOR_WHITE,
-        },
-    }
+        }, {
+            padding = UI.sz(2),
+            width = nil,
+            height = UI.sz(20),
+            background = Blitbuffer.COLOR_BLACK,
+            shadow = false,
+        })
     local bz = badge:getSize()
     local inset = UI.sz(3)
     badge.overlap_offset = {
@@ -189,18 +187,29 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
         and type(book) == "table" and type(book.stable_id) == "string" then
         req = select(1, source:coverRequest(book))
     end
-    local cover = Image.widget{
+    local cover_pad = UI.sz(2)
+    local cover_w = math.max(UI.sz(16), cw - cover_pad * 2)
+    local cover_h = math.max(UI.sz(24), ch - cover_pad * 2)
+    local image = Image.widget{
         src = req and req.url or nil,
         headers = req and req.headers or nil,
-        width = cw,
-        height = ch,
+        width = cover_w,
+        height = cover_h,
         alpha = false,
         fit = "letterbox",
-        border = true,
+        border = false,
         fallback = title,
         show_parent = opts.show_parent,
         on_ready = opts.on_ready,
     }
+    local cover = Surface.card(image, {
+        padding = cover_pad,
+        radius = UI.cardRadius(),
+        background = UI.surface(),
+        clip = true,
+        clip_background = UI.surface(),
+        shadow = true,
+    })
     if opts.badge then
         local badge = BookInfo.progressBadge(cw, pct)
         if badge then
@@ -330,14 +339,7 @@ function BookInfo.hero(plugin, source, book, opts)
     end
 
     local pad_v = UI.sz(6)
-    local widget = FrameContainer:new{
-        bordersize = 0,
-        padding = pad,
-        padding_top = pad_v,
-        padding_bottom = pad_v,
-        margin = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        HorizontalGroup:new{
+    local widget = Surface.card(HorizontalGroup:new{
             align = "top",
             cover_box,
             HorizontalSpan:new{ width = gap },
@@ -345,8 +347,14 @@ function BookInfo.hero(plugin, source, book, opts)
                 dimen = Geom:new{ w = info_w, h = ch },
                 info,
             },
-        },
-    }
+        }, {
+        padding = pad,
+        padding_top = pad_v,
+        padding_bottom = pad_v,
+        background = false,
+        radius = 0,
+        shadow = false,
+    })
     return widget, widget:getSize().h
 end
 

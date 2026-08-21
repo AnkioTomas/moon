@@ -120,6 +120,12 @@ package.preload["ui.components.bookui"] = function()
         face = function() return {} end,
         rule = function() return 1 end,
         track = function() return 1 end,
+        surface = function() return 1 end,
+        actionSurface = function() return 1 end,
+        pillRadius = function(h) return math.floor(h / 2) end,
+        progressBar = function(width, height, percent)
+            return { width = width, height = height, percentage = percent }
+        end,
     }
 end
 
