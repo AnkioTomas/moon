@@ -7,11 +7,9 @@
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local CenterContainer = require("ui/widget/container/centercontainer")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local LeftContainer = require("ui/widget/container/leftcontainer")
-local LineWidget = require("ui/widget/linewidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local TextWidget = require("ui/widget/textwidget")
@@ -38,16 +36,9 @@ local AISettings = require("ui.desktop.settings.ai")
 
 local Settings = {}
 
---- 设置分组内的缩进分割线。
----@param width number
----@return table
-local function insetDivider(width)
-    local inset = UI.sz(8)
-    local line_w = math.max(UI.sz(40), width - inset * 2)
-    return CenterContainer:new{
-        dimen = Geom:new{ w = width, h = UI.line() },
-        LineWidget:new{ background = UI.rule(), dimen = Geom:new{ w = line_w, h = UI.line() } },
-    }
+--- 设置行之间的留白，替代把每行切开的硬分割线。
+local function rowGap()
+    return VerticalSpan:new{ width = UI.sz(6) }
 end
 
 --- 分组标题和行构建器展平进分页数据。
@@ -62,7 +53,7 @@ local function appendSection(out, width, title, row_builders)
         TextWidget:new{ text = title, face = UI.face("cfont", 13), max_width = width, fgcolor = UI.muted() },
     })
     for i, build in ipairs(row_builders) do
-        if i > 1 then table.insert(out, insetDivider(width)) end
+        if i > 1 then table.insert(out, rowGap()) end
         table.insert(out, build(width))
     end
 end
@@ -72,7 +63,7 @@ end
 ---@param row_builders table
 local function appendRowList(out, width, row_builders)
     for i, build in ipairs(row_builders) do
-        if i > 1 then table.insert(out, insetDivider(width)) end
+        if i > 1 then table.insert(out, rowGap()) end
         table.insert(out, build(width))
     end
 end
