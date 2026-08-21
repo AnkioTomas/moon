@@ -132,7 +132,7 @@ end
 function BookPlugin:onNetworkConnected()
     require("book.sync").retryDirtyAsync()
     self:emitToSource("network_connected")
-    require("lockscreen.init").refreshInBackground()
+    require("lockscreen.init").refreshInBackground(true)
 end
 
 --- 翻页（分页视图）：统计换页；分发 page_changed
