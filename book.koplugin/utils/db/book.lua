@@ -323,6 +323,28 @@ function BookDB.pathsAll()
     return out
 end
 
+--- 最近阅读：last_open 倒序（不限源；锁屏「正在读」要跨源取真最近一本）
+---@param limit number|nil
+---@return Book[]
+function BookDB.recent(limit)
+    Base.ensure()
+    local result, nrows = Base.query(
+        "SELECT " .. COLUMNS .. " FROM books WHERE in_library=1 AND last_open>0 ORDER BY last_open DESC LIMIT ?;",
+        tonumber(limit) or 24
+    )
+    local out = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            local row = {}
+            for c = 1, #result do
+                row[c] = result[c][i]
+            end
+            out[#out + 1] = rowToBook(unpack(row, 1, #result))
+        end
+    end
+    return out
+end
+
 --- 最近阅读：last_open 倒序
 ---@param source_id string
 ---@param limit number|nil

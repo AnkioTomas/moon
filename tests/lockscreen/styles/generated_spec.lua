@@ -25,7 +25,13 @@ package.preload["lockscreen.context"] = function()
                 period = "7d", start_ts = 100, end_ts = 100 + 7 * 86400,
                 summary = { total_seconds = 7200, book_count = 1, pages = 20 },
                 books = { { stable_id = "b1", title = "测试书", authors = "作者", percent = 42, seconds = 7200 } },
-                days = { { ymd = "2024-01-01", seconds = 7200, pages = 20 } },
+                grain = "day",
+                buckets = {
+                    { key = "2024-01-01", label = "01-01", seconds = 7200, pages = 20 },
+                },
+                days = {
+                    { key = "2024-01-01", label = "01-01", seconds = 7200, pages = 20 },
+                },
             }
         end,
         bookshelf = function()

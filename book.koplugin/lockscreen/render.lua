@@ -109,15 +109,27 @@ local function paintImage(bb, block)
     local y = block.y or 0
     local width = math.max(1, block.width or 1)
     local height = math.max(1, block.height or 1)
+    local radius = math.max(0, math.floor(tonumber(block.radius) or 0))
+    local border_color = block.border_color or Blitbuffer.COLOR_GRAY_5
     if block.shadow then
-        local s = block.shadow
-        bb:paintRect(x + s, y + s, width, height, Blitbuffer.COLOR_GRAY_9)
+        local s = type(block.shadow) == "number" and block.shadow or 2
+        -- DESIGN：轻阴影 #DD，偏移约 2px
+        if radius > 0 then
+            bb:paintRoundedRect(x + s, y + s, width, height, Blitbuffer.COLOR_GRAY_D, radius)
+        else
+            bb:paintRect(x + s, y + s, width, height, Blitbuffer.COLOR_GRAY_D)
+        end
     end
     -- 精装衬底：letterbox 留边也像书壳，不露屏底
-    bb:paintRect(x, y, width, height, block.matte or Blitbuffer.COLOR_GRAY_4)
+    local matte = block.matte or Blitbuffer.COLOR_GRAY_E
+    if radius > 0 then
+        bb:paintRoundedRect(x, y, width, height, matte, radius)
+    else
+        bb:paintRect(x, y, width, height, matte)
+    end
     if type(path) ~= "string" or path == "" then
         if block.border then
-            bb:paintBorder(x, y, width, height, 1, Blitbuffer.COLOR_BLACK)
+            bb:paintBorder(x, y, width, height, 1, border_color, radius > 0 and radius or nil)
         end
         return
     end
@@ -129,7 +141,7 @@ local function paintImage(bb, block)
     probe:free()
     if not ok_size or not iw or not ih or iw <= 0 or ih <= 0 then
         if block.border then
-            bb:paintBorder(x, y, width, height, 1, Blitbuffer.COLOR_BLACK)
+            bb:paintBorder(x, y, width, height, 1, border_color, radius > 0 and radius or nil)
         end
         return
     end
@@ -151,7 +163,7 @@ local function paintImage(bb, block)
     local ok = pcall(image.paintTo, image, bb, ox, oy)
     image:free()
     if block.border then
-        bb:paintBorder(x, y, width, height, 1, Blitbuffer.COLOR_BLACK)
+        bb:paintBorder(x, y, width, height, 1, border_color, radius > 0 and radius or nil)
     end
     if not ok then
         return
@@ -172,8 +184,8 @@ local function paintSpine(bb, block)
     local dir = 1
 
     if block.shadow then
-        local s = block.shadow
-        bb:paintRect(x + s, y + s, width, height, Blitbuffer.COLOR_GRAY_9)
+        local s = type(block.shadow) == "number" and block.shadow or 2
+        bb:paintRect(x + s, y + s, width, height, Blitbuffer.COLOR_GRAY_D)
     end
 
     if pose == "tilt" then
@@ -209,11 +221,12 @@ local function paintSpine(bb, block)
         bb:paintRect(bx, band_y2, bw, 1, Blitbuffer.COLOR_GRAY_E)
     end
 
+    local outline = block.outline or Blitbuffer.COLOR_GRAY_3
     if lean_shift > 0 then
         local bx = dir < 0 and (x - lean_shift) or x
-        bb:paintBorder(bx, y, width + lean_shift, height, 1, Blitbuffer.COLOR_BLACK)
+        bb:paintBorder(bx, y, width + lean_shift, height, 1, outline)
     else
-        bb:paintBorder(x, y, width, height, 1, Blitbuffer.COLOR_BLACK)
+        bb:paintBorder(x, y, width, height, 1, outline)
     end
 
     local label = block.label
@@ -238,28 +251,71 @@ local function paintSpine(bb, block)
     end
 end
 
+--- 圆角矩形；radius 为 0/nil 时退化为直角。
+---@param bb userdata
+---@param x number
+---@param y number
+---@param width number
+---@param height number
+---@param color any
+---@param radius number|nil
+local function paintRect(bb, x, y, width, height, color, radius)
+    radius = math.max(0, math.floor(tonumber(radius) or 0))
+    if radius > 0 then
+        bb:paintRoundedRect(x, y, width, height, color, radius)
+    else
+        bb:paintRect(x, y, width, height, color)
+    end
+end
+
 ---@param bb userdata 目标 Blitbuffer
 ---@param block table 图形块描述
 ---@param w number 输出宽度
 local function paintShape(bb, block, w)
     local x = block.x or math.floor(w * 0.08)
+    local y = block.y or 0
     local width = block.width or (w - x * 2)
     if block.kind == "rule" then
-        bb:paintRect(x, block.y or 0, width, block.height or 2,
-            block.color or Blitbuffer.COLOR_BLACK)
+        -- DESIGN：分割线 #55，默认 1px，不抢内容
+        bb:paintRect(x, y, width, block.height or 1,
+            block.color or Blitbuffer.COLOR_GRAY_5)
     elseif block.kind == "bar" then
-        local height = block.height or 12
-        bb:paintRect(x, block.y or 0, width, height, Blitbuffer.COLOR_GRAY_E)
-        bb:paintRect(x, block.y or 0, math.floor(width * math.max(0, math.min(1, block.value or 0))), height,
-            block.color or Blitbuffer.COLOR_BLACK)
+        -- DESIGN：胶囊进度条，空轨 #EE，填充纯黑，高约 6–8
+        local height = block.height or 8
+        local radius = block.radius
+        if radius == nil then
+            radius = math.max(1, math.floor(height / 2))
+        end
+        local track = block.track or Blitbuffer.COLOR_GRAY_E
+        local fill = block.color or Blitbuffer.COLOR_BLACK
+        paintRect(bb, x, y, width, height, track, radius)
+        local filled = math.floor(width * math.max(0, math.min(1, block.value or 0)))
+        if filled > 0 then
+            paintRect(bb, x, y, filled, height, fill, radius)
+        end
     elseif block.kind == "panel" then
-        bb:paintRect(x, block.y or 0, width, block.height or 1,
-            block.color or Blitbuffer.COLOR_WHITE)
-    elseif block.kind == "vbar" then
+        -- DESIGN：浅卡可带 8px 圆角 + 2px 轻阴影（#DD）
         local height = block.height or 1
+        local radius = block.radius or 0
+        local color = block.color or Blitbuffer.COLOR_WHITE
+        if block.shadow then
+            local s = type(block.shadow) == "number" and block.shadow or 2
+            paintRect(bb, x + s, y + s, width, height, Blitbuffer.COLOR_GRAY_D, radius)
+        end
+        paintRect(bb, x, y, width, height, color, radius)
+    elseif block.kind == "vbar" then
+        -- DESIGN 锁屏日柱：默认无满高浅轨；value 为相对槽高的比例，也可由调用方直接给实心柱高
+        local height = block.height or 1
+        local radius = block.radius or 0
+        local track = block.track
+        if track then
+            paintRect(bb, x, y, width, height, track, radius)
+        end
         local filled = math.floor(height * math.max(0, math.min(1, block.value or 0)))
-        bb:paintRect(x, (block.y or 0) + height - filled, width, filled,
-            block.color or Blitbuffer.COLOR_BLACK)
+        if filled > 0 then
+            paintRect(bb, x, y + height - filled, width, filled,
+                block.color or Blitbuffer.COLOR_BLACK, radius)
+        end
     elseif block.kind == "image" then
         paintImage(bb, block)
     elseif block.kind == "spine" then
