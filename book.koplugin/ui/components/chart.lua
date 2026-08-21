@@ -228,7 +228,7 @@ function Chart.appendLines(blocks, opts)
 end
 
 --- 桌面柱状图 Widget（HorizontalGroup of 竖条）。
----@param opts table width,height,points/values,gap,track_empty
+---@param opts table width,height,points/values,gap
 ---@return table widget
 function Chart.bars(opts)
     opts = opts or {}
@@ -265,7 +265,7 @@ function Chart.bars(opts)
             and math.max(UI.sz(2), math.floor(bar_h * seconds / peak + 0.5))
             or UI.line()
         local bar = LineWidget:new{
-            background = seconds > 0 and Blitbuffer.COLOR_BLACK or (opts.track_empty and UI.track() or UI.track()),
+            background = seconds > 0 and Blitbuffer.COLOR_BLACK or UI.track(),
             dimen = Geom:new{ w = col_w, h = current_h },
         }
         local slot = BottomContainer:new{ dimen = Geom:new{ w = col_w, h = bar_h }, bar }
