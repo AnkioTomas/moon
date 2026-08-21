@@ -292,6 +292,10 @@ function Desktop:sourceChanged(source)
     self._home_loaded = false
     self._library_state = nil
     self._store_state = nil
+    self._store_books = nil
+    self.store_search = nil
+    self.store_page = 1
+    self.store_total = 0
     self._insight_state = nil
     self._insight_loaded = false
     self.filter = nil
