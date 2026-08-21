@@ -33,6 +33,19 @@ local cover_a = "/tmp/moon-lockscreen-cover-a.png"
 local cover_b = "/tmp/moon-lockscreen-cover-b.png"
 local current_cover = cover_a
 
+package.preload["ui/renderimage"] = function()
+    return {
+        renderImageFile = function(_, path)
+            local file = io.open(path, "rb")
+            if not file then return nil end
+            local data = file:read("*a")
+            file:close()
+            if not data or #data <= 8 then return nil end
+            return { free = function() end }
+        end,
+    }
+end
+
 package.preload["http.request"] = function()
     return {
         download = function(opts, dest, cb)
@@ -124,6 +137,7 @@ local function cleanup()
     for k, v in pairs(prev) do common[k] = v end
     MoonSettings.save()
     pcall(os.remove, Compose.path())
+    pcall(os.remove, require("lockscreen.background").myrlPath())
     pcall(os.remove, cover_a)
     pcall(os.remove, cover_b)
     _G.G_reader_settings = previous_settings
@@ -206,6 +220,9 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(refreshed)
     Assert.not_nil(last_download.url)
     Assert.is_true(tostring(last_download.url):find("myrl", 1, true) ~= nil)
+    Assert.eq(saved.screensaver_document_cover,
+        require("lockscreen.background").myrlPath())
+    Assert.eq(saved.screensaver_document_cover ~= Compose.path(), true)
 
     -- 即使组合图已经是当天版本，日报下载标记过期也必须再次请求。
     common.lock_screen_myrl_day = "1999-01-01"
