@@ -34,6 +34,7 @@ local DesktopSettings = require("ui.desktop.settings.desktop")
 local Language = require("ui.desktop.settings.language")
 local QuickPanel = require("ui.desktop.settings.quickpanel")
 local Maintenance = require("ui.desktop.settings.maintenance")
+local AISettings = require("ui.desktop.settings.ai")
 
 local Settings = {}
 
@@ -159,6 +160,15 @@ function Settings.build(desktop)
                 })
             end,
             function(iw)
+                local configured = require("ai").isConfigured()
+                return SettingRow.build(iw, {
+                    kind = "nav", icon = "psychology", title = _("AI 服务"),
+                    status = configured and MoonSettings.get().ai_model or _("未配置"),
+                    status_on = configured,
+                    callback = function() AISettings.open(desktop) end,
+                })
+            end,
+            function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "folder", title = _("远程管理"),
                     status = Remote.isRunning() and _("运行中") or nil, status_on = Remote.isRunning(),
@@ -173,6 +183,8 @@ function Settings.build(desktop)
                 })
             end,
             Maintenance.cacheRow(desktop),
+            Maintenance.importNotesRow(),
+            Maintenance.importStatsRow(),
             Maintenance.aboutRow(),
             Maintenance.closeRow(desktop),
             Maintenance.updateRow(),

@@ -33,9 +33,10 @@ function Bars.timeText(now)
 end
 
 --- 底条进度文案：百分比 · 页码 · 章号（取得到的才拼）。
----@param cur { percent: number|nil, page: number|nil, total_pages: number|nil, chapter_idx: number|nil, chapter_count: number|nil }|nil
+---@param cur ReaderSessionSnapshot|nil
+---@param toc BookChapter[]|nil
 ---@return string
-function Bars.progressText(cur)
+function Bars.progressText(cur, toc)
     if type(cur) ~= "table" then
         return ""
     end
@@ -51,7 +52,9 @@ function Bars.progressText(cur)
     if page and total and total > 0 then
         parts[#parts + 1] = string.format(_("第 %d/%d 页"), page, total)
     end
-    local idx, count = tonumber(cur.chapter_idx), tonumber(cur.chapter_count)
+    local identity = cur.identity
+    local idx = identity and tonumber(identity.chapter_idx)
+    local count = toc and #toc or nil
     if idx and count and count > 0 then
         parts[#parts + 1] = string.format(_("第 %d/%d 章"), idx, count)
     end
@@ -66,7 +69,7 @@ function Bars:startClock()
         if require("apps/reader/readerui").instance ~= self.ui then
             return
         end
-        if self.ui and require("ui.reader.session").isActive() then
+        if self.ui and require("ui.reader.session").current() then
             UIManager:setDirty(self.ui.dialog, "ui")
         end
         self:startClock()
@@ -92,8 +95,8 @@ function Bars:paintTo(bb, x, y)
     local w, h = dimen.w, dimen.h
     local pad = UI.sz(8)
 
-    -- 顶条：右上时间（控制台打开时由顶栏接管）
-    if common.book_reader_show_top_time ~= false and not require("ui.reader").isToolbarOpen() then
+    -- 顶条：右上时间
+    if common.book_reader_show_top_time ~= false then
         local time = TextWidget:new{
             text = Bars.timeText(),
             face = UI.face("xx_smallinfofont", 12),
@@ -104,7 +107,7 @@ function Bars:paintTo(bb, x, y)
     end
 
     -- 底条：细进度线贴底，进度文案在线上方右对齐
-    if common.book_reader_show_bottom_progress ~= false and not require("ui.reader").isToolbarOpen() then
+    if common.book_reader_show_bottom_progress ~= false then
         local pct = math.max(0, math.min(100, tonumber(cur.percent) or 0))
         local line_h = UI.line()
         local fill_w = math.floor(w * pct / 100 + 0.5)
@@ -112,7 +115,7 @@ function Bars:paintTo(bb, x, y)
             bb:paintRect(x, y + h - line_h, fill_w, line_h, Blitbuffer.COLOR_GRAY_3)
         end
         local info = TextWidget:new{
-            text = Bars.progressText(cur),
+            text = Bars.progressText(cur, require("ui.reader.session").toc()),
             face = UI.face("xx_smallinfofont", 12),
             fgcolor = UI.muted(),
         }

@@ -160,7 +160,7 @@ function Detail:init()
     end
     self:rebuild()
     self:fetchStats()
-    if self.book and self.book.ref and self.book.ref.source_id == "zlib" then
+    if self.book and self.book.source_id == "zlib" then
         self._store_detail_job = require("zlib.init").getDetailAsync(self.book, function(detail)
             self._store_detail_job = nil
             if self._closed or not detail then return end
@@ -220,18 +220,18 @@ end
 --- 书城书（zlib）未读过，无本机数据可查，直接跳过。
 ---@return nil
 function Detail:fetchStats()
-    local ref = self.book and self.book.ref
-    if type(ref) ~= "table" or type(ref.source_id) ~= "string" or type(ref.stable_id) ~= "string" then
+    local book = self.book
+    if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
         return
     end
-    if ref.source_id == "zlib" then
+    if book.source_id == "zlib" then
         return
     end
     local stats, daily
     require("utils.db.queue").run(function()
         local StatsDB = require("utils.db.stats")
-        stats = StatsDB.summaryByBook(ref.source_id, ref.stable_id)
-        daily = StatsDB.dailyByBook(ref.source_id, ref.stable_id, 30)
+        stats = StatsDB.summaryByBook(book.source_id, book.stable_id)
+        daily = StatsDB.dailyByBook(book.source_id, book.stable_id, 30)
     end, {
         on_done = function()
             if self._closed then
@@ -251,8 +251,15 @@ function Detail:onClose()
     self._closed = true
     if self._store_detail_job and self._store_detail_job.cancel then self._store_detail_job.cancel() end
     if self._install_job and self._install_job.cancel then self._install_job.cancel() end
-    self._store_detail_job, self._install_job = nil, nil
+    if self._reflow_job and self._reflow_job.cancel then self._reflow_job.cancel() end
+    if self._reflow_temp then
+        pcall(os.remove, self._reflow_temp)
+        pcall(os.remove, self._reflow_temp .. ".part")
+    end
     local UIManager = require("ui/uimanager")
+    if self._reflow_dialog then UIManager:close(self._reflow_dialog) end
+    self._store_detail_job, self._install_job = nil, nil
+    self._reflow_job, self._reflow_dialog = nil, nil
     local desk = self.desktop
     UIManager:close(self)
     -- 全屏详情关闭后重绘下层桌面；无需为普通 UI 切换强制闪屏。
@@ -271,17 +278,18 @@ end
 --- 走到这说明底层数据已变，打脏标记，关闭详情时桌面要清缓存重建而不是纯重绘。
 function Detail:reload()
     self._dirty = true
-    local ref = self.book.ref
+    local book = self.book
     local row
     require("utils.db.queue").run(function()
-        row = require("utils.db.book").get(ref.source_id, ref.stable_id)
+        row = require("utils.db.book").get(book.source_id, book.stable_id)
     end, {
         on_done = function()
             if self._closed then
                 return
             end
             if row then
-                row.ref = self.book.ref
+                row.source_id = book.source_id
+                row.stable_id = book.stable_id
                 self.book = row
             end
             self:rebuild()
@@ -293,6 +301,16 @@ end
 --- Widget 关闭时触发 close_callback。
 function Detail:onCloseWidget()
     self._closed = true
+    if self._reflow_job and self._reflow_job.cancel then self._reflow_job.cancel() end
+    if self._reflow_temp then
+        pcall(os.remove, self._reflow_temp)
+        pcall(os.remove, self._reflow_temp .. ".part")
+    end
+    self._reflow_job = nil
+    if self._reflow_dialog then
+        require("ui/uimanager"):close(self._reflow_dialog)
+        self._reflow_dialog = nil
+    end
     local cb = self.close_callback
     self.close_callback = nil
     if cb then
@@ -309,52 +327,88 @@ function Detail:openBook()
     if plugin and plugin.openBook then plugin:openBook(b) end
 end
 
---- 将本地 TXT 转为带目录和物理切片的 EPUB，再以原书身份打开。
-function Detail:reflowText()
+--- 将本地 TXT/MOBI 转为带目录和物理切片的 EPUB，替换原书后打开生成文件。
+---@param confirmed boolean|nil MOBI 有损转换是否已确认
+function Detail:reflowText(confirmed)
     local book = self.book or {}
-    local ref = book.ref
+    local path = type(book.stable_id) == "string" and book.stable_id or ""
+    local lower_path = path:lower()
+    local is_txt = lower_path:match("%.txt$") ~= nil
+    local is_mobi = lower_path:match("%.mobi$") ~= nil
     if self._reflow_job or self._closed
-        or not ref
-        or ref.source_id ~= "local"
-        or type(ref.stable_id) ~= "string"
-        or not ref.stable_id:lower():match("%.txt$")
+        or book.source_id ~= "local"
+        or not (is_txt or is_mobi)
     then
         return
     end
 
     local UIManager = require("ui/uimanager")
+    if is_mobi and not confirmed then
+        local ConfirmBox = require("ui/widget/confirmbox")
+        UIManager:show(ConfirmBox:new{
+            text = _("转换后的 EPUB 会替换原书；只保留文字并重新识别章节，图片、脚注和原排版会丢失。继续？"),
+            ok_text = _("继续"),
+            ok_callback = function()
+                self:reflowText(true)
+            end,
+        })
+        return
+    end
+
     local InfoMessage = require("ui/widget/infomessage")
     local dialog = InfoMessage:new{ text = _("正在优化排版…") }
+    self._reflow_dialog = dialog
     UIManager:show(dialog)
     self._reflow_job = { pending = true }
     UIManager:nextTick(function()
         if self._closed then
             UIManager:close(dialog)
+            self._reflow_dialog = nil
             return
         end
         local Paths = require("utils.paths")
-        Paths.ensureBookWork(ref.stable_id, ref.source_id)
-        local dest = Paths.bookWorkDir(ref.stable_id, ref.source_id) .. "/reflow.epub"
-        self._reflow_job = require("convert.text2epub").build({
+        local target = path:gsub("%.[^./]+$", ".epub")
+        local dest = target .. ".moon-reflow"
+        self._reflow_temp = dest
+        local options = {
             dest = dest,
-            source = ref.stable_id,
+            source = path,
             title = book.title,
             author = book.authors,
-            identifier = "moon-reflow-" .. Paths.slugFor(ref.stable_id),
+            identifier = "moon-reflow-" .. Paths.slugFor(path),
             reflow = true,
-        }, function(ok, err)
+        }
+        local converter = is_mobi and require("convert.mobi2epub") or require("convert.text2epub")
+        self._reflow_job = converter.build(options, function(ok, err)
             self._reflow_job = nil
+            self._reflow_temp = nil
             UIManager:close(dialog)
+            self._reflow_dialog = nil
             if self._closed then
+                pcall(os.remove, dest)
                 return
             end
             if not ok then
+                pcall(os.remove, dest)
+                pcall(os.remove, dest .. ".part")
                 UIManager:show(InfoMessage:new{ text = err or _("排版失败") })
                 return
             end
-            require("book.store").touchAsync(dest, ref)
+            local replaced, replace_err = self.source:replaceBook(dest, path)
+            if not replaced then
+                pcall(os.remove, dest)
+                pcall(os.remove, dest .. ".part")
+                UIManager:show(InfoMessage:new{ text = replace_err or _("替换原书失败") })
+                return
+            end
+            local identity = {}
+            for key, value in pairs(book) do identity[key] = value end
+            identity.stable_id = replaced
+            identity.path = replaced
+            require("book.store").touchAsync(replaced, identity)
+            self._dirty = true
             self:onClose()
-            require("apps/reader/readerui"):showReader(dest)
+            require("apps/reader/readerui"):showReader(replaced)
         end)
     end)
 end
@@ -410,11 +464,11 @@ end
 --- 启动刮削（底部按钮入口，条件与原底部按钮一致）。
 ---@return nil
 function Detail:startScrape()
-    local ref = self.book and self.book.ref
-    if type(ref) ~= "table" then
+    local book = self.book
+    if type(book) ~= "table" then
         return
     end
-    require("scrape.ui").start(ref, self.book.title, function()
+    require("scrape.ui").start(book, book.title, function()
         self:reload()
     end)
 end
@@ -423,7 +477,7 @@ end
 ---@return nil
 function Detail:openEditor()
     local book = self.book or {}
-    if type(book.ref) ~= "table" then
+    if type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
         return
     end
     local UIManager = require("ui/uimanager")
@@ -466,8 +520,8 @@ end
 ---@param fields table 对话框字段值：书名/作者/分类/系列
 ---@return nil
 function Detail:saveMeta(fields)
-    local ref = self.book and self.book.ref
-    if type(ref) ~= "table" or type(fields) ~= "table" then
+    local book = self.book
+    if type(book) ~= "table" or type(fields) ~= "table" then
         return
     end
     --- 空串归一为 nil：空标题才能回退 stable_id 显示
@@ -481,7 +535,7 @@ function Detail:saveMeta(fields)
     local authors = nonempty(fields[2])
     local category = nonempty(fields[3])
     local series = nonempty(fields[4])
-    local can_move = ref.source_id == "local"
+    local can_move = book.source_id == "local"
         and self.source ~= nil and self.source.id == "local"
         and type(self.source.moveBook) == "function"
     if can_move and not category then
@@ -490,18 +544,18 @@ function Detail:saveMeta(fields)
     local move_err, new_stable_id
     require("utils.db.queue").run(function()
         if can_move then
-            local moved, err = self.source:moveBook(ref.stable_id, category, series)
+            local moved, err = self.source:moveBook(book.stable_id, category, series)
             if not moved then
                 move_err = err
                 return
             end
             new_stable_id = moved
         end
-        local sid = new_stable_id or ref.stable_id
+        local sid = new_stable_id or book.stable_id
         local BookDB = require("utils.db.book")
-        local existing = BookDB.get(ref.source_id, sid)
-        BookDB.upsert({
-            source_id = ref.source_id,
+        local existing = BookDB.get(book.source_id, sid)
+        BookDB.upsertLocal({
+            source_id = book.source_id,
             stable_id = sid,
             title = title,
             authors = authors,
@@ -524,8 +578,8 @@ function Detail:saveMeta(fields)
                 UIManager:show(InfoMessage:new{ text = move_err, timeout = 2 })
                 return
             end
-            if new_stable_id and new_stable_id ~= ref.stable_id and self.book then
-                self.book.ref = { source_id = ref.source_id, stable_id = new_stable_id }
+            if new_stable_id and new_stable_id ~= book.stable_id and self.book then
+                self.book.stable_id = new_stable_id
             end
             self:reload()
             UIManager:show(InfoMessage:new{
@@ -684,17 +738,19 @@ function Detail:rebuild()
     local pad = UI.pagePad()
     local content_w = w - pad * 2
 
-    local store_book = book.ref and book.ref.source_id == "zlib"
+    local store_book = book.source_id == "zlib"
     local caps = self.source and self.source:capabilities() or {}
-    local can_scrape = caps.scrape == true and type(book.ref) == "table"
-        and type(book.ref.source_id) == "string" and type(book.ref.stable_id) == "string"
+    local can_scrape = caps.scrape == true
+        and type(book.source_id) == "string" and type(book.stable_id) == "string"
     local can_read = not store_book and self.source ~= nil
         and (self.source.type == "book"
             or self.source.type == "online"
             or self.source.type == "article")
     local can_reflow = not store_book and self.source and self.source.id == "local"
-        and book.ref and type(book.ref.stable_id) == "string"
-        and book.ref.stable_id:lower():match("%.txt$") ~= nil
+        and type(self.source.replaceBook) == "function"
+        and type(book.stable_id) == "string"
+        and (book.stable_id:lower():match("%.txt$") ~= nil
+            or book.stable_id:lower():match("%.mobi$") ~= nil)
 
     local title_bar, title_h = self:buildTopBar(w)
 

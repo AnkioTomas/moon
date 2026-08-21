@@ -63,8 +63,8 @@ end
 
 local function confirmDownload(desktop, enable_after)
     UIManager:show(ConfirmBox:new{
-        text = _("下载拼音词库后，候选词更丰富、输入体验更好。词库约 150 MB，是否现在下载？"),
-        ok_text = _("下载"), ok_callback = function() download(desktop, enable_after) end,
+        text = _("更新词库前，请先在“检查更新”中更新 Book 书库。新词库可能需要新版插件支持。是否继续？"),
+        ok_text = _("继续下载"), ok_callback = function() download(desktop, enable_after) end,
     })
 end
 

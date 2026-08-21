@@ -407,13 +407,7 @@ function Library.fetch(desktop)
     local search = f.search or ""
     local category = f.category or ""
     local series = f.series or ""
-    local force = desktop._library_force == true
-    desktop._library_force = nil
-
-    if not source or not source.configured or not source:configured() then
-        done({}, _("请先在设置里配置当前数据源"))
-        return
-    end
+    if not source then done({}, _("当前数据源不可用")); return end
     if not source.listLibraryAsync then
         done({}, _("当前数据源不支持书库"))
         return
@@ -424,7 +418,6 @@ function Library.fetch(desktop)
         search = search,
         category = category,
         series = series,
-        force = force,
     }, function(res, err)
         if desktop._closed or desktop.tab ~= "library"
             or desktop.source ~= source or (desktop.source_generation or 0) ~= generation then
@@ -437,7 +430,6 @@ function Library.fetch(desktop)
         end
         desktop.total = tonumber(res.count) or 0
         local books = res.data or {}
-        Store.rememberMany(books)
         done(books)
     end)
 end
@@ -512,7 +504,7 @@ function Library.showFilterPicker(desktop, kind)
 
     local source = desktop.source
     local generation = desktop.source_generation or 0
-    if not source or not source.configured or not source:configured() or not source.filtersAsync then
+    if not source or not source.filtersAsync then
         applyList({})
         return
     end
@@ -577,10 +569,26 @@ end
 --- 手动强制重扫书库（本地源：真实扫盘并清理失效书）。
 ---@param desktop table
 function Library.rescan(desktop)
-    desktop._library_force = true
-    desktop._library_state = nil
-    desktop.tab = "library"
-    desktop:rebuild()
+    local source = desktop.source
+    if not source or not source.syncBooksAsync then return end
+    local generation = desktop.source_generation or 0
+    if desktop._books_sync_cancel and desktop._books_sync_cancel.cancel then
+        desktop._books_sync_cancel:cancel()
+    end
+    desktop._books_sync_cancel = source:syncBooksAsync({ force = true }, function(result, err)
+        desktop._books_sync_cancel = nil
+        if desktop._closed or desktop.source ~= source
+            or (desktop.source_generation or 0) ~= generation then return end
+        if not result then
+            desktop._library_state = { books = {}, err = err or _("同步失败") }
+        else
+            desktop._library_state = nil
+            desktop._home_state = nil
+            desktop._home_loaded = false
+        end
+        desktop.tab = "library"
+        desktop:rebuild()
+    end)
 end
 
 --- 清除全部筛选条件。

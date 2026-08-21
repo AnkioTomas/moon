@@ -324,10 +324,7 @@ function Home.fetch(desktop)
         desktop:rebuild()
     end
 
-    if not source or not source.configured or not source:configured() then
-        finish({ recent_err = _("请先配置数据源"), reading = {} })
-        return
-    end
+    if not source then finish({ recent_err = _("当前数据源不可用"), reading = {} }); return end
     desktop._home_fetch_cancel = source:recentBooksAsync(24, function(res, err)
         if not valid() then
             return
@@ -352,7 +349,6 @@ function Home.fetch(desktop)
                     table.insert(reading, book)
                 end
             end
-            Store.rememberMany(rows)
             finish({ recent = recent, reading = reading })
         end)
         if not applied then

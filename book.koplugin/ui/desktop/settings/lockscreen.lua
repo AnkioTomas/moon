@@ -50,7 +50,7 @@ function Lockscreen.rows(desktop)
             })
         end,
     }
-    if mode ~= "ko" and mode ~= "myrl" then
+    if mode ~= "ko" and mode ~= "myrl" and mode ~= "bookshelf" then
         rows[#rows + 1] = function(iw)
             local labels = { custom = _("自定义"), bing = _("必应壁纸"), none = _("无背景") }
             local background = LockScreen.backgroundMode()
