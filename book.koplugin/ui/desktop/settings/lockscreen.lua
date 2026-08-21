@@ -3,11 +3,13 @@
 --]]
 
 local InfoMessage = require("ui/widget/infomessage")
+local InputDialog = require("ui/widget/inputdialog")
 local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
 local Popup = require("ui.components.popup")
 local SettingRow = require("ui.components.settingrow")
 local LockScreen = require("lockscreen.init")
+local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -25,74 +27,91 @@ local function refreshAfterChange(desktop)
             })
         end)
     end
-    if LockScreen.canRefreshOffline("compose") then
+    if LockScreen.canRefreshOffline() then
         refresh()
     else
         NetworkMgr:runWhenOnline(refresh)
     end
 end
 
-local function pickMode(desktop, current)
-    Popup.list{
-        title = _("锁屏显示"),
-        items = LockScreen.options(),
-        current = current,
-        choice_icons = true,
-        centered = true,
-        on_select = function(mode)
-            if not mode or mode == current then return end
-            LockScreen.setMode(mode)
-            desktop:rebuild()
-            if mode == "ko" then return end
-            refreshAfterChange(desktop)
-        end,
+local function editMessage(desktop)
+    local dialog
+    dialog = InputDialog:new{
+        title = _("自定义留言"),
+        input = LockScreen.customMessage(),
+        buttons = {{
+            { text = _("取消"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("保存"), is_enter_default = true, callback = function()
+                local text = dialog:getInputText()
+                UIManager:close(dialog)
+                LockScreen.setCustomMessage(text)
+                refreshAfterChange(desktop)
+            end },
+        }},
     }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
 end
 
 ---@param desktop table
 ---@return table
 function Lockscreen.rows(desktop)
-    local mode = LockScreen.mode()
+    local enabled = LockScreen.isCompose()
     local rows = {
         function(iw)
             return SettingRow.build(iw, {
-                kind = "nav", icon = "wallpaper", title = _("锁屏显示"),
-                status = LockScreen.label(mode), status_on = mode ~= "ko",
-                callback = function() pickMode(desktop, mode) end,
+                kind = "toggle", icon = "wallpaper", title = _("替代系统锁屏"),
+                status = enabled and _("开") or _("关"), status_on = enabled,
+                callback = function()
+                    LockScreen.setMode(enabled and "ko" or "compose")
+                    if enabled then
+                        desktop:rebuild()
+                    else
+                        refreshAfterChange(desktop)
+                    end
+                end,
             })
         end,
     }
-    if mode == "ko" then
+    if not enabled then
         return rows
     end
 
-    rows[#rows + 1] = function(iw)
-        local labels = {
-            custom = _("自定义"),
-            myrl = _("摸鱼日报"),
-            bookshelf = _("书架"),
-            bing = _("必应壁纸"),
-            cover = _("当前阅读书籍封面"),
-            none = _("无"),
-        }
-        local background = LockScreen.backgroundMode()
-        return SettingRow.build(iw, {
-            kind = "nav", icon = "image", title = _("背景"),
-            status = labels[background] or labels.bing,
-            subtitle = background == "custom" and LockScreen.backgroundHint() or nil,
-            callback = function()
-                Popup.list{
-                    title = _("背景"),
-                    items = LockScreen.backgroundOptions(),
-                    current = background, choice_icons = true, centered = true,
-                    on_select = function(value)
-                        if not value or value == background then return end
-                        LockScreen.setBackgroundMode(value)
-                        refreshAfterChange(desktop)
-                    end,
-                }
-            end,
-        })
+    local component = LockScreen.component()
+    if component ~= "myrl" and component ~= "bookshelf" then
+        rows[#rows + 1] = function(iw)
+            local labels = {
+                custom = _("自定义"),
+                bing = _("必应壁纸"),
+                cover = _("当前阅读书籍封面"),
+                folder = _("文件夹壁纸"),
+                none = _("无"),
+            }
+            local background = LockScreen.backgroundMode()
+            local subtitle
+            if background == "custom" then
+                subtitle = LockScreen.backgroundHint()
+            elseif background == "folder" then
+                subtitle = LockScreen.folderHint()
+            end
+            return SettingRow.build(iw, {
+                kind = "nav", icon = "image", title = _("背景"),
+                status = labels[background] or labels.bing,
+                subtitle = subtitle,
+                callback = function()
+                    Popup.list{
+                        title = _("背景"),
+                        items = LockScreen.backgroundOptions(),
+                        current = background, choice_icons = true, centered = true,
+                        on_select = function(value)
+                            if not value or value == background then return end
+                            LockScreen.setBackgroundMode(value)
+                            refreshAfterChange(desktop)
+                        end,
+                    }
+                end,
+            })
+        end
     end
 
     rows[#rows + 1] = function(iw)
@@ -122,8 +141,8 @@ function Lockscreen.rows(desktop)
         })
     end
 
-    local component = LockScreen.component()
-    if component ~= "none" then
+    if component ~= "none" and component ~= "bill"
+        and component ~= "myrl" and component ~= "bookshelf" then
         rows[#rows + 1] = function(iw)
             local positions = {
                 ["top-left"] = _("左上"), ["top-center"] = _("上中"), ["top-right"] = _("右上"),
@@ -212,6 +231,19 @@ function Lockscreen.rows(desktop)
                         end,
                     }
                 end,
+            })
+        end
+    end
+
+    if component == "message" then
+        rows[#rows + 1] = function(iw)
+            local text = LockScreen.customMessage()
+            local preview = Text.truncateUtf8(text, 18)
+            if preview ~= text then preview = preview .. "…" end
+            return SettingRow.build(iw, {
+                kind = "nav", icon = "chat", title = _("自定义留言"),
+                status = preview,
+                callback = function() editMessage(desktop) end,
             })
         end
     end

@@ -33,12 +33,17 @@ local Settings = require("lockscreen.settings")
 
 -- 隔离本测对 common 的改动
 local common = MoonSettings.get()
-local prev_lock = common.lock_screen
-local prev_day = common.lock_screen_day
+local previous = {}
+for _, key in ipairs({
+    "lock_screen", "lock_screen_day",
+    "lock_screen_background", "lock_screen_component", "lock_screen_position",
+    "lock_screen_wide",
+}) do
+    previous[key] = common[key]
+end
 
 local function cleanup()
-    common.lock_screen = prev_lock
-    common.lock_screen_day = prev_day
+    for key, value in pairs(previous) do common[key] = value end
     MoonSettings.save()
     _G.G_reader_settings = previous_settings
 end
@@ -49,9 +54,11 @@ local ok_run, err_run = pcall(function()
     MoonSettings.save()
 
     -- 模式读写
+    common.lock_screen = nil
+    MoonSettings.save()
     Assert.is_nil(Settings.mode())
-    Settings.setMode("myrl")
-    Assert.eq(Settings.mode(), "myrl")
+    Settings.setMode("compose")
+    Assert.eq(Settings.mode(), "compose")
     Settings.setMode(nil)
     Assert.eq(Settings.mode(), "ko")
 
