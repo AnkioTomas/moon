@@ -70,7 +70,7 @@ function Pinyin.bootstrap()
     require("pinyin.candidate_bar").install({ enabled = Pinyin.isEnabled })
 end
 
---- 设置页词库状态：未下载、下载中、不可用或词条数与来源。
+--- 设置页词库状态：未下载、下载中、不可用或词条数与构建版本。
 function Pinyin.dictStatus()
     if require("pinyin.download").downloading() then
         return _("下载中…")
@@ -83,8 +83,8 @@ function Pinyin.dictStatus()
         return _("未下载")
     end
     local entries = Dict.entries() or "?"
-    local tag = Dict.sourceTag() or Settings.get().pinyin_dict_source or "?"
-    return string.format("%s · %s", entries, tag)
+    local built_at = Dict.builtAt() or Settings.get().pinyin_dict_built_at or "?"
+    return string.format("%s · %s", entries, built_at)
 end
 
 --- 手动下载或更新词库；网络不可用时由 NetworkMgr 延后执行。

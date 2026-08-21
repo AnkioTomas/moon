@@ -46,12 +46,48 @@ end
 
 local function cleanupTmp()
     local dir = tmpDir()
-    for f in lfs.dir(dir) do
+    local ok, iter, dir_obj = pcall(lfs.dir, dir)
+    if not ok or not iter then
+        return
+    end
+    for f in iter, dir_obj do
         if f ~= "." and f ~= ".." then
             os.remove(dir .. "/" .. f)
         end
     end
     os.remove(dir)
+end
+
+local function tmpManifestPath()
+    return tmpDir() .. "/.manifest.json"
+end
+
+-- 临时分片必须属于同一版 manifest，不能把新旧词库拼在一起。
+local function syncTmpManifest(manifest)
+    local path = tmpManifestPath()
+    local f = io.open(path, "rb")
+    if f then
+        local body = f:read("*a")
+        f:close()
+        local ok, saved = pcall(JSON.decode, body)
+        if not ok or type(saved) ~= "table"
+            or saved.built_at ~= manifest.built_at
+            or saved.raw_sha256 ~= manifest.raw_sha256 then
+            cleanupTmp()
+        end
+    end
+    lfs.mkdir(tmpDir())
+    f = assert(io.open(path, "wb"))
+    f:write(JSON.encode({
+        built_at = manifest.built_at,
+        raw_sha256 = manifest.raw_sha256,
+    }))
+    f:close()
+end
+
+local function partComplete(part)
+    local attr = lfs.attributes(tmpDir() .. "/" .. part.file)
+    return attr and attr.mode == "file" and attr.size == tonumber(part.size)
 end
 
 -- 子进程中校验、拼接并原子落位，避免大文件 IO 阻塞 UI。
@@ -66,6 +102,8 @@ local function assemble(manifest, dir, dest)
             local data = f:read("*a")
             f:close()
             if part.sha256 and sha256(data) ~= part.sha256 then
+                -- 只丢掉坏片，保留其它已完成分片供下次续传。
+                os.remove(dir .. "/" .. part.file)
                 error("part sha256 mismatch: " .. part.file)
             end
             assert(out:write(data))
@@ -118,16 +156,15 @@ function M.ensure(cb, on_progress)
             return
         end
         local ok, manifest = pcall(JSON.decode, body)
-        if not ok or type(manifest) ~= "table" or type(manifest.parts) ~= "table"
-            or #manifest.parts == 0 then
+        if not ok or type(manifest) ~= "table" or type(manifest.built_at) ~= "string"
+            or manifest.built_at == "" or type(manifest.parts) ~= "table" or #manifest.parts == 0 then
             done(false, "bad manifest")
             return
         end
         local attr = lfs.attributes(dest)
         local settings = MoonSettings.get()
         if attr and attr.mode == "file" and (attr.size or 0) > 0
-            and (not manifest.raw_size or attr.size == tonumber(manifest.raw_size))
-            and manifest.raw_sha256 and settings.pinyin_dict_sha256 == manifest.raw_sha256 then
+            and settings.pinyin_dict_built_at == manifest.built_at then
             done(true)
             return
         end
@@ -137,7 +174,7 @@ function M.ensure(cb, on_progress)
         end
         report("manifest", 0, total, 0, #manifest.parts)
         Paths.ensureSettings() -- 内含 ensureDir(root)
-        lfs.mkdir(tmpDir())
+        syncTmpManifest(manifest)
         downloadParts(manifest, 1, dest, done, report, 0, total)
     end)
 end
@@ -150,6 +187,12 @@ downloadParts = function(manifest, idx, dest, done, report, done_bytes, total)
         return
     end
     local part = parts[idx]
+    if partComplete(part) then
+        local size = tonumber(part.size) or 0
+        report("part", done_bytes + size, total, idx, #parts)
+        downloadParts(manifest, idx + 1, dest, done, report, done_bytes + size, total)
+        return
+    end
     _job = Request.download({
         url = BASE_URL .. "/" .. part.file,
         method = "GET",
@@ -160,8 +203,13 @@ downloadParts = function(manifest, idx, dest, done, report, done_bytes, total)
         end or nil,
     }, tmpDir() .. "/" .. part.file, function(ok, err)
         if not ok then
-            cleanupTmp()
+            os.remove(tmpDir() .. "/" .. part.file)
             done(false, err)
+            return
+        end
+        if not partComplete(part) then
+            os.remove(tmpDir() .. "/" .. part.file)
+            done(false, "part size mismatch: " .. part.file)
             return
         end
         downloadParts(manifest, idx + 1, dest, done, report,
@@ -189,21 +237,20 @@ assembleInTask = function(manifest, dest, done, report)
             end
             require("pinyin.dictionary").reset()
             local c = MoonSettings.get()
-            c.pinyin_dict_source = manifest.tag or "unknown"
+            c.pinyin_dict_built_at = manifest.built_at
             c.pinyin_dict_sha256 = manifest.raw_sha256
             MoonSettings.save()
             logger.info("book.pinyin dict installed:", manifest.tag, manifest.entries)
             done(true)
         end,
         on_failed = function(err)
-            cleanupTmp()
             logger.warn("book.pinyin dict assemble failed:", err)
             done(false, err)
         end,
     })
 end
 
---- 中止当前网络或拼接任务，并清理临时分片。
+--- 中止当前网络或拼接任务；保留已完成分片供下次继续。
 function M.cancel()
     if _job then
         if _job.abort then
@@ -214,7 +261,6 @@ function M.cancel()
     end
     _job = nil
     _downloading = false
-    cleanupTmp()
 end
 
 return M

@@ -188,6 +188,11 @@ function M.sourceTag()
     return metaValue("source_tag")
 end
 
+--- 词库构建版本（manifest.built_at），词库不可用时返回 nil。
+function M.builtAt()
+    return metaValue("built_at")
+end
+
 --- 连写码 → 空格分隔前缀（贪心最长匹配音节）。
 --- "nihao" → "ni hao", true；"nih" → "ni h", false。
 ---@param code string 纯小写连写拼音
