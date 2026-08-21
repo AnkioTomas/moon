@@ -1,7 +1,9 @@
 --[[--
-reading_stats 表：自采集阅读统计（一页一条，上传成功即删）
+reading_stats 表：自采集与拉取的阅读统计（一页一条，按记录身份去重）。
 
-身份即 BookRef(source_id + stable_id)，天然按源隔离。
+sync_status=0 表示待上传，1 表示已与远端同步。
+
+身份即 BookIdentity(source_id + stable_id)，天然按源隔离。
 
 @module koplugin.book.utils.db.stats
 --]]
@@ -12,8 +14,9 @@ local StatsDB = {}
 
 --- 追加一条阅读统计。
 ---@param row { source_id: string, stable_id: string, page: number, start_time: number, duration: number, total_pages: number }
+---@param synced boolean|nil
 ---@return boolean
-function StatsDB.add(row)
+function StatsDB.add(row, synced)
     if type(row) ~= "table" then
         return false
     end
@@ -28,18 +31,22 @@ function StatsDB.add(row)
     end
     Base.ensure()
     return Base.exec(
-        [[INSERT INTO reading_stats (source_id, stable_id, page, start_time, duration, total_pages)
-          VALUES (?,?,?,?,?,?);]],
+        [[INSERT INTO reading_stats (
+            source_id, stable_id, page, start_time, duration, total_pages, sync_status
+          ) VALUES (?,?,?,?,?,?,?)
+          ON CONFLICT(source_id, stable_id, page, start_time, duration, total_pages)
+          DO UPDATE SET sync_status=MAX(reading_stats.sync_status, excluded.sync_status);]],
         source_id,
         row.stable_id,
         tonumber(row.page) or 0,
         start_time,
         duration,
-        tonumber(row.total_pages) or 0
+        tonumber(row.total_pages) or 0,
+        synced and 1 or 0
     ) ~= nil
 end
 
---- 指定源的待上报条数。
+--- 指定源的全部记录数。
 ---@param source_id string
 ---@return number
 function StatsDB.countBySource(source_id)
@@ -55,7 +62,36 @@ function StatsDB.countBySource(source_id)
     return tonumber(n) or 0
 end
 
---- 列出指定源的待上报统计（按时间升序）。
+--- 列出指定源的待上传统计。
+---@param source_id string
+---@return table[]
+function StatsDB.unsyncedBySource(source_id)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id then return {} end
+    Base.ensure()
+    local result, nrows = Base.query(
+        [[SELECT id, stable_id, page, start_time, duration, total_pages, sync_status
+          FROM reading_stats WHERE source_id=? AND sync_status=0 ORDER BY start_time ASC;]],
+        source_id
+    )
+    local rows = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            rows[#rows + 1] = {
+                id = tonumber(result[1][i]) or 0,
+                stable_id = result[2][i],
+                page = tonumber(result[3][i]) or 0,
+                start_time = tonumber(result[4][i]) or 0,
+                duration = tonumber(result[5][i]) or 0,
+                total_pages = tonumber(result[6][i]) or 0,
+                sync_status = tonumber(result[7][i]) or 0,
+            }
+        end
+    end
+    return rows
+end
+
+--- 列出指定源的全部统计（按时间升序）。
 ---@param source_id string
 ---@return table[] rows 含 id / stable_id / page / start_time / duration / total_pages
 function StatsDB.allBySource(source_id)
@@ -65,7 +101,7 @@ function StatsDB.allBySource(source_id)
     end
     Base.ensure()
     local result, nrows = Base.query(
-        [[SELECT id, stable_id, page, start_time, duration, total_pages
+        [[SELECT id, stable_id, page, start_time, duration, total_pages, sync_status
           FROM reading_stats WHERE source_id=? ORDER BY start_time ASC;]],
         source_id
     )
@@ -81,6 +117,7 @@ function StatsDB.allBySource(source_id)
             start_time = tonumber(result[4][i]) or 0,
             duration = tonumber(result[5][i]) or 0,
             total_pages = tonumber(result[6][i]) or 0,
+            sync_status = tonumber(result[7][i]) or 0,
         }
     end
     return rows
@@ -119,7 +156,7 @@ function StatsDB.summaryBySource(source_id)
 end
 
 --- 汇总单本书阅读统计：总时长/已读页数/上次阅读时间（详情页用）。
---- 注意：远端源统计上报成功即删，这里只剩未上报部分；本地源完整保留。
+--- 已上传和远端拉取记录仍保留，详情聚合始终读取完整本地历史。
 ---@param source_id string
 ---@param stable_id string
 ---@return { total_seconds: number, pages: number, last_read: number }
@@ -143,7 +180,7 @@ function StatsDB.summaryByBook(source_id, stable_id)
 end
 
 --- 单本书按天聚合（详情页「最近几天」卡片用，最近在前）。
---- 注意：远端源统计上报成功即删，这里只剩未上报部分；本地源完整保留。
+--- 已上传和远端拉取记录仍保留，详情聚合始终读取完整本地历史。
 ---@param source_id string
 ---@param stable_id string
 ---@param limit number|nil 最多返回天数，默认 5
@@ -327,16 +364,26 @@ function StatsDB.periodDays(source_id, start_ts, end_ts)
     return rows
 end
 
---- 删除已上传记录。
+--- 标记已被 Source 确认的记录。
 ---@param ids number[]
 ---@return boolean
-function StatsDB.deleteIds(ids)
+function StatsDB.markSynced(ids)
     if type(ids) ~= "table" or #ids == 0 then
         return false
     end
     Base.ensure()
+    if not Base.exec("BEGIN IMMEDIATE;") then
+        return false
+    end
     for _, id in ipairs(ids) do
-        Base.exec([[DELETE FROM reading_stats WHERE id=?;]], tonumber(id) or 0)
+        if not Base.exec([[UPDATE reading_stats SET sync_status=1 WHERE id=?;]], id) then
+            Base.exec("ROLLBACK;")
+            return false
+        end
+    end
+    if not Base.exec("COMMIT;") then
+        Base.exec("ROLLBACK;")
+        return false
     end
     return true
 end
