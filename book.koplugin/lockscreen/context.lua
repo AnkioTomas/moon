@@ -48,26 +48,105 @@ local function buildBook(opts)
     local stable_id = opts.stable_id
     local stats = StatsDB.summaryByBook(source_id, stable_id)
     local chapter_count = opts.chapter_count
-    if chapter_count == nil and source_id and stable_id then
-        local toc = require("book.store").toc({
+    local chapter_title = opts.chapter_title
+    local toc = opts.toc
+    if (chapter_count == nil or chapter_title == nil) and source_id and stable_id then
+        toc = toc or require("book.store").toc({
             source_id = source_id,
             stable_id = stable_id,
         })
-        chapter_count = toc and #toc or nil
+        if chapter_count == nil then
+            chapter_count = toc and #toc or nil
+        end
     end
+    local chapter_idx = opts.chapter_idx ~= nil and tonumber(opts.chapter_idx) or nil
+    if chapter_title == nil and type(toc) == "table" and chapter_idx then
+        local chapter = toc[chapter_idx]
+        if type(chapter) == "table" then
+            chapter_title = chapter.title or chapter.name
+        end
+    end
+    local cover
+    if type(stable_id) == "string" and stable_id ~= "" then
+        local path = Paths.coverPath(stable_id, source_id)
+        if lfs.attributes(path, "mode") == "file" then
+            cover = path
+        end
+    end
+    local percent = tonumber(opts.percent) or 0
+    local page = tonumber(opts.page) or 0
+    local total_pages = tonumber(opts.total_pages) or 0
+    local remaining_pages = total_pages > page and (total_pages - page) or nil
+    local remaining_percent = math.max(0, 100 - percent)
     return {
         source_id = source_id,
         stable_id = stable_id,
         title = opts.title or stable_id,
         authors = opts.authors or "",
-        percent = tonumber(opts.percent) or 0,
-        page = tonumber(opts.page) or 0,
-        total_pages = tonumber(opts.total_pages) or 0,
-        chapter_idx = opts.chapter_idx ~= nil and tonumber(opts.chapter_idx) or nil,
+        percent = percent,
+        page = page,
+        total_pages = total_pages,
+        chapter_idx = chapter_idx,
         chapter_count = chapter_count,
+        chapter_title = chapter_title,
+        cover = cover,
+        remaining_pages = remaining_pages,
+        remaining_percent = remaining_percent,
         total_seconds = stats.total_seconds,
         pages = stats.pages or 0,
     }
+end
+
+--- 从会话或本地 notes 快照收集高亮文案。
+---@param source_id string|nil
+---@param stable_id string|nil
+---@param chapter_idx number|nil
+---@param limit number|nil
+---@return string[]
+local function collectHighlights(source_id, stable_id, chapter_idx, limit)
+    limit = math.max(1, tonumber(limit) or 3)
+    local texts = {}
+    local function push(text)
+        if type(text) == "string" and text ~= "" then
+            texts[#texts + 1] = text
+            return #texts >= limit
+        end
+        return false
+    end
+    local cur = currentSession()
+    local annotations = cur and cur.ui and cur.ui.annotation and cur.ui.annotation.annotations
+    if type(annotations) == "table" then
+        for _, item in ipairs(annotations) do
+            if item.drawer and push(item.text) then
+                return texts
+            end
+        end
+    end
+    if type(source_id) == "string" and type(stable_id) == "string" then
+        local ok, NoteDB = pcall(require, "utils.db.note")
+        if ok and NoteDB then
+            local row = NoteDB.get(source_id, stable_id, chapter_idx or 0)
+            local payload = row and row.payload
+            if type(payload) == "string" and payload ~= "" then
+                local decoded = nil
+                local jok, JSON = pcall(require, "json")
+                if jok then
+                    local dok, data = pcall(JSON.decode, payload)
+                    if dok then
+                        decoded = data
+                    end
+                end
+                if type(decoded) == "table" then
+                    for _, item in ipairs(decoded) do
+                        if type(item) == "table" and item.drawer and push(item.text) then
+                            return texts
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return texts
 end
 
 ---@param ts number|nil Unix 时间戳；省略时使用当前时间
@@ -115,7 +194,7 @@ local function fillDayBuckets(rows, start_ts, end_ts)
     return buckets
 end
 
---- 给当前书挂上近 7 日阅读桶（阅读统计柱图用）。
+--- 给当前书挂上近 7 日阅读桶与高亮（阅读统计柱图 / 封面卡片用）。
 ---@param book table|nil
 ---@return table|nil
 local function withRecentBuckets(book)
@@ -129,6 +208,7 @@ local function withRecentBuckets(book)
         start_ts,
         end_ts
     )
+    book.highlights = collectHighlights(book.source_id, book.stable_id, book.chapter_idx, 3)
     return book
 end
 
@@ -177,6 +257,7 @@ function M.currentBook()
             total_pages = tonumber(cur.total_pages) or 0,
             chapter_idx = identity.chapter_idx,
             chapter_count = toc and #toc or nil,
+            toc = toc,
         }))
     end
     -- 锁屏多在无 Reader 会话时生成（熄屏/桌面刷新）：回退到 last_open 最近一本

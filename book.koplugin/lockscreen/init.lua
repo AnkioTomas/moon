@@ -195,15 +195,35 @@ function M.backgroundMode()
     return require("utils.settings").get().lock_screen_background or "bing"
 end
 
----@param mode string custom/bing/none
+---@param mode string custom/bing/cover/none
 ---@return nil
 function M.setBackgroundMode(mode)
-    if mode ~= "custom" and mode ~= "bing" and mode ~= "none" then
+    if mode ~= "custom" and mode ~= "bing" and mode ~= "cover" and mode ~= "none" then
         return
     end
     cancelJob()
     local SettingsStore = require("utils.settings")
     SettingsStore.get().lock_screen_background = mode
+    SettingsStore.save()
+    Settings.setSavedDay(nil)
+    Settings.clearCover()
+end
+
+---@return string simple/bookmark/cover
+function M.readingMode()
+    return require("utils.settings").get().lock_screen_reading_mode or "bookmark"
+end
+
+---@param mode string simple/bookmark/cover
+---@return nil
+function M.setReadingMode(mode)
+    local allowed = { simple = true, bookmark = true, cover = true }
+    if not allowed[mode] then
+        return
+    end
+    cancelJob()
+    local SettingsStore = require("utils.settings")
+    SettingsStore.get().lock_screen_reading_mode = mode
     SettingsStore.save()
     Settings.setSavedDay(nil)
     Settings.clearCover()

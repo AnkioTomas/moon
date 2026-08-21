@@ -24,6 +24,7 @@ local DEFAULTS = {
         lock_screen = "myrl", lock_screen_bill_period = "7d",
         lock_screen_background = "bing", lock_screen_quote_mode = "highlight",
         lock_screen_quote_position = "center-center", lock_screen_quote_wide = true,
+        lock_screen_reading_mode = "bookmark",
     },
     remote = { remote_port = 9528, remote_autostart = false },
     pinyin = { pinyin_enabled = false },
@@ -42,6 +43,7 @@ end
 for _, key in ipairs({
     "lock_screen_day", "lock_screen_bill_period", "lock_screen_quote_cache",
     "lock_screen_quote_source_cache", "lock_screen_quote_index", "lock_screen_bing_day",
+    "lock_screen_reading_mode",
 }) do
     KEY_SECTION[key] = "lockscreen"
 end

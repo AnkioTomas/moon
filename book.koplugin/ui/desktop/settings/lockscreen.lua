@@ -52,22 +52,61 @@ function Lockscreen.rows(desktop)
     }
     if mode ~= "ko" and mode ~= "myrl" and mode ~= "bookshelf" then
         rows[#rows + 1] = function(iw)
-            local labels = { custom = _("自定义"), bing = _("必应壁纸"), none = _("无背景") }
+            local labels = {
+                custom = _("自定义"),
+                bing = _("必应壁纸"),
+                cover = _("书籍封面"),
+                none = _("无背景"),
+            }
             local background = LockScreen.backgroundMode()
             return SettingRow.build(iw, {
                 kind = "nav", icon = "image", title = _("背景壁纸"),
-                status = labels[background], subtitle = background == "custom" and LockScreen.backgroundHint() or nil,
+                status = labels[background] or labels.bing,
+                subtitle = background == "custom" and LockScreen.backgroundHint()
+                    or background == "cover" and _("最近阅读书籍的封面")
+                    or nil,
                 callback = function()
                     Popup.list{
                         title = _("背景壁纸"),
                         items = {
                             { text = labels.custom, value = "custom" },
                             { text = labels.bing .. " · " .. _("每日更新"), value = "bing" },
+                            { text = labels.cover .. " · " .. _("最近阅读"), value = "cover" },
                             { text = labels.none, value = "none" },
                         },
                         current = background, choice_icons = true, centered = true,
                         on_select = function(value)
                             LockScreen.setBackgroundMode(value)
+                            desktop:rebuild()
+                            LockScreen.refreshInBackground()
+                        end,
+                    }
+                end,
+            })
+        end
+    end
+    if mode == "reading" then
+        rows[#rows + 1] = function(iw)
+            local labels = {
+                simple = _("简洁"),
+                bookmark = _("书签"),
+                cover = _("封面卡片"),
+            }
+            local reading_mode = LockScreen.readingMode()
+            return SettingRow.build(iw, {
+                kind = "nav", icon = "view_agenda", title = _("阅读统计布局"),
+                status = labels[reading_mode] or labels.bookmark,
+                callback = function()
+                    Popup.list{
+                        title = _("阅读统计布局"),
+                        items = {
+                            { text = labels.simple .. " · " .. _("顶部章节与进度"), value = "simple" },
+                            { text = labels.bookmark .. " · " .. _("居中书签卡"), value = "bookmark" },
+                            { text = labels.cover .. " · " .. _("左侧多卡片"), value = "cover" },
+                        },
+                        current = reading_mode, choice_icons = true, centered = true,
+                        on_select = function(value)
+                            LockScreen.setReadingMode(value)
                             desktop:rebuild()
                             LockScreen.refreshInBackground()
                         end,
