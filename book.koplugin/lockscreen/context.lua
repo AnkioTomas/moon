@@ -40,26 +40,84 @@ local function currentSession()
     return require("ui.reader.session").current()
 end
 
----@return table|nil 当前书籍及阅读统计；无阅读会话时返回 nil
+--- 组装锁屏用的书本快照（会话优先字段 + 库表/统计兜底）。
+---@param opts table
+---@return table
+local function buildBook(opts)
+    local source_id = opts.source_id
+    local stable_id = opts.stable_id
+    local stats = StatsDB.summaryByBook(source_id, stable_id)
+    local chapter_count = opts.chapter_count
+    if chapter_count == nil and source_id and stable_id then
+        local toc = require("book.store").toc({
+            source_id = source_id,
+            stable_id = stable_id,
+        })
+        chapter_count = toc and #toc or nil
+    end
+    return {
+        source_id = source_id,
+        stable_id = stable_id,
+        title = opts.title or stable_id,
+        authors = opts.authors or "",
+        percent = tonumber(opts.percent) or 0,
+        page = tonumber(opts.page) or 0,
+        total_pages = tonumber(opts.total_pages) or 0,
+        chapter_idx = opts.chapter_idx ~= nil and tonumber(opts.chapter_idx) or nil,
+        chapter_count = chapter_count,
+        total_seconds = stats.total_seconds,
+    }
+end
+
+--- 无阅读会话时：按 last_open 取最近一本（优先未读完）。
+---@return table|nil
+local function latestReadingBook()
+    local recent = BookDB.recent(16)
+    if #recent == 0 then
+        return nil
+    end
+    local row
+    for _, book in ipairs(recent) do
+        if (tonumber(book.percent) or 0) < 100 then
+            row = book
+            break
+        end
+    end
+    row = row or recent[1]
+    local progress = require("utils.db.progress").get(row.source_id, row.stable_id)
+    -- 全书进度以 books.percent 为准；pending_progress 只补章节下标
+    local chapter_idx = (progress and progress.chapter_idx) or row.last_chapter_idx
+    return buildBook({
+        source_id = row.source_id,
+        stable_id = row.stable_id,
+        title = row.title,
+        authors = row.authors,
+        percent = tonumber(row.percent) or 0,
+        chapter_idx = chapter_idx,
+    })
+end
+
+---@return table|nil 最近正在阅读的书及统计；无最近打开记录时返回 nil
 function M.currentBook()
     local cur = currentSession()
     local identity = cur and cur.identity
-    if not identity or not cur then
-        return nil
+    if identity and cur then
+        local book = identity.book or BookDB.get(identity.source_id, identity.stable_id) or {}
+        local toc = require("ui.reader.session").toc()
+        return buildBook({
+            source_id = identity.source_id,
+            stable_id = identity.stable_id,
+            title = book.title or identity.stable_id,
+            authors = book.authors,
+            percent = tonumber(cur.percent) or tonumber(book.percent) or 0,
+            page = tonumber(cur.page) or 0,
+            total_pages = tonumber(cur.total_pages) or 0,
+            chapter_idx = identity.chapter_idx,
+            chapter_count = toc and #toc or nil,
+        })
     end
-    local book = identity.book or BookDB.get(identity.source_id, identity.stable_id) or {}
-    local stats = StatsDB.summaryByBook(identity.source_id, identity.stable_id)
-    local toc = require("ui.reader.session").toc()
-    return {
-        title = book.title or identity.stable_id,
-        authors = book.authors or "",
-        percent = tonumber(cur.percent) or tonumber(book.percent) or 0,
-        page = tonumber(cur.page) or 0,
-        total_pages = tonumber(cur.total_pages) or 0,
-        chapter_idx = tonumber(identity.chapter_idx),
-        chapter_count = toc and #toc or nil,
-        total_seconds = stats.total_seconds,
-    }
+    -- 锁屏多在无 Reader 会话时生成（熄屏/桌面刷新）：回退到 last_open 最近一本
+    return latestReadingBook()
 end
 
 ---@param ts number|nil Unix 时间戳；省略时使用当前时间
@@ -89,19 +147,89 @@ function M.billRange(period)
     return dayStart(now) - 6 * 86400, finish
 end
 
----@return table {period, start_ts, end_ts, summary, books, days}
+--- 补齐逐日桶：从 start 到 end（左闭右开）每天一格，无数据为 0。
+---@param rows table[]
+---@param start_ts number
+---@param end_ts number
+---@return table[] buckets { key, label, seconds, pages }
+local function fillDayBuckets(rows, start_ts, end_ts)
+    local by_ymd = {}
+    for _, row in ipairs(rows or {}) do
+        if type(row.ymd) == "string" then
+            by_ymd[row.ymd] = row
+        end
+    end
+    local buckets = {}
+    local t = os.date("*t", start_ts)
+    ---@cast t osdate
+    -- 用正午推进，避开夏令时跳变
+    local cursor = os.time({ year = t.year, month = t.month, day = t.day, hour = 12 })
+    local guard = 0
+    while cursor < end_ts and guard < 400 do
+        guard = guard + 1
+        local ymd = os.date("%Y-%m-%d", cursor)
+        local hit = by_ymd[ymd]
+        buckets[#buckets + 1] = {
+            key = ymd,
+            label = ymd:sub(6), -- MM-DD
+            seconds = hit and (tonumber(hit.seconds) or 0) or 0,
+            pages = hit and (tonumber(hit.pages) or 0) or 0,
+        }
+        local n = os.date("*t", cursor)
+        ---@cast n osdate
+        cursor = os.time({ year = n.year, month = n.month, day = n.day + 1, hour = 12 })
+    end
+    return buckets
+end
+
+--- 补齐逐小时桶：本地时区 0–23，无数据为 0。
+---@param rows table[]
+---@return table[] buckets { key, label, seconds, pages }
+local function fillHourBuckets(rows)
+    local by_hour = {}
+    for _, row in ipairs(rows or {}) do
+        local h = tonumber(row.hour)
+        if h then
+            by_hour[h] = row
+        end
+    end
+    local buckets = {}
+    for h = 0, 23 do
+        local hit = by_hour[h]
+        local key = string.format("%02d", h)
+        buckets[#buckets + 1] = {
+            key = key,
+            label = key,
+            seconds = hit and (tonumber(hit.seconds) or 0) or 0,
+            pages = hit and (tonumber(hit.pages) or 0) or 0,
+        }
+    end
+    return buckets
+end
+
+---@return table {period, start_ts, end_ts, summary, books, grain, buckets}
 function M.bill()
     local c = MoonSettings.get()
     local period = c.lock_screen_bill_period or "7d"
     local start_ts, end_ts = M.billRange(period)
     local source_id = c.active_source or "local"
+    local grain = period == "today" and "hour" or "day"
+    local buckets
+    if grain == "hour" then
+        buckets = fillHourBuckets(StatsDB.periodHours(source_id, start_ts, end_ts))
+    else
+        buckets = fillDayBuckets(StatsDB.periodDays(source_id, start_ts, end_ts), start_ts, end_ts)
+    end
     return {
         period = period,
         start_ts = start_ts,
         end_ts = end_ts,
         summary = StatsDB.periodSummary(source_id, start_ts, end_ts),
         books = StatsDB.periodBooks(source_id, start_ts, end_ts, 5),
-        days = StatsDB.periodDays(source_id, start_ts, end_ts),
+        grain = grain,
+        buckets = buckets,
+        -- 兼容旧字段：按天粒度时等于 buckets
+        days = grain == "day" and buckets or nil,
     }
 end
 

@@ -78,12 +78,27 @@ local function draw(text, source, bg, cb)
         or vertical == "bottom" and h - margin - panel_height
         or math.floor((h - panel_height) / 2)
     local rule_y = panel_y + panel_height - math.floor(h * 0.09)
+    -- DESIGN：白底圆角浅卡 + 轻阴影；引号/来源走灰阶，分割线默认 #55
+    local radius = math.max(8, math.floor(w * 0.02))
+    local Blitbuffer = require("ffi/blitbuffer")
     local ok, err = Render.write(M.path(), bg, {
-        { kind = "panel", x = panel_x, y = panel_y, width = panel_width, height = panel_height },
-        { text = "“", x = text_x, y = panel_y + math.floor(h * 0.025), width = text_width, size = 64, bold = true, box = false },
-        { text = text, x = text_x, y = panel_y + math.floor(h * 0.11), width = text_width, size = font_size, bold = true, box = false },
-        { kind = "rule", x = text_x, y = rule_y, width = text_width },
-        { text = source, x = text_x, y = rule_y + math.floor(h * 0.025), width = text_width, size = 18, align = "right", box = false },
+        {
+            kind = "panel", x = panel_x, y = panel_y, width = panel_width, height = panel_height,
+            radius = radius, shadow = 2, color = Blitbuffer.COLOR_WHITE,
+        },
+        {
+            text = "“", x = text_x, y = panel_y + math.floor(h * 0.025),
+            width = text_width, size = 56, bold = true, box = false, color = Blitbuffer.COLOR_GRAY_4,
+        },
+        {
+            text = text, x = text_x, y = panel_y + math.floor(h * 0.11),
+            width = text_width, size = font_size, bold = true, box = false,
+        },
+        { kind = "rule", x = text_x, y = rule_y, width = text_width, height = 1 },
+        {
+            text = source, x = text_x, y = rule_y + math.floor(h * 0.025),
+            width = text_width, size = 16, align = "right", box = false, color = Blitbuffer.COLOR_GRAY_3,
+        },
     })
     cb(ok, err)
 end

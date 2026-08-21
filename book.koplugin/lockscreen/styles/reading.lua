@@ -1,16 +1,22 @@
 --[[--
 阅读统计锁屏。
 
+对齐 DESIGN.md：白底浅卡、黑灰字阶、胶囊进度、KPI 层次分明。
+
 @module koplugin.book.lockscreen.styles.reading
 --]]
 
 local Background = require("lockscreen.background")
 local Context = require("lockscreen.context")
 local Paths = require("utils.paths")
+local Blitbuffer = require("ffi/blitbuffer")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
 local M = { id = "reading", label = _("阅读统计"), local_render = true }
+
+local MUTED = Blitbuffer.COLOR_GRAY_3
+local DIM = Blitbuffer.COLOR_GRAY_4
 
 ---@return string 阅读统计图片缓存路径
 function M.path()
@@ -36,33 +42,97 @@ function M.fetch(cb)
     return Background.ensure(function(bg)
         local Render = require("lockscreen.render")
         local w, h = Render.size()
-        local margin = math.floor(w * 0.07)
+        local margin = math.max(16, math.floor(w * 0.055))
+        local radius = math.max(8, math.floor(w * 0.02))
+        local pad = math.max(14, math.floor(w * 0.045))
+        local card_x = margin
+        local card_w = w - margin * 2
+        local inner_x = card_x + pad
+        local inner_w = card_w - pad * 2
         local book = Context.currentBook()
         local blocks
+
         if not book then
+            local card_h = math.floor(h * 0.42)
+            local card_y = math.floor((h - card_h) / 2)
             blocks = {
-                { kind = "panel", x = margin, y = math.floor(h * 0.07), width = w - margin * 2, height = math.floor(h * 0.5) },
-                { text = _("阅读统计"), x = margin * 2, y = math.floor(h * 0.11), width = w - margin * 4, size = 38, bold = true, box = false },
-                { text = _("当前没有正在阅读的书籍"), x = margin * 2, y = math.floor(h * 0.25), width = w - margin * 4, size = 24, box = false },
+                {
+                    kind = "panel", x = card_x, y = card_y, width = card_w, height = card_h,
+                    radius = radius, shadow = 2, color = Blitbuffer.COLOR_WHITE,
+                },
+                {
+                    text = _("阅读统计"), x = inner_x, y = card_y + pad,
+                    width = inner_w, size = 18, box = false, color = MUTED,
+                },
+                {
+                    kind = "rule", x = inner_x, y = card_y + pad + 28,
+                    width = inner_w, height = 1,
+                },
+                {
+                    text = _("当前没有正在阅读的书籍"),
+                    x = inner_x, y = card_y + math.floor(card_h * 0.48),
+                    width = inner_w, size = 20, align = "center", box = false, color = MUTED,
+                },
             }
         else
             local position = book.total_pages > 0
                 and T(_("%1 / %2 页"), book.page, book.total_pages) or ""
             local chapter = book.chapter_count and book.chapter_count > 0
                 and T(_("第 %1 / %2 章"), book.chapter_idx or 1, book.chapter_count) or ""
+            local meta = table.concat({ position, chapter }, "  ·  ")
+            local card_h = math.floor(h * 0.78)
+            local card_y = math.floor((h - card_h) / 2)
             blocks = {
-                { kind = "panel", x = margin, y = math.floor(h * 0.055), width = w - margin * 2, height = math.floor(h * 0.78) },
-                { text = _("阅读统计"), x = margin * 2, y = math.floor(h * 0.09), width = w - margin * 4, size = 26, bold = true, box = false },
-                { kind = "rule", x = margin * 2, y = math.floor(h * 0.145), width = w - margin * 4 },
-                { text = book.title, x = margin * 2, y = math.floor(h * 0.19), width = w - margin * 4, size = 38, bold = true, box = false },
-                { text = book.authors, x = margin * 2, y = math.floor(h * 0.30), width = w - margin * 4, size = 21, box = false },
-                { text = string.format("%.0f%%", book.percent), x = margin * 2, y = math.floor(h * 0.40), width = w - margin * 4, size = 64, bold = true, box = false },
-                { kind = "bar", x = margin * 2, y = math.floor(h * 0.52), width = w - margin * 4, height = 14, value = book.percent / 100 },
-                { text = table.concat({ position, chapter }, "  "), x = margin * 2, y = math.floor(h * 0.59), width = w - margin * 4, size = 21, box = false },
-                { kind = "rule", x = margin * 2, y = math.floor(h * 0.67), width = w - margin * 4 },
-                { text = _("累计阅读") .. "\n" .. duration(book.total_seconds), x = margin * 2, y = math.floor(h * 0.71), width = w - margin * 4, size = 22, bold = true, box = false },
+                {
+                    kind = "panel", x = card_x, y = card_y, width = card_w, height = card_h,
+                    radius = radius, shadow = 2, color = Blitbuffer.COLOR_WHITE,
+                },
+                {
+                    text = _("阅读统计"), x = inner_x, y = card_y + pad,
+                    width = inner_w, size = 16, box = false, color = MUTED,
+                },
+                {
+                    kind = "rule", x = inner_x, y = card_y + pad + 26,
+                    width = inner_w, height = 1,
+                },
+                {
+                    text = book.title, x = inner_x, y = math.floor(card_y + card_h * 0.14),
+                    width = inner_w, size = 28, bold = true, box = false,
+                },
+                {
+                    text = book.authors, x = inner_x, y = math.floor(card_y + card_h * 0.28),
+                    width = inner_w, size = 16, box = false, color = MUTED,
+                },
+                {
+                    text = string.format("%.0f%%", book.percent),
+                    x = inner_x, y = math.floor(card_y + card_h * 0.40),
+                    width = inner_w, size = 52, bold = true, box = false,
+                },
+                -- DESIGN：胶囊进度条，高约 8
+                {
+                    kind = "bar", x = inner_x, y = math.floor(card_y + card_h * 0.55),
+                    width = inner_w, height = 8, value = book.percent / 100,
+                },
+                {
+                    text = meta, x = inner_x, y = math.floor(card_y + card_h * 0.62),
+                    width = inner_w, size = 15, box = false, color = DIM,
+                },
+                {
+                    kind = "rule", x = inner_x, y = math.floor(card_y + card_h * 0.72),
+                    width = inner_w, height = 1,
+                },
+                {
+                    text = _("累计阅读"), x = inner_x, y = math.floor(card_y + card_h * 0.76),
+                    width = inner_w, size = 13, box = false, color = MUTED,
+                },
+                {
+                    text = duration(book.total_seconds),
+                    x = inner_x, y = math.floor(card_y + card_h * 0.84),
+                    width = inner_w, size = 22, bold = true, box = false,
+                },
             }
         end
+
         local ok, err = Render.write(M.path(), bg, blocks)
         cb(ok, err)
     end)

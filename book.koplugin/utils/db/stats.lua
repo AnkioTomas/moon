@@ -364,6 +364,37 @@ function StatsDB.periodDays(source_id, start_ts, end_ts)
     return rows
 end
 
+--- 指定时间范围内某源的逐小时统计（本地时区 0–23）。
+---@param source_id string
+---@param start_ts number
+---@param end_ts number
+---@return table[] rows { hour, seconds, pages }（hour 为 0–23）
+function StatsDB.periodHours(source_id, start_ts, end_ts)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id then
+        return {}
+    end
+    Base.ensure()
+    local result, nrows = Base.query(
+        [[SELECT CAST(strftime('%H', start_time, 'unixepoch', 'localtime') AS INTEGER),
+                 SUM(duration), COUNT(*)
+          FROM reading_stats WHERE source_id=? AND start_time>=? AND start_time<?
+          GROUP BY 1 ORDER BY 1;]],
+        source_id, tonumber(start_ts) or 0, tonumber(end_ts) or 0
+    )
+    local rows = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            rows[#rows + 1] = {
+                hour = tonumber(result[1][i]) or 0,
+                seconds = tonumber(result[2][i]) or 0,
+                pages = tonumber(result[3][i]) or 0,
+            }
+        end
+    end
+    return rows
+end
+
 --- 标记已被 Source 确认的记录。
 ---@param ids number[]
 ---@return boolean

@@ -128,22 +128,22 @@ local function pushCabinet(blocks, frame)
         kind = "panel", x = x + w - post, y = y, width = post, height = h,
         color = Blitbuffer.COLOR_GRAY_4,
     }
-    -- 外轮廓
+    -- 外轮廓：DESIGN 克制边框，用深灰而非纯黑硬框
     blocks[#blocks + 1] = {
-        kind = "rule", x = x, y = y, width = w, height = 2,
-        color = Blitbuffer.COLOR_BLACK,
+        kind = "rule", x = x, y = y, width = w, height = 1,
+        color = Blitbuffer.COLOR_GRAY_3,
     }
     blocks[#blocks + 1] = {
-        kind = "rule", x = x, y = y + h - 2, width = w, height = 2,
-        color = Blitbuffer.COLOR_BLACK,
+        kind = "rule", x = x, y = y + h - 1, width = w, height = 1,
+        color = Blitbuffer.COLOR_GRAY_3,
     }
     blocks[#blocks + 1] = {
-        kind = "panel", x = x, y = y, width = 2, height = h,
-        color = Blitbuffer.COLOR_BLACK,
+        kind = "panel", x = x, y = y, width = 1, height = h,
+        color = Blitbuffer.COLOR_GRAY_3,
     }
     blocks[#blocks + 1] = {
-        kind = "panel", x = x + w - 2, y = y, width = 2, height = h,
-        color = Blitbuffer.COLOR_BLACK,
+        kind = "panel", x = x + w - 1, y = y, width = 1, height = h,
+        color = Blitbuffer.COLOR_GRAY_3,
     }
 end
 
@@ -236,19 +236,19 @@ local function pushBoundPlaceholder(blocks, x, y, cw, ch, tone)
     }
     blocks[#blocks + 1] = {
         kind = "rule", x = x, y = y, width = cw, height = 1,
-        color = Blitbuffer.COLOR_BLACK,
+        color = Blitbuffer.COLOR_GRAY_3,
     }
     blocks[#blocks + 1] = {
         kind = "panel", x = x, y = y, width = 1, height = ch,
-        color = Blitbuffer.COLOR_BLACK,
+        color = Blitbuffer.COLOR_GRAY_3,
     }
     blocks[#blocks + 1] = {
         kind = "panel", x = x + cw - 1, y = y, width = 1, height = ch,
-        color = Blitbuffer.COLOR_BLACK,
+        color = Blitbuffer.COLOR_GRAY_3,
     }
     blocks[#blocks + 1] = {
         kind = "rule", x = x, y = y + ch - 1, width = cw, height = 1,
-        color = Blitbuffer.COLOR_BLACK,
+        color = Blitbuffer.COLOR_GRAY_3,
     }
 end
 
@@ -280,10 +280,12 @@ local function layoutCovers(blocks, books, start_i, left, shelf_top, inner_w, ma
                 kind = "image",
                 path = book.cover,
                 x = x, y = cy, width = cw, height = ch,
-                matte = Blitbuffer.COLOR_GRAY_4,
+                matte = Blitbuffer.COLOR_GRAY_E,
                 inset = 2,
                 border = true,
-                shadow = 3,
+                border_color = Blitbuffer.COLOR_GRAY_5,
+                shadow = 2,
+                radius = math.max(4, math.floor(cw * 0.06)),
             }
         else
             local tone = SPINE_COLORS[(h % #SPINE_COLORS) + 1]
@@ -377,12 +379,12 @@ function M.fetch(cb)
         color = Blitbuffer.COLOR_GRAY_4,
     }
     blocks[#blocks + 1] = {
-        kind = "panel", x = frame.x, y = frame.y, width = 2, height = frame.h,
-        color = Blitbuffer.COLOR_BLACK,
+        kind = "panel", x = frame.x, y = frame.y, width = 1, height = frame.h,
+        color = Blitbuffer.COLOR_GRAY_3,
     }
     blocks[#blocks + 1] = {
-        kind = "panel", x = frame.x + frame.w - 2, y = frame.y, width = 2, height = frame.h,
-        color = Blitbuffer.COLOR_BLACK,
+        kind = "panel", x = frame.x + frame.w - 1, y = frame.y, width = 1, height = frame.h,
+        color = Blitbuffer.COLOR_GRAY_3,
     }
 
     local ok, err = Render.write(M.path(), nil, blocks)

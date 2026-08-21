@@ -17,6 +17,9 @@ package.preload["utils.db.base"] = function()
         end,
         query = function(sql, ...)
             calls[#calls + 1] = { sql = sql, args = { ... } }
+            if sql:find("strftime('%H'", 1, true) then
+                return { { 9 }, { 1200 }, { 3 } }, 1
+            end
             if sql:find("date(start_time", 1, true) then
                 return { { "2024-01-01" }, { 600 }, { 2 } }, 1
             end
@@ -49,3 +52,13 @@ local days = Stats.periodDays("moon", 100, 200)
 Assert.len(days, 1)
 Assert.eq(days[1].ymd, "2024-01-01")
 Assert.eq(days[1].seconds, 600)
+
+local hours = Stats.periodHours("moon", 100, 200)
+Assert.len(hours, 1)
+Assert.eq(hours[1].hour, 9)
+Assert.eq(hours[1].seconds, 1200)
+Assert.eq(hours[1].pages, 3)
+Assert.is_true(calls[#calls].sql:find("strftime('%H'", 1, true) ~= nil)
+Assert.eq(calls[#calls].args[1], "moon")
+Assert.eq(calls[#calls].args[2], 100)
+Assert.eq(calls[#calls].args[3], 200)
