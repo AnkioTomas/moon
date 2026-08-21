@@ -18,6 +18,15 @@ package.preload["lockscreen.context"] = function()
                 title = "测试书", authors = "作者", percent = 42,
                 page = 42, total_pages = 100, chapter_idx = 2, chapter_count = 8,
                 total_seconds = 3600,
+                buckets = {
+                    { key = "2024-01-01", label = "01-01", seconds = 600 },
+                    { key = "2024-01-02", label = "01-02", seconds = 1200 },
+                    { key = "2024-01-03", label = "01-03", seconds = 0 },
+                    { key = "2024-01-04", label = "01-04", seconds = 1800 },
+                    { key = "2024-01-05", label = "01-05", seconds = 900 },
+                    { key = "2024-01-06", label = "01-06", seconds = 0 },
+                    { key = "2024-01-07", label = "01-07", seconds = 3600 },
+                },
             }
         end,
         bill = function()
@@ -94,10 +103,11 @@ Assert.eq(writes[1].bg, "/bg.jpg")
 local has_progress, has_chart, has_book = false, false, false
 for _, block in ipairs(writes[1].blocks) do
     has_progress = has_progress or (block.kind == "bar" and block.value == 0.42)
+    has_chart = has_chart or block.kind == "vbar"
 end
 for _, block in ipairs(writes[2].blocks) do
-    has_chart = has_chart or block.kind == "vbar"
     has_book = has_book or (type(block.text) == "string" and block.text:find("测试书", 1, true) ~= nil)
+    has_chart = has_chart or block.kind == "vbar"
 end
 Assert.is_true(has_progress)
 Assert.is_true(has_chart)
@@ -105,18 +115,18 @@ Assert.is_true(has_book)
 
 local shelf = writes[3]
 Assert.eq(shelf.path, "/lock/bookshelf.png")
-local spines, images, boards = 0, 0, 0
+local images, spines, boards = 0, 0, 0
 for _, block in ipairs(shelf.blocks) do
-    if block.kind == "spine" then spines = spines + 1 end
     if block.kind == "image" then images = images + 1 end
-    -- 层板本体偏厚，约 10～20px
+    if block.kind == "spine" then spines = spines + 1 end
+    -- 旧书柜层板：厚 panel 8～24px；海报墙不应再有
     if block.kind == "panel" and block.height and block.height >= 8 and block.height <= 24
-        and block.color then
+        and block.color and block.width and block.width > 100 then
         boards = boards + 1
     end
 end
-Assert.is_true(spines >= 1)
 Assert.is_true(images >= 1)
-Assert.is_true(boards >= 4)
--- 不再叠壁纸
+Assert.eq(spines, 0)
+Assert.eq(boards, 0)
+-- 不叠壁纸
 Assert.is_nil(shelf.bg)
