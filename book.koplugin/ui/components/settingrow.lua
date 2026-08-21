@@ -24,7 +24,6 @@
 
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
@@ -37,6 +36,7 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
 local Icon = require("ui.components.icon")
+local Surface = require("ui.components.surface")
 
 local SettingRow = {}
 
@@ -151,18 +151,14 @@ function SettingRow.build(width, opts)
     }
 
     local tap = tappable(width, row_h, opts.callback)
-    tap[1] = FrameContainer:new{
-        bordersize = 0,
+    tap[1] = Surface.card(inner, {
+        width = width,
+        height = row_h,
         padding = 0,
-        padding_left = pad_x,
-        padding_right = pad_x,
-        padding_top = pad_y,
-        padding_bottom = pad_y,
-        margin = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = width, h = row_h },
-        inner,
-    }
+        radius = UI.cardRadius(),
+        background = UI.surface(),
+        shadow = false,
+    })
     return tap
 end
 
