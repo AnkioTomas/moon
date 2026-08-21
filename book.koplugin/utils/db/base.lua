@@ -1,8 +1,8 @@
 --[[--
-插件 SQLite 连接与通用原语（$DATA/.moon/book.sqlite3）
+插件 SQLite 连接与通用原语（$DATA/.moon/book.sqlite3）。
 
-表由 open → ensureSchema 一次 CREATE IF NOT EXISTS。
-不做数据迁移：PRAGMA user_version 与 SCHEMA_VERSION 不一致时清库重建。
+表由 open → ensureSchema 创建并原地补列。数据库只允许向前迁移，
+绝不因版本变化删除用户的书架、进度、笔记或统计。
 
 使用 WAL 模式 + busy_timeout=5000，主/子进程均可安全访问。
 
@@ -142,30 +142,22 @@ function Base.requireSourceId(source_id)
     return source_id
 end
 
---- schema 版本：不一致即清库重建（不做数据迁移）
-local SCHEMA_VERSION = 1
+local SCHEMA_VERSION = 2
 
---- user_version 不匹配时 DROP 全部旧表
----@return nil
-local function wipeIfStale()
-    local v = tonumber((Base.rowexec("PRAGMA user_version;"))) or 0
-    if v == SCHEMA_VERSION then
-        return
+---@param table_name string
+---@param column_name string
+---@return boolean
+local function hasColumn(table_name, column_name)
+    local columns, nrows = Base.query("PRAGMA table_info(" .. table_name .. ");")
+    if not columns or not columns[2] then
+        return false
     end
-    Base.exec([[
-DROP TABLE IF EXISTS books;
-DROP TABLE IF EXISTS opens;
-DROP TABLE IF EXISTS chapters;
-DROP TABLE IF EXISTS http;
-DROP TABLE IF EXISTS pending_progress;
-DROP TABLE IF EXISTS reading_stats;
-DROP TABLE IF EXISTS notes;
-DROP TABLE IF EXISTS toc;
-DROP TABLE IF EXISTS ai_analysis;
-DROP TABLE IF EXISTS xray_entities;
-DROP TABLE IF EXISTS xray_timeline;
-DROP TABLE IF EXISTS xray_meta;
-]])
+    for i = 1, nrows do
+        if columns[2][i] == column_name then
+            return true
+        end
+    end
+    return false
 end
 
 --- 首次打开时 CREATE IF NOT EXISTS 全表
@@ -187,10 +179,14 @@ CREATE TABLE IF NOT EXISTS books (
   path        TEXT,
   last_open   INTEGER NOT NULL DEFAULT 0,
   last_chapter_idx INTEGER,
+  in_library INTEGER NOT NULL DEFAULT 1,
+  metadata_dirty INTEGER NOT NULL DEFAULT 0,
+  metadata_updated_at INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (source_id, stable_id)
 );
 CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(source_id, md5);
 CREATE INDEX IF NOT EXISTS idx_books_path ON books(path);
+CREATE INDEX IF NOT EXISTS idx_books_library ON books(source_id, in_library, stable_id);
 
 CREATE TABLE IF NOT EXISTS chapters (
   path        TEXT PRIMARY KEY,
@@ -296,30 +292,21 @@ CREATE TABLE IF NOT EXISTS xray_meta (
   PRIMARY KEY (source_id, stable_id)
 );
 ]])
-    local columns, nrows = Base.query("PRAGMA table_info(pending_progress);")
-    local has_sync_status = false
-    if columns and columns[2] then
-        for i = 1, nrows do
-            if columns[2][i] == "sync_status" then
-                has_sync_status = true
-                break
-            end
-        end
+    if not hasColumn("books", "in_library") then
+        Base.exec("ALTER TABLE books ADD COLUMN in_library INTEGER NOT NULL DEFAULT 1;")
     end
-    if not has_sync_status then
+    if not hasColumn("books", "metadata_dirty") then
+        Base.exec("ALTER TABLE books ADD COLUMN metadata_dirty INTEGER NOT NULL DEFAULT 0;")
+    end
+    if not hasColumn("books", "metadata_updated_at") then
+        Base.exec("ALTER TABLE books ADD COLUMN metadata_updated_at INTEGER NOT NULL DEFAULT 0;")
+    end
+    Base.exec([[CREATE INDEX IF NOT EXISTS idx_books_library
+        ON books(source_id, in_library, stable_id);]])
+    if not hasColumn("pending_progress", "sync_status") then
         Base.exec("ALTER TABLE pending_progress ADD COLUMN sync_status INTEGER NOT NULL DEFAULT 0;")
     end
-    local stats_columns, stats_nrows = Base.query("PRAGMA table_info(reading_stats);")
-    local stats_have_sync_status = false
-    if stats_columns and stats_columns[2] then
-        for i = 1, stats_nrows do
-            if stats_columns[2][i] == "sync_status" then
-                stats_have_sync_status = true
-                break
-            end
-        end
-    end
-    if not stats_have_sync_status then
+    if not hasColumn("reading_stats", "sync_status") then
         Base.exec("ALTER TABLE reading_stats ADD COLUMN sync_status INTEGER NOT NULL DEFAULT 0;")
     end
     Base.exec([[DELETE FROM reading_stats WHERE id NOT IN (
@@ -328,17 +315,7 @@ CREATE TABLE IF NOT EXISTS xray_meta (
     );]])
     Base.exec([[CREATE UNIQUE INDEX IF NOT EXISTS idx_reading_stats_identity
         ON reading_stats(source_id, stable_id, page, start_time, duration, total_pages);]])
-    local note_columns, note_nrows = Base.query("PRAGMA table_info(notes);")
-    local notes_have_sync_status = false
-    if note_columns and note_columns[2] then
-        for i = 1, note_nrows do
-            if note_columns[2][i] == "sync_status" then
-                notes_have_sync_status = true
-                break
-            end
-        end
-    end
-    if not notes_have_sync_status then
+    if not hasColumn("notes", "sync_status") then
         Base.exec("ALTER TABLE notes ADD COLUMN sync_status INTEGER NOT NULL DEFAULT 0;")
     end
     Base.exec("PRAGMA user_version=" .. SCHEMA_VERSION .. ";")
@@ -370,7 +347,13 @@ function Base.open()
         conn:exec("PRAGMA journal_mode=WAL;")
         conn:exec("PRAGMA busy_timeout=5000;")
     end)
-    wipeIfStale()
+    local version = tonumber((Base.rowexec("PRAGMA user_version;"))) or 0
+    if version > SCHEMA_VERSION then
+        local version_err = "database schema is newer than this plugin: " .. tostring(version)
+        logger.warn("book.db open failed", version_err)
+        Base.close()
+        return nil, version_err
+    end
     ensureSchema()
     return conn
 end
