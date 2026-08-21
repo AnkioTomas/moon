@@ -43,7 +43,7 @@ function BookPlugin:init()
         logger.err("book turbo init failed:", err_turbo)
     end
     Host.attach(self)
-    require("translate.edge").install()
+    require("translate.init").install()
     require("ui.desktop.panel.native").install(self.ui)
     require("lockscreen.init").bootstrap()
     require("remote.init").bootstrap()
