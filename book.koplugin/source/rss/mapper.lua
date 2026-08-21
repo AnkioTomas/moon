@@ -4,7 +4,6 @@ RSS feed/item → Book / BookChapter / ChapterContentPayload。
 @module koplugin.book.source.rss.mapper
 --]]
 
-local BookRef = require("types.book").BookRef
 local BookListResult = require("types.book_list")
 local Parser = require("source.rss.parser")
 
@@ -30,7 +29,7 @@ function Mapper.book(feed, parsed)
         title = parsed.title
     end
     return {
-        ref = BookRef.new(SOURCE_ID, url),
+        source_id = SOURCE_ID, stable_id = url,
         title = title,
         authors = parsed and parsed.title or nil,
         intro = parsed and parsed.intro or nil,
@@ -56,13 +55,14 @@ function Mapper.library(feeds, parsed_by_url)
     return BookListResult.new(books)
 end
 
----@param ref BookRef
+---@param identity BookIdentity
 ---@param feed table|nil
 ---@param parsed table
 ---@return BookDetail
-function Mapper.detail(ref, feed, parsed)
-    local book = Mapper.book(feed or { url = ref.stable_id }, parsed)
-    book.ref = ref
+function Mapper.detail(identity, feed, parsed)
+    local book = Mapper.book(feed or { url = identity.stable_id }, parsed)
+    book.source_id = identity.source_id
+    book.stable_id = identity.stable_id
     return book
 end
 

@@ -4,7 +4,6 @@ WebDAV entry → Book
 @module koplugin.book.source.webdav.mapper
 --]]
 
-local BookRef = require("types.book").BookRef
 local BookListResult = require("types.book_list")
 local Text = require("utils.text")
 
@@ -53,11 +52,16 @@ function Mapper.list(entries, base_path)
             local path = normalizePath(e.path or e.href or e.name)
             if path ~= "" then
                 local title = e.name or path:match("([^/]+)$") or path
+                local parent = path:match("^(.*)/[^/]+$") or ""
+                local category, series = parent:match("^([^/]+)/?([^/]*)")
+                if series == "" then series = nil end
                 books[#books + 1] = {
-                    ref = BookRef.new(SOURCE_ID, path),
+                    source_id = SOURCE_ID, stable_id = path,
                     title = title,
                     authors = nil,
                     percent = 0,
+                    category = category,
+                    series = series,
                 }
             end
         end
@@ -65,13 +69,13 @@ function Mapper.list(entries, base_path)
     return BookListResult.new(books)
 end
 
---- 由 BookRef 构造最小详情。
----@param ref BookRef
+--- 由 BookIdentity 构造最小详情。
+---@param identity BookIdentity
 ---@return BookDetail
-function Mapper.detailFromRef(ref)
-    local title = ref.stable_id:match("([^/]+)$") or ref.stable_id
+function Mapper.detailFromIdentity(identity)
+    local title = identity.stable_id:match("([^/]+)$") or identity.stable_id
     return {
-        ref = ref,
+        source_id = identity.source_id, stable_id = identity.stable_id,
         title = title,
         percent = 0,
     }

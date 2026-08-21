@@ -4,7 +4,6 @@
 @module koplugin.book.source.wechat.mapper
 --]]
 
-local BookRef = require("types.book").BookRef
 local Book = require("types.book").Book
 local ProgressPosition = require("types.book_progress")
 local BookListResult = require("types.book_list")
@@ -78,7 +77,7 @@ function Mapper.book(row)
     local finished = userFinished(book)
     local cover = type(book.cover) == "string" and book.cover or nil
     local out = {
-        ref = BookRef.new(SOURCE_ID, id),
+        source_id = SOURCE_ID, stable_id = id,
         title = book.title or book.bookName or book.name,
         authors = book.authors or book.author,
         percent = Book.clampPercent(
@@ -116,7 +115,7 @@ function Mapper.albumBook(album)
     local cover = type(info.cover) == "string" and info.cover or nil
     local finished = info.finish == 1 or info.finish == true or info.finishStatus == "已完结"
     return {
-        ref = BookRef.new(SOURCE_ID, tostring(id)),
+        source_id = SOURCE_ID, stable_id = tostring(id),
         title = info.name or info.title,
         authors = info.authorName or info.author,
         percent = Book.clampPercent(0, finished),
@@ -179,9 +178,9 @@ function Mapper.shelfList(shelf, on_cover)
     for _, row in ipairs(list) do
         local b, cover = Mapper.book(row)
         if b then
-            Mapper.applyProgress(b, prog_map[b.ref.stable_id])
+            Mapper.applyProgress(b, prog_map[b.stable_id])
             if cover and on_cover then
-                on_cover(b.ref.stable_id, cover)
+                on_cover(b.stable_id, cover)
             end
             books[#books + 1] = b
         end
@@ -190,7 +189,7 @@ function Mapper.shelfList(shelf, on_cover)
         local b, cover = Mapper.albumBook(album)
         if b then
             if cover and on_cover then
-                on_cover(b.ref.stable_id, cover)
+                on_cover(b.stable_id, cover)
             end
             books[#books + 1] = b
         end
@@ -209,9 +208,9 @@ function Mapper.recentList(data, shelf, on_cover)
     for _, item in ipairs(data.items or {}) do
         local b, cover = Mapper.book(item)
         if b then
-            Mapper.applyProgress(b, prog_map[b.ref.stable_id])
+            Mapper.applyProgress(b, prog_map[b.stable_id])
             if cover and on_cover then
-                on_cover(b.ref.stable_id, cover)
+                on_cover(b.stable_id, cover)
             end
             books[#books + 1] = b
         end
@@ -250,7 +249,7 @@ function Mapper.searchList(data, on_cover)
         local b, cover = Mapper.book(type(row) == "table" and (row.book or row) or row)
         if b then
             if cover and on_cover then
-                on_cover(b.ref.stable_id, cover)
+                on_cover(b.stable_id, cover)
             end
             books[#books + 1] = b
         end

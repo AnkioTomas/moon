@@ -35,10 +35,10 @@ end
 
 function Source:capabilities()
     return {
-        search = false,
+        search = true,
         refresh = true,
         scrape = false,
-        insight = false,
+        insight = true,
         store = false,
     }
 end
@@ -81,11 +81,11 @@ end
 
 --- RSS 目录会在头部插入新文章；章节文件却按 N.html 缓存。
 --- 目录身份序列变化时清掉该 feed 的章节文件，避免 N 指向旧文章。
-local function reconcileChapterCache(ref, chapters)
+local function reconcileChapterCache(identity, chapters)
     local Paths = require("utils.paths")
     local lfs = require("libs/libkoreader-lfs")
-    Paths.ensureBookWork(ref.stable_id, ref.source_id)
-    local dir = Paths.bookWorkDir(ref.stable_id, ref.source_id)
+    Paths.ensureBookWork(identity.stable_id, identity.source_id)
+    local dir = Paths.bookWorkDir(identity.stable_id, identity.source_id)
     local fingerprint_path = dir .. "/rss-catalog"
     local ids = {}
     for _, chapter in ipairs(chapters) do
@@ -121,31 +121,41 @@ local function reconcileChapterCache(ref, chapters)
     end
 end
 
-function Source:listLibraryAsync(opts, cb)
-    opts = opts or {}
-    if opts.force then self._client:clear() end
+---@param opts { force?: boolean }|nil
+---@param cb fun(result: SyncResult|nil, err: any)
+---@return { cancel: fun() }
+function Source:syncBooksAsync(opts, cb)
+    if opts and opts.force then self._client:clear() end
     local feeds = configuredFeeds(self.cfg)
     local parsed = {}
     for _, feed in ipairs(feeds) do
         parsed[feed.url] = self._client:peek(feed.url)
     end
-    cb(Mapper.library(feeds, parsed))
-    return { cancel = function() end }
+    local cancelled, job = false, nil
+    require("ui/uimanager"):nextTick(function()
+        if cancelled then return end
+        local list = Mapper.library(feeds, parsed)
+        job = require("book.store").reconcileAsync(self.id, list.data or {}, nil, cb)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job:cancel() end
+    end }
 end
 
-function Source:getDetailAsync(ref, cb)
-    local feed = findFeed(self, ref.stable_id)
+function Source:getDetailAsync(identity, cb)
+    local feed = findFeed(self, identity.stable_id)
     if not feed then
         cb(nil, _("订阅不存在"))
         return { cancel = function() end }
     end
     return self._client:fetchAsync(feed.url, nil, function(data, err)
-        if data then cb(Mapper.detail(ref, feed, data)) else cb(nil, err) end
+        if data then cb(Mapper.detail(identity, feed, data)) else cb(nil, err) end
     end)
 end
 
-function Source:getTocAsync(ref, cb)
-    local feed = findFeed(self, ref.stable_id)
+local function getTocAsync(self, identity, cb)
+    local feed = findFeed(self, identity.stable_id)
     if not feed then
         cb(nil, _("订阅不存在"))
         return { cancel = function() end }
@@ -156,14 +166,14 @@ function Source:getTocAsync(ref, cb)
         if #chapters == 0 then
             cb(nil, _("RSS 暂无文章"))
         else
-            reconcileChapterCache(ref, chapters)
+            reconcileChapterCache(identity, chapters)
             cb(chapters)
         end
     end)
 end
 
-function Source:fetchChapterContentAsync(ref, chapter, cb)
-    local feed = findFeed(self, ref.stable_id)
+local function fetchChapterContentAsync(self, identity, chapter, cb)
+    local feed = findFeed(self, identity.stable_id)
     if not feed then
         cb(nil, _("订阅不存在"))
         return { cancel = function() end }
@@ -172,6 +182,15 @@ function Source:fetchChapterContentAsync(ref, chapter, cb)
         if not data then cb(nil, err); return end
         cb(Mapper.chapterContent(data, chapter))
     end)
+end
+
+function Source:openBookAsync(identity, opts, cb)
+    return require("source.chapter").openWithUi(self, identity, identity.book, opts, {
+        loadToc = function(r, done) return getTocAsync(self, r, done) end,
+        fetchContent = function(r, chapter, done)
+            return fetchChapterContentAsync(self, r, chapter, done)
+        end,
+    }, cb)
 end
 
 return RSS

@@ -4,7 +4,6 @@ Moon wire → 领域对象
 @module koplugin.book.source.moon.mapper
 --]]
 
-local BookRef = require("types.book").BookRef
 local Book = require("types.book").Book
 local ProgressPosition = require("types.book_progress")
 local BookListResult = require("types.book_list")
@@ -60,7 +59,7 @@ function Mapper.book(row)
     end
     local finished = userFinished(row)
     return {
-        ref = BookRef.new(SOURCE_ID, sid),
+        source_id = SOURCE_ID, stable_id = sid,
         title = row.title or row.bookName or row.name,
         authors = row.authors or row.author,
         percent = Book.clampPercent(
