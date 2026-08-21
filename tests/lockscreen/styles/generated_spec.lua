@@ -10,6 +10,14 @@ local writes = {}
 package.preload["lockscreen.background"] = function()
     return { ensure = function(cb) cb("/bg.jpg") end }
 end
+package.preload["utils.settings"] = function()
+    return {
+        get = function()
+            return { lock_screen_reading_mode = "bookmark" }
+        end,
+        save = function() end,
+    }
+end
 -- bookshelf 不再走 Background；其余样式仍用 stub
 package.preload["lockscreen.context"] = function()
     return {
@@ -17,7 +25,9 @@ package.preload["lockscreen.context"] = function()
             return {
                 title = "测试书", authors = "作者", percent = 42,
                 page = 42, total_pages = 100, chapter_idx = 2, chapter_count = 8,
-                total_seconds = 3600,
+                chapter_title = "第二章", remaining_pages = 58, remaining_percent = 58,
+                total_seconds = 3600, cover = "/cover.png",
+                highlights = { "这是一句高亮" },
                 buckets = {
                     { key = "2024-01-01", label = "01-01", seconds = 600 },
                     { key = "2024-01-02", label = "01-02", seconds = 1200 },
@@ -130,3 +140,25 @@ Assert.eq(spines, 0)
 Assert.eq(boards, 0)
 -- 不叠壁纸
 Assert.is_nil(shelf.bg)
+
+-- 三种阅读布局都能出图
+do
+    local mode_holder = { value = "bookmark" }
+    package.preload["utils.settings"] = function()
+        return {
+            get = function() return { lock_screen_reading_mode = mode_holder.value } end,
+            save = function() end,
+        }
+    end
+    for _, mode in ipairs({ "simple", "bookmark", "cover" }) do
+        mode_holder.value = mode
+        package.loaded["utils.settings"] = nil
+        package.loaded["lockscreen.styles.reading"] = nil
+        local R = require("lockscreen.styles.reading")
+        local ok
+        R.fetch(function(success) ok = success end)
+        Assert.is_true(ok)
+        local last = writes[#writes]
+        Assert.is_true(#last.blocks >= 3)
+    end
+end

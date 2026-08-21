@@ -1,5 +1,5 @@
 --[[--
-锁屏背景：固定 custom.png 优先，否则按日缓存必应壁纸，最后由渲染器使用纯色。
+锁屏背景：custom.png / 必应日图 / 最近在读书籍封面；否则由渲染器铺纯色。
 
 @module koplugin.book.lockscreen.background
 --]]
@@ -28,6 +28,18 @@ function M.bingPath()
     return Paths.screensaverDir() .. "/bing.jpg"
 end
 
+--- 最近在读书籍封面（本地缓存）；没有则 nil。
+---@return string|nil
+function M.coverPath()
+    local ok, Context = pcall(require, "lockscreen.context")
+    if not ok or not Context or not Context.currentBook then
+        return nil
+    end
+    local book = Context.currentBook()
+    local path = book and book.cover
+    return fileOk(path) and path or nil
+end
+
 --- 返回当前可用背景，不触网。
 ---@return string|nil
 function M.current()
@@ -35,15 +47,18 @@ function M.current()
     if mode == "custom" then
         return fileOk(M.customPath()) and M.customPath() or nil
     end
+    if mode == "cover" then
+        return M.coverPath()
+    end
     if mode == "bing" and fileOk(M.bingPath()) then
         return M.bingPath()
     end
     return nil
 end
 
---- 确保背景可用。自定义图永不触网；必应按日更新，失败时保留旧图。
+--- 确保背景可用。自定义 / 封面永不触网；必应按日更新，失败时保留旧图。
 ---@param cb fun(path: string|nil)
----@return table|nil 可取消的下载任务；本地缓存命中时返回 nil
+---@return table|nil 可取消的下载任务；本地命中时返回 nil
 function M.ensure(cb)
     local cancelled = false
     local c = MoonSettings.get()
@@ -54,6 +69,10 @@ function M.ensure(cb)
     end
     if mode == "custom" then
         cb(fileOk(M.customPath()) and M.customPath() or nil)
+        return nil
+    end
+    if mode == "cover" then
+        cb(M.coverPath())
         return nil
     end
     local today = os.date("%Y-%m-%d")
