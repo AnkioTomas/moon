@@ -8,6 +8,52 @@ local Text = require("utils.text")
 local _ = require("gettext")
 local Setting = {}
 
+local function edit(plugin, key, title, hint, password, normalize)
+    local UIManager = require("ui/uimanager")
+    local InputDialog = require("ui/widget/inputdialog")
+    local cfg = require("utils.settings").getSource("zlib")
+    local dialog
+    dialog = InputDialog:new{
+        title = title, input = tostring(cfg[key] or ""), input_hint = hint,
+        text_type = password and "password" or nil,
+        buttons = {{
+            { text = _("取消"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("保存"), callback = function()
+                cfg[key] = normalize(dialog:getInputText())
+                if key == "email" or key == "password" then
+                    cfg.user_id, cfg.user_key = nil, nil
+                end
+                require("utils.settings").saveSource("zlib", cfg)
+                UIManager:close(dialog)
+                if plugin and plugin.desktop and not plugin.desktop._closed then plugin.desktop:rebuild() end
+            end },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+local function field(plugin, key, title, hint, password, normalize, icon)
+    return function(iw)
+        local value = require("utils.settings").getSource("zlib")[key] or ""
+        return require("ui.components.settingrow").build(iw, {
+            kind = "nav", icon = icon or "edit", title = title,
+            status = value ~= "" and (password and "******" or value) or _("未设置"),
+            status_on = value ~= "", callback = function()
+                edit(plugin, key, title, hint, password, normalize)
+            end,
+        })
+    end
+end
+
+function Setting.rows(plugin)
+    return {
+        field(plugin, "email", _("邮箱"), _("输入邮箱"), false, Text.trim, "mail"),
+        field(plugin, "password", _("密码"), _("输入密码"), true, function(value) return value or "" end, "key"),
+        field(plugin, "base_url", _("镜像地址"), _("留空自动选择"), false, Text.trim, "dns"),
+    }
+end
+
 --- 返回设置入口的状态文案与已登录标记。
 ---@return string
 ---@return boolean

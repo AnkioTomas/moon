@@ -1,11 +1,9 @@
 --[[--
-配置存储（通用 + 各源文件）
+配置存储。
 
-  .moon/settings/common.lua     跨源通用
-  .moon/settings/<sourceId>.lua 各源专用
-
-本模块只负责读写磁盘。每个文件进程内只打开一次，之后读走内存、写走 flush。
-打开文件只调 Paths.ensureSettings，禁止 ensureLayout（循环依赖）。
+common.lua 只保存跨功能的全局状态；功能配置分别保存到
+settings/<section>.lua。读取旧版 common.lua 时自动迁移，保留旧的
+get()/save() 外观，避免调用方因为存储拆分而改变行为。
 
 @module koplugin.book.utils.settings
 --]]
@@ -13,162 +11,188 @@
 local LuaSettings = require("luasettings")
 local Paths = require("utils.paths")
 
----@class MoonCommonSettings
----@field active_source SourceId 当前数据源 id
----@field enabled_sources table<SourceId, boolean>|nil 启用源集合；nil = 全部启用（兼容旧配置）
----@field ui_scale number UI 缩放百分比（默认 130）
----@field ui_font string|nil 界面字体 id：空=系统默认；本地为 basename；微信为 weread id
----@field ui_font_name string|nil 界面字体展示名
----@field grid_max_cols number 网格最大列数（2～6，默认 4）
----@field lock_screen string|nil 锁屏显示：默认 myrl；ko=跟随系统；其余为已注册样式 id
----@field lock_screen_day string|nil 当前样式上次成功下载日 YYYY-MM-DD
----@field lock_screen_bill_period string 阅读账单周期：today/7d/30d/month
----@field lock_screen_quote_cache string|nil 最近成功的一言
----@field lock_screen_quote_source_cache string|nil 最近成功一言的作者与出处
----@field lock_screen_quote_index number|nil 高亮轮换位置
----@field lock_screen_bing_day string|nil 必应背景下载日
----@field lock_screen_background string 背景：custom/bing/none
----@field lock_screen_quote_mode string 一言样式内容：highlight/hitokoto
----@field lock_screen_quote_position string 一言位置
----@field lock_screen_quote_wide boolean 一言是否宽屏
----@field remote_port number 远程传书端口（默认 9528）
----@field remote_autostart boolean 远程传书开机自启
----@field pinyin_enabled boolean 中文键盘入口（开启即把 zh_CN 加入 KOReader 键盘布局列表，默认关闭）
----@field pinyin_dict_built_at string|nil 已安装词库的 manifest.built_at，nil=未下载
----@field pinyin_dict_sha256 string|nil 已安装词库的原始文件 SHA-256，用于完整性记录
----@field quick_panel_actions string[]|nil 快捷面板启用的可配置系统动作 id（按显示顺序）
----@field quick_panel_icons table<string, string>|nil 快捷面板动作的 Material Icons 覆盖值
----@field book_reader_show_top_time boolean 阅读页顶部时间
----@field book_reader_show_bottom_progress boolean 阅读页底部进度
----@field ai_endpoint string OpenAI 兼容接口根地址或 chat/completions 地址
----@field ai_api_key string API 密钥
----@field ai_model string 模型名
-
 local M = {}
 
---- 通用配置默认值
----@return MoonCommonSettings
-local function commonDefaults()
-    return {
+local DEFAULTS = {
+    common = {
         active_source = "moon",
-        ui_scale = 130,
-        ui_font = "",
-        ui_font_name = "",
-        grid_max_cols = 4,
-        lock_screen = "myrl",
-        lock_screen_bill_period = "7d",
-        lock_screen_background = "bing",
-        lock_screen_quote_mode = "highlight",
-        lock_screen_quote_position = "center-center",
-        lock_screen_quote_wide = true,
-        remote_port = 9528,
-        remote_autostart = false,
-        pinyin_enabled = false,
-        quick_panel_actions = { "native_menu" },
-        quick_panel_icons = {},
-        book_reader_show_top_time = true,
-        book_reader_show_bottom_progress = true,
-        ai_endpoint = "",
-        ai_api_key = "",
-        ai_model = "",
-    }
+    },
+    display = {
+        ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,
+    },
+    lockscreen = {
+        lock_screen = "myrl", lock_screen_bill_period = "7d",
+        lock_screen_background = "bing", lock_screen_quote_mode = "highlight",
+        lock_screen_quote_position = "center-center", lock_screen_quote_wide = true,
+    },
+    remote = { remote_port = 9528, remote_autostart = false },
+    pinyin = { pinyin_enabled = false },
+    quickpanel = { quick_panel_actions = { "native_menu" }, quick_panel_icons = {} },
+    reader = { book_reader_show_top_time = true, book_reader_show_bottom_progress = true },
+    ai = { ai_endpoint = "", ai_api_key = "", ai_model = "" },
+}
+
+local SECTIONS = { "common", "display", "lockscreen", "remote", "pinyin", "quickpanel", "reader", "ai" }
+local KEY_SECTION = {}
+for section, defaults in pairs(DEFAULTS) do
+    for key in pairs(defaults) do KEY_SECTION[key] = section end
+end
+-- These are runtime/cache values, not user-facing defaults, but belong beside
+-- the lockscreen settings rather than in common.lua.
+for _, key in ipairs({
+    "lock_screen_day", "lock_screen_bill_period", "lock_screen_quote_cache",
+    "lock_screen_quote_source_cache", "lock_screen_quote_index", "lock_screen_bing_day",
+}) do
+    KEY_SECTION[key] = "lockscreen"
+end
+for _, key in ipairs({ "pinyin_dict_built_at", "pinyin_dict_sha256", "pinyin_dict_source" }) do
+    KEY_SECTION[key] = "pinyin"
+end
+KEY_SECTION.enabled_sources = "common"
+
+local _files = {}
+local _merged
+local _initialized = false
+
+local function copyValue(value)
+    if type(value) ~= "table" then return value end
+    local out = {}
+    for key, nested in pairs(value) do out[key] = nested end
+    return out
 end
 
---- 补齐缺失默认键；有写入则返回 true
----@param data table
----@param defaults table
----@return boolean
 local function fillDefaults(data, defaults)
     local dirty = false
-    for k, v in pairs(defaults) do
-        if data[k] == nil then
-            data[k] = v
+    for key, value in pairs(defaults or {}) do
+        if data[key] == nil then
+            data[key] = copyValue(value)
             dirty = true
         end
     end
     return dirty
 end
 
---- 已打开的配置文件：path → LuaSettings。
---- LuaSettings:open 每次都 dofile 重新解析文件，而 UI.sz/UI.face 每次调用都要读
---- ui_scale，一个页面就是几百次。实例必须常驻，不能每次读配置都重开文件。
-local _files = {}
-
---- 打开配置文件（进程内只开一次；首次补齐默认键）
----@param path string
----@param defaults table|nil
----@return table LuaSettings 实例
-local function openFile(path, defaults)
+local function openFile(path)
     local ls = _files[path]
-    if ls then
-        return ls
-    end
+    if ls then return ls end
     Paths.ensureSettings()
     ls = LuaSettings:open(path)
     _files[path] = ls
-    if defaults and fillDefaults(ls.data, defaults) then
-        ls:flush()
-    end
     return ls
 end
 
---- 读通用配置（data 表）
----@return MoonCommonSettings
-function M.get()
-    return openFile(Paths.commonPath(), commonDefaults()).data
+local function sectionFile(section)
+    return openFile(section == "common" and Paths.commonPath() or Paths.sectionPath(section))
 end
 
---- 写通用配置
----@param s MoonCommonSettings|table|nil
----@return nil
-function M.save(s)
-    local ls = openFile(Paths.commonPath(), commonDefaults())
-    if type(s) == "table" and s ~= ls.data then
-        ls:reset(s)
+local function initialize()
+    if _initialized then return end
+    _initialized = true
+
+    local common = sectionFile("common")
+    local old = {}
+    for key, value in pairs(common.data) do old[key] = value end
+    local common_dirty = false
+
+    for _, section in ipairs(SECTIONS) do
+        local file = sectionFile(section)
+        local dirty = false
+        for key, value in pairs(old) do
+            if KEY_SECTION[key] == section and file.data[key] == nil then
+                file.data[key] = value
+                common.data[key] = nil
+                dirty, common_dirty = true, true
+            end
+        end
+        if fillDefaults(file.data, DEFAULTS[section]) then dirty = true end
+        if dirty then file:flush() end
     end
-    ls:flush()
+    if common.data.enabled_sources == nil and old.enabled_sources ~= nil then
+        common.data.enabled_sources = old.enabled_sources
+        common_dirty = true
+    end
+    if fillDefaults(common.data, DEFAULTS.common) then common_dirty = true end
+    if common_dirty then common:flush() end
 end
 
---- 读源配置表
----@param id SourceId|nil
+local function buildMerged()
+    local merged = {}
+    for _, section in ipairs(SECTIONS) do
+        for key, value in pairs(sectionFile(section).data) do merged[key] = value end
+    end
+    return merged
+end
+
+local function refreshMerged()
+    local fresh = buildMerged()
+    if not _merged then
+        _merged = fresh
+        return
+    end
+    for key in pairs(_merged) do _merged[key] = nil end
+    for key, value in pairs(fresh) do _merged[key] = value end
+end
+
+--- Return all functional settings, or one section when named.
+---@param section string|nil
 ---@return table
+function M.get(section)
+    initialize()
+    if section then return sectionFile(section).data end
+    if not _merged then _merged = buildMerged() end
+    return _merged
+end
+
+local function saveMerged(values)
+    for key, section in pairs(KEY_SECTION) do
+        local file = sectionFile(section)
+        -- Synchronize known keys, including nil deletions. This matters for
+        -- callers that clear a value and then call save().
+        file.data[key] = values[key]
+    end
+    for _, section in ipairs(SECTIONS) do sectionFile(section):flush() end
+end
+
+--- Persist all functional settings. The optional table keeps compatibility with
+--- callers that pass the result of get().
+---@param values table|nil
+function M.save(values)
+    initialize()
+    saveMerged(values or _merged or buildMerged())
+    refreshMerged()
+end
+
+--- Persist one functional section without merging unrelated settings.
+---@param section string
+---@param values table|nil
+function M.saveSection(section, values)
+    initialize()
+    local file = sectionFile(section)
+    if type(values) == "table" and values ~= file.data then file:reset(values) end
+    file:flush()
+    refreshMerged()
+end
+
 function M.getSource(id)
+    initialize()
     return openFile(Paths.sourcePath(id or M.activeSourceId())).data
 end
 
---- 写源配置表
----@param id SourceId|nil
----@param s table|nil
----@return nil
-function M.saveSource(id, s)
-    id = id or M.activeSourceId()
-    local ls = openFile(Paths.sourcePath(id))
-    if type(s) == "table" and s ~= ls.data then
-        ls:reset(s)
-    end
-    ls:flush()
+function M.saveSource(id, values)
+    initialize()
+    local file = openFile(Paths.sourcePath(id or M.activeSourceId()))
+    if type(values) == "table" and values ~= file.data then file:reset(values) end
+    file:flush()
 end
 
---- 当前活跃数据源 id
----@return SourceId
 function M.activeSourceId()
-    local c = M.get()
-    return c.active_source or "moon"
+    return M.get("common").active_source or "moon"
 end
 
---- 确保 G_reader_settings.device_id 存在（缺失则生成并持久化）
----@return string
 function M.ensureDeviceId()
     local id = G_reader_settings:readSetting("device_id")
-    if type(id) == "string" and id ~= "" then
-        return id
-    end
-    -- KOReader 通常已有 device_id；缺失时本地生成并持久化
-    id = string.format(
-        "book-%08x%08x",
-        math.floor(math.random() * 0xffffffff),
-        os.time() % 0xffffffff
-    )
+    if type(id) == "string" and id ~= "" then return id end
+    id = string.format("book-%08x%08x", math.floor(math.random() * 0xffffffff), os.time() % 0xffffffff)
     G_reader_settings:saveSetting("device_id", id)
     return id
 end
