@@ -18,6 +18,7 @@ local Myrl = require("lockscreen.styles.myrl")
 local Reading = require("lockscreen.styles.reading")
 local Bill = require("lockscreen.styles.bill")
 local Quote = require("lockscreen.styles.quote")
+local Bookshelf = require("lockscreen.styles.bookshelf")
 
 local M = {}
 
@@ -39,7 +40,7 @@ function M.dayKey()
 end
 
 --- 已注册样式（顺序即设置页选项顺序）。
-M.styles = { Myrl, Reading, Bill, Quote }
+M.styles = { Myrl, Reading, Bill, Quote, Bookshelf }
 
 ---@param id string|nil
 ---@return table|nil
