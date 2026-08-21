@@ -1,0 +1,25 @@
+--[[--
+翻译注入：替换 Translator.showTranslation。
+@module tests.translate.init_spec
+--]]
+
+local Assert = require("support.assert")
+
+package.preload["translate.edge"] = function()
+    return {
+        translateAsync = function() error("not called by install") end,
+    }
+end
+
+local translator = {
+    showTranslation = function() end,
+}
+package.preload["ui/translator"] = function() return translator end
+
+local Translate = require("translate.init")
+Translate.install()
+Assert.is_true(type(translator.showTranslation) == "function")
+
+local before = translator.showTranslation
+Translate.install()
+Assert.eq(translator.showTranslation, before)

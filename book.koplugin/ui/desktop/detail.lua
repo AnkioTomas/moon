@@ -47,6 +47,7 @@ local Icon = require("ui.components.icon")
 local Pager = require("ui.components.pager")
 local LocalMapper = require("source.local.mapper")
 local UI = require("ui.components.bookui")
+local Surface = require("ui.components.surface")
 local Text = require("utils.text")
 local _ = require("gettext")
 local Screen = Device.screen
@@ -83,28 +84,20 @@ end
 ---@param on_tap fun()
 ---@return table
 local function actionChip(w, h, icon, text, on_tap)
-    local border = UI.line()
     local tap = BookInfo.tappable(w, h, on_tap)
-    tap[1] = FrameContainer:new{
-        bordersize = border,
-        color = UI.rule(),
-        padding = 0,
-        margin = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = w, h = h },
-        CenterContainer:new{
-            dimen = Geom:new{ w = w - border * 2, h = h - border * 2 },
-            Icon.label{
+    tap[1] = Surface.pill(Icon.label{
                 name = icon,
                 text = text,
                 direction = "row",
                 size = 18,
                 font_size = 14,
                 gap = UI.sz(6),
-                max_width = w - border * 2 - UI.sz(16),
-            },
-        },
-    }
+                max_width = w - UI.sz(16),
+            }, {
+        width = w,
+        height = h,
+        shadow = false,
+    })
     return tap
 end
 
@@ -115,8 +108,7 @@ end
 ---@return table, number 卡片 widget 与其高度
 local function kpiCard(w, value, label)
     local pad = UI.sz(10)
-    local border = UI.line()
-    local inner_w = math.max(1, w - (pad + border) * 2)
+    local inner_w = math.max(1, w - pad * 2)
     local value_w = TextWidget:new{
         text = value,
         face = UI.face("cfont", 16),
@@ -129,24 +121,21 @@ local function kpiCard(w, value, label)
         max_width = inner_w,
         fgcolor = UI.muted(),
     }
-    local h = pad * 2 + border * 2 + value_w:getSize().h + UI.sz(4) + label_w:getSize().h
-    local card = FrameContainer:new{
-        bordersize = border,
-        color = UI.rule(),
-        padding = pad,
-        margin = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = w, h = h },
-        CenterContainer:new{
-            dimen = Geom:new{ w = inner_w, h = h - (pad + border) * 2 },
+    local h = pad * 2 + value_w:getSize().h + UI.sz(4) + label_w:getSize().h
+    local card = Surface.card(CenterContainer:new{
+            dimen = Geom:new{ w = inner_w, h = h - pad * 2 },
             VerticalGroup:new{
                 align = "center",
                 value_w,
                 VerticalSpan:new{ width = UI.sz(4) },
                 label_w,
             },
-        },
-    }
+        }, {
+        width = w,
+        height = h,
+        padding = pad,
+        shadow = true,
+    })
     return card, h
 end
 

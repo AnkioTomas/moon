@@ -65,12 +65,12 @@ local function ensureWidgets()
         HorizontalGroup = require("ui/widget/horizontalgroup"),
         HorizontalSpan = require("ui/widget/horizontalspan"),
         InputContainer = require("ui/widget/container/inputcontainer"),
-        ProgressWidget = require("ui/widget/progresswidget"),
         TextWidget = require("ui/widget/textwidget"),
         VerticalGroup = require("ui/widget/verticalgroup"),
         VerticalSpan = require("ui/widget/verticalspan"),
         UI = require("ui.components.bookui"),
         Icon = require("ui.components.icon"),
+        Surface = require("ui.components.surface"),
     }
 
     NativeAction = Widgets.InputContainer:extend{}
@@ -78,18 +78,8 @@ local function ensureWidgets()
         local W = Widgets
         self.dimen = W.Geom:new{ w = self.width, h = self.height }
         self.ges_events = { Tap = { W.GestureRange:new{ ges = "tap", range = self.dimen } } }
-        local fg = self.active and W.Blitbuffer.COLOR_WHITE or W.Blitbuffer.COLOR_BLACK
-        self[1] = W.FrameContainer:new{
-            bordersize = W.UI.line(),
-            color = self.active and W.Blitbuffer.COLOR_BLACK or W.UI.rule(),
-            background = self.active and W.Blitbuffer.COLOR_BLACK or W.Blitbuffer.COLOR_WHITE,
-            padding = W.UI.sz(4),
-            width = self.width,
-            height = self.height,
-            dimen = W.Geom:new{ w = self.width, h = self.height },
-            W.CenterContainer:new{
-                dimen = W.Geom:new{ w = self.width - W.UI.sz(10), h = self.height - W.UI.sz(10) },
-                W.VerticalGroup:new{
+        local fg = W.Blitbuffer.COLOR_BLACK
+        self[1] = W.Surface.pill(W.VerticalGroup:new{
                     align = "center",
                     W.Icon.widget{ name = self.icon, size = 24, color = fg },
                     W.VerticalSpan:new{ width = W.UI.sz(3) },
@@ -99,9 +89,13 @@ local function ensureWidgets()
                         fgcolor = fg,
                         max_width = self.width - W.UI.sz(18),
                     },
-                },
-            },
-        }
+                }, {
+            background = self.active and W.UI.actionSurface() or W.UI.surface(),
+            padding = W.UI.sz(5),
+            width = self.width,
+            height = self.height,
+            shadow = false,
+        })
     end
     function NativeAction:onTap()
         local Panel = require("ui.desktop.panel")
@@ -124,10 +118,7 @@ local function ensureWidgets()
         local label_w, value_w = W.UI.sz(72), W.UI.sz(42)
         local bar_w = self.width - label_w - value_w - W.UI.sz(16)
         self.bar_x, self.bar_w = label_w + W.UI.sz(8), bar_w
-        self.progress = W.ProgressWidget:new{
-            width = bar_w, height = W.UI.sz(22), percentage = self.value / 100,
-            radius = 0, bordersize = W.UI.line(), bgcolor = W.UI.track(), fillcolor = W.Blitbuffer.COLOR_BLACK,
-        }
+        self.progress = W.UI.progressBar(bar_w, W.UI.sz(22), self.value)
         self[1] = W.HorizontalGroup:new{
             align = "center",
             W.CenterContainer:new{
@@ -148,7 +139,8 @@ local function ensureWidgets()
         local fraction = math.max(0, math.min(1, (pos.x - self.dimen.x - self.bar_x) / self.bar_w))
         local Panel = require("ui.desktop.panel")
         if not Panel.setLevel(self.kind, fraction) then return false end
-        self.progress.percentage = fraction
+        self.progress = W.UI.progressBar(self.bar_w, W.UI.sz(22), fraction * 100)
+        self[1][3] = self.progress
         UIManager:setDirty(self, "ui")
         if finish then refreshMenu(self.menu) end
         return true

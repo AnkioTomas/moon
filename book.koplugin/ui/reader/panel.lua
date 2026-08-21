@@ -23,6 +23,7 @@ local TopContainer = require("ui/widget/container/topcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local Icon = require("ui.components.icon")
+local Surface = require("ui.components.surface")
 local Popup = require("ui.components.popup")
 local UI = require("ui.components.bookui")
 local Session = require("ui.reader.session")
@@ -55,26 +56,21 @@ local function action(width, height, icon, label, callback, active)
         return true
     end
     local color = Blitbuffer.COLOR_BLACK
-    tap[1] = FrameContainer:new{
-        bordersize = 0,
-        padding = 0,
-        background = Blitbuffer.COLOR_WHITE,
+    tap[1] = Surface.pill(Icon.label{
+            name = icon,
+            text = label,
+            direction = "column",
+            color = color,
+            face = active and "cfont" or "xx_smallinfofont",
+            font_size = active and 12 or 11,
+            max_width = math.max(UI.sz(36), width - UI.sz(6)),
+            gap = UI.sz(2),
+        }, {
         width = width,
         height = height,
-        CenterContainer:new{
-            dimen = Geom:new{ w = width, h = height },
-            Icon.label{
-                name = icon,
-                text = label,
-                direction = "column",
-                color = color,
-                face = active and "cfont" or "xx_smallinfofont",
-                font_size = active and 12 or 11,
-                max_width = math.max(UI.sz(36), width - UI.sz(6)),
-                gap = UI.sz(2),
-            },
-        },
-    }
+        background = active and UI.actionSurface() or UI.surface(),
+        shadow = false,
+    })
     return tap
 end
 

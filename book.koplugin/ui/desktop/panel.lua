@@ -23,7 +23,6 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local NetworkMgr = require("ui/network/manager")
 local OverlapGroup = require("ui/widget/overlapgroup")
-local ProgressWidget = require("ui/widget/progresswidget")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -34,6 +33,7 @@ local Screen = Device.screen
 
 local Icon = require("ui.components.icon")
 local UI = require("ui.components.bookui")
+local Surface = require("ui.components.surface")
 local MoonSettings = require("utils.settings")
 
 local Panel = InputContainer:extend{
@@ -291,18 +291,8 @@ local function rectContains(rect, pos)
 end
 
 local function actionTile(action, width, height, active, icon)
-    local fg = active and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
-    return FrameContainer:new{
-        bordersize = UI.line(),
-        color = active and Blitbuffer.COLOR_BLACK or UI.rule(),
-        background = active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
-        padding = UI.sz(4),
-        width = width,
-        height = height,
-        dimen = Geom:new{ w = width, h = height },
-        CenterContainer:new{
-            dimen = Geom:new{ w = width - UI.sz(10), h = height - UI.sz(10) },
-            VerticalGroup:new{
+    local fg = Blitbuffer.COLOR_BLACK
+    return Surface.pill(VerticalGroup:new{
                 align = "center",
                 Icon.widget{ name = icon or action.icon, size = 24, color = fg },
                 VerticalSpan:new{ width = UI.sz(4) },
@@ -312,9 +302,13 @@ local function actionTile(action, width, height, active, icon)
                     fgcolor = fg,
                     max_width = width - UI.sz(18),
                 },
-            },
-        },
-    }
+            }, {
+        width = width,
+        height = height,
+        padding = UI.sz(5),
+        background = active and UI.actionSurface() or UI.surface(),
+        shadow = false,
+    })
 end
 
 local function sliderRow(title, value, width)
@@ -333,15 +327,7 @@ local function sliderRow(title, value, width)
             },
         },
         HorizontalSpan:new{ width = UI.sz(8) },
-        ProgressWidget:new{
-            width = bar_w,
-            height = UI.sz(22),
-            percentage = value / 100,
-            radius = 0,
-            bordersize = UI.line(),
-            bgcolor = UI.track(),
-            fillcolor = Blitbuffer.COLOR_BLACK,
-        },
+        UI.progressBar(bar_w, UI.sz(22), value),
         HorizontalSpan:new{ width = UI.sz(8) },
         CenterContainer:new{
             dimen = Geom:new{ w = value_w, h = row_h },

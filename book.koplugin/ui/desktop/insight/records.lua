@@ -7,13 +7,13 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local BottomContainer = require("ui/widget/container/bottomcontainer")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local LineWidget = require("ui/widget/linewidget")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
+local Surface = require("ui.components.surface")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local _ = require("gettext")
@@ -153,8 +153,7 @@ end
 ---@return table, number 卡片控件和高度。
 local function recordCard(width, value, label)
     local pad = UI.sz(8)
-    local border = UI.line()
-    local inner_w = math.max(1, width - (pad + border) * 2)
+    local inner_w = math.max(1, width - pad * 2)
     local value_widget = TextWidget:new{
         text = tostring(value), face = UI.face("cfont", 15), max_width = inner_w,
         fgcolor = Blitbuffer.COLOR_BLACK,
@@ -163,17 +162,17 @@ local function recordCard(width, value, label)
         text = label, face = UI.face("xx_smallinfofont", 11), max_width = inner_w,
         fgcolor = UI.muted(),
     }
-    local height = pad * 2 + border * 2 + value_widget:getSize().h
+    local height = pad * 2 + value_widget:getSize().h
         + UI.sz(4) + label_widget:getSize().h
-    return FrameContainer:new{
-        bordersize = border, color = UI.rule(), padding = pad, margin = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = width, h = height },
-        CenterContainer:new{
-            dimen = Geom:new{ w = inner_w, h = height - (pad + border) * 2 },
-            VerticalGroup:new{ align = "center", value_widget, VerticalSpan:new{ width = UI.sz(4) }, label_widget },
-        },
-    }, height
+    return Surface.card(CenterContainer:new{
+        dimen = Geom:new{ w = inner_w, h = height - pad * 2 },
+        VerticalGroup:new{ align = "center", value_widget, VerticalSpan:new{ width = UI.sz(4) }, label_widget },
+    }, {
+        width = width,
+        height = height,
+        padding = pad,
+        shadow = true,
+    }), height
 end
 
 --- 将指标卡片排成一行。
