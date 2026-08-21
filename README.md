@@ -1,6 +1,6 @@
 # Book 书库
 
-Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供连接远端阅读服务的书库桌面。它将图书馆、首页、统计和设置整合为全屏界面，可下载并打开书籍、缓存封面，以及同步阅读进度。
+Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供本地优先的多源书库桌面。它将图书馆、首页、统计和设置整合为全屏界面，可下载并打开书籍，并双向同步书架、阅读进度、笔记和统计。
 
 架构上通过统一 **Source** 接口支持多数据源扩展（Book 服务、微信读书、RSS、WebDAV、本地目录）；**Book 服务（moon）完整实现**；微信读书与 RSS 使用通用按章阅读链路，其中一个 RSS feed 作为一本书、文章作为章节。同时只激活一个数据源；书城 Tab 按源能力动态显示。
 
@@ -19,14 +19,14 @@ Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供�
 ## 功能
 
 - **封面书库**：以响应式网格展示书籍、阅读进度和总数，支持分页。
-- **搜索与筛选**：按书名/作者搜索，或按分类、标签、系列、作者筛选。
+- **本地搜索与筛选**：书架列表、关键词搜索、分类/系列筛选、最近阅读和统计查询全部读取本地 SQLite，离线可用。
 - **主页概览**：最近阅读和在读书籍。
-- **多维统计**：从服务端拉取阅读 KPI、月度/星期分布与日历热力，点选日期查看当日书单。
+- **多维统计**：本地采集并聚合阅读 KPI 与日历热力；远端记录同步落库后也从本地查询。
 - **书籍详情**：查看作者、分类、标签、系列、进度和简介后再开始阅读。
 - **下载与缓存**：书籍按 `bookKey=md5(source:stableId)` 落盘到 `.moon/cache/<source>/book/<key>/`（整本 `book.*` 或章节 `N.html`）；元数据 / 目录 / 打开映射 / HTTP 缓存在 `.moon/book.sqlite3`（meta TTL 7 天 / toc TTL 1 天）。首次打开可显示下载进度。按章源通过 `fetchChapterContentAsync` 交标准正文，宿主统一写 HTML 并支持章末/章首连续换章与前1后3预取。
 - **在线按章阅读**：微信读书与 RSS 拉取目录后，由宿主按章生成 HTML；阅读中支持上一章/下一章与后台预取（前 1 后 3）。RSS 支持手工增删 feed 与 OPML 导入。
-- **进度同步**：可在打开书籍时拉取远端进度，并在关闭书籍或设备休眠时上传进度。
-  - **阅读统计上报**：复用 KOReader「阅读统计」插件的 `statistics.sqlite3`，在关闭/休眠时将页停留时长与页数上报到服务端高维统计接口（可手动立即上报）。
+- **双向同步**：所有源统一提供书架、进度、笔记和统计四类同步；本地未确认版本优先，关闭/休眠和网络恢复会重试脏数据。
+- **阅读统计**：插件自行采集页停留时长，也可导入 KOReader 历史统计；上传成功后本地历史仍保留。
 - **阅读页面板**：触摸设备可在阅读页中部点按打开 Book 悬浮面板，快速调整字体、字号、行距、字重、对比度、边距和滚动/分页模式，并可进入目录、系统更多设置或返回书库。
 - **启动入口**：可从 KOReader 主菜单、文件管理器“+”菜单或调度器动作打开；也可设为启动时默认打开。
 - **缓存管理**：首次进入主页时自动清理连续 90 天未打开的本地书籍及其封面，也可在设置中手动清空所有插件缓存。
@@ -122,9 +122,9 @@ Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供�
 
 ## 本地数据
 
-插件配置在 `$DATA/.moon/settings/`（`common.lua` 与各源文件）。结构化数据在 `$DATA/.moon/book.sqlite3`（`books` / `tocs` / `opens` / `http`）。正文与封面在 `$DATA/.moon/cache/<source>/`。
+插件配置在 `$DATA/.moon/settings/`（`common.lua` 与各源文件）。结构化数据在 `$DATA/.moon/book.sqlite3`（`books` / `chapters` / `pending_progress` / `notes` / `reading_stats` / `toc` / `http`）。正文与封面在 `$DATA/.moon/cache/<source>/`。
 
-首次进入主页时，插件会异步删除连续 90 天未打开的本地书籍及相应封面。**设置 → 清理缓存** 会清空缓存目录与 tocs/opens/meta 字段，但保留 `books.filename` / `books.md5`，也不会删除服务器端内容。
+远端书架删除或本地文件暂时缺失只会把 `books.in_library` 设为隐藏，不删除书籍身份、进度、笔记和统计。数据库升级原地补列，不因版本变化清库；高版本数据库会拒绝打开并保持原状。
 
 ## 版本号
 
@@ -143,4 +143,4 @@ sed -i.bak "s/@VERSION@/${VERSION}/g" book.koplugin/bookversion.lua
 
 ## 许可证
 
-本项目采用 [MIT License](LICENSE)。
+本项目采用 [GNU GPLv3](LICENSE)。
