@@ -450,6 +450,7 @@ return {
     ["阅读 %1 本 · %2 页"] = "%1 books · %2 pages",
     ["书单"] = "Books",
     ["日均"] = "Daily average",
+    ["时均"] = "Hourly average",
     ["书籍高亮"] = "Book highlights",
     ["语句来源"] = "Quote source",
     ["默认句子"] = "Default quote",

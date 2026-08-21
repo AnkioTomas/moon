@@ -171,6 +171,7 @@ local function fillDayBuckets(rows, start_ts, end_ts)
         local hit = by_ymd[ymd]
         buckets[#buckets + 1] = {
             key = ymd,
+            ymd = ymd, -- 兼容旧字段名
             label = ymd:sub(6), -- MM-DD
             seconds = hit and (tonumber(hit.seconds) or 0) or 0,
             pages = hit and (tonumber(hit.pages) or 0) or 0,
