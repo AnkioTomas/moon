@@ -64,6 +64,9 @@ package.preload["utils.db.stats"] = function()
         periodBooks = function() return { { stable_id = "b1" } } end,
         periodDays = function() return { { ymd = "2024-01-01", seconds = 10, pages = 1 } } end,
         periodHours = function() return { { hour = 9, seconds = 600, pages = 2 } } end,
+        dailyByBook = function()
+            return { { ymd = "2024-01-01", seconds = 600, pages = 2 } }
+        end,
     }
 end
 local annotations = {
@@ -94,6 +97,8 @@ Assert.eq(book.percent, 35)
 Assert.eq(book.total_seconds, 600)
 Assert.eq(book.page, 7)
 Assert.eq(book.total_pages, 20)
+Assert.len(book.buckets, 7)
+Assert.eq(book.buckets[1].seconds, 0) -- stub 日不在近 7 天，补齐后为 0
 
 -- 无会话：回退到 last_open 最近未读完的一本，章节来自 pending_progress
 session_book = nil
