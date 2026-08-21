@@ -12,6 +12,50 @@ local SOURCE_ID = "moon"
 
 local Setting = {}
 
+local function edit(plugin, key, title, hint, password, normalize)
+    local UIManager = require("ui/uimanager")
+    local InputDialog = require("ui/widget/inputdialog")
+    local SettingRow = require("ui.components.settingrow")
+    local cfg = require("utils.settings").getSource(SOURCE_ID)
+    local dialog
+    dialog = InputDialog:new{
+        title = title, input = tostring(cfg[key] or ""), input_hint = hint,
+        text_type = password and "password" or nil,
+        buttons = {{
+            { text = _("取消"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("保存"), callback = function()
+                cfg[key] = normalize(dialog:getInputText())
+                require("utils.settings").saveSource(SOURCE_ID, cfg)
+                require("source.registry").invalidate()
+                UIManager:close(dialog)
+                if plugin and plugin.onSourceChanged then plugin:onSourceChanged() end
+            end },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+local function field(plugin, key, title, hint, password, normalize, icon)
+    return function(iw)
+        local value = require("utils.settings").getSource(SOURCE_ID)[key] or ""
+        return require("ui.components.settingrow").build(iw, {
+            kind = "nav", icon = icon or "edit", title = title,
+            status = value ~= "" and (password and "******" or value) or _("未设置"),
+            status_on = value ~= "", callback = function()
+                edit(plugin, key, title, hint, password, normalize)
+            end,
+        })
+    end
+end
+
+function Setting.rows(plugin)
+    return {
+        field(plugin, "base_url", _("服务器地址"), "https://book.example.com", false, Text.stripWhitespace, "dns"),
+        field(plugin, "token", _("长期令牌"), "bk_...", true, Text.stripWhitespace, "key"),
+    }
+end
+
 
 --- 设置行状态文案与高亮开关。
 ---@return string status, boolean status_on

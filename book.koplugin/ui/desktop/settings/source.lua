@@ -93,37 +93,39 @@ function Source.sections(ctx)
     local sections = { { title = _("数据源"), rows = common_rows } }
 
     local local_setting = loadSourceSetting("local")
-    if local_setting and type(local_setting.open) == "function" then
+    if local_setting and (type(local_setting.rows) == "function" or type(local_setting.open) == "function") then
         local status, status_on = local_setting.rowStatus()
+        local rows = type(local_setting.rows) == "function" and local_setting.rows(plugin) or { function(iw)
+            return SettingRow.build(iw, {
+                kind = "nav", icon = "folder", title = _("本地目录"),
+                status = status, status_on = status_on,
+                callback = function() local_setting.open(plugin) end,
+            })
+        end }
         sections[#sections + 1] = {
             title = _("本地"),
-            rows = { function(iw)
-                return SettingRow.build(iw, {
-                    kind = "nav", icon = "folder", title = _("本地目录"),
-                    status = status, status_on = status_on,
-                    callback = function() local_setting.open(plugin) end,
-                })
-            end },
+            rows = rows,
         }
     end
 
     for _idx, meta in ipairs(enabled) do
         if meta.id ~= "local" then
             local mod = loadSourceSetting(meta.id)
-            if mod and type(mod.open) == "function" then
+            if mod and (type(mod.rows) == "function" or type(mod.open) == "function") then
                 local status, status_on
                 if type(mod.rowStatus) == "function" then status, status_on = mod.rowStatus() end
                 local title = (mod.rowTitle and mod.rowTitle()) or _("源设置")
                 local icon = (mod.rowIcon and mod.rowIcon()) or "dns"
+                local rows = type(mod.rows) == "function" and mod.rows(plugin) or { function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "nav", icon = icon, title = title,
+                        status = status, status_on = status_on,
+                        callback = function() mod.open(plugin) end,
+                    })
+                end }
                 sections[#sections + 1] = {
                     title = meta.name or meta.id,
-                    rows = { function(iw)
-                        return SettingRow.build(iw, {
-                            kind = "nav", icon = icon, title = title,
-                            status = status, status_on = status_on,
-                            callback = function() mod.open(plugin) end,
-                        })
-                    end },
+                    rows = rows,
                 }
             end
         end

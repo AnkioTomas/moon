@@ -9,6 +9,8 @@ Moon 目录布局（$DATA/.moon）
         image/           网络图片 / 封面
     settings/
       common.lua
+      display.lua / lockscreen.lua / remote.lua / pinyin.lua
+      quickpanel.lua / reader.lua / ai.lua
       moon.lua / wechat.lua / webdav.lua
     fonts/               UI 字体（.woff）
 
@@ -177,6 +179,13 @@ end
 ---@return string
 function P.commonPath()
     return P.settingsDir() .. "/common.lua"
+end
+
+--- 功能配置路径：settings/<section>.lua
+---@param section string
+---@return string
+function P.sectionPath(section)
+    return P.settingsDir() .. "/" .. tostring(section) .. ".lua"
 end
 
 --- 源专用配置路径：settings/<id>.lua

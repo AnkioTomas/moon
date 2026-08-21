@@ -107,7 +107,7 @@ function Settings.build(desktop)
     local sub = desktop._settings_sub
     local valid_sub = {
         sources = true, display = true, lockscreen = true, desktop = true,
-        language = true, remote = true, quickpanel = true,
+        language = true, remote = true, quickpanel = true, ai = true,
     }
     if sub ~= nil and not valid_sub[sub] then
         sub = nil
@@ -156,7 +156,7 @@ function Settings.build(desktop)
                     kind = "nav", icon = "psychology", title = _("AI 服务"),
                     status = configured and MoonSettings.get().ai_model or _("未配置"),
                     status_on = configured,
-                    callback = function() AISettings.open(desktop) end,
+                    callback = function() gotoSub(desktop, "ai") end,
                 })
             end,
             function(iw)
@@ -202,6 +202,8 @@ function Settings.build(desktop)
             appendSection(packed, card_w, _("远程管理"), Remote.menuRows(desktop))
         elseif sub == "quickpanel" then
             appendSection(packed, card_w, _("快捷面板"), QuickPanel.rows(desktop))
+        elseif sub == "ai" then
+            appendSection(packed, card_w, _("AI 服务"), AISettings.rows(desktop))
         end
     end
 
