@@ -3,7 +3,6 @@
 --]]
 
 local InfoMessage = require("ui/widget/infomessage")
-local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
 local Popup = require("ui.components.popup")
 local SettingRow = require("ui.components.settingrow")
@@ -142,15 +141,27 @@ function Source.sections(ctx)
             })
         end
     end
-    if type(source and source.putProgressAsync) == "function" then
+    if source then
         extra_rows[#extra_rows + 1] = function(iw)
             return SettingRow.build(iw, {
-                kind = "action", icon = "sync", title = _("立即同步进度"),
+                kind = "action", icon = "sync", title = _("立即同步"),
                 callback = function()
-                    local Progress = require("book.progress")
-                    local src = plugin and plugin.getSource and plugin:getSource()
-                    if not src then return end
-                    NetworkMgr:runWhenOnline(function() Progress.flushPendingAsync(src, true) end)
+                    UIManager:show(InfoMessage:new{ text = _("正在同步…"), timeout = 2 })
+                    require("book.sync").runAsync(source, nil, function(result, err)
+                        if desktop._closed then return end
+                        if result then
+                            desktop._home_state = nil
+                            desktop._home_loaded = false
+                            desktop._library_state = nil
+                            desktop._insight_state = nil
+                            desktop._insight_loaded = false
+                            desktop:rebuild()
+                        end
+                        UIManager:show(InfoMessage:new{
+                            text = result and _("同步完成") or (err and tostring(err) or _("同步失败")),
+                            timeout = 2,
+                        })
+                    end)
                 end,
             })
         end

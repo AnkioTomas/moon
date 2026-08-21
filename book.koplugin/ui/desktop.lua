@@ -277,6 +277,7 @@ function Desktop:sourceChanged(source)
         "_library_fetch_cancel",
         "_store_fetch_cancel",
         "_insight_fetch_cancel",
+        "_books_sync_cancel",
     }) do
         local job = self[key]
         if type(job) == "table" and type(job.cancel) == "function" then

@@ -224,21 +224,24 @@ end
 local function showToc(panel)
     local ui = panel.plugin and panel.plugin.ui
     panel:onClose()
-    local Chapter = require("chapters.init")
-    if Chapter.isActive() then
+    local session = require("ui.reader.session")
+    local toc = session.toc()
+    if toc then
+        local current = session.current()
+        local identity = current and current.identity
+        local current_idx = identity and identity.chapter_idx
         local items = {}
-        local current = Chapter.currentIdx()
-        for _, chapter in ipairs(Chapter.toc() or {}) do
+        for _, chapter in ipairs(toc) do
             local idx = tonumber(chapter.idx) or 0
             items[#items + 1] = {
                 text = chapter.title or ("#" .. idx),
                 value = idx,
-                checked = idx == current,
+                checked = idx == current_idx,
             }
         end
         Popup.list{
             title = _("目录"), items = items, choice_icons = true,
-            on_select = function(idx) Chapter.gotoChapter(idx) end,
+            on_select = function(idx) session.gotoChapter(idx) end,
         }
     elseif ui and ui.toc and ui.toc.onShowToc then
         ui.toc:onShowToc()
@@ -294,10 +297,12 @@ function Panel:rebuild()
     local top_h = UI.barH()
     local bottom_h = UI.barH()
     local current = Session.current() or {}
+    local identity = current.identity
+    local toc = Session.toc()
     local ui = self.plugin and self.plugin.ui
-    local title = (current.book and current.book.title) or _("阅读")
-    if current.chapter_idx and current.chapter_count then
-        title = string.format(_("第 %d/%d 章"), current.chapter_idx, current.chapter_count)
+    local title = (identity and identity.book and identity.book.title) or _("阅读")
+    if identity and identity.chapter_idx and toc then
+        title = string.format(_("第 %d/%d 章"), identity.chapter_idx, #toc)
     end
     local title_w = math.floor(w * 0.42)
     local action_w = math.floor((w - title_w) / 3)

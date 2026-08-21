@@ -301,14 +301,24 @@ end
 local function syncReading(plugin, event)
     local identity = current_session and current_session.identity
     local source = identity and identity.source
-    if identity and source and source.putProgressAsync then
-        require("book.progress").push(plugin.ui, identity)
-    end
     if source and identity then
-        require("book.note").push(plugin.ui, identity)
+        require("book.progress").save(current_session, function(ok)
+            if ok and source.syncProgressAsync then
+                source:syncProgressAsync({ identity = identity }, function() end)
+            end
+        end)
+        require("book.note").save(plugin.ui, identity, function(ok)
+            if ok and source.syncNotesAsync then
+                source:syncNotesAsync({ identity = identity }, function() end)
+            end
+        end)
     end
     require("book.stats").stop(function()
-        if source then
+        if source and source.syncStatsAsync then
+            source:syncStatsAsync({ dirty_only = true }, function()
+                plugin:emitToSource(event, nil, source)
+            end)
+        elseif source then
             plugin:emitToSource(event, nil, source)
         end
     end)

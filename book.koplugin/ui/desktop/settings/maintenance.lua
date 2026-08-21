@@ -54,7 +54,7 @@ local function showAbout()
     table.insert(body, VerticalSpan:new{ width = UI.sz(2) })
     table.insert(body, TextWidget:new{ text = REPO_HOST, face = UI.face("xx_smallinfofont", 12), fgcolor = UI.muted() })
     table.insert(body, VerticalSpan:new{ width = UI.sz(4) })
-    table.insert(body, TextWidget:new{ text = _("MIT License"), face = UI.face("xx_smallinfofont", 11), fgcolor = UI.muted() })
+    table.insert(body, TextWidget:new{ text = _("GNU GPLv3"), face = UI.face("xx_smallinfofont", 11), fgcolor = UI.muted() })
     dialog:addWidget(body)
     UIManager:show(dialog)
 end
@@ -94,6 +94,46 @@ function Maintenance.cacheRow(desktop)
                         end)
                     end,
                 })
+            end,
+        })
+    end
+end
+
+function Maintenance.importNotesRow()
+    return function(iw)
+        return SettingRow.build(iw, {
+            kind = "action", icon = "format_quote", title = _("导入本地注解"),
+            callback = function()
+                UIManager:show(InfoMessage:new{ text = _("正在导入本地注解…"), timeout = 1 })
+                require("book.note").importLocalAsync(function(result)
+                    local text
+                    if result.failed > 0 then
+                        text = T(_("已导入 %1 条注解，%2 条失败"), result.imported, result.failed)
+                    else
+                        text = T(_("已导入 %1 条注解"), result.imported)
+                    end
+                    UIManager:show(InfoMessage:new{ text = text, timeout = 2 })
+                end)
+            end,
+        })
+    end
+end
+
+function Maintenance.importStatsRow()
+    return function(iw)
+        return SettingRow.build(iw, {
+            kind = "action", icon = "timer", title = _("导入本地阅读统计"),
+            callback = function()
+                UIManager:show(InfoMessage:new{ text = _("正在导入本地阅读统计…"), timeout = 1 })
+                require("book.stats").importLocalAsync(function(result)
+                    local text
+                    if result.failed > 0 then
+                        text = T(_("已导入 %1 条阅读统计，%2 条失败"), result.imported, result.failed)
+                    else
+                        text = T(_("已导入 %1 条阅读统计"), result.imported)
+                    end
+                    UIManager:show(InfoMessage:new{ text = text, timeout = 2 })
+                end)
             end,
         })
     end
