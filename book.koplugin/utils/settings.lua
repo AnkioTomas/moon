@@ -2,8 +2,7 @@
 配置存储。
 
 common.lua 只保存跨功能的全局状态；功能配置分别保存到
-settings/<section>.lua。读取旧版 common.lua 时自动迁移，保留旧的
-get()/save() 外观，避免调用方因为存储拆分而改变行为。
+settings/<section>.lua。统一提供 get()/save() 外观，避免调用方感知存储布局。
 
 @module koplugin.book.utils.settings
 --]]
@@ -23,10 +22,11 @@ local DEFAULTS = {
     lockscreen = {
         lock_screen = "compose",
         lock_screen_background = "bing",
-        lock_screen_component = "bookmark",
+        lock_screen_component = "current",
         lock_screen_position = "center-center",
         lock_screen_wide = true,
         lock_screen_bill_period = "7d",
+        lock_screen_custom_message = "读书不觉已春深，一寸光阴一寸金。",
     },
     remote = { remote_port = 9528, remote_autostart = false },
     pinyin = { pinyin_enabled = false },
@@ -47,6 +47,7 @@ for _, key in ipairs({
     "lock_screen_quote_source_cache", "lock_screen_quote_index", "lock_screen_bing_day",
     "lock_screen_myrl_day", "lock_screen_component", "lock_screen_position",
     "lock_screen_wide",
+    "lock_screen_custom_message", "lock_screen_folder_day", "lock_screen_folder_pick",
 }) do
     KEY_SECTION[key] = "lockscreen"
 end
