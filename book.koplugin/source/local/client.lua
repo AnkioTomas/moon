@@ -103,6 +103,20 @@ local function coverPath(stable_id)
     return require("utils.paths").coverPath(stable_id, SOURCE_ID)
 end
 
+--- 把书籍附属资源从旧路径迁移到新路径。
+---@param old_path string
+---@param new_path string
+local function moveBookArtifacts(old_path, new_path)
+    local old_cover = coverPath(old_path)
+    if lfs.attributes(old_cover, "mode") == "file" then
+        os.rename(old_cover, coverPath(new_path))
+    end
+    local old_sdr = old_path .. ".sdr"
+    if lfs.attributes(old_sdr, "mode") == "directory" then
+        os.rename(old_sdr, new_path .. ".sdr")
+    end
+end
+
 --- 把封面 blitbuffer 落盘为 PNG（os.remove/os.rename 不抛异常，无需 pcall）。
 ---@param bb any
 ---@param stable_id string
@@ -250,6 +264,9 @@ local function resolveOne(f)
     local BookDB = require("utils.db.book")
     local cached = BookDB.get(SOURCE_ID, f.path)
     if cached and type(cached.title) == "string" and cached.title ~= "" then
+        if cached.in_library == false then
+            BookDB.setLibraryMembership(SOURCE_ID, f.path, true)
+        end
         return
     end
     local digest = util.partialMD5(f.path)
@@ -288,10 +305,11 @@ local function resolveOne(f)
         category = f.category,
         series = f.series,
         fetched_at = os.time(),
+        path = f.path,
     })
 end
 
---- 扫描后清理失效书籍：books 表本源的、本次未扫到的记录删除（不动 reading_stats），连同封面。
+--- 扫描后隐藏失效书籍并清路径，身份、进度、笔记和统计保留。
 --- 改名/移动的书已在 resolveOne 里原地更新 stable_id，这里的 keep 集合天然包含它们。
 --- 同步阻塞，只在子进程里跑。
 ---@param files table[]
@@ -303,7 +321,7 @@ local function pruneMissing(files)
     local BookDB = require("utils.db.book")
     for _, stable_id in ipairs(BookDB.stableIdsBySource(SOURCE_ID)) do
         if not keep[stable_id] then
-            BookDB.remove(SOURCE_ID, stable_id)
+            BookDB.setLibraryMembership(SOURCE_ID, stable_id, false, true)
             os.remove(coverPath(stable_id))
         end
     end
@@ -474,16 +492,94 @@ function Client:moveBook(stable_id, category, series)
     if not moved then
         return nil, _("移动失败：") .. tostring(move_err)
     end
-    local old_cover = coverPath(stable_id)
-    if lfs.attributes(old_cover, "mode") == "file" then
-        os.rename(old_cover, coverPath(new_path))
-    end
-    -- KOReader 的 .sdr 目录（阅读进度/书签/笔记）跟着书走
-    local old_sdr = stable_id .. ".sdr"
-    if lfs.attributes(old_sdr, "mode") == "directory" then
-        os.rename(old_sdr, new_path .. ".sdr")
-    end
+    moveBookArtifacts(stable_id, new_path)
     require("utils.db.book").renameStableId(SOURCE_ID, stable_id, new_path, cat, ser)
+    return new_path
+end
+
+--- 用转换后的临时 EPUB 替换本地原书。
+--- 新文件使用原文件名的 .epub 扩展名；原书、封面、.sdr 和数据库身份一起迁移。
+--- 目标 EPUB 已存在或任一步骤失败时拒绝操作，避免覆盖另一册书。
+---@param temp_path string 转换器生成的临时 EPUB
+---@param stable_id string 原书绝对路径
+---@return string|nil new_stable_id, string|nil err
+function Client:replaceBook(temp_path, stable_id)
+    local ok, path_err = self:validatePath()
+    if not ok then
+        return nil, path_err
+    end
+    if type(temp_path) ~= "string" or temp_path == ""
+        or type(stable_id) ~= "string" or stable_id == ""
+    then
+        return nil, _("无效路径")
+    end
+    local root = rootPath(self.cfg)
+    if stable_id ~= root and stable_id:sub(1, #root + 1) ~= root .. "/" then
+        return nil, _("原书不在书库目录内")
+    end
+    local new_path = stable_id:gsub("%.[^./]+$", ".epub")
+    if new_path == stable_id then
+        return nil, _("原书已经是 EPUB")
+    end
+    if lfs.attributes(new_path) then
+        return nil, _("目标位置已有同名文件：") .. (new_path:match("([^/]+)$") or new_path)
+    end
+    if lfs.attributes(new_path .. ".sdr") then
+        return nil, _("目标位置已有同名文件：") .. (new_path:match("([^/]+)$") or new_path) .. ".sdr"
+    end
+
+    local backup = stable_id .. ".moon-reflow-backup"
+    if lfs.attributes(backup) then
+        return nil, _("存在未完成的排版替换，请清理后重试")
+    end
+    local moved, move_err = os.rename(stable_id, backup)
+    if not moved then
+        return nil, _("暂存原书失败：") .. tostring(move_err)
+    end
+    local created, create_err = os.rename(temp_path, new_path)
+    if not created then
+        os.rename(backup, stable_id)
+        return nil, _("放置转换文件失败：") .. tostring(create_err)
+    end
+
+    local BookDB = require("utils.db.book")
+    local row = BookDB.get(SOURCE_ID, stable_id)
+    local renamed = BookDB.renameStableId(
+        SOURCE_ID,
+        stable_id,
+        new_path,
+        row and row.category or nil,
+        row and row.series or nil
+    )
+    if not renamed then
+        os.remove(new_path)
+        os.rename(backup, stable_id)
+        return nil, _("更新书籍身份失败")
+    end
+
+    if not os.remove(backup) then
+        BookDB.renameStableId(
+            SOURCE_ID,
+            new_path,
+            stable_id,
+            row and row.category or nil,
+            row and row.series or nil
+        )
+        os.remove(new_path)
+        os.rename(backup, stable_id)
+        return nil, _("删除原书失败")
+    end
+    local digest_ok, digest = pcall(util.partialMD5, new_path)
+    if row and digest_ok and type(digest) == "string" and digest ~= "" then
+        local updated = {}
+        for key, value in pairs(row) do updated[key] = value end
+        updated.source_id = SOURCE_ID
+        updated.stable_id = new_path
+        updated.path = new_path
+        updated.md5 = digest
+        BookDB.upsert(updated)
+    end
+    moveBookArtifacts(stable_id, new_path)
     return new_path
 end
 
@@ -529,6 +625,23 @@ function Client:indexOneAsync(path, cb)
     }
 end
 
+--- 强制扫盘写库（不查询）。供 syncBooksAsync(force) 使用。
+---@param cb fun(ok: boolean, err: any)
+---@return { cancel: fun() }|nil
+function Client:scanAsync(cb)
+    local ok, err = self:validatePath()
+    if not ok then
+        UIManager:nextTick(function()
+            cb(false, err)
+        end)
+        return nil
+    end
+    local root = rootPath(self.cfg)
+    return scanJob(root, function()
+        cb(true)
+    end)
+end
+
 --- 书库查询（异步）：默认直查数据库；opts.force 先真实扫盘写库再查。
 ---@param opts table|nil { force, page, page_size, category, series, search }
 ---@param cb fun(rows: table[]|nil, count: number, err: any)
@@ -547,8 +660,11 @@ function Client:listAsync(opts, cb)
         return nil
     end
 
-    local root = rootPath(self.cfg)
-    return scanJob(root, function()
+    return self:scanAsync(function(scan_ok, scan_err)
+        if not scan_ok then
+            cb(nil, 0, scan_err)
+            return
+        end
         queryDb(opts, cb)
     end)
 end
@@ -598,13 +714,13 @@ function Client:filtersAsync(cb)
     return nil
 end
 
---- 最近阅读（opens 表按 last_open 倒序）。
+--- 最近阅读（books.last_open 倒序）。
 ---@param limit number|nil
 ---@param cb fun(rows: table[])
 ---@return nil
 function Client:recentAsync(limit, cb)
     UIManager:nextTick(function()
-        cb(require("utils.db.open").recentBySource(SOURCE_ID, limit or 24))
+        cb(require("utils.db.book").recentBySource(SOURCE_ID, limit or 24))
     end)
     return nil
 end

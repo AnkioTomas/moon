@@ -10,9 +10,87 @@ local Client = require("source.moon.client")
 local Mapper = require("source.moon.mapper")
 local SourceBase = require("source.base")
 local ProgressPosition = require("types.book_progress")
+local logger = require("logger")
 local _ = require("gettext")
 
 local Moon = {}
+
+local BOOK_EXTENSIONS = {
+    epub = true,
+    pdf = true,
+    cbz = true,
+    cbr = true,
+    mobi = true,
+    azw3 = true,
+    txt = true,
+}
+
+---@type table<string, function[]>
+local opening = {}
+
+---@param identity BookIdentity
+---@return string
+local function bookPath(identity)
+    local Paths = require("utils.paths")
+    local ext = identity.stable_id:match("%.([%w]+)$")
+    ext = ext and string.lower(ext) or nil
+    Paths.ensureBookWork(identity.stable_id, identity.source_id)
+    return Paths.bookWorkDir(identity.stable_id, identity.source_id)
+        .. "/book." .. (BOOK_EXTENSIONS[ext] and ext or "epub")
+end
+
+---@param path string
+---@param format_path string|nil
+---@return boolean
+local function validBook(path, format_path)
+    local attr = require("libs/libkoreader-lfs").attributes(path)
+    if not attr or attr.mode ~= "file" or not attr.size or attr.size < 4 then
+        return false
+    end
+    local file = io.open(path, "rb")
+    if not file then return false end
+    local head = file:read(4) or ""
+    file:close()
+
+    local ext = (format_path or path):match("%.([^.]+)$")
+    ext = ext and string.lower(ext) or nil
+    if ext == "txt" then return true end
+    if ext == "mobi" or ext == "azw3" then
+        if attr.size < 68 then return false end
+        file = io.open(path, "rb")
+        if not file then return false end
+        file:seek("set", 60)
+        local palm = file:read(8) or ""
+        file:close()
+        return palm == "BOOKMOBI" or palm == "TEXtREAd"
+    end
+    if ext == "epub" or ext == "cbz" then
+        return head == "PK\003\004" or head == "PK\005\006"
+    end
+    if ext == "cbr" then
+        return head == "Rar!" or head == "PK\003\004"
+    end
+    return ext == "pdf" and head == "%PDF"
+end
+
+---@param key string
+---@param start fun(done: fun(ok: boolean, path: string|nil, err: any))
+---@param cb fun(ok: boolean, path: string|nil, err: any)
+local function shareOpening(key, start, cb)
+    local waiters = opening[key]
+    if waiters then
+        waiters[#waiters + 1] = cb
+        return
+    end
+    opening[key] = { cb }
+    start(function(ok, path, err)
+        waiters = opening[key]
+        opening[key] = nil
+        for i = 1, #waiters do
+            waiters[i](ok, path, err)
+        end
+    end)
+end
 
 --- 返回 Moon 源元信息。
 ---@return BookSourceMeta
@@ -48,7 +126,8 @@ end
 ---@return SourceCapabilities
 function Source:capabilities()
     return {
-        search = false,
+        search = true,
+        refresh = true,
         scrape = false,
         insight = true,
         store = false,
@@ -61,14 +140,145 @@ function Source:configured()
     return self._client:configured()
 end
 
+--- 打开 Moon 整本书：缓存命中直开，否则下载、校验并登记物理路径。
+---@param identity BookIdentity
+---@param _opts table|nil
+---@param cb fun(path: string|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:openBookAsync(identity, _opts, cb)
+    local cancelled = false
+    local dialog
+    local path = bookPath(identity)
+
+    local function closeDialog()
+        if dialog then
+            dialog:close()
+            dialog = nil
+        end
+    end
+
+    local function register(local_path)
+        require("book.store").touchAsync(local_path, identity, nil, function(ok, err)
+            if cancelled then return end
+            if ok then
+                cb(local_path)
+            else
+                cb(nil, err and tostring(err) or _("无法登记书籍路径"))
+            end
+        end)
+    end
+
+    if validBook(path) then
+        register(path)
+        return { cancel = function() cancelled = true end }
+    end
+    os.remove(path)
+
+    require("ui/network/manager"):runWhenOnline(function()
+        if cancelled then return end
+        shareOpening(identity.stable_id, function(done)
+            local book = identity.book or {}
+            local title = book.title
+                or (identity.stable_id:match("([^/\\]+)$") or identity.stable_id)
+            local size = tonumber(book.fileSize or book.filesize or book.size or book.file_size)
+            local has_dialog, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
+            if has_dialog and ProgressbarDialog then
+                dialog = ProgressbarDialog:new{
+                    title = _("正在下载…"),
+                    subtitle = title,
+                    progress_max = (size and size > 0) and size or nil,
+                    refresh_time_seconds = 1,
+                    dismissable = false,
+                }
+                dialog:show()
+            else
+                require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
+                    text = _("正在下载…"),
+                })
+            end
+
+            local temp_path = path .. ".part"
+            self._client:downloadBookAsync(identity.stable_id, temp_path, dialog and function(bytes)
+                if dialog then dialog:reportProgress(bytes) end
+            end or nil, function(ok, err)
+                closeDialog()
+                if not ok then
+                    os.remove(temp_path)
+                    done(false, nil, (type(err) == "table" and err.message) or err)
+                    return
+                end
+                if not validBook(temp_path, path) then
+                    os.remove(temp_path)
+                    done(false, nil, _("下载文件校验失败"))
+                    return
+                end
+                os.remove(path)
+                if not os.rename(temp_path, path) then
+                    os.remove(temp_path)
+                    done(false, nil, _("无法保存文件"))
+                    return
+                end
+                done(true, path)
+            end)
+        end, function(ok, local_path, err)
+            if cancelled then return end
+            if not ok then
+                cb(nil, err or _("下载失败"))
+                return
+            end
+            register(local_path)
+        end)
+    end)
+
+    return {
+        cancel = function()
+            cancelled = true
+            closeDialog()
+        end,
+    }
+end
+
 --- 生命周期事件：阅读统计上报时机由本源自决。
---- StatsSync 拖 KOReader UI 依赖链，必须函数内延迟加载（离线测试会 require 本文件）。
+--- 统计上报会拖 KOReader UI 依赖链，必须函数内延迟加载（离线测试会 require 本文件）。
 ---@param event string
 ---@param _payload table|nil
-function Source:onEvent(event, _payload)
-    if event == "document_close" or event == "suspend" then
-        require("stats.stats_sync").pushWithUi(self, false, false)
+function Source:onEvent(event, payload)
+    SourceBase.onEvent(self, event, payload)
+    if event == "stats_sync_request" then
+        self:syncReadingStats(true)
     end
+end
+
+--- Moon 自己决定联网、节流、pull/push 顺序和用户提示。
+---@param show_message boolean
+function Source:syncReadingStats(show_message)
+    local UIManager = require("ui/uimanager")
+    local InfoMessage = require("ui/widget/infomessage")
+    if self._stats_syncing then
+        if show_message then
+            UIManager:show(InfoMessage:new{ text = _("阅读统计正在同步…"), timeout = 2 })
+        end
+        return
+    end
+    if not self:configured() then
+        if show_message then UIManager:show(InfoMessage:new{ text = _("未配置"), timeout = 2 }) end
+        return
+    end
+    self._stats_syncing = true
+    require("ui/network/manager"):runWhenOnline(function()
+        local function finish(result, err)
+            self._stats_syncing = false
+            if show_message then
+                UIManager:show(InfoMessage:new{
+                    text = result and _("阅读统计已同步") or (err or _("统计同步失败")),
+                    timeout = 2,
+                })
+            elseif not result then
+                logger.warn("book moon stats sync failed", err)
+            end
+        end
+        self:syncStatsAsync(nil, finish)
+    end)
 end
 
 --- 把 BookListOpts 转成 Moon list API 的 query 表。
@@ -95,104 +305,146 @@ function Source:clearCaches()
 end
 
 --- 构造 Moon 封面请求。
----@param ref BookRef
+---@param identity BookIdentity
 ---@return BookCoverRequest|nil, string|nil
-function Source:coverRequest(ref)
-    local req, err = self._client:coverRequest(ref.stable_id)
+function Source:coverRequest(identity)
+    local req, err = self._client:coverRequest(identity.stable_id)
     if not req then
         return nil, (type(err) == "table" and err.message) or err
     end
     return req
 end
 
-function Source:listLibraryAsync(opts, cb)
-    return self._client:listBooksAsync(listQuery(opts), function(wire, err)
-        if wire then
-            cb(Mapper.list(wire))
-        else
-            cb(nil, (type(err) == "table" and err.message) or err)
-        end
-    end)
-end
-
-function Source:recentBooksAsync(limit, cb)
-    return self._client:recentBooksAsync(limit, function(wire, err)
-        if wire then
-            cb(Mapper.list(wire))
-        else
-            cb(nil, (type(err) == "table" and err.message) or err)
-        end
-    end)
-end
-
-function Source:filtersAsync(cb)
-    return self._client:filtersAsync(function(wire, err)
-        if wire then
-            local data = wire.data or wire
-            cb({
-                data = {
-                    category = data.categories or data.category or {},
-                    series = data.groupNames or data.series or {},
-                },
-            })
-        else
-            cb(nil, (type(err) == "table" and err.message) or err)
-        end
-    end)
-end
-
-function Source:importReadingStatsAsync(payload, cb)
-    payload = payload or {}
-    -- 本地统计身份即 stable_id（moon 源 = filename），直接透传服务器契约
-    local books, stats, seen = {}, {}, {}
-    for _, b in ipairs(payload.books or {}) do
-        local filename = b.stable_id
-        if type(filename) == "string" and filename ~= "" and not seen[filename] then
-            seen[filename] = true
-            books[#books + 1] = { filename = filename }
-        end
+--- 分页拉取完整 Moon 书架，全部成功后一次性对账本地库。
+---@param opts { force?: boolean }|nil
+---@param cb fun(result: SyncResult|nil, err: any)
+---@return { cancel: fun() }
+function Source:syncBooksAsync(opts, cb)
+    if opts and opts.force then self:clearCaches() end
+    local page, page_size = 1, 200
+    local books, cancelled, job = {}, false, nil
+    local function nextPage()
+        if cancelled then return end
+        job = self._client:listBooksAsync(listQuery({ page = page, page_size = page_size }), function(wire, err)
+            job = nil
+            if cancelled then return end
+            if not wire then cb(nil, (type(err) == "table" and err.message) or err); return end
+            local mapped = Mapper.list(wire)
+            for _, book in ipairs(mapped.data or {}) do books[#books + 1] = book end
+            local count = tonumber(mapped.count) or #books
+            if #books < count and #(mapped.data or {}) > 0 then
+                page = page + 1
+                nextPage()
+                return
+            end
+            job = require("book.store").reconcileAsync(self.id, books, nil, cb)
+        end)
     end
-    for _, s in ipairs(payload.stats or {}) do
-        local filename = s.stable_id
-        if type(filename) == "string" and filename ~= "" then
+    nextPage()
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job:cancel() end
+    end }
+end
+
+--- 把领域统计记录转换成 Moon 的上报协议。
+--- 设备标识和 books/stats wire 字段属于 Source，不泄漏到 book.stats。
+---@param rows table[]
+---@param cb fun(data: table|nil, err: string|nil)
+---@return table|nil
+function Source:pushStatsAsync(rows, cb)
+    rows = rows or {}
+    local books, stats, seen = {}, {}, {}
+    for _, row in ipairs(rows) do
+        if type(row.stable_id) == "string" and row.stable_id ~= "" then
+            if not seen[row.stable_id] then
+                seen[row.stable_id] = true
+                books[#books + 1] = { filename = row.stable_id }
+            end
             stats[#stats + 1] = {
-                filename = filename,
-                page = s.page,
-                start_time = s.start_time,
-                duration = s.duration,
-                total_pages = s.total_pages,
-                device_id = s.device_id,
+                filename = row.stable_id,
+                page = row.page,
+                start_time = row.start_time,
+                duration = row.duration,
+                total_pages = row.total_pages,
             }
         end
     end
-    if #books == 0 and #stats == 0 then
+    if #stats == 0 then
         cb(nil, _("无阅读统计数据"))
         return nil
     end
-    return self._client:importReadingStatsAsync({
-        books = books,
-        stats = stats,
-        device_id = payload.device_id,
-    }, function(wire, err)
-        if wire then
-            cb(wire)
-        else
-            cb(nil, (type(err) == "table" and err.message) or err)
-        end
-    end)
+    local id = G_reader_settings and G_reader_settings:readSetting("device_id")
+    if type(id) ~= "string" or id == "" then
+        id = string.format("book-%08x%08x", math.floor(math.random() * 0xffffffff), os.time() % 0xffffffff)
+        if G_reader_settings then G_reader_settings:saveSetting("device_id", id) end
+    end
+    return self._client:syncStatsAsync({
+        books = books, stats = stats, device_id = id,
+    }, cb)
 end
 
-function Source:syncAnnotationsAsync(payload, cb)
-    payload = payload or {}
-    local filename = payload.filename
-    if type(filename) ~= "string" or filename == "" or type(payload.annotations) ~= "table" then
+--- 逐本拉取 Moon page_stat，并映射成 reading_stats 领域记录。
+---@param cb fun(rows: table[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:pullStatsAsync(cb)
+    local ids = require("utils.db.book").libraryStableIdsBySource(self.id)
+    local rows, index, cancelled, job = {}, 1, false, nil
+    local function nextBook()
+        if cancelled then return end
+        local stable_id = ids[index]
+        index = index + 1
+        if not stable_id then
+            cb(rows)
+            return
+        end
+        job = self._client:getBookStatsAsync(stable_id, function(wire, err)
+            if cancelled then return end
+            if not wire then
+                cb(nil, (type(err) == "table" and err.message) or err)
+                return
+            end
+            local data = wire.data or wire
+            local stats = data.page_stat or data.stats or data.records or data
+            if type(stats) == "table" then
+                for _, item in ipairs(stats) do
+                    if type(item) == "table" then
+                        local start_time = tonumber(item.start_time or item.startTime)
+                        local duration = tonumber(item.duration)
+                        if start_time and duration and duration > 0 then
+                            rows[#rows + 1] = {
+                                source_id = self.id,
+                                stable_id = stable_id,
+                                page = tonumber(item.page) or 0,
+                                start_time = start_time,
+                                duration = duration,
+                                total_pages = tonumber(item.total_pages or item.totalPages or item.pages) or 0,
+                            }
+                        end
+                    end
+                end
+            end
+            nextBook()
+        end)
+    end
+    nextBook()
+    return {
+        cancel = function()
+            cancelled = true
+            if job and job.cancel then job.cancel() end
+        end,
+    }
+end
+
+function Source:pushNotesAsync(identity, annotations, cb)
+    if type(identity) ~= "table" or type(identity.stable_id) ~= "string"
+        or identity.stable_id == "" or type(annotations) ~= "table" then
         cb(nil, _("无效的注解数据"))
         return nil
     end
     return self._client:syncAnnotationsAsync({
-        filename = filename,
-        device_id = payload.device_id,
-        annotations = payload.annotations,
+        filename = identity.stable_id,
+        annotations = annotations,
     }, function(wire, err)
         if wire then
             cb(wire)
@@ -202,18 +454,20 @@ function Source:syncAnnotationsAsync(payload, cb)
     end)
 end
 
-function Source:readingInsightAsync(cb)
-    return self._client:readingInsightAsync(function(wire, err)
-        if wire then
-            cb({ data = Mapper.insight(wire.data or wire) })
-        else
+function Source:pullNotesAsync(identity, cb)
+    return self._client:getAnnotationsAsync(identity.stable_id, function(wire, err)
+        if not wire then
             cb(nil, (type(err) == "table" and err.message) or err)
+            return
         end
+        local data = wire.data or wire
+        local annotations = data.annotations
+        cb(type(annotations) == "table" and annotations or {})
     end)
 end
 
-function Source:getProgressAsync(ref, cb)
-    return self._client:getProgressAsync(ref.stable_id, function(wire, err)
+function Source:getProgressAsync(identity, cb)
+    return self._client:getProgressAsync(identity.stable_id, function(wire, err)
         if not wire then
             cb(nil, (type(err) == "table" and err.message) or err)
             return
@@ -227,27 +481,17 @@ function Source:getProgressAsync(ref, cb)
     end)
 end
 
-function Source:putProgressAsync(ref, pos, cb)
+function Source:putProgressAsync(identity, pos, cb)
     pos = pos or {}
     local frac = ProgressPosition.clampFraction(pos.fraction)
     return self._client:updateProgressAsync({
-        filename = ref.stable_id,
+        filename = identity.stable_id,
         frac = frac,
         spine = pos.chapter_idx or 0,
         page = 0,
         percent = string.format("%.2f", frac * 100) .. "%",
     }, function(wire, err)
         if wire then
-            cb(true)
-        else
-            cb(nil, (type(err) == "table" and err.message) or err)
-        end
-    end)
-end
-
-function Source:materializeWholeAsync(ref, temp_path, on_progress, cb)
-    return self._client:downloadBookAsync(ref.stable_id, temp_path, on_progress, function(ok, err)
-        if ok then
             cb(true)
         else
             cb(nil, (type(err) == "table" and err.message) or err)

@@ -200,6 +200,19 @@ function Registry.current()
     return _active
 end
 
+--- 按书籍身份解析属主源；当前源匹配则复用，否则创建非活跃实例。
+--- 不切换用户当前选择的数据源。
+---@param id SourceId
+---@return BookSource|nil, string|nil
+function Registry.resolve(id)
+    local current, err = Registry.current()
+    if current and current.id == id then
+        return current
+    end
+    local source, create_err = Registry.create(id)
+    return source, create_err or err
+end
+
 --- 必须拿到活跃源；失败抛错给调用方处理（不再静默换 Moon）
 ---@return BookSource
 function Registry.requireActive()

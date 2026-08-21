@@ -220,7 +220,7 @@ function Client:filtersAsync(cb)
     return self:_jsonAsync("GET", "/index/book/filters", { cache_ttl = 5 * 60 }, cb)
 end
 
-function Client:importReadingStatsAsync(body, cb)
+function Client:syncStatsAsync(body, cb)
     return self:_jsonAsync("POST", "/index/stats/import", { body = body or {}, json = true }, function(res, err)
         if res then
             Request.clearCache("/index/stats/insight")
@@ -229,10 +229,22 @@ function Client:importReadingStatsAsync(body, cb)
     end)
 end
 
+function Client:getBookStatsAsync(filename, cb)
+    return self:_jsonAsync("GET", "/index/stats/book", {
+        query = { filename = filename },
+    }, cb)
+end
+
 function Client:syncAnnotationsAsync(body, cb)
     return self:_jsonAsync("POST", "/index/stats/annotations", {
         body = body or {},
         json = true,
+    }, cb)
+end
+
+function Client:getAnnotationsAsync(filename, cb)
+    return self:_jsonAsync("GET", "/index/stats/annotations", {
+        query = { filename = filename },
     }, cb)
 end
 
