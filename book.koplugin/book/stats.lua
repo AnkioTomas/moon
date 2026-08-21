@@ -110,7 +110,7 @@ end
 ---@param done fun(ok: boolean, result: any)|nil result 为 Source 结果、empty 或错误
 ---@return table|nil job Source 返回的可取消任务；无待同步记录时为 nil
 function Stats.push(source, done)
-    if not source or type(source.syncStatsAsync) ~= "function" then
+    if not source or type(source.pushStatsAsync) ~= "function" then
         if done then done(false, "unsupported") end
         return
     end
@@ -143,7 +143,7 @@ function Stats.push(source, done)
             end,
         })
     end
-    return source:syncStatsAsync(rows, onResult)
+    return source:pushStatsAsync(rows, onResult)
 end
 
 --- 判断一条领域统计记录是否具备可持久化的最小字段。
@@ -261,6 +261,61 @@ function Stats.pull(source, done)
             if done then done(true, result) end
         end)
     end)
+end
+
+--- 拉取并集合并，再上传本地未确认统计。
+---@param source BookSource
+---@param _opts table|nil
+---@param cb fun(result: SyncResult|nil, err: any)|nil
+---@return { cancel: fun() }
+function Stats.syncAsync(source, _opts, cb)
+    local opts = _opts or {}
+    local can_pull = source and type(source.pullStatsAsync) == "function"
+    local can_push = source and type(source.pushStatsAsync) == "function"
+    local cancelled, current_job = false, nil
+    local result = { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
+    local function finish(value, err)
+        if not cancelled and cb then cb(value, err) end
+    end
+    if not can_pull and not can_push then
+        require("ui/uimanager"):nextTick(function()
+            result.skipped, result.reason = true, "unsupported"
+            finish(result)
+        end)
+        return { cancel = function() cancelled = true end }
+    end
+    local function push()
+        if cancelled then return end
+        if not can_push then finish(result); return end
+        local pending = #StatsDB.unsyncedBySource(source.id)
+        if pending == 0 then finish(result); return end
+        current_job = Stats.push(source, function(ok, value)
+            current_job = nil
+            if not ok then finish(nil, value); return end
+            result.pushed = pending
+            finish(result)
+        end)
+    end
+    if can_pull and not opts.dirty_only then
+        current_job = source:pullStatsAsync(function(rows, err)
+            current_job = nil
+            if cancelled then return end
+            if not rows then finish(nil, err or "stats pull failed"); return end
+            importRows(rows, true, function(imported)
+                if cancelled then return end
+                result.pulled = imported.imported
+                push()
+            end)
+        end)
+    else
+        require("ui/uimanager"):nextTick(push)
+    end
+    return {
+        cancel = function()
+            cancelled = true
+            if current_job and current_job.cancel then current_job:cancel() end
+        end,
+    }
 end
 
 --- 收集已登记书籍和章节的物理路径，供 DocSettings Lua 统计导入。

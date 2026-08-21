@@ -15,9 +15,17 @@ local ProgressPosition = require("types.book_progress")
 local _ = require("gettext")
 
 local Progress = {}
+local asked_conflicts = {}
+local last_revision = 0
 
+local function nextRevision()
+    last_revision = math.max(os.time(), last_revision + 1)
+    return last_revision
+end
 
-
+local function T(fmt, value)
+    return tostring(fmt):gsub("%%1", tostring(value), 1)
+end
 --- 把文档内比例合成为全书比例。
 ---@param doc_frac number
 ---@param id BookIdentity|nil
@@ -106,7 +114,7 @@ function Progress.save(snapshot, cb)
         return
     end
     local pos = Progress.position(snapshot)
-    pos.updated_at = os.time()
+    pos.updated_at = nextRevision()
     DbQueue.run(function()
         assert(ProgressDB.upsert(id.source_id, id.stable_id, pos), "failed to save progress")
     end, {
@@ -120,38 +128,117 @@ function Progress.save(snapshot, cb)
     })
 end
 
---- 上传数据库中所有未同步进度。网络失败由源回调 false，进度行保留。
----@param _ui table|nil 保留入口签名；进度数据完全来自数据库
-function Progress.push(_ui)
-    local sources = {}
-    local Registry = require("source.registry")
-    for _idx, row in ipairs(ProgressDB.unsynced()) do
-        local source = sources[row.source_id]
-        if source == nil then
-            local resolved, err = Registry.resolve(row.source_id)
-            source = resolved or false
-            sources[row.source_id] = source
-            if not source and err then
-                logger.warn("book.progress source unavailable", row.source_id, err)
-            end
-        end
-        if source and source.putProgressAsync then
-            local identity = { source_id = row.source_id, stable_id = row.stable_id }
-            local pos = {
-                fraction = row.fraction,
-                chapter_idx = row.chapter_idx,
-                chapter_fraction = row.chapter_fraction,
-                locator = row.locator,
+---@param row PendingProgress
+---@return ProgressPosition
+local function rowPosition(row)
+    return {
+        fraction = row.fraction,
+        chapter_idx = row.chapter_idx,
+        chapter_fraction = row.chapter_fraction,
+        locator = row.locator,
+    }
+end
+
+--- 将一个 Source 的本地进度与远端收敛。本地脏版本先上传，干净后才拉取。
+---@param source BookSource
+---@param opts { identity?: BookIdentity, dirty_only?: boolean }|nil
+---@param cb fun(result: SyncResult|nil, err: any)|nil
+---@return { cancel: fun() }
+function Progress.syncAsync(source, opts, cb)
+    opts = opts or {}
+    local can_pull = source and type(source.getProgressAsync) == "function"
+    local can_push = source and type(source.putProgressAsync) == "function"
+    local cancelled, current_job = false, nil
+    local result = { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
+    local function finish(value, err)
+        if not cancelled and cb then cb(value, err) end
+    end
+    if not source or (not can_pull and not can_push) then
+        require("ui/uimanager"):nextTick(function()
+            result.skipped, result.reason = true, "unsupported"
+            finish(result)
+        end)
+        return { cancel = function() cancelled = true end }
+    end
+
+    local identities, seen = {}, {}
+    local function add(source_id, stable_id, chapter_idx)
+        local key = tostring(stable_id) .. "\31" .. tostring(chapter_idx or 0)
+        if stable_id and stable_id ~= "" and not seen[key] then
+            seen[key] = true
+            identities[#identities + 1] = {
+                source_id = source_id, stable_id = stable_id, chapter_idx = chapter_idx,
             }
-            source:putProgressAsync(identity, pos, function(res, err)
-                if res == true then
-                    confirm(row.source_id, row.stable_id, row.updated_at, function() end)
-                else
-                    logger.warn("book.progress push failed", row.stable_id, err)
-                end
-            end)
         end
     end
+    if opts.identity then
+        add(source.id, opts.identity.stable_id, opts.identity.chapter_idx)
+    elseif not opts.dirty_only then
+        for _, stable_id in ipairs(require("utils.db.book").libraryStableIdsBySource(source.id)) do
+            add(source.id, stable_id)
+        end
+    end
+    if not opts.identity then
+        for _, row in ipairs(ProgressDB.unsynced(source.id)) do
+            add(source.id, row.stable_id, row.chapter_idx)
+        end
+    end
+
+    local index = 1
+    local function nextIdentity()
+        if cancelled then return end
+        local identity = identities[index]
+        index = index + 1
+        if not identity then finish(result); return end
+
+        local function pullRemote()
+            if opts.dirty_only or not can_pull then nextIdentity(); return end
+            current_job = source:getProgressAsync(identity, function(pos, err)
+                current_job = nil
+                if cancelled then return end
+                if not pos then finish(nil, err or "progress pull failed"); return end
+                DbQueue.run(function()
+                    pos.updated_at = os.time()
+                    assert(ProgressDB.upsertRemote(source.id, identity.stable_id, pos),
+                        "failed to save remote progress")
+                end, {
+                    on_done = function()
+                        result.pulled = result.pulled + 1
+                        nextIdentity()
+                    end,
+                    on_failed = function(save_err) finish(nil, save_err) end,
+                })
+            end)
+        end
+
+        local row = ProgressDB.get(source.id, identity.stable_id)
+        if row and row.sync_status == 0 then
+            if not can_push then
+                result.conflicts = result.conflicts + 1
+                nextIdentity()
+                return
+            end
+            current_job = source:putProgressAsync(identity, rowPosition(row), function(ok, err)
+                current_job = nil
+                if cancelled then return end
+                if ok ~= true then finish(nil, err or "progress push failed"); return end
+                confirm(source.id, identity.stable_id, row.updated_at, function(confirmed)
+                    if not confirmed then finish(nil, "progress confirm failed"); return end
+                    result.pushed = result.pushed + 1
+                    pullRemote()
+                end)
+            end)
+            return
+        end
+        pullRemote()
+    end
+    require("ui/uimanager"):nextTick(nextIdentity)
+    return {
+        cancel = function()
+            cancelled = true
+            if current_job and current_job.cancel then current_job:cancel() end
+        end,
+    }
 end
 
 --- 把云端进度应用到当前文档（按章书跳章，整本书跳比例）。
@@ -214,6 +301,9 @@ end
 ---@param pct number
 ---@param local_frac number
 local function askProgressConflict(id, pos, pct, local_frac)
+    local key = id.source_id .. "\31" .. id.stable_id
+    if asked_conflicts[key] then return end
+    asked_conflicts[key] = true
     local ConfirmBox = require("ui/widget/confirmbox")
     local remote_label = T(_("云端 %1%"), string.format("%.1f", pct * 100))
     local local_label = T(_("本地 %1%"), string.format("%.1f", local_frac * 100))
@@ -229,6 +319,15 @@ local function askProgressConflict(id, pos, pct, local_frac)
             end
         end,
         cancel_callback = function()
+            local Session = require("ui.reader.session")
+            local current = Session.current()
+            if current and Session.isCurrent(id) then
+                Progress.save(current, function(ok)
+                    if ok and id.source and id.source.syncProgressAsync then
+                        id.source:syncProgressAsync({ identity = id }, function() end)
+                    end
+                end)
+            end
         end,
     })
 end
@@ -239,24 +338,23 @@ function Progress.pull(snapshot)
     local id = snapshot and snapshot.identity
     if not id then return end
     local source = id.source
-    if not source or not source.getProgressAsync then
+    if not source or not source.syncProgressAsync then
         return
     end
-    Progress.save(snapshot, function(ok)
-        if not ok then
-            return
-        end
-        source:getProgressAsync(id, function(pos, err)
+    source:syncProgressAsync({ identity = id }, function(result, err)
             -- 校验当前文档身份：若用户已切换到其他书，跳过进度应用
             local Session = require("ui.reader.session")
             if not Session.isCurrent(id) then
                 logger.dbg("book.progress pull skip: document changed")
                 return
             end
-            if not pos then
+            if not result then
                 UIManager:show(InfoMessage:new{ text = err or _("拉取失败") })
                 return
             end
+            if result.skipped then return end
+            local pos = ProgressDB.get(id.source_id, id.stable_id)
+            if not pos then return end
             local local_position = Session.position()
             local local_frac = local_position and local_position.fraction or 0
             if math.abs(local_frac - pos.fraction) < 0.01 then
@@ -264,7 +362,10 @@ function Progress.pull(snapshot)
             end
             askProgressConflict(id, pos, pos.fraction, local_frac)
         end)
-    end)
+end
+
+function Progress.clearConflicts()
+    asked_conflicts = {}
 end
 
 return Progress
