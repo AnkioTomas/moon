@@ -229,14 +229,16 @@ function Reader.attach(plugin)
         ui.view:registerViewModule("book_bars", bars)
         bars:startClock()
     end
-    require("lockscreen.init").refreshInBackground()
+    require("lockscreen.init").refreshInBackground(true)
 end
 
 ---@param plugin table
 function Reader.refresh(plugin)
     local ui = plugin and plugin.ui
     if ui then UIManager:setDirty(ui.dialog, "ui") end
-    require("lockscreen.init").refreshInBackground()
+    local LockScreen = require("lockscreen.init")
+    local force = LockScreen.needsLiveRefresh and LockScreen.needsLiveRefresh()
+    LockScreen.refreshInBackground(force)
 end
 
 return Reader

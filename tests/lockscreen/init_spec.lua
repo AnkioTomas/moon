@@ -28,6 +28,10 @@ end
 
 local PNG8 = "\137PNG\r\n\26\n" .. string.rep("\0", 24)
 local last_download = {}
+local render_writes = 0
+local cover_a = "/tmp/moon-lockscreen-cover-a.png"
+local cover_b = "/tmp/moon-lockscreen-cover-b.png"
+local current_cover = cover_a
 
 package.preload["http.request"] = function()
     return {
@@ -61,11 +65,20 @@ package.preload["ui/network/manager"] = function()
     }
 end
 
+package.preload["lockscreen.context"] = function()
+    return {
+        currentBook = function()
+            return { cover = current_cover }
+        end,
+    }
+end
+
 package.preload["lockscreen.render"] = function()
     return {
         size = function() return 480, 800 end,
         measureText = function() return 40 end,
         write = function(path)
+            render_writes = render_writes + 1
             local f = assert(io.open(path, "wb"))
             f:write(PNG8)
             f:close()
@@ -86,6 +99,7 @@ package.loaded["http.request"] = nil
 package.loaded["ui/network/manager"] = nil
 package.loaded["lockscreen.background"] = nil
 package.loaded["lockscreen.compose"] = nil
+package.loaded["lockscreen.context"] = nil
 package.loaded["lockscreen.init"] = nil
 package.loaded["lockscreen.render"] = nil
 package.loaded["lockscreen.settings"] = nil
@@ -98,6 +112,8 @@ local common = MoonSettings.get()
 local prev = {
     lock_screen = common.lock_screen,
     lock_screen_day = common.lock_screen_day,
+    lock_screen_bing_day = common.lock_screen_bing_day,
+    lock_screen_myrl_day = common.lock_screen_myrl_day,
     lock_screen_background = common.lock_screen_background,
     lock_screen_component = common.lock_screen_component,
     lock_screen_position = common.lock_screen_position,
@@ -108,31 +124,47 @@ local function cleanup()
     for k, v in pairs(prev) do common[k] = v end
     MoonSettings.save()
     pcall(os.remove, Compose.path())
+    pcall(os.remove, cover_a)
+    pcall(os.remove, cover_b)
     _G.G_reader_settings = previous_settings
 end
 
 local ok_run, err_run = pcall(function()
     common.lock_screen = "ko"
     common.lock_screen_day = nil
+    common.lock_screen_background = "bing"
+    common.lock_screen_component = "current"
     MoonSettings.save()
+    pcall(os.remove, Compose.path())
 
-    Assert.eq(LockScreen.mode(), "ko")
-    Assert.eq(LockScreen.label(), "跟随 KOReader")
-
-    local opts = LockScreen.options()
-    Assert.len(opts, 2)
-    Assert.eq(opts[1].value, "ko")
-    Assert.eq(opts[2].value, "compose")
-    Assert.eq(LockScreen.label("compose"), "组合壁纸")
+    Assert.is_false(LockScreen.isCompose())
 
     saved.screensaver_type = "cover"
     saved.screensaver_document_cover = "/old/cover.png"
     saved.screensaver_show_message = true
 
+    -- 残留 compose.png 不得让 setMode 立刻 applyCover（准备态必须是 disable）
+    require("utils.paths").ensureScreensaverDir()
+    local stale = assert(io.open(Compose.path(), "wb"))
+    stale:write(PNG8)
+    stale:close()
     LockScreen.setMode("compose")
-    Assert.eq(LockScreen.mode(), "compose")
+    Assert.is_true(LockScreen.isCompose())
     Assert.eq(common.lock_screen, "compose")
     Assert.eq(saved.screensaver_type, "disable")
+    Assert.is_nil(saved.screensaver_document_cover)
+
+    -- 账单是完整报告卡，位置固定居中，且底层 API 不能写入位置配置。
+    local previous_position = common.lock_screen_position
+    LockScreen.setComponent("bill")
+    common.lock_screen_position = "top-left"
+    MoonSettings.save()
+    Assert.eq(Compose.position(), "center-center")
+    LockScreen.setPosition("bottom-right")
+    Assert.eq(common.lock_screen_position, "top-left")
+    LockScreen.setComponent("current")
+    common.lock_screen_position = previous_position
+    MoonSettings.save()
 
     local done, ok_dl
     LockScreen.refresh(function(ok)
@@ -148,14 +180,23 @@ local ok_run, err_run = pcall(function()
 
     -- 缓存命中
     last_download.url = nil
+    render_writes = 0
     local refreshed
     LockScreen.refresh(function(ok) refreshed = ok end)
     Stubs.flush()
     Assert.is_true(refreshed)
+    Assert.eq(render_writes, 0)
 
-    -- myrl 背景触网
-    LockScreen.setBackgroundMode("myrl")
-    LockScreen.setComponent("none")
+    -- 强制刷新必须绕过当天缓存，保证动态主体能更新。
+    LockScreen.refreshInBackground(true)
+    Stubs.flush()
+    Assert.is_true(render_writes > 0)
+
+    -- myrl 主体触网；日报不再是独立背景。
+    LockScreen.setBackgroundMode("bing")
+    LockScreen.setComponent("myrl")
+    Assert.eq(Compose.backgroundMode(), "bing")
+    Assert.eq(Compose.assetMode(), "myrl")
     common.lock_screen_myrl_day = nil
     MoonSettings.save()
     pcall(os.remove, require("lockscreen.background").myrlPath())
@@ -166,6 +207,34 @@ local ok_run, err_run = pcall(function()
     Assert.not_nil(last_download.url)
     Assert.is_true(tostring(last_download.url):find("myrl", 1, true) ~= nil)
 
+    -- 即使组合图已经是当天版本，日报下载标记过期也必须再次请求。
+    common.lock_screen_myrl_day = "1999-01-01"
+    MoonSettings.save()
+    last_download.url = nil
+    LockScreen.refresh(function(ok) refreshed = ok end)
+    Stubs.flush()
+    Assert.is_true(refreshed)
+    Assert.is_true(tostring(last_download.url):find("myrl", 1, true) ~= nil)
+
+    -- 当前书籍封面参与缓存键：同一天切换书籍也要重绘。
+    local file_a = assert(io.open(cover_a, "wb"))
+    file_a:write(PNG8)
+    file_a:close()
+    local file_b = assert(io.open(cover_b, "wb"))
+    file_b:write(PNG8)
+    file_b:close()
+    LockScreen.setBackgroundMode("cover")
+    LockScreen.setComponent("none")
+    LockScreen.refresh(function(ok) refreshed = ok end)
+    Stubs.flush()
+    Assert.is_true(refreshed)
+    render_writes = 0
+    current_cover = cover_b
+    LockScreen.refresh(function(ok) refreshed = ok end)
+    Stubs.flush()
+    Assert.is_true(refreshed)
+    Assert.is_true(render_writes > 0)
+
     online = false
     last_download.url = nil
     LockScreen.refreshInBackground()
@@ -174,7 +243,7 @@ local ok_run, err_run = pcall(function()
 
     online = true
     LockScreen.setMode("ko")
-    Assert.eq(LockScreen.mode(), "ko")
+    Assert.is_false(LockScreen.isCompose())
     Assert.eq(saved.screensaver_type, "disable")
     Assert.is_true(saved.screensaver_show_message)
 end)

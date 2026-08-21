@@ -132,7 +132,8 @@ function Settings.build(desktop)
             function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "wallpaper", title = _("锁屏"),
-                    status = LockScreen.label(LockScreen.mode()), status_on = LockScreen.mode() ~= "ko",
+                    status = LockScreen.isCompose() and _("开") or _("关"),
+                    status_on = LockScreen.isCompose(),
                     callback = function() gotoSub(desktop, "lockscreen") end,
                 })
             end,

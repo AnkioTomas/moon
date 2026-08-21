@@ -209,7 +209,6 @@ local function monthlyChart(stats, width, height)
         width = width,
         height = height,
         gap = UI.sz(4),
-        track_empty = true,
     })
 end
 

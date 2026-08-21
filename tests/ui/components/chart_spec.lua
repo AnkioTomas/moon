@@ -73,3 +73,21 @@ Assert.eq(line_n, 2)
 Assert.eq(dot_n, 3)
 Assert.eq(lines[2].x1, 0)
 Assert.eq(lines[2].x2, 49)
+
+-- 统计卡的 7 根柱应铺满绘图区，而不是被默认柱宽上限缩在中间。
+local full = {}
+local seven = {}
+for i = 1, 7 do
+    seven[#seven + 1] = { value = i, label = tostring(i) }
+end
+Chart.appendBars(full, {
+    points = seven,
+    x = 0, y = 0, width = 400, height = 50,
+    bar_cap_ratio = 0.20,
+    label_mode = "none",
+})
+local full_rule
+for _, block in ipairs(full) do
+    if block.kind == "rule" then full_rule = block break end
+end
+Assert.is_true(full_rule.width >= 390)
