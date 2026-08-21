@@ -9,6 +9,7 @@ findFeed 走 getDetailAsync；章节打开验证源自己管理联网与进度 U
 
 local Assert = require("support.assert")
 local Config = require("support.config")
+local Stubs = require("support.stubs")
 local lfs = require("libs/libkoreader-lfs")
 
 -- 可变配置：RSS.new 每次取同一张表，改 feeds 即可驱动不同用例
@@ -18,6 +19,7 @@ local cfg = { feeds = {} }
 local client_state = { data = nil, err = nil, cleared = 0 }
 local chapter_open = {}
 local progress_ui = { shown = 0, closed = 0, progress = {} }
+local reconciled_books
 
 package.preload["utils.settings"] = function()
     return {
@@ -67,6 +69,15 @@ package.preload["source.chapter"] = function()
             ops.progress(4)
             dialog:close()
             cb(chapter_open.path, chapter_open.err)
+            return { cancel = function() end }
+        end,
+    }
+end
+package.preload["book.store"] = function()
+    return {
+        reconcileAsync = function(_, books, _, cb)
+            reconciled_books = books
+            cb({ pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false })
             return { cancel = function() end }
         end,
     }
@@ -125,7 +136,7 @@ local function fileExists(path)
     return lfs.attributes(path, "mode") == "file"
 end
 
--- configuredFeeds：按规范化 URL 去重（保留首条）、跳过空 URL（经 listLibraryAsync 观察）
+-- configuredFeeds：按规范化 URL 去重（保留首条）、跳过空 URL（经 syncBooksAsync 观察）
 do
     cfg.feeds = {
         { url = "Example.COM/feed/", title = "甲" },
@@ -135,12 +146,12 @@ do
     }
     local src = RSS.new()
     local books
-    src:listLibraryAsync({}, function(result) books = result end)
-    Assert.len(books.data, 2)
-    Assert.eq(books.data[1].title, "甲")
-    Assert.eq(books.data[1].stable_id, "https://example.com/feed")
-    Assert.eq(books.data[2].title, "乙")
-    Assert.eq(books.data[2].stable_id, "https://b.example.com/rss")
+    src:syncBooksAsync({}, function(result) books = result end)
+    Stubs.flush()
+    Assert.eq(books.pulled, 2)
+    Assert.eq(reconciled_books[1].title, "甲")
+    Assert.eq(reconciled_books[1].stable_id, "https://example.com/feed")
+    Assert.eq(reconciled_books[2].title, "乙")
 end
 
 -- configured：有无有效订阅
@@ -203,6 +214,7 @@ do
         "ui/network/manager",
         "ui/widget/progressbardialog",
         "source.chapter",
+        "book.store",
         "source.rss",
     }) do
         package.preload[name] = nil

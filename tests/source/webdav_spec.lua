@@ -20,7 +20,6 @@ end
 package.preload["source.webdav.client"] = function()
     return { new = function() return client end }
 end
-package.preload["source.webdav.mapper"] = function() return {} end
 package.preload["utils.paths"] = function()
     return {
         ensureBookWork = function() end,
@@ -48,6 +47,12 @@ package.preload["book.store"] = function()
             rec.touch_identity = identity
             cb(true)
         end,
+        reconcileAsync = function(source_id, books, _, cb)
+            rec.reconciled_source = source_id
+            rec.reconciled_books = books
+            cb({ pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false })
+            return { cancel = function() end }
+        end,
     }
 end
 
@@ -60,6 +65,13 @@ function client:downloadAsync(stable_id, path, on_progress, cb)
     file:close()
     if on_progress then on_progress(8) end
     cb(rec.ok ~= false, rec.err)
+    return { cancel = function() end }
+end
+
+function client:listAsync(path, cb)
+    rec.listed = rec.listed or {}
+    rec.listed[#rec.listed + 1] = path
+    cb(assert(rec.tree[path]))
     return { cancel = function() end }
 end
 
@@ -97,6 +109,34 @@ source:openBookAsync(identity, nil, function(p, err) opened, open_err = p, err e
 Assert.is_nil(opened)
 Assert.eq(open_err, "下载文件校验失败")
 Assert.is_nil(lfs.attributes(path .. ".part"))
+
+-- 完整递归目录成功后只对账一次；前两级目录映射 category / series。
+rec.tree = {
+    [""] = {
+        { is_dir = true, name = "fiction", path = "fiction" },
+        { is_dir = false, name = "root.pdf", path = "root.pdf" },
+    },
+    ["fiction"] = {
+        { is_dir = true, name = "trilogy", path = "fiction/trilogy" },
+        { is_dir = false, name = "one.epub", path = "fiction/one.epub" },
+    },
+    ["fiction/trilogy"] = {
+        { is_dir = false, name = "two.epub", path = "fiction/trilogy/two.epub" },
+    },
+}
+local sync_result
+source:syncBooksAsync(nil, function(result) sync_result = result end)
+Assert.eq(table.concat(rec.listed, ","), ",fiction,fiction/trilogy")
+Assert.eq(rec.reconciled_source, "webdav")
+Assert.eq(#rec.reconciled_books, 3)
+local by_id = {}
+for _, book in ipairs(rec.reconciled_books) do by_id[book.stable_id] = book end
+Assert.is_nil(by_id["root.pdf"].category)
+Assert.eq(by_id["fiction/one.epub"].category, "fiction")
+Assert.is_nil(by_id["fiction/one.epub"].series)
+Assert.eq(by_id["fiction/trilogy/two.epub"].category, "fiction")
+Assert.eq(by_id["fiction/trilogy/two.epub"].series, "trilogy")
+Assert.eq(sync_result.pulled, 3)
 
 for _, name in ipairs({
     "source.base",

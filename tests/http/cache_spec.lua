@@ -42,3 +42,19 @@ do
     local k2 = Cache.key("GET", "https://x/list", { page = 2 })
     Assert.is_true(k1 ~= k2)
 end
+
+-- POST 表单同样进入规范化参数，搜索关键词不能串缓存。
+do
+    local k1 = Cache.key("POST", "zlib://api/eapi/book/search", {
+        message = "Lua",
+        page = 1,
+        limit = 200,
+    })
+    local k2 = Cache.key("POST", "zlib://api/eapi/book/search", {
+        message = "Linux",
+        page = 1,
+        limit = 200,
+    })
+    Assert.eq(k1, "POST zlib://api/eapi/book/search?limit=200&message=Lua&page=1")
+    Assert.is_true(k1 ~= k2)
+end

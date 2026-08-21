@@ -198,6 +198,66 @@ do
     clearMods()
 end
 
+-- ── upsertRemote：普通缓存不改变书架成员；完整快照显式恢复成员 ──
+do
+    local connection, calls = makeConn()
+    local DbBase, BookDB = loadBook(connection)
+
+    Assert.is_true(BookDB.upsertRemote({ source_id = "moon", stable_id = "store.epub" }))
+    local q = calls[#calls]
+    Assert.eq(q.args[13], 0, "新缓存行默认不进入书架")
+    Assert.eq(q.args[14], 0, "未指定成员关系时冲突行必须保留原值")
+    Assert.is_true(q.sql:find("CASE WHEN ?=1 THEN excluded.in_library ELSE books.in_library END", 1, true) ~= nil)
+
+    Assert.is_true(BookDB.upsertRemote({
+        source_id = "moon", stable_id = "shelf.epub", in_library = true,
+    }))
+    q = calls[#calls]
+    Assert.eq(q.args[13], 1)
+    Assert.eq(q.args[14], 1)
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── reconcile：先隐藏旧成员，再恢复完整快照；任一写失败整体回滚 ──
+do
+    local connection, calls = makeConn()
+    local DbBase, BookDB = loadBook(connection)
+    Assert.is_true(BookDB.reconcile("moon", {
+        { stable_id = "a.epub", title = "A" },
+        { source_id = "moon", stable_id = "b.epub", title = "B" },
+    }))
+    local hide, inserts, commit = 0, 0, false
+    for _, call in ipairs(calls) do
+        if call.sql == "UPDATE books SET in_library=0 WHERE source_id=?;" then hide = hide + 1 end
+        if call.sql:find("INSERT INTO books", 1, true) and call.argc == 14 then
+            inserts = inserts + 1
+            Assert.eq(call.args[13], 1)
+            Assert.eq(call.args[14], 1)
+        end
+        if call.sql == "COMMIT;" then commit = true end
+    end
+    Assert.eq(hide, 1)
+    Assert.eq(inserts, 2)
+    Assert.is_true(commit)
+    DbBase.close()
+    clearMods()
+end
+
+do
+    local connection, calls = makeConn({
+        step = function(sql)
+            if sql:find("INSERT INTO books", 1, true) then error("disk full") end
+        end,
+    })
+    local DbBase, BookDB = loadBook(connection)
+    Assert.is_false(BookDB.reconcile("moon", { { stable_id = "a.epub" } }))
+    Assert.eq(calls[#calls].sql, "ROLLBACK;")
+    DbBase.close()
+    clearMods()
+end
+
 -- ── get：命中映射 Book；未命中 nil；非法输入不碰 DB ──────
 do
     local connection, calls = makeConn({
@@ -433,7 +493,7 @@ do
     Assert.eq(rows[2].stable_id, "/a.epub")
     Assert.eq(rows[2].last_chapter_idx, 5)
     local q = calls[#calls]
-    Assert.is_true(q.sql:find("FROM books WHERE source_id=? AND last_open>0 ORDER BY last_open DESC LIMIT ?;", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("FROM books WHERE source_id=? AND in_library=1 AND last_open>0 ORDER BY last_open DESC LIMIT ?;", 1, true) ~= nil)
     Assert.eq(q.args[1], "local")
     Assert.eq(q.args[2], 24)
 

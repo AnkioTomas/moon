@@ -1,8 +1,8 @@
 --[[--
-source.moon 门面离线用例：listQuery 组装 / onEvent 事件分发 / progress 映射。
+source.moon 门面离线用例：书架同步 / 本地查询 / onEvent 事件分发 / progress 映射。
 
-listQuery 是 local 函数，经 listLibraryAsync 捕获传给 client 的 query 观察；
-onEvent 的 KOReader UI 依赖（NetworkMgr/StatsSync）按约定函数内延迟加载，这里用 preload 打桩。
+书架同步经远端 listQuery 拉全量；书架展示与筛选则必须经过 book.catalog。
+onEvent 的 KOReader UI 依赖按约定函数内延迟加载，这里用 preload 打桩。
 
 @module tests.source.moon_spec
 --]]
@@ -37,7 +37,23 @@ package.preload["utils.paths"] = function()
 end
 
 package.preload["utils.db.book"] = function()
-    return { stableIdsBySource = function() return { "a.epub", "b.epub" } end }
+    return { libraryStableIdsBySource = function() return { "a.epub", "b.epub" } end }
+end
+
+package.preload["book.catalog"] = function()
+    return {
+        listLibraryAsync = function(source_id, opts, cb)
+            rec.catalog_source = source_id
+            rec.catalog_opts = opts
+            cb({ data = { { stable_id = "local-a.epub", percent = 42 } }, count = 1 })
+            return { cancel = function() end }
+        end,
+        filtersAsync = function(source_id, cb)
+            rec.catalog_source = source_id
+            cb({ data = { category = { "小说", "技术" }, series = { "第一辑" } } })
+            return { cancel = function() end }
+        end,
+    }
 end
 
 package.preload["ui/network/manager"] = function()
@@ -70,6 +86,12 @@ package.preload["book.store"] = function()
             touches[#touches + 1] = { path = path, identity = identity }
             cb(true)
         end,
+        reconcileAsync = function(source_id, books, _, cb)
+            rec.reconciled_source = source_id
+            rec.reconciled_books = books
+            cb({ pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false })
+            return { cancel = function() end }
+        end,
     }
 end
 
@@ -78,6 +100,13 @@ local sync = { push_calls = 0, last_source = nil, push_args = nil }
 
 package.preload["book.stats"] = function()
     return {
+        syncAsync = function(self, _, cb)
+            sync.push_calls = sync.push_calls + 1
+            sync.pull_calls = (sync.pull_calls or 0) + 1
+            sync.last_source = self
+            cb({ pulled = 1, pushed = 1 })
+            return { cancel = function() end }
+        end,
         push = function(self, cb)
             sync.push_calls = sync.push_calls + 1
             sync.last_source = self
@@ -168,18 +197,23 @@ local function resetRec()
     for k in pairs(rec) do rec[k] = nil end
 end
 
--- listQuery：opts 缺省 → 默认 query
+-- syncBooksAsync：完整书架拉取后写入本地库
 do
     resetRec()
-    src:listLibraryAsync(nil, function() end)
+    rec.list_wire = { data = { { filename = "a.epub", title = "A" } }, count = 1 }
+    local result
+    src:syncBooksAsync(nil, function(value) result = value end)
     Assert.eq(rec.query.page, 1)
-    Assert.eq(rec.query.pageSize, 50)
+    Assert.eq(rec.query.pageSize, 200)
     Assert.eq(rec.query.search, "")
     Assert.eq(rec.query.series, "")
     Assert.eq(rec.query.category, "")
     Assert.is_nil(rec.query.favorite)
     Assert.is_nil(rec.query.finished)
     Assert.is_nil(rec.query.author)
+    Assert.eq(rec.reconciled_source, "moon")
+    Assert.eq(rec.reconciled_books[1].stable_id, "a.epub")
+    Assert.eq(result.pulled, 1)
 end
 
 
@@ -239,82 +273,57 @@ do
     Assert.is_nil(lfs.attributes(path .. ".part"))
 end
 
--- listQuery：opts 全字段 → 键名映射（page_size → pageSize）
+-- 书架查询：所有参数原样交给本地 catalog，不触发 Moon HTTP client。
 do
     resetRec()
-    rec.list_wire = {
-        data = { { filename = "a.epub", title = "A", percent = 42 } },
-        count = 1,
-    }
     local result
-    src:listLibraryAsync({
+    local opts = {
         page = 3,
         page_size = 10,
         search = "科幻",
         series = "s",
         category = "c",
-    }, function(r) result = r end)
-    Assert.eq(rec.query.page, 3)
-    Assert.eq(rec.query.pageSize, 10)
-    Assert.eq(rec.query.search, "科幻")
-    Assert.eq(rec.query.series, "s")
-    Assert.eq(rec.query.category, "c")
-    -- wire 经 Mapper.list 映射
+    }
+    src:listLibraryAsync(opts, function(r) result = r end)
+    Assert.is_nil(rec.query)
+    Assert.eq(rec.catalog_source, "moon")
+    Assert.eq(rec.catalog_opts, opts)
     Assert.eq(result.count, 1)
-    Assert.eq(result.data[1].stable_id, "a.epub")
+    Assert.eq(result.data[1].stable_id, "local-a.epub")
     Assert.eq(result.data[1].percent, 42)
 end
 
--- filtersAsync：服务端字段收口成 category / series。
+-- 筛选项同样只来自本地 catalog。
 do
     resetRec()
-    rec.filters_wire = {
-        data = {
-            categories = { "小说", "技术" },
-            groupNames = { "第一辑" },
-            authors = { "不应透传" },
-        },
-    }
     local result
     src:filtersAsync(function(r) result = r end)
+    Assert.is_nil(rec.filters_wire)
+    Assert.eq(rec.catalog_source, "moon")
     Assert.len(result.data.category, 2)
     Assert.eq(result.data.category[1], "小说")
     Assert.len(result.data.series, 1)
     Assert.eq(result.data.series[1], "第一辑")
-    Assert.is_nil(result.data.authors)
 end
 
--- listLibraryAsync 错误：{ message = ... } 取 message，字符串原样透传
-do
-    resetRec()
-    rec.list_err = { message = "服务器错误" }
-    local result, err
-    src:listLibraryAsync({}, function(r, e) result, err = r, e end)
-    Assert.is_nil(result)
-    Assert.eq(err, "服务器错误")
-
-    rec.list_err = "网络故障"
-    src:listLibraryAsync({}, function(r, e) result, err = r, e end)
-    Assert.eq(err, "网络故障")
-end
-
--- onEvent：document_close/suspend 推统计
+-- onEvent：阅读生命周期由 session 处理；这里只响应用户统计同步请求
 do
     sync.push_calls = 0
+    sync.pull_calls = 0
 
     src:onEvent("document_close")
-    Assert.eq(sync.push_calls, 1)
-    Assert.eq(sync.last_source, src)
+    Assert.eq(sync.push_calls, 0)
 
     src:onEvent("suspend")
-    Assert.eq(sync.push_calls, 2)
+    Assert.eq(sync.push_calls, 0)
 
     src:onEvent("page_changed")
-    Assert.eq(sync.push_calls, 2)
+    Assert.eq(sync.push_calls, 0)
 
     src:onEvent("stats_sync_request")
     Assert.eq(sync.pull_calls, 1)
-    Assert.eq(sync.push_calls, 3)
+    Assert.eq(sync.push_calls, 1)
+    Assert.eq(sync.last_source, src)
 end
 
 -- getProgressAsync：wire 表 → ProgressPosition（percent/100、chapter_idx、locator）
@@ -394,7 +403,7 @@ end
 do
     resetRec()
     local ok
-    src:syncAnnotationsAsync({ source_id = "moon", stable_id = "a.epub", chapter_idx = 2 }, {
+    src:pushNotesAsync({ source_id = "moon", stable_id = "a.epub", chapter_idx = 2 }, {
         { datetime = "2026-08-20", page = "/p" },
     }, function(res)
         ok = res
@@ -409,7 +418,7 @@ end
 do
     resetRec()
     local response
-    src:syncStatsAsync({
+    src:pushStatsAsync({
         { stable_id = "a.epub", page = 3, start_time = 1000, duration = 30, total_pages = 100 },
     }, function(res) response = res end)
     Assert.not_nil(response)

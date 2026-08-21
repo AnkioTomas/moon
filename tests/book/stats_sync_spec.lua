@@ -37,7 +37,7 @@ local source_callback
 local received
 local source = {
     id = "moon",
-    syncStatsAsync = function(_, rows, cb)
+    pushStatsAsync = function(_, rows, cb)
         received = rows
         source_callback = cb
         return { cancel = function() end }

@@ -8,16 +8,13 @@ local Assert = require("support.assert")
 local original_json_preload = package.preload["json"]
 local original_socketutil_preload = package.preload["socketutil"]
 
-local function sourceBase()
-    return {}
-end
-
 package.preload["utils.settings"] = function()
     return {
         getSource = function() return {} end,
     }
 end
-package.preload["source.base"] = sourceBase
+package.preload["source.base"] = nil
+package.loaded["source.base"] = nil
 package.preload["source.contract"] = function()
     return {
         clampFraction = function(n) return n end,
@@ -35,21 +32,21 @@ package.loaded["source.moon"] = nil
 local moon = require("source.moon").new()
 for _, name in ipairs({
     "listLibraryAsync", "recentBooksAsync", "filtersAsync",
-    "syncStatsAsync",
-    "pullStatsAsync",
+    "syncBooksAsync", "syncProgressAsync", "syncNotesAsync", "syncStatsAsync",
+    "pushStatsAsync", "pullStatsAsync", "pushNotesAsync", "pullNotesAsync",
     "readingInsightAsync", "getProgressAsync", "putProgressAsync",
     "openBookAsync",
 }) do
     Assert.eq(type(moon[name]), "function")
 end
-
 package.preload["source.webdav.client"] = function()
     return { new = function() return {} end }
 end
 package.preload["source.webdav.mapper"] = function() return {} end
 package.loaded["source.webdav"] = nil
 local webdav = require("source.webdav").new()
-for _, name in ipairs({ "listLibraryAsync", "openBookAsync" }) do
+for _, name in ipairs({ "listLibraryAsync", "syncBooksAsync", "syncProgressAsync",
+    "syncNotesAsync", "syncStatsAsync", "openBookAsync" }) do
     Assert.eq(type(webdav[name]), "function")
 end
 
@@ -67,7 +64,8 @@ package.preload["source.wechat.mapper"] = function() return {} end
 package.loaded["source.wechat"] = nil
 local wechat = require("source.wechat").new()
 for _, name in ipairs({
-    "listLibraryAsync", "listStoreAsync", "recentBooksAsync",
+    "listLibraryAsync", "syncBooksAsync", "syncProgressAsync", "syncNotesAsync",
+    "syncStatsAsync", "listStoreAsync", "recentBooksAsync",
     "getDetailAsync", "openBookAsync",
     "getProgressAsync", "putProgressAsync",
 }) do

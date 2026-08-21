@@ -104,13 +104,15 @@ local ok_run, err_run = pcall(function()
 
     -- 选项 = 跟随系统 + 已注册样式（摸鱼日报在内）
     local opts = LockScreen.options()
-    Assert.len(opts, 5)
+    Assert.len(opts, 6)
     Assert.eq(opts[1].value, "ko")
     Assert.eq(opts[2].value, "myrl")
     Assert.eq(opts[3].value, "reading")
     Assert.eq(opts[4].value, "bill")
     Assert.eq(opts[5].value, "quote")
+    Assert.eq(opts[6].value, "bookshelf")
     Assert.eq(LockScreen.label("myrl"), "摸鱼日报")
+    Assert.eq(LockScreen.label("bookshelf"), "书架")
 
     -- 既有 KOReader 配置不应被备份或恢复。
     saved.screensaver_type = "cover"

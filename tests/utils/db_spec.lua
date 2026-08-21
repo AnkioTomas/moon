@@ -329,9 +329,9 @@ do
     })
     Assert.eq(count, 7)
     count_q = calls[1]
-    Assert.is_true(count_q.sql:find("AND category=?", 1, true) ~= nil)
-    Assert.is_true(count_q.sql:find("AND series=?", 1, true) ~= nil)
-    Assert.is_true(count_q.sql:find("title LIKE ?", 1, true) ~= nil)
+    Assert.is_true(count_q.sql:find("AND b.category=?", 1, true) ~= nil)
+    Assert.is_true(count_q.sql:find("AND b.series=?", 1, true) ~= nil)
+    Assert.is_true(count_q.sql:find("b.title LIKE ?", 1, true) ~= nil)
     Assert.eq(count_q.args[1], "local")
     Assert.eq(count_q.args[2], "sub")
     Assert.eq(count_q.args[3], "第一辑")
@@ -351,9 +351,8 @@ do
     clearMods()
 end
 
--- ── wipeIfStale：user_version 不匹配清库重建，匹配则不动 ──
+-- ── schema migration：旧版本原地升级，未来版本拒绝且绝不清库 ──
 do
-    -- 用指定 user_version 打开一次，返回是否执行了 DROP
     local function openWith(version)
         local execs = {}
         local connection = {
@@ -383,7 +382,7 @@ do
         end
         package.loaded["utils.db.base"] = nil
         local DbBase = require("utils.db.base")
-        DbBase.open()
+        local opened, open_err = DbBase.open()
         local dropped = false
         for _, sql in ipairs(execs) do
             if sql:find("DROP TABLE IF EXISTS books", 1, true) then
@@ -400,15 +399,23 @@ do
                 break
             end
         end
-        return dropped, created_notes
+        return opened, open_err, dropped, created_notes
     end
 
-    local dropped, created_notes = openWith(1)
-    Assert.is_false(dropped) -- 版本匹配：不清库
+    local opened, open_err, dropped, created_notes = openWith(1)
+    Assert.not_nil(opened)
+    Assert.is_nil(open_err)
+    Assert.is_false(dropped)
     Assert.is_true(created_notes)
-    dropped, created_notes = openWith(0)
-    Assert.is_true(dropped) -- 旧库/新库：DROP 全部旧表后重建
+    opened, open_err, dropped, created_notes = openWith(0)
+    Assert.not_nil(opened)
+    Assert.is_false(dropped)
     Assert.is_true(created_notes)
+    opened, open_err, dropped, created_notes = openWith(3)
+    Assert.is_nil(opened)
+    Assert.matches(open_err, "newer")
+    Assert.is_false(dropped)
+    Assert.is_false(created_notes)
 end
 
 -- ── reading_stats 聚合查询（本地洞察）──
