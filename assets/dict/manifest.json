@@ -1,0 +1,67 @@
+{
+  "source": "http://download.huzheng.org/zh_CN/",
+  "built_at": "2026-08-19 23:53:01",
+  "slice_size": 15728640,
+  "dictionaries": [
+    {
+      "id": "oxford",
+      "name": "牛津现代英汉双解词典",
+      "source": "http://download.huzheng.org/zh_CN/stardict-oxford-gb-2.4.2.tar.bz2",
+      "file": "stardict-oxford-gb-2.4.2.tar.bz2",
+      "size": 7702157,
+      "sha256": "bb52b04aebc605baa80b593f7edbcf6d1b81cd7b4321e6c66204b8a2d25ff1b8",
+      "parts": [
+        {
+          "file": "oxford.part.001",
+          "size": 7702157,
+          "sha256": "bb52b04aebc605baa80b593f7edbcf6d1b81cd7b4321e6c66204b8a2d25ff1b8"
+        }
+      ]
+    },
+    {
+      "id": "xhzd",
+      "name": "新华字典",
+      "source": "http://download.huzheng.org/zh_CN/stardict-xhzd-2.4.2.tar.bz2",
+      "file": "stardict-xhzd-2.4.2.tar.bz2",
+      "size": 8926866,
+      "sha256": "24745da6439f7aafd540661aa2cc20096c6fb7aca24dc62a1fb4b65e0822e646",
+      "parts": [
+        {
+          "file": "xhzd.part.001",
+          "size": 8926866,
+          "sha256": "24745da6439f7aafd540661aa2cc20096c6fb7aca24dc62a1fb4b65e0822e646"
+        }
+      ]
+    },
+    {
+      "id": "xiandaihanyucidian",
+      "name": "现代汉语词典",
+      "source": "http://download.huzheng.org/zh_CN/stardict-xiandaihanyucidian-2.4.2.tar.bz2",
+      "file": "stardict-xiandaihanyucidian-2.4.2.tar.bz2",
+      "size": 3349368,
+      "sha256": "fc2da07aa2fc4a8e2e53f1034676dde96346cf446e4d631b52ea52367cc4db29",
+      "parts": [
+        {
+          "file": "xiandaihanyucidian.part.001",
+          "size": 3349368,
+          "sha256": "fc2da07aa2fc4a8e2e53f1034676dde96346cf446e4d631b52ea52367cc4db29"
+        }
+      ]
+    },
+    {
+      "id": "ghycyzzd",
+      "name": "古汉语常用字字典",
+      "source": "http://download.huzheng.org/zh_CN/stardict-ghycyzzd-2.4.2.tar.bz2",
+      "file": "stardict-ghycyzzd-2.4.2.tar.bz2",
+      "size": 823703,
+      "sha256": "f58fb3dfb6da70331c9fc218b824850b6ab945b7559cd92d3dc1a0c69f35a218",
+      "parts": [
+        {
+          "file": "ghycyzzd.part.001",
+          "size": 823703,
+          "sha256": "f58fb3dfb6da70331c9fc218b824850b6ab945b7559cd92d3dc1a0c69f35a218"
+        }
+      ]
+    }
+  ]
+}
