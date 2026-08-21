@@ -10,13 +10,14 @@ local Device = require("device")
 
 local M = {}
 
+-- 位置值只在这里维护，设置页和编排层共享同一份白名单。
 local POSITIONS = {
     ["top-left"] = true, ["top-center"] = true, ["top-right"] = true,
     ["center-left"] = true, ["center-center"] = true, ["center-right"] = true,
     ["bottom-left"] = true, ["bottom-center"] = true, ["bottom-right"] = true,
 }
 
---- 竖屏宽高（锁屏强制竖屏出图）。
+--- 返回竖屏宽高；锁屏图片始终按竖屏尺寸生成。
 ---@return number, number
 function M.portraitSize()
     local w, h = Device.screen:getWidth(), Device.screen:getHeight()
@@ -26,17 +27,20 @@ function M.portraitSize()
     return w, h
 end
 
+--- 返回本地日期，作为每日背景和组合图的基础缓存键。
 ---@return string YYYY-MM-DD
 function M.dayKey()
     return os.date("%Y-%m-%d")
 end
 
+--- 判断位置是否属于九宫格九个合法值。
 ---@param position string|nil
 ---@return boolean
 function M.validPosition(position)
     return POSITIONS[position] == true
 end
 
+--- 将位置字符串拆成垂直和水平两个方向；非法部分回到居中。
 ---@param position string|nil
 ---@return string, string vertical, horizontal
 function M.parsePosition(position)
@@ -53,8 +57,9 @@ function M.parsePosition(position)
 end
 
 --- 计算主体面板矩形。
+--- 所有普通主体共用边距、内边距和圆角，避免各自漂移。
 ---@param opts { position: string|nil, wide: boolean|nil, height: number|nil, screen_w: number|nil, screen_h: number|nil }
----@return { x: number, y: number, w: number, h: number, margin: number, pad: number, text_x: number, text_w: number, font_size_hint: number, radius: number }
+---@return { x: number, y: number, w: number, h: number, pad: number, text_x: number, text_w: number, radius: number, wide: boolean }
 function M.panel(opts)
     opts = opts or {}
     local w = opts.screen_w
@@ -85,15 +90,11 @@ function M.panel(opts)
         y = y,
         w = panel_w,
         h = panel_h,
-        margin = margin,
         pad = pad,
         text_x = x + pad,
         text_w = panel_w - pad * 2,
-        font_size_hint = wide and 34 or 30,
         radius = math.max(8, math.floor(w * 0.02)),
         wide = wide,
-        screen_w = w,
-        screen_h = h,
     }
 end
 
