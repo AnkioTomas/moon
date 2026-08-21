@@ -8,6 +8,7 @@
 
 local Background = require("lockscreen.background")
 local Context = require("lockscreen.context")
+local Chart = require("ui.components.chart")
 local Paths = require("utils.paths")
 local Blitbuffer = require("ffi/blitbuffer")
 local _ = require("gettext")
@@ -139,70 +140,15 @@ function M.fetch(cb)
             x = inner_x, y = chart_y, width = inner_w, size = 15, bold = true, box = false,
         }
 
-        local max_seconds = 1
-        for _, slot in ipairs(buckets) do
-            max_seconds = math.max(max_seconds, slot.seconds or 0)
-        end
-        local n = #buckets
         local chart_top = math.floor(h * 0.775)
         local chart_h = math.floor(h * 0.11)
-        local gap = math.max(2, math.floor(inner_w * 0.012))
-        -- 柱宽上限：约内容宽 8%；24 小时会自然变细
-        local bar_cap = math.max(4, math.floor(inner_w * 0.08))
-        local bar_w = n > 0
-            and math.max(3, math.min(bar_cap, math.floor((inner_w - gap * (n - 1)) / n)))
-            or 3
-        local chart_w = n > 0 and (bar_w * n + gap * (n - 1)) or 0
-        local chart_x = inner_x + math.max(0, math.floor((inner_w - chart_w) / 2))
-        local bar_radius = math.min(3, math.max(1, math.floor(bar_w / 3)))
-
-        if n > 0 then
-            blocks[#blocks + 1] = {
-                kind = "rule", x = chart_x, y = chart_top + chart_h,
-                width = chart_w, height = 1,
-            }
-        end
-        for i, slot in ipairs(buckets) do
-            local seconds = slot.seconds or 0
-            local ratio = seconds / max_seconds
-            if ratio > 0 then
-                local filled = math.max(3, math.floor(chart_h * ratio + 0.5))
-                blocks[#blocks + 1] = {
-                    kind = "vbar",
-                    x = chart_x + (i - 1) * (bar_w + gap),
-                    y = chart_top + chart_h - filled,
-                    width = bar_w,
-                    height = filled,
-                    value = 1,
-                    radius = bar_radius,
-                }
-            end
-        end
-        if n > 0 then
-            local label_y = chart_top + chart_h + 5
-            -- ≤7 格逐柱标；小时 24 格与长周期只标首尾
-            if n <= 7 then
-                for i, slot in ipairs(buckets) do
-                    blocks[#blocks + 1] = {
-                        text = slot.label or slot.key or "",
-                        x = chart_x + (i - 1) * (bar_w + gap),
-                        y = label_y,
-                        width = bar_w, size = 11, align = "center", box = false, color = DIM,
-                    }
-                end
-            else
-                blocks[#blocks + 1] = {
-                    text = buckets[1].label or buckets[1].key or "",
-                    x = chart_x, y = label_y,
-                    width = math.floor(chart_w / 2), size = 12, box = false, color = DIM,
-                }
-                blocks[#blocks + 1] = {
-                    text = buckets[n].label or buckets[n].key or "",
-                    x = chart_x + math.floor(chart_w / 2), y = label_y,
-                    width = math.floor(chart_w / 2), size = 12, align = "right", box = false, color = DIM,
-                }
-            end
-        end
+        Chart.appendBars(blocks, {
+            points = buckets,
+            value_key = "seconds",
+            x = inner_x, y = chart_top, width = inner_w, height = chart_h,
+            label_color = DIM,
+            label_mode = "auto",
+        })
 
         local ok, err = Render.write(M.path(), bg, blocks)
         cb(ok, err)
