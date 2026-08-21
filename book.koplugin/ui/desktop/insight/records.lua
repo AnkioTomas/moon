@@ -5,14 +5,13 @@
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local BottomContainer = require("ui/widget/container/bottomcontainer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
-local LineWidget = require("ui/widget/linewidget")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
+local Chart = require("ui.components.chart")
 local Surface = require("ui.components.surface")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -198,33 +197,20 @@ end
 ---@param height number 图表高度。
 ---@return table
 local function monthlyChart(stats, width, height)
-    local gap = UI.sz(4)
-    local col_w = math.max(1, math.floor((width - gap * 11) / 12))
-    local label_h = UI.sz(18)
-    local bar_h = math.max(UI.sz(24), height - label_h)
-    local max_seconds = 0
-    for month = 1, 12 do max_seconds = math.max(max_seconds, stats.month_seconds[month] or 0) end
-    local row = HorizontalGroup:new{ align = "center" }
+    local points = {}
     for month = 1, 12 do
-        if month > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
-        local seconds = stats.month_seconds[month] or 0
-        local current_h = max_seconds > 0
-            and math.max(UI.sz(2), math.floor(bar_h * seconds / max_seconds + 0.5)) or UI.line()
-        local bar = LineWidget:new{
-            background = seconds > 0 and Blitbuffer.COLOR_BLACK or UI.track(),
-            dimen = Geom:new{ w = col_w, h = current_h },
+        points[#points + 1] = {
+            value = stats.month_seconds[month] or 0,
+            label = T(_("%1月"), month),
         }
-        local slot = BottomContainer:new{ dimen = Geom:new{ w = col_w, h = bar_h }, bar }
-        local month_label = TextWidget:new{
-            text = T(_("%1月"), month), face = UI.face("xx_smallinfofont", 10),
-            max_width = col_w, fgcolor = UI.muted(),
-        }
-        table.insert(row, VerticalGroup:new{
-            align = "center", slot, VerticalSpan:new{ width = UI.sz(3) },
-            CenterContainer:new{ dimen = Geom:new{ w = col_w, h = label_h }, month_label },
-        })
     end
-    return row
+    return Chart.bars({
+        points = points,
+        width = width,
+        height = height,
+        gap = UI.sz(4),
+        track_empty = true,
+    })
 end
 
 --- 构建连续记录页。
