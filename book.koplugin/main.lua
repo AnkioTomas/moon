@@ -130,6 +130,7 @@ end
 --- 网络恢复：通知当前源重试持久化队列，并刷新锁屏图。
 ---@return nil
 function BookPlugin:onNetworkConnected()
+    require("book.sync").retryDirtyAsync()
     self:emitToSource("network_connected")
     require("lockscreen.init").refreshInBackground()
 end
