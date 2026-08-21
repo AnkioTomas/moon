@@ -67,9 +67,43 @@ function Store.rememberMany(books)
     end
     DbQueue.run(function()
         for i = 1, #payload do
-            BookDB.upsert(payload[i])
+            BookDB.upsertRemote(payload[i])
         end
     end)
+end
+
+--- 将完整书架快照串行写入数据库；失败时 BookDB 内部回滚整个对账。
+---@param source_id string
+---@param books Book[]
+---@param opts { clear_missing_paths?: boolean }|nil
+---@param cb fun(result: SyncResult|nil, err: any)
+---@return { cancel: fun() }
+function Store.reconcileAsync(source_id, books, opts, cb)
+    local cancelled = false
+    local before = {}
+    for _, stable_id in ipairs(BookDB.libraryStableIdsBySource(source_id)) do
+        before[stable_id] = true
+    end
+    local incoming = {}
+    for _, book in ipairs(books or {}) do
+        if book.stable_id ~= nil then incoming[tostring(book.stable_id)] = true end
+    end
+    local hidden = 0
+    for stable_id in pairs(before) do
+        if not incoming[stable_id] then hidden = hidden + 1 end
+    end
+    DbQueue.run(function()
+        assert(BookDB.reconcile(source_id, books or {}, opts), "failed to reconcile books")
+    end, {
+        on_done = function()
+            if not cancelled then
+                cb({ pulled = #(books or {}), pushed = 0, hidden = hidden,
+                    conflicts = 0, skipped = false })
+            end
+        end,
+        on_failed = function(err) if not cancelled then cb(nil, err) end end,
+    })
+    return { cancel = function() cancelled = true end }
 end
 
 --- 异步打开/下载后登记。
@@ -105,7 +139,7 @@ function Store.touchAsync(path, identity, opts, cb)
                 for k, v in pairs(book) do row[k] = v end
                 row.source_id = source_id
                 row.stable_id = stable_id
-                assert(BookDB.upsert(row), "failed to save book metadata")
+                assert(BookDB.upsertRemote(row), "failed to save book metadata")
             end
             if toc_payload then
                 assert(TocDB.upsert(source_id, stable_id, toc_payload), "failed to save chapter toc")
