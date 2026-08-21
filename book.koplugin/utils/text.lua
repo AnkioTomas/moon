@@ -91,6 +91,41 @@ function Text.isValidUtf8(s)
     return true
 end
 
+--- 按字节上限截取 UTF-8 字符串，不切断多字节字符。
+---@param s any
+---@param max_bytes number
+---@return string
+function Text.truncateUtf8(s, max_bytes)
+    s = tostring(s or "")
+    max_bytes = math.max(0, math.floor(tonumber(max_bytes) or 0))
+    if #s <= max_bytes then
+        return s
+    end
+    local last = max_bytes
+    while last > 0 do
+        local b = string.byte(s, last)
+        if not b or b < 0x80 or b >= 0xC0 then
+            break
+        end
+        last = last - 1
+    end
+    if last == 0 then
+        return ""
+    end
+    local lead = string.byte(s, last)
+    local width = lead < 0x80 and 1
+        or (lead >= 0xC2 and lead <= 0xDF and 2)
+        or (lead >= 0xE0 and lead <= 0xEF and 3)
+        or (lead >= 0xF0 and lead <= 0xF4 and 4)
+        or 1
+    if last + width - 1 > max_bytes then
+        last = last - 1
+    else
+        last = max_bytes
+    end
+    return s:sub(1, last)
+end
+
 --- 换行符规范化：\r\n / \r → \n。
 ---@param s any
 ---@return string
