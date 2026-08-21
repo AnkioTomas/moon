@@ -21,6 +21,21 @@ local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 
 local Store = {}
+local MAX_RESULTS = 200
+
+--- 从已加载结果中切出当前 UI 页。
+---@param desktop table
+---@return table
+function Store.pageBooks(desktop)
+    local all = desktop._store_books or {}
+    local page_size = desktop.store_page_size or desktop.page_size or 1
+    local first = ((desktop.store_page or 1) - 1) * page_size + 1
+    local books = {}
+    for i = first, math.min(#all, first + page_size - 1) do
+        books[#books + 1] = all[i]
+    end
+    return books
+end
 
 --- 复用图书馆网格构建书城页。
 ---@param ctx table
@@ -31,7 +46,39 @@ function Store.build(ctx, state, opts)
     opts = opts or {}
     opts.loading_text = opts.loading_text or _("加载中…")
     opts.empty_text = opts.empty_text or _("书城暂无内容")
+    opts.search_only = true
+    opts.on_search = opts.on_search or function()
+        if ctx.desktop then Store.showSearch(ctx.desktop) end
+    end
+    opts.on_clear = opts.on_clear or function()
+        if ctx.desktop then Store.applySearch(ctx.desktop, "") end
+    end
     return Library.build(ctx, state, opts)
+end
+
+--- 应用书城搜索，搜索词与图书馆筛选状态分开保存。
+---@param desktop table
+---@param query string|nil
+function Store.applySearch(desktop, query)
+    if desktop._store_fetch_cancel then
+        desktop._store_fetch_cancel:cancel()
+        desktop._store_fetch_cancel = nil
+    end
+    desktop.store_search = query and query ~= "" and query or nil
+    desktop.store_page = 1
+    desktop.store_total = 0
+    desktop._store_books = nil
+    desktop._store_state = nil
+    desktop.tab = "store"
+    desktop:rebuild()
+end
+
+--- 弹出书城搜索框。
+---@param desktop table
+function Store.showSearch(desktop)
+    Library.showSearch(desktop, function(query)
+        Store.applySearch(desktop, query)
+    end, desktop.store_search)
 end
 
 --- 同步书城 page_size（与图书馆网格容量一致）。
@@ -64,25 +111,13 @@ function Store.gotoPage(desktop, page)
         return
     end
     desktop.store_page = page
-    desktop._store_state = nil
+    desktop._store_state = desktop._store_books and { books = Store.pageBooks(desktop) } or nil
     desktop:rebuild()
 end
 
 --- 异步拉取书城列表。
 ---@param desktop table
 function Store.fetch(desktop)
-    --- 写入书城状态并重建。
-    ---@param books table|nil
-    ---@param err string|nil
-    local function done(books, err)
-        if desktop._closed or desktop.tab ~= "store" then return end
-        desktop._store_state = {
-            books = books or {},
-            err = err,
-        }
-        desktop:rebuild()
-    end
-
     if desktop._store_fetch_cancel then
         desktop._store_fetch_cancel:cancel()
         desktop._store_fetch_cancel = nil
@@ -91,39 +126,55 @@ function Store.fetch(desktop)
     Store.syncPageSize(desktop)
     local source = desktop.source
     local generation = desktop.source_generation or 0
-    local page = desktop.store_page or desktop.page or 1
-    local page_size = desktop.store_page_size or desktop.page_size or 1
-    local search = (desktop.filter and desktop.filter.search) or ""
+    local search = desktop.store_search or ""
+
+    --- 写入错误状态；失败结果不缓存。
+    ---@param err string
+    local function fail(err)
+        if desktop._closed or desktop.tab ~= "store" then return end
+        desktop._store_books = nil
+        desktop.store_total = 0
+        desktop._store_state = { books = {}, err = err }
+        desktop:rebuild()
+    end
 
     if not source or not source.configured or not source:configured() then
-        done({}, _("请先在设置里配置当前数据源"))
+        fail(_("请先在设置里配置当前数据源"))
         return
     end
     local backend = type(source.importBookAsync) == "function" and require("zlib.init") or source
     if not backend.listStoreAsync then
-        done({}, _("当前数据源不支持书城"))
+        fail(_("当前数据源不支持书城"))
         return
     end
     desktop._store_fetch_cancel = backend:listStoreAsync({
-        page = page,
-        page_size = page_size,
+        page = 1,
+        page_size = MAX_RESULTS,
         search = search,
     }, function(res, err)
         if desktop._closed or desktop.tab ~= "store"
-            or desktop.source ~= source or (desktop.source_generation or 0) ~= generation then
+            or desktop.source ~= source or (desktop.source_generation or 0) ~= generation
+            or (desktop.store_search or "") ~= search then
             return
         end
         desktop._store_fetch_cancel = nil
         if not res then
-            done({}, err or _("加载失败"))
+            fail(err or _("加载失败"))
             return
         end
-        desktop.store_total = tonumber(res.count) or 0
-        local books = res.data or {}
+        local books = {}
+        for i = 1, math.min(#(res.data or {}), MAX_RESULTS) do
+            books[#books + 1] = res.data[i]
+        end
         if backend == source then
             BookStore.rememberMany(books)
         end
-        done(books)
+        desktop._store_books = books
+        desktop.store_total = #books
+        local pages = Store.pages(desktop)
+        if (desktop.store_page or 1) > pages then desktop.store_page = pages end
+        desktop._store_state = { books = Store.pageBooks(desktop) }
+        desktop:rebuild()
     end)
 end
 
@@ -141,6 +192,10 @@ function Store.page(desktop)
         end
     end
     local state = desktop._store_state
+    if not state and desktop._store_books then
+        state = { books = Store.pageBooks(desktop) }
+        desktop._store_state = state
+    end
     if not state then
         UIManager:nextTick(function()
             if desktop._closed or desktop.tab ~= "store" then return end
