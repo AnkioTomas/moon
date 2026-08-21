@@ -263,8 +263,9 @@ function Library.build(ctx, state, opts)
     local tools_kids = { align = "center" }
     local caps = (ctx.source and ctx.source.capabilities and ctx.source:capabilities()) or {}
     local has_filters = type(ctx.source and ctx.source.filtersAsync) == "function"
+    local search_only = opts.search_only == true
     local has_tool = false
-    if caps.refresh then
+    if not search_only and caps.refresh then
         table.insert(tools_kids, iconAction("refresh", _("刷新"), function()
             if ctx.desktop then Library.rescan(ctx.desktop) end
         end))
@@ -272,13 +273,17 @@ function Library.build(ctx, state, opts)
             table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
         end
     end
-    if caps.search then
+    if search_only or caps.search then
         table.insert(tools_kids, iconAction("search", _("搜索"), function()
-            if ctx.desktop then Library.showSearch(ctx.desktop) end
+            if opts.on_search then
+                opts.on_search()
+            elseif ctx.desktop then
+                Library.showSearch(ctx.desktop)
+            end
         end))
         has_tool = true
     end
-    if has_filters then
+    if not search_only and has_filters then
         if has_tool then
             table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
         end
@@ -287,10 +292,14 @@ function Library.build(ctx, state, opts)
         end))
         has_tool = true
     end
-    if has_tool then
+    if has_tool and (not search_only or opts.on_clear) then
         table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
         table.insert(tools_kids, iconAction("clear", _("清除"), function()
-            if ctx.desktop then Library.clearFilters(ctx.desktop) end
+            if opts.on_clear then
+                opts.on_clear()
+            elseif ctx.desktop then
+                Library.clearFilters(ctx.desktop)
+            end
         end))
     end
     local tools = HorizontalGroup:new(tools_kids)
@@ -586,18 +595,27 @@ end
 
 --- 弹出搜索输入框。
 ---@param desktop table
-function Library.showSearch(desktop)
+---@param on_apply fun(query: string)|nil
+---@param initial_query string|nil
+function Library.showSearch(desktop, on_apply, initial_query)
+    local function apply(query)
+        if on_apply then
+            on_apply(query)
+        else
+            Library.applyExclusive(desktop, "search", query)
+        end
+    end
     local dialog
     dialog = InputDialog:new{
         title = _("搜索书籍"),
-        input = (desktop.filter and desktop.filter.search) or "",
+        input = initial_query or (desktop.filter and desktop.filter.search) or "",
         input_hint = _("书名或作者"),
         buttons = {{
             {
                 text = _("清除"),
                 callback = function()
                     UIManager:close(dialog)
-                    Library.applyExclusive(desktop, "search", "")
+                    apply("")
                 end,
             },
             {
@@ -611,7 +629,7 @@ function Library.showSearch(desktop)
                 callback = function()
                     local q = dialog:getInputText() or ""
                     UIManager:close(dialog)
-                    Library.applyExclusive(desktop, "search", q)
+                    apply(q)
                 end,
             },
         }},
