@@ -660,4 +660,10 @@ return {
     ["删除失败：%1"] = "Delete failed: %1",
     ["选择当前字典，或删除 Book 安装的字典"] = "Select the current dictionary or delete dictionaries installed by Book",
     ["字典已安装并切换"] = "Dictionary installed and selected",
+    ["保存主要翻译到笔记"] = "Save main translation to note",
+    ["保存全部内容到笔记"] = "Save all to note",
+    ["复制主要翻译"] = "Copy main translation",
+    ["复制全部内容"] = "Copy all",
+    ["翻译来源：%1"] = "Translation from: %1",
+    ["翻译失败"] = "Translation failed",
 }
