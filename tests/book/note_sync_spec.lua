@@ -1,6 +1,7 @@
 --[[-- book.note 从本地未同步快照上传，并在打开时拉取远端快照。 --]]
 
 local Assert = require("support.assert")
+local Stubs = require("support.stubs")
 
 local previous_settings = _G.G_reader_settings
 local source
@@ -27,6 +28,16 @@ package.preload["utils.db.note"] = function()
         end,
         get = function(source_id, stable_id, chapter_idx)
             return rows[source_id .. ":" .. stable_id .. ":" .. (chapter_idx or 0)]
+        end,
+        upsertRemote = function(source_id, stable_id, chapter_idx, payload, updated_at)
+            local key = source_id .. ":" .. stable_id .. ":" .. (chapter_idx or 0)
+            local old = rows[key]
+            if not old or old.sync_status == 1 then
+                rows[key] = { source_id = source_id, stable_id = stable_id,
+                    chapter_idx = chapter_idx or 0, payload = payload,
+                    updated_at = updated_at, sync_status = 1 }
+            end
+            return true
         end,
         unsynced = function()
             local out = {}
@@ -81,13 +92,15 @@ package.loaded["book.store"] = nil
 package.loaded["book.note"] = nil
 
 local sent = {}
+local pull_count = 0
 source = {
     id = "moon",
-    syncAnnotationsAsync = function(_, pushed_identity, pushed_annotations, cb)
+    pushNotesAsync = function(_, pushed_identity, pushed_annotations, cb)
         sent[#sent + 1] = { identity = pushed_identity, annotations = pushed_annotations }
         cb({ code = 200 })
     end,
-    getAnnotationsAsync = function(_, _identity, cb)
+    pullNotesAsync = function(_, _identity, cb)
+        pull_count = pull_count + 1
         cb({ { datetime = "2026-08-20", page = "/remote" } })
     end,
 }
@@ -131,8 +144,14 @@ local identity = {
     source = source,
 }
 local Note = require("book.note")
+source.syncNotesAsync = function(self, opts, cb)
+    return Note.syncAsync(self, opts, cb)
+end
 
-Note.save(ui, identity, function(ok) if ok then Note.push() end end)
+Note.save(ui, identity, function(ok)
+    if ok then Note.syncAsync(source, { identity = identity }, function() end) end
+end)
+Stubs.flush()
 Assert.eq(#sent, 1)
 Assert.eq(sent[1].identity.source_id, "moon")
 Assert.eq(sent[1].identity.stable_id, "小说.epub")
@@ -142,11 +161,24 @@ Assert.eq(sent[1].annotations[1].text, "高亮文字")
 Assert.eq(sent[1].annotations[1].ignored, nil)
 
 annotations = {}
-Note.save(ui, identity, function(ok) if ok then Note.push() end end)
+Note.save(ui, identity, function(ok)
+    if ok then Note.syncAsync(source, { identity = identity }, function() end) end
+end)
+Stubs.flush()
 Assert.eq(#sent, 2)
 Assert.eq(#sent[2].annotations, 0, "空快照必须上报以传播删除")
 
+-- 网络恢复只重试本地脏快照，不顺手拉远端。
+annotations = { { datetime = "2026-08-21", page = "/local-new" } }
+Note.save(ui, identity, function(ok)
+    if ok then Note.syncAsync(source, { identity = identity, dirty_only = true }, function() end) end
+end)
+Stubs.flush()
+Assert.eq(#sent, 3)
+Assert.eq(pull_count, 2)
+
 Note.pull(ui, identity)
+Stubs.flush()
 Assert.eq(annotations[1].page, "/remote", "pull 必须在保存当前快照后应用远端快照")
 Assert.eq(rows["moon:小说.epub:0"].sync_status, 1, "拉取结果必须先作为已同步快照写入 SQLite")
 

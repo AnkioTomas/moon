@@ -70,6 +70,14 @@ stub("source.chapter", function()
         end,
     }
 end)
+stub("book.store", function()
+    return {
+        reconcileAsync = function(_, books, _, cb)
+            cb({ pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false })
+            return { cancel = function() end }
+        end,
+    }
+end)
 
 package.loaded["source.wechat"] = nil
 local WeChat = require("source.wechat")
@@ -224,7 +232,7 @@ do
     Assert.is_false(fired)
 end
 
--- 封面缓存：listLibraryAsync 记住 http(s) 封面，非法 URL / 无封面不缓存
+-- 封面缓存：syncBooksAsync 记住 http(s) 封面，非法 URL / 无封面不缓存
 do
     fake_client.shelfSyncAsync = function(_, cb)
         cb({
@@ -238,7 +246,7 @@ do
     end
     local src = WeChat.new()
     local result
-    src:listLibraryAsync(nil, function(r) result = r end)
+    src:syncBooksAsync(nil, function(r) result = r end)
     Assert.not_nil(result)
 
     -- 合法 http(s) 封面入缓存，coverRequest 带回会话头
@@ -265,7 +273,7 @@ do
         })
         return { cancel = function() end }
     end
-    src:listLibraryAsync(nil, function() end)
+    src:syncBooksAsync(nil, function() end)
     Assert.eq(src:coverRequest({ source_id = "wechat", stable_id = "b1" }).url,
         "https://cdn.example.com/a2.jpg")
 

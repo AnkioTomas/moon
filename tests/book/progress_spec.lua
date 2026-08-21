@@ -49,6 +49,12 @@ package.preload["utils.db.progress"] = function()
             end
             return true
         end,
+        get = function(source_id, stable_id)
+            for _, row in ipairs(rows) do
+                if row.source_id == source_id and row.stable_id == stable_id then return row end
+            end
+        end,
+        upsertRemote = function() return true end,
     }
 end
 
@@ -79,11 +85,17 @@ package.loaded["book.progress"] = nil
 local Progress = require("book.progress")
 
 local pushed = {}
+local pulled = 0
 sources.moon = {
     id = "moon",
     putProgressAsync = function(_, identity, pos, cb)
         pushed[#pushed + 1] = { "moon", identity.stable_id, pos.fraction }
         cb(true)
+        return { cancel = function() end }
+    end,
+    getProgressAsync = function(_, _, cb)
+        pulled = pulled + 1
+        cb({ fraction = 0.1 })
         return { cancel = function() end }
     end,
 }
@@ -96,16 +108,19 @@ sources.wechat = {
     end,
 }
 
--- push 不看当前书：两个源的所有未同步项均被尝试，只有明确 true 才确认。
-Progress.push()
+-- dirty_only 只处理指定源的本地脏项，上传成功按版本确认，绝不拉远端。
+local sync_result
+Progress.syncAsync(sources.moon, { dirty_only = true }, function(result) sync_result = result end)
 Stubs.flush()
-Assert.len(pushed, 2)
+Assert.len(pushed, 1)
 Assert.eq(#marked, 1)
 Assert.eq(marked[1][1], "moon")
 Assert.eq(marked[1][2], "a.epub")
 Assert.eq(rows[1].sync_status, 1)
 Assert.eq(rows[2].sync_status, 0)
 Assert.eq(rows[3].sync_status, 1)
+Assert.eq(sync_result.pushed, 1)
+Assert.eq(pulled, 0)
 
 -- 进度保存总是生成一个未同步版本，尚未保存完成时不上传。
 local ui = {
@@ -123,6 +138,11 @@ Assert.is_true(saved_ok)
 Assert.len(saved, 1)
 Assert.eq(saved[1].pos.fraction, 0.25)
 Assert.is_true(saved[1].pos.updated_at > 0)
+
+Progress.save(snapshot)
+Assert.len(saved, 2)
+Assert.is_true(saved[2].pos.updated_at > saved[1].pos.updated_at,
+    "同一秒连续保存也必须生成不同版本")
 
 for _, name in ipairs({
     "utils.db.progress", "utils.db.queue", "source.registry",

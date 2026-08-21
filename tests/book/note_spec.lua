@@ -18,6 +18,7 @@ package.preload["json"] = function()
 end
 package.preload["utils.db.note"] = function()
     return {
+        get = function() return nil end,
         upsert = function(source_id, stable_id, chapter_idx, payload)
             writes[#writes + 1] = { source_id, stable_id, chapter_idx, payload }
             return true

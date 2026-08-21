@@ -1,11 +1,9 @@
 --[[--
 source.local.mapper 离线用例
 
-目标模块顶部零硬依赖（只 require types 和 gettext）；
-insight 在函数内 require("utils.db.book")，
-真实实现会开 sqlite，这里用 package.preload 换成可控假库。
-
-formatDuration 是模块内 local 函数，经由 insight 输出的文案间接覆盖。
+映射已收口到 book.catalog；本模块是 local 源薄封装。
+insight 在 catalog 内 require("utils.db.book")，
+这里用 package.preload 换成可控假库。
 
 @module tests.source.local.mapper_spec
 --]]
@@ -21,6 +19,8 @@ package.preload["utils.db.book"] = function()
         end,
     }
 end
+package.loaded["book.catalog"] = nil
+package.loaded["source.local.mapper"] = nil
 
 local Mapper = require("source.local.mapper")
 
@@ -207,4 +207,5 @@ end
 -- 收尾：不影响同进程内后续用例
 package.preload["utils.db.book"] = nil
 package.loaded["utils.db.book"] = nil
+package.loaded["book.catalog"] = nil
 package.loaded["source.local.mapper"] = nil

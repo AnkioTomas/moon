@@ -91,6 +91,11 @@ package.preload["utils.db.book"] = function()
             book_upserts[#book_upserts + 1] = row
             return true
         end,
+        upsertRemote = function(row)
+            book_upserts[#book_upserts + 1] = row
+            return true
+        end,
+        libraryStableIdsBySource = function() return {} end,
         touchPath = function(source_id, stable_id, path, chapter_idx)
             touch_calls[#touch_calls + 1] = {
                 source_id = source_id,

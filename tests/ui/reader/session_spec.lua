@@ -17,6 +17,16 @@ local stored_toc = {}
 local default_source = {
     id = "moon",
     putProgressAsync = function() end,
+    syncProgressAsync = function(_, opts, cb)
+        calls.progress[#calls.progress + 1] = { "sync", opts.identity }
+        if cb then cb({}) end
+    end,
+    syncNotesAsync = function(_, opts, cb)
+        calls.notes = calls.notes or {}
+        calls.notes[#calls.notes + 1] = { opts.identity, "sync" }
+        if cb then cb({}) end
+    end,
+    syncStatsAsync = function(_, _, cb) if cb then cb({}) end end,
 }
 
 package.preload["book.store"] = function()
@@ -114,6 +124,7 @@ end
 
 package.preload["book.progress"] = function()
     return {
+        save = function(_, cb) if cb then cb(true) end end,
         pull = function(snapshot)
             calls.progress[#calls.progress + 1] = { "pull", snapshot and snapshot.identity }
         end,
@@ -371,12 +382,12 @@ do
     tracker_stop_done = nil
     defer_tracker_stop = false
     Assert.is_nil(Session.current(), "关书清会话")
-    Assert.eq(calls.progress[#calls.progress - 1][1], "push")
+    Assert.eq(calls.progress[#calls.progress - 1][1], "sync")
     Assert.eq(calls.progress[#calls.progress][1], "clearConflicts")
     Assert.eq(calls.tracker[#calls.tracker][1], "stop")
     Assert.eq(emitted[#emitted].ev, "document_close")
     Assert.eq(calls.notes[#calls.notes][1].stable_id, "b1", "注解同步复用阅读身份")
-    Assert.eq(calls.notes[#calls.notes][2], "push", "注解保存成功后才触发推送")
+    Assert.eq(calls.notes[#calls.notes][2], "sync", "注解保存成功后才触发同步")
     Assert.is_nil(Session.current(), "关闭文档清理阅读状态")
 
     -- 不活跃时翻页：统计照收，源不收事件
@@ -436,9 +447,9 @@ do
     Assert.eq(pull[1], "pull")
     Assert.eq(pull[2].source_id, "moon")
     Session.onCloseDocument(plugin)
-    local push = calls.progress[#calls.progress - 1]
-    Assert.eq(push[1], "push")
-    Assert.eq(push[2].source_id, "moon", "保存当前书后再冲刷数据库队列")
+    local sync_call = calls.progress[#calls.progress - 1]
+    Assert.eq(sync_call[1], "sync")
+    Assert.eq(sync_call[2].source_id, "moon", "保存当前书后再同步属主源")
     Assert.eq(emitted[#emitted].source.id, "moon", "document_close 事件路由到属主源")
 end
 

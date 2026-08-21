@@ -11,13 +11,39 @@ package.preload["ui.reader.native"] = function()
 end
 
 local active = true
+local sync_source = { id = "moon" }
+local current = { identity = { source_id = "moon", stable_id = "b1", source = sync_source } }
 package.preload["ui.reader.session"] = function()
     return {
         current = function()
-            return active and { identity = { source = {} } } or nil
+            return active and current or nil
         end,
         toc = function() return nil end,
     }
+end
+
+local sync_calls = {}
+package.preload["book.progress"] = function()
+    return { save = function(snapshot, cb)
+        sync_calls[#sync_calls + 1] = { "save_progress", snapshot }
+        cb(true)
+    end }
+end
+package.preload["book.note"] = function()
+    return { save = function(saved_ui, identity, cb)
+        sync_calls[#sync_calls + 1] = { "save_notes", saved_ui, identity }
+        cb(true)
+    end }
+end
+package.preload["book.sync"] = function()
+    return { runAsync = function(source, opts, cb)
+        sync_calls[#sync_calls + 1] = { "sync", source, opts }
+        cb({ pulled = 0, pushed = 2 })
+        return { cancel = function() end }
+    end }
+end
+package.preload["ui/widget/infomessage"] = function()
+    return { new = function(_, opts) return opts end }
 end
 
 local registered_module
@@ -81,6 +107,14 @@ Assert.eq(refreshed, 1)
 Assert.is_true(Reader.actions(ui)[2].active)
 Assert.eq(Reader.actions(ui)[2].icon, "bookmark")
 Assert.is_false(Reader.executeAction("missing", ui))
+
+Assert.is_true(Reader.executeAction("sync", ui))
+Assert.eq(sync_calls[1][1], "save_progress")
+Assert.eq(sync_calls[2][1], "save_notes")
+Assert.eq(sync_calls[3][1], "sync")
+Assert.eq(sync_calls[3][2], sync_source)
+Assert.eq(sync_calls[3][3].identity, current.identity)
+Assert.is_true(sync_calls[3][3].skip_books)
 
 Reader.attach(plugin)
 Assert.eq(native_ui, ui)

@@ -10,6 +10,9 @@ local Assert = require("support.assert")
 --   { code = N, body = "...", headers = {...} } 或 { err = { error = { code = -5, message = "..." } } }
 local captured = {}
 local queue = {}
+local cache_keys = {}
+local cache_sets = {}
+local cache_hit
 local function enqueue(res) queue[#queue + 1] = res end
 
 local saved
@@ -36,6 +39,23 @@ package.preload["http.request"] = function()
         end,
     }
 end
+package.preload["http.cache"] = function()
+    return {
+        key = function(method, url, query)
+            cache_keys[#cache_keys + 1] = { method = method, url = url, query = query }
+            return method .. " " .. url .. " #" .. tostring(#cache_keys)
+        end,
+        getAsync = function(_key, cb)
+            local hit = cache_hit
+            cache_hit = nil
+            cb(hit)
+            return { cancel = function() end }
+        end,
+        set = function(key, value, ttl)
+            cache_sets[#cache_sets + 1] = { key = key, value = value, ttl = ttl }
+        end,
+    }
+end
 package.preload["utils.settings"] = function()
     return { saveSource = function(id, cfg) saved = { id = id, cfg = cfg } end }
 end
@@ -47,13 +67,15 @@ package.loaded["zlib.client"] = nil
 local Client
 -- 钉住的镜像是模块级状态：fresh 重 require 清状态，避免用例间串味
 local function fresh(cfg)
+    cache_keys = {}
+    cache_sets = {}
     package.loaded["zlib.client"] = nil
     Client = require("zlib.client")
     return Client.new(cfg or { email = "me@example.com", password = "secret" })
 end
 
-local SEED1 = "https://z-library.sk"
-local SEED2 = "https://thai-books.sk"
+local SEED1 = "https://librella.tw"
+local SEED2 = "https://bookabooki.tw"
 
 -- 默认走第一个种子镜像，无 Basic 门禁
 do
@@ -67,6 +89,21 @@ do
     Assert.eq(captured[1].url, SEED1 .. "/eapi/book/most-popular")
     Assert.is_nil(captured[1].auth_username)
     Assert.eq(captured[1].method, "GET")
+    Assert.eq(cache_keys[1].method, "GET")
+    Assert.eq(cache_sets[1].ttl, 30 * 60)
+end
+
+-- HTTP 持久化缓存命中时不碰网络。
+do
+    captured = {}
+    queue = {}
+    cache_hit = { success = 1, books = {} }
+    local client = fresh()
+    local wire
+    client:listPopularAsync(function(v) wire = v end)
+    Assert.not_nil(wire)
+    Assert.len(captured, 0)
+    Assert.len(cache_sets, 0)
 end
 
 -- 用户配置的镜像优先于种子
@@ -115,24 +152,28 @@ do
     Assert.eq(err, "连接超时，请检查网络")
 end
 
--- 302 跨主机：镜像迁移，POST 在新 origin 上原样重发（不退化成 GET），并钉住新镜像
+-- 302 跨主机：镜像迁移，POST 在完整 Location 上原样重发（不退化成 GET），并钉住新镜像。
 do
     captured = {}
     queue = {}
-    enqueue({ code = 302, headers = { location = "https://z-lib.fm/eapi/user/login" } })
+    enqueue({ code = 302, headers = { location = "https://z-lib.fm/eapi/user/login?redirected=1" } })
     enqueue({ code = 200, body = '{"success":1,"user":{"id":42,"remix_userkey":"key42"}}' })
     local client = fresh()
     local ok
     client:loginAsync(function(v) ok = v end)
     Assert.is_true(ok)
     Assert.len(captured, 2)
-    Assert.eq(captured[2].url, "https://z-lib.fm/eapi/user/login")
+    Assert.eq(captured[2].url, "https://z-lib.fm/eapi/user/login?redirected=1")
     Assert.eq(captured[2].method, "POST") -- 镜像迁移保持 POST
     Assert.not_nil(captured[2].body)
-    Assert.eq(client.user_id, "42")
-    Assert.eq(client.user_key, "key42")
+    Assert.eq(client.cfg.user_id, "42")
+    Assert.eq(client.cfg.user_key, "key42")
     Assert.eq(saved.id, "zlib")
     Assert.eq(saved.cfg.user_key, "key42")
+
+    enqueue({ code = 200, body = '{"success":1}' })
+    client:listPopularAsync(function(v) ok = v end)
+    Assert.eq(captured[3].url, "https://z-lib.fm/eapi/book/most-popular")
 end
 
 -- 307 站内跳转：保持方法与 body，跟随 Location
@@ -148,6 +189,20 @@ do
     Assert.eq(captured[2].url, SEED1 .. "/eapi/book/search2")
     Assert.eq(captured[2].method, "POST")
     Assert.matches(captured[2].body, "message=Lua")
+end
+
+-- 相对查询串仍指向当前资源，不能被解析为父目录下的新路径。
+do
+    captured = {}
+    queue = {}
+    enqueue({ code = 307, headers = { location = "?page=2" } })
+    enqueue({ code = 200, body = '{"success":1,"books":[],"pagination":{"total_items":0}}' })
+    local client = fresh()
+    local wire
+    client:searchAsync("Lua", 1, 12, function(data) wire = data end)
+    Assert.not_nil(wire)
+    Assert.eq(captured[2].url, SEED1 .. "/eapi/book/search?page=2")
+    Assert.eq(captured[2].method, "POST")
 end
 
 -- 301 站内跳转 POST：转 GET 丢 body
@@ -228,19 +283,36 @@ do
     Assert.len(captured, 0)
 end
 
--- 搜索请求体：表单字段编码与分页
+-- 搜索请求体：表单字段编码、分页与语言
 do
     captured = {}
     queue = {}
     enqueue({ code = 200, body = '{"success":1,"books":[],"pagination":{"total_items":5}}' })
     local client = fresh()
     local wire
-    client:searchAsync("Lua 书", 2, 12, function(data) wire = data end)
+    client:searchAsync("Lua 书", 2, 12, function(data) wire = data end, "chinese")
     Assert.eq(wire.pagination.total_items, 5)
     Assert.eq(captured[1].method, "POST")
     Assert.matches(captured[1].body, "message=Lua%%20%%E4%%B9%%A6")
     Assert.matches(captured[1].body, "page=2")
     Assert.matches(captured[1].body, "limit=12")
+    Assert.matches(captured[1].body, "languages%%5B0%%5D=chinese")
+    Assert.eq(captured[1].headers["Content-Type"], "application/x-www-form-urlencoded; charset=UTF-8")
+    Assert.eq(captured[1].headers["X-Requested-With"], "XMLHttpRequest")
+    Assert.eq(cache_keys[1].method, "POST")
+    Assert.eq(cache_keys[1].query.message, "Lua 书")
+    Assert.eq(cache_sets[1].ttl, 5 * 60)
+end
+
+-- 空关键词是默认书城，缓存 30 分钟。
+do
+    captured = {}
+    queue = {}
+    enqueue({ code = 200, body = '{"success":1,"books":[],"pagination":{"total_items":0}}' })
+    local client = fresh()
+    client:searchAsync("", 1, 200, function() end, "chinese")
+    Assert.eq(cache_keys[1].query["languages[0]"], "chinese")
+    Assert.eq(cache_sets[1].ttl, 30 * 60)
 end
 
 -- 下载链接：会话 cookie + allowDownload=false 拦截

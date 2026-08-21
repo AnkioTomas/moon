@@ -1,5 +1,5 @@
 --[[--
-本地生成锁屏：阅读统计与阅读账单布局数据。
+本地生成锁屏：阅读统计、阅读账单与物理书架布局数据。
 
 @module tests.lockscreen.styles.generated_spec
 --]]
@@ -10,6 +10,7 @@ local writes = {}
 package.preload["lockscreen.background"] = function()
     return { ensure = function(cb) cb("/bg.jpg") end }
 end
+-- bookshelf 不再走 Background；其余样式仍用 stub
 package.preload["lockscreen.context"] = function()
     return {
         currentBook = function()
@@ -25,6 +26,19 @@ package.preload["lockscreen.context"] = function()
                 summary = { total_seconds = 7200, book_count = 1, pages = 20 },
                 books = { { stable_id = "b1", title = "测试书", authors = "作者", percent = 42, seconds = 7200 } },
                 days = { { ymd = "2024-01-01", seconds = 7200, pages = 20 } },
+            }
+        end,
+        bookshelf = function()
+            return {
+                reading = {
+                    { stable_id = "r1", title = "在读书", cover = nil },
+                    { stable_id = "r2", title = "另一本", cover = "/c2.png" },
+                },
+                covers = {
+                    { stable_id = "c1", title = "封面甲", cover = "/a.png" },
+                    { stable_id = "c2", title = "封面乙", cover = nil },
+                    { stable_id = "c3", title = "封面丙", cover = "/c.png" },
+                },
             }
         end,
     }
@@ -49,14 +63,27 @@ package.preload["ffi/util"] = function()
         end,
     }
 end
+package.preload["ffi/blitbuffer"] = function()
+    local c = function() return {} end
+    return {
+        COLOR_BLACK = c(), COLOR_WHITE = c(),
+        COLOR_GRAY_2 = c(), COLOR_GRAY_3 = c(), COLOR_GRAY_4 = c(),
+        COLOR_GRAY_5 = c(), COLOR_GRAY_6 = c(), COLOR_GRAY_7 = c(),
+        COLOR_GRAY_9 = c(), COLOR_GRAY_B = c(), COLOR_DARK_GRAY = c(),
+        COLOR_GRAY_D = c(), COLOR_GRAY_E = c(),
+    }
+end
 
 local Reading = require("lockscreen.styles.reading")
 local Bill = require("lockscreen.styles.bill")
-local reading_ok, bill_ok
+local Bookshelf = require("lockscreen.styles.bookshelf")
+local reading_ok, bill_ok, shelf_ok
 Reading.fetch(function(ok) reading_ok = ok end)
 Bill.fetch(function(ok) bill_ok = ok end)
+Bookshelf.fetch(function(ok) shelf_ok = ok end)
 Assert.is_true(reading_ok)
 Assert.is_true(bill_ok)
+Assert.is_true(shelf_ok)
 Assert.eq(writes[1].bg, "/bg.jpg")
 local has_progress, has_chart, has_book = false, false, false
 for _, block in ipairs(writes[1].blocks) do
@@ -69,3 +96,21 @@ end
 Assert.is_true(has_progress)
 Assert.is_true(has_chart)
 Assert.is_true(has_book)
+
+local shelf = writes[3]
+Assert.eq(shelf.path, "/lock/bookshelf.png")
+local spines, images, boards = 0, 0, 0
+for _, block in ipairs(shelf.blocks) do
+    if block.kind == "spine" then spines = spines + 1 end
+    if block.kind == "image" then images = images + 1 end
+    -- 层板本体偏厚，约 10～20px
+    if block.kind == "panel" and block.height and block.height >= 8 and block.height <= 24
+        and block.color then
+        boards = boards + 1
+    end
+end
+Assert.is_true(spines >= 1)
+Assert.is_true(images >= 1)
+Assert.is_true(boards >= 4)
+-- 不再叠壁纸
+Assert.is_nil(shelf.bg)

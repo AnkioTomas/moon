@@ -11,7 +11,38 @@ package.preload["utils.settings"] = function()
     return { get = function() return settings end, save = function() end }
 end
 package.preload["utils.db.book"] = function()
-    return { get = function() return { title = "测试书", authors = "作者", percent = 10 } end }
+    return {
+        get = function() return { title = "测试书", authors = "作者", percent = 10 } end,
+        recentBySource = function()
+            return {
+                { source_id = "moon", stable_id = "b1", title = "在读", authors = "甲", percent = 35 },
+                { source_id = "moon", stable_id = "b2", title = "读完", authors = "乙", percent = 100 },
+                { source_id = "moon", stable_id = "b3", title = "封面书", authors = "丙", percent = 10 },
+            }
+        end,
+        listBySource = function()
+            return {
+                { source_id = "moon", stable_id = "b4", title = "库内书", authors = "丁", percent = 0 },
+            }, 1
+        end,
+    }
+end
+package.preload["utils.paths"] = function()
+    return {
+        coverPath = function(stable_id)
+            return "/covers/" .. tostring(stable_id) .. ".png"
+        end,
+    }
+end
+package.preload["libs/libkoreader-lfs"] = function()
+    return {
+        attributes = function(path, field)
+            if path == "/covers/b1.png" and field == "mode" then
+                return "file"
+            end
+            return nil
+        end,
+    }
 end
 local range
 package.preload["utils.db.stats"] = function()
@@ -62,3 +93,13 @@ Assert.len(bill.days, 1)
 Assert.eq(Context.highlight(), "第一句")
 Assert.eq(Context.highlight(), "第二句")
 Assert.eq(Context.highlight(), "第一句")
+
+local shelf = Context.bookshelf()
+Assert.len(shelf.reading, 2)
+Assert.eq(shelf.reading[1].stable_id, "b1")
+Assert.eq(shelf.reading[1].cover, "/covers/b1.png")
+Assert.eq(shelf.reading[2].stable_id, "b3")
+Assert.is_nil(shelf.reading[2].cover)
+-- 已读完的进封面层；reading 已占的不重复
+Assert.eq(shelf.covers[1].stable_id, "b2")
+Assert.eq(shelf.covers[2].stable_id, "b4")

@@ -135,7 +135,7 @@ local function stubListBySource(source_id, opts)
     opts = opts or {}
     local matched = {}
     for _, row in pairs(db_rows) do
-        if row.source_id == source_id then
+        if row.source_id == source_id and row.in_library ~= false then
             local keep = true
             if type(opts.category) == "string" and opts.category ~= "" and row.category ~= opts.category then
                 keep = false
@@ -229,6 +229,7 @@ package.preload["utils.db.book"] = function()
         end,
         upsert = function(row)
             upserts[#upserts + 1] = row
+            row.in_library = true
             db_rows[rowKey(row.source_id, row.stable_id)] = row
             return true
         end,
@@ -245,6 +246,15 @@ package.preload["utils.db.book"] = function()
         remove = function(source_id, stable_id)
             removed[#removed + 1] = stable_id
             db_rows[rowKey(source_id, stable_id)] = nil
+            return true
+        end,
+        setLibraryMembership = function(source_id, stable_id, in_library, clear_path)
+            local row = db_rows[rowKey(source_id, stable_id)]
+            if row then
+                row.in_library = in_library
+                if clear_path then row.path = nil end
+            end
+            if not in_library then removed[#removed + 1] = stable_id end
             return true
         end,
         listBySource = stubListBySource,
@@ -460,9 +470,11 @@ do
     local bad = db_rows[rowKey("local", "/books/sub/bad.epub")]
     Assert.not_nil(bad)
     Assert.eq(bad.title, "bad")
-    -- 失效书被清理，存活书不动
+    -- 失效书只退出书架，身份与历史仍保留；存活书不动
     Assert.is_true(hasValue(removed, "/books/gone.epub"))
-    Assert.is_nil(db_rows[rowKey("local", "/books/gone.epub")])
+    Assert.not_nil(db_rows[rowKey("local", "/books/gone.epub")])
+    Assert.is_false(db_rows[rowKey("local", "/books/gone.epub")].in_library)
+    Assert.is_nil(db_rows[rowKey("local", "/books/gone.epub")].path)
     Assert.not_nil(db_rows[rowKey("local", "/books/a.epub")])
     -- 封面：解析成功的 5 本都尝试提取（bad.epub 无引擎不提取）
     Assert.len(covers_saved, 5)
@@ -705,6 +717,75 @@ do
 
     os.rename = real_rename
 end
+
+-- ── replaceBook：转换后的 EPUB 替换原书；身份、封面和 .sdr 一起迁移 ──
+do
+    reset()
+    db_rows[rowKey("local", "/books/reflow.mobi")] = {
+        source_id = "local",
+        stable_id = "/books/reflow.mobi",
+        title = "重排",
+        category = "科幻",
+        series = "系列",
+    }
+    local real_rename, real_remove = os.rename, os.remove
+    local renamed_files, removed_files = {}, {}
+    os.rename = function(from, to)
+        renamed_files[#renamed_files + 1] = { from, to }
+        return true
+    end
+    os.remove = function(path)
+        removed_files[#removed_files + 1] = path
+        return true
+    end
+
+    local c = Client.new({ path = "/books" })
+    local new_id, err = c:replaceBook("/books/reflow.epub.moon-reflow", "/books/reflow.mobi")
+    Assert.is_nil(err)
+    Assert.eq(new_id, "/books/reflow.epub")
+    Assert.eq(renamed_files[1][1], "/books/reflow.mobi")
+    Assert.eq(renamed_files[1][2], "/books/reflow.mobi.moon-reflow-backup")
+    Assert.eq(renamed_files[2][1], "/books/reflow.epub.moon-reflow")
+    Assert.eq(renamed_files[2][2], "/books/reflow.epub")
+    Assert.eq(removed_files[1], "/books/reflow.mobi.moon-reflow-backup")
+    Assert.is_nil(db_rows[rowKey("local", "/books/reflow.mobi")])
+    local row = db_rows[rowKey("local", "/books/reflow.epub")]
+    Assert.not_nil(row)
+    Assert.eq(row.category, "科幻")
+    Assert.eq(row.series, "系列")
+
+    -- 目标 EPUB 已存在时拒绝，不能碰原文件。
+    reset()
+    local before = #renamed_files
+    new_id, err = c:replaceBook("/tmp/reflow.epub.moon-reflow", "/books/a.mobi")
+    Assert.is_nil(new_id)
+    Assert.not_nil(err)
+    Assert.eq(#renamed_files, before)
+
+    -- 转换文件落位失败时，必须把备份恢复成原书，且不迁移数据库身份。
+    reset()
+    db_rows[rowKey("local", "/books/rollback.mobi")] = {
+        source_id = "local", stable_id = "/books/rollback.mobi", title = "回滚",
+    }
+    renamed_files = {}
+    os.rename = function(from, to)
+        renamed_files[#renamed_files + 1] = { from, to }
+        if from == "/books/rollback.epub.moon-reflow" then
+            return nil, "disk error"
+        end
+        return true
+    end
+    new_id, err = c:replaceBook("/books/rollback.epub.moon-reflow", "/books/rollback.mobi")
+    Assert.is_nil(new_id)
+    Assert.matches(err, "放置转换文件失败")
+    Assert.eq(renamed_files[3][1], "/books/rollback.mobi.moon-reflow-backup")
+    Assert.eq(renamed_files[3][2], "/books/rollback.mobi")
+    Assert.not_nil(db_rows[rowKey("local", "/books/rollback.mobi")])
+    Assert.len(renames, 0)
+
+    os.rename, os.remove = real_rename, real_remove
+end
+
 do
     reset()
     local c = Client.new({ path = "/books" })

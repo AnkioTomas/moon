@@ -39,7 +39,12 @@ package.loaded["ai.json"] = nil
 package.loaded["ai"] = nil
 package.loaded["ai.init"] = nil
 
-local AI = require("ai")
+-- 真机插件加载器只注入 book.koplugin/?.lua，不提供 ?/init.lua。
+local original_path = package.path
+package.path = package.path:gsub("[^;]*/book%.koplugin/%?/init%.lua;?", "")
+local loaded, AI = pcall(require, "ai")
+package.path = original_path
+Assert.is_true(loaded)
 Assert.is_true(AI.isConfigured())
 
 local content, err
