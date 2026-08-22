@@ -9,6 +9,7 @@ local UIManager = require("ui/uimanager")
 local Popup = require("ui.components.popup")
 local SettingRow = require("ui.components.settingrow")
 local LockScreen = require("lockscreen.init")
+local Components = require("lockscreen.components.base")
 local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -78,7 +79,8 @@ function Lockscreen.rows(desktop)
     end
 
     local component = LockScreen.component()
-    if component ~= "myrl" and component ~= "bookshelf" then
+    local component_config = Components.find(component)
+    if not component_config or component_config.uses_background ~= false then
         rows[#rows + 1] = function(iw)
             local labels = {
                 custom = _("自定义"),
@@ -141,8 +143,7 @@ function Lockscreen.rows(desktop)
         })
     end
 
-    if component ~= "none" and component ~= "bill"
-        and component ~= "myrl" and component ~= "bookshelf" then
+    if component_config and component_config.supports_position ~= false then
         rows[#rows + 1] = function(iw)
             local positions = {
                 ["top-left"] = _("左上"), ["top-center"] = _("上中"), ["top-right"] = _("右上"),

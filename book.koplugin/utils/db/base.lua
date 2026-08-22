@@ -142,7 +142,7 @@ function Base.requireSourceId(source_id)
     return source_id
 end
 
-local SCHEMA_VERSION = 2
+local SCHEMA_VERSION = 4
 
 ---@param table_name string
 ---@param column_name string
@@ -207,7 +207,10 @@ CREATE TABLE IF NOT EXISTS pending_progress (
   stable_id TEXT NOT NULL,
   fraction REAL NOT NULL,
   chapter_idx INTEGER,
+  chapter_title TEXT,
   chapter_fraction REAL,
+  page INTEGER,
+  total_pages INTEGER,
   locator TEXT,
   updated_at INTEGER NOT NULL,
   sync_status INTEGER NOT NULL DEFAULT 0,
@@ -305,6 +308,15 @@ CREATE TABLE IF NOT EXISTS xray_meta (
         ON books(source_id, in_library, stable_id);]])
     if not hasColumn("pending_progress", "sync_status") then
         Base.exec("ALTER TABLE pending_progress ADD COLUMN sync_status INTEGER NOT NULL DEFAULT 0;")
+    end
+    if not hasColumn("pending_progress", "chapter_title") then
+        Base.exec("ALTER TABLE pending_progress ADD COLUMN chapter_title TEXT;")
+    end
+    if not hasColumn("pending_progress", "page") then
+        Base.exec("ALTER TABLE pending_progress ADD COLUMN page INTEGER;")
+    end
+    if not hasColumn("pending_progress", "total_pages") then
+        Base.exec("ALTER TABLE pending_progress ADD COLUMN total_pages INTEGER;")
     end
     if not hasColumn("reading_stats", "sync_status") then
         Base.exec("ALTER TABLE reading_stats ADD COLUMN sync_status INTEGER NOT NULL DEFAULT 0;")
