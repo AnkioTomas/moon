@@ -262,7 +262,8 @@ do
     drain(serve(c_css))
     local _, b_css, h_css = parseResponse(c_css:output())
     has(h_css, "text/css")
-    has(b_css, "--blue")
+    has(b_css, "--surface")
+    has(b_css, "setting-row")
     has(b_css, "prefers-color-scheme: dark")
 
     local c_js = newClient({ "GET /js.js HTTP/1.1\r\n\r\n" })
