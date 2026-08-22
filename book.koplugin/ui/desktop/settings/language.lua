@@ -29,9 +29,26 @@ end
 local function download(desktop, enable_after)
     if require("pinyin.download").downloading() then return end
     local dialog
+    local dialog_has_bar = false
     local function closeDialog()
         if dialog then dialog:close(); dialog = nil end
+        dialog_has_bar = false
     end
+    local function openDialog(opts)
+        closeDialog()
+        local ok, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
+        if not ok then return end
+        dialog = ProgressbarDialog:new(opts)
+        dialog_has_bar = opts.progress_max ~= nil and opts.progress_max > 0
+        dialog:show()
+    end
+    -- manifest 拉取前无总量，先给即时反馈，避免确认框关闭后长时间空白。
+    openDialog{
+        title = _("正在准备下载拼音词库…"),
+        subtitle = _("请稍候…"),
+        refresh_time_seconds = 1,
+        dismissable = false,
+    }
     Pinyin.downloadDict(function(ok, err)
         closeDialog()
         UIManager:show(InfoMessage:new{
@@ -41,22 +58,21 @@ local function download(desktop, enable_after)
         if ok and enable_after then Pinyin.setEnabled(true) end
         desktop:rebuild()
     end, function(stage, done_bytes, total, _idx, count)
+        if stage == "assemble" then
+            closeDialog()
+            UIManager:show(InfoMessage:new{ text = _("拼接校验词库…"), timeout = 2 })
+            return
+        end
         if (stage == "manifest" or stage == "part") and total and total > 0 then
-            if not dialog then
-                local ok, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
-                if not ok then return end
-                dialog = ProgressbarDialog:new{
+            if not dialog_has_bar then
+                openDialog{
                     title = stage == "manifest" and _("正在准备下载拼音词库…") or _("正在下载拼音词库…"),
                     subtitle = T(_("共 %1 片"), count) .. string.format(" · %.1f MB", total / 1048576),
                     progress_max = total, refresh_time_seconds = 1, dismissable = false,
                 }
-                dialog:show()
             elseif stage == "part" then
                 dialog:reportProgress(done_bytes)
             end
-        elseif stage == "assemble" then
-            closeDialog()
-            UIManager:show(InfoMessage:new{ text = _("拼接校验词库…"), timeout = 2 })
         end
     end)
 end
