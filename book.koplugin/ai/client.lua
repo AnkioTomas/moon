@@ -12,6 +12,9 @@ local Text = require("utils.text")
 
 local Client = {}
 
+--- AI 请求默认 User-Agent；部分 OpenAI 兼容网关按 UA 分流/限流。
+local DEFAULT_UA = "opencode/1.2.3"
+
 --- 规范化 Chat Completions URL；已带路径则原样返回。
 ---@param base string|nil
 ---@return string|nil
@@ -121,7 +124,7 @@ function Client.chat(messages, opts, cb)
         content_type = "application/json",
         accept = "application/json",
         timeout = (opts and opts.timeout) or 120,
-        headers = { Authorization = "Bearer " .. api_key },
+        headers = { Authorization = "Bearer " .. api_key, ["User-Agent"] = DEFAULT_UA },
     }, function(response, err, raw)
         if not response then
             local detail
@@ -163,6 +166,7 @@ function Client.chatStream(messages, opts, cb)
         timeout = opts.timeout or 180,
         headers = {
             Authorization = "Bearer " .. api_key,
+            ["User-Agent"] = DEFAULT_UA,
             ["Content-Type"] = "application/json",
             Accept = "text/event-stream",
         },

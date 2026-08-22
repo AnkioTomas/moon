@@ -5,11 +5,13 @@
 require("l10n").apply()
 
 local InputDialog = require("ui/widget/inputdialog")
+local InfoMessage = require("ui/widget/infomessage")
 local SettingRow = require("ui.components.settingrow")
 local Settings = require("utils.settings")
 local Text = require("utils.text")
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local AI = {}
 
@@ -48,6 +50,46 @@ local function row(desktop, key, title, hint, password, normalize)
     end
 end
 
+--- 点按后发一条最小 chat（小 max_tokens），成功显示返回摘要，失败显示错误。
+---@param desktop table
+---@return function
+local function testRow(desktop)
+    local testing = false
+    return function(iw)
+        return SettingRow.build(iw, {
+            kind = "action", icon = "network_check", title = _("测试连接"),
+            callback = function()
+                if testing then
+                    return
+                end
+                if not require("ai").isConfigured() then
+                    UIManager:show(InfoMessage:new{ text = _("请先配置接口地址、API 密钥和模型"), timeout = 2 })
+                    return
+                end
+                testing = true
+                local loading = InfoMessage:new{ text = _("正在测试…") }
+                UIManager:show(loading)
+                require("ai").chat({ { role = "user", content = "ping" } },
+                    { max_tokens = 10, timeout = 30 },
+                    function(content, err)
+                        testing = false
+                        UIManager:close(loading)
+                        if desktop._closed then
+                            return
+                        end
+                        local text
+                        if content then
+                            text = T(_("连接正常，模型回复：%1"), Text.trim(content):sub(1, 50))
+                        else
+                            text = T(_("测试失败：%1"), tostring(err))
+                        end
+                        UIManager:show(InfoMessage:new{ text = text, timeout = 4 })
+                    end)
+            end,
+        })
+    end
+end
+
 ---@param desktop table
 ---@return table
 function AI.rows(desktop)
@@ -58,6 +100,7 @@ function AI.rows(desktop)
             function(value) return Text.trim(value) end),
         row(desktop, "ai_model", _("模型"), _("输入模型名"), false,
             function(value) return Text.trim(value) end),
+        testRow(desktop),
     }
 end
 

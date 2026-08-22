@@ -11,11 +11,18 @@ end
 
 local sent
 package.preload["http.request"] = function()
-    return { post = function(url, body, opts, cb)
-        sent = { url = url, body = body, opts = opts }
-        cb('{"choices":[{"message":{"content":"ok"}}]}', nil, {})
-        return { cancel = function() end }
-    end }
+    return {
+        post = function(url, body, opts, cb)
+            sent = { url = url, body = body, opts = opts }
+            cb('{"choices":[{"message":{"content":"ok"}}]}', nil, {})
+            return { cancel = function() end }
+        end,
+        stream = function(opts, handlers)
+            sent = { url = opts.url, opts = opts }
+            handlers.on_done(nil)
+            return { cancel = function() end }
+        end,
+    }
 end
 
 local Client = require("ai.client")
@@ -31,6 +38,8 @@ end)
 Assert.eq(sent.url, "https://example.test/v1/chat/completions")
 Assert.eq(sent.body, "model-x")
 Assert.eq(sent.opts.headers.Authorization, "Bearer secret")
+Assert.eq(sent.opts.headers["User-Agent"],
+    "opencode/1.2.3 ai-sdk/amazon-bedrock/3.0.73 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5")
 Assert.eq(sent.opts.content_type, "application/json")
 Assert.eq(content, "ok")
 Assert.is_nil(failure)
@@ -47,6 +56,12 @@ Assert.eq(array_content, "a\nb")
 local missing, err = Client.decodeResponse('{"error":{"message":"bad key"}}')
 Assert.is_nil(missing)
 Assert.eq(err, "bad key")
+
+-- 流式路径同样带默认 UA
+settings.ai_api_key = " secret "
+Client.chatStream({ { role = "user", content = "hi" } }, {}, function() end)
+Assert.eq(sent.opts.headers["User-Agent"],
+    "opencode/1.2.3 ai-sdk/amazon-bedrock/3.0.73 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5")
 
 settings.ai_api_key = ""
 Assert.is_false(Client.isConfigured())
