@@ -543,7 +543,7 @@ return {
     ["正在尝试镜像：%1"] = "Trying mirror: %1",
     ["镜像地址（可选，留空自动选择）"] = "Mirror URL (optional, auto if empty)",
     ["文件管理"] = "File Manager",
-    ["文件管理服务"] = "File manager service",
+    ["远程管理服务"] = "Remote management service",
     ["未运行"] = "Not running",
     ["运行中"] = "Running",
     ["端口"] = "Port",

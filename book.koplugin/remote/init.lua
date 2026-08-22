@@ -1,5 +1,5 @@
 --[[--
-文件管理服务：生命周期 + 文件系统 IO + 设置页菜单行。
+远程管理服务：生命周期 + 文件系统 IO + 设置页菜单行。
 
 模块级单例（FM / Reader 两个插件实例共享一份 server）；
 KOReader UI 依赖全部函数内延迟加载（离线测试只碰 server.lua）。
@@ -560,21 +560,34 @@ end
 
 -- ── 设置页菜单行 ─────────────────────────────────────
 
+--- 本机局域网 IP：UDP setpeername 只查路由表不发包，getsockname 拿到出口网卡地址。
+--- 不能用 dns.toip(gethostname())：多数设备 /etc/hosts 把主机名映射到 127.0.0.1。
+---@return string|nil
+local function localIP()
+    local ok, socket = pcall(require, "socket")
+    if not ok or not socket.udp then
+        return nil
+    end
+    local s = socket.udp()
+    if not s then
+        return nil
+    end
+    local ip
+    -- 203.0.113.1 是 RFC 5737 文档保留段，必然走默认路由（同 NetworkMgr:hasDefaultRoute）
+    if s:setpeername("203.0.113.1", "53") then
+        ip = s:getsockname()
+    end
+    s:close()
+    return ip
+end
+
 --- 状态行文案：运行中给可访问地址（IP 尽力而为），否则「未运行」。
 ---@return string status, boolean running
 local function statusLabel()
     if not Remote.isRunning() then
         return _("未运行"), false
     end
-    local ip
-    local ok, socket = pcall(require, "socket")
-    if ok and socket.dns then
-        local host = socket.dns.gethostname()
-        if host then
-            ip = socket.dns.toip(host)
-        end
-    end
-    return string.format("http://%s:%d", ip or _("本机IP"), Remote.port()), true
+    return string.format("http://%s:%d", localIP() or _("本机IP"), Remote.port()), true
 end
 
 --- 设置页「文件管理」子页行构建数组（供 ui/desktop/settings.lua）。
@@ -599,7 +612,7 @@ function Remote.menuRows(desktop)
         return SettingRow.build(iw, {
             kind = "toggle",
             icon = "folder",
-            title = _("文件管理服务"),
+            title = _("远程管理服务"),
             status = status,
             status_on = running,
             callback = function()
