@@ -27,11 +27,16 @@ local DEFAULTS = {
         lock_screen_wide = true,
         lock_screen_bill_period = "7d",
         lock_screen_custom_message = "读书不觉已春深，一寸光阴一寸金。",
+        lock_screen_asset_cache = {},
     },
     remote = { remote_port = 9528, remote_autostart = false },
     pinyin = { pinyin_enabled = false },
     quickpanel = { quick_panel_actions = { "native_menu" }, quick_panel_icons = {} },
-    reader = { book_reader_show_top_time = true, book_reader_show_bottom_progress = true },
+    reader = {
+        book_reader_show_top_time = true,
+        book_reader_show_bottom_progress = true,
+        book_reader_layout_id = "off",
+    },
     ai = { ai_endpoint = "", ai_api_key = "", ai_model = "" },
 }
 
@@ -44,10 +49,9 @@ end
 -- the lockscreen settings rather than in common.lua.
 for _, key in ipairs({
     "lock_screen_day", "lock_screen_bill_period", "lock_screen_quote_cache",
-    "lock_screen_quote_source_cache", "lock_screen_quote_index", "lock_screen_bing_day",
-    "lock_screen_myrl_day", "lock_screen_component", "lock_screen_position",
-    "lock_screen_wide",
-    "lock_screen_custom_message", "lock_screen_folder_day", "lock_screen_folder_pick",
+    "lock_screen_quote_source_cache", "lock_screen_quote_index",
+    "lock_screen_component", "lock_screen_position", "lock_screen_wide",
+    "lock_screen_custom_message", "lock_screen_asset_cache",
 }) do
     KEY_SECTION[key] = "lockscreen"
 end
