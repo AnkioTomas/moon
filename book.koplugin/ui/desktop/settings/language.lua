@@ -3,15 +3,33 @@
 --]]
 
 local ConfirmBox = require("ui/widget/confirmbox")
+local Geom = require("ui/geometry")
 local InfoMessage = require("ui/widget/infomessage")
+local LeftContainer = require("ui/widget/container/leftcontainer")
+local TextBoxWidget = require("ui/widget/textboxwidget")
 local UIManager = require("ui/uimanager")
 local Popup = require("ui.components.popup")
 local SettingRow = require("ui.components.settingrow")
+local UI = require("ui.components.bookui")
+local Paths = require("utils.paths")
 local Pinyin = require("pinyin.init")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
 local Language = {}
+local RELEASES_URL = "https://github.com/AnkioTomas/moon/releases"
+
+local function hintRow(width, text)
+    return LeftContainer:new{
+        dimen = Geom:new{ w = width },
+        TextBoxWidget:new{
+            text = text,
+            face = UI.face("xx_smallinfofont", 11),
+            width = math.max(1, width - UI.sz(4)),
+            fgcolor = UI.muted(),
+        },
+    }
+end
 
 local function pickLanguage()
     local source = require("ui/language"):getLangMenuTable()
@@ -122,6 +140,12 @@ function Language.rows(desktop)
                 status_on = require("pinyin.dictionary").isAvailable(),
                 callback = function() confirmDownload(desktop) end,
             })
+        end,
+        function(iw)
+            return hintRow(iw, T(_(
+                "若在线下载过慢，可到 GitHub Release（%1）下载 pinyin-dictionary-版本号.sqlite3，"
+                .. "重命名为 dictionary.sqlite3 后放入：\n%2"
+            ), RELEASES_URL, Paths.pinyinDictPath()))
         end,
     }
 end

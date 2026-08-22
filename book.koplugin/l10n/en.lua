@@ -567,6 +567,7 @@ return {
     ["获取词库信息…"] = "Fetching dictionary info…",
     ["拼接校验词库…"] = "Joining and verifying dictionary…",
     ["共 %1 片"] = "%1 parts",
+    ["若在线下载过慢，可到 GitHub Release（%1）下载 pinyin-dictionary-版本号.sqlite3，重命名为 dictionary.sqlite3 后放入：\n%2"] = "If online download is slow, get pinyin-dictionary-<version>.sqlite3 from GitHub Release (%1), rename it to dictionary.sqlite3, and place it at:\n%2",
     ["已启用的数据源"] = "Enabled sources",
     ["在线"] = "Online",
     ["本地"] = "Local",

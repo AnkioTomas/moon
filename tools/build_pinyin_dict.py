@@ -3,13 +3,17 @@
 
 数据来源：https://github.com/iDvel/rime-ice （cn_dicts/ 下 5 个启用文件）
 用法：python3 tools/build_pinyin_dict.py [--tag <release-tag>] [--out-dir assets/pinyin]
+                                        [--keep-raw] [--assemble-only]
 
-  --tag     缺省取 rime-ice 最新 release tag，失败回落 main
-  --out-dir 缺省 assets/pinyin
+  --tag           缺省取 rime-ice 最新 release tag，失败回落 main
+  --out-dir       缺省 assets/pinyin
+  --keep-raw      切片后保留 dictionary.sqlite3（默认删除，避免误提交整库）
+  --assemble-only 仅从已有 manifest + 分片拼出 dictionary.sqlite3 并校验（CI / Release 用）
 
 产物（--out-dir 下）：
 
   dictionary.sqlite3.part.001 / .002 / ... 原始 SQLite 二进制分片，按序拼接
+  dictionary.sqlite3                       完整原始库（--keep-raw 或 --assemble-only）
   manifest.json                            { tag, built_at, entries, raw_sha256, raw_size,
                                              parts: [{file, size}] }
 
@@ -205,11 +209,62 @@ class TopCandidates:
         return sorted(self.words.items(), key=lambda item: (-item[1], item[0]))
 
 
+def assemble_only(out_dir):
+    """从 out_dir 已有分片拼出 dictionary.sqlite3，对照 manifest 校验。"""
+    manifest_path = os.path.join(out_dir, "manifest.json")
+    with open(manifest_path, encoding="utf-8") as f:
+        manifest = json.load(f)
+    parts = manifest.get("parts")
+    if not parts:
+        raise SystemExit("manifest missing parts")
+
+    raw_path = os.path.join(out_dir, "dictionary.sqlite3")
+    if os.path.exists(raw_path):
+        os.remove(raw_path)
+
+    sha256 = hashlib.sha256()
+    total = 0
+    with open(raw_path, "wb") as out:
+        for part in parts:
+            part_path = os.path.join(out_dir, part["file"])
+            with open(part_path, "rb") as f:
+                data = f.read()
+            expect_sha = part.get("sha256")
+            if expect_sha and hashlib.sha256(data).hexdigest() != expect_sha:
+                raise SystemExit(f"part sha256 mismatch: {part['file']}")
+            expect_size = part.get("size")
+            if expect_size is not None and len(data) != int(expect_size):
+                raise SystemExit(f"part size mismatch: {part['file']}")
+            out.write(data)
+            sha256.update(data)
+            total += len(data)
+
+    expect_raw_size = manifest.get("raw_size")
+    if expect_raw_size is not None and total != int(expect_raw_size):
+        raise SystemExit(f"size mismatch: got {total}, want {expect_raw_size}")
+    expect_raw_sha = manifest.get("raw_sha256")
+    if expect_raw_sha and sha256.hexdigest() != expect_raw_sha:
+        raise SystemExit("raw sha256 mismatch")
+
+    print(f"assembled: {raw_path} ({total / 1024 / 1024:.1f} MB)")
+    print(f"raw_sha256={sha256.hexdigest()}")
+    return raw_path
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default=None)
     ap.add_argument("--out-dir", default="assets/pinyin")
+    ap.add_argument("--keep-raw", action="store_true",
+                    help="切片后保留 dictionary.sqlite3")
+    ap.add_argument("--assemble-only", action="store_true",
+                    help="仅从已有分片拼出 dictionary.sqlite3")
     args = ap.parse_args()
+
+    out_dir = args.out_dir
+    if args.assemble_only:
+        assemble_only(out_dir)
+        return
 
     tag = args.tag or latest_tag()
     print(f"source: {REPO}@{tag}")
@@ -269,7 +324,6 @@ def main():
             stats[name] = (count, skipped)
             print(f"  entries={count} skipped={skipped}")
 
-    out_dir = args.out_dir
     os.makedirs(out_dir, exist_ok=True)
     raw_path = os.path.join(out_dir, "dictionary.sqlite3")
     for name in os.listdir(out_dir):
@@ -379,7 +433,10 @@ def main():
             with open(os.path.join(out_dir, name), "wb") as fo:
                 fo.write(data)
             parts.append({"file": name, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
-    os.remove(raw_path)
+    if args.keep_raw:
+        print(f"kept raw: {raw_path} ({raw_size / 1024 / 1024:.1f} MB)")
+    else:
+        os.remove(raw_path)
 
     manifest = {
         "tag": tag,

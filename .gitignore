@@ -10,3 +10,6 @@
 
 # Agent instructions (local only)
 AGENTS.md
+
+# 拼音整库仅 Release 分发，勿提交（分片在 assets/pinyin/）
+/assets/pinyin/dictionary.sqlite3
