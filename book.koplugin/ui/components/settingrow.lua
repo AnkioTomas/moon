@@ -16,7 +16,7 @@
     status = "开",
     status_on = true,
     chevron = true,   -- 可覆盖 kind 默认
-    background = UI.surface(),  -- false 可去掉卡片底
+    background = false,  -- 默认无卡片底；传 UI.surface() 可恢复浅底
     callback = fn,
   })
 
@@ -152,7 +152,7 @@ function SettingRow.build(width, opts)
     }
 
     local background = opts.background
-    if background == nil then background = UI.surface() end
+    if background == nil then background = false end
 
     local tap = tappable(width, row_h, opts.callback)
     tap[1] = Surface.card(inner, {

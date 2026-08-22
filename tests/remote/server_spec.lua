@@ -255,6 +255,7 @@ do
     has(body, "远程管理")
     has(body, "/file.html")
     has(body, "/input.html")
+    has(body, "/settings.html")
     Assert.is_true(client.closed, "Connection: close 后 socket 必须关闭")
 
     -- 静态资源：ctype 正确 + 内容命中；夜间模式媒体查询在 css 里
@@ -284,6 +285,12 @@ do
     local _, b_i = parseResponse(c_i:output())
     has(b_i, "远程输入")
     has(b_i, "/input.js")
+
+    local c_s = newClient({ "GET /settings.html HTTP/1.1\r\n\r\n" })
+    drain(serve(c_s))
+    local _, b_s = parseResponse(c_s:output())
+    has(b_s, "连接配置")
+    has(b_s, "/settings.js")
 
     -- 静态路由非 GET → 405；未知路径 → 404
     local c_p = newClient({ "POST /style.css HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
@@ -713,4 +720,42 @@ do
     local c7 = newClient({ "DELETE /api/clipboard HTTP/1.1\r\n\r\n" })
     drain(serve(c7))
     Assert.eq((parseResponse(c7:output())), 405)
+end
+
+-- ── 远程配置 ───────────────────────────────────────────
+
+do
+    local c1 = newClient({ "GET /api/settings HTTP/1.1\r\n\r\n" })
+    drain(serve(c1))
+    local code, body = parseResponse(c1:output())
+    Assert.eq(code, 200)
+    local d = require("support.json_stub").decode(body)
+    Assert.not_nil(d.ai)
+    Assert.not_nil(d.moon)
+    Assert.not_nil(d.rss)
+
+    local payload = '{"ai":{"ai_endpoint":"https://cfg.test/v1","ai_api_key":"******","ai_model":"m"}}'
+    local c2 = newClient({
+        "POST /api/settings HTTP/1.1\r\nContent-Length: " .. #payload .. "\r\n\r\n" .. payload,
+    })
+    drain(serve(c2))
+    Assert.eq((parseResponse(c2:output())), 200)
+
+    local opml = '<opml><body><outline xmlUrl="https://rss.test/feed" text="T"/></body></opml>'
+    local c3 = newClient({
+        "POST /api/settings/rss/opml HTTP/1.1\r\nContent-Length: " .. #opml .. "\r\n\r\n" .. opml,
+    })
+    drain(serve(c3))
+    local code3, body3 = parseResponse(c3:output())
+    Assert.eq(code3, 200)
+    local d3 = require("support.json_stub").decode(body3)
+    Assert.is_true(d3.added >= 0)
+
+    local c4 = newClient({ "DELETE /api/settings HTTP/1.1\r\n\r\n" })
+    drain(serve(c4))
+    Assert.eq((parseResponse(c4:output())), 405)
+
+    local c5 = newClient({ "POST /api/settings HTTP/1.1\r\nContent-Length: 300000\r\n\r\n" })
+    drain(serve(c5))
+    Assert.eq((parseResponse(c5:output())), 413)
 end

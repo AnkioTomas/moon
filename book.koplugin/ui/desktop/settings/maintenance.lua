@@ -20,7 +20,6 @@ local T = require("ffi/util").template
 
 local Maintenance = {}
 local REPO_URL = "https://github.com/AnkioTomas/moon"
-local RELEASES_URL = REPO_URL .. "/releases/latest"
 local REPO_HOST = "github.com/AnkioTomas/moon"
 
 local function pluginVersion()
@@ -148,18 +147,6 @@ end
 function Maintenance.closeRow(desktop)
     return function(iw)
         return SettingRow.build(iw, { kind = "action", icon = "close", title = _("关闭桌面"), callback = function() desktop:onClose() end })
-    end
-end
-
-function Maintenance.updateRow()
-    return function(iw)
-        return SettingRow.build(iw, {
-            kind = "action", icon = "system_update", title = _("检查更新"), status = pluginVersion(), status_on = true,
-            callback = function()
-                if Device:canOpenLink() then Device:openLink(RELEASES_URL)
-                else UIManager:show(InfoMessage:new{ text = RELEASES_URL }) end
-            end,
-        })
     end
 end
 

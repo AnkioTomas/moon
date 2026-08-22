@@ -78,7 +78,6 @@ local function backRow(desktop)
     return function(iw)
         return SettingRow.build(iw, {
             kind = "action", icon = "arrow_back", title = _("返回"),
-            background = false,
             callback = function() gotoSub(desktop, nil) end,
         })
     end
@@ -180,7 +179,6 @@ function Settings.build(desktop)
             Maintenance.importStatsRow(),
             Maintenance.aboutRow(),
             Maintenance.closeRow(desktop),
-            Maintenance.updateRow(),
         })
     else
         table.insert(packed, backRow(desktop)(card_w))
