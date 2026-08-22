@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<!-- 连接配置页（静态路由；逻辑在 /settings.js，共享函数在 /js.js） -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>连接配置 - 远程管理</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="page-header">
+<h1><a href="/">远程管理</a> <span class="crumb">/</span> 连接配置</h1>
+<p class="note warn">密钥在读取时会脱敏；不修改密钥时请保持为 ******。</p>
+</header>
+
+<div id="loadstate" class="state" role="status" aria-live="polite">加载中…</div>
+
+<form id="form-ai" class="panel cfg-form" autocomplete="off">
+<h2>AI 服务</h2>
+<div class="field">
+<label for="ai_endpoint">接口地址</label>
+<input id="ai_endpoint" name="ai_endpoint" type="url" inputmode="url" placeholder="https://api.example.com/v1">
+</div>
+<div class="field">
+<label for="ai_api_key">API 密钥</label>
+<input id="ai_api_key" name="ai_api_key" type="password" autocomplete="off" placeholder="sk-…">
+</div>
+<div class="field">
+<label for="ai_model">模型</label>
+<input id="ai_model" name="ai_model" type="text" placeholder="gpt-4o-mini">
+</div>
+<div class="btns">
+<button type="submit" class="primary">保存 AI 配置</button>
+</div>
+<div class="form-state" id="state-ai" role="status" aria-live="polite"></div>
+</form>
+
+<form id="form-moon" class="panel cfg-form" autocomplete="off">
+<h2>Moon 源</h2>
+<div class="field">
+<label for="moon_base_url">服务器地址</label>
+<input id="moon_base_url" name="base_url" type="url" inputmode="url" placeholder="https://book.example.com">
+</div>
+<div class="field">
+<label for="moon_token">长期令牌</label>
+<input id="moon_token" name="token" type="password" autocomplete="off" placeholder="bk_…">
+</div>
+<div class="btns">
+<button type="submit" class="primary">保存 Moon 配置</button>
+</div>
+<div class="form-state" id="state-moon" role="status" aria-live="polite"></div>
+</form>
+
+<form id="form-webdav" class="panel cfg-form" autocomplete="off">
+<h2>WebDAV</h2>
+<div class="field">
+<label for="webdav_url">服务器地址</label>
+<input id="webdav_url" name="url" type="url" inputmode="url" placeholder="https://dav.example.com/dav/">
+</div>
+<div class="field">
+<label for="webdav_username">用户名</label>
+<input id="webdav_username" name="username" type="text" autocomplete="username">
+</div>
+<div class="field">
+<label for="webdav_password">密码</label>
+<input id="webdav_password" name="password" type="password" autocomplete="current-password">
+</div>
+<div class="btns">
+<button type="submit" class="primary">保存 WebDAV 配置</button>
+</div>
+<div class="form-state" id="state-webdav" role="status" aria-live="polite"></div>
+</form>
+
+<form id="form-zlib" class="panel cfg-form" autocomplete="off">
+<h2>Z-Library（下载账号）</h2>
+<div class="field">
+<label for="zlib_email">邮箱</label>
+<input id="zlib_email" name="email" type="email" autocomplete="username">
+</div>
+<div class="field">
+<label for="zlib_password">密码</label>
+<input id="zlib_password" name="password" type="password" autocomplete="current-password">
+</div>
+<div class="field">
+<label for="zlib_base_url">镜像地址（可选）</label>
+<input id="zlib_base_url" name="base_url" type="url" inputmode="url" placeholder="留空自动选择">
+</div>
+<div class="btns">
+<button type="submit" class="primary">保存 Z-Library 配置</button>
+</div>
+<div class="form-state" id="state-zlib" role="status" aria-live="polite"></div>
+</form>
+
+<section class="panel cfg-form" id="panel-rss">
+<h2>RSS 订阅</h2>
+<ul id="rss-list" class="rss-list"></ul>
+<form id="form-rss-add" class="rss-add" autocomplete="off">
+<div class="field">
+<label for="rss_url">订阅地址</label>
+<input id="rss_url" name="url" type="url" inputmode="url" placeholder="https://example.com/feed.xml">
+</div>
+<div class="field">
+<label for="rss_title">名称（可留空）</label>
+<input id="rss_title" name="title" type="text">
+</div>
+<div class="btns">
+<button type="submit">添加订阅</button>
+</div>
+</form>
+<div class="btns">
+<label class="file-input">
+<span class="visually-hidden">选择 OPML 文件</span>
+<input type="file" id="rss-opml" accept=".opml,.xml,text/xml">
+</label>
+<button type="button" id="rss-save" class="primary">保存订阅列表</button>
+</div>
+<div class="form-state" id="state-rss" role="status" aria-live="polite"></div>
+</section>
+
+<script src="/js.js"></script>
+<script src="/settings.js"></script>
+</body>
+</html>
