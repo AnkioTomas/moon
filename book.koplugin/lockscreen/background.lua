@@ -1,5 +1,8 @@
 --[[--
-锁屏背景：custom / 必应 / 封面 / 摸鱼日报 / 书架海报墙；none 时由渲染器铺纯色。
+锁屏图片资源管理。
+
+本模块只处理通用资源生命周期：路径解析、图片校验、每日下载、失败重试。
+具体主体通过 asset 描述资源，不在这里为某个主体写特例。
 
 @module koplugin.book.lockscreen.background
 --]]
@@ -8,333 +11,269 @@ local lfs = require("libs/libkoreader-lfs")
 local Request = require("http.request")
 local Paths = require("utils.paths")
 local MoonSettings = require("utils.settings")
+local Layout = require("lockscreen.layout")
 
 local M = {}
 
-local BG_MODES = {
-    custom = true,
-    bing = true,
-    cover = true,
-    myrl = true,
-    bookshelf = true,
-    none = true,
+local IMAGE_EXTS = {
+    png = true,
+    jpg = true,
+    jpeg = true,
+    webp = true,
 }
 
----@param path string
+local FIXED_PATHS = {
+    custom = "/custom.png",
+    bing = "/bing.jpg",
+}
+
+--- 只做文件层检查；网络资源还需要经过 isValidImage 的解码检查。
+---@param path string|nil
 ---@return boolean
 local function fileOk(path)
+    if type(path) ~= "string" or path == "" then return false end
     local attr = lfs.attributes(path)
-    return attr and attr.mode == "file" and (attr.size or 0) > 8
+    return attr ~= nil and attr.mode == "file" and (attr.size or 0) > 8
 end
 
----@param mode string|nil
+--- 真实解码图片，拒绝 HTML、JSON 和损坏的图片文件。
+---@param path string|nil
 ---@return boolean
-function M.validMode(mode)
-    return BG_MODES[mode] == true
+function M.isValidImage(path)
+    if not fileOk(path) then return false end
+    local RenderImage = require("ui/renderimage")
+    local decoded, image = pcall(RenderImage.renderImageFile, RenderImage, path, false, 1, 1)
+    if not decoded or not image then return false end
+    if type(image.free) == "function" then pcall(image.free, image) end
+    return true
 end
 
----@return string
-function M.customPath()
-    return Paths.screensaverDir() .. "/custom.png"
-end
-
----@return string
-function M.bingPath()
-    return Paths.screensaverDir() .. "/bing.jpg"
-end
-
----@return string
-function M.myrlPath()
-    return Paths.screensaverDir() .. "/myrl.png"
-end
-
----@return string
-function M.bookshelfPath()
-    return Paths.screensaverDir() .. "/bookshelf.png"
-end
-
---- 最近在读书籍封面（本地缓存）；没有则 nil。
+--- 解析资源描述中的路径；path 可以是字符串或无参函数。
+---@param asset table|nil
 ---@return string|nil
-function M.coverPath()
-    local ok, Context = pcall(require, "lockscreen.context")
-    if not ok or not Context or not Context.currentBook then
-        return nil
+function M.resolve(asset)
+    if type(asset) ~= "table" then return nil end
+    if type(asset.path) == "function" then return asset.path() end
+    return asset.path
+end
+
+--- 构造每日更新资源。主体只需提供 id、路径和请求函数。
+---@param opts table
+---@return table
+function M.daily(opts)
+    local id = assert(opts.id)
+    return {
+        id = id,
+        path = assert(opts.path),
+        request = assert(opts.request),
+        daily = true,
+        network = true,
+        direct = opts.direct == true,
+    }
+end
+
+--- 返回锁屏资源的统一缓存表。
+---
+--- 每日标记和文件夹选择都放在同一个动态表中；新增资源不需要再改设置
+--- 模块登记一个新的顶层键。
+---@return table
+local asset_cache
+local function assetCache()
+    if asset_cache then return asset_cache end
+    local settings = MoonSettings.get()
+    if type(settings.lock_screen_asset_cache) ~= "table" then
+        settings.lock_screen_asset_cache = {}
     end
-    local book = Context.currentBook()
+    asset_cache = settings.lock_screen_asset_cache
+    return asset_cache
+end
+
+--- 返回当前阅读书籍的本地封面。
+---@return string|nil
+local function coverPath()
+    local book = require("lockscreen.components.current").book()
     local path = book and book.cover
     return fileOk(path) and path or nil
 end
 
---- 返回当前可用背景，不触网、不渲染书架。
----@return string|nil
-function M.current()
-    local mode = MoonSettings.get().lock_screen_background or "bing"
-    if mode == "custom" then
-        return fileOk(M.customPath()) and M.customPath() or nil
-    end
-    if mode == "cover" then
-        return M.coverPath()
-    end
-    if mode == "bing" and fileOk(M.bingPath()) then
-        return M.bingPath()
-    end
-    if mode == "myrl" and fileOk(M.myrlPath()) then
-        return M.myrlPath()
-    end
-    if mode == "bookshelf" and fileOk(M.bookshelfPath()) then
-        return M.bookshelfPath()
-    end
-    return nil
-end
+--- 文件夹壁纸目录。
+local FOLDER_DIR = Paths.screensaverDir() .. "/wallpapers"
 
---- 渲染书架海报墙到缓存文件（本地，不触网）。
----@param path string
----@return boolean, any
-local function renderBookshelf(path)
-    local Context = require("lockscreen.context")
-    local Render = require("lockscreen.render")
-    local Blitbuffer = require("ffi/blitbuffer")
-    local _ = require("gettext")
+local folder_cache = {}
 
-    local PLACEHOLDER_TONES = {
-        Blitbuffer.COLOR_GRAY_4,
-        Blitbuffer.COLOR_GRAY_5,
-        Blitbuffer.COLOR_GRAY_6,
-        Blitbuffer.COLOR_DARK_GRAY,
-        Blitbuffer.COLOR_GRAY_7,
-    }
-
-    local function hash(s)
-        local h = 0
-        for i = 1, #s do
-            h = (h * 33 + s:byte(i)) % 2147483647
-        end
-        return h
-    end
-
-    local function collectPosters(data)
-        local posters, seen = {}, {}
-        local function push(book)
-            local id = book.stable_id
-            if type(id) ~= "string" or id == "" or seen[id] then
-                return
-            end
-            seen[id] = true
-            posters[#posters + 1] = book
-        end
-        for _, book in ipairs(data.reading or {}) do
-            push(book)
-        end
-        for _, book in ipairs(data.covers or {}) do
-            push(book)
-        end
-        return posters
-    end
-
-    local function pushPlaceholder(blocks, x, y, cw, ch, tone)
-        local radius = math.max(4, math.floor(cw * 0.06))
-        blocks[#blocks + 1] = {
-            kind = "panel",
-            x = x + 2, y = y + 2, width = cw, height = ch,
-            radius = radius, color = Blitbuffer.COLOR_GRAY_D,
-        }
-        blocks[#blocks + 1] = {
-            kind = "panel",
-            x = x, y = y, width = cw, height = ch,
-            radius = radius, color = tone,
-        }
-        local inset = math.max(6, math.floor(cw * 0.14))
-        blocks[#blocks + 1] = {
-            kind = "panel",
-            x = x + inset, y = y + inset,
-            width = cw - inset * 2, height = ch - inset * 2,
-            radius = math.max(2, math.floor(radius * 0.6)),
-            color = Blitbuffer.COLOR_GRAY_E,
-        }
-    end
-
-    local function pushPoster(blocks, book, x, y, cw, ch, day)
-        local radius = math.max(4, math.floor(cw * 0.06))
-        if book.cover then
-            blocks[#blocks + 1] = {
-                kind = "image",
-                path = book.cover,
-                x = x, y = y, width = cw, height = ch,
-                matte = Blitbuffer.COLOR_WHITE,
-                inset = 0,
-                border = false,
-                shadow = 2,
-                radius = radius,
-            }
-        else
-            local tone = PLACEHOLDER_TONES[(hash((book.stable_id or "") .. "\0" .. day) % #PLACEHOLDER_TONES) + 1]
-            pushPlaceholder(blocks, x, y, cw, ch, tone)
-        end
-    end
-
-    local w, h = Render.size()
-    local day = os.date("%Y-%m-%d")
-    local posters = collectPosters(Context.bookshelf())
-    local blocks = {
-        {
-            kind = "panel", x = 0, y = 0, width = w, height = h,
-            color = Blitbuffer.COLOR_WHITE,
-        },
-    }
-
-    local margin = math.max(12, math.floor(w * 0.04))
-    local gap = math.max(8, math.floor(w * 0.022))
-    local cols = w >= 560 and 4 or 3
-    local cell_w = math.floor((w - margin * 2 - gap * (cols - 1)) / cols)
-    local cell_h = math.floor(cell_w * 1.45)
-    local rows = math.max(1, math.floor((h - margin * 2 + gap) / (cell_h + gap)))
-    local capacity = cols * rows
-    local grid_h = rows * cell_h + (rows - 1) * gap
-    local grid_w = cols * cell_w + (cols - 1) * gap
-    local origin_x = math.floor((w - grid_w) / 2)
-    local origin_y = math.floor((h - grid_h) / 2)
-
-    if #posters == 0 then
-        blocks[#blocks + 1] = {
-            text = _("书架还是空的"),
-            x = margin, y = math.floor(h * 0.45),
-            width = w - margin * 2, size = 22, align = "center", box = false,
-            color = Blitbuffer.COLOR_GRAY_6,
-        }
-    else
-        local n = math.min(#posters, capacity)
-        for i = 1, n do
-            local col = (i - 1) % cols
-            local row = math.floor((i - 1) / cols)
-            local x = origin_x + col * (cell_w + gap)
-            local y = origin_y + row * (cell_h + gap)
-            pushPoster(blocks, posters[i], x, y, cell_w, cell_h, day)
-        end
-    end
-
-    Paths.ensureScreensaverDir()
-    return Render.write(path, nil, blocks)
-end
-
---- 下载摸鱼日报。
----@param cb fun(path: string|nil)
+--- 目录未变化时复用已排序的图片路径；修改目录后自动重新扫描。
 ---@return table|nil
-local function ensureMyrl(cb)
-    local cancelled = false
-    local today = os.date("%Y-%m-%d")
-    local c = MoonSettings.get()
-    local cached = M.myrlPath()
-    if c.lock_screen_myrl_day == today and fileOk(cached) then
-        cb(cached)
+local function folderFiles()
+    local attr = lfs.attributes(FOLDER_DIR)
+    if not attr or attr.mode ~= "directory" then
+        folder_cache = {}
         return nil
     end
+    local signature = attr.modification or attr.change or attr.size or attr
+    if folder_cache.signature == signature and folder_cache.files then
+        return folder_cache.files
+    end
+
+    local files = {}
+    for name in lfs.dir(FOLDER_DIR) do
+        if name ~= "." and name ~= ".." then
+            local ext = name:match("%.([^.]+)$")
+            if ext and IMAGE_EXTS[ext:lower()] then
+                local path = FOLDER_DIR .. "/" .. name
+                if fileOk(path) then files[#files + 1] = path end
+            end
+        end
+    end
+    table.sort(files)
+    folder_cache = { signature = signature, files = files }
+    return files
+end
+
+--- 扫描文件夹并按日复用一张稳定图片。
+---@return string|nil
+local function folderPick()
+    local cache = assetCache()
+    local day = Layout.dayKey()
+    local entry = cache.folder
+    if type(entry) == "table" and entry.day == day and fileOk(entry.path) then
+        return entry.path
+    end
+    local files = folderFiles()
+    if not files or #files == 0 then return nil end
+    local pick = files[(os.time() % #files) + 1]
+    cache.folder = { day = day, path = pick }
+    MoonSettings.save()
+    return pick
+end
+
+local BACKGROUNDS = {
+    bing = M.daily{
+        id = "bing",
+        path = function() return Paths.screensaverDir() .. FIXED_PATHS.bing end,
+        request = function()
+            return {
+                url = "https://api.ankio.net/bing",
+                method = "GET",
+                allow_redirects = true,
+                timeout = 60,
+            }
+        end,
+    },
+    custom = {
+        id = "custom",
+        path = function() return Paths.screensaverDir() .. FIXED_PATHS.custom end,
+    },
+    cover = { id = "cover", path = coverPath, refresh_on_resume = true },
+    folder = { id = "folder", path = folderPick },
+    none = { id = "none" },
+}
+
+--- 判断背景设置值是否合法；主体资源不属于背景设置项。
+---@param mode string|nil
+---@return boolean
+function M.validMode(mode)
+    return BACKGROUNDS[mode] ~= nil
+end
+
+--- 返回用户选择的背景资源；非法值回退到必应。
+---@param mode string|nil
+---@return table
+function M.background(mode)
+    return BACKGROUNDS[mode] or BACKGROUNDS.bing
+end
+
+--- 判断每日资源是否已经拿到今天的有效图片。
+---@param asset table|nil
+---@return boolean
+function M.isFresh(asset)
+    if type(asset) ~= "table" or not asset.daily then return true end
+    local cache = assetCache()
+    local entry = cache[asset.id]
+    return type(entry) == "table" and entry.day == Layout.dayKey()
+        and M.isValidImage(M.resolve(asset))
+end
+
+--- 清除资源日期标记，让下一次准备重新尝试下载。
+---@param asset table|nil
+---@return nil
+function M.invalidate(asset)
+    if type(asset) ~= "table" or not asset.daily then return end
+    local cache = assetCache()
+    if cache[asset.id] ~= nil then
+        cache[asset.id] = nil
+        MoonSettings.save()
+    end
+end
+
+--- 下载每日图片；成功才更新日期标记，失败时保留旧图并继续重试。
+---@param asset table
+---@param cb fun(path: string|nil, err: string|nil)
+---@return table|nil
+local function ensureDaily(asset, cb)
+    local path = M.resolve(asset)
+    local day = Layout.dayKey()
+    if not path then
+        cb(nil, asset.id .. " background path unavailable")
+        return nil
+    end
+    if M.isFresh(asset) then
+        cb(path)
+        return nil
+    end
+
     local NetworkMgr = require("ui/network/manager")
     if not NetworkMgr:isOnline() then
-        cb(fileOk(cached) and cached or nil)
+        local valid = M.isValidImage(path)
+        cb(valid and path or nil, valid and nil or asset.id .. " background unavailable")
         return nil
     end
+
     Paths.ensureScreensaverDir()
-    local Layout = require("lockscreen.layout")
-    local w, h = Layout.portraitSize()
-    local tmp = cached .. ".part"
-    local request_job = Request.download({
-        url = string.format("https://api.ankio.net/myrl?ink=1&width=%d&height=%d", w, h),
-        method = "GET",
-        timeout = 60,
-    }, tmp, function(ok)
+    local cancelled = false
+    local tmp = path .. ".part"
+    local request_job = Request.download(asset.request(), tmp, function(ok)
         if cancelled then
             os.remove(tmp)
             return
         end
-        if ok and os.rename(tmp, cached) then
-            c.lock_screen_myrl_day = today
+        if ok and M.isValidImage(tmp) and os.rename(tmp, path)
+                and M.isValidImage(path) then
+            local cache = assetCache()
+            cache[asset.id] = { day = day }
             MoonSettings.save()
-            cb(cached)
+            cb(path)
+            return
+        end
+
+        os.remove(tmp)
+        M.invalidate(asset)
+        if M.isValidImage(path) then
+            cb(path)
         else
-            os.remove(tmp)
-            cb(fileOk(cached) and cached or nil)
+            cb(nil, asset.id .. " background download failed")
         end
     end)
     return {
         cancel = function()
             cancelled = true
-            if request_job and request_job.cancel then
-                request_job.cancel()
-            end
+            if request_job and request_job.cancel then request_job.cancel() end
         end,
     }
 end
 
---- 确保背景可用。
----@param cb fun(path: string|nil)
----@return table|nil 可取消的下载任务；本地命中时返回 nil
-function M.ensure(cb)
-    local cancelled = false
-    local c = MoonSettings.get()
-    local mode = c.lock_screen_background or "bing"
-    if mode == "none" then
+--- 准备任意资源；每日下载和本地资源共用同一入口。
+---@param asset table|nil
+---@param cb fun(path: string|nil, err: string|nil)
+---@return table|nil
+function M.ensure(asset, cb)
+    if type(asset) ~= "table" or asset.id == "none" then
         cb(nil)
         return nil
     end
-    if mode == "custom" then
-        cb(fileOk(M.customPath()) and M.customPath() or nil)
-        return nil
-    end
-    if mode == "cover" then
-        cb(M.coverPath())
-        return nil
-    end
-    if mode == "bookshelf" then
-        local path = M.bookshelfPath()
-        local ok = renderBookshelf(path)
-        cb(ok and fileOk(path) and path or nil)
-        return nil
-    end
-    if mode == "myrl" then
-        return ensureMyrl(cb)
-    end
-
-    -- bing（默认）
-    local today = os.date("%Y-%m-%d")
-    local cached = M.bingPath()
-    if c.lock_screen_bing_day == today and fileOk(cached) then
-        cb(cached)
-        return nil
-    end
-    local NetworkMgr = require("ui/network/manager")
-    if not NetworkMgr:isOnline() then
-        cb(fileOk(cached) and cached or nil)
-        return nil
-    end
-    Paths.ensureScreensaverDir()
-    local tmp = cached .. ".part"
-    local request_job = Request.download({
-        url = "https://api.ankio.net/bing",
-        method = "GET",
-        allow_redirects = true,
-        timeout = 60,
-    }, tmp, function(ok)
-        if cancelled then
-            os.remove(tmp)
-            return
-        end
-        if ok and os.rename(tmp, cached) then
-            c.lock_screen_bing_day = today
-            MoonSettings.save()
-            cb(cached)
-        else
-            os.remove(tmp)
-            cb(fileOk(cached) and cached or nil)
-        end
-    end)
-    return {
-        cancel = function()
-            cancelled = true
-            if request_job and request_job.cancel then
-                request_job.cancel()
-            end
-        end,
-    }
+    if asset.daily then return ensureDaily(asset, cb) end
+    local path = M.resolve(asset)
+    cb(fileOk(path) and path or nil)
+    return nil
 end
 
 return M
