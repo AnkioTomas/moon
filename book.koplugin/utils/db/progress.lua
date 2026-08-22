@@ -8,7 +8,17 @@ local Base = require("utils.db.base")
 
 local ProgressDB = {}
 
-local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_fraction, locator, updated_at, sync_status"
+local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, updated_at, sync_status"
+
+---@param value any
+---@return integer|nil
+local function positiveInt(value)
+    local n = tonumber(value)
+    if not n or n < 1 then
+        return nil
+    end
+    return math.floor(n)
+end
 
 ---@param source_id string
 ---@param stable_id string
@@ -26,12 +36,16 @@ function ProgressDB.upsert(source_id, stable_id, pos)
     Base.ensure()
     return Base.exec(
         [[INSERT INTO pending_progress
-            (source_id, stable_id, fraction, chapter_idx, chapter_fraction, locator, updated_at, sync_status)
-          VALUES (?,?,?,?,?,?,?,0)
+            (source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction,
+             page, total_pages, locator, updated_at, sync_status)
+          VALUES (?,?,?,?,?,?,?,?,?,?,0)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             fraction=excluded.fraction,
             chapter_idx=excluded.chapter_idx,
+            chapter_title=excluded.chapter_title,
             chapter_fraction=excluded.chapter_fraction,
+            page=excluded.page,
+            total_pages=excluded.total_pages,
             locator=excluded.locator,
             updated_at=excluded.updated_at,
             sync_status=0;]],
@@ -39,7 +53,10 @@ function ProgressDB.upsert(source_id, stable_id, pos)
         stable_id,
         fraction,
         pos.chapter_idx,
+        pos.chapter_title,
         pos.chapter_fraction,
+        positiveInt(pos.page),
+        positiveInt(pos.total_pages),
         pos.locator,
         tonumber(pos.updated_at) or os.time()
     ) ~= nil
@@ -59,14 +76,19 @@ function ProgressDB.upsertRemote(source_id, stable_id, pos)
     Base.ensure()
     return Base.exec(
         [[INSERT INTO pending_progress
-            (source_id, stable_id, fraction, chapter_idx, chapter_fraction, locator, updated_at, sync_status)
-          VALUES (?,?,?,?,?,?,?,1)
+            (source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction,
+             page, total_pages, locator, updated_at, sync_status)
+          VALUES (?,?,?,?,?,?,?,?,?,?,1)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             fraction=excluded.fraction, chapter_idx=excluded.chapter_idx,
-            chapter_fraction=excluded.chapter_fraction, locator=excluded.locator,
+            chapter_title=excluded.chapter_title,
+            chapter_fraction=excluded.chapter_fraction,
+            page=excluded.page, total_pages=excluded.total_pages,
+            locator=excluded.locator,
             updated_at=excluded.updated_at, sync_status=1
           WHERE pending_progress.sync_status=1;]],
-        source_id, stable_id, fraction, pos.chapter_idx, pos.chapter_fraction,
+        source_id, stable_id, fraction, pos.chapter_idx, pos.chapter_title, pos.chapter_fraction,
+        positiveInt(pos.page), positiveInt(pos.total_pages),
         pos.locator, tonumber(pos.updated_at) or os.time()
     ) ~= nil
 end
@@ -80,7 +102,8 @@ function ProgressDB.get(source_id, stable_id)
         return nil
     end
     Base.ensure()
-    local source, stable, fraction, chapter_idx, chapter_fraction, locator, updated_at, sync_status = Base.rowexec(
+    local source, stable, fraction, chapter_idx, chapter_title, chapter_fraction,
+        page, total_pages, locator, updated_at, sync_status = Base.rowexec(
         "SELECT " .. COLUMNS .. " FROM pending_progress WHERE source_id=? AND stable_id=? LIMIT 1;",
         source_id,
         stable_id
@@ -93,7 +116,10 @@ function ProgressDB.get(source_id, stable_id)
         stable_id = stable,
         fraction = tonumber(fraction) or 0,
         chapter_idx = chapter_idx ~= nil and tonumber(chapter_idx) or nil,
+        chapter_title = type(chapter_title) == "string" and chapter_title ~= "" and chapter_title or nil,
         chapter_fraction = chapter_fraction ~= nil and tonumber(chapter_fraction) or nil,
+        page = page ~= nil and tonumber(page) or nil,
+        total_pages = total_pages ~= nil and tonumber(total_pages) or nil,
         locator = locator,
         updated_at = tonumber(updated_at) or 0,
         sync_status = tonumber(sync_status) or 0,
@@ -109,15 +135,19 @@ local function rows(result, nrows)
         return out
     end
     for i = 1, nrows do
+        local title = result[5][i]
         out[#out + 1] = {
             source_id = result[1][i],
             stable_id = result[2][i],
             fraction = tonumber(result[3][i]) or 0,
             chapter_idx = result[4][i] ~= nil and tonumber(result[4][i]) or nil,
-            chapter_fraction = result[5][i] ~= nil and tonumber(result[5][i]) or nil,
-            locator = result[6][i],
-            updated_at = tonumber(result[7][i]) or 0,
-            sync_status = tonumber(result[8] and result[8][i]) or 0,
+            chapter_title = type(title) == "string" and title ~= "" and title or nil,
+            chapter_fraction = result[6][i] ~= nil and tonumber(result[6][i]) or nil,
+            page = result[7][i] ~= nil and tonumber(result[7][i]) or nil,
+            total_pages = result[8][i] ~= nil and tonumber(result[8][i]) or nil,
+            locator = result[9][i],
+            updated_at = tonumber(result[10][i]) or 0,
+            sync_status = tonumber(result[11] and result[11][i]) or 0,
         }
     end
     return out
