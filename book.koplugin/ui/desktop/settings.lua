@@ -78,6 +78,7 @@ local function backRow(desktop)
     return function(iw)
         return SettingRow.build(iw, {
             kind = "action", icon = "arrow_back", title = _("返回"),
+            background = false,
             callback = function() gotoSub(desktop, nil) end,
         })
     end
