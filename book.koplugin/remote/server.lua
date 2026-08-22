@@ -1,5 +1,5 @@
 --[[--
-文件管理 HTTP 服务核心：LuaSocket TCP + 增量状态机。
+远程管理 HTTP 服务核心：LuaSocket TCP + 增量状态机。
 
 挂接：start 后由 UIManager:insertZMQ(server) 驱动 waitEvent
 （UIManager 把它当迭代器反复调用，返回 nil = 本轮无更多工作；
