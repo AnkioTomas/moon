@@ -1,5 +1,5 @@
 --[[--
-lockscreen.settings：模式读写 / 写入 KOReader screensaver_*
+lockscreen.settings：写入 KOReader screensaver_*
 
 @module tests.lockscreen.settings_spec
 --]]
@@ -28,40 +28,9 @@ _G.G_reader_settings = {
     end,
 }
 
-local MoonSettings = require("utils.settings")
 local Settings = require("lockscreen.settings")
 
--- 隔离本测对 common 的改动
-local common = MoonSettings.get()
-local previous = {}
-for _, key in ipairs({
-    "lock_screen", "lock_screen_day",
-    "lock_screen_background", "lock_screen_component", "lock_screen_position",
-    "lock_screen_wide",
-}) do
-    previous[key] = common[key]
-end
-
-local function cleanup()
-    for key, value in pairs(previous) do common[key] = value end
-    MoonSettings.save()
-    _G.G_reader_settings = previous_settings
-end
-
 local ok_run, err_run = pcall(function()
-    common.lock_screen = nil
-    common.lock_screen_day = nil
-    MoonSettings.save()
-
-    -- 模式读写
-    common.lock_screen = nil
-    MoonSettings.save()
-    Assert.is_nil(Settings.mode())
-    Settings.setMode("compose")
-    Assert.eq(Settings.mode(), "compose")
-    Settings.setMode(nil)
-    Assert.eq(Settings.mode(), "ko")
-
     -- applyCover：document_cover 接管并关掉提示文字
     local cover_path = "/tmp/moon-lockscreen-test-cover.png"
     local cover_file = assert(io.open(cover_path, "wb"))
@@ -84,16 +53,9 @@ local ok_run, err_run = pcall(function()
     Assert.eq(saved.screensaver_type, "disable")
     Assert.is_nil(saved.screensaver_document_cover)
     Assert.is_true(saved.screensaver_show_message)
-
-    -- 下载日标记读写
-    Assert.is_nil(Settings.savedDay())
-    Settings.setSavedDay("2024-01-01")
-    Assert.eq(Settings.savedDay(), "2024-01-01")
-    Settings.setSavedDay(nil)
-    Assert.is_nil(Settings.savedDay())
 end)
 
-cleanup()
+_G.G_reader_settings = previous_settings
 if not ok_run then
     error(err_run)
 end
