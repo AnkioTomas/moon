@@ -78,9 +78,9 @@ package.preload["ui/network/manager"] = function()
     }
 end
 
-package.preload["lockscreen.context"] = function()
+package.preload["lockscreen.components.current"] = function()
     return {
-        currentBook = function()
+        book = function()
             return { cover = current_cover }
         end,
     }
@@ -112,7 +112,7 @@ package.loaded["http.request"] = nil
 package.loaded["ui/network/manager"] = nil
 package.loaded["lockscreen.background"] = nil
 package.loaded["lockscreen.compose"] = nil
-package.loaded["lockscreen.context"] = nil
+package.loaded["lockscreen.components.current"] = nil
 package.loaded["lockscreen.init"] = nil
 package.loaded["lockscreen.render"] = nil
 package.loaded["lockscreen.settings"] = nil
@@ -120,13 +120,24 @@ package.loaded["lockscreen.settings"] = nil
 local MoonSettings = require("utils.settings")
 local LockScreen = require("lockscreen.init")
 local Compose = require("lockscreen.compose")
+local compose_path = require("utils.paths").screensaverDir() .. "/compose.png"
 
 local common = MoonSettings.get()
+local previous_asset_cache = {}
+for key, value in pairs(common.lock_screen_asset_cache or {}) do
+    if type(value) == "table" then
+        previous_asset_cache[key] = {}
+        for nested_key, nested_value in pairs(value) do
+            previous_asset_cache[key][nested_key] = nested_value
+        end
+    else
+        previous_asset_cache[key] = value
+    end
+end
 local prev = {
     lock_screen = common.lock_screen,
     lock_screen_day = common.lock_screen_day,
-    lock_screen_bing_day = common.lock_screen_bing_day,
-    lock_screen_myrl_day = common.lock_screen_myrl_day,
+    lock_screen_asset_cache = previous_asset_cache,
     lock_screen_background = common.lock_screen_background,
     lock_screen_component = common.lock_screen_component,
     lock_screen_position = common.lock_screen_position,
@@ -136,8 +147,8 @@ local prev = {
 local function cleanup()
     for k, v in pairs(prev) do common[k] = v end
     MoonSettings.save()
-    pcall(os.remove, Compose.path())
-    pcall(os.remove, require("lockscreen.background").myrlPath())
+    pcall(os.remove, compose_path)
+    pcall(os.remove, require("utils.paths").screensaverDir() .. "/myrl.png")
     pcall(os.remove, cover_a)
     pcall(os.remove, cover_b)
     _G.G_reader_settings = previous_settings
@@ -149,7 +160,7 @@ local ok_run, err_run = pcall(function()
     common.lock_screen_background = "bing"
     common.lock_screen_component = "current"
     MoonSettings.save()
-    pcall(os.remove, Compose.path())
+    pcall(os.remove, compose_path)
 
     Assert.is_false(LockScreen.isCompose())
 
@@ -159,7 +170,7 @@ local ok_run, err_run = pcall(function()
 
     -- 残留 compose.png 不得让 setMode 立刻 applyCover（准备态必须是 disable）
     require("utils.paths").ensureScreensaverDir()
-    local stale = assert(io.open(Compose.path(), "wb"))
+    local stale = assert(io.open(compose_path, "wb"))
     stale:write(PNG8)
     stale:close()
     LockScreen.setMode("compose")
@@ -189,7 +200,7 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(done)
     Assert.is_true(ok_dl)
     Assert.eq(saved.screensaver_type, "document_cover")
-    Assert.eq(saved.screensaver_document_cover, Compose.path())
+    Assert.eq(saved.screensaver_document_cover, compose_path)
     Assert.is_false(saved.screensaver_show_message)
 
     -- 缓存命中
@@ -210,10 +221,10 @@ local ok_run, err_run = pcall(function()
     LockScreen.setBackgroundMode("bing")
     LockScreen.setComponent("myrl")
     Assert.eq(Compose.backgroundMode(), "bing")
-    Assert.eq(Compose.assetMode(), "myrl")
-    common.lock_screen_myrl_day = nil
+    Assert.eq(Compose.asset().id, "myrl")
+    common.lock_screen_asset_cache.myrl = nil
     MoonSettings.save()
-    pcall(os.remove, require("lockscreen.background").myrlPath())
+    pcall(os.remove, require("utils.paths").screensaverDir() .. "/myrl.png")
     last_download.url = nil
     LockScreen.refresh(function(ok) refreshed = ok end)
     Stubs.flush()
@@ -221,11 +232,11 @@ local ok_run, err_run = pcall(function()
     Assert.not_nil(last_download.url)
     Assert.is_true(tostring(last_download.url):find("myrl", 1, true) ~= nil)
     Assert.eq(saved.screensaver_document_cover,
-        require("lockscreen.background").myrlPath())
-    Assert.eq(saved.screensaver_document_cover ~= Compose.path(), true)
+        require("utils.paths").screensaverDir() .. "/myrl.png")
+    Assert.eq(saved.screensaver_document_cover ~= compose_path, true)
 
     -- 即使组合图已经是当天版本，日报下载标记过期也必须再次请求。
-    common.lock_screen_myrl_day = "1999-01-01"
+    common.lock_screen_asset_cache.myrl = { day = "1999-01-01" }
     MoonSettings.save()
     last_download.url = nil
     LockScreen.refresh(function(ok) refreshed = ok end)
