@@ -1,6 +1,8 @@
 --[[--
-界面字体选择器：koreader/fonts 本地字 + 微信读书（可下载）。
+界面字体选择器：本地/系统字库 + 微信读书（可下载）。
 
+底部 Tab 栏（在线/本地/系统）走 Popup 的 bottom_tabs（完整 pager 之下独立一行）。
+列表行只留通栏预览：本地/系统把字体名用该字体渲染，在线用远程预览图；当前项左侧标 ✓。
 预览按页懒构建（禁止打开时全表 getFace / 拉图）。
 列表走 MoonFont.listAsync（http.Cache 优先，不强制刷新）。
 无「系统默认」项；空配置仍由 applyCurrent 回退 fontmap 备份。
@@ -9,10 +11,10 @@
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local Device = require("device")
 local Font = require("ui/font")
 local InfoMessage = require("ui/widget/infomessage")
 local NetworkMgr = require("ui/network/manager")
+local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local MoonFont = require("utils.font")
@@ -21,23 +23,21 @@ local Popup = require("ui.components.popup")
 local UI = require("ui.components.bookui")
 local _ = require("gettext")
 local T = require("ffi/util").template
-local Screen = Device.screen
 
 local FontPicker = {}
+local TABS = { { "weread", "在线" }, { "local", "本地" }, { "system", "系统" } }
 
 ---@class FontPickerOpts
 ---@field title string|nil
 ---@field on_done fun(id: string, name: string)|nil
 
-local function previewSize()
-    return math.max(UI.sz(120), math.floor(Screen:getWidth() * 0.48)), UI.sz(36)
-end
-
 ---@param it MoonFontItem|table
 ---@param pw number
 ---@return table|nil
 local function localPreview(it, pw)
-    if it.kind ~= "local" or not it.id or it.id == "" then return nil end
+    if (it.kind ~= "local" and it.kind ~= "system") or not it.id or it.id == "" then
+        return nil
+    end
     local face = Font:getFace(it.id, UI.fontSize(18))
     if not face then return nil end
     return TextWidget:new{
@@ -65,18 +65,6 @@ local function wereadPreview(it, pw, ph, menu)
         fallback = it.name,
         show_parent = menu,
     }
-end
-
----@param it table
----@param cur string
----@return string
-local function rowText(it, cur)
-    local mark = (it.id == cur) and "✓ " or ""
-    local kind = it.kind == "local" and _("本地") or _("在线")
-    if it.kind == "weread" and (type(it.preview) ~= "string" or it.preview == "") then
-        return mark .. (it.name or "") .. " · " .. kind
-    end
-    return mark .. kind
 end
 
 ---@param opts FontPickerOpts|table
@@ -124,28 +112,31 @@ local function downloadAndSave(opts, item)
 end
 
 --- 当前页补预览；挂钩 updateItems，翻页再建。
+--- 预览宽度 = 行内容宽（屏宽扣行 padding）；state 容器不裁剪，预览通栏绘制。
+--- 禁止回写 state_w：文字列剩余宽 = 内容宽 - state_w，撑满会让 TextWidget 拿到负宽崩溃。
 ---@param menu table
 ---@param sources table
----@param pw number
----@param ph number
-local function attachLazyPreviews(menu, sources, pw, ph)
+local function attachLazyPreviews(menu, sources)
+    local pw = menu.inner_dimen.w - 2 * Size.padding.fullscreen
+    local ph = UI.sz(36)
     local done = {}
+    local generation = 0
     local orig = menu.updateItems
     menu.updateItems = function(self, select_number, no_recalculate_dimen)
+        if sources.generation ~= generation then done = {}; generation = sources.generation end
         local per = self.perpage or 14
         local first = ((self.page or 1) - 1) * per + 1
         local last = math.min(#self.item_table, first + per - 1)
         for i = first, last do
             if not done[i] then
                 done[i] = true
-                local src = sources[i]
+                local src = sources.list[i]
                 if type(src) == "table" then
                     local state = localPreview(src, pw) or wereadPreview(src, pw, ph, self)
                     if state then self.item_table[i].state = state end
                 end
             end
         end
-        if not self.state_w or self.state_w < pw then self.state_w = pw end
         return orig(self, select_number, no_recalculate_dimen)
     end
     menu:updateItems(nil, true)
@@ -155,26 +146,53 @@ end
 ---@param items MoonFontItem[]|table|nil
 local function showPicker(opts, items)
     local cur = MoonFont.currentId()
-    local pw, ph = previewSize()
-    local rows, sources = {}, {}
+    local groups = { weread = {}, ["local"] = {}, system = {} }
+    local active = "weread"
     for _, it in ipairs(items or {}) do
-        rows[#rows + 1] = { text = rowText(it, cur), value = it, fallback = it.name }
-        sources[#sources + 1] = it
+        (groups[it.kind] or groups.weread)[#(groups[it.kind] or groups.weread) + 1] = it
+        if it.id == cur and groups[it.kind] then active = it.kind end
     end
-    local menu = Popup.list{
+    local menu
+    local sources = { list = {}, generation = 0 }
+    local function rowsFor(kind)
+        local rows, sources = {}, {}
+        for _, it in ipairs(groups[kind]) do
+            rows[#rows + 1] = { text = "", value = it, fallback = it.name,
+                mandatory = it.id == cur and "✓" or nil } -- 当前项标记放右侧，避免盖住预览左端
+            sources[#sources + 1] = it
+        end
+        if #rows == 0 then rows[1] = { text = _("暂无字体"), enabled = false } end
+        return rows, sources
+    end
+    local function select(item)
+        if menu then UIManager:close(menu); menu = nil end
+        if item.kind == "local" or item.kind == "system" or MoonFont.isInstalled(item) then
+            saveSelection(opts, item.id, item.name or item.id)
+        else
+            NetworkMgr:runWhenOnline(function() downloadAndSave(opts, item) end)
+        end
+    end
+    local function switch(kind)
+        local rows, list = rowsFor(kind)
+        sources.list = list
+        sources.generation = sources.generation + 1
+        Popup.setListItems(menu, opts.title or _('界面字体'), rows, select)
+        menu:setBottomTabActive(kind)
+        menu:updateItems(nil, true)
+    end
+    local tabs = {}
+    for i, tab in ipairs(TABS) do
+        tabs[i] = { id = tab[1], text = _(tab[2]) }
+    end
+    local rows, initial_sources = rowsFor(active)
+    sources.list = initial_sources
+    menu = Popup.single{
         title = opts.title or _("界面字体"),
         items = rows,
-        on_select = function(item)
-            if type(item) ~= "table" then return end
-            local id, name = item.id or "", item.name or item.id or ""
-            if item.kind == "local" or MoonFont.isInstalled(item) then
-                saveSelection(opts, id, name)
-                return
-            end
-            NetworkMgr:runWhenOnline(function() downloadAndSave(opts, item) end)
-        end,
+        on_select = select,
+        bottom_tabs = { tabs = tabs, active = active, on_tab = switch },
     }
-    attachLazyPreviews(menu, sources, pw, ph)
+    attachLazyPreviews(menu, sources)
 end
 
 ---@param opts FontPickerOpts|table|nil

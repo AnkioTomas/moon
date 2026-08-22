@@ -54,6 +54,37 @@ package.preload["ui/widget/textwidget"] = function()
     return TextWidget
 end
 
+for _, name in ipairs({"horizontalgroup", "verticalgroup"}) do
+    package.preload["ui/widget/" .. name] = function()
+        local C = {}
+        function C:new(o) return o or {} end
+        return C
+    end
+end
+package.preload["ui/widget/container/inputcontainer"] = function()
+    local C = {}
+    function C:new(o) return o or {} end
+    return C
+end
+package.preload["ui/widget/titlebar"] = function()
+    local C = {}
+    function C:new(o) o = o or {}; o.getHeight = function() return 40 end; return o end
+    return C
+end
+package.preload["ui/geometry"] = function()
+    local C = {}
+    function C:new(o) return o or {} end
+    return C
+end
+package.preload["ui/size"] = function()
+    return { padding = { fullscreen = 22 } }
+end
+package.preload["ui/gesturerange"] = function()
+    local C = {}
+    function C:new(o) return o or {} end
+    return C
+end
+
 package.preload["ui/widget/infomessage"] = function()
     local InfoMessage = {}
     function InfoMessage:new(o) return o or {} end
@@ -115,7 +146,7 @@ end
 
 package.preload["ui.components.popup"] = function()
     return {
-        list = function(opts)
+        single = function(opts)
             local item_table = {}
             for _, row in ipairs(opts.items or {}) do
                 item_table[#item_table + 1] = { text = row.text }
@@ -125,11 +156,24 @@ package.preload["ui.components.popup"] = function()
                 perpage = 10,
                 page = 1,
                 state_w = nil,
+                inner_dimen = { w = 400, h = 700 }, -- attachLazyPreviews 据此算通栏预览宽
+                bottom_tabs = opts.bottom_tabs,
                 updateItems = function(self)
                     self._updates = (self._updates or 0) + 1
                 end,
+                setBottomTabActive = function(self, id)
+                    self.bottom_tabs.active = id
+                end,
             }
             return captured_menu
+        end,
+        setListItems = function(menu, _title, items)
+            local item_table = {}
+            for _, row in ipairs(items or {}) do
+                item_table[#item_table + 1] = { text = row.text }
+            end
+            menu.item_table = item_table
+            menu.page = 1
         end,
     }
 end
@@ -181,20 +225,25 @@ FontPicker.open{ title = "字体" }
 
 Assert.is_true(captured_menu ~= nil, "menu created")
 Assert.eq(list_force, false, "cache-first listAsync(false)")
-Assert.eq(#captured_menu.item_table, 60, "no system-default row")
--- 第 1 页 10 个 local → 10 次 getFace
-Assert.is_true(getface_n <= 10, "lazy local preview, got " .. tostring(getface_n))
-Assert.is_true(getface_n >= 1, "first page built some local previews")
-Assert.eq(image_n, 0, "no weread image on page 1")
+Assert.eq(#captured_menu.item_table, 20, "默认在线页 20 行（无内嵌 Tab 行）")
+Assert.eq(captured_menu.item_table[1].text, "", "行只留预览，无名字列")
+Assert.eq(#captured_menu.bottom_tabs.tabs, 3, "底部三个 Tab")
+Assert.eq(captured_menu.bottom_tabs.active, "weread")
+Assert.eq(captured_menu.item_table[1].state._src, "https://example.com/p1.svg", "通栏远程预览")
+Assert.is_true(image_n >= 1 and image_n <= 10, "在线页懒构建封面预览, got " .. tostring(image_n))
+Assert.eq(getface_n, 0, "在线页不碰本地字体")
 
--- page 5 = indices 41..50 → weread
+-- 切到本地页：换内容、Tab 选中态跟随、预览改走 getFace
 getface_n = 0
 image_n = 0
-captured_menu.page = 5
-captured_menu:updateItems()
-Assert.eq(getface_n, 0, "page 5 is weread-only")
-Assert.is_true(image_n > 0 and image_n <= 10, "weread previews for visible page, got " .. tostring(image_n))
+captured_menu.bottom_tabs.on_tab("local")
+Assert.eq(#captured_menu.item_table, 40, "本地页 40 行")
+Assert.eq(captured_menu.bottom_tabs.active, "local")
+Assert.eq(captured_menu.item_table[1].state.text, "Font01", "名字由该字体渲染在预览里")
+Assert.is_true(getface_n >= 1 and getface_n <= 10, "本地页懒构建 getFace, got " .. tostring(getface_n))
+Assert.eq(image_n, 0, "本地页不拉图")
 
-local images_before = image_n
+-- 预览按索引缓存：重刷同页不重复构建
+local before = getface_n
 captured_menu:updateItems()
-Assert.eq(image_n, images_before, "preview cache per index")
+Assert.eq(getface_n, before, "preview cache per index")

@@ -58,9 +58,22 @@ package.preload["ui/widget/horizontalgroup"] = function()
     function HorizontalGroup:new(o)
         o = o or {}
         o._hgroup = true
+        o.getSize = function() return { w = 100, h = 20 } end
         return o
     end
     return HorizontalGroup
+end
+
+package.preload["ui/widget/verticalgroup"] = function()
+    local VerticalGroup = {}
+    function VerticalGroup:new(o)
+        o = o or {}
+        o._vgroup = true
+        o.getSize = function() return { w = 100, h = 40 } end
+        o.resetLayout = function() end
+        return o
+    end
+    return VerticalGroup
 end
 
 package.preload["ui/widget/horizontalspan"] = function()
@@ -71,6 +84,12 @@ package.preload["ui/widget/horizontalspan"] = function()
         return o
     end
     return HorizontalSpan
+end
+
+package.preload["ui/widget/button"] = function()
+    local Button = {}
+    function Button:new(o) return o end
+    return Button
 end
 
 package.preload["ui/widget/menu"] = function()
@@ -86,8 +105,16 @@ package.preload["ui/widget/menu"] = function()
             o.page = o:getPageNumber(o.item_table.current)
         end
         o._updates = 0
+        o.inner_dimen = { w = 400, h = 700 }
+        o.item_dimen = { w = 400, h = 50 }
+        o.available_height = 600
+        o.page_info_text = { setText = function() end, hide = function() end }
+        o.page_info = { {}, o.page_info_text, {} } -- 假 pager 行：chev / 页码 / chev
+        -- FrameContainer → OverlapGroup(content_group, page_return, footer)
+        o[1] = { [1] = { {}, {}, { o.page_info } } }
         return o
     end
+    function Menu:_recalculateDimen() end
     function Menu:getPageNumber(n)
         if #self.item_table == 0 or not n or n == 0 then return 1 end
         return math.ceil(math.min(n, #self.item_table) / self.perpage)
@@ -279,6 +306,37 @@ end
 
 -- setListItems：menu 为 nil 时静默返回
 Popup.setListItems(nil, "t", { "x" })
+
+-- —— bottom_tabs：完整 pager 之下的独立 Tab 栏 ——
+
+do
+    local active
+    local menu = Popup.list{
+        items = { "a", "b" },
+        bottom_tabs = {
+            tabs = { { id = "x", text = "X" }, { id = "y", text = "Y" }, { id = "z", text = "Z" } },
+            active = "x",
+            on_tab = function(id) active = id end,
+        },
+    }
+    -- footer 子件换成竖排：pager 原样在上，Tab 栏在下
+    local stack = menu[1][1][3][1]
+    Assert.eq(stack[1], menu.page_info)
+    local bar = stack[2]
+    Assert.eq(#bar, 3)
+    Assert.eq(bar[1].width, 133) -- floor(400/3)，全宽等分
+    Assert.is_true(bar[1].text_font_bold) -- 当前 Tab 加粗
+    Assert.is_true(bar[2].text_font_bold == false)
+    Assert.is_true(menu._updates >= 1) -- 挂载后触发全量重算
+    bar[1].callback() -- 点当前 Tab：不触发
+    Assert.is_nil(active)
+    bar[2].callback()
+    Assert.eq(active, "y")
+    menu:setBottomTabActive("y")
+    local bar2 = menu[1][1][3][1][2]
+    Assert.is_true(bar2[2].text_font_bold)
+    Assert.is_true(bar2[1].text_font_bold == false)
+end
 
 -- —— sheet / spin 回归 ——
 
