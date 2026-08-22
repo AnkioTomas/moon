@@ -20,14 +20,18 @@ local Language = {}
 local RELEASES_URL = "https://github.com/AnkioTomas/moon/releases"
 
 local function hintRow(width, text)
+    local box_w = math.max(1, width - UI.sz(4))
+    local box = TextBoxWidget:new{
+        text = text,
+        face = UI.face("xx_smallinfofont", 11),
+        width = box_w,
+        fgcolor = UI.muted(),
+    }
+    -- LeftContainer 只设 w 时 dimen.h 为 0：VerticalGroup 不预留高度，paintTo 会把正文往上顶到上一行。
+    local box_h = box:getSize().h
     return LeftContainer:new{
-        dimen = Geom:new{ w = width },
-        TextBoxWidget:new{
-            text = text,
-            face = UI.face("xx_smallinfofont", 11),
-            width = math.max(1, width - UI.sz(4)),
-            fgcolor = UI.muted(),
-        },
+        dimen = Geom:new{ w = width, h = box_h },
+        box,
     }
 end
 
@@ -144,7 +148,7 @@ function Language.rows(desktop)
         function(iw)
             return hintRow(iw, T(_(
                 "若在线下载过慢，可到 GitHub Release（%1）下载 pinyin-dictionary-版本号.sqlite3，"
-                .. "重命名为 dictionary.sqlite3 后放入：\n%2"
+                .. "重命名为 dictionary.sqlite3 后放入：%2"
             ), RELEASES_URL, Paths.pinyinDictPath()))
         end,
     }
