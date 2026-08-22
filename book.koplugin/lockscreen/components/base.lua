@@ -4,39 +4,37 @@
 @module koplugin.book.lockscreen.components.base
 --]]
 
-local Stats = require("lockscreen.components.stats")
-local Hitokoto = require("lockscreen.components.hitokoto")
-local Highlight = require("lockscreen.components.highlight")
-local Current = require("lockscreen.components.current")
-local Bookmark = require("lockscreen.components.bookmark")
-local CoverCards = require("lockscreen.components.cover_cards")
-local Bill = require("lockscreen.components.bill")
 local _ = require("gettext")
 
 local M = {}
 
+-- 新增主体只需新增 components/<name>.lua，并在这里登记一次；资源下载、
+-- 每日更新和锁屏入口都不需要跟着增加分支。
+local COMPONENT_MODULES = {
+    "stats", "hitokoto", "highlight", "current", "bill", "message", "myrl", "bookshelf",
+}
+
+-- “无”仍是一个合法主体，方便只显示背景而不引入额外的空值分支。
 local None = {
     id = "none",
     label = _("无"),
     supports_narrow = true,
-    needs_network = false,
-    blocks = function()
-        return {}
-    end,
+    supports_position = false,
+    blocks = function() return {} end,
 }
 
---- 顺序即设置页选项顺序。
+-- 顺序同时决定设置页的展示顺序；组件对象只描述能力，不保存运行状态。
 M.components = {
-    Stats,
-    Hitokoto,
-    Highlight,
-    Current,
-    Bookmark,
-    CoverCards,
-    Bill,
     None,
 }
 
+for i = #COMPONENT_MODULES, 1, -1 do
+    local component = require("lockscreen.components." .. COMPONENT_MODULES[i])
+    if component.supports_narrow == nil then component.supports_narrow = true end
+    table.insert(M.components, 1, component)
+end
+
+--- 按稳定 ID 查找主体配置。
 ---@param id string|nil
 ---@return table|nil
 function M.find(id)
@@ -48,6 +46,7 @@ function M.find(id)
     return nil
 end
 
+--- 将主体配置转换为设置页需要的选项结构。
 ---@return {text: string, value: string}[]
 function M.options()
     local items = {}
