@@ -10,7 +10,6 @@ Kindle 风格入口。弹出原生窗口前关闭控制台，避免全屏层叠�
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
-local Event = require("ui/event")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
@@ -321,7 +320,7 @@ function Panel:rebuild()
             },
             action(action_w, top_h, "format_paint", _("阅读风格"), function()
                 self:onClose()
-                if ui then ui:handleEvent(Event:new("ShowConfigMenu")) end
+                require("ui.reader.layout").showMenu(ui)
             end),
             action(action_w, top_h, "text_fields", _("阅读字体"), function()
                 showTypography(self)
