@@ -20,8 +20,9 @@ local M = {
     id = "current",
     label = _("当前阅读"),
     live = true,
-    preferred_height = 0.30,
-    min_height = 150,
+    -- 面板高度以 hero 内容为准；这里只给布局层一个偏紧的上限，避免白卡上下留白。
+    preferred_height = 0.20,
+    min_height = 120,
 }
 
 local BookInfo
@@ -124,7 +125,7 @@ function M.book(with_stats)
     return with_stats and withStats(book) or book
 end
 
---- 当前阅读主体：白卡 + BookInfo.hero（封面 / 书名 / 作者 / 章节 / 进度）。
+--- 当前阅读主体：白卡贴合 BookInfo.hero 高度（封面 / 书名 / 作者 / 章节 / 进度）。
 ---@param rect table
 ---@return table[]
 function M.blocks(rect)
@@ -135,21 +136,26 @@ function M.blocks(rect)
     ensureUI()
     local chapter = U.chapterLine(book)
     local subtitle = chapter ~= "" and (_("章节") .. " · " .. chapter) or nil
+    -- 左右边距取锁屏面板 pad，但封顶 20，避免宽屏把卡片撑得过松。
+    local pad = math.max(16, math.min(rect.pad or 16, 20))
     local hero, hero_h = BookInfo.hero(nil, nil, book, {
         width = rect.w,
-        pad = rect.pad,
+        pad = pad,
         subtitle = subtitle,
         show_progress = true,
     })
-    local y = rect.y + math.max(0, math.floor((rect.h - hero_h) / 2))
+    -- hero 自身上下只有 UI.sz(6)；外面再留一圈，白卡不至于贴边。
+    local inset_v = math.max(10, math.floor(pad * 0.6))
+    local card_h = hero_h + inset_v * 2
+    local y = rect.y + math.max(0, math.floor((rect.h - card_h) / 2))
     return {
         {
-            kind = "panel", x = rect.x, y = rect.y, width = rect.w, height = rect.h,
+            kind = "panel", x = rect.x, y = y, width = rect.w, height = card_h,
             radius = rect.radius, shadow = 2, color = require("ffi/blitbuffer").COLOR_WHITE,
         },
         {
             kind = "widget", role = "hero",
-            widget = hero, x = rect.x, y = y, width = rect.w, height = hero_h,
+            widget = hero, x = rect.x, y = y + inset_v, width = rect.w, height = hero_h,
         },
     }
 end
