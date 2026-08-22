@@ -6,15 +6,21 @@
 
   manifest.json                 { tag, built_at, entries, raw_sha256, raw_size, parts }
   dictionary.sqlite3.part.NNN   原始 SQLite 二进制分片，按序拼出原始 sqlite
+  dictionary.sqlite3            完整原始库（--keep-raw 或 --assemble-only；默认不提交仓库）
 
 生成 / 更新（仓库根，纯 stdlib Python）：
 
   python3 tools/build_pinyin_dict.py
+  python3 tools/build_pinyin_dict.py --assemble-only   # 仅从分片拼整库（Release CI 用）
 
 设备端不读这里的文件——插件（pinyin/download.lua）经 jsdelivr 按
 仓库 main 拉取切片、逐片校验 SHA-256 后拼接成
 $DATA/.moon/dictionary.sqlite3。切片是因为单片超 jsdelivr
 ~20MB 单文件上限。
+
+手动 sideload：GitHub Release 附带 `pinyin-dictionary-vX.Y.Z.sqlite3`
+（由 CI `--assemble-only` 从分片拼出），重命名为 `dictionary.sqlite3`
+放入 `$DATA/.moon/` 即可。
 
 schema（解压后的 sqlite）：
 

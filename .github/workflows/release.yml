@@ -58,6 +58,17 @@ jobs:
           echo "Packaged ${ASSET} (version ${VERSION})"
           unzip -l "$ASSET" | head -n 30
 
+      - name: Assemble pinyin dictionary
+        id: pinyin
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          DICT="pinyin-dictionary-${TAG}.sqlite3"
+          python3 tools/build_pinyin_dict.py --assemble-only --out-dir assets/pinyin
+          mv assets/pinyin/dictionary.sqlite3 "$DICT"
+          ls -lh "$DICT"
+          echo "asset=${DICT}" >> "$GITHUB_OUTPUT"
+
       - name: Build release notes
         run: |
           set -euo pipefail
@@ -78,7 +89,12 @@ jobs:
             echo
             echo "KOReader 插件包：\`${{ steps.ver.outputs.asset }}\`"
             echo
+            echo "拼音词库（整库，手动 sideload）：\`${{ steps.pinyin.outputs.asset }}\`"
+            echo
             echo "安装：解压后将 \`book.koplugin\` 复制到 KOReader 的 \`plugins\` 目录，然后重启。"
+            echo
+            echo "拼音词库 sideload：从 Release 下载 \`${{ steps.pinyin.outputs.asset }}\`，重命名为 \`dictionary.sqlite3\`，"
+            echo "放入 KOReader 数据目录下的 \`.moon/\`（与 \`book.sqlite3\` 同级），然后重启。"
             echo
             echo "### 更新内容"
             echo
@@ -145,7 +161,8 @@ jobs:
           set -euo pipefail
           TAG="${{ steps.ver.outputs.tag }}"
           ASSET="${{ steps.ver.outputs.asset }}"
-          ARGS=(release create "$TAG" "$ASSET" --title "Book ${TAG}" --notes-file RELEASE_NOTES.md)
+          DICT="${{ steps.pinyin.outputs.asset }}"
+          ARGS=(release create "$TAG" "$ASSET" "$DICT" --title "Book ${TAG}" --notes-file RELEASE_NOTES.md)
 
           if [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
             ARGS+=(--prerelease)
