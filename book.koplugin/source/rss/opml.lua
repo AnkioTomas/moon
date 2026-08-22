@@ -21,14 +21,12 @@ local function attr(tag, name)
     return Text.xmlDecode(rest:match("^%s*[\"'](.-)" .. quote) or "")
 end
 
----@param path string|nil
----@return table[]|nil, string|nil
-function OPML.read(path)
-    path = path or OPML.DEFAULT_IMPORT_PATH
-    local f, err = io.open(path, "rb")
-    if not f then return nil, err end
-    local content = f:read("*a")
-    f:close()
+---@param content string
+---@return table[]|nil
+function OPML.parse(content)
+    if type(content) ~= "string" or content == "" then
+        return nil
+    end
     local feeds = {}
     for tag in content:gmatch("<[oO][uU][tT][lL][iI][nN][eE]%s+([^>]*)>") do
         local url = attr(tag, "xmlurl")
@@ -40,6 +38,17 @@ function OPML.read(path)
         end
     end
     return feeds
+end
+
+---@param path string|nil
+---@return table[]|nil, string|nil
+function OPML.read(path)
+    path = path or OPML.DEFAULT_IMPORT_PATH
+    local f, err = io.open(path, "rb")
+    if not f then return nil, err end
+    local content = f:read("*a")
+    f:close()
+    return OPML.parse(content), nil
 end
 
 return OPML

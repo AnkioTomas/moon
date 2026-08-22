@@ -61,6 +61,7 @@ Server.__index = Server
 -- （函数首参即 self；不反向 require server，无循环）
 local File = require("remote.file")
 local Input = require("remote.input")
+local SettingsRoute = require("remote.settings_route")
 Server._routeList = File.list
 Server._routeDownload = File.download
 Server._routeUpload = File.upload
@@ -68,6 +69,8 @@ Server._routeMutate = File.mutate
 Server._routeRename = File.rename
 Server._routeInput = Input.route
 Server._routeClipboard = Input.clipboard
+Server._routeSettings = SettingsRoute.settings
+Server._routeSettingsOpml = SettingsRoute.opml
 
 ---@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil }
 ---@return table
@@ -368,6 +371,10 @@ function Server:_route(conn, head)
         return self:_routeClipboard(conn, method, headers, query)
     elseif path == "/api/rename" then
         return self:_routeRename(conn, method, query)
+    elseif path == "/api/settings" then
+        return self:_routeSettings(conn, method, headers, query)
+    elseif path == "/api/settings/rss/opml" then
+        return self:_routeSettingsOpml(conn, method, headers, query)
     end
     return self:_fail(conn, 404, "Not Found")
 end
@@ -410,6 +417,9 @@ function Server:_readBody(conn)
         local mode = conn.text_mode
         conn.text_buf = nil
         conn.text_mode = nil
+        if SettingsRoute.finishBody(self, conn, text, mode) then
+            return
+        end
         if mode == "clipboard" then
             self.handlers.set_clipboard(text)
             return self:_queueResponse(conn, {
@@ -523,8 +533,8 @@ end
 
 -- ── 页面与静态资源 ─────────────────────────────────────
 
--- 一切页面资源都是静态路由（不注入模板）：html 经 /、/file.html、/input.html，
--- 样式脚本经 /style.css、/js.js、/file.js、/input.js；实例配置走 /api/config。
+-- 一切页面资源都是静态路由（不注入模板）：html 经 /、/file.html、/input.html、/settings.html，
+-- 样式脚本经 /style.css、/js.js、/file.js、/input.js、/settings.js；实例配置走 /api/config。
 local HTML_DIR = (debug.getinfo(1, "S").source:match("^@(.+)/[^/]+$") or ".") .. "/html"
 
 local ASSETS = {
@@ -532,10 +542,12 @@ local ASSETS = {
     ["/index.html"] = { "index.html", "text/html; charset=utf-8" },
     ["/file.html"] = { "file.html", "text/html; charset=utf-8" },
     ["/input.html"] = { "input.html", "text/html; charset=utf-8" },
+    ["/settings.html"] = { "settings.html", "text/html; charset=utf-8" },
     ["/style.css"] = { "style.css", "text/css; charset=utf-8" },
     ["/js.js"] = { "js.js", "application/javascript; charset=utf-8" },
     ["/file.js"] = { "file.js", "application/javascript; charset=utf-8" },
     ["/input.js"] = { "input.js", "application/javascript; charset=utf-8" },
+    ["/settings.js"] = { "settings.js", "application/javascript; charset=utf-8" },
 }
 
 local _asset_cache = {} ---@type table<string, string>
