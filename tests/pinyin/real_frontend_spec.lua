@@ -54,7 +54,9 @@ package.preload["ffi/utf8proc"] = function()
 end
 
 package.preload["ffi/blitbuffer"] = function()
-    return setmetatable({}, {
+    return setmetatable({
+        isColor8 = function() return true end,
+    }, {
         __index = function()
             return 0
         end,
@@ -133,6 +135,8 @@ local function fakeWidgetClass()
     function W:setMaxWidth(w)
         self.max_width = w
     end
+
+    function W:paintTo() end
 
     function W:free() end
     return W
@@ -308,9 +312,10 @@ local function newKeyboard(layer)
     }
 end
 
-local function rowKey(kb, j)
-    -- VirtualKey 结构：[1]=FrameContainer [1]=CenterContainer [1]=TextWidget
-    return kb.layout[1][j][1][1][1]
+local function cellText(kb, j)
+    -- 候选条 Strip 顶掉首行：kb.layout[1] = { strip }；cells[1..10] = ◀/候选×7/空档/▶
+    local cell = kb.layout[1][1].cells[j]
+    return (cell and cell.tw) and cell.tw.text or ""
 end
 
 -- ── 用例 ─────────────────────────────────────────────
@@ -322,9 +327,11 @@ do
     Assert.is_true(ZH.keys[1]._pinyin_bar == true, "候选行必须插到真实 zh_CN 布局第一行")
     Assert.eq(#ZH.keys, 6, "zh_CN 原 5 行 + 候选行")
     Assert.eq(#kb.KEYS, 6)
-    Assert.eq(#kb.layout, 6, "真实 addKeys 必须造出 6 行 VirtualKey")
-    Assert.eq(rowKey(kb, 1).text, "◀")
-    Assert.eq(rowKey(kb, 10).text, "▶")
+    Assert.eq(#kb.layout, 6, "真实 addKeys 必须造出 6 行")
+    Assert.eq(#kb.layout[1], 1, "首行被候选条顶掉，FocusManager 布局里整行一个部件")
+    local cells = kb.layout[1][1].cells
+    Assert.eq(cellText(kb, 1), "◀")
+    Assert.eq(cellText(kb, #cells), "▶")
     Assert.is_false(kb.layout[2][1].flash_keyboard, "启用时所有布局键必须跳过阻塞式闪烁")
     local ac = kb.inputbox.addChars
     Assert.eq(type(ac), "table", "zh_CN wrapInputBox 把 addChars 包成 wrapMethod 表")
@@ -338,17 +345,17 @@ do
     kb:addChar("i")
     Assert.eq(text(kb.inputbox), "ni", "拼音码应先显示在输入框")
     Assert.eq(lookup_calls[#lookup_calls], "ni", "输入码必须查词库")
-    Assert.eq(rowKey(kb, 2).text, "你好", "第一候选上键")
-    Assert.eq(rowKey(kb, 3).text, "你好吗")
+    Assert.eq(cellText(kb, 2), "你好", "第一候选上键")
+    Assert.eq(cellText(kb, 3), "你好吗")
     kb:delChar() -- 键盘退格：逐字母回退
     Assert.eq(text(kb.inputbox), "n")
     Assert.eq(lookup_calls[#lookup_calls], "n")
     kb:addChar("i")
     local rebuilds_before = kb.inputbox.layout_rebuilds
-    kb.layout[1][2].callback() -- 点「你好」
+    kb.layout[1][1].cells[2].callback() -- 点「你好」
     Assert.eq(text(kb.inputbox), "你好", "点候选：插整词")
     Assert.eq(kb.inputbox.layout_rebuilds, rebuilds_before + 1, "候选提交只能重建一次文本布局")
-    Assert.eq(rowKey(kb, 2).text, "", "提交后候选行清空")
+    Assert.eq(cellText(kb, 2), "", "提交后候选行清空")
 end
 
 -- 3. 换层（Shift→Sym→ABC，number 输入框从 layer 4 起步）：addKeys 重建后候选行仍活
@@ -361,8 +368,8 @@ do
     kb:addChar("n")
     kb:addChar("i")
     Assert.eq(text(kb.inputbox), "ni")
-    Assert.eq(rowKey(kb, 2).text, "你好", "换层重建键位后候选必须画在新键位上")
-    kb.layout[1][2].callback()
+    Assert.eq(cellText(kb, 2), "你好", "换层重建键位后候选必须画在新候选条上")
+    kb.layout[1][1].cells[2].callback()
     Assert.eq(text(kb.inputbox), "你好", "换层后点候选仍可提交")
 end
 
@@ -380,7 +387,7 @@ do
     kb:addChar("n")
     kb:addChar("i")
     Assert.eq(text(kb.inputbox), "xni", "候选栏重新接管后拼音码应显示")
-    Assert.eq(rowKey(kb, 2).text, "你好")
+    Assert.eq(cellText(kb, 2), "你好")
 end
 
 -- 5. 词库不可用：候选行摘除（不留幽灵行），输入透传原生 generic_ime 不崩溃
@@ -403,7 +410,27 @@ do
     Assert.is_true(ZH.keys[1]._pinyin_bar == true, "词库可用后候选行回来")
     kb:addChar("n")
     kb:addChar("i")
-    Assert.eq(rowKey(kb, 2).text, "你好")
+    Assert.eq(cellText(kb, 2), "你好")
+end
+
+-- 7. 真实 paint 链 + tap 命中：候选条自己画自己分发，不经过 VirtualKey 手势体系
+do
+    local kb = newKeyboard()
+    kb:addChar("n")
+    kb:addChar("i")
+    -- 全 noop 的假 blitbuffer：真容器链 + strip:paintTo 全跑一遍
+    local bb = setmetatable({}, { __index = function() return function() end end })
+    kb:paintTo(bb, 0, 0)
+    local strip = kb.layout[1][1]
+    Assert.is_true(strip.dimen.x ~= nil and strip.dimen.y ~= nil, "paint 后候选条坐标必须落地")
+    -- tap 命中第 2 个候选「你好吗」：◀ 宽 + 缝 + 词1 宽 + 缝 + 1
+    local x = strip.dimen.x + strip.cells[1].w + strip.gap + strip.cells[2].w + strip.gap + 1
+    local ev = { handler = "onGesture", args = { { ges = "tap", pos = { x = x, y = strip.dimen.y + 1 } } } }
+    Assert.is_true(strip:handleEvent(ev), "条内 tap 必须吞掉")
+    Assert.eq(text(kb.inputbox), "你好吗", "tap 候选必须提交对应词")
+    -- 条外 tap 放行（交给其他行/下层）
+    local outside = { handler = "onGesture", args = { { ges = "tap", pos = { x = 0, y = 0 } } } }
+    Assert.is_false(strip:handleEvent(outside), "条外 tap 必须放行")
 end
 
 -- ── 清理 ─────────────────────────────────────────────
