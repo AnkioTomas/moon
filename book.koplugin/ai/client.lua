@@ -9,11 +9,12 @@ local Request = require("http.request")
 local Settings = require("utils.settings")
 local SSE = require("ai.sse")
 local Text = require("utils.text")
+local logger = require("logger")
 
 local Client = {}
 
 --- AI 请求默认 User-Agent；部分 OpenAI 兼容网关按 UA 分流/限流。
-local DEFAULT_UA = "opencode/1.2.3"
+local DEFAULT_UA = "opencode/1.2.3 ai-sdk/amazon-bedrock/3.0.73 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5"
 
 --- 规范化 Chat Completions URL；已带路径则原样返回。
 ---@param base string|nil
@@ -50,17 +51,36 @@ local function contentOf(message)
     return #parts > 0 and table.concat(parts, "\n") or nil
 end
 
+--- 截断响应体便于日志（首尾截断，控制长度）。
+---@param s string|nil
+---@param n number
+---@return string
+local function snip(s, n)
+    s = tostring(s or ""):gsub("%s+", " ")
+    if #s <= n then
+        return s
+    end
+    return s:sub(1, n) .. ("…(" .. #s .. "B)")
+end
+
 --- 解析非流式响应体，返回 choices[1].message 正文。
 ---@param body string|nil
 ---@return string|nil, string|nil
 function Client.decodeResponse(body)
     local ok, decoded = pcall(JSON.decode, body or "")
-    if not ok or type(decoded) ~= "table" then return nil, "invalid AI response" end
+    if not ok or type(decoded) ~= "table" then
+        return nil, "invalid AI response"
+    end
     local choice = decoded.choices and decoded.choices[1]
     local content = contentOf(choice and choice.message)
     if not content or content == "" then
         local err = decoded.error
-        return nil, type(err) == "table" and tostring(err.message or err.code) or "empty AI response"
+        if type(err) == "table" then
+            return nil, tostring(err.message or err.code)
+        end
+        logger.warn("ai.client: empty content; keys=",
+            choice and choice.message and "has-message" or "no-message", "body=", snip(body, 200))
+        return nil, "empty AI response"
     end
     return content
 end
@@ -133,10 +153,17 @@ function Client.chat(messages, opts, cb)
                 detail = decoded_ok and type(decoded) == "table" and decoded.error
                 detail = type(detail) == "table" and detail.message or nil
             end
+            if not detail then
+                logger.warn("ai.client: request failed err=", err, "code=",
+                    raw and raw.code, "body=", snip(raw and raw.body, 200))
+            end
             cb(nil, detail or err)
             return
         end
         local content, decode_err = Client.decodeResponse(response)
+        if not content then
+            logger.warn("ai.client: decode failed err=", decode_err, "body=", snip(response, 300))
+        end
         cb(content, decode_err)
     end)
 end

@@ -6,6 +6,7 @@ AI JSON 解码：剥离 Markdown fence，再解析对象。
 
 local JSON = require("json")
 local Text = require("utils.text")
+local logger = require("logger")
 
 local AiJson = {}
 
@@ -27,6 +28,8 @@ function AiJson.decode(content)
         end
     end
     if not ok or type(result) ~= "table" then
+        local s = content:gsub("%s+", " ")
+        logger.warn("ai.json: not JSON; err=", tostring(result), "content=", s:sub(1, 200), (#content > 200 and "…" or ""))
         return nil, "AI did not return JSON"
     end
     return result
