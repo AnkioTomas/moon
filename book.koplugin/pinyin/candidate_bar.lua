@@ -6,11 +6,13 @@
 wrapInputBox 包装表的 func——那依赖 generic_ime 包装结构的内部细节，
 结构对不上就静默退回原生 IME（候选混进输入框文本），已经在真机上踩过。
 
-候选来自 Book 词库（pinyin.dictionary，rime-ice 词频序）。候选行的十个键宽固定，
-输入时只更新文字和回调；不得修改已有 VirtualKey 的几何，也不得调用 addKeys 重建整张键盘。
+候选来自 Book 词库（pinyin.dictionary，rime-ice 词频序）。候选条不用
+VirtualKey：addKeys 建好首行后整条顶掉，换成自研 Strip（pinyin/strip.lua，
+鸭子类型自足 widget，不进 KOReader 容器体系）——布局规则（自然宽、放不下
+整词跳过不截断、不满员居中）与 tap 命中都收在组件里，本文件只做拦截与编排。
 
-激活时（开关开 + 词库在 + 当前 zh_CN 布局）：字母不进原生 IME，
-原样写进输入框（所见即所输），词库候选显示在键盘首行；
+激活时（开关开 + 词库在 + 当前 zh_CN 布局 + 非 number 输入框）：
+字母不进原生 IME，原样写进输入框（所见即所输），词库候选显示在键盘首行；
 点候选或空格 = 删掉已输入字母、插入整词。退格逐字母回退。
 同时关闭当前键盘实例的按键闪烁：原生闪烁会在字符回调前强制提交一次
 电子墨水刷新，Kindle 随后的 UI 刷新可能阻塞等待前一 marker，所有布局都会卡。
@@ -26,20 +28,18 @@ KOReader 没有 Lua 线程；不能用 Task.run fork（父进程 sqlite 连接 +
 - 候选行只在真能用（开关开 + 词库在）时插进 zh_CN 布局，其余情况必须摘掉：
   否则留下一整行按不动的 ◀▶ 幽灵行，而输入还是原生 IME 行内候选。
 - 键位绑定跟着 VirtualKeyboard:addKeys 走，不是 init：换层（Shift/Sym、number 输入框
-  从 layer 4 切字母层）只调 addKeys，全部 VirtualKey 会重建，绑 init 必然拿到死引用。
+  从 layer 4 切字母层）只调 addKeys，键位全部重建，绑 init 必然拿到死引用。
 
 @module koplugin.book.pinyin.candidate_bar
 --]]
 
 local Bar = {}
 
-local Blitbuffer = require("ffi/blitbuffer")
-local Size = require("ui/size")
+local Strip = require("pinyin.strip")
 local util = require("util")
 
 local ZH_MODULE = "ui/data/keyboardlayouts/zh_CN_keyboard"
-local SLOT_COUNT = 7
-local NAV_WIDTH = 1.0
+local SLOT_COUNT = Strip.SLOT_COUNT
 
 local _enabled
 local _hooked = false
@@ -50,8 +50,7 @@ local _keyboard
 local _code = ""
 local _pages = {}
 local _page = 1
-local _prev_key, _next_key, _spacer_key
-local _cand_keys = {}
+local _strip
 local _requestLookup
 local stopSearch
 
@@ -114,6 +113,8 @@ end
 
 --- 候选行随 want 插入/摘除 zh_CN 布局数据（幂等）。
 --- 必须在 VirtualKeyboard:init 读 keys 之前调用——键盘高度按行数算。
+--- 行内保留 10 个空键：addKeys 以 #KEYS[1] 为基准键宽。建出来的首行随后
+--- 被 Strip 整条顶掉，这些键只是占位。
 local function syncRow(want)
     if not (want or package.loaded[ZH_MODULE]) then
         return
@@ -129,39 +130,13 @@ local function syncRow(want)
         table.remove(keys, 1)
         return
     end
-    -- 候选格从创建起就保持正常宽度，避免空标签被 VirtualKey 压成 8px 字号。
     local row = { _pinyin_bar = true }
     for i = 1, 10 do
-        local w = NAV_WIDTH
-        if i >= 2 and i <= 8 then
-            w = 1.0
-        elseif i == 9 then
-            w = 1.0 -- 固定空档，整行十键几何永不变化
-        end
-        row[i] = { label = "", width = w }
+        row[i] = { label = "", width = 1.0 }
     end
     row[1].label = "◀"
     row[10].label = "▶"
     table.insert(keys, 1, row)
-end
-
--- VirtualKey 的文本节点在三层容器内；同时恢复空键被压小的字号。
-local function setKeyText(key, text, gray)
-    key.label = text
-    key.callback = nil
-    local tw = key[1][1][1]
-    -- 兜底：若键仍带着被压小的 face，恢复 VirtualKey 自己的键盘字号
-    if key.face and tw.face ~= key.face then
-        tw.face = key.face
-        tw._face_adjusted = nil
-    end
-    -- CenterContainer 不会裁剪越界文本；没有这个上限，长候选会盖住相邻键的边框。
-    if tw.setMaxWidth then
-        local width = (key.width or 0) - 2 * (key.bordersize or 0) - 2 * Size.padding.small
-        tw:setMaxWidth(math.max(8, width))
-    end
-    tw.fgcolor = gray and Blitbuffer.COLOR_GRAY or Blitbuffer.COLOR_BLACK
-    tw:setText(text)
 end
 
 local function redraw()
@@ -169,9 +144,11 @@ local function redraw()
         return
     end
     -- 只标记脏区，让 UIManager 在本轮 forceRePaint 里画。
-    -- 按键回调里自行 widgetRepaint 候选行会跟 VirtualKey 的 invert/forceRePaint 抢 buffer，真机闪退。
+    -- 自行 widgetRepaint 候选条会跟 VirtualKey 的 invert/forceRePaint 抢 buffer，真机闪退。
+    -- 刷新类型必须留灰阶（ui）：fast 在 Kindle 上是 DU 波形（2 级灰），
+    -- 会把键缝透出的浅灰分割线量化成白，打字后候选行就没线了。
     require("ui/uimanager"):setDirty(_keyboard, function()
-        return "fast", _keyboard.dimen
+        return "ui", _keyboard.dimen
     end)
 end
 
@@ -192,7 +169,7 @@ local function makePages(words)
         if #page == SLOT_COUNT then
             pages[#pages + 1], page = page, {}
         end
-        page[#page + 1] = { word = word }
+        page[#page + 1] = word
     end
     if #page > 0 then
         pages[#pages + 1] = page
@@ -230,77 +207,63 @@ local function commit(word)
     return true
 end
 
+-- 页码收口后把当前页词表交给候选条重建 cells（布局规则全在 strip.lua）。
 local function refresh()
-    if not _prev_key then
-        return
-    end
-    if not _active then
-        setKeyText(_prev_key, "")
-        setKeyText(_next_key, "")
-        setKeyText(_spacer_key, "")
-        for i = 1, SLOT_COUNT do
-            setKeyText(_cand_keys[i], "")
-        end
+    local strip = _strip
+    if not strip then
         return
     end
     local pages = math.max(1, #_pages)
     if _page > pages then
         _page = pages
     end
-    local page = _pages[_page] or {}
-    setKeyText(_prev_key, "◀", _page <= 1)
-    if _page > 1 then
-        _prev_key.callback = function()
-            _page = _page - 1
+    strip:setCells(_pages[_page] or {}, {
+        page = _page,
+        pages = pages,
+        on_page = function(delta)
+            _page = _page + delta
             refresh()
             redraw()
-        end
-    end
-    setKeyText(_next_key, "▶", _page >= pages)
-    if _page < pages then
-        _next_key.callback = function()
-            _page = _page + 1
+        end,
+        on_word = function(word)
+            commit(word)
             refresh()
             redraw()
-        end
-    end
-    setKeyText(_spacer_key, "")
-    for i = 1, SLOT_COUNT do
-        local item = page[i]
-        local word = item and item.word
-        local key = _cand_keys[i]
-        if word then
-            setKeyText(key, word)
-            key.callback = function()
-                commit(word)
-                refresh()
-                redraw()
-            end
-        else
-            setKeyText(key, "")
-        end
-    end
+        end,
+    })
 end
 
-local function bindKeys(kb)
-    _prev_key, _next_key, _spacer_key = nil, nil, nil
-    _cand_keys = {}
-    local row = kb.layout and kb.layout[1]
-    if not (kb.KEYS and kb.KEYS[1] and kb.KEYS[1]._pinyin_bar and row and #row >= 10) then
+-- 候选条挂进键盘：addKeys 建完整棵树后，把首行 HorizontalGroup 整条顶掉。
+-- 布局树：kb[1]=BottomContainer → 键盘框 FrameContainer → CenterContainer
+-- → VerticalGroup，其 [1] 即首行（行内键与 span 交错，奇数位是键）。
+-- 结构对不上就不装（候选栏停用、输入全透传；首行退回等宽空键行）。
+local function installStrip(kb)
+    _strip = nil
+    if not (kb.KEYS and kb.KEYS[1] and kb.KEYS[1]._pinyin_bar) then
         return false
     end
-    for i = 1, 10 do
-        -- addKeys 只给非空标签键摘 swipe_callback，候选键标签是空串所以留着了；
-        -- 而它们没有 key_chars，一划就 index nil 崩。候选行不需要长按/划动。
-        row[i].hold_callback = nil
-        row[i].swipe_callback = nil
+    local vg = kb[1] and kb[1][1] and kb[1][1][1] and kb[1][1][1][1]
+    local row = vg and vg[1]
+    if not (row and row.getSize and row[1] and row[1].width) then
+        return false
     end
-    _prev_key = row[1]
-    for i = 1, SLOT_COUNT do
-        _cand_keys[i] = row[1 + i]
+    local budget = 0
+    for j = 3, 17, 2 do -- 第 2..9 个键（7 候选槽 + 空档）
+        budget = budget + row[j].width
     end
-    _spacer_key = row[9]
-    _next_key = row[10]
+    local size = row:getSize()
+    local strip = Strip:new{
+        dimen = { w = size.w, h = size.h },
+        gap = kb.key_padding or 2,
+        face = row[1].face, -- 与被顶掉的键同款键盘字体（含 keyboard_key_font_size/bold 设置）
+        bold = row[1].bold,
+        nav_w = row[1].width,
+        budget = budget,
+        cells = {},
+    }
+    vg[1] = strip -- 顶掉的首行是 addKeys 刚建的（空标签，无 xtext），丢弃无泄漏
+    kb.layout[1] = { strip } -- FocusManager 方向键导航按 layout 遍历：整行一个部件
+    _strip = strip
     return true
 end
 
@@ -362,7 +325,7 @@ local function disableKeyFlash(kb)
     end
 end
 
--- init、换层和换布局都会重建键位。绑定失败时必须停用拦截，避免吞掉原生输入。
+-- init、换层和换布局都会重建键位。安装失败时必须停用拦截，避免吞掉原生输入。
 local function wrappedAddKeys(self, ...)
     orig_addKeys(self, ...)
     if _want then
@@ -370,13 +333,15 @@ local function wrappedAddKeys(self, ...)
         disableKeyFlash(self)
     end
     _keyboard = self
-    _active = _want and bindKeys(self)
+    _active = _want and installStrip(self)
     refresh()
 end
 
 local function wrappedInit(self, ...)
     -- 文件存在不等于 SQLite 可用；损坏或未完成的文件必须保留原生 IME。
-    _want = not not (_enabled() and require("pinyin.dictionary").isAvailable())
+    -- number 输入框从符号层起步、不打字，候选行直接不装。
+    _want = not not (_enabled() and require("pinyin.dictionary").isAvailable()
+        and not (self.inputbox and self.inputbox.input_type == "number"))
     syncRow(_want)
     clearCode()
     orig_init(self, ...)
@@ -384,8 +349,7 @@ end
 
 local function wrappedAddChar(self, key)
     _keyboard = self
-    -- 候选行空槽位是没有 key_chars 的 VirtualKey，点按会以 nil 键调到这里；
-    -- 必须吞掉，透传给原生会 addChars(nil) 直接崩（见 candidate_bar_spec）。
+    -- 上游偶发非字符串键（如空键位）：必须吞掉，透传给原生会 addChars(nil) 直接崩。
     if type(key) ~= "string" then
         return
     end
@@ -405,7 +369,7 @@ local function wrappedAddChar(self, key)
     end
     if key == " " and _code ~= "" then
         local first = _pages[1] and _pages[1][1]
-        if first and commit(first.word) then
+        if first and commit(first) then
             refresh()
             redraw()
             return
