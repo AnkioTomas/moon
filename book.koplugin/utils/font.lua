@@ -8,17 +8,21 @@ Book 插件 UI 字体
 字源：
   id == ""                         恢复首次备份的 fontmap（配置空值；选择器不提供此项）
   .moon/fonts/<id>.woff            微信读书已下载
-  FontList.fontdir（koreader/fonts）下 basename == id
+  $DATA/fonts/<basename>           KOReader 设置目录字库
+  FontList 其余路径                 系统字库（basename == id）
 
-微信列表：http.Cache（TTL）优先，磁盘 list.json 作冷启动备份。
+列表顺序：微信读书 → 设置目录 fonts → 系统。
+扫描走 Task 子进程；微信列表 http.Cache（TTL）优先，磁盘 list.json 作冷启动备份。
 
 @module koplugin.book.moon.font
 --]]
 
 local Archiver = require("ffi/archiver")
+local DataStorage = require("datastorage")
 local Font = require("ui/font")
 local FontList = require("fontlist")
 local JSON = require("json")
+local ffiUtil = require("ffi/util")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local util = require("util")
@@ -53,7 +57,7 @@ local _weread_cache = nil
 ---@class MoonFontItem
 ---@field id string 写入 ui_font；空=恢复默认 fontmap
 ---@field name string
----@field kind string "local"|"weread"
+---@field kind string "local"|"weread"|"system"
 ---@field url string|nil
 ---@field preview string|nil
 ---@field zip_size number|nil
@@ -85,10 +89,10 @@ local function listCachePath()
     return Paths.fontsDir() .. "/list.json"
 end
 
---- koreader/fonts 根目录（FontList.fontdir，通常为 ./fonts）
+--- KOReader 设置目录 fonts（$DATA/fonts）
 ---@return string
-local function koFontsDir()
-    return FontList.fontdir or "./fonts"
+local function settingsFontsDir()
+    return DataStorage:getDataDir() .. "/fonts"
 end
 
 function M.currentId()
@@ -106,18 +110,21 @@ end
 
 function M.isInstalled(id_or_item)
     if type(id_or_item) == "table" then
-        if id_or_item.kind == "local" then return true end
+        if id_or_item.kind == "local" or id_or_item.kind == "system" then return true end
         id_or_item = id_or_item.id
     end
     local path = wereadPath(id_or_item)
     return path ~= nil and lfs.attributes(path, "mode") == "file"
 end
 
---- 只扫 koreader/fonts（递归），不碰系统/外置字库。
+--- 递归扫描目录内字体；seen 按 basename 去重。
+---@param dir string
+---@param kind string
+---@param seen table<string, boolean>
+---@param seen_paths table<string, boolean>
 ---@return MoonFontItem[]
-local function listLocal()
-    local out, seen = {}, {}
-    local dir = koFontsDir()
+local function scanDirFonts(dir, kind, seen, seen_paths)
+    local out = {}
     if lfs.attributes(dir, "mode") ~= "directory" then
         return out
     end
@@ -126,16 +133,55 @@ local function listLocal()
         local ext = file:lower():match("%.([^.]+)$") or ""
         if not LOCAL_EXT[ext] or seen[file] then return end
         seen[file] = true
+        seen_paths[path] = true
         out[#out + 1] = {
             id = file,
             name = file:gsub("%.[^%.]+$", ""),
-            kind = "local",
+            kind = kind,
             path = path,
             zip_size = 0,
         }
     end)
     table.sort(out, function(a, b) return (a.name or "") < (b.name or "") end)
     return out
+end
+
+--- FontList 中尚未登记的路径 → 系统字库。
+---@param seen table<string, boolean>
+---@param seen_paths table<string, boolean>
+---@return MoonFontItem[]
+local function scanSystemFonts(seen, seen_paths)
+    local out = {}
+    FontList:getFontList()
+    for _, path in ipairs(FontList.fontlist or {}) do
+        if not seen_paths[path] then
+            local file = basename(path)
+            if file ~= "" and not seen[file] then
+                local ext = file:lower():match("%.([^.]+)$") or ""
+                if LOCAL_EXT[ext] then
+                    seen[file] = true
+                    out[#out + 1] = {
+                        id = file,
+                        name = file:gsub("%.[^%.]+$", ""),
+                        kind = "system",
+                        path = path,
+                        zip_size = 0,
+                    }
+                end
+            end
+        end
+    end
+    table.sort(out, function(a, b) return (a.name or "") < (b.name or "") end)
+    return out
+end
+
+--- 设置目录 + 系统字库（同步；listAsync 在子进程跑同一逻辑）。
+---@return MoonFontItem[], MoonFontItem[]
+local function scanInstalledFonts()
+    local seen, seen_paths = {}, {}
+    local settings = scanDirFonts(settingsFontsDir(), "local", seen, seen_paths)
+    local system = scanSystemFonts(seen, seen_paths)
+    return settings, system
 end
 
 ---@param raw_items table|nil
@@ -193,12 +239,14 @@ local function writeDiskWeread(items)
 end
 
 ---@param weread MoonFontItem[]|nil
----@param local_items MoonFontItem[]
+---@param settings MoonFontItem[]|nil
+---@param system MoonFontItem[]|nil
 ---@return MoonFontItem[]
-local function merge(local_items, weread)
+local function merge(weread, settings, system)
     local out = {}
-    for _, it in ipairs(local_items) do out[#out + 1] = it end
     for _, it in ipairs(weread or {}) do out[#out + 1] = it end
+    for _, it in ipairs(settings or {}) do out[#out + 1] = it end
+    for _, it in ipairs(system or {}) do out[#out + 1] = it end
     return out
 end
 
@@ -209,28 +257,73 @@ local function rememberWeread(items)
     Cache.set(LIST_CACHE_KEY, { items = items }, LIST_TTL)
 end
 
---- 同步列表：本地 + 已有缓存（不联网）。
+--- 同步列表：微信 + 设置目录 + 系统（不联网）。
 ---@return MoonFontItem[]
 function M.list()
     if not _weread_cache then
         _weread_cache = readDiskWeread()
     end
-    return merge(listLocal(), _weread_cache)
+    local settings, system = scanInstalledFonts()
+    return merge(_weread_cache, settings, system)
 end
 
---- 异步列表。force=false：内存 → http.Cache → 磁盘 → 联网；force=true：强制联网。
+--- 异步列表。扫描在子进程；微信 force=false：内存 → http.Cache → 磁盘 → 联网。
 ---@param force boolean|nil
 ---@param cb fun(items: MoonFontItem[], err: string|nil)
 ---@return { cancel: fun() }
 function M.listAsync(force, cb)
-    local local_items = listLocal()
     local cancelled = false
-    local net_job, cache_job
+    local net_job, cache_job, scan_job
+    local weread_result, settings_result, system_result
+    local weread_done, scan_done = false, false
+    local weread_err
+    local scan_err
 
-    local function finish(weread, err)
-        if cancelled then return end
-        cb(merge(local_items, weread), err)
+    local function try_finish()
+        if cancelled or not weread_done or not scan_done then return end
+        cb(merge(weread_result, settings_result, system_result), weread_err or scan_err)
     end
+
+    local function finishWeread(weread, err)
+        if cancelled then return end
+        weread_result = weread
+        weread_err = err
+        weread_done = true
+        try_finish()
+    end
+
+    scan_job = Task.run(function(_, write_fd)
+        local settings, system = scanInstalledFonts()
+        local ok, payload = pcall(JSON.encode, { settings = settings, system = system })
+        if ok and type(payload) == "string" then
+            ffiUtil.writeToFD(write_fd, payload, true)
+        end
+    end, {
+        pipe = true,
+        on_done = function(raw)
+            if cancelled then return end
+            local settings, system = {}, {}
+            if type(raw) == "string" and raw ~= "" then
+                local ok, data = pcall(JSON.decode, raw)
+                if ok and type(data) == "table" then
+                    settings = data.settings or {}
+                    system = data.system or {}
+                end
+            end
+            settings_result = settings
+            system_result = system
+            scan_done = true
+            try_finish()
+        end,
+        on_failed = function(err)
+            if cancelled then return end
+            logger.warn("book.font scan failed", err)
+            settings_result, system_result = {}, {}
+            scan_err = err or _("字体扫描失败")
+            scan_done = true
+            try_finish()
+        end,
+    })
 
     local function fetchNet()
         net_job = Request.request({
@@ -242,37 +335,37 @@ function M.listAsync(force, cb)
             if cancelled then return end
             if err or not Request.ok(res and res.code) then
                 local fallback = _weread_cache or readDiskWeread()
-                finish(fallback, err or _("获取字体列表失败"))
+                finishWeread(fallback, err or _("获取字体列表失败"))
                 return
             end
             local ok, data = pcall(JSON.decode, res.body or "")
             if not ok or type(data) ~= "table" or type(data.items) ~= "table" then
-                finish(_weread_cache or readDiskWeread(), _("字体列表解析失败"))
+                finishWeread(_weread_cache or readDiskWeread(), _("字体列表解析失败"))
                 return
             end
             local weread = normalizeWeread(data.items)
             rememberWeread(weread)
-            finish(weread)
+            finishWeread(weread)
         end)
     end
 
     if force then
         fetchNet()
     elseif _weread_cache then
-        finish(_weread_cache)
+        finishWeread(_weread_cache)
     else
         cache_job = Cache.getAsync(LIST_CACHE_KEY, function(hit)
             if cancelled then return end
             if type(hit) == "table" and type(hit.items) == "table" then
                 _weread_cache = normalizeWeread(hit.items)
                 writeDiskWeread(_weread_cache)
-                finish(_weread_cache)
+                finishWeread(_weread_cache)
                 return
             end
             local disk = readDiskWeread()
             if disk then
                 _weread_cache = disk
-                finish(disk)
+                finishWeread(disk)
                 return
             end
             fetchNet()
@@ -282,6 +375,7 @@ function M.listAsync(force, cb)
     return {
         cancel = function()
             cancelled = true
+            if scan_job then scan_job:abort() end
             if cache_job and cache_job.cancel then cache_job.cancel() end
             if net_job and net_job.cancel then net_job.cancel() end
         end,
@@ -296,12 +390,12 @@ local function registerFontPath(path)
     table.insert(FontList.fontlist, 1, path)
 end
 
---- 在 koreader/fonts 树里按 basename 找文件。
+--- 在目录树里按 basename 找字体文件。
+---@param dir string
 ---@param id string
 ---@return string|nil
-local function findKoFont(id)
+local function findInDir(dir, id)
     local found
-    local dir = koFontsDir()
     if lfs.attributes(dir, "mode") ~= "directory" then
         return nil
     end
@@ -311,6 +405,19 @@ local function findKoFont(id)
         end
     end)
     return found
+end
+
+--- 设置目录或 FontList 里按 basename 找字体。
+---@param id string
+---@return string|nil
+local function findInstalledFont(id)
+    local path = findInDir(settingsFontsDir(), id)
+    if path then return path end
+    FontList:getFontList()
+    for _, p in ipairs(FontList.fontlist or {}) do
+        if basename(p) == id then return p end
+    end
+    return nil
 end
 
 ---@param id string|nil
@@ -323,7 +430,7 @@ local function resolveBasename(id)
         registerFontPath(woff)
         return basename(woff)
     end
-    local path = findKoFont(id)
+    local path = findInstalledFont(id)
     if path then
         registerFontPath(path)
         return id
@@ -395,7 +502,7 @@ local function installPaths(item)
     if type(item) ~= "table" or not item.id then
         return nil, nil, _("无效字体项")
     end
-    if item.kind == "local" then return "", "", nil end
+    if item.kind == "local" or item.kind == "system" then return "", "", nil end
     if not item.url then return nil, nil, _("无效字体项") end
     local id = sanitizeId(item.id)
     Paths.ensureFonts()

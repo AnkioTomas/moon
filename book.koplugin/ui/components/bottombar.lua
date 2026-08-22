@@ -31,6 +31,7 @@ local LineWidget = require("ui/widget/linewidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local TextWidget = require("ui/widget/textwidget")
+local Button = require("ui/widget/button")
 local Screen = Device.screen
 
 local UI = require("ui.components.bookui")
@@ -39,10 +40,11 @@ local Icon = require("ui.components.icon")
 local BottomBar = {}
 
 --- 构建底栏 widget。
----@param tabs table[] { id, text, icon }
+---@param tabs table[] { id, text, icon, callback }
 ---@param active string|nil 当前选中 tab id
+---@param parent table|nil 事件归属父控件
 ---@return table
-function BottomBar.build(tabs, active)
+function BottomBar.build(tabs, active, on_tab, parent)
     tabs = tabs or {}
     local sw = Screen:getWidth()
     local bh = UI.barH()
@@ -65,7 +67,7 @@ function BottomBar.build(tabs, active)
             fgcolor = is_active and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_6,
         }
         local content_h = math.max(1, bh - underline_h)
-        local cell = VerticalGroup:new{
+        local cell_content = VerticalGroup:new{
             align = "center",
             CenterContainer:new{
                 dimen = Geom:new{ w = cell_w, h = content_h },
@@ -88,6 +90,20 @@ function BottomBar.build(tabs, active)
                 },
             },
         }
+        local cell = cell_content
+        if on_tab then
+            cell = Button:new{
+                width = cell_w,
+                height = bh - UI.line(),
+                bordersize = 0,
+                padding = 0,
+                text = tab.text,
+                icon = tab.icon,
+                text_font_bold = is_active,
+                callback = function() on_tab(tab.id) end,
+                show_parent = parent,
+            }
+        end
         table.insert(row, cell)
     end
     return FrameContainer:new{

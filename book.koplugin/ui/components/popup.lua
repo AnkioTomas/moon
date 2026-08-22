@@ -1,7 +1,9 @@
 --[[--
 弹出层选项。
 
-  Popup.list   — 列表（支持居中单选/多选与 Material 选择图标）
+  Popup.list   — 列表（兼容入口：按 select_mode 分发到 single/multi）
+  Popup.single — 单选列表（popup/single.lua）
+  Popup.multi  — 多选列表（popup/multi.lua）
   Popup.sheet  — 居中动作表（ButtonDialog，适合少量动作）
   Popup.spin   — 数值增减（SpinWidget）
   Popup.directory — 插件内目录选择（左上取消，右上确认）
@@ -32,261 +34,41 @@ items 统一形状：
   { text = "...", dim = true }              -- 置灰；选项文字不加粗
   { text = "...", separator = true }        -- sheet 里作为分隔（空行）
 
-list 选择语义：
-  select_mode = "single"（默认）点按即关闭；opts.current = value 或项上 checked=true
+list 选择语义（实现在 popup/single.lua 与 popup/multi.lua，共享底座 popup/list.lua）：
+  单选（默认）点按即关闭；opts.current = value 或项上 checked=true
     opts.choice_icons=true 显示 Material 单选图标；centered=true 使用居中 Menu。
-  select_mode = "multi" 点按只切换 Material 勾选图标、不关闭；on_toggle(value, checked, item, selected)
+  多选 点按只切换 Material 勾选图标、不关闭；on_toggle(value, checked, item, selected)
     每次切换触发（selected 为当前全部勾选值列表）；最终结果在 close_callback 里读取。
 
 @module koplugin.book.ui.components.popup
 --]]
 
 local ButtonDialog = require("ui/widget/buttondialog")
-local HorizontalGroup = require("ui/widget/horizontalgroup")
-local HorizontalSpan = require("ui/widget/horizontalspan")
 local Menu = require("ui/widget/menu")
 local SpinWidget = require("ui/widget/spinwidget")
 local UIManager = require("ui/uimanager")
 local UI = require("ui.components.bookui")
-local Image = require("ui.components.image")
-local Icon = require("ui.components.icon")
+local Single = require("ui.components.popup.single")
+local Multi = require("ui.components.popup.multi")
 
 local Popup = {}
-
---- 勾选框与 state 控件之间的间距。
----@return number
-local function checkGap()
-    return UI.sz(6)
-end
-
---- 把调用方 items 规范成 Menu 可用结构。
---- ctx: { close, refresh, on_select, on_toggle }；opts 同 Popup.list。
----@param items table|nil
----@param ctx table
----@param opts table|nil
----@return table out, number max_state_w, number|nil current_idx
-local function normalizeItems(items, ctx, opts)
-    opts = opts or {}
-    local icon_sz = opts.icon_size or UI.iconSz()
-    local image_sz = opts.image_size or UI.sz(40)
-    local multi = opts.select_mode == "multi"
-    local choice_icons = multi or opts.choice_icons == true
-    local out = {}
-    local raws = {} -- 可选中的原始项（selectedValues 的数据源）
-    local max_state_w = 0
-    local current_idx
-
-    --- 当前全部勾选值（multi 的 on_toggle 第 4 参）。
-    ---@return table
-    local function selectedValues()
-        local t = {}
-        for _, r in ipairs(raws) do
-            if r.checked and r.value ~= nil then
-                t[#t + 1] = r.value
-            end
-        end
-        return t
-    end
-
-    --- 构造 state 控件：multi 前置勾选框，可与 icon/image/widget 并存。
-    ---@param raw table
-    ---@param image_only boolean
-    ---@return table|nil state, number state_w
-    local function buildState(raw, image_only)
-        local inner, inner_w
-        if raw.widget then
-            inner = raw.widget
-            inner_w = tonumber(raw.widget_w) or (raw.widget.getSize and raw.widget:getSize().w) or image_sz
-        elseif raw.image then
-            local iw = tonumber(raw.image_w) or (image_only and (opts.image_w or image_sz)) or icon_sz
-            local ih = tonumber(raw.image_h) or (image_only and (opts.image_h or image_sz)) or icon_sz
-            inner = Image.widget{
-                src = raw.image,
-                width = iw,
-                height = ih,
-                alpha = raw.alpha ~= false,
-                headers = raw.headers or opts.headers,
-                fallback = raw.fallback,
-            }
-            inner_w = inner and iw or 0
-        elseif raw.icon then
-            inner = Icon.widget{ name = raw.icon }
-            inner_w = inner and icon_sz or 0
-        end
-        if not choice_icons then
-            return inner, inner_w or 0
-        end
-        local selected = raw.checked == true or (not multi and opts.current ~= nil and raw.value == opts.current)
-        local cm = Icon.widget{ name = multi and (selected and "check_box" or "check_box_outline_blank")
-            or (selected and "radio_button_checked" or "radio_button_unchecked") }
-        local cm_w = icon_sz
-        if not inner then
-            return cm, cm_w
-        end
-        return HorizontalGroup:new{
-            align = "center",
-            cm,
-            HorizontalSpan:new{ width = checkGap() },
-            inner,
-        }, cm_w + checkGap() + inner_w
-    end
-
-    for _, raw in ipairs(items or {}) do
-        if type(raw) == "string" then
-            raw = { text = raw, value = raw }
-        end
-        -- 保留带 submenu 的原生 Menu 项（字体列表等）
-        if raw.sub_item_table or raw.sub_item_table_func then
-            table.insert(out, raw)
-        else
-            -- image：可替换文案；icon：小图标；widget：自定义 state（如字体样张）
-            local image_only = raw.image and (raw.text == nil or raw.text == false or raw.image_only)
-            local item = {
-                text = image_only and "" or (raw.text or tostring(raw.value or "")),
-                select_enabled = raw.enabled ~= false,
-                bold = nil,
-                dim = raw.dim or raw.enabled == false,
-                mandatory = raw.mandatory,
-                keep_menu_open = raw.keep_menu_open,
-            }
-            raws[#raws + 1] = raw
-            local state, state_w = buildState(raw, image_only)
-            item.state = state
-            max_state_w = math.max(max_state_w, state_w or 0)
-
-            if raw.enabled == false then
-                item.enabled = false
-                item.select_enabled = false
-            else
-                local value = raw.value
-                local user_cb = raw.callback
-                if multi then
-                    -- 多选：点按只切换勾选并重绘当前页，不关闭
-                    item.callback = function()
-                        raw.checked = not raw.checked
-                        item.state = buildState(raw, image_only)
-                        ctx.refresh()
-                        if user_cb then
-                            user_cb(raw.checked, raw)
-                        end
-                        if ctx.on_toggle then
-                            ctx.on_toggle(value, raw.checked, raw, selectedValues())
-                        end
-                    end
-                else
-                    item.callback = function()
-                        if not raw.keep_menu_open then
-                            ctx.close()
-                        end
-                        if user_cb then
-                            user_cb()
-                        elseif ctx.on_select then
-                            ctx.on_select(value, raw)
-                        end
-                    end
-                end
-            end
-            table.insert(out, item)
-            -- 单选当前项：显式 current 值优先，其次项上 checked=true
-            if not multi and not current_idx then
-                if (opts.current ~= nil and raw.value ~= nil and raw.value == opts.current)
-                    or raw.checked == true then
-                    current_idx = #out
-                end
-            end
-        end
-    end
-    return out, max_state_w, current_idx
-end
 
 --- 全屏选项列表（翻页，不滚动）。
 --- opts: title / subtitle / items / select_mode("single"|"multi") / current
 ---       / on_select / on_toggle / close_callback / icon_size / image_size …
+--- 新代码直接用 Popup.single / Popup.multi，不必带 select_mode。
 ---@param opts table|nil
 ---@return table
 function Popup.list(opts)
     opts = opts or {}
-    local holder = { menu = nil }
-    --- 关闭当前 list 菜单（仅关闭，不触发回调——Menu 的 close_callback 会处理）。
-    local function close()
-        if holder.menu then
-            UIManager:close(holder.menu)
-            holder.menu = nil
-        end
+    if opts.select_mode == "multi" then
+        return Multi.open(opts)
     end
-    --- 重绘当前页（多选勾选切换用）。
-    local function refresh()
-        if holder.menu then
-            holder.menu:updateItems(nil, true)
-        end
-    end
-
-    local items, state_w, current_idx
-    if opts.raw then
-        items = opts.items or {}
-        state_w = opts.state_w or 0
-        current_idx = opts.current_idx
-    else
-        items, state_w, current_idx = normalizeItems(opts.items, {
-            close = close,
-            refresh = refresh,
-            on_select = opts.on_select,
-            on_toggle = opts.on_toggle,
-        }, opts)
-    end
-    if current_idx then
-        items.current = current_idx -- Menu init 自动跳到该页并把当前项加粗
-    end
-
-    local centered_height
-    local screen
-    if opts.centered then
-        screen = require("device").screen
-        local max_height = screen:getHeight() - UI.sz(32)
-        centered_height = math.min(max_height, UI.sz(72 + #items * 52))
-    end
-    local menu = Menu:new{
-        title = opts.title or "",
-        subtitle = opts.subtitle,
-        item_table = items,
-        is_borderless = not opts.centered,
-        is_popout = opts.centered == true,
-        covers_fullscreen = opts.centered ~= true,
-        width = opts.centered and (opts.width or UI.sz(420)) or opts.width,
-        height = opts.centered and (opts.height or centered_height) or opts.height,
-        title_bar_left_icon = opts.title_icon,
-        items_font_size = UI.menuFontSize(),
-        title_shrink_font_to_fit = true,
-        state_w = (state_w and state_w > 0) and state_w or nil,
-        items_per_page = opts.centered and math.max(1, #items) or nil,
-        close_callback = function()
-            holder.menu = nil
-            if opts.close_callback then
-                opts.close_callback()
-            end
-        end,
-    }
-    holder.menu = menu
-
-    if opts.centered then
-        menu.page_info_text:setText("")
-        menu.page_info_text:hide()
-        menu.page_info_left_chev:hide()
-        menu.page_info_right_chev:hide()
-        menu.page_info_first_chev:hide()
-        menu.page_info_last_chev:hide()
-        menu.page_return_arrow:hide()
-    end
-
-    if opts.centered then
-        UIManager:show(menu, nil, nil,
-            math.floor((screen:getWidth() - menu.dimen.w) / 2),
-            math.floor((screen:getHeight() - menu.dimen.h) / 2))
-    else
-        UIManager:show(menu)
-    end
-    return menu
+    return Single.open(opts)
 end
+
+Popup.single = Single.open
+Popup.multi = Multi.open
 
 --- 居中动作表（少量选项）。
 ---@param opts table|nil
@@ -403,8 +185,9 @@ function Popup.setListItems(menu, title, items, on_select, opts)
         return
     end
     opts = opts or {}
+    local normalize = opts.select_mode == "multi" and Multi.normalize or Single.normalize
     -- setListItems 不应关闭菜单，只需更新内容（选中不关闭是既有行为）
-    local normalized, state_w, current_idx = normalizeItems(items, {
+    local normalized, state_w, current_idx = normalize(items, {
         close = function() end,
         refresh = function()
             menu:updateItems(nil, true)
@@ -474,7 +257,7 @@ function Popup.directory(opts)
                 open(path == "/" and "/" .. name or path .. "/" .. name)
             end }
         end
-        local directory_items, state_w = normalizeItems(entries, { close = function() close(false) end, refresh = function() end }, {})
+        local directory_items, state_w = Single.normalize(entries, { close = function() close(false) end }, {})
         holder.menu = Menu:new{
             custom_title_bar = title_bar, title = opts.title or "选择目录", subtitle = path,
             item_table = directory_items, state_w = state_w,
