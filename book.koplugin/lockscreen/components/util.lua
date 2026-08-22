@@ -1,18 +1,75 @@
 --[[--
-锁屏主体组件公共文案/时长辅助。
+锁屏主体公共辅助：日期桶、章节文案、时长、空态。
+
+书籍头部 / 封面 / 进度条已迁到 ui.components.bookinfo，本文件不再自造。
+色值与 ui.components.bookui 对齐（COLOR_GRAY_*），DSL 块不依赖 Device。
 
 @module koplugin.book.lockscreen.components.util
 --]]
 
-local Blitbuffer = require("ffi/blitbuffer")
 local _ = require("gettext")
 local T = require("ffi/util").template
+local Blitbuffer = require("ffi/blitbuffer")
 
 local U = {}
 
+-- 与 UI.muted / dim / rule / surface 同源，避免 DSL 主体为取色去拉 Device。
 U.MUTED = Blitbuffer.COLOR_GRAY_3
 U.DIM = Blitbuffer.COLOR_GRAY_4
+U.RULE = Blitbuffer.COLOR_GRAY_5
+U.SURFACE = Blitbuffer.COLOR_GRAY_E
+U.FALLBACK_MESSAGE = "读书不觉已春深，一寸光阴一寸金。"
 
+function U.dayStart(ts)
+    local t = os.date("*t", ts or os.time())
+    t.hour, t.min, t.sec = 0, 0, 0
+    return os.time(t)
+end
+
+function U.dayBuckets(rows, start_ts, end_ts)
+    local by_ymd = {}
+    for _, row in ipairs(rows or {}) do
+        if type(row.ymd) == "string" then by_ymd[row.ymd] = row end
+    end
+    local buckets = {}
+    local t = os.date("*t", start_ts)
+    local cursor = os.time{ year = t.year, month = t.month, day = t.day, hour = 12 }
+    while cursor < end_ts do
+        local ymd = os.date("%Y-%m-%d", cursor)
+        local row = by_ymd[ymd]
+        buckets[#buckets + 1] = {
+            key = ymd, label = ymd:sub(6),
+            seconds = row and (tonumber(row.seconds) or 0) or 0,
+            pages = row and (tonumber(row.pages) or 0) or 0,
+        }
+        local next_day = os.date("*t", cursor)
+        cursor = os.time{
+            year = next_day.year, month = next_day.month,
+            day = next_day.day + 1, hour = 12,
+        }
+    end
+    return buckets
+end
+
+--- 去掉中英文常见章节前缀，让卡片标题保留真正的章节名。
+---@param title string|nil
+---@return string
+function U.cleanChapterTitle(title)
+    if type(title) ~= "string" then
+        return ""
+    end
+    local cleaned = title
+        :gsub("^%s+", "")
+        :gsub("%s+$", "")
+        :gsub("^第%d+章[:：%s]*", "")
+        :gsub("^[Cc]hapter%s+%d+[:%.%s]*", "")
+        :gsub("^[Cc]h%.%s*%d+[:%.%s]*", "")
+        :gsub("^%s+", "")
+        :gsub("%s+$", "")
+    return cleaned
+end
+
+--- 将秒数格式化为适合锁屏宽度的分钟/小时文案。
 ---@param seconds number|nil
 ---@return string
 function U.duration(seconds)
@@ -21,10 +78,15 @@ function U.duration(seconds)
         or T(_("%1 分钟"), minutes)
 end
 
+--- 返回清洗后的章节名；没有章节名时显示章节序号或“阅读中”。
 ---@param book table
 ---@return string
 function U.chapterLine(book)
     if book.chapter_title and book.chapter_title ~= "" then
+        local cleaned = U.cleanChapterTitle(book.chapter_title)
+        if cleaned ~= "" then
+            return cleaned
+        end
         return book.chapter_title
     end
     if book.chapter_count and book.chapter_count > 0 then
@@ -33,25 +95,18 @@ function U.chapterLine(book)
     return _("阅读中")
 end
 
+--- 返回统一的进度百分比和页数文案。
 ---@param book table
----@return string
-function U.remainingLine(book)
-    if book.remaining_pages and book.remaining_pages > 0 then
-        return T(_("剩余 %1 页"), book.remaining_pages)
-    end
-    return T(_("剩余 %1%%"), math.floor(book.remaining_percent or 0))
+---@return number, string
+function U.progress(book)
+    local percent = math.max(0, math.min(100, tonumber(book.percent) or 0))
+    local total = tonumber(book.total_pages) or 0
+    local pages = total > 0 and string.format("%d / %d 页", tonumber(book.page) or 0, total)
+        or _("页数暂无")
+    return percent, pages
 end
 
----@param book table
----@return string
-function U.progressLine(book)
-    if book.total_pages and book.total_pages > 0 then
-        return T(_("%1 / %2 页 · %3%%"), book.page, book.total_pages, math.floor(book.percent or 0))
-    end
-    return string.format("%.0f%%", book.percent or 0)
-end
-
---- 空态白卡。
+--- 生成主体没有数据时使用的空态白卡（纯 DSL，不拉 UI 树）。
 ---@param rect table
 ---@param title string
 ---@param message string
@@ -68,7 +123,7 @@ function U.emptyBlocks(rect, title, message)
         },
         {
             kind = "rule", x = rect.text_x, y = rect.y + rect.pad + 28,
-            width = rect.text_w, height = 1,
+            width = rect.text_w, height = 1, color = U.RULE,
         },
         {
             text = message,

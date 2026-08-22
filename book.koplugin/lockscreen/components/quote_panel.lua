@@ -9,19 +9,21 @@ local Layout = require("lockscreen.layout")
 
 local M = {}
 
+-- quote 主体需要根据实际字体测量高度，不能套用固定普通面板高度。
+--- 统一绘制引号、正文、分割线和出处。
 ---@param text string
 ---@param source string
 ---@param position string
 ---@param wide boolean
 ---@return table[]
 function M.blocks(text, source, position, wide)
-    local Render = require("lockscreen.render")
-    local sw, sh = Render.size()
+    local sw, sh = Layout.portraitSize()
     local margin = math.floor(sw * 0.07)
     local panel_w = wide and (sw - margin * 2) or math.floor(sw * 0.5)
     local font_size = wide and 34 or 30
     local text_w = panel_w - margin * 2
     local max_text_h = wide and math.floor(sh * 0.52) or math.floor(sh * 0.5)
+    local Render = require("lockscreen.render")
     local text_h = Render.measureText(text, text_w, font_size, true)
     while text_h > max_text_h and font_size > 24 do
         font_size = font_size - 2
@@ -53,7 +55,7 @@ function M.blocks(text, source, position, wide)
             text = text, x = text_x, y = rect.y + math.floor(sh * 0.11),
             width = text_w, size = font_size, bold = true, box = false,
         },
-        { kind = "rule", x = text_x, y = rule_y, width = text_w, height = 1 },
+        { kind = "rule", x = text_x, y = rule_y, width = text_w, height = 1, color = Blitbuffer.COLOR_GRAY_5 },
         {
             text = source, x = text_x, y = rule_y + math.floor(sh * 0.025),
             width = text_w, size = 16, align = "right", box = false, color = Blitbuffer.COLOR_GRAY_3,
