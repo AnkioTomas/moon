@@ -14,6 +14,14 @@ local _ = require("gettext")
 
 local Chapter = {}
 
+local function fileExists(path)
+    if type(path) ~= "string" or path == "" then return false end
+    local f = io.open(path, "rb")
+    if not f then return false end
+    f:close()
+    return true
+end
+
 local function loadToc(identity, ops, cb)
     return ops.loadToc(identity, function(toc, err)
         if type(toc) ~= "table" or #toc == 0 then
@@ -33,6 +41,30 @@ local function localPosition(identity)
     if book and tonumber(book.last_chapter_idx) then
         return { chapter_idx = tonumber(book.last_chapter_idx) }
     end
+end
+
+--- 本地已有章节文件时返回路径，供快开；否则 nil。
+---@param identity BookIdentity
+---@param opts table|nil
+---@return string|nil
+local function existingLocalPath(identity, opts)
+    opts = opts or {}
+    local idx = tonumber(opts.chapter_idx)
+    if idx then
+        local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
+        return fileExists(path) and path or nil
+    end
+    local book = identity.book
+    if not book or not book.path then
+        book = require("utils.db.book").get(identity.source_id, identity.stable_id)
+    end
+    if book and fileExists(book.path) then
+        return book.path
+    end
+    local pos = localPosition(identity)
+    idx = pos and tonumber(pos.chapter_idx) or 1
+    local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
+    return fileExists(path) and path or nil
 end
 
 local function body(payload)
@@ -175,7 +207,7 @@ function Chapter.openAsync(source, identity, book, opts, ops, cb)
     }
 end
 
---- 带进度对话框的按章打开：联网调度 + 步骤进度 + 可取消任务。
+--- 带进度对话框的按章打开：本地命中则快开并在后台刷新；否则联网准备。
 ---@param source BookSource
 ---@param identity BookIdentity
 ---@param book Book
@@ -184,8 +216,29 @@ end
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Chapter.openWithUi(source, identity, book, opts, ops, cb)
+    opts = opts or {}
     local cancelled = false
-    local job, dialog
+    local job, dialog, background_job
+
+    local local_path = existingLocalPath(identity, opts)
+    if local_path then
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled then cb(local_path) end
+        end)
+        require("ui/network/manager"):runWhenOnline(function()
+            if cancelled then return end
+            background_job = Chapter.openAsync(source, identity, book, opts, ops, function() end)
+        end)
+        return {
+            cancel = function()
+                cancelled = true
+                if background_job and background_job.cancel then
+                    background_job.cancel()
+                end
+            end,
+        }
+    end
+
     local function closeDialog()
         if dialog then
             dialog:close()
@@ -221,6 +274,9 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
             cancelled = true
             if job then
                 job.cancel()
+            end
+            if background_job and background_job.cancel then
+                background_job.cancel()
             end
             closeDialog()
         end,
