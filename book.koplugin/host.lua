@@ -145,6 +145,10 @@ local function patchStartWithMenu()
     end
 end
 
+function Host.openOnStart()
+    return isOpenOnStart()
+end
+
 --- 插件 init：挂钩菜单；FM 侧按 start_with 决定是否自动开桌面
 ---@param plugin table
 ---@return nil
