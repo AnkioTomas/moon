@@ -45,7 +45,7 @@ local STATUS = {
 ---@field delete fun(path: string): boolean|nil, any
 ---@field rename fun(path: string, to: string): boolean|nil, any
 ---@field temp_path fun(name: string): string 上传临时落盘路径
----@field is_protected fun(path: string): boolean 重要路径及其祖先不可删除/移动
+---@field is_protected fun(path: string): boolean 重要路径及其祖先不可删除/移动（展示级判定，可免 realpath；变更 handler 内部仍全量校验）
 ---@field get_input fun(): { active: boolean, text: string|nil } 设备激活输入框状态与当前文本
 ---@field set_input fun(text: string): boolean|nil, any 光标处追加注入（addChars 路径）；无激活框返回 nil, err
 ---@field get_clipboard fun(): { text: string } 设备共享剪贴板（最后复制的文本）
@@ -57,7 +57,7 @@ local STATUS = {
 local Server = {}
 Server.__index = Server
 
--- 路由实现拆分：文件管理 → remote.file，远程输入 → remote.input
+-- 路由实现拆分：remote.file（文件管理）/ remote.input（远程输入）/ remote.settings_route（远程配置）
 -- （函数首参即 self；不反向 require server，无循环）
 local File = require("remote.file")
 local Input = require("remote.input")
@@ -271,13 +271,6 @@ end
 -- 路由模块（remote.file）以 self.cleanPath 使用
 Server.cleanPath = cleanPath
 
-local function contains(root, path)
-    if root == "/" then
-        return path:sub(1, 1) == "/"
-    end
-    return path == root or path:sub(1, #root + 1) == root .. "/"
-end
-
 ---@param p any
 ---@return string|nil
 function Server:_safePath(p)
@@ -286,7 +279,7 @@ function Server:_safePath(p)
         return nil
     end
     for _, root in ipairs(self.roots) do
-        if contains(root, path) then
+        if Text.pathContains(root, path) then
             return path
         end
     end
@@ -379,7 +372,34 @@ function Server:_route(conn, head)
     return self:_fail(conn, 404, "Not Found")
 end
 
--- ── body（上传流式落盘）───────────────────────────────
+-- ── body（上传流式落盘 / 文本攒内存）────────────────────
+
+--- 文本 body 入口（远程输入/剪贴板/远程配置共用）：校验 Content-Length，
+--- 切 body 状态攒内存（不落盘），收尾函数挂 conn.finish——body 收齐后由
+--- _readBody 回调（签名 fun(server, conn, text)，自含响应）。
+---@param limit number body 上限（字节）
+---@param finish fun(self: table, conn: table, text: string)
+---@return true|nil|false true=有 body 进状态机；false=空 body，调用方当场收尾；
+---        nil=已排错误响应（411/413），调用方直接 return
+function Server:_acceptText(conn, headers, limit, finish)
+    local len = tonumber(headers["content-length"] or "")
+    if not len or len < 0 then
+        self:_fail(conn, 411, "Content-Length required")
+        return nil
+    end
+    if len > limit then
+        self:_fail(conn, 413, "Body too large")
+        return nil
+    end
+    if len == 0 then
+        return false
+    end
+    conn.finish = finish
+    conn.text_buf = {}
+    conn.remaining = len
+    conn.state = "body"
+    return true
+end
 
 function Server:_readBody(conn)
     local got
@@ -400,7 +420,7 @@ function Server:_readBody(conn)
     if #got > conn.remaining then
         got = got:sub(1, conn.remaining) -- 超收部分丢弃（Connection: close，无下一请求）
     end
-    if conn.text_mode then
+    if conn.finish then
         conn.text_buf[#conn.text_buf + 1] = got
     else
         conn.file:write(got)
@@ -410,29 +430,14 @@ function Server:_readBody(conn)
     if conn.remaining > 0 then
         return true
     end
-    if conn.text_mode then
-        -- 文本通道收尾：text_mode 是路由标记（"append" 输入框 / "clipboard" 剪贴板）。
-        -- 注入同步完成直接回；无激活输入框 → 409（剪贴板写入不受输入框影响）。
+    if conn.finish then
+        -- 文本通道收尾：finish 由路由在 _acceptText 时挂上
+        local finish = conn.finish
+        conn.finish = nil
         local text = table.concat(conn.text_buf)
-        local mode = conn.text_mode
         conn.text_buf = nil
-        conn.text_mode = nil
-        if SettingsRoute.finishBody(self, conn, text, mode) then
-            return
-        end
-        if mode == "clipboard" then
-            self.handlers.set_clipboard(text)
-            return self:_queueResponse(conn, {
-                code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
-            })
-        end
-        local ok, err = self.handlers.set_input(text)
-        if not ok then
-            return self:_fail(conn, 409, err)
-        end
-        return self:_queueResponse(conn, {
-            code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
-        })
+        finish(self, conn, text)
+        return true
     end
     conn.file:close()
     conn.file = nil
