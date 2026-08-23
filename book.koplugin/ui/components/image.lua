@@ -3,7 +3,7 @@
 
 布局（定宽高占位，异步替换内容）：
   +----------+     +----------+
-  | fallback | →   |  image   |   fill 铺满 / letterbox 留边
+  | fallback | →   |  image   |
   |  文案    |     |          |   border 时画框
   +----------+     +----------+
 
@@ -14,8 +14,7 @@
     headers = { Authorization = "Bearer …" },  -- 仅网络请求
     width = n, height = n,
     alpha = true,
-    fit = "fill",             -- "fill" | "letterbox"（封面：按框解码，禁止原图进内存）
-    border = false,           -- letterbox 封面边框
+    border = false,           -- 是否画边框
     fallback = "…",           -- 未就绪/失败文案；空/省略则空白占位
     show_parent = desk,       -- 窗口级父；嵌套 setDirty 必须靠它
     on_ready = function(path) end,  -- 可选：下载并替换完成后
@@ -26,7 +25,7 @@ UI 图标请用 ui.components.icon（Material Icons 字体），不要走本组�
   Image.abortPending()
   Image.fetchAsync(url, headers, function(path, err) end)  -- 只下载不显示（刮削封面）
 
-下载直写磁盘，网络图用 KOReader Turbo 事件循环。
+下载直写磁盘；下载与解码均异步，不在主线程解码图片。
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -44,11 +43,15 @@ local logger = require("logger")
 local UI = require("ui.components.bookui")
 local Paths = require("utils.paths")
 local Request = require("http.request")
+local JSON = require("json")
+local Task = require("utils.task")
+local ffiUtil = require("ffi/util")
 
 local Image = {}
 
 local EXTS = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg" }
 local dl_seq = 0
+local decode_seq = 0
 local jobs = {}
 
 --- 登记在飞下载 job（{ cancel }）。
@@ -103,7 +106,7 @@ end
 ---@param url string
 ---@return string
 local function cacheBase(url)
-    return Paths.imageDir("image") .. "/" .. md5(url)
+    return Paths.imageRootDir() .. "/" .. md5(url)
 end
 
 --- 截断占位文案。
@@ -169,41 +172,144 @@ local function placeholder(w, h, fb, border)
     return frame(child, w, h, border)
 end
 
---- 按 fit 模式解码文件；letterbox 禁止整图进内存。
+--- 同步解码为定尺寸 BB，再包成 ImageWidget。
 ---@param path string
 ---@param w number
 ---@param h number
 ---@param alpha boolean|nil
----@param fit string|nil
 ---@return table|nil
-local function decodeFile(path, w, h, alpha, fit)
-    local letterbox = fit == "letterbox"
-    local ok, img = pcall(function()
-        if letterbox then
-            local RenderImage = require("ui/renderimage")
-            local bb = RenderImage:renderImageFile(path, false, w, h)
-            if not bb then
-                error("renderImageFile failed")
-            end
-            return ImageWidget:new{
-                image = bb,
-                image_disposable = true,
-                scale_factor = 1,
-                alpha = alpha and true or false,
-            }
-        end
-        return ImageWidget:new{
-            file = path,
-            width = w,
-            height = h,
-            alpha = alpha,
-        }
-    end)
-    if ok and img then
-        return img
+local function decodeSync(path, w, h, alpha)
+    local RenderImage = require("ui/renderimage")
+    local bb = RenderImage:renderImageFile(path, false, w, h)
+    if not bb then
+        return nil
     end
-    logger.warn(letterbox and "book image letterbox failed" or "book image decode failed", path, img)
-    return nil
+    return ImageWidget:new{
+        image = bb,
+        image_disposable = true,
+        scale_factor = 1,
+        alpha = alpha and true or false,
+    }
+end
+
+--- 子进程解码中间文件路径。
+---@return string
+local function decodeTmpPath()
+    decode_seq = decode_seq + 1
+    return Paths.cacheDir() .. "/image-decode-" .. tostring(os.time()) .. "-" .. tostring(decode_seq) .. ".bin"
+end
+
+--- 从序列化字符串重建 BB / ImageWidget（主进程，轻量）。
+---@param data string|nil
+---@param alpha boolean|nil
+---@return table|nil
+local function unmarshal(data, alpha)
+    if type(data) ~= "string" or data == "" then
+        return nil
+    end
+    local nl = data:find("\n", 1, true)
+    if not nl then
+        return nil
+    end
+    local ok, head = pcall(JSON.decode, data:sub(1, nl - 1))
+    if not ok or type(head) ~= "table" then
+        return nil
+    end
+    local pixels = data:sub(nl + 1)
+    if #pixels ~= head.stride * head.h then
+        return nil
+    end
+    local ok_bb, bb = pcall(Blitbuffer.fromstring, head.w, head.h, head.fmt, pixels, head.stride)
+    if not ok_bb or not bb then
+        return nil
+    end
+    return ImageWidget:new{
+        image = bb,
+        image_disposable = true,
+        scale_factor = 1,
+        alpha = alpha and true or false,
+    }
+end
+
+--- 读取文件全部内容；失败返回 nil。
+---@param path string|nil
+---@return string|nil
+local function readFile(path)
+    if type(path) ~= "string" or path == "" then
+        return nil
+    end
+    local f = io.open(path, "rb")
+    if not f then
+        return nil
+    end
+    local data = f:read("*a")
+    f:close()
+    return data
+end
+
+
+--- 读回并删除子进程写出的中间文件。
+---@param raw string|nil
+---@return string|nil
+local function readDecodedFile(raw)
+    local data = readFile(raw)
+    os.remove(raw)
+    return data
+end
+
+--- 在子进程解码图片为定尺寸 BB，序列化落中间文件后回主进程。
+---@param path string
+---@param w number
+---@param h number
+---@param alpha boolean|nil
+---@param cb fun(widget: table|nil)
+---@return table 可 abort 的 job
+local function decodeAsync(path, w, h, alpha, cb)
+    local cancelled = false
+    Paths.ensureCacheRoot()
+    local tmp = decodeTmpPath()
+    local job = Task.run(function(_, write_fd)
+        local RenderImage = require("ui/renderimage")
+        local Blitbuffer = require("ffi/blitbuffer")
+        local bb = RenderImage:renderImageFile(path, false, w, h)
+        if not bb then
+            ffiUtil.writeToFD(write_fd, "", true)
+            return
+        end
+        local header = JSON.encode({
+            w = tonumber(bb.w),
+            h = tonumber(bb.h),
+            stride = tonumber(bb.stride),
+            fmt = bb:getType(),
+        })
+        local pixels = Blitbuffer.tostring(bb)
+        bb:free()
+        local f = io.open(tmp, "wb")
+        if f then
+            f:write(header, "\n", pixels)
+            f:close()
+        end
+        ffiUtil.writeToFD(write_fd, tmp, true)
+    end, {
+        pipe = true,
+        on_done = function(raw)
+            if not cancelled then
+                cb(unmarshal(readDecodedFile(raw), alpha))
+            end
+        end,
+        on_failed = function()
+            if not cancelled then
+                cb(nil)
+            end
+        end,
+    })
+    return {
+        abort = function()
+            cancelled = true
+            job:abort()
+            os.remove(tmp)
+        end,
+    }
 end
 
 --- 已缓存的网络图路径；未命中返回 nil。
@@ -237,6 +343,7 @@ function Image.fetchAsync(url, headers, cb)
         end)
         return { cancel = function() end }
     end
+    Paths.ensureImageRoot()
     local base = cacheBase(url)
     dl_seq = dl_seq + 1
     local tmp = string.format("%s.%d.part", base, dl_seq)
@@ -338,42 +445,40 @@ local function requestPaint(box)
     end
 end
 
---- 解码并呈现图片，失败则占位。
+--- 同步解码并呈现（子进程内锁屏离屏渲染用）。
 ---@param path string|nil
 ---@param w number
 ---@param h number
 ---@param alpha boolean|nil
----@param fit string|nil
 ---@param border boolean|nil
 ---@param fb any
 ---@return table
-local function present(path, w, h, alpha, fit, border, fb)
+local function presentSync(path, w, h, alpha, border, fb)
     local inner_w, inner_h = w, h
     if border then
         local line = UI.line()
         inner_w = math.max(1, w - line * 2)
         inner_h = math.max(1, h - line * 2)
     end
-    local img = path and decodeFile(path, inner_w, inner_h, alpha, fit)
+    local img = path and decodeSync(path, inner_w, inner_h, alpha)
     if img then
         return frame(img, w, h, border)
     end
     return placeholder(w, h, fb, border)
 end
 
---- 未缓存网络图：固定尺寸占位，下载完只替换自身。
----@param url string
+--- 通用异步图片框：定尺寸占位，下载/解码完成后只替换自身。
+---@param src string|nil
 ---@param headers table|nil
 ---@param w number
 ---@param h number
 ---@param alpha boolean|nil
----@param fit string|nil
 ---@param border boolean|nil
 ---@param fb any
 ---@param show_parent table|nil
 ---@param on_ready fun(path: string)|nil
 ---@return table
-local function pendingBox(url, headers, w, h, alpha, fit, border, fb, show_parent, on_ready)
+local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_ready)
     local box = WidgetContainer:new{
         dimen = Geom:new{ x = 0, y = 0, w = w, h = h },
         align = "center",
@@ -390,31 +495,42 @@ local function pendingBox(url, headers, w, h, alpha, fit, border, fb, show_paren
         WidgetContainer.paintTo(self, bb, x, y)
     end
 
+    local inner_w, inner_h = w, h
+    if border then
+        local line = UI.line()
+        inner_w = math.max(1, w - line * 2)
+        inner_h = math.max(1, h - line * 2)
+    end
+
     local alive = true
     local job
+    local decode_job
 
-    --- 下载完成后替换占位内容。
+    --- 解码完成后替换占位内容。
+    ---@param widget table|nil
     ---@param path string|nil
-    local function apply(path)
-        if not alive or not path then
-            return
-        end
-        local ok, next_w = pcall(present, path, w, h, alpha, fit, border, fb)
-        if not ok then
-            logger.warn("book image apply boom", url, next_w)
+    local function apply(widget, path)
+        if not alive or not widget then
             return
         end
         if box[1] and box[1].free then
             box[1]:free()
         end
-        box[1] = next_w
+        box[1] = frame(widget, w, h, border)
         requestPaint(box)
         if type(on_ready) == "function" then
             pcall(on_ready, path)
         end
     end
 
-    --- 释放占位并取消在飞下载。
+    local function decode(path)
+        decode_job = decodeAsync(path, inner_w, inner_h, alpha, function(widget)
+            decode_job = nil
+            apply(widget, path)
+        end)
+    end
+
+    --- 释放占位并取消在飞下载/解码。
     ---@param full any
     function box:free(full)
         alive = false
@@ -423,23 +539,34 @@ local function pendingBox(url, headers, w, h, alpha, fit, border, fb, show_paren
             forgetJob(job)
             job = nil
         end
+        if decode_job then
+            decode_job.abort()
+            decode_job = nil
+        end
         WidgetContainer.free(self, full)
     end
 
-    job = Image.fetchAsync(url, headers, function(path, err)
-        forgetJob(job)
-        job = nil
-        if path then
-            apply(path)
-        else
-            logger.warn("book image async failed", url, err)
-        end
-    end)
-    rememberJob(job)
+    local path = resolve(src)
+    if path then
+        decode(path)
+        return box
+    end
+    if isHttp(src) then
+        job = Image.fetchAsync(src, headers, function(path, err)
+            forgetJob(job)
+            job = nil
+            if path then
+                decode(path)
+            else
+                logger.warn("book image async failed", src, err)
+            end
+        end)
+        rememberJob(job)
+    end
     return box
 end
 
---- 构建图片 widget；网络未缓存时返回自更新占位。
+--- 构建图片 widget。默认异步解码；opts.sync=true 时同步解码（锁屏离屏渲染）。
 ---@param opts table|nil
 ---@return table
 function Image.widget(opts)
@@ -452,29 +579,28 @@ function Image.widget(opts)
     if alpha == nil then
         alpha = true
     end
-    local fit = opts.fit or "fill"
     local border = opts.border and true or false
     local fb = opts.fallback
     local show_parent = opts.show_parent
     local on_ready = opts.on_ready
 
-    local path = resolve(src)
-    if path then
-        local ready = present(path, w, h, alpha, fit, border, fb)
-        if ready then
-            if type(on_ready) == "function" then
-                -- 同步命中：下一拍回调，避免构建期重入
-                UIManager:nextTick(function()
-                    pcall(on_ready, path)
-                end)
+    if opts.sync then
+        local path = resolve(src)
+        if path then
+            local ready = presentSync(path, w, h, alpha, border, fb)
+            if ready then
+                if type(on_ready) == "function" then
+                    UIManager:nextTick(function()
+                        pcall(on_ready, path)
+                    end)
+                end
+                return ready
             end
-            return ready
         end
+        return placeholder(w, h, fb, border)
     end
-    if isHttp(src) then
-        return pendingBox(src, headers, w, h, alpha, fit, border, fb, show_parent, on_ready)
-    end
-    return placeholder(w, h, fb, border)
+
+    return asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_ready)
 end
 
 return Image

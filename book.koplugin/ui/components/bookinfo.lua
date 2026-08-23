@@ -196,11 +196,11 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
         width = cover_w,
         height = cover_h,
         alpha = false,
-        fit = "letterbox",
         border = false,
         fallback = title,
         show_parent = opts.show_parent,
         on_ready = opts.on_ready,
+        sync = opts.sync,
     }
     local cover = Surface.card(image, {
         padding = cover_pad,
@@ -249,6 +249,7 @@ function BookInfo.hero(plugin, source, book, opts)
         on_ready = opts.on_ready,
         src = opts.src,
         headers = opts.headers,
+        sync = opts.sync,
     }))
     local cover_box = cover
     if opts.on_tap then

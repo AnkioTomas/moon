@@ -111,7 +111,8 @@ local function downloadAndSave(opts, item)
     end)
 end
 
---- 当前页补预览；挂钩 updateItems，翻页再建。
+--- 当前页补预览；挂钩 updateItems。
+--- Menu 翻页会 free 旧 item 的 state，所以每次 updateItems 都对当前页重建，不能跨页缓存。
 --- 预览宽度 = 行内容宽（屏宽扣行 padding）；state 容器不裁剪，预览通栏绘制。
 --- 禁止回写 state_w：文字列剩余宽 = 内容宽 - state_w，撑满会让 TextWidget 拿到负宽崩溃。
 ---@param menu table
@@ -119,22 +120,16 @@ end
 local function attachLazyPreviews(menu, sources)
     local pw = menu.inner_dimen.w - 2 * Size.padding.fullscreen
     local ph = UI.sz(36)
-    local done = {}
-    local generation = 0
     local orig = menu.updateItems
     menu.updateItems = function(self, select_number, no_recalculate_dimen)
-        if sources.generation ~= generation then done = {}; generation = sources.generation end
         local per = self.perpage or 14
         local first = ((self.page or 1) - 1) * per + 1
         local last = math.min(#self.item_table, first + per - 1)
         for i = first, last do
-            if not done[i] then
-                done[i] = true
-                local src = sources.list[i]
-                if type(src) == "table" then
-                    local state = localPreview(src, pw) or wereadPreview(src, pw, ph, self)
-                    if state then self.item_table[i].state = state end
-                end
+            local src = sources.list[i]
+            if type(src) == "table" then
+                local state = localPreview(src, pw) or wereadPreview(src, pw, ph, self)
+                if state then self.item_table[i].state = state end
             end
         end
         return orig(self, select_number, no_recalculate_dimen)
@@ -153,7 +148,7 @@ local function showPicker(opts, items)
         if it.id == cur and groups[it.kind] then active = it.kind end
     end
     local menu
-    local sources = { list = {}, generation = 0 }
+    local sources = { list = {} }
     local function rowsFor(kind)
         local rows, sources = {}, {}
         for _, it in ipairs(groups[kind]) do
@@ -175,7 +170,6 @@ local function showPicker(opts, items)
     local function switch(kind)
         local rows, list = rowsFor(kind)
         sources.list = list
-        sources.generation = sources.generation + 1
         Popup.setListItems(menu, opts.title or _('界面字体'), rows, select)
         menu:setBottomTabActive(kind)
         menu:updateItems(nil, true)
