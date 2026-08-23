@@ -120,6 +120,7 @@ package.preload["source.registry"] = function()
     return { meta = function() return { name = "书库" } end }
 end
 
+local previous_settings = _G.G_reader_settings
 _G.G_reader_settings = {
     isTrue = function(_, key)
         return key == "twelve_hour_clock"
@@ -211,3 +212,5 @@ TopBar.build()
 Assert.eq(icon_calls[1].name, "source")
 Assert.eq(icon_calls[2].name, "memory")
 Assert.eq(icon_calls[3].name, "wifi_off")
+
+_G.G_reader_settings = previous_settings
