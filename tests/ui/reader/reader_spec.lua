@@ -5,8 +5,31 @@ local Stubs = require("support.stubs")
 Stubs.install()
 Stubs.reset()
 
+package.preload["l10n"] = function() return { apply = function() end } end
+package.preload["gettext"] = function() return function(value) return value end end
+
+package.preload["l10n"] = function() return { apply = function() end } end
+package.preload["gettext"] = function() return function(value) return value end end
+package.preload["device"] = function()
+    return {
+        screen = {
+            getWidth = function() return 600 end,
+            getHeight = function() return 800 end,
+            getDPI = function() return 160 end,
+            scaleBySize = function(_, n) return n end,
+        },
+        hasWifiToggle = function() return true end,
+    }
+end
+package.preload["ui/network/manager"] = function()
+    return { isWifiOn = function() return false end }
+end
+package.preload["ui/event"] = function()
+    return { new = function(_, name) return { name = name } end }
+end
+
 local native_ui
-package.preload["ui.reader.native"] = function()
+package.preload["ui.panel.native"] = function()
     return { install = function(ui) native_ui = ui end }
 end
 
@@ -20,6 +43,12 @@ package.preload["ui.reader.session"] = function()
         end,
         toc = function() return nil end,
     }
+end
+package.preload["ui.reader.ocr"] = function()
+    return { open = function() end }
+end
+package.preload["ui.reader.dictionary"] = function()
+    return { open = function() end }
 end
 
 local sync_calls = {}
@@ -80,21 +109,14 @@ local plugin = { ui = ui }
 
 local Reader = require("ui.reader")
 local actions = Reader.actions(ui)
-Assert.len(actions, 13)
+Assert.len(actions, 6)
 Assert.eq(actions[1].id, "toc")
-Assert.eq(actions[1].icon, "toc")
+Assert.eq(actions[1].icon, "menu_book")
 Assert.eq(actions[2].id, "bookmark")
 Assert.eq(actions[3].id, "highlights")
 Assert.eq(actions[4].id, "sync")
-Assert.eq(actions[5].id, "ocr")
-Assert.eq(actions[6].id, "dictionary")
-Assert.eq(actions[7].id, "ai_analysis")
-Assert.eq(actions[8].id, "ai_summary")
-Assert.eq(actions[9].id, "ai_graph")
-Assert.eq(actions[10].id, "xray_characters")
-Assert.eq(actions[11].id, "xray_locations")
-Assert.eq(actions[12].id, "xray_timeline")
-Assert.eq(actions[13].id, "xray_lookup")
+Assert.eq(actions[5].id, "dictionary")
+Assert.eq(actions[6].id, "ocr")
 
 local closed, refreshed = 0, 0
 Assert.is_true(Reader.executeAction("bookmark", ui, {

@@ -24,7 +24,7 @@ end
 package.preload["ui/widget/touchmenu"] = function() return TouchMenu end
 
 local executed, refreshed = {}, 0
-package.preload["ui.desktop.panel"] = function()
+package.preload["ui.panel.desktop"] = function()
     return {
         menuActions = function()
             return {
@@ -32,6 +32,7 @@ package.preload["ui.desktop.panel"] = function()
                 { id = "plugin.example.popup", title = "插件页面", active = false },
             }
         end,
+        sliders = function() return {} end,
         executeAction = function(id, opts)
             executed[#executed + 1] = id
             opts.refresh()
@@ -54,10 +55,10 @@ package.preload["apps/reader/modules/readermenu"] = function() return ReaderMenu
 package.preload["apps/filemanager/filemanager"] = function() return { instance = active_file_manager } end
 package.preload["apps/reader/readerui"] = function() return { instance = nil } end
 
-local NativePanel = require("ui.desktop.panel.native")
+local NativePanel = require("ui.panel.native")
 NativePanel.install()
 NativePanel.install()
-Assert.is_true(TouchMenu._book_quick_panel_patched)
+Assert.is_true(TouchMenu._book_panel_patched)
 TouchMenu:updateItems()
 TouchMenu.updateItems({ item_table = { _book_quick_panel = true } })
 Assert.eq(native_update_calls, 2)
@@ -71,13 +72,13 @@ file_menu:setUpdateItemTable()
 Assert.len(file_menu.tab_item_table, 2)
 local tab = file_menu.tab_item_table[1]
 Assert.is_true(tab._book_quick_panel)
-Assert.eq(tab.icon, "appbar.contrast")
+Assert.eq(tab.icon, "appbar.pokeball")
 Assert.len(tab, 2)
 
 local shown_tab
 function file_menu:onShowMenu(index) shown_tab = index end
 active_file_manager.menu = file_menu
-Assert.is_true(NativePanel.show())
+Assert.is_true(NativePanel.show("desktop"))
 Assert.eq(shown_tab, 1)
 
 tab.callback()
@@ -91,4 +92,4 @@ Assert.eq(refreshed, 1)
 
 local reader_menu = setmetatable({}, { __index = ReaderMenu })
 reader_menu:setUpdateItemTable()
-Assert.is_true(reader_menu.tab_item_table[1]._book_quick_panel)
+Assert.is_nil(reader_menu.tab_item_table[1]._book_quick_panel)
