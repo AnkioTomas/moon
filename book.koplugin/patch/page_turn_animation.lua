@@ -43,6 +43,55 @@ function PageTurnAnimation.isApplied()
     return Manager.isApplied(PageTurnAnimation.FEATURE)
 end
 
+local PREV_REFRESH_KEY = "swipe_animations_prev_refresh_rate"
+
+--- 动画开启时把完全刷新率强制为「从不」，避免全刷闪烁打断动画；先备份原值。
+---@return nil
+local function forceFullRefreshNever()
+    if G_reader_settings:has(PREV_REFRESH_KEY) then return end
+    G_reader_settings:saveSetting(PREV_REFRESH_KEY, {
+        day = G_reader_settings:readSetting("full_refresh_count"),
+        night = G_reader_settings:readSetting("night_full_refresh_count"),
+    })
+    G_reader_settings:saveSetting("full_refresh_count", 0)
+    G_reader_settings:saveSetting("night_full_refresh_count", 0)
+end
+
+--- 关闭动画时恢复用户原先的完全刷新率。
+---@return nil
+local function restoreFullRefresh()
+    local prev = G_reader_settings:readSetting(PREV_REFRESH_KEY)
+    if prev == nil then return end
+    if prev.day ~= nil then
+        G_reader_settings:saveSetting("full_refresh_count", prev.day)
+    else
+        G_reader_settings:delSetting("full_refresh_count")
+    end
+    if prev.night ~= nil then
+        G_reader_settings:saveSetting("night_full_refresh_count", prev.night)
+    else
+        G_reader_settings:delSetting("night_full_refresh_count")
+    end
+    G_reader_settings:delSetting(PREV_REFRESH_KEY)
+end
+
+local _refresh_guard_installed = false
+
+--- 运行时拦截刷新率设置：动画开启期间强制为「从不」（0），避免全刷闪烁打断
+--- 动画。纯内存包装，不修改任何 KOReader 文件，重启后失效。
+---@return nil
+local function installRefreshGuard()
+    if _refresh_guard_installed then return end
+    _refresh_guard_installed = true
+    local orig = UIManager.setRefreshRate
+    UIManager.setRefreshRate = function(self, rate, night_rate)
+        if PageTurnAnimation.isEnabled() then
+            rate, night_rate = 0, 0
+        end
+        return orig(self, rate, night_rate)
+    end
+end
+
 --- 开启/关闭动画：先装/卸补丁，成功后再落设置。
 ---@param on boolean
 ---@return table { ok = true } | { ok = false, err = string }
@@ -57,6 +106,11 @@ function PageTurnAnimation.setEnabled(on)
     end
     if not res.ok then
         return res
+    end
+    if on then
+        forceFullRefreshNever()
+    else
+        restoreFullRefresh()
     end
     G_reader_settings:saveSetting("swipe_animations", on)
     return { ok = true }
@@ -83,9 +137,13 @@ end
 function PageTurnAnimation.checkStartup()
     if _startup_checked then return end
     _startup_checked = true
+    installRefreshGuard()
     if unsupportedReason() then return end
     if not PageTurnAnimation.isEnabled() then return end
-    if PageTurnAnimation.isApplied() then return end
+    if PageTurnAnimation.isApplied() then
+        forceFullRefreshNever()
+        return
+    end
 
     local dialog
     dialog = ConfirmBox:new{
@@ -96,6 +154,7 @@ function PageTurnAnimation.checkStartup()
             UIManager:close(dialog)
             local res = Manager.install(PageTurnAnimation.FEATURE)
             if res.ok then
+                forceFullRefreshNever()
                 PageTurnAnimation.promptRestart()
             else
                 UIManager:show(InfoMessage:new{
