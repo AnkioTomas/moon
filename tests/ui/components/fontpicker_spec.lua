@@ -243,7 +243,7 @@ Assert.eq(captured_menu.item_table[1].state.text, "Font01", "名字由该字体�
 Assert.is_true(getface_n >= 1 and getface_n <= 10, "本地页懒构建 getFace, got " .. tostring(getface_n))
 Assert.eq(image_n, 0, "本地页不拉图")
 
--- 预览按索引缓存：重刷同页不重复构建
+-- Menu 翻页会 free 旧 item 的 state，updateItems 必须重建当前页，不能跨页缓存
 local before = getface_n
 captured_menu:updateItems()
-Assert.eq(getface_n, before, "preview cache per index")
+Assert.eq(getface_n - before, 10, "重刷同页重建整页预览")

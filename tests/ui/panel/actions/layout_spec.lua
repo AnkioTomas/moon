@@ -5,30 +5,24 @@ local Assert = require("support.assert")
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
 
-local shown_ui
-package.preload["ui.reader.layout"] = function()
-    return {
-        isReflowable = function(ui)
-            return ui ~= nil and ui.rolling ~= nil
-        end,
-        matchId = function(ui)
-            return ui and ui.layout_id or "off"
-        end,
-        showMenu = function(ui)
-            shown_ui = ui
-        end,
-    }
-end
-
+local opened
 local Action = require("ui.panel.actions.layout")
 Assert.eq(Action.id, "layout")
+Assert.eq(Action.title, "布局")
 Assert.eq(Action.scope, "reader")
+Assert.is_nil(Action.keep_open)
 
-local reflowable = { rolling = {}, layout_id = "book" }
-Assert.is_true(Action.available({ ui = reflowable }))
-Assert.is_true(Action.active({ ui = reflowable }))
+local ui = {
+    config = {
+        onShowConfigMenu = function()
+            opened = true
+        end,
+    },
+}
+Assert.is_true(Action.available({ ui = ui }))
+Assert.is_true(Action.available({}))
 Assert.is_false(Action.available({ ui = {} }))
-Assert.is_false(Action.active({ ui = { rolling = {}, layout_id = "off" } }))
+Assert.is_false(Action.available({ ui = { config = {} } }))
 
-Action.run({ ui = reflowable })
-Assert.eq(shown_ui, reflowable)
+Action.run({ ui = ui })
+Assert.is_true(opened)

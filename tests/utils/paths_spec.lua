@@ -78,6 +78,7 @@ do
     Assert.eq(Paths.sourceCacheDir("moon"), root .. "/cache/moon")
     Assert.eq(Paths.bookDir("moon"), root .. "/cache/moon/book")
     Assert.eq(Paths.imageDir("moon"), root .. "/cache/moon/image")
+    Assert.eq(Paths.imageRootDir(), root .. "/cache/image")
     -- 源 id 非法字符在拼接前先 sanitize
     Assert.eq(Paths.sourceCacheDir("a/b"), root .. "/cache/a_b")
     Assert.eq(Paths.coverPath("sid", "moon"),
@@ -101,6 +102,14 @@ do
     Assert.eq(lfs.attributes(Paths.imageDir(TEST_SOURCE), "mode"), "directory")
     Paths.ensureLayout(TEST_SOURCE)
     Assert.eq(lfs.attributes(Paths.sourceCacheDir(TEST_SOURCE), "mode"), "directory")
+end
+
+-- ensureImageRoot：通用网络图片目录（非书源），真实创建且幂等
+do
+    Paths.ensureImageRoot()
+    Assert.eq(lfs.attributes(Paths.imageRootDir(), "mode"), "directory")
+    Paths.ensureImageRoot()
+    Assert.eq(lfs.attributes(Paths.imageRootDir(), "mode"), "directory")
 end
 
 -- ensureBookWork：在 ensureLayout 基础上再建 book/<slug>/
