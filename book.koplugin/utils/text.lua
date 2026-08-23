@@ -1,5 +1,5 @@
 --[[--
-文字处理工具：trim / 斜杠修剪 / BOM 与换行规范化 / XML 转义与实体解码 / URL 与 form 编码 / 纯文本段落化。
+文字处理工具：trim / 斜杠修剪 / 路径包含判定 / BOM 与换行规范化 / XML 转义与实体解码 / URL 与 form 编码 / 纯文本段落化。
 
 纯 Lua，零 KOReader 依赖（离线测试直接 require）。
 
@@ -41,6 +41,17 @@ end
 ---@return string
 function Text.rtrimSlashes(s)
     return (tostring(s or ""):gsub("/+$", ""))
+end
+
+--- path 是否等于 root 或位于 root 之内（纯字符串前缀判定，不做 realpath；root="/" 恒真）。
+---@param root string
+---@param path string
+---@return boolean
+function Text.pathContains(root, path)
+    if root == "/" then
+        return path:sub(1, 1) == "/"
+    end
+    return path == root or path:sub(1, #root + 1) == root .. "/"
 end
 
 --- 去 UTF-8 BOM。

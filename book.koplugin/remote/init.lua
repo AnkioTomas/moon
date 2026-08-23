@@ -14,6 +14,7 @@ KOReader 根、字体、插件、设置、Book 数据及书籍根目录不可删
 
 local logger = require("logger")
 local Settings = require("utils.settings")
+local Text = require("utils.text")
 local _ = require("gettext")
 
 local Remote = {}
@@ -21,17 +22,8 @@ local Remote = {}
 local _server = nil ---@type table|nil server 实例（也是 insertZMQ 的句柄）
 local _resume = false ---@type boolean suspend 前在跑，resume 时恢复
 local _temp_seq = 0
-
-local function common()
-    return Settings.get()
-end
-
-local function contains(root, path)
-    if root == "/" then
-        return path:sub(1, 1) == "/"
-    end
-    return path == root or path:sub(1, #root + 1) == root .. "/"
-end
+--- Kindle 实际打孔的端口：stop 必须用它拆规则，不能读当前配置（运行中改端口会泄漏旧规则）
+local _punched_port = nil ---@type number|nil
 
 --- 构造可访问根、快捷入口和保护路径。全部转成真实绝对路径，堵住软链接逃逸。
 --- 注意字体/插件/本插件目录在部分环境是软链（模拟器指向源码树）：
@@ -55,7 +47,7 @@ local function storageLayout()
     for _, r in ipairs({ root, book, fonts, plugins, plugin_self }) do
         local dup = false
         for _, existing in ipairs(roots) do
-            if contains(existing, r) then
+            if Text.pathContains(existing, r) then
                 dup = true
                 break
             end
@@ -98,7 +90,7 @@ end
 
 local function allowed(path)
     for _, root in ipairs(layout().roots) do
-        if contains(root, path) then
+        if Text.pathContains(root, path) then
             return true
         end
     end
@@ -128,7 +120,19 @@ local function isProtected(path)
     path = require("ffi/util").realpath(path) or path
     for _, protected in ipairs(layout().protected) do
         -- 删除/移动祖先同样会带走重要路径，必须一起挡住。
-        if path == protected or contains(path, protected) then
+        if path == protected or Text.pathContains(path, protected) then
+            return true
+        end
+    end
+    return false
+end
+
+--- 展示级 protected 判定：与 isProtected 同逻辑但免 realpath——目录列表每个
+--- entry 都调一次，realpath 是一趟 FFI syscall，大目录下成百上千次会卡 UI。
+--- 安全不降级：删除/改名在 deleteRecursive/renameTo 内部仍走 isProtected 全量校验。
+local function isProtectedDisplay(path)
+    for _, protected in ipairs(layout().protected) do
+        if path == protected or Text.pathContains(path, protected) then
             return true
         end
     end
@@ -137,24 +141,24 @@ end
 
 ---@return number
 function Remote.port()
-    return tonumber(common().remote_port) or 9528
+    return tonumber(Settings.get().remote_port) or 9528
 end
 
 ---@return boolean
 function Remote.autostartOn()
-    return common().remote_autostart == true
+    return Settings.get().remote_autostart == true
 end
 
 ---@param on boolean
 function Remote.setAutostart(on)
-    local c = common()
+    local c = Settings.get()
     c.remote_autostart = on and true or false
     Settings.save(c)
 end
 
 ---@param port number
 function Remote.setPort(port)
-    local c = common()
+    local c = Settings.get()
     c.remote_port = port
     Settings.save(c)
 end
@@ -457,6 +461,8 @@ end
 -- ── 启停 ─────────────────────────────────────────────
 
 --- Kindle 防火墙打孔（照 httpinspector 语义：start 打、stop 堵）。
+--- 端口必须用打孔时记下的 _punched_port：运行中改了端口的话，读当前配置
+--- 会拆错规则，把旧端口的 ACCEPT 永久留在 iptables 里。
 ---@param add boolean
 local function kindleHole(add)
     local Device = require("device")
@@ -465,6 +471,10 @@ local function kindleHole(add)
     end
     local verb = add and "-A" or "-D"
     local port = Remote.port()
+    if not add then
+        port = _punched_port or port
+    end
+    _punched_port = add and port or nil
     os.execute(string.format(
         "iptables %s INPUT -p tcp --dport %d -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT",
         verb, port))
@@ -495,7 +505,7 @@ function Remote.start()
             delete = deleteRecursive,
             rename = renameTo,
             temp_path = tempPath,
-            is_protected = isProtected,
+            is_protected = isProtectedDisplay,
             get_input = getInput,
             set_input = setInput,
             get_clipboard = getClipboard,

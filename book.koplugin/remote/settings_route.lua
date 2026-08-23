@@ -11,29 +11,35 @@ local Route = {}
 
 Route.BODY_LIMIT = SettingsApi.BODY_LIMIT
 
----@param self table
----@param conn table
----@param headers table
----@param text_mode string
----@return true|nil|false
-local function acceptText(self, conn, headers, text_mode)
-    local len = tonumber(headers["content-length"] or "")
-    if not len or len < 0 then
-        self:_fail(conn, 411, "Content-Length required")
-        return nil
+--- /api/settings body 收尾：JSON 部分更新
+function Route.finishSettings(self, conn, text)
+    local payload, err = JSON.decode(text)
+    if not payload then
+        return self:_fail(conn, 400, err or "invalid json")
     end
-    if len > Route.BODY_LIMIT then
-        self:_fail(conn, 413, "Body too large")
-        return nil
+    local applied
+    applied, err = SettingsApi.apply(payload)
+    if not applied then
+        return self:_fail(conn, 400, err)
     end
-    if len == 0 then
-        return false
+    return self:_queueResponse(conn, {
+        code = 200,
+        ctype = "application/json; charset=utf-8",
+        body = JSON.encode(applied),
+    })
+end
+
+--- /api/settings/rss/opml body 收尾：OPML 原文导入（合并去重）
+function Route.finishOpml(self, conn, text)
+    local applied, err = SettingsApi.importOpml(text)
+    if not applied then
+        return self:_fail(conn, 400, err)
     end
-    conn.text_mode = text_mode
-    conn.text_buf = {}
-    conn.remaining = len
-    conn.state = "body"
-    return true
+    return self:_queueResponse(conn, {
+        code = 200,
+        ctype = "application/json; charset=utf-8",
+        body = JSON.encode(applied),
+    })
 end
 
 --- GET /api/settings ；POST JSON 部分更新
@@ -48,22 +54,15 @@ function Route.settings(self, conn, method, headers, _query)
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    local st = acceptText(self, conn, headers, "settings")
+    local st = self:_acceptText(conn, headers, Route.BODY_LIMIT, Route.finishSettings)
     if st == nil then
         return
     end
     if st then
         return true
     end
-    local applied, err = SettingsApi.apply({})
-    if not applied then
-        return self:_fail(conn, 400, err)
-    end
-    return self:_queueResponse(conn, {
-        code = 200,
-        ctype = "application/json; charset=utf-8",
-        body = JSON.encode(applied),
-    })
+    -- 空 body = 空 JSON 部分更新
+    return Route.finishSettings(self, conn, "{}")
 end
 
 --- POST /api/settings/rss/opml —— OPML 原文导入（合并去重）
@@ -71,62 +70,15 @@ function Route.opml(self, conn, method, headers, _query)
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    local st = acceptText(self, conn, headers, "opml")
+    local st = self:_acceptText(conn, headers, Route.BODY_LIMIT, Route.finishOpml)
     if st == nil then
         return
     end
     if st then
         return true
     end
-    local applied, err = SettingsApi.importOpml("")
-    if not applied then
-        return self:_fail(conn, 400, err)
-    end
-    return self:_queueResponse(conn, {
-        code = 200,
-        ctype = "application/json; charset=utf-8",
-        body = JSON.encode(applied),
-    })
-end
-
---- server._readBody 收尾：解析 JSON / OPML 文本
----@param self table
----@param conn table
----@param text string
----@return boolean|nil
-function Route.finishBody(self, conn, text, mode)
-    if mode == "settings" then
-        local payload, err = JSON.decode(text)
-        if not payload then
-            self:_fail(conn, 400, err or "invalid json")
-            return true
-        end
-        local applied, err = SettingsApi.apply(payload)
-        if not applied then
-            self:_fail(conn, 400, err)
-            return true
-        end
-        self:_queueResponse(conn, {
-            code = 200,
-            ctype = "application/json; charset=utf-8",
-            body = JSON.encode(applied),
-        })
-        return true
-    end
-    if mode == "opml" then
-        local applied, err = SettingsApi.importOpml(text)
-        if not applied then
-            self:_fail(conn, 400, err)
-            return true
-        end
-        self:_queueResponse(conn, {
-            code = 200,
-            ctype = "application/json; charset=utf-8",
-            body = JSON.encode(applied),
-        })
-        return true
-    end
-    return nil
+    -- 空 body → importOpml 报 "empty opml"（400）
+    return Route.finishOpml(self, conn, "")
 end
 
 return Route
