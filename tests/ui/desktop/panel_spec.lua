@@ -6,7 +6,7 @@ ui.desktop.panel 离线用例：快捷动作配置、能力过滤与灯光范围
 
 local Assert = require("support.assert")
 
-local settings = { quick_panel_actions = {} }
+local settings = { quick_panel_actions = { "night", "wifi" } }
 local saved = 0
 package.preload["utils.settings"] = function()
     return {
@@ -21,8 +21,8 @@ end
 package.preload["gettext"] = function()
     return function(s) return s end
 end
-package.preload["ffi/blitbuffer"] = function()
-    return setmetatable({}, { __index = function() return 0 end })
+package.preload["logger"] = function()
+    return { err = function() end }
 end
 
 local powerd = {
@@ -61,13 +61,12 @@ end
 
 local events = {}
 local next_ticks = {}
+local scheduled = {}
 package.preload["ui/uimanager"] = function()
     return {
         broadcastEvent = function(_, event) events[#events + 1] = event.name end,
         nextTick = function(_, fn) next_ticks[#next_ticks + 1] = fn end,
-        scheduleIn = function(_, _delay, fn) next_ticks[#next_ticks + 1] = fn end,
-        close = function() end,
-        setDirty = function() end,
+        scheduleIn = function(_, delay, fn) scheduled[#scheduled + 1] = { delay = delay, fn = fn } end,
     }
 end
 package.preload["ui/event"] = function()
@@ -77,121 +76,41 @@ package.preload["ui/network/manager"] = function()
     return { isWifiOn = function() return false end }
 end
 
-local function classStub()
-    local C = {}
-    C.__index = C
-    function C:new(o) return setmetatable(o or {}, self) end
-    function C:extend(o)
-        o = o or {}
-        o.__index = o
-        return setmetatable(o, { __index = self })
-    end
-    return C
-end
-
-package.preload["ui/widget/container/inputcontainer"] = classStub
-for _, name in ipairs({
-    "ui/widget/container/centercontainer",
-    "ui/widget/container/framecontainer",
-    "ui/widget/container/overlapgroup",
-    "ui/widget/horizontalgroup",
-    "ui/widget/horizontalspan",
-    "ui/widget/linewidget",
-    "ui/widget/progresswidget",
-    "ui/widget/textwidget",
-    "ui/widget/verticalgroup",
-    "ui/widget/verticalspan",
-}) do
-    package.preload[name] = classStub
-end
-package.preload["ui/geometry"] = function()
-    local Geom = classStub()
-    return Geom
-end
-package.preload["ui/gesturerange"] = classStub
-package.preload["ui.components.icon"] = function()
-    return { widget = function() return {} end }
-end
-package.preload["ui.components.bookui"] = function()
-    return {
-        sz = function(n) return n end,
-        line = function() return 1 end,
-        pagePad = function() return 16 end,
-        face = function() return {} end,
-        rule = function() return 1 end,
-        track = function() return 1 end,
-        surface = function() return 1 end,
-        actionSurface = function() return 1 end,
-        pillRadius = function(h) return math.floor(h / 2) end,
-        progressBar = function(width, height, percent)
-            return { width = width, height = height, percentage = percent }
-        end,
-    }
-end
-
 G_reader_settings = {
     isTrue = function(_, key) return key == "night_mode" end,
 }
 
 local Panel = require("ui.desktop.panel")
 
--- 默认仅固定动作；配置接口不写入未知动作。
-Assert.eq(Panel.enabledCount(), 0)
+-- 默认夜间模式与 Wi-Fi；未知动作不写入配置。
+Assert.eq(Panel.enabledCount(), 2)
 Panel.setEnabled("missing", true)
 Assert.eq(saved, 0)
 
--- 第三方动作必须使用稳定 id 注册，并能复用快捷面板配置。
-local callback_count = 0
-local ok, err = Panel.registerAction{
-    id = "plugin.example.popup",
-    title = "插件页面",
-    icon = "extension",
-    callback = function() callback_count = callback_count + 1 end,
-}
-Assert.is_true(ok)
-Assert.is_nil(err)
-local duplicate_ok = Panel.registerAction{
-    id = "plugin.example.popup",
-    title = "重复动作",
-    icon = "extension",
-    callback = function() end,
-}
-Assert.is_true(not duplicate_ok)
-Panel.setEnabled("plugin.example.popup", true)
-local plugin_option
-for _, option in ipairs(Panel.options()) do
-    if option.id == "plugin.example.popup" then plugin_option = option break end
-end
-Assert.is_true(plugin_option ~= nil)
-Assert.is_true(plugin_option.enabled)
-Assert.eq(plugin_option.icon, "extension")
-local visible_with_plugin = setmetatable({}, { __index = Panel }):visibleActionIds()
-Assert.contains(visible_with_plugin, "plugin.example.popup")
-Panel.setEnabled("plugin.example.popup", false)
+-- 灯光百分比与图标解析集中到 panel，两个入口复用同一份结果。
+Assert.eq(Panel.lightPercent("brightness"), 25)
+Assert.eq(Panel.lightPercent("warmth"), 25)
+local initial_menu = Panel.menuActions()
+Assert.eq(initial_menu[1].id, "night")
+Assert.eq(initial_menu[1].icon, "dark_mode")
+Assert.eq(initial_menu[2].id, "wifi")
+Assert.eq(initial_menu[2].icon, "signal_wifi_4_bar")
+
+-- 滑杆按设备能力生成，并携带显示百分比。
+local sliders = Panel.sliders()
+Assert.len(sliders, 2)
+Assert.eq(sliders[1].kind, "brightness")
+Assert.eq(sliders[1].value, 25)
+Assert.eq(sliders[2].kind, "warmth")
+Assert.eq(sliders[2].value, 25)
 
 -- 启用顺序、去重与移动。
+settings.quick_panel_actions = {}
 Panel.setEnabled("rotate", true)
 Panel.setEnabled("refresh", true)
 Panel.setEnabled("rotate", true)
 Assert.eq(Panel.enabledCount(), 2)
 Assert.eq(settings.quick_panel_actions[1], "rotate")
-
-Panel.setIcon("plugin.example.popup", "settings")
-Assert.eq(settings.quick_panel_icons["plugin.example.popup"], "settings")
-local plugin_icon_option
-for _, option in ipairs(Panel.options()) do
-    if option.id == "plugin.example.popup" then plugin_icon_option = option break end
-end
-Assert.eq(plugin_icon_option.icon, "settings")
-
-local instance_for_plugin = setmetatable({}, { __index = Panel })
-instance_for_plugin._closed = false
-instance_for_plugin:runAction("plugin.example.popup")
-Assert.eq(callback_count, 1)
-Assert.is_true(instance_for_plugin._closed)
-Assert.is_true(Panel.unregisterAction("plugin.example.popup"))
-Assert.is_true(not Panel.unregisterAction("plugin.example.popup"))
-Assert.eq(settings.quick_panel_actions[2], "refresh")
 Panel.move("refresh", -1)
 Assert.eq(settings.quick_panel_actions[1], "refresh")
 Assert.eq(settings.quick_panel_actions[2], "rotate")
@@ -200,12 +119,16 @@ Assert.eq(Panel.enabledCount(), 1)
 Assert.eq(settings.quick_panel_actions[1], "rotate")
 
 -- 不支持的动作仍可配置，但运行时从可见项过滤。
+Panel.setEnabled("night", true)
+Panel.setEnabled("wifi", true)
 Panel.setEnabled("frontlight", true)
 Panel.setEnabled("suspend", true)
 has_frontlight = false
 can_suspend = false
-local instance = setmetatable({}, { __index = Panel })
-local visible = instance:visibleActionIds()
+local visible = {}
+for _, action in ipairs(Panel.menuActions()) do
+    visible[#visible + 1] = action.id
+end
 Assert.contains(visible, "night")
 Assert.contains(visible, "wifi")
 Assert.contains(visible, "rotate")
@@ -213,29 +136,28 @@ Assert.is_true(not table.concat(visible, ","):find("frontlight", 1, true))
 Assert.is_true(not table.concat(visible, ","):find("suspend", 1, true))
 
 -- 夜间模式走 KOReader 事件，不直接改全局设置。
-instance._closed = false
-instance:runAction("night")
+Assert.is_true(Panel.executeAction("night", { refresh = function() end }))
 Assert.eq(events[1], "ToggleNightMode")
 Assert.eq(#next_ticks, 1)
 
--- 原生顶部面板关闭快捷面板后广播 KOReader 的 ShowMenu 事件。
-instance:runAction("native_menu")
-Assert.is_true(instance._closed)
-Assert.eq(events[2], "ShowMenu")
+-- 原生顶部面板已移除；Wi-Fi 保留菜单并延迟刷新：设备状态回填需要时间，延迟不能是硬编码魔法分支。
+local wifi_closed = 0
+Assert.is_true(Panel.executeAction("wifi", {
+    close = function() wifi_closed = wifi_closed + 1 end,
+    refresh = function() end,
+}))
+Assert.eq(wifi_closed, 0)
+Assert.eq(events[2], "ToggleWifi")
+Assert.eq(scheduled[#scheduled].delay, 1)
 
 -- 亮度百分比映射到设备原生 0..24；暖度同样先转原生范围。
 has_frontlight = true
-instance._slider_rects = {
-    brightness = { x = 0, y = 0, w = 100, h = 20 },
-    warmth = { x = 0, y = 30, w = 100, h = 20 },
-}
-instance._last_slider_refresh = os.clock()
-Assert.is_true(instance:setSlider("brightness", { x = 50, y = 10 }, false))
+Assert.is_true(Panel.setLevel("brightness", 0.5))
 Assert.eq(powerd.intensity, 12)
 Assert.is_true(powerd.resume_updated)
-Assert.is_true(instance:setSlider("warmth", { x = 75, y = 40 }, false))
+Assert.is_true(Panel.setLevel("warmth", 0.75))
 Assert.eq(powerd.warmth, 75)
 
 -- 亮度滑到最左端关闭前光。
-Assert.is_true(instance:setSlider("brightness", { x = 0, y = 10 }, false))
+Assert.is_true(Panel.setLevel("brightness", 0))
 Assert.eq(powerd.intensity, 0)

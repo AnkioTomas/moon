@@ -411,7 +411,7 @@ do
     Assert.not_nil(opened)
     Assert.is_false(dropped)
     Assert.is_true(created_notes)
-    opened, open_err, dropped, created_notes = openWith(3)
+    opened, open_err, dropped, created_notes = openWith(5)
     Assert.is_nil(opened)
     Assert.matches(open_err, "newer")
     Assert.is_false(dropped)
