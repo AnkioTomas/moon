@@ -12,6 +12,8 @@ Moon 目录布局（$DATA/.moon）
       display.lua / lockscreen.lua / remote.lua / pinyin.lua
       quickpanel.lua / reader.lua / ai.lua
       moon.lua / wechat.lua / webdav.lua
+    backups/
+      patches/<feature>/      核心补丁安装前的原始文件备份
     fonts/               UI 字体（.woff）
 
 注意：打开 settings 只能 ensureSettings，禁止 ensureLayout（会与 settings 读活跃源形成环）。
@@ -201,6 +203,26 @@ end
 function P.ensureSettings()
     ensureDir(P.root())
     ensureDir(P.settingsDir())
+end
+
+--- 补丁备份根目录：$DATA/.moon/backups/patches
+---@return string
+function P.patchBackupsDir()
+    return P.root() .. "/backups/patches"
+end
+
+--- 某功能的补丁备份目录：backups/patches/<feature>/
+---@param feature string
+---@return string
+function P.patchBackupDir(feature)
+    return P.patchBackupsDir() .. "/" .. tostring(feature)
+end
+
+--- 保证某功能的补丁备份目录存在。
+---@param feature string
+---@return nil
+function P.ensurePatchBackupDir(feature)
+    ensureDir(P.patchBackupDir(feature))
 end
 
 --- 保证 fonts 目录存在

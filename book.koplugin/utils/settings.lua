@@ -31,7 +31,10 @@ local DEFAULTS = {
     },
     remote = { remote_port = 9528, remote_autostart = false },
     pinyin = { pinyin_enabled = false },
-    quickpanel = { quick_panel_actions = { "native_menu" }, quick_panel_icons = {} },
+    quickpanel = {
+        quick_panel_actions = { "night", "wifi" },
+        quick_panel_reader_actions = { "toc", "bookmark", "highlights", "sync", "dictionary", "ocr" },
+    },
     reader = {
         book_reader_show_top_time = true,
         book_reader_show_bottom_progress = true,
