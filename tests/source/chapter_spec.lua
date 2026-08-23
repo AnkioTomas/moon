@@ -50,9 +50,14 @@ end
 package.preload["ui/network/manager"] = function()
     return { runWhenOnline = function(_, fn) fn() end }
 end
+local progress_ui = { shown = 0 }
 package.preload["ui/widget/progressbardialog"] = function()
     return { new = function()
-        return { show = function() end, close = function() end, reportProgress = function() end }
+        return {
+            show = function() progress_ui.shown = (progress_ui.shown or 0) + 1 end,
+            close = function() end,
+            reportProgress = function() end,
+        }
     end }
 end
 package.loaded["ui/network/manager"] = nil
@@ -129,18 +134,33 @@ Assert.eq(fetched_after_cancel, 0)
 
 -- UI 源契约：最终回调始终异步，取消后不再交付结果。
 touch_error = nil
+os.remove(tmp .. "/2.html")
 local ui_path
 local ui_job = Chapter.openWithUi({ type = "article" }, identity, {}, { chapter_idx = 2 }, ops,
     function(p) ui_path = p end)
 Assert.is_nil(ui_path)
 Stubs.flush()
 Assert.not_nil(ui_path)
+Assert.eq(progress_ui.shown, 1)
 ui_path = nil
+progress_ui.shown = 0
 ui_job = Chapter.openWithUi({ type = "article" }, identity, {}, { chapter_idx = 2 }, ops,
     function(p) ui_path = p end)
 ui_job.cancel()
 Stubs.flush()
 Assert.is_nil(ui_path)
+
+-- 本地章节已存在时快开，不弹准备框，并在后台静默刷新登记。
+local fast_path
+local touch_before = #touches
+Chapter.openWithUi({ type = "article" }, identity, {}, { chapter_idx = 2 }, ops, function(p)
+    fast_path = p
+end)
+Stubs.flush()
+Assert.eq(fast_path, tmp .. "/2.html")
+Assert.eq(progress_ui.shown, 0)
+Stubs.flush()
+Assert.eq(#touches, touch_before + 1)
 
 for name in lfs.dir(tmp) do
     if name ~= "." and name ~= ".." then os.remove(tmp .. "/" .. name) end
