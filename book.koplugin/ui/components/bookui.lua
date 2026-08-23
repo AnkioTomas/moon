@@ -424,9 +424,6 @@ function UI.progressBar(width, height, percent)
     if percent < 0 then percent = 0 end
     if percent > 100 then percent = 100 end
 
-    local fill_w = math.floor(width * percent / 100 + 0.5)
-    if fill_w < 0 then fill_w = 0 end
-    if fill_w > width then fill_w = width end
     local radius = UI.pillRadius(height)
     local function bar(w, color)
         return FrameContainer:new{
@@ -443,12 +440,23 @@ function UI.progressBar(width, height, percent)
         }
     end
     local track = bar(width, UI.track())
-    local fill = fill_w > 0 and bar(fill_w, Blitbuffer.COLOR_BLACK) or nil
-    return OverlapGroup:new{
+    local progress = OverlapGroup:new{
         dimen = Geom:new{ w = width, h = height },
         track,
-        fill,
     }
+    function progress:setPercent(value)
+        value = tonumber(value) or 0
+        if value < 0 then value = 0 end
+        if value > 100 then value = 100 end
+        local w = math.floor(width * value / 100 + 0.5)
+        if w < 0 then w = 0 end
+        if w > width then w = width end
+        self[2] = w > 0 and bar(w, Blitbuffer.COLOR_BLACK) or nil
+        self._size = nil
+        self:getSize()
+    end
+    progress:setPercent(percent)
+    return progress
 end
 
 return UI
