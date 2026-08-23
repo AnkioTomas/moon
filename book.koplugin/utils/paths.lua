@@ -240,6 +240,19 @@ function P.ensureCacheRoot()
     P.ensureScreensaverDir()
 end
 
+--- 通用网络图片目录（不属于特定源）：cache/image/
+---@return string
+function P.imageRootDir()
+    return P.cacheDir() .. "/image"
+end
+
+--- 确保通用网络图片目录存在。
+---@return nil
+function P.ensureImageRoot()
+    P.ensureCacheRoot()
+    ensureDir(P.imageRootDir())
+end
+
 --- 确保 .moon 与指定源的 cache/book/image 目录存在
 ---@param id string|nil
 ---@return nil
