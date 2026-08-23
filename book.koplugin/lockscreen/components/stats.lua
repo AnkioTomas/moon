@@ -63,6 +63,7 @@ function M.blocks(rect)
         pad = pad,
         subtitle = subtitle,
         show_progress = false,
+        sync = true,
     })
     local progress, progress_h = BookInfo.progressRow(inner_w, pct)
 

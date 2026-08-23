@@ -108,6 +108,7 @@ end
 local function coverCell(book, slot_w, cover_w, cover_h)
     local cover = select(1, BookInfo.cover(nil, nil, book, cover_w, cover_h, {
         badge = true,
+        sync = true,
     }))
     local title = TextWidget:new{
         text = BookInfo.title(book),

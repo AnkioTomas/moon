@@ -143,6 +143,7 @@ function M.blocks(rect)
         pad = pad,
         subtitle = subtitle,
         show_progress = true,
+        sync = true,
     })
     -- hero 自身上下只有 UI.sz(6)；外面再留一圈，白卡不至于贴边。
     local inset_v = math.max(10, math.floor(pad * 0.6))
