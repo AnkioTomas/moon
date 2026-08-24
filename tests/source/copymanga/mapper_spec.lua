@@ -38,6 +38,16 @@ do
 end
 
 do
+    local list = Mapper.list({
+        results = {
+            total = 1,
+            list = { { type = 1, comic = { name = "来自深渊", path_word = "laizishenyuan" } } },
+        },
+    })
+    Assert.eq(list.data[1].stable_id, "laizishenyuan")
+end
+
+do
     local book, groups = Mapper.detail({
         results = {
             comic = {

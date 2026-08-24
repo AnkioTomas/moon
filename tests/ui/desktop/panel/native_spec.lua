@@ -80,6 +80,8 @@ function file_menu:onShowMenu(index) shown_tab = index end
 active_file_manager.menu = file_menu
 Assert.is_true(NativePanel.show("desktop"))
 Assert.eq(shown_tab, 1)
+-- 桌面（FileManager）菜单不注入阅读面板。
+Assert.is_false(NativePanel.show("reader"))
 
 tab.callback()
 Assert.len(tab, 2)

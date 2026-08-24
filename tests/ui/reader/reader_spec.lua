@@ -74,6 +74,14 @@ end
 package.preload["ui/widget/infomessage"] = function()
     return { new = function(_, opts) return opts end }
 end
+-- 阅读动作顺序来自配置；测试里用干净配置，避免读取模拟器遗留的 quick_panel_reader_actions。
+local moon_settings = {}
+package.preload["utils.settings"] = function()
+    return {
+        get = function() return moon_settings end,
+        save = function() end,
+    }
+end
 
 local registered_module
 package.preload["ui.reader.bars"] = function()

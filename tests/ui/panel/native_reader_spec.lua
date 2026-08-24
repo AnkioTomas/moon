@@ -33,5 +33,8 @@ Native.install({}, { reader = true })
 
 ReaderMenu:onShowMenu(nil)
 Assert.eq(ReaderMenu.shown_tab, 1)
+-- 即使上次记住/手势指定了其他 Tab，也强制落到阅读面板 Tab。
+ReaderMenu:onShowMenu(3)
+Assert.eq(ReaderMenu.shown_tab, 1)
 
 _G.G_reader_settings = previous_settings

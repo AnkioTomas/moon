@@ -78,6 +78,11 @@ Assert.eq(Layout.get("book").title, "纸书")
 Assert.eq(Layout.get("column").h_margins[1], 42)
 Assert.is_true(Layout.get("initial").css:find("first%-letter") ~= nil)
 Assert.is_true(Layout.get("essay").css:find("text%-indent: 0") ~= nil)
+-- 预设改用 non-float 的 initial-letter 做首字下沉，避免 CREngine 因 float
+-- 变化把 DOM 标记为 stale，导致每次应用预设都弹「重新加载文档」。
+Assert.is_nil(Layout.get("initial").css:find("float"))
+Assert.is_nil(Layout.get("book").css:find("float"))
+Assert.is_true(Layout.get("initial").css:find("initial%-letter") ~= nil)
 
 -- 脚注类全局项不被清掉
 g_settings.style_tweaks = {
@@ -133,7 +138,7 @@ Assert.is_true(Layout.apply(ui, "initial"))
 Assert.eq(ui.font.configurable.font_size, 22)
 Assert.eq(ui.font.configurable.line_spacing, 155)
 Assert.eq(ui.styletweak.book_style_tweak_enabled, true)
-Assert.is_true(ui.styletweak.book_style_tweak:find("2%.8em") ~= nil)
+Assert.is_true(ui.styletweak.book_style_tweak:find("initial%-letter") ~= nil)
 Assert.eq(ui.styletweak.doc_tweaks["book_layout.css"], false)
 Assert.is_true(ui.styletweak.doc_tweaks.paragraph_first_no_indent)
 Assert.is_true(ui.styletweak.doc_tweaks["footnote-inpage_epub"])

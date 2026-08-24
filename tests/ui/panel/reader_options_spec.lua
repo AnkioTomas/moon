@@ -23,17 +23,8 @@ local ACTIONS = {
         available = function(ctx) return ctx.ui == nil or ctx.ui.rolling ~= nil end,
         run = function() end,
     },
-    layout = {
-        id = "layout", title = "布局", icon = "format_size", scope = "reader",
-        available = function(ctx)
-            local ui = ctx and ctx.ui
-            if not ui then return true end
-            return ui.config ~= nil
-        end,
-        run = function() end,
-    },
 }
-local ORDER = { "toc", "preset", "layout" }
+local ORDER = { "toc", "preset" }
 
 package.preload["ui.panel.actions.registry"] = function()
     local Registry = {}
@@ -56,8 +47,7 @@ local function findOption(id)
     end
 end
 
-Assert.is_true(findOption("layout").available)
 Assert.is_true(findOption("preset").available)
 
-ReaderPanel.setEnabled("layout", true)
-Assert.is_true(findOption("layout").enabled)
+ReaderPanel.setEnabled("preset", true)
+Assert.is_true(findOption("preset").enabled)
