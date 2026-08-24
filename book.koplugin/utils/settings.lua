@@ -34,6 +34,7 @@ local DEFAULTS = {
     quickpanel = {
         quick_panel_actions = { "night", "wifi" },
         quick_panel_reader_actions = { "toc", "bookmark", "highlights", "sync", "dictionary", "ocr" },
+        quick_panel_reader_action_layout_renamed = false,
     },
     reader = {
         book_reader_show_top_time = true,

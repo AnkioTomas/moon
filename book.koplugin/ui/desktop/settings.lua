@@ -30,7 +30,7 @@ local Display = require("ui.desktop.settings.display")
 local Lockscreen = require("ui.desktop.settings.lockscreen")
 local DesktopSettings = require("ui.desktop.settings.desktop")
 local Language = require("ui.desktop.settings.language")
-local QuickPanel = require("ui.desktop.settings.quickpanel")
+local QuickPanel = require("ui.panel.settings")
 local Maintenance = require("ui.desktop.settings.maintenance")
 local AISettings = require("ui.desktop.settings.ai")
 
@@ -170,7 +170,7 @@ function Settings.build(desktop)
             function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "dashboard_customize", title = _("快捷面板"),
-                    status = T(_("已启用 %1 项"), require("ui.desktop.panel").enabledCount()), status_on = true,
+                    status = T(_("已启用 %1 项"), QuickPanel.enabledCount()), status_on = true,
                     callback = function() gotoSub(desktop, "quickpanel") end,
                 })
             end,
@@ -201,7 +201,9 @@ function Settings.build(desktop)
         elseif sub == "remote" then
             appendSection(packed, card_w, _("远程管理"), Remote.menuRows(desktop))
         elseif sub == "quickpanel" then
-            appendSection(packed, card_w, _("快捷面板"), QuickPanel.rows(desktop))
+            for _, section in ipairs(QuickPanel.sections(desktop)) do
+                appendSection(packed, card_w, section.title, section.rows)
+            end
         elseif sub == "ai" then
             appendSection(packed, card_w, _("AI 服务"), AISettings.rows(desktop))
         end
