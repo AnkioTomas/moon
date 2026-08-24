@@ -80,7 +80,7 @@ G_reader_settings = {
     isTrue = function(_, key) return key == "night_mode" end,
 }
 
-local Panel = require("ui.desktop.panel")
+local Panel = require("ui.panel.desktop")
 
 -- 默认夜间模式与 Wi-Fi；未知动作不写入配置。
 Assert.eq(Panel.enabledCount(), 2)

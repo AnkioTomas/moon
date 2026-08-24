@@ -68,6 +68,7 @@ package.preload["apps/reader/modules/readermenu"] = function() return ReaderMenu
 
 local ui = {
     dialog = {},
+    document = {},
     font = { font_face = "Book Sans", onSetFont = function() end },
 }
 local Native = require("ui.panel.native")

@@ -118,9 +118,23 @@ package.loaded["lockscreen.render"] = nil
 package.loaded["lockscreen.settings"] = nil
 
 local MoonSettings = require("utils.settings")
+
+-- 用临时目录隔离 screensaver 文件，避免测试删除/覆盖真实的 config/.moon/screensaver
+local Paths = require("utils.paths")
+local lfs = require("libs/libkoreader-lfs")
+local TEST_SCREENSAVER = "/tmp/moon-lockscreen-screensaver"
+local function ensureTestScreensaver()
+    if lfs.attributes(TEST_SCREENSAVER, "mode") ~= "directory" then
+        lfs.mkdir(TEST_SCREENSAVER)
+    end
+end
+ensureTestScreensaver()
+Paths.screensaverDir = function() return TEST_SCREENSAVER end
+Paths.ensureScreensaverDir = ensureTestScreensaver
+
 local LockScreen = require("lockscreen.init")
 local Compose = require("lockscreen.compose")
-local compose_path = require("utils.paths").screensaverDir() .. "/compose.png"
+local compose_path = Paths.screensaverDir() .. "/compose.png"
 
 local common = MoonSettings.get()
 local previous_asset_cache = {}

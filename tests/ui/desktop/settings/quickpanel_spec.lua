@@ -80,7 +80,7 @@ package.preload["ffi/util"] = function()
     return { template = function(value, position) return value:gsub("%%1", tostring(position)) end }
 end
 
-local QuickPanel = require("ui.desktop.settings.quickpanel")
+local QuickPanel = require("ui.panel.settings")
 local desktop = { rebuild = function() end }
 local sections = QuickPanel.sections(desktop)
 
@@ -107,7 +107,8 @@ Assert.eq(captured_dialog.buttons[3][1].text, "关闭")
 sections[1].rows[2](400)
 Assert.eq(built.title, "休眠")
 Assert.eq(built.status, "当前设备不可用")
-Assert.is_true(built.chevron)
+Assert.is_false(built.chevron)
+Assert.is_nil(built.callback)
 
 -- 阅读页动作走同一套配置流程。
 sections[2].rows[1](400)

@@ -35,7 +35,7 @@ end
 
 do
     state.cfg = {}
-    Assert.eq(Auth.apiHost(), "api.copy202601.com")
+    Assert.eq(Auth.apiHost(), Auth.DEFAULT_API_HOST)
 end
 
 do
