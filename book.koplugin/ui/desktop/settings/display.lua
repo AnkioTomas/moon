@@ -8,7 +8,9 @@ local Popup = require("ui.components.popup")
 local SettingRow = require("ui.components.settingrow")
 local FontPicker = require("ui.components.fontpicker")
 local UI = require("ui.components.bookui")
+local PageTurnAnimation = require("patch.page_turn_animation")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Display = {}
 
@@ -61,6 +63,25 @@ function Display.rows(ctx)
                             desktop:rebuild()
                         end,
                     }
+                end,
+            })
+        end,
+        function(iw)
+            local enabled = PageTurnAnimation.isEnabled()
+            return SettingRow.build(iw, {
+                kind = "toggle", icon = "animation", title = _("翻页动画"),
+                status = enabled and _("开") or _("关"), status_on = enabled,
+                callback = function()
+                    local res = PageTurnAnimation.setEnabled(not enabled)
+                    if not res.ok then
+                        UIManager:show(InfoMessage:new{
+                            text = T(_("翻页动画补丁操作失败：%1"), tostring(res.err or "")),
+                            timeout = 3,
+                        })
+                        return
+                    end
+                    desktop:rebuild()
+                    PageTurnAnimation.promptRestart()
                 end,
             })
         end,

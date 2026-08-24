@@ -138,7 +138,13 @@ local function attachBottomTabs(menu, bt)
         }
     end
     local stack = VerticalGroup:new{ align = "left", pager, bar }
-    menu[1][1][3][1] = stack
+    -- Menu 的页脚位于 FrameContainer → OverlapGroup 的第三个槽位（footer），其第一个子件是
+    -- 原 pager。结构变化时宁可显式失败，也不静默索引 nil 导致 Tab 栏整体丢失。
+    local footer = menu[1] and menu[1][1] and menu[1][1][3]
+    if type(footer) ~= "table" then
+        error("book bottom tabs: unexpected Menu footer structure")
+    end
+    footer[1] = stack
     -- Menu 底部只预留了 pager 高度（menu.lua _recalculateDimen）：重算时补扣 Tab 栏高度
     local orig = menu._recalculateDimen
     menu._recalculateDimen = function(self, no_recalculate_dimen)
