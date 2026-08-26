@@ -50,10 +50,10 @@ function Client:_url(path, query)
     return url
 end
 
---- 把 filename 编成 WebDAV 封面路径（分段 percent-encode）。
+--- 把 filename 编成 Moon 封面路径（分段 percent-encode）。
 ---@param filename string|nil
 ---@return string
-local function webdavPath(filename)
+local function coverPath(filename)
     filename = Text.trimSlashes(filename)
     local parts = {}
     for seg in filename:gmatch("[^/]+") do
@@ -73,7 +73,7 @@ function Client:coverRequest(filename)
         return nil, _("未配置服务器或令牌")
     end
     local req = {
-        url = self.base_url .. webdavPath(filename),
+        url = self.base_url .. coverPath(filename),
         headers = {
             ["Authorization"] = "Bearer " .. self.token,
             ["Accept"] = "*/*",

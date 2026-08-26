@@ -9,7 +9,6 @@ local Assert = require("support.assert")
 local store = {
     ai = { ai_endpoint = "", ai_api_key = "", ai_model = "" },
     moon = { base_url = "", token = "" },
-    webdav = { url = "", username = "", password = "" },
     zlib = { email = "", password = "", base_url = nil },
 }
 local invalidated = 0

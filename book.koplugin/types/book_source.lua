@@ -1,6 +1,6 @@
 --- Source 接口与能力表。可 require：仅 SourceCapabilities.defaults 为运行时。
 
----@alias SourceId "moon"|"webdav"|"wechat"|"copymanga"|"local"|string
+---@alias SourceId "moon"|"wechat"|"local"|string
 
 ---@alias BookSourceType
 ---| '"book"' # 整本文件
@@ -96,7 +96,7 @@ end
 ---@field getProgressAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: ProgressPosition|nil, err: string|nil)): table|nil 拉取远端进度
 ---@field putProgressAsync fun(self: BookSource, identity: BookIdentity, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 推送进度
 ---@field coverRequest fun(self: BookSource, identity: BookIdentity): (BookCoverRequest|nil, string|nil) 封面请求描述（纯构造，无 IO）
----@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 书城导入目标（local 移入 / webdav 上传）
+---@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 书城导入目标（local 移入）
 ---@field replaceBook fun(self: BookSource, temp_path: string, stable_id: string): (string|nil, string|nil)|nil 本地转换后替换原书（仅 local）
 ---@field pushStatsAsync fun(self: BookSource, rows: BookStatsRow[], cb: fun(data: table|nil, err: string|nil)): table|nil 上报领域统计记录；协议细节由源处理
 ---@field pullStatsAsync fun(self: BookSource, cb: fun(rows: BookStatsRow[]|nil, err: string|nil)): table|nil 拉取领域统计记录

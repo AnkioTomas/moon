@@ -61,8 +61,8 @@ end
 
 local Open = require("book.open")
 local book = {
-    source_id = "webdav",
-    stable_id = "/remote/book.epub",
+    source_id = "moon",
+    stable_id = "book-1",
     title = "整本书",
 }
 
@@ -74,7 +74,7 @@ local plugin = { desktop = desktop }
 Open.book(plugin, book)
 open_callbacks[1]("/library/book.epub")
 Stubs.flush()
-Assert.eq(resolved_id, "webdav")
+Assert.eq(resolved_id, "moon")
 Assert.eq(opened_identity.source, source)
 Assert.eq(opened_identity.book, book)
 Assert.eq(shown[1], "/library/book.epub")

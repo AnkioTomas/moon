@@ -71,7 +71,6 @@ function SettingsApi.snapshot()
     local Settings = require("utils.settings")
     local ai = Settings.get("ai")
     local moon = Settings.getSource("moon")
-    local webdav = Settings.getSource("webdav")
     local zlib = Settings.getSource("zlib")
     return {
         ai = {
@@ -82,11 +81,6 @@ function SettingsApi.snapshot()
         moon = {
             base_url = asStr(moon.base_url),
             token = maskValue(moon.token, true),
-        },
-        webdav = {
-            url = asStr(webdav.url),
-            username = asStr(webdav.username),
-            password = maskValue(webdav.password, true),
         },
         zlib = {
             email = asStr(zlib.email),
@@ -145,26 +139,6 @@ function SettingsApi.apply(payload)
         end
         if moon_changed then
             Settings.saveSource("moon", cfg)
-            require("source.registry").invalidate()
-            changed = true
-        end
-    end
-
-    if hasGroup(payload.webdav) then
-        local cfg = Settings.getSource("webdav")
-        local g = payload.webdav
-        local webdav_changed = false
-        if applyField(cfg, "url", g.url, Text.stripWhitespace) then
-            webdav_changed = true
-        end
-        if applyField(cfg, "username", g.username, Text.stripWhitespace) then
-            webdav_changed = true
-        end
-        if applyField(cfg, "password", g.password, function(v) return v or "" end) then
-            webdav_changed = true
-        end
-        if webdav_changed then
-            Settings.saveSource("webdav", cfg)
             require("source.registry").invalidate()
             changed = true
         end

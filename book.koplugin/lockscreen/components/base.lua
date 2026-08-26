@@ -11,7 +11,7 @@ local M = {}
 -- 新增主体只需新增 components/<name>.lua，并在这里登记一次；资源下载、
 -- 每日更新和锁屏入口都不需要跟着增加分支。
 local COMPONENT_MODULES = {
-    "stats", "hitokoto", "highlight", "current", "bill", "message", "myrl", "bookshelf",
+    "stats", "hitokoto", "highlight", "current", "bill", "message", "myrl", "bookshelf", "poster",
 }
 
 -- “无”仍是一个合法主体，方便只显示背景而不引入额外的空值分支。

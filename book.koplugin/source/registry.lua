@@ -28,14 +28,12 @@ local Registry = {}
 ---@type table<SourceId, fun(): table>
 local FACTORIES = {
     moon = function() return require("source.moon") end,
-    webdav = function() return require("source.webdav") end,
     wechat = function() return require("source.wechat") end,
-    copymanga = function() return require("source.copymanga") end,
     ["local"] = function() return require("source.local") end,
 }
 
--- 正式源（WebDAV 已具备列目录+下载）；local 默认源，列表垫底
-local ORDER = { "moon", "wechat", "webdav", "copymanga", "local" }
+-- local 默认源，列表垫底
+local ORDER = { "moon", "wechat", "local" }
 
 ---@type BookSource|nil
 local _active = nil

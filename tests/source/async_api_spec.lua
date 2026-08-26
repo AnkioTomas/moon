@@ -39,16 +39,6 @@ for _, name in ipairs({
 }) do
     Assert.eq(type(moon[name]), "function")
 end
-package.preload["source.webdav.client"] = function()
-    return { new = function() return {} end }
-end
-package.preload["source.webdav.mapper"] = function() return {} end
-package.loaded["source.webdav"] = nil
-local webdav = require("source.webdav").new()
-for _, name in ipairs({ "listLibraryAsync", "syncBooksAsync", "syncProgressAsync",
-    "syncNotesAsync", "syncStatsAsync", "openBookAsync" }) do
-    Assert.eq(type(webdav[name]), "function")
-end
 
 package.preload["source.wechat.client"] = function()
     return { new = function() return {} end, sessionHeaders = function() return {} end }
@@ -80,9 +70,6 @@ for _, name in ipairs({
     "source.moon.client",
     "source.moon.mapper",
     "source.moon",
-    "source.webdav.client",
-    "source.webdav.mapper",
-    "source.webdav",
     "source.wechat.client",
     "source.wechat.auth",
     "source.wechat.chapter",

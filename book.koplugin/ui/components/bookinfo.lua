@@ -208,7 +208,7 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
         background = UI.surface(),
         clip = true,
         clip_background = UI.surface(),
-        shadow = true,
+        shadow = opts.shadow,
     })
     if opts.badge then
         local badge = BookInfo.progressBadge(cw, pct)
