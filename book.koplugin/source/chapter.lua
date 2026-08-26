@@ -283,4 +283,94 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
     }
 end
 
+--- 后台预取后续章节：已有文件跳过，失败静默继续；联网后顺序落盘并登记。
+---@param identity BookIdentity
+---@param book Book|nil
+---@param toc BookChapter[]
+---@param from_idx integer 当前章序号（预取 from_idx+1 …）
+---@param count integer 预取章数
+---@param ops { fetchContent: fun(identity: BookIdentity, chapter: BookChapter, cb: function) }
+---@param cb fun()|nil 全部完成或无可预取章
+---@return { cancel: fun() }
+function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
+    from_idx = tonumber(from_idx) or 0
+    count = tonumber(count) or 0
+    local cancelled = false
+    local active
+    local indices = {}
+    if count > 0 and type(toc) == "table" and #toc > 0 then
+        for i = 1, count do
+            local idx = from_idx + i
+            if idx <= #toc then
+                indices[#indices + 1] = idx
+            end
+        end
+    end
+    if #indices == 0 then
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled and cb then cb() end
+        end)
+        return { cancel = function() cancelled = true end }
+    end
+
+    local pos = 1
+    local function nextIndex()
+        if cancelled then return end
+        local idx = indices[pos]
+        pos = pos + 1
+        if not idx then
+            if cb then cb() end
+            return
+        end
+        local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
+        local f = io.open(path, "rb")
+        if f then
+            f:close()
+            require("ui/uimanager"):nextTick(nextIndex)
+            return
+        end
+        local item = toc[idx]
+        if not item then
+            require("ui/uimanager"):nextTick(nextIndex)
+            return
+        end
+        active = ops.fetchContent(identity, item, function(payload)
+            if cancelled then return end
+            active = nil
+            if not payload then
+                require("ui/uimanager"):nextTick(nextIndex)
+                return
+            end
+            write(path, payload, function(wpath)
+                if cancelled then return end
+                if not wpath then
+                    require("ui/uimanager"):nextTick(nextIndex)
+                    return
+                end
+                require("book.store").touchAsync(wpath, identity, {
+                    chapter_idx = idx,
+                    toc = toc,
+                    book = book,
+                }, function()
+                    if cancelled then return end
+                    require("ui/uimanager"):nextTick(nextIndex)
+                end)
+            end)
+        end)
+    end
+
+    require("ui/network/manager"):runWhenOnline(function()
+        if cancelled then return end
+        nextIndex()
+    end)
+    return {
+        cancel = function()
+            cancelled = true
+            local job = active
+            active = nil
+            if job and job.cancel then job.cancel() end
+        end,
+    }
+end
+
 return Chapter
