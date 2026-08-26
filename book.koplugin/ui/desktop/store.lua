@@ -1,6 +1,6 @@
 --[[--
 书城 Tab：浏览目录。
-  local / webdav 使用全局 Z-Library；自带书城能力的源仍走 source.listStoreAsync。
+  local 使用全局 Z-Library；自带书城能力的源仍走 source.listStoreAsync。
 
 布局（同 Library.build）：
   +-----------------------------------------------+
