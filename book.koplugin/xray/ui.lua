@@ -229,4 +229,58 @@ function UI.lookup(ui, word)
     end)
 end
 
+local function showPageResult(mode, result)
+    if mode == "summary" then
+        viewer(_("AI 总结"), result.summary ~= "" and result.summary or _("没有可用的总结"))
+    elseif mode == "analysis" then
+        viewer(_("AI 分析"), result.analysis ~= "" and result.analysis or _("没有可用的分析"))
+    end
+end
+
+local function showPageGraph(identity)
+    local Analysis = require("xray.analysis")
+    local Graph = require("xray.graph")
+    local graph = Graph.merge(Analysis.all(identity))
+    viewer(_("人物与事件图谱"), Graph.format(graph))
+end
+
+local function requestPageAnalysis(ui, identity, mode)
+    local Analysis = require("xray.analysis")
+    local cached = Analysis.cached(ui, identity)
+    if cached then
+        if mode == "graph" then showPageGraph(identity) else showPageResult(mode, cached) end
+        return
+    end
+    local loading = require("ui/widget/infomessage"):new{ text = _("AI 正在阅读当前页…") }
+    UIManager:show(loading)
+    Analysis.run(ui, identity, nil, function(result, err)
+        UIManager:close(loading)
+        if not result then
+            info(T(_("AI 请求失败：%1"), tostring(err or _("未知错误"))))
+            return
+        end
+        if mode == "graph" then showPageGraph(identity) else showPageResult(mode, result) end
+    end)
+end
+
+--- 当前页 AI 分析 / 总结 / 图谱。
+---@param ui table|nil
+---@param mode "analysis"|"summary"|"graph"
+function UI.openPage(ui, mode)
+    local identity = currentIdentity()
+    if not ui or not identity then
+        info(_("当前书籍没有可用身份"))
+        return
+    end
+    local Analysis = require("xray.analysis")
+    if mode == "graph" and #Analysis.all(identity) > 0 then
+        showPageGraph(identity)
+        return
+    end
+    if not ensureConfigured() then return end
+    require("ui/network/manager"):runWhenOnline(function()
+        requestPageAnalysis(ui, identity, mode)
+    end)
+end
+
 return UI

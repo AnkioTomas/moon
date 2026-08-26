@@ -55,13 +55,6 @@ Assert.eq(Client.DEFAULT_TIMEOUT, 120)
 Assert.eq(content, "ok")
 Assert.is_nil(failure)
 
--- 兼容旧调用：第二参直接传 cb
-Client.chat({ { role = "user", content = "hello" } }, function(value, err)
-    content, failure = value, err
-end)
-Assert.eq(content, "ok")
-Assert.is_nil(failure)
-
 local array_content = Client.decodeResponse('{"choices":[{"message":{"content":[{"text":"a"},{"text":"b"}]}}]}')
 Assert.eq(array_content, "a\nb")
 local truncated, trunc_err = Client.decodeResponse('{"choices":[{"finish_reason":"length","message":{"role":"assistant","content":"","reasoning_content":"pong reply"}}]}')

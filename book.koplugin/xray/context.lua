@@ -11,6 +11,7 @@ local Context = {}
 local BOOK_TEXT_LIMIT = 20000
 local CHAPTER_BUDGET = 80000
 local PER_CHAPTER_SAMPLE = 1200
+local VISIBLE_TEXT_LIMIT = 12000
 
 local function flattenTOC(nodes, flat)
     flat = flat or {}
@@ -78,6 +79,34 @@ local function pageText(ui, page)
     return Text.trim(Text.normalizeNewlines(table.concat(parts, " ")))
 end
 
+--- 当前可见页正文与页码；滚动文档按屏幕坐标取字。
+---@param ui table|nil
+---@return string|nil, integer
+function Context.visibleText(ui)
+    local document = ui and ui.document
+    if not document then return nil, 0 end
+    local page = currentPage(ui)
+    local text
+    if ui.rolling and document.getTextFromPositions then
+        local width = ui.view and ui.view.dimen and ui.view.dimen.w
+        local height = ui.view and ui.view.dimen and ui.view.dimen.h
+        if not width or not height then
+            local ok, Device = pcall(require, "device")
+            local screen = ok and Device and Device.screen
+            width = screen and screen:getWidth() or 100000
+            height = screen and screen:getHeight() or 100000
+        end
+        local ok, result = pcall(document.getTextFromPositions, document,
+            { x = 0, y = 0 }, { x = width, y = height }, true)
+        text = ok and result and result.text or nil
+    else
+        text = pageText(ui, page)
+    end
+    text = Text.trim(Text.normalizeNewlines(text))
+    if text == "" then return nil, page end
+    return Text.truncateUtf8(text, VISIBLE_TEXT_LIMIT), page
+end
+
 --- 最近正文（不超过 limit 字节），止于当前页。
 ---@param ui table
 ---@param limit integer|nil
@@ -87,7 +116,7 @@ function Context.bookText(ui, limit, end_page)
     limit = limit or BOOK_TEXT_LIMIT
     end_page = end_page or currentPage(ui)
     if end_page < 1 then
-        local text = require("ai.context").currentPage(ui)
+        local text = Context.visibleText(ui)
         return text or "", end_page
     end
     local chunks = {}
