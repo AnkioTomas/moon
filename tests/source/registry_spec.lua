@@ -48,23 +48,11 @@ package.preload["source.wechat.mapper"] = function() return {} end
 package.preload["source.wechat.chapter"] = function()
     return { ensure = function() return true end }
 end
-package.preload["http.webdav"] = function()
-    return {
-        new = function()
-            return {
-                ping = function() return true end,
-                list = function() return {} end,
-                get = function() return true end,
-            }
-        end,
-    }
-end
 
 -- 清掉可能缓存的模块
 package.loaded["source.registry"] = nil
 package.loaded["source.moon"] = nil
 package.loaded["source.wechat"] = nil
-package.loaded["source.webdav"] = nil
 
 local Registry = require("source.registry")
 
@@ -76,7 +64,6 @@ do
     end
     Assert.is_true(ids.moon)
     Assert.is_true(ids.wechat)
-    Assert.is_true(ids.webdav)
     Assert.is_true(ids["local"])
 end
 
@@ -105,7 +92,6 @@ end
 
 do
     Assert.eq(Registry.meta("wechat").type, "online")
-    Assert.eq(Registry.meta("copymanga").type, "online")
 end
 
 do
@@ -117,18 +103,18 @@ end
 -- 启用源：默认全开；禁用/启用非活跃源；活跃源禁止禁用
 do
     -- 无 enabled_sources（旧配置）：全真，listEnabled == list
-    Assert.is_true(Registry.isEnabled("copymanga"))
+    Assert.is_true(Registry.isEnabled("wechat"))
     Assert.is_true(Registry.isEnabled("moon"))
     Assert.eq(#Registry.listEnabled(), #Registry.list())
 
     -- 禁用非活跃源：首次写入以全开初始化集合
-    Assert.is_true(Registry.setEnabled("copymanga", false))
-    Assert.is_false(Registry.isEnabled("copymanga"))
+    Assert.is_true(Registry.setEnabled("wechat", false))
+    Assert.is_false(Registry.isEnabled("wechat"))
     Assert.eq(#Registry.listEnabled(), #Registry.list() - 1)
 
     -- 再启用回来
-    Assert.is_true(Registry.setEnabled("copymanga", true))
-    Assert.is_true(Registry.isEnabled("copymanga"))
+    Assert.is_true(Registry.setEnabled("wechat", true))
+    Assert.is_true(Registry.isEnabled("wechat"))
     Assert.eq(#Registry.listEnabled(), #Registry.list())
 
     -- 活跃源（stub 固定 moon）禁止禁用；isEnabled 兜底恒 true
@@ -150,11 +136,9 @@ for _, k in ipairs({
     "source.wechat.client",
     "source.wechat.mapper",
     "source.wechat.chapter",
-    "http.webdav",
     "source.registry",
     "source.moon",
     "source.wechat",
-    "source.webdav",
 }) do
     package.preload[k] = nil
     package.loaded[k] = nil

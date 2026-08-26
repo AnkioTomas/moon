@@ -126,12 +126,65 @@ local function paintRect(bb, x, y, width, height, color, radius)
     end
 end
 
+--- 将 widget 绘制到画布；负坐标时裁剪，避免 blit 越界崩溃。
+---@param bb userdata
+---@param block table
+---@param canvas_w number
+---@param canvas_h number
+local function paintWidget(bb, block, canvas_w, canvas_h)
+    local widget = block.widget
+    if not widget or type(widget.paintTo) ~= "function" then
+        error("invalid lockscreen widget block")
+    end
+    local x = math.floor(block.x or 0)
+    local y = math.floor(block.y or 0)
+    if x >= canvas_w or y >= canvas_h then
+        return
+    end
+    if x >= 0 and y >= 0 then
+        local ok, err = pcall(widget.paintTo, widget, bb, x, y)
+        if not ok then
+            error(err)
+        end
+        return
+    end
+    local size = widget.getSize and widget:getSize()
+    if not size then
+        local ok, err = pcall(widget.paintTo, widget, bb, math.max(0, x), math.max(0, y))
+        if not ok then
+            error(err)
+        end
+        return
+    end
+    local ww, wh = size.w, size.h
+    local src_x = math.max(0, -x)
+    local src_y = math.max(0, -y)
+    local dst_x = math.max(0, x)
+    local dst_y = math.max(0, y)
+    local visible_w = math.min(ww - src_x, canvas_w - dst_x)
+    local visible_h = math.min(wh - src_y, canvas_h - dst_y)
+    if visible_w <= 0 or visible_h <= 0 then
+        return
+    end
+    local tmp = Blitbuffer.new(ww, wh, Blitbuffer.TYPE_BB8)
+    tmp:fill(Blitbuffer.COLOR_WHITE)
+    local ok, err = pcall(function()
+        widget:paintTo(tmp, 0, 0)
+        bb:blitFrom(tmp, dst_x, dst_y, src_x, src_y, visible_w, visible_h)
+    end)
+    tmp:free()
+    if not ok then
+        error(err)
+    end
+end
+
 --- 分发非文本图形块：线、柱、卡片、点和离屏 widget。
 --- 封面 / 进度条不再走 DSL；主体通过 kind=widget 复用 ui.components。
 ---@param bb userdata 目标 Blitbuffer
 ---@param block table 图形块描述
 ---@param w number 输出宽度
-local function paintShape(bb, block, w)
+---@param h number 输出高度
+local function paintShape(bb, block, w, h)
     local x = block.x or math.floor(w * 0.08)
     local y = block.y or 0
     local width = block.width or (w - x * 2)
@@ -199,14 +252,7 @@ local function paintShape(bb, block, w)
         local size = math.max(1, math.floor(tonumber(block.size) or 4))
         paintRect(bb, x, y, size, size, block.color or Blitbuffer.COLOR_BLACK, 0)
     elseif block.kind == "widget" then
-        local widget = block.widget
-        if not widget or type(widget.paintTo) ~= "function" then
-            error("invalid lockscreen widget block")
-        end
-        local ok, err = pcall(widget.paintTo, widget, bb, x, y)
-        if not ok then
-            error(err)
-        end
+        paintWidget(bb, block, w, h)
     end
 end
 
@@ -240,7 +286,7 @@ function M.write(path, background, blocks)
         end
         for _, block in ipairs(blocks) do
             if block.kind then
-                paintShape(bb, block, w)
+                paintShape(bb, block, w, h)
             else
                 paintText(bb, block, w)
             end

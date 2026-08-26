@@ -11,7 +11,7 @@ Moon 目录布局（$DATA/.moon）
       common.lua
       display.lua / lockscreen.lua / remote.lua / pinyin.lua
       quickpanel.lua / reader.lua / ai.lua
-      moon.lua / wechat.lua / webdav.lua
+      moon.lua / wechat.lua
     backups/
       patches/<feature>/      核心补丁安装前的原始文件备份
     fonts/               UI 字体（.woff）
@@ -114,7 +114,7 @@ function P.imageDir(id)
 end
 
 --- stable_id → 文件系统安全的目录/文件名片段。
---- stable_id 本身可能含 / 等路径分隔符（webdav 远程路径），不能直接当目录名用；
+--- stable_id 本身可能含 / 等路径分隔符，不能直接当目录名用；
 --- 目录已按 source 分段，这里只需保证同源内不同 stable_id 不冲突。
 ---@param stable_id string
 ---@return string

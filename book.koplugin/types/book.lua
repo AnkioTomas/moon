@@ -3,7 +3,7 @@
 
 --- 路径解析出的阅读身份（Store.identityFor / ensureIdentity 返回值）。
 ---@class BookIdentity
----@field source_id string 源标识（moon / webdav / wechat / local 等）
+---@field source_id string 源标识（moon / wechat / local 等）
 ---@field stable_id string 源内稳定身份
 ---@field chapter_idx number|nil 章节文件时为章号；整本书为 nil
 ---@field book Book|nil books 表元数据行；刚登记/未入库时可能为内存行或 nil

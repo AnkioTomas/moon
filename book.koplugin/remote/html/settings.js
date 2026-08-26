@@ -40,9 +40,6 @@ function loadSettings() {
             ai_model: data.ai.ai_model,
             moon_base_url: data.moon.base_url,
             moon_token: data.moon.token,
-            webdav_url: data.webdav.url,
-            webdav_username: data.webdav.username,
-            webdav_password: data.webdav.password,
             zlib_email: data.zlib.email,
             zlib_password: data.zlib.password,
             zlib_base_url: data.zlib.base_url,
@@ -69,7 +66,6 @@ function bindForm(formId, groupName, stateId) {
 
 bindForm('form-ai', 'ai', 'state-ai');
 bindForm('form-moon', 'moon', 'state-moon');
-bindForm('form-webdav', 'webdav', 'state-webdav');
 bindForm('form-zlib', 'zlib', 'state-zlib');
 
 loadSettings();
