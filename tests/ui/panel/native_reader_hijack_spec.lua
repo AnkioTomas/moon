@@ -32,6 +32,11 @@ package.preload["apps/filemanager/filemanager"] = function()
 end
 package.preload["apps/reader/readerui"] = function() return { instance = nil } end
 
+local previous_settings = _G.G_reader_settings
+_G.G_reader_settings = {
+    saveSetting = function() end,
+}
+
 local original_filemanager_callback = function() return "native" end
 local ReaderMenu = {}
 function ReaderMenu:getDefaultMenuButtons()
@@ -61,3 +66,5 @@ Assert.is_false(buttons.filemanager.remember)
 buttons.filemanager.callback()
 Assert.is_true(menu.closed)
 Assert.eq(opened_desktop, 1)
+
+_G.G_reader_settings = previous_settings

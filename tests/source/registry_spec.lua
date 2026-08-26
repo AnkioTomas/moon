@@ -105,7 +105,7 @@ end
 
 do
     Assert.eq(Registry.meta("wechat").type, "online")
-    Assert.eq(Registry.meta("rss").type, "article")
+    Assert.eq(Registry.meta("copymanga").type, "online")
 end
 
 do
@@ -117,18 +117,18 @@ end
 -- 启用源：默认全开；禁用/启用非活跃源；活跃源禁止禁用
 do
     -- 无 enabled_sources（旧配置）：全真，listEnabled == list
-    Assert.is_true(Registry.isEnabled("rss"))
+    Assert.is_true(Registry.isEnabled("copymanga"))
     Assert.is_true(Registry.isEnabled("moon"))
     Assert.eq(#Registry.listEnabled(), #Registry.list())
 
     -- 禁用非活跃源：首次写入以全开初始化集合
-    Assert.is_true(Registry.setEnabled("rss", false))
-    Assert.is_false(Registry.isEnabled("rss"))
+    Assert.is_true(Registry.setEnabled("copymanga", false))
+    Assert.is_false(Registry.isEnabled("copymanga"))
     Assert.eq(#Registry.listEnabled(), #Registry.list() - 1)
 
     -- 再启用回来
-    Assert.is_true(Registry.setEnabled("rss", true))
-    Assert.is_true(Registry.isEnabled("rss"))
+    Assert.is_true(Registry.setEnabled("copymanga", true))
+    Assert.is_true(Registry.isEnabled("copymanga"))
     Assert.eq(#Registry.listEnabled(), #Registry.list())
 
     -- 活跃源（stub 固定 moon）禁止禁用；isEnabled 兜底恒 true

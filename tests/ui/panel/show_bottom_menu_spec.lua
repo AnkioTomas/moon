@@ -1,4 +1,4 @@
---[[-- 原生阅读菜单注入：缺省 Tab 打开时正确解析快捷面板 Tab。 --]]
+--[[-- 阅读菜单安装时保留用户已有的 show_bottom_menu 设置。 --]]
 
 local Assert = require("support.assert")
 
@@ -7,39 +7,31 @@ package.preload["gettext"] = function() return function(value) return value end 
 package.preload["logger"] = function() return { err = function() end } end
 package.preload["device"] = function() return { isTouchDevice = function() return true end } end
 package.preload["ui/uimanager"] = function() return { show = function() end, setDirty = function() end } end
+package.preload["ui.panel.native_settings"] = function() return { inject = function() end } end
 package.preload["ui.panel.desktop"] = function() return { menuActions = function() return {} end } end
 package.preload["ui.panel.reader"] = function() return { actions = function() return {} end } end
-
-local TouchMenu = {}
-function TouchMenu:updateItems() end
-function TouchMenu:switchMenuTab(_tab_num) end
-package.preload["ui/widget/touchmenu"] = function() return TouchMenu end
-
-local ReaderMenu = {}
-function ReaderMenu:setUpdateItemTable()
-    self.tab_item_table = self.tab_item_table or {}
+package.preload["ui/widget/touchmenu"] = function()
+    return { updateItems = function() end, switchMenuTab = function() end }
 end
-function ReaderMenu:onShowMenu(tab_index)
-    self.shown_tab = tab_index
+package.preload["apps/filemanager/filemanagermenu"] = function()
+    return { setUpdateItemTable = function() end }
 end
+package.preload["apps/reader/readerui"] = function() return { instance = nil } end
+package.preload["apps/filemanager/filemanager"] = function() return { instance = nil } end
+
+local ReaderMenu = { setUpdateItemTable = function() end, getDefaultMenuButtons = function() return {} end }
 package.preload["apps/reader/modules/readermenu"] = function() return ReaderMenu end
-package.preload["apps/reader/modules/readerconfig"] = function() return nil end
 
 local previous_settings = _G.G_reader_settings
 local saved = {}
 _G.G_reader_settings = {
-    readSetting = function() return nil end,
+    readSetting = function() return true end,
     saveSetting = function(_, key, value) saved[key] = value end,
 }
 
+package.loaded["ui.panel.native"] = nil
 local Native = require("ui.panel.native")
 Native.install({}, { reader = true })
-Assert.eq(saved.show_bottom_menu, false)
-
-ReaderMenu:onShowMenu(nil)
-Assert.eq(ReaderMenu.shown_tab, 1)
--- 即使上次记住/手势指定了其他 Tab，也强制落到阅读面板 Tab。
-ReaderMenu:onShowMenu(3)
-Assert.eq(ReaderMenu.shown_tab, 1)
+Assert.is_nil(saved.show_bottom_menu)
 
 _G.G_reader_settings = previous_settings

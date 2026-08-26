@@ -162,6 +162,23 @@ Assert.eq(progress_ui.shown, 0)
 Stubs.flush()
 Assert.eq(#touches, touch_before + 1)
 
+-- 预取：已有文件跳过，只拉取缺失章。
+os.remove(tmp .. "/2.html")
+os.remove(tmp .. "/3.html")
+local prefetched = {}
+local prefetch_ops = {
+    fetchContent = function(_, item, cb)
+        prefetched[#prefetched + 1] = item.idx
+        cb({ title = item.title, text = "预取" .. item.idx })
+    end,
+}
+Chapter.prefetchAsync(identity, { title = "书" }, toc, 1, 3, prefetch_ops, function() end)
+Stubs.flush()
+Assert.eq(prefetched[1], 2)
+Assert.eq(prefetched[2], 3)
+Assert.len(prefetched, 2, "共 3 章时从第 1 章只预取 2、3")
+Assert.is_true(io.open(tmp .. "/2.html", "rb") ~= nil)
+
 for name in lfs.dir(tmp) do
     if name ~= "." and name ~= ".." then os.remove(tmp .. "/" .. name) end
 end

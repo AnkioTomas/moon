@@ -732,7 +732,7 @@ do
     local d = require("support.json_stub").decode(body)
     Assert.not_nil(d.ai)
     Assert.not_nil(d.moon)
-    Assert.not_nil(d.rss)
+    Assert.is_nil(d.rss)
 
     local payload = '{"ai":{"ai_endpoint":"https://cfg.test/v1","ai_api_key":"******","ai_model":"m"}}'
     local c2 = newClient({
@@ -740,16 +740,6 @@ do
     })
     drain(serve(c2))
     Assert.eq((parseResponse(c2:output())), 200)
-
-    local opml = '<opml><body><outline xmlUrl="https://rss.test/feed" text="T"/></body></opml>'
-    local c3 = newClient({
-        "POST /api/settings/rss/opml HTTP/1.1\r\nContent-Length: " .. #opml .. "\r\n\r\n" .. opml,
-    })
-    drain(serve(c3))
-    local code3, body3 = parseResponse(c3:output())
-    Assert.eq(code3, 200)
-    local d3 = require("support.json_stub").decode(body3)
-    Assert.is_true(d3.added >= 0)
 
     local c4 = newClient({ "DELETE /api/settings HTTP/1.1\r\n\r\n" })
     drain(serve(c4))
