@@ -198,6 +198,21 @@ function Source:openBookAsync(identity, opts, cb)
     }, cb)
 end
 
+--- 阅读中后台预取后续章节。
+---@param identity BookIdentity
+---@param toc BookChapter[]
+---@param from_idx integer
+---@param count integer
+---@param cb fun()|nil
+---@return { cancel: fun() }
+function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
+    return require("source.chapter").prefetchAsync(identity, identity.book, toc, from_idx, count, {
+        fetchContent = function(r, chapter, done)
+            return fetchChapterContentAsync(self, r, chapter, done)
+        end,
+    }, cb)
+end
+
 function Source:getProgressAsync(identity, cb)
     local cancelled = false
     local first, second

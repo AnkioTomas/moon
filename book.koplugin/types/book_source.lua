@@ -1,6 +1,6 @@
 --- Source 接口与能力表。可 require：仅 SourceCapabilities.defaults 为运行时。
 
----@alias SourceId "moon"|"webdav"|"wechat"|"rss"|"local"|string
+---@alias SourceId "moon"|"webdav"|"wechat"|"copymanga"|"local"|string
 
 ---@alias BookSourceType
 ---| '"book"' # 整本文件
