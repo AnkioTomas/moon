@@ -37,6 +37,10 @@ local current_session
 local chapter_session
 ---@type { cancel: fun() }|nil
 local prefetch_job
+---@type string|nil
+local speed_key
+---@type { total_seconds: number, pages: number }|nil
+local speed_summary
 
 --- 取消在途预取任务。
 local function cancelPrefetch()
@@ -92,6 +96,46 @@ function Session.position()
     local current = current_session
     if not current then return nil end
     return require("book.progress").position(current)
+end
+
+--- 读取当前书的阅读统计摘要，按身份缓存。
+---@param identity BookIdentity|nil
+---@return { total_seconds: number, pages: number }|nil
+local function readingSummary(identity)
+    if type(identity) ~= "table" or not identity.source_id or not identity.stable_id then
+        return nil
+    end
+    local key = identity.source_id .. "/" .. identity.stable_id
+    if speed_key == key then
+        return speed_summary
+    end
+    speed_key = key
+    speed_summary = require("utils.db.stats").summaryByBook(identity.source_id, identity.stable_id)
+    return speed_summary
+end
+
+--- 全书剩余阅读时间估算（秒）；数据不足或已读完返回 nil。
+--- 基于 session.fraction（全书比例）与历史阅读时长线性外推。
+---@return number|nil
+function Session.remainingSeconds()
+    local current = current_session
+    if not current or type(current.identity) ~= "table" then
+        return nil
+    end
+    local fraction = tonumber(current.fraction)
+    if not fraction or fraction <= 0 or fraction >= 1 then
+        return nil
+    end
+    local summary = readingSummary(current.identity)
+    if type(summary) ~= "table" then
+        return nil
+    end
+    local total_seconds = tonumber(summary.total_seconds)
+    local pages = tonumber(summary.pages)
+    if not total_seconds or total_seconds <= 0 or not pages or pages <= 0 then
+        return nil
+    end
+    return math.floor(total_seconds * (1 - fraction) / fraction)
 end
 
 --- 根据已确认打开的目标章定位新文档，并清掉切换状态。
