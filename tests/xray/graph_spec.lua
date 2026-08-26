@@ -1,7 +1,7 @@
---[[-- ai.graph：跨页人物、事件和关系去重。 --]]
+--[[-- xray.graph：跨页人物、事件和关系去重。 --]]
 
 local Assert = require("support.assert")
-local Graph = require("ai.graph")
+local Graph = require("xray.graph")
 
 local page = {
     characters = { { name = "甲", role = "主角", description = "" } },

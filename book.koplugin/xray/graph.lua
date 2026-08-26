@@ -1,7 +1,7 @@
 --[[--
 把一本书已经分析过的页面合并成人物、事件和关系图谱。
 
-@module koplugin.book.ai.graph
+@module koplugin.book.xray.graph
 --]]
 
 local Text = require("utils.text")

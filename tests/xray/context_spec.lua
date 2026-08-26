@@ -1,7 +1,7 @@
---[[-- ai.context：滚动/分页文档当前页文本采集。 --]]
+--[[-- xray.context：滚动/分页文档当前页文本采集。 --]]
 
 local Assert = require("support.assert")
-local Context = require("ai.context")
+local Context = require("xray.context")
 
 local rolling = {
     rolling = {},
@@ -16,7 +16,7 @@ local rolling = {
         end,
     },
 }
-local text, page = Context.currentPage(rolling)
+local text, page = Context.visibleText(rolling)
 Assert.eq(text, "当前页正文")
 Assert.eq(page, 7)
 
@@ -28,9 +28,11 @@ local paging = {
         end,
     },
 }
-text, page = Context.currentPage(paging)
+text, page = Context.visibleText(paging)
 Assert.eq(text, "Hello world 中文")
 Assert.eq(page, 3)
 
-local empty = Context.currentPage({ document = { getTextBoxes = function() return {} end } })
+local empty = Context.visibleText({ document = { getTextBoxes = function() return {} end } })
 Assert.is_nil(empty)
+
+Assert.eq(Context.currentPage({ getCurrentPage = function() return 5 end }), 5)

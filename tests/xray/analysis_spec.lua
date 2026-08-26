@@ -1,4 +1,4 @@
---[[-- ai.analysis：结构化结果清洗、缓存和持久化。 --]]
+--[[-- xray.analysis：结构化结果清洗、缓存和持久化。 --]]
 
 local Assert = require("support.assert")
 local Json = require("support.json_stub")
@@ -17,8 +17,8 @@ package.preload["utils.db.ai"] = function()
         allForBook = function() return {} end,
     }
 end
-package.preload["ai.context"] = function()
-    return { currentPage = function() return "正文", 12 end }
+package.preload["xray.context"] = function()
+    return { visibleText = function() return "正文", 12 end }
 end
 local chat_calls = 0
 package.preload["ai"] = function()
@@ -53,22 +53,30 @@ package.preload["ai.json"] = function()
         end,
     }
 end
--- 旧 client 桩不再使用
-package.preload["ai.client"] = function()
-    return { chat = function() error("should use ai facade") end }
-end
 package.preload["utils.db.queue"] = function()
     return { run = function(worker, opts) worker(); opts.on_done() end }
 end
 package.preload["ffi/sha2"] = function() return { md5 = function() return "context-key" end } end
 
-local Analysis = require("ai.analysis")
+local Analysis = require("xray.analysis")
 local decoded = assert(Analysis.decode('{"summary":" s ","analysis":" a ","characters":[],"events":[],"relations":[]}'))
 Assert.eq(decoded.summary, "s")
 Assert.eq(decoded.analysis, "a")
 Assert.is_nil(Analysis.decode("not json"))
 local with_braces = assert(Analysis.decode('prefix {"summary":"含 { 符号","analysis":"ok","characters":[],"events":[],"relations":[]} suffix'))
 Assert.eq(with_braces.summary, "含 { 符号")
+
+local filtered = assert(Analysis.decode('{"summary":"有","analysis":"","characters":[{"name":"","role":"","description":""}],"events":[{"name":"","description":""}],"relations":[{"from":"","to":"","type":"","description":""}]}'))
+Assert.eq(filtered.summary, "有")
+Assert.len(filtered.characters, 0)
+Assert.len(filtered.events, 0)
+Assert.len(filtered.relations, 0)
+
+local partial = assert(Analysis.decode('{"summary":"","analysis":"","characters":[{"name":"","role":"旁白","description":""}],"events":[],"relations":[{"from":"","to":"乙","type":"","description":""}]}'))
+Assert.len(partial.characters, 1)
+Assert.eq(partial.characters[1].role, "旁白")
+Assert.len(partial.relations, 1)
+Assert.eq(partial.relations[1].to, "乙")
 
 local result, failure, was_cached
 local identity = { source_id = "moon", stable_id = "book", chapter_idx = 2, book = { title = "T" } }

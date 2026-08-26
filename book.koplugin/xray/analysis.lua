@@ -1,18 +1,34 @@
 --[[--
-阅读 AI 分析：当前页文本只请求一次，结构化结果同时服务分析、总结和关系图谱。
+当前页 AI 分析：结构化结果同时服务总结、分析与关系图谱。
 
-@module koplugin.book.ai.analysis
+@module koplugin.book.xray.analysis
 --]]
 
 local JSON = require("json")
 local AI = require("ai")
-local AiDB = require("utils.db.ai")
 local AiJson = require("ai.json")
-local Context = require("ai.context")
+local Context = require("xray.context")
 local DbQueue = require("utils.db.queue")
 local Text = require("utils.text")
+local AiDB = require("utils.db.ai")
 
 local Analysis = {}
+
+---@param clean table
+---@param fields string[]
+---@return boolean
+local function keepItem(clean, fields)
+    for _, field in ipairs(fields) do
+        if field == "participants" then
+            if #clean[field] > 0 then
+                return true
+            end
+        elseif clean[field] ~= "" then
+            return true
+        end
+    end
+    return false
+end
 
 local function cleanArray(value, fields)
     local out = {}
@@ -29,7 +45,9 @@ local function cleanArray(value, fields)
                     clean[field] = Text.trim(item[field])
                 end
             end
-            if clean.name ~= "" or clean.from ~= "" or clean.description ~= "" then out[#out + 1] = clean end
+            if keepItem(clean, fields) then
+                out[#out + 1] = clean
+            end
         end
     end
     return out
@@ -78,7 +96,7 @@ end
 ---@param identity BookIdentity
 ---@return table|nil, string|nil, integer|nil
 function Analysis.cached(ui, identity)
-    local text, page = Context.currentPage(ui)
+    local text, page = Context.visibleText(ui)
     if not text then return nil, "no text", page end
     return decodeRow(AiDB.get(identity.source_id, identity.stable_id, identity.chapter_idx,
         keyFor(identity, text))), nil, page
@@ -92,7 +110,7 @@ end
 ---@return table|nil
 function Analysis.run(ui, identity, opts, cb)
     opts = opts or {}
-    local text, page = Context.currentPage(ui)
+    local text, page = Context.visibleText(ui)
     if not text then cb(nil, "no text"); return nil end
     local context_key = keyFor(identity, text)
     if not opts.force then

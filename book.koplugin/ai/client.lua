@@ -88,11 +88,9 @@ local function credentials()
     return endpoint, api_key, model
 end
 
----@param model string
----@param messages table[]
+--- 关闭推理/thinking 扩展字段（多网关字段名不一致，按需全部写入）。
+---@param payload table
 ---@param opts table|nil
----@param stream boolean
----@return string|nil, any
 local function applyThinkingPolicy(payload, opts)
     if opts and opts.thinking == true then
         return
@@ -134,10 +132,7 @@ end
 ---@param cb fun(content: string|nil, err: any)
 ---@return table|nil
 function Client.chat(messages, opts, cb)
-    if type(opts) == "function" then
-        cb = opts
-        opts = nil
-    end
+    opts = opts or {}
     local endpoint, api_key, model, conf_err = credentials()
     if not endpoint then
         cb(nil, conf_err)
