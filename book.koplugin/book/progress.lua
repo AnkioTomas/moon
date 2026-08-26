@@ -118,6 +118,23 @@ local function applyFractionToDoc(ui, pct)
     end
 end
 
+--- 把章内/文档比例应用到当前 ReaderUI（XPointer 或页码）。
+---@param ui table
+---@param pct number
+function Progress.applyFractionToDoc(ui, pct)
+    applyFractionToDoc(ui, pct)
+end
+
+--- 冷打开：pending 章序号与当前身份一致时应用章内比例。
+---@param snapshot ReaderSessionSnapshot
+function Progress.applyLocalPending(snapshot)
+    local id = snapshot and snapshot.identity
+    if not id or not id.chapter_idx or not snapshot.ui then return end
+    local row = ProgressDB.get(id.source_id, id.stable_id)
+    if not row or tonumber(row.chapter_idx) ~= tonumber(id.chapter_idx) then return end
+    if row.chapter_fraction == nil then return end
+    applyFractionToDoc(snapshot.ui, row.chapter_fraction)
+end
 
 --- 服务端确认后标记对应本地版本已同步；新版本不会被旧回调覆盖。
 ---@param source_id string
@@ -289,12 +306,14 @@ local function applyRemotePos(ui, id, pos, pct, show_msg)
     if toc then
         local count = #toc
         local target_idx = pos.chapter_idx
-        local within = pos.chapter_fraction or pct
-        if not target_idx then
+        local within
+        if pos.chapter_fraction ~= nil then
+            within = pos.chapter_fraction
+        elseif not target_idx then
             local p = pct * count
             target_idx = math.max(1, math.min(count, math.floor(p) + 1))
             within = p - (target_idx - 1)
-        elseif not pos.chapter_fraction then
+        else
             local p = pct * count
             local expect = math.floor(p) + 1
             if expect == target_idx then
@@ -391,6 +410,34 @@ function Progress.pull(snapshot)
             local pos = ProgressDB.get(id.source_id, id.stable_id)
             if not pos then return end
             local local_position = Session.position()
+            if id.chapter_idx and Session.toc() then
+                local local_idx = local_position and local_position.chapter_idx
+                local remote_idx = pos.chapter_idx
+                if local_idx and remote_idx and local_idx ~= remote_idx then
+                    askProgressConflict(id, pos, pos.fraction, local_position.fraction)
+                    return
+                end
+                local local_within = local_position and local_position.chapter_fraction or 0
+                local remote_within = pos.chapter_fraction
+                if remote_within == nil then
+                    local count = #Session.toc()
+                    if count > 0 then
+                        local p = pos.fraction * count
+                        local expect = math.floor(p) + 1
+                        if expect == (remote_idx or local_idx) then
+                            remote_within = p - (expect - 1)
+                        else
+                            remote_within = 0
+                        end
+                    else
+                        remote_within = 0
+                    end
+                end
+                if math.abs(local_within - remote_within) >= 0.01 then
+                    askProgressConflict(id, pos, pos.fraction, local_position.fraction)
+                end
+                return
+            end
             local local_frac = local_position and local_position.fraction or 0
             if math.abs(local_frac - pos.fraction) < 0.01 then
                 return
