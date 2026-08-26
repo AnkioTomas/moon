@@ -6,6 +6,7 @@ OpenAI 兼容 SSE 解析：缓冲按行切 data:，冒泡 delta.content。
 @module koplugin.book.ai.sse
 --]]
 
+local Content = require("ai.content")
 local JSON = require("json")
 
 local SSE = {}
@@ -32,9 +33,8 @@ function SSE.parser()
             return nil
         end
         local choice = decoded.choices and decoded.choices[1]
-        local delta = choice and choice.delta
-        local content = delta and delta.content
-        if type(content) ~= "string" or content == "" then
+        local content = Content.fromDelta(choice and choice.delta)
+        if not content or content == "" then
             return nil
         end
         return content

@@ -723,14 +723,45 @@ do
 end
 
 -- ── 远程配置 ───────────────────────────────────────────
+-- 必须 stub utils.settings：POST 会落盘，不能碰 config/ 软链里的真配置。
 
 do
+    local store = {
+        ai = { ai_endpoint = "https://old.example/v1", ai_api_key = "sk-real", ai_model = "old" },
+        moon = { base_url = "https://moon.test", token = "bk" },
+        zlib = { email = "", password = "", base_url = nil },
+    }
+    package.preload["utils.settings"] = function()
+        return {
+            get = function(section)
+                return store[section]
+            end,
+            getSource = function(id)
+                return store[id]
+            end,
+            saveSection = function(section, cfg)
+                store[section] = cfg
+            end,
+            saveSource = function(id, cfg)
+                store[id] = cfg
+            end,
+        }
+    end
+    package.preload["source.registry"] = function()
+        return { invalidate = function() end }
+    end
+    for _, name in ipairs({ "utils.settings", "source.registry", "remote.settings" }) do
+        package.loaded[name] = nil
+    end
+
     local c1 = newClient({ "GET /api/settings HTTP/1.1\r\n\r\n" })
     drain(serve(c1))
     local code, body = parseResponse(c1:output())
     Assert.eq(code, 200)
     local d = require("support.json_stub").decode(body)
     Assert.not_nil(d.ai)
+    Assert.eq(d.ai.ai_endpoint, "https://old.example/v1")
+    Assert.eq(d.ai.ai_api_key, "******")
     Assert.not_nil(d.moon)
     Assert.is_nil(d.rss)
 
@@ -740,6 +771,9 @@ do
     })
     drain(serve(c2))
     Assert.eq((parseResponse(c2:output())), 200)
+    Assert.eq(store.ai.ai_endpoint, "https://cfg.test/v1")
+    Assert.eq(store.ai.ai_model, "m")
+    Assert.eq(store.ai.ai_api_key, "sk-real")
 
     local c4 = newClient({ "DELETE /api/settings HTTP/1.1\r\n\r\n" })
     drain(serve(c4))
@@ -748,4 +782,9 @@ do
     local c5 = newClient({ "POST /api/settings HTTP/1.1\r\nContent-Length: 300000\r\n\r\n" })
     drain(serve(c5))
     Assert.eq((parseResponse(c5:output())), 413)
+
+    for _, name in ipairs({ "utils.settings", "source.registry", "remote.settings" }) do
+        package.preload[name] = nil
+        package.loaded[name] = nil
+    end
 end

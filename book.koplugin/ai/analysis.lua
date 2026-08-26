@@ -35,24 +35,30 @@ local function cleanArray(value, fields)
     return out
 end
 
---- 校验并清洗 AI 返回的结构化分析 JSON。
----@param content string|nil
+---@param decoded table
 ---@return table|nil, string|nil
-function Analysis.decode(content)
-    local result, err = AiJson.decode(content)
-    if not result then return nil, err end
-    result = {
-        summary = Text.trim(result.summary),
-        analysis = Text.trim(result.analysis),
-        characters = cleanArray(result.characters, { "name", "role", "description" }),
-        events = cleanArray(result.events, { "name", "description", "participants" }),
-        relations = cleanArray(result.relations, { "from", "to", "type", "description" }),
+local function normalize(decoded)
+    local result = {
+        summary = Text.trim(decoded.summary),
+        analysis = Text.trim(decoded.analysis),
+        characters = cleanArray(decoded.characters, { "name", "role", "description" }),
+        events = cleanArray(decoded.events, { "name", "description", "participants" }),
+        relations = cleanArray(decoded.relations, { "from", "to", "type", "description" }),
     }
     if result.summary == "" and result.analysis == "" and #result.characters == 0
         and #result.events == 0 and #result.relations == 0 then
         return nil, "empty AI analysis"
     end
     return result
+end
+
+--- 校验并清洗 AI 返回的结构化分析 JSON。
+---@param content string|nil
+---@return table|nil, string|nil
+function Analysis.decode(content)
+    local decoded, err = AiJson.decode(content)
+    if not decoded then return nil, err end
+    return normalize(decoded)
 end
 
 local function keyFor(identity, text)
@@ -103,18 +109,8 @@ function Analysis.run(ui, identity, opts, cb)
     }
     return AI.jsonExtract(messages, { max_tokens = 2000 }, function(decoded, err)
         if not decoded then cb(nil, err); return end
-        local result = {
-            summary = Text.trim(decoded.summary),
-            analysis = Text.trim(decoded.analysis),
-            characters = cleanArray(decoded.characters, { "name", "role", "description" }),
-            events = cleanArray(decoded.events, { "name", "description", "participants" }),
-            relations = cleanArray(decoded.relations, { "from", "to", "type", "description" }),
-        }
-        if result.summary == "" and result.analysis == "" and #result.characters == 0
-            and #result.events == 0 and #result.relations == 0 then
-            cb(nil, "empty AI analysis")
-            return
-        end
+        local result, norm_err = normalize(decoded)
+        if not result then cb(nil, norm_err); return end
         local ok, payload = pcall(JSON.encode, result)
         if not ok then cb(nil, payload); return end
         DbQueue.run(function()
