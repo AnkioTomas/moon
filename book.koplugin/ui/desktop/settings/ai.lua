@@ -70,7 +70,7 @@ local function testRow(desktop)
                 local loading = InfoMessage:new{ text = _("正在测试…") }
                 UIManager:show(loading)
                 require("ai").chat({ { role = "user", content = "ping" } },
-                    { max_tokens = 10, timeout = 30 },
+                    { max_tokens = 64 },
                     function(content, err)
                         testing = false
                         UIManager:close(loading)

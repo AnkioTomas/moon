@@ -5,6 +5,7 @@ OpenAI 兼容 Chat Completions 客户端。只负责协议，不拥有阅读上�
 --]]
 
 local JSON = require("json")
+local Content = require("ai.content")
 local Request = require("http.request")
 local Settings = require("utils.settings")
 local SSE = require("ai.sse")
@@ -12,6 +13,9 @@ local Text = require("utils.text")
 local logger = require("logger")
 
 local Client = {}
+
+--- 默认请求超时（秒）；推理模型首包可能较慢。
+Client.DEFAULT_TIMEOUT = 120
 
 --- AI 请求默认 User-Agent；部分 OpenAI 兼容网关按 UA 分流/限流。
 local DEFAULT_UA = "opencode/1.2.3 ai-sdk/amazon-bedrock/3.0.73 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5"
@@ -35,22 +39,6 @@ function Client.isConfigured()
         and Text.trim(settings.ai_model) ~= ""
 end
 
---- 从 message.content 抽出纯文本（字符串或 text 分片表）。
----@param message table|nil
----@return string|nil
-local function contentOf(message)
-    local content = message and message.content
-    if type(content) == "string" then return content end
-    if type(content) ~= "table" then return nil end
-    local parts = {}
-    for _, part in ipairs(content) do
-        if type(part) == "table" and type(part.text) == "string" then
-            parts[#parts + 1] = part.text
-        end
-    end
-    return #parts > 0 and table.concat(parts, "\n") or nil
-end
-
 --- 截断响应体便于日志（首尾截断，控制长度）。
 ---@param s string|nil
 ---@param n number
@@ -72,11 +60,14 @@ function Client.decodeResponse(body)
         return nil, "invalid AI response"
     end
     local choice = decoded.choices and decoded.choices[1]
-    local content = contentOf(choice and choice.message)
+    local content = Content.fromMessage(choice and choice.message)
     if not content or content == "" then
         local err = decoded.error
         if type(err) == "table" then
             return nil, tostring(err.message or err.code)
+        end
+        if choice and choice.finish_reason == "length" then
+            return nil, "response truncated (max_tokens too low)"
         end
         logger.warn("ai.client: empty content; keys=",
             choice and choice.message and "has-message" or "no-message", "body=", snip(body, 200))
@@ -102,6 +93,22 @@ end
 ---@param opts table|nil
 ---@param stream boolean
 ---@return string|nil, any
+local function applyThinkingPolicy(payload, opts)
+    if opts and opts.thinking == true then
+        return
+    end
+    -- OpenRouter / 多数兼容网关
+    payload.reasoning = { enabled = false }
+    -- Qwen 官方 / vLLM 直连
+    payload.enable_thinking = false
+    payload.chat_template_kwargs = { enable_thinking = false }
+end
+
+---@param model string
+---@param messages table[]
+---@param opts table|nil
+---@param stream boolean
+---@return string|nil, any
 local function encodeBody(model, messages, opts, stream)
     opts = opts or {}
     local payload = {
@@ -113,6 +120,7 @@ local function encodeBody(model, messages, opts, stream)
     if stream then
         payload.stream = true
     end
+    applyThinkingPolicy(payload, opts)
     local ok, body = pcall(JSON.encode, payload)
     if not ok then
         return nil, body
@@ -143,7 +151,7 @@ function Client.chat(messages, opts, cb)
     return Request.post(endpoint, body, {
         content_type = "application/json",
         accept = "application/json",
-        timeout = (opts and opts.timeout) or 120,
+        timeout = (opts and opts.timeout) or Client.DEFAULT_TIMEOUT,
         headers = { Authorization = "Bearer " .. api_key, ["User-Agent"] = DEFAULT_UA },
     }, function(response, err, raw)
         if not response then
@@ -190,7 +198,7 @@ function Client.chatStream(messages, opts, cb)
         url = endpoint,
         method = "POST",
         body = body,
-        timeout = opts.timeout or 180,
+        timeout = opts.timeout or Client.DEFAULT_TIMEOUT,
         headers = {
             Authorization = "Bearer " .. api_key,
             ["User-Agent"] = DEFAULT_UA,

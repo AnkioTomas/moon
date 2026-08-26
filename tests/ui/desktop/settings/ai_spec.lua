@@ -69,8 +69,8 @@ shown = {}
 closed = {}
 built.callback()
 Assert.len(chat_calls, 1)
-Assert.eq(chat_calls[1].opts.max_tokens, 10)
-Assert.eq(chat_calls[1].opts.timeout, 30)
+Assert.eq(chat_calls[1].opts.max_tokens, 64)
+Assert.eq(chat_calls[1].opts.timeout, nil)
 Assert.eq(shown[#shown].text, "正在测试…")
 Assert.is_nil(shown[#shown].timeout)
 Assert.len(closed, 0)
