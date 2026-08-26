@@ -252,39 +252,6 @@ textarea { resize: vertical; width: 100% }
 }
 .form-state.ok { color: var(--fg); font-weight: 500 }
 .form-state.err { color: var(--muted); font-weight: 600 }
-.rss-list {
-    list-style: none;
-    margin: 0 0 var(--section-gap);
-    padding: 0;
-}
-.rss-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--rule);
-}
-.rss-item:last-child { border-bottom: none }
-.rss-title { font-size: 14px; font-weight: 500 }
-.rss-url {
-    font-size: 11px;
-    color: var(--dim);
-    overflow-wrap: anywhere;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-}
-.rss-item button {
-    align-self: flex-start;
-    margin-top: 4px;
-    min-height: 36px;
-    padding: .35em .75em;
-    font-size: 12px;
-}
-.rss-empty {
-    color: var(--dim);
-    font-size: 13px;
-    padding: 4px 0 8px;
-}
-.rss-add { margin-bottom: var(--section-gap) }
 
 /* ── 工具栏 ── */
 .toolbar {

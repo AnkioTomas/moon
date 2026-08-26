@@ -70,7 +70,6 @@ Server._routeRename = File.rename
 Server._routeInput = Input.route
 Server._routeClipboard = Input.clipboard
 Server._routeSettings = SettingsRoute.settings
-Server._routeSettingsOpml = SettingsRoute.opml
 
 ---@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil }
 ---@return table
@@ -366,8 +365,6 @@ function Server:_route(conn, head)
         return self:_routeRename(conn, method, query)
     elseif path == "/api/settings" then
         return self:_routeSettings(conn, method, headers, query)
-    elseif path == "/api/settings/rss/opml" then
-        return self:_routeSettingsOpml(conn, method, headers, query)
     end
     return self:_fail(conn, 404, "Not Found")
 end

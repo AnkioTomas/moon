@@ -73,15 +73,6 @@ function SettingsApi.snapshot()
     local moon = Settings.getSource("moon")
     local webdav = Settings.getSource("webdav")
     local zlib = Settings.getSource("zlib")
-    local rss = Settings.getSource("rss")
-    local feeds = type(rss.feeds) == "table" and rss.feeds or {}
-    local out_feeds = {}
-    for i, feed in ipairs(feeds) do
-        out_feeds[i] = {
-            url = asStr(feed.url),
-            title = asStr(feed.title),
-        }
-    end
     return {
         ai = {
             ai_endpoint = asStr(ai.ai_endpoint),
@@ -101,9 +92,6 @@ function SettingsApi.snapshot()
             email = asStr(zlib.email),
             password = maskValue(zlib.password, true),
             base_url = asStr(zlib.base_url),
-        },
-        rss = {
-            feeds = out_feeds,
         },
     }
 end
@@ -206,75 +194,7 @@ function SettingsApi.apply(payload)
         end
     end
 
-    if hasGroup(payload.rss) and type(payload.rss.feeds) == "table" then
-        local Parser = require("source.rss.parser")
-        local cfg = Settings.getSource("rss")
-        local list = {}
-        local seen = {}
-        for _, feed in ipairs(payload.rss.feeds) do
-            if type(feed) == "table" then
-                local url = Parser.normalizeUrl(feed.url)
-                if url and not seen[url] then
-                    seen[url] = true
-                    list[#list + 1] = {
-                        url = url,
-                        title = Text.trim(feed.title),
-                    }
-                end
-            end
-        end
-        cfg.feeds = list
-        Settings.saveSource("rss", cfg)
-        require("source.registry").invalidate()
-        changed = true
-    end
-
     return { ok = true, changed = changed, settings = SettingsApi.snapshot() }
-end
-
----@param content string
----@return table|nil result
----@return string|nil err
-function SettingsApi.importOpml(content)
-    if type(content) ~= "string" or content == "" then
-        return nil, "empty opml"
-    end
-    local OPML = require("source.rss.opml")
-    local Parser = require("source.rss.parser")
-    local imported = OPML.parse(content)
-    if not imported then
-        return nil, "invalid opml"
-    end
-    local Settings = require("utils.settings")
-    local cfg = Settings.getSource("rss")
-    local list = type(cfg.feeds) == "table" and cfg.feeds or {}
-    local seen = {}
-    for _, feed in ipairs(list) do
-        local url = Parser.normalizeUrl(feed.url)
-        if url then
-            seen[url] = true
-        end
-    end
-    local added = 0
-    for _, feed in ipairs(imported) do
-        local url = Parser.normalizeUrl(feed.url)
-        if url and not seen[url] then
-            seen[url] = true
-            list[#list + 1] = {
-                url = url,
-                title = Text.trim(feed.title),
-            }
-            added = added + 1
-        end
-    end
-    cfg.feeds = list
-    Settings.saveSource("rss", cfg)
-    require("source.registry").invalidate()
-    return {
-        ok = true,
-        added = added,
-        settings = SettingsApi.snapshot(),
-    }
 end
 
 return SettingsApi

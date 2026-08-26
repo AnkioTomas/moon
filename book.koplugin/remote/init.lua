@@ -600,6 +600,12 @@ local function statusLabel()
     return string.format("http://%s:%d", localIP() or _("本机IP"), Remote.port()), true
 end
 
+--- 运行状态文案：运行中给可访问地址，否则「未运行」。
+---@return string status, boolean running
+function Remote.status()
+    return statusLabel()
+end
+
 --- 设置页「文件管理」子页行构建数组（供 ui/desktop/settings.lua）。
 ---@param desktop table
 ---@return function[]
