@@ -26,10 +26,15 @@ package.preload["apps/reader/modules/readermenu"] = function() return ReaderMenu
 package.preload["apps/reader/modules/readerconfig"] = function() return nil end
 
 local previous_settings = _G.G_reader_settings
-_G.G_reader_settings = { readSetting = function() return nil end }
+local saved = {}
+_G.G_reader_settings = {
+    readSetting = function() return nil end,
+    saveSetting = function(_, key, value) saved[key] = value end,
+}
 
 local Native = require("ui.panel.native")
 Native.install({}, { reader = true })
+Assert.eq(saved.show_bottom_menu, false)
 
 ReaderMenu:onShowMenu(nil)
 Assert.eq(ReaderMenu.shown_tab, 1)

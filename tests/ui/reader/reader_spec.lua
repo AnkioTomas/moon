@@ -44,36 +44,10 @@ package.preload["ui.reader.session"] = function()
         toc = function() return nil end,
     }
 end
-package.preload["ui.reader.ocr"] = function()
-    return { open = function() end }
-end
 package.preload["ui.reader.dictionary"] = function()
     return { open = function() end }
 end
 
-local sync_calls = {}
-package.preload["book.progress"] = function()
-    return { save = function(snapshot, cb)
-        sync_calls[#sync_calls + 1] = { "save_progress", snapshot }
-        cb(true)
-    end }
-end
-package.preload["book.note"] = function()
-    return { save = function(saved_ui, identity, cb)
-        sync_calls[#sync_calls + 1] = { "save_notes", saved_ui, identity }
-        cb(true)
-    end }
-end
-package.preload["book.sync"] = function()
-    return { runAsync = function(source, opts, cb)
-        sync_calls[#sync_calls + 1] = { "sync", source, opts }
-        cb({ pulled = 0, pushed = 2 })
-        return { cancel = function() end }
-    end }
-end
-package.preload["ui/widget/infomessage"] = function()
-    return { new = function(_, opts) return opts end }
-end
 -- 阅读动作顺序来自配置；测试里用干净配置，避免读取模拟器遗留的 quick_panel_reader_actions。
 local moon_settings = {}
 package.preload["utils.settings"] = function()
@@ -85,13 +59,14 @@ end
 
 local registered_module
 package.preload["ui.reader.bars"] = function()
-    return { startClock = function() end }
+    return { startClock = function() end, applyInsets = function() end }
 end
 package.preload["lockscreen.init"] = function()
     return { refreshInBackground = function() end }
 end
 
 local bookmarked, toggles = false, 0
+local footer_disabled = false
 local ui = {
     dialog = {},
     toc = { onShowToc = function() end },
@@ -111,44 +86,27 @@ local ui = {
         registerViewModule = function(_, name, module)
             registered_module = { name = name, module = module }
         end,
+        footer = {
+            disableFooter = function() footer_disabled = true end,
+        },
     },
 }
 local plugin = { ui = ui }
 
 local Reader = require("ui.reader")
 local actions = Reader.actions(ui)
-Assert.len(actions, 6)
+Assert.len(actions, 3)
 Assert.eq(actions[1].id, "toc")
 Assert.eq(actions[1].icon, "menu_book")
-Assert.eq(actions[2].id, "bookmark")
-Assert.eq(actions[3].id, "highlights")
-Assert.eq(actions[4].id, "sync")
-Assert.eq(actions[5].id, "dictionary")
-Assert.eq(actions[6].id, "ocr")
+Assert.eq(actions[2].id, "highlights")
+Assert.eq(actions[3].id, "dictionary")
 
-local closed, refreshed = 0, 0
-Assert.is_true(Reader.executeAction("bookmark", ui, {
-    close = function() closed = closed + 1 end,
-    refresh = function() refreshed = refreshed + 1 end,
-}))
-Assert.eq(toggles, 1)
-Assert.eq(closed, 0)
-Assert.eq(refreshed, 1)
-Assert.is_true(Reader.actions(ui)[2].active)
-Assert.eq(Reader.actions(ui)[2].icon, "bookmark")
 Assert.is_false(Reader.executeAction("missing", ui))
-
-Assert.is_true(Reader.executeAction("sync", ui))
-Assert.eq(sync_calls[1][1], "save_progress")
-Assert.eq(sync_calls[2][1], "save_notes")
-Assert.eq(sync_calls[3][1], "sync")
-Assert.eq(sync_calls[3][2], sync_source)
-Assert.eq(sync_calls[3][3].identity, current.identity)
-Assert.is_true(sync_calls[3][3].skip_books)
 
 Reader.attach(plugin)
 Assert.eq(native_ui, ui)
 Assert.eq(registered_module.name, "book_bars")
+Assert.is_true(footer_disabled, "应关闭 KOReader 原生底部状态栏")
 Assert.is_nil(ui._zones, "不应注册覆盖原生菜单的触摸区")
 
 native_ui = nil

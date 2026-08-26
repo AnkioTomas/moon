@@ -134,6 +134,9 @@ package.preload["book.progress"] = function()
         clearConflicts = function()
             calls.progress[#calls.progress + 1] = { "clearConflicts" }
         end,
+        applyLocalPending = function(snapshot)
+            calls.progress[#calls.progress + 1] = { "applyLocalPending", snapshot and snapshot.identity }
+        end,
         position = function(snapshot)
             local identity = snapshot and snapshot.identity
             calls.progress_position_identity = identity
@@ -208,6 +211,10 @@ do
                 cancelled = cancelled + 1
             end }
         end,
+        prefetchChaptersAsync = function(_, _, _, from_idx, count)
+            calls.prefetch = { from_idx = from_idx, count = count }
+            return { cancel = function() calls.prefetch_cancelled = true end }
+        end,
     }
     package.preload["apps/reader/readerui"] = function()
         return {
@@ -225,6 +232,9 @@ do
     stored_toc.chapters = toc
     local plugin = mkPlugin("/cache/1.html")
     Session.onReaderReady(plugin)
+
+    Assert.eq(calls.prefetch.from_idx, 1)
+    Assert.eq(calls.prefetch.count, 3)
 
     Assert.is_false(Session.onChapterBoundary(-1), "首章不能继续向前")
     Assert.is_true(Session.onChapterBoundary(1), "章末触发下一章")
@@ -252,6 +262,10 @@ do
             stored_toc.chapters = toc
             return asyncChapter("/cache/" .. idx .. ".html", cb)
         end,
+        prefetchChaptersAsync = function(_, _, _, from_idx, count)
+            calls.prefetch = { from_idx = from_idx, count = count }
+            return { cancel = function() end }
+        end,
     }
     local identity = { source_id = "moon", stable_id = "chapters", source = source,
         book = { source_id = "moon", stable_id = "chapters" } }
@@ -272,12 +286,13 @@ end
 -- .moon 外文档统一归 local，并按 local 属主源分发
 do
     local plugin, emitted = mkPlugin("/other/plain.epub")
+    local progress_before = #calls.progress
     Session.onReaderReady(plugin)
     Assert.not_nil(Session.current())
     Assert.eq(Session.current().identity.source_id, "local")
     Assert.eq(Session.current().identity.source.id, "local")
-    Assert.eq(calls.tracker[1][1], "start")
-    Assert.eq(calls.progress[1][1], "pull")
+    Assert.eq(calls.tracker[#calls.tracker][1], "start")
+    Assert.eq(calls.progress[progress_before + 1][1], "pull")
     Assert.eq(calls.reader[#calls.reader][1], "attach")
 end
 
@@ -416,6 +431,47 @@ do
     Assert.is_nil(calls.chapter[#calls.chapter], "章节落点不再由 chapters 门面处理")
     Session.onCloseDocument(plugin)
     Assert.is_false(Session.gotoChapter(1), "真关书清除目录状态")
+end
+
+-- 按章阅读：拦截 KOReader 原生 EndOfBook 弹窗，改由会话切下一章。
+do
+    local end_dialog = 0
+    local toc = { { idx = 1 }, { idx = 2 } }
+    stored_toc.chapters = toc
+    package.preload["apps/reader/readerui"] = function()
+        return {
+            instance = {
+                switchDocument = function(_, path)
+                    calls.switched_path = path
+                end,
+            },
+        }
+    end
+    package.loaded["apps/reader/readerui"] = nil
+    local source = {
+        openBookAsync = function(_, _, opts, cb)
+            return asyncChapter("/cache/" .. opts.chapter_idx .. ".html", cb)
+        end,
+        prefetchChaptersAsync = function()
+            return { cancel = function() end }
+        end,
+    }
+    resolved_source = source
+    local plugin = mkPlugin("/cache/1.html")
+    plugin.ui.name = "ReaderUI"
+    plugin.ui.status = {
+        onEndOfBook = function()
+            end_dialog = end_dialog + 1
+        end,
+    }
+    Session.onReaderReady(plugin)
+    Assert.is_true(plugin.ui._book_end_of_book_wrapped)
+    Assert.is_true(plugin.ui.status.onEndOfBook(plugin.ui.status))
+    Stubs.flush()
+    Assert.eq(end_dialog, 0, "切章成功时不弹原生结束对话框")
+    Assert.eq(calls.switched_path, "/cache/2.html")
+    Session.onCloseDocument(plugin)
+    resolved_source = nil
 end
 
 -- 已落盘章节文件冷打开时从数据库恢复目录和跨章导航。

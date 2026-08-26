@@ -90,8 +90,8 @@ do
     Assert.eq(Paths.fontsDir(), root .. "/fonts")
     Assert.eq(Paths.commonPath(), root .. "/settings/common.lua")
     Assert.eq(Paths.sourcePath("wechat"), root .. "/settings/wechat.lua")
-    -- sourcePath(nil) 默认 moon
-    Assert.eq(Paths.sourcePath(nil), root .. "/settings/moon.lua")
+    -- sourcePath(nil) 默认 local
+    Assert.eq(Paths.sourcePath(nil), root .. "/settings/local.lua")
 end
 
 -- ensureLayout：真实创建 .moon/cache/<source>/{book,image}，重复调用幂等

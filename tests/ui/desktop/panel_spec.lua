@@ -104,6 +104,10 @@ Assert.eq(sliders[1].value, 25)
 Assert.eq(sliders[2].kind, "warmth")
 Assert.eq(sliders[2].value, 25)
 
+-- 暖色本身已是 0..100，避免原生刻度往返在非整倍值上丢精度。
+powerd.warmth = 10
+Assert.eq(Panel.lightPercent("warmth"), 10)
+
 -- 启用顺序、去重与移动。
 settings.quick_panel_actions = {}
 Panel.setEnabled("rotate", true)

@@ -1,4 +1,4 @@
---[[-- ui.panel.actions.preset 离线用例。 --]]
+--[[-- ui.panel.actions.reader.preset 离线用例。 --]]
 
 local Assert = require("support.assert")
 
@@ -20,7 +20,7 @@ package.preload["ui.reader.layout"] = function()
     }
 end
 
-local Action = require("ui.panel.actions.preset")
+local Action = require("ui.panel.actions.reader.preset")
 Assert.eq(Action.id, "preset")
 Assert.eq(Action.title, "预设")
 Assert.eq(Action.scope, "reader")
