@@ -92,22 +92,6 @@ function Source.sections(ctx)
     }
     local sections = { { title = _("数据源"), rows = common_rows } }
 
-    local local_setting = loadSourceSetting("local")
-    if local_setting and (type(local_setting.rows) == "function" or type(local_setting.open) == "function") then
-        local status, status_on = local_setting.rowStatus()
-        local rows = type(local_setting.rows) == "function" and local_setting.rows(plugin) or { function(iw)
-            return SettingRow.build(iw, {
-                kind = "nav", icon = "folder", title = _("本地目录"),
-                status = status, status_on = status_on,
-                callback = function() local_setting.open(plugin) end,
-            })
-        end }
-        sections[#sections + 1] = {
-            title = _("本地"),
-            rows = rows,
-        }
-    end
-
     for _idx, meta in ipairs(enabled) do
         if meta.id ~= "local" then
             local mod = loadSourceSetting(meta.id)
@@ -129,6 +113,22 @@ function Source.sections(ctx)
                 }
             end
         end
+    end
+
+    local local_setting = loadSourceSetting("local")
+    if local_setting and (type(local_setting.rows) == "function" or type(local_setting.open) == "function") then
+        local status, status_on = local_setting.rowStatus()
+        local rows = type(local_setting.rows) == "function" and local_setting.rows(plugin) or { function(iw)
+            return SettingRow.build(iw, {
+                kind = "nav", icon = "folder", title = _("本地目录"),
+                status = status, status_on = status_on,
+                callback = function() local_setting.open(plugin) end,
+            })
+        end }
+        sections[#sections + 1] = {
+            title = _("本地"),
+            rows = rows,
+        }
     end
 
     local extra_rows = {}
