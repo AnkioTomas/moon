@@ -14,7 +14,7 @@ local M = {}
 
 local DEFAULTS = {
     common = {
-        active_source = "moon",
+        active_source = "local",
     },
     display = {
         ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,
@@ -33,7 +33,7 @@ local DEFAULTS = {
     pinyin = { pinyin_enabled = false },
     quickpanel = {
         quick_panel_actions = { "night", "wifi" },
-        quick_panel_reader_actions = { "toc", "bookmark", "highlights", "sync", "dictionary", "ocr" },
+        quick_panel_reader_actions = { "toc", "highlights", "dictionary", "ocr" },
         quick_panel_reader_action_layout_renamed = false,
     },
     reader = {
@@ -126,6 +126,14 @@ local function initialize()
         common_dirty = true
     end
     if fillDefaults(common.data, DEFAULTS.common) then common_dirty = true end
+    if common.data.active_source == "rss" then
+        common.data.active_source = "local"
+        common_dirty = true
+    end
+    if type(common.data.enabled_sources) == "table" and common.data.enabled_sources.rss ~= nil then
+        common.data.enabled_sources.rss = nil
+        common_dirty = true
+    end
     if common_dirty then common:flush() end
 end
 
@@ -200,7 +208,7 @@ function M.saveSource(id, values)
 end
 
 function M.activeSourceId()
-    return M.get("common").active_source or "moon"
+    return M.get("common").active_source or "local"
 end
 
 function M.ensureDeviceId()

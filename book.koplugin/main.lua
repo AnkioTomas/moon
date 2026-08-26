@@ -217,6 +217,22 @@ end
 ---@param filter table|nil 图书馆初始筛选（透传 Desktop.filter）
 ---@return nil
 function BookPlugin:openDesktop(filter)
+    -- 阅读中桌面宿主是 FileManager 实例：先退出阅读面板，再委托 FM 打开，
+    -- 避免把全屏桌面叠在未关闭的阅读器上。
+    if self.ui and self.ui.document then
+        if self.ui.onClose then self.ui:onClose() end
+        local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
+        if ok and FileManager then
+            if not FileManager.instance then FileManager:showFiles() end
+            local fm = FileManager.instance
+            local fm_plugin = fm and fm.book
+            if fm_plugin and type(fm_plugin.openDesktop) == "function" then
+                fm_plugin:openDesktop(filter)
+            end
+        end
+        return
+    end
+
     local source = self:getSource()
     if not source then
         UIManager:show(InfoMessage:new{ text = _("当前数据源不可用") })

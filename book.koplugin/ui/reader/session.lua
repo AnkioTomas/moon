@@ -13,6 +13,8 @@ local _ = require("gettext")
 
 local Session = {}
 
+local PREFETCH_AHEAD = 3
+
 ---@class ReaderSessionSnapshot
 ---@field ui table 当前 ReaderUI
 ---@field identity BookIdentity 当前物理文档身份
@@ -33,19 +35,24 @@ local Session = {}
 local current_session
 ---@type ReaderChapterSession|nil
 local chapter_session
+---@type { cancel: fun() }|nil
+local prefetch_job
+
+--- 取消在途预取任务。
+local function cancelPrefetch()
+    local job = prefetch_job
+    prefetch_job = nil
+    if job and job.cancel then job.cancel() end
+end
 
 --- 清除当前 ReaderUI 的章节导航状态。
 local function clearActiveChapter()
     local chapter = chapter_session
     chapter_session = nil
+    cancelPrefetch()
     if current_session then current_session.chapter = nil end
     local transition = chapter and chapter.transition
     if transition and transition.cancel then transition.cancel() end
-end
-
---- 清除章节状态并取消源侧任务。
-local function clearChapter()
-    clearActiveChapter()
 end
 
 --- 返回绑定当前物理文档的章节状态。
@@ -99,7 +106,7 @@ local function applyChapterTarget(chapter, ui)
     require("ui/uimanager"):nextTick(function()
         if activeChapter() ~= chapter or ui.document.file ~= target.path then return end
         local page
-        if within ~= nil and within > 0 and within < 1 then
+        if within ~= nil then
             within = require("types.book_progress").clampFraction(within)
             if ui.document.getXPointerFromProportion then
                 local xptr = ui.document:getXPointerFromProportion(within)
@@ -153,6 +160,17 @@ end
 local function wrapChapterReaderUi(ui)
     if not ui or ui.name ~= "ReaderUI" or ui._book_chapters_wrapped then return end
     ui._book_chapters_wrapped = true
+    local status = ui.status
+    if status and status.onEndOfBook and not ui._book_end_of_book_wrapped then
+        ui._book_end_of_book_wrapped = true
+        local original = status.onEndOfBook
+        status.onEndOfBook = function(self)
+            if Session.onChapterBoundary(1) then
+                return true
+            end
+            return original(self)
+        end
+    end
     wrapBoundary(ui.rolling, function(view)
         if view.view and view.view.view_mode == "scroll" then
             return view.current_pos
@@ -240,6 +258,20 @@ local function snapshot(session, page)
     session.percent = position.fraction * 100
 end
 
+--- 后台预取当前章之后的章节；切章/关书时取消。
+---@param chapter ReaderChapterSession
+local function schedulePrefetch(chapter)
+    cancelPrefetch()
+    if not chapter or chapter.transition then return end
+    local identity = chapter.identity
+    local source = identity and identity.source
+    local idx = identity and identity.chapter_idx
+    if not source or not idx or type(source.prefetchChaptersAsync) ~= "function" then
+        return
+    end
+    prefetch_job = source:prefetchChaptersAsync(identity, chapter.toc, idx, PREFETCH_AHEAD)
+end
+
 --- ReaderReady：按物理路径重建阅读快照并启动统计、进度和阅读 UI。
 ---@param plugin table Book 插件实例
 function Session.onReaderReady(plugin)
@@ -248,7 +280,7 @@ function Session.onReaderReady(plugin)
     local ui = plugin.ui
     local identity = Store.ensureIdentity(ui.document.file)
     if not identity then
-        clearChapter()
+        clearActiveChapter()
         local UIManager = require("ui/uimanager")
         local ConfirmBox = require("ui/widget/confirmbox")
         UIManager:show(ConfirmBox:new{
@@ -278,14 +310,26 @@ function Session.onReaderReady(plugin)
         else
             transition = { path = ui.document.file }
         end
+        local nav_target = transition.within ~= nil or transition.direction ~= nil
         clearActiveChapter()
         local chapter = { identity = identity, toc = toc, transition = transition }
         chapter_session = chapter
         current_session.chapter = chapter
         applyChapterTarget(chapter, ui)
         wrapChapterReaderUi(ui)
+        snapshot(current_session)
+        if not nav_target then
+            require("book.progress").applyLocalPending(current_session)
+            snapshot(current_session)
+        end
+        require("book.stats").start(current_session)
+        require("ui.reader").attach(plugin)
+        require("book.progress").pull(current_session)
+        require("book.note").pull(ui, identity)
+        schedulePrefetch(chapter)
+        return
     else
-        clearChapter()
+        clearActiveChapter()
     end
 
     snapshot(current_session)
@@ -330,7 +374,7 @@ function Session.onCloseDocument(plugin)
     syncReading(plugin, "document_close")
     local transition = chapter_session and chapter_session.transition
     if not (transition and transition.path) then
-        clearChapter()
+        clearActiveChapter()
         require("book.progress").clearConflicts()
     end
     current_session = nil
@@ -389,6 +433,7 @@ end
 ---@param idx integer
 ---@param opts { within: number|nil, direction: "prev"|"next"|nil }
 local function requestChapter(chapter, idx, opts)
+    cancelPrefetch()
     local current_idx = current_session.identity.chapter_idx
     local identity = chapter.identity
     chapter.transition = identity.source:openBookAsync(identity, { chapter_idx = idx }, function(path, err)
@@ -428,7 +473,11 @@ end
 ---@return boolean started
 function Session.gotoChapter(idx, opts)
     local chapter = activeChapter()
+    local current_idx = current_session and current_session.identity.chapter_idx
     if not chapter or chapter.transition or idx < 1 or idx > #chapter.toc then
+        return false
+    end
+    if current_idx and idx == current_idx then
         return false
     end
     requestChapter(chapter, idx, opts or {})

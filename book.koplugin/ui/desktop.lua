@@ -36,7 +36,7 @@ local StorePage = require("ui.desktop.store")
 local Insight = require("ui.desktop.insight")
 local Settings = require("ui.desktop.settings")
 local Detail = require("ui.desktop.detail")
-local NativePanel = require("ui.desktop.panel.native")
+local NativePanel = require("ui.panel.native")
 local Image = require("ui.components.image")
 local TopBar = require("ui.components.topbar")
 local BottomBar = require("ui.components.bottombar")
@@ -168,7 +168,7 @@ function Desktop:onSwipeTopBar(_, ges_ev)
     if type(ges_ev) ~= "table" or ges_ev.direction ~= "south" then
         return true
     end
-    NativePanel.show()
+    NativePanel.show("desktop")
     return true
 end
 
@@ -177,7 +177,7 @@ end
 ---@param _ges table|nil
 ---@return boolean
 function Desktop:onTapTopBar(_, _ges)
-    NativePanel.show()
+    NativePanel.show("desktop")
     return true
 end
 

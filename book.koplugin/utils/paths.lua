@@ -194,7 +194,7 @@ end
 ---@param id string|nil
 ---@return string
 function P.sourcePath(id)
-    id = tostring(id or "moon")
+    id = tostring(id or "local")
     return P.settingsDir() .. "/" .. id .. ".lua"
 end
 
