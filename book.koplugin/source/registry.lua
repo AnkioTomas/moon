@@ -34,7 +34,7 @@ local FACTORIES = {
     ["local"] = function() return require("source.local") end,
 }
 
--- 正式源（WebDAV 已具备列目录+下载）
+-- 正式源（WebDAV 已具备列目录+下载）；local 默认源，列表垫底
 local ORDER = { "moon", "wechat", "webdav", "copymanga", "local" }
 
 ---@type BookSource|nil
