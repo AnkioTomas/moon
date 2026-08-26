@@ -25,8 +25,6 @@ local Bars = {
     view = nil,
     ui = nil,
     _clock = nil,
-    _speed_key = nil,
-    _summary = nil,
 }
 
 --- 顶条时间文案。
@@ -53,27 +51,6 @@ function Bars.chapterTitle(cur, toc)
         return identity.book.title
     end
     return ""
-end
-
---- 剩余阅读时间估算（秒）；数据不足或已读完返回 nil。
----@param cur ReaderSessionSnapshot|nil
----@param summary { total_seconds: number, pages: number }|nil 单本书阅读统计
----@return number|nil
-function Bars.remainingSeconds(cur, summary)
-    if type(cur) ~= "table" or type(summary) ~= "table" then
-        return nil
-    end
-    local page = tonumber(cur.page)
-    local total = tonumber(cur.total_pages)
-    local total_seconds = tonumber(summary.total_seconds)
-    local pages = tonumber(summary.pages)
-    if not page or not total or total <= page then
-        return nil
-    end
-    if not total_seconds or total_seconds <= 0 or not pages or pages <= 0 then
-        return nil
-    end
-    return math.floor((total - page) * (total_seconds / pages))
 end
 
 --- 剩余阅读时间文案；不足一分钟时为空。
@@ -140,22 +117,6 @@ function Bars:startClock()
         self:startClock()
     end
     UIManager:scheduleIn(61 - tonumber(os.date("%S")), self._clock)
-end
-
---- 读取当前书的平均阅读时长统计，按身份缓存。
----@param identity BookIdentity|nil
----@return { total_seconds: number, pages: number }|nil
-local function summaryFor(identity)
-    if type(identity) ~= "table" or not identity.source_id or not identity.stable_id then
-        return nil
-    end
-    local key = identity.source_id .. "/" .. identity.stable_id
-    if Bars._speed_key == key then
-        return Bars._summary
-    end
-    Bars._speed_key = key
-    Bars._summary = require("utils.db.stats").summaryByBook(identity.source_id, identity.stable_id)
-    return Bars._summary
 end
 
 --- 顶/底条在正文上占用的高度，供正文 margin 让位。
@@ -239,9 +200,10 @@ function Bars:paintTo(bb, x, y)
         local bar_h = UI.sz(6)
         local gap = UI.sz(8)
         local bar_min = UI.sz(80)
-        local remaining = Bars.remainingSeconds(cur, summaryFor(cur.identity))
+        local Session = require("ui.reader.session")
+        local remaining = Session.remainingSeconds()
         local info = TextWidget:new{
-            text = Bars.progressText(cur, require("ui.reader.session").toc(), remaining),
+            text = Bars.progressText(cur, Session.toc(), remaining),
             face = UI.face("xx_smallinfofont", 12),
             fgcolor = UI.muted(),
             max_width = w - pad * 2 - gap - bar_min,
