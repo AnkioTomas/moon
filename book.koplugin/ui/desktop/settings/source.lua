@@ -47,6 +47,13 @@ local function pickSource(desktop, plugin, active_id)
     }
 end
 
+--- 弹出已启用数据源列表并切换当前源。
+---@param desktop table
+---@param plugin table|nil
+function Source.pickActive(desktop, plugin)
+    pickSource(desktop, plugin, MoonSettings.activeSourceId())
+end
+
 local function pickEnabledSources(desktop)
     local active_id = MoonSettings.activeSourceId()
     local items = {}
@@ -78,7 +85,7 @@ function Source.sections(ctx)
             return SettingRow.build(iw, {
                 kind = "nav", icon = "source", title = _("当前数据源"),
                 status = active_name, status_on = true,
-                callback = function() pickSource(desktop, plugin, active_id) end,
+                callback = function() Source.pickActive(desktop, plugin) end,
             })
         end,
         function(iw)

@@ -22,7 +22,8 @@ Desktop 顶部状态条（纯构建、无内部状态）。
   Desktop:rebuild() 会整页重建并再次调用 TopBar.build()。
   定时：Desktop:scheduleClockTick() 每分钟只调用 refreshTopBar()（换顶栏 + 区域 ui 刷新，不整页 rebuild）。
   事件：切源、切 tab、设置改完、封面 idle 回调等凡触发 rebuild 的路径也会刷新顶栏。
-  交互：本组件仍只负责展示；Desktop 在顶栏高度范围注册点击和向下滑手势。
+  交互：本组件仍只负责展示；Desktop 在顶栏高度范围注册点击和向下滑手势，
+  源名区域命中由 TopBar.sourceTapRect() 提供。
 
 @module koplugin.book.ui.components.topbar
 --]]
@@ -117,6 +118,41 @@ local function sourceName()
         return meta.name or meta.id
     end
     return id or _("未知源")
+end
+
+--- 当前源标签在屏幕上的可点区域（与 build 左栏布局一致）。
+---@return table|nil
+function TopBar.sourceTapRect()
+    local sw = Screen:getWidth()
+    local th = UI.topBarH()
+    local pad = UI.pagePad()
+    local gap_w = UI.sz(8)
+    local inner_w = sw - pad * 2
+
+    local clock = TextWidget:new{
+        text = datetime.secondsToHour(os.time(), G_reader_settings:isTrue("twelve_hour_clock")),
+        face = UI.face("xx_smallinfofont", 12),
+        fgcolor = Blitbuffer.COLOR_BLACK,
+    }
+    local source = Icon.label{
+        name = "source",
+        text = sourceName(),
+        size = ICON_SIZE,
+        font_size = 12,
+        gap = UI.sz(4),
+        max_width = math.floor(inner_w * 0.36),
+    }
+    local clock_size = clock:getSize()
+    local source_size = source:getSize()
+    if not clock_size or not source_size then
+        return nil
+    end
+    return Geom:new{
+        x = pad + clock_size.w + gap_w,
+        y = 0,
+        w = source_size.w,
+        h = th,
+    }
 end
 
 --- 构建一整条顶栏 widget（无缓存；调用方负责挂到 Desktop 并 setDirty）。
