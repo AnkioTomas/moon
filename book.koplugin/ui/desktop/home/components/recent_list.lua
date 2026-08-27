@@ -52,24 +52,80 @@ local function openHandlers(ctx)
     return on_open, on_read
 end
 
-local function coverCell(ctx, book, slot_w, cw, ch, on_open)
+local function coverCell(ctx, book, cell_w, cw, ch, on_open)
     local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, {
         badge = true,
         show_parent = ctx.desktop,
     }))
-    local tap = BookInfo.tappable(slot_w, ch, function()
+    local tap = BookInfo.tappable(cell_w, ch, function()
         if on_open then on_open(book) end
     end)
     tap[1] = LeftContainer:new{
-        dimen = Geom:new{ w = slot_w, h = ch },
+        dimen = Geom:new{ w = cell_w, h = ch },
         cover,
     }
     return tap, ch
 end
 
-local function buildGrid(ctx, books, w, pad, budget_h, page, on_open)
+--- hero 预览：固定封面宽，按 grid_max_cols 换行；末行不满列不拉伸。
+local function buildFillGrid(ctx, books, w, pad, max_h, on_open)
     local avail = math.max(1, w - pad * 2)
-    local slot_w, cw, ch, cols, cgap, row_gap = UI.denseCoverMetrics(avail, budget_h)
+    local _slot_w, cw, ch, cols, cgap, row_gap = UI.denseCoverMetrics(avail, max_h, {
+        gap = UI.sz(6),
+        row_gap = UI.sz(10),
+        title_extra = 0,
+        min_cols = 1,
+    })
+
+    local grid = VerticalGroup:new{ align = "left" }
+    local row_group = HorizontalGroup:new{}
+    local col_i = 0
+    local row_n = 0
+    local grid_h = 0
+
+    local function flushRow()
+        if row_n > 0 then
+            table.insert(grid, VerticalSpan:new{ width = row_gap })
+            grid_h = grid_h + row_gap
+        end
+        table.insert(grid, FrameContainer:new{
+            bordersize = 0,
+            padding = 0,
+            padding_left = pad,
+            padding_right = pad,
+            margin = 0,
+            row_group,
+        })
+        grid_h = grid_h + ch
+        row_group = HorizontalGroup:new{}
+        col_i = 0
+        row_n = row_n + 1
+    end
+
+    for _, book in ipairs(books) do
+        local cell = coverCell(ctx, book, cw, cw, ch, on_open)
+        if col_i > 0 then
+            table.insert(row_group, HorizontalSpan:new{ width = cgap })
+        end
+        table.insert(row_group, cell)
+        col_i = col_i + 1
+        if col_i >= cols then
+            flushRow()
+        end
+    end
+    if col_i > 0 then
+        flushRow()
+    end
+    return grid, grid_h, 1, 1
+end
+
+--- footer 分页：跟书架同一套密铺网格。
+local function buildPagedGrid(ctx, books, w, pad, budget_h, page, on_open)
+    local avail = math.max(1, w - pad * 2)
+    local _slot_w, cw, ch, cols, cgap, row_gap = UI.denseCoverMetrics(avail, budget_h, {
+        title_extra = 0,
+        min_cols = 1,
+    })
     local rows = math.max(1, math.floor((budget_h + row_gap) / (ch + row_gap)))
     local page_size = math.max(1, cols * rows)
     local pages = math.max(1, math.ceil(#books / page_size))
@@ -103,7 +159,7 @@ local function buildGrid(ctx, books, w, pad, budget_h, page, on_open)
     end
 
     for i = start_i, stop_i do
-        local cell = coverCell(ctx, books[i], slot_w, cw, ch, on_open)
+        local cell = coverCell(ctx, books[i], cw, cw, ch, on_open)
         if col_i > 0 then
             table.insert(row_group, HorizontalSpan:new{ width = cgap })
         end
@@ -252,11 +308,13 @@ function M.build(ctx, state, opts)
         end
         local band_h = consume and Pager.bandH() or 0
         local grid_budget = math.max(UI.sz(80), budget - band_h - used)
-        if not consume and not list_only then
-            grid_budget = math.min(grid_budget, UI.sz(160))
-        end
         local cur = (desktop and desktop._home_reading_page) or 1
-        local grid, grid_h, page, pages = buildGrid(ctx, grid_books, w, pad, grid_budget, cur, on_open)
+        local grid, grid_h, page, pages
+        if consume then
+            grid, grid_h, page, pages = buildPagedGrid(ctx, grid_books, w, pad, grid_budget, cur, on_open)
+        else
+            grid, grid_h, page, pages = buildFillGrid(ctx, grid_books, w, pad, grid_budget, on_open)
+        end
         if desktop then desktop._home_reading_page = page end
         table.insert(kids, grid)
         used = used + grid_h
