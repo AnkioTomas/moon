@@ -36,6 +36,19 @@ local SESSION_COOKIE_KEYS = { "wr_gid", "wr_fp", "wr_vid", "wr_skey", "wr_ql", "
 --- 扫码会话 guest cookie（仅内存，不落盘）
 local login_jar = {}
 
+--- 上次续期时间戳；续期冷却内不重复打 renewal。
+local last_renew_at = 0
+local RENEW_COOLDOWN = 600
+
+--- 续期进行中的等待队列（合并并发 renewal）。
+local renew_waiters = nil
+
+--- 微信会话失效 errcode（对齐 weread.koplugin）。
+local AUTH_ERRCODES = {
+    [-2012] = true,
+    [-2041] = true,
+}
+
 --- 合并浏览器默认请求头。
 ---@param extra table|nil
 ---@return table
@@ -333,31 +346,127 @@ local function checkWereadErr(data)
     return data
 end
 
---- Nonblocking authenticated GET.
----@param url string
----@param opts table|nil
+--- 判断响应是否属于会话失效（应尝试 renewal）。
+---@param data table|nil
+---@param err string|nil
+---@param http_code number|nil
+---@return boolean
+local function isAuthFailure(data, err, http_code)
+    if type(data) == "table" then
+        local code = tonumber(data.errcode or data.errCode)
+        if code and AUTH_ERRCODES[code] then
+            return true
+        end
+        local msg = tostring(data.errmsg or data.errMsg or "")
+        if msg:find("登录", 1, true) or msg:find("超时", 1, true) then
+            return true
+        end
+    end
+    if type(err) == "string" and (err:find("登录", 1, true) or err:find("超时", 1, true)) then
+        return true
+    end
+    local code = tonumber(http_code)
+    return code == 401 or code == 403
+end
+
+--- renewal 接口 succ 判定。
+---@param data table|nil
+---@return boolean
+local function isRenewSuccess(data)
+    return type(data) == "table" and (data.succ == 1 or data.succ == true)
+end
+
+--- 尝试 renewal；冷却内跳过；并发请求合并为一次 renewal。
+---@param cb fun(ok: boolean|nil, err: string|nil)
+local function tryRenewAsync(cb)
+    if renew_waiters then
+        renew_waiters[#renew_waiters + 1] = cb
+        return
+    end
+    if os.time() - last_renew_at < RENEW_COOLDOWN then
+        -- 冷却内不再打 renewal，但仍允许上层用现有 Cookie 重试一次。
+        cb(true)
+        return
+    end
+    renew_waiters = { cb }
+    Auth.renewCookieAsync(function(ok, err)
+        local waiters = renew_waiters
+        renew_waiters = nil
+        if ok then
+            last_renew_at = os.time()
+        end
+        for _, waiter in ipairs(waiters or {}) do
+            waiter(ok, err)
+        end
+    end)
+end
+
+--- 带会话失效自动 renewal + 单次重试的 HTTP 请求。
+---@param opts table Turbo request opts（含 skip_auth_retry）
 ---@param cb fun(raw: string|nil, err: string|nil, res: table|nil)
 ---@return { cancel: fun() }|nil
-function Auth.webGetAsync(url, opts, cb)
+local function sessionRequest(opts, cb)
     opts = opts or {}
     if not Auth.hasSession() then
         cb(nil, _("请先扫码登录微信读书"))
         return nil
     end
+    local retried = opts._auth_retried
+    opts._auth_retried = nil
+    local headers = Auth.sessionHeaders(opts.headers)
+    if opts.accept then
+        headers["Accept"] = opts.accept
+    end
+    if opts.content_type then
+        headers["Content-Type"] = opts.content_type
+    end
     return Request.request({
-        url = url,
-        method = "GET",
-        headers = Auth.sessionHeaders(opts.headers),
-        timeout = opts.block_timeout or 45,
+        url = opts.url,
+        method = opts.method or "GET",
+        body = opts.body,
+        headers = headers,
+        timeout = opts.block_timeout or opts.timeout or 45,
+        allow_redirects = opts.allow_redirects,
     }, function(res, err)
         if err then
             cb(nil, err, res)
-        elseif not Request.ok(res and res.code) then
-            cb(nil, "HTTP " .. tostring(res and res.code), res)
-        else
-            cb(res.body or "", nil, res)
+            return
         end
+        local code = res and res.code
+        local raw = res and res.body or ""
+        if not opts.skip_auth_retry and not retried then
+            local data = decodeJson(raw)
+            if isAuthFailure(data, nil, code) then
+                tryRenewAsync(function(renewed)
+                    if renewed then
+                        sessionRequest(setmetatable({ _auth_retried = true }, { __index = opts }), cb)
+                    else
+                        cb(nil, (type(data) == "table" and (data.errmsg or data.errMsg))
+                            or _("续期失败"), res)
+                    end
+                end)
+                return
+            end
+        end
+        if not Request.ok(code) then
+            cb(nil, "HTTP " .. tostring(code), res)
+            return
+        end
+        cb(raw, nil, res)
     end)
+end
+
+function Auth.webGetAsync(url, opts, cb)
+    opts = opts or {}
+    return sessionRequest({
+        url = url,
+        method = "GET",
+        headers = opts.headers,
+        accept = opts.accept,
+        block_timeout = opts.block_timeout,
+        allow_redirects = opts.allow_redirects,
+        skip_auth_retry = opts.skip_auth_retry,
+    }, cb)
 end
 
 --- Nonblocking authenticated POST.
@@ -368,27 +477,15 @@ end
 ---@return { cancel: fun() }|nil
 function Auth.webPostAsync(url, body, opts, cb)
     opts = opts or {}
-    if not Auth.hasSession() then
-        cb(nil, _("请先扫码登录微信读书"))
-        return nil
-    end
-    local headers = Auth.sessionHeaders(opts.headers)
-    headers["Content-Type"] = opts.content_type or "application/json"
-    return Request.request({
+    return sessionRequest({
         url = url,
         method = "POST",
         body = body,
-        headers = headers,
-        timeout = opts.block_timeout or 45,
-    }, function(res, err)
-        if err then
-            cb(nil, err, res)
-        elseif not Request.ok(res and res.code) then
-            cb(nil, "HTTP " .. tostring(res and res.code), res)
-        else
-            cb(res.body or "", nil, res)
-        end
-    end)
+        headers = opts.headers,
+        content_type = opts.content_type or "application/json",
+        block_timeout = opts.block_timeout,
+        skip_auth_retry = opts.skip_auth_retry,
+    }, cb)
 end
 
 --- Async JSON GET helper.
@@ -414,10 +511,13 @@ jsonGetAsync = function(base, path_query, check_err, cb)
     end)
 end
 
+--- App API（``i.weread.qq.com``）：仅移动端 ``accessToken``+``vid`` 鉴权。
+--- Web 扫码会话（Cookie + X-Vid + X-Skey）请求这些路径会稳定返回 -2012，请走 ``webApi*``。
 function Auth.apiGetAsync(path_query, cb)
     return jsonGetAsync(API, path_query, true, cb)
 end
 
+--- 见 ``apiGetAsync``：Web Cookie 不可用。
 function Auth.apiPostAsync(path, body_tbl, cb)
     return Auth.webPostAsync(absUrl(API, path), JSON.encode(body_tbl or {}), nil, function(raw, err)
         if not raw then
@@ -613,13 +713,20 @@ function Auth.renewCookieAsync(cb)
         return nil
     end
     return Request.request({
-        url = WEB .. "/",
-        method = "HEAD",
-        headers = Auth.sessionHeaders(),
+        url = WEB .. "/web/login/renewal",
+        method = "POST",
+        body = JSON.encode({ rq = "%2Fweb%2Fbook%2Fread", ql = false }),
+        headers = Auth.sessionHeaders({ ["Content-Type"] = "application/json" }),
         timeout = 20,
     }, function(res, err)
         if err then
             cb(nil, err)
+            return
+        end
+        local raw = res and res.body or ""
+        local data = decodeJson(raw)
+        if not isRenewSuccess(data) then
+            cb(nil, _("续期失败"))
             return
         end
         local set = parseSetCookie(asyncHeaders(res))
@@ -636,10 +743,14 @@ function Auth.renewCookieAsync(cb)
                     wr_ql = set.wr_ql or c.wr_ql,
                 }
             )
+            logger.info("weread cookie renewed")
             cb(true)
-        elseif not Request.ok(res and res.code) then
+            return
+        end
+        if not Request.ok(res and res.code) then
             cb(nil, _("续期失败 HTTP ") .. tostring(res and res.code))
         else
+            -- succ=1 但无 Set-Cookie：会话仍有效
             cb(true)
         end
     end)

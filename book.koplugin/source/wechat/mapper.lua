@@ -291,6 +291,7 @@ function Mapper.chapters(data, bookId)
                 source_idx = ch.chapterIdx or ch.idx,
                 uid = ch.chapterUid or ch.uid,
                 title = title,
+                tar = type(ch.tar) == "string" and ch.tar or nil,
             }
         end
     end
@@ -308,6 +309,7 @@ function Mapper.chapters(data, bookId)
             source_idx = ch.source_idx ~= nil and tostring(ch.source_idx) or nil,
             uid = ch.uid ~= nil and tostring(ch.uid) or nil,
             title = title,
+            tar = type(ch.tar) == "string" and ch.tar ~= "" and ch.tar or nil,
         }
     end
     if #chapters == 0 then
@@ -339,6 +341,25 @@ function Mapper.progress(data)
         chapter_fraction = tonumber(node.chapter_fraction or node.chapterOffset),
         locator = node.locator,
     }, chapter_uid
+end
+
+--- 书架 wire 附带进度条目 → pending_progress 候选。
+---@param shelf table|nil
+---@return table[] rows { stable_id, fraction, chapter_uid }
+function Mapper.shelfProgressRows(shelf)
+    local prog_map = Mapper.progressByBookId(shelf)
+    local rows = {}
+    for id, p in pairs(prog_map) do
+        local prog = tonumber(p.progress or p.readingProgress)
+        if prog and prog >= 0 then
+            rows[#rows + 1] = {
+                stable_id = id,
+                fraction = ProgressPosition.clampFraction(prog / 100),
+                chapter_uid = p.chapterUid or p.chapter_uid,
+            }
+        end
+    end
+    return rows
 end
 
 return Mapper

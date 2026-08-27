@@ -84,6 +84,11 @@ local WeChat = require("source.wechat")
 
 local REF = { source_id = "wechat", stable_id = "b1", book = { title = "微信书" } }
 
+do
+    local caps = WeChat.new():capabilities()
+    Assert.is_false(caps.scrape)
+end
+
 -- openBookAsync：源自己管理联网/进度 UI，成功首参只返回已入库物理路径。
 do
     chapter_open.path = "/cache/wechat/b1/2.html"
@@ -230,6 +235,64 @@ do
     handle.cancel()
     pending({ percent = 50 })
     Assert.is_false(fired)
+end
+
+-- listStoreAsync：无搜索词走分类榜单，有关键词走搜索
+do
+    local called
+    fake_client.storeCatalogAsync = function(_, opts, cb)
+        called = opts
+        cb({
+            books = {
+                { bookInfo = { bookId = "s1", title = "榜单书", cover = "https://cdn.example.com/s.jpg" } },
+            },
+        })
+        return { cancel = function() end }
+    end
+    fake_client.searchAsync = function(_, keyword, _, _, cb)
+        called = { search = keyword }
+        cb({ books = { { bookId = "k1", title = "搜索书" } } })
+        return { cancel = function() end }
+    end
+    local src = WeChat.new()
+    local result
+    src:listStoreAsync({ page_size = 40 }, function(res) result = res end)
+    Assert.eq(called.limit, 40)
+    Assert.eq(called.category, "all")
+    Assert.eq(#result.data, 1)
+    Assert.eq(result.data[1].stable_id, "s1")
+    Assert.not_nil(src:coverRequest({ source_id = "wechat", stable_id = "s1" }))
+
+    src:listStoreAsync({ search = "三体", page_size = 10, scope = 16 }, function(res) result = res end)
+    Assert.eq(called.search, "三体")
+    Assert.eq(#result.data, 1)
+    Assert.eq(result.data[1].stable_id, "k1")
+end
+
+-- addStoreBookAsync：加入书架后同步本地图书馆
+do
+    local added_id
+    fake_client.addToShelfAsync = function(_, book_id, cb)
+        added_id = book_id
+        cb({ succ = 1 })
+        return { cancel = function() end }
+    end
+    fake_client.shelfSyncAsync = function(_, cb)
+        cb({
+            books = { { bookId = added_id, title = "同步书" } },
+            bookProgress = {},
+        })
+        return { cancel = function() end }
+    end
+    local src = WeChat.new()
+    local ok, err, title
+    src:addStoreBookAsync({ stable_id = "s9", title = "测试书" }, function(v, e, t)
+        ok, err, title = v, e, t
+    end)
+    Assert.eq(added_id, "s9")
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(title, "测试书")
 end
 
 -- 封面缓存：syncBooksAsync 记住 http(s) 封面，非法 URL / 无封面不缓存

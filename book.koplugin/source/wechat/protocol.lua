@@ -8,10 +8,15 @@
 --]]
 
 local bit = require("bit")
-local md5 = require("ffi/sha2").md5
+local sha2 = require("ffi/sha2")
+local md5 = sha2.md5
+local sha256_hex = sha2.sha256
 local Text = require("utils.text")
 
 local Protocol = {}
+
+Protocol.USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0"
+Protocol.DEFAULT_READER_TOKEN = "3c5c8717f3daf09iop3423zafeqoi"
 
 --- 判断字符串是否全为数字。
 ---@param s any
@@ -276,6 +281,130 @@ end
 --- 拼接 e0+e1+e3（或 t0+t1）并解码为明文。
 ---@param ... string
 ---@return string|nil text, string|nil err
+--- 微信 Web 响应 succ 字段是否为成功。
+---@param data table|nil
+---@param field string|nil
+---@return boolean
+function Protocol.isSuccessResponse(data, field)
+    if type(data) ~= "table" then
+        return false
+    end
+    local value = data[field or "succ"]
+    return value == true or tonumber(value) == 1
+end
+
+--- 从 UA 推导 Web appId（阅读时长上报用）。
+---@param user_agent string|nil
+---@return string
+function Protocol.webAppId(user_agent)
+    user_agent = user_agent or Protocol.USER_AGENT
+    local prefix = {}
+    local count = 0
+    for part in user_agent:gmatch("%S+") do
+        count = count + 1
+        if count > 12 then break end
+        prefix[#prefix + 1] = tostring(#part % 10)
+    end
+    local hash = 0
+    for i = 1, #user_agent do
+        hash = bit.band(0x83 * hash + user_agent:byte(i), 0x7fffffff)
+    end
+    return "wb" .. table.concat(prefix) .. "h" .. tostring(hash)
+end
+
+--- UTF-8 前缀截断（最多 max_chars 个码点）。
+---@param value any
+---@param max_chars number|nil
+---@return string
+function Protocol.utf8Substr(value, max_chars)
+    local text = tostring(value or "")
+    local limit = math.max(0, math.floor(tonumber(max_chars) or 0))
+    local index, count = 1, 0
+    while index <= #text and count < limit do
+        local first = text:byte(index)
+        local width = 0
+        local second = text:byte(index + 1)
+        if first <= 0x7f then
+            width = 1
+        elseif first >= 0xc2 and first <= 0xdf
+            and second and second >= 0x80 and second <= 0xbf then
+            width = 2
+        elseif (first >= 0xe1 and first <= 0xec or first == 0xe0 or first == 0xee or first == 0xef)
+            and second and second >= 0x80 and second <= 0xbf then
+            width = 3
+        elseif (first >= 0xf0 and first <= 0xf4)
+            and second and second >= 0x80 and second <= 0xbf then
+            width = 4
+        else
+            break
+        end
+        for offset = 2, width - 1 do
+            local cont = text:byte(index + offset)
+            if not cont or cont < 0x80 or cont > 0xbf then
+                width = 0
+                break
+            end
+        end
+        if width == 0 then break end
+        index = index + width
+        count = count + 1
+    end
+    return text:sub(1, index - 1)
+end
+
+local function readPositionPayload(opts)
+    local now = opts.now or os.time()
+    local pc = opts.pclts or opts.pc
+    if pc == nil or pc == "" or tonumber(pc) == 0 then
+        pc = Protocol.encode(now)
+    end
+    local progress = math.floor(tonumber(opts.progress) or 0)
+    progress = math.max(0, math.min(100, progress))
+    return {
+        appId = opts.app_id or Protocol.webAppId(opts.user_agent),
+        b = Protocol.encode(opts.book_id),
+        c = Protocol.encode(opts.chapter_uid or 0),
+        ci = math.floor(tonumber(opts.chapter_idx) or 0),
+        co = math.max(0, math.floor(tonumber(opts.chapter_offset) or 0)),
+        sm = Protocol.utf8Substr(opts.summary, 20),
+        pr = progress,
+        ct = now,
+        ps = opts.psvts or opts.ps or "",
+        pc = pc,
+    }
+end
+
+--- 进入阅读会话 payload（web/book/read 首次）。
+---@param opts table
+---@return table
+function Protocol.makeEnterReadPayload(opts)
+    opts = opts or {}
+    local params = readPositionPayload(opts)
+    params.s = Protocol.sign(Protocol.sortedQuery(params))
+    return params
+end
+
+--- 周期性阅读时长 payload（web/book/read）。
+---@param opts table
+---@return table
+function Protocol.makeReadPayload(opts)
+    opts = opts or {}
+    local params = readPositionPayload(opts)
+    local now = params.ct
+    local ts = opts.ts or (now * 1000 + math.random(0, 999))
+    local rn = opts.rn or math.random(0, 999)
+    local token = opts.token
+    if token == nil or token == "" then
+        token = Protocol.DEFAULT_READER_TOKEN
+    end
+    params.rt = math.max(0, math.floor(tonumber(opts.elapsed_seconds) or 0))
+    params.ts = ts
+    params.rn = rn
+    params.sg = sha256_hex(tostring(ts) .. tostring(rn) .. token)
+    params.s = Protocol.sign(Protocol.sortedQuery(params))
+    return params
+end
+
 function Protocol.decodeShards(...)
     local parts = {}
     for i = 1, select("#", ...) do

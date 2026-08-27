@@ -10,6 +10,9 @@ local JSON = require("json")
 local logger = require("logger")
 local Auth = require("source.wechat.auth")
 local Protocol = require("source.wechat.protocol")
+local Context = require("source.wechat.context")
+local Annotations = require("source.wechat.annotations")
+local Assets = require("source.wechat.assets")
 local Text = require("utils.text")
 local _ = require("gettext")
 
@@ -101,6 +104,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
             fail(_("阅读页缺少 psvts"))
             return
         end
+        Context.rememberPsvts(bookId, uid, psvts)
         requestShard(uid, psvts, "/web/book/chapter/e_0", reader_url, false, function(e0, e0err)
             if not e0 then
                 fail(e0err)
@@ -137,10 +141,13 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                     local xhtml, decode_err = Protocol.decodeShards(e0, e1, e3)
                     if not xhtml then
                         fail(decode_err or _("章节解码失败"))
-                    elseif Text.looksLikeHtml(xhtml) then
-                        cb(xhtml)
                     else
-                        cb(Text.textToBody(xhtml))
+                        local fragment = Text.htmlBodyFragment(xhtml)
+                        if Text.looksLikeHtml(fragment) then
+                            cb(fragment)
+                        else
+                            cb(Text.textToBody(fragment))
+                        end
                     end
                 end)
             end)
@@ -161,14 +168,49 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
     end
     local title = (chapter and chapter.title)
         or string.format(_("第 %d 章"), tonumber(chapter and chapter.idx) or 0)
-    return Chapter.fetchHtmlAsync(bookId, chapter or {}, function(html, err)
+    local cancelled, decorate_job, asset_job = false, nil, nil
+    local reader_url = Protocol.readerUrl(bookId, chapter and chapter.uid)
+    local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter or {}, function(html, err)
+        if cancelled then return end
         if not html then
             logger.warn("weread chapter fetch", bookId, chapter and chapter.idx, err)
             cb(nil, err)
             return
         end
-        cb({ title = title, html = html })
+        asset_job = Assets.localizeAsync(bookId, chapter or {}, html, reader_url, function(localized)
+            if cancelled then return end
+            html = localized
+            local Client = require("source.wechat.client")
+            local client = Client:new()
+            local uid = chapter and chapter.uid
+            if not uid then
+                cb({ title = title, html = html })
+                return
+            end
+            decorate_job = client:chapterUnderlinesAsync(bookId, uid, function(wire, ul_err)
+                if cancelled then return end
+                if wire and type(wire.underlines) == "table" and #wire.underlines > 0 then
+                    local injected, css = Annotations.inject(html, wire.underlines)
+                    if css ~= "" and injected:find("<head", 1, true) then
+                        html = injected:gsub("<head>", "<head><style>" .. css .. "</style>", 1)
+                    else
+                        html = injected
+                    end
+                elseif ul_err then
+                    logger.dbg("wechat underlines skip", bookId, uid, ul_err)
+                end
+                cb({ title = title, html = html })
+            end)
+        end)
     end)
+    return {
+        cancel = function()
+            cancelled = true
+            if fetch_job and fetch_job.cancel then fetch_job:cancel() end
+            if asset_job and asset_job.cancel then asset_job:cancel() end
+            if decorate_job and decorate_job.cancel then decorate_job:cancel() end
+        end,
+    }
 end
 
 return Chapter

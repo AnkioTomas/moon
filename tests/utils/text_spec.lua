@@ -118,6 +118,21 @@ do
     Assert.is_false(Text.looksLikeHtml("plain line"))
     Assert.is_false(Text.looksLikeHtml(nil))
 
+    Assert.is_true(Text.hasRemoteImageSrc('<img src="https://cdn/x.png"/>'))
+    Assert.is_true(Text.hasRemoteImageSrc([[<img src="//cdn/x.png"/>]]))
+    Assert.is_true(Text.hasRemoteImageSrc([[<img src="https://x/a.png?q=1&amp;w=2"/>]]))
+    Assert.is_false(Text.hasRemoteImageSrc('<img src="data:image/png;base64,AAA"/>'))
+    Assert.is_false(Text.hasRemoteImageSrc('<img src="images/foo.png"/>'))
+    Assert.is_false(Text.hasRemoteImageSrc('<img src="foo.jpg"/>'))
+    Assert.is_false(Text.hasRemoteImageSrc("https://cdn/x.png"))
+    Assert.is_false(Text.hasRemoteImageSrc(nil))
+
+    Assert.eq(Text.htmlBodyFragment('<html><head><title>x</title></head><body><p>hi</p></body></html>'), "<p>hi</p>")
+    Assert.eq(Text.htmlBodyFragment('<html><body>title</body></html><html><body><p>main</p></body></html>'), "title\n<p>main</p>")
+    Assert.eq(Text.htmlBodyFragment('<body class="a"><div>1</div></body>'), "<div>1</div>")
+    Assert.eq(Text.htmlBodyFragment([[<?xml version="1.0"?><!DOCTYPE html><p>x</p>]]), "<p>x</p>")
+    Assert.eq(Text.htmlBodyFragment(nil), "")
+
     Assert.eq(Text.textToBody("hello\nworld"), "<p>hello</p>\n<p>world</p>")
     -- 空行跳过、行尾空白剥除、行首保留、内容转义
     Assert.eq(Text.textToBody("a  \n\n  b<c"), "<p>a</p>\n<p>  b&lt;c</p>")

@@ -95,6 +95,12 @@ do
 end
 
 do
+    local src, err = Registry.create("wechat")
+    Assert.is_true(src ~= nil, err)
+    Assert.is_false(src:capabilities().scrape)
+end
+
+do
     local src, err = Registry.create("nope")
     Assert.is_nil(src)
     Assert.is_true(type(err) == "string")

@@ -21,6 +21,13 @@ do
     Assert.is_nil(c.progress_pull)
     Assert.is_nil(c.progress_push)
     Assert.is_nil(c.stats_import)
+    Assert.is_false(SourceCapabilities.supportsScrape(nil))
+    Assert.is_false(SourceCapabilities.supportsScrape({ capabilities = function()
+        return { scrape = false }
+    end }))
+    Assert.is_true(SourceCapabilities.supportsScrape({ capabilities = function()
+        return { scrape = true }
+    end }))
 end
 
 do

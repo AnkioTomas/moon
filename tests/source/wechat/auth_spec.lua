@@ -497,6 +497,46 @@ do
 end
 
 ------------------------------------------------------------------------
+-- 会话失效自动 renewal + 重试
+------------------------------------------------------------------------
+
+do
+    local auth = freshAuth({ wr_skey = "old", wr_vid = "1" })
+    local calls = {}
+    state.json_map = {
+        ['{"errcode":-2012,"errmsg":"登录态失效"}'] = { errcode = -2012, errmsg = "登录态失效" },
+        ['{"succ":1}'] = { succ = 1 },
+        ['{"errcode":0,"ok":1}'] = { errcode = 0, ok = 1 },
+    }
+    state.request_impl = function(opts, cb)
+        calls[#calls + 1] = opts.url
+        if opts.url:find("/web/login/renewal", 1, true) then
+            cb({
+                code = 200,
+                body = '{"succ":1}',
+                headers = { ["set-cookie"] = "wr_skey=newkey; Path=/" },
+            })
+            return { cancel = function() end }
+        end
+        if #calls == 1 then
+            cb({ code = 200, body = '{"errcode":-2012,"errmsg":"登录态失效"}' })
+        else
+            cb({ code = 200, body = '{"errcode":0,"ok":1}' })
+        end
+        return { cancel = function() end }
+    end
+    local data, err
+    auth.apiGetAsync("/retry", function(d, e)
+        data, err = d, e
+    end)
+    Assert.is_nil(err)
+    Assert.eq(data.ok, 1)
+    Assert.eq(#calls, 3)
+    Assert.is_true(calls[2]:find("/web/login/renewal", 1, true) ~= nil)
+    Assert.eq(require("utils.settings").getSource("wechat").wr_skey, "newkey")
+end
+
+------------------------------------------------------------------------
 -- 清理：恢复本文件改动的 preload / loaded，避免污染同进程后续用例
 ------------------------------------------------------------------------
 

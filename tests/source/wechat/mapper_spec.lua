@@ -66,6 +66,42 @@ do
 end
 
 do
+    local chapters = Mapper.chapters({
+        data = {
+            {
+                bookId = "1",
+                updated = {
+                    { chapterIdx = 1, chapterUid = "u1", title = "图章", wordCount = 10, tar = "/web/tar/1" },
+                },
+            },
+        },
+    }, "1")
+    Assert.eq(chapters[1].tar, "/web/tar/1")
+end
+
+do
     local pos = Mapper.progress({ progress = 50, chapterUid = "u1" })
     Assert.eq(pos.fraction, 0.5)
+end
+
+do
+    local list = Mapper.searchList({
+        books = {
+            {
+                searchIdx = 1,
+                bookInfo = {
+                    bookId = "22946457",
+                    title = "围城",
+                    author = "钱钟书",
+                    cover = "http://x/c.jpg",
+                },
+            },
+        },
+        totalCount = 40,
+        hasMore = 1,
+    })
+    Assert.eq(#list.data, 1)
+    Assert.eq(list.data[1].stable_id, "22946457")
+    Assert.eq(list.data[1].title, "围城")
+    Assert.eq(list.data[1].authors, "钱钟书")
 end

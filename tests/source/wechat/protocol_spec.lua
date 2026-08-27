@@ -117,3 +117,25 @@ do
     Assert.is_nil(err)
     Assert.eq(text, "hello")
 end
+
+-- makeReadPayload：rt/ts/rn/sg 字段齐全
+do
+    local real_time, real_random = os.time, math.random
+    os.time = function() return 1700000000 end
+    math.random = function() return 42 end
+    local payload = Protocol.makeReadPayload({
+        book_id = "123",
+        chapter_uid = "9",
+        chapter_idx = 1,
+        progress = 50,
+        summary = "章节",
+        psvts = "abc",
+        elapsed_seconds = 30,
+    })
+    os.time = real_time
+    math.random = real_random
+    Assert.eq(payload.pr, 50)
+    Assert.eq(payload.rt, 30)
+    Assert.not_nil(payload.sg)
+    Assert.not_nil(payload.s)
+end
