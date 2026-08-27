@@ -494,6 +494,41 @@ function M.readerCurrentId(ui)
     return ""
 end
 
+--- KOReader ReaderFont:onSetFont 在 FontList 未命中或 font_face 已相同时静默 no-op；
+--- 全书偏好必须落到 document，不能依赖该路径。
+---@param ui table
+---@param face string
+---@return boolean
+local function setReaderFontFace(ui, face)
+    if type(face) ~= "string" or face == "" then
+        return false
+    end
+    ui.font.font_face = face
+    ui.document:setFontFace(face)
+    ui.font:onSaveSettings()
+    if ui.handleEvent then
+        ui:handleEvent(require("ui/event"):new("UpdatePos"))
+    end
+    return true
+end
+
+--- 把已解析的 CRE 字体名写入当前文档与 sidecar（不写 books.reader_prefs）。
+---@param ui table|nil
+---@param face string
+---@param id string|nil
+---@param name string|nil
+---@return boolean
+function M.applyFaceToReader(ui, face, id, name)
+    if not M.supportsReader(ui) or not setReaderFontFace(ui, face) then
+        return false
+    end
+    id = sanitizeId(id or "")
+    ui.doc_settings:saveSetting("book_reader_font_id", id)
+    ui.doc_settings:saveSetting("book_reader_font_name", name or id)
+    ui.doc_settings:flush()
+    return true
+end
+
 ---@param ui table|nil
 ---@param id string
 ---@param name string|nil
@@ -506,11 +541,9 @@ function M.applyToReader(ui, id, name)
     if not face then
         return nil, err
     end
-    ui.font:onSetFont(face)
-    ui.font:onSaveSettings()
-    id = sanitizeId(id)
-    ui.doc_settings:saveSetting("book_reader_font_id", id)
-    ui.doc_settings:saveSetting("book_reader_font_name", name or id)
+    if not M.applyFaceToReader(ui, face, id, name) then
+        return nil, _("应用字体失败")
+    end
     require("book.reader_prefs").captureAndSave(ui)
     require("ui/uimanager"):setDirty(ui.dialog, "ui")
     return true

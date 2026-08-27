@@ -86,22 +86,35 @@ end
 package.preload["ui/uimanager"] = function()
     return { setDirty = function() end }
 end
+package.preload["ui/event"] = function()
+    return { new = function(_, name) return { name = name } end }
+end
+package.preload["book.reader_prefs"] = function()
+    return { captureAndSave = function() end }
+end
 
 package.loaded["utils.font"] = nil
 local MoonFont = require("utils.font")
 
-local ui = {
+local ui
+ui = {
     font = {
         font_face = "Old",
         onSetFont = function(self, face) self.font_face = face end,
-        onSaveSettings = function() end,
+        onSaveSettings = function(self)
+            self.saved_face = self.font_face
+        end,
     },
-    document = { setFontFace = function() end },
+    document = {
+        setFontFace = function(_, face) ui.document.face = face end,
+    },
     doc_settings = {
         data = {},
         saveSetting = function(self, key, value) self.data[key] = value end,
         readSetting = function(self, key) return self.data[key] end,
+        flush = function() end,
     },
+    handleEvent = function() end,
     dialog = {},
 }
 
@@ -117,5 +130,16 @@ local ok, apply_err = MoonFont.applyToReader(ui, "reader-font.ttf", "Demo")
 Assert.is_true(ok)
 Assert.is_nil(apply_err)
 Assert.eq(ui.font.font_face, "Reader Demo")
+Assert.eq(ui.document.face, "Reader Demo")
+Assert.eq(ui.font.saved_face, "Reader Demo")
 Assert.eq(ui.doc_settings.data.book_reader_font_id, "reader-font.ttf")
 Assert.eq(MoonFont.readerCurrentId(ui), "reader-font.ttf")
+
+local ok_face = MoonFont.applyFaceToReader(ui, "Reader Demo", "reader-font.ttf", "Demo")
+Assert.is_true(ok_face)
+Assert.eq(ui.document.face, "Reader Demo")
+
+ui.font.font_face = "Reader Demo"
+ui.document.face = nil
+Assert.is_true(MoonFont.applyFaceToReader(ui, "Reader Demo", "reader-font.ttf", "Demo"))
+Assert.eq(ui.document.face, "Reader Demo")
