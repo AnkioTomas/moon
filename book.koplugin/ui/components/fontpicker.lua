@@ -34,6 +34,8 @@ local TABS = {
 ---@class FontPickerOpts
 ---@field title string|nil
 ---@field on_done fun(id: string, name: string)|nil
+---@field current_id fun(): string|nil|nil
+---@field on_select fun(item: MoonFontItem|table, id: string, name: string)|nil
 
 ---@param it MoonFontItem|table
 ---@param pw number
@@ -74,7 +76,13 @@ end
 ---@param opts FontPickerOpts|table
 ---@param id string
 ---@param name string
-local function saveSelection(opts, id, name)
+---@param item MoonFontItem|table|nil
+local function saveSelection(opts, id, name, item)
+    if opts.on_select then
+        opts.on_select(item or { id = id, name = name }, id, name)
+        if opts.on_done then opts.on_done(id, name) end
+        return
+    end
     MoonFont.set(id, name)
     UIManager:show(InfoMessage:new{
         text = T(_("已选择：%1"), name),
@@ -108,7 +116,7 @@ local function downloadAndSave(opts, item)
             dialog:close()
         end
         if ok then
-            saveSelection(opts, id, name)
+            saveSelection(opts, id, name, item)
         else
             UIManager:show(InfoMessage:new{ text = err or _("字体下载失败") })
         end
@@ -144,7 +152,7 @@ end
 ---@param opts FontPickerOpts|table
 ---@param items MoonFontItem[]|table|nil
 local function showPicker(opts, items)
-    local cur = MoonFont.currentId()
+    local cur = (opts.current_id and opts.current_id()) or MoonFont.currentId()
     local groups = { weread = {}, ["local"] = {}, system = {} }
     local active = "weread"
     for _, it in ipairs(items or {}) do
@@ -166,7 +174,7 @@ local function showPicker(opts, items)
     local function select(item)
         if menu then UIManager:close(menu); menu = nil end
         if item.kind == "local" or item.kind == "system" or MoonFont.isInstalled(item) then
-            saveSelection(opts, item.id, item.name or item.id)
+            saveSelection(opts, item.id, item.name or item.id, item)
         else
             NetworkMgr:runWhenOnline(function() downloadAndSave(opts, item) end)
         end

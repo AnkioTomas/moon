@@ -29,6 +29,7 @@ local Source = require("ui.desktop.settings.source")
 local Display = require("ui.desktop.settings.display")
 local Lockscreen = require("ui.desktop.settings.lockscreen")
 local DesktopSettings = require("ui.desktop.settings.desktop")
+local HomeSettings = require("ui.desktop.settings.home")
 local Language = require("ui.desktop.settings.language")
 local QuickPanel = require("ui.panel.settings")
 local Maintenance = require("ui.desktop.settings.maintenance")
@@ -107,7 +108,7 @@ function Settings.build(desktop)
     local sub = desktop._settings_sub
     local valid_sub = {
         sources = true, display = true, lockscreen = true, desktop = true,
-        language = true, remote = true, quickpanel = true, ai = true,
+        home = true, language = true, remote = true, quickpanel = true, ai = true,
     }
     if sub ~= nil and not valid_sub[sub] then
         sub = nil
@@ -196,6 +197,8 @@ function Settings.build(desktop)
             appendSection(packed, card_w, _("锁屏"), Lockscreen.rows(desktop))
         elseif sub == "desktop" then
             appendSection(packed, card_w, _("桌面"), DesktopSettings.rows(desktop, open_on))
+        elseif sub == "home" then
+            appendSection(packed, card_w, _("首页布局"), HomeSettings.rows(desktop))
         elseif sub == "language" then
             appendSection(packed, card_w, _("语言与输入"), Language.rows(desktop))
         elseif sub == "remote" then

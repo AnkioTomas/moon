@@ -2,9 +2,12 @@
 @module koplugin.book.ui.desktop.settings.desktop
 --]]
 
+local MoonSettings = require("utils.settings")
+local Base = require("ui.desktop.home.components.base")
 local SettingRow = require("ui.components.settingrow")
 local Host = require("host")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local DesktopSettings = {}
 
@@ -12,6 +15,7 @@ local DesktopSettings = {}
 ---@param open_on boolean
 ---@return table
 function DesktopSettings.rows(desktop, open_on)
+    local count = #Base.enabledLayout()
     return {
         function(iw)
             return SettingRow.build(iw, {
@@ -26,7 +30,13 @@ function DesktopSettings.rows(desktop, open_on)
         end,
         function(iw)
             return SettingRow.build(iw, {
-                kind = "action", icon = "more_horiz", title = _("其他"), status = _("敬请期待"),
+                kind = "nav", icon = "home", title = _("首页布局"),
+                status = T(_("已启用 %1 项"), count), status_on = count > 0,
+                callback = function()
+                    desktop._settings_sub = "home"
+                    desktop._settings_page = 1
+                    desktop:rebuild()
+                end,
             })
         end,
     }
