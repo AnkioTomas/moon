@@ -6,6 +6,7 @@
 
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
+local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
@@ -20,6 +21,7 @@ local T = require("ffi/util").template
 local M = {
     id = "stats",
     label = _("阅读统计"),
+    icon = "insights",
 }
 
 local function recordCard(width, value, label)
@@ -61,6 +63,8 @@ end
 ---@return table
 function M.build(ctx, state, opts)
     local w = opts.width
+    local margin = UI.sz(10)
+    local inner_w = math.max(1, w - margin * 2)
     local stats = state.stats or {}
     local gap = UI.sz(8)
     local items = {
@@ -68,7 +72,7 @@ function M.build(ctx, state, opts)
         { value = stats.total_text or "—", label = _("总阅读") },
         { value = stats.today_text or "—", label = _("今日阅读") },
     }
-    local card_w = math.floor((w - gap * (#items - 1)) / #items)
+    local card_w = math.floor((inner_w - gap * (#items - 1)) / #items)
     local row = HorizontalGroup:new{ align = "center" }
     local row_h = 0
     for i, item in ipairs(items) do
@@ -77,7 +81,20 @@ function M.build(ctx, state, opts)
         row_h = math.max(row_h, card_h)
         table.insert(row, card)
     end
-    return { widget = row, height = row_h }
+    local pad_y = UI.sz(4)
+    local total_h = row_h + pad_y * 2
+    local widget = FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        padding_left = margin,
+        padding_right = margin,
+        padding_top = pad_y,
+        padding_bottom = pad_y,
+        margin = 0,
+        dimen = Geom:new{ w = w, h = total_h },
+        row,
+    }
+    return { widget = widget, height = total_h }
 end
 
 return M

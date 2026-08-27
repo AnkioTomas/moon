@@ -274,7 +274,6 @@ function Desktop:sourceChanged(source)
     self.source_generation = (self.source_generation or 0) + 1
     for _, key in ipairs({
         "_home_fetch_cancel",
-        "_home_quote_job",
         "_library_fetch_cancel",
         "_store_fetch_cancel",
         "_insight_fetch_cancel",
@@ -461,7 +460,6 @@ function Desktop:onClose()
     end
     for _, key in ipairs({
         "_home_fetch_cancel",
-        "_home_quote_job",
         "_library_fetch_cancel",
         "_store_fetch_cancel",
         "_insight_fetch_cancel",

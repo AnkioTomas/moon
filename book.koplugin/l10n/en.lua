@@ -740,4 +740,7 @@ return {
     ["组件排序"] = "Component order",
     ["点按可上移或下移"] = "Tap to move up or down",
     ["第 %1 位"] = "#%1",
+    ["星期"] = "Week ",
+    ["布局"] = "Layout",
+    ["已启用"] = "Enabled",
 }

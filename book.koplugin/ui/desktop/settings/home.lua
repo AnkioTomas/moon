@@ -120,6 +120,7 @@ local function openSortList(desktop)
         if comp then
             items[#items + 1] = {
                 text = comp.label,
+                icon = comp.icon,
                 mandatory = T(_("第 %1 位"), i),
                 callback = function()
                     configure(desktop, comp)
@@ -144,7 +145,7 @@ local function componentRow(desktop, comp, enabled, pos)
         end
         return SettingRow.build(iw, {
             kind = "nav",
-            icon = "widgets",
+            icon = comp.icon or "widgets",
             title = comp.label,
             status = status,
             status_on = enabled,
@@ -155,7 +156,7 @@ end
 
 ---@param desktop table
 ---@return table
-function HomeSettings.rows(desktop)
+function HomeSettings.sections(desktop)
     local home = MoonSettings.get("home")
     local mode = home.home_recent_list_mode or "hero_grid"
     local mode_label = mode == "list_only" and _("纯列表") or _("长条+列表")
@@ -164,7 +165,8 @@ function HomeSettings.rows(desktop)
     for i, id in ipairs(layout) do
         enabled_set[id] = i
     end
-    local rows = {
+
+    local layout_rows = {
         function(iw)
             return SettingRow.build(iw, {
                 kind = "nav",
@@ -178,7 +180,7 @@ function HomeSettings.rows(desktop)
         function(iw)
             return SettingRow.build(iw, {
                 kind = "nav",
-                icon = "dashboard_customize",
+                icon = "grid_view",
                 title = _("最近阅读列表形态"),
                 status = mode_label,
                 status_on = true,
@@ -200,18 +202,32 @@ function HomeSettings.rows(desktop)
             })
         end,
     }
+
+    local enabled_rows = {}
     for i, id in ipairs(layout) do
         local comp = Base.find(id)
         if comp then
-            rows[#rows + 1] = componentRow(desktop, comp, true, i)
+            enabled_rows[#enabled_rows + 1] = componentRow(desktop, comp, true, i)
         end
     end
+
+    local disabled_rows = {}
     for i, comp in ipairs(Base.components) do
         if not enabled_set[comp.id] then
-            rows[#rows + 1] = componentRow(desktop, comp, false, nil)
+            disabled_rows[#disabled_rows + 1] = componentRow(desktop, comp, false, nil)
         end
     end
-    return rows
+
+    local sections = {
+        { title = _("布局"), rows = layout_rows },
+    }
+    if #enabled_rows > 0 then
+        sections[#sections + 1] = { title = _("已启用"), rows = enabled_rows }
+    end
+    if #disabled_rows > 0 then
+        sections[#sections + 1] = { title = _("未启用"), rows = disabled_rows }
+    end
+    return sections
 end
 
 return HomeSettings

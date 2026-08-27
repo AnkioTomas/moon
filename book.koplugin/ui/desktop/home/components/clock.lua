@@ -6,6 +6,7 @@
 
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
+local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
@@ -16,10 +17,13 @@ local _ = require("gettext")
 local M = {
     id = "clock",
     label = _("时钟"),
+    icon = "schedule",
 }
 
-local function clockHeight()
-    return UI.sz(72)
+local DOW = { _("日"), _("一"), _("二"), _("三"), _("四"), _("五"), _("六") }
+
+local function clockBodyHeight()
+    return UI.sz(56)
 end
 
 ---@param ctx table
@@ -28,11 +32,14 @@ end
 ---@return table
 function M.build(ctx, _state, opts)
     local w = opts.width
-    local h = clockHeight()
+    local pad_y = UI.sz(10)
+    local body_h = clockBodyHeight()
+    local total_h = body_h + pad_y * 2
     local time_text = os.date("%H:%M")
-    local date_text = os.date("%Y-%m-%d %A")
-    local widget = CenterContainer:new{
-        dimen = Geom:new{ w = w, h = h },
+    local wday = tonumber(os.date("%w")) or 0
+    local date_text = os.date("%Y-%m-%d") .. " " .. _("星期") .. DOW[wday + 1]
+    local body = CenterContainer:new{
+        dimen = Geom:new{ w = w, h = body_h },
         VerticalGroup:new{
             align = "center",
             TextWidget:new{
@@ -48,7 +55,16 @@ function M.build(ctx, _state, opts)
             },
         },
     }
-    return { widget = widget, height = h }
+    local widget = FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        padding_top = pad_y,
+        padding_bottom = pad_y,
+        margin = 0,
+        dimen = Geom:new{ w = w, h = total_h },
+        body,
+    }
+    return { widget = widget, height = total_h }
 end
 
 return M

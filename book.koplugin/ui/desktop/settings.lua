@@ -198,7 +198,9 @@ function Settings.build(desktop)
         elseif sub == "desktop" then
             appendSection(packed, card_w, _("桌面"), DesktopSettings.rows(desktop, open_on))
         elseif sub == "home" then
-            appendSection(packed, card_w, _("首页布局"), HomeSettings.rows(desktop))
+            for _idx, section in ipairs(HomeSettings.sections(desktop)) do
+                appendSection(packed, card_w, section.title, section.rows)
+            end
         elseif sub == "language" then
             appendSection(packed, card_w, _("语言与输入"), Language.rows(desktop))
         elseif sub == "remote" then
