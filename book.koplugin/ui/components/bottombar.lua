@@ -26,12 +26,13 @@ local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
+local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
+local InputContainer = require("ui/widget/container/inputcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local TextWidget = require("ui/widget/textwidget")
-local Button = require("ui/widget/button")
 local Screen = Device.screen
 
 local UI = require("ui.components.bookui")
@@ -92,17 +93,24 @@ function BottomBar.build(tabs, active, on_tab, parent)
         }
         local cell = cell_content
         if on_tab then
-            cell = Button:new{
-                width = cell_w,
-                height = bh - UI.line(),
-                bordersize = 0,
-                padding = 0,
-                text = tab.text,
-                icon = tab.icon,
-                text_font_bold = is_active,
-                callback = function() on_tab(tab.id) end,
-                show_parent = parent,
+            local cell_h = bh - UI.line()
+            local tap_dimen = Geom:new{ w = cell_w, h = cell_h }
+            local tap = InputContainer:new{ dimen = tap_dimen }
+            tap.ges_events = {
+                TapBottomTab = {
+                    GestureRange:new{
+                        ges = "tap",
+                        range = function() return tap:getSize() end,
+                    },
+                },
             }
+            ---@return boolean
+            tap.onTapBottomTab = function()
+                on_tab(tab.id)
+                return true
+            end
+            tap[1] = cell_content
+            cell = tap
         end
         table.insert(row, cell)
     end

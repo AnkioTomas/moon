@@ -1,4 +1,4 @@
---[[-- xray.store：别名去重与 timeline TOC 对齐。 --]]
+--[[-- xray.store：别名去重。 --]]
 
 local Assert = require("support.assert")
 local Json = require("support.json_stub")
@@ -40,20 +40,12 @@ for _, e in ipairs(merged) do
     if e.kind == "character" then john = e end
 end
 Assert.is_true(john ~= nil)
-Assert.eq(john.name, "John Doe")
+Assert.eq(john.name, "John")
 Assert.eq(john.payload.role, "hero")
 Assert.eq(john.payload.description, "grown")
-
-local aligned = Store.alignTimeline({
-    { chapter = "Chapter 2", event = "leaves" },
-    { chapter = "Chapter 1", event = "arrives" },
-}, {
-    { title = "Chapter 1", page = 10 },
-    { title = "Chapter 2", page = 20 },
-})
-Assert.eq(#aligned, 2)
-Assert.eq(aligned[1].chapter, "Chapter 1")
-Assert.eq(aligned[1].page, 10)
-Assert.eq(aligned[1].sort_idx, 1)
-Assert.eq(aligned[2].chapter, "Chapter 2")
-Assert.eq(aligned[2].sort_idx, 2)
+local aliases = {}
+for _, alias in ipairs(john.aliases or {}) do aliases[#aliases + 1] = alias end
+Assert.is_true(
+    aliases[1] == "John Doe" or aliases[2] == "John Doe",
+    "alternate name should become alias"
+)

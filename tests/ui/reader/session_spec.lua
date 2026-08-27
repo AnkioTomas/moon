@@ -164,6 +164,17 @@ package.preload["ui/widget/infomessage"] = function()
     return { new = function(_, opts) return opts end }
 end
 
+package.preload["utils.db.stats"] = function()
+    return {
+        summaryByBook = function(source_id, stable_id)
+            if source_id == "moon" and (stable_id == "b1" or stable_id == "chapters") then
+                return { total_seconds = 6000, pages = 100, last_read = 0 }
+            end
+            return { total_seconds = 0, pages = 0, last_read = 0 }
+        end,
+    }
+end
+
 local Session = require("ui.reader.session")
 
 local function asyncChapter(path, cb)
@@ -509,11 +520,34 @@ do
     Assert.eq(emitted[#emitted].source.id, "moon", "document_close 事件路由到属主源")
 end
 
+-- remainingSeconds：全书比例 × 历史时长线性外推；无会话或数据不足返回 nil
+do
+    local plugin, _ = mkPlugin("/x/book.epub")
+    Session.onReaderReady(plugin)
+    Assert.eq(Session.remainingSeconds(), 18000)
+    Session.onCloseDocument(plugin)
+    Assert.is_nil(Session.remainingSeconds())
+end
+do
+    local plugin, _ = mkPlugin("/other/plain.epub")
+    Session.onReaderReady(plugin)
+    Assert.is_nil(Session.remainingSeconds())
+end
+do
+    resolved_source = default_source
+    stored_toc.chapters = { { idx = 1 }, { idx = 2 } }
+    local plugin, _ = mkPlugin("/cache/1.html")
+    Session.onReaderReady(plugin)
+    Assert.eq(Session.remainingSeconds(), 2000)
+    Session.onCloseDocument(plugin)
+end
+
 -- 清理：fake 经 package.preload 安装，runner 只清 package.loaded。
 for _, name in ipairs({
     "book.store", "book.stats", "book.progress",
     "book.note",
     "ui.reader",
+    "utils.db.stats",
     "ui/widget/confirmbox",
     "ui/widget/infomessage",
     "apps/reader/readerui",

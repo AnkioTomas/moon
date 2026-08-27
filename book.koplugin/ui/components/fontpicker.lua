@@ -25,7 +25,11 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 
 local FontPicker = {}
-local TABS = { { "weread", "在线" }, { "local", "本地" }, { "system", "系统" } }
+local TABS = {
+    { "weread", "在线", "cloud" },
+    { "local", "本地", "folder" },
+    { "system", "系统", "desktop_windows" },
+}
 
 ---@class FontPickerOpts
 ---@field title string|nil
@@ -176,7 +180,7 @@ local function showPicker(opts, items)
     end
     local tabs = {}
     for i, tab in ipairs(TABS) do
-        tabs[i] = { id = tab[1], text = _(tab[2]) }
+        tabs[i] = { id = tab[1], text = _(tab[2]), icon = tab[3] }
     end
     local rows, initial_sources = rowsFor(active)
     sources.list = initial_sources

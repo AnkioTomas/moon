@@ -5,15 +5,21 @@ Popup 列表的共享底座：Menu 构造与项内嵌控件，不含单选/多�
 @module koplugin.book.ui.components.popup.list
 --]]
 
+local Blitbuffer = require("ffi/blitbuffer")
+local CenterContainer = require("ui/widget/container/centercontainer")
+local Geom = require("ui/geometry")
+local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local Button = require("ui/widget/button")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local InputContainer = require("ui/widget/container/inputcontainer")
 local Menu = require("ui/widget/menu")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local UI = require("ui.components.bookui")
 local Image = require("ui.components.image")
 local Icon = require("ui.components.icon")
+local Surface = require("ui.components.surface")
 
 local List = {}
 
@@ -96,6 +102,59 @@ function List.withChoiceMark(inner, inner_w, selected, multi, opts)
         HorizontalSpan:new{ width = gap },
         inner,
     }, icon_sz + gap + inner_w
+end
+
+--- Material 图标标题栏左侧操作（与阅读面板头部同款胶囊按钮）。
+--- TitleBar 居中布局会为右侧关闭键对称预留左侧空位，按钮叠在预留区即可。
+--- title_shrink_font_to_fit 下 setTitle 会 clear+init，左侧按钮须每次重挂。
+---@param title_bar table
+---@param opts table
+local function attachMaterialLeftAction(title_bar, opts)
+    if not opts.title_material_icon then
+        return
+    end
+    local function insertLeft()
+        local btn_w = UI.sz(44)
+        local bar_h = title_bar:getHeight()
+        local dimen = Geom:new{ w = btn_w, h = bar_h }
+        local tap = InputContainer:new{
+            dimen = dimen,
+            overlap_align = "left",
+        }
+        tap.ges_events = {
+            TapTitleAction = {
+                GestureRange:new{
+                    ges = "tap",
+                    range = function() return tap:getSize() end,
+                },
+            },
+        }
+        ---@return boolean
+        tap.onTapTitleAction = function()
+            if opts.on_left_tap then opts.on_left_tap() end
+            return true
+        end
+        tap[1] = CenterContainer:new{
+            dimen = dimen,
+            Surface.pill(Icon.widget{
+                name = opts.title_material_icon,
+                size = 22,
+                color = Blitbuffer.COLOR_BLACK,
+            }, {
+                width = btn_w,
+                height = UI.sz(36),
+                background = UI.surface(),
+                shadow = false,
+            }),
+        }
+        table.insert(title_bar, tap)
+    end
+    insertLeft()
+    local orig_setTitle = title_bar.setTitle
+    title_bar.setTitle = function(self, title, no_refresh)
+        orig_setTitle(self, title, no_refresh)
+        insertLeft()
+    end
 end
 
 --- 底部 Tab 栏（仅全屏列表）：完整 pager 行之下再加一行全宽等分 Tab。
@@ -222,7 +281,7 @@ function List.openList(opts, normalize)
         covers_fullscreen = opts.centered ~= true,
         width = opts.centered and (opts.width or UI.sz(420)) or opts.width,
         height = opts.centered and (opts.height or centered_height) or opts.height,
-        title_bar_left_icon = opts.title_icon,
+        title_bar_left_icon = opts.title_material_icon and nil or opts.title_icon,
         items_font_size = UI.menuFontSize(),
         title_shrink_font_to_fit = true,
         state_w = (state_w and state_w > 0) and state_w or nil,
@@ -236,8 +295,16 @@ function List.openList(opts, normalize)
     }
     holder.menu = menu
 
+    if opts.title_material_icon and menu.title_bar then
+        attachMaterialLeftAction(menu.title_bar, opts)
+    end
+
     if opts.bottom_tabs then
         attachBottomTabs(menu, opts.bottom_tabs)
+    end
+
+    if opts.on_left_tap and not opts.title_material_icon then
+        menu.onLeftButtonTap = opts.on_left_tap
     end
 
     if opts.centered then

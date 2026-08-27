@@ -34,6 +34,9 @@ local function setDisplay(ui, key, value, menu)
     local settings = MoonSettings.get()
     settings[key] = value
     MoonSettings.save(settings)
+    if key == "book_xray_show_marks" then
+        require("xray.marks").invalidate()
+    end
     require("ui.reader.bars").applyInsets(ui)
     if ui and ui.handleEvent then
         ui:handleEvent(require("ui/event"):new("UpdatePos"))
@@ -89,6 +92,22 @@ local function removeItem(items, id)
     end
 end
 
+--- KOReader 设置 Tab 是 tab_item_table 里的一项数组，不是 id=setting 的节点。
+---@param menu table
+---@return table|nil
+local function settingTab(menu)
+    for _, tab in ipairs(menu.tab_item_table or {}) do
+        if type(tab) == "table" and findItem(tab, "night_mode") then
+            return tab
+        end
+    end
+    for _, tab in ipairs(menu.tab_item_table or {}) do
+        if type(tab) == "table" and findItem(tab, "screen") then
+            return tab
+        end
+    end
+end
+
 --- 生成一个切换 Book 阅读显示开关的菜单项。
 ---@param ui table|nil
 ---@param id string
@@ -117,6 +136,7 @@ local function settingsItems(ui)
     return {
         toggleItem(ui, "book_reader_top_status", _("顶部状态栏"), "book_reader_show_top_time"),
         toggleItem(ui, "book_reader_bottom_progress", _("底部进度栏"), "book_reader_show_bottom_progress"),
+        toggleItem(ui, "book_xray_show_marks", _("页内实体标记"), "book_xray_show_marks"),
         {
             id = "book_reader_save_default",
             text = _("保存当前配置为默认配置"),
@@ -129,12 +149,15 @@ end
 --- 清理冲突的原生状态栏项，并把 Book 阅读显示设置注入设置 Tab。
 ---@param menu table
 function NativeSettings.inject(menu)
-    removeItem(menu.tab_item_table, "status_bar")
-    local setting = findItem(menu.tab_item_table, "setting")
-    if not setting then return end
-    local target = setting.sub_item_table or setting
-    for _i, item in ipairs(settingsItems(menu.ui)) do
-        if not findItem(target, item.id) then target[#target + 1] = item end
+    local tab = settingTab(menu)
+    if not tab then return end
+    removeItem(tab, "status_bar")
+    local items = settingsItems(menu.ui)
+    for i = #items, 1, -1 do
+        local item = items[i]
+        if not findItem(tab, item.id) then
+            table.insert(tab, 1, item)
+        end
     end
 end
 

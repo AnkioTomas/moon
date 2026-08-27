@@ -1,27 +1,32 @@
 --[[--
-X-Ray 阅读 UI：人物 / 地点 / 时间线列表与选词查询。
+X-Ray 阅读 UI：底部分栏主菜单、TextViewer 详情、划词补全。
 
 @module koplugin.book.xray.ui
 --]]
 
 require("l10n").apply()
 
+local Popup = require("ui.components.popup")
 local UIManager = require("ui/uimanager")
 local Text = require("utils.text")
+local Kinds = require("xray.kinds")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
 local UI = {}
 
+local TABS = {
+    { "character", "人物", "person" },
+    { "location", "地点", "location_on" },
+    { "term", "专有名词", "label" },
+}
+
+--- 当前打开的 X-Ray 主菜单（生成成功后刷新列表）。
+---@type table|nil
+local main_holder
+
 local function info(text)
     UIManager:show(require("ui/widget/infomessage"):new{ text = text, timeout = 3 })
-end
-
-local function viewer(title, text)
-    UIManager:show(require("ui/widget/textviewer"):new{
-        title = title,
-        text = text,
-    })
 end
 
 local function currentIdentity()
@@ -29,9 +34,27 @@ local function currentIdentity()
     return current and current.identity
 end
 
-local function formatEntity(entity)
+---@param title string
+---@param text string
+local function showInfoBox(title, text)
+    local Screen = require("device").screen
+    UIManager:show(require("ui/widget/textviewer"):new{
+        title = title,
+        text = text ~= "" and text or _("（无内容）"),
+        add_default_buttons = true,
+        height = math.floor(Screen:getHeight() * 0.65),
+    })
+end
+
+---@param entity table
+---@return string[]
+local function entityLines(entity)
     local payload = entity.payload or {}
-    local lines = { entity.name }
+    local lines = {}
+    local kind_label = Kinds.label(entity.kind)
+    if kind_label ~= "" then
+        lines[#lines + 1] = T(_("类型：%1"), kind_label)
+    end
     if entity.aliases and #entity.aliases > 0 then
         lines[#lines + 1] = T(_("别名：%1"), table.concat(entity.aliases, "、"))
     end
@@ -39,11 +62,32 @@ local function formatEntity(entity)
         lines[#lines + 1] = T(_("身份：%1"), payload.role)
     end
     if payload.description and payload.description ~= "" then
-        lines[#lines + 1] = ""
-        lines[#lines + 1] = payload.description
+        if #lines > 0 then
+            lines[#lines + 1] = ""
+        end
+        for line in (payload.description .. "\n"):gmatch("([^\n]*)\n") do
+            lines[#lines + 1] = line
+        end
+    end
+    return lines
+end
+
+local function formatEntity(entity)
+    local lines = { entity.name }
+    for i, line in ipairs(entityLines(entity)) do
+        lines[#lines + 1] = line
     end
     return table.concat(lines, "\n")
 end
+
+--- 展示已收录实体详情。
+---@param entity table
+function UI.showEntity(entity)
+    if not entity then return end
+    showInfoBox(entity.name, table.concat(entityLines(entity), "\n"))
+end
+
+UI.formatEntity = formatEntity
 
 local function ensureConfigured()
     if not require("ai").isConfigured() then
@@ -53,10 +97,62 @@ local function ensureConfigured()
     return true
 end
 
-local function runFetch(ui, identity, mode)
+local function tabSubtitle(tab_id)
+    return Kinds.label(tab_id)
+end
+
+---@param tab_id string
+---@param identity BookIdentity
+---@return table[]
+local function rowsForTab(tab_id, identity)
+    local Store = require("xray.store")
+    local items = {}
+    for i, entity in ipairs(Store.loadEntities(identity, tab_id)) do
+        local subtitle = entity.payload and entity.payload.role or ""
+        if subtitle == "" and entity.payload then
+            subtitle = entity.payload.description or ""
+        end
+        items[#items + 1] = {
+            text = entity.name,
+            mandatory = Text.truncateUtf8(subtitle, 40),
+            keep_menu_open = true,
+            callback = function()
+                showInfoBox(entity.name, table.concat(entityLines(entity), "\n"))
+            end,
+        }
+    end
+    if #items == 0 then
+        items[1] = {
+            text = _("暂无数据，点左上角重新生成"),
+            enabled = false,
+            dim = true,
+        }
+    end
+    return items
+end
+
+---@param holder table
+---@param opts table|nil
+local function refreshMainTab(holder, opts)
+    opts = opts or {}
+    if not holder or not holder.menu then
+        return
+    end
+    local items = rowsForTab(holder.active, holder.identity)
+    Popup.setListItems(holder.menu, _("X-Ray"), items, nil, {
+        subtitle = tabSubtitle(holder.active),
+        preserve_page = opts.preserve_page == true,
+    })
+    if holder.menu.setBottomTabActive then
+        holder.menu:setBottomTabActive(holder.active)
+    end
+    holder.menu:updateItems(nil, true)
+end
+
+local function runFetch(ui, identity, force)
     local Fetch = require("xray.fetch")
     local loading = require("ui/widget/infomessage"):new{
-        text = mode == "incremental" and _("正在更新 X-Ray…") or _("正在生成 X-Ray…"),
+        text = force and _("正在重新生成 X-Ray…") or _("正在生成 X-Ray…"),
     }
     UIManager:show(loading)
     local cb = function(result, err)
@@ -65,119 +161,77 @@ local function runFetch(ui, identity, mode)
             info(T(_("X-Ray 失败：%1"), tostring(err or _("未知错误"))))
             return
         end
-        info(T(_("X-Ray 已更新：人物 %1，地点 %2，事件 %3"),
+        info(T(_("X-Ray 已更新：人物 %1，地点 %2，专有名词 %3"),
             tostring(#(result.characters or {})),
             tostring(#(result.locations or {})),
-            tostring(#(result.timeline or {}))))
+            tostring(#(result.terms or {}))))
+        require("xray.marks").invalidate()
+        refreshMainTab(main_holder, { preserve_page = true })
     end
-    if mode == "incremental" then
-        Fetch.incremental(ui, identity, cb)
-    else
-        Fetch.comprehensive(ui, identity, { force = mode == "force" }, cb)
-    end
+    Fetch.comprehensive(ui, identity, { force = force == true }, cb)
 end
 
----@param kind "character"|"location"
-local function showEntityList(ui, kind)
-    local identity = currentIdentity()
-    if not identity then
-        info(_("当前书籍没有可用身份"))
-        return
-    end
-    local Store = require("xray.store")
-    local entities = Store.loadEntities(identity, kind)
-    local title = kind == "character" and _("人物") or _("地点")
-    if #entities == 0 then
-        if not ensureConfigured() then return end
-        UIManager:show(require("ui/widget/confirmbox"):new{
-            text = _("尚无 X-Ray 数据。现在生成？"),
-            ok_text = _("生成"),
-            ok_callback = function()
-                require("ui/network/manager"):runWhenOnline(function()
-                    runFetch(ui, identity, "force")
-                end)
-            end,
-        })
-        return
-    end
-    local items = {}
-    for _, entity in ipairs(entities) do
-        local subtitle = entity.payload and entity.payload.role or ""
-        if subtitle == "" and entity.payload then
-            subtitle = entity.payload.description or ""
-        end
-        items[#items + 1] = {
-            text = entity.name,
-            mandatory = Text.truncateUtf8(subtitle, 40),
-            callback = function()
-                viewer(entity.name, formatEntity(entity))
-            end,
-        }
-    end
-    items[#items + 1] = {
-        text = _("更新 X-Ray"),
-        icon = "refresh",
-        callback = function()
-            if not ensureConfigured() then return end
-            require("ui/network/manager"):runWhenOnline(function()
-                runFetch(ui, identity, "incremental")
-            end)
-        end,
-    }
-    items[#items + 1] = {
-        text = _("重新生成"),
-        icon = "restart_alt",
-        callback = function()
-            if not ensureConfigured() then return end
-            require("ui/network/manager"):runWhenOnline(function()
-                runFetch(ui, identity, "force")
-            end)
-        end,
-    }
-    require("ui.components.popup").list{ title = title, items = items }
-end
-
-local function showTimeline(ui)
-    local identity = currentIdentity()
-    if not identity then
-        info(_("当前书籍没有可用身份"))
-        return
-    end
-    local events = require("xray.store").loadTimeline(identity)
-    if #events == 0 then
-        if not ensureConfigured() then return end
-        UIManager:show(require("ui/widget/confirmbox"):new{
-            text = _("尚无时间线。现在生成 X-Ray？"),
-            ok_text = _("生成"),
-            ok_callback = function()
-                require("ui/network/manager"):runWhenOnline(function()
-                    runFetch(ui, identity, "force")
-                end)
-            end,
-        })
-        return
-    end
-    local lines = {}
-    for _, ev in ipairs(events) do
-        lines[#lines + 1] = string.format("【%s】\n%s\n", ev.chapter, ev.event)
-    end
-    viewer(_("时间线"), table.concat(lines, "\n"))
-end
-
---- 打开人物 / 地点 / 时间线面板。
+--- 打开 X-Ray 主菜单（底部分栏，左上角重新生成）。
 ---@param ui table|nil
----@param mode "characters"|"locations"|"timeline"
-function UI.open(ui, mode)
-    if mode == "locations" then
-        showEntityList(ui, "location")
-    elseif mode == "timeline" then
-        showTimeline(ui)
-    else
-        showEntityList(ui, "character")
+---@param initial_tab string|nil
+function UI.openMain(ui, initial_tab)
+    local identity = currentIdentity()
+    if not ui or not identity then
+        info(_("当前书籍没有可用身份"))
+        return
     end
+    initial_tab = initial_tab or "character"
+    local holder = {
+        menu = nil,
+        active = initial_tab,
+        ui = ui,
+        identity = identity,
+    }
+    main_holder = holder
+
+    local function switch(tab_id)
+        holder.active = tab_id
+        refreshMainTab(holder)
+    end
+
+    local tabs = {}
+    for i, tab in ipairs(TABS) do
+        tabs[#tabs + 1] = { id = tab[1], text = _(tab[2]), icon = tab[3] }
+    end
+
+    holder.menu = Popup.list{
+        title = _("X-Ray"),
+        title_material_icon = "sync",
+        subtitle = tabSubtitle(initial_tab),
+        items = rowsForTab(initial_tab, identity),
+        bottom_tabs = { tabs = tabs, active = initial_tab, on_tab = switch },
+        on_left_tap = function()
+            if not ensureConfigured() then return end
+            require("ui/network/manager"):runWhenOnline(function()
+                runFetch(ui, identity, true)
+            end)
+        end,
+        close_callback = function()
+            if main_holder == holder then
+                main_holder = nil
+            end
+        end,
+    }
 end
 
---- 选词查询 / 补全实体。
+---@param ui table|nil
+---@param mode "characters"|"locations"|"terms"|nil
+function UI.open(ui, mode)
+    local tab = "character"
+    if mode == "locations" then
+        tab = "location"
+    elseif mode == "terms" then
+        tab = "term"
+    end
+    UI.openMain(ui, tab)
+end
+
+--- 选词查询 / 补全实体（划词菜单入口，不在 X-Ray 主菜单）。
 ---@param ui table|nil
 ---@param word string|nil
 function UI.lookup(ui, word)
@@ -188,30 +242,6 @@ function UI.lookup(ui, word)
     end
     word = Text.trim(word)
     if word == "" then
-        local input = require("ui/widget/inputdialog"):new{
-            title = _("X-Ray 查询"),
-            input_hint = _("人物或地点名称"),
-            buttons = { {
-                {
-                    text = _("取消"),
-                    id = "close",
-                    callback = function()
-                        UIManager:close(input)
-                    end,
-                },
-                {
-                    text = _("查询"),
-                    is_enter_default = true,
-                    callback = function()
-                        local value = input:getInputText()
-                        UIManager:close(input)
-                        UI.lookup(ui, value)
-                    end,
-                },
-            } },
-        }
-        UIManager:show(input)
-        input:onShowKeyboard()
         return
     end
     if not ensureConfigured() then return end
@@ -224,62 +254,9 @@ function UI.lookup(ui, word)
                 info(T(_("未找到：%1"), tostring(err or word)))
                 return
             end
-            viewer(entity.name, formatEntity(entity))
+            UI.showEntity(entity)
+            require("xray.marks").invalidate()
         end)
-    end)
-end
-
-local function showPageResult(mode, result)
-    if mode == "summary" then
-        viewer(_("AI 总结"), result.summary ~= "" and result.summary or _("没有可用的总结"))
-    elseif mode == "analysis" then
-        viewer(_("AI 分析"), result.analysis ~= "" and result.analysis or _("没有可用的分析"))
-    end
-end
-
-local function showPageGraph(identity)
-    local Analysis = require("xray.analysis")
-    local Graph = require("xray.graph")
-    local graph = Graph.merge(Analysis.all(identity))
-    viewer(_("人物与事件图谱"), Graph.format(graph))
-end
-
-local function requestPageAnalysis(ui, identity, mode)
-    local Analysis = require("xray.analysis")
-    local cached = Analysis.cached(ui, identity)
-    if cached then
-        if mode == "graph" then showPageGraph(identity) else showPageResult(mode, cached) end
-        return
-    end
-    local loading = require("ui/widget/infomessage"):new{ text = _("AI 正在阅读当前页…") }
-    UIManager:show(loading)
-    Analysis.run(ui, identity, nil, function(result, err)
-        UIManager:close(loading)
-        if not result then
-            info(T(_("AI 请求失败：%1"), tostring(err or _("未知错误"))))
-            return
-        end
-        if mode == "graph" then showPageGraph(identity) else showPageResult(mode, result) end
-    end)
-end
-
---- 当前页 AI 分析 / 总结 / 图谱。
----@param ui table|nil
----@param mode "analysis"|"summary"|"graph"
-function UI.openPage(ui, mode)
-    local identity = currentIdentity()
-    if not ui or not identity then
-        info(_("当前书籍没有可用身份"))
-        return
-    end
-    local Analysis = require("xray.analysis")
-    if mode == "graph" and #Analysis.all(identity) > 0 then
-        showPageGraph(identity)
-        return
-    end
-    if not ensureConfigured() then return end
-    require("ui/network/manager"):runWhenOnline(function()
-        requestPageAnalysis(ui, identity, mode)
     end)
 end
 

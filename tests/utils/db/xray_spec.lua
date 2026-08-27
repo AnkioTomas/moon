@@ -45,11 +45,4 @@ Assert.matches(call.sql, "INSERT INTO xray_entities")
 Assert.eq(call.args[1], "moon")
 Assert.eq(call.args[4], "Mina")
 
-Assert.is_true(XrayDB.upsertTimeline("moon", "b1", "Ch1", "event", 3, 1, 10))
-Assert.matches(calls[#calls].sql, "INSERT INTO xray_timeline")
-
-Assert.is_true(XrayDB.upsertMeta("moon", "b1", 12, "fiction", 10))
-Assert.matches(calls[#calls].sql, "INSERT INTO xray_meta")
-
 Assert.is_false(XrayDB.upsertEntity("", "b1", "character", "Mina", "[]", "{}"))
-Assert.is_false(XrayDB.upsertTimeline("moon", "b1", "", "event"))

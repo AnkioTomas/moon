@@ -202,7 +202,12 @@ function Popup.setListItems(menu, title, items, on_select, opts)
         menu.state_w = state_w
     end
     if menu.switchItemTable then
-        menu:switchItemTable(title or menu.title, normalized, current_idx, nil, opts.subtitle)
+        local itemnumber = current_idx
+        if not itemnumber and opts.preserve_page and menu.page then
+            local per = menu.perpage or 14
+            itemnumber = math.min((menu.page - 1) * per + 1, math.max(1, #normalized))
+        end
+        menu:switchItemTable(title or menu.title, normalized, itemnumber, nil, opts.subtitle)
         UIManager:setDirty(menu, "ui")
     end
 end

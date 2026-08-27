@@ -1,5 +1,5 @@
 --[[--
-X-Ray 本地存储：别名去重合并、时间线 TOC 对齐。
+X-Ray 本地存储：别名去重合并。
 
 @module koplugin.book.xray.store
 --]]
@@ -76,15 +76,15 @@ function Store.mergeEntities(existing, incoming)
                 local cur = by_key[hit]
                 local seen = {}
                 for _, a in ipairs(cur.aliases or {}) do seen[normName(a)] = true end
+                if normName(name) ~= normName(cur.name) and not seen[normName(name)] then
+                    cur.aliases[#cur.aliases + 1] = name
+                    seen[normName(name)] = true
+                end
                 for _, a in ipairs(aliases) do
                     if not seen[normName(a)] then
                         cur.aliases[#cur.aliases + 1] = a
                         seen[normName(a)] = true
                     end
-                end
-                if normName(name) ~= normName(cur.name) and #name > #cur.name then
-                    cur.aliases[#cur.aliases + 1] = cur.name
-                    cur.name = name
                 end
                 for k, v in pairs(payload) do
                     if type(v) == "string" and Text.trim(v) ~= "" then
@@ -93,8 +93,8 @@ function Store.mergeEntities(existing, incoming)
                         cur.payload[k] = v
                     end
                 end
-                alias_to_key[normName(name)] = hit
-                for _, a in ipairs(aliases) do alias_to_key[normName(a)] = hit end
+                alias_to_key[normName(cur.name)] = hit
+                for _, a in ipairs(cur.aliases or {}) do alias_to_key[normName(a)] = hit end
             else
                 remember({
                     kind = kind,
@@ -117,40 +117,30 @@ function Store.mergeEntities(existing, incoming)
     return out
 end
 
---- TOC 项：{ title, page }；给 timeline 填 page/sort_idx。
----@param events table[] { chapter, event }
----@param toc table[]|nil
----@return table[]
-function Store.alignTimeline(events, toc)
-    local by_title = {}
-    for i, entry in ipairs(toc or {}) do
-        local title = Text.trim(entry.title or entry.chapter or "")
-        if title ~= "" then
-            by_title[normName(title)] = {
-                page = tonumber(entry.page) or 0,
-                sort_idx = i,
-                title = title,
-            }
+--- 已有实体快照，供 AI prompt 引用（name 为数据库主键）。
+---@param identity BookIdentity
+---@return table
+function Store.promptSnapshot(identity)
+    local snapshot = { characters = {}, locations = {}, terms = {} }
+    for _, entity in ipairs(Store.loadEntities(identity)) do
+        local payload = entity.payload or {}
+        local item = {
+            name = entity.name,
+            aliases = entity.aliases or {},
+        }
+        if entity.kind == "character" then
+            item.role = payload.role or ""
+            item.description = payload.description or ""
+            snapshot.characters[#snapshot.characters + 1] = item
+        elseif entity.kind == "location" then
+            item.description = payload.description or ""
+            snapshot.locations[#snapshot.locations + 1] = item
+        else
+            item.description = payload.description or ""
+            snapshot.terms[#snapshot.terms + 1] = item
         end
     end
-    local out = {}
-    for i, ev in ipairs(events or {}) do
-        local chapter = Text.trim(ev.chapter)
-        if chapter ~= "" then
-            local hit = by_title[normName(chapter)]
-            out[#out + 1] = {
-                chapter = hit and hit.title or chapter,
-                event = Text.trim(ev.event),
-                page = hit and hit.page or tonumber(ev.page) or 0,
-                sort_idx = hit and hit.sort_idx or i,
-            }
-        end
-    end
-    table.sort(out, function(a, b)
-        if a.sort_idx ~= b.sort_idx then return a.sort_idx < b.sort_idx end
-        return a.page < b.page
-    end)
-    return out
+    return snapshot
 end
 
 --- 读取已解码实体列表；kind 非空时过滤。
@@ -172,6 +162,17 @@ function Store.loadEntities(identity, kind)
     return out
 end
 
+--- 全量替换一本书的 X-Ray 实体。
+---@param identity BookIdentity
+---@param entities table[]
+---@return boolean
+function Store.replaceEntities(identity, entities)
+    if not XrayDB.deleteAllForBook(identity.source_id, identity.stable_id) then
+        return false
+    end
+    return Store.saveEntities(identity, entities)
+end
+
 --- 批量落盘实体（aliases / payload 编码为 JSON）。
 ---@param identity BookIdentity
 ---@param entities table[]
@@ -187,47 +188,6 @@ function Store.saveEntities(identity, entities)
         end
     end
     return true
-end
-
---- 读取时间线。
----@param identity BookIdentity
----@return table[]
-function Store.loadTimeline(identity)
-    return XrayDB.listTimeline(identity.source_id, identity.stable_id)
-end
-
---- 批量落盘时间线。
----@param identity BookIdentity
----@param events table[]
----@return boolean
-function Store.saveTimeline(identity, events)
-    local now = os.time()
-    for _, ev in ipairs(events or {}) do
-        if not XrayDB.upsertTimeline(
-            identity.source_id, identity.stable_id, ev.chapter, ev.event,
-            ev.page, ev.sort_idx, now
-        ) then
-            return false
-        end
-    end
-    return true
-end
-
---- 读取 X-Ray 元数据。
----@param identity BookIdentity
----@return table|nil
-function Store.loadMeta(identity)
-    return XrayDB.getMeta(identity.source_id, identity.stable_id)
-end
-
---- 写入上次拉取页与书类型。
----@param identity BookIdentity
----@param last_fetch_page integer
----@param book_type string|nil
----@return boolean
-function Store.saveMeta(identity, last_fetch_page, book_type)
-    return XrayDB.upsertMeta(identity.source_id, identity.stable_id,
-        last_fetch_page, book_type)
 end
 
 return Store

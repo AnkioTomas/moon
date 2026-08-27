@@ -65,12 +65,6 @@ Assert.eq(
     "42% · 第 7/100 页 · 约 1 小时 30 分"
 )
 
--- remainingSeconds：剩余页数 × 平均每页时长；数据不足或已读完返回 nil
-Assert.eq(Bars.remainingSeconds({ page = 100, total_pages = 200 }, { total_seconds = 6000, pages = 100 }), 6000)
-Assert.is_nil(Bars.remainingSeconds({ page = 200, total_pages = 200 }, { total_seconds = 6000, pages = 100 }))
-Assert.is_nil(Bars.remainingSeconds({ page = 1, total_pages = 200 }, { total_seconds = 0, pages = 0 }))
-Assert.is_nil(Bars.remainingSeconds(nil, { total_seconds = 6000, pages = 100 }))
-
 -- remainingText：不足一分钟为空；分钟 / 小时 + 分钟
 Assert.eq(Bars.remainingText(nil), "")
 Assert.eq(Bars.remainingText(59), "")

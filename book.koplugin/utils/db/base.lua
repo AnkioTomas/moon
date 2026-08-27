@@ -247,19 +247,6 @@ CREATE TABLE IF NOT EXISTS toc (
   PRIMARY KEY (source_id, stable_id)
 );
 
-CREATE TABLE IF NOT EXISTS ai_analysis (
-  source_id   TEXT NOT NULL,
-  stable_id   TEXT NOT NULL,
-  chapter_idx INTEGER NOT NULL DEFAULT 0,
-  context_key TEXT NOT NULL,
-  page        INTEGER NOT NULL DEFAULT 0,
-  payload     TEXT NOT NULL,
-  updated_at  INTEGER NOT NULL,
-  PRIMARY KEY (source_id, stable_id, chapter_idx, context_key)
-);
-CREATE INDEX IF NOT EXISTS idx_ai_analysis_book
-  ON ai_analysis(source_id, stable_id, updated_at);
-
 CREATE TABLE IF NOT EXISTS xray_entities (
   source_id    TEXT NOT NULL,
   stable_id    TEXT NOT NULL,
@@ -272,28 +259,6 @@ CREATE TABLE IF NOT EXISTS xray_entities (
 );
 CREATE INDEX IF NOT EXISTS idx_xray_entities_book
   ON xray_entities(source_id, stable_id, kind);
-
-CREATE TABLE IF NOT EXISTS xray_timeline (
-  source_id  TEXT NOT NULL,
-  stable_id  TEXT NOT NULL,
-  chapter    TEXT NOT NULL,
-  event      TEXT NOT NULL,
-  page       INTEGER NOT NULL DEFAULT 0,
-  sort_idx   INTEGER NOT NULL DEFAULT 0,
-  updated_at INTEGER NOT NULL,
-  PRIMARY KEY (source_id, stable_id, chapter)
-);
-CREATE INDEX IF NOT EXISTS idx_xray_timeline_book
-  ON xray_timeline(source_id, stable_id, sort_idx);
-
-CREATE TABLE IF NOT EXISTS xray_meta (
-  source_id       TEXT NOT NULL,
-  stable_id       TEXT NOT NULL,
-  last_fetch_page INTEGER NOT NULL DEFAULT 0,
-  book_type       TEXT,
-  updated_at      INTEGER NOT NULL,
-  PRIMARY KEY (source_id, stable_id)
-);
 ]])
     if not hasColumn("books", "in_library") then
         Base.exec("ALTER TABLE books ADD COLUMN in_library INTEGER NOT NULL DEFAULT 1;")

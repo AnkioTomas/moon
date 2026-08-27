@@ -1,4 +1,4 @@
---[[-- xray.context：滚动/分页文档当前页文本采集。 --]]
+--[[-- xray.context：当前页 + 前序正文。 --]]
 
 local Assert = require("support.assert")
 local Context = require("xray.context")
@@ -23,16 +23,26 @@ Assert.eq(page, 7)
 local paging = {
     getCurrentPage = function() return 3 end,
     document = {
-        getTextBoxes = function()
-            return { { { word = "Hello" }, { word = "world" } }, { { word = "中文" } } }
+        getTextBoxes = function(_, page_num)
+            return { { { word = "page" .. tostring(page_num) } } }
         end,
     },
 }
 text, page = Context.visibleText(paging)
-Assert.eq(text, "Hello world 中文")
+Assert.eq(text, "page3")
 Assert.eq(page, 3)
 
 local empty = Context.visibleText({ document = { getTextBoxes = function() return {} end } })
 Assert.is_nil(empty)
 
 Assert.eq(Context.currentPage({ getCurrentPage = function() return 5 end }), 5)
+
+local prior = Context.priorText(paging, 3, 2000)
+Assert.matches(prior, "page1")
+Assert.matches(prior, "page2")
+Assert.is_false(prior:find("page3", 1, true) ~= nil)
+
+local ctx = Context.forAnalysis(paging)
+Assert.eq(ctx.current_page, "page3")
+Assert.matches(ctx.prior_text, "page2")
+Assert.eq(ctx.page, 3)
