@@ -215,7 +215,8 @@ end
 function BookPlugin:openDesktop(filter)
     -- 阅读中桌面宿主是 FileManager 实例：先退出阅读面板，再委托 FM 打开，
     -- 避免把全屏桌面叠在未关闭的阅读器上。
-    if self.ui and self.ui.document then
+    local from_reader = self.ui and self.ui.document
+    if from_reader then
         if self.ui.onClose then self.ui:onClose() end
         local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
         if ok and FileManager then
@@ -223,6 +224,7 @@ function BookPlugin:openDesktop(filter)
             local fm = FileManager.instance
             local fm_plugin = fm and fm.book
             if fm_plugin and type(fm_plugin.openDesktop) == "function" then
+                fm_plugin._home_rotate_on_open = true
                 fm_plugin:openDesktop(filter)
             end
         end
@@ -262,6 +264,10 @@ function BookPlugin:openDesktop(filter)
         return
     end
     self.desktop = desk
+    if self._home_rotate_on_open then
+        self._home_rotate_on_open = nil
+        require("ui.desktop.home").onReturnToDesktop(desk)
+    end
     UIManager:show(self.desktop)
     UIManager:setDirty(self.desktop, "ui")
     -- 桌面已可见；源可趁后台做自动维护（本地源：扫描写库 + 清失效）

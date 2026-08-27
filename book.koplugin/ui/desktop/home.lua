@@ -25,11 +25,26 @@ local Screen = Device.screen
 
 local Home = {}
 
-local Hitokoto = require("lockscreen.components.hitokoto")
-
---- 书摘轮换：递增索引并取一条高亮。
+--- 书摘：按当前索引取一条，不递增。
 ---@param recent table|nil
----@return table|nil excerpt { text, source }
+---@return table|nil
+local function pickExcerpt(recent)
+    if not recent or not recent.source_id or not recent.stable_id then
+        return nil
+    end
+    local chapter_idx = recent.chapter_idx or recent.last_chapter_idx
+    local home = MoonSettings.get("home")
+    local index = tonumber(home.home_excerpt_index) or 0
+    local text, source = Highlights.pick(
+        recent.source_id, recent.stable_id, chapter_idx, index + 1
+    )
+    if not text then return nil end
+    return { text = text, source = source }
+end
+
+--- 书摘轮换：递增索引后取一条（仅离开阅读回到桌面时调用）。
+---@param recent table|nil
+---@return table|nil
 local function rotateExcerpt(recent)
     if not recent or not recent.source_id or not recent.stable_id then
         return nil
@@ -48,60 +63,29 @@ local function rotateExcerpt(recent)
     return { text = text, source = source }
 end
 
---- 从缓存填充一言到 state（首屏不阻塞）。
+--- 一言 / 书摘只读缓存与本地高亮，不做定时或重复网络刷新。
 ---@param state table
-local function fillQuoteCache(state)
+---@param rotate_excerpt boolean|nil
+local function fillExtras(state, rotate_excerpt)
     local c = MoonSettings.get()
     state.quote = {
         text = c.lock_screen_quote_cache,
         source = c.lock_screen_quote_source_cache,
     }
-end
-
---- 合并书摘 / 一言缓存；rotate 为 true 时轮换书摘。
----@param desktop table
----@param rotate boolean|nil
-local function applyExtras(desktop, rotate)
-    local state = desktop._home_state or {}
-    if rotate then
-        local excerpt = rotateExcerpt(state.recent)
+    if state.recent then
+        local excerpt = rotate_excerpt and rotateExcerpt(state.recent) or pickExcerpt(state.recent)
         if excerpt then
             state.excerpt = excerpt
         end
     end
-    fillQuoteCache(state)
-    desktop._home_state = state
+    return state
 end
 
---- 后台拉一言；仅文案变化时再 rebuild。
+--- 离开阅读回到桌面：仅轮换书摘一次（一言仍走锁屏 resume 更新缓存）。
 ---@param desktop table
-local function refreshQuote(desktop)
-    if desktop._home_quote_job then
-        desktop._home_quote_job:cancel()
-        desktop._home_quote_job = nil
-    end
-    desktop._home_quote_job = Hitokoto.ensureText(function(text, source)
-        desktop._home_quote_job = nil
-        if desktop._closed or desktop.tab ~= "home" then return end
-        local cur = desktop._home_state or {}
-        local old = cur.quote
-        if old and old.text == text and old.source == source then
-            return
-        end
-        cur.quote = { text = text, source = source }
-        desktop._home_state = cur
-        desktop:rebuild()
-    end)
-end
-
---- 回到桌面：轮换书摘 + 后台更新一言（单次 rebuild）。
----@param desktop table
-function Home.onShow(desktop)
-    if not desktop or desktop._closed or desktop.tab ~= "home" then return end
-    if not desktop._home_loaded then return end
-    applyExtras(desktop, true)
-    desktop:rebuild()
-    refreshQuote(desktop)
+function Home.onReturnToDesktop(desktop)
+    if not desktop or desktop._closed then return end
+    desktop._home_rotate_excerpt = true
 end
 
 --- 构建主页。
@@ -148,14 +132,15 @@ function Home.fetch(desktop)
     local function finish(state)
         desktop._home_fetching = false
         desktop._home_fetch_cancel = nil
-        desktop._home_state = state or {}
+        local rotate = desktop._home_rotate_excerpt
+        desktop._home_rotate_excerpt = nil
+        state = fillExtras(state or {}, rotate)
+        desktop._home_state = state
         desktop._home_loaded = true
         if not valid() or desktop.tab ~= "home" then
             return
         end
-        applyExtras(desktop, true)
         desktop:rebuild()
-        refreshQuote(desktop)
     end
 
     if not source then finish({ recent_err = gettext("当前数据源不可用"), reading = {} }); return end

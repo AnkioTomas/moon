@@ -19,6 +19,7 @@ local _ = require("gettext")
 local M = {
     id = "excerpt",
     label = _("书摘"),
+    icon = "format_ink_highlighter",
 }
 
 ---@param ctx table
