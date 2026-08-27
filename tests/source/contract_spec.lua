@@ -10,7 +10,9 @@ do
     local c = SourceCapabilities.defaults()
     Assert.is_false(c.store)
     Assert.is_false(c.insight)
+    Assert.is_false(c.stats_pull)
     Assert.is_false(c.scrape)
+    Assert.is_false(c.edit)
     Assert.is_nil(c.library)
     Assert.is_nil(c.detail)
     Assert.is_nil(c.filters)
@@ -27,6 +29,17 @@ do
     end }))
     Assert.is_true(SourceCapabilities.supportsScrape({ capabilities = function()
         return { scrape = true }
+    end }))
+    Assert.is_false(SourceCapabilities.supportsEdit(nil))
+    Assert.is_false(SourceCapabilities.supportsEdit({ capabilities = function()
+        return { edit = false }
+    end }))
+    Assert.is_true(SourceCapabilities.supportsEdit({ capabilities = function()
+        return { edit = true }
+    end }))
+    Assert.is_false(SourceCapabilities.supportsStatsPull(nil))
+    Assert.is_true(SourceCapabilities.supportsStatsPull({ capabilities = function()
+        return { stats_pull = true }
     end }))
 end
 
