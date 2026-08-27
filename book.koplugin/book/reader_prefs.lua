@@ -135,6 +135,17 @@ function M.captureAndSave(ui, identity)
     if not prefs then
         return false
     end
+    -- 连续章节每章独立 sidecar；关书时若当前章未写入 book_reader_font_id，
+    -- 不得用空值覆盖全书已保存的字体偏好。
+    local existing = M.load(identity)
+    if existing then
+        local id = prefs.font_id
+        if (type(id) ~= "string" or id == "")
+            and type(existing.font_id) == "string" and existing.font_id ~= "" then
+            prefs.font_id = existing.font_id
+            prefs.font_name = existing.font_name or prefs.font_name
+        end
+    end
     return M.save(identity, prefs)
 end
 
@@ -174,15 +185,12 @@ function M.apply(ui, identity)
 
     local font_id = type(prefs.font_id) == "string" and prefs.font_id or ""
     if font_id ~= "" then
-        MoonFont.applyToReader(ui, font_id, prefs.font_name)
-    elseif type(prefs.font_face) == "string" and prefs.font_face ~= "" and ui.font then
-        ui.font:onSetFont(prefs.font_face)
-        ui.font:onSaveSettings()
-        if ui.doc_settings then
-            ui.doc_settings:saveSetting("book_reader_font_id", "")
-            ui.doc_settings:saveSetting("book_reader_font_name", "")
-            ui.doc_settings:flush()
+        local face = MoonFont.faceForId(font_id)
+        if face then
+            MoonFont.applyFaceToReader(ui, face, font_id, prefs.font_name)
         end
+    elseif type(prefs.font_face) == "string" and prefs.font_face ~= "" then
+        MoonFont.applyFaceToReader(ui, prefs.font_face, "", "")
     end
 
     if typeset then

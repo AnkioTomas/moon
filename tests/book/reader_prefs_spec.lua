@@ -51,7 +51,10 @@ package.preload["utils.font"] = function()
         supportsReader = function(ui)
             return ui and ui.font ~= nil and ui.document and ui.document.setFontFace
         end,
-        applyToReader = function() return true end,
+        faceForId = function(id)
+            if id == "demo.ttf" then return "Demo Face" end
+        end,
+        applyFaceToReader = function() return true end,
     }
 end
 
@@ -101,10 +104,11 @@ local ReaderPrefs = require("book.reader_prefs")
 
 local ui = {
     font = {
-        onSetFont = function() end,
-        onSaveSettings = function() end,
-        onSetFontSize = function() end,
-        onSetLineSpace = function() end,
+        font_face = "Old",
+        onSetFont = function(self, face) self.font_face = face end,
+        onSaveSettings = function(self)
+            self.saved_face = self.font_face
+        end,
     },
     document = {
         setFontFace = function() end,
@@ -132,6 +136,9 @@ local ui = {
     dialog = {},
 }
 
+ui.font.onSetFontSize = function() end
+ui.font.onSetLineSpace = function() end
+
 local identity = { source_id = "moon", stable_id = "book-1" }
 
 ui.doc_settings.data.book_reader_font_id = "demo.ttf"
@@ -147,5 +154,10 @@ local loaded = ReaderPrefs.load(identity)
 Assert.eq(loaded.font_id, "demo.ttf")
 Assert.eq(loaded.copt.h_page_margins[1], 40)
 Assert.is_true(ReaderPrefs.apply(ui, identity))
+
+ui.doc_settings.data.book_reader_font_id = nil
+Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
+loaded = ReaderPrefs.load(identity)
+Assert.eq(loaded.font_id, "demo.ttf")
 
 return true
