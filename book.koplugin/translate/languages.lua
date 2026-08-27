@@ -13,11 +13,12 @@ require("l10n").apply()
 local MoonSettings = require("utils.settings")
 local ffiUtil = require("ffi/util")
 local _ = require("gettext")
-local T = require("ffi/util").template
 
 local Languages = {}
 
 local ALL_LANGUAGES = "__all__"
+
+local DEFAULT_FAVORITES = { "en", "zh", "ja", "fr", "de", "ko", "es", "ru", "zh_TW" }
 
 local FALLBACK = {
     en = "English",
@@ -30,6 +31,30 @@ local FALLBACK = {
     ko = "Korean",
     ru = "Russian",
 }
+
+local DETECTED_ALIASES = {
+    ["zh-Hans"] = "zh",
+    ["zh-hans"] = "zh",
+    ["zh-Hant"] = "zh_TW",
+    ["zh-hant"] = "zh_TW",
+}
+
+--- Edge / API 语言码 → KOReader 语言码。
+---@param code string|nil
+---@return string|nil
+local function normalizeCode(code)
+    if type(code) ~= "string" or code == "" then
+        return code
+    end
+    if DETECTED_ALIASES[code] then
+        return DETECTED_ALIASES[code]
+    end
+    local lower = code:lower()
+    if DETECTED_ALIASES[lower] then
+        return DETECTED_ALIASES[lower]
+    end
+    return code
+end
 
 ---@param translator table
 ---@return table<string, string>
@@ -61,12 +86,11 @@ end
 --- 常用语言代码（settings 未配置时用 defaults）。
 ---@return string[]
 function Languages.favoriteCodes()
-    local reader = MoonSettings.get("reader")
-    local list = reader.translate_languages
+    local list = MoonSettings.get("reader").translate_languages
     if type(list) == "table" and #list > 0 then
         return list
     end
-    return MoonSettings.get("reader").translate_languages
+    return DEFAULT_FAVORITES
 end
 
 --- 写入常用语言。
@@ -184,11 +208,13 @@ end
 function Languages.displayName(translator, code, detected)
     if code == "auto" then
         if detected then
-            return translator:getLanguageName(detected, detected)
+            local norm = normalizeCode(detected)
+            return languageName(translator, norm) or translator:getLanguageName(norm, detected)
         end
         return _("自动检测")
     end
-    return translator:getLanguageName(code, code or "?")
+    local norm = normalizeCode(code)
+    return languageName(translator, norm) or translator:getLanguageName(norm, code or "?")
 end
 
 --- 写入 KOReader 源语言设置。
