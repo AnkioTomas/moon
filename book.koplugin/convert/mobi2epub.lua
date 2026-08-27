@@ -40,30 +40,20 @@ local function appendPage(pages, raw)
     end
 end
 
---- 按页提取 MOBI 文本后交给 text2epub 打包；可取消。
----@param opts {
----   source: string,
----   dest: string,
----   title: string|nil,
----   author: string|nil,
----   language: string|nil,
----   identifier: string|nil,
----   max_part_chars: number|nil,
----   on_progress: (fun(ev: table))|nil,
---- }
----@param cb fun(ok: boolean|nil, err: any)
+--- 按页提取 MOBI 纯文本；可取消。
+---@param opts { source: string, on_progress: (fun(ev: table))|nil }
+---@param cb fun(text: string|nil, err: any)
 ---@return { cancel: fun() }
-function Mobi2Epub.build(opts, cb)
+function Mobi2Epub.extract(opts, cb)
     opts = opts or {}
     if type(cb) ~= "function" then
-        error("mobi2epub.build: cb must be function", 2)
+        error("mobi2epub.extract: cb must be function", 2)
     end
 
     local source = opts.source
     local cancelled = false
     local finished = false
     local document
-    local active_job
     local pages = {}
 
     local function closeDocument()
@@ -80,13 +70,13 @@ function Mobi2Epub.build(opts, cb)
         end
     end
 
-    local function finish(ok, err)
+    local function finish(text, err)
         if cancelled or finished then
             return
         end
         finished = true
         closeDocument()
-        cb(ok, err)
+        cb(text, err)
     end
 
     local job = {}
@@ -95,35 +85,7 @@ function Mobi2Epub.build(opts, cb)
             return
         end
         cancelled = true
-        if active_job and type(active_job.cancel) == "function" then
-            active_job.cancel()
-        end
-        active_job = nil
         closeDocument()
-    end
-
-    local function buildEpub()
-        closeDocument()
-        local text = table.concat(pages, "\n")
-        if Text.trim(text) == "" then
-            finish(nil, _("MOBI 没有可提取的文本"))
-            return
-        end
-        active_job = require("convert.text2epub").build({
-            dest = opts.dest,
-            text = text,
-            source = source,
-            title = opts.title,
-            author = opts.author,
-            language = opts.language,
-            identifier = opts.identifier,
-            max_part_chars = opts.max_part_chars,
-            reflow = true,
-            on_progress = opts.on_progress,
-        }, function(ok, err)
-            active_job = nil
-            finish(ok, err)
-        end)
     end
 
     local function extractPage(page, page_count)
@@ -159,7 +121,12 @@ function Mobi2Epub.build(opts, cb)
         appendPage(pages, chunk)
         emit({ phase = "extract", index = page, total = page_count })
         if page == page_count then
-            buildEpub()
+            local text = table.concat(pages, "\n")
+            if Text.trim(text) == "" then
+                finish(nil, _("MOBI 没有可提取的文本"))
+                return
+            end
+            finish(text)
         else
             UIManager:nextTick(function()
                 extractPage(page + 1, page_count)
@@ -213,6 +180,58 @@ function Mobi2Epub.build(opts, cb)
         end)
     end)
 
+    return job
+end
+
+--- 按页提取 MOBI 文本后交给 text2epub 打包；可取消。
+---@param opts {
+---   source: string,
+---   dest: string,
+---   title: string|nil,
+---   author: string|nil,
+---   language: string|nil,
+---   identifier: string|nil,
+---   max_part_chars: number|nil,
+---   on_progress: (fun(ev: table))|nil,
+--- }
+---@param cb fun(ok: boolean|nil, err: any)
+---@return { cancel: fun() }
+function Mobi2Epub.build(opts, cb)
+    opts = opts or {}
+    if type(cb) ~= "function" then
+        error("mobi2epub.build: cb must be function", 2)
+    end
+
+    local active_job
+    local extract_job = Mobi2Epub.extract(opts, function(text, err)
+        if not text then
+            cb(nil, err)
+            return
+        end
+        active_job = require("convert.text2epub").build({
+            dest = opts.dest,
+            text = text,
+            source = opts.source,
+            title = opts.title,
+            author = opts.author,
+            language = opts.language,
+            identifier = opts.identifier,
+            max_part_chars = opts.max_part_chars,
+            reflow = true,
+            on_progress = opts.on_progress,
+        }, cb)
+    end)
+
+    local job = {}
+    function job.cancel()
+        if extract_job and extract_job.cancel then
+            extract_job.cancel()
+        end
+        if active_job and active_job.cancel then
+            active_job.cancel()
+        end
+        extract_job, active_job = nil, nil
+    end
     return job
 end
 

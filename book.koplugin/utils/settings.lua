@@ -33,7 +33,7 @@ local DEFAULTS = {
     pinyin = { pinyin_enabled = false },
     quickpanel = {
         quick_panel_actions = { "night", "wifi" },
-        quick_panel_reader_actions = { "toc", "highlights", "xray", "dictionary", "ocr" },
+        quick_panel_reader_actions = { "toc", "reflow", "highlights", "xray", "dictionary", "ocr" },
     },
     reader = {
         book_xray_show_marks = true,

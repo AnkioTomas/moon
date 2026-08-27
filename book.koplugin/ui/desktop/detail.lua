@@ -240,15 +240,7 @@ function Detail:onClose()
     self._closed = true
     if self._store_detail_job and self._store_detail_job.cancel then self._store_detail_job.cancel() end
     if self._install_job and self._install_job.cancel then self._install_job.cancel() end
-    if self._reflow_job and self._reflow_job.cancel then self._reflow_job.cancel() end
-    if self._reflow_temp then
-        pcall(os.remove, self._reflow_temp)
-        pcall(os.remove, self._reflow_temp .. ".part")
-    end
     local UIManager = require("ui/uimanager")
-    if self._reflow_dialog then UIManager:close(self._reflow_dialog) end
-    self._store_detail_job, self._install_job = nil, nil
-    self._reflow_job, self._reflow_dialog = nil, nil
     local desk = self.desktop
     UIManager:close(self)
     -- 全屏详情关闭后重绘下层桌面；无需为普通 UI 切换强制闪屏。
@@ -290,16 +282,6 @@ end
 --- Widget 关闭时触发 close_callback。
 function Detail:onCloseWidget()
     self._closed = true
-    if self._reflow_job and self._reflow_job.cancel then self._reflow_job.cancel() end
-    if self._reflow_temp then
-        pcall(os.remove, self._reflow_temp)
-        pcall(os.remove, self._reflow_temp .. ".part")
-    end
-    self._reflow_job = nil
-    if self._reflow_dialog then
-        require("ui/uimanager"):close(self._reflow_dialog)
-        self._reflow_dialog = nil
-    end
     local cb = self.close_callback
     self.close_callback = nil
     if cb then
@@ -314,92 +296,6 @@ function Detail:openBook()
     local b = self.book
     self:onClose()
     if plugin and plugin.openBook then plugin:openBook(b) end
-end
-
---- 将本地 TXT/MOBI 转为带目录和物理切片的 EPUB，替换原书后打开生成文件。
----@param confirmed boolean|nil MOBI 有损转换是否已确认
-function Detail:reflowText(confirmed)
-    local book = self.book or {}
-    local path = type(book.stable_id) == "string" and book.stable_id or ""
-    local lower_path = path:lower()
-    local is_txt = lower_path:match("%.txt$") ~= nil
-    local is_mobi = lower_path:match("%.mobi$") ~= nil
-    if self._reflow_job or self._closed
-        or book.source_id ~= "local"
-        or not (is_txt or is_mobi)
-    then
-        return
-    end
-
-    local UIManager = require("ui/uimanager")
-    if is_mobi and not confirmed then
-        local ConfirmBox = require("ui/widget/confirmbox")
-        UIManager:show(ConfirmBox:new{
-            text = _("转换后的 EPUB 会替换原书；只保留文字并重新识别章节，图片、脚注和原排版会丢失。继续？"),
-            ok_text = _("继续"),
-            ok_callback = function()
-                self:reflowText(true)
-            end,
-        })
-        return
-    end
-
-    local InfoMessage = require("ui/widget/infomessage")
-    local dialog = InfoMessage:new{ text = _("正在优化排版…") }
-    self._reflow_dialog = dialog
-    UIManager:show(dialog)
-    self._reflow_job = { pending = true }
-    UIManager:nextTick(function()
-        if self._closed then
-            UIManager:close(dialog)
-            self._reflow_dialog = nil
-            return
-        end
-        local Paths = require("utils.paths")
-        local target = path:gsub("%.[^./]+$", ".epub")
-        local dest = target .. ".moon-reflow"
-        self._reflow_temp = dest
-        local options = {
-            dest = dest,
-            source = path,
-            title = book.title,
-            author = book.authors,
-            identifier = "moon-reflow-" .. Paths.slugFor(path),
-            reflow = true,
-        }
-        local converter = is_mobi and require("convert.mobi2epub") or require("convert.text2epub")
-        self._reflow_job = converter.build(options, function(ok, err)
-            self._reflow_job = nil
-            self._reflow_temp = nil
-            UIManager:close(dialog)
-            self._reflow_dialog = nil
-            if self._closed then
-                pcall(os.remove, dest)
-                return
-            end
-            if not ok then
-                pcall(os.remove, dest)
-                pcall(os.remove, dest .. ".part")
-                UIManager:show(InfoMessage:new{ text = err or _("排版失败") })
-                return
-            end
-            local replaced, replace_err = self.source:replaceBook(dest, path)
-            if not replaced then
-                pcall(os.remove, dest)
-                pcall(os.remove, dest .. ".part")
-                UIManager:show(InfoMessage:new{ text = replace_err or _("替换原书失败") })
-                return
-            end
-            local identity = {}
-            for key, value in pairs(book) do identity[key] = value end
-            identity.stable_id = replaced
-            identity.path = replaced
-            require("book.store").touchAsync(replaced, identity)
-            self._dirty = true
-            self:onClose()
-            require("apps/reader/readerui"):showReader(replaced)
-        end)
-    end)
 end
 
 --- 书城书「加入书库」：无凭据先开设置；否则弹进度条下载并导入当前源。
@@ -734,11 +630,6 @@ function Detail:rebuild()
     local can_read = not store_book and self.source ~= nil
         and (self.source.type == "book"
             or self.source.type == "chapter")
-    local can_reflow = not store_book and self.source and self.source.id == "local"
-        and type(self.source.replaceBook) == "function"
-        and type(book.stable_id) == "string"
-        and (book.stable_id:lower():match("%.txt$") ~= nil
-            or book.stable_id:lower():match("%.mobi$") ~= nil)
 
     local title_bar, title_h = self:buildTopBar(w)
 
@@ -772,11 +663,6 @@ function Detail:rebuild()
         if can_scrape then
             table.insert(defs, { icon = "search", text = _("刮削"), fn = function()
                 self:startScrape()
-            end })
-        end
-        if can_reflow then
-            table.insert(defs, { icon = "auto_fix_high", text = _("优化排版"), fn = function()
-                self:reflowText()
             end })
         end
         if can_read then
