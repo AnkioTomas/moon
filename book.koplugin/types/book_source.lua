@@ -17,6 +17,7 @@
 ---@field search boolean 图书馆关键词搜索（BookListOpts.search）
 ---@field refresh boolean 支持手动强制重扫书库（本地源；opts.force）
 ---@field scrape boolean 支持把外部元数据写入本地书籍记录（仅 local 为 true；wechat/moon 明确 false）
+---@field edit boolean 支持编辑展示元信息（仅 local 为 true；wechat/moon 明确 false）
 ---@field insight boolean 阅读洞察 / 统计页（readingInsightAsync）
 ---@field store boolean 源自带书城（listStoreAsync；无则走全局 zlib）
 
@@ -29,6 +30,7 @@ function SourceCapabilities.defaults()
         search = false,
         refresh = false,
         scrape = false,
+        edit = false,
         insight = false,
         store = false,
     }
@@ -42,6 +44,16 @@ function SourceCapabilities.supportsScrape(source)
         return false
     end
     return source:capabilities().scrape == true
+end
+
+--- 源是否允许编辑展示元信息（UI 统一入口）。
+---@param source BookSource|nil
+---@return boolean
+function SourceCapabilities.supportsEdit(source)
+    if not source or type(source.capabilities) ~= "function" then
+        return false
+    end
+    return source:capabilities().edit == true
 end
 
 --- 图书馆筛选项；只支持分类和系列。

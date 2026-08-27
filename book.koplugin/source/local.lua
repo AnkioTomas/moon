@@ -46,6 +46,7 @@ function Source:capabilities()
         search = true,
         refresh = true,
         scrape = true,
+        edit = true,
         insight = true,
         store = false,
     }
