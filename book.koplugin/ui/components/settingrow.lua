@@ -113,13 +113,15 @@ function SettingRow.build(width, opts)
     end
 
     local right = HorizontalGroup:new{ align = "center" }
+    local status_widget
     if opts.status then
-        table.insert(right, TextWidget:new{
+        status_widget = TextWidget:new{
             text = opts.status,
             face = UI.face("cfont", 14),
             max_width = status_w,
             fgcolor = opts.status_on and Blitbuffer.COLOR_BLACK or UI.muted(),
-        })
+        }
+        table.insert(right, status_widget)
     end
     if show_chevron then
         if opts.status then
@@ -163,6 +165,7 @@ function SettingRow.build(width, opts)
         background = background,
         shadow = false,
     })
+    tap.status_widget = status_widget
     return tap
 end
 

@@ -161,6 +161,24 @@ function ReaderSettings.sections(desktop)
             title = _("阅读弹窗"),
             rows = popup_rows,
         },
+        {
+            title = _("翻译"),
+            rows = {
+                function(iw)
+                    local Languages = require("translate.languages")
+                    local Translator = require("ui/translator")
+                    return SettingRow.build(iw, {
+                        kind = "nav",
+                        icon = "translate",
+                        title = _("常用翻译语言"),
+                        status = T(_("%1 种"), #Languages.favoriteCodes()),
+                        callback = function()
+                            Languages.openSettingsPicker(Translator, desktop)
+                        end,
+                    })
+                end,
+            },
+        },
     }
 end
 
