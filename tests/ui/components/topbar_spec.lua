@@ -37,7 +37,13 @@ package.preload["ui/widget/textwidget"] = function()
     return {
         new = function(_, opts)
             text_calls[#text_calls + 1] = opts.text
-            return opts
+            local text = tostring(opts.text or "")
+            return {
+                text = opts.text,
+                getSize = function()
+                    return { w = #text * 8, h = 12 }
+                end,
+            }
         end,
     }
 end
@@ -105,7 +111,12 @@ package.preload["ui.components.icon"] = function()
     return {
         label = function(opts)
             icon_calls[#icon_calls + 1] = { kind = "label", name = opts.name, text = opts.text }
-            return opts
+            local text = tostring(opts.text or "")
+            return {
+                getSize = function()
+                    return { w = #text * 8 + 20, h = 14 }
+                end,
+            }
         end,
         widget = function(opts)
             icon_calls[#icon_calls + 1] = { kind = "widget", name = opts.name }
@@ -143,6 +154,12 @@ package.loaded["ui.components.topbar"] = nil
 local TopBar = require("ui.components.topbar")
 
 TopBar.build()
+
+local rect = TopBar.sourceTapRect()
+Assert.is_true(rect ~= nil)
+Assert.eq(rect.x, 12 + #"1:23 PM" * 8 + 8)
+Assert.eq(rect.w, #"书库" * 8 + 20)
+Assert.eq(rect.h, 40)
 
 Assert.eq(icon_calls[1].name, "source")
 Assert.eq(icon_calls[2].name, "memory")

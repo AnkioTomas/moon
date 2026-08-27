@@ -12,7 +12,7 @@ Book 桌面壳 — 顶栏 + 底栏 + Tab 内容拼装。
   |-----------------------------------------------|
   | BottomBar  首页|图书馆|[书城]|[统计]|设置      |
   +-----------------------------------------------+
-  手势：底栏 tap 切 Tab；内容区左右滑翻图书馆/书城页。
+  手势：底栏 tap 切 Tab；内容区左右滑翻图书馆/书城页；顶栏点源名换源、点其他区域或下滑开快捷面板。
 
 @module koplugin.book.ui.desktop
 --]]
@@ -39,6 +39,7 @@ local Detail = require("ui.desktop.detail")
 local NativePanel = require("ui.panel.native")
 local Image = require("ui.components.image")
 local TopBar = require("ui.components.topbar")
+local SourceSettings = require("ui.desktop.settings.source")
 local BottomBar = require("ui.components.bottombar")
 local UI = require("ui.components.bookui")
 local BookStore = require("book.store")
@@ -172,11 +173,23 @@ function Desktop:onSwipeTopBar(_, ges_ev)
     return true
 end
 
---- 顶栏点击：与下滑一致，直接打开原生快捷面板 Tab。
+--- 顶栏点击：源名区域切换数据源，其余区域打开原生快捷面板 Tab。
 ---@param _ any
----@param _ges table|nil
+---@param ges table|nil
 ---@return boolean
-function Desktop:onTapTopBar(_, _ges)
+function Desktop:onTapTopBar(_, ges)
+    if ges and ges.pos then
+        local rect = TopBar.sourceTapRect()
+        if rect then
+            local x, y = ges.pos.x, ges.pos.y
+            if x >= rect.x and x < rect.x + rect.w
+                and y >= rect.y and y < rect.y + rect.h
+            then
+                SourceSettings.pickActive(self, self.plugin)
+                return true
+            end
+        end
+    end
     NativePanel.show("desktop")
     return true
 end
