@@ -127,9 +127,9 @@ function M.build(ctx, state, opts)
     local w = opts.width
     local budget = opts.budget or opts.width
     local pad = UI.sz(10)
-    local mode = MoonSettings.get("home").home_recent_list_mode or "hero_grid"
-    local list_only = opts.list_only or mode == "list_only"
-    local consume = opts.consume_remaining
+    local recent_mode = opts.recent_mode or "inline"
+    local list_only = (MoonSettings.get("home").home_recent_list_mode or "hero_grid") == "list_only"
+    local consume = recent_mode == "footer_full" or recent_mode == "footer_tail"
     local desktop = opts.desktop
     local on_open, on_read = openHandlers(ctx)
     local kids = { align = "left" }

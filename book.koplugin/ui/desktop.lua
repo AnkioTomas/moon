@@ -402,9 +402,6 @@ function Desktop:scheduleClockTick()
     self._clock_tick = function()
         if self._closed then return end
         self:refreshTopBar()
-        if self.tab == "home" and Home.hasClock() then
-            self:rebuild()
-        end
         self:scheduleClockTick()
     end
     local delay = math.max(1, 61 - (tonumber(os.date("%S")) or 0))

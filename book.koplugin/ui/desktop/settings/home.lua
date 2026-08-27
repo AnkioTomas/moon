@@ -19,10 +19,6 @@ local function saveLayout(layout)
     MoonSettings.saveSection("home", home)
 end
 
-local function enabledLayout()
-    return Base.enabledLayout()
-end
-
 local function isEnabled(id, layout)
     for i, item in ipairs(layout) do
         if item == id then return true end
@@ -38,7 +34,7 @@ local function position(id, layout)
 end
 
 local function toggle(id, desktop)
-    local layout = enabledLayout()
+    local layout = Base.enabledLayout()
     if isEnabled(id, layout) then
         local out = {}
         for i, item in ipairs(layout) do
@@ -55,7 +51,7 @@ local function toggle(id, desktop)
 end
 
 local function move(id, delta, desktop)
-    local layout = enabledLayout()
+    local layout = Base.enabledLayout()
     local pos = position(id, layout)
     if not pos then return end
     local next_pos = pos + delta
@@ -68,7 +64,7 @@ local function move(id, delta, desktop)
 end
 
 local function configure(desktop, comp)
-    local layout = enabledLayout()
+    local layout = Base.enabledLayout()
     local enabled = isEnabled(comp.id, layout)
     local pos = position(comp.id, layout)
     local dialog
@@ -112,7 +108,7 @@ local function configure(desktop, comp)
 end
 
 local function openSortList(desktop)
-    local layout = enabledLayout()
+    local layout = Base.enabledLayout()
     if #layout == 0 then return end
     local items = {}
     for i, id in ipairs(layout) do
@@ -160,7 +156,7 @@ function HomeSettings.sections(desktop)
     local home = MoonSettings.get("home")
     local mode = home.home_recent_list_mode or "hero_grid"
     local mode_label = mode == "list_only" and _("纯列表") or _("长条+列表")
-    local layout = enabledLayout()
+    local layout = Base.enabledLayout()
     local enabled_set = {}
     for i, id in ipairs(layout) do
         enabled_set[id] = i

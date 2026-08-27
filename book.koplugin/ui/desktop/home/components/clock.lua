@@ -22,10 +22,6 @@ local M = {
 
 local DOW = { _("日"), _("一"), _("二"), _("三"), _("四"), _("五"), _("六") }
 
-local function clockBodyHeight()
-    return UI.sz(56)
-end
-
 ---@param ctx table
 ---@param _state table
 ---@param opts table
@@ -33,7 +29,7 @@ end
 function M.build(ctx, _state, opts)
     local w = opts.width
     local pad_y = UI.sz(10)
-    local body_h = clockBodyHeight()
+    local body_h = UI.sz(56)
     local total_h = body_h + pad_y * 2
     local time_text = os.date("%H:%M")
     local wday = tonumber(os.date("%w")) or 0
