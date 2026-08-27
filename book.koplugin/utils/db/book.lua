@@ -612,6 +612,53 @@ function BookDB.remove(source_id, stable_id)
     ) ~= nil
 end
 
+--- 读取全书阅读排版偏好（JSON 串）。
+---@param source_id string
+---@param stable_id string
+---@return string|nil
+function BookDB.getReaderPrefs(source_id, stable_id)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
+        return nil
+    end
+    Base.ensure()
+    local payload = Base.rowexec(
+        [[SELECT reader_prefs FROM books WHERE source_id=? AND stable_id=? LIMIT 1;]],
+        source_id,
+        stable_id
+    )
+    if type(payload) ~= "string" or payload == "" then
+        return nil
+    end
+    return payload
+end
+
+--- 写入全书阅读排版偏好（JSON 串）。
+---@param source_id string
+---@param stable_id string
+---@param payload string
+---@return boolean
+function BookDB.setReaderPrefs(source_id, stable_id, payload)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
+        return false
+    end
+    if type(payload) ~= "string" or payload == "" then
+        return false
+    end
+    Base.ensure()
+    return Base.exec(
+        [[INSERT INTO books (source_id, stable_id, fetched_at, reader_prefs, in_library)
+          VALUES (?, ?, ?, ?, 1)
+          ON CONFLICT(source_id, stable_id) DO UPDATE SET
+            reader_prefs=excluded.reader_prefs;]],
+        source_id,
+        stable_id,
+        os.time(),
+        payload
+    ) ~= nil
+end
+
 --- 清空全部书籍展示元数据（保留键与 md5）
 ---@return boolean
 function BookDB.stripMeta()
