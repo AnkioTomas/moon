@@ -113,7 +113,7 @@ do
         total_pages = 300,
         locator = "/body[1]/p[2]",
     }))
-    local q = calls[#calls]
+    local q = calls[#calls - 1]
     Assert.is_true(q.sql:find("INSERT INTO pending_progress", 1, true) ~= nil)
     Assert.is_true(q.sql:find("ON CONFLICT(source_id, stable_id) DO UPDATE", 1, true) ~= nil)
     Assert.is_true(q.sql:find("chapter_title", 1, true) ~= nil)
@@ -132,9 +132,15 @@ do
     Assert.eq(type(q.args[10]), "number") -- updated_at = os.time()
     Assert.is_false(q.sql:find("book'1", 1, true) ~= nil)
 
+    local sync = calls[#calls]
+    Assert.is_true(sync.sql:find("UPDATE books SET percent=", 1, true) ~= nil)
+    Assert.eq(sync.args[1], 50)
+    Assert.eq(sync.args[2], "moon")
+    Assert.eq(sync.args[3], "book'1")
+
     -- 可选字段缺省时绑定 nil；非法页码（0）也落成 nil
     Assert.is_true(ProgressDB.upsert("moon", "b2", { fraction = 0.1, page = 0, total_pages = -1 }))
-    q = calls[#calls]
+    q = calls[#calls - 1]
     Assert.eq(q.argc, 10)
     Assert.eq(q.args[4], nil)
     Assert.eq(q.args[5], nil)
@@ -144,7 +150,7 @@ do
     Assert.eq(q.args[9], nil)
 
     Assert.is_true(ProgressDB.upsert("moon", "b3", { fraction = 0.2, updated_at = 1234 }))
-    Assert.eq(calls[#calls].args[10], 1234)
+    Assert.eq(calls[#calls - 1].args[10], 1234)
 
     DbBase.close()
     clearMods()

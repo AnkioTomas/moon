@@ -16,6 +16,7 @@ local resolved_source
 local stored_toc = {}
 local default_source = {
     id = "moon",
+    type = "book",
     putProgressAsync = function() end,
     syncProgressAsync = function(_, opts, cb)
         calls.progress[#calls.progress + 1] = { "sync", opts.identity }
@@ -27,6 +28,14 @@ local default_source = {
         if cb then cb({}) end
     end,
     syncStatsAsync = function(_, _, cb) if cb then cb({}) end end,
+}
+local chapter_default_source = {
+    id = "moon",
+    type = "chapter",
+    putProgressAsync = default_source.putProgressAsync,
+    syncProgressAsync = default_source.syncProgressAsync,
+    syncNotesAsync = default_source.syncNotesAsync,
+    syncStatsAsync = default_source.syncStatsAsync,
 }
 
 package.preload["book.store"] = function()
@@ -47,7 +56,7 @@ package.preload["book.store"] = function()
                     stable_id = "b2",
                     chapter_idx = 3,
                     book = { title = "旧章书" },
-                    source = resolved_source or default_source,
+                    source = resolved_source or chapter_default_source,
                 }
             end
             if path == "/other/9.html" then
@@ -56,7 +65,7 @@ package.preload["book.store"] = function()
                     stable_id = "b2",
                     chapter_idx = 9,
                     book = { title = "旧章书" },
-                    source = default_source,
+                    source = resolved_source or chapter_default_source,
                 }
             end
             if path == "/other/plain.epub" then
@@ -65,7 +74,7 @@ package.preload["book.store"] = function()
                     stable_id = "/other/plain.epub",
                     chapter_idx = nil,
                     book = { title = "plain" },
-                    source = { id = "local" },
+                    source = { id = "local", type = "book" },
                 }
             end
             if path == "/cache/1.html" or path == "/cache/2.html" then
@@ -74,7 +83,7 @@ package.preload["book.store"] = function()
                     stable_id = "chapters",
                     chapter_idx = path == "/cache/1.html" and 1 or 2,
                     book = { title = "章节书" },
-                    source = resolved_source or default_source,
+                    source = resolved_source or chapter_default_source,
                 }
             end
             return nil
@@ -212,6 +221,7 @@ do
     local callback
     local cancelled = 0
     local source = {
+        type = "chapter",
         openBookAsync = function(_, _, _, cb)
             local active = true
             callback = function(...)
@@ -268,6 +278,7 @@ end
 do
     local toc = { { idx = 1 }, { idx = 2 } }
     local source = {
+        type = "chapter",
         openBookAsync = function(_, _, opts, cb)
             local idx = opts.chapter_idx
             stored_toc.chapters = toc
@@ -462,6 +473,7 @@ do
     end
     package.loaded["apps/reader/readerui"] = nil
     local source = {
+        type = "chapter",
         openBookAsync = function(_, _, opts, cb)
             return asyncChapter("/cache/" .. opts.chapter_idx .. ".html", cb)
         end,
@@ -491,6 +503,7 @@ end
 do
     local source = {
         id = "moon",
+        type = "chapter",
         openBookAsync = function()
             return { cancel = function() end }
         end,

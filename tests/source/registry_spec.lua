@@ -91,7 +91,7 @@ do
 end
 
 do
-    Assert.eq(Registry.meta("wechat").type, "online")
+    Assert.eq(Registry.meta("wechat").type, "chapter")
 end
 
 do
