@@ -493,7 +493,9 @@ do
     Assert.eq(rows[2].stable_id, "/a.epub")
     Assert.eq(rows[2].last_chapter_idx, 5)
     local q = calls[#calls]
-    Assert.is_true(q.sql:find("FROM books WHERE source_id=? AND in_library=1 AND last_open>0 ORDER BY last_open DESC LIMIT ?;", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("pending_progress", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("COALESCE", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("ORDER BY b.last_open DESC", 1, true) ~= nil)
     Assert.eq(q.args[1], "local")
     Assert.eq(q.args[2], 24)
 

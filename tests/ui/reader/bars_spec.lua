@@ -71,9 +71,9 @@ Assert.eq(Bars.progressText({ percent = -3 }), "0%")
 
 -- progressText：页码 / 章号拼接
 Assert.eq(Bars.progressText({ percent = 42, page = 7, total_pages = 100 }), "42% · 第 7/100 页")
-Assert.eq(Bars.progressText({ percent = 5, identity = { chapter_idx = 3 } }, toc), "5% · 第 3/10 章")
+Assert.eq(Bars.progressText({ percent = 5, reading_chapter_idx = 3 }, toc), "5% · 第 3/10 章")
 Assert.eq(
-    Bars.progressText({ percent = 5, page = 1, total_pages = 2, identity = { chapter_idx = 3 } }, toc),
+    Bars.progressText({ percent = 5, page = 1, total_pages = 2, reading_chapter_idx = 3 }, toc),
     "5% · 第 3/10 章 · 第 1/2 页"
 )
 

@@ -81,7 +81,7 @@ local ops = {
 }
 
 local path
-Chapter.openAsync({ type = "article" }, identity, { title = "书" }, { chapter_idx = 2 }, ops, function(p)
+Chapter.openAsync({ type = "chapter" }, identity, { title = "书" }, { chapter_idx = 2 }, ops, function(p)
     path = p
 end)
 Assert.eq(fetched[1], 2)
@@ -96,19 +96,19 @@ Assert.is_true(html:find("<h1>二</h1>", 1, true) ~= nil)
 Assert.is_true(html:find("<p>正文2</p>", 1, true) ~= nil)
 
 -- 已落盘直接复用，不再请求正文。
-Chapter.openAsync({ type = "article" }, identity, {}, { chapter_idx = 2 }, ops, function(p) path = p end)
+Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, function(p) path = p end)
 Assert.len(fetched, 1)
 
 -- 未指定章时优先使用本地 pending_progress。
 pending = { chapter_idx = 3 }
-Chapter.openAsync({ type = "article" }, identity, {}, nil, ops, function(p) path = p end)
+Chapter.openAsync({ type = "chapter" }, identity, {}, nil, ops, function(p) path = p end)
 Assert.eq(touches[#touches].chapter_idx, 3)
 Assert.eq(fetched[#fetched], 3)
 
 -- 数据库登记失败时不能交付物理路径。
 touch_error = "db failed"
 local failed_path, failed_err
-Chapter.openAsync({ type = "article" }, identity, {}, { chapter_idx = 1 }, ops, function(p, e)
+Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 1 }, ops, function(p, e)
     failed_path, failed_err = p, e
 end)
 Assert.is_nil(failed_path)
@@ -118,7 +118,7 @@ Assert.eq(failed_err, "db failed")
 local load_callback
 local cancelled = 0
 local fetched_after_cancel = 0
-local cancelled_job = Chapter.openAsync({ type = "article" }, identity, {}, { chapter_idx = 1 }, {
+local cancelled_job = Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 1 }, {
     loadToc = function(_, cb)
         load_callback = cb
         return { cancel = function() cancelled = cancelled + 1 end }
@@ -136,7 +136,7 @@ Assert.eq(fetched_after_cancel, 0)
 touch_error = nil
 os.remove(tmp .. "/2.html")
 local ui_path
-local ui_job = Chapter.openWithUi({ type = "article" }, identity, {}, { chapter_idx = 2 }, ops,
+local ui_job = Chapter.openWithUi({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops,
     function(p) ui_path = p end)
 Assert.is_nil(ui_path)
 Stubs.flush()
@@ -144,7 +144,7 @@ Assert.not_nil(ui_path)
 Assert.eq(progress_ui.shown, 1)
 ui_path = nil
 progress_ui.shown = 0
-ui_job = Chapter.openWithUi({ type = "article" }, identity, {}, { chapter_idx = 2 }, ops,
+ui_job = Chapter.openWithUi({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops,
     function(p) ui_path = p end)
 ui_job.cancel()
 Stubs.flush()
@@ -153,7 +153,7 @@ Assert.is_nil(ui_path)
 -- 本地章节已存在时快开，不弹准备框，并在后台静默刷新登记。
 local fast_path
 local touch_before = #touches
-Chapter.openWithUi({ type = "article" }, identity, {}, { chapter_idx = 2 }, ops, function(p)
+Chapter.openWithUi({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, function(p)
     fast_path = p
 end)
 Stubs.flush()
