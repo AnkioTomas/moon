@@ -93,6 +93,18 @@ local function bookSupportsScrape(book, fallback_source)
     return SourceCapabilities.supportsScrape(src)
 end
 
+--- 按书籍属主源判断是否可编辑元信息。
+---@param book table|nil
+---@param fallback_source table|nil
+---@return boolean
+local function bookSupportsEdit(book, fallback_source)
+    if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
+        return false
+    end
+    local src = require("source.registry").resolve(book.source_id) or fallback_source
+    return SourceCapabilities.supportsEdit(src)
+end
+
 --- 小节标题（书城书的简介用）。
 ---@param text string
 ---@param width number
@@ -469,6 +481,13 @@ function Detail:openEditor()
     if type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
         return
     end
+    if not bookSupportsEdit(book, self.source) then
+        require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
+            text = _("当前数据源不支持编辑"),
+            timeout = 2,
+        })
+        return
+    end
     local UIManager = require("ui/uimanager")
     local MultiInputDialog = require("ui/widget/multiinputdialog")
     local dialog
@@ -511,6 +530,9 @@ end
 function Detail:saveMeta(fields)
     local book = self.book
     if type(book) ~= "table" or type(fields) ~= "table" then
+        return
+    end
+    if not bookSupportsEdit(book, self.source) then
         return
     end
     --- 空串归一为 nil：空标题才能回退 stable_id 显示
@@ -730,6 +752,7 @@ function Detail:rebuild()
     local store_kind = storeKind(book, self.source, self.store_preview)
     local store_book = store_kind ~= nil
     local can_scrape = bookSupportsScrape(book, self.source)
+    local can_edit = bookSupportsEdit(book, self.source)
     local can_read = not store_book and self.source ~= nil
         and (self.source.type == "book"
             or self.source.type == "chapter")
@@ -762,11 +785,12 @@ function Detail:rebuild()
         }
         footer_h = footer:getSize().h + footer_pad_v * 2
     else
-        local defs = {
-            { icon = "edit", text = _("编辑"), fn = function()
+        local defs = {}
+        if can_edit then
+            defs[#defs + 1] = { icon = "edit", text = _("编辑"), fn = function()
                 self:openEditor()
-            end },
-        }
+            end }
+        end
         if can_scrape then
             table.insert(defs, { icon = "search", text = _("刮削"), fn = function()
                 self:startScrape()
@@ -784,6 +808,15 @@ function Detail:rebuild()
         end
         local btn_h = UI.sz(44)
         local btn_gap = UI.sz(10)
+        if #defs == 0 then
+            footer = TextWidget:new{
+                text = _("暂无可用操作"),
+                face = UI.face("xx_smallinfofont", 13),
+                max_width = content_w,
+                fgcolor = UI.muted(),
+            }
+            footer_h = footer:getSize().h + footer_pad_v * 2
+        else
         local cell_w = math.floor((content_w - btn_gap * (#defs - 1)) / #defs)
         local row = HorizontalGroup:new{ align = "center" }
         for i, def in ipairs(defs) do
@@ -794,6 +827,7 @@ function Detail:rebuild()
         end
         footer = row
         footer_h = btn_h + footer_pad_v * 2
+        end
     end
 
     local body_h = math.max(UI.sz(80), h - title_h - footer_h)
