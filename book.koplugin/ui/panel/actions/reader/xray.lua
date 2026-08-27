@@ -10,12 +10,12 @@ return {
     title = _("X-Ray"),
     icon = "person_search",
     scope = "reader",
-    --- 设置页无 ReaderUI 时仍应可配置；运行时由 xray.ui 校验身份与 AI。
     ---@param ctx BookQuickPanelContext|nil
     ---@return boolean
     available = function(ctx)
-        local ui = ctx and ctx.ui
-        if not ui then return true end
+        if require("utils.settings").get().book_xray_enabled == false then
+            return false
+        end
         return true
     end,
     ---@param ctx BookQuickPanelContext

@@ -36,7 +36,23 @@ local DEFAULTS = {
         quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "xray", "dictionary", "ocr" },
     },
     reader = {
+        book_xray_enabled = true,
         book_xray_show_marks = true,
+        book_reader_top_bar = true,
+        book_reader_bottom_bar = true,
+        reader_popup_buttons = {
+            select = true,
+            highlight = true,
+            copy = true,
+            add_note = true,
+            wikipedia = true,
+            dictionary = true,
+            translate = true,
+            view_html = true,
+            qrcode = true,
+            search = true,
+        },
+        translate_languages = { "en", "zh", "ja", "fr", "de", "ko", "es", "ru", "zh_TW" },
     },
     home = {
         home_layout = { "recent_list" },

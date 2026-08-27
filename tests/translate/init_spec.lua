@@ -5,6 +5,10 @@
 
 local Assert = require("support.assert")
 
+package.preload["l10n"] = function() return { apply = function() end } end
+package.preload["translate.popup"] = function()
+    return { open = function() end }
+end
 package.preload["translate.edge"] = function()
     return {
         translateAsync = function() error("not called by install") end,

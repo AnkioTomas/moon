@@ -47,6 +47,7 @@ function Reader.attach(plugin)
     end
     require("lockscreen.init").refreshInBackground(true)
     require("xray.marks").install(ui)
+    require("ui.reader.highlight_menu").install(ui)
 end
 
 ---@param plugin table

@@ -34,6 +34,7 @@ local Language = require("ui.desktop.settings.language")
 local QuickPanel = require("ui.panel.settings")
 local Maintenance = require("ui.desktop.settings.maintenance")
 local AISettings = require("ui.desktop.settings.ai")
+local ReaderSettings = require("ui.desktop.settings.reader")
 
 local Settings = {}
 
@@ -109,6 +110,7 @@ function Settings.build(desktop)
     local valid_sub = {
         sources = true, display = true, lockscreen = true, desktop = true,
         home = true, language = true, remote = true, quickpanel = true, ai = true,
+        reader = true,
     }
     if sub ~= nil and not valid_sub[sub] then
         sub = nil
@@ -121,6 +123,13 @@ function Settings.build(desktop)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "source", title = _("数据源"), status = active_name, status_on = true,
                     callback = function() gotoSub(desktop, "sources") end,
+                })
+            end,
+            function(iw)
+                return SettingRow.build(iw, {
+                    kind = "nav", icon = "menu_book", title = _("阅读"),
+                    status_on = true,
+                    callback = function() gotoSub(desktop, "reader") end,
                 })
             end,
             function(iw)
@@ -211,6 +220,10 @@ function Settings.build(desktop)
             end
         elseif sub == "ai" then
             appendSection(packed, card_w, _("AI 服务"), AISettings.rows(desktop))
+        elseif sub == "reader" then
+            for _, section in ipairs(ReaderSettings.sections(desktop)) do
+                appendSection(packed, card_w, section.title, section.rows)
+            end
         end
     end
 
