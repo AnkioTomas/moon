@@ -420,6 +420,101 @@ local function findInstalledFont(id)
     return nil
 end
 
+---@param path string
+---@return table|nil
+local function ensureFontInfo(path)
+    FontList:getFontList()
+    if FontList.fontinfo[path] then
+        return FontList.fontinfo[path]
+    end
+    local dir = path:match("^(.*)/[^/]+$")
+    if not dir then
+        return nil
+    end
+    local mark = { cache_dirty = false }
+    FontList:_readList(dir, mark)
+    return FontList.fontinfo[path]
+end
+
+---@param id string|nil
+---@return string|nil, string|nil
+local function resolvePath(id)
+    id = sanitizeId(id or "")
+    if id == "" then
+        return ""
+    end
+    local woff = wereadPath(id)
+    if woff and lfs.attributes(woff, "mode") == "file" then
+        registerFontPath(woff)
+        return woff
+    end
+    local path = findInstalledFont(id)
+    if path then
+        registerFontPath(path)
+        return path
+    end
+    return nil, _("字体文件不存在")
+end
+
+---@param id string|nil
+---@return string|nil, string|nil
+function M.faceForId(id)
+    local path, err = resolvePath(id)
+    if not path then
+        return nil, err
+    end
+    if path == "" then
+        return nil, _("字体文件不存在")
+    end
+    local info = ensureFontInfo(path)
+    if not info or not info[1] or not info[1].name then
+        return nil, _("应用字体失败")
+    end
+    local cre = require("document/credocument"):engineInit()
+    pcall(cre.registerFont, path)
+    return info[1].name
+end
+
+---@param ui table|nil
+---@return boolean
+function M.supportsReader(ui)
+    return ui and ui.font ~= nil and type(ui.document) == "table"
+        and type(ui.document.setFontFace) == "function"
+end
+
+---@param ui table|nil
+---@return string
+function M.readerCurrentId(ui)
+    if ui and ui.doc_settings then
+        local id = ui.doc_settings:readSetting("book_reader_font_id")
+        if type(id) == "string" and id ~= "" then
+            return id
+        end
+    end
+    return ""
+end
+
+---@param ui table|nil
+---@param id string
+---@param name string|nil
+---@return boolean|nil, string|nil
+function M.applyToReader(ui, id, name)
+    if not M.supportsReader(ui) then
+        return nil, _("当前文档不支持字体与排版调整")
+    end
+    local face, err = M.faceForId(id)
+    if not face then
+        return nil, err
+    end
+    ui.font:onSetFont(face)
+    ui.font:onSaveSettings()
+    id = sanitizeId(id)
+    ui.doc_settings:saveSetting("book_reader_font_id", id)
+    ui.doc_settings:saveSetting("book_reader_font_name", name or id)
+    require("ui/uimanager"):setDirty(ui.dialog, "ui")
+    return true
+end
+
 ---@param id string|nil
 ---@return string|nil, string|nil
 local function resolveBasename(id)

@@ -33,15 +33,20 @@ local DEFAULTS = {
     pinyin = { pinyin_enabled = false },
     quickpanel = {
         quick_panel_actions = { "night", "wifi" },
-        quick_panel_reader_actions = { "toc", "reflow", "highlights", "xray", "dictionary", "ocr" },
+        quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "xray", "dictionary", "ocr" },
     },
     reader = {
         book_xray_show_marks = true,
     },
+    home = {
+        home_layout = { "recent_list" },
+        home_recent_list_mode = "hero_grid",
+        home_excerpt_index = 0,
+    },
     ai = { ai_endpoint = "", ai_api_key = "", ai_model = "" },
 }
 
-local SECTIONS = { "common", "display", "lockscreen", "remote", "pinyin", "quickpanel", "reader", "ai" }
+local SECTIONS = { "common", "display", "lockscreen", "remote", "pinyin", "quickpanel", "reader", "home", "ai" }
 local KEY_SECTION = {}
 for section, defaults in pairs(DEFAULTS) do
     for key in pairs(defaults) do KEY_SECTION[key] = section end
