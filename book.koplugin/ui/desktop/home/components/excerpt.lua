@@ -28,7 +28,10 @@ local M = {
 ---@return table
 function M.build(ctx, state, opts)
     local w = opts.width
+    local margin = UI.sz(10)
+    local card_w = math.max(1, w - margin * 2)
     local pad = UI.sz(12)
+    local inner_w = math.max(1, card_w - pad * 2)
     local excerpt = state.excerpt or {}
     local text = excerpt.text or _("暂无高亮")
     local source = excerpt.source or _("书摘")
@@ -36,7 +39,6 @@ function M.build(ctx, state, opts)
         text = U.FALLBACK_MESSAGE
         source = _("默认句子")
     end
-    local inner_w = math.max(1, w - pad * 4)
     local title_w = TextWidget:new{
         text = _("书摘"),
         face = UI.face("cfont", 12),
@@ -75,12 +77,21 @@ function M.build(ctx, state, opts)
             content,
         },
     }, {
-        width = w,
+        width = card_w,
         height = card_h,
         padding = pad,
         shadow = true,
     })
-    return { widget = card, height = card_h }
+    local widget = FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        padding_left = margin,
+        padding_right = margin,
+        margin = 0,
+        dimen = Geom:new{ w = w, h = card_h },
+        card,
+    }
+    return { widget = widget, height = card_h }
 end
 
 return M
