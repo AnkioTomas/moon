@@ -85,7 +85,7 @@ function Bars.progressText(cur, toc, remaining_seconds)
     end
     parts[#parts + 1] = string.format("%.0f%%", pct)
     local identity = cur.identity
-    local idx = identity and tonumber(identity.chapter_idx)
+    local idx = tonumber(cur.reading_chapter_idx) or (identity and tonumber(identity.chapter_idx))
     local count = toc and #toc or nil
     if idx and count and count > 0 then
         parts[#parts + 1] = string.format(_("第 %d/%d 章"), idx, count)

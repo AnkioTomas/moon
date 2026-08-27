@@ -17,9 +17,7 @@ local function showToc(ctx)
         end
         return
     end
-    local current = session.current()
-    local identity = current and current.identity
-    local current_idx = identity and identity.chapter_idx
+    local current_idx = session.chapterIndex()
     local items = {}
     for _, chapter in ipairs(toc) do
         local idx = tonumber(chapter.idx) or 0

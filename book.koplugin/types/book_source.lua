@@ -4,8 +4,7 @@
 
 ---@alias BookSourceType
 ---| '"book"' # 整本文件
----| '"online"' # 在线书籍，按章阅读
----| '"article"' # 文章订阅，按章阅读
+---| '"chapter"' # 连续章节阅读
 
 ---@class BookSourceMeta
 ---@field id SourceId

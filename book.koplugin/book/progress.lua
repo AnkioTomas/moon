@@ -30,13 +30,15 @@ end
 ---@param doc_frac number
 ---@param id BookIdentity|nil
 ---@param toc BookChapter[]|nil
+---@param reading_idx number|nil
 ---@return number
-local function wholeFraction(doc_frac, id, toc)
-    if not id or not id.chapter_idx then
+local function wholeFraction(doc_frac, id, toc, reading_idx)
+    local idx = id and id.chapter_idx or reading_idx
+    if not idx then
         return doc_frac
     end
     local count = toc and #toc
-    local idx = tonumber(id.chapter_idx) or 1
+    idx = tonumber(idx) or 1
     if not count or count <= 0 then
         return doc_frac
     end
@@ -50,8 +52,9 @@ function Progress.fraction(snapshot)
     if not snapshot then return 0 end
     local doc_frac = tonumber(snapshot.doc_fraction) or 0
     local identity = snapshot.identity
-    local chapter = snapshot.chapter
-    return wholeFraction(doc_frac, identity, chapter and chapter.toc)
+    local SessionToc = require("ui.reader.session.toc")
+    local toc = SessionToc.list(snapshot)
+    return wholeFraction(doc_frac, identity, toc, snapshot.reading_chapter_idx)
 end
 
 --- 当前章节标题（顶栏 / 进度上报共用）。
@@ -70,11 +73,17 @@ function Progress.position(snapshot)
     local page = tonumber(snapshot and snapshot.page)
     local total_pages = tonumber(snapshot and snapshot.total_pages)
     local Session = require("ui.reader.session")
+    local Toc = require("ui.reader.session.toc")
+    local chapter_idx = id.chapter_idx or snapshot and snapshot.reading_chapter_idx
+    local chapter_frac
+    if chapter_idx then
+        chapter_frac = Toc.chapterFraction(snapshot) or doc_frac
+    end
     return {
         fraction = Progress.fraction(snapshot),
-        chapter_idx = id.chapter_idx,
+        chapter_idx = chapter_idx,
         chapter_title = Session.chapterTitle(snapshot),
-        chapter_fraction = id.chapter_idx and doc_frac or nil,
+        chapter_fraction = chapter_frac,
         page = page and page > 0 and math.floor(page) or nil,
         total_pages = total_pages and total_pages > 0 and math.floor(total_pages) or nil,
     }
@@ -283,8 +292,9 @@ end
 ---@param pct number clamp 后的全书比例
 ---@param show_msg boolean|nil
 local function applyRemotePos(ui, id, pos, pct, show_msg)
-    local toc = require("ui.reader.session").toc()
-    if toc then
+    local Session = require("ui.reader.session")
+    if Session.isChapterMode(id) then
+        local toc = Session.toc()
         local count = #toc
         local target_idx = pos.chapter_idx
         local within
@@ -391,7 +401,7 @@ function Progress.pull(snapshot)
             local pos = ProgressDB.get(id.source_id, id.stable_id)
             if not pos then return end
             local local_position = Session.position()
-            if id.chapter_idx and Session.toc() then
+            if Session.isChapterMode(id) then
                 local local_idx = local_position and local_position.chapter_idx
                 local remote_idx = pos.chapter_idx
                 if local_idx and remote_idx and local_idx ~= remote_idx then

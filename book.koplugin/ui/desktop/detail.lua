@@ -733,8 +733,7 @@ function Detail:rebuild()
         and type(book.source_id) == "string" and type(book.stable_id) == "string"
     local can_read = not store_book and self.source ~= nil
         and (self.source.type == "book"
-            or self.source.type == "online"
-            or self.source.type == "article")
+            or self.source.type == "chapter")
     local can_reflow = not store_book and self.source and self.source.id == "local"
         and type(self.source.replaceBook) == "function"
         and type(book.stable_id) == "string"
