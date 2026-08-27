@@ -18,7 +18,6 @@ local Enrich = require("ui.desktop.home.enrich")
 local HomeStats = require("ui.desktop.home.stats")
 local Layout = require("ui.desktop.home.layout")
 local Highlights = require("book.highlights")
-local Base = require("ui.desktop.home.components.base")
 local logger = require("logger")
 local gettext = require("gettext")
 local Screen = Device.screen
@@ -81,19 +80,21 @@ local function fillExtras(state, rotate_excerpt)
     return state
 end
 
---- 离开阅读回到桌面：仅轮换书摘一次（一言仍走锁屏 resume 更新缓存）。
+--- 离开阅读回到桌面：已加载则就地轮换书摘；否则等 fetch 完成时轮换。
 ---@param desktop table
 function Home.onReturnToDesktop(desktop)
     if not desktop or desktop._closed then return end
+    if desktop._home_loaded and desktop._home_state then
+        local excerpt = rotateExcerpt(desktop._home_state.recent)
+        if excerpt then
+            desktop._home_state.excerpt = excerpt
+        end
+        if desktop.tab == "home" then
+            desktop:rebuild()
+        end
+        return
+    end
     desktop._home_rotate_excerpt = true
-end
-
---- 构建主页。
----@param ctx table
----@param state table
----@return table
-function Home.build(ctx, state)
-    return Layout.build(ctx, state)
 end
 
 --- 异步拉取最近阅读与本地统计。
@@ -207,13 +208,7 @@ function Home.page(desktop)
             },
         }
     end
-    return Home.build(desktop:ctx(), desktop._home_state or {})
-end
-
---- 首页是否启用时钟组件（顶栏分钟 tick 联动）。
----@return boolean
-function Home.hasClock()
-    return Base.hasComponent("clock")
+    return Layout.build(desktop:ctx(), desktop._home_state or {})
 end
 
 return Home

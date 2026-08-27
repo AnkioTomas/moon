@@ -16,21 +16,19 @@ local COMPONENT_MODULES = {
 }
 
 M.components = {}
+local by_id = {}
 
 for _, name in ipairs(COMPONENT_MODULES) do
-    M.components[#M.components + 1] = require("ui.desktop.home.components." .. name)
+    local component = require("ui.desktop.home.components." .. name)
+    M.components[#M.components + 1] = component
+    by_id[component.id] = component
 end
 
 --- 按 id 查找组件定义。
 ---@param id string|nil
 ---@return table|nil
 function M.find(id)
-    for _, component in ipairs(M.components) do
-        if component.id == id then
-            return component
-        end
-    end
-    return nil
+    return id and by_id[id] or nil
 end
 
 --- 设置页选项列表。
