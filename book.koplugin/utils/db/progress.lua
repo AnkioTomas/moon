@@ -5,6 +5,7 @@
 --]]
 
 local Base = require("utils.db.base")
+local Book = require("types.book").Book
 
 local ProgressDB = {}
 
@@ -18,6 +19,20 @@ local function positiveInt(value)
         return nil
     end
     return math.floor(n)
+end
+
+--- 进度落盘后同步 books.percent，避免只读 books 表的 UI 显示旧值。
+---@param source_id string
+---@param stable_id string
+---@param fraction number
+local function syncBookPercent(source_id, stable_id, fraction)
+    local percent = Book.clampPercent(fraction, false, true)
+    Base.exec(
+        [[UPDATE books SET percent=? WHERE source_id=? AND stable_id=?;]],
+        percent,
+        source_id,
+        stable_id
+    )
 end
 
 ---@param source_id string
@@ -34,7 +49,7 @@ function ProgressDB.upsert(source_id, stable_id, pos)
         return false
     end
     Base.ensure()
-    return Base.exec(
+    if not Base.exec(
         [[INSERT INTO pending_progress
             (source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction,
              page, total_pages, locator, updated_at, sync_status)
@@ -59,7 +74,11 @@ function ProgressDB.upsert(source_id, stable_id, pos)
         positiveInt(pos.total_pages),
         pos.locator,
         tonumber(pos.updated_at) or os.time()
-    ) ~= nil
+    ) then
+        return false
+    end
+    syncBookPercent(source_id, stable_id, fraction)
+    return true
 end
 
 --- 保存远端进度。未同步的本地版本不允许被远端覆盖。
@@ -74,7 +93,7 @@ function ProgressDB.upsertRemote(source_id, stable_id, pos)
         return false
     end
     Base.ensure()
-    return Base.exec(
+    if not Base.exec(
         [[INSERT INTO pending_progress
             (source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction,
              page, total_pages, locator, updated_at, sync_status)
@@ -90,7 +109,11 @@ function ProgressDB.upsertRemote(source_id, stable_id, pos)
         source_id, stable_id, fraction, pos.chapter_idx, pos.chapter_title, pos.chapter_fraction,
         positiveInt(pos.page), positiveInt(pos.total_pages),
         pos.locator, tonumber(pos.updated_at) or os.time()
-    ) ~= nil
+    ) then
+        return false
+    end
+    syncBookPercent(source_id, stable_id, fraction)
+    return true
 end
 
 ---@param source_id string
