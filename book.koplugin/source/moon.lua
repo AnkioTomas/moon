@@ -129,6 +129,7 @@ function Source:capabilities()
         search = true,
         refresh = true,
         scrape = false,
+        edit = false,
         insight = true,
         store = false,
     }
