@@ -345,7 +345,7 @@ function BookDB.recent(limit)
     return out
 end
 
---- 最近阅读：last_open 倒序
+--- 最近阅读：last_open 倒序；进度与图书馆一致，优先 pending_progress.fraction。
 ---@param source_id string
 ---@param limit number|nil
 ---@return Book[]
@@ -356,7 +356,15 @@ function BookDB.recentBySource(source_id, limit)
     end
     Base.ensure()
     local result, nrows = Base.query(
-        "SELECT " .. COLUMNS .. " FROM books WHERE source_id=? AND in_library=1 AND last_open>0 ORDER BY last_open DESC LIMIT ?;",
+        [[SELECT b.source_id, b.stable_id, b.md5, b.title, b.authors,
+                 COALESCE(p.fraction * 100, b.percent),
+                 b.category, b.favorite, b.series, b.intro, b.fetched_at, b.path,
+                 b.last_open, b.last_chapter_idx, b.in_library, b.metadata_dirty, b.metadata_updated_at
+            FROM books b
+            LEFT JOIN pending_progress p
+              ON p.source_id=b.source_id AND p.stable_id=b.stable_id
+           WHERE b.source_id=? AND b.in_library=1 AND b.last_open>0
+           ORDER BY b.last_open DESC LIMIT ?;]],
         source_id,
         tonumber(limit) or 24
     )
