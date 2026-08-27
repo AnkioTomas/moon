@@ -95,9 +95,17 @@ f:close()
 Assert.is_true(html:find("<h1>二</h1>", 1, true) ~= nil)
 Assert.is_true(html:find("<p>正文2</p>", 1, true) ~= nil)
 
--- 已落盘直接复用，不再请求正文。
+-- 已落盘且无远程 img 时直接复用，不再请求正文。
 Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, function(p) path = p end)
 Assert.len(fetched, 1)
+
+-- 缓存 HTML 仍含远程 img 时必须重新拉取并内联。
+local stale = io.open(tmp .. "/2.html", "wb")
+stale:write('<!DOCTYPE html><html><body><img src="https://res.weread.qq.com/wrepub/x.png"/></body></html>')
+stale:close()
+Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, function(p) path = p end)
+Assert.eq(fetched[#fetched], 2)
+Assert.len(fetched, 2)
 
 -- 未指定章时优先使用本地 pending_progress。
 pending = { chapter_idx = 3 }

@@ -437,6 +437,7 @@ function Desktop:showDetail(book)
         plugin = self.plugin,
         source = self.source,
         desktop = self,
+        store_preview = self.tab == "store",
         covers_fullscreen = true,
         close_callback = function()
             local dirty = desk.detail and desk.detail._dirty

@@ -16,6 +16,7 @@ local BookDB = require("utils.db.book")
 local DbQueue = require("utils.db.queue")
 local Paths = require("utils.paths")
 local Text = require("utils.text")
+local SourceCapabilities = require("types.book_source").SourceCapabilities
 local logger = require("logger")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -155,6 +156,17 @@ end
 function ScrapeUI.start(identity, default_title, on_close)
     if not identity or type(identity.source_id) ~= "string" or type(identity.stable_id) ~= "string" then
         logger.warn("scrape: invalid book identity")
+        return
+    end
+    local src = require("source.registry").resolve(identity.source_id)
+    if not SourceCapabilities.supportsScrape(src) then
+        UIManager:show(InfoMessage:new{
+            text = _("当前数据源不支持刮削"),
+            timeout = 2,
+        })
+        if on_close then
+            on_close()
+        end
         return
     end
 

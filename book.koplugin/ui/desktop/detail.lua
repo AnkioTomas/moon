@@ -1,8 +1,8 @@
 --[[--
 书籍详情：Material 返回顶栏 + 书籍信息（hero，点按开始阅读）+ 阅读情况 + 底部动作行
   单页，禁止 ScrollableContainer；「最近几天」用 Pager 分页，不做高度裁剪。
-  书城书（zlib）未入库：无编辑/统计，hero 不显示简介摘要与进度，完整简介直下，
-  底部只留「加入书库」。
+  书城书（zlib / 微信未上架）未入库：无编辑/统计，hero 不显示简介摘要与进度，完整简介直下，
+  底部：zlib「加入书库」下载导入；微信「加入书架」。
 
 布局：
   +-----------------------------------------------+
@@ -49,6 +49,7 @@ local LocalMapper = require("source.local.mapper")
 local UI = require("ui.components.bookui")
 local Surface = require("ui.components.surface")
 local Text = require("utils.text")
+local SourceCapabilities = require("types.book_source").SourceCapabilities
 local _ = require("gettext")
 local Screen = Device.screen
 
@@ -59,7 +60,38 @@ local Detail = InputContainer:extend{
     plugin = nil,
     source = nil,
     desktop = nil,
+    store_preview = false,
 }
+
+--- 书城预览书：zlib 待下载；微信读书仅书城 Tab 进入时为预览。
+---@param book table|nil
+---@param source table|nil
+---@param store_preview boolean|nil
+---@return "zlib"|"wechat"|nil
+local function storeKind(book, source, store_preview)
+    if type(book) ~= "table" then
+        return nil
+    end
+    if book.source_id == "zlib" then
+        return "zlib"
+    end
+    if store_preview and book.source_id == "wechat" and source and source.id == "wechat" then
+        return "wechat"
+    end
+    return nil
+end
+
+--- 按书籍属主源判断是否可刮削（不用当前活跃源冒充）。
+---@param book table|nil
+---@param fallback_source table|nil
+---@return boolean
+local function bookSupportsScrape(book, fallback_source)
+    if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
+        return false
+    end
+    local src = require("source.registry").resolve(book.source_id) or fallback_source
+    return SourceCapabilities.supportsScrape(src)
+end
 
 --- 小节标题（书城书的简介用）。
 ---@param text string
@@ -149,8 +181,22 @@ function Detail:init()
     end
     self:rebuild()
     self:fetchStats()
-    if self.book and self.book.source_id == "zlib" then
+    local kind = storeKind(self.book, self.source, self.store_preview)
+    if kind == "zlib" then
         self._store_detail_job = require("zlib.init").getDetailAsync(self.book, function(detail)
+            self._store_detail_job = nil
+            if self._closed or not detail then return end
+            self.book = detail
+            self:rebuild()
+            require("ui/uimanager"):setDirty(self, "ui")
+        end)
+    elseif kind == "wechat" and self.source and self.source.getDetailAsync then
+        local book = self.book
+        self._store_detail_job = self.source:getDetailAsync({
+            source_id = book.source_id,
+            stable_id = book.stable_id,
+            book = book,
+        }, function(detail, err)
             self._store_detail_job = nil
             if self._closed or not detail then return end
             self.book = detail
@@ -206,14 +252,14 @@ function Detail:buildTopBar(w)
 end
 
 --- 异步拉本机阅读统计（汇总 + 最近 N 天），完成后重建阅读情况区。
---- 书城书（zlib）未读过，无本机数据可查，直接跳过。
+--- 书城预览书未读过，无本机数据可查，直接跳过。
 ---@return nil
 function Detail:fetchStats()
     local book = self.book
     if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
         return
     end
-    if book.source_id == "zlib" then
+    if storeKind(book, self.source, self.store_preview) then
         return
     end
     local stats, daily
@@ -298,11 +344,62 @@ function Detail:openBook()
     if plugin and plugin.openBook then plugin:openBook(b) end
 end
 
---- 书城书「加入书库」：无凭据先开设置；否则弹进度条下载并导入当前源。
+--- 书城书动作：zlib 下载导入；微信读书加入远端书架并同步。
 ---@return nil
 function Detail:installStoreBook()
     local book = self.book or {}
     if self._install_job then
+        return
+    end
+    local kind = storeKind(book, self.source, self.store_preview)
+    if kind == "wechat" then
+        if not self.source or not self.source.configured or not self.source:configured() then
+            require("source.wechat.setting").open(self.plugin)
+            return
+        end
+        local UIManager = require("ui/uimanager")
+        local InfoMessage = require("ui/widget/infomessage")
+        local ProgressbarDialog = require("ui/widget/progressbardialog")
+        local dialog = ProgressbarDialog:new{
+            title = _("正在加入书架…"),
+            subtitle = book.title,
+            progress_max = 1,
+            dismissable = false,
+        }
+        dialog:show()
+        require("ui/network/manager"):runWhenOnline(function()
+            if self._closed then
+                dialog:close()
+                return
+            end
+            if type(self.source.addStoreBookAsync) ~= "function" then
+                dialog:close()
+                UIManager:show(InfoMessage:new{ text = _("当前数据源不支持书城") })
+                return
+            end
+            self._install_job = self.source:addStoreBookAsync(book, function(ok, err, title)
+                self._install_job = nil
+                dialog:close()
+                if self._closed then
+                    return
+                end
+                if not ok then
+                    UIManager:show(InfoMessage:new{ text = err or _("加入书架失败") })
+                    return
+                end
+                local desk = self.desktop
+                self:onClose()
+                UIManager:show(InfoMessage:new{
+                    text = _("已加入书架：") .. tostring(title or book.title),
+                    timeout = 3,
+                })
+                if desk and not desk._closed then
+                    desk._library_state = nil
+                    desk.page = 1
+                    desk:switchTab("library")
+                end
+            end)
+        end)
         return
     end
     if not require("zlib.init").hasCredentials() then
@@ -351,6 +448,13 @@ end
 function Detail:startScrape()
     local book = self.book
     if type(book) ~= "table" then
+        return
+    end
+    if not bookSupportsScrape(book, self.source) then
+        require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
+            text = _("当前数据源不支持刮削"),
+            timeout = 2,
+        })
         return
     end
     require("scrape.ui").start(book, book.title, function()
@@ -623,10 +727,9 @@ function Detail:rebuild()
     local pad = UI.pagePad()
     local content_w = w - pad * 2
 
-    local store_book = book.source_id == "zlib"
-    local caps = self.source and self.source:capabilities() or {}
-    local can_scrape = caps.scrape == true
-        and type(book.source_id) == "string" and type(book.stable_id) == "string"
+    local store_kind = storeKind(book, self.source, self.store_preview)
+    local store_book = store_kind ~= nil
+    local can_scrape = bookSupportsScrape(book, self.source)
     local can_read = not store_book and self.source ~= nil
         and (self.source.type == "book"
             or self.source.type == "chapter")
@@ -638,13 +741,17 @@ function Detail:rebuild()
     local footer_pad_v = UI.sz(12)
     local footer, footer_h
     if store_book then
+        local action_enabled = store_kind == "wechat"
+            and self.source and self.source.configured and self.source:configured()
+            or store_kind == "zlib"
+                and type(self.source and self.source.importBookAsync) == "function"
         footer = ButtonTable:new{
             width = content_w,
             buttons = { {
                 {
-                    text = _("加入书库"),
+                    text = store_kind == "wechat" and _("加入书架") or _("加入书库"),
                     font_size = UI.buttonFontSize(),
-                    enabled = type(self.source and self.source.importBookAsync) == "function",
+                    enabled = action_enabled,
                     callback = function()
                         self:installStoreBook()
                     end,

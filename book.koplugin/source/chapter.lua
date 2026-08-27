@@ -14,12 +14,24 @@ local _ = require("gettext")
 
 local Chapter = {}
 
-local function fileExists(path)
-    if type(path) ~= "string" or path == "" then return false end
+local function readFile(path)
+    if type(path) ~= "string" or path == "" then return nil end
     local f = io.open(path, "rb")
-    if not f then return false end
+    if not f then return nil end
+    local data = f:read("*a")
     f:close()
-    return true
+    return data
+end
+
+--- 章节 HTML 是否可直接复用（存在且远程 img 已内联）。
+---@param path string
+---@return boolean
+local function chapterReady(path)
+    local html = readFile(path)
+    if not html or html == "" then
+        return false
+    end
+    return not Text.hasRemoteImageSrc(html)
 end
 
 local function loadToc(identity, ops, cb)
@@ -52,19 +64,19 @@ local function existingLocalPath(identity, opts)
     local idx = tonumber(opts.chapter_idx)
     if idx then
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-        return fileExists(path) and path or nil
+        return chapterReady(path) and path or nil
     end
     local book = identity.book
     if not book or not book.path then
         book = require("utils.db.book").get(identity.source_id, identity.stable_id)
     end
-    if book and fileExists(book.path) then
+    if book and chapterReady(book.path) then
         return book.path
     end
     local pos = localPosition(identity)
     idx = pos and tonumber(pos.chapter_idx) or 1
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-    return fileExists(path) and path or nil
+    return chapterReady(path) and path or nil
 end
 
 local function body(payload)
@@ -109,9 +121,7 @@ end
 
 local function ensure(identity, toc, idx, ops, cb)
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-    local f = io.open(path, "rb")
-    if f then
-        f:close()
+    if chapterReady(path) then
         cb(path)
         return
     end
@@ -323,9 +333,7 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
             return
         end
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-        local f = io.open(path, "rb")
-        if f then
-            f:close()
+        if chapterReady(path) then
             require("ui/uimanager"):nextTick(nextIndex)
             return
         end

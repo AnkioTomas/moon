@@ -255,6 +255,56 @@ function Text.looksLikeHtml(s)
         or head:find("<h%d") ~= nil
 end
 
+--- HTML 是否仍含未内联的远程 http(s) 图片 src。
+---@param s string|nil
+---@return boolean
+function Text.hasRemoteImageSrc(s)
+    if type(s) ~= "string" then
+        return false
+    end
+    local found = false
+    s:gsub("src=([\"'])(.-)%1", function(_, src)
+        local url = tostring(src or ""):gsub("&amp;", "&")
+        if url:match("^//") or url:match("^https?://") then
+            found = true
+        end
+    end)
+    return found
+end
+
+--- 抽取多个拼接 HTML 文档里的全部 <body> 内容。
+-- 微信读书章节可能解码成多个连续 XHTML，首个 body 常是标题壳，正文在后续 body。
+---@param s string|nil
+---@return string
+function Text.htmlBodyFragment(s)
+    s = tostring(s or "")
+    local bodies = {}
+    local remaining = s
+    while remaining ~= "" do
+        local body_start = remaining:find("<body", 1, true)
+        if not body_start then
+            break
+        end
+        local body_open_end = remaining:find(">", body_start, true)
+        if not body_open_end then
+            break
+        end
+        local body_close = remaining:find("</body>", body_open_end, true)
+        if not body_close then
+            bodies[#bodies + 1] = remaining:sub(body_open_end + 1)
+            break
+        end
+        bodies[#bodies + 1] = remaining:sub(body_open_end + 1, body_close - 1)
+        remaining = remaining:sub(body_close + 7)
+    end
+    if #bodies > 0 then
+        return table.concat(bodies, "\n")
+    end
+    s = s:gsub("<%?xml[^>]*>", "")
+    s = s:gsub("<!DOCTYPE[^>]*>", "")
+    return s
+end
+
 --- 纯文本按行包成 <p> 段落（规范化换行；行尾空白剥除；空行跳过；内容转义）。
 ---@param text string|nil
 ---@return string
