@@ -15,8 +15,9 @@ local Screen = Device.screen
 
 local HEADER_FONT_SIZE_DEFAULT = 20
 --- CRE 页头 HEADER_MARGIN + 亚像素缝，overlay 多盖一点。
+local TOP_BAND_BLEED = 9
 local function bandBleed()
-    return Screen:scaleBySize(4)
+    return Screen:scaleBySize(TOP_BAND_BLEED)
 end
 
 local Bars = {
@@ -67,7 +68,7 @@ function Bars.remainingText(remaining_seconds)
     return string.format(_("约 %d 分钟"), minutes)
 end
 
---- 底条进度文案：百分比 · 章号 · 页码 · 剩余时间（取得到的才拼）。
+--- 底条进度文案：百分比 · 章号 · 剩余时间（取得到的才拼）。
 ---@param cur ReaderSessionSnapshot|nil
 ---@param toc BookChapter[]|nil
 ---@param remaining_seconds number|nil
@@ -89,10 +90,6 @@ function Bars.progressText(cur, toc, remaining_seconds)
     local count = toc and #toc or nil
     if idx and count and count > 0 then
         parts[#parts + 1] = string.format(_("第 %d/%d 章"), idx, count)
-    end
-    local page, total = tonumber(cur.page), tonumber(cur.total_pages)
-    if page and total and total > 0 then
-        parts[#parts + 1] = string.format(_("第 %d/%d 页"), page, total)
     end
     local remaining = Bars.remainingText(remaining_seconds)
     if remaining ~= "" then
@@ -607,12 +604,21 @@ function Bars:paintTo(bb, x, y)
             info:paintTo(bb, x + margin_l, stack_y)
             UI.progressBar(prog_w, prog_h, pct):paintTo(bb, x + margin_l, stack_y + info_h + gap)
         else
+            -- 跟 ReaderFooter alongside：文字优先占满，进度条用剩余宽度（至少 min_width_pct）。
             local gap = Screen:scaleBySize(8)
-            local info_max = math.max(1, math.floor(inner_w * 0.55))
-            info.max_width = info_max
-            local is = info:getSize()
+            local min_bar_pct = tonumber(settings.progress_bar_min_width_pct) or 20
             local prog_h = footer.progress_bar and footer.progress_bar.height or UI.sz(6)
-            local prog_w = math.max(1, inner_w - is.w - gap)
+            local prog_w
+            if settings.progress_bar_lock_width then
+                prog_w = math.max(1, math.floor(min_bar_pct / 100 * inner_w))
+                info.max_width = math.max(1, inner_w - prog_w - gap)
+            else
+                local text_max_ratio = (100 - min_bar_pct) / 100
+                info.max_width = math.max(1, math.floor(text_max_ratio * inner_w))
+                local is = info:getSize()
+                prog_w = math.max(1, inner_w - is.w - gap)
+            end
+            local is = info:getSize()
             local row_h = math.max(is.h, prog_h)
             local row_y = bottom_y + math.floor((bar_h - row_h) / 2)
             UI.progressBar(prog_w, prog_h, pct):paintTo(
