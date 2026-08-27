@@ -31,6 +31,11 @@ local current_session
 local function bootstrapReading(plugin, session)
     require("book.stats").start(session)
     require("ui.reader").attach(plugin)
+    require("ui/uimanager"):nextTick(function()
+        if plugin.ui and plugin.ui.document then
+            require("book.reader_prefs").apply(plugin.ui, session.identity)
+        end
+    end)
     require("book.progress").pull(session)
     require("book.note").pull(plugin.ui, session.identity)
 end
@@ -161,6 +166,9 @@ end
 --- CloseDocument：结清阅读状态；切章保留目录，真正关书清除全部章节状态。
 ---@param plugin table Book 插件实例
 function Session.onCloseDocument(plugin)
+    if current_session and plugin.ui then
+        require("book.reader_prefs").captureAndSave(plugin.ui, current_session.identity)
+    end
     syncReading(plugin, "document_close")
     if ChapterMode.onCloseDocument(current_session) then
         require("book.progress").clearConflicts()
@@ -204,6 +212,9 @@ end
 ---@param plugin table Book 插件实例
 function Session.onSuspend(plugin)
     if not plugin.ui.document then return end
+    if current_session then
+        require("book.reader_prefs").captureAndSave(plugin.ui, current_session.identity)
+    end
     syncReading(plugin, "suspend")
 end
 

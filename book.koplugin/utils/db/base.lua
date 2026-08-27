@@ -269,6 +269,9 @@ CREATE INDEX IF NOT EXISTS idx_xray_entities_book
     if not hasColumn("books", "metadata_updated_at") then
         Base.exec("ALTER TABLE books ADD COLUMN metadata_updated_at INTEGER NOT NULL DEFAULT 0;")
     end
+    if not hasColumn("books", "reader_prefs") then
+        Base.exec("ALTER TABLE books ADD COLUMN reader_prefs TEXT;")
+    end
     Base.exec([[CREATE INDEX IF NOT EXISTS idx_books_library
         ON books(source_id, in_library, stable_id);]])
     if not hasColumn("pending_progress", "sync_status") then

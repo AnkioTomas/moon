@@ -511,6 +511,7 @@ function M.applyToReader(ui, id, name)
     id = sanitizeId(id)
     ui.doc_settings:saveSetting("book_reader_font_id", id)
     ui.doc_settings:saveSetting("book_reader_font_name", name or id)
+    require("book.reader_prefs").captureAndSave(ui)
     require("ui/uimanager"):setDirty(ui.dialog, "ui")
     return true
 end
