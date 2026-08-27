@@ -69,22 +69,18 @@ Assert.eq(Bars.progressText({ percent = 42 }), "42%")
 Assert.eq(Bars.progressText({ percent = 150 }), "100%")
 Assert.eq(Bars.progressText({ percent = -3 }), "0%")
 
--- progressText：页码 / 章号拼接
-Assert.eq(Bars.progressText({ percent = 42, page = 7, total_pages = 100 }), "42% · 第 7/100 页")
+-- progressText：章号拼接（不显示页码）
+Assert.eq(Bars.progressText({ percent = 42, page = 7, total_pages = 100 }), "42%")
 Assert.eq(Bars.progressText({ percent = 5, reading_chapter_idx = 3 }, toc), "5% · 第 3/10 章")
 Assert.eq(
     Bars.progressText({ percent = 5, page = 1, total_pages = 2, reading_chapter_idx = 3 }, toc),
-    "5% · 第 3/10 章 · 第 1/2 页"
+    "5% · 第 3/10 章"
 )
-
--- progressText：页数缺失/为零不拼页码
-Assert.eq(Bars.progressText({ percent = 1, page = 3 }), "1%")
-Assert.eq(Bars.progressText({ percent = 1, page = 3, total_pages = 0 }), "1%")
 
 -- progressText：剩余阅读时间拼接在末尾
 Assert.eq(
     Bars.progressText({ percent = 42, page = 7, total_pages = 100 }, nil, 3600 + 1800),
-    "42% · 第 7/100 页 · 约 1 小时 30 分"
+    "42% · 约 1 小时 30 分"
 )
 
 -- remainingText：不足一分钟为空；分钟 / 小时 + 分钟

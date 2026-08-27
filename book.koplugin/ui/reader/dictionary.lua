@@ -38,7 +38,7 @@ local function manage(ui)
     if #paths == 0 then info(_("尚未安装字典")); return end
     local items = {}
     table.sort(paths, function(a, b) return bookName(a) < bookName(b) end)
-    for _, path in ipairs(paths) do
+    for i, path in ipairs(paths) do
         local id = managedId(dictionary, path)
         items[#items + 1] = {
             text = bookName(path),
@@ -94,7 +94,7 @@ local function install(ui, item)
         require("dictionary.manager").refresh(dictionary)
         local installed = require("dictionary.manager").installed(dictionary.data_dir)
         local prefix = dictionary.data_dir .. "/book-" .. item.id .. "/"
-        for _, path in ipairs(installed) do
+        for i, path in ipairs(installed) do
             if path:sub(1, #prefix) == prefix then
                 require("dictionary.manager").activate(dictionary, path)
                 break
@@ -115,7 +115,7 @@ function Dictionary.download(ui)
             if not items then info(T(_("获取字典目录失败：%1"), tostring(err))); return end
             local dictionary = ui and ui.dictionary
             local rows = {}
-            for _, item in ipairs(items) do
+            for i, item in ipairs(items) do
                 local installed = dictionary and dictionary.data_dir
                     and require("dictionary.manager").isInstalled(dictionary.data_dir, item.id)
                 rows[#rows + 1] = {

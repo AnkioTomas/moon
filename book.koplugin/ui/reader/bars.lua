@@ -124,11 +124,76 @@ function Bars.setSystemTop(ui, enabled)
     end
 end
 
+function Bars.setSystemBottom(ui, enabled)
+    ui = ui or Bars.ui
+    if not ui or Bars.systemBottomVisible(ui) == enabled then
+        return
+    end
+    local footer = ui.view and ui.view.footer
+    if footer and footer.onToggleFooterMode then
+        footer:onToggleFooterMode()
+    end
+end
+
+--- 顶栏偏好（未设置时默认开）。
+---@return boolean
+function Bars.topBarPreference()
+    return require("utils.settings").get().book_reader_top_bar ~= false
+end
+
+--- 底栏偏好（未设置时默认开）。
+---@return boolean
+function Bars.bottomBarPreference()
+    return require("utils.settings").get().book_reader_bottom_bar ~= false
+end
+
+--- 写入顶栏偏好，并在阅读中时立即应用。
+---@param enabled boolean
+---@param ui table|nil
+---@return nil
+function Bars.setTopBarPreference(enabled, ui)
+    local MoonSettings = require("utils.settings")
+    local settings = MoonSettings.get()
+    settings.book_reader_top_bar = enabled ~= false
+    MoonSettings.save(settings)
+    ui = ui or Bars.ui
+    if ui then
+        Bars.setSystemTop(ui, settings.book_reader_top_bar)
+    end
+end
+
+--- 写入底栏偏好，并在阅读中时立即应用。
+---@param enabled boolean
+---@param ui table|nil
+---@return nil
+function Bars.setBottomBarPreference(enabled, ui)
+    local MoonSettings = require("utils.settings")
+    local settings = MoonSettings.get()
+    settings.book_reader_bottom_bar = enabled ~= false
+    MoonSettings.save(settings)
+    ui = ui or Bars.ui
+    if ui then
+        Bars.setSystemBottom(ui, settings.book_reader_bottom_bar)
+    end
+end
+
+--- 按 Book 设置同步系统顶底栏。
+---@param ui table|nil
+---@return nil
+function Bars.applyPreferences(ui)
+    ui = ui or Bars.ui
+    if not ui then
+        return
+    end
+    Bars.setSystemTop(ui, Bars.topBarPreference())
+    Bars.setSystemBottom(ui, Bars.bottomBarPreference())
+end
+
 --- 切换系统顶栏（Alt Status Bar ↔ status_line）。
 ---@param ui table|nil
 ---@return nil
 function Bars.toggleSystemTop(ui)
-    Bars.setSystemTop(ui, not Bars.systemTopVisible(ui))
+    Bars.setTopBarPreference(not Bars.systemTopVisible(ui), ui)
 end
 
 --- 切换系统底栏（ReaderFooter 显隐 ↔ footer_visible）。
@@ -136,9 +201,12 @@ end
 ---@return nil
 function Bars.toggleSystemBottom(ui)
     ui = ui or Bars.ui
-    local footer = ui and ui.view and ui.view.footer
-    if footer and footer.onToggleFooterMode then
-        footer:onToggleFooterMode()
+    Bars.setSystemBottom(ui, not Bars.systemBottomVisible(ui))
+    if ui then
+        local MoonSettings = require("utils.settings")
+        local settings = MoonSettings.get()
+        settings.book_reader_bottom_bar = Bars.systemBottomVisible(ui)
+        MoonSettings.save(settings)
     end
 end
 
@@ -490,8 +558,10 @@ function Bars.install(ui)
         ui:registerPostInitCallback(function()
             hijackFooter(ui)
             registerFooterTouchZones(ui)
+            Bars.applyPreferences(ui)
         end)
     end
+    Bars.applyPreferences(ui)
 end
 
 --- 每分钟顶条时钟；ReaderUI 销毁后自动停摆。

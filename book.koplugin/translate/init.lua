@@ -9,8 +9,7 @@ Edge 请求和插件行为分开：`translate.edge` 只负责传输与响应解�
 
 require("l10n").apply()
 
-local Edge = require("translate.edge")
-local logger = require("logger")
+local Popup = require("translate.popup")
 local Translate = {}
 
 local function showResult(translator, text, translated, detailed_view, source_lang, from_highlight, index)
@@ -111,18 +110,15 @@ local function showTranslation(translator, text, detailed_view, source_lang, tar
     end
     target_lang = target_lang or translator:getTargetLanguage()
     source_lang = source_lang or translator:getSourceLanguage()
-    Edge.translateAsync(text, target_lang, source_lang, function(translated, detected_lang, err)
-        if not translated then
-            local _ = require("gettext")
-            local UIManager = require("ui/uimanager")
-            local InfoMessage = require("ui/widget/infomessage")
-            logger.warn("Edge translator failed:", err)
-            UIManager:show(InfoMessage:new{ text = _("翻译失败") })
-            return
-        end
-        showResult(translator, text, translated, detailed_view,
-            detected_lang or source_lang, from_highlight, index)
-    end)
+    Popup.open{
+        translator = translator,
+        text = text,
+        source_lang = source_lang,
+        target_lang = target_lang,
+        show_detail = function(translated, source_lang_actual)
+            showResult(translator, text, translated, true, source_lang_actual, from_highlight, index)
+        end,
+    }
 end
 
 --- 安装 Edge 翻译入口；重复调用无副作用。

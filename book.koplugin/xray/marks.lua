@@ -22,7 +22,9 @@ local Marks = {
 --- 页内实体标记是否开启。
 ---@return boolean
 function Marks.enabled()
-    return require("utils.settings").get().book_xray_show_marks ~= false
+    local settings = require("utils.settings").get()
+    return settings.book_xray_enabled ~= false
+        and settings.book_xray_show_marks ~= false
 end
 
 --- 开关页内实体标记并刷新当前阅读视图。
@@ -369,6 +371,9 @@ local function registerHighlight(ui)
     ui.highlight:addToHighlightDialog("12_xray_lookup", function(this)
         return {
             text = _("X-Ray 查询"),
+            show_in_highlight_dialog_func = function()
+                return require("utils.settings").get().book_xray_enabled ~= false
+            end,
             callback = function()
                 local word = require("util").cleanupSelectedText(this.selected_text.text)
                 require("xray.ui").lookup(this.ui, word)
