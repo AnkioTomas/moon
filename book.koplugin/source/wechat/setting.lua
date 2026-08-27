@@ -180,6 +180,26 @@ local function showQrLogin(plugin)
     end)
 end
 
+--- 刷新 Skills API Key（Web 会话自动获取）。
+---@param plugin table|nil
+local function refreshAgentKey(plugin)
+    local Auth = require("source.wechat.auth")
+    local NetworkMgr = require("ui/network/manager")
+    local UIManager = require("ui/uimanager")
+    local InfoMessage = require("ui/widget/infomessage")
+    NetworkMgr:runWhenOnline(function()
+        Auth.fetchAgentKeyAsync(function(key, err)
+            UIManager:show(InfoMessage:new{
+                text = key and _("Skills 密钥已更新") or (err or _("获取失败")),
+                timeout = 2,
+            })
+            if key then
+                afterAuthChanged(plugin)
+            end
+        end)
+    end)
+end
+
 --- 自绘账号菜单（未登录直接扫码；已登录：扫码 / 续期 / 退出）
 ---@param plugin table|nil
 function Setting.open(plugin)
@@ -205,6 +225,15 @@ function Setting.open(plugin)
                     callback = function()
                         UIManager:close(dialog)
                         showQrLogin(plugin)
+                    end,
+                },
+            },
+            {
+                {
+                    text = _("刷新 Skills 密钥"),
+                    callback = function()
+                        UIManager:close(dialog)
+                        refreshAgentKey(plugin)
                     end,
                 },
             },

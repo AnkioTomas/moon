@@ -55,6 +55,15 @@ package.preload["source.wechat.auth"] = function()
             cb("{}")
             return { cancel = function() end }
         end,
+        agentGatewayAsync = function(api_name, params, cb)
+            posted.gateway = { api_name = api_name, params = params }
+            cb({
+                readLongest = {
+                    { book = { bookId = "1" }, readTime = 3600 },
+                },
+            })
+            return { cancel = function() end }
+        end,
     }
 end
 package.preload["source.wechat.client"] = nil
@@ -145,11 +154,13 @@ end
 
 do
     captured = {}
+    posted = {}
     local wire, err
     client:readStatsAsync("monthly", nil, function(data, e) wire, err = data, e end)
-    Assert.eq(#captured, 0)
     Assert.is_nil(err)
-    Assert.eq(type(wire), "table")
+    Assert.eq(posted.gateway.api_name, "/readdata/detail")
+    Assert.eq(posted.gateway.params.mode, "monthly")
+    Assert.eq(#(wire.readLongest or {}), 1)
 end
 
 do

@@ -74,6 +74,7 @@ do
     Assert.eq(src.type, "book")
     local caps = src:capabilities()
     Assert.is_true(caps.scrape)
+    Assert.is_true(caps.edit)
     Assert.is_nil(caps.whole_book)
     Assert.is_true(type(src.recentBooksAsync) == "function")
     Assert.is_true(type(src.coverRequest) == "function")
@@ -87,7 +88,9 @@ do
     Assert.eq(src.type, "book")
     local caps = src:capabilities()
     Assert.is_true(caps.insight)
+    Assert.is_true(caps.stats_pull)
     Assert.is_false(caps.scrape)
+    Assert.is_false(caps.edit)
 end
 
 do
@@ -98,6 +101,7 @@ do
     local src, err = Registry.create("wechat")
     Assert.is_true(src ~= nil, err)
     Assert.is_false(src:capabilities().scrape)
+    Assert.is_false(src:capabilities().edit)
 end
 
 do

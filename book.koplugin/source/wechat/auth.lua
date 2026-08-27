@@ -1,6 +1,6 @@
 --[[--
 微信读书认证：Web 扫码长连接登录，会话 Cookie 自动落盘。
-无 API Key、无手动粘贴 Cookie。
+Skills API Key 经 ``GET /api/skills/apikeyGet`` 自动获取，供 Agent 网关使用。
 
 流程：
   GET /api/auth/getLoginUid
@@ -27,6 +27,8 @@ local ensureGuestCookiesAsync
 
 local WEB = "https://weread.qq.com"
 local API = "https://i.weread.qq.com"
+local AGENT_GATEWAY = API .. "/api/agent/gateway"
+local DEFAULT_SKILL_VERSION = "1.0.4"
 
 --- 用户提供的桌面 Edge UA（微信读书 Web）
 local BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"
@@ -235,6 +237,22 @@ function Auth.hasSession()
     -- 旧 cookie 串：wr_skey= 必须带非空值（"wr_skey=; …" 这种空值不算会话）
     local legacy = type(c.cookie) == "string" and c.cookie:match("wr_skey=([^;]*)") or nil
     return type(legacy) == "string" and legacy ~= ""
+end
+
+--- Skills Agent 网关是否已配置 API Key（``wrk-…``）。
+---@return boolean
+function Auth.hasAgentKey()
+    return Text.trim(cfg().api_key or "") ~= ""
+end
+
+--- 当前 Skills 版本号（随 ``upgrade_info`` 自动更新）。
+---@return string
+function Auth.skillVersion()
+    local version = Text.trim(cfg().skill_version or "")
+    if version ~= "" then
+        return version
+    end
+    return DEFAULT_SKILL_VERSION
 end
 
 --- 展示用用户标签（昵称优先，否则 user_id）。
@@ -547,6 +565,103 @@ function Auth.webApiPostAsync(path, body_tbl, cb)
     end)
 end
 
+--- 用 Web 会话拉取 Skills API Key 并落盘（``GET /api/skills/apikeyGet``）。
+---@param cb fun(key: string|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Auth.fetchAgentKeyAsync(cb)
+    if not Auth.hasSession() then
+        cb(nil, _("请先扫码登录微信读书"))
+        return nil
+    end
+    return Auth.webGetAsync(WEB .. "/api/skills/apikeyGet?only_show=1", {
+        headers = { ["Referer"] = WEB .. "/r/weread-skills" },
+    }, function(raw, err)
+        if not raw then
+            cb(nil, err)
+            return
+        end
+        local data, decode_err = decodeJson(raw)
+        if not data then
+            cb(nil, decode_err)
+            return
+        end
+        local key = Text.trim(data.apikey or data.api_key or "")
+        if key == "" then
+            cb(nil, _("未获取到 Skills API Key"))
+            return
+        end
+        saveCfg({ api_key = key })
+        logger.info("weread skills api key ok")
+        cb(key)
+    end)
+end
+
+--- Skills Agent 网关：``POST i.weread.qq.com/api/agent/gateway``。
+--- Bearer ``wrk-…``；缺省时经 Web 会话自动 ``GET /api/skills/apikeyGet`` 获取。
+---@param api_name string 如 ``/readdata/detail``
+---@param params table|nil 业务参数平铺在 body 顶层（禁止包在 params 内）
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Auth.agentGatewayAsync(api_name, params, cb)
+    local function invoke()
+        local key = Text.trim(cfg().api_key or "")
+        if key == "" then
+            cb(nil, _("未获取到 Skills API Key"))
+            return
+        end
+        local body = {
+            api_name = api_name,
+            skill_version = Auth.skillVersion(),
+        }
+        if type(params) == "table" then
+            for k, v in pairs(params) do
+                body[k] = v
+            end
+        end
+        return Request.request({
+            url = AGENT_GATEWAY,
+            method = "POST",
+            body = JSON.encode(body),
+            headers = browserHeaders({
+                ["Content-Type"] = "application/json",
+                ["Authorization"] = "Bearer " .. key,
+            }),
+            timeout = 45,
+        }, function(res, err)
+            if err then
+                cb(nil, err)
+                return
+            end
+            local code = res and res.code
+            local raw = res and res.body or ""
+            if not Request.ok(code) then
+                cb(nil, "HTTP " .. tostring(code))
+                return
+            end
+            local data, decode_err = decodeJson(raw)
+            if not data then
+                cb(nil, decode_err)
+                return
+            end
+            local upgrade = data.upgrade_info
+            if type(upgrade) == "table" and upgrade.version then
+                saveCfg({ skill_version = tostring(upgrade.version) })
+            end
+            cb(checkWereadErr(data))
+        end)
+    end
+    if Auth.hasAgentKey() then
+        return invoke()
+    end
+    return Auth.fetchAgentKeyAsync(function(key, err)
+        if not key then
+            cb(nil, err)
+            return
+        end
+        invoke()
+    end)
+end
+
 ensureGuestCookiesAsync = function(cb)
     login_jar = {}
     return Request.request({
@@ -703,6 +818,11 @@ function Auth.completeQrLoginAsync(info, cb)
             end
         end
         logger.info("weread login ok", vid, name)
+        Auth.fetchAgentKeyAsync(function(key, fetch_err)
+            if not key then
+                logger.dbg("weread skills api key fetch failed", fetch_err)
+            end
+        end)
         cb({ user_id = vid, user_name = name })
     end)
 end
@@ -744,6 +864,11 @@ function Auth.renewCookieAsync(cb)
                 }
             )
             logger.info("weread cookie renewed")
+            Auth.fetchAgentKeyAsync(function(key, fetch_err)
+                if not key then
+                    logger.dbg("weread skills api key fetch failed", fetch_err)
+                end
+            end)
             cb(true)
             return
         end

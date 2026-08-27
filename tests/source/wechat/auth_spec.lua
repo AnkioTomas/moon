@@ -506,6 +506,7 @@ do
     state.json_map = {
         ['{"errcode":-2012,"errmsg":"登录态失效"}'] = { errcode = -2012, errmsg = "登录态失效" },
         ['{"succ":1}'] = { succ = 1 },
+        ['{"apikey":"wrk-renewed"}'] = { apikey = "wrk-renewed" },
         ['{"errcode":0,"ok":1}'] = { errcode = 0, ok = 1 },
     }
     state.request_impl = function(opts, cb)
@@ -516,6 +517,10 @@ do
                 body = '{"succ":1}',
                 headers = { ["set-cookie"] = "wr_skey=newkey; Path=/" },
             })
+            return { cancel = function() end }
+        end
+        if opts.url:find("/api/skills/apikeyGet", 1, true) then
+            cb({ code = 200, body = '{"apikey":"wrk-renewed"}' })
             return { cancel = function() end }
         end
         if #calls == 1 then
@@ -531,9 +536,65 @@ do
     end)
     Assert.is_nil(err)
     Assert.eq(data.ok, 1)
-    Assert.eq(#calls, 3)
+    Assert.eq(#calls, 4)
     Assert.is_true(calls[2]:find("/web/login/renewal", 1, true) ~= nil)
+    Assert.is_true(calls[3]:find("/api/skills/apikeyGet", 1, true) ~= nil)
     Assert.eq(require("utils.settings").getSource("wechat").wr_skey, "newkey")
+    Assert.eq(require("utils.settings").getSource("wechat").api_key, "wrk-renewed")
+end
+
+------------------------------------------------------------------------
+-- agentGatewayAsync：Skills API Key 门禁 / 网关请求体
+------------------------------------------------------------------------
+
+do
+    local auth = freshAuth({})
+    local data, err
+    auth.agentGatewayAsync("/readdata/detail", { mode = "monthly" }, function(d, e)
+        data, err = d, e
+    end)
+    Assert.is_nil(data)
+    Assert.is_true((err or ""):find("请先扫码登录", 1, true) ~= nil)
+
+    auth = freshAuth({ wr_skey = "s", wr_vid = "1" })
+    state.json_map['{"apikey":"wrk-auto"}'] = { apikey = "wrk-auto" }
+    state.json_map['{"errcode":0,"totalReadTime":3600}'] = { errcode = 0, totalReadTime = 3600 }
+    local calls = 0
+    state.request_impl = function(opts, cb)
+        calls = calls + 1
+        if opts.url:find("/api/skills/apikeyGet", 1, true) then
+            cb({ code = 200, body = '{"apikey":"wrk-auto"}' })
+        else
+            cb({ code = 200, body = '{"errcode":0,"totalReadTime":3600}' })
+        end
+        return { cancel = function() end }
+    end
+    data, err = nil, nil
+    auth.agentGatewayAsync("/readdata/detail", { mode = "monthly" }, function(d, e)
+        data, err = d, e
+    end)
+    Assert.is_nil(err)
+    Assert.eq(calls, 2)
+    Assert.eq(require("utils.settings").getSource("wechat").api_key, "wrk-auto")
+    Assert.eq(data.totalReadTime, 3600)
+
+    auth = freshAuth({ api_key = "wrk-test", skill_version = "1.0.4" })
+    local got
+    state.json_map["{\"errcode\":0,\"totalReadTime\":3600}"] = { errcode = 0, totalReadTime = 3600 }
+    state.request_impl = function(opts, cb)
+        got = opts
+        cb({ code = 200, body = '{"errcode":0,"totalReadTime":3600}' })
+        return { cancel = function() end }
+    end
+    data, err = nil, nil
+    auth.agentGatewayAsync("/readdata/detail", { mode = "monthly" }, function(d, e)
+        data, err = d, e
+    end)
+    Assert.is_nil(err)
+    Assert.eq(got.url, "https://i.weread.qq.com/api/agent/gateway")
+    Assert.eq(got.headers["Authorization"], "Bearer wrk-test")
+    Assert.not_nil(got.body)
+    Assert.eq(data.totalReadTime, 3600)
 end
 
 ------------------------------------------------------------------------

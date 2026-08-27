@@ -2,7 +2,7 @@
 微信读书协议客户端：只返回 wire，不做领域转换（仅异步）。
 
 Web 扫码会话（Cookie + X-Vid + X-Skey）只走 ``weread.qq.com/web/*``；
-``i.weread.qq.com`` 裸路径需移动端 ``accessToken``，本插件不使用。
+阅读统计等 Agent 能力走 ``i.weread.qq.com/api/agent/gateway``（Skills API Key 由 Web 会话自动获取）。
 
 @module koplugin.book.source.wechat.client
 --]]
@@ -345,10 +345,17 @@ function Client:reportReadAsync(body, referer, cb)
 end
 
 function Client:readStatsAsync(mode, base_time, cb)
-    -- i.weread.qq.com/readdata/detail 仅移动端 accessToken；Web Cookie 无等价接口。
-    logger.dbg("weread readStats skipped: no web API", mode or "monthly", base_time)
-    cb({})
-    return nil
+    local params = { mode = mode or "monthly" }
+    if base_time and tonumber(base_time) and tonumber(base_time) > 0 then
+        params.baseTime = tonumber(base_time)
+    end
+    return Auth.agentGatewayAsync("/readdata/detail", params, function(data, err)
+        if data then
+            cb(data)
+        else
+            cb(nil, err)
+        end
+    end)
 end
 
 function Client:bookmarkListAsync(bookId, cb)

@@ -87,6 +87,8 @@ local REF = { source_id = "wechat", stable_id = "b1", book = { title = "微信�
 do
     local caps = WeChat.new():capabilities()
     Assert.is_false(caps.scrape)
+    Assert.is_false(caps.edit)
+    Assert.is_true(caps.stats_pull)
 end
 
 -- openBookAsync：源自己管理联网/进度 UI，成功首参只返回已入库物理路径。
@@ -205,6 +207,13 @@ do
     -- 已读完标记把进度抬到 100%
     wire = { percent = 30, finishReading = 1 }
     Assert.eq(get().fraction, 1)
+
+    -- getProgress 真实 wire：{ bookId, book: { chapterUid, progress, ... } }
+    wire = { bookId = "42", book = { chapterUid = "99", chapterIdx = 7, progress = 77, chapterOffset = 5000 } }
+    pos = get()
+    Assert.eq(pos.fraction, 0.77)
+    Assert.eq(pos.chapter_idx, 7)
+    Assert.is_true(math.abs((pos.chapter_fraction or 0) - 0.5) < 0.001)
 
     -- 自带 chapter_idx 时直接回调，不再拉目录
     wire = { percent = 10, chapterIdx = 7, chapterUid = "99" }
