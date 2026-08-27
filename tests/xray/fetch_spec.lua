@@ -7,7 +7,7 @@ package.preload["json"] = function()
     return { decode = Json.decode, encode = Json.encode }
 end
 
-local saved = { entities = {}, timeline = {} }
+local saved = { entities = {} }
 local entity_rows = {}
 package.preload["utils.db.xray"] = function()
     return {
@@ -20,12 +20,25 @@ package.preload["utils.db.xray"] = function()
             end
             return out
         end,
-        listTimeline = function()
-            return saved.timeline_rows or {}
+        deleteAllForBook = function()
+            entity_rows = {}
+            saved.entities = {}
+            return true
         end,
-        getMeta = function() return nil end,
         upsertEntity = function(_, _, kind, name, aliases_json, payload_json)
-            saved.entities[#saved.entities + 1] = { kind = kind, name = name }
+            for i, row in ipairs(entity_rows) do
+                if row.kind == kind and row.name == name then
+                    entity_rows[i] = {
+                        kind = kind,
+                        name = name,
+                        aliases_json = aliases_json or "[]",
+                        payload_json = payload_json or "{}",
+                        updated_at = 1,
+                    }
+                    saved.entities = entity_rows
+                    return true
+                end
+            end
             entity_rows[#entity_rows + 1] = {
                 kind = kind,
                 name = name,
@@ -33,22 +46,7 @@ package.preload["utils.db.xray"] = function()
                 payload_json = payload_json or "{}",
                 updated_at = 1,
             }
-            return true
-        end,
-        upsertTimeline = function(_, _, chapter, event, page, sort_idx)
-            saved.timeline[#saved.timeline + 1] = chapter
-            saved.timeline_rows = saved.timeline_rows or {}
-            saved.timeline_rows[#saved.timeline_rows + 1] = {
-                chapter = chapter,
-                event = event,
-                page = page or 0,
-                sort_idx = sort_idx or 0,
-                updated_at = 1,
-            }
-            return true
-        end,
-        upsertMeta = function(_, _, page, book_type)
-            saved.meta = { page = page, book_type = book_type }
+            saved.entities = entity_rows
             return true
         end,
     }
@@ -60,10 +58,9 @@ package.preload["xray.context"] = function()
     return {
         forAnalysis = function()
             return {
-                book_text = "text",
-                chapter_samples = "## Ch1 (p.1)\nhello",
+                current_page = "Mina at Whitby saw Dracula",
+                prior_text = "prior",
                 page = 5,
-                toc = { { title = "Ch1", page = 1 } },
             }
         end,
         currentPage = function() return 5 end,
@@ -81,8 +78,8 @@ package.preload["ai"] = function()
                 locations = {
                     { name = "Whitby", description = "town" },
                 },
-                timeline = {
-                    { chapter = "Ch1", event = "arrives" },
+                terms = {
+                    { name = "Dracula", aliases = {}, description = "title" },
                 },
             })
         end,
@@ -104,8 +101,48 @@ Assert.is_nil(failure)
 Assert.eq(#result.characters, 1)
 Assert.eq(result.characters[1].name, "Mina")
 Assert.eq(#result.locations, 1)
-Assert.eq(result.timeline[1].chapter, "Ch1")
-Assert.eq(saved.meta.page, 5)
-Assert.eq(saved.meta.book_type, "fiction")
-Assert.eq(#saved.entities, 2)
-Assert.eq(#saved.timeline, 1)
+Assert.eq(#result.terms, 1)
+Assert.eq(#saved.entities, 3)
+entity_rows = {
+    { kind = "character", name = "Old", aliases_json = "[]", payload_json = "{}", updated_at = 1 },
+}
+saved.entities = { { kind = "character", name = "Old" } }
+package.loaded["xray.fetch"] = nil
+Fetch = require("xray.fetch")
+Fetch.comprehensive({}, identity, { force = true }, function(value, err)
+    result, failure = value, err
+end)
+Assert.is_nil(failure)
+Assert.eq(#result.characters, 2)
+local names = {}
+for _, row in ipairs(result.characters) do names[row.name] = true end
+Assert.is_true(names.Old)
+Assert.is_true(names.Mina)
+Assert.eq(#saved.entities, 4)
+
+-- 未在上下文中出现的名称应被丢弃
+package.preload["ai"] = function()
+    return {
+        isConfigured = function() return true end,
+        jsonExtract = function(_, _, cb)
+            cb({
+                characters = {
+                    { name = "Mina", aliases = {}, role = "heroine", description = "brave" },
+                    { name = "Imaginary", aliases = {}, role = "none", description = "nope" },
+                },
+                locations = {},
+                terms = {},
+            })
+        end,
+    }
+end
+entity_rows = {}
+saved.entities = {}
+package.loaded["xray.fetch"] = nil
+Fetch = require("xray.fetch")
+Fetch.comprehensive({}, identity, { force = true }, function(value, err)
+    result, failure = value, err
+end)
+Assert.is_nil(failure)
+Assert.eq(#result.characters, 1)
+Assert.eq(result.characters[1].name, "Mina")

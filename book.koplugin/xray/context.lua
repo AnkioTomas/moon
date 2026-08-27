@@ -1,5 +1,5 @@
 --[[--
-X-Ray spoiler-safe 文本采样：当前进度内的微上下文 + 章节短采样。
+X-Ray 阅读上下文：当前可见页 + 其前最多 2000 字节正文。
 
 @module koplugin.book.xray.context
 --]]
@@ -8,28 +8,8 @@ local Text = require("utils.text")
 
 local Context = {}
 
-local BOOK_TEXT_LIMIT = 20000
-local CHAPTER_BUDGET = 80000
-local PER_CHAPTER_SAMPLE = 1200
+local PRIOR_TEXT_LIMIT = 2000
 local VISIBLE_TEXT_LIMIT = 12000
-
-local function flattenTOC(nodes, flat)
-    flat = flat or {}
-    if not nodes then return flat end
-    for _, node in ipairs(nodes) do
-        if type(node) == "table" then
-            flat[#flat + 1] = node
-            if #node > 0 then
-                flattenTOC(node, flat)
-            elseif node.sub_item_table then
-                flattenTOC(node.sub_item_table, flat)
-            elseif node.children then
-                flattenTOC(node.children, flat)
-            end
-        end
-    end
-    return flat
-end
 
 local function currentPage(ui)
     if not ui then return 0 end
@@ -79,6 +59,25 @@ local function pageText(ui, page)
     return Text.trim(Text.normalizeNewlines(table.concat(parts, " ")))
 end
 
+---@param s string
+---@param max_bytes integer
+---@return string
+local function tailUtf8(s, max_bytes)
+    s = tostring(s or "")
+    if #s <= max_bytes then
+        return s
+    end
+    local start = math.max(1, #s - max_bytes)
+    while start <= #s do
+        local piece = s:sub(start)
+        if #piece <= max_bytes and Text.isValidUtf8(piece) then
+            return piece
+        end
+        start = start + 1
+    end
+    return Text.truncateUtf8(s, max_bytes)
+end
+
 --- 当前可见页正文与页码；滚动文档按屏幕坐标取字。
 ---@param ui table|nil
 ---@return string|nil, integer
@@ -107,97 +106,51 @@ function Context.visibleText(ui)
     return Text.truncateUtf8(text, VISIBLE_TEXT_LIMIT), page
 end
 
---- 最近正文（不超过 limit 字节），止于当前页。
+--- 当前页之前的正文（不含当前页），最多 limit 字节。
 ---@param ui table
----@param limit integer|nil
 ---@param end_page integer|nil
----@return string, integer
-function Context.bookText(ui, limit, end_page)
-    limit = limit or BOOK_TEXT_LIMIT
+---@param limit integer|nil
+---@return string
+function Context.priorText(ui, end_page, limit)
+    limit = limit or PRIOR_TEXT_LIMIT
     end_page = end_page or currentPage(ui)
-    if end_page < 1 then
-        local text = Context.visibleText(ui)
-        return text or "", end_page
+    if end_page <= 1 then
+        return ""
     end
-    local chunks = {}
+    local parts = {}
     local total = 0
-    for page = end_page, 1, -1 do
+    for page = end_page - 1, 1, -1 do
         local text = pageText(ui, page)
         if text ~= "" then
-            local piece = Text.truncateUtf8(text, limit - total)
-            if piece ~= "" then
-                table.insert(chunks, 1, piece)
-                total = total + #piece
+            local room = limit - total
+            if #text > room then
+                text = tailUtf8(text, room)
             end
-            if total >= limit then break end
+            if text ~= "" then
+                table.insert(parts, 1, text)
+                total = total + #text
+            end
+            if total >= limit then
+                break
+            end
         end
     end
-    return table.concat(chunks, "\n\n"), end_page
+    return table.concat(parts, "\n\n")
 end
 
---- 已读章节采样：标题 + 短摘录。
+--- 组装 X-Ray 分析上下文。
 ---@param ui table
----@param end_page integer|nil
----@param start_page integer|nil 增量起点（含）；nil=从头
----@return string, table[] chapter titles with page
-function Context.chapterSamples(ui, end_page, start_page)
-    end_page = end_page or currentPage(ui)
-    start_page = tonumber(start_page) or 1
-    local document = ui and ui.document
-    local toc = {}
-    if document and document.getToc then
-        local ok, raw = pcall(document.getToc, document)
-        if ok then toc = flattenTOC(raw) end
+---@return { current_page: string, prior_text: string, page: integer }
+function Context.forAnalysis(ui)
+    local page = currentPage(ui)
+    local visible, visible_page = Context.visibleText(ui)
+    if visible_page and visible_page > 0 then
+        page = visible_page
     end
-
-    local active = {}
-    for _, chapter in ipairs(toc) do
-        local page = tonumber(chapter.page)
-        local title = Text.trim(chapter.title)
-        if title ~= "" and page and page >= start_page and page <= end_page then
-            active[#active + 1] = { title = title, page = page }
-        end
-    end
-
-    local budget = CHAPTER_BUDGET
-    if #active > 60 then
-        budget = math.min(budget, 60000)
-    elseif #active > 30 then
-        budget = math.min(budget, 80000)
-    end
-
-    local per = PER_CHAPTER_SAMPLE
-    if #active > 0 then
-        per = math.max(400, math.floor(budget / #active))
-        per = math.min(per, PER_CHAPTER_SAMPLE)
-    end
-
-    local parts = {}
-    local used = 0
-    for _, chapter in ipairs(active) do
-        if used >= budget then break end
-        local sample = Text.truncateUtf8(pageText(ui, chapter.page), per)
-        local block = string.format("## %s (p.%d)\n%s", chapter.title, chapter.page, sample)
-        parts[#parts + 1] = block
-        used = used + #block
-    end
-    return table.concat(parts, "\n\n"), active
-end
-
---- 组装综合分析用的书文与章节采样。
----@param ui table
----@param opts { start_page?: integer, end_page?: integer }|nil
----@return { book_text: string, chapter_samples: string, page: integer, toc: table[] }
-function Context.forAnalysis(ui, opts)
-    opts = opts or {}
-    local page = opts.end_page or currentPage(ui)
-    local book_text = Context.bookText(ui, BOOK_TEXT_LIMIT, page)
-    local samples, toc = Context.chapterSamples(ui, page, opts.start_page)
     return {
-        book_text = book_text,
-        chapter_samples = samples,
+        current_page = visible or pageText(ui, page) or "",
+        prior_text = Context.priorText(ui, page, PRIOR_TEXT_LIMIT),
         page = page,
-        toc = toc,
     }
 end
 

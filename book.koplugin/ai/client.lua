@@ -126,6 +126,16 @@ local function encodeBody(model, messages, opts, stream)
     return body
 end
 
+--- AI 请求超时：连接与整包共用同一预算（默认 120s）。
+---@param opts table|nil
+---@return integer, integer timeout, connect_timeout
+local function httpTimeouts(opts)
+    opts = opts or {}
+    local timeout = opts.timeout or Client.DEFAULT_TIMEOUT
+    local connect = opts.connect_timeout or timeout
+    return timeout, connect
+end
+
 --- 非流式 Chat Completions；cb(content, err)。
 ---@param messages table[]
 ---@param opts table|nil
@@ -143,10 +153,12 @@ function Client.chat(messages, opts, cb)
         cb(nil, enc_err)
         return nil
     end
+    local timeout, connect_timeout = httpTimeouts(opts)
     return Request.post(endpoint, body, {
         content_type = "application/json",
         accept = "application/json",
-        timeout = (opts and opts.timeout) or Client.DEFAULT_TIMEOUT,
+        timeout = timeout,
+        connect_timeout = connect_timeout,
         headers = { Authorization = "Bearer " .. api_key, ["User-Agent"] = DEFAULT_UA },
     }, function(response, err, raw)
         if not response then
@@ -189,11 +201,13 @@ function Client.chatStream(messages, opts, cb)
         return nil
     end
     local parser = SSE.parser()
+    local timeout, connect_timeout = httpTimeouts(opts)
     return Request.stream({
         url = endpoint,
         method = "POST",
         body = body,
-        timeout = opts.timeout or Client.DEFAULT_TIMEOUT,
+        timeout = timeout,
+        connect_timeout = connect_timeout,
         headers = {
             Authorization = "Bearer " .. api_key,
             ["User-Agent"] = DEFAULT_UA,

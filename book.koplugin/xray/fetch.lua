@@ -1,5 +1,5 @@
 --[[--
-X-Ray 拉取：综合拉取 / 选词补全 / 手动增量。
+X-Ray 拉取：综合拉取 / 选词补全。
 
 @module koplugin.book.xray.fetch
 --]]
@@ -12,6 +12,55 @@ local Store = require("xray.store")
 local Text = require("utils.text")
 
 local Fetch = {}
+
+local MIN_GROUND_LEN = 2
+
+---@param ctx table
+---@return string
+local function readingContext(ctx)
+    return table.concat({ ctx.current_page or "", ctx.prior_text or "" }, "\n\n")
+end
+
+---@param needle string
+---@param haystack string
+---@return boolean
+local function appearsInText(needle, haystack)
+    needle = Text.trim(needle)
+    if needle == "" or #needle < MIN_GROUND_LEN then
+        return false
+    end
+    return haystack:find(needle, 1, true) ~= nil
+end
+
+--- name 或任一 alias 须在上下文中出现；hint 用于划词（选中词本身已在文中）。
+---@param row table
+---@param context string
+---@param hint string|nil
+---@return boolean
+local function isGrounded(row, context, hint)
+    if appearsInText(row.name, context) then
+        return true
+    end
+    for _, alias in ipairs(row.aliases or {}) do
+        if appearsInText(alias, context) then
+            return true
+        end
+    end
+    return hint and appearsInText(hint, context)
+end
+
+---@param incoming table[]
+---@param context string
+---@return table[]
+local function filterGrounded(incoming, context)
+    local out = {}
+    for _, row in ipairs(incoming or {}) do
+        if isGrounded(row, context) then
+            out[#out + 1] = row
+        end
+    end
+    return out
+end
 
 local function progressPercent(ui, page)
     local document = ui and ui.document
@@ -61,6 +110,24 @@ local function cleanLocation(item)
     }
 end
 
+local function cleanTerm(item)
+    local name = Text.trim(item and item.name)
+    if name == "" then return nil end
+    local aliases = {}
+    for _, alias in ipairs(type(item.aliases) == "table" and item.aliases or {}) do
+        alias = Text.trim(alias)
+        if alias ~= "" then aliases[#aliases + 1] = alias end
+    end
+    return {
+        kind = "term",
+        name = name,
+        aliases = aliases,
+        payload = {
+            description = Text.trim(item.description),
+        },
+    }
+end
+
 local function cleanPayload(decoded)
     local incoming = {}
     for _, item in ipairs(type(decoded.characters) == "table" and decoded.characters or {}) do
@@ -71,53 +138,30 @@ local function cleanPayload(decoded)
         local row = cleanLocation(item)
         if row then incoming[#incoming + 1] = row end
     end
-    local timeline = {}
-    for _, item in ipairs(type(decoded.timeline) == "table" and decoded.timeline or {}) do
-        local chapter = Text.trim(item.chapter)
-        local event = Text.trim(item.event)
-        if chapter ~= "" and event ~= "" then
-            timeline[#timeline + 1] = { chapter = chapter, event = event }
-        end
+    for _, item in ipairs(type(decoded.terms) == "table" and decoded.terms or {}) do
+        local row = cleanTerm(item)
+        if row then incoming[#incoming + 1] = row end
     end
-    return incoming, timeline, Text.trim(decoded.book_type)
+    return incoming
 end
 
-local function persist(identity, incoming, timeline, toc, page, book_type, cb)
-    local existing = Store.loadEntities(identity)
-    local merged = Store.mergeEntities(existing, incoming)
-    local aligned = Store.alignTimeline(timeline, toc)
-    -- 增量时保留旧 timeline：按 chapter 合并
-    local old_timeline = Store.loadTimeline(identity)
-    local by_chapter = {}
-    for _, ev in ipairs(old_timeline) do
-        by_chapter[Text.trim(ev.chapter):lower()] = ev
-    end
-    for _, ev in ipairs(aligned) do
-        by_chapter[Text.trim(ev.chapter):lower()] = ev
-    end
-    local combined = {}
-    for _, ev in pairs(by_chapter) do
-        combined[#combined + 1] = ev
-    end
-    table.sort(combined, function(a, b)
-        local sa, sb = tonumber(a.sort_idx) or 0, tonumber(b.sort_idx) or 0
-        if sa ~= sb then return sa < sb end
-        return (tonumber(a.page) or 0) < (tonumber(b.page) or 0)
-    end)
+local function fetchResult(identity)
+    return {
+        characters = Store.loadEntities(identity, "character"),
+        locations = Store.loadEntities(identity, "location"),
+        terms = Store.loadEntities(identity, "term"),
+    }
+end
 
+---@param identity BookIdentity
+---@param incoming table[]
+---@param cb fun(result: table|nil, err: any)
+local function persist(identity, incoming, cb)
     DbQueue.run(function()
+        local merged = Store.mergeEntities(Store.loadEntities(identity), incoming)
         assert(Store.saveEntities(identity, merged), "failed to save xray entities")
-        assert(Store.saveTimeline(identity, combined), "failed to save xray timeline")
-        assert(Store.saveMeta(identity, page, book_type ~= "" and book_type or nil),
-            "failed to save xray meta")
     end, {
-        on_done = function()
-            cb({
-                characters = Store.loadEntities(identity, "character"),
-                locations = Store.loadEntities(identity, "location"),
-                timeline = Store.loadTimeline(identity),
-            })
-        end,
+        on_done = function() cb(fetchResult(identity)) end,
         on_failed = function(err) cb(nil, err) end,
     })
 end
@@ -134,78 +178,30 @@ function Fetch.comprehensive(ui, identity, opts, cb)
         cb(nil, "AI is not configured")
         return nil
     end
-    local meta = Store.loadMeta(identity)
-    if not opts.force and meta and meta.last_fetch_page and meta.last_fetch_page > 0 then
-        local entities = Store.loadEntities(identity)
-        if #entities > 0 or #Store.loadTimeline(identity) > 0 then
-            cb({
-                characters = Store.loadEntities(identity, "character"),
-                locations = Store.loadEntities(identity, "location"),
-                timeline = Store.loadTimeline(identity),
-                cached = true,
-            })
-            return nil
-        end
+    if not opts.force and #Store.loadEntities(identity) > 0 then
+        local result = fetchResult(identity)
+        result.cached = true
+        cb(result)
+        return nil
     end
 
     local ctx = Context.forAnalysis(ui)
+    if ctx.current_page == "" and ctx.prior_text == "" then
+        cb(nil, "no text")
+        return nil
+    end
     local title, author = bookMeta(identity)
     local progress = progressPercent(ui, ctx.page)
+    local existing = Store.promptSnapshot(identity)
     local messages = {
         { role = "system", content = Prompts.system },
         { role = "user", content = Prompts.comprehensive(
-            title, author, progress, ctx.book_text, ctx.chapter_samples) },
+            title, author, progress, ctx.current_page, ctx.prior_text, existing) },
     }
     return AI.jsonExtract(messages, { max_tokens = 8000, timeout = 180 }, function(decoded, err)
         if not decoded then cb(nil, err); return end
-        local incoming, timeline, book_type = cleanPayload(decoded)
-        persist(identity, incoming, timeline, ctx.toc, ctx.page, book_type, cb)
-    end)
-end
-
---- 自上次拉取页起做增量补充。
----@param ui table
----@param identity BookIdentity
----@param cb fun(result: table|nil, err: any)
----@return table|nil
-function Fetch.incremental(ui, identity, cb)
-    if not AI.isConfigured() then
-        cb(nil, "AI is not configured")
-        return nil
-    end
-    local meta = Store.loadMeta(identity)
-    local start_page = (meta and meta.last_fetch_page or 0) + 1
-    local page = Context.currentPage(ui)
-    if page < start_page then
-        cb({
-            characters = Store.loadEntities(identity, "character"),
-            locations = Store.loadEntities(identity, "location"),
-            timeline = Store.loadTimeline(identity),
-            cached = true,
-        })
-        return nil
-    end
-
-    local ctx = Context.forAnalysis(ui, { start_page = start_page, end_page = page })
-    local title, author = bookMeta(identity)
-    local progress = progressPercent(ui, page)
-    local known_chars, known_locs = {}, {}
-    for _, e in ipairs(Store.loadEntities(identity, "character")) do
-        known_chars[#known_chars + 1] = "- " .. e.name
-    end
-    for _, e in ipairs(Store.loadEntities(identity, "location")) do
-        known_locs[#known_locs + 1] = "- " .. e.name
-    end
-    local messages = {
-        { role = "system", content = Prompts.system },
-        { role = "user", content = Prompts.incremental(
-            title, author, progress, ctx.book_text, ctx.chapter_samples,
-            table.concat(known_chars, "\n"), table.concat(known_locs, "\n")) },
-    }
-    return AI.jsonExtract(messages, { max_tokens = 6000, timeout = 180 }, function(decoded, err)
-        if not decoded then cb(nil, err); return end
-        local incoming, timeline, book_type = cleanPayload(decoded)
-        persist(identity, incoming, timeline, ctx.toc, page, book_type, cb)
+        local context = readingContext(ctx)
+        persist(identity, filterGrounded(cleanPayload(decoded), context), cb)
     end)
 end
 
@@ -225,7 +221,6 @@ function Fetch.lookupWord(ui, identity, word, cb)
         cb(nil, "AI is not configured")
         return nil
     end
-    -- 本地别名命中则免请求
     for _, entity in ipairs(Store.loadEntities(identity)) do
         if Text.trim(entity.name):lower() == word:lower() then
             cb(entity)
@@ -240,9 +235,12 @@ function Fetch.lookupWord(ui, identity, word, cb)
     end
 
     local ctx = Context.forAnalysis(ui)
+    local title, author = bookMeta(identity)
+    local existing = Store.promptSnapshot(identity)
     local messages = {
         { role = "system", content = Prompts.system },
-        { role = "user", content = Prompts.singleWord(word, ctx.book_text, ctx.chapter_samples) },
+        { role = "user", content = Prompts.singleWord(
+            word, title, author, ctx.current_page, ctx.prior_text, existing) },
     }
     return AI.jsonExtract(messages, { max_tokens = 800 }, function(decoded, err)
         if not decoded then cb(nil, err); return end
@@ -254,11 +252,18 @@ function Fetch.lookupWord(ui, identity, word, cb)
         local row
         if decoded.type == "location" then
             row = cleanLocation(item)
+        elseif decoded.type == "term" then
+            row = cleanTerm(item)
         else
             row = cleanCharacter(item)
         end
         if not row then
             cb(nil, "invalid entity")
+            return
+        end
+        local context = readingContext(ctx)
+        if not isGrounded(row, context, word) then
+            cb(nil, "name not found in text")
             return
         end
         DbQueue.run(function()

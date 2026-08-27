@@ -18,7 +18,7 @@ local DESKTOP_ORDER = {
     "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "suspend",
 }
 local READER_ORDER = {
-    "toc", "highlights", "preset", "dictionary",
+    "toc", "highlights", "xray", "preset", "dictionary",
 }
 
 local builtins = {}

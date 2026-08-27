@@ -51,6 +51,7 @@ function Reader.attach(plugin)
         ui:handleEvent(Event:new("UpdatePos"))
     end
     require("lockscreen.init").refreshInBackground(true)
+    require("xray.marks").install(ui)
 end
 
 ---@param plugin table
