@@ -31,8 +31,7 @@ Assert.is_nil(common_file.ui_scale)
 Assert.is_nil(common_file.lock_screen)
 Assert.eq(type(Settings.get("display").ui_scale), "number")
 Assert.eq(type(Settings.get("lockscreen").lock_screen), "string")
--- 快捷面板迁移标记必须是 quickpanel 段的持久化键，否则布局改名迁移会反复执行。
-Assert.not_nil(Settings.get("quickpanel").quick_panel_reader_action_layout_renamed)
+Assert.eq(type(Settings.get("quickpanel").quick_panel_reader_actions), "table")
 
 local active = Settings.activeSourceId()
 Assert.eq(active, common.active_source)

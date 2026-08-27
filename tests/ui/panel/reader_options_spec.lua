@@ -7,7 +7,6 @@ package.preload["gettext"] = function() return function(value) return value end 
 
 local saved = {
     quick_panel_reader_actions = { "toc" },
-    quick_panel_reader_action_layout_renamed = true,
 }
 package.preload["utils.settings"] = function()
     return {
@@ -18,13 +17,12 @@ end
 
 local ACTIONS = {
     toc = { id = "toc", title = "目录", icon = "menu_book", scope = "reader", run = function() end },
-    preset = {
-        id = "preset", title = "预设", icon = "article", scope = "reader",
-        available = function(ctx) return ctx.ui == nil or ctx.ui.rolling ~= nil end,
+    dictionary = {
+        id = "dictionary", title = "词典", icon = "book", scope = "reader",
         run = function() end,
     },
 }
-local ORDER = { "toc", "preset" }
+local ORDER = { "toc", "dictionary" }
 
 package.preload["ui.panel.actions.registry"] = function()
     local Registry = {}
@@ -47,7 +45,7 @@ local function findOption(id)
     end
 end
 
-Assert.is_true(findOption("preset").available)
+Assert.is_true(findOption("dictionary").available)
 
-ReaderPanel.setEnabled("preset", true)
-Assert.is_true(findOption("preset").enabled)
+ReaderPanel.setEnabled("dictionary", true)
+Assert.is_true(findOption("dictionary").enabled)

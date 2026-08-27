@@ -54,10 +54,6 @@ function BookPlugin:init()
             require("patch.page_turn_animation").checkStartup()
         end)
     end)
-    -- Reader 扫描 styletweaks 前落盘，保证全局阅读风格 CSS 可被注册
-    pcall(function()
-        require("ui.reader.layout").ensureCssFile()
-    end)
     if self.ui and self.ui.document then
         self:emitToSource("reader_open")
     end

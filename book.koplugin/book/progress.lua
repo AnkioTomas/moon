@@ -54,31 +54,11 @@ function Progress.fraction(snapshot)
     return wholeFraction(doc_frac, identity, chapter and chapter.toc)
 end
 
---- 解析当前章节标题：按章源走 toc[idx]，整本书走 KOReader 文档 TOC。
---- 不是所有源都有 chapter_idx，标题比下标更适合跨源持久化。
+--- 当前章节标题（顶栏 / 进度上报共用）。
 ---@param snapshot ReaderSessionSnapshot|nil
----@return string|nil
-local function chapterTitle(snapshot)
-    if not snapshot then return nil end
-    local id = snapshot.identity
-    local chapter = snapshot.chapter
-    if chapter and type(chapter.toc) == "table" and id and id.chapter_idx then
-        local entry = chapter.toc[tonumber(id.chapter_idx)]
-        if type(entry) == "table" then
-            local title = entry.title or entry.name
-            if type(title) == "string" and title ~= "" then
-                return title
-            end
-        end
-    end
-    local toc = snapshot.ui and snapshot.ui.toc
-    if toc and type(toc.getTocTitleOfCurrentPage) == "function" then
-        local title = toc:getTocTitleOfCurrentPage()
-        if type(title) == "string" and title ~= "" then
-            return title
-        end
-    end
-    return nil
+---@return string
+function Progress.chapterTitle(snapshot)
+    return require("ui.reader.session").chapterTitle(snapshot) or ""
 end
 
 --- 当前 ProgressPosition；位置完全来自 ReaderSession 快照。
@@ -89,10 +69,11 @@ function Progress.position(snapshot)
     local doc_frac = snapshot and tonumber(snapshot.doc_fraction) or 0
     local page = tonumber(snapshot and snapshot.page)
     local total_pages = tonumber(snapshot and snapshot.total_pages)
+    local Session = require("ui.reader.session")
     return {
         fraction = Progress.fraction(snapshot),
         chapter_idx = id.chapter_idx,
-        chapter_title = chapterTitle(snapshot),
+        chapter_title = Session.chapterTitle(snapshot),
         chapter_fraction = id.chapter_idx and doc_frac or nil,
         page = page and page > 0 and math.floor(page) or nil,
         total_pages = total_pages and total_pages > 0 and math.floor(total_pages) or nil,

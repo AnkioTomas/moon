@@ -17,10 +17,7 @@ end
 package.preload["utils.settings"] = function()
     return {
         get = function()
-            return {
-                book_reader_show_top_time = true,
-                book_reader_show_bottom_progress = true,
-            }
+            return { book_xray_show_marks = true }
         end,
         save = function() end,
     }
@@ -92,7 +89,9 @@ local setting = menu.tab_item_table[4]
 Assert.eq(setting.id, "setting")
 Assert.eq(setting[1].id, "book_reader_top_status")
 Assert.eq(setting[2].id, "book_reader_bottom_progress")
-Assert.eq(setting[3].id, "book_reader_save_default")
+Assert.eq(setting[3].id, "book_xray_show_marks")
+Assert.eq(setting[4].id, "book_reader_save_default")
+Assert.eq(setting[5].id, "status_bar")
 
 tab.callback()
 tab[2].callback({

@@ -378,6 +378,7 @@ do
     Assert.eq(cur.total_pages, 200)
     Assert.eq(cur.percent, 25)
     Assert.is_nil(Session.toc(), "整本书没有章节目录")
+    Assert.is_nil(Session.chapterTitle(), "整本书无章节标题")
     Assert.eq(cur.identity.source.id, "moon", "属主源来自身份")
     -- 统计拿到的是内存身份（DB 写入异步，同 tick 查不到）
     local start_call = calls.tracker[#calls.tracker]
@@ -435,6 +436,7 @@ do
     Assert.eq(cur.identity.stable_id, "b2")
     Assert.eq(cur.identity.chapter_idx, 9)
     Assert.len(Session.toc(), 10)
+    Assert.eq(Session.chapterTitle(), "9", "章节标题来自 toc title")
     Assert.eq(cur.identity.book.title, "旧章书")
     Assert.eq(cur.identity.source.id, "moon")
     Assert.eq(cur.percent, 75, "章节快照使用当前会话身份计算全书进度")
