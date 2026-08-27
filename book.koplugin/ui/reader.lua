@@ -39,14 +39,9 @@ function Reader.attach(plugin)
     if ui.view and ui.view.registerViewModule then
         local bars = require("ui.reader.bars")
         ui.view:registerViewModule("book_bars", bars)
+        bars:install(ui)
         bars:startClock()
     end
-    -- Book 自绘上下进度条替换 KOReader 原生底部状态栏/进度条。
-    local footer = ui.view and ui.view.footer
-    if footer and footer.disableFooter then
-        pcall(footer.disableFooter, footer)
-    end
-    require("ui.reader.bars").applyInsets(ui)
     if ui.handleEvent then
         ui:handleEvent(Event:new("UpdatePos"))
     end

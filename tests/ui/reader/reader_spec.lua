@@ -59,14 +59,16 @@ end
 
 local registered_module
 package.preload["ui.reader.bars"] = function()
-    return { startClock = function() end, applyInsets = function() end }
+    return { startClock = function() end, install = function() end }
 end
 package.preload["lockscreen.init"] = function()
     return { refreshInBackground = function() end }
 end
+package.preload["xray.marks"] = function()
+    return { install = function() end }
+end
 
 local bookmarked, toggles = false, 0
-local footer_disabled = false
 local ui = {
     dialog = {},
     toc = { onShowToc = function() end },
@@ -86,27 +88,26 @@ local ui = {
         registerViewModule = function(_, name, module)
             registered_module = { name = name, module = module }
         end,
-        footer = {
-            disableFooter = function() footer_disabled = true end,
-        },
+        registerTouchZones = function() end,
+        footer = {},
     },
 }
 local plugin = { ui = ui }
 
 local Reader = require("ui.reader")
 local actions = Reader.actions(ui)
-Assert.len(actions, 3)
+Assert.len(actions, 4)
 Assert.eq(actions[1].id, "toc")
 Assert.eq(actions[1].icon, "menu_book")
 Assert.eq(actions[2].id, "highlights")
-Assert.eq(actions[3].id, "dictionary")
+Assert.eq(actions[3].id, "xray")
+Assert.eq(actions[4].id, "dictionary")
 
 Assert.is_false(Reader.executeAction("missing", ui))
 
 Reader.attach(plugin)
 Assert.eq(native_ui, ui)
 Assert.eq(registered_module.name, "book_bars")
-Assert.is_true(footer_disabled, "应关闭 KOReader 原生底部状态栏")
 Assert.is_nil(ui._zones, "不应注册覆盖原生菜单的触摸区")
 
 native_ui = nil

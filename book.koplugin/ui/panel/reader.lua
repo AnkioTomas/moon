@@ -36,28 +36,7 @@ local function settingsAvailable(action)
     return Registry.available(action, { ui = nil })
 end
 
---- 旧版把阅读风格存成 layout；一次性改名为 preset。
----@return void
-local function migrateReaderActionIds()
-    local settings = MoonSettings.get()
-    if settings.quick_panel_reader_action_layout_renamed then
-        return
-    end
-    local configured = settings.quick_panel_reader_actions
-    if type(configured) == "table" then
-        for i, id in ipairs(configured) do
-            if id == "layout" then
-                configured[i] = "preset"
-            end
-        end
-        settings.quick_panel_reader_actions = configured
-    end
-    settings.quick_panel_reader_action_layout_renamed = true
-    MoonSettings.save(settings)
-end
-
 local list = ActionList.create("reader", "quick_panel_reader_actions", Registry.readerOrder, {
-    before_read = migrateReaderActionIds,
     can_enable = settingsAvailable,
     settings_available = settingsAvailable,
 })

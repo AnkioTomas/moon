@@ -34,13 +34,9 @@ local DEFAULTS = {
     quickpanel = {
         quick_panel_actions = { "night", "wifi" },
         quick_panel_reader_actions = { "toc", "highlights", "xray", "dictionary", "ocr" },
-        quick_panel_reader_action_layout_renamed = false,
     },
     reader = {
-        book_reader_show_top_time = true,
-        book_reader_show_bottom_progress = true,
         book_xray_show_marks = true,
-        book_reader_layout_id = "off",
     },
     ai = { ai_endpoint = "", ai_api_key = "", ai_model = "" },
 }

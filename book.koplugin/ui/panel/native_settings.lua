@@ -15,6 +15,8 @@ local _ = require("gettext")
 
 local NativeSettings = {}
 
+local Bars = require("ui.reader.bars")
+
 --- 刷新阅读视图并在后台更新锁屏。
 ---@param ui table|nil
 ---@return nil
@@ -36,10 +38,6 @@ local function setDisplay(ui, key, value, menu)
     MoonSettings.save(settings)
     if key == "book_xray_show_marks" then
         require("xray.marks").invalidate()
-    end
-    require("ui.reader.bars").applyInsets(ui)
-    if ui and ui.handleEvent then
-        ui:handleEvent(require("ui/event"):new("UpdatePos"))
     end
     refreshReader(ui)
     Menu.refresh(menu)
@@ -76,33 +74,16 @@ local function findItem(items, id)
     end
 end
 
---- 递归删除指定 id 的菜单项。
----@param items table[]|nil
----@param id string
----@return nil
-local function removeItem(items, id)
-    if type(items) ~= "table" then return end
-    for i = #items, 1, -1 do
-        local item = items[i]
-        if type(item) == "table" and item.id == id then
-            table.remove(items, i)
-        elseif type(item) == "table" then
-            removeItem(item.sub_item_table or (#item > 0 and item or nil), id)
-        end
-    end
-end
-
 --- KOReader 设置 Tab 是 tab_item_table 里的一项数组，不是 id=setting 的节点。
 ---@param menu table
 ---@return table|nil
 local function settingTab(menu)
     for _, tab in ipairs(menu.tab_item_table or {}) do
-        if type(tab) == "table" and findItem(tab, "night_mode") then
-            return tab
-        end
-    end
-    for _, tab in ipairs(menu.tab_item_table or {}) do
-        if type(tab) == "table" and findItem(tab, "screen") then
+        if type(tab) == "table" and (
+            findItem(tab, "night_mode")
+            or findItem(tab, "status_bar")
+            or findItem(tab, "screen")
+        ) then
             return tab
         end
     end
@@ -129,13 +110,54 @@ local function toggleItem(ui, id, text, key)
     }
 end
 
+--- 顶栏开关：与 Aa → Alt Status Bar 一一对应。
+---@param ui table|nil
+---@return table
+local function topStatusItem(ui)
+    return {
+        id = "book_reader_top_status",
+        text = _("顶部状态栏"),
+        enabled_func = function()
+            return ui and ui.rolling and ui.document
+        end,
+        checked_func = function()
+            return Bars.systemTopVisible(ui)
+        end,
+        callback = function(menu)
+            Bars.toggleSystemTop(ui)
+            refreshReader(ui)
+            Menu.refresh(menu)
+        end,
+        keep_menu_open = true,
+    }
+end
+
+--- 底栏开关：与 Status bar 显隐一一对应。
+---@param ui table|nil
+---@return table
+local function bottomProgressItem(ui)
+    return {
+        id = "book_reader_bottom_progress",
+        text = _("底部进度栏"),
+        checked_func = function()
+            return Bars.systemBottomVisible(ui)
+        end,
+        callback = function(menu)
+            Bars.toggleSystemBottom(ui)
+            refreshReader(ui)
+            Menu.refresh(menu)
+        end,
+        keep_menu_open = true,
+    }
+end
+
 --- 生成 Book 阅读显示设置菜单项列表。
 ---@param ui table|nil
 ---@return table[]
 local function settingsItems(ui)
     return {
-        toggleItem(ui, "book_reader_top_status", _("顶部状态栏"), "book_reader_show_top_time"),
-        toggleItem(ui, "book_reader_bottom_progress", _("底部进度栏"), "book_reader_show_bottom_progress"),
+        topStatusItem(ui),
+        bottomProgressItem(ui),
         toggleItem(ui, "book_xray_show_marks", _("页内实体标记"), "book_xray_show_marks"),
         {
             id = "book_reader_save_default",
@@ -146,12 +168,11 @@ local function settingsItems(ui)
     }
 end
 
---- 清理冲突的原生状态栏项，并把 Book 阅读显示设置注入设置 Tab。
+--- 把 Book 阅读显示设置注入设置 Tab（保留原生 status_bar 项）。
 ---@param menu table
 function NativeSettings.inject(menu)
     local tab = settingTab(menu)
     if not tab then return end
-    removeItem(tab, "status_bar")
     local items = settingsItems(menu.ui)
     for i = #items, 1, -1 do
         local item = items[i]

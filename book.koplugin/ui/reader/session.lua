@@ -78,6 +78,68 @@ function Session.toc()
     return chapter and chapter.toc or nil
 end
 
+--- 在目录中按章序号查找条目（支持 toc[idx] 与 entry.idx 两种布局）。
+---@param toc BookChapter[]|table
+---@param chapter_idx number|string|nil
+---@return BookChapter|nil
+local function tocEntry(toc, chapter_idx)
+    local idx = tonumber(chapter_idx)
+    if not idx or type(toc) ~= "table" then
+        return nil
+    end
+    local direct = toc[idx]
+    if type(direct) == "table" then
+        local entry_idx = tonumber(direct.idx)
+        if entry_idx == nil or entry_idx == idx then
+            return direct
+        end
+    end
+    for _, entry in ipairs(toc) do
+        if type(entry) == "table" and tonumber(entry.idx) == idx then
+            return entry
+        end
+    end
+    return type(direct) == "table" and direct or nil
+end
+
+--- 目录条目标题。
+---@param entry BookChapter|table|nil
+---@return string|nil
+local function tocTitle(entry)
+    if type(entry) ~= "table" then
+        return nil
+    end
+    local title = entry.title or entry.name
+    if type(title) ~= "string" then
+        return nil
+    end
+    title = title:match("^%s*(.-)%s*$")
+    if title == "" then
+        return nil
+    end
+    return title
+end
+
+--- 当前章节标题：抹平按章书与整本书差异，统一读 session 目录里的 title。
+---@param snapshot ReaderSessionSnapshot|nil 缺省当前会话
+---@return string|nil
+function Session.chapterTitle(snapshot)
+    snapshot = snapshot or current_session
+    if not snapshot then
+        return nil
+    end
+    local id = snapshot.identity
+    local toc = snapshot.chapter and snapshot.chapter.toc
+    if not toc then
+        local chapter = activeChapter()
+        toc = chapter and chapter.toc
+    end
+    if toc and id and id.chapter_idx then
+        return tocTitle(tocEntry(toc, id.chapter_idx))
+    end
+    return nil
+end
+
 --- 当前会话是否仍绑定指定身份；用于异步回调丢弃旧文档结果。
 ---@param identity BookIdentity|nil
 ---@return boolean
