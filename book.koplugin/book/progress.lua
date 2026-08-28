@@ -12,6 +12,7 @@ local logger = require("logger")
 local ProgressDB = require("utils.db.progress")
 local DbQueue = require("utils.db.queue")
 local ProgressPosition = require("types.book_progress")
+local Position = require("book.progress.position")
 local Text = require("utils.text")
 local _ = require("gettext")
 
@@ -39,35 +40,13 @@ local function T(fmt, ...)
     end
     return s
 end
---- 把文档内比例合成为全书比例。
----@param doc_frac number
----@param id BookIdentity|nil
----@param toc BookChapter[]|nil
----@param reading_idx number|nil
----@return number
-local function wholeFraction(doc_frac, id, toc, reading_idx)
-    local idx = id and id.chapter_idx or reading_idx
-    if not idx then
-        return doc_frac
-    end
-    local count = toc and #toc
-    idx = tonumber(idx) or 1
-    if not count or count <= 0 then
-        return doc_frac
-    end
-    return math.max(0, math.min(1, ((idx - 1) + doc_frac) / count))
-end
-
 --- 从阅读快照取得全书阅读比例 0..1（按章源会合成）。
 ---@param snapshot ReaderSessionSnapshot
 ---@return number
 function Progress.fraction(snapshot)
     if not snapshot then return 0 end
-    local doc_frac = tonumber(snapshot.doc_fraction) or 0
-    local identity = snapshot.identity
-    local SessionToc = require("ui.reader.session.toc")
-    local toc = SessionToc.list(snapshot)
-    return wholeFraction(doc_frac, identity, toc, snapshot.reading_chapter_idx)
+    local toc = require("ui.reader.session.toc").list(snapshot)
+    return Position.fraction(snapshot, toc)
 end
 
 --- 当前章节标题（顶栏 / 进度上报共用）。
@@ -81,28 +60,13 @@ end
 ---@param snapshot ReaderSessionSnapshot
 ---@return ProgressPosition
 function Progress.position(snapshot)
-    local id = snapshot and snapshot.identity or {}
-    local doc_frac = snapshot and tonumber(snapshot.doc_fraction) or 0
-    local page = tonumber(snapshot and snapshot.page)
-    local total_pages = tonumber(snapshot and snapshot.total_pages)
     local Session = require("ui.reader.session")
     local Toc = require("ui.reader.session.toc")
-    local chapter_idx = id.chapter_idx or snapshot and snapshot.reading_chapter_idx
-    local chapter_frac
-    if chapter_idx then
-        chapter_frac = Toc.chapterFraction(snapshot) or doc_frac
+    local position = Position.position(snapshot, Toc.list(snapshot), Session.chapterTitle(snapshot))
+    if position.chapter_idx then
+        position.chapter_fraction = Toc.chapterFraction(snapshot) or position.chapter_fraction
     end
-    local ui = snapshot and snapshot.ui
-    return {
-        fraction = Progress.fraction(snapshot),
-        chapter_idx = chapter_idx,
-        chapter_title = Session.chapterTitle(snapshot),
-        chapter_fraction = chapter_frac,
-        page = page and page > 0 and math.floor(page) or nil,
-        total_pages = total_pages and total_pages > 0 and math.floor(total_pages) or nil,
-        -- rolling 文档的精确定位；paging 文档没有 xpointer，靠 page 恢复。
-        locator = ui and ui.rolling and ui.rolling.xpointer or nil,
-    }
+    return position
 end
 
 --- 把跳转结果落到 sidecar，让原生阅读器下次开书就在这个位置。

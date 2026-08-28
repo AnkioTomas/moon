@@ -11,6 +11,7 @@ local NoteDB = require("utils.db.note")
 local DbQueue = require("utils.db.queue")
 local logger = require("logger")
 local Store = require("book.store")
+local Normalize = require("book.note.normalize")
 
 local Note = {}
 local last_revision = 0
@@ -22,43 +23,6 @@ local last_revision = 0
 local function nextRevision()
     last_revision = math.max(os.time(), last_revision + 1)
     return last_revision
-end
-
---- 归一化注解快照。
----
---- 远端划线在开章定位前只有 ``wr_range``，没有本地坐标——不要为了凑 ``page`` 造假值：
---- ReaderAnnotation:onReadSettings 用 ``type(annotations[1].page)`` 判断整个数组是
---- crengine 还是 mupdf 格式，一个数字 ``page`` 会让整份注解（含本地划线）被搬去
---- ``annotations_paging`` 并加载空表。
----@param items table[]|nil
----@param total_pages integer|nil
----@return table[]
-local function clean(items, total_pages)
-    local result = {}
-    for _, item in ipairs(items or {}) do
-        if type(item) == "table" and item.datetime
-            and (item.page or item.pageref or item.wr_range) then
-            result[#result + 1] = {
-                datetime = item.datetime,
-                datetime_updated = item.datetime_updated,
-                drawer = item.drawer,
-                color = item.color,
-                text = item.text,
-                note = item.note,
-                chapter = item.chapter,
-                chapter_idx = item.chapter_idx,
-                pageno = item.pageno,
-                page = item.page or item.pageref,
-                total_pages = total_pages or item.total_pages or 0,
-                pos0 = item.pos0,
-                pos1 = item.pos1,
-                wr_range = item.wr_range,
-                wr_bookmark_id = item.wr_bookmark_id,
-                wr_review_id = item.wr_review_id,
-            }
-        end
-    end
-    return result
 end
 
 --- 取文档总页数：优先问 document，退回 doc_settings 里的 doc_pages，都没有算 0。
@@ -73,14 +37,6 @@ end
 
 ---@param item table
 ---@return integer
-local function bucketKey(item)
-    local idx = tonumber(item.chapter_idx)
-    if idx and idx > 0 then
-        return idx
-    end
-    return 0
-end
-
 --- 远端注解按 ``chapter_idx`` 分片落库（payload 一律为通用 KOReader 注解数组）。
 ---
 --- 只覆盖远端确实报告了的分片：远端一条都没报时不写任何分片。协议字段缺失与
@@ -93,7 +49,7 @@ local function saveRemoteBuckets(source_id, stable_id, annotations, done)
     local buckets = {}
     for _, item in ipairs(annotations or {}) do
         if type(item) == "table" then
-            local key = bucketKey(item)
+            local key = Normalize.bucketKey(item)
             local bucket = buckets[key]
             if not bucket then
                 bucket = {}
@@ -110,7 +66,7 @@ local function saveRemoteBuckets(source_id, stable_id, annotations, done)
         local revision = nextRevision()
         for key, items in pairs(buckets) do
             local chapter_idx = key > 0 and key or nil
-            local ok, payload = pcall(JSON.encode, clean(items))
+        local ok, payload = pcall(JSON.encode, Normalize.clean(items))
             assert(ok, payload)
             assert(NoteDB.upsertRemote(
                 source_id, stable_id, chapter_idx, payload, revision
@@ -140,7 +96,7 @@ function Note.save(ui, identity, done)
     ui.doc_settings:flush()
     local items = ui.doc_settings:readSetting("annotations") or {}
     local total_pages = pageCount(ui)
-    local ok, payload = pcall(JSON.encode, clean(items, total_pages))
+    local ok, payload = pcall(JSON.encode, Normalize.clean(items, total_pages))
     if not ok then
         logger.warn("book.note encode failed", identity.stable_id, payload)
         if done then done(false) end
@@ -296,7 +252,7 @@ function Note.syncAsync(source, opts, cb)
                     end
                     return
                 end
-                local ok_encode, pushed_payload = pcall(JSON.encode, clean(annotations))
+                local ok_encode, pushed_payload = pcall(JSON.encode, Normalize.clean(annotations))
                 if not ok_encode then
                     finish(nil, "invalid local notes")
                     return
@@ -392,7 +348,7 @@ function Note.importLocalAsync(done)
             return
         end
         local total_pages = tonumber(settings:readSetting("doc_pages")) or 0
-        local normalized = clean(annotations, total_pages)
+                local normalized = Normalize.clean(annotations, total_pages)
         if #normalized == 0 then
             result.skipped = result.skipped + 1
             UIManager:nextTick(nextItem)
@@ -447,40 +403,6 @@ end
 --- 远端划线在开章定位成功前只留在 notes 表里。
 ---@param item table
 ---@return boolean
-local function renderable(item)
-    -- page 必须是 xpointer 字符串：onReadSettings 拿首条的 page 类型判定整个数组的格式。
-    if type(item.page) ~= "string" or item.page == "" then
-        return false
-    end
-    if not item.drawer then
-        return true
-    end
-    return type(item.pos0) == "string" and item.pos0 ~= ""
-        and type(item.pos1) == "string" and item.pos1 ~= ""
-end
-
---- 合并远端划线与本地未同步划线（保留无 wr_bookmark_id 的本地高亮）。
----@param remote table[]
----@param local_items table[]
----@return table[]
-local function mergeAnnotations(remote, local_items)
-    local merged, seen = {}, {}
-    for _, item in ipairs(remote or {}) do
-        if type(item) == "table" and renderable(item) then
-            local key = item.wr_bookmark_id
-                or table.concat({ tostring(item.text or ""), tostring(item.wr_range or "") }, "\31")
-            seen[key] = true
-            merged[#merged + 1] = item
-        end
-    end
-    for _, item in ipairs(local_items or {}) do
-        if type(item) == "table" and not item.wr_bookmark_id and renderable(item) then
-            merged[#merged + 1] = item
-        end
-    end
-    return merged
-end
-
 --- 把本地 notes 快照定位并写入阅读器注解。
 ---
 --- 纯本地：读 sqlite、算 xpointer、写 doc_settings，不碰网络也不排 nextTick。
@@ -508,7 +430,7 @@ function Note.applyLocal(ui, identity)
         )
     end
     local current = ui.doc_settings:readSetting("annotations") or {}
-    annotations = mergeAnnotations(annotations, current)
+    annotations = Normalize.merge(annotations, current)
     if #annotations == 0 and #current == 0 then
         return 0
     end

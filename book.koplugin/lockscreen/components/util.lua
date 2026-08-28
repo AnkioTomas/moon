@@ -10,6 +10,7 @@
 local _ = require("gettext")
 local T = require("ffi/util").template
 local Blitbuffer = require("ffi/blitbuffer")
+local Text = require("utils.text")
 
 local U = {}
 
@@ -64,18 +65,7 @@ end
 ---@param title string|nil
 ---@return string
 function U.cleanChapterTitle(title)
-    if type(title) ~= "string" then
-        return ""
-    end
-    local cleaned = title
-        :gsub("^%s+", "")
-        :gsub("%s+$", "")
-        :gsub("^第%d+章[:：%s]*", "")
-        :gsub("^[Cc]hapter%s+%d+[:%.%s]*", "")
-        :gsub("^[Cc]h%.%s*%d+[:%.%s]*", "")
-        :gsub("^%s+", "")
-        :gsub("%s+$", "")
-    return cleaned
+    return Text.cleanChapterTitle(title)
 end
 
 --- 将秒数格式化为适合锁屏宽度的分钟/小时文案。
