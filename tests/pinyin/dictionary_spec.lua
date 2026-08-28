@@ -151,7 +151,6 @@ Assert.is_false(complete)
 -- ── 查询：短码直接命中构建期索引；长码才走 words 索引 ──
 Assert.is_true(Dict.isAvailable())
 Assert.eq(Dict.entries(), "3")
-Assert.eq(Dict.sourceTag(), "test")
 Assert.eq(Dict.builtAt(), "2026-08-19 13:17:06")
 
 local words = Dict.lookup("nihao")

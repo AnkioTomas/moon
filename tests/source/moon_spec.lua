@@ -346,6 +346,13 @@ do
     local pos
     src:getProgressAsync({ stable_id = "a.epub" }, function(p) pos = p end)
     Assert.eq(pos.fraction, 0.55)
+
+    -- 服务端 /book/progress 回吐的是 spine 键，且 locator 过期时为空串
+    rec.progress_wire = { data = { percent = 30, spine = 5, locator = "", page = 9 } }
+    src:getProgressAsync({ stable_id = "a.epub" }, function(p) pos = p end)
+    Assert.eq(pos.fraction, 0.3)
+    Assert.eq(pos.chapter_idx, 5)
+    Assert.is_nil(pos.locator, "空串应归一成 nil")
 end
 
 -- getProgressAsync：拉取失败透传错误；wire 无法映射时报「进度为空」
@@ -378,6 +385,13 @@ do
     Assert.eq(rec.put_payload.spine, 2)
     Assert.eq(rec.put_payload.page, 0)
     Assert.eq(rec.put_payload.percent, "50.00%")
+
+    -- 精确坐标必须发出去：不发的话服务端永远存不到，拉回来只有会漂移的百分比
+    src:putProgressAsync({ stable_id = "a.epub" }, {
+        fraction = 0.5, chapter_idx = 2, page = 12, locator = "/body/p[7]",
+    }, function() end)
+    Assert.eq(rec.put_payload.locator, "/body/p[7]")
+    Assert.eq(rec.put_payload.page, 12)
 
     -- fraction 超 1 按百分数钳制（42 → 0.42）；chapter_idx 缺省 spine = 0
     src:putProgressAsync({ stable_id = "b.epub" }, { fraction = 42 }, function() end)

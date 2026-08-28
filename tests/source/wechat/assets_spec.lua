@@ -105,5 +105,5 @@ do
     end)
     Assert.is_true(done)
     Assert.matches(html_out, 'src="images/[0-9a-f]+%.png"')
-    Assert.is_false(Assets.hasRemoteImages(html_out))
+    Assert.is_false(require("utils.text").hasRemoteImageSrc(html_out))
 end

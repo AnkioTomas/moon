@@ -714,32 +714,6 @@ function Client:filtersAsync(cb)
     return nil
 end
 
---- 最近阅读（books.last_open 倒序）。
----@param limit number|nil
----@param cb fun(rows: table[])
----@return nil
-function Client:recentAsync(limit, cb)
-    UIManager:nextTick(function()
-        cb(require("utils.db.book").recentBySource(SOURCE_ID, limit or 24))
-    end)
-    return nil
-end
-
---- 阅读统计聚合（reading_stats 表）。
----@param cb fun(summary: table, daily: table[], daily_books: table[])
----@return nil
-function Client:insightAsync(cb)
-    UIManager:nextTick(function()
-        local StatsDB = require("utils.db.stats")
-        cb(
-            StatsDB.summaryBySource(SOURCE_ID),
-            StatsDB.dailyBySource(SOURCE_ID),
-            StatsDB.dailyBooksBySource(SOURCE_ID)
-        )
-    end)
-    return nil
-end
-
 --- 封面缓存路径（已存在才返回；绝不现提取，coverRequest 在 UI 线程同步调用）。
 ---@param stable_id string
 ---@return string|nil

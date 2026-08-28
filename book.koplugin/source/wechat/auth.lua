@@ -19,6 +19,7 @@ local Request = require("http.request")
 local Header = require("http.header")
 local UIManager = require("ui/uimanager")
 local Text = require("utils.text")
+local Protocol = require("source.wechat.protocol")
 local _ = require("gettext")
 
 local Auth = {}
@@ -30,8 +31,8 @@ local API = "https://i.weread.qq.com"
 local AGENT_GATEWAY = API .. "/api/agent/gateway"
 local DEFAULT_SKILL_VERSION = "1.0.4"
 
---- 用户提供的桌面 Edge UA（微信读书 Web）
-local BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"
+--- 浏览器 UA 与 protocol.webAppId 保持一致（阅读时长上报 appId 依赖 UA）。
+local BROWSER_UA = Protocol.USER_AGENT
 
 local SESSION_COOKIE_KEYS = { "wr_gid", "wr_fp", "wr_vid", "wr_skey", "wr_ql", "wr_rt" }
 
@@ -268,19 +269,6 @@ function Auth.userLabel()
     return nil
 end
 
---- 当前用户 vid。
----@return string|nil
-function Auth.userVid()
-    local vid = vidOf(cfg())
-    if type(vid) == "string" and vid ~= "" then
-        return vid
-    end
-    if type(vid) == "number" then
-        return tostring(vid)
-    end
-    return nil
-end
-
 --- 清除本地会话与派生 Cookie 字段。
 function Auth.clearSession()
     saveCfg({
@@ -340,6 +328,20 @@ local function absUrl(base, path_query)
         return path_query
     end
     return base .. path_query
+end
+
+--- 会话失效探针：只有带 errcode/errmsg 的 JSON 才值得解码。
+---
+--- 章节正文分片、reader 页 HTML 与图片都会走同一条请求路径，动辄几百 KB 且必然不是
+--- JSON；无条件 decode 一遍纯属白烧 CPU。
+---@param raw string
+---@return boolean
+local function mayCarryErrCode(raw)
+    if raw:sub(1, 1) ~= "{" then
+        return false
+    end
+    return raw:find("errcode", 1, true) ~= nil or raw:find("errCode", 1, true) ~= nil
+        or raw:find("errmsg", 1, true) ~= nil or raw:find("errMsg", 1, true) ~= nil
 end
 
 --- 解码 JSON 文本为 table。
@@ -453,7 +455,7 @@ local function sessionRequest(opts, cb)
         local code = res and res.code
         local raw = res and res.body or ""
         if not opts.skip_auth_retry and not retried then
-            local data = decodeJson(raw)
+            local data = mayCarryErrCode(raw) and decodeJson(raw) or nil
             if isAuthFailure(data, nil, code) then
                 tryRenewAsync(function(renewed)
                     if renewed then
@@ -509,50 +511,21 @@ end
 --- Async JSON GET helper.
 ---@param base string
 ---@param path_query string
----@param check_err boolean|nil
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
-jsonGetAsync = function(base, path_query, check_err, cb)
+jsonGetAsync = function(base, path_query, cb)
     return Auth.webGetAsync(absUrl(base, path_query), nil, function(raw, err)
         if not raw then
             cb(nil, err)
             return
         end
-        local data, decode_err = decodeJson(raw)
-        if not data then
-            cb(nil, decode_err)
-        elseif check_err then
-            cb(checkWereadErr(data))
-        else
-            cb(data)
-        end
+        cb(decodeJson(raw))
     end)
 end
 
---- App API（``i.weread.qq.com``）：仅移动端 ``accessToken``+``vid`` 鉴权。
---- Web 扫码会话（Cookie + X-Vid + X-Skey）请求这些路径会稳定返回 -2012，请走 ``webApi*``。
-function Auth.apiGetAsync(path_query, cb)
-    return jsonGetAsync(API, path_query, true, cb)
-end
-
---- 见 ``apiGetAsync``：Web Cookie 不可用。
-function Auth.apiPostAsync(path, body_tbl, cb)
-    return Auth.webPostAsync(absUrl(API, path), JSON.encode(body_tbl or {}), nil, function(raw, err)
-        if not raw then
-            cb(nil, err)
-            return
-        end
-        local data, decode_err = decodeJson(raw)
-        if data then
-            cb(checkWereadErr(data))
-        else
-            cb(nil, decode_err)
-        end
-    end)
-end
-
+--- Web API JSON GET；errcode 校验由 client 层的 acceptWebWire 决定。
 function Auth.webApiGetAsync(path_query, cb)
-    return jsonGetAsync(WEB, path_query, false, cb)
+    return jsonGetAsync(WEB, path_query, cb)
 end
 
 function Auth.webApiPostAsync(path, body_tbl, cb)

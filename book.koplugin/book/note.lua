@@ -20,10 +20,20 @@ local function nextRevision()
     return last_revision
 end
 
+--- 归一化注解快照。
+---
+--- 远端划线在开章定位前只有 ``wr_range``，没有本地坐标——不要为了凑 ``page`` 造假值：
+--- ReaderAnnotation:onReadSettings 用 ``type(annotations[1].page)`` 判断整个数组是
+--- crengine 还是 mupdf 格式，一个数字 ``page`` 会让整份注解（含本地划线）被搬去
+--- ``annotations_paging`` 并加载空表。
+---@param items table[]|nil
+---@param total_pages integer|nil
+---@return table[]
 local function clean(items, total_pages)
     local result = {}
     for _, item in ipairs(items or {}) do
-        if type(item) == "table" and item.datetime and (item.page or item.pageref) then
+        if type(item) == "table" and item.datetime
+            and (item.page or item.pageref or item.wr_range) then
             result[#result + 1] = {
                 datetime = item.datetime,
                 datetime_updated = item.datetime_updated,
@@ -32,11 +42,15 @@ local function clean(items, total_pages)
                 text = item.text,
                 note = item.note,
                 chapter = item.chapter,
+                chapter_idx = item.chapter_idx,
                 pageno = item.pageno,
                 page = item.page or item.pageref,
                 total_pages = total_pages or item.total_pages or 0,
                 pos0 = item.pos0,
                 pos1 = item.pos1,
+                wr_range = item.wr_range,
+                wr_bookmark_id = item.wr_bookmark_id,
+                wr_review_id = item.wr_review_id,
             }
         end
     end
@@ -50,7 +64,61 @@ local function pageCount(ui)
         or 0
 end
 
+---@param item table
+---@return integer
+local function bucketKey(item)
+    local idx = tonumber(item.chapter_idx)
+    if idx and idx > 0 then
+        return idx
+    end
+    return 0
+end
 
+--- 远端注解按 ``chapter_idx`` 分片落库（payload 一律为通用 KOReader 注解数组）。
+---
+--- 只覆盖远端确实报告了的分片：远端一条都没报时不写任何分片。协议字段缺失与
+--- 「远端确实为空」在 wire 上无法区分，宁可漏掉云端删除，也不能把本地划线清空。
+---@param source_id string
+---@param stable_id string
+---@param annotations table[]
+---@param done fun(ok: boolean)|nil
+local function saveRemoteBuckets(source_id, stable_id, annotations, done)
+    local buckets = {}
+    for _, item in ipairs(annotations or {}) do
+        if type(item) == "table" then
+            local key = bucketKey(item)
+            local bucket = buckets[key]
+            if not bucket then
+                bucket = {}
+                buckets[key] = bucket
+            end
+            bucket[#bucket + 1] = item
+        end
+    end
+    if not next(buckets) then
+        if done then done(true) end
+        return
+    end
+    DbQueue.run(function()
+        local revision = nextRevision()
+        for key, items in pairs(buckets) do
+            local chapter_idx = key > 0 and key or nil
+            local ok, payload = pcall(JSON.encode, clean(items))
+            assert(ok, payload)
+            assert(NoteDB.upsertRemote(
+                source_id, stable_id, chapter_idx, payload, revision
+            ), "failed to save remote notes")
+        end
+    end, {
+        on_done = function()
+            if done then done(true) end
+        end,
+        on_failed = function(err)
+            logger.warn("book.note remote buckets failed", stable_id, err)
+            if done then done(false) end
+        end,
+    })
+end
 
 --- 保存当前文档的完整注解快照。写入完成前不发网络请求。
 ---@param ui table
@@ -151,6 +219,7 @@ function Note.syncAsync(source, opts, cb)
     end
 
     local index = 1
+    local book_pulled = {}
     local function nextIdentity()
         if cancelled then return end
         local identity = identities[index]
@@ -159,22 +228,23 @@ function Note.syncAsync(source, opts, cb)
 
         local function pullRemote()
             if opts.dirty_only or not can_pull then nextIdentity(); return end
+            local stable_id = identity.stable_id
+            if book_pulled[stable_id] then
+                result.pulled = result.pulled + 1
+                nextIdentity()
+                return
+            end
             current_job = source:pullNotesAsync(identity, function(annotations, err)
                 current_job = nil
                 if cancelled then return end
                 if type(annotations) ~= "table" then finish(nil, err or "notes pull failed"); return end
-                local ok, payload = pcall(JSON.encode, clean(annotations))
-                if not ok then finish(nil, payload); return end
-                DbQueue.run(function()
-                    assert(NoteDB.upsertRemote(source.id, identity.stable_id,
-                        identity.chapter_idx, payload, nextRevision()), "failed to save remote notes")
-                end, {
-                    on_done = function()
-                        result.pulled = result.pulled + 1
-                        nextIdentity()
-                    end,
-                    on_failed = function(save_err) finish(nil, save_err) end,
-                })
+                book_pulled[stable_id] = true
+                saveRemoteBuckets(source.id, stable_id, annotations, function(ok)
+                    if cancelled then return end
+                    if not ok then finish(nil, "failed to save remote notes"); return end
+                    result.pulled = result.pulled + 1
+                    nextIdentity()
+                end)
             end)
         end
 
@@ -182,7 +252,7 @@ function Note.syncAsync(source, opts, cb)
         if row and row.sync_status == 0 then
             if not can_push then
                 result.conflicts = result.conflicts + 1
-                nextIdentity()
+                pullRemote()
                 return
             end
             local ok, annotations = pcall(JSON.decode, row.payload)
@@ -193,12 +263,40 @@ function Note.syncAsync(source, opts, cb)
             current_job = source:pushNotesAsync(identity, annotations, function(value, err)
                 current_job = nil
                 if cancelled then return end
-                if not value then finish(nil, err or "notes push failed"); return end
-                confirm(row, function(confirmed)
-                    if not confirmed then finish(nil, "notes confirm failed"); return end
-                    result.pushed = result.pushed + 1
-                    pullRemote()
-                end)
+                if not value then
+                    result.conflicts = result.conflicts + 1
+                    if opts.dirty_only then
+                        nextIdentity()
+                    elseif can_pull then
+                        pullRemote()
+                    else
+                        finish(nil, err or "notes push failed")
+                    end
+                    return
+                end
+                local ok_encode, pushed_payload = pcall(JSON.encode, clean(annotations))
+                if not ok_encode then
+                    finish(nil, "invalid local notes")
+                    return
+                end
+                DbQueue.run(function()
+                    assert(NoteDB.upsert(
+                        row.source_id, row.stable_id, row.chapter_idx,
+                        pushed_payload, row.updated_at, false
+                    ), "failed to persist pushed notes")
+                end, {
+                    on_done = function()
+                        confirm(row, function(confirmed)
+                            if not confirmed then finish(nil, "notes confirm failed"); return end
+                            result.pushed = result.pushed + 1
+                            pullRemote()
+                        end)
+                    end,
+                    on_failed = function(persist_err)
+                        logger.warn("book.note persist pushed failed", row.stable_id, persist_err)
+                        finish(nil, "failed to persist pushed notes")
+                    end,
+                })
             end)
             return
         end
@@ -308,7 +406,95 @@ function Note.importLocalAsync(done)
     return { cancel = function() cancelled = true end }
 end
 
+--- 能否交给 KOReader 渲染（rolling 文档）。
+---
+--- 两条硬约束，任一不满足都不能进 doc_settings：
+--- 1. ``page`` 必须是 xpointer 字符串，否则 onReadSettings 会判定整份注解是 mupdf
+---    格式，连本地划线一起搬去 ``annotations_paging``；
+--- 2. 带 ``drawer`` 的必须有 pos0/pos1，否则 ReaderView:drawSavedHighlight 直接
+---    ``getPosFromXPointer(nil)`` 抛错终止绘制。
+---
+--- 远端划线在开章定位成功前只留在 notes 表里。
+---@param item table
+---@return boolean
+local function renderable(item)
+    -- page 必须是 xpointer 字符串：onReadSettings 拿首条的 page 类型判定整个数组的格式。
+    if type(item.page) ~= "string" or item.page == "" then
+        return false
+    end
+    if not item.drawer then
+        return true
+    end
+    return type(item.pos0) == "string" and item.pos0 ~= ""
+        and type(item.pos1) == "string" and item.pos1 ~= ""
+end
+
+--- 合并远端划线与本地未同步划线（保留无 wr_bookmark_id 的本地高亮）。
+---@param remote table[]
+---@param local_items table[]
+---@return table[]
+local function mergeAnnotations(remote, local_items)
+    local merged, seen = {}, {}
+    for _, item in ipairs(remote or {}) do
+        if type(item) == "table" and renderable(item) then
+            local key = item.wr_bookmark_id
+                or table.concat({ tostring(item.text or ""), tostring(item.wr_range or "") }, "\31")
+            seen[key] = true
+            merged[#merged + 1] = item
+        end
+    end
+    for _, item in ipairs(local_items or {}) do
+        if type(item) == "table" and not item.wr_bookmark_id and renderable(item) then
+            merged[#merged + 1] = item
+        end
+    end
+    return merged
+end
+
+--- 把本地 notes 快照定位并写入阅读器注解。
+---
+--- 纯本地：读 sqlite、算 xpointer、写 doc_settings，不碰网络也不排 nextTick。
+--- 必须在文档首次绘制前**同步**跑完，否则云端划线要等下一次刷新才出现。
+---@param ui table
+---@param identity BookIdentity
+---@return integer applied 写入阅读器的注解条数
+function Note.applyLocal(ui, identity)
+    local source = identity and identity.source
+    if not ui or not ui.doc_settings or not identity then
+        return 0
+    end
+    if not Store.isCurrentDocument(ui, identity) then
+        logger.dbg("book.note apply skip: document changed")
+        return 0
+    end
+    local row = NoteDB.get(identity.source_id, identity.stable_id, identity.chapter_idx)
+    local ok, annotations = pcall(JSON.decode, row and row.payload or "[]")
+    if not ok or type(annotations) ~= "table" then
+        return 0
+    end
+    if source and type(source.localizeAnnotations) == "function" then
+        annotations = source:localizeAnnotations(
+            ui.document, annotations, ui.document and ui.document.file
+        )
+    end
+    local current = ui.doc_settings:readSetting("annotations") or {}
+    annotations = mergeAnnotations(annotations, current)
+    if #annotations == 0 and #current == 0 then
+        return 0
+    end
+    ui.doc_settings:saveSetting("annotations", annotations)
+    ui.doc_settings:flush()
+    if ui.annotation then
+        ui.annotation.annotations = annotations
+        -- 远端划线的定位顺序与文档顺序无关，而 drawSavedHighlight 靠有序 break 提前退出。
+        ui.annotation:updateAnnotations(true)
+    end
+    return #annotations
+end
+
 --- 拉取远端注解前先保存当前快照，避免远端覆盖尚未落盘的本地修改。
+---
+--- 只负责「网络同步 → 落库 → 重画」；首屏渲染由 ``Note.applyLocal`` 负责。
 ---@param ui table
 ---@param identity BookIdentity
 function Note.pull(ui, identity)
@@ -316,22 +502,20 @@ function Note.pull(ui, identity)
     if not source or not source.syncNotesAsync then
         return
     end
+    local UIManager = require("ui/uimanager")
+    local function applyFromDb()
+        local before = ui.doc_settings and #(ui.doc_settings:readSetting("annotations") or {}) or 0
+        if Note.applyLocal(ui, identity) ~= before and ui.view then
+            UIManager:setDirty(ui.view.dialog or "all", "partial")
+        end
+    end
     local function syncAndApply()
         source:syncNotesAsync({ identity = identity }, function(result, err)
-            if not Store.isCurrentDocument(ui, identity) then
-                logger.dbg("book.note pull skip: document changed")
-                return
-            end
             if not result then
                 logger.warn("book.note pull failed", identity.stable_id, err)
                 return
             end
-            local row = NoteDB.get(identity.source_id, identity.stable_id, identity.chapter_idx)
-            local ok, annotations = pcall(JSON.decode, row and row.payload or "[]")
-            if not ok or type(annotations) ~= "table" then return end
-            ui.doc_settings:saveSetting("annotations", annotations)
-            ui.doc_settings:flush()
-            if ui.annotation then ui.annotation.annotations = annotations end
+            UIManager:nextTick(applyFromDb)
         end)
     end
     local existing = NoteDB.get(identity.source_id, identity.stable_id, identity.chapter_idx)

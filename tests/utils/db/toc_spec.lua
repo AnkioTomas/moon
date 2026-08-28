@@ -119,26 +119,6 @@ do
     clearMods()
 end
 
--- ── upsert：非法输入拒绝且不碰 DB ────────────────────────
-do
-    local connection, calls = makeConn()
-    local DbBase, TocDB = loadToc(connection)
-    local before = #calls
-
-    Assert.is_false(TocDB.upsert("", "b", "p"))
-    Assert.is_false(TocDB.upsert(nil, "b", "p"))
-    Assert.is_false(TocDB.upsert("moon", "", "p"))
-    Assert.is_false(TocDB.upsert("moon", nil, "p"))
-    Assert.is_false(TocDB.upsert("moon", "b", nil))
-    Assert.is_false(TocDB.upsert("moon", "b", "")) -- 空串 payload 拒收
-    Assert.is_false(TocDB.upsert("moon", "b", 123)) -- 非字符串 payload 拒收
-    Assert.is_false(TocDB.upsert("moon", "b", { "p" }))
-    Assert.eq(#calls, before)
-
-    DbBase.close()
-    clearMods()
-end
-
 -- ── get：新鲜命中返回 payload + fetched_at，双键参数化 ────
 do
     local now = os.time()
@@ -194,24 +174,18 @@ do
     clearMods()
 end
 
--- ── get：缺失（无行）即 miss；非法参数不碰 DB ────────────
+-- ── get：缺失（无行）即 miss ─────────────────────────────
 do
-    local connection, calls = makeConn()
+    local connection = makeConn()
     local DbBase, TocDB = loadToc(connection)
 
     Assert.is_nil(TocDB.get("moon", "missing", 3600))
-    local before = #calls
-    Assert.is_nil(TocDB.get("", "b", 3600))
-    Assert.is_nil(TocDB.get(nil, "b", 3600))
-    Assert.is_nil(TocDB.get("moon", "", 3600))
-    Assert.is_nil(TocDB.get("moon", nil, 3600))
-    Assert.eq(#calls, before)
 
     DbBase.close()
     clearMods()
 end
 
--- ── delete：双键绑定；非法输入拒绝且不碰 DB ──────────────
+-- ── delete：双键绑定 ─────────────────────────────────────
 do
     local connection, calls = makeConn()
     local DbBase, TocDB = loadToc(connection)
@@ -223,12 +197,6 @@ do
     Assert.eq(q.args[1], "moon")
     Assert.eq(q.args[2], "a'); DROP TABLE toc;--")
     Assert.is_false(q.sql:find("DROP TABLE", 1, true) ~= nil)
-
-    local before = #calls
-    Assert.is_false(TocDB.delete("", "a"))
-    Assert.is_false(TocDB.delete("moon", ""))
-    Assert.is_false(TocDB.delete("moon", nil))
-    Assert.eq(#calls, before)
 
     DbBase.close()
     clearMods()

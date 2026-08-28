@@ -28,14 +28,14 @@ local current_session
 
 ---@param plugin table
 ---@param session ReaderSessionSnapshot
-local function bootstrapReading(plugin, session)
+---@param skip_pull boolean|nil 连续章节切章导航：跳过云端进度拉取与注解拉取
+local function bootstrapReading(plugin, session, skip_pull)
     require("book.stats").start(session)
     require("ui.reader").attach(plugin)
-    require("ui/uimanager"):nextTick(function()
-        if plugin.ui and plugin.ui.document then
-            require("book.reader_prefs").apply(plugin.ui, session.identity)
-        end
-    end)
+    -- 首绘前同步写入注解：晚一个 tick 云端划线就要等下次刷新才出现。切章同样要重来，
+    -- 因为注解按 chapter_idx 分片。
+    require("book.note").applyLocal(plugin.ui, session.identity)
+    if skip_pull then return end
     require("book.progress").pull(session)
     require("book.note").pull(plugin.ui, session.identity)
 end
@@ -127,8 +127,8 @@ function Session.onReaderReady(plugin)
 
     current_session = Snapshot.new(ui, identity)
     local mode = Mode.resolve(identity)
-    handlers[mode].onReaderReady(plugin, current_session)
-    bootstrapReading(plugin, current_session)
+    local skip_pull = handlers[mode].onReaderReady(plugin, current_session)
+    bootstrapReading(plugin, current_session, skip_pull)
     if mode == "chapter" then
         ChapterMode.afterBootstrap(current_session)
     end

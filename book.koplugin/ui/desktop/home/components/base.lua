@@ -61,14 +61,4 @@ function M.enabledLayout()
     return out
 end
 
---- 首页是否包含指定组件。
----@param id string
----@return boolean
-function M.hasComponent(id)
-    for _, item in ipairs(M.enabledLayout()) do
-        if item == id then return true end
-    end
-    return false
-end
-
 return M

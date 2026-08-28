@@ -51,12 +51,6 @@ function Client:configured()
     return Auth.hasSession()
 end
 
---- 当前会话请求头（封面下载等复用）。
----@return table
-function Client.sessionHeaders()
-    return Auth.sessionHeaders()
-end
-
 function Client:shelfSyncAsync(cb)
     return Auth.webApiGetAsync("/web/shelf/sync?" .. Text.formEncode({
         synckey = 0,
@@ -66,17 +60,6 @@ function Client:shelfSyncAsync(cb)
             cb(data)
         end
     end)
-end
-
---- 查询 bookId 是否已在书架。
----@param bookId string|number
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Client:shelfHasBookAsync(bookId, cb)
-    bookId = tostring(bookId or "")
-    return Auth.webApiGetAsync("/web/shelf/bookIds?" .. Text.formEncode({
-        bookIds = bookId,
-    }), cb)
 end
 
 --- 加入微信读书书架。
@@ -98,9 +81,69 @@ function Client:addToShelfAsync(bookId, cb)
     end)
 end
 
-function Client:recentBooksAsync(limit, cb)
-    limit = tonumber(limit) or 8
-    return Auth.webApiGetAsync("/api/storyfeed/getRecentBooks?count=" .. tostring(limit), cb)
+--- 逐页拉取并合并 ``books``，直到凑满 limit 或服务端说没有更多。
+---
+--- 书城榜单与搜索的翻页规则完全一致（游标取末条 ``searchIdx``，``hasMore`` 判停），
+--- 差异只在 URL，所以由 ``fetchPage`` 提供，翻页与合并收口在这里。
+---@param limit integer
+---@param fetchPage fun(cursor: integer, cb: fun(data: table|nil, err: string|nil)): table|nil
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return { cancel: fun() }
+local function collectPagesAsync(limit, fetchPage, cb)
+    local merged, cursor = {}, 0
+    local cancelled, job = false, nil
+
+    local function fetchNext()
+        if cancelled then
+            return
+        end
+        job = fetchPage(cursor, function(data, err)
+            if cancelled then
+                return
+            end
+            if not data then
+                cb(nil, err)
+                return
+            end
+            local batch = data.books
+            if type(batch) ~= "table" then
+                cb({ books = merged, totalCount = data.totalCount, hasMore = data.hasMore })
+                return
+            end
+            for _, row in ipairs(batch) do
+                merged[#merged + 1] = row
+                if #merged >= limit then
+                    break
+                end
+            end
+            local has_more = data.hasMore == 1 or data.hasMore == true
+            if #merged >= limit or not has_more or #batch == 0 then
+                cb({ books = merged, totalCount = data.totalCount, hasMore = has_more })
+                return
+            end
+            local last = batch[#batch]
+            cursor = tonumber(last and last.searchIdx) or (cursor + #batch)
+            fetchNext()
+        end)
+    end
+
+    fetchNext()
+    return {
+        cancel = function()
+            cancelled = true
+            if job and job.cancel then
+                job:cancel()
+            end
+        end,
+    }
+end
+
+--- 单次请求上限：微信读书每页最多 20 条。
+---@param count any
+---@return integer limit, integer page_size
+local function pageBounds(count)
+    local limit = math.max(1, math.min(tonumber(count) or 20, 200))
+    return limit, math.min(limit, 20)
 end
 
 --- 书城分类榜单（无关键词浏览）；自动翻页直到凑满 limit 或无更多。
@@ -109,78 +152,18 @@ end
 ---@return { cancel: fun() }|nil
 function Client:storeCatalogAsync(opts, cb)
     opts = opts or {}
-    local limit = math.max(1, math.min(tonumber(opts.limit) or 20, 200))
+    local limit = pageBounds(opts.limit)
     local category = tostring(opts.category or "all")
     if category == "" then
         category = "all"
     end
     local rank = tonumber(opts.rank) or 1
-    local max_index = 0
-    local merged = {}
-    local cancelled = false
-    local job
-
-    local function finish(wire, err)
-        if cancelled then
-            return
-        end
-        if wire then
-            cb(wire)
-        else
-            cb(nil, err)
-        end
-    end
-
-    local function fetchNext()
-        if cancelled then
-            return
-        end
-        job = Auth.webApiGetAsync("/web/bookListInCategory/" .. category .. "?" .. Text.formEncode({
-            maxIndex = max_index,
+    return collectPagesAsync(limit, function(cursor, on_page)
+        return Auth.webApiGetAsync("/web/bookListInCategory/" .. category .. "?" .. Text.formEncode({
+            maxIndex = cursor,
             rank = rank,
-        }), function(data, err)
-            if cancelled then
-                return
-            end
-            if not data then
-                finish(nil, err)
-                return
-            end
-            local batch = data.books
-            if type(batch) ~= "table" then
-                finish({ books = merged, totalCount = data.totalCount, hasMore = data.hasMore })
-                return
-            end
-            for _, row in ipairs(batch) do
-                merged[#merged + 1] = row
-                if #merged >= limit then
-                    break
-                end
-            end
-            local has_more = data.hasMore == 1 or data.hasMore == true
-            if #merged >= limit or not has_more or #batch == 0 then
-                finish({
-                    books = merged,
-                    totalCount = data.totalCount,
-                    hasMore = has_more,
-                })
-                return
-            end
-            local last = batch[#batch]
-            max_index = tonumber(last and last.searchIdx) or (max_index + #batch)
-            fetchNext()
-        end)
-    end
-
-    fetchNext()
-    return {
-        cancel = function()
-            cancelled = true
-            if job and job.cancel then
-                job:cancel()
-            end
-        end,
-    }
+        }), on_page)
+    end, cb)
 end
 
 function Client:searchAsync(keyword, count, _scope, cb)
@@ -189,81 +172,23 @@ function Client:searchAsync(keyword, count, _scope, cb)
         cb({ books = {} })
         return nil
     end
-    local limit = math.max(1, math.min(tonumber(count) or 20, 200))
-    local page_size = math.min(limit, 20)
-    local max_idx = 0
+    local limit, page_size = pageBounds(count)
+    -- 搜索会话 id：首页返回后带上，后续页才算同一次搜索。
     local sid = ""
-    local merged = {}
-    local cancelled = false
-    local job
-
-    local function finish(wire, err)
-        if cancelled then
-            return
-        end
-        if wire then
-            cb(wire)
-        else
-            cb(nil, err)
-        end
-    end
-
-    local function fetchNext()
-        if cancelled then
-            return
-        end
-        job = Auth.webApiGetAsync("/web/search/global?" .. Text.formEncode({
+    return collectPagesAsync(limit, function(cursor, on_page)
+        return Auth.webApiGetAsync("/web/search/global?" .. Text.formEncode({
             keyword = keyword,
-            maxIdx = max_idx,
+            maxIdx = cursor,
             fragmentSize = 120,
             count = page_size,
             sid = sid,
         }), function(data, err)
-            if cancelled then
-                return
-            end
-            if not data then
-                finish(nil, err)
-                return
-            end
-            if type(data.sid) == "string" and data.sid ~= "" then
+            if type(data) == "table" and type(data.sid) == "string" and data.sid ~= "" then
                 sid = data.sid
             end
-            local batch = data.books
-            if type(batch) ~= "table" then
-                finish({ books = merged, totalCount = data.totalCount, hasMore = data.hasMore })
-                return
-            end
-            for _, row in ipairs(batch) do
-                merged[#merged + 1] = row
-                if #merged >= limit then
-                    break
-                end
-            end
-            local has_more = data.hasMore == 1 or data.hasMore == true
-            if #merged >= limit or not has_more or #batch == 0 then
-                finish({
-                    books = merged,
-                    totalCount = data.totalCount,
-                    hasMore = has_more,
-                })
-                return
-            end
-            local last = batch[#batch]
-            max_idx = tonumber(last and last.searchIdx) or (max_idx + #batch)
-            fetchNext()
+            on_page(data, err)
         end)
-    end
-
-    fetchNext()
-    return {
-        cancel = function()
-            cancelled = true
-            if job and job.cancel then
-                job:cancel()
-            end
-        end,
-    }
+    end, cb)
 end
 
 function Client:bookInfoAsync(bookId, cb)
@@ -298,9 +223,13 @@ function Client:getProgressAsync(bookId, cb)
     end)
 end
 
-function Client:putProgressAsync(bookId, progress_percent, chapter_uid, cb)
+---@param bookId string
+---@param opts { progress: number, chapter_uid: string|number, chapter_idx?: number, chapter_offset?: number, summary?: string }
+---@param cb fun(data: table|nil, err: any)
+function Client:putProgressAsync(bookId, opts, cb)
+    opts = type(opts) == "table" and opts or {}
     bookId = tostring(bookId or "")
-    chapter_uid = chapter_uid and tostring(chapter_uid) or nil
+    local chapter_uid = opts.chapter_uid and tostring(opts.chapter_uid) or nil
     if bookId == "" or not chapter_uid then
         cb(nil, _("缺少章节信息"))
         return nil
@@ -314,7 +243,10 @@ function Client:putProgressAsync(bookId, progress_percent, chapter_uid, cb)
     local payload = Protocol.makeEnterReadPayload({
         book_id = bookId,
         chapter_uid = chapter_uid,
-        progress = progress_percent,
+        chapter_idx = opts.chapter_idx,
+        chapter_offset = opts.chapter_offset,
+        summary = opts.summary,
+        progress = opts.progress,
         psvts = psvts,
     })
     return self:reportReadAsync(JSON.encode(payload), referer, function(data, err)
@@ -358,38 +290,103 @@ function Client:readStatsAsync(mode, base_time, cb)
     end)
 end
 
+--- 个人划线列表。
+---
+--- 必须走 Agent 网关：Web 会话打 ``/web/book/bookmarklist`` 恒返回 ``{}``（无 errcode），
+--- 而网关 ``/book/bookmarklist`` 返回 ``updated`` + ``chapters``（含 chapterIdx）。
+---@param bookId string
+---@param cb fun(data: table|nil, err: any)
+---@return { cancel: fun() }|nil
 function Client:bookmarkListAsync(bookId, cb)
-    bookId = tostring(bookId or "")
-    return Auth.webApiGetAsync("/web/book/bookmarklist?" .. Text.formEncode({
-        bookId = bookId,
-        synckey = 0,
-    }), function(data, err)
-        if acceptWebWire(data, err, cb) then
-            cb(data)
-        end
-    end)
-end
-
-function Client:chapterUnderlinesAsync(bookId, chapter_uid, cb)
-    return Auth.webApiGetAsync("/web/book/underlines?" .. Text.formEncode({
+    return Auth.agentGatewayAsync("/book/bookmarklist", {
         bookId = tostring(bookId or ""),
-        chapterUid = chapter_uid,
-        synckey = 0,
-    }), function(data, err)
-        if acceptWebWire(data, err, cb) then
-            cb(data)
-        end
-    end)
-end
-
-function Client:chapterReviewsAsync(bookId, chapter_uid, batch, cb)
-    return Auth.webApiPostAsync("/web/book/readreviews", {
-        bookId = tostring(bookId or ""),
-        chapterUid = chapter_uid,
-        reviews = batch,
     }, function(data, err)
-        if not data then
+        if data then
+            cb(data)
+        else
             cb(nil, err)
+        end
+    end)
+end
+
+--- 本人在该书的想法与点评（含划线想法的 ``range``）。
+---@param bookId string
+---@param cb fun(data: table|nil, err: any)
+---@return { cancel: fun() }|nil
+function Client:myReviewsAsync(bookId, cb)
+    return Auth.agentGatewayAsync("/review/list/mine", {
+        bookid = tostring(bookId or ""),
+        count = 100,
+        synckey = 0,
+    }, function(data, err)
+        if data then
+            cb(data)
+        else
+            cb(nil, err)
+        end
+    end)
+end
+
+--- 发表划线下想法（Agent 网关 ``/review/add``）。
+---@param body table
+---@param cb fun(data: table|nil, err: any)
+---@return { cancel: fun() }|nil
+function Client:addReviewAsync(body, cb)
+    if type(body) ~= "table" then
+        cb(nil, _("无效的想法数据"))
+        return nil
+    end
+    return Auth.agentGatewayAsync("/review/add", body, function(data, err)
+        if data then
+            cb(data)
+        else
+            cb(nil, err)
+        end
+    end)
+end
+
+--- 修改划线下想法（Agent 网关 ``/review/useredit``）。
+---@param body table
+---@param cb fun(data: table|nil, err: any)
+---@return { cancel: fun() }|nil
+function Client:editReviewAsync(body, cb)
+    if type(body) ~= "table" then
+        cb(nil, _("无效的想法数据"))
+        return nil
+    end
+    return Auth.agentGatewayAsync("/review/useredit", body, function(data, err)
+        if data then
+            cb(data)
+        else
+            cb(nil, err)
+        end
+    end)
+end
+
+--- 上传单条划线。
+---@param bookId string
+---@param chapter_uid string|number
+---@param body table
+---@param cb fun(data: table|nil, err: any)
+---@return { cancel: fun() }|nil
+function Client:addBookmarkAsync(bookId, chapter_uid, body, cb)
+    bookId = tostring(bookId or "")
+    chapter_uid = chapter_uid and tostring(chapter_uid) or nil
+    if bookId == "" or not chapter_uid or type(body) ~= "table" then
+        cb(nil, _("无效的划线数据"))
+        return nil
+    end
+    local referer = Protocol.readerUrl(bookId, chapter_uid)
+    return Auth.webPostAsync("https://weread.qq.com/web/book/addBookmark", JSON.encode(body), {
+        headers = { ["Referer"] = referer },
+    }, function(raw, err)
+        if not raw then
+            cb(nil, err)
+            return
+        end
+        local ok, data = pcall(JSON.decode, raw)
+        if not ok or type(data) ~= "table" then
+            cb(nil, _("划线上传失败"))
             return
         end
         if acceptWebWire(data, err, cb) then

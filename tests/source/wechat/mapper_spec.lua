@@ -85,6 +85,16 @@ do
 end
 
 do
+    local pos, uid = Mapper.progress({
+        bookId = "42",
+        book = { chapterUid = "u7", progress = 77, chapterOffset = 5000 },
+    })
+    Assert.eq(uid, "u7")
+    Assert.eq(pos.fraction, 0.77)
+    Assert.is_true(math.abs(pos.chapter_fraction - 0.5) < 0.001)
+end
+
+do
     local list = Mapper.searchList({
         books = {
             {

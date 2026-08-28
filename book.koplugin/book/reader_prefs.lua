@@ -1,7 +1,7 @@
 --[[--
 全书阅读排版偏好：字体 + CRE 边距/字号，按 source_id + stable_id 存 books.reader_prefs。
 
-连续章节每章是独立物理文件；本模块在关书/休眠/切章前捕获当前排版，开章后按书身份覆盖应用。
+连续章节每章是独立物理文件；本模块在关书/休眠/切章前捕获当前排版，开章时按书身份写回 sidecar。
 
 @module koplugin.book.book.reader_prefs
 --]]
@@ -13,15 +13,8 @@ local Store = require("book.store")
 
 local M = {}
 
---- CRE configurable 中跟全书排版相关的键（copt_ 前缀落 doc_settings）。
-local COPT_KEYS = {
-    "h_page_margins",
-    "t_page_margin",
-    "b_page_margin",
-    "sync_t_b_page_margins",
-    "font_size",
-    "line_spacing",
-}
+--- native_font.lua 为渲染字体选项塞进 configurable 的临时键，不属于排版偏好。
+local SKIP_COPT_KEY = "book_font_face"
 
 ---@param value any
 ---@return any
@@ -78,11 +71,12 @@ function M.capture(ui)
     if not config then
         return nil
     end
+    -- configurable 就是整套 copt_ 排版状态；逐键白名单会丢字重、字间距等设置。
     local copt = {}
-    for i = 1, #COPT_KEYS do
-        local key = COPT_KEYS[i]
-        local value = config[key]
-        if value ~= nil then
+    for key, value in pairs(config) do
+        local value_type = type(value)
+        if key ~= SKIP_COPT_KEY
+            and (value_type == "number" or value_type == "string" or value_type == "table") then
             copt[key] = copyValue(value)
         end
     end
@@ -149,70 +143,30 @@ function M.captureAndSave(ui, identity)
     return M.save(identity, prefs)
 end
 
---- 把全书偏好应用到当前文档（覆盖该章 sidecar 已加载的排版）。
----@param ui table|nil
----@param identity BookIdentity|nil
+--- DocSettingsLoad：把全书偏好写进 sidecar，交给 KOReader 原生 ReadSettings 加载。
+---
+--- 必须在 ReadSettings 之前写，文档加载完再逐键重放只能覆盖手工列举的那几项，
+--- 未列举的键（字重、字间距等）已经按该章 sidecar 的默认值渲染完毕。
+---@param doc_settings table
+---@param document table|nil
 ---@return boolean
-function M.apply(ui, identity)
-    if not MoonFont.supportsReader(ui) then
+function M.inject(doc_settings, document)
+    if type(document) ~= "table" or type(document.setFontFace) ~= "function" then
         return false
     end
-    identity = identity or M.identityForUi(ui)
-    if not identity then
-        return false
-    end
-    local prefs = M.load(identity)
+    local prefs = M.load(Store.identityFor(document.file))
     if not prefs then
         return false
     end
-
-    local config = ui.document.configurable
-    local typeset = ui.typeset
-    local copt = prefs.copt or {}
-    if config then
-        for i = 1, #COPT_KEYS do
-            local key = COPT_KEYS[i]
-            local value = copt[key]
-            if value ~= nil then
-                config[key] = copyValue(value)
-            end
-        end
-        if ui.doc_settings and config.saveSettings then
-            config:saveSettings(ui.doc_settings, "copt_")
-            ui.doc_settings:flush()
-        end
+    for key, value in pairs(prefs.copt or {}) do
+        doc_settings:saveSetting("copt_" .. key, copyValue(value))
     end
-
     local font_id = type(prefs.font_id) == "string" and prefs.font_id or ""
-    if font_id ~= "" then
-        local face = MoonFont.faceForId(font_id)
-        if face then
-            MoonFont.applyFaceToReader(ui, face, font_id, prefs.font_name)
-        end
-    elseif type(prefs.font_face) == "string" and prefs.font_face ~= "" then
-        MoonFont.applyFaceToReader(ui, prefs.font_face, "", "")
-    end
-
-    if typeset then
-        if copt.h_page_margins then
-            typeset:onSetPageHorizMargins(copyValue(copt.h_page_margins))
-        end
-        if copt.t_page_margin ~= nil and copt.b_page_margin ~= nil then
-            typeset:onSetPageTopAndBottomMargin({ copt.t_page_margin, copt.b_page_margin })
-        end
-    end
-    if ui.font then
-        if copt.font_size then
-            ui.font:onSetFontSize(copt.font_size)
-        end
-        if copt.line_spacing then
-            ui.font:onSetLineSpace(copt.line_spacing)
-        end
-    end
-
-    require("ui/uimanager"):setDirty(ui.dialog, "ui")
-    if ui.handleEvent then
-        ui:handleEvent(require("ui/event"):new("UpdatePos"))
+    local face = font_id ~= "" and MoonFont.faceForId(font_id) or prefs.font_face
+    if type(face) == "string" and face ~= "" then
+        doc_settings:saveSetting("font_face", face)
+        doc_settings:saveSetting("book_reader_font_id", font_id)
+        doc_settings:saveSetting("book_reader_font_name", prefs.font_name or font_id)
     end
     return true
 end

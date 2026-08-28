@@ -1,8 +1,8 @@
 --[[--
 插件 SQLite 连接与通用原语（$DATA/.moon/book.sqlite3）。
 
-表由 open → ensureSchema 创建并原地补列。数据库只允许向前迁移，
-绝不因版本变化删除用户的书架、进度、笔记或统计。
+表由 open → ensureSchema 一次性建全。没有迁移、没有版本号：
+schema 变了就删库重建，表定义永远只有 ensureSchema 里那一份。
 
 使用 WAL 模式 + busy_timeout=5000，主/子进程均可安全访问。
 
@@ -142,25 +142,8 @@ function Base.requireSourceId(source_id)
     return source_id
 end
 
-local SCHEMA_VERSION = 4
-
----@param table_name string
----@param column_name string
----@return boolean
-local function hasColumn(table_name, column_name)
-    local columns, nrows = Base.query("PRAGMA table_info(" .. table_name .. ");")
-    if not columns or not columns[2] then
-        return false
-    end
-    for i = 1, nrows do
-        if columns[2][i] == column_name then
-            return true
-        end
-    end
-    return false
-end
-
---- 首次打开时 CREATE IF NOT EXISTS 全表
+--- 首次打开时 CREATE IF NOT EXISTS 全表。
+--- 没有迁移：改了 schema 就删库重建，表定义永远只有这一份。
 ---@return nil
 local function ensureSchema()
     Base.exec([[
@@ -182,6 +165,7 @@ CREATE TABLE IF NOT EXISTS books (
   in_library INTEGER NOT NULL DEFAULT 1,
   metadata_dirty INTEGER NOT NULL DEFAULT 0,
   metadata_updated_at INTEGER NOT NULL DEFAULT 0,
+  reader_prefs TEXT,
   PRIMARY KEY (source_id, stable_id)
 );
 CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(source_id, md5);
@@ -212,6 +196,7 @@ CREATE TABLE IF NOT EXISTS pending_progress (
   page INTEGER,
   total_pages INTEGER,
   locator TEXT,
+  extra TEXT,
   updated_at INTEGER NOT NULL,
   sync_status INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (source_id, stable_id)
@@ -225,9 +210,13 @@ CREATE TABLE IF NOT EXISTS reading_stats (
   start_time  INTEGER NOT NULL,
   duration    INTEGER NOT NULL DEFAULT 0,
   total_pages INTEGER NOT NULL DEFAULT 0,
+  chapter_idx INTEGER,
+  chapter_fraction REAL,
   sync_status INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_reading_stats_source ON reading_stats(source_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reading_stats_identity
+  ON reading_stats(source_id, stable_id, page, start_time, duration, total_pages);
 
 CREATE TABLE IF NOT EXISTS notes (
   source_id   TEXT NOT NULL,
@@ -260,45 +249,6 @@ CREATE TABLE IF NOT EXISTS xray_entities (
 CREATE INDEX IF NOT EXISTS idx_xray_entities_book
   ON xray_entities(source_id, stable_id, kind);
 ]])
-    if not hasColumn("books", "in_library") then
-        Base.exec("ALTER TABLE books ADD COLUMN in_library INTEGER NOT NULL DEFAULT 1;")
-    end
-    if not hasColumn("books", "metadata_dirty") then
-        Base.exec("ALTER TABLE books ADD COLUMN metadata_dirty INTEGER NOT NULL DEFAULT 0;")
-    end
-    if not hasColumn("books", "metadata_updated_at") then
-        Base.exec("ALTER TABLE books ADD COLUMN metadata_updated_at INTEGER NOT NULL DEFAULT 0;")
-    end
-    if not hasColumn("books", "reader_prefs") then
-        Base.exec("ALTER TABLE books ADD COLUMN reader_prefs TEXT;")
-    end
-    Base.exec([[CREATE INDEX IF NOT EXISTS idx_books_library
-        ON books(source_id, in_library, stable_id);]])
-    if not hasColumn("pending_progress", "sync_status") then
-        Base.exec("ALTER TABLE pending_progress ADD COLUMN sync_status INTEGER NOT NULL DEFAULT 0;")
-    end
-    if not hasColumn("pending_progress", "chapter_title") then
-        Base.exec("ALTER TABLE pending_progress ADD COLUMN chapter_title TEXT;")
-    end
-    if not hasColumn("pending_progress", "page") then
-        Base.exec("ALTER TABLE pending_progress ADD COLUMN page INTEGER;")
-    end
-    if not hasColumn("pending_progress", "total_pages") then
-        Base.exec("ALTER TABLE pending_progress ADD COLUMN total_pages INTEGER;")
-    end
-    if not hasColumn("reading_stats", "sync_status") then
-        Base.exec("ALTER TABLE reading_stats ADD COLUMN sync_status INTEGER NOT NULL DEFAULT 0;")
-    end
-    Base.exec([[DELETE FROM reading_stats WHERE id NOT IN (
-        SELECT MIN(id) FROM reading_stats
-        GROUP BY source_id, stable_id, page, start_time, duration, total_pages
-    );]])
-    Base.exec([[CREATE UNIQUE INDEX IF NOT EXISTS idx_reading_stats_identity
-        ON reading_stats(source_id, stable_id, page, start_time, duration, total_pages);]])
-    if not hasColumn("notes", "sync_status") then
-        Base.exec("ALTER TABLE notes ADD COLUMN sync_status INTEGER NOT NULL DEFAULT 0;")
-    end
-    Base.exec("PRAGMA user_version=" .. SCHEMA_VERSION .. ";")
 end
 
 --- 打开（或复用）全局 SQLite 连接并确保 schema。
@@ -327,13 +277,6 @@ function Base.open()
         conn:exec("PRAGMA journal_mode=WAL;")
         conn:exec("PRAGMA busy_timeout=5000;")
     end)
-    local version = tonumber((Base.rowexec("PRAGMA user_version;"))) or 0
-    if version > SCHEMA_VERSION then
-        local version_err = "database schema is newer than this plugin: " .. tostring(version)
-        logger.warn("book.db open failed", version_err)
-        Base.close()
-        return nil, version_err
-    end
     ensureSchema()
     return conn
 end

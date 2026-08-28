@@ -283,10 +283,15 @@ do
     -- vid 为数字 → tostring
     local h4 = freshAuth({ user_id = 7, wr_skey = "s" }).sessionHeaders()
     Assert.eq(h4["X-Vid"], "7")
+
+    -- wr_vid 空串不遮蔽有效的 user_id（空串在 Lua 里为真值）
+    local h5 = freshAuth({ wr_vid = "", user_id = "v2", wr_skey = "s" }).sessionHeaders()
+    Assert.eq(h5["X-Vid"], "v2")
+    Assert.is_nil(freshAuth({ wr_vid = "", wr_skey = "s" }).sessionHeaders()["X-Vid"])
 end
 
 ------------------------------------------------------------------------
--- hasSession / userLabel / userVid
+-- hasSession / userLabel
 ------------------------------------------------------------------------
 
 do
@@ -302,13 +307,6 @@ do
     -- user_name 空 → 回退 user_id
     Assert.eq(freshAuth({ user_name = "", user_id = 9 }).userLabel(), "9")
     Assert.is_nil(freshAuth({}).userLabel())
-
-    Assert.eq(freshAuth({ wr_vid = "v1", user_id = "v2" }).userVid(), "v1")
-    Assert.eq(freshAuth({ user_id = 33 }).userVid(), "33")
-    -- wr_vid 空串不遮蔽有效的 user_id
-    Assert.eq(freshAuth({ wr_vid = "", user_id = "v2" }).userVid(), "v2")
-    Assert.is_nil(freshAuth({ wr_vid = "" }).userVid())
-    Assert.is_nil(freshAuth({}).userVid())
 end
 
 ------------------------------------------------------------------------
@@ -343,7 +341,7 @@ end
 
 do
     local auth = freshAuth()
-    local absUrl = upvalue(auth.apiPostAsync, "absUrl")
+    local absUrl = upvalue(auth.webApiPostAsync, "absUrl")
     Assert.not_nil(absUrl)
 
     Assert.eq(absUrl("https://i.weread.qq.com", "/a/b?x=1"), "https://i.weread.qq.com/a/b?x=1")
@@ -357,7 +355,7 @@ end
 
 do
     local auth = freshAuth()
-    local checkWereadErr = upvalue(auth.apiPostAsync, "checkWereadErr")
+    local checkWereadErr = upvalue(auth.agentGatewayAsync, "checkWereadErr")
     Assert.not_nil(checkWereadErr)
 
     -- errcode 缺失 / 0 → 原样返回 data
@@ -388,7 +386,10 @@ do
 end
 
 ------------------------------------------------------------------------
--- apiGetAsync：会话门禁 / URL 拼接 / decodeJson / HTTP 错误
+-- webApiGetAsync：会话门禁 / URL 拼接 / decodeJson / HTTP 错误
+--
+-- errcode 非 0 不在此层判定（由 client 的 acceptWebWire 负责），
+-- 这里只确认 wire 原样透传。
 ------------------------------------------------------------------------
 
 do
@@ -398,13 +399,13 @@ do
         error("request must not be called")
     end
     local data, err
-    auth.apiGetAsync("/test", function(d, e)
+    auth.webApiGetAsync("/web/test", function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(data)
     Assert.eq(err, "请先扫码登录微信读书")
 
-    -- 已登录：URL 拼接 + JSON 成功 + errcode 检查通过
+    -- 已登录：URL 拼接 + JSON 成功
     auth = freshAuth({ wr_skey = "s", wr_vid = "1" })
     local got_url
     state.json_map = { ['{"errcode":0,"ok":1}'] = { errcode = 0, ok = 1 } }
@@ -414,25 +415,12 @@ do
         return { cancel = function() end }
     end
     data, err = nil, nil
-    auth.apiGetAsync("/test?x=1", function(d, e)
+    auth.webApiGetAsync("/web/test?x=1", function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(err)
-    Assert.eq(got_url, "https://i.weread.qq.com/test?x=1")
+    Assert.eq(got_url, "https://weread.qq.com/web/test?x=1")
     Assert.eq(data.ok, 1)
-
-    -- errcode 非 0 → 业务错误
-    state.json_map = { ['{"errcode":-2012,"errmsg":"登录态失效"}'] = { errcode = -2012, errmsg = "登录态失效" } }
-    state.request_impl = function(_opts, cb)
-        cb({ code = 200, body = '{"errcode":-2012,"errmsg":"登录态失效"}' })
-        return { cancel = function() end }
-    end
-    data, err = nil, nil
-    auth.apiGetAsync("/t", function(d, e)
-        data, err = d, e
-    end)
-    Assert.is_nil(data)
-    Assert.eq(err, "登录态失效")
 
     -- 非法 JSON → 返回非 JSON
     state.json_map = {}
@@ -441,7 +429,7 @@ do
         return { cancel = function() end }
     end
     data, err = nil, nil
-    auth.apiGetAsync("/t", function(d, e)
+    auth.webApiGetAsync("/web/t", function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(data)
@@ -453,7 +441,7 @@ do
         return { cancel = function() end }
     end
     data, err = nil, nil
-    auth.apiGetAsync("/t", function(d, e)
+    auth.webApiGetAsync("/web/t", function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(data)
@@ -465,7 +453,7 @@ do
         return { cancel = function() end }
     end
     data, err = nil, nil
-    auth.apiGetAsync("/t", function(d, e)
+    auth.webApiGetAsync("/web/t", function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(data)
@@ -473,7 +461,7 @@ do
 end
 
 ------------------------------------------------------------------------
--- webPostAsync：Content-Type 默认与覆盖
+-- webApiPostAsync：Content-Type 默认与 URL 拼接
 ------------------------------------------------------------------------
 
 do
@@ -486,13 +474,13 @@ do
         return { cancel = function() end }
     end
     local data, err
-    auth.apiPostAsync("/sync", { a = 1 }, function(d, e)
+    auth.webApiPostAsync("/web/sync", { a = 1 }, function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(err)
     Assert.not_nil(data)
     Assert.eq(got_opts.method, "POST")
-    Assert.eq(got_opts.url, "https://i.weread.qq.com/sync")
+    Assert.eq(got_opts.url, "https://weread.qq.com/web/sync")
     Assert.eq(got_opts.headers["Content-Type"], "application/json")
 end
 
@@ -531,7 +519,7 @@ do
         return { cancel = function() end }
     end
     local data, err
-    auth.apiGetAsync("/retry", function(d, e)
+    auth.webApiGetAsync("/web/retry", function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(err)

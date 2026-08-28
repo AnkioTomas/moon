@@ -5,7 +5,6 @@
 --]]
 
 local Auth = require("source.wechat.auth")
-local Text = require("utils.text")
 local Paths = require("utils.paths")
 local lfs = require("libs/libkoreader-lfs")
 local md5 = require("ffi/sha2").md5
@@ -282,13 +281,6 @@ local function downloadRemoteImagesAsync(xhtml, referer, images_dir, cb)
             if active_job and active_job.cancel then active_job:cancel() end
         end,
     }
-end
-
---- 正文是否仍含远程 img（供章节缓存判定）。
----@param html string|nil
----@return boolean
-function Assets.hasRemoteImages(html)
-    return Text.hasRemoteImageSrc(html)
 end
 
 --- 把章节 HTML 内图片下载到章节工作目录并改写为相对路径。

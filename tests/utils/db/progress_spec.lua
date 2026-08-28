@@ -28,6 +28,22 @@ local function stubDbDeps()
     package.preload["ffi/sha2"] = function()
         return { md5 = function(s) return s end }
     end
+    -- extra 列要真的编解码，全局 json stub 的 encode 是会抛错的空壳
+    package.preload["json"] = function()
+        return {
+            encode = function(t)
+                local parts = {}
+                for k, v in pairs(t) do
+                    parts[#parts + 1] = string.format(
+                        '"%s":%s', k, type(v) == "string" and '"' .. v .. '"' or tostring(v)
+                    )
+                end
+                return "{" .. table.concat(parts, ",") .. "}"
+            end,
+            decode = require("support.json_stub").decode,
+        }
+    end
+    package.loaded["json"] = nil
 end
 
 local function clearMods()
@@ -112,6 +128,7 @@ do
         page = 12,
         total_pages = 300,
         locator = "/body[1]/p[2]",
+        extra = { chapter_uid = 42 },
     }))
     local q = calls[#calls - 1]
     Assert.is_true(q.sql:find("INSERT INTO pending_progress", 1, true) ~= nil)
@@ -119,7 +136,7 @@ do
     Assert.is_true(q.sql:find("chapter_title", 1, true) ~= nil)
     Assert.is_true(q.sql:find("total_pages", 1, true) ~= nil)
     Assert.is_true(q.sql:find("sync_status=0", 1, true) ~= nil)
-    Assert.eq(q.argc, 10)
+    Assert.eq(q.argc, 11)
     Assert.eq(q.args[1], "moon")
     Assert.eq(q.args[2], "book'1")
     Assert.eq(q.args[3], 0.5)
@@ -129,7 +146,8 @@ do
     Assert.eq(q.args[7], 12)
     Assert.eq(q.args[8], 300)
     Assert.eq(q.args[9], "/body[1]/p[2]")
-    Assert.eq(type(q.args[10]), "number") -- updated_at = os.time()
+    Assert.is_true(q.args[10]:find("chapter_uid", 1, true) ~= nil) -- extra 序列化为 JSON
+    Assert.eq(type(q.args[11]), "number") -- updated_at = os.time()
     Assert.is_false(q.sql:find("book'1", 1, true) ~= nil)
 
     local sync = calls[#calls]
@@ -141,16 +159,20 @@ do
     -- 可选字段缺省时绑定 nil；非法页码（0）也落成 nil
     Assert.is_true(ProgressDB.upsert("moon", "b2", { fraction = 0.1, page = 0, total_pages = -1 }))
     q = calls[#calls - 1]
-    Assert.eq(q.argc, 10)
+    Assert.eq(q.argc, 11)
     Assert.eq(q.args[4], nil)
     Assert.eq(q.args[5], nil)
     Assert.eq(q.args[6], nil)
     Assert.eq(q.args[7], nil)
     Assert.eq(q.args[8], nil)
     Assert.eq(q.args[9], nil)
+    Assert.eq(q.args[10], nil) -- extra 缺省与空表都落 NULL
+
+    Assert.is_true(ProgressDB.upsert("moon", "b4", { fraction = 0.1, extra = {} }))
+    Assert.eq(calls[#calls - 1].args[10], nil)
 
     Assert.is_true(ProgressDB.upsert("moon", "b3", { fraction = 0.2, updated_at = 1234 }))
-    Assert.eq(calls[#calls - 1].args[10], 1234)
+    Assert.eq(calls[#calls - 1].args[11], 1234)
 
     DbBase.close()
     clearMods()
@@ -190,6 +212,7 @@ do
                 { 12, nil },
                 { 300, nil },
                 { "/loc/1", nil },
+                { '{"chapter_uid":42}', "not json" },
                 { 1000, 2000 },
                 { 0, 1 },
             }, 2
@@ -208,6 +231,7 @@ do
     Assert.eq(rows[1].page, 12)
     Assert.eq(rows[1].total_pages, 300)
     Assert.eq(rows[1].locator, "/loc/1")
+    Assert.eq(rows[1].extra.chapter_uid, 42)
     Assert.eq(rows[1].updated_at, 1000)
     Assert.eq(rows[1].sync_status, 0)
     Assert.eq(rows[2].fraction, 0.75) -- 字符串 fraction 被 tonumber
@@ -217,6 +241,7 @@ do
     Assert.is_nil(rows[2].page)
     Assert.is_nil(rows[2].total_pages)
     Assert.is_nil(rows[2].locator)
+    Assert.is_nil(rows[2].extra) -- 损坏的 JSON 不抛错，降级为 nil
     Assert.eq(rows[2].sync_status, 1)
     local q = calls[#calls]
     Assert.is_true(q.sql:find("WHERE source_id=?", 1, true) ~= nil)
@@ -280,7 +305,7 @@ do
         resultset = function()
             return {
                 { "moon" }, { "queued.epub" }, { 0.3 },
-                { nil }, { nil }, { nil }, { nil }, { nil }, { nil },
+                { nil }, { nil }, { nil }, { nil }, { nil }, { nil }, { nil },
                 { 99 }, { 0 },
             }, 1
         end,

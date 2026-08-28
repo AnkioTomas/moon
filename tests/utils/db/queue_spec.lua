@@ -182,9 +182,13 @@ do
     Assert.eq(table.concat(order, ","), "cb,next")
 end
 
--- flush 幂等：空队列冲刷无副作用
+-- 空队列反复冲刷无副作用，且队列仍可继续工作（不能只 assert(true) 凑断言数）
 do
     Stubs.flush()
     Stubs.flush()
-    Assert.is_true(true)
+    local ran = 0
+    Queue.run(function() ran = ran + 1 end)
+    Assert.eq(ran, 0, "run 不得同步执行")
+    Stubs.flush()
+    Assert.eq(ran, 1, "空转后队列仍能派发任务")
 end

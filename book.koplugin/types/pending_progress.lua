@@ -12,5 +12,6 @@
 ---@field page integer|nil 当前文档页码（1-based）
 ---@field total_pages integer|nil 当前文档总页数
 ---@field locator string|nil XPointer/CFI 等精确定位
+---@field extra table|nil 源私有定位字段（JSON 落库），如微信 chapter_uid
 ---@field updated_at integer 更新时间戳
 ---@field sync_status integer 0=待同步，1=已同步

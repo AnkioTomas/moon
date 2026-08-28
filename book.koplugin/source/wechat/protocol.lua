@@ -15,7 +15,7 @@ local Text = require("utils.text")
 
 local Protocol = {}
 
-Protocol.USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0"
+Protocol.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"
 Protocol.DEFAULT_READER_TOKEN = "3c5c8717f3daf09iop3423zafeqoi"
 
 --- 判断字符串是否全为数字。
@@ -159,42 +159,6 @@ end
 
 -- --- 分片解码（响应：32 字节 MD5 头 + 混淆 body；去掉首字符后反交换再 base64）---
 
-local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
---- Base64 解码（兼容 URL-safe 字符）。
----@param data string
----@return string
-local function base64Decode(data)
-    data = data:gsub("-", "+"):gsub("_", "/")
-    local pad = #data % 4
-    if pad > 0 then
-        data = data .. string.rep("=", 4 - pad)
-    end
-    data = data:gsub("[^" .. B64 .. "=]", "")
-    return (data:gsub(".", function(char)
-        if char == "=" then
-            return ""
-        end
-        local bits = ""
-        local index = B64:find(char, 1, true) - 1
-        for b = 6, 1, -1 do
-            bits = bits .. (index % 2 ^ b - index % 2 ^ (b - 1) > 0 and "1" or "0")
-        end
-        return bits
-    end):gsub("%d%d%d?%d?%d?%d?%d?%d?", function(bits)
-        if #bits ~= 8 then
-            return ""
-        end
-        local byte = 0
-        for i = 1, 8 do
-            if bits:sub(i, i) == "1" then
-                byte = byte + 2 ^ (8 - i)
-            end
-        end
-        return string.char(byte)
-    end))
-end
-
 --- 从混淆串推导交换位置列表。
 ---@param encoded string
 ---@return number[]
@@ -234,22 +198,45 @@ local function swapPositions(encoded)
 end
 
 --- 按位置列表反向交换还原混淆串。
+---
+--- positions 最多 10 项即最多 20 次单字符交换，而 encoded 是整章 base64（数百 KB）。
+--- 只把被动过的下标记进稀疏表，最后一次线性重拼，不逐字符建数组。
 ---@param encoded string
 ---@param positions number[]
 ---@return string
 local function reverseSwaps(encoded, positions)
-    local chars = {}
-    for i = 1, #encoded do
-        chars[i] = encoded:sub(i, i)
+    local patch = {}
+    ---@param at integer 1-based
+    ---@return string
+    local function charAt(at)
+        return patch[at] or encoded:sub(at, at)
     end
     for i = #positions, 1, -2 do
         for k = 1, 0, -1 do
             local left = positions[i] + k + 1
             local right = positions[i - 1] + k + 1
-            chars[left], chars[right] = chars[right], chars[left]
+            patch[left], patch[right] = charAt(right), charAt(left)
         end
     end
-    return table.concat(chars)
+    if not next(patch) then
+        return encoded
+    end
+    -- 按下标排序后分段拼接：未受影响的区间整段复制。
+    local touched = {}
+    for at in pairs(patch) do
+        touched[#touched + 1] = at
+    end
+    table.sort(touched)
+    local parts, cursor = {}, 1
+    for _, at in ipairs(touched) do
+        if at > cursor then
+            parts[#parts + 1] = encoded:sub(cursor, at - 1)
+        end
+        parts[#parts + 1] = patch[at]
+        cursor = at + 1
+    end
+    parts[#parts + 1] = encoded:sub(cursor)
+    return table.concat(parts)
 end
 
 --- 校验分片 MD5 头并返回 body。
@@ -275,22 +262,7 @@ local function decodeEncodedBody(body)
         return ""
     end
     local encoded = body:sub(2)
-    return base64Decode(reverseSwaps(encoded, swapPositions(encoded)))
-end
-
---- 拼接 e0+e1+e3（或 t0+t1）并解码为明文。
----@param ... string
----@return string|nil text, string|nil err
---- 微信 Web 响应 succ 字段是否为成功。
----@param data table|nil
----@param field string|nil
----@return boolean
-function Protocol.isSuccessResponse(data, field)
-    if type(data) ~= "table" then
-        return false
-    end
-    local value = data[field or "succ"]
-    return value == true or tonumber(value) == 1
+    return Text.base64Decode(reverseSwaps(encoded, swapPositions(encoded)))
 end
 
 --- 从 UA 推导 Web appId（阅读时长上报用）。
@@ -405,6 +377,9 @@ function Protocol.makeReadPayload(opts)
     return params
 end
 
+--- 拼接 e0+e1+e3（或 t0+t1）并解码为明文。
+---@param ... string
+---@return string|nil text, string|nil err
 function Protocol.decodeShards(...)
     local parts = {}
     for i = 1, select("#", ...) do

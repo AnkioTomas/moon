@@ -20,9 +20,10 @@ local translator = {
 }
 package.preload["ui/translator"] = function() return translator end
 
+local native = translator.showTranslation
 local Translate = require("translate.init")
 Translate.install()
-Assert.is_true(type(translator.showTranslation) == "function")
+Assert.is_false(translator.showTranslation == native, "install 必须替换掉原生实现")
 
 local before = translator.showTranslation
 Translate.install()

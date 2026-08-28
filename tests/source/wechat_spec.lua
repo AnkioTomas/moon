@@ -21,6 +21,25 @@ local fake_client = {}
 local chapter_open = {}
 local progress_ui = { shown = 0, closed = 0, progress = {} }
 
+-- 目录缓存 payload 要真解码才能取出 chapter_uid
+stub("json", function()
+    return {
+        decode = require("support.json_stub").decode,
+        encode = require("support.json_stub").encode,
+    }
+end)
+
+-- 目录缓存：按 stable_id 供给 payload，未登记的书一律未命中
+local toc_payload = {}
+stub("utils.db.toc", function()
+    return {
+        get = function(_, stable_id) return toc_payload[stable_id] end,
+        upsert = function(_, stable_id, payload)
+            toc_payload[stable_id] = payload
+            return true
+        end,
+    }
+end)
 stub("utils.settings", function()
     return {
         getSource = function() return {} end,
@@ -31,15 +50,22 @@ stub("source.wechat.auth", function()
     return {
         hasSession = function() return true end,
         userLabel = function() return "tester" end,
+        sessionHeaders = function() return { Cookie = "wr_skey=stub" } end,
     }
 end)
 stub("source.wechat.client", function()
     return {
         new = function() return fake_client end,
-        sessionHeaders = function() return { Cookie = "wr_skey=stub" } end,
     }
 end)
-stub("source.wechat.chapter", function() return {} end)
+stub("source.wechat.chapter", function()
+    return {
+        ensurePsvtsAsync = function(_, _, cb)
+            cb(true)
+            return { cancel = function() end }
+        end,
+    }
+end)
 stub("ui/network/manager", function()
     return { runWhenOnline = function(_, fn) fn() end }
 end)
@@ -91,6 +117,121 @@ do
     Assert.is_true(caps.stats_pull)
 end
 
+-- pushStatsAsync：无章节坐标的行无处可报，直接成功而非空转失败。
+do
+    local src = WeChat.new()
+    local ok, err
+    src:pushStatsAsync({ { stable_id = "b1", duration = 10 } }, function(data, e)
+        ok, err = data, e
+    end)
+    Assert.not_nil(ok)
+    Assert.is_nil(err)
+end
+
+-- pushStatsAsync 逐章上报中途失败：只确认已报出去的章。
+-- 若把全部行一起确认就会丢时长，若一条都不确认则下次重试把已报的章再报一遍（微信侧翻倍）。
+do
+    local src = WeChat.new()
+    toc_payload["bp"] = require("support.json_stub").encode({
+        { idx = 1, uid = "u1", title = "一" },
+        { idx = 2, uid = "u2", title = "二" },
+    })
+    local reported = 0
+    fake_client.reportReadAsync = function(_, _, _, cb)
+        reported = reported + 1
+        if reported == 1 then
+            cb({ ok = true })
+        else
+            cb(nil, "boom")
+        end
+        return { cancel = function() end }
+    end
+    local data, err
+    src:pushStatsAsync({
+        { id = 11, stable_id = "bp", chapter_idx = 1, duration = 10 },
+        { id = 12, stable_id = "bp", chapter_idx = 2, duration = 20 },
+        { id = 13, stable_id = "bp", duration = 5 },
+    }, function(value, e) data, err = value, e end)
+    fake_client.reportReadAsync = nil
+    Assert.eq(reported, 2)
+    Assert.is_nil(err)
+    Assert.len(data.synced_ids, 2, "只确认无坐标行与已上报成功的第一章")
+    Assert.eq(data.synced_ids[1], 13)
+    Assert.eq(data.synced_ids[2], 11)
+end
+
+-- 全部章节都上报失败时不能报成功：一行都没确认就该让调用方看到错误并重试。
+do
+    local src = WeChat.new()
+    fake_client.reportReadAsync = function(_, _, _, cb)
+        cb(nil, "boom")
+        return { cancel = function() end }
+    end
+    local data, err
+    src:pushStatsAsync({
+        { id = 21, stable_id = "bp", chapter_idx = 1, duration = 10 },
+    }, function(value, e) data, err = value, e end)
+    fake_client.reportReadAsync = nil
+    Assert.is_nil(data)
+    Assert.eq(err, "boom")
+end
+
+-- 翻页不得上报阅读时长：微信侧时长唯一来源是 pushStatsAsync（本地采集补报）。
+-- 一旦这里又开一路心跳，同一段阅读时间会被微信计两遍。
+do
+    local src = WeChat.new()
+    local reported = 0
+    fake_client.reportReadAsync = function(_, _, _, cb)
+        reported = reported + 1
+        cb({ ok = true })
+        return { cancel = function() end }
+    end
+    src:onEvent("page_changed", {
+        identity = { source_id = "wechat", stable_id = "b1", chapter_idx = 2 },
+        percent = 0.5,
+    })
+    src:onEvent("document_close", nil)
+    Assert.eq(reported, 0, "翻页/关书不得直接上报时长")
+    fake_client.reportReadAsync = nil
+end
+
+-- getDetailAsync：wire 经 mapper 转 Book，并把封面 URL 记进缓存供 coverRequest 用
+do
+    local src = WeChat.new()
+    fake_client.bookInfoAsync = function(_, book_id, cb)
+        Assert.eq(book_id, "b1")
+        cb({ book = { bookId = "b1", title = "详情书", author = "某人",
+                      cover = "https://img.weread.qq.com/c.jpg" } })
+        return { cancel = function() end }
+    end
+    local book, err
+    src:getDetailAsync(REF, function(b, e) book, err = b, e end)
+    Assert.is_nil(err)
+    Assert.eq(book.stable_id, "b1")
+    Assert.eq(book.title, "详情书")
+    Assert.eq(src:coverRequest(REF).url, "https://img.weread.qq.com/c.jpg")
+
+    -- 空 wire → 明确报错而非返回半个 Book
+    fake_client.bookInfoAsync = function(_, _, cb)
+        cb({})
+        return { cancel = function() end }
+    end
+    book, err = nil, nil
+    src:getDetailAsync(REF, function(b, e) book, err = b, e end)
+    Assert.is_nil(book)
+    Assert.eq(err, "书籍详情为空")
+
+    fake_client.bookInfoAsync = function(_, _, cb)
+        cb(nil, "详情拉取失败")
+        return { cancel = function() end }
+    end
+    book, err = nil, nil
+    src:getDetailAsync(REF, function(b, e) book, err = b, e end)
+    Assert.is_nil(book)
+    Assert.eq(err, "详情拉取失败")
+    fake_client.bookInfoAsync = nil
+end
+
 -- openBookAsync：源自己管理联网/进度 UI，成功首参只返回已入库物理路径。
 do
     chapter_open.path = "/cache/wechat/b1/2.html"
@@ -121,8 +262,15 @@ end
 -- putProgressAsync：fraction → percent（0/1 边界、四舍五入、缺进度兜底）
 do
     local captured
-    fake_client.putProgressAsync = function(_, stable_id, progress, chapter_uid, cb)
-        captured = { stable_id = stable_id, progress = progress, chapter_uid = chapter_uid }
+    fake_client.putProgressAsync = function(_, stable_id, opts, cb)
+        captured = {
+            stable_id = stable_id,
+            progress = opts.progress,
+            chapter_uid = opts.chapter_uid,
+            chapter_idx = opts.chapter_idx,
+            chapter_offset = opts.chapter_offset,
+            summary = opts.summary,
+        }
         cb({ ok = true })
         return { cancel = function() end }
     end
@@ -134,42 +282,55 @@ do
         return ok, err
     end
 
-    Assert.is_true(put({ fraction = 0 }))
+    -- 源私有的 chapter_uid 走 extra；REF 无 chapter_idx，归一后为 0
+    local UID = { chapter_uid = 42, chapter_idx = 0 }
+    Assert.is_true(put({ fraction = 0, extra = UID }))
     Assert.eq(captured.progress, 0)
-    Assert.is_true(put({ fraction = 1 }))
+    Assert.is_true(put({ fraction = 1, extra = UID }))
     Assert.eq(captured.progress, 100)
-    Assert.is_true(put({ fraction = 0.5 }))
+    Assert.is_true(put({ fraction = 0.5, extra = UID }))
     Assert.eq(captured.progress, 50)
     -- 四舍五入：0.666 → 67
-    Assert.is_true(put({ fraction = 0.666 }))
+    Assert.is_true(put({ fraction = 0.666, extra = UID }))
     Assert.eq(captured.progress, 67)
     -- clampFraction 兼容 1..100 百分数入参
-    Assert.is_true(put({ fraction = 25 }))
+    Assert.is_true(put({ fraction = 25, extra = UID }))
     Assert.eq(captured.progress, 25)
-    -- 缺进度兜底：fraction 缺失 / pos 为 nil 都按 0 上传
-    Assert.is_true(put({}))
-    Assert.eq(captured.progress, 0)
-    Assert.is_true(put(nil))
-    Assert.eq(captured.progress, 0)
+    -- 缺 chapter_uid 无法上传
+    Assert.is_nil(put({}))
+    Assert.is_nil(put(nil))
     -- stable_id 透传
     Assert.eq(captured.stable_id, "b1")
-    -- locator（XPointer）与 chapter_idx（目录序号）都不是微信 chapterUid，不上传；
-    -- 只有显式 chapter_uid 才透传
-    Assert.is_true(put({ fraction = 0.5, locator = "epubcfi(/6/4)", chapter_idx = 3 }))
-    Assert.is_nil(captured.chapter_uid)
-    Assert.is_true(put({ fraction = 0.5, chapter_uid = 42 }))
+    -- 仅有 chapter_idx、无 uid 且目录拉取失败时不上传
+    fake_client.chapterInfosAsync = function(_, _, cb)
+        cb(nil, "目录拉取失败")
+        return { cancel = function() end }
+    end
+    Assert.is_nil(put({ fraction = 0.5, locator = "epubcfi(/6/4)", chapter_idx = 3 }))
+    Assert.is_true(put({ fraction = 0.5, extra = UID }))
     Assert.eq(captured.chapter_uid, 42)
+    Assert.is_true(put({
+        fraction = 0.5, chapter_idx = 3, chapter_fraction = 0.25, chapter_title = "序章",
+        extra = { chapter_uid = 42, chapter_idx = 3 },
+    }))
+    Assert.eq(captured.chapter_idx, 3)
+    Assert.eq(captured.chapter_offset, 2500)
+    Assert.eq(captured.summary, "序章")
+    -- extra 记的是别的章：不复用旧 uid，回落到目录解析（此处目录拉取失败 → 不上传）
+    Assert.is_nil(put({ fraction = 0.5, chapter_idx = 7, extra = { chapter_uid = 42, chapter_idx = 3 } }))
 end
 
--- putProgressAsync：失败时错误透传（table err 取 message）
+-- putProgressAsync：失败时错误原样透传（client 层错误一律是字符串）
 do
-    fake_client.putProgressAsync = function(_, _, _, _, cb)
-        cb(nil, { message = "写入失败" })
+    fake_client.putProgressAsync = function(_, _, _, cb)
+        cb(nil, "写入失败")
         return { cancel = function() end }
     end
     local src = WeChat.new()
     local ok, err
-    src:putProgressAsync(REF, { fraction = 0.5 }, function(v, e) ok, err = v, e end)
+    src:putProgressAsync(REF, {
+        fraction = 0.5, extra = { chapter_uid = 42, chapter_idx = 0 },
+    }, function(v, e) ok, err = v, e end)
     Assert.is_nil(ok)
     Assert.eq(err, "写入失败")
 end
@@ -225,7 +386,7 @@ end
 -- getProgressAsync：网络失败错误透传；取消后迟到的回调被丢弃
 do
     fake_client.getProgressAsync = function(_, _, cb)
-        cb(nil, { message = "拉取失败" })
+        cb(nil, "拉取失败")
         return { cancel = function() end }
     end
     local src = WeChat.new()
@@ -353,6 +514,85 @@ do
     src:clearCaches()
     local req4 = src:coverRequest({ source_id = "wechat", stable_id = "b1" })
     Assert.is_nil(req4)
+end
+
+-- pushNotesAsync：划线与想法两段队列必须串起来
+do
+    local NOTE_REF = {
+        source_id = "wechat",
+        stable_id = "bpush",
+        chapter_idx = 2,
+        book = { title = "微信书" },
+    }
+    require("source.wechat.context").rememberBookVersion("bpush", 7)
+    -- chapter_uid 只从目录缓存解析，预置一条免去拉取
+    toc_payload["bpush"] = '[{"uid":"8"},{"uid":"9"}]'
+    local calls
+    fake_client.addBookmarkAsync = function(_, _, _, body, cb)
+        calls[#calls + 1] = { api = "addBookmark", range = body.range }
+        cb({ bookmarkId = "bm-new" })
+        return { cancel = function() end }
+    end
+    fake_client.addReviewAsync = function(_, body, cb)
+        calls[#calls + 1] = { api = "addReview", content = body.content, range = body.range }
+        cb({ reviewId = "rv-new" })
+        return { cancel = function() end }
+    end
+    fake_client.editReviewAsync = function(_, body, cb)
+        calls[#calls + 1] = { api = "editReview", content = body.content, review_id = body.reviewId }
+        cb({ succ = 1 })
+        return { cancel = function() end }
+    end
+
+    local src = WeChat.new()
+    local function push(annotations)
+        calls = {}
+        local ok, err
+        src:pushNotesAsync(NOTE_REF, annotations, function(v, e) ok, err = v, e end)
+        require("support.stubs").flush()
+        return ok, err
+    end
+
+    -- 在已有划线上写想法：无新划线可传，直接走 useredit
+    local ok, err = push({
+        {
+            drawer = "lighten", text = "旧划线", wr_range = "0-3",
+            wr_bookmark_id = "bm1", wr_review_id = "rv1", note = "改过的想法",
+        },
+    })
+    Assert.is_true(ok, "editReview 未完成: " .. tostring(err))
+    Assert.is_nil(err)
+    Assert.eq(#calls, 1)
+    Assert.eq(calls[1].api, "editReview")
+    Assert.eq(calls[1].review_id, "rv1")
+    Assert.eq(calls[1].content, "改过的想法")
+
+    -- 已有划线但还没有 review：走 add
+    ok = push({
+        { drawer = "lighten", text = "旧划线", wr_range = "0-3", wr_bookmark_id = "bm1", note = "新想法" },
+    })
+    Assert.is_true(ok)
+    Assert.eq(#calls, 1)
+    Assert.eq(calls[1].api, "addReview")
+    Assert.eq(calls[1].content, "新想法")
+
+    -- 新划线带想法：addBookmark 回写 wr_bookmark_id 后必须继续推想法。
+    -- 曾因 pushReviews 声明晚于引用而解析成全局 nil，划线传完即崩，想法永远推不上去。
+    local fresh = { drawer = "lighten", text = "新划线", wr_range = "4-9", note = "随手记" }
+    ok, err = push({ fresh })
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(#calls, 2)
+    Assert.eq(calls[1].api, "addBookmark")
+    Assert.eq(calls[2].api, "addReview")
+    Assert.eq(calls[2].content, "随手记")
+    Assert.eq(fresh.wr_bookmark_id, "bm-new")
+    Assert.eq(fresh.wr_review_id, "rv-new")
+
+    -- 无划线也无想法：不发请求
+    ok = push({ { drawer = "lighten", text = "旧划线", wr_bookmark_id = "bm1", wr_range = "0-3" } })
+    Assert.is_true(ok)
+    Assert.eq(#calls, 0)
 end
 
 -- 还原打桩，避免影响本文件之后的其它用例

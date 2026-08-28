@@ -122,6 +122,10 @@ end
 local function ensure(identity, toc, idx, ops, cb)
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
     if chapterReady(path) then
+        if ops.refreshCached then
+            local item = toc[idx]
+            return ops.refreshCached(identity, item, path, cb)
+        end
         cb(path)
         return
     end
@@ -232,9 +236,38 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
 
     local local_path = existingLocalPath(identity, opts)
     if local_path then
-        require("ui/uimanager"):nextTick(function()
-            if not cancelled then cb(local_path) end
-        end)
+        local function open(path)
+            require("ui/uimanager"):nextTick(function()
+                if not cancelled then cb(path) end
+            end)
+        end
+        if ops.refreshCached then
+            require("ui/network/manager"):runWhenOnline(function()
+                if cancelled then return end
+                local idx = tonumber(opts.chapter_idx)
+                if not idx then
+                    local pos = localPosition(identity)
+                    idx = pos and tonumber(pos.chapter_idx) or 1
+                end
+                loadToc(identity, ops, function(toc)
+                    if cancelled or type(toc) ~= "table" then
+                        open(local_path)
+                        return
+                    end
+                    idx = math.max(1, math.min(#toc, idx or 1))
+                    local item = toc[idx]
+                    if not item then
+                        open(local_path)
+                        return
+                    end
+                    ops.refreshCached(identity, item, local_path, function(path)
+                        if not cancelled then open(path or local_path) end
+                    end)
+                end)
+            end)
+        else
+            open(local_path)
+        end
         require("ui/network/manager"):runWhenOnline(function()
             if cancelled then return end
             background_job = Chapter.openAsync(source, identity, book, opts, ops, function() end)

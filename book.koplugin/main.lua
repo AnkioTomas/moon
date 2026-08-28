@@ -88,6 +88,13 @@ function BookPlugin:addToMainMenu(menu_items)
     }
 end
 
+--- 读 sidecar 前：把全书排版偏好写进本章 sidecar，由原生模块加载
+---@param doc_settings table
+---@return nil
+function BookPlugin:onDocSettingsLoad(doc_settings)
+    require("book.reader_prefs").inject(doc_settings, self.document)
+end
+
 --- 阅读器就绪：建阅读会话；统计计时；拉进度；按章落点；挂阅读页
 ---@return nil
 function BookPlugin:onReaderReady()

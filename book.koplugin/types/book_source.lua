@@ -19,6 +19,7 @@
 ---@field scrape boolean 支持把外部元数据写入本地书籍记录（仅 local 为 true；wechat/moon 明确 false）
 ---@field edit boolean 支持编辑展示元信息（仅 local 为 true；wechat/moon 明确 false）
 ---@field insight boolean 阅读洞察 / 统计页（readingInsightAsync）
+---@field stats_pull boolean 是否从远端拉取阅读统计并写入本地 reading_stats（各源自决映射与替换策略）
 ---@field store boolean 源自带书城（listStoreAsync；无则走全局 zlib）
 
 local SourceCapabilities = {}
@@ -32,8 +33,19 @@ function SourceCapabilities.defaults()
         scrape = false,
         edit = false,
         insight = false,
+        stats_pull = false,
         store = false,
     }
+end
+
+--- 源是否将远端阅读统计同步入库（UI 与 book.stats 统一入口）。
+---@param source BookSource|nil
+---@return boolean
+function SourceCapabilities.supportsStatsPull(source)
+    if not source or type(source.capabilities) ~= "function" then
+        return false
+    end
+    return source:capabilities().stats_pull == true
 end
 
 --- 源是否允许刮削（UI 与 scrape 模块统一入口）。
@@ -70,12 +82,29 @@ end
 
 --- 单条阅读会话统计（落盘 reading_stats 后上报）。
 ---@class BookStatsRow
+---@field id number|nil 本地 reading_stats 行 id（push 时由调用方带入，供 synced_ids 回报）
 ---@field source_id string 源标识
 ---@field stable_id string 源内书籍身份
 ---@field page number 结束页
 ---@field start_time number 会话开始时间戳（秒）
 ---@field duration number 阅读时长（秒）
 ---@field total_pages number 全书页数
+
+--- pullStatsAsync 可选替换范围：入库前删除本地已同步行，避免云端聚合与本地页记录双计。
+---@class BookStatsPullReplace
+---@field mode '"synced"'|'"prefix"'  synced=删该源全部 sync_status=1；prefix=删匹配前缀的已同步行
+---@field stable_prefixes string[]|nil mode=prefix 时生效
+
+--- pullStatsAsync 回包：纯数组为追加去重；带 replace 为云端优先覆盖入库。
+---@class BookStatsPullResult
+---@field rows BookStatsRow[]
+---@field replace BookStatsPullReplace|nil
+
+--- pushStatsAsync 回包：结果为真即视为上传成功。
+--- 逐条上报的源部分失败时，用 synced_ids 只确认已被远端接受的行，
+--- 其余保持 sync_status=0 等下次重试，避免同一段时间被重复计时。
+---@class BookStatsPushResult
+---@field synced_ids number[]|nil 已被远端接受的 reading_stats 行 id；缺省表示本次全部行
 
 --- 封面 HTTP 请求描述（UI 线程同步取，再异步下载）。
 ---@class BookCoverRequest
@@ -119,8 +148,8 @@ end
 ---@field coverRequest fun(self: BookSource, identity: BookIdentity): (BookCoverRequest|nil, string|nil) 封面请求描述（纯构造，无 IO）
 ---@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 书城导入目标（local 移入）
 ---@field replaceBook fun(self: BookSource, temp_path: string, stable_id: string): (string|nil, string|nil)|nil 本地转换后替换原书（仅 local）
----@field pushStatsAsync fun(self: BookSource, rows: BookStatsRow[], cb: fun(data: table|nil, err: string|nil)): table|nil 上报领域统计记录；协议细节由源处理
----@field pullStatsAsync fun(self: BookSource, cb: fun(rows: BookStatsRow[]|nil, err: string|nil)): table|nil 拉取领域统计记录
+---@field pushStatsAsync fun(self: BookSource, rows: BookStatsRow[], cb: fun(data: BookStatsPushResult|nil, err: string|nil)): table|nil 上报领域统计记录；协议细节由源处理
+---@field pullStatsAsync fun(self: BookSource, cb: fun(result: BookStatsRow[]|BookStatsPullResult|nil, err: string|nil)): table|nil 拉取领域统计记录（可选 replace 覆盖策略）
 ---@field pushNotesAsync fun(self: BookSource, identity: BookIdentity, annotations: table[], cb: fun(data: table|nil, err: string|nil)): table|nil 上传划线/书签
 ---@field pullNotesAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: table[]|nil, err: string|nil)): table|nil 拉取划线/书签
 

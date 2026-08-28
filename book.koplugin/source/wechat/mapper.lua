@@ -96,6 +96,20 @@ function Mapper.book(row)
     return out, cover
 end
 
+--- 书籍详情 wire → bookVersion（addBookmark 必填）。
+---@param wire table|nil
+---@return number|nil
+function Mapper.bookVersion(wire)
+    if type(wire) ~= "table" then
+        return nil
+    end
+    local book = wire.book or wire.data or wire
+    if type(book) ~= "table" then
+        return nil
+    end
+    return tonumber(book.version or book.bookVersion or wire.version or wire.bookVersion)
+end
+
 --- 微信专辑 → Book（及封面 URL）。
 ---@param album table
 ---@return Book|nil, string|nil
@@ -188,27 +202,6 @@ function Mapper.shelfList(shelf, on_cover)
     for _, album in ipairs(shelf.albums or {}) do
         local b, cover = Mapper.albumBook(album)
         if b then
-            if cover and on_cover then
-                on_cover(b.stable_id, cover)
-            end
-            books[#books + 1] = b
-        end
-    end
-    return BookListResult.new(books)
-end
-
---- 最近阅读 wire → BookListResult。
----@param data table
----@param shelf table|nil
----@param on_cover fun(stable_id: string, url: string)|nil
----@return BookListResult
-function Mapper.recentList(data, shelf, on_cover)
-    local prog_map = Mapper.progressByBookId(shelf)
-    local books = {}
-    for _, item in ipairs(data.items or {}) do
-        local b, cover = Mapper.book(item)
-        if b then
-            Mapper.applyProgress(b, prog_map[b.stable_id])
             if cover and on_cover then
                 on_cover(b.stable_id, cover)
             end
@@ -318,6 +311,34 @@ function Mapper.chapters(data, bookId)
     return chapters
 end
 
+--- 章内偏移：微信 wire 为 0..10000，其它源可能已是 0..1。
+---@param raw any
+---@return number|nil
+local function normalizeChapterOffset(raw)
+    local n = tonumber(raw)
+    if n == nil then
+        return nil
+    end
+    if n > 1 then
+        return ProgressPosition.clampFraction(n / 10000)
+    end
+    return ProgressPosition.clampFraction(n)
+end
+
+--- 进度 wire 解包：getProgress 进度在 book 子对象里。
+---@param root table
+---@return table
+local function progressNode(root)
+    local node = unwrapBookRow(root)
+    if node and node ~= root then
+        return node
+    end
+    if type(root.book) == "table" then
+        return root.book
+    end
+    return root
+end
+
 --- 进度 wire → ProgressPosition。
 ---@param data table|nil
 ---@return ProgressPosition|nil, string|nil chapter_uid
@@ -325,39 +346,53 @@ function Mapper.progress(data)
     if type(data) ~= "table" then
         return nil
     end
-    local node = data
+    local root = data
     if type(data.data) == "table" then
-        node = data.data
+        root = data.data
     end
-    local finished = userFinished(node) or userFinished(data)
-    local percent = Book.clampPercent(
-        node.percent or node.progress or node.progressPercent or node.readingProgress,
-        finished
-    )
+    local node = progressNode(root)
+    local finished = userFinished(node) or userFinished(root)
+    local chapter_idx = tonumber(node.chapter_idx or node.chapterIdx)
+    local chapter_fraction = normalizeChapterOffset(node.chapter_fraction or node.chapterOffset)
+    local percent = tonumber(node.percent or node.progress or node.progressPercent or node.readingProgress)
+    local fraction
+    if percent and (percent > 0 or not chapter_idx) then
+        fraction = ProgressPosition.clampFraction(
+            Book.clampPercent(percent, finished) / 100
+        )
+    else
+        fraction = 0
+    end
     local chapter_uid = node.chapter_uid or node.chapterUid
     return {
-        fraction = ProgressPosition.clampFraction(percent / 100),
-        chapter_idx = tonumber(node.chapter_idx or node.chapterIdx),
-        chapter_fraction = tonumber(node.chapter_fraction or node.chapterOffset),
+        fraction = fraction,
+        chapter_idx = chapter_idx,
+        chapter_fraction = chapter_fraction,
         locator = node.locator,
     }, chapter_uid
 end
 
 --- 书架 wire 附带进度条目 → pending_progress 候选。
 ---@param shelf table|nil
----@return table[] rows { stable_id, fraction, chapter_uid }
+---@return table[] rows { stable_id, fraction, chapter_idx?, chapter_fraction?, chapter_uid? }
 function Mapper.shelfProgressRows(shelf)
     local prog_map = Mapper.progressByBookId(shelf)
     local rows = {}
     for id, p in pairs(prog_map) do
         local prog = tonumber(p.progress or p.readingProgress)
-        if prog and prog >= 0 then
-            rows[#rows + 1] = {
-                stable_id = id,
-                fraction = ProgressPosition.clampFraction(prog / 100),
-                chapter_uid = p.chapterUid or p.chapter_uid,
-            }
+        local chapter_idx = tonumber(p.chapterIdx or p.chapter_idx)
+        local chapter_fraction = normalizeChapterOffset(p.chapterOffset or p.chapter_offset)
+        if prog == nil and not chapter_idx then
+            goto continue
         end
+        rows[#rows + 1] = {
+            stable_id = id,
+            fraction = ProgressPosition.clampFraction((prog or 0) / 100),
+            chapter_idx = chapter_idx,
+            chapter_fraction = chapter_fraction,
+            chapter_uid = p.chapterUid or p.chapter_uid,
+        }
+        ::continue::
     end
     return rows
 end

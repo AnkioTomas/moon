@@ -12,9 +12,6 @@ local HttpDB = {}
 ---@param key string
 ---@return string|nil, number|nil
 function HttpDB.get(key)
-    if type(key) ~= "string" or key == "" then
-        return nil
-    end
     Base.ensure()
     local value, expires = Base.rowexec(
         [[SELECT value, expires FROM http WHERE key=? LIMIT 1;]],
@@ -32,9 +29,6 @@ end
 ---@param expires number
 ---@return boolean
 function HttpDB.set(key, value_json, expires)
-    if type(key) ~= "string" or key == "" or type(value_json) ~= "string" then
-        return false
-    end
     Base.ensure()
     return Base.exec(
         [[INSERT INTO http (key, value, expires) VALUES (?,?,?)
@@ -51,9 +45,6 @@ end
 ---@param key string
 ---@return boolean
 function HttpDB.delete(key)
-    if type(key) ~= "string" or key == "" then
-        return false
-    end
     Base.ensure()
     return Base.exec([[DELETE FROM http WHERE key=?;]], key) ~= nil
 end

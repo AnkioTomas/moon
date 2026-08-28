@@ -189,27 +189,6 @@ function Bars.applyPreferences(ui)
     Bars.setSystemBottom(ui, Bars.bottomBarPreference())
 end
 
---- 切换系统顶栏（Alt Status Bar ↔ status_line）。
----@param ui table|nil
----@return nil
-function Bars.toggleSystemTop(ui)
-    Bars.setTopBarPreference(not Bars.systemTopVisible(ui), ui)
-end
-
---- 切换系统底栏（ReaderFooter 显隐 ↔ footer_visible）。
----@param ui table|nil
----@return nil
-function Bars.toggleSystemBottom(ui)
-    ui = ui or Bars.ui
-    Bars.setSystemBottom(ui, not Bars.systemBottomVisible(ui))
-    if ui then
-        local MoonSettings = require("utils.settings")
-        local settings = MoonSettings.get()
-        settings.book_reader_bottom_bar = Bars.systemBottomVisible(ui)
-        MoonSettings.save(settings)
-    end
-end
-
 --- 系统顶栏（CRe Alt Status Bar）是否启用。
 ---@param ui table|nil
 ---@return boolean
@@ -340,19 +319,6 @@ function Bars.topHeight(ui)
     end
     ui = ui or Bars.ui
     return ui.document:getHeaderHeight()
-end
-
---- 系统底栏高度（像素）；overlay 未启用时为 0。
----@param ui table|nil
----@return number
-function Bars.bottomHeight(ui)
-    if not Bars.bottomVisible(ui) then
-        return 0
-    end
-    ui = ui or Bars.ui
-    local view = Bars.view or ui.view
-    local _, band_h = bottomBandGeometry(view, ui, 0)
-    return band_h or 0
 end
 
 --- 顶栏水平内边距（左、右），跟文档页边距一致。
@@ -554,8 +520,9 @@ function Bars.install(ui)
     ui._book_bars_installed = true
     hijackFooter(ui)
     registerFooterTouchZones(ui)
-    if ui.registerPostInitCallback then
-        ui:registerPostInitCallback(function()
+    -- Reader.attach 在 ReaderReady 内执行，postInitCallback 此时已为 nil。
+    if ui.registerPostReaderReadyCallback then
+        ui:registerPostReaderReadyCallback(function()
             hijackFooter(ui)
             registerFooterTouchZones(ui)
             Bars.applyPreferences(ui)

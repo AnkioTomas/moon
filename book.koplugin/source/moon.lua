@@ -131,6 +131,7 @@ function Source:capabilities()
         scrape = false,
         edit = false,
         insight = true,
+        stats_pull = true,
         store = false,
     }
 end
@@ -485,12 +486,15 @@ end
 function Source:putProgressAsync(identity, pos, cb)
     pos = pos or {}
     local frac = ProgressPosition.clampFraction(pos.fraction)
+    -- locator 是唯一能跨设备对齐的坐标：百分比会随字号排版漂移。
+    -- 不发它的话，mapper 拉回来的 locator 永远是 nil，恢复位置只能靠百分比。
     return self._client:updateProgressAsync({
         filename = identity.stable_id,
         frac = frac,
         spine = pos.chapter_idx or 0,
-        page = 0,
+        page = pos.page or 0,
         percent = string.format("%.2f", frac * 100) .. "%",
+        locator = pos.locator,
     }, function(wire, err)
         if wire then
             cb(true)

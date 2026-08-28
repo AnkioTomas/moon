@@ -2,6 +2,7 @@
 微信读书章节正文：读 reader 页拿 psvts → 拉 e_0/e_1/e_3（或 t_0/t_1）→ 解码。
 
 对齐 weread 网页端通道。只返回标准正文，不写盘、不打 EPUB。
+个人划线通过 bookmarklist 同步为 KOReader 原生注解，不在 HTML 里注入社区热度线。
 
 @module koplugin.book.source.wechat.chapter
 --]]
@@ -36,6 +37,50 @@ local function extractPsvts(html)
         end
     end
     return html:match([["psvts"%s*:%s*"([^"]+)"]])
+end
+
+--- 确保章节 psvts 已缓存（进度/时长上报依赖）。
+---@param bookId string
+---@param chapter_uid string|number
+---@param cb fun(ok: boolean, err: any)
+---@return { cancel: fun() }|nil
+function Chapter.ensurePsvtsAsync(bookId, chapter_uid, cb)
+    bookId = tostring(bookId or "")
+    chapter_uid = chapter_uid and tostring(chapter_uid) or nil
+    if bookId == "" or not chapter_uid then
+        cb(nil, _("缺少章节信息"))
+        return { cancel = function() end }
+    end
+    if Context.psvts(bookId, chapter_uid) then
+        cb(true)
+        return nil
+    end
+    local cancelled = false
+    local reader_url = Protocol.readerUrl(bookId, chapter_uid)
+    local job = Auth.webGetAsync(reader_url, {
+        accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        headers = { ["Referer"] = reader_url },
+        block_timeout = 60,
+    }, function(html, err)
+        if cancelled then return end
+        if not html then
+            cb(nil, err or _("无法打开阅读页"))
+            return
+        end
+        local psvts = extractPsvts(html)
+        if not psvts or psvts == "" then
+            cb(nil, _("阅读页缺少 psvts"))
+            return
+        end
+        Context.rememberPsvts(bookId, chapter_uid, psvts)
+        cb(true)
+    end)
+    return {
+        cancel = function()
+            cancelled = true
+            if job and job.cancel then job.cancel() end
+        end,
+    }
 end
 
 --- 异步拉取章节 HTML 正文。
@@ -144,7 +189,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                     else
                         local fragment = Text.htmlBodyFragment(xhtml)
                         if Text.looksLikeHtml(fragment) then
-                            cb(fragment)
+                            cb(Annotations.cleanChapterHtml(fragment))
                         else
                             cb(Text.textToBody(fragment))
                         end
@@ -154,6 +199,42 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
         end)
     end)
     return { cancel = cancel }
+end
+
+--- 原地清理缓存章节 HTML；无需改写时不碰磁盘。
+---@param path string
+---@return boolean rewritten
+local function rewriteCachedHtml(path)
+    if type(path) ~= "string" or path == "" then
+        return false
+    end
+    local f = io.open(path, "rb")
+    if not f then
+        return false
+    end
+    local html = f:read("*a")
+    f:close()
+    if type(html) ~= "string" or html == "" then
+        return false
+    end
+    local cleaned = Annotations.cleanChapterHtml(html)
+    if cleaned == html then
+        return false
+    end
+    local tmp = path .. ".part"
+    pcall(os.remove, tmp)
+    local out = io.open(tmp, "wb")
+    if not out then
+        return false
+    end
+    out:write(cleaned)
+    out:close()
+    os.remove(path)
+    if os.rename(tmp, path) then
+        return true
+    end
+    pcall(os.remove, tmp)
+    return false
 end
 
 --- 标准章节内容：{ title, html }。
@@ -168,7 +249,7 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
     end
     local title = (chapter and chapter.title)
         or string.format(_("第 %d 章"), tonumber(chapter and chapter.idx) or 0)
-    local cancelled, decorate_job, asset_job = false, nil, nil
+    local cancelled, asset_job = false, nil
     local reader_url = Protocol.readerUrl(bookId, chapter and chapter.uid)
     local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter or {}, function(html, err)
         if cancelled then return end
@@ -179,28 +260,7 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
         end
         asset_job = Assets.localizeAsync(bookId, chapter or {}, html, reader_url, function(localized)
             if cancelled then return end
-            html = localized
-            local Client = require("source.wechat.client")
-            local client = Client:new()
-            local uid = chapter and chapter.uid
-            if not uid then
-                cb({ title = title, html = html })
-                return
-            end
-            decorate_job = client:chapterUnderlinesAsync(bookId, uid, function(wire, ul_err)
-                if cancelled then return end
-                if wire and type(wire.underlines) == "table" and #wire.underlines > 0 then
-                    local injected, css = Annotations.inject(html, wire.underlines)
-                    if css ~= "" and injected:find("<head", 1, true) then
-                        html = injected:gsub("<head>", "<head><style>" .. css .. "</style>", 1)
-                    else
-                        html = injected
-                    end
-                elseif ul_err then
-                    logger.dbg("wechat underlines skip", bookId, uid, ul_err)
-                end
-                cb({ title = title, html = html })
-            end)
+            cb({ title = title, html = localized })
         end)
     end)
     return {
@@ -208,9 +268,21 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
             cancelled = true
             if fetch_job and fetch_job.cancel then fetch_job:cancel() end
             if asset_job and asset_job.cancel then asset_job:cancel() end
-            if decorate_job and decorate_job.cancel then decorate_job:cancel() end
         end,
     }
+end
+
+--- 已缓存章节：清除旧版误注入的社区热度虚线。
+---
+--- 纯本地文件操作，同步完成；无论清理成败都回原路径，调用方照常开章。
+---@param path string
+---@param cb fun(path: string|nil)
+function Chapter.refreshCached(path, cb)
+    local cleaned = rewriteCachedHtml(path)
+    if cleaned then
+        logger.dbg("weread stripped injected underlines", path)
+    end
+    cb(path)
 end
 
 return Chapter

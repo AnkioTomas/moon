@@ -10,13 +10,10 @@ return {
     title = _("X-Ray"),
     icon = "person_search",
     scope = "reader",
-    ---@param ctx BookQuickPanelContext|nil
+    --- 未显式关闭即可用（老配置缺该键时视为开启）。
     ---@return boolean
-    available = function(ctx)
-        if require("utils.settings").get().book_xray_enabled == false then
-            return false
-        end
-        return true
+    available = function()
+        return require("utils.settings").get().book_xray_enabled ~= false
     end,
     ---@param ctx BookQuickPanelContext
     ---@return void

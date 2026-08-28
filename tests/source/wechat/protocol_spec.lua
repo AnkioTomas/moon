@@ -98,6 +98,59 @@ do
     Assert.eq(err, "shard md5 mismatch")
 end
 
+-- decodeShards：长正文（swapPositions 多位置分支）
+--
+-- 反向构造：从明文 base64 出发，按 reverseSwaps 的交换序列倒序施加得到混淆串，
+-- 解码后必须还原。交换下标恒小于 len-n-1，不会碰到 swapPositions 读取的尾部字节，
+-- 所以位置表可以直接从明文 base64 上算。
+do
+    local function upvalue(fn, name)
+        local i = 1
+        while true do
+            local n, v = debug.getupvalue(fn, i)
+            if n == nil then
+                return nil
+            end
+            if n == name then
+                return v
+            end
+            i = i + 1
+        end
+    end
+    local decodeEncodedBody = upvalue(Protocol.decodeShards, "decodeEncodedBody")
+    Assert.not_nil(decodeEncodedBody)
+    local swapPositions = upvalue(decodeEncodedBody, "swapPositions")
+    Assert.not_nil(swapPositions)
+
+    local plain = string.rep("微信读书章节正文 weread chapter body. ", 20)
+    local b64 = require("utils.text").base64Encode(plain)
+    Assert.is_true(#b64 > 200)
+
+    local positions = swapPositions(b64)
+    Assert.is_true(#positions > 2, "长输入应走多位置分支")
+    Assert.eq(#positions % 2, 0)
+
+    -- reverseSwaps 实际执行的交换序列
+    local ops = {}
+    for i = #positions, 1, -2 do
+        for k = 1, 0, -1 do
+            ops[#ops + 1] = { positions[i] + k + 1, positions[i - 1] + k + 1 }
+        end
+    end
+    local chars = {}
+    for i = 1, #b64 do
+        chars[i] = b64:sub(i, i)
+    end
+    for i = #ops, 1, -1 do
+        local a, b = ops[i][1], ops[i][2]
+        chars[a], chars[b] = chars[b], chars[a]
+    end
+    local body = "x" .. table.concat(chars)
+    local text, err = Protocol.decodeShards(md5(body):upper() .. body)
+    Assert.is_nil(err)
+    Assert.eq(text, plain)
+end
+
 -- decodeShards：合法分片 → hello
 do
     -- 构造：对 base64("hello") 做与 reverseSwaps 相反的交换（len<11 → positions {0,2}）
