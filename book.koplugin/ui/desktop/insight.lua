@@ -213,7 +213,12 @@ function Insight.fetch(desktop)
     local function loadInsight()
         desktop._insight_fetch_cancel = source:readingInsightAsync(function(res, err)
             if desktop._closed or desktop.source ~= source
-                or (desktop.source_generation or 0) ~= generation then return end
+                or (desktop.source_generation or 0) ~= generation then
+                -- 结果作废也要放掉在飞标记，否则换回该源后统计页永久不再拉取
+                desktop._insight_fetching = false
+                desktop._insight_fetch_cancel = nil
+                return
+            end
             if not res then
                 finish({ has_data = false, error = err or _("加载失败") })
                 return

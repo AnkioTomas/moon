@@ -1,6 +1,9 @@
 --[[-- xray.marks：页内实体标记（findAllText → 屏幕框）。 --]]
 
 local Assert = require("support.assert")
+-- 全书扫描排在 nextTick（同步扫描会卡住绘制），断言前要冲刷
+local Stubs = require("support.stubs")
+Stubs.install()
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
 package.preload["utils.settings"] = function()
@@ -51,6 +54,9 @@ Marks.view = Marks.ui.view
 Marks._matches_key = nil
 Marks._render_key = nil
 Marks:rebuild()
+Assert.len(Marks._marks, 0, "首帧不做全书扫描，标记要等下一 tick")
+Stubs.flush()
+Marks:rebuild()
 Assert.len(Marks._marks, 2)
 Assert.eq(Marks._marks[1].entity.name, "John Doe")
 Assert.eq(Marks._marks[1].box.x, 0)
@@ -90,6 +96,8 @@ end
 package.loaded["xray.store"] = nil
 Marks._matches_key = nil
 Marks._render_key = nil
+Marks:rebuild()
+Stubs.flush()
 Marks:rebuild()
 Assert.len(Marks._marks, 1)
 Assert.eq(Marks._marks[1].box.x, 20)

@@ -165,6 +165,12 @@ function Client:_jsonAsync(method, path, opts, cb)
                 cb(nil, data.msg or _("令牌无效或未登录"))
                 return
             end
+            -- 非 2xx 一律失败。服务端 5xx/4xx 的错误页有时也是 JSON 且不带业务
+            -- code 字段，只看 data.code 会把它当成功，上报类调用据此清掉脏标记。
+            if code < 200 or code >= 300 then
+                cb(nil, data.msg or T(_("请求失败 (HTTP %1)"), tostring(code)))
+                return
+            end
             if data.code and data.code ~= 200 then
                 cb(nil, data.msg or T(_("错误码 %1"), tostring(data.code)))
                 return

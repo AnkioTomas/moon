@@ -23,8 +23,19 @@ package.preload["utils.db.stats"] = function()
         end,
         replaceSynced = function(source_id, replace, incoming)
             if replace_fails then return nil end
+            -- 与真身同语义：清理范围由本批数据的时间窗口界定，且只删合成行
             if type(replace) == "table" then
-                StatsDBStub.deleteSyncedBySource(source_id)
+                local from, to
+                for _, row in ipairs(incoming or {}) do
+                    local ts = tonumber(row.start_time)
+                    if ts then
+                        from = (from == nil or ts < from) and ts or from
+                        to = (to == nil or ts > to) and ts or to
+                    end
+                end
+                if from and to then
+                    StatsDBStub.deleteSyntheticInRange(source_id, from, to)
+                end
             end
             local result = { imported = 0, skipped = 0 }
             for _, row in ipairs(incoming) do
@@ -49,10 +60,18 @@ package.preload["utils.db.stats"] = function()
             saved[#saved + 1] = row
             return true
         end,
-        deleteSyncedBySource = function(source_id)
+        deleteSyntheticInRange = function(source_id, from_ts, to_ts, prefix)
             local kept = {}
             for _, row in ipairs(rows) do
-                if row.source_id == source_id and row.sync_status == 1 then
+                local ts = tonumber(row.start_time) or 0
+                local synthetic = type(row.stable_id) == "string"
+                    and row.stable_id:sub(1, 2) == "__"
+                    and (row.stable_id:find(":day:", 1, true) ~= nil
+                        or row.stable_id:find(":book:", 1, true) ~= nil)
+                local in_prefix = prefix == nil
+                    or (type(row.stable_id) == "string" and row.stable_id:sub(1, #prefix) == prefix)
+                if row.source_id == source_id and synthetic and in_prefix
+                    and ts >= from_ts and ts <= to_ts then
                     deleted_synced = deleted_synced + 1
                 else
                     kept[#kept + 1] = row
@@ -61,7 +80,6 @@ package.preload["utils.db.stats"] = function()
             rows = kept
             return true
         end,
-        deleteSyncedByStablePrefix = function() return true end,
         summaryBySource = function() return { total_seconds = 0 } end,
         unsyncedBySource = function() return {} end,
     }
@@ -137,10 +155,21 @@ Assert.eq(#saved, 3)
 Assert.eq(saved[3].sync_status, 1, "pull 记录必须直接标记为已同步")
 Assert.eq(rows[1].sync_status, 1, "pull 命中本地重复记录时必须确认其同步状态")
 
+-- replace 的清理范围只能是「本批回包覆盖的时间窗口内的合成行」：
+-- 窗口外的历史合成行、以及任何本地逐页记录（推送成功后同样是 sync_status=1）
+-- 都不属于云端，删掉就是抹用户数据。
 deleted_synced = 0
 rows[#rows + 1] = {
     source_id = "wechat", stable_id = "__wr:day:1", page = 0,
     start_time = 1, duration = 10, total_pages = 0, sync_status = 1,
+}
+rows[#rows + 1] = {
+    source_id = "wechat", stable_id = "__wr:day:1000", page = 0,
+    start_time = 1000, duration = 10, total_pages = 0, sync_status = 1,
+}
+rows[#rows + 1] = {
+    source_id = "wechat", stable_id = "book-1", page = 7,
+    start_time = 1001, duration = 30, total_pages = 200, sync_status = 1,
 }
 local replaced
 Stats.pull({
@@ -160,19 +189,26 @@ Stats.pull({
 end)
 Stubs.flush()
 Assert.is_true(replaced.ok)
-Assert.eq(deleted_synced, 1)
-local wechat_rows = 0
+Assert.eq(deleted_synced, 1, "只该删窗口内那一条合成行")
+
+local seen_ids = {}
 for _, row in ipairs(rows) do
     if row.source_id == "wechat" then
-        wechat_rows = wechat_rows + 1
-        Assert.eq(row.stable_id, "__wr:day:1000")
-        Assert.eq(row.duration, 99)
+        seen_ids[row.stable_id] = row
     end
 end
-Assert.eq(wechat_rows, 1)
+Assert.not_nil(seen_ids["__wr:day:1"], "窗口外的历史合成行必须保留")
+Assert.eq(seen_ids["__wr:day:1"].duration, 10)
+Assert.not_nil(seen_ids["book-1"], "本地逐页记录不属于云端，绝不能被 pull 删掉")
+Assert.eq(seen_ids["__wr:day:1000"].duration, 99, "窗口内的合成行由本批数据覆盖")
 
 -- ── syncStatsAsync 必须与 Stats.pull 走同一条解析：{ rows, replace } 回包要真入库 ──
 deleted_synced = 0
+-- 先埋一条落在本次窗口（start_time=2000）内的旧合成行，替换才可观测
+rows[#rows + 1] = {
+    source_id = "wechat", stable_id = "__wr:day:2000", page = 0,
+    start_time = 2000, duration = 7, total_pages = 0, sync_status = 1,
+}
 local synced
 Stats.syncAsync({
     id = "wechat",

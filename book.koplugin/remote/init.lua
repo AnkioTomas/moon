@@ -181,6 +181,33 @@ function Remote.port()
     return tonumber(Settings.get().remote_port) or 9528
 end
 
+--- 生成 n 字节随机数的十六进制串。
+---
+--- 优先 /dev/urandom。`math.random` 未播种时 LuaJIT 每次启动给出同一序列，
+--- 令牌会在所有设备上完全一致——等于没有令牌。只有 urandom 不可用（极少见）
+--- 才退回时间/地址混合播种的 math.random，并记一条 warn。
+---@param n integer 字节数
+---@return string 长度为 2n 的小写十六进制
+local function randomHex(n)
+    local f = io.open("/dev/urandom", "rb")
+    if f then
+        local raw = f:read(n)
+        f:close()
+        if type(raw) == "string" and #raw == n then
+            return (raw:gsub(".", function(ch)
+                return string.format("%02x", ch:byte())
+            end))
+        end
+    end
+    logger.warn("remote: /dev/urandom unavailable, token entropy degraded")
+    math.randomseed(os.time() + tonumber(tostring({}):match("0x(%x+)") or "0", 16))
+    local bytes = {}
+    for i = 1, n do
+        bytes[i] = string.format("%02x", math.random(0, 255))
+    end
+    return table.concat(bytes)
+end
+
 --- 访问令牌（首次使用时生成并持久化）。所有 API 都要它，
 --- 否则同网任何人都能读写设备文件。
 ---@return string
@@ -188,11 +215,7 @@ function Remote.token()
     local c = Settings.get()
     local token = c.remote_token
     if type(token) ~= "string" or #token < 16 then
-        local bytes = {}
-        for i = 1, 16 do
-            bytes[i] = string.format("%02x", math.random(0, 255))
-        end
-        token = table.concat(bytes)
+        token = randomHex(16)
         c.remote_token = token
         Settings.save(c)
     end
@@ -402,6 +425,12 @@ local function renameTo(path, to)
     path, to = existingPath(path), newPath(to)
     if not path or not to then
         return nil, "path outside managed roots"
+    end
+    -- isProtected 只挡凭证目录本身及其祖先，挡不住目录里的单个文件：
+    -- 把 settings/moon.lua 改名搬出去，再 /download 就能拿到 token。
+    if isSecret(path) or isSecret(to) then
+        logger.warn("book remote reject rename of config file:", path, "→", to)
+        return nil, "protected path"
     end
     if not lfs.attributes(path) then
         return nil, "not found"

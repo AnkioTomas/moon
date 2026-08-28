@@ -26,8 +26,14 @@ package.preload["utils.db.note"] = function()
             }
             return true
         end,
+        -- 返回副本：真身每次都从 sqlite 新建表。共享引用会让调用方手里的 row
+        -- 跟着库里的行一起变，把「期间被改过」的判定悄悄变成永远相等。
         get = function(source_id, stable_id, chapter_idx)
-            return rows[source_id .. ":" .. stable_id .. ":" .. (chapter_idx or 0)]
+            local row = rows[source_id .. ":" .. stable_id .. ":" .. (chapter_idx or 0)]
+            if not row then return nil end
+            local copy = {}
+            for k, v in pairs(row) do copy[k] = v end
+            return copy
         end,
         upsertRemote = function(source_id, stable_id, chapter_idx, payload, updated_at)
             local key = source_id .. ":" .. stable_id .. ":" .. (chapter_idx or 0)
@@ -46,9 +52,13 @@ package.preload["utils.db.note"] = function()
             end
             return out
         end,
-        markSynced = function(source_id, stable_id, chapter_idx, updated_at)
+        -- 与真身同语义：payload 与 sync_status 同一条语句写入，受 updated_at 乐观锁保护
+        markSynced = function(source_id, stable_id, chapter_idx, updated_at, payload)
             local row = rows[source_id .. ":" .. stable_id .. ":" .. chapter_idx]
-            if row and row.updated_at == updated_at then row.sync_status = 1 end
+            if row and row.updated_at == updated_at then
+                row.sync_status = 1
+                if payload ~= nil then row.payload = payload end
+            end
             return true
         end,
     }
@@ -283,6 +293,50 @@ do
     Assert.is_nil(result_err)
     Assert.eq(rows["empty:book3.epub:0"].payload, "[snapshot-kept]",
         "远端空回包不能覆盖已同步的本地划线")
+end
+
+-- 上传窗口内用户又划了线：不能用上传时那份快照 + 旧修订号覆盖回去。
+-- 曾经的写法是「先 upsert 旧 payload + 旧 updated_at，再 markSynced」，
+-- 第一步把新划的线抹掉，第二步的乐观锁于是恰好匹配、脏标记也被清掉。
+do
+    local racing = { id = "racing" }
+    -- payload 必须经 json stub 的 encode 生成，decode 才认得（否则 sync 在解码处就退出）
+    local JSON = require("json")
+    local uploaded_payload = JSON.encode({
+        { datetime = "2026-08-24", page = "/body/p[1].0" },
+    })
+    local newer_payload = JSON.encode({
+        { datetime = "2026-08-24", page = "/body/p[1].0" },
+        { datetime = "2026-08-24", page = "/body/p[2].0" },
+    })
+    rows["racing:book4.epub:0"] = {
+        source_id = "racing",
+        stable_id = "book4.epub",
+        chapter_idx = 0,
+        payload = uploaded_payload,
+        updated_at = 100,
+        sync_status = 0,
+    }
+    racing.pushNotesAsync = function(_, _identity, _annotations, cb)
+        -- 模拟上传耗时期间用户新划一条线：payload 与修订号都变了
+        rows["racing:book4.epub:0"].payload = newer_payload
+        rows["racing:book4.epub:0"].updated_at = 101
+        rows["racing:book4.epub:0"].sync_status = 0
+        cb({ code = 200 })
+    end
+    racing.pullNotesAsync = function(_, _identity, cb) cb({}) end
+
+    local pushed_result
+    Note.syncAsync(racing, { identity = {
+        source_id = "racing", stable_id = "book4.epub", source = racing,
+    }, dirty_only = true }, function(result) pushed_result = result end)
+    Stubs.flush()
+
+    local row = rows["racing:book4.epub:0"]
+    Assert.eq(row.payload, newer_payload, "上传期间新划的线不能被旧快照覆盖")
+    Assert.eq(row.updated_at, 101, "修订号不能被回退")
+    Assert.eq(row.sync_status, 0, "本地仍有未上传内容，脏标记必须保留")
+    Assert.eq(pushed_result.pushed, 1, "这次上传本身是成功的")
 end
 
 _G.G_reader_settings = previous_settings

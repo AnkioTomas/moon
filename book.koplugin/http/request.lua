@@ -598,7 +598,12 @@ function Request.writeResponseToFile(res, dest, opts, cb)
     ---@param ok boolean
     ---@param reason any 失败原因
     local function finish(ok, reason)
-        pcall(file.close, file)
+        -- close 的返回值必须判：写入走缓冲，磁盘满时前面每片 write 都「成功」，
+        -- 错误只在最后 flush 时冒出来。丢掉它就等于把半截文件当成功下载交出去。
+        local pok, closed, close_err = pcall(function() return file:close() end)
+        if ok and (not pok or not closed) then
+            ok, reason = false, close_err or "close failed"
+        end
         if not ok then
             pcall(os.remove, dest)
         end

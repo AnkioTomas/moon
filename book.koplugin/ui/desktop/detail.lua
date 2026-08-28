@@ -340,6 +340,9 @@ end
 --- Widget 关闭时触发 close_callback。
 function Detail:onCloseWidget()
     self._closed = true
+    if self[1] and self[1].free then
+        self[1]:free()
+    end
     local cb = self.close_callback
     self.close_callback = nil
     if cb then
@@ -917,6 +920,9 @@ function Detail:rebuild()
         },
     }
 
+    -- 先接上新树再释放旧树：reload（刮削/编辑后）会反复 rebuild，旧树里的封面
+    -- BlitBuffer 只在 free 时释放，不放就是每次刮削漏一张全屏封面。
+    local old = self[1]
     self[1] = FrameContainer:new{
         bordersize = 0,
         padding = 0,
@@ -924,6 +930,9 @@ function Detail:rebuild()
         dimen = Geom:new{ w = w, h = h },
         VerticalGroup:new(root_kids),
     }
+    if old and old.free then
+        old:free()
+    end
     self.dimen = Geom:new{ x = 0, y = 0, w = w, h = h }
 end
 

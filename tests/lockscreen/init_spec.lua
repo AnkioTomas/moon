@@ -182,7 +182,8 @@ local ok_run, err_run = pcall(function()
     saved.screensaver_document_cover = "/old/cover.png"
     saved.screensaver_show_message = true
 
-    -- 残留 compose.png 不得让 setMode 立刻 applyCover（准备态必须是 disable）
+    -- 残留 compose.png 不得让 setMode 立刻 applyCover：新图生成前保持用户原配置
+    -- （以前这里会写 disable，把用户自己设的锁屏方式永久关掉）
     require("utils.paths").ensureScreensaverDir()
     local stale = assert(io.open(compose_path, "wb"))
     stale:write(PNG8)
@@ -190,8 +191,8 @@ local ok_run, err_run = pcall(function()
     LockScreen.setMode("compose")
     Assert.is_true(LockScreen.isCompose())
     Assert.eq(common.lock_screen, "compose")
-    Assert.eq(saved.screensaver_type, "disable")
-    Assert.is_nil(saved.screensaver_document_cover)
+    Assert.eq(saved.screensaver_type, "cover", "尚未接管前不得改动用户锁屏方式")
+    Assert.eq(saved.screensaver_document_cover, "/old/cover.png")
 
     -- 账单是完整报告卡，位置固定居中，且底层 API 不能写入位置配置。
     local previous_position = common.lock_screen_position
@@ -284,9 +285,11 @@ local ok_run, err_run = pcall(function()
     Assert.is_nil(last_download.url)
 
     online = true
+    -- 切回 KOReader 锁屏：撤下接管并还原用户接管前的配置
     LockScreen.setMode("ko")
     Assert.is_false(LockScreen.isCompose())
-    Assert.eq(saved.screensaver_type, "disable")
+    Assert.eq(saved.screensaver_type, "cover", "接管前的锁屏方式必须还原")
+    Assert.eq(saved.screensaver_document_cover, "/old/cover.png")
     Assert.is_true(saved.screensaver_show_message)
 end)
 

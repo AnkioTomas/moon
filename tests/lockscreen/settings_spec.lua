@@ -31,6 +31,10 @@ _G.G_reader_settings = {
 local Settings = require("lockscreen.settings")
 
 local ok_run, err_run = pcall(function()
+    -- 用户原本自己设的锁屏方式：接管前必须被快照，clearCover 时原样还回去
+    saved.screensaver_type = "cover"
+    saved.screensaver_show_message = true
+
     -- applyCover：document_cover 接管并关掉提示文字
     local cover_path = "/tmp/moon-lockscreen-test-cover.png"
     local cover_file = assert(io.open(cover_path, "wb"))
@@ -49,10 +53,16 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(saved.screensaver_show_message)
     os.remove(cover_path)
 
+    -- clearCover：还原接管前的配置，而不是一律 disable
     Settings.clearCover()
-    Assert.eq(saved.screensaver_type, "disable")
-    Assert.is_nil(saved.screensaver_document_cover)
+    Assert.eq(saved.screensaver_type, "cover", "用户原本的锁屏方式必须还原")
+    Assert.is_nil(saved.screensaver_document_cover, "原本没有的键要删掉")
     Assert.is_true(saved.screensaver_show_message)
+
+    -- 没接管过（无快照）时 clearCover 不许乱动用户配置
+    saved.screensaver_type = "random_image"
+    Settings.clearCover()
+    Assert.eq(saved.screensaver_type, "random_image")
 end)
 
 _G.G_reader_settings = previous_settings

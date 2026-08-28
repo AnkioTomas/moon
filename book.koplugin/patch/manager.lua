@@ -71,10 +71,12 @@ local function writeFile(path, content)
     local fh, err = io.open(tmp, "wb")
     if not fh then return nil, err or "cannot open " .. tmp end
     local ok, werr = fh:write(content)
-    fh:close()
-    if not ok then
+    -- close 也要判：写入走缓冲，磁盘满 / 断电前的 flush 失败只在 close 时报出来。
+    -- 不判就会把半截文件 rename 成正式补丁，KOReader 下次启动直接加载坏文件。
+    local cok, cerr = fh:close()
+    if not ok or not cok then
         os.remove(tmp)
-        return nil, werr
+        return nil, werr or cerr or "write failed"
     end
     local rok, rerr = os.rename(tmp, path)
     if not rok then

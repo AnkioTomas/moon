@@ -149,15 +149,23 @@ function NoteDB.unsynced(source_id)
     return rows(Base.query(sql .. " ORDER BY updated_at ASC;"))
 end
 
---- 把快照标记为已同步（sync_status=1），仅当 updated_at 仍是上传时那一版。
---- updated_at 参与 WHERE 是乐观锁：上传期间本地又改过就不匹配，脏标记得以保留，
---- 下轮同步会重新上传。返回值只表示 SQL 执行成功，不代表真的有行被更新。
+--- 上传成功后落定这一版快照：写回 payload 并标记已同步，一条语句完成。
+---
+--- `updated_at` 参与 WHERE 是乐观锁，且**必须**和 payload 写入同一条语句：
+--- 分成「先覆盖 payload、再 markSynced」两步时，第一步会用上传前的旧修订号把
+--- 上传期间用户新划的线覆盖掉，第二步的乐观锁于是恰好匹配、脏标记也被清掉。
+--- payload 允许为 nil（只标记不写内容）；修订号不变，因为内容语义上仍是这一版
+--- （源侧只是回填了远端分配的 id）。
+---
+--- 返回值只表示 SQL 执行成功。是否真的命中那一行由调用方在同一个 DbQueue 任务里
+--- 比对 updated_at 判断——ljsqlite3 这层拿不到 changes()。
 ---@param source_id string
 ---@param stable_id string
 ---@param chapter_idx integer|nil nil 或 0 表示整本书那一份快照
 ---@param updated_at number 上传时快照的修订号，缺失则拒绝执行
+---@param payload string|nil 源侧回填过 id 的快照
 ---@return boolean false 表示参数非法或 SQL 失败
-function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at)
+function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at, payload)
     source_id = Base.requireSourceId(source_id)
     chapter_idx = tonumber(chapter_idx) or 0
     updated_at = tonumber(updated_at)
@@ -166,6 +174,16 @@ function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at)
         return false
     end
     Base.ensure()
+    if payload ~= nil then
+        if type(payload) ~= "string" then
+            return false
+        end
+        return Base.exec(
+            [[UPDATE notes SET sync_status=1, payload=?
+              WHERE source_id=? AND stable_id=? AND chapter_idx=? AND updated_at=?;]],
+            payload, source_id, stable_id, chapter_idx, updated_at
+        ) ~= nil
+    end
     return Base.exec(
         [[UPDATE notes SET sync_status=1
           WHERE source_id=? AND stable_id=? AND chapter_idx=? AND updated_at=?;]],

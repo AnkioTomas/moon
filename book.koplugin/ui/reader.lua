@@ -39,7 +39,9 @@ function Reader.attach(plugin)
     if ui.view and ui.view.registerViewModule then
         local bars = require("ui.reader.bars")
         ui.view:registerViewModule("book_bars", bars)
-        bars:install(ui)
+        -- 点号定义：冒号调用会把模块表当 ui 传进去（安装标记落在模块上，第二本书起
+        -- 直接静默跳过、顶底条不再劫持）。
+        bars.install(ui)
         bars:startClock()
     end
     if ui.handleEvent then
