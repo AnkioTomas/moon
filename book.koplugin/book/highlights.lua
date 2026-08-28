@@ -4,8 +4,6 @@
 @module koplugin.book.book.highlights
 --]]
 
-local Session = require("ui.reader.session")
-
 local Highlights = {}
 
 --- 算高亮条目的去重键：有 id 就用 id，否则用文本+章节+页码+起止位置拼串。
@@ -30,8 +28,9 @@ end
 ---@param source_id string|nil
 ---@param stable_id string|nil
 ---@param chapter_idx integer|nil
+---@param current_items table[]|nil 当前阅读器尚未落库的注解
 ---@return table[]
-function Highlights.collect(source_id, stable_id, chapter_idx)
+function Highlights.collect(source_id, stable_id, chapter_idx, current_items)
     local items, seen = {}, {}
     --- 收一条高亮：只要有 drawer（划线）且文本非空的条目，按 key 去重。
     ---@param item any 非表 / 无 drawer / 空文本一律丢弃
@@ -46,13 +45,8 @@ function Highlights.collect(source_id, stable_id, chapter_idx)
         items[#items + 1] = item
     end
 
-    local cur = Session.current()
-    local identity = cur and cur.identity
-    if identity and identity.source_id == source_id and identity.stable_id == stable_id then
-        local annotations = cur.ui and cur.ui.annotation and cur.ui.annotation.annotations
-        for _, item in ipairs(annotations or {}) do push(item) end
-        if #items > 0 then return items end
-    end
+    for _, item in ipairs(current_items or {}) do push(item) end
+    if #items > 0 then return items end
 
     if type(source_id) ~= "string" or type(stable_id) ~= "string" then
         return items
@@ -76,18 +70,19 @@ end
 ---@param stable_id string
 ---@param chapter_idx integer|nil
 ---@param index integer 1-based 轮换索引
+---@param current_items table[]|nil 当前阅读器尚未落库的注解
 ---@return string|nil text
 ---@return string|nil source 出处
-function Highlights.pick(source_id, stable_id, chapter_idx, index)
-    local items = Highlights.collect(source_id, stable_id, chapter_idx)
+function Highlights.pick(source_id, stable_id, chapter_idx, index, current_items)
+    local items = Highlights.collect(source_id, stable_id, chapter_idx, current_items)
     if #items == 0 then return nil, nil end
     local picked = items[(tonumber(index) or 0) % #items + 1]
     local parts = {}
     local chapter = picked.chapter
         or (type(picked.chapters) == "table" and picked.chapters[1])
     if type(chapter) == "string" and chapter ~= "" then
-        local U = require("lockscreen.components.util")
-        local cleaned = U.cleanChapterTitle(chapter)
+        local Text = require("utils.text")
+        local cleaned = Text.cleanChapterTitle and Text.cleanChapterTitle(chapter) or chapter
         parts[#parts + 1] = cleaned ~= "" and cleaned or chapter
     end
     local page = tonumber(picked.pageno) or tonumber(picked.page)

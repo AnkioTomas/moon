@@ -20,6 +20,7 @@ local MoonSettings = require("utils.settings")
 local MoonFont = require("utils.font")
 local LockScreen = require("lockscreen.init")
 local Remote = require("remote.init")
+local RemoteUI = require("remote.ui")
 local SourceRegistry = require("source.registry")
 local Host = require("host")
 local _ = require("gettext")
@@ -219,7 +220,7 @@ function Settings.build(desktop)
         elseif sub == "language" then
             appendSection(packed, card_w, _("语言与输入"), Language.rows(desktop))
         elseif sub == "remote" then
-            appendSection(packed, card_w, _("远程管理"), Remote.menuRows(desktop))
+            appendSection(packed, card_w, _("远程管理"), RemoteUI.menuRows(desktop))
         elseif sub == "quickpanel" then
             for _, section in ipairs(QuickPanel.sections(desktop)) do
                 appendSection(packed, card_w, section.title, section.rows)

@@ -8,6 +8,20 @@
 
 local Text = {}
 
+--- 去掉常见章节前缀，供业务和展示层共用。
+---@param title string|nil
+---@return string
+function Text.cleanChapterTitle(title)
+    if type(title) ~= "string" then return "" end
+    return title:gsub("^%s+", "")
+        :gsub("%s+$", "")
+        :gsub("^第%d+章[:：%s]*", "")
+        :gsub("^[Cc]hapter%s+%d+[:%.%s]*", "")
+        :gsub("^[Cc]h%.%s*%d+[:%.%s]*", "")
+        :gsub("^%s+", "")
+        :gsub("%s+$", "")
+end
+
 --- 去首尾空白；nil 视为空字符串。
 ---@param s any
 ---@return string

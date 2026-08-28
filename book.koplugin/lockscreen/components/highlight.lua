@@ -28,13 +28,15 @@ function M.next()
     local source_id = identity and identity.source_id
     local stable_id = identity and identity.stable_id
     local chapter_idx = identity and identity.chapter_idx
-    local items = Highlights.collect(source_id, stable_id, chapter_idx)
+    local annotations = cur and cur.ui and cur.ui.annotation and cur.ui.annotation.annotations
+    local items = Highlights.collect(source_id, stable_id, chapter_idx, annotations)
     if #items == 0 then
         local book = Current.book()
         if book then
             source_id = book.source_id
             stable_id = book.stable_id
             chapter_idx = book.chapter_idx
+            annotations = nil
             items = Highlights.collect(source_id, stable_id, chapter_idx)
         end
     end
@@ -44,7 +46,7 @@ function M.next()
     local index = (tonumber(settings.lock_screen_quote_index) or 0) % #items + 1
     settings.lock_screen_quote_index = index
     MoonSettings.save()
-    return Highlights.pick(source_id, stable_id, chapter_idx, index)
+    return Highlights.pick(source_id, stable_id, chapter_idx, index, annotations)
 end
 
 -- quote 布局由 compose 传入位置和宽窄，组件只负责取得下一条高亮。
