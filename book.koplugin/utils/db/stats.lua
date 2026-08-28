@@ -29,32 +29,40 @@ local function isRemoteBookStableId(stable_id)
         and stable_id:sub(1, 2) == "__"
 end
 
---- 删除指定源全部已同步统计（云端 pull 覆盖前调用）。
+--- 云端 pull 覆盖前的清理：**只删本次回包时间窗口内的合成行**。
+---
+--- 两条边界都是数据事故的教训，不能放宽：
+--- 1. 只删合成行（`__*:day:*` / `__*:book:*`）。本地逐页记录推送成功后也是
+---    `sync_status=1`，按 sync_status 删会把用户自己设备采集的阅读历史一起删掉。
+--- 2. 只删窗口内。回包通常只覆盖近一个月，删整源等于每同步一次就抹掉更早的历史。
 ---@param source_id string
+---@param from_ts number 窗口起（含）
+---@param to_ts number 窗口止（含）
+---@param prefix string|nil 限定 stable_id 前缀；缺省则窗口内全部合成行
 ---@return boolean
-function StatsDB.deleteSyncedBySource(source_id)
+function StatsDB.deleteSyntheticInRange(source_id, from_ts, to_ts, prefix)
     source_id = Base.requireSourceId(source_id)
-    if not source_id then
+    from_ts = tonumber(from_ts)
+    to_ts = tonumber(to_ts)
+    if not source_id or not from_ts or not to_ts then
         return false
     end
     Base.ensure()
-    return Base.exec([[DELETE FROM reading_stats WHERE source_id=? AND sync_status=1;]], source_id) ~= nil
-end
-
---- 删除指定源、匹配 stable_id 前缀的已同步统计。
----@param source_id string
----@param prefix string
----@return boolean
-function StatsDB.deleteSyncedByStablePrefix(source_id, prefix)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(prefix) ~= "string" or prefix == "" then
-        return false
+    if prefix ~= nil then
+        if type(prefix) ~= "string" or prefix == "" then
+            return false
+        end
+        return Base.exec(
+            [[DELETE FROM reading_stats
+              WHERE source_id=? AND start_time>=? AND start_time<=? AND stable_id LIKE ?;]],
+            source_id, from_ts, to_ts, prefix .. "%"
+        ) ~= nil
     end
-    Base.ensure()
     return Base.exec(
-        [[DELETE FROM reading_stats WHERE source_id=? AND sync_status=1 AND stable_id LIKE ?;]],
-        source_id,
-        prefix .. "%"
+        [[DELETE FROM reading_stats
+          WHERE source_id=? AND start_time>=? AND start_time<=?
+            AND (stable_id GLOB '__*:day:*' OR stable_id GLOB '__*:book:*');]],
+        source_id, from_ts, to_ts
     ) ~= nil
 end
 
@@ -230,14 +238,26 @@ function StatsDB.replaceSynced(source_id, replace, rows)
     end
     local result = { imported = 0, skipped = 0 }
     local ok, err = pcall(function()
-        if type(replace) == "table" then
+        -- 清理范围由本批数据自己界定：回包没覆盖到的时间段一律不动。
+        -- rows 为空（协议异常/网络截断）时 from 为 nil，什么都不删——与
+        -- book.note 的 saveRemoteBuckets 同一立场：宁可漏掉云端删除。
+        local from, to
+        for _, row in ipairs(rows or {}) do
+            local ts = tonumber(row.start_time)
+            if ts then
+                from = (from == nil or ts < from) and ts or from
+                to = (to == nil or ts > to) and ts or to
+            end
+        end
+        if type(replace) == "table" and from and to then
             if replace.mode == "prefix" and type(replace.stable_prefixes) == "table" then
                 for _, prefix in ipairs(replace.stable_prefixes) do
-                    assert(StatsDB.deleteSyncedByStablePrefix(source_id, prefix),
+                    assert(StatsDB.deleteSyntheticInRange(source_id, from, to, prefix),
                         "failed to clear synced reading stats")
                 end
             else
-                assert(StatsDB.deleteSyncedBySource(source_id), "failed to clear synced reading stats")
+                assert(StatsDB.deleteSyntheticInRange(source_id, from, to),
+                    "failed to clear synced reading stats")
             end
         end
         for _, row in ipairs(rows or {}) do

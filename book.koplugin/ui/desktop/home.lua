@@ -150,6 +150,10 @@ function Home.fetch(desktop)
     if not source then finish({ recent_err = gettext("当前数据源不可用"), reading = {} }); return end
     desktop._home_fetch_cancel = source:recentBooksAsync(24, function(res, err)
         if not valid() then
+            -- 结果作废也必须放掉在飞标记：不然换回这个源后 _home_fetching 恒为 true，
+            -- 主页永远停在旧内容。
+            desktop._home_fetching = false
+            desktop._home_fetch_cancel = nil
             return
         end
         local applied, boom = pcall(function()

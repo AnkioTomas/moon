@@ -32,6 +32,24 @@ do
     Assert.is_true(out:find("https://a/x.png", 1, true) == nil)
 end
 
+-- 无引号 src 的边界：空白类必须写 %s。曾经写成 [^\s"'=<>`]，Lua 模式里那是
+-- 「排除反斜杠和字母 s」，于是 src 会把后面的属性一起吞掉，带 s 的文件名被截断。
+do
+    local srcs = Html2Epub._collectImageSrcs([[<img src=photos/sunset.png width=100>]])
+    Assert.eq(#srcs, 1)
+    Assert.eq(srcs[1], "photos/sunset.png", "无引号 src 不能把后续属性吞进来")
+
+    local out = Html2Epub._rewriteImageSrcs(
+        [[<img src=photos/sunset.png width=100>]], { ["photos/sunset.png"] = "images/1.png" })
+    Assert.matches(out, "src=images/1%.png width=100")
+end
+
+-- 同一 src 出现多次只登记一次
+do
+    local srcs = Html2Epub._collectImageSrcs([[<img src="same.png"><img src="same.png">]])
+    Assert.eq(#srcs, 1)
+end
+
 -- plain text → paragraphs
 do
     local body = Html2Epub._ensureHtmlBody("hello\nworld")

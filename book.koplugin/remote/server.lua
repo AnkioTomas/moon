@@ -20,8 +20,14 @@ local Text = require("utils.text")
 
 local HEADER_LIMIT = 16 * 1024
 local CHUNK = 32 * 1024
---- 无字节进展的连接存活上限（秒）；pending 状态（写入中）豁免
+--- 无字节进展的连接存活上限（秒）；pending 状态（写入中）用 PENDING_TIMEOUT
 local IDLE_TIMEOUT = 120
+--- pending（等 handlers.save 回调）的存活上限（秒）。回调丢了就永远不回收，
+--- 连接与临时文件一起挂着，因此豁免必须有尽头。大文件落位可能很慢，给足余量。
+local PENDING_TIMEOUT = 30 * 60
+--- 同时在途连接上限。到顶后直接拒绝新连接：设备内存与 fd 都很紧，
+--- 没有上限时一个 for 循环的 curl 就能把 KOReader 拖死。
+local MAX_CONNS = 32
 
 local STATUS = {
     [200] = "OK",
@@ -159,6 +165,12 @@ function Server:_kill(conn)
         pcall(function() conn.file:close() end)
         conn.file = nil
     end
+    -- 下载中途断开（浏览器点取消、超时回收）时 body_file 还开着：
+    -- 不关就是每次一个 fd，几十次下载后 accept 直接 EMFILE。
+    if conn.body_file then
+        pcall(function() conn.body_file:close() end)
+        conn.body_file = nil
+    end
     if conn.temp then
         pcall(os.remove, conn.temp)
         conn.temp = nil
@@ -170,6 +182,11 @@ function Server:_accept()
     while true do
         local client = self._sock:accept()
         if not client then
+            return
+        end
+        if #self._conns >= MAX_CONNS then
+            logger.warn("book remote too many connections, dropping", #self._conns)
+            pcall(function() client:close() end)
             return
         end
         client:settimeout(0)
@@ -184,13 +201,15 @@ function Server:_accept()
     end
 end
 
---- 回收超过 IDLE_TIMEOUT 无字节进展的连接；pending（等 save 回调）豁免。
+--- 回收无进展的连接。pending（等 save 回调）用更宽的 PENDING_TIMEOUT 而非无限豁免：
+--- 回调因异常丢失时连接和上传临时文件会永久挂着。
 function Server:_reapIdle()
     local now = socket.gettime()
     for i = #self._conns, 1, -1 do
         local conn = self._conns[i]
-        if not conn.dead and conn.state ~= "pending" and now - conn.touched > IDLE_TIMEOUT then
-            logger.warn("book remote idle timeout, closing conn")
+        local limit = conn.state == "pending" and PENDING_TIMEOUT or IDLE_TIMEOUT
+        if not conn.dead and now - conn.touched > limit then
+            logger.warn("book remote idle timeout, closing conn", conn.state)
             self:_kill(conn)
             table.remove(self._conns, i)
         end
@@ -356,12 +375,18 @@ local function hostIsLiteral(headers)
 end
 
 --- 跨站写请求拦截：Origin 缺失（curl 等非浏览器）放过，存在则必须与 Host 一致。
+---
+--- `Origin: null` 必须拒绝：沙箱 iframe、data:/file: 页面发出的请求就长这样，
+--- 恰好是攻击者能构造的场景。放过它等于给跨站写开了个后门。
 ---@param headers table
 ---@return boolean
 local function sameOrigin(headers)
     local origin = headers["origin"]
-    if type(origin) ~= "string" or origin == "" or origin == "null" then
+    if type(origin) ~= "string" or origin == "" then
         return true
+    end
+    if origin == "null" then
+        return false
     end
     return origin:match("^https?://(.+)$") == headers["host"]
 end

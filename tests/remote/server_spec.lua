@@ -385,6 +385,15 @@ do
     local c_rebind = newClient({ "GET /api/list?path=/ HTTP/1.1\r\nHost: evil.example\r\n\r\n" })
     drain(serve(c_rebind, handlers))
     Assert.eq((parseResponse(c_rebind:output())), 403)
+
+    -- Origin: null（沙箱 iframe、data:/file: 页面）→ 403。曾经被当作「非浏览器」放过。
+    local c_null = newClient({
+        "POST /api/delete?path=/a HTTP/1.1\r\nHost: 192.168.1.5:9528\r\n" ..
+        "Origin: null\r\nContent-Length: 0\r\n\r\n",
+    })
+    drain(serve(c_null, handlers))
+    Assert.eq((parseResponse(c_null:output())), 403)
+    Assert.is_nil(calls.delete)
 end
 
 -- ── GET /api/list ─────────────────────────────────────

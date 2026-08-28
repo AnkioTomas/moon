@@ -35,8 +35,6 @@ local function pageCount(ui)
         or 0
 end
 
----@param item table
----@return integer
 --- 远端注解按 ``chapter_idx`` 分片落库（payload 一律为通用 KOReader 注解数组）。
 ---
 --- 只覆盖远端确实报告了的分片：远端一条都没报时不写任何分片。协议字段缺失与
@@ -122,16 +120,27 @@ function Note.save(ui, identity, done)
     })
 end
 
---- 把一条 notes 记录标记为已同步（按 row.updated_at 做乐观校验）。
---- 若期间本地又改过（updated_at 已变），markSynced 不会误清脏标记。
+--- 上传成功后落定这一版快照：写回源侧回填过 id 的 payload 并标记已同步。
+---
+--- 读-比对-写全在同一个 DbQueue 任务里：队列串行，所以这段相对其它库写入是原子的。
+--- 上传期间用户又划了线（updated_at 变了）时整条跳过——既不覆盖新内容，也不清脏
+--- 标记，下轮同步重新上传。
 ---@param row table notes 表行（含 source_id/stable_id/chapter_idx/updated_at）
----@param done fun(ok: boolean)
-local function confirm(row, done)
+---@param payload string|nil 源侧回填过远端 id 的快照
+---@param done fun(ok: boolean, stale: boolean|nil)
+local function confirm(row, payload, done)
+    local stale = false
     DbQueue.run(function()
-        assert(NoteDB.markSynced(row.source_id, row.stable_id, row.chapter_idx, row.updated_at),
-            "failed to confirm notes")
+        local live = NoteDB.get(row.source_id, row.stable_id, row.chapter_idx)
+        if not live or live.updated_at ~= row.updated_at then
+            stale = true
+            return
+        end
+        assert(NoteDB.markSynced(
+            row.source_id, row.stable_id, row.chapter_idx, row.updated_at, payload
+        ), "failed to confirm notes")
     end, {
-        on_done = function() done(true) end,
+        on_done = function() done(not stale, stale) end,
         on_failed = function(err)
             logger.warn("book.note confirm failed", row.stable_id, err)
             done(false)
@@ -252,29 +261,26 @@ function Note.syncAsync(source, opts, cb)
                     end
                     return
                 end
+                -- 源侧（如 wechat.lua）在上传过程中把远端分配的 wr_bookmark_id /
+                -- wr_review_id 原地写进了 annotations，必须落库，否则下轮会重复上传。
                 local ok_encode, pushed_payload = pcall(JSON.encode, Normalize.clean(annotations))
                 if not ok_encode then
                     finish(nil, "invalid local notes")
                     return
                 end
-                DbQueue.run(function()
-                    assert(NoteDB.upsert(
-                        row.source_id, row.stable_id, row.chapter_idx,
-                        pushed_payload, row.updated_at, false
-                    ), "failed to persist pushed notes")
-                end, {
-                    on_done = function()
-                        confirm(row, function(confirmed)
-                            if not confirmed then finish(nil, "notes confirm failed"); return end
-                            result.pushed = result.pushed + 1
-                            pullRemote()
-                        end)
-                    end,
-                    on_failed = function(persist_err)
-                        logger.warn("book.note persist pushed failed", row.stable_id, persist_err)
-                        finish(nil, "failed to persist pushed notes")
-                    end,
-                })
+                confirm(row, pushed_payload, function(confirmed, stale)
+                    if stale then
+                        -- 上传期间本地又改过：这次算推成功，但脏标记留着下轮再推
+                        logger.dbg("book.note confirm skipped: local changed during push",
+                            row.stable_id)
+                        result.pushed = result.pushed + 1
+                        pullRemote()
+                        return
+                    end
+                    if not confirmed then finish(nil, "notes confirm failed"); return end
+                    result.pushed = result.pushed + 1
+                    pullRemote()
+                end)
             end)
             return
         end
@@ -392,17 +398,6 @@ function Note.importLocalAsync(done)
     return { cancel = function() cancelled = true end }
 end
 
---- 能否交给 KOReader 渲染（rolling 文档）。
----
---- 两条硬约束，任一不满足都不能进 doc_settings：
---- 1. ``page`` 必须是 xpointer 字符串，否则 onReadSettings 会判定整份注解是 mupdf
----    格式，连本地划线一起搬去 ``annotations_paging``；
---- 2. 带 ``drawer`` 的必须有 pos0/pos1，否则 ReaderView:drawSavedHighlight 直接
----    ``getPosFromXPointer(nil)`` 抛错终止绘制。
----
---- 远端划线在开章定位成功前只留在 notes 表里。
----@param item table
----@return boolean
 --- 把本地 notes 快照定位并写入阅读器注解。
 ---
 --- 纯本地：读 sqlite、算 xpointer、写 doc_settings，不碰网络也不排 nextTick。
@@ -430,7 +425,16 @@ function Note.applyLocal(ui, identity)
         )
     end
     local current = ui.doc_settings:readSetting("annotations") or {}
-    annotations = Normalize.merge(annotations, current)
+    -- 注解形态跟文档走：ReaderUI 只会挂 rolling 或 paging 其中之一
+    annotations = Normalize.merge(annotations, current, ui.paging ~= nil)
+    -- 合并结果条数少于阅读器现有条数，说明本地有条目被判成不可渲染而被丢弃。
+    -- 这里是整体覆盖 doc_settings，写下去就是永久删除用户划线：宁可这次不显示
+    -- 云端划线，也不能删本地的。（分页文档的 page 是数字，曾经被误判过一次。）
+    if #annotations < #current then
+        logger.warn("book.note apply skip: merge would drop local annotations",
+            identity.stable_id, #current, #annotations)
+        return 0
+    end
     if #annotations == 0 and #current == 0 then
         return 0
     end

@@ -1,7 +1,8 @@
 --[[--
 插件 SQLite 连接与通用原语（$DATA/.moon/book.sqlite3）。
 
-表由 open → ensureSchema 建立并按 user_version 增量迁移。
+表由 open → ensureSchema 建立；缺列由无条件 ALTER 补齐（addColumn 幂等），
+`user_version` 只作记录用，不参与任何判定。
 
 使用 WAL 模式 + busy_timeout=5000，主/子进程均可安全访问。
 
@@ -13,7 +14,8 @@ local Paths = require("utils.paths")
 
 local Base = {}
 
-local SCHEMA_VERSION = 1
+-- 只写不读：存量库里出现过 1/2/4/5，写一个更大的值免得把版本号往回改。
+local SCHEMA_VERSION = 6
 
 local conn = nil
 local conn_is_subprocess_owned = false
@@ -287,10 +289,14 @@ CREATE INDEX IF NOT EXISTS idx_xray_entities_book
         return false, "create schema failed"
     end
 
-    local version_value = Base.rowexec("PRAGMA user_version;")
-    local version = tonumber(version_value) or 0
     -- Columns added after the original schema need explicit ALTERs because
     -- CREATE TABLE IF NOT EXISTS does not update an existing table.
+    --
+    -- 这里**不能**用 user_version 做门槛。历史上 SCHEMA_VERSION 走过 1→2→4→5 又回到 1，
+    -- 存量库的 user_version 比常量大，`version < SCHEMA_VERSION` 恒假 → 整段跳过，
+    -- 而 pending_progress 缺 extra 列会让每次进度写入报 "no such column" 并被
+    -- Base.exec 静默 warn 掉（表现为进度永不保存）。addColumn 自带 hasColumn 幂等，
+    -- 无条件跑一遍即可，版本号对正确性没有贡献。
     local columns = {
         { "books", "last_open", "INTEGER NOT NULL DEFAULT 0" },
         { "books", "last_chapter_idx", "INTEGER" },
@@ -298,18 +304,22 @@ CREATE INDEX IF NOT EXISTS idx_xray_entities_book
         { "books", "metadata_dirty", "INTEGER NOT NULL DEFAULT 0" },
         { "books", "metadata_updated_at", "INTEGER NOT NULL DEFAULT 0" },
         { "books", "reader_prefs", "TEXT" },
+        -- pending_progress 初版只有 fraction/chapter_idx/chapter_fraction/locator/
+        -- updated_at/sync_status（见 5f3a904），下面四列是后加的。
+        { "pending_progress", "chapter_title", "TEXT" },
+        { "pending_progress", "page", "INTEGER" },
+        { "pending_progress", "total_pages", "INTEGER" },
+        { "pending_progress", "extra", "TEXT" },
         { "reading_stats", "chapter_idx", "INTEGER" },
         { "reading_stats", "chapter_fraction", "REAL" },
         { "reading_stats", "sync_status", "INTEGER NOT NULL DEFAULT 0" },
         { "xray_entities", "aliases_json", "TEXT NOT NULL DEFAULT '[]'" },
         { "xray_entities", "payload_json", "TEXT NOT NULL DEFAULT '{}'" },
     }
-    if version < SCHEMA_VERSION then
-        for _, item in ipairs(columns) do
-            if not addColumn(item[1], item[2], item[3]) then
-                Base.exec("ROLLBACK;")
-                return false, "migrate column failed: " .. item[1] .. "." .. item[2]
-            end
+    for _, item in ipairs(columns) do
+        if not addColumn(item[1], item[2], item[3]) then
+            Base.exec("ROLLBACK;")
+            return false, "migrate column failed: " .. item[1] .. "." .. item[2]
         end
     end
 

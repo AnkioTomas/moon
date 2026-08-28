@@ -68,8 +68,19 @@ package.preload["utils.settings"] = function()
 end
 
 local registered_module
+local bars_installed_on
+-- install 是点号定义（首参就是 ui）：stub 必须按真身的约定校验，
+-- 否则 reader.lua 写成 bars:install(ui) 也照样绿——真机上第二本书起底栏劫持全失效。
 package.preload["ui.reader.bars"] = function()
-    return { startClock = function() end, install = function() end }
+    local Bars = {}
+    function Bars.install(arg)
+        bars_installed_on = arg
+    end
+    function Bars:startClock()
+        -- registerViewModule 会把 ui/view 挂到模块上，冒号调用是这里的约定
+        assert(self == Bars, "startClock 必须以方法形式调用")
+    end
+    return Bars
 end
 package.preload["lockscreen.init"] = function()
     return { refreshInBackground = function() end }
@@ -118,6 +129,7 @@ Assert.is_false(Reader.executeAction("missing", ui))
 Reader.attach(plugin)
 Assert.eq(native_ui, ui)
 Assert.eq(registered_module.name, "book_bars")
+Assert.eq(bars_installed_on, ui, "install 的首参必须是 ReaderUI，不能是模块自己")
 Assert.is_nil(ui._zones, "不应注册覆盖原生菜单的触摸区")
 
 native_ui = nil

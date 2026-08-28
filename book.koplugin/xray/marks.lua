@@ -283,8 +283,36 @@ function Marks.invalidate()
     end
 end
 
---- 按需重算当前屏幕上的标记框：扫描键变了才全书重扫，渲染键变了才重解析屏幕坐标。
---- 未开启或无阅读会话时清空标记。
+--- 排一次全书扫描到下一个 tick，完成后重绘。
+---
+--- 扫描是每个实体名一趟 findAllText，几十个实体的书要好几秒。rebuild 的调用点是
+--- paintTo：在那里同步扫描等于开书/翻页首帧直接卡死。放到 nextTick 后，页面先出来，
+--- 下划线晚一帧补上。
+---@param key string 本次扫描对应的 scanKey
+---@param entities table[]
+function Marks:scheduleScan(key, entities)
+    if self._scan_pending == key then
+        return
+    end
+    self._scan_pending = key
+    local ui = self.ui
+    UIManager:nextTick(function()
+        self._scan_pending = nil
+        -- 期间换书/关书：这次结果作废
+        if self.ui ~= ui or not Marks.enabled() or scanKey(ui, entities) ~= key then
+            return
+        end
+        self._matches = buildMatches(ui, entities)
+        self._matches_key = key
+        self._render_key = nil
+        if ui.dialog then
+            UIManager:setDirty(ui.dialog, "ui")
+        end
+    end)
+end
+
+--- 按需重算当前屏幕上的标记框：扫描键变了就排一次异步全书重扫，
+--- 渲染键变了才重解析屏幕坐标。未开启或无阅读会话时清空标记。
 function Marks:rebuild()
     if not self.ui or not Marks.enabled() then
         self._marks = {}
@@ -301,9 +329,12 @@ function Marks:rebuild()
         return
     end
     if matches_key ~= self._matches_key then
-        self._matches = buildMatches(self.ui, entities)
-        self._matches_key = matches_key
+        -- 旧命中属于别的书/别的实体集合，画出来就是错位下划线
+        self._matches = {}
+        self._marks = {}
         self._render_key = nil
+        self:scheduleScan(matches_key, entities)
+        return
     end
     local r_key = renderKey(self.ui, entities)
     if r_key == self._render_key then

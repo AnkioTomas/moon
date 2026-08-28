@@ -128,50 +128,54 @@ function TranslatePopup:requestTranslate()
     end)
 end
 
+--- 当前是否已有可用译文（占位文案不算）。
+---@param self BookTranslatePopup
+---@return string|nil 译文；尚未就绪时 nil
+local function readyTranslation(self)
+    local translated = self.translated
+    if type(translated) ~= "string" or translated == ""
+        or translated == _("正在翻译…") or translated == _("翻译失败") then
+        return nil
+    end
+    return translated
+end
+
 --- 划词场景：复制 / 存笔记。
+---
+--- 按钮结构不依赖译文：init 时译文还是空串，按结果决定要不要建按钮的话，
+--- 译文回来后没人重建这棵树，按钮就永远不出现。译文只在点按那一刻取。
 ---@param self BookTranslatePopup
 ---@return table|nil
 function TranslatePopup:actionButtons()
     local rows = {}
-    local translated = self.translated
-    if translated == "" or translated == _("正在翻译…") or translated == _("翻译失败") then
-        return nil
+
+    --- 存笔记：index 有值则改写既有笔记，否则新建。
+    ---@param full boolean 是否连原文一起存
+    local function saveNote(full)
+        local translated = readyTranslation(self)
+        if not translated then return end
+        local ui = require("apps/reader/readerui").instance
+        local text = full and ("▣ " .. self.text .. "\n● " .. translated) or translated
+        UIManager:close(self)
+        if not (ui and ui.highlight) then return end
+        UIManager:close(ui.highlight.highlight_dialog)
+        ui.highlight.highlight_dialog = nil
+        if self.note_index then
+            ui.highlight:editNote(self.note_index, false, text)
+        else
+            ui.highlight:addNote(text)
+        end
     end
 
     if self.from_highlight then
-        local ui = require("apps/reader/readerui").instance
-        local text_all = "▣ " .. self.text .. "\n● " .. translated
-        local index = self.note_index
         rows[#rows + 1] = {
             {
                 text = _("保存主要翻译到笔记"),
-                callback = function()
-                    UIManager:close(self)
-                    if ui and ui.highlight then
-                        UIManager:close(ui.highlight.highlight_dialog)
-                        ui.highlight.highlight_dialog = nil
-                        if index then
-                            ui.highlight:editNote(index, false, translated)
-                        else
-                            ui.highlight:addNote(translated)
-                        end
-                    end
-                end,
+                callback = function() saveNote(false) end,
             },
             {
                 text = _("保存全部内容到笔记"),
-                callback = function()
-                    UIManager:close(self)
-                    if ui and ui.highlight then
-                        UIManager:close(ui.highlight.highlight_dialog)
-                        ui.highlight.highlight_dialog = nil
-                        if index then
-                            ui.highlight:editNote(index, false, text_all)
-                        else
-                            ui.highlight:addNote(text_all)
-                        end
-                    end
-                end,
+                callback = function() saveNote(true) end,
             },
         }
     end
@@ -181,16 +185,21 @@ function TranslatePopup:actionButtons()
             {
                 text = _("复制主要翻译"),
                 callback = function()
-                    Device.input.setClipboardText(translated)
+                    local translated = readyTranslation(self)
+                    if translated then
+                        Device.input.setClipboardText(translated)
+                    end
                 end,
             },
         }
         if self.from_highlight then
-            local text_all = "▣ " .. self.text .. "\n● " .. translated
             rows[#rows][2] = {
                 text = _("复制全部内容"),
                 callback = function()
-                    Device.input.setClipboardText(text_all)
+                    local translated = readyTranslation(self)
+                    if translated then
+                        Device.input.setClipboardText("▣ " .. self.text .. "\n● " .. translated)
+                    end
                 end,
             }
         end
@@ -311,6 +320,16 @@ function TranslatePopup:init()
         content,
     }
     self.dimen = self[1]:getSize()
+end
+
+--- 关窗时取消在途翻译：不取消的话回调仍会往已关闭的 widget 上 setDirty，
+--- 并把整个弹窗（含原文与译文）挂在请求闭包里活到响应返回。
+---@return nil
+function TranslatePopup:onCloseWidget()
+    if self.job and self.job.cancel then
+        self.job.cancel()
+    end
+    self.job = nil
 end
 
 --- 打开翻译弹窗并立即请求译文。

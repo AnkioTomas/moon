@@ -71,12 +71,16 @@ local function importShelfProgress(self, shelf, cb)
     require("utils.db.queue").run(function()
         local ProgressDB = require("utils.db.progress")
         for _, row in ipairs(rows) do
+            -- row.chapter_idx 来自 wire（云端索引空间）。目录已缓存时按 uid 换算成本地
+            -- 序号；没缓存就只能先存 wire 值，真正打开时 getProgressAsync 会再纠正一次。
+            local chapter_idx = (row.chapter_uid
+                and Toc.index(self.id, row.stable_id, row.chapter_uid)) or row.chapter_idx
             ProgressDB.upsertRemote(self.id, row.stable_id, {
                 fraction = row.fraction,
-                chapter_idx = row.chapter_idx,
+                chapter_idx = chapter_idx,
                 chapter_fraction = row.chapter_fraction,
-                extra = (row.chapter_uid and row.chapter_idx)
-                    and { chapter_uid = row.chapter_uid, chapter_idx = row.chapter_idx } or nil,
+                extra = (row.chapter_uid and chapter_idx)
+                    and { chapter_uid = row.chapter_uid, chapter_idx = chapter_idx } or nil,
             })
         end
     end, {
@@ -395,13 +399,23 @@ function Source:getProgressAsync(identity, cb)
             end
             cb(pos)
         end
-        if not chapter_uid or pos.chapter_idx then
+        -- wire 的 chapterIdx 是云端索引空间，本地目录过滤掉了 wordCount=0 与「封面」，
+        -- 两边序号并不相等（差几章就跳到错误的章节）。只要有 uid 就一律回查目录换算成
+        -- 本地 idx；没有 uid 时才不得不沿用 wire 序号。
+        if not chapter_uid then
+            finish()
+            return
+        end
+        local mapped = Toc.index(identity.source_id, identity.stable_id, chapter_uid)
+        if mapped then
+            pos.chapter_idx = mapped
             finish()
             return
         end
         second = getTocAsync(self, identity, function()
             if cancelled then return end
             pos.chapter_idx = Toc.index(identity.source_id, identity.stable_id, chapter_uid)
+                or pos.chapter_idx
             finish()
         end)
     end)

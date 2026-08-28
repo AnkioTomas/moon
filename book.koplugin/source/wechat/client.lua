@@ -304,6 +304,13 @@ function Client:reportReadAsync(body, referer, cb)
             cb(nil, _("上报响应异常"))
             return
         end
+        -- errcode 非 0（会话失效、参数被拒）也是失败：不校验的话调用方会把这条
+        -- 进度/时长标记为已同步，数据静默丢失。
+        if not acceptWebWire(data, nil, cb) then
+            logger.warn("weread report read rejected",
+                tostring(data.errcode or data.errCode), tostring(data.errmsg or data.errMsg))
+            return
+        end
         cb(data)
     end)
 end

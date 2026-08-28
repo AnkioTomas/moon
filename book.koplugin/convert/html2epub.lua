@@ -199,7 +199,9 @@ local function collectImageSrcs(html)
     for _, src in html:gmatch([[<img%s+[^>]-src%s*=%s*(["'])(.-)%1]]) do
         add(src)
     end
-    for src in html:gmatch([[<img%s+[^>]-src%s*=%s*([^\s"'=<>`]+)]]) do
+    -- 空白类必须写 %s：Lua 模式没有 \s，写成 \s 是「排除反斜杠和字母 s」，
+    -- 于是 <img src=a.png width=10> 会被取成 "a.png width=10"，且带 s 的文件名被截断。
+    for src in html:gmatch([[<img%s+[^>]-src%s*=%s*([^%s"'=<>`]+)]]) do
         add(src)
     end
     return list
@@ -219,7 +221,7 @@ local function rewriteImageSrcs(html, map)
     html = html:gsub([[(<img%s+[^>]-src%s*=%s*)(["'])(.-)%2]], function(pre, q, src)
         return pre .. q .. repl(src) .. q
     end)
-    html = html:gsub([[(<img%s+[^>]-src%s*=%s*)([^\s"'=<>`]+)]], function(pre, src)
+    html = html:gsub([[(<img%s+[^>]-src%s*=%s*)([^%s"'=<>`]+)]], function(pre, src)
         return pre .. repl(src)
     end)
     return html

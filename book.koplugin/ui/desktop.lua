@@ -344,12 +344,6 @@ function Desktop:rebuild()
         local sw = Screen:getWidth()
         local sh = Screen:getHeight()
         self.dimen = Geom:new{ x = 0, y = 0, w = sw, h = sh }
-        -- 旧树必须显式释放：里面的图片 asyncBox 只在 free 时取消在飞下载/解码，
-        -- 否则每次切 Tab 都留下一批解好的 BlitBuffer 挂在孤立 widget 上等 GC。
-        if self[1] and self[1].free then
-            self[1]:free()
-        end
-
         local content
         if self.tab == "home" then
             content = Home.page(self)
@@ -386,13 +380,22 @@ function Desktop:rebuild()
             top,
             bar,
         }
-        self[1] = FrameContainer:new{
+        local frame = FrameContainer:new{
             bordersize = 0,
             padding = 0,
             margin = 0,
             background = Blitbuffer.COLOR_WHITE,
             root,
         }
+        -- 先建新树、后释放旧树。反过来的话，页面构建抛错时 self[1] 已经是被 free
+        -- 过的树，接下来照样会被 paintTo（下面只 return，不清 self[1]）。
+        -- 旧树必须显式释放：里面的图片 asyncBox 只在 free 时取消在飞下载/解码，
+        -- 否则每次切 Tab 都留下一批解好的 BlitBuffer 挂在孤立 widget 上等 GC。
+        local old = self[1]
+        self[1] = frame
+        if old and old.free then
+            old:free()
+        end
     end)
     if not ok then
         logger.err("book desktop rebuild failed:", err)
