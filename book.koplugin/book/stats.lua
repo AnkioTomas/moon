@@ -219,7 +219,11 @@ local function markPulled(source)
     if not source or type(source.id) ~= "string" or source.id == "" then
         return
     end
-    require("utils.settings").saveSource(source.id, { last_stats_pull_at = os.time() })
+    -- saveSource 是整表覆盖：必须读回完整配置再改，否则连 token 一起抹掉
+    local Settings = require("utils.settings")
+    local cfg = Settings.getSource(source.id)
+    cfg.last_stats_pull_at = os.time()
+    Settings.saveSource(source.id, cfg)
 end
 
 --- 将本地导入的统计记录逐条写入 reading_stats，保持待上传状态。
