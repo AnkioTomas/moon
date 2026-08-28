@@ -326,7 +326,7 @@ local function resolveOne(f)
     })
 end
 
---- 扫描后隐藏失效书籍并清路径，身份、进度、笔记和统计保留。
+-- 扫描后隐藏失效书籍并清路径，身份、进度、笔记、统计和封面缓存保留。
 --- 改名/移动的书已在 resolveOne 里原地更新 stable_id，这里的 keep 集合天然包含它们。
 --- 同步阻塞，只在子进程里跑。
 ---@param files table[]
@@ -339,7 +339,6 @@ local function pruneMissing(files)
     for _, stable_id in ipairs(BookDB.stableIdsBySource(SOURCE_ID)) do
         if not keep[stable_id] then
             BookDB.setLibraryMembership(SOURCE_ID, stable_id, false, true)
-            os.remove(coverPath(stable_id))
         end
     end
 end
