@@ -86,6 +86,8 @@ end
 ---@return string[]
 local function baseCandidates(cfg)
     local out, seen = {}, {}
+    --- 归一化一个候选地址（去空白、去尾部斜杠、补 https 前缀）后按去重追加。
+    ---@param u string|nil 候选地址，非字符串或归一化后为空则跳过
     local function add(u)
         if type(u) ~= "string" then return end
         u = u:gsub("%s+", ""):gsub("/+$", "")
@@ -223,6 +225,7 @@ function Client:_jsonAsync(method, path, opts, cb)
     local job
     local cache_job
     local result = {}
+    --- 取消在途请求：置位取消标记，并中断缓存读取与当前 HTTP 请求。
     function result.cancel()
         cancelled = true
         if cache_job and cache_job.cancel then cache_job.cancel() end
@@ -462,9 +465,12 @@ end
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:downloadAsync(id, hash, dest, on_progress, cb)
-    local cancelled, job, retried = false, nil, false
+    local cancelled, job, retried, done = false, nil, false, false
     local result = {}
+    --- 取消下载并清掉半截文件。已交付结果后调用是空操作：
+    --- 对话框拆除、installAsync 收尾都会再调一次 cancel，那时删的是成品。
     function result.cancel()
+        if done then return end
         cancelled = true
         if job and job.cancel then job.cancel() end
         pcall(os.remove, dest)
@@ -473,7 +479,9 @@ function Client:downloadAsync(id, hash, dest, on_progress, cb)
     ---@param ok boolean|nil
     ---@param err string|nil
     local function finish(ok, err)
-        if not cancelled then cb(ok, err) end
+        if cancelled then return end
+        done = true
+        cb(ok, err)
     end
     --- 下载已授权的 CDN 文件，并拒绝错误返回的 HTML 页面。
     ---@param link string

@@ -363,6 +363,9 @@ function Request.stream(opts, handlers)
     local state = { cancelled = false, done = false, client = nil }
     local user_agent = getHeader(opts.headers, "User-Agent")
 
+    --- 收束流：只回调一次 on_done，并归还此前占用的输入超时计数。
+    --- 计数归零才 resetInputTimeout，避免并发流互相把对方的 1s 轮询关掉。
+    ---@param err any nil 表示正常收完
     local function finish(err)
         if state.done then
             return
@@ -377,6 +380,8 @@ function Request.stream(opts, handlers)
         end
     end
 
+    --- 把 body 增量丢给 on_data，已取消或已结束后一律丢弃。
+    ---@param chunk any 非字符串或空串直接忽略
     local function emit(chunk)
         if state.cancelled or state.done then
             return
@@ -588,6 +593,10 @@ function Request.writeResponseToFile(res, dest, opts, cb)
     local offset = 1
     local written = 0
 
+    --- 关闭文件并回调结果；失败时删除半截文件，不留下损坏的 dest。
+    --- 已取消的任务不回调（调用方已经不关心结果了），但清理照做。
+    ---@param ok boolean
+    ---@param reason any 失败原因
     local function finish(ok, reason)
         pcall(file.close, file)
         if not ok then
@@ -598,6 +607,8 @@ function Request.writeResponseToFile(res, dest, opts, cb)
         end
     end
 
+    --- 每个 nextTick 写一片 WRITE_CHUNK，写完再排下一片。
+    --- 分片是为了不在一次事件循环里卡住 UI；写满即 finish(true)。
     local function writeNext()
         if state.cancelled then
             finish(false, "cancelled")

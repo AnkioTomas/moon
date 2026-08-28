@@ -20,6 +20,7 @@ function Search.searchAsync(query, cb)
     local cancelled = false
     local current_job = nil
 
+    --- 豆瓣无结果时改走微信读书；仍然空结果则回调错误。
     local function tryWeread()
         if cancelled then return end
         logger.info("scrape: fallback to weread")

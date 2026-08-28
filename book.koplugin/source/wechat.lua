@@ -115,7 +115,11 @@ function Source:clearCaches()
     Toc.clear()
 end
 
-Source.close = Source.clearCaches
+--- 关闭这个实例。只清实例自己的封面表：Context（psvts）与 Toc 是进程级的，
+--- 换源时关旧实例若把它们一起清了，正在阅读那本书的上报会报「请先打开该章节」。
+function Source:close()
+    self._covers = {}
+end
 
 --- 构造微信封面请求。
 ---@param identity BookIdentity

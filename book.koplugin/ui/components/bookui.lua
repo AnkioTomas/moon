@@ -425,6 +425,10 @@ function UI.progressBar(width, height, percent)
     if percent > 100 then percent = 100 end
 
     local radius = UI.pillRadius(height)
+    --- 造一段定高的圆角色块，用作进度条的轨道或填充。
+    ---@param w number 色块宽度（像素）
+    ---@param color table Blitbuffer 颜色
+    ---@return table
     local function bar(w, color)
         return FrameContainer:new{
             bordersize = 0,
@@ -444,6 +448,9 @@ function UI.progressBar(width, height, percent)
         dimen = Geom:new{ w = width, h = height },
         track,
     }
+    --- 就地更新进度百分比：重建填充色块并清掉尺寸缓存。
+    --- 入参会被夹到 0–100；调用方仍需自行触发重绘。
+    ---@param value number|nil 百分比，nil 按 0 处理
     function progress:setPercent(value)
         value = tonumber(value) or 0
         if value < 0 then value = 0 end

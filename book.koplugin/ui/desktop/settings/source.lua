@@ -13,12 +13,21 @@ local T = require("ffi/util").template
 
 local Source = {}
 
+--- 取某个源的 setting 模块。
+--- 源不一定带设置模块，require 失败即视为没有，不作为错误。
+---@param id string|nil 源标识
+---@return table|nil
 local function loadSourceSetting(id)
     local ok, mod = pcall(require, "source." .. tostring(id) .. ".setting")
     if ok and type(mod) == "table" then return mod end
     return nil
 end
 
+--- 弹出已启用源列表，选中后切换当前源并通知插件。
+--- 选回当前源视为无操作，避免白重建一次桌面。
+---@param desktop table 桌面实例
+---@param plugin table|nil 插件实例，用于回调 onSourceChanged
+---@param active_id string|nil 当前源标识，用于打勾与去重
 local function pickSource(desktop, plugin, active_id)
     local sources = SourceRegistry.listEnabled()
     if #sources == 0 then return end
@@ -54,6 +63,9 @@ function Source.pickActive(desktop, plugin)
     pickSource(desktop, plugin, MoonSettings.activeSourceId())
 end
 
+--- 弹出全部源的多选列表，勾选即时生效，关闭时重建桌面。
+--- 当前源那一项不可取消勾选，否则会没有可用源。
+---@param desktop table 桌面实例
 local function pickEnabledSources(desktop)
     local active_id = MoonSettings.activeSourceId()
     local items = {}

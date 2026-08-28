@@ -59,8 +59,8 @@ function SourceBase:close() end
 ---   page_changed    — 翻页（仅源身份书籍），payload = { identity, page, total_pages, percent }
 ---   book_info_request — 阅读面板详情页请求书籍信息，payload = { identity, book, refresh }
 ---     （源可拉最新详情写 Store.rememberMany 后调 refresh() 重绘面板；基类空操作即可）
----@param _event string
----@param _payload table|nil
+---@param event string 事件名
+---@param payload table|nil 事件载荷，含义随事件而定
 function SourceBase:onEvent(event, payload)
     if event ~= "desktop_open" or type(payload) ~= "table" then return end
     if self.configured and not self:configured() then return end
@@ -95,6 +95,9 @@ local function defer(cb, result)
     return { cancel = function() cancelled = true end }
 end
 
+--- 异步回报一个「跳过」的同步结果，供不支持某方向同步的源直接复用。
+---@param cb fun(result: SyncResult)
+---@return { cancel: fun() }
 local function unsupported(cb)
     return defer(cb, {
         pulled = 0, pushed = 0, hidden = 0, conflicts = 0,

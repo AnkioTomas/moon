@@ -179,6 +179,8 @@ CREATE TABLE IF NOT EXISTS chapters (
   chapter_idx INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
+-- 按书查章（改名联动、批量更新）走这条，否则每次全表扫
+CREATE INDEX IF NOT EXISTS idx_chapters_book ON chapters(source_id, stable_id);
 
 CREATE TABLE IF NOT EXISTS http (
   key       TEXT PRIMARY KEY,
@@ -215,6 +217,8 @@ CREATE TABLE IF NOT EXISTS reading_stats (
   sync_status INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_reading_stats_source ON reading_stats(source_id);
+-- 账单/日历全是 source_id + start_time 范围查询
+CREATE INDEX IF NOT EXISTS idx_reading_stats_time ON reading_stats(source_id, start_time);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_reading_stats_identity
   ON reading_stats(source_id, stable_id, page, start_time, duration, total_pages);
 

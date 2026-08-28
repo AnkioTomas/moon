@@ -1,7 +1,8 @@
 --[[--
 测试用 KOReader 数据目录接线。
 
-仓库根 `config` 软链 → 模拟器数据目录。
+数据目录是仓库根 `test/`（沙箱，git 忽略），由 tests/run.sh 建好并经 KO_HOME 传入。
+**不是** 模拟器的 `config/`：测试会往里写配置、sqlite 与缓存，落到真实数据上会改坏用户配置。
 本模块只解决「数据目录在哪」；读/写配置一律走 moon.settings。
 
   local Config = require("support.config")
@@ -32,17 +33,32 @@ end
 
 local ROOT = resolveRoot()
 
+--- 沙箱数据目录：KO_HOME 优先（tests/run.sh 设置），否则仓库根 test/。
+---@return string
+local function resolveDataDir()
+    local home = os.getenv("KO_HOME")
+    if type(home) == "string" and home ~= "" then
+        return (home:gsub("/+$", ""))
+    end
+    return ROOT .. "/test"
+end
+
+local DATA_DIR = resolveDataDir()
+
 --- 仓库根
+---@return string
 function Config.root()
     return ROOT
 end
 
---- KOReader 数据目录（= 根目录 config 软链）
+--- KOReader 数据目录（测试沙箱，非模拟器 config/）
+---@return string
 function Config.dir()
-    return ROOT .. "/config"
+    return DATA_DIR
 end
 
---- config 软链是否可用
+--- 沙箱配置是否就绪（tests/run.sh 会建；直接 luajit 跑 run.lua 时可能没有）
+---@return boolean
 function Config.available()
     local f = io.open(Config.dir() .. "/.moon/settings/common.lua", "r")
     if not f then
@@ -58,7 +74,9 @@ function Config.settings()
     return require("utils.settings")
 end
 
---- 挂上模拟器 native 库（libkoreader-lfs 等），供 Paths / LuaSettings 使用
+--- 挂上 native 库（libkoreader-lfs 等），供 Paths / LuaSettings 使用。
+--- 沙箱里的 libs 是软链到模拟器构建产物，只读。
+---@return boolean 库不可用时返回 false，相关 spec 自行跳过
 function Config.setupNativePath()
     local dir = Config.dir()
     local mark = dir .. "/libs/libkoreader-lfs.so"

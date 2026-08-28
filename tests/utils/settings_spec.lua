@@ -1,5 +1,5 @@
 --[[--
-配置接线：DataStorage → config/，读配置走 moon.settings
+配置接线：DataStorage → 测试沙箱数据目录，读配置走 moon.settings
 
 @module tests.config_spec
 --]]
@@ -8,7 +8,9 @@ local Assert = require("support.assert")
 local Config = require("support.config")
 
 Assert.not_nil(Config.root())
-Assert.eq(Config.dir(), Config.root() .. "/config")
+-- 数据目录必须是沙箱，绝不能指回模拟器 config/（测试会写坏真实配置）
+Assert.matches(Config.dir(), "/test$")
+Assert.is_nil(Config.dir():find("/config", 1, true))
 
 do
     local DS = require("datastorage")
@@ -16,7 +18,7 @@ do
 end
 
 if not Config.available() then
-    io.write("  (skip: config/ 软链不可用)\n")
+    io.write("  (skip: 沙箱数据目录未就绪，请用 ./tests/run.sh 运行)\n")
     return
 end
 
@@ -40,7 +42,7 @@ local src = Settings.getSource(active)
 Assert.not_nil(src)
 Assert.eq(type(src), "table")
 
--- 路径也应落在 config/.moon/settings
+-- 路径也应落在沙箱 .moon/settings
 local Paths = require("utils.paths")
 Assert.eq(Paths.root(), Config.dir() .. "/.moon")
 Assert.eq(Paths.commonPath(), Config.dir() .. "/.moon/settings/common.lua")

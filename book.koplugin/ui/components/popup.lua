@@ -220,15 +220,25 @@ function Popup.directory(opts)
     local lfs = require("libs/libkoreader-lfs")
     local TitleBar = require("ui/widget/titlebar")
     local root = opts.root or "/"
+    --- 判断路径是否落在允许浏览的根目录内，用于拦截越界跳转。
+    ---@param path string 绝对路径
+    ---@return boolean
     local function isWithin(path)
         return path == root or root == "/" or path:sub(1, #root + 1) == root .. "/"
     end
+    --- 取上一级目录；已在根目录时原地不动，避免走出浏览范围。
+    ---@param path string 绝对路径
+    ---@return string
     local function parent(path)
         if path == root then return path end
         return path:match("^(.*)/[^/]+$") or root
     end
+    --- 展示指定目录一层的选择菜单；进入子目录靠关掉当前菜单再递归调用自身。
+    ---@param path string 要展示的目录绝对路径
     local function open(path)
         local holder = { menu = nil }
+        --- 关闭当前层菜单；仅左上取消时才回调 on_cancel。
+        ---@param cancelled boolean 是否为用户主动取消
         local function close(cancelled)
             if holder.menu then UIManager:close(holder.menu) end
             if cancelled and opts.on_cancel then opts.on_cancel() end

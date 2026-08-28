@@ -82,13 +82,34 @@ package.preload["json"] = function()
     }
 end
 
+local TOKEN = "0123456789abcdef"
+
+--- 除静态资源外所有路由都要 token：给请求行的 URI 补上 t=，
+--- 免得每条用例都写一遍。opts.no_token 保留原样（用于认证本身的用例）。
+---@param chunk string
+---@return string
+local function withToken(chunk)
+    local method, uri, rest = chunk:match("^(%u+) (%S+) (HTTP/1%.1.*)$")
+    if not method then
+        return chunk
+    end
+    local sep = uri:find("?", 1, true) and "&" or "?"
+    return method .. " " .. uri .. sep .. "t=" .. TOKEN .. " " .. rest
+end
+
 --- 新假客户端：chunks 为 receive 逐次吐出的字节片。
 --- opts.send_limit：单次 send 最多发出的字节数（模拟 EAGAIN 部分写）。
+--- opts.no_token：不给请求补 token。
 ---@param chunks string[]
 ---@param opts table|nil
 ---@return table
 local function newClient(chunks, opts)
     opts = opts or {}
+    if not opts.no_token then
+        for i = 1, #chunks do
+            chunks[i] = withToken(chunks[i])
+        end
+    end
     local c = {
         chunks = chunks,
         sent = {},
@@ -202,6 +223,7 @@ local function serve(client, handlers, opts)
     local server = Server.new({
         host = "127.0.0.1",
         port = 9528,
+        token = TOKEN,
         handlers = handlers,
         root = opts and opts.root or "/",
         roots = opts and opts.roots,
@@ -309,6 +331,60 @@ do
     Assert.eq(cfg.root, "/managed")
     Assert.eq(cfg.home, "/managed/books")
     Assert.eq(cfg.shortcuts[1].label, "书籍根目录")
+end
+
+-- ── 认证：token / 同源 / DNS rebinding ──────────────────
+
+do
+    -- 静态资源免票（都是常量，且页面要先加载才能拿到 token 转发）
+    local c_asset = newClient({ "GET /style.css HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_asset))
+    Assert.eq((parseResponse(c_asset:output())), 200)
+
+    -- 无 token / 错 token → 403，绝不落到 handler
+    local handlers, calls = fakeHandlers({ ["/"] = {} })
+    local c_none = newClient({ "GET /api/list?path=/ HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_none, handlers))
+    Assert.eq((parseResponse(c_none:output())), 403)
+
+    local c_bad = newClient({ "GET /api/list?path=/&t=nope HTTP/1.1\r\n\r\n" }, { no_token = true })
+    drain(serve(c_bad, handlers))
+    Assert.eq((parseResponse(c_bad:output())), 403)
+
+    local c_del = newClient(
+        { "POST /api/delete?path=/a HTTP/1.1\r\nContent-Length: 0\r\n\r\n" }, { no_token = true })
+    drain(serve(c_del, handlers))
+    Assert.eq((parseResponse(c_del:output())), 403)
+    Assert.is_nil(calls.delete, "未认证的删除不应到达 handler")
+
+    -- Authorization: Bearer 也算
+    local c_hdr = newClient({
+        "GET /api/list?path=/ HTTP/1.1\r\nAuthorization: Bearer " .. TOKEN .. "\r\n\r\n",
+    }, { no_token = true })
+    drain(serve(c_hdr, handlers))
+    Assert.eq((parseResponse(c_hdr:output())), 200)
+
+    -- 跨站写：Origin 与 Host 不一致 → 403（恶意页面 fetch 删文件）
+    local c_cross = newClient({
+        "POST /api/delete?path=/a HTTP/1.1\r\nHost: 192.168.1.5:9528\r\n" ..
+        "Origin: http://evil.example\r\nContent-Length: 0\r\n\r\n",
+    })
+    drain(serve(c_cross, handlers))
+    Assert.eq((parseResponse(c_cross:output())), 403)
+    Assert.is_nil(calls.delete)
+
+    -- 同源写放过
+    local c_same = newClient({
+        "POST /api/mkdir?path=/a/b HTTP/1.1\r\nHost: 192.168.1.5:9528\r\n" ..
+        "Origin: http://192.168.1.5:9528\r\nContent-Length: 0\r\n\r\n",
+    })
+    drain(serve(c_same, handlers))
+    Assert.eq((parseResponse(c_same:output())), 200)
+
+    -- DNS rebinding：Host 是域名 → 403
+    local c_rebind = newClient({ "GET /api/list?path=/ HTTP/1.1\r\nHost: evil.example\r\n\r\n" })
+    drain(serve(c_rebind, handlers))
+    Assert.eq((parseResponse(c_rebind:output())), 403)
 end
 
 -- ── GET /api/list ─────────────────────────────────────
@@ -549,7 +625,7 @@ do
 
     -- bind 失败
     bind_opts = { err = "address in use" }
-    local s = Server.new({ port = 1, root = "/", handlers = {} })
+    local s = Server.new({ port = 1, root = "/", token = TOKEN, handlers = {} })
     local ok, err = s:start()
     Assert.is_false(ok)
     Assert.eq(err, "address in use")
@@ -723,7 +799,7 @@ do
 end
 
 -- ── 远程配置 ───────────────────────────────────────────
--- 必须 stub utils.settings：POST 会落盘，不能碰 config/ 软链里的真配置。
+-- 必须 stub utils.settings：POST 会落盘，连沙箱配置也不该被这条用例改。
 
 do
     local store = {

@@ -64,11 +64,16 @@ end
 
 local function installLogger()
     package.preload["logger"] = function()
-        local logger = {}
+        -- levels/setLevel 是给真实 dbg.lua 用的：它被 geometry 链间接 require，
+        -- 缺了就在 turnOff() 里索引 nil 崩掉整个 spec
+        local logger = {
+            levels = { dbg = 1, info = 2, warn = 3, err = 4 },
+        }
         function logger.dbg() end
         function logger.info() end
         function logger.warn() end
         function logger.err() end
+        function logger:setLevel() end
         return logger
     end
 end
@@ -111,7 +116,7 @@ local function installJson()
     end
 end
 
---- 把 DataStorage 指到仓库根 config/（模拟器数据目录）
+--- 把 DataStorage 指到测试沙箱数据目录（support.config，非模拟器 config/）
 local function installDataStorage()
     package.preload["datastorage"] = function()
         local Config = require("support.config")

@@ -113,6 +113,7 @@ local function paragraphsFromLines(lines, reflow)
         return paragraphs
     end
     local current = {}
+    --- 结束当前段落：把已累积的行作为一段收下，没有累积行则什么都不做。
     local function flush()
         if #current > 0 then
             paragraphs[#paragraphs + 1] = current
@@ -186,6 +187,7 @@ local function chapterParts(title, lines, max_chars, reflow)
     end
     local parts, body = {}, {}
     local body_chars = 0
+    --- 把已累积的段落封成一个分片的 XHTML 片段；首个分片额外带 h1 标题。
     local function flush()
         if #body == 0 then
             return
@@ -331,6 +333,8 @@ function Text2Epub.parse(text, opts)
 
     local sections = {}
     local current
+    --- 开启一个新章节，后续正文行都归入它。
+    ---@param section_title string 章节标题
     local function startSection(section_title)
         current = { title = section_title, lines = {} }
         sections[#sections + 1] = current

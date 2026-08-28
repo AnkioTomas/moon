@@ -4,8 +4,10 @@
 
 # KOReader 外部库（本机克隆，不纳入版本控制；内部一切更改一律忽略）
 /koreader/
-# 模拟器配置目录软链 → koreader/.../koreader
+# 模拟器配置目录软链 → koreader/.../koreader（真实数据，测试不许碰）
 /config
+# 离线测试沙箱数据目录（tests/run.sh 自建：配置、sqlite、缓存全落这里）
+/test/
 .env
 
 # Agent instructions (local only)

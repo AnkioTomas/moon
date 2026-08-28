@@ -164,6 +164,10 @@ function Reflow.applyAsync(identity, cb)
     local dest = target .. ".moon-reflow"
     local cached = preview_cache[path]
 
+    --- 转换收尾：成功则用产物替换原书并登记新路径，失败清掉临时文件。
+    --- 任何一步失败都保证 dest 与 dest.part 不残留，且不改动原书。
+    ---@param ok boolean 转换是否成功
+    ---@param err string|nil 转换失败原因
     local function finishReplace(ok, err)
         preview_cache[path] = nil
         if not ok then
@@ -241,6 +245,7 @@ function Reflow.startFromReader(ui, identity)
     local Popup = require("ui.components.popup")
     local holder = { analyze_job = nil, apply_job = nil, dialog = nil }
 
+    --- 关掉当前进度提示框（幂等，没有框时什么都不做）。
     local function closeDialog()
         if holder.dialog then
             UIManager:close(holder.dialog)
@@ -248,6 +253,7 @@ function Reflow.startFromReader(ui, identity)
         end
     end
 
+    --- 取消进行中的分析/转换任务并丢弃该书的预览缓存。
     local function cancelJobs()
         if holder.analyze_job and holder.analyze_job.cancel then
             holder.analyze_job.cancel()
@@ -259,6 +265,9 @@ function Reflow.startFromReader(ui, identity)
         preview_cache[path] = nil
     end
 
+    --- 弹出章节预览列表；确认后才真正转换并用新书重开阅读器。
+    --- 列表项一律禁用（只读预览）；未识别到章节则只提示不弹表。
+    ---@param titles string[]|nil 识别出的章节标题
     local function showPreview(titles)
         if not titles or #titles == 0 then
             UIManager:show(InfoMessage:new{ text = _("未识别到章节") })
@@ -269,6 +278,7 @@ function Reflow.startFromReader(ui, identity)
             items[#items + 1] = { text = title, enabled = false, dim = true }
         end
         local preview_menu
+        --- 关掉预览列表（幂等）。
         local function closePreview()
             if preview_menu then
                 UIManager:close(preview_menu)
@@ -311,6 +321,7 @@ function Reflow.startFromReader(ui, identity)
         }
     end
 
+    --- 显示进度提示并异步识别章节，成功后转入预览。
     local function runAnalyze()
         closeDialog()
         holder.dialog = InfoMessage:new{ text = _("正在分析章节…") }

@@ -41,9 +41,10 @@ local Icon = require("ui.components.icon")
 local BottomBar = {}
 
 --- 构建底栏 widget。
----@param tabs table[] { id, text, icon, callback }
+---@param tabs table[] { id, text, icon }，逐项等分整屏宽度
 ---@param active string|nil 当前选中 tab id
----@param parent table|nil 事件归属父控件
+---@param on_tab fun(id: string)|nil 点击回调；为 nil 时整栏不接受点按
+---@param parent table|nil 事件归属父控件（当前实现未使用，仅保留调用约定）
 ---@return table
 function BottomBar.build(tabs, active, on_tab, parent)
     tabs = tabs or {}

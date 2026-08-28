@@ -268,11 +268,14 @@ function Client:reportReadAsync(body, referer, cb)
             return
         end
         local ok, data = pcall(JSON.decode, raw)
-        if ok and type(data) == "table" then
-            cb(data)
-        else
-            cb({ ok = true })
+        if not ok or type(data) ~= "table" then
+            -- 登录页 HTML、WAF 拦截页、空响应都会走到这里。当成功上报的话，
+            -- 调用方会把这条进度/时长标记为已同步，数据静默丢失。
+            logger.warn("weread report read: unexpected response", tostring(raw):sub(1, 120))
+            cb(nil, _("上报响应异常"))
+            return
         end
+        cb(data)
     end)
 end
 

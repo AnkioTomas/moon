@@ -8,6 +8,14 @@ local Text = require("utils.text")
 local _ = require("gettext")
 local Setting = {}
 
+--- 弹出单字段输入框修改 zlib 配置项并落盘。
+--- 改动 email/password 会清掉已缓存的 user_id/user_key，强制下次重新登录。
+---@param plugin table|nil 保存后用于刷新桌面
+---@param key string 配置字段名
+---@param title string 对话框标题
+---@param hint string 输入框提示
+---@param password boolean|nil 是否按密码输入
+---@param normalize fun(value: string|nil): string 存盘前的归一化函数
 local function edit(plugin, key, title, hint, password, normalize)
     local UIManager = require("ui/uimanager")
     local InputDialog = require("ui/widget/inputdialog")
@@ -33,6 +41,15 @@ local function edit(plugin, key, title, hint, password, normalize)
     dialog:onShowKeyboard()
 end
 
+--- 生成一行设置项的构造器，点击后打开对应字段的编辑框。
+---@param plugin table|nil 保存后用于刷新桌面
+---@param key string 配置字段名
+---@param title string 行标题
+---@param hint string 输入框提示
+---@param password boolean|nil 是否按密码输入（状态列显示为 ******）
+---@param normalize fun(value: string|nil): string 存盘前的归一化函数
+---@param icon string|nil 行图标名，缺省 edit
+---@return fun(iw: table): table 设置行构造器
 local function field(plugin, key, title, hint, password, normalize, icon)
     return function(iw)
         local value = require("utils.settings").getSource("zlib")[key] or ""
@@ -46,6 +63,9 @@ local function field(plugin, key, title, hint, password, normalize, icon)
     end
 end
 
+--- Z-Library 设置页的行构造器列表：邮箱、密码、镜像地址。
+---@param plugin table|nil 保存后用于刷新桌面
+---@return table[] 设置行构造器数组，元素为 fun(iw: table): table
 function Setting.rows(plugin)
     return {
         field(plugin, "email", _("邮箱"), _("输入邮箱"), false, Text.trim, "mail"),

@@ -312,11 +312,18 @@ function Chart.lines(opts)
         dot_size = dot_size,
     }
 
+    --- 返回固定尺寸并同步写回 self.dimen，供 paintTo 定位使用。
+    ---@return table Geom
     function LineChart:getSize()
         self.dimen = Geom:new{ w = self.width, h = self.height }
         return self.dimen
     end
 
+    --- 画基线、折线和数据点；单点时居中，多点按等距横向铺满。
+    --- 纵向以 peak 为满高归一化，无数据点时直接不画。
+    ---@param bb table 目标 Blitbuffer
+    ---@param x number 左上角横坐标
+    ---@param y number 左上角纵坐标
     function LineChart:paintTo(bb, x, y)
         local n = #self.points
         if n == 0 then
@@ -332,6 +339,11 @@ function Chart.lines(opts)
             local cy = y + h - math.floor(h * ratio + 0.5)
             coords[#coords + 1] = { x = cx, y = cy }
         end
+        --- 用 Bresenham 逐像素连接两点（Blitbuffer 没有画线原语）。
+        ---@param x1 number 起点横坐标
+        ---@param y1 number 起点纵坐标
+        ---@param x2 number 终点横坐标
+        ---@param y2 number 终点纵坐标
         local function paintSegment(x1, y1, x2, y2)
             local dx = math.abs(x2 - x1)
             local dy = math.abs(y2 - y1)

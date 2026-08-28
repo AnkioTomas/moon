@@ -382,17 +382,16 @@ function Mapper.shelfProgressRows(shelf)
         local prog = tonumber(p.progress or p.readingProgress)
         local chapter_idx = tonumber(p.chapterIdx or p.chapter_idx)
         local chapter_fraction = normalizeChapterOffset(p.chapterOffset or p.chapter_offset)
-        if prog == nil and not chapter_idx then
-            goto continue
+        -- 两个进度字段都没有的条目不是进度，直接跳过
+        if prog ~= nil or chapter_idx then
+            rows[#rows + 1] = {
+                stable_id = id,
+                fraction = ProgressPosition.clampFraction((prog or 0) / 100),
+                chapter_idx = chapter_idx,
+                chapter_fraction = chapter_fraction,
+                chapter_uid = p.chapterUid or p.chapter_uid,
+            }
         end
-        rows[#rows + 1] = {
-            stable_id = id,
-            fraction = ProgressPosition.clampFraction((prog or 0) / 100),
-            chapter_idx = chapter_idx,
-            chapter_fraction = chapter_fraction,
-            chapter_uid = p.chapterUid or p.chapter_uid,
-        }
-        ::continue::
     end
     return rows
 end

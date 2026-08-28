@@ -15,6 +15,13 @@ local T = require("ffi/util").template
 
 local AI = {}
 
+--- 弹输入框编辑一项 AI 配置，保存后写入 ai 分区并重建桌面。
+---@param desktop table 桌面实例
+---@param key string ai 配置键名
+---@param title string 对话框标题，也是设置行标题
+---@param hint string 输入框占位提示
+---@param password boolean 是否按密码遮蔽输入
+---@param normalize fun(value: string): string 落盘前的规范化（去空白、去尾斜杠等）
 local function edit(desktop, key, title, hint, password, normalize)
     local cfg = Settings.get("ai")
     local dialog
@@ -37,6 +44,14 @@ local function edit(desktop, key, title, hint, password, normalize)
     dialog:onShowKeyboard()
 end
 
+--- 造一个 AI 配置项设置行的构造器；密码项状态只显示星号。
+---@param desktop table 桌面实例
+---@param key string ai 配置键名
+---@param title string 设置行标题
+---@param hint string 输入框占位提示
+---@param password boolean 是否按密码遮蔽
+---@param normalize fun(value: string): string 落盘前的规范化
+---@return fun(iw: number): table
 local function row(desktop, key, title, hint, password, normalize)
     return function(iw)
         local value = Settings.get("ai")[key] or ""

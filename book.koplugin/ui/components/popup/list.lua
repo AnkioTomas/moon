@@ -10,7 +10,6 @@ local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
-local Button = require("ui/widget/button")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local Menu = require("ui/widget/menu")
@@ -113,6 +112,7 @@ local function attachMaterialLeftAction(title_bar, opts)
     if not opts.title_material_icon then
         return
     end
+    --- 往标题栏左侧预留区叠一个胶囊图标按钮（直接 table.insert 进 TitleBar 的重叠组）。
     local function insertLeft()
         local btn_w = UI.sz(44)
         local bar_h = title_bar:getHeight()
@@ -163,24 +163,10 @@ end
 ---@param menu table
 ---@param bt table
 local function attachBottomTabs(menu, bt)
-    local ok_center, CenterContainer = pcall(require, "ui/widget/container/centercontainer")
-    local Geom = ok_center and require("ui/geometry") or nil
-    local ok, BottomBar = pcall(require, "ui.components.bottombar")
+    local BottomBar = require("ui.components.bottombar")
+    --- 按当前 bt.active 重建底部 Tab 栏；点已选中的 Tab 不触发回调。
+    ---@return table
     local function buildBar()
-        if not ok then
-            local bar = HorizontalGroup:new{ align = "center" }
-            local cell_w = math.floor(menu.inner_dimen.w / math.max(1, #(bt.tabs or {})))
-            for _, tab in ipairs(bt.tabs or {}) do
-                local id = tab.id
-                bar[#bar + 1] = Button:new{
-                    text = tab.text, width = cell_w, bordersize = 0,
-                    text_font_bold = id == bt.active,
-                    callback = function() if id ~= bt.active and bt.on_tab then bt.on_tab(id) end end,
-                    show_parent = menu,
-                }
-            end
-            return bar
-        end
         return BottomBar.build(bt.tabs or {}, bt.active, function(id)
             if id ~= bt.active and bt.on_tab then bt.on_tab(id) end
         end, menu)
@@ -189,13 +175,10 @@ local function attachBottomTabs(menu, bt)
     local bar_h = bar:getSize().h
     -- footer 是底对齐的 BottomContainer：子件换成「pager 在上、Tab 栏在下」的竖排。
     -- menu → FrameContainer → OverlapGroup(content_group, page_return, footer)
-    local pager = menu.page_info
-    if ok_center then
-        pager = CenterContainer:new{
-            dimen = Geom:new{ w = menu.inner_dimen.w, h = menu.page_info:getSize().h },
-            menu.page_info,
-        }
-    end
+    local pager = CenterContainer:new{
+        dimen = Geom:new{ w = menu.inner_dimen.w, h = menu.page_info:getSize().h },
+        menu.page_info,
+    }
     local stack = VerticalGroup:new{ align = "left", pager, bar }
     -- Menu 的页脚位于 FrameContainer → OverlapGroup 的第三个槽位（footer），其第一个子件是
     -- 原 pager。结构变化时宁可显式失败，也不静默索引 nil 导致 Tab 栏整体丢失。

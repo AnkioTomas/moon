@@ -16,8 +16,12 @@ local T = require("ffi/util").template
 
 local Lockscreen = {}
 
+--- 设置项变更后重建设置页，并重新合成锁屏图。
+--- 只有当前配置能离线出图时才直接生成，否则等联网——不然壁纸源拉不到会白跑一次。
+---@param desktop table 桌面实例
 local function refreshAfterChange(desktop)
     desktop:rebuild()
+    --- 合成一次锁屏图并提示结果。
     local function refresh()
         UIManager:show(InfoMessage:new{ text = _("正在生成锁屏图…"), timeout = 2 })
         LockScreen.refresh(function(ok, err)
@@ -35,6 +39,8 @@ local function refreshAfterChange(desktop)
     end
 end
 
+--- 弹输入框编辑锁屏自定义留言，保存后立刻重出图。
+---@param desktop table 桌面实例
 local function editMessage(desktop)
     local dialog
     dialog = InputDialog:new{

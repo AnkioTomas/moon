@@ -22,12 +22,17 @@ local Maintenance = {}
 local REPO_URL = "https://github.com/AnkioTomas/moon"
 local REPO_HOST = "github.com/AnkioTomas/moon"
 
+--- 读取插件版本号。
+--- bookversion 由 CI 打 tag 时注入，源码树里可能没有，此时退化为 dev 版本号。
+---@return string
 local function pluginVersion()
     local ok, ver = pcall(require, "bookversion")
     if ok and type(ver) == "string" and ver ~= "" then return ver end
     return "0.0.0-dev"
 end
 
+--- 弹出「关于」对话框：图标、名称、版本、简介、作者与许可证。
+--- 仅设备支持外部链接时才给「打开 GitHub」按钮。
 local function showAbout()
     local ver, dialog = pluginVersion()
     local buttons = {}
@@ -58,6 +63,11 @@ local function showAbout()
     UIManager:show(dialog)
 end
 
+--- 造「清理缓存」设置行的构造器。
+--- 缓存体积异步测量，结果缓存在 desktop 上，首次显示「计算中…」并在算完后重建设置页；
+--- 清理会连带作废首页与书库状态，因为封面等资源就在 cache 里。
+---@param desktop table 桌面实例
+---@return fun(iw: number): table
 function Maintenance.cacheRow(desktop)
     return function(iw)
         local cache_size = desktop._cache_size_label or _("计算中…")
@@ -98,6 +108,8 @@ function Maintenance.cacheRow(desktop)
     end
 end
 
+--- 造「导入本地注解」设置行的构造器；导入完成后提示成功与失败条数。
+---@return fun(iw: number): table
 function Maintenance.importNotesRow()
     return function(iw)
         return SettingRow.build(iw, {
@@ -118,6 +130,8 @@ function Maintenance.importNotesRow()
     end
 end
 
+--- 造「导入本地阅读统计」设置行的构造器；导入完成后提示成功与失败条数。
+---@return fun(iw: number): table
 function Maintenance.importStatsRow()
     return function(iw)
         return SettingRow.build(iw, {
@@ -138,12 +152,17 @@ function Maintenance.importStatsRow()
     end
 end
 
+--- 造「关于」设置行的构造器，状态位显示当前版本号。
+---@return fun(iw: number): table
 function Maintenance.aboutRow()
     return function(iw)
         return SettingRow.build(iw, { kind = "nav", icon = "info", title = _("关于"), status = pluginVersion(), status_on = true, callback = showAbout })
     end
 end
 
+--- 造「关闭桌面」设置行的构造器。
+---@param desktop table 桌面实例
+---@return fun(iw: number): table
 function Maintenance.closeRow(desktop)
     return function(iw)
         return SettingRow.build(iw, { kind = "action", icon = "close", title = _("关闭桌面"), callback = function() desktop:onClose() end })

@@ -12,7 +12,7 @@ local Stubs = require("support.stubs")
 local Config = require("support.config")
 
 if not Config.available() then
-    io.write("  (skip: config/ 软链不可用)\n")
+    io.write("  (skip: 沙箱数据目录未就绪，请用 ./tests/run.sh 运行)\n")
     return
 end
 
@@ -57,8 +57,18 @@ local manifest = {
 }
 
 -- json：download 用 JSON.decode 解 manifest；测试侧用 KOReader 自带的 dkjson 真实现
+-- （只读模拟器构建产物，和 native 库同一性质）
+local DKJSON = Config.root() .. "/config/common/dkjson.lua"
+do
+    local probe = io.open(DKJSON, "r")
+    if not probe then
+        io.write("  (skip: 缺 config/common/dkjson.lua，需要本机 koreader 构建产物)\n")
+        return
+    end
+    probe:close()
+end
 package.preload["json"] = function()
-    return dofile("config/common/dkjson.lua")
+    return dofile(DKJSON)
 end
 
 -- stub http.request：get 给 manifest，download 写对应分片（并回报一次写字节进度）

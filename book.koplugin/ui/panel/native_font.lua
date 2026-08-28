@@ -106,6 +106,10 @@ function NativeFont.install(ui)
             prepareFontOption(self)
             return original_show(self, ...)
         end
+        --- 底部配置面板选中字体项时的事件处理：把序号映射回字体名交给 ReaderFont。
+        --- 序号越界或阅读器无 font 模块时静默忽略，但仍吞掉事件避免继续冒泡。
+        ---@param index number|string 字体在 _book_font_faces 中的序号
+        ---@return boolean
         function ReaderConfig:onBookSetFont(index)
             local face = self._book_font_faces and self._book_font_faces[tonumber(index)]
             if face and self.ui and self.ui.font then self.ui.font:onSetFont(face) end

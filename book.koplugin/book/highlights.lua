@@ -8,6 +8,10 @@ local Session = require("ui.reader.session")
 
 local Highlights = {}
 
+--- 算高亮条目的去重键：有 id 就用 id，否则用文本+章节+页码+起止位置拼串。
+--- 拼串用 \0 分隔，避免字段内容里的分隔符造成误撞。
+---@param item table 注解条目（会话 annotation 或 notes 表反序列化结果）
+---@return string
 local function highlightKey(item)
     local id = item.id or item.annotation_id
     if id ~= nil then return "id:" .. tostring(id) end
@@ -29,6 +33,8 @@ end
 ---@return table[]
 function Highlights.collect(source_id, stable_id, chapter_idx)
     local items, seen = {}, {}
+    --- 收一条高亮：只要有 drawer（划线）且文本非空的条目，按 key 去重。
+    ---@param item any 非表 / 无 drawer / 空文本一律丢弃
     local function push(item)
         if type(item) ~= "table" or not item.drawer
                 or type(item.text) ~= "string" or item.text == "" then

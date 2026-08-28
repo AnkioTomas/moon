@@ -20,10 +20,17 @@ local Surface = {}
 
 local RoundedClip = WidgetContainer:extend{}
 
+--- 尺寸由构造时传入的 dimen 决定，不随子件变化。
+---@return table Geom
 function RoundedClip:getSize()
     return self.dimen
 end
 
+--- 先画子件，再用背景色把四角圆外的像素涂掉，模拟对子件的圆角裁剪。
+--- 半径会夹到短边一半；无背景色或半径为 0 时退化成直接绘制子件。
+---@param bb table 目标 Blitbuffer
+---@param x number 左上角横坐标
+---@param y number 左上角纵坐标
 function RoundedClip:paintTo(bb, x, y)
     self[1]:paintTo(bb, x, y)
     local w, h, r = self.dimen.w, self.dimen.h, self.radius
@@ -43,14 +50,25 @@ function RoundedClip:paintTo(bb, x, y)
     end
 end
 
+--- 上下内边距之和，单边未指定时回落到通用 padding。
+---@param opts table 表面参数
+---@return number
 local function verticalPadding(opts)
     return (opts.padding_top or opts.padding or 0) + (opts.padding_bottom or opts.padding or 0)
 end
 
+--- 左右内边距之和，单边未指定时回落到通用 padding。
+---@param opts table 表面参数
+---@return number
 local function horizontalPadding(opts)
     return (opts.padding_left or opts.padding or 0) + (opts.padding_right or opts.padding or 0)
 end
 
+--- 造统一视觉的无边框圆角容器：给定宽高时先居中撑开子件（扣掉内边距），
+--- opts.clip 为真再包一层 RoundedClip，防止子件（如封面图）方角盖平圆角。
+---@param child table 子件
+---@param opts table|nil background/width/height/dimen/radius/padding*/clip* 等参数
+---@return table
 local function frame(child, opts)
     opts = opts or {}
     local background = opts.background

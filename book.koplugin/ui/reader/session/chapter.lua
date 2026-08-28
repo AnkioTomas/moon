@@ -22,6 +22,8 @@ local chapter_session
 ---@type { cancel: fun() }|nil
 local prefetch_job
 
+--- 取消在途的后续章预取任务。
+--- 先清模块状态再 cancel，避免 cancel 回调重入时又看到已废弃的 job。
 local function cancelPrefetch()
     local job = prefetch_job
     prefetch_job = nil

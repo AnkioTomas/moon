@@ -75,7 +75,7 @@ loadConfig().then(function (config) {
                     return false;
                 };
             } else {
-                a.href = '/download?path=' + encodeURIComponent(full);
+                a.href = withToken('/download?path=' + encodeURIComponent(full));
             }
             td.appendChild(a);
             tr.appendChild(td);

@@ -75,6 +75,10 @@ end
 package.preload["ui/network/manager"] = function()
     return { isWifiOn = function() return false end }
 end
+-- registry 一次性加载全部动作模块，font 动作会拉真身 utils.font（ui/font + fontlist）
+package.preload["utils.font"] = function()
+    return { supportsReader = function() return true end }
+end
 
 G_reader_settings = {
     isTrue = function(_, key) return key == "night_mode" end,

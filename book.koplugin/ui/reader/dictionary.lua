@@ -13,10 +13,17 @@ local Text = require("utils.text")
 
 local Dictionary = {}
 
+--- 弹一条自动消失的提示。
+---@param text string 提示文案
+---@param timeout number|nil 停留秒数，默认 3
 local function info(text, timeout)
     UIManager:show(require("ui/widget/infomessage"):new{ text = text, timeout = timeout or 3 })
 end
 
+--- 读取 .ifo 里的 bookname 作为字典显示名。
+--- 文件读不到或没有该字段时依次退化为文件名、原路径，保证永远有可展示的名字。
+---@param path string 字典 .ifo 绝对路径
+---@return string
 local function bookName(path)
     local file = io.open(path, "rb")
     local body = file and file:read("*a") or ""
@@ -24,12 +31,20 @@ local function bookName(path)
     return Text.trim(body:match("\nbookname=(.-)\r?\n") or path:match("/([^/]+)%.ifo$") or path)
 end
 
+--- 从字典路径反解出本插件安装时使用的字典 id。
+--- 只认 `<data_dir>/book-<id>/` 这一命名约定；非本插件安装的字典返回 nil，据此禁止删除。
+---@param dictionary table KOReader ReaderDictionary 实例
+---@param path string 字典 .ifo 绝对路径
+---@return string|nil
 local function managedId(dictionary, path)
     local prefix = dictionary.data_dir .. "/book-"
     if path:sub(1, #prefix) ~= prefix then return nil end
     return path:sub(#prefix + 1):match("^([%w_%-]+)/")
 end
 
+--- 弹出已安装字典列表，可切换当前字典或删除本插件装的字典。
+--- 按显示名排序；字典模块缺失或一本都没装时只给提示。
+---@param ui table|nil ReaderUI 实例
 local function manage(ui)
     local dictionary = ui and ui.dictionary
     if not dictionary or not dictionary.data_dir then info(_("字典模块不可用")); return end
@@ -81,6 +96,9 @@ local function manage(ui)
     }
 end
 
+--- 下载安装一本字典，成功后刷新字典模块并把它设为当前字典。
+---@param ui table|nil ReaderUI 实例
+---@param item table 目录项，含 id / name / size
 local function install(ui, item)
     local dictionary = ui and ui.dictionary
     if not dictionary or not dictionary.data_dir then info(_("字典模块不可用")); return end

@@ -105,7 +105,11 @@ function M.save(identity, prefs)
     if not payload then
         return false
     end
-    return BookDB.setReaderPrefs(source_id, stable_id, payload)
+    -- 走队列：直写会和在飞的队列任务抢同一条 sqlite 连接（关书时进度也在写）
+    require("utils.db.queue").run(function()
+        BookDB.setReaderPrefs(source_id, stable_id, payload)
+    end)
+    return true
 end
 
 ---@param identity BookIdentity|nil

@@ -17,7 +17,6 @@ local JSON = require("json")
 local logger = require("logger")
 local Request = require("http.request")
 local Header = require("http.header")
-local UIManager = require("ui/uimanager")
 local Text = require("utils.text")
 local Protocol = require("source.wechat.protocol")
 local _ = require("gettext")
@@ -721,7 +720,8 @@ function Auth.waitQrLoginAsync(uid, cb)
             end
             if err and os.time() < deadline then
                 -- 网络错误：延迟 3 秒再重试，避免轰炸服务器
-                UIManager:scheduleIn(3, poll)
+                -- 源模块顶部不许 require UI 模块（离线测试直接 require 源文件）
+                require("ui/uimanager"):scheduleIn(3, poll)
                 return
             end
             if err or not Request.ok(res and res.code) then

@@ -71,15 +71,17 @@ Server._routeInput = Input.route
 Server._routeClipboard = Input.clipboard
 Server._routeSettings = SettingsRoute.settings
 
----@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil }
+---@param o { host: string|nil, port: number, token: string, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil }
 ---@return table
 function Server.new(o)
     o = o or {}
     assert(type(o.handlers) == "table", "remote.server: handlers required")
     assert(type(o.root) == "string", "remote.server: root required")
+    assert(type(o.token) == "string" and o.token ~= "", "remote.server: token required")
     return setmetatable({
         host = o.host or "*",
         port = o.port,
+        token = o.token,
         handlers = o.handlers,
         root = o.root,
         roots = o.roots or { o.root },
@@ -105,6 +107,7 @@ function Server:start()
     return true
 end
 
+--- 关停：断开全部在途连接并关闭监听 socket；可重复调用。
 function Server:stop()
     for _, conn in ipairs(self._conns) do
         self:_kill(conn)
@@ -146,6 +149,9 @@ end
 
 -- ── 连接生命周期 ─────────────────────────────────────
 
+--- 标记连接死亡并释放其占用：socket、正在写的文件、未移交的上传临时文件。
+--- 关闭动作全部 pcall：kill 常在异常路径调用，二次错误会盖掉真实原因。
+---@param conn table
 function Server:_kill(conn)
     conn.dead = true
     pcall(function() conn.sock:close() end)
@@ -159,6 +165,7 @@ function Server:_kill(conn)
     end
 end
 
+--- 收干监听队列里所有新连接，各建一条 headers 状态的连接记录（非阻塞）。
 function Server:_accept()
     while true do
         local client = self._sock:accept()
@@ -177,6 +184,7 @@ function Server:_accept()
     end
 end
 
+--- 回收超过 IDLE_TIMEOUT 无字节进展的连接；pending（等 save 回调）豁免。
 function Server:_reapIdle()
     local now = socket.gettime()
     for i = #self._conns, 1, -1 do
@@ -189,6 +197,8 @@ function Server:_reapIdle()
     end
 end
 
+--- 按连接当前状态推进一小步（headers/body/pending/respond）。
+---@param conn table
 ---@return boolean 本轮是否有进展
 function Server:_step(conn)
     if conn.dead then
@@ -208,6 +218,10 @@ end
 
 -- ── headers ──────────────────────────────────────────
 
+--- 收字节直到出现空行分隔，随即分发路由；超 HEADER_LIMIT 回 431。
+--- 空行之后的残留字节留在 conn.buf，归 body 阶段消费。
+---@param conn table
+---@return boolean 本轮是否读到字节
 function Server:_readHeaders(conn)
     local data, err, partial = conn.sock:receive(CHUNK)
     local got = data or partial
@@ -285,6 +299,9 @@ function Server:_safePath(p)
     return nil
 end
 
+--- 取上级目录；path 本身是某个 managed root 或越界时返回 nil。
+---@param path string
+---@return string|nil
 function Server:_parent(path)
     for _, root in ipairs(self.roots) do
         if path == root then
@@ -298,6 +315,9 @@ function Server:_parent(path)
     return self:_safePath(parent)
 end
 
+--- 路径是否正好是某个 managed root。
+---@param path string
+---@return boolean
 function Server:_isRoot(path)
     for _, root in ipairs(self.roots) do
         if path == root then
@@ -307,7 +327,51 @@ function Server:_isRoot(path)
     return false
 end
 
+--- 请求是否带正确 token（查询串 t= 或 Authorization: Bearer）。
+---@param headers table
+---@param query table
+---@return boolean
+function Server:_authorized(headers, query)
+    if query.t == self.token then
+        return true
+    end
+    local auth = headers["authorization"]
+    return type(auth) == "string" and auth:match("^[Bb]earer%s+(.+)$") == self.token
+end
+
+--- Host 是域名说明是 DNS rebinding：浏览器会把它当同源，于是恶意页面里的脚本
+--- 能拿设备当自己的后端。只认 IP / localhost 字面量；无 Host 头不是浏览器，放过。
+---@param headers table
+---@return boolean
+local function hostIsLiteral(headers)
+    local host = headers["host"]
+    if type(host) ~= "string" or host == "" then
+        return true
+    end
+    -- 去掉端口：[::1]:9528 / 192.168.1.5:9528 / ::1 / localhost
+    local name = host:match("^%[(.-)%]") or host:match("^([^:]+):%d+$") or host
+    return name == "localhost"
+        or name:match("^%d+%.%d+%.%d+%.%d+$") ~= nil
+        or (name:find(":", 1, true) ~= nil and name:match("^[%x:]+$") ~= nil)
+end
+
+--- 跨站写请求拦截：Origin 缺失（curl 等非浏览器）放过，存在则必须与 Host 一致。
+---@param headers table
+---@return boolean
+local function sameOrigin(headers)
+    local origin = headers["origin"]
+    if type(origin) ~= "string" or origin == "" or origin == "null" then
+        return true
+    end
+    return origin:match("^https?://(.+)$") == headers["host"]
+end
+
 --- 解析请求行 + headers 并分发路由；失败直接排响应。
+--- 顺序固定：静态资源（免凭据，仅 GET，否则 405）→ token 校验（403）→
+--- Host 字面量校验（403，防 DNS rebinding）→ 非 GET 的同源校验（403）→ API 路由；
+--- 全不匹配回 404。
+---@param conn table
+---@param head string 请求行 + headers 原文（不含结尾空行）
 function Server:_route(conn, head)
     local first = head:match("^([^\r\n]+)") or ""
     local method, uri = first:match("^(%S+)%s+(%S+)%s+HTTP/%d%.%d$")
@@ -332,6 +396,21 @@ function Server:_route(conn, head)
             return self:_fail(conn, 405, "Method Not Allowed")
         end
         return self:_queueResponse(conn, { code = 200, ctype = ctype, body = body })
+    end
+
+    -- 静态页面/资源是常量，可无凭据取；其余全部要 token：
+    -- 没有这道门，同一 Wi-Fi 上任何人都能列目录、下载、删文件、改配置。
+    if not self:_authorized(headers, query) then
+        logger.warn("book remote unauthorized", method, path)
+        return self:_fail(conn, 403, "Unauthorized")
+    end
+    if not hostIsLiteral(headers) then
+        return self:_fail(conn, 403, "Bad host")
+    end
+    -- 非 GET 都是 CORS「简单请求」：不校验来源的话，用户打开恶意页面就能删文件、
+    -- 改配置（攻击者读不到响应也无所谓，副作用已经发生）。
+    if method ~= "GET" and not sameOrigin(headers) then
+        return self:_fail(conn, 403, "Cross-origin request rejected")
     end
 
     if path == "/api/config" then
@@ -374,6 +453,8 @@ end
 --- 文本 body 入口（远程输入/剪贴板/远程配置共用）：校验 Content-Length，
 --- 切 body 状态攒内存（不落盘），收尾函数挂 conn.finish——body 收齐后由
 --- _readBody 回调（签名 fun(server, conn, text)，自含响应）。
+---@param conn table
+---@param headers table 已小写化的请求头
 ---@param limit number body 上限（字节）
 ---@param finish fun(self: table, conn: table, text: string)
 ---@return true|nil|false true=有 body 进状态机；false=空 body，调用方当场收尾；
@@ -398,6 +479,11 @@ function Server:_acceptText(conn, headers, limit, finish)
     return true
 end
 
+--- 收 body：文本通道攒内存，上传通道流式写盘。
+--- 收满后文本通道调 conn.finish 自行收尾；上传通道关文件、把临时文件所有权移交
+--- handlers.save 并转 pending 等回调。写盘失败当场回 500，避免落一个截断文件还回 ok。
+---@param conn table
+---@return boolean 本轮是否有进展
 function Server:_readBody(conn)
     local got
     if #conn.buf > 0 then
@@ -420,7 +506,18 @@ function Server:_readBody(conn)
     if conn.finish then
         conn.text_buf[#conn.text_buf + 1] = got
     else
-        conn.file:write(got)
+        -- 磁盘满/IO 错误必须当场失败：继续走下去会 save 一个截断文件并回 {"ok":true}
+        local ok, werr = conn.file:write(got)
+        if not ok then
+            conn.file:close()
+            conn.file = nil
+            if conn.temp then
+                pcall(os.remove, conn.temp)
+                conn.temp = nil
+            end
+            self:_fail(conn, 500, tostring(werr or "write failed"))
+            return true
+        end
     end
     conn.remaining = conn.remaining - #got
     conn.touched = socket.gettime()
@@ -456,6 +553,9 @@ function Server:_readBody(conn)
     return true
 end
 
+--- 轮询异步落位结果：conn.resp 就绪才排响应，否则本轮无进展。
+---@param conn table
+---@return boolean
 function Server:_checkPending(conn)
     if not conn.resp then
         return false
@@ -469,6 +569,9 @@ end
 -- ── respond ──────────────────────────────────────────
 
 --- 错误响应：一律 JSON {"error": msg}（页面据此显示真实原因）。
+---@param conn table
+---@param code number HTTP 状态码（需在 STATUS 表内，否则原因短语为 Unknown）
+---@param msg any 错误说明，tostring 后进 JSON
 function Server:_fail(conn, code, msg)
     return self:_queueResponse(conn, {
         code = code,
@@ -477,6 +580,8 @@ function Server:_fail(conn, code, msg)
     })
 end
 
+--- 拼响应头并转 respond 状态；带 file 时只发头，body 由 _write 分块读发。
+---@param conn table
 ---@param resp { code: number, ctype: string|nil, body: string|nil, extra: string[]|nil, file: any|nil, size: number|nil }
 function Server:_queueResponse(conn, resp)
     local lines = {
@@ -502,6 +607,9 @@ function Server:_queueResponse(conn, resp)
     conn.state = "respond"
 end
 
+--- 非阻塞外发当前缓冲；发完后若有 body_file 就续读下一块，否则关连接（Connection: close）。
+---@param conn table
+---@return boolean 本轮是否有进展
 function Server:_write(conn)
     if conn.out_off > #conn.out then
         if conn.body_file then
@@ -569,7 +677,7 @@ local function readAsset(name)
 end
 
 ---@param path string 路由路径
----@return string|nil name, string|nil ctype
+---@return string|nil body, string|nil ctype 非静态路由或读取失败时返回 nil
 function Server.asset(path)
     local a = ASSETS[path]
     if not a then

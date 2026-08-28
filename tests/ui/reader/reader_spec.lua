@@ -21,6 +21,16 @@ package.preload["device"] = function()
         hasWifiToggle = function() return true end,
     }
 end
+-- registry 一次性加载全部动作模块，font 动作会拉真身 utils.font（ui/font + fontlist）
+package.preload["utils.font"] = function()
+    return {
+        -- 与真身同契约：非 CRengine 文档（本 spec 的假 ui）不支持换字体
+        supportsReader = function(u)
+            return u and u.font ~= nil and type(u.document) == "table"
+                and type(u.document.setFontFace) == "function" or false
+        end,
+    }
+end
 package.preload["ui/network/manager"] = function()
     return { isWifiOn = function() return false end }
 end

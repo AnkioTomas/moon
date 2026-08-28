@@ -21,6 +21,8 @@ local Input = {}
 Input.TEXT_LIMIT = 256 * 1024
 
 --- /api/input body 收尾：光标处追加注入；无激活输入框 → 409。
+---@param conn table
+---@param text string 收齐的请求体文本
 function Input.finishAppend(self, conn, text)
     local ok, err = self.handlers.set_input(text)
     if not ok then
@@ -32,6 +34,8 @@ function Input.finishAppend(self, conn, text)
 end
 
 --- /api/clipboard body 收尾：剪贴板写入不受输入框影响。
+---@param conn table
+---@param text string 收齐的请求体文本（空串=清空）
 function Input.finishClipboard(self, conn, text)
     self.handlers.set_clipboard(text)
     return self:_queueResponse(conn, {
@@ -39,7 +43,12 @@ function Input.finishClipboard(self, conn, text)
     })
 end
 
---- 输入框通道：光标处追加（append 唯一模式，与远程输入初衷一致）
+--- /api/input：GET 回 { active, text }；POST 收文本走 finishAppend 光标处追加。
+--- 其余方法 405；空 body 视为无操作直接回 ok。
+---@param conn table
+---@param method string
+---@param headers table 已小写化的请求头
+---@return true|nil true=已进 body 状态，等收齐后回调
 function Input.route(self, conn, method, headers, _query)
     if method == "GET" then
         local st = self.handlers.get_input() or {}
@@ -68,7 +77,12 @@ function Input.route(self, conn, method, headers, _query)
     })
 end
 
---- 共享剪贴板通道：GET 读设备最后复制；POST 写设备剪贴板（+激活输入框）
+--- /api/clipboard：GET 回 { text }（设备最后复制的文本）；POST 整段写入剪贴板并同步进激活输入框。
+--- 其余方法 405；空 body 表示清空。
+---@param conn table
+---@param method string
+---@param headers table 已小写化的请求头
+---@return true|nil true=已进 body 状态，等收齐后回调
 function Input.clipboard(self, conn, method, headers, _query)
     if method == "GET" then
         local st = self.handlers.get_clipboard() or {}

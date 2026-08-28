@@ -19,6 +19,10 @@ local T = require("ffi/util").template
 local Language = {}
 local RELEASES_URL = "https://github.com/AnkioTomas/moon/releases"
 
+--- 造一行小字灰色提示，高度按文本实测撑开。
+---@param width number 行可用宽度
+---@param text string 提示文案
+---@return table LeftContainer widget
 local function hintRow(width, text)
     local box_w = math.max(1, width - UI.sz(4))
     local box = TextBoxWidget:new{
@@ -35,6 +39,8 @@ local function hintRow(width, text)
     }
 end
 
+--- 弹出界面语言选择列表。
+--- 选项与回调都直接取自 KOReader 原生语言菜单，切换行为完全交给它。
 local function pickLanguage()
     local source = require("ui/language"):getLangMenuTable()
     local items = {}
@@ -48,14 +54,21 @@ local function pickLanguage()
     Popup.list{ title = _("语言"), items = items }
 end
 
+--- 下载拼音词库，全程用进度对话框回报 manifest / 分片 / 拼接三个阶段。
+--- 已在下载中则直接返回，避免并发拉取。
+---@param desktop table 桌面实例，结束后重建以刷新状态文案
+---@param enable_after boolean|nil 下载成功后是否顺带开启拼音增强
 local function download(desktop, enable_after)
     if require("pinyin.download").downloading() then return end
     local dialog
     local dialog_has_bar = false
+    --- 关掉当前进度对话框（若有）。
     local function closeDialog()
         if dialog then dialog:close(); dialog = nil end
         dialog_has_bar = false
     end
+    --- 换一个进度对话框；总量未知时退化成无进度条的等待提示。
+    ---@param opts table ProgressbarDialog 参数
     local function openDialog(opts)
         closeDialog()
         local ok, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
@@ -99,6 +112,9 @@ local function download(desktop, enable_after)
     end)
 end
 
+--- 下载词库前先确认，提醒新词库可能要求新版插件。
+---@param desktop table 桌面实例
+---@param enable_after boolean|nil 下载成功后是否顺带开启拼音增强
 local function confirmDownload(desktop, enable_after)
     UIManager:show(ConfirmBox:new{
         text = _("新词库可能需要新版插件支持。是否继续下载？"),

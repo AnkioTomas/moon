@@ -154,6 +154,9 @@ end
 function Languages.pickerItems(translator, include_auto, current)
     local items = {}
     local seen = {}
+    --- 追加一个语言项，重复代码按先到先得去重。
+    ---@param code string|nil 语言代码，nil 直接跳过
+    ---@param text string|nil 显示文案，缺省取语言本地化名
     local function add(code, text)
         if not code or seen[code] then
             return
