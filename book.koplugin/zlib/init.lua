@@ -121,6 +121,7 @@ function Zlib.installAsync(source, book, on_progress, cb)
     if not id then cb(nil, _("无效书籍身份")); return nil end
     local api, cancelled, job, temp = client(), false, nil, nil
     local result = {}
+    --- 取消下载或导入：终止在途任务并清掉已落盘的 .part 临时文件。
     function result.cancel()
         cancelled = true
         if job and job.cancel then job.cancel() end

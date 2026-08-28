@@ -42,6 +42,55 @@ package.preload["ui.components.icon"] = function()
     }
 end
 
+-- 这些真身会经 geometry → optmath → dbg 拉进 device/SDL 与 ffi/blitbuffer，
+-- 离线环境没有编译产物，必须在 require 前挡住
+package.preload["ui/widget/container/centercontainer"] = function()
+    local C = {}
+    function C:new(o) return o or {} end
+    return C
+end
+
+package.preload["ui/widget/container/inputcontainer"] = function()
+    local C = {}
+    function C:new(o) return o or {} end
+    return C
+end
+
+package.preload["ui/geometry"] = function()
+    local C = {}
+    function C:new(o) return o or {} end
+    return C
+end
+
+package.preload["ui/gesturerange"] = function()
+    local C = {}
+    function C:new(o) return o or {} end
+    return C
+end
+
+package.preload["ffi/blitbuffer"] = function()
+    return { COLOR_BLACK = 1, COLOR_WHITE = 0 }
+end
+
+package.preload["ui.components.bottombar"] = function()
+    return {
+        build = function(tabs, active, on_tab)
+            return {
+                _tabs = tabs,
+                _active = active,
+                _on_tab = on_tab,
+                getSize = function() return { w = 400, h = 60 } end,
+            }
+        end,
+    }
+end
+
+package.preload["ui.components.surface"] = function()
+    return {
+        pill = function(inner) return { _pill = inner } end,
+    }
+end
+
 package.preload["ui/widget/checkmark"] = function()
     local CheckMark = {}
     function CheckMark:new(o)
@@ -109,7 +158,11 @@ package.preload["ui/widget/menu"] = function()
         o.item_dimen = { w = 400, h = 50 }
         o.available_height = 600
         o.page_info_text = { setText = function() end, hide = function() end }
-        o.page_info = { {}, o.page_info_text, {} } -- 假 pager 行：chev / 页码 / chev
+        -- 假 pager 行：chev / 页码 / chev
+        o.page_info = {
+            {}, o.page_info_text, {},
+            getSize = function() return { w = 400, h = 30 } end,
+        }
         -- FrameContainer → OverlapGroup(content_group, page_return, footer)
         o[1] = { [1] = { {}, {}, { o.page_info } } }
         return o
@@ -319,23 +372,20 @@ do
             on_tab = function(id) active = id end,
         },
     }
-    -- footer 子件换成竖排：pager 原样在上，Tab 栏在下
+    -- footer 子件换成竖排：pager 居中包一层在上，Tab 栏在下
     local stack = menu[1][1][3][1]
-    Assert.eq(stack[1], menu.page_info)
+    Assert.eq(stack[1][1], menu.page_info)
     local bar = stack[2]
-    Assert.eq(#bar, 3)
-    Assert.eq(bar[1].width, 133) -- floor(400/3)，全宽等分
-    Assert.is_true(bar[1].text_font_bold) -- 当前 Tab 加粗
-    Assert.is_true(bar[2].text_font_bold == false)
+    Assert.eq(#bar._tabs, 3)
+    Assert.eq(bar._active, "x")
     Assert.is_true(menu._updates >= 1) -- 挂载后触发全量重算
-    bar[1].callback() -- 点当前 Tab：不触发
+    bar._on_tab("x") -- 点当前 Tab：不触发
     Assert.is_nil(active)
-    bar[2].callback()
+    bar._on_tab("y")
     Assert.eq(active, "y")
     menu:setBottomTabActive("y")
     local bar2 = menu[1][1][3][1][2]
-    Assert.is_true(bar2[2].text_font_bold)
-    Assert.is_true(bar2[1].text_font_bold == false)
+    Assert.eq(bar2._active, "y")
 end
 
 -- —— sheet / spin 回归 ——

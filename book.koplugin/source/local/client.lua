@@ -9,11 +9,17 @@
 --]]
 
 local lfs = require("libs/libkoreader-lfs")
-local UIManager = require("ui/uimanager")
 local util = require("util")
 local Text = require("utils.text")
 local _ = require("gettext")
 local Task = require("utils.task")
+
+-- 源模块顶部不许 require KOReader UI 模块（离线测试直接 require 源文件）
+local _uimanager
+local function uiManager()
+    _uimanager = _uimanager or require("ui/uimanager")
+    return _uimanager
+end
 
 local Client = {}
 Client.__index = Client
@@ -360,7 +366,7 @@ local function queryDb(opts, cb)
     opts = opts or {}
     local page = math.max(1, tonumber(opts.page) or 1)
     local page_size = math.max(1, tonumber(opts.page_size) or 24)
-    UIManager:nextTick(function()
+    uiManager():nextTick(function()
         local BookDB = require("utils.db.book")
         local rows, count = BookDB.listBySource(SOURCE_ID, {
             category = opts.category,
@@ -590,14 +596,14 @@ end
 ---@return { cancel: fun() }|nil
 function Client:indexOneAsync(path, cb)
     if type(path) ~= "string" or path == "" then
-        UIManager:nextTick(function()
+        uiManager():nextTick(function()
             cb(nil, _("无效路径"))
         end)
         return nil
     end
     local name = path:match("([^/]+)$") or path
     if not isBookFile(name) then
-        UIManager:nextTick(function()
+        uiManager():nextTick(function()
             cb(nil, _("不支持的文件格式"))
         end)
         return nil
@@ -631,7 +637,7 @@ end
 function Client:scanAsync(cb)
     local ok, err = self:validatePath()
     if not ok then
-        UIManager:nextTick(function()
+        uiManager():nextTick(function()
             cb(false, err)
         end)
         return nil
@@ -649,7 +655,7 @@ end
 function Client:listAsync(opts, cb)
     local ok, err = self:validatePath()
     if not ok then
-        UIManager:nextTick(function()
+        uiManager():nextTick(function()
             cb(nil, 0, err)
         end)
         return nil
@@ -698,7 +704,7 @@ end
 ---@return { cancel: fun() }|nil
 function Client:filtersAsync(cb)
     local ok, err = self:validatePath()
-    UIManager:nextTick(function()
+    uiManager():nextTick(function()
         if not ok then
             cb(nil, err)
             return

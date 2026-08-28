@@ -13,12 +13,18 @@ local T = require("ffi/util").template
 
 local HomeSettings = {}
 
+--- 写回首页启用组件的有序列表。
+---@param layout string[] 组件 id，顺序即首页显示顺序
 local function saveLayout(layout)
     local home = MoonSettings.get("home")
     home.home_layout = layout
     MoonSettings.saveSection("home", home)
 end
 
+--- 判断组件是否在启用列表里。
+---@param id string 组件 id
+---@param layout string[] 启用列表
+---@return boolean
 local function isEnabled(id, layout)
     for i, item in ipairs(layout) do
         if item == id then return true end
@@ -26,6 +32,10 @@ local function isEnabled(id, layout)
     return false
 end
 
+--- 组件在启用列表中的序号。
+---@param id string 组件 id
+---@param layout string[] 启用列表
+---@return number|nil 未启用时为 nil
 local function position(id, layout)
     for i, item in ipairs(layout) do
         if item == id then return i end
@@ -33,6 +43,10 @@ local function position(id, layout)
     return nil
 end
 
+--- 启用/停用组件并立刻重建桌面。
+--- 启用时追加到末尾。清掉 desktop 的首页缓存，否则组件已装卸但界面仍用旧数据。
+---@param id string 组件 id
+---@param desktop table 桌面实例
 local function toggle(id, desktop)
     local layout = Base.enabledLayout()
     if isEnabled(id, layout) then
@@ -50,6 +64,11 @@ local function toggle(id, desktop)
     desktop:rebuild()
 end
 
+--- 在启用列表里挪动组件位置并重建桌面。
+--- 越界或未启用时静默忽略。
+---@param id string 组件 id
+---@param delta number 位移量，-1 上移 / 1 下移
+---@param desktop table 桌面实例
 local function move(id, delta, desktop)
     local layout = Base.enabledLayout()
     local pos = position(id, layout)
@@ -63,6 +82,9 @@ local function move(id, delta, desktop)
     desktop:rebuild()
 end
 
+--- 弹出单个组件的操作面板：启用/停用，已启用时另给上移下移。
+---@param desktop table 桌面实例
+---@param comp table 组件定义（id / label / icon）
 local function configure(desktop, comp)
     local layout = Base.enabledLayout()
     local enabled = isEnabled(comp.id, layout)
@@ -107,6 +129,9 @@ local function configure(desktop, comp)
     UIManager:show(dialog)
 end
 
+--- 弹出已启用组件的排序列表，点按进入单组件操作面板。
+--- 一个都没启用时不弹空列表。
+---@param desktop table 桌面实例
 local function openSortList(desktop)
     local layout = Base.enabledLayout()
     if #layout == 0 then return end
@@ -131,6 +156,12 @@ local function openSortList(desktop)
     }
 end
 
+--- 造一个组件设置行的构造器（延迟到拿到内容宽度时才建 widget）。
+---@param desktop table 桌面实例
+---@param comp table 组件定义（id / label / icon）
+---@param enabled boolean 当前是否启用
+---@param pos number|nil 启用时的序号
+---@return fun(iw: number): table
 local function componentRow(desktop, comp, enabled, pos)
     return function(iw)
         local status

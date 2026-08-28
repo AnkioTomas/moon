@@ -523,6 +523,8 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
         end
     end
 
+    --- 异步解码本地图片并替换占位；句柄存在 decode_job 里供 free 时中止。
+    ---@param path string 本地图片路径
     local function decode(path)
         decode_job = decodeAsync(path, inner_w, inner_h, alpha, function(widget)
             decode_job = nil

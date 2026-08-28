@@ -56,6 +56,7 @@ function Mobi2Epub.extract(opts, cb)
     local document
     local pages = {}
 
+    --- 关闭已打开的 crengine 文档并置空句柄；重复调用无副作用。
     local function closeDocument()
         local doc = document
         document = nil
@@ -64,12 +65,17 @@ function Mobi2Epub.extract(opts, cb)
         end
     end
 
+    --- 上报提取进度；已取消或调用方没给 on_progress 时静默丢弃。
+    ---@param ev table 形如 { phase = "extract", index, total }
     local function emit(ev)
         if not cancelled and type(opts.on_progress) == "function" then
             opts.on_progress(ev)
         end
     end
 
+    --- 收尾：关文档并回调一次；已取消或已完成时直接返回。
+    ---@param text string|nil 提取到的全文
+    ---@param err any 失败原因
     local function finish(text, err)
         if cancelled or finished then
             return
@@ -80,6 +86,7 @@ function Mobi2Epub.extract(opts, cb)
     end
 
     local job = {}
+    --- 中止提取：停止翻页并关文档，cb 不会再触发。
     function job.cancel()
         if cancelled or finished then
             return
@@ -88,6 +95,10 @@ function Mobi2Epub.extract(opts, cb)
         closeDocument()
     end
 
+    --- 提取第 page 页文本并追加到 pages，随后让出事件循环处理下一页。
+    --- 非末页取相邻两页 xpointer 之间的文本，末页只能按屏幕坐标范围取。
+    ---@param page number 当前页号，从 1 起
+    ---@param page_count number 总页数
     local function extractPage(page, page_count)
         if cancelled then
             return
@@ -223,6 +234,7 @@ function Mobi2Epub.build(opts, cb)
     end)
 
     local job = {}
+    --- 中止转换：文本提取和 epub 打包两阶段任一在途都会被取消。
     function job.cancel()
         if extract_job and extract_job.cancel then
             extract_job.cancel()

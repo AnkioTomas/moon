@@ -354,6 +354,9 @@ function Stats.syncAsync(source, _opts, cb)
     local can_push = source and type(source.pushStatsAsync) == "function"
     local cancelled, current_job = false, nil
     local result = { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
+    --- 终结整次同步并回调；已取消时静默丢弃。
+    ---@param value SyncResult|nil nil 表示失败
+    ---@param err any
     local function finish(value, err)
         if not cancelled and cb then cb(value, err) end
     end
@@ -364,6 +367,9 @@ function Stats.syncAsync(source, _opts, cb)
         end)
         return { cancel = function() cancelled = true end }
     end
+    --- 上传本地未确认的统计行，然后终结同步。
+    --- 无待传行或源不支持推送时直接按成功收尾；result.pushed 取源确认条数，
+    --- 源没回报确认数时退回本次待传条数。
     local function push()
         if cancelled then return end
         if not can_push then finish(result); return end

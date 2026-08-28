@@ -9,7 +9,7 @@ local Assert = require("support.assert")
 local Config = require("support.config")
 
 if not Config.available() then
-    io.write("  (skip: config/ 软链不可用)\n")
+    io.write("  (skip: 沙箱数据目录未就绪，请用 ./tests/run.sh 运行)\n")
     return
 end
 

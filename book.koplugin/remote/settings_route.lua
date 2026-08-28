@@ -11,7 +11,10 @@ local Route = {}
 
 Route.BODY_LIMIT = SettingsApi.BODY_LIMIT
 
---- /api/settings body 收尾：JSON 部分更新
+--- /api/settings body 收尾：解析 JSON 后做部分更新，回写实际生效的字段。
+--- JSON 非法或 apply 拒绝都回 400（带原因）。
+---@param conn table
+---@param text string 收齐的请求体 JSON 文本
 function Route.finishSettings(self, conn, text)
     local payload, err = JSON.decode(text)
     if not payload then
@@ -29,7 +32,12 @@ function Route.finishSettings(self, conn, text)
     })
 end
 
---- GET /api/settings ；POST JSON 部分更新
+--- GET /api/settings 回配置快照；POST 收 JSON 走 finishSettings 做部分更新。
+--- 其余方法 405；空 body 等价于提交 {}。
+---@param conn table
+---@param method string
+---@param headers table 已小写化的请求头
+---@return true|nil true=已进 body 状态，等收齐后回调
 function Route.settings(self, conn, method, headers, _query)
     if method == "GET" then
         return self:_queueResponse(conn, {

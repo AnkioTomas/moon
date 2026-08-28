@@ -4,8 +4,8 @@ book.cache：协作式异步扫盘/删除状态机 + cleanupStale TTL 判定
 purgeDirAsync 是 cache.lua 的局部函数，只能经 clearAsync 触达；
 这里把 utils.task 打成「主进程同步跑 worker + 同步 on_done」，
 避免真 fork 子进程，同时保留 purge 自身的 nextTick 分片调度。
-BookDB/ChapterDB 全部假实现（内存表），绝不打开真实 config/.moon/book.sqlite3；
-临时目录限定在 config/.moon/cache/test_book_cache_spec/ 下，结束清理。
+BookDB/ChapterDB 全部假实现（内存表），绝不打开真实的 book.sqlite3；
+临时目录限定在沙箱 .moon/cache/test_book_cache_spec/ 下，结束清理。
 
 @module tests.book.cache_spec
 --]]

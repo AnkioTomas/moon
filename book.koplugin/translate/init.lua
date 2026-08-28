@@ -12,6 +12,15 @@ require("l10n").apply()
 local Popup = require("translate.popup")
 local Translate = {}
 
+--- 复制原文到剪贴板，确保联网后打开 Edge 翻译弹窗。
+--- 离线时交给 NetworkMgr 排队，联网回调里重跑本函数，因此参数需原样透传。
+---@param translator table KOReader Translator 单例
+---@param text string 待翻译原文
+---@param detailed_view boolean|nil 原生详细模式标记，本实现不使用
+---@param source_lang string|nil 源语言代码，缺省取 translator 当前设置
+---@param target_lang string|nil 目标语言代码，缺省取 translator 当前设置
+---@param from_highlight boolean|nil 是否由划词菜单触发（决定是否显示存笔记按钮）
+---@param index number|nil 划词笔记序号，有值则编辑该条而非新增
 local function showTranslation(translator, text, detailed_view, source_lang, target_lang, from_highlight, index)
     local Device = require("device")
     if Device:hasClipboard() then

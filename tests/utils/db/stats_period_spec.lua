@@ -21,7 +21,13 @@ package.preload["utils.db.base"] = function()
                 return { { 9 }, { 1200 }, { 3 } }, 1
             end
             if sql:find("date(start_time", 1, true) then
-                return { { "2024-01-01" }, { 600 }, { 2 } }, 1
+                -- 同一天既有云端日桶又有本地逐页记录：合并后只能算云端那份
+                return {
+                    { "2024-01-01", "2024-01-01" },
+                    { "__moon:day:2024-01-01", "b1" },
+                    { 3000, 600 },
+                    { 1, 2 },
+                }, 2
             end
             return {
                 { "b1" }, { "书名" }, { "作者" }, { 42 }, { 1800 }, { 5 },
@@ -33,25 +39,32 @@ package.loaded["utils.db.stats"] = nil
 
 local Stats = require("utils.db.stats")
 local summary = Stats.periodSummary("moon", 100, 200)
-Assert.eq(summary.total_seconds, 3600)
+-- 总时长走「云端日桶优先」，不是 3000+600
+Assert.eq(summary.total_seconds, 3000)
 Assert.eq(summary.book_count, 2)
 Assert.eq(summary.pages, 9)
 Assert.eq(calls[1].args[1], "moon")
 Assert.eq(calls[1].args[2], 100)
 Assert.eq(calls[1].args[3], 200)
+-- 书数/页数只数真实书的记录
+Assert.is_true(calls[1].sql:find("NOT GLOB '__*:day:*'", 1, true) ~= nil)
 
+calls = {}
 local books = Stats.periodBooks("moon", 100, 200, 3)
 Assert.len(books, 1)
 Assert.eq(books[1].stable_id, "b1")
 Assert.eq(books[1].seconds, 1800)
 Assert.eq(books[1].percent, 42)
-Assert.eq(calls[2].args[4], 3)
-Assert.is_true(calls[2].sql:find("start_time>=?", 1, true) ~= nil)
+Assert.eq(calls[1].args[4], 3)
+Assert.is_true(calls[1].sql:find("start_time>=?", 1, true) ~= nil)
+Assert.is_true(calls[1].sql:find("NOT GLOB '__*:day:*'", 1, true) ~= nil)
 
+calls = {}
 local days = Stats.periodDays("moon", 100, 200)
 Assert.len(days, 1)
 Assert.eq(days[1].ymd, "2024-01-01")
-Assert.eq(days[1].seconds, 600)
+Assert.eq(days[1].seconds, 3000)
+Assert.eq(calls[1].args[2], 100, "按天查询必须带范围参数")
 
 local hours = Stats.periodHours("moon", 100, 200)
 Assert.len(hours, 1)

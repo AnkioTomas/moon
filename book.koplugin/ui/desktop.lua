@@ -281,23 +281,42 @@ function Desktop:switchTab(id)
     self:rebuild()
 end
 
+-- 各 Tab 的在飞取数任务；换源和关桌面都必须全部取消（漏一个就是关了页还在跑网络+写库）
+local FETCH_JOB_KEYS = {
+    "_home_fetch_cancel",
+    "_library_fetch_cancel",
+    "_store_fetch_cancel",
+    "_insight_fetch_cancel",
+    "_books_sync_cancel",
+}
+
+-- 只在关闭时清的后台维护任务
+local MAINTENANCE_JOB_KEYS = {
+    "_cache_size_job",
+    "_cache_clear_job",
+    "_local_cleanup_job",
+}
+
+--- 取消并清空 self 上登记的任务句柄。job.cancel 一律是零参闭包。
+---@param self table
+---@param keys string[]
+local function cancelJobs(self, keys)
+    for _, key in ipairs(keys) do
+        local job = self[key]
+        if type(job) == "table" and type(job.cancel) == "function" then
+            pcall(job.cancel)
+        elseif type(job) == "function" then
+            pcall(job)
+        end
+        self[key] = nil
+    end
+end
+
 --- 数据源切换：取消在飞请求、清各 Tab 缓存、回退不支持的 Tab 并重建。
 ---@param source BookSource|nil
 function Desktop:sourceChanged(source)
     self.source_generation = (self.source_generation or 0) + 1
-    for _, key in ipairs({
-        "_home_fetch_cancel",
-        "_library_fetch_cancel",
-        "_store_fetch_cancel",
-        "_insight_fetch_cancel",
-        "_books_sync_cancel",
-    }) do
-        local job = self[key]
-        if type(job) == "table" and type(job.cancel) == "function" then
-            pcall(function() job:cancel() end)
-        end
-        self[key] = nil
-    end
+    cancelJobs(self, FETCH_JOB_KEYS)
     Image.abortPending()
     self.source = source
     self._tabs = desktopTabs(source)
@@ -325,6 +344,11 @@ function Desktop:rebuild()
         local sw = Screen:getWidth()
         local sh = Screen:getHeight()
         self.dimen = Geom:new{ x = 0, y = 0, w = sw, h = sh }
+        -- 旧树必须显式释放：里面的图片 asyncBox 只在 free 时取消在飞下载/解码，
+        -- 否则每次切 Tab 都留下一批解好的 BlitBuffer 挂在孤立 widget 上等 GC。
+        if self[1] and self[1].free then
+            self[1]:free()
+        end
 
         local content
         if self.tab == "home" then
@@ -469,23 +493,8 @@ function Desktop:onClose()
         UIManager:unschedule(self._clock_tick)
         self._clock_tick = nil
     end
-    for _, key in ipairs({
-        "_home_fetch_cancel",
-        "_library_fetch_cancel",
-        "_store_fetch_cancel",
-        "_insight_fetch_cancel",
-        "_cache_size_job",
-        "_cache_clear_job",
-        "_local_cleanup_job",
-    }) do
-        local job = self[key]
-        if type(job) == "table" and type(job.cancel) == "function" then
-            pcall(function() job:cancel() end)
-        elseif type(job) == "function" then
-            pcall(job)
-        end
-        self[key] = nil
-    end
+    cancelJobs(self, FETCH_JOB_KEYS)
+    cancelJobs(self, MAINTENANCE_JOB_KEYS)
     self._home_refresh_pending = false
     self._library_refresh_pending = false
     self._insight_refresh_pending = false

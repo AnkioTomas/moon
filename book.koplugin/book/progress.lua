@@ -19,11 +19,19 @@ local Progress = {}
 local asked_conflicts = {}
 local last_revision = 0
 
+--- 生成单调递增的进度修订号（同一进程内不会重复）。
+--- 秒级时间戳在同一秒内多次写入会撞号，而修订号是 pending_progress 判定新旧的
+--- 依据，必须严格递增。
+---@return integer
 local function nextRevision()
     last_revision = math.max(os.time(), last_revision + 1)
     return last_revision
 end
 
+--- 按位置填充翻译串里的 %1、%2… 占位符（每个占位符只替换首次出现）。
+---@param fmt string 含 %N 占位符的模板
+---@param ... any 依次替换 %1、%2…
+---@return string
 local function T(fmt, ...)
     local s = tostring(fmt)
     for i = 1, select("#", ...) do
@@ -263,6 +271,9 @@ function Progress.syncAsync(source, opts, cb)
     local can_push = source and type(source.putProgressAsync) == "function"
     local cancelled, current_job = false, nil
     local result = { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
+    --- 终结整次同步并回调；已取消时静默丢弃。
+    ---@param value SyncResult|nil nil 表示失败
+    ---@param err any
     local function finish(value, err)
         if not cancelled and cb then cb(value, err) end
     end
@@ -275,6 +286,10 @@ function Progress.syncAsync(source, opts, cb)
     end
 
     local identities, seen = {}, {}
+    --- 把一个待同步身份加入队列，按 (stable_id, chapter_idx) 去重。
+    ---@param source_id string
+    ---@param stable_id string|nil 空串与 nil 直接忽略
+    ---@param chapter_idx integer|nil nil 表示整本书
     local function add(source_id, stable_id, chapter_idx)
         local key = tostring(stable_id) .. "\31" .. tostring(chapter_idx or 0)
         if stable_id and stable_id ~= "" and not seen[key] then
@@ -298,12 +313,16 @@ function Progress.syncAsync(source, opts, cb)
     end
 
     local index = 1
+    --- 处理队列里的下一个身份：本地脏行先推、确认后再拉远端；队列空即 finish。
+    --- 串行推进（每步在回调里递归），保证同一本书不会同时推和拉。
     local function nextIdentity()
         if cancelled then return end
         local identity = identities[index]
         index = index + 1
         if not identity then finish(result); return end
 
+        --- 拉当前身份的远端进度落库，再推进到下一个身份。
+        --- dirty_only 模式或源不支持拉取时直接跳过。
         local function pullRemote()
             if opts.dirty_only or not can_pull then nextIdentity(); return end
             current_job = source:getProgressAsync(identity, function(pos, err)
@@ -475,15 +494,16 @@ local function conflictLabel(pos, id, snapshot)
     return T(_("%1%"), string.format("%.1f", (tonumber(pos.fraction) or 0) * 100))
 end
 
---- 把云端进度应用到当前文档（按章书跳章，整本书跳比例）。
---- 调用前提：已确认 pos 与本地不一致且文档身份未变。
---- 只有活动的按章会话才允许用远端进度切章；冷打开的章节文件按单文档处理。
+--- 把选定的进度应用到当前文档（按章书跳章，整本书跳比例）。
+--- 冲突弹窗两个方向都用它：选云端跳云端位置，选本地跳本地那份记录。
+--- 调用前提：已确认 pos 与当前位置不一致且文档身份未变。
+--- 只有活动的按章会话才允许切章；冷打开的章节文件按单文档处理。
 ---@param ui table
 ---@param id BookIdentity
 ---@param pos ProgressPosition
 ---@param pct number clamp 后的全书比例
 ---@param show_msg boolean|nil
-local function applyRemotePos(ui, id, pos, pct, show_msg)
+local function applyChosenPos(ui, id, pos, pct, show_msg)
     local toc = chapterToc(id)
     if toc then
         local count = #toc
@@ -594,7 +614,6 @@ end
 local function askProgressConflict(id, snapshot, local_pos, remote_pos)
     local key = id.source_id .. "\31" .. id.stable_id
     if asked_conflicts[key] then return end
-    asked_conflicts[key] = true
     local ConfirmBox = require("ui/widget/confirmbox")
     local local_desc = conflictLabel(local_pos, id, snapshot)
     local remote_desc = conflictLabel(remote_pos, id, snapshot)
@@ -605,6 +624,9 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
         ok_text = remote_btn,
         cancel_text = local_btn,
         ok_callback = function()
+            -- 置位挪进回调：点空白关闭弹窗时两个回调都不跑，
+            -- 在 show 之前置位会让本次会话再也不问，脏本地进度既不推也不采纳。
+            asked_conflicts[key] = true
             local Session = require("ui.reader.session")
             local current = Session.current()
             if not current or not isSameBook(id) then
@@ -628,21 +650,39 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
                 on_done = function()
                     local live = Session.current()
                     if live and isSameBook(id) then
-                        applyRemotePos(live.ui, live.identity, remote_pos, remote_pos.fraction, true)
+                        applyChosenPos(live.ui, live.identity, remote_pos, remote_pos.fraction, true)
                     end
                 end,
             })
         end,
         cancel_callback = function()
+            asked_conflicts[key] = true
             local Session = require("ui.reader.session")
-            local current = Session.current()
-            if current and isSameBook(id) then
-                Progress.save(current, function(ok)
-                    if ok and id.source and id.source.syncProgressAsync then
+            if not Session.current() or not isSameBook(id) then
+                return
+            end
+            -- 落回弹窗上展示的那份本地进度，不能重新采样实时位置：冷打开的落点
+            -- 可能比本地记录更靠前，那会把「保留本地」变成覆盖本地。
+            local adopt = {}
+            for k, v in pairs(local_pos) do adopt[k] = v end
+            adopt.updated_at = nextRevision()
+            DbQueue.run(function()
+                assert(ProgressDB.upsert(id.source_id, id.stable_id, adopt),
+                    "failed to save local progress")
+            end, {
+                on_done = function()
+                    local live = Session.current()
+                    if live and isSameBook(id) then
+                        applyChosenPos(live.ui, live.identity, adopt, adopt.fraction, false)
+                    end
+                    if id.source and id.source.syncProgressAsync then
                         id.source:syncProgressAsync({ identity = id }, function() end)
                     end
-                end)
-            end
+                end,
+                on_failed = function(err)
+                    logger.warn("book.progress adopt local failed", id.stable_id, err)
+                end,
+            })
         end,
     })
 end
@@ -677,6 +717,8 @@ function Progress.pull(snapshot)
     end)
 end
 
+--- 清空「已问过进度冲突」的记忆，下次开书会重新弹 ConfirmBox。
+--- 由 Session.onCloseDocument 在真正关书（非切章）时调用。
 function Progress.clearConflicts()
     asked_conflicts = {}
 end

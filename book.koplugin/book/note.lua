@@ -15,6 +15,10 @@ local Store = require("book.store")
 local Note = {}
 local last_revision = 0
 
+--- 生成单调递增的注解修订号（同一进程内不会重复）。
+--- 取 os.time() 与上次值+1 的较大者：秒级时间戳在同一秒内多次写入会撞号，
+--- 而修订号是 notes 表判定新旧的依据，必须严格递增。
+---@return integer
 local function nextRevision()
     last_revision = math.max(os.time(), last_revision + 1)
     return last_revision
@@ -57,6 +61,9 @@ local function clean(items, total_pages)
     return result
 end
 
+--- 取文档总页数：优先问 document，退回 doc_settings 里的 doc_pages，都没有算 0。
+---@param ui table ReaderUI
+---@return integer
 local function pageCount(ui)
     return ui.document and ui.document.getPageCount
         and tonumber(ui.document:getPageCount())
@@ -159,6 +166,10 @@ function Note.save(ui, identity, done)
     })
 end
 
+--- 把一条 notes 记录标记为已同步（按 row.updated_at 做乐观校验）。
+--- 若期间本地又改过（updated_at 已变），markSynced 不会误清脏标记。
+---@param row table notes 表行（含 source_id/stable_id/chapter_idx/updated_at）
+---@param done fun(ok: boolean)
 local function confirm(row, done)
     DbQueue.run(function()
         assert(NoteDB.markSynced(row.source_id, row.stable_id, row.chapter_idx, row.updated_at),
@@ -183,6 +194,9 @@ function Note.syncAsync(source, opts, cb)
     local can_push = source and type(source.pushNotesAsync) == "function"
     local cancelled, current_job = false, nil
     local result = { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
+    --- 终结整次同步并回调；已取消时静默丢弃。
+    ---@param value SyncResult|nil nil 表示失败
+    ---@param err any
     local function finish(value, err)
         if not cancelled and cb then cb(value, err) end
     end
@@ -195,6 +209,10 @@ function Note.syncAsync(source, opts, cb)
     end
 
     local identities, seen = {}, {}
+    --- 把一个待同步身份加入队列，按 (stable_id, chapter_idx) 去重。
+    --- chapter_idx 为 0/nil 统一收敛成 nil（整本书那一份快照）。
+    ---@param stable_id string|nil 空串与 nil 直接忽略
+    ---@param chapter_idx integer|nil
     local function add(stable_id, chapter_idx)
         local key = tostring(stable_id) .. "\31" .. tostring(chapter_idx or 0)
         if stable_id and stable_id ~= "" and not seen[key] then
@@ -220,12 +238,16 @@ function Note.syncAsync(source, opts, cb)
 
     local index = 1
     local book_pulled = {}
+    --- 处理队列里的下一个身份：本地脏快照先推、再拉远端；队列空即 finish。
+    --- 串行推进（每步在回调里递归），避免同时对同一本书发多个请求。
     local function nextIdentity()
         if cancelled then return end
         local identity = identities[index]
         index = index + 1
         if not identity then finish(result); return end
 
+        --- 拉当前身份的远端注解并分片落库，然后推进到下一个身份。
+        --- 同一本书只拉一次（远端按书返回全量），后续章节身份直接记账跳过。
         local function pullRemote()
             if opts.dirty_only or not can_pull then nextIdentity(); return end
             local stable_id = identity.stable_id
@@ -322,6 +344,11 @@ function Note.importLocalAsync(done)
     local UIManager = require("ui/uimanager")
     local candidates, seen_paths = {}, {}
 
+    --- 登记一个待导入候选，按物理路径去重（同一文件只导一次）。
+    ---@param path string|nil 非字符串或空串忽略
+    ---@param source_id string
+    ---@param stable_id string
+    ---@param chapter_idx integer|nil nil 表示整本书
     local function add(path, source_id, stable_id, chapter_idx)
         if type(path) ~= "string" or path == "" or seen_paths[path] then return end
         seen_paths[path] = true
@@ -342,9 +369,12 @@ function Note.importLocalAsync(done)
 
     local i, cancelled = 1, false
     local result = { imported = 0, skipped = 0, failed = 0 }
+    --- 回报导入统计；已取消时静默丢弃。
     local function finish()
         if not cancelled and done then done(result) end
     end
+    --- 处理下一个候选文件：读 DocSettings 注解 → 归一化 → 仅在无本地快照时插入。
+    --- 每个候选占一个 nextTick，避免一次性遍历全库卡住 UI。
     local function nextItem()
         if cancelled then return end
         local candidate = candidates[i]
@@ -503,12 +533,15 @@ function Note.pull(ui, identity)
         return
     end
     local UIManager = require("ui/uimanager")
+    --- 用库里最新快照重写阅读器注解；条数变了才请求局部重画。
     local function applyFromDb()
         local before = ui.doc_settings and #(ui.doc_settings:readSetting("annotations") or {}) or 0
         if Note.applyLocal(ui, identity) ~= before and ui.view then
             UIManager:setDirty(ui.view.dialog or "all", "partial")
         end
     end
+    --- 走属主源做一次注解同步，成功后在下一 tick 应用到阅读器。
+    --- 同步失败只记日志：注解拉不下来不该影响正在进行的阅读。
     local function syncAndApply()
         source:syncNotesAsync({ identity = identity }, function(result, err)
             if not result then

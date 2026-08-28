@@ -81,6 +81,8 @@ end
 ---@param on_pick fun(code: string)
 ---@return nil
 function TranslatePopup:pickLanguage(title, include_auto, current, on_pick)
+    --- 展示单选列表；常用语言页选中「全部语言」时递归展开完整列表。
+    ---@param all_languages boolean 是否展示完整语言表
     local function openPicker(all_languages)
         Popup.single{
             title = title,

@@ -78,6 +78,8 @@ function HighlightMenu.ensureWrapped(highlight)
     end
 end
 
+--- 在 ReaderHighlight 类上挂一次钩子，弹窗前补齐按钮门控。
+--- 必须在弹窗时机而非安装时机包装，因为别的插件会晚注册按钮；类级标记保证只打一次补丁。
 local function patchShowMenu()
     local ok, ReaderHighlight = pcall(require, "apps/reader/modules/readerhighlight")
     if not ok or ReaderHighlight._book_popup_patched then
@@ -85,6 +87,9 @@ local function patchShowMenu()
     end
     ReaderHighlight._book_popup_patched = true
     local orig = ReaderHighlight.onShowHighlightMenu
+    --- 补齐按钮门控后转交原生实现。
+    ---@param index number|nil 已有标注的序号；新划词为 nil
+    ---@return boolean
     function ReaderHighlight:onShowHighlightMenu(index)
         HighlightMenu.ensureWrapped(self)
         return orig(self, index)

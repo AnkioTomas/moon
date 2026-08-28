@@ -163,11 +163,16 @@ local function purgeDirAsync(dir, done)
         end
     end
 
+    --- 回调最终结果；已取消的任务静默丢弃结果。
+    ---@param ok boolean
+    ---@param err any 失败时为 os.remove 的错误串
     local function finish(ok, err)
         if not cancelled then
             done(ok, err)
         end
     end
+    --- 一个 UI 周期最多处理 24 个目录项，剩余工作排到下一 tick。
+    --- 栈顶目录迭代完才删自身（自底向上），任一 remove 失败立即终止整次删除。
     local function step()
         if cancelled then
             return
@@ -229,6 +234,7 @@ function Cache.sizeBytesAsync(cb)
             stack[1] = entry
         end
     end
+    --- 扫描收尾：缓存目录字节数之外再计入 sqlite 库文件本身，然后回调总量。
     local function finish()
         local db_file = Paths.dbPath()
         if lfs.attributes(db_file, "mode") == "file" then
@@ -238,6 +244,8 @@ function Cache.sizeBytesAsync(cb)
             cb(total)
         end
     end
+    --- 一个 UI 周期最多 stat 48 个目录项，累加文件大小后排下一 tick。
+    --- 无法 stat 的项直接跳过，不中断扫描（大小统计允许不精确）。
     local function step()
         if cancelled then
             return

@@ -189,6 +189,24 @@ local COLUMNS =
     "source_id, stable_id, md5, title, authors, percent, category, favorite, series, intro, fetched_at, path, last_open, last_chapter_idx, in_library, metadata_dirty, metadata_updated_at"
 
 --- rowexec 位置参数 → Book 表
+--- 形参顺序必须与 COLUMNS 一致；sqlite 返回的都是字符串，数值列在此统一 tonumber。
+---@param source_id_r string|nil 为 nil 表示没查到行
+---@param stable_id_r string|nil
+---@param digest string|nil books.md5 列
+---@param title string|nil
+---@param authors string|nil
+---@param percent any 阅读进度 0..100
+---@param category string|nil
+---@param favorite string|nil
+---@param series string|nil
+---@param intro string|nil
+---@param fetched_at any 元数据拉取时间戳，缺失算 0
+---@param path string|nil 本地文件路径
+---@param last_open any 最近打开时间戳，缺失算 0
+---@param last_chapter_idx any 最近读到的章
+---@param in_library any 非 0 即视为在书架内
+---@param metadata_dirty any
+---@param metadata_updated_at any
 ---@return Book|nil
 local function rowToBook(source_id_r, stable_id_r, digest, title, authors, percent, category, favorite, series, intro, fetched_at, path, last_open, last_chapter_idx, in_library, metadata_dirty, metadata_updated_at)
     if not source_id_r then
@@ -648,8 +666,10 @@ function BookDB.setReaderPrefs(source_id, stable_id, payload)
     end
     Base.ensure()
     return Base.exec(
+        -- in_library=0：存排版偏好不代表这本书在书架上，
+        -- 写成 1 会让对账隐藏过的书凭空回到书架。
         [[INSERT INTO books (source_id, stable_id, fetched_at, reader_prefs, in_library)
-          VALUES (?, ?, ?, ?, 1)
+          VALUES (?, ?, ?, ?, 0)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             reader_prefs=excluded.reader_prefs;]],
         source_id,

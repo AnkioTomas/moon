@@ -79,11 +79,20 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
         return false
     end
     Base.ensure()
+    -- keep_dirty 必须在这里判定：靠 SQL 的 WHERE 只能让 UPDATE 静默 no-op，
+    -- 下面的 syncBookPercent 仍会把 books.percent 改成远端值，
+    -- 于是 pending_progress 是本地进度、books.percent 是云端进度，两处显示打架。
+    -- 本地版本更新算正常结果，返回 true（调用方 assert 成功）。
+    if keep_dirty and tonumber(Base.rowexec(
+            "SELECT sync_status FROM pending_progress WHERE source_id=? AND stable_id=?;",
+            source_id, stable_id)) == 0 then
+        return true
+    end
     if not Base.exec(
         [[INSERT INTO pending_progress
             (source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction,
              page, total_pages, locator, extra, updated_at, sync_status)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,]] .. status .. [[)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             fraction=excluded.fraction,
             chapter_idx=excluded.chapter_idx,
@@ -94,11 +103,10 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
             locator=excluded.locator,
             extra=excluded.extra,
             updated_at=excluded.updated_at,
-            sync_status=]] .. status ..
-        (keep_dirty and " WHERE pending_progress.sync_status=1;" or ";"),
+            sync_status=excluded.sync_status;]],
         source_id, stable_id, fraction, pos.chapter_idx, pos.chapter_title, pos.chapter_fraction,
         positiveInt(pos.page), positiveInt(pos.total_pages),
-        pos.locator, encodeExtra(pos.extra), tonumber(pos.updated_at) or os.time()
+        pos.locator, encodeExtra(pos.extra), tonumber(pos.updated_at) or os.time(), status
     ) then
         return false
     end

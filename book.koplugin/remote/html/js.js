@@ -24,8 +24,29 @@ function setState(node, text, kind) {
     node.textContent = text || '';
     node.className = 'state' + (kind ? ' ' + kind : '');
 }
+/* 访问令牌：首次从地址栏 ?t= 取，之后存 sessionStorage（页面间跳转是普通链接） */
+var TOKEN = (function () {
+    var m = location.search.match(/[?&]t=([^&]*)/);
+    var t = m ? decodeURIComponent(m[1]) : sessionStorage.getItem('rt') || '';
+    if (t) sessionStorage.setItem('rt', t);
+    return t;
+})();
+/* 给同站 URL 补上 token；页面链接与 API 请求都要 */
+function withToken(u) {
+    if (!TOKEN) return u;
+    return u + (u.indexOf('?') < 0 ? '?' : '&') + 't=' + encodeURIComponent(TOKEN);
+}
+/* 顶部导航链接（/file.html 等）跳转后也要带 token */
+function linkTokens() {
+    var as = document.getElementsByTagName('a');
+    for (var i = 0; i < as.length; i++) {
+        var h = as[i].getAttribute('href');
+        if (h && h.charAt(0) === '/' && h.indexOf('t=') < 0) as[i].setAttribute('href', withToken(h));
+    }
+}
+document.addEventListener('DOMContentLoaded', linkTokens);
 function jfetch(u, opt) {
-    return fetch(u, opt).then(function (r) {
+    return fetch(withToken(u), opt).then(function (r) {
         return r.text().then(function (t) {
             var d;
             try { d = JSON.parse(t); } catch (e) { throw 'HTTP ' + r.status; }

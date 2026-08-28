@@ -37,6 +37,9 @@ local function storageLayout()
     local book = ffiUtil.realpath(local_cfg.path or "")
         or ffiUtil.realpath(G_reader_settings:readSetting("home_dir") or "")
         or root
+    --- realpath 取不到（路径尚不存在等）时退回原串，保证 roots 里没有 nil。
+    ---@param p string
+    ---@return string
     local function real(p)
         return ffiUtil.realpath(p) or p
     end
@@ -76,11 +79,20 @@ local function storageLayout()
             data .. "/.moon",
             book,
         },
+        -- 凭证所在：protected 只挡删除/改名（判定的是「祖先」），下载读取要另挡
+        -- 「这些路径之内」，否则 /download 能把 moon token、zlib 密码、AI key 拉走。
+        secret = {
+            data .. "/settings",
+            data .. "/settings.reader.lua",
+            data .. "/.moon",
+        },
     }
 end
 
 local _layout
 
+--- 取存储布局（首次调用时构造并缓存；start 会重新构造一次刷新配置变更）。
+---@return table
 local function layout()
     if not _layout then
         _layout = storageLayout()
@@ -88,6 +100,9 @@ local function layout()
     return _layout
 end
 
+--- 路径是否落在任一 managed root 之内。
+---@param path string 真实绝对路径
+---@return boolean
 local function allowed(path)
     for _, root in ipairs(layout().roots) do
         if Text.pathContains(root, path) then
@@ -97,6 +112,9 @@ local function allowed(path)
     return false
 end
 
+--- 已存在路径的范围校验：先 realpath（堵软链逃逸）再查 roots，越界返回 nil 并记警告。
+---@param path string
+---@return string|nil 真实绝对路径
 local function existingPath(path)
     local real = require("ffi/util").realpath(path)
     if real and allowed(real) then
@@ -106,6 +124,8 @@ local function existingPath(path)
 end
 
 --- 目标尚不存在时，以真实父目录校验范围。
+---@param path string
+---@return string|nil 真实父目录 + 原基名
 local function newPath(path)
     local ffiUtil = require("ffi/util")
     local parent = ffiUtil.realpath(ffiUtil.dirname(path))
@@ -116,6 +136,9 @@ local function newPath(path)
     return parent .. "/" .. ffiUtil.basename(path)
 end
 
+--- 变更操作的全量保护判定：realpath 后命中重要路径本身或其祖先即拒。
+---@param path string
+---@return boolean
 local function isProtected(path)
     path = require("ffi/util").realpath(path) or path
     for _, protected in ipairs(layout().protected) do
@@ -127,9 +150,23 @@ local function isProtected(path)
     return false
 end
 
+--- 配置/凭证文件本身或其目录内：一律不许读出去。
+---@param path string
+---@return boolean
+local function isSecret(path)
+    for _, secret in ipairs(layout().secret) do
+        if path == secret or Text.pathContains(secret, path) then
+            return true
+        end
+    end
+    return false
+end
+
 --- 展示级 protected 判定：与 isProtected 同逻辑但免 realpath——目录列表每个
 --- entry 都调一次，realpath 是一趟 FFI syscall，大目录下成百上千次会卡 UI。
 --- 安全不降级：删除/改名在 deleteRecursive/renameTo 内部仍走 isProtected 全量校验。
+---@param path string
+---@return boolean
 local function isProtectedDisplay(path)
     for _, protected in ipairs(layout().protected) do
         if path == protected or Text.pathContains(path, protected) then
@@ -142,6 +179,24 @@ end
 ---@return number
 function Remote.port()
     return tonumber(Settings.get().remote_port) or 9528
+end
+
+--- 访问令牌（首次使用时生成并持久化）。所有 API 都要它，
+--- 否则同网任何人都能读写设备文件。
+---@return string
+function Remote.token()
+    local c = Settings.get()
+    local token = c.remote_token
+    if type(token) ~= "string" or #token < 16 then
+        local bytes = {}
+        for i = 1, 16 do
+            bytes[i] = string.format("%02x", math.random(0, 255))
+        end
+        token = table.concat(bytes)
+        c.remote_token = token
+        Settings.save(c)
+    end
+    return token
 end
 
 ---@return boolean
@@ -211,7 +266,7 @@ local function listDir(path)
     return entries
 end
 
---- 下载解析：存在且是普通文件。
+--- 下载解析：存在、是普通文件、且不是配置/凭证。
 ---@param path string
 ---@return string|nil
 local function resolveDownload(path)
@@ -222,10 +277,16 @@ local function resolveDownload(path)
     if require("libs/libkoreader-lfs").attributes(path, "mode") ~= "file" then
         return nil
     end
+    if isSecret(path) then
+        logger.warn("book remote reject download of config file:", path)
+        return nil
+    end
     return path
 end
 
 --- 流式复制（os.rename 跨设备失败时的退路）；失败不留半截目标。
+---@param src string
+---@param dst string
 ---@return boolean|nil, any
 local function copyFile(src, dst)
     local input, err = io.open(src, "rb")
@@ -410,6 +471,8 @@ end
 local _clip = "" ---@type string 设备最后复制的文本镜像
 local _clip_hooked = false
 
+--- 包一层 Device.input.setClipboardText，把设备侧每次复制镜像到 _clip（只装一次）。
+--- 无剪贴板能力的设备直接跳过。
 local function hookClipboard()
     if _clip_hooked then
         return
@@ -446,6 +509,8 @@ local function setClipboard(text)
     end
 end
 
+--- 上传临时落盘路径：缓存目录下 upload-<时间>-<序号>.part，进程内自增保证不撞名。
+---@return string
 local function tempPath(_name)
     local Paths = require("utils.paths")
     Paths.ensureCacheRoot()
@@ -493,6 +558,7 @@ function Remote.start()
     local server = require("remote.server").new {
         host = "*",
         port = Remote.port(),
+        token = Remote.token(),
         root = _layout.root,
         roots = _layout.roots,
         home = _layout.home,
@@ -524,6 +590,7 @@ function Remote.start()
     return true
 end
 
+--- 停服（幂等）：摘掉 UIManager 轮询、断连接、拆 Kindle 防火墙规则。
 function Remote.stop()
     if not Remote.isRunning() then
         return
@@ -549,11 +616,13 @@ function Remote.bootstrap()
     end
 end
 
+--- 休眠：记下当前是否在跑再停服（睡眠中留着监听既没用又费电）。
 function Remote.onSuspend()
     _resume = Remote.isRunning()
     Remote.stop()
 end
 
+--- 唤醒：休眠前在跑、或开了自启，就重新起服。
 function Remote.onResume()
     if _resume or Remote.autostartOn() then
         _resume = false
@@ -564,6 +633,7 @@ function Remote.onResume()
     end
 end
 
+--- 退出 KOReader：停服，避免残留监听与 iptables 规则。
 function Remote.onExit()
     Remote.stop()
 end
@@ -597,7 +667,9 @@ local function statusLabel()
     if not Remote.isRunning() then
         return _("未运行"), false
     end
-    return string.format("http://%s:%d", localIP() or _("本机IP"), Remote.port()), true
+    -- 地址必须带 token：页面自己把它存进 sessionStorage 再转发给各 API
+    return string.format("http://%s:%d/?t=%s",
+        localIP() or _("本机IP"), Remote.port(), Remote.token()), true
 end
 
 --- 运行状态文案：运行中给可访问地址，否则「未运行」。
@@ -615,6 +687,7 @@ function Remote.menuRows(desktop)
     local SettingRow = require("ui.components.settingrow")
     local T = require("ffi/util").template
 
+    --- 刷新设置页（页面已关闭则不动，避免操作已释放的 widget）。
     local function rebuild()
         if not desktop._closed then
             desktop:rebuild()

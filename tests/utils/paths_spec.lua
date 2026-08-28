@@ -73,7 +73,8 @@ end
 -- 路径拼接正确性
 do
     local root = Paths.root()
-    Assert.matches(root, "/config/%.moon$")
+    -- 数据目录由 support.config 决定（测试沙箱），这里只校验 .moon 后缀
+    Assert.eq(root, require("support.config").dir() .. "/.moon")
     Assert.eq(Paths.cacheDir(), root .. "/cache")
     Assert.eq(Paths.sourceCacheDir("moon"), root .. "/cache/moon")
     Assert.eq(Paths.bookDir("moon"), root .. "/cache/moon/book")

@@ -23,6 +23,11 @@ package.preload["utils.db.book"] = function()
     }
 end
 
+-- 落库经 DbQueue：用例里同步执行 worker
+package.preload["utils.db.queue"] = function()
+    return { run = function(worker) worker() end }
+end
+
 package.preload["book.store"] = function()
     return {
         ensureIdentity = function()

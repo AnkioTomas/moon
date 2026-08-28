@@ -16,6 +16,8 @@ local Screen = Device.screen
 local HEADER_FONT_SIZE_DEFAULT = 20
 --- CRE 页头 HEADER_MARGIN + 亚像素缝，overlay 多盖一点。
 local TOP_BAND_BLEED = 9
+--- overlay 顶部额外覆盖的像素数（已按屏幕缩放）。
+---@return number
 local function bandBleed()
     return Screen:scaleBySize(TOP_BAND_BLEED)
 end
@@ -124,6 +126,10 @@ function Bars.setSystemTop(ui, enabled)
     end
 end
 
+--- 设置系统底栏开/关（走原生 ReaderFooter 的模式切换）。
+--- 目标状态与当前一致时直接返回，避免把 footer 切到别的模式。
+---@param ui table|nil ReaderUI 实例，缺省用当前会话的
+---@param enabled boolean 是否显示系统底栏
 function Bars.setSystemBottom(ui, enabled)
     ui = ui or Bars.ui
     if not ui or Bars.systemBottomVisible(ui) == enabled then
@@ -535,16 +541,25 @@ end
 ---@return nil
 function Bars:startClock()
     local UIManager = require("ui/uimanager")
-    self._clock = function()
-        if require("apps/reader/readerui").instance ~= self.ui then
+    -- Bars 是单例，registerViewModule 每次开书都把 self.ui 覆写成新的 ReaderUI：
+    -- 闭包里必须捕获本次的 ui，否则 instance ~= self.ui 永远为假，旧链条不停摆，
+    -- 每开一本书就多一条每分钟刷屏的定时器。
+    local ui = self.ui
+    if self._clock then
+        UIManager:unschedule(self._clock)
+    end
+    --- 刷一次顶条并把自己排到下一个整分；换书或退出阅读后不再续排。
+    local function tick()
+        if require("apps/reader/readerui").instance ~= ui then
             return
         end
-        if self.ui and Bars.topVisible(self.ui) and require("ui.reader.session").current() then
-            UIManager:setDirty(self.ui.dialog, "ui")
+        if Bars.topVisible(ui) and require("ui.reader.session").current() then
+            UIManager:setDirty(ui.dialog, "ui")
         end
-        self:startClock()
+        UIManager:scheduleIn(61 - tonumber(os.date("%S")), tick)
     end
-    UIManager:scheduleIn(61 - tonumber(os.date("%S")), self._clock)
+    self._clock = tick
+    UIManager:scheduleIn(61 - tonumber(os.date("%S")), tick)
 end
 
 --- 绘制顶条（章节名 + 时间）与底条（进度文案 + 进度条）叠加层。
@@ -593,6 +608,9 @@ function Bars:paintTo(bb, x, y)
             }
             paintCentered(title, bb, x + margin_l, text_y, text_h)
             time:paintTo(bb, x + w - margin_r - ts.w, text_y + math.floor((text_h - ts.h) / 2))
+            -- paintTo 每次翻页/每分钟时钟都会跑：TextWidget 持有 xtext 缓冲，画完即释放
+            title:free()
+            time:free()
         end
     end
 
@@ -627,7 +645,9 @@ function Bars:paintTo(bb, x, y)
             local info_h = info:getSize().h
             local stack_h = prog_h + gap + info_h
             local stack_y = bottom_y + math.floor((bar_h - stack_h) / 2)
-            UI.progressBar(prog_w, prog_h, pct):paintTo(bb, x + margin_l, stack_y)
+            local bar = UI.progressBar(prog_w, prog_h, pct)
+            bar:paintTo(bb, x + margin_l, stack_y)
+            bar:free()
             info.max_width = inner_w
             info:paintTo(bb, x + margin_l, stack_y + prog_h + gap)
         elseif settings.progress_bar_position == "below" then
@@ -639,7 +659,9 @@ function Bars:paintTo(bb, x, y)
             local stack_h = info_h + gap + prog_h
             local stack_y = bottom_y + math.floor((bar_h - stack_h) / 2)
             info:paintTo(bb, x + margin_l, stack_y)
-            UI.progressBar(prog_w, prog_h, pct):paintTo(bb, x + margin_l, stack_y + info_h + gap)
+            local bar = UI.progressBar(prog_w, prog_h, pct)
+            bar:paintTo(bb, x + margin_l, stack_y + info_h + gap)
+            bar:free()
         else
             -- 跟 ReaderFooter alongside：文字优先占满，进度条用剩余宽度（至少 min_width_pct）。
             local gap = Screen:scaleBySize(8)
@@ -658,10 +680,12 @@ function Bars:paintTo(bb, x, y)
             local is = info:getSize()
             local row_h = math.max(is.h, prog_h)
             local row_y = bottom_y + math.floor((bar_h - row_h) / 2)
-            UI.progressBar(prog_w, prog_h, pct):paintTo(
-                bb, x + margin_l, row_y + math.floor((row_h - prog_h) / 2))
+            local bar = UI.progressBar(prog_w, prog_h, pct)
+            bar:paintTo(bb, x + margin_l, row_y + math.floor((row_h - prog_h) / 2))
+            bar:free()
             info:paintTo(bb, x + margin_l + prog_w + gap, row_y + math.floor((row_h - is.h) / 2))
         end
+        info:free()
         end
     end
 end

@@ -14,6 +14,9 @@ local _ = require("gettext")
 
 local Chapter = {}
 
+--- 读取整个文件的字节；路径无效或打不开返回 nil。
+---@param path string|nil
+---@return string|nil
 local function readFile(path)
     if type(path) ~= "string" or path == "" then return nil end
     local f = io.open(path, "rb")
@@ -34,6 +37,11 @@ local function chapterReady(path)
     return not Text.hasRemoteImageSrc(html)
 end
 
+--- 取目录并把空目录归一成错误，免得各调用点重复判空。
+---@param identity BookIdentity
+---@param ops table 至少含 loadToc
+---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 local function loadToc(identity, ops, cb)
     return ops.loadToc(identity, function(toc, err)
         if type(toc) ~= "table" or #toc == 0 then
@@ -44,6 +52,10 @@ local function loadToc(identity, ops, cb)
     end)
 end
 
+--- 取本地记录的阅读位置：待推送进度优先，其次书表的 last_chapter_idx。
+--- 待推送进度只有在带章节号或百分比大于 0 时才算数，避免刚建的空记录覆盖历史。
+---@param identity BookIdentity
+---@return PendingProgress|{ chapter_idx: number }|nil
 local function localPosition(identity)
     local pending = require("utils.db.progress").get(identity.source_id, identity.stable_id)
     if pending and (tonumber(pending.chapter_idx) or (tonumber(pending.fraction) or 0) > 0) then
@@ -79,6 +91,11 @@ local function existingLocalPath(identity, opts)
     return chapterReady(path) and path or nil
 end
 
+--- 把源交来的正文载荷归一成标题与 HTML 片段。
+--- 纯字符串按正文处理；表优先取 html，只有 text 或内容不像 HTML 时才转成段落。
+---@param payload ChapterContentPayload|string|nil
+---@return string title 章节标题，缺省为「章节」
+---@return string content HTML 片段，无内容为空串
 local function body(payload)
     local title, content = _("章节"), ""
     if type(payload) == "string" then
@@ -96,6 +113,10 @@ local function body(payload)
     return title, content
 end
 
+--- 把章节正文包成完整 HTML 落盘，先写 .part 再 rename，避免读到半截文件。
+---@param path string 目标章节文件路径
+---@param payload ChapterContentPayload|string|nil 源交来的正文
+---@param cb fun(path: string|nil, err: string|nil) 成功回传落盘路径
 local function write(path, payload, cb)
     local title, content = body(payload)
     if content == "" then
@@ -119,6 +140,14 @@ local function write(path, payload, cb)
     cb(path)
 end
 
+--- 确保第 idx 章正文已在本地：已就绪则直接用（源提供 refreshCached 时交它决定是否刷新），
+--- 否则拉正文并落盘。
+---@param identity BookIdentity
+---@param toc BookChapter[] 完整目录
+---@param idx number 章节序号，必须落在 toc 范围内
+---@param ops table 至少含 fetchContent，可选 refreshCached
+---@param cb fun(path: string|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 local function ensure(identity, toc, idx, ops, cb)
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
     if chapterReady(path) then
@@ -151,6 +180,8 @@ function Chapter.openAsync(source, identity, book, opts, ops, cb)
     local progress = ops.progress or function() end
 
     --- 启动一个阶段；同步回调和异步回调都只允许当前阶段继续流水线。
+    ---@param start fun(done: function): table|nil 阶段体，返回可取消 job
+    ---@param done function 阶段完成回调，收到 start 内部回调的全部参数
     local function run(start, done)
         local operation = {}
         active = operation
@@ -163,6 +194,9 @@ function Chapter.openAsync(source, identity, book, opts, ops, cb)
         end)
     end
 
+    --- 拿到（可能刷新过的）书籍详情后跑完整流水线：目录 → 选章 → 落盘 → 登记路径。
+    --- 未指定 opts.chapter_idx 时按本地进度选章，只有百分比没有章号就按目录长度折算。
+    ---@param detail Book|nil 最新详情，nil 表示沿用传入的 book
     local function withBook(detail)
         book = detail or book
         progress(1)
@@ -236,6 +270,8 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
 
     local local_path = existingLocalPath(identity, opts)
     if local_path then
+        --- 下一个 tick 交付路径给调用方；期间被取消则不回调。
+        ---@param path string 章节文件路径
         local function open(path)
             require("ui/uimanager"):nextTick(function()
                 if not cancelled then cb(path) end
@@ -282,6 +318,7 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
         }
     end
 
+    --- 关掉进度对话框并置空句柄；重复调用无副作用。
     local function closeDialog()
         if dialog then
             dialog:close()
@@ -357,6 +394,8 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
     end
 
     local pos = 1
+    --- 处理下一个待预取章节：已落盘或目录缺项则跳过，取正文失败也静默继续。
+    --- 每章之间让出事件循环，避免预取阻塞翻页。全部处理完调用 cb。
     local function nextIndex()
         if cancelled then return end
         local idx = indices[pos]

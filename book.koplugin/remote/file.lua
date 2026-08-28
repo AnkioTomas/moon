@@ -15,7 +15,11 @@ local File = {}
 
 -- ── 路由 ─────────────────────────────────────────────
 
---- GET /api/list?path=
+--- GET /api/list?path=：列目录，逐项标注 protected。
+--- path 缺省列 server.root；非 GET 405，越界 403，非目录/不存在 404。
+---@param conn table
+---@param method string
+---@param path string|nil 目标目录绝对路径
 function File.list(self, conn, method, path)
     if method ~= "GET" then
         return self:_fail(conn, 405, "Method Not Allowed")
@@ -47,7 +51,11 @@ function File.list(self, conn, method, path)
     })
 end
 
---- GET /download?path=
+--- GET /download?path=：以 attachment 流式下发单个普通文件。
+--- 非 GET 405，路径非法 400，越界 403，不是文件或打开失败 404。
+---@param conn table
+---@param method string
+---@param path string|nil 目标文件绝对路径
 function File.download(self, conn, method, path)
     if method ~= "GET" then
         return self:_fail(conn, 405, "Method Not Allowed")
@@ -80,7 +88,15 @@ function File.download(self, conn, method, path)
     })
 end
 
---- PUT|POST /upload?dir=&name=（raw body 流式落盘，body 读取在 server 状态机）
+--- PUT|POST /upload?dir=&name=（raw body 流式落盘，body 读取在 server 状态机）。
+--- 校验通过后开临时文件、把连接切到 body 状态；带 Expect: 100-continue 先回 interim。
+--- 方法不符 405，dir/name 非法 400，越界 403，chunked 501，缺 Content-Length 411，开文件失败 500。
+---@param conn table
+---@param method string
+---@param headers table 已小写化的请求头
+---@param dir string|nil 落位目录绝对路径
+---@param name string|nil 文件名（斜杠会被替换成下划线）
+---@return true|nil true=已进 body 状态；nil=已排错误响应
 function File.upload(self, conn, method, headers, dir, name)
     if method ~= "PUT" and method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
@@ -127,7 +143,12 @@ function File.upload(self, conn, method, headers, dir, name)
     return true
 end
 
---- POST /api/mkdir|delete?path=（无请求体的单路径变更操作公共壳）
+--- POST /api/mkdir|delete?path=（无请求体的单路径变更操作公共壳）。
+--- 非 POST 405，路径非法 400，越界/删 root 或受保护路径 403，handler 失败 500。
+---@param conn table
+---@param method string
+---@param path string|nil 目标绝对路径
+---@param fn fun(path: string): boolean|nil, any 实际变更操作（handlers.mkdir / handlers.delete）
 function File.mutate(self, conn, method, path, fn)
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
@@ -153,7 +174,11 @@ function File.mutate(self, conn, method, path, fn)
     })
 end
 
---- POST /api/rename?path=&to=
+--- POST /api/rename?path=&to=：重命名/移动，源与目标都必须在 managed roots 内。
+--- 非 POST 405，路径非法 400，越界或源是 root、源/目标受保护 403，handler 失败 500。
+---@param conn table
+---@param method string
+---@param query table 查询串，取 path（源）与 to（目标）
 function File.rename(self, conn, method, query)
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")

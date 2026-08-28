@@ -24,9 +24,15 @@ function Sync.runAsync(source, opts, cb)
     local summary = {
         domains = {}, pulled = 0, pushed = 0, hidden = 0, conflicts = 0,
     }
+    --- 终结整次编排并回调汇总；已取消时静默丢弃。
+    ---@param value table|nil nil 表示某个域失败
+    ---@param err any
     local function finish(value, err)
         if not cancelled and cb then cb(value, err) end
     end
+    --- 同步下一个数据域，并把它的计数累加进汇总；域列表走完即 finish。
+    --- 任一域失败立即中断后续域（部分成功的计数仍留在 summary 里但不回调）。
+    --- 源未实现对应方法记为 skipped，不算失败。
     local function nextDomain()
         if cancelled then return end
         local domain = DOMAINS[index]

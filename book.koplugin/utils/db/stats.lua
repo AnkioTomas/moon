@@ -58,21 +58,34 @@ function StatsDB.deleteSyncedByStablePrefix(source_id, prefix)
     ) ~= nil
 end
 
+--- 云端日桶/书桶是合成行（stable_id 形如 `__src:day:...`）：按书、按小时统计里
+--- 必须排掉，否则同一天既算云端整天时长又算本地逐页时长，账单直接翻倍。
+local NOT_SYNTHETIC = " AND stable_id NOT GLOB '__*:day:*' AND stable_id NOT GLOB '__*:book:*' "
+
 --- 按天合并云端日桶与本地页记录：有云端日桶的日期以云端为准。
 ---@param source_id string
+---@param start_ts number|nil 可选时间范围（含）
+---@param end_ts number|nil 可选时间范围（不含）
 ---@return table[] rows { ymd, seconds, pages }
-local function mergedDailyRows(source_id)
+local function mergedDailyRows(source_id, start_ts, end_ts)
     source_id = Base.requireSourceId(source_id)
     if not source_id then
         return {}
     end
     Base.ensure()
+    local range = ""
+    local args = { source_id }
+    if start_ts and end_ts then
+        range = " AND start_time>=? AND start_time<?"
+        args[2] = tonumber(start_ts) or 0
+        args[3] = tonumber(end_ts) or 0
+    end
     local result, nrows = Base.query(
         [[SELECT date(start_time,'unixepoch','localtime') AS day,
                  stable_id, COALESCE(SUM(duration),0), COUNT(*)
-          FROM reading_stats WHERE source_id=?
+          FROM reading_stats WHERE source_id=]] .. "?" .. range .. [[
           GROUP BY day, stable_id ORDER BY day;]],
-        source_id
+        unpack(args, 1, #args)
     )
     local cloud, local_days, pages = {}, {}, {}
     if result and nrows and nrows > 0 then
@@ -389,13 +402,20 @@ function StatsDB.periodSummary(source_id, start_ts, end_ts)
         return { total_seconds = 0, book_count = 0, pages = 0 }
     end
     Base.ensure()
-    local seconds, books, pages = Base.rowexec(
-        [[SELECT COALESCE(SUM(duration),0), COUNT(DISTINCT stable_id), COUNT(*)
-          FROM reading_stats WHERE source_id=? AND start_time>=? AND start_time<?;]],
+    -- 书数/页数只看真实书的记录；总时长按天走「云端日桶优先」的合并口径，
+    -- 与洞察日历保持一致，也避免同一天双重计数。
+    local _, books, pages = Base.rowexec(
+        [[SELECT 0, COUNT(DISTINCT stable_id), COUNT(*)
+          FROM reading_stats WHERE source_id=? AND start_time>=? AND start_time<?]]
+        .. NOT_SYNTHETIC .. ";",
         source_id, tonumber(start_ts) or 0, tonumber(end_ts) or 0
     )
+    local total = 0
+    for _i, row in ipairs(mergedDailyRows(source_id, start_ts, end_ts)) do
+        total = total + row.seconds
+    end
     return {
-        total_seconds = tonumber(seconds) or 0,
+        total_seconds = total,
         book_count = tonumber(books) or 0,
         pages = tonumber(pages) or 0,
     }
@@ -419,6 +439,8 @@ function StatsDB.periodBooks(source_id, start_ts, end_ts, limit)
           FROM reading_stats r LEFT JOIN books b
             ON b.source_id=r.source_id AND b.stable_id=r.stable_id
           WHERE r.source_id=? AND r.start_time>=? AND r.start_time<?
+            AND r.stable_id NOT GLOB '__*:day:*'
+            AND r.stable_id NOT GLOB '__*:book:*'
           GROUP BY r.stable_id ORDER BY 5 DESC LIMIT ?;]],
         source_id, tonumber(start_ts) or 0, tonumber(end_ts) or 0,
         math.max(1, tonumber(limit) or 5)
@@ -449,24 +471,8 @@ function StatsDB.periodDays(source_id, start_ts, end_ts)
     if not source_id then
         return {}
     end
-    Base.ensure()
-    local result, nrows = Base.query(
-        [[SELECT date(start_time,'unixepoch','localtime'), SUM(duration), COUNT(*)
-          FROM reading_stats WHERE source_id=? AND start_time>=? AND start_time<?
-          GROUP BY 1 ORDER BY 1;]],
-        source_id, tonumber(start_ts) or 0, tonumber(end_ts) or 0
-    )
-    local rows = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            rows[#rows + 1] = {
-                ymd = result[1][i],
-                seconds = tonumber(result[2][i]) or 0,
-                pages = tonumber(result[3][i]) or 0,
-            }
-        end
-    end
-    return rows
+    -- 与洞察日历同一口径：有云端日桶的日期以云端为准，不与本地逐页记录相加
+    return mergedDailyRows(source_id, start_ts, end_ts)
 end
 
 --- 指定时间范围内某源的逐小时统计（本地时区 0–23）。
@@ -483,7 +489,8 @@ function StatsDB.periodHours(source_id, start_ts, end_ts)
     local result, nrows = Base.query(
         [[SELECT CAST(strftime('%H', start_time, 'unixepoch', 'localtime') AS INTEGER),
                  SUM(duration), COUNT(*)
-          FROM reading_stats WHERE source_id=? AND start_time>=? AND start_time<?
+          FROM reading_stats WHERE source_id=? AND start_time>=? AND start_time<?]]
+        .. NOT_SYNTHETIC .. [[
           GROUP BY 1 ORDER BY 1;]],
         source_id, tonumber(start_ts) or 0, tonumber(end_ts) or 0
     )

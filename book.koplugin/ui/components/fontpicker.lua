@@ -161,6 +161,11 @@ local function showPicker(opts, items)
     end
     local menu
     local sources = { list = {} }
+    --- 把某一分组的字体转成菜单行，并同步返回与行一一对应的字体项列表。
+    --- 行文本留空由懒预览填充，当前字体在右侧打勾；分组为空给一条禁用占位行。
+    ---@param kind string 分组名：weread / local / system
+    ---@return table[] rows 菜单行
+    ---@return MoonFontItem[] sources 与 rows 同序的字体项（占位行时为空表）
     local function rowsFor(kind)
         local rows, sources = {}, {}
         for _, it in ipairs(groups[kind]) do
@@ -171,6 +176,8 @@ local function showPicker(opts, items)
         if #rows == 0 then rows[1] = { text = _("暂无字体"), enabled = false } end
         return rows, sources
     end
+    --- 选中一项字体：先关弹窗，本地/系统/已安装的直接落盘，未安装的联网下载后再落盘。
+    ---@param item MoonFontItem|table
     local function select(item)
         if menu then UIManager:close(menu); menu = nil end
         if item.kind == "local" or item.kind == "system" or MoonFont.isInstalled(item) then
@@ -179,6 +186,8 @@ local function showPicker(opts, items)
             NetworkMgr:runWhenOnline(function() downloadAndSave(opts, item) end)
         end
     end
+    --- 切换分组 Tab：换列表内容并同步懒预览的数据源与底栏选中态。
+    ---@param kind string 分组名：weread / local / system
     local function switch(kind)
         local rows, list = rowsFor(kind)
         sources.list = list

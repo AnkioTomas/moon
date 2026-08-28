@@ -9,6 +9,7 @@ local Stubs = require("support.stubs")
 
 local shown = {}
 local synced = {}
+local upserted = {}
 local pulled = 0
 local pending_row
 local current_identity = {
@@ -71,7 +72,7 @@ package.preload["utils.db.progress"] = function()
                 return pending_row
             end
         end,
-        upsert = function() return true end,
+        upsert = function(_, _, pos) upserted[#upserted + 1] = pos; return true end,
         upsertRemote = function() return true end,
         adoptRemote = function() return true end,
     }
@@ -136,6 +137,38 @@ Stubs.flush()
 Assert.eq(pulled, 1, "应先拉远端进度")
 Assert.len(shown, 1, "章序号不一致时应弹冲突框")
 Assert.len(synced, 0, "冲突时不应先 sync 推本地")
+
+-- 选「保留本地」：落回 pending 行那份进度，不能重新采样实时位置（doc_fraction=0 在第 3 章章首）
+do
+    local box = shown[1]
+    upserted = {}
+    box.cancel_callback()
+    Stubs.flush()
+    Assert.len(upserted, 1, "应把本地那份进度写回")
+    Assert.eq(upserted[1].chapter_idx, 3)
+    Assert.eq(upserted[1].fraction, 0.4)
+    Assert.eq(upserted[1].chapter_fraction, 0.1, "章内比例取 pending 行，不是实时的 0")
+    Assert.eq(synced[1], "b1", "选本地后应推上去收敛")
+end
+
+-- 点空白关闭（两个 callback 都不跑）不应算已决议：同一本书还要能再问
+do
+    Progress.clearConflicts()
+    shown = {}
+    synced = {}
+    Progress.pull(snapshot())
+    Stubs.flush()
+    Assert.len(shown, 1)
+    Progress.pull(snapshot()) -- 未决议 → 允许再问
+    Stubs.flush()
+    Assert.len(shown, 2, "弹窗被忽略时不应把本次会话标记为已问过")
+    shown[2].ok_callback()
+    Stubs.flush()
+    shown = {}
+    Progress.pull(snapshot())
+    Stubs.flush()
+    Assert.eq(#shown, 0, "已决议后同一会话不再问")
+end
 
 -- 同章 pending 与远端章内差 <1% → 不弹窗，后台 sync
 Progress.clearConflicts()

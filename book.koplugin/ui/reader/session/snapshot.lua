@@ -23,6 +23,11 @@ local speed_key
 ---@type { total_seconds: number, pages: number }|nil
 local speed_summary
 
+--- 转成有限数字，NaN / ±inf / 低于下限一律判为无效。
+--- 页数与速度都参与除法，脏值必须在入口挡掉而不是让 NaN 扩散到进度里。
+---@param value any 待校验值
+---@param minimum number|nil 允许的最小值
+---@return number|nil
 local function validNumber(value, minimum)
     value = tonumber(value)
     if not value or value ~= value or value == math.huge or value == -math.huge then

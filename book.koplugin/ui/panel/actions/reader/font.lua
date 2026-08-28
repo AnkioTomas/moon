@@ -3,8 +3,6 @@
 --]]
 
 local UIManager = require("ui/uimanager")
-local InfoMessage = require("ui/widget/infomessage")
-local FontPicker = require("ui.components.fontpicker")
 local MoonFont = require("utils.font")
 local T = require("ffi/util").template
 local _ = require("gettext")
@@ -29,6 +27,9 @@ return {
     ---@param ctx BookQuickPanelContext
     ---@return void
     run = function(ctx)
+        -- registry 会把所有动作模块一次性 require 进来：整棵 widget 树延迟到真正用时再拉
+        local InfoMessage = require("ui/widget/infomessage")
+        local FontPicker = require("ui.components.fontpicker")
         local ui = ctx.ui
         if not MoonFont.supportsReader(ui) then
             UIManager:show(InfoMessage:new{

@@ -186,6 +186,8 @@ end
 local function collectImageSrcs(html)
     local list = {}
     local seen = {}
+    --- 按首次出现顺序收录一个 src，空值与重复项跳过。
+    ---@param src string
     local function add(src)
         src = Text.trim(src)
         if src == "" or seen[src] then
@@ -208,6 +210,9 @@ end
 ---@param map table<string, string>
 ---@return string
 local function rewriteImageSrcs(html, map)
+    --- 查表替换单个 src；不在映射表里的原样保留。
+    ---@param src string
+    ---@return string
     local function repl(src)
         return map[src] or src
     end
@@ -413,6 +418,8 @@ function Html2Epub.build(opts, cb)
     local image_order = {}
     local img_seq = 0
 
+    --- 上报进度事件；已取消或调用方没给 on_progress 时静默丢弃。
+    ---@param ev table 形如 { phase = "chapter"|"image"|"pack", index, total, title, url }
     local function emit(ev)
         if cancelled or type(opts.on_progress) ~= "function" then
             return
@@ -420,6 +427,8 @@ function Html2Epub.build(opts, cb)
         opts.on_progress(ev)
     end
 
+    --- 终止构建并以错误回调；置位 cancelled 保证 cb 只触发一次。
+    ---@param err any 失败原因
     local function fail(err)
         if cancelled then
             return
@@ -428,6 +437,9 @@ function Html2Epub.build(opts, cb)
         cb(nil, err)
     end
 
+    --- 计算某张图片的下载请求头：按 URL 定制的头覆盖全局 image_headers。
+    ---@param url string 图片地址
+    ---@return table<string, string>
     local function headersFor(url)
         local extra = opts.image_headers
         if type(opts.image_headers_for) == "function" then
@@ -439,6 +451,12 @@ function Html2Epub.build(opts, cb)
         return Header.forDownload(extra)
     end
 
+    --- 把图片字节登记进 epub 资源表并分配 images/img_NNN.ext 路径。
+    --- 扩展名优先按字节魔数嗅探，嗅不出才用 prefer_ext 或 URL 后缀，都没有则落到 .bin。
+    ---@param key string 去重键（原始 src）
+    ---@param bytes string 图片字节
+    ---@param prefer_ext string|nil 备选扩展名（含点）
+    ---@return string href 章节 XHTML 中应引用的相对路径
     local function rememberImage(key, bytes, prefer_ext)
         local existing = image_by_key[key]
         if existing then
@@ -461,6 +479,10 @@ function Html2Epub.build(opts, cb)
         return href
     end
 
+    --- 取回单张图片并登记：data: URI 就地解码，本地路径直接读文件，http(s) 走异步下载。
+    --- 取不到不算致命错误——done(nil) 表示保留原 src 不重写。已取消时不回调。
+    ---@param src string 原始 img src
+    ---@param done fun(href: string|nil) 成功给 epub 内相对路径，失败给 nil
     local function loadOneImage(src, done)
         if cancelled then
             return
@@ -529,6 +551,9 @@ function Html2Epub.build(opts, cb)
         end)
     end
 
+    --- 逐张取回章节内图片（串行，每张之间让出一次事件循环），再重写 src 为 epub 内路径。
+    ---@param html string 章节 HTML
+    ---@param done fun(html: string) 重写后的 HTML；取不到的图片保持原 src
     local function embedImages(html, done)
         local srcs = collectImageSrcs(html)
         if #srcs == 0 then
@@ -537,6 +562,7 @@ function Html2Epub.build(opts, cb)
         end
         local map = {}
         local i = 0
+        --- 处理下一张图片，全部处理完则交付重写后的 HTML。
         local function nextImg()
             if cancelled then
                 return
@@ -557,6 +583,8 @@ function Html2Epub.build(opts, cb)
         nextImg()
     end
 
+    --- 全部章节就绪后打包 epub：zip 写入放进 Task 子进程，避免阻塞 UI。
+    --- 子进程通过管道回传 "ok" 或 "err:<原因>"，据此调用外层 cb。
     local function packAndFinish()
         if cancelled then
             return
@@ -608,6 +636,8 @@ function Html2Epub.build(opts, cb)
         })
     end
 
+    --- 处理第 index 章（取正文 → 内嵌图片 → 生成 XHTML），越界则转入打包。
+    ---@param index number 章节序号，从 1 起
     local function processChapter(index)
         if cancelled then
             return
@@ -621,6 +651,9 @@ function Html2Epub.build(opts, cb)
         local title = meta.title or string.format(_("第 %d 章"), index)
         emit({ phase = "chapter", index = index, total = total, title = title })
 
+        --- 收到本章正文后补全 html 骨架、内嵌图片并追加到章节表；无正文视为致命错误。
+        ---@param html string|nil 章节 HTML
+        ---@param err any 取正文失败的原因
         local function onHtml(html, err)
             if cancelled then
                 return
