@@ -28,14 +28,20 @@ Strip.__index = Strip
 -- 每页候选槽数：分页（candidate_bar.makePages）与布局共用一个语义来源。
 Strip.SLOT_COUNT = 7
 
+--- 用给定字段表建候选条实例（不拷贝，直接挂元表）。
+---@param o { dimen: table, gap: number, face: table, bold: boolean|nil, nav_w: number, budget: number, cells: table[] }
+---@return table
 function Strip:new(o)
     return setmetatable(o, self)
 end
 
+--- 条的固定尺寸（VerticalGroup 布局用）。
+---@return table
 function Strip:getSize()
     return self.dimen
 end
 
+--- 释放各 cell 里 TextWidget 占的 xtext C 内存（重建 cells 与销毁时都要调）。
 function Strip:free()
     for _, cell in ipairs(self.cells or {}) do
         if cell.tw and cell.tw.free then
@@ -44,6 +50,11 @@ function Strip:free()
     end
 end
 
+--- 逐 cell 画白底并居中绘制文本；顺带记下实际落点供 tap 命中使用。
+--- cell 之间留 gap 不画，透出键盘框底色即分割线。
+---@param bb table Blitbuffer
+---@param x number
+---@param y number
 function Strip:paintTo(bb, x, y)
     local d = self.dimen
     d.x, d.y = x, y
@@ -62,8 +73,10 @@ function Strip:paintTo(bb, x, y)
     end
 end
 
--- 条内 tap 一律吞掉（空档区域不得穿透到下层），命中带回调的 cell 才动作。
--- 缝算进左侧 cell 的命中区（原生键的手势区同样外扩 key_padding）。
+--- 自做 tap 命中：条内 tap 一律吞掉（空档区域不得穿透到下层），命中带回调的 cell 才动作。
+--- 缝算进左侧 cell 的命中区（原生键的手势区同样外扩 key_padding）。
+---@param event table 事件对象，只处理 onGesture 的 tap
+---@return boolean 是否已消费
 function Strip:handleEvent(event)
     if event.handler ~= "onGesture" then
         return false
@@ -96,6 +109,11 @@ end
 ---@param opts { page: number, pages: number, on_page: fun(delta: number), on_word: fun(word: string) }
 function Strip:setCells(words, opts)
     self:free() -- 旧 cells 的 TextWidget
+    --- 造一个 ◀/▶ 翻页 cell；不可用时文字变灰且不挂回调。
+    ---@param label string
+    ---@param enabled boolean
+    ---@param delta number 页码增量
+    ---@return table
     local function navCell(label, enabled, delta)
         return {
             tw = TextWidget:new{

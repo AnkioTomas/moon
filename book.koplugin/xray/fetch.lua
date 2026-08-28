@@ -62,6 +62,10 @@ local function filterGrounded(incoming, context)
     return out
 end
 
+--- 当前阅读进度百分比（1~100），页数或页码不可用时按 1 算。
+---@param ui table|nil ReaderUI
+---@param page integer|nil
+---@return integer
 local function progressPercent(ui, page)
     local document = ui and ui.document
     local total = document and (document.getPageCount and document:getPageCount())
@@ -71,11 +75,17 @@ local function progressPercent(ui, page)
     return math.max(1, math.min(100, math.floor(page * 100 / total + 0.5)))
 end
 
+--- 取书名与作者（供提示词），缺失时为空串。
+---@param identity BookIdentity|nil
+---@return string title, string author
 local function bookMeta(identity)
     local book = identity and identity.book or {}
     return Text.trim(book.title), Text.trim(book.authors or book.author)
 end
 
+--- 把模型返回的人物项规范成实体行（去空白别名）；无名字返回 nil。
+---@param item table|nil
+---@return table|nil
 local function cleanCharacter(item)
     local name = Text.trim(item and item.name)
     if name == "" then return nil end
@@ -97,6 +107,9 @@ local function cleanCharacter(item)
     }
 end
 
+--- 把模型返回的地点项规范成实体行（地点不带别名）；无名字返回 nil。
+---@param item table|nil
+---@return table|nil
 local function cleanLocation(item)
     local name = Text.trim(item and item.name)
     if name == "" then return nil end
@@ -110,6 +123,9 @@ local function cleanLocation(item)
     }
 end
 
+--- 把模型返回的术语项规范成实体行（去空白别名）；无名字返回 nil。
+---@param item table|nil
+---@return table|nil
 local function cleanTerm(item)
     local name = Text.trim(item and item.name)
     if name == "" then return nil end
@@ -128,6 +144,9 @@ local function cleanTerm(item)
     }
 end
 
+--- 把综合拉取返回的 characters/locations/terms 三段规范化并合成一张实体列表。
+---@param decoded table 模型返回的 JSON 对象
+---@return table[]
 local function cleanPayload(decoded)
     local incoming = {}
     for _, item in ipairs(type(decoded.characters) == "table" and decoded.characters or {}) do
@@ -145,6 +164,9 @@ local function cleanPayload(decoded)
     return incoming
 end
 
+--- 按三类实体读库，组成返回给调用方的结果表。
+---@param identity BookIdentity
+---@return { characters: table[], locations: table[], terms: table[] }
 local function fetchResult(identity)
     return {
         characters = Store.loadEntities(identity, "character"),

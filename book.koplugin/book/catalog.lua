@@ -98,10 +98,21 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
         end
     end
     local BookDB = require("utils.db.book")
+    local stable_ids = {}
+    for _, b in ipairs(daily_books or {}) do
+        if type(b.stable_id) == "string" and b.stable_id ~= "" then
+            stable_ids[#stable_ids + 1] = b.stable_id
+        end
+    end
+    local metadata = BookDB.getMany and BookDB.getMany(source_id, stable_ids) or nil
     for _, b in ipairs(daily_books or {}) do
         local day = type(b.ymd) == "string" and days[b.ymd] or nil
         if day and type(b.stable_id) == "string" and b.stable_id ~= "" then
-            local meta = BookDB.get(source_id, b.stable_id)
+            local meta = metadata and metadata[b.stable_id]
+            if not metadata then
+                -- Compatibility with lightweight test doubles and old embedders.
+                meta = BookDB.get(source_id, b.stable_id)
+            end
             local max_total = tonumber(b.max_total_pages) or 0
             local percent = 0
             if max_total > 0 then

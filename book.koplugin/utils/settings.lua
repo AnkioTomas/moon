@@ -86,13 +86,20 @@ local _files = {}
 local _merged
 local _initialized = false
 
+--- 复制默认值，递归拷贝表，避免嵌套配置共享 DEFAULTS 的子表。
+---@param value any
+---@return any
 local function copyValue(value)
     if type(value) ~= "table" then return value end
     local out = {}
-    for key, nested in pairs(value) do out[key] = nested end
+    for key, nested in pairs(value) do out[key] = copyValue(nested) end
     return out
 end
 
+--- 就地补齐 data 里缺失的默认键；已有值（含 false）一律保留。
+---@param data table 目标配置表（原地修改）
+---@param defaults table|nil
+---@return boolean dirty 是否补过键，调用方据此决定要不要 flush
 local function fillDefaults(data, defaults)
     local dirty = false
     for key, value in pairs(defaults or {}) do
@@ -104,6 +111,10 @@ local function fillDefaults(data, defaults)
     return dirty
 end
 
+--- 按路径打开并缓存 LuaSettings 实例。
+--- 同一路径全程复用一个实例：多份实例会各自持有 data 副本，flush 时互相覆盖。
+---@param path string
+---@return table LuaSettings
 local function openFile(path)
     local ls = _files[path]
     if ls then return ls end
@@ -113,10 +124,17 @@ local function openFile(path)
     return ls
 end
 
+--- 取某个配置分区的 LuaSettings；common 落 common.lua，其余落 settings/<section>.lua。
+---@param section string
+---@return table LuaSettings
 local function sectionFile(section)
     return openFile(section == "common" and Paths.commonPath() or Paths.sectionPath(section))
 end
 
+--- 首次访问配置时做一次迁移与补默认，只跑一遍。
+--- 迁移方向：老版本全塞在 common.lua 的键，按 KEY_SECTION 搬到各分区文件，
+--- 分区已有该键则以分区值为准（不回写覆盖），搬走后从 common 删除。
+--- 顺带把已下线的 rss 源从 active_source / enabled_sources 里剔掉。
 local function initialize()
     if _initialized then return end
     _initialized = true
@@ -155,6 +173,9 @@ local function initialize()
     if common_dirty then common:flush() end
 end
 
+--- 把所有分区平铺成一张表，供 get() 的无参形态返回。
+--- 键跨分区重名时按 SECTIONS 顺序后者胜出（实际不存在重名）。
+---@return table
 local function buildMerged()
     local merged = {}
     for _, section in ipairs(SECTIONS) do
@@ -163,6 +184,8 @@ local function buildMerged()
     return merged
 end
 
+--- 用磁盘最新内容刷新平铺表，就地清空再填。
+--- 必须复用同一个表对象：调用方普遍长期持着 get() 的返回值，换新表会让它们读到旧快照。
 local function refreshMerged()
     local fresh = buildMerged()
     if not _merged then
@@ -183,22 +206,35 @@ function M.get(section)
     return _merged
 end
 
-local function saveMerged(values)
+--- 把平铺表按 KEY_SECTION 回写到各分区文件并全部 flush。
+--- 默认只写入 values 中出现的键；replace=true 时缺键才会被清除。
+---@param values table 平铺的配置值
+---@param replace boolean|nil
+local function saveMerged(values, replace)
     for key, section in pairs(KEY_SECTION) do
         local file = sectionFile(section)
-        -- Synchronize known keys, including nil deletions. This matters for
-        -- callers that clear a value and then call save().
-        file.data[key] = values[key]
+        if replace or values[key] ~= nil then
+            file.data[key] = values[key]
+        end
     end
     for _, section in ipairs(SECTIONS) do sectionFile(section):flush() end
 end
 
---- Persist all functional settings. The optional table keeps compatibility with
---- callers that pass the result of get().
+--- Persist settings. Partial tables are merged; get()'s live merged table keeps
+--- the historical full-replacement behavior so clearing a key remains possible.
 ---@param values table|nil
 function M.save(values)
     initialize()
-    saveMerged(values or _merged or buildMerged())
+    local replacement = values == nil or values == _merged
+    saveMerged(values or _merged or buildMerged(), replacement)
+    refreshMerged()
+end
+
+--- Explicitly replace all functional settings; missing keys are removed.
+---@param values table
+function M.replace(values)
+    initialize()
+    saveMerged(values or {}, true)
     refreshMerged()
 end
 
@@ -213,11 +249,18 @@ function M.saveSection(section, values)
     refreshMerged()
 end
 
+--- 取某个源的独立配置表（可直接就地修改，改完调 saveSource 落盘）。
+---@param id string|nil 省略时用当前活跃源
+---@return table
 function M.getSource(id)
     initialize()
     return openFile(Paths.sourcePath(id or M.activeSourceId())).data
 end
 
+--- 落盘某个源的配置。
+--- 传入的表若不是 getSource 返回的那张，则整体 reset 覆盖（未出现的键被丢弃）。
+---@param id string|nil 省略时用当前活跃源
+---@param values table|nil nil 表示只 flush 现有内容
 function M.saveSource(id, values)
     initialize()
     local file = openFile(Paths.sourcePath(id or M.activeSourceId()))
@@ -225,10 +268,15 @@ function M.saveSource(id, values)
     file:flush()
 end
 
+--- 当前活跃源 id；未配置时为 "local"。
+---@return string
 function M.activeSourceId()
     return M.get("common").active_source or "local"
 end
 
+--- 取设备标识，没有就生成一个并立即落盘。
+--- 存在 KOReader 全局设置而非本插件配置里：多源共用同一设备身份，且卸载插件后仍稳定。
+---@return string
 function M.ensureDeviceId()
     local id = G_reader_settings:readSetting("device_id")
     if type(id) == "string" and id ~= "" then return id end

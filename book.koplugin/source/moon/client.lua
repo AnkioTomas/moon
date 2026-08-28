@@ -129,6 +129,8 @@ function Client:_jsonAsync(method, path, opts, cb)
     local cache_job
     local request_job
 
+    --- 真正发起 HTTP 请求并解析 JSON 回包。
+    --- 传输错误、非 JSON、401 与业务 code≠200 都归一成 cb(nil, err)；成功才写缓存。
     local function doRequest()
         if cancelled then
             return
@@ -202,6 +204,10 @@ function Client:_jsonAsync(method, path, opts, cb)
     }
 end
 
+--- 拉取书架列表（缓存 5 分钟）。
+---@param query table|nil list API 查询参数（page/page_size/search/series/category）
+---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@return { cancel: fun() }|nil
 function Client:listBooksAsync(query, cb)
     return self:_jsonAsync("GET", "/index/book/list", {
         query = query or {},
@@ -209,6 +215,10 @@ function Client:listBooksAsync(query, cb)
     }, cb)
 end
 
+--- 拉取最近阅读列表（缓存 5 分钟）。
+---@param limit number|nil 条数上限，缺省 8
+---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@return { cancel: fun() }|nil
 function Client:recentBooksAsync(limit, cb)
     return self:_jsonAsync("GET", "/index/book/recent", {
         query = { limit = limit or 8 },
@@ -216,10 +226,17 @@ function Client:recentBooksAsync(limit, cb)
     }, cb)
 end
 
+--- 拉取书库筛选项（分类、系列；缓存 5 分钟）。
+---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@return { cancel: fun() }|nil
 function Client:filtersAsync(cb)
     return self:_jsonAsync("GET", "/index/book/filters", { cache_ttl = 5 * 60 }, cb)
 end
 
+--- 上报阅读统计；成功后作废阅读洞察缓存，免得页面还显示旧聚合。
+---@param body table|nil 形如 { books, stats, device_id }
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Client:syncStatsAsync(body, cb)
     return self:_jsonAsync("POST", "/index/stats/import", { body = body or {}, json = true }, function(res, err)
         if res then
@@ -229,12 +246,20 @@ function Client:syncStatsAsync(body, cb)
     end)
 end
 
+--- 拉取单本书的逐页阅读统计（不缓存）。
+---@param filename string Moon 侧书籍身份，即 stable_id
+---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@return { cancel: fun() }|nil
 function Client:getBookStatsAsync(filename, cb)
     return self:_jsonAsync("GET", "/index/stats/book", {
         query = { filename = filename },
     }, cb)
 end
 
+--- 上传某本书的注解集合（整本覆盖语义）。
+---@param body table|nil 形如 { filename, annotations }
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Client:syncAnnotationsAsync(body, cb)
     return self:_jsonAsync("POST", "/index/stats/annotations", {
         body = body or {},
@@ -242,22 +267,37 @@ function Client:syncAnnotationsAsync(body, cb)
     }, cb)
 end
 
+--- 拉取某本书的注解集合（不缓存）。
+---@param filename string Moon 侧书籍身份，即 stable_id
+---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@return { cancel: fun() }|nil
 function Client:getAnnotationsAsync(filename, cb)
     return self:_jsonAsync("GET", "/index/stats/annotations", {
         query = { filename = filename },
     }, cb)
 end
 
+--- 拉取阅读洞察聚合数据（缓存 30 分钟，上报统计成功后会被作废）。
+---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@return { cancel: fun() }|nil
 function Client:readingInsightAsync(cb)
     return self:_jsonAsync("GET", "/index/stats/insight", { cache_ttl = 30 * 60 }, cb)
 end
 
+--- 拉取某本书的云端阅读进度（不缓存）。
+---@param filename string Moon 侧书籍身份，即 stable_id
+---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@return { cancel: fun() }|nil
 function Client:getProgressAsync(filename, cb)
     return self:_jsonAsync("GET", "/index/book/progress", {
         query = { filename = filename },
     }, cb)
 end
 
+--- 上报阅读进度（表单编码）；成功后作废最近阅读与书架列表缓存。
+---@param body table|nil 形如 { filename, frac, spine, page, percent, locator }
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Client:updateProgressAsync(body, cb)
     return self:_jsonAsync("POST", "/index/book/progressUpdate", { body = body or {} }, function(res, err)
         if res then

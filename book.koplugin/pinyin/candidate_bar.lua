@@ -56,7 +56,9 @@ local stopSearch
 
 -- ── 基础工具 ─────────────────────────────────────────
 
--- 绕过 IME 包装直写输入框，避免候选字再次进入原生 IME。
+--- 绕过 IME 包装直写输入框，避免候选字再次进入原生 IME。
+---@param inputbox table InputText 实例
+---@param chars string
 local function rawAddChars(inputbox, chars)
     local f = inputbox.addChars
     if type(f) == "table" and f.raw_method_call then
@@ -66,6 +68,8 @@ local function rawAddChars(inputbox, chars)
     end
 end
 
+--- 绕过 IME 包装删除光标前一个字符。
+---@param inputbox table InputText 实例
 local function rawDelChar(inputbox)
     local f = inputbox.delChar
     if type(f) == "table" and f.raw_method_call then
@@ -75,9 +79,14 @@ local function rawDelChar(inputbox)
     end
 end
 
--- InputText 没有批量替换 API。候选提交若循环 delChar，会让每个拼音字母都
--- free/init 一遍 TextBoxWidget；Kindle 上这比查词慢得多。真实 InputText 直接
--- 改 charlist 后只重排一次；非标准输入框保留原来的兼容路径。
+--- 把光标前 count 个字符整体换成 chars。
+--- InputText 没有批量替换 API。候选提交若循环 delChar，会让每个拼音字母都
+--- free/init 一遍 TextBoxWidget；Kindle 上这比查词慢得多。真实 InputText 直接
+--- 改 charlist 后只重排一次；非标准输入框保留原来的兼容路径。
+---@param inputbox table InputText 实例
+---@param count number 待替换的字符数（已输入的拼音码长度）
+---@param chars string 替换成的词
+---@return boolean 只读、不可编辑或光标前不足 count 个字符时 false
 local function rawReplaceBeforeCursor(inputbox, count, chars)
     if inputbox.readonly
             or inputbox.isTextEditable and not inputbox:isTextEditable(true) then
@@ -115,6 +124,7 @@ end
 --- 必须在 VirtualKeyboard:init 读 keys 之前调用——键盘高度按行数算。
 --- 行内保留 10 个空键：addKeys 以 #KEYS[1] 为基准键宽。建出来的首行随后
 --- 被 Strip 整条顶掉，这些键只是占位。
+---@param want boolean 候选行是否应存在
 local function syncRow(want)
     if not (want or package.loaded[ZH_MODULE]) then
         return
@@ -139,14 +149,15 @@ local function syncRow(want)
     table.insert(keys, 1, row)
 end
 
+--- 把当前键盘标记为脏区，让候选行在本轮刷新里重画（无键盘时无操作）。
+--- 只标记脏区，让 UIManager 在本轮 forceRePaint 里画：
+--- 自行 widgetRepaint 候选条会跟 VirtualKey 的 invert/forceRePaint 抢 buffer，真机闪退。
+--- 刷新类型必须留灰阶（ui）：fast 在 Kindle 上是 DU 波形（2 级灰），
+--- 会把键缝透出的浅灰分割线量化成白，打字后候选行就没线了。
 local function redraw()
     if not _keyboard then
         return
     end
-    -- 只标记脏区，让 UIManager 在本轮 forceRePaint 里画。
-    -- 自行 widgetRepaint 候选条会跟 VirtualKey 的 invert/forceRePaint 抢 buffer，真机闪退。
-    -- 刷新类型必须留灰阶（ui）：fast 在 Kindle 上是 DU 波形（2 级灰），
-    -- 会把键缝透出的浅灰分割线量化成白，打字后候选行就没线了。
     require("ui/uimanager"):setDirty(_keyboard, function()
         return "ui", _keyboard.dimen
     end)
@@ -154,6 +165,7 @@ end
 
 -- ── 候选状态 ─────────────────────────────────────────
 
+--- 结束本次拼写：取消在途查询，清空输入码与候选分页。
 local function clearCode()
     if stopSearch then
         stopSearch()
@@ -163,6 +175,9 @@ local function clearCode()
     _page = 1
 end
 
+--- 按候选槽数把词表切成分页（保持词频序）。
+---@param words string[]
+---@return string[][]
 local function makePages(words)
     local pages, page = {}, {}
     for _, word in ipairs(words) do
@@ -177,6 +192,10 @@ local function makePages(words)
     return pages
 end
 
+--- 校验光标前紧邻的字符确实是当前输入码。
+--- 用户点走光标或别处改了文本时会不成立，此时必须放弃这次拼写而不是乱替换。
+---@param inputbox table InputText 实例
+---@return boolean
 local function codeAtCursor(inputbox)
     local pos = inputbox.charpos
     if not pos then
@@ -191,6 +210,9 @@ local function codeAtCursor(inputbox)
     return true
 end
 
+--- 提交候选：删掉已输入的字母、插入整词，并结束本次拼写。
+---@param word string
+---@return boolean 无输入码、光标已离开输入码或替换失败时 false
 local function commit(word)
     local inputbox = _keyboard and _keyboard.inputbox
     if not inputbox or _code == "" then
@@ -207,7 +229,8 @@ local function commit(word)
     return true
 end
 
--- 页码收口后把当前页词表交给候选条重建 cells（布局规则全在 strip.lua）。
+--- 页码收口后把当前页词表交给候选条重建 cells（布局规则全在 strip.lua）。
+--- 同时挂上翻页与选词回调；未装候选条时无操作。
 local function refresh()
     local strip = _strip
     if not strip then
@@ -233,10 +256,12 @@ local function refresh()
     })
 end
 
--- 候选条挂进键盘：addKeys 建完整棵树后，把首行 HorizontalGroup 整条顶掉。
--- 布局树：kb[1]=BottomContainer → 键盘框 FrameContainer → CenterContainer
--- → VerticalGroup，其 [1] 即首行（行内键与 span 交错，奇数位是键）。
--- 结构对不上就不装（候选栏停用、输入全透传；首行退回等宽空键行）。
+--- 候选条挂进键盘：addKeys 建完整棵树后，把首行 HorizontalGroup 整条顶掉。
+--- 布局树：kb[1]=BottomContainer → 键盘框 FrameContainer → CenterContainer
+--- → VerticalGroup，其 [1] 即首行（行内键与 span 交错，奇数位是键）。
+--- 结构对不上就不装（候选栏停用、输入全透传；首行退回等宽空键行）。
+---@param kb table VirtualKeyboard 实例
+---@return boolean 是否装上候选条
 local function installStrip(kb)
     _strip = nil
     if not (kb.KEYS and kb.KEYS[1] and kb.KEYS[1]._pinyin_bar) then
@@ -274,12 +299,14 @@ local orig_init, orig_addKeys, orig_addChar, orig_delChar
 -- 连打只查最后一次；查询和候选行重绘都在 UIManager 调度里跑，不在按键路径。
 local LOOKUP_WAIT = 0.15
 
+local stopSearch
 stopSearch = function()
     if _requestLookup then
         _requestLookup:cancel()
     end
 end
 
+--- 查库结果回来之前先只显示输入码本身，避免候选行空一拍。
 local function showCodeOnly()
     if _code == "" then
         _pages = {}
@@ -289,8 +316,12 @@ local function showCodeOnly()
     _page = 1
 end
 
--- 查询经 debounce 移出按键回调。不能用 Task.run：fork 会复制已有 sqlite
--- 连接，设备上可能 SIGSEGV。
+--- 实际查词并刷新候选行（debounce 到期后执行）。
+--- 查询经 debounce 移出按键回调。不能用 Task.run：fork 会复制已有 sqlite
+--- 连接，设备上可能 SIGSEGV。查前查后都比对键盘与输入码，过期结果直接丢弃；
+--- 词库无命中时退化为把输入码本身当唯一候选。
+---@param keyboard table 发起查询的 VirtualKeyboard 实例
+---@param code string 输入码（小写字母串）
 local function startLookup(keyboard, code)
     if keyboard ~= _keyboard or code == "" or code ~= _code then
         return
@@ -308,6 +339,9 @@ local function startLookup(keyboard, code)
     redraw()
 end
 
+--- 连打去抖：只查最后一次输入码（debounce 句柄进程内共用，首次调用时建）。
+---@param keyboard table 发起查询的 VirtualKeyboard 实例
+---@param code string 输入码
 local function requestLookup(keyboard, code)
     if not _requestLookup then
         _requestLookup = require("utils.timing").debounce(startLookup, LOOKUP_WAIT)
@@ -317,6 +351,9 @@ local function requestLookup(keyboard, code)
     _requestLookup(keyboard, code)
 end
 
+--- 关掉该键盘实例所有按键的闪烁：原生闪烁会在字符回调前强制提交一次墨水刷新，
+--- Kindle 上后续 UI 刷新会阻塞等 marker，整屏发卡。
+---@param kb table VirtualKeyboard 实例
 local function disableKeyFlash(kb)
     for _, row in ipairs(kb.layout or {}) do
         for _, key in ipairs(row) do
@@ -325,7 +362,9 @@ local function disableKeyFlash(kb)
     end
 end
 
--- init、换层和换布局都会重建键位。安装失败时必须停用拦截，避免吞掉原生输入。
+--- VirtualKeyboard:addKeys 包装：键位重建后（init、换层、换布局都会走这里）
+--- 重新挂候选条。安装失败时必须停用拦截，避免吞掉原生输入。
+---@param ... any 透传给原方法
 local function wrappedAddKeys(self, ...)
     orig_addKeys(self, ...)
     if _want then
@@ -337,9 +376,12 @@ local function wrappedAddKeys(self, ...)
     refresh()
 end
 
+--- VirtualKeyboard:init 包装：建键盘树之前定下这次要不要候选行并同步布局数据
+--- （键盘高度按行数算，晚了就来不及）。
+--- 文件存在不等于 SQLite 可用；损坏或未完成的文件必须保留原生 IME。
+--- number 输入框从符号层起步、不打字，候选行直接不装。
+---@param ... any 透传给原方法
 local function wrappedInit(self, ...)
-    -- 文件存在不等于 SQLite 可用；损坏或未完成的文件必须保留原生 IME。
-    -- number 输入框从符号层起步、不打字，候选行直接不装。
     _want = not not (_enabled() and require("pinyin.dictionary").isAvailable()
         and not (self.inputbox and self.inputbox.input_type == "number"))
     syncRow(_want)
@@ -347,9 +389,13 @@ local function wrappedInit(self, ...)
     orig_init(self, ...)
 end
 
+--- VirtualKeyboard:addChar 包装：候选栏激活时接管字母键。
+--- 字母就地小写写进输入框并追加到输入码；空格提交首选（提交失败才透传）；
+--- 其余键结束本次拼写后走原路。未激活时全透传。
+--- 上游偶发非字符串键（如空键位）会被吞掉：透传给原生会 addChars(nil) 直接崩。
+---@param key string 按键字符
 local function wrappedAddChar(self, key)
     _keyboard = self
-    -- 上游偶发非字符串键（如空键位）：必须吞掉，透传给原生会 addChars(nil) 直接崩。
     if type(key) ~= "string" then
         return
     end
@@ -386,6 +432,8 @@ local function wrappedAddChar(self, key)
     return orig_addChar(self, key)
 end
 
+--- VirtualKeyboard:delChar 包装：拼写中逐字母回退输入码并重查，
+--- 光标已离开输入码则先结束拼写再走原路。
 local function wrappedDelChar(self)
     _keyboard = self
     if _active and _code ~= "" then

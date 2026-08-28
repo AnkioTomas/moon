@@ -43,6 +43,8 @@ local ok, err = pcall(function()
         -- widget in the same repaint cycle). This is the "previous page" used
         -- by the wipe effect.
         local orig_beforePaint = Screen.beforePaint
+        --- 绘制新页之前快照当前帧缓冲，作为翻页动画的「旧页」。
+        --- 一轮重绘里每个脏 widget 都会调到，用 painting 标记保证只快照一次。
         function Screen:beforePaint()
             if not self.painting then
                 self.painting = true
@@ -57,6 +59,7 @@ local ok, err = pcall(function()
         end
 
         local orig_afterPaint = Screen.afterPaint
+        --- 本轮重绘结束：解掉 painting 标记，下一轮才会重新快照。
         function Screen:afterPaint()
             self.painting = false
             if orig_afterPaint then
@@ -67,6 +70,8 @@ local ok, err = pcall(function()
         -- The upstream base framebuffer only declares these as stubs; persist
         -- the state so the software animation can read it.
         local orig_setSwipeAnimations = Screen.setSwipeAnimations
+        --- 记下翻页动画开关：上游基类只有空实现，软件动画要靠这个状态判断。
+        ---@param enabled boolean
         function Screen:setSwipeAnimations(enabled)
             if orig_setSwipeAnimations then
                 orig_setSwipeAnimations(self, enabled)
@@ -80,6 +85,8 @@ local ok, err = pcall(function()
         -- animation direction in sync. This replaces the former
         -- 2-mtk-swipe-direction.lua.
         local orig_setSwipeDirection = Screen.setSwipeDirection
+        --- 记下翻页方向；MTK 设备上原方法是硬件 ioctl 配置，必须先调原方法再存状态。
+        ---@param direction boolean 是否向前翻
         function Screen:setSwipeDirection(direction)
             if orig_setSwipeDirection then
                 orig_setSwipeDirection(self, direction)
@@ -119,6 +126,8 @@ local ok, err = pcall(function()
     ---------------------------------------------------------------
     -- 2.2 Perform the clearing refresh (supports mild global refresh)
     ---------------------------------------------------------------
+    ---@param screen_w number
+    ---@param screen_h number
     function SwipeAnimation.performClearing(self, screen_w, screen_h)
         local mild = G_reader_settings:isTrue("swipe_animation_mild_global_refresh")
 
@@ -139,6 +148,8 @@ local ok, err = pcall(function()
     --     Can be called before the animation; accurate prev_page is required
     --     to correctly detect forward/backward chapter boundaries
     ---------------------------------------------------------------
+    ---@param prev_page number|nil 翻页前的页码，缺省回退到 toc.pageno（精度更差）
+    ---@return boolean
     function SwipeAnimation.shouldForceFullAfterAnimation(self, prev_page)
         local instance = ReaderUI.instance
         if not instance then
@@ -205,6 +216,8 @@ local ok, err = pcall(function()
     -- 2.4 Actually trigger the full refresh
     --     Supports mild global refresh, consistent with performClearing
     ---------------------------------------------------------------
+    ---@param screen_w number
+    ---@param screen_h number
     function SwipeAnimation.forceFullAndReset(self, screen_w, screen_h)
         -- We are inside _repaint, so we must refresh directly;
         -- setDirty would be deferred to the next frame and become ineffective
@@ -232,6 +245,10 @@ local ok, err = pcall(function()
     -- Interior cuts snap to `align` (Screen.alignment_constraint, 16 on
     -- Kobo MTK) so getBoundedRect does not expand neighbouring strips
     -- into each other. Last edge stays the real width.
+    ---@param screen_w number 屏幕宽度（最后一条边界保持真实宽度）
+    ---@param steps number 期望的条带数
+    ---@param align number|nil 对齐粒度（Screen.alignment_constraint），小于 2 视为不对齐
+    ---@return number[] 递增的切分边界，含 0 与 screen_w
     local function buildStripEdges(screen_w, steps, align)
         local edges = {0}
         local use_align = type(align) == "number" and align >= 2
@@ -251,6 +268,9 @@ local ok, err = pcall(function()
         return edges
     end
 
+    --- 跑软件翻页动画：把新页按条带逐段揭开覆盖旧页快照。
+    --- 由 UIManager:_repaint 在新页画完、排队刷新执行前调用。
+    --- 需要清屏刷新或强制全刷时直接跳过动画改走对应刷新；没有旧页快照也直接返回。
     function SwipeAnimation.runSwipeAnimation(self)
         local screen_w = Screen.bb:getWidth()
         local screen_h = Screen.bb:getHeight()

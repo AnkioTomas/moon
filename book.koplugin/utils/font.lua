@@ -63,6 +63,8 @@ local _weread_cache = nil
 ---@field zip_size number|nil
 ---@field path string|nil
 
+--- 首次调用时备份 Font.fontmap 里 UI 各 face 的原始值。
+--- 只备份一次：这份快照是「恢复系统默认」的唯一依据，被后续 apply 覆盖过就找不回来了。
 local function saveFontmapDefaults()
     if _defaults then return end
     _defaults = {}
@@ -71,20 +73,31 @@ local function saveFontmapDefaults()
     end
 end
 
+--- 把字体 id 规范成可安全拼进文件名的形式：去空白，非 [%w._-] 一律换成下划线。
+---@param id string
+---@return string
 local function sanitizeId(id)
     return (Text.stripWhitespace(id):gsub("[^%w%._%-]", "_"))
 end
 
+--- 微信读书字体在 .moon/fonts 下的落盘路径。
+---@param id string 字体 id（内部会 sanitize）
+---@return string|nil nil 表示 id 规范化后为空
 local function wereadPath(id)
     id = sanitizeId(id)
     if id == "" then return nil end
     return Paths.fontsDir() .. "/" .. id .. ".woff"
 end
 
+--- 取路径最后一段（同时兼容 / 与 \ 分隔）。
+---@param path any 非字符串按 tostring 处理
+---@return string
 local function basename(path)
     return (tostring(path or ""):match("([^/\\]+)$")) or tostring(path or "")
 end
 
+--- 微信读书字体列表的磁盘备份路径（http.Cache 失效时的冷启动来源）。
+---@return string
 local function listCachePath()
     return Paths.fontsDir() .. "/list.json"
 end
@@ -95,10 +108,14 @@ local function settingsFontsDir()
     return DataStorage:getDataDir() .. "/fonts"
 end
 
+--- 当前配置的 UI 字体 id；空串表示用系统默认 fontmap。
+---@return string
 function M.currentId()
     return tostring(MoonSettings.get().ui_font or "")
 end
 
+--- 当前 UI 字体的显示名：优先用配置里记的中文名，退回 id，都没有显示「系统默认」。
+---@return string
 function M.currentName()
     local s = MoonSettings.get()
     if type(s.ui_font_name) == "string" and s.ui_font_name ~= "" then
@@ -108,6 +125,10 @@ function M.currentName()
     return id ~= "" and id or _("系统默认")
 end
 
+--- 字体是否已可用。
+--- local / system 字源本来就在盘上，恒为 true；只有微信读书字体需要检查 .woff 是否落盘。
+---@param id_or_item string|MoonFontItem 字体 id 或列表项
+---@return boolean
 function M.isInstalled(id_or_item)
     if type(id_or_item) == "table" then
         if id_or_item.kind == "local" or id_or_item.kind == "system" then return true end
@@ -279,11 +300,16 @@ function M.listAsync(force, cb)
     local weread_err
     local scan_err
 
+    --- 微信列表与本地扫描都到齐后合并回调一次（两路并发，谁后到谁触发）。
+    --- 任一路的错误都带回给调用方，但列表仍按已有结果给出。
     local function try_finish()
         if cancelled or not weread_done or not scan_done then return end
         cb(merge(weread_result, settings_result, system_result), weread_err or scan_err)
     end
 
+    --- 记下微信读书那一路的结果，并尝试收尾。
+    ---@param weread MoonFontItem[]|nil 失败时可能是缓存兜底结果
+    ---@param err string|nil
     local function finishWeread(weread, err)
         if cancelled then return end
         weread_result = weread
@@ -325,6 +351,8 @@ function M.listAsync(force, cb)
         end,
     })
 
+    --- 联网拉微信读书字体列表；成功则写入内存/磁盘/http.Cache 三处。
+    --- 请求失败或响应无法解析时退回已有缓存（可能为 nil），并把错误一起带回。
     local function fetchNet()
         net_job = Request.request({
             url = LIST_URL,
@@ -382,6 +410,9 @@ function M.listAsync(force, cb)
     }
 end
 
+--- 把字体文件路径插到 FontList 队首，让 KOReader 能解析到它。
+--- 已在列表里就不重复插；插队首是为了同名 basename 时优先命中本插件指定的文件。
+---@param path string
 local function registerFontPath(path)
     FontList:getFontList()
     for _, p in ipairs(FontList.fontlist) do
@@ -588,6 +619,9 @@ local function apply(id)
     return true
 end
 
+--- 把配置里的字体真正写进 Font.fontmap（唯一改 fontmap 的入口）。
+--- 字体文件已不存在时退回系统默认，只记警告，不让 UI 因缺字体起不来。
+---@return boolean|nil ok, string|nil err
 function M.applyCurrent()
     local id = M.currentId()
     if id ~= "" and not resolveBasename(id) then
@@ -597,6 +631,12 @@ function M.applyCurrent()
     return apply(id)
 end
 
+--- 从下载的 zip 里抽出第一个 .woff/.woff2 落到 dest。
+--- 无论成功失败都删掉 zip_path；失败时连 dest 一起删，不留半截字体文件。
+--- 在 Task 子进程里执行（会阻塞地解压）。
+---@param zip_path string
+---@param dest string
+---@return boolean|nil ok, string|nil err
 local function extractInstalledFont(zip_path, dest)
     local arc = Archiver.Reader:new()
     if not arc:open(zip_path) then
@@ -627,6 +667,13 @@ local function extractInstalledFont(zip_path, dest)
     return true
 end
 
+--- 算出安装一个字体项需要的落盘路径。
+--- 三种结果：local/system 返回 ("", "")，表示无需安装；已装好的返回 (dest, nil)；
+--- 需要下载的返回 (dest, zip_path)。
+---@param item MoonFontItem
+---@return string|nil dest 字体最终路径
+---@return string|nil zip_path 待下载的压缩包路径；nil 表示不必下载
+---@return string|nil err 字体项非法
 local function installPaths(item)
     if type(item) ~= "table" or not item.id then
         return nil, nil, _("无效字体项")
@@ -642,6 +689,12 @@ local function installPaths(item)
     return dest, Paths.fontsDir() .. "/" .. id .. ".zip", nil
 end
 
+--- 确保字体可用：需要时下载 zip 并在子进程解压，已装好或无需安装则直接回调成功。
+--- 下载前先删掉残留 zip，避免续用上次中断的半截包。
+---@param item MoonFontItem
+---@param on_progress fun(bytes: number)|nil 下载字节进度
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }
 function M.ensureInstalledAsync(item, on_progress, cb)
     local dest, zip_path, path_err = installPaths(item)
     if path_err then

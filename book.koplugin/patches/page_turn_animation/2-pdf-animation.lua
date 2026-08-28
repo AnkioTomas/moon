@@ -15,6 +15,10 @@ local ok, err = pcall(function()
 
     local original_gotoPage = ReaderPaging._gotoPage
 
+    --- 分页文档跳页前补发 PageChangeAnimation 事件（上游只在 ReaderRolling 发）。
+    --- 只在真正翻页且非滚动模式、且开了动画开关时发；随后照常走原逻辑。
+    ---@param number number 目标页码
+    ---@param orig_mode any 透传给原方法
     function ReaderPaging:_gotoPage(number, orig_mode)
         -- Check if we are turning a page and not in scroll mode
         if self.current_page and self.current_page > 0 and number ~= self.current_page and not self.view.page_scroll then

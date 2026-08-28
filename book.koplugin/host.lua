@@ -145,6 +145,8 @@ local function patchStartWithMenu()
     end
 end
 
+--- KOReader 的「启动时打开」是否设为本插件桌面。
+---@return boolean
 function Host.openOnStart()
     return isOpenOnStart()
 end

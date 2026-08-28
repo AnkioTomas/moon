@@ -53,6 +53,9 @@ local function loadEntities(ui)
     return require("xray.store").loadEntities(identity)
 end
 
+--- 实体集合的最新更新时间，作为缓存键的一部分（实体改了就重扫）。
+---@param entities table[]|nil
+---@return number
 local function entityStamp(entities)
     local stamp = 0
     for _, entity in ipairs(entities or {}) do
@@ -217,6 +220,10 @@ local function resolveMarks(ui, matches)
     return out
 end
 
+--- 全书扫描结果的缓存键：身份 + 章节 + 实体数量与最新时间戳。
+---@param ui table 未使用，保持与 renderKey 同签名
+---@param entities table[]
+---@return string|nil 无阅读会话时 nil
 local function scanKey(ui, entities)
     local cur = require("ui.reader.session").current()
     if not cur or not cur.identity then
@@ -228,6 +235,10 @@ local function scanKey(ui, entities)
     }, "\0")
 end
 
+--- 屏幕框解析结果的缓存键：在扫描键基础上再加屏幕尺寸、页码与滚动位置。
+---@param ui table
+---@param entities table[]
+---@return string|nil 无阅读会话时 nil
 local function renderKey(ui, entities)
     local key = scanKey(ui, entities)
     if not key then
@@ -258,6 +269,7 @@ local function hitScreenBox(pos, box)
         and pos.y >= box.y - pad and pos.y <= box.y + box.h + 2
 end
 
+--- 丢弃扫描与渲染缓存并重绘阅读视图（实体增删改或开关变化后调用）。
 function Marks.invalidate()
     Marks._matches = {}
     Marks._matches_key = nil
@@ -271,6 +283,8 @@ function Marks.invalidate()
     end
 end
 
+--- 按需重算当前屏幕上的标记框：扫描键变了才全书重扫，渲染键变了才重解析屏幕坐标。
+--- 未开启或无阅读会话时清空标记。
 function Marks:rebuild()
     if not self.ui or not Marks.enabled() then
         self._marks = {}
@@ -313,6 +327,8 @@ local function paintDashedUnderscore(bb, rect)
     end
 end
 
+--- 作为 view module 被调用：先刷新标记框，再给每个命中画虚线下划线。
+---@param bb any Blitbuffer
 function Marks:paintTo(bb, _x, _y)
     if not Marks.enabled() then
         return
@@ -342,6 +358,8 @@ function Marks:onTap(ges)
     return false
 end
 
+--- 注册全屏 tap 区（只装一次）：命中实体才消费，否则让翻页/菜单等原有手势继续。
+---@param ui table ReaderUI
 local function registerTouch(ui)
     if ui._book_xray_marks_touch then
         return
@@ -363,6 +381,8 @@ local function registerTouch(ui)
     } })
 end
 
+--- 往划词菜单加「X-Ray 查询」（只装一次）；总开关关闭时该项不显示。
+---@param ui table ReaderUI
 local function registerHighlight(ui)
     if not ui.highlight or ui._book_xray_highlight then
         return

@@ -19,14 +19,21 @@ local logger = require("logger")
 local Queue = {}
 
 local pending = {}
+local pending_head = 1
+local pending_tail = 0
 local running = false
 
+--- 取队首任务同步执行一次，还有剩余就排下一 tick 继续。
+--- 一次只跑一个任务（每 tick 一个），保证 SQLite 单连接串行访问且不长时间占住 UI。
+--- worker 抛错走 on_failed，回调自身抛错只记日志，都不会中断队列。
 local function flush()
-    if running or #pending == 0 then
+    if running or pending_head > pending_tail then
         return
     end
     running = true
-    local item = table.remove(pending, 1)
+    local item = pending[pending_head]
+    pending[pending_head] = nil
+    pending_head = pending_head + 1
 
     local ok, err = pcall(item.worker)
     running = false
@@ -40,8 +47,12 @@ local function flush()
         end
     end
 
-    if #pending > 0 then
+    if pending_head <= pending_tail then
         UIManager:nextTick(flush)
+    else
+        pending = {}
+        pending_head = 1
+        pending_tail = 0
     end
 end
 
@@ -50,11 +61,12 @@ end
 ---@param opts { on_done?: fun(raw: nil), on_failed?: fun(err: any) }|nil
 function Queue.run(worker, opts)
     opts = opts or {}
-    table.insert(pending, {
+    pending_tail = pending_tail + 1
+    pending[pending_tail] = {
         worker = worker,
         on_done = opts.on_done,
         on_failed = opts.on_failed,
-    })
+    }
     if not running then
         UIManager:nextTick(flush)
     end
@@ -63,6 +75,8 @@ end
 --- 取消队列中所有待执行操作（不影响正在执行的）。
 function Queue.clear()
     pending = {}
+    pending_head = 1
+    pending_tail = 0
 end
 
 return Queue

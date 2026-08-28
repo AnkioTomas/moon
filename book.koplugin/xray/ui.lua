@@ -25,10 +25,14 @@ local TABS = {
 ---@type table|nil
 local main_holder
 
+--- 弹一条 3 秒自动消失的提示。
+---@param text string
 local function info(text)
     UIManager:show(require("ui/widget/infomessage"):new{ text = text, timeout = 3 })
 end
 
+--- 当前阅读会话的书籍身份；没有会话时 nil。
+---@return BookIdentity|nil
 local function currentIdentity()
     local current = require("ui.reader.session").current()
     return current and current.identity
@@ -72,6 +76,9 @@ local function entityLines(entity)
     return lines
 end
 
+--- 实体详情的纯文本形式：首行名字，其后是类型/别名/身份/简介。
+---@param entity table
+---@return string
 local function formatEntity(entity)
     local lines = { entity.name }
     for i, line in ipairs(entityLines(entity)) do
@@ -89,6 +96,8 @@ end
 
 UI.formatEntity = formatEntity
 
+--- 未配置 AI 时提示并拦下操作。
+---@return boolean 是否可以继续
 local function ensureConfigured()
     if not require("ai").isConfigured() then
         info(_("请先在 Book 设置中配置 AI 服务"))
@@ -97,6 +106,9 @@ local function ensureConfigured()
     return true
 end
 
+--- 分栏副标题（即该实体类型的显示名）。
+---@param tab_id string character / location / term
+---@return string
 local function tabSubtitle(tab_id)
     return Kinds.label(tab_id)
 end
@@ -149,12 +161,19 @@ local function refreshMainTab(holder, opts)
     holder.menu:updateItems(nil, true)
 end
 
+--- 跑一次综合拉取：显示进行中提示，完成后报数、失效页内标记并刷新当前分栏。
+---@param ui table ReaderUI
+---@param identity BookIdentity
+---@param force boolean|nil 为真则忽略已有缓存重新生成
 local function runFetch(ui, identity, force)
     local Fetch = require("xray.fetch")
     local loading = require("ui/widget/infomessage"):new{
         text = force and _("正在重新生成 X-Ray…") or _("正在生成 X-Ray…"),
     }
     UIManager:show(loading)
+    --- 拉取回调：关掉进行中提示，成功报三类数量，失败提示原因。
+    ---@param result table|nil
+    ---@param err any
     local cb = function(result, err)
         UIManager:close(loading)
         if not result then
@@ -189,6 +208,8 @@ function UI.openMain(ui, initial_tab)
     }
     main_holder = holder
 
+    --- 切换底部分栏并重载列表。
+    ---@param tab_id string
     local function switch(tab_id)
         holder.active = tab_id
         refreshMainTab(holder)

@@ -16,6 +16,8 @@ local Task = require("utils.task")
 
 -- 源模块顶部不许 require KOReader UI 模块（离线测试直接 require 源文件）
 local _uimanager
+--- 延迟取 UIManager 并缓存；顶层 require UI 模块会让离线测试直接炸。
+---@return table
 local function uiManager()
     _uimanager = _uimanager or require("ui/uimanager")
     return _uimanager
@@ -179,6 +181,9 @@ local function parseBookProps(path)
     if not ok or type(props) ~= "table" then
         return nil
     end
+    --- 元数据字段归一：非字符串或去空白后为空一律当作缺失。
+    ---@param s any
+    ---@return string|nil
     local function clean(s)
         if type(s) ~= "string" then
             return nil
@@ -200,6 +205,12 @@ end
 ---@return table[]
 local function scanFiles(root)
     local files = {}
+    --- 递归遍历一层目录，把书籍文件连同继承来的分类/系列收进 files。
+    --- 跳过 . 前缀项与 .sdr 边车目录；depth 超过 2 不再下钻。
+    ---@param dir string 当前目录绝对路径
+    ---@param category string|nil 继承的分类（一级子目录名）
+    ---@param series string|nil 继承的系列（二级子目录名）
+    ---@param depth number 当前层级，根为 1
     local function walk(dir, category, series, depth)
         local iter_ok, iter, state = pcall(lfs.dir, dir)
         if not (iter_ok and iter) then

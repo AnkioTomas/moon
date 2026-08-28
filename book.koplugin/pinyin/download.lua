@@ -40,10 +40,13 @@ function M.downloading()
     return _downloading
 end
 
+--- 分片续传用的临时目录。
+---@return string
 local function tmpDir()
     return Paths.root() .. "/pinyin_dict.dl"
 end
 
+--- 删掉临时目录及其中全部分片；目录不存在时无操作。
 local function cleanupTmp()
     local dir = tmpDir()
     local ok, iter, dir_obj = pcall(lfs.dir, dir)
@@ -58,11 +61,15 @@ local function cleanupTmp()
     os.remove(dir)
 end
 
+--- 临时目录里记录本批分片所属 manifest 版本的文件路径。
+---@return string
 local function tmpManifestPath()
     return tmpDir() .. "/.manifest.json"
 end
 
--- 临时分片必须属于同一版 manifest，不能把新旧词库拼在一起。
+--- 记下本批分片对应的 manifest 版本；版本对不上先清空续传目录。
+--- 临时分片必须属于同一版 manifest，不能把新旧词库拼在一起。
+---@param manifest table 至少含 built_at 与 raw_sha256
 local function syncTmpManifest(manifest)
     local path = tmpManifestPath()
     local f = io.open(path, "rb")
@@ -85,12 +92,21 @@ local function syncTmpManifest(manifest)
     f:close()
 end
 
+--- 分片是否已完整落在临时目录（只比字节数，内容由拼接期 sha256 把关）。
+---@param part table manifest 分片项（file / size）
+---@return boolean
 local function partComplete(part)
     local attr = lfs.attributes(tmpDir() .. "/" .. part.file)
     return attr and attr.mode == "file" and attr.size == tonumber(part.size)
 end
 
--- 子进程中校验、拼接并原子落位，避免大文件 IO 阻塞 UI。
+--- 逐片校验 sha256 后拼成整库，核对总长度再改名落位。
+--- 子进程中校验、拼接并原子落位，避免大文件 IO 阻塞 UI。
+--- 校验不过只删坏片（其余分片留着续传），并清掉半截目标文件。
+---@param manifest table 含 parts / raw_size
+---@param dir string 分片所在目录
+---@param dest string 目标词库路径
+---@return string|nil 出错信息，成功为 nil
 local function assemble(manifest, dir, dest)
     local out_tmp = dest .. ".part"
     local ok, err = pcall(function()
@@ -133,12 +149,17 @@ function M.ensure(cb, on_progress)
     end
     local dest = Paths.pinyinDictPath()
     _downloading = true
+    --- 转发进度给调用方（未传 on_progress 时静默丢弃）。
+    ---@param ... any 阶段名及可选的进度数值
     local function report(...)
         if on_progress then
             on_progress(...)
         end
     end
     local done_called = false
+    --- 收尾：解掉在飞标记并回调，只生效一次（多条失败路径可能都调到）。
+    ---@param ok boolean
+    ---@param err any
     local function done(ok, err)
         if done_called then
             return

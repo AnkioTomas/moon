@@ -132,11 +132,18 @@ do
     -- 建表走无参 conn:exec，不进 prepare；首个 prepare 就是下面这条 INSERT
     local text = "line1\nline2's"
     Assert.is_true(DbBase.exec("INSERT INTO sample VALUES (?,?,?)", text, nil, 3) ~= nil)
-    Assert.eq(calls[1].sql, "INSERT INTO sample VALUES (?,?,?)")
-    Assert.eq(calls[1].argc, 3)
-    Assert.eq(calls[1].args[1], text)
-    Assert.eq(calls[1].args[2], nil)
-    Assert.eq(calls[1].args[3], 3)
+    local insert_call
+    for _, call in ipairs(calls) do
+        if call.sql == "INSERT INTO sample VALUES (?,?,?)" then
+            insert_call = call
+            break
+        end
+    end
+    Assert.not_nil(insert_call)
+    Assert.eq(insert_call.argc, 3)
+    Assert.eq(insert_call.args[1], text)
+    Assert.eq(insert_call.args[2], nil)
+    Assert.eq(insert_call.args[3], 3)
 
     local got_text, got_nil, got_number = DbBase.rowexec(
         "SELECT text, nullable, number FROM sample WHERE text=?",
@@ -417,13 +424,12 @@ do
     Assert.is_nil(open_err)
     local schema = table.concat(execs, "\n")
     Assert.is_true(schema:find("CREATE TABLE IF NOT EXISTS notes", 1, true) ~= nil)
-    -- 建表语句必须自带全部列：没有 ALTER 兜底了
+    -- 建表语句必须自带全部列，旧库则由 ALTER 迁移补齐。
     Assert.is_true(schema:find("reader_prefs TEXT", 1, true) ~= nil)
     Assert.is_true(schema:find("extra TEXT", 1, true) ~= nil)
     Assert.is_true(schema:find("idx_reading_stats_identity", 1, true) ~= nil)
-    Assert.is_false(schema:find("ALTER TABLE", 1, true) ~= nil)
+    Assert.is_true(schema:find("PRAGMA user_version", 1, true) ~= nil)
     Assert.is_false(schema:find("DROP TABLE", 1, true) ~= nil)
-    Assert.is_false(schema:find("user_version", 1, true) ~= nil)
 end
 
 -- ── reading_stats 聚合查询（本地洞察）──

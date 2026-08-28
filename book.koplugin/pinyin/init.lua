@@ -16,6 +16,9 @@ function Pinyin.isEnabled()
     return Settings.get().pinyin_enabled == true
 end
 
+--- 浅拷贝布局列表：快照要跟 G_reader_settings 里的表脱钩，否则后续改写会连快照一起改。
+---@param layouts string[]|nil
+---@return string[]
 local function copyLayouts(layouts)
     local copy = {}
     for i, layout in ipairs(layouts or {}) do

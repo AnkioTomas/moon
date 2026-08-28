@@ -15,6 +15,8 @@ local COMPOSE_PATH = Paths.screensaverDir() .. "/compose.png"
 
 -- 组合图是可丢弃的派生文件；源资源和设置变化都会使它失效。
 
+--- 取用户选中的主体；已删除或未知 ID 回退到「当前阅读」。
+---@return table
 local function selectedComponent()
     local id = MoonSettings.get().lock_screen_component
     return Components.find(id) or Components.find("current")
@@ -163,6 +165,10 @@ function M.build(cb)
         end,
     }
 
+    --- 回调一次即封口：已取消或已回调过都不再触发 cb。
+    ---@param ok boolean
+    ---@param err any
+    ---@param output_path string|nil direct 资源时为原图路径，否则 nil（用 compose.png）
     local function finish(ok, err, output_path)
         if cancelled or finished then return end
         finished = true
@@ -178,6 +184,8 @@ function M.build(cb)
     local has_text = type(component.ensureText) == "function"
     local pending = has_text and 2 or 1
 
+    --- 资源与文案都就绪（pending 归零）后合成并写盘；未就绪时直接返回。
+    --- 背景解码失败会让该资源失效，下次重新取。
     local function renderWhenReady()
         if cancelled or finished or pending > 0 then
             return
@@ -201,6 +209,9 @@ function M.build(cb)
         finish(ok, err, nil)
     end
 
+    --- 背景资源就绪回调：记下路径/错误，扣一个待办后尝试合成。
+    ---@param path string|nil 背景图本地路径
+    ---@param err any
     local function onAsset(path, err)
         if cancelled then return end
         asset_error = err

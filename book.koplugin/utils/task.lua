@@ -103,6 +103,8 @@ function Task.run(worker, opts)
     local check
     local on_timeout
 
+    --- 撤掉轮询与超时两个 UIManager 定时回调。
+    --- 任何 settle 路径都必须先调它，否则已结束的任务还会被继续轮询。
     local function clearSchedules()
         if check then
             UIManager:unschedule(check)
@@ -112,6 +114,8 @@ function Task.run(worker, opts)
         end
     end
 
+    --- 成功收尾：撤定时器并回调 on_done。settled 之后再调无效（成功/失败/abort 只认第一次）。
+    ---@param raw string|nil pipe 模式下子进程写出的原始字节，否则 nil
     local function settleDone(raw)
         if settled then
             return
@@ -123,6 +127,9 @@ function Task.run(worker, opts)
         end
     end
 
+    --- 失败收尾：撤定时器并回调 on_failed。settled 之后再调无效。
+    --- 只管回调，不负责杀子进程（需要杀的走 failProtocol / on_timeout）。
+    ---@param err any 失败原因（"timeout"、启动错误或协议错误串）
     local function settleFailed(err)
         if settled then
             return
@@ -143,6 +150,10 @@ function Task.run(worker, opts)
         settleFailed(err)
     end
 
+    --- 从缓冲区里切出完整帧（8 位十六进制长度头 + payload）逐条回调 on_message。
+    --- 不完整的尾帧留在缓冲区等下次读取；final 为真时残留字节视为协议错误。
+    ---@param final boolean 是否是子进程已退出后的最后一次派发
+    ---@return boolean ok false 表示已因协议失败 settle，调用方必须立即返回
     local function dispatchMessages(final)
         while #message_buffer >= 8 do
             local size = tonumber(message_buffer:sub(1, 8), 16)
@@ -177,6 +188,9 @@ function Task.run(worker, opts)
         return true
     end
 
+    --- 非阻塞读走管道里当前可读的字节，追加进缓冲区后派发完整帧。
+    --- 管道空时直接返回成功，不阻塞轮询。
+    ---@return boolean ok false 表示已因协议失败 settle，调用方必须立即返回
     local function readAvailableMessages()
         local size = ffiUtil.getNonBlockingReadSize(read_fd)
         if not size or size <= 0 then
@@ -225,6 +239,9 @@ function Task.run(worker, opts)
         read_fd = second
     end
 
+    --- 每 POLL_INTERVAL 跑一次：收消息、检查子进程是否退出，未退出就再排一次。
+    --- 子进程退出后把管道余量读净；message 模式派发完最后一批帧才算成功，
+    --- pipe 模式把原始字节整块交给 on_done。
     function check()
         if settled then
             return
@@ -247,6 +264,7 @@ function Task.run(worker, opts)
         end
     end
 
+    --- 超时：杀掉子进程并以 "timeout" 失败收尾。已 settle 的任务不受影响。
     function on_timeout()
         if settled then
             return

@@ -51,12 +51,20 @@ local M = {
     asset = { id = "none" },
 }
 
+--- 取本地封面缓存路径；无 stable_id 或文件不存在返回 nil（锁屏不触网补图）。
+---@param stable_id string|nil
+---@param source_id string|nil
+---@return string|nil
 local function coverPath(stable_id, source_id)
     if type(stable_id) ~= "string" or stable_id == "" then return nil end
     local path = Paths.coverPath(stable_id, source_id)
     return lfs.attributes(path, "mode") == "file" and path or nil
 end
 
+--- 把书库行收敛成书架格子要的字段（含封面路径）。
+---@param book table 数据库行
+---@param source_id string 行内无 source_id 时的兜底源
+---@return table
 local function shelfBook(book, source_id)
     local sid = book.source_id or source_id
     local stable_id = book.stable_id
@@ -77,6 +85,11 @@ function M.data()
     local recent = BookDB.recentBySource(source_id, 64)
     local reading, covers, seen = {}, {}, {}
 
+    --- 按 stable_id 去重后追加到目标列表，满 limit 即停。
+    ---@param target table[]
+    ---@param rows table[]|nil
+    ---@param limit number
+    ---@param accept fun(row: table): boolean|nil 额外过滤条件
     local function append(target, rows, limit, accept)
         for _, row in ipairs(rows or {}) do
             if #target >= limit then return end
@@ -177,6 +190,8 @@ end
 local function books()
     local data = M.data()
     local result, seen = {}, {}
+    --- 追加一段书列表，跳过缺 stable_id 与已出现过的书。
+    ---@param list table[]|nil
     local function append(list)
         for _, book in ipairs(list or {}) do
             local id = book.stable_id

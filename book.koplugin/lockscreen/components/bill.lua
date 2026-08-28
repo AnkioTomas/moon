@@ -24,6 +24,11 @@ local M = {
     end,
 }
 
+--- 组一个图表桶；row 缺失时秒数与页数归零。
+---@param key string
+---@param label string
+---@param row table|nil 统计行（seconds / pages）
+---@return table
 local function bucket(key, label, row)
     return {
         key = key, label = label,
@@ -32,6 +37,9 @@ local function bucket(key, label, row)
     }
 end
 
+--- 把按小时统计行铺成 0~23 点的 24 个桶，缺失小时补零。
+---@param rows table[]|nil 每行含 hour / seconds / pages
+---@return table[]
 local function hourBuckets(rows)
     local by_hour = {}
     for _, row in ipairs(rows or {}) do
@@ -46,6 +54,9 @@ local function hourBuckets(rows)
     return buckets
 end
 
+--- 账单周期换算成半开区间 [start, end)，end 一律取明日零点（含今天）。
+---@param period string today / 7d / 30d / month，其余按 7d 处理
+---@return number start_ts, number end_ts
 local function billRange(period)
     local now = os.time()
     local finish = U.dayStart(now) + 86400

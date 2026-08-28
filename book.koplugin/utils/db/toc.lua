@@ -14,7 +14,7 @@ local TocDB = {}
 --- 取目录缓存；fetched_at 在 max_age 秒内才返回 payload，否则 nil。
 ---@param source_id string
 ---@param stable_id string
----@param max_age? number 秒；省略时不做过期判断
+---@param max_age number|nil 秒；省略时不做过期判断
 ---@return string|nil payload, number|nil fetched_at
 function TocDB.get(source_id, stable_id, max_age)
     Base.ensure()

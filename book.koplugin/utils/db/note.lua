@@ -149,6 +149,14 @@ function NoteDB.unsynced(source_id)
     return rows(Base.query(sql .. " ORDER BY updated_at ASC;"))
 end
 
+--- 把快照标记为已同步（sync_status=1），仅当 updated_at 仍是上传时那一版。
+--- updated_at 参与 WHERE 是乐观锁：上传期间本地又改过就不匹配，脏标记得以保留，
+--- 下轮同步会重新上传。返回值只表示 SQL 执行成功，不代表真的有行被更新。
+---@param source_id string
+---@param stable_id string
+---@param chapter_idx integer|nil nil 或 0 表示整本书那一份快照
+---@param updated_at number 上传时快照的修订号，缺失则拒绝执行
+---@return boolean false 表示参数非法或 SQL 失败
 function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at)
     source_id = Base.requireSourceId(source_id)
     chapter_idx = tonumber(chapter_idx) or 0

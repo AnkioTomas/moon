@@ -17,6 +17,9 @@ function SSE.parser()
     local buf = ""
     local full = {}
 
+    --- 解析一行 SSE：空行、注释行、非 data:、[DONE]、坏 JSON 与空 delta 一律返回 nil。
+    ---@param line string 已去掉行尾 \r 的单行
+    ---@return string|nil 该行携带的正文增量
     local function handleLine(line)
         if line == "" or line:sub(1, 1) == ":" then
             return nil
