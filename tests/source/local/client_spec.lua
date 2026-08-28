@@ -88,6 +88,7 @@ end
 
 local opened = {}
 local covers_saved = {}
+local props_read = 0
 package.preload["document/documentregistry"] = function()
     return {
         hasProvider = function(_, path)
@@ -98,6 +99,7 @@ package.preload["document/documentregistry"] = function()
             opened[#opened + 1] = path
             return {
                 getProps = function()
+                    props_read = props_read + 1
                     return { title = "T:" .. path, authors = "A:" .. path, description = "D:" .. path }
                 end,
                 getCoverPageImage = function()
@@ -348,6 +350,7 @@ local function reset()
     renames = {}
     opened = {}
     covers_saved = {}
+    props_read = 0
     dirs_scanned = {}
     removed_files = {}
 end
@@ -518,14 +521,18 @@ do
     c:listAsync({ force = true }, function() end)
     Stubs.flush()
     Assert.len(opened, 5)
+    Assert.eq(props_read, 5)
 
     opened = {}
     upserts = {}
     dirs_scanned = {}
+    covers_saved = {}
     c:listAsync({ force = true }, function() end)
     Stubs.flush()
     Assert.is_true(#dirs_scanned > 0)
-    Assert.len(opened, 0)
+    Assert.len(opened, 5)
+    Assert.eq(props_read, 5)
+    Assert.len(covers_saved, 5)
     Assert.len(upserts, 0)
 
     -- 非 force 纯查库
