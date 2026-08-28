@@ -317,6 +317,7 @@ end
 function Desktop:sourceChanged(source)
     self.source_generation = (self.source_generation or 0) + 1
     cancelJobs(self, FETCH_JOB_KEYS)
+    -- 只取消旧页面的在飞任务；已落盘图片缓存必须保留，切回源时可直接复用。
     Image.abortPending()
     self.source = source
     self._tabs = desktopTabs(source)

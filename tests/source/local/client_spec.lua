@@ -320,9 +320,16 @@ local Client = require("source.local.client")
 
 -- 可控时钟：自动扫描节流断言用
 local real_time = os.time
+local real_remove = os.remove
 local now = 1000
 os.time = function()
     return now
+end
+
+local removed_files = {}
+os.remove = function(path)
+    removed_files[#removed_files + 1] = path
+    return true
 end
 
 local function hasValue(t, v)
@@ -342,6 +349,7 @@ local function reset()
     opened = {}
     covers_saved = {}
     dirs_scanned = {}
+    removed_files = {}
 end
 
 -- ── 直查数据库：不扫盘，分页 / 筛选 / 搜索都走 DB ──────
@@ -475,6 +483,7 @@ do
     Assert.not_nil(db_rows[rowKey("local", "/books/gone.epub")])
     Assert.is_false(db_rows[rowKey("local", "/books/gone.epub")].in_library)
     Assert.is_nil(db_rows[rowKey("local", "/books/gone.epub")].path)
+    Assert.is_false(hasValue(removed_files, "/data/.moon/cache/local/image//books/gone.epub.png"))
     Assert.not_nil(db_rows[rowKey("local", "/books/a.epub")])
     -- 封面：解析成功的 5 本都尝试提取（bad.epub 无引擎不提取）
     Assert.len(covers_saved, 5)
@@ -879,6 +888,7 @@ do
 end
 
 os.time = real_time
+os.remove = real_remove
 
 for _, name in ipairs({
     "libs/libkoreader-lfs",
