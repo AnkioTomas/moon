@@ -324,6 +324,11 @@ function Protocol.utf8Substr(value, max_chars)
     return text:sub(1, index - 1)
 end
 
+--- 组装 web/book/read 的位置字段（进入阅读与时长上报共用的基础部分）。
+--- 书籍 id 与章节 uid 走 Protocol.encode 混淆，摘要截到 20 个字符，进度夹到 0..100；
+--- pc 缺失时用当前时间编码兜底。返回的表尚未签名，由调用方补 s 字段。
+---@param opts table 含 book_id / chapter_uid / chapter_idx / chapter_offset / summary / progress / psvts / now
+---@return table
 local function readPositionPayload(opts)
     local now = opts.now or os.time()
     local pc = opts.pclts or opts.pc

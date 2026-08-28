@@ -1,8 +1,7 @@
 --[[--
 插件 SQLite 连接与通用原语（$DATA/.moon/book.sqlite3）。
 
-表由 open → ensureSchema 一次性建全。没有迁移、没有版本号：
-schema 变了就删库重建，表定义永远只有 ensureSchema 里那一份。
+表由 open → ensureSchema 建立并按 user_version 增量迁移。
 
 使用 WAL 模式 + busy_timeout=5000，主/子进程均可安全访问。
 
@@ -13,6 +12,8 @@ local logger = require("logger")
 local Paths = require("utils.paths")
 
 local Base = {}
+
+local SCHEMA_VERSION = 1
 
 local conn = nil
 local conn_is_subprocess_owned = false
@@ -142,11 +143,39 @@ function Base.requireSourceId(source_id)
     return source_id
 end
 
---- 首次打开时 CREATE IF NOT EXISTS 全表。
---- 没有迁移：改了 schema 就删库重建，表定义永远只有这一份。
----@return nil
+local function hasColumn(table_name, column_name)
+    local result, nrows = Base.query("PRAGMA table_info(" .. table_name .. ");")
+    if not result then
+        return false, false
+    end
+    for i = 1, nrows or 0 do
+        if result[2] and result[2][i] == column_name then
+            return true, true
+        end
+    end
+    return false, true
+end
+
+local function addColumn(table_name, column_name, definition)
+    local present, inspected = hasColumn(table_name, column_name)
+    if present then
+        return true
+    end
+    -- Old test doubles may not implement PRAGMA table_info; real SQLite does.
+    if not inspected then
+        return true
+    end
+    return Base.exec("ALTER TABLE " .. table_name .. " ADD COLUMN "
+        .. column_name .. " " .. definition) ~= nil
+end
+
+--- 建表并执行兼容性迁移；任何一步失败都回滚并返回错误。
+---@return boolean, any
 local function ensureSchema()
-    Base.exec([[
+    if not Base.exec("BEGIN IMMEDIATE;") then
+        return false, "begin schema migration failed"
+    end
+    local ok = Base.exec([[
 CREATE TABLE IF NOT EXISTS books (
   source_id  TEXT NOT NULL,
   stable_id  TEXT NOT NULL,
@@ -253,6 +282,46 @@ CREATE TABLE IF NOT EXISTS xray_entities (
 CREATE INDEX IF NOT EXISTS idx_xray_entities_book
   ON xray_entities(source_id, stable_id, kind);
 ]])
+    if not ok then
+        Base.exec("ROLLBACK;")
+        return false, "create schema failed"
+    end
+
+    local version_value = Base.rowexec("PRAGMA user_version;")
+    local version = tonumber(version_value) or 0
+    -- Columns added after the original schema need explicit ALTERs because
+    -- CREATE TABLE IF NOT EXISTS does not update an existing table.
+    local columns = {
+        { "books", "last_open", "INTEGER NOT NULL DEFAULT 0" },
+        { "books", "last_chapter_idx", "INTEGER" },
+        { "books", "in_library", "INTEGER NOT NULL DEFAULT 1" },
+        { "books", "metadata_dirty", "INTEGER NOT NULL DEFAULT 0" },
+        { "books", "metadata_updated_at", "INTEGER NOT NULL DEFAULT 0" },
+        { "books", "reader_prefs", "TEXT" },
+        { "reading_stats", "chapter_idx", "INTEGER" },
+        { "reading_stats", "chapter_fraction", "REAL" },
+        { "reading_stats", "sync_status", "INTEGER NOT NULL DEFAULT 0" },
+        { "xray_entities", "aliases_json", "TEXT NOT NULL DEFAULT '[]'" },
+        { "xray_entities", "payload_json", "TEXT NOT NULL DEFAULT '{}'" },
+    }
+    if version < SCHEMA_VERSION then
+        for _, item in ipairs(columns) do
+            if not addColumn(item[1], item[2], item[3]) then
+                Base.exec("ROLLBACK;")
+                return false, "migrate column failed: " .. item[1] .. "." .. item[2]
+            end
+        end
+    end
+
+    if not Base.exec("PRAGMA user_version = " .. SCHEMA_VERSION .. ";") then
+        Base.exec("ROLLBACK;")
+        return false, "set schema version failed"
+    end
+    if not Base.exec("COMMIT;") then
+        Base.exec("ROLLBACK;")
+        return false, "commit schema migration failed"
+    end
+    return true
 end
 
 --- 打开（或复用）全局 SQLite 连接并确保 schema。
@@ -281,7 +350,12 @@ function Base.open()
         conn:exec("PRAGMA journal_mode=WAL;")
         conn:exec("PRAGMA busy_timeout=5000;")
     end)
-    ensureSchema()
+    local schema_ok, schema_err = ensureSchema()
+    if not schema_ok then
+        logger.warn("book.db schema init failed", schema_err)
+        Base.close()
+        return nil, schema_err
+    end
     return conn
 end
 

@@ -11,6 +11,9 @@ local Context = {}
 local PRIOR_TEXT_LIMIT = 2000
 local VISIBLE_TEXT_LIMIT = 12000
 
+--- 取当前页码：优先问 ReaderUI，退回问 document；都拿不到返回 0。
+---@param ui table|nil ReaderUI
+---@return integer
 local function currentPage(ui)
     if not ui then return 0 end
     if type(ui.getCurrentPage) == "function" then
@@ -25,6 +28,10 @@ local function currentPage(ui)
     return 0
 end
 
+--- 取某页正文：getTextBoxes 优先，退回 getPageText；结果可能是字符串或嵌套词框表。
+---@param ui table|nil ReaderUI
+---@param page integer|nil
+---@return string 取不到时空串
 local function pageText(ui, page)
     local document = ui and ui.document
     if not document or not page or page < 1 then return "" end
@@ -41,6 +48,9 @@ local function pageText(ui, page)
         return Text.trim(Text.normalizeNewlines(boxes))
     end
     local parts = {}
+    --- 递归收集词框里的文本（word / text 字段优先），最多下探 5 层防环。
+    ---@param value any
+    ---@param depth integer
     local function walk(value, depth)
         if depth > 5 then return end
         if type(value) == "string" then

@@ -20,12 +20,21 @@ U.RULE = Blitbuffer.COLOR_GRAY_5
 U.SURFACE = Blitbuffer.COLOR_GRAY_E
 U.FALLBACK_MESSAGE = "读书不觉已春深，一寸光阴一寸金。"
 
+--- 取所在自然日 00:00:00 的时间戳（本地时区）。
+---@param ts number|nil 缺省用当前时间
+---@return number
 function U.dayStart(ts)
     local t = os.date("*t", ts or os.time())
     t.hour, t.min, t.sec = 0, 0, 0
     return os.time(t)
 end
 
+--- 把按天统计行铺成 [start_ts, end_ts) 内逐日连续的桶，缺失日补零。
+--- 游标固定取当日 12 点推进，绕开夏令时切换日只有 23 小时导致的跳日。
+---@param rows table[]|nil 每行含 ymd / seconds / pages
+---@param start_ts number
+---@param end_ts number
+---@return table[] 每项 { key, label, seconds, pages }
 function U.dayBuckets(rows, start_ts, end_ts)
     local by_ymd = {}
     for _, row in ipairs(rows or {}) do

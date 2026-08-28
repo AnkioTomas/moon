@@ -621,6 +621,8 @@ function Detail:buildRecent(w, avail_h)
     local pager_h = UI.iconSz() + UI.sz(12)
 
     --- 预算内能放的行数。
+    ---@param budget number 可用高度
+    ---@return number
     local function rowsFit(budget)
         return math.floor((budget - fixed_h) / (row_h + row_gap))
     end

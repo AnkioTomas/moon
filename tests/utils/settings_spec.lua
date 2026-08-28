@@ -38,6 +38,14 @@ Assert.eq(type(Settings.get("quickpanel").quick_panel_reader_actions), "table")
 local active = Settings.activeSourceId()
 Assert.eq(active, common.active_source)
 
+-- 传入部分平铺表只更新指定键，不应清掉其他分区的配置。
+local original_lock_screen = common.lock_screen
+Settings.save({ lock_screen = "ko" })
+Assert.eq(Settings.get().lock_screen, "ko")
+Assert.eq(Settings.get().active_source, active)
+common.lock_screen = original_lock_screen
+Settings.save(common)
+
 local src = Settings.getSource(active)
 Assert.not_nil(src)
 Assert.eq(type(src), "table")

@@ -31,6 +31,7 @@ local Timing = {}
 ---@return TimingHandle
 local function handle(invoke, cancel)
     local h = {}
+    --- 取消挂起的调用（节流句柄则是清掉上次执行时间，下次调用立即放行）。
     function h:cancel()
         cancel()
     end

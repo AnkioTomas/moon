@@ -70,12 +70,18 @@ local function appendRowList(out, width, row_builders)
     end
 end
 
+--- 切换设置子页并重建；页码重置到第一页。
+---@param desktop table 桌面实例
+---@param sub string|nil 子页标识；nil 回到设置主菜单
 local function gotoSub(desktop, sub)
     desktop._settings_sub = sub
     desktop._settings_page = 1
     desktop:rebuild()
 end
 
+--- 造子页顶部「返回」行的构造器。
+---@param desktop table 桌面实例
+---@return fun(iw: number): table
 local function backRow(desktop)
     return function(iw)
         return SettingRow.build(iw, {

@@ -166,9 +166,17 @@ function Source:syncBooksAsync(_opts, cb)
     end }
 end
 
+--- 书城列表：无关键词走分类榜单，有关键词走搜索。
+--- 两条路径的 wire 都按搜索结果格式映射，并顺手记下封面 URL 供后续取图。
+---@param opts BookListOpts|nil
+---@param cb fun(data: BookListResult|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Source:listStoreAsync(opts, cb)
     opts = opts or {}
     local search = opts.search or ""
+    --- 把书城 wire 映射成书籍列表；失败原样透传错误。
+    ---@param wire table|nil
+    ---@param err string|nil
     local on_wire = function(wire, err)
         if wire then
             cb(Mapper.searchList(wire, function(id, url)
@@ -232,6 +240,10 @@ function Source:addStoreBookAsync(book, cb)
     }
 end
 
+--- 拉取书籍详情并缓存封面 URL；映射不出书籍时按「详情为空」失败。
+---@param identity BookIdentity
+---@param cb fun(book: Book|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Source:getDetailAsync(identity, cb)
     return self._client:bookInfoAsync(identity.stable_id, function(wire, err)
         if not wire then
@@ -249,6 +261,12 @@ function Source:getDetailAsync(identity, cb)
     end)
 end
 
+--- 取目录：命中本地 toc 缓存则下一个 tick 直接回调（返回 nil，无可取消 job），
+--- 未命中才拉章节信息并写回缓存。
+---@param self WechatSource
+---@param identity BookIdentity
+---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 local function getTocAsync(self, identity, cb)
     local cached = Toc.read(identity.source_id, identity.stable_id)
     if cached and #cached > 0 then
@@ -315,6 +333,11 @@ local function fetchContent(r, chapter, done)
     return WChapter.fetchContentAsync(r.stable_id, chapter, done)
 end
 
+--- 按章打开：目录、正文与缓存刷新都交给 source.chapter 的带 UI 流程。
+---@param identity BookIdentity
+---@param opts table|nil 可含 chapter_idx 指定章节
+---@param cb fun(path: string|nil, err: string|nil)
+---@return { cancel: fun() }
 function Source:openBookAsync(identity, opts, cb)
     return require("source.chapter").openWithUi(self, identity, identity.book, opts, {
         loadToc = function(r, done) return getTocAsync(self, r, done) end,
@@ -338,6 +361,12 @@ function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
     }, cb)
 end
 
+--- 拉取云端进度并补齐本地需要的坐标。
+--- 云端只给 chapter_uid 时回查目录换算章节序号；只给章内位置时按目录长度折算全书百分比；
+--- 章节坐标写进 pos.extra 供后续 push 复用。
+---@param identity BookIdentity
+---@param cb fun(pos: ProgressPosition|nil, err: string|nil)
+---@return { cancel: fun() }
 function Source:getProgressAsync(identity, cb)
     local cancelled = false
     local first, second
@@ -385,6 +414,11 @@ function Source:getProgressAsync(identity, cb)
     }
 end
 
+--- 上报阅读进度：需要 chapter_uid，优先复用 pos.extra 缓存的坐标，否则回查目录解析。
+---@param identity BookIdentity
+---@param pos ProgressPosition|nil 缺省视为空位置
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }
 function Source:putProgressAsync(identity, pos, cb)
     pos = pos or {}
     local frac = ProgressPosition.clampFraction(pos.fraction)
@@ -399,6 +433,8 @@ function Source:putProgressAsync(identity, pos, cb)
     local extra = pos.extra
     local chapter_uid = extra and tonumber(extra.chapter_idx) == chapter_idx
         and extra.chapter_uid or nil
+    --- 拿到章节 uid 后先补齐 psvts 签名参数，再上报进度。
+    ---@param uid string 章节 uid
     local function startPush(uid)
         ensure_job = WChapter.ensurePsvtsAsync(identity.stable_id, uid, function(ok, err)
             if cancelled then return end
@@ -522,6 +558,9 @@ function Source:pushStatsAsync(rows, cb)
         cb({ ok = true, synced_ids = confirmed })
     end
 
+    --- 上报一个章节桶的阅读时长；成功则确认桶内全部行 id 并处理下一个。
+    ---@param bucket table 形如 { stable_id, chapter_idx, duration, chapter_fraction, ids }
+    ---@param chapter_uid string 章节 uid
     local function report(bucket, chapter_uid)
         local psvts = require("source.wechat.context").psvts(bucket.stable_id, chapter_uid)
         local payload = Protocol.makeReadPayload({
@@ -547,6 +586,9 @@ function Source:pushStatsAsync(rows, cb)
         end)
     end
 
+    --- 先补齐该章的 psvts 签名参数，再上报时长；补不上视为本轮失败。
+    ---@param bucket table 章节聚合桶
+    ---@param chapter_uid string 章节 uid
     local function ensureAndReport(bucket, chapter_uid)
         job = WChapter.ensurePsvtsAsync(bucket.stable_id, chapter_uid, function(ok, err)
             if cancelled then return end
@@ -558,6 +600,8 @@ function Source:pushStatsAsync(rows, cb)
         end)
     end
 
+    --- 把桶的章节序号解析成 uid 后上报；缓存没有就拉一次目录，仍解析不出视为失败。
+    ---@param bucket table 章节聚合桶
     local function resolveAndReport(bucket)
         local chapter_uid = Toc.uid(self.id, bucket.stable_id, bucket.chapter_idx)
         if chapter_uid then
@@ -595,6 +639,9 @@ function Source:pushStatsAsync(rows, cb)
     }
 end
 
+--- 拉取月度阅读统计并映射成 reading_stats 领域记录。
+---@param cb fun(result: BookStatsRow[]|BookStatsPullResult|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Source:pullStatsAsync(cb)
     return self._client:readStatsAsync("monthly", nil, function(wire, err)
         if not wire then
@@ -605,6 +652,11 @@ function Source:pullStatsAsync(cb)
     end)
 end
 
+--- 拉取某本书的划线与想法，合并成 KOReader 注解数组。
+--- 想法接口失败只记日志不算错：划线本身已经可用。
+---@param identity BookIdentity
+---@param cb fun(annotations: table[]|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Source:pullNotesAsync(identity, cb)
     if not self:configured() then
         cb(nil, _("请先扫码登录微信读书"))
@@ -646,6 +698,13 @@ function Source:localizeAnnotations(document, annotations, html_path)
     return Notes.localizeAnnotations(document, annotations, html_path)
 end
 
+--- 上传当前章的划线与想法。
+--- 微信读书的划线坐标依赖章节 HTML，因此只能按章推送：identity 必须带 chapter_idx，
+--- 且该章正文已落盘（缺 HTML 时无法定位划线区间）。无可推送内容直接回调成功。
+---@param identity BookIdentity
+---@param annotations table[] KOReader 注解数组
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Source:pushNotesAsync(identity, annotations, cb)
     if not self:configured() then
         cb(nil, _("请先扫码登录微信读书"))
@@ -676,14 +735,21 @@ function Source:pushNotesAsync(identity, annotations, cb)
     local book_id = identity.stable_id
     local Context = require("source.wechat.context")
 
+    --- 收尾回调；已取消则丢弃结果。
+    ---@param ok boolean|nil
+    ---@param err string|nil
     local function finish(ok, err)
         if not cancelled then cb(ok, err) end
     end
 
+    --- 串行推送本章的划线，走完再推想法。
+    ---@param chapter_uid string 章节 uid
+    ---@param book_version number|nil 书籍版本号，划线坐标需要它对齐
     local function pushAll(chapter_uid, book_version)
         -- 前向声明：划线队列走完后转入想法推送，必须先于 nextBookmark 进入作用域。
         local pushReviews
         local index = 1
+        --- 推送队列中的下一条划线；队列走完转入想法推送。
         local function nextBookmark()
             if cancelled then return end
             local item = candidates[index]
@@ -768,6 +834,8 @@ function Source:pushNotesAsync(identity, annotations, cb)
         nextBookmark()
     end
 
+    --- 确保拿到书籍版本号后再推送：优先用上下文缓存，缺失才拉一次书籍详情并记住。
+    ---@param chapter_uid string 章节 uid
     local function withBookVersion(chapter_uid)
         local book_version = Context.bookVersion(book_id)
         if book_version then

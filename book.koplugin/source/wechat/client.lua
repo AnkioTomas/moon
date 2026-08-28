@@ -51,6 +51,9 @@ function Client:configured()
     return Auth.hasSession()
 end
 
+--- 全量拉取书架（synckey=0 表示不做增量）。
+---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@return { cancel: fun() }|nil
 function Client:shelfSyncAsync(cb)
     return Auth.webApiGetAsync("/web/shelf/sync?" .. Text.formEncode({
         synckey = 0,
@@ -93,6 +96,7 @@ local function collectPagesAsync(limit, fetchPage, cb)
     local merged, cursor = {}, 0
     local cancelled, job = false, nil
 
+    --- 取下一页并并入 merged；凑满 limit、服务端说没有更多或本页为空即收尾。
     local function fetchNext()
         if cancelled then
             return
@@ -166,6 +170,13 @@ function Client:storeCatalogAsync(opts, cb)
     end, cb)
 end
 
+--- 全站搜索；自动翻页直到凑满 count 或无更多。关键词为空直接回空结果。
+--- 首页回包里的 sid 会带到后续页，服务端据此认定是同一次搜索。
+---@param keyword string|nil 搜索关键词
+---@param count number|nil 结果条数上限，缺省 20，最多 200
+---@param _scope any 保留参数，当前实现不使用
+---@param cb fun(wire: table|nil, err: string|nil) 合并后的 { books, totalCount, hasMore }
+---@return { cancel: fun() }|nil
 function Client:searchAsync(keyword, count, _scope, cb)
     keyword = tostring(keyword or "")
     if keyword == "" then
@@ -191,6 +202,10 @@ function Client:searchAsync(keyword, count, _scope, cb)
     end, cb)
 end
 
+--- 拉取书籍详情（含书籍版本号）。
+---@param bookId string|number|nil 微信读书 bookId，即 stable_id
+---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@return { cancel: fun() }|nil
 function Client:bookInfoAsync(bookId, cb)
     bookId = tostring(bookId or "")
     return Auth.webApiGetAsync("/web/book/info?" .. Text.formEncode({ bookId = bookId }), function(data, err)
@@ -200,6 +215,10 @@ function Client:bookInfoAsync(bookId, cb)
     end)
 end
 
+--- 拉取整本书的章节目录。
+---@param bookId string|number|nil 微信读书 bookId，即 stable_id
+---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@return { cancel: fun() }|nil
 function Client:chapterInfosAsync(bookId, cb)
     bookId = tostring(bookId or "")
     return Auth.webApiPostAsync("/web/book/chapterInfos", {
@@ -211,6 +230,10 @@ function Client:chapterInfosAsync(bookId, cb)
     end)
 end
 
+--- 拉取云端阅读进度；带毫秒时间戳参数避开中间层缓存。
+---@param bookId string|number|nil 微信读书 bookId，即 stable_id
+---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@return { cancel: fun() }|nil
 function Client:getProgressAsync(bookId, cb)
     bookId = tostring(bookId or "")
     return Auth.webApiGetAsync("/web/book/getProgress?" .. Text.formEncode({
@@ -259,6 +282,12 @@ function Client:putProgressAsync(bookId, opts, cb)
     end)
 end
 
+--- 上报阅读行为（进度与时长共用的 /web/book/read 接口）。
+--- 回包不是 JSON 一律按失败：登录页 HTML 与 WAF 拦截页都长这样，当成功会静默丢数据。
+---@param body string 已编码好的 JSON 请求体
+---@param referer string|nil Referer 头，缺省用站点首页
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Client:reportReadAsync(body, referer, cb)
     return Auth.webPostAsync("https://weread.qq.com/web/book/read", body, {
         headers = { ["Referer"] = referer or "https://weread.qq.com/" },
@@ -279,6 +308,11 @@ function Client:reportReadAsync(body, referer, cb)
     end)
 end
 
+--- 经 Agent 网关拉取阅读统计明细。
+---@param mode string|nil 统计口径，缺省 "monthly"
+---@param base_time number|nil 基准时间戳（秒），大于 0 才带上
+---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
+---@return { cancel: fun() }|nil
 function Client:readStatsAsync(mode, base_time, cb)
     local params = { mode = mode or "monthly" }
     if base_time and tonumber(base_time) and tonumber(base_time) > 0 then

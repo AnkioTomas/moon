@@ -110,6 +110,9 @@ function Home.fetch(desktop)
 
     local source = desktop.source
     local generation = desktop.source_generation or 0
+    --- 本次拉取结果是否还该采用。
+    --- 桌面已关或期间换过源（source_generation 变化）时回调必须丢弃，否则会串源写状态。
+    ---@return boolean
     local function valid()
         return not desktop._closed
             and desktop.source == source

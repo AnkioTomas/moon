@@ -24,6 +24,12 @@ local M = {
     icon = "insights",
 }
 
+--- 造一张「数值 + 说明」统计卡；高度按文本实测撑开。
+---@param width number 卡片宽
+---@param value string|number 主数值
+---@param label string 下方说明文案
+---@return table card 卡片 widget
+---@return number height 卡片高度
 local function recordCard(width, value, label)
     local pad = UI.sz(8)
     local inner_w = math.max(1, width - pad * 2)

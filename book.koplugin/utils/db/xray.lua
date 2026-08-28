@@ -8,6 +8,11 @@ local Base = require("utils.db.base")
 
 local XrayDB = {}
 
+--- 校验书籍身份，通过则返回规范化的 source_id。
+--- 返回 nil 让调用方直接拒绝这次读写，不带非法身份下到 SQL。
+---@param source_id string|nil
+---@param stable_id string|nil 必须是非空字符串
+---@return string|nil source_id nil 表示身份非法
 local function validBook(source_id, stable_id)
     source_id = Base.requireSourceId(source_id)
     if not source_id or type(stable_id) ~= "string" or stable_id == "" then

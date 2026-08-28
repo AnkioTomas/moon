@@ -96,13 +96,23 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     end
     local cancelled = false
     local active_job
+    --- 中止取正文：置位取消标记并终止在途请求。
     local function cancel()
         cancelled = true
         if active_job then active_job.cancel() end
     end
+    --- 以错误收尾；已取消则丢弃。
+    ---@param err any 失败原因
     local function fail(err)
         if not cancelled then cb(nil, err) end
     end
+    --- 请求一个正文分片端点；空对象回包（"{}"）按失败处理，交由调用方换端点重试。
+    ---@param uid string 章节 uid
+    ---@param psvts string 阅读页里提取的签名参数
+    ---@param endpoint string 正文接口路径
+    ---@param referer string Referer 头，需为对应阅读页 URL
+    ---@param style boolean|nil 是否请求带样式的正文
+    ---@param done fun(raw: string|nil, err: any) 原始 JSON 串
     local function requestShard(uid, psvts, endpoint, referer, style, done)
         local params = Protocol.contentParams(bookId, uid, psvts, {
             sc = 1,

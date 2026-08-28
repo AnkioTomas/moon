@@ -33,6 +33,10 @@ local function ensureUI()
     BookInfo = require("ui.components.bookinfo")
 end
 
+--- 取本地封面缓存路径；无 stable_id 或文件不存在返回 nil。
+---@param stable_id string|nil
+---@param source_id string|nil
+---@return string|nil
 local function coverPath(stable_id, source_id)
     if type(stable_id) ~= "string" or stable_id == "" then return nil end
     local path = Paths.coverPath(stable_id, source_id)
@@ -58,6 +62,9 @@ local function buildBook(opts)
     }
 end
 
+--- 就地补上这本书的累计阅读时长与近 7 天日桶。
+---@param book table|nil
+---@return table|nil 原表（book 为 nil 时透传 nil）
 local function withStats(book)
     if not book then return nil end
     local summary = StatsDB.summaryByBook(book.source_id, book.stable_id)
@@ -71,6 +78,9 @@ local function withStats(book)
     return book
 end
 
+--- 无阅读会话时的兜底：当前源最近打开的书，优先取未读完的那本。
+--- 进度以 progress 表为准（比 books.percent 新）。
+---@return table|nil 书库为空时 nil
 local function latestBook()
     local source_id = MoonSettings.get().active_source or "local"
     local recent = BookDB.recentBySource(source_id, 16)

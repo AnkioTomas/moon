@@ -31,12 +31,20 @@ local FILL_RING = { 4, 6, 3, 7, 2, 8, 1, 9 }
 -- 绘制顺序：远 → 近，正中最后（叠在最上）
 local PAINT_ORDER = { 1, 9, 2, 8, 3, 7, 4, 6, 5 }
 
+--- 造「进详情」与「直接开读」两个点按回调。
+---@param ctx table 首页组件上下文（desktop / plugin / source）
+---@return fun(book: Book) on_open 进书籍详情页
+---@return fun(book: Book) on_read 直接开书；插件不可用时退化为进详情
 local function openHandlers(ctx)
+    --- 进书籍详情页。
+    ---@param book Book
     local on_open = function(book)
         if ctx.desktop and ctx.desktop.showDetail then
             ctx.desktop:showDetail(book)
         end
     end
+    --- 直接开书阅读。
+    ---@param book Book
     local on_read = function(book)
         local plugin = ctx.plugin or (ctx.desktop and ctx.desktop.plugin)
         if plugin and plugin.openBook then
@@ -48,6 +56,13 @@ local function openHandlers(ctx)
     return on_open, on_read
 end
 
+--- 按离正中的槽距缩放封面尺寸，越远越小。
+--- 带绝对下限，避免窄屏上外圈封面缩到看不清。
+---@param main_cw number 正中封面宽
+---@param main_ch number 正中封面高
+---@param dist number 到正中槽的距离（0 / 1 / ≥2）
+---@return number cw 封面宽
+---@return number ch 封面高
 local function slotScale(main_cw, main_ch, dist)
     if dist == 0 then
         return main_cw, main_ch
@@ -61,6 +76,13 @@ local function slotScale(main_cw, main_ch, dist)
 end
 
 --- 封面；仅主封面叠底栏进度。
+---@param ctx table 首页组件上下文（desktop / plugin / source）
+---@param book Book 要显示的书
+---@param cw number 封面宽
+---@param ch number 封面高
+---@param on_tap fun()|false|nil 点按回调；无回调时只出静态封面
+---@param opts table|nil 选项，show_progress 为真时叠底部进度条
+---@return table 封面 widget
 local function coverStack(ctx, book, cw, ch, on_tap, opts)
     opts = opts or {}
     local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, {

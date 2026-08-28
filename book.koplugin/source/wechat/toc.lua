@@ -127,6 +127,7 @@ function Toc.wholeFraction(source_id, stable_id, chapter_idx, chapter_fraction)
     )
 end
 
+--- 清空进程内目录缓存；落库的 toc 表不受影响。
 function Toc.clear()
     cache = {}
 end

@@ -67,6 +67,9 @@ end
 function Text.isValidUtf8(s)
     s = tostring(s or "")
     local i, n = 1, #s
+    --- 指定位置是否为 UTF-8 续字节（0x80..0xBF）。
+    ---@param pos integer 字节下标，越界算 false
+    ---@return boolean
     local function continuation(pos)
         local b = string.byte(s, pos)
         return b and b >= 0x80 and b <= 0xBF

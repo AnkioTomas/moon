@@ -15,6 +15,9 @@ Prompts.system = [[你是文学阅读助手。只输出合法 JSON，不要 Mark
 local function formatExisting(snapshot)
     snapshot = snapshot or {}
     local parts = {}
+    --- 追加一段已知实体清单（带别名与简介）；空列表不出小标题。
+    ---@param label string 小标题
+    ---@param items table[]|nil
     local function section(label, items)
         if type(items) ~= "table" or #items == 0 then
             return

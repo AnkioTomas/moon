@@ -27,6 +27,8 @@ local M = {
     icon = "view_list",
 }
 
+--- 清掉筛选与分页后跳到书库页。
+---@param desktop table|nil 桌面实例
 local function openLibrary(desktop)
     if not desktop or not desktop.switchTab then return end
     desktop.filter = {}
@@ -35,12 +37,20 @@ local function openLibrary(desktop)
     desktop:switchTab("library")
 end
 
+--- 造「进详情」与「直接开读」两个点按回调。
+---@param ctx table 首页组件上下文（desktop / plugin / source）
+---@return fun(book: Book) on_open 进书籍详情页
+---@return fun(book: Book) on_read 直接开书；插件不可用时退化为进详情
 local function openHandlers(ctx)
+    --- 进书籍详情页。
+    ---@param book Book
     local on_open = function(book)
         if ctx.desktop and ctx.desktop.showDetail then
             ctx.desktop:showDetail(book)
         end
     end
+    --- 直接开书阅读。
+    ---@param book Book
     local on_read = function(book)
         local plugin = ctx.plugin or (ctx.desktop and ctx.desktop.plugin)
         if plugin and plugin.openBook then
@@ -52,6 +62,15 @@ local function openHandlers(ctx)
     return on_open, on_read
 end
 
+--- 造一个可点按的封面格子（带角标，封面左对齐在格宽内）。
+---@param ctx table 首页组件上下文（desktop / plugin / source）
+---@param book Book 要显示的书
+---@param cell_w number 格子宽（可大于封面宽）
+---@param cw number 封面宽
+---@param ch number 封面高
+---@param on_open fun(book: Book)|nil 点按回调
+---@return table cell 格子 widget
+---@return number height 格子高度
 local function coverCell(ctx, book, cell_w, cw, ch, on_open)
     local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, {
         badge = true,
@@ -68,6 +87,17 @@ local function coverCell(ctx, book, cell_w, cw, ch, on_open)
 end
 
 --- hero 预览：固定封面宽，按 grid_max_cols 换行；末行不满列不拉伸。
+--- 全量铺开不分页，返回的页码恒为 1/1，只为与分页版签名一致。
+---@param ctx table 首页组件上下文（desktop / plugin / source）
+---@param books Book[] 要铺的书
+---@param w number 组件总宽
+---@param pad number 左右内边距
+---@param max_h number 高度预算，用来定封面尺寸
+---@param on_open fun(book: Book)|nil 封面点按回调
+---@return table grid 网格 widget
+---@return number height 实占高度
+---@return number page 当前页，恒为 1
+---@return number pages 总页数，恒为 1
 local function buildFillGrid(ctx, books, w, pad, max_h, on_open)
     local avail = math.max(1, w - pad * 2)
     local _slot_w, cw, ch, cols, cgap, row_gap = UI.denseCoverMetrics(avail, max_h, {
@@ -83,6 +113,7 @@ local function buildFillGrid(ctx, books, w, pad, max_h, on_open)
     local row_n = 0
     local grid_h = 0
 
+    --- 把攒好的一行落进网格并重置行状态；行间距只在非首行加。
     local function flushRow()
         if row_n > 0 then
             table.insert(grid, VerticalSpan:new{ width = row_gap })
@@ -120,6 +151,18 @@ local function buildFillGrid(ctx, books, w, pad, max_h, on_open)
 end
 
 --- footer 分页：跟书架同一套密铺网格。
+--- 行列数由高度预算反推，页码越界会被夹回有效范围。
+---@param ctx table 首页组件上下文（desktop / plugin / source）
+---@param books Book[] 全部候选书
+---@param w number 组件总宽
+---@param pad number 左右内边距
+---@param budget_h number 高度预算，决定行数与封面尺寸
+---@param page number 请求页码，从 1 起
+---@param on_open fun(book: Book)|nil 封面点按回调
+---@return table grid 网格 widget
+---@return number height 实占高度
+---@return number page 实际页码（已夹取）
+---@return number pages 总页数
 local function buildPagedGrid(ctx, books, w, pad, budget_h, page, on_open)
     local avail = math.max(1, w - pad * 2)
     local _slot_w, cw, ch, cols, cgap, row_gap = UI.denseCoverMetrics(avail, budget_h, {
@@ -139,6 +182,7 @@ local function buildPagedGrid(ctx, books, w, pad, budget_h, page, on_open)
     local row_n = 0
     local grid_h = 0
 
+    --- 把攒好的一行落进网格并重置行状态；行间距只在非首行加。
     local function flushRow()
         if row_n > 0 then
             table.insert(grid, VerticalSpan:new{ width = row_gap })

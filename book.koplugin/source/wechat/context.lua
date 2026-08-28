@@ -42,6 +42,7 @@ function Context.bookVersion(book_id)
     return book_version_by_id[tostring(book_id)]
 end
 
+--- 清空进程内缓存的 psvts 与书籍版本号（换账号或登出后必须调）。
 function Context.clear()
     psvts_by_chapter = {}
     book_version_by_id = {}

@@ -151,7 +151,10 @@ function M.reset()
     _statements = nil
 end
 
--- 首次读取时缓存完整 meta 表；词库不可用或查询失败时返回 nil。
+--- 读 meta 表里的一项。
+--- 首次读取时缓存完整 meta 表；词库不可用或查询失败时返回 nil。
+---@param k string 键名
+---@return string|nil
 local function metaValue(k)
     if _meta then
         return _meta[k]
@@ -219,6 +222,8 @@ end
 
 --- 简拼：默认每个音节取首字母，也接受 zh/ch/sh 展开的声母。
 --- 「jfyhdcm」和「jfyhdchm」都可命中「江枫渔火对愁眠」。
+---@param code string 纯小写连写拼音
+---@return string 简拼码
 local function abbrevCode(code)
     local out = {}
     local i = 1
@@ -271,6 +276,11 @@ function M.lookup(code)
         return {}
     end
 
+    --- 跑一条候选查询，最多取 MAX_CANDI 条；预编译语句按 name 缓存复用。
+    ---@param name string 语句缓存键
+    ---@param sql string
+    ---@param ... any 绑定参数（按序 bind1）
+    ---@return string[]
     local function fetch(name, sql, ...)
         local stmt = _statements[name]
         if not stmt then

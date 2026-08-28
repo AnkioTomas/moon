@@ -260,6 +260,8 @@ function Library.build(ctx, state, opts)
     local pages = opts.pages or 1
     local total = opts.total or 0
     local books = state.books
+    --- 点封面进书籍详情页。
+    ---@param book Book 被点中的书
     local on_open = function(book)
         if ctx.desktop and ctx.desktop.showDetail then
             ctx.desktop:showDetail(book)
@@ -612,6 +614,8 @@ end
 ---@param on_apply fun(query: string)|nil
 ---@param initial_query string|nil
 function Library.showSearch(desktop, on_apply, initial_query)
+    --- 提交搜索词；调用方没给 on_apply 时落到书库的独占搜索筛选。
+    ---@param query string 搜索词，空串表示清除
     local function apply(query)
         if on_apply then
             on_apply(query)

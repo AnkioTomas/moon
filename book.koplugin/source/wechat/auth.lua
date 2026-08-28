@@ -475,6 +475,11 @@ local function sessionRequest(opts, cb)
     end)
 end
 
+--- 带会话 Cookie 的异步 GET；遇鉴权失效会自动续期后重试一次。
+---@param url string 完整 URL
+---@param opts table|nil headers / accept / block_timeout / allow_redirects / skip_auth_retry
+---@param cb fun(raw: string|nil, err: string|nil, res: table|nil) 失败时 raw 为 nil，res 是原始响应
+---@return { cancel: fun() }|nil
 function Auth.webGetAsync(url, opts, cb)
     opts = opts or {}
     return sessionRequest({
@@ -512,6 +517,7 @@ end
 ---@param path_query string
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
+local jsonGetAsync
 jsonGetAsync = function(base, path_query, cb)
     return Auth.webGetAsync(absUrl(base, path_query), nil, function(raw, err)
         if not raw then
@@ -523,10 +529,19 @@ jsonGetAsync = function(base, path_query, cb)
 end
 
 --- Web API JSON GET；errcode 校验由 client 层的 acceptWebWire 决定。
+---@param path_query string 相对 Web 站点的路径（可带 query）
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Auth.webApiGetAsync(path_query, cb)
     return jsonGetAsync(WEB, path_query, cb)
 end
 
+--- Web API JSON POST；body 以 JSON 发出，回包解码成表。
+--- 同 webApiGetAsync，errcode 校验留给 client 层。
+---@param path string 相对 Web 站点的路径
+---@param body_tbl table|nil 请求体，缺省发空对象
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Auth.webApiPostAsync(path, body_tbl, cb)
     return Auth.webPostAsync(absUrl(WEB, path), JSON.encode(body_tbl or {}), nil, function(raw, err)
         if not raw then
@@ -575,6 +590,8 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Auth.agentGatewayAsync(api_name, params, cb)
+    --- 用已有 API Key 调网关；回包里带 upgrade_info 时顺手记住新的 skill_version。
+    ---@return { cancel: fun() }|nil
     local function invoke()
         local key = Text.trim(cfg().api_key or "")
         if key == "" then
@@ -634,6 +651,7 @@ function Auth.agentGatewayAsync(api_name, params, cb)
     end)
 end
 
+local ensureGuestCookiesAsync
 ensureGuestCookiesAsync = function(cb)
     login_jar = {}
     return Request.request({
@@ -653,6 +671,9 @@ ensureGuestCookiesAsync = function(cb)
     end)
 end
 
+--- 发起扫码登录：先拿访客 Cookie，再申请登录 uid 并拼出二维码内容。
+---@param cb fun(info: { uid: string, qr_payload: string }|nil, err: string|nil)
+---@return { cancel: fun() }
 function Auth.beginQrLoginAsync(cb)
     local cancelled = false
     local first, second
@@ -696,6 +717,12 @@ function Auth.beginQrLoginAsync(cb)
     }
 end
 
+--- 长轮询等待扫码确认，最多等 90 秒。
+--- 成功回调带会话密钥（vid/accessToken/refreshToken 与几个 Cookie 字段）与状态 "ok"，
+--- 失败或超时回调 (nil, err, "error")。
+---@param uid string beginQrLoginAsync 拿到的登录 uid
+---@param cb fun(session: table|nil, err: string|nil, status: string)
+---@return { cancel: fun() }
 function Auth.waitQrLoginAsync(uid, cb)
     if not uid or uid == "" then
         cb(nil, _("无效 uid"), "error")
@@ -705,6 +732,7 @@ function Auth.waitQrLoginAsync(uid, cb)
     local deadline = os.time() + 90
     local request_job
     local url = WEB .. "/api/auth/getLoginInfo?uid=" .. tostring(uid) .. "&otp"
+    --- 发一轮长轮询；截止时间前的网络错误延迟 3 秒重试，其余情况直接定论。
     local function poll()
         if cancelled then
             return
@@ -766,6 +794,11 @@ function Auth.waitQrLoginAsync(uid, cb)
     }
 end
 
+--- 落盘扫码得到的会话，并补拉用户昵称与 Skills API Key。
+--- 昵称和 API Key 取不到都不算失败：会话本身已经可用。
+---@param info table|nil waitQrLoginAsync 回调给的会话表
+---@param cb fun(user: { user_id: string, user_name: string }|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Auth.completeQrLoginAsync(info, cb)
     if type(info) ~= "table" then
         cb(nil, _("无登录信息"))
@@ -800,6 +833,10 @@ function Auth.completeQrLoginAsync(info, cb)
     end)
 end
 
+--- 续期会话 Cookie；成功时把新的 wr_skey/wr_rt 落盘并顺带刷新 Skills API Key。
+--- 未登录直接失败；响应未判定为续期成功也按「续期失败」回调。
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }|nil
 function Auth.renewCookieAsync(cb)
     if not Auth.hasSession() then
         cb(nil, _("请先扫码登录微信读书"))

@@ -208,6 +208,8 @@ function Insight.fetch(desktop)
         return
     end
 
+    --- 向当前源拉统计并归一化成插件内部状态；期间换源或关桌面则丢弃结果。
+    --- 解析用 pcall 包住：源返回的结构不受本地控制，脏数据只该退化成一条错误提示。
     local function loadInsight()
         desktop._insight_fetch_cancel = source:readingInsightAsync(function(res, err)
             if desktop._closed or desktop.source ~= source

@@ -17,14 +17,20 @@ local _install_dir
 local _backups_root
 local _patches_dir
 
+--- 延迟取 lfs（本模块零 UI 依赖，离线测试才能直接 require）。
+---@return table
 local function lfs()
     return require("libs/libkoreader-lfs")
 end
 
+--- 延迟取 DataStorage。
+---@return table
 local function dataStorage()
     return require("datastorage")
 end
 
+--- 延迟取 utils.paths。
+---@return table
 local function paths()
     return require("utils.paths")
 end
@@ -110,10 +116,15 @@ function Manager.init(opts)
     _patches_dir = opts.patches_dir
 end
 
+--- KOReader 安装目录（被补丁的核心文件所在），未注入时取当前工作目录。
+---@return string
 local function installDir()
     return _install_dir or lfs().currentdir()
 end
 
+--- 某功能的原文件备份目录。
+---@param feature string 功能名（patches/ 下的子目录名）
+---@return string
 local function backupDir(feature)
     if _backups_root then
         return _backups_root .. "/" .. feature
@@ -121,6 +132,8 @@ local function backupDir(feature)
     return paths().patchBackupDir(feature)
 end
 
+--- KOReader 运行时补丁目录（静态补丁文件分发到这里）。
+---@return string
 local function patchesDir()
     return _patches_dir or dataStorage():getPatchesDir()
 end

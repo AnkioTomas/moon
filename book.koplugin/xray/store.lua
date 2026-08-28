@@ -10,21 +10,34 @@ local XrayDB = require("utils.db.xray")
 
 local Store = {}
 
+--- 名字规范化（去空白 + 转小写），去重比较一律用它。
+---@param name string|nil
+---@return string
 local function normName(name)
     return Text.trim(name):lower()
 end
 
+--- 解 JSON 列表；空串或解析失败一律当空表（库里的旧脏数据不该让阅读页崩）。
+---@param raw string|nil
+---@return table
 local function decodeList(raw)
     if type(raw) ~= "string" or raw == "" then return {} end
     local ok, value = pcall(JSON.decode, raw)
     return ok and type(value) == "table" and value or {}
 end
 
+--- 编码成 JSON 串落库；编码失败退化为空列表。
+---@param value any
+---@return string
 local function encode(value)
     local ok, payload = pcall(JSON.encode, value)
     return ok and payload or "[]"
 end
 
+--- 实体去重键：类型 + 规范名（同名不同类算两个实体）。
+---@param kind string
+---@param name string
+---@return string
 local function entityKey(kind, name)
     return kind .. "\0" .. normName(name)
 end
@@ -38,6 +51,8 @@ function Store.mergeEntities(existing, incoming)
     local alias_to_key = {}
     local order = {}
 
+    --- 登记一个实体：占住去重键、记下出现顺序，并把名字与全部别名指向它。
+    ---@param entity table
     local function remember(entity)
         local key = entityKey(entity.kind, entity.name)
         by_key[key] = entity

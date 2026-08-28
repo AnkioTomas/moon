@@ -57,6 +57,8 @@ local function extFor(mime)
     return ""
 end
 
+--- 递归建目录；已存在或路径为空直接返回。
+---@param dir string|nil
 local function ensureDir(dir)
     if not dir or dir == "" then
         return
@@ -247,6 +249,8 @@ local function downloadRemoteImagesAsync(xhtml, referer, images_dir, cb)
     end
     local url_hrefs, index = {}, 1
     local cancelled, active_job = false, nil
+    --- 下载队列中的下一张远程图片；下完全部后统一把 src 改写成本地相对路径。
+    --- 单张下载失败不中断，只是该 src 保持原样。
     local function nextUrl()
         if cancelled then return end
         local url = urls[index]
@@ -296,10 +300,14 @@ function Assets.localizeAsync(book_id, chapter, html, referer, cb)
     local images_dir = Paths.bookWorkDir(book_id, "wechat") .. "/images"
     ensureDir(images_dir)
 
+    --- 交付改写后的 HTML；已取消则丢弃。
+    ---@param out string
     local function finish(out)
         if not cancelled then cb(out) end
     end
 
+    --- tar 资源包处理完后，先按包内映射改写 src，再补下仍指向 http(s) 的图片。
+    ---@param src_map table<string, string>|nil 原始 src → 本地相对路径
     local function afterTar(src_map)
         if cancelled then return end
         local rewritten = Assets.rewriteImageSources(html, src_map or {})

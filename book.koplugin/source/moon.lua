@@ -152,6 +152,7 @@ function Source:openBookAsync(identity, _opts, cb)
     local dialog
     local path = bookPath(identity)
 
+    --- 关掉下载进度对话框并置空句柄；重复调用无副作用。
     local function closeDialog()
         if dialog then
             dialog:close()
@@ -159,6 +160,8 @@ function Source:openBookAsync(identity, _opts, cb)
         end
     end
 
+    --- 把已就绪的物理文件登记进书库，再把路径交给调用方。
+    ---@param local_path string 本地书籍文件路径
     local function register(local_path)
         require("book.store").touchAsync(local_path, identity, nil, function(ok, err)
             if cancelled then return end
@@ -243,7 +246,7 @@ end
 --- 生命周期事件：阅读统计上报时机由本源自决。
 --- 统计上报会拖 KOReader UI 依赖链，必须函数内延迟加载（离线测试会 require 本文件）。
 ---@param event string
----@param _payload table|nil
+---@param payload table|nil 事件载荷，原样转交基类
 function Source:onEvent(event, payload)
     SourceBase.onEvent(self, event, payload)
     if event == "stats_sync_request" then
@@ -268,6 +271,9 @@ function Source:syncReadingStats(show_message)
     end
     self._stats_syncing = true
     require("ui/network/manager"):runWhenOnline(function()
+        --- 同步收尾：解除节流标记，按需提示用户，静默模式下只记日志。
+        ---@param result SyncResult|nil
+        ---@param err any 失败原因
         local function finish(result, err)
             self._stats_syncing = false
             if show_message then
@@ -325,6 +331,7 @@ function Source:syncBooksAsync(opts, cb)
     if opts and opts.force then self:clearCaches() end
     local page, page_size = 1, 200
     local books, cancelled, job = {}, false, nil
+    --- 拉下一页书架；累计条数够 count 或本页为空即收尾并对账入库。
     local function nextPage()
         if cancelled then return end
         job = self._client:listBooksAsync(listQuery({ page = page, page_size = page_size }), function(wire, err)
@@ -392,6 +399,8 @@ end
 function Source:pullStatsAsync(cb)
     local ids = require("utils.db.book").libraryStableIdsBySource(self.id)
     local rows, index, cancelled, job = {}, 1, false, nil
+    --- 拉下一本书的 page_stat 并累加到 rows；书拉完即整体回调。
+    --- 任一本请求失败即整体失败：统计只能整批入库，半截数据会漏计时长。
     local function nextBook()
         if cancelled then return end
         local stable_id = ids[index]
@@ -438,6 +447,12 @@ function Source:pullStatsAsync(cb)
     }
 end
 
+--- 按 stable_id 整体上传某本书的划线/书签。
+--- Moon 的注解接口是整本覆盖语义，annotations 必须是该书的完整集合。
+---@param identity BookIdentity
+---@param annotations table[] KOReader 注解数组
+---@param cb fun(data: table|nil, err: string|nil)
+---@return table|nil
 function Source:pushNotesAsync(identity, annotations, cb)
     if type(identity) ~= "table" or type(identity.stable_id) ~= "string"
         or identity.stable_id == "" or type(annotations) ~= "table" then
@@ -456,6 +471,10 @@ function Source:pushNotesAsync(identity, annotations, cb)
     end)
 end
 
+--- 拉取某本书的划线/书签；远端没有注解字段时按空数组处理。
+---@param identity BookIdentity
+---@param cb fun(annotations: table[]|nil, err: string|nil)
+---@return table|nil
 function Source:pullNotesAsync(identity, cb)
     return self._client:getAnnotationsAsync(identity.stable_id, function(wire, err)
         if not wire then
@@ -468,6 +487,10 @@ function Source:pullNotesAsync(identity, cb)
     end)
 end
 
+--- 拉取云端阅读进度；wire 映射不出有效位置时按「进度为空」失败。
+---@param identity BookIdentity
+---@param cb fun(pos: ProgressPosition|nil, err: string|nil)
+---@return table|nil
 function Source:getProgressAsync(identity, cb)
     return self._client:getProgressAsync(identity.stable_id, function(wire, err)
         if not wire then
@@ -483,6 +506,11 @@ function Source:getProgressAsync(identity, cb)
     end)
 end
 
+--- 上报阅读进度：百分比、章节序号、页码与 locator 一起发。
+---@param identity BookIdentity
+---@param pos ProgressPosition|nil 缺省视为空位置（百分比 0）
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return table|nil
 function Source:putProgressAsync(identity, pos, cb)
     pos = pos or {}
     local frac = ProgressPosition.clampFraction(pos.fraction)

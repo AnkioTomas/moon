@@ -72,12 +72,12 @@ function M.daily(opts)
     }
 end
 
+local asset_cache
 --- 返回锁屏资源的统一缓存表。
 ---
 --- 每日标记和文件夹选择都放在同一个动态表中；新增资源不需要再改设置
 --- 模块登记一个新的顶层键。
 ---@return table
-local asset_cache
 local function assetCache()
     if asset_cache then return asset_cache end
     local settings = MoonSettings.get()

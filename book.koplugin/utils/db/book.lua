@@ -250,6 +250,50 @@ function BookDB.get(source_id, stable_id)
     ))
 end
 
+--- 批量取 books 行，避免统计/列表场景的 N+1 查询。
+---@param source_id string
+---@param stable_ids string[]
+---@return table<string, Book>
+function BookDB.getMany(source_id, stable_ids)
+    source_id = Base.requireSourceId(source_id)
+    if not source_id or type(stable_ids) ~= "table" then
+        return {}
+    end
+    local ids, seen = {}, {}
+    for _, stable_id in ipairs(stable_ids) do
+        if type(stable_id) == "string" and stable_id ~= "" and not seen[stable_id] then
+            seen[stable_id] = true
+            ids[#ids + 1] = stable_id
+        end
+    end
+    if #ids == 0 then return {} end
+
+    Base.ensure()
+    local out = {}
+    -- Keep below SQLite's usual 999 bind parameter limit.
+    for start = 1, #ids, 500 do
+        local finish = math.min(start + 499, #ids)
+        local placeholders = {}
+        for i = start, finish do placeholders[#placeholders + 1] = "?" end
+        local args = { source_id }
+        for i = start, finish do args[#args + 1] = ids[i] end
+        local result, nrows = Base.query(
+            "SELECT " .. COLUMNS .. " FROM books WHERE source_id=? AND stable_id IN ("
+                .. table.concat(placeholders, ",") .. ");",
+            unpack(args)
+        )
+        if result and nrows and nrows > 0 then
+            for i = 1, nrows do
+                local row = {}
+                for c = 1, #result do row[c] = result[c][i] end
+                local book = rowToBook(unpack(row, 1, #result))
+                if book then out[book.stable_id] = book end
+            end
+        end
+    end
+    return out
+end
+
 --- 按本地路径取 books 行（身份解析唯一入口：整本书精确匹配）
 ---@param path string
 ---@return Book|nil

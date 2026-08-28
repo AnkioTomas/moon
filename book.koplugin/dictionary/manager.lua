@@ -17,10 +17,17 @@ local BASE_URL = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/dict"
 local _job
 local _downloading = false
 
+--- 校验字典 id：清单来自网络，id 会拼进目录名与分片文件名，
+--- 只放行 `[%w_-]`，否则 `../` 之类能写到数据目录外。
+---@param value any
+---@return string|nil 合法时返回原值
 local function safeId(value)
     return type(value) == "string" and value:match("^[%w_%-]+$") and value or nil
 end
 
+--- 是否为 sha256 十六进制串（64 位）。
+---@param value any
+---@return boolean
 local function validHash(value)
     return type(value) == "string" and #value == 64 and value:match("^%x+$") ~= nil
 end
@@ -71,19 +78,32 @@ function Manager.catalog(cb)
     end)
 end
 
+--- 分片下载的临时目录（保留即为续传依据，安装成功后才清）。
+---@param id string
+---@return string
 local function tmpDir(id)
     return Paths.root() .. "/dict-" .. id .. ".dl"
 end
 
+--- 递归删目录。
+---@param path string
 local function purge(path)
     return require("ffi/util").purgeDir(path)
 end
 
+--- 分片是否已完整落盘：只比长度，sha256 留到拼接时统一校验（避免每次重启全量重算）。
+---@param dir string 临时目录
+---@param part table 清单里的分片项（file/size/sha256）
+---@return boolean
 local function partComplete(dir, part)
     local attr = lfs.attributes(dir .. "/" .. part.file)
     return attr and attr.mode == "file" and attr.size == tonumber(part.size)
 end
 
+--- 安装目录。`book-` 前缀是所有权标记：只有这个前缀的词典允许被本插件删除。
+---@param data_dir string KOReader 词典根目录
+---@param id string
+---@return string
 local function installTarget(data_dir, id)
     return data_dir .. "/book-" .. id
 end
@@ -96,6 +116,13 @@ function Manager.isInstalled(data_dir, id)
     return safeId(id) ~= nil and lfs.attributes(installTarget(data_dir, id), "mode") == "directory"
 end
 
+--- 拼接分片 → 逐片与整包校验 sha256 → 解压到 `target .. ".part"` → 整目录 rename 到位。
+--- 全程失败即 error（跑在 Task 子进程里，由 on_failed 接住）：
+--- 解压到暂存目录再 rename 是为了原子性，中途失败不会留下半个词典被 KOReader 读到。
+--- 归档内路径必须逐条查绝对路径与 `..`，否则能写到词典目录之外。
+---@param item table 清单项（id/size/sha256/parts）
+---@param dir string 分片所在临时目录
+---@param target string 最终安装目录
 local function assembleAndExtract(item, dir, target)
     local sha256 = require("ffi/sha2").sha256
     local archive = dir .. "/archive.part"
@@ -151,6 +178,13 @@ local function assembleAndExtract(item, dir, target)
     assert(os.rename(staging, target))
 end
 
+--- 逐片下载（递归推进，串行；已完整的片直接跳过 = 续传），全部到位后转入解压安装。
+--- 任一片失败即删除该片、清 `_downloading` 并回调失败，不重试。
+---@param item table 清单项
+---@param dir string 临时目录
+---@param idx number 当前分片序号（从 1 起）
+---@param done table `{ data_dir = string, callback = fun(ok: boolean, err: any) }`
+---@param report fun(stage: string, done: number, total: number, idx: number, count: number) stage 为 "part"/"install"
 local function downloadParts(item, dir, idx, done, report)
     local part = item.parts[idx]
     if not part then
@@ -230,6 +264,11 @@ function Manager.cancel()
     _job, _downloading = nil, false
 end
 
+--- 递归收集 `.ifo` 路径（StarDict 词典的标识文件）。跳过 `res`（词典自带资源目录，里面没有 .ifo）。
+--- 目录不可读时静默返回已收集的结果：用户可能手工放了权限不对的目录，不该让整个词典列表崩掉。
+---@param path string
+---@param out string[]|nil 累积结果
+---@return string[]
 local function scanIfos(path, out)
     out = out or {}
     local ok, iter, dir_obj = pcall(lfs.dir, path)

@@ -16,6 +16,7 @@ local _ = require("gettext")
 local UI
 local BookInfo
 
+--- 延迟加载桌面同源组件，避免锁屏初始化依赖完整 UI 树。
 local function ensureUI()
     if UI then return end
     UI = require("ui.components.bookui")
@@ -31,12 +32,20 @@ local M = {
     asset = { id = "none" },
 }
 
+--- 取本地封面缓存路径；无 stable_id 或文件不存在返回 nil。
+---@param stable_id string|nil
+---@param source_id string|nil
+---@return string|nil
 local function coverPath(stable_id, source_id)
     if type(stable_id) ~= "string" or stable_id == "" then return nil end
     local path = Paths.coverPath(stable_id, source_id)
     return lfs.attributes(path, "mode") == "file" and path or nil
 end
 
+--- 把书库行收敛成海报格子要的字段（含封面路径）。
+---@param book table 数据库行
+---@param source_id string 行内无 source_id 时的兜底源
+---@return table
 local function shelfBook(book, source_id)
     local sid = book.source_id or source_id
     local stable_id = book.stable_id
@@ -58,6 +67,9 @@ local function books(limit)
     local recent = BookDB.recentBySource(source_id, limit * 2)
     local result, seen = {}, {}
 
+    --- 按 stable_id 去重后追加到结果，总数达 cap 即停。
+    ---@param rows table[]|nil
+    ---@param cap number
     local function append(rows, cap)
         for _, row in ipairs(rows or {}) do
             if #result >= cap then return end

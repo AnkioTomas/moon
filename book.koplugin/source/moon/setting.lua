@@ -12,6 +12,14 @@ local SOURCE_ID = "moon"
 
 local Setting = {}
 
+--- 弹出单字段输入框修改 Moon 配置项并落盘。
+--- 保存后作废 registry 缓存的源实例，让新地址/令牌立即生效。
+---@param plugin table|nil 保存后回调 onSourceChanged 刷新 UI
+---@param key string 配置字段名
+---@param title string 对话框标题
+---@param hint string 输入框提示
+---@param password boolean|nil 是否按密码输入
+---@param normalize fun(value: string|nil): string 存盘前的归一化函数
 local function edit(plugin, key, title, hint, password, normalize)
     local UIManager = require("ui/uimanager")
     local InputDialog = require("ui/widget/inputdialog")
@@ -36,6 +44,15 @@ local function edit(plugin, key, title, hint, password, normalize)
     dialog:onShowKeyboard()
 end
 
+--- 生成一行设置项的构造器，点击后打开对应字段的编辑框。
+---@param plugin table|nil 保存后回调 onSourceChanged 刷新 UI
+---@param key string 配置字段名
+---@param title string 行标题
+---@param hint string 输入框提示
+---@param password boolean|nil 是否按密码输入（状态列显示为 ******）
+---@param normalize fun(value: string|nil): string 存盘前的归一化函数
+---@param icon string|nil 行图标名，缺省 edit
+---@return fun(iw: table): table 设置行构造器
 local function field(plugin, key, title, hint, password, normalize, icon)
     return function(iw)
         local value = require("utils.settings").getSource(SOURCE_ID)[key] or ""
@@ -49,6 +66,9 @@ local function field(plugin, key, title, hint, password, normalize, icon)
     end
 end
 
+--- Moon 设置页的行构造器列表：服务器地址、长期令牌。
+---@param plugin table|nil 保存后回调 onSourceChanged 刷新 UI
+---@return table[] 设置行构造器数组，元素为 fun(iw: table): table
 function Setting.rows(plugin)
     return {
         field(plugin, "base_url", _("服务器地址"), "https://book.example.com", false, Text.stripWhitespace, "dns"),
