@@ -2,7 +2,8 @@
 阅读统计：采集当前页停留时间，导入历史统计，并通过属主 Source 同步。
 
 reading_stats 是本地唯一事实来源：本地采集和本地导入写成待同步记录，
-远端拉取写成已同步记录。网络状态、同步时机、重试和 wire 协议由 Source 负责。
+远端拉取（capabilities.stats_pull）写成已同步记录；有云端日桶的日期展示以云端为准。
+网络状态、同步时机、重试和 wire 协议由 Source 负责。
 
 @module koplugin.book.book.stats
 --]]
@@ -10,13 +11,18 @@ reading_stats 是本地唯一事实来源：本地采集和本地导入写成待
 local StatsDB = require("utils.db.stats")
 local DbQueue = require("utils.db.queue")
 local logger = require("logger")
+local SourceCapabilities = require("types.book_source").SourceCapabilities
 local Stats = {}
+
+local PULL_TTL = 30 * 60
 
 --- 当前阅读页的内存计时会话。
 ---@class ReadingStatsSession
 ---@field identity BookIdentity 当前文档身份
 ---@field page number 当前页码；0 表示未知
 ---@field total_pages number 当前文档总页数；未知时为 0
+---@field chapter_idx integer|nil 当前章节序号（整本书为 nil）
+---@field chapter_fraction number|nil 当前章节阅读比例（0..1）
 ---@field started_at integer 当前页开始计时的 Unix 时间戳
 
 ---@type ReadingStatsSession|nil
@@ -40,6 +46,8 @@ local function settle(current, done)
         start_time = current.started_at,
         duration = duration,
         total_pages = current.total_pages,
+        chapter_idx = current.chapter_idx,
+        chapter_fraction = current.chapter_fraction,
     }
     DbQueue.run(function()
         assert(StatsDB.add(row), "failed to record reading stats")
@@ -77,6 +85,8 @@ function Stats.start(snapshot)
         identity = snapshot.identity,
         page = tonumber(snapshot.page) or 0,
         total_pages = tonumber(snapshot.total_pages) or 0,
+        chapter_idx = snapshot.identity.chapter_idx,
+        chapter_fraction = snapshot.chapter_fraction,
         started_at = os.time(),
     }
 end
@@ -93,6 +103,7 @@ function Stats.onPage(snapshot)
     settle(current)
     current.page = page
     current.total_pages = tonumber(snapshot.total_pages) or 0
+    current.chapter_fraction = snapshot.chapter_fraction
     current.started_at = os.time()
 end
 
@@ -105,9 +116,11 @@ end
 
 --- 把本地待同步统计交给 Source，成功后只确认对应本地记录。
 --- 网络、节流、重试和上传时机全部由 Source 决定。
---- Source 成功回调后按本次读取的行 id 标记 sync_status=1，不删除历史统计。
+--- 默认按本次读取的行 id 标记 sync_status=1；Source 若在结果里带 ``synced_ids``
+--- 则只确认这些行，其余保持待上传，等下一次重试——逐条上报的源部分失败时，
+--- 已上报的段不会被重复计时，未上报的段也不会被误确认。不删除历史统计。
 ---@param source BookSource
----@param done fun(ok: boolean, result: any)|nil result 为 Source 结果、empty 或错误
+---@param done fun(ok: boolean, result: any, confirmed: integer|nil)|nil result 为 Source 结果、empty 或错误
 ---@return table|nil job Source 返回的可取消任务；无待同步记录时为 nil
 function Stats.push(source, done)
     if not source or type(source.pushStatsAsync) ~= "function" then
@@ -131,11 +144,17 @@ function Stats.push(source, done)
             if done then done(false, err) end
             return
         end
+        local confirm_ids = type(result) == "table" and type(result.synced_ids) == "table"
+            and result.synced_ids or ids
+        if #confirm_ids == 0 then
+            if done then done(true, result, 0) end
+            return
+        end
         DbQueue.run(function()
-            assert(StatsDB.markSynced(ids), "failed to confirm reading stats")
+            assert(StatsDB.markSynced(confirm_ids), "failed to confirm reading stats")
         end, {
             on_done = function()
-                if done then done(true, result) end
+                if done then done(true, result, #confirm_ids) end
             end,
             on_failed = function(confirm_err)
                 logger.warn("book.stats confirm failed", confirm_err)
@@ -158,51 +177,63 @@ local function validRecord(row)
         or false
 end
 
---- 生成统计记录去重键。
---- 完整身份由 source_id、stable_id、页码、开始时间、时长和总页数组成。
----@param row table
----@return string
-local function recordKey(row)
-    return table.concat({ row.source_id, row.stable_id, tonumber(row.page) or 0,
-        tonumber(row.start_time) or 0, tonumber(row.duration) or 0,
-        tonumber(row.total_pages) or 0 }, "\31")
+--- 解析 pullStatsAsync 回包：数组=追加去重；``{ rows, replace }``=云端覆盖入库。
+--- 同时滤掉字段不全的行，让入库循环可以对失败直接 assert。
+---@param result BookStatsRow[]|BookStatsPullResult|nil
+---@return BookStatsRow[]|nil, BookStatsPullReplace|nil, integer skipped
+local function normalizePullResult(result)
+    if type(result) ~= "table" then
+        return nil, nil, 0
+    end
+    local raw = type(result.rows) == "table" and result.rows or result
+    local rows, skipped = {}, 0
+    for _, row in ipairs(raw) do
+        if validRecord(row) then
+            rows[#rows + 1] = row
+        else
+            skipped = skipped + 1
+        end
+    end
+    return rows, type(result.rows) == "table" and result.replace or nil, skipped
 end
 
---- 将领域统计记录串行去重写入 reading_stats。
---- synced=false 用于本地导入，记录保持待上传；synced=true 用于远端 pull。
---- 远端记录命中本地重复项时仍执行 UPSERT，把旧记录提升为已同步。
+--- 是否距上次成功 pull 已超过节流窗口。
+---@param source BookSource
+---@return boolean
+function Stats.shouldPull(source)
+    if not SourceCapabilities.supportsStatsPull(source) then
+        return false
+    end
+    if not source.configured or not source:configured() then
+        return false
+    end
+    local cfg = require("utils.settings").getSource(source.id)
+    local last = tonumber(cfg and cfg.last_stats_pull_at) or 0
+    return os.time() - last >= PULL_TTL
+end
+
+--- 记录成功 pull 时间戳（节流用）。
+---@param source BookSource
+---@return nil
+local function markPulled(source)
+    if not source or type(source.id) ~= "string" or source.id == "" then
+        return
+    end
+    require("utils.settings").saveSource(source.id, { last_stats_pull_at = os.time() })
+end
+
+--- 将本地导入的统计记录逐条写入 reading_stats，保持待上传状态。
+--- 每个 tick 写一条，避免大批量导入长时间阻塞 UI；已存在的记录跳过。
 ---@param rows table[]|nil
----@param synced boolean
 ---@param done fun(result: { imported: integer, skipped: integer, failed: integer })|nil
 ---@return nil
-local function importRows(rows, synced, done)
+local function importRows(rows, done)
     local UIManager = require("ui/uimanager")
-    local existing = {}
     local result = { imported = 0, skipped = 0, failed = 0 }
     local pending = {}
     for _, row in ipairs(rows or {}) do
         if validRecord(row) then
-            existing[row.source_id] = existing[row.source_id] or {}
-            if next(existing[row.source_id]) == nil then
-                for _, old in ipairs(StatsDB.allBySource(row.source_id)) do
-                    existing[row.source_id][recordKey({
-                        source_id = row.source_id, stable_id = old.stable_id, page = old.page,
-                        start_time = old.start_time, duration = old.duration, total_pages = old.total_pages,
-                    })] = true
-                end
-            end
-            row._key = recordKey(row)
-            if existing[row.source_id][row._key] then
-                if synced then
-                    row._existing = true
-                    pending[#pending + 1] = row
-                else
-                    result.skipped = result.skipped + 1
-                end
-            else
-                existing[row.source_id][row._key] = true
-                pending[#pending + 1] = row
-            end
+            pending[#pending + 1] = row
         else
             result.skipped = result.skipped + 1
         end
@@ -218,17 +249,17 @@ local function importRows(rows, synced, done)
             if done then done(result) end
             return
         end
-        row._key = nil
-        local was_existing = row._existing
-        row._existing = nil
+        local inserted = false
         DbQueue.run(function()
-            assert(StatsDB.add(row, synced), "failed to import reading stats")
+            if StatsDB.exists(row) then return end
+            assert(StatsDB.add(row), "failed to import reading stats")
+            inserted = true
         end, {
             on_done = function()
-                if was_existing then
-                    result.skipped = result.skipped + 1
-                else
+                if inserted then
                     result.imported = result.imported + 1
+                else
+                    result.skipped = result.skipped + 1
                 end
                 UIManager:nextTick(nextItem)
             end,
@@ -242,24 +273,68 @@ local function importRows(rows, synced, done)
     UIManager:nextTick(nextItem)
 end
 
---- 从 Source 拉取统计记录并去重落库。Source 返回领域记录，不返回 wire。
---- 拉取记录直接按已同步状态保存，不会在下一次 push 中重新上传。
+--- 从 Source 拉取统计记录并落库。Source 返回领域记录，不返回 wire。
+--- 拉取记录直接按已同步状态保存，不会在下一次 push 中重新上传；
+--- 清理旧已同步行与写入本批记录在同一事务内完成，中途失败整体回滚。
 ---@param source BookSource
 ---@param done fun(ok: boolean, result: table|string|nil)|nil
----@return nil
+---@return table|nil job Source 返回的可取消任务
 function Stats.pull(source, done)
     if not source or type(source.pullStatsAsync) ~= "function" then
         if done then done(false, "unsupported") end
         return
     end
-    source:pullStatsAsync(function(rows, err)
+    return source:pullStatsAsync(function(result, err)
+        local rows, replace, invalid = normalizePullResult(result)
         if not rows then
             if done then done(false, err) end
             return
         end
-        importRows(rows, true, function(result)
-            if done then done(true, result) end
-        end)
+        local saved
+        DbQueue.run(function()
+            saved = StatsDB.replaceSynced(source.id, replace, rows)
+            assert(saved, "failed to save pulled reading stats")
+        end, {
+            on_done = function()
+                saved.skipped = saved.skipped + invalid
+                saved.failed = 0
+                if done then done(true, saved) end
+            end,
+            on_failed = function(save_err)
+                logger.warn("book.stats pull save failed", source.id, save_err)
+                if done then done(false, save_err) end
+            end,
+        })
+    end)
+end
+
+--- 后台拉取远端统计；仅 ``capabilities.stats_pull`` 源参与，默认 30 分钟节流。
+---@param source BookSource
+---@param opts { force?: boolean, on_done?: fun(ok: boolean, result: table|string|nil) }|nil
+---@return nil
+function Stats.pullInBackground(source, opts)
+    opts = opts or {}
+    if not SourceCapabilities.supportsStatsPull(source) then
+        return
+    end
+    if not source.configured or not source:configured() then
+        return
+    end
+    if not opts.force and not Stats.shouldPull(source) then
+        return
+    end
+    if source._stats_pulling then
+        return
+    end
+    source._stats_pulling = true
+    Stats.pull(source, function(ok, result)
+        source._stats_pulling = false
+        if ok then
+            markPulled(source)
+        end
+        if opts.on_done then
+            opts.on_done(ok, result)
+        end
     end)
 end
 
@@ -270,7 +345,8 @@ end
 ---@return { cancel: fun() }
 function Stats.syncAsync(source, _opts, cb)
     local opts = _opts or {}
-    local can_pull = source and type(source.pullStatsAsync) == "function"
+    local can_pull = source and SourceCapabilities.supportsStatsPull(source)
+        and type(source.pullStatsAsync) == "function"
     local can_push = source and type(source.pushStatsAsync) == "function"
     local cancelled, current_job = false, nil
     local result = { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
@@ -289,23 +365,20 @@ function Stats.syncAsync(source, _opts, cb)
         if not can_push then finish(result); return end
         local pending = #StatsDB.unsyncedBySource(source.id)
         if pending == 0 then finish(result); return end
-        current_job = Stats.push(source, function(ok, value)
+        current_job = Stats.push(source, function(ok, value, confirmed)
             current_job = nil
             if not ok then finish(nil, value); return end
-            result.pushed = pending
+            result.pushed = confirmed or pending
             finish(result)
         end)
     end
     if can_pull and not opts.dirty_only then
-        current_job = source:pullStatsAsync(function(rows, err)
+        current_job = Stats.pull(source, function(ok, pulled)
             current_job = nil
             if cancelled then return end
-            if not rows then finish(nil, err or "stats pull failed"); return end
-            importRows(rows, true, function(imported)
-                if cancelled then return end
-                result.pulled = imported.imported
-                push()
-            end)
+            if not ok then finish(nil, pulled or "stats pull failed"); return end
+            result.pulled = pulled.imported
+            push()
         end)
     else
         require("ui/uimanager"):nextTick(push)
@@ -401,7 +474,7 @@ function Stats.importLocalAsync(done)
         if #external_rows > 0 then
             local rows = external_rows
             external_rows = {}
-            importRows(rows, false, function(imported)
+            importRows(rows, function(imported)
                 result.imported = result.imported + imported.imported
                 result.skipped = result.skipped + imported.skipped
                 result.failed = result.failed + imported.failed
@@ -445,7 +518,7 @@ function Stats.importLocalAsync(done)
                 total_pages = tonumber(stats.pages) or 0,
             }
         end
-        importRows(rows, false, function(imported)
+        importRows(rows, function(imported)
             result.imported = result.imported + imported.imported
             result.skipped = result.skipped + imported.skipped
             result.failed = result.failed + imported.failed

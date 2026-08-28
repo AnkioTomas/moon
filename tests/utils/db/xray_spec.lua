@@ -15,11 +15,7 @@ local connection = {
                 call.argc = select("#", ...)
                 return self
             end,
-            step = function()
-                if sql:find("PRAGMA user_version", 1, true) then
-                    return { 1 }, { "user_version" }
-                end
-            end,
+            step = function() end,
             close = function() end,
         }
     end,

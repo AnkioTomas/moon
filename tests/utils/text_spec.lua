@@ -140,3 +140,19 @@ do
     Assert.eq(Text.textToBody("a\r\nb"), "<p>a</p>\n<p>b</p>")
     Assert.eq(Text.textToBody(nil), "")
 end
+
+-- base64 编解码：空串、单字节、双字节、三字节尾、多字节 UTF-8 与 URL-safe 解码
+do
+    Assert.eq(Text.base64Encode(""), "")
+    Assert.eq(Text.base64Encode("A"), "QQ==")
+    Assert.eq(Text.base64Encode("ab"), "YWI=")
+    Assert.eq(Text.base64Encode("abc"), "YWJj")
+    Assert.eq(Text.base64Encode("作者：罗贯"), "5L2c6ICF77ya572X6LSv")
+
+    Assert.eq(Text.base64Decode("QQ=="), "A")
+    Assert.eq(Text.base64Decode("YWI="), "ab")
+    Assert.eq(Text.base64Decode("YWJj"), "abc")
+    Assert.eq(Text.base64Decode("5L2c6ICF77ya572X6LSv"), "作者：罗贯")
+    -- URL-safe 字符与缺失填充
+    Assert.eq(Text.base64Decode("YWI"), "ab")
+end

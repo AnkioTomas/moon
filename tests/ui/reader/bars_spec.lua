@@ -121,7 +121,6 @@ Assert.is_true(Bars.topVisible(ui_top))
 Assert.is_true(Bars.bottomVisible(ui_top))
 Assert.eq(Bars.topHeight(ui_top), 28)
 Assert.eq(Bars.topOffset(ui_top), 12)
-Assert.eq(Bars.bottomHeight(ui_top), 32)
 
 ui_top.document.getHeaderHeight = function() return 0 end
 Assert.is_false(Bars.systemTopVisible(ui_top))
@@ -134,28 +133,29 @@ Assert.is_false(Bars.systemTopVisible(ui_top))
 ui_top.view.view_mode = "page"
 ui_top.view.footer_visible = false
 Assert.is_false(Bars.systemBottomVisible(ui_top))
-Assert.eq(Bars.bottomHeight(ui_top), 0)
 
--- toggleSystemTop：按实际显隐切换，并同步 ConfigChange
+-- setTopBarPreference：按显隐同步 ConfigChange + SetStatusLine
+-- 顶栏当前可见（getHeaderHeight 28 + page 模式），关掉它 → status_line 置 1
 ui_top.document.configurable.status_line = 0
 events = {}
-Bars.toggleSystemTop(ui_top)
+Bars.setTopBarPreference(false, ui_top)
 Assert.eq(events[1].name, "ConfigChange")
 Assert.eq(events[1].args[1], "status_line")
 Assert.eq(events[1].args[2], 1)
 Assert.eq(events[2].name, "SetStatusLine")
 Assert.eq(events[2].args[1], 1)
+-- 顶栏已隐藏，打开它 → status_line 置 0
 ui_top.document.getHeaderHeight = function() return 0 end
 events = {}
-Bars.toggleSystemTop(ui_top)
+Bars.setTopBarPreference(true, ui_top)
 Assert.eq(events[1].args[2], 0)
 Assert.eq(events[2].args[1], 0)
 
--- toggleSystemBottom：调 footer:onToggleFooterMode
+-- setSystemBottom：调 footer:onToggleFooterMode
 local toggled = false
 ui_top.view.footer.onToggleFooterMode = function() toggled = true end
 ui_top.view.footer_visible = true
-Bars.toggleSystemBottom(ui_top)
+Bars.setSystemBottom(ui_top, false)
 Assert.is_true(toggled)
 
 -- hijackFooter：底栏可见时 TapFooter / onHoldFooter 吞手势

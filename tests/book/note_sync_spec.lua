@@ -182,4 +182,107 @@ Stubs.flush()
 Assert.eq(annotations[1].page, "/remote", "pull 必须在保存当前快照后应用远端快照")
 Assert.eq(rows["moon:小说.epub:0"].sync_status, 1, "拉取结果必须先作为已同步快照写入 SQLite")
 
+-- 只读源：本地脏快照不能上传，但仍应拉取远端。
+pull_count = 0
+local readonly = {
+    id = "readonly",
+    pullNotesAsync = function(_, _identity, cb)
+        pull_count = pull_count + 1
+        cb({ { datetime = "2026-08-22", page = "/remote-readonly", drawer = "lighten", text = "远端" } })
+    end,
+}
+readonly.syncNotesAsync = function(self, opts, cb)
+    return Note.syncAsync(self, opts, cb)
+end
+rows["readonly:book.epub:0"] = {
+    source_id = "readonly",
+    stable_id = "book.epub",
+    chapter_idx = 0,
+    payload = "[snapshot-dirty]",
+    updated_at = 99,
+    sync_status = 0,
+}
+local sync_err
+Note.syncAsync(readonly, { identity = {
+    source_id = "readonly", stable_id = "book.epub", source = readonly,
+} }, function(result, err)
+    sync_err = err
+    Assert.eq(result.conflicts, 1)
+    Assert.eq(result.pulled, 1)
+end)
+Stubs.flush()
+Assert.is_nil(sync_err, "只读源拉取不应因无法上传而失败")
+Assert.eq(pull_count, 1)
+
+-- 未定位的远端划线不能进 doc_settings：
+-- ReaderAnnotation:onReadSettings 按首条 page 的类型判定整份注解的格式，数字 page 会把
+-- 本地划线一起搬去 annotations_paging 并加载空表；缺 pos0 则让 drawSavedHighlight 抛错。
+do
+    local unlocated = {
+        id = "unlocated",
+        pullNotesAsync = function(_, _identity, cb)
+            cb({
+                -- 定位失败：只有 wr_range，没有 page/pos0
+                { datetime = "2026-08-23", drawer = "lighten", text = "远端未定位", wr_range = "0-5" },
+                -- 已定位：page 是 xpointer
+                {
+                    datetime = "2026-08-23", drawer = "lighten", text = "远端已定位",
+                    page = "/html/body/p[1]/text().0",
+                    pos0 = "/html/body/p[1]/text().0",
+                    pos1 = "/html/body/p[1]/text().5",
+                    wr_range = "10-15", wr_bookmark_id = "bm-1",
+                },
+            })
+        end,
+    }
+    unlocated.syncNotesAsync = function(self, opts, cb)
+        return Note.syncAsync(self, opts, cb)
+    end
+    annotations = {}
+    local ui2 = {
+        document = { getPageCount = function() return 10 end },
+        doc_settings = {
+            flush = function() end,
+            readSetting = function(_, key)
+                if key == "annotations" then return annotations end
+            end,
+            saveSetting = function(_, key, value)
+                if key == "annotations" then annotations = value end
+            end,
+        },
+    }
+    Note.pull(ui2, {
+        source_id = "unlocated", stable_id = "book2.epub", source = unlocated,
+    })
+    Stubs.flush()
+    Assert.eq(#annotations, 1, "只有定位成功的远端划线可进 doc_settings")
+    Assert.eq(annotations[1].text, "远端已定位")
+    Assert.eq(type(annotations[1].page), "string", "page 必须是 xpointer 字符串")
+end
+
+-- 远端一条注解都没报回来时，不能把已同步的本地快照覆盖成空：
+-- 协议字段缺失与「云端确实为空」在 wire 上无法区分，宁可漏掉云端删除也不能清空划线。
+do
+    local empty = {
+        id = "empty",
+        pullNotesAsync = function(_, _identity, cb) cb({}) end,
+    }
+    rows["empty:book3.epub:0"] = {
+        source_id = "empty",
+        stable_id = "book3.epub",
+        chapter_idx = 0,
+        payload = "[snapshot-kept]",
+        updated_at = 7,
+        sync_status = 1,
+    }
+    local result_err
+    Note.syncAsync(empty, { identity = {
+        source_id = "empty", stable_id = "book3.epub", source = empty,
+    } }, function(_, err) result_err = err end)
+    Stubs.flush()
+    Assert.is_nil(result_err)
+    Assert.eq(rows["empty:book3.epub:0"].payload, "[snapshot-kept]",
+        "远端空回包不能覆盖已同步的本地划线")
+end
+
 _G.G_reader_settings = previous_settings

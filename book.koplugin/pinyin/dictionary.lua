@@ -183,11 +183,6 @@ function M.entries()
     return metaValue("entries")
 end
 
---- rime-ice 来源 tag，词库不可用时返回 nil。
-function M.sourceTag()
-    return metaValue("source_tag")
-end
-
 --- 词库构建版本（manifest.built_at），词库不可用时返回 nil。
 function M.builtAt()
     return metaValue("built_at")

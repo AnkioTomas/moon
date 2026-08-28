@@ -17,10 +17,6 @@ local TocDB = {}
 ---@param max_age? number 秒；省略时不做过期判断
 ---@return string|nil payload, number|nil fetched_at
 function TocDB.get(source_id, stable_id, max_age)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-        return nil
-    end
     Base.ensure()
     local payload, fetched_at = Base.rowexec(
         [[SELECT payload, fetched_at FROM toc WHERE source_id=? AND stable_id=? LIMIT 1;]],
@@ -43,13 +39,6 @@ end
 ---@param payload string
 ---@return boolean
 function TocDB.upsert(source_id, stable_id, payload)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-        return false
-    end
-    if type(payload) ~= "string" or payload == "" then
-        return false
-    end
     Base.ensure()
     return Base.exec(
         [[INSERT INTO toc (source_id, stable_id, payload, fetched_at)
@@ -69,10 +58,6 @@ end
 ---@param stable_id string
 ---@return boolean
 function TocDB.delete(source_id, stable_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-        return false
-    end
     Base.ensure()
     return Base.exec(
         [[DELETE FROM toc WHERE source_id=? AND stable_id=?;]],

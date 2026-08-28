@@ -14,9 +14,6 @@ local ChapterDB = {}
 ---@param path string
 ---@return { source_id: string, stable_id: string, chapter_idx: integer }|nil
 function ChapterDB.get(path)
-    if type(path) ~= "string" or path == "" then
-        return nil
-    end
     Base.ensure()
     local source_id, stable_id, chapter_idx = Base.rowexec(
         [[SELECT source_id, stable_id, chapter_idx FROM chapters WHERE path=? LIMIT 1;]],
@@ -36,20 +33,6 @@ end
 ---@param row { path: string, source_id: string, stable_id: string, chapter_idx: integer }
 ---@return boolean
 function ChapterDB.upsert(row)
-    if type(row) ~= "table" then
-        return false
-    end
-    local source_id = Base.requireSourceId(row.source_id)
-    if not source_id or type(row.stable_id) ~= "string" or row.stable_id == "" then
-        return false
-    end
-    if type(row.path) ~= "string" or row.path == "" then
-        return false
-    end
-    local chapter_idx = tonumber(row.chapter_idx)
-    if not chapter_idx then
-        return false
-    end
     Base.ensure()
     return Base.exec(
         [[INSERT INTO chapters (path, source_id, stable_id, chapter_idx, updated_at)
@@ -60,9 +43,9 @@ function ChapterDB.upsert(row)
             chapter_idx=excluded.chapter_idx,
             updated_at=excluded.updated_at;]],
         row.path,
-        source_id,
+        row.source_id,
         row.stable_id,
-        chapter_idx,
+        tonumber(row.chapter_idx),
         os.time()
     ) ~= nil
 end
@@ -71,7 +54,8 @@ end
 ---@param dir string
 ---@return boolean
 function ChapterDB.deleteUnder(dir)
-    if type(dir) ~= "string" or dir == "" then
+    -- 空 dir 会拼成 LIKE '/%'，删光所有绝对路径登记；必须挡住
+    if dir == "" then
         return false
     end
     Base.ensure()
@@ -85,9 +69,6 @@ end
 ---@param path string
 ---@return boolean
 function ChapterDB.delete(path)
-    if type(path) ~= "string" or path == "" then
-        return false
-    end
     Base.ensure()
     return Base.exec([[DELETE FROM chapters WHERE path=?;]], path) ~= nil
 end

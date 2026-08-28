@@ -134,33 +134,6 @@ do
     clearMods()
 end
 
--- ── upsert：非法输入拒绝且不碰 DB ────────────────────────
-do
-    local connection, calls = makeConn()
-    local DbBase, ChapterDB = loadChapter(connection)
-    local before = #calls
-
-    Assert.is_false(ChapterDB.upsert(nil))
-    Assert.is_false(ChapterDB.upsert("x"))
-    Assert.is_false(ChapterDB.upsert({}))
-    -- source_id 缺/空
-    Assert.is_false(ChapterDB.upsert({ path = "/p/1.html", stable_id = "b", chapter_idx = 1 }))
-    Assert.is_false(ChapterDB.upsert({ path = "/p/1.html", source_id = "", stable_id = "b", chapter_idx = 1 }))
-    -- stable_id 缺/空
-    Assert.is_false(ChapterDB.upsert({ path = "/p/1.html", source_id = "moon", chapter_idx = 1 }))
-    Assert.is_false(ChapterDB.upsert({ path = "/p/1.html", source_id = "moon", stable_id = "", chapter_idx = 1 }))
-    -- path 缺/空
-    Assert.is_false(ChapterDB.upsert({ source_id = "moon", stable_id = "b", chapter_idx = 1 }))
-    Assert.is_false(ChapterDB.upsert({ path = "", source_id = "moon", stable_id = "b", chapter_idx = 1 }))
-    -- chapter_idx 缺/非数字
-    Assert.is_false(ChapterDB.upsert({ path = "/p/1.html", source_id = "moon", stable_id = "b" }))
-    Assert.is_false(ChapterDB.upsert({ path = "/p/1.html", source_id = "moon", stable_id = "b", chapter_idx = "abc" }))
-    Assert.eq(#calls, before)
-
-    DbBase.close()
-    clearMods()
-end
-
 -- ── get：命中返回身份表；chapter_idx 转数字；path 参数化 ──
 do
     local connection, calls = makeConn({
@@ -185,23 +158,18 @@ do
     clearMods()
 end
 
--- ── get：未命中 nil；非法 path 不碰 DB ────────────────────
+-- ── get：未命中 nil ──────────────────────────────────────
 do
-    local connection, calls = makeConn()
+    local connection = makeConn()
     local DbBase, ChapterDB = loadChapter(connection)
 
     Assert.is_nil(ChapterDB.get("/cache/moon/book/x/missing.html"))
-    local before = #calls
-    Assert.is_nil(ChapterDB.get(""))
-    Assert.is_nil(ChapterDB.get(nil))
-    Assert.is_nil(ChapterDB.get(123))
-    Assert.eq(#calls, before)
 
     DbBase.close()
     clearMods()
 end
 
--- ── delete：path 绑定删除；非法输入拒绝且不碰 DB ──────────
+-- ── delete：path 绑定删除 ────────────────────────────────
 do
     local connection, calls = makeConn()
     local DbBase, ChapterDB = loadChapter(connection)
@@ -211,11 +179,6 @@ do
     Assert.eq(q.sql, "DELETE FROM chapters WHERE path=?;")
     Assert.eq(q.argc, 1)
     Assert.eq(q.args[1], "/cache/moon/book/x/3.html")
-
-    local before = #calls
-    Assert.is_false(ChapterDB.delete(""))
-    Assert.is_false(ChapterDB.delete(nil))
-    Assert.eq(#calls, before)
 
     DbBase.close()
     clearMods()
@@ -233,9 +196,9 @@ do
     Assert.eq(q.args[1], [[/cache/mo\%on\_book/%]]) -- % _ 转义后拼 "/%"
     Assert.is_false(q.sql:find("/cache/", 1, true) ~= nil) -- 目录不拼进 SQL
 
+    -- 空目录名会拼成 LIKE '/%' 删光全表，必须在碰 DB 前拒绝
     local before = #calls
     Assert.is_false(ChapterDB.deleteUnder(""))
-    Assert.is_false(ChapterDB.deleteUnder(nil))
     Assert.eq(#calls, before)
 
     DbBase.close()

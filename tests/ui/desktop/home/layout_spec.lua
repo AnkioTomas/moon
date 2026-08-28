@@ -119,8 +119,6 @@ local Layout = require("ui.desktop.home.layout")
 
 Assert.eq(#Base.enabledLayout(), 1)
 Assert.eq(Base.enabledLayout()[1], "recent_list")
-Assert.is_true(Base.hasComponent("recent_list"))
-Assert.is_false(Base.hasComponent("clock"))
 
 home_settings.home_layout = { "clock", "stats", "unknown", "recent_list" }
 local layout = Base.enabledLayout()

@@ -847,28 +847,6 @@ do
     Assert.eq(res.data.series[2], "系列 B")
 end
 
--- ── recentAsync / insightAsync：透传 DB 结果 ──────
-do
-    reset()
-    local c = Client.new({ path = "/books" })
-    local rows
-    c:recentAsync(24, function(r)
-        rows = r
-    end)
-    Stubs.flush()
-    Assert.len(rows, 2)
-    Assert.eq(rows[1].stable_id, "/books/a.epub")
-
-    local summary, daily, daily_books
-    c:insightAsync(function(s, d, db)
-        summary, daily, daily_books = s, d, db
-    end)
-    Stubs.flush()
-    Assert.eq(summary.total_seconds, 3600)
-    Assert.eq(daily[1].ymd, "2026-08-15")
-    Assert.eq(daily_books[1].stable_id, "/books/a.epub")
-end
-
 -- ── cachedCoverPath：冒号调用约定（源门面以 self._client:cachedCoverPath 调用）──
 do
     reset()

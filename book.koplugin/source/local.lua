@@ -115,18 +115,6 @@ function Source:syncBooksAsync(opts, cb)
     end)
 end
 
---- 最近阅读：本地 books.last_open。
----@param limit number|nil
----@param cb fun(data: BookListResult|nil, err: string|nil)
----@return table|nil
-function Source:recentBooksAsync(limit, cb)
-    return SourceBase.recentBooksAsync(self, limit, cb)
-end
-
---- 阅读洞察：本地 reading_stats 聚合。
----@param cb fun(data: BookInsightResult|nil, err: string|nil)
----@return table|nil
-
 --- 把书城下载文件移入本地书库根目录，并单本入库（不重扫）。
 ---@param temp_path string
 ---@param filename string

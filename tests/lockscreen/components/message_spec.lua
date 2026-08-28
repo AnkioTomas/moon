@@ -1,7 +1,7 @@
 --[[--
-lockscreen 新主体：message 块结构。
+lockscreen.components.message：自定义留言块结构。
 
-@module tests.lockscreen.components.new_spec
+@module tests.lockscreen.components.message_spec
 --]]
 
 local Assert = require("support.assert")

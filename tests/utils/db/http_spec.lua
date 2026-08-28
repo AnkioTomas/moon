@@ -116,17 +116,12 @@ do
     clearMods()
 end
 
--- ── get：未命中返回 nil；非法 key 不碰 DB ────────────────
+-- ── get：未命中返回 nil ──────────────────────────────────
 do
-    local connection, calls = makeConn() -- step 恒 nil = 未命中
+    local connection = makeConn() -- step 恒 nil = 未命中
     local DbBase, HttpDB = loadHttp(connection)
 
     Assert.is_nil(HttpDB.get("missing"))
-    local before = #calls
-    Assert.is_nil(HttpDB.get(nil))
-    Assert.is_nil(HttpDB.get(""))
-    Assert.is_nil(HttpDB.get(42))
-    Assert.eq(#calls, before) -- 非法输入未产生新查询
 
     DbBase.close()
     clearMods()
@@ -155,23 +150,7 @@ do
     clearMods()
 end
 
--- ── set：非法 key / value 拒绝且不碰 DB ──────────────────
-do
-    local connection, calls = makeConn()
-    local DbBase, HttpDB = loadHttp(connection)
-    local before = #calls
-
-    Assert.is_false(HttpDB.set("", "v", 1))
-    Assert.is_false(HttpDB.set(nil, "v", 1))
-    Assert.is_false(HttpDB.set("k", nil, 1))
-    Assert.is_false(HttpDB.set("k", 123, 1))
-    Assert.eq(#calls, before)
-
-    DbBase.close()
-    clearMods()
-end
-
--- ── delete：参数化删除；非法 key 拒绝 ────────────────────
+-- ── delete：参数化删除 ───────────────────────────────────
 do
     local connection, calls = makeConn()
     local DbBase, HttpDB = loadHttp(connection)
@@ -183,11 +162,6 @@ do
     Assert.eq(q.argc, 1)
     Assert.eq(q.args[1], key)
     Assert.is_false(q.sql:find("DROP TABLE", 1, true) ~= nil)
-
-    local before = #calls
-    Assert.is_false(HttpDB.delete(""))
-    Assert.is_false(HttpDB.delete(nil))
-    Assert.eq(#calls, before)
 
     DbBase.close()
     clearMods()

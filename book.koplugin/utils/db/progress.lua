@@ -6,10 +6,12 @@
 
 local Base = require("utils.db.base")
 local Book = require("types.book").Book
+local JSON = require("json")
+local logger = require("logger")
 
 local ProgressDB = {}
 
-local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, updated_at, sync_status"
+local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, extra, updated_at, sync_status"
 
 ---@param value any
 ---@return integer|nil
@@ -35,58 +37,42 @@ local function syncBookPercent(source_id, stable_id, fraction)
     )
 end
 
----@param source_id string
----@param stable_id string
----@param pos ProgressPosition
----@return boolean
-function ProgressDB.upsert(source_id, stable_id, pos)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" or type(pos) ~= "table" then
-        return false
+--- 源私有定位字段序列化为 JSON；空表与非表一律存 NULL。
+---@param extra table|nil
+---@return string|nil
+local function encodeExtra(extra)
+    if type(extra) ~= "table" or next(extra) == nil then
+        return nil
     end
-    local fraction = tonumber(pos.fraction)
-    if not fraction then
-        return false
+    local ok, payload = pcall(JSON.encode, extra)
+    if not ok then
+        logger.warn("book.db progress extra encode failed", payload)
+        return nil
     end
-    Base.ensure()
-    if not Base.exec(
-        [[INSERT INTO pending_progress
-            (source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction,
-             page, total_pages, locator, updated_at, sync_status)
-          VALUES (?,?,?,?,?,?,?,?,?,?,0)
-          ON CONFLICT(source_id, stable_id) DO UPDATE SET
-            fraction=excluded.fraction,
-            chapter_idx=excluded.chapter_idx,
-            chapter_title=excluded.chapter_title,
-            chapter_fraction=excluded.chapter_fraction,
-            page=excluded.page,
-            total_pages=excluded.total_pages,
-            locator=excluded.locator,
-            updated_at=excluded.updated_at,
-            sync_status=0;]],
-        source_id,
-        stable_id,
-        fraction,
-        pos.chapter_idx,
-        pos.chapter_title,
-        pos.chapter_fraction,
-        positiveInt(pos.page),
-        positiveInt(pos.total_pages),
-        pos.locator,
-        tonumber(pos.updated_at) or os.time()
-    ) then
-        return false
-    end
-    syncBookPercent(source_id, stable_id, fraction)
-    return true
+    return payload
 end
 
---- 保存远端进度。未同步的本地版本不允许被远端覆盖。
+---@param payload any
+---@return table|nil
+local function decodeExtra(payload)
+    if type(payload) ~= "string" or payload == "" then
+        return nil
+    end
+    local ok, extra = pcall(JSON.decode, payload)
+    if not ok or type(extra) ~= "table" then
+        return nil
+    end
+    return extra
+end
+
+--- 三种写入只差同步状态与「是否允许覆盖脏版本」，SQL 其余部分完全相同。
 ---@param source_id string
 ---@param stable_id string
 ---@param pos ProgressPosition
+---@param status integer 落库后的 sync_status
+---@param keep_dirty boolean|nil 为真时不覆盖 sync_status=0 的本地脏版本
 ---@return boolean
-function ProgressDB.upsertRemote(source_id, stable_id, pos)
+local function write(source_id, stable_id, pos, status, keep_dirty)
     source_id = Base.requireSourceId(source_id)
     local fraction = type(pos) == "table" and tonumber(pos.fraction) or nil
     if not source_id or type(stable_id) ~= "string" or stable_id == "" or not fraction then
@@ -96,24 +82,54 @@ function ProgressDB.upsertRemote(source_id, stable_id, pos)
     if not Base.exec(
         [[INSERT INTO pending_progress
             (source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction,
-             page, total_pages, locator, updated_at, sync_status)
-          VALUES (?,?,?,?,?,?,?,?,?,?,1)
+             page, total_pages, locator, extra, updated_at, sync_status)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,]] .. status .. [[)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
-            fraction=excluded.fraction, chapter_idx=excluded.chapter_idx,
+            fraction=excluded.fraction,
+            chapter_idx=excluded.chapter_idx,
             chapter_title=excluded.chapter_title,
             chapter_fraction=excluded.chapter_fraction,
-            page=excluded.page, total_pages=excluded.total_pages,
+            page=excluded.page,
+            total_pages=excluded.total_pages,
             locator=excluded.locator,
-            updated_at=excluded.updated_at, sync_status=1
-          WHERE pending_progress.sync_status=1;]],
+            extra=excluded.extra,
+            updated_at=excluded.updated_at,
+            sync_status=]] .. status ..
+        (keep_dirty and " WHERE pending_progress.sync_status=1;" or ";"),
         source_id, stable_id, fraction, pos.chapter_idx, pos.chapter_title, pos.chapter_fraction,
         positiveInt(pos.page), positiveInt(pos.total_pages),
-        pos.locator, tonumber(pos.updated_at) or os.time()
+        pos.locator, encodeExtra(pos.extra), tonumber(pos.updated_at) or os.time()
     ) then
         return false
     end
     syncBookPercent(source_id, stable_id, fraction)
     return true
+end
+
+---@param source_id string
+---@param stable_id string
+---@param pos ProgressPosition
+---@return boolean
+function ProgressDB.upsert(source_id, stable_id, pos)
+    return write(source_id, stable_id, pos, 0)
+end
+
+--- 保存远端进度。未同步的本地版本不允许被远端覆盖。
+---@param source_id string
+---@param stable_id string
+---@param pos ProgressPosition
+---@return boolean
+function ProgressDB.upsertRemote(source_id, stable_id, pos)
+    return write(source_id, stable_id, pos, 1, true)
+end
+
+--- 用户确认采用远端进度：无条件覆盖本地（含 sync_status=0 的脏版本）。
+---@param source_id string
+---@param stable_id string
+---@param pos ProgressPosition
+---@return boolean
+function ProgressDB.adoptRemote(source_id, stable_id, pos)
+    return write(source_id, stable_id, pos, 1)
 end
 
 ---@param source_id string
@@ -126,7 +142,7 @@ function ProgressDB.get(source_id, stable_id)
     end
     Base.ensure()
     local source, stable, fraction, chapter_idx, chapter_title, chapter_fraction,
-        page, total_pages, locator, updated_at, sync_status = Base.rowexec(
+        page, total_pages, locator, extra, updated_at, sync_status = Base.rowexec(
         "SELECT " .. COLUMNS .. " FROM pending_progress WHERE source_id=? AND stable_id=? LIMIT 1;",
         source_id,
         stable_id
@@ -144,6 +160,7 @@ function ProgressDB.get(source_id, stable_id)
         page = page ~= nil and tonumber(page) or nil,
         total_pages = total_pages ~= nil and tonumber(total_pages) or nil,
         locator = locator,
+        extra = decodeExtra(extra),
         updated_at = tonumber(updated_at) or 0,
         sync_status = tonumber(sync_status) or 0,
     }
@@ -169,8 +186,9 @@ local function rows(result, nrows)
             page = result[7][i] ~= nil and tonumber(result[7][i]) or nil,
             total_pages = result[8][i] ~= nil and tonumber(result[8][i]) or nil,
             locator = result[9][i],
-            updated_at = tonumber(result[10][i]) or 0,
-            sync_status = tonumber(result[11] and result[11][i]) or 0,
+            extra = decodeExtra(result[10][i]),
+            updated_at = tonumber(result[11][i]) or 0,
+            sync_status = tonumber(result[12] and result[12][i]) or 0,
         }
     end
     return out

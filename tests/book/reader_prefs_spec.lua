@@ -28,6 +28,9 @@ package.preload["book.store"] = function()
         ensureIdentity = function()
             return { source_id = "moon", stable_id = "book-1" }
         end,
+        identityFor = function()
+            return { source_id = "moon", stable_id = "book-1" }
+        end,
     }
 end
 
@@ -119,6 +122,8 @@ local ui = {
             sync_t_b_page_margins = 0,
             font_size = 22,
             line_spacing = 100,
+            font_base_weight = 0.5,
+            book_font_face = 3,
             saveSettings = function() end,
         },
     },
@@ -145,15 +150,33 @@ ui.doc_settings.data.book_reader_font_id = "demo.ttf"
 Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
 Assert.is_true(type(saved_payload) == "string" and #saved_payload > 0)
 
+-- 未落库时不得往 sidecar 写任何东西
 saved_payload = nil
-Assert.is_false(ReaderPrefs.apply(ui, identity))
+local blank = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
+Assert.is_false(ReaderPrefs.inject(blank, { file = "/x.epub", setFontFace = function() end }))
+Assert.is_nil(next(blank.data))
 
 ui.document.configurable.h_page_margins = { 40, 40 }
 Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
 local loaded = ReaderPrefs.load(identity)
 Assert.eq(loaded.font_id, "demo.ttf")
 Assert.eq(loaded.copt.h_page_margins[1], 40)
-Assert.is_true(ReaderPrefs.apply(ui, identity))
+-- 白名单外的键（字重）必须一起持久化，且不带 native_font 的临时键
+Assert.eq(loaded.copt.font_base_weight, 0.5)
+Assert.is_nil(loaded.copt.book_font_face)
+
+-- inject 把整套 copt 写进新章 sidecar，由原生 ReadSettings 加载
+local fresh = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
+Assert.is_true(ReaderPrefs.inject(fresh, { file = "/x.epub", setFontFace = function() end }))
+Assert.eq(fresh.data.copt_font_base_weight, 0.5)
+Assert.eq(fresh.data.copt_h_page_margins[1], 40)
+Assert.eq(fresh.data.font_face, "Demo Face")
+Assert.eq(fresh.data.book_reader_font_id, "demo.ttf")
+
+-- 非 CRE 文档不落 copt_
+local kopt = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
+Assert.is_false(ReaderPrefs.inject(kopt, { file = "/x.pdf" }))
+Assert.is_nil(next(kopt.data))
 
 ui.doc_settings.data.book_reader_font_id = nil
 Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))

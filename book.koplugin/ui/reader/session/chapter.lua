@@ -258,12 +258,11 @@ function Chapter.onCloseDocument(session)
     return false
 end
 
----@param session ReaderSessionSnapshot
+---@param chapter ReaderChapterSession
 ---@param idx integer
 ---@param opts { within: number|nil, direction: "prev"|"next"|nil }
-local function requestChapter(session, chapter, idx, opts)
+local function requestChapter(chapter, idx, opts)
     cancelPrefetch()
-    local current_idx = session.identity.chapter_idx
     local identity = chapter.identity
     chapter.transition = identity.source:openBookAsync(identity, { chapter_idx = idx }, function(path, err)
         chapter.transition = nil
@@ -274,11 +273,9 @@ local function requestChapter(session, chapter, idx, opts)
             return
         end
 
+        -- 目录跳转不带方向：一律落到章首；只有翻页越界（显式 prev）才回上一章尾部
         local within = opts.within
-        local direction = within == nil and opts.direction
-        if within == nil and direction == nil and idx ~= current_idx then
-            direction = idx < current_idx and "prev" or "next"
-        end
+        local direction = within == nil and (opts.direction or "next") or nil
         chapter.transition = {
             path = path,
             within = within,
@@ -310,7 +307,7 @@ function Chapter.gotoChapter(session, idx, opts)
     if current_idx and idx == current_idx then
         return false
     end
-    requestChapter(session, chapter, idx, opts or {})
+    requestChapter(chapter, idx, opts or {})
     return true
 end
 
@@ -325,7 +322,7 @@ function Chapter.onChapterBoundary(session, delta)
     end
     local target = session.identity.chapter_idx + delta
     if target < 1 or target > #chapter.toc then return false end
-    requestChapter(session, chapter, target, { direction = delta < 0 and "prev" or "next" })
+    requestChapter(chapter, target, { direction = delta < 0 and "prev" or "next" })
     return true
 end
 

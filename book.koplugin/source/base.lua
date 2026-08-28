@@ -65,6 +65,7 @@ function SourceBase:onEvent(event, payload)
     if event ~= "desktop_open" or type(payload) ~= "table" then return end
     if self.configured and not self:configured() then return end
     local desktop = payload
+    require("book.stats").pullInBackground(self)
     if desktop._books_sync_cancel and desktop._books_sync_cancel.cancel then
         desktop._books_sync_cancel:cancel()
     end

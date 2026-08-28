@@ -138,7 +138,8 @@ function Mapper.progress(wire)
     return {
         fraction = ProgressPosition.clampFraction(percent / 100),
         chapter_idx = tonumber(node.chapter_idx or node.chapterIdx or node.spine),
-        locator = node.locator,
+        -- 服务端在 locator 过期时回空串；归一成 nil，免得下游到处判空串。
+        locator = node.locator ~= "" and node.locator or nil,
     }
 end
 

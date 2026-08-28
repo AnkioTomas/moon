@@ -94,6 +94,13 @@ package.preload["book.store"] = function()
     }
 end
 
+package.preload["book.reader_prefs"] = function()
+    return {
+        apply = function() end,
+        captureAndSave = function() end,
+    }
+end
+
 package.preload["book.stats"] = function()
     return {
         start = function(ui, identity)
@@ -119,6 +126,11 @@ package.preload["book.note"] = function()
             calls.notes = calls.notes or {}
             calls.notes[#calls.notes + 1] = { identity, ui }
             if cb then cb(true) end
+        end,
+        applyLocal = function(ui, identity)
+            calls.notes = calls.notes or {}
+            calls.notes[#calls.notes + 1] = { identity, "apply_local" }
+            return 0
         end,
         pull = function(ui, identity)
             calls.notes = calls.notes or {}
@@ -293,14 +305,39 @@ do
         book = { source_id = "moon", stable_id = "chapters" } }
     resolved_source = source
     stored_toc.chapters = toc
+    local function countPulls()
+        local n = 0
+        for _, entry in ipairs(calls.progress) do
+            if entry[1] == "pull" then n = n + 1 end
+        end
+        return n
+    end
     local plugin = mkPlugin("/cache/1.html")
+    local pulls_before = countPulls()
     Session.onReaderReady(plugin)
+    Assert.eq(countPulls(), pulls_before + 1, "冷打开只 pull 一次")
     Assert.is_true(Session.gotoChapter(2))
     Stubs.flush()
     Assert.eq(calls.switched_path, "/cache/2.html")
     plugin.ui.document.file = "/cache/2.html"
     Session.onReaderReady(plugin)
+    Assert.eq(countPulls(), pulls_before + 1, "连续切章不应再 pull")
     Assert.len(Session.toc(), 2)
+
+    -- 目录回跳上一章落到章首，不是章尾
+    local events = {}
+    plugin.ui.handleEvent = function(_, ev) events[#events + 1] = ev end
+    Assert.is_true(Session.gotoChapter(1))
+    Stubs.flush()
+    Assert.eq(calls.switched_path, "/cache/1.html")
+    plugin.ui.document.file = "/cache/1.html"
+    Session.onReaderReady(plugin)
+    Stubs.flush()
+    local ev = events[#events]
+    Assert.eq(ev.handler, "onGotoPage")
+    Assert.eq(ev.args[1], 1)
+    plugin.ui.handleEvent = nil
+
     Session.onCloseDocument(plugin)
     resolved_source = nil
 end

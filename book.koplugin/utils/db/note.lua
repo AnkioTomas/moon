@@ -149,12 +149,6 @@ function NoteDB.unsynced(source_id)
     return rows(Base.query(sql .. " ORDER BY updated_at ASC;"))
 end
 
---- 服务端确认后标记对应本地版本已同步。
----@param source_id string
----@param stable_id string
----@param chapter_idx integer
----@param updated_at number
----@return boolean
 function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at)
     source_id = Base.requireSourceId(source_id)
     chapter_idx = tonumber(chapter_idx) or 0
@@ -171,6 +165,27 @@ function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at)
         stable_id,
         chapter_idx,
         updated_at
+    ) ~= nil
+end
+
+--- 删除指定书籍或章节的注解快照。
+---@param source_id string
+---@param stable_id string
+---@param chapter_idx integer|nil
+---@return boolean
+function NoteDB.delete(source_id, stable_id, chapter_idx)
+    source_id = Base.requireSourceId(source_id)
+    chapter_idx = tonumber(chapter_idx) or 0
+    if not source_id or type(stable_id) ~= "string" or stable_id == ""
+        or chapter_idx < 0 or chapter_idx % 1 ~= 0 then
+        return false
+    end
+    Base.ensure()
+    return Base.exec(
+        "DELETE FROM notes WHERE source_id=? AND stable_id=? AND chapter_idx=?;",
+        source_id,
+        stable_id,
+        chapter_idx
     ) ~= nil
 end
 

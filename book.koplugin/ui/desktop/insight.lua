@@ -208,41 +208,60 @@ function Insight.fetch(desktop)
         return
     end
 
-    desktop._insight_fetch_cancel = source:readingInsightAsync(function(res, err)
-        if desktop._closed or desktop.source ~= source
-            or (desktop.source_generation or 0) ~= generation then return end
-        if not res then
-            finish({ has_data = false, error = err or _("加载失败") })
-            return
-        end
-        local applied, boom = pcall(function()
-            local raw = res.data or res
-            if type(raw) ~= "table" or type(raw.total) ~= "table" or type(raw.calendar) ~= "table" then
-                finish({ has_data = false, error = _("响应数据无效") })
+    local function loadInsight()
+        desktop._insight_fetch_cancel = source:readingInsightAsync(function(res, err)
+            if desktop._closed or desktop.source ~= source
+                or (desktop.source_generation or 0) ~= generation then return end
+            if not res then
+                finish({ has_data = false, error = err or _("加载失败") })
                 return
             end
-            local per_day = raw.calendar.days or {}
-            local days = {}
-            for day in pairs(per_day) do days[#days + 1] = day end
-            table.sort(days)
-            local today = os.date("%Y-%m-%d")
-            local selected = per_day[today] and today or (days[#days] or "")
-            local ym = raw.calendar.initial_ym or os.date("%Y-%m")
-            local yy, mm = selected:match("^(%d%d%d%d)%-(%d%d)")
-            if yy and mm then ym = yy .. "-" .. mm end
-            finish({
-                has_data = not not raw.has_data,
-                total = raw.total,
-                calendar = raw.calendar,
-                ym = ym,
-                selected = selected,
-            })
+            local applied, boom = pcall(function()
+                local raw = res.data or res
+                if type(raw) ~= "table" or type(raw.total) ~= "table" or type(raw.calendar) ~= "table" then
+                    finish({ has_data = false, error = _("响应数据无效") })
+                    return
+                end
+                local per_day = raw.calendar.days or {}
+                local days = {}
+                for day in pairs(per_day) do days[#days + 1] = day end
+                table.sort(days)
+                local today = os.date("%Y-%m-%d")
+                local selected = per_day[today] and today or (days[#days] or "")
+                local ym = raw.calendar.initial_ym or os.date("%Y-%m")
+                local yy, mm = selected:match("^(%d%d%d%d)%-(%d%d)")
+                if yy and mm then ym = yy .. "-" .. mm end
+                finish({
+                    has_data = not not raw.has_data,
+                    total = raw.total,
+                    calendar = raw.calendar,
+                    ym = ym,
+                    selected = selected,
+                })
+            end)
+            if not applied then
+                logger.err("book insight fetch apply failed:", boom)
+                finish({ has_data = false, error = tostring(boom) })
+            end
         end)
-        if not applied then
-            logger.err("book insight fetch apply failed:", boom)
-            finish({ has_data = false, error = tostring(boom) })
-        end
-    end)
+    end
+
+    local SourceCapabilities = require("types.book_source").SourceCapabilities
+    local summary = require("utils.db.stats").summaryBySource(source.id)
+    if SourceCapabilities.supportsStatsPull(source)
+        and (tonumber(summary.total_seconds) or 0) <= 0 then
+        require("book.stats").pullInBackground(source, {
+            force = true,
+            on_done = function()
+                if desktop._closed or desktop.source ~= source
+                    or (desktop.source_generation or 0) ~= generation then return end
+                loadInsight()
+            end,
+        })
+        return
+    end
+
+    loadInsight()
 end
 
 --- Desktop rebuild 入口：未加载则触发 fetch。
