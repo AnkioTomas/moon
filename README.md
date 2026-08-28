@@ -1,145 +1,133 @@
 # Book 书库
 
-Book 是一个 [KOReader](https://koreader.rocks/) 插件，为 KOReader 提供本地优先的多源书库桌面。它将图书馆、首页、统计和设置整合为全屏界面，可下载并打开书籍，并双向同步书架、阅读进度、笔记和统计。
+Book 是一个面向 [KOReader](https://koreader.rocks/) 的本地优先书库插件。
+它提供书库桌面、书籍详情、阅读进度、笔记、阅读统计和多数据源支持。
 
-架构上通过统一 **Source** 接口支持多数据源扩展（Book 服务、微信读书、本地目录）；**Book 服务（moon）完整实现**；微信读书等在线源使用通用按章阅读链路。同时只激活一个数据源；书城 Tab 按源能力动态显示。
-
-配套服务端：[AnkioTomas/book](https://github.com/AnkioTomas/book)（静读天下 Web 管理）。本插件通过其 HTTP API 拉取书库、封面与进度；请先部署该服务，再在插件设置中填写服务器地址与令牌。
-
-## 截图
-
-| 主页 | 图书馆 |
-| --- | --- |
-| ![主页](screenshots/home.png) | ![图书馆](screenshots/library.png) |
-
-| 设置 | 阅读页悬浮面板 |
-| --- | --- |
-| ![设置](screenshots/settings.png) | ![阅读页悬浮面板](screenshots/reader-menu.png) |
+插件是纯 Lua/LuaJIT 项目，无独立构建步骤，不依赖 Java、Node.js 或第三方运行时。
+运行时使用 KOReader 已提供的 UI、SQLite、LuaSocket 和文件系统模块。
 
 ## 功能
 
-- **封面书库**：以响应式网格展示书籍、阅读进度和总数，支持分页。
-- **本地搜索与筛选**：书架列表、关键词搜索、分类/系列筛选、最近阅读和统计查询全部读取本地 SQLite，离线可用。
-- **主页概览**：最近阅读和在读书籍。
-- **多维统计**：本地采集并聚合阅读 KPI 与日历热力；远端记录同步落库后也从本地查询。
-- **书籍详情**：查看作者、分类、标签、系列、进度和简介后再开始阅读。
-- **下载与缓存**：书籍按 `bookKey=md5(source:stableId)` 落盘到 `.moon/cache/<source>/book/<key>/`（整本 `book.*` 或章节 `N.html`）；元数据 / 目录 / 打开映射 / HTTP 缓存在 `.moon/book.sqlite3`（meta TTL 7 天 / toc TTL 1 天）。首次打开可显示下载进度。按章源通过 `fetchChapterContentAsync` 交标准正文，宿主统一写 HTML 并支持章末/章首连续换章与前1后3预取。
-- **在线按章阅读**：微信读书等源拉取目录后，由宿主按章生成 HTML；阅读中支持上一章/下一章与后台预取后续章节。
-- **双向同步**：所有源统一提供书架、进度、笔记和统计四类同步；本地未确认版本优先，关闭/休眠和网络恢复会重试脏数据。
-- **阅读统计**：插件自行采集页停留时长，也可导入 KOReader 历史统计；上传成功后本地历史仍保留。
-- **阅读页面板**：触摸设备可在阅读页中部点按打开 Book 悬浮面板，快速调整字体、字号、行距、字重、对比度、边距和滚动/分页模式，并可进入目录、系统更多设置或返回书库。
-- **启动入口**：可从 KOReader 主菜单、文件管理器“+”菜单或调度器动作打开；也可设为启动时默认打开。
-- **缓存管理**：首次进入主页时自动清理连续 90 天未打开的本地书籍及其封面，也可在设置中手动清空所有插件缓存。
-- **显示适配**：针对墨水屏优化的色阶与布局，可在设置中循环调整界面字号（100%–180%）。
+- 书库桌面：主页、图书馆、书城、统计、设置。
+- 数据源：本地书籍、Book 服务（Moon）、微信读书。
+- 单一活跃数据源，可单独启用或停用其他数据源。
+- 本地 SQLite 书籍索引，支持搜索、分类、系列、最近阅读和分页。
+- 书籍下载、封面缓存、章节缓存和目录缓存。
+- 阅读进度同步、笔记同步和阅读统计同步。
+- 微信读书扫码登录、按章阅读、章节预取和书架同步。
+- 本地目录扫描、文件改名识别和分类/系列目录管理。
+- 阅读页中部悬浮面板：字体、字号、行距、边距、目录和阅读选项。
+- X-Ray：人物、地点和专有名词生成、详情查看和页内标记。
+- 组合锁屏：壁纸、当前书籍、阅读统计、目标、留言和高亮组件。
+- 拼音输入增强：中文键盘候选栏、分片词库下载和本地 SQLite 查询。
+- 远程管理：局域网文件浏览、上传、下载、重命名、目录操作和远程输入。
+- TXT/MOBI 重新排版为 EPUB，并支持翻页动画补丁和常用翻译功能。
+
+功能是否显示由当前数据源能力和设置决定。例如，本地源不显示书城；未登录的微信读书源不能同步云端内容。
 
 ## 安装
 
-1. 将 `book.koplugin` 目录复制到 KOReader 的插件目录：
+1. 下载或复制 `book.koplugin/` 目录。
+2. 将目录放入 KOReader 数据目录的 `plugins/`：
 
    ```text
    <KOReader 数据目录>/plugins/book.koplugin
    ```
 
-2. 重启 KOReader。
-3. 从主菜单的 **Book 桌面** 打开插件。
+3. 重启 KOReader。
+4. 从主菜单的 **Book 桌面** 打开书库。
 
-> 插件运行在 KOReader 的 Lua 环境中，不需要单独安装 Java、Node.js 或其他项目依赖。
+不要把源码目录复制成 `plugins/book`；插件目录必须保留 `.koplugin` 后缀。
 
-开发、本机模拟器调试与贡献流程见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+## 快速开始
 
-## 配置
+### 本地书籍
 
-首次打开后，进入底部 **设置** 标签页切换 **数据源**。Book 服务填写服务器与令牌：
+在 **设置 → 数据源 → 本地** 中选择书籍根目录。打开书库后插件会在后台扫描目录，索引写入本地 SQLite。
+本地源不需要账号或服务器。
 
-| 配置项 | 说明 |
-| --- | --- |
-| 服务器地址 | Book 服务的基础 URL，例如 `https://book.example.com`；末尾 `/` 会被自动忽略。 |
-| 令牌 | 服务端签发的 Bearer 长期令牌。 |
-| 本地下载缓存目录 | 已下载书籍与封面缓存的保存位置；默认是 KOReader 数据目录下的 `books`。 |
+### Book 服务
 
-保存后可使用 **测试连接** 验证配置。设置页还可控制阅读页悬浮菜单、自动同步进度、自动上报阅读统计、启动时打开桌面、主页顶部内容和界面字号；在 **清理缓存** 中可删除所有已下载书籍和封面，不会影响服务器数据。
+在 **设置 → 数据源 → Book 书库** 中填写服务地址和令牌，然后使用 **测试连接**。
+该源需要兼容的 Book 服务端；服务端项目见 [AnkioTomas/book](https://github.com/AnkioTomas/book)。
 
-## 使用
+### 微信读书
 
-### 浏览与阅读
+在 **设置 → 数据源 → 微信读书** 中使用扫码登录。登录成功后可同步书架、进度、注解、阅读统计并按章打开书籍。
+微信读书源的章节正文和签名参数由源模块处理，插件不会把微信协议暴露给其他源。
 
-1. 在 **首页** 查看最近阅读和在读书籍，或切换到 **图书馆** 浏览藏书；**统计** 页从当前数据源拉取多维阅读数据（Book 源走服务端 insight）。
-2. 点按首页中的“已读”或“未读”统计可直接进入对应筛选后的图书馆；也可在图书馆顶部使用搜索、筛选或清除筛选。左右滑动可切换页面。
-3. 点按一本书打开详情页，然后选择 **开始阅读**。书籍不存在于本地时会显示下载进度并自动下载。
+## 日常使用
 
-> 支持书城能力的数据源会在底栏显示 **书城**；当前 Book 源不显示该书城入口。
+1. 在主页查看最近阅读，或在图书馆搜索和筛选书籍。
+2. 点按书籍进入详情页，再选择 **开始阅读**。
+3. 阅读时点按屏幕中部打开 Book 面板；可从面板进入目录、调整排版或返回书库。
+4. 关闭文档、设备休眠或网络恢复时，插件会按数据源能力处理待同步数据。
+5. 进度冲突时会显示本地与云端位置，由用户选择保留哪一边。
 
-### 阅读页悬浮菜单
+## 设置说明
 
-默认启用且仅适用于触摸设备。阅读时点按屏幕中部区域可打开 Book 悬浮面板，进行常用排版调整、查看目录、进入 KOReader 更多阅读设置，或选择 **首页** 关闭当前书籍并返回 Book 桌面。
+- **数据源**：选择活跃源，并控制哪些源出现在选择器中。
+- **阅读**：阅读页面板、顶部/底部状态栏、翻页动画、X-Ray 和翻译设置。
+- **显示**：字体、界面字号和书库网格列数。
+- **主页**：主页组件、最近阅读布局和组件顺序。
+- **锁屏**：是否替代系统锁屏、背景、主体组件、位置、形态和账单周期。
+- **语言与输入**：拼音输入增强、中文键盘布局和词库下载。
+- **远程管理**：局域网服务、端口和开机自启。
+- **维护**：清理缓存、导入本地注解、导入本地阅读统计和查看版本。
 
-如需保留 KOReader 默认的中部翻页行为，可在 **设置 → 注入阅读页菜单** 中关闭此功能。
+### 远程管理安全
 
-### 进度同步
-
-启用“自动同步进度”后，插件会在打开书籍时尝试从服务器恢复进度，并在关闭文档或设备休眠时上传当前进度。也可以通过 KOReader 调度器中的 **打开 Book 桌面** 动作进入书库。
-
-### 阅读统计上报
-
-启用“自动上报阅读统计”后，插件会在关闭文档或设备休眠时，在后台把 KOReader 阅读统计库中的数据上传到服务端（JSON，`/index/stats/import`）。设置里点 **立即上报阅读统计** 同样走后台分步上传，并显示进度条。
-
-上报以 **filename**（书库相对路径）为书籍主键。payload 只含：
-- `books[]`: `{ filename, title?, authors? }`
-- `stats[]`: `{ filename, page, start_time, duration, total_pages, device_id? }`
-
-插件通过 `books.md5`→`books.filename` 与 opens 映射解析远端 filename；服务端用 filename 匹配书库书名与作者，匹配不到才用上报回退值。
-
-前置条件：
-
-1. 设备上启用 KOReader「阅读统计」插件，并已产生 `statistics.sqlite3`。
-2. 对应书籍曾通过 Book 桌面打开/下载过（以便建立 filename 映射）。无法解析 filename 的条目会被跳过。
-
-进度同步与统计上报是两条管道：前者按 `filename` 更新阅读位置，后者按同一 `filename` 累积时长与页数。
-
-## 服务端接口
-
-默认对接 [AnkioTomas/book](https://github.com/AnkioTomas/book)。插件以 `Authorization: Bearer <token>` 请求服务器。除封面和书籍下载外，接口应返回 JSON；成功响应使用 `code: 200`，业务错误应提供 `msg` 字段。
-
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| `GET` | `/index/auth/ping` | 测试令牌和连接。 |
-| `GET` | `/index/book/list` | 分页书籍列表；支持 `page`、`pageSize`、`search`、`series`、`category`、`favorite`、`finished`、`author` 查询参数。 |
-| `GET` | `/index/book/recent` | 最近阅读书籍，使用 `limit` 参数。 |
-| `GET` | `/index/book/filters` | 分类、标签、系列和作者筛选项。 |
-| `GET` | `/index/book/progress` | 获取书籍进度，使用 `filename` 参数。 |
-| `POST` | `/index/book/progressUpdate` | 更新进度，表单字段包括 `filename`、`frac`、`spine`、`page`、`percent`。 |
-| `GET` | `/index/book/file` | 下载书籍文件，使用 `filename` 参数。 |
-| `GET` | `/webdav/{filename}` | 下载封面图片；文件名中的路径段会进行 URL 编码。 |
-| `POST` | `/index/stats/device` | 注册阅读设备，JSON：`{ id, model }`。 |
-| `POST` | `/index/stats/importMoon` | 上传静读天下 `.mrpro` 备份（multipart `file`）；按天写入 page_stat。设备 ID 取备份 `deviceRandomID2`（前缀 `moon-`），缺则失败；每次导入会 DROP 历史误用的 `moon-import`，并替换该设备旧数据。 |
-| `GET` | `/index/stats/summary` | 阅读活动汇总 KPI。 |
-| `GET` | `/index/stats/insight` | 多维统计页数据：KPI、月/星期分布、按日 perDay。 |
-| `GET` | `/index/stats/book` | 单书 page_stat，查询参数 `filename`。 |
-
-下载前，插件会尝试以 `HEAD /index/book/file?filename=...` 获取 `Content-Length` 以显示进度；服务端不支持 `HEAD` 或未返回长度时，下载仍可正常进行。
-
-书籍列表中的常用字段包括 `filename`、`bookName`、`author`、`favorite`、`category`、`series`、`description` 和 `progressPercent`。最近阅读接口返回的数据用于主页的最近阅读和在读区域。
+远程管理默认关闭。启用后服务只应在可信局域网使用，所有 API 请求都需要访问令牌。
+令牌保存在插件配置中；不要将带令牌的访问地址分享给不可信设备。
 
 ## 本地数据
 
-插件配置在 `$DATA/.moon/settings/`（`common.lua` 与各源文件）。结构化数据在 `$DATA/.moon/book.sqlite3`（`books` / `chapters` / `pending_progress` / `notes` / `reading_stats` / `toc` / `http`）。正文与封面在 `$DATA/.moon/cache/<source>/`。
+插件数据位于 KOReader 数据目录下的 `.moon/`：
 
-远端书架删除或本地文件暂时缺失只会把 `books.in_library` 设为隐藏，不删除书籍身份、进度、笔记和统计。数据库升级原地补列，不因版本变化清库；高版本数据库会拒绝打开并保持原状。
+```text
+.moon/
+├── settings/                 # common.lua 与各数据源配置
+├── book.sqlite3              # 书籍、章节、目录、进度、笔记和统计
+├── cache/                    # 书籍、章节、封面和 HTTP 缓存
+├── dictionary.sqlite3        # 拼音词库（下载后生成）
+└── screensaver/wallpapers/   # 可选的锁屏壁纸目录
+```
 
-## 版本号
+数据库身份使用 `(source_id, stable_id)`。本地书籍的 `stable_id` 是文件路径；在线书籍使用源提供的稳定 ID。
+章节文件通过 `chapters` 表精确映射身份，换源不会串用旧书进度。
 
-插件版本写在 `book.koplugin/bookversion.lua`（故意不用 `version.lua`，以免和 KOReader 自带模块冲突）。未注入时为 `0.0.0-dev`；设置页 **关于** 会显示该版本。
+数据库采用增量 schema 迁移，不会因为插件升级自动删除用户数据。清理缓存只删除可重新生成的文件，不删除书籍身份、进度、笔记和统计。
 
-外部打包时注入示例：
+## 开发与测试
+
+项目不需要构建。离线测试不启动 KOReader：
 
 ```bash
-# 整文件覆盖（推荐）
-VERSION=1.2.3
-printf 'return "%s"\n' "$VERSION" > book.koplugin/bookversion.lua
-
-# 或替换占位符
-sed -i.bak "s/@VERSION@/${VERSION}/g" book.koplugin/bookversion.lua
+./tests/run.sh
 ```
+
+运行单个测试：
+
+```bash
+./tests/run.sh tests/book/catalog_spec.lua
+```
+
+本机模拟器需要 KOReader 源码目录和 `kodev` 环境：
+
+```bash
+./run.sh
+```
+
+测试数据写入仓库根目录的 `test/` 沙箱，不使用本机 KOReader 的真实配置目录。
+
+新增数据源时遵循 `source/base.lua` 和 `source/registry.lua` 的接口：通常需要门面、client、mapper 和 setting 四部分。新增文字处理必须复用 `utils/text.lua`；SQLite 访问必须使用参数化查询。
+
+更完整的架构约定见 [AGENTS.md](AGENTS.md) 和 [DESIGN.md](DESIGN.md)。
+
+## 版本与发布
+
+版本文件是 `book.koplugin/bookversion.lua`，源码树中默认显示 `0.0.0-dev`。
+发布时 CI 在 `v*` tag 中注入版本并生成插件压缩包。
 
 ## 许可证
 

@@ -146,6 +146,45 @@ local function saveCover(bb, stable_id)
     end
 end
 
+--- 从已打开的文档提取封面；封面缓存独立于 books 元数据缓存。
+---@param doc table
+---@param path string
+local function saveDocumentCover(doc, path)
+    if lfs.attributes(coverPath(path), "mode") == "file" then
+        return
+    end
+    local ok_cover, cover_bb = pcall(function()
+        return doc:getCoverPageImage()
+    end)
+    if ok_cover and cover_bb then
+        saveCover(cover_bb, path)
+    end
+end
+
+--- 打开文档并补齐缺失封面；不读取或更新元数据。
+---@param path string
+local function ensureCover(path)
+    local ok, err = pcall(function()
+        local DocumentRegistry = require("document/documentregistry")
+        if not DocumentRegistry:hasProvider(path) then
+            return
+        end
+        local doc = DocumentRegistry:openDocument(path)
+        if not doc then
+            return
+        end
+        if doc.loadDocument and not doc:loadDocument(false) then
+            pcall(function() doc:close() end)
+            return
+        end
+        saveDocumentCover(doc, path)
+        pcall(function() doc:close() end)
+    end)
+    if not ok then
+        require("logger").warn("book local cover extraction failed", path, err)
+    end
+end
+
 --- 解析单本书元数据 + 封面；失败返回 nil（损坏 / 无引擎）。
 --- crengine 需 loadDocument(false) 仅载元数据；close 后注册表引用归零自动清。
 ---@param path string 书路径，即 stable_id
@@ -167,14 +206,7 @@ local function parseBookProps(path)
         end
         local p = doc:getProps()
         -- 封面：与元数据同会话提取（无封面的格式返回 nil）
-        if lfs.attributes(coverPath(path), "mode") ~= "file" then
-            local ok_cover, cover_bb = pcall(function()
-                return doc:getCoverPageImage()
-            end)
-            if ok_cover and cover_bb then
-                saveCover(cover_bb, path)
-            end
-        end
+        saveDocumentCover(doc, path)
         pcall(function() doc:close() end)
         return p
     end)
@@ -284,6 +316,7 @@ local function resolveOne(f)
         if cached.in_library == false then
             BookDB.setLibraryMembership(SOURCE_ID, f.path, true)
         end
+        ensureCover(f.path)
         return
     end
     local digest = util.partialMD5(f.path)

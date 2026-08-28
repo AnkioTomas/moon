@@ -1,7 +1,7 @@
 -- English overlay; msgid is Simplified Chinese.
 return {
     ["Book 书库"] = "Book Library",
-    ["Book 桌面：图书馆 / 主页 / 统计 / 设置。封面书库、详情阅读、进度同步、多维统计；阅读中部点击可开悬浮菜单。"] = "Book desktop: Library / Home / Stats / Settings. Cover shelf, details, progress sync, reading stats; tap the center of a book to open the floating menu.",
+    ["图书馆、书城、阅读进度、统计与多源同步。"] = "Library, store, reading progress, statistics, and multi-source sync.",
     ["Book 桌面"] = "Book Desktop",
     ["打开 Book 桌面"] = "Open Book Desktop",
     ["无法识别此书，请从 Book 桌面打开。"] = "Unrecognized book. Please open it from Book Desktop.",
