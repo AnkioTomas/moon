@@ -3,6 +3,7 @@
 --]]
 
 local InfoMessage = require("ui/widget/infomessage")
+local ButtonDialog = require("ui/widget/buttondialog")
 local UIManager = require("ui/uimanager")
 local MoonSettings = require("utils.settings")
 local SettingRow = require("ui.components.settingrow")
@@ -23,6 +24,7 @@ local POPUP_BUTTONS = {
     { id = "wikipedia", title = _("百度百科"), icon = "language" },
     { id = "dictionary", title = _("词典"), icon = "book" },
     { id = "translate", title = _("翻译"), icon = "translate" },
+    { id = "xray", title = _("X-Ray 查询"), icon = "person_search" },
     { id = "view_html", title = _("查看HTML"), icon = "code" },
     { id = "qrcode", title = _("生成二维码"), icon = "qr_code" },
     { id = "search", title = _("搜索"), icon = "search" },
@@ -42,24 +44,76 @@ local function refreshReaderUi()
     end
 end
 
+---@param reader table
+---@return string[]
+local function popupOrder(reader)
+    local out, seen = {}, {}
+    for _, key in ipairs(reader.reader_popup_button_order or {}) do
+        if not seen[key] then
+            out[#out + 1], seen[key] = key, true
+        end
+    end
+    for _, item in ipairs(POPUP_BUTTONS) do
+        if not seen[item.id] then
+            out[#out + 1], seen[item.id] = item.id, true
+        end
+    end
+    return out
+end
+
 ---@param desktop table
----@param key string
----@param title string
----@param icon string
+---@param item { id: string, title: string, icon: string }
 ---@return fun(width: number): table
-local function popupToggleRow(desktop, key, title, icon)
+local function popupConfigureRow(desktop, item)
     return function(iw)
         local reader = MoonSettings.get("reader")
         local buttons = reader.reader_popup_buttons or {}
-        local on = buttons[key] ~= false
+        local order = popupOrder(reader)
+        local position
+        for i, key in ipairs(order) do
+            if key == item.id then position = i break end
+        end
+        local enabled = buttons[item.id] ~= false
         return SettingRow.build(iw, {
-            kind = "toggle", icon = icon, title = title,
-            status = on and _("开") or _("关"), status_on = on,
+            kind = "nav", icon = item.icon, title = item.title,
+            status = enabled and T(_("第 %1 位"), position) or _("关闭"), status_on = enabled,
             callback = function()
-                reader.reader_popup_buttons = reader.reader_popup_buttons or {}
-                reader.reader_popup_buttons[key] = not on
-                MoonSettings.saveSection("reader", reader)
-                desktop:rebuild()
+                local dialog
+                local actions = {
+                    {
+                        {
+                            text = enabled and _("停用") or _("启用"),
+                            callback = function()
+                                reader.reader_popup_buttons = reader.reader_popup_buttons or {}
+                                reader.reader_popup_buttons[item.id] = not enabled
+                                MoonSettings.saveSection("reader", reader)
+                                UIManager:close(dialog)
+                                desktop:rebuild()
+                            end,
+                        },
+                    },
+                }
+                if enabled then
+                    local function move(delta)
+                        local next_pos = position + delta
+                        order[position], order[next_pos] = order[next_pos], order[position]
+                        reader.reader_popup_button_order = order
+                        MoonSettings.saveSection("reader", reader)
+                        UIManager:close(dialog)
+                        desktop:rebuild()
+                    end
+                    actions[#actions + 1] = {
+                        { text = _("上移"), enabled = position > 1, callback = function() move(-1) end },
+                        { text = _("下移"), enabled = position < #order, callback = function() move(1) end },
+                    }
+                end
+                actions[#actions + 1] = {{
+                    text = _("关闭"), callback = function() UIManager:close(dialog) end,
+                }}
+                dialog = ButtonDialog:new{
+                    title = item.title, title_align = "center", use_info_style = false, buttons = actions,
+                }
+                UIManager:show(dialog)
             end,
         })
     end
@@ -79,7 +133,7 @@ function ReaderSettings.sections(desktop)
 
     local popup_rows = {}
     for _, item in ipairs(POPUP_BUTTONS) do
-        popup_rows[#popup_rows + 1] = popupToggleRow(desktop, item.id, item.title, item.icon)
+        popup_rows[#popup_rows + 1] = popupConfigureRow(desktop, item)
     end
     local translation_rows = {
         function(iw)

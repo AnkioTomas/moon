@@ -7,9 +7,11 @@ Stubs.reset()
 
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
+package.preload["ui/widget/buttondialog"] = function() return {} end
 
 local settings = {
     reader_popup_buttons = { dictionary = false, qrcode = false },
+    reader_popup_button_order = { "translate", "dictionary" },
 }
 package.preload["utils.settings"] = function()
     return {
@@ -44,3 +46,9 @@ Assert.is_true(dict.show_in_highlight_dialog_func())
 HighlightMenu.ensureWrapped(highlight)
 local dict2 = highlight._highlight_buttons["06_dictionary"]({}, nil)
 Assert.is_true(dict2.show_in_highlight_dialog_func())
+
+factories["07_translate"] = function() return { text = "Translate" } end
+HighlightMenu.ensureWrapped(highlight)
+local ordered = HighlightMenu.orderedFactories(highlight)
+Assert.eq(ordered[1].index, "07_translate")
+Assert.eq(ordered[2].index, "06_dictionary")
