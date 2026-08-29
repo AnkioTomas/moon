@@ -169,6 +169,28 @@ do
     clearMods()
 end
 
+-- ── countByBook：按身份统计，参数化查询 ──────────────────
+do
+    local connection, calls = makeConn({
+        step = function()
+            return { "35" }, { "COUNT(*)" }
+        end,
+    })
+    local DbBase, ChapterDB = loadChapter(connection)
+
+    Assert.eq(ChapterDB.countByBook("wechat", "book'1"), 35)
+    local q = calls[#calls]
+    Assert.eq(q.sql, "SELECT COUNT(*) FROM chapters WHERE source_id=? AND stable_id=?;")
+    Assert.eq(q.argc, 2)
+    Assert.eq(q.args[1], "wechat")
+    Assert.eq(q.args[2], "book'1")
+    Assert.eq(ChapterDB.countByBook("", "book"), 0)
+    Assert.eq(ChapterDB.countByBook("wechat", ""), 0)
+
+    DbBase.close()
+    clearMods()
+end
+
 -- ── delete：path 绑定删除 ────────────────────────────────
 do
     local connection, calls = makeConn()

@@ -130,6 +130,10 @@ end
 package.preload["source.registry"] = function()
     return { meta = function() return { name = "书库" } end }
 end
+local cache_status
+package.preload["source.cache_queue"] = function()
+    return { status = function() return cache_status end }
+end
 
 local previous_settings = _G.G_reader_settings
 _G.G_reader_settings = {
@@ -171,6 +175,14 @@ Assert.eq(icon_calls[5].name, "brightness_6")
 Assert.eq(icon_calls[6].name, "battery_android_full")
 Assert.eq(icon_calls[6].text, "100%")
 Assert.contains(text_calls, "1:23 PM")
+
+-- 有后台全本缓存任务时，顶栏显示实时进度。
+cache_status = { state = "running", cached = 34, total = 35 }
+icon_calls = {}
+TopBar.build()
+Assert.eq(icon_calls[3].name, "download")
+Assert.eq(icon_calls[3].text, "缓存 34/35")
+cache_status = nil
 
 local normal_levels = {
     { 0, "battery_android_0" },

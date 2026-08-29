@@ -333,7 +333,7 @@ do
     Assert.eq(cfg.shortcuts[1].label, "书籍根目录")
 end
 
--- ── 认证：token / 同源 / DNS rebinding ──────────────────
+-- ── 来源校验 / DNS rebinding ───────────────────────────
 
 do
     -- 静态资源免票（都是常量，且页面要先加载才能拿到 token 转发）
@@ -341,28 +341,21 @@ do
     drain(serve(c_asset))
     Assert.eq((parseResponse(c_asset:output())), 200)
 
-    -- 无 token / 错 token → 403，绝不落到 handler
+    -- 无 token 也可访问，远程管理不再使用令牌
     local handlers, calls = fakeHandlers({ ["/"] = {} })
     local c_none = newClient({ "GET /api/list?path=/ HTTP/1.1\r\n\r\n" }, { no_token = true })
     drain(serve(c_none, handlers))
-    Assert.eq((parseResponse(c_none:output())), 403)
+    Assert.eq((parseResponse(c_none:output())), 200)
 
     local c_bad = newClient({ "GET /api/list?path=/&t=nope HTTP/1.1\r\n\r\n" }, { no_token = true })
     drain(serve(c_bad, handlers))
-    Assert.eq((parseResponse(c_bad:output())), 403)
+    Assert.eq((parseResponse(c_bad:output())), 200)
 
     local c_del = newClient(
         { "POST /api/delete?path=/a HTTP/1.1\r\nContent-Length: 0\r\n\r\n" }, { no_token = true })
     drain(serve(c_del, handlers))
-    Assert.eq((parseResponse(c_del:output())), 403)
-    Assert.is_nil(calls.delete, "未认证的删除不应到达 handler")
-
-    -- Authorization: Bearer 也算
-    local c_hdr = newClient({
-        "GET /api/list?path=/ HTTP/1.1\r\nAuthorization: Bearer " .. TOKEN .. "\r\n\r\n",
-    }, { no_token = true })
-    drain(serve(c_hdr, handlers))
-    Assert.eq((parseResponse(c_hdr:output())), 200)
+    Assert.eq((parseResponse(c_del:output())), 200)
+    Assert.eq(calls.delete, "/a")
 
     -- 跨站写：Origin 与 Host 不一致 → 403（恶意页面 fetch 删文件）
     local c_cross = newClient({
@@ -371,7 +364,7 @@ do
     })
     drain(serve(c_cross, handlers))
     Assert.eq((parseResponse(c_cross:output())), 403)
-    Assert.is_nil(calls.delete)
+    Assert.eq(calls.delete, "/a", "跨站请求被拒绝且不应再次调用 handler")
 
     -- 同源写放过
     local c_same = newClient({
@@ -393,7 +386,7 @@ do
     })
     drain(serve(c_null, handlers))
     Assert.eq((parseResponse(c_null:output())), 403)
-    Assert.is_nil(calls.delete)
+    Assert.eq(calls.delete, "/a", "Origin null 被拒绝且不应再次调用 handler")
 end
 
 -- ── GET /api/list ─────────────────────────────────────

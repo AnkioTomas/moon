@@ -40,6 +40,7 @@ stub("baike.init", { install = function() calls.baike = (calls.baike or 0) + 1 e
 stub("ui.panel.native", { install = function() calls.panel = (calls.panel or 0) + 1 end })
 stub("lockscreen.init", { bootstrap = function() calls.lockscreen = (calls.lockscreen or 0) + 1 end })
 stub("remote.init", { bootstrap = function() calls.remote = (calls.remote or 0) + 1 end })
+stub("ui.screenshot_share", { install = function() calls.screenshot_share = (calls.screenshot_share or 0) + 1 end })
 stub("pinyin.init", { bootstrap = function() calls.pinyin = (calls.pinyin or 0) + 1 end })
 stub("patch.manager", { init = function() calls.patch = (calls.patch or 0) + 1 end })
 stub("patch.page_turn_animation", { checkStartup = function() calls.animation = (calls.animation or 0) + 1 end })
@@ -49,6 +50,7 @@ local plugin = setmetatable({ path = "book.koplugin" }, Main)
 plugin:init()
 Assert.is_true(saved.footnote_link_in_popup)
 Assert.is_true(saved.book_footnote_popup_initialized)
+Assert.eq(calls.screenshot_share, 1)
 
 saved.footnote_link_in_popup = false
 plugin:init()

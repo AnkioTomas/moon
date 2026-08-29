@@ -225,6 +225,12 @@ do
         source = src,
         tab = "home",
         rebuild = function() rebuilds = rebuilds + 1 end,
+        -- 真实实现是 Home.invalidate：清状态后仅在首页时重建
+        invalidateHome = function(self)
+            self._home_state = nil
+            self._home_loaded = false
+            if self.tab == "home" then rebuilds = rebuilds + 1 end
+        end,
     }
     src:onEvent("home_open", desktop)
     Assert.is_true(rec.query ~= nil)

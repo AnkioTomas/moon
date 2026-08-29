@@ -7,6 +7,8 @@ book.reader_prefs 离线用例：捕获、落库与应用。
 local Assert = require("support.assert")
 
 local saved_payload
+local fail_write
+local warnings = {}
 package.preload["utils.db.book"] = function()
     return {
         getReaderPrefs = function(source_id, stable_id)
@@ -17,6 +19,7 @@ package.preload["utils.db.book"] = function()
         setReaderPrefs = function(source_id, stable_id, payload)
             Assert.eq(source_id, "moon")
             Assert.eq(stable_id, "book-1")
+            if fail_write then return false end
             saved_payload = payload
             return true
         end,
@@ -25,15 +28,25 @@ end
 
 -- 落库经 DbQueue：用例里同步执行 worker
 package.preload["utils.db.queue"] = function()
-    return { run = function(worker) worker() end }
+    return { run = function(worker, opts)
+        local ok, err = pcall(worker)
+        if not ok and opts and opts.on_failed then opts.on_failed(err) end
+    end }
+end
+
+package.preload["logger"] = function()
+    return { warn = function(...) warnings[#warnings + 1] = { ... } end }
 end
 
 package.preload["book.store"] = function()
     return {
         ensureIdentity = function()
-            return { source_id = "moon", stable_id = "book-1" }
+            return { source_id = "moon", stable_id = "book-1", chapter_idx = 1 }
         end,
-        identityFor = function()
+        identityFor = function(path)
+            if path == "/chapter.html" then
+                return { source_id = "moon", stable_id = "book-1", chapter_idx = 1 }
+            end
             return { source_id = "moon", stable_id = "book-1" }
         end,
     }
@@ -149,7 +162,7 @@ local ui = {
 ui.font.onSetFontSize = function() end
 ui.font.onSetLineSpace = function() end
 
-local identity = { source_id = "moon", stable_id = "book-1" }
+local identity = { source_id = "moon", stable_id = "book-1", chapter_idx = 1 }
 
 ui.doc_settings.data.book_reader_font_id = "demo.ttf"
 Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
@@ -172,11 +185,18 @@ Assert.is_nil(loaded.copt.book_font_face)
 
 -- inject 把整套 copt 写进新章 sidecar，由原生 ReadSettings 加载
 local fresh = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
-Assert.is_true(ReaderPrefs.inject(fresh, { file = "/x.epub", setFontFace = function() end }))
+Assert.is_true(ReaderPrefs.inject(fresh, { file = "/chapter.html", setFontFace = function() end }))
 Assert.eq(fresh.data.copt_font_base_weight, 0.5)
 Assert.eq(fresh.data.copt_h_page_margins[1], 40)
 Assert.eq(fresh.data.font_face, "Demo Face")
 Assert.eq(fresh.data.book_reader_font_id, "demo.ttf")
+
+-- 整本书的单一 sidecar 就是偏好真相，不读写跨文件偏好。
+local whole_book = { source_id = "moon", stable_id = "book-1" }
+Assert.is_false(ReaderPrefs.captureAndSave(ui, whole_book))
+local whole_book_settings = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
+Assert.is_false(ReaderPrefs.inject(whole_book_settings, { file = "/x.epub", setFontFace = function() end }))
+Assert.is_nil(next(whole_book_settings.data))
 
 -- 非 CRE 文档不落 copt_
 local kopt = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
@@ -187,5 +207,11 @@ ui.doc_settings.data.book_reader_font_id = nil
 Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
 loaded = ReaderPrefs.load(identity)
 Assert.eq(loaded.font_id, "demo.ttf")
+
+-- 异步队列的入队结果不代表写库成功，失败必须留痕。
+fail_write = true
+Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
+Assert.eq(#warnings, 1)
+Assert.matches(warnings[1][1], "reader_prefs save failed")
 
 return true
