@@ -1,5 +1,5 @@
 --[[--
-首页加载状态：书架同步在飞时保持 loading，完成后允许重拉本地数据。
+首页加载状态：书架同步在飞时也先读本地数据，完成后再刷新。
 
 @module tests.ui.desktop.home_spec
 --]]
@@ -77,19 +77,11 @@ local desktop = {
     rebuild = function(self) self.rebuilds = (self.rebuilds or 0) + 1 end,
 }
 
--- 首屏只显示 loading；同步未结束不能把空 state 标为已加载。
+-- 首屏不等待网络同步，直接读取本地最近阅读。
 Home.page(desktop)
 Assert.is_false(desktop._home_loaded and true or false)
 Assert.eq(#ticks, 1)
 ticks[1]()
-Assert.is_true(desktop._home_waiting_sync)
-Assert.eq(calls, 0)
-
--- source.base 在同步结束后触发 rebuild；这次 fetch 会填满首页状态。
-desktop._books_sync_pending = false
-Home.page(desktop)
-Assert.eq(#ticks, 2)
-ticks[2]()
 Assert.is_true(desktop._home_loaded)
 Assert.eq(calls, 1)
 Assert.eq(desktop._home_state.recent.stable_id, "book-1")

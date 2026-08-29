@@ -64,8 +64,8 @@ local MIN_SCALE = 100
 local MAX_SCALE = 180
 local STEP = 10
 local DEFAULT_GRID_MAX_COLS = 4
-local MIN_GRID_MAX_COLS = 2
-local MAX_GRID_MAX_COLS = 6
+local MIN_GRID_MAX_COLS = 3
+local MAX_GRID_MAX_COLS = 8
 
 --- UI 缩放下限（百分比）。
 ---@return number
