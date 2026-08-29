@@ -21,6 +21,7 @@
 ---@field insight boolean 阅读洞察 / 统计页（readingInsightAsync）
 ---@field stats_pull boolean 是否从远端拉取阅读统计并写入本地 reading_stats（各源自决映射与替换策略）
 ---@field store boolean 源自带书城（listStoreAsync；无则走全局 zlib）
+---@field cacheAllChaptersAsync fun(identity: BookIdentity, on_progress: function|nil, cb: function)|nil 章节模式全本缓存
 
 local SourceCapabilities = {}
 

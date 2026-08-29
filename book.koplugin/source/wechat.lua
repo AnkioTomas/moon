@@ -365,6 +365,31 @@ function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
     }, cb)
 end
 
+--- 缓存整本章节正文；目录只拉一次，正文按序下载并可取消。
+---@param identity BookIdentity
+---@param on_progress fun(done: integer, total: integer)|nil
+---@param cb fun(ok: boolean, total: integer, err: string|nil)
+---@return { cancel: fun() }
+function Source:cacheAllChaptersAsync(identity, on_progress, cb)
+    local cancelled, active = false, nil
+    active = getTocAsync(self, identity, function(toc, err)
+        if cancelled then return end
+        if not toc then cb(false, 0, err or _("章节列表为空")); return end
+        active = require("source.chapter").prefetchAsync(identity, identity.book, toc, 0, #toc, {
+            fetchContent = fetchContent,
+            progress = on_progress,
+        }, function()
+            if not cancelled then cb(true, #toc) end
+        end)
+    end)
+    return {
+        cancel = function()
+            cancelled = true
+            if active and active.cancel then active.cancel() end
+        end,
+    }
+end
+
 --- 拉取云端进度并补齐本地需要的坐标。
 --- 云端只给 chapter_uid 时回查目录换算章节序号；只给章内位置时按目录长度折算全书百分比；
 --- 章节坐标写进 pos.extra 供后续 push 复用。

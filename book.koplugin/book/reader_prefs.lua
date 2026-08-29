@@ -10,11 +10,19 @@ local JSON = require("json")
 local BookDB = require("utils.db.book")
 local MoonFont = require("utils.font")
 local Store = require("book.store")
+local logger = require("logger")
 
 local M = {}
 
 --- native_font.lua 为渲染字体选项塞进 configurable 的临时键，不属于排版偏好。
 local SKIP_COPT_KEY = "book_font_face"
+
+---@param identity BookIdentity|nil
+---@return boolean
+local function isChapter(identity)
+    -- 整本书只有一个物理文件，KOReader sidecar 已是唯一真相；只有章节书需要跨文件同步。
+    return identity ~= nil and identity.chapter_idx ~= nil
+end
 
 ---@param value any
 ---@return any
@@ -91,9 +99,9 @@ end
 
 ---@param identity BookIdentity|nil
 ---@param prefs table|nil
----@return boolean
+---@return boolean 是否已排入数据库队列
 function M.save(identity, prefs)
-    if not identity or not prefs then
+    if not isChapter(identity) or not prefs then
         return false
     end
     local source_id = identity.source_id
@@ -107,15 +115,19 @@ function M.save(identity, prefs)
     end
     -- 走队列：直写会和在飞的队列任务抢同一条 sqlite 连接（关书时进度也在写）
     require("utils.db.queue").run(function()
-        BookDB.setReaderPrefs(source_id, stable_id, payload)
-    end)
+        assert(BookDB.setReaderPrefs(source_id, stable_id, payload), "failed to save reader preferences")
+    end, {
+        on_failed = function(err)
+            logger.warn("book.reader_prefs save failed", source_id, stable_id, err)
+        end,
+    })
     return true
 end
 
 ---@param identity BookIdentity|nil
 ---@return table|nil
 function M.load(identity)
-    if not identity then
+    if not isChapter(identity) then
         return nil
     end
     return decode(BookDB.getReaderPrefs(identity.source_id, identity.stable_id))
@@ -126,7 +138,7 @@ end
 ---@return boolean
 function M.captureAndSave(ui, identity)
     identity = identity or M.identityForUi(ui)
-    if not identity then
+    if not isChapter(identity) then
         return false
     end
     local prefs = M.capture(ui)
@@ -158,7 +170,11 @@ function M.inject(doc_settings, document)
     if type(document) ~= "table" or type(document.setFontFace) ~= "function" then
         return false
     end
-    local prefs = M.load(Store.identityFor(document.file))
+    local identity = Store.identityFor(document.file)
+    if not isChapter(identity) then
+        return false
+    end
+    local prefs = M.load(identity)
     if not prefs then
         return false
     end
@@ -166,7 +182,7 @@ function M.inject(doc_settings, document)
         doc_settings:saveSetting("copt_" .. key, copyValue(value))
     end
     local font_id = type(prefs.font_id) == "string" and prefs.font_id or ""
-    local face = font_id ~= "" and MoonFont.faceForId(font_id) or prefs.font_face
+    local face = (font_id ~= "" and MoonFont.faceForId(font_id)) or prefs.font_face
     if type(face) == "string" and face ~= "" then
         doc_settings:saveSetting("font_face", face)
         doc_settings:saveSetting("book_reader_font_id", font_id)
