@@ -52,6 +52,7 @@ local UI = require("ui.components.bookui")
 local Icon = require("ui.components.icon")
 local MoonSettings = require("utils.settings")
 local SourceRegistry = require("source.registry")
+local CacheQueue = require("source.cache_queue")
 
 local TopBar = {}
 
@@ -118,6 +119,20 @@ local function sourceName()
         return meta.name or meta.id
     end
     return id or _("未知源")
+end
+
+--- 后台全本缓存状态；无任务时不占顶栏空间。
+---@return string|nil
+local function cacheStatus()
+    local status = CacheQueue.status()
+    if not status then return nil end
+    if status.state == "retry_wait" then
+        return _("缓存重试中")
+    end
+    if status.total > 0 then
+        return _("缓存") .. " " .. tostring(status.cached) .. "/" .. tostring(status.total)
+    end
+    return _("缓存中")
 end
 
 --- 当前源标签在屏幕上的可点区域（与 build 左栏布局一致）。
@@ -207,6 +222,8 @@ function TopBar.build()
     if mem_avail then
         add(metric("memory", util.getFriendlySize(mem_avail)))
     end
+
+    add(metric("download", cacheStatus()))
 
     -- 剩余存储：数据目录所在文件系统的可用空间（f_bavail；接口在 ffi/util）。
     local _, _, disk_avail = ffiUtil.df(DataStorage:getDataDir())
