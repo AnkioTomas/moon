@@ -14,8 +14,13 @@ local T = require("ffi/util").template
 -- 官方种子镜像（不带尾斜杠）。前排入口来自上游域名清单，并经
 -- eAPI /info/ok 实测可用；旧入口保留作地区性回退。
 local SEED_URLS = {
+    "https://fuckfbi.ru",
+    "https://zh.chris101.ru",
+    "https://zh.z-lib.gd",
+    "https://z-library.la",
     "https://librella.tw",
     "https://bookabooki.tw",
+    "https://zh.z-library.sk",
     "https://librella.fi",
     "https://lexlib.tw",
     "https://lexlib.fi",
@@ -31,6 +36,8 @@ local SEED_URLS = {
     "https://czechbooks.sk",
     "https://z-lib.sk",
     "https://german-books.sk",
+    "https://zh.z2026.ru",
+    "https://sss101.ru"
 }
 
 local USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
