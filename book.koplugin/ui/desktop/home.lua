@@ -93,7 +93,6 @@ function Home.invalidate(desktop)
     end
     desktop._home_fetch_cancel = nil
     desktop._home_fetching = false
-    desktop._home_waiting_sync = nil
     desktop._home_state = nil
     desktop._home_loaded = false
     desktop._home_reading_page = 1
@@ -125,12 +124,6 @@ end
 ---@param desktop table
 function Home.fetch(desktop)
     if desktop._home_fetching then return end
-    if desktop._books_sync_pending then
-        -- 首次书架同步会补齐远端书籍的封面和元数据。等待它完成，但不能把
-        -- 首页伪装成已加载，否则后续 rebuild 只会拿空 state 组装布局。
-        desktop._home_waiting_sync = true
-        return
-    end
     desktop._home_fetching = true
 
     if desktop._home_fetch_cancel then
