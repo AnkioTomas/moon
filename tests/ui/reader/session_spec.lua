@@ -531,7 +531,7 @@ do
         end,
     }
     Session.onReaderReady(plugin)
-    Assert.is_true(plugin.ui._book_end_of_book_wrapped)
+    Assert.is_true(plugin.ui._book_end_of_book_handler)
     Assert.is_true(plugin.ui.status.onEndOfBook(plugin.ui.status))
     Stubs.flush()
     Assert.eq(end_dialog, 0, "切章成功时不弹原生结束对话框")

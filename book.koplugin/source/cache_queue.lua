@@ -188,6 +188,33 @@ function Queue.status()
     }
 end
 
+--- 返回当前任务快照：运行中/重试等待的任务在前，其余按入队顺序排列。
+--- 返回副本，调用方不能修改队列内部状态。
+---@return table[]
+function Queue.tasks()
+    local out = {}
+    local function append(job, state)
+        if not job then return end
+        local identity = job.identity or {}
+        local book = identity.book or {}
+        out[#out + 1] = {
+            state = state or job.state,
+            source_id = identity.source_id or job.source and job.source.id,
+            stable_id = identity.stable_id,
+            title = book.title or identity.title or identity.stable_id,
+            cached = tonumber(job.cached) or 0,
+            total = tonumber(job.total) or 0,
+            attempt = tonumber(job.attempt) or 0,
+        }
+    end
+    append(active)
+    append(waiting_retry)
+    for _, job in ipairs(pending) do
+        append(job, "queued")
+    end
+    return out
+end
+
 --- 订阅状态改变。返回的 cancel 只注销观察者，绝不影响缓存任务。
 ---@param callback fun()
 ---@return { cancel: fun() }

@@ -182,6 +182,7 @@ icon_calls = {}
 TopBar.build()
 Assert.eq(icon_calls[3].name, "download")
 Assert.eq(icon_calls[3].text, "缓存 34/35")
+Assert.not_nil(TopBar.cacheTapRect())
 cache_status = nil
 
 local normal_levels = {

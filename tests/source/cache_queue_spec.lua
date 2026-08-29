@@ -46,6 +46,8 @@ Assert.is_true(queued)
 Assert.eq(#callbacks, 1)
 Assert.eq(Queue.status().state, "running")
 Assert.eq(Queue.status().total, 35)
+Assert.eq(Queue.tasks()[1].title, "book-1")
+Assert.eq(Queue.tasks()[1].state, "running")
 
 -- 同一本书不得并发重复缓存。
 local same, queued_again = Queue.enqueue(source, ref)
@@ -54,6 +56,7 @@ Assert.is_false(queued_again)
 
 -- 425 退避 15 秒后重试；已缓存章节由 source.chapter 自动跳过。
 callbacks[1](false, 34, "HTTP 425", 35, 1)
+Assert.eq(Queue.tasks()[1].state, "retry_wait")
 Assert.eq(#scheduled, 1)
 Assert.eq(scheduled[1].delay, 15)
 scheduled[1].fn()
@@ -61,6 +64,7 @@ Assert.eq(#callbacks, 2)
 
 callbacks[2](true, 35, nil, 35, 0)
 Assert.is_true(job.done)
+Assert.eq(#Queue.tasks(), 0)
 Assert.eq(job.result.cached, 35)
 Assert.eq(job.result.total, 35)
 Assert.eq(notices[#notices], "全本缓存完成：35 / 35 章")

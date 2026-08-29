@@ -179,12 +179,22 @@ function Desktop:onSwipeTopBar(_, ges_ev)
     return true
 end
 
---- 顶栏点击：源名区域切换数据源，其余区域打开原生快捷面板 Tab。
+--- 顶栏点击：缓存指标打开任务列表，源名区域切换数据源，其余区域打开原生快捷面板 Tab。
 ---@param _ any
 ---@param ges table|nil
 ---@return boolean
 function Desktop:onTapTopBar(_, ges)
     if ges and ges.pos then
+        local cache_rect = TopBar.cacheTapRect()
+        if cache_rect then
+            local x, y = ges.pos.x, ges.pos.y
+            if x >= cache_rect.x and x < cache_rect.x + cache_rect.w
+                and y >= cache_rect.y and y < cache_rect.y + cache_rect.h
+            then
+                self:showCacheQueue()
+                return true
+            end
+        end
         local rect = TopBar.sourceTapRect()
         if rect then
             local x, y = ges.pos.x, ges.pos.y
@@ -198,6 +208,38 @@ function Desktop:onTapTopBar(_, ges)
     end
     NativePanel.show("desktop")
     return true
+end
+
+--- 打开全本缓存任务快照；队列本身继续在后台运行。
+---@return nil
+function Desktop:showCacheQueue()
+    local Queue = require("source.cache_queue")
+    local tasks = Queue.tasks()
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local UIManager = require("ui/uimanager")
+    local rows = {}
+    for _i, task in ipairs(tasks) do
+        local state = task.state == "running" and _("正在缓存")
+            or task.state == "retry_wait" and _("缓存重试中")
+            or _("等待缓存")
+        local text = tostring(task.title or task.stable_id or "") .. " · " .. state
+        if task.total > 0 then
+            text = text .. " " .. tostring(task.cached) .. "/" .. tostring(task.total)
+        end
+        rows[#rows + 1] = {{ text = text, enabled = false }}
+    end
+    if #rows == 0 then
+        rows[1] = {{ text = _("当前没有缓存任务"), enabled = false }}
+    end
+    local dialog
+    rows[#rows + 1] = {{ text = _("关闭"), callback = function()
+        if dialog then UIManager:close(dialog) end
+    end }}
+    dialog = ButtonDialog:new{
+        title = _("缓存任务"),
+        buttons = rows,
+    }
+    UIManager:show(dialog)
 end
 
 --- 内容区高度（扣除顶栏 + 底栏）。

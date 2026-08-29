@@ -193,17 +193,6 @@ end
 local function wrapChapterReaderUi(ui)
     if not ui or ui.name ~= "ReaderUI" or ui._book_chapters_wrapped then return end
     ui._book_chapters_wrapped = true
-    local status = ui.status
-    if status and status.onEndOfBook and not ui._book_end_of_book_wrapped then
-        ui._book_end_of_book_wrapped = true
-        local original = status.onEndOfBook
-        status.onEndOfBook = function(self)
-            if require("ui.reader.session").onChapterBoundary(1) then
-                return true
-            end
-            return original(self)
-        end
-    end
     wrapBoundary(ui.rolling, function(view)
         if view.view and view.view.view_mode == "scroll" then
             return view.current_pos
