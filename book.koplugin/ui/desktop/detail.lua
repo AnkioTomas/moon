@@ -386,16 +386,29 @@ function Detail:cacheAllChapters()
         if self._closed or not self._cache_dialog then return end
         if total and total > 0 then dialog.progress_max = total end
         dialog:reportProgress(done or 0)
-    end, function(ok, total, err)
+    end, function(ok, cached, err, total, failed)
         self._cache_job = nil
         if self._cache_dialog then
             dialog:close()
             self._cache_dialog = nil
         end
         if self._closed then return end
+        local text
+        if ok then
+            text = _("全本缓存完成：") .. tostring(cached or 0) .. " / "
+                .. tostring(total or cached or 0) .. _(" 章")
+        elseif total and total > 0 then
+            text = _("全本缓存部分完成：") .. tostring(cached or 0) .. " / "
+                .. tostring(total) .. _(" 章")
+            if failed and failed > 0 then
+                text = text .. "，" .. tostring(failed) .. _(" 章失败")
+            end
+            if err then text = text .. "\n" .. tostring(err) end
+        else
+            text = err or _("全本缓存失败")
+        end
         UIManager:show(InfoMessage:new{
-            text = ok and (_("全本缓存完成：") .. tostring(total or 0) .. _(" 章"))
-                or (err or _("全本缓存失败")),
+            text = text,
             timeout = 3,
         })
     end)

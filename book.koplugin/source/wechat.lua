@@ -365,21 +365,23 @@ function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
     }, cb)
 end
 
---- 缓存整本章节正文；目录只拉一次，正文按序下载并可取消。
+--- 缓存整本章节正文；目录只拉一次，正文按序下载并返回部分成功统计。
 ---@param identity BookIdentity
 ---@param on_progress fun(done: integer, total: integer)|nil
----@param cb fun(ok: boolean, total: integer, err: string|nil)
+---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
 ---@return { cancel: fun() }
 function Source:cacheAllChaptersAsync(identity, on_progress, cb)
     local cancelled, active = false, nil
     active = getTocAsync(self, identity, function(toc, err)
         if cancelled then return end
-        if not toc then cb(false, 0, err or _("章节列表为空")); return end
+        if not toc then cb(false, 0, err or _("章节列表为空"), 0, 0); return end
         active = require("source.chapter").prefetchAsync(identity, identity.book, toc, 0, #toc, {
             fetchContent = fetchContent,
             progress = on_progress,
-        }, function()
-            if not cancelled then cb(true, #toc) end
+        }, function(cached, total, failed, last_err)
+            if not cancelled then
+                cb(failed == 0, cached, last_err, total, failed)
+            end
         end)
     end)
     return {

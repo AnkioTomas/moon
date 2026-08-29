@@ -354,20 +354,22 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
     }
 end
 
---- 后台预取后续章节：已有文件跳过，失败静默继续；联网后顺序落盘并登记。
+--- 后台预取章节：已有文件跳过，逐章落盘并统计成功/失败。
 ---@param identity BookIdentity
 ---@param book Book|nil
 ---@param toc BookChapter[]
 ---@param from_idx integer 当前章序号（预取 from_idx+1 …）
 ---@param count integer 预取章数
 ---@param ops { fetchContent: fun(identity: BookIdentity, chapter: BookChapter, cb: function), progress: fun(done: integer, total: integer)|nil }
----@param cb fun()|nil 全部完成或无可预取章
+---@param cb fun(cached: integer, total: integer, failed: integer, err: any)|nil 完成统计
 ---@return { cancel: fun() }
 function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
     from_idx = tonumber(from_idx) or 0
     count = tonumber(count) or 0
     local cancelled = false
     local active
+    local cached_count, failed_count = 0, 0
+    local last_error
     local indices = {}
     if count > 0 and type(toc) == "table" and #toc > 0 then
         for i = 1, count do
@@ -379,55 +381,73 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
     end
     if #indices == 0 then
         require("ui/uimanager"):nextTick(function()
-            if not cancelled and cb then cb() end
+            if not cancelled and cb then cb(0, 0, 0) end
         end)
         return { cancel = function() cancelled = true end }
     end
 
     local pos = 1
-    --- 处理下一个待预取章节：已落盘或目录缺项则跳过，取正文失败也静默继续。
+    local function report()
+        if ops.progress then
+            ops.progress(cached_count + failed_count, #indices)
+        end
+    end
+
+    local nextIndex
+    local function failed(err)
+        failed_count = failed_count + 1
+        last_error = err or last_error
+        report()
+        require("ui/uimanager"):nextTick(nextIndex)
+    end
+
+    --- 处理下一个待预取章节；单章失败不阻断后续，但必须进入最终统计。
     --- 每章之间让出事件循环，避免预取阻塞翻页。全部处理完调用 cb。
-    local function nextIndex()
+    nextIndex = function()
         if cancelled then return end
         local idx = indices[pos]
         pos = pos + 1
         if not idx then
-            if cb then cb() end
+            if cb then cb(cached_count, #indices, failed_count, last_error) end
             return
         end
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
         if chapterReady(path) then
-            if ops.progress then ops.progress(pos - 1, #indices) end
+            cached_count = cached_count + 1
+            report()
             require("ui/uimanager"):nextTick(nextIndex)
             return
         end
         local item = toc[idx]
         if not item then
-            require("ui/uimanager"):nextTick(nextIndex)
+            failed(_("章节信息缺失") .. " #" .. tostring(idx))
             return
         end
-        active = ops.fetchContent(identity, item, function(payload)
+        active = ops.fetchContent(identity, item, function(payload, err)
             if cancelled then return end
             active = nil
             if not payload then
-                if ops.progress then ops.progress(pos - 1, #indices) end
-                require("ui/uimanager"):nextTick(nextIndex)
+                failed(err or (_("章节内容获取失败") .. " #" .. tostring(idx)))
                 return
             end
-            write(path, payload, function(wpath)
+            write(path, payload, function(wpath, write_err)
                 if cancelled then return end
                 if not wpath then
-                    if ops.progress then ops.progress(pos - 1, #indices) end
-                    require("ui/uimanager"):nextTick(nextIndex)
+                    failed(write_err or (_("章节保存失败") .. " #" .. tostring(idx)))
                     return
                 end
                 require("book.store").touchAsync(wpath, identity, {
                     chapter_idx = idx,
                     toc = toc,
                     book = book,
-                }, function()
+                }, function(ok, err)
                     if cancelled then return end
-                    if ops.progress then ops.progress(pos - 1, #indices) end
+                    if not ok then
+                        failed(err or (_("章节登记失败") .. " #" .. tostring(idx)))
+                        return
+                    end
+                    cached_count = cached_count + 1
+                    report()
                     require("ui/uimanager"):nextTick(nextIndex)
                 end)
             end)
