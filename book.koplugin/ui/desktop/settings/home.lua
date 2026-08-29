@@ -59,8 +59,7 @@ local function toggle(id, desktop)
         layout[#layout + 1] = id
         saveLayout(layout)
     end
-    desktop._home_state = nil
-    desktop._home_loaded = false
+    require("ui.desktop.home").invalidate(desktop)
     desktop:rebuild()
 end
 

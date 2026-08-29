@@ -80,21 +80,45 @@ local function fillExtras(state, rotate_excerpt)
     return state
 end
 
---- 离开阅读回到桌面：已加载则就地轮换书摘；否则等 fetch 完成时轮换。
+--- 首页数据作废：取消在飞取数、清全部首页状态；当前在首页则立即重建（重建会重新 fetch）。
+--- 这是唯一允许清首页状态的地方，禁止在别处手写 _home_state / _home_loaded。
+---@param desktop table
+function Home.invalidate(desktop)
+    if not desktop or desktop._closed then return end
+    -- 先废弃回调资格，再取消句柄。cancel 只是尽力而为，旧回调仍可能晚到。
+    desktop._home_fetch_request = nil
+    local job = desktop._home_fetch_cancel
+    if type(job) == "table" and type(job.cancel) == "function" then
+        pcall(job.cancel)
+    end
+    desktop._home_fetch_cancel = nil
+    desktop._home_fetching = false
+    desktop._home_waiting_sync = nil
+    desktop._home_state = nil
+    desktop._home_loaded = false
+    desktop._home_reading_page = 1
+    if desktop.tab == "home" then
+        desktop:rebuild()
+    end
+end
+
+--- 进入首页的唯一入口：Tab 切入 / 唤醒 / 从阅读回桌面都走这里，语义固定为「刷新一遍」。
+---@param desktop table
+function Home.enter(desktop)
+    if not desktop or desktop._closed then return end
+    Home.invalidate(desktop)
+    desktop:scheduleClockTick()
+    if desktop.plugin and desktop.plugin.emitToSource then
+        desktop.plugin:emitToSource("home_open", desktop)
+    end
+end
+
+--- 离开阅读回到桌面：标记书摘轮换，然后按统一入口刷新（fetch 完成时轮换）。
 ---@param desktop table
 function Home.onReturnToDesktop(desktop)
     if not desktop or desktop._closed then return end
-    if desktop._home_loaded and desktop._home_state then
-        local excerpt = rotateExcerpt(desktop._home_state.recent)
-        if excerpt then
-            desktop._home_state.excerpt = excerpt
-        end
-        if desktop.tab == "home" then
-            desktop:rebuild()
-        end
-        return
-    end
     desktop._home_rotate_excerpt = true
+    Home.invalidate(desktop)
 end
 
 --- 异步拉取最近阅读与本地统计。
@@ -102,6 +126,9 @@ end
 function Home.fetch(desktop)
     if desktop._home_fetching then return end
     if desktop._books_sync_pending then
+        -- 首次书架同步会补齐远端书籍的封面和元数据。等待它完成，但不能把
+        -- 首页伪装成已加载，否则后续 rebuild 只会拿空 state 组装布局。
+        desktop._home_waiting_sync = true
         return
     end
     desktop._home_fetching = true
@@ -113,6 +140,8 @@ function Home.fetch(desktop)
 
     local source = desktop.source
     local generation = desktop.source_generation or 0
+    local request = {}
+    desktop._home_fetch_request = request
     --- 本次拉取结果是否还该采用。
     --- 桌面已关或期间换过源（source_generation 变化）时回调必须丢弃，否则会串源写状态。
     ---@return boolean
@@ -120,6 +149,7 @@ function Home.fetch(desktop)
         return not desktop._closed
             and desktop.source == source
             and (desktop.source_generation or 0) == generation
+            and desktop._home_fetch_request == request
     end
 
     if not desktop._local_cleanup_done then
@@ -137,6 +167,7 @@ function Home.fetch(desktop)
     --- 写入主页状态并重建。
     ---@param state table|nil
     local function finish(state)
+        if not valid() then return end
         desktop._home_fetching = false
         desktop._home_fetch_cancel = nil
         local rotate = desktop._home_rotate_excerpt
@@ -144,19 +175,16 @@ function Home.fetch(desktop)
         state = fillExtras(state or {}, rotate)
         desktop._home_state = state
         desktop._home_loaded = true
-        if not valid() or desktop.tab ~= "home" then
-            return
-        end
-        desktop:rebuild()
+        local visible = desktop.tab == "home"
+        -- 成功回调也只能消费一次；后到的重复回调视为失效。
+        desktop._home_fetch_request = nil
+        if visible then desktop:rebuild() end
     end
 
     if not source then finish({ recent_err = gettext("当前数据源不可用"), reading = {} }); return end
-    desktop._home_fetch_cancel = source:recentBooksAsync(24, function(res, err)
+    local job = source:recentBooksAsync(24, function(res, err)
         if not valid() then
-            -- 结果作废也必须放掉在飞标记：不然换回这个源后 _home_fetching 恒为 true，
-            -- 主页永远停在旧内容。
-            desktop._home_fetching = false
-            desktop._home_fetch_cancel = nil
+            -- 取消只是尽力而为；旧回调不能碰新一轮请求的任何状态。
             return
         end
         local applied, boom = pcall(function()
@@ -189,6 +217,10 @@ function Home.fetch(desktop)
             finish({ recent_err = tostring(boom), reading = {} })
         end
     end)
+    -- 有些本地源同步回调；完成后不能把已结束任务句柄重新挂回桌面。
+    if desktop._home_fetch_request == request then
+        desktop._home_fetch_cancel = job
+    end
 end
 
 --- Desktop rebuild 入口：未加载则触发 fetch。
@@ -198,7 +230,6 @@ function Home.page(desktop)
     local h = desktop:contentHeight()
     local w = (desktop.dimen and desktop.dimen.w) or Screen:getWidth()
     if not desktop._home_loaded then
-        desktop._home_loaded = true
         UIManager:nextTick(function()
             if desktop._closed or desktop.tab ~= "home" then return end
             Home.fetch(desktop)

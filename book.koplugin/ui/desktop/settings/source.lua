@@ -171,8 +171,7 @@ function Source.sections(ctx)
                     require("book.sync").runAsync(source, nil, function(result, err)
                         if desktop._closed then return end
                         if result then
-                            desktop._home_state = nil
-                            desktop._home_loaded = false
+                            require("ui.desktop.home").invalidate(desktop)
                             desktop._library_state = nil
                             desktop._insight_state = nil
                             desktop._insight_loaded = false
