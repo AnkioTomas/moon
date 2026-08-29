@@ -50,6 +50,7 @@ function BookPlugin:init()
         G_reader_settings:saveSetting("book_footnote_popup_initialized", true)
     end
     require("translate.init").install()
+    require("baike.init").install()
     require("ui.panel.native").install(self.ui)
     require("lockscreen.init").bootstrap()
     require("remote.init").bootstrap()

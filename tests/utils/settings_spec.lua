@@ -34,6 +34,8 @@ Assert.is_nil(common_file.lock_screen)
 Assert.eq(type(Settings.get("display").ui_scale), "number")
 Assert.eq(type(Settings.get("lockscreen").lock_screen), "string")
 Assert.eq(type(Settings.get("quickpanel").quick_panel_reader_actions), "table")
+Assert.is_true(Settings.get("reader").edge_translation_enabled)
+Assert.is_true(Settings.get("reader").baike_enabled)
 
 local active = Settings.activeSourceId()
 Assert.eq(active, common.active_source)

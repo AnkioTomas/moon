@@ -10,6 +10,7 @@
 require("l10n").apply()
 
 local MoonSettings = require("utils.settings")
+local _ = require("gettext")
 
 local HighlightMenu = {}
 
@@ -47,6 +48,10 @@ local function wrapFactory(fn, key)
         local button = fn(this, index)
         if not button then
             return button
+        end
+        if key == "wikipedia" and MoonSettings.get("reader").baike_enabled ~= false then
+            -- 事件 id 保持不变，实际处理已由 baike.init 接管。
+            button.text = _("百度百科")
         end
         local orig_show = button.show_in_highlight_dialog_func
         button.show_in_highlight_dialog_func = function()

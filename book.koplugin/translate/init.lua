@@ -10,7 +10,14 @@ Edge 请求和插件行为分开：`translate.edge` 只负责传输与响应解�
 require("l10n").apply()
 
 local Popup = require("translate.popup")
+local MoonSettings = require("utils.settings")
 local Translate = {}
+
+--- Edge 翻译开关。默认开启；关闭后完整回退 KOReader 原生翻译实现。
+---@return boolean
+function Translate.isEnabled()
+    return MoonSettings.get("reader").edge_translation_enabled ~= false
+end
 
 --- 复制原文到剪贴板，确保联网后打开 Edge 翻译弹窗。
 --- 离线时交给 NetworkMgr 排队，联网回调里重跑本函数，因此参数需原样透传。
@@ -49,7 +56,11 @@ function Translate.install()
         return
     end
     Translator._book_edge_translation = true
+    local native_show_translation = Translator.showTranslation
     Translator.showTranslation = function(self, text, detailed_view, source_lang, target_lang, from_highlight, index)
+        if not Translate.isEnabled() then
+            return native_show_translation(self, text, detailed_view, source_lang, target_lang, from_highlight, index)
+        end
         return showTranslation(self, text, detailed_view, source_lang, target_lang, from_highlight, index)
     end
 end
