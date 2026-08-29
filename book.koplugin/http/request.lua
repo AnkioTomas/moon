@@ -234,7 +234,7 @@ end
 ---@return { cancel: fun() }
 function Request.request(opts, cb)
     opts = opts or {}
-    local state = { cancelled = false }
+    local state = { cancelled = false, done = false, client = nil }
     local user_agent = getHeader(opts.headers, "User-Agent")
 
     if not Request.ensureTurbo() then
@@ -249,14 +249,52 @@ function Request.request(opts, cb)
     UIManager:setInputTimeout(1000)
     input_timeouts = input_timeouts + 1
 
+    --- 归还一次输入超时引用；取消、初始化失败与正常响应共用这条收口。
+    ---@return boolean released
+    local function finish()
+        if state.done then
+            return false
+        end
+        state.done = true
+        state.client = nil
+        input_timeouts = math.max(0, input_timeouts - 1)
+        if input_timeouts == 0 then
+            UIManager:resetInputTimeout()
+        end
+        return true
+    end
+
     UIManager.looper:add_callback(function()
-        local turbo = require("turbo")
+        if state.cancelled then
+            finish()
+            return
+        end
+        local ok, turbo = pcall(require, "turbo")
+        if not ok then
+            if finish() and not state.cancelled then
+                cb(nil, turbo)
+            end
+            return
+        end
         turbo.log.categories.success = false
         turbo.log.categories.warning = false
-        patchTurboSsl()
+        local patched, patch_err = pcall(patchTurboSsl)
+        if not patched then
+            if finish() and not state.cancelled then
+                cb(nil, patch_err)
+            end
+            return
+        end
 
-        local client = turbo.async.HTTPClient({ verify_ca = false })
-        local res = coroutine.yield(client:fetch(opts.url, {
+        local made, client = pcall(turbo.async.HTTPClient, { verify_ca = false })
+        if not made then
+            if finish() and not state.cancelled then
+                cb(nil, client)
+            end
+            return
+        end
+        state.client = client
+        local fetch_opts = {
             method = opts.method,
             body = opts.body,
             request_timeout = opts.timeout or 30,
@@ -269,19 +307,33 @@ function Request.request(opts, cb)
             on_headers = function(headers)
                 addHeaders(headers, opts.headers)
             end,
-        }))
-
-        input_timeouts = input_timeouts - 1
-        if input_timeouts == 0 then
-            UIManager:resetInputTimeout()
+        }
+        local fetched, future = pcall(client.fetch, client, opts.url, fetch_opts)
+        if not fetched then
+            if finish() and not state.cancelled then
+                cb(nil, future)
+            end
+            return
         end
+        local res = coroutine.yield(future)
 
-        if not state.cancelled then
+        if finish() and not state.cancelled then
             cb(res, responseError(res))
         end
     end)
 
-    return makeJob(state)
+    return makeJob(state, function()
+        if state.done then
+            return
+        end
+        local client = state.client
+        if client and client.iostream and not client.iostream:closed() then
+            pcall(function()
+                client.iostream:close()
+            end)
+        end
+        finish()
+    end)
 end
 
 --- GET；成功 cb(body, nil, res)，失败 cb(nil, err, res)。
