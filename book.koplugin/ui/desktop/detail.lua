@@ -298,6 +298,8 @@ function Detail:onClose()
     self._closed = true
     if self._store_detail_job and self._store_detail_job.cancel then self._store_detail_job.cancel() end
     if self._install_job and self._install_job.cancel then self._install_job.cancel() end
+    if self._cache_job and self._cache_job.cancel then self._cache_job.cancel() end
+    if self._cache_dialog then self._cache_dialog:close(); self._cache_dialog = nil end
     local UIManager = require("ui/uimanager")
     local desk = self.desktop
     UIManager:close(self)
@@ -357,6 +359,46 @@ function Detail:openBook()
     local b = self.book
     self:onClose()
     if plugin and plugin.openBook then plugin:openBook(b) end
+end
+
+--- 缓存章节模式整本正文。
+---@return nil
+function Detail:cacheAllChapters()
+    if self._cache_job or self._closed then return end
+    local source, book = self.source, self.book
+    if not source or type(source.cacheAllChaptersAsync) ~= "function" then return end
+    local UIManager = require("ui/uimanager")
+    local InfoMessage = require("ui/widget/infomessage")
+    local ProgressbarDialog = require("ui/widget/progressbardialog")
+    local dialog = ProgressbarDialog:new{
+        title = _("正在缓存全本…"),
+        subtitle = book.title or book.stable_id,
+        progress_max = 1,
+        dismissable = false,
+    }
+    self._cache_dialog = dialog
+    dialog:show()
+    self._cache_job = source:cacheAllChaptersAsync({
+        source_id = book.source_id,
+        stable_id = book.stable_id,
+        book = book,
+    }, function(done, total)
+        if self._closed or not self._cache_dialog then return end
+        if total and total > 0 then dialog.progress_max = total end
+        dialog:reportProgress(done or 0)
+    end, function(ok, total, err)
+        self._cache_job = nil
+        if self._cache_dialog then
+            dialog:close()
+            self._cache_dialog = nil
+        end
+        if self._closed then return end
+        UIManager:show(InfoMessage:new{
+            text = ok and (_("全本缓存完成：") .. tostring(total or 0) .. _(" 章"))
+                or (err or _("全本缓存失败")),
+            timeout = 3,
+        })
+    end)
 end
 
 --- 书城书动作：zlib 下载导入；微信读书加入远端书架并同步。
@@ -761,6 +803,8 @@ function Detail:rebuild()
     local can_read = not store_book and self.source ~= nil
         and (self.source.type == "book"
             or self.source.type == "chapter")
+    local can_cache = can_read and self.source.type == "chapter"
+        and type(self.source.cacheAllChaptersAsync) == "function"
 
     local title_bar, title_h = self:buildTopBar(w)
 
@@ -808,6 +852,15 @@ function Detail:rebuild()
                 text = pct > 0 and pct < 100 and _("继续阅读") or _("开始阅读"),
                 fn = function()
                     self:openBook()
+                end,
+            })
+        end
+        if can_cache then
+            table.insert(defs, {
+                icon = "download",
+                text = _("缓存全本"),
+                fn = function()
+                    self:cacheAllChapters()
                 end,
             })
         end

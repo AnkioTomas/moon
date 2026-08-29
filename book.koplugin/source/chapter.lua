@@ -360,7 +360,7 @@ end
 ---@param toc BookChapter[]
 ---@param from_idx integer 当前章序号（预取 from_idx+1 …）
 ---@param count integer 预取章数
----@param ops { fetchContent: fun(identity: BookIdentity, chapter: BookChapter, cb: function) }
+---@param ops { fetchContent: fun(identity: BookIdentity, chapter: BookChapter, cb: function), progress: fun(done: integer, total: integer)|nil }
 ---@param cb fun()|nil 全部完成或无可预取章
 ---@return { cancel: fun() }
 function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
@@ -397,6 +397,7 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
         end
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
         if chapterReady(path) then
+            if ops.progress then ops.progress(pos - 1, #indices) end
             require("ui/uimanager"):nextTick(nextIndex)
             return
         end
@@ -409,12 +410,14 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
             if cancelled then return end
             active = nil
             if not payload then
+                if ops.progress then ops.progress(pos - 1, #indices) end
                 require("ui/uimanager"):nextTick(nextIndex)
                 return
             end
             write(path, payload, function(wpath)
                 if cancelled then return end
                 if not wpath then
+                    if ops.progress then ops.progress(pos - 1, #indices) end
                     require("ui/uimanager"):nextTick(nextIndex)
                     return
                 end
@@ -424,6 +427,7 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
                     book = book,
                 }, function()
                     if cancelled then return end
+                    if ops.progress then ops.progress(pos - 1, #indices) end
                     require("ui/uimanager"):nextTick(nextIndex)
                 end)
             end)
