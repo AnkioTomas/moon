@@ -399,8 +399,10 @@ function Source:cacheAllChaptersAsync(identity, on_progress, cb)
     active = getTocAsync(self, identity, function(toc, err)
         if cancelled then return end
         if not toc then cb(false, 0, err or _("章节列表为空"), 0, 0); return end
-        active = require("source.chapter").prefetchAsync(identity, identity.book, toc, 0, #toc, {
+        active = require("source.chapter").prefetchAsync(identity, nil, toc, 0, #toc, {
             fetchContent = fetchContent,
+            persist_toc = false,
+            persist_book = false,
             progress = on_progress,
             -- 全本缓存让服务端有喘息时间；阅读期预取仍保持无间隔。
             interval_seconds = 1.5,

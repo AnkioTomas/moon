@@ -57,9 +57,12 @@ Assert.is_false(queued_again)
 -- 425 退避 15 秒后重试；已缓存章节由 source.chapter 自动跳过。
 callbacks[1](false, 34, "HTTP 425", 35, 1)
 Assert.eq(Queue.tasks()[1].state, "retry_wait")
-Assert.eq(#scheduled, 1)
-Assert.eq(scheduled[1].delay, 15)
-scheduled[1].fn()
+local retry_schedule
+for _, item in ipairs(scheduled) do
+    if item.delay == 15 then retry_schedule = item break end
+end
+Assert.not_nil(retry_schedule)
+retry_schedule.fn()
 Assert.eq(#callbacks, 2)
 
 callbacks[2](true, 35, nil, 35, 0)

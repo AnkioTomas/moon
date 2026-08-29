@@ -135,7 +135,7 @@ end
 ---@param path string 目标章节文件路径
 ---@param payload ChapterContentPayload|string|nil 源交来的正文
 ---@param cb fun(path: string|nil, err: string|nil) 成功回传落盘路径
-local function write(path, payload, cb)
+local function write(path, payload, cb, opts)
     local title, content = body(payload)
     if content == "" then
         cb(nil, _("章节内容为空"))
@@ -147,28 +147,56 @@ local function write(path, payload, cb)
     pcall(os.remove, tmp)
     local f, err = io.open(tmp, "wb")
     if not f then cb(nil, err or _("无法写入章节")); return end
-    local wrote, write_err = f:write(html)
-    local closed, close_err = f:close()
-    if not wrote or not closed then
-        pcall(os.remove, tmp)
-        cb(nil, write_err or close_err or _("无法写入章节"))
+    local function finish(ok, reason)
+        local closed, close_err = f:close()
+        if not closed then ok, reason = false, reason or close_err end
+        if not ok then
+            pcall(os.remove, tmp)
+            cb(nil, reason or _("无法写入章节"))
+            return
+        end
+        -- Same-directory rename replaces the old cache atomically on supported targets.
+        -- Deleting path first turns a transient write/rename failure into data loss.
+        if not os.rename(tmp, path) then
+            pcall(os.remove, tmp)
+            cb(nil, _("无法保存章节文件"))
+            return
+        end
+        local attr = lfs.attributes(path)
+        if attr then
+            ready_cache[path] = {
+                signature = tostring(attr.size or "") .. ":" .. tostring(attr.modification or ""),
+                ready = true,
+            }
+        end
+        cb(path)
+    end
+
+    if not (opts and opts.yield_write) then
+        local wrote, write_err = f:write(html)
+        finish(wrote ~= nil, write_err)
         return
     end
-    -- Same-directory rename replaces the old cache atomically on supported targets.
-    -- Deleting path first turns a transient write/rename failure into data loss.
-    if not os.rename(tmp, path) then
-        pcall(os.remove, tmp)
-        cb(nil, _("无法保存章节文件"))
-        return
+
+    -- 全本缓存让出事件循环，避免一次把整章 HTML 写完后才处理返回/翻页。
+    local UIManager = require("ui/uimanager")
+    local offset = 1
+    local chunk_size = 64 * 1024
+    local function writeNext()
+        if offset > #html then
+            finish(true)
+            return
+        end
+        local chunk = html:sub(offset, offset + chunk_size - 1)
+        local wrote, write_err = f:write(chunk)
+        if not wrote then
+            finish(false, write_err)
+            return
+        end
+        offset = offset + #chunk
+        UIManager:nextTick(writeNext)
     end
-    local attr = lfs.attributes(path)
-    if attr then
-        ready_cache[path] = {
-            signature = tostring(attr.size or "") .. ":" .. tostring(attr.modification or ""),
-            ready = true,
-        }
-    end
-    cb(path)
+    UIManager:nextTick(writeNext)
 end
 
 --- 确保第 idx 章正文已在本地：已就绪则直接用（源提供 refreshCached 时交它决定是否刷新），
@@ -176,7 +204,7 @@ end
 ---@param identity BookIdentity
 ---@param toc BookChapter[] 完整目录
 ---@param idx number 章节序号，必须落在 toc 范围内
----@param ops table 至少含 fetchContent，可选 refreshCached
+---@param ops table 至少含 fetchContent，可选 refreshCached/persist_toc/persist_book
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 local function ensure(identity, toc, idx, ops, cb)
@@ -451,11 +479,10 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
                     failed(write_err or (_("章节保存失败") .. " #" .. tostring(idx)))
                     return
                 end
-                require("book.store").touchAsync(wpath, identity, {
-                    chapter_idx = idx,
-                    toc = toc,
-                    book = book,
-                }, function(ok, err)
+                local store_opts = { chapter_idx = idx }
+                if ops.persist_toc ~= false then store_opts.toc = toc end
+                if ops.persist_book ~= false then store_opts.book = book end
+                require("book.store").touchAsync(wpath, identity, store_opts, function(ok, err)
                     if cancelled then return end
                     if not ok then
                         failed(err or (_("章节登记失败") .. " #" .. tostring(idx)))
@@ -465,7 +492,7 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
                     report()
                     continueNext()
                 end)
-            end)
+            end, { yield_write = true })
         end)
     end
 

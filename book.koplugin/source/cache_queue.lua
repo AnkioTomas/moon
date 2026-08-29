@@ -18,14 +18,27 @@ local by_key = {}
 local active
 local waiting_retry
 local watchers = {}
+local change_scheduled = false
 
 local MAX_ATTEMPTS = 3
 local RETRY_DELAY_SECONDS = 15
 
 --- 通知首页状态栏刷新；订阅者只是 UI 观察者，绝不拥有或取消任务。
-local function changed()
+local function flushChanged()
+    change_scheduled = false
     for callback in pairs(watchers) do
         pcall(callback)
+    end
+end
+
+local function changed()
+    if change_scheduled then return end
+    change_scheduled = true
+    local ok, UIManager = pcall(require, "ui/uimanager")
+    if ok and UIManager and UIManager.scheduleIn then
+        UIManager:scheduleIn(0.25, flushChanged)
+    else
+        flushChanged()
     end
 end
 
