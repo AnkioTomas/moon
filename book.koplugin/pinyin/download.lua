@@ -67,9 +67,47 @@ local function tmpManifestPath()
     return tmpDir() .. "/.manifest.json"
 end
 
+---@param value any
+---@return boolean
+local function isSha256(value)
+    return type(value) == "string" and #value == 64 and value:match("^[%da-fA-F]+$") ~= nil
+end
+
+---@param value any
+---@return boolean
+local function isPositiveInteger(value)
+    local n = tonumber(value)
+    return n ~= nil and n > 0 and n < math.huge and n == math.floor(n)
+end
+
+--- 验证不受本地控制的远程 manifest，避免路径逃逸和坏数据把下载状态机卡死。
+---@param manifest any
+---@return boolean, string|nil
+local function validateManifest(manifest)
+    if type(manifest) ~= "table" or type(manifest.built_at) ~= "string" or manifest.built_at == ""
+        or not isSha256(manifest.raw_sha256) or not isPositiveInteger(manifest.raw_size)
+        or type(manifest.parts) ~= "table" or #manifest.parts == 0 then
+        return false, "bad manifest"
+    end
+    local total = 0
+    for _, part in ipairs(manifest.parts) do
+        if type(part) ~= "table" or type(part.file) ~= "string"
+            or not part.file:match("^[%w._%-]+$") or not isPositiveInteger(part.size)
+            or not isSha256(part.sha256) then
+            return false, "bad manifest part"
+        end
+        total = total + tonumber(part.size)
+    end
+    if total ~= tonumber(manifest.raw_size) then
+        return false, "manifest size mismatch"
+    end
+    return true
+end
+
 --- 记下本批分片对应的 manifest 版本；版本对不上先清空续传目录。
 --- 临时分片必须属于同一版 manifest，不能把新旧词库拼在一起。
 ---@param manifest table 至少含 built_at 与 raw_sha256
+---@return boolean, string|nil
 local function syncTmpManifest(manifest)
     local path = tmpManifestPath()
     local f = io.open(path, "rb")
@@ -83,13 +121,27 @@ local function syncTmpManifest(manifest)
             cleanupTmp()
         end
     end
-    lfs.mkdir(tmpDir())
-    f = assert(io.open(path, "wb"))
-    f:write(JSON.encode({
+    if lfs.attributes(tmpDir(), "mode") ~= "directory" and not lfs.mkdir(tmpDir()) then
+        return false, "cannot create dictionary temp directory"
+    end
+    local ok, encoded = pcall(JSON.encode, {
         built_at = manifest.built_at,
         raw_sha256 = manifest.raw_sha256,
-    }))
-    f:close()
+    })
+    if not ok then
+        return false, tostring(encoded)
+    end
+    local write_file, open_err = io.open(path, "wb")
+    if not write_file then
+        return false, open_err or "cannot write dictionary manifest"
+    end
+    local wrote, write_err = write_file:write(encoded)
+    local closed, close_err = write_file:close()
+    if not wrote or not closed then
+        os.remove(path)
+        return false, write_err or close_err or "cannot write dictionary manifest"
+    end
+    return true
 end
 
 --- 分片是否已完整落在临时目录（只比字节数，内容由拼接期 sha256 把关）。
@@ -177,9 +229,13 @@ function M.ensure(cb, on_progress)
             return
         end
         local ok, manifest = pcall(JSON.decode, body)
-        if not ok or type(manifest) ~= "table" or type(manifest.built_at) ~= "string"
-            or manifest.built_at == "" or type(manifest.parts) ~= "table" or #manifest.parts == 0 then
+        if not ok then
             done(false, "bad manifest")
+            return
+        end
+        local valid, manifest_err = validateManifest(manifest)
+        if not valid then
+            done(false, manifest_err)
             return
         end
         local attr = lfs.attributes(dest)
@@ -195,7 +251,11 @@ function M.ensure(cb, on_progress)
         end
         report("manifest", 0, total, 0, #manifest.parts)
         Paths.ensureSettings() -- 内含 ensureDir(root)
-        syncTmpManifest(manifest)
+        local synced, sync_err = syncTmpManifest(manifest)
+        if not synced then
+            done(false, sync_err)
+            return
+        end
         downloadParts(manifest, 1, dest, done, report, 0, total)
     end)
 end
