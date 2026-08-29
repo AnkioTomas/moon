@@ -1,0 +1,133 @@
+--[[--
+首页加载状态：书架同步在飞时保持 loading，完成后允许重拉本地数据。
+
+@module tests.ui.desktop.home_spec
+--]]
+
+local Assert = require("support.assert")
+
+local ticks = {}
+package.preload["ui/uimanager"] = function()
+    return {
+        nextTick = function(_, fn)
+            ticks[#ticks + 1] = fn
+        end,
+    }
+end
+package.preload["ffi/blitbuffer"] = function()
+    return { COLOR_WHITE = 255 }
+end
+package.preload["device"] = function()
+    return { screen = { getWidth = function() return 600 end } }
+end
+package.preload["ui/geometry"] = function()
+    return { new = function(_, opts) return opts end }
+end
+local function widget()
+    return { new = function(_, opts) return opts end }
+end
+package.preload["ui/widget/container/centercontainer"] = widget
+package.preload["ui/widget/container/framecontainer"] = widget
+package.preload["ui/widget/textwidget"] = widget
+package.preload["ui.components.bookinfo"] = function()
+    return { file = function(book) return book and book.stable_id end }
+end
+package.preload["ui.components.bookui"] = function()
+    return { face = function() return {} end, muted = function() return 0 end }
+end
+package.preload["utils.settings"] = function()
+    return { get = function() return {} end }
+end
+package.preload["ui.desktop.home.enrich"] = function()
+    return { apply = function(recent, reading) return recent, reading end }
+end
+package.preload["ui.desktop.home.stats"] = function()
+    return { summarize = function() return {} end }
+end
+package.preload["book.highlights"] = function()
+    return { pick = function() end, collect = function() return {} end }
+end
+package.preload["ui.desktop.home.layout"] = function()
+    return { build = function(_, state) return { state = state } end }
+end
+package.preload["logger"] = function()
+    return { err = function() end }
+end
+package.preload["gettext"] = function()
+    return function(text) return text end
+end
+
+local Home = require("ui.desktop.home")
+local calls = 0
+local desktop = {
+    tab = "home",
+    _books_sync_pending = true,
+    _local_cleanup_done = true,
+    source_generation = 0,
+    source = {
+        id = "local",
+        recentBooksAsync = function(_, _, cb)
+            calls = calls + 1
+            cb({ data = { { stable_id = "book-1" } } })
+            return { cancel = function() end }
+        end,
+    },
+    contentHeight = function() return 400 end,
+    ctx = function(self) return { desktop = self } end,
+    rebuild = function(self) self.rebuilds = (self.rebuilds or 0) + 1 end,
+}
+
+-- 首屏只显示 loading；同步未结束不能把空 state 标为已加载。
+Home.page(desktop)
+Assert.is_false(desktop._home_loaded and true or false)
+Assert.eq(#ticks, 1)
+ticks[1]()
+Assert.is_true(desktop._home_waiting_sync)
+Assert.eq(calls, 0)
+
+-- source.base 在同步结束后触发 rebuild；这次 fetch 会填满首页状态。
+desktop._books_sync_pending = false
+Home.page(desktop)
+Assert.eq(#ticks, 2)
+ticks[2]()
+Assert.is_true(desktop._home_loaded)
+Assert.eq(calls, 1)
+Assert.eq(desktop._home_state.recent.stable_id, "book-1")
+
+-- cancel 只是尽力而为：同源旧请求的晚到回调不得覆盖新一轮状态。
+local callbacks = {}
+desktop.source.recentBooksAsync = function(_, _, cb)
+    callbacks[#callbacks + 1] = cb
+    return { cancel = function() end }
+end
+Home.invalidate(desktop)
+ticks[#ticks]()
+local first = callbacks[#callbacks]
+Home.invalidate(desktop)
+ticks[#ticks]()
+local second = callbacks[#callbacks]
+second({ data = { { stable_id = "new" } } })
+first({ data = { { stable_id = "old" } } })
+Assert.eq(desktop._home_state.recent.stable_id, "new")
+
+-- 进入首页统一入口：清状态 + 重建 + 通知源，下一次 page 必然重拉。
+local emitted
+desktop.plugin = {
+    emitToSource = function(_, event) emitted = event end,
+}
+desktop.scheduleClockTick = function() end
+local before = desktop.rebuilds or 0
+Home.enter(desktop)
+Assert.is_false(desktop._home_loaded)
+Assert.is_nil(desktop._home_state)
+Assert.eq(desktop.rebuilds, before + 1)
+Assert.eq(emitted, "home_open")
+
+-- 不在首页时只作废状态，不重建（避免在设置页乱刷屏）。
+desktop.tab = "settings"
+desktop._home_loaded = true
+Home.invalidate(desktop)
+Assert.is_false(desktop._home_loaded)
+Assert.eq(desktop.rebuilds, before + 1)
+
+return true
