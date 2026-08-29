@@ -16,11 +16,29 @@ local _ = require("gettext")
 local Chapter = {}
 
 local PREFETCH_AHEAD = 3
+local NAV_THROTTLE_SECONDS = 2
 
 ---@type ReaderChapterSession|nil
 local chapter_session
 ---@type { cancel: fun() }|nil
 local prefetch_job
+local navigation_throttle
+local transition_notice
+
+local function closeTransitionNotice()
+    if transition_notice then
+        require("ui/uimanager"):close(transition_notice)
+        transition_notice = nil
+    end
+end
+
+local function showTransitionNotice()
+    closeTransitionNotice()
+    transition_notice = require("ui/widget/infomessage"):new{
+        text = _("正在切换章节，请稍候…"),
+    }
+    require("ui/uimanager"):show(transition_notice)
+end
 
 --- 取消在途的后续章预取任务。
 --- 先清模块状态再 cancel，避免 cancel 回调重入时又看到已废弃的 job。
@@ -38,6 +56,7 @@ function Chapter.clearActiveChapter(session)
     if session then session.chapter = nil end
     local transition = chapter and chapter.transition
     if transition and transition.cancel then transition.cancel() end
+    closeTransitionNotice()
 end
 
 ---@param session ReaderSessionSnapshot|nil
@@ -219,8 +238,21 @@ end
 function Chapter.onReaderReady(plugin, session)
     local ui = plugin.ui
     local identity = session.identity
-    local toc = Store.toc(identity)
-    local transition = chapter_session and chapter_session.transition
+    -- switchDocument 会为每一章重新触发 ReaderReady，但书目 TOC 不变。
+    -- 不要每次都同步查库并 JSON 解码整份 TOC；只有换书/首次打开才从 Store 读取。
+    local previous = chapter_session
+    local toc
+    if previous
+        and previous.identity
+        and previous.identity.source_id == identity.source_id
+        and previous.identity.stable_id == identity.stable_id
+        and type(previous.toc) == "table"
+        and #previous.toc > 0 then
+        toc = previous.toc
+    else
+        toc = Store.toc(identity)
+    end
+    local transition = previous and previous.transition
     if transition and transition.path == ui.document.file then
         chapter_session.transition = nil
     else
@@ -254,6 +286,7 @@ end
 function Chapter.onCloseDocument(session)
     local transition = chapter_session and chapter_session.transition
     if not (transition and transition.path) then
+        if navigation_throttle then navigation_throttle:cancel() end
         Chapter.clearActiveChapter(session)
         return true
     end
@@ -265,10 +298,13 @@ end
 ---@param opts { within: number|nil, direction: "prev"|"next"|nil }
 local function requestChapter(chapter, idx, opts)
     cancelPrefetch()
+    showTransitionNotice()
     local identity = chapter.identity
     chapter.transition = identity.source:openBookAsync(identity, { chapter_idx = idx }, function(path, err)
         chapter.transition = nil
         if not path then
+            closeTransitionNotice()
+            navigation_throttle:cancel()
             require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
                 text = err or _("章节打开失败"),
             })
@@ -285,15 +321,28 @@ local function requestChapter(chapter, idx, opts)
         }
 
         local ReaderUI = require("apps/reader/readerui")
-        if ReaderUI.instance then
-            ReaderUI.instance:switchDocument(path, true)
-        else
-            require("ui/uimanager"):nextTick(function()
-                ReaderUI:showReader(path, nil, true)
-            end)
+        local UIManager = require("ui/uimanager")
+        -- 先把提示实际刷到屏幕，再让出一个 tick 启动 KOReader 的阻塞式 HTML 打开。
+        -- 直接调用 switchDocument 会立刻被 ReaderUI 的 invisible opening message 覆盖，
+        -- 用户看不到“正在切换”提示。
+        if UIManager.forceRePaint then
+            UIManager:forceRePaint()
         end
+        UIManager:nextTick(function()
+            if chapter_session ~= chapter then return end
+            if ReaderUI.instance then
+                ReaderUI.instance:switchDocument(path, true)
+            else
+                ReaderUI:showReader(path, nil, true)
+            end
+        end)
     end)
 end
+
+navigation_throttle = require("utils.timing").throttle(function(chapter, idx, opts)
+    requestChapter(chapter, idx, opts)
+    return true
+end, NAV_THROTTLE_SECONDS)
 
 ---@param session ReaderSessionSnapshot|nil
 ---@param idx integer
@@ -303,7 +352,8 @@ function Chapter.gotoChapter(session, idx, opts)
     if not session then return false end
     local chapter = Chapter.activeChapter(session)
     local current_idx = session.identity.chapter_idx
-    if not chapter or chapter.transition or idx < 1 or idx > #chapter.toc then
+    if not chapter or type(chapter.toc) ~= "table" or chapter.transition
+        or idx < 1 or idx > #chapter.toc then
         return false
     end
     if current_idx and idx == current_idx then
@@ -319,13 +369,15 @@ end
 function Chapter.onChapterBoundary(session, delta)
     if not session then return false end
     local chapter = Chapter.activeChapter(session)
-    if not chapter or chapter.transition then
+    if not chapter or type(chapter.toc) ~= "table" or chapter.transition then
         return false
     end
     local target = session.identity.chapter_idx + delta
     if target < 1 or target > #chapter.toc then return false end
-    requestChapter(chapter, target, { direction = delta < 0 and "prev" or "next" })
-    return true
+    local accepted = navigation_throttle(chapter, target, {
+        direction = delta < 0 and "prev" or "next",
+    })
+    return accepted == true
 end
 
 return Chapter

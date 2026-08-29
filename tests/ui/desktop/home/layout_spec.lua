@@ -82,13 +82,19 @@ local function stubComponent(id, height, extra)
             if extra and extra.pager then
                 part.pager = extra.pager
             end
+            if extra and extra.refresh then
+                part.refresh = extra.refresh
+            end
             return part
         end,
     }
 end
 
+local clock_refreshes = 0
 for _, spec in ipairs({
-    { "clock", 50 },
+    { "clock", 50, {
+        refresh = function() clock_refreshes = clock_refreshes + 1 end,
+    } },
     { "stats", 40 },
     { "hitokoto", 30 },
     { "excerpt", 35 },
@@ -159,11 +165,15 @@ build_log = {}
 layout_kids = {}
 home_settings.home_layout = { "clock", "stats", "recent_list" }
 home_settings.home_recent_list_mode = "hero_grid"
-Layout.build({ width = 320, height = 90 }, {})
+local desktop = {}
+Layout.build({ width = 320, height = 90, desktop = desktop }, {})
 Assert.eq(#build_log, 2)
 Assert.eq(build_log[1].id, "clock")
 Assert.eq(build_log[2].id, "stats")
 Assert.eq(#layout_kids, 1)
+Assert.is_true(type(desktop._home_clock_refresh) == "function")
+desktop._home_clock_refresh()
+Assert.eq(clock_refreshes, 1)
 
 -- Layout.build：唯一 recent_list → footer_full + 底部分页条
 build_log = {}
@@ -192,8 +202,10 @@ build_log = {}
 layout_kids = {}
 home_settings.home_layout = { "clock", "recent_list" }
 home_settings.home_recent_list_mode = "hero_grid"
-Layout.build({ width = 320, height = 200 }, {})
+local full_frame = Layout.build({ width = 320, height = 200 }, {})
 Assert.eq(build_log[2].recent_mode, "inline")
 Assert.is_nil(layout_kids[#layout_kids]._pager)
+Assert.eq(full_frame.width, 320)
+Assert.eq(full_frame.height, 200)
 
 return true

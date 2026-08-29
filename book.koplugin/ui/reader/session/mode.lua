@@ -4,19 +4,16 @@
 @module koplugin.book.ui.reader.session.mode
 --]]
 
-local Store = require("book.store")
-
 local Mode = {}
 
 ---@param identity BookIdentity|nil
 ---@return "book"|"chapter"
 function Mode.resolve(identity)
     local source = identity and identity.source
+    -- 源类型就是模式契约；目录是否已缓存是数据可用性，不应触发同步
+    -- SQLite/JSON 读取，更不能因为缓存暂时缺失把章节书当整书打开。
     if source and source.type == "chapter" then
-        local toc = Store.toc(identity)
-        if toc then
-            return "chapter"
-        end
+        return "chapter"
     end
     return "book"
 end

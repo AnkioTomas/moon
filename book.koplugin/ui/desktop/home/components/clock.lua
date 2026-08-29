@@ -31,24 +31,24 @@ function M.build(ctx, _state, opts)
     local pad_y = UI.sz(10)
     local body_h = UI.sz(56)
     local total_h = body_h + pad_y * 2
-    local time_text = os.date("%H:%M")
-    local wday = tonumber(os.date("%w")) or 0
-    local date_text = os.date("%Y-%m-%d") .. " " .. _("星期") .. DOW[wday + 1]
+    local time_widget = TextWidget:new{
+        text = os.date("%H:%M"),
+        face = UI.face("cfont", 36),
+        fgcolor = Blitbuffer.COLOR_BLACK,
+    }
+    local date_widget = TextWidget:new{
+        text = os.date("%Y-%m-%d") .. " " .. _("星期")
+            .. DOW[(tonumber(os.date("%w")) or 0) + 1],
+        face = UI.face("xx_smallinfofont", 13),
+        fgcolor = UI.muted(),
+    }
     local body = CenterContainer:new{
         dimen = Geom:new{ w = w, h = body_h },
         VerticalGroup:new{
             align = "center",
-            TextWidget:new{
-                text = time_text,
-                face = UI.face("cfont", 36),
-                fgcolor = Blitbuffer.COLOR_BLACK,
-            },
+            time_widget,
             VerticalSpan:new{ width = UI.sz(4) },
-            TextWidget:new{
-                text = date_text,
-                face = UI.face("xx_smallinfofont", 13),
-                fgcolor = UI.muted(),
-            },
+            date_widget,
         },
     }
     local widget = FrameContainer:new{
@@ -60,7 +60,15 @@ function M.build(ctx, _state, opts)
         dimen = Geom:new{ w = w, h = total_h },
         body,
     }
-    return { widget = widget, height = total_h }
+    return {
+        widget = widget,
+        height = total_h,
+        refresh = function()
+            time_widget:setText(os.date("%H:%M"))
+            date_widget:setText(os.date("%Y-%m-%d") .. " " .. _("星期")
+                .. DOW[(tonumber(os.date("%w")) or 0) + 1])
+        end,
+    }
 end
 
 return M

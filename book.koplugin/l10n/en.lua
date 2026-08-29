@@ -683,6 +683,7 @@ return {
     ["阅读时长上报失败"] = "Failed to report reading time",
     ["阅读统计正在同步…"] = "Syncing reading stats…",
     ["阅读页缺少 psvts"] = "Reader is missing psvts",
+    ["正在切换章节，请稍候…"] = "Switching chapter, please wait…",
     ["页数暂无"] = "Page count unavailable",
     ["（无内容）"] = "(No content)",
 }

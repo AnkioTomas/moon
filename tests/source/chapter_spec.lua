@@ -158,7 +158,7 @@ ui_job.cancel()
 Stubs.flush()
 Assert.is_nil(ui_path)
 
--- 本地章节已存在时快开，不弹准备框，并在后台静默刷新登记。
+-- 本地章节已存在时快开，不弹准备框，也不启动重复的后台打开流水线。
 local fast_path
 local touch_before = #touches
 Chapter.openWithUi({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, function(p)
@@ -168,7 +168,7 @@ Stubs.flush()
 Assert.eq(fast_path, tmp .. "/2.html")
 Assert.eq(progress_ui.shown, 0)
 Stubs.flush()
-Assert.eq(#touches, touch_before + 1)
+Assert.eq(#touches, touch_before)
 
 -- 预取：已有文件跳过，只拉取缺失章。
 os.remove(tmp .. "/2.html")

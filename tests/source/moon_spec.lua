@@ -216,6 +216,28 @@ do
     Assert.eq(result.pulled, 1)
 end
 
+-- 首页进入按 5 分钟节流检查书架；图书馆手动刷新走源事件并强制请求。
+do
+    resetRec()
+    rec.list_wire = { data = { { filename = "home.epub", title = "Home" } }, count = 1 }
+    local rebuilds = 0
+    local desktop = {
+        source = src,
+        tab = "home",
+        rebuild = function() rebuilds = rebuilds + 1 end,
+    }
+    src:onEvent("home_open", desktop)
+    Assert.is_true(rec.query ~= nil)
+    local first_query = rec.query
+    resetRec()
+    src:onEvent("home_open", desktop)
+    Assert.is_nil(rec.query)
+    src:onEvent("library_refresh_request", desktop)
+    Assert.is_true(rec.query ~= nil)
+    Assert.eq(rebuilds, 2)
+    rec.query = first_query
+end
+
 
 -- openBookAsync：Moon 自己完成缓存、下载、校验、并发合并和落库。
 do

@@ -574,29 +574,14 @@ function Library.gotoPage(desktop, page)
     desktop:rebuild()
 end
 
---- 手动强制重扫书库（本地源：真实扫盘并清理失效书）。
+--- 手动强制刷新书库；具体动作由当前源决定（本地源扫盘，远端源拉全量）。
 ---@param desktop table
 function Library.rescan(desktop)
     local source = desktop.source
     if not source or not source.syncBooksAsync then return end
-    local generation = desktop.source_generation or 0
-    if desktop._books_sync_cancel and desktop._books_sync_cancel.cancel then
-        desktop._books_sync_cancel:cancel()
+    if desktop.plugin and desktop.plugin.emitToSource then
+        desktop.plugin:emitToSource("library_refresh_request", desktop, source)
     end
-    desktop._books_sync_cancel = source:syncBooksAsync({ force = true }, function(result, err)
-        desktop._books_sync_cancel = nil
-        if desktop._closed or desktop.source ~= source
-            or (desktop.source_generation or 0) ~= generation then return end
-        if not result then
-            desktop._library_state = { books = {}, err = err or _("同步失败") }
-        else
-            desktop._library_state = nil
-            desktop._home_state = nil
-            desktop._home_loaded = false
-        end
-        desktop.tab = "library"
-        desktop:rebuild()
-    end)
 end
 
 --- 清除全部筛选条件。
