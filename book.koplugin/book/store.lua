@@ -185,6 +185,15 @@ function Store.toc(identity)
     return toc
 end
 
+--- 本地目录与已缓存章节数是否完全一致；目录未知时不能宣称缓存完成。
+---@param identity BookIdentity|nil
+---@return boolean
+function Store.allChaptersCached(identity)
+    local toc = Store.toc(identity)
+    if not toc or #toc == 0 then return false end
+    return ChapterDB.countByBook(identity.source_id, identity.stable_id) == #toc
+end
+
 --- 进度/面板用身份：BookIdentity（含 source_id/stable_id）。
 --- 唯一规则 = 路径精确查库：chapters（章节文件）→ books.path（整本书）。
 ---@param path string
