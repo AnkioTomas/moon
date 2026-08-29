@@ -32,6 +32,13 @@ local M = {
     asset = { id = "none" },
 }
 
+local function activeSourceId()
+    if type(MoonSettings.activeSourceId) == "function" then
+        return MoonSettings.activeSourceId()
+    end
+    return MoonSettings.get().active_source or "local"
+end
+
 --- 取本地封面缓存路径；无 stable_id 或文件不存在返回 nil。
 ---@param stable_id string|nil
 ---@param source_id string|nil
@@ -63,7 +70,7 @@ end
 ---@return table[]
 local function books(limit)
     limit = math.max(1, math.floor(tonumber(limit) or 1))
-    local source_id = MoonSettings.get().active_source or "local"
+    local source_id = activeSourceId()
     local recent = BookDB.recentBySource(source_id, limit * 2)
     local result, seen = {}, {}
 

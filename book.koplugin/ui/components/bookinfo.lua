@@ -38,9 +38,44 @@ local GestureRange = require("ui/gesturerange")
 local Image = require("ui.components.image")
 local UI = require("ui.components.bookui")
 local Surface = require("ui.components.surface")
+local Paths = require("utils.paths")
+local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
 
 local BookInfo = {}
+
+--- 下载的网络封面同时落到源专属路径，供锁屏离屏渲染复用。
+--- books 表不保存 URL，锁屏不能在渲染阶段重新构造在线请求。
+---@param book table|nil
+---@param path string|nil
+local function persistCover(book, path)
+    if type(book) ~= "table" or type(path) ~= "string" or path == "" then return end
+    local source_id, stable_id = book.source_id, book.stable_id
+    if type(source_id) ~= "string" or source_id == ""
+        or type(stable_id) ~= "string" or stable_id == "" then
+        return
+    end
+    local target = Paths.coverPath(stable_id, source_id)
+    if target == path then return end
+    if lfs.attributes(target, "mode") == "file" then return end
+    Paths.ensureLayout(source_id)
+    local src = io.open(path, "rb")
+    if not src then return end
+    local data = src:read("*a")
+    src:close()
+    if type(data) ~= "string" or data == "" then return end
+    local tmp = target .. ".part"
+    local dst = io.open(tmp, "wb")
+    if not dst then return end
+    local ok = pcall(function() dst:write(data) end)
+    dst:close()
+    if not ok then
+        os.remove(tmp)
+        return
+    end
+    os.remove(target)
+    os.rename(tmp, target)
+end
 
 --- 取书籍 stable_id（文件身份）。
 ---@param book Book|table|nil
@@ -190,6 +225,7 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
     local cover_pad = UI.sz(2)
     local cover_w = math.max(UI.sz(16), cw - cover_pad * 2)
     local cover_h = math.max(UI.sz(24), ch - cover_pad * 2)
+    local on_ready = opts.on_ready
     local image = Image.widget{
         src = req and req.url or nil,
         headers = req and req.headers or nil,
@@ -199,7 +235,10 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
         border = false,
         fallback = title,
         show_parent = opts.show_parent,
-        on_ready = opts.on_ready,
+        on_ready = function(path)
+            persistCover(book, path)
+            if on_ready then on_ready(path) end
+        end,
         sync = opts.sync,
     }
     local cover = Surface.card(image, {
