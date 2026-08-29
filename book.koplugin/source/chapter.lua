@@ -277,33 +277,10 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
                 if not cancelled then cb(path) end
             end)
         end
-        if ops.refreshCached then
-            require("ui/network/manager"):runWhenOnline(function()
-                if cancelled then return end
-                local idx = tonumber(opts.chapter_idx)
-                if not idx then
-                    local pos = localPosition(identity)
-                    idx = pos and tonumber(pos.chapter_idx) or 1
-                end
-                loadToc(identity, ops, function(toc)
-                    if cancelled or type(toc) ~= "table" then
-                        open(local_path)
-                        return
-                    end
-                    idx = math.max(1, math.min(#toc, idx or 1))
-                    local item = toc[idx]
-                    if not item then
-                        open(local_path)
-                        return
-                    end
-                    ops.refreshCached(identity, item, local_path, function(path)
-                        if not cancelled then open(path or local_path) end
-                    end)
-                end)
-            end)
-        else
-            open(local_path)
-        end
+        -- 本地命中不应等待网络，也不应再启动一条独立的刷新流水线。
+        -- 后台 openAsync 已经会在需要时执行 refreshCached；这里直接交付缓存路径，
+        -- 避免重复拉 TOC、重复改写 HTML。
+        open(local_path)
         require("ui/network/manager"):runWhenOnline(function()
             if cancelled then return end
             background_job = Chapter.openAsync(source, identity, book, opts, ops, function() end)
