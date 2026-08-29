@@ -53,6 +53,9 @@ local Desktop = InputContainer:extend{
     filter = nil,
 }
 
+-- 首页状态作废入口挂成 Desktop 方法：source 层拿到 desktop 就能刷首页，不用反向 require UI。
+Desktop.invalidateHome = Home.invalidate
+
 --- 按数据源能力生成 Desktop 底栏 Tab。
 ---@param source table|nil
 ---@return table
@@ -98,6 +101,9 @@ function Desktop:init()
     self.tab = self.tab or "home"
     clampTab(self)
     self._closed = false
+    self._cache_queue_watch = require("source.cache_queue").watch(function()
+        if not self._closed then self:refreshTopBar() end
+    end)
     self.ges_events = {
         SwipeTopBar = {
             GestureRange:new{
@@ -263,12 +269,6 @@ function Desktop:switchTab(id)
     if id == "store" and self.tab ~= "store" then
         self._store_state = nil
     end
-    if id == "home" then
-        self._home_state = nil
-        self._home_loaded = false
-        self._home_reading_page = 1
-        self:scheduleClockTick()
-    end
     if id == "settings" then
         self._settings_page = 1
         self._settings_sub = nil
@@ -279,10 +279,12 @@ function Desktop:switchTab(id)
         self._insight_ui_page = 1
     end
     self.tab = id
-    self:rebuild()
-    if id == "home" and self.plugin and self.plugin.emitToSource then
-        self.plugin:emitToSource("home_open", self)
+    if id == "home" then
+        -- 进首页一律刷新一遍：清状态 + rebuild + 通知源查书架，全在 Home.enter 里
+        Home.enter(self)
+        return
     end
+    self:rebuild()
 end
 
 -- 各 Tab 的在飞取数任务；换源和关桌面都必须全部取消（漏一个就是关了页还在跑网络+写库）
@@ -321,13 +323,13 @@ end
 function Desktop:sourceChanged(source)
     self.source_generation = (self.source_generation or 0) + 1
     cancelJobs(self, FETCH_JOB_KEYS)
+    self._books_sync_pending = false
+    self._books_sync_request = nil
     -- 只取消旧页面的在飞任务；已落盘图片缓存必须保留，切回源时可直接复用。
     Image.abortPending()
     self.source = source
     self._tabs = desktopTabs(source)
     clampTab(self)
-    self._home_state = nil
-    self._home_loaded = false
     self._library_state = nil
     self._store_state = nil
     self._store_books = nil
@@ -337,7 +339,10 @@ function Desktop:sourceChanged(source)
     self._insight_state = nil
     self._insight_loaded = false
     self.filter = nil
-    self:rebuild()
+    Home.invalidate(self)
+    if self.tab ~= "home" then
+        self:rebuild()
+    end
 end
 
 --- 重建顶栏 + 内容 + 底栏。
@@ -497,9 +502,10 @@ function Desktop:showDetail(book)
             if dirty then
                 -- 详情里改过数据（编辑/刮削）：列表与首页缓存已失效，重建触发重拉
                 desk._library_state = nil
-                desk._home_state = nil
-                desk._home_loaded = false
-                desk:rebuild()
+                Home.invalidate(desk)
+                if desk.tab ~= "home" then
+                    desk:rebuild()
+                end
             else
                 UIManager:setDirty(desk, "ui")
             end
@@ -514,6 +520,10 @@ end
 function Desktop:onClose()
     logger.info("book.desktop close")
     self._closed = true
+    if self._cache_queue_watch then
+        self._cache_queue_watch.cancel()
+        self._cache_queue_watch = nil
+    end
     if self._clock_tick then
         UIManager:unschedule(self._clock_tick)
         self._clock_tick = nil
@@ -566,6 +576,10 @@ end
 --- Widget 关闭回调：停时钟、清手势、中止图片下载。
 function Desktop:onCloseWidget()
     self._closed = true
+    if self._cache_queue_watch then
+        self._cache_queue_watch.cancel()
+        self._cache_queue_watch = nil
+    end
     if self._clock_tick then
         UIManager:unschedule(self._clock_tick)
         self._clock_tick = nil

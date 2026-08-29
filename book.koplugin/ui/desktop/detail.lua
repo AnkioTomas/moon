@@ -49,6 +49,7 @@ local LocalMapper = require("source.local.mapper")
 local UI = require("ui.components.bookui")
 local Surface = require("ui.components.surface")
 local Text = require("utils.text")
+local Store = require("book.store")
 local SourceCapabilities = require("types.book_source").SourceCapabilities
 local _ = require("gettext")
 local Screen = Device.screen
@@ -298,8 +299,6 @@ function Detail:onClose()
     self._closed = true
     if self._store_detail_job and self._store_detail_job.cancel then self._store_detail_job.cancel() end
     if self._install_job and self._install_job.cancel then self._install_job.cancel() end
-    if self._cache_job and self._cache_job.cancel then self._cache_job.cancel() end
-    if self._cache_dialog then self._cache_dialog:close(); self._cache_dialog = nil end
     local UIManager = require("ui/uimanager")
     local desk = self.desktop
     UIManager:close(self)
@@ -364,54 +363,23 @@ end
 --- 缓存章节模式整本正文。
 ---@return nil
 function Detail:cacheAllChapters()
-    if self._cache_job or self._closed then return end
+    if self._cache_job and not self._cache_job.done then return end
+    if self._closed then return end
     local source, book = self.source, self.book
     if not source or type(source.cacheAllChaptersAsync) ~= "function" then return end
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
-    local ProgressbarDialog = require("ui/widget/progressbardialog")
-    local dialog = ProgressbarDialog:new{
-        title = _("正在缓存全本…"),
-        subtitle = book.title or book.stable_id,
-        progress_max = 1,
-        dismissable = false,
-    }
-    self._cache_dialog = dialog
-    dialog:show()
-    self._cache_job = source:cacheAllChaptersAsync({
+    local job, queued = require("source.cache_queue").enqueue(source, {
         source_id = book.source_id,
         stable_id = book.stable_id,
         book = book,
-    }, function(done, total)
-        if self._closed or not self._cache_dialog then return end
-        if total and total > 0 then dialog.progress_max = total end
-        dialog:reportProgress(done or 0)
-    end, function(ok, cached, err, total, failed)
-        self._cache_job = nil
-        if self._cache_dialog then
-            dialog:close()
-            self._cache_dialog = nil
-        end
-        if self._closed then return end
-        local text
-        if ok then
-            text = _("全本缓存完成：") .. tostring(cached or 0) .. " / "
-                .. tostring(total or cached or 0) .. _(" 章")
-        elseif total and total > 0 then
-            text = _("全本缓存部分完成：") .. tostring(cached or 0) .. " / "
-                .. tostring(total) .. _(" 章")
-            if failed and failed > 0 then
-                text = text .. "，" .. tostring(failed) .. _(" 章失败")
-            end
-            if err then text = text .. "\n" .. tostring(err) end
-        else
-            text = err or _("全本缓存失败")
-        end
-        UIManager:show(InfoMessage:new{
-            text = text,
-            timeout = 3,
-        })
-    end)
+    })
+    if not job then return end
+    self._cache_job = job
+    UIManager:show(InfoMessage:new{
+        text = queued and _("已加入后台缓存队列") or _("全本缓存任务已在后台运行"),
+        timeout = 3,
+    })
 end
 
 --- 书城书动作：zlib 下载导入；微信读书加入远端书架并同步。
@@ -818,6 +786,10 @@ function Detail:rebuild()
             or self.source.type == "chapter")
     local can_cache = can_read and self.source.type == "chapter"
         and type(self.source.cacheAllChaptersAsync) == "function"
+        and not Store.allChaptersCached({
+            source_id = book.source_id,
+            stable_id = book.stable_id,
+        })
 
     local title_bar, title_h = self:buildTopBar(w)
 
