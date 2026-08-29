@@ -257,7 +257,7 @@ function TranslatePopup:init()
     self.text_box = TextBoxWidget:new{
         text = self.translated or "",
         face = require("ui/font"):getFace("x_smallinfofont"),
-        width = inner_w - pad * 2,
+        width = inner_w,
         height = text_h,
         alignment = "left",
     }
@@ -273,34 +273,49 @@ function TranslatePopup:init()
         show_parent = self,
     }
 
-    local divider = LineWidget:new{
+    -- 词典释义区不再嵌套一层边框。语言栏与译文之间只保留一条浅分隔线，
+    -- 操作区继续复用 ButtonTable 的原生浅灰分隔线。
+    local title_divider = LineWidget:new{
         background = Blitbuffer.COLOR_BLACK,
         dimen = Geom:new{ w = self.width, h = Size.line.medium },
     }
-
-    local body = FrameContainer:new{
-        padding = pad,
-        VerticalGroup:new{
-            align = "left",
-            HorizontalGroup:new{
-                align = "center",
-                self.source_btn,
-                HorizontalSpan:new{ width = pad },
-                self.target_btn,
-            },
-            VerticalSpan:new{ width = Size.padding.small },
-            FrameContainer:new{
-                bordersize = Size.border.thin,
-                bordercolor = Blitbuffer.COLOR_BLACK,
-                background = Blitbuffer.COLOR_WHITE,
-                padding = pad,
-                self.text_box,
-            },
+    local body_divider = LineWidget:new{
+        background = Blitbuffer.COLOR_GRAY,
+        dimen = Geom:new{ w = inner_w, h = Size.line.medium },
+    }
+    local language_row = HorizontalGroup:new{
+        align = "center",
+        self.source_btn,
+        HorizontalSpan:new{ width = pad },
+        self.target_btn,
+    }
+    local body = VerticalGroup:new{
+        align = "left",
+        VerticalSpan:new{ width = Size.padding.small },
+        CenterContainer:new{
+            dimen = Geom:new{ w = self.width, h = language_row:getSize().h },
+            language_row,
         },
+        VerticalSpan:new{ width = Size.padding.small },
+        CenterContainer:new{
+            dimen = Geom:new{ w = self.width, h = Size.line.medium },
+            body_divider,
+        },
+        VerticalSpan:new{ width = Size.padding.small },
+        CenterContainer:new{
+            dimen = Geom:new{ w = self.width, h = text_h },
+            self.text_box,
+        },
+        VerticalSpan:new{ width = Size.padding.small },
     }
 
     local button_table = self:actionButtons()
-    local content = VerticalGroup:new{ align = "left", title_bar, divider, body }
+    local content = VerticalGroup:new{
+        align = "left",
+        title_bar,
+        title_divider,
+        body,
+    }
     if button_table then
         content[#content + 1] = CenterContainer:new{
             dimen = Geom:new{
