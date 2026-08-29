@@ -18,6 +18,9 @@ local _ = require("gettext")
 local SourceBase = {}
 SourceBase.__index = SourceBase
 
+-- 首页重新可见时允许检查一次书架；具体同步和网络缓存由各源决定。
+local BOOKS_REFRESH_INTERVAL = 5 * 60
+
 --- 构造 SourceBase 实例。
 ---@param o { id: SourceId, name: string|nil }|table|nil
 ---@return SourceBase
@@ -53,35 +56,76 @@ function SourceBase:close() end
 ---   chapter_changed — 按章会话切换章节，payload = { identity }
 ---   fm_open         — FileManager 主界面显示
 ---   desktop_open    — Book 桌面打开并可见，payload = Desktop 实例
+---   home_open       — 用户进入首页；源侧按节流策略检查书架
+---   library_refresh_request — 用户在图书馆点击刷新，要求源强制刷新书架
 ---   suspend         — 设备休眠前（有打开文档时）
 ---   network_connected — 网络恢复，源可重试持久化上报队列
 ---   stats_sync_request — 用户请求同步阅读统计，源决定 pull/push 和联网策略
 ---   page_changed    — 翻页（仅源身份书籍），payload = { identity, page, total_pages, percent }
 ---   book_info_request — 阅读面板详情页请求书籍信息，payload = { identity, book, refresh }
 ---     （源可拉最新详情写 Store.rememberMany 后调 refresh() 重绘面板；基类空操作即可）
----@param event string 事件名
----@param payload table|nil 事件载荷，含义随事件而定
-function SourceBase:onEvent(event, payload)
-    if event ~= "desktop_open" or type(payload) ~= "table" then return end
-    if self.configured and not self:configured() then return end
-    local desktop = payload
-    require("book.stats").pullInBackground(self)
+local function syncDesktopBooks(self, desktop, opts)
+    if type(desktop) ~= "table" or desktop._closed then return end
+    if desktop._books_sync_pending and not (opts and opts.force) then return end
     if desktop._books_sync_cancel and desktop._books_sync_cancel.cancel then
         desktop._books_sync_cancel:cancel()
     end
-    desktop._books_sync_cancel = self:syncBooksAsync(nil, function(result, err)
+    desktop._books_sync_pending = true
+    local request = {}
+    desktop._books_sync_request = request
+    local job = self:syncBooksAsync(opts, function(result, err)
+        if desktop._books_sync_request ~= request then return end
         desktop._books_sync_cancel = nil
+        desktop._books_sync_pending = false
         if desktop._closed or desktop.source ~= self then return end
         if not result then
             require("logger").warn("book shelf sync failed", self.id, err)
+            desktop._home_state = nil
+            desktop._home_loaded = false
+            if desktop.tab == "library" then
+                desktop._library_state = { books = {}, err = err or _("同步失败") }
+            end
+            if desktop.tab == "home" or desktop.tab == "library" then desktop:rebuild() end
             return
         end
-        if result.skipped then return end
+        -- 源自己的节流命中表示本地数据未变，不要无意义重建整页。
+        if result.skipped then
+            return
+        end
+        self._books_refresh_at = os.time()
         desktop._home_state = nil
         desktop._home_loaded = false
         desktop._library_state = nil
         if desktop.tab == "home" or desktop.tab == "library" then desktop:rebuild() end
     end)
+    -- 某些源会同步回调；避免把已完成的 job 句柄残留到桌面状态。
+    if desktop._books_sync_request == request and desktop._books_sync_pending then
+        desktop._books_sync_cancel = job
+    end
+end
+
+---@param event string 事件名
+---@param payload table|nil 事件载荷，含义随事件而定
+function SourceBase:onEvent(event, payload)
+    if type(payload) ~= "table" then return end
+    if self.configured and not self:configured() then return end
+    local desktop = payload
+    if event == "home_open" then
+        if self._books_refresh_at and os.time() - self._books_refresh_at < BOOKS_REFRESH_INTERVAL then
+            return
+        end
+        syncDesktopBooks(self, desktop)
+        return
+    end
+    if event == "library_refresh_request" then
+        syncDesktopBooks(self, desktop, { force = true })
+        return
+    end
+    if event ~= "desktop_open" then return end
+    -- 首页取最近阅读必须等首轮书架同步落库；否则远端源的封面仍只在
+    -- 实例内存缓存里，首屏会先构建出没有封面的卡片且不会自动补图。
+    require("book.stats").pullInBackground(self)
+    syncDesktopBooks(self, desktop)
 end
 
 ---@param cb function

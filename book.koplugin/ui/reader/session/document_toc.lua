@@ -7,6 +7,7 @@
 local Event = require("ui/event")
 
 local DocumentToc = {}
+local list_cache = setmetatable({}, { __mode = "k" })
 
 ---@param ui table|nil
 ---@return table|nil ReaderToc
@@ -21,7 +22,11 @@ local function rawToc(ui)
     if not toc_mod or not ui.document then
         return nil
     end
-    if type(toc_mod.fillToc) == "function" then
+    -- ReaderToc.fillToc 可能触发文档解析；TOC 在同一 ReaderUI 生命周期内是
+    -- 稳定的，已有结果时不要每次绘制都再次填充。
+    if type(toc_mod.toc) == "table" and #toc_mod.toc > 0 then
+        return toc_mod.toc
+    elseif type(toc_mod.fillToc) == "function" then
         pcall(toc_mod.fillToc, toc_mod)
     elseif type(ui.document.getToc) == "function" then
         local ok, items = pcall(ui.document.getToc, ui.document)
@@ -47,6 +52,10 @@ end
 function DocumentToc.list(ui)
     local items = rawToc(ui)
     if not items then return nil end
+    local cached = ui and list_cache[ui]
+    if cached and cached.items == items and cached.count == #items then
+        return cached.out
+    end
     local out = {}
     for i, entry in ipairs(items) do
         if type(entry) == "table" then
@@ -62,7 +71,11 @@ function DocumentToc.list(ui)
             }
         end
     end
-    return #out > 0 and out or nil
+    if #out == 0 then return nil end
+    if ui then
+        list_cache[ui] = { items = items, count = #items, out = out }
+    end
+    return out
 end
 
 ---@param ui table|nil

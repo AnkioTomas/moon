@@ -14,6 +14,7 @@ local defer_tracker_stop = false
 local tracker_stop_done
 local resolved_source
 local stored_toc = {}
+local toc_reads = 0
 local default_source = {
     id = "moon",
     type = "book",
@@ -89,6 +90,7 @@ package.preload["book.store"] = function()
             return nil
         end,
         toc = function(identity)
+            toc_reads = toc_reads + 1
             return stored_toc[identity.stable_id]
         end,
     }
@@ -320,8 +322,10 @@ do
     Stubs.flush()
     Assert.eq(calls.switched_path, "/cache/2.html")
     plugin.ui.document.file = "/cache/2.html"
+    local toc_reads_before_switch_ready = toc_reads
     Session.onReaderReady(plugin)
     Assert.eq(countPulls(), pulls_before + 1, "连续切章不应再 pull")
+    Assert.eq(toc_reads, toc_reads_before_switch_ready, "连续切章复用已加载目录")
     Assert.len(Session.toc(), 2)
 
     -- 目录回跳上一章落到章首，不是章尾

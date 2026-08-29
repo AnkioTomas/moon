@@ -74,8 +74,10 @@ end
 --- 切换设置子页并重建；页码重置到第一页。
 ---@param desktop table 桌面实例
 ---@param sub string|nil 子页标识；nil 回到设置主菜单
-local function gotoSub(desktop, sub)
+---@param parent string|nil 返回时的父级子页
+local function gotoSub(desktop, sub, parent)
     desktop._settings_sub = sub
+    desktop._settings_parent = parent
     desktop._settings_page = 1
     desktop:rebuild()
 end
@@ -87,7 +89,7 @@ local function backRow(desktop)
     return function(iw)
         return SettingRow.build(iw, {
             kind = "action", icon = "arrow_back", title = _("返回"),
-            callback = function() gotoSub(desktop, nil) end,
+            callback = function() gotoSub(desktop, desktop._settings_parent) end,
         })
     end
 end
@@ -122,6 +124,7 @@ function Settings.build(desktop)
     if sub ~= nil and not valid_sub[sub] then
         sub = nil
         desktop._settings_sub = nil
+        desktop._settings_parent = nil
     end
 
     if sub == nil then

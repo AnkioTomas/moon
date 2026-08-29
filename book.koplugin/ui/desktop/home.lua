@@ -101,6 +101,9 @@ end
 ---@param desktop table
 function Home.fetch(desktop)
     if desktop._home_fetching then return end
+    if desktop._books_sync_pending then
+        return
+    end
     desktop._home_fetching = true
 
     if desktop._home_fetch_cancel then

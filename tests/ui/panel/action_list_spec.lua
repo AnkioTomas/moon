@@ -50,10 +50,11 @@ end
 package.loaded["ui.panel.desktop"] = nil
 local DesktopPanel = require("ui.panel.desktop")
 
-Assert.eq(DesktopPanel.enabledCount(), 2)
+-- 配置为空时默认启用注册表中的全部桌面动作。
+Assert.eq(DesktopPanel.enabledCount(), 3)
 
 DesktopPanel.setEnabled("wifi", true)
-Assert.eq(DesktopPanel.enabledCount(), 2)
+Assert.eq(DesktopPanel.enabledCount(), 3)
 
 DesktopPanel.setEnabled("rotate", true)
 Assert.eq(DesktopPanel.enabledCount(), 3)

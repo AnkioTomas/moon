@@ -13,6 +13,8 @@ local Text = require("utils.text")
 local _ = require("gettext")
 
 local Chapter = {}
+local lfs = require("libs/libkoreader-lfs")
+local ready_cache = {}
 
 --- 读取整个文件的字节；路径无效或打不开返回 nil。
 ---@param path string|nil
@@ -27,14 +29,30 @@ local function readFile(path)
 end
 
 --- 章节 HTML 是否可直接复用（存在且远程 img 已内联）。
----@param path string
+---@param path string|nil
 ---@return boolean
 local function chapterReady(path)
-    local html = readFile(path)
-    if not html or html == "" then
+    if type(path) ~= "string" or path == "" then
         return false
     end
-    return not Text.hasRemoteImageSrc(html)
+    local attr = lfs.attributes(path)
+    if not attr or attr.mode ~= "file" then
+        ready_cache[path] = nil
+        return false
+    end
+    local signature = tostring(attr.size or "") .. ":" .. tostring(attr.modification or "")
+    local cached = ready_cache[path]
+    if cached and cached.signature == signature then
+        return cached.ready
+    end
+    local html = readFile(path)
+    if not html or html == "" then
+        ready_cache[path] = { signature = signature, ready = false }
+        return false
+    end
+    local ready = not Text.hasRemoteImageSrc(html)
+    ready_cache[path] = { signature = signature, ready = ready }
+    return ready
 end
 
 --- 取目录并把空目录归一成错误，免得各调用点重复判空。
@@ -136,6 +154,13 @@ local function write(path, payload, cb)
         pcall(os.remove, tmp)
         cb(nil, _("无法保存章节文件"))
         return
+    end
+    local attr = lfs.attributes(path)
+    if attr then
+        ready_cache[path] = {
+            signature = tostring(attr.size or "") .. ":" .. tostring(attr.modification or ""),
+            ready = true,
+        }
     end
     cb(path)
 end
@@ -255,7 +280,7 @@ function Chapter.openAsync(source, identity, book, opts, ops, cb)
     }
 end
 
---- 带进度对话框的按章打开：本地命中则快开并在后台刷新；否则联网准备。
+--- 带进度对话框的按章打开：本地命中快开；否则联网准备。
 ---@param source BookSource
 ---@param identity BookIdentity
 ---@param book Book
@@ -266,7 +291,7 @@ end
 function Chapter.openWithUi(source, identity, book, opts, ops, cb)
     opts = opts or {}
     local cancelled = false
-    local job, dialog, background_job
+    local job, dialog
 
     local local_path = existingLocalPath(identity, opts)
     if local_path then
@@ -277,20 +302,12 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
                 if not cancelled then cb(path) end
             end)
         end
-        -- 本地命中不应等待网络，也不应再启动一条独立的刷新流水线。
-        -- 后台 openAsync 已经会在需要时执行 refreshCached；这里直接交付缓存路径，
-        -- 避免重复拉 TOC、重复改写 HTML。
+        -- 本地命中直接交付。不要在切章时再启动后台 openAsync：它会重复读目录、
+        -- 扫描/改写整份 HTML，并把这些同步工作塞回 UI 线程，抵消快开收益。
         open(local_path)
-        require("ui/network/manager"):runWhenOnline(function()
-            if cancelled then return end
-            background_job = Chapter.openAsync(source, identity, book, opts, ops, function() end)
-        end)
         return {
             cancel = function()
                 cancelled = true
-                if background_job and background_job.cancel then
-                    background_job.cancel()
-                end
             end,
         }
     end
@@ -331,9 +348,6 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
             cancelled = true
             if job then
                 job.cancel()
-            end
-            if background_job and background_job.cancel then
-                background_job.cancel()
             end
             closeDialog()
         end,

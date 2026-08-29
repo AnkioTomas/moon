@@ -280,6 +280,9 @@ function Desktop:switchTab(id)
     end
     self.tab = id
     self:rebuild()
+    if id == "home" and self.plugin and self.plugin.emitToSource then
+        self.plugin:emitToSource("home_open", self)
+    end
 end
 
 -- 各 Tab 的在飞取数任务；换源和关桌面都必须全部取消（漏一个就是关了页还在跑网络+写库）
@@ -436,6 +439,22 @@ function Desktop:refreshTopBar()
     })
 end
 
+--- 原地刷新首页时钟；不重建整页，避免重置封面和异步图片任务。
+function Desktop:refreshHomeClock()
+    if self.tab ~= "home" or type(self._home_clock_refresh) ~= "function" then
+        return
+    end
+    self._home_clock_refresh()
+    local region = self._home_clock_region
+    if not region then return end
+    UIManager:setDirty(self, "ui", Geom:new{
+        x = region.x,
+        y = UI.topBarH() + region.y,
+        w = region.w,
+        h = region.h,
+    })
+end
+
 --- 按分钟对齐调度顶栏时钟刷新。
 function Desktop:scheduleClockTick()
     if self._clock_tick then
@@ -443,6 +462,7 @@ function Desktop:scheduleClockTick()
     end
     self._clock_tick = function()
         if self._closed then return end
+        self:refreshHomeClock()
         self:refreshTopBar()
         self:scheduleClockTick()
     end

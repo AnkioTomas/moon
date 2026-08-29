@@ -34,6 +34,7 @@ function DesktopSettings.rows(desktop, open_on)
                 status = T(_("已启用 %1 项"), count), status_on = count > 0,
                 callback = function()
                     desktop._settings_sub = "home"
+                    desktop._settings_parent = "desktop"
                     desktop._settings_page = 1
                     desktop:rebuild()
                 end,

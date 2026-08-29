@@ -245,6 +245,27 @@ do
     clearMods()
 end
 
+-- 大书架走批量 upsert，避免每本书重复 prepare/close。
+do
+    local connection, calls = makeConn()
+    local DbBase, BookDB = loadBook(connection)
+    local books = {}
+    for i = 1, 9 do
+        books[i] = { stable_id = "book-" .. i, title = "Book " .. i }
+    end
+    Assert.is_true(BookDB.reconcile("moon", books))
+    local inserts = 0
+    for _, call in ipairs(calls) do
+        if call.sql:find("INSERT INTO books", 1, true) then
+            inserts = inserts + 1
+            Assert.is_true(call.argc == 96 or call.argc == 12) -- 8/1 行 × 12 个绑定参数
+        end
+    end
+    Assert.eq(inserts, 2)
+    DbBase.close()
+    clearMods()
+end
+
 do
     local connection, calls = makeConn({
         step = function(sql)

@@ -106,6 +106,71 @@ function BookDB.upsertRemote(row)
     ) ~= nil
 end
 
+--- 批量写入远端书架行。大书架同步不能为每本书 prepare/close 一次；
+--- 每批 8 行（96 个绑定参数）：兼容低端设备上的 SQLite/LuaJIT 绑定实现，
+--- 同时避免每本书都重复 prepare/close。
+---@param rows table[]
+---@return boolean
+function BookDB.upsertRemoteMany(rows)
+    if type(rows) ~= "table" or #rows == 0 then return true end
+    Base.ensure()
+    for start = 1, #rows, 8 do
+        local values, args = {}, {}
+        local finish = math.min(start + 7, #rows)
+        for i = start, finish do
+            local row = rows[i]
+            if type(row) ~= "table" then return false end
+            local source_id = Base.requireSourceId(row.source_id)
+            local stable_id = row.stable_id
+            if type(stable_id) == "number" then stable_id = tostring(stable_id) end
+            if not source_id or type(stable_id) ~= "string" or stable_id == "" then
+                return false
+            end
+            values[#values + 1] = "(?,?,?,?,?,?,?,?,?,?,?,?,1)"
+            args[#args + 1] = source_id
+            args[#args + 1] = stable_id
+            args[#args + 1] = row.md5
+            args[#args + 1] = row.title
+            args[#args + 1] = row.authors
+            args[#args + 1] = tonumber(row.percent) or 0
+            args[#args + 1] = row.category
+            args[#args + 1] = favoriteToDb(row.favorite)
+            args[#args + 1] = row.series
+            args[#args + 1] = row.intro
+            args[#args + 1] = tonumber(row.fetched_at) or os.time()
+            args[#args + 1] = row.path
+        end
+        local ok = Base.exec(
+            [[INSERT INTO books (
+                source_id, stable_id, md5, title, authors, percent, category,
+                favorite, series, intro, fetched_at, path, in_library
+              ) VALUES ]] .. table.concat(values, ",") .. [[
+              ON CONFLICT(source_id, stable_id) DO UPDATE SET
+                md5=COALESCE(excluded.md5, books.md5),
+                title=CASE WHEN books.metadata_dirty=0 THEN excluded.title ELSE books.title END,
+                authors=CASE WHEN books.metadata_dirty=0 THEN excluded.authors ELSE books.authors END,
+                category=CASE WHEN books.metadata_dirty=0 THEN excluded.category ELSE books.category END,
+                favorite=CASE WHEN books.metadata_dirty=0 THEN excluded.favorite ELSE books.favorite END,
+                series=CASE WHEN books.metadata_dirty=0 THEN excluded.series ELSE books.series END,
+                intro=CASE WHEN books.metadata_dirty=0 THEN excluded.intro ELSE books.intro END,
+                percent=excluded.percent,
+                fetched_at=excluded.fetched_at,
+                path=COALESCE(excluded.path, books.path),
+                in_library=1;]],
+            -- args 内允许 NULL；不能用不带上界的 unpack，否则会在第一个 nil 处截断。
+            unpack(args, 1, #values * 12)
+        )
+        if not ok then
+            -- 某些旧版 SQLite/绑定对多行 UPSERT 支持不完整；批量失败时回退
+            -- 单行写入，不能让一次刷新把整个书架清空。
+            for i = start, finish do
+                if not BookDB.upsertRemote(rows[i]) then return false end
+            end
+        end
+    end
+    return true
+end
+
 --- 用户编辑展示元数据；版本用于异步确认，旧回调不能清掉新编辑。
 ---@param row table
 ---@return boolean
@@ -155,12 +220,24 @@ function BookDB.reconcile(source_id, books, opts)
             WHERE source_id=? AND in_library=0;]], source_id) ~= nil
     end
     if ok then
-        for _, row in ipairs(books) do
-            local copy = {}
-            for k, v in pairs(row) do copy[k] = v end
-            copy.source_id = source_id
-            copy.in_library = true
-            if not BookDB.upsertRemote(copy) then ok = false break end
+        if #books > 8 then
+            local batch = {}
+            for _, row in ipairs(books) do
+                local copy = {}
+                for k, v in pairs(row) do copy[k] = v end
+                copy.source_id = source_id
+                copy.in_library = true
+                batch[#batch + 1] = copy
+            end
+            ok = BookDB.upsertRemoteMany(batch)
+        else
+            for _, row in ipairs(books) do
+                local copy = {}
+                for k, v in pairs(row) do copy[k] = v end
+                copy.source_id = source_id
+                copy.in_library = true
+                if not BookDB.upsertRemote(copy) then ok = false break end
+            end
         end
     end
     if ok and Base.exec("COMMIT;") then return true end

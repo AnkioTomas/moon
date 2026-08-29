@@ -62,6 +62,10 @@ function Layout.build(ctx, state)
     local kids = { align = "left" }
     local used = 0
     local pager = nil
+    if ctx.desktop then
+        ctx.desktop._home_clock_refresh = nil
+        ctx.desktop._home_clock_region = nil
+    end
 
     for i, id in ipairs(layout_ids) do
         local comp = Base.find(id)
@@ -92,6 +96,15 @@ function Layout.build(ctx, state)
                 end
                 table.insert(kids, part.widget)
                 used = used + ph
+                if part.refresh and ctx.desktop then
+                    ctx.desktop._home_clock_refresh = part.refresh
+                    ctx.desktop._home_clock_region = Geom:new{
+                        x = 0,
+                        y = used - ph,
+                        w = w,
+                        h = ph,
+                    }
+                end
                 if part.pager then pager = part.pager end
             end
         end
@@ -110,6 +123,10 @@ function Layout.build(ctx, state)
         padding = 0,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
+        -- FrameContainer 的背景尺寸取 width/height，不取 dimen；组件内容不足一屏时
+        -- 不显式填满会留下旧页面像素，切回首页就会出现半屏白/残影。
+        width = w,
+        height = h,
         dimen = Geom:new{ w = w, h = h },
         VerticalGroup:new(kids),
     }
