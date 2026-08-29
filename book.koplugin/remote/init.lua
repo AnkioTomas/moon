@@ -46,8 +46,9 @@ local function storageLayout()
     local fonts = real(data .. "/fonts")
     local plugins = real(data .. "/plugins")
     local plugin_self = real(plugins .. "/book.koplugin")
+    local screenshot_dir = real(G_reader_settings:readSetting("screenshot_dir") or (data .. "/screenshots"))
     local roots = {}
-    for _, r in ipairs({ root, book, fonts, plugins, plugin_self }) do
+    for _, r in ipairs({ root, book, fonts, plugins, plugin_self, screenshot_dir }) do
         local dup = false
         for _, existing in ipairs(roots) do
             if Text.pathContains(existing, r) then
@@ -67,6 +68,7 @@ local function storageLayout()
             { label = "KOReader 字体", path = fonts },
             { label = "KOReader 插件", path = plugins },
             { label = "书籍根目录", path = book },
+            { label = "截图文件夹", path = screenshot_dir },
         },
         protected = {
             root,
@@ -179,47 +181,6 @@ end
 ---@return number
 function Remote.port()
     return tonumber(Settings.get().remote_port) or 9528
-end
-
---- 生成 n 字节随机数的十六进制串。
----
---- 优先 /dev/urandom。`math.random` 未播种时 LuaJIT 每次启动给出同一序列，
---- 令牌会在所有设备上完全一致——等于没有令牌。只有 urandom 不可用（极少见）
---- 才退回时间/地址混合播种的 math.random，并记一条 warn。
----@param n integer 字节数
----@return string 长度为 2n 的小写十六进制
-local function randomHex(n)
-    local f = io.open("/dev/urandom", "rb")
-    if f then
-        local raw = f:read(n)
-        f:close()
-        if type(raw) == "string" and #raw == n then
-            return (raw:gsub(".", function(ch)
-                return string.format("%02x", ch:byte())
-            end))
-        end
-    end
-    logger.warn("remote: /dev/urandom unavailable, token entropy degraded")
-    math.randomseed(os.time() + tonumber(tostring({}):match("0x(%x+)") or "0", 16))
-    local bytes = {}
-    for i = 1, n do
-        bytes[i] = string.format("%02x", math.random(0, 255))
-    end
-    return table.concat(bytes)
-end
-
---- 访问令牌（首次使用时生成并持久化）。所有 API 都要它，
---- 否则同网任何人都能读写设备文件。
----@return string
-function Remote.token()
-    local c = Settings.get()
-    local token = c.remote_token
-    if type(token) ~= "string" or #token < 16 then
-        token = randomHex(16)
-        c.remote_token = token
-        Settings.save(c)
-    end
-    return token
 end
 
 ---@return boolean
@@ -339,12 +300,13 @@ local function copyFile(src, dst)
     return true
 end
 
---- 上传落位：重名加 " (n)"；os.rename 失败（跨设备）退化为复制。
+--- 上传落位：重名策略由网页明确传入；os.rename 失败（跨设备）退化为复制。
 ---@param temp string
 ---@param dir string
 ---@param name string
 ---@param cb fun(ok: boolean|nil, err: any)
-local function saveUpload(temp, dir, name, cb)
+---@param conflict "overwrite"|"skip"|"rename"|nil
+local function saveUpload(temp, dir, name, cb, conflict)
     local lfs = require("libs/libkoreader-lfs")
     dir = existingPath(dir)
     if not dir then
@@ -354,9 +316,25 @@ local function saveUpload(temp, dir, name, cb)
     local stem, ext = name:match("^(.*)(%.[^.]*)$")
     stem, ext = stem or name, ext or ""
     local target, n = dir .. "/" .. name, 2
-    while lfs.attributes(target) do
-        target = string.format("%s/%s (%d)%s", dir, stem, n, ext)
-        n = n + 1
+    local existing = lfs.attributes(target)
+    -- 询问阶段与实际落位之间可能有竞态；默认退化为保留两者，绝不静默覆盖。
+    if conflict == "ask" and existing then
+        conflict = "rename"
+    end
+    if conflict == "skip" and existing then
+        pcall(os.remove, temp)
+        cb(true)
+        return
+    end
+    if conflict == "rename" then
+        while lfs.attributes(target) do
+            target = string.format("%s/%s (%d)%s", dir, stem, n, ext)
+            n = n + 1
+        end
+    elseif existing and existing.mode ~= "file" then
+        pcall(os.remove, temp)
+        cb(nil, "target is not a file")
+        return
     end
     local ok, err = os.rename(temp, target)
     if not ok then
@@ -364,6 +342,13 @@ local function saveUpload(temp, dir, name, cb)
     end
     pcall(os.remove, temp)
     cb(ok, err)
+end
+
+---@param path string
+---@return boolean
+local function pathExists(path)
+    path = existingPath(path)
+    return path ~= nil and require("libs/libkoreader-lfs").attributes(path) ~= nil
 end
 
 ---@param path string
@@ -587,7 +572,6 @@ function Remote.start()
     local server = require("remote.server").new {
         host = "*",
         port = Remote.port(),
-        token = Remote.token(),
         root = _layout.root,
         roots = _layout.roots,
         home = _layout.home,
@@ -596,6 +580,7 @@ function Remote.start()
             list_dir = listDir,
             resolve_download = resolveDownload,
             save = saveUpload,
+            path_exists = pathExists,
             mkdir = mkdirOne,
             delete = deleteRecursive,
             rename = renameTo,
@@ -690,15 +675,36 @@ local function localIP()
     return ip
 end
 
+--- 启动服务并给受控文件生成局域网下载地址。
+---@param path string
+---@return string|nil url
+---@return string|nil err
+function Remote.shareUrl(path)
+    -- 截图目录可在服务运行期间被用户修改；分享时以当前配置重建范围，
+    -- 否则新目录会被旧 roots 快照误判为越界。
+    _layout = storageLayout()
+    local real = existingPath(path)
+    if not real or require("libs/libkoreader-lfs").attributes(real, "mode") ~= "file" then
+        return nil, "file unavailable"
+    end
+    local ok, err = Remote.start()
+    if not ok then
+        return nil, err
+    end
+    local ip = localIP()
+    if not ip then
+        return nil, "local IP unavailable"
+    end
+    return string.format("http://%s:%d/download?path=%s", ip, Remote.port(), Text.urlEncode(real))
+end
+
 --- 状态行文案：运行中给可访问地址（IP 尽力而为），否则「未运行」。
 ---@return string status, boolean running
 local function statusLabel()
     if not Remote.isRunning() then
         return _("未运行"), false
     end
-    -- 地址必须带 token：页面自己把它存进 sessionStorage 再转发给各 API
-    return string.format("http://%s:%d/?t=%s",
-        localIP() or _("本机IP"), Remote.port(), Remote.token()), true
+    return string.format("http://%s:%d/", localIP() or _("本机IP"), Remote.port()), true
 end
 
 --- 运行状态文案：运行中给可访问地址，否则「未运行」。

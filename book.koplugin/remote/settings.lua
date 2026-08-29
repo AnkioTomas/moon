@@ -46,10 +46,14 @@ end
 ---@param normalize fun(string): string
 ---@return boolean changed
 local function applyField(cfg, key, incoming, normalize)
+    -- /api/settings is PATCH-like: omitting a key must not erase its saved value.
+    if incoming == nil then
+        return false
+    end
     if SECRET_KEYS[key] and unchangedSecret(incoming) then
         return false
     end
-    local next = normalize(tostring(incoming or ""))
+    local next = normalize(tostring(incoming))
     if cfg[key] ~= next then
         cfg[key] = next
         return true
@@ -156,11 +160,13 @@ function SettingsApi.apply(payload)
             cfg.user_id, cfg.user_key = nil, nil
             zlib_changed = true
         end
-        local base = Text.trim(g.base_url or "")
-        local next_base = base ~= "" and base or nil
-        if cfg.base_url ~= next_base then
-            cfg.base_url = next_base
-            zlib_changed = true
+        if g.base_url ~= nil then
+            local base = Text.trim(tostring(g.base_url))
+            local next_base = base ~= "" and base or nil
+            if cfg.base_url ~= next_base then
+                cfg.base_url = next_base
+                zlib_changed = true
+            end
         end
         if zlib_changed then
             Settings.saveSource("zlib", cfg)

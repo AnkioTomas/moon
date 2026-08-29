@@ -38,6 +38,8 @@ loadConfig().then(function (config) {
     function render(d) {
         var tb = el('list');
         tb.innerHTML = '';
+        var preview = el('preview');
+        preview.innerHTML = '';
 
         if (d.parent) {
             var tr0 = document.createElement('tr');
@@ -64,6 +66,14 @@ loadConfig().then(function (config) {
             var tr = document.createElement('tr');
             if (e.dir) tr.className = 'd';
 
+            if (!e.dir && /\.(png|jpe?g|gif|webp|bmp)$/i.test(e.name)) {
+                var img = document.createElement('img');
+                img.loading = 'lazy';
+                img.alt = e.name;
+                img.src = '/download?path=' + encodeURIComponent(full) + '&inline=1';
+                preview.appendChild(img);
+            }
+
             var td = document.createElement('td');
             td.className = 'n';
             var a = document.createElement('a');
@@ -75,7 +85,7 @@ loadConfig().then(function (config) {
                     return false;
                 };
             } else {
-                a.href = withToken('/download?path=' + encodeURIComponent(full));
+                a.href = '/download?path=' + encodeURIComponent(full);
             }
             td.appendChild(a);
             tr.appendChild(td);
@@ -181,6 +191,15 @@ loadConfig().then(function (config) {
         el('quick').appendChild(b);
     });
 
+    function uploadFile(file, conflict) {
+        return jfetch(
+            '/upload?dir=' + encodeURIComponent(cur) +
+            '&name=' + encodeURIComponent(file.name) +
+            '&conflict=' + encodeURIComponent(conflict || 'ask'),
+            { method: 'PUT', body: file }
+        );
+    }
+
     upBtn.onclick = function () {
         var fs = fileInput.files;
         if (!fs.length || busy) return;
@@ -196,11 +215,20 @@ loadConfig().then(function (config) {
             }
             var f = fs[i++];
             say('上传 ' + f.name + ' (' + fmt(f.size) + ')… ');
-            jfetch(
-                '/upload?dir=' + encodeURIComponent(cur) +
-                '&name=' + encodeURIComponent(f.name),
-                { method: 'PUT', body: f }
-            ).then(function () {
+            uploadFile(f).catch(function (err) {
+                if (err.status !== 409) throw err;
+                return dialog({
+                    title: '文件已存在', msg: f.name,
+                    choices: [
+                        { text: '覆盖', value: 'overwrite', kind: 'danger' },
+                        { text: '跳过', value: 'skip' },
+                        { text: '两者保留', value: 'rename', kind: 'primary' }
+                    ]
+                }).then(function (choice) {
+                    if (!choice) throw new Error('已取消');
+                    return uploadFile(f, choice);
+                });
+            }).then(function () {
                 el('log').textContent += '成功\n';
                 next();
             }).catch(function (err) {
