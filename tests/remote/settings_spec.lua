@@ -70,6 +70,30 @@ do
     Assert.eq(store.moon.base_url, "https://moon.test")
 end
 
+-- 远程 API 是部分更新：未提交的字段（尤其密钥）必须原样保留。
+do
+    store.ai.ai_endpoint = "https://keep.example/v1"
+    store.ai.ai_api_key = "keep-ai-key"
+    store.ai.ai_model = "old-model"
+    local result = SettingsApi.apply({ ai = { ai_model = "partial-model" } })
+    Assert.is_true(result.changed)
+    Assert.eq(store.ai.ai_endpoint, "https://keep.example/v1")
+    Assert.eq(store.ai.ai_api_key, "keep-ai-key")
+    Assert.eq(store.ai.ai_model, "partial-model")
+
+    store.moon.base_url, store.moon.token = "https://keep.moon", "keep-token"
+    SettingsApi.apply({ moon = { base_url = "https://new.moon" } })
+    Assert.eq(store.moon.token, "keep-token")
+
+    store.zlib.email, store.zlib.password, store.zlib.base_url = "old@example.com", "keep-password", "https://keep.zlib"
+    SettingsApi.apply({ zlib = { email = "new@example.com" } })
+    Assert.eq(store.zlib.password, "keep-password")
+    Assert.eq(store.zlib.base_url, "https://keep.zlib")
+
+    result = SettingsApi.apply({ ai = {}, moon = {}, zlib = {} })
+    Assert.is_false(result.changed)
+end
+
 for _, name in ipairs({
     "utils.settings", "source.registry", "remote.settings",
 }) do

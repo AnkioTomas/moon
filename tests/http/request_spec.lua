@@ -342,4 +342,35 @@ do
     Assert.eq(#sni_hosts, 1)
     -- 原始握手都被透传
     Assert.eq(handshake_calls, 4)
+
+    -- 普通请求在 yield 后取消必须立即关连接，不能只抑制回调却继续占用网络。
+    local queued
+    UIManager.looper = {
+        add_callback = function(_, fn)
+            queued = fn
+        end,
+    }
+    local turbo = require("turbo")
+    local closed = 0
+    turbo.async.HTTPClient = function()
+        return {
+            iostream = {
+                closed = function() return false end,
+                close = function() closed = closed + 1 end,
+            },
+            fetch = function()
+                return {}
+            end,
+        }
+    end
+    local calls = 0
+    local job = Request.request({ url = "https://api.ankio.net/pending" }, function()
+        calls = calls + 1
+    end)
+    local co = coroutine.create(queued)
+    Assert.is_true(coroutine.resume(co))
+    Assert.eq(coroutine.status(co), "suspended")
+    job.cancel()
+    Assert.eq(closed, 1)
+    Assert.eq(calls, 0)
 end

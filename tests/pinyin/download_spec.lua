@@ -142,6 +142,22 @@ local function cleanup()
 end
 
 local ok_run, err_run = pcall(function()
+    -- 远端 manifest 不可信：坏分片名不能进入下载状态，更不能把 _downloading 卡成 true。
+    local original_parts = manifest.parts
+    manifest.parts = {
+        { file = "../outside", size = #part1, sha256 = sha.sha256(part1) },
+        original_parts[2],
+    }
+    local bad_ok, bad_err
+    Download.ensure(function(ok, err)
+        bad_ok, bad_err = ok, err
+    end)
+    Stubs.flush()
+    Assert.is_false(bad_ok)
+    Assert.matches(bad_err, "bad manifest part")
+    Assert.is_false(Download.downloading())
+    manifest.parts = original_parts
+
     -- 第一轮第二片失败：第一片必须保留，重试只拉失败的那片。
     fail_part_once = true
     local failed, failed_err

@@ -24,6 +24,7 @@ for name in lfs.dir(tmp) do
 end
 
 local pending
+local book_row
 package.preload["utils.paths"] = function()
     return { chapterPath = function(_, idx) return tmp .. "/" .. idx .. ".html" end }
 end
@@ -31,7 +32,7 @@ package.preload["utils.db.progress"] = function()
     return { get = function() return pending end }
 end
 package.preload["utils.db.book"] = function()
-    return { get = function() return nil end }
+    return { get = function() return book_row end }
 end
 local touches = {}
 local touch_error
@@ -113,6 +114,13 @@ Chapter.openAsync({ type = "chapter" }, identity, {}, nil, ops, function(p) path
 Assert.eq(touches[#touches].chapter_idx, 3)
 Assert.eq(fetched[#fetched], 3)
 
+-- 书籍记录可能存在但尚未登记 path；缓存检查必须把 nil 当作未命中，不能传给 lfs。
+book_row = { path = nil }
+local nil_path_err
+Chapter.openAsync({ type = "chapter" }, identity, {}, nil, ops, function(_, err) nil_path_err = err end)
+Assert.is_nil(nil_path_err)
+book_row = nil
+
 -- 数据库登记失败时不能交付物理路径。
 touch_error = "db failed"
 local failed_path, failed_err
@@ -121,6 +129,32 @@ Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 1 }, ops, 
 end)
 Assert.is_nil(failed_path)
 Assert.eq(failed_err, "db failed")
+
+-- 新内容写入失败不能删除已有缓存，也不能把半截文件交给阅读器。
+local old_html = '<!DOCTYPE html><html><body><img src="https://example.com/old.png"/></body></html>'
+local old = assert(io.open(tmp .. "/1.html", "wb"))
+old:write(old_html)
+old:close()
+local real_open = io.open
+io.open = function(file, mode)
+    if file == tmp .. "/1.html.part" and mode == "wb" then
+        return {
+            write = function() return nil, "disk full" end,
+            close = function() return true end,
+        }
+    end
+    return real_open(file, mode)
+end
+local write_failed_path, write_failed_err
+Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 1 }, ops, function(p, err)
+    write_failed_path, write_failed_err = p, err
+end)
+io.open = real_open
+Assert.is_nil(write_failed_path)
+Assert.eq(write_failed_err, "disk full")
+local preserved = assert(io.open(tmp .. "/1.html", "rb"))
+Assert.eq(preserved:read("*a"), old_html)
+preserved:close()
 
 -- cancel 必须传给当前源任务，迟到回调不能继续下载正文。
 local load_callback
@@ -186,6 +220,26 @@ Assert.eq(prefetched[1], 2)
 Assert.eq(prefetched[2], 3)
 Assert.len(prefetched, 2, "共 3 章时从第 1 章只预取 2、3")
 Assert.is_true(io.open(tmp .. "/2.html", "rb") ~= nil)
+
+-- 单章返回 HTTP 425 等错误时继续后续章节，并准确回报成功/失败数量。
+for i = 1, 3 do os.remove(tmp .. "/" .. i .. ".html") end
+local cached, total, failed, last_error
+Chapter.prefetchAsync(identity, { title = "书" }, toc, 0, 3, {
+    fetchContent = function(_, item, cb)
+        if item.idx == 2 then
+            cb(nil, "HTTP 425")
+        else
+            cb({ title = item.title, text = "正文" .. item.idx })
+        end
+    end,
+}, function(done, all, bad, err)
+    cached, total, failed, last_error = done, all, bad, err
+end)
+Stubs.flush()
+Assert.eq(cached, 2)
+Assert.eq(total, 3)
+Assert.eq(failed, 1)
+Assert.eq(last_error, "HTTP 425")
 
 for name in lfs.dir(tmp) do
     if name ~= "." and name ~= ".." then os.remove(tmp .. "/" .. name) end

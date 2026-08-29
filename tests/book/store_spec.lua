@@ -33,6 +33,7 @@ end
 local chapter_rows = {} -- path → chapters 行
 local chapter_upserts = {}
 local chapter_upsert_ok = true
+local chapter_counts = {}
 package.preload["utils.db.chapter"] = function()
     return {
         get = function(path)
@@ -41,6 +42,9 @@ package.preload["utils.db.chapter"] = function()
         upsert = function(row)
             chapter_upserts[#chapter_upserts + 1] = row
             return chapter_upsert_ok
+        end,
+        countByBook = function(source_id, stable_id)
+            return chapter_counts[source_id .. "\0" .. stable_id] or 0
         end,
     }
 end
@@ -160,6 +164,20 @@ package.preload["source.registry"] = function()
 end
 
 local Store = require("book.store")
+
+-- ── allChaptersCached：目录数量与本地章节登记数必须一致 ──
+do
+    local identity = { source_id = "wechat", stable_id = "cached-book" }
+    toc_rows["wechat\0cached-book"] = "toc:cached"
+    json_values["toc:cached"] = { { idx = 1 }, { idx = 2 } }
+    chapter_counts["wechat\0cached-book"] = 2
+    Assert.is_true(Store.allChaptersCached(identity))
+    chapter_counts["wechat\0cached-book"] = 1
+    Assert.is_false(Store.allChaptersCached(identity))
+    Assert.is_false(Store.allChaptersCached({ source_id = "wechat", stable_id = "no-toc" }))
+    toc_rows["wechat\0cached-book"] = nil
+    chapter_counts["wechat\0cached-book"] = nil
+end
 
 -- ── identityFor：chapters 命中 → 章节身份（优先于 books.path）──
 do
