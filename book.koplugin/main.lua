@@ -43,6 +43,12 @@ function BookPlugin:init()
         logger.err("book turbo init failed:", err_turbo)
     end
     Host.attach(self)
+    -- ReaderLink 已原生处理脚注识别、内容提取和弹窗跳转。升级后的第一次
+    -- 初始化也要打开一次，之后用户可在「链接」菜单关闭，Book 不再覆盖选择。
+    if G_reader_settings and not G_reader_settings:isTrue("book_footnote_popup_initialized") then
+        G_reader_settings:saveSetting("footnote_link_in_popup", true)
+        G_reader_settings:saveSetting("book_footnote_popup_initialized", true)
+    end
     require("translate.init").install()
     require("ui.panel.native").install(self.ui)
     require("lockscreen.init").bootstrap()
