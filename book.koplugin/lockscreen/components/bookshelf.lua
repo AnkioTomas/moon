@@ -51,6 +51,13 @@ local M = {
     asset = { id = "none" },
 }
 
+local function activeSourceId()
+    if type(MoonSettings.activeSourceId) == "function" then
+        return MoonSettings.activeSourceId()
+    end
+    return MoonSettings.get().active_source or "local"
+end
+
 --- 取本地封面缓存路径；无 stable_id 或文件不存在返回 nil（锁屏不触网补图）。
 ---@param stable_id string|nil
 ---@param source_id string|nil
@@ -81,7 +88,7 @@ end
 --- 读取当前数据源的书架快照；锁屏不触网，只拿本地封面缓存。
 ---@return { reading: table[], covers: table[] }
 function M.data()
-    local source_id = MoonSettings.get().active_source or "local"
+    local source_id = activeSourceId()
     local recent = BookDB.recentBySource(source_id, 64)
     local reading, covers, seen = {}, {}, {}
 

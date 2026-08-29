@@ -25,6 +25,13 @@ local M = {
     min_height = 120,
 }
 
+local function activeSourceId()
+    if type(MoonSettings.activeSourceId) == "function" then
+        return MoonSettings.activeSourceId()
+    end
+    return MoonSettings.get().active_source or "local"
+end
+
 local BookInfo
 
 --- 延迟加载桌面同源组件，避免锁屏初始化依赖完整 UI 树。
@@ -82,7 +89,7 @@ end
 --- 进度以 progress 表为准（比 books.percent 新）。
 ---@return table|nil 书库为空时 nil
 local function latestBook()
-    local source_id = MoonSettings.get().active_source or "local"
+    local source_id = activeSourceId()
     local recent = BookDB.recentBySource(source_id, 16)
     if #recent == 0 then return nil end
     local row
