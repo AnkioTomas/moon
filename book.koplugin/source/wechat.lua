@@ -112,6 +112,30 @@ function Source:configured()
     return Auth.hasSession()
 end
 
+--- 删除微信读书的本地章节缓存、封面和登记；不删除云端书架。
+---@param identity BookIdentity
+---@param cb fun(ok: boolean, err: string|nil)
+---@return table
+function Source:deleteBookAsync(identity, cb)
+    local cancelled = false
+    require("ui/uimanager"):nextTick(function()
+        if cancelled then return end
+        local Paths = require("utils.paths")
+        local Util = require("ffi/util")
+        local dir = Paths.bookWorkDir(identity.stable_id, self.id)
+        if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory"
+            and not Util.purgeDir(dir) then
+            cb(false, _("删除本书失败"))
+            return
+        end
+        os.remove(Paths.coverPath(identity.stable_id, self.id))
+        require("utils.db.book").remove(self.id, identity.stable_id)
+        require("utils.db.chapter").deleteUnder(dir)
+        cb(true)
+    end)
+    return { cancel = function() cancelled = true end }
+end
+
 --- 清空封面 URL、阅读上下文与目录缓存。
 function Source:clearCaches()
     self._covers = {}

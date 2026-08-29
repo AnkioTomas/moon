@@ -26,6 +26,25 @@ local handlers = {
 ---@type ReaderSessionSnapshot|nil
 local current_session
 
+--- 安装本插件的书籍结束处理，屏蔽 KOReader 默认的结束菜单。
+---@param plugin table
+---@param ui table
+local function installEndOfBookHandler(plugin, ui)
+    local status = ui and ui.status
+    if not status or type(status.onEndOfBook) ~= "function"
+        or ui._book_end_of_book_handler then
+        return
+    end
+    ui._book_end_of_book_handler = true
+    status.onEndOfBook = function(self)
+        if Session.isChapterMode() and Session.onChapterBoundary(1) then
+            return true
+        end
+        require("ui.reader.end_dialog").show(plugin, ui, current_session and current_session.identity)
+        return true
+    end
+end
+
 ---@param plugin table
 ---@param session ReaderSessionSnapshot
 ---@param skip_pull boolean|nil 连续章节切章导航：跳过云端进度拉取与注解拉取
@@ -126,6 +145,7 @@ function Session.onReaderReady(plugin)
     end
 
     current_session = Snapshot.new(ui, identity)
+    installEndOfBookHandler(plugin, ui)
     local mode = Mode.resolve(identity)
     local skip_pull = handlers[mode].onReaderReady(plugin, current_session)
     bootstrapReading(plugin, current_session, skip_pull)

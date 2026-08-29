@@ -142,6 +142,30 @@ function Source:configured()
     return self._client:configured()
 end
 
+--- 删除 Moon 书籍的本地文件、封面和登记；不删除云端原书。
+---@param identity BookIdentity
+---@param cb fun(ok: boolean, err: string|nil)
+---@return table
+function Source:deleteBookAsync(identity, cb)
+    local cancelled = false
+    require("ui/uimanager"):nextTick(function()
+        if cancelled then return end
+        local Paths = require("utils.paths")
+        local Util = require("ffi/util")
+        local dir = Paths.bookWorkDir(identity.stable_id, self.id)
+        if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory"
+            and not Util.purgeDir(dir) then
+            cb(false, _("删除本书失败"))
+            return
+        end
+        os.remove(Paths.coverPath(identity.stable_id, self.id))
+        require("utils.db.book").remove(self.id, identity.stable_id)
+        require("utils.db.chapter").deleteUnder(dir)
+        cb(true)
+    end)
+    return { cancel = function() cancelled = true end }
+end
+
 --- 打开 Moon 整本书：缓存命中直开，否则下载、校验并登记物理路径。
 ---@param identity BookIdentity
 ---@param _opts table|nil

@@ -39,6 +39,17 @@ function SourceBase:clearCaches() end
 --- 关闭数据源并释放资源（基类空操作）。
 function SourceBase:close() end
 
+--- 删除源拥有的书籍；默认源不提供删除实现。
+---@param _identity BookIdentity
+---@param cb fun(ok: boolean, err: string|nil)
+---@return table|nil
+function SourceBase:deleteBookAsync(_identity, cb)
+    require("ui/uimanager"):nextTick(function()
+        cb(false, _("当前数据源不支持删除本书"))
+    end)
+    return nil
+end
+
 --- 插件生命周期事件通知。桌面打开默认后台同步书架，各源可追加行为。
 --- 事件清单：
 ---   reader_open     — Reader 实例创建（Reader 侧插件 init）

@@ -9,7 +9,7 @@ Desktop 顶部状态条（纯构建、无内部状态）。
   左贴左（时钟最左，其后源名）· 右贴右（OverlapGroup）；缺能力的指标直接省略。
 
 指标（右，左→右）：
-  剩余内存、剩余存储、Wi‑Fi、亮度、电池（电池固定贴最右）。
+  剩余内存、后台缓存（有任务时显示且可点击）、剩余存储、Wi‑Fi、亮度、电池（电池固定贴最右）。
   内存/存储用 util.getFriendlySize 显示可用量；拉不到则省略。
 
 电池：
@@ -55,6 +55,7 @@ local SourceRegistry = require("source.registry")
 local CacheQueue = require("source.cache_queue")
 
 local TopBar = {}
+local cache_rect
 
 --- 顶栏小图标逻辑尺寸（小于底栏的 24）。
 local ICON_SIZE = 14
@@ -170,6 +171,12 @@ function TopBar.sourceTapRect()
     }
 end
 
+--- 当前缓存指标在顶栏上的可点区域；无任务时返回 nil。
+---@return table|nil
+function TopBar.cacheTapRect()
+    return cache_rect
+end
+
 --- 构建一整条顶栏 widget（无缓存；调用方负责挂到 Desktop 并 setDirty）。
 ---@return table
 function TopBar.build()
@@ -201,9 +208,10 @@ function TopBar.build()
         },
     }
 
-    -- 右：剩余内存、剩余存储、Wi-Fi、亮度、电池（电池贴最右）。
+    -- 右：剩余内存、后台缓存、剩余存储、Wi-Fi、亮度、电池（电池贴最右）。
     local right = HorizontalGroup:new{ align = "center" }
     local n = 0
+    local metrics = {}
     --- 向右侧指标行追加一项。
     ---@param widget table|nil
     local function add(widget)
@@ -214,6 +222,7 @@ function TopBar.build()
             table.insert(right, HorizontalSpan:new{ width = gap_w })
         end
         table.insert(right, widget)
+        metrics[#metrics + 1] = widget
         n = n + 1
     end
 
@@ -223,7 +232,8 @@ function TopBar.build()
         add(metric("memory", util.getFriendlySize(mem_avail)))
     end
 
-    add(metric("download", cacheStatus()))
+    local cache_widget = metric("download", cacheStatus())
+    add(cache_widget)
 
     -- 剩余存储：数据目录所在文件系统的可用空间（f_bavail；接口在 ffi/util）。
     local _, _, disk_avail = ffiUtil.df(DataStorage:getDataDir())
@@ -245,6 +255,36 @@ function TopBar.build()
         local pct = Device.powerd:getCapacity()
         if type(pct) == "number" then
             add(batteryMetric(pct, Device.powerd:isCharging()))
+        end
+    end
+
+    cache_rect = nil
+    local right_w = 0
+    for i, widget in ipairs(metrics) do
+        local size = widget.getSize and widget:getSize()
+        if size then
+            if i > 1 then right_w = right_w + gap_w end
+            right_w = right_w + size.w
+        end
+    end
+    for i, widget in ipairs(metrics) do
+        if widget == cache_widget then
+            local size = widget.getSize and widget:getSize()
+            local before = 0
+            for j = 1, i - 1 do
+                local prev = metrics[j]
+                local prev_size = prev.getSize and prev:getSize()
+                if prev_size then before = before + prev_size.w + gap_w end
+            end
+            if size then
+                cache_rect = Geom:new{
+                    x = pad + inner_w - right_w + before,
+                    y = 0,
+                    w = size.w,
+                    h = th,
+                }
+            end
+            break
         end
     end
 

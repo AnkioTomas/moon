@@ -58,6 +58,28 @@ function Source:configured()
     return self._client:configured()
 end
 
+--- 删除本地原书及其本地登记。
+---@param identity BookIdentity
+---@param cb fun(ok: boolean, err: string|nil)
+---@return table
+function Source:deleteBookAsync(identity, cb)
+    local cancelled = false
+    require("ui/uimanager"):nextTick(function()
+        if cancelled then return end
+        local path = identity and identity.stable_id
+        if type(path) ~= "string" or path == "" or not os.remove(path) then
+            cb(false, _("删除本书失败"))
+            return
+        end
+        require("utils.db.book").remove(self.id, identity.stable_id)
+        require("utils.db.chapter").delete(path)
+        local Paths = require("utils.paths")
+        os.remove(Paths.coverPath(identity.stable_id, self.id))
+        cb(true)
+    end)
+    return { cancel = function() cancelled = true end }
+end
+
 --- 本地文件直接登记并返回，不下载不复制。
 ---@param identity BookIdentity
 ---@param _opts table|nil
