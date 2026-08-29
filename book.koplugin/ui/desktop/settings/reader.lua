@@ -19,7 +19,8 @@ local POPUP_BUTTONS = {
     { id = "highlight", title = _("高亮"), icon = "format_ink_highlighter" },
     { id = "copy", title = _("复制"), icon = "content_copy" },
     { id = "add_note", title = _("添加笔记"), icon = "note_add" },
-    { id = "wikipedia", title = _("维基百科"), icon = "language" },
+    -- 保持 wikipedia id，兼容已保存的划词菜单显示设置。
+    { id = "wikipedia", title = _("百度百科"), icon = "language" },
     { id = "dictionary", title = _("词典"), icon = "book" },
     { id = "translate", title = _("翻译"), icon = "translate" },
     { id = "view_html", title = _("查看HTML"), icon = "code" },
@@ -73,10 +74,40 @@ function ReaderSettings.sections(desktop)
     local top_on = Bars.topBarPreference()
     local bottom_on = Bars.bottomBarPreference()
     local animation_on = PageTurnAnimation.isEnabled()
+    local edge_translation_on = reader.edge_translation_enabled ~= false
+    local baike_on = reader.baike_enabled ~= false
 
     local popup_rows = {}
     for _, item in ipairs(POPUP_BUTTONS) do
         popup_rows[#popup_rows + 1] = popupToggleRow(desktop, item.id, item.title, item.icon)
+    end
+    local translation_rows = {
+        function(iw)
+            return SettingRow.build(iw, {
+                kind = "toggle", icon = "translate", title = _("Edge 翻译"),
+                status = edge_translation_on and _("开") or _("关"), status_on = edge_translation_on,
+                callback = function()
+                    reader.edge_translation_enabled = not edge_translation_on
+                    MoonSettings.saveSection("reader", reader)
+                    desktop:rebuild()
+                end,
+            })
+        end,
+    }
+    if edge_translation_on then
+        translation_rows[#translation_rows + 1] = function(iw)
+            local Languages = require("translate.languages")
+            local Translator = require("ui/translator")
+            return SettingRow.build(iw, {
+                kind = "nav",
+                icon = "translate",
+                title = _("常用翻译语言"),
+                status = T(_("%1 种"), #Languages.favoriteCodes()),
+                callback = function()
+                    Languages.openSettingsPicker(Translator, desktop)
+                end,
+            })
+        end
     end
 
     return {
@@ -163,17 +194,19 @@ function ReaderSettings.sections(desktop)
         },
         {
             title = _("翻译"),
+            rows = translation_rows,
+        },
+        {
+            title = _("百科"),
             rows = {
                 function(iw)
-                    local Languages = require("translate.languages")
-                    local Translator = require("ui/translator")
                     return SettingRow.build(iw, {
-                        kind = "nav",
-                        icon = "translate",
-                        title = _("常用翻译语言"),
-                        status = T(_("%1 种"), #Languages.favoriteCodes()),
+                        kind = "toggle", icon = "language", title = _("百度百科"),
+                        status = baike_on and _("开") or _("关"), status_on = baike_on,
                         callback = function()
-                            Languages.openSettingsPicker(Translator, desktop)
+                            reader.baike_enabled = not baike_on
+                            MoonSettings.saveSection("reader", reader)
+                            desktop:rebuild()
                         end,
                     })
                 end,
