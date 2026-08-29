@@ -147,9 +147,15 @@ local function write(path, payload, cb)
     pcall(os.remove, tmp)
     local f, err = io.open(tmp, "wb")
     if not f then cb(nil, err or _("无法写入章节")); return end
-    f:write(html)
-    f:close()
-    os.remove(path)
+    local wrote, write_err = f:write(html)
+    local closed, close_err = f:close()
+    if not wrote or not closed then
+        pcall(os.remove, tmp)
+        cb(nil, write_err or close_err or _("无法写入章节"))
+        return
+    end
+    -- Same-directory rename replaces the old cache atomically on supported targets.
+    -- Deleting path first turns a transient write/rename failure into data loss.
     if not os.rename(tmp, path) then
         pcall(os.remove, tmp)
         cb(nil, _("无法保存章节文件"))
@@ -360,7 +366,7 @@ end
 ---@param toc BookChapter[]
 ---@param from_idx integer 当前章序号（预取 from_idx+1 …）
 ---@param count integer 预取章数
----@param ops { fetchContent: fun(identity: BookIdentity, chapter: BookChapter, cb: function), progress: fun(done: integer, total: integer)|nil }
+---@param ops { fetchContent: fun(identity: BookIdentity, chapter: BookChapter, cb: function), progress: fun(done: integer, total: integer)|nil, interval_seconds: number|nil }
 ---@param cb fun(cached: integer, total: integer, failed: integer, err: any)|nil 完成统计
 ---@return { cancel: fun() }
 function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
@@ -387,6 +393,7 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
     end
 
     local pos = 1
+    local interval = math.max(0, tonumber(ops.interval_seconds) or 0)
     local function report()
         if ops.progress then
             ops.progress(cached_count + failed_count, #indices)
@@ -394,11 +401,19 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
     end
 
     local nextIndex
+    local function continueNext()
+        local UIManager = require("ui/uimanager")
+        if interval > 0 then
+            UIManager:scheduleIn(interval, nextIndex)
+        else
+            UIManager:nextTick(nextIndex)
+        end
+    end
     local function failed(err)
         failed_count = failed_count + 1
         last_error = err or last_error
         report()
-        require("ui/uimanager"):nextTick(nextIndex)
+        continueNext()
     end
 
     --- 处理下一个待预取章节；单章失败不阻断后续，但必须进入最终统计。
@@ -448,7 +463,7 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
                     end
                     cached_count = cached_count + 1
                     report()
-                    require("ui/uimanager"):nextTick(nextIndex)
+                    continueNext()
                 end)
             end)
         end)

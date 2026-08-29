@@ -378,6 +378,8 @@ function Source:cacheAllChaptersAsync(identity, on_progress, cb)
         active = require("source.chapter").prefetchAsync(identity, identity.book, toc, 0, #toc, {
             fetchContent = fetchContent,
             progress = on_progress,
+            -- 全本缓存让服务端有喘息时间；阅读期预取仍保持无间隔。
+            interval_seconds = 1.5,
         }, function(cached, total, failed, last_err)
             if not cancelled then
                 cb(failed == 0, cached, last_err, total, failed)

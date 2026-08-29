@@ -237,9 +237,12 @@ local function rewriteCachedHtml(path)
     if not out then
         return false
     end
-    out:write(cleaned)
-    out:close()
-    os.remove(path)
+    local wrote = out:write(cleaned)
+    local closed = out:close()
+    if not wrote or not closed then
+        pcall(os.remove, tmp)
+        return false
+    end
     if os.rename(tmp, path) then
         return true
     end
