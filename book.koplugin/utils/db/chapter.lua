@@ -29,6 +29,22 @@ function ChapterDB.get(path)
     }
 end
 
+--- 按书统计已登记的章节文件数。
+---@param source_id string
+---@param stable_id string
+---@return integer
+function ChapterDB.countByBook(source_id, stable_id)
+    if type(source_id) ~= "string" or source_id == ""
+        or type(stable_id) ~= "string" or stable_id == "" then
+        return 0
+    end
+    Base.ensure()
+    return tonumber(Base.rowexec(
+        [[SELECT COUNT(*) FROM chapters WHERE source_id=? AND stable_id=?;]],
+        source_id, stable_id
+    )) or 0
+end
+
 --- 登记章节文件路径 → 书籍身份
 ---@param row { path: string, source_id: string, stable_id: string, chapter_idx: integer }
 ---@return boolean
