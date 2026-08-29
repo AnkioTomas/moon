@@ -26,7 +26,40 @@ local Bars = {
     view = nil,
     ui = nil,
     _clock = nil,
+    -- paintTo 是 ReaderView 的热路径。缓存文本控件，避免每次局部刷新都重新
+    -- 分配 xtext 缓冲和做一次完整排版。
+    _paint_widgets = {},
+    _paint_widget_keys = {},
 }
+
+---@param slot string
+---@param key string
+---@param opts table
+---@return table
+local function cachedTextWidget(slot, key, opts)
+    local old_key = Bars._paint_widget_keys[slot]
+    local widget = Bars._paint_widgets[slot]
+    if not widget or old_key ~= key then
+        if widget and widget.free then
+            widget:free()
+        end
+        local TextWidget = require("ui/widget/textwidget")
+        widget = TextWidget:new(opts)
+        Bars._paint_widgets[slot] = widget
+        Bars._paint_widget_keys[slot] = key
+    end
+    return widget
+end
+
+local function clearPaintWidgets()
+    for slot, widget in pairs(Bars._paint_widgets) do
+        if widget and widget.free then
+            widget:free()
+        end
+        Bars._paint_widgets[slot] = nil
+        Bars._paint_widget_keys[slot] = nil
+    end
+end
 
 --- 顶条时间文案。
 ---@param now number|nil os.time 时间戳（缺省当前）
@@ -545,6 +578,10 @@ function Bars:startClock()
     -- 闭包里必须捕获本次的 ui，否则 instance ~= self.ui 永远为假，旧链条不停摆，
     -- 每开一本书就多一条每分钟刷屏的定时器。
     local ui = self.ui
+    if self._paint_ui and self._paint_ui ~= ui then
+        clearPaintWidgets()
+    end
+    self._paint_ui = ui
     if self._clock then
         UIManager:unschedule(self._clock)
     end
@@ -568,7 +605,6 @@ end
 ---@param y number
 ---@return nil
 function Bars:paintTo(bb, x, y)
-    local TextWidget = require("ui/widget/textwidget")
     local cur = require("ui.reader.session").current()
     if not cur then
         return
@@ -594,23 +630,25 @@ function Bars:paintTo(bb, x, y)
             local text_h = Bars.topHeight(ui)
             local face = topTextFace(ui, text_h)
 
-            local time = TextWidget:new{
-                text = Bars.timeText(),
-                face = face,
-                fgcolor = Blitbuffer.COLOR_BLACK,
-            }
+            local time_text = Bars.timeText()
+            local time = cachedTextWidget("time",
+                table.concat({ time_text, tostring(face), tostring(text_h) }, "\0"), {
+                    text = time_text,
+                    face = face,
+                    fgcolor = Blitbuffer.COLOR_BLACK,
+                })
             local ts = time:getSize()
-            local title = TextWidget:new{
-                text = Bars.chapterTitle(Session.current()),
-                face = face,
-                fgcolor = Blitbuffer.COLOR_BLACK,
-                max_width = math.max(1, inner_w - ts.w - gap),
-            }
+            local title_text = Bars.chapterTitle(Session.current())
+            local title_width = math.max(1, inner_w - ts.w - gap)
+            local title = cachedTextWidget("title",
+                table.concat({ title_text, tostring(face), tostring(title_width), tostring(text_h) }, "\0"), {
+                    text = title_text,
+                    face = face,
+                    fgcolor = Blitbuffer.COLOR_BLACK,
+                    max_width = title_width,
+                })
             paintCentered(title, bb, x + margin_l, text_y, text_h)
             time:paintTo(bb, x + w - margin_r - ts.w, text_y + math.floor((text_h - ts.h) / 2))
-            -- paintTo 每次翻页/每分钟时钟都会跑：TextWidget 持有 xtext 缓冲，画完即释放
-            title:free()
-            time:free()
         end
     end
 
@@ -628,12 +666,14 @@ function Bars:paintTo(bb, x, y)
         local pct = math.max(0, math.min(100, tonumber(cur.percent) or 0))
         local info_text = Bars.progressText(cur, Session.toc(), Session.remainingSeconds())
 
-        local info = TextWidget:new{
-            text = info_text,
-            face = face,
-            fgcolor = fgcolor,
-            bold = footer.footer_text and footer.footer_text.bold,
-        }
+        local bold = footer.footer_text and footer.footer_text.bold
+        local info = cachedTextWidget("info",
+            table.concat({ info_text, tostring(face), tostring(fgcolor), tostring(bold) }, "\0"), {
+                text = info_text,
+                face = face,
+                fgcolor = fgcolor,
+                bold = bold,
+            })
 
         if settings.disable_progress_bar then
             info.max_width = inner_w
@@ -685,7 +725,6 @@ function Bars:paintTo(bb, x, y)
             bar:free()
             info:paintTo(bb, x + margin_l + prog_w + gap, row_y + math.floor((row_h - is.h) / 2))
         end
-        info:free()
         end
     end
 end

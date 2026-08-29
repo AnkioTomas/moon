@@ -29,10 +29,7 @@ local Registry = require("ui.panel.actions.registry")
 
 local Panel = {}
 
---- 新装默认启用的桌面动作。
-local DEFAULT_ACTIONS = { "night", "wifi" }
-
-local list = ActionList.create("desktop", "quick_panel_actions", DEFAULT_ACTIONS, {
+local list = ActionList.create("desktop", "quick_panel_actions", Registry.desktopOrder, {
     can_enable = function(action) return Registry.available(action) end,
 })
 

@@ -32,8 +32,11 @@ local DEFAULTS = {
     remote = { remote_port = 9528, remote_autostart = false },
     pinyin = { pinyin_enabled = false },
     quickpanel = {
-        quick_panel_actions = { "night", "wifi" },
-        quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "xray", "dictionary", "ocr" },
+        -- 新安装默认启用注册表中的全部动作；已有配置仍保持用户选择。
+        quick_panel_actions = {
+            "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "suspend",
+        },
+        quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "xray", "dictionary" },
     },
     reader = {
         book_xray_enabled = true,
