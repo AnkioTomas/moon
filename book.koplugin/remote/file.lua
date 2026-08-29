@@ -56,7 +56,8 @@ end
 ---@param conn table
 ---@param method string
 ---@param path string|nil 目标文件绝对路径
-function File.download(self, conn, method, path)
+---@param inline string|nil 图片预览时省略附件头
+function File.download(self, conn, method, path, inline)
     if method ~= "GET" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
@@ -79,10 +80,19 @@ function File.download(self, conn, method, path)
     local size = file:seek("end") or 0
     file:seek("set", 0)
     local name = real:match("([^/]+)$") or "file"
+    local ext = name:lower():match("(%.[^.]*)$")
+    local ctype = ({
+        [".png"] = "image/png", [".jpg"] = "image/jpeg", [".jpeg"] = "image/jpeg",
+        [".gif"] = "image/gif", [".webp"] = "image/webp", [".bmp"] = "image/bmp",
+    })[ext] or "application/octet-stream"
+    local extra = nil
+    if inline ~= "1" then
+        extra = { "Content-Disposition: attachment; filename*=UTF-8''" .. Text.urlEncode(name) }
+    end
     return self:_queueResponse(conn, {
         code = 200,
-        ctype = "application/octet-stream",
-        extra = { "Content-Disposition: attachment; filename*=UTF-8''" .. Text.urlEncode(name) },
+        ctype = ctype,
+        extra = extra,
         file = file,
         size = size,
     })
@@ -96,8 +106,9 @@ end
 ---@param headers table 已小写化的请求头
 ---@param dir string|nil 落位目录绝对路径
 ---@param name string|nil 文件名（斜杠会被替换成下划线）
+---@param conflict string|nil 重名策略：缺省 ask，先 409 让客户端选择
 ---@return true|nil true=已进 body 状态；nil=已排错误响应
-function File.upload(self, conn, method, headers, dir, name)
+function File.upload(self, conn, method, headers, dir, name, conflict)
     if method ~= "PUT" and method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
@@ -115,6 +126,14 @@ function File.upload(self, conn, method, headers, dir, name)
     name = Text.trim(type(name) == "string" and name:gsub("[/\\]", "_") or "")
     if name == "" or name == "." or name == ".." then
         return self:_fail(conn, 400, "Bad name")
+    end
+    conflict = conflict or "ask"
+    if conflict ~= "ask" and conflict ~= "overwrite" and conflict ~= "skip" and conflict ~= "rename" then
+        return self:_fail(conn, 400, "Bad conflict policy")
+    end
+    if conflict == "ask" and self.handlers.path_exists
+        and self.handlers.path_exists(dir .. "/" .. name) then
+        return self:_fail(conn, 409, "File exists")
     end
     local len = tonumber(headers["content-length"] or "")
     if headers["transfer-encoding"] and not len then
@@ -138,6 +157,7 @@ function File.upload(self, conn, method, headers, dir, name)
     conn.temp = temp
     conn.dir = dir
     conn.name = name
+    conn.conflict = conflict
     conn.remaining = len
     conn.state = "body"
     return true

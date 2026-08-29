@@ -46,7 +46,8 @@ local STATUS = {
 ---@class RemoteHandlers
 ---@field list_dir fun(path: string): table[]|nil, any 目录项 { name, dir, size, mtime }；非目录返回 nil, err
 ---@field resolve_download fun(path: string): string|nil 存在且是普通文件才返回路径
----@field save fun(temp: string, dir: string, name: string, cb: fun(ok: boolean|nil, err: any)) 上传落位（可异步）
+---@field path_exists fun(path: string): boolean 路径是否已存在（上传重名预检）
+---@field save fun(temp: string, dir: string, name: string, cb: fun(ok: boolean|nil, err: any), conflict: "overwrite"|"skip"|"rename"|nil) 上传落位（可异步）
 ---@field mkdir fun(path: string): boolean|nil, any
 ---@field delete fun(path: string): boolean|nil, any
 ---@field rename fun(path: string, to: string): boolean|nil, any
@@ -77,17 +78,15 @@ Server._routeInput = Input.route
 Server._routeClipboard = Input.clipboard
 Server._routeSettings = SettingsRoute.settings
 
----@param o { host: string|nil, port: number, token: string, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil }
+---@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil }
 ---@return table
 function Server.new(o)
     o = o or {}
     assert(type(o.handlers) == "table", "remote.server: handlers required")
     assert(type(o.root) == "string", "remote.server: root required")
-    assert(type(o.token) == "string" and o.token ~= "", "remote.server: token required")
     return setmetatable({
         host = o.host or "*",
         port = o.port,
-        token = o.token,
         handlers = o.handlers,
         root = o.root,
         roots = o.roots or { o.root },
@@ -346,18 +345,6 @@ function Server:_isRoot(path)
     return false
 end
 
---- 请求是否带正确 token（查询串 t= 或 Authorization: Bearer）。
----@param headers table
----@param query table
----@return boolean
-function Server:_authorized(headers, query)
-    if query.t == self.token then
-        return true
-    end
-    local auth = headers["authorization"]
-    return type(auth) == "string" and auth:match("^[Bb]earer%s+(.+)$") == self.token
-end
-
 --- Host 是域名说明是 DNS rebinding：浏览器会把它当同源，于是恶意页面里的脚本
 --- 能拿设备当自己的后端。只认 IP / localhost 字面量；无 Host 头不是浏览器，放过。
 ---@param headers table
@@ -392,7 +379,7 @@ local function sameOrigin(headers)
 end
 
 --- 解析请求行 + headers 并分发路由；失败直接排响应。
---- 顺序固定：静态资源（免凭据，仅 GET，否则 405）→ token 校验（403）→
+--- 顺序固定：静态资源（仅 GET，否则 405）→
 --- Host 字面量校验（403，防 DNS rebinding）→ 非 GET 的同源校验（403）→ API 路由；
 --- 全不匹配回 404。
 ---@param conn table
@@ -423,12 +410,6 @@ function Server:_route(conn, head)
         return self:_queueResponse(conn, { code = 200, ctype = ctype, body = body })
     end
 
-    -- 静态页面/资源是常量，可无凭据取；其余全部要 token：
-    -- 没有这道门，同一 Wi-Fi 上任何人都能列目录、下载、删文件、改配置。
-    if not self:_authorized(headers, query) then
-        logger.warn("book remote unauthorized", method, path)
-        return self:_fail(conn, 403, "Unauthorized")
-    end
     if not hostIsLiteral(headers) then
         return self:_fail(conn, 403, "Bad host")
     end
@@ -454,9 +435,9 @@ function Server:_route(conn, head)
     elseif path == "/api/list" then
         return self:_routeList(conn, method, query.path)
     elseif path == "/download" then
-        return self:_routeDownload(conn, method, query.path)
+        return self:_routeDownload(conn, method, query.path, query.inline)
     elseif path == "/upload" then
-        return self:_routeUpload(conn, method, headers, query.dir, query.name)
+        return self:_routeUpload(conn, method, headers, query.dir, query.name, query.conflict)
     elseif path == "/api/mkdir" then
         return self:_routeMutate(conn, method, query.path, self.handlers.mkdir)
     elseif path == "/api/delete" then
@@ -560,7 +541,7 @@ function Server:_readBody(conn)
     end
     conn.file:close()
     conn.file = nil
-    local temp, dir, name = conn.temp, conn.dir, conn.name
+    local temp, dir, name, conflict = conn.temp, conn.dir, conn.name, conn.conflict
     conn.temp = nil -- 所有权移交 save（kill 不许再删）
     conn.state = "pending"
     self.handlers.save(temp, dir, name, function(ok, err)
@@ -574,7 +555,7 @@ function Server:_readBody(conn)
                 ctype = "application/json; charset=utf-8",
                 body = JSON.encode({ error = "Save failed: " .. tostring(err) }),
             }
-    end)
+    end, conflict)
     return true
 end
 
