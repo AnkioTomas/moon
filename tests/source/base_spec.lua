@@ -1,4 +1,4 @@
---[[-- source.base：首页等待书架同步的事件契约。 --]]
+--[[-- source.base：首页同步在后台进行，不阻塞本地首页数据。 --]]
 
 local Assert = require("support.assert")
 
@@ -20,7 +20,6 @@ local rebuilds = 0
 local desktop = {
     source = source,
     tab = "home",
-    _home_waiting_sync = true,
     rebuild = function() rebuilds = rebuilds + 1 end,
     -- 真实实现是 Home.invalidate：清状态后仅在首页时重建
     invalidateHome = function(self)
@@ -30,13 +29,11 @@ local desktop = {
     end,
 }
 source:onEvent("home_open", desktop)
-Assert.eq(rebuilds, 1)
+Assert.eq(rebuilds, 0)
 Assert.is_false(desktop._books_sync_pending)
-Assert.is_nil(desktop._home_waiting_sync)
 
--- 非等待状态的节流命中仍保持零重建。
-desktop._home_waiting_sync = nil
+-- 重复的跳过结果仍保持零重建。
 source:onEvent("home_open", desktop)
-Assert.eq(rebuilds, 1)
+Assert.eq(rebuilds, 0)
 
 return true
