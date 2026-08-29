@@ -126,7 +126,7 @@ local function paintRect(bb, x, y, width, height, color, radius)
     end
 end
 
---- 将 widget 绘制到画布；负坐标时裁剪，避免 blit 越界崩溃。
+--- 将 widget 绘制到画布；越过任一画布边缘时裁剪，避免 blit 越界。
 ---@param bb userdata
 ---@param block table
 ---@param canvas_w number
@@ -139,13 +139,6 @@ local function paintWidget(bb, block, canvas_w, canvas_h)
     local x = math.floor(block.x or 0)
     local y = math.floor(block.y or 0)
     if x >= canvas_w or y >= canvas_h then
-        return
-    end
-    if x >= 0 and y >= 0 then
-        local ok, err = pcall(widget.paintTo, widget, bb, x, y)
-        if not ok then
-            error(err)
-        end
         return
     end
     local size = widget.getSize and widget:getSize()
@@ -164,6 +157,13 @@ local function paintWidget(bb, block, canvas_w, canvas_h)
     local visible_w = math.min(ww - src_x, canvas_w - dst_x)
     local visible_h = math.min(wh - src_y, canvas_h - dst_y)
     if visible_w <= 0 or visible_h <= 0 then
+        return
+    end
+    if src_x == 0 and src_y == 0 and visible_w == ww and visible_h == wh then
+        local ok, err = pcall(widget.paintTo, widget, bb, x, y)
+        if not ok then
+            error(err)
+        end
         return
     end
     local tmp = Blitbuffer.new(ww, wh, Blitbuffer.TYPE_BB8)

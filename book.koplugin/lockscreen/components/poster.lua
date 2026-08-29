@@ -132,9 +132,9 @@ local function slots(w, count)
     local poster_h = math.floor(poster_w * 1.5)
     local lift = math.floor(poster_h * 0.5)
     local row_step = poster_h + gap_v
-    local avail_w = math.max(1, w - pad_x * 2)
-    local max_cols = math.max(1, math.floor((avail_w + gap_h) / (poster_w + gap_h)))
-    local cols = math.min(max_cols, count, math.max(1, math.ceil(count / 4)))
+    -- 列数只由书籍数量决定。最右列可以超出画布，最终由渲染器裁剪；
+    -- 按可用宽度提前删列会直接漏掉海报。
+    local cols = math.min(count, math.max(1, math.ceil(count / 4)))
     local counts = columnCounts(count, cols)
 
     local layout = {}

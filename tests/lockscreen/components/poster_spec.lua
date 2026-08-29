@@ -75,6 +75,7 @@ db_rows = {
 cover_calls = 0
 local wall = widgetBlocks(Poster.blocks({ x = 0, y = 0, w = 540, h = 720 }))
 Assert.eq(#wall, 5)
+Assert.eq(cover_calls, 5)
 
 local odd_x = wall[1].x
 local even_x
@@ -106,3 +107,13 @@ for _, block in ipairs(wall) do
     max_x = math.max(max_x, block.x + block.width)
 end
 Assert.is_true(max_x < 540 * 0.7)
+
+-- 窄画布仍应生成按书籍数量决定的全部列，最右列交给渲染器裁剪。
+local narrow = widgetBlocks(Poster.blocks({ x = 0, y = 0, w = 200, h = 720 }))
+Assert.eq(#narrow, 5)
+Assert.eq(cover_calls, 10)
+local narrow_max_x = 0
+for _, block in ipairs(narrow) do
+    narrow_max_x = math.max(narrow_max_x, block.x + block.width)
+end
+Assert.is_true(narrow_max_x > 200)
