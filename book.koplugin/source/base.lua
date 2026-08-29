@@ -21,16 +21,6 @@ SourceBase.__index = SourceBase
 -- 首页重新可见时允许检查一次书架；具体同步和网络缓存由各源决定。
 local BOOKS_REFRESH_INTERVAL = 5 * 60
 
---- 构造 SourceBase 实例。
----@param o { id: SourceId, name: string|nil }|table|nil
----@return SourceBase
-function SourceBase:new(o)
-    o = o or {}
-    setmetatable(o, self)
-    self.__index = self
-    return o
-end
-
 --- 返回默认全 false 能力集。
 ---@return SourceCapabilities
 function SourceBase:capabilities()
@@ -77,26 +67,28 @@ local function syncDesktopBooks(self, desktop, opts)
         if desktop._books_sync_request ~= request then return end
         desktop._books_sync_cancel = nil
         desktop._books_sync_pending = false
+        local wake_home = desktop._home_waiting_sync
+        desktop._home_waiting_sync = nil
         if desktop._closed or desktop.source ~= self then return end
         if not result then
             require("logger").warn("book shelf sync failed", self.id, err)
-            desktop._home_state = nil
-            desktop._home_loaded = false
+            desktop:invalidateHome()
             if desktop.tab == "library" then
                 desktop._library_state = { books = {}, err = err or _("同步失败") }
+                desktop:rebuild()
             end
-            if desktop.tab == "home" or desktop.tab == "library" then desktop:rebuild() end
             return
         end
         -- 源自己的节流命中表示本地数据未变，不要无意义重建整页。
         if result.skipped then
+            -- 首页可能正在等待这轮同步完成。即使数据未变，也要让它开始读本地书架。
+            if wake_home then desktop:invalidateHome() end
             return
         end
         self._books_refresh_at = os.time()
-        desktop._home_state = nil
-        desktop._home_loaded = false
         desktop._library_state = nil
-        if desktop.tab == "home" or desktop.tab == "library" then desktop:rebuild() end
+        desktop:invalidateHome()
+        if desktop.tab == "library" then desktop:rebuild() end
     end)
     -- 某些源会同步回调；避免把已完成的 job 句柄残留到桌面状态。
     if desktop._books_sync_request == request and desktop._books_sync_pending then

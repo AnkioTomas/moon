@@ -141,15 +141,4 @@ function Source:replaceBook(temp_path, stable_id)
     return self._client:replaceBook(temp_path, stable_id)
 end
 
---- 插件生命周期事件：桌面打开时自动扫描（节流在 client 内）。
---- 扫描会改库，扫完后若桌面正停在图书馆页则置态重建。
----@param event string
----@param payload table|nil desktop_open 时为 Desktop 实例
-function Source:onEvent(event, payload)
-    return SourceBase.onEvent(self, event, payload)
-end
-
---- 换源关闭：取消在飞自动扫描。
-function Source:close() end
-
 return Local

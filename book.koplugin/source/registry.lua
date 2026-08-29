@@ -146,13 +146,6 @@ function Registry.create(id)
     return mod.new()
 end
 
---- 创建候选；失败不改动当前活跃源
----@param id SourceId
----@return BookSource|nil, string|nil
-function Registry.createCandidate(id)
-    return Registry.create(id)
-end
-
 --- 安全关闭源实例（忽略 close 异常）。
 ---@param src BookSource|nil
 local function closeSource(src)
@@ -235,7 +228,7 @@ function Registry.setActive(id)
     if not FACTORIES[id] then
         return nil, T(_("未知数据源: %1"), tostring(id))
     end
-    local candidate, err = Registry.createCandidate(id)
+    local candidate, err = Registry.create(id)
     if not candidate then
         return nil, err
     end
