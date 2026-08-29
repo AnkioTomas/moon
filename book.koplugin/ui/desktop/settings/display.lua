@@ -47,11 +47,11 @@ function Display.rows(ctx)
         end,
         function(iw)
             return SettingRow.build(iw, {
-                kind = "nav", icon = "grid_view", title = _("网格最大列数"),
+                kind = "nav", icon = "grid_view", title = _("每行网格数量"),
                 status = tostring(grid_max_cols), status_on = true,
                 callback = function()
                     Popup.spin{
-                        title = _("网格最大列数"), value = UI.getGridMaxCols(),
+                        title = _("每行网格数量"), value = UI.getGridMaxCols(),
                         value_min = UI.gridMaxColsMin(), value_max = UI.gridMaxColsMax(),
                         value_step = 1, ok_always_enabled = true,
                         callback = function(spin)

@@ -264,7 +264,7 @@ return {
     ["上报统计"] = "Upload stats",
     ["字体"] = "Font",
     ["字号"] = "Font size",
-    ["网格最大列数"] = "Maximum grid columns",
+    ["每行网格数量"] = "Grid columns per row",
     ["启动打开桌面"] = "Open on start",
     ["锁屏显示"] = "Lock screen",
     ["替代系统锁屏"] = "Replace system lock screen",

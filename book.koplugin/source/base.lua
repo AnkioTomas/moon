@@ -67,8 +67,6 @@ local function syncDesktopBooks(self, desktop, opts)
         if desktop._books_sync_request ~= request then return end
         desktop._books_sync_cancel = nil
         desktop._books_sync_pending = false
-        local wake_home = desktop._home_waiting_sync
-        desktop._home_waiting_sync = nil
         if desktop._closed or desktop.source ~= self then return end
         if not result then
             require("logger").warn("book shelf sync failed", self.id, err)
@@ -81,8 +79,6 @@ local function syncDesktopBooks(self, desktop, opts)
         end
         -- 源自己的节流命中表示本地数据未变，不要无意义重建整页。
         if result.skipped then
-            -- 首页可能正在等待这轮同步完成。即使数据未变，也要让它开始读本地书架。
-            if wake_home then desktop:invalidateHome() end
             return
         end
         self._books_refresh_at = os.time()
@@ -114,8 +110,7 @@ function SourceBase:onEvent(event, payload)
         return
     end
     if event ~= "desktop_open" then return end
-    -- 首页取最近阅读必须等首轮书架同步落库；否则远端源的封面仍只在
-    -- 实例内存缓存里，首屏会先构建出没有封面的卡片且不会自动补图。
+    -- 书架同步在后台进行：首页先读本地数据，成功后由回调刷新封面和元数据。
     require("book.stats").pullInBackground(self)
     syncDesktopBooks(self, desktop)
 end
