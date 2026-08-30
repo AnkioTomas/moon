@@ -56,7 +56,6 @@ end
 ---@return boolean
 function XrayDB.upsert(source_id, stable_id, entity, updated_at)
     local aliases = joinAliases(entity.aliases)
-    Base.ensure()
     return Base.exec([[
         INSERT INTO xray_entities
           (source_id, stable_id, kind, name, aliases, role, description,
@@ -80,7 +79,6 @@ end
 ---@param kind string|nil
 ---@return table[]
 function XrayDB.list(source_id, stable_id, kind)
-    Base.ensure()
     local result, nrows
     if kind and kind ~= "" then
         result, nrows = Base.query([[
@@ -119,7 +117,6 @@ end
 ---@param stable_id string
 ---@return boolean
 function XrayDB.clear(source_id, stable_id)
-    Base.ensure()
     return Base.exec([[
         DELETE FROM xray_entities
         WHERE source_id=? AND stable_id=?;
@@ -133,7 +130,6 @@ end
 ---@param name string
 ---@return boolean
 function XrayDB.delete(source_id, stable_id, kind, name)
-    Base.ensure()
     return Base.exec([[
         DELETE FROM xray_entities
         WHERE source_id=? AND stable_id=? AND kind=? AND name=?;
@@ -147,7 +143,6 @@ end
 ---@param updated_at integer|nil
 ---@return boolean
 function XrayDB.replace(source_id, stable_id, entities, updated_at)
-    Base.ensure()
     if not Base.exec("BEGIN IMMEDIATE;") then return false end
     local ok = Base.exec(
         [[DELETE FROM xray_entities WHERE source_id=? AND stable_id=?;]],
