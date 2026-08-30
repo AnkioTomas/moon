@@ -7,7 +7,7 @@ local pending_rows = {
 }
 local confirmed
 local confirm_ok = true
-package.preload["utils.db.stats"] = function()
+package.preload["db.stats"] = function()
     return {
         unsyncedBySource = function() return pending_rows end,
         markSynced = function(ids)
@@ -16,20 +16,10 @@ package.preload["utils.db.stats"] = function()
         end,
     }
 end
-package.preload["utils.db.queue"] = function()
-    return {
-        run = function(worker, opts)
-            local ok, err = pcall(worker)
-            local cb = ok and opts.on_done or opts.on_failed
-            if cb then cb(ok and nil or err) end
-        end,
-    }
-end
 package.preload["ui/network/manager"] = function()
     error("book.stats 不得加载 NetworkMgr")
 end
-package.loaded["utils.db.stats"] = nil
-package.loaded["utils.db.queue"] = nil
+package.loaded["db.stats"] = nil
 package.loaded["book.stats"] = nil
 
 local Stats = require("book.stats")

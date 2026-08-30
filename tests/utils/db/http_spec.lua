@@ -1,8 +1,8 @@
 --[[--
 
-utils.db.http：http 表 CRUD（HTTP GET 响应缓存）
+db.http：http 表 CRUD（HTTP GET 响应缓存）
 
-@module tests.utils.db.http_spec
+@module tests.db.http_spec
 --]]
 
 local Assert = require("support.assert")
@@ -37,8 +37,14 @@ local function clearMods()
         "utils.task",
         "lua-ljsqlite3/init",
         "ffi/sha2",
-        "utils.db.base",
-        "utils.db.http",
+        "db.base",
+        "db.book",
+        "db.chapter",
+        "db.http",
+        "db.note",
+        "db.progress",
+        "db.stats",
+        "db.xray",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -85,10 +91,10 @@ local function loadHttp(connection)
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["utils.db.base"] = nil
-    package.loaded["utils.db.http"] = nil
-    local DbBase = require("utils.db.base")
-    local HttpDB = require("utils.db.http")
+    package.loaded["db.base"] = nil
+    package.loaded["db.http"] = nil
+    local DbBase = require("db.base")
+    local HttpDB = require("db.http")
     DbBase.open()
     return DbBase, HttpDB
 end
@@ -97,14 +103,14 @@ end
 do
     local connection, calls = makeConn({
         step = function()
-            return { '{"a":1}', 12345 }, { "value", "expires" }
+            return { '{"a":1}', os.time() + 3600 }, { "value", "expires" }
         end,
     })
     local DbBase, HttpDB = loadHttp(connection)
 
     local value, expires = HttpDB.get("https://api.example.com/x?u=1")
     Assert.eq(value, '{"a":1}')
-    Assert.eq(expires, 12345)
+    Assert.eq(expires > os.time(), true)
     local q = calls[#calls]
     Assert.is_true(q.sql:find("SELECT value, expires FROM http WHERE key=?", 1, true) ~= nil)
     Assert.eq(q.argc, 1)
@@ -122,6 +128,39 @@ do
     local DbBase, HttpDB = loadHttp(connection)
 
     Assert.is_nil(HttpDB.get("missing"))
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── get：读取前批量删除所有过期条目 ─────────────────────
+do
+    local deleted = false
+    local connection, calls = makeConn({
+        step = function(sql)
+            if sql:find("DELETE FROM http WHERE expires", 1, true) then
+                deleted = true
+                return
+            end
+            if sql:find("SELECT value, expires", 1, true) then
+                if deleted then return nil, 0 end
+                return { "expired", os.time() - 1 }, { "value", "expires" }
+            end
+        end,
+    })
+    local DbBase, HttpDB = loadHttp(connection)
+
+    local value = HttpDB.get("expired-key")
+    Assert.is_nil(value)
+    local q
+    for _, call in ipairs(calls) do
+        if call.sql == "DELETE FROM http WHERE expires <= ?;" then q = call break end
+    end
+    Assert.not_nil(q)
+    Assert.eq(q.sql, "DELETE FROM http WHERE expires <= ?;")
+    Assert.eq(q.argc, 1)
+    Assert.eq(type(q.args[1]), "number")
+    Assert.is_true(calls[#calls].sql:find("SELECT value, expires", 1, true) ~= nil)
 
     DbBase.close()
     clearMods()

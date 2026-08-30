@@ -2,7 +2,7 @@
 source.local.mapper 离线用例
 
 映射已收口到 book.catalog；本模块是 local 源薄封装。
-insight 在 catalog 内 require("utils.db.book")，
+insight 在 catalog 内 require("db.book")，
 这里用 package.preload 换成可控假库。
 
 @module tests.source.local.mapper_spec
@@ -12,7 +12,7 @@ local Assert = require("support.assert")
 
 -- 可控假 books 表：key = source_id .. "\n" .. stable_id
 local FakeBooks = {}
-package.preload["utils.db.book"] = function()
+package.preload["db.book"] = function()
     return {
         get = function(source_id, stable_id)
             return FakeBooks[source_id .. "\n" .. tostring(stable_id)]
@@ -205,7 +205,7 @@ do -- max_total_pages 为 0 / nil 时 percent 为 0；无 daily 时 days 为空
 end
 
 -- 收尾：不影响同进程内后续用例
-package.preload["utils.db.book"] = nil
-package.loaded["utils.db.book"] = nil
+package.preload["db.book"] = nil
+package.loaded["db.book"] = nil
 package.loaded["book.catalog"] = nil
 package.loaded["source.local.mapper"] = nil

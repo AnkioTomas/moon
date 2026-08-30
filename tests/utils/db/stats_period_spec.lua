@@ -1,13 +1,13 @@
 --[[--
-utils.db.stats：账单周期查询必须参数化并正确映射结果。
+db.stats：账单周期查询必须参数化并正确映射结果。
 
-@module tests.utils.db.stats_period_spec
+@module tests.db.stats_period_spec
 --]]
 
 local Assert = require("support.assert")
 local calls = {}
 
-package.preload["utils.db.base"] = function()
+package.preload["db.base"] = function()
     return {
         requireSourceId = function(id) return id ~= "" and id or nil end,
         ensure = function() end,
@@ -25,6 +25,7 @@ package.preload["utils.db.base"] = function()
                 return {
                     { "2024-01-01", "2024-01-01" },
                     { "__moon:day:2024-01-01", "b1" },
+                    { "day", "page" },
                     { 3000, 600 },
                     { 1, 2 },
                 }, 2
@@ -35,9 +36,9 @@ package.preload["utils.db.base"] = function()
         end,
     }
 end
-package.loaded["utils.db.stats"] = nil
+package.loaded["db.stats"] = nil
 
-local Stats = require("utils.db.stats")
+local Stats = require("db.stats")
 local summary = Stats.periodSummary("moon", 100, 200)
 -- 总时长走「云端日桶优先」，不是 3000+600
 Assert.eq(summary.total_seconds, 3000)
@@ -47,7 +48,7 @@ Assert.eq(calls[1].args[1], "moon")
 Assert.eq(calls[1].args[2], 100)
 Assert.eq(calls[1].args[3], 200)
 -- 书数/页数只数真实书的记录
-Assert.is_true(calls[1].sql:find("NOT GLOB '__*:day:*'", 1, true) ~= nil)
+Assert.is_true(calls[1].sql:find("record_type='page'", 1, true) ~= nil)
 
 calls = {}
 local books = Stats.periodBooks("moon", 100, 200, 3)
@@ -57,7 +58,7 @@ Assert.eq(books[1].seconds, 1800)
 Assert.eq(books[1].percent, 42)
 Assert.eq(calls[1].args[4], 3)
 Assert.is_true(calls[1].sql:find("start_time>=?", 1, true) ~= nil)
-Assert.is_true(calls[1].sql:find("NOT GLOB '__*:day:*'", 1, true) ~= nil)
+Assert.is_true(calls[1].sql:find("record_type='page'", 1, true) ~= nil)
 
 calls = {}
 local days = Stats.periodDays("moon", 100, 200)

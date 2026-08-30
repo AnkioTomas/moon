@@ -13,7 +13,7 @@ _G.G_reader_settings = {
 }
 
 local rows = {}
-package.preload["utils.db.note"] = function()
+package.preload["db.note"] = function()
     return {
         upsert = function(source_id, stable_id, chapter_idx, payload, updated_at, synced)
             rows[source_id .. ":" .. stable_id .. ":" .. (chapter_idx or 0)] = {
@@ -82,20 +82,7 @@ package.preload["json"] = function()
         decode = function(payload) return payloads[payload] end,
     }
 end
-package.preload["utils.db.queue"] = function()
-    return {
-        run = function(worker, opts)
-            local ok, err = pcall(worker)
-            if ok then
-                if opts.on_done then opts.on_done() end
-            elseif opts.on_failed then
-                opts.on_failed(err)
-            end
-        end,
-    }
-end
-package.loaded["utils.db.note"] = nil
-package.loaded["utils.db.queue"] = nil
+package.loaded["db.note"] = nil
 package.loaded["json"] = nil
 package.loaded["source.registry"] = nil
 package.loaded["book.store"] = nil

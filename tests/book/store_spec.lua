@@ -20,7 +20,7 @@ package.preload["utils.paths"] = function()
 end
 
 local db_sql = {}
-package.preload["utils.db.base"] = function()
+package.preload["db.base"] = function()
     return {
         ensure = function() return true end,
         exec = function(sql)
@@ -34,7 +34,7 @@ local chapter_rows = {} -- path → chapters 行
 local chapter_upserts = {}
 local chapter_upsert_ok = true
 local chapter_counts = {}
-package.preload["utils.db.chapter"] = function()
+package.preload["db.chapter"] = function()
     return {
         get = function(path)
             return chapter_rows[path]
@@ -51,20 +51,6 @@ end
 
 local toc_rows = {}
 local toc_upserts = {}
-package.preload["utils.db.toc"] = function()
-    return {
-        get = function(source_id, stable_id)
-            return toc_rows[source_id .. "\0" .. stable_id]
-        end,
-        upsert = function(source_id, stable_id, payload)
-            toc_upserts[#toc_upserts + 1] = {
-                source_id = source_id, stable_id = stable_id, payload = payload,
-            }
-            toc_rows[source_id .. "\0" .. stable_id] = payload
-            return true
-        end,
-    }
-end
 
 local json_values = {}
 package.preload["json"] = function()
@@ -83,7 +69,7 @@ local book_rows_by_id = {} -- "sid\0stid" → books 行
 local book_upserts = {}
 local touch_calls = {} -- { source_id, stable_id, path, chapter_idx }
 local touch_ok = true
-package.preload["utils.db.book"] = function()
+package.preload["db.book"] = function()
     return {
         getByPath = function(path)
             return book_rows_by_path[path]
@@ -99,33 +85,28 @@ package.preload["utils.db.book"] = function()
             book_upserts[#book_upserts + 1] = row
             return true
         end,
+        getToc = function(source_id, stable_id)
+            return toc_rows[source_id .. "\0" .. stable_id]
+        end,
+        setToc = function(source_id, stable_id, payload)
+            toc_upserts[#toc_upserts + 1] = {
+                source_id = source_id, stable_id = stable_id, payload = payload,
+            }
+            toc_rows[source_id .. "\0" .. stable_id] = payload
+            return true
+        end,
         libraryStableIdsBySource = function() return {} end,
-        touchPath = function(source_id, stable_id, path, chapter_idx)
+        touchPath = function(source_id, stable_id, path)
             touch_calls[#touch_calls + 1] = {
                 source_id = source_id,
                 stable_id = stable_id,
                 path = path,
-                chapter_idx = chapter_idx,
             }
             return touch_ok
         end,
     }
 end
 
-package.preload["utils.db.queue"] = function()
-    return {
-        -- 同步执行 worker：登记结果当断言即可见
-        run = function(worker, opts)
-            local ok, err = pcall(worker)
-            if ok and opts and opts.on_done then
-                opts.on_done()
-            elseif not ok and opts and opts.on_failed then
-                opts.on_failed(err)
-            end
-        end,
-        clear = function() end,
-    }
-end
 
 -- partialMD5 由用例按路径填表控制；值 "ERR" 模拟计算失败（pcall 兜底）
 local md5_by_path = {}
@@ -238,7 +219,6 @@ do
     Assert.eq(touch_calls[1].source_id, "moon")
     Assert.eq(touch_calls[1].stable_id, "sk")
     Assert.eq(touch_calls[1].path, path)
-    Assert.eq(touch_calls[1].chapter_idx, 5)
     Assert.eq(#chapter_upserts, 1)
     Assert.eq(chapter_upserts[1].path, path)
     Assert.eq(chapter_upserts[1].source_id, "moon")
@@ -380,7 +360,6 @@ do
     Assert.eq(touch_calls[1].source_id, "moon")
     Assert.eq(touch_calls[1].stable_id, "s9")
     Assert.eq(touch_calls[1].path, "/cache/moon/book/slug/7.html")
-    Assert.eq(touch_calls[1].chapter_idx, 7)
     Assert.eq(#chapter_upserts, 1)
     Assert.eq(chapter_upserts[1].path, "/cache/moon/book/slug/7.html")
     Assert.eq(chapter_upserts[1].chapter_idx, 7)
@@ -450,7 +429,6 @@ do
             authors = "作者",
             percent = 12,
             category = "分类",
-            favorite = true,
             series = "系列",
             intro = "简介",
             path = "/should/not/persist.epub", -- rememberMany 不写 path
@@ -465,7 +443,6 @@ do
     Assert.eq(book_upserts[1].authors, "作者")
     Assert.eq(book_upserts[1].percent, 12)
     Assert.eq(book_upserts[1].category, "分类")
-    Assert.eq(book_upserts[1].favorite, true)
     Assert.eq(book_upserts[1].series, "系列")
     Assert.eq(book_upserts[1].intro, "简介")
     Assert.is_true(type(book_upserts[1].fetched_at) == "number")
@@ -482,11 +459,10 @@ end
 
 for _, k in ipairs({
     "utils.paths",
-    "utils.db.base",
-    "utils.db.book",
-    "utils.db.chapter",
-    "utils.db.toc",
-    "utils.db.queue",
+    "db.base",
+    "db.book",
+    "db.chapter",
+
     "source.registry",
     "book.store",
     "ffi/util",

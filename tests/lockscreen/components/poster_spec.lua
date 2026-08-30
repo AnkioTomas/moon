@@ -15,7 +15,7 @@ package.preload["utils.settings"] = function()
 end
 
 local db_rows = {}
-package.preload["utils.db.book"] = function()
+package.preload["db.book"] = function()
     return {
         recentBySource = function(_, limit)
             local rows = {}

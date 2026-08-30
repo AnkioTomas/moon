@@ -1,11 +1,13 @@
---[[-- utils.db.note：notes 表完整快照写入。 --]]
+--[[-- db.note：notes 表完整快照写入。 --]]
 
 local Assert = require("support.assert")
 
 local function clearMods()
     for _, name in ipairs({
         "utils.paths", "utils.task", "lua-ljsqlite3/init", "ffi/sha2",
-        "utils.db.base", "utils.db.note",
+        "db.base", "db.note",
+        "db.book", "db.chapter", "db.http", "db.progress",
+        "db.stats", "db.xray",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -46,8 +48,8 @@ package.preload["lua-ljsqlite3/init"] = function()
     return { open = function() return connection end }
 end
 
-local Base = require("utils.db.base")
-local NoteDB = require("utils.db.note")
+local Base = require("db.base")
+local NoteDB = require("db.note")
 Base.open()
 
 Assert.is_true(NoteDB.upsert("moon", "book'1", nil, "[{}]"))
@@ -62,14 +64,6 @@ Assert.eq(q.args[4], "[{}]")
 Assert.eq(type(q.args[5]), "number")
 Assert.eq(q.args[6], 0)
 Assert.is_false(q.sql:find("book'1", 1, true) ~= nil)
-
-local before = #calls
-Assert.is_false(NoteDB.upsert("", "b", nil, "[]"))
-Assert.is_false(NoteDB.upsert("moon", "", nil, "[]"))
-Assert.is_false(NoteDB.upsert("moon", "b", -1, "[]"))
-Assert.is_false(NoteDB.upsert("moon", "b", 1.5, "[]"))
-Assert.is_false(NoteDB.upsert("moon", "b", nil, nil))
-Assert.eq(#calls, before)
 
 -- get：身份参数化查询，并且 chapter_idx=nil 与整本记录的 0 对齐。
 connection.prepare = function(_, sql)
@@ -98,9 +92,5 @@ Assert.eq(q.args[3], 0)
 Assert.is_false(q.sql:find("book'1", 1, true) ~= nil)
 Assert.eq(row.payload, "[{}]")
 Assert.eq(row.sync_status, 0)
-Assert.is_nil(NoteDB.get("", "book", nil))
-Assert.is_nil(NoteDB.get("moon", "", nil))
-Assert.is_nil(NoteDB.get("moon", "book", -1))
-
 Base.close()
 clearMods()

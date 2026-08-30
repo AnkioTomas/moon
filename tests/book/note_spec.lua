@@ -1,8 +1,7 @@
---[[-- book.note：注解快照在事件时 JSON 编码后排队落库。 --]]
+--[[-- book.note：注解快照在事件时 JSON 编码后同步落库。 --]]
 
 local Assert = require("support.assert")
 
-local queued = {}
 local writes = {}
 local encoded
 local fail_encode = false
@@ -16,7 +15,7 @@ package.preload["json"] = function()
         end,
     }
 end
-package.preload["utils.db.note"] = function()
+package.preload["db.note"] = function()
     return {
         get = function() return nil end,
         upsert = function(source_id, stable_id, chapter_idx, payload)
@@ -27,13 +26,6 @@ package.preload["utils.db.note"] = function()
 end
 package.preload["book.store"] = function()
     return {}
-end
-package.preload["utils.db.queue"] = function()
-    return {
-        run = function(worker, opts)
-            queued[#queued + 1] = { worker = worker, opts = opts }
-        end,
-    }
 end
 package.preload["logger"] = function()
     return { warn = function() end }
@@ -53,11 +45,9 @@ local ui = {
 }
 local identity = { source_id = "moon", stable_id = "b'1", chapter_idx = 2 }
 Note.save(ui, identity)
-Assert.eq(encoded[1].text, "高亮", "必须在事件当下编码，不能把可变表交给异步队列")
+Assert.eq(encoded[1].text, "高亮", "必须在事件当下编码")
 Assert.eq(encoded[1].total_pages, 100)
-Assert.len(queued, 1)
 annotations[1].text = "已修改"
-queued[1].worker()
 Assert.len(writes, 1)
 Assert.eq(writes[1][1], "moon")
 Assert.eq(writes[1][2], "b'1")
@@ -66,9 +56,9 @@ Assert.eq(writes[1][4], "[snapshot]")
 
 fail_encode = true
 Note.save(ui, { source_id = "moon", stable_id = "b2" })
-Assert.len(queued, 1, "编码失败不能写入不完整快照")
+Assert.len(writes, 1, "编码失败不能写入不完整快照")
 
-for _, name in ipairs({ "json", "utils.db.note", "utils.db.queue", "logger", "book.store", "book.note" }) do
+for _, name in ipairs({ "json", "db.note", "logger", "book.store", "book.note" }) do
     package.preload[name] = nil
     package.loaded[name] = nil
 end

@@ -36,7 +36,7 @@ package.preload["utils.paths"] = function()
     }
 end
 
-package.preload["utils.db.book"] = function()
+package.preload["db.book"] = function()
     return { libraryStableIdsBySource = function() return { "a.epub", "b.epub" } end }
 end
 
@@ -488,7 +488,7 @@ end
 for _, name in ipairs({
     "utils.settings",
     "utils.paths",
-    "utils.db.book",
+    "db.book",
     "source.moon.client",
     "ui/network/manager",
     "ui/widget/progressbardialog",

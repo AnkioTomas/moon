@@ -201,7 +201,7 @@ package.preload["utils.task"] = function()
         end,
     }
 end
-package.preload["utils.db.book"] = function()
+package.preload["db.book"] = function()
     return {
         get = function(source_id, stable_id)
             return db_rows[rowKey(source_id, stable_id)]
@@ -293,7 +293,7 @@ package.preload["utils.db.book"] = function()
         end,
     }
 end
-package.preload["utils.db.stats"] = function()
+package.preload["db.stats"] = function()
     return {
         summaryBySource = function()
             return { total_seconds = 3600, total_pages = 42, last7_seconds = 600, longest_day_seconds = 1200 }
@@ -311,8 +311,8 @@ for _, name in ipairs({
     "utils.paths",
     "document/documentregistry",
     "utils.task",
-    "utils.db.book",
-    "utils.db.stats",
+    "db.book",
+    "db.stats",
     "source.local.client",
 }) do
     package.loaded[name] = nil
@@ -498,7 +498,7 @@ do
     db_rows[rowKey("local", "/books/old_name.epub")] = {
         source_id = "local", stable_id = "/books/old_name.epub", md5 = "digest-a", title = "已有元数据",
     }
-    local BookDB = require("utils.db.book")
+    local BookDB = require("db.book")
     -- 模拟扫描发现同 md5 的新路径（partialMD5 在此测试环境恒为 nil，直接调用 DB 层验证原地改名的效果）
     local by_md5 = BookDB.getByMd5("local", "digest-a")
     Assert.not_nil(by_md5)
@@ -902,8 +902,8 @@ for _, name in ipairs({
     "utils.paths",
     "document/documentregistry",
     "utils.task",
-    "utils.db.book",
-    "utils.db.stats",
+    "db.book",
+    "db.stats",
     "source.local.client",
 }) do
     package.preload[name] = nil

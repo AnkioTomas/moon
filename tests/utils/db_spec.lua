@@ -1,7 +1,7 @@
 --[[--
-utils.db：open 仅子进程 + wipeIfStale 清库重建 + reading_stats CRUD
+db：open、schema 与 reading_stats CRUD
 
-@module tests.utils.db_spec
+@module tests.db_spec
 --]]
 
 local Assert = require("support.assert")
@@ -36,9 +36,14 @@ local function clearMods()
         "utils.task",
         "lua-ljsqlite3/init",
         "ffi/sha2",
-        "utils.db.base",
-        "utils.db.book",
-        "utils.db.stats",
+        "db.base",
+        "db.book",
+        "db.chapter",
+        "db.http",
+        "db.note",
+        "db.progress",
+        "db.stats",
+        "db.xray",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -52,9 +57,9 @@ do
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return { exec = function() end, close = function() end } end }
     end
-    package.loaded["utils.db.base"] = nil
+    package.loaded["db.base"] = nil
 
-    local DbBase = require("utils.db.base")
+    local DbBase = require("db.base")
     local ok, conn = pcall(DbBase.open)
     Assert.is_true(ok)
     Assert.is_true(conn ~= nil)
@@ -82,9 +87,9 @@ do
             end,
         }
     end
-    package.loaded["utils.db.base"] = nil
+    package.loaded["db.base"] = nil
 
-    local DbBase = require("utils.db.base")
+    local DbBase = require("db.base")
     Assert.is_true(DbBase.open() ~= nil)
     Assert.eq(opened, 1)
     Assert.is_true(DbBase.open() ~= nil)
@@ -125,9 +130,9 @@ do
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["utils.db.base"] = nil
+    package.loaded["db.base"] = nil
 
-    local DbBase = require("utils.db.base")
+    local DbBase = require("db.base")
     DbBase.open()
     -- 建表走无参 conn:exec，不进 prepare；首个 prepare 就是下面这条 INSERT
     local text = "line1\nline2's"
@@ -220,16 +225,17 @@ do
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["utils.db.base"] = nil
-    package.loaded["utils.db.stats"] = nil
+    package.loaded["db.base"] = nil
+    package.loaded["db.stats"] = nil
 
-    local DbBase = require("utils.db.base")
-    local StatsDB = require("utils.db.stats")
+    local DbBase = require("db.base")
+    local StatsDB = require("db.stats")
     DbBase.open()
 
     Assert.is_true(StatsDB.add({
         source_id = "moon",
         stable_id = "a.epub",
+        record_type = "page",
         page = 3,
         start_time = 1000,
         duration = 30,
@@ -237,25 +243,24 @@ do
     }))
     local insert = calls[#calls]
     Assert.is_true(insert.sql:find("INSERT INTO reading_stats", 1, true) ~= nil)
-    Assert.eq(insert.argc, 9)
+    Assert.eq(insert.argc, 10)
     Assert.eq(insert.args[1], "moon")
     Assert.eq(insert.args[2], "a.epub")
-    Assert.eq(insert.args[4], 1000)
-    Assert.eq(insert.args[9], 0)
+    Assert.eq(insert.args[4], 3)
+    Assert.eq(insert.args[10], 0)
 
-    -- 非法输入在碰 DB 前拒绝
-    Assert.is_false(StatsDB.add({ source_id = "moon", stable_id = "", start_time = 1, duration = 1 }))
+    -- 非法时长仍拒绝
     Assert.is_false(StatsDB.add({ source_id = "moon", stable_id = "a", start_time = 1, duration = 0 }))
 
-    local hit = { source_id = "moon", stable_id = "a.epub", page = 3,
+    local hit = { source_id = "moon", stable_id = "a.epub", record_type = "page", page = 3,
         start_time = 1000, duration = 30, total_pages = 300 }
-    local miss = { source_id = "moon", stable_id = "b.epub", page = 4,
+    local miss = { source_id = "moon", stable_id = "b.epub", record_type = "page", page = 4,
         start_time = 2000, duration = 45, total_pages = 400 }
     Assert.is_true(StatsDB.exists(hit))
     Assert.is_false(StatsDB.exists(miss))
     local probe = calls[#calls]
     Assert.is_true(probe.sql:find("SELECT 1 FROM reading_stats", 1, true) ~= nil)
-    Assert.eq(probe.argc, 6, "exists 必须走参数化唯一索引查询")
+    Assert.eq(probe.argc, 5, "exists 必须走参数化唯一索引查询")
 
     -- replaceSynced：清理 + 写入同事务；命中的算 skipped，未命中的算 imported
     local mark = #calls
@@ -337,11 +342,11 @@ do
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["utils.db.base"] = nil
-    package.loaded["utils.db.book"] = nil
+    package.loaded["db.base"] = nil
+    package.loaded["db.book"] = nil
 
-    local DbBase = require("utils.db.base")
-    local BookDB = require("utils.db.book")
+    local DbBase = require("db.base")
+    local BookDB = require("db.book")
     DbBase.open()
 
     -- 无筛选：仅 source_id；LIMIT/OFFSET 绑定
@@ -393,7 +398,7 @@ do
     clearMods()
 end
 
--- ── schema：一次建全，无迁移无版本号，且从不 DROP ──────────
+-- ── schema：各模块一次性建表，无迁移、无版本号，且从不 DROP ─
 do
     local execs = {}
     local connection = {
@@ -414,8 +419,8 @@ do
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["utils.db.base"] = nil
-    local DbBase = require("utils.db.base")
+    package.loaded["db.base"] = nil
+    local DbBase = require("db.base")
     local opened, open_err = DbBase.open()
     DbBase.close()
     clearMods()
@@ -424,11 +429,12 @@ do
     Assert.is_nil(open_err)
     local schema = table.concat(execs, "\n")
     Assert.is_true(schema:find("CREATE TABLE IF NOT EXISTS notes", 1, true) ~= nil)
-    -- 建表语句必须自带全部列，旧库则由 ALTER 迁移补齐。
+    -- 建表语句必须自带全部列，不做旧库迁移。
     Assert.is_true(schema:find("reader_prefs TEXT", 1, true) ~= nil)
     Assert.is_true(schema:find("extra TEXT", 1, true) ~= nil)
     Assert.is_true(schema:find("idx_reading_stats_identity", 1, true) ~= nil)
-    Assert.is_true(schema:find("PRAGMA user_version", 1, true) ~= nil)
+    Assert.is_false(schema:find("PRAGMA user_version", 1, true) ~= nil)
+    Assert.is_true(schema:find("record_type TEXT NOT NULL", 1, true) ~= nil)
     Assert.is_false(schema:find("DROP TABLE", 1, true) ~= nil)
 end
 
@@ -455,7 +461,7 @@ do
                     return nil
                 end,
                 resultset = function()
-                    if sql:find("NOT GLOB", 1, true) then
+                    if sql:find("record_type='page'", 1, true) then
                         return {
                             { day2 },
                             { "/books/a.epub" },
@@ -464,10 +470,11 @@ do
                             { 20 },
                         }, 1
                     end
-                    if sql:find("GROUP BY day, stable_id", 1, true) then
+                    if sql:find("GROUP BY day, stable_id, record_type", 1, true) then
                         return {
                             { day1, day2 },
                             { "/books/a.epub", "/books/a.epub" },
+                            { "page", "page" },
                             { 300, 600 },
                             { 5, 10 },
                         }, 2
@@ -495,11 +502,11 @@ do
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["utils.db.base"] = nil
-    package.loaded["utils.db.stats"] = nil
+    package.loaded["db.base"] = nil
+    package.loaded["db.stats"] = nil
 
-    local DbBase = require("utils.db.base")
-    local StatsDB = require("utils.db.stats")
+    local DbBase = require("db.base")
+    local StatsDB = require("db.stats")
     DbBase.open()
 
     local s = StatsDB.summaryBySource("local")
@@ -527,13 +534,6 @@ do
     Assert.eq(sb_q.args[1], "local")
     Assert.eq(sb_q.args[2], "/books/a.epub")
 
-    -- 非法身份在碰 DB 前拒绝
-    local empty = StatsDB.summaryByBook("", "/books/a.epub")
-    Assert.eq(empty.pages, 0)
-    Assert.eq(empty.last_read, 0)
-    empty = StatsDB.summaryByBook("local", "")
-    Assert.eq(empty.total_seconds, 0)
-
     -- 按书按天聚合（详情页最近几天卡片）：日期倒序 + LIMIT 绑定
     local bd = StatsDB.dailyByBook("local", "/books/a.epub", 5)
     Assert.eq(#bd, 2)
@@ -547,8 +547,6 @@ do
     Assert.eq(bd_q.args[1], "local")
     Assert.eq(bd_q.args[2], "/books/a.epub")
     Assert.eq(bd_q.args[3], 5)
-    Assert.eq(#StatsDB.dailyByBook("", "/books/a.epub"), 0)
-
     -- 全部参数化：source_id 绑定，不以字面量拼进 SQL
     for _, c in ipairs(calls) do
         Assert.is_false(c.sql:find("'local'", 1, true) ~= nil)

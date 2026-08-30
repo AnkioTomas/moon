@@ -3,25 +3,11 @@
 local Assert = require("support.assert")
 
 local added = {}
-local deferred
-package.preload["utils.db.stats"] = function()
+package.preload["db.stats"] = function()
     return {
         add = function(row)
             added[#added + 1] = row
             return true
-        end,
-    }
-end
-package.preload["utils.db.queue"] = function()
-    return {
-        run = function(worker, opts)
-            if deferred then
-                deferred = { worker = worker, opts = opts }
-                return
-            end
-            local ok, err = pcall(worker)
-            local cb = ok and opts and opts.on_done or opts and opts.on_failed
-            if cb then cb(ok and nil or err) end
         end,
     }
 end
@@ -104,17 +90,13 @@ do
     Assert.eq(#added, 1)
 end
 
--- DB worker 延迟执行时仍必须记录翻页前的快照，不能读到已修改的会话表。
+-- 写库时使用翻页前的快照，不能读到已修改的会话表。
 do
     added = {}
     local u = ui("/book.epub", 1, 300)
     Tracker.start(u)
     now = now + 5
-    deferred = true
     Tracker.onPage(ui("/book.epub", 2, 300))
-    local queued = deferred
-    deferred = nil
-    queued.worker()
     Assert.eq(added[1].page, 1)
     Assert.eq(added[1].duration, 5)
     Tracker.stop()
@@ -123,8 +105,8 @@ end
 os.time = real_time
 
 for _, name in ipairs({
-    "utils.db.stats",
-    "utils.db.queue",
+    "db.stats",
+
     "book.stats",
 }) do
     package.preload[name] = nil
