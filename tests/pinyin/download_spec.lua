@@ -2,7 +2,7 @@
 pinyin.download：manifest → 原始分片下载 → 拼接 → 校验落位
 
 不碰真网络：stub http.request（download 写假分片 / get 给 manifest），
-stub utils.task 让 assemble 在主进程同步跑。
+stub workers.job 让 assemble 在主进程同步跑。
 
 @module tests.pinyin.download_spec
 --]]
@@ -111,8 +111,8 @@ package.preload["http.request"] = function()
     }
 end
 
--- Task 同步跑 worker（不真 fork），on_done/on_failed 直接调
-package.preload["utils.task"] = function()
+-- Job 同步跑 worker（不真 fork），on_done/on_failed 直接调
+package.preload["workers.job"] = function()
     return {
         run = function(worker, opts)
             local ok, err = pcall(worker)
@@ -205,9 +205,12 @@ local ok_run, err_run = pcall(function()
     Assert.eq(progress_events[3][3], total)
     Assert.eq(progress_events[3][4], 1)
     Assert.eq(progress_events[4][1], "part")
-    Assert.eq(progress_events[4][2], total, "第二片完成后累计=总量")
+    Assert.eq(progress_events[4][2], #part1, "开始下载第二片时累计保持第一片")
     Assert.eq(progress_events[4][4], 2)
-    Assert.eq(progress_events[5][1], "assemble")
+    Assert.eq(progress_events[5][1], "part")
+    Assert.eq(progress_events[5][2], total, "第二片完成后累计=总量")
+    Assert.eq(progress_events[5][4], 2)
+    Assert.eq(progress_events[6][1], "assemble")
 
     -- 落位文件 = 解压拼接结果
     local f = assert(io.open(dest, "rb"))
