@@ -10,16 +10,22 @@
 local JSON = require("json")
 
 local Protocol = {}
+---@type number
 Protocol.MAX_FRAME = 4 * 1024 * 1024
 
 ---@class WorkerMessage
----@field type string
+---@field type "ready"|"fatal"|"request"|"cancel"|"response"|"shutdown"|"stopped"|"error"|"progress"|"started"|"done"|"failed"
 ---@field id number|nil
 ---@field op string|nil
 ---@field args table|nil
 ---@field ok boolean|nil
 ---@field result any
+---@field value WorkerProgress|nil
 ---@field error string|nil
+
+---@alias WorkerState "stopped"|"starting"|"ready"|"dead"
+---@alias WorkerHandler fun(args: table|nil): any
+---@alias WorkerRequestCallback fun(result: any, err: string|nil)
 
 ---@class WorkerDecoder
 ---@field buffer string

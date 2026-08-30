@@ -16,19 +16,27 @@ local Context = require("workers.context")
 local Job = {}
 Job.__index = Job
 
+---@alias WorkerJobState "queued"|"running"|"done"|"failed"|"cancelled"
+
 ---@class WorkerJob
 ---@field id number
----@field state "queued"|"running"|"done"|"failed"|"cancelled"
+---@field state WorkerJobState
 ---@field pid number|nil
 ---@field progress WorkerProgress|nil
 ---@field error string|nil
 ---@field cancel fun(self: WorkerJob)
 ---@field abort fun(self: WorkerJob)
 ---@field status fun(self: WorkerJob): WorkerJobStatus
+---@field on_progress fun(value: WorkerProgress, job: WorkerJob)|nil
+---@field on_done fun(result: any)|nil
+---@field on_failed fun(err: string)|nil
+---@field on_state fun(state: WorkerJobState, job: WorkerJob)|nil
+---@field on_settled fun(job: WorkerJob)|nil
+---@field on_cancelled fun(job: WorkerJob)|nil
 
 ---@class WorkerJobStatus
 ---@field id number
----@field state string
+---@field state WorkerJobState
 ---@field pid number|nil
 ---@field progress WorkerProgress|nil
 ---@field error string|nil
@@ -42,6 +50,23 @@ Job.__index = Job
 ---@field on_settled fun(job: WorkerJob)|nil
 ---@field on_cancelled fun(job: WorkerJob)|nil
 ---@field timeout number|nil
+
+---@class WorkerJobInternal: WorkerJob
+---@field decoder WorkerDecoder
+---@field ui table
+---@field read_fd number|nil
+---@field attached boolean
+---@field settled boolean
+---@field reaping boolean
+---@field timeout_fn fun()|nil
+---@field _setState fun(self: WorkerJobInternal, state: WorkerJobState, err: string|nil)
+---@field _detach fun(self: WorkerJobInternal)
+---@field _release fun(self: WorkerJobInternal)
+---@field _settle fun(self: WorkerJobInternal, state: WorkerJobState, result: any, err: string|nil, reaping: boolean|nil)
+---@field _fail fun(self: WorkerJobInternal, err: string)
+---@field _dispatch fun(self: WorkerJobInternal, message: WorkerMessage)
+---@field _read fun(self: WorkerJobInternal)
+---@field waitEvent fun(self: WorkerJobInternal)
 
 local READ_CHUNK = 64 * 1024
 local next_id = 0
@@ -77,6 +102,7 @@ end
 ---@param state "queued"|"running"|"done"|"failed"|"cancelled"
 ---@param err string|nil
 ---@return nil
+---@param self WorkerJobInternal
 function Job:_setState(state, err)
     if self.state == state then return end
     self.state = state
@@ -85,6 +111,7 @@ function Job:_setState(state, err)
 end
 
 ---@return nil
+---@param self WorkerJobInternal
 function Job:_detach()
     if not self.attached then return end
     self.attached = false
@@ -92,6 +119,7 @@ function Job:_detach()
 end
 
 ---@return nil
+---@param self WorkerJobInternal
 function Job:_release()
     if self.timeout_fn then self.ui:unschedule(self.timeout_fn) end
     closeFd(self.read_fd)
@@ -104,6 +132,7 @@ end
 ---@param err string|nil
 ---@param reaping boolean|nil
 ---@return nil
+---@param self WorkerJobInternal
 function Job:_settle(state, result, err, reaping)
     if self.settled then return end
     self.settled = true
@@ -126,6 +155,7 @@ end
 
 ---@param err string
 ---@return nil
+---@param self WorkerJobInternal
 function Job:_fail(err)
     if self.settled then return end
     if self.pid then ffiUtil.terminateSubProcess(self.pid) end
@@ -134,6 +164,7 @@ end
 
 ---@param message WorkerMessage
 ---@return nil
+---@param self WorkerJobInternal
 function Job:_dispatch(message)
     if message.type == "started" then
         self:_setState("running")
@@ -148,6 +179,7 @@ function Job:_dispatch(message)
 end
 
 ---@return nil
+---@param self WorkerJobInternal
 function Job:_read()
     if not self.read_fd then return end
     while true do
@@ -162,7 +194,7 @@ function Job:_read()
         end
         local messages, err = Protocol.feed(self.decoder, ffi.string(buffer, count))
         if not messages then
-            self:_fail(err)
+            self:_fail(err or "worker protocol failed")
             return
         end
         for _, message in ipairs(messages) do self:_dispatch(message) end
@@ -172,6 +204,7 @@ end
 
 --- UIManager 调用点；只收 IPC 和回调，不执行业务闭包。
 ---@return nil
+---@param self WorkerJobInternal
 function Job:waitEvent()
     if self.settled then
         if self.reaping and self.pid and ffiUtil.isSubProcessDone(self.pid) then
@@ -191,6 +224,7 @@ function Job:waitEvent()
 end
 
 ---@return nil
+---@param self WorkerJobInternal
 function Job:cancel()
     if self.settled then return end
     if self.pid then ffiUtil.terminateSubProcess(self.pid) end
@@ -201,6 +235,7 @@ end
 Job.abort = Job.cancel
 
 ---@return WorkerJobStatus
+---@param self WorkerJobInternal
 function Job:status()
     return {
         id = self.id,
@@ -211,9 +246,9 @@ function Job:status()
     }
 end
 
----@param worker fun(context: table): any
+---@param worker fun(context: WorkerContext): any
 ---@param opts WorkerJobOptions|nil
----@return WorkerJob
+---@return WorkerJobInternal
 function Job.run(worker, opts)
     assert(type(worker) == "function", "workers.job.run: worker must be function")
     opts = opts or {}
@@ -273,7 +308,7 @@ function Job.run(worker, opts)
 end
 
 ---@param id number
----@return WorkerJob|nil
+---@return WorkerJobInternal|nil
 function Job.get(id)
     return active[id]
 end
