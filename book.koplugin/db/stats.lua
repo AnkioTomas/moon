@@ -1,32 +1,42 @@
 --[[--
-reading_stats 表：自采集与拉取的阅读统计（一页一条，按记录身份去重）。
+reading_stats 表：自采集与拉取的阅读统计（逐页事件与云端聚合记录，按记录身份去重）。
 
 sync_status=0 表示待上传，1 表示已与远端同步。
 
 身份即 BookIdentity(source_id + stable_id)，天然按源隔离。
 
-@module koplugin.book.utils.db.stats
+@module koplugin.book.db.stats
 --]]
 
-local Base = require("utils.db.base")
+local Base = require("db.base")
 local logger = require("logger")
 
 local StatsDB = {}
 
---- 远端日桶 stable_id（``__*:day:``）判定。
----@param stable_id string|nil
----@return boolean
-local function isRemoteDayStableId(stable_id)
-    return type(stable_id) == "string" and stable_id:find(":day:", 1, true) ~= nil
-        and stable_id:sub(1, 2) == "__"
-end
+local DAY_RECORD = "day"
+local BOOK_RECORD = "book"
 
---- 远端周期书单 stable_id（``__*:book:``）判定；不参与按天总时长。
----@param stable_id string|nil
----@return boolean
-local function isRemoteBookStableId(stable_id)
-    return type(stable_id) == "string" and stable_id:find(":book:", 1, true) ~= nil
-        and stable_id:sub(1, 2) == "__"
+--- 创建阅读统计表及聚合查询索引。
+--- 仅在 Base.open() 的一次性 schema 初始化阶段调用。
+---@return boolean 成功返回 true，SQL 失败返回 false
+function StatsDB.ensureSchema()
+    if not Base.exec([[
+CREATE TABLE IF NOT EXISTS reading_stats (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, source_id TEXT NOT NULL,
+  stable_id TEXT NOT NULL, record_type TEXT NOT NULL,
+  page INTEGER NOT NULL DEFAULT 0,
+  start_time INTEGER NOT NULL, duration INTEGER NOT NULL DEFAULT 0,
+  total_pages INTEGER NOT NULL DEFAULT 0, chapter_idx INTEGER,
+  chapter_fraction REAL, sync_status INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_reading_stats_time ON reading_stats(source_id, start_time);
+]]) then return false end
+
+    if not Base.exec([[CREATE UNIQUE INDEX IF NOT EXISTS idx_reading_stats_identity
+        ON reading_stats(source_id, stable_id, page, start_time, duration);]]) then
+        return false
+    end
+    return true
 end
 
 --- 云端 pull 覆盖前的清理：**只删本次回包时间窗口内的合成行**。
@@ -41,34 +51,30 @@ end
 ---@param prefix string|nil 限定 stable_id 前缀；缺省则窗口内全部合成行
 ---@return boolean
 function StatsDB.deleteSyntheticInRange(source_id, from_ts, to_ts, prefix)
-    source_id = Base.requireSourceId(source_id)
     from_ts = tonumber(from_ts)
     to_ts = tonumber(to_ts)
-    if not source_id or not from_ts or not to_ts then
+    if not from_ts or not to_ts then
         return false
     end
-    Base.ensure()
     if prefix ~= nil then
-        if type(prefix) ~= "string" or prefix == "" then
-            return false
-        end
         return Base.exec(
             [[DELETE FROM reading_stats
-              WHERE source_id=? AND start_time>=? AND start_time<=? AND stable_id LIKE ?;]],
+              WHERE source_id=? AND record_type IN ('day','book')
+                AND start_time>=? AND start_time<=? AND stable_id LIKE ?;]],
             source_id, from_ts, to_ts, prefix .. "%"
         ) ~= nil
     end
     return Base.exec(
         [[DELETE FROM reading_stats
-          WHERE source_id=? AND start_time>=? AND start_time<=?
-            AND (stable_id GLOB '__*:day:*' OR stable_id GLOB '__*:book:*');]],
+          WHERE source_id=? AND record_type IN ('day','book')
+            AND start_time>=? AND start_time<=?;]],
         source_id, from_ts, to_ts
     ) ~= nil
 end
 
---- 云端日桶/书桶是合成行（stable_id 形如 `__src:day:...`）：按书、按小时统计里
---- 必须排掉，否则同一天既算云端整天时长又算本地逐页时长，账单直接翻倍。
-local NOT_SYNTHETIC = " AND stable_id NOT GLOB '__*:day:*' AND stable_id NOT GLOB '__*:book:*' "
+--- 云端日桶/书桶是合成行：按书、按小时统计里必须排掉，否则同一天既算云端整天
+--- 时长又算本地逐页时长，账单直接翻倍。
+local NOT_SYNTHETIC = " AND record_type='page' "
 
 --- 按天合并云端日桶与本地页记录：有云端日桶的日期以云端为准。
 ---@param source_id string
@@ -76,11 +82,6 @@ local NOT_SYNTHETIC = " AND stable_id NOT GLOB '__*:day:*' AND stable_id NOT GLO
 ---@param end_ts number|nil 可选时间范围（不含）
 ---@return table[] rows { ymd, seconds, pages }
 local function mergedDailyRows(source_id, start_ts, end_ts)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return {}
-    end
-    Base.ensure()
     local range = ""
     local args = { source_id }
     if start_ts and end_ts then
@@ -90,21 +91,21 @@ local function mergedDailyRows(source_id, start_ts, end_ts)
     end
     local result, nrows = Base.query(
         [[SELECT date(start_time,'unixepoch','localtime') AS day,
-                 stable_id, COALESCE(SUM(duration),0), COUNT(*)
+                 stable_id, record_type, COALESCE(SUM(duration),0), COUNT(*)
           FROM reading_stats WHERE source_id=]] .. "?" .. range .. [[
-          GROUP BY day, stable_id ORDER BY day;]],
+          GROUP BY day, stable_id, record_type ORDER BY day;]],
         unpack(args, 1, #args)
     )
     local cloud, local_days, pages = {}, {}, {}
     if result and nrows and nrows > 0 then
         for i = 1, nrows do
             local day = result[1][i]
-            local stable_id = result[2][i]
-            local seconds = tonumber(result[3][i]) or 0
-            local count = tonumber(result[4][i]) or 0
-            if isRemoteBookStableId(stable_id) then
+            local record_type = result[3][i]
+            local seconds = tonumber(result[4][i]) or 0
+            local count = tonumber(result[5][i]) or 0
+            if record_type == BOOK_RECORD then
                 -- 周期书单排行，不参与日历总时长
-            elseif isRemoteDayStableId(stable_id) then
+            elseif record_type == DAY_RECORD then
                 cloud[day] = seconds
                 pages[day] = (pages[day] or 0) + count
             else
@@ -132,28 +133,22 @@ end
 ---@param synced boolean|nil
 ---@return boolean
 function StatsDB.add(row, synced)
-    if type(row) ~= "table" then
-        return false
-    end
-    local source_id = Base.requireSourceId(row.source_id)
-    if not source_id or type(row.stable_id) ~= "string" or row.stable_id == "" then
-        return false
-    end
+    local source_id = row.source_id
     local start_time = tonumber(row.start_time)
     local duration = tonumber(row.duration)
     if not start_time or not duration or duration <= 0 then
         return false
     end
-    Base.ensure()
     return Base.exec(
         [[INSERT INTO reading_stats (
-            source_id, stable_id, page, start_time, duration, total_pages,
+            source_id, stable_id, record_type, page, start_time, duration, total_pages,
             chapter_idx, chapter_fraction, sync_status
-          ) VALUES (?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(source_id, stable_id, page, start_time, duration, total_pages)
+          ) VALUES (?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(source_id, stable_id, page, start_time, duration)
           DO UPDATE SET sync_status=MAX(reading_stats.sync_status, excluded.sync_status);]],
         source_id,
         row.stable_id,
+        row.record_type,
         tonumber(row.page) or 0,
         start_time,
         duration,
@@ -168,9 +163,6 @@ end
 ---@param source_id string
 ---@return table[]
 function StatsDB.unsyncedBySource(source_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then return {} end
-    Base.ensure()
     local result, nrows = Base.query(
         [[SELECT id, stable_id, page, start_time, duration, total_pages,
                  chapter_idx, chapter_fraction, sync_status
@@ -200,24 +192,16 @@ end
 ---@param row table
 ---@return boolean
 function StatsDB.exists(row)
-    if type(row) ~= "table" then
-        return false
-    end
-    local source_id = Base.requireSourceId(row.source_id)
-    if not source_id or type(row.stable_id) ~= "string" or row.stable_id == "" then
-        return false
-    end
-    Base.ensure()
+    local source_id = row.source_id
     return Base.rowexec(
         [[SELECT 1 FROM reading_stats
           WHERE source_id=? AND stable_id=? AND page=? AND start_time=?
-            AND duration=? AND total_pages=? LIMIT 1;]],
+            AND duration=? LIMIT 1;]],
         source_id,
         row.stable_id,
         tonumber(row.page) or 0,
         tonumber(row.start_time) or 0,
-        tonumber(row.duration) or 0,
-        tonumber(row.total_pages) or 0
+        tonumber(row.duration) or 0
     ) ~= nil
 end
 
@@ -228,11 +212,6 @@ end
 ---@param rows table[]|nil
 ---@return { imported: integer, skipped: integer }|nil
 function StatsDB.replaceSynced(source_id, replace, rows)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return nil
-    end
-    Base.ensure()
     if not Base.exec("BEGIN IMMEDIATE;") then
         return nil
     end
@@ -249,8 +228,8 @@ function StatsDB.replaceSynced(source_id, replace, rows)
                 to = (to == nil or ts > to) and ts or to
             end
         end
-        if type(replace) == "table" and from and to then
-            if replace.mode == "prefix" and type(replace.stable_prefixes) == "table" then
+        if replace and from and to then
+            if replace.mode == "prefix" and replace.stable_prefixes then
                 for _, prefix in ipairs(replace.stable_prefixes) do
                     assert(StatsDB.deleteSyntheticInRange(source_id, from, to, prefix),
                         "failed to clear synced reading stats")
@@ -286,10 +265,6 @@ end
 ---@param source_id string
 ---@return { total_seconds: number, total_pages: number, last7_seconds: number, longest_day_seconds: number }
 function StatsDB.summaryBySource(source_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return { total_seconds = 0, total_pages = 0, last7_seconds = 0, longest_day_seconds = 0 }
-    end
     local daily = mergedDailyRows(source_id)
     local total_seconds, total_pages, last7_seconds, longest_day_seconds = 0, 0, 0, 0
     local cutoff = os.date("%Y-%m-%d", os.time() - 6 * 86400)
@@ -318,11 +293,6 @@ end
 ---@param stable_id string
 ---@return { total_seconds: number, pages: number, last_read: number }
 function StatsDB.summaryByBook(source_id, stable_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-        return { total_seconds = 0, pages = 0, last_read = 0 }
-    end
-    Base.ensure()
     local total_seconds, pages, last_read = Base.rowexec(
         [[SELECT COALESCE(SUM(duration),0), COUNT(*), COALESCE(MAX(start_time),0)
           FROM reading_stats WHERE source_id=? AND stable_id=?;]],
@@ -343,11 +313,6 @@ end
 ---@param limit number|nil 最多返回天数，默认 5
 ---@return table[] rows { ymd, seconds, pages }（日期倒序）
 function StatsDB.dailyByBook(source_id, stable_id, limit)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-        return {}
-    end
-    Base.ensure()
     local result, nrows = Base.query(
         [[SELECT date(start_time,'unixepoch','localtime') AS day,
                  SUM(duration), COUNT(*)
@@ -382,17 +347,11 @@ end
 ---@param source_id string
 ---@return table[] rows { ymd, stable_id, seconds, max_page, max_total_pages }（日期升序、时长降序）
 function StatsDB.dailyBooksBySource(source_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return {}
-    end
-    Base.ensure()
     local result, nrows = Base.query(
         [[SELECT date(start_time,'unixepoch','localtime') AS day,
                  stable_id, SUM(duration), MAX(page), MAX(total_pages)
           FROM reading_stats WHERE source_id=?
-            AND stable_id NOT GLOB '__*:day:*'
-            AND stable_id NOT GLOB '__*:book:*'
+            AND record_type='page'
           GROUP BY day, stable_id ORDER BY day, 3 DESC;]],
         source_id
     )
@@ -417,11 +376,6 @@ end
 ---@param end_ts number
 ---@return { total_seconds: number, book_count: number, pages: number }
 function StatsDB.periodSummary(source_id, start_ts, end_ts)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return { total_seconds = 0, book_count = 0, pages = 0 }
-    end
-    Base.ensure()
     -- 书数/页数只看真实书的记录；总时长按天走「云端日桶优先」的合并口径，
     -- 与洞察日历保持一致，也避免同一天双重计数。
     local _, books, pages = Base.rowexec(
@@ -448,19 +402,13 @@ end
 ---@param limit number|nil
 ---@return table[] rows { stable_id, title, authors, percent, seconds, pages }
 function StatsDB.periodBooks(source_id, start_ts, end_ts, limit)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return {}
-    end
-    Base.ensure()
     local result, nrows = Base.query(
         [[SELECT r.stable_id, b.title, b.authors, b.percent,
                  SUM(r.duration), COUNT(*)
           FROM reading_stats r LEFT JOIN books b
             ON b.source_id=r.source_id AND b.stable_id=r.stable_id
           WHERE r.source_id=? AND r.start_time>=? AND r.start_time<?
-            AND r.stable_id NOT GLOB '__*:day:*'
-            AND r.stable_id NOT GLOB '__*:book:*'
+            AND r.record_type='page'
           GROUP BY r.stable_id ORDER BY 5 DESC LIMIT ?;]],
         source_id, tonumber(start_ts) or 0, tonumber(end_ts) or 0,
         math.max(1, tonumber(limit) or 5)
@@ -487,10 +435,6 @@ end
 ---@param end_ts number
 ---@return table[] rows { ymd, seconds, pages }
 function StatsDB.periodDays(source_id, start_ts, end_ts)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return {}
-    end
     -- 与洞察日历同一口径：有云端日桶的日期以云端为准，不与本地逐页记录相加
     return mergedDailyRows(source_id, start_ts, end_ts)
 end
@@ -501,11 +445,6 @@ end
 ---@param end_ts number
 ---@return table[] rows { hour, seconds, pages }（hour 为 0–23）
 function StatsDB.periodHours(source_id, start_ts, end_ts)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return {}
-    end
-    Base.ensure()
     local result, nrows = Base.query(
         [[SELECT CAST(strftime('%H', start_time, 'unixepoch', 'localtime') AS INTEGER),
                  SUM(duration), COUNT(*)
@@ -531,10 +470,9 @@ end
 ---@param ids number[]
 ---@return boolean
 function StatsDB.markSynced(ids)
-    if type(ids) ~= "table" or #ids == 0 then
+    if #ids == 0 then
         return false
     end
-    Base.ensure()
     if not Base.exec("BEGIN IMMEDIATE;") then
         return false
     end
