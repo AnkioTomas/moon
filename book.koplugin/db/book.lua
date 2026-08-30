@@ -1,54 +1,52 @@
 --[[--
 books 表：BookIdentity + 展示元数据 + 统计 md5
 
-@module koplugin.book.utils.db.book
+@module koplugin.book.db.book
 --]]
 
-local Base = require("utils.db.base")
+local Base = require("db.base")
 
 local BookDB = {}
 
---- favorite 字段写入 DB 的字符串形式（契约：nil / string / boolean，见 types/book.lua）
----@param v nil|string|boolean
----@return string|nil
-local function favoriteToDb(v)
-    if v == nil then
-        return nil
-    end
-    if type(v) == "string" then
-        return v
-    end
-    return tostring(v)
+--- 创建 books 表及其常用索引。
+--- 仅在 Base.open() 的一次性 schema 初始化阶段调用。
+---@return boolean 成功返回 true，SQL 失败返回 false
+function BookDB.ensureSchema()
+    if not Base.exec([[
+CREATE TABLE IF NOT EXISTS books (
+  source_id TEXT NOT NULL, stable_id TEXT NOT NULL, md5 TEXT, title TEXT,
+  authors TEXT, percent REAL DEFAULT 0, category TEXT,
+  series TEXT, intro TEXT, fetched_at INTEGER NOT NULL DEFAULT 0, path TEXT,
+  last_open INTEGER NOT NULL DEFAULT 0,
+  in_library INTEGER NOT NULL DEFAULT 1, metadata_dirty INTEGER NOT NULL DEFAULT 0,
+  metadata_updated_at INTEGER NOT NULL DEFAULT 0, reader_prefs TEXT,
+  toc TEXT, toc_fetched_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (source_id, stable_id)
+);
+CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(source_id, md5);
+CREATE INDEX IF NOT EXISTS idx_books_path ON books(path);
+CREATE INDEX IF NOT EXISTS idx_books_library ON books(source_id, in_library, stable_id);
+]]) then return false end
+    return true
 end
 
 --- 插入或更新 books 行。兼容旧调用：视为可信本地写入，但不制造待上传状态。
 ---@param row table
 ---@return boolean
 function BookDB.upsert(row)
-    if type(row) ~= "table" then
-        return false
-    end
-    Base.ensure()
-    local source_id = Base.requireSourceId(row.source_id)
+    local source_id = row.source_id
     local stable_id = row.stable_id
-    if type(stable_id) == "number" then
-        stable_id = tostring(stable_id)
-    end
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-        return false
-    end
     return Base.exec(
         [[INSERT INTO books (
             source_id, stable_id, md5, title, authors,
-            percent, category, favorite, series, intro, fetched_at, path, in_library
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)
+            percent, category, series, intro, fetched_at, path, in_library
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,1)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             md5=COALESCE(excluded.md5, books.md5),
             title=excluded.title,
             authors=excluded.authors,
             percent=excluded.percent,
             category=excluded.category,
-            favorite=excluded.favorite,
             series=excluded.series,
             intro=excluded.intro,
             fetched_at=excluded.fetched_at,
@@ -61,7 +59,6 @@ function BookDB.upsert(row)
         row.authors,
         tonumber(row.percent) or 0,
         row.category,
-        favoriteToDb(row.favorite),
         row.series,
         row.intro,
         tonumber(row.fetched_at) or os.time(),
@@ -73,18 +70,14 @@ end
 ---@param row table
 ---@return boolean
 function BookDB.upsertRemote(row)
-    if type(row) ~= "table" then return false end
-    local source_id = Base.requireSourceId(row.source_id)
+    local source_id = row.source_id
     local stable_id = row.stable_id
-    if type(stable_id) == "number" then stable_id = tostring(stable_id) end
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then return false end
     local has_membership = row.in_library ~= nil
     local in_library = row.in_library == true or tonumber(row.in_library) == 1
-    Base.ensure()
     return Base.exec(
         [[INSERT INTO books (
             source_id, stable_id, md5, title, authors, percent, category,
-            favorite, series, intro, fetched_at, path, in_library,
+            series, intro, fetched_at, path, in_library,
             metadata_dirty, metadata_updated_at
           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
@@ -92,7 +85,6 @@ function BookDB.upsertRemote(row)
             title=CASE WHEN books.metadata_dirty=0 THEN excluded.title ELSE books.title END,
             authors=CASE WHEN books.metadata_dirty=0 THEN excluded.authors ELSE books.authors END,
             category=CASE WHEN books.metadata_dirty=0 THEN excluded.category ELSE books.category END,
-            favorite=CASE WHEN books.metadata_dirty=0 THEN excluded.favorite ELSE books.favorite END,
             series=CASE WHEN books.metadata_dirty=0 THEN excluded.series ELSE books.series END,
             intro=CASE WHEN books.metadata_dirty=0 THEN excluded.intro ELSE books.intro END,
             percent=excluded.percent,
@@ -100,33 +92,27 @@ function BookDB.upsertRemote(row)
             path=COALESCE(excluded.path, books.path),
             in_library=CASE WHEN ?=1 THEN excluded.in_library ELSE books.in_library END;]],
         source_id, stable_id, row.md5, row.title, row.authors,
-        tonumber(row.percent) or 0, row.category, favoriteToDb(row.favorite),
+        tonumber(row.percent) or 0, row.category,
         row.series, row.intro, tonumber(row.fetched_at) or os.time(), row.path,
         in_library and 1 or 0, has_membership and 1 or 0
     ) ~= nil
 end
 
 --- 批量写入远端书架行。大书架同步不能为每本书 prepare/close 一次；
---- 每批 8 行（96 个绑定参数）：兼容低端设备上的 SQLite/LuaJIT 绑定实现，
+--- 每批 8 行（88 个绑定参数）：兼容低端设备上的 SQLite/LuaJIT 绑定实现，
 --- 同时避免每本书都重复 prepare/close。
 ---@param rows table[]
 ---@return boolean
 function BookDB.upsertRemoteMany(rows)
-    if type(rows) ~= "table" or #rows == 0 then return true end
-    Base.ensure()
+    if #rows == 0 then return true end
     for start = 1, #rows, 8 do
         local values, args = {}, {}
         local finish = math.min(start + 7, #rows)
         for i = start, finish do
             local row = rows[i]
-            if type(row) ~= "table" then return false end
-            local source_id = Base.requireSourceId(row.source_id)
+            local source_id = row.source_id
             local stable_id = row.stable_id
-            if type(stable_id) == "number" then stable_id = tostring(stable_id) end
-            if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-                return false
-            end
-            values[#values + 1] = "(?,?,?,?,?,?,?,?,?,?,?,?,1)"
+            values[#values + 1] = "(?,?,?,?,?,?,?,?,?,?,?,1)"
             args[#args + 1] = source_id
             args[#args + 1] = stable_id
             args[#args + 1] = row.md5
@@ -134,7 +120,6 @@ function BookDB.upsertRemoteMany(rows)
             args[#args + 1] = row.authors
             args[#args + 1] = tonumber(row.percent) or 0
             args[#args + 1] = row.category
-            args[#args + 1] = favoriteToDb(row.favorite)
             args[#args + 1] = row.series
             args[#args + 1] = row.intro
             args[#args + 1] = tonumber(row.fetched_at) or os.time()
@@ -143,14 +128,13 @@ function BookDB.upsertRemoteMany(rows)
         local ok = Base.exec(
             [[INSERT INTO books (
                 source_id, stable_id, md5, title, authors, percent, category,
-                favorite, series, intro, fetched_at, path, in_library
+                series, intro, fetched_at, path, in_library
               ) VALUES ]] .. table.concat(values, ",") .. [[
               ON CONFLICT(source_id, stable_id) DO UPDATE SET
                 md5=COALESCE(excluded.md5, books.md5),
                 title=CASE WHEN books.metadata_dirty=0 THEN excluded.title ELSE books.title END,
                 authors=CASE WHEN books.metadata_dirty=0 THEN excluded.authors ELSE books.authors END,
                 category=CASE WHEN books.metadata_dirty=0 THEN excluded.category ELSE books.category END,
-                favorite=CASE WHEN books.metadata_dirty=0 THEN excluded.favorite ELSE books.favorite END,
                 series=CASE WHEN books.metadata_dirty=0 THEN excluded.series ELSE books.series END,
                 intro=CASE WHEN books.metadata_dirty=0 THEN excluded.intro ELSE books.intro END,
                 percent=excluded.percent,
@@ -158,7 +142,7 @@ function BookDB.upsertRemoteMany(rows)
                 path=COALESCE(excluded.path, books.path),
                 in_library=1;]],
             -- args 内允许 NULL；不能用不带上界的 unpack，否则会在第一个 nil 处截断。
-            unpack(args, 1, #values * 12)
+            unpack(args, 1, #values * 11)
         )
         if not ok then
             -- 某些旧版 SQLite/绑定对多行 UPSERT 支持不完整；批量失败时回退
@@ -175,25 +159,22 @@ end
 ---@param row table
 ---@return boolean
 function BookDB.upsertLocal(row)
-    if type(row) ~= "table" then return false end
-    local source_id = Base.requireSourceId(row.source_id)
+    local source_id = row.source_id
     local stable_id = row.stable_id
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then return false end
     local revision = tonumber(row.metadata_updated_at) or os.time()
-    Base.ensure()
     return Base.exec(
         [[INSERT INTO books (
-            source_id, stable_id, title, authors, percent, category, favorite,
+            source_id, stable_id, title, authors, percent, category,
             series, intro, fetched_at, in_library, metadata_dirty, metadata_updated_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,1,1,?)
+          ) VALUES (?,?,?,?,?,?,?,?,?,1,1,?)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             title=excluded.title, authors=excluded.authors,
-            category=excluded.category, favorite=excluded.favorite,
+            category=excluded.category,
             series=excluded.series, intro=excluded.intro,
             fetched_at=excluded.fetched_at, in_library=1,
             metadata_dirty=1, metadata_updated_at=excluded.metadata_updated_at;]],
         source_id, stable_id, row.title, row.authors, tonumber(row.percent) or 0,
-        row.category, favoriteToDb(row.favorite), row.series, row.intro,
+        row.category, row.series, row.intro,
         tonumber(row.fetched_at) or os.time(), revision
     ) ~= nil
 end
@@ -204,39 +185,28 @@ end
 ---@param opts { clear_missing_paths?: boolean }|nil
 ---@return boolean
 function BookDB.reconcile(source_id, books, opts)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(books) ~= "table" then return false end
     for _, row in ipairs(books) do
-        if type(row) ~= "table" or tostring(row.source_id or source_id) ~= source_id
-            or row.stable_id == nil or tostring(row.stable_id) == "" then
-            return false
-        end
     end
-    Base.ensure()
     if not Base.exec("BEGIN IMMEDIATE;") then return false end
     local ok = Base.exec("UPDATE books SET in_library=0 WHERE source_id=?;", source_id) ~= nil
     if ok and opts and opts.clear_missing_paths then
-        ok = Base.exec([[UPDATE books SET path=NULL, last_chapter_idx=NULL
+        ok = Base.exec([[UPDATE books SET path=NULL
             WHERE source_id=? AND in_library=0;]], source_id) ~= nil
     end
     if ok then
-        if #books > 8 then
-            local batch = {}
-            for _, row in ipairs(books) do
-                local copy = {}
-                for k, v in pairs(row) do copy[k] = v end
-                copy.source_id = source_id
-                copy.in_library = true
-                batch[#batch + 1] = copy
-            end
+        local batch = {}
+        for _, row in ipairs(books) do
+            local copy = {}
+            for k, v in pairs(row) do copy[k] = v end
+            copy.source_id = source_id
+            copy.in_library = true
+            batch[#batch + 1] = copy
+        end
+        if #batch > 8 then
             ok = BookDB.upsertRemoteMany(batch)
         else
-            for _, row in ipairs(books) do
-                local copy = {}
-                for k, v in pairs(row) do copy[k] = v end
-                copy.source_id = source_id
-                copy.in_library = true
-                if not BookDB.upsertRemote(copy) then ok = false break end
+            for _, row in ipairs(batch) do
+                if not BookDB.upsertRemote(row) then ok = false break end
             end
         end
     end
@@ -251,11 +221,8 @@ end
 ---@param clear_path boolean|nil
 ---@return boolean
 function BookDB.setLibraryMembership(source_id, stable_id, in_library, clear_path)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then return false end
-    Base.ensure()
     if clear_path and not in_library then
-        return Base.exec([[UPDATE books SET in_library=0, path=NULL, last_chapter_idx=NULL
+        return Base.exec([[UPDATE books SET in_library=0, path=NULL
             WHERE source_id=? AND stable_id=?;]], source_id, stable_id) ~= nil
     end
     return Base.exec([[UPDATE books SET in_library=? WHERE source_id=? AND stable_id=?;]],
@@ -263,7 +230,7 @@ function BookDB.setLibraryMembership(source_id, stable_id, in_library, clear_pat
 end
 
 local COLUMNS =
-    "source_id, stable_id, md5, title, authors, percent, category, favorite, series, intro, fetched_at, path, last_open, last_chapter_idx, in_library, metadata_dirty, metadata_updated_at"
+    "source_id, stable_id, md5, title, authors, percent, category, series, intro, fetched_at, path, last_open, in_library, metadata_dirty, metadata_updated_at"
 
 --- rowexec 位置参数 → Book 表
 --- 形参顺序必须与 COLUMNS 一致；sqlite 返回的都是字符串，数值列在此统一 tonumber。
@@ -274,18 +241,16 @@ local COLUMNS =
 ---@param authors string|nil
 ---@param percent any 阅读进度 0..100
 ---@param category string|nil
----@param favorite string|nil
 ---@param series string|nil
 ---@param intro string|nil
 ---@param fetched_at any 元数据拉取时间戳，缺失算 0
 ---@param path string|nil 本地文件路径
 ---@param last_open any 最近打开时间戳，缺失算 0
----@param last_chapter_idx any 最近读到的章
 ---@param in_library any 非 0 即视为在书架内
 ---@param metadata_dirty any
 ---@param metadata_updated_at any
 ---@return Book|nil
-local function rowToBook(source_id_r, stable_id_r, digest, title, authors, percent, category, favorite, series, intro, fetched_at, path, last_open, last_chapter_idx, in_library, metadata_dirty, metadata_updated_at)
+local function rowToBook(source_id_r, stable_id_r, digest, title, authors, percent, category, series, intro, fetched_at, path, last_open, in_library, metadata_dirty, metadata_updated_at)
     if not source_id_r then
         return nil
     end
@@ -297,13 +262,11 @@ local function rowToBook(source_id_r, stable_id_r, digest, title, authors, perce
         authors = authors,
         percent = tonumber(percent) or 0,
         category = category,
-        favorite = favorite,
         series = series,
         intro = intro,
         fetched_at = tonumber(fetched_at) or 0,
         path = path,
         last_open = tonumber(last_open) or 0,
-        last_chapter_idx = last_chapter_idx,
         in_library = tonumber(in_library) ~= 0,
         metadata_dirty = tonumber(metadata_dirty) or 0,
         metadata_updated_at = tonumber(metadata_updated_at) or 0,
@@ -315,11 +278,6 @@ end
 ---@param stable_id string
 ---@return Book|nil
 function BookDB.get(source_id, stable_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-        return nil
-    end
-    Base.ensure()
     return rowToBook(Base.rowexec(
         "SELECT " .. COLUMNS .. " FROM books WHERE source_id=? AND stable_id=? LIMIT 1;",
         source_id,
@@ -332,20 +290,15 @@ end
 ---@param stable_ids string[]
 ---@return table<string, Book>
 function BookDB.getMany(source_id, stable_ids)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_ids) ~= "table" then
-        return {}
-    end
     local ids, seen = {}, {}
     for _, stable_id in ipairs(stable_ids) do
-        if type(stable_id) == "string" and stable_id ~= "" and not seen[stable_id] then
+        if not seen[stable_id] then
             seen[stable_id] = true
             ids[#ids + 1] = stable_id
         end
     end
     if #ids == 0 then return {} end
 
-    Base.ensure()
     local out = {}
     -- Keep below SQLite's usual 999 bind parameter limit.
     for start = 1, #ids, 500 do
@@ -375,44 +328,29 @@ end
 ---@param path string
 ---@return Book|nil
 function BookDB.getByPath(path)
-    if type(path) ~= "string" or path == "" then
-        return nil
-    end
-    Base.ensure()
     return rowToBook(Base.rowexec(
         "SELECT " .. COLUMNS .. " FROM books WHERE path=? LIMIT 1;",
         path
     ))
 end
 
---- 打开/下载后登记：更新 path + last_open（+ last_chapter_idx）。
+--- 打开/下载后登记：更新 path + last_open。
 --- 行不存在时补一行身份（fetched_at=0 表示仅身份行）。
 ---@param source_id string
 ---@param stable_id string
 ---@param path string
----@param chapter_idx number|nil
 ---@return boolean
-function BookDB.touchPath(source_id, stable_id, path, chapter_idx)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-        return false
-    end
-    if type(path) ~= "string" or path == "" then
-        return false
-    end
-    Base.ensure()
+function BookDB.touchPath(source_id, stable_id, path)
     return Base.exec(
-        [[INSERT INTO books (source_id, stable_id, fetched_at, path, last_open, last_chapter_idx)
-          VALUES (?,?,0,?,?,?)
+        [[INSERT INTO books (source_id, stable_id, fetched_at, path, last_open)
+          VALUES (?,?,0,?,?)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             path=excluded.path,
-            last_open=excluded.last_open,
-            last_chapter_idx=excluded.last_chapter_idx;]],
+            last_open=excluded.last_open;]],
         source_id,
         stable_id,
         path,
-        os.time(),
-        chapter_idx
+        os.time()
     ) ~= nil
 end
 
@@ -420,12 +358,8 @@ end
 ---@param path string
 ---@return boolean
 function BookDB.clearPath(path)
-    if type(path) ~= "string" or path == "" then
-        return false
-    end
-    Base.ensure()
     return Base.exec(
-        [[UPDATE books SET path=NULL, last_chapter_idx=NULL WHERE path=?;]],
+        [[UPDATE books SET path=NULL WHERE path=?;]],
         path
     ) ~= nil
 end
@@ -434,12 +368,12 @@ end
 ---@param dir string
 ---@return boolean
 function BookDB.clearPathsUnder(dir)
-    if type(dir) ~= "string" or dir == "" then
+    -- 空目录会拼成 LIKE '/%'，会清掉全部绝对路径登记。
+    if not dir or dir == "" then
         return false
     end
-    Base.ensure()
     return Base.exec(
-        [[UPDATE books SET path=NULL, last_chapter_idx=NULL WHERE path LIKE ? ESCAPE '\';]],
+        [[UPDATE books SET path=NULL WHERE path LIKE ? ESCAPE '\';]],
         dir:gsub("([%%_\\])", "\\%1") .. "/%"
     ) ~= nil
 end
@@ -447,7 +381,6 @@ end
 --- 全部已登记路径（清缓存对账）
 ---@return { source_id: string, stable_id: string, path: string }[]
 function BookDB.pathsAll()
-    Base.ensure()
     local result, nrows = Base.query([[SELECT source_id, stable_id, path FROM books WHERE path IS NOT NULL;]])
     local out = {}
     if result and nrows and nrows > 0 then
@@ -466,7 +399,6 @@ end
 ---@param limit number|nil
 ---@return Book[]
 function BookDB.recent(limit)
-    Base.ensure()
     local result, nrows = Base.query(
         "SELECT " .. COLUMNS .. " FROM books WHERE in_library=1 AND last_open>0 ORDER BY last_open DESC LIMIT ?;",
         tonumber(limit) or 24
@@ -489,16 +421,11 @@ end
 ---@param limit number|nil
 ---@return Book[]
 function BookDB.recentBySource(source_id, limit)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return {}
-    end
-    Base.ensure()
     local result, nrows = Base.query(
         [[SELECT b.source_id, b.stable_id, b.md5, b.title, b.authors,
                  COALESCE(p.fraction * 100, b.percent),
-                 b.category, b.favorite, b.series, b.intro, b.fetched_at, b.path,
-                 b.last_open, b.last_chapter_idx, b.in_library, b.metadata_dirty, b.metadata_updated_at
+                 b.category, b.series, b.intro, b.fetched_at, b.path,
+                 b.last_open, b.in_library, b.metadata_dirty, b.metadata_updated_at
             FROM books b
             LEFT JOIN pending_progress p
               ON p.source_id=b.source_id AND p.stable_id=b.stable_id
@@ -523,8 +450,7 @@ end
 --- 清空全部打开记录与路径登记（清缓存）
 ---@return boolean
 function BookDB.clearOpens()
-    Base.ensure()
-    return Base.exec([[UPDATE books SET path=NULL, last_open=0, last_chapter_idx=NULL;]]) ~= nil
+    return Base.exec([[UPDATE books SET path=NULL, last_open=0;]]) ~= nil
 end
 
 --- 按 (source_id, md5) 找已入库的行（本地源用内容摘要识别文件改名/移动）。
@@ -532,11 +458,6 @@ end
 ---@param md5 string
 ---@return Book|nil
 function BookDB.getByMd5(source_id, md5)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(md5) ~= "string" or md5 == "" then
-        return nil
-    end
-    Base.ensure()
     return rowToBook(Base.rowexec(
         "SELECT " .. COLUMNS .. " FROM books WHERE source_id=? AND md5=? LIMIT 1;",
         source_id,
@@ -546,7 +467,7 @@ end
 
 --- 改名/移动：把某本书的 stable_id 换成新值（本地源文件路径变化，身份仍由 md5 认定）。
 --- category/series 由文件所在目录派生，随新位置一并刷新（传 nil 即清除）。
---- 本地源 path==stable_id，同步改写 path；chapters / reading_stats / notes / pending_progress 一并联动。
+--- 本地源 path==stable_id，同步改写 path；所有书籍身份表一并联动，目录缓存直接失效。
 ---@param source_id string
 ---@param old_stable_id string
 ---@param new_stable_id string
@@ -554,20 +475,9 @@ end
 ---@param series string|nil
 ---@return boolean
 function BookDB.renameStableId(source_id, old_stable_id, new_stable_id, category, series)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return false
-    end
-    if type(old_stable_id) ~= "string" or old_stable_id == "" then
-        return false
-    end
-    if type(new_stable_id) ~= "string" or new_stable_id == "" then
-        return false
-    end
     if old_stable_id == new_stable_id then
         return true
     end
-    Base.ensure()
     -- 身份必须同生共死：包事务，任何一步失败整体回滚
     if not Base.exec([[BEGIN IMMEDIATE;]]) then
         return false
@@ -586,6 +496,9 @@ function BookDB.renameStableId(source_id, old_stable_id, new_stable_id, category
         new_stable_id, source_id, old_stable_id
     ) and Base.exec(
         [[UPDATE pending_progress SET stable_id=? WHERE source_id=? AND stable_id=?;]],
+        new_stable_id, source_id, old_stable_id
+    ) and Base.exec(
+        [[UPDATE xray_entities SET stable_id=? WHERE source_id=? AND stable_id=?;]],
         new_stable_id, source_id, old_stable_id
     )
     Base.exec(ok and [[COMMIT;]] or [[ROLLBACK;]])
@@ -611,11 +524,6 @@ end
 ---@param source_id string
 ---@return string[]
 function BookDB.stableIdsBySource(source_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return {}
-    end
-    Base.ensure()
     return stringColumn([[SELECT stable_id FROM books WHERE source_id=?;]], source_id)
 end
 
@@ -623,9 +531,6 @@ end
 ---@param source_id string
 ---@return string[]
 function BookDB.libraryStableIdsBySource(source_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then return {} end
-    Base.ensure()
     return stringColumn([[SELECT stable_id FROM books
         WHERE source_id=? AND in_library=1 ORDER BY stable_id;]], source_id)
 end
@@ -635,23 +540,18 @@ end
 ---@param opts { category: string|nil, series: string|nil, search: string|nil, limit: number|nil, offset: number|nil }|nil
 ---@return table[] rows, number count
 function BookDB.listBySource(source_id, opts)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return {}, 0
-    end
     opts = opts or {}
-    Base.ensure()
     local where = "b.source_id=? AND b.in_library=1"
     local args = { source_id }
-    if type(opts.category) == "string" and opts.category ~= "" then
+    if opts.category and opts.category ~= "" then
         where = where .. " AND b.category=?"
         args[#args + 1] = opts.category
     end
-    if type(opts.series) == "string" and opts.series ~= "" then
+    if opts.series and opts.series ~= "" then
         where = where .. " AND b.series=?"
         args[#args + 1] = opts.series
     end
-    if type(opts.search) == "string" and opts.search ~= "" then
+    if opts.search and opts.search ~= "" then
         -- 转义 LIKE 通配符：用户输入的 % _ 是字面量
         where = where .. [[ AND (b.title LIKE ? ESCAPE '\' OR b.authors LIKE ? ESCAPE '\' OR b.stable_id LIKE ? ESCAPE '\')]]
         local like = "%" .. opts.search:gsub("([%%_\\])", "\\%1") .. "%"
@@ -704,11 +604,6 @@ end
 ---@param source_id string
 ---@return string[]
 function BookDB.categoriesBySource(source_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return {}
-    end
-    Base.ensure()
     return stringColumn(
         [[SELECT DISTINCT category FROM books
           WHERE source_id=? AND in_library=1 AND category IS NOT NULL AND category<>''
@@ -721,11 +616,6 @@ end
 ---@param source_id string
 ---@return string[]
 function BookDB.seriesBySource(source_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id then
-        return {}
-    end
-    Base.ensure()
     return stringColumn(
         [[SELECT DISTINCT series FROM books
           WHERE source_id=? AND in_library=1 AND series IS NOT NULL AND series<>''
@@ -739,14 +629,55 @@ end
 ---@param stable_id string
 ---@return boolean
 function BookDB.remove(source_id, stable_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-        return false
-    end
-    Base.ensure()
-    require("utils.db.toc").delete(source_id, stable_id)
     return Base.exec(
         [[DELETE FROM books WHERE source_id=? AND stable_id=?;]],
+        source_id, stable_id
+    ) ~= nil
+end
+
+--- 读取书籍目录缓存；max_age 秒内才命中。
+---@param source_id string
+---@param stable_id string
+---@param max_age number|nil
+---@return string|nil, number|nil
+function BookDB.getToc(source_id, stable_id, max_age)
+    local payload, fetched_at = Base.rowexec(
+        [[SELECT toc, toc_fetched_at FROM books
+          WHERE source_id=? AND stable_id=? LIMIT 1;]],
+        source_id, stable_id
+    )
+    if not payload then return nil end
+    fetched_at = tonumber(fetched_at) or 0
+    if max_age and os.time() - fetched_at >= max_age then
+        return nil
+    end
+    return payload, fetched_at
+end
+
+--- 写入书籍目录缓存。
+---@param source_id string
+---@param stable_id string
+---@param payload string
+---@return boolean
+function BookDB.setToc(source_id, stable_id, payload)
+    return Base.exec(
+        [[INSERT INTO books (source_id, stable_id, toc, toc_fetched_at)
+          VALUES (?,?,?,?)
+          ON CONFLICT(source_id, stable_id) DO UPDATE SET
+            toc=excluded.toc,
+            toc_fetched_at=excluded.toc_fetched_at;]],
+        source_id, stable_id, payload, os.time()
+    ) ~= nil
+end
+
+--- 删除书籍目录缓存。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function BookDB.clearToc(source_id, stable_id)
+    return Base.exec(
+        [[UPDATE books SET toc=NULL, toc_fetched_at=0
+          WHERE source_id=? AND stable_id=?;]],
         source_id, stable_id
     ) ~= nil
 end
@@ -756,19 +687,11 @@ end
 ---@param stable_id string
 ---@return string|nil
 function BookDB.getReaderPrefs(source_id, stable_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-        return nil
-    end
-    Base.ensure()
     local payload = Base.rowexec(
         [[SELECT reader_prefs FROM books WHERE source_id=? AND stable_id=? LIMIT 1;]],
         source_id,
         stable_id
     )
-    if type(payload) ~= "string" or payload == "" then
-        return nil
-    end
     return payload
 end
 
@@ -778,24 +701,15 @@ end
 ---@param payload string
 ---@return boolean
 function BookDB.setReaderPrefs(source_id, stable_id, payload)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-        return false
-    end
-    if type(payload) ~= "string" or payload == "" then
-        return false
-    end
-    Base.ensure()
     return Base.exec(
         -- in_library=0：存排版偏好不代表这本书在书架上，
         -- 写成 1 会让对账隐藏过的书凭空回到书架。
-        [[INSERT INTO books (source_id, stable_id, fetched_at, reader_prefs, in_library)
-          VALUES (?, ?, ?, ?, 0)
+        [[INSERT INTO books (source_id, stable_id, reader_prefs, in_library)
+          VALUES (?, ?, ?, 0)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             reader_prefs=excluded.reader_prefs;]],
         source_id,
         stable_id,
-        os.time(),
         payload
     ) ~= nil
 end
@@ -803,11 +717,10 @@ end
 --- 清空全部书籍展示元数据（保留键与 md5）
 ---@return boolean
 function BookDB.stripMeta()
-    Base.ensure()
     return Base.exec([[
 UPDATE books SET
   title=NULL, authors=NULL, percent=0, category=NULL,
-  favorite=NULL, series=NULL, intro=NULL, fetched_at=0;
+          series=NULL, intro=NULL, fetched_at=0;
 ]]) ~= nil
 end
 
@@ -816,11 +729,10 @@ end
 ---@return boolean
 function BookDB.expireBefore(before_ts)
     before_ts = tonumber(before_ts) or 0
-    Base.ensure()
     return Base.exec([[
 UPDATE books SET
   title=NULL, authors=NULL, percent=0, category=NULL,
-  favorite=NULL, series=NULL, intro=NULL, fetched_at=0
+  series=NULL, intro=NULL, fetched_at=0
 WHERE fetched_at > 0 AND fetched_at < ?;
 ]], before_ts) ~= nil
 end
