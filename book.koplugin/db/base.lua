@@ -16,15 +16,6 @@ local Base = {}
 
 local conn = nil
 
---- 数据库只允许在主进程访问。
---- 后台子进程需要把结果通过 workers.simple_job 回调交回主进程后再落库。
----@return nil
-local function assertMainProcess()
-    if Context.inSubProcess() then
-        error("book.db: database access is forbidden in subprocess; use workers.simple_job", 3)
-    end
-end
-
 --- 打开 SQLite 连接（不改模块级 conn）
 ---@return userdata|nil, string|nil
 local function openSqlite()
@@ -55,7 +46,7 @@ end
 ---@param ... any 绑定到 ? 占位符的值
 ---@return boolean|nil, any
 function Base.exec(sql, ...)
-    assertMainProcess()
+    Base.ensure()
     if not conn then
         return nil
     end
@@ -83,7 +74,7 @@ end
 ---@param ... any 绑定到 ? 占位符的值
 ---@return any ...
 function Base.rowexec(sql, ...)
-    assertMainProcess()
+    Base.ensure()
     if not conn then
         return nil
     end
@@ -113,7 +104,7 @@ end
 ---@param ... any 绑定到 ? 占位符的值
 ---@return table|nil, number
 function Base.query(sql, ...)
-    assertMainProcess()
+    Base.ensure()
     if not conn then
         return nil, 0
     end
@@ -153,7 +144,6 @@ local schema_modules = {
     "db.note",
     "db.progress",
     "db.stats",
-    "db.toc",
     "db.xray",
 }
 
