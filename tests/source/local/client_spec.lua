@@ -178,9 +178,9 @@ local function stubListBySource(source_id, opts)
     return matched, count
 end
 
--- 扫描改走子进程（utils.task）：离线测试不 fork，worker 就地同步跑，
+-- 扫描改走子进程（workers.job）：离线测试不 fork，worker 就地同步跑，
 -- on_done 经 nextTick 保持异步语义；子进程语义（自开 DB 连接）在真机覆盖。
-package.preload["utils.task"] = function()
+package.preload["workers.job"] = function()
     return {
         run = function(worker, opts)
             opts = opts or {}

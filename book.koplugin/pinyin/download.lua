@@ -7,7 +7,7 @@
   dictionary.sqlite3.part.NNN  原始 SQLite 二进制分片，按序拼出原始 sqlite
 
 设备经 jsdelivr 按仓库文件拉取；单文件有大小上限，所以切片。
-下载逐片走 Request.download（Turbo，不堵 UI）；拼接/分片 SHA-256/落位放 Task 子进程
+下载逐片走 Request.download（Turbo，不堵 UI）；拼接/分片 SHA-256/落位放 Job 子进程
 （大文件 IO，主进程做会卡 UI）。
 
 落盘：$DATA/.moon/dictionary.sqlite3（见 Paths.pinyinDictPath）。
@@ -21,19 +21,19 @@ local JSON = require("json")
 local Request = require("http.request")
 local Paths = require("utils.paths")
 local MoonSettings = require("utils.settings")
-local Task = require("utils.task")
+local Job = require("workers.job")
 
 -- 与桌面设置页使用同一仓库；jsdelivr 按 main 分发原始分片。
 local BASE_URL = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/pinyin"
 
 local M = {}
 
-local _job -- 当前在飞 job（Request job 或 Task job）
+local _job -- 当前在飞 job（Request job 或 Job）
 local _downloading = false
 
 -- 下载和拼接相互递归，先声明以保持主流程顺序。
 local downloadParts
-local assembleInTask
+local assembleInJob
 
 --- 是否有下载或拼接任务在运行。
 function M.downloading()
@@ -82,7 +82,7 @@ end
 
 --- 验证不受本地控制的远程 manifest，避免路径逃逸和坏数据把下载状态机卡死。
 ---@param manifest any
----@return boolean, string|nil
+---@return boolean, string|nil, number|nil
 local function validateManifest(manifest)
     if type(manifest) ~= "table" or type(manifest.built_at) ~= "string" or manifest.built_at == ""
         or not isSha256(manifest.raw_sha256) or not isPositiveInteger(manifest.raw_size)
@@ -101,7 +101,7 @@ local function validateManifest(manifest)
     if total ~= tonumber(manifest.raw_size) then
         return false, "manifest size mismatch"
     end
-    return true
+    return true, nil, total
 end
 
 --- 记下本批分片对应的 manifest 版本；版本对不上先清空续传目录。
@@ -233,7 +233,7 @@ function M.ensure(cb, on_progress)
             done(false, "bad manifest")
             return
         end
-        local valid, manifest_err = validateManifest(manifest)
+        local valid, manifest_err, total = validateManifest(manifest)
         if not valid then
             done(false, manifest_err)
             return
@@ -244,10 +244,6 @@ function M.ensure(cb, on_progress)
             and settings.pinyin_dict_built_at == manifest.built_at then
             done(true)
             return
-        end
-        local total = 0
-        for _, p in ipairs(manifest.parts) do
-            total = total + (tonumber(p.size) or 0)
         end
         report("manifest", 0, total, 0, #manifest.parts)
         Paths.ensureSettings() -- 内含 ensureDir(root)
@@ -264,7 +260,7 @@ end
 downloadParts = function(manifest, idx, dest, done, report, done_bytes, total)
     local parts = manifest.parts
     if idx > #parts then
-        assembleInTask(manifest, dest, done, report)
+        assembleInJob(manifest, dest, done, report)
         return
     end
     local part = parts[idx]
@@ -274,6 +270,8 @@ downloadParts = function(manifest, idx, dest, done, report, done_bytes, total)
         downloadParts(manifest, idx + 1, dest, done, report, done_bytes + size, total)
         return
     end
+    -- 网络响应尚未返回时也先通知当前分片，避免进度框长时间停在上一阶段。
+    report("part", done_bytes, total, idx, #parts)
     _job = Request.download({
         url = BASE_URL .. "/" .. part.file,
         method = "GET",
@@ -298,10 +296,10 @@ downloadParts = function(manifest, idx, dest, done, report, done_bytes, total)
     end)
 end
 
-assembleInTask = function(manifest, dest, done, report)
+assembleInJob = function(manifest, dest, done, report)
     report("assemble")
     local dir = tmpDir()
-    _job = Task.run(function()
+    _job = Job.run(function()
         local err = assemble(manifest, dir, dest)
         if err then
             error(err)
@@ -334,11 +332,7 @@ end
 --- 中止当前网络或拼接任务；保留已完成分片供下次继续。
 function M.cancel()
     if _job then
-        if _job.abort then
-            _job.abort()
-        elseif _job.cancel then
-            _job.cancel()
-        end
+        if _job.cancel then _job:cancel() end
     end
     _job = nil
     _downloading = false

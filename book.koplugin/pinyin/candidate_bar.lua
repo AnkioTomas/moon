@@ -1,35 +1,6 @@
 --[[--
 拼音候选栏：zh_CN 键盘首行候选条。
 
-拦截点与 pinyinplus.koplugin 一致：挂在 VirtualKeyboard.addChar/delChar 上
-（键盘类方法，每个虚拟键敲击的必经之路，上游多年未变）。不去替换
-wrapInputBox 包装表的 func——那依赖 generic_ime 包装结构的内部细节，
-结构对不上就静默退回原生 IME（候选混进输入框文本），已经在真机上踩过。
-
-候选来自 Book 词库（pinyin.dictionary，rime-ice 词频序）。候选条不用
-VirtualKey：addKeys 建好首行后整条顶掉，换成自研 Strip（pinyin/strip.lua，
-鸭子类型自足 widget，不进 KOReader 容器体系）——布局规则（自然宽、放不下
-整词跳过不截断、不满员居中）与 tap 命中都收在组件里，本文件只做拦截与编排。
-
-激活时（开关开 + 词库在 + 当前 zh_CN 布局 + 非 number 输入框）：
-字母不进原生 IME，原样写进输入框（所见即所输），词库候选显示在键盘首行；
-点候选或空格 = 删掉已输入字母、插入整词。退格逐字母回退。
-同时关闭当前键盘实例的按键闪烁：原生闪烁会在字符回调前强制提交一次
-电子墨水刷新，Kindle 随后的 UI 刷新可能阻塞等待前一 marker，所有布局都会卡。
-连打走 utils.timing.debounce，查库和候选绘制在 scheduleIn 回调里跑（不在按键路径）。
-KOReader 没有 Lua 线程；不能用 Task.run fork（父进程 sqlite 连接 + fork = 闪退）。
-非字母结束本次拼写，按键走原路。大写字母并进输入码（按小写查词）。
-
-已知取舍：物理键盘 / SDL 文本输入（InputText:onTextInput → inputbox:addChars）
-不经过 VirtualKeyboard.addChar，仍走原生 IME——与 pinyinplus 行为一致。
-目标设备（Android）用的是屏幕键盘，不受影响。
-
-关键约束：
-- 候选行只在真能用（开关开 + 词库在）时插进 zh_CN 布局，其余情况必须摘掉：
-  否则留下一整行按不动的 ◀▶ 幽灵行，而输入还是原生 IME 行内候选。
-- 键位绑定跟着 VirtualKeyboard:addKeys 走，不是 init：换层（Shift/Sym、number 输入框
-  从 layer 4 切字母层）只调 addKeys，键位全部重建，绑 init 必然拿到死引用。
-
 @module koplugin.book.pinyin.candidate_bar
 --]]
 
@@ -37,6 +8,7 @@ local Bar = {}
 
 local Strip = require("pinyin.strip")
 local util = require("util")
+local SimpleJob = require("workers.simple_job")
 
 local ZH_MODULE = "ui/data/keyboardlayouts/zh_CN_keyboard"
 local SLOT_COUNT = Strip.SLOT_COUNT
@@ -47,12 +19,15 @@ local _hooked = false
 local _want = false
 local _active = false
 local _keyboard
-local _code = ""
-local _pages = {}
-local _page = 1
 local _strip
-local _requestLookup
-local stopSearch
+local lookup = {
+    code = "",
+    pages = {},
+    page = 1,
+    debounce = nil,
+    job = nil,
+    generation = 0,
+}
 
 -- ── 基础工具 ─────────────────────────────────────────
 
@@ -167,12 +142,17 @@ end
 
 --- 结束本次拼写：取消在途查询，清空输入码与候选分页。
 local function clearCode()
-    if stopSearch then
-        stopSearch()
+    lookup.generation = lookup.generation + 1
+    if lookup.debounce then
+        lookup.debounce:cancel()
     end
-    _code = ""
-    _pages = {}
-    _page = 1
+    if lookup.job then
+        lookup.job:cancel()
+    end
+    lookup.job = nil
+    lookup.code = ""
+    lookup.pages = {}
+    lookup.page = 1
 end
 
 --- 按候选槽数把词表切成分页（保持词频序）。
@@ -201,9 +181,9 @@ local function codeAtCursor(inputbox)
     if not pos then
         return false
     end
-    for i = #_code, 1, -1 do
+    for i = #lookup.code, 1, -1 do
         pos = pos - 1
-        if inputbox.charlist[pos] ~= _code:sub(i, i) then
+        if inputbox.charlist[pos] ~= lookup.code:sub(i, i) then
             return false
         end
     end
@@ -215,14 +195,14 @@ end
 ---@return boolean 无输入码、光标已离开输入码或替换失败时 false
 local function commit(word)
     local inputbox = _keyboard and _keyboard.inputbox
-    if not inputbox or _code == "" then
+    if not inputbox or lookup.code == "" then
         return false
     end
     if not codeAtCursor(inputbox) then
         clearCode()
         return false
     end
-    if not rawReplaceBeforeCursor(inputbox, #_code, word) then
+    if not rawReplaceBeforeCursor(inputbox, #lookup.code, word) then
         return false
     end
     clearCode()
@@ -236,15 +216,15 @@ local function refresh()
     if not strip then
         return
     end
-    local pages = math.max(1, #_pages)
-    if _page > pages then
-        _page = pages
+    local pages = math.max(1, #lookup.pages)
+    if lookup.page > pages then
+        lookup.page = pages
     end
-    strip:setCells(_pages[_page] or {}, {
-        page = _page,
+    strip:setCells(lookup.pages[lookup.page] or {}, {
+        page = lookup.page,
         pages = pages,
         on_page = function(delta)
-            _page = _page + delta
+            lookup.page = lookup.page + delta
             refresh()
             redraw()
         end,
@@ -299,56 +279,57 @@ local orig_init, orig_addKeys, orig_addChar, orig_delChar
 -- 连打只查最后一次；查询和候选行重绘都在 UIManager 调度里跑，不在按键路径。
 local LOOKUP_WAIT = 0.15
 
-local stopSearch
-stopSearch = function()
-    if _requestLookup then
-        _requestLookup:cancel()
-    end
-end
-
 --- 查库结果回来之前先只显示输入码本身，避免候选行空一拍。
 local function showCodeOnly()
-    if _code == "" then
-        _pages = {}
+    if lookup.code == "" then
+        lookup.pages = {}
     else
-        _pages = makePages({ _code })
+        lookup.pages = makePages({ lookup.code })
     end
-    _page = 1
+    lookup.page = 1
 end
 
 --- 实际查词并刷新候选行（debounce 到期后执行）。
---- 查询经 debounce 移出按键回调。不能用 Task.run：fork 会复制已有 sqlite
---- 连接，设备上可能 SIGSEGV。查前查后都比对键盘与输入码，过期结果直接丢弃；
---- 词库无命中时退化为把输入码本身当唯一候选。
 ---@param keyboard table 发起查询的 VirtualKeyboard 实例
 ---@param code string 输入码（小写字母串）
 local function startLookup(keyboard, code)
-    if keyboard ~= _keyboard or code == "" or code ~= _code then
+    if keyboard ~= _keyboard or code == "" or code ~= lookup.code then
         return
     end
-    local words = require("pinyin.dictionary").lookup(code)
-    if keyboard ~= _keyboard or code ~= _code then
-        return
-    end
-    if type(words) ~= "table" or #words == 0 then
-        words = { code }
-    end
-    _pages = makePages(words)
-    _page = 1
-    refresh()
-    redraw()
+    local generation = lookup.generation
+    lookup.job = SimpleJob.run(function()
+        return require("pinyin.dictionary").lookup(code)
+    end, {
+        on_done = function(words)
+            if generation ~= lookup.generation
+                    or keyboard ~= _keyboard or code ~= lookup.code then
+                return
+            end
+            if type(words) ~= "table" or #words == 0 then
+                words = { code }
+            end
+            lookup.pages = makePages(words)
+            lookup.page = 1
+            refresh()
+            redraw()
+        end,
+    })
 end
 
 --- 连打去抖：只查最后一次输入码（debounce 句柄进程内共用，首次调用时建）。
 ---@param keyboard table 发起查询的 VirtualKeyboard 实例
 ---@param code string 输入码
 local function requestLookup(keyboard, code)
-    if not _requestLookup then
-        _requestLookup = require("utils.timing").debounce(startLookup, LOOKUP_WAIT)
+    if lookup.job then
+        lookup.job:cancel()
+        lookup.job = nil
+    end
+    if not lookup.debounce then
+        lookup.debounce = require("utils.timing").debounce(startLookup, LOOKUP_WAIT)
     end
     -- The debounce handle is shared, so keep the owner in its arguments. A
     -- callback from an old keyboard must never repaint the current one.
-    _requestLookup(keyboard, code)
+    lookup.debounce(keyboard, code)
 end
 
 --- 关掉该键盘实例所有按键的闪烁：原生闪烁会在字符回调前强制提交一次墨水刷新，
@@ -402,19 +383,19 @@ local function wrappedAddChar(self, key)
     if not _active then
         return orig_addChar(self, key)
     end
-    if _code ~= "" and not codeAtCursor(self.inputbox) then
+    if lookup.code ~= "" and not codeAtCursor(self.inputbox) then
         clearCode()
     end
     if key:match("^%a$") then
-        _code = _code .. key:lower()
+        lookup.code = lookup.code .. key:lower()
         rawAddChars(self.inputbox, key:lower())
         showCodeOnly()
         refresh()
-        requestLookup(self, _code)
+        requestLookup(self, lookup.code)
         return
     end
-    if key == " " and _code ~= "" then
-        local first = _pages[1] and _pages[1][1]
+    if key == " " and lookup.code ~= "" then
+        local first = lookup.pages[1] and lookup.pages[1][1]
         if first and commit(first) then
             refresh()
             redraw()
@@ -424,7 +405,7 @@ local function wrappedAddChar(self, key)
         redraw()
         return orig_addChar(self, key)
     end
-    if _code ~= "" then
+    if lookup.code ~= "" then
         clearCode()
         refresh()
         redraw()
@@ -436,18 +417,18 @@ end
 --- 光标已离开输入码则先结束拼写再走原路。
 local function wrappedDelChar(self)
     _keyboard = self
-    if _active and _code ~= "" then
+    if _active and lookup.code ~= "" then
         if not codeAtCursor(self.inputbox) then
             clearCode()
             refresh()
             redraw()
             return orig_delChar(self)
         end
-        _code = _code:sub(1, -2)
+        lookup.code = lookup.code:sub(1, -2)
         rawDelChar(self.inputbox)
         showCodeOnly()
         refresh()
-        requestLookup(self, _code)
+        requestLookup(self, lookup.code)
         return
     end
     return orig_delChar(self)

@@ -71,8 +71,8 @@ do
     local saved = {
         archiver_loaded = package.loaded["ffi/archiver"],
         archiver_preload = package.preload["ffi/archiver"],
-        task_loaded = package.loaded["utils.task"],
-        task_preload = package.preload["utils.task"],
+        job_loaded = package.loaded["workers.job"],
+        job_preload = package.preload["workers.job"],
         html2epub = package.loaded["convert.html2epub"],
     }
 
@@ -106,21 +106,17 @@ do
     end
     os.remove = function() return true end
 
-    package.loaded["utils.task"] = nil
-    package.preload["utils.task"] = function()
+    package.loaded["workers.job"] = nil
+    package.preload["workers.job"] = function()
         return {
             run = function(worker, opts)
-                local write_buf
-                -- 传正确的 (pid, write_fd, read_fd) 签名
-                local ok, err = pcall(worker, 123, function(data)
-                    write_buf = data
-                end, nil)
+                local ok, result = pcall(worker)
                 if not ok then
                     if opts and opts.on_failed then
                         opts.on_failed(err)
                     end
                 elseif opts and opts.on_done then
-                    opts.on_done(write_buf)
+                    opts.on_done(result)
                 end
                 return { abort = function() end }
             end,
@@ -189,7 +185,7 @@ do
     os.remove = old_remove
     package.preload["ffi/archiver"] = saved.archiver_preload
     package.loaded["ffi/archiver"] = saved.archiver_loaded
-    package.preload["utils.task"] = saved.task_preload
-    package.loaded["utils.task"] = saved.task_loaded
+    package.preload["workers.job"] = saved.job_preload
+    package.loaded["workers.job"] = saved.job_loaded
     package.loaded["convert.html2epub"] = saved.html2epub
 end
