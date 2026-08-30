@@ -127,16 +127,6 @@ function Base.query(sql, ...)
     return result, nrows or 0
 end
 
---- 校验 source_id；非法返回 nil
----@param source_id string
----@return string|nil
-function Base.requireSourceId(source_id)
-    if type(source_id) ~= "string" or source_id == "" then
-        return nil
-    end
-    return source_id
-end
-
 local schema_modules = {
     "db.book",
     "db.chapter",

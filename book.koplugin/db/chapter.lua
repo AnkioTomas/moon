@@ -46,10 +46,6 @@ end
 ---@param stable_id string
 ---@return integer
 function ChapterDB.countByBook(source_id, stable_id)
-    if type(source_id) ~= "string" or source_id == ""
-        or type(stable_id) ~= "string" or stable_id == "" then
-        return 0
-    end
     return tonumber(Base.rowexec(
         [[SELECT COUNT(*) FROM chapters WHERE source_id=? AND stable_id=?;]],
         source_id, stable_id
