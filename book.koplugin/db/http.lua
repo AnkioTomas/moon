@@ -28,7 +28,7 @@ function HttpDB.get(key)
         [[SELECT value, expires FROM http WHERE key=? LIMIT 1;]],
         key
     )
-    if type(value) ~= "string" then return nil end
+    if not value then return nil end
     return value, tonumber(expires) or 0
 end
 
@@ -60,7 +60,7 @@ end
 ---@param url_substr string|nil URL 子串；nil 或空字符串表示全部删除
 ---@return boolean
 function HttpDB.clear(url_substr)
-    if type(url_substr) ~= "string" or url_substr == "" then
+    if url_substr == nil or url_substr == "" then
         return Base.exec([[DELETE FROM http;]]) ~= nil
     end
     local pat = url_substr:gsub("([%%_\\])", "\\%1")
