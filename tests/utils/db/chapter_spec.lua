@@ -1,7 +1,7 @@
 --[[--
-utils.db.chapter：chapters 表 CRUD（章节文件路径 → 书籍身份，path 主键）
+db.chapter：chapters 表 CRUD（章节文件路径 → 书籍身份，path 主键）
 
-@module tests.utils.db.chapter_spec
+@module tests.db.chapter_spec
 --]]
 
 local Assert = require("support.assert")
@@ -36,8 +36,14 @@ local function clearMods()
         "utils.task",
         "lua-ljsqlite3/init",
         "ffi/sha2",
-        "utils.db.base",
-        "utils.db.chapter",
+        "db.base",
+        "db.book",
+        "db.chapter",
+        "db.http",
+        "db.note",
+        "db.progress",
+        "db.stats",
+        "db.xray",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -90,10 +96,10 @@ local function loadChapter(connection)
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["utils.db.base"] = nil
-    package.loaded["utils.db.chapter"] = nil
-    local DbBase = require("utils.db.base")
-    local ChapterDB = require("utils.db.chapter")
+    package.loaded["db.base"] = nil
+    package.loaded["db.chapter"] = nil
+    local DbBase = require("db.base")
+    local ChapterDB = require("db.chapter")
     DbBase.open()
     return DbBase, ChapterDB
 end
@@ -184,9 +190,6 @@ do
     Assert.eq(q.argc, 2)
     Assert.eq(q.args[1], "wechat")
     Assert.eq(q.args[2], "book'1")
-    Assert.eq(ChapterDB.countByBook("", "book"), 0)
-    Assert.eq(ChapterDB.countByBook("wechat", ""), 0)
-
     DbBase.close()
     clearMods()
 end

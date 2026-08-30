@@ -9,7 +9,7 @@ local Assert = require("support.assert")
 local saved_payload
 local fail_write
 local warnings = {}
-package.preload["utils.db.book"] = function()
+package.preload["db.book"] = function()
     return {
         getReaderPrefs = function(source_id, stable_id)
             Assert.eq(source_id, "moon")
@@ -26,13 +26,7 @@ package.preload["utils.db.book"] = function()
     }
 end
 
--- 落库经 DbQueue：用例里同步执行 worker
-package.preload["utils.db.queue"] = function()
-    return { run = function(worker, opts)
-        local ok, err = pcall(worker)
-        if not ok and opts and opts.on_failed then opts.on_failed(err) end
-    end }
-end
+-- 同步落库
 
 package.preload["logger"] = function()
     return { warn = function(...) warnings[#warnings + 1] = { ... } end }
@@ -119,7 +113,7 @@ package.loaded["book.reader_prefs"] = nil
 package.loaded["json"] = nil
 package.loaded["ffi/util"] = nil
 package.loaded["utils.font"] = nil
-package.loaded["utils.db.book"] = nil
+package.loaded["db.book"] = nil
 package.loaded["book.store"] = nil
 local ReaderPrefs = require("book.reader_prefs")
 
@@ -208,9 +202,9 @@ Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
 loaded = ReaderPrefs.load(identity)
 Assert.eq(loaded.font_id, "demo.ttf")
 
--- 异步队列的入队结果不代表写库成功，失败必须留痕。
+-- 同步写库失败直接返回 false，并留下日志。
 fail_write = true
-Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
+Assert.is_false(ReaderPrefs.captureAndSave(ui, identity))
 Assert.eq(#warnings, 1)
 Assert.matches(warnings[1][1], "reader_prefs save failed")
 

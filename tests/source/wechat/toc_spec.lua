@@ -6,19 +6,16 @@ local Assert = require("support.assert")
 local store = {}
 local upserted = {}
 local reads = 0
-package.preload["utils.db.toc"] = function()
+package.preload["db.book"] = function()
     return {
-        get = function(_source_id, stable_id)
+        getToc = function(_source_id, stable_id)
             reads = reads + 1
             return store[stable_id]
         end,
-        upsert = function(_source_id, stable_id, payload)
+        setToc = function(_source_id, stable_id, payload)
             upserted[stable_id] = payload
         end,
     }
-end
-package.preload["utils.db.queue"] = function()
-    return { run = function(worker) worker() end }
 end
 package.preload["json"] = function()
     return {

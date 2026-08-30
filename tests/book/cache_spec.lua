@@ -102,7 +102,7 @@ end
 
 -- 假 BookDB：clearPath/clearPathsUnder 只把行从 pathsAll 结果集里摘掉
 --（真实实现是 path 置 NULL，pathsAll 同样查不到）
-package.preload["utils.db.book"] = function()
+package.preload["db.book"] = function()
     local function removeWhere(pred)
         for i = #book_rows, 1, -1 do
             if pred(book_rows[i]) then
@@ -140,7 +140,7 @@ package.preload["utils.db.book"] = function()
     }
 end
 
-package.preload["utils.db.chapter"] = function()
+package.preload["db.chapter"] = function()
     return {
         all = function()
             return chapter_rows
@@ -414,8 +414,8 @@ end
 for _, name in ipairs({
     "utils.paths",
     "utils.task",
-    "utils.db.book",
-    "utils.db.chapter",
+    "db.book",
+    "db.chapter",
     "ui.components.image",
     "book.cache",
 }) do

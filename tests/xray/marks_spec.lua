@@ -24,7 +24,7 @@ package.preload["xray.ui"] = function()
     return { showEntity = function(e) opened = e.name end }
 end
 
-local entity = { kind = "character", name = "John Doe", aliases = { "John" }, payload = {} }
+local entity = { kind = "character", name = "John Doe", aliases = { "John" } }
 
 -- 滚动文档（CreDocument）：findAllText 给 xpointer，getScreenBoxesFromPositions 给屏幕框。
 package.preload["xray.store"] = function()
@@ -91,7 +91,7 @@ Marks.ui = {
 }
 Marks.view = Marks.ui.view
 package.preload["xray.store"] = function()
-    return { loadEntities = function() return { { kind = "term", name = "Whitby", aliases = {}, payload = {} } } end }
+    return { loadEntities = function() return { { kind = "term", name = "Whitby", aliases = {} } } end }
 end
 package.loaded["xray.store"] = nil
 Marks._matches_key = nil

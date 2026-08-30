@@ -65,7 +65,7 @@ package.loaded["ui.reader.session.toc"] = nil
 package.preload["logger"] = function()
     return { dbg = function() end, warn = function() end, info = function() end }
 end
-package.preload["utils.db.progress"] = function()
+package.preload["db.progress"] = function()
     return {
         get = function(_, stable_id)
             if stable_id == "b1" then
@@ -76,13 +76,6 @@ package.preload["utils.db.progress"] = function()
         upsertRemote = function() return true end,
         adoptRemote = function() return true end,
     }
-end
-package.preload["utils.db.queue"] = function()
-    return { run = function(worker, opts)
-        local ok, err = pcall(worker)
-        local cb = ok and opts and opts.on_done or opts and opts.on_failed
-        if cb then cb(ok and nil or err) end
-    end }
 end
 
 local source = {
@@ -219,7 +212,7 @@ Assert.eq(synced[1], "b1")
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",
     "ui.reader.session.toc", "ui.reader.session", "logger",
-    "utils.db.progress", "utils.db.queue", "book.progress",
+    "db.progress", "book.progress",
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil

@@ -1,4 +1,4 @@
---[[-- utils.db.xray：参数化写入。 --]]
+--[[-- db.xray：参数化写入。 --]]
 
 local Assert = require("support.assert")
 
@@ -31,14 +31,18 @@ package.preload["lua-ljsqlite3/init"] = function()
     return { open = function() return connection end }
 end
 
-local Base = require("utils.db.base")
-local XrayDB = require("utils.db.xray")
+local Base = require("db.base")
+local XrayDB = require("db.xray")
 Base.open()
 
-Assert.is_true(XrayDB.upsertEntity("moon", "b1", "character", "Mina", "[]", "{}", 10))
+Assert.is_true(XrayDB.upsert("moon", "b1", {
+    kind = "character", name = "Mina", aliases = { "A", "B" }, role = "hero",
+    description = "brave", gender = "female", occupation = "detective",
+}, 10))
 local call = calls[#calls]
 Assert.matches(call.sql, "INSERT INTO xray_entities")
 Assert.eq(call.args[1], "moon")
 Assert.eq(call.args[4], "Mina")
-
-Assert.is_false(XrayDB.upsertEntity("", "b1", "character", "Mina", "[]", "{}"))
+Assert.eq(call.args[5], "A、B")
+Assert.eq(call.args[6], "hero")
+Assert.eq(call.args[7], "brave")

@@ -13,7 +13,7 @@ local function sameRecord(a, b)
 end
 local StatsDBStub
 local replace_fails = false
-package.preload["utils.db.stats"] = function()
+package.preload["db.stats"] = function()
     StatsDBStub = StatsDBStub or {
         exists = function(row)
             for _, old in ipairs(rows) do
@@ -85,7 +85,7 @@ package.preload["utils.db.stats"] = function()
     }
     return StatsDBStub
 end
-package.preload["utils.db.book"] = function()
+package.preload["db.book"] = function()
     return {
         pathsAll = function()
             return { { path = "/book.epub", source_id = "local", stable_id = "/book.epub" } }
@@ -93,7 +93,7 @@ package.preload["utils.db.book"] = function()
         getByMd5 = function() return nil end,
     }
 end
-package.preload["utils.db.chapter"] = function()
+package.preload["db.chapter"] = function()
     return { all = function() return {} end }
 end
 package.preload["docsettings"] = function()
@@ -115,7 +115,7 @@ package.preload["docsettings"] = function()
     }
 end
 package.loaded["book.stats"] = nil
-package.loaded["utils.db.stats"] = nil
+package.loaded["db.stats"] = nil
 local Stats = require("book.stats")
 
 local result

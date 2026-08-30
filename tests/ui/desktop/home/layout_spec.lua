@@ -110,7 +110,7 @@ for _, spec in ipairs({
 end
 
 local progress_rows = {}
-package.preload["utils.db.progress"] = function()
+package.preload["db.progress"] = function()
     return {
         get = function(source_id, stable_id)
             return progress_rows[source_id .. "\0" .. stable_id]

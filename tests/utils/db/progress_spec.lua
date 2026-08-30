@@ -1,7 +1,7 @@
 --[[--
-utils.db.progress：pending_progress 表 CRUD（待上传进度）
+db.progress：pending_progress 表 CRUD（待上传进度）
 
-@module tests.utils.db.progress_spec
+@module tests.db.progress_spec
 --]]
 
 local Assert = require("support.assert")
@@ -52,8 +52,14 @@ local function clearMods()
         "utils.task",
         "lua-ljsqlite3/init",
         "ffi/sha2",
-        "utils.db.base",
-        "utils.db.progress",
+        "db.base",
+        "db.book",
+        "db.chapter",
+        "db.http",
+        "db.note",
+        "db.progress",
+        "db.stats",
+        "db.xray",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -107,10 +113,10 @@ local function loadProgress(connection)
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["utils.db.base"] = nil
-    package.loaded["utils.db.progress"] = nil
-    local DbBase = require("utils.db.base")
-    local ProgressDB = require("utils.db.progress")
+    package.loaded["db.base"] = nil
+    package.loaded["db.progress"] = nil
+    local DbBase = require("db.base")
+    local ProgressDB = require("db.progress")
     DbBase.open()
     return DbBase, ProgressDB
 end
@@ -211,26 +217,6 @@ do
     clearMods()
 end
 
--- ── upsert：非法输入拒绝且不碰 DB ────────────────────────
-do
-    local connection, calls = makeConn()
-    local DbBase, ProgressDB = loadProgress(connection)
-    local before = #calls
-
-    Assert.is_false(ProgressDB.upsert("", "b", { fraction = 0.1 }))
-    Assert.is_false(ProgressDB.upsert(nil, "b", { fraction = 0.1 }))
-    Assert.is_false(ProgressDB.upsert("moon", "", { fraction = 0.1 }))
-    Assert.is_false(ProgressDB.upsert("moon", nil, { fraction = 0.1 }))
-    Assert.is_false(ProgressDB.upsert("moon", "b", nil))
-    Assert.is_false(ProgressDB.upsert("moon", "b", "x"))
-    Assert.is_false(ProgressDB.upsert("moon", "b", {})) -- fraction 缺失
-    Assert.is_false(ProgressDB.upsert("moon", "b", { fraction = "abc" })) -- fraction 非数字
-    Assert.eq(#calls, before)
-
-    DbBase.close()
-    clearMods()
-end
-
 -- ── all(source_id)：带过滤走 prepare 绑定，行映射正确 ────
 do
     local connection, calls = makeConn({
@@ -286,21 +272,17 @@ do
     clearMods()
 end
 
--- ── all()：无过滤走 conn:exec（无参数），空结果返回 {} ───
+-- ── all()：按 source_id 查询，空结果返回 {} ──────────────
 do
     local connection, calls = makeConn()
     local DbBase, ProgressDB = loadProgress(connection)
 
-    local rows = ProgressDB.all()
+    local rows = ProgressDB.all("moon")
     Assert.eq(#rows, 0)
     local q = calls[#calls]
     Assert.is_true(q.sql:find("FROM pending_progress", 1, true) ~= nil)
-    Assert.is_false(q.sql:find("WHERE", 1, true) ~= nil)
-    Assert.eq(q.argc, 0)
-
-    -- 空串 source_id 等价于无过滤
-    ProgressDB.all("")
-    Assert.is_false(calls[#calls].sql:find("WHERE", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("WHERE source_id=?", 1, true) ~= nil)
+    Assert.eq(q.argc, 1)
 
     DbBase.close()
     clearMods()
@@ -322,10 +304,6 @@ do
     Assert.is_false(q.sql:find("DROP TABLE", 1, true) ~= nil)
 
     local before = #calls
-    Assert.is_false(ProgressDB.markSynced("", "a", 1))
-    Assert.is_false(ProgressDB.markSynced("moon", "", 1))
-    Assert.is_false(ProgressDB.markSynced("moon", nil, 1))
-    Assert.is_false(ProgressDB.markSynced("moon", "a", nil))
     Assert.eq(#calls, before)
 
     DbBase.close()

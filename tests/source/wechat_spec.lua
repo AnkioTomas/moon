@@ -31,10 +31,10 @@ end)
 
 -- 目录缓存：按 stable_id 供给 payload，未登记的书一律未命中
 local toc_payload = {}
-stub("utils.db.toc", function()
+stub("db.book", function()
     return {
-        get = function(_, stable_id) return toc_payload[stable_id] end,
-        upsert = function(_, stable_id, payload)
+        getToc = function(_, stable_id) return toc_payload[stable_id] end,
+        setToc = function(_, stable_id, payload)
             toc_payload[stable_id] = payload
             return true
         end,

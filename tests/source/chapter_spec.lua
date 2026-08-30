@@ -28,10 +28,10 @@ local book_row
 package.preload["utils.paths"] = function()
     return { chapterPath = function(_, idx) return tmp .. "/" .. idx .. ".html" end }
 end
-package.preload["utils.db.progress"] = function()
+package.preload["db.progress"] = function()
     return { get = function() return pending end }
 end
-package.preload["utils.db.book"] = function()
+package.preload["db.book"] = function()
     return { get = function() return book_row end }
 end
 local touches = {}
@@ -246,7 +246,7 @@ for name in lfs.dir(tmp) do
 end
 lfs.rmdir(tmp)
 for _, name in ipairs({
-    "utils.paths", "utils.db.progress", "utils.db.book", "book.store", "source.chapter",
+    "utils.paths", "db.progress", "db.book", "book.store", "source.chapter",
     "ui/network/manager", "ui/widget/progressbardialog",
 }) do
     package.preload[name] = nil

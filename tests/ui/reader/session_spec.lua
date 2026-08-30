@@ -187,7 +187,7 @@ package.preload["ui/widget/infomessage"] = function()
     return { new = function(_, opts) return opts end }
 end
 
-package.preload["utils.db.stats"] = function()
+package.preload["db.stats"] = function()
     return {
         summaryByBook = function(source_id, stable_id)
             if source_id == "moon" and (stable_id == "b1" or stable_id == "chapters") then
@@ -553,7 +553,7 @@ do
     local plugin = mkPlugin("/other/3.html")
     Session.onReaderReady(plugin)
     Assert.not_nil(Session.current())
-    Assert.len(Session.toc(), 10, "冷打开章节从 toc 表恢复目录")
+    Assert.len(Session.toc(), 10, "冷打开章节从 books.toc 恢复目录")
     Assert.is_true(Session.gotoChapter(2))
     Session.onCloseDocument(plugin)
     resolved_source = nil
@@ -603,7 +603,7 @@ for _, name in ipairs({
     "book.store", "book.stats", "book.progress",
     "book.note",
     "ui.reader",
-    "utils.db.stats",
+    "db.stats",
     "ui/widget/confirmbox",
     "ui/widget/infomessage",
     "apps/reader/readerui",

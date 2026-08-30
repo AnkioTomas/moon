@@ -9,9 +9,9 @@ end
 
 local saved = { entities = {} }
 local entity_rows = {}
-package.preload["utils.db.xray"] = function()
+package.preload["db.xray"] = function()
     return {
-        listEntities = function(_, _, kind)
+        list = function(_, _, kind)
             local out = {}
             for _, row in ipairs(entity_rows) do
                 if not kind or row.kind == kind then
@@ -20,39 +20,16 @@ package.preload["utils.db.xray"] = function()
             end
             return out
         end,
-        deleteAllForBook = function()
+        replace = function(_, _, entities)
             entity_rows = {}
             saved.entities = {}
-            return true
-        end,
-        upsertEntity = function(_, _, kind, name, aliases_json, payload_json)
-            for i, row in ipairs(entity_rows) do
-                if row.kind == kind and row.name == name then
-                    entity_rows[i] = {
-                        kind = kind,
-                        name = name,
-                        aliases_json = aliases_json or "[]",
-                        payload_json = payload_json or "{}",
-                        updated_at = 1,
-                    }
-                    saved.entities = entity_rows
-                    return true
-                end
+            for _, entity in ipairs(entities or {}) do
+                entity_rows[#entity_rows + 1] = entity
             end
-            entity_rows[#entity_rows + 1] = {
-                kind = kind,
-                name = name,
-                aliases_json = aliases_json or "[]",
-                payload_json = payload_json or "{}",
-                updated_at = 1,
-            }
             saved.entities = entity_rows
             return true
         end,
     }
-end
-package.preload["utils.db.queue"] = function()
-    return { run = function(worker, opts) worker(); opts.on_done() end }
 end
 package.preload["xray.context"] = function()
     return {
@@ -104,7 +81,7 @@ Assert.eq(#result.locations, 1)
 Assert.eq(#result.terms, 1)
 Assert.eq(#saved.entities, 3)
 entity_rows = {
-    { kind = "character", name = "Old", aliases_json = "[]", payload_json = "{}", updated_at = 1 },
+    { kind = "character", name = "Old", aliases = {}, role = "", description = "", updated_at = 1 },
 }
 saved.entities = { { kind = "character", name = "Old" } }
 package.loaded["xray.fetch"] = nil

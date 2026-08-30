@@ -9,7 +9,7 @@ local Assert = require("support.assert")
 package.preload["ui.reader.session"] = function()
     return { current = function() return nil end }
 end
-package.preload["utils.db.note"] = function()
+package.preload["db.note"] = function()
     return {
         get = function(_, stable_id, chapter_idx)
             if stable_id == "book-1" and chapter_idx == 0 then

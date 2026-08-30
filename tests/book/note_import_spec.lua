@@ -29,7 +29,7 @@ package.preload["json"] = function()
         end,
     }
 end
-package.preload["utils.db.book"] = function()
+package.preload["db.book"] = function()
     return {
         pathsAll = function()
             return {
@@ -40,7 +40,7 @@ package.preload["utils.db.book"] = function()
         end,
     }
 end
-package.preload["utils.db.chapter"] = function()
+package.preload["db.chapter"] = function()
     return {
         all = function()
             return {
@@ -62,7 +62,7 @@ package.preload["docsettings"] = function()
         end,
     }
 end
-package.preload["utils.db.note"] = function()
+package.preload["db.note"] = function()
     local NoteDB = {}
     local function key(source_id, stable_id, chapter_idx)
         return source_id .. ":" .. stable_id .. ":" .. tostring(chapter_idx or 0)
@@ -83,14 +83,6 @@ package.preload["utils.db.note"] = function()
     end
     return NoteDB
 end
-package.preload["utils.db.queue"] = function()
-    return {
-        run = function(worker, opts)
-            local ok, err = pcall(worker)
-            if ok then opts.on_done() else opts.on_failed(err) end
-        end,
-    }
-end
 package.preload["book.store"] = function()
     return {}
 end
@@ -99,8 +91,7 @@ package.preload["logger"] = function()
 end
 
 package.loaded["book.note"] = nil
-package.loaded["utils.db.note"] = nil
-package.loaded["utils.db.queue"] = nil
+package.loaded["db.note"] = nil
 package.loaded["json"] = nil
 local Note = require("book.note")
 

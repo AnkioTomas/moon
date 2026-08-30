@@ -26,7 +26,7 @@ local function unsynced(source_id)
     return out
 end
 
-package.preload["utils.db.progress"] = function()
+package.preload["db.progress"] = function()
     return {
         unsynced = unsynced,
         upsert = function(source_id, stable_id, pos)
@@ -58,15 +58,6 @@ package.preload["utils.db.progress"] = function()
     }
 end
 
-package.preload["utils.db.queue"] = function()
-    return {
-        run = function(worker, opts)
-            local ok, err = pcall(worker)
-            local cb = ok and opts and opts.on_done or opts and opts.on_failed
-            if cb then cb(ok and nil or err) end
-        end,
-    }
-end
 
 package.preload["source.registry"] = function()
     return { resolve = function(id) return sources[id] end }
@@ -145,7 +136,7 @@ Assert.is_true(saved[2].pos.updated_at > saved[1].pos.updated_at,
     "同一秒连续保存也必须生成不同版本")
 
 for _, name in ipairs({
-    "utils.db.progress", "utils.db.queue", "source.registry",
+    "db.progress", "source.registry",
     "ui/widget/infomessage", "ui/event", "book.store", "book.progress",
 }) do
     package.preload[name] = nil

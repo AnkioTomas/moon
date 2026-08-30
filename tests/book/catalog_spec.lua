@@ -20,7 +20,7 @@ local FakeStats = {
     daily_books = {},
 }
 
-package.preload["utils.db.book"] = function()
+package.preload["db.book"] = function()
     return {
         listBySource = function()
             return FakeBooks.list_rows, FakeBooks.list_count
@@ -39,7 +39,7 @@ package.preload["utils.db.book"] = function()
         end,
     }
 end
-package.preload["utils.db.stats"] = function()
+package.preload["db.stats"] = function()
     return {
         summaryBySource = function()
             return FakeStats.summary
@@ -118,8 +118,8 @@ do -- 非法 source_id
     Assert.eq(got.err, "invalid source_id")
 end
 
-package.preload["utils.db.book"] = nil
-package.preload["utils.db.stats"] = nil
-package.loaded["utils.db.book"] = nil
-package.loaded["utils.db.stats"] = nil
+package.preload["db.book"] = nil
+package.preload["db.stats"] = nil
+package.loaded["db.book"] = nil
+package.loaded["db.stats"] = nil
 package.loaded["book.catalog"] = nil
