@@ -3,18 +3,30 @@ chapters 表：章节文件路径 → 所属书籍身份。
 
 章节不进入 books 表；身份解析的唯一入口是 path 精确匹配。
 
-@module koplugin.book.utils.db.chapter
+@module koplugin.book.db.chapter
 --]]
 
-local Base = require("utils.db.base")
+local Base = require("db.base")
 
 local ChapterDB = {}
+
+--- 创建 chapters 表及按书籍身份查询的索引。
+--- 仅在 Base.open() 的一次性 schema 初始化阶段调用。
+---@return boolean 成功返回 true，SQL 失败返回 false
+function ChapterDB.ensureSchema()
+    return Base.exec([[
+CREATE TABLE IF NOT EXISTS chapters (
+  path TEXT PRIMARY KEY, source_id TEXT NOT NULL, stable_id TEXT NOT NULL,
+  chapter_idx INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chapters_book ON chapters(source_id, stable_id);
+]]) ~= nil
+end
 
 --- 按章节文件路径取身份
 ---@param path string
 ---@return { source_id: string, stable_id: string, chapter_idx: integer }|nil
 function ChapterDB.get(path)
-    Base.ensure()
     local source_id, stable_id, chapter_idx = Base.rowexec(
         [[SELECT source_id, stable_id, chapter_idx FROM chapters WHERE path=? LIMIT 1;]],
         path
@@ -38,7 +50,6 @@ function ChapterDB.countByBook(source_id, stable_id)
         or type(stable_id) ~= "string" or stable_id == "" then
         return 0
     end
-    Base.ensure()
     return tonumber(Base.rowexec(
         [[SELECT COUNT(*) FROM chapters WHERE source_id=? AND stable_id=?;]],
         source_id, stable_id
@@ -49,7 +60,6 @@ end
 ---@param row { path: string, source_id: string, stable_id: string, chapter_idx: integer }
 ---@return boolean
 function ChapterDB.upsert(row)
-    Base.ensure()
     return Base.exec(
         [[INSERT INTO chapters (path, source_id, stable_id, chapter_idx, updated_at)
           VALUES (?,?,?,?,?)
@@ -74,7 +84,6 @@ function ChapterDB.deleteUnder(dir)
     if dir == "" then
         return false
     end
-    Base.ensure()
     return Base.exec(
         [[DELETE FROM chapters WHERE path LIKE ? ESCAPE '\';]],
         dir:gsub("([%%_\\])", "\\%1") .. "/%"
@@ -85,14 +94,12 @@ end
 ---@param path string
 ---@return boolean
 function ChapterDB.delete(path)
-    Base.ensure()
     return Base.exec([[DELETE FROM chapters WHERE path=?;]], path) ~= nil
 end
 
 --- 全部章节登记（清缓存对账）
 ---@return { path: string, source_id: string, stable_id: string, chapter_idx: integer }[]
 function ChapterDB.all()
-    Base.ensure()
     local result, nrows = Base.query([[SELECT path, source_id, stable_id, chapter_idx FROM chapters;]])
     local out = {}
     if result and nrows and nrows > 0 then
@@ -111,7 +118,6 @@ end
 --- 清空全部章节登记（清缓存）
 ---@return boolean
 function ChapterDB.clear()
-    Base.ensure()
     return Base.exec([[DELETE FROM chapters;]]) ~= nil
 end
 
