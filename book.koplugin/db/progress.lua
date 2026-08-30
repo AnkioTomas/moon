@@ -206,24 +206,22 @@ local function rows(result, nrows)
     return out
 end
 
----@param source_id string|nil
+---@param source_id string
 ---@return PendingProgress[]
 function ProgressDB.all(source_id)
-    local sql = "SELECT " .. COLUMNS .. " FROM pending_progress"
-    if source_id ~= nil then
-        return rows(Base.query(sql .. " WHERE source_id=? ORDER BY updated_at ASC;", source_id))
-    end
-    return rows(Base.query(sql .. " ORDER BY updated_at ASC;"))
+    return rows(Base.query(
+        "SELECT " .. COLUMNS .. " FROM pending_progress WHERE source_id=? ORDER BY updated_at ASC;",
+        source_id
+    ))
 end
 
----@param source_id string|nil
+---@param source_id string
 ---@return PendingProgress[]
 function ProgressDB.unsynced(source_id)
-    local sql = "SELECT " .. COLUMNS .. " FROM pending_progress WHERE sync_status=0"
-    if source_id ~= nil then
-        return rows(Base.query(sql .. " AND source_id=? ORDER BY updated_at ASC;", source_id))
-    end
-    return rows(Base.query(sql .. " ORDER BY updated_at ASC;"))
+    return rows(Base.query(
+        "SELECT " .. COLUMNS .. " FROM pending_progress WHERE sync_status=0 AND source_id=? ORDER BY updated_at ASC;",
+        source_id
+    ))
 end
 
 ---@param source_id string
