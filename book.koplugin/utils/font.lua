@@ -12,7 +12,7 @@ Book 插件 UI 字体
   FontList 其余路径                 系统字库（basename == id）
 
 列表顺序：微信读书 → 设置目录 fonts → 系统。
-扫描走 Task 子进程；微信列表 http.Cache（TTL）优先，磁盘 list.json 作冷启动备份。
+扫描走 Job 子进程；微信列表 http.Cache（TTL）优先，磁盘 list.json 作冷启动备份。
 
 @module koplugin.book.moon.font
 --]]
@@ -22,7 +22,6 @@ local DataStorage = require("datastorage")
 local Font = require("ui/font")
 local FontList = require("fontlist")
 local JSON = require("json")
-local ffiUtil = require("ffi/util")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local util = require("util")
@@ -30,11 +29,11 @@ local Cache = require("http.cache")
 local Request = require("http.request")
 local Paths = require("utils.paths")
 local MoonSettings = require("utils.settings")
-local Task = require("utils.task")
+local Job = require("workers.job")
 local Text = require("utils.text")
 local _ = require("gettext")
 
-local M = {}
+local MoonFont = {}
 
 local LIST_URL = "https://weread.qq.com/feconfig/font/list?type=web_v2"
 local LIST_TTL = 7 * 24 * 3600 -- 7 天
@@ -110,18 +109,18 @@ end
 
 --- 当前配置的 UI 字体 id；空串表示用系统默认 fontmap。
 ---@return string
-function M.currentId()
+function MoonFont.currentId()
     return tostring(MoonSettings.get().ui_font or "")
 end
 
 --- 当前 UI 字体的显示名：优先用配置里记的中文名，退回 id，都没有显示「系统默认」。
 ---@return string
-function M.currentName()
+function MoonFont.currentName()
     local s = MoonSettings.get()
     if type(s.ui_font_name) == "string" and s.ui_font_name ~= "" then
         return s.ui_font_name
     end
-    local id = M.currentId()
+    local id = tostring(s.ui_font or "")
     return id ~= "" and id or _("系统默认")
 end
 
@@ -129,7 +128,7 @@ end
 --- local / system 字源本来就在盘上，恒为 true；只有微信读书字体需要检查 .woff 是否落盘。
 ---@param id_or_item string|MoonFontItem 字体 id 或列表项
 ---@return boolean
-function M.isInstalled(id_or_item)
+function MoonFont.isInstalled(id_or_item)
     if type(id_or_item) == "table" then
         if id_or_item.kind == "local" or id_or_item.kind == "system" then return true end
         id_or_item = id_or_item.id
@@ -280,7 +279,7 @@ end
 
 --- 同步列表：微信 + 设置目录 + 系统（不联网）。
 ---@return MoonFontItem[]
-function M.list()
+function MoonFont.list()
     if not _weread_cache then
         _weread_cache = readDiskWeread()
     end
@@ -292,7 +291,7 @@ end
 ---@param force boolean|nil
 ---@param cb fun(items: MoonFontItem[], err: string|nil)
 ---@return { cancel: fun() }
-function M.listAsync(force, cb)
+function MoonFont.listAsync(force, cb)
     local cancelled = false
     local net_job, cache_job, scan_job
     local weread_result, settings_result, system_result
@@ -318,23 +317,16 @@ function M.listAsync(force, cb)
         try_finish()
     end
 
-    scan_job = Task.run(function(_, write_fd)
+    scan_job = Job.run(function()
         local settings, system = scanInstalledFonts()
-        local ok, payload = pcall(JSON.encode, { settings = settings, system = system })
-        if ok and type(payload) == "string" then
-            ffiUtil.writeToFD(write_fd, payload, true)
-        end
+        return { settings = settings, system = system }
     end, {
-        pipe = true,
-        on_done = function(raw)
+        on_done = function(data)
             if cancelled then return end
             local settings, system = {}, {}
-            if type(raw) == "string" and raw ~= "" then
-                local ok, data = pcall(JSON.decode, raw)
-                if ok and type(data) == "table" then
-                    settings = data.settings or {}
-                    system = data.system or {}
-                end
+            if type(data) == "table" then
+                settings = data.settings or {}
+                system = data.system or {}
             end
             settings_result = settings
             system_result = system
@@ -489,7 +481,7 @@ end
 
 ---@param id string|nil
 ---@return string|nil, string|nil
-function M.faceForId(id)
+function MoonFont.faceForId(id)
     local path, err = resolvePath(id)
     if not path then
         return nil, err
@@ -508,14 +500,14 @@ end
 
 ---@param ui table|nil
 ---@return boolean
-function M.supportsReader(ui)
+function MoonFont.supportsReader(ui)
     return ui and ui.font ~= nil and type(ui.document) == "table"
-        and type(ui.document.setFontFace) == "function"
+        and type(ui.document.setFontFace) == "function" or false
 end
 
 ---@param ui table|nil
 ---@return string
-function M.readerCurrentId(ui)
+function MoonFont.readerCurrentId(ui)
     if ui and ui.doc_settings then
         local id = ui.doc_settings:readSetting("book_reader_font_id")
         if type(id) == "string" and id ~= "" then
@@ -549,8 +541,8 @@ end
 ---@param id string|nil
 ---@param name string|nil
 ---@return boolean
-function M.applyFaceToReader(ui, face, id, name)
-    if not M.supportsReader(ui) or not setReaderFontFace(ui, face) then
+function MoonFont.applyFaceToReader(ui, face, id, name)
+    if not MoonFont.supportsReader(ui) or not setReaderFontFace(ui, face) then
         return false
     end
     id = sanitizeId(id or "")
@@ -564,38 +556,20 @@ end
 ---@param id string
 ---@param name string|nil
 ---@return boolean|nil, string|nil
-function M.applyToReader(ui, id, name)
-    if not M.supportsReader(ui) then
+function MoonFont.applyToReader(ui, id, name)
+    if not MoonFont.supportsReader(ui) then
         return nil, _("当前文档不支持字体与排版调整")
     end
-    local face, err = M.faceForId(id)
+    local face, err = MoonFont.faceForId(id)
     if not face then
         return nil, err
     end
-    if not M.applyFaceToReader(ui, face, id, name) then
+    if not MoonFont.applyFaceToReader(ui, face, id, name) then
         return nil, _("应用字体失败")
     end
     require("book.reader_prefs").captureAndSave(ui)
     require("ui/uimanager"):setDirty(ui.dialog, "ui")
     return true
-end
-
----@param id string|nil
----@return string|nil, string|nil
-local function resolveBasename(id)
-    id = sanitizeId(id or "")
-    if id == "" then return "" end
-    local woff = wereadPath(id)
-    if woff and lfs.attributes(woff, "mode") == "file" then
-        registerFontPath(woff)
-        return basename(woff)
-    end
-    local path = findInstalledFont(id)
-    if path then
-        registerFontPath(path)
-        return id
-    end
-    return nil, _("字体文件不存在")
 end
 
 ---@param id string|nil
@@ -610,8 +584,9 @@ local function apply(id)
         Font.faces = {}
         return true
     end
-    local base, err = resolveBasename(id)
-    if not base then return nil, err end
+    local path, err = resolvePath(id)
+    if not path then return nil, err end
+    local base = basename(path)
     for _, key in ipairs(UI_FACES) do
         Font.fontmap[key] = base
     end
@@ -622,9 +597,9 @@ end
 --- 把配置里的字体真正写进 Font.fontmap（唯一改 fontmap 的入口）。
 --- 字体文件已不存在时退回系统默认，只记警告，不让 UI 因缺字体起不来。
 ---@return boolean|nil ok, string|nil err
-function M.applyCurrent()
-    local id = M.currentId()
-    if id ~= "" and not resolveBasename(id) then
+function MoonFont.applyCurrent()
+    local id = MoonFont.currentId()
+    if id ~= "" and not resolvePath(id) then
         logger.warn("book.font missing, fallback default", id)
         id = ""
     end
@@ -633,7 +608,7 @@ end
 
 --- 从下载的 zip 里抽出第一个 .woff/.woff2 落到 dest。
 --- 无论成功失败都删掉 zip_path；失败时连 dest 一起删，不留半截字体文件。
---- 在 Task 子进程里执行（会阻塞地解压）。
+--- 在 Job 子进程里执行（会阻塞地解压）。
 ---@param zip_path string
 ---@param dest string
 ---@return boolean|nil ok, string|nil err
@@ -695,7 +670,7 @@ end
 ---@param on_progress fun(bytes: number)|nil 下载字节进度
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }
-function M.ensureInstalledAsync(item, on_progress, cb)
+function MoonFont.ensureInstalledAsync(item, on_progress, cb)
     local dest, zip_path, path_err = installPaths(item)
     if path_err then
         cb(nil, path_err)
@@ -706,7 +681,7 @@ function M.ensureInstalledAsync(item, on_progress, cb)
         return { cancel = function() end }
     end
     local cancelled = false
-    local download_job, extract_task
+    local download_job, extract_job
     os.remove(zip_path)
     download_job = Request.download({
         url = item.url,
@@ -719,7 +694,7 @@ function M.ensureInstalledAsync(item, on_progress, cb)
             cb(nil, err)
             return
         end
-        extract_task = Task.run(function()
+        extract_job = Job.run(function()
             extractInstalledFont(zip_path, dest)
         end, {
             on_done = function()
@@ -740,7 +715,7 @@ function M.ensureInstalledAsync(item, on_progress, cb)
         cancel = function()
             cancelled = true
             if download_job then download_job.cancel() end
-            if extract_task then extract_task:abort() end
+            if extract_job then extract_job:abort() end
         end,
     }
 end
@@ -748,7 +723,7 @@ end
 ---@param id string|nil 空=恢复默认 fontmap
 ---@param name string|nil
 ---@return boolean
-function M.set(id, name)
+function MoonFont.set(id, name)
     id = sanitizeId(id or "")
     local s = MoonSettings.get()
     s.ui_font = id
@@ -758,4 +733,4 @@ function M.set(id, name)
     return true
 end
 
-return M
+return MoonFont
