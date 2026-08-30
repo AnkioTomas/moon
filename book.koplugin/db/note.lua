@@ -5,12 +5,26 @@ sync_status=0 表示待上传，1 表示已同步。
 
 chapter_idx = 0 表示整本文件；正数表示章节文件。
 
-@module koplugin.book.utils.db.note
+@module koplugin.book.db.note
 --]]
 
-local Base = require("utils.db.base")
+local Base = require("db.base")
 
 local NoteDB = {}
+
+--- 创建 notes 表。
+--- 仅在 Base.open() 的一次性 schema 初始化阶段调用。
+---@return boolean 成功返回 true，SQL 失败返回 false
+function NoteDB.ensureSchema()
+    return Base.exec([[
+CREATE TABLE IF NOT EXISTS notes (
+  source_id TEXT NOT NULL, stable_id TEXT NOT NULL,
+  chapter_idx INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL,
+  updated_at INTEGER NOT NULL, sync_status INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (source_id, stable_id, chapter_idx)
+);
+]]) ~= nil
+end
 
 --- 覆盖指定书籍或章节的注解快照。
 ---@param source_id string
@@ -21,14 +35,7 @@ local NoteDB = {}
 ---@param synced boolean|nil 此快照已由远端确认
 ---@return boolean
 function NoteDB.upsert(source_id, stable_id, chapter_idx, payload, updated_at, synced)
-    source_id = Base.requireSourceId(source_id)
     chapter_idx = tonumber(chapter_idx) or 0
-    if not source_id or type(stable_id) ~= "string" or stable_id == ""
-        or chapter_idx < 0 or chapter_idx % 1 ~= 0
-        or type(payload) ~= "string" then
-        return false
-    end
-    Base.ensure()
     return Base.exec(
         [[INSERT INTO notes (source_id, stable_id, chapter_idx, payload, updated_at, sync_status)
           VALUES (?,?,?,?,?,?)
@@ -53,13 +60,7 @@ end
 ---@param updated_at number|nil
 ---@return boolean
 function NoteDB.upsertRemote(source_id, stable_id, chapter_idx, payload, updated_at)
-    source_id = Base.requireSourceId(source_id)
     chapter_idx = tonumber(chapter_idx) or 0
-    if not source_id or type(stable_id) ~= "string" or stable_id == ""
-        or chapter_idx < 0 or chapter_idx % 1 ~= 0 or type(payload) ~= "string" then
-        return false
-    end
-    Base.ensure()
     return Base.exec(
         [[INSERT INTO notes (source_id, stable_id, chapter_idx, payload, updated_at, sync_status)
           VALUES (?,?,?,?,?,1)
@@ -99,13 +100,7 @@ end
 ---@param chapter_idx integer|nil
 ---@return table|nil
 function NoteDB.get(source_id, stable_id, chapter_idx)
-    source_id = Base.requireSourceId(source_id)
     chapter_idx = tonumber(chapter_idx) or 0
-    if not source_id or type(stable_id) ~= "string" or stable_id == ""
-        or chapter_idx < 0 or chapter_idx % 1 ~= 0 then
-        return nil
-    end
-    Base.ensure()
     local source, stable, chapter, payload, updated_at, sync_status = Base.rowexec(
         "SELECT " .. COLUMNS .. " FROM notes WHERE source_id=? AND stable_id=? AND chapter_idx=? LIMIT 1;",
         source_id,
@@ -129,9 +124,8 @@ end
 ---@param source_id string|nil
 ---@return table[]
 function NoteDB.all(source_id)
-    Base.ensure()
     local sql = "SELECT " .. COLUMNS .. " FROM notes"
-    if type(source_id) == "string" and source_id ~= "" then
+    if source_id ~= nil then
         return rows(Base.query(sql .. " WHERE source_id=? ORDER BY updated_at ASC;", source_id))
     end
     return rows(Base.query(sql .. " ORDER BY updated_at ASC;"))
@@ -141,9 +135,8 @@ end
 ---@param source_id string|nil
 ---@return table[]
 function NoteDB.unsynced(source_id)
-    Base.ensure()
     local sql = "SELECT " .. COLUMNS .. " FROM notes WHERE sync_status=0"
-    if type(source_id) == "string" and source_id ~= "" then
+    if source_id ~= nil then
         return rows(Base.query(sql .. " AND source_id=? ORDER BY updated_at ASC;", source_id))
     end
     return rows(Base.query(sql .. " ORDER BY updated_at ASC;"))
@@ -157,8 +150,7 @@ end
 --- payload 允许为 nil（只标记不写内容）；修订号不变，因为内容语义上仍是这一版
 --- （源侧只是回填了远端分配的 id）。
 ---
---- 返回值只表示 SQL 执行成功。是否真的命中那一行由调用方在同一个 DbQueue 任务里
---- 比对 updated_at 判断——ljsqlite3 这层拿不到 changes()。
+--- 返回值只表示 SQL 执行成功。是否真的命中那一行由调用方另行判断。
 ---@param source_id string
 ---@param stable_id string
 ---@param chapter_idx integer|nil nil 或 0 表示整本书那一份快照
@@ -166,18 +158,9 @@ end
 ---@param payload string|nil 源侧回填过 id 的快照
 ---@return boolean false 表示参数非法或 SQL 失败
 function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at, payload)
-    source_id = Base.requireSourceId(source_id)
     chapter_idx = tonumber(chapter_idx) or 0
     updated_at = tonumber(updated_at)
-    if not source_id or type(stable_id) ~= "string" or stable_id == ""
-        or chapter_idx < 0 or chapter_idx % 1 ~= 0 or not updated_at then
-        return false
-    end
-    Base.ensure()
     if payload ~= nil then
-        if type(payload) ~= "string" then
-            return false
-        end
         return Base.exec(
             [[UPDATE notes SET sync_status=1, payload=?
               WHERE source_id=? AND stable_id=? AND chapter_idx=? AND updated_at=?;]],
@@ -200,13 +183,7 @@ end
 ---@param chapter_idx integer|nil
 ---@return boolean
 function NoteDB.delete(source_id, stable_id, chapter_idx)
-    source_id = Base.requireSourceId(source_id)
     chapter_idx = tonumber(chapter_idx) or 0
-    if not source_id or type(stable_id) ~= "string" or stable_id == ""
-        or chapter_idx < 0 or chapter_idx % 1 ~= 0 then
-        return false
-    end
-    Base.ensure()
     return Base.exec(
         "DELETE FROM notes WHERE source_id=? AND stable_id=? AND chapter_idx=?;",
         source_id,
