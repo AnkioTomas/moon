@@ -1,15 +1,31 @@
 --[[--
 本地阅读进度（一书一条）。sync_status=0 表示待上传，1 表示已同步。
 
-@module koplugin.book.utils.db.progress
+@module koplugin.book.db.progress
 --]]
 
-local Base = require("utils.db.base")
+local Base = require("db.base")
 local Book = require("types.book").Book
 local JSON = require("json")
 local logger = require("logger")
 
 local ProgressDB = {}
+
+--- 创建本地阅读进度表。
+--- 仅在 Base.open() 的一次性 schema 初始化阶段调用。
+---@return boolean 成功返回 true，SQL 失败返回 false
+function ProgressDB.ensureSchema()
+    if not Base.exec([[
+CREATE TABLE IF NOT EXISTS pending_progress (
+  source_id TEXT NOT NULL, stable_id TEXT NOT NULL, fraction REAL NOT NULL,
+  chapter_idx INTEGER, chapter_title TEXT, chapter_fraction REAL,
+  page INTEGER, total_pages INTEGER, locator TEXT, extra TEXT,
+  updated_at INTEGER NOT NULL, sync_status INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (source_id, stable_id)
+);
+]]) then return false end
+    return true
+end
 
 local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, extra, updated_at, sync_status"
 
@@ -41,7 +57,7 @@ end
 ---@param extra table|nil
 ---@return string|nil
 local function encodeExtra(extra)
-    if type(extra) ~= "table" or next(extra) == nil then
+    if not extra or next(extra) == nil then
         return nil
     end
     local ok, payload = pcall(JSON.encode, extra)
@@ -55,11 +71,8 @@ end
 ---@param payload any
 ---@return table|nil
 local function decodeExtra(payload)
-    if type(payload) ~= "string" or payload == "" then
-        return nil
-    end
     local ok, extra = pcall(JSON.decode, payload)
-    if not ok or type(extra) ~= "table" then
+    if not ok then
         return nil
     end
     return extra
@@ -73,12 +86,7 @@ end
 ---@param keep_dirty boolean|nil 为真时不覆盖 sync_status=0 的本地脏版本
 ---@return boolean
 local function write(source_id, stable_id, pos, status, keep_dirty)
-    source_id = Base.requireSourceId(source_id)
-    local fraction = type(pos) == "table" and tonumber(pos.fraction) or nil
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" or not fraction then
-        return false
-    end
-    Base.ensure()
+    local fraction = tonumber(pos.fraction)
     -- keep_dirty 必须在这里判定：靠 SQL 的 WHERE 只能让 UPDATE 静默 no-op，
     -- 下面的 syncBookPercent 仍会把 books.percent 改成远端值，
     -- 于是 pending_progress 是本地进度、books.percent 是云端进度，两处显示打架。
@@ -114,6 +122,7 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
     return true
 end
 
+--- 保存本地阅读进度，标记为待同步。
 ---@param source_id string
 ---@param stable_id string
 ---@param pos ProgressPosition
@@ -144,11 +153,6 @@ end
 ---@param stable_id string
 ---@return PendingProgress|nil
 function ProgressDB.get(source_id, stable_id)
-    source_id = Base.requireSourceId(source_id)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" then
-        return nil
-    end
-    Base.ensure()
     local source, stable, fraction, chapter_idx, chapter_title, chapter_fraction,
         page, total_pages, locator, extra, updated_at, sync_status = Base.rowexec(
         "SELECT " .. COLUMNS .. " FROM pending_progress WHERE source_id=? AND stable_id=? LIMIT 1;",
@@ -163,7 +167,7 @@ function ProgressDB.get(source_id, stable_id)
         stable_id = stable,
         fraction = tonumber(fraction) or 0,
         chapter_idx = chapter_idx ~= nil and tonumber(chapter_idx) or nil,
-        chapter_title = type(chapter_title) == "string" and chapter_title ~= "" and chapter_title or nil,
+        chapter_title = chapter_title ~= "" and chapter_title or nil,
         chapter_fraction = chapter_fraction ~= nil and tonumber(chapter_fraction) or nil,
         page = page ~= nil and tonumber(page) or nil,
         total_pages = total_pages ~= nil and tonumber(total_pages) or nil,
@@ -189,7 +193,7 @@ local function rows(result, nrows)
             stable_id = result[2][i],
             fraction = tonumber(result[3][i]) or 0,
             chapter_idx = result[4][i] ~= nil and tonumber(result[4][i]) or nil,
-            chapter_title = type(title) == "string" and title ~= "" and title or nil,
+            chapter_title = title ~= "" and title or nil,
             chapter_fraction = result[6][i] ~= nil and tonumber(result[6][i]) or nil,
             page = result[7][i] ~= nil and tonumber(result[7][i]) or nil,
             total_pages = result[8][i] ~= nil and tonumber(result[8][i]) or nil,
@@ -205,9 +209,8 @@ end
 ---@param source_id string|nil
 ---@return PendingProgress[]
 function ProgressDB.all(source_id)
-    Base.ensure()
     local sql = "SELECT " .. COLUMNS .. " FROM pending_progress"
-    if type(source_id) == "string" and source_id ~= "" then
+    if source_id ~= nil then
         return rows(Base.query(sql .. " WHERE source_id=? ORDER BY updated_at ASC;", source_id))
     end
     return rows(Base.query(sql .. " ORDER BY updated_at ASC;"))
@@ -216,9 +219,8 @@ end
 ---@param source_id string|nil
 ---@return PendingProgress[]
 function ProgressDB.unsynced(source_id)
-    Base.ensure()
     local sql = "SELECT " .. COLUMNS .. " FROM pending_progress WHERE sync_status=0"
-    if type(source_id) == "string" and source_id ~= "" then
+    if source_id ~= nil then
         return rows(Base.query(sql .. " AND source_id=? ORDER BY updated_at ASC;", source_id))
     end
     return rows(Base.query(sql .. " ORDER BY updated_at ASC;"))
@@ -229,12 +231,7 @@ end
 ---@param updated_at number
 ---@return boolean
 function ProgressDB.markSynced(source_id, stable_id, updated_at)
-    source_id = Base.requireSourceId(source_id)
     updated_at = tonumber(updated_at)
-    if not source_id or type(stable_id) ~= "string" or stable_id == "" or not updated_at then
-        return false
-    end
-    Base.ensure()
     return Base.exec(
         [[UPDATE pending_progress SET sync_status=1
           WHERE source_id=? AND stable_id=? AND updated_at=?;]],
