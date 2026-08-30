@@ -12,6 +12,10 @@ local writer
 ---@alias WorkerProgress table
 ---@alias WorkerSender fun(message: WorkerMessage): boolean, string|nil
 
+---@class WorkerContext
+---@field post fun(message: WorkerProgress)
+---@field inSubProcess fun(): boolean
+
 ---@return boolean
 function Context.inSubProcess()
     return writer ~= nil

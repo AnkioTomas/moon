@@ -1,72 +1,71 @@
 # Workers
 
-这里是独立于 `utils/task.lua` 的后台执行基础设施。DB 是常驻双向 Worker；Job 在提交时 fork，因此可执行现有 Lua 闭包并向主线程回报状态。
+`book.koplugin/workers` 只提供两种任务模型：一次性子进程 `Job`，以及主线程下一帧执行的 `SimpleJob`。目录内没有常驻进程管理器，也没有数据库专用 worker。
+
+## 目录模块
+
+| 模块 | 作用 | 典型调用方 |
+| --- | --- | --- |
+| `workers/job` | fork 一次性子进程，传输进度和最终结果 | 文件扫描、转换、校验等重任务 |
+| `workers/simple_job` | 使用 `UIManager:nextTick` 延后执行闭包 | 很短的主线程任务、拆分 UI 工作 |
+| `workers/context` | Job 子进程上下文，发送进度 | 仅由 `workers/job` 注入的 `ctx` 使用 |
+| `workers/protocol` | IPC 帧编码、增量解码和 EOF 校验 | Job 内部协议层，一般不直接调用 |
+
+## Job
 
 ```lua
-local Worker = require("workers.runtime").new {
-    handlers = {
-        ping = function(args)
-            return { value = args.value }
-        end,
-    },
-}
+local Job = require("workers/job")
 
-Worker:attach()
-Worker:request("ping", { value = 1 }, function(result, err)
-    -- 回调始终在主进程
-end)
-```
-
-子进程只接收 JSON 可编码的 table，handler 由主进程在创建时提供并在子进程内执行。
-请求通过双向匿名 pipe 传输，协议为 8 位十六进制长度头加 JSON payload。
-
-`Runtime:waitEvent` 可直接交给 `UIManager:insertZMQ`；它只做非阻塞 pipe 读写、协议解析和回调。
-子进程退出后，已发送请求失败回调，尚未发送的请求保留，并按退避时间自动重新拉起子进程。
-
-当前模块不负责数据库或文件业务，也不允许 handler 触碰主进程 UI、SQLite 连接、文件 userdata 或 socket userdata。
-
-## DB 常驻执行域
-
-```lua
-local Workers = require("workers/init")
-local DB = Workers.get("db")
-
-Workers.attach()
-DB:request("query", {
-    sql = "SELECT * FROM books WHERE source_id = ? LIMIT ?;",
-    params = { "local", 24 },
-}, cb)
-```
-
-`DB` 在子进程启动时先丢弃 fork 继承的 SQLite 状态，再由首次请求重新打开连接。只提供参数化 `query`/`exec`，不增加一层伪 ORM。它会保持运行，直到 `Workers.destroy("db")` 或 KOReader 退出；异常退出则自动按退避重启。
-
-## 通用 Job
-
-```lua
-local Workers = require("workers/init")
-
-local job = Workers.run(function(ctx)
-    ctx:post({ phase = "scan", current = 1, total = 10 })
+local job = Job.run(function(ctx)
+    for i = 1, 10 do
+        ctx.post({ phase = "scan", current = i, total = 10 })
+    end
     return { files = 10 }
 end, {
-    on_progress = function(progress, job)
-        -- 主线程：job:status() 可读 state/progress/error
-    end,
+    on_progress = function(progress, job) end,
     on_done = function(result) end,
     on_failed = function(err) end,
+    on_state = function(state, job) end,
 })
 
 job:cancel()
 ```
 
-闭包在 fork 时继承到子进程，不会通过 IPC 序列化。`ctx:post` 与返回值必须是 JSON 可编码数据；不要捕获 SQLite、UI、socket 或文件 userdata。Job 完成后自然退出；`Workers.Job.list()` 可取得仍在运行的任务状态。
+`Job.run` 会 fork 子进程；闭包在 fork 时继承，不经过 IPC 序列化。`ctx.post` 的参数、任务返回值和进度数据必须是 JSON 可编码的 Lua table。不要捕获 UI、SQLite、socket 或文件 userdata。任务结束后子进程退出。
 
-新增常驻执行域只需要注册一个定义，不需要复制 pipe、重启或事件循环代码：
+Job 状态为 `queued`、`running`、`done`、`failed` 或 `cancelled`。`job:status()` 返回当前状态；`Job.get(id)`、`Job.list()` 查询活动任务，`Job.stop()` 取消全部活动任务。`timeout` 可在选项中指定超时秒数。
+
+## SimpleJob
 
 ```lua
-Workers.define("search", {
-    handlers = { ping = function() return { alive = true } end },
+local SimpleJob = require("workers/simple_job")
+
+local task = SimpleJob.nextTick(function()
+    return update_small_piece()
+end, {
+    on_done = function(result) end,
+    on_failed = function(err) end,
 })
+
+task:cancel()
 ```
 
-网络仍由主进程 Turbo 事件循环处理。
+`SimpleJob.run` 与 `SimpleJob.nextTick` 等价。任务只排入 `UIManager:nextTick`，不 fork、不建 pipe；取消只能阻止尚未开始的回调，不能中断已经运行的同步闭包。状态和 `task:status()` 与 Job 类似。
+
+## IPC 协议
+
+`workers/protocol` 使用字节流帧：8 个 ASCII 十六进制字符表示 payload 长度，后跟 JSON payload。
+
+```lua
+local Protocol = require("workers/protocol")
+
+local frame = Protocol.encode({ type = "progress", value = { current = 1 } })
+local decoder = Protocol.newDecoder()
+local messages, err = Protocol.feed(decoder, frame:sub(1, 4))
+messages, err = Protocol.feed(decoder, frame:sub(5))
+local complete, finish_err = Protocol.finish(decoder)
+```
+
+`Protocol.feed` 支持半包和一次输入多个完整帧；任何非法长度、非法 JSON 或超过 `MAX_FRAME` 的帧都会返回错误。子进程 EOF 时必须调用 `Protocol.finish`，残留字节表示不完整帧。
+
+`workers/context` 的 `enter`、`leave` 由 Job 内部管理；业务闭包只使用传入的 `ctx.post(message)`。在 Job 外调用 `Context.post` 会抛出错误。
