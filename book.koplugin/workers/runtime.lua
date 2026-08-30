@@ -1,14 +1,13 @@
 --[[--
-主进程常驻 Worker 管理器。
+一个执行域对应一个常驻子进程。
 
-与 utils.task.lua 独立：这里是长期双向 pipe 服务，不是一次性任务包装。
 主进程只做非阻塞 IPC、队列和回调；实际 handler 永远在子进程执行。
 
-  local Worker = require("workers.master").new({ handlers = { ... } })
+  local Worker = require("workers.runtime").new({ handlers = { ... } })
   Worker:request("list_books", args, function(result, err) end)
   UIManager:insertZMQ(Worker)
 
-@module koplugin.book.workers.master
+@module koplugin.book.workers.runtime
 --]]
 
 local ffi = require("ffi")
@@ -19,18 +18,48 @@ local Protocol = require("workers.protocol")
 -- `ffi/util` 已加载 KOReader 的 posix_h 声明（fcntl/write/close/O_NONBLOCK）。
 -- 不在此重复 cdef，避免把 write 的 ssize_t 错声明成 long。
 
-local Master = {}
-Master.__index = Master
+local Runtime = {}
+Runtime.__index = Runtime
+
+---@class WorkerRequestHandle
+---@field id number
+---@field cancel fun(self: WorkerRequestHandle)
+
+---@class WorkerDefinition
+---@field name string|nil
+---@field handlers table<string, fun(args: table|nil): any>
+---@field init fun()|nil
+---@field max_pending number|nil
+
+---@class WorkerRuntime
+---@field handlers table<string, fun(args: table|nil): any>
+---@field init fun()|nil
+---@field max_pending number
+---@field pid number|nil
+---@field read_fd number|nil
+---@field write_fd number|nil
+---@field decoder WorkerDecoder
+---@field write_queue table[]
+---@field write_head number
+---@field requests table<number, table>
+---@field next_id number
+---@field state string
+---@field restart_at number
+---@field restart_delay number
+---@field stopping boolean
 
 local MAX_PENDING = 32
 local READ_CHUNK = 64 * 1024
 local WRITE_BUDGET = 128 * 1024
 local RESTART_MAX_DELAY = 30
 
+---@return number
 local function now()
     return (ffiUtil.getTimestamp and ffiUtil.getTimestamp()) or os.clock()
 end
 
+---@param fd number
+---@return boolean
 local function setNonBlocking(fd)
     local ok = pcall(function()
         local flags = ffi.C.fcntl(fd, ffi.C.F_GETFL, 0)
@@ -41,16 +70,20 @@ local function setNonBlocking(fd)
     return ok
 end
 
+---@param fd number|nil
+---@return nil
 local function closeFd(fd)
     if fd then pcall(ffi.C.close, fd) end
 end
 
----@param opts { handlers: table<string, function>, max_pending?: number }
-function Master.new(opts)
+---@param opts WorkerDefinition
+---@return WorkerRuntime
+function Runtime.new(opts)
     opts = opts or {}
-    assert(type(opts.handlers) == "table", "workers.master: handlers required")
+    assert(type(opts.handlers) == "table", "workers.runtime: handlers required")
     return setmetatable({
         handlers = opts.handlers,
+        init = opts.init,
         max_pending = tonumber(opts.max_pending) or MAX_PENDING,
         pid = nil,
         read_fd = nil,
@@ -64,31 +97,41 @@ function Master.new(opts)
         restart_at = 0,
         restart_delay = 0.25,
         stopping = false,
-    }, Master)
+    }, Runtime)
 end
 
-function Master:isRunning()
+---@return boolean
+function Runtime:isRunning()
     return self.state == "starting" or self.state == "ready"
 end
 
+---@param self WorkerRuntime
+---@return boolean
 local function queueEmpty(self)
     return self.write_head > #self.write_queue
 end
 
-function Master:_enqueue(value)
+---@param self WorkerRuntime
+---@param value table
+---@param id number|nil
+---@return boolean|nil, string|nil
+function Runtime:_enqueue(value, id)
     local ok, frame = pcall(Protocol.encode, value)
     if not ok then return nil, frame end
-    self.write_queue[#self.write_queue + 1] = { data = frame, offset = 1 }
+    self.write_queue[#self.write_queue + 1] = { data = frame, offset = 1, id = id }
     return true
 end
 
-function Master:_closePipes()
+---@return nil
+function Runtime:_closePipes()
     closeFd(self.read_fd)
     closeFd(self.write_fd)
     self.read_fd, self.write_fd = nil, nil
 end
 
-function Master:_failInflight(err)
+---@param err string
+---@return nil
+function Runtime:_failInflight(err)
     local calls = self.requests
     for _, item in pairs(calls) do
         if item.sent and not item.cancelled and item.callback then
@@ -98,7 +141,9 @@ function Master:_failInflight(err)
     end
 end
 
-function Master:_markDead(err)
+---@param err string|nil
+---@return nil
+function Runtime:_markDead(err)
     if self.state == "stopped" then return end
     self:_closePipes()
     self.pid = nil
@@ -114,21 +159,22 @@ function Master:_markDead(err)
         end
     end
     self.write_queue, self.write_head = kept, 1
-    -- 只有仍有尚未写出的请求才自动重启。没有待处理工作时不拉起空转的
-    -- 子进程；下一次 request 会懒启动并继续使用退避后的状态。
-    if not self.stopping and self.write_head <= #self.write_queue then
+    -- 记录退避时间；没有工作时不拉起空转的子进程，但下一次 request 会复用它。
+    if not self.stopping then
         self.restart_at = now() + self.restart_delay
         self.restart_delay = math.min(self.restart_delay * 2, RESTART_MAX_DELAY)
     end
 end
 
-function Master:_start()
+---@return boolean|nil, string|nil
+function Runtime:_start()
     if self:isRunning() then return true end
     if self.stopping then return nil, "worker stopping" end
     local Child = require("workers.child")
     local handlers = self.handlers
+    local init = self.init
     local pid, read_fd, write_fd = ffiUtil.runInSubProcess(function(_, child_write, child_read)
-        Child.run(child_read, child_write, handlers)
+        Child.run(child_read, child_write, handlers, init)
     end, "bidi")
     if not pid then
         self.state = "dead"
@@ -144,7 +190,8 @@ function Master:_start()
     return true
 end
 
-function Master:_send()
+---@return nil
+function Runtime:_send()
     if not self.write_fd or queueEmpty(self) then return end
     local sent_total = 0
     while self.write_head <= #self.write_queue and sent_total < WRITE_BUDGET do
@@ -180,16 +227,19 @@ function Master:_send()
 end
 
 --- 把 Worker 接入 KOReader 主事件循环；调用一次即可。
-function Master:attach()
+---@return nil
+function Runtime:attach()
     require("ui/uimanager"):insertZMQ(self)
 end
 
 --- 从 KOReader 主事件循环摘除 Worker。
-function Master:detach()
+---@return nil
+function Runtime:detach()
     require("ui/uimanager"):removeZMQ(self)
 end
 
-function Master:_read()
+---@return nil
+function Runtime:_read()
     if not self.read_fd then return end
     local available = ffiUtil.getNonBlockingReadSize(self.read_fd)
     if not available or available <= 0 then return end
@@ -210,7 +260,9 @@ function Master:_read()
     end
 end
 
-function Master:_dispatch(message)
+---@param message WorkerMessage
+---@return nil
+function Runtime:_dispatch(message)
     if message.type == "ready" then
         self.state = "ready"
         self.restart_delay = 0.25
@@ -234,7 +286,8 @@ function Master:_dispatch(message)
 end
 
 --- UIManager/事件循环调用点；必须短，不执行业务 handler。
-function Master:waitEvent()
+---@return nil
+function Runtime:waitEvent()
     if self.state == "dead" and not self.stopping
         and self.write_head <= #self.write_queue and now() >= self.restart_at then
         self:_start()
@@ -254,8 +307,8 @@ end
 ---@param op string
 ---@param args table|nil
 ---@param callback fun(result: any, err: any)|nil
----@return table|nil, string|nil
-function Master:request(op, args, callback)
+---@return WorkerRequestHandle|nil, string|nil
+function Runtime:request(op, args, callback)
     if type(op) ~= "string" or op == "" then return nil, "invalid worker operation" end
     local queued = #self.write_queue - self.write_head + 1
     local active = 0
@@ -264,13 +317,15 @@ function Master:request(op, args, callback)
     self.next_id = self.next_id + 1
     local id = self.next_id
     self.requests[id] = { id = id, callback = callback, sent = false }
-    local ok, err = self:_enqueue({ type = "request", id = id, op = op, args = args })
+    local ok, err = self:_enqueue({ type = "request", id = id, op = op, args = args }, id)
     if not ok then
         self.requests[id] = nil
         return nil, err
     end
-    self.write_queue[#self.write_queue].id = id
-    if self.state == "stopped" then self:_start() end
+    if self.state == "stopped"
+        or (self.state == "dead" and not self.stopping and now() >= self.restart_at) then
+        self:_start()
+    end
     return {
         id = id,
         cancel = function()
@@ -282,7 +337,8 @@ function Master:request(op, args, callback)
     }
 end
 
-function Master:stop()
+---@return nil
+function Runtime:stop()
     if self.state == "stopped" then return end
     self.stopping = true
     if self:isRunning() then
@@ -307,4 +363,4 @@ function Master:stop()
     self.stopping = false
 end
 
-return Master
+return Runtime
