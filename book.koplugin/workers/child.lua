@@ -12,6 +12,9 @@ local Protocol = require("workers.protocol")
 
 local Child = {}
 
+---@param fd number
+---@param value WorkerMessage
+---@return nil
 local function writeFrame(fd, value)
     local frame = Protocol.encode(value)
     local ffi = require("ffi")
@@ -21,6 +24,9 @@ local function writeFrame(fd, value)
     if n ~= #frame then error("worker child: pipe write failed") end
 end
 
+---@param fd number
+---@param size number
+---@return string
 local function readExact(fd, size)
     local ffi = require("ffi")
     local buffer = ffi.new("char[?]", size)
@@ -28,6 +34,8 @@ local function readExact(fd, size)
     return ffi.string(buffer, n)
 end
 
+---@param fd number
+---@return WorkerMessage|nil, string|nil
 local function readFrame(fd)
     local header = readExact(fd, 8)
     if #header == 0 then
@@ -49,8 +57,11 @@ end
 ---@param read_fd number
 ---@param write_fd number
 ---@param handlers table<string, fun(args: table|nil): any>
-function Child.run(read_fd, write_fd, handlers)
+---@param init fun()|nil
+---@return nil
+function Child.run(read_fd, write_fd, handlers, init)
     handlers = handlers or {}
+    if init then init() end
     writeFrame(write_fd, { type = "ready" })
 
     local cancelled = {}

@@ -12,6 +12,18 @@ local JSON = require("json")
 local Protocol = {}
 Protocol.MAX_FRAME = 4 * 1024 * 1024
 
+---@class WorkerMessage
+---@field type string
+---@field id number|nil
+---@field op string|nil
+---@field args table|nil
+---@field ok boolean|nil
+---@field result any
+---@field error string|nil
+
+---@class WorkerDecoder
+---@field buffer string
+
 ---@param value table
 ---@return string
 function Protocol.encode(value)
@@ -25,15 +37,15 @@ function Protocol.encode(value)
     return string.format("%08x", #payload) .. payload
 end
 
----@return table
+---@return WorkerDecoder
 function Protocol.newDecoder()
     return { buffer = "" }
 end
 
 --- 增量喂入字节并取出完整消息。
----@param decoder table
+---@param decoder WorkerDecoder
 ---@param bytes string
----@return table[]|nil messages, string|nil err
+---@return WorkerMessage[]|nil messages, string|nil err
 function Protocol.feed(decoder, bytes)
     if type(bytes) ~= "string" then
         return nil, "worker protocol: bytes must be string"
@@ -65,7 +77,7 @@ function Protocol.feed(decoder, bytes)
 end
 
 --- 子进程 EOF 时调用；残留字节表示协议损坏。
----@param decoder table
+---@param decoder WorkerDecoder
 ---@return boolean, string|nil
 function Protocol.finish(decoder)
     if decoder.buffer ~= "" then
