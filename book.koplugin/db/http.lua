@@ -23,7 +23,6 @@ end
 ---@return string|nil value_json 缓存的 JSON 文本
 ---@return number|nil expires Unix 秒级过期时间
 function HttpDB.get(key)
-    Base.ensure()
     Base.exec([[DELETE FROM http WHERE expires <= ?;]], os.time())
     local value, expires = Base.rowexec(
         [[SELECT value, expires FROM http WHERE key=? LIMIT 1;]],
@@ -39,7 +38,6 @@ end
 ---@param expires number Unix 秒级过期时间
 ---@return boolean 成功返回 true，SQL 失败返回 false
 function HttpDB.set(key, value_json, expires)
-    Base.ensure()
     return Base.exec(
         [[INSERT INTO http (key, value, expires) VALUES (?,?,?)
           ON CONFLICT(key) DO UPDATE SET
@@ -55,7 +53,6 @@ end
 ---@param key string 缓存键
 ---@return boolean 成功返回 true，SQL 失败返回 false
 function HttpDB.delete(key)
-    Base.ensure()
     return Base.exec([[DELETE FROM http WHERE key=?;]], key) ~= nil
 end
 
@@ -63,7 +60,6 @@ end
 ---@param url_substr string|nil URL 子串；nil 或空字符串表示全部删除
 ---@return boolean
 function HttpDB.clear(url_substr)
-    Base.ensure()
     if type(url_substr) ~= "string" or url_substr == "" then
         return Base.exec([[DELETE FROM http;]]) ~= nil
     end
