@@ -11,21 +11,11 @@ local Context = {}
 local PRIOR_TEXT_LIMIT = 2000
 local VISIBLE_TEXT_LIMIT = 12000
 
---- 取当前页码：优先问 ReaderUI，退回问 document；都拿不到返回 0。
----@param ui table|nil ReaderUI
+--- 取阅读会话维护的当前页码。
 ---@return integer
-local function currentPage(ui)
-    if not ui then return 0 end
-    if type(ui.getCurrentPage) == "function" then
-        local ok, page = pcall(function() return ui:getCurrentPage() end)
-        if ok and page then return tonumber(page) or 0 end
-    end
-    local document = ui.document
-    if document and document.getCurrentPage then
-        local ok, page = pcall(document.getCurrentPage, document)
-        if ok and page then return tonumber(page) or 0 end
-    end
-    return 0
+local function currentPage()
+    local session = require("ui.reader.session").current()
+    return session and session.page or 0
 end
 
 --- 取某页正文：getTextBoxes 优先，退回 getPageText；结果可能是字符串或嵌套词框表。
@@ -61,7 +51,7 @@ local function pageText(ui, page)
             elseif type(value.text) == "string" then
                 parts[#parts + 1] = value.text
             else
-                for _, item in ipairs(value) do walk(item, depth + 1) end
+                for index, item in ipairs(value) do walk(item, depth + 1) end
             end
         end
     end
@@ -94,7 +84,7 @@ end
 function Context.visibleText(ui)
     local document = ui and ui.document
     if not document then return nil, 0 end
-    local page = currentPage(ui)
+    local page = currentPage()
     local text
     if ui.rolling and document.getTextFromPositions then
         local width = ui.view and ui.view.dimen and ui.view.dimen.w
@@ -123,7 +113,7 @@ end
 ---@return string
 function Context.priorText(ui, end_page, limit)
     limit = limit or PRIOR_TEXT_LIMIT
-    end_page = end_page or currentPage(ui)
+    end_page = end_page or currentPage()
     if end_page <= 1 then
         return ""
     end
@@ -152,13 +142,13 @@ end
 ---@param ui table
 ---@return { current_page: string, prior_text: string, page: integer }
 function Context.forAnalysis(ui)
-    local page = currentPage(ui)
+    local page = currentPage()
     local visible, visible_page = Context.visibleText(ui)
     if visible_page and visible_page > 0 then
         page = visible_page
     end
     return {
-        current_page = visible or pageText(ui, page) or "",
+        current_page = visible or pageText(ui, page),
         prior_text = Context.priorText(ui, page, PRIOR_TEXT_LIMIT),
         page = page,
     }

@@ -8,6 +8,7 @@ require("l10n").apply()
 
 local Text = require("utils.text")
 local UIManager = require("ui/uimanager")
+local Context = require("xray.context")
 local _ = require("gettext")
 
 local Marks = {
@@ -17,6 +18,7 @@ local Marks = {
     _matches_key = nil,
     _marks = {},
     _render_key = nil,
+    _revision = 0,
 }
 
 --- 页内实体标记是否开启。
@@ -42,26 +44,14 @@ function Marks.setEnabled(on, ui)
     end
 end
 
----@param ui table
 ---@return table[]
-local function loadEntities(ui)
+local function loadEntities()
     local cur = require("ui.reader.session").current()
     local identity = cur and cur.identity
     if not identity then
         return {}
     end
-    return require("xray.store").loadEntities(identity)
-end
-
---- 实体集合的最新更新时间，作为缓存键的一部分（实体改了就重扫）。
----@param entities table[]|nil
----@return number
-local function entityStamp(entities)
-    local stamp = 0
-    for _, entity in ipairs(entities or {}) do
-        stamp = math.max(stamp, tonumber(entity.updated_at) or 0)
-    end
-    return stamp
+    return require("db.xray").list(identity.source_id, identity.stable_id)
 end
 
 ---@param ui table
@@ -77,22 +67,6 @@ local function screenSize(ui)
         return screen:getWidth(), screen:getHeight()
     end
     return nil, nil
-end
-
----@param ui table
----@return number
-local function currentPage(ui)
-    if ui and ui.getCurrentPage then
-        local ok, page = pcall(ui.getCurrentPage, ui)
-        if ok and page then return tonumber(page) or 0 end
-    end
-    if ui and ui.paging and ui.paging.getCurrentPage then
-        return tonumber(ui.paging:getCurrentPage()) or 0
-    end
-    if ui and ui.rolling and ui.rolling.getCurrentPage then
-        return tonumber(ui.rolling:getCurrentPage()) or 0
-    end
-    return 0
 end
 
 --- 滚动文档（CreDocument）与分页文档（PDF/DJVU）的 findAllText 签名不同。
@@ -126,25 +100,26 @@ local function buildMatches(ui, entities)
     local max_hits = 5000
     local names = {}
     local seen = {}
-    for _, entity in ipairs(entities or {}) do
+    for index, entity in ipairs(entities) do
         local candidates = { entity.name }
-        for _, alias in ipairs(entity.aliases or {}) do
+        for index, alias in ipairs(entity.aliases) do
             candidates[#candidates + 1] = alias
         end
-        for _, name in ipairs(candidates) do
+        for index, name in ipairs(candidates) do
             name = Text.trim(name)
-            if name ~= "" and not seen[name:lower()] then
-                seen[name:lower()] = true
+            local normalized = name:lower()
+            if name ~= "" and not seen[normalized] then
+                seen[normalized] = true
                 names[#names + 1] = { name = name, entity = entity }
             end
         end
     end
 
     local out = {}
-    for _, item in ipairs(names) do
+    for index, item in ipairs(names) do
         local matches = findMatches(document, is_reflow, item.name, max_hits)
         if matches then
-            for _, match in ipairs(matches) do
+            for index, match in ipairs(matches) do
                 out[#out + 1] = { entity = item.entity, match = match }
             end
         end
@@ -164,8 +139,16 @@ local function resolveMarks(ui, matches)
     local is_reflow = document.getScreenBoxesFromPositions ~= nil
     local width, height = screenSize(ui)
     local out = {}
+    local page = is_reflow and 0 or Context.currentPage()
 
-    for _, item in ipairs(matches) do
+    local function addMark(entity, box)
+        out[#out + 1] = {
+            entity = entity,
+            box = { x = box.x, y = box.y, w = box.w, h = box.h },
+        }
+    end
+
+    for index, item in ipairs(matches) do
         local match = item.match
         local entity = item.entity
         if is_reflow then
@@ -174,23 +157,19 @@ local function resolveMarks(ui, matches)
             if start_xp and end_xp then
                 local ok, boxes = pcall(document.getScreenBoxesFromPositions, document, start_xp, end_xp, true)
                 if ok and boxes then
-                    for _, box in ipairs(boxes) do
+                    for index, box in ipairs(boxes) do
                         if type(box) == "table" and box.x and box.y and box.w and box.h then
                             if (not height or (box.y >= 0 and box.y < height))
                                 and (not width or (box.x >= 0 and box.x < width)) then
-                                out[#out + 1] = {
-                                    entity = entity,
-                                    box = { x = box.x, y = box.y, w = box.w, h = box.h },
-                                }
+                                addMark(entity, box)
                             end
                         end
                     end
                 end
             end
         else
-            local page = currentPage(ui)
             if match and match.start and match.start == page and match.boxes and page > 0 then
-                for _, native in ipairs(match.boxes) do
+                for index, native in ipairs(match.boxes) do
                     local page_box = native
                     if document.nativeToPageRectTransform then
                         local ok, transformed = pcall(document.nativeToPageRectTransform, document, page, native)
@@ -202,16 +181,10 @@ local function resolveMarks(ui, matches)
                     if view and view.pageToScreenTransform then
                         local ok, screen_box = pcall(view.pageToScreenTransform, view, page, page_box)
                         if ok and screen_box then
-                            out[#out + 1] = {
-                                entity = entity,
-                                box = { x = screen_box.x, y = screen_box.y, w = screen_box.w, h = screen_box.h },
-                            }
+                            addMark(entity, screen_box)
                         end
                     else
-                        out[#out + 1] = {
-                            entity = entity,
-                            box = { x = page_box.x, y = page_box.y, w = page_box.w, h = page_box.h },
-                        }
+                        addMark(entity, page_box)
                     end
                 end
             end
@@ -220,18 +193,27 @@ local function resolveMarks(ui, matches)
     return out
 end
 
---- 全书扫描结果的缓存键：身份 + 章节 + 实体数量与最新时间戳。
----@param ui table 未使用，保持与 renderKey 同签名
+--- 清空命中与当前屏幕标记；旧扫描任务完成后会按缓存键自行作废。
+---@param self table
+local function resetMarks(self)
+    self._matches = {}
+    self._matches_key = nil
+    self._marks = {}
+    self._render_key = nil
+end
+
+--- 全书扫描结果的缓存键：身份 + 章节 + 实体数量 + 内存修订号。
+--- 实体写入路径会主动 invalidate，无须每次绘制都遍历更新时间戳。
 ---@param entities table[]
 ---@return string|nil 无阅读会话时 nil
-local function scanKey(ui, entities)
+local function scanKey(entities)
     local cur = require("ui.reader.session").current()
     if not cur or not cur.identity then
         return nil
     end
     return table.concat({
         cur.identity.source_id, cur.identity.stable_id,
-        tostring(cur.identity.chapter_idx or 0), tostring(#entities), tostring(entityStamp(entities)),
+        tostring(cur.identity.chapter_idx or 0), tostring(#entities), tostring(Marks._revision),
     }, "\0")
 end
 
@@ -240,7 +222,7 @@ end
 ---@param entities table[]
 ---@return string|nil 无阅读会话时 nil
 local function renderKey(ui, entities)
-    local key = scanKey(ui, entities)
+    local key = scanKey(entities)
     if not key then
         return nil
     end
@@ -253,7 +235,7 @@ local function renderKey(ui, entities)
     end
     return table.concat({
         key, tostring(w or 0), tostring(h or 0),
-        tostring(currentPage(ui)), pos,
+        tostring(Context.currentPage()), pos,
     }, "\0")
 end
 
@@ -271,10 +253,8 @@ end
 
 --- 丢弃扫描与渲染缓存并重绘阅读视图（实体增删改或开关变化后调用）。
 function Marks.invalidate()
-    Marks._matches = {}
-    Marks._matches_key = nil
-    Marks._marks = {}
-    Marks._render_key = nil
+    Marks._revision = Marks._revision + 1
+    resetMarks(Marks)
     if Marks.ui and Marks.ui.dialog then
         UIManager:setDirty(Marks.ui.dialog, "ui")
     end
@@ -299,7 +279,7 @@ function Marks:scheduleScan(key, entities)
     UIManager:nextTick(function()
         self._scan_pending = nil
         -- 期间换书/关书：这次结果作废
-        if self.ui ~= ui or not Marks.enabled() or scanKey(ui, entities) ~= key then
+        if self.ui ~= ui or not Marks.enabled() or scanKey(entities) ~= key then
             return
         end
         self._matches = buildMatches(ui, entities)
@@ -315,24 +295,18 @@ end
 --- 渲染键变了才重解析屏幕坐标。未开启或无阅读会话时清空标记。
 function Marks:rebuild()
     if not self.ui or not Marks.enabled() then
-        self._marks = {}
-        self._render_key = nil
+        resetMarks(self)
         return
     end
-    local entities = loadEntities(self.ui)
-    local matches_key = scanKey(self.ui, entities)
+    local entities = loadEntities()
+    local matches_key = scanKey(entities)
     if not matches_key then
-        self._matches = {}
-        self._matches_key = nil
-        self._marks = {}
-        self._render_key = nil
+        resetMarks(self)
         return
     end
     if matches_key ~= self._matches_key then
         -- 旧命中属于别的书/别的实体集合，画出来就是错位下划线
-        self._matches = {}
-        self._marks = {}
-        self._render_key = nil
+        resetMarks(self)
         self:scheduleScan(matches_key, entities)
         return
     end
@@ -360,12 +334,12 @@ end
 
 --- 作为 view module 被调用：先刷新标记框，再给每个命中画虚线下划线。
 ---@param bb any Blitbuffer
-function Marks:paintTo(bb, _x, _y)
+function Marks:paintTo(bb)
     if not Marks.enabled() then
         return
     end
     self:rebuild()
-    for _, mark in ipairs(self._marks) do
+    for index, mark in ipairs(self._marks) do
         paintDashedUnderscore(bb, mark.box)
     end
 end
@@ -380,7 +354,7 @@ function Marks:onTap(ges)
         return false
     end
     self:rebuild()
-    for _, mark in ipairs(self._marks) do
+    for index, mark in ipairs(self._marks) do
         if hitScreenBox(ges.pos, mark.box) then
             require("xray.ui").showEntity(mark.entity)
             return true

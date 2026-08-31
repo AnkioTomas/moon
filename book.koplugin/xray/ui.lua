@@ -10,16 +10,11 @@ local Popup = require("ui.components.popup")
 local UIManager = require("ui/uimanager")
 local Text = require("utils.text")
 local Kinds = require("xray.kinds")
+local XrayDB = require("db.xray")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
 local UI = {}
-
-local TABS = {
-    { "character", "人物", "person" },
-    { "location", "地点", "location_on" },
-    { "term", "专有名词", "label" },
-}
 
 --- 当前打开的 X-Ray 主菜单（生成成功后刷新列表）。
 ---@type table|nil
@@ -53,7 +48,6 @@ end
 ---@param entity table
 ---@return string[]
 local function entityLines(entity)
-    local payload = entity.payload or {}
     local lines = {}
     local kind_label = Kinds.label(entity.kind)
     if kind_label ~= "" then
@@ -62,14 +56,14 @@ local function entityLines(entity)
     if entity.aliases and #entity.aliases > 0 then
         lines[#lines + 1] = T(_("别名：%1"), table.concat(entity.aliases, "、"))
     end
-    if payload.role and payload.role ~= "" then
-        lines[#lines + 1] = T(_("身份：%1"), payload.role)
+    if entity.role and entity.role ~= "" then
+        lines[#lines + 1] = T(_("身份：%1"), entity.role)
     end
-    if payload.description and payload.description ~= "" then
+    if entity.description and entity.description ~= "" then
         if #lines > 0 then
             lines[#lines + 1] = ""
         end
-        for line in (payload.description .. "\n"):gmatch("([^\n]*)\n") do
+        for line in (entity.description .. "\n"):gmatch("([^\n]*)\n") do
             lines[#lines + 1] = line
         end
     end
@@ -106,30 +100,20 @@ local function ensureConfigured()
     return true
 end
 
---- 分栏副标题（即该实体类型的显示名）。
----@param tab_id string character / location / term
----@return string
-local function tabSubtitle(tab_id)
-    return Kinds.label(tab_id)
-end
-
 ---@param tab_id string
 ---@param identity BookIdentity
 ---@return table[]
 local function rowsForTab(tab_id, identity)
-    local Store = require("xray.store")
     local items = {}
-    for i, entity in ipairs(Store.loadEntities(identity, tab_id)) do
-        local subtitle = entity.payload and entity.payload.role or ""
-        if subtitle == "" and entity.payload then
-            subtitle = entity.payload.description or ""
-        end
+    for i, entity in ipairs(XrayDB.list(identity.source_id, identity.stable_id, tab_id)) do
+        local subtitle = entity.role or ""
+        if subtitle == "" then subtitle = entity.description or "" end
         items[#items + 1] = {
             text = entity.name,
             mandatory = Text.truncateUtf8(subtitle, 40),
             keep_menu_open = true,
             callback = function()
-                showInfoBox(entity.name, table.concat(entityLines(entity), "\n"))
+                UI.showEntity(entity)
             end,
         }
     end
@@ -152,7 +136,7 @@ local function refreshMainTab(holder, opts)
     end
     local items = rowsForTab(holder.active, holder.identity)
     Popup.setListItems(holder.menu, _("X-Ray"), items, nil, {
-        subtitle = tabSubtitle(holder.active),
+        subtitle = Kinds.label(holder.active),
         preserve_page = opts.preserve_page == true,
     })
     if holder.menu.setBottomTabActive then
@@ -181,9 +165,9 @@ local function runFetch(ui, identity, force)
             return
         end
         info(T(_("X-Ray 已更新：人物 %1，地点 %2，专有名词 %3"),
-            tostring(#(result.characters or {})),
-            tostring(#(result.locations or {})),
-            tostring(#(result.terms or {}))))
+            tostring(#result.characters),
+            tostring(#result.locations),
+            tostring(#result.terms)))
         require("xray.marks").invalidate()
         refreshMainTab(main_holder, { preserve_page = true })
     end
@@ -215,17 +199,12 @@ function UI.openMain(ui, initial_tab)
         refreshMainTab(holder)
     end
 
-    local tabs = {}
-    for i, tab in ipairs(TABS) do
-        tabs[#tabs + 1] = { id = tab[1], text = _(tab[2]), icon = tab[3] }
-    end
-
     holder.menu = Popup.list{
         title = _("X-Ray"),
         title_material_icon = "sync",
-        subtitle = tabSubtitle(initial_tab),
+        subtitle = Kinds.label(initial_tab),
         items = rowsForTab(initial_tab, identity),
-        bottom_tabs = { tabs = tabs, active = initial_tab, on_tab = switch },
+        bottom_tabs = { tabs = Kinds, active = initial_tab, on_tab = switch },
         on_left_tap = function()
             if not ensureConfigured() then return end
             require("ui/network/manager"):runWhenOnline(function()

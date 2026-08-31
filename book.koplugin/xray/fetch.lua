@@ -6,19 +6,25 @@ X-Ray 拉取：综合拉取 / 选词补全。
 
 local AI = require("ai")
 local Context = require("xray.context")
-local DbQueue = require("utils.db.queue")
 local Prompts = require("xray.prompts")
 local Store = require("xray.store")
+local XrayDB = require("db.xray")
 local Text = require("utils.text")
 
 local Fetch = {}
 
 local MIN_GROUND_LEN = 2
 
+local payload_sections = {
+    { kind = "character", key = "characters" },
+    { kind = "location", key = "locations" },
+    { kind = "term", key = "terms" },
+}
+
 ---@param ctx table
 ---@return string
 local function readingContext(ctx)
-    return table.concat({ ctx.current_page or "", ctx.prior_text or "" }, "\n\n")
+    return table.concat({ ctx.current_page, ctx.prior_text }, "\n\n")
 end
 
 ---@param needle string
@@ -41,7 +47,7 @@ local function isGrounded(row, context, hint)
     if appearsInText(row.name, context) then
         return true
     end
-    for _, alias in ipairs(row.aliases or {}) do
+    for index, alias in ipairs(row.aliases) do
         if appearsInText(alias, context) then
             return true
         end
@@ -54,7 +60,7 @@ end
 ---@return table[]
 local function filterGrounded(incoming, context)
     local out = {}
-    for _, row in ipairs(incoming or {}) do
+    for index, row in ipairs(incoming) do
         if isGrounded(row, context) then
             out[#out + 1] = row
         end
@@ -62,86 +68,40 @@ local function filterGrounded(incoming, context)
     return out
 end
 
---- 当前阅读进度百分比（1~100），页数或页码不可用时按 1 算。
----@param ui table|nil ReaderUI
----@param page integer|nil
----@return integer
-local function progressPercent(ui, page)
-    local document = ui and ui.document
-    local total = document and (document.getPageCount and document:getPageCount())
-    total = tonumber(total) or 0
-    page = tonumber(page) or 0
-    if total <= 0 or page <= 0 then return 1 end
-    return math.max(1, math.min(100, math.floor(page * 100 / total + 0.5)))
-end
-
 --- 取书名与作者（供提示词），缺失时为空串。
----@param identity BookIdentity|nil
+---@param identity BookIdentity
 ---@return string title, string author
 local function bookMeta(identity)
-    local book = identity and identity.book or {}
+    local book = identity.book or {}
     return Text.trim(book.title), Text.trim(book.authors or book.author)
 end
 
---- 把模型返回的人物项规范成实体行（去空白别名）；无名字返回 nil。
----@param item table|nil
+--- 把模型返回的实体规范成实体行；无名字返回 nil。
+---@param kind "character"|"location"|"term"
+---@param item table
 ---@return table|nil
-local function cleanCharacter(item)
-    local name = Text.trim(item and item.name)
+local function cleanEntity(kind, item)
+    local name = Text.trim(item.name)
     if name == "" then return nil end
     local aliases = {}
-    for _, alias in ipairs(type(item.aliases) == "table" and item.aliases or {}) do
-        alias = Text.trim(alias)
-        if alias ~= "" then aliases[#aliases + 1] = alias end
+    if kind ~= "location" then
+        for index, alias in ipairs(item.aliases) do
+            alias = Text.trim(alias)
+            if alias ~= "" then aliases[#aliases + 1] = alias end
+        end
     end
-    return {
-        kind = "character",
+    local entity = {
+        kind = kind,
         name = name,
         aliases = aliases,
-        payload = {
-            role = Text.trim(item.role),
-            description = Text.trim(item.description),
-            gender = Text.trim(item.gender),
-            occupation = Text.trim(item.occupation),
-        },
+        description = Text.trim(item.description),
     }
-end
-
---- 把模型返回的地点项规范成实体行（地点不带别名）；无名字返回 nil。
----@param item table|nil
----@return table|nil
-local function cleanLocation(item)
-    local name = Text.trim(item and item.name)
-    if name == "" then return nil end
-    return {
-        kind = "location",
-        name = name,
-        aliases = {},
-        payload = {
-            description = Text.trim(item.description),
-        },
-    }
-end
-
---- 把模型返回的术语项规范成实体行（去空白别名）；无名字返回 nil。
----@param item table|nil
----@return table|nil
-local function cleanTerm(item)
-    local name = Text.trim(item and item.name)
-    if name == "" then return nil end
-    local aliases = {}
-    for _, alias in ipairs(type(item.aliases) == "table" and item.aliases or {}) do
-        alias = Text.trim(alias)
-        if alias ~= "" then aliases[#aliases + 1] = alias end
+    if kind == "character" then
+        entity.role = Text.trim(item.role)
+        entity.gender = Text.trim(item.gender)
+        entity.occupation = Text.trim(item.occupation)
     end
-    return {
-        kind = "term",
-        name = name,
-        aliases = aliases,
-        payload = {
-            description = Text.trim(item.description),
-        },
-    }
+    return entity
 end
 
 --- 把综合拉取返回的 characters/locations/terms 三段规范化并合成一张实体列表。
@@ -149,43 +109,48 @@ end
 ---@return table[]
 local function cleanPayload(decoded)
     local incoming = {}
-    for _, item in ipairs(type(decoded.characters) == "table" and decoded.characters or {}) do
-        local row = cleanCharacter(item)
-        if row then incoming[#incoming + 1] = row end
-    end
-    for _, item in ipairs(type(decoded.locations) == "table" and decoded.locations or {}) do
-        local row = cleanLocation(item)
-        if row then incoming[#incoming + 1] = row end
-    end
-    for _, item in ipairs(type(decoded.terms) == "table" and decoded.terms or {}) do
-        local row = cleanTerm(item)
-        if row then incoming[#incoming + 1] = row end
+    for section_index, section in ipairs(payload_sections) do
+        for item_index, item in ipairs(decoded[section.key]) do
+            local row = cleanEntity(section.kind, item)
+            if row then incoming[#incoming + 1] = row end
+        end
     end
     return incoming
 end
 
---- 按三类实体读库，组成返回给调用方的结果表。
----@param identity BookIdentity
+--- 按三类实体组成返回给调用方的结果表。
+---@param entities table[]
 ---@return { characters: table[], locations: table[], terms: table[] }
-local function fetchResult(identity)
-    return {
-        characters = Store.loadEntities(identity, "character"),
-        locations = Store.loadEntities(identity, "location"),
-        terms = Store.loadEntities(identity, "term"),
+local function fetchResult(entities)
+    local result = { characters = {}, locations = {}, terms = {} }
+    local buckets = {
+        character = result.characters,
+        location = result.locations,
+        term = result.terms,
     }
+    for entity_index, entity in ipairs(entities) do
+        local bucket = buckets[entity.kind]
+        if bucket then
+            bucket[#bucket + 1] = entity
+        end
+    end
+    return result
+end
+
+---@param identity BookIdentity
+---@param incoming table[]
+local function mergeAndSave(identity, incoming)
+    local merged = Store.mergeEntities(XrayDB.list(identity.source_id, identity.stable_id), incoming)
+    assert(XrayDB.replace(identity.source_id, identity.stable_id, merged), "failed to save xray entities")
+    return merged
 end
 
 ---@param identity BookIdentity
 ---@param incoming table[]
 ---@param cb fun(result: table|nil, err: any)
 local function persist(identity, incoming, cb)
-    DbQueue.run(function()
-        local merged = Store.mergeEntities(Store.loadEntities(identity), incoming)
-        assert(Store.saveEntities(identity, merged), "failed to save xray entities")
-    end, {
-        on_done = function() cb(fetchResult(identity)) end,
-        on_failed = function(err) cb(nil, err) end,
-    })
+    local ok, result = pcall(mergeAndSave, identity, incoming)
+    if ok then cb(fetchResult(result)) else cb(nil, result) end
 end
 
 --- 综合拉取 X-Ray；已有数据且非 force 时直接回缓存。
@@ -200,8 +165,9 @@ function Fetch.comprehensive(ui, identity, opts, cb)
         cb(nil, "AI is not configured")
         return nil
     end
-    if not opts.force and #Store.loadEntities(identity) > 0 then
-        local result = fetchResult(identity)
+    local existing = XrayDB.list(identity.source_id, identity.stable_id)
+    if not opts.force and #existing > 0 then
+        local result = fetchResult(existing)
         result.cached = true
         cb(result)
         return nil
@@ -213,12 +179,13 @@ function Fetch.comprehensive(ui, identity, opts, cb)
         return nil
     end
     local title, author = bookMeta(identity)
-    local progress = progressPercent(ui, ctx.page)
-    local existing = Store.promptSnapshot(identity)
+    local session = require("ui.reader.session").current()
+    local progress = math.max(1, math.floor(session.percent + 0.5))
+    local existing_snapshot = Store.promptSnapshot(existing)
     local messages = {
         { role = "system", content = Prompts.system },
         { role = "user", content = Prompts.comprehensive(
-            title, author, progress, ctx.current_page, ctx.prior_text, existing) },
+            title, author, progress, ctx.current_page, ctx.prior_text, existing_snapshot) },
     }
     return AI.jsonExtract(messages, { max_tokens = 8000, timeout = 180 }, function(decoded, err)
         if not decoded then cb(nil, err); return end
@@ -243,13 +210,15 @@ function Fetch.lookupWord(ui, identity, word, cb)
         cb(nil, "AI is not configured")
         return nil
     end
-    for _, entity in ipairs(Store.loadEntities(identity)) do
-        if Text.trim(entity.name):lower() == word:lower() then
+    local entities = XrayDB.list(identity.source_id, identity.stable_id)
+    local normalized_word = word:lower()
+    for index, entity in ipairs(entities) do
+        if Text.trim(entity.name):lower() == normalized_word then
             cb(entity)
             return nil
         end
-        for _, alias in ipairs(entity.aliases or {}) do
-            if Text.trim(alias):lower() == word:lower() then
+        for index, alias in ipairs(entity.aliases) do
+            if Text.trim(alias):lower() == normalized_word then
                 cb(entity)
                 return nil
             end
@@ -258,7 +227,7 @@ function Fetch.lookupWord(ui, identity, word, cb)
 
     local ctx = Context.forAnalysis(ui)
     local title, author = bookMeta(identity)
-    local existing = Store.promptSnapshot(identity)
+    local existing = Store.promptSnapshot(entities)
     local messages = {
         { role = "system", content = Prompts.system },
         { role = "user", content = Prompts.singleWord(
@@ -270,14 +239,14 @@ function Fetch.lookupWord(ui, identity, word, cb)
             cb(nil, Text.trim(decoded.error_message) ~= "" and decoded.error_message or "not an entity")
             return
         end
-        local item = decoded.item or {}
+        local item = decoded.item
         local row
         if decoded.type == "location" then
-            row = cleanLocation(item)
+            row = cleanEntity("location", item)
         elseif decoded.type == "term" then
-            row = cleanTerm(item)
+            row = cleanEntity("term", item)
         else
-            row = cleanCharacter(item)
+            row = cleanEntity("character", item)
         end
         if not row then
             cb(nil, "invalid entity")
@@ -288,13 +257,8 @@ function Fetch.lookupWord(ui, identity, word, cb)
             cb(nil, "name not found in text")
             return
         end
-        DbQueue.run(function()
-            local merged = Store.mergeEntities(Store.loadEntities(identity), { row })
-            assert(Store.saveEntities(identity, merged), "failed to save lookup entity")
-        end, {
-            on_done = function() cb(row) end,
-            on_failed = function(save_err) cb(nil, save_err) end,
-        })
+        local ok, save_err = pcall(mergeAndSave, identity, { row })
+        if ok then cb(row) else cb(nil, save_err) end
     end)
 end
 
