@@ -86,6 +86,7 @@ end
 ---@field id number|nil 本地 reading_stats 行 id（push 时由调用方带入，供 synced_ids 回报）
 ---@field source_id string 源标识
 ---@field stable_id string 源内书籍身份
+---@field record_type string 记录类型：page/day/book
 ---@field page number 结束页
 ---@field start_time number 会话开始时间戳（秒）
 ---@field duration number 阅读时长（秒）
