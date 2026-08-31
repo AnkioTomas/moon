@@ -188,6 +188,21 @@ function UI.muted()
     return Blitbuffer.COLOR_GRAY_3 -- 0x33，深灰接近黑
 end
 
+--- 创建统一的弱化文字控件。
+---@param text string
+---@param width number
+---@param size number|nil
+---@return table
+function UI.mutedText(text, width, size)
+    local TextWidget = require("ui/widget/textwidget")
+    return TextWidget:new{
+        text = text,
+        face = UI.face("xx_smallinfofont", size or 14),
+        max_width = width,
+        fgcolor = UI.muted(),
+    }
+end
+
 --- 更淡的弱化色。
 ---@return any
 function UI.dim()
