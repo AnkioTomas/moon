@@ -44,8 +44,7 @@ local UI = require("ui.components.bookui")
 local Paths = require("utils.paths")
 local Request = require("http.request")
 local JSON = require("json")
-local Task = require("utils.task")
-local ffiUtil = require("ffi/util")
+local Job = require("workers.job")
 
 local Image = {}
 
@@ -268,13 +267,12 @@ local function decodeAsync(path, w, h, alpha, cb)
     local cancelled = false
     Paths.ensureCacheRoot()
     local tmp = decodeTmpPath()
-    local job = Task.run(function(_, write_fd)
+    local job = Job.run(function()
         local RenderImage = require("ui/renderimage")
         local Blitbuffer = require("ffi/blitbuffer")
         local bb = RenderImage:renderImageFile(path, false, w, h)
         if not bb then
-            ffiUtil.writeToFD(write_fd, "", true)
-            return
+            return nil
         end
         local header = JSON.encode({
             w = tonumber(bb.w),
@@ -289,12 +287,11 @@ local function decodeAsync(path, w, h, alpha, cb)
             f:write(header, "\n", pixels)
             f:close()
         end
-        ffiUtil.writeToFD(write_fd, tmp, true)
+        return tmp
     end, {
-        pipe = true,
-        on_done = function(raw)
+        on_done = function(result)
             if not cancelled then
-                cb(unmarshal(readDecodedFile(raw), alpha))
+                cb(result and unmarshal(readDecodedFile(result), alpha) or nil)
             end
         end,
         on_failed = function()
