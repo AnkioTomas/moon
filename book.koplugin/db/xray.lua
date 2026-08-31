@@ -28,12 +28,11 @@ CREATE INDEX IF NOT EXISTS idx_xray_entities_book
 end
 
 local function joinAliases(aliases)
-    return table.concat(aliases or {}, "、")
+    return table.concat(aliases, "、")
 end
 
 local function splitAliases(encoded)
     local aliases = {}
-    encoded = encoded or ""
     local start = 1
     while true do
         local first, last = string.find(encoded, "、", start, true)
@@ -112,30 +111,6 @@ function XrayDB.list(source_id, stable_id, kind)
     return out
 end
 
---- 删除一本书的全部 X-Ray 实体。
----@param source_id string
----@param stable_id string
----@return boolean
-function XrayDB.clear(source_id, stable_id)
-    return Base.exec([[
-        DELETE FROM xray_entities
-        WHERE source_id=? AND stable_id=?;
-    ]], source_id, stable_id) ~= nil
-end
-
---- 删除指定实体。
----@param source_id string
----@param stable_id string
----@param kind string
----@param name string
----@return boolean
-function XrayDB.delete(source_id, stable_id, kind, name)
-    return Base.exec([[
-        DELETE FROM xray_entities
-        WHERE source_id=? AND stable_id=? AND kind=? AND name=?;
-    ]], source_id, stable_id, kind, name) ~= nil
-end
-
 --- 原子替换一本书的全部 X-Ray 实体。
 ---@param source_id string
 ---@param stable_id string
@@ -150,7 +125,7 @@ function XrayDB.replace(source_id, stable_id, entities, updated_at)
     ) ~= nil
     if ok then
         local stamp = tonumber(updated_at) or os.time()
-        for _, entity in ipairs(entities) do
+        for index, entity in ipairs(entities) do
             if not XrayDB.upsert(source_id, stable_id, entity, stamp) then
                 ok = false
                 break
