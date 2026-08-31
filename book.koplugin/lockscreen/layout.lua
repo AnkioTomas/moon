@@ -7,15 +7,19 @@
 --]]
 
 local Device = require("device")
+local _ = require("gettext")
 
 local M = {}
 
 -- 位置值只在这里维护，设置页和编排层共享同一份白名单。
 local POSITIONS = {
-    ["top-left"] = true, ["top-center"] = true, ["top-right"] = true,
-    ["center-left"] = true, ["center-center"] = true, ["center-right"] = true,
-    ["bottom-left"] = true, ["bottom-center"] = true, ["bottom-right"] = true,
+    { id = "top-left", label = _("左上") }, { id = "top-center", label = _("上中") }, { id = "top-right", label = _("右上") },
+    { id = "center-left", label = _("左中") }, { id = "center-center", label = _("居中") }, { id = "center-right", label = _("右中") },
+    { id = "bottom-left", label = _("左下") }, { id = "bottom-center", label = _("下中") }, { id = "bottom-right", label = _("右下") },
 }
+
+local POSITION_BY_ID = {}
+for _, position in ipairs(POSITIONS) do POSITION_BY_ID[position.id] = position end
 
 --- 返回竖屏宽高；锁屏图片始终按竖屏尺寸生成。
 ---@return number, number
@@ -27,17 +31,26 @@ function M.portraitSize()
     return w, h
 end
 
---- 返回本地日期，作为每日背景和组合图的基础缓存键。
----@return string YYYY-MM-DD
-function M.dayKey()
-    return os.date("%Y-%m-%d")
-end
-
 --- 判断位置是否属于九宫格九个合法值。
 ---@param position string|nil
 ---@return boolean
 function M.validPosition(position)
-    return POSITIONS[position] == true
+    return POSITION_BY_ID[position] ~= nil
+end
+
+---@return {text: string, value: string}[]
+function M.options()
+    local options = {}
+    for _, position in ipairs(POSITIONS) do
+        options[#options + 1] = { text = position.label, value = position.id }
+    end
+    return options
+end
+
+---@param position string|nil
+---@return string
+function M.label(position)
+    return (POSITION_BY_ID[position] or POSITION_BY_ID["center-center"]).label
 end
 
 --- 将位置字符串拆成垂直和水平两个方向；非法部分回到居中。
@@ -94,7 +107,6 @@ function M.panel(opts)
         text_x = x + pad,
         text_w = panel_w - pad * 2,
         radius = math.max(8, math.floor(w * 0.02)),
-        wide = wide,
     }
 end
 
