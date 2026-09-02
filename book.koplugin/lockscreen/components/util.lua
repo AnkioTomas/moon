@@ -10,7 +10,6 @@
 local _ = require("gettext")
 local T = require("ffi/util").template
 local Blitbuffer = require("ffi/blitbuffer")
-local Text = require("utils.text")
 
 local U = {}
 
@@ -18,7 +17,6 @@ local U = {}
 U.MUTED = Blitbuffer.COLOR_GRAY_3
 U.DIM = Blitbuffer.COLOR_GRAY_4
 U.RULE = Blitbuffer.COLOR_GRAY_5
-U.SURFACE = Blitbuffer.COLOR_GRAY_E
 U.FALLBACK_MESSAGE = "读书不觉已春深，一寸光阴一寸金。"
 
 --- 取所在自然日 00:00:00 的时间戳（本地时区）。
@@ -61,13 +59,6 @@ function U.dayBuckets(rows, start_ts, end_ts)
     return buckets
 end
 
---- 去掉中英文常见章节前缀，让卡片标题保留真正的章节名。
----@param title string|nil
----@return string
-function U.cleanChapterTitle(title)
-    return Text.cleanChapterTitle(title)
-end
-
 --- 将秒数格式化为适合锁屏宽度的分钟/小时文案。
 ---@param seconds number|nil
 ---@return string
@@ -77,15 +68,11 @@ function U.duration(seconds)
         or T(_("%1 分钟"), minutes)
 end
 
---- 返回清洗后的章节名；没有章节名时显示章节序号或“阅读中”。
+--- 返回章节名；没有章节名时显示章节序号或“阅读中”。
 ---@param book table
 ---@return string
 function U.chapterLine(book)
     if book.chapter_title and book.chapter_title ~= "" then
-        local cleaned = U.cleanChapterTitle(book.chapter_title)
-        if cleaned ~= "" then
-            return cleaned
-        end
         return book.chapter_title
     end
     if book.chapter_count and book.chapter_count > 0 then

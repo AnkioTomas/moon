@@ -15,99 +15,71 @@ local COMPOSE_PATH = Paths.screensaverDir() .. "/compose.png"
 
 -- 组合图是可丢弃的派生文件；源资源和设置变化都会使它失效。
 
---- 取用户选中的主体；已删除或未知 ID 回退到「当前阅读」。
+--- 解析一次当前组合计划；计划内的字段在本轮生成期间保持一致。
 ---@return table
-local function selectedComponent()
-    local id = MoonSettings.get().lock_screen_component
-    return Components.find(id) or Components.find("current")
-end
-
---- 读取并校验用户选择的背景模式。
----@return string
-function M.backgroundMode()
-    local mode = MoonSettings.get().lock_screen_background or "bing"
-    return Background.validMode(mode) and mode or "bing"
-end
-
---- 读取并校验主体 ID；已删除或未知主体统一回退到当前阅读。
----@return string
-function M.componentId()
-    return selectedComponent().id
-end
-
---- 返回当前主体实际使用的资源描述。
----@return table
-function M.asset()
-    local component = selectedComponent()
-    if component.asset then return component.asset end
-    if component.uses_background == false then return Background.background("none") end
-    return Background.background(M.backgroundMode())
-end
-
---- 返回系统锁屏最终应读取的文件；direct 资源绕过组合图。
----@return string
-function M.outputPath()
-    local asset = M.asset()
-    if asset.direct then
-        return Background.resolve(asset)
+function M.plan()
+    local settings = MoonSettings.get()
+    local id = settings.lock_screen_component
+    -- current 在注册表里必存在；assert 收窄 table|nil，注册表坏了直接炸。
+    local component = assert(Components.find(id) or Components.find("current"))
+    local background_mode = settings.lock_screen_background or "bing"
+    if not Background.validMode(background_mode) then background_mode = "bing" end
+    local asset = component.asset
+        or (component.uses_background == false and Background.background("none")
+            or Background.background(background_mode))
+    local position = settings.lock_screen_position or "center-center"
+    if component.supports_position == false or not Layout.validPosition(position) then
+        position = "center-center"
     end
-    return COMPOSE_PATH
-end
-
---- 读取九宫格位置，保证布局层只接收合法值。
----@return string
-function M.position()
-    if selectedComponent().supports_position == false then
-        return "center-center"
-    end
-    local position = MoonSettings.get().lock_screen_position or "center-center"
-    return Layout.validPosition(position) and position or "center-center"
-end
-
---- 根据主体能力决定是否允许窄屏布局。
----@return boolean
-function M.wide()
-    if selectedComponent().supports_narrow == false then
-        return true
-    end
-    return MoonSettings.get().lock_screen_wide ~= false
+    local wide = component.supports_narrow ~= false and settings.lock_screen_wide ~= false
+    local source_path = Background.resolve(asset)
+    return {
+        component = component,
+        background_mode = background_mode,
+        asset = asset,
+        position = position,
+        wide = wide,
+        supports_narrow = component.supports_narrow == true,
+        offline = asset.network ~= true and component.needs_network ~= true,
+        source_path = source_path,
+        output_path = asset.direct and source_path or COMPOSE_PATH,
+    }
 end
 
 --- 生成组合图缓存键。
 ---
 --- 键包含日期、布局、主体和动态资源身份；当前书籍封面即使在同一天
 --- 更换，也必须触发重新合成。
+---@param plan table
 ---@return string
-function M.dayKey()
-    local component = selectedComponent()
-    local id = component.id
-    local asset = M.asset()
+function M.dayKey(plan)
+    local component = plan.component
+    local asset = plan.asset
     local parts = {
-        Layout.dayKey(),
+        Background.dayKey(),
         asset.id,
-        id,
-        M.position(),
-        M.wide() and "wide" or "narrow",
-        Background.resolve(asset) or "",
+        component.id,
+        plan.position,
+        plan.wide and "wide" or "narrow",
+        plan.source_path or "",
     }
-    if component and component.cache_key then
+    if component.cache_key then
         parts[#parts + 1] = tostring(component.cache_key())
     end
     return table.concat(parts, ":")
 end
 
 --- 判断已有组合图是否仍可直接交给 KOReader 使用。
+---@param plan table
 ---@param force boolean|nil
 ---@return boolean
-function M.cacheValid(force)
+function M.cacheValid(plan, force)
     if force then
         return false
     end
-    local asset = M.asset()
-    local path = M.outputPath()
-    return MoonSettings.get().lock_screen_day == M.dayKey()
-        and Background.isFresh(asset)
-        and Background.isValidImage(path)
+    return MoonSettings.get().lock_screen_day == M.dayKey(plan)
+        and Background.isFresh(plan.asset)
+        and (plan.asset.direct or Background.isValidImage(plan.output_path))
 end
 
 --- 将主体声明的相对高度换算为像素高度。
@@ -150,9 +122,10 @@ end
 --- 并行准备资源和异步文案，二者都完成后才写入组合图。
 ---
 --- 返回值是可取消任务；本地背景和同步主体会直接在本次调用中完成。
+---@param plan table
 ---@param cb fun(ok: boolean, err: any, output_path: string|nil)
 ---@return table|nil
-function M.build(cb)
+function M.build(plan, cb)
     local cancelled = false
     local finished = false
     local asset_job
@@ -175,62 +148,54 @@ function M.build(cb)
         cb(ok, err, output_path)
     end
 
-    local component = selectedComponent()
-    local position = M.position()
-    local wide = M.wide()
-    local asset = M.asset()
-    local asset_error
-    local asset_path, hitokoto_data
-    local has_text = type(component.ensureText) == "function"
-    local pending = has_text and 2 or 1
+    local component = plan.component
+    local asset_error, asset_path, text_data
+    local asset_ready = false
+    -- direct 资源不经 compose.png，拉取文案纯属无效工作。
+    local text_ready = plan.asset.direct or type(component.ensureText) ~= "function"
 
-    --- 资源与文案都就绪（pending 归零）后合成并写盘；未就绪时直接返回。
-    --- 背景解码失败会让该资源失效，下次重新取。
     local function renderWhenReady()
-        if cancelled or finished or pending > 0 then
-            return
-        end
+        if cancelled or finished or not asset_ready then return end
         if asset_error then
             finish(false, asset_error)
             return
         end
-        -- direct 资源本身就是完整锁屏图，不需要再经过 compose.png。
-        if asset.direct then
+        if plan.asset.direct then
             finish(true, nil, asset_path)
             return
         end
+        if not text_ready then return end
         Paths.ensureScreensaverDir()
-        local blocks = buildBlocks(component, position, wide, hitokoto_data)
+        local blocks = buildBlocks(component, plan.position, plan.wide, text_data)
         local Render = require("lockscreen.render")
         local ok, err = Render.write(COMPOSE_PATH, asset_path, blocks)
         if not ok and asset_path and tostring(err):find("cannot decode background", 1, true) then
-            Background.invalidate(asset)
+            Background.invalidate(plan.asset)
         end
         finish(ok, err, nil)
     end
 
-    --- 背景资源就绪回调：记下路径/错误，扣一个待办后尝试合成。
+    --- 背景资源就绪后，直接检查是否已具备生成条件。
     ---@param path string|nil 背景图本地路径
     ---@param err any
     local function onAsset(path, err)
         if cancelled then return end
         asset_error = err
         asset_path = path
-        pending = pending - 1
+        asset_ready = true
         renderWhenReady()
     end
-    asset_job = Background.ensure(asset, onAsset)
+    asset_job = Background.ensure(plan.asset, onAsset)
 
-    if has_text then
+    if finished then return nil end
+    if not text_ready then
         text_job = component.ensureText(function(text, source)
             if cancelled then return end
-            hitokoto_data = { text = text, source = source }
-            pending = pending - 1
+            text_data = { text = text, source = source }
+            text_ready = true
             renderWhenReady()
         end)
     end
-    renderWhenReady()
-
     return finished and nil or job
 end
 

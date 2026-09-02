@@ -76,17 +76,13 @@ local function paintBackground(bb, path, w, h)
     elseif source and source.free then
         source:free()
     end
-    if not ok then
-        return false, err
-    end
-    return true
+    return ok, err
 end
 
---- 将文本块绘制到离屏缓冲，并返回实际排版高度。
+--- 将文本块绘制到离屏缓冲。
 ---@param bb userdata 目标 Blitbuffer
 ---@param block table 文本块描述
 ---@param w number 输出宽度
----@return number 实际文本高度
 local function paintText(bb, block, w)
     local x = block.x or math.floor(w * 0.08)
     local width = block.width or (w - x * 2)
@@ -106,7 +102,6 @@ local function paintText(bb, block, w)
     end
     widget:paintTo(bb, x, block.y or 0)
     widget:free()
-    return size.h
 end
 
 --- 绘制圆角矩形；radius 为 0/nil 时退化为直角。

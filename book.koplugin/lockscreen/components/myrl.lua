@@ -9,21 +9,14 @@ local Background = require("lockscreen.background")
 local Layout = require("lockscreen.layout")
 local Paths = require("utils.paths")
 
---- 摸鱼日报缓存图片路径。
----@return string
-local function path()
-    return Paths.screensaverDir() .. "/myrl.png"
-end
-
 return {
     id = "myrl",
     label = _("摸鱼日报"),
     supports_position = false,
     uses_background = false,
-    live = true,
     asset = Background.daily{
         id = "myrl",
-        path = path,
+        path = function() return Paths.screensaverDir() .. "/myrl.png" end,
         direct = true,
         request = function()
             local w, h = Layout.portraitSize()

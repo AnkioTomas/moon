@@ -18,7 +18,6 @@ local M = {
     id = "stats",
     label = _("阅读统计"),
     supports_narrow = false,
-    live = true,
     -- 柱图占屏高 30%，卡片整体需要更高的定位预算。
     preferred_height = 0.72,
 }
@@ -67,7 +66,7 @@ function M.blocks(rect)
     })
     local progress, progress_h = BookInfo.progressRow(inner_w, pct)
 
-    local _screen_w, screen_h = Layout.portraitSize()
+    local screen_h = select(2, Layout.portraitSize())
     local chart_h = math.max(96, math.floor(screen_h * 0.30))
     local chart_label_h = 24
     local meta_row_h = 36
@@ -114,11 +113,11 @@ function M.blocks(rect)
             radius = rect.radius, shadow = 2, color = Blitbuffer.COLOR_WHITE,
         },
         {
-            kind = "widget", role = "hero",
+            kind = "widget",
             widget = hero, x = rect.x, y = hero_y, width = rect.w, height = hero_h,
         },
         {
-            kind = "widget", role = "progress",
+            kind = "widget",
             widget = progress, x = inner_x, y = progress_y, width = inner_w, height = progress_h,
         },
         {

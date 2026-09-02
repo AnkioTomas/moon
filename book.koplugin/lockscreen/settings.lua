@@ -42,11 +42,7 @@ function M.applyCover(path)
     -- 快照必须在任何写入之前：下面两条早退路径也会改 screensaver_show_message，
     -- 不先记就等于改了用户配置又没留还原的依据。
     snapshot()
-    if type(path) ~= "string" or path == "" then
-        G_reader_settings:saveSetting("screensaver_show_message", true)
-        return
-    end
-    local attr = lfs.attributes(path)
+    local attr = type(path) == "string" and path ~= "" and lfs.attributes(path)
     if not attr or attr.mode ~= "file" or (attr.size or 0) == 0 then
         G_reader_settings:saveSetting("screensaver_show_message", true)
         return
@@ -73,7 +69,6 @@ function M.clearCover()
             end
         end
         G_reader_settings:delSetting(PREVIOUS_KEY)
-        return
     end
     -- 没有快照说明本插件还没接管过（或历史版本已经改过、原值无从得知）：
     -- 什么都不写。这里曾无条件 disable，把用户自己设的锁屏方式也一起关掉。

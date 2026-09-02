@@ -15,7 +15,6 @@ local M = {
     id = "hitokoto",
     label = _("一言"),
     needs_network = true,
-    refresh_on_resume = true,
     layout = "quote",
 }
 
