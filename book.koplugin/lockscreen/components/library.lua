@@ -31,15 +31,14 @@ end
 ---@param source_id string 行内缺 source_id 时的兜底
 ---@return table
 function M.shelfBook(book, source_id)
-    local sid = book.source_id or source_id
     local stable_id = book.stable_id
     return {
-        source_id = sid,
+        source_id = source_id,
         stable_id = stable_id,
         title = book.title or stable_id or "",
         authors = book.authors or "",
         percent = tonumber(book.percent) or 0,
-        cover = M.coverPath(stable_id, sid),
+        cover = M.coverPath(stable_id, source_id),
     }
 end
 
