@@ -24,7 +24,7 @@ end
 do
     Assert.eq(
         Cache.key("get", "https://x/index/book/list", { page = 2, search = "三体" }),
-        "GET https://x/index/book/list?page=2&search=三体"
+        "GET https://x/index/book/list?page=2&search=%E4%B8%89%E4%BD%93"
     )
     Assert.eq(
         Cache.key("GET", "https://x/index/book/list?junk=1", { page = 1 }),
@@ -34,6 +34,14 @@ do
         Cache.key("GET", "https://x/index/book/filters"),
         "GET https://x/index/book/filters"
     )
+end
+
+-- 缓存键必须无歧义：单个值里的 &/= 不能与多个参数碰撞。
+do
+    local embedded = Cache.key("GET", "https://x/list", { a = "1&b=2" })
+    local split = Cache.key("GET", "https://x/list", { a = 1, b = 2 })
+    Assert.is_true(embedded ~= split)
+    Assert.eq(embedded, "GET https://x/list?a=1%26b%3D2")
 end
 
 -- 不同查询 → 不同键

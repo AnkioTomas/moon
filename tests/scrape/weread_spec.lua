@@ -396,6 +396,24 @@ do
     Assert.eq(results[1].tags[4], "冒险")
 end
 
+-- ── 数字 bookId 归一为字符串；评分标签去空白且不重复 ────
+do
+    local body = [[{"books":[{"bookInfo":{
+        "title":"类型归一","category":"文学","bookId":123,
+        "newRatingDetail":{"title":" 文学 "}
+    }}]}]]
+    fake.res, fake.err = { code = 200, body = body }, nil
+    local results
+    Weread.searchAsync("x", nil, function(res)
+        results = res
+    end)
+    Assert.len(results, 1)
+    Assert.eq(results[1].bookId, "123")
+    Assert.eq(results[1].url, "https://weread.qq.com/web/reader/123")
+    Assert.len(results[1].tags, 1)
+    Assert.eq(results[1].tags[1], "文学")
+end
+
 -- ── count 参数钳制：默认 10，<=0 回默认，>20 封顶 20 ──
 do
     fake.res, fake.err = { code = 200, body = '{"books":[]}' }, nil

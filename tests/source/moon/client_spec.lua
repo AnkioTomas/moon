@@ -3,6 +3,7 @@
 local Assert = require("support.assert")
 
 local response
+local cache_keys = {}
 package.preload["http.request"] = function()
     return {
         request = function(_req, cb)
@@ -14,7 +15,10 @@ package.preload["http.request"] = function()
 end
 package.preload["http.cache"] = function()
     return {
-        key = function() return nil end,
+        key = function(...)
+            cache_keys[#cache_keys + 1] = { ... }
+            return "cache-" .. #cache_keys
+        end,
         getAsync = function(_k, cb) cb(nil) end,
         set = function() end,
     }
@@ -86,3 +90,15 @@ Assert.matches(err4, "令牌")
 local d5, err5 = post(nil, "timeout")
 Assert.is_nil(d5)
 Assert.eq(err5, "timeout")
+
+-- GET 缓存必须按令牌隔离，但缓存键中不能落明文令牌。
+response = { res = { code = 200, body = "{}" } }
+client:_jsonAsync("GET", "/api/private", { cache_ttl = 60 }, function() end)
+client.token = "another-token"
+client:_jsonAsync("GET", "/api/private", { cache_ttl = 60 }, function() end)
+Assert.eq(#cache_keys, 2)
+Assert.not_nil(cache_keys[1][4])
+Assert.not_nil(cache_keys[2][4])
+Assert.is_true(cache_keys[1][4] ~= cache_keys[2][4])
+Assert.is_true(cache_keys[1][4] ~= "t")
+Assert.is_true(cache_keys[2][4] ~= "another-token")

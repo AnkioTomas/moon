@@ -45,3 +45,15 @@ do
     Assert.eq(h["User-Agent"], "DL/9")
     Assert.eq(h["Connection"], "keep-alive")
 end
+
+-- HTTP 头大小写不敏感；不同大小写覆盖时不能留下两个冲突字段。
+do
+    local h = Header.forRequest({
+        ["user-agent"] = "LowerUA/1",
+        ["accept"] = "application/json",
+    })
+    Assert.eq(h["user-agent"], "LowerUA/1")
+    Assert.eq(h["accept"], "application/json")
+    Assert.is_nil(h["User-Agent"])
+    Assert.is_nil(h["Accept"])
+end

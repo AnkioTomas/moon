@@ -184,6 +184,28 @@ do
     Assert.is_nil(by_id["1000001"])
 end
 
+-- ── HTML 实体必须在展示和落库前解码 ────────────────────
+do
+    fake.res, fake.err = {
+        code = 200,
+        body = [[
+<div class="result"><div class="content"><h3>
+<a href="https://book.douban.com/subject/1234567/">活着&amp;死去</a>
+</h3><span class="subject-cast">余&amp;华 / 作家出版社 / 2012</span>
+<img src="https://img.example/cover.jpg?a=1&amp;b=2">
+<p>生存&amp;死亡</p></div></div>]],
+    }, nil
+    local results
+    Douban.searchAsync("活着&死去", function(res)
+        results = res
+    end)
+    Assert.len(results, 1)
+    Assert.eq(results[1].title, "活着&死去")
+    Assert.eq(results[1].author, "余&华")
+    Assert.eq(results[1].cover_url, "https://img.example/cover.jpg?a=1&b=2")
+    Assert.eq(results[1].intro, "生存&死亡")
+end
+
 -- ── 结果截断到前 10 条 ─────────────────────────────────
 do
     local blocks = {}

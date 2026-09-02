@@ -68,6 +68,72 @@ do
     Assert.is_nil(Request.header({ headers = {} }, "X-Missing"))
     Assert.is_nil(Request.header({}, "X-Missing")) -- 无 headers 字段
     Assert.is_nil(Request.header(nil, "X-Missing")) -- 无 res
+    Assert.eq(
+        Request.header({ headers = { ["CoNtEnT-TyPe"] = "mixed" } }, "content-type"),
+        "mixed"
+    )
+end
+
+-- ── GET / POST 参数透传 ──────────────────────────────────
+do
+    local original = Request.request
+    local captured = {}
+    Request.request = function(opts, cb)
+        captured[#captured + 1] = opts
+        cb({ code = 200, body = "" })
+        return { cancel = function() end }
+    end
+    Request.get("https://example.test/get", { allow_redirects = true }, function() end)
+    Request.post("https://example.test/post", "x", { allow_redirects = true }, function() end)
+    Request.request = original
+    Assert.is_true(captured[1].allow_redirects)
+    Assert.is_true(captured[2].allow_redirects)
+end
+
+-- ── download 原子落位 ────────────────────────────────────
+do
+    local original_request = Request.request
+    local original_write = Request.writeResponseToFile
+    local real_rename = os.rename
+    local real_remove = os.remove
+    local write_dest
+    local renamed
+    local removed
+
+    Request.request = function(_, cb)
+        cb({ code = 200, body = "payload" })
+        return { cancel = function() end }
+    end
+    Request.writeResponseToFile = function(_, dest, _, cb)
+        write_dest = dest
+        cb(true)
+        return { cancel = function() end }
+    end
+    os.rename = function(from, to)
+        renamed = { from, to }
+        return true
+    end
+    os.remove = function(path)
+        removed = path
+        return true
+    end
+
+    local ok_d, err_d
+    Request.download({ url = "https://example.test/file" }, "/tmp/download.bin", function(ok, err)
+        ok_d, err_d = ok, err
+    end)
+
+    Request.request = original_request
+    Request.writeResponseToFile = original_write
+    os.rename = real_rename
+    os.remove = real_remove
+
+    Assert.eq(write_dest, "/tmp/download.bin.part")
+    Assert.eq(renamed[1], "/tmp/download.bin.part")
+    Assert.eq(renamed[2], "/tmp/download.bin")
+    Assert.is_nil(removed)
+    Assert.is_true(ok_d)
+    Assert.is_nil(err_d)
 end
 
 -- ── writeResponseToFile ──────────────────────────────────
