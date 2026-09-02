@@ -27,6 +27,11 @@ local MAX_CANDI = 21 -- 候选栏约 3 页，多了也翻不到
 local SCHEMA_VERSION = "2"
 local QUICK_DIRECT_MAX = 6
 local QUICK_ABBREV_MAX = 5
+local SQL_QUICK = "SELECT words.word FROM quick JOIN words ON words.rowid = quick.word_id"
+    .. " WHERE quick.mode = ? AND quick.code = ? ORDER BY quick.rank LIMIT " .. MAX_CANDI
+local SQL_EXACT = "SELECT word FROM words WHERE code = ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
+local SQL_DIRECT = "SELECT word FROM words WHERE code GLOB ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
+local SQL_ABBREV = "SELECT word FROM words WHERE initials GLOB ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
 
 -- 拼音音节表（无声调，ü=v），用于把连写输入切为词库的空格分隔形式。
 local SYLLABLES = {
@@ -91,6 +96,33 @@ end
 local _conn -- lua-ljsqlite3 连接；false = 已判定不可用
 local _meta -- meta 缓存
 local _statements -- 高频查询的预编译语句，跟连接同生命周期
+
+--- 跑一条候选查询，最多取 MAX_CANDI 条；预编译语句按 name 缓存复用。
+---@param conn table
+---@param name string 语句缓存键
+---@param sql string
+---@param ... any 绑定参数（按序 bind1）
+---@return string[]
+local function fetch(conn, name, sql, ...)
+    local stmt = _statements[name]
+    if not stmt then
+        stmt = conn:prepare(sql)
+        _statements[name] = stmt
+    end
+    stmt:clearbind():reset()
+    for i = 1, select("#", ...) do
+        stmt:bind1(i, select(i, ...))
+    end
+    local rows = {}
+    for row in stmt:rows() do
+        rows[#rows + 1] = row[1]
+        if #rows >= MAX_CANDI then break end
+    end
+    -- rows() 只有迭代到 SQLITE_DONE 才会自动 reset；LIMIT 恰好命中时循环
+    -- 会提前结束，下一次查询必须显式清理游标和绑定值。
+    stmt:clearbind():reset()
+    return rows
+end
 
 -- 只尝试打开一次；失败缓存为不可用，直到 reset 后重试。
 local function ensureOpen()
@@ -276,59 +308,26 @@ function M.lookup(code)
         return {}
     end
 
-    --- 跑一条候选查询，最多取 MAX_CANDI 条；预编译语句按 name 缓存复用。
-    ---@param name string 语句缓存键
-    ---@param sql string
-    ---@param ... any 绑定参数（按序 bind1）
-    ---@return string[]
-    local function fetch(name, sql, ...)
-        local stmt = _statements[name]
-        if not stmt then
-            stmt = conn:prepare(sql)
-            _statements[name] = stmt
-        end
-        stmt:clearbind():reset()
-        for i = 1, select("#", ...) do
-            stmt:bind1(i, select(i, ...))
-        end
-        local rows = {}
-        for row in stmt:rows() do
-            rows[#rows + 1] = row[1]
-            if #rows >= MAX_CANDI then
-                break
-            end
-        end
-        -- rows() 只有迭代到 SQLITE_DONE 才会自动 reset；LIMIT 恰好命中时循环
-        -- 会提前结束，下一次查询必须显式清理游标和绑定值。
-        stmt:clearbind():reset()
-        return rows
-    end
-
-    local sql_quick = "SELECT words.word FROM quick JOIN words ON words.rowid = quick.word_id"
-        .. " WHERE quick.mode = ? AND quick.code = ? ORDER BY quick.rank LIMIT " .. MAX_CANDI
-    local sql_exact = "SELECT word FROM words WHERE code = ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
-    local sql_direct = "SELECT word FROM words WHERE code GLOB ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
-    local sql_abbrev = "SELECT word FROM words WHERE initials GLOB ? ORDER BY weight DESC LIMIT " .. MAX_CANDI
     local out = {}
     local ok = pcall(function()
         if kind == "exact" then
-            out = fetch("exact", sql_exact, code)
+            out = fetch(conn, "exact", SQL_EXACT, code)
             return
         end
 
         local quick_mode = kind == "direct" and "direct" or "abbrev"
         local quick_limit = kind == "direct" and QUICK_DIRECT_MAX or QUICK_ABBREV_MAX
         if #code <= quick_limit then
-            out = fetch("quick", sql_quick, quick_mode, code)
+            out = fetch(conn, "quick", SQL_QUICK, quick_mode, code)
             if #out > 0 then
                 return
             end
         end
 
         if kind == "direct" then
-            out = fetch("direct", sql_direct, code .. "*")
+            out = fetch(conn, "direct", SQL_DIRECT, code .. "*")
         else
-            out = fetch("abbrev", sql_abbrev, abbrevCode(code) .. "*")
+            out = fetch(conn, "abbrev", SQL_ABBREV, abbrevCode(code) .. "*")
         end
     end)
     if not ok then

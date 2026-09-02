@@ -31,6 +31,7 @@ end
 local function ensureLayouts()
     if G_reader_settings:readSetting(PREVIOUS_LAYOUTS_KEY) == nil then
         local layouts = G_reader_settings:readSetting("keyboard_layouts", {})
+        ---@cast layouts string[]
         G_reader_settings:saveSetting(PREVIOUS_LAYOUTS_KEY, copyLayouts(layouts))
     end
     G_reader_settings:saveSetting("keyboard_layouts", { "en", "zh_CN" })
