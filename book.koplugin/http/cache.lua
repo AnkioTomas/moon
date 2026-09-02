@@ -1,11 +1,11 @@
 --[[--
 HTTP 响应缓存（键 = METHOD + path + 规范化参数，TTL 秒）。
 
-持久化在 utils.db.http（JSON 文本 + expires）。
+持久化在 db.http（JSON 文本 + expires）。
 只存成功响应；调用方传入 ttl>0 才写入。
 写操作后应 Request.clearCache() 或 Cache.clear() 失效。
 
-读/写均经 Task 子进程碰库（主进程禁止 SQLite）。
+读写均在当前线程同步访问 SQLite。
 
 @module koplugin.book.http.cache
 --]]
@@ -13,29 +13,18 @@ HTTP 响应缓存（键 = METHOD + path + 规范化参数，TTL 秒）。
 local JSON = require("json")
 local logger = require("logger")
 local UIManager = require("ui/uimanager")
-local DbQueue = require("utils.db.queue")
+local Text = require("utils.text")
 
 local Cache = {}
 
---- 查询表 → 稳定 query string（键排序；不做 URL escape，仅作缓存键）
+--- 查询表 → 稳定且无歧义的 query string。
 ---@param query table|nil
 ---@return string 无前导 `?`；空表返回 ""
 function Cache.queryString(query)
     if type(query) ~= "table" or not next(query) then
         return ""
     end
-    local keys = {}
-    for k in pairs(query) do
-        keys[#keys + 1] = k
-    end
-    table.sort(keys, function(a, b)
-        return tostring(a) < tostring(b)
-    end)
-    local parts = {}
-    for _, k in ipairs(keys) do
-        parts[#parts + 1] = tostring(k) .. "=" .. tostring(query[k])
-    end
-    return table.concat(parts, "&")
+    return Text.formEncode(query)
 end
 
 --- 缓存键：`GET https://host/path?a=1&b=2`
@@ -43,19 +32,27 @@ end
 ---@param method string|nil 默认 GET
 ---@param url string path 或完整 URL（可含/不含 query）
 ---@param query table|nil 查询参数
+---@param scope string|nil 认证用户等额外隔离维度；不得传入明文凭据
 ---@return string
-function Cache.key(method, url, query)
+function Cache.key(method, url, query, scope)
     method = string.upper(tostring(method or "GET"))
     url = tostring(url or "")
     local qs = Cache.queryString(query)
+    local key
     if qs ~= "" then
         local path = url:match("^([^?]*)") or url
-        return method .. " " .. path .. "?" .. qs
+        key = method .. " " .. path .. "?" .. qs
+    else
+        key = method .. " " .. url
     end
-    return method .. " " .. url
+    if scope ~= nil then
+        local value = tostring(scope)
+        key = key .. " @" .. #value .. ":" .. value
+    end
+    return key
 end
 
---- 异步读取缓存；过期或 JSON 损坏则删行并 cb(nil)
+--- 读取缓存；过期由 db.http.get 淘汰，JSON 损坏则删行并 cb(nil)
 ---@param key string
 ---@param cb fun(value: any|nil)
 ---@return { cancel: fun() }
@@ -73,23 +70,16 @@ function Cache.getAsync(key, cb)
         if cancelled then
             return
         end
-        local HttpDB = require("utils.db.http")
-        local value_json, expires = HttpDB.get(key)
-        if value_json and (expires or 0) > os.time() then
+        local HttpDB = require("db.http")
+        local value_json = HttpDB.get(key)
+        if value_json then
             local ok, value = pcall(JSON.decode, value_json)
             if ok then
                 cb(value)
                 return
             end
-            -- JSON 损坏，删除（写操作走队列）
-            DbQueue.run(function()
-                HttpDB.delete(key)
-            end)
-        elseif value_json then
-            -- 过期，删除（写操作走队列）
-            DbQueue.run(function()
-                HttpDB.delete(key)
-            end)
+            -- JSON 损坏，删除
+            HttpDB.delete(key)
         end
         cb(nil)
     end)
@@ -101,7 +91,7 @@ function Cache.getAsync(key, cb)
     }
 end
 
---- 写入缓存；ttl<=0 或 value 无法 JSON 编码则跳过（子进程落库，不堵 UI）
+--- 写入缓存；ttl<=0 或 value 无法 JSON 编码则跳过。
 ---@param key string
 ---@param value any
 ---@param ttl number 存活秒数
@@ -117,28 +107,22 @@ function Cache.set(key, value, ttl)
         return
     end
     local expires = os.time() + ttl
-    DbQueue.run(function()
-        local HttpDB = require("utils.db.http")
-        HttpDB.set(key, encoded, expires)
-    end, {
-        on_failed = function(err)
-            logger.warn("book.http cache set failed", key, err)
-        end,
-    })
+    local HttpDB = require("db.http")
+    local stored, err = HttpDB.set(key, encoded, expires)
+    if not stored then
+        logger.warn("book.http cache set failed", key, err)
+    end
 end
 
---- 清空全部缓存；传 url_substr 则只失效 key 含该子串的条目（子进程执行）
+--- 清空全部缓存；传 url_substr 则只失效 key 含该子串的条目。
 ---@param url_substr string|nil
 ---@return nil
 function Cache.clear(url_substr)
-    DbQueue.run(function()
-        local HttpDB = require("utils.db.http")
-        HttpDB.clear(url_substr)
-    end, {
-        on_failed = function(err)
-            logger.warn("book.http cache clear failed", url_substr, err)
-        end,
-    })
+    local HttpDB = require("db.http")
+    local ok, err = HttpDB.clear(url_substr)
+    if not ok then
+        logger.warn("book.http cache clear failed", url_substr, err)
+    end
 end
 
 return Cache

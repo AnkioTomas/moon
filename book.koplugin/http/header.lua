@@ -21,15 +21,21 @@ local Header = {}
 ---@return table
 function Header.merge(extra, defaults)
     local headers = {}
+    local names = {}
     if type(defaults) == "table" then
         for k, v in pairs(defaults) do
             headers[k] = v
+            if type(k) == "string" then names[k:lower()] = k end
         end
     end
     if type(extra) == "table" then
         for k, v in pairs(extra) do
             if v ~= nil then
+                local lower = type(k) == "string" and k:lower()
+                local previous = lower and names[lower]
+                if previous and previous ~= k then headers[previous] = nil end
                 headers[k] = v
+                if lower then names[lower] = k end
             end
         end
     end
