@@ -6,26 +6,34 @@ lockscreen 封面海报：电影海报墙错排。
 
 local Assert = require("support.assert")
 
-package.preload["utils.settings"] = function()
+package.preload["lockscreen.components.library"] = function()
     return {
-        activeSourceId = function() return "local" end,
-        get = function()
-            return { active_source = "local" }
+        activeSourceId = function() return "moon" end,
+        shelfBook = function(row, source_id)
+            return {
+                source_id = source_id,
+                stable_id = row.stable_id,
+                title = row.title,
+                percent = row.percent,
+            }
         end,
     }
 end
 
 local db_rows = {}
+local db_sources = {}
 package.preload["db.book"] = function()
     return {
-        recentBySource = function(_, limit)
+        recentBySource = function(source_id, limit)
+            db_sources[#db_sources + 1] = source_id
             local rows = {}
             for i = 1, math.min(limit, #db_rows) do
                 rows[i] = db_rows[i]
             end
             return rows
         end,
-        listBySource = function()
+        listBySource = function(source_id)
+            db_sources[#db_sources + 1] = source_id
             return db_rows, #db_rows
         end,
     }
@@ -39,6 +47,7 @@ package.preload["ui.components.bookinfo"] = function()
             return {
                 paintTo = function() end,
                 free = function() end,
+                stable_id = book.stable_id,
                 cw = cw,
                 ch = ch,
             }, cw, ch
@@ -77,6 +86,21 @@ cover_calls = 0
 local wall = widgetBlocks(Poster.blocks({ x = 0, y = 0, w = 540, h = 720 }))
 Assert.eq(#wall, 5)
 Assert.eq(cover_calls, 5)
+Assert.eq(db_sources[1], "moon")
+
+local expected = {
+    { 6, -96, 128, 192 },
+    { 6, 104, 128, 192 },
+    { 6, 304, 128, 192 },
+    { 138, 0, 128, 192 },
+    { 138, 200, 128, 192 },
+}
+for i, slot in ipairs(expected) do
+    Assert.eq(wall[i].x, slot[1])
+    Assert.eq(wall[i].y, slot[2])
+    Assert.eq(wall[i].width, slot[3])
+    Assert.eq(wall[i].height, slot[4])
+end
 
 local odd_x = wall[1].x
 local even_x
