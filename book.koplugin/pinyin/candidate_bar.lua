@@ -8,7 +8,7 @@ local Bar = {}
 
 local Strip = require("pinyin.strip")
 local util = require("util")
-local SimpleJob = require("workers.simple_job")
+local SimpleJob = require("workers/simple_job")
 
 local ZH_MODULE = "ui/data/keyboardlayouts/zh_CN_keyboard"
 local SLOT_COUNT = Strip.SLOT_COUNT
@@ -274,7 +274,7 @@ end
 
 -- ── VirtualKeyboard 拦截 ─────────────────────────────
 
-local orig_init, orig_addKeys, orig_addChar, orig_delChar
+local orig_init, orig_addKeys, orig_addChar, orig_delChar, orig_onCloseWidget
 
 -- 连打只查最后一次；查询和候选行重绘都在 UIManager 调度里跑，不在按键路径。
 local LOOKUP_WAIT = 0.15
@@ -434,6 +434,16 @@ local function wrappedDelChar(self)
     return orig_delChar(self)
 end
 
+--- 键盘关闭时取消尚未触发或尚未完成的查询；保留当前 Strip 引用，
+--- 因为 KOReader 隐藏后可能复用同一个键盘实例。
+local function wrappedOnCloseWidget(self, ...)
+    if self == _keyboard then
+        clearCode()
+        refresh()
+    end
+    return orig_onCloseWidget(self, ...)
+end
+
 --- 安装 VirtualKeyboard 钩子；重复安装不重复包装方法。
 ---@param opts { enabled: fun(): boolean }
 function Bar.install(opts)
@@ -446,10 +456,12 @@ function Bar.install(opts)
     orig_addKeys = VK.addKeys
     orig_addChar = VK.addChar
     orig_delChar = VK.delChar
+    orig_onCloseWidget = VK.onCloseWidget
     VK.init = wrappedInit
     VK.addKeys = wrappedAddKeys
     VK.addChar = wrappedAddChar
     VK.delChar = wrappedDelChar
+    if orig_onCloseWidget then VK.onCloseWidget = wrappedOnCloseWidget end
     _hooked = true
 end
 

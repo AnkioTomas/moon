@@ -165,21 +165,35 @@ local function assemble(manifest, dir, dest)
         local out = assert(io.open(out_tmp, "wb"))
         local total = 0
         local sha256 = require("ffi/sha2").sha256
+        local full_hash = sha256()
         for _, part in ipairs(manifest.parts) do
             local f = assert(io.open(dir .. "/" .. part.file, "rb"))
-            local data = f:read("*a")
-            f:close()
-            if part.sha256 and sha256(data) ~= part.sha256 then
+            local part_hash = sha256()
+            while true do
+                local data, read_err = f:read(256 * 1024)
+                if not data then
+                    assert(not read_err, read_err)
+                    break
+                end
+                part_hash(data)
+                full_hash(data)
+                assert(out:write(data))
+                total = total + #data
+            end
+            assert(f:close())
+            if part_hash() ~= part.sha256:lower() then
                 -- 只丢掉坏片，保留其它已完成分片供下次续传。
+                out:close()
                 os.remove(dir .. "/" .. part.file)
                 error("part sha256 mismatch: " .. part.file)
             end
-            assert(out:write(data))
-            total = total + #data
         end
-        out:close()
-        if manifest.raw_size and total ~= tonumber(manifest.raw_size) then
+        assert(out:close())
+        if total ~= tonumber(manifest.raw_size) then
             error(string.format("size mismatch: got %d, want %d", total, manifest.raw_size))
+        end
+        if full_hash() ~= manifest.raw_sha256:lower() then
+            error("dictionary sha256 mismatch")
         end
         assert(os.rename(out_tmp, dest))
     end)
@@ -240,7 +254,7 @@ function M.ensure(cb, on_progress)
         end
         local attr = lfs.attributes(dest)
         local settings = MoonSettings.get()
-        if attr and attr.mode == "file" and (attr.size or 0) > 0
+        if attr and attr.mode == "file" and attr.size == tonumber(manifest.raw_size)
             and settings.pinyin_dict_built_at == manifest.built_at then
             done(true)
             return
