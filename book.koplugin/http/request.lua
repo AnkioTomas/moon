@@ -197,7 +197,7 @@ function Request.header(res, name)
     if type(headers.get) == "function" then
         return headers:get(name, true) or headers:get(name)
     end
-    return headers[name] or headers[name:lower()]
+    return getHeader(headers, name)
 end
 
 ------------------------------------------------------------------------
@@ -349,6 +349,7 @@ function Request.get(url, opts, cb)
         headers = Header.forRequest(opts.headers, opts.accept),
         timeout = opts.timeout or opts.block_timeout or 30,
         connect_timeout = opts.connect_timeout or 10,
+        allow_redirects = opts.allow_redirects,
         auth_username = opts.user or opts.auth_username,
         auth_password = opts.password or opts.auth_password,
     }, function(res, err)
@@ -357,7 +358,8 @@ function Request.get(url, opts, cb)
         elseif not Request.ok(res and res.code) then
             cb(nil, T(_("HTTP %1"), tostring(res and res.code)), res)
         else
-            cb(res.body or "", nil, res)
+            local response = assert(res)
+            cb(response.body or "", nil, response)
         end
     end)
 end
@@ -384,6 +386,7 @@ function Request.post(url, body, opts, cb)
         headers = headers,
         timeout = opts.timeout or opts.block_timeout or 30,
         connect_timeout = opts.connect_timeout or 10,
+        allow_redirects = opts.allow_redirects,
         auth_username = opts.user or opts.auth_username,
         auth_password = opts.password or opts.auth_password,
     }, function(res, err)
@@ -392,7 +395,8 @@ function Request.post(url, body, opts, cb)
         elseif not Request.ok(res and res.code) then
             cb(nil, T(_("HTTP %1"), tostring(res and res.code)), res)
         else
-            cb(res.body or "", nil, res)
+            local response = assert(res)
+            cb(response.body or "", nil, response)
         end
     end)
 end
@@ -423,7 +427,8 @@ function Request.stream(opts, handlers)
             return
         end
         state.done = true
-        input_timeouts = input_timeouts - 1
+        state.client = nil
+        input_timeouts = math.max(0, input_timeouts - 1)
         if input_timeouts == 0 then
             UIManager:resetInputTimeout()
         end
@@ -473,14 +478,30 @@ function Request.stream(opts, handlers)
             return
         end
 
-        local turbo = require("turbo")
+        local ok, turbo = pcall(require, "turbo")
+        if not ok then
+            finish(turbo)
+            return
+        end
         turbo.log.categories.success = false
         turbo.log.categories.warning = false
-        patchTurboSsl()
+        local patched, patch_err = pcall(patchTurboSsl)
+        if not patched then
+            finish(patch_err)
+            return
+        end
 
-        local httputil = require("turbo.httputil")
-        local buffer = require("turbo.structs.buffer")
-        local client = turbo.async.HTTPClient({ verify_ca = false })
+        local got_httputil, httputil = pcall(require, "turbo.httputil")
+        local got_buffer, buffer = pcall(require, "turbo.structs.buffer")
+        if not got_httputil or not got_buffer then
+            finish(got_httputil and buffer or httputil)
+            return
+        end
+        local made, client = pcall(turbo.async.HTTPClient, { verify_ca = false })
+        if not made then
+            finish(client)
+            return
+        end
         state.client = client
 
         local HTTPClient = getmetatable(client)
@@ -488,6 +509,11 @@ function Request.stream(opts, handlers)
         local orig_chunked = HTTPClient._chunked_data
         local orig_body = HTTPClient._handle_body
         local orig_finalize = HTTPClient._finalize_request
+        if type(orig_chunked) ~= "function" or type(orig_body) ~= "function"
+                or type(orig_finalize) ~= "function" then
+            finish("unsupported Turbo HTTPClient")
+            return
+        end
 
         client._chunked_data = function(self, data)
             if data and data:len() > 2 then
@@ -575,7 +601,7 @@ function Request.stream(opts, handlers)
             end, self)
         end
 
-        local res = coroutine.yield(client:fetch(opts.url, {
+        local fetched, future = pcall(client.fetch, client, opts.url, {
             method = opts.method or "GET",
             body = opts.body,
             request_timeout = opts.timeout or 180,
@@ -587,7 +613,12 @@ function Request.stream(opts, handlers)
             on_headers = function(headers)
                 addHeaders(headers, opts.headers)
             end,
-        }))
+        })
+        if not fetched then
+            finish(future)
+            return
+        end
+        local res = coroutine.yield(future)
 
         -- finalize 通常已调 finish；兜底：yield 返回但未 finalize 时仍收口
         if not state.done then
@@ -702,6 +733,7 @@ function Request.download(opts, dest, cb)
     local state = { cancelled = false }
     local request_job
     local write_job
+    local tmp = dest .. ".part"
 
     request_job = Request.request(opts, function(res, err)
         if state.cancelled then
@@ -715,12 +747,21 @@ function Request.download(opts, dest, cb)
             cb(false, "HTTP " .. tostring(res and res.code), res)
             return
         end
-        write_job = Request.writeResponseToFile(res, dest, {
+        write_job = Request.writeResponseToFile(res, tmp, {
             on_progress = opts and opts.on_progress,
         }, function(ok, write_err)
-            if not state.cancelled then
-                cb(ok, write_err, res)
+            if state.cancelled then return end
+            if not ok then
+                cb(false, write_err, res)
+                return
             end
+            local moved, rename_err = os.rename(tmp, dest)
+            if not moved then
+                pcall(os.remove, tmp)
+                cb(false, rename_err or "rename failed", res)
+                return
+            end
+            cb(true, nil, res)
         end)
     end)
 
