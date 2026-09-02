@@ -32,3 +32,35 @@ do
     Assert.is_true(done_err == "cancelled" or done_err == "turbo looper unavailable")
     Request.ensureTurbo = orig
 end
+
+-- looper 可用但 Turbo 初始化失败：必须 on_done 收口，不能让输入超时引用泄漏。
+do
+    local UIManager = require("ui/uimanager")
+    local orig = Request.ensureTurbo
+    local resets = 0
+    Request.ensureTurbo = function() return true end
+    UIManager.setInputTimeout = function() end
+    UIManager.resetInputTimeout = function() resets = resets + 1 end
+    UIManager.looper = {
+        add_callback = function(_, fn)
+            local co = coroutine.create(fn)
+            local ok, err = coroutine.resume(co)
+            if not ok then error(err) end
+        end,
+    }
+    package.loaded["turbo"] = nil
+    package.preload["turbo"] = function()
+        error("turbo load failed")
+    end
+
+    local done_err
+    Request.stream({ url = "https://example.test/" }, {
+        on_done = function(err) done_err = err end,
+    })
+
+    Request.ensureTurbo = orig
+    package.preload["turbo"] = nil
+    package.loaded["turbo"] = nil
+    Assert.matches(tostring(done_err), "turbo load failed")
+    Assert.eq(resets, 1)
+end

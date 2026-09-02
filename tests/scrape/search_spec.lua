@@ -76,6 +76,18 @@ local function recorder()
     end
 end
 
+-- ── 空关键词由协调器直接拒绝，不触发任何源 ─────────────
+do
+    resetFakes()
+    local rec, cb = recorder()
+    local job = Search.searchAsync("  ", cb)
+    Assert.is_nil(job)
+    Assert.eq(rec.n, 1)
+    Assert.eq(rec.err, "搜索关键词为空")
+    Assert.eq(DoubanFake.calls, 0)
+    Assert.eq(WereadFake.calls, 0)
+end
+
 -- ── 豆瓣成功：直接回调，不回落 weread ──────────────────
 do
     resetFakes()
