@@ -31,11 +31,6 @@ package.preload["json"] = function()
         end,
     }
 end
-package.preload["lockscreen.components.util"] = function()
-    return {
-        cleanChapterTitle = function(t) return t end,
-    }
-end
 package.preload["l10n"] = function()
     return { apply = function() end }
 end

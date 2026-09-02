@@ -12,6 +12,11 @@ end
 package.preload["ffi/blitbuffer"] = function()
     return {}
 end
+package.preload["ui/widget/textwidget"] = function()
+    return {
+        new = function(_, opts) return opts end,
+    }
+end
 package.preload["utils.settings"] = function()
     return {
         get = function() return settings end,
@@ -27,5 +32,10 @@ Assert.eq(UI.setGridMaxCols(1), 3)
 Assert.eq(settings.grid_max_cols, 3)
 Assert.eq(UI.setGridMaxCols(99), 8)
 Assert.eq(settings.grid_max_cols, 8)
+
+local muted = UI.mutedText("label", 120, 12)
+Assert.eq(muted.text, "label")
+Assert.eq(muted.max_width, 120)
+Assert.not_nil(muted.face)
 
 return true

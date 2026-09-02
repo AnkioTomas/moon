@@ -254,6 +254,21 @@ package.preload["utils.timing"] = function()
     }
 end
 
+-- startLookup 使用 SimpleJob；集成用例同步执行任务体，专注验证真实键盘包装。
+package.preload["workers.simple_job"] = function()
+    return {
+        run = function(fn, opts)
+            local ok, result = pcall(fn)
+            if ok then
+                if opts.on_done then opts.on_done(result) end
+            elseif opts.on_failed then
+                opts.on_failed(result)
+            end
+            return { cancel = function() end }
+        end,
+    }
+end
+
 -- ── 假输入框：真 wrapInputBox 要包的全套方法 ─────────
 
 local function fakeInputBox()

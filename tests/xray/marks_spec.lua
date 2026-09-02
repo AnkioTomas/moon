@@ -12,7 +12,7 @@ end
 package.preload["ui.reader.session"] = function()
     return {
         current = function()
-            return { identity = { source_id = "moon", stable_id = "book", chapter_idx = 0 } }
+            return { page = 3, identity = { source_id = "moon", stable_id = "book", chapter_idx = 0 } }
         end,
     }
 end
@@ -27,10 +27,10 @@ end
 local entity = { kind = "character", name = "John Doe", aliases = { "John" } }
 
 -- 滚动文档（CreDocument）：findAllText 给 xpointer，getScreenBoxesFromPositions 给屏幕框。
-package.preload["xray.store"] = function()
-    return { loadEntities = function() return { entity } end }
+package.preload["db.xray"] = function()
+    return { list = function() return { entity } end }
 end
-package.loaded["xray.store"] = nil
+package.loaded["db.xray"] = nil
 package.loaded["xray.ui"] = nil
 
 Marks.ui = {
@@ -38,12 +38,12 @@ Marks.ui = {
     dialog = {},
     view = { dimen = { w = 100, h = 50 } },
     document = {
-        findAllText = function(_, pattern)
+        findAllText = function(document, pattern)
             if pattern == "John Doe" then return { { start = "xp0", ["end"] = "xp1" } } end
             if pattern == "John" then return { { start = "xp2", ["end"] = "xp3" } } end
             return {}
         end,
-        getScreenBoxesFromPositions = function(_, start_xp, end_xp)
+        getScreenBoxesFromPositions = function(document, start_xp, end_xp)
             if start_xp == "xp0" then return { { x = 0, y = 0, w = 80, h = 20 } } end
             if start_xp == "xp2" then return { { x = 90, y = 0, w = 40, h = 20 } } end
             return {}
@@ -64,6 +64,7 @@ Assert.eq(Marks._marks[1].box.x, 0)
 Marks.invalidate()
 Assert.len(Marks._matches, 0)
 Assert.len(Marks._marks, 0)
+Assert.eq(Marks._revision, 1)
 
 -- 分页文档（PDF/DJVU）：findAllText 给页码 + boxes，nativeToPageRectTransform 转页面坐标。
 package.loaded["xray.marks"] = nil
@@ -73,27 +74,27 @@ Marks.ui = {
     dialog = {},
     view = {
         dimen = { w = 100, h = 50 },
-        pageToScreenTransform = function(_, page, box)
+        pageToScreenTransform = function(view, page, box)
             return { x = box.x * 2, y = box.y * 2, w = box.w * 2, h = box.h * 2 }
         end,
     },
     document = {
-        findAllText = function(_, pattern, ci, ctx, max)
+        findAllText = function(document, pattern, case_insensitive, context, max_hits)
             return { {
                 start = 3,
                 boxes = { { x = 10, y = 5, w = 40, h = 20 } },
             } }
         end,
-        nativeToPageRectTransform = function(_, page, box)
+        nativeToPageRectTransform = function(document, page, box)
             return { x = box.x, y = box.y, w = box.w, h = box.h }
         end,
     },
 }
 Marks.view = Marks.ui.view
-package.preload["xray.store"] = function()
-    return { loadEntities = function() return { { kind = "term", name = "Whitby", aliases = {} } } end }
+package.preload["db.xray"] = function()
+    return { list = function() return { { kind = "term", name = "Whitby", aliases = {} } } end }
 end
-package.loaded["xray.store"] = nil
+package.loaded["db.xray"] = nil
 Marks._matches_key = nil
 Marks._render_key = nil
 Marks:rebuild()

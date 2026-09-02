@@ -38,8 +38,15 @@ stub("http.request", { ensureTurbo = function() end })
 stub("translate.init", { install = function() calls.translate = (calls.translate or 0) + 1 end })
 stub("baike.init", { install = function() calls.baike = (calls.baike or 0) + 1 end })
 stub("ui.panel.native", { install = function() calls.panel = (calls.panel or 0) + 1 end })
-stub("lockscreen.init", { bootstrap = function() calls.lockscreen = (calls.lockscreen or 0) + 1 end })
-stub("remote.init", { bootstrap = function() calls.remote = (calls.remote or 0) + 1 end })
+stub("lockscreen.init", {
+    bootstrap = function() calls.lockscreen = (calls.lockscreen or 0) + 1 end,
+    refresh = function(_, force) calls.lock_refresh = force end,
+})
+stub("ui.reader.session", { onSuspend = function() calls.session_suspend = true end })
+stub("remote.init", {
+    bootstrap = function() calls.remote = (calls.remote or 0) + 1 end,
+    onSuspend = function() calls.remote_suspend = true end,
+})
 stub("ui.screenshot_share", { install = function() calls.screenshot_share = (calls.screenshot_share or 0) + 1 end })
 stub("pinyin.init", { bootstrap = function() calls.pinyin = (calls.pinyin or 0) + 1 end })
 stub("patch.manager", { init = function() calls.patch = (calls.patch or 0) + 1 end })
@@ -55,3 +62,8 @@ Assert.eq(calls.screenshot_share, 1)
 saved.footnote_link_in_popup = false
 plugin:init()
 Assert.is_false(saved.footnote_link_in_popup, "用户关闭后不得在后续启动时重新打开")
+
+plugin:onSuspend()
+Assert.is_true(calls.session_suspend)
+Assert.is_true(calls.lock_refresh)
+Assert.is_true(calls.remote_suspend)

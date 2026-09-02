@@ -59,6 +59,16 @@ local ok_run, err_run = pcall(function()
     Assert.is_nil(saved.screensaver_document_cover, "原本没有的键要删掉")
     Assert.is_true(saved.screensaver_show_message)
 
+    -- 显式 false 不是“缺失”：恢复后必须保留 false
+    local false_file = assert(io.open(cover_path, "wb"))
+    false_file:write("cover")
+    false_file:close()
+    saved.screensaver_show_message = false
+    Settings.applyCover(cover_path)
+    Settings.clearCover()
+    Assert.is_false(saved.screensaver_show_message)
+    os.remove(cover_path)
+
     -- 没接管过（无快照）时 clearCover 不许乱动用户配置
     saved.screensaver_type = "random_image"
     Settings.clearCover()

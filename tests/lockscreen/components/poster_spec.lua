@@ -8,6 +8,7 @@ local Assert = require("support.assert")
 
 package.preload["utils.settings"] = function()
     return {
+        activeSourceId = function() return "local" end,
         get = function()
             return { active_source = "local" }
         end,
