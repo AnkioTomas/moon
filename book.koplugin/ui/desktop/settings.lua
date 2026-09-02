@@ -18,7 +18,7 @@ local Pager = require("ui.components.pager")
 local SettingRow = require("ui.components.settingrow")
 local MoonSettings = require("utils.settings")
 local MoonFont = require("utils.font")
-local LockScreen = require("lockscreen.init")
+local LockSettings = require("lockscreen.settings")
 local Remote = require("remote.init")
 local RemoteUI = require("remote.ui")
 local SourceRegistry = require("source.registry")
@@ -152,8 +152,8 @@ function Settings.build(desktop)
             function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "wallpaper", title = _("锁屏"),
-                    status = LockScreen.isCompose() and _("开") or _("关"),
-                    status_on = LockScreen.isCompose(),
+                    status = LockSettings.isCompose() and _("开") or _("关"),
+                    status_on = LockSettings.isCompose(),
                     callback = function() gotoSub(desktop, "lockscreen") end,
                 })
             end,
