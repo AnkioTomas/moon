@@ -12,8 +12,7 @@ local InfoMessage = require("ui/widget/infomessage")
 local Results = require("scrape.results")
 local Search = require("scrape.search")
 local Image = require("ui.components.image")
-local BookDB = require("utils.db.book")
-local DbQueue = require("utils.db.queue")
+local BookDB = require("db.book")
 local Paths = require("utils.paths")
 local Text = require("utils.text")
 local SourceCapabilities = require("types.book_source").SourceCapabilities
@@ -32,19 +31,29 @@ local function copyFile(from, to)
     if not src then
         return false
     end
-    local data = src:read("*a")
-    src:close()
     local tmp = to .. ".part"
+    pcall(os.remove, tmp)
     local dst = io.open(tmp, "wb")
     if not dst then
+        src:close()
         return false
     end
-    dst:write(data)
-    dst:close()
-    os.remove(to)
-    if os.rename(tmp, to) then
-        return true
+
+    local ok = true
+    while true do
+        local chunk, err = src:read(64 * 1024)
+        if not chunk then
+            ok = err == nil
+            break
+        end
+        if not dst:write(chunk) then
+            ok = false
+            break
+        end
     end
+    src:close()
+    if not dst:close() then ok = false end
+    if ok and os.rename(tmp, to) then return true end
     os.remove(tmp)
     return false
 end
@@ -61,7 +70,9 @@ local function saveCover(identity, url, headers, done)
     end
     Image.fetchAsync(url, headers, function(path, err)
         if path then
-            copyFile(path, Paths.coverPath(identity.stable_id, identity.source_id))
+            if not copyFile(path, Paths.coverPath(identity.stable_id, identity.source_id)) then
+                logger.warn("scrape cover save failed:", path)
+            end
         else
             logger.warn("scrape cover download failed:", url, err)
         end
@@ -72,29 +83,27 @@ end
 --- 写 books 表 + 拉封面，两件事都落地后回调。
 ---@param identity BookIdentity
 ---@param result table
----@param done fun()
+---@param done fun(err: string|nil)
 local function applyResult(identity, result, done)
-    DbQueue.run(function()
-        -- 分类归本地目录/用户，刮削只补元数据，不覆盖
-        local existing = BookDB.get(identity.source_id, identity.stable_id)
-        BookDB.upsert({
-            source_id = identity.source_id,
-            stable_id = identity.stable_id,
-            title = result.title,
-            authors = result.author,
-            intro = result.intro,
-            category = existing and existing.category or nil,
-            series = result.series,
-            percent = existing and existing.percent or 0,
-            favorite = existing and existing.favorite or nil,
-            md5 = existing and existing.md5 or nil,
-            fetched_at = os.time(),
-        })
-    end, {
-        on_done = function()
-            saveCover(identity, result.cover_url, result.cover_headers, done)
-        end,
+    -- 分类归本地目录/用户，刮削只补元数据，不覆盖
+    local existing = BookDB.get(identity.source_id, identity.stable_id)
+    local ok = BookDB.upsertLocal({
+        source_id = identity.source_id,
+        stable_id = identity.stable_id,
+        title = result.title,
+        authors = result.author,
+        intro = result.intro,
+        category = existing and existing.category or nil,
+        series = result.series,
+        percent = existing and existing.percent or 0,
+        md5 = existing and existing.md5 or nil,
+        fetched_at = os.time(),
     })
+    if not ok then
+        done(_("元数据更新失败"))
+        return
+    end
+    saveCover(identity, result.cover_url, result.cover_headers, done)
 end
 
 --- 显示搜索结果选择页
@@ -106,11 +115,11 @@ local function showResults(identity, results, source, on_close)
     local page = Results:new{
         results = results,
         source = source,
-        -- 选中后落库与下封面都是异步：全部完成才通知调用方刷新
+        -- 选中后落库与下封面都完成才通知调用方刷新
         on_pick = function(result)
-            applyResult(identity, result, function()
+            applyResult(identity, result, function(err)
                 UIManager:show(InfoMessage:new{
-                    text = _("元数据已更新"),
+                    text = err or _("元数据已更新"),
                     timeout = 1.5,
                 })
                 if on_close then on_close() end
@@ -145,7 +154,7 @@ local function performSearch(identity, query, on_close)
         end
 
         logger.info("scrape: got results from", source)
-        showResults(identity, results, source, on_close)
+        showResults(identity, assert(results), assert(source), on_close)
     end)
 end
 

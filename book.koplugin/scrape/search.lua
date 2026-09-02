@@ -9,6 +9,8 @@
 local Douban = require("scrape.douban")
 local Weread = require("scrape.weread")
 local logger = require("logger")
+local Text = require("utils.text")
+local _ = require("gettext")
 
 local Search = {}
 
@@ -17,15 +19,20 @@ local Search = {}
 ---@param cb fun(results: table[]|nil, err: string|nil, source: string|nil)
 ---@return { cancel: fun() }|nil
 function Search.searchAsync(query, cb)
+    query = Text.trim(query)
+    if query == "" then
+        cb(nil, _("搜索关键词为空"))
+        return nil
+    end
     local cancelled = false
-    local current_job = nil
+    local current_job
 
     --- 豆瓣无结果时改走微信读书；仍然空结果则回调错误。
     local function tryWeread()
         if cancelled then return end
         logger.info("scrape: fallback to weread")
         current_job = Weread.searchAsync(query, nil, function(results, err)
-            if cancelled or not cb then return end
+            if cancelled then return end
             if results and #results > 0 then
                 cb(results, nil, "weread")
             else
@@ -36,7 +43,7 @@ function Search.searchAsync(query, cb)
 
     logger.info("scrape: trying douban first")
     current_job = Douban.searchAsync(query, function(results, err)
-        if cancelled or not cb then return end
+        if cancelled then return end
         if results and #results > 0 then
             cb(results, nil, "douban")
         else

@@ -9,7 +9,6 @@
 
 local JSON = require("json")
 local Request = require("http.request")
-local socketurl = require("socket.url")
 local logger = require("logger")
 local Text = require("utils.text")
 local _ = require("gettext")
@@ -38,7 +37,7 @@ function Weread.searchAsync(query, count, cb)
     if count <= 0 then count = DEFAULT_COUNT end
     if count > 20 then count = 20 end
 
-    local url = SEARCH_URL .. "?keyword=" .. socketurl.escape(query)
+    local url = SEARCH_URL .. "?keyword=" .. Text.urlEncode(query)
         .. "&maxIdx=0&count=" .. tostring(count)
 
     return Request.request({
@@ -63,7 +62,8 @@ function Weread.searchAsync(query, count, cb)
             cb(nil, _("网络请求失败"))
             return
         end
-        local body = res.body or ""
+        local response = assert(res)
+        local body = response.body or ""
         local ok, data = pcall(JSON.decode, body)
         if not ok or type(data) ~= "table" then
             cb(nil, _("响应格式错误"))
@@ -76,12 +76,10 @@ function Weread.searchAsync(query, count, cb)
         local results = {}
         for _, row in ipairs(data.books) do
             local info = row.bookInfo
-            if type(info) == "table" and info.title and info.title ~= "" then
-                if tonumber(info.soldout) ~= 1 then
-                    local mapped = mapBook(info, row)
-                    if mapped then
-                        results[#results + 1] = mapped
-                    end
+            if type(info) == "table" and tonumber(info.soldout) ~= 1 then
+                local mapped = mapBook(info, row)
+                if mapped then
+                    results[#results + 1] = mapped
                 end
             end
         end
@@ -102,29 +100,29 @@ function mapBook(info, row)
 
     local intro = trim(info.intro)
     local category = trim(info.category)
-    local tags = {}
+    local tags, seen = {}, {}
     if category ~= "" then
         -- 多字节分隔符先归一成逗号：Lua 字符类按字节匹配，直接放类里会切碎 UTF-8
         category = category:gsub("／", ","):gsub("、", ","):gsub("，", ",")
         for p in category:gmatch("[^%-,/|]+") do
             local part = trim(p)
-            if part ~= "" then tags[#tags + 1] = part end
+            if part ~= "" and not seen[part] then
+                tags[#tags + 1] = part
+                seen[part] = true
+            end
         end
     end
 
     local detail = info.newRatingDetail or row.newRatingDetail
-    if type(detail) == "table" and detail.title and detail.title ~= "" then
-        local found = false
-        for _, t in ipairs(tags) do
-            if t == detail.title then found = true break end
-        end
-        if not found then tags[#tags + 1] = detail.title end
+    local detail_title = type(detail) == "table" and trim(detail.title) or ""
+    if detail_title ~= "" and not seen[detail_title] then
+        tags[#tags + 1] = detail_title
     end
 
     local publishTime = info.publishTime or ""
     local year = publishTime:match("(%d%d%d%d)")
 
-    local bookId = info.bookId or ""
+    local bookId = tostring(info.bookId or "")
     local url = trim(info.deepLink)
     if url == "" and bookId ~= "" then
         url = "https://weread.qq.com/web/reader/" .. bookId
