@@ -8,7 +8,6 @@
 --]]
 
 local Request = require("http.request")
-local socketurl = require("socket.url")
 local logger = require("logger")
 local Text = require("utils.text")
 local _ = require("gettext")
@@ -61,12 +60,8 @@ end
 ---@return string|nil
 local function extractSubjectId(block, url)
     if type(url) == "string" then
-        local id = url:match("subject/(%d+)") or url:match("subject%%2F(%d+)")
-        if id then
-            return id
-        end
-        local escaped = socketurl.unescape(url:gsub("&amp;", "&"))
-        id = escaped:match("subject/(%d+)")
+        local decoded = Text.urlDecode(Text.xmlDecode(url))
+        local id = decoded and decoded:match("subject/(%d+)")
         if id then
             return id
         end
@@ -121,7 +116,7 @@ local function parseBlock(block, query)
         return nil, "no_title"
     end
 
-    title = trim(title)
+    title = trim(Text.xmlDecode(title))
     local subject_id = extractSubjectId(block, url)
     if not subject_id then
         return nil, "no_id"
@@ -132,18 +127,19 @@ local function parseBlock(block, query)
         return nil, "low_sim"
     end
 
-    local cast = block:match('class="subject%-cast"[^>]*>([^<]+)<')
+    local cast = Text.xmlDecode(block:match('class="subject%-cast"[^>]*>([^<]+)<'))
     local author, publisher, year = parseCast(cast)
 
     local cover = block:match('<img%s+[^>]*src="([^"]+)"')
+    if cover then cover = Text.xmlDecode(cover) end
     local rating = block:match('<span class="rating_nums">([^<]+)</span>')
     if rating then
-        rating = trim(rating)
+        rating = trim(Text.xmlDecode(rating))
     end
 
     local intro = block:match("<p>([^<]+)</p>")
     if intro then
-        intro = trim(intro)
+        intro = trim(Text.xmlDecode(intro))
     end
 
     return {
@@ -210,11 +206,8 @@ local function parseSearchResults(html, query)
         return a.similarity > b.similarity
     end)
 
-    local top = {}
-    for i = 1, math.min(10, #results) do
-        top[#top + 1] = results[i]
-    end
-    return top
+    for i = #results, 11, -1 do results[i] = nil end
+    return results
 end
 
 --- 搜索豆瓣图书
@@ -228,7 +221,7 @@ function Douban.searchAsync(query, cb)
         return nil
     end
 
-    local url = SEARCH_URL .. "?cat=1001&q=" .. socketurl.escape(query)
+    local url = SEARCH_URL .. "?cat=1001&q=" .. Text.urlEncode(query)
     logger.info("douban search:", query, url)
 
     return Request.request({

@@ -52,27 +52,20 @@ local function factsLine(result)
     return table.concat(parts, " · ")
 end
 
---- 搜索结果 → BookInfo.hero 能吃的 book 形。
----@param result table
----@return table
-local function asBook(result)
-    return {
-        title = result.title,
-        authors = result.author,
-        intro = result.intro,
-        cover_url = result.cover_url,
-        cover_headers = result.cover_headers,
-        percent = 0,
-    }
-end
-
 --- 单条结果卡：hero + 底部分隔线。
 ---@param self table
 ---@param result table
 ---@param width number
 ---@return table
 local function buildCard(self, result, width)
-    local row = select(1, BookInfo.hero(nil, nil, asBook(result), {
+    local row = select(1, BookInfo.hero(nil, nil, {
+        title = result.title,
+        authors = result.author,
+        intro = result.intro,
+        cover_url = result.cover_url,
+        cover_headers = result.cover_headers,
+        percent = 0,
+    }, {
         width = width,
         pad = 0,
         show_parent = self,
