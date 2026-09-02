@@ -20,7 +20,7 @@ local DEFAULTS = {
         ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,
     },
     lockscreen = {
-        lock_screen = "compose",
+        lock_screen = "ko",
         lock_screen_background = "bing",
         lock_screen_component = "current",
         lock_screen_position = "center-center",
