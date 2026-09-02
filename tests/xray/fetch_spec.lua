@@ -11,19 +11,19 @@ local saved = { entities = {} }
 local entity_rows = {}
 package.preload["db.xray"] = function()
     return {
-        list = function(_, _, kind)
+        list = function(source_id, stable_id, kind)
             local out = {}
-            for _, row in ipairs(entity_rows) do
+            for index, row in ipairs(entity_rows) do
                 if not kind or row.kind == kind then
                     out[#out + 1] = row
                 end
             end
             return out
         end,
-        replace = function(_, _, entities)
+        replace = function(source_id, stable_id, entities)
             entity_rows = {}
             saved.entities = {}
-            for _, entity in ipairs(entities or {}) do
+            for index, entity in ipairs(entities or {}) do
                 entity_rows[#entity_rows + 1] = entity
             end
             saved.entities = entity_rows
@@ -43,10 +43,15 @@ package.preload["xray.context"] = function()
         currentPage = function() return 5 end,
     }
 end
+package.preload["ui.reader.session"] = function()
+    return { current = function() return { percent = 42 } end }
+end
 package.preload["ai"] = function()
     return {
         isConfigured = function() return true end,
-        jsonExtract = function(_, _, cb)
+        jsonExtract = function(messages, opts, cb)
+            Assert.eq(opts.max_tokens, 8000)
+            Assert.matches(messages[2].content, "阅读进度：约 42%%")
             cb({
                 book_type = "fiction",
                 characters = {
@@ -92,7 +97,7 @@ end)
 Assert.is_nil(failure)
 Assert.eq(#result.characters, 2)
 local names = {}
-for _, row in ipairs(result.characters) do names[row.name] = true end
+for index, row in ipairs(result.characters) do names[row.name] = true end
 Assert.is_true(names.Old)
 Assert.is_true(names.Mina)
 Assert.eq(#saved.entities, 4)
@@ -101,7 +106,7 @@ Assert.eq(#saved.entities, 4)
 package.preload["ai"] = function()
     return {
         isConfigured = function() return true end,
-        jsonExtract = function(_, _, cb)
+        jsonExtract = function(messages, options, cb)
             cb({
                 characters = {
                     { name = "Mina", aliases = {}, role = "heroine", description = "brave" },

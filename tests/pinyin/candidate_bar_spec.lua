@@ -24,7 +24,7 @@ package.preload["ui/uimanager"] = function()
         setDirty = function()
             dirty_calls = dirty_calls + 1
         end,
-        nextTick = function(f)
+        nextTick = function(_, f)
             q[#q + 1] = f
         end,
         scheduleIn = function(_, _delay, f)

@@ -133,6 +133,7 @@ Paths.screensaverDir = function() return TEST_SCREENSAVER end
 Paths.ensureScreensaverDir = ensureTestScreensaver
 
 local LockScreen = require("lockscreen.init")
+local Settings = require("lockscreen.settings")
 local Compose = require("lockscreen.compose")
 local compose_path = Paths.screensaverDir() .. "/compose.png"
 
@@ -176,7 +177,7 @@ local ok_run, err_run = pcall(function()
     MoonSettings.save()
     pcall(os.remove, compose_path)
 
-    Assert.is_false(LockScreen.isCompose())
+    Assert.is_false(Settings.isCompose())
 
     saved.screensaver_type = "cover"
     saved.screensaver_document_cover = "/old/cover.png"
@@ -188,24 +189,23 @@ local ok_run, err_run = pcall(function()
     local stale = assert(io.open(compose_path, "wb"))
     stale:write(PNG8)
     stale:close()
-    LockScreen.setMode("compose")
-    Assert.is_true(LockScreen.isCompose())
+    Settings.setMode("compose")
+    Assert.is_true(Settings.isCompose())
     Assert.eq(common.lock_screen, "compose")
     Assert.eq(saved.screensaver_type, "cover", "尚未接管前不得改动用户锁屏方式")
     Assert.eq(saved.screensaver_document_cover, "/old/cover.png")
 
     -- 账单是完整报告卡，位置固定居中，且底层 API 不能写入位置配置。
     local previous_position = common.lock_screen_position
-    LockScreen.setComponent("bill")
+    Settings.setComponent("bill")
     common.lock_screen_position = "top-left"
     MoonSettings.save()
-    Assert.eq(Compose.position(), "center-center")
-    LockScreen.setPosition("bottom-right")
+    Assert.eq(Compose.plan().position, "center-center")
+    Settings.setPosition("bottom-right")
     Assert.eq(common.lock_screen_position, "top-left")
-    LockScreen.setComponent("current")
+    Settings.setComponent("current")
     common.lock_screen_position = previous_position
     MoonSettings.save()
-
     local done, ok_dl
     LockScreen.refresh(function(ok)
         done = true
@@ -228,15 +228,15 @@ local ok_run, err_run = pcall(function()
     Assert.eq(render_writes, 0)
 
     -- 强制刷新必须绕过当天缓存，保证动态主体能更新。
-    LockScreen.refreshInBackground(true)
+    LockScreen.refresh(nil, true)
     Stubs.flush()
     Assert.is_true(render_writes > 0)
 
     -- myrl 主体触网；日报不再是独立背景。
-    LockScreen.setBackgroundMode("bing")
-    LockScreen.setComponent("myrl")
-    Assert.eq(Compose.backgroundMode(), "bing")
-    Assert.eq(Compose.asset().id, "myrl")
+    Settings.setBackgroundMode("bing")
+    Settings.setComponent("myrl")
+    Assert.eq(Compose.plan().background_mode, "bing")
+    Assert.eq(Compose.plan().asset.id, "myrl")
     common.lock_screen_asset_cache.myrl = nil
     MoonSettings.save()
     pcall(os.remove, require("utils.paths").screensaverDir() .. "/myrl.png")
@@ -266,8 +266,8 @@ local ok_run, err_run = pcall(function()
     local file_b = assert(io.open(cover_b, "wb"))
     file_b:write(PNG8)
     file_b:close()
-    LockScreen.setBackgroundMode("cover")
-    LockScreen.setComponent("none")
+    Settings.setBackgroundMode("cover")
+    Settings.setComponent("none")
     LockScreen.refresh(function(ok) refreshed = ok end)
     Stubs.flush()
     Assert.is_true(refreshed)
@@ -280,14 +280,14 @@ local ok_run, err_run = pcall(function()
 
     online = false
     last_download.url = nil
-    LockScreen.refreshInBackground()
+    LockScreen.refresh()
     Stubs.flush()
     Assert.is_nil(last_download.url)
 
     online = true
     -- 切回 KOReader 锁屏：撤下接管并还原用户接管前的配置
-    LockScreen.setMode("ko")
-    Assert.is_false(LockScreen.isCompose())
+    Settings.setMode("ko")
+    Assert.is_false(Settings.isCompose())
     Assert.eq(saved.screensaver_type, "cover", "接管前的锁屏方式必须还原")
     Assert.eq(saved.screensaver_document_cover, "/old/cover.png")
     Assert.is_true(saved.screensaver_show_message)

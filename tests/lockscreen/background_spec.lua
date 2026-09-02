@@ -12,6 +12,8 @@ local download
 local download_count = 0
 local download_valid = true
 local online = true
+local original_date = os.date
+os.date = function() return "2020-01-02" end
 
 package.preload["utils.paths"] = function()
     return {
@@ -83,7 +85,6 @@ end
 package.preload["lockscreen.layout"] = function()
     return {
         portraitSize = function() return 480, 800 end,
-        dayKey = function() return "2020-01-02" end,
     }
 end
 
@@ -233,3 +234,5 @@ download_valid = true
 Background.ensure(custom_daily, function(path) got = path end)
 Assert.eq(got, custom_daily_path)
 Assert.eq(settings.lock_screen_asset_cache["new-style"].day, "2020-01-02")
+
+os.date = original_date

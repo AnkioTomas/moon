@@ -83,7 +83,7 @@ package.preload["ui.reader.bars"] = function()
     return Bars
 end
 package.preload["lockscreen.init"] = function()
-    return { refreshInBackground = function() end }
+    return { refresh = function() error("翻页不得重绘锁屏") end }
 end
 package.preload["xray.marks"] = function()
     return { install = function() end }
@@ -135,3 +135,5 @@ Assert.is_nil(ui._zones, "不应注册覆盖原生菜单的触摸区")
 native_ui = nil
 Reader.attach(plugin)
 Assert.is_nil(native_ui, "同一 ReaderUI 不应重复安装")
+
+Reader.refresh(plugin)

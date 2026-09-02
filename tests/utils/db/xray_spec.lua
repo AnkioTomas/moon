@@ -4,9 +4,9 @@ local Assert = require("support.assert")
 
 local calls = {}
 local connection = {
-    exec = function(_, sql) calls[#calls + 1] = { sql = sql, args = {} } end,
+    exec = function(connection, sql) calls[#calls + 1] = { sql = sql, args = {} } end,
     close = function() end,
-    prepare = function(_, sql)
+    prepare = function(connection, sql)
         local call = { sql = sql }
         calls[#calls + 1] = call
         return {

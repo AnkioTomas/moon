@@ -12,7 +12,7 @@ package.preload["ui/uimanager"] = function()
     return { show = function() end, setDirty = function() end }
 end
 package.preload["lockscreen.init"] = function()
-    return { refreshInBackground = function() end }
+    return { refresh = function() end }
 end
 package.preload["utils.settings"] = function()
     return {
