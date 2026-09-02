@@ -81,7 +81,7 @@ end
 
 package.loaded["lockscreen.components.current"] = nil
 local Current = require("lockscreen.components.current")
-local book = Current.book(true)
+local book = assert(Current.book(true))
 
 Assert.eq(book_source, "moon")
 Assert.eq(progress_source, "moon")
@@ -112,7 +112,7 @@ rows = {
     },
 }
 progress_value = {}
-book = Current.book()
+book = assert(Current.book())
 Assert.eq(book.stable_id, "poison")
 Assert.is_nil(book.chapter_idx)
 Assert.is_nil(book.chapter_title)
