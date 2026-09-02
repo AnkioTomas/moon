@@ -43,7 +43,6 @@ function M.find(id)
             return component
         end
     end
-    return nil
 end
 
 --- 将主体配置转换为设置页需要的选项结构。

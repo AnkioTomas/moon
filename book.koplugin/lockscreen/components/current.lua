@@ -6,31 +6,20 @@
 @module koplugin.book.lockscreen.components.current
 --]]
 
-local BookDB = require("utils.db.book")
-local StatsDB = require("utils.db.stats")
-local ProgressDB = require("utils.db.progress")
-local Session = require("ui.reader.session")
-local MoonSettings = require("utils.settings")
-local Paths = require("utils.paths")
-local lfs = require("libs/libkoreader-lfs")
+local BookDB = require("db.book")
+local StatsDB = require("db.stats")
+local ProgressDB = require("db.progress")
+local Library = require("lockscreen.components.library")
 local U = require("lockscreen.components.util")
 local _ = require("gettext")
 
 local M = {
     id = "current",
     label = _("当前阅读"),
-    live = true,
     -- 面板高度以 hero 内容为准；这里只给布局层一个偏紧的上限，避免白卡上下留白。
     preferred_height = 0.20,
     min_height = 120,
 }
-
-local function activeSourceId()
-    if type(MoonSettings.activeSourceId) == "function" then
-        return MoonSettings.activeSourceId()
-    end
-    return MoonSettings.get().active_source or "local"
-end
 
 local BookInfo
 
@@ -40,17 +29,7 @@ local function ensureUI()
     BookInfo = require("ui.components.bookinfo")
 end
 
---- 取本地封面缓存路径；无 stable_id 或文件不存在返回 nil。
----@param stable_id string|nil
----@param source_id string|nil
----@return string|nil
-local function coverPath(stable_id, source_id)
-    if type(stable_id) ~= "string" or stable_id == "" then return nil end
-    local path = Paths.coverPath(stable_id, source_id)
-    return lfs.attributes(path, "mode") == "file" and path or nil
-end
-
---- 组装锁屏用的当前书快照；会话关闭后回退到当前源最近打开的书。
+--- 把零散字段归一成锁屏用的书快照；封面取本地缓存，缺失为 nil。
 ---@param opts table
 ---@return table
 local function buildBook(opts)
@@ -65,7 +44,7 @@ local function buildBook(opts)
         total_pages = tonumber(opts.total_pages) or 0,
         chapter_idx = tonumber(opts.chapter_idx),
         chapter_title = opts.chapter_title,
-        cover = coverPath(stable_id, source_id),
+        cover = Library.coverPath(stable_id, source_id),
     }
 end
 
@@ -85,11 +64,11 @@ local function withStats(book)
     return book
 end
 
---- 无阅读会话时的兜底：当前源最近打开的书，优先取未读完的那本。
---- 进度以 progress 表为准（比 books.percent 新）。
+--- 当前源最近打开的书，优先取未读完的那本。
+--- 元数据来自 books，阅读位置来自 pending_progress。
 ---@return table|nil 书库为空时 nil
-local function latestBook()
-    local source_id = activeSourceId()
+local function currentBook()
+    local source_id = Library.activeSourceId()
     local recent = BookDB.recentBySource(source_id, 16)
     if #recent == 0 then return nil end
     local row
@@ -108,7 +87,7 @@ local function latestBook()
         authors = row.authors,
         percent = progress.fraction ~= nil and progress.fraction * 100
             or tonumber(row.percent) or 0,
-        chapter_idx = progress.chapter_idx or row.last_chapter_idx,
+        chapter_idx = progress.chapter_idx,
         chapter_title = progress.chapter_title,
         page = progress.page,
         total_pages = progress.total_pages,
@@ -119,26 +98,7 @@ end
 ---@param with_stats boolean|nil
 ---@return table|nil
 function M.book(with_stats)
-    local cur = Session.current()
-    local identity = cur and cur.identity
-    local book
-    if identity and cur then
-        local db_book = identity.book or BookDB.get(identity.source_id, identity.stable_id) or {}
-        local progress = ProgressDB.get(identity.source_id, identity.stable_id) or {}
-        book = buildBook{
-            source_id = identity.source_id,
-            stable_id = identity.stable_id,
-            title = db_book.title or identity.stable_id,
-            authors = db_book.authors,
-            percent = tonumber(cur.percent) or tonumber(db_book.percent) or 0,
-            page = tonumber(cur.page) or progress.page,
-            total_pages = tonumber(cur.total_pages) or progress.total_pages,
-            chapter_idx = identity.chapter_idx,
-            chapter_title = progress.chapter_title or db_book.chapter_title,
-        }
-    else
-        book = latestBook()
-    end
+    local book = currentBook()
     return with_stats and withStats(book) or book
 end
 
@@ -172,7 +132,7 @@ function M.blocks(rect)
             radius = rect.radius, shadow = 2, color = require("ffi/blitbuffer").COLOR_WHITE,
         },
         {
-            kind = "widget", role = "hero",
+            kind = "widget",
             widget = hero, x = rect.x, y = y + inset_v, width = rect.w, height = hero_h,
         },
     }

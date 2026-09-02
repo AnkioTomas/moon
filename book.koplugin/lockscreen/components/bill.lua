@@ -4,9 +4,10 @@
 @module koplugin.book.lockscreen.components.bill
 --]]
 
-local StatsDB = require("utils.db.stats")
+local StatsDB = require("db.stats")
 local Chart = require("ui.components.chart")
 local Blitbuffer = require("ffi/blitbuffer")
+local Library = require("lockscreen.components.library")
 local U = require("lockscreen.components.util")
 local MoonSettings = require("utils.settings")
 local _ = require("gettext")
@@ -17,12 +18,45 @@ local M = {
     label = _("阅读账单"),
     supports_narrow = false,
     supports_position = false,
-    live = true,
     preferred_height = 0.90,
     cache_key = function()
         return MoonSettings.get().lock_screen_bill_period or "7d"
     end,
 }
+
+local PERIODS = {
+    { id = "today", label = _("今日") },
+    { id = "7d", label = _("最近 7 天") },
+    { id = "30d", label = _("最近 30 天") },
+    { id = "month", label = _("本月") },
+}
+
+local PERIOD_BY_ID = {}
+for _, period in ipairs(PERIODS) do PERIOD_BY_ID[period.id] = period end
+
+--- 账单周期是否是四个合法值之一。
+---@param period string|nil
+---@return boolean
+function M.validPeriod(period)
+    return PERIOD_BY_ID[period] ~= nil
+end
+
+--- 账单周期的设置页选项。
+---@return {text: string, value: string}[]
+function M.periodOptions()
+    local options = {}
+    for _, period in ipairs(PERIODS) do
+        options[#options + 1] = { text = period.label, value = period.id }
+    end
+    return options
+end
+
+--- 周期显示名；非法值按最近 7 天显示。
+---@param period string|nil
+---@return string
+function M.periodLabel(period)
+    return (PERIOD_BY_ID[period] or PERIOD_BY_ID["7d"]).label
+end
 
 --- 组一个图表桶；row 缺失时秒数与页数归零。
 ---@param key string
@@ -78,7 +112,7 @@ function M.data()
     local settings = MoonSettings.get()
     local period = settings.lock_screen_bill_period or "7d"
     local start_ts, end_ts = billRange(period)
-    local source_id = settings.active_source or "local"
+    local source_id = Library.activeSourceId()
     local grain = period == "today" and "hour" or "day"
     local buckets = grain == "hour"
         and hourBuckets(StatsDB.periodHours(source_id, start_ts, end_ts))
@@ -92,20 +126,6 @@ function M.data()
         grain = grain,
         buckets = buckets,
     }
-end
-
--- 周期标签集中在这里，避免账单布局重复处理非法周期。
---- 将设置中的周期 ID 转成显示文案。
----@param period string
----@return string
-local function periodLabel(period)
-    local labels = {
-        today = _("今日"),
-        ["7d"] = _("最近 7 天"),
-        ["30d"] = _("最近 30 天"),
-        month = _("本月"),
-    }
-    return labels[period] or labels["7d"]
 end
 
 --- 将秒数转成账单卡片使用的短时长文案。
@@ -151,7 +171,7 @@ function M.blocks(rect)
             x = inner_x, y = y0 + pad + 4, width = inner_w / 2, size = 14, box = false, color = U.MUTED,
         },
         {
-            text = periodLabel(bill.period) .. "  "
+            text = M.periodLabel(bill.period) .. "  "
                 .. os.date("%Y.%m.%d", bill.start_ts or os.time()) .. " - "
                 .. os.date("%Y.%m.%d", (bill.end_ts or os.time()) - 1),
             x = inner_x, y = y0 + math.floor(h * 0.10), width = inner_w, size = 15, box = false, color = U.MUTED,

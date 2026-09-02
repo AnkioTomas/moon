@@ -8,10 +8,8 @@
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local BookDB = require("utils.db.book")
-local MoonSettings = require("utils.settings")
-local Paths = require("utils.paths")
-local lfs = require("libs/libkoreader-lfs")
+local BookDB = require("db.book")
+local Library = require("lockscreen.components.library")
 local _ = require("gettext")
 
 -- 主体注册阶段只需要元数据；真正生成封面时再加载 UI 组件。
@@ -45,50 +43,15 @@ local M = {
     id = "bookshelf",
     label = _("书架"),
     supports_position = false,
-    live = true,
     full_screen = true,
     uses_background = false,
     asset = { id = "none" },
 }
 
-local function activeSourceId()
-    if type(MoonSettings.activeSourceId) == "function" then
-        return MoonSettings.activeSourceId()
-    end
-    return MoonSettings.get().active_source or "local"
-end
-
---- 取本地封面缓存路径；无 stable_id 或文件不存在返回 nil（锁屏不触网补图）。
----@param stable_id string|nil
----@param source_id string|nil
----@return string|nil
-local function coverPath(stable_id, source_id)
-    if type(stable_id) ~= "string" or stable_id == "" then return nil end
-    local path = Paths.coverPath(stable_id, source_id)
-    return lfs.attributes(path, "mode") == "file" and path or nil
-end
-
---- 把书库行收敛成书架格子要的字段（含封面路径）。
----@param book table 数据库行
----@param source_id string 行内无 source_id 时的兜底源
----@return table
-local function shelfBook(book, source_id)
-    local sid = book.source_id or source_id
-    local stable_id = book.stable_id
-    return {
-        source_id = sid,
-        stable_id = stable_id,
-        title = book.title or stable_id or "",
-        authors = book.authors or "",
-        percent = tonumber(book.percent) or 0,
-        cover = coverPath(stable_id, sid),
-    }
-end
-
 --- 读取当前数据源的书架快照；锁屏不触网，只拿本地封面缓存。
 ---@return { reading: table[], covers: table[] }
 function M.data()
-    local source_id = activeSourceId()
+    local source_id = Library.activeSourceId()
     local recent = BookDB.recentBySource(source_id, 64)
     local reading, covers, seen = {}, {}, {}
 
@@ -96,13 +59,15 @@ function M.data()
     ---@param target table[]
     ---@param rows table[]|nil
     ---@param limit number
-    ---@param accept fun(row: table): boolean|nil 额外过滤条件
+    ---@param accept (fun(row: table): boolean)|nil 额外过滤条件
     local function append(target, rows, limit, accept)
         for _, row in ipairs(rows or {}) do
             if #target >= limit then return end
-            if not seen[row.stable_id] and (not accept or accept(row)) then
-                target[#target + 1] = shelfBook(row, source_id)
-                seen[row.stable_id] = true
+            local id = row.stable_id
+            if type(id) == "string" and id ~= "" and not seen[id]
+                    and (not accept or accept(row)) then
+                target[#target + 1] = Library.shelfBook(row, source_id)
+                seen[id] = true
             end
         end
     end
@@ -192,24 +157,13 @@ local function header(width, height, pad, count)
     }
 end
 
---- 读取书架并按稳定身份去重；正在阅读的书保持在最前面。
+--- 读取书架；M.data 已按稳定身份去重，正在阅读的书保持在最前面。
 ---@return table[]
 local function books()
     local data = M.data()
-    local result, seen = {}, {}
-    --- 追加一段书列表，跳过缺 stable_id 与已出现过的书。
-    ---@param list table[]|nil
-    local function append(list)
-        for _, book in ipairs(list or {}) do
-            local id = book.stable_id
-            if type(id) == "string" and id ~= "" and not seen[id] then
-                seen[id] = true
-                result[#result + 1] = book
-            end
-        end
-    end
-    append(data.reading)
-    append(data.covers)
+    local result = {}
+    for _, book in ipairs(data.reading or {}) do result[#result + 1] = book end
+    for _, book in ipairs(data.covers or {}) do result[#result + 1] = book end
     return result
 end
 
@@ -238,14 +192,13 @@ function M.blocks(rect)
     local blocks = {
         { kind = "panel", x = 0, y = 0, width = w, height = h,
             color = Blitbuffer.COLOR_WHITE },
-        { kind = "widget", role = "header", widget = header(w, top_h, pad, #shelf),
+        { kind = "widget", widget = header(w, top_h, pad, #shelf),
             x = 0, y = 0, width = w, height = top_h },
     }
 
     if #shelf == 0 then
         blocks[#blocks + 1] = {
             kind = "widget",
-            role = "empty",
             widget = CenterContainer:new{
                 dimen = Geom:new{ w = w, h = grid_h },
                 TextWidget:new{
@@ -267,7 +220,6 @@ function M.blocks(rect)
         -- 与桌面书库一样，最后一行从内容区左侧开始，不额外引入另一种排列。
         blocks[#blocks + 1] = {
             kind = "widget",
-            role = "cover",
             widget = coverCell(shelf[i], slot_w, cover_w, cover_h),
             x = pad + col * (slot_w + gap),
             y = top_h + row * (cell_h + row_gap),

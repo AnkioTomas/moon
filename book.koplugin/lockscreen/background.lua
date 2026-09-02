@@ -12,19 +12,21 @@ local Request = require("http.request")
 local Paths = require("utils.paths")
 local MoonSettings = require("utils.settings")
 local Layout = require("lockscreen.layout")
+local _ = require("gettext")
 
 local M = {}
+
+--- 返回本地日期；每日资源和组合缓存共用此时钟。
+---@return string YYYY-MM-DD
+function M.dayKey()
+    return os.date("%Y-%m-%d")
+end
 
 local IMAGE_EXTS = {
     png = true,
     jpg = true,
     jpeg = true,
     webp = true,
-}
-
-local FIXED_PATHS = {
-    custom = "/custom.png",
-    bing = "/bing.jpg",
 }
 
 --- 只做文件层检查；网络资源还需要经过 isValidImage 的解码检查。
@@ -64,6 +66,7 @@ function M.daily(opts)
     local id = assert(opts.id)
     return {
         id = id,
+        label = opts.label,
         path = assert(opts.path),
         request = assert(opts.request),
         daily = true,
@@ -116,12 +119,10 @@ local function folderFiles()
 
     local files = {}
     for name in lfs.dir(FOLDER_DIR) do
-        if name ~= "." and name ~= ".." then
-            local ext = name:match("%.([^.]+)$")
-            if ext and IMAGE_EXTS[ext:lower()] then
-                local path = FOLDER_DIR .. "/" .. name
-                if fileOk(path) then files[#files + 1] = path end
-            end
+        local ext = name:match("%.([^.]+)$")
+        if ext and IMAGE_EXTS[ext:lower()] then
+            local path = FOLDER_DIR .. "/" .. name
+            if fileOk(path) then files[#files + 1] = path end
         end
     end
     table.sort(files)
@@ -133,7 +134,7 @@ end
 ---@return string|nil
 local function folderPick()
     local cache = assetCache()
-    local day = Layout.dayKey()
+    local day = M.dayKey()
     local entry = cache.folder
     if type(entry) == "table" and entry.day == day and fileOk(entry.path) then
         return entry.path
@@ -149,7 +150,8 @@ end
 local BACKGROUNDS = {
     bing = M.daily{
         id = "bing",
-        path = function() return Paths.screensaverDir() .. FIXED_PATHS.bing end,
+        label = _("必应壁纸"),
+        path = function() return Paths.screensaverDir() .. "/bing.jpg" end,
         request = function()
             return {
                 url = "https://api.ankio.net/bing",
@@ -161,12 +163,15 @@ local BACKGROUNDS = {
     },
     custom = {
         id = "custom",
-        path = function() return Paths.screensaverDir() .. FIXED_PATHS.custom end,
+        label = _("自定义"),
+        path = function() return Paths.screensaverDir() .. "/custom.png" end,
     },
-    cover = { id = "cover", path = coverPath, refresh_on_resume = true },
-    folder = { id = "folder", path = folderPick },
-    none = { id = "none" },
+    cover = { id = "cover", label = _("当前阅读书籍封面"), path = coverPath },
+    folder = { id = "folder", label = _("文件夹壁纸"), path = folderPick },
+    none = { id = "none", label = _("无") },
 }
+
+local BACKGROUND_IDS = { "custom", "bing", "cover", "folder", "none" }
 
 --- 判断背景设置值是否合法；主体资源不属于背景设置项。
 ---@param mode string|nil
@@ -182,6 +187,35 @@ function M.background(mode)
     return BACKGROUNDS[mode] or BACKGROUNDS.bing
 end
 
+--- 背景的显示名。
+---@param mode string|nil
+---@return string
+function M.label(mode)
+    return M.background(mode).label
+end
+
+--- 背景的设置页选项，顺序由 BACKGROUND_IDS 决定。
+---@return {text: string, value: string}[]
+function M.options()
+    local options = {}
+    for _, id in ipairs(BACKGROUND_IDS) do
+        local background = BACKGROUNDS[id]
+        options[#options + 1] = { text = background.label, value = id }
+    end
+    return options
+end
+
+--- 设置页副标题：告诉用户自定义图和文件夹壁纸该放哪里。
+---@param mode string
+---@return string|nil 其余背景无提示
+function M.hint(mode)
+    if mode == "custom" then
+        local w, h = Layout.portraitSize()
+        return string.format(".moon/screensaver/custom.png · %d × %d", w, h)
+    end
+    return mode == "folder" and ".moon/screensaver/wallpapers/" or nil
+end
+
 --- 判断每日资源是否已经拿到今天的有效图片。
 ---@param asset table|nil
 ---@return boolean
@@ -189,7 +223,7 @@ function M.isFresh(asset)
     if type(asset) ~= "table" or not asset.daily then return true end
     local cache = assetCache()
     local entry = cache[asset.id]
-    return type(entry) == "table" and entry.day == Layout.dayKey()
+    return type(entry) == "table" and entry.day == M.dayKey()
         and M.isValidImage(M.resolve(asset))
 end
 
@@ -211,7 +245,7 @@ end
 ---@return table|nil
 local function ensureDaily(asset, cb)
     local path = M.resolve(asset)
-    local day = Layout.dayKey()
+    local day = M.dayKey()
     if not path then
         cb(nil, asset.id .. " background path unavailable")
         return nil

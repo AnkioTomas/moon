@@ -12,12 +12,6 @@ local MoonSettings = require("utils.settings")
 local M = {}
 local job
 
---- 取消在飞的生成任务；同一时刻只允许一个。
-local function cancelJob()
-    if job and job.cancel then job.cancel() end
-    job = nil
-end
-
 --- 生成并接管锁屏图；非强制刷新不打断现有生成，缓存命中直接复用。
 ---@param cb fun(ok: boolean, err: any)|nil
 ---@param force boolean|nil
@@ -31,7 +25,8 @@ function M.refresh(cb, force)
         return
     end
 
-    cancelJob()
+    if job and job.cancel then job.cancel() end
+    job = nil
     local generation = Settings.revision()
     local build
     build = Compose.build(plan, function(ok, err, path)

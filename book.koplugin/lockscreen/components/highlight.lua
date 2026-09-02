@@ -4,7 +4,6 @@
 @module koplugin.book.lockscreen.components.highlight
 --]]
 
-local Session = require("ui.reader.session")
 local Current = require("lockscreen.components.current")
 local MoonSettings = require("utils.settings")
 local Highlights = require("book.highlights")
@@ -15,38 +14,25 @@ local _ = require("gettext")
 local M = {
     id = "highlight",
     label = _("阅读高亮"),
-    live = true,
-    refresh_on_annotations = true,
     layout = "quote",
 }
 
 --- 轮换一条当前书高亮，并生成章节/页码出处。
 ---@return string|nil, string|nil
 function M.next()
-    local cur = Session.current()
-    local identity = cur and cur.identity
-    local source_id = identity and identity.source_id
-    local stable_id = identity and identity.stable_id
-    local chapter_idx = identity and identity.chapter_idx
-    local annotations = cur and cur.ui and cur.ui.annotation and cur.ui.annotation.annotations
-    local items = Highlights.collect(source_id, stable_id, chapter_idx, annotations)
-    if #items == 0 then
-        local book = Current.book()
-        if book then
-            source_id = book.source_id
-            stable_id = book.stable_id
-            chapter_idx = book.chapter_idx
-            annotations = nil
-            items = Highlights.collect(source_id, stable_id, chapter_idx)
-        end
-    end
+    local book = Current.book()
+    if not book then return nil end
+    local source_id = book.source_id
+    local stable_id = book.stable_id
+    local chapter_idx = book.chapter_idx
+    local items = Highlights.collect(source_id, stable_id, chapter_idx)
     if #items == 0 then return nil end
 
     local settings = MoonSettings.get()
     local index = (tonumber(settings.lock_screen_quote_index) or 0) % #items + 1
     settings.lock_screen_quote_index = index
     MoonSettings.save()
-    return Highlights.pick(source_id, stable_id, chapter_idx, index, annotations)
+    return Highlights.pick(source_id, stable_id, chapter_idx, index)
 end
 
 -- quote 布局由 compose 传入位置和宽窄，组件只负责取得下一条高亮。
