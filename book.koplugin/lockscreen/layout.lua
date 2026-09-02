@@ -38,6 +38,7 @@ function M.validPosition(position)
     return POSITION_BY_ID[position] ~= nil
 end
 
+--- 九宫格位置的设置页选项。
 ---@return {text: string, value: string}[]
 function M.options()
     local options = {}
@@ -47,6 +48,7 @@ function M.options()
     return options
 end
 
+--- 位置的显示名；非法值按居中显示。
 ---@param position string|nil
 ---@return string
 function M.label(position)
@@ -55,7 +57,7 @@ end
 
 --- 将位置字符串拆成垂直和水平两个方向；非法部分回到居中。
 ---@param position string|nil
----@return string, string vertical, horizontal
+---@return string vertical, string horizontal
 function M.parsePosition(position)
     local vertical, horizontal = tostring(position or "center-center"):match("^(%w+)%-(%w+)$")
     vertical = vertical or "center"
