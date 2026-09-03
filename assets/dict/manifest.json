@@ -1,7 +1,37 @@
 {
-  "source": "http://download.huzheng.org/zh_CN/",
-  "built_at": "2026-08-19 23:53:01",
+  "source": "http://download.huzheng.org/",
+  "built_at": "2026-09-03 17:35:51",
   "slice_size": 15728640,
+  "languages": [
+    {
+      "id": "zh_CN",
+      "name": "简体中文"
+    },
+    {
+      "id": "en",
+      "name": "英语"
+    },
+    {
+      "id": "ja",
+      "name": "日语"
+    },
+    {
+      "id": "ko",
+      "name": "韩语"
+    },
+    {
+      "id": "de",
+      "name": "德语"
+    },
+    {
+      "id": "fr",
+      "name": "法语"
+    },
+    {
+      "id": "ru",
+      "name": "俄语"
+    }
+  ],
   "dictionaries": [
     {
       "id": "oxford",
@@ -15,6 +45,42 @@
           "file": "oxford.part.001",
           "size": 7702157,
           "sha256": "bb52b04aebc605baa80b593f7edbcf6d1b81cd7b4321e6c66204b8a2d25ff1b8"
+        }
+      ],
+      "lang": "zh_CN",
+      "lang_name": "简体中文"
+    },
+    {
+      "id": "langdao-ec",
+      "name": "朗道英汉字典",
+      "lang": "zh_CN",
+      "lang_name": "简体中文",
+      "source": "http://download.huzheng.org/zh_CN/stardict-langdao-ec-gb-2.4.2.tar.bz2",
+      "file": "stardict-langdao-ec-gb-2.4.2.tar.bz2",
+      "size": 8743872,
+      "sha256": "68adfd6348418725b1810b5aeda2506ce44ddbc1ad99f2f68f6ba135cd3bf03c",
+      "parts": [
+        {
+          "file": "langdao-ec.part.001",
+          "size": 8743872,
+          "sha256": "68adfd6348418725b1810b5aeda2506ce44ddbc1ad99f2f68f6ba135cd3bf03c"
+        }
+      ]
+    },
+    {
+      "id": "langdao-ce",
+      "name": "朗道汉英字典",
+      "lang": "zh_CN",
+      "lang_name": "简体中文",
+      "source": "http://download.huzheng.org/zh_CN/stardict-langdao-ce-gb-2.4.2.tar.bz2",
+      "file": "stardict-langdao-ce-gb-2.4.2.tar.bz2",
+      "size": 7345014,
+      "sha256": "d539239f4920aa308582fba53918ea16844b6a2378cb74f9b99bfaec6e2f4f30",
+      "parts": [
+        {
+          "file": "langdao-ce.part.001",
+          "size": 7345014,
+          "sha256": "d539239f4920aa308582fba53918ea16844b6a2378cb74f9b99bfaec6e2f4f30"
         }
       ]
     },
@@ -31,7 +97,9 @@
           "size": 8926866,
           "sha256": "24745da6439f7aafd540661aa2cc20096c6fb7aca24dc62a1fb4b65e0822e646"
         }
-      ]
+      ],
+      "lang": "zh_CN",
+      "lang_name": "简体中文"
     },
     {
       "id": "xiandaihanyucidian",
@@ -46,7 +114,9 @@
           "size": 3349368,
           "sha256": "fc2da07aa2fc4a8e2e53f1034676dde96346cf446e4d631b52ea52367cc4db29"
         }
-      ]
+      ],
+      "lang": "zh_CN",
+      "lang_name": "简体中文"
     },
     {
       "id": "ghycyzzd",
@@ -60,6 +130,234 @@
           "file": "ghycyzzd.part.001",
           "size": 823703,
           "sha256": "f58fb3dfb6da70331c9fc218b824850b6ab945b7559cd92d3dc1a0c69f35a218"
+        }
+      ],
+      "lang": "zh_CN",
+      "lang_name": "简体中文"
+    },
+    {
+      "id": "chengyuda",
+      "name": "中华成语大词典",
+      "lang": "zh_CN",
+      "lang_name": "简体中文",
+      "source": "http://download.huzheng.org/zh_CN/stardict-chengyuda-2.4.2.tar.bz2",
+      "file": "stardict-chengyuda-2.4.2.tar.bz2",
+      "size": 9386226,
+      "sha256": "13372f0a88654ace84b120b1294b4eac21876ec8734fcbb3e098a95afb1447dc",
+      "parts": [
+        {
+          "file": "chengyuda.part.001",
+          "size": 9386226,
+          "sha256": "13372f0a88654ace84b120b1294b4eac21876ec8734fcbb3e098a95afb1447dc"
+        }
+      ]
+    },
+    {
+      "id": "gaojihanyudacidian",
+      "name": "高级汉语大词典",
+      "lang": "zh_CN",
+      "lang_name": "简体中文",
+      "source": "http://download.huzheng.org/zh_CN/stardict-gaojihanyudacidian_fix-2.4.2.tar.bz2",
+      "file": "stardict-gaojihanyudacidian_fix-2.4.2.tar.bz2",
+      "size": 6352387,
+      "sha256": "96428da6ee9798cb06128c90cc963af1f3fbfcf1abc7f20dd6c899a923fa5af1",
+      "parts": [
+        {
+          "file": "gaojihanyudacidian.part.001",
+          "size": 6352387,
+          "sha256": "96428da6ee9798cb06128c90cc963af1f3fbfcf1abc7f20dd6c899a923fa5af1"
+        }
+      ]
+    },
+    {
+      "id": "mdbg-cedict",
+      "name": "CC-CEDICT 汉英词典",
+      "lang": "zh_CN",
+      "lang_name": "简体中文",
+      "source": "http://download.huzheng.org/zh_CN/stardict-mdbg-cc-cedict-2.4.2.tar.bz2",
+      "file": "stardict-mdbg-cc-cedict-2.4.2.tar.bz2",
+      "size": 3669633,
+      "sha256": "a330d927e7128e53883e7c990fef3b502c5c1f7edb95cbc92b08557cf165c870",
+      "parts": [
+        {
+          "file": "mdbg-cedict.part.001",
+          "size": 3669633,
+          "sha256": "a330d927e7128e53883e7c990fef3b502c5c1f7edb95cbc92b08557cf165c870"
+        }
+      ]
+    },
+    {
+      "id": "kangxitext",
+      "name": "康熙字典（文字版）",
+      "lang": "zh_CN",
+      "lang_name": "简体中文",
+      "source": "http://download.huzheng.org/zh_CN/stardict-kangxitext-2.4.2.tar.bz2",
+      "file": "stardict-kangxitext-2.4.2.tar.bz2",
+      "size": 4308420,
+      "sha256": "2716e7d63be245f9937baed15248e1af7df42cebebc87b0d6c239a82869f825c",
+      "parts": [
+        {
+          "file": "kangxitext.part.001",
+          "size": 4308420,
+          "sha256": "2716e7d63be245f9937baed15248e1af7df42cebebc87b0d6c239a82869f825c"
+        }
+      ]
+    },
+    {
+      "id": "wordnet",
+      "name": "WordNet",
+      "lang": "en",
+      "lang_name": "英语",
+      "source": "http://download.huzheng.org/dict.org/stardict-dictd_www.dict.org_wn-2.4.2.tar.bz2",
+      "file": "stardict-dictd_www.dict.org_wn-2.4.2.tar.bz2",
+      "size": 10682037,
+      "sha256": "27dfc985076b4b70706bfc50172f2645bb8371f61ad6fc3c08ed093ef2bdb2ef",
+      "parts": [
+        {
+          "file": "wordnet.part.001",
+          "size": 10682037,
+          "sha256": "27dfc985076b4b70706bfc50172f2645bb8371f61ad6fc3c08ed093ef2bdb2ef"
+        }
+      ]
+    },
+    {
+      "id": "web1913",
+      "name": "Webster's Revised Unabridged Dictionary (1913)",
+      "lang": "en",
+      "lang_name": "英语",
+      "source": "http://download.huzheng.org/dict.org/stardict-dictd-web1913-2.4.2.tar.bz2",
+      "file": "stardict-dictd-web1913-2.4.2.tar.bz2",
+      "size": 28773233,
+      "sha256": "68f79667136b4bb6f101409d4dc7e95ac430073f36d2f822d9b265b0b841d946",
+      "parts": [
+        {
+          "file": "web1913.part.001",
+          "size": 15728640,
+          "sha256": "f465b737e709d649b11cde2b98c53f731d051a6700de3571f77ed466ad441c80"
+        },
+        {
+          "file": "web1913.part.002",
+          "size": 13044593,
+          "sha256": "ad9cc7e099b9b39b02e74679e81d1e7244ba32e84af4192feae99a4d12d16e7a"
+        }
+      ]
+    },
+    {
+      "id": "jilin-jc",
+      "name": "日汉双解词典",
+      "lang": "ja",
+      "lang_name": "日语",
+      "source": "http://download.huzheng.org/zh_CN/stardict-jilin_jc-2.4.2.tar.bz2",
+      "file": "stardict-jilin_jc-2.4.2.tar.bz2",
+      "size": 3938437,
+      "sha256": "b125fc5bfe94724d9ff42f1e1431deee3274ac1c3c99a8406eec24a465b4466b",
+      "parts": [
+        {
+          "file": "jilin-jc.part.001",
+          "size": 3938437,
+          "sha256": "b125fc5bfe94724d9ff42f1e1431deee3274ac1c3c99a8406eec24a465b4466b"
+        }
+      ]
+    },
+    {
+      "id": "jmdict-ja-en",
+      "name": "JMDict 日英词典",
+      "lang": "ja",
+      "lang_name": "日语",
+      "source": "http://download.huzheng.org/ja/stardict-jmdict-ja-en-2.4.2.tar.bz2",
+      "file": "stardict-jmdict-ja-en-2.4.2.tar.bz2",
+      "size": 4017230,
+      "sha256": "1b2ed4e2844c08fd31e377b7d0e428a798fcfdbc8bd4c9492756d8f01c28d1a4",
+      "parts": [
+        {
+          "file": "jmdict-ja-en.part.001",
+          "size": 4017230,
+          "sha256": "1b2ed4e2844c08fd31e377b7d0e428a798fcfdbc8bd4c9492756d8f01c28d1a4"
+        }
+      ]
+    },
+    {
+      "id": "naver-krcn",
+      "name": "Naver 韩中词典",
+      "lang": "ko",
+      "lang_name": "韩语",
+      "source": "http://download.huzheng.org/zh_CN/stardict-naver_krcn-2.4.2.tar.bz2",
+      "file": "stardict-naver_krcn-2.4.2.tar.bz2",
+      "size": 4688750,
+      "sha256": "7a150d2d55fd92e81398b1cfffd2c0cc9909ff4980b41bb29e7c7ae077892505",
+      "parts": [
+        {
+          "file": "naver-krcn.part.001",
+          "size": 4688750,
+          "sha256": "7a150d2d55fd92e81398b1cfffd2c0cc9909ff4980b41bb29e7c7ae077892505"
+        }
+      ]
+    },
+    {
+      "id": "naver-cnkr",
+      "name": "Naver 中韩词典",
+      "lang": "ko",
+      "lang_name": "韩语",
+      "source": "http://download.huzheng.org/zh_CN/stardict-naver_cnkr-2.4.2.tar.bz2",
+      "file": "stardict-naver_cnkr-2.4.2.tar.bz2",
+      "size": 9496361,
+      "sha256": "95187b4445d10bc08db01bde20fb6676709f757f8015fa0788083f1e192e1c2d",
+      "parts": [
+        {
+          "file": "naver-cnkr.part.001",
+          "size": 9496361,
+          "sha256": "95187b4445d10bc08db01bde20fb6676709f757f8015fa0788083f1e192e1c2d"
+        }
+      ]
+    },
+    {
+      "id": "xindehan",
+      "name": "新德汉词典",
+      "lang": "de",
+      "lang_name": "德语",
+      "source": "http://download.huzheng.org/zh_CN/stardict-xindehan-2.4.2.tar.bz2",
+      "file": "stardict-xindehan-2.4.2.tar.bz2",
+      "size": 3353721,
+      "sha256": "814fa248edcb758be60edcc187ff9cc7e1206010e57b9265e0ea506fa7fec3c8",
+      "parts": [
+        {
+          "file": "xindehan.part.001",
+          "size": 3353721,
+          "sha256": "814fa248edcb758be60edcc187ff9cc7e1206010e57b9265e0ea506fa7fec3c8"
+        }
+      ]
+    },
+    {
+      "id": "fccf",
+      "name": "法汉汉法词典",
+      "lang": "fr",
+      "lang_name": "法语",
+      "source": "http://download.huzheng.org/zh_CN/stardict-fccf-2.4.2.tar.bz2",
+      "file": "stardict-fccf-2.4.2.tar.bz2",
+      "size": 12503405,
+      "sha256": "289d2320be0cf1a4d1d56520f33cabc110811ffe6e17681ca35487982e8afb95",
+      "parts": [
+        {
+          "file": "fccf.part.001",
+          "size": 12503405,
+          "sha256": "289d2320be0cf1a4d1d56520f33cabc110811ffe6e17681ca35487982e8afb95"
+        }
+      ]
+    },
+    {
+      "id": "yidiantong-ehan",
+      "name": "一典通俄汉词典",
+      "lang": "ru",
+      "lang_name": "俄语",
+      "source": "http://download.huzheng.org/zh_CN/stardict-yidiantong_ehan-2.4.2.tar.bz2",
+      "file": "stardict-yidiantong_ehan-2.4.2.tar.bz2",
+      "size": 4883256,
+      "sha256": "161927d2d27c69b94331d4321995226c22a72425f4cd8429b3f1f23486fac0c5",
+      "parts": [
+        {
+          "file": "yidiantong-ehan.part.001",
+          "size": 4883256,
+          "sha256": "161927d2d27c69b94331d4321995226c22a72425f4cd8429b3f1f23486fac0c5"
         }
       ]
     }
