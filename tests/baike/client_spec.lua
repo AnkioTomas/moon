@@ -52,6 +52,14 @@ local entry = Client.parseResponse({
 Assert.eq(entry.title, "词条")
 Assert.eq(entry.definition, "摘要\n第二行\n\n名称：甲、乙")
 Assert.is_nil(Client.parseResponse({ abstract = "missing title" }))
+Assert.is_nil(Client.parseResponse({ title = "empty" }))
+Assert.is_nil(Client.parseResponse({ title = "invalid card", card = "bad" }))
+Assert.is_nil(Client.parseResponse({ title = "invalid item", card = { 1, false } }))
+Assert.eq(Client.parseResponse({
+    title = "摘要仍然有效",
+    abstract = "正文",
+    card = { false, { name = "名称", value = "值" } },
+}).definition, "正文\n\n名称：值")
 
 local result, err
 local job = Client.lookupAsync("电子阅读器", function(value, failure)

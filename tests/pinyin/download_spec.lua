@@ -77,7 +77,7 @@ local progress_events = {}
 local fail_part_once = false
 package.preload["http.request"] = function()
     return {
-        get = function(url, opts, cb)
+        get = function(_, _, cb)
             local JSON = require("json")
             local body = JSON.encode(manifest)
             require("ui/uimanager"):nextTick(function()
@@ -224,6 +224,24 @@ local ok_run, err_run = pcall(function()
     -- 临时目录已清理
     Assert.is_nil(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/pinyin_dict.dl"))
 
+    -- built_at 相同但词库被截断：大小不符时必须重新下载，不能把非空文件当成功。
+    local downloads_before_repair = #downloads
+    local truncated = assert(io.open(dest, "wb"))
+    truncated:write("broken")
+    truncated:close()
+    local repaired, repair_ok
+    Download.ensure(function(ok)
+        repaired = true
+        repair_ok = ok
+    end)
+    Stubs.flush()
+    Assert.is_true(repaired)
+    Assert.is_true(repair_ok)
+    Assert.eq(#downloads, downloads_before_repair + #manifest.parts)
+    local repaired_file = assert(io.open(dest, "rb"))
+    Assert.eq(repaired_file:read("*a"), raw)
+    repaired_file:close()
+
     -- built_at 未变时只检查 manifest，不重复下载或拼接词库；
     -- SHA 只是下载完整性记录，不能作为用户可见版本。
     local downloads_before = #downloads
@@ -237,6 +255,25 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(done_again)
     Assert.is_true(ok_again)
     Assert.eq(#downloads, downloads_before)
+
+    -- 每片哈希都正确仍不够：拼接顺序/清单错误必须被整库 raw_sha256 拦住，
+    -- 且安装失败不能破坏上一版有效词库。
+    local old_built_at = manifest.built_at
+    local old_raw_sha = manifest.raw_sha256
+    manifest.built_at = "2026-08-20 00:00:00"
+    manifest.raw_sha256 = string.rep("0", 64)
+    local hash_ok, hash_err
+    Download.ensure(function(ok, err)
+        hash_ok, hash_err = ok, err
+    end)
+    Stubs.flush()
+    Assert.is_false(hash_ok)
+    Assert.matches(tostring(hash_err), "dictionary sha256 mismatch")
+    local preserved = assert(io.open(dest, "rb"))
+    Assert.eq(preserved:read("*a"), raw)
+    preserved:close()
+    manifest.built_at = old_built_at
+    manifest.raw_sha256 = old_raw_sha
 end)
 
 cleanup()
