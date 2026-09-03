@@ -37,6 +37,7 @@ stub("host", { attach = function() calls.host = (calls.host or 0) + 1 end })
 stub("http.request", { ensureTurbo = function() end })
 stub("translate.init", { install = function() calls.translate = (calls.translate or 0) + 1 end })
 stub("baike.init", { install = function() calls.baike = (calls.baike or 0) + 1 end })
+stub("dictionary.init", { install = function() calls.dictionary = (calls.dictionary or 0) + 1 end })
 stub("ui.panel.native", { install = function() calls.panel = (calls.panel or 0) + 1 end })
 stub("lockscreen.init", {
     bootstrap = function() calls.lockscreen = (calls.lockscreen or 0) + 1 end,

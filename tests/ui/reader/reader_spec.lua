@@ -54,9 +54,6 @@ package.preload["ui.reader.session"] = function()
         toc = function() return nil end,
     }
 end
-package.preload["ui.reader.dictionary"] = function()
-    return { open = function() end }
-end
 
 -- 阅读动作顺序来自配置；测试里用干净配置，避免读取模拟器遗留的 quick_panel_reader_actions。
 local moon_settings = {}
@@ -117,12 +114,11 @@ local plugin = { ui = ui }
 
 local Reader = require("ui.reader")
 local actions = Reader.actions(ui)
-Assert.len(actions, 4)
+Assert.len(actions, 3)
 Assert.eq(actions[1].id, "toc")
 Assert.eq(actions[1].icon, "menu_book")
 Assert.eq(actions[2].id, "highlights")
 Assert.eq(actions[3].id, "xray")
-Assert.eq(actions[4].id, "dictionary")
 
 Assert.is_false(Reader.executeAction("missing", ui))
 
