@@ -4,7 +4,7 @@ HTML → EPUB（多章节、内嵌图片、元数据）。
 设计要点：
   - 章节内容经 `get_chapter(index, chapter, cb)` 按需回调拉取，避免一次性塞入巨量 HTML。
   - 网络图片支持统一 `image_headers`，或按 URL 的 `image_headers_for(url)`。
-  - 打包走子进程（utils.task），不堵 UI。
+  - 打包走子进程（workers.job），不堵 UI。
   - 逐章 / 逐图之间用 nextTick 让出事件循环。
 
   local Html2Epub = require("convert.html2epub")
@@ -585,8 +585,7 @@ function Html2Epub.build(opts, cb)
         nextImg()
     end
 
-    --- 全部章节就绪后打包 epub：zip 写入放进 Task 子进程，避免阻塞 UI。
-    --- 子进程通过管道回传 "ok" 或 "err:<原因>"，据此调用外层 cb。
+    --- 全部章节就绪后打包 epub：zip 写入放进 Job 子进程，避免阻塞 UI。
     local function packAndFinish()
         if cancelled then
             return
@@ -602,32 +601,22 @@ function Html2Epub.build(opts, cb)
             chapters = chapters,
             images = images,
         }
-        local Task = require("utils.task")
-        pack_task = Task.run(function(pid, write_fd, read_fd)
+        local Job = require("workers.job")
+        pack_task = Job.run(function()
             local ok, err = writeEpubPackage(pack_opts, dest)
-            local payload = ok and "ok" or ("err:" .. tostring(err or "pack failed"))
-            local ffiUtil = require("ffi/util")
-            if type(write_fd) == "function" then
-                write_fd(payload)
-            else
-                ffiUtil.writeToFD(write_fd, payload, true)
-            end
-            if read_fd and type(read_fd) ~= "function" then
-                ffiUtil.closeFD(read_fd)
-            end
+            return ok and "ok" or ("err:" .. tostring(err or "pack failed"))
         end, {
-            pipe = true,
-            on_done = function(raw)
+            on_done = function(result)
                 pack_task = nil
                 if cancelled then
                     return
                 end
-                if raw == "ok" then
+                if result == "ok" then
                     cb(true)
                     return
                 end
-                local msg = type(raw) == "string" and raw:match("^err:(.*)$") or nil
-                cb(nil, msg or raw or _("写入 epub 失败"))
+                local msg = type(result) == "string" and result:match("^err:(.*)$") or nil
+                cb(nil, msg or result or _("写入 epub 失败"))
             end,
             on_failed = function(err)
                 pack_task = nil
