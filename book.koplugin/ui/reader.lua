@@ -47,7 +47,6 @@ function Reader.attach(plugin)
     if ui.handleEvent then
         ui:handleEvent(Event:new("UpdatePos"))
     end
-    require("lockscreen.init").refreshInBackground(true)
     require("xray.marks").install(ui)
     require("ui.reader.highlight_menu").install(ui)
 end
@@ -56,9 +55,6 @@ end
 function Reader.refresh(plugin)
     local ui = plugin and plugin.ui
     if ui then UIManager:setDirty(ui.dialog, "ui") end
-    local LockScreen = require("lockscreen.init")
-    local force = LockScreen.needsLiveRefresh and LockScreen.needsLiveRefresh()
-    LockScreen.refreshInBackground(force)
 end
 
 return Reader
