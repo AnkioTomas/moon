@@ -22,8 +22,6 @@ local Protocol = require("source.wechat.protocol")
 local _ = require("gettext")
 
 local Auth = {}
-local jsonGetAsync
-local ensureGuestCookiesAsync
 
 local WEB = "https://weread.qq.com"
 local API = "https://i.weread.qq.com"
@@ -199,18 +197,10 @@ local function sessionMap(c)
     }
 end
 
---- Cookie 以字段为准拼装；旧配置仅有整段 cookie 时回退。
+--- Cookie 由会话字段拼装；无有效字段返回 nil。
 ---@return string|nil
 function Auth.cookieHeader()
-    local c = cfg()
-    local built = cookieFrom(sessionMap(c), SESSION_COOKIE_KEYS)
-    if built then
-        return built
-    end
-    if type(c.cookie) == "string" and c.cookie ~= "" then
-        return c.cookie
-    end
-    return nil
+    return cookieFrom(sessionMap(cfg()), SESSION_COOKIE_KEYS)
 end
 
 --- 已登录请求头：Cookie + X-Vid + X-Skey。
@@ -227,16 +217,11 @@ function Auth.sessionHeaders(extra)
     }))
 end
 
---- 是否已有可用会话（wr_skey 或旧 cookie 串）。
+--- 是否已有可用会话（wr_skey 非空）。
 ---@return boolean
 function Auth.hasSession()
-    local c = cfg()
-    if type(c.wr_skey) == "string" and c.wr_skey ~= "" then
-        return true
-    end
-    -- 旧 cookie 串：wr_skey= 必须带非空值（"wr_skey=; …" 这种空值不算会话）
-    local legacy = type(c.cookie) == "string" and c.cookie:match("wr_skey=([^;]*)") or nil
-    return type(legacy) == "string" and legacy ~= ""
+    local skey = cfg().wr_skey
+    return type(skey) == "string" and skey ~= ""
 end
 
 --- Skills Agent 网关是否已配置 API Key（``wrk-…``）。
@@ -271,7 +256,6 @@ end
 --- 清除本地会话与派生 Cookie 字段。
 function Auth.clearSession()
     saveCfg({
-        cookie = "",
         wr_vid = "",
         wr_skey = "",
         wr_rt = "",
@@ -286,7 +270,7 @@ function Auth.clearSession()
     })
 end
 
---- 字段是真相；cookie 字符串只是派生落盘（兼容旧读法）。
+--- 会话以字段落盘；Cookie 头按需由字段拼装。
 ---@param vid string|number|nil
 ---@param skey string|nil
 ---@param rt string|nil
@@ -306,7 +290,6 @@ local function applySession(vid, skey, rt, name, extras)
         wr_rt = rt,
     }
     saveCfg({
-        cookie = cookieFrom(map, SESSION_COOKIE_KEYS) or "",
         wr_vid = map.wr_vid,
         wr_skey = map.wr_skey,
         wr_rt = map.wr_rt,
@@ -517,8 +500,7 @@ end
 ---@param path_query string
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
-local jsonGetAsync
-jsonGetAsync = function(base, path_query, cb)
+local function jsonGetAsync(base, path_query, cb)
     return Auth.webGetAsync(absUrl(base, path_query), nil, function(raw, err)
         if not raw then
             cb(nil, err)
@@ -651,8 +633,10 @@ function Auth.agentGatewayAsync(api_name, params, cb)
     end)
 end
 
-local ensureGuestCookiesAsync
-ensureGuestCookiesAsync = function(cb)
+--- 访客 Cookie：重置登录 jar，访问首页拿 wr_fp/wr_gid，缺失则本地随机补齐。
+---@param cb fun(ok: boolean)
+---@return { cancel: fun() }
+local function ensureGuestCookiesAsync(cb)
     login_jar = {}
     return Request.request({
         url = WEB .. "/",

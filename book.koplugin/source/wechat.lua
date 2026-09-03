@@ -68,28 +68,21 @@ local function importShelfProgress(self, shelf, cb)
         if cb then cb() end
         return
     end
-    require("utils.db.queue").run(function()
-        local ProgressDB = require("utils.db.progress")
-        for _, row in ipairs(rows) do
-            -- row.chapter_idx 来自 wire（云端索引空间）。目录已缓存时按 uid 换算成本地
-            -- 序号；没缓存就只能先存 wire 值，真正打开时 getProgressAsync 会再纠正一次。
-            local chapter_idx = (row.chapter_uid
-                and Toc.index(self.id, row.stable_id, row.chapter_uid)) or row.chapter_idx
-            ProgressDB.upsertRemote(self.id, row.stable_id, {
-                fraction = row.fraction,
-                chapter_idx = chapter_idx,
-                chapter_fraction = row.chapter_fraction,
-                extra = (row.chapter_uid and chapter_idx)
-                    and { chapter_uid = row.chapter_uid, chapter_idx = chapter_idx } or nil,
-            })
-        end
-    end, {
-        on_done = cb,
-        on_failed = function(err)
-            logger.warn("wechat shelf progress import failed", err)
-            if cb then cb() end
-        end,
-    })
+    local ProgressDB = require("db.progress")
+    for _, row in ipairs(rows) do
+        -- row.chapter_idx 来自 wire（云端索引空间）。目录已缓存时按 uid 换算成本地
+        -- 序号；没缓存就只能先存 wire 值，真正打开时 getProgressAsync 会再纠正一次。
+        local chapter_idx = (row.chapter_uid
+            and Toc.index(self.id, row.stable_id, row.chapter_uid)) or row.chapter_idx
+        ProgressDB.upsertRemote(self.id, row.stable_id, {
+            fraction = row.fraction,
+            chapter_idx = chapter_idx,
+            chapter_fraction = row.chapter_fraction,
+            extra = (row.chapter_uid and chapter_idx)
+                and { chapter_uid = row.chapter_uid, chapter_idx = chapter_idx } or nil,
+        })
+    end
+    if cb then cb() end
 end
 
 --- 返回微信读书源能力集。
@@ -129,8 +122,8 @@ function Source:deleteBookAsync(identity, cb)
             return
         end
         os.remove(Paths.coverPath(identity.stable_id, self.id))
-        require("utils.db.book").remove(self.id, identity.stable_id)
-        require("utils.db.chapter").deleteUnder(dir)
+        require("db.book").remove(self.id, identity.stable_id)
+        require("db.chapter").deleteUnder(dir)
         cb(true)
     end)
     return { cancel = function() cancelled = true end }
@@ -174,15 +167,13 @@ function Source:syncBooksAsync(_opts, cb)
             local list = Mapper.shelfList(wire, function(id, url)
                 rememberCover(self, id, url)
             end)
-            job = require("book.store").reconcileAsync(self.id, list.data or {}, nil, function(result, rerr)
-                if cancelled then return end
-                if not result then
-                    cb(nil, rerr)
-                    return
-                end
-                importShelfProgress(self, wire, function()
-                    if not cancelled then cb(result) end
-                end)
+            local result, rerr = require("book.store").reconcile(self.id, list.data or {})
+            if not result then
+                cb(nil, rerr)
+                return
+            end
+            importShelfProgress(self, wire, function()
+                if not cancelled then cb(result) end
             end)
         else
             cb(nil, err)
@@ -290,12 +281,11 @@ function Source:getDetailAsync(identity, cb)
 end
 
 --- 取目录：命中本地 toc 缓存则下一个 tick 直接回调（返回 nil，无可取消 job），
---- 未命中才拉章节信息并写回缓存。
----@param self WechatSource
+--- 未命中才拉章节信息并写回缓存。也是阅读会话目录恢复入口。
 ---@param identity BookIdentity
 ---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
-local function getTocAsync(self, identity, cb)
+function Source:loadTocAsync(identity, cb)
     local cached = Toc.read(identity.source_id, identity.stable_id)
     if cached and #cached > 0 then
         require("ui/uimanager"):nextTick(function() cb(cached) end)
@@ -340,7 +330,7 @@ local function resolveChapterUidAsync(self, identity, chapter_idx, cb)
         require("ui/uimanager"):nextTick(function() cb(nil, _("缺少章节信息")) end)
         return nil
     end
-    return getTocAsync(self, identity, function(toc, err)
+    return self:loadTocAsync(identity, function(toc, err)
         if not toc then
             cb(nil, err or _("缺少章节信息"))
             return
@@ -368,7 +358,7 @@ end
 ---@return { cancel: fun() }
 function Source:openBookAsync(identity, opts, cb)
     return require("source.chapter").openWithUi(self, identity, identity.book, opts, {
-        loadToc = function(r, done) return getTocAsync(self, r, done) end,
+        loadToc = function(r, done) return self:loadTocAsync(r, done) end,
         fetchContent = fetchContent,
         refreshCached = function(_r, chapter, path, done)
             return WChapter.refreshCached(path, done)
@@ -396,7 +386,7 @@ end
 ---@return { cancel: fun() }
 function Source:cacheAllChaptersAsync(identity, on_progress, cb)
     local cancelled, active = false, nil
-    active = getTocAsync(self, identity, function(toc, err)
+    active = self:loadTocAsync(identity, function(toc, err)
         if cancelled then return end
         if not toc then cb(false, 0, err or _("章节列表为空"), 0, 0); return end
         active = require("source.chapter").prefetchAsync(identity, nil, toc, 0, #toc, {
@@ -467,7 +457,7 @@ function Source:getProgressAsync(identity, cb)
             finish()
             return
         end
-        second = getTocAsync(self, identity, function()
+        second = self:loadTocAsync(identity, function()
             if cancelled then return end
             pos.chapter_idx = Toc.index(identity.source_id, identity.stable_id, chapter_uid)
                 or pos.chapter_idx
@@ -677,7 +667,7 @@ function Source:pushStatsAsync(rows, cb)
             ensureAndReport(bucket, chapter_uid)
             return
         end
-        job = getTocAsync(self, { source_id = self.id, stable_id = bucket.stable_id }, function()
+        job = self:loadTocAsync({ source_id = self.id, stable_id = bucket.stable_id }, function()
             if cancelled then return end
             chapter_uid = Toc.uid(self.id, bucket.stable_id, bucket.chapter_idx)
             if not chapter_uid then
@@ -943,40 +933,6 @@ function Source:pushNotesAsync(identity, annotations, cb)
             if current_job and current_job.cancel then current_job:cancel() end
         end,
     }
-end
-
---- 生命周期：用户触发的统计同步。
----
---- 阅读时长不在此处心跳上报：本地 ``book.stats`` 采集是唯一来源，关书时经
---- ``syncStatsAsync`` → ``pushStatsAsync`` 按章补报。翻页时再报一次会让微信侧时长翻倍。
----@param event string
----@param payload table|nil
-function Source:onEvent(event, payload)
-    SourceBase.onEvent(self, event, payload)
-    if not self:configured() then return end
-    if event == "stats_sync_request" then
-        self:syncReadingStats(true)
-    end
-end
-
---- 用户触发的统计同步。
----@param show_message boolean
-function Source:syncReadingStats(show_message)
-    if self._stats_syncing then return end
-    self._stats_syncing = true
-    local UIManager = require("ui/uimanager")
-    local InfoMessage = require("ui/widget/infomessage")
-    require("ui/network/manager"):runWhenOnline(function()
-        self:syncStatsAsync(nil, function(result, err)
-            self._stats_syncing = false
-            if show_message then
-                UIManager:show(InfoMessage:new{
-                    text = result and _("阅读统计已同步") or (err or _("统计同步失败")),
-                    timeout = 2,
-                })
-            end
-        end)
-    end)
 end
 
 return WeChat

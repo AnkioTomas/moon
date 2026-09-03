@@ -98,9 +98,8 @@ stub("source.chapter", function()
 end)
 stub("book.store", function()
     return {
-        reconcileAsync = function(_, books, _, cb)
-            cb({ pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false })
-            return { cancel = function() end }
+        reconcile = function(_, books)
+            return { pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
         end,
     }
 end)

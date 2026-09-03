@@ -8,8 +8,7 @@ reading_stats 是本地唯一事实来源：本地采集和本地导入写成待
 @module koplugin.book.book.stats
 --]]
 
-local StatsDB = require("utils.db.stats")
-local DbQueue = require("utils.db.queue")
+local StatsDB = require("db.stats")
 local logger = require("logger")
 local SourceCapabilities = require("types.book_source").SourceCapabilities
 local Stats = {}
@@ -28,7 +27,7 @@ local PULL_TTL = 30 * 60
 ---@type ReadingStatsSession|nil
 local session
 
---- 结清一个页面计时段并异步写入待同步统计。
+--- 结清一个页面计时段并写入待同步统计。
 --- 停留不足 1 秒时直接丢弃；数据库错误通过 done 返回。
 ---@param current ReadingStatsSession
 ---@param done fun(err: any|nil)|nil
@@ -42,6 +41,7 @@ local function settle(current, done)
     local row = {
         source_id = current.identity.source_id,
         stable_id = current.identity.stable_id,
+        record_type = "page",
         page = current.page,
         start_time = current.started_at,
         duration = duration,
@@ -49,19 +49,15 @@ local function settle(current, done)
         chapter_idx = current.chapter_idx,
         chapter_fraction = current.chapter_fraction,
     }
-    DbQueue.run(function()
-        assert(StatsDB.add(row), "failed to record reading stats")
-    end, {
-        on_done = done,
-        on_failed = function(err)
-            logger.warn("book.stats write failed", err)
-            if done then done(err) end
-        end,
-    })
+    local ok = StatsDB.add(row)
+    if not ok then
+        logger.warn("book.stats write failed", row.stable_id)
+    end
+    if done then done(not ok and "failed to record reading stats" or nil) end
 end
 
 --- 移除当前内存会话，并在存在活动计时段时结清它。
---- 先清空 session，避免异步落库期间重复结算同一计时段。
+--- 先清空 session，避免重复结算同一计时段。
 ---@param done fun(err: any|nil)|nil
 ---@return nil
 local function stopSession(done)
@@ -150,17 +146,12 @@ function Stats.push(source, done)
             if done then done(true, result, 0) end
             return
         end
-        DbQueue.run(function()
-            assert(StatsDB.markSynced(confirm_ids), "failed to confirm reading stats")
-        end, {
-            on_done = function()
-                if done then done(true, result, #confirm_ids) end
-            end,
-            on_failed = function(confirm_err)
-                logger.warn("book.stats confirm failed", confirm_err)
-                if done then done(false, confirm_err) end
-            end,
-        })
+        if StatsDB.markSynced(confirm_ids) then
+            if done then done(true, result, #confirm_ids) end
+        else
+            logger.warn("book.stats confirm failed", #confirm_ids)
+            if done then done(false, "failed to confirm reading stats") end
+        end
     end
     return source:pushStatsAsync(rows, onResult)
 end
@@ -253,26 +244,15 @@ local function importRows(rows, done)
             if done then done(result) end
             return
         end
-        local inserted = false
-        DbQueue.run(function()
-            if StatsDB.exists(row) then return end
-            assert(StatsDB.add(row), "failed to import reading stats")
-            inserted = true
-        end, {
-            on_done = function()
-                if inserted then
-                    result.imported = result.imported + 1
-                else
-                    result.skipped = result.skipped + 1
-                end
-                UIManager:nextTick(nextItem)
-            end,
-            on_failed = function(err)
-                result.failed = result.failed + 1
-                logger.warn("book.stats import failed", err)
-                UIManager:nextTick(nextItem)
-            end,
-        })
+        if StatsDB.exists(row) then
+            result.skipped = result.skipped + 1
+        elseif StatsDB.add(row) then
+            result.imported = result.imported + 1
+        else
+            result.failed = result.failed + 1
+            logger.warn("book.stats import failed", row.stable_id)
+        end
+        UIManager:nextTick(nextItem)
     end
     UIManager:nextTick(nextItem)
 end
@@ -294,21 +274,14 @@ function Stats.pull(source, done)
             if done then done(false, err) end
             return
         end
-        local saved
-        DbQueue.run(function()
-            saved = StatsDB.replaceSynced(source.id, replace, rows)
-            assert(saved, "failed to save pulled reading stats")
-        end, {
-            on_done = function()
-                saved.skipped = saved.skipped + invalid
-                saved.failed = 0
-                if done then done(true, saved) end
-            end,
-            on_failed = function(save_err)
-                logger.warn("book.stats pull save failed", source.id, save_err)
-                if done then done(false, save_err) end
-            end,
-        })
+        local saved = StatsDB.replaceSynced(source.id, replace, rows)
+        if saved then
+            saved.skipped = saved.skipped + invalid
+            saved.failed = 0
+            if done then done(true, saved) end
+        else
+            if done then done(false, "failed to save pulled reading stats") end
+        end
     end)
 end
 
@@ -405,8 +378,8 @@ end
 --- 同一路径只保留第一次出现的身份，避免重复读取同一个 sidecar。
 ---@return table[] candidates 含 path、source_id、stable_id，章节可含 chapter_idx
 local function localStatCandidates()
-    local BookDB = require("utils.db.book")
-    local ChapterDB = require("utils.db.chapter")
+    local BookDB = require("db.book")
+    local ChapterDB = require("db.chapter")
     local out, seen = {}, {}
 
     --- 添加一个未出现过的有效物理路径。
@@ -438,7 +411,7 @@ local function readKoreaderStatsDb()
     if not sq_ok or not SQ3 then return rows end
     local conn = SQ3.open(path)
     if not conn then return rows end
-    local BookDB = require("utils.db.book")
+    local BookDB = require("db.book")
     local stmt
     local query_ok = pcall(function()
         stmt = conn:prepare([[SELECT b.md5, p.page, p.start_time, p.duration, p.total_pages
@@ -450,6 +423,7 @@ local function readKoreaderStatsDb()
                 rows[#rows + 1] = {
                     source_id = book.source_id,
                     stable_id = book.stable_id,
+                    record_type = "page",
                     page = tonumber(item[2]) or 0,
                     start_time = tonumber(item[3]) or 0,
                     duration = tonumber(item[4]) or 0,
@@ -522,6 +496,7 @@ function Stats.importLocalAsync(done)
             rows[#rows + 1] = {
                 source_id = candidate.source_id,
                 stable_id = candidate.stable_id,
+                record_type = "page",
                 page = tonumber(points[timestamp]) or tonumber(points[tostring(timestamp)]) or 0,
                 start_time = timestamp,
                 duration = average,

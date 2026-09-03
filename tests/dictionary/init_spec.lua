@@ -20,7 +20,7 @@ local manage_calls = 0
 local download_calls = 0
 local pick_opts
 local manage_changed_callback
-package.preload["ui.reader.dictionary"] = function()
+package.preload["dictionary.ui"] = function()
     return {
         manage = function(_, changed_callback)
             manage_calls = manage_calls + 1

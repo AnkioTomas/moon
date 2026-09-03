@@ -11,9 +11,8 @@ local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local UIManager = require("ui/uimanager")
 local Paths = require("utils.paths")
-local BookDB = require("utils.db.book")
-local ChapterDB = require("utils.db.chapter")
-local Task = require("utils.task")
+local BookDB = require("db.book")
+local ChapterDB = require("db.chapter")
 
 local Cache = {}
 
@@ -27,6 +26,62 @@ local function parentDir(path)
     return path:match("(.+)/[^/]+$")
 end
 
+--- 目录直属子项（跳过 . / ..）。
+---@param dir string
+---@return string[]
+local function entriesOf(dir)
+    local names = {}
+    for name in lfs.dir(dir) do
+        if name ~= "." and name ~= ".." then names[#names + 1] = name end
+    end
+    return names
+end
+
+--- 缓存根下所有 <source>/book/<entry> 的绝对路径。
+---@param cache_root string
+---@return string[]
+local function bookEntries(cache_root)
+    local out = {}
+    for _, source_name in ipairs(entriesOf(cache_root)) do
+        local book_root = cache_root .. "/" .. source_name .. "/book"
+        if lfs.attributes(book_root, "mode") == "directory" then
+            for _, name in ipairs(entriesOf(book_root)) do
+                out[#out + 1] = book_root .. "/" .. name
+            end
+        end
+    end
+    return out
+end
+
+--- 条目最后活跃时间：有登记取 books.last_open，否则回退文件 mtime；两者都没有为 0（不清）。
+---@param path string
+---@param recorded number|nil
+---@return number
+local function lastOpenOf(path, recorded)
+    if recorded and recorded > 0 then return recorded end
+    local attr = lfs.attributes(path)
+    return attr and tonumber(attr.modification) or 0
+end
+
+--- 删掉一个过期条目并清对应登记：目录 = 章节书（整目录 purge），文件 = 整本书。
+---@param path string
+---@param mode string
+---@return boolean removed
+local function purgeEntry(path, mode)
+    if mode == "directory" then
+        if not require("ffi/util").purgeDir(path) then return false end
+        BookDB.clearPathsUnder(path)
+        ChapterDB.deleteUnder(path)
+        logger.info("book cleaned stale book dir", path)
+        return true
+    end
+    -- os.remove 失败返回 nil, err 不抛错
+    if not os.remove(path) then return false end
+    BookDB.clearPath(path)
+    ChapterDB.delete(path)
+    return true
+end
+
 --- 清理过期 meta，并删掉连续 90 天未打开的书目录；顺带清失效路径登记
 ---@return number 删除的目录/文件数
 function Cache.cleanupStale()
@@ -36,66 +91,26 @@ function Cache.cleanupStale()
 
     local book_rows = BookDB.pathsAll()
     local chapter_rows = ChapterDB.all()
-    local book_by_path = {}
-    -- 目录活跃度：章节 touch 也会更新 books.last_open，按书目录取最大值即可
-    local last_open_by_dir = {}
+    -- 活跃度按条目路径索引：整本书 = 文件自身；章节书 = 章节所在目录取最大值
+    -- （章节 touch 也会更新 books.last_open）
+    local last_open_by_path = {}
     for _, row in ipairs(book_rows) do
-        book_by_path[row.path] = row
+        local last_open = tonumber(row.last_open) or 0
+        last_open_by_path[row.path] = math.max(last_open_by_path[row.path] or 0, last_open)
         local dir = parentDir(row.path)
         if dir then
-            last_open_by_dir[dir] = math.max(
-                last_open_by_dir[dir] or 0,
-                tonumber(row.last_open) or 0
-            )
+            last_open_by_path[dir] = math.max(last_open_by_path[dir] or 0, last_open)
         end
     end
-    local removed = 0
-    local cache_root = Paths.cacheDir()
 
-    for source_name in lfs.dir(cache_root) do
-        if source_name ~= "." and source_name ~= ".." then
-            local source_dir = cache_root .. "/" .. source_name
-            if lfs.attributes(source_dir, "mode") == "directory" then
-                local book_root = source_dir .. "/book"
-                if lfs.attributes(book_root, "mode") == "directory" then
-                    for name in lfs.dir(book_root) do
-                        if name ~= "." and name ~= ".." then
-                            local book_dir = book_root .. "/" .. name
-                            local mode = lfs.attributes(book_dir, "mode")
-                            if mode == "directory" then
-                                local attr = lfs.attributes(book_dir)
-                                local last_open = last_open_by_dir[book_dir]
-                                    or (attr and tonumber(attr.modification)) or 0
-                                if last_open > 0 and (now - last_open) >= LOCAL_BOOK_TTL then
-                                    if require("ffi/util").purgeDir(book_dir) then
-                                        removed = removed + 1
-                                        BookDB.clearPathsUnder(book_dir)
-                                        ChapterDB.deleteUnder(book_dir)
-                                        logger.info("book cleaned stale book dir", book_dir)
-                                    end
-                                end
-                            elseif mode == "file" then
-                                local v = book_by_path[book_dir]
-                                local last_open = v and tonumber(v.last_open) or 0
-                                if last_open <= 0 then
-                                    local attr = lfs.attributes(book_dir)
-                                    last_open = attr and (tonumber(attr.modification) or 0) or 0
-                                end
-                                if last_open > 0 and (now - last_open) >= LOCAL_BOOK_TTL then
-                                    -- os.remove 失败返回 nil, err 不抛错，pcall 恒真会误计数
-                                    if os.remove(book_dir) then
-                                        removed = removed + 1
-                                        if v then
-                                            BookDB.clearPath(book_dir)
-                                        end
-                                        ChapterDB.delete(book_dir)
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
+    local removed = 0
+    for _, path in ipairs(bookEntries(Paths.cacheDir())) do
+        local mode = lfs.attributes(path, "mode")
+        local last_open = lastOpenOf(path, last_open_by_path[path])
+        if (mode == "directory" or mode == "file")
+            and last_open > 0 and now - last_open >= LOCAL_BOOK_TTL
+            and purgeEntry(path, mode) then
+            removed = removed + 1
         end
     end
 
@@ -114,28 +129,24 @@ function Cache.cleanupStale()
     return removed
 end
 
---- 过期缓存清理放到子进程（扫盘 + SQLite）。
+--- 过期缓存清理推到下一 tick 在主进程跑：cleanupStale 读写 sqlite，
+--- 而 db.base 禁止在 fork 子进程里碰库（子进程会继承父进程的连接句柄）。
 ---@param cb fun(ok: boolean, removed: number|nil)|nil
 ---@return { cancel: fun() }
 function Cache.cleanupStaleAsync(cb)
     cb = cb or function() end
-    local ffiUtil = require("ffi/util")
-    local task = Task.run(function(_, write_fd)
-        ffiUtil.writeToFD(write_fd, tostring(Cache.cleanupStale()), true)
-    end, {
-        pipe = true,
-        on_done = function(raw)
-            cb(true, tonumber(raw) or 0)
-        end,
-        on_failed = function()
+    local cancelled = false
+    UIManager:nextTick(function()
+        if cancelled then return end
+        local ok, result = pcall(Cache.cleanupStale)
+        if not ok then
+            logger.warn("book cache cleanup failed", result)
             cb(false)
-        end,
-    })
-    return {
-        cancel = function()
-            task:abort()
-        end,
-    }
+            return
+        end
+        cb(true, result)
+    end)
+    return { cancel = function() cancelled = true end }
 end
 
 --- lfs.dir 返回 (iter, dir_obj)；必须成对保存，调用 iter(dir_obj)。
@@ -293,50 +304,32 @@ function Cache.clearAsync(cb)
     local dir = Paths.cacheDir()
     local cancelled = false
     local purge_job
-    local db_job
-    -- 先清 DB 再删文件：即使文件删除失败，DB 记录已干净，不会产生孤立引用
-    db_job = Task.run(function()
-        ChapterDB.clear()
-        BookDB.clearOpens()
-        BookDB.stripMeta()
-    end, {
-        on_done = function()
-            if cancelled then
-                return
-            end
-            -- DB 清理成功后再删文件
-            purge_job = purgeDirAsync(dir, function(ok, err)
-                if cancelled then
-                    return
-                end
-                if not ok then
-                    -- 文件删除失败但 DB 已清：重建 cache 目录即可
-                    Paths.ensureCacheRoot()
-                    logger.warn("book cache file purge failed (db already cleared)", dir, err)
-                    cb(false, err)
-                    return
-                end
-                Paths.ensureCacheRoot()
-                logger.info("book cache cleared", dir)
-                cb(true)
-            end)
-        end,
-        on_failed = function(db_err)
-            if cancelled then
-                return
-            end
-            logger.warn("book cache db clear failed, skipping file purge", db_err)
-            cb(false, db_err)
-        end,
-    })
+    -- 先清 DB 再删文件：即使文件删除失败，DB 记录已干净，不会产生孤立引用。
+    -- db.* 不抛错，失败只体现在返回值上。
+    if not (ChapterDB.clear() and BookDB.clearOpens() and BookDB.stripMeta()) then
+        logger.warn("book cache db clear failed, skipping file purge")
+        cb(false, "db clear failed")
+        return { cancel = function() end }
+    end
+    -- DB 清理成功后再删文件
+    purge_job = purgeDirAsync(dir, function(ok, err)
+        if cancelled then return end
+        if not ok then
+            -- 文件删除失败但 DB 已清：重建 cache 目录即可
+            Paths.ensureCacheRoot()
+            logger.warn("book cache file purge failed (db already cleared)", dir, err)
+            cb(false, err)
+            return
+        end
+        Paths.ensureCacheRoot()
+        logger.info("book cache cleared", dir)
+        cb(true)
+    end)
     return {
         cancel = function()
             cancelled = true
             if purge_job then
                 purge_job:cancel()
-            end
-            if db_job then
-                db_job:abort()
             end
         end,
     }

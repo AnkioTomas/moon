@@ -37,7 +37,7 @@ end
 local touches = {}
 local touch_error
 package.preload["book.store"] = function()
-    return { touchAsync = function(path, identity, opts, cb)
+    return { touch = function(path, identity, opts)
         touches[#touches + 1] = {
             path = path,
             identity = identity,
@@ -45,7 +45,8 @@ package.preload["book.store"] = function()
             toc = opts.toc,
             book = opts.book,
         }
-        if touch_error then cb(nil, touch_error) else cb(true) end
+        if touch_error then return false, touch_error end
+        return true
     end }
 end
 package.preload["ui/network/manager"] = function()

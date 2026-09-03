@@ -23,7 +23,6 @@ local Setting = {}
 local function edit(plugin, key, title, hint, password, normalize)
     local UIManager = require("ui/uimanager")
     local InputDialog = require("ui/widget/inputdialog")
-    local SettingRow = require("ui.components.settingrow")
     local cfg = require("utils.settings").getSource(SOURCE_ID)
     local dialog
     dialog = InputDialog:new{

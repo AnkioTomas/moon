@@ -15,6 +15,7 @@ local _ = require("gettext")
 ---@field id SourceId
 ---@field name string|nil
 ---@field type BookSourceType
+---@field _books_refresh_at number|nil 最近一次书架同步完成时间
 local SourceBase = {}
 SourceBase.__index = SourceBase
 
@@ -57,11 +58,11 @@ end
 ---   chapter_changed — 按章会话切换章节，payload = { identity }
 ---   fm_open         — FileManager 主界面显示
 ---   desktop_open    — Book 桌面打开并可见，payload = Desktop 实例
+---   desktop_resume  — Book 桌面从休眠恢复，payload = Desktop 实例
 ---   home_open       — 用户进入首页；源侧按节流策略检查书架
 ---   library_refresh_request — 用户在图书馆点击刷新，要求源强制刷新书架
 ---   suspend         — 设备休眠前（有打开文档时）
 ---   network_connected — 网络恢复，源可重试持久化上报队列
----   stats_sync_request — 用户请求同步阅读统计，源决定 pull/push 和联网策略
 ---   page_changed    — 翻页（仅源身份书籍），payload = { identity, page, total_pages, percent }
 ---   book_info_request — 阅读面板详情页请求书籍信息，payload = { identity, book, refresh }
 ---     （源可拉最新详情写 Store.rememberMany 后调 refresh() 重绘面板；基类空操作即可）
@@ -103,13 +104,29 @@ local function syncDesktopBooks(self, desktop, opts)
     end
 end
 
+--- 后台统计成功落库后作废依赖统计的桌面缓存。
+---@param self SourceBase
+---@param desktop table
+local function pullDesktopStats(self, desktop)
+    require("book.stats").pullInBackground(self, {
+        on_done = function(ok)
+            if not ok or desktop._closed or desktop.source ~= self then return end
+            desktop._insight_state = nil
+            desktop._insight_loaded = false
+            desktop:invalidateHome()
+            if desktop.tab == "stats" then desktop:rebuild() end
+        end,
+    })
+end
+
 ---@param event string 事件名
 ---@param payload table|nil 事件载荷，含义随事件而定
 function SourceBase:onEvent(event, payload)
     if type(payload) ~= "table" then return end
     if self.configured and not self:configured() then return end
     local desktop = payload
-    if event == "home_open" then
+    if event == "home_open" or event == "desktop_resume" then
+        pullDesktopStats(self, desktop)
         if self._books_refresh_at and os.time() - self._books_refresh_at < BOOKS_REFRESH_INTERVAL then
             return
         end
@@ -122,7 +139,7 @@ function SourceBase:onEvent(event, payload)
     end
     if event ~= "desktop_open" then return end
     -- 书架同步在后台进行：首页先读本地数据，成功后由回调刷新封面和元数据。
-    require("book.stats").pullInBackground(self)
+    pullDesktopStats(self, desktop)
     syncDesktopBooks(self, desktop)
 end
 

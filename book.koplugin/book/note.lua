@@ -7,8 +7,7 @@
 --]]
 
 local JSON = require("json")
-local NoteDB = require("utils.db.note")
-local DbQueue = require("utils.db.queue")
+local NoteDB = require("db.note")
 local logger = require("logger")
 local Store = require("book.store")
 local Normalize = require("book.note.normalize")
@@ -60,25 +59,18 @@ local function saveRemoteBuckets(source_id, stable_id, annotations, done)
         if done then done(true) end
         return
     end
-    DbQueue.run(function()
-        local revision = nextRevision()
-        for key, items in pairs(buckets) do
-            local chapter_idx = key > 0 and key or nil
-        local ok, payload = pcall(JSON.encode, Normalize.clean(items))
-            assert(ok, payload)
-            assert(NoteDB.upsertRemote(
-                source_id, stable_id, chapter_idx, payload, revision
-            ), "failed to save remote notes")
+    local revision = nextRevision()
+    local ok = true
+    for key, items in pairs(buckets) do
+        local chapter_idx = key > 0 and key or nil
+        local encoded, payload = pcall(JSON.encode, Normalize.clean(items))
+        ok = encoded and NoteDB.upsertRemote(source_id, stable_id, chapter_idx, payload, revision)
+        if not ok then
+            logger.warn("book.note remote bucket failed", stable_id, chapter_idx, not encoded and payload or nil)
+            break
         end
-    end, {
-        on_done = function()
-            if done then done(true) end
-        end,
-        on_failed = function(err)
-            logger.warn("book.note remote buckets failed", stable_id, err)
-            if done then done(false) end
-        end,
-    })
+    end
+    if done then done(ok) end
 end
 
 --- 保存当前文档的完整注解快照。写入完成前不发网络请求。
@@ -109,43 +101,28 @@ function Note.save(ui, identity, done)
         return
     end
     local updated_at = nextRevision()
-    DbQueue.run(function()
-        assert(NoteDB.upsert(source_id, stable_id, chapter_idx, payload, updated_at), "failed to save notes")
-    end, {
-        on_done = function() if done then done(true, updated_at) end end,
-        on_failed = function(err)
-            logger.warn("book.note save failed", stable_id, err)
-            if done then done(false) end
-        end,
-    })
+    local saved = NoteDB.upsert(source_id, stable_id, chapter_idx, payload, updated_at)
+    if not saved then logger.warn("book.note save failed", stable_id) end
+    if done then done(saved, saved and updated_at or nil) end
 end
 
 --- 上传成功后落定这一版快照：写回源侧回填过 id 的 payload 并标记已同步。
 ---
---- 读-比对-写全在同一个 DbQueue 任务里：队列串行，所以这段相对其它库写入是原子的。
+--- 读-比对-写在同一个同步调用中，保持原子性。
 --- 上传期间用户又划了线（updated_at 变了）时整条跳过——既不覆盖新内容，也不清脏
 --- 标记，下轮同步重新上传。
 ---@param row table notes 表行（含 source_id/stable_id/chapter_idx/updated_at）
 ---@param payload string|nil 源侧回填过远端 id 的快照
 ---@param done fun(ok: boolean, stale: boolean|nil)
 local function confirm(row, payload, done)
-    local stale = false
-    DbQueue.run(function()
-        local live = NoteDB.get(row.source_id, row.stable_id, row.chapter_idx)
-        if not live or live.updated_at ~= row.updated_at then
-            stale = true
-            return
-        end
-        assert(NoteDB.markSynced(
-            row.source_id, row.stable_id, row.chapter_idx, row.updated_at, payload
-        ), "failed to confirm notes")
-    end, {
-        on_done = function() done(not stale, stale) end,
-        on_failed = function(err)
-            logger.warn("book.note confirm failed", row.stable_id, err)
-            done(false)
-        end,
-    })
+    local live = NoteDB.get(row.source_id, row.stable_id, row.chapter_idx)
+    if not live or live.updated_at ~= row.updated_at then
+        done(false, true)
+        return
+    end
+    local ok = NoteDB.markSynced(row.source_id, row.stable_id, row.chapter_idx, row.updated_at, payload)
+    if not ok then logger.warn("book.note confirm failed", row.stable_id) end
+    done(ok)
 end
 
 --- 将一个 Source 的注解快照与远端收敛。本地脏快照先上传。
@@ -191,7 +168,7 @@ function Note.syncAsync(source, opts, cb)
     if opts.identity then
         add(opts.identity.stable_id, opts.identity.chapter_idx)
     elseif not opts.dirty_only then
-        for _, stable_id in ipairs(require("utils.db.book").libraryStableIdsBySource(source.id)) do
+        for _, stable_id in ipairs(require("db.book").libraryStableIdsBySource(source.id)) do
             add(stable_id)
         end
     end
@@ -300,8 +277,8 @@ end
 ---@param done fun(result: { imported: integer, skipped: integer, failed: integer })|nil
 ---@return { cancel: fun() }
 function Note.importLocalAsync(done)
-    local BookDB = require("utils.db.book")
-    local ChapterDB = require("utils.db.chapter")
+    local BookDB = require("db.book")
+    local ChapterDB = require("db.chapter")
     local DocSettings = require("docsettings")
     local UIManager = require("ui/uimanager")
     local candidates, seen_paths = {}, {}
@@ -367,31 +344,16 @@ function Note.importLocalAsync(done)
             UIManager:nextTick(nextItem)
             return
         end
-        local inserted = false
-        DbQueue.run(function()
-            if NoteDB.get(candidate.source_id, candidate.stable_id, candidate.chapter_idx) then
-                return
-            end
-            assert(NoteDB.upsert(
-                candidate.source_id,
-                candidate.stable_id,
-                candidate.chapter_idx,
-                payload,
-                nextRevision()
-            ), "failed to import notes")
-            inserted = true
-        end, {
-            on_done = function()
-                if inserted then result.imported = result.imported + 1
-                else result.skipped = result.skipped + 1 end
-                UIManager:nextTick(nextItem)
-            end,
-            on_failed = function(err)
-                logger.warn("book.note import failed", candidate.path, err)
-                result.failed = result.failed + 1
-                UIManager:nextTick(nextItem)
-            end,
-        })
+        if NoteDB.get(candidate.source_id, candidate.stable_id, candidate.chapter_idx) then
+            result.skipped = result.skipped + 1
+        elseif NoteDB.upsert(candidate.source_id, candidate.stable_id, candidate.chapter_idx,
+            payload, nextRevision()) then
+            result.imported = result.imported + 1
+        else
+            logger.warn("book.note import failed", candidate.path)
+            result.failed = result.failed + 1
+        end
+        UIManager:nextTick(nextItem)
     end
 
     UIManager:nextTick(nextItem)

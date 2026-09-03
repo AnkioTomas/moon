@@ -108,16 +108,14 @@ package.preload["db.book"] = function()
 end
 
 
--- partialMD5 由用例按路径填表控制；值 "ERR" 模拟计算失败（pcall 兜底）
+-- partialMD5 由用例按路径填表控制（真实实现打不开文件返回 nil，不抛错）
 local md5_by_path = {}
-package.preload["ffi/util"] = function()
+-- partialMD5 在 frontend/util.lua（不是 ffi/util）；store 按真实归属 require("util")
+package.loaded["util"] = nil
+package.preload["util"] = function()
     return {
         partialMD5 = function(path)
-            local digest = md5_by_path[path]
-            if digest == "ERR" then
-                error("io error")
-            end
-            return digest
+            return md5_by_path[path]
         end,
     }
 end
@@ -207,7 +205,7 @@ do
     Assert.is_nil(Store.identityFor("/nowhere/gone.epub"))
 end
 
--- ── ensureIdentity：命中章节身份 → touchAsync 补登记（books + chapters）──
+-- ── ensureIdentity：命中章节身份 → 只刷新 books.path/last_open，chapters 已在库不重写 ──
 do
     local path = "/cache/moon/book/slug/5.html"
     chapter_rows[path] = { source_id = "moon", stable_id = "sk", chapter_idx = 5 }
@@ -219,11 +217,7 @@ do
     Assert.eq(touch_calls[1].source_id, "moon")
     Assert.eq(touch_calls[1].stable_id, "sk")
     Assert.eq(touch_calls[1].path, path)
-    Assert.eq(#chapter_upserts, 1)
-    Assert.eq(chapter_upserts[1].path, path)
-    Assert.eq(chapter_upserts[1].source_id, "moon")
-    Assert.eq(chapter_upserts[1].stable_id, "sk")
-    Assert.eq(chapter_upserts[1].chapter_idx, 5)
+    Assert.eq(#chapter_upserts, 0)
     Assert.eq(#book_upserts, 0) -- 命中身份不写 books 元数据
     Assert.eq(id.source.id, "moon") -- ensureIdentity 附属主源
     chapter_rows[path] = nil
@@ -329,33 +323,27 @@ do
     touch_calls = {}
 end
 
--- ── ensureIdentity：partialMD5 失败 → md5=nil，仍登记 ────
+-- ── ensureIdentity：文件打不开 → partialMD5 返回 nil，md5=nil 仍登记 ────
 do
-    md5_by_path["/lib/broken.epub"] = "ERR"
     local id = Store.ensureIdentity("/lib/broken.epub")
     Assert.eq(id.source_id, "local")
     Assert.eq(#book_upserts, 1)
     Assert.is_nil(book_upserts[1].md5)
     Assert.eq(book_upserts[1].title, "broken")
     Assert.eq(#touch_calls, 1)
-    md5_by_path["/lib/broken.epub"] = nil
     book_upserts = {}
     touch_calls = {}
 end
 
--- ── touchAsync：章节详情、目录和路径在同一事务登记 ──
+-- ── touch：章节详情、目录和路径在同一事务登记 ──
 do
     local identity = { source_id = "moon", stable_id = "s9" }
     local toc = { { idx = 1, title = "一" }, { idx = 2, title = "二" } }
-    local callback_ok
-    Store.touchAsync("/cache/moon/book/slug/7.html", identity, {
+    Assert.is_true(Store.touch("/cache/moon/book/slug/7.html", identity, {
         chapter_idx = 7,
         toc = toc,
         book = { title = "最新详情" },
-    }, function(ok)
-        callback_ok = ok
-    end)
-    Assert.is_true(callback_ok)
+    }))
     Assert.eq(#touch_calls, 1)
     Assert.eq(touch_calls[1].source_id, "moon")
     Assert.eq(touch_calls[1].stable_id, "s9")
@@ -378,16 +366,13 @@ do
     db_sql = {}
 end
 
--- ── touchAsync：任一登记失败都走失败回调 ────────────────
+-- ── touch：任一登记失败返回 false + 原因 ────────────────
 do
     local identity = { source_id = "moon", stable_id = "broken" }
     chapter_upsert_ok = false
-    local ok, err
-    Store.touchAsync("/cache/moon/book/slug/8.html", identity, { chapter_idx = 8 }, function(v, e)
-        ok, err = v, e
-    end)
-    Assert.is_nil(ok)
-    Assert.matches(tostring(err), "failed to register chapter path")
+    local ok, err = Store.touch("/cache/moon/book/slug/8.html", identity, { chapter_idx = 8 })
+    Assert.is_false(ok)
+    Assert.matches(err, "failed to register chapter path")
     Assert.eq(db_sql[#db_sql], "ROLLBACK;")
     chapter_upsert_ok = true
     touch_calls = {}
@@ -395,20 +380,18 @@ do
     db_sql = {}
 
     touch_ok = false
-    Store.touchAsync("/lib/broken.epub", identity, nil, function(v, e)
-        ok, err = v, e
-    end)
-    Assert.is_nil(ok)
-    Assert.matches(tostring(err), "failed to register book path")
+    ok, err = Store.touch("/lib/broken.epub", identity)
+    Assert.is_false(ok)
+    Assert.matches(err, "failed to register book path")
     touch_ok = true
     touch_calls = {}
 end
 
--- ── touchAsync：不带 chapter_idx（opts=nil / opts={}）→ 只登记 books ──
+-- ── touch：不带 chapter_idx（opts=nil / opts={}）→ 只登记 books ──
 do
     local identity = { source_id = "moon", stable_id = "s10" }
-    Store.touchAsync("/lib/whole.epub", identity, nil)
-    Store.touchAsync("/lib/whole2.epub", identity, {})
+    Store.touch("/lib/whole.epub", identity, nil)
+    Store.touch("/lib/whole2.epub", identity, {})
     Assert.eq(#touch_calls, 2)
     Assert.eq(touch_calls[1].path, "/lib/whole.epub")
     Assert.is_nil(touch_calls[1].chapter_idx)
@@ -465,7 +448,7 @@ for _, k in ipairs({
 
     "source.registry",
     "book.store",
-    "ffi/util",
+    "util",
 }) do
     package.preload[k] = nil
     package.loaded[k] = nil

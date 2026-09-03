@@ -1,26 +1,22 @@
 --[[--
-书籍身份与异步落库。
+书籍身份与数据库持久化。
 
-books/chapters → utils.db.*（book.sqlite3）
+books/chapters → db.*（book.sqlite3）
 身份 = (source_id, stable_id)；md5 是本地源的内容摘要，供扫盘识别改名/移动。
 缓存扫盘/清量在 book.cache。
 
 身份解析只有一条规则：物理路径精确查库——
 章节文件查 chapters 表，整本书查 books.path；都未中时
 .moon 内的文件拒开（必须从 Book 桌面打开），.moon 外的文件登记为 local 书。
-各源只有在物理文件落地后调用 touchAsync；需要打开文件时等待其完成回调，
-确保路径与章节身份已经写入数据库。
+各源只有在物理文件落地后调用 Store.touch（同步写库），成功后才打开文件。
 
 @module koplugin.book.book.store
 --]]
 
 local Paths = require("utils.paths")
-local DbBase = require("utils.db.base")
-local BookDB = require("utils.db.book")
-local ChapterDB = require("utils.db.chapter")
-local TocDB = require("utils.db.toc")
-local DbQueue = require("utils.db.queue")
-local logger = require("logger")
+local DbBase = require("db.base")
+local BookDB = require("db.book")
+local ChapterDB = require("db.chapter")
 
 local Store = {}
 
@@ -31,16 +27,7 @@ local function basename(path)
     return path:match("([^/\\]+)$") or path
 end
 
---- 属主源解析：身份属于哪个源就用哪个源实例（current 匹配直接用，否则按 id 建实例）；
---- 不可用返回 nil——跳过源同步，也不许错用 current（串书根因）。
---- 只在打开时（ensureIdentity）调用：registry.create 有构造开销，identityFor 读路径不挂。
----@param source_id string
----@return BookSource|nil
-local function owningSource(source_id)
-    return require("source.registry").resolve(source_id)
-end
-
---- 异步保存列表中的书籍元数据；没有身份列的临时条目跳过。
+--- 保存列表中的书籍元数据；没有身份列的临时条目跳过。
 ---@param books table
 function Store.rememberMany(books)
     local payload = {}
@@ -55,7 +42,6 @@ function Store.rememberMany(books)
                 authors = book.authors,
                 percent = tonumber(book.percent) or 0,
                 category = book.category,
-                favorite = book.favorite,
                 series = book.series,
                 intro = book.intro,
                 fetched_at = fetched_at,
@@ -65,112 +51,100 @@ function Store.rememberMany(books)
     if #payload == 0 then
         return
     end
-    DbQueue.run(function()
-        for i = 1, #payload do
-            BookDB.upsertRemote(payload[i])
-        end
-    end)
+    for i = 1, #payload do
+        BookDB.upsertRemote(payload[i])
+    end
 end
 
---- 将完整书架快照串行写入数据库；失败时 BookDB 内部回滚整个对账。
+--- 用完整书架快照对账 books 表；失败时 BookDB 内部回滚。
 ---@param source_id string
 ---@param books Book[]
----@param opts { clear_missing_paths?: boolean }|nil
----@param cb fun(result: SyncResult|nil, err: any)
----@return { cancel: fun() }
-function Store.reconcileAsync(source_id, books, opts, cb)
-    local cancelled = false
-    local before = {}
-    for _, stable_id in ipairs(BookDB.libraryStableIdsBySource(source_id)) do
-        before[stable_id] = true
-    end
+---@return SyncResult|nil result
+---@return string|nil err
+function Store.reconcile(source_id, books)
     local incoming = {}
-    for _, book in ipairs(books or {}) do
+    for _, book in ipairs(books) do
         if book.stable_id ~= nil then incoming[tostring(book.stable_id)] = true end
     end
     local hidden = 0
-    for stable_id in pairs(before) do
+    for _, stable_id in ipairs(BookDB.libraryStableIdsBySource(source_id)) do
         if not incoming[stable_id] then hidden = hidden + 1 end
     end
-    DbQueue.run(function()
-        assert(BookDB.reconcile(source_id, books or {}, opts), "failed to reconcile books")
-    end, {
-        on_done = function()
-            if not cancelled then
-                cb({ pulled = #(books or {}), pushed = 0, hidden = hidden,
-                    conflicts = 0, skipped = false })
-            end
-        end,
-        on_failed = function(err) if not cancelled then cb(nil, err) end end,
-    })
-    return { cancel = function() cancelled = true end }
+    if not BookDB.reconcile(source_id, books) then
+        return nil, "failed to reconcile books"
+    end
+    return { pulled = #books, pushed = 0, hidden = hidden, conflicts = 0, skipped = false }
 end
 
---- 异步打开/下载后登记。
+--- 章节登记事务体：最新元数据、books.path、toc、chapters 四步任一失败即返回错误。
+---@param path string
+---@param source_id string
+---@param stable_id string
+---@param opts { chapter_idx: number, toc_payload: string|nil, book: Book|nil }
+---@return string|nil err
+local function registerChapter(path, source_id, stable_id, opts)
+    if opts.book then
+        local row = {}
+        for k, v in pairs(opts.book) do row[k] = v end
+        row.source_id = source_id
+        row.stable_id = stable_id
+        if not BookDB.upsertRemote(row) then return "failed to save book metadata" end
+    end
+    if not BookDB.touchPath(source_id, stable_id, path) then return "failed to register book path" end
+    if opts.toc_payload and not BookDB.setToc(source_id, stable_id, opts.toc_payload) then
+        return "failed to save chapter toc"
+    end
+    if not ChapterDB.upsert({
+        path = path,
+        source_id = source_id,
+        stable_id = stable_id,
+        chapter_idx = opts.chapter_idx,
+    }) then
+        return "failed to register chapter path"
+    end
+    return nil
+end
+
+--- 打开/下载后登记物理路径。
 --- 整本写 books.path；章节在同一事务写最新元数据、toc、books.path 和 chapters。
 ---@param path string 本地 epub/html 路径
 ---@param identity BookIdentity
 ---@param opts { chapter_idx: number|nil, toc: BookChapter[]|nil, book: Book|nil }|nil
----@param cb fun(ok: boolean|nil, err: any|nil)|nil
-function Store.touchAsync(path, identity, opts, cb)
+---@return boolean ok
+---@return string|nil err
+function Store.touch(path, identity, opts)
     local source_id, stable_id = identity.source_id, identity.stable_id
     local chapter_idx = opts and opts.chapter_idx
+    if not chapter_idx then
+        if not BookDB.touchPath(source_id, stable_id, path) then
+            return false, "failed to register book path"
+        end
+        return true
+    end
+
     local toc_payload
-    if opts and opts.toc then
-        local ok, payload = pcall(function() return require("json").encode(opts.toc) end)
+    if opts.toc then
+        local ok, payload = pcall(require("json").encode, opts.toc)
         if not ok or type(payload) ~= "string" or payload == "" then
-            if cb then cb(nil, payload or "failed to encode chapter toc") end
-            return
+            return false, payload or "failed to encode chapter toc"
         end
         toc_payload = payload
     end
-    DbQueue.run(function()
-        if not chapter_idx then
-            assert(BookDB.touchPath(source_id, stable_id, path), "failed to register book path")
-            return
-        end
-
-        assert(DbBase.ensure(), "failed to open book database")
-        assert(DbBase.exec("BEGIN IMMEDIATE;"), "failed to begin path registration")
-        local ok, err = pcall(function()
-            local book = opts and opts.book
-            if book then
-                local row = {}
-                for k, v in pairs(book) do row[k] = v end
-                row.source_id = source_id
-                row.stable_id = stable_id
-                assert(BookDB.upsertRemote(row), "failed to save book metadata")
-            end
-            if toc_payload then
-                assert(TocDB.upsert(source_id, stable_id, toc_payload), "failed to save chapter toc")
-            end
-            assert(BookDB.touchPath(source_id, stable_id, path, chapter_idx), "failed to register book path")
-            assert(ChapterDB.upsert({
-                path = path,
-                source_id = source_id,
-                stable_id = stable_id,
-                chapter_idx = chapter_idx,
-            }), "failed to register chapter path")
-        end)
-        if ok then
-            if not DbBase.exec("COMMIT;") then
-                DbBase.exec("ROLLBACK;")
-                error("failed to commit path registration")
-            end
-        else
-            DbBase.exec("ROLLBACK;")
-            error(err, 0)
-        end
-    end, {
-        on_done = cb and function() cb(true) end or nil,
-        on_failed = function(err)
-            if cb then
-                cb(nil, err)
-            else
-                logger.warn("book.store path registration failed", path, err)
-            end
-        end,
+    if not DbBase.ensure() then return false, "failed to open book database" end
+    if not DbBase.exec("BEGIN IMMEDIATE;") then return false, "failed to begin path registration" end
+    local err = registerChapter(path, source_id, stable_id, {
+        chapter_idx = chapter_idx,
+        toc_payload = toc_payload,
+        book = opts.book,
     })
+    if not err and not DbBase.exec("COMMIT;") then
+        err = "failed to commit path registration"
+    end
+    if err then
+        DbBase.exec("ROLLBACK;")
+        return false, err
+    end
+    return true
 end
 
 --- 从数据库读取书籍目录；目录缺失或损坏返回 nil。
@@ -178,9 +152,9 @@ end
 ---@return BookChapter[]|nil
 function Store.toc(identity)
     if not identity or not identity.source_id or not identity.stable_id then return nil end
-    local payload = TocDB.get(identity.source_id, identity.stable_id)
+    local payload = BookDB.getToc(identity.source_id, identity.stable_id)
     if not payload then return nil end
-    local ok, toc = pcall(function() return require("json").decode(payload) end)
+    local ok, toc = pcall(require("json").decode, payload)
     if not ok or type(toc) ~= "table" or #toc == 0 then return nil end
     return toc
 end
@@ -238,15 +212,17 @@ end
 --- 打开时确保身份：能解析则补登记打开记录；
 --- .moon 内未知文件返回 nil（必须从 Book 桌面打开）；
 --- .moon 外未入库文件一律当本地书登记（统计/进度挂到 local 源）。
---- 返回的身份附带属主源实例（source 字段，可能为 nil）。
---- DB 写入走队列异步落，返回的是内存身份（含 book/chapter 元数据），同 tick 再查 identityFor 不一定中。
+--- 返回的身份附带属主源实例（source 字段，可能为 nil）：身份属于哪个源就用哪个源实例
+--- （registry.resolve：current 匹配直接用，否则按 id 建实例），不许错用 current（串书根因）。
 ---@param path string
 ---@return BookIdentity|nil
 function Store.ensureIdentity(path)
+    local registry = require("source.registry")
     local id = Store.identityFor(path)
     if id then
-        id.source = owningSource(id.source_id)
-        Store.touchAsync(path, id, { chapter_idx = id.chapter_idx })
+        id.source = registry.resolve(id.source_id)
+        -- 路径已在库里（chapters/books.path 命中），只需刷新打开时间
+        BookDB.touchPath(id.source_id, id.stable_id, path)
         return id
     end
     if Paths.isMoonPath(path) then
@@ -254,31 +230,24 @@ function Store.ensureIdentity(path)
     end
     -- 未入库 → 当本地书登记（标题取文件名；md5 供扫盘改名识别）。
     -- 已有行（如扫盘已解析元数据、仅 path 被清掉）只补 path，不覆盖元数据。
-    local ok, digest = pcall(function()
-        return require("ffi/util").partialMD5(path)
-    end)
-    local name = basename(path)
-    local title = name:gsub("%.[^%.]+$", "")
     local row = {
         source_id = "local",
         stable_id = path,
-        md5 = ok and digest or nil,
-        title = title,
+        md5 = require("util").partialMD5(path),
+        title = basename(path):gsub("%.[^%.]+$", ""),
         fetched_at = os.time(),
         path = path,
     }
-    DbQueue.run(function()
-        if not BookDB.get("local", path) then
-            BookDB.upsert(row)
-        end
-        BookDB.touchPath("local", path, path, nil)
-    end)
+    if not BookDB.get("local", path) then
+        BookDB.upsert(row)
+    end
+    BookDB.touchPath("local", path, path)
     return {
         source_id = "local",
         stable_id = path,
         chapter_idx = nil,
         book = row,
-        source = owningSource("local"),
+        source = registry.resolve("local"),
     }
 end
 

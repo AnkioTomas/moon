@@ -85,7 +85,6 @@ function Mapper.book(row)
             finished
         ),
         category = book.category,
-        favorite = book.favorite or (book.isTop == 1) or nil,
         series = book.series,
         cover = cover,
     }
@@ -125,7 +124,6 @@ function Mapper.albumBook(album)
     if not id then
         return nil
     end
-    local extra = album.albumInfoExtra
     local cover = type(info.cover) == "string" and info.cover or nil
     local finished = info.finish == 1 or info.finish == true or info.finishStatus == "已完结"
     return {
@@ -133,7 +131,6 @@ function Mapper.albumBook(album)
         title = info.name or info.title,
         authors = info.authorName or info.author,
         percent = Book.clampPercent(0, finished),
-        favorite = type(extra) == "table" and extra.isTop == 1 or nil,
         cover = cover,
     }, cover
 end

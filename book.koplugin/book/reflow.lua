@@ -189,7 +189,10 @@ function Reflow.applyAsync(identity, cb)
         end
         touch_identity.stable_id = replaced
         touch_identity.path = replaced
-        require("book.store").touchAsync(replaced, touch_identity)
+        local touched, touch_err = require("book.store").touch(replaced, touch_identity)
+        if not touched then
+            require("logger").warn("book reflow path registration failed", replaced, touch_err)
+        end
         cb(replaced)
     end
 

@@ -243,15 +243,8 @@ do
     })
     Assert.eq(auth.cookieHeader(), "wr_gid=g; wr_fp=f; wr_vid=1; wr_skey=s; wr_ql=0; wr_rt=r")
 
-    -- 仅旧整段 cookie → 原样回退
-    local legacy = freshAuth({ cookie = "wr_skey=oldskey; wr_vid=9" })
-    Assert.eq(legacy.cookieHeader(), "wr_skey=oldskey; wr_vid=9")
-
-    -- 字段为空串不算，仍回退旧 cookie
-    local empty_fields = freshAuth({ wr_skey = "", cookie = "wr_skey=x" })
-    Assert.eq(empty_fields.cookieHeader(), "wr_skey=x")
-
-    -- 什么都没有 → nil
+    -- 字段全空 → nil；整段 cookie 串不再是配置项，不读
+    Assert.is_nil(freshAuth({ wr_skey = "", cookie = "wr_skey=x" }).cookieHeader())
     Assert.is_nil(freshAuth({}).cookieHeader())
 end
 
@@ -296,11 +289,8 @@ end
 
 do
     Assert.is_true(freshAuth({ wr_skey = "s" }).hasSession())
-    -- 旧 cookie 串含非空 wr_skey= 才算有会话；空值不算
-    Assert.is_true(freshAuth({ cookie = "wr_gid=1; wr_skey=abc" }).hasSession())
-    Assert.is_false(freshAuth({ cookie = "wr_skey=; wr_gid=1" }).hasSession())
     Assert.is_false(freshAuth({ wr_skey = "" }).hasSession())
-    Assert.is_false(freshAuth({ cookie = "wr_gid=1" }).hasSession())
+    Assert.is_false(freshAuth({ cookie = "wr_gid=1; wr_skey=abc" }).hasSession(), "整段 cookie 串不算会话")
     Assert.is_false(freshAuth({}).hasSession())
 
     Assert.eq(freshAuth({ user_name = "阿明", user_id = "9" }).userLabel(), "阿明")
@@ -315,7 +305,7 @@ end
 
 do
     local cfg = {
-        cookie = "c", wr_vid = "v", wr_skey = "s", wr_rt = "r",
+        wr_vid = "v", wr_skey = "s", wr_rt = "r",
         wr_gid = "g", wr_fp = "f", wr_ql = "1",
         user_id = "u", user_name = "n",
         api_key = "k", skill_version = "sv", other = "keep",
@@ -323,7 +313,7 @@ do
     local auth = freshAuth(cfg)
     auth.clearSession()
     for _, k in ipairs({
-        "cookie", "wr_vid", "wr_skey", "wr_rt",
+        "wr_vid", "wr_skey", "wr_rt",
         "wr_gid", "wr_fp", "wr_ql", "user_id", "user_name",
         "api_key", "skill_version",
     }) do

@@ -229,11 +229,10 @@ end
 
 --- 下载正文里仍指向 http(s) 的 img 并写入 images/。
 ---@param xhtml string
----@param referer string|nil
 ---@param images_dir string
 ---@param cb fun(html: string)
 ---@return table|nil
-local function downloadRemoteImagesAsync(xhtml, referer, images_dir, cb)
+local function downloadRemoteImagesAsync(xhtml, images_dir, cb)
     local urls = {}
     local seen = {}
     xhtml:gsub('src=(["\'])(.-)%1', function(_, src)
@@ -311,7 +310,7 @@ function Assets.localizeAsync(book_id, chapter, html, referer, cb)
     local function afterTar(src_map)
         if cancelled then return end
         local rewritten = Assets.rewriteImageSources(html, src_map or {})
-        local job = downloadRemoteImagesAsync(rewritten, referer, images_dir, finish)
+        local job = downloadRemoteImagesAsync(rewritten, images_dir, finish)
         if job then
             jobs[#jobs + 1] = job
         end

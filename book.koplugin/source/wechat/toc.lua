@@ -1,5 +1,5 @@
 --[[--
-微信读书目录缓存读取：把 toc 表（JSON 载荷）的读取与按 idx/uid 定位收口到一处，
+微信读书目录缓存读取：把 books.toc（JSON 载荷）的读取与按 idx/uid 定位收口到一处，
 避免在门面、上报器与划线模块里重复 decode。
 
 解码结果带进程内缓存：目录只由本插件 ``Toc.put`` 写入，写入即失效重建，
@@ -49,11 +49,11 @@ local function entryOf(source_id, stable_id)
     if hit then
         return hit
     end
-    local payload = require("utils.db.toc").get(source_id, stable_id, TTL)
+    local payload = require("db.book").getToc(source_id, stable_id, TTL)
     if not payload then
         return nil
     end
-    local ok, decoded = pcall(function() return require("json").decode(payload) end)
+    local ok, decoded = pcall(require("json").decode, payload)
     if not ok or type(decoded) ~= "table" then
         return nil
     end
@@ -76,14 +76,12 @@ end
 ---@param stable_id string
 ---@param list BookChapter[]
 function Toc.put(source_id, stable_id, list)
-    local ok, encoded = pcall(function() return require("json").encode(list) end)
+    local ok, encoded = pcall(require("json").encode, list)
     if not ok or not encoded then
         return
     end
     cache[cacheKey(source_id, stable_id)] = buildEntry(list)
-    require("utils.db.queue").run(function()
-        require("utils.db.toc").upsert(source_id, stable_id, encoded)
-    end)
+    require("db.book").setToc(source_id, stable_id, encoded)
 end
 
 --- 按 1-based 章节序号取 chapter.uid。
@@ -127,7 +125,7 @@ function Toc.wholeFraction(source_id, stable_id, chapter_idx, chapter_fraction)
     )
 end
 
---- 清空进程内目录缓存；落库的 toc 表不受影响。
+--- 清空进程内目录缓存；落库的 books.toc 不受影响。
 function Toc.clear()
     cache = {}
 end

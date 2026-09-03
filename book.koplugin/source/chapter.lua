@@ -70,18 +70,14 @@ local function loadToc(identity, ops, cb)
     end)
 end
 
---- 取本地记录的阅读位置：待推送进度优先，其次书表的 last_chapter_idx。
+--- 取本地记录的阅读位置：只读 pending_progress。
 --- 待推送进度只有在带章节号或百分比大于 0 时才算数，避免刚建的空记录覆盖历史。
 ---@param identity BookIdentity
 ---@return PendingProgress|{ chapter_idx: number }|nil
 local function localPosition(identity)
-    local pending = require("utils.db.progress").get(identity.source_id, identity.stable_id)
+    local pending = require("db.progress").get(identity.source_id, identity.stable_id)
     if pending and (tonumber(pending.chapter_idx) or (tonumber(pending.fraction) or 0) > 0) then
         return pending
-    end
-    local book = require("utils.db.book").get(identity.source_id, identity.stable_id)
-    if book and tonumber(book.last_chapter_idx) then
-        return { chapter_idx = tonumber(book.last_chapter_idx) }
     end
 end
 
@@ -98,7 +94,7 @@ local function existingLocalPath(identity, opts)
     end
     local book = identity.book
     if not book or not book.path then
-        book = require("utils.db.book").get(identity.source_id, identity.stable_id)
+        book = require("db.book").get(identity.source_id, identity.stable_id)
     end
     if book and chapterReady(book.path) then
         return book.path
@@ -135,6 +131,7 @@ end
 ---@param path string 目标章节文件路径
 ---@param payload ChapterContentPayload|string|nil 源交来的正文
 ---@param cb fun(path: string|nil, err: string|nil) 成功回传落盘路径
+---@return { cancel: fun() }|nil
 local function write(path, payload, cb, opts)
     local title, content = body(payload)
     if content == "" then
@@ -147,7 +144,10 @@ local function write(path, payload, cb, opts)
     pcall(os.remove, tmp)
     local f, err = io.open(tmp, "wb")
     if not f then cb(nil, err or _("无法写入章节")); return end
+    local completed = false
     local function finish(ok, reason)
+        if completed then return end
+        completed = true
         local closed, close_err = f:close()
         if not closed then ok, reason = false, reason or close_err end
         if not ok then
@@ -183,6 +183,7 @@ local function write(path, payload, cb, opts)
     local offset = 1
     local chunk_size = 64 * 1024
     local function writeNext()
+        if completed then return end
         if offset > #html then
             finish(true)
             return
@@ -197,6 +198,14 @@ local function write(path, payload, cb, opts)
         UIManager:nextTick(writeNext)
     end
     UIManager:nextTick(writeNext)
+    return {
+        cancel = function()
+            if completed then return end
+            completed = true
+            pcall(function() f:close() end)
+            pcall(os.remove, tmp)
+        end,
+    }
 end
 
 --- 确保第 idx 章正文已在本地：已就绪则直接用（源提供 refreshCached 时交它决定是否刷新），
@@ -278,20 +287,17 @@ function Chapter.openAsync(source, identity, book, opts, ops, cb)
             end, function(path, e)
                 if not path then cb(nil, e); return end
                 progress(3)
-                run(function(done)
-                    return require("book.store").touchAsync(path, identity, {
-                        chapter_idx = idx,
-                        toc = toc,
-                        book = book,
-                    }, done)
-                end, function(ok, db_err)
-                    if not ok then
-                        cb(nil, db_err and tostring(db_err) or _("无法登记章节"))
-                        return
-                    end
-                    progress(4)
-                    cb(path)
-                end)
+                local ok, db_err = require("book.store").touch(path, identity, {
+                    chapter_idx = idx,
+                    toc = toc,
+                    book = book,
+                })
+                if not ok then
+                    cb(nil, db_err)
+                    return
+                end
+                progress(4)
+                cb(path)
             end)
         end)
     end
@@ -473,7 +479,8 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
                 failed(err or (_("章节内容获取失败") .. " #" .. tostring(idx)))
                 return
             end
-            write(path, payload, function(wpath, write_err)
+            active = write(path, payload, function(wpath, write_err)
+                active = nil
                 if cancelled then return end
                 if not wpath then
                     failed(write_err or (_("章节保存失败") .. " #" .. tostring(idx)))
@@ -482,16 +489,14 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
                 local store_opts = { chapter_idx = idx }
                 if ops.persist_toc ~= false then store_opts.toc = toc end
                 if ops.persist_book ~= false then store_opts.book = book end
-                require("book.store").touchAsync(wpath, identity, store_opts, function(ok, err)
-                    if cancelled then return end
-                    if not ok then
-                        failed(err or (_("章节登记失败") .. " #" .. tostring(idx)))
-                        return
-                    end
-                    cached_count = cached_count + 1
-                    report()
-                    continueNext()
-                end)
+                local touched, touch_err = require("book.store").touch(wpath, identity, store_opts)
+                if not touched then
+                    failed(touch_err)
+                    return
+                end
+                cached_count = cached_count + 1
+                report()
+                continueNext()
             end, { yield_write = true })
         end)
     end

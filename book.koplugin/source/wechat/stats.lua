@@ -33,6 +33,7 @@ function Stats.fromWire(source_id, wire)
                 rows[#rows + 1] = {
                     source_id = source_id,
                     stable_id = DAY_PREFIX .. tostring(ts),
+                    record_type = "day",
                     page = 0,
                     start_time = ts,
                     duration = duration,
@@ -57,6 +58,7 @@ function Stats.fromWire(source_id, wire)
                     rows[#rows + 1] = {
                         source_id = source_id,
                         stable_id = BOOK_PREFIX .. tostring(id) .. ":" .. tostring(anchor),
+                        record_type = "book",
                         page = 0,
                         start_time = anchor,
                         duration = duration,

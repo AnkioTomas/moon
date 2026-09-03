@@ -180,6 +180,10 @@ do
 
     Assert.is_true(BookDB.upsertRemote({ source_id = "moon", stable_id = "store.epub" }))
     local q = calls[#calls]
+    -- 去掉 favorite 后：12 列绑定 + ON CONFLICT 成员标志 = 13；VALUES 不得多一个 ?
+    local qmarks = select(2, q.sql:gsub("%?", "%?"))
+    Assert.eq(qmarks, 13)
+    Assert.eq(q.argc, 13)
     Assert.eq(q.args[12], 0, "新缓存行默认不进入书架")
     Assert.eq(q.args[13], 0, "未指定成员关系时冲突行必须保留原值")
     Assert.is_true(q.sql:find("CASE WHEN ?=1 THEN excluded.in_library ELSE books.in_library END", 1, true) ~= nil)
@@ -206,15 +210,20 @@ do
     local hide, inserts, commit = 0, 0, false
     for _, call in ipairs(calls) do
         if call.sql == "UPDATE books SET in_library=0 WHERE source_id=?;" then hide = hide + 1 end
-        if call.sql:find("INSERT INTO books", 1, true) and call.argc == 13 then
+        if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
-            Assert.eq(call.args[12], 1)
-            Assert.eq(call.args[13], 1)
+            Assert.eq(call.argc, 22) -- 2 行 × 11 个绑定参数，in_library 由 SQL 常量置 1
+            -- NULL 列不得让后续列左移：md5 为空时 title 仍在第 4 位
+            Assert.eq(call.args[1], "moon")
+            Assert.is_nil(call.args[3])
+            Assert.eq(call.args[4], "A")
+            Assert.eq(call.args[12], "moon") -- 未带 source_id 的行也归到本源
+            Assert.eq(call.args[15], "B")
         end
         if call.sql == "COMMIT;" then commit = true end
     end
     Assert.eq(hide, 1)
-    Assert.eq(inserts, 2)
+    Assert.eq(inserts, 1)
     Assert.is_true(commit)
     DbBase.close()
     clearMods()
