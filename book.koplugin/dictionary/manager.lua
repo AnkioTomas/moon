@@ -9,7 +9,7 @@ StarDict 词典管理：清单、分片下载校验、原子安装、切换与�
 local JSON = require("json")
 local Request = require("http.request")
 local Paths = require("utils.paths")
-local Task = require("utils.task")
+local Job = require("workers.job")
 local lfs = require("libs/libkoreader-lfs")
 
 local Manager = {}
@@ -48,9 +48,11 @@ function Manager.validateManifest(manifest)
             return nil, "bad dictionary manifest"
         end
         local sum = 0
+        local part_prefix = item.id .. ".part."
         for _, part in ipairs(item.parts) do
             if type(part) ~= "table" or type(part.file) ~= "string"
-                or not part.file:match("^" .. item.id .. "%.part%.%d%d%d$")
+                or part.file:sub(1, #part_prefix) ~= part_prefix
+                or part.file:sub(#part_prefix + 1):match("^%d%d%d$") == nil
                 or tonumber(part.size) == nil or tonumber(part.size) <= 0
                 or not validHash(part.sha256) then
                 return nil, "bad dictionary part"
@@ -85,10 +87,26 @@ local function tmpDir(id)
     return Paths.root() .. "/dict-" .. id .. ".dl"
 end
 
---- 递归删目录。
+--- 递归删除但不跟随符号链接，避免受控目录里的链接把删除扩散到目录外。
 ---@param path string
+---@return boolean|nil, string|nil
 local function purge(path)
-    return require("ffi/util").purgeDir(path)
+    local attr, attr_err = lfs.symlinkattributes(path)
+    if not attr then
+        return nil, attr_err
+    end
+    if attr.mode ~= "directory" then
+        return os.remove(path)
+    end
+    local ok, iter, dir_obj = pcall(lfs.dir, path)
+    if not ok then return nil, iter end
+    for name in iter, dir_obj do
+        if name ~= "." and name ~= ".." then
+            local removed, remove_err = purge(path .. "/" .. name)
+            if not removed then return nil, remove_err end
+        end
+    end
+    return os.remove(path)
 end
 
 --- 分片是否已完整落盘：只比长度，sha256 留到拼接时统一校验（避免每次重启全量重算）。
@@ -113,11 +131,11 @@ end
 ---@param id string
 ---@return boolean
 function Manager.isInstalled(data_dir, id)
-    return safeId(id) ~= nil and lfs.attributes(installTarget(data_dir, id), "mode") == "directory"
+    return safeId(id) ~= nil and lfs.symlinkattributes(installTarget(data_dir, id), "mode") == "directory"
 end
 
 --- 拼接分片 → 逐片与整包校验 sha256 → 解压到 `target .. ".part"` → 整目录 rename 到位。
---- 全程失败即 error（跑在 Task 子进程里，由 on_failed 接住）：
+--- 全程失败即 error（跑在 Job 子进程里，由 on_failed 接住）：
 --- 解压到暂存目录再 rename 是为了原子性，中途失败不会留下半个词典被 KOReader 读到。
 --- 归档内路径必须逐条查绝对路径与 `..`，否则能写到词典目录之外。
 ---@param item table 清单项（id/size/sha256/parts）
@@ -127,24 +145,28 @@ local function assembleAndExtract(item, dir, target)
     local sha256 = require("ffi/sha2").sha256
     local archive = dir .. "/archive.part"
     local output = assert(io.open(archive, "wb"))
-    local full, total = {}, 0
+    local total = 0
     for _, part in ipairs(item.parts) do
-        local file = assert(io.open(dir .. "/" .. part.file, "rb"))
+        local part_path = dir .. "/" .. part.file
+        local file = assert(io.open(part_path, "rb"))
         local data = file:read("*a")
         file:close()
         if #data ~= tonumber(part.size) or sha256(data) ~= part.sha256 then
             output:close()
+            os.remove(part_path)
             error("part sha256 mismatch: " .. part.file)
         end
         assert(output:write(data))
-        full[#full + 1] = data
         total = total + #data
     end
-    output:close()
-    if total ~= tonumber(item.size) or sha256(table.concat(full)) ~= item.sha256 then
+    assert(output:close())
+    local archive_file = assert(io.open(archive, "rb"))
+    local archive_data = assert(archive_file:read("*a"))
+    archive_file:close()
+    if total ~= tonumber(item.size) or sha256(archive_data) ~= item.sha256 then
         error("dictionary sha256 mismatch")
     end
-    full = nil
+    archive_data = nil
 
     local staging = target .. ".part"
     purge(staging)
@@ -172,9 +194,14 @@ local function assembleAndExtract(item, dir, target)
             end
         end
     end
+    local iterate_err = reader.err
     reader:close()
+    if iterate_err then
+        purge(staging)
+        error(iterate_err)
+    end
     if not has_ifo then purge(staging); error("archive contains no StarDict dictionary") end
-    if lfs.attributes(target) then purge(staging); error("dictionary already installed") end
+    if lfs.symlinkattributes(target) then purge(staging); error("dictionary already installed") end
     assert(os.rename(staging, target))
 end
 
@@ -190,7 +217,7 @@ local function downloadParts(item, dir, idx, done, report)
     if not part then
         report("install", item.size, item.size, #item.parts, #item.parts)
         local target = installTarget(done.data_dir, item.id)
-        _job = Task.run(function() assembleAndExtract(item, dir, target) end, {
+        _job = Job.run(function() assembleAndExtract(item, dir, target) end, {
             timeout = 300,
             on_done = function()
                 _downloading, _job = false, nil
@@ -243,6 +270,11 @@ function Manager.install(item, data_dir, cb, on_progress)
     local util_ok, make_err = require("util").makePath(data_dir)
     if not util_ok then cb(false, make_err); return end
     local dir = tmpDir(item.id)
+    local dir_attr = lfs.symlinkattributes(dir)
+    if dir_attr and dir_attr.mode ~= "directory" then
+        cb(false, "invalid download directory")
+        return
+    end
     local dir_ok, dir_err = require("util").makePath(dir)
     if not dir_ok then cb(false, dir_err); return end
     _downloading = true
@@ -259,7 +291,7 @@ end
 --- 取消进行中的下载或安装任务。
 function Manager.cancel()
     if _job then
-        if _job.abort then _job.abort() elseif _job.cancel then _job.cancel() end
+        if _job.abort then _job:abort() elseif _job.cancel then _job:cancel() end
     end
     _job, _downloading = nil, false
 end
@@ -327,9 +359,9 @@ function Manager.remove(dictionary, id)
         return false, "invalid dictionary"
     end
     local target = installTarget(dictionary.data_dir, id)
-    if lfs.attributes(target, "mode") ~= "directory" then return false, "dictionary not installed" end
+    if lfs.symlinkattributes(target, "mode") ~= "directory" then return false, "dictionary not installed" end
     local removed, remove_err = purge(target)
-    if not removed and lfs.attributes(target) then return false, remove_err or "delete failed" end
+    if not removed and lfs.symlinkattributes(target) then return false, remove_err or "delete failed" end
     for path in pairs(dictionary.dicts_disabled or {}) do
         if path:sub(1, #target + 1) == target .. "/" then dictionary.dicts_disabled[path] = nil end
     end
