@@ -27,7 +27,7 @@ package.preload["ui/uimanager"] = function()
         nextTick = function(_, f)
             q[#q + 1] = f
         end,
-        scheduleIn = function(_, _delay, f)
+        scheduleIn = function(_, _, f)
             q[#q + 1] = f
         end,
         unschedule = function(_, f)
@@ -216,6 +216,9 @@ local VK = {
     delChar = function(self)
         self.inputbox:delChar()
     end,
+    onCloseWidget = function(self)
+        self.closed = true
+    end,
 }
 package.preload["ui/widget/virtualkeyboard"] = function()
     return VK
@@ -376,6 +379,17 @@ do
     kb.inputbox:addChars("i")
     Assert.eq(#native_adds, before + 2, "SDL 文本输入必须走原生 IME")
     Assert.eq(text(kb), "", "字母被原生 IME 吃掉（行内候选），不进文本")
+end
+
+-- 键盘关闭必须取消尚未触发的查询。
+do
+    local before = #lookup_calls
+    local kb = newKeyboard()
+    typeCode(kb, "ni")
+    kb:onCloseWidget()
+    flush()
+    Assert.is_true(kb.closed)
+    Assert.eq(#lookup_calls, before, "关闭后的防抖查询不得再访问词库")
 end
 
 -- 点候选：插整词，候选条清空

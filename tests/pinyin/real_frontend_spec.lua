@@ -255,7 +255,7 @@ package.preload["utils.timing"] = function()
 end
 
 -- startLookup 使用 SimpleJob；集成用例同步执行任务体，专注验证真实键盘包装。
-package.preload["workers.simple_job"] = function()
+package.preload["workers/simple_job"] = function()
     return {
         run = function(fn, opts)
             local ok, result = pcall(fn)

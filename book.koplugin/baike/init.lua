@@ -20,6 +20,17 @@ local MoonSettings = require("utils.settings")
 
 local Baike = {}
 
+---@param self table ReaderWikipedia 实例
+---@return nil
+local function cancelLookup(self)
+    local state = self._book_baike_job
+    self._book_baike_job = nil
+    if state and state.job and state.job.cancel then
+        state.job:cancel()
+    end
+    self:dismissLookupInfo()
+end
+
 --- 百度百科开关。默认开启；关闭后完整回退 KOReader 原生维基百科。
 ---@return boolean
 function Baike.isEnabled()
@@ -68,29 +79,32 @@ end
 ---@param _get_fullpage boolean|nil
 ---@param _forced_lang string|nil
 ---@param dict_close_callback function|nil
+---@param state table|nil
 ---@return nil
-local function lookup(self, word, is_sane, box, _get_fullpage, _forced_lang, dict_close_callback)
+local function lookup(self, word, is_sane, box, _get_fullpage, _forced_lang, dict_close_callback, state)
+    if not state then
+        cancelLookup(self)
+        state = {}
+        self._book_baike_job = state
+    end
     local NetworkMgr = require("ui/network/manager")
     if NetworkMgr:willRerunWhenOnline(function()
-        lookup(self, word, is_sane, box, nil, nil, dict_close_callback)
+        if self._book_baike_job == state and Baike.isEnabled() then
+            lookup(self, word, is_sane, box, nil, nil, dict_close_callback, state)
+        end
     end) then
         return
     end
     word = self:cleanSelection(word, is_sane)
     if word == "" then
+        self._book_baike_job = nil
         return
     end
     logger.dbg("Baidu Baike lookup:", word)
     self.lookup_msg = _("正在查询百度百科：\n%1")
     self:showLookupInfo(word)
-    local previous = self._book_baike_job
-    if previous and previous.job and previous.job.cancel then
-        previous.job:cancel()
-    end
     -- Request 在生产环境异步回调，但测试替身和失败路径可能同步回调；用请求状态
     -- 对象而非返回的 job 比较，二者都正确。
-    local state = {}
-    self._book_baike_job = state
     state.job = Client.lookupAsync(word, function(result, err)
         if self._book_baike_job ~= state then
             return
@@ -148,6 +162,7 @@ function Baike.install()
     local native_lookup = ReaderWikipedia.lookupWikipedia
     local native_lookup_input = ReaderWikipedia.lookupInput
     local native_add_to_main_menu = ReaderWikipedia.addToMainMenu
+    local native_close_document = ReaderWikipedia.onCloseDocument
     ReaderWikipedia.lookupWikipedia = function(self, ...)
         if Baike.isEnabled() then
             return lookup(self, ...)
@@ -156,7 +171,7 @@ function Baike.install()
     end
     ReaderWikipedia.lookupInput = function(self, ...)
         if Baike.isEnabled() then
-            return lookupInput(self, ...)
+            return lookupInput(self)
         end
         return native_lookup_input(self, ...)
     end
@@ -171,6 +186,12 @@ function Baike.install()
                 self:onShowWikipediaLookup()
             end,
         }
+    end
+    ReaderWikipedia.onCloseDocument = function(self, ...)
+        cancelLookup(self)
+        if native_close_document then
+            return native_close_document(self, ...)
+        end
     end
 
     local DictQuickLookup = require("ui/widget/dictquicklookup")

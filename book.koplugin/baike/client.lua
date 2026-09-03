@@ -73,22 +73,30 @@ function Client.parseResponse(payload)
     end
 
     local details = {}
-    for _, item in ipairs(payload.card or {}) do
-        if #details >= MAX_CARD_ITEMS then
-            break
-        end
-        local name = cleanText(item.name)
-        local value = cleanText(item.value)
-        if name ~= "" and value ~= "" then
-            details[#details + 1] = name .. "：" .. value
+    if type(payload.card) == "table" then
+        for _, item in ipairs(payload.card) do
+            if #details >= MAX_CARD_ITEMS then
+                break
+            end
+            if type(item) == "table" then
+                local name = cleanText(item.name)
+                local value = cleanText(item.value)
+                if name ~= "" and value ~= "" then
+                    details[#details + 1] = name .. "：" .. value
+                end
+            end
         end
     end
     if #details > 0 then
         parts[#parts + 1] = table.concat(details, "\n")
     end
+    local definition = table.concat(parts, "\n\n")
+    if definition == "" then
+        return nil
+    end
     return {
         title = title,
-        definition = table.concat(parts, "\n\n"),
+        definition = definition,
     }
 end
 
