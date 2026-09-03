@@ -275,22 +275,12 @@ function Detail:fetchStats()
     if storeKind(book, self.source, self.store_preview) then
         return
     end
-    local stats, daily
-    require("utils.db.queue").run(function()
-        local StatsDB = require("utils.db.stats")
-        stats = StatsDB.summaryByBook(book.source_id, book.stable_id)
-        daily = StatsDB.dailyByBook(book.source_id, book.stable_id, 30)
-    end, {
-        on_done = function()
-            if self._closed then
-                return
-            end
-            self._stats = stats
-            self._daily = daily
-            self:rebuild()
-            require("ui/uimanager"):setDirty(self, "ui")
-        end,
-    })
+    local StatsDB = require("db.stats")
+    self._stats = StatsDB.summaryByBook(book.source_id, book.stable_id)
+    self._daily = StatsDB.dailyByBook(book.source_id, book.stable_id, 30)
+    if self._closed then return end
+    self:rebuild()
+    require("ui/uimanager"):setDirty(self, "ui")
 end
 
 --- 关闭详情并强制重绘下层桌面。
@@ -319,23 +309,15 @@ end
 function Detail:reload()
     self._dirty = true
     local book = self.book
-    local row
-    require("utils.db.queue").run(function()
-        row = require("utils.db.book").get(book.source_id, book.stable_id)
-    end, {
-        on_done = function()
-            if self._closed then
-                return
-            end
-            if row then
-                row.source_id = book.source_id
-                row.stable_id = book.stable_id
-                self.book = row
-            end
-            self:rebuild()
-            require("ui/uimanager"):setDirty(self, "ui")
-        end,
-    })
+    local row = require("db.book").get(book.source_id, book.stable_id)
+    if self._closed then return end
+    if row then
+        row.source_id = book.source_id
+        row.stable_id = book.stable_id
+        self.book = row
+    end
+    self:rebuild()
+    require("ui/uimanager"):setDirty(self, "ui")
 end
 
 --- Widget 关闭时触发 close_callback。
@@ -548,7 +530,7 @@ function Detail:openEditor()
     dialog:onShowKeyboard()
 end
 
---- 保存编辑结果到 books 表（进度/收藏/简介/md5 保留），完成后 reload 重绘。
+--- 保存编辑结果到 books 表（进度/简介/md5 保留），完成后 reload 重绘。
 --- 本地源：分类/系列即目录层级，改动会移动文件、stable_id 跟着变
 ---（opens/reading_stats/pending_progress 由 moveBook 里的 renameStableId 迁移）。
 ---@param fields table 对话框字段值：书名/作者/分类/系列
@@ -579,17 +561,17 @@ function Detail:saveMeta(fields)
         series = nil -- 本地源系列必须挂在分类下，与扫盘派生语义一致
     end
     local move_err, new_stable_id
-    require("utils.db.queue").run(function()
-        if can_move then
-            local moved, err = self.source:moveBook(book.stable_id, category, series)
-            if not moved then
-                move_err = err
-                return
-            end
+    if can_move then
+        local moved, err = self.source:moveBook(book.stable_id, category, series)
+        if not moved then
+            move_err = err
+        else
             new_stable_id = moved
         end
+    end
+    if not move_err then
         local sid = new_stable_id or book.stable_id
-        local BookDB = require("utils.db.book")
+        local BookDB = require("db.book")
         local existing = BookDB.get(book.source_id, sid)
         BookDB.upsertLocal({
             source_id = book.source_id,
@@ -600,30 +582,26 @@ function Detail:saveMeta(fields)
             series = series,
             intro = existing and existing.intro or nil,
             percent = existing and existing.percent or 0,
-            favorite = existing and existing.favorite or nil,
             md5 = existing and existing.md5 or nil,
             fetched_at = os.time(),
         })
-    end, {
-        on_done = function()
-            if self._closed then
-                return
-            end
-            local UIManager = require("ui/uimanager")
-            local InfoMessage = require("ui/widget/infomessage")
-            if move_err then
-                UIManager:show(InfoMessage:new{ text = move_err, timeout = 2 })
-                return
-            end
-            if new_stable_id and new_stable_id ~= book.stable_id and self.book then
-                self.book.stable_id = new_stable_id
-            end
-            self:reload()
-            UIManager:show(InfoMessage:new{
-                text = _("元数据已更新"),
-                timeout = 1.5,
-            })
-        end,
+    end
+    if self._closed then
+        return
+    end
+    local UIManager = require("ui/uimanager")
+    local InfoMessage = require("ui/widget/infomessage")
+    if move_err then
+        UIManager:show(InfoMessage:new{ text = move_err, timeout = 2 })
+        return
+    end
+    if new_stable_id and new_stable_id ~= book.stable_id and self.book then
+        self.book.stable_id = new_stable_id
+    end
+    self:reload()
+    UIManager:show(InfoMessage:new{
+        text = _("元数据已更新"),
+        timeout = 1.5,
     })
 end
 

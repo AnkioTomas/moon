@@ -130,6 +130,7 @@ function ReaderSettings.sections(desktop)
     local animation_on = PageTurnAnimation.isEnabled()
     local edge_translation_on = reader.edge_translation_enabled ~= false
     local baike_on = reader.baike_enabled ~= false
+    local dictionary_on = reader.dictionary_enabled ~= false
 
     local popup_rows = {}
     for _, item in ipairs(POPUP_BUTTONS) do
@@ -159,6 +160,37 @@ function ReaderSettings.sections(desktop)
                 status = T(_("%1 种"), #Languages.favoriteCodes()),
                 callback = function()
                     Languages.openSettingsPicker(Translator, desktop)
+                end,
+            })
+        end
+    end
+    local dictionary_rows = {
+        function(iw)
+            return SettingRow.build(iw, {
+                kind = "toggle", icon = "book", title = _("Book 词典"),
+                status = dictionary_on and _("开") or _("关"), status_on = dictionary_on,
+                callback = function()
+                    reader.dictionary_enabled = not dictionary_on
+                    MoonSettings.saveSection("reader", reader)
+                    desktop:rebuild()
+                end,
+            })
+        end,
+    }
+    if dictionary_on then
+        dictionary_rows[#dictionary_rows + 1] = function(iw)
+            return SettingRow.build(iw, {
+                kind = "nav", icon = "cloud_download", title = _("下载词典"),
+                callback = function()
+                    require("ui.reader.dictionary").download(readerUi())
+                end,
+            })
+        end
+        dictionary_rows[#dictionary_rows + 1] = function(iw)
+            return SettingRow.build(iw, {
+                kind = "nav", icon = "settings", title = _("管理词典"),
+                callback = function()
+                    require("ui.reader.dictionary").manage(readerUi())
                 end,
             })
         end
@@ -245,6 +277,10 @@ function ReaderSettings.sections(desktop)
         {
             title = _("阅读弹窗"),
             rows = popup_rows,
+        },
+        {
+            title = _("词典"),
+            rows = dictionary_rows,
         },
         {
             title = _("翻译"),

@@ -18,7 +18,7 @@ local InfoMessage = require("ui/widget/infomessage")
 local NetworkMgr = require("ui/network/manager")
 local Pager = require("ui.components.pager")
 local Store = require("book.store")
-local BookDB = require("utils.db.book")
+local BookDB = require("db.book")
 local UI = require("ui.components.bookui")
 local UIManager = require("ui/uimanager")
 local TextWidget = require("ui/widget/textwidget")
@@ -254,7 +254,7 @@ function Insight.fetch(desktop)
     end
 
     local SourceCapabilities = require("types.book_source").SourceCapabilities
-    local summary = require("utils.db.stats").summaryBySource(source.id)
+    local summary = require("db.stats").summaryBySource(source.id)
     if SourceCapabilities.supportsStatsPull(source)
         and (tonumber(summary.total_seconds) or 0) <= 0 then
         require("book.stats").pullInBackground(source, {

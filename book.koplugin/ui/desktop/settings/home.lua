@@ -26,7 +26,7 @@ end
 ---@param layout string[] 启用列表
 ---@return boolean
 local function isEnabled(id, layout)
-    for i, item in ipairs(layout) do
+    for _, item in ipairs(layout) do
         if item == id then return true end
     end
     return false
@@ -50,8 +50,9 @@ end
 local function toggle(id, desktop)
     local layout = Base.enabledLayout()
     if isEnabled(id, layout) then
+        if #layout == 1 then return end
         local out = {}
-        for i, item in ipairs(layout) do
+        for _, item in ipairs(layout) do
             if item ~= id then out[#out + 1] = item end
         end
         saveLayout(out)
@@ -92,6 +93,7 @@ local function configure(desktop, comp)
     local buttons = {}
     buttons[#buttons + 1] = {{
         text = enabled and _("停用") or _("启用"),
+        enabled = not enabled or #layout > 1,
         callback = function()
             UIManager:close(dialog)
             toggle(comp.id, desktop)
@@ -133,7 +135,6 @@ end
 ---@param desktop table 桌面实例
 local function openSortList(desktop)
     local layout = Base.enabledLayout()
-    if #layout == 0 then return end
     local items = {}
     for i, id in ipairs(layout) do
         local comp = Base.find(id)
@@ -199,11 +200,13 @@ function HomeSettings.sections(desktop)
                 icon = "sort",
                 title = _("组件排序"),
                 status = T(_("%1 项"), #layout),
-                status_on = #layout > 0,
+                status_on = true,
                 callback = function() openSortList(desktop) end,
             })
         end,
-        function(iw)
+    }
+    if enabled_set.recent_list then
+        layout_rows[#layout_rows + 1] = function(iw)
             return SettingRow.build(iw, {
                 kind = "nav",
                 icon = "grid_view",
@@ -226,8 +229,8 @@ function HomeSettings.sections(desktop)
                     }
                 end,
             })
-        end,
-    }
+        end
+    end
 
     local enabled_rows = {}
     for i, id in ipairs(layout) do
@@ -238,7 +241,7 @@ function HomeSettings.sections(desktop)
     end
 
     local disabled_rows = {}
-    for i, comp in ipairs(Base.components) do
+    for _, comp in ipairs(Base.components) do
         if not enabled_set[comp.id] then
             disabled_rows[#disabled_rows + 1] = componentRow(desktop, comp, false, nil)
         end
