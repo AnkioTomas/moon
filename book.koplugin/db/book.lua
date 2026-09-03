@@ -79,7 +79,7 @@ function BookDB.upsertRemote(row)
             source_id, stable_id, md5, title, authors, percent, category,
             series, intro, fetched_at, path, in_library,
             metadata_dirty, metadata_updated_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,0)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             md5=COALESCE(excluded.md5, books.md5),
             title=CASE WHEN books.metadata_dirty=0 THEN excluded.title ELSE books.title END,
@@ -185,8 +185,6 @@ end
 ---@param opts { clear_missing_paths?: boolean }|nil
 ---@return boolean
 function BookDB.reconcile(source_id, books, opts)
-    for _, row in ipairs(books) do
-    end
     if not Base.exec("BEGIN IMMEDIATE;") then return false end
     local ok = Base.exec("UPDATE books SET in_library=0 WHERE source_id=?;", source_id) ~= nil
     if ok and opts and opts.clear_missing_paths then

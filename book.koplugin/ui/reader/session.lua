@@ -75,7 +75,7 @@ function Session.isChapterMode(identity)
     return Mode.isChapter(identity)
 end
 
---- 当前活跃书籍目录；整书来自 KOReader 文档 TOC，连续章节来自书目 toc 表。
+--- 当前活跃书籍目录；整书来自 KOReader 文档 TOC，连续章节来自 books.toc。
 ---@return BookChapter[]|nil
 function Session.toc()
     return Toc.list(current_session)
