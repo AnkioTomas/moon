@@ -20,7 +20,7 @@ local NativeSettings = {}
 ---@return nil
 local function refreshReader(ui)
     if ui then UIManager:setDirty(ui.dialog, "ui") end
-    require("lockscreen.init").refreshInBackground()
+    require("lockscreen.init").refresh()
 end
 
 --- 保存当前文档配置为默认并刷新。
