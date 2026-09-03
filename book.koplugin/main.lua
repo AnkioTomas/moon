@@ -137,14 +137,18 @@ function BookPlugin:onSuspend()
     require("remote.init").onSuspend()
 end
 
---- 唤醒：恢复阅读统计计时；预生成下一次锁屏；恢复远程传书；停在首页则整页刷新
+--- 唤醒：恢复阅读统计计时与后台服务；Book 桌面按当前页面刷新本地 UI 和源数据。
 ---@return nil
 function BookPlugin:onResume()
     require("ui.reader.session").onResume(self)
     require("lockscreen.init").onResume()
     require("remote.init").onResume()
-    if self.desktop and not self.desktop._closed and self.desktop.tab == "home" then
-        require("ui.desktop.home").enter(self.desktop)
+    local desktop = self.desktop
+    if not desktop or desktop._closed then return end
+    if desktop.tab == "home" then
+        require("ui.desktop.home").refreshOnEnter(desktop)
+    else
+        self:emitToSource("desktop_resume", desktop)
     end
 end
 

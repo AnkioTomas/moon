@@ -169,7 +169,7 @@ function M.build(ctx, state, opts)
     local h = math.min(opts.budget or PREFERRED_H, PREFERRED_H)
     local recent = state.recent
     local reading = state.reading or {}
-    local _, on_read = openHandlers(ctx)
+    local on_read = select(2, openHandlers(ctx))
 
     if not recent then
         local tw = TextWidget:new{
@@ -187,7 +187,7 @@ function M.build(ctx, state, opts)
     end
 
     local books = { recent }
-    for i, book in ipairs(reading) do
+    for _, book in ipairs(reading) do
         if #books < SLOT_COUNT then
             books[#books + 1] = book
         end
@@ -198,8 +198,9 @@ function M.build(ctx, state, opts)
     local avail_h = math.max(1, h - pad * 2)
     local pitch = avail_w / SLOT_COUNT
 
-    local main_cw = math.min(UI.sz(108), math.floor(avail_w * 0.34))
-    main_cw, main_ch = UI.coverDim(main_cw)
+    local main_cw, main_ch = UI.coverDim(
+        math.min(UI.sz(108), math.floor(avail_w * 0.34))
+    )
     if main_ch > avail_h - UI.sz(8) then
         main_ch = avail_h - UI.sz(8)
         main_cw = math.max(UI.sz(56), math.floor(main_ch * 2 / 3))
@@ -214,7 +215,7 @@ function M.build(ctx, state, opts)
         overlap_offset = { 0, 0 },
     }
 
-    for i, slot_idx in ipairs(PAINT_ORDER) do
+    for _, slot_idx in ipairs(PAINT_ORDER) do
         local entry = slots[slot_idx]
         if entry then
             local dist = math.abs(slot_idx - CENTER_SLOT)

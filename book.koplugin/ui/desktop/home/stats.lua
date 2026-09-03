@@ -5,7 +5,7 @@
 --]]
 
 local Catalog = require("book.catalog")
-local StatsDB = require("utils.db.stats")
+local StatsDB = require("db.stats")
 
 local HomeStats = {}
 

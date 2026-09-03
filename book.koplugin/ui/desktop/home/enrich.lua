@@ -4,7 +4,7 @@
 @module koplugin.book.ui.desktop.home.enrich
 --]]
 
-local ProgressDB = require("utils.db.progress")
+local ProgressDB = require("db.progress")
 
 local Enrich = {}
 
@@ -23,8 +23,6 @@ function Enrich.book(book)
     end
     if progress.chapter_idx then
         book.chapter_idx = progress.chapter_idx
-    elseif book.last_chapter_idx then
-        book.chapter_idx = tonumber(book.last_chapter_idx)
     end
     if progress.fraction ~= nil then
         book.percent = math.floor(tonumber(progress.fraction) * 100 + 0.5)

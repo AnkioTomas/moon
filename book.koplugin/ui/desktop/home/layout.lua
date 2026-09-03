@@ -24,27 +24,17 @@ local Layout = {}
 ---@param layout_ids string[]
 ---@param index number
 ---@param id string
+---@param list_only boolean
 ---@return string|nil "footer_full"|"footer_tail"|"inline"
-local function recentListMode(layout_ids, index, id)
+local function recentListMode(layout_ids, index, id, list_only)
     if id ~= "recent_list" then return nil end
     if layout_ids[1] == "recent_list" and #layout_ids == 1 then
         return "footer_full"
     end
-    local list_only = MoonSettings.get("home").home_recent_list_mode == "list_only"
     if list_only and index == #layout_ids then
         return "footer_tail"
     end
     return "inline"
-end
-
----@param layout_ids string[]
----@return boolean
-local function footerPager(layout_ids)
-    if layout_ids[1] == "recent_list" and #layout_ids == 1 then
-        return true
-    end
-    local list_only = MoonSettings.get("home").home_recent_list_mode == "list_only"
-    return list_only and layout_ids[#layout_ids] == "recent_list"
 end
 
 --- 组装首页内容区。
@@ -55,7 +45,11 @@ function Layout.build(ctx, state)
     local w = ctx.width
     local h = ctx.height
     local layout_ids = Base.enabledLayout()
-    local pin_pager = footerPager(layout_ids)
+    local list_only = MoonSettings.get("home").home_recent_list_mode == "list_only"
+    local footer_mode = recentListMode(
+        layout_ids, #layout_ids, layout_ids[#layout_ids], list_only
+    )
+    local pin_pager = footer_mode == "footer_full" or footer_mode == "footer_tail"
     local band_h = pin_pager and Pager.bandH() or 0
     local budget = math.max(1, h - band_h)
     local gap = UI.sz(8)
@@ -73,7 +67,7 @@ function Layout.build(ctx, state)
             local comp_gap = i > 1 and gap or 0
             local remaining = budget - used - comp_gap
             if remaining > 0 then
-                local recent_mode = recentListMode(layout_ids, i, id)
+                local recent_mode = recentListMode(layout_ids, i, id, list_only)
                 local opts = {
                     width = w,
                     budget = remaining,
@@ -82,13 +76,9 @@ function Layout.build(ctx, state)
                 }
                 local part = comp.build(ctx, state, opts)
                 local ph = part.height or (part.widget and part.widget:getSize().h) or 0
-                local fill_footer = recent_mode == "footer_full" or recent_mode == "footer_tail"
                 if used + comp_gap + ph > budget then
-                    if fill_footer then
-                        ph = math.max(1, budget - used - comp_gap)
-                    else
-                        break
-                    end
+                    if part.widget and part.widget.free then part.widget:free() end
+                    break
                 end
                 if comp_gap > 0 then
                     table.insert(kids, VerticalSpan:new{ width = comp_gap })

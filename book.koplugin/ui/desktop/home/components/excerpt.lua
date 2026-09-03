@@ -26,19 +26,15 @@ local M = {
 ---@param state table
 ---@param opts table
 ---@return table
-function M.build(ctx, state, opts)
+function M.build(_ctx, state, opts)
     local w = opts.width
     local margin = UI.sz(10)
     local card_w = math.max(1, w - margin * 2)
     local pad = UI.sz(12)
     local inner_w = math.max(1, card_w - pad * 2)
     local excerpt = state.excerpt or {}
-    local text = excerpt.text or _("暂无高亮")
-    local source = excerpt.source or _("书摘")
-    if not excerpt.text then
-        text = U.FALLBACK_MESSAGE
-        source = _("默认句子")
-    end
+    local text = excerpt.text or U.FALLBACK_MESSAGE
+    local source = excerpt.text and (excerpt.source or _("书摘")) or _("默认句子")
     local title_w = TextWidget:new{
         text = _("书摘"),
         face = UI.face("cfont", 12),

@@ -9,7 +9,7 @@ local _ = require("gettext")
 
 local M = {}
 
-local DEFAULT_LAYOUT = { "recent_list" }
+local DEFAULT_COMPONENT = "recent_list"
 
 local COMPONENT_MODULES = {
     "clock", "stats", "hitokoto", "excerpt", "recent_list", "recent_cards",
@@ -31,22 +31,12 @@ function M.find(id)
     return id and by_id[id] or nil
 end
 
---- 设置页选项列表。
----@return {text: string, value: string}[]
-function M.options()
-    local items = {}
-    for _, component in ipairs(M.components) do
-        items[#items + 1] = { text = component.label, value = component.id }
-    end
-    return items
-end
-
 --- 读取并净化用户启用的有序组件 id 列表。
 ---@return string[]
 function M.enabledLayout()
     local raw = MoonSettings.get("home").home_layout
     if type(raw) ~= "table" or #raw == 0 then
-        return { DEFAULT_LAYOUT[1] }
+        return { DEFAULT_COMPONENT }
     end
     local out, seen = {}, {}
     for _, id in ipairs(raw) do
@@ -56,7 +46,7 @@ function M.enabledLayout()
         end
     end
     if #out == 0 then
-        return { DEFAULT_LAYOUT[1] }
+        return { DEFAULT_COMPONENT }
     end
     return out
 end

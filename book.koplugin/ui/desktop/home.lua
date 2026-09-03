@@ -31,7 +31,7 @@ local function pickExcerpt(recent)
     if not recent or not recent.source_id or not recent.stable_id then
         return nil
     end
-    local chapter_idx = recent.chapter_idx or recent.last_chapter_idx
+    local chapter_idx = recent.chapter_idx
     local home = MoonSettings.get("home")
     local index = tonumber(home.home_excerpt_index) or 0
     local text, source = Highlights.pick(
@@ -48,7 +48,7 @@ local function rotateExcerpt(recent)
     if not recent or not recent.source_id or not recent.stable_id then
         return nil
     end
-    local chapter_idx = recent.chapter_idx or recent.last_chapter_idx
+    local chapter_idx = recent.chapter_idx
     local items = Highlights.collect(recent.source_id, recent.stable_id, chapter_idx)
     if #items == 0 then return nil end
     local home = MoonSettings.get("home")
@@ -101,9 +101,9 @@ function Home.invalidate(desktop)
     end
 end
 
---- 进入首页的唯一入口：Tab 切入 / 唤醒 / 从阅读回桌面都走这里，语义固定为「刷新一遍」。
+--- 进入首页时刷新：Tab 切入 / 唤醒都走这里，语义固定为「刷新一遍」。
 ---@param desktop table
-function Home.enter(desktop)
+function Home.refreshOnEnter(desktop)
     if not desktop or desktop._closed then return end
     Home.invalidate(desktop)
     desktop:scheduleClockTick()
