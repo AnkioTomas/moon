@@ -42,11 +42,21 @@ stub("ui.panel.native", { install = function() calls.panel = (calls.panel or 0) 
 stub("lockscreen.init", {
     bootstrap = function() calls.lockscreen = (calls.lockscreen or 0) + 1 end,
     refresh = function(_, force) calls.lock_refresh = force end,
+    onResume = function() calls.lock_resume = (calls.lock_resume or 0) + 1 end,
 })
-stub("ui.reader.session", { onSuspend = function() calls.session_suspend = true end })
+stub("ui.reader.session", {
+    onSuspend = function() calls.session_suspend = true end,
+    onResume = function() calls.session_resume = (calls.session_resume or 0) + 1 end,
+})
 stub("remote.init", {
     bootstrap = function() calls.remote = (calls.remote or 0) + 1 end,
     onSuspend = function() calls.remote_suspend = true end,
+    onResume = function() calls.remote_resume = (calls.remote_resume or 0) + 1 end,
+})
+stub("ui.desktop.home", {
+    enter = function(desktop)
+        calls.home_enter = desktop
+    end,
 })
 stub("ui.screenshot_share", { install = function() calls.screenshot_share = (calls.screenshot_share or 0) + 1 end })
 stub("pinyin.init", { bootstrap = function() calls.pinyin = (calls.pinyin or 0) + 1 end })
@@ -68,3 +78,21 @@ plugin:onSuspend()
 Assert.is_true(calls.session_suspend)
 Assert.is_true(calls.lock_refresh)
 Assert.is_true(calls.remote_suspend)
+
+local resumed_desktop = { tab = "library" }
+plugin.desktop = resumed_desktop
+plugin.emitToSource = function(_, event, payload)
+    calls.source_event = event
+    calls.source_payload = payload
+end
+plugin:onResume()
+Assert.eq(calls.session_resume, 1)
+Assert.eq(calls.lock_resume, 1)
+Assert.eq(calls.remote_resume, 1)
+Assert.eq(calls.source_event, "desktop_resume")
+Assert.eq(calls.source_payload, resumed_desktop)
+
+resumed_desktop.tab = "home"
+plugin:onResume()
+Assert.eq(calls.home_enter, resumed_desktop)
+Assert.eq(calls.source_event, "desktop_resume", "首页刷新事件由 Home.enter 负责发送")

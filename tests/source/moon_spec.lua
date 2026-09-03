@@ -100,6 +100,7 @@ local sync = { push_calls = 0, last_source = nil, push_args = nil }
 
 package.preload["book.stats"] = function()
     return {
+        pullInBackground = function() end,
         syncAsync = function(self, _, cb)
             sync.push_calls = sync.push_calls + 1
             sync.pull_calls = (sync.pull_calls or 0) + 1
