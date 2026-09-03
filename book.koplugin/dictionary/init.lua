@@ -12,6 +12,30 @@ require("l10n").apply()
 local MoonSettings = require("utils.settings")
 
 local DictInit = {}
+local DOWNLOAD_ITEM_ID = "dictionary_download"
+
+--- 把下载入口排在查词之后；菜单项本身由 ReaderDictionary.addToMainMenu 提供。
+---@return nil
+local function placeDownloadMenu()
+    for _, module in ipairs({
+        "ui/elements/reader_menu_order",
+        "ui/elements/filemanager_menu_order",
+    }) do
+        local ok, order = pcall(require, module)
+        local search = ok and order.search
+        if type(search) == "table" then
+            for index = #search, 1, -1 do
+                if search[index] == DOWNLOAD_ITEM_ID then table.remove(search, index) end
+            end
+            for index, id in ipairs(search) do
+                if id == "dictionary_lookup" then
+                    table.insert(search, index + 1, DOWNLOAD_ITEM_ID)
+                    break
+                end
+            end
+        end
+    end
+end
 
 --- Book 词典开关。默认开启；关闭后完整回退 KOReader 原生词典管理。
 ---@return boolean
@@ -27,6 +51,7 @@ function DictInit.install()
         return
     end
     ReaderDictionary._book_dict_installed = true
+    placeDownloadMenu()
 
     local native_show_menu = ReaderDictionary.showDictionariesMenu
     local native_add_to_main_menu = ReaderDictionary.addToMainMenu
@@ -41,12 +66,15 @@ function DictInit.install()
         native_add_to_main_menu(self, menu_items)
         if not DictInit.isEnabled() then return end
         local settings = menu_items.dictionary_settings
-        for _, item in ipairs(settings and settings.sub_item_table or {}) do
+        for index, item in ipairs(settings and settings.sub_item_table or {}) do
             if item.separator and type(item.sub_item_table_func) == "function" then
+                table.remove(settings.sub_item_table, index)
                 item.sub_item_table_func = nil
+                item.separator = nil
                 item.callback = function()
                     require("ui.reader.dictionary").download(self.ui)
                 end
+                menu_items[DOWNLOAD_ITEM_ID] = item
                 break
             end
         end
