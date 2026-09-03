@@ -1,9 +1,9 @@
 --[[--
-StarDict 词典下载、切换、删除。
+StarDict 词典下载、切换、删除弹窗。
 
-供原生词典菜单与查词弹窗调用；不再挂快捷面板。
+供 dictionary.init 注入的原生菜单与查词弹窗调用。
 
-@module koplugin.book.ui.reader.dictionary
+@module koplugin.book.dictionary.ui
 --]]
 
 require("l10n").apply()
@@ -116,8 +116,8 @@ local function install(ui, item)
         require("dictionary.manager").refresh(dictionary)
         local installed = require("dictionary.manager").installed(dictionary.data_dir)
         local prefix = dictionary.data_dir .. "/book-" .. item.id .. "/"
-    for index = 1, #installed do
-        local path = installed[index]
+        for index = 1, #installed do
+            local path = installed[index]
             if path:sub(1, #prefix) == prefix then
                 require("dictionary.manager").activate(dictionary, path)
                 break

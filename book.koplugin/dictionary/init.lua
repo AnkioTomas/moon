@@ -57,7 +57,7 @@ function DictInit.install()
     local native_add_to_main_menu = ReaderDictionary.addToMainMenu
     ReaderDictionary.showDictionariesMenu = function(self, changed_callback)
         if DictInit.isEnabled() then
-            require("ui.reader.dictionary").manage(self.ui, changed_callback)
+            require("dictionary.ui").manage(self.ui, changed_callback)
             return
         end
         return native_show_menu(self, changed_callback)
@@ -72,7 +72,7 @@ function DictInit.install()
                 item.sub_item_table_func = nil
                 item.separator = nil
                 item.callback = function()
-                    require("ui.reader.dictionary").download(self.ui)
+                    require("dictionary.ui").download(self.ui)
                 end
                 menu_items[DOWNLOAD_ITEM_ID] = item
                 break
@@ -103,7 +103,7 @@ function DictInit.install()
             and self.dict_title and self.dict_title.dimen
             and ges_ev and ges_ev.pos and ges_ev.pos.intersectWith
             and ges_ev.pos:intersectWith(self.dict_title.dimen) then
-            require("ui.reader.dictionary").pick(self.ui, {
+            require("dictionary.ui").pick(self.ui, {
                 word = self.word,
                 current_name = self.dictionary,
                 close_window = function()
