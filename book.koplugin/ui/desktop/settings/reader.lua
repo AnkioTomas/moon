@@ -182,7 +182,7 @@ function ReaderSettings.sections(desktop)
             return SettingRow.build(iw, {
                 kind = "nav", icon = "cloud_download", title = _("下载词典"),
                 callback = function()
-                    require("ui.reader.dictionary").download(readerUi())
+                    require("dictionary.ui").download(readerUi())
                 end,
             })
         end
@@ -190,7 +190,7 @@ function ReaderSettings.sections(desktop)
             return SettingRow.build(iw, {
                 kind = "nav", icon = "settings", title = _("管理词典"),
                 callback = function()
-                    require("ui.reader.dictionary").manage(readerUi())
+                    require("dictionary.ui").manage(readerUi())
                 end,
             })
         end
