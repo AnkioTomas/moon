@@ -537,7 +537,6 @@ return {
     ["书籍封面"] = "Book cover",
     ["章节"] = "Chapter",
     ["高亮"] = "Highlight",
-    ["暂无高亮"] = "No highlights yet",
     ["阅读中"] = "Reading",
     ["组合壁纸"] = "Compose wallpaper",
     ["主体组件"] = "Foreground widget",

@@ -127,7 +127,7 @@ local function readingSummary(identity)
         return speed_summary
     end
     speed_key = key
-    speed_summary = require("utils.db.stats").summaryByBook(identity.source_id, identity.stable_id)
+    speed_summary = require("db.stats").summaryByBook(identity.source_id, identity.stable_id)
     return speed_summary
 end
 

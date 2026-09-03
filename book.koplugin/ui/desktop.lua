@@ -322,8 +322,8 @@ function Desktop:switchTab(id)
     end
     self.tab = id
     if id == "home" then
-        -- 进首页一律刷新一遍：清状态 + rebuild + 通知源查书架，全在 Home.enter 里
-        Home.enter(self)
+        -- 进首页一律刷新一遍：清状态 + rebuild + 通知源查书架。
+        Home.refreshOnEnter(self)
         return
     end
     self:rebuild()

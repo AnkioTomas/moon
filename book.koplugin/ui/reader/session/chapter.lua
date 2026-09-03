@@ -10,19 +10,20 @@ local _ = require("gettext")
 
 ---@class ReaderChapterSession
 ---@field identity BookIdentity 书籍身份与属主源
----@field toc BookChapter[] 从 toc 表恢复的目录快照
----@field transition { cancel: fun() }|{ path: string, within: number|nil, direction: "prev"|"next"|nil }|nil 在途任务或待打开目标
+---@field toc BookChapter[] 从 books.toc 恢复的目录快照
+---@field request { cancel: fun() }|nil 在途章节打开任务
+---@field target { path: string, within: number|nil, direction: "prev"|"next"|nil }|nil 已下载、等待 ReaderReady 的目标
+---@field toc_job { cancel: fun() }|nil 目录恢复任务
+---@field switching boolean 已进入 switchDocument，同步 CloseDocument 应保留本书会话
 
 local Chapter = {}
 
 local PREFETCH_AHEAD = 3
-local NAV_THROTTLE_SECONDS = 2
 
 ---@type ReaderChapterSession|nil
 local chapter_session
 ---@type { cancel: fun() }|nil
 local prefetch_job
-local navigation_throttle
 local transition_notice
 
 local function closeTransitionNotice()
@@ -54,8 +55,8 @@ function Chapter.clearActiveChapter(session)
     chapter_session = nil
     cancelPrefetch()
     if session then session.chapter = nil end
-    local transition = chapter and chapter.transition
-    if transition and transition.cancel then transition.cancel() end
+    if chapter and chapter.request and chapter.request.cancel then chapter.request.cancel() end
+    if chapter and chapter.toc_job and chapter.toc_job.cancel then chapter.toc_job.cancel() end
     closeTransitionNotice()
 end
 
@@ -129,8 +130,10 @@ end
 ---@param chapter ReaderChapterSession
 ---@param ui table
 local function applyChapterTarget(chapter, ui)
-    local target = chapter.transition
-    chapter.transition = nil
+    local target = chapter.target
+    chapter.target = nil
+    chapter.switching = false
+    if not target then return end
     if target.within == nil and target.direction == nil then return end
     local within, direction = target.within, target.direction
 
@@ -211,11 +214,12 @@ end
 ---@param chapter ReaderChapterSession
 local function schedulePrefetch(chapter)
     cancelPrefetch()
-    if not chapter or chapter.transition then return end
+    if not chapter or chapter.request or chapter.target or chapter.switching then return end
     local identity = chapter.identity
     local source = identity and identity.source
     local idx = identity and identity.chapter_idx
-    if not source or not idx or type(source.prefetchChaptersAsync) ~= "function" then
+    if not source or not idx or type(chapter.toc) ~= "table"
+        or type(source.prefetchChaptersAsync) ~= "function" then
         return
     end
     prefetch_job = source:prefetchChaptersAsync(identity, chapter.toc, idx, PREFETCH_AHEAD)
@@ -227,30 +231,35 @@ end
 function Chapter.onReaderReady(plugin, session)
     local ui = plugin.ui
     local identity = session.identity
-    -- switchDocument 会为每一章重新触发 ReaderReady，但书目 TOC 不变。
-    -- 不要每次都同步查库并 JSON 解码整份 TOC；只有换书/首次打开才从 Store 读取。
     local previous = chapter_session
-    local toc
-    if previous
+    local same_book = previous
         and previous.identity
         and previous.identity.source_id == identity.source_id
         and previous.identity.stable_id == identity.stable_id
-        and type(previous.toc) == "table"
-        and #previous.toc > 0 then
-        toc = previous.toc
+    local chapter
+    if same_book then
+        chapter = previous
+        cancelPrefetch()
+        if chapter.request and chapter.request.cancel then chapter.request.cancel() end
+        chapter.request = nil
+        chapter.identity = identity
     else
-        toc = Store.toc(identity)
+        Chapter.clearActiveChapter(nil)
+        chapter = {
+            identity = identity,
+            toc = Store.toc(identity),
+            switching = false,
+        }
+        chapter_session = chapter
     end
-    local transition = previous and previous.transition
-    if transition and transition.path == ui.document.file then
-        chapter_session.transition = nil
-    else
-        transition = { path = ui.document.file }
+
+    local target = chapter.target
+    local nav_target = target ~= nil and target.path == ui.document.file
+    if target and not nav_target then
+        chapter.target = nil
+        chapter.switching = false
+        closeTransitionNotice()
     end
-    local nav_target = transition.within ~= nil or transition.direction ~= nil
-    Chapter.clearActiveChapter(session)
-    local chapter = { identity = identity, toc = toc, transition = transition }
-    chapter_session = chapter
     session.chapter = chapter
     applyChapterTarget(chapter, ui)
     wrapChapterReaderUi(ui)
@@ -262,20 +271,35 @@ function Chapter.onReaderReady(plugin, session)
     return nav_target
 end
 
+---@param plugin table
 ---@param session ReaderSessionSnapshot
-function Chapter.afterBootstrap(session)
+function Chapter.afterBootstrap(plugin, session)
     local chapter = Chapter.activeChapter(session)
-    if chapter then
+    if not chapter then return end
+    plugin:emitToSource("chapter_changed", { identity = session.identity }, session.identity.source)
+    if type(chapter.toc) == "table" and #chapter.toc > 0 then
         schedulePrefetch(chapter)
+        return
     end
+    local source = chapter.identity.source
+    if not source or type(source.loadTocAsync) ~= "function" then return end
+    chapter.toc_job = source:loadTocAsync(chapter.identity, function(toc)
+        chapter.toc_job = nil
+        if chapter_session ~= chapter or session.chapter ~= chapter
+            or type(toc) ~= "table" or #toc == 0 then
+            return
+        end
+        chapter.toc = toc
+        Snapshot.refresh(session)
+        require("ui.reader").refresh(plugin)
+        schedulePrefetch(chapter)
+    end)
 end
 
 ---@param session ReaderSessionSnapshot|nil
 ---@return boolean clear_conflicts 是否清除进度冲突记忆
 function Chapter.onCloseDocument(session)
-    local transition = chapter_session and chapter_session.transition
-    if not (transition and transition.path) then
-        if navigation_throttle then navigation_throttle:cancel() end
+    if not (chapter_session and chapter_session.switching) then
         Chapter.clearActiveChapter(session)
         return true
     end
@@ -289,21 +313,22 @@ local function requestChapter(chapter, idx, opts)
     cancelPrefetch()
     showTransitionNotice()
     local identity = chapter.identity
-    chapter.transition = identity.source:openBookAsync(identity, { chapter_idx = idx }, function(path, err)
-        chapter.transition = nil
+    chapter.request = identity.source:openBookAsync(identity, { chapter_idx = idx }, function(path, err)
+        chapter.request = nil
+        if chapter_session ~= chapter then return end
         if not path then
             closeTransitionNotice()
-            navigation_throttle:cancel()
             require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
                 text = err or _("章节打开失败"),
             })
+            schedulePrefetch(chapter)
             return
         end
 
         -- 目录跳转不带方向：一律落到章首；只有翻页越界（显式 prev）才回上一章尾部
         local within = opts.within
         local direction = within == nil and (opts.direction or "next") or nil
-        chapter.transition = {
+        chapter.target = {
             path = path,
             within = within,
             direction = direction,
@@ -319,19 +344,26 @@ local function requestChapter(chapter, idx, opts)
         end
         UIManager:nextTick(function()
             if chapter_session ~= chapter then return end
-            if ReaderUI.instance then
-                ReaderUI.instance:switchDocument(path, true)
-            else
-                ReaderUI:showReader(path, nil, true)
+            chapter.switching = true
+            local ok, switch_err = pcall(function()
+                if ReaderUI.instance then
+                    ReaderUI.instance:switchDocument(path, true)
+                else
+                    ReaderUI:showReader(path, nil, true)
+                end
+            end)
+            if not ok and chapter_session == chapter then
+                chapter.switching = false
+                chapter.target = nil
+                closeTransitionNotice()
+                require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
+                    text = tostring(switch_err or _("章节打开失败")),
+                })
+                schedulePrefetch(chapter)
             end
         end)
     end)
 end
-
-navigation_throttle = require("utils.timing").throttle(function(chapter, idx, opts)
-    requestChapter(chapter, idx, opts)
-    return true
-end, NAV_THROTTLE_SECONDS)
 
 ---@param session ReaderSessionSnapshot|nil
 ---@param idx integer
@@ -341,7 +373,8 @@ function Chapter.gotoChapter(session, idx, opts)
     if not session then return false end
     local chapter = Chapter.activeChapter(session)
     local current_idx = session.identity.chapter_idx
-    if not chapter or type(chapter.toc) ~= "table" or chapter.transition
+    if not chapter or type(chapter.toc) ~= "table"
+        or chapter.request or chapter.target or chapter.switching
         or idx < 1 or idx > #chapter.toc then
         return false
     end
@@ -358,15 +391,20 @@ end
 function Chapter.onChapterBoundary(session, delta)
     if not session then return false end
     local chapter = Chapter.activeChapter(session)
-    if not chapter or type(chapter.toc) ~= "table" or chapter.transition then
+    if not chapter or type(chapter.toc) ~= "table" then
         return false
     end
-    local target = session.identity.chapter_idx + delta
+    if chapter.request or chapter.target or chapter.switching then
+        return true
+    end
+    local current = tonumber(session.identity.chapter_idx)
+    if not current then return false end
+    local target = current + delta
     if target < 1 or target > #chapter.toc then return false end
-    local accepted = navigation_throttle(chapter, target, {
+    requestChapter(chapter, target, {
         direction = delta < 0 and "prev" or "next",
     })
-    return accepted == true
+    return true
 end
 
 return Chapter
