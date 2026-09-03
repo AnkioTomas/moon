@@ -36,7 +36,7 @@ local DEFAULTS = {
         quick_panel_actions = {
             "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "suspend",
         },
-        quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "xray", "dictionary" },
+        quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "xray" },
     },
     reader = {
         book_xray_enabled = true,
@@ -45,6 +45,7 @@ local DEFAULTS = {
         book_reader_bottom_bar = true,
         edge_translation_enabled = true,
         baike_enabled = true,
+        dictionary_enabled = true,
         -- 划词菜单的显示顺序；关闭状态仍由 reader_popup_buttons 单独保存。
         reader_popup_button_order = {
             "select", "highlight", "copy", "add_note", "dictionary", "translate",
