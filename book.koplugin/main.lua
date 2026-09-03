@@ -51,6 +51,7 @@ function BookPlugin:init()
     end
     require("translate.init").install()
     require("baike.init").install()
+    require("dictionary.init").install()
     require("ui.panel.native").install(self.ui)
     require("lockscreen.init").bootstrap()
     require("remote.init").bootstrap()
@@ -128,10 +129,11 @@ function BookPlugin:onStartOfBook()
     return require("ui.reader.session").onChapterBoundary(-1)
 end
 
---- 休眠前：有打开文档时推进度 / 结清统计并通知源；远程传书停服（resume 恢复）
+--- 休眠前：结清阅读状态，生成下一次锁屏图，停远程传书服务。
 ---@return nil
 function BookPlugin:onSuspend()
     require("ui.reader.session").onSuspend(self)
+    require("lockscreen.init").refresh(nil, true)
     require("remote.init").onSuspend()
 end
 
@@ -157,7 +159,7 @@ end
 function BookPlugin:onNetworkConnected()
     require("book.sync").retryDirtyAsync()
     self:emitToSource("network_connected")
-    require("lockscreen.init").refreshInBackground(true)
+    require("lockscreen.init").refresh(nil, true)
 end
 
 --- 翻页（分页视图）：统计换页；分发 page_changed
@@ -179,7 +181,6 @@ end
 ---@param items table KOReader 变更描述
 function BookPlugin:onAnnotationsModified(items)
     require("ui.reader.session").onAnnotationsModified(self, items)
-    require("lockscreen.init").onAnnotationsModified()
 end
 
 -- ── 对外动作（UI / 设置页调用）───────────────────────
