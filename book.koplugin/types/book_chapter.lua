@@ -7,3 +7,5 @@
 ---@field source_idx string|nil 源端非连续章节号
 ---@field uid string|nil 源侧章节身份
 ---@field title string 章节标题
+---@field page number|nil KOReader 文档目录起始页
+---@field xpointer string|nil KOReader 文档目录定位点
