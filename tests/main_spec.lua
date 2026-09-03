@@ -54,7 +54,7 @@ stub("remote.init", {
     onResume = function() calls.remote_resume = (calls.remote_resume or 0) + 1 end,
 })
 stub("ui.desktop.home", {
-    enter = function(desktop)
+    refreshOnEnter = function(desktop)
         calls.home_enter = desktop
     end,
 })
@@ -95,4 +95,4 @@ Assert.eq(calls.source_payload, resumed_desktop)
 resumed_desktop.tab = "home"
 plugin:onResume()
 Assert.eq(calls.home_enter, resumed_desktop)
-Assert.eq(calls.source_event, "desktop_resume", "首页刷新事件由 Home.enter 负责发送")
+Assert.eq(calls.source_event, "desktop_resume", "首页刷新事件由 Home.refreshOnEnter 负责发送")

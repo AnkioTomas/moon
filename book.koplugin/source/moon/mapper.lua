@@ -67,7 +67,6 @@ function Mapper.book(row)
             finished
         ),
         category = row.category,
-        favorite = row.favorite,
         series = row.series,
         cover = type(row.cover) == "string" and row.cover or nil,
     }

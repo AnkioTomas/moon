@@ -212,53 +212,50 @@ end
 ---@param rows table[]|nil
 ---@return { imported: integer, skipped: integer }|nil
 function StatsDB.replaceSynced(source_id, replace, rows)
+    rows = rows or {}
+    -- 清理范围由本批数据自己界定：回包没覆盖到的时间段一律不动。
+    -- rows 为空（协议异常/网络截断）时 from 为 nil，什么都不删——与
+    -- book.note 的 saveRemoteBuckets 同一立场：宁可漏掉云端删除。
+    local from, to
+    for _, row in ipairs(rows) do
+        local ts = tonumber(row.start_time)
+        if ts then
+            from = (from == nil or ts < from) and ts or from
+            to = (to == nil or ts > to) and ts or to
+        end
+    end
+    --- 按 replace 策略清掉本批覆盖时间段内的旧已同步行。
+    ---@return boolean
+    local function clearRange()
+        if not (replace and from and to) then return true end
+        if replace.mode == "prefix" and replace.stable_prefixes then
+            for _, prefix in ipairs(replace.stable_prefixes) do
+                if not StatsDB.deleteSyntheticInRange(source_id, from, to, prefix) then return false end
+            end
+            return true
+        end
+        return StatsDB.deleteSyntheticInRange(source_id, from, to)
+    end
+
     if not Base.exec("BEGIN IMMEDIATE;") then
         return nil
     end
     local result = { imported = 0, skipped = 0 }
-    local ok, err = pcall(function()
-        -- 清理范围由本批数据自己界定：回包没覆盖到的时间段一律不动。
-        -- rows 为空（协议异常/网络截断）时 from 为 nil，什么都不删——与
-        -- book.note 的 saveRemoteBuckets 同一立场：宁可漏掉云端删除。
-        local from, to
-        for _, row in ipairs(rows or {}) do
-            local ts = tonumber(row.start_time)
-            if ts then
-                from = (from == nil or ts < from) and ts or from
-                to = (to == nil or ts > to) and ts or to
-            end
+    local ok = clearRange()
+    for _, row in ipairs(rows) do
+        if not ok then break end
+        local duplicate = StatsDB.exists(row)
+        ok = StatsDB.add(row, true)
+        if duplicate then
+            result.skipped = result.skipped + 1
+        else
+            result.imported = result.imported + 1
         end
-        if replace and from and to then
-            if replace.mode == "prefix" and replace.stable_prefixes then
-                for _, prefix in ipairs(replace.stable_prefixes) do
-                    assert(StatsDB.deleteSyntheticInRange(source_id, from, to, prefix),
-                        "failed to clear synced reading stats")
-                end
-            else
-                assert(StatsDB.deleteSyntheticInRange(source_id, from, to),
-                    "failed to clear synced reading stats")
-            end
-        end
-        for _, row in ipairs(rows or {}) do
-            local duplicate = StatsDB.exists(row)
-            assert(StatsDB.add(row, true), "failed to save pulled reading stats")
-            if duplicate then
-                result.skipped = result.skipped + 1
-            else
-                result.imported = result.imported + 1
-            end
-        end
-    end)
-    if not ok then
-        Base.exec("ROLLBACK;")
-        logger.warn("book.db replaceSynced failed", err)
-        return nil
     end
-    if not Base.exec("COMMIT;") then
-        Base.exec("ROLLBACK;")
-        return nil
-    end
-    return result
+    if ok and Base.exec("COMMIT;") then return result end
+    Base.exec("ROLLBACK;")
+    logger.warn("book.db replaceSynced failed", source_id)
+    return nil
 end
 
 --- 汇总某源阅读统计：总时长/页数、近 7 天时长、最长单日。

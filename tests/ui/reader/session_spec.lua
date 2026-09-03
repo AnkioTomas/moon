@@ -233,10 +233,11 @@ end
 -- 首次路径由源解析；Session 只接管 ReaderReady 交接和后续切章。
 do
     local callback
-    local cancelled = 0
+    local cancelled, opened = 0, 0
     local source = {
         type = "chapter",
         openBookAsync = function(_, _, _, cb)
+            opened = opened + 1
             local active = true
             callback = function(...)
                 if active then cb(...) end
@@ -273,7 +274,10 @@ do
 
     Assert.is_false(Session.onChapterBoundary(-1), "首章不能继续向前")
     Assert.is_true(Session.onChapterBoundary(1), "章末触发下一章")
-    Assert.is_false(Session.onChapterBoundary(1), "请求在途时拒绝重复边界事件")
+    Assert.eq(opened, 1)
+    -- 在途期间重复边界事件仍算「已处理」（吞掉原生 EndOfBook 弹窗），但不再发起第二次请求
+    Assert.is_true(Session.onChapterBoundary(1), "请求在途时锁住重复边界事件")
+    Assert.eq(opened, 1, "在途时不得重复发起切章请求")
     callback(nil, "download failed")
     Assert.is_true(Session.gotoChapter(2), "失败后允许再次切章")
 

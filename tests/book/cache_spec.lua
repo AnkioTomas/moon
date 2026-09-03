@@ -2,8 +2,7 @@
 book.cache：协作式异步扫盘/删除状态机 + cleanupStale TTL 判定
 
 purgeDirAsync 是 cache.lua 的局部函数，只能经 clearAsync 触达；
-这里把 utils.task 打成「主进程同步跑 worker + 同步 on_done」，
-避免真 fork 子进程，同时保留 purge 自身的 nextTick 分片调度。
+DB 清理同步完成后 purge 走 nextTick 分片调度，由 Stubs.flush() 驱动。
 BookDB/ChapterDB 全部假实现（内存表），绝不打开真实的 book.sqlite3；
 临时目录限定在沙箱 .moon/cache/test_book_cache_spec/ 下，结束清理。
 
@@ -78,24 +77,6 @@ package.preload["utils.paths"] = function()
     }
 end
 
-package.preload["utils.task"] = function()
-    return {
-        inSubProcess = function()
-            return false
-        end,
-        -- 同步跑 worker + 同步 on_done：clearAsync 随即启动 purgeDirAsync，
-        -- purge 的分片仍走 UIManager:nextTick，由 Stubs.flush() 驱动
-        run = function(worker, opts)
-            opts = opts or {}
-            worker(0, nil)
-            if opts.on_done then
-                opts.on_done(nil)
-            end
-            return { abort = function() end }
-        end,
-    }
-end
-
 package.preload["ui.components.image"] = function()
     return { abortPending = function() end }
 end
@@ -116,10 +97,12 @@ package.preload["db.book"] = function()
         end,
         stripMeta = function()
             db_log.strip_meta = (db_log.strip_meta or 0) + 1
+            return true
         end,
         clearOpens = function()
             db_log.clear_opens = (db_log.clear_opens or 0) + 1
             book_rows = {}
+            return true
         end,
         pathsAll = function()
             return book_rows
@@ -165,6 +148,7 @@ package.preload["db.chapter"] = function()
         clear = function()
             db_log.chapter_clear = (db_log.chapter_clear or 0) + 1
             chapter_rows = {}
+            return true
         end,
     }
 end
@@ -413,7 +397,6 @@ if lfs.attributes(BASE) then
 end
 for _, name in ipairs({
     "utils.paths",
-    "utils.task",
     "db.book",
     "db.chapter",
     "ui.components.image",

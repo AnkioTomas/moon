@@ -71,8 +71,8 @@ function Source:deleteBookAsync(identity, cb)
             cb(false, _("删除本书失败"))
             return
         end
-        require("utils.db.book").remove(self.id, identity.stable_id)
-        require("utils.db.chapter").delete(path)
+        require("db.book").remove(self.id, identity.stable_id)
+        require("db.chapter").delete(path)
         local Paths = require("utils.paths")
         os.remove(Paths.coverPath(identity.stable_id, self.id))
         cb(true)
@@ -95,14 +95,12 @@ function Source:openBookAsync(identity, _opts, cb)
             cb(nil, _("本地书籍文件不存在"))
             return
         end
-        require("book.store").touchAsync(path, identity, nil, function(ok, err)
-            if cancelled then return end
-            if ok then
-                cb(path)
-            else
-                cb(nil, err and tostring(err) or _("无法登记书籍路径"))
-            end
-        end)
+        local ok, err = require("book.store").touch(path, identity)
+        if ok then
+            cb(path)
+        else
+            cb(nil, err)
+        end
     end)
     return { cancel = function() cancelled = true end }
 end

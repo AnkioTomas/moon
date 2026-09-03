@@ -150,7 +150,7 @@ function Session.onReaderReady(plugin)
     local skip_pull = handlers[mode].onReaderReady(plugin, current_session)
     bootstrapReading(plugin, current_session, skip_pull)
     if mode == "chapter" then
-        ChapterMode.afterBootstrap(current_session)
+        ChapterMode.afterBootstrap(plugin, current_session)
     end
 end
 

@@ -75,9 +75,9 @@ end
 ---@return nil
 function Sync.retryDirtyAsync()
     local Registry = require("source.registry")
-    local ProgressDB = require("utils.db.progress")
-    local NoteDB = require("utils.db.note")
-    local StatsDB = require("utils.db.stats")
+    local ProgressDB = require("db.progress")
+    local NoteDB = require("db.note")
+    local StatsDB = require("db.stats")
     for _, meta in ipairs(Registry.listEnabled()) do
         local id = meta.id
         local dirty = #ProgressDB.unsynced(id) > 0

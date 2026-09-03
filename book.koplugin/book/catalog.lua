@@ -97,7 +97,7 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
             }
         end
     end
-    local BookDB = require("utils.db.book")
+    local BookDB = require("db.book")
     local stable_ids = {}
     for _, b in ipairs(daily_books or {}) do
         if type(b.stable_id) == "string" and b.stable_id ~= "" then
@@ -187,7 +187,7 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             cb(nil, "invalid source_id")
             return
         end
-        local rows, count = require("utils.db.book").listBySource(source_id, {
+        local rows, count = require("db.book").listBySource(source_id, {
             category = opts.category,
             series = opts.series,
             search = opts.search,
@@ -213,7 +213,7 @@ function Catalog.filtersAsync(source_id, cb)
             cb(nil, "invalid source_id")
             return
         end
-        local BookDB = require("utils.db.book")
+        local BookDB = require("db.book")
         cb({
             data = {
                 category = BookDB.categoriesBySource(source_id),
@@ -234,7 +234,7 @@ function Catalog.recentBooksAsync(source_id, limit, cb)
             cb(nil, "invalid source_id")
             return
         end
-        local rows = require("utils.db.book").recentBySource(source_id, limit or 24)
+        local rows = require("db.book").recentBySource(source_id, limit or 24)
         cb(Catalog.toList(rows, nil, source_id))
     end)
 end
@@ -249,7 +249,7 @@ function Catalog.readingInsightAsync(source_id, cb)
             cb(nil, "invalid source_id")
             return
         end
-        local StatsDB = require("utils.db.stats")
+        local StatsDB = require("db.stats")
         cb({
             data = Catalog.toInsight(
                 source_id,

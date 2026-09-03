@@ -1,11 +1,8 @@
 --[[--
-source.local.mapper 离线用例
+book.catalog 行映射离线用例：books 行 → Book 列表、统计聚合 → StatsInsight。
+insight 在 catalog 内 require("db.book")，这里用 package.preload 换成可控假库。
 
-映射已收口到 book.catalog；本模块是 local 源薄封装。
-insight 在 catalog 内 require("db.book")，
-这里用 package.preload 换成可控假库。
-
-@module tests.source.local.mapper_spec
+@module tests.book.catalog_rows_spec
 --]]
 
 local Assert = require("support.assert")
@@ -20,14 +17,19 @@ package.preload["db.book"] = function()
     }
 end
 package.loaded["book.catalog"] = nil
-package.loaded["source.local.mapper"] = nil
 
-local Mapper = require("source.local.mapper")
+local Catalog = require("book.catalog")
+
+---@param rows table[]|nil
+---@param count number|nil
+local function list(rows, count)
+    return Catalog.toList(rows, count, "local")
+end
 
 -- ===== bookFromRow / list：字段映射 =====
 
 do -- 全字段行 → Book 逐项映射
-    local list = Mapper.list({
+    local list = list({
         {
             stable_id = "/books/三体.epub",
             title = "三体",
@@ -49,7 +51,7 @@ do -- 全字段行 → Book 逐项映射
 end
 
 do -- 缺字段兜底：只有 stable_id 的行
-    local list = Mapper.list({ { stable_id = "a.txt" } })
+    local list = list({ { stable_id = "a.txt" } })
     local b = list.data[1]
     Assert.eq(b.stable_id, "a.txt")
     Assert.is_nil(b.title)
@@ -60,7 +62,7 @@ do -- 缺字段兜底：只有 stable_id 的行
 end
 
 do -- percent 为字符串时按 tonumber 转换；非法值归零
-    local list = Mapper.list({
+    local list = list({
         { stable_id = "a", percent = "37" },
         { stable_id = "b", percent = "not-a-number" },
     })
@@ -69,7 +71,7 @@ do -- percent 为字符串时按 tonumber 转换；非法值归零
 end
 
 do -- 非法行被过滤：无 stable_id / 空 stable_id / 非表
-    local list = Mapper.list({
+    local list = list({
         { title = "无身份" },
         { stable_id = "" },
         "不是表",
@@ -80,20 +82,20 @@ do -- 非法行被过滤：无 stable_id / 空 stable_id / 非表
 end
 
 do -- count 参数：显式传入优先，否则取 books 数量；rows 为 nil 时为空列表
-    local with_count = Mapper.list({ { stable_id = "a" } }, 99)
+    local with_count = list({ { stable_id = "a" } }, 99)
     Assert.eq(with_count.count, 99)
     Assert.eq(#with_count.data, 1)
 
-    local derived = Mapper.list({ { stable_id = "a" }, { stable_id = "b" } })
+    local derived = list({ { stable_id = "a" }, { stable_id = "b" } })
     Assert.eq(derived.count, 2)
 
-    local empty = Mapper.list(nil)
+    local empty = list(nil)
     Assert.eq(empty.count, 0)
     Assert.eq(#empty.data, 0)
 end
 
 do -- recent 与 list 同构（无显式 count）
-    local r = Mapper.recent({
+    local r = list({
         { stable_id = "x", title = "最近读" },
         { stable_id = "y" },
     })
@@ -105,16 +107,16 @@ end
 -- ===== insight：formatDuration 各量级（经输出文案间接覆盖） =====
 
 do -- 0 / 负值 / nil → 「0分钟」，has_data = false
-    local r = Mapper.insight({ total_seconds = 0 }, {}, {})
+    local r = Catalog.toInsight("local", { total_seconds = 0 }, {}, {})
     Assert.is_false(r.has_data)
     Assert.is_false(r.total.has_data)
     Assert.eq(r.total.total_text, "0分钟")
 
-    local neg = Mapper.insight({ total_seconds = -5 }, {}, {})
+    local neg = Catalog.toInsight("local", { total_seconds = -5 }, {}, {})
     Assert.is_false(neg.has_data)
     Assert.eq(neg.total.total_text, "0分钟")
 
-    local nil_summary = Mapper.insight(nil, nil, nil)
+    local nil_summary = Catalog.toInsight("local", nil, nil, nil)
     Assert.is_false(nil_summary.has_data)
     Assert.eq(nil_summary.total.total_text, "0分钟")
     Assert.eq(nil_summary.total.last7_text, "0分钟")
@@ -122,17 +124,17 @@ do -- 0 / 负值 / nil → 「0分钟」，has_data = false
 end
 
 do -- 秒级（不足 1 分钟）按最少 1 分钟显示；正数即有数据
-    local r = Mapper.insight({ total_seconds = 59 }, {}, {})
+    local r = Catalog.toInsight("local", { total_seconds = 59 }, {}, {})
     Assert.is_true(r.has_data)
     Assert.is_true(r.total.has_data)
     Assert.eq(r.total.total_text, "1分钟")
 end
 
 do -- 分钟级 / 小时级
-    local m = Mapper.insight({ total_seconds = 300 }, {}, {})
+    local m = Catalog.toInsight("local", { total_seconds = 300 }, {}, {})
     Assert.eq(m.total.total_text, "5分钟")
 
-    local h = Mapper.insight({
+    local h = Catalog.toInsight("local", {
         total_seconds = 3600,
         last7_seconds = 90,
         longest_day_seconds = 7265,
@@ -146,7 +148,7 @@ end
 
 do -- summary / daily / daily_books → 卡片结构
     FakeBooks["local\n/books/三体.epub"] = { title = "三体", authors = "刘慈欣" }
-    local r = Mapper.insight(
+    local r = Catalog.toInsight("local", 
         { total_seconds = 7265, total_pages = 123, last7_seconds = 60, longest_day_seconds = 3600 },
         {
             { ymd = "2026-08-14", seconds = 3600 },
@@ -187,7 +189,7 @@ do -- summary / daily / daily_books → 卡片结构
 end
 
 do -- max_total_pages 为 0 / nil 时 percent 为 0；无 daily 时 days 为空
-    local r = Mapper.insight(
+    local r = Catalog.toInsight("local", 
         { total_seconds = 10 },
         { { ymd = "2026-08-15", seconds = 10 } },
         {
@@ -200,7 +202,7 @@ do -- max_total_pages 为 0 / nil 时 percent 为 0；无 daily 时 days 为空
     Assert.eq(books[1].percent, 0)
     Assert.eq(books[2].percent, 0)
 
-    local no_daily = Mapper.insight({ total_seconds = 10 }, nil, nil)
+    local no_daily = Catalog.toInsight("local", { total_seconds = 10 }, nil, nil)
     Assert.is_nil(next(no_daily.calendar.days))
 end
 
@@ -208,4 +210,3 @@ end
 package.preload["db.book"] = nil
 package.loaded["db.book"] = nil
 package.loaded["book.catalog"] = nil
-package.loaded["source.local.mapper"] = nil

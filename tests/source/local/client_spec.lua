@@ -178,26 +178,29 @@ local function stubListBySource(source_id, opts)
     return matched, count
 end
 
--- 扫描改走子进程（workers.job）：离线测试不 fork，worker 就地同步跑，
--- on_done 经 nextTick 保持异步语义；子进程语义（自开 DB 连接）在真机覆盖。
+-- 扫描走子进程（workers.job）：离线测试不 fork，worker 就地同步跑，
+-- ctx.post 直接转给 on_progress，结果经 nextTick 交 on_done 保持异步语义。
+-- 子进程不碰 sqlite 的约束由 db.base 在真机上强制，这里的 db.book 全是内存假实现。
 package.preload["workers.job"] = function()
     return {
         run = function(worker, opts)
             opts = opts or {}
-            local ok, err = pcall(worker)
+            local ctx = {
+                post = function(message)
+                    if opts.on_progress then opts.on_progress(message) end
+                end,
+            }
+            local ok, result = pcall(worker, ctx)
             require("ui/uimanager"):nextTick(function()
                 if ok then
                     if opts.on_done then
-                        opts.on_done(nil)
+                        opts.on_done(result)
                     end
                 elseif opts.on_failed then
-                    opts.on_failed(err)
+                    opts.on_failed(result)
                 end
             end)
             return { abort = function() end }
-        end,
-        inSubProcess = function()
-            return false
         end,
     }
 end
@@ -205,6 +208,14 @@ package.preload["db.book"] = function()
     return {
         get = function(source_id, stable_id)
             return db_rows[rowKey(source_id, stable_id)]
+        end,
+        getMany = function(source_id, stable_ids)
+            local out = {}
+            for _, stable_id in ipairs(stable_ids) do
+                local row = db_rows[rowKey(source_id, stable_id)]
+                if row then out[stable_id] = row end
+            end
+            return out
         end,
         getByMd5 = function(source_id, md5)
             if type(md5) ~= "string" or md5 == "" then

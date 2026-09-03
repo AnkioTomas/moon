@@ -42,10 +42,10 @@ local TopContainer = require("ui/widget/container/topcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local TextWidget = require("ui/widget/textwidget")
+local Catalog = require("book.catalog")
 local BookInfo = require("ui.components.bookinfo")
 local Icon = require("ui.components.icon")
 local Pager = require("ui.components.pager")
-local LocalMapper = require("source.local.mapper")
 local UI = require("ui.components.bookui")
 local Surface = require("ui.components.surface")
 local Text = require("utils.text")
@@ -672,7 +672,7 @@ function Detail:buildRecent(w, avail_h)
             LeftContainer:new{
                 dimen = Geom:new{ w = dur_w, h = row_h },
                 TextWidget:new{
-                    text = LocalMapper.formatDuration(r.seconds),
+                    text = Catalog.formatDuration(r.seconds),
                     face = UI.face("xx_smallinfofont", 12),
                     fgcolor = Blitbuffer.COLOR_BLACK,
                 },
@@ -722,7 +722,7 @@ function Detail:buildStatsArea(w, avail_h)
 
     local gap = UI.sz(10)
     local items = {
-        { LocalMapper.formatDuration(st.total_seconds), _("累计时长") },
+        { Catalog.formatDuration(st.total_seconds), _("累计时长") },
         { tostring(st.pages), _("已读页数") },
         { st.last_read > 0 and os.date("%Y-%m-%d", st.last_read) or "—", _("上次阅读") },
     }

@@ -10,7 +10,6 @@ local Client = require("source.moon.client")
 local Mapper = require("source.moon.mapper")
 local SourceBase = require("source.base")
 local ProgressPosition = require("types.book_progress")
-local logger = require("logger")
 local _ = require("gettext")
 
 local Moon = {}
@@ -159,8 +158,8 @@ function Source:deleteBookAsync(identity, cb)
             return
         end
         os.remove(Paths.coverPath(identity.stable_id, self.id))
-        require("utils.db.book").remove(self.id, identity.stable_id)
-        require("utils.db.chapter").deleteUnder(dir)
+        require("db.book").remove(self.id, identity.stable_id)
+        require("db.chapter").deleteUnder(dir)
         cb(true)
     end)
     return { cancel = function() cancelled = true end }
@@ -187,14 +186,12 @@ function Source:openBookAsync(identity, _opts, cb)
     --- 把已就绪的物理文件登记进书库，再把路径交给调用方。
     ---@param local_path string 本地书籍文件路径
     local function register(local_path)
-        require("book.store").touchAsync(local_path, identity, nil, function(ok, err)
-            if cancelled then return end
-            if ok then
-                cb(local_path)
-            else
-                cb(nil, err and tostring(err) or _("无法登记书籍路径"))
-            end
-        end)
+        local ok, err = require("book.store").touch(local_path, identity)
+        if ok then
+            cb(local_path)
+        else
+            cb(nil, err)
+        end
     end
 
     if validBook(path) then
@@ -267,52 +264,6 @@ function Source:openBookAsync(identity, _opts, cb)
     }
 end
 
---- 生命周期事件：阅读统计上报时机由本源自决。
---- 统计上报会拖 KOReader UI 依赖链，必须函数内延迟加载（离线测试会 require 本文件）。
----@param event string
----@param payload table|nil 事件载荷，原样转交基类
-function Source:onEvent(event, payload)
-    SourceBase.onEvent(self, event, payload)
-    if event == "stats_sync_request" then
-        self:syncReadingStats(true)
-    end
-end
-
---- Moon 自己决定联网、节流、pull/push 顺序和用户提示。
----@param show_message boolean
-function Source:syncReadingStats(show_message)
-    local UIManager = require("ui/uimanager")
-    local InfoMessage = require("ui/widget/infomessage")
-    if self._stats_syncing then
-        if show_message then
-            UIManager:show(InfoMessage:new{ text = _("阅读统计正在同步…"), timeout = 2 })
-        end
-        return
-    end
-    if not self:configured() then
-        if show_message then UIManager:show(InfoMessage:new{ text = _("未配置"), timeout = 2 }) end
-        return
-    end
-    self._stats_syncing = true
-    require("ui/network/manager"):runWhenOnline(function()
-        --- 同步收尾：解除节流标记，按需提示用户，静默模式下只记日志。
-        ---@param result SyncResult|nil
-        ---@param err any 失败原因
-        local function finish(result, err)
-            self._stats_syncing = false
-            if show_message then
-                UIManager:show(InfoMessage:new{
-                    text = result and _("阅读统计已同步") or (err or _("统计同步失败")),
-                    timeout = 2,
-                })
-            elseif not result then
-                logger.warn("book moon stats sync failed", err)
-            end
-        end
-        self:syncStatsAsync(nil, finish)
-    end)
-end
-
 --- 把 BookListOpts 转成 Moon list API 的 query 表。
 ---@param opts BookListOpts|nil
 ---@return table
@@ -370,7 +321,7 @@ function Source:syncBooksAsync(opts, cb)
                 nextPage()
                 return
             end
-            job = require("book.store").reconcileAsync(self.id, books, nil, cb)
+            cb(require("book.store").reconcile(self.id, books))
         end)
     end
     nextPage()
@@ -421,7 +372,7 @@ end
 ---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:pullStatsAsync(cb)
-    local ids = require("utils.db.book").libraryStableIdsBySource(self.id)
+    local ids = require("db.book").libraryStableIdsBySource(self.id)
     local rows, index, cancelled, job = {}, 1, false, nil
     --- 拉下一本书的 page_stat 并累加到 rows；书拉完即整体回调。
     --- 任一本请求失败即整体失败：统计只能整批入库，半截数据会漏计时长。
@@ -450,6 +401,7 @@ function Source:pullStatsAsync(cb)
                             rows[#rows + 1] = {
                                 source_id = self.id,
                                 stable_id = stable_id,
+                                record_type = "page",
                                 page = tonumber(item.page) or 0,
                                 start_time = start_time,
                                 duration = duration,

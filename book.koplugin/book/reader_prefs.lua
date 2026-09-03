@@ -7,7 +7,7 @@
 --]]
 
 local JSON = require("json")
-local BookDB = require("utils.db.book")
+local BookDB = require("db.book")
 local MoonFont = require("utils.font")
 local Store = require("book.store")
 local logger = require("logger")
@@ -99,7 +99,7 @@ end
 
 ---@param identity BookIdentity|nil
 ---@param prefs table|nil
----@return boolean 是否已排入数据库队列
+---@return boolean 是否成功写入数据库
 function M.save(identity, prefs)
     if not isChapter(identity) or not prefs then
         return false
@@ -113,14 +113,11 @@ function M.save(identity, prefs)
     if not payload then
         return false
     end
-    -- 走队列：直写会和在飞的队列任务抢同一条 sqlite 连接（关书时进度也在写）
-    require("utils.db.queue").run(function()
-        assert(BookDB.setReaderPrefs(source_id, stable_id, payload), "failed to save reader preferences")
-    end, {
-        on_failed = function(err)
-            logger.warn("book.reader_prefs save failed", source_id, stable_id, err)
-        end,
-    })
+    local ok, err = BookDB.setReaderPrefs(source_id, stable_id, payload)
+    if not ok then
+        logger.warn("book.reader_prefs save failed", source_id, stable_id, err)
+        return false
+    end
     return true
 end
 

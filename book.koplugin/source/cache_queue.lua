@@ -27,19 +27,14 @@ local RETRY_DELAY_SECONDS = 15
 local function flushChanged()
     change_scheduled = false
     for callback in pairs(watchers) do
-        pcall(callback)
+        callback()
     end
 end
 
 local function changed()
     if change_scheduled then return end
     change_scheduled = true
-    local ok, UIManager = pcall(require, "ui/uimanager")
-    if ok and UIManager and UIManager.scheduleIn then
-        UIManager:scheduleIn(0.25, flushChanged)
-    else
-        flushChanged()
-    end
+    require("ui/uimanager"):scheduleIn(0.25, flushChanged)
 end
 
 ---@param source BookSource
@@ -57,9 +52,8 @@ local function retryable(err)
         or text:find("shard md5 mismatch", 1, true) ~= nil
 end
 
----@param job table
 ---@param result table
-local function notify(job, result)
+local function notify(result)
     local text
     if result.ok then
         text = _("全本缓存完成：") .. tostring(result.cached) .. " / "
@@ -74,11 +68,7 @@ local function notify(job, result)
     else
         text = tostring(result.err or _("全本缓存失败"))
     end
-    local ok, UIManager = pcall(require, "ui/uimanager")
-    local ok_message, InfoMessage = pcall(require, "ui/widget/infomessage")
-    if ok and ok_message then
-        UIManager:show(InfoMessage:new{ text = text, timeout = 5 })
-    end
+    require("ui/uimanager"):show(require("ui/widget/infomessage"):new{ text = text, timeout = 5 })
 end
 
 local startNext
@@ -91,7 +81,7 @@ local function finish(job, result)
     by_key[job.key] = nil
     if active == job then active = nil end
     if waiting_retry == job then waiting_retry = nil end
-    notify(job, result)
+    notify(result)
     changed()
     startNext()
 end
@@ -135,7 +125,7 @@ startNext = function()
     job.state = "running"
     job.attempt = job.attempt + 1
     changed()
-    local ok, handle_or_err = pcall(job.source.cacheAllChaptersAsync, job.source, job.identity,
+    job.handle = job.source:cacheAllChaptersAsync(job.identity,
         function(cached, total)
             if job.cancelled then return end
             job.cached = tonumber(cached) or 0
@@ -151,13 +141,6 @@ startNext = function()
                 err = err,
             })
         end)
-    if not ok then
-        retryOrFinish(job, {
-            ok = false, cached = 0, total = 0, failed = 0, err = handle_or_err,
-        })
-        return
-    end
-    job.handle = handle_or_err
 end
 
 --- 加入全本缓存后台队列。同一本书已在排队或运行时复用既有任务。

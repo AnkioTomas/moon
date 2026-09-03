@@ -109,7 +109,7 @@ desktop.plugin = {
 }
 desktop.scheduleClockTick = function() end
 local before = desktop.rebuilds or 0
-Home.enter(desktop)
+Home.refreshOnEnter(desktop)
 Assert.is_false(desktop._home_loaded)
 Assert.is_nil(desktop._home_state)
 Assert.eq(desktop.rebuilds, before + 1)

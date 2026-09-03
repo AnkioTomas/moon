@@ -51,7 +51,7 @@ function Highlights.collect(source_id, stable_id, chapter_idx, current_items)
     if type(source_id) ~= "string" or type(stable_id) ~= "string" then
         return items
     end
-    local ok, NoteDB = pcall(require, "utils.db.note")
+    local ok, NoteDB = pcall(require, "db.note")
     if not ok or not NoteDB then return items end
     local idx = tonumber(chapter_idx) or 0
     local row = NoteDB.get(source_id, stable_id, idx)
@@ -81,9 +81,7 @@ function Highlights.pick(source_id, stable_id, chapter_idx, index, current_items
     local chapter = picked.chapter
         or (type(picked.chapters) == "table" and picked.chapters[1])
     if type(chapter) == "string" and chapter ~= "" then
-        local Text = require("utils.text")
-        local cleaned = Text.cleanChapterTitle and Text.cleanChapterTitle(chapter) or chapter
-        parts[#parts + 1] = cleaned ~= "" and cleaned or chapter
+        parts[#parts + 1] = chapter
     end
     local page = tonumber(picked.pageno) or tonumber(picked.page)
     if page and page > 0 then

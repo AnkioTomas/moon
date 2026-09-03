@@ -12,7 +12,7 @@ local lfs = require("libs/libkoreader-lfs")
 local util = require("util")
 local Text = require("utils.text")
 local _ = require("gettext")
-local Task = require("utils.task")
+local Job = require("workers.job")
 
 -- 源模块顶部不许 require KOReader UI 模块（离线测试直接 require 源文件）
 local _uimanager
@@ -303,72 +303,89 @@ local function parseFilename(filename)
     return name, nil
 end
 
---- 解析单本书并写入 books 表。同步阻塞，只在子进程里跑（BookDB 自带 ensure，首用即开子进程连接）。
---- 命中 books 表缓存（title 非空）则跳过解析。路径未命中时按内容 md5 找旧行：
---- 命中说明文件被移动/改名，原地把 stable_id 换成新路径（身份以 md5 为准，不当新书），
---- category/series 由所在目录派生，随新位置一并刷新；
---- 否则才是真新书，解析引擎失败回退文件名。
----@param f table 扫描产物 { name, path, category, series }
-local function resolveOne(f)
-    local BookDB = require("utils.db.book")
-    local cached = BookDB.get(SOURCE_ID, f.path)
-    if cached and type(cached.title) == "string" and cached.title ~= "" then
-        if cached.in_library == false then
-            BookDB.setLibraryMembership(SOURCE_ID, f.path, true)
-        end
-        ensureCover(f.path)
-        return
-    end
-    local digest = util.partialMD5(f.path)
-    local moved_from = nil
-    if digest then
-        local by_md5 = BookDB.getByMd5(SOURCE_ID, digest)
-        if by_md5 and by_md5.stable_id ~= f.path then
-            moved_from = by_md5.stable_id
+--- 扫盘的进程边界：
+---   子进程只做文件系统 / 渲染引擎重活（遍历、md5、解析元数据、落封面），**不碰 sqlite**——
+---   db.base 禁止子进程访问库（fork 会继承父进程的连接句柄）。
+---   主进程在 fork 前查好「已入库且标题非空」的行交给子进程判断是否要解析，
+---   子进程把每个扫描产物经 ctx.post 逐条回传（避开单帧 4MB 上限），主进程收齐后落库。
+
+--- 主进程：本地源已入库且标题非空的行，按 stable_id（即路径）索引。
+---@return table<string, Book>
+local function knownBooks()
+    local BookDB = require("db.book")
+    local rows = BookDB.getMany(SOURCE_ID, BookDB.stableIdsBySource(SOURCE_ID))
+    for stable_id, row in pairs(rows) do
+        if type(row.title) ~= "string" or row.title == "" then
+            rows[stable_id] = nil
         end
     end
-    if moved_from then
-        BookDB.renameStableId(SOURCE_ID, moved_from, f.path, f.category, f.series)
-        local old_cover = coverPath(moved_from)
-        if lfs.attributes(old_cover, "mode") == "file" then
-            os.rename(old_cover, coverPath(f.path))
-        end
-        -- KOReader 的 .sdr 目录（阅读进度/书签/笔记）跟着书走
-        local old_sdr = moved_from .. ".sdr"
-        if lfs.attributes(old_sdr, "mode") == "directory" then
-            os.rename(old_sdr, f.path .. ".sdr")
-        end
-        return
-    end
-    local props = parseBookProps(f.path) or {}
-    local title, authors, intro = props.title, props.authors, props.intro
-    if not title or title == "" then
-        title, authors = parseFilename(f.name)
-    end
-    BookDB.upsert({
-        source_id = SOURCE_ID,
-        stable_id = f.path,
-        md5 = digest,
-        title = title,
-        authors = authors,
-        intro = intro,
-        category = f.category,
-        series = f.series,
-        fetched_at = os.time(),
-        path = f.path,
-    })
+    return rows
 end
 
--- 扫描后隐藏失效书籍并清路径，身份、进度、笔记、统计和封面缓存保留。
---- 改名/移动的书已在 resolveOne 里原地更新 stable_id，这里的 keep 集合天然包含它们。
---- 同步阻塞，只在子进程里跑。
+--- 子进程：已入库的书只补封面；否则算 md5 并解析元数据（引擎失败回退文件名）。
+---@param f table 扫描产物 { name, path, category, series }
+---@param known table<string, Book>
+---@return table f 原表，未入库时补上 md5/title/authors/intro
+local function parseFile(f, known)
+    if known[f.path] then
+        ensureCover(f.path)
+        return f
+    end
+    f.md5 = util.partialMD5(f.path)
+    local props = parseBookProps(f.path) or {}
+    f.title, f.authors, f.intro = props.title, props.authors, props.intro
+    if not f.title or f.title == "" then
+        f.title, f.authors = parseFilename(f.name)
+    end
+    return f
+end
+
+--- 主进程：把子进程解析结果写入 books 表。
+--- 已入库行只恢复书架成员；未命中时按内容 md5 找旧行——命中说明文件被移动/改名，
+--- 原地换 stable_id（身份以 md5 为准，不当新书），category/series 随新位置刷新；
+--- 否则才是真新书。
+---@param files table[] parseFile 产物
+---@param known table<string, Book>
+local function commitFiles(files, known)
+    local BookDB = require("db.book")
+    for _, f in ipairs(files) do
+        local cached = known[f.path]
+        if cached then
+            if cached.in_library == false then
+                BookDB.setLibraryMembership(SOURCE_ID, f.path, true)
+            end
+        else
+            local by_md5 = f.md5 and BookDB.getByMd5(SOURCE_ID, f.md5)
+            if by_md5 and by_md5.stable_id ~= f.path then
+                BookDB.renameStableId(SOURCE_ID, by_md5.stable_id, f.path, f.category, f.series)
+                moveBookArtifacts(by_md5.stable_id, f.path)
+            else
+                BookDB.upsert({
+                    source_id = SOURCE_ID,
+                    stable_id = f.path,
+                    md5 = f.md5,
+                    title = f.title,
+                    authors = f.authors,
+                    intro = f.intro,
+                    category = f.category,
+                    series = f.series,
+                    fetched_at = os.time(),
+                    path = f.path,
+                })
+            end
+        end
+    end
+end
+
+--- 扫描后隐藏失效书籍并清路径，身份、进度、笔记、统计和封面缓存保留。
+--- 改名/移动的书已在 commitFiles 里原地更新 stable_id，这里的 keep 集合天然包含它们。
 ---@param files table[]
 local function pruneMissing(files)
     local keep = {}
     for _, f in ipairs(files) do
         keep[f.path] = true
     end
-    local BookDB = require("utils.db.book")
+    local BookDB = require("db.book")
     for _, stable_id in ipairs(BookDB.stableIdsBySource(SOURCE_ID)) do
         if not keep[stable_id] then
             BookDB.setLibraryMembership(SOURCE_ID, stable_id, false, true)
@@ -376,20 +393,27 @@ local function pruneMissing(files)
     end
 end
 
---- 扫盘任务：重活全在子进程，cancel 杀子进程。
+--- 扫盘任务：遍历与解析在子进程，落库在主进程，cancel 杀子进程。
 --- 扫描成败都调 on_done：子进程崩溃/启动失败时库里是旧数据，照查，不让 UI 空转。
 ---@param root string
 ---@param on_done fun()
 ---@return { cancel: fun() }
 local function scanJob(root, on_done)
-    local job = Task.run(function()
-        local files = scanFiles(root)
-        for _, f in ipairs(files) do
-            resolveOne(f)
+    local known = knownBooks()
+    local files = {}
+    local job = Job.run(function(ctx)
+        for _, f in ipairs(scanFiles(root)) do
+            ctx.post(parseFile(f, known))
         end
-        pruneMissing(files)
     end, {
-        on_done = on_done,
+        on_progress = function(f)
+            files[#files + 1] = f
+        end,
+        on_done = function()
+            commitFiles(files, known)
+            pruneMissing(files)
+            on_done()
+        end,
         on_failed = function(err)
             require("logger").warn("book local scan failed", err)
             on_done()
@@ -410,7 +434,7 @@ local function queryDb(opts, cb)
     local page = math.max(1, tonumber(opts.page) or 1)
     local page_size = math.max(1, tonumber(opts.page_size) or 24)
     uiManager():nextTick(function()
-        local BookDB = require("utils.db.book")
+        local BookDB = require("db.book")
         local rows, count = BookDB.listBySource(SOURCE_ID, {
             category = opts.category,
             series = opts.series,
@@ -479,9 +503,9 @@ function Client:importAsync(temp_path, filename, cb)
 end
 
 --- 手动改分类/系列 = 移动文件：分类是一级目录、系列是二级目录（无分类则系列无意义，丢弃）。
---- stable_id 即文件绝对路径，移动后跟着变；四表身份经 renameStableId 迁移，
+--- stable_id 即文件绝对路径，移动后跟着变；书籍相关身份经 renameStableId 迁移，
 --- 封面缓存与 KOReader 的 .sdr 目录（阅读进度/书签/笔记）改名跟随。
---- 编辑对话框保存时经 DbQueue 调用（renameStableId 写库）；FS 操作同步快，不另起子进程。
+--- 编辑对话框保存时同步调用 renameStableId 写库；FS 操作不另起子进程。
 ---@param stable_id string 当前文件绝对路径
 ---@param category string|nil
 ---@param series string|nil
@@ -542,7 +566,7 @@ function Client:moveBook(stable_id, category, series)
         return nil, _("移动失败：") .. tostring(move_err)
     end
     moveBookArtifacts(stable_id, new_path)
-    require("utils.db.book").renameStableId(SOURCE_ID, stable_id, new_path, cat, ser)
+    require("db.book").renameStableId(SOURCE_ID, stable_id, new_path, cat, ser)
     return new_path
 end
 
@@ -591,7 +615,7 @@ function Client:replaceBook(temp_path, stable_id)
         return nil, _("放置转换文件失败：") .. tostring(create_err)
     end
 
-    local BookDB = require("utils.db.book")
+    local BookDB = require("db.book")
     local row = BookDB.get(SOURCE_ID, stable_id)
     local renamed = BookDB.renameStableId(
         SOURCE_ID,
@@ -651,15 +675,12 @@ function Client:indexOneAsync(path, cb)
         end)
         return nil
     end
-    local job = Task.run(function()
-        resolveOne({
-            name = name,
-            path = path,
-            category = nil,
-            series = nil,
-        })
+    local known = knownBooks()
+    local job = Job.run(function()
+        return parseFile({ name = name, path = path }, known)
     end, {
-        on_done = function()
+        on_done = function(f)
+            commitFiles({ f }, known)
             cb(true)
         end,
         on_failed = function(err)
@@ -752,7 +773,7 @@ function Client:filtersAsync(cb)
             cb(nil, err)
             return
         end
-        local BookDB = require("utils.db.book")
+        local BookDB = require("db.book")
         cb({
             data = {
                 category = BookDB.categoriesBySource(SOURCE_ID),

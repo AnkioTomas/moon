@@ -30,7 +30,7 @@ CREATE INDEX IF NOT EXISTS idx_books_library ON books(source_id, in_library, sta
     return true
 end
 
---- 插入或更新 books 行。兼容旧调用：视为可信本地写入，但不制造待上传状态。
+--- 插入或更新 books 行（本地可信写入：扫盘/本地登记），不制造待上传状态。
 ---@param row table
 ---@return boolean
 function BookDB.upsert(row)
@@ -108,22 +108,23 @@ function BookDB.upsertRemoteMany(rows)
     for start = 1, #rows, 8 do
         local values, args = {}, {}
         local finish = math.min(start + 7, #rows)
+        -- 绑定参数允许 NULL，不能用 #args+1 追加（nil 不增长表长，后续列会整体左移错位）；
+        -- 按 (行序-1)*11 + 列序 显式定位。
         for i = start, finish do
             local row = rows[i]
-            local source_id = row.source_id
-            local stable_id = row.stable_id
+            local base = #values * 11
             values[#values + 1] = "(?,?,?,?,?,?,?,?,?,?,?,1)"
-            args[#args + 1] = source_id
-            args[#args + 1] = stable_id
-            args[#args + 1] = row.md5
-            args[#args + 1] = row.title
-            args[#args + 1] = row.authors
-            args[#args + 1] = tonumber(row.percent) or 0
-            args[#args + 1] = row.category
-            args[#args + 1] = row.series
-            args[#args + 1] = row.intro
-            args[#args + 1] = tonumber(row.fetched_at) or os.time()
-            args[#args + 1] = row.path
+            args[base + 1] = row.source_id
+            args[base + 2] = row.stable_id
+            args[base + 3] = row.md5
+            args[base + 4] = row.title
+            args[base + 5] = row.authors
+            args[base + 6] = tonumber(row.percent) or 0
+            args[base + 7] = row.category
+            args[base + 8] = row.series
+            args[base + 9] = row.intro
+            args[base + 10] = tonumber(row.fetched_at) or os.time()
+            args[base + 11] = row.path
         end
         local ok = Base.exec(
             [[INSERT INTO books (
@@ -182,15 +183,10 @@ end
 --- 用完整远端/磁盘快照原子对账。只有调用本函数才会隐藏缺失书籍。
 ---@param source_id string
 ---@param books table[]
----@param opts { clear_missing_paths?: boolean }|nil
 ---@return boolean
-function BookDB.reconcile(source_id, books, opts)
+function BookDB.reconcile(source_id, books)
     if not Base.exec("BEGIN IMMEDIATE;") then return false end
     local ok = Base.exec("UPDATE books SET in_library=0 WHERE source_id=?;", source_id) ~= nil
-    if ok and opts and opts.clear_missing_paths then
-        ok = Base.exec([[UPDATE books SET path=NULL
-            WHERE source_id=? AND in_library=0;]], source_id) ~= nil
-    end
     if ok then
         local batch = {}
         for _, row in ipairs(books) do
@@ -200,13 +196,7 @@ function BookDB.reconcile(source_id, books, opts)
             copy.in_library = true
             batch[#batch + 1] = copy
         end
-        if #batch > 8 then
-            ok = BookDB.upsertRemoteMany(batch)
-        else
-            for _, row in ipairs(batch) do
-                if not BookDB.upsertRemote(row) then ok = false break end
-            end
-        end
+        ok = BookDB.upsertRemoteMany(batch)
     end
     if ok and Base.exec("COMMIT;") then return true end
     Base.exec("ROLLBACK;")
@@ -302,7 +292,7 @@ function BookDB.getMany(source_id, stable_ids)
     for start = 1, #ids, 500 do
         local finish = math.min(start + 499, #ids)
         local placeholders = {}
-        for i = start, finish do placeholders[#placeholders + 1] = "?" end
+        for _ = start, finish do placeholders[#placeholders + 1] = "?" end
         local args = { source_id }
         for i = start, finish do args[#args + 1] = ids[i] end
         local result, nrows = Base.query(

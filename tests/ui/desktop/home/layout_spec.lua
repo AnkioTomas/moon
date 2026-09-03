@@ -32,6 +32,7 @@ end
 
 local build_log = {}
 local layout_kids = {}
+local freed = {}
 
 local function widgetStub()
     return {
@@ -78,7 +79,13 @@ local function stubComponent(id, height, extra)
                 for k, v in pairs(extra) do entry[k] = v end
             end
             build_log[#build_log + 1] = entry
-            local part = { widget = { _id = id }, height = height }
+            local part = {
+                widget = {
+                    _id = id,
+                    free = function() freed[id] = (freed[id] or 0) + 1 end,
+                },
+                height = height,
+            }
             if extra and extra.pager then
                 part.pager = extra.pager
             end
@@ -163,6 +170,7 @@ Assert.eq(HomeStats.currentStreak(broken), 1)
 -- Layout.build：预算不足时裁剪后续组件
 build_log = {}
 layout_kids = {}
+freed = {}
 home_settings.home_layout = { "clock", "stats", "recent_list" }
 home_settings.home_recent_list_mode = "hero_grid"
 local desktop = {}
@@ -171,6 +179,7 @@ Assert.eq(#build_log, 2)
 Assert.eq(build_log[1].id, "clock")
 Assert.eq(build_log[2].id, "stats")
 Assert.eq(#layout_kids, 1)
+Assert.eq(freed.stats, 1)
 Assert.is_true(type(desktop._home_clock_refresh) == "function")
 desktop._home_clock_refresh()
 Assert.eq(clock_refreshes, 1)

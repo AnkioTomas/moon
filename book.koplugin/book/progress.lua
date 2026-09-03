@@ -9,8 +9,7 @@ local Event = require("ui/event")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local logger = require("logger")
-local ProgressDB = require("utils.db.progress")
-local DbQueue = require("utils.db.queue")
+local ProgressDB = require("db.progress")
 local ProgressPosition = require("types.book_progress")
 local Position = require("book.progress.position")
 local Text = require("utils.text")
@@ -174,15 +173,9 @@ end
 ---@param revision integer
 ---@param done fun(ok: boolean)
 local function confirm(source_id, stable_id, revision, done)
-    DbQueue.run(function()
-        assert(ProgressDB.markSynced(source_id, stable_id, revision), "failed to confirm progress")
-    end, {
-        on_done = function() done(true) end,
-        on_failed = function(err)
-            logger.warn("book.progress confirm failed", stable_id, err)
-            done(false)
-        end,
-    })
+    local ok = ProgressDB.markSynced(source_id, stable_id, revision)
+    if not ok then logger.warn("book.progress confirm failed", stable_id) end
+    done(ok)
 end
 
 --- 保存当前文档进度。写入完成前不发网络请求，避免同步旧快照。
@@ -196,17 +189,9 @@ function Progress.save(snapshot, cb)
     end
     local pos = Progress.position(snapshot)
     pos.updated_at = nextRevision()
-    DbQueue.run(function()
-        assert(ProgressDB.upsert(id.source_id, id.stable_id, pos), "failed to save progress")
-    end, {
-        on_done = function()
-            if cb then cb(true) end
-        end,
-        on_failed = function(err)
-            logger.warn("book.progress save failed", id.stable_id, err)
-            if cb then cb(false) end
-        end,
-    })
+    local ok = ProgressDB.upsert(id.source_id, id.stable_id, pos)
+    if not ok then logger.warn("book.progress save failed", id.stable_id) end
+    if cb then cb(ok) end
 end
 
 ---@param row PendingProgress
@@ -266,7 +251,7 @@ function Progress.syncAsync(source, opts, cb)
     if opts.identity then
         add(source.id, opts.identity.stable_id, opts.identity.chapter_idx)
     elseif not opts.dirty_only then
-        for _, stable_id in ipairs(require("utils.db.book").libraryStableIdsBySource(source.id)) do
+        for _, stable_id in ipairs(require("db.book").libraryStableIdsBySource(source.id)) do
             add(source.id, stable_id)
         end
     end
@@ -293,17 +278,13 @@ function Progress.syncAsync(source, opts, cb)
                 current_job = nil
                 if cancelled then return end
                 if not pos then finish(nil, err or "progress pull failed"); return end
-                DbQueue.run(function()
-                    pos.updated_at = os.time()
-                    assert(ProgressDB.upsertRemote(source.id, identity.stable_id, pos),
-                        "failed to save remote progress")
-                end, {
-                    on_done = function()
-                        result.pulled = result.pulled + 1
-                        nextIdentity()
-                    end,
-                    on_failed = function(save_err) finish(nil, save_err) end,
-                })
+                pos.updated_at = os.time()
+                if ProgressDB.upsertRemote(source.id, identity.stable_id, pos) then
+                    result.pulled = result.pulled + 1
+                    nextIdentity()
+                else
+                    finish(nil, "failed to save remote progress")
+                end
             end)
         end
 
@@ -596,28 +577,25 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
             if not current or not isSameBook(id) then
                 return
             end
-            DbQueue.run(function()
-                local remote = {
-                    fraction = remote_pos.fraction,
-                    chapter_idx = remote_pos.chapter_idx,
-                    chapter_title = remote_pos.chapter_title,
-                    chapter_fraction = remote_pos.chapter_fraction,
-                    page = remote_pos.page,
-                    total_pages = remote_pos.total_pages,
-                    locator = remote_pos.locator,
-                    extra = remote_pos.extra,
-                    updated_at = os.time(),
-                }
-                assert(ProgressDB.adoptRemote(id.source_id, id.stable_id, remote),
-                    "failed to save remote progress")
-            end, {
-                on_done = function()
-                    local live = Session.current()
-                    if live and isSameBook(id) then
-                        applyChosenPos(live.ui, live.identity, remote_pos, remote_pos.fraction, true)
-                    end
-                end,
-            })
+            local remote = {
+                fraction = remote_pos.fraction,
+                chapter_idx = remote_pos.chapter_idx,
+                chapter_title = remote_pos.chapter_title,
+                chapter_fraction = remote_pos.chapter_fraction,
+                page = remote_pos.page,
+                total_pages = remote_pos.total_pages,
+                locator = remote_pos.locator,
+                extra = remote_pos.extra,
+                updated_at = os.time(),
+            }
+            if not ProgressDB.adoptRemote(id.source_id, id.stable_id, remote) then
+                logger.warn("book.progress adopt remote failed", id.stable_id)
+                return
+            end
+            local live = Session.current()
+            if live and isSameBook(id) then
+                applyChosenPos(live.ui, live.identity, remote_pos, remote_pos.fraction, true)
+            end
         end,
         cancel_callback = function()
             asked_conflicts[key] = true
@@ -630,23 +608,17 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
             local adopt = {}
             for k, v in pairs(local_pos) do adopt[k] = v end
             adopt.updated_at = nextRevision()
-            DbQueue.run(function()
-                assert(ProgressDB.upsert(id.source_id, id.stable_id, adopt),
-                    "failed to save local progress")
-            end, {
-                on_done = function()
-                    local live = Session.current()
-                    if live and isSameBook(id) then
-                        applyChosenPos(live.ui, live.identity, adopt, adopt.fraction, false)
-                    end
-                    if id.source and id.source.syncProgressAsync then
-                        id.source:syncProgressAsync({ identity = id }, function() end)
-                    end
-                end,
-                on_failed = function(err)
-                    logger.warn("book.progress adopt local failed", id.stable_id, err)
-                end,
-            })
+            if not ProgressDB.upsert(id.source_id, id.stable_id, adopt) then
+                logger.warn("book.progress adopt local failed", id.stable_id)
+                return
+            end
+            local live = Session.current()
+            if live and isSameBook(id) then
+                applyChosenPos(live.ui, live.identity, adopt, adopt.fraction, false)
+            end
+            if id.source and id.source.syncProgressAsync then
+                id.source:syncProgressAsync({ identity = id }, function() end)
+            end
         end,
     })
 end

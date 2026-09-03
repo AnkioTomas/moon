@@ -14,7 +14,11 @@ local Cache = require("http.cache")
 local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
+local md5 = require("ffi/sha2").md5
 
+---@class MoonClient
+---@field base_url string
+---@field token string
 local Client = {}
 
 --- 构造 Moon HTTP 客户端。
@@ -100,7 +104,9 @@ function Client:_jsonAsync(method, path, opts, cb)
     local cache_ttl = tonumber(opts.cache_ttl) or 0
     local cache_key
     if method == "GET" and cache_ttl > 0 then
-        cache_key = Cache.key(method, self.base_url .. path, opts.query)
+        local cache_scope = md5(self.token)
+        ---@cast cache_scope string
+        cache_key = Cache.key(method, self.base_url .. path, opts.query, cache_scope)
     end
 
     local headers = {
@@ -150,12 +156,13 @@ function Client:_jsonAsync(method, path, opts, cb)
                 cb(nil, req_err)
                 return
             end
-            local code = tonumber(res and res.code)
+            local response = assert(res)
+            local code = tonumber(response.code)
             if not code then
-                cb(nil, T(_("请求失败: %1"), tostring(res and res.code)))
+                cb(nil, T(_("请求失败: %1"), tostring(response.code)))
                 return
             end
-            local raw = Text.stripBom(res.body or "")
+            local raw = Text.stripBom(response.body or "")
             local ok, data = pcall(JSON.decode, raw)
             if not ok or type(data) ~= "table" then
                 cb(nil, T(_("响应不是 JSON (HTTP %1) %2"), tostring(code), (raw:gsub("%s+", " ")):sub(1, 120)))

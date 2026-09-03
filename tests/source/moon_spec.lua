@@ -82,15 +82,14 @@ end
 local touches = {}
 package.preload["book.store"] = function()
     return {
-        touchAsync = function(path, identity, _, cb)
+        touch = function(path, identity)
             touches[#touches + 1] = { path = path, identity = identity }
-            cb(true)
+            return true
         end,
-        reconcileAsync = function(source_id, books, _, cb)
+        reconcile = function(source_id, books)
             rec.reconciled_source = source_id
             rec.reconciled_books = books
-            cb({ pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false })
-            return { cancel = function() end }
+            return { pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
         end,
     }
 end
@@ -348,11 +347,6 @@ do
 
     src:onEvent("page_changed")
     Assert.eq(sync.push_calls, 0)
-
-    src:onEvent("stats_sync_request")
-    Assert.eq(sync.pull_calls, 1)
-    Assert.eq(sync.push_calls, 1)
-    Assert.eq(sync.last_source, src)
 end
 
 -- getProgressAsync：wire 表 → ProgressPosition（percent/100、chapter_idx、locator）
