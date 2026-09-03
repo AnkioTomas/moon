@@ -20,20 +20,6 @@ local T = require("ffi/util").template
 
 local Records = {}
 
---- 创建灰色弱化文案。
----@param text string 文案。
----@param width number 最大宽度。
----@param size number|nil 字号。
----@return table
-local function muted(text, width, size)
-    return TextWidget:new{
-        text = text,
-        face = UI.face("xx_smallinfofont", size or 14),
-        max_width = width,
-        fgcolor = UI.muted(),
-    }
-end
-
 --- 将秒数格式化为统计页短时长文案。
 ---@param seconds number|nil 阅读秒数。
 ---@return string
@@ -248,7 +234,7 @@ function Records.build(state, width, avail_h)
     }, width, gap)
     push(record_row, record_h)
     push(VerticalSpan:new{ width = gap }, gap)
-    local title = muted(T(_("%1年每月阅读时长"), stats.year), width, 12)
+    local title = UI.mutedText(T(_("%1年每月阅读时长"), stats.year), width, 12)
     push(title, title:getSize().h)
     push(VerticalSpan:new{ width = UI.sz(4) }, UI.sz(4))
     local chart_h = math.max(UI.sz(48), math.min(UI.sz(220), avail_h - used))

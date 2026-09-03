@@ -22,20 +22,6 @@ local T = require("ffi/util").template
 local Overview = {}
 local DOW = { _("日"), _("一"), _("二"), _("三"), _("四"), _("五"), _("六") }
 
---- 创建灰色弱化文案。
----@param text string 文案。
----@param width number 最大宽度。
----@param size number|nil 字号。
----@return table
-local function muted(text, width, size)
-    return TextWidget:new{
-        text = text,
-        face = UI.face("xx_smallinfofont", size or 14),
-        max_width = width,
-        fgcolor = UI.muted(),
-    }
-end
-
 --- 年月字符串按月偏移。
 ---@param ym string YYYY-MM。
 ---@param delta number 月份偏移量。
@@ -102,7 +88,7 @@ local function buildHero(state, width)
                 fgcolor = Blitbuffer.COLOR_BLACK,
             },
             VerticalSpan:new{ width = UI.sz(6) },
-            muted(_("总阅读时长"), width, 13),
+            UI.mutedText(_("总阅读时长"), width, 13),
         },
     }
 end
@@ -135,7 +121,7 @@ local function buildSecondary(state, width)
                     fgcolor = Blitbuffer.COLOR_BLACK,
                 },
                 VerticalSpan:new{ width = UI.sz(4) },
-                muted(item[1], cell_w - UI.sz(4), 12),
+                UI.mutedText(item[1], cell_w - UI.sz(4), 12),
             },
         })
     end
@@ -265,7 +251,7 @@ local function buildCalendar(desktop, state, width, max_height)
         if i > 1 then table.insert(dow_row, HorizontalSpan:new{ width = gap }) end
         table.insert(dow_row, CenterContainer:new{
             dimen = Geom:new{ w = col_w, h = UI.sz(20) },
-            muted(name, col_w, 11),
+            UI.mutedText(name, col_w, 11),
         })
     end
 
@@ -321,16 +307,16 @@ function Overview.build(desktop, state, width, avail_h)
         table.insert(col, VerticalSpan:new{ width = UI.sz(12) })
         table.insert(col, CenterContainer:new{
             dimen = Geom:new{ w = width, h = UI.sz(24) },
-            muted(state.error, width),
+            UI.mutedText(state.error, width),
         })
     elseif not state.has_data then
         table.insert(col, VerticalSpan:new{ width = UI.sz(12) })
         table.insert(col, CenterContainer:new{
             dimen = Geom:new{ w = width, h = UI.sz(40) },
-            muted(_("暂无阅读统计。上报后再查看。"), width),
+            UI.mutedText(_("暂无阅读统计。上报后再查看。"), width),
         })
     else
-        local hint = muted(_("点选日期查看当日书单"), width)
+        local hint = UI.mutedText(_("点选日期查看当日书单"), width)
         local fixed_h = UI.sz(96) + UI.sz(8) + UI.sz(48) + UI.sz(16) + UI.sz(8) + hint:getSize().h
         local calendar_h = math.max(1, avail_h - fixed_h)
         table.insert(col, VerticalSpan:new{ width = UI.sz(8) })

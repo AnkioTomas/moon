@@ -19,20 +19,6 @@ local T = require("ffi/util").template
 
 local Day = {}
 
---- 创建灰色弱化文案。
----@param text string 文案。
----@param width number 最大宽度。
----@param size number|nil 字号。
----@return table
-local function muted(text, width, size)
-    return TextWidget:new{
-        text = text,
-        face = UI.face("xx_smallinfofont", size or 14),
-        max_width = width,
-        fgcolor = UI.muted(),
-    }
-end
-
 --- 构建日期标题，可附带该日阅读时长。
 ---@param ymd string YYYY-MM-DD 日期键。
 ---@param duration_text string|nil 时长文案。
@@ -80,7 +66,7 @@ function Day.build(desktop, state, width, avail_h, open_book)
     push(VerticalSpan:new{ width = UI.sz(10) }, UI.sz(10))
 
     if not info or not info.books or #info.books == 0 then
-        local empty = muted(_("这一天没有阅读记录"), width)
+        local empty = UI.mutedText(_("这一天没有阅读记录"), width)
         push(empty, empty:getSize().h)
         return col
     end
@@ -114,7 +100,7 @@ function Day.build(desktop, state, width, avail_h, open_book)
                 fgcolor = Blitbuffer.COLOR_BLACK,
             },
             VerticalSpan:new{ width = UI.sz(4) },
-            muted(author_text, meta_w, 12),
+            UI.mutedText(author_text, meta_w, 12),
             VerticalSpan:new{ width = UI.sz(8) },
             UI.progressBar(meta_w, UI.sz(6), percent),
         }
@@ -134,7 +120,7 @@ function Day.build(desktop, state, width, avail_h, open_book)
     local rest = #info.books - shown
     if rest > 0 then
         push(VerticalSpan:new{ width = UI.sz(6) }, UI.sz(6))
-        local more = muted(T(_("另有 %1 本未显示"), rest), width)
+        local more = UI.mutedText(T(_("另有 %1 本未显示"), rest), width)
         push(more, more:getSize().h)
     end
     return col
