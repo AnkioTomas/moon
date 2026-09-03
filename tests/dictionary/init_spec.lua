@@ -11,6 +11,10 @@ local settings = { dictionary_enabled = true }
 package.preload["utils.settings"] = function()
     return { get = function() return settings end }
 end
+local reader_order = { search = { "dictionary_lookup", "wikipedia_lookup" } }
+local filemanager_order = { search = { "dictionary_lookup", "wikipedia_lookup" } }
+package.preload["ui/elements/reader_menu_order"] = function() return reader_order end
+package.preload["ui/elements/filemanager_menu_order"] = function() return filemanager_order end
 
 local manage_calls = 0
 local download_calls = 0
@@ -83,6 +87,8 @@ local DictInit = require("dictionary.init")
 Assert.is_true(DictInit.isEnabled())
 DictInit.install()
 Assert.is_true(ReaderDictionary._book_dict_installed)
+Assert.eq(reader_order.search[2], "dictionary_download")
+Assert.eq(filemanager_order.search[2], "dictionary_download")
 
 local changed_calls = 0
 Assert.eq(ReaderDictionary.showDictionariesMenu({ ui = {} }, function()
@@ -96,7 +102,8 @@ Assert.eq(changed_calls, 1)
 
 local menu_items = {}
 ReaderDictionary.addToMainMenu(ReaderDictionary, menu_items)
-local download_item = menu_items.dictionary_settings.sub_item_table[2]
+local download_item = menu_items.dictionary_download
+Assert.len(menu_items.dictionary_settings.sub_item_table, 1)
 Assert.is_nil(download_item.sub_item_table_func)
 download_item.callback()
 Assert.eq(download_calls, 1)
@@ -118,6 +125,8 @@ settings.dictionary_enabled = false
 Assert.is_false(DictInit.isEnabled())
 local native_menu_items = {}
 ReaderDictionary.addToMainMenu(ReaderDictionary, native_menu_items)
+Assert.is_nil(native_menu_items.dictionary_download)
+Assert.len(native_menu_items.dictionary_settings.sub_item_table, 2)
 Assert.is_true(type(native_menu_items.dictionary_settings.sub_item_table[2].sub_item_table_func) == "function")
 native_menu_items.dictionary_settings.sub_item_table[2].sub_item_table_func()
 Assert.eq(native_download_calls, 1)
