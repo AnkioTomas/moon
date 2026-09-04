@@ -20,7 +20,7 @@ local default_source = {
     type = "book",
     putProgressAsync = function() end,
     syncProgressAsync = function(_, opts, cb)
-        calls.progress[#calls.progress + 1] = { "sync", opts.identity }
+        calls.progress[#calls.progress + 1] = { "sync", opts.identity, opts.dirty_only }
         if cb then cb({}) end
     end,
     syncNotesAsync = function(_, opts, cb)
@@ -466,6 +466,8 @@ do
     defer_tracker_stop = false
     Assert.is_nil(Session.current(), "关书清会话")
     Assert.eq(calls.progress[#calls.progress - 1][1], "sync")
+    Assert.is_true(calls.progress[#calls.progress - 1][3],
+        "关书进度只能上传，不能立即回拉旧云端值")
     Assert.eq(calls.progress[#calls.progress][1], "clearConflicts")
     Assert.eq(calls.tracker[#calls.tracker][1], "stop")
     Assert.eq(emitted[#emitted].ev, "document_close")

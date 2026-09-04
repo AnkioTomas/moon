@@ -36,16 +36,19 @@ local Note = require("book.note")
 local annotations = { { datetime = "2026-08-20", text = "高亮", page = 3 } }
 local ui = {
     document = { getPageCount = function() return 100 end },
+    annotation = { annotations = annotations },
     doc_settings = {
         flush = function() end,
         readSetting = function(_, key)
-            return key == "annotations" and annotations or nil
+            return key == "annotations"
+                and { { datetime = "2026-08-19", text = "旧快照", page = 2 } }
+                or nil
         end,
     },
 }
 local identity = { source_id = "moon", stable_id = "b'1", chapter_idx = 2 }
 Note.save(ui, identity)
-Assert.eq(encoded[1].text, "高亮", "必须在事件当下编码")
+Assert.eq(encoded[1].text, "高亮", "必须编码 ReaderAnnotation 当前内存快照")
 Assert.eq(encoded[1].total_pages, 100)
 annotations[1].text = "已修改"
 Assert.len(writes, 1)

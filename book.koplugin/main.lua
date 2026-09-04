@@ -148,7 +148,7 @@ end
 function BookPlugin:onSuspend()
     logger.info("book lifecycle suspend")
     require("ui.reader.session").onSuspend(self)
-    require("lockscreen.init").refresh(nil, true)
+    require("lockscreen.init").refresh(nil, true, "suspend")
     require("remote.init").onSuspend()
     logger.flush()
 end
@@ -183,7 +183,7 @@ function BookPlugin:onNetworkConnected()
     logger.info("book lifecycle network_connected")
     require("book.sync").retryDirtyAsync()
     self:emitToSource("network_connected")
-    require("lockscreen.init").refresh(nil, true)
+    require("lockscreen.init").refresh(nil, true, "network_connected")
 end
 
 --- 翻页（分页视图）：统计换页；分发 page_changed

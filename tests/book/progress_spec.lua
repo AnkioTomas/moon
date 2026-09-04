@@ -120,14 +120,20 @@ local ui = {
 }
 local snapshot = {
     ui = ui,
-    identity = { source_id = "moon", stable_id = "current.epub" },
+    identity = { source_id = "moon", stable_id = "current.epub", chapter_idx = 3 },
     doc_fraction = 0.25,
+}
+rows[#rows + 1] = {
+    source_id = "moon", stable_id = "current.epub", chapter_idx = 3,
+    fraction = 0.2, updated_at = 4, sync_status = 1,
+    extra = { chapter_uid = "u3", chapter_idx = 3 },
 }
 local saved_ok
 Progress.save(snapshot, function(ok) saved_ok = ok end)
 Assert.is_true(saved_ok)
 Assert.len(saved, 1)
 Assert.eq(saved[1].pos.fraction, 0.25)
+Assert.eq(saved[1].pos.extra.chapter_uid, "u3", "保存同章进度不能清空远端章节 UID")
 Assert.is_true(saved[1].pos.updated_at > 0)
 
 Progress.save(snapshot)
