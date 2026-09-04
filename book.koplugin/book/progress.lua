@@ -622,7 +622,7 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
     })
 end
 
---- 开书后拉远端进度并与当前阅读位置对比；冲突时弹窗，一致则后台 sync 收敛。
+--- 开书后拉远端进度并与当前阅读位置对比；冲突时弹窗，一致则直接收敛。
 --- 必须先拉后比：syncProgressAsync 会先推脏本地，会把冲突静默抹平。
 ---@param snapshot ReaderSessionSnapshot
 function Progress.pull(snapshot)
@@ -646,8 +646,15 @@ function Progress.pull(snapshot)
             askProgressConflict(id, snapshot, local_position, remote_pos)
             return
         end
-        if source.syncProgressAsync then
-            source:syncProgressAsync({ identity = id }, function() end)
+        local row = ProgressDB.get(id.source_id, id.stable_id)
+        if row and row.sync_status == 0 then
+            -- 本地脏版本与云端基本一致时只推不拉；上面已经拿到了最新远端，
+            -- 再跑完整同步只会产生第二次相同的 getProgress。
+            if source.syncProgressAsync then
+                source:syncProgressAsync({ identity = id, dirty_only = true }, function() end)
+            end
+        elseif not ProgressDB.upsertRemote(id.source_id, id.stable_id, remote_pos) then
+            logger.warn("book.progress save remote failed", id.stable_id)
         end
     end)
 end

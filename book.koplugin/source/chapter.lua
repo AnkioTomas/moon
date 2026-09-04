@@ -85,24 +85,28 @@ end
 ---@param identity BookIdentity
 ---@param opts table|nil
 ---@return string|nil
+---@return number|nil
 local function existingLocalPath(identity, opts)
     opts = opts or {}
     local idx = tonumber(opts.chapter_idx)
     if idx then
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-        return chapterReady(path) and path or nil
+        if chapterReady(path) then return path, idx end
+        return nil
     end
     local book = identity.book
     if not book or not book.path then
         book = require("db.book").get(identity.source_id, identity.stable_id)
     end
     if book and chapterReady(book.path) then
-        return book.path
+        idx = tonumber(book.path:match("[/\\](%d+)%.html$"))
+        if idx then return book.path, idx end
     end
     local pos = localPosition(identity)
     idx = pos and tonumber(pos.chapter_idx) or 1
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
-    return chapterReady(path) and path or nil
+    if chapterReady(path) then return path, idx end
+    return nil
 end
 
 --- 把源交来的正文载荷归一成标题与 HTML 片段。
@@ -333,18 +337,17 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
     local cancelled = false
     local job, dialog
 
-    local local_path = existingLocalPath(identity, opts)
+    local local_path, local_idx = existingLocalPath(identity, opts)
     if local_path then
-        --- 下一个 tick 交付路径给调用方；期间被取消则不回调。
-        ---@param path string 章节文件路径
-        local function open(path)
-            require("ui/uimanager"):nextTick(function()
-                if not cancelled then cb(path) end
-            end)
-        end
+        local touched, touch_err = require("book.store").touch(local_path, identity, {
+            chapter_idx = local_idx,
+        })
         -- 本地命中直接交付。不要在切章时再启动后台 openAsync：它会重复读目录、
         -- 扫描/改写整份 HTML，并把这些同步工作塞回 UI 线程，抵消快开收益。
-        open(local_path)
+        -- 但身份登记不能省：旧缓存可能早于 chapters 表，ReaderReady 只按路径精确查库。
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled then cb(touched and local_path or nil, touch_err) end
+        end)
         return {
             cancel = function()
                 cancelled = true
