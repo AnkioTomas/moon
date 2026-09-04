@@ -85,7 +85,7 @@ jobs:
           fi
 
           {
-            echo "## Book ${TAG}"
+            echo "## 月读 ${TAG}"
             echo
             echo "KOReader 插件包：\`${{ steps.ver.outputs.asset }}\`"
             echo
@@ -162,7 +162,7 @@ jobs:
           TAG="${{ steps.ver.outputs.tag }}"
           ASSET="${{ steps.ver.outputs.asset }}"
           DICT="${{ steps.pinyin.outputs.asset }}"
-          ARGS=(release create "$TAG" "$ASSET" "$DICT" --title "Book ${TAG}" --notes-file RELEASE_NOTES.md)
+          ARGS=(release create "$TAG" "$ASSET" "$DICT" --title "月读 ${TAG}" --notes-file RELEASE_NOTES.md)
 
           if [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
             ARGS+=(--prerelease)
