@@ -9,6 +9,7 @@
 --]]
 
 local SourceCapabilities = require("types.book_source").SourceCapabilities
+local logger = require("utils.log")
 local _ = require("gettext")
 
 ---@class SourceBase : BookSource
@@ -68,15 +69,23 @@ end
 ---     （源可拉最新详情写 Store.rememberMany 后调 refresh() 重绘面板；基类空操作即可）
 local function syncDesktopBooks(self, desktop, opts)
     if type(desktop) ~= "table" or desktop._closed then return end
-    if desktop._books_sync_pending and not (opts and opts.force) then return end
+    if desktop._books_sync_pending and not (opts and opts.force) then
+        logger.dbg("book shelf refresh skipped", self.id, "pending")
+        return
+    end
     if desktop._books_sync_cancel and desktop._books_sync_cancel.cancel then
+        logger.dbg("book shelf refresh cancel previous", self.id)
         desktop._books_sync_cancel:cancel()
     end
+    logger.dbg("book shelf refresh start", self.id, opts and opts.force and "forced" or "background")
     desktop._books_sync_pending = true
     local request = {}
     desktop._books_sync_request = request
     local job = self:syncBooksAsync(opts, function(result, err)
-        if desktop._books_sync_request ~= request then return end
+        if desktop._books_sync_request ~= request then
+            logger.dbg("book shelf refresh result dropped", self.id, "stale")
+            return
+        end
         desktop._books_sync_cancel = nil
         desktop._books_sync_pending = false
         if desktop._closed or desktop.source ~= self then return end
@@ -91,8 +100,13 @@ local function syncDesktopBooks(self, desktop, opts)
         end
         -- 源自己的节流命中表示本地数据未变，不要无意义重建整页。
         if result.skipped then
+            logger.dbg("book shelf refresh done", self.id, "skipped", result.reason or "")
             return
         end
+        logger.dbg("book shelf refresh done", self.id,
+            "pulled", tonumber(result.pulled) or 0,
+            "pushed", tonumber(result.pushed) or 0,
+            "hidden", tonumber(result.hidden) or 0)
         self._books_refresh_at = os.time()
         desktop._library_state = nil
         desktop:invalidateHome()
@@ -108,8 +122,10 @@ end
 ---@param self SourceBase
 ---@param desktop table
 local function pullDesktopStats(self, desktop)
+    logger.dbg("book stats background pull start", self.id)
     require("book.stats").pullInBackground(self, {
         on_done = function(ok)
+            logger.dbg("book stats background pull done", self.id, ok and "ok" or "failed")
             if not ok or desktop._closed or desktop.source ~= self then return end
             desktop._insight_state = nil
             desktop._insight_loaded = false
@@ -128,6 +144,7 @@ function SourceBase:onEvent(event, payload)
     if event == "home_open" or event == "desktop_resume" then
         pullDesktopStats(self, desktop)
         if self._books_refresh_at and os.time() - self._books_refresh_at < BOOKS_REFRESH_INTERVAL then
+            logger.dbg("book shelf refresh skipped", self.id, "throttled")
             return
         end
         syncDesktopBooks(self, desktop)

@@ -150,6 +150,7 @@ function BookPlugin:onSuspend()
     require("ui.reader.session").onSuspend(self)
     require("lockscreen.init").refresh(nil, true)
     require("remote.init").onSuspend()
+    logger.flush()
 end
 
 --- 唤醒：恢复阅读统计计时与后台服务；月读桌面按当前页面刷新本地 UI 和源数据。
@@ -173,6 +174,7 @@ end
 function BookPlugin:onExit()
     logger.info("book plugin exit")
     require("remote.init").onExit()
+    logger.flush()
 end
 
 --- 网络恢复：通知当前源重试持久化队列，并刷新锁屏图。

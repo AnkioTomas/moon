@@ -27,6 +27,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
+local Perf = require("utils.perf")
 local _ = require("gettext")
 local Screen = Device.screen
 
@@ -389,6 +390,7 @@ end
 
 --- 重建顶栏 + 内容 + 底栏。
 function Desktop:rebuild()
+    local started_at = Perf.now()
     pcall(function()
         require("utils.font").applyCurrent()
     end)
@@ -449,6 +451,8 @@ function Desktop:rebuild()
             old:free()
         end
     end)
+    logger.dbg("book.perf desktop.rebuild", Perf.elapsedMs(started_at), "ms",
+        self.tab or "-", ok and "ok" or "failed")
     if not ok then
         logger.err("book desktop rebuild failed:", err)
         local InfoMessage = require("ui/widget/infomessage")

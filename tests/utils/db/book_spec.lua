@@ -31,7 +31,7 @@ local function stubDbDeps()
         return { md5 = function(s) return s end }
     end
     package.preload["utils.log"] = function()
-        return { warn = function() end }
+        return { dbg = function() end, warn = function() end }
     end
     package.loaded["utils.log"] = nil
 end

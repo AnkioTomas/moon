@@ -12,6 +12,8 @@ local ffiUtil = require("ffi/util")
 local Posix = require("ffi/posix")
 local Protocol = require("workers.protocol")
 local Context = require("workers.context")
+local logger = require("utils.log")
+local Perf = require("utils.perf")
 
 local Job = {}
 Job.__index = Job
@@ -58,6 +60,7 @@ Job.__index = Job
 ---@field attached boolean
 ---@field settled boolean
 ---@field reaping boolean
+---@field started_at number
 ---@field timeout_fn fun()|nil
 ---@field _setState fun(self: WorkerJobInternal, state: WorkerJobState, err: string|nil)
 ---@field _detach fun(self: WorkerJobInternal)
@@ -107,6 +110,7 @@ function Job:_setState(state, err)
     if self.state == state then return end
     self.state = state
     self.error = err
+    logger.dbg("book.worker state", self.id, state, err or "")
     notify(self.on_state, state, self)
 end
 
@@ -137,6 +141,7 @@ function Job:_settle(state, result, err, reaping)
     if self.settled then return end
     self.settled = true
     self:_setState(state, err)
+    logger.dbg("book.perf worker", self.id, Perf.elapsedMs(self.started_at), "ms", state)
     if reaping == nil and self.pid then
         reaping = not ffiUtil.isSubProcessDone(self.pid)
     end
@@ -255,6 +260,7 @@ function Job.run(worker, opts)
     next_id = next_id + 1
     local self = setmetatable({
         id = next_id,
+        started_at = Perf.now(),
         state = "queued",
         decoder = Protocol.newDecoder(),
         on_progress = opts.on_progress or opts.on_message,
@@ -264,6 +270,7 @@ function Job.run(worker, opts)
         on_settled = opts.on_settled,
         on_cancelled = opts.on_cancelled,
     }, Job)
+    logger.dbg("book.worker queued", self.id)
     notify(self.on_state, "queued", self)
 
     local pid, read_fd = ffiUtil.runInSubProcess(function(_, write_fd)
