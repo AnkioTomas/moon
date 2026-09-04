@@ -47,6 +47,8 @@ local function storageLayout()
     local plugins = real(data .. "/plugins")
     local plugin_self = real(plugins .. "/book.koplugin")
     local screenshot_dir = real(G_reader_settings:readSetting("screenshot_dir") or (data .. "/screenshots"))
+    local crash_log = real(data .. "/crash.log")
+    local plugin_log = real(data .. "/.moon/book.log")
     local roots = {}
     for _, r in ipairs({ root, book, fonts, plugins, plugin_self, screenshot_dir }) do
         local dup = false
@@ -69,6 +71,14 @@ local function storageLayout()
             { label = "KOReader 插件", path = plugins },
             { label = "书籍根目录", path = book },
             { label = "截图文件夹", path = screenshot_dir },
+            {
+                label = "KOReader 崩溃日志", path = crash_log, kind = "file", name = "crash.log",
+                missing = "尚未生成 KOReader 崩溃日志。",
+            },
+            {
+                label = "插件日志", path = plugin_log, kind = "file", name = "book.log",
+                missing = "插件日志尚未生成。",
+            },
         },
         protected = {
             root,
@@ -87,6 +97,10 @@ local function storageLayout()
             data .. "/settings",
             data .. "/settings.reader.lua",
             data .. "/.moon",
+        },
+        public_files = {
+            [crash_log] = true,
+            [plugin_log] = true,
         },
     }
 end
@@ -156,6 +170,7 @@ end
 ---@param path string
 ---@return boolean
 local function isSecret(path)
+    if layout().public_files[path] then return false end
     for _, secret in ipairs(layout().secret) do
         if path == secret or Text.pathContains(secret, path) then
             return true
@@ -508,6 +523,98 @@ local function deleteRecursiveAsync(path, cb)
     end, cb)
 end
 
+local MAX_ARCHIVE_ENTRIES = 10000
+local MAX_EXTRACT_BYTES = 2 * 1024 * 1024 * 1024
+
+---@param archive string
+---@return string|nil output
+---@return string|nil err
+local function extractZip(archive)
+    local lfs = require("libs/libkoreader-lfs")
+    archive = existingPath(archive)
+    if not archive or lfs.attributes(archive, "mode") ~= "file" then
+        return nil, "not found"
+    end
+    if isSecret(archive) then
+        return nil, "protected path"
+    end
+    local name = archive:match("([^/]+)$") or ""
+    if not name:lower():match("%.zip$") then
+        return nil, "not a zip archive"
+    end
+    local target = archive:sub(1, #archive - 4)
+    if isProtected(target) then
+        return nil, "protected path"
+    end
+    if lfs.attributes(target) then
+        return nil, "target exists"
+    end
+    local staging = target .. ".moon-extract.part"
+    if lfs.attributes(staging) then deleteRecursive(staging) end
+    local made, make_err = lfs.mkdir(staging)
+    if not made then return nil, make_err end
+
+    local reader = require("ffi/archiver").Reader:new()
+    local function fail(err)
+        reader:close()
+        deleteRecursive(staging)
+        return nil, err
+    end
+    if not reader:open(archive) then
+        return fail(reader.err or "cannot open archive")
+    end
+
+    local count, total = 0, 0
+    for entry in reader:iterate() do
+        count = count + 1
+        if count > MAX_ARCHIVE_ENTRIES then
+            return fail("too many archive entries")
+        end
+        local path = entry.path
+        if type(path) ~= "string" or path == "" or path:sub(1, 1) == "/"
+            or path:find("\\", 1, true) or path:match("^%a:")
+            or path == ".." or path:match("^%.%./") or path:match("/%.%./")
+            or path:match("/%.%.$")
+        then
+            return fail("unsafe archive path")
+        end
+        if entry.mode ~= "file" and entry.mode ~= "directory" then
+            return fail("unsupported archive entry")
+        end
+        if entry.mode == "file" then
+            total = total + math.max(0, tonumber(entry.size) or 0)
+            if total > MAX_EXTRACT_BYTES then
+                return fail("archive too large")
+            end
+        end
+        if not reader:extractToPath(path, staging .. "/" .. path) then
+            return fail(reader.err or "archive extraction failed")
+        end
+    end
+    local iterate_err = reader.err
+    reader:close()
+    if iterate_err then
+        deleteRecursive(staging)
+        return nil, iterate_err
+    end
+    local moved, move_err = os.rename(staging, target)
+    if not moved then
+        deleteRecursive(staging)
+        return nil, move_err
+    end
+    return target
+end
+
+---@param path string
+---@param cb fun(ok: boolean|nil, err: any, output: string|nil)
+local function extractZipAsync(path, cb)
+    runFilesystem("remote-extract", function()
+        return extractZip(path)
+    end, function(output, err)
+        cb(output ~= nil, err, output)
+    end)
+end
+
 ---@param path string
 ---@param to string
 ---@return boolean|nil, any
@@ -698,6 +805,7 @@ function Remote.start()
             rename = function(path, to, cb)
                 cb(renameTo(path, to))
             end,
+            extract = extractZipAsync,
             temp_path = tempPath,
             is_protected = isProtectedDisplay,
             get_input = getInput,

@@ -52,6 +52,7 @@ local STATUS = {
 ---@field mkdir fun(path: string, cb: fun(ok: boolean|nil, err: any))
 ---@field delete fun(path: string, cb: fun(ok: boolean|nil, err: any))
 ---@field rename fun(path: string, to: string, cb: fun(ok: boolean|nil, err: any))
+---@field extract fun(path: string, cb: fun(ok: boolean|nil, err: any, output: string|nil))
 ---@field temp_path fun(name: string): string 上传临时落盘路径
 ---@field is_protected fun(path: string): boolean 重要路径及其祖先不可删除/移动（展示级判定，可免 realpath；变更 handler 内部仍全量校验）
 ---@field get_input fun(): { active: boolean, text: string|nil } 设备激活输入框状态与当前文本
@@ -75,6 +76,7 @@ Server._routeDownload = File.download
 Server._routeUpload = File.upload
 Server._routeMutate = File.mutate
 Server._routeRename = File.rename
+Server._routeExtract = File.extract
 Server._routeInput = Input.route
 Server._routeClipboard = Input.clipboard
 Server._routeSettings = SettingsRoute.settings
@@ -479,6 +481,8 @@ function Server:_route(conn, head)
         return self:_routeClipboard(conn, method, headers, query)
     elseif path == "/api/rename" then
         return self:_routeRename(conn, method, query)
+    elseif path == "/api/extract" then
+        return self:_routeExtract(conn, method, query.path)
     elseif path == "/api/settings" then
         return self:_routeSettings(conn, method, headers, query)
     end
