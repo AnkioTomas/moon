@@ -20,6 +20,7 @@ local logger = require("utils.log")
 local JSON = require("json")
 local Request = require("http.request")
 local Paths = require("utils.paths")
+local Perf = require("utils.perf")
 local MoonSettings = require("utils.settings")
 local Job = require("workers.job")
 
@@ -214,7 +215,9 @@ function M.ensure(cb, on_progress)
         return
     end
     local dest = Paths.pinyinDictPath()
+    local started_at = Perf.now()
     _downloading = true
+    logger.dbg("book.pinyin dict download start", dest)
     --- 转发进度给调用方（未传 on_progress 时静默丢弃）。
     ---@param ... any 阶段名及可选的进度数值
     local function report(...)
@@ -233,6 +236,11 @@ function M.ensure(cb, on_progress)
         done_called = true
         _downloading = false
         _job = nil
+        if ok then
+            logger.dbg("book.pinyin dict download done", Perf.elapsedMs(started_at), "ms")
+        else
+            logger.warn("book.pinyin dict download failed", Perf.elapsedMs(started_at), "ms", err)
+        end
         cb(ok, err)
     end
 
@@ -325,7 +333,6 @@ assembleInJob = function(manifest, dest, done, report)
             cleanupTmp()
             local attr = lfs.attributes(dest)
             if not attr or attr.mode ~= "file" or (attr.size or 0) == 0 then
-                logger.warn("book.pinyin dict assemble finished without output:", dest)
                 done(false, "dictionary file missing: " .. dest)
                 return
             end
@@ -338,7 +345,6 @@ assembleInJob = function(manifest, dest, done, report)
             done(true)
         end,
         on_failed = function(err)
-            logger.warn("book.pinyin dict assemble failed:", err)
             done(false, err)
         end,
     })

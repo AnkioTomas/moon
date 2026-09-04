@@ -86,6 +86,7 @@ function Edge.translateAsync(text, target_lang, source_lang, callback)
         timeout = 60,
     }, function(content, err)
         if err then
+            logger.warn("book.translate edge failed", err)
             callback(nil, nil, err)
             return
         end

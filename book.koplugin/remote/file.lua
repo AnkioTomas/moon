@@ -10,6 +10,7 @@ _isRoot/cleanPath/handlers，不反向 require server（防循环）。
 
 local JSON = require("json")
 local Text = require("utils.text")
+local logger = require("utils.log")
 
 local File = {}
 
@@ -186,9 +187,12 @@ function File.mutate(self, conn, method, path, fn)
         return self:_fail(conn, 403, "Protected path")
     end
     local ok, err = fn(target)
+    local op = fn == self.handlers.delete and "delete" or "mkdir"
     if not ok then
+        logger.warn("book remote mutate failed", op, target, err)
         return self:_fail(conn, 500, err)
     end
+    logger.dbg("book remote mutate done", op, target)
     return self:_queueResponse(conn, {
         code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
     })
@@ -216,8 +220,10 @@ function File.rename(self, conn, method, query)
     end
     local ok, err = self.handlers.rename(from, to)
     if not ok then
+        logger.warn("book remote mutate failed", "rename", from, to, err)
         return self:_fail(conn, 500, err)
     end
+    logger.dbg("book remote mutate done", "rename", from, to)
     return self:_queueResponse(conn, {
         code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
     })
