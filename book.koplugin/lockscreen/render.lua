@@ -10,7 +10,6 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local Font = require("ui/font")
 local ImageWidget = require("ui/widget/imagewidget")
-local logger = require("utils.log")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local Paths = require("utils.paths")
 local Layout = require("lockscreen.layout")
@@ -295,9 +294,6 @@ function M.write(path, background, blocks)
     end)
     freeWidgets(blocks)
     bb:free()
-    if not ok then
-        logger.warn("Book lockscreen render failed:", err)
-    end
     return ok, err
 end
 

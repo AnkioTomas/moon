@@ -86,7 +86,7 @@ end
 --- 异步拉取章节 HTML 正文。
 ---@param bookId string
 ---@param chapter BookChapter
----@param cb fun(html: string|nil, err: any)
+---@param cb fun(html: string|nil, err: any, range_html: string|nil)
 ---@return { cancel: fun() }
 function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     bookId = tostring(bookId or "")
@@ -177,7 +177,8 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                         if not plain then
                             fail(decode_err or _("txt 章节解码失败"))
                         else
-                            cb(Text.textToBody(plain))
+                            local body = Text.textToBody(plain)
+                            cb(body, nil, body)
                         end
                     end)
                 end)
@@ -199,9 +200,10 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                     else
                         local fragment = Text.htmlBodyFragment(xhtml)
                         if Text.looksLikeHtml(fragment) then
-                            cb(Annotations.cleanChapterHtml(fragment))
+                            cb(Annotations.cleanChapterHtml(fragment), nil, fragment)
                         else
-                            cb(Text.textToBody(fragment))
+                            local body = Text.textToBody(fragment)
+                            cb(body, nil, body)
                         end
                     end
                 end)

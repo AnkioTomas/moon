@@ -15,6 +15,7 @@ local TTL = 6 * 60 * 60
 ---@class WechatTocEntry
 ---@field list BookChapter[]
 ---@field idx_by_uid table<string, integer>
+---@field source_idx_by_idx table<integer, integer>
 
 ---@type table<string, WechatTocEntry>
 local cache = {}
@@ -31,12 +32,19 @@ end
 ---@return WechatTocEntry
 local function buildEntry(list)
     local idx_by_uid = {}
+    local source_idx_by_idx = {}
     for _, chapter in ipairs(list) do
-        if type(chapter) == "table" and chapter.uid ~= nil then
-            idx_by_uid[tostring(chapter.uid)] = tonumber(chapter.idx)
+        if type(chapter) == "table" then
+            local idx = tonumber(chapter.idx)
+            if chapter.uid ~= nil then
+                idx_by_uid[tostring(chapter.uid)] = idx
+            end
+            if idx and tonumber(chapter.source_idx) then
+                source_idx_by_idx[idx] = tonumber(chapter.source_idx)
+            end
         end
     end
-    return { list = list, idx_by_uid = idx_by_uid }
+    return { list = list, idx_by_uid = idx_by_uid, source_idx_by_idx = source_idx_by_idx }
 end
 
 --- 取解码后的目录条目（含 uid 反查表）；未命中/过期/非法 JSON 一律返回 nil。
@@ -106,6 +114,16 @@ function Toc.index(source_id, stable_id, uid)
     end
     local entry = entryOf(source_id, stable_id)
     return entry and entry.idx_by_uid[tostring(uid)]
+end
+
+--- 按本地章节序号取微信原始 chapterIdx。
+---@param source_id string
+---@param stable_id string
+---@param idx number|nil
+---@return integer|nil
+function Toc.sourceIndex(source_id, stable_id, idx)
+    local entry = entryOf(source_id, stable_id)
+    return entry and entry.source_idx_by_idx[tonumber(idx)]
 end
 
 --- 章内进度 + 章节序号 → 全书 fraction；目录未缓存时返回 nil。

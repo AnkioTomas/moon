@@ -1,8 +1,8 @@
 --[[--
 微信读书协议客户端：只返回 wire，不做领域转换（仅异步）。
 
-Web 扫码会话（Cookie + X-Vid + X-Skey）只走 ``weread.qq.com/web/*``；
-阅读统计等 Agent 能力走 ``i.weread.qq.com/api/agent/gateway``（Skills API Key 由 Web 会话自动获取）。
+Web 扫码会话（Cookie + X-Vid + X-Skey）用于网页接口；
+官方 Agent 网关只承担读能力，写想法走 ``weread.qq.com/web/review/*``。
 
 @module koplugin.book.source.wechat.client
 --]]
@@ -371,7 +371,29 @@ function Client:myReviewsAsync(bookId, cb)
     end)
 end
 
---- 发表划线下想法（Agent 网关 ``/review/add``）。
+--- Web 写接口；Agent Skills 网关是只读通道，写请求会返回 HTTP 499。
+---@param path string
+---@param body table
+---@param cb fun(data: table|nil, err: any)
+---@return { cancel: fun() }|nil
+local function postWebWriteAsync(path, body, cb)
+    return Auth.webPostAsync("https://weread.qq.com/web" .. path, JSON.encode(body), {
+        headers = { ["Referer"] = "https://weread.qq.com/" },
+    }, function(raw, err)
+        if not raw then
+            cb(nil, err)
+            return
+        end
+        local ok, data = pcall(JSON.decode, raw)
+        if not ok or type(data) ~= "table" then
+            cb(nil, _("想法上传失败"))
+            return
+        end
+        if acceptWebWire(data, err, cb) then cb(data) end
+    end)
+end
+
+--- 发表划线下想法。
 ---@param body table
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
@@ -380,16 +402,10 @@ function Client:addReviewAsync(body, cb)
         cb(nil, _("无效的想法数据"))
         return nil
     end
-    return Auth.agentGatewayAsync("/review/add", body, function(data, err)
-        if data then
-            cb(data)
-        else
-            cb(nil, err)
-        end
-    end)
+    return postWebWriteAsync("/review/add", body, cb)
 end
 
---- 修改划线下想法（Agent 网关 ``/review/useredit``）。
+--- 修改划线下想法。
 ---@param body table
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
@@ -398,13 +414,45 @@ function Client:editReviewAsync(body, cb)
         cb(nil, _("无效的想法数据"))
         return nil
     end
-    return Auth.agentGatewayAsync("/review/useredit", body, function(data, err)
-        if data then
-            cb(data)
-        else
-            cb(nil, err)
-        end
-    end)
+    return postWebWriteAsync("/review/edit", body, cb)
+end
+
+--- 删除想法。
+---@param review_id string|number
+---@param cb fun(data: table|nil, err: any)
+---@return { cancel: fun() }|nil
+function Client:deleteReviewAsync(review_id, cb)
+    if review_id == nil then
+        cb(nil, _("无效的想法数据"))
+        return nil
+    end
+    return postWebWriteAsync("/review/delete", { reviewId = tostring(review_id) }, cb)
+end
+
+--- 更新划线样式和颜色。
+---@param body table
+---@param cb fun(data: table|nil, err: any)
+---@return { cancel: fun() }|nil
+function Client:updateBookmarkAsync(body, cb)
+    if type(body) ~= "table" or body.bookmarkId == nil then
+        cb(nil, _("无效的划线数据"))
+        return nil
+    end
+    return postWebWriteAsync("/book/updateBookmark", body, cb)
+end
+
+--- 删除划线。
+---@param bookmark_id string|number
+---@param cb fun(data: table|nil, err: any)
+---@return { cancel: fun() }|nil
+function Client:removeBookmarkAsync(bookmark_id, cb)
+    if bookmark_id == nil then
+        cb(nil, _("无效的划线数据"))
+        return nil
+    end
+    return postWebWriteAsync("/book/removeBookmark", {
+        bookmarkId = tostring(bookmark_id),
+    }, cb)
 end
 
 --- 上传单条划线。

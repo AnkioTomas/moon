@@ -9,6 +9,7 @@ local Client = require("source.wechat.client")
 local Mapper = require("source.wechat.mapper")
 local WChapter = require("source.wechat.chapter")
 local Notes = require("source.wechat.notes")
+local Annotations = require("source.wechat.annotations")
 local Toc = require("source.wechat.toc")
 local SourceBase = require("source.base")
 local ProgressPosition = require("types.book_progress")
@@ -496,6 +497,8 @@ function Source:putProgressAsync(identity, pos, cb)
     --- 拿到章节 uid 后先补齐 psvts 签名参数，再上报进度。
     ---@param uid string 章节 uid
     local function startPush(uid)
+        local source_idx = Toc.sourceIndex(identity.source_id, identity.stable_id, chapter_idx)
+            or chapter_idx
         ensure_job = WChapter.ensurePsvtsAsync(identity.stable_id, uid, function(ok, err)
             if cancelled then return end
             if not ok then
@@ -505,7 +508,7 @@ function Source:putProgressAsync(identity, pos, cb)
             push_job = self._client:putProgressAsync(identity.stable_id, {
                 progress = progress,
                 chapter_uid = uid,
-                chapter_idx = chapter_idx,
+                chapter_idx = source_idx,
                 chapter_offset = offset,
                 summary = summary,
             }, function(wire, push_err)
@@ -626,7 +629,8 @@ function Source:pushStatsAsync(rows, cb)
         local payload = Protocol.makeReadPayload({
             book_id = bucket.stable_id,
             chapter_uid = chapter_uid,
-            chapter_idx = bucket.chapter_idx,
+            chapter_idx = Toc.sourceIndex(self.id, bucket.stable_id, bucket.chapter_idx)
+                or bucket.chapter_idx,
             chapter_offset = math.floor(ProgressPosition.clampFraction(bucket.chapter_fraction) * 10000),
             summary = "",
             progress = 0,
@@ -736,9 +740,15 @@ function Source:pullNotesAsync(identity, cb)
             if not reviews then
                 logger.warn("wechat my reviews failed", identity.stable_id, rerr)
             end
-            cb(Notes.toAnnotations(
+            local annotations = Notes.toAnnotations(
                 wire, nil, reviews, identity.source_id, identity.stable_id
-            ))
+            )
+            local review_count = type(reviews) == "table" and #(reviews.reviews or {}) or 0
+            local total_count = type(reviews) == "table" and tonumber(reviews.totalCount) or nil
+            local authoritative = type(reviews) == "table"
+                and tonumber(reviews.hasMore or 0) ~= 1
+                and (not total_count or total_count <= review_count)
+            cb(annotations, nil, { authoritative = authoritative })
         end)
     end)
     return {
@@ -753,9 +763,10 @@ end
 ---@param document table|nil
 ---@param annotations table[]
 ---@param html_path string|nil
+---@param current table[]|nil
 ---@return table[]
-function Source:localizeAnnotations(document, annotations, html_path)
-    return Notes.localizeAnnotations(document, annotations, html_path)
+function Source:localizeAnnotations(document, annotations, html_path, current)
+    return Notes.localizeAnnotations(document, annotations, html_path, current)
 end
 
 --- 上传当前章的划线与想法。
@@ -774,8 +785,23 @@ function Source:pushNotesAsync(identity, annotations, cb)
         cb(nil, _("无效书籍"))
         return nil
     end
-    local candidates = Notes.pushCandidates(annotations)
-    if #candidates == 0 and #Notes.notePushCandidates(annotations) == 0 then
+    local has_work = false
+    for _, item in ipairs(annotations or {}) do
+        if type(item) == "table" and type(item.note) == "string" and item.note ~= ""
+                and not item.wr_bookmark_id and not item.wr_review_id then
+            -- KOReader 原生 note 对应微信想法，不应先制造一条远端 bookmark。
+            item.wr_review_only = true
+        end
+        if type(item) == "table" and (item.wr_deleted or item.wr_delete_review
+                or item.wr_update_bookmark or item.wr_update_review
+                or (item.drawer and not item.wr_bookmark_id
+                    and (type(item.note) ~= "string" or item.note == ""))
+                or (type(item.note) == "string" and item.note ~= ""
+                    and not item.wr_review_id)) then
+            has_work = true
+        end
+    end
+    if not has_work then
         cb(true)
         return nil
     end
@@ -784,77 +810,51 @@ function Source:pushNotesAsync(identity, annotations, cb)
         cb(nil, _("按章书籍请打开章节后同步划线"))
         return nil
     end
-    local cancelled, current_job, resolve_job = false, nil, nil
-    local html
+    local cancelled, finished, current_job, resolve_job = false, false, nil, nil
+    local local_html
     local path = require("utils.paths").chapterPath(identity.stable_id, chapter_idx, identity.source_id)
     local f = io.open(path, "rb")
     if f then
-        html = f:read("*a")
+        local_html = f:read("*a")
         f:close()
     end
     local book_id = identity.stable_id
     local Context = require("source.wechat.context")
+    local confirmed = {}
+    local preflight_wire
 
     --- 收尾回调；已取消则丢弃结果。
     ---@param ok boolean|nil
     ---@param err string|nil
     local function finish(ok, err)
-        if not cancelled then cb(ok, err) end
+        if not cancelled and not finished then
+            finished = true
+            cb(ok, err)
+        end
     end
 
-    --- 串行推送本章的划线，走完再推想法。
-    ---@param chapter_uid string 章节 uid
-    ---@param book_version number|nil 书籍版本号，划线坐标需要它对齐
-    local function pushAll(chapter_uid, book_version)
-        -- 前向声明：划线队列走完后转入想法推送，必须先于 nextBookmark 进入作用域。
-        local pushReviews
-        local index = 1
-        --- 推送队列中的下一条划线；队列走完转入想法推送。
-        local function nextBookmark()
-            if cancelled then return end
-            local item = candidates[index]
-            index = index + 1
-            if not item then
-                pushReviews(chapter_uid)
-                return
-            end
-            local body, body_err = Notes.toBookmarkBody(
-                book_id, chapter_uid, chapter_idx, book_version, item, html
-            )
-            if not body then
-                finish(nil, body_err)
-                return
-            end
-            current_job = self._client:addBookmarkAsync(book_id, chapter_uid, body, function(wire, err)
-                current_job = nil
-                if cancelled then return end
-                if not wire then
-                    finish(nil, err or _("划线上传失败"))
-                    return
-                end
-                local bookmark_id = wire.bookmarkId or wire.id
-                if bookmark_id then
-                    item.wr_bookmark_id = bookmark_id
-                    item.wr_range = body.range
-                end
-                nextBookmark()
-            end)
-        end
+    local pushReviews
 
-        local review_items, review_index = nil, 1
-        pushReviews = function(_chapter_uid)
+    --- 串行推送想法。
+    ---@param chapter_uid string
+    local function pushReviewItems(chapter_uid)
+        local review_items = Notes.notePushCandidates(annotations)
+        local review_index = 1
+        local function nextReview()
             if cancelled then return end
-            -- 惰性取一次：此时划线已全部上传并回写 wr_bookmark_id，新划线的想法才够格入选。
-            review_items = review_items or Notes.notePushCandidates(annotations)
             local item = review_items[review_index]
             review_index = review_index + 1
             if not item then
                 finish(true)
                 return
             end
+            if not item.wr_review_id and not confirmed[item] and not item.wr_review_only then
+                finish(nil, _("远端划线未确认，不能上传想法"))
+                return
+            end
             local body, body_err
             if item.wr_review_id then
-                body, body_err = Notes.toReviewEditBody(item)
+                body, body_err = Notes.toReviewEditBody(book_id, chapter_uid, item)
                 if not body then
                     finish(nil, body_err)
                     return
@@ -866,11 +866,12 @@ function Source:pushNotesAsync(identity, annotations, cb)
                         finish(nil, err or _("想法上传失败"))
                         return
                     end
-                    pushReviews(_chapter_uid)
+                    item.wr_update_review = nil
+                    nextReview()
                 end)
                 return
             end
-            body, body_err = Notes.toReviewBody(book_id, _chapter_uid, item)
+            body, body_err = Notes.toReviewBody(book_id, chapter_uid, item)
             if not body then
                 finish(nil, body_err)
                 return
@@ -884,22 +885,114 @@ function Source:pushNotesAsync(identity, annotations, cb)
                 end
                 local review_id = wire.reviewId
                     or (type(wire.data) == "table" and wire.data.reviewId)
-                if review_id then
-                    item.wr_review_id = review_id
+                if not review_id then
+                    finish(nil, _("想法上传成功但缺少 reviewId"))
+                    return
                 end
-                pushReviews(_chapter_uid)
+                item.wr_review_id = review_id
+                nextReview()
             end)
         end
+        nextReview()
+    end
 
+    --- 已确认的远端划线先同步样式和颜色，再推送想法。
+    ---@param chapter_uid string
+    pushReviews = function(chapter_uid)
+        local updates = {}
+        for _, item in ipairs(Notes.bookmarkUpdateCandidates(annotations)) do
+            if confirmed[item] then updates[#updates + 1] = item end
+        end
+        local index = 1
+        local function nextUpdate()
+            if cancelled then return end
+            local item = updates[index]
+            index = index + 1
+            if not item then
+                pushReviewItems(chapter_uid)
+                return
+            end
+            current_job = self._client:updateBookmarkAsync(
+                Notes.toBookmarkUpdateBody(item),
+                function(wire, err)
+                    current_job = nil
+                    if cancelled then return end
+                    if not wire then
+                        finish(nil, err or _("划线上传失败"))
+                        return
+                    end
+                    item.wr_update_bookmark = nil
+                    nextUpdate()
+                end
+            )
+        end
+        nextUpdate()
+    end
+
+    --- bookmark 提交后只用一次轻量列表确认 canonical id/range。
+    ---@param chapter_uid string
+    ---@param submitted table[]
+    local function postflight(chapter_uid, submitted)
+        current_job = self._client:bookmarkListAsync(book_id, function(wire, err)
+            current_job = nil
+            if cancelled then return end
+            if not wire then
+                finish(nil, err or _("无法确认划线上传结果"))
+                return
+            end
+            local _, seen = Notes.reconcileBookmarks(annotations, wire, chapter_uid)
+            for item in pairs(seen) do confirmed[item] = true end
+            for _, item in ipairs(submitted) do
+                if not item.wr_bookmark_id or not confirmed[item] then
+                    finish(nil, _("划线上传后未在远端确认"))
+                    return
+                end
+            end
+            pushReviews(chapter_uid)
+        end)
+    end
+
+    --- 串行提交预先验证过的划线；上传过程不再重算坐标。
+    local function pushBookmarks(chapter_uid, book_version, candidates)
+        local source_idx = Toc.sourceIndex(identity.source_id, identity.stable_id, chapter_idx)
+            or chapter_idx
+        local index, submitted = 1, {}
+        local function nextBookmark()
+            if cancelled then return end
+            local item = candidates[index]
+            index = index + 1
+            if not item then
+                postflight(chapter_uid, submitted)
+                return
+            end
+            local body, body_err = Notes.toBookmarkBody(
+                book_id, chapter_uid, source_idx, book_version, item
+            )
+            if not body then
+                finish(nil, body_err)
+                return
+            end
+            current_job = self._client:addBookmarkAsync(book_id, chapter_uid, body, function(wire, err)
+                current_job = nil
+                if cancelled then return end
+                if not wire then
+                    finish(nil, err or _("划线上传失败"))
+                    return
+                end
+                item.wr_range = body.range
+                item.wr_bookmark_id = wire.bookmarkId or wire.id
+                submitted[#submitted + 1] = item
+                nextBookmark()
+            end)
+        end
         nextBookmark()
     end
 
-    --- 确保拿到书籍版本号后再推送：优先用上下文缓存，缺失才拉一次书籍详情并记住。
-    ---@param chapter_uid string 章节 uid
-    local function withBookVersion(chapter_uid)
+    --- 确保拿到书籍版本号后再提交新划线。
+    local function withBookVersion(chapter_uid, candidates)
         local book_version = Context.bookVersion(book_id)
         if book_version then
-            pushAll(chapter_uid, book_version)
+            pushBookmarks(chapter_uid, book_version, candidates)
             return
         end
         current_job = self._client:bookInfoAsync(book_id, function(wire, err)
@@ -915,7 +1008,170 @@ function Source:pushNotesAsync(identity, annotations, cb)
                 return
             end
             Context.rememberBookVersion(book_id, book_version)
-            pushAll(chapter_uid, book_version)
+            pushBookmarks(chapter_uid, book_version, candidates)
+        end)
+    end
+
+    --- 新划线或待新增想法的划线未经 preflight 确认时，取一次当前章节 range HTML；
+    --- 所有坐标都在首个写请求前算完。
+    local function prepareBookmarks(chapter_uid)
+        local candidates = Notes.pushCandidates(annotations)
+        local range_items, included = {}, {}
+        for _, item in ipairs(candidates) do
+            range_items[#range_items + 1] = item
+            included[item] = true
+        end
+        for _, item in ipairs(annotations or {}) do
+            if type(item) == "table" and not item.wr_review_id
+                    and type(item.note) == "string" and item.note ~= "" and not included[item]
+                    and (item.wr_review_only or (item.wr_bookmark_id and not confirmed[item])) then
+                range_items[#range_items + 1] = item
+            end
+        end
+        if #range_items == 0 then
+            pushReviews(chapter_uid)
+            return
+        end
+        if not local_html then
+            finish(nil, _("缺少本地章节正文，无法定位划线"))
+            return
+        end
+        local toc = Toc.read(identity.source_id, identity.stable_id)
+        local chapter = toc and toc[chapter_idx]
+        if not chapter then
+            finish(nil, _("缺少章节信息"))
+            return
+        end
+        current_job = WChapter.fetchHtmlAsync(book_id, chapter, function(_, err, range_html)
+            current_job = nil
+            if cancelled then return end
+            if not range_html then
+                finish(nil, err or _("无法获取章节坐标"))
+                return
+            end
+            for _, item in ipairs(range_items) do
+                local range, range_err = Annotations.toWireRange(
+                    range_html, local_html, item.text, item.pos0, item.pos1
+                )
+                if not range then
+                    finish(nil, range_err or _("无法定位划线范围"))
+                    return
+                end
+                item.wr_range = range
+            end
+            local _, seen = Notes.reconcileBookmarks(annotations, preflight_wire, chapter_uid)
+            for item in pairs(seen) do confirmed[item] = true end
+            candidates = Notes.pushCandidates(annotations)
+            if #candidates == 0 then
+                pushReviews(chapter_uid)
+                return
+            end
+            table.sort(candidates, function(a, b)
+                local a_start = tonumber(tostring(a.wr_range):match("^(%d+)")) or 0
+                local b_start = tonumber(tostring(b.wr_range):match("^(%d+)")) or 0
+                -- 服务端若在正文中加入标记，后面的区间先提交不会推移前面的坐标。
+                -- 正确性仍由 postflight 确认，不依赖这个顺序。
+                return a_start > b_start
+            end)
+            withBookVersion(chapter_uid, candidates)
+        end)
+    end
+
+    --- 先提交本地删除；成功后从待确认快照移除墓碑。
+    ---@param done fun()
+    local function pushDeletes(done)
+        local items = Notes.deleteCandidates(annotations)
+        local index = 1
+        local function removeItem(target)
+            for i = #annotations, 1, -1 do
+                if annotations[i] == target then
+                    table.remove(annotations, i)
+                    return
+                end
+            end
+        end
+        local function nextDelete()
+            if cancelled then return end
+            local item = items[index]
+            index = index + 1
+            if not item then
+                done()
+                return
+            end
+            local function deleteBookmark()
+                if not item.wr_deleted or not item.wr_bookmark_id then
+                    if item.wr_deleted then removeItem(item) end
+                    nextDelete()
+                    return
+                end
+                current_job = self._client:removeBookmarkAsync(item.wr_bookmark_id, function(wire, err)
+                    current_job = nil
+                    if cancelled then return end
+                    if not wire then
+                        finish(nil, err or _("划线上传失败"))
+                        return
+                    end
+                    item.wr_bookmark_id = nil
+                    if item.wr_deleted then removeItem(item) end
+                    nextDelete()
+                end)
+            end
+            if item.wr_review_id then
+                current_job = self._client:deleteReviewAsync(item.wr_review_id, function(wire, err)
+                    current_job = nil
+                    if cancelled then return end
+                    if not wire then
+                        finish(nil, err or _("想法上传失败"))
+                        return
+                    end
+                    item.wr_review_id = nil
+                    item.wr_delete_review = nil
+                    deleteBookmark()
+                end)
+            else
+                item.wr_delete_review = nil
+                deleteBookmark()
+            end
+        end
+        nextDelete()
+    end
+
+    --- 微信源自己做轻量 preflight；通用 Note.syncAsync 仍保持先推后拉。
+    local function preflight(chapter_uid)
+        current_job = self._client:bookmarkListAsync(book_id, function(wire, err)
+            current_job = nil
+            if cancelled then return end
+            if not wire then
+                finish(nil, err or _("无法预检远端划线"))
+                return
+            end
+            preflight_wire = wire
+            local bookmark_ids = Notes.bookmarkIds(wire, chapter_uid)
+            for _, item in ipairs(annotations or {}) do
+                if type(item) == "table" and not item.wr_deleted and item.wr_bookmark_id
+                        and not bookmark_ids[tostring(item.wr_bookmark_id)] then
+                    item.wr_bookmark_id = nil
+                end
+            end
+            local _, seen = Notes.reconcileBookmarks(annotations, wire, chapter_uid)
+            for item in pairs(seen) do confirmed[item] = true end
+            current_job = self._client:myReviewsAsync(book_id, function(reviews, review_err)
+                current_job = nil
+                if cancelled then return end
+                if not reviews then
+                    finish(nil, review_err or _("想法上传失败"))
+                    return
+                end
+                local review_ids = Notes.reviewIds(reviews)
+                for _, item in ipairs(annotations or {}) do
+                    if type(item) == "table" and not item.wr_deleted and item.wr_review_id
+                            and not review_ids[tostring(item.wr_review_id)] then
+                        item.wr_review_id = nil
+                    end
+                end
+                Notes.reconcileReviews(annotations, reviews)
+                prepareBookmarks(chapter_uid)
+            end)
         end)
     end
 
@@ -925,7 +1181,9 @@ function Source:pushNotesAsync(identity, annotations, cb)
             finish(nil, err or _("缺少章节信息"))
             return
         end
-        withBookVersion(chapter_uid)
+        pushDeletes(function()
+            preflight(chapter_uid)
+        end)
     end)
     return {
         cancel = function()

@@ -224,10 +224,13 @@ function Client.chatStream(messages, opts, cb)
         on_done = function(err)
             local full = parser.finish()
             if err then
+                logger.warn("ai.client: stream failed err=", err,
+                    "partial_len=", #full)
                 cb(full ~= "" and full or nil, err)
                 return
             end
             if full == "" then
+                logger.warn("ai.client: stream empty")
                 cb(nil, "empty AI response")
                 return
             end
