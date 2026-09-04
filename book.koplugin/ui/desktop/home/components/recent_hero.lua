@@ -18,11 +18,15 @@ local M = {
     icon = "auto_stories",
 }
 
-function M.heightRange()
+---@param _ctx table|nil
+---@param _state table|nil
+---@param opts table|nil
+function M.heightRange(_ctx, _state, opts)
+    local preferred = UI.sz(148)
     return {
         min = UI.sz(132),
-        preferred = UI.sz(148),
-        max = UI.sz(180),
+        preferred = preferred,
+        max = math.max(preferred, (opts and opts.height) or UI.sz(180)),
         grow = 2,
     }
 end
@@ -58,10 +62,7 @@ function M.build(ctx, state, opts)
     local body
 
     if recent then
-        local cover_w = math.min(
-            UI.sz(96),
-            math.floor(math.max(1, h - UI.sz(12)) * 2 / 3)
-        )
+        local cover_w = math.floor(math.max(1, h - UI.sz(12)) * 2 / 3)
         local hero = BookInfo.hero(ctx.plugin, ctx.source, recent, {
             width = w,
             pad = UI.sz(10),

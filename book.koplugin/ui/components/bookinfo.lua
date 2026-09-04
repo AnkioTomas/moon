@@ -279,6 +279,12 @@ function BookInfo.hero(plugin, source, book, opts)
     local avail = math.max(1, w - pad * 2)
     local gap = UI.sz(8)
     local cw = math.min(UI.sz(80), math.floor(avail * 0.22))
+    if opts.cover_width then
+        cw = math.max(1, math.min(
+            math.floor(opts.cover_width),
+            avail - gap - UI.sz(40)
+        ))
+    end
     local ch = math.floor(cw * 3 / 2)
     local show_progress = opts.show_progress ~= false
 
