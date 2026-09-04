@@ -1,7 +1,8 @@
 --[[--
-微信读书阅读统计：累计总量 + 年度明细 wire → reading_stats 领域行。
+微信读书阅读统计：累计总量、日桶及周书单 wire → reading_stats 领域行。
 
 云端只提供账户级日桶 ``__wr:day:<ts>``，不伪造按日书籍归属。
+周排行用 ``__wr:week:<baseTime>:<bookId>``，只作为周书单。
 权威累计时长用 ``__wr:total``，不参与日历分桶求和。
 入库前按各合成前缀的时间窗口替换旧记录，避免重复累计。
 
@@ -11,6 +12,7 @@
 local Stats = {}
 
 local DAY_PREFIX = "__wr:day:"
+local WEEK_PREFIX = "__wr:week:"
 local LEGACY_BOOK_PREFIX = "__wr:book:"
 local TOTAL_ID = "__wr:total"
 
@@ -47,6 +49,28 @@ end
 --- 月度 ``readTimes`` 的粒度是日，可以直接落日桶。
 local function appendMonthlyDaily(rows, source_id, wire)
     appendTimes(rows, source_id, field(wire, "readTimes"))
+end
+
+local function appendWeeklyBooks(rows, source_id, wire)
+    local anchor = tonumber(field(wire, "baseTime"))
+    local longest = field(wire, "readLongest")
+    if not anchor or type(longest) ~= "table" then return end
+    for _, item in ipairs(longest) do
+        local book = type(item) == "table" and item.book or nil
+        local id = type(book) == "table" and (book.bookId or book.id) or nil
+        local duration = type(item) == "table" and tonumber(item.readTime) or nil
+        if id and duration and duration > 0 then
+            rows[#rows + 1] = {
+                source_id = source_id,
+                stable_id = WEEK_PREFIX .. tostring(anchor) .. ":" .. tostring(id),
+                record_type = "book",
+                page = 0,
+                start_time = anchor,
+                duration = duration,
+                total_pages = 0,
+            }
+        end
+    end
 end
 
 local function yearRange(wire)
@@ -102,13 +126,67 @@ function Stats.monthlyBaseTimes(annual)
     return out
 end
 
---- 合并总体权威总量、年度日明细和月度日桶。
+--- 从真实日桶得到需要拉取的自然周，每周只请求一次。
+---@param annuals table[]
+---@param monthlies table[]
+---@return number[]
+function Stats.weeklyBaseTimes(annuals, monthlies)
+    local by_week = {}
+    local function collect(read_times)
+        if type(read_times) ~= "table" then return end
+        for ts_str, seconds in pairs(read_times) do
+            local ts = tonumber(ts_str)
+            if ts and ts > 0 and (tonumber(seconds) or 0) > 0 then
+                local date = os.date("*t", ts)
+                local noon = os.time({
+                    year = date.year, month = date.month, day = date.day, hour = 12,
+                })
+                local monday = noon - ((date.wday + 5) % 7) * 86400
+                local key = os.date("%Y-%m-%d", monday)
+                if not by_week[key] then by_week[key] = ts end
+            end
+        end
+    end
+    for _, annual in ipairs(annuals or {}) do
+        collect(field(annual, "dailyReadTimes"))
+    end
+    for _, monthly in ipairs(monthlies or {}) do
+        collect(field(monthly, "readTimes"))
+    end
+    local keys = {}
+    for key in pairs(by_week) do keys[#keys + 1] = key end
+    table.sort(keys)
+    local out = {}
+    for _, key in ipairs(keys) do out[#out + 1] = by_week[key] end
+    return out
+end
+
+--- 提取周排行里的书籍 wire，供调用方持久化元数据。
+---@param weeklies table[]
+---@return table[]
+function Stats.weeklyBookWires(weeklies)
+    local out = {}
+    for _, weekly in ipairs(weeklies or {}) do
+        local longest = field(weekly, "readLongest")
+        if type(longest) == "table" then
+            for _, item in ipairs(longest) do
+                if type(item) == "table" and type(item.book) == "table" then
+                    out[#out + 1] = item.book
+                end
+            end
+        end
+    end
+    return out
+end
+
+--- 合并总体权威总量、日桶和周书单。
 ---@param source_id string
 ---@param overall table
 ---@param annuals table[]
 ---@param monthlies table[]|nil
+---@param weeklies table[]|nil
 ---@return BookStatsPullResult
-function Stats.fromWires(source_id, overall, annuals, monthlies)
+function Stats.fromWires(source_id, overall, annuals, monthlies, weeklies)
     local rows = {}
     local total = tonumber(field(overall, "totalReadTime"))
     if total and total > 0 then
@@ -138,6 +216,17 @@ function Stats.fromWires(source_id, overall, annuals, monthlies)
     for _, monthly in ipairs(monthlies or {}) do
         appendMonthlyDaily(rows, source_id, monthly)
     end
+    for _, weekly in ipairs(weeklies or {}) do
+        appendWeeklyBooks(rows, source_id, weekly)
+        local anchor = tonumber(field(weekly, "baseTime"))
+        if anchor then
+            ranges[#ranges + 1] = {
+                stable_prefix = WEEK_PREFIX .. tostring(anchor) .. ":",
+                from_ts = anchor,
+                to_ts = anchor,
+            }
+        end
+    end
     return {
         rows = rows,
         replace = {
@@ -148,6 +237,7 @@ function Stats.fromWires(source_id, overall, annuals, monthlies)
 end
 
 Stats.DAY_PREFIX = DAY_PREFIX
+Stats.WEEK_PREFIX = WEEK_PREFIX
 Stats.TOTAL_ID = TOTAL_ID
 
 return Stats

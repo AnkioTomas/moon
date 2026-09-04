@@ -22,6 +22,7 @@ local chapter_open = {}
 local chapter_range_html
 local chapter_fetches = 0
 local progress_ui = { shown = 0, closed = 0, progress = {} }
+local remembered_stats_books = {}
 
 -- 目录缓存 payload 要真解码才能取出 chapter_uid
 stub("json", function()
@@ -105,6 +106,7 @@ stub("source.chapter", function()
 end)
 stub("book.store", function()
     return {
+        rememberMany = function(books) remembered_stats_books = books end,
         reconcile = function(_, books)
             return { pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
         end,
@@ -146,10 +148,17 @@ do
                 baseTime = base_time,
                 dailyReadTimes = { [tostring(base_time)] = 900 },
             })
-        else
+        elseif mode == "monthly" then
             cb({
                 baseTime = base_time,
                 readTimes = { [tostring(base_time + 86400)] = 900 },
+            })
+        else
+            cb({
+                baseTime = base_time,
+                readLongest = {
+                    { book = { bookId = "weekly-book", title = "周书" }, readTime = 900 },
+                },
             })
         end
         return { cancel = function() end }
@@ -161,10 +170,12 @@ do
     Assert.eq(requests[3][1], "annually")
     Assert.eq(requests[4][1], "monthly")
     Assert.eq(requests[4][2], 1_735_689_600)
+    Assert.eq(requests[5][1], "weekly")
+    Assert.eq(requests[6][1], "weekly")
     Assert.not_nil(requests[2][2])
     Assert.not_nil(requests[3][2])
     Assert.eq(result.replace.mode, "ranges")
-    Assert.len(result.replace.ranges, 5)
+    Assert.len(result.replace.ranges, 7)
     local total, monthly_day
     for _, row in ipairs(result.rows) do
         if row.record_type == "total" then total = row.duration end
@@ -172,6 +183,7 @@ do
     end
     Assert.eq(total, 7200)
     Assert.eq(monthly_day, 900)
+    Assert.eq(remembered_stats_books[1].stable_id, "weekly-book")
     fake_client.readStatsAsync = nil
 end
 

@@ -741,16 +741,27 @@ function Source:pullStatsAsync(cb)
             cb(nil, err)
             return
         end
-        local Mapper = require("source.wechat.stats")
-        collect("annually", Mapper.annualBaseTimes(overall), function(annuals)
+        local StatsMapper = require("source.wechat.stats")
+        collect("annually", StatsMapper.annualBaseTimes(overall), function(annuals)
             local monthly_bases = {}
             for _, annual in ipairs(annuals) do
-                for _, base_time in ipairs(Mapper.monthlyBaseTimes(annual)) do
+                for _, base_time in ipairs(StatsMapper.monthlyBaseTimes(annual)) do
                     monthly_bases[#monthly_bases + 1] = base_time
                 end
             end
             collect("monthly", monthly_bases, function(monthlies)
-                cb(Mapper.fromWires(self.id, overall, annuals, monthlies))
+                local weekly_bases = StatsMapper.weeklyBaseTimes(annuals, monthlies)
+                collect("weekly", weekly_bases, function(weeklies)
+                    local books = {}
+                    for _, wire in ipairs(StatsMapper.weeklyBookWires(weeklies)) do
+                        local book = Mapper.book(wire)
+                        if book then books[#books + 1] = book end
+                    end
+                    require("book.store").rememberMany(books)
+                    cb(StatsMapper.fromWires(
+                        self.id, overall, annuals, monthlies, weeklies
+                    ))
+                end)
             end)
         end)
     end)

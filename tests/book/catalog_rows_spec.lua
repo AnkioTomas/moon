@@ -206,6 +206,31 @@ do -- max_total_pages 为 0 / nil 时 percent 为 0；无 daily 时 days 为空
     Assert.is_nil(next(no_daily.calendar.days))
 end
 
+do -- 微信日历点日展示该日期所在周的远端书单
+    FakeBooks["wechat\n42"] = { title = "长安的荔枝", authors = "马伯庸", percent = 60 }
+    local r = Catalog.toInsight("wechat",
+        { total_seconds = 1800 },
+        {
+            { ymd = "2026-08-27", seconds = 1200 },
+            { ymd = "2026-08-29", seconds = 600 },
+            { ymd = "2026-08-31", seconds = 300 },
+        },
+        {
+            { ymd = "2026-08-27", stable_id = "local-only" },
+        },
+        {
+            { week_ymd = "2026-08-24", stable_id = "42", seconds = 1800 },
+        }
+    )
+    Assert.eq(r.calendar.book_scope, "week")
+    local books = r.calendar.weeks["2026-08-24"].books
+    Assert.eq(books[1].stable_id, "42")
+    Assert.eq(books[1].duration_text, "30分钟")
+    Assert.eq(books[1].percent, 60)
+    Assert.len(r.calendar.days["2026-08-27"].books, 0)
+    Assert.len(r.calendar.days["2026-08-31"].books, 0)
+end
+
 -- 收尾：不影响同进程内后续用例
 package.preload["db.book"] = nil
 package.loaded["db.book"] = nil

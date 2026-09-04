@@ -467,6 +467,13 @@ do
                     return nil
                 end,
                 resultset = function()
+                    if sql:find("stable_id LIKE '__wr:week:%'", 1, true) then
+                        return {
+                            { "2026-08-24" },
+                            { "__wr:week:1787529600:book-42" },
+                            { 1800 },
+                        }, 1
+                    end
                     if sql:find("record_type='page'", 1, true) then
                         return {
                             { day2 },
@@ -535,6 +542,11 @@ do
     Assert.eq(books[1].stable_id, "/books/a.epub")
     Assert.eq(books[1].max_page, 10)
     Assert.eq(books[1].max_total_pages, 20)
+    local weekly = StatsDB.weeklyBooksBySource("wechat")
+    Assert.eq(#weekly, 1)
+    Assert.eq(weekly[1].week_ymd, "2026-08-24")
+    Assert.eq(weekly[1].stable_id, "book-42")
+    Assert.eq(weekly[1].seconds, 1800)
     local sb = StatsDB.summaryByBook("local", "/books/a.epub")
     Assert.eq(sb.total_seconds, 3660)
     Assert.eq(sb.pages, 3)

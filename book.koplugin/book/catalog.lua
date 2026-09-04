@@ -89,8 +89,9 @@ end
 ---@param summary table|nil
 ---@param daily table[]|nil
 ---@param daily_books table[]|nil
+---@param weekly_books table[]|nil
 ---@return StatsInsight
-function Catalog.toInsight(source_id, summary, daily, daily_books)
+function Catalog.toInsight(source_id, summary, daily, daily_books, weekly_books)
     local has_data = (tonumber(summary and summary.total_seconds) or 0) > 0
     local days = {}
     for _, d in ipairs(daily or {}) do
@@ -103,15 +104,16 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
         end
     end
     local BookDB = require("db.book")
+    local week_scope = source_id == "wechat"
+    local book_rows = week_scope and (weekly_books or {}) or (daily_books or {})
     local stable_ids = {}
-    for _, b in ipairs(daily_books or {}) do
+    for _, b in ipairs(book_rows) do
         if type(b.stable_id) == "string" and b.stable_id ~= "" then
             stable_ids[#stable_ids + 1] = b.stable_id
         end
     end
     local metadata = BookDB.getMany and BookDB.getMany(source_id, stable_ids) or nil
-    for _, b in ipairs(daily_books or {}) do
-        local day = type(b.ymd) == "string" and days[b.ymd] or nil
+    local function appendBook(day, b)
         if day and type(b.stable_id) == "string" and b.stable_id ~= "" then
             local meta = metadata and metadata[b.stable_id]
             if not metadata then
@@ -125,6 +127,8 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
                 if percent > 100 then
                     percent = 100
                 end
+            elseif week_scope then
+                percent = tonumber(meta and meta.percent) or 0
             end
             local title = meta and meta.title or nil
             if not title or title == "" then
@@ -136,7 +140,22 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
                 title = title,
                 authors = meta and meta.authors or nil,
                 percent = percent,
+                duration_seconds = tonumber(b.seconds) or 0,
+                duration_text = Catalog.formatDuration(b.seconds),
             }
+        end
+    end
+    local weeks = {}
+    if week_scope then
+        for _, b in ipairs(book_rows) do
+            if type(b.week_ymd) == "string" then
+                weeks[b.week_ymd] = weeks[b.week_ymd] or { books = {} }
+                appendBook(weeks[b.week_ymd], b)
+            end
+        end
+    else
+        for _, b in ipairs(book_rows) do
+            appendBook(type(b.ymd) == "string" and days[b.ymd] or nil, b)
         end
     end
     local total_seconds = tonumber(summary and summary.total_seconds) or 0
@@ -152,6 +171,8 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
         calendar = {
             initial_ym = os.date("%Y-%m"),
             days = days,
+            book_scope = week_scope and "week" or "day",
+            weeks = week_scope and weeks or nil,
         },
     }
 end
@@ -286,7 +307,8 @@ function Catalog.readingInsightAsync(source_id, cb)
                 source_id,
                 StatsDB.summaryBySource(source_id),
                 StatsDB.dailyBySource(source_id),
-                StatsDB.dailyBooksBySource(source_id)
+                StatsDB.dailyBooksBySource(source_id),
+                StatsDB.weeklyBooksBySource and StatsDB.weeklyBooksBySource(source_id) or nil
             ),
         })
     end)

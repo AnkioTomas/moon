@@ -19,6 +19,16 @@ local T = require("ffi/util").template
 
 local Day = {}
 
+local function weekStart(ymd)
+    local year, month, day = tostring(ymd or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not year then return nil end
+    local noon = os.time({
+        year = tonumber(year), month = tonumber(month), day = tonumber(day), hour = 12,
+    })
+    local date = os.date("*t", noon)
+    return os.date("%Y-%m-%d", noon - ((date.wday + 5) % 7) * 86400)
+end
+
 --- 构建日期标题，可附带该日阅读时长。
 ---@param ymd string YYYY-MM-DD 日期键。
 ---@param duration_text string|nil 时长文案。
@@ -42,8 +52,16 @@ end
 ---@return table
 function Day.build(desktop, state, width, avail_h, open_book)
     local selected = state.selected or ""
-    local days = (state.calendar and state.calendar.days) or {}
+    local calendar = state.calendar or {}
+    local days = calendar.days or {}
     local info = selected ~= "" and days[selected] or nil
+    local week_scope = calendar.book_scope == "week"
+    local books = info and info.books or {}
+    if week_scope then
+        local week = weekStart(selected)
+        books = week and calendar.weeks and calendar.weeks[week]
+            and calendar.weeks[week].books or {}
+    end
     local col = VerticalGroup:new{ align = "left" }
     local used = 0
     --- 追加控件并累计高度，用于在可用区域内截断书单。
@@ -63,10 +81,18 @@ function Day.build(desktop, state, width, avail_h, open_book)
         fgcolor = Blitbuffer.COLOR_BLACK,
     }
     push(title_widget, title_widget:getSize().h)
+    if week_scope then
+        push(VerticalSpan:new{ width = UI.sz(4) }, UI.sz(4))
+        local scope = UI.mutedText(_("本周阅读书目"), width, 12)
+        push(scope, scope:getSize().h)
+    end
     push(VerticalSpan:new{ width = UI.sz(10) }, UI.sz(10))
 
-    if not info or not info.books or #info.books == 0 then
-        local empty = UI.mutedText(_("这一天没有阅读记录"), width)
+    if #books == 0 then
+        local empty = UI.mutedText(
+            week_scope and _("本周没有阅读书目") or _("这一天没有阅读记录"),
+            width
+        )
         push(empty, empty:getSize().h)
         return col
     end
@@ -75,15 +101,18 @@ function Day.build(desktop, state, width, avail_h, open_book)
     local gap, row_gap = UI.sz(12), UI.sz(12)
     local more_h, shown = UI.sz(22), 0
     local plugin, api = desktop.plugin, desktop.source
-    for i, book in ipairs(info.books) do
+    for i, book in ipairs(books) do
         local need = cover_h + (shown > 0 and row_gap or 0)
-        local reserve = (i < #info.books) and (UI.sz(6) + more_h) or 0
+        local reserve = (i < #books) and (UI.sz(6) + more_h) or 0
         if avail_h and used + need + reserve > avail_h then break end
         if shown > 0 then push(VerticalSpan:new{ width = row_gap }, row_gap) end
 
         local sid = book.stable_id
         local title_text = book.title or sid or "?"
         local author_text = (book.authors and book.authors ~= "") and book.authors or _("未知作者")
+        if book.duration_text and book.duration_text ~= "" then
+            author_text = T(_("%1 · %2"), author_text, book.duration_text)
+        end
         local percent = tonumber(book.percent) or 0
         if percent < 0 then percent = 0 elseif percent > 100 then percent = 100 end
         local cover = select(1, BookInfo.cover(plugin, api, book, cover_w, cover_h, {
@@ -117,7 +146,7 @@ function Day.build(desktop, state, width, avail_h, open_book)
         shown = shown + 1
     end
 
-    local rest = #info.books - shown
+    local rest = #books - shown
     if rest > 0 then
         push(VerticalSpan:new{ width = UI.sz(6) }, UI.sz(6))
         local more = UI.mutedText(T(_("另有 %1 本未显示"), rest), width)

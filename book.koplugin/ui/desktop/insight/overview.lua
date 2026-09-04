@@ -316,7 +316,11 @@ function Overview.build(desktop, state, width, avail_h)
             UI.mutedText(_("暂无阅读统计。上报后再查看。"), width),
         })
     else
-        local hint = UI.mutedText(_("点选日期查看当日书单"), width)
+        local week_scope = state.calendar and state.calendar.book_scope == "week"
+        local hint = UI.mutedText(
+            week_scope and _("点选日期查看本周书目") or _("点选日期查看当日书单"),
+            width
+        )
         local fixed_h = UI.sz(96) + UI.sz(8) + UI.sz(48) + UI.sz(16) + UI.sz(8) + hint:getSize().h
         local calendar_h = math.max(1, avail_h - fixed_h)
         table.insert(col, VerticalSpan:new{ width = UI.sz(8) })
