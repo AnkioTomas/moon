@@ -10,6 +10,7 @@ local Stubs = require("support.stubs")
 local shown = {}
 local synced = {}
 local upserted = {}
+local remote_upserted = {}
 local pulled = 0
 local pending_row
 local current_identity = {
@@ -73,7 +74,10 @@ package.preload["db.progress"] = function()
             end
         end,
         upsert = function(_, _, pos) upserted[#upserted + 1] = pos; return true end,
-        upsertRemote = function() return true end,
+        upsertRemote = function(_, _, pos)
+            remote_upserted[#remote_upserted + 1] = pos
+            return true
+        end,
         adoptRemote = function() return true end,
     }
 end
@@ -92,6 +96,7 @@ local source = {
     end,
     syncProgressAsync = function(_, opts, cb)
         synced[#synced + 1] = opts.identity and opts.identity.stable_id
+        synced.dirty_only = opts.dirty_only
         if cb then cb({ pulled = 0, pushed = 0 }) end
         return { cancel = function() end }
     end,
@@ -163,10 +168,11 @@ do
     Assert.eq(#shown, 0, "已决议后同一会话不再问")
 end
 
--- 同章 pending 与远端章内差 <1% → 不弹窗，后台 sync
+-- 同章已同步进度与远端章内差 <1% → 不弹窗，复用本次响应直接落库。
 Progress.clearConflicts()
 shown = {}
 synced = {}
+remote_upserted = {}
 pulled = 0
 pending_row = {
     fraction = 0.41,
@@ -184,12 +190,24 @@ Stubs.flush()
 
 Assert.eq(pulled, 1)
 Assert.eq(#shown, 0, "差异 <1% 时不弹窗")
-Assert.eq(synced[1], "b1", "无冲突时应后台 sync 收敛")
+Assert.eq(#synced, 0, "已有远端响应时不应再启动完整同步")
+Assert.eq(#remote_upserted, 1, "应直接保存本次远端响应")
+
+-- 本地脏进度已与云端基本一致 → 只推不拉，避免第二次 getProgress。
+synced = {}
+remote_upserted = {}
+pending_row.sync_status = 0
+Progress.pull(snapshot())
+Stubs.flush()
+Assert.eq(synced[1], "b1")
+Assert.is_true(synced.dirty_only, "脏本地只需上传")
+Assert.eq(#remote_upserted, 0, "不能用远端覆盖脏本地")
 
 -- 阅读器尚在章首但 pending 已与云端一致 → 不弹假冲突
 Progress.clearConflicts()
 shown = {}
 synced = {}
+remote_upserted = {}
 pulled = 0
 pending_row = {
     fraction = 0.41,
@@ -207,7 +225,8 @@ Stubs.flush()
 
 Assert.eq(pulled, 1)
 Assert.eq(#shown, 0, "pending 与云端一致时不应假冲突")
-Assert.eq(synced[1], "b1")
+Assert.eq(#synced, 0)
+Assert.eq(#remote_upserted, 1)
 
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",

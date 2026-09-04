@@ -193,7 +193,7 @@ ui_job.cancel()
 Stubs.flush()
 Assert.is_nil(ui_path)
 
--- 本地章节已存在时快开，不弹准备框，也不启动重复的后台打开流水线。
+-- 本地章节已存在时快开，不弹准备框；但必须补登记身份，修复早于 chapters 表的缓存。
 local fast_path
 local touch_before = #touches
 Chapter.openWithUi({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, function(p)
@@ -203,7 +203,20 @@ Stubs.flush()
 Assert.eq(fast_path, tmp .. "/2.html")
 Assert.eq(progress_ui.shown, 0)
 Stubs.flush()
-Assert.eq(#touches, touch_before)
+Assert.eq(#touches, touch_before + 1)
+Assert.eq(touches[#touches].chapter_idx, 2)
+Assert.is_nil(touches[#touches].toc)
+
+-- 快开登记失败不能继续把未知 .moon 文件交给 Reader。
+touch_error = "register failed"
+local failed_path, failed_err
+Chapter.openWithUi({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, function(p, err)
+    failed_path, failed_err = p, err
+end)
+Stubs.flush()
+Assert.is_nil(failed_path)
+Assert.eq(failed_err, "register failed")
+touch_error = nil
 
 -- 预取：已有文件跳过，只拉取缺失章。
 os.remove(tmp .. "/2.html")
