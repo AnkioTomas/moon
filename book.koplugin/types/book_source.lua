@@ -137,6 +137,10 @@ end
 ---@field syncBooksAsync fun(self: BookSource, opts: { force?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛书架
 ---@field syncProgressAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛进度
 ---@field syncNotesAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛笔记
+---@field cleanAnnotations fun(self: BookSource, items: table[], total_pages: integer|nil): table[]|nil 清洗并透传源私有注解字段
+---@field prepareLocalAnnotations fun(self: BookSource, previous: table[], current: table[]): table[]|nil 根据源协议生成更新/删除状态
+---@field mergeAnnotations fun(self: BookSource, remote: table[], current: table[], paging: boolean|nil, authoritative: boolean): table[]|nil 按源身份语义合并注解
+---@field legacyAuthoritativeAnnotations fun(self: BookSource, items: table[]): boolean|nil 识别旧版 payload 的完整快照标记
 ---@field syncStatsAsync fun(self: BookSource, opts: { dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛统计
 ---@field deleteBookAsync fun(self: BookSource, identity: BookIdentity, cb: fun(ok: boolean, err: string|nil)): table|nil 删除源拥有的书籍
 ---@field listLibraryAsync fun(self: BookSource, opts: BookListOpts|nil, cb: fun(data: BookListResult|nil, err: string|nil)): table|nil 图书馆列表

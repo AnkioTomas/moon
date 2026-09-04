@@ -188,6 +188,14 @@ function Progress.save(snapshot, cb)
         return
     end
     local pos = Progress.position(snapshot)
+    local previous = ProgressDB.get(id.source_id, id.stable_id)
+    local previous_extra = previous and previous.extra
+    local previous_idx = previous_extra and tonumber(previous_extra.chapter_idx)
+    if previous_idx and previous_idx == tonumber(pos.chapter_idx) then
+        -- position 只包含通用阅读坐标；同章时保留源侧不透明 extra，
+        -- 避免保存本地进度时丢失远端桥接坐标。
+        pos.extra = previous_extra
+    end
     pos.updated_at = nextRevision()
     local ok = ProgressDB.upsert(id.source_id, id.stable_id, pos)
     if not ok then logger.warn("book.progress save failed", id.stable_id) end
@@ -216,15 +224,26 @@ end
 ---@return { cancel: fun() }
 function Progress.syncAsync(source, opts, cb)
     opts = opts or {}
+    local target = opts.identity and opts.identity.stable_id or "all"
     local can_pull = source and type(source.getProgressAsync) == "function"
     local can_push = source and type(source.putProgressAsync) == "function"
     local cancelled, current_job = false, nil
     local result = { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
+    logger.dbg("book.progress sync start", source and source.id or "none", target,
+        opts.dirty_only and "dirty_only" or "full")
     --- 终结整次同步并回调；已取消时静默丢弃。
     ---@param value SyncResult|nil nil 表示失败
     ---@param err any
     local function finish(value, err)
-        if not cancelled and cb then cb(value, err) end
+        if cancelled then return end
+        if value then
+            logger.dbg("book.progress sync done", source and source.id or "none", target,
+                "pulled", value.pulled or 0, "pushed", value.pushed or 0,
+                "conflicts", value.conflicts or 0)
+        else
+            logger.warn("book.progress sync failed", source and source.id or "none", target, err)
+        end
+        if cb then cb(value, err) end
     end
     if not source or (not can_pull and not can_push) then
         require("ui/uimanager"):nextTick(function()
@@ -632,17 +651,21 @@ function Progress.pull(snapshot)
     if not source or type(source.getProgressAsync) ~= "function" then
         return
     end
+    logger.dbg("book.progress reader pull start", id.source_id, id.stable_id,
+        id.chapter_idx or "book")
     source:getProgressAsync(id, function(remote_pos, err)
         if not isSameBook(id) then
             logger.dbg("book.progress pull skip: document changed")
             return
         end
         if not remote_pos then
+            logger.warn("book.progress reader pull failed", id.source_id, id.stable_id, err)
             UIManager:show(InfoMessage:new{ text = err or _("拉取失败") })
             return
         end
         local local_position = localProgressForPull(id, snapshot)
         if progressDiffers(local_position, remote_pos, id, snapshot) then
+            logger.dbg("book.progress reader pull conflict", id.source_id, id.stable_id)
             askProgressConflict(id, snapshot, local_position, remote_pos)
             return
         end
@@ -655,7 +678,9 @@ function Progress.pull(snapshot)
             end
         elseif not ProgressDB.upsertRemote(id.source_id, id.stable_id, remote_pos) then
             logger.warn("book.progress save remote failed", id.stable_id)
+            return
         end
+        logger.dbg("book.progress reader pull done", id.source_id, id.stable_id, "matched")
     end)
 end
 
