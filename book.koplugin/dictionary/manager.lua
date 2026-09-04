@@ -218,6 +218,7 @@ local function downloadParts(item, dir, idx, done, report)
         report("install", item.size, item.size, #item.parts, #item.parts)
         local target = installTarget(done.data_dir, item.id)
         _job = Job.run(function() assembleAndExtract(item, dir, target) end, {
+            name = "dictionary.install",
             timeout = 300,
             on_done = function()
                 _downloading, _job = false, nil

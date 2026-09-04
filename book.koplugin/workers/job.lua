@@ -22,6 +22,7 @@ Job.__index = Job
 
 ---@class WorkerJob
 ---@field id number
+---@field name string
 ---@field state WorkerJobState
 ---@field pid number|nil
 ---@field progress WorkerProgress|nil
@@ -38,12 +39,14 @@ Job.__index = Job
 
 ---@class WorkerJobStatus
 ---@field id number
+---@field name string
 ---@field state WorkerJobState
 ---@field pid number|nil
 ---@field progress WorkerProgress|nil
 ---@field error string|nil
 
 ---@class WorkerJobOptions
+---@field name string 稳定任务名，用于日志和诊断
 ---@field on_progress fun(value: WorkerProgress, job: WorkerJob)|nil
 ---@field on_message fun(value: WorkerProgress, job: WorkerJob)|nil
 ---@field on_done fun(result: any)|nil
@@ -110,7 +113,7 @@ function Job:_setState(state, err)
     if self.state == state then return end
     self.state = state
     self.error = err
-    logger.dbg("book.worker state", self.id, state, err or "")
+    logger.dbg("book.worker state", self.name, "#" .. self.id, state, err or "")
     notify(self.on_state, state, self)
 end
 
@@ -141,7 +144,8 @@ function Job:_settle(state, result, err, reaping)
     if self.settled then return end
     self.settled = true
     self:_setState(state, err)
-    logger.dbg("book.perf worker", self.id, Perf.elapsedMs(self.started_at), "ms", state)
+    logger.dbg("book.perf worker", self.name, "#" .. self.id,
+        Perf.elapsedMs(self.started_at), "ms", state)
     if reaping == nil and self.pid then
         reaping = not ffiUtil.isSubProcessDone(self.pid)
     end
@@ -244,6 +248,7 @@ Job.abort = Job.cancel
 function Job:status()
     return {
         id = self.id,
+        name = self.name,
         state = self.state,
         pid = self.pid,
         progress = self.progress,
@@ -257,9 +262,12 @@ end
 function Job.run(worker, opts)
     assert(type(worker) == "function", "workers.job.run: worker must be function")
     opts = opts or {}
+    assert(type(opts.name) == "string" and opts.name ~= "",
+        "workers.job.run: opts.name required")
     next_id = next_id + 1
     local self = setmetatable({
         id = next_id,
+        name = opts.name,
         started_at = Perf.now(),
         state = "queued",
         decoder = Protocol.newDecoder(),
@@ -270,7 +278,7 @@ function Job.run(worker, opts)
         on_settled = opts.on_settled,
         on_cancelled = opts.on_cancelled,
     }, Job)
-    logger.dbg("book.worker queued", self.id)
+    logger.dbg("book.worker queued", self.name, "#" .. self.id)
     notify(self.on_state, "queued", self)
 
     local pid, read_fd = ffiUtil.runInSubProcess(function(_, write_fd)

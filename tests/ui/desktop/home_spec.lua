@@ -12,6 +12,14 @@ package.preload["ui/uimanager"] = function()
         nextTick = function(_, fn)
             ticks[#ticks + 1] = fn
         end,
+        scheduleIn = function(_, _, fn)
+            ticks[#ticks + 1] = fn
+        end,
+        unschedule = function(_, fn)
+            for i = #ticks, 1, -1 do
+                if ticks[i] == fn then table.remove(ticks, i) end
+            end
+        end,
     }
 end
 package.preload["ffi/blitbuffer"] = function()
@@ -98,6 +106,24 @@ local second = callbacks[#callbacks]
 second({ data = { { stable_id = "new" } } })
 first({ data = { { stable_id = "old" } } })
 Assert.eq(desktop._home_state.recent.stable_id, "new")
+
+-- 后台更新保留旧内容；200ms 内重复通知合并，取数完成后只重建一次。
+ticks = {}
+desktop._home_loaded = true
+desktop._home_state = { recent = { stable_id = "visible" } }
+desktop.source.recentBooksAsync = function(_, _, cb)
+    calls = calls + 1
+    cb({ data = { { stable_id = "refreshed" } } })
+    return { cancel = function() end }
+end
+local before_refresh = desktop.rebuilds or 0
+Home.refreshData(desktop)
+Home.refreshData(desktop)
+Assert.eq(#ticks, 1)
+Assert.eq(desktop._home_state.recent.stable_id, "visible")
+ticks[1]()
+Assert.eq(desktop.rebuilds, before_refresh + 1)
+Assert.eq(calls, 2)
 
 -- 进入首页统一入口：清状态 + 重建 + 通知源，下一次 page 必然重拉。
 local emitted

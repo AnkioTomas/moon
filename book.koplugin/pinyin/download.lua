@@ -319,6 +319,7 @@ assembleInJob = function(manifest, dest, done, report)
             error(err)
         end
     end, {
+        name = "pinyin.assemble",
         timeout = 300,
         on_done = function()
             cleanupTmp()

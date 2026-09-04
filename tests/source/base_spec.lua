@@ -27,17 +27,12 @@ local source = setmetatable({
     end,
 }, { __index = SourceBase })
 
-local rebuilds = 0
+local rebuilds, refreshes = 0, 0
 local desktop = {
     source = source,
     tab = "home",
     rebuild = function() rebuilds = rebuilds + 1 end,
-    -- 真实实现是 Home.invalidate：清状态后仅在首页时重建
-    invalidateHome = function(self)
-        self._home_state = nil
-        self._home_loaded = false
-        if self.tab == "home" then rebuilds = rebuilds + 1 end
-    end,
+    refreshHome = function() refreshes = refreshes + 1 end,
 }
 source:onEvent("home_open", desktop)
 Assert.eq(rebuilds, 0)
@@ -52,8 +47,8 @@ Assert.eq(sync_calls, 2)
 
 -- 统计成功落库后，首页必须重新读取本地统计。
 stats_callbacks[2](true)
-Assert.eq(rebuilds, 1)
-Assert.is_false(desktop._home_loaded)
+Assert.eq(refreshes, 1)
+Assert.eq(rebuilds, 0)
 
 -- 唤醒事件受书架节流约束，但统计拉取由统计模块自己的节流负责。
 source._books_refresh_at = os.time()
@@ -63,7 +58,8 @@ Assert.eq(sync_calls, 2)
 Assert.len(stats_callbacks, 3)
 stats_callbacks[3](true)
 Assert.is_false(desktop._insight_loaded)
-Assert.eq(rebuilds, 2)
+Assert.eq(refreshes, 2)
+Assert.eq(rebuilds, 1)
 
 -- 新建桌面不沿用唤醒节流：首次可见必须立即同步书架和统计。
 desktop.tab = "home"
@@ -71,6 +67,7 @@ source:onEvent("desktop_open", desktop)
 Assert.eq(sync_calls, 3)
 Assert.len(stats_callbacks, 4)
 stats_callbacks[4](true)
-Assert.eq(rebuilds, 3)
+Assert.eq(refreshes, 3)
+Assert.eq(rebuilds, 1)
 
 return true

@@ -56,6 +56,7 @@ local Desktop = InputContainer:extend{
 
 -- 首页状态作废入口挂成 Desktop 方法：source 层拿到 desktop 就能刷首页，不用反向 require UI。
 Desktop.invalidateHome = Home.invalidate
+Desktop.refreshHome = Home.refreshData
 
 --- 按数据源能力生成 Desktop 底栏 Tab。
 ---@param source table|nil
@@ -574,6 +575,11 @@ function Desktop:onClose()
         UIManager:unschedule(self._clock_tick)
         self._clock_tick = nil
     end
+    if self._home_refresh_debounce then
+        self._home_refresh_debounce:cancel()
+        self._home_refresh_debounce = nil
+    end
+    self._home_refresh_reasons = nil
     cancelJobs(self, FETCH_JOB_KEYS)
     cancelJobs(self, MAINTENANCE_JOB_KEYS)
     self._home_refresh_pending = false
