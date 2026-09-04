@@ -157,17 +157,23 @@ function client:syncAnnotationsAsync(payload, cb)
     return { cancel = function() end }
 end
 
+function client:getAnnotationsAsync(stable_id, cb)
+    rec.annotations_id = stable_id
+    cb({ data = { annotations = { { page = "/p", datetime = "2026-08-20" } } } })
+    return { cancel = function() end }
+end
+
 function client:syncStatsAsync(payload, cb)
     rec.stats_payload = payload
     cb({ ok = true })
     return { cancel = function() end }
 end
 
-function client:getBookStatsAsync(stable_id, cb)
-    rec.stats_ids = rec.stats_ids or {}
-    rec.stats_ids[#rec.stats_ids + 1] = stable_id
-    cb({ data = { page_stat = {
-        { page = #rec.stats_ids, start_time = 1000 + #rec.stats_ids, duration = 30, total_pages = 100 },
+function client:getStatsAsync(cb)
+    rec.stats_fetches = (rec.stats_fetches or 0) + 1
+    cb({ data = { stats = {
+        { book_filename = "a.epub", page = 1, start_time = 1001, duration = 30, total_pages = 100 },
+        { book_filename = "b.epub", page = 2, start_time = 1002, duration = 30, total_pages = 100 },
     } } })
     return { cancel = function() end }
 end
@@ -369,7 +375,17 @@ do
     src:getProgressAsync({ stable_id = "a.epub" }, function(p) pos = p end)
     Assert.eq(pos.fraction, 0.3)
     Assert.eq(pos.chapter_idx, 5)
+    Assert.eq(pos.page, 9)
     Assert.is_nil(pos.locator, "空串应归一成 nil")
+end
+
+do
+    resetRec()
+    rec.progress_wire = { code = 200, data = nil }
+    local pos, meta
+    src:getProgressAsync({ stable_id = "a.epub" }, function(p, _, m) pos, meta = p, m end)
+    Assert.is_nil(pos)
+    Assert.is_true(meta.empty)
 end
 
 -- getProgressAsync：拉取失败透传错误；wire 无法映射时报「进度为空」
@@ -406,9 +422,11 @@ do
     -- 精确坐标必须发出去：不发的话服务端永远存不到，拉回来只有会漂移的百分比
     src:putProgressAsync({ stable_id = "a.epub" }, {
         fraction = 0.5, chapter_idx = 2, page = 12, locator = "/body/p[7]",
+        extra = { offset = 8 },
     }, function() end)
     Assert.eq(rec.put_payload.locator, "/body/p[7]")
     Assert.eq(rec.put_payload.page, 12)
+    Assert.eq(rec.put_payload.offset, 8)
 
     -- fraction 超 1 按百分数钳制（42 → 0.42）；chapter_idx 缺省 spine = 0
     src:putProgressAsync({ stable_id = "b.epub" }, { fraction = 42 }, function() end)
@@ -441,11 +459,22 @@ do
     end)
     Assert.not_nil(ok)
     Assert.eq(rec.annotations_payload.filename, "a.epub")
-    Assert.is_nil(rec.annotations_payload.device_id)
+    Assert.eq(rec.annotations_payload.device_id, "koreader")
     Assert.eq(rec.annotations_payload.annotations[1].page, "/p")
 end
 
--- 统计同步：book.stats 只传领域记录，Moon 源负责 wire 与设备字段。
+do
+    resetRec()
+    local annotations, meta
+    src:pullNotesAsync({ stable_id = "a.epub" }, function(rows, _, info)
+        annotations, meta = rows, info
+    end)
+    Assert.eq(rec.annotations_id, "a.epub")
+    Assert.len(annotations, 1)
+    Assert.is_true(meta.authoritative)
+end
+
+-- 统计同步：book.stats 只传领域记录，Moon 源负责 wire 字段。
 do
     resetRec()
     local response
@@ -456,21 +485,21 @@ do
     Assert.eq(rec.stats_payload.books[1].filename, "a.epub")
     Assert.eq(rec.stats_payload.stats[1].filename, "a.epub")
     Assert.is_nil(rec.stats_payload.stats[1].stable_id)
+    Assert.eq(rec.stats_payload.device_id, "koreader")
 end
 
--- 统计拉取：Moon 源逐本请求并映射成带身份的领域记录。
+-- 统计拉取：Moon 源一次获取账户完整快照。
 do
     resetRec()
     local rows
     src:pullStatsAsync(function(value) rows = value end)
-    Assert.len(rec.stats_ids, 2)
-    Assert.eq(rec.stats_ids[1], "a.epub")
-    Assert.eq(rec.stats_ids[2], "b.epub")
-    Assert.len(rows, 2)
-    Assert.eq(rows[1].source_id, "moon")
-    Assert.eq(rows[1].stable_id, "a.epub")
-    Assert.eq(rows[2].stable_id, "b.epub")
-    Assert.eq(rows[2].duration, 30)
+    Assert.eq(rec.stats_fetches, 1)
+    Assert.eq(rows.replace.mode, "all_synced")
+    Assert.len(rows.rows, 2)
+    Assert.eq(rows.rows[1].source_id, "moon")
+    Assert.eq(rows.rows[1].stable_id, "a.epub")
+    Assert.eq(rows.rows[2].stable_id, "b.epub")
+    Assert.eq(rows.rows[2].duration, 30)
 end
 
 -- 还原 preload/loaded，避免影响本文件之后的用例

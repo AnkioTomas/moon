@@ -28,6 +28,19 @@ do
 end
 
 do
+    local b = Mapper.book({
+        filename = "x.epub",
+        favorite = "小说",
+        category = "标签",
+        description = "简介",
+        hasReadTag = true,
+    })
+    Assert.eq(b.category, "小说")
+    Assert.eq(b.intro, "简介")
+    Assert.eq(b.percent, 100)
+end
+
+do
     local list = Mapper.list({
         count = 1,
         data = { { filename = "a.epub", title = "t" } },
@@ -42,9 +55,14 @@ do
 end
 
 do
-    local pos = Mapper.progress({ data = { percent = 80, spine = 2 } })
+    local pos = Mapper.progress({
+        data = { percent = 80, spine = 2, page = 9, offset = 3, timestamp = 1700000000000 },
+    })
     Assert.eq(pos.fraction, 0.8)
     Assert.eq(pos.chapter_idx, 2)
+    Assert.eq(pos.page, 9)
+    Assert.eq(pos.extra.offset, 3)
+    Assert.eq(pos.updated_at, 1700000000)
 end
 
 Assert.is_nil(Mapper.book(nil))

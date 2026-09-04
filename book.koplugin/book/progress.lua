@@ -293,9 +293,10 @@ function Progress.syncAsync(source, opts, cb)
         --- dirty_only 模式或源不支持拉取时直接跳过。
         local function pullRemote()
             if opts.dirty_only or not can_pull then nextIdentity(); return end
-            current_job = source:getProgressAsync(identity, function(pos, err)
+            current_job = source:getProgressAsync(identity, function(pos, err, meta)
                 current_job = nil
                 if cancelled then return end
+                if type(meta) == "table" and meta.empty then nextIdentity(); return end
                 if not pos then finish(nil, err or "progress pull failed"); return end
                 if ProgressDB.upsertRemote(source.id, identity.stable_id, pos) then
                     result.pulled = result.pulled + 1
@@ -653,9 +654,13 @@ function Progress.pull(snapshot)
     end
     logger.dbg("book.progress reader pull start", id.source_id, id.stable_id,
         id.chapter_idx or "book")
-    source:getProgressAsync(id, function(remote_pos, err)
+    source:getProgressAsync(id, function(remote_pos, err, meta)
         if not isSameBook(id) then
             logger.dbg("book.progress pull skip: document changed")
+            return
+        end
+        if type(meta) == "table" and meta.empty then
+            logger.dbg("book.progress reader pull empty", id.source_id, id.stable_id)
             return
         end
         if not remote_pos then

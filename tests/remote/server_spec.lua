@@ -191,6 +191,10 @@ local function fakeHandlers(dirs)
             calls.rename = { from = path, to = to }
             cb(true)
         end,
+        extract = function(path, cb)
+            calls.extract = path
+            cb(true, nil, path:gsub("%.zip$", ""))
+        end,
         is_protected = function()
             return false
         end,
@@ -298,12 +302,31 @@ do
     local _, b_js, h_js = parseResponse(c_js:output())
     has(h_js, "application/javascript")
     has(b_js, "jfetch")
+    local c_file_js = newClient({ "GET /file.js HTTP/1.1\r\n\r\n" })
+    drain(serve(c_file_js))
+    local _, b_file_js = parseResponse(c_file_js:output())
+    has(b_file_js, "Array.isArray(d.entries)")
+    has(b_file_js, "webkitRelativePath")
+    has(b_file_js, "webkitGetAsEntry")
+    has(b_file_js, "dragenter")
+    has(b_file_js, "/api/extract?path=")
+    has(b_file_js, "日志不可用")
 
     local c_f = newClient({ "GET /file.html HTTP/1.1\r\n\r\n" })
     drain(serve(c_f))
     local _, b_f = parseResponse(c_f:output())
     has(b_f, "文件管理")
-    has(b_f, "第 2 级目录为分类") -- 书籍根目录约定说明
+    Assert.is_nil(b_f:find("第 2 级目录为分类", 1, true))
+    has(b_f, "file-main")
+    has(b_f, "explorer-shell")
+    has(b_f, "explorer-sidebar")
+    has(b_f, 'id="parent"')
+    has(b_f, 'id="pickfile"')
+    has(b_f, 'id="pickfolder"')
+    has(b_f, 'id="dropzone"')
+    has(b_f, 'id="count"')
+    has(b_f, 'id="folder"')
+    has(b_f, "webkitdirectory")
     has(b_f, "/js.js")
 
     local c_i = newClient({ "GET /input.html HTTP/1.1\r\n\r\n" })
@@ -328,13 +351,21 @@ do
     drain(serve(c_cfg, nil, {
         root = "/managed",
         home = "/managed/books",
-        shortcuts = { { label = "书籍根目录", path = "/managed/books" } },
+        shortcuts = {
+            { label = "书籍根目录", path = "/managed/books" },
+            {
+                label = "KOReader 崩溃日志", path = "/managed/crash.log",
+                kind = "file", missing = "尚未生成 KOReader 崩溃日志。",
+            },
+        },
     }))
     local _, b_cfg = parseResponse(c_cfg:output())
     local cfg = require("support.json_stub").decode(b_cfg)
     Assert.eq(cfg.root, "/managed")
     Assert.eq(cfg.home, "/managed/books")
     Assert.eq(cfg.shortcuts[1].label, "书籍根目录")
+    Assert.eq(cfg.shortcuts[2].kind, "file")
+    Assert.eq(cfg.shortcuts[2].missing, "尚未生成 KOReader 崩溃日志。")
 
     local dynamic = Server.new({ root = "/old", handlers = fakeHandlers({}) })
     dynamic:updateLayout({
@@ -480,7 +511,9 @@ do
     Assert.eq(delayed_client:output(), "")
     delayed_cb({})
     drain(delayed_server)
-    Assert.eq((parseResponse(delayed_client:output())), 200)
+    local delayed_code, delayed_body = parseResponse(delayed_client:output())
+    Assert.eq(delayed_code, 200)
+    has(delayed_body, '"entries":[]')
 
     -- 页面隐藏按钮不是保护；伪造 API 请求也必须被后端拦下。
     local c4 = newClient({
@@ -620,7 +653,7 @@ do
     Assert.eq((parseResponse(c3:output())), 400)
 end
 
--- ── mkdir / delete / rename ───────────────────────────
+-- ── mkdir / delete / rename / extract ─────────────────
 
 do
     -- mkdir → 200 + 参数透传
@@ -675,6 +708,31 @@ do
     local c6 = newClient({ "GET /api/delete?path=/a HTTP/1.1\r\n\r\n" })
     drain(serve(c6, h3))
     Assert.eq((parseResponse(c6:output())), 405)
+
+    -- extract → 200 + 输出目录；格式/体积/冲突错误保留明确语义。
+    local h4, calls4 = fakeHandlers({})
+    local c7 = newClient({ "POST /api/extract?path=/a/books.zip HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c7, h4))
+    local code7, body7 = parseResponse(c7:output())
+    Assert.eq(code7, 200)
+    Assert.eq(calls4.extract, "/a/books.zip")
+    has(body7, '"/a/books"')
+
+    h4.extract = function(_, cb) cb(nil, "unsafe archive path") end
+    local c8 = newClient({ "POST /api/extract?path=/a/books.zip HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c8, h4))
+    Assert.eq((parseResponse(c8:output())), 400)
+    h4.extract = function(_, cb) cb(nil, "archive too large") end
+    local c9 = newClient({ "POST /api/extract?path=/a/books.zip HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c9, h4))
+    Assert.eq((parseResponse(c9:output())), 413)
+    h4.extract = function(_, cb) cb(nil, "target exists") end
+    local c10 = newClient({ "POST /api/extract?path=/a/books.zip HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c10, h4))
+    Assert.eq((parseResponse(c10:output())), 409)
+    local c11 = newClient({ "GET /api/extract?path=/a/books.zip HTTP/1.1\r\n\r\n" })
+    drain(serve(c11, h4))
+    Assert.eq((parseResponse(c11:output())), 405)
 end
 
 -- ── 路由杂项 ──────────────────────────────────────────
