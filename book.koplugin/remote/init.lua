@@ -739,6 +739,33 @@ local function setClipboard(text)
     end
 end
 
+---@return table
+local function getStatus()
+    local Device = require("device")
+    local status = {
+        charging = false,
+        reading = false,
+    }
+    if Device:hasBattery() and Device.powerd then
+        status.battery = Device.powerd:getCapacity()
+        status.charging = Device.powerd:isCharging() and true or false
+    end
+    local DataStorage = require("datastorage")
+    local _, _, available = require("ffi/util").df(DataStorage:getDataDir())
+    status.storage_available = available
+
+    local session = require("ui.reader.session").current()
+    if session then
+        status.reading = true
+        local identity = session.identity
+        status.book = identity and identity.book and identity.book.title
+        if not status.book and session.ui and session.ui.document then
+            status.book = require("ffi/util").basename(session.ui.document.file)
+        end
+    end
+    return status
+end
+
 --- 上传临时落盘路径：缓存目录下 upload-<时间>-<序号>.part，进程内自增保证不撞名。
 ---@return string
 local function tempPath(_name)
@@ -812,6 +839,7 @@ function Remote.start()
             set_input = setInput,
             get_clipboard = getClipboard,
             set_clipboard = setClipboard,
+            get_status = getStatus,
         },
     }
     local started, serr = server:start()
