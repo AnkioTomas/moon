@@ -24,6 +24,15 @@ local M = {
     icon = "insights",
 }
 
+function M.heightRange()
+    return {
+        min = UI.sz(62),
+        preferred = UI.sz(76),
+        max = UI.sz(104),
+        grow = 1,
+    }
+end
+
 --- 造一张「数值 + 说明」统计卡；高度按文本实测撑开。
 ---@param width number 卡片宽
 ---@param value string|number 主数值
@@ -69,6 +78,7 @@ end
 ---@return table
 function M.build(ctx, state, opts)
     local w = opts.width
+    local total_h = opts.height
     local margin = UI.sz(10)
     local inner_w = math.max(1, w - margin * 2)
     local stats = state.stats or {}
@@ -80,25 +90,20 @@ function M.build(ctx, state, opts)
     }
     local card_w = math.floor((inner_w - gap * (#items - 1)) / #items)
     local row = HorizontalGroup:new{ align = "center" }
-    local row_h = 0
     for i, item in ipairs(items) do
         if i > 1 then table.insert(row, HorizontalSpan:new{ width = gap }) end
-        local card, card_h = recordCard(card_w, item.value, item.label)
-        row_h = math.max(row_h, card_h)
+        local card = recordCard(card_w, item.value, item.label)
         table.insert(row, card)
     end
-    local pad_y = UI.sz(4)
-    local total_h = row_h + pad_y * 2
     local widget = FrameContainer:new{
         bordersize = 0,
         padding = 0,
-        padding_left = margin,
-        padding_right = margin,
-        padding_top = pad_y,
-        padding_bottom = pad_y,
         margin = 0,
         dimen = Geom:new{ w = w, h = total_h },
-        row,
+        CenterContainer:new{
+            dimen = Geom:new{ w = w, h = total_h },
+            row,
+        },
     }
     return { widget = widget, height = total_h }
 end

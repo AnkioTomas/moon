@@ -7,6 +7,29 @@ l10n 目录一致性：en 与 zh_TW 键集必须双向一致，所有值是非�
 
 local Assert = require("support.assert")
 
+local root = require("support.config").root()
+
+-- require 后重复键已经被 Lua 覆盖，必须在加载目录前检查源文件。
+local function assertNoDuplicateKeys(lang)
+    local path = string.format("%s/book.koplugin/l10n/%s.lua", root, lang)
+    local fh = assert(io.open(path, "rb"))
+    local seen = {}
+    local line_no = 0
+    for line in fh:lines() do
+        line_no = line_no + 1
+        local key = line:match('^%s*%["(.*)"%]%s*=')
+        if key then
+            Assert.is_nil(seen[key], string.format(
+                "%s 重复键: %s（第 %d、%d 行）", lang, key, seen[key] or 0, line_no))
+            seen[key] = line_no
+        end
+    end
+    fh:close()
+end
+
+assertNoDuplicateKeys("en")
+assertNoDuplicateKeys("zh_TW")
+
 local en = require("l10n.en")
 local zh_tw = require("l10n.zh_TW")
 
@@ -75,14 +98,6 @@ do
         end))
     end
 
-    --- 键还原成源码里的字面写法，用于反查
-    ---@param s string
-    ---@return string
-    local function escape(s)
-        return (s:gsub("\\", "\\\\"):gsub("\n", "\\n"):gsub("\t", "\\t"):gsub("\r", "\\r"))
-    end
-
-    local root = require("support.config").root()
     local pipe = assert(io.popen(string.format(
         "find %s/book.koplugin -name '*.lua' -not -path '*/l10n/*' -not -path '*/types/*'",
         root)))
@@ -109,16 +124,20 @@ do
     table.sort(missing)
     Assert.len(missing, 0, "l10n 目录缺少源码里的文案: " .. table.concat(missing, " | "))
 
-    -- 反向：目录里不许留源码用不到的键。
-    -- 文案改一版就留一条旧键，攒到过 207 条（占目录 24%），全是维护噪音。
+    -- 反向：目录键必须作为完整字符串存在于源码。不能用裸 substring 搜索，
+    -- 否则「账号」会被「微信读书账号」冒充使用，注释也会掩盖废弃键。
+    local source_literals = {}
+    for _, src in ipairs(sources) do
+        for literal in src:gmatch('"([^"\n]*)"') do
+            source_literals[unescape(literal)] = true
+        end
+        for literal in src:gmatch("'([^'\n]*)'") do
+            source_literals[unescape(literal)] = true
+        end
+    end
     local stale = {}
     for key in pairs(en) do
-        local needle = escape(key)
-        local found = false
-        for _, src in ipairs(sources) do
-            if src:find(needle, 1, true) then found = true break end
-        end
-        if not found then stale[#stale + 1] = key end
+        if not source_literals[key] then stale[#stale + 1] = key end
     end
     table.sort(stale)
     Assert.len(stale, 0, "l10n 目录残留源码里已不用的键: " .. table.concat(stale, " | "))

@@ -68,8 +68,7 @@ local DEFAULTS = {
         translate_languages = { "en", "zh", "ja", "fr", "de", "ko", "es", "ru", "zh_TW" },
     },
     home = {
-        home_layout = { "recent_list" },
-        home_recent_list_mode = "hero_grid",
+        home_layout = { "recent_hero", "recent_list" },
         home_excerpt_index = 0,
     },
     ai = { ai_endpoint = "", ai_api_key = "", ai_model = "" },
@@ -80,6 +79,8 @@ local KEY_SECTION = {}
 for section, defaults in pairs(DEFAULTS) do
     for key in pairs(defaults) do KEY_SECTION[key] = section end
 end
+-- 旧版首页把大卡片和列表塞在同一个组件里；仅用于迁移后删除。
+KEY_SECTION.home_recent_list_mode = "home"
 -- These are runtime/cache values, not user-facing defaults, but belong beside
 -- the lockscreen settings rather than in common.lua.
 for _, key in ipairs({
@@ -122,6 +123,27 @@ local function fillDefaults(data, defaults)
         end
     end
     return dirty
+end
+
+--- 把旧 recent_list 显示模式迁移成两个可独立启停、排序的组件。
+---@param data table
+---@return boolean
+local function migrateHomeLayout(data)
+    local mode = data.home_recent_list_mode
+    if mode == nil then return false end
+    local layout = type(data.home_layout) == "table" and data.home_layout or {}
+    local out = {}
+    for _, id in ipairs(layout) do
+        if id ~= "recent_hero" then
+            if id == "recent_list" and mode ~= "list_only" then
+                out[#out + 1] = "recent_hero"
+            end
+            out[#out + 1] = id
+        end
+    end
+    data.home_layout = out
+    data.home_recent_list_mode = nil
+    return true
 end
 
 --- 按路径打开并缓存 LuaSettings 实例。
@@ -168,6 +190,7 @@ local function initialize()
             end
         end
         if fillDefaults(file.data, DEFAULTS[section]) then dirty = true end
+        if section == "home" and migrateHomeLayout(file.data) then dirty = true end
         if dirty then file:flush() end
     end
     if common.data.enabled_sources == nil and old.enabled_sources ~= nil then

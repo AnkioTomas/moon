@@ -9,10 +9,11 @@ local _ = require("gettext")
 
 local M = {}
 
-local DEFAULT_COMPONENT = "recent_list"
+local DEFAULT_COMPONENTS = { "recent_hero", "recent_list" }
 
 local COMPONENT_MODULES = {
-    "clock", "stats", "hitokoto", "excerpt", "recent_list", "recent_cards",
+    "clock", "stats", "hitokoto", "excerpt",
+    "recent_hero", "recent_list", "recent_cards",
 }
 
 M.components = {}
@@ -36,7 +37,7 @@ end
 function M.enabledLayout()
     local raw = MoonSettings.get("home").home_layout
     if type(raw) ~= "table" or #raw == 0 then
-        return { DEFAULT_COMPONENT }
+        return { DEFAULT_COMPONENTS[1], DEFAULT_COMPONENTS[2] }
     end
     local out, seen = {}, {}
     for _, id in ipairs(raw) do
@@ -46,7 +47,7 @@ function M.enabledLayout()
         end
     end
     if #out == 0 then
-        return { DEFAULT_COMPONENT }
+        return { DEFAULT_COMPONENTS[1], DEFAULT_COMPONENTS[2] }
     end
     return out
 end

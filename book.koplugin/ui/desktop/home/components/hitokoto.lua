@@ -24,14 +24,23 @@ local M = {
     icon = "format_quote",
 }
 
+function M.heightRange()
+    return {
+        min = UI.sz(90),
+        preferred = UI.sz(112),
+        max = UI.sz(156),
+        grow = 1,
+    }
+end
+
 ---@param ctx table
 ---@param state table
 ---@param opts table
 ---@return table
 function M.build(ctx, state, opts)
     local w = opts.width
+    local total_h = opts.height
     local pad_x = UI.sz(10)
-    local pad_y = UI.sz(6)
     local inner_w = math.max(1, w - pad_x * 2)
     local quote = state.quote or {}
     local text = quote.text or MoonSettings.get().lock_screen_quote_cache or U.FALLBACK_MESSAGE
@@ -76,7 +85,7 @@ function M.build(ctx, state, opts)
             src_w,
         },
     }
-    local total_h = inner_h + pad_y * 2
+    local pad_y = math.max(0, math.floor((total_h - inner_h) / 2))
     local widget = FrameContainer:new{
         bordersize = 0,
         padding = 0,

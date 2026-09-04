@@ -1,54 +1,34 @@
---[[--
-ui.desktop.home 离线用例：布局默认、裁剪、pager 与 enrich。
-
-@module tests.ui.desktop.home.layout_spec
---]]
+--[[-- 首页弹性布局：范围分配、末尾裁剪和准确高度传递。 --]]
 
 local Assert = require("support.assert")
 
 local home_settings = {
-    home_layout = { "recent_list" },
-    home_recent_list_mode = "hero_grid",
+    home_layout = { "recent_hero", "recent_list" },
     home_excerpt_index = 0,
 }
 package.preload["utils.settings"] = function()
     return {
-        get = function(section)
-            if section == "home" then return home_settings end
-            return home_settings
-        end,
-        saveSection = function(_, section, values)
-            if section == "home" then home_settings = values end
-        end,
+        get = function() return home_settings end,
+        saveSection = function(_, _, values) home_settings = values end,
     }
 end
+package.preload["l10n"] = function() return { apply = function() end } end
+package.preload["gettext"] = function() return function(s) return s end end
 
-package.preload["l10n"] = function()
-    return { apply = function() end }
-end
-package.preload["gettext"] = function()
-    return function(s) return s end
-end
-
-local build_log = {}
 local layout_kids = {}
-local freed = {}
+local build_log = {}
+local ranges = {}
 
 local function widgetStub()
     return {
         new = function(_, opts)
-            if opts and opts.align then
-                layout_kids = opts
-                return opts
-            end
+            if opts and opts.align then layout_kids = opts end
             return opts or {}
         end,
     }
 end
 
-package.preload["ffi/blitbuffer"] = function()
-    return { COLOR_WHITE = 255 }
-end
+package.preload["ffi/blitbuffer"] = function() return { COLOR_WHITE = 255 } end
 package.preload["ui/widget/container/framecontainer"] = widgetStub
 package.preload["ui/geometry"] = widgetStub
 package.preload["ui/widget/verticalgroup"] = widgetStub
@@ -56,140 +36,103 @@ package.preload["ui/widget/verticalspan"] = widgetStub
 package.preload["ui.components.bookui"] = function()
     return { sz = function(n) return n end }
 end
-package.preload["ui.components.pager"] = function()
-    return {
-        bandH = function() return 20 end,
-        band = function(w, page, pages)
-            return { _pager = true, w = w, page = page, pages = pages }
-        end,
-    }
-end
 
-local function stubComponent(id, height, extra)
+local function stubComponent(id)
     return {
         id = id,
         label = id,
+        heightRange = function()
+            return ranges[id] or { min = 10, preferred = 10, max = 10, grow = 1 }
+        end,
         build = function(_ctx, _state, opts)
-            local entry = {
-                id = id,
-                budget = opts.budget,
-                recent_mode = opts.recent_mode,
-            }
-            if extra then
-                for k, v in pairs(extra) do entry[k] = v end
-            end
-            build_log[#build_log + 1] = entry
-            local part = {
-                widget = {
-                    _id = id,
-                    free = function() freed[id] = (freed[id] or 0) + 1 end,
-                },
-                height = height,
-            }
-            if extra and extra.pager then
-                part.pager = extra.pager
-            end
-            if extra and extra.refresh then
-                part.refresh = extra.refresh
-            end
+            build_log[#build_log + 1] = { id = id, height = opts.height }
+            local part = { widget = { _id = id }, height = opts.height }
+            if id == "clock" then part.refresh = function() end end
             return part
         end,
     }
 end
 
-local clock_refreshes = 0
-for _, spec in ipairs({
-    { "clock", 50, {
-        refresh = function() clock_refreshes = clock_refreshes + 1 end,
-    } },
-    { "stats", 40 },
-    { "hitokoto", 30 },
-    { "excerpt", 35 },
-    { "recent_list", 120, {
-        pager = { page = 2, pages = 5, handlers = {} },
-    }},
-    { "recent_cards", 200 },
+for _, id in ipairs({
+    "clock", "stats", "hitokoto", "excerpt",
+    "recent_hero", "recent_list", "recent_cards",
 }) do
-    local id, height, extra = spec[1], spec[2], spec[3]
     package.preload["ui.desktop.home.components." .. id] = function()
-        return stubComponent(id, height, extra)
+        return stubComponent(id)
     end
 end
 
 local Base = require("ui.desktop.home.components.base")
-local HomeStats = require("ui.desktop.home.stats")
 local Layout = require("ui.desktop.home.layout")
 
-Assert.eq(#Base.enabledLayout(), 1)
-Assert.eq(Base.enabledLayout()[1], "recent_list")
+local defaults = Base.enabledLayout()
+Assert.len(defaults, 2)
+Assert.eq(defaults[1], "recent_hero")
+Assert.eq(defaults[2], "recent_list")
 
-home_settings.home_layout = { "clock", "stats", "unknown", "recent_list" }
-local layout = Base.enabledLayout()
-Assert.eq(#layout, 3)
-Assert.eq(layout[1], "clock")
-Assert.eq(layout[3], "recent_list")
+-- 最小值放不下时，当前项及其后的组件全部隐藏。
+local selected, heights, unused = Layout.allocate({
+    { id = "a", min = 30, preferred = 40, max = 50, grow = 1 },
+    { id = "b", min = 30, preferred = 40, max = 60, grow = 2 },
+    { id = "c", min = 20, preferred = 20, max = 20, grow = 1 },
+}, 75, 8)
+Assert.len(selected, 2)
+Assert.eq(selected[2].id, "b")
+Assert.eq(heights[1] + heights[2] + 8 + unused, 75)
 
-local daily = {
-    { ymd = os.date("%Y-%m-%d"), seconds = 600 },
-    { ymd = os.date("%Y-%m-%d", os.time() - 86400), seconds = 300 },
-    { ymd = os.date("%Y-%m-%d", os.time() - 2 * 86400), seconds = 0 },
-}
-Assert.eq(HomeStats.currentStreak(daily), 2)
+-- 先公平扩到理想值，再按 grow 消耗最大值空间。
+selected, heights, unused = Layout.allocate({
+    { id = "a", min = 20, preferred = 30, max = 50, grow = 1 },
+    { id = "b", min = 20, preferred = 30, max = 70, grow = 3 },
+}, 100, 0)
+Assert.eq(heights[1], 40)
+Assert.eq(heights[2], 60)
+Assert.eq(unused, 0)
 
-local broken = {
-    { ymd = os.date("%Y-%m-%d"), seconds = 0 },
-    { ymd = os.date("%Y-%m-%d", os.time() - 86400), seconds = 100 },
-}
-Assert.eq(HomeStats.currentStreak(broken), 1)
+-- 所有组件达到最大值后，剩余空间留在页面底部。
+selected, heights, unused = Layout.allocate({
+    { id = "a", min = 10, preferred = 20, max = 25, grow = 1 },
+}, 40, 0)
+Assert.eq(heights[1], 25)
+Assert.eq(unused, 15)
 
--- Layout.build：预算不足时裁剪后续组件
+-- 不足完整第二行时，书架保持一行，零碎高度交给连续伸缩组件。
+selected, heights = Layout.allocate({
+    { id = "hero", min = 30, preferred = 40, max = 80, grow = 2 },
+    { id = "list", min = 50, preferred = 80, max = 110, grow = 6, step = 30 },
+}, 100, 0)
+Assert.eq(heights[1], 50)
+Assert.eq(heights[2], 50)
+
+-- 空间达到整行步长时，书架优先恢复默认两行。
+selected, heights = Layout.allocate({
+    { id = "hero", min = 30, preferred = 40, max = 80, grow = 2 },
+    { id = "list", min = 50, preferred = 80, max = 110, grow = 6, step = 30 },
+}, 110, 0)
+Assert.eq(heights[1], 30)
+Assert.eq(heights[2], 80)
+
+-- build 必须把分配高度原样交给组件，并维护时钟刷新区域。
+home_settings.home_layout = { "clock", "stats", "recent_list" }
+ranges.clock = { min = 20, preferred = 30, max = 40, grow = 1 }
+ranges.stats = { min = 20, preferred = 30, max = 40, grow = 1 }
+ranges.recent_list = { min = 40, preferred = 60, max = 100, grow = 4 }
 build_log = {}
 layout_kids = {}
-freed = {}
-home_settings.home_layout = { "clock", "stats", "recent_list" }
-home_settings.home_recent_list_mode = "hero_grid"
 local desktop = {}
-Layout.build({ width = 320, height = 90, desktop = desktop }, {})
-Assert.eq(#build_log, 2)
+local frame = Layout.build({ width = 320, height = 120, desktop = desktop }, {})
+Assert.len(build_log, 3)
+Assert.eq(build_log[1].height + build_log[2].height + build_log[3].height + 16, 120)
+Assert.is_true(build_log[3].height > build_log[1].height)
+Assert.eq(desktop._home_clock_region.h, build_log[1].height)
+Assert.eq(frame.width, 320)
+Assert.eq(frame.height, 120)
+
+-- 页面太矮时严格按顺序保留前缀。
+build_log = {}
+Layout.build({ width = 320, height = 70 }, {})
+Assert.len(build_log, 2)
 Assert.eq(build_log[1].id, "clock")
 Assert.eq(build_log[2].id, "stats")
-Assert.eq(#layout_kids, 1)
-Assert.eq(freed.stats, 1)
-Assert.is_true(type(desktop._home_clock_refresh) == "function")
-desktop._home_clock_refresh()
-Assert.eq(clock_refreshes, 1)
-
--- Layout.build：唯一 recent_list → footer_full + 底部分页条
-build_log = {}
-layout_kids = {}
-home_settings.home_layout = { "recent_list" }
-Layout.build({ width = 320, height = 200 }, {})
-Assert.eq(#build_log, 1)
-Assert.eq(build_log[1].recent_mode, "footer_full")
-Assert.eq(#layout_kids, 3)
-Assert.is_true(layout_kids[3]._pager)
-Assert.eq(layout_kids[3].page, 2)
-
--- Layout.build：纯列表末位 recent_list → footer_tail
-build_log = {}
-layout_kids = {}
-home_settings.home_layout = { "clock", "recent_list" }
-home_settings.home_recent_list_mode = "list_only"
-Layout.build({ width = 320, height = 200 }, {})
-Assert.eq(#build_log, 2)
-Assert.eq(build_log[1].recent_mode, nil)
-Assert.eq(build_log[2].recent_mode, "footer_tail")
-Assert.is_true(layout_kids[#layout_kids]._pager)
-
--- Layout.build：inline 模式不分页条
-build_log = {}
-layout_kids = {}
-home_settings.home_layout = { "clock", "recent_list" }
-home_settings.home_recent_list_mode = "hero_grid"
-local full_frame = Layout.build({ width = 320, height = 200 }, {})
-Assert.eq(build_log[2].recent_mode, "inline")
-Assert.is_nil(layout_kids[#layout_kids]._pager)
-Assert.eq(full_frame.width, 320)
-Assert.eq(full_frame.height, 200)
 
 return true

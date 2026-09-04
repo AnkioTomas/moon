@@ -22,12 +22,22 @@ local M = {
     icon = "format_ink_highlighter",
 }
 
+function M.heightRange()
+    return {
+        min = UI.sz(88),
+        preferred = UI.sz(116),
+        max = UI.sz(164),
+        grow = 1,
+    }
+end
+
 ---@param ctx table
 ---@param state table
 ---@param opts table
 ---@return table
 function M.build(_ctx, state, opts)
     local w = opts.width
+    local allocated_h = opts.height
     local margin = UI.sz(10)
     local card_w = math.max(1, w - margin * 2)
     local pad = UI.sz(12)
@@ -55,7 +65,7 @@ function M.build(_ctx, state, opts)
         fgcolor = UI.dim(),
     }
     local inner_h = title_w:getSize().h + UI.sz(6) + body:getSize().h + UI.sz(6) + src_w:getSize().h
-    local card_h = inner_h + pad * 2
+    local card_h = allocated_h
     local content = VerticalGroup:new{
         align = "left",
         title_w,

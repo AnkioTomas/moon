@@ -305,6 +305,34 @@ do
     })
     Assert.eq(pending.wr_review_id, "rv-recovered")
     Assert.is_true(confirmed[pending])
+    local current = Notes.prepareLocalAnnotations({
+        {
+            datetime = "old", page = "/body/a", drawer = "lighten",
+            note = "旧笔记", wr_bookmark_id = "bm1", wr_review_id = "rv1",
+        },
+        {
+            datetime = "old", page = "/body/b", drawer = "lighten",
+            wr_bookmark_id = "bm2",
+        },
+    }, {
+        {
+            datetime = "new", page = "/body/a", drawer = "lighten",
+            wr_bookmark_id = "bm1",
+        },
+    })
+    Assert.is_true(current[1].wr_delete_review)
+    Assert.is_true(current[2].wr_deleted)
+    Assert.eq(current[2].wr_bookmark_id, "bm2")
+
+    local remote_note = { {
+        page = "/body/n", datetime = "r", text = "原文", note = "想法",
+        wr_range = "100-102", wr_review_id = "rv1",
+    } }
+    local local_note = { {
+        page = "/body/n", datetime = "l", text = "原文", note = "想法",
+        wr_range = "300-302",
+    } }
+    Assert.len(Notes.mergeAnnotations(remote_note, local_note, false, true), 1)
     local version = Mapper.bookVersion({ book = { version = 123 } })
     Assert.eq(version, 123)
 end

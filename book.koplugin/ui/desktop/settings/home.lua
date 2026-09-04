@@ -184,9 +184,6 @@ end
 ---@param desktop table
 ---@return table
 function HomeSettings.sections(desktop)
-    local home = MoonSettings.get("home")
-    local mode = home.home_recent_list_mode or "hero_grid"
-    local mode_label = mode == "list_only" and _("纯列表") or _("长条+列表")
     local layout = Base.enabledLayout()
     local enabled_set = {}
     for i, id in ipairs(layout) do
@@ -205,33 +202,6 @@ function HomeSettings.sections(desktop)
             })
         end,
     }
-    if enabled_set.recent_list then
-        layout_rows[#layout_rows + 1] = function(iw)
-            return SettingRow.build(iw, {
-                kind = "nav",
-                icon = "grid_view",
-                title = _("最近阅读列表形态"),
-                status = mode_label,
-                status_on = true,
-                callback = function()
-                    Popup.list{
-                        title = _("最近阅读列表形态"),
-                        items = {
-                            { text = _("长条+列表"), value = "hero_grid" },
-                            { text = _("纯列表"), value = "list_only" },
-                        },
-                        current = mode,
-                        on_select = function(value)
-                            home.home_recent_list_mode = value
-                            MoonSettings.saveSection("home", home)
-                            desktop:rebuild()
-                        end,
-                    }
-                end,
-            })
-        end
-    end
-
     local enabled_rows = {}
     for i, id in ipairs(layout) do
         local comp = Base.find(id)
