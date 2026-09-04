@@ -14,6 +14,25 @@ local logger = require("utils.log")
 
 local File = {}
 
+-- FAT32 单文件上限以下留出余量；更大的文件不适合经阅读器缓存中转。
+File.MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
+
+---@param err any
+---@return number
+local function mutationErrorCode(err)
+    err = tostring(err or "")
+    if err == "protected path" or err == "path outside managed roots" then
+        return 403
+    end
+    if err == "not found" then
+        return 404
+    end
+    if err == "already exists" or err == "target exists" or err == "target is not a file" then
+        return 409
+    end
+    return 500
+end
+
 -- ── 路由 ─────────────────────────────────────────────
 
 --- GET /api/list?path=：列目录，逐项标注 protected。
@@ -34,22 +53,31 @@ function File.list(self, conn, method, path)
             return self:_fail(conn, 403, "Path outside managed roots")
         end
     end
-    local entries, err = self.handlers.list_dir(dir)
-    if not entries then
-        return self:_fail(conn, 404, err)
-    end
-    for _, entry in ipairs(entries) do
-        entry.protected = self.handlers.is_protected(dir .. "/" .. entry.name)
-    end
-    return self:_queueResponse(conn, {
-        code = 200,
-        ctype = "application/json; charset=utf-8",
-        body = JSON.encode({
-            path = dir,
-            parent = self:_parent(dir),
-            entries = entries,
-        }),
-    })
+    conn.state = "pending"
+    self.handlers.list_dir(dir, function(entries, err)
+        if conn.dead then return end
+        if not entries then
+            conn.resp = {
+                code = 404,
+                ctype = "application/json; charset=utf-8",
+                body = JSON.encode({ error = tostring(err) }),
+            }
+            return
+        end
+        for _, entry in ipairs(entries) do
+            entry.protected = self.handlers.is_protected(dir .. "/" .. entry.name)
+        end
+        conn.resp = {
+            code = 200,
+            ctype = "application/json; charset=utf-8",
+            body = JSON.encode({
+                path = dir,
+                parent = self:_parent(dir),
+                entries = entries,
+            }),
+        }
+    end)
+    return true
 end
 
 --- GET /download?path=：以 attachment 流式下发单个普通文件。
@@ -121,7 +149,7 @@ function File.upload(self, conn, method, headers, dir, name, conflict)
     if not dir then
         return self:_fail(conn, 403, "Path outside managed roots")
     end
-    if not self.handlers.list_dir(dir) then
+    if not self.handlers.is_dir(dir) then
         return self:_fail(conn, 400, "Bad dir")
     end
     name = Text.trim(type(name) == "string" and name:gsub("[/\\]", "_") or "")
@@ -136,23 +164,26 @@ function File.upload(self, conn, method, headers, dir, name, conflict)
         and self.handlers.path_exists(dir .. "/" .. name) then
         return self:_fail(conn, 409, "File exists")
     end
-    local len = tonumber(headers["content-length"] or "")
-    if headers["transfer-encoding"] and not len then
+    if headers["transfer-encoding"] then
         return self:_fail(conn, 501, "Chunked not supported")
     end
-    if not len or len < 1 then
+    local len, len_err = self:_contentLength(headers)
+    if len_err == "missing" then
         return self:_fail(conn, 411, "Content-Length required")
+    end
+    if not len then
+        return self:_fail(conn, 400, "Invalid Content-Length")
+    end
+    if len < 1 then
+        return self:_fail(conn, 411, "Content-Length required")
+    end
+    if len > File.MAX_UPLOAD_BYTES then
+        return self:_fail(conn, 413, "Upload too large")
     end
     local temp = self.handlers.temp_path(name)
     local file, ferr = io.open(temp, "wb")
     if not file then
         return self:_fail(conn, 500, ferr)
-    end
-    -- curl 大文件带 Expect: 100-continue，先发 interim（25 字节，零超时发出即可；
-    -- 偶发 EAGAIN 时 curl 1s 后也会自行发 body，不死锁）
-    local expect = headers["expect"]
-    if type(expect) == "string" and expect:lower():find("100%-continue") then
-        conn.sock:send("HTTP/1.1 100 Continue\r\n\r\n")
     end
     conn.file = file
     conn.temp = temp
@@ -160,16 +191,24 @@ function File.upload(self, conn, method, headers, dir, name, conflict)
     conn.name = name
     conn.conflict = conflict
     conn.remaining = len
-    conn.state = "body"
+    local expect = headers["expect"]
+    if type(expect) == "string" and expect:lower():find("100%-continue") then
+        conn.out = "HTTP/1.1 100 Continue\r\n\r\n"
+        conn.out_off = 1
+        conn.state = "continue"
+    else
+        conn.state = "body"
+    end
     return true
 end
 
 --- POST /api/mkdir|delete?path=（无请求体的单路径变更操作公共壳）。
---- 非 POST 405，路径非法 400，越界/删 root 或受保护路径 403，handler 失败 500。
+--- 非 POST 405，路径非法 400，越界/删 root 或受保护路径 403；
+--- 不存在 404、冲突 409，其余 handler 失败 500。
 ---@param conn table
 ---@param method string
 ---@param path string|nil 目标绝对路径
----@param fn fun(path: string): boolean|nil, any 实际变更操作（handlers.mkdir / handlers.delete）
+---@param fn fun(path: string, cb: fun(ok: boolean|nil, err: any)) 实际变更操作
 function File.mutate(self, conn, method, path, fn)
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
@@ -186,20 +225,30 @@ function File.mutate(self, conn, method, path, fn)
         and (self:_isRoot(target) or self.handlers.is_protected(target)) then
         return self:_fail(conn, 403, "Protected path")
     end
-    local ok, err = fn(target)
     local op = fn == self.handlers.delete and "delete" or "mkdir"
-    if not ok then
-        logger.warn("book remote mutate failed", op, target, err)
-        return self:_fail(conn, 500, err)
-    end
-    logger.dbg("book remote mutate done", op, target)
-    return self:_queueResponse(conn, {
-        code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
-    })
+    conn.state = "pending"
+    fn(target, function(ok, err)
+        if conn.dead then return end
+        if not ok then
+            logger.warn("book remote mutate failed", op, target, err)
+            conn.resp = {
+                code = mutationErrorCode(err),
+                ctype = "application/json; charset=utf-8",
+                body = JSON.encode({ error = tostring(err) }),
+            }
+            return
+        end
+        logger.dbg("book remote mutate done", op, target)
+        conn.resp = {
+            code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
+        }
+    end)
+    return true
 end
 
 --- POST /api/rename?path=&to=：重命名/移动，源与目标都必须在 managed roots 内。
---- 非 POST 405，路径非法 400，越界或源是 root、源/目标受保护 403，handler 失败 500。
+--- 非 POST 405，路径非法 400，越界或源是 root、源/目标受保护 403；
+--- 不存在 404、冲突 409，其余 handler 失败 500。
 ---@param conn table
 ---@param method string
 ---@param query table 查询串，取 path（源）与 to（目标）
@@ -218,15 +267,24 @@ function File.rename(self, conn, method, query)
     if self:_isRoot(from) or self.handlers.is_protected(from) or self.handlers.is_protected(to) then
         return self:_fail(conn, 403, "Protected path")
     end
-    local ok, err = self.handlers.rename(from, to)
-    if not ok then
-        logger.warn("book remote mutate failed", "rename", from, to, err)
-        return self:_fail(conn, 500, err)
-    end
-    logger.dbg("book remote mutate done", "rename", from, to)
-    return self:_queueResponse(conn, {
-        code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
-    })
+    conn.state = "pending"
+    self.handlers.rename(from, to, function(ok, err)
+        if conn.dead then return end
+        if not ok then
+            logger.warn("book remote mutate failed", "rename", from, to, err)
+            conn.resp = {
+                code = mutationErrorCode(err),
+                ctype = "application/json; charset=utf-8",
+                body = JSON.encode({ error = tostring(err) }),
+            }
+            return
+        end
+        logger.dbg("book remote mutate done", "rename", from, to)
+        conn.resp = {
+            code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
+        }
+    end)
+    return true
 end
 
 return File

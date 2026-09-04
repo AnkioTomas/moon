@@ -6,8 +6,8 @@ KOReader UI 依赖全部函数内延迟加载（离线测试只碰 server.lua）
 
 范围 = KOReader 数据目录的上级目录；书籍根目录若在范围外则作为独立入口。
 KOReader 根、字体、插件、设置、Book 数据及书籍根目录不可删除或移动。
-下载/列表/变更由 handlers 直接落 lfs/os，
-上传先落临时文件再移入目标目录（重名加 " (n)"，跨设备退化为流式复制）。
+下载和单次元数据查询直接落 lfs/os；目录扫描、递归删除、跨设备复制串行跑 worker。
+上传先落临时文件再移入目标目录（重名加 " (n)"，跨设备退化为后台流式复制）。
 
 @module koplugin.book.remote.init
 --]]
@@ -207,6 +207,77 @@ function Remote.isRunning()
     return _server ~= nil
 end
 
+-- 文件系统重活串行跑子进程：避免阻塞 UI，也避免多个远程请求同时 fork 撑爆设备。
+local _io_queue = {}
+local _io_job
+local _io_stopping = false
+
+local function pumpIO()
+    if _io_job or _io_stopping or #_io_queue == 0 then return end
+    local item = table.remove(_io_queue, 1)
+    _io_job = true -- Job.run 失败时会同步回调；先放哨兵避免回调后被覆盖。
+
+    local function finish(result, err)
+        _io_job = nil
+        item.done(result, err)
+        pumpIO()
+    end
+
+    local job = require("workers.job").run(item.worker, {
+        name = item.name,
+        timeout = 30 * 60,
+        on_done = function(result) finish(result) end,
+        on_failed = function(err)
+            if item.cleanup then item.cleanup() end
+            finish(nil, err)
+        end,
+        on_cancelled = function()
+            if item.cleanup then item.cleanup() end
+            finish(nil, "cancelled")
+        end,
+    })
+    if _io_job then _io_job = job end
+end
+
+---@param name string
+---@param operation fun(): any, any
+---@param cb fun(value: any, err: any)
+---@param cleanup fun()|nil
+local function runFilesystem(name, operation, cb, cleanup)
+    _io_queue[#_io_queue + 1] = {
+        name = name,
+        worker = function()
+            local value, err = operation()
+            if not value then
+                return { ok = false, error = tostring(err or "operation failed") }
+            end
+            return { ok = true, value = value }
+        end,
+        done = function(result, worker_err)
+            if not result then
+                cb(nil, worker_err)
+            elseif result.ok then
+                cb(result.value)
+            else
+                cb(nil, result.error)
+            end
+        end,
+        cleanup = cleanup,
+    }
+    pumpIO()
+end
+
+local function stopFilesystemJobs()
+    _io_stopping = true
+    if type(_io_job) == "table" then _io_job:cancel() end
+    _io_job = nil
+    for _, item in ipairs(_io_queue) do
+        if item.cleanup then item.cleanup() end
+    end
+    _io_queue = {}
+    _io_stopping = false
+end
+
 -- ── handlers（server 的全部 IO 接缝）──────────────────
 
 --- 目录列表：目录优先、按名称排序；非目录返回 nil, err。
@@ -248,6 +319,14 @@ local function listDir(path)
         return x.name < y.name
     end)
     return entries
+end
+
+---@param path string
+---@param cb fun(entries: table[]|nil, err: any)
+local function listDirAsync(path, cb)
+    runFilesystem("remote-list", function()
+        return listDir(path)
+    end, cb)
 end
 
 --- 下载解析：存在、是普通文件、且不是配置/凭证。
@@ -337,11 +416,25 @@ local function saveUpload(temp, dir, name, cb, conflict)
         return
     end
     local ok, err = os.rename(temp, target)
-    if not ok then
-        ok, err = copyFile(temp, target)
+    if ok then
+        cb(true)
+        return
     end
-    pcall(os.remove, temp)
-    cb(ok, err)
+    _temp_seq = _temp_seq + 1
+    local staging = string.format("%s.moon-upload-%d-%d.part", target, os.time(), _temp_seq)
+    runFilesystem("remote-upload-copy", function()
+        return copyFile(temp, staging)
+    end, function(copy_ok, copy_err)
+        if copy_ok then
+            copy_ok, copy_err = os.rename(staging, target)
+        end
+        pcall(os.remove, staging)
+        pcall(os.remove, temp)
+        cb(copy_ok, copy_err or err)
+    end, function()
+        pcall(os.remove, temp)
+        pcall(os.remove, staging)
+    end)
 end
 
 ---@param path string
@@ -349,6 +442,14 @@ end
 local function pathExists(path)
     path = existingPath(path)
     return path ~= nil and require("libs/libkoreader-lfs").attributes(path) ~= nil
+end
+
+---@param path string
+---@return boolean
+local function isDir(path)
+    path = existingPath(path)
+    return path ~= nil
+        and require("libs/libkoreader-lfs").attributes(path, "mode") == "directory"
 end
 
 ---@param path string
@@ -397,6 +498,14 @@ local function deleteRecursive(path)
         return lfs.rmdir(path)
     end
     return os.remove(path)
+end
+
+---@param path string
+---@param cb fun(ok: boolean|nil, err: any)
+local function deleteRecursiveAsync(path, cb)
+    runFilesystem("remote-delete", function()
+        return deleteRecursive(path)
+    end, cb)
 end
 
 ---@param path string
@@ -577,13 +686,18 @@ function Remote.start()
         home = _layout.home,
         shortcuts = _layout.shortcuts,
         handlers = {
-            list_dir = listDir,
+            list_dir = listDirAsync,
+            is_dir = isDir,
             resolve_download = resolveDownload,
             save = saveUpload,
             path_exists = pathExists,
-            mkdir = mkdirOne,
-            delete = deleteRecursive,
-            rename = renameTo,
+            mkdir = function(path, cb)
+                cb(mkdirOne(path))
+            end,
+            delete = deleteRecursiveAsync,
+            rename = function(path, to, cb)
+                cb(renameTo(path, to))
+            end,
             temp_path = tempPath,
             is_protected = isProtectedDisplay,
             get_input = getInput,
@@ -612,6 +726,7 @@ function Remote.stop()
     require("ui/uimanager"):removeZMQ(_server)
     _server:stop()
     _server = nil
+    stopFilesystemJobs()
     kindleHole(false)
     logger.info("book remote stopped")
 end
@@ -683,6 +798,9 @@ function Remote.shareUrl(path)
     -- 截图目录可在服务运行期间被用户修改；分享时以当前配置重建范围，
     -- 否则新目录会被旧 roots 快照误判为越界。
     _layout = storageLayout()
+    if _server then
+        _server:updateLayout(_layout)
+    end
     local real = existingPath(path)
     if not real or require("libs/libkoreader-lfs").attributes(real, "mode") ~= "file" then
         return nil, "file unavailable"
