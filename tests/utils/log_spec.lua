@@ -69,7 +69,7 @@ Assert.not_nil(content:find("[DEBUG] visible", 1, true))
 Assert.not_nil(content:find("[INFO] hello 7", 1, true))
 Assert.not_nil(content:find("[WARN] tail 11", 1, true))
 
--- 重新加载模块等同插件进程重启：旧日志必须在第一次写入前被截断。
+-- 同一天重启继续追加，崩溃后的下一次启动不能先把诊断证据删掉。
 package.loaded["utils.log"] = nil
 local RestartedLog = require("utils.log")
 RestartedLog.info("fresh")
@@ -79,6 +79,20 @@ file = assert(io.open(RestartedLog.path(), "r"))
 content = file:read("*a")
 file:close()
 Assert.not_nil(content:find("[INFO] fresh", 1, true))
+Assert.not_nil(content:find("visible", 1, true))
+
+-- 跨天首次启动才清空旧日志，避免日志无限增长。
+local lfs = require("libs/libkoreader-lfs")
+Assert.is_true(lfs.touch(RestartedLog.path(), os.time() - 2 * 24 * 60 * 60))
+package.loaded["utils.log"] = nil
+local NextDayLog = require("utils.log")
+NextDayLog.warn("new day")
+NextDayLog.flush()
+Stubs.flush()
+file = assert(io.open(NextDayLog.path(), "r"))
+content = file:read("*a")
+file:close()
+Assert.not_nil(content:find("[WARN] new day", 1, true))
 Assert.is_nil(content:find("visible", 1, true))
 
 Settings.save({ book_debug_enabled = original_debug })

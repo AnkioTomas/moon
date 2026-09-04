@@ -228,6 +228,12 @@ function StatsDB.replaceSynced(source_id, replace, rows)
     --- 按 replace 策略清掉本批覆盖时间段内的旧已同步行。
     ---@return boolean
     local function clearRange()
+        if replace and replace.mode == "all_synced" then
+            return Base.exec(
+                "DELETE FROM reading_stats WHERE source_id=? AND sync_status=1;",
+                source_id
+            ) ~= nil
+        end
         if replace and type(replace.ranges) == "table" then
             for _, range in ipairs(replace.ranges) do
                 if not StatsDB.deleteSyntheticInRange(

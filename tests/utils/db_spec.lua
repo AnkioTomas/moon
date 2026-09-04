@@ -278,6 +278,16 @@ do
     Assert.eq(deleted, 1)
     Assert.eq(committed, 1)
 
+    local full_mark = #calls
+    local emptied = StatsDB.replaceSynced("moon", { mode = "all_synced" }, {})
+    Assert.eq(emptied.imported, 0)
+    local full_delete
+    for i = full_mark + 1, #calls do
+        if calls[i].sql:find("sync_status=1", 1, true) then full_delete = calls[i] end
+    end
+    Assert.not_nil(full_delete, "空的全量快照也必须清掉旧远端记录")
+    Assert.eq(full_delete.args[1], "moon")
+
     local pending = StatsDB.unsyncedBySource("moon")
     Assert.eq(#pending, 2)
     Assert.is_true(StatsDB.markSynced({ 7, 8 }))
