@@ -7,14 +7,20 @@
 <title>连接配置 - 远程管理</title>
 <link rel="stylesheet" href="/style.css">
 </head>
-<body>
-<header class="page-header">
-<h1><a href="/">远程管理</a> <span class="crumb">/</span> 连接配置</h1>
-<p class="note warn">密钥在读取时会脱敏；不修改密钥时请保持为 ******。</p>
+<body class="settings-page">
+<header class="brand-page-header">
+<a class="brand-mini" href="/">
+<img src="/logo.jpg" alt="" width="36" height="36"><span>月读</span>
+</a>
+<span class="brand-divider" aria-hidden="true"></span>
+<h1>连接配置</h1>
 </header>
 
+<main>
+<p class="security-note">密钥读取时会脱敏；不修改时请保持为 ******。</p>
 <div id="loadstate" class="state" role="status" aria-live="polite">加载中…</div>
 
+<div class="settings-grid">
 <form id="form-ai" class="panel cfg-form" autocomplete="off">
 <h2>AI 服务</h2>
 <div class="field">
@@ -70,7 +76,10 @@
 </div>
 <div class="form-state" id="state-zlib" role="status" aria-live="polite"></div>
 </form>
+</div>
+</main>
 
+<footer class="site-footer"><span class="footer-brand"><img src="/logo.jpg" alt="" width="32" height="32"><span><strong>月读</strong><small>作者 Ankio</small></span></span><a class="footer-link" href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net ↗</a></footer>
 <script src="/js.js"></script>
 <script src="/settings.js"></script>
 </body>

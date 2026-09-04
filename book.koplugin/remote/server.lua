@@ -66,10 +66,11 @@ local STATUS = {
 local Server = {}
 Server.__index = Server
 
--- 路由实现拆分：remote.file（文件管理）/ remote.input（远程输入）/ remote.settings_route（远程配置）
+-- 路由实现拆分：文件、远程输入、共享剪贴板、远程配置各自独立。
 -- （函数首参即 self；不反向 require server，无循环）
 local File = require("remote.file")
 local Input = require("remote.input")
+local Clipboard = require("remote.clipboard")
 local SettingsRoute = require("remote.settings_route")
 Server._routeList = File.list
 Server._routeDownload = File.download
@@ -78,7 +79,7 @@ Server._routeMutate = File.mutate
 Server._routeRename = File.rename
 Server._routeExtract = File.extract
 Server._routeInput = Input.route
-Server._routeClipboard = Input.clipboard
+Server._routeClipboard = Clipboard.route
 Server._routeSettings = SettingsRoute.settings
 
 ---@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil }
@@ -714,8 +715,7 @@ end
 
 -- ── 页面与静态资源 ─────────────────────────────────────
 
--- 一切页面资源都是静态路由（不注入模板）：html 经 /、/file.html、/input.html、/settings.html，
--- 样式脚本经 /style.css、/js.js、/file.js、/input.js、/settings.js；实例配置走 /api/config。
+-- 一切页面资源都是静态路由（不注入模板）；实例配置走 /api/config。
 local HTML_DIR = (debug.getinfo(1, "S").source:match("^@(.+)/[^/]+$") or ".") .. "/html"
 
 local ASSETS = {
@@ -723,11 +723,14 @@ local ASSETS = {
     ["/index.html"] = { "index.html", "text/html; charset=utf-8" },
     ["/file.html"] = { "file.html", "text/html; charset=utf-8" },
     ["/input.html"] = { "input.html", "text/html; charset=utf-8" },
+    ["/clipboard.html"] = { "clipboard.html", "text/html; charset=utf-8" },
     ["/settings.html"] = { "settings.html", "text/html; charset=utf-8" },
+    ["/logo.jpg"] = { "logo.jpg", "image/jpeg" },
     ["/style.css"] = { "style.css", "text/css; charset=utf-8" },
     ["/js.js"] = { "js.js", "application/javascript; charset=utf-8" },
     ["/file.js"] = { "file.js", "application/javascript; charset=utf-8" },
     ["/input.js"] = { "input.js", "application/javascript; charset=utf-8" },
+    ["/clipboard.js"] = { "clipboard.js", "application/javascript; charset=utf-8" },
     ["/settings.js"] = { "settings.js", "application/javascript; charset=utf-8" },
 }
 
