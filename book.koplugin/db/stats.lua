@@ -1,5 +1,5 @@
 --[[--
-reading_stats 表：自采集与拉取的阅读统计（逐页事件与云端聚合记录，按记录身份去重）。
+reading_stats 表：自采集与拉取的阅读统计（逐页事件、云端分桶及权威累计值，按记录身份去重）。
 
 sync_status=0 表示待上传，1 表示已与远端同步。
 
@@ -15,6 +15,7 @@ local StatsDB = {}
 
 local DAY_RECORD = "day"
 local BOOK_RECORD = "book"
+local TOTAL_RECORD = "total"
 
 --- 创建阅读统计表及聚合查询索引。
 --- 仅在 Base.open() 的一次性 schema 初始化阶段调用。
@@ -42,7 +43,7 @@ end
 --- 云端 pull 覆盖前的清理：**只删本次回包时间窗口内的合成行**。
 ---
 --- 两条边界都是数据事故的教训，不能放宽：
---- 1. 只删合成行（`__*:day:*` / `__*:book:*`）。本地逐页记录推送成功后也是
+--- 1. 只删合成行（`__*:day:*` / `__*:book:*` / `__*:total*`）。本地逐页记录推送成功后也是
 ---    `sync_status=1`，按 sync_status 删会把用户自己设备采集的阅读历史一起删掉。
 --- 2. 只删窗口内。回包通常只覆盖近一个月，删整源等于每同步一次就抹掉更早的历史。
 ---@param source_id string
@@ -59,14 +60,14 @@ function StatsDB.deleteSyntheticInRange(source_id, from_ts, to_ts, prefix)
     if prefix ~= nil then
         return Base.exec(
             [[DELETE FROM reading_stats
-              WHERE source_id=? AND record_type IN ('day','book')
+              WHERE source_id=? AND record_type IN ('day','book','total')
                 AND start_time>=? AND start_time<=? AND stable_id LIKE ?;]],
             source_id, from_ts, to_ts, prefix .. "%"
         ) ~= nil
     end
     return Base.exec(
         [[DELETE FROM reading_stats
-          WHERE source_id=? AND record_type IN ('day','book')
+          WHERE source_id=? AND record_type IN ('day','book','total')
             AND start_time>=? AND start_time<=?;]],
         source_id, from_ts, to_ts
     ) ~= nil
@@ -103,8 +104,8 @@ local function mergedDailyRows(source_id, start_ts, end_ts)
             local record_type = result[3][i]
             local seconds = tonumber(result[4][i]) or 0
             local count = tonumber(result[5][i]) or 0
-            if record_type == BOOK_RECORD then
-                -- 周期书单排行，不参与日历总时长
+            if record_type == BOOK_RECORD or record_type == TOTAL_RECORD then
+                -- 周期书单排行和权威累计值不参与日历总时长
             elseif record_type == DAY_RECORD then
                 cloud[day] = seconds
                 pages[day] = (pages[day] or 0) + count
@@ -227,6 +228,14 @@ function StatsDB.replaceSynced(source_id, replace, rows)
     --- 按 replace 策略清掉本批覆盖时间段内的旧已同步行。
     ---@return boolean
     local function clearRange()
+        if replace and type(replace.ranges) == "table" then
+            for _, range in ipairs(replace.ranges) do
+                if not StatsDB.deleteSyntheticInRange(
+                    source_id, range.from_ts, range.to_ts, range.stable_prefix
+                ) then return false end
+            end
+            return true
+        end
         if not (replace and from and to) then return true end
         if replace.mode == "prefix" and replace.stable_prefixes then
             for _, prefix in ipairs(replace.stable_prefixes) do
@@ -276,6 +285,13 @@ function StatsDB.summaryBySource(source_id)
             longest_day_seconds = seconds
         end
     end
+    local remote_total = Base.rowexec(
+        [[SELECT COALESCE(MAX(duration),0) FROM reading_stats
+          WHERE source_id=? AND record_type='total';]],
+        source_id
+    )
+    remote_total = tonumber(remote_total) or 0
+    if remote_total > 0 then total_seconds = remote_total end
     return {
         total_seconds = total_seconds,
         total_pages = total_pages,

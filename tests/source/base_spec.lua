@@ -6,23 +6,20 @@ package.preload["gettext"] = function()
     return function(text) return text end
 end
 
-local stats_callbacks = {}
-package.preload["book.stats"] = function()
-    return {
-        pullInBackground = function(_, opts)
-            stats_callbacks[#stats_callbacks + 1] = opts.on_done
-        end,
-    }
-end
-
 local SourceBase = require("source.base")
-local sync_calls = 0
+local sync_calls, stats_calls, stats_callbacks = 0, 0, {}
 local source = setmetatable({
     id = "test",
     configured = function() return true end,
+    capabilities = function() return { stats_pull = true } end,
     syncBooksAsync = function(_, _, cb)
         sync_calls = sync_calls + 1
         cb({ skipped = true })
+        return { cancel = function() end }
+    end,
+    syncStatsAsync = function(_, _, cb)
+        stats_calls = stats_calls + 1
+        stats_callbacks[#stats_callbacks + 1] = cb
         return { cancel = function() end }
     end,
 }, { __index = SourceBase })
@@ -38,25 +35,28 @@ source:onEvent("home_open", desktop)
 Assert.eq(rebuilds, 0)
 Assert.is_false(desktop._books_sync_pending)
 Assert.eq(sync_calls, 1)
-Assert.len(stats_callbacks, 1)
+Assert.eq(stats_calls, 1)
+Assert.is_true(desktop._stats_sync_pending)
 
--- 重复的跳过结果仍保持零重建。
+-- 统计同步在飞时复用生命周期，不得重复发起。
 source:onEvent("home_open", desktop)
 Assert.eq(rebuilds, 0)
 Assert.eq(sync_calls, 2)
+Assert.eq(stats_calls, 1)
 
 -- 统计成功落库后，首页必须重新读取本地统计。
-stats_callbacks[2](true)
+stats_callbacks[1]({ pulled = 2, pushed = 1 })
+Assert.is_false(desktop._stats_sync_pending)
 Assert.eq(refreshes, 1)
 Assert.eq(rebuilds, 0)
 
--- 唤醒事件受书架节流约束，但统计拉取由统计模块自己的节流负责。
+-- 唤醒事件受书架节流约束，但统计仍按同一生命周期双向同步。
 source._books_refresh_at = os.time()
 desktop.tab = "stats"
 source:onEvent("desktop_resume", desktop)
 Assert.eq(sync_calls, 2)
-Assert.len(stats_callbacks, 3)
-stats_callbacks[3](true)
+Assert.eq(stats_calls, 2)
+stats_callbacks[2]({ pulled = 1, pushed = 0 })
 Assert.is_false(desktop._insight_loaded)
 Assert.eq(refreshes, 2)
 Assert.eq(rebuilds, 1)
@@ -65,8 +65,8 @@ Assert.eq(rebuilds, 1)
 desktop.tab = "home"
 source:onEvent("desktop_open", desktop)
 Assert.eq(sync_calls, 3)
-Assert.len(stats_callbacks, 4)
-stats_callbacks[4](true)
+Assert.eq(stats_calls, 3)
+stats_callbacks[3]({ pulled = 1, pushed = 1 })
 Assert.eq(refreshes, 3)
 Assert.eq(rebuilds, 1)
 

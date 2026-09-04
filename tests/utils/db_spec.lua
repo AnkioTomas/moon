@@ -455,6 +455,12 @@ do
                     return self
                 end,
                 step = function()
+                    if sql:find("record_type='total'", 1, true) then
+                        if call.args and call.args[1] == "wechat" then
+                            return { 7200 }, { "total" }
+                        end
+                        return nil
+                    end
                     if sql:find("MAX(start_time)", 1, true) then
                         return { 3660, 3, 2000 }, { "s", "c", "m" }
                     end
@@ -514,6 +520,10 @@ do
     Assert.eq(s.total_pages, 15)
     Assert.eq(s.last7_seconds, 900)
     Assert.eq(s.longest_day_seconds, 600)
+
+    local remote = StatsDB.summaryBySource("wechat")
+    Assert.eq(remote.total_seconds, 7200,
+        "微信累计总量必须覆盖不完整的明细桶求和")
 
     local daily = StatsDB.dailyBySource("local")
     Assert.eq(#daily, 2)

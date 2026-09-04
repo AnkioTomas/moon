@@ -253,21 +253,6 @@ function Insight.fetch(desktop)
         end)
     end
 
-    local SourceCapabilities = require("types.book_source").SourceCapabilities
-    local summary = require("db.stats").summaryBySource(source.id)
-    if SourceCapabilities.supportsStatsPull(source)
-        and (tonumber(summary.total_seconds) or 0) <= 0 then
-        require("book.stats").pullInBackground(source, {
-            force = true,
-            on_done = function()
-                if desktop._closed or desktop.source ~= source
-                    or (desktop.source_generation or 0) ~= generation then return end
-                loadInsight()
-            end,
-        })
-        return
-    end
-
     loadInsight()
 end
 

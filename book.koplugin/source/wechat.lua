@@ -703,17 +703,65 @@ function Source:pushStatsAsync(rows, cb)
     }
 end
 
---- 拉取月度阅读统计并映射成 reading_stats 领域记录。
+--- 拉取累计总量，再按年定位月份、按月拉取真实日明细。
 ---@param cb fun(result: BookStatsRow[]|BookStatsPullResult|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Source:pullStatsAsync(cb)
-    return self._client:readStatsAsync("monthly", nil, function(wire, err)
-        if not wire then
+    local cancelled, jobs = false, {}
+    local function request(mode, base_time, done)
+        local slot = {}
+        jobs[#jobs + 1] = slot
+        slot.job = self._client:readStatsAsync(mode, base_time, done)
+    end
+    local function collect(mode, bases, done)
+        local results, index = {}, 1
+        local function nextPeriod()
+            if cancelled then return end
+            local base_time = bases[index]
+            index = index + 1
+            if not base_time then
+                done(results)
+                return
+            end
+            request(mode, base_time, function(wire, err)
+                if cancelled then return end
+                if not wire then
+                    cb(nil, err)
+                    return
+                end
+                results[#results + 1] = wire
+                nextPeriod()
+            end)
+        end
+        nextPeriod()
+    end
+    request("overall", nil, function(overall, err)
+        if cancelled then return end
+        if not overall then
             cb(nil, err)
             return
         end
-        cb(require("source.wechat.stats").fromWire(self.id, wire))
+        local Mapper = require("source.wechat.stats")
+        collect("annually", Mapper.annualBaseTimes(overall), function(annuals)
+            local monthly_bases = {}
+            for _, annual in ipairs(annuals) do
+                for _, base_time in ipairs(Mapper.monthlyBaseTimes(annual)) do
+                    monthly_bases[#monthly_bases + 1] = base_time
+                end
+            end
+            collect("monthly", monthly_bases, function(monthlies)
+                cb(Mapper.fromWires(self.id, overall, annuals, monthlies))
+            end)
+        end)
     end)
+    return {
+        cancel = function()
+            cancelled = true
+            for _, slot in ipairs(jobs) do
+                if slot.job and slot.job.cancel then slot.job:cancel() end
+            end
+        end,
+    }
 end
 
 --- 拉取某本书的划线与想法，合并成 KOReader 注解数组。

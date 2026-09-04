@@ -41,9 +41,9 @@ package.preload["ui.components.bookui"] = function()
 end
 
 local Hero = require("ui.desktop.home.components.recent_hero")
-local range = Hero.heightRange()
+local range = Hero.heightRange({}, {}, { height = 500 })
 Assert.eq(range.min, 132)
-Assert.eq(range.max, 180)
+Assert.eq(range.max, 500)
 
 local opened
 local book = { stable_id = "book" }
@@ -51,7 +51,11 @@ local part = Hero.build({
     plugin = { openBook = function(_, value) opened = value end },
 }, { recent = book }, { width = 600, height = 160 })
 Assert.eq(part.height, 160)
-Assert.eq(hero_cover_width, 96)
+Assert.eq(hero_cover_width, 98)
+Hero.build({
+    plugin = { openBook = function(_, value) opened = value end },
+}, { recent = book }, { width = 600, height = 300 })
+Assert.eq(hero_cover_width, 192)
 hero_tap()
 Assert.eq(opened, book)
 

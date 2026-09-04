@@ -123,6 +123,58 @@ do
     Assert.is_true(caps.stats_pull)
 end
 
+-- 年度不带日明细时，必须继续拉对应月份。
+do
+    local requests = {}
+    fake_client.readStatsAsync = function(_, mode, base_time, cb)
+        requests[#requests + 1] = { mode, base_time }
+        if mode == "overall" then
+            cb({
+                totalReadTime = 7200,
+                readTimes = {
+                    ["1735689600"] = 3600,
+                    ["1767225600"] = 3600,
+                },
+            })
+        elseif mode == "annually" and base_time == 1_735_689_600 then
+            cb({
+                baseTime = base_time,
+                readTimes = { [tostring(base_time)] = 900 },
+            })
+        elseif mode == "annually" then
+            cb({
+                baseTime = base_time,
+                dailyReadTimes = { [tostring(base_time)] = 900 },
+            })
+        else
+            cb({
+                baseTime = base_time,
+                readTimes = { [tostring(base_time + 86400)] = 900 },
+            })
+        end
+        return { cancel = function() end }
+    end
+    local result
+    WeChat.new():pullStatsAsync(function(value) result = value end)
+    Assert.eq(requests[1][1], "overall")
+    Assert.eq(requests[2][1], "annually")
+    Assert.eq(requests[3][1], "annually")
+    Assert.eq(requests[4][1], "monthly")
+    Assert.eq(requests[4][2], 1_735_689_600)
+    Assert.not_nil(requests[2][2])
+    Assert.not_nil(requests[3][2])
+    Assert.eq(result.replace.mode, "ranges")
+    Assert.len(result.replace.ranges, 5)
+    local total, monthly_day
+    for _, row in ipairs(result.rows) do
+        if row.record_type == "total" then total = row.duration end
+        if row.stable_id == "__wr:day:1735776000" then monthly_day = row.duration end
+    end
+    Assert.eq(total, 7200)
+    Assert.eq(monthly_day, 900)
+    fake_client.readStatsAsync = nil
+end
+
 -- pushStatsAsync：无章节坐标的行无处可报，直接成功而非空转失败。
 do
     local src = WeChat.new()

@@ -86,16 +86,22 @@ end
 ---@field id number|nil 本地 reading_stats 行 id（push 时由调用方带入，供 synced_ids 回报）
 ---@field source_id string 源标识
 ---@field stable_id string 源内书籍身份
----@field record_type string 记录类型：page/day/book
+---@field record_type string 记录类型：page/day/book/total
 ---@field page number 结束页
 ---@field start_time number 会话开始时间戳（秒）
 ---@field duration number 阅读时长（秒）
 ---@field total_pages number 全书页数
 
 --- pullStatsAsync 可选替换范围：入库前删除本地已同步行，避免云端聚合与本地页记录双计。
+---@class BookStatsPullReplaceRange
+---@field stable_prefix string
+---@field from_ts number
+---@field to_ts number
+
 ---@class BookStatsPullReplace
----@field mode '"synced"'|'"prefix"'  synced=删该源全部 sync_status=1；prefix=删匹配前缀的已同步行
+---@field mode '"synced"'|'"prefix"'|'"ranges"' synced=删该源全部 sync_status=1；prefix=删匹配前缀的已同步行
 ---@field stable_prefixes string[]|nil mode=prefix 时生效
+---@field ranges BookStatsPullReplaceRange[]|nil mode=ranges 时按各前缀的独立时间窗口清理
 
 --- pullStatsAsync 回包：纯数组为追加去重；带 replace 为云端优先覆盖入库。
 ---@class BookStatsPullResult
