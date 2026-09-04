@@ -73,6 +73,17 @@ do
     -- 本地独有的条目要保留
     local extra = { { page = "/body/b", datetime = "y", text = "本地独有" } }
     Assert.len(Normalize.merge(remote, extra, false), 2)
+
+    -- 微信写入后会重排 wire range；同一位置、同一笔记不能因此保留本地无 id 副本。
+    local remote_note = { {
+        page = "/body/n", datetime = "r", text = "原文", note = "想法",
+        wr_range = "100-102", wr_review_id = "rv1",
+    } }
+    local local_note = { {
+        page = "/body/n", datetime = "l", text = "原文", note = "想法",
+        wr_range = "300-302",
+    } }
+    Assert.len(Normalize.merge(remote_note, local_note, false), 1)
 end
 
 -- ── 无选中文本的纯书签不能互相判重 ──
@@ -93,6 +104,14 @@ do
         wr_bookmark_id = "wr9",
     } }
     Assert.len(Normalize.merge({}, locals, false), 1)
+    Assert.len(Normalize.merge({
+        { wr_snapshot = true, wr_authoritative = true },
+    }, locals, false), 0, "完整远端快照缺失的已同步条目必须删除")
+    Assert.len(Normalize.merge({
+        { wr_snapshot = true, wr_authoritative = true },
+    }, {
+        { page = "/body/local", datetime = "l", text = "本地新增" },
+    }, false), 1, "远端删除不能误伤尚无远端 id 的本地新增")
 end
 
 -- ── clean：total_pages 回填与必需字段过滤 ──
@@ -104,4 +123,37 @@ do
     }, 100)
     Assert.len(cleaned, 1)
     Assert.eq(cleaned[1].total_pages, 100)
+end
+
+-- ── 本地删除必须留下远端 id；只删 note 不能连划线一起删 ──
+do
+    local current = Normalize.withDeletions({
+        {
+            datetime = "old", page = "/body/a", drawer = "lighten",
+            note = "旧笔记", wr_bookmark_id = "bm1", wr_review_id = "rv1",
+        },
+        {
+            datetime = "old", page = "/body/b", drawer = "lighten",
+            wr_bookmark_id = "bm2",
+        },
+        {
+            datetime = "old", page = "/body/c", drawer = "lighten",
+            text = "原文", note = "修改前", wr_review_id = "rv3",
+        },
+    }, {
+        {
+            datetime = "new", page = "/body/a", drawer = "lighten",
+            wr_bookmark_id = "bm1",
+        },
+        {
+            datetime = "new", page = "/body/c", drawer = "lighten",
+            text = "原文", note = "修改后", wr_review_id = "rv3",
+        },
+    })
+    Assert.eq(current[1].wr_review_id, "rv1")
+    Assert.is_true(current[1].wr_delete_review)
+    Assert.is_true(current[2].wr_update_review)
+    Assert.is_true(current[3].wr_deleted)
+    Assert.eq(current[3].wr_bookmark_id, "bm2")
+    Assert.is_nil(current[3].wr_review_id)
 end

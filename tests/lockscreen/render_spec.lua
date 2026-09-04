@@ -136,7 +136,7 @@ local ok_run, err_run = pcall(function()
     Assert.eq(canvas_frees, 1)
     Assert.eq(writes, 0)
     Assert.is_nil(renamed)
-    Assert.eq(warnings, 1)
+    Assert.eq(warnings, 0, "渲染错误由锁屏刷新入口统一记录，底层不得重复报警")
 
     -- rename 失败必须删除临时文件，旧 compose.png 不受影响。
     reset()
@@ -149,7 +149,7 @@ local ok_run, err_run = pcall(function()
     Assert.eq(renamed[2], "/tmp/compose.png")
     Assert.eq(removed, "/tmp/compose.png.part")
     Assert.eq(canvas_frees, 1)
-    Assert.eq(warnings, 1)
+    Assert.eq(warnings, 0)
 end)
 
 os.rename = real_rename

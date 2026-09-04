@@ -8,6 +8,7 @@ local JSON = require("json")
 local Request = require("http.request")
 local Cache = require("http.cache")
 local Text = require("utils.text")
+local logger = require("utils.log")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -257,6 +258,8 @@ function Client:_jsonAsync(method, path, opts, cb)
         if cancelled then return end
         bi = bi + 1
         if bi > #bases then
+            logger.warn("book.zlib request failed", method, path,
+                "attempts", #bases, last_err)
             cb(nil, last_err)
             return
         end
@@ -287,6 +290,8 @@ function Client:_jsonAsync(method, path, opts, cb)
             if not code then
                 if originOf(url) == pinned_base then pinned_base = nil end
                 last_err = classifyTransportError(res, err)
+                logger.dbg("book.zlib failover", method, path,
+                    current_base, "transport", last_err)
                 tryNextBase()
                 return
             end
@@ -308,6 +313,7 @@ function Client:_jsonAsync(method, path, opts, cb)
                 -- Location 的路径和查询是服务端给出的请求目标，不能丢掉。
                 local new_origin = originOf(target)
                 local is_mirror_move = new_origin and new_origin ~= originOf(url)
+                logger.dbg("book.zlib redirect", code, originOf(url), new_origin or target)
                 if is_mirror_move and m ~= "GET" then
                     -- 镜像迁移：保持 POST 和 body，但跟随完整的 Location。
                     issue(target, m, req_body, headers, seen, hops + 1)
@@ -330,6 +336,8 @@ function Client:_jsonAsync(method, path, opts, cb)
             -- 5xx 是镜像自己病了：换下一个
             if code >= 500 then
                 last_err = T(_("HTTP %1"), code)
+                logger.dbg("book.zlib failover", method, path,
+                    current_base, "status", code)
                 tryNextBase()
                 return
             end
@@ -337,12 +345,18 @@ function Client:_jsonAsync(method, path, opts, cb)
             -- bot 挑战页：不是 JSON，是拦截页；换镜像才可能有用
             if looksLikeChallenge(res.body) then
                 last_err = _("服务器拒绝自动访问，正在尝试其它镜像")
+                logger.dbg("book.zlib failover", method, path,
+                    current_base, "bot_challenge")
                 tryNextBase()
                 return
             end
 
             -- 这个 base 能用：钉住（故障转移选中的镜像，下次直接用）
-            pinned_base = originOf(url) or current_base
+            local selected = originOf(url) or current_base
+            if selected ~= pinned_base then
+                logger.dbg("book.zlib mirror selected", selected)
+            end
+            pinned_base = selected
 
             local data, decode_err = decode(res.body)
             if not Request.ok(code) then
@@ -359,6 +373,7 @@ function Client:_jsonAsync(method, path, opts, cb)
         cache_job = Cache.getAsync(cache_key, function(hit)
             if cancelled then return end
             if hit ~= nil then
+                logger.dbg("book.zlib cache hit", method, path)
                 cb(hit)
             else
                 tryNextBase()

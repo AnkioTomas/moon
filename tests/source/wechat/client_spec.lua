@@ -9,6 +9,14 @@ local Assert = require("support.assert")
 local captured = {}
 local posted = {}
 
+package.preload["json"] = function()
+    return {
+        encode = require("support.json_stub").encode,
+        decode = require("support.json_stub").decode,
+    }
+end
+package.loaded["json"] = nil
+
 package.preload["source.wechat.auth"] = function()
     return {
         webApiGetAsync = function(path, cb)
@@ -52,7 +60,13 @@ package.preload["source.wechat.auth"] = function()
         webPostAsync = function(url, body, _, cb)
             posted.url = url
             posted.raw = body
-            cb("{}")
+            if url:find("/review/add", 1, true) then
+                cb('{"reviewId":"rv-1"}')
+            elseif url:find("/review/edit", 1, true) then
+                cb('{"succ":1}')
+            else
+                cb("{}")
+            end
             return { cancel = function() end }
         end,
         agentGatewayAsync = function(api_name, params, cb)
@@ -100,6 +114,21 @@ do
     Assert.is_true(captured[2]:find("sid=sid-1", 1, true) ~= nil)
     Assert.eq(#wire.books, 3)
     Assert.eq(wire.books[3].bookInfo.bookId, "3")
+end
+
+do
+    posted = {}
+    client:editReviewAsync({ reviewId = "rv-1", content = "修改" }, function() end)
+    Assert.is_true(posted.url:find("/web/review/edit", 1, true) ~= nil)
+
+    client:deleteReviewAsync("rv-1", function() end)
+    Assert.is_true(posted.url:find("/web/review/delete", 1, true) ~= nil)
+
+    client:updateBookmarkAsync({ bookmarkId = "bm-1", style = 1, colorStyle = 2 }, function() end)
+    Assert.is_true(posted.url:find("/web/book/updateBookmark", 1, true) ~= nil)
+
+    client:removeBookmarkAsync("bm-1", function() end)
+    Assert.is_true(posted.url:find("/web/book/removeBookmark", 1, true) ~= nil)
 end
 
 do
@@ -165,8 +194,8 @@ do
     posted = {}
     local wire
     client:addReviewAsync({ bookId = "99", content = "想法", range = "1-2" }, function(data) wire = data end)
-    Assert.eq(posted.gateway.api_name, "/review/add")
-    Assert.eq(posted.gateway.params.content, "想法")
+    Assert.is_true(posted.url:find("weread.qq.com/web/review/add", 1, true) ~= nil)
+    Assert.is_true(posted.raw:find("想法", 1, true) ~= nil)
     Assert.eq(wire.reviewId, "rv-1")
 end
 

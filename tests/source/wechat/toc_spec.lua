@@ -35,13 +35,16 @@ end
 do
     -- payload 是目录数组（与 Mapper.chapters 输出一致），按数组索引定位。
     store["b2"] = [[
-        [{"idx":1,"uid":"u1"},{"idx":2,"uid":"u2"}]
+        [{"idx":1,"source_idx":2,"uid":"u1"},{"idx":2,"source_idx":4,"uid":"u2"}]
     ]]
     Assert.eq(Toc.uid("wechat", "b2", 1), "u1")
     Assert.eq(Toc.uid("wechat", "b2", 2), "u2")
     Assert.is_nil(Toc.uid("wechat", "b2", 99))
     Assert.eq(Toc.index("wechat", "b2", "u2"), 2)
     Assert.is_nil(Toc.index("wechat", "b2", "u9"))
+    Assert.eq(Toc.sourceIndex("wechat", "b2", 1), 2)
+    Assert.eq(Toc.sourceIndex("wechat", "b2", 2), 4)
+    Assert.is_nil(Toc.sourceIndex("wechat", "b2", 99))
 end
 
 do

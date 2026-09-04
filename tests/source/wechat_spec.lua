@@ -19,6 +19,8 @@ end
 -- 可控假 client：每个用例按需覆写方法
 local fake_client = {}
 local chapter_open = {}
+local chapter_range_html
+local chapter_fetches = 0
 local progress_ui = { shown = 0, closed = 0, progress = {} }
 
 -- 目录缓存 payload 要真解码才能取出 chapter_uid
@@ -62,6 +64,11 @@ stub("source.wechat.chapter", function()
     return {
         ensurePsvtsAsync = function(_, _, cb)
             cb(true)
+            return { cancel = function() end }
+        end,
+        fetchHtmlAsync = function(_, _, cb)
+            chapter_fetches = chapter_fetches + 1
+            cb(chapter_range_html, nil, chapter_range_html)
             return { cancel = function() end }
         end,
     }
@@ -132,12 +139,14 @@ end
 do
     local src = WeChat.new()
     toc_payload["bp"] = require("support.json_stub").encode({
-        { idx = 1, uid = "u1", title = "一" },
-        { idx = 2, uid = "u2", title = "二" },
+        { idx = 1, source_idx = 3, uid = "u1", title = "一" },
+        { idx = 2, source_idx = 5, uid = "u2", title = "二" },
     })
     local reported = 0
-    fake_client.reportReadAsync = function(_, _, _, cb)
+    local reported_payloads = {}
+    fake_client.reportReadAsync = function(_, raw, _, cb)
         reported = reported + 1
+        reported_payloads[#reported_payloads + 1] = require("json").decode(raw)
         if reported == 1 then
             cb({ ok = true })
         else
@@ -157,6 +166,7 @@ do
     Assert.len(data.synced_ids, 2, "只确认无坐标行与已上报成功的第一章")
     Assert.eq(data.synced_ids[1], 13)
     Assert.eq(data.synced_ids[2], 11)
+    Assert.eq(reported_payloads[1].ci, 3, "时长上报必须使用微信原始 chapterIdx")
 end
 
 -- 全部章节都上报失败时不能报成功：一行都没确认就该让调用方看到错误并重试。
@@ -260,6 +270,10 @@ end
 
 -- putProgressAsync：fraction → percent（0/1 边界、四舍五入、缺进度兜底）
 do
+    toc_payload["b1"] = [[
+        [{"idx":1,"source_idx":2,"uid":"40"},{"idx":2,"source_idx":4,"uid":"41"},
+         {"idx":3,"source_idx":7,"uid":"42"}]
+    ]]
     local captured
     fake_client.putProgressAsync = function(_, stable_id, opts, cb)
         captured = {
@@ -312,11 +326,13 @@ do
         fraction = 0.5, chapter_idx = 3, chapter_fraction = 0.25, chapter_title = "序章",
         extra = { chapter_uid = 42, chapter_idx = 3 },
     }))
-    Assert.eq(captured.chapter_idx, 3)
+    Assert.eq(captured.chapter_idx, 7, "上传必须使用微信原始 chapterIdx")
     Assert.eq(captured.chapter_offset, 2500)
     Assert.eq(captured.summary, "序章")
     -- extra 记的是别的章：不复用旧 uid，回落到目录解析（此处目录拉取失败 → 不上传）
     Assert.is_nil(put({ fraction = 0.5, chapter_idx = 7, extra = { chapter_uid = 42, chapter_idx = 3 } }))
+    toc_payload["b1"] = nil
+    require("source.wechat.toc").clear()
 end
 
 -- putProgressAsync：失败时错误原样透传（client 层错误一律是字符串）
@@ -515,6 +531,32 @@ do
     Assert.is_nil(req4)
 end
 
+-- pullNotesAsync：微信原始 chapterIdx 必须按 uid 映射成本地过滤后的章节序号。
+do
+    toc_payload["bpull"] = '[{"idx":5,"source_idx":6,"uid":"41"}]'
+    fake_client.bookmarkListAsync = function(_, _, cb)
+        cb({
+            updated = {
+                {
+                    chapterUid = "41", chapterIdx = 6, bookmarkId = "bm1",
+                    type = 1, range = "1-3", markText = "划线", createTime = 1,
+                },
+            },
+            chapters = { { chapterUid = "41", chapterIdx = 6 } },
+        })
+        return { cancel = function() end }
+    end
+    fake_client.myReviewsAsync = function(_, _, cb)
+        cb({ reviews = {} })
+        return { cancel = function() end }
+    end
+    local annotations
+    WeChat.new():pullNotesAsync({
+        source_id = "wechat", stable_id = "bpull", chapter_idx = 5,
+    }, function(value) annotations = value end)
+    Assert.eq(annotations[1].chapter_idx, 5)
+end
+
 -- pushNotesAsync：划线与想法两段队列必须串起来
 do
     local NOTE_REF = {
@@ -525,11 +567,58 @@ do
     }
     require("source.wechat.context").rememberBookVersion("bpush", 7)
     -- chapter_uid 只从目录缓存解析，预置一条免去拉取
-    toc_payload["bpush"] = '[{"uid":"8"},{"uid":"9"}]'
+    toc_payload["bpush"] = '[{"idx":1,"source_idx":3,"uid":"8"},{"idx":2,"source_idx":6,"uid":"9"}]'
     local calls
+    local remote_bookmarks = {
+        {
+            chapterUid = "9", chapterIdx = 6, bookmarkId = "bm1",
+            type = 1, range = "3-6", markText = "旧划线",
+        },
+    }
+    chapter_range_html = "<p>旧划线</p><p>新划线</p><p>补偿划线</p>"
+        .. "<p>部分一</p><p>部分二</p>"
+    local chapter_path = require("utils.paths").chapterPath("bpush", 2, "wechat")
+    local chapter_file = assert(io.open(chapter_path, "wb"))
+    chapter_file:write("<html><body><h1>微信书</h1><p>旧划线</p><p>新划线</p>"
+        .. "<p>补偿划线</p><p>部分一</p><p>部分二</p></body></html>")
+    chapter_file:close()
+    local omit_next_id = false
+    local fail_text
+    local bookmark_ids = {
+        ["新划线"] = "bm-new",
+        ["补偿划线"] = "bm-postflight",
+        ["部分一"] = "bm-part1",
+        ["部分二"] = "bm-part2",
+    }
+    fake_client.bookmarkListAsync = function(_, _, cb)
+        cb({ updated = remote_bookmarks })
+        return { cancel = function() end }
+    end
+    fake_client.myReviewsAsync = function(_, _, cb)
+        cb({ reviews = { { review = { reviewId = "rv1" } } } })
+        return { cancel = function() end }
+    end
     fake_client.addBookmarkAsync = function(_, _, _, body, cb)
-        calls[#calls + 1] = { api = "addBookmark", range = body.range }
-        cb({ bookmarkId = "bm-new" })
+        local text = require("utils.text").base64Decode(body.markText)
+        local remote_id = bookmark_ids[text]
+        calls[#calls + 1] = {
+            api = "addBookmark", range = body.range, chapter_idx = body.chapterIdx,
+        }
+        if text == fail_text then
+            fail_text = nil
+            cb(nil, "timeout")
+            return { cancel = function() end }
+        end
+        remote_bookmarks[#remote_bookmarks + 1] = {
+            chapterUid = "9", chapterIdx = 6, bookmarkId = remote_id,
+            type = 1, range = body.range, markText = text,
+        }
+        if omit_next_id then
+            omit_next_id = false
+            cb({ succ = 1 })
+        else
+            cb({ bookmarkId = remote_id })
+        end
         return { cancel = function() end }
     end
     fake_client.addReviewAsync = function(_, body, cb)
@@ -538,7 +627,28 @@ do
         return { cancel = function() end }
     end
     fake_client.editReviewAsync = function(_, body, cb)
-        calls[#calls + 1] = { api = "editReview", content = body.content, review_id = body.reviewId }
+        calls[#calls + 1] = {
+            api = "editReview", content = body.content, review_id = body.reviewId,
+            book_id = body.bookId, chapter_uid = body.chapterUid,
+            range = body.range, abstract = body.abstract,
+        }
+        cb({ succ = 1 })
+        return { cancel = function() end }
+    end
+    fake_client.deleteReviewAsync = function(_, review_id, cb)
+        calls[#calls + 1] = { api = "deleteReview", review_id = review_id }
+        cb({ succ = 1 })
+        return { cancel = function() end }
+    end
+    fake_client.removeBookmarkAsync = function(_, bookmark_id, cb)
+        calls[#calls + 1] = { api = "removeBookmark", bookmark_id = bookmark_id }
+        cb({ succ = 1 })
+        return { cancel = function() end }
+    end
+    fake_client.updateBookmarkAsync = function(_, body, cb)
+        calls[#calls + 1] = {
+            api = "updateBookmark", bookmark_id = body.bookmarkId, color_style = body.colorStyle,
+        }
         cb({ succ = 1 })
         return { cancel = function() end }
     end
@@ -557,6 +667,7 @@ do
         {
             drawer = "lighten", text = "旧划线", wr_range = "0-3",
             wr_bookmark_id = "bm1", wr_review_id = "rv1", note = "改过的想法",
+            wr_update_review = true,
         },
     })
     Assert.is_true(ok, "editReview 未完成: " .. tostring(err))
@@ -565,6 +676,10 @@ do
     Assert.eq(calls[1].api, "editReview")
     Assert.eq(calls[1].review_id, "rv1")
     Assert.eq(calls[1].content, "改过的想法")
+    Assert.eq(calls[1].book_id, "bpush")
+    Assert.eq(calls[1].chapter_uid, 9)
+    Assert.eq(calls[1].abstract, "旧划线")
+    Assert.eq(chapter_fetches, 0)
 
     -- 已有划线但还没有 review：走 add
     ok = push({
@@ -575,23 +690,96 @@ do
     Assert.eq(calls[1].api, "addReview")
     Assert.eq(calls[1].content, "新想法")
 
-    -- 新划线带想法：addBookmark 回写 wr_bookmark_id 后必须继续推想法。
-    -- 曾因 pushReviews 声明晚于引用而解析成全局 nil，划线传完即崩，想法永远推不上去。
+    -- 删除整条原生笔记：远端 review 与 bookmark 都要删除，墓碑随后移除。
+    local deleted = {
+        wr_deleted = true, wr_bookmark_id = "bm1", wr_review_id = "rv1",
+    }
+    ok, err = push({ deleted })
+    Assert.is_true(ok, tostring(err))
+    Assert.eq(#calls, 2)
+    Assert.eq(calls[1].api, "deleteReview")
+    Assert.eq(calls[2].api, "removeBookmark")
+
+    -- 只清空 note：删除 review，但保留底层划线。
+    local cleared = {
+        datetime = "2026-01-01", drawer = "lighten", text = "旧划线",
+        wr_range = "0-3", wr_bookmark_id = "bm1", wr_review_id = "rv1",
+        wr_delete_review = true,
+    }
+    ok, err = push({ cleared })
+    Assert.is_true(ok, tostring(err))
+    Assert.eq(#calls, 1)
+    Assert.eq(calls[1].api, "deleteReview")
+    Assert.eq(cleared.wr_bookmark_id, "bm1")
+    Assert.is_nil(cleared.wr_review_id)
+
+    -- 本地修改划线颜色走 updateBookmark，不得伪造新划线。
+    local recolored = {
+        datetime = "2026-01-01", drawer = "lighten", color = "green", text = "旧划线",
+        wr_range = "0-3", wr_bookmark_id = "bm1", wr_update_bookmark = true,
+    }
+    ok, err = push({ recolored })
+    Assert.is_true(ok, tostring(err))
+    Assert.eq(#calls, 1)
+    Assert.eq(calls[1].api, "updateBookmark")
+    Assert.eq(calls[1].color_style, 2)
+    Assert.is_nil(recolored.wr_update_bookmark)
+
+    -- KOReader 原生 note 直接映射微信想法，不能先制造一条远端高亮。
     local fresh = { drawer = "lighten", text = "新划线", wr_range = "4-9", note = "随手记" }
     ok, err = push({ fresh })
     Assert.is_true(ok)
     Assert.is_nil(err)
-    Assert.eq(#calls, 2)
-    Assert.eq(calls[1].api, "addBookmark")
-    Assert.eq(calls[2].api, "addReview")
-    Assert.eq(calls[2].content, "随手记")
-    Assert.eq(fresh.wr_bookmark_id, "bm-new")
+    Assert.eq(#calls, 1)
+    Assert.eq(calls[1].api, "addReview")
+    Assert.eq(calls[1].content, "随手记")
+    Assert.is_nil(fresh.wr_bookmark_id)
     Assert.eq(fresh.wr_review_id, "rv-new")
+    Assert.eq(chapter_fetches, 1)
+
+    -- 前面已有远端笔记时，仍必须扫描并上传后面的本地新笔记。
+    local later = { drawer = "lighten", text = "部分一", note = "后面的新笔记" }
+    ok, err = push({
+        {
+            drawer = "lighten", text = "旧划线", note = "没修改",
+            wr_range = "0-3", wr_bookmark_id = "bm1", wr_review_id = "rv1",
+        },
+        later,
+    })
+    Assert.is_true(ok, tostring(err))
+    Assert.eq(#calls, 1)
+    Assert.eq(calls[1].api, "addReview")
+    Assert.eq(calls[1].content, "后面的新笔记")
+    Assert.eq(later.wr_review_id, "rv-new")
+
+    -- addBookmark 回包缺 id 时由一次 postflight 找回，不能把未确认提交误判成功。
+    omit_next_id = true
+    local recovered = { drawer = "lighten", text = "补偿划线" }
+    ok, err = push({ recovered })
+    Assert.is_true(ok, tostring(err))
+    Assert.eq(recovered.wr_bookmark_id, "bm-postflight")
+    Assert.eq(chapter_fetches, 3)
+
+    -- 批次后半超时：下轮 preflight 必须认回前半成功项，只补传失败项。
+    fail_text = "部分一"
+    ok = push({
+        { drawer = "lighten", text = "部分一" },
+        { drawer = "lighten", text = "部分二" },
+    })
+    Assert.is_nil(ok)
+    local retry_first = { drawer = "lighten", text = "部分一" }
+    local retry_second = { drawer = "lighten", text = "部分二" }
+    ok, err = push({ retry_first, retry_second })
+    Assert.is_true(ok, tostring(err))
+    Assert.eq(#calls, 1)
+    Assert.eq(retry_first.wr_bookmark_id, "bm-part1")
+    Assert.eq(retry_second.wr_bookmark_id, "bm-part2")
 
     -- 无划线也无想法：不发请求
     ok = push({ { drawer = "lighten", text = "旧划线", wr_bookmark_id = "bm1", wr_range = "0-3" } })
     Assert.is_true(ok)
     Assert.eq(#calls, 0)
+    os.remove(chapter_path)
 end
 
 -- 还原打桩，避免影响本文件之后的其它用例

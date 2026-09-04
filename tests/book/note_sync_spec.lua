@@ -52,6 +52,13 @@ package.preload["db.note"] = function()
             end
             return out
         end,
+        all = function(source_id)
+            local out = {}
+            for _, row in pairs(rows) do
+                if not source_id or row.source_id == source_id then out[#out + 1] = row end
+            end
+            return out
+        end,
         -- 与真身同语义：payload 与 sync_status 同一条语句写入，受 updated_at 乐观锁保护
         markSynced = function(source_id, stable_id, chapter_idx, updated_at, payload)
             local row = rows[source_id .. ":" .. stable_id .. ":" .. chapter_idx]
@@ -282,6 +289,62 @@ do
         "远端空回包不能覆盖已同步的本地划线")
 end
 
+-- 完整远端快照为空时必须覆盖旧分片，并携带 authoritative 标记供 applyLocal 删除旧项。
+do
+    local authoritative = {
+        id = "authoritative",
+        pullNotesAsync = function(_, _identity, cb)
+            cb({}, nil, { authoritative = true })
+        end,
+    }
+    local JSON = require("json")
+    rows["authoritative:book.epub:2"] = {
+        source_id = "authoritative",
+        stable_id = "book.epub",
+        chapter_idx = 2,
+        payload = JSON.encode({
+            {
+                datetime = "old", page = "/body/a", pos0 = "/body/a", pos1 = "/body/b",
+                drawer = "lighten", wr_bookmark_id = "bm-old",
+            },
+        }),
+        updated_at = 7,
+        sync_status = 1,
+    }
+    Note.syncAsync(authoritative, { identity = {
+        source_id = "authoritative", stable_id = "book.epub", chapter_idx = 2,
+        source = authoritative,
+    } }, function() end)
+    Stubs.flush()
+    local snapshot = JSON.decode(rows["authoritative:book.epub:2"].payload)
+    Assert.eq(#snapshot, 1)
+    Assert.is_true(snapshot[1].wr_snapshot)
+    Assert.is_true(snapshot[1].wr_authoritative)
+
+    annotations = {
+        {
+            datetime = "old", page = "/body/a", pos0 = "/body/a", pos1 = "/body/b",
+            drawer = "lighten", wr_bookmark_id = "bm-old",
+        },
+    }
+    local ui3 = {
+        doc_settings = {
+            readSetting = function(_, key)
+                if key == "annotations" then return annotations end
+            end,
+            saveSetting = function(_, key, value)
+                if key == "annotations" then annotations = value end
+            end,
+            flush = function() end,
+        },
+    }
+    Note.applyLocal(ui3, {
+        source_id = "authoritative", stable_id = "book.epub", chapter_idx = 2,
+        source = authoritative,
+    })
+    Assert.eq(#annotations, 0, "权威远端删除不能被本地防丢保护挡住")
+end
+
 -- 上传窗口内用户又划了线：不能用上传时那份快照 + 旧修订号覆盖回去。
 -- 曾经的写法是「先 upsert 旧 payload + 旧 updated_at，再 markSynced」，
 -- 第一步把新划的线抹掉，第二步的乐观锁于是恰好匹配、脏标记也被清掉。
@@ -324,6 +387,37 @@ do
     Assert.eq(row.updated_at, 101, "修订号不能被回退")
     Assert.eq(row.sync_status, 0, "本地仍有未上传内容，脏标记必须保留")
     Assert.eq(pushed_result.pushed, 1, "这次上传本身是成功的")
+end
+
+-- 同一源并发触发两次同步时必须串行；第二次应看到第一轮已确认的干净快照。
+do
+    local JSON = require("json")
+    local callbacks = {}
+    local serial = {
+        id = "serial",
+        pushNotesAsync = function(_, _identity, _annotations, cb)
+            callbacks[#callbacks + 1] = cb
+            return { cancel = function() end }
+        end,
+    }
+    rows["serial:book.epub:0"] = {
+        source_id = "serial", stable_id = "book.epub", chapter_idx = 0,
+        payload = JSON.encode({ { datetime = "2026-09-04", page = "/local" } }),
+        updated_at = 200, sync_status = 0,
+    }
+    local completed = 0
+    local opts = {
+        identity = { source_id = "serial", stable_id = "book.epub", source = serial },
+        dirty_only = true,
+    }
+    Note.syncAsync(serial, opts, function() completed = completed + 1 end)
+    Note.syncAsync(serial, opts, function() completed = completed + 1 end)
+    Stubs.flush()
+    Assert.eq(#callbacks, 1, "第二轮不能与第一轮并发上传")
+    callbacks[1]({ code = 200 })
+    Stubs.flush()
+    Assert.eq(#callbacks, 1, "第一轮确认后第二轮不应重复上传干净快照")
+    Assert.eq(completed, 2)
 end
 
 _G.G_reader_settings = previous_settings

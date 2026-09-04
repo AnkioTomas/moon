@@ -32,6 +32,18 @@ local render_writes = 0
 local cover_a = "/tmp/moon-lockscreen-cover-a.png"
 local cover_b = "/tmp/moon-lockscreen-cover-b.png"
 local current_cover = cover_a
+local logs = {}
+
+package.preload["utils.log"] = function()
+    local function capture(...)
+        local parts = {}
+        for i = 1, select("#", ...) do
+            parts[i] = tostring(select(i, ...))
+        end
+        logs[#logs + 1] = table.concat(parts, " ")
+    end
+    return { dbg = capture, warn = capture }
+end
 
 package.preload["ui/renderimage"] = function()
     return {
@@ -116,6 +128,7 @@ package.loaded["lockscreen.components.current"] = nil
 package.loaded["lockscreen.init"] = nil
 package.loaded["lockscreen.render"] = nil
 package.loaded["lockscreen.settings"] = nil
+package.loaded["utils.log"] = nil
 
 local MoonSettings = require("utils.settings")
 
@@ -217,6 +230,8 @@ local ok_run, err_run = pcall(function()
     Assert.eq(saved.screensaver_type, "document_cover")
     Assert.eq(saved.screensaver_document_cover, compose_path)
     Assert.is_false(saved.screensaver_show_message)
+    Assert.matches(table.concat(logs, "\n"), "book%.lockscreen refresh start request")
+    Assert.matches(table.concat(logs, "\n"), "book%.lockscreen refresh done request")
 
     -- 缓存命中
     last_download.url = nil
@@ -226,6 +241,8 @@ local ok_run, err_run = pcall(function()
     Stubs.flush()
     Assert.is_true(refreshed)
     Assert.eq(render_writes, 0)
+    Assert.matches(table.concat(logs, "\n"),
+        "book%.lockscreen refresh skipped request cache_hit")
 
     -- 强制刷新必须绕过当天缓存，保证动态主体能更新。
     LockScreen.refresh(nil, true)

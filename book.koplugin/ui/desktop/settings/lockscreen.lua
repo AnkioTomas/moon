@@ -35,7 +35,7 @@ local function refreshAfterChange(desktop)
                     or T(_("生成失败: %1"), tostring(err or "")),
                 timeout = 2,
             })
-        end)
+        end, nil, "settings")
     end
     if Compose.plan().offline then
         refresh()

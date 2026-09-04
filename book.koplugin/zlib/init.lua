@@ -8,6 +8,7 @@
 local Client = require("zlib.client")
 local Mapper = require("zlib.mapper")
 local Paths = require("utils.paths")
+local logger = require("utils.log")
 local _ = require("gettext")
 
 local Zlib = {}
@@ -119,6 +120,7 @@ function Zlib.installAsync(source, book, on_progress, cb)
     end
     local id, hash = Mapper.parse(book and book.stable_id)
     if not id then cb(nil, _("无效书籍身份")); return nil end
+    logger.dbg("book.zlib install start", book.stable_id, source.id or "unknown")
     local api, cancelled, job, temp = client(), false, nil, nil
     local result = {}
     --- 取消下载或导入：终止在途任务并清掉已落盘的 .part 临时文件。
@@ -135,10 +137,21 @@ function Zlib.installAsync(source, book, on_progress, cb)
         temp = Paths.bookWorkDir(detail.stable_id, "zlib") .. "/" .. filename .. ".part"
         job = api:downloadAsync(id, hash, temp, on_progress, function(ok, err)
             if cancelled then pcall(os.remove, temp); return end
-            if not ok then pcall(os.remove, temp); cb(nil, err); return end
+            if not ok then
+                pcall(os.remove, temp)
+                logger.warn("book.zlib install failed", book.stable_id, "download", err)
+                cb(nil, err)
+                return
+            end
             job = source:importBookAsync(temp, filename, function(imported, import_err)
                 pcall(os.remove, temp)
-                if not cancelled then cb(imported, import_err, filename) end
+                if cancelled then return end
+                if imported then
+                    logger.dbg("book.zlib install done", book.stable_id, filename)
+                else
+                    logger.warn("book.zlib install failed", book.stable_id, "import", import_err)
+                end
+                cb(imported, import_err, filename)
             end)
         end)
     end
