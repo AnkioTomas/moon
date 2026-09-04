@@ -159,6 +159,12 @@ function P.dbPath()
     return P.root() .. "/book.sqlite3"
 end
 
+--- 插件独立日志：$DATA/.moon/book.log
+---@return string
+function P.logPath()
+    return P.root() .. "/book.log"
+end
+
 --- 拼音词库 SQLite 路径：$DATA/.moon/dictionary.sqlite3（经 pinyin/download 下载落盘）
 ---@return string
 function P.pinyinDictPath()

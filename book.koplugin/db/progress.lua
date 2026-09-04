@@ -7,7 +7,7 @@
 local Base = require("db.base")
 local Book = require("types.book").Book
 local JSON = require("json")
-local logger = require("logger")
+local logger = require("utils.log")
 
 local ProgressDB = {}
 
@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS pending_progress (
   updated_at INTEGER NOT NULL, sync_status INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (source_id, stable_id)
 );
+CREATE INDEX IF NOT EXISTS idx_pending_progress_recent
+  ON pending_progress(source_id, updated_at DESC);
 ]]) then return false end
     return true
 end
@@ -110,11 +112,12 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
             total_pages=excluded.total_pages,
             locator=excluded.locator,
             extra=excluded.extra,
-            updated_at=excluded.updated_at,
+            updated_at=MAX(excluded.updated_at, pending_progress.updated_at),
             sync_status=excluded.sync_status;]],
         source_id, stable_id, fraction, pos.chapter_idx, pos.chapter_title, pos.chapter_fraction,
         positiveInt(pos.page), positiveInt(pos.total_pages),
-        pos.locator, encodeExtra(pos.extra), tonumber(pos.updated_at) or os.time(), status
+        pos.locator, encodeExtra(pos.extra),
+        tonumber(pos.updated_at) or (status == 0 and os.time() or 0), status
     ) then
         return false
     end
@@ -221,6 +224,26 @@ function ProgressDB.unsynced(source_id)
     return rows(Base.query(
         "SELECT " .. COLUMNS .. " FROM pending_progress WHERE sync_status=0 AND source_id=? ORDER BY updated_at ASC;",
         source_id
+    ))
+end
+
+--- 当前书库中有阅读进度的书，按进度更新时间倒序。
+--- books 只负责成员资格；最近阅读的准入与排序完全由 pending_progress 决定。
+---@param source_id string
+---@param limit number|nil
+---@return PendingProgress[]
+function ProgressDB.recent(source_id, limit)
+    return rows(Base.query(
+        [[SELECT ]] .. COLUMNS .. [[ FROM pending_progress p
+          WHERE p.source_id=? AND p.updated_at>0
+            AND EXISTS (
+              SELECT 1 FROM books b
+               WHERE b.source_id=p.source_id AND b.stable_id=p.stable_id
+                 AND b.in_library=1
+            )
+          ORDER BY p.updated_at DESC, p.stable_id ASC LIMIT ?;]],
+        source_id,
+        math.max(1, tonumber(limit) or 24)
     ))
 end
 

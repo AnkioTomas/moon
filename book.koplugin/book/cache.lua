@@ -8,11 +8,12 @@
 --]]
 
 local lfs = require("libs/libkoreader-lfs")
-local logger = require("logger")
+local logger = require("utils.log")
 local UIManager = require("ui/uimanager")
 local Paths = require("utils.paths")
 local BookDB = require("db.book")
 local ChapterDB = require("db.chapter")
+local ProgressDB = require("db.progress")
 
 local Cache = {}
 
@@ -53,11 +54,11 @@ local function bookEntries(cache_root)
     return out
 end
 
---- 条目最后活跃时间：有登记取 books.last_open，否则回退文件 mtime；两者都没有为 0（不清）。
+--- 条目最后活跃时间：有阅读进度取其更新时间，否则回退文件 mtime。
 ---@param path string
 ---@param recorded number|nil
 ---@return number
-local function lastOpenOf(path, recorded)
+local function lastActivityOf(path, recorded)
     if recorded and recorded > 0 then return recorded end
     local attr = lfs.attributes(path)
     return attr and tonumber(attr.modification) or 0
@@ -91,24 +92,34 @@ function Cache.cleanupStale()
 
     local book_rows = BookDB.pathsAll()
     local chapter_rows = ChapterDB.all()
-    -- 活跃度按条目路径索引：整本书 = 文件自身；章节书 = 章节所在目录取最大值
-    -- （章节 touch 也会更新 books.last_open）
-    local last_open_by_path = {}
+    local progress_by_book = {}
+    local loaded_sources = {}
     for _, row in ipairs(book_rows) do
-        local last_open = tonumber(row.last_open) or 0
-        last_open_by_path[row.path] = math.max(last_open_by_path[row.path] or 0, last_open)
+        if not loaded_sources[row.source_id] then
+            loaded_sources[row.source_id] = true
+            for _, progress in ipairs(ProgressDB.all(row.source_id)) do
+                progress_by_book[row.source_id .. "\0" .. progress.stable_id] =
+                    tonumber(progress.updated_at) or 0
+            end
+        end
+    end
+    -- 活跃度按条目路径索引：整本书 = 文件自身；章节书 = 章节所在目录取最大值。
+    local activity_by_path = {}
+    for _, row in ipairs(book_rows) do
+        local activity = progress_by_book[row.source_id .. "\0" .. row.stable_id] or 0
+        activity_by_path[row.path] = math.max(activity_by_path[row.path] or 0, activity)
         local dir = parentDir(row.path)
         if dir then
-            last_open_by_path[dir] = math.max(last_open_by_path[dir] or 0, last_open)
+            activity_by_path[dir] = math.max(activity_by_path[dir] or 0, activity)
         end
     end
 
     local removed = 0
     for _, path in ipairs(bookEntries(Paths.cacheDir())) do
         local mode = lfs.attributes(path, "mode")
-        local last_open = lastOpenOf(path, last_open_by_path[path])
+        local activity = lastActivityOf(path, activity_by_path[path])
         if (mode == "directory" or mode == "file")
-            and last_open > 0 and now - last_open >= LOCAL_BOOK_TTL
+            and activity > 0 and now - activity >= LOCAL_BOOK_TTL
             and purgeEntry(path, mode) then
             removed = removed + 1
         end
@@ -306,7 +317,7 @@ function Cache.clearAsync(cb)
     local purge_job
     -- 先清 DB 再删文件：即使文件删除失败，DB 记录已干净，不会产生孤立引用。
     -- db.* 不抛错，失败只体现在返回值上。
-    if not (ChapterDB.clear() and BookDB.clearOpens() and BookDB.stripMeta()) then
+    if not (ChapterDB.clear() and BookDB.clearPaths() and BookDB.stripMeta()) then
         logger.warn("book cache db clear failed, skipping file purge")
         cb(false, "db clear failed")
         return { cancel = function() end }

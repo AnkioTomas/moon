@@ -14,11 +14,10 @@ local TextWidget = require("ui/widget/textwidget")
 local BookInfo = require("ui.components.bookinfo")
 local UI = require("ui.components.bookui")
 local MoonSettings = require("utils.settings")
-local Enrich = require("ui.desktop.home.enrich")
 local HomeStats = require("ui.desktop.home.stats")
 local Layout = require("ui.desktop.home.layout")
 local Highlights = require("book.highlights")
-local logger = require("logger")
+local logger = require("utils.log")
 local gettext = require("gettext")
 local Screen = Device.screen
 
@@ -198,7 +197,6 @@ function Home.fetch(desktop)
                     table.insert(reading, book)
                 end
             end
-            recent, reading = Enrich.apply(recent, reading)
             finish({
                 recent = recent,
                 reading = reading,

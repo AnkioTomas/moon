@@ -9,6 +9,7 @@
 
 local Blitbuffer = require("ffi/blitbuffer")
 local BookDB = require("db.book")
+local Catalog = require("book.catalog")
 local Library = require("lockscreen.components.library")
 local _ = require("gettext")
 
@@ -52,7 +53,7 @@ local M = {
 ---@return { reading: table[], covers: table[] }
 function M.data()
     local source_id = Library.activeSourceId()
-    local recent = BookDB.recentBySource(source_id, 64)
+    local recent = Catalog.recentBooks(source_id, 64)
     local reading, covers, seen = {}, {}, {}
 
     --- 按 stable_id 去重后追加到目标列表，满 limit 即停。

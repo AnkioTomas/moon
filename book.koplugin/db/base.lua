@@ -8,7 +8,7 @@
 @module koplugin.book.db.base
 --]]
 
-local logger = require("logger")
+local logger = require("utils.log")
 local Paths = require("utils.paths")
 local Context = require("workers.context")
 

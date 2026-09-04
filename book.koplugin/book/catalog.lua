@@ -1,5 +1,6 @@
 --[[--
-本地书库唯一读入口：按 source_id 查 books / reading_stats。
+本地目录唯一读入口：books 提供书库列表，pending_progress 提供最近阅读，
+reading_stats 提供统计。
 
 约定：
   - UI 查询经 SourceBase 的本地方法到达此处
@@ -60,6 +61,10 @@ local function toBook(row, source_id)
         category = row.category,
         series = row.series,
         percent = tonumber(row.percent) or 0,
+        chapter_idx = row.chapter_idx,
+        chapter_title = row.chapter_title,
+        page = row.page,
+        total_pages = row.total_pages,
     }
 end
 
@@ -223,7 +228,33 @@ function Catalog.filtersAsync(source_id, cb)
     end)
 end
 
---- 最近阅读（books.last_open 倒序）。
+--- 最近阅读同步快照：进度决定准入、顺序和阅读位置，books 只补书库元数据。
+---@param source_id string
+---@param limit number|nil
+---@return Book[]
+function Catalog.recentBooks(source_id, limit)
+    local progress_rows = require("db.progress").recent(source_id, limit)
+    local stable_ids = {}
+    for _, row in ipairs(progress_rows) do
+        stable_ids[#stable_ids + 1] = row.stable_id
+    end
+    local metadata = require("db.book").getMany(source_id, stable_ids)
+    local books = {}
+    for _, progress in ipairs(progress_rows) do
+        local book = toBook(metadata[progress.stable_id], source_id)
+        if book then
+            book.percent = math.floor((tonumber(progress.fraction) or 0) * 100 + 0.5)
+            book.chapter_idx = progress.chapter_idx
+            book.chapter_title = progress.chapter_title
+            book.page = progress.page
+            book.total_pages = progress.total_pages
+            books[#books + 1] = book
+        end
+    end
+    return books
+end
+
+--- 最近阅读（仅按 pending_progress.updated_at 倒序）。
 ---@param source_id string
 ---@param limit number|nil
 ---@param cb fun(data: BookListResult|nil, err: string|nil)
@@ -234,7 +265,7 @@ function Catalog.recentBooksAsync(source_id, limit, cb)
             cb(nil, "invalid source_id")
             return
         end
-        local rows = require("db.book").recentBySource(source_id, limit or 24)
+        local rows = Catalog.recentBooks(source_id, limit or 24)
         cb(Catalog.toList(rows, nil, source_id))
     end)
 end

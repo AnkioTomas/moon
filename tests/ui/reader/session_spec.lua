@@ -412,7 +412,7 @@ do
     Assert.is_nil(Session.current(), "拒开不建会话")
     Assert.is_false(Session.gotoChapter(1), "无法识别的文档也清除章节会话")
     Assert.eq(#shown, 1)
-    Assert.eq(shown[1].text, "无法识别此书，请从 Book 桌面打开。")
+    Assert.eq(shown[1].text, "无法识别此书，请从月读打开。")
     Assert.eq(shown[1].ok_text, "关闭文档")
     Assert.eq(shown[1].cancel_text, "仍要阅读")
     Assert.eq(#emitted, 0)

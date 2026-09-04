@@ -10,7 +10,7 @@ local Request = require("http.request")
 local Settings = require("utils.settings")
 local SSE = require("ai.sse")
 local Text = require("utils.text")
-local logger = require("logger")
+local logger = require("utils.log")
 
 local Client = {}
 

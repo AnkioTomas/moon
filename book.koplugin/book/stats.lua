@@ -9,7 +9,7 @@ reading_stats 是本地唯一事实来源：本地采集和本地导入写成待
 --]]
 
 local StatsDB = require("db.stats")
-local logger = require("logger")
+local logger = require("utils.log")
 local SourceCapabilities = require("types.book_source").SourceCapabilities
 local Stats = {}
 

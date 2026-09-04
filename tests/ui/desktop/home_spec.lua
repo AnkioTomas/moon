@@ -38,9 +38,6 @@ end
 package.preload["utils.settings"] = function()
     return { get = function() return {} end }
 end
-package.preload["ui.desktop.home.enrich"] = function()
-    return { apply = function(recent, reading) return recent, reading end }
-end
 package.preload["ui.desktop.home.stats"] = function()
     return { summarize = function() return {} end }
 end

@@ -116,17 +116,7 @@ for _, spec in ipairs({
     end
 end
 
-local progress_rows = {}
-package.preload["db.progress"] = function()
-    return {
-        get = function(source_id, stable_id)
-            return progress_rows[source_id .. "\0" .. stable_id]
-        end,
-    }
-end
-
 local Base = require("ui.desktop.home.components.base")
-local Enrich = require("ui.desktop.home.enrich")
 local HomeStats = require("ui.desktop.home.stats")
 local Layout = require("ui.desktop.home.layout")
 
@@ -138,21 +128,6 @@ local layout = Base.enabledLayout()
 Assert.eq(#layout, 3)
 Assert.eq(layout[1], "clock")
 Assert.eq(layout[3], "recent_list")
-
-progress_rows["moon\0book-1"] = {
-    chapter_title = "第一章 开端",
-    chapter_idx = 2,
-    fraction = 0.42,
-}
-local book = Enrich.book({
-    source_id = "moon",
-    stable_id = "book-1",
-    title = "测试书",
-    percent = 10,
-})
-Assert.eq(book.chapter_title, "第一章 开端")
-Assert.eq(book.chapter_idx, 2)
-Assert.eq(book.percent, 42)
 
 local daily = {
     { ymd = os.date("%Y-%m-%d"), seconds = 600 },

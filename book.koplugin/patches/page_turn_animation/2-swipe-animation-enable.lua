@@ -19,5 +19,5 @@ local ok, err = pcall(function()
 end)
 
 if not ok then
-    require("logger").warn("[SwipeAnimationEnablePatch] failed:", err)
+    require("utils.log").warn("[SwipeAnimationEnablePatch] failed:", err)
 end

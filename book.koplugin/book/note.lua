@@ -8,7 +8,7 @@
 
 local JSON = require("json")
 local NoteDB = require("db.note")
-local logger = require("logger")
+local logger = require("utils.log")
 local Store = require("book.store")
 local Normalize = require("book.note.normalize")
 

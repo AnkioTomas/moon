@@ -1,5 +1,5 @@
 --[[--
-Book 书库插件入口 — 事件接线板。
+月读插件入口 — 事件接线板。
 
 KOReader 会为 FileManager 和 Reader 各建一个插件实例；
 关书后 FM 侧实例才是开桌面的宿主。
@@ -10,7 +10,7 @@ KOReader 会为 FileManager 和 Reader 各建一个插件实例；
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
-local logger = require("logger")
+local logger = require("utils.log")
 require("l10n")
 local _ = require("gettext")
 
@@ -35,16 +35,18 @@ local BookPlugin = WidgetContainer:extend {
 --- 插件初始化：挂接 Host（菜单 / 开机打开等）
 ---@return nil
 function BookPlugin:init()
+    logger.start()
+    logger.info("book plugin init", self.ui and self.ui.document and "reader" or "filemanager")
     -- HTTP 依赖 Turbo ioloop；必须在 UIManager:run() 前打开 DUSE_TURBO_LIB
     local ok_turbo, err_turbo = pcall(function()
         require("http.request").ensureTurbo()
     end)
     if not ok_turbo then
-        logger.err("book turbo init failed:", err_turbo)
+        logger.error("book turbo init failed:", err_turbo)
     end
     Host.attach(self)
     -- ReaderLink 已原生处理脚注识别、内容提取和弹窗跳转。升级后的第一次
-    -- 初始化也要打开一次，之后用户可在「链接」菜单关闭，Book 不再覆盖选择。
+    -- 初始化也要打开一次，之后用户可在「链接」菜单关闭，月读不再覆盖选择。
     if G_reader_settings and not G_reader_settings:isTrue("book_footnote_popup_initialized") then
         G_reader_settings:saveSetting("footnote_link_in_popup", true)
         G_reader_settings:saveSetting("book_footnote_popup_initialized", true)
@@ -56,13 +58,19 @@ function BookPlugin:init()
     require("lockscreen.init").bootstrap()
     require("remote.init").bootstrap()
     -- ButtonDialog 依赖设备后端；离线加载插件时该后端不存在，不能让无关功能整个失效。
-    pcall(function() require("ui.screenshot_share").install() end)
+    local ok_share, err_share = pcall(function() require("ui.screenshot_share").install() end)
+    if not ok_share then
+        logger.warn("book screenshot share install failed:", err_share)
+    end
     require("pinyin.init").bootstrap()
     require("patch.manager").init({ plugin_root = self.path })
     UIManager:nextTick(function()
-        pcall(function()
+        local ok_animation, err_animation = pcall(function()
             require("patch.page_turn_animation").checkStartup()
         end)
+        if not ok_animation then
+            logger.warn("book page turn animation check failed:", err_animation)
+        end
     end)
     if self.ui and self.ui.document then
         self:emitToSource("reader_open")
@@ -72,13 +80,14 @@ end
 --- FM 显示时同步接管（避免 FileManager 先闪一帧）
 ---@return nil
 function BookPlugin:onShow()
+    logger.dbg("book lifecycle show")
     Host.onShow(self)
     if self.ui and not self.ui.document then
         self:emitToSource("fm_open")
     end
 end
 
---- Dispatcher / 手势：打开 Book 桌面
+--- Dispatcher / 手势：打开月读
 ---@return boolean 已处理
 function BookPlugin:onBookOpenShelf()
     self:openDesktop()
@@ -90,7 +99,7 @@ end
 ---@return nil
 function BookPlugin:addToMainMenu(menu_items)
     menu_items.book_library = {
-        text = _("Book 桌面"),
+        text = _("月读"),
         sorting_hint = "setting",
         callback = function()
             self:openDesktop()
@@ -102,44 +111,51 @@ end
 ---@param doc_settings table
 ---@return nil
 function BookPlugin:onDocSettingsLoad(doc_settings)
+    logger.dbg("book lifecycle doc_settings_load")
     require("book.reader_prefs").inject(doc_settings, self.document)
 end
 
 --- 阅读器就绪：建阅读会话；统计计时；拉进度；按章落点；挂阅读页
 ---@return nil
 function BookPlugin:onReaderReady()
+    logger.info("book lifecycle reader_ready")
     require("ui.reader.session").onReaderReady(self)
 end
 
 --- 关文档：推进度；结清统计；通知源；切章则保留会话，真关书才清
 ---@return nil
 function BookPlugin:onCloseDocument()
+    logger.info("book lifecycle close_document")
     require("ui.reader.session").onCloseDocument(self)
 end
 
 --- 章末：按章会话自动下一章
 ---@return boolean
 function BookPlugin:onEndOfBook()
+    logger.dbg("book lifecycle end_of_book")
     return require("ui.reader.session").onChapterBoundary(1)
 end
 
 --- 章首：按章会话自动上一章（由阅读会话边界处理触发）
 ---@return boolean
 function BookPlugin:onStartOfBook()
+    logger.dbg("book lifecycle start_of_book")
     return require("ui.reader.session").onChapterBoundary(-1)
 end
 
 --- 休眠前：结清阅读状态，生成下一次锁屏图，停远程传书服务。
 ---@return nil
 function BookPlugin:onSuspend()
+    logger.info("book lifecycle suspend")
     require("ui.reader.session").onSuspend(self)
     require("lockscreen.init").refresh(nil, true)
     require("remote.init").onSuspend()
 end
 
---- 唤醒：恢复阅读统计计时与后台服务；Book 桌面按当前页面刷新本地 UI 和源数据。
+--- 唤醒：恢复阅读统计计时与后台服务；月读桌面按当前页面刷新本地 UI 和源数据。
 ---@return nil
 function BookPlugin:onResume()
+    logger.info("book lifecycle resume")
     require("ui.reader.session").onResume(self)
     require("lockscreen.init").onResume()
     require("remote.init").onResume()
@@ -155,12 +171,14 @@ end
 --- 退出：停远程传书服务
 ---@return nil
 function BookPlugin:onExit()
+    logger.info("book plugin exit")
     require("remote.init").onExit()
 end
 
 --- 网络恢复：通知当前源重试持久化队列，并刷新锁屏图。
 ---@return nil
 function BookPlugin:onNetworkConnected()
+    logger.info("book lifecycle network_connected")
     require("book.sync").retryDirtyAsync()
     self:emitToSource("network_connected")
     require("lockscreen.init").refresh(nil, true)
@@ -170,6 +188,7 @@ end
 ---@param page number
 ---@return nil
 function BookPlugin:onPageUpdate(page)
+    logger.dbg("book lifecycle page_update", page)
     require("ui.reader.session").onPageChanged(self, page)
 end
 
@@ -178,12 +197,14 @@ end
 ---@param page number|nil
 ---@return nil
 function BookPlugin:onPosUpdate(_pos, page)
+    logger.dbg("book lifecycle pos_update", page)
     require("ui.reader.session").onPageChanged(self, page)
 end
 
 --- 注解变化：由阅读会话按当前身份持久化，并预生成高亮锁屏。
 ---@param items table KOReader 变更描述
 function BookPlugin:onAnnotationsModified(items)
+    logger.dbg("book lifecycle annotations_modified", #items)
     require("ui.reader.session").onAnnotationsModified(self, items)
 end
 
@@ -203,11 +224,13 @@ end
 function BookPlugin:emitToSource(event, payload, source)
     source = source or self:getSource()
     if not source then
+        logger.dbg("book source event skipped:", event)
         return
     end
+    logger.dbg("book source event:", event, source.id)
     local ok, err = pcall(source.onEvent, source, event, payload)
     if not ok then
-        logger.err("book source event failed:", event, err)
+        logger.error("book source event failed:", event, err)
     end
 end
 
@@ -222,8 +245,8 @@ end
 --- 注意：Registry.setActive 已原子激活新源，此处不再 invalidate。
 ---@return nil
 function BookPlugin:onSourceChanged()
-    logger.info("book onSourceChanged")
     local source = SourceRegistry.current()
+    logger.info("book source changed", source and source.id or "unavailable")
     if source and source.clearCaches then
         source:clearCaches()
     end
@@ -233,7 +256,7 @@ function BookPlugin:onSourceChanged()
     end
 end
 
---- 打开全屏 Book 桌面
+--- 打开月读全屏桌面
 ---@param filter table|nil 图书馆初始筛选（透传 Desktop.filter）
 ---@return nil
 function BookPlugin:openDesktop(filter)
@@ -281,7 +304,7 @@ function BookPlugin:openDesktop(filter)
         }
     end)
     if not ok then
-        logger.err("book desktop create failed:", desk)
+        logger.error("book desktop create failed:", desk)
         UIManager:show(InfoMessage:new {
             text = _("桌面打开失败:\n") .. tostring(desk),
         })

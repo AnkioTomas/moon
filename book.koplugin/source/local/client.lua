@@ -181,7 +181,7 @@ local function ensureCover(path)
         pcall(function() doc:close() end)
     end)
     if not ok then
-        require("logger").warn("book local cover extraction failed", path, err)
+        require("utils.log").warn("book local cover extraction failed", path, err)
     end
 end
 
@@ -415,7 +415,7 @@ local function scanJob(root, on_done)
             on_done()
         end,
         on_failed = function(err)
-            require("logger").warn("book local scan failed", err)
+            require("utils.log").warn("book local scan failed", err)
             on_done()
         end,
     })
@@ -684,7 +684,7 @@ function Client:indexOneAsync(path, cb)
             cb(true)
         end,
         on_failed = function(err)
-            require("logger").warn("book local index failed", err)
+            require("utils.log").warn("book local index failed", err)
             cb(nil, err)
         end,
     })

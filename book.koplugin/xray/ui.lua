@@ -94,7 +94,7 @@ UI.formatEntity = formatEntity
 ---@return boolean 是否可以继续
 local function ensureConfigured()
     if not require("ai").isConfigured() then
-        info(_("请先在 Book 设置中配置 AI 服务"))
+        info(_("请先在月读设置中配置 AI 服务"))
         return false
     end
     return true

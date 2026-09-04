@@ -17,7 +17,6 @@ CREATE TABLE IF NOT EXISTS books (
   source_id TEXT NOT NULL, stable_id TEXT NOT NULL, md5 TEXT, title TEXT,
   authors TEXT, percent REAL DEFAULT 0, category TEXT,
   series TEXT, intro TEXT, fetched_at INTEGER NOT NULL DEFAULT 0, path TEXT,
-  last_open INTEGER NOT NULL DEFAULT 0,
   in_library INTEGER NOT NULL DEFAULT 1, metadata_dirty INTEGER NOT NULL DEFAULT 0,
   metadata_updated_at INTEGER NOT NULL DEFAULT 0, reader_prefs TEXT,
   toc TEXT, toc_fetched_at INTEGER NOT NULL DEFAULT 0,
@@ -180,23 +179,29 @@ function BookDB.upsertLocal(row)
     ) ~= nil
 end
 
---- 用完整远端/磁盘快照原子对账。只有调用本函数才会隐藏缺失书籍。
+--- 远端书架快照入库：先 upsert 全部条目，再把本次未刷新的成员标为不活跃（不删行）。
 ---@param source_id string
 ---@param books table[]
 ---@return boolean
 function BookDB.reconcile(source_id, books)
     if not Base.exec("BEGIN IMMEDIATE;") then return false end
-    local ok = Base.exec("UPDATE books SET in_library=0 WHERE source_id=?;", source_id) ~= nil
+    local sync_at = os.time()
+    local batch = {}
+    for _, row in ipairs(books) do
+        local copy = {}
+        for k, v in pairs(row) do copy[k] = v end
+        copy.source_id = source_id
+        copy.in_library = true
+        copy.fetched_at = sync_at
+        batch[#batch + 1] = copy
+    end
+    local ok = BookDB.upsertRemoteMany(batch)
     if ok then
-        local batch = {}
-        for _, row in ipairs(books) do
-            local copy = {}
-            for k, v in pairs(row) do copy[k] = v end
-            copy.source_id = source_id
-            copy.in_library = true
-            batch[#batch + 1] = copy
-        end
-        ok = BookDB.upsertRemoteMany(batch)
+        ok = Base.exec(
+            [[UPDATE books SET in_library=0
+              WHERE source_id=? AND fetched_at<? AND in_library=1;]],
+            source_id, sync_at
+        ) ~= nil
     end
     if ok and Base.exec("COMMIT;") then return true end
     Base.exec("ROLLBACK;")
@@ -218,7 +223,7 @@ function BookDB.setLibraryMembership(source_id, stable_id, in_library, clear_pat
 end
 
 local COLUMNS =
-    "source_id, stable_id, md5, title, authors, percent, category, series, intro, fetched_at, path, last_open, in_library, metadata_dirty, metadata_updated_at"
+    "source_id, stable_id, md5, title, authors, percent, category, series, intro, fetched_at, path, in_library, metadata_dirty, metadata_updated_at"
 
 --- rowexec 位置参数 → Book 表
 --- 形参顺序必须与 COLUMNS 一致；sqlite 返回的都是字符串，数值列在此统一 tonumber。
@@ -233,12 +238,11 @@ local COLUMNS =
 ---@param intro string|nil
 ---@param fetched_at any 元数据拉取时间戳，缺失算 0
 ---@param path string|nil 本地文件路径
----@param last_open any 最近打开时间戳，缺失算 0
 ---@param in_library any 非 0 即视为在书架内
 ---@param metadata_dirty any
 ---@param metadata_updated_at any
 ---@return Book|nil
-local function rowToBook(source_id_r, stable_id_r, digest, title, authors, percent, category, series, intro, fetched_at, path, last_open, in_library, metadata_dirty, metadata_updated_at)
+local function rowToBook(source_id_r, stable_id_r, digest, title, authors, percent, category, series, intro, fetched_at, path, in_library, metadata_dirty, metadata_updated_at)
     if not source_id_r then
         return nil
     end
@@ -254,7 +258,6 @@ local function rowToBook(source_id_r, stable_id_r, digest, title, authors, perce
         intro = intro,
         fetched_at = tonumber(fetched_at) or 0,
         path = path,
-        last_open = tonumber(last_open) or 0,
         in_library = tonumber(in_library) ~= 0,
         metadata_dirty = tonumber(metadata_dirty) or 0,
         metadata_updated_at = tonumber(metadata_updated_at) or 0,
@@ -322,7 +325,7 @@ function BookDB.getByPath(path)
     ))
 end
 
---- 打开/下载后登记：更新 path + last_open。
+--- 文件落地后登记物理路径。
 --- 行不存在时补一行身份（fetched_at=0 表示仅身份行）。
 ---@param source_id string
 ---@param stable_id string
@@ -330,15 +333,13 @@ end
 ---@return boolean
 function BookDB.touchPath(source_id, stable_id, path)
     return Base.exec(
-        [[INSERT INTO books (source_id, stable_id, fetched_at, path, last_open)
-          VALUES (?,?,0,?,?)
+        [[INSERT INTO books (source_id, stable_id, fetched_at, path)
+          VALUES (?,?,0,?)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
-            path=excluded.path,
-            last_open=excluded.last_open;]],
+            path=excluded.path;]],
         source_id,
         stable_id,
-        path,
-        os.time()
+        path
     ) ~= nil
 end
 
@@ -383,62 +384,10 @@ function BookDB.pathsAll()
     return out
 end
 
---- 最近阅读：last_open 倒序（不限源；锁屏「正在读」要跨源取真最近一本）
----@param limit number|nil
----@return Book[]
-function BookDB.recent(limit)
-    local result, nrows = Base.query(
-        "SELECT " .. COLUMNS .. " FROM books WHERE in_library=1 AND last_open>0 ORDER BY last_open DESC LIMIT ?;",
-        tonumber(limit) or 24
-    )
-    local out = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            local row = {}
-            for c = 1, #result do
-                row[c] = result[c][i]
-            end
-            out[#out + 1] = rowToBook(unpack(row, 1, #result))
-        end
-    end
-    return out
-end
-
---- 最近阅读：last_open 倒序；进度与图书馆一致，优先 pending_progress.fraction。
----@param source_id string
----@param limit number|nil
----@return Book[]
-function BookDB.recentBySource(source_id, limit)
-    local result, nrows = Base.query(
-        [[SELECT b.source_id, b.stable_id, b.md5, b.title, b.authors,
-                 COALESCE(p.fraction * 100, b.percent),
-                 b.category, b.series, b.intro, b.fetched_at, b.path,
-                 b.last_open, b.in_library, b.metadata_dirty, b.metadata_updated_at
-            FROM books b
-            LEFT JOIN pending_progress p
-              ON p.source_id=b.source_id AND p.stable_id=b.stable_id
-           WHERE b.source_id=? AND b.in_library=1 AND b.last_open>0
-           ORDER BY b.last_open DESC LIMIT ?;]],
-        source_id,
-        tonumber(limit) or 24
-    )
-    local out = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            local row = {}
-            for c = 1, #result do
-                row[c] = result[c][i]
-            end
-            out[#out + 1] = rowToBook(unpack(row, 1, #result))
-        end
-    end
-    return out
-end
-
---- 清空全部打开记录与路径登记（清缓存）
+--- 清空全部路径登记（清缓存）。
 ---@return boolean
-function BookDB.clearOpens()
-    return Base.exec([[UPDATE books SET path=NULL, last_open=0;]]) ~= nil
+function BookDB.clearPaths()
+    return Base.exec([[UPDATE books SET path=NULL;]]) ~= nil
 end
 
 --- 按 (source_id, md5) 找已入库的行（本地源用内容摘要识别文件改名/移动）。

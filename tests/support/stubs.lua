@@ -78,6 +78,19 @@ local function installLogger()
     end
 end
 
+local function installBookLog()
+    package.preload["utils.log"] = function()
+        local log = {}
+        function log.dbg() end
+        function log.info() end
+        function log.warn() end
+        function log.error() end
+        log.err = log.error
+        function log.start() end
+        return log
+    end
+end
+
 local function installGettext()
     package.preload["gettext"] = function()
         -- 可索引 callable table：current_lang/translation 供 l10n 模块与测试读写；
@@ -151,6 +164,7 @@ function Stubs.install()
     Config.installUtilStub()
     installUIManager()
     installLogger()
+    installBookLog()
     installGettext()
     installSocketutil()
     installJson()

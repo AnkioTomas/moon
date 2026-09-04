@@ -22,7 +22,6 @@
 ---@field intro string|nil 简介
 ---@field fetched_at integer 元数据拉取时间戳；0 表示仅身份行
 ---@field path string|nil 本地文件路径；身份解析唯一入口（下载/登记后由各源收口更新）
----@field last_open integer 最近打开时间戳；0 表示未打开过
 ---@field in_library boolean|nil 是否属于当前源书架；false 时仍保留身份与历史
 ---@field metadata_dirty integer|nil 本地展示元数据尚未被远端确认
 ---@field metadata_updated_at integer|nil 本地展示元数据版本

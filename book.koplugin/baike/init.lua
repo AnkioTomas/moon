@@ -13,7 +13,7 @@ if l10n.apply then
 end
 
 local Client = require("baike.client")
-local logger = require("logger")
+local logger = require("utils.log")
 local _ = require("gettext")
 local T = require("ffi/util").template
 local MoonSettings = require("utils.settings")

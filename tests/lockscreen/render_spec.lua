@@ -65,7 +65,7 @@ package.preload["lockscreen.layout"] = function()
     }
 end
 
-package.preload["logger"] = function()
+package.preload["utils.log"] = function()
     return {
         warn = function() warnings = warnings + 1 end,
     }

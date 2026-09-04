@@ -80,6 +80,10 @@ end
 package.preload["ui.components.image"] = function()
     return { abortPending = function() end }
 end
+package.preload["utils.log"] = function()
+    return { info = function() end, warn = function() end }
+end
+package.loaded["utils.log"] = nil
 
 -- 假 BookDB：clearPath/clearPathsUnder 只把行从 pathsAll 结果集里摘掉
 --（真实实现是 path 置 NULL，pathsAll 同样查不到）
@@ -99,7 +103,7 @@ package.preload["db.book"] = function()
             db_log.strip_meta = (db_log.strip_meta or 0) + 1
             return true
         end,
-        clearOpens = function()
+        clearPaths = function()
             db_log.clear_opens = (db_log.clear_opens or 0) + 1
             book_rows = {}
             return true
@@ -119,6 +123,23 @@ package.preload["db.book"] = function()
             removeWhere(function(row)
                 return row.path and row.path:sub(1, #prefix) == prefix
             end)
+        end,
+    }
+end
+
+package.preload["db.progress"] = function()
+    return {
+        all = function(source_id)
+            local rows = {}
+            for _, book in ipairs(book_rows) do
+                if book.source_id == source_id and book.updated_at then
+                    rows[#rows + 1] = {
+                        stable_id = book.stable_id,
+                        updated_at = book.updated_at,
+                    }
+                end
+            end
+            return rows
         end,
     }
 end
@@ -205,7 +226,7 @@ do
     writeFile(CACHE .. "/moon/book/aaa/sub/2.html", 10)
     writeFile(CACHE .. "/moon/image/c.png", 10)
     book_rows = {
-        { source_id = "moon", stable_id = "aaa", path = CACHE .. "/moon/book/aaa/1.html", last_open = os.time() },
+        { source_id = "moon", stable_id = "aaa", path = CACHE .. "/moon/book/aaa/1.html", updated_at = os.time() },
     }
     chapter_rows = {
         { path = CACHE .. "/moon/book/aaa/sub/2.html", source_id = "moon", stable_id = "aaa", chapter_idx = 2 },
@@ -223,7 +244,7 @@ do
     Assert.is_true(ok_result)
     Assert.is_nil(lfs.attributes(CACHE .. "/moon")) -- 整树被删
     Assert.eq(lfs.attributes(CACHE, "mode"), "directory") -- ensureCacheRoot 重建空根
-    -- DB 阶段依次：ChapterDB.clear → BookDB.clearOpens → BookDB.stripMeta
+    -- DB 阶段依次：ChapterDB.clear → BookDB.clearPaths → BookDB.stripMeta
     Assert.eq(db_log.chapter_clear, 1)
     Assert.eq(db_log.clear_opens, 1)
     Assert.eq(db_log.strip_meta, 1)
@@ -307,10 +328,10 @@ do
     writeFile(CACHE .. "/moon/book/norecord/1.html", 10)
     writeFile(CACHE .. "/moon/book/loose.epub", 10)
     book_rows = {
-        { source_id = "moon", stable_id = "old", path = CACHE .. "/moon/book/oldbook/1.html", last_open = now - TTL - 86400 },
-        { source_id = "moon", stable_id = "new", path = CACHE .. "/moon/book/newbook/1.html", last_open = now - 3600 },
-        { source_id = "moon", stable_id = "loose", path = CACHE .. "/moon/book/loose.epub", last_open = now - TTL - 86400 },
-        { source_id = "moon", stable_id = "ghost", path = CACHE .. "/moon/book/ghost/1.html", last_open = now - 100 },
+        { source_id = "moon", stable_id = "old", path = CACHE .. "/moon/book/oldbook/1.html", updated_at = now - TTL - 86400 },
+        { source_id = "moon", stable_id = "new", path = CACHE .. "/moon/book/newbook/1.html", updated_at = now - 3600 },
+        { source_id = "moon", stable_id = "loose", path = CACHE .. "/moon/book/loose.epub", updated_at = now - TTL - 86400 },
+        { source_id = "moon", stable_id = "ghost", path = CACHE .. "/moon/book/ghost/1.html", updated_at = now - 100 },
     }
     chapter_rows = {
         { path = CACHE .. "/moon/book/oldbook/ch1.html", source_id = "moon", stable_id = "old", chapter_idx = 1 },
@@ -348,7 +369,7 @@ do
     Assert.eq(chapter_rows[1].path, CACHE .. "/moon/book/newbook/ch1.html")
 end
 
--- ── cleanupStale：目录活跃度取父目录 books.last_open 最大值 ──
+-- ── cleanupStale：目录活跃度取父目录阅读进度时间最大值 ───
 do
     resetTree()
     local now = os.time()
@@ -356,8 +377,8 @@ do
     writeFile(CACHE .. "/moon/book/mixed/old.html", 10)
     writeFile(CACHE .. "/moon/book/mixed/new.html", 10)
     book_rows = {
-        { source_id = "moon", stable_id = "a", path = CACHE .. "/moon/book/mixed/old.html", last_open = now - TTL - 86400 },
-        { source_id = "moon", stable_id = "b", path = CACHE .. "/moon/book/mixed/new.html", last_open = now },
+        { source_id = "moon", stable_id = "a", path = CACHE .. "/moon/book/mixed/old.html", updated_at = now - TTL - 86400 },
+        { source_id = "moon", stable_id = "b", path = CACHE .. "/moon/book/mixed/new.html", updated_at = now },
     }
 
     local removed = Cache.cleanupStale()
@@ -376,7 +397,7 @@ do
     writeFile(CACHE .. "/moon/book/fresh/1.html", 10)
     writeFile(CACHE .. "/moon/book/fresh/ch1.html", 10)
     book_rows = {
-        { source_id = "moon", stable_id = "fresh", path = CACHE .. "/moon/book/fresh/1.html", last_open = os.time() },
+        { source_id = "moon", stable_id = "fresh", path = CACHE .. "/moon/book/fresh/1.html", updated_at = os.time() },
     }
     chapter_rows = {
         { path = CACHE .. "/moon/book/fresh/ch1.html", source_id = "moon", stable_id = "fresh", chapter_idx = 1 },

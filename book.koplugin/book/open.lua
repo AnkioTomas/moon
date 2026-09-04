@@ -6,7 +6,7 @@
 
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
-local logger = require("logger")
+local logger = require("utils.log")
 local Store = require("book.store")
 local _ = require("gettext")
 

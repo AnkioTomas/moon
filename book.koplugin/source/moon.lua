@@ -96,7 +96,7 @@ end
 function Moon.meta()
     return {
         id = "moon",
-        name = _("Book 书库"),
+        name = _("月读服务"),
         type = "book",
     }
 end

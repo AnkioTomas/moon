@@ -28,7 +28,7 @@ end
 
 -- 同步落库
 
-package.preload["logger"] = function()
+package.preload["utils.log"] = function()
     return { warn = function(...) warnings[#warnings + 1] = { ... } end }
 end
 

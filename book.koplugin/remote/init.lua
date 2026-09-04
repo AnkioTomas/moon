@@ -12,7 +12,7 @@ KOReader 根、字体、插件、设置、Book 数据及书籍根目录不可删
 @module koplugin.book.remote.init
 --]]
 
-local logger = require("logger")
+local logger = require("utils.log")
 local Settings = require("utils.settings")
 local Text = require("utils.text")
 local _ = require("gettext")

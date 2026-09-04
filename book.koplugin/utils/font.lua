@@ -1,5 +1,5 @@
 --[[--
-Book 插件 UI 字体
+月读插件 UI 字体
 
   set(id, name)       只写 display.ui_font / ui_font_name，绝不碰 Font.fontmap
   applyCurrent()      唯一改 Font.fontmap 的入口；由 Desktop / Reader 在重建时调用
@@ -23,7 +23,7 @@ local Font = require("ui/font")
 local FontList = require("fontlist")
 local JSON = require("json")
 local lfs = require("libs/libkoreader-lfs")
-local logger = require("logger")
+local logger = require("utils.log")
 local util = require("util")
 local Cache = require("http.cache")
 local Request = require("http.request")

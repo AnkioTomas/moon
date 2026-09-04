@@ -11,7 +11,7 @@ HTTP 响应缓存（键 = METHOD + path + 规范化参数，TTL 秒）。
 --]]
 
 local JSON = require("json")
-local logger = require("logger")
+local logger = require("utils.log")
 local UIManager = require("ui/uimanager")
 local Text = require("utils.text")
 

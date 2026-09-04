@@ -205,7 +205,7 @@ do
     Assert.is_nil(Store.identityFor("/nowhere/gone.epub"))
 end
 
--- ── ensureIdentity：命中章节身份 → 只刷新 books.path/last_open，chapters 已在库不重写 ──
+-- ── ensureIdentity：命中章节身份 → 只刷新 books.path，chapters 已在库不重写 ──
 do
     local path = "/cache/moon/book/slug/5.html"
     chapter_rows[path] = { source_id = "moon", stable_id = "sk", chapter_idx = 5 }

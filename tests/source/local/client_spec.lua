@@ -296,12 +296,6 @@ package.preload["db.book"] = function()
             table.sort(out)
             return out
         end,
-        recentBySource = function()
-            return {
-                { stable_id = "/books/a.epub", last_open = 200, title = "T:/books/a.epub" },
-                { stable_id = "/books/note.md", last_open = 100, title = "note" },
-            }
-        end,
     }
 end
 package.preload["db.stats"] = function()

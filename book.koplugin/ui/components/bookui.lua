@@ -1,5 +1,5 @@
 --[[--
-Book 桌面 UI 缩放 — 字号 / 间距 / 图标统一从这里走。
+月读桌面 UI 缩放 — 字号 / 间距 / 图标统一从这里走。
 缩放值存 moon.settings（$DATA/.moon/settings/display.lua 的 ui_scale）
 字体族存 display.ui_font，经 moon.font 改 Font.fontmap；UI.face 解析字族。
 
