@@ -163,7 +163,12 @@ local function syncReading(plugin, event)
     if source and identity then
         require("book.progress").save(current_session, function(ok)
             if ok and source.syncProgressAsync then
-                source:syncProgressAsync({ identity = identity }, function() end)
+                -- 关书只负责把本地新版本推上去。立即回拉可能读到微信尚未收敛的
+                -- 旧值，再把刚上传的进度覆盖掉；远端拉取统一留给下次 ReaderReady。
+                source:syncProgressAsync({
+                    identity = identity,
+                    dirty_only = true,
+                }, function() end)
             end
         end)
         require("book.note").save(plugin.ui, identity, function(ok)
