@@ -43,6 +43,9 @@ local function userFinished(row)
     if row.finishReading == 1 or row.finishReading == true then
         return true
     end
+    if row.hasReadTag == 1 or row.hasReadTag == true then
+        return true
+    end
     return false
 end
 
@@ -58,7 +61,7 @@ function Mapper.book(row)
         return nil
     end
     local finished = userFinished(row)
-    return {
+    local out = {
         source_id = SOURCE_ID, stable_id = sid,
         title = row.title or row.bookName or row.name,
         authors = row.authors or row.author,
@@ -66,10 +69,13 @@ function Mapper.book(row)
             row.percent or row.progress or row.progressPercent or row.readProgress,
             finished
         ),
-        category = row.category,
+        category = row.favorite or row.category,
         series = row.series,
         cover = type(row.cover) == "string" and row.cover or nil,
     }
+    local intro = row.description or row.intro or row.summary
+    if type(intro) == "string" and intro ~= "" then out.intro = intro end
+    return out
 end
 
 --- 详情行 wire → BookDetail。
@@ -137,93 +143,13 @@ function Mapper.progress(wire)
     return {
         fraction = ProgressPosition.clampFraction(percent / 100),
         chapter_idx = tonumber(node.chapter_idx or node.chapterIdx or node.spine),
+        page = tonumber(node.page or node.pageIndex),
         -- 服务端在 locator 过期时回空串；归一成 nil，免得下游到处判空串。
         locator = node.locator ~= "" and node.locator or nil,
-    }
-end
-
---- 构造空的阅读统计洞察结构。
----@return StatsInsight
-local function emptyInsight()
-    return {
-        has_data = false,
-        total = { has_data = false },
-        calendar = {
-            initial_ym = os.date("%Y-%m"),
-            days = {},
-        },
-    }
-end
-
---- 统计洞察 wire → StatsInsight。
----@param raw table|nil
----@return StatsInsight
-function Mapper.insight(raw)
-    if type(raw) ~= "table" then
-        return emptyInsight()
-    end
-    if type(raw.total) == "table" and type(raw.calendar) == "table"
-        and raw.readingActivity == nil and raw.perDay == nil then
-        local has_data = not not (raw.has_data or raw.total.has_data)
-        return {
-            has_data = has_data,
-            total = {
-                has_data = has_data,
-                total_pages = tonumber(raw.total.total_pages),
-                total_text = raw.total.total_text,
-                last7_text = raw.total.last7_text,
-                longest_day_text = raw.total.longest_day_text,
-            },
-            calendar = {
-                initial_ym = raw.calendar.initial_ym or os.date("%Y-%m"),
-                days = raw.calendar.days or {},
-            },
-        }
-    end
-
-    local data = raw
-    if type(raw.data) == "table" and (raw.data.readingActivity or raw.data.perDay or raw.data.hasData ~= nil) then
-        data = raw.data
-    end
-
-    local activity = data.readingActivity or {}
-    local kpi = activity.kpi or {}
-    local has_data = not not (data.hasData or activity.hasData or data.has_data)
-
-    local per_day = data.perDay or data.days or {}
-    local days = {}
-    for ymd, day in pairs(per_day) do
-        if type(day) == "table" then
-            local books = {}
-            if type(day.books) == "table" then
-                for _, b in ipairs(day.books) do
-                    local nb = Mapper.book(b)
-                    if nb then
-                        books[#books + 1] = nb
-                    end
-                end
-            end
-            days[ymd] = {
-                duration_seconds = tonumber(day.duration_seconds or day.duration),
-                duration_text = day.duration_text or day.durationText,
-                books = books,
-            }
-        end
-    end
-
-    return {
-        has_data = has_data,
-        total = {
-            has_data = has_data,
-            total_pages = tonumber(kpi.total_pages or kpi.totalPagesRead),
-            total_text = kpi.total_text or kpi.totalReadingTime,
-            last7_text = kpi.last7_text or kpi.last7DaysReadTime,
-            longest_day_text = kpi.longest_day_text or kpi.longestDay,
-        },
-        calendar = {
-            initial_ym = data.initialYm or data.initial_ym or os.date("%Y-%m"),
-            days = days,
-        },
+        extra = tonumber(node.offset) and { offset = tonumber(node.offset) } or nil,
+        updated_at = (tonumber(node.timestamp) or 0) > 1e12
+            and math.floor(tonumber(node.timestamp) / 1000)
+            or tonumber(node.timestamp),
     }
 end
 

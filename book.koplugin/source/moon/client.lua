@@ -228,34 +228,29 @@ function Client:listBooksAsync(query, cb)
     }, cb)
 end
 
---- 拉取书库筛选项（分类、系列；缓存 5 分钟）。
+--- 拉取服务端最近阅读列表。
+---@param limit number
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
-function Client:filtersAsync(cb)
-    return self:_jsonAsync("GET", "/index/book/filters", { cache_ttl = 5 * 60 }, cb)
+function Client:recentBooksAsync(limit, cb)
+    return self:_jsonAsync("GET", "/index/book/recent", {
+        query = { limit = limit },
+    }, cb)
 end
 
---- 上报阅读统计；成功后作废阅读洞察缓存，免得页面还显示旧聚合。
+--- 上报阅读统计。
 ---@param body table|nil 形如 { books, stats, device_id }
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:syncStatsAsync(body, cb)
-    return self:_jsonAsync("POST", "/index/stats/import", { body = body or {}, json = true }, function(res, err)
-        if res then
-            Request.clearCache("/index/stats/insight")
-        end
-        cb(res, err)
-    end)
+    return self:_jsonAsync("POST", "/index/stats/import", { body = body or {}, json = true }, cb)
 end
 
---- 拉取单本书的逐页阅读统计（不缓存）。
----@param filename string Moon 侧书籍身份，即 stable_id
+--- 拉取账户全部阅读事实（不缓存）。
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
-function Client:getBookStatsAsync(filename, cb)
-    return self:_jsonAsync("GET", "/index/stats/book", {
-        query = { filename = filename },
-    }, cb)
+function Client:getStatsAsync(cb)
+    return self:_jsonAsync("GET", "/index/stats/daily", nil, cb)
 end
 
 --- 上传某本书的注解集合（整本覆盖语义）。
@@ -277,13 +272,6 @@ function Client:getAnnotationsAsync(filename, cb)
     return self:_jsonAsync("GET", "/index/stats/annotations", {
         query = { filename = filename },
     }, cb)
-end
-
---- 拉取阅读洞察聚合数据（缓存 30 分钟，上报统计成功后会被作废）。
----@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
----@return { cancel: fun() }|nil
-function Client:readingInsightAsync(cb)
-    return self:_jsonAsync("GET", "/index/stats/insight", { cache_ttl = 30 * 60 }, cb)
 end
 
 --- 拉取某本书的云端阅读进度（不缓存）。
