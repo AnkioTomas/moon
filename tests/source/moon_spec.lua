@@ -220,17 +220,11 @@ end
 do
     resetRec()
     rec.list_wire = { data = { { filename = "home.epub", title = "Home" } }, count = 1 }
-    local rebuilds = 0
+    local refreshes = 0
     local desktop = {
         source = src,
         tab = "home",
-        rebuild = function() rebuilds = rebuilds + 1 end,
-        -- 真实实现是 Home.invalidate：清状态后仅在首页时重建
-        invalidateHome = function(self)
-            self._home_state = nil
-            self._home_loaded = false
-            if self.tab == "home" then rebuilds = rebuilds + 1 end
-        end,
+        refreshHome = function() refreshes = refreshes + 1 end,
     }
     src:onEvent("home_open", desktop)
     Assert.is_true(rec.query ~= nil)
@@ -240,7 +234,7 @@ do
     Assert.is_nil(rec.query)
     src:onEvent("library_refresh_request", desktop)
     Assert.is_true(rec.query ~= nil)
-    Assert.eq(rebuilds, 2)
+    Assert.eq(refreshes, 2)
     rec.query = first_query
 end
 

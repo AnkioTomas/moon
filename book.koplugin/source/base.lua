@@ -91,7 +91,7 @@ local function syncDesktopBooks(self, desktop, opts)
         if desktop._closed or desktop.source ~= self then return end
         if not result then
             require("utils.log").warn("book shelf sync failed", self.id, err)
-            desktop:invalidateHome()
+            desktop:refreshHome("shelf_sync_failed")
             if desktop.tab == "library" then
                 desktop._library_state = { books = {}, err = err or _("同步失败") }
                 desktop:rebuild()
@@ -109,7 +109,7 @@ local function syncDesktopBooks(self, desktop, opts)
             "hidden", tonumber(result.hidden) or 0)
         self._books_refresh_at = os.time()
         desktop._library_state = nil
-        desktop:invalidateHome()
+        desktop:refreshHome("shelf_sync")
         if desktop.tab == "library" then desktop:rebuild() end
     end)
     -- 某些源会同步回调；避免把已完成的 job 句柄残留到桌面状态。
@@ -129,7 +129,7 @@ local function pullDesktopStats(self, desktop)
             if not ok or desktop._closed or desktop.source ~= self then return end
             desktop._insight_state = nil
             desktop._insight_loaded = false
-            desktop:invalidateHome()
+            desktop:refreshHome("stats_sync")
             if desktop.tab == "stats" then desktop:rebuild() end
         end,
     })

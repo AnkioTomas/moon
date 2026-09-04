@@ -18,10 +18,24 @@ local HomeStats = require("ui.desktop.home.stats")
 local Layout = require("ui.desktop.home.layout")
 local Highlights = require("book.highlights")
 local logger = require("utils.log")
+local Timing = require("utils.timing")
 local gettext = require("gettext")
 local Screen = Device.screen
 
 local Home = {}
+local REFRESH_DEBOUNCE_SECONDS = 0.2
+
+--- 废弃当前首页查询；是否清除已显示状态由调用方决定。
+---@param desktop table
+local function cancelFetch(desktop)
+    desktop._home_fetch_request = nil
+    local job = desktop._home_fetch_cancel
+    if type(job) == "table" and type(job.cancel) == "function" then
+        pcall(job.cancel)
+    end
+    desktop._home_fetch_cancel = nil
+    desktop._home_fetching = false
+end
 
 --- 书摘：按当前索引取一条，不递增。
 ---@param recent table|nil
@@ -84,20 +98,46 @@ end
 ---@param desktop table
 function Home.invalidate(desktop)
     if not desktop or desktop._closed then return end
+    if desktop._home_refresh_debounce then desktop._home_refresh_debounce:cancel() end
+    desktop._home_refresh_reasons = nil
     -- 先废弃回调资格，再取消句柄。cancel 只是尽力而为，旧回调仍可能晚到。
-    desktop._home_fetch_request = nil
-    local job = desktop._home_fetch_cancel
-    if type(job) == "table" and type(job.cancel) == "function" then
-        pcall(job.cancel)
-    end
-    desktop._home_fetch_cancel = nil
-    desktop._home_fetching = false
+    cancelFetch(desktop)
     desktop._home_state = nil
     desktop._home_loaded = false
     desktop._home_reading_page = 1
     if desktop.tab == "home" then
         desktop:rebuild()
     end
+end
+
+--- 后台数据变化后的静默刷新：保留旧页面，200ms 内多次请求合并，取数完成只重建一次。
+---@param desktop table
+---@param reason string|nil
+function Home.refreshData(desktop, reason)
+    if not desktop or desktop._closed then return end
+    desktop._home_refresh_reasons = desktop._home_refresh_reasons or {}
+    desktop._home_refresh_reasons[reason or "background"] = true
+    if not desktop._home_refresh_debounce then
+        desktop._home_refresh_debounce = Timing.debounce(function()
+            if desktop._closed then return end
+            local reasons = {}
+            for value in pairs(desktop._home_refresh_reasons or {}) do
+                reasons[#reasons + 1] = value
+            end
+            table.sort(reasons)
+            desktop._home_refresh_reasons = nil
+            logger.dbg("book home refresh", table.concat(reasons, ","))
+            cancelFetch(desktop)
+            if desktop.tab ~= "home" then
+                desktop._home_state = nil
+                desktop._home_loaded = false
+                desktop._home_reading_page = 1
+                return
+            end
+            Home.fetch(desktop)
+        end, REFRESH_DEBOUNCE_SECONDS)
+    end
+    desktop._home_refresh_debounce()
 end
 
 --- 进入首页时刷新：Tab 切入 / 唤醒都走这里，语义固定为「刷新一遍」。
@@ -124,6 +164,7 @@ end
 function Home.fetch(desktop)
     if desktop._home_fetching then return end
     desktop._home_fetching = true
+    logger.dbg("book home fetch start", desktop.source and desktop.source.id or "unavailable")
 
     if desktop._home_fetch_cancel then
         desktop._home_fetch_cancel:cancel()
@@ -167,6 +208,8 @@ function Home.fetch(desktop)
         state = fillExtras(state or {}, rotate)
         desktop._home_state = state
         desktop._home_loaded = true
+        logger.dbg("book home fetch done", source and source.id or "unavailable",
+            "reading", #(state.reading or {}), state.recent_err and "error" or "ok")
         local visible = desktop.tab == "home"
         -- 成功回调也只能消费一次；后到的重复回调视为失效。
         desktop._home_fetch_request = nil

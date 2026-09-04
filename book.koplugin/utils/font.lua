@@ -321,6 +321,7 @@ function MoonFont.listAsync(force, cb)
         local settings, system = scanInstalledFonts()
         return { settings = settings, system = system }
     end, {
+        name = "font.scan",
         on_done = function(data)
             if cancelled then return end
             local settings, system = {}, {}
@@ -697,6 +698,7 @@ function MoonFont.ensureInstalledAsync(item, on_progress, cb)
         extract_job = Job.run(function()
             extractInstalledFont(zip_path, dest)
         end, {
+            name = "font.extract",
             on_done = function()
                 if cancelled then return end
                 if lfs.attributes(dest, "mode") == "file" then

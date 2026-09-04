@@ -406,6 +406,7 @@ local function scanJob(root, on_done)
             ctx.post(parseFile(f, known))
         end
     end, {
+        name = "local.scan",
         on_progress = function(f)
             files[#files + 1] = f
         end,
@@ -679,6 +680,7 @@ function Client:indexOneAsync(path, cb)
     local job = Job.run(function()
         return parseFile({ name = name, path = path }, known)
     end, {
+        name = "local.index",
         on_done = function(f)
             commitFiles({ f }, known)
             cb(true)

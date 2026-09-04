@@ -606,6 +606,7 @@ function Html2Epub.build(opts, cb)
             local ok, err = writeEpubPackage(pack_opts, dest)
             return ok and "ok" or ("err:" .. tostring(err or "pack failed"))
         end, {
+            name = "epub.pack",
             on_done = function(result)
                 pack_task = nil
                 if cancelled then

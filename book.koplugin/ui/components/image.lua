@@ -289,6 +289,7 @@ local function decodeAsync(path, w, h, alpha, cb)
         end
         return tmp
     end, {
+        name = "image.decode",
         on_done = function(result)
             if not cancelled then
                 cb(result and unmarshal(readDecodedFile(result), alpha) or nil)
