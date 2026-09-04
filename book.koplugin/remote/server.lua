@@ -44,13 +44,14 @@ local STATUS = {
 }
 
 ---@class RemoteHandlers
----@field list_dir fun(path: string): table[]|nil, any 目录项 { name, dir, size, mtime }；非目录返回 nil, err
+---@field list_dir fun(path: string, cb: fun(entries: table[]|nil, err: any)) 异步目录列表
+---@field is_dir fun(path: string): boolean 路径是否为目录（上传前单次校验）
 ---@field resolve_download fun(path: string): string|nil 存在且是普通文件才返回路径
 ---@field path_exists fun(path: string): boolean 路径是否已存在（上传重名预检）
 ---@field save fun(temp: string, dir: string, name: string, cb: fun(ok: boolean|nil, err: any), conflict: "overwrite"|"skip"|"rename"|nil) 上传落位（可异步）
----@field mkdir fun(path: string): boolean|nil, any
----@field delete fun(path: string): boolean|nil, any
----@field rename fun(path: string, to: string): boolean|nil, any
+---@field mkdir fun(path: string, cb: fun(ok: boolean|nil, err: any))
+---@field delete fun(path: string, cb: fun(ok: boolean|nil, err: any))
+---@field rename fun(path: string, to: string, cb: fun(ok: boolean|nil, err: any))
 ---@field temp_path fun(name: string): string 上传临时落盘路径
 ---@field is_protected fun(path: string): boolean 重要路径及其祖先不可删除/移动（展示级判定，可免 realpath；变更 handler 内部仍全量校验）
 ---@field get_input fun(): { active: boolean, text: string|nil } 设备激活输入框状态与当前文本
@@ -95,6 +96,15 @@ function Server.new(o)
         slice = tonumber(o.slice) or 0.025,
         _conns = {},
     }, Server)
+end
+
+--- 原子替换文件管理范围；运行中的连接后续路由立即使用新布局。
+---@param o { root: string, roots: string[], home: string|nil, shortcuts: table[]|nil }
+function Server:updateLayout(o)
+    self.root = o.root
+    self.roots = o.roots
+    self.home = o.home or o.root
+    self.shortcuts = o.shortcuts or {}
 end
 
 ---@return boolean ok, string|nil err
@@ -228,10 +238,31 @@ function Server:_step(conn)
         return self:_readBody(conn)
     elseif conn.state == "pending" then
         return self:_checkPending(conn)
+    elseif conn.state == "continue" then
+        return self:_writeContinue(conn)
     elseif conn.state == "respond" then
         return self:_write(conn)
     end
     return false
+end
+
+--- 严格解析 Content-Length；HTTP 只允许十进制非负整数。
+---@param headers table
+---@return number|nil length
+---@return string|nil err "missing"|"invalid"
+function Server:_contentLength(headers)
+    local raw = headers["content-length"]
+    if type(raw) ~= "string" or raw == "" then
+        return nil, "missing"
+    end
+    if not raw:match("^%d+$") then
+        return nil, "invalid"
+    end
+    local len = tonumber(raw)
+    if not len or len == math.huge then
+        return nil, "invalid"
+    end
+    return len
 end
 
 -- ── headers ──────────────────────────────────────────
@@ -466,9 +497,13 @@ end
 ---@return true|nil|false true=有 body 进状态机；false=空 body，调用方当场收尾；
 ---        nil=已排错误响应（411/413），调用方直接 return
 function Server:_acceptText(conn, headers, limit, finish)
-    local len = tonumber(headers["content-length"] or "")
-    if not len or len < 0 then
+    local len, len_err = self:_contentLength(headers)
+    if len_err == "missing" then
         self:_fail(conn, 411, "Content-Length required")
+        return nil
+    end
+    if not len then
+        self:_fail(conn, 400, "Invalid Content-Length")
         return nil
     end
     if len > limit then
@@ -483,6 +518,27 @@ function Server:_acceptText(conn, headers, limit, finish)
     conn.remaining = len
     conn.state = "body"
     return true
+end
+
+--- 完整发出 100 Continue 后再进入 body；与最终响应共用部分写语义。
+---@param conn table
+---@return boolean
+function Server:_writeContinue(conn)
+    if conn.out_off > #conn.out then
+        conn.out = ""
+        conn.out_off = 1
+        conn.state = "body"
+        return true
+    end
+    local sent, err, last = conn.sock:send(conn.out, conn.out_off)
+    local upto = sent or last
+    if upto then
+        conn.out_off = upto + 1
+        conn.touched = socket.gettime()
+        return true
+    end
+    if err == "closed" then self:_kill(conn) end
+    return false
 end
 
 --- 收 body：文本通道攒内存，上传通道流式写盘。

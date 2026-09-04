@@ -37,7 +37,7 @@ end
 ---@param value any
 ---@return boolean
 local function unchangedSecret(value)
-    return value == SettingsApi.MASK or value == "******"
+    return value == SettingsApi.MASK
 end
 
 ---@param cfg table
