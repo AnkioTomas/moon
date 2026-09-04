@@ -22,6 +22,8 @@ HTTP 请求原语（Turbo，非阻塞，唯一网络栈）
 local UIManager = require("ui/uimanager")
 local Header = require("http.header")
 local Cache = require("http.cache")
+local logger = require("utils.log")
+local Perf = require("utils.perf")
 local T = require("ffi/util").template
 local _ = require("gettext")
 
@@ -29,6 +31,7 @@ local Request = {}
 
 --- 并发请求期间拉长 UI 输入超时的引用计数。
 local input_timeouts = 0
+local request_seq = 0
 
 --- 写盘切片。太大单拍卡；太小 nextTick 开销高。
 local WRITE_CHUNK = 64 * 1024
@@ -36,6 +39,21 @@ local WRITE_CHUNK = 64 * 1024
 --- Turbo/LuaSec 即使 verify_ca=false 仍会加载默认 CA
 --- （/etc/ssl/certs/ca-certificates.crt），macOS 等设备上不存在会直接炸。
 local ssl_patched = false
+
+--- 日志只保留 scheme/host/path；query、fragment、userinfo 可能带令牌，禁止落盘。
+---@param url any
+---@return string
+local function safeUrl(url)
+    local value = tostring(url or "")
+    value = value:gsub("#.*$", ""):gsub("%?.*$", "")
+    return (value:gsub("^(https?://)[^/@]+@", "%1"))
+end
+
+---@param path any
+---@return string
+local function fileName(path)
+    return tostring(path or ""):match("([^/]+)$") or "<unknown>"
+end
 
 ------------------------------------------------------------------------
 -- 内部
@@ -236,11 +254,26 @@ function Request.request(opts, cb)
     opts = opts or {}
     local state = { cancelled = false, done = false, client = nil }
     local user_agent = getHeader(opts.headers, "User-Agent")
+    request_seq = request_seq + 1
+    local request_id = request_seq
+    local method = tostring(opts.method or "GET")
+    local url = safeUrl(opts.url)
+    local started_at = Perf.now()
+    logger.dbg("book.http start", request_id, method, url)
+
+    local function deliver(res, err)
+        logger.dbg("book.http done", request_id, method, url,
+            "status", res and res.code or "-", "ms",
+            Perf.elapsedMs(started_at),
+            "bytes", res and type(res.body) == "string" and #res.body or 0,
+            err and ("error=" .. tostring(err)) or "ok")
+        cb(res, err)
+    end
 
     if not Request.ensureTurbo() then
         UIManager:nextTick(function()
             if not state.cancelled then
-                cb(nil, "turbo looper unavailable")
+                deliver(nil, "turbo looper unavailable")
             end
         end)
         return makeJob(state)
@@ -272,7 +305,7 @@ function Request.request(opts, cb)
         local ok, turbo = pcall(require, "turbo")
         if not ok then
             if finish() and not state.cancelled then
-                cb(nil, turbo)
+                deliver(nil, turbo)
             end
             return
         end
@@ -281,7 +314,7 @@ function Request.request(opts, cb)
         local patched, patch_err = pcall(patchTurboSsl)
         if not patched then
             if finish() and not state.cancelled then
-                cb(nil, patch_err)
+                deliver(nil, patch_err)
             end
             return
         end
@@ -289,7 +322,7 @@ function Request.request(opts, cb)
         local made, client = pcall(turbo.async.HTTPClient, { verify_ca = false })
         if not made then
             if finish() and not state.cancelled then
-                cb(nil, client)
+                deliver(nil, client)
             end
             return
         end
@@ -311,14 +344,14 @@ function Request.request(opts, cb)
         local fetched, future = pcall(client.fetch, client, opts.url, fetch_opts)
         if not fetched then
             if finish() and not state.cancelled then
-                cb(nil, future)
+                deliver(nil, future)
             end
             return
         end
         local res = coroutine.yield(future)
 
         if finish() and not state.cancelled then
-            cb(res, responseError(res))
+            deliver(res, responseError(res))
         end
     end)
 
@@ -326,6 +359,7 @@ function Request.request(opts, cb)
         if state.done then
             return
         end
+        logger.dbg("book.http cancel", request_id, method, url)
         local client = state.client
         if client and client.iostream and not client.iostream:closed() then
             pcall(function()
@@ -418,6 +452,13 @@ function Request.stream(opts, handlers)
     handlers = handlers or {}
     local state = { cancelled = false, done = false, client = nil }
     local user_agent = getHeader(opts.headers, "User-Agent")
+    request_seq = request_seq + 1
+    local request_id = request_seq
+    local method = tostring(opts.method or "GET")
+    local url = safeUrl(opts.url)
+    local started_at = Perf.now()
+    local received = 0
+    logger.dbg("book.http stream start", request_id, method, url)
 
     --- 收束流：只回调一次 on_done，并归还此前占用的输入超时计数。
     --- 计数归零才 resetInputTimeout，避免并发流互相把对方的 1s 轮询关掉。
@@ -432,6 +473,10 @@ function Request.stream(opts, handlers)
         if input_timeouts == 0 then
             UIManager:resetInputTimeout()
         end
+        logger.dbg("book.http stream done", request_id, method, url, "ms",
+            Perf.elapsedMs(started_at),
+            "bytes", received,
+            err and ("error=" .. tostring(err)) or "ok")
         if handlers.on_done then
             handlers.on_done(err)
         end
@@ -443,8 +488,9 @@ function Request.stream(opts, handlers)
         if state.cancelled or state.done then
             return
         end
-        if type(chunk) == "string" and #chunk > 0 and handlers.on_data then
-            handlers.on_data(chunk)
+        if type(chunk) == "string" and #chunk > 0 then
+            received = received + #chunk
+            if handlers.on_data then handlers.on_data(chunk) end
         end
     end
 
@@ -454,6 +500,8 @@ function Request.stream(opts, handlers)
                 return
             end
             state.done = true
+            logger.dbg("book.http stream done", request_id, method, url,
+                state.cancelled and "cancelled" or "error=turbo looper unavailable")
             if handlers.on_done then
                 handlers.on_done(state.cancelled and "cancelled" or "turbo looper unavailable")
             end
@@ -653,10 +701,14 @@ function Request.writeResponseToFile(res, dest, opts, cb)
     opts = opts or {}
     local state = { cancelled = false }
     local body = res and res.body
+    local target = fileName(dest)
+    logger.dbg("book.http file write start", target, "bytes",
+        type(body) == "string" and #body or 0)
 
     if type(body) ~= "string" then
         UIManager:nextTick(function()
             if not state.cancelled then
+                logger.dbg("book.http file write done", target, "error=empty response")
                 cb(false, "empty response")
             end
         end)
@@ -667,6 +719,8 @@ function Request.writeResponseToFile(res, dest, opts, cb)
     if not file then
         UIManager:nextTick(function()
             if not state.cancelled then
+                logger.dbg("book.http file write done", target,
+                    "error=" .. tostring(open_err or "cannot create file"))
                 cb(false, open_err or "cannot create file")
             end
         end)
@@ -690,6 +744,8 @@ function Request.writeResponseToFile(res, dest, opts, cb)
         if not ok then
             pcall(os.remove, dest)
         end
+        logger.dbg("book.http file write done", target, "bytes", written,
+            ok and "ok" or ("error=" .. tostring(reason)))
         if not state.cancelled then
             cb(ok, reason)
         end
@@ -734,17 +790,25 @@ function Request.download(opts, dest, cb)
     local request_job
     local write_job
     local tmp = dest .. ".part"
+    local target = fileName(dest)
+    logger.dbg("book.http download start", target, safeUrl(opts and opts.url))
+
+    local function done(ok, err, res)
+        logger.dbg("book.http download done", target,
+            ok and "ok" or ("error=" .. tostring(err)))
+        cb(ok, err, res)
+    end
 
     request_job = Request.request(opts, function(res, err)
         if state.cancelled then
             return
         end
         if err then
-            cb(false, err, res)
+            done(false, err, res)
             return
         end
         if not Request.ok(res and res.code) then
-            cb(false, "HTTP " .. tostring(res and res.code), res)
+            done(false, "HTTP " .. tostring(res and res.code), res)
             return
         end
         write_job = Request.writeResponseToFile(res, tmp, {
@@ -752,20 +816,21 @@ function Request.download(opts, dest, cb)
         }, function(ok, write_err)
             if state.cancelled then return end
             if not ok then
-                cb(false, write_err, res)
+                done(false, write_err, res)
                 return
             end
             local moved, rename_err = os.rename(tmp, dest)
             if not moved then
                 pcall(os.remove, tmp)
-                cb(false, rename_err or "rename failed", res)
+                done(false, rename_err or "rename failed", res)
                 return
             end
-            cb(true, nil, res)
+            done(true, nil, res)
         end)
     end)
 
     return makeJob(state, function()
+        logger.dbg("book.http download cancel", target)
         if request_job then
             request_job.cancel()
         end

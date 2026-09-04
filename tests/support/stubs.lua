@@ -87,6 +87,7 @@ local function installBookLog()
         function log.error() end
         log.err = log.error
         function log.start() end
+        function log.flush() end
         return log
     end
 end
