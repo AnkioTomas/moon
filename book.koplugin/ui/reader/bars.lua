@@ -455,12 +455,12 @@ end
 local function footerTouchZone(ui)
     ui = ui or Bars.ui
     local screen_h = Screen:getHeight()
-    local view = ui and ui.view
-    local band_y, band_h = bottomBandGeometry(view, ui, 0)
-    if band_h and band_h > 0 then
+    local footer = ui and ui.view and ui.view.footer
+    local band_h = footer and footer.getHeight and tonumber(footer:getHeight())
+    if band_h and band_h > 0 and band_h < screen_h then
         return {
             ratio_x = 0,
-            ratio_y = band_y / screen_h,
+            ratio_y = (screen_h - band_h) / screen_h,
             ratio_w = 1,
             ratio_h = band_h / screen_h,
         }

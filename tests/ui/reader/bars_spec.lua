@@ -163,9 +163,14 @@ local footer = {
     ui = ui_top,
     TapFooter = function() return false end,
     onHoldFooter = function() return false end,
+    getHeight = function() return 32 end,
 }
 ui_top.view.footer = footer
 ui_top._book_bars_installed = nil
+local touch_zones
+ui_top.registerTouchZones = function(_, zones) touch_zones = zones end
 Bars.install(ui_top)
 Assert.is_true(footer:TapFooter())
 Assert.is_true(footer:onHoldFooter())
+Assert.eq(touch_zones[1].screen_zone.ratio_y, 0.96)
+Assert.eq(touch_zones[1].screen_zone.ratio_h, 0.04)

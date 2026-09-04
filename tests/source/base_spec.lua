@@ -50,8 +50,9 @@ Assert.is_false(desktop._stats_sync_pending)
 Assert.eq(refreshes, 1)
 Assert.eq(rebuilds, 0)
 
--- 唤醒事件受书架节流约束，但统计仍按同一生命周期双向同步。
+-- 唤醒事件的书架与统计分别节流；过期后统计才重新同步。
 source._books_refresh_at = os.time()
+source._stats_refresh_at = os.time() - 301
 desktop.tab = "stats"
 source:onEvent("desktop_resume", desktop)
 Assert.eq(sync_calls, 2)
@@ -62,6 +63,7 @@ Assert.eq(refreshes, 2)
 Assert.eq(rebuilds, 1)
 
 -- 新建桌面不沿用唤醒节流：首次可见必须立即同步书架和统计。
+source._stats_refresh_at = os.time() - 301
 desktop.tab = "home"
 source:onEvent("desktop_open", desktop)
 Assert.eq(sync_calls, 3)

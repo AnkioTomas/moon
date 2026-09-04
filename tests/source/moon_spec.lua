@@ -39,6 +39,17 @@ end
 package.preload["db.book"] = function()
     return { libraryStableIdsBySource = function() return { "a.epub", "b.epub" } end }
 end
+package.preload["db.progress"] = function()
+    return {
+        upsertRemote = function(source_id, stable_id, pos)
+            rec.remote_progress = rec.remote_progress or {}
+            rec.remote_progress[#rec.remote_progress + 1] = {
+                source_id = source_id, stable_id = stable_id, pos = pos,
+            }
+            return true
+        end,
+    }
+end
 
 package.preload["book.catalog"] = function()
     return {
@@ -51,6 +62,11 @@ package.preload["book.catalog"] = function()
         filtersAsync = function(source_id, cb)
             rec.catalog_source = source_id
             cb({ data = { category = { "小说", "技术" }, series = { "第一辑" } } })
+            return { cancel = function() end }
+        end,
+        recentBooksAsync = function(source_id, limit, cb)
+            rec.recent_fallback = { source_id = source_id, limit = limit }
+            cb({ data = { { stable_id = "cached.epub" } }, count = 1 })
             return { cancel = function() end }
         end,
     }
@@ -91,6 +107,9 @@ package.preload["book.store"] = function()
             rec.reconciled_books = books
             return { pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
         end,
+        rememberMany = function(books)
+            rec.remembered_books = books
+        end,
     }
 end
 
@@ -127,6 +146,12 @@ end
 function client:listBooksAsync(query, cb)
     rec.query = query
     cb(rec.list_wire, rec.list_err)
+    return { cancel = function() end }
+end
+
+function client:recentBooksAsync(limit, cb)
+    rec.recent_limit = limit
+    cb(rec.recent_wire, rec.recent_err)
     return { cancel = function() end }
 end
 
@@ -221,6 +246,37 @@ do
     Assert.eq(result.pulled, 1)
 end
 
+-- 最近阅读直接使用服务端顺序，并把元数据与进度保存到本地供离线回退。
+do
+    resetRec()
+    rec.recent_wire = {
+        data = {
+            {
+                filename = "recent.epub",
+                title = "最近",
+                progressPercent = 42,
+                progressTimestamp = 1700000000000,
+            },
+        },
+        count = 1,
+    }
+    local result
+    src:recentBooksAsync(8, function(value) result = value end)
+    Assert.eq(rec.recent_limit, 8)
+    Assert.eq(result.data[1].stable_id, "recent.epub")
+    Assert.eq(rec.remembered_books[1].stable_id, "recent.epub")
+    Assert.is_true(rec.remembered_books[1].in_library)
+    Assert.eq(rec.remote_progress[1].stable_id, "recent.epub")
+    Assert.eq(rec.remote_progress[1].pos.fraction, 0.42)
+    Assert.eq(rec.remote_progress[1].pos.updated_at, 1700000000)
+
+    resetRec()
+    rec.recent_err = "offline"
+    src:recentBooksAsync(8, function(value) result = value end)
+    Assert.eq(rec.recent_fallback.source_id, "moon")
+    Assert.eq(result.data[1].stable_id, "cached.epub")
+end
+
 -- 首页进入按 5 分钟节流检查书架；统计按相同生命周期双向同步；
 -- 图书馆手动刷新同时触发两者并强制请求书架。
 do
@@ -240,7 +296,7 @@ do
     Assert.is_nil(rec.query)
     src:onEvent("library_refresh_request", desktop)
     Assert.is_true(rec.query ~= nil)
-    Assert.eq(refreshes, 5)
+    Assert.eq(refreshes, 4)
     rec.query = first_query
 end
 
@@ -507,6 +563,7 @@ for _, name in ipairs({
     "utils.settings",
     "utils.paths",
     "db.book",
+    "db.progress",
     "source.moon.client",
     "ui/network/manager",
     "ui/widget/progressbardialog",
