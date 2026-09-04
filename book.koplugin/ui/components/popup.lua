@@ -173,7 +173,8 @@ function Popup.spin(opts)
 end
 
 --- 更新已打开的 list 菜单内容（异步加载筛选结果时用）。
---- 不关闭菜单；opts 可带 select_mode / on_toggle / current / subtitle，
+--- 更新动作不关闭菜单；更新后的单选项仍须在点按时关闭。
+--- opts 可带 select_mode / on_toggle / current / subtitle，
 --- 单选给了 current 时会跳到当前项所在页。
 ---@param menu table|nil
 ---@param title string|nil
@@ -186,9 +187,8 @@ function Popup.setListItems(menu, title, items, on_select, opts)
     end
     opts = opts or {}
     local normalize = opts.select_mode == "multi" and Multi.normalize or Single.normalize
-    -- setListItems 不应关闭菜单，只需更新内容（选中不关闭是既有行为）
     local normalized, state_w, current_idx = normalize(items, {
-        close = function() end,
+        close = function() UIManager:close(menu) end,
         refresh = function()
             menu:updateItems(nil, true)
         end,

@@ -100,6 +100,7 @@ function Home.invalidate(desktop)
     if not desktop or desktop._closed then return end
     if desktop._home_refresh_debounce then desktop._home_refresh_debounce:cancel() end
     desktop._home_refresh_reasons = nil
+    desktop._home_refresh_pending = nil
     -- 先废弃回调资格，再取消句柄。cancel 只是尽力而为，旧回调仍可能晚到。
     cancelFetch(desktop)
     desktop._home_state = nil
@@ -127,6 +128,13 @@ function Home.refreshData(desktop, reason)
             table.sort(reasons)
             desktop._home_refresh_reasons = nil
             logger.dbg("book home refresh", table.concat(reasons, ","))
+            if desktop._home_fetching then
+                -- 同步完成可能撞上首页正在取数。取消 Turbo 请求只会丢弃回调，
+                -- 底层超时定时器仍会存活并在 30 秒后报 async.lua -6。
+                -- 让当前请求自然结束，再补一次刷新即可。
+                desktop._home_refresh_pending = true
+                return
+            end
             cancelFetch(desktop)
             if desktop.tab ~= "home" then
                 desktop._home_state = nil
@@ -214,6 +222,10 @@ function Home.fetch(desktop)
         -- 成功回调也只能消费一次；后到的重复回调视为失效。
         desktop._home_fetch_request = nil
         if visible then desktop:rebuild() end
+        if desktop._home_refresh_pending then
+            desktop._home_refresh_pending = nil
+            Home.refreshData(desktop, "pending")
+        end
     end
 
     if not source then finish({ recent_err = gettext("当前数据源不可用"), reading = {} }); return end

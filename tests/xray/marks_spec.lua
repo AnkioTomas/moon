@@ -1,11 +1,41 @@
 --[[-- xray.marks：页内实体标记（findAllText → 屏幕框）。 --]]
 
 local Assert = require("support.assert")
--- 全书扫描排在 nextTick（同步扫描会卡住绘制），断言前要冲刷
+-- 全书扫描走后台 Job，测试桩把 Job 完成回调排到 nextTick。
 local Stubs = require("support.stubs")
 Stubs.install()
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
+local job_runs, job_cancels = 0, 0
+package.preload["workers.job"] = function()
+    return {
+        run = function(worker, opts)
+            job_runs = job_runs + 1
+            local cancelled = false
+            local job = {
+                cancel = function()
+                    cancelled = true
+                    job_cancels = job_cancels + 1
+                end,
+            }
+            require("ui/uimanager"):nextTick(function()
+                if cancelled then return end
+                local ok, result = pcall(worker, {
+                    post = function(message)
+                        if not cancelled and opts.on_progress then opts.on_progress(message) end
+                    end,
+                })
+                if cancelled then return end
+                if ok then
+                    if opts.on_done then opts.on_done(result) end
+                elseif opts.on_failed then
+                    opts.on_failed(result)
+                end
+            end)
+            return job
+        end,
+    }
+end
 package.preload["utils.settings"] = function()
     return { get = function() return {} end }
 end
@@ -55,6 +85,7 @@ Marks._matches_key = nil
 Marks._render_key = nil
 Marks:rebuild()
 Assert.len(Marks._marks, 0, "首帧不做全书扫描，标记要等下一 tick")
+Assert.eq(job_runs, 1)
 Stubs.flush()
 Marks:rebuild()
 Assert.len(Marks._marks, 2)
@@ -65,6 +96,13 @@ Marks.invalidate()
 Assert.len(Marks._matches, 0)
 Assert.len(Marks._marks, 0)
 Assert.eq(Marks._revision, 1)
+
+-- 实体变化或关书必须取消尚未完成的扫描。
+Marks:rebuild()
+Assert.eq(job_runs, 2)
+Marks.invalidate()
+Assert.eq(job_cancels, 1)
+Stubs.flush()
 
 -- 分页文档（PDF/DJVU）：findAllText 给页码 + boxes，nativeToPageRectTransform 转页面坐标。
 package.loaded["xray.marks"] = nil

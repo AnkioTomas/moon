@@ -355,6 +355,9 @@ do
     Popup.setListItems(menu, nil, { "x" })
     Assert.eq(menu.page, 1)
     Assert.eq(menu.title, "新标题") -- title 为 nil 时保留
+    closed_widgets = {}
+    menu.item_table[1].callback()
+    Assert.eq(closed_widgets[1], menu, "异步替换后的单选项也必须关闭菜单")
 end
 
 -- setListItems：menu 为 nil 时静默返回

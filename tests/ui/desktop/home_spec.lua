@@ -125,6 +125,26 @@ ticks[1]()
 Assert.eq(desktop.rebuilds, before_refresh + 1)
 Assert.eq(calls, 2)
 
+-- 后台同步撞上在飞首页请求时不取消 Turbo；当前请求结束后顺序补拉。
+ticks = {}
+local pending_callback
+local cancels = 0
+desktop.source.recentBooksAsync = function(_, _, cb)
+    calls = calls + 1
+    pending_callback = cb
+    return { cancel = function() cancels = cancels + 1 end }
+end
+Home.fetch(desktop)
+Home.refreshData(desktop, "stats_sync")
+ticks[1]()
+Assert.eq(cancels, 0)
+Assert.is_true(desktop._home_refresh_pending)
+pending_callback({ data = { { stable_id = "pending" } } })
+Assert.is_false(desktop._home_refresh_pending and true or false)
+Assert.eq(#ticks, 1)
+ticks[1]()
+Assert.eq(cancels, 0)
+
 -- 进入首页统一入口：清状态 + 重建 + 通知源，下一次 page 必然重拉。
 local emitted
 desktop.plugin = {

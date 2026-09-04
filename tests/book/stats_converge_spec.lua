@@ -65,3 +65,15 @@ Assert.eq(table.concat(order, ","), "push")
 Assert.eq(result.pushed, 1)
 Assert.eq(result.pulled, 0)
 
+-- 上报失败不能阻断远端拉取；本地脏记录仍保留，后续继续重试。
+order, result = {}, nil
+source.pushStatsAsync = function(_, _, cb)
+    order[#order + 1] = "push"
+    cb(nil, "upload failed")
+end
+Stats.syncAsync(source, nil, function(value) result = value end)
+Assert.eq(table.concat(order, ","), "push,pull")
+Assert.eq(result.pushed, 0)
+Assert.eq(result.pulled, 1)
+Assert.eq(result.push_error, "upload failed")
+

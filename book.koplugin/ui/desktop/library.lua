@@ -457,7 +457,7 @@ function Library.showFilterRoot(desktop)
         })
     end
 
-    desktop._filter_root = Popup.list{
+    desktop._filter_root = Popup.sheet{
         title = _("筛选"),
         items = items,
         close_callback = function()

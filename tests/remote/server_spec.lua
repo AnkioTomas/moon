@@ -285,7 +285,11 @@ do
     has(body, "远程管理")
     has(body, "/file.html")
     has(body, "/input.html")
+    has(body, "/clipboard.html")
     has(body, "/settings.html")
+    has(body, "/logo.jpg")
+    has(body, "Ankio")
+    has(body, "https://ankio.net")
     Assert.is_true(client.closed, "Connection: close 后 socket 必须关闭")
 
     -- 静态资源：ctype 正确 + 内容命中；夜间模式媒体查询在 css 里
@@ -312,10 +316,18 @@ do
     has(b_file_js, "/api/extract?path=")
     has(b_file_js, "日志不可用")
 
+    local c_logo = newClient({ "GET /logo.jpg HTTP/1.1\r\n\r\n" })
+    drain(serve(c_logo))
+    local _, b_logo, h_logo = parseResponse(c_logo:output())
+    has(h_logo, "image/jpeg")
+    Assert.is_true(#b_logo > 100)
+
     local c_f = newClient({ "GET /file.html HTTP/1.1\r\n\r\n" })
     drain(serve(c_f))
     local _, b_f = parseResponse(c_f:output())
     has(b_f, "文件管理")
+    has(b_f, "/logo.jpg")
+    has(b_f, "ankio.net")
     Assert.is_nil(b_f:find("第 2 级目录为分类", 1, true))
     has(b_f, "file-main")
     has(b_f, "explorer-shell")
@@ -334,12 +346,28 @@ do
     local _, b_i = parseResponse(c_i:output())
     has(b_i, "远程输入")
     has(b_i, "/input.js")
+    has(b_i, "ankio.net")
+    Assert.is_nil(b_i:find("共享剪贴板", 1, true))
+
+    local c_cb = newClient({ "GET /clipboard.html HTTP/1.1\r\n\r\n" })
+    drain(serve(c_cb))
+    local _, b_cb = parseResponse(c_cb:output())
+    has(b_cb, "共享剪贴板")
+    has(b_cb, "/clipboard.js")
+    has(b_cb, "ankio.net")
+
+    local c_cb_js = newClient({ "GET /clipboard.js HTTP/1.1\r\n\r\n" })
+    drain(serve(c_cb_js))
+    local _, b_cb_js, h_cb_js = parseResponse(c_cb_js:output())
+    has(h_cb_js, "application/javascript")
+    has(b_cb_js, "/api/clipboard")
 
     local c_s = newClient({ "GET /settings.html HTTP/1.1\r\n\r\n" })
     drain(serve(c_s))
     local _, b_s = parseResponse(c_s:output())
     has(b_s, "连接配置")
     has(b_s, "/settings.js")
+    has(b_s, "ankio.net")
 
     -- 静态路由非 GET → 405；未知路径 → 404
     local c_p = newClient({ "POST /style.css HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
