@@ -62,7 +62,7 @@ local function openHandlers(ctx)
     return on_open, on_read
 end
 
---- 造一个可点按的封面格子（带角标，封面左对齐在格宽内）。
+--- 造一个与图书馆一致的封面格子：封面居中、进度角标、下方单行书名。
 ---@param ctx table 首页组件上下文（desktop / plugin / source）
 ---@param book Book 要显示的书
 ---@param cell_w number 格子宽（可大于封面宽）
@@ -76,14 +76,27 @@ local function coverCell(ctx, book, cell_w, cw, ch, on_open)
         badge = true,
         show_parent = ctx.desktop,
     }))
-    local tap = BookInfo.tappable(cell_w, ch, function()
+    local title_gap = UI.sz(4)
+    local title_h = UI.sz(22)
+    local total_h = ch + title_gap + title_h
+    local tap = BookInfo.tappable(cell_w, total_h, function()
         if on_open then on_open(book) end
     end)
-    tap[1] = LeftContainer:new{
-        dimen = Geom:new{ w = cell_w, h = ch },
-        cover,
+    tap[1] = VerticalGroup:new{
+        align = "center",
+        CenterContainer:new{
+            dimen = Geom:new{ w = cell_w, h = ch },
+            cover,
+        },
+        VerticalSpan:new{ width = title_gap },
+        TextWidget:new{
+            text = BookInfo.title(book),
+            face = UI.face("xx_smallinfofont", 13),
+            max_width = cell_w,
+            fgcolor = Blitbuffer.COLOR_BLACK,
+        },
     }
-    return tap, ch
+    return tap, total_h
 end
 
 --- hero 预览：固定封面宽，按 grid_max_cols 换行；末行不满列不拉伸。
@@ -100,11 +113,11 @@ end
 ---@return number pages 总页数，恒为 1
 local function buildFillGrid(ctx, books, w, pad, max_h, on_open)
     local avail = math.max(1, w - pad * 2)
-    local _slot_w, cw, ch, cols, cgap, row_gap = UI.denseCoverMetrics(avail, max_h, {
-        gap = UI.sz(6),
-        row_gap = UI.sz(10),
-        title_extra = 0,
-        min_cols = 1,
+    -- 首页网格与图书馆一样由列宽决定封面宽度；高度只限制列数，
+    -- 不触发「为了硬塞两行而缩窄封面」的垂直压缩。
+    local slot_w, cw, ch, cols, cgap, row_gap, cell_h = UI.denseCoverMetrics(avail, 0, {
+        title_extra = UI.sz(4) + UI.sz(22),
+        max_h = max_h,
     })
 
     local grid = VerticalGroup:new{ align = "left" }
@@ -127,14 +140,14 @@ local function buildFillGrid(ctx, books, w, pad, max_h, on_open)
             margin = 0,
             row_group,
         })
-        grid_h = grid_h + ch
+        grid_h = grid_h + cell_h
         row_group = HorizontalGroup:new{}
         col_i = 0
         row_n = row_n + 1
     end
 
     for _, book in ipairs(books) do
-        local cell = coverCell(ctx, book, cw, cw, ch, on_open)
+        local cell = coverCell(ctx, book, slot_w, cw, ch, on_open)
         if col_i > 0 then
             table.insert(row_group, HorizontalSpan:new{ width = cgap })
         end
@@ -165,11 +178,11 @@ end
 ---@return number pages 总页数
 local function buildPagedGrid(ctx, books, w, pad, budget_h, page, on_open)
     local avail = math.max(1, w - pad * 2)
-    local _slot_w, cw, ch, cols, cgap, row_gap = UI.denseCoverMetrics(avail, budget_h, {
-        title_extra = 0,
-        min_cols = 1,
+    local slot_w, cw, ch, cols, cgap, row_gap, cell_h = UI.denseCoverMetrics(avail, 0, {
+        title_extra = UI.sz(4) + UI.sz(22),
+        max_h = budget_h,
     })
-    local rows = math.max(1, math.floor((budget_h + row_gap) / (ch + row_gap)))
+    local rows = math.max(1, math.floor((budget_h + row_gap) / (cell_h + row_gap)))
     local page_size = math.max(1, cols * rows)
     local pages = math.max(1, math.ceil(#books / page_size))
     page = Pager.clamp(page, pages)
@@ -196,14 +209,14 @@ local function buildPagedGrid(ctx, books, w, pad, budget_h, page, on_open)
             margin = 0,
             row_group,
         })
-        grid_h = grid_h + ch
+        grid_h = grid_h + cell_h
         row_group = HorizontalGroup:new{}
         col_i = 0
         row_n = row_n + 1
     end
 
     for i = start_i, stop_i do
-        local cell = coverCell(ctx, books[i], cw, cw, ch, on_open)
+        local cell = coverCell(ctx, books[i], slot_w, cw, ch, on_open)
         if col_i > 0 then
             table.insert(row_group, HorizontalSpan:new{ width = cgap })
         end
