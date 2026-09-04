@@ -1,7 +1,7 @@
 --[[--
 db.book：books 表 CRUD（listBySource / 分类与系列查询已在 db_spec 覆盖）
 
-重点：路径登记（getByPath / touchPath / clearPath(s) / pathsAll / recentBySource / clearOpens）。
+重点：路径登记（getByPath / touchPath / clearPath(s) / pathsAll）。
 
 @module tests.db.book_spec
 --]]
@@ -30,6 +30,10 @@ local function stubDbDeps()
     package.preload["ffi/sha2"] = function()
         return { md5 = function(s) return s end }
     end
+    package.preload["utils.log"] = function()
+        return { warn = function() end }
+    end
+    package.loaded["utils.log"] = nil
 end
 
 local function clearMods()
@@ -180,7 +184,7 @@ do
 
     Assert.is_true(BookDB.upsertRemote({ source_id = "moon", stable_id = "store.epub" }))
     local q = calls[#calls]
-    -- 去掉 favorite 后：12 列绑定 + ON CONFLICT 成员标志 = 13；VALUES 不得多一个 ?
+    -- 12 列绑定 + ON CONFLICT 成员标志 = 13；VALUES 不得多一个 ?
     local qmarks = select(2, q.sql:gsub("%?", "%?"))
     Assert.eq(qmarks, 13)
     Assert.eq(q.argc, 13)
@@ -199,7 +203,7 @@ do
     clearMods()
 end
 
--- ── reconcile：先隐藏旧成员，再恢复完整快照；任一写失败整体回滚 ──
+-- ── reconcile：先 upsert 快照，再把 fetched_at 未刷新的成员标 inactive ──
 do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection)
@@ -207,9 +211,12 @@ do
         { stable_id = "a.epub", title = "A" },
         { source_id = "moon", stable_id = "b.epub", title = "B" },
     }))
-    local hide, inserts, commit = 0, 0, false
+    local deactivate, inserts, commit = 0, 0, false
     for _, call in ipairs(calls) do
-        if call.sql == "UPDATE books SET in_library=0 WHERE source_id=?;" then hide = hide + 1 end
+        if call.sql:find("UPDATE books SET in_library=0", 1, true)
+            and call.sql:find("fetched_at<?", 1, true) then
+            deactivate = deactivate + 1
+        end
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
             Assert.eq(call.argc, 22) -- 2 行 × 11 个绑定参数，in_library 由 SQL 常量置 1
@@ -222,7 +229,7 @@ do
         end
         if call.sql == "COMMIT;" then commit = true end
     end
-    Assert.eq(hide, 1)
+    Assert.eq(deactivate, 1)
     Assert.eq(inserts, 1)
     Assert.is_true(commit)
     DbBase.close()
@@ -270,11 +277,11 @@ do
             return {
                 "moon", "id'1", "md5x", "标题", "作者",
                 66, "分类", "系列", "简介", 1000,
-                "/cache/moon/book/x/book.epub", 200, 1, 0, 0,
+                "/cache/moon/book/x/book.epub", 1, 0, 0,
             }, {
                 "source_id", "stable_id", "md5", "title", "authors",
                 "percent", "category", "series", "intro", "fetched_at",
-                "path", "last_open", "in_library", "metadata_dirty", "metadata_updated_at",
+                "path", "in_library", "metadata_dirty", "metadata_updated_at",
             }
         end,
     })
@@ -289,7 +296,6 @@ do
     Assert.eq(book.percent, 66)
     Assert.eq(book.fetched_at, 1000)
     Assert.eq(book.path, "/cache/moon/book/x/book.epub")
-    Assert.eq(book.last_open, 200)
     local q = calls[#calls]
     Assert.is_true(q.sql:find("FROM books WHERE source_id=? AND stable_id=? LIMIT 1;", 1, true) ~= nil)
     Assert.eq(q.argc, 2)
@@ -320,11 +326,11 @@ do
             return {
                 "moon", "b1", nil, "标题", nil,
                 0, nil, nil, nil, 0,
-                "/cache/moon/book/x/book.epub", 300, 1, 0, 0,
+                "/cache/moon/book/x/book.epub", 1, 0, 0,
             }, {
                 "source_id", "stable_id", "md5", "title", "authors",
                 "percent", "category", "series", "intro", "fetched_at",
-                "path", "last_open", "in_library", "metadata_dirty", "metadata_updated_at",
+                "path", "in_library", "metadata_dirty", "metadata_updated_at",
             }
         end,
     })
@@ -335,7 +341,6 @@ do
     Assert.eq(book.source_id, "moon")
     Assert.eq(book.stable_id, "b1")
     Assert.eq(book.path, "/cache/moon/book/x/book.epub")
-    Assert.eq(book.last_open, 300)
     local q = calls[#calls]
     Assert.is_true(q.sql:find("FROM books WHERE path=? LIMIT 1;", 1, true) ~= nil)
     Assert.eq(q.argc, 1)
@@ -345,21 +350,21 @@ do
     clearMods()
 end
 
--- ── touchPath：登记 path + last_open，全参数化 ────────────
+-- ── touchPath：只登记 path，不制造阅读状态 ────────────────
 do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection)
 
     Assert.is_true(BookDB.touchPath("local", "/a.epub", "/a.epub"))
     local q = calls[#calls]
-    Assert.is_true(q.sql:find("INSERT INTO books (source_id, stable_id, fetched_at, path, last_open)", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("INSERT INTO books (source_id, stable_id, fetched_at, path)", 1, true) ~= nil)
     Assert.is_true(q.sql:find("ON CONFLICT(source_id, stable_id) DO UPDATE", 1, true) ~= nil)
-    Assert.eq(q.argc, 4)
+    Assert.eq(q.argc, 3)
     Assert.eq(q.args[1], "local")
     Assert.eq(q.args[2], "/a.epub")
     Assert.eq(q.args[3], "/a.epub")
-    Assert.eq(type(q.args[4]), "number") -- last_open = os.time()
-    -- 第二次登记覆盖路径与打开时间
+    Assert.is_true(q.sql:find("last_open", 1, true) == nil)
+    -- 第二次登记仍只覆盖路径
     Assert.is_true(BookDB.touchPath("moon", "b1", "/cache/moon/book/x/book.epub"))
 
     DbBase.close()
@@ -437,59 +442,13 @@ do
     clearMods()
 end
 
--- ── recentBySource：last_open>0 倒序 + LIMIT 绑定 ─────────
-do
-    local connection, calls = makeConn({
-        resultset = function()
-            return {
-                { "local", "local" },
-                { "/b.epub", "/a.epub" },
-                { nil, "md5a" },
-                { "书名B", "书名A" },
-                { "作者B", nil },
-                { 10, 42 },
-                { nil, "sub" },
-                { nil, nil },
-                { nil, "介绍A" },
-                { 0, 1000 },
-                { "/b.epub", "/a.epub" },
-                { 200, 100 },
-                { 1, 1 },
-                { 0, 0 },
-                { 0, 0 },
-            }, 2
-        end,
-    })
-    local DbBase, BookDB = loadBook(connection)
-
-    local rows = BookDB.recentBySource("local", 24)
-    Assert.eq(#rows, 2)
-    Assert.eq(rows[1].stable_id, "/b.epub")
-    Assert.eq(rows[1].last_open, 200)
-    Assert.eq(rows[1].title, "书名B")
-    Assert.eq(rows[2].stable_id, "/a.epub")
-    local q = calls[#calls]
-    Assert.is_true(q.sql:find("pending_progress", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("COALESCE", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("ORDER BY b.last_open DESC", 1, true) ~= nil)
-    Assert.eq(q.args[1], "local")
-    Assert.eq(q.args[2], 24)
-
-    -- limit 缺省 24
-    BookDB.recentBySource("local")
-    Assert.eq(calls[#calls].args[2], 24)
-
-    DbBase.close()
-    clearMods()
-end
-
--- ── clearOpens：全表清打开记录与路径登记 ──────────────────
+-- ── clearPaths：清空全部路径登记 ─────────────────────────
 do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection)
 
-    Assert.is_true(BookDB.clearOpens())
-    Assert.eq(calls[#calls].sql, "UPDATE books SET path=NULL, last_open=0;")
+    Assert.is_true(BookDB.clearPaths())
+    Assert.eq(calls[#calls].sql, "UPDATE books SET path=NULL;")
 
     DbBase.close()
     clearMods()

@@ -87,10 +87,10 @@ function Sync.retryDirtyAsync()
             local source, err = Registry.resolve(id)
             if source then
                 Sync.runAsync(source, { dirty_only = true, skip_books = true }, function(_, sync_err)
-                    if sync_err then require("logger").warn("book dirty sync failed", id, sync_err) end
+                    if sync_err then require("utils.log").warn("book dirty sync failed", id, sync_err) end
                 end)
             elseif err then
-                require("logger").warn("book dirty source unavailable", id, err)
+                require("utils.log").warn("book dirty source unavailable", id, err)
             end
         end
     end

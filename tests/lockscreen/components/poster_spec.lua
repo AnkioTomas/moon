@@ -24,17 +24,19 @@ local db_rows = {}
 local db_sources = {}
 package.preload["db.book"] = function()
     return {
-        recentBySource = function(source_id, limit)
-            db_sources[#db_sources + 1] = source_id
-            local rows = {}
-            for i = 1, math.min(limit, #db_rows) do
-                rows[i] = db_rows[i]
-            end
-            return rows
-        end,
         listBySource = function(source_id)
             db_sources[#db_sources + 1] = source_id
             return db_rows, #db_rows
+        end,
+    }
+end
+package.preload["book.catalog"] = function()
+    return {
+        recentBooks = function(source_id, limit)
+            db_sources[#db_sources + 1] = source_id
+            local rows = {}
+            for i = 1, math.min(limit, #db_rows) do rows[i] = db_rows[i] end
+            return rows
         end,
     }
 end

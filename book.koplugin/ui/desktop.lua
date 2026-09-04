@@ -1,5 +1,5 @@
 --[[--
-Book 桌面壳 — 顶栏 + 底栏 + Tab 内容拼装。
+月读桌面壳 — 顶栏 + 底栏 + Tab 内容拼装。
   页逻辑在 home / library / store / insight / settings；本文件只做窗体与手势。
 
 布局（OverlapGroup 叠层）：
@@ -26,7 +26,7 @@ local GestureRange = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local UIManager = require("ui/uimanager")
-local logger = require("logger")
+local logger = require("utils.log")
 local _ = require("gettext")
 local Screen = Device.screen
 

@@ -10,7 +10,7 @@ local JSON = require("json")
 local BookDB = require("db.book")
 local MoonFont = require("utils.font")
 local Store = require("book.store")
-local logger = require("logger")
+local logger = require("utils.log")
 
 local M = {}
 

@@ -167,7 +167,7 @@ function ReaderSettings.sections(desktop)
     local dictionary_rows = {
         function(iw)
             return SettingRow.build(iw, {
-                kind = "toggle", icon = "book", title = _("Book 词典"),
+                kind = "toggle", icon = "book", title = _("月读词典"),
                 status = dictionary_on and _("开") or _("关"), status_on = dictionary_on,
                 callback = function()
                     reader.dictionary_enabled = not dictionary_on

@@ -197,6 +197,7 @@ function Settings.build(desktop)
             Maintenance.cacheRow(desktop),
             Maintenance.importNotesRow(),
             Maintenance.importStatsRow(),
+            Maintenance.debugLogRow(desktop),
             Maintenance.aboutRow(),
             Maintenance.closeRow(desktop),
         })

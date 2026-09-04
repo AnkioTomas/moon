@@ -4,7 +4,7 @@
 
 require("l10n").apply()
 
-local logger = require("logger")
+local logger = require("utils.log")
 
 ---@class BookQuickPanelRegistry
 ---@field get fun(id: string): BookQuickPanelAction|nil

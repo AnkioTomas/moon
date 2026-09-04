@@ -96,7 +96,7 @@ local ok, err = pcall(function()
     end
 
     -- ==================== 2. SwipeAnimation module ====================
-    local logger = require("logger")
+    local logger = require("utils.log")
     -- Module-level cache to avoid repeated requires on the _repaint hot path
     local ReaderUI = require("apps/reader/readerui")
     -- Shared animation tuning (single source of truth, defined in uimanager.lua)
@@ -418,5 +418,5 @@ local ok, err = pcall(function()
 end)
 
 if not ok then
-    require("logger").warn("[SwipeAnimationCorePatch] failed:", err)
+    require("utils.log").warn("[SwipeAnimationCorePatch] failed:", err)
 end

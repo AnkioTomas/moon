@@ -14,7 +14,7 @@
 --]]
 
 local socket = require("socket")
-local logger = require("logger")
+local logger = require("utils.log")
 local JSON = require("json")
 local Text = require("utils.text")
 

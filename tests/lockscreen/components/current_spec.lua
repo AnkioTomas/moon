@@ -7,38 +7,25 @@ lockscreen 当前阅读：所有书籍数据只读当前源数据库。
 local Assert = require("support.assert")
 
 local active_source = "moon"
-local book_source
-local progress_source
-local progress_stable_id
-local progress_value = {
-    fraction = 0.55,
+local recent_source
+local rows = {
+    { stable_id = "done", title = "Done", authors = "A", percent = 100 },
+    {
+        stable_id = "reading", title = "Reading", authors = "B", percent = 55,
     chapter_idx = 7,
     chapter_title = "数据库章节",
     page = 12,
     total_pages = 80,
+    },
 }
 local stats_sources = {}
-local rows = {
-    { stable_id = "done", title = "Done", authors = "A", percent = 100 },
-    { stable_id = "reading", title = "Reading", authors = "B", percent = 40 },
-}
 
-package.preload["db.book"] = function()
+package.preload["book.catalog"] = function()
     return {
-        recentBySource = function(source_id, limit)
-            book_source = source_id
+        recentBooks = function(source_id, limit)
+            recent_source = source_id
             Assert.eq(limit, 16)
             return rows
-        end,
-    }
-end
-
-package.preload["db.progress"] = function()
-    return {
-        get = function(source_id, stable_id)
-            progress_source = source_id
-            progress_stable_id = stable_id
-            return progress_value
         end,
     }
 end
@@ -83,9 +70,7 @@ package.loaded["lockscreen.components.current"] = nil
 local Current = require("lockscreen.components.current")
 local book = assert(Current.book(true))
 
-Assert.eq(book_source, "moon")
-Assert.eq(progress_source, "moon")
-Assert.eq(progress_stable_id, "reading")
+Assert.eq(recent_source, "moon")
 Assert.eq(stats_sources[1], "moon")
 Assert.eq(stats_sources[2], "moon")
 Assert.eq(book.source_id, "moon")
@@ -101,17 +86,14 @@ Assert.eq(book.cover, "moon/reading.png")
 Assert.eq(book.total_seconds, 3600)
 Assert.eq(book.buckets[1].key, "today")
 
--- books 行不存在章节字段；即使测试数据夹带旧字段也不得读取。
+-- 进度没有章节字段时保持为空。
 rows = {
     {
         stable_id = "poison",
         title = "Poison",
         percent = 20,
-        last_chapter_idx = 99,
-        chapter_title = "错误字段",
     },
 }
-progress_value = {}
 book = assert(Current.book())
 Assert.eq(book.stable_id, "poison")
 Assert.is_nil(book.chapter_idx)
@@ -120,6 +102,6 @@ Assert.is_nil(book.chapter_title)
 -- 当前源没有图书时不得回退到其它源或 ReaderSession。
 active_source = "wechat"
 rows = {}
-book_source = nil
+recent_source = nil
 Assert.is_nil(Current.book())
-Assert.eq(book_source, "wechat")
+Assert.eq(recent_source, "wechat")

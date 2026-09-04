@@ -29,13 +29,17 @@ end
 
 package.preload["db.book"] = function()
     return {
-        recentBySource = function(source_id)
-            db_sources[#db_sources + 1] = source_id
-            return recent
-        end,
         listBySource = function(source_id)
             db_sources[#db_sources + 1] = source_id
             return listed, #listed
+        end,
+    }
+end
+package.preload["book.catalog"] = function()
+    return {
+        recentBooks = function(source_id)
+            db_sources[#db_sources + 1] = source_id
+            return recent
         end,
     }
 end

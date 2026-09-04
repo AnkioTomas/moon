@@ -8,7 +8,7 @@
 local Event = require("ui/event")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
-local logger = require("logger")
+local logger = require("utils.log")
 local ProgressDB = require("db.progress")
 local ProgressPosition = require("types.book_progress")
 local Position = require("book.progress.position")
@@ -278,7 +278,6 @@ function Progress.syncAsync(source, opts, cb)
                 current_job = nil
                 if cancelled then return end
                 if not pos then finish(nil, err or "progress pull failed"); return end
-                pos.updated_at = os.time()
                 if ProgressDB.upsertRemote(source.id, identity.stable_id, pos) then
                     result.pulled = result.pulled + 1
                     nextIdentity()

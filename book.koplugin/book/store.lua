@@ -7,7 +7,7 @@ books/chapters → db.*（book.sqlite3）
 
 身份解析只有一条规则：物理路径精确查库——
 章节文件查 chapters 表，整本书查 books.path；都未中时
-.moon 内的文件拒开（必须从 Book 桌面打开），.moon 外的文件登记为 local 书。
+.moon 内的文件拒开（必须从月读桌面打开），.moon 外的文件登记为 local 书。
 各源只有在物理文件落地后调用 Store.touch（同步写库），成功后才打开文件。
 
 @module koplugin.book.book.store
@@ -56,7 +56,7 @@ function Store.rememberMany(books)
     end
 end
 
---- 用完整书架快照对账 books 表；失败时 BookDB 内部回滚。
+--- 用完整书架快照对账 books 表：upsert 全部远端条目，未刷新的成员标 inactive（不删行）。
 ---@param source_id string
 ---@param books Book[]
 ---@return SyncResult|nil result
@@ -210,7 +210,7 @@ function Store.isCurrentDocument(ui, identity)
 end
 
 --- 打开时确保身份：能解析则补登记打开记录；
---- .moon 内未知文件返回 nil（必须从 Book 桌面打开）；
+--- .moon 内未知文件返回 nil（必须从月读桌面打开）；
 --- .moon 外未入库文件一律当本地书登记（统计/进度挂到 local 源）。
 --- 返回的身份附带属主源实例（source 字段，可能为 nil）：身份属于哪个源就用哪个源实例
 --- （registry.resolve：current 匹配直接用，否则按 id 建实例），不许错用 current（串书根因）。
@@ -226,7 +226,7 @@ function Store.ensureIdentity(path)
         return id
     end
     if Paths.isMoonPath(path) then
-        return nil -- .moon 内未知文件必须从 Book 桌面打开
+        return nil -- .moon 内未知文件必须从月读桌面打开
     end
     -- 未入库 → 当本地书登记（标题取文件名；md5 供扫盘改名识别）。
     -- 已有行（如扫盘已解析元数据、仅 path 被清掉）只补 path，不覆盖元数据。

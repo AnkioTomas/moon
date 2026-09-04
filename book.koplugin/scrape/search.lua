@@ -8,7 +8,7 @@
 
 local Douban = require("scrape.douban")
 local Weread = require("scrape.weread")
-local logger = require("logger")
+local logger = require("utils.log")
 local Text = require("utils.text")
 local _ = require("gettext")
 

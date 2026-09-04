@@ -37,7 +37,7 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local logger = require("logger")
+local logger = require("utils.log")
 local lfs = require("libs/libkoreader-lfs")
 
 local UI = require("ui.components.bookui")

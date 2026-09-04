@@ -95,7 +95,7 @@ function Dictionary.manage(ui, changed_callback)
     end
     require("ui.components.popup").list{
         title = _("管理已安装字典"),
-        subtitle = _("选择当前字典，或删除 Book 安装的字典"),
+        subtitle = _("选择当前字典，或删除月读安装的字典"),
         items = items,
     }
 end

@@ -8,7 +8,7 @@ local Auth = require("source.wechat.auth")
 local Paths = require("utils.paths")
 local lfs = require("libs/libkoreader-lfs")
 local md5 = require("ffi/sha2").md5
-local logger = require("logger")
+local logger = require("utils.log")
 
 local Assets = {}
 

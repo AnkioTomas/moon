@@ -8,7 +8,7 @@ Book (moon) HTTP 客户端（Bearer Token）
 --]]
 
 local JSON = require("json")
-local logger = require("logger")
+local logger = require("utils.log")
 local Request = require("http.request")
 local Cache = require("http.cache")
 local Text = require("utils.text")
@@ -228,17 +228,6 @@ function Client:listBooksAsync(query, cb)
     }, cb)
 end
 
---- 拉取最近阅读列表（缓存 5 分钟）。
----@param limit number|nil 条数上限，缺省 8
----@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
----@return { cancel: fun() }|nil
-function Client:recentBooksAsync(limit, cb)
-    return self:_jsonAsync("GET", "/index/book/recent", {
-        query = { limit = limit or 8 },
-        cache_ttl = 5 * 60,
-    }, cb)
-end
-
 --- 拉取书库筛选项（分类、系列；缓存 5 分钟）。
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
@@ -307,14 +296,13 @@ function Client:getProgressAsync(filename, cb)
     }, cb)
 end
 
---- 上报阅读进度（表单编码）；成功后作废最近阅读与书架列表缓存。
+--- 上报阅读进度（表单编码）；成功后作废书架列表缓存。
 ---@param body table|nil 形如 { filename, frac, spine, page, percent, locator }
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:updateProgressAsync(body, cb)
     return self:_jsonAsync("POST", "/index/book/progressUpdate", { body = body or {} }, function(res, err)
         if res then
-            Request.clearCache("/index/book/recent")
             Request.clearCache("/index/book/list")
         end
         cb(res, err)

@@ -16,7 +16,7 @@
 --]]
 
 local lfs = require("libs/libkoreader-lfs")
-local logger = require("logger")
+local logger = require("utils.log")
 local JSON = require("json")
 local Request = require("http.request")
 local Paths = require("utils.paths")

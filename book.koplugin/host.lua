@@ -9,21 +9,21 @@ KOReader 宿主钩子：启动项菜单 + 桌面接管。
 
 菜单挂钩：
   registerMenu        — Dispatcher 手势 + 主菜单入口
-  pinSettingsMenu     — 设置里「Book 桌面」置顶
-  patchStartWithMenu  — 系统启动项插入 Book 书库
+  pinSettingsMenu     — 设置里「月读」置顶
+  patchStartWithMenu  — 系统启动项插入月读
 
 @module koplugin.book.host
 --]]
 
 local Dispatcher = require("dispatcher")
 local UIManager = require("ui/uimanager")
-local logger = require("logger")
+local logger = require("utils.log")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
 local Host = {}
 
---- G_reader_settings.start_with 的 Book 书库取值
+--- G_reader_settings.start_with 的月读取值
 Host.OPEN_ON_START_ID = "bookshelf_book"
 
 local MENU_ITEM_ID = "book_library"
@@ -38,7 +38,7 @@ local function isFileManager(plugin)
     return plugin and plugin.ui and not plugin.ui.document
 end
 
---- 启动项是否选中 Book 书库
+--- 启动项是否选中月读
 ---@return boolean
 local function isOpenOnStart()
     return G_reader_settings:readSetting("start_with", "filemanager") == Host.OPEN_ON_START_ID
@@ -66,7 +66,7 @@ local function registerMenu(plugin)
         Dispatcher:registerAction("book_open_shelf", {
             category = "none",
             event = "BookOpenShelf",
-            title = _("打开 Book 桌面"),
+            title = _("打开月读"),
             general = true,
             filemanager = true,
         })
@@ -76,7 +76,7 @@ local function registerMenu(plugin)
     end
 end
 
---- 设置菜单里把「Book 桌面」置顶（只做一次）
+--- 设置菜单里把「月读」置顶（只做一次）
 ---@return nil
 local function pinSettingsMenu()
     for _, modname in ipairs({
@@ -96,7 +96,7 @@ local function pinSettingsMenu()
     end
 end
 
---- 系统「启动时打开」插入 Book 书库，并修补 text_func（否则选中后标题为 nil）
+--- 系统「启动时打开」插入月读，并修补 text_func（否则选中后标题为 nil）
 ---@return nil
 local function patchStartWithMenu()
     local ok, FMMenu = pcall(require, "apps/filemanager/filemanagermenu")
@@ -109,7 +109,7 @@ local function patchStartWithMenu()
     end
     FMMenu._book_startwith_patched = true
 
-    local book_label = _("Book 书库")
+    local book_label = _("月读")
     local orig = FMMenu.getStartWithMenuTable
     FMMenu.getStartWithMenuTable = function(self)
         local item = orig(self)
@@ -131,7 +131,7 @@ local function patchStartWithMenu()
             end,
             radio = true,
         })
-        -- 原 text_func 只扫系统 id；选 Book 时对不上 → 返回 nil
+        -- 原 text_func 只扫系统 id；选月读时对不上 → 返回 nil
         local orig_text_func = item.text_func
         item.text_func = function()
             if isOpenOnStart() then

@@ -11,7 +11,7 @@ require("l10n").apply()
 
 local Device = require("device")
 local UIManager = require("ui/uimanager")
-local logger = require("logger")
+local logger = require("utils.log")
 
 local Menu = require("ui.panel.menu")
 local NativeSettings = require("ui.panel.native_settings")
@@ -76,7 +76,7 @@ local function ensureWidgets()
     return Widgets
 end
 
---- 关闭文档后回到 Book 桌面，而不是 KOReader 原生文件管理器。
+--- 关闭文档后回到月读桌面，而不是 KOReader 原生文件管理器。
 ---@return nil
 local function openBookDesktop()
     local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
@@ -92,7 +92,7 @@ local function openBookDesktop()
     end
 end
 
---- 退出阅读会话并回到 Book 桌面。
+--- 退出阅读会话并回到月读桌面。
 ---@param ui table|nil
 ---@param menu table|nil
 ---@return nil
@@ -174,7 +174,7 @@ local function syncBarSeparator(menu)
     if not ok then error(err, 0) end
 end
 
---- 替换 TouchMenu 的 item 列表为 Book 面板自绘内容。
+--- 替换 TouchMenu 的 item 列表为月读面板自绘内容。
 ---@param menu table
 ---@return nil
 local function renderPanelContent(menu)
@@ -348,7 +348,7 @@ local function tabIndex(menu, marker)
     end
 end
 
---- 阅读模式下把 filemanager Tab 重定向到 Book 桌面。
+--- 阅读模式下把 filemanager Tab 重定向到月读桌面。
 ---@param ReaderMenu table
 ---@return nil
 local function patchFileBrowserButton(ReaderMenu)

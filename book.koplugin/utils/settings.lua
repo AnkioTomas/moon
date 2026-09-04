@@ -15,6 +15,7 @@ local M = {}
 local DEFAULTS = {
     common = {
         active_source = "local",
+        book_debug_enabled = false,
     },
     display = {
         ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,

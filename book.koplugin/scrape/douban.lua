@@ -8,7 +8,7 @@
 --]]
 
 local Request = require("http.request")
-local logger = require("logger")
+local logger = require("utils.log")
 local Text = require("utils.text")
 local _ = require("gettext")
 

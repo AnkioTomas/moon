@@ -6,7 +6,7 @@ Source 注册表：单活跃源，候选创建 + 原子激活。
 --]]
 
 local MoonSettings = require("utils.settings")
-local logger = require("logger")
+local logger = require("utils.log")
 local _ = require("gettext")
 
 --- 简易模板替换（避免测试环境依赖 string.pack）。

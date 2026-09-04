@@ -143,6 +143,7 @@ do
     Assert.is_true(q.sql:find("total_pages", 1, true) ~= nil)
     -- sync_status 是绑定参数（第 12 个），不再拼进 SQL
     Assert.is_true(q.sql:find("sync_status=excluded.sync_status", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("updated_at=MAX(excluded.updated_at, pending_progress.updated_at)", 1, true) ~= nil)
     Assert.eq(q.argc, 12)
     Assert.eq(q.args[12], 0)
     Assert.eq(q.args[1], "moon")
@@ -217,6 +218,20 @@ do
     clearMods()
 end
 
+-- ── 远端缺时间戳不得把同步时间伪装成阅读时间 ──────────────
+do
+    local connection, calls = makeConn()
+    local DbBase, ProgressDB = loadProgress(connection)
+    Assert.is_true(ProgressDB.upsertRemote("wechat", "99", { fraction = 0.4 }))
+    local q = calls[#calls - 1]
+    Assert.eq(q.args[1], "wechat")
+    Assert.eq(q.args[2], "99")
+    Assert.eq(q.args[11], 0)
+
+    DbBase.close()
+    clearMods()
+end
+
 -- ── all(source_id)：带过滤走 prepare 绑定，行映射正确 ────
 do
     local connection, calls = makeConn({
@@ -267,6 +282,39 @@ do
     Assert.is_true(q.sql:find("ORDER BY updated_at ASC", 1, true) ~= nil)
     Assert.eq(q.argc, 1)
     Assert.eq(q.args[1], "moon")
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── recent：仅由 pending_progress 决定准入与顺序 ─────────
+do
+    local connection, calls = makeConn({
+        resultset = function()
+            return {
+                { "moon", "moon" },
+                { "b.epub", "a.epub" },
+                { 0.8, 0.2 },
+                { nil, nil }, { nil, nil }, { nil, nil },
+                { nil, nil }, { nil, nil }, { nil, nil }, { nil, nil },
+                { 2000, 1000 },
+                { 1, 1 },
+            }, 2
+        end,
+    })
+    local DbBase, ProgressDB = loadProgress(connection)
+
+    local rows = ProgressDB.recent("moon", 24)
+    Assert.eq(rows[1].stable_id, "b.epub")
+    Assert.eq(rows[1].fraction, 0.8)
+    local q = calls[#calls]
+    Assert.is_true(q.sql:find("FROM pending_progress p", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("EXISTS", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("b.in_library=1", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("last_open", 1, true) == nil)
+    Assert.is_true(q.sql:find("ORDER BY p.updated_at DESC, p.stable_id ASC", 1, true) ~= nil)
+    Assert.eq(q.args[1], "moon")
+    Assert.eq(q.args[2], 24)
 
     DbBase.close()
     clearMods()

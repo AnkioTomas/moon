@@ -8,7 +8,7 @@ Microsoft Edge 翻译传输：供 KOReader 翻译 UI 使用。
 --]]
 
 local JSON = require("json")
-local logger = require("logger")
+local logger = require("utils.log")
 local Text = require("utils.text")
 
 local Edge = {

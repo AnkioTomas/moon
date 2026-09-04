@@ -6,7 +6,7 @@ AI JSON 解码：剥离 Markdown fence，再解析对象。
 
 local JSON = require("json")
 local Text = require("utils.text")
-local logger = require("logger")
+local logger = require("utils.log")
 
 local AiJson = {}
 

@@ -16,7 +16,7 @@ local BookDB = require("db.book")
 local Paths = require("utils.paths")
 local Text = require("utils.text")
 local SourceCapabilities = require("types.book_source").SourceCapabilities
-local logger = require("logger")
+local logger = require("utils.log")
 local _ = require("gettext")
 local T = require("ffi/util").template
 

@@ -36,6 +36,51 @@ do
 end
 
 do
+    local rows = Mapper.shelfProgressRows({
+        bookProgress = {
+            { bookId = "1", progress = 40, readUpdateTime = 1700000000 },
+        },
+    })
+    Assert.eq(rows[1].updated_at, 1700000000)
+end
+
+do
+    local rows = Mapper.shelfProgressRows({
+        books = { { bookId = "9", readUpdateTime = 1800000000 } },
+        bookProgress = { { bookId = "9", progress = 20 } },
+    })
+    Assert.eq(#rows, 1)
+    Assert.eq(rows[1].stable_id, "9")
+    Assert.eq(rows[1].updated_at, 1800000000)
+end
+
+do
+    local rows = Mapper.shelfProgressRows({
+        books = { { bookId = "9", readUpdateTime = 1800000000 } },
+        bookProgress = {},
+    })
+    Assert.eq(#rows, 0, "没有阅读进度的书不得进入最近阅读")
+end
+
+do
+    local shelf = {
+        books = { { bookId = "1", title = "A" } },
+        recentBooks = { { bookId = "2", title = "B" } },
+        finishReadBooks = { { bookId = "1", title = "A dup" }, { bookId = "3", title = "C" } },
+        bookProgress = { { bookId = "1", progress = 33 } },
+        albums = {},
+    }
+    local list = Mapper.shelfList(shelf)
+    Assert.eq(#list.data, 3)
+    local ids = {}
+    for _, b in ipairs(list.data) do ids[b.stable_id] = b.title end
+    Assert.eq(ids["1"], "A")
+    Assert.eq(ids["2"], "B")
+    Assert.eq(ids["3"], "C")
+    Assert.eq(list.data[1].percent, 33)
+end
+
+do
     local shelf = {
         books = { { bookId = "1", title = "A" } },
         bookProgress = { { bookId = "1", progress = 33 } },

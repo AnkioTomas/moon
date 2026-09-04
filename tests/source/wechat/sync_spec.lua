@@ -17,13 +17,14 @@ local Annotations = require("source.wechat.annotations")
 do
     local rows = Mapper.shelfProgressRows({
         bookProgress = {
-            { bookId = "1", progress = 40, chapterUid = "u1" },
+            { bookId = "1", progress = 40, chapterUid = "u1", readUpdateTime = 1700000000 },
         },
     })
     Assert.eq(#rows, 1)
     Assert.eq(rows[1].stable_id, "1")
     Assert.eq(rows[1].fraction, 0.4)
     Assert.eq(rows[1].chapter_uid, "u1")
+    Assert.eq(rows[1].updated_at, 1700000000)
 end
 
 do

@@ -9,7 +9,7 @@
 ---@field total_pages integer|nil 当前文档总页数
 ---@field locator string|nil XPointer/CFI 等精确定位
 ---@field extra table|nil 源私有定位字段，原样往返本地库；跨源代码不得解读其内容
----@field updated_at integer|nil 待上传版本号，仅本地队列使用
+---@field updated_at integer|nil 进度/阅读最后活跃时间（含远端 readUpdateTime）
 
 local ProgressPosition = {}
 

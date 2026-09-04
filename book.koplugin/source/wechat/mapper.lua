@@ -170,6 +170,29 @@ function Mapper.progressByBookId(shelf)
     return map
 end
 
+--- 合并书架各列表并按 bookId 去重。
+---@param into table[]
+---@param seen table<string, boolean>
+---@param rows table|nil
+local function appendShelfRows(into, seen, rows)
+    if type(rows) ~= "table" then
+        return
+    end
+    for _, row in ipairs(rows) do
+        local book = unwrapBookRow(row)
+        if type(book) == "table" then
+            local id = book.bookId or book.id or book.book_id
+            if id ~= nil then
+                id = tostring(id)
+                if not seen[id] then
+                    seen[id] = true
+                    into[#into + 1] = row
+                end
+            end
+        end
+    end
+end
+
 --- 书架 wire → BookListResult。
 ---@param shelf table
 ---@param on_cover fun(stable_id: string, url: string)|nil
@@ -177,15 +200,11 @@ end
 function Mapper.shelfList(shelf, on_cover)
     local prog_map = Mapper.progressByBookId(shelf)
     local books = {}
-    local list = shelf.books
-        or shelf.recentBooks
-        or (shelf.data and shelf.data.books)
-        or {}
-    if #list == 0 and type(shelf.finishReadBooks) == "table" then
-        for _, row in ipairs(shelf.finishReadBooks) do
-            list[#list + 1] = row
-        end
-    end
+    local list, seen = {}, {}
+    appendShelfRows(list, seen, shelf.books)
+    appendShelfRows(list, seen, shelf.recentBooks)
+    appendShelfRows(list, seen, shelf.finishReadBooks)
+    appendShelfRows(list, seen, shelf.data and shelf.data.books)
     for _, row in ipairs(list) do
         local b, cover = Mapper.book(row)
         if b then
@@ -369,11 +388,52 @@ function Mapper.progress(data)
     }, chapter_uid
 end
 
+--- 从 wire 行解出最近阅读时间戳。
+---@param row table|nil
+---@return number|nil
+local function readUpdatedAt(row)
+    if type(row) ~= "table" then
+        return nil
+    end
+    local ts = tonumber(row.readUpdateTime or row.read_update_time or row.updateTime)
+    if ts and ts > 0 then
+        return ts
+    end
+    return nil
+end
+
+--- 书架条目上的真实阅读时间，供对应进度行补全时间戳。
+---@param shelf table|nil
+---@return table<string, number>
+local function readTimesByBookId(shelf)
+    if type(shelf) ~= "table" then return {} end
+    local list, seen, out = {}, {}, {}
+    appendShelfRows(list, seen, shelf.books)
+    appendShelfRows(list, seen, shelf.recentBooks)
+    appendShelfRows(list, seen, shelf.finishReadBooks)
+    appendShelfRows(list, seen, shelf.data and shelf.data.books)
+    for _, row in ipairs(list) do
+        local book = unwrapBookRow(row)
+        local id = type(book) == "table" and (book.bookId or book.id or book.book_id)
+        local ts = readUpdatedAt(book)
+        if id ~= nil and ts then out[tostring(id)] = ts end
+    end
+    for _, album in ipairs(shelf.albums or {}) do
+        local info = album.albumInfo or album
+        local extra = album.albumInfoExtra or {}
+        local id = info and (info.albumId or album.albumId)
+        local ts = tonumber(extra.lectureReadUpdateTime or info.updateTime)
+        if id ~= nil and ts and ts > 0 then out[tostring(id)] = ts end
+    end
+    return out
+end
+
 --- 书架 wire 附带进度条目 → pending_progress 候选。
 ---@param shelf table|nil
----@return table[] rows { stable_id, fraction, chapter_idx?, chapter_fraction?, chapter_uid? }
+---@return table[] rows { stable_id, fraction, chapter_idx?, chapter_fraction?, chapter_uid?, updated_at? }
 function Mapper.shelfProgressRows(shelf)
     local prog_map = Mapper.progressByBookId(shelf)
+    local read_times = readTimesByBookId(shelf)
     local rows = {}
     for id, p in pairs(prog_map) do
         local prog = tonumber(p.progress or p.readingProgress)
@@ -387,6 +447,7 @@ function Mapper.shelfProgressRows(shelf)
                 chapter_idx = chapter_idx,
                 chapter_fraction = chapter_fraction,
                 chapter_uid = p.chapterUid or p.chapter_uid,
+                updated_at = readUpdatedAt(p) or read_times[id],
             }
         end
     end

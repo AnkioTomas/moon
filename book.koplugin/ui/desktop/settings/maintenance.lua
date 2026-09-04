@@ -15,6 +15,7 @@ local UI = require("ui.components.bookui")
 local Icon = require("ui.components.icon")
 local SettingRow = require("ui.components.settingrow")
 local Cache = require("book.cache")
+local MoonSettings = require("utils.settings")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -44,7 +45,7 @@ local function showAbout()
     local body = VerticalGroup:new{ align = "center" }
     local icon = Icon.widget{ name = "info", size = 44 }
     if icon then table.insert(body, icon); table.insert(body, VerticalSpan:new{ width = UI.sz(10) }) end
-    table.insert(body, TextWidget:new{ text = _("Book 书库"), face = UI.face("cfont", 20) })
+    table.insert(body, TextWidget:new{ text = _("月读"), face = UI.face("cfont", 20) })
     table.insert(body, VerticalSpan:new{ width = UI.sz(4) })
     table.insert(body, TextWidget:new{ text = T(_("版本 %1"), ver), face = UI.face("xx_smallinfofont", 13), fgcolor = UI.muted() })
     table.insert(body, VerticalSpan:new{ width = UI.sz(12) })
@@ -146,6 +147,23 @@ function Maintenance.importStatsRow()
                     end
                     UIManager:show(InfoMessage:new{ text = text, timeout = 2 })
                 end)
+            end,
+        })
+    end
+end
+
+--- 造「调试日志」开关；控制 DEBUG/INFO，WARN/ERROR 始终写入独立日志。
+---@param desktop table 桌面实例
+---@return fun(iw: number): table
+function Maintenance.debugLogRow(desktop)
+    return function(iw)
+        local enabled = MoonSettings.get("common").book_debug_enabled
+        return SettingRow.build(iw, {
+            kind = "toggle", icon = "bug_report", title = _("调试日志"),
+            status = enabled and _("开") or _("关"), status_on = enabled,
+            callback = function()
+                MoonSettings.save({ book_debug_enabled = not enabled })
+                desktop:rebuild()
             end,
         })
     end

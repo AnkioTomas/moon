@@ -22,7 +22,7 @@ HTML → EPUB（多章节、内嵌图片、元数据）。
 --]]
 
 local UIManager = require("ui/uimanager")
-local logger = require("logger")
+local logger = require("utils.log")
 local Header = require("http.header")
 local Text = require("utils.text")
 local _ = require("gettext")

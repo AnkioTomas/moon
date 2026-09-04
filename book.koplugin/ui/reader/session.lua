@@ -136,7 +136,7 @@ function Session.onReaderReady(plugin)
         local UIManager = require("ui/uimanager")
         local ConfirmBox = require("ui/widget/confirmbox")
         UIManager:show(ConfirmBox:new{
-            text = _("无法识别此书，请从 Book 桌面打开。"),
+            text = _("无法识别此书，请从月读打开。"),
             ok_text = _("关闭文档"),
             ok_callback = function() ui:onClose() end,
             cancel_text = _("仍要阅读"),

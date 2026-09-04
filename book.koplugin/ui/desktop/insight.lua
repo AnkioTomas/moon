@@ -24,7 +24,7 @@ local UIManager = require("ui/uimanager")
 local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local logger = require("logger")
+local logger = require("utils.log")
 local _ = require("gettext")
 local META_TTL = 7 * 24 * 60 * 60
 

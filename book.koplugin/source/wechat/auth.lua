@@ -14,7 +14,7 @@ Skills API Key 经 ``GET /api/skills/apikeyGet`` 自动获取，供 Agent 网关
 --]]
 
 local JSON = require("json")
-local logger = require("logger")
+local logger = require("utils.log")
 local Request = require("http.request")
 local Header = require("http.header")
 local Text = require("utils.text")

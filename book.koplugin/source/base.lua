@@ -57,8 +57,8 @@ end
 ---   document_close  — 关闭文档
 ---   chapter_changed — 按章会话切换章节，payload = { identity }
 ---   fm_open         — FileManager 主界面显示
----   desktop_open    — Book 桌面打开并可见，payload = Desktop 实例
----   desktop_resume  — Book 桌面从休眠恢复，payload = Desktop 实例
+---   desktop_open    — 月读桌面打开并可见，payload = Desktop 实例
+---   desktop_resume  — 月读桌面从休眠恢复，payload = Desktop 实例
 ---   home_open       — 用户进入首页；源侧按节流策略检查书架
 ---   library_refresh_request — 用户在图书馆点击刷新，要求源强制刷新书架
 ---   suspend         — 设备休眠前（有打开文档时）
@@ -81,7 +81,7 @@ local function syncDesktopBooks(self, desktop, opts)
         desktop._books_sync_pending = false
         if desktop._closed or desktop.source ~= self then return end
         if not result then
-            require("logger").warn("book shelf sync failed", self.id, err)
+            require("utils.log").warn("book shelf sync failed", self.id, err)
             desktop:invalidateHome()
             if desktop.tab == "library" then
                 desktop._library_state = { books = {}, err = err or _("同步失败") }
@@ -193,7 +193,7 @@ function SourceBase:syncStatsAsync(opts, cb)
     return require("book.stats").syncAsync(self, opts, cb)
 end
 
---- 最近阅读：只读本地 books.last_open（book.catalog）。
+--- 最近阅读：仅按本地阅读进度更新时间排序（book.catalog）。
 ---@param limit number|nil
 ---@param cb fun(data: BookListResult|nil, err: string|nil)
 ---@return table|nil

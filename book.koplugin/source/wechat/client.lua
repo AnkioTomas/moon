@@ -8,7 +8,7 @@ Web 扫码会话（Cookie + X-Vid + X-Skey）只走 ``weread.qq.com/web/*``；
 --]]
 
 local JSON = require("json")
-local logger = require("logger")
+local logger = require("utils.log")
 local Auth = require("source.wechat.auth")
 local Context = require("source.wechat.context")
 local Protocol = require("source.wechat.protocol")

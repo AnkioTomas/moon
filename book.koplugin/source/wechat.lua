@@ -14,7 +14,7 @@ local SourceBase = require("source.base")
 local ProgressPosition = require("types.book_progress")
 local JSON = require("json")
 local Protocol = require("source.wechat.protocol")
-local logger = require("logger")
+local logger = require("utils.log")
 local _ = require("gettext")
 
 local WeChat = {}
@@ -78,6 +78,7 @@ local function importShelfProgress(self, shelf, cb)
             fraction = row.fraction,
             chapter_idx = chapter_idx,
             chapter_fraction = row.chapter_fraction,
+            updated_at = row.updated_at,
             extra = (row.chapter_uid and chapter_idx)
                 and { chapter_uid = row.chapter_uid, chapter_idx = chapter_idx } or nil,
         })

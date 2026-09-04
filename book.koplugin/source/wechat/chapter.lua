@@ -8,7 +8,7 @@
 --]]
 
 local JSON = require("json")
-local logger = require("logger")
+local logger = require("utils.log")
 local Auth = require("source.wechat.auth")
 local Protocol = require("source.wechat.protocol")
 local Context = require("source.wechat.context")

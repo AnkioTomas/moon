@@ -8,6 +8,7 @@
 --]]
 
 local BookDB = require("db.book")
+local Catalog = require("book.catalog")
 local Library = require("lockscreen.components.library")
 local _ = require("gettext")
 
@@ -35,7 +36,7 @@ local M = {
 local function books(limit)
     limit = math.max(1, math.floor(tonumber(limit) or 1))
     local source_id = Library.activeSourceId()
-    local recent = BookDB.recentBySource(source_id, limit * 2)
+    local recent = Catalog.recentBooks(source_id, limit * 2)
     local result, seen = {}, {}
 
     --- 按 stable_id 去重后追加到结果，总数达 cap 即停。

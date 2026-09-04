@@ -9,7 +9,7 @@ sync_status=0 表示待上传，1 表示已与远端同步。
 --]]
 
 local Base = require("db.base")
-local logger = require("logger")
+local logger = require("utils.log")
 
 local StatsDB = {}
 

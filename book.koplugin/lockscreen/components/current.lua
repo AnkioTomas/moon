@@ -6,9 +6,8 @@
 @module koplugin.book.lockscreen.components.current
 --]]
 
-local BookDB = require("db.book")
+local Catalog = require("book.catalog")
 local StatsDB = require("db.stats")
-local ProgressDB = require("db.progress")
 local Library = require("lockscreen.components.library")
 local U = require("lockscreen.components.util")
 local _ = require("gettext")
@@ -69,7 +68,7 @@ end
 ---@return table|nil 书库为空时 nil
 local function currentBook()
     local source_id = Library.activeSourceId()
-    local recent = BookDB.recentBySource(source_id, 16)
+    local recent = Catalog.recentBooks(source_id, 16)
     if #recent == 0 then return nil end
     local row
     for _, book in ipairs(recent) do
@@ -79,18 +78,16 @@ local function currentBook()
         end
     end
     row = row or recent[1]
-    local progress = ProgressDB.get(source_id, row.stable_id) or {}
     return buildBook{
         source_id = source_id,
         stable_id = row.stable_id,
         title = row.title,
         authors = row.authors,
-        percent = progress.fraction ~= nil and progress.fraction * 100
-            or tonumber(row.percent) or 0,
-        chapter_idx = progress.chapter_idx,
-        chapter_title = progress.chapter_title,
-        page = progress.page,
-        total_pages = progress.total_pages,
+        percent = row.percent,
+        chapter_idx = row.chapter_idx,
+        chapter_title = row.chapter_title,
+        page = row.page,
+        total_pages = row.total_pages,
     }
 end
 
