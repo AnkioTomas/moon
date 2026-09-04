@@ -134,7 +134,7 @@ function Layout.build(ctx, state)
     for _, id in ipairs(layout_ids) do
         local comp = Base.find(id)
         if comp then
-            local range = comp.heightRange(ctx, state, { width = w })
+            local range = comp.heightRange(ctx, state, { width = w, height = h })
             range.comp = comp
             range.id = id
             ranges[#ranges + 1] = range
