@@ -383,6 +383,34 @@ function StatsDB.dailyBooksBySource(source_id)
     return rows
 end
 
+--- 微信周排行书单；stable_id 去掉合成前缀后恢复真实书籍身份。
+---@param source_id string
+---@return table[] rows { week_ymd, stable_id, seconds }
+function StatsDB.weeklyBooksBySource(source_id)
+    local result, nrows = Base.query(
+        [[SELECT date(start_time,'unixepoch','localtime'), stable_id, duration
+          FROM reading_stats
+          WHERE source_id=? AND record_type='book'
+            AND stable_id LIKE '__wr:week:%'
+          ORDER BY start_time, duration DESC;]],
+        source_id
+    )
+    local rows = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            local stable_id = tostring(result[2][i] or ""):match("^__wr:week:%d+:(.+)$")
+            if stable_id and stable_id ~= "" then
+                rows[#rows + 1] = {
+                    week_ymd = result[1][i],
+                    stable_id = stable_id,
+                    seconds = tonumber(result[3][i]) or 0,
+                }
+            end
+        end
+    end
+    return rows
+end
+
 --- 指定时间范围内某源的账单汇总。
 ---@param source_id string
 ---@param start_ts number
