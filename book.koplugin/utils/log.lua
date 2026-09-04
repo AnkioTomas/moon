@@ -1,7 +1,7 @@
 --[[--
 Book 独立文件日志。
 
-首次加载时清空上次运行的日志；后续日志积攒 10 条后经
+同一天内重启继续追加日志，跨天首次启动时清空旧日志；后续日志积攒 10 条后经
 SimpleJob 批量追加到 $DATA/.moon/book.log，不经过 KOReader logger。
 
 @module koplugin.book.utils.log
@@ -28,7 +28,12 @@ local function start()
         return Paths.logPath()
     end)
     if not ok then return false end
-    local file = io.open(path, "w")
+    local mode = "w"
+    local attr = require("libs/libkoreader-lfs").attributes(path)
+    if attr and os.date("%Y-%m-%d", attr.modification) == os.date("%Y-%m-%d") then
+        mode = "a"
+    end
+    local file = io.open(path, mode)
     if not file then return false end
     file:close()
     log_path = path
