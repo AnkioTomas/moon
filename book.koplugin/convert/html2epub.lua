@@ -25,6 +25,7 @@ local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
 local Header = require("http.header")
 local Text = require("utils.text")
+local Perf = require("utils.perf")
 local _ = require("gettext")
 
 local Html2Epub = {}
@@ -410,6 +411,7 @@ function Html2Epub.build(opts, cb)
     end
 
     local cancelled = false
+    local started_at = Perf.now()
     local active_job
     local pack_task
     local book_title = opts.title or _("未命名")
@@ -436,6 +438,7 @@ function Html2Epub.build(opts, cb)
             return
         end
         cancelled = true
+        logger.warn("book.html2epub failed", dest, Perf.elapsedMs(started_at), "ms", err)
         cb(nil, err)
     end
 
@@ -613,16 +616,18 @@ function Html2Epub.build(opts, cb)
                     return
                 end
                 if result == "ok" then
+                    logger.dbg("book.html2epub done", dest, total, "chapters",
+                        #images, "images", Perf.elapsedMs(started_at), "ms")
                     cb(true)
                     return
                 end
                 local msg = type(result) == "string" and result:match("^err:(.*)$") or nil
-                cb(nil, msg or result or _("写入 epub 失败"))
+                fail(msg or result or _("写入 epub 失败"))
             end,
             on_failed = function(err)
                 pack_task = nil
                 if not cancelled then
-                    cb(nil, err or _("写入 epub 失败"))
+                    fail(err or _("写入 epub 失败"))
                 end
             end,
         })
