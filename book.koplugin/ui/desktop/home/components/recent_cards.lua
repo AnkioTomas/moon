@@ -31,6 +31,15 @@ local FILL_RING = { 4, 6, 3, 7, 2, 8, 1, 9 }
 -- 绘制顺序：远 → 近，正中最后（叠在最上）
 local PAINT_ORDER = { 1, 9, 2, 8, 3, 7, 4, 6, 5 }
 
+function M.heightRange()
+    return {
+        min = UI.sz(120),
+        preferred = PREFERRED_H,
+        max = UI.sz(260),
+        grow = 2,
+    }
+end
+
 --- 造「进详情」与「直接开读」两个点按回调。
 ---@param ctx table 首页组件上下文（desktop / plugin / source）
 ---@return fun(book: Book) on_open 进书籍详情页
@@ -166,7 +175,7 @@ end
 ---@return table
 function M.build(ctx, state, opts)
     local w = opts.width
-    local h = math.min(opts.budget or PREFERRED_H, PREFERRED_H)
+    local h = opts.height
     local recent = state.recent
     local reading = state.reading or {}
     local on_read = select(2, openHandlers(ctx))

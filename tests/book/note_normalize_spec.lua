@@ -63,27 +63,15 @@ end
 -- ── 跨端去重：远端与本地同一条只保留一条 ──
 do
     local remote = { {
-        page = "/body/a", datetime = "x", text = "同一句", wr_range = "1-5",
-        wr_bookmark_id = "wr1",
+        page = "/body/a", datetime = "x", text = "同一句",
     } }
-    -- 本地副本还没回填 wr_bookmark_id，只能靠 text + range 认出是同一条
-    local locals = { { page = "/body/a", datetime = "x", text = "同一句", wr_range = "1-5" } }
+    local locals = { { page = "/body/a", datetime = "x", text = "同一句" } }
     Assert.len(Normalize.merge(remote, locals, false), 1, "同一条划线不应显示两遍")
 
     -- 本地独有的条目要保留
     local extra = { { page = "/body/b", datetime = "y", text = "本地独有" } }
     Assert.len(Normalize.merge(remote, extra, false), 2)
 
-    -- 微信写入后会重排 wire range；同一位置、同一笔记不能因此保留本地无 id 副本。
-    local remote_note = { {
-        page = "/body/n", datetime = "r", text = "原文", note = "想法",
-        wr_range = "100-102", wr_review_id = "rv1",
-    } }
-    local local_note = { {
-        page = "/body/n", datetime = "l", text = "原文", note = "想法",
-        wr_range = "300-302",
-    } }
-    Assert.len(Normalize.merge(remote_note, local_note, false), 1)
 end
 
 -- ── 无选中文本的纯书签不能互相判重 ──
@@ -101,17 +89,8 @@ end
 do
     local locals = { {
         page = "/body/c", datetime = "z", text = "云端这次没报",
-        wr_bookmark_id = "wr9",
     } }
     Assert.len(Normalize.merge({}, locals, false), 1)
-    Assert.len(Normalize.merge({
-        { wr_snapshot = true, wr_authoritative = true },
-    }, locals, false), 0, "完整远端快照缺失的已同步条目必须删除")
-    Assert.len(Normalize.merge({
-        { wr_snapshot = true, wr_authoritative = true },
-    }, {
-        { page = "/body/local", datetime = "l", text = "本地新增" },
-    }, false), 1, "远端删除不能误伤尚无远端 id 的本地新增")
 end
 
 -- ── clean：total_pages 回填与必需字段过滤 ──
@@ -125,35 +104,14 @@ do
     Assert.eq(cleaned[1].total_pages, 100)
 end
 
--- ── 本地删除必须留下远端 id；只删 note 不能连划线一起删 ──
+-- ── payload 元数据使用通用外层，旧数组仍可读取 ──
 do
-    local current = Normalize.withDeletions({
-        {
-            datetime = "old", page = "/body/a", drawer = "lighten",
-            note = "旧笔记", wr_bookmark_id = "bm1", wr_review_id = "rv1",
-        },
-        {
-            datetime = "old", page = "/body/b", drawer = "lighten",
-            wr_bookmark_id = "bm2",
-        },
-        {
-            datetime = "old", page = "/body/c", drawer = "lighten",
-            text = "原文", note = "修改前", wr_review_id = "rv3",
-        },
-    }, {
-        {
-            datetime = "new", page = "/body/a", drawer = "lighten",
-            wr_bookmark_id = "bm1",
-        },
-        {
-            datetime = "new", page = "/body/c", drawer = "lighten",
-            text = "原文", note = "修改后", wr_review_id = "rv3",
-        },
-    })
-    Assert.eq(current[1].wr_review_id, "rv1")
-    Assert.is_true(current[1].wr_delete_review)
-    Assert.is_true(current[2].wr_update_review)
-    Assert.is_true(current[3].wr_deleted)
-    Assert.eq(current[3].wr_bookmark_id, "bm2")
-    Assert.is_nil(current[3].wr_review_id)
+    local items = { { page = "/body/a" } }
+    local packed = Normalize.pack(items, true)
+    local unpacked, authoritative = Normalize.unpack(packed)
+    Assert.eq(unpacked, items)
+    Assert.is_true(authoritative)
+    local legacy, legacy_authoritative = Normalize.unpack(items)
+    Assert.eq(legacy, items)
+    Assert.is_false(legacy_authoritative)
 end

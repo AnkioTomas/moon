@@ -2,10 +2,9 @@
 
 local Assert = require("support.assert")
 
-local layout = { "recent_list" }
+local layout = { "recent_hero", "recent_list" }
 local home = {
     home_layout = layout,
-    home_recent_list_mode = "hero_grid",
 }
 local saves = 0
 local shown
@@ -30,6 +29,7 @@ package.preload["utils.settings"] = function()
 end
 package.preload["ui.desktop.home.components.base"] = function()
     local components = {
+        { id = "recent_hero", label = "当前阅读", icon = "auto_stories" },
         { id = "recent_list", label = "最近阅读列表", icon = "view_list" },
         { id = "clock", label = "时钟", icon = "schedule" },
     }
@@ -66,13 +66,13 @@ local Settings = require("ui.desktop.settings.home")
 local desktop = { rebuild = function() end }
 
 local sections = Settings.sections(desktop)
-Assert.len(sections[1].rows, 2)
+Assert.len(sections[1].rows, 1)
 local enabled_row = sections[2].rows[1](600)
 enabled_row.callback()
 local toggle = shown.buttons[1][1]
-Assert.is_false(toggle.enabled)
+Assert.is_true(toggle.enabled)
 toggle.callback()
-Assert.eq(saves, 0)
+Assert.eq(saves, 1)
 Assert.eq(layout[1], "recent_list")
 
 layout = { "clock" }

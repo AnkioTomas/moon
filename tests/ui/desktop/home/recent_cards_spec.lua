@@ -44,6 +44,7 @@ local part = Cards.build({}, {
     reading = {},
 }, {
     width = 600,
+    height = 200,
     budget = 200,
 })
 
@@ -57,6 +58,7 @@ Cards.build({
     },
 }, {}, {
     width = 600,
+    height = 200,
     budget = 200,
 })
 Assert.is_nil(opened)

@@ -291,10 +291,15 @@ end
 
 -- 完整远端快照为空时必须覆盖旧分片，并携带 authoritative 标记供 applyLocal 删除旧项。
 do
+    local merge_authoritative
     local authoritative = {
         id = "authoritative",
         pullNotesAsync = function(_, _identity, cb)
             cb({}, nil, { authoritative = true })
+        end,
+        mergeAnnotations = function(_, remote, _current, _paging, is_authoritative)
+            merge_authoritative = is_authoritative
+            return remote
         end,
     }
     local JSON = require("json")
@@ -317,9 +322,8 @@ do
     } }, function() end)
     Stubs.flush()
     local snapshot = JSON.decode(rows["authoritative:book.epub:2"].payload)
-    Assert.eq(#snapshot, 1)
-    Assert.is_true(snapshot[1].wr_snapshot)
-    Assert.is_true(snapshot[1].wr_authoritative)
+    Assert.is_true(snapshot.authoritative)
+    Assert.eq(#snapshot.items, 0)
 
     annotations = {
         {
@@ -343,6 +347,7 @@ do
         source = authoritative,
     })
     Assert.eq(#annotations, 0, "权威远端删除不能被本地防丢保护挡住")
+    Assert.is_true(merge_authoritative)
 end
 
 -- 上传窗口内用户又划了线：不能用上传时那份快照 + 旧修订号覆盖回去。

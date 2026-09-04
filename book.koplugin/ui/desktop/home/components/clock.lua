@@ -22,15 +22,22 @@ local M = {
 
 local DOW = { _("日"), _("一"), _("二"), _("三"), _("四"), _("五"), _("六") }
 
+function M.heightRange()
+    return {
+        min = UI.sz(64),
+        preferred = UI.sz(76),
+        max = UI.sz(104),
+        grow = 1,
+    }
+end
+
 ---@param ctx table
 ---@param _state table
 ---@param opts table
 ---@return table
 function M.build(ctx, _state, opts)
     local w = opts.width
-    local pad_y = UI.sz(10)
-    local body_h = UI.sz(56)
-    local total_h = body_h + pad_y * 2
+    local total_h = opts.height
     local time_widget = TextWidget:new{
         text = os.date("%H:%M"),
         face = UI.face("cfont", 36),
@@ -43,7 +50,7 @@ function M.build(ctx, _state, opts)
         fgcolor = UI.muted(),
     }
     local body = CenterContainer:new{
-        dimen = Geom:new{ w = w, h = body_h },
+        dimen = Geom:new{ w = w, h = total_h },
         VerticalGroup:new{
             align = "center",
             time_widget,
@@ -54,8 +61,6 @@ function M.build(ctx, _state, opts)
     local widget = FrameContainer:new{
         bordersize = 0,
         padding = 0,
-        padding_top = pad_y,
-        padding_bottom = pad_y,
         margin = 0,
         dimen = Geom:new{ w = w, h = total_h },
         body,
