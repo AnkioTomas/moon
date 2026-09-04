@@ -1,11 +1,8 @@
 --[[--
-远程输入 / 共享剪贴板路由（均复用 server 状态机，首参 self=server，不反向 require）：
+远程输入路由（复用 server 状态机，首参 self=server，不反向 require）：
 
 - /api/input     —— 输入框通道：GET → { active, text }（激活状态+全文，供光标预览）；
                     POST → addChars 光标处追加注入（保留撤销/重绘路径，语义不变）。
-- /api/clipboard —— 共享剪贴板：GET → { text }（设备最后复制的文本：阅读划线复制、
-                    链接复制等都会落进来）；POST → 整段写入设备剪贴板 + 同步进
-                    激活输入框（无激活输入框只写剪贴板，不报错）。空 body = 清空。
 
 POST body 走 server:_acceptText 攒内存不落盘（上限 256KB——一段文本足够），
 收齐后由 server._readBody 回调这里挂上的 finish 函数。
@@ -28,16 +25,6 @@ function Input.finishAppend(self, conn, text)
     if not ok then
         return self:_fail(conn, 409, err)
     end
-    return self:_queueResponse(conn, {
-        code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
-    })
-end
-
---- /api/clipboard body 收尾：剪贴板写入不受输入框影响。
----@param conn table
----@param text string 收齐的请求体文本（空串=清空）
-function Input.finishClipboard(self, conn, text)
-    self.handlers.set_clipboard(text)
     return self:_queueResponse(conn, {
         code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
     })
@@ -75,35 +62,6 @@ function Input.route(self, conn, method, headers, _query)
     return self:_queueResponse(conn, {
         code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
     })
-end
-
---- /api/clipboard：GET 回 { text }（设备最后复制的文本）；POST 整段写入剪贴板并同步进激活输入框。
---- 其余方法 405；空 body 表示清空。
----@param conn table
----@param method string
----@param headers table 已小写化的请求头
----@return true|nil true=已进 body 状态，等收齐后回调
-function Input.clipboard(self, conn, method, headers, _query)
-    if method == "GET" then
-        local st = self.handlers.get_clipboard() or {}
-        return self:_queueResponse(conn, {
-            code = 200,
-            ctype = "application/json; charset=utf-8",
-            body = JSON.encode({ text = st.text or "" }),
-        })
-    end
-    if method ~= "POST" then
-        return self:_fail(conn, 405, "Method Not Allowed")
-    end
-    local st = self:_acceptText(conn, headers, Input.TEXT_LIMIT, Input.finishClipboard)
-    if st == nil then
-        return
-    end
-    if st then
-        return true
-    end
-    -- 空 body = 清空
-    return Input.finishClipboard(self, conn, "")
 end
 
 return Input

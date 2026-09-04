@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 远程输入 / 共享剪贴板页（静态路由；逻辑在 /input.js，共享函数在 /js.js） -->
+<!-- 远程输入页（静态路由；逻辑在 /input.js，共享函数在 /js.js） -->
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -7,24 +7,16 @@
 <title>远程输入 - 远程管理</title>
 <link rel="stylesheet" href="/style.css">
 </head>
-<body>
-<header class="page-header">
-<h1><a href="/">远程管理</a> <span class="crumb">/</span> 远程输入</h1>
+<body class="utility-page">
+<header class="brand-page-header">
+<a class="brand-mini" href="/">
+<img src="/logo.jpg" alt="" width="36" height="36"><span>月读</span>
+</a>
+<span class="brand-divider" aria-hidden="true"></span>
+<h1>远程输入</h1>
 </header>
 
-<section class="panel" aria-labelledby="cb-title">
-<h2 id="cb-title">共享剪贴板</h2>
-<div id="cbstate" class="state" role="status" aria-live="polite"></div>
-<label class="visually-hidden" for="cbtext">剪贴板文本</label>
-<textarea id="cbtext" rows="8" placeholder="设备上还没有复制过文本"></textarea>
-<div class="btns">
-<button type="button" id="cbpull">从设备拉取</button>
-<button type="button" id="cbpush" class="primary">写入设备</button>
-<button type="button" id="cbcopy">复制到本机</button>
-<button type="button" id="cbclear" class="danger">清空设备剪贴板</button>
-</div>
-</section>
-
+<main class="single-page">
 <section class="panel" aria-labelledby="ri-title">
 <h2 id="ri-title">远程输入</h2>
 <div id="ristate" class="state" role="status" aria-live="polite">检测中…</div>
@@ -32,7 +24,9 @@
 <textarea id="ritext" rows="5" disabled placeholder="设备上没有激活的输入框"></textarea>
 <button type="button" id="risend" class="primary" disabled>追加到光标处</button>
 </section>
+</main>
 
+<footer class="site-footer"><span class="footer-brand"><img src="/logo.jpg" alt="" width="32" height="32"><span><strong>月读</strong><small>作者 Ankio</small></span></span><a class="footer-link" href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net ↗</a></footer>
 
 <script src="/js.js"></script>
 <script src="/input.js"></script>
