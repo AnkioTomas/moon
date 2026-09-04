@@ -99,7 +99,6 @@ local sync = { push_calls = 0, last_source = nil, push_args = nil }
 
 package.preload["book.stats"] = function()
     return {
-        pullInBackground = function() end,
         syncAsync = function(self, _, cb)
             sync.push_calls = sync.push_calls + 1
             sync.pull_calls = (sync.pull_calls or 0) + 1
@@ -216,7 +215,8 @@ do
     Assert.eq(result.pulled, 1)
 end
 
--- 首页进入按 5 分钟节流检查书架；图书馆手动刷新走源事件并强制请求。
+-- 首页进入按 5 分钟节流检查书架；统计按相同生命周期双向同步；
+-- 图书馆手动刷新同时触发两者并强制请求书架。
 do
     resetRec()
     rec.list_wire = { data = { { filename = "home.epub", title = "Home" } }, count = 1 }
@@ -234,7 +234,7 @@ do
     Assert.is_nil(rec.query)
     src:onEvent("library_refresh_request", desktop)
     Assert.is_true(rec.query ~= nil)
-    Assert.eq(refreshes, 2)
+    Assert.eq(refreshes, 5)
     rec.query = first_query
 end
 

@@ -118,21 +118,43 @@ local function syncDesktopBooks(self, desktop, opts)
     end
 end
 
---- 后台统计成功落库后作废依赖统计的桌面缓存。
+--- 后台双向同步统计；成功后作废依赖本地 reading_stats 的桌面缓存。
 ---@param self SourceBase
 ---@param desktop table
-local function pullDesktopStats(self, desktop)
-    logger.dbg("book stats background pull start", self.id)
-    require("book.stats").pullInBackground(self, {
-        on_done = function(ok)
-            logger.dbg("book stats background pull done", self.id, ok and "ok" or "failed")
-            if not ok or desktop._closed or desktop.source ~= self then return end
+local function syncDesktopStats(self, desktop)
+    local can_pull = SourceCapabilities.supportsStatsPull(self)
+    local can_push = type(self.pushStatsAsync) == "function"
+    if not can_pull and not can_push then return end
+    if desktop._stats_sync_pending then
+        logger.dbg("book stats sync skipped", self.id, "pending")
+        return
+    end
+    logger.dbg("book stats sync start", self.id)
+    desktop._stats_sync_pending = true
+    local request = {}
+    desktop._stats_sync_request = request
+    local job = self:syncStatsAsync(nil, function(result, err)
+        if desktop._stats_sync_request ~= request then return end
+        desktop._stats_sync_cancel = nil
+        desktop._stats_sync_pending = false
+        if desktop._closed or desktop.source ~= self then return end
+        if not result then
+            logger.warn("book stats sync failed", self.id, err)
+            return
+        end
+        logger.dbg("book stats sync done", self.id,
+            "pulled", tonumber(result.pulled) or 0,
+            "pushed", tonumber(result.pushed) or 0)
+        if not result.skipped then
             desktop._insight_state = nil
             desktop._insight_loaded = false
             desktop:refreshHome("stats_sync")
             if desktop.tab == "stats" then desktop:rebuild() end
-        end,
-    })
+        end
+    end)
+    if desktop._stats_sync_request == request and desktop._stats_sync_pending then
+        desktop._stats_sync_cancel = job
+    end
 end
 
 ---@param event string 事件名
@@ -142,7 +164,7 @@ function SourceBase:onEvent(event, payload)
     if self.configured and not self:configured() then return end
     local desktop = payload
     if event == "home_open" or event == "desktop_resume" then
-        pullDesktopStats(self, desktop)
+        syncDesktopStats(self, desktop)
         if self._books_refresh_at and os.time() - self._books_refresh_at < BOOKS_REFRESH_INTERVAL then
             logger.dbg("book shelf refresh skipped", self.id, "throttled")
             return
@@ -151,12 +173,13 @@ function SourceBase:onEvent(event, payload)
         return
     end
     if event == "library_refresh_request" then
+        syncDesktopStats(self, desktop)
         syncDesktopBooks(self, desktop, { force = true })
         return
     end
     if event ~= "desktop_open" then return end
     -- 书架同步在后台进行：首页先读本地数据，成功后由回调刷新封面和元数据。
-    pullDesktopStats(self, desktop)
+    syncDesktopStats(self, desktop)
     syncDesktopBooks(self, desktop)
 end
 

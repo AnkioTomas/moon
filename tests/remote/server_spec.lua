@@ -157,11 +157,15 @@ local Server = require("remote.server")
 local function fakeHandlers(dirs)
     local calls = {}
     local handlers = {
-        list_dir = function(path)
+        list_dir = function(path, cb)
             if not dirs[path] then
-                return nil, "not a directory"
+                cb(nil, "not a directory")
+                return
             end
-            return dirs[path]
+            cb(dirs[path])
+        end,
+        is_dir = function(path)
+            return dirs[path] ~= nil
         end,
         resolve_download = function(path)
             return path == "/dl/ok.bin" and "/dl/ok.bin" or nil
@@ -175,17 +179,17 @@ local function fakeHandlers(dirs)
             os.remove(temp)
             cb(true)
         end,
-        mkdir = function(path)
+        mkdir = function(path, cb)
             calls.mkdir = path
-            return true
+            cb(true)
         end,
-        delete = function(path)
+        delete = function(path, cb)
             calls.delete = path
-            return true
+            cb(true)
         end,
-        rename = function(path, to)
+        rename = function(path, to, cb)
             calls.rename = { from = path, to = to }
-            return true
+            cb(true)
         end,
         is_protected = function()
             return false
@@ -331,6 +335,18 @@ do
     Assert.eq(cfg.root, "/managed")
     Assert.eq(cfg.home, "/managed/books")
     Assert.eq(cfg.shortcuts[1].label, "书籍根目录")
+
+    local dynamic = Server.new({ root = "/old", handlers = fakeHandlers({}) })
+    dynamic:updateLayout({
+        root = "/new",
+        roots = { "/new", "/shots" },
+        home = "/new/books",
+        shortcuts = { { label = "截图", path = "/shots" } },
+    })
+    Assert.eq(dynamic.root, "/new")
+    Assert.eq(dynamic.roots[2], "/shots")
+    Assert.eq(dynamic.home, "/new/books")
+    Assert.eq(dynamic.shortcuts[1].path, "/shots")
 end
 
 -- ── 来源校验 / DNS rebinding ───────────────────────────
@@ -453,6 +469,19 @@ do
     drain(serve(c3, handlers, { root = "/managed" }))
     Assert.eq((parseResponse(c3:output())), 403)
 
+    -- 慢目录扫描允许异步完成，连接在回调前保持 pending。
+    local delayed_cb
+    local delayed_handlers = fakeHandlers({ ["/managed"] = {} })
+    delayed_handlers.list_dir = function(_, cb) delayed_cb = cb end
+    local delayed_client = newClient({ "GET /api/list?path=/managed HTTP/1.1\r\n\r\n" })
+    local delayed_server = serve(delayed_client, delayed_handlers, { root = "/managed" })
+    delayed_server:waitEvent()
+    Assert.eq(delayed_server._conns[1].state, "pending")
+    Assert.eq(delayed_client:output(), "")
+    delayed_cb({})
+    drain(delayed_server)
+    Assert.eq((parseResponse(delayed_client:output())), 200)
+
     -- 页面隐藏按钮不是保护；伪造 API 请求也必须被后端拦下。
     local c4 = newClient({
         "POST /api/delete?path=/managed/koreader HTTP/1.1\r\nContent-Length: 0\r\n\r\n",
@@ -517,6 +546,24 @@ do
     drain(serve(c5, fakeHandlers({ ["/inbox"] = {} })))
     Assert.eq((parseResponse(c5:output())), 501)
 
+    -- Content-Length 必须是十进制整数，且上传体积有硬上限。
+    local c5b = newClient({
+        "PUT /upload?dir=/inbox&name=x HTTP/1.1\r\nContent-Length: 1.5\r\n\r\nZ",
+    })
+    drain(serve(c5b, fakeHandlers({ ["/inbox"] = {} })))
+    Assert.eq((parseResponse(c5b:output())), 400)
+    local c5c = newClient({
+        "PUT /upload?dir=/inbox&name=x HTTP/1.1\r\nContent-Length: 2147483649\r\n\r\n",
+    })
+    drain(serve(c5c, fakeHandlers({ ["/inbox"] = {} })))
+    Assert.eq((parseResponse(c5c:output())), 413)
+    local c5d = newClient({
+        "PUT /upload?dir=/inbox&name=x HTTP/1.1\r\n"
+            .. "Transfer-Encoding: chunked\r\nContent-Length: 1\r\n\r\nZ",
+    })
+    drain(serve(c5d, fakeHandlers({ ["/inbox"] = {} })))
+    Assert.eq((parseResponse(c5d:output())), 501)
+
     -- save 失败 → 500
     local h6 = fakeHandlers({ ["/inbox"] = {} })
     h6.save = function(temp, _, _, cb)
@@ -528,6 +575,19 @@ do
     local code6, body6 = parseResponse(c6:output())
     Assert.eq(code6, 500)
     has(body6, "disk full")
+end
+
+-- Expect: 100-continue 也必须走部分写缓冲，不能靠一次 send 碰运气。
+do
+    local handlers, calls = fakeHandlers({ ["/inbox"] = {} })
+    local client = newClient({
+        "PUT /upload?dir=/inbox&name=x HTTP/1.1\r\n"
+            .. "Content-Length: 1\r\nExpect: 100-continue\r\n\r\nZ",
+    }, { send_limit = 7 })
+    drain(serve(client, handlers))
+    has(client:output(), "HTTP/1.1 100 Continue\r\n\r\n")
+    has(client:output(), "HTTP/1.1 200 OK\r\n")
+    Assert.eq(calls.save.content, "Z")
 end
 
 -- ── 下载 ──────────────────────────────────────────────
@@ -588,17 +648,27 @@ do
     Assert.eq(calls3.rename.from, "/a")
     Assert.eq(calls3.rename.to, "/b")
 
-    -- rename 缺 to → 400；handler 失败 → 500
+    -- 可预期业务错误使用 404/409，不冒充服务内部故障。
+    h1.mkdir = function(_, cb) cb(nil, "already exists") end
+    local c1b = newClient({ "POST /api/mkdir?path=/a/b HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c1b, h1))
+    Assert.eq((parseResponse(c1b:output())), 409)
+    h2.delete = function(_, cb) cb(nil, "not found") end
+    local c2c = newClient({ "POST /api/delete?path=/a/b HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(c2c, h2))
+    Assert.eq((parseResponse(c2c:output())), 404)
+
+    -- rename 缺 to → 400；目标冲突 → 409
     local c4 = newClient({ "POST /api/rename?path=/a HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
     drain(serve(c4, h3))
     Assert.eq((parseResponse(c4:output())), 400)
-    h3.rename = function()
-        return nil, "target exists"
+    h3.rename = function(_, _, cb)
+        cb(nil, "target exists")
     end
     local c5 = newClient({ "POST /api/rename?path=/a&to=/b HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
     drain(serve(c5, h3))
     local code5, body5 = parseResponse(c5:output())
-    Assert.eq(code5, 500)
+    Assert.eq(code5, 409)
     has(body5, "target exists")
 
     -- GET 变更接口 → 405
@@ -745,6 +815,9 @@ do
     local c7 = newClient({ "POST /api/input HTTP/1.1\r\nContent-Length: 300000\r\n\r\n" })
     drain(serve(c7))
     Assert.eq((parseResponse(c7:output())), 413)
+    local c7b = newClient({ "POST /api/input HTTP/1.1\r\nContent-Length: 1.5\r\n\r\nx" })
+    drain(serve(c7b))
+    Assert.eq((parseResponse(c7b:output())), 400)
 
     -- GET 用错方法组合外的动词 → 405
     local c8 = newClient({ "DELETE /api/input HTTP/1.1\r\n\r\n" })

@@ -319,8 +319,10 @@ function Desktop:switchTab(id)
         self._settings_parent = nil
         self._cache_size_label = nil
     end
-    if id == "stats" then
+    if id == "stats" and self.tab ~= "stats" then
         self._insight_ui_page = 1
+        self._insight_state = nil
+        self._insight_loaded = false
     end
     self.tab = id
     if id == "home" then
@@ -338,6 +340,7 @@ local FETCH_JOB_KEYS = {
     "_store_fetch_cancel",
     "_insight_fetch_cancel",
     "_books_sync_cancel",
+    "_stats_sync_cancel",
 }
 
 -- 只在关闭时清的后台维护任务
@@ -369,6 +372,8 @@ function Desktop:sourceChanged(source)
     cancelJobs(self, FETCH_JOB_KEYS)
     self._books_sync_pending = false
     self._books_sync_request = nil
+    self._stats_sync_pending = false
+    self._stats_sync_request = nil
     -- 只取消旧页面的在飞任务；已落盘图片缓存必须保留，切回源时可直接复用。
     Image.abortPending()
     self.source = source

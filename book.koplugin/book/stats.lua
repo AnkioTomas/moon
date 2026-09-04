@@ -13,8 +13,6 @@ local logger = require("utils.log")
 local SourceCapabilities = require("types.book_source").SourceCapabilities
 local Stats = {}
 
-local PULL_TTL = 30 * 60
-
 --- 当前阅读页的内存计时会话。
 ---@class ReadingStatsSession
 ---@field identity BookIdentity 当前文档身份
@@ -188,35 +186,6 @@ local function normalizePullResult(result)
     return rows, type(result.rows) == "table" and result.replace or nil, skipped
 end
 
---- 是否距上次成功 pull 已超过节流窗口。
----@param source BookSource
----@return boolean
-function Stats.shouldPull(source)
-    if not SourceCapabilities.supportsStatsPull(source) then
-        return false
-    end
-    if not source.configured or not source:configured() then
-        return false
-    end
-    local cfg = require("utils.settings").getSource(source.id)
-    local last = tonumber(cfg and cfg.last_stats_pull_at) or 0
-    return os.time() - last >= PULL_TTL
-end
-
---- 记录成功 pull 时间戳（节流用）。
----@param source BookSource
----@return nil
-local function markPulled(source)
-    if not source or type(source.id) ~= "string" or source.id == "" then
-        return
-    end
-    -- saveSource 是整表覆盖：必须读回完整配置再改，否则连 token 一起抹掉
-    local Settings = require("utils.settings")
-    local cfg = Settings.getSource(source.id)
-    cfg.last_stats_pull_at = os.time()
-    Settings.saveSource(source.id, cfg)
-end
-
 --- 从 Source 拉取统计记录并落库。Source 返回领域记录，不返回 wire。
 --- 拉取记录直接按已同步状态保存，不会在下一次 push 中重新上传；
 --- 清理旧已同步行与写入本批记录在同一事务内完成，中途失败整体回滚。
@@ -245,37 +214,7 @@ function Stats.pull(source, done)
     end)
 end
 
---- 后台拉取远端统计；仅 ``capabilities.stats_pull`` 源参与，默认 30 分钟节流。
----@param source BookSource
----@param opts { force?: boolean, on_done?: fun(ok: boolean, result: table|string|nil) }|nil
----@return nil
-function Stats.pullInBackground(source, opts)
-    opts = opts or {}
-    if not SourceCapabilities.supportsStatsPull(source) then
-        return
-    end
-    if not source.configured or not source:configured() then
-        return
-    end
-    if not opts.force and not Stats.shouldPull(source) then
-        return
-    end
-    if source._stats_pulling then
-        return
-    end
-    source._stats_pulling = true
-    Stats.pull(source, function(ok, result)
-        source._stats_pulling = false
-        if ok then
-            markPulled(source)
-        end
-        if opts.on_done then
-            opts.on_done(ok, result)
-        end
-    end)
-end
-
---- 拉取并集合并，再上传本地未确认统计。
+--- 先上传本地未确认统计，再拉取远端聚合落库。
 ---@param source BookSource
 ---@param _opts table|nil
 ---@param cb fun(result: SyncResult|nil, err: any)|nil
@@ -300,32 +239,34 @@ function Stats.syncAsync(source, _opts, cb)
         end)
         return { cancel = function() cancelled = true end }
     end
-    --- 上传本地未确认的统计行，然后终结同步。
-    --- 无待传行或源不支持推送时直接按成功收尾；result.pushed 取源确认条数，
-    --- 源没回报确认数时退回本次待传条数。
-    local function push()
+    --- 拉取远端统计后终结同步；dirty_only 路径只推不拉。
+    local function pull()
         if cancelled then return end
-        if not can_push then finish(result); return end
-        local pending = #StatsDB.unsyncedBySource(source.id)
-        if pending == 0 then finish(result); return end
-        current_job = Stats.push(source, function(ok, value, confirmed)
-            current_job = nil
-            if not ok then finish(nil, value); return end
-            result.pushed = confirmed or pending
-            finish(result)
-        end)
-    end
-    if can_pull and not opts.dirty_only then
+        if not can_pull or opts.dirty_only then finish(result); return end
         current_job = Stats.pull(source, function(ok, pulled)
             current_job = nil
             if cancelled then return end
             if not ok then finish(nil, pulled or "stats pull failed"); return end
             result.pulled = pulled.imported
-            push()
+            finish(result)
         end)
-    else
-        require("ui/uimanager"):nextTick(push)
     end
+    --- 上传本地未确认的统计行，然后继续拉取远端。
+    --- 无待传行或源不支持推送时直接进入拉取；result.pushed 取源确认条数，
+    --- 源没回报确认数时退回本次待传条数。
+    local function push()
+        if cancelled then return end
+        if not can_push then pull(); return end
+        local pending = #StatsDB.unsyncedBySource(source.id)
+        if pending == 0 then pull(); return end
+        current_job = Stats.push(source, function(ok, value, confirmed)
+            current_job = nil
+            if not ok then finish(nil, value); return end
+            result.pushed = confirmed or pending
+            pull()
+        end)
+    end
+    require("ui/uimanager"):nextTick(push)
     return {
         cancel = function()
             cancelled = true
