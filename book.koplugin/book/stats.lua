@@ -226,6 +226,7 @@ function Stats.syncAsync(source, _opts, cb)
     local can_push = source and type(source.pushStatsAsync) == "function"
     local cancelled, current_job = false, nil
     local result = { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
+    local push_error
     --- 终结整次同步并回调；已取消时静默丢弃。
     ---@param value SyncResult|nil nil 表示失败
     ---@param err any
@@ -246,8 +247,16 @@ function Stats.syncAsync(source, _opts, cb)
         current_job = Stats.pull(source, function(ok, pulled)
             current_job = nil
             if cancelled then return end
-            if not ok then finish(nil, pulled or "stats pull failed"); return end
+            if not ok then
+                local pull_error = pulled or "stats pull failed"
+                if push_error then
+                    pull_error = tostring(push_error) .. "; " .. tostring(pull_error)
+                end
+                finish(nil, pull_error)
+                return
+            end
             result.pulled = pulled.imported
+            result.push_error = push_error
             finish(result)
         end)
     end
@@ -261,7 +270,12 @@ function Stats.syncAsync(source, _opts, cb)
         if pending == 0 then pull(); return end
         current_job = Stats.push(source, function(ok, value, confirmed)
             current_job = nil
-            if not ok then finish(nil, value); return end
+            if not ok then
+                push_error = value or "stats push failed"
+                logger.warn("book.stats push failed; continue pulling", source.id, push_error)
+                pull()
+                return
+            end
             result.pushed = confirmed or pending
             pull()
         end)
