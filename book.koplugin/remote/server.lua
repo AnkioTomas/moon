@@ -545,6 +545,11 @@ function Server:_readBody(conn)
     conn.temp = nil -- 所有权移交 save（kill 不许再删）
     conn.state = "pending"
     self.handlers.save(temp, dir, name, function(ok, err)
+        if ok then
+            logger.dbg("book remote upload saved", dir, name, conflict)
+        else
+            logger.warn("book remote upload failed", dir, name, err)
+        end
         if conn.dead then
             return
         end
