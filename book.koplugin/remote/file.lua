@@ -30,7 +30,26 @@ local function mutationErrorCode(err)
     if err == "already exists" or err == "target exists" or err == "target is not a file" then
         return 409
     end
+    if err == "archive too large" then
+        return 413
+    end
+    if err == "not a zip archive" or err == "unsafe archive path"
+        or err == "unsupported archive entry" or err == "too many archive entries"
+    then
+        return 400
+    end
     return 500
+end
+
+---@param path string
+---@param parent string|nil
+---@param entries table[]
+---@return string
+local function listBody(path, parent, entries)
+    return '{"path":' .. JSON.encode(path)
+        .. ',"parent":' .. (parent and JSON.encode(parent) or "null")
+        .. ',"entries":' .. (#entries == 0 and "[]" or JSON.encode(entries))
+        .. "}"
 end
 
 -- ── 路由 ─────────────────────────────────────────────
@@ -70,11 +89,7 @@ function File.list(self, conn, method, path)
         conn.resp = {
             code = 200,
             ctype = "application/json; charset=utf-8",
-            body = JSON.encode({
-                path = dir,
-                parent = self:_parent(dir),
-                entries = entries,
-            }),
+            body = listBody(dir, self:_parent(dir), entries),
         }
     end)
     return true
@@ -282,6 +297,43 @@ function File.rename(self, conn, method, query)
         logger.dbg("book remote mutate done", "rename", from, to)
         conn.resp = {
             code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
+        }
+    end)
+    return true
+end
+
+--- POST /api/extract?path=：把 ZIP 解压到同目录下的同名文件夹。
+---@param conn table
+---@param method string
+---@param path string|nil
+function File.extract(self, conn, method, path)
+    if method ~= "POST" then
+        return self:_fail(conn, 405, "Method Not Allowed")
+    end
+    local target = self.cleanPath(path)
+    if not target then
+        return self:_fail(conn, 400, "Bad path")
+    end
+    target = self:_safePath(target)
+    if not target then
+        return self:_fail(conn, 403, "Path outside managed roots")
+    end
+    conn.state = "pending"
+    self.handlers.extract(target, function(ok, err, output)
+        if conn.dead then return end
+        if not ok then
+            logger.warn("book remote extract failed", target, err)
+            conn.resp = {
+                code = mutationErrorCode(err),
+                ctype = "application/json; charset=utf-8",
+                body = JSON.encode({ error = tostring(err) }),
+            }
+            return
+        end
+        conn.resp = {
+            code = 200,
+            ctype = "application/json; charset=utf-8",
+            body = JSON.encode({ ok = true, path = output }),
         }
     end)
     return true

@@ -7,39 +7,57 @@
 <title>文件管理 - 远程管理</title>
 <link rel="stylesheet" href="/style.css">
 </head>
-<body>
-<header class="page-header">
-<h1><a href="/">远程管理</a> <span class="crumb">/</span> 文件管理</h1>
+<body class="file-page">
+<header class="explorer-titlebar">
+<a class="explorer-home" href="/" aria-label="返回远程管理">月读</a>
+<strong>文件管理器</strong>
 </header>
 
-<div class="toolbar" role="toolbar" aria-label="目录导航">
-<button type="button" id="back" disabled>← 返回</button>
-<span id="quick"></span>
-</div>
-
+<main class="file-main">
+<nav class="explorer-nav" aria-label="目录导航">
+<button type="button" id="back" title="后退" aria-label="后退" disabled>←</button>
+<button type="button" id="parent" title="上一级" aria-label="上一级" disabled>↑</button>
+<button type="button" id="refresh" title="刷新" aria-label="刷新">↻</button>
+<div class="address-bar">
+<span aria-hidden="true">▰</span>
 <div id="path" class="path" aria-live="polite"></div>
-<p class="note" id="booktip">书籍根目录约定：第 2 级目录为分类，第 3 级目录为系列（分类 / 系列 / 书籍）。</p>
-
-<div class="toolbar actions" role="toolbar" aria-label="文件操作">
-<label class="file-input">
-<span class="visually-hidden">选择文件</span>
-<input type="file" id="file" multiple>
-</label>
-<button type="button" id="up" class="primary">上传到当前目录</button>
-<button type="button" id="mk">新建文件夹</button>
 </div>
+</nav>
 
-<pre id="log" class="log" aria-live="polite"></pre>
+<div class="explorer-shell">
+<aside class="explorer-sidebar">
+<div class="sidebar-title">此阅读器</div>
+<div id="quick" class="quick-list"></div>
+</aside>
 
+<section class="explorer-content" aria-labelledby="list-title">
+<div id="dropzone" class="drop-overlay" hidden>
+<strong>释放以上传</strong>
+<span>文件和文件夹将上传到当前目录</span>
+</div>
+<div class="command-bar" role="toolbar" aria-label="文件操作">
+<button type="button" id="pickfile">＋ 上传文件</button>
+<button type="button" id="pickfolder">▰ 上传文件夹</button>
+<button type="button" id="mk">新建文件夹</button>
+<input type="file" id="file" multiple hidden>
+<input type="file" id="folder" webkitdirectory directory multiple hidden>
+<span class="command-spacer"></span>
+<span id="count" class="count-badge">0 项</span>
+</div>
+<h1 id="list-title" class="visually-hidden">目录内容</h1>
 <div class="table-wrap">
 <table>
 <thead>
-<tr><th scope="col">名称</th><th scope="col">大小</th><th scope="col">修改时间</th><th scope="col"><span class="visually-hidden">操作</span></th></tr>
+<tr><th scope="col">名称</th><th scope="col">大小</th><th scope="col">修改时间</th><th scope="col" class="ops-head">操作</th></tr>
 </thead>
 <tbody id="list"></tbody>
 </table>
-</div>
 <div id="preview" class="preview" aria-label="图片预览"></div>
+</div>
+<pre id="log" class="log status-log" aria-live="polite"></pre>
+</section>
+</div>
+</main>
 
 <div id="ov" class="overlay" hidden>
 <div id="dlg" class="dialog" role="dialog" aria-modal="true" aria-labelledby="dt">
