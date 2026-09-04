@@ -7,6 +7,7 @@
 local Text = require("utils.text")
 local Annotations = require("source.wechat.annotations")
 local Toc = require("source.wechat.toc")
+local Normalize = require("book.note.normalize")
 
 local Notes = {}
 
@@ -30,6 +31,127 @@ local LOCAL_COLOR = {
     [4] = "purple",
     [5] = "orange",
 }
+
+local WR_FIELDS = {
+    "wr_range", "wr_bookmark_id", "wr_review_id", "wr_review_only",
+    "wr_delete_review", "wr_update_review", "wr_update_bookmark",
+}
+
+---@param items table[]|nil
+---@param total_pages integer|nil
+---@return table[]
+function Notes.cleanAnnotations(items, total_pages)
+    local out = {}
+    for _, item in ipairs(items or {}) do
+        if type(item) == "table" and item.wr_deleted
+                and (item.wr_bookmark_id or item.wr_review_id) then
+            out[#out + 1] = {
+                datetime = item.datetime or os.date("%Y-%m-%d %H:%M:%S"),
+                chapter_idx = item.chapter_idx,
+                wr_bookmark_id = item.wr_bookmark_id,
+                wr_review_id = item.wr_review_id,
+                wr_deleted = true,
+            }
+        elseif type(item) == "table" and not item.wr_snapshot then
+            local placeholder = not item.page and not item.pageref and item.wr_range
+            local source = item
+            if placeholder then
+                source = {}
+                for k, v in pairs(item) do source[k] = v end
+                source.page = placeholder
+            end
+            local clean = Normalize.clean({ source }, total_pages)[1]
+            if clean then
+                if placeholder then clean.page = nil end
+                for _, field in ipairs(WR_FIELDS) do clean[field] = item[field] end
+                out[#out + 1] = clean
+            end
+        end
+    end
+    return out
+end
+
+---@param previous table[]|nil
+---@param current table[]
+---@return table[]
+function Notes.prepareLocalAnnotations(previous, current)
+    local bookmarks, reviews, current_by_bookmark, current_by_review = {}, {}, {}, {}
+    for _, item in ipairs(current) do
+        if item.wr_bookmark_id then
+            local id = tostring(item.wr_bookmark_id)
+            bookmarks[id] = true
+            current_by_bookmark[id] = item
+        end
+        if item.wr_review_id then
+            local id = tostring(item.wr_review_id)
+            reviews[id] = true
+            current_by_review[id] = item
+        end
+    end
+    for _, old in ipairs(previous or {}) do
+        if type(old) == "table" and old.wr_deleted then
+            local keep_bookmark = old.wr_bookmark_id
+                and not bookmarks[tostring(old.wr_bookmark_id)]
+            local keep_review = old.wr_review_id
+                and not reviews[tostring(old.wr_review_id)]
+            if keep_bookmark or keep_review then
+                current[#current + 1] = {
+                    datetime = old.datetime,
+                    chapter_idx = old.chapter_idx,
+                    wr_bookmark_id = keep_bookmark and old.wr_bookmark_id or nil,
+                    wr_review_id = keep_review and old.wr_review_id or nil,
+                    wr_deleted = true,
+                }
+            end
+        elseif type(old) == "table" then
+            local bookmark_id, review_id = old.wr_bookmark_id, old.wr_review_id
+            local current_item = bookmark_id
+                and current_by_bookmark[tostring(bookmark_id)] or nil
+            current_item = current_item or (review_id
+                and current_by_review[tostring(review_id)] or nil)
+            if current_item and (old.color ~= current_item.color
+                    or old.drawer ~= current_item.drawer) then
+                current_item.wr_update_bookmark = true
+            end
+            if review_id and current_item and old.note and old.note ~= ""
+                    and current_item.note and current_item.note ~= ""
+                    and old.note ~= current_item.note then
+                current_item.wr_update_review = true
+            end
+            if review_id and current_item and old.note and old.note ~= ""
+                    and (not current_item.note or current_item.note == "") then
+                current_item.wr_review_id = review_id
+                current_item.wr_delete_review = true
+            else
+                local delete_bookmark = bookmark_id
+                    and not bookmarks[tostring(bookmark_id)]
+                local delete_review = review_id
+                    and not reviews[tostring(review_id)]
+                if delete_bookmark or delete_review then
+                    current[#current + 1] = {
+                        datetime = old.datetime,
+                        chapter_idx = old.chapter_idx,
+                        wr_bookmark_id = delete_bookmark and bookmark_id or nil,
+                        wr_review_id = delete_review and review_id or nil,
+                        wr_deleted = true,
+                    }
+                end
+            end
+        end
+    end
+    return current
+end
+
+---@param items table[]|nil
+---@return boolean
+function Notes.legacyAuthoritative(items)
+    for _, item in ipairs(items or {}) do
+        if type(item) == "table" and (item.wr_authoritative or item.wr_snapshot) then
+            return true
+        end
+    end
+    return false
+end
 
 --- 是否为个人划线（bookmarklist ``updated`` 条目；排除 type=0 书签位）。
 ---@param row table
@@ -112,6 +234,54 @@ function Notes.localizeAnnotations(document, annotations, html_path, current)
         end
     end
     return out
+end
+
+---@param remote table[]
+---@param local_items table[]
+---@param paging boolean|nil
+---@param authoritative boolean|nil
+---@return table[]
+function Notes.mergeAnnotations(remote, local_items, paging, authoritative)
+    local function rangeKey(item)
+        if type(item.text) ~= "string" or item.text == "" then return nil end
+        return table.concat({ item.text, tostring(item.wr_range or "") }, "\31")
+    end
+    local function noteKey(item)
+        if type(item.text) ~= "string" or item.text == ""
+                or type(item.note) ~= "string" or item.note == "" then
+            return nil
+        end
+        return table.concat({ item.text, item.note }, "\31")
+    end
+    authoritative = authoritative or Notes.legacyAuthoritative(remote)
+    local merged, seen = {}, {}
+    for _, item in ipairs(remote or {}) do
+        if type(item) == "table" and not item.wr_snapshot
+                and Normalize.renderable(item, paging) then
+            if item.wr_bookmark_id then seen["bookmark:" .. tostring(item.wr_bookmark_id)] = true end
+            if item.wr_review_id then seen["review:" .. tostring(item.wr_review_id)] = true end
+            local range_key, note_key = rangeKey(item), noteKey(item)
+            if range_key then seen["range:" .. range_key] = true end
+            if note_key then seen["note:" .. note_key] = true end
+            merged[#merged + 1] = item
+        end
+    end
+    for _, item in ipairs(local_items or {}) do
+        if type(item) == "table" then
+            local range_key, note_key = rangeKey(item), noteKey(item)
+            local duplicate = item.wr_bookmark_id
+                    and seen["bookmark:" .. tostring(item.wr_bookmark_id)]
+                or item.wr_review_id and seen["review:" .. tostring(item.wr_review_id)]
+                or range_key and seen["range:" .. range_key]
+                or note_key and seen["note:" .. note_key]
+            local deleted_remote = authoritative and not duplicate
+                and (item.wr_bookmark_id or item.wr_review_id)
+            if not duplicate and not deleted_remote and Normalize.renderable(item, paging) then
+                merged[#merged + 1] = item
+            end
+        end
+    end
+    return merged
 end
 
 --- bookmarklist 的 markText 可能是 base64。

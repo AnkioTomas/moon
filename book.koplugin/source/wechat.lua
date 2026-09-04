@@ -769,6 +769,22 @@ function Source:localizeAnnotations(document, annotations, html_path, current)
     return Notes.localizeAnnotations(document, annotations, html_path, current)
 end
 
+function Source:cleanAnnotations(items, total_pages)
+    return Notes.cleanAnnotations(items, total_pages)
+end
+
+function Source:prepareLocalAnnotations(previous, current)
+    return Notes.prepareLocalAnnotations(previous, current)
+end
+
+function Source:mergeAnnotations(remote, current, paging, authoritative)
+    return Notes.mergeAnnotations(remote, current, paging, authoritative)
+end
+
+function Source:legacyAuthoritativeAnnotations(items)
+    return Notes.legacyAuthoritative(items)
+end
+
 --- 上传当前章的划线与想法。
 --- 微信读书的划线坐标依赖章节 HTML，因此只能按章推送：identity 必须带 chapter_idx，
 --- 且该章正文已落盘（缺 HTML 时无法定位划线区间）。无可推送内容直接回调成功。
