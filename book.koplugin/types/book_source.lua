@@ -99,7 +99,7 @@ end
 ---@field to_ts number
 
 ---@class BookStatsPullReplace
----@field mode '"synced"'|'"prefix"'|'"ranges"' synced=删该源全部 sync_status=1；prefix=删匹配前缀的已同步行
+---@field mode '"synced"'|'"all_synced"'|'"prefix"'|'"ranges"' all_synced=全量快照，删除该源全部已同步行
 ---@field stable_prefixes string[]|nil mode=prefix 时生效
 ---@field ranges BookStatsPullReplaceRange[]|nil mode=ranges 时按各前缀的独立时间窗口清理
 
@@ -158,7 +158,7 @@ end
 ---@field openBookAsync fun(self: BookSource, identity: BookIdentity, opts: table|nil, cb: fun(path: string|nil, err: string|nil)): table|nil 根据书籍身份解析、落盘并登记物理文档；按章源通过 opts.chapter_idx 指定章节；取消后不回调
 ---@field loadTocAsync fun(self: BookSource, identity: BookIdentity, cb: fun(toc: BookChapter[]|nil, err: string|nil)): table|nil 拉取并持久化章节目录
 ---@field prefetchChaptersAsync fun(self: BookSource, identity: BookIdentity, toc: BookChapter[], from_idx: integer, count: integer): table|nil 阅读期预取后续章节
----@field getProgressAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: ProgressPosition|nil, err: string|nil)): table|nil 拉取远端进度
+---@field getProgressAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: ProgressPosition|nil, err: string|nil, meta: table|nil)): table|nil 拉取远端进度；meta.empty 表示远端无记录
 ---@field putProgressAsync fun(self: BookSource, identity: BookIdentity, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 推送进度
 ---@field coverRequest fun(self: BookSource, identity: BookIdentity): (BookCoverRequest|nil, string|nil) 封面请求描述（纯构造，无 IO）
 ---@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 书城导入目标（local 移入）

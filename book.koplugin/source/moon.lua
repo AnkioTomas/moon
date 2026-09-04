@@ -278,6 +278,32 @@ local function listQuery(opts)
     }
 end
 
+--- 拉取服务端最近阅读，保存元数据和远端进度后直接按服务端顺序返回。
+---@param limit number|nil
+---@param cb fun(data: BookListResult|nil, err: string|nil)
+---@return table|nil
+function Source:recentBooksAsync(limit, cb)
+    limit = math.max(1, math.min(50, tonumber(limit) or 24))
+    return self._client:recentBooksAsync(limit, function(wire, err)
+        if not wire then
+            SourceBase.recentBooksAsync(self, limit, cb)
+            return
+        end
+        local mapped = Mapper.list(wire)
+        require("book.store").rememberMany(mapped.data)
+        local raw = type(wire.data) == "table" and wire.data or {}
+        local ProgressDB = require("db.progress")
+        for _, row in ipairs(raw) do
+            local stable_id = Mapper.stableId(row)
+            local pos = Mapper.progress({ data = row })
+            if stable_id and pos then
+                ProgressDB.upsertRemote(self.id, stable_id, pos)
+            end
+        end
+        cb(mapped)
+    end)
+end
+
 --- 清空 Moon 书库/统计相关 HTTP 缓存。
 function Source:clearCaches()
     local ok, Request = pcall(require, "http.request")
@@ -358,69 +384,43 @@ function Source:pushStatsAsync(rows, cb)
         cb(nil, _("无阅读统计数据"))
         return nil
     end
-    local id = G_reader_settings and G_reader_settings:readSetting("device_id")
-    if type(id) ~= "string" or id == "" then
-        id = string.format("book-%08x%08x", math.floor(math.random() * 0xffffffff), os.time() % 0xffffffff)
-        if G_reader_settings then G_reader_settings:saveSetting("device_id", id) end
-    end
     return self._client:syncStatsAsync({
-        books = books, stats = stats, device_id = id,
+        books = books,
+        stats = stats,
+        device_id = "koreader",
     }, cb)
 end
 
---- 逐本拉取 Moon page_stat，并映射成 reading_stats 领域记录。
+--- 一次拉取 Moon 账户的完整 page_stat 快照。
 ---@param cb fun(rows: table[]|nil, err: string|nil)
----@return { cancel: fun() }
+---@return table|nil
 function Source:pullStatsAsync(cb)
-    local ids = require("db.book").libraryStableIdsBySource(self.id)
-    local rows, index, cancelled, job = {}, 1, false, nil
-    --- 拉下一本书的 page_stat 并累加到 rows；书拉完即整体回调。
-    --- 任一本请求失败即整体失败：统计只能整批入库，半截数据会漏计时长。
-    local function nextBook()
-        if cancelled then return end
-        local stable_id = ids[index]
-        index = index + 1
-        if not stable_id then
-            cb(rows)
+    return self._client:getStatsAsync(function(wire, err)
+        if not wire then
+            cb(nil, (type(err) == "table" and err.message) or err)
             return
         end
-        job = self._client:getBookStatsAsync(stable_id, function(wire, err)
-            if cancelled then return end
-            if not wire then
-                cb(nil, (type(err) == "table" and err.message) or err)
-                return
+        local data = wire.data or wire
+        local stats = data.stats or data.records or {}
+        local rows = {}
+        for _, item in ipairs(type(stats) == "table" and stats or {}) do
+            local stable_id = item.book_filename or item.filename
+            local start_time = tonumber(item.start_time or item.startTime)
+            local duration = tonumber(item.duration)
+            if stable_id and stable_id ~= "" and start_time and duration and duration > 0 then
+                rows[#rows + 1] = {
+                    source_id = self.id,
+                    stable_id = stable_id,
+                    record_type = "page",
+                    page = tonumber(item.page) or 0,
+                    start_time = start_time,
+                    duration = duration,
+                    total_pages = tonumber(item.total_pages or item.totalPages or item.pages) or 0,
+                }
             end
-            local data = wire.data or wire
-            local stats = data.page_stat or data.stats or data.records or data
-            if type(stats) == "table" then
-                for _, item in ipairs(stats) do
-                    if type(item) == "table" then
-                        local start_time = tonumber(item.start_time or item.startTime)
-                        local duration = tonumber(item.duration)
-                        if start_time and duration and duration > 0 then
-                            rows[#rows + 1] = {
-                                source_id = self.id,
-                                stable_id = stable_id,
-                                record_type = "page",
-                                page = tonumber(item.page) or 0,
-                                start_time = start_time,
-                                duration = duration,
-                                total_pages = tonumber(item.total_pages or item.totalPages or item.pages) or 0,
-                            }
-                        end
-                    end
-                end
-            end
-            nextBook()
-        end)
-    end
-    nextBook()
-    return {
-        cancel = function()
-            cancelled = true
-            if job and job.cancel then job.cancel() end
-        end,
-    }
+        end
+        cb({ rows = rows, replace = { mode = "all_synced" } })
+    end)
 end
 
 --- 按 stable_id 整体上传某本书的划线/书签。
@@ -437,6 +437,7 @@ function Source:pushNotesAsync(identity, annotations, cb)
     end
     return self._client:syncAnnotationsAsync({
         filename = identity.stable_id,
+        device_id = "koreader",
         annotations = annotations,
     }, function(wire, err)
         if wire then
@@ -459,7 +460,7 @@ function Source:pullNotesAsync(identity, cb)
         end
         local data = wire.data or wire
         local annotations = data.annotations
-        cb(type(annotations) == "table" and annotations or {})
+        cb(type(annotations) == "table" and annotations or {}, nil, { authoritative = true })
     end)
 end
 
@@ -471,6 +472,12 @@ function Source:getProgressAsync(identity, cb)
     return self._client:getProgressAsync(identity.stable_id, function(wire, err)
         if not wire then
             cb(nil, (type(err) == "table" and err.message) or err)
+            return
+        end
+        if type(wire) == "table"
+            and ((wire.code ~= nil and wire.data == nil)
+                or (type(wire.data) == "table" and next(wire.data) == nil)) then
+            cb(nil, nil, { empty = true })
             return
         end
         local pos = Mapper.progress(wire)
@@ -497,6 +504,7 @@ function Source:putProgressAsync(identity, pos, cb)
         frac = frac,
         spine = pos.chapter_idx or 0,
         page = pos.page or 0,
+        offset = pos.extra and pos.extra.offset or 0,
         percent = string.format("%.2f", frac * 100) .. "%",
         locator = pos.locator,
     }, function(wire, err)
