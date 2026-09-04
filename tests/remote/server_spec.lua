@@ -211,6 +211,14 @@ local function fakeHandlers(dirs)
         set_clipboard = function(text)
             calls.clipboard = text
         end,
+        get_status = function()
+            return calls.status or {
+                battery = 80,
+                charging = false,
+                storage_available = 1024,
+                reading = false,
+            }
+        end,
         temp_path = function()
             return os.tmpname()
         end,
@@ -288,6 +296,8 @@ do
     has(body, "/clipboard.html")
     has(body, "/settings.html")
     has(body, "/logo.jpg")
+    has(body, 'id="status-battery"')
+    has(body, "/index.js")
     has(body, "Ankio")
     has(body, "https://ankio.net")
     Assert.is_true(client.closed, "Connection: close 后 socket 必须关闭")
@@ -306,6 +316,10 @@ do
     local _, b_js, h_js = parseResponse(c_js:output())
     has(h_js, "application/javascript")
     has(b_js, "jfetch")
+    local c_index_js = newClient({ "GET /index.js HTTP/1.1\r\n\r\n" })
+    drain(serve(c_index_js))
+    local _, b_index_js = parseResponse(c_index_js:output())
+    has(b_index_js, "/api/status")
     local c_file_js = newClient({ "GET /file.js HTTP/1.1\r\n\r\n" })
     drain(serve(c_file_js))
     local _, b_file_js = parseResponse(c_file_js:output())
