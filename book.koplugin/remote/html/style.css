@@ -146,6 +146,30 @@ a:hover { text-decoration: underline }
     color: var(--muted);
     font-size: 12px;
 }
+.device-summary {
+    display: grid;
+    grid-template-columns: minmax(130px, .6fr) minmax(130px, .6fr) minmax(0, 2fr);
+    gap: 10px;
+    margin-bottom: 18px;
+}
+.device-summary > div {
+    min-width: 0;
+    padding: 11px 13px;
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    background: var(--card);
+}
+.device-summary span,
+.device-summary strong { display: block }
+.device-summary span { color: var(--dim); font-size: 10px }
+.device-summary strong {
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--fg);
+    font-size: 13px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .site-footer {
     display: flex;
     align-items: center;
@@ -762,6 +786,8 @@ tr.f td.n a::before { content: "▤" }
     .brand-hero h1 { font-size: 27px }
     .brand-hero p { font-size: 13px }
     .setting-group { grid-template-columns: 1fr }
+    .device-summary { grid-template-columns: 1fr 1fr }
+    .device-summary .reading-status { grid-column: 1 / -1 }
     .setting-row { min-height: 76px; padding: 13px }
     .brand-page-header { margin-bottom: 16px; padding: 12px 0 }
     .single-page { margin-top: 4vh }

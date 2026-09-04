@@ -59,6 +59,7 @@ local STATUS = {
 ---@field set_input fun(text: string): boolean|nil, any 光标处追加注入（addChars 路径）；无激活框返回 nil, err
 ---@field get_clipboard fun(): { text: string } 设备共享剪贴板（最后复制的文本）
 ---@field set_clipboard fun(text: string) 写入设备剪贴板并同步进激活输入框
+---@field get_status fun(): table 首页设备状态快照
 
 --- 一切非 2xx 响应都是 JSON {"error": msg}：页面能把真实原因显示出来，
 --- 而不是 r.json() 解析纯文本炸出 SyntaxError 掩盖问题。
@@ -71,6 +72,7 @@ Server.__index = Server
 local File = require("remote.file")
 local Input = require("remote.input")
 local Clipboard = require("remote.clipboard")
+local Status = require("remote.status")
 local SettingsRoute = require("remote.settings_route")
 Server._routeList = File.list
 Server._routeDownload = File.download
@@ -80,6 +82,7 @@ Server._routeRename = File.rename
 Server._routeExtract = File.extract
 Server._routeInput = Input.route
 Server._routeClipboard = Clipboard.route
+Server._routeStatus = Status.route
 Server._routeSettings = SettingsRoute.settings
 
 ---@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil }
@@ -480,6 +483,8 @@ function Server:_route(conn, head)
         return self:_routeInput(conn, method, headers, query)
     elseif path == "/api/clipboard" then
         return self:_routeClipboard(conn, method, headers, query)
+    elseif path == "/api/status" then
+        return self:_routeStatus(conn, method)
     elseif path == "/api/rename" then
         return self:_routeRename(conn, method, query)
     elseif path == "/api/extract" then
@@ -728,6 +733,7 @@ local ASSETS = {
     ["/logo.jpg"] = { "logo.jpg", "image/jpeg" },
     ["/style.css"] = { "style.css", "text/css; charset=utf-8" },
     ["/js.js"] = { "js.js", "application/javascript; charset=utf-8" },
+    ["/index.js"] = { "index.js", "application/javascript; charset=utf-8" },
     ["/file.js"] = { "file.js", "application/javascript; charset=utf-8" },
     ["/input.js"] = { "input.js", "application/javascript; charset=utf-8" },
     ["/clipboard.js"] = { "clipboard.js", "application/javascript; charset=utf-8" },
