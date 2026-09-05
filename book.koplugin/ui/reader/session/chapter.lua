@@ -261,6 +261,7 @@ function Chapter.onReaderReady(plugin, session)
         closeTransitionNotice()
     end
     session.chapter = chapter
+    if nav_target then closeTransitionNotice() end
     applyChapterTarget(chapter, ui)
     wrapChapterReaderUi(ui)
     Snapshot.refresh(session)
