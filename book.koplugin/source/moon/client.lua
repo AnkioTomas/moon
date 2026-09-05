@@ -228,16 +228,6 @@ function Client:listBooksAsync(query, cb)
     }, cb)
 end
 
---- 拉取服务端最近阅读列表。
----@param limit number
----@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
----@return { cancel: fun() }|nil
-function Client:recentBooksAsync(limit, cb)
-    return self:_jsonAsync("GET", "/index/book/recent", {
-        query = { limit = limit },
-    }, cb)
-end
-
 --- 上报阅读统计。
 ---@param body table|nil 形如 { books, stats, device_id }
 ---@param cb fun(data: table|nil, err: string|nil)
@@ -300,24 +290,17 @@ end
 --- Download without blocking the UI on LuaSocket.
 ---@param filename string
 ---@param temp_path string
----@param on_progress fun(bytes: number, total: number|nil)|nil
+---@param on_progress fun(bytes: number)|nil
 ---@param cb fun(ok: boolean, err: string|nil)
----@param on_headers fun(total: number|nil)|nil
 ---@return { cancel: fun() }|nil
-function Client:downloadBookAsync(filename, temp_path, on_progress, cb, on_headers)
+function Client:downloadBookAsync(filename, temp_path, on_progress, cb)
     local url, cfg_err = self:_url("/index/book/file", { filename = filename })
     if not url then
         cb(false, cfg_err)
         return nil
     end
     pcall(os.remove, temp_path)
-    local file, open_err = io.open(temp_path, "wb")
-    if not file then
-        cb(false, open_err or _("无法保存文件"))
-        return nil
-    end
-    local code, total, received, write_err
-    return Request.stream({
+    return Request.download({
         url = url,
         method = "GET",
         headers = {
@@ -326,43 +309,21 @@ function Client:downloadBookAsync(filename, temp_path, on_progress, cb, on_heade
             ["Accept"] = "*/*",
         },
         timeout = 120,
-    }, {
-        on_headers = function(status, headers)
-            code = tonumber(status)
-            total = tonumber(headers and headers.get and headers:get("Content-Length", true))
-            if on_headers then on_headers(total) end
-        end,
-        on_data = function(chunk)
-            if write_err or not code or code < 200 or code >= 300 then return end
-            local wrote, err = file:write(chunk)
-            if not wrote then
-                write_err = err or _("无法保存文件")
-                return
-            end
-            received = (received or 0) + #chunk
-            if on_progress then on_progress(received, total) end
-        end,
-        on_done = function(err)
-            local closed, close_err = file:close()
-            if err or write_err or not closed or not code or code < 200 or code >= 300 then
-                pcall(os.remove, temp_path)
-                cb(false, err or write_err or close_err or ("HTTP " .. tostring(code)))
-                return
-            end
-            local attr = require("libs/libkoreader-lfs").attributes(temp_path)
-            if not attr or not attr.size or attr.size <= 0 then
-                pcall(os.remove, temp_path)
-                cb(false, _("下载文件为空"))
-                return
-            end
-            if total and attr.size ~= total then
-                pcall(os.remove, temp_path)
-                cb(false, _("下载文件校验失败"))
-                return
-            end
-            cb(true)
-        end,
-    })
+        on_progress = on_progress,
+    }, temp_path, function(ok, err)
+        if not ok then
+            pcall(os.remove, temp_path)
+            cb(false, err)
+            return
+        end
+        local attr = require("libs/libkoreader-lfs").attributes(temp_path)
+        if not attr or not attr.size or attr.size <= 0 then
+            pcall(os.remove, temp_path)
+            cb(false, _("下载文件为空"))
+            return
+        end
+        cb(true)
+    end)
 end
 
 return Client
