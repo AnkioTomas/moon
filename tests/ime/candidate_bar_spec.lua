@@ -1,5 +1,5 @@
 --[[--
-pinyin.candidate_bar 离线用例：VirtualKeyboard / zh_CN 布局 / 词库全 stub。
+ime.candidate_bar 离线用例：VirtualKeyboard / zh_CN 布局 / 词库全 stub。
 
 候选条是自研 Strip widget（顶掉 addKeys 建的首行），假键盘给出最小容器壳：
 kb[1][1][1][1] = VerticalGroup（其 [1] = 首行，行内键/span 交错，奇数位是键）。
@@ -10,7 +10,7 @@ kb[1][1][1][1] = VerticalGroup（其 [1] = 首行，行内键/span 交错，奇�
 物理键盘 / SDL 文本输入（直调 inputbox 包装表）回退原生 IME、
 关闭/词库缺失时全透传且不留幽灵行。
 
-@module tests.pinyin.candidate_bar_spec
+@module tests.ime.candidate_bar_spec
 --]]
 
 local Assert = require("support.assert")
@@ -71,7 +71,7 @@ local dict_available = true
 local dict_file_exists = true
 local lookup_calls = {}
 local WORDS = { "你好", "你好吗", "内耗", "拟合", "泥沼", "尼龙", "匿迹", "逆转", "匿名", "溺爱" }
-package.preload["pinyin.dictionary"] = function()
+package.preload["ime.pinyin.dictionary"] = function()
     return {
         isAvailable = function()
             return dict_available
@@ -86,6 +86,24 @@ package.preload["pinyin.dictionary"] = function()
             end
             return {}
         end,
+    }
+end
+local current_profile
+package.preload["ime.registry"] = function()
+    current_profile = {
+        id = "pinyin",
+        commit_space = true,
+        mapKey = function(key)
+            if type(key) == "string" and key:match("^%a$") then
+                key = key:lower()
+                return key, key
+            end
+        end,
+    }
+    return {
+        current = function() return current_profile end,
+        isAvailable = function() return require("ime.pinyin.dictionary").isAvailable() end,
+        lookup = function(_, code) return require("ime.pinyin.dictionary").lookup(code) end,
     }
 end
 
@@ -227,7 +245,7 @@ end
 -- ── 被测模块 ─────────────────────────────────────────
 
 local pinyin_on = true
-local Bar = require("pinyin.candidate_bar")
+local Bar = require("ime.candidate_bar")
 Bar.install({ enabled = function() return pinyin_on end })
 
 local function flush()
@@ -304,7 +322,7 @@ end
 -- 候选行注入：zh_CN 布局 keys[1] 被插入带标记的 10 键行，首行被 Strip 顶掉
 do
     local kb = newKeyboard()
-    Assert.is_true(zh_keys[1]._pinyin_bar == true, "候选行必须插到布局第一行")
+    Assert.is_true(zh_keys[1]._ime_bar == true, "候选行必须插到布局第一行")
     Assert.eq(#zh_keys[1], 10)
     Assert.eq(#zh_keys, 2, "原字母行保留")
     local strip = stripOf(kb)
@@ -368,6 +386,30 @@ do
     Assert.eq(wordCell(kb, 2).tw.text, "你好吗")
     Assert.eq(wordCell(kb, 3).tw.text, "内耗")
     Assert.is_true(kb.KEYS[1][2].width > 0, "占位键宽必须有效（addKeys 基准行）")
+end
+
+-- 形码内部仍查 ASCII 编码，但输入框显示用户实际按下的字根。
+do
+    local pinyin_profile = current_profile
+    local roots = { o = "人", n = "弓" }
+    current_profile = {
+        id = "cangjie",
+        commit_space = true,
+        labels = roots,
+        mapKey = function(key)
+            key = type(key) == "string" and key:lower() or nil
+            if key and roots[key] then return key, roots[key] end
+        end,
+    }
+    local kb = newKeyboard()
+    typeCode(kb, "on")
+    Assert.eq(text(kb), "人弓", "仓颉预编辑必须显示字根而不是 on")
+    flush()
+    Assert.eq(lookup_calls[#lookup_calls], "on", "仓颉词库仍按 ASCII 码查询")
+    VK.delChar(kb)
+    Assert.eq(text(kb), "人", "退格按一个字根删除")
+    kb:onCloseWidget()
+    current_profile = pinyin_profile
 end
 
 -- 物理键盘 / SDL 文本输入：直调 inputbox 包装表，不经过 VirtualKeyboard.addChar，
@@ -516,7 +558,7 @@ end
 -- 没坐满的队列整体居中。回归：截断出 0/过小的 max_width 会让
 -- xtext makeLine 抛错（Kindle 真机崩溃）。
 do
-    local dict = require("pinyin.dictionary")
+    local dict = require("ime.pinyin.dictionary")
     local orig_lookup = dict.lookup
     local long1 = string.rep("a", 40) -- 400+20 = 420 ≤ 预算 480，占满后剩 60
     local long2 = string.rep("b", 20) -- 200+20 = 220 > 剩余 60：跳过
@@ -542,7 +584,7 @@ do
     dict_file_exists = true
     local before = #native_adds
     local kb = newKeyboard()
-    Assert.is_nil(zh_keys[1]._pinyin_bar, "损坏词库时候选行必须摘掉")
+    Assert.is_nil(zh_keys[1]._ime_bar, "损坏词库时候选行必须摘掉")
     Assert.is_true(kb.layout[1][1].flash_keyboard, "损坏词库时不得改变原生键盘反馈")
     VK.addChar(kb, "n")
     Assert.eq(#native_adds, before + 1, "损坏词库时字母必须透传原生 IME")
@@ -554,7 +596,7 @@ do
     dict_available = false
     local before = #native_adds
     local kb = newKeyboard()
-    Assert.is_nil(zh_keys[1]._pinyin_bar, "词库缺失时候选行必须摘掉")
+    Assert.is_nil(zh_keys[1]._ime_bar, "词库缺失时候选行必须摘掉")
     Assert.is_true(kb.layout[1][1].flash_keyboard, "词库缺失时不得改变原生键盘反馈")
     Assert.eq(#zh_keys, 1)
     Assert.eq(#kb.layout, 1, "键盘少一行")
@@ -567,7 +609,7 @@ end
 -- 词库就位后：下次键盘 init 自己把候选行加回来（无需重装 hook）
 do
     local kb = newKeyboard()
-    Assert.is_true(zh_keys[1]._pinyin_bar == true, "词库可用后候选行回来")
+    Assert.is_true(zh_keys[1]._ime_bar == true, "词库可用后候选行回来")
     typeAndLookup(kb, "nihao")
     Assert.eq(wordCell(kb, 1).tw.text, "你好")
 end
@@ -577,7 +619,7 @@ do
     pinyin_on = false
     local before = #native_adds
     local kb = newKeyboard()
-    Assert.is_nil(zh_keys[1]._pinyin_bar, "关闭后候选行必须摘掉")
+    Assert.is_nil(zh_keys[1]._ime_bar, "关闭后候选行必须摘掉")
     typeCode(kb, "abc")
     Assert.eq(#native_adds, before + 3, "关闭时字母全透传")
     pinyin_on = true
@@ -585,11 +627,11 @@ end
 
 -- 清理：preload 桩不卸会污染后续 spec
 for _, name in ipairs({
-    "ui/uimanager", "ui/size", "ffi/blitbuffer", "pinyin.dictionary",
+    "ui/uimanager", "ui/size", "ffi/blitbuffer", "ime.pinyin.dictionary",
     "ui/data/keyboardlayouts/zh_CN_keyboard", "ui/widget/virtualkeyboard",
     "ui/widget/textwidget",
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil
 end
-package.loaded["pinyin.candidate_bar"] = nil
+package.loaded["ime.candidate_bar"] = nil

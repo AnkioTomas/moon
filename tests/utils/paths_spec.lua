@@ -86,6 +86,11 @@ do
     Assert.eq(Paths.bookWorkDir("sid", "moon"),
         root .. "/cache/moon/book/" .. Paths.slugFor("sid"))
     Assert.eq(Paths.dbPath(), root .. "/book.sqlite3")
+    Assert.eq(Paths.pinyinDictPath(), root .. "/dictionary.sqlite3")
+    Assert.eq(Paths.imeDictPath("wubi"), root .. "/dictionary-wubi.sqlite3")
+    Assert.eq(Paths.imeDictPath("cangjie"), root .. "/dictionary-cangjie.sqlite3")
+    Assert.eq(Paths.imeDictPath("zhuyin"), root .. "/dictionary-zhuyin.sqlite3")
+    Assert.errors(function() Paths.imeDictPath("stroke") end, "unsupported input method")
     Assert.eq(Paths.settingsDir(), root .. "/settings")
     Assert.eq(Paths.fontsDir(), root .. "/fonts")
     Assert.eq(Paths.commonPath(), root .. "/settings/common.lua")

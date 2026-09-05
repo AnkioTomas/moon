@@ -1,10 +1,10 @@
 --[[--
-pinyin.download：manifest → 原始分片下载 → 拼接 → 校验落位
+ime.download：manifest → 原始分片下载 → 拼接 → 校验落位
 
 不碰真网络：stub http.request（download 写假分片 / get 给 manifest），
 stub workers.job 让 assemble 在主进程同步跑。
 
-@module tests.pinyin.download_spec
+@module tests.ime.download_spec
 --]]
 
 local Assert = require("support.assert")
@@ -125,7 +125,12 @@ package.preload["workers.job"] = function()
 end
 
 local Paths = require("utils.paths")
-local Download = require("pinyin.download")
+package.preload["ime.registry"] = function()
+    return {
+        reset = function() end,
+    }
+end
+local Download = require("ime.download")
 local MoonSettings = require("utils.settings")
 
 local dest = Paths.pinyinDictPath()
@@ -145,7 +150,7 @@ local ok_run, err_run = pcall(function()
         original_parts[2],
     }
     local bad_ok, bad_err
-    Download.ensure(function(ok, err)
+    Download.ensure("pinyin", function(ok, err)
         bad_ok, bad_err = ok, err
     end)
     Stubs.flush()
@@ -157,7 +162,7 @@ local ok_run, err_run = pcall(function()
     -- 第一轮第二片失败：第一片必须保留，重试只拉失败的那片。
     fail_part_once = true
     local failed, failed_err
-    Download.ensure(function(ok, err)
+    Download.ensure("pinyin", function(ok, err)
         failed = not ok
         failed_err = err
     end)
@@ -165,13 +170,13 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(failed)
     Assert.matches(failed_err, "network failed")
     Assert.eq(#downloads, 2)
-    Assert.is_true(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/pinyin_dict.dl/" .. manifest.parts[1].file) ~= nil)
-    Assert.is_nil(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/pinyin_dict.dl/" .. manifest.parts[2].file))
+    Assert.is_true(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/ime_pinyin_dict.dl/" .. manifest.parts[1].file) ~= nil)
+    Assert.is_nil(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/ime_pinyin_dict.dl/" .. manifest.parts[2].file))
 
     downloads = {}
     progress_events = {}
     local done, ok_cb
-    Download.ensure(function(ok, err)
+    Download.ensure("pinyin", function(ok, err)
         done = true
         ok_cb = ok
         if not ok then
@@ -218,7 +223,7 @@ local ok_run, err_run = pcall(function()
     Assert.eq(MoonSettings.get().pinyin_dict_sha256, raw_sha)
 
     -- 临时目录已清理
-    Assert.is_nil(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/pinyin_dict.dl"))
+    Assert.is_nil(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/ime_pinyin_dict.dl"))
 
     -- built_at 相同但词库被截断：大小不符时必须重新下载，不能把非空文件当成功。
     local downloads_before_repair = #downloads
@@ -226,7 +231,7 @@ local ok_run, err_run = pcall(function()
     truncated:write("broken")
     truncated:close()
     local repaired, repair_ok
-    Download.ensure(function(ok)
+    Download.ensure("pinyin", function(ok)
         repaired = true
         repair_ok = ok
     end)
@@ -243,7 +248,7 @@ local ok_run, err_run = pcall(function()
     local downloads_before = #downloads
     fake_settings.pinyin_dict_sha256 = "stale-sha"
     local done_again, ok_again
-    Download.ensure(function(ok)
+    Download.ensure("pinyin", function(ok)
         done_again = true
         ok_again = ok
     end)
@@ -259,7 +264,7 @@ local ok_run, err_run = pcall(function()
     manifest.built_at = "2026-08-20 00:00:00"
     manifest.raw_sha256 = string.rep("0", 64)
     local hash_ok, hash_err
-    Download.ensure(function(ok, err)
+    Download.ensure("pinyin", function(ok, err)
         hash_ok, hash_err = ok, err
     end)
     Stubs.flush()
@@ -270,6 +275,23 @@ local ok_run, err_run = pcall(function()
     preserved:close()
     manifest.built_at = old_built_at
     manifest.raw_sha256 = old_raw_sha
+
+    -- 非拼音布局使用独立 CDN 目录、文件名和版本记录，不能覆盖旧拼音词库。
+    downloads = {}
+    local wubi_done
+    Download.ensure("wubi", function(ok)
+        wubi_done = ok
+    end)
+    Stubs.flush()
+    Assert.is_true(wubi_done)
+    Assert.is_true(downloads[1]:find("/assets/ime/wubi/", 1, true) ~= nil)
+    local wubi_dest = Paths.imeDictPath("wubi")
+    local wubi_file = assert(io.open(wubi_dest, "rb"))
+    Assert.eq(wubi_file:read("*a"), raw)
+    wubi_file:close()
+    Assert.eq(fake_settings.ime_dict_built_at.wubi, manifest.built_at)
+    Assert.eq(fake_settings.ime_dict_sha256.wubi, raw_sha)
+    os.remove(wubi_dest)
 end)
 
 cleanup()

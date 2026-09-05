@@ -65,7 +65,7 @@ stub("ui.desktop.home", {
     end,
 })
 stub("ui.screenshot_share", { install = function() calls.screenshot_share = (calls.screenshot_share or 0) + 1 end })
-stub("pinyin.init", { bootstrap = function() calls.pinyin = (calls.pinyin or 0) + 1 end })
+stub("ime.init", { bootstrap = function() calls.pinyin = (calls.pinyin or 0) + 1 end })
 stub("patch.manager", { init = function() calls.patch = (calls.patch or 0) + 1 end })
 stub("patch.page_turn_animation", { checkStartup = function() calls.animation = (calls.animation or 0) + 1 end })
 
