@@ -15,16 +15,35 @@ pinyin.candidate_bar × 真实 KOReader 前端集成用例。
 --]]
 
 local Assert = require("support.assert")
+local Config = require("support.config")
+
+if not Config.setupNativePath() then
+    Assert.skip("需要 KOReader 模拟器原生库")
+end
+local frontend = io.open(Config.root() .. "/koreader/frontend/ui/uimanager.lua", "r")
+if not frontend then
+    Assert.skip("需要本机 KOReader 源码")
+end
+frontend:close()
 
 -- run.lua 的 package.path 是相对路径，本 spec 要 chdir 到 koreader/ 根
 --（真实键盘布局模块内部 dofile("frontend/...")），先把所有搜索路径转绝对。
-package.cpath = "./koreader/koreader-emulator-arm64-apple-darwin25.5.0-debug/koreader/?.so;"
-    .. "./koreader/koreader-emulator-arm64-apple-darwin25.5.0-debug/koreader/libs/?.so;"
-    .. package.cpath
 local lfs = require("libs/libkoreader-lfs")
 local BASE = lfs.currentdir()
 local KO = BASE .. "/koreader"
-local EMU = KO .. "/koreader-emulator-arm64-apple-darwin25.5.0-debug/koreader"
+local EMU
+for name in lfs.dir(KO) do
+    if name:match("^koreader%-emulator%-.+%-debug$") then
+        local candidate = KO .. "/" .. name .. "/koreader"
+        if lfs.attributes(candidate, "mode") == "directory" then
+            EMU = candidate
+            break
+        end
+    end
+end
+if not EMU then
+    Assert.skip("未找到 KOReader 模拟器构建目录")
+end
 package.cpath = EMU .. "/?.so;" .. EMU .. "/libs/?.so;" .. package.cpath
 package.path = table.concat({
     KO .. "/frontend/?.lua",

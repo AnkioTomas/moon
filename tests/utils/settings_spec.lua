@@ -9,7 +9,7 @@ local Config = require("support.config")
 
 Assert.not_nil(Config.root())
 -- 数据目录必须是沙箱，绝不能指回模拟器 config/（测试会写坏真实配置）
-Assert.matches(Config.dir(), "/test$")
+Assert.eq(Config.dir(), (os.getenv("KO_HOME") or (Config.root() .. "/test")):gsub("/+$", ""))
 Assert.is_nil(Config.dir():find("/config", 1, true))
 
 do
@@ -18,11 +18,8 @@ do
 end
 
 if not Config.available() then
-    io.write("  (skip: 沙箱数据目录未就绪，请用 ./tests/run.sh 运行)\n")
-    return
+    Assert.skip("沙箱数据目录未就绪，请用 ./tests/run.sh 运行")
 end
-
-Assert.is_true(Config.setupNativePath())
 
 local Settings = Config.settings()
 local common = Settings.get()

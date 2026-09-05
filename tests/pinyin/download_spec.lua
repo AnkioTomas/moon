@@ -12,11 +12,8 @@ local Stubs = require("support.stubs")
 local Config = require("support.config")
 
 if not Config.available() then
-    io.write("  (skip: 沙箱数据目录未就绪，请用 ./tests/run.sh 运行)\n")
-    return
+    Assert.skip("沙箱数据目录未就绪，请用 ./tests/run.sh 运行")
 end
-
-Assert.is_true(Config.setupNativePath())
 
 -- 数据目录指到隔离的临时根，别碰真实 .moon
 -- 先清后建：避免上一轮崩掉（进程被杀，cleanup 没跑）留下的残留影响断言
@@ -56,19 +53,18 @@ local manifest = {
     },
 }
 
--- json：download 用 JSON.decode 解 manifest；测试侧用 KOReader 自带的 dkjson 真实现
--- （只读模拟器构建产物，和 native 库同一性质）
-local DKJSON = Config.root() .. "/config/common/dkjson.lua"
-do
-    local probe = io.open(DKJSON, "r")
-    if not probe then
-        io.write("  (skip: 缺 config/common/dkjson.lua，需要本机 koreader 构建产物)\n")
-        return
-    end
-    probe:close()
-end
+-- 本用例只验证 manifest 的消费逻辑，不重复测试 JSON 编解码器。
+local encoded_manifest
 package.preload["json"] = function()
-    return dofile(DKJSON)
+    return {
+        encode = function(value)
+            encoded_manifest = value
+            return "{}"
+        end,
+        decode = function()
+            return encoded_manifest
+        end,
+    }
 end
 
 -- stub http.request：get 给 manifest，download 写对应分片（并回报一次写字节进度）

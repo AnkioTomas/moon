@@ -72,6 +72,7 @@ end
 
 local failed = 0
 local passed = 0
+local skipped = 0
 local total_asserts = 0
 
 -- 环境基线：stubs 首次安装后的干净状态。每个 spec 前恢复到基线，
@@ -147,8 +148,17 @@ for _, path in ipairs(specs) do
         Assert.reset_count()
         local ok, boom = xpcall(function()
             chunk(Assert)
-        end, debug.traceback)
-        if not ok then
+        end, function(err)
+            if type(err) == "string" and err:sub(1, #Assert.SKIP_PREFIX) == Assert.SKIP_PREFIX then
+                return err
+            end
+            return debug.traceback(err)
+        end)
+        if not ok and type(boom) == "string"
+            and boom:sub(1, #Assert.SKIP_PREFIX) == Assert.SKIP_PREFIX then
+            io.write("  skip (" .. boom:sub(#Assert.SKIP_PREFIX + 1) .. ")\n")
+            skipped = skipped + 1
+        elseif not ok then
             io.stderr:write("  FAIL\n" .. tostring(boom) .. "\n")
             failed = failed + 1
         elseif Assert.count == 0 then
@@ -163,5 +173,8 @@ for _, path in ipairs(specs) do
     end
 end
 
-io.write(string.format("\n%d passed, %d failed (%d assertions)\n", passed, failed, total_asserts))
+io.write(string.format(
+    "\n%d passed, %d skipped, %d failed (%d assertions)\n",
+    passed, skipped, failed, total_asserts
+))
 os.exit(failed == 0 and 0 or 1)

@@ -50,7 +50,7 @@ local function storageLayout()
     local plugin_self = real(plugins .. "/book.koplugin")
     local screenshot_dir = real(G_reader_settings:readSetting("screenshot_dir") or (data .. "/screenshots"))
     Paths.ensureScreensaverDir()
-    local wallpapers = Paths.screensaverDir() .. "/"
+    local wallpapers = Paths.screensaverDir()
     if lfs.attributes(wallpapers, "mode") ~= "directory" then
         lfs.mkdir(wallpapers)
     end

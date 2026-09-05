@@ -12,7 +12,7 @@ cd "$ROOT"
 SANDBOX="${KO_HOME:-$ROOT/test}"
 mkdir -p "$SANDBOX/.moon/settings" "$SANDBOX/.moon/cache" "$SANDBOX/settings"
 
-# native 库来自模拟器构建产物；没有 config/ 时相关 spec 会自行跳过
+# 有模拟器构建产物时优先使用真实 native 库；否则 runner 安装最小测试桩
 if [ ! -e "$SANDBOX/libs" ] && [ -d "$ROOT/config/libs" ]; then
     ln -s "$ROOT/config/libs" "$SANDBOX/libs"
 fi
