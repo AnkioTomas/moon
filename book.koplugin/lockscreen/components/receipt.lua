@@ -240,22 +240,23 @@ function M.blocks(rect)
     }
 
     local half = math.floor(width / 2)
+    local column_gap = math.max(12, math.floor(pad * 0.7))
     blocks[#blocks + 1] = {
         text = _("今日阅读页数"), x = x, y = y + math.floor(height * 0.725),
-        width = half, size = 13, box = false, color = U.MUTED,
+        width = half - column_gap, size = 13, box = false, color = U.MUTED,
     }
     blocks[#blocks + 1] = {
         text = tostring(tonumber(today.pages) or 0) .. " " .. _("页"),
         x = x, y = y + math.floor(height * 0.765),
-        width = half, size = 27, bold = true, box = false,
+        width = half - column_gap, size = 27, bold = true, box = false,
     }
     blocks[#blocks + 1] = {
-        text = _("今日阅读时长"), x = x + half, y = y + math.floor(height * 0.725),
-        width = width - half, size = 13, box = false, color = U.MUTED,
+        text = _("今日阅读时长"), x = x + half + column_gap, y = y + math.floor(height * 0.725),
+        width = width - half - column_gap, size = 13, box = false, color = U.MUTED,
     }
     blocks[#blocks + 1] = {
-        text = U.duration(today.seconds), x = x + half, y = y + math.floor(height * 0.765),
-        width = width - half, size = 27, bold = true, box = false,
+        text = U.duration(today.seconds), x = x + half + column_gap, y = y + math.floor(height * 0.765),
+        width = width - half - column_gap, size = 27, bold = true, box = false,
     }
     blocks[#blocks + 1] = {
         kind = "rule", x = x + half, y = y + math.floor(height * 0.72),
