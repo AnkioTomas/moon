@@ -31,6 +31,8 @@ local _punched_port = nil ---@type number|nil
 local function storageLayout()
     local DataStorage = require("datastorage")
     local ffiUtil = require("ffi/util")
+    local lfs = require("libs/libkoreader-lfs")
+    local Paths = require("utils.paths")
     local data = assert(ffiUtil.realpath(DataStorage:getFullDataDir()), "KOReader data dir unavailable")
     local root = ffiUtil.dirname(data)
     local local_cfg = Settings.getSource("local")
@@ -47,6 +49,12 @@ local function storageLayout()
     local plugins = real(data .. "/plugins")
     local plugin_self = real(plugins .. "/book.koplugin")
     local screenshot_dir = real(G_reader_settings:readSetting("screenshot_dir") or (data .. "/screenshots"))
+    Paths.ensureScreensaverDir()
+    local wallpapers = Paths.screensaverDir() .. "/"
+    if lfs.attributes(wallpapers, "mode") ~= "directory" then
+        lfs.mkdir(wallpapers)
+    end
+    wallpapers = real(wallpapers)
     local crash_log = real(data .. "/crash.log")
     local plugin_log = real(data .. "/.moon/book.log")
     local roots = {}
@@ -71,6 +79,7 @@ local function storageLayout()
             { label = "KOReader 插件", path = plugins },
             { label = "书籍根目录", path = book },
             { label = "截图文件夹", path = screenshot_dir },
+            { label = "锁屏壁纸", path = wallpapers },
             {
                 label = "KOReader 崩溃日志", path = crash_log, kind = "file", name = "crash.log",
                 missing = "尚未生成 KOReader 崩溃日志。",
@@ -102,6 +111,7 @@ local function storageLayout()
             [crash_log] = true,
             [plugin_log] = true,
         },
+        public_dirs = { wallpapers },
     }
 end
 
@@ -171,6 +181,11 @@ end
 ---@return boolean
 local function isSecret(path)
     if layout().public_files[path] then return false end
+    for _, public_dir in ipairs(layout().public_dirs) do
+        if Text.pathContains(public_dir, path) then
+            return false
+        end
+    end
     for _, secret in ipairs(layout().secret) do
         if path == secret or Text.pathContains(secret, path) then
             return true
