@@ -8,7 +8,10 @@ require("l10n").apply()
 
 local Text = require("utils.text")
 local UIManager = require("ui/uimanager")
+local logger = require("utils.log")
 local _ = require("gettext")
+
+local SCAN_DEBOUNCE = 0.2
 
 local Marks = {
     view = nil,
@@ -17,6 +20,9 @@ local Marks = {
     _render_key = nil,
     _revision = 0,
     _scan_pending = nil,
+    _scan_timer = nil,
+    _scan_job = nil,
+    _scan_token = nil,
     _entity_cache_key = nil,
     _entity_cache = nil,
 }
@@ -212,9 +218,18 @@ local function scanVisibleMarks(ui, entities)
     return out
 end
 
---- 清空当前屏幕标记；已排队任务会按缓存键自行作废。
+--- 清空当前屏幕标记并取消待执行或正在运行的扫描。
 ---@param self table
 local function resetMarks(self)
+    self._scan_token = nil
+    if self._scan_timer then
+        UIManager:unschedule(self._scan_timer)
+        self._scan_timer = nil
+    end
+    if self._scan_job then
+        self._scan_job:cancel()
+        self._scan_job = nil
+    end
     self._marks = {}
     self._render_key = nil
     self._scan_pending = nil
@@ -242,7 +257,7 @@ local function renderKey(ui)
     }, "\0")
 end
 
---- 把当前页扫描排到首帧之后；快速翻页时旧键任务直接作废。
+--- 防抖后扫描当前页；快速翻页会取消旧计时器或尚未执行的任务。
 ---@param self table
 ---@param key string
 ---@param entities table[]
@@ -250,28 +265,59 @@ local function scheduleScan(self, key, entities)
     if self._scan_pending == key then
         return
     end
+    if self._scan_timer then
+        UIManager:unschedule(self._scan_timer)
+        self._scan_timer = nil
+    end
+    if self._scan_job then
+        self._scan_job:cancel()
+        self._scan_job = nil
+    end
     self._scan_pending = key
     local ui = self.ui
-    UIManager:nextTick(function()
-        if self._scan_pending ~= key or self.ui ~= ui then
+    local token = {}
+    self._scan_token = token
+    local timer
+    timer = function()
+        if self._scan_token ~= token or self._scan_pending ~= key or self.ui ~= ui then
             return
         end
+        self._scan_timer = nil
         if not Marks.enabled() or renderKey(ui) ~= key then
             if self._scan_pending == key then self._scan_pending = nil end
             return
         end
-        local marks = scanVisibleMarks(ui, entities)
-        if self._scan_pending ~= key or self.ui ~= ui
-            or not Marks.enabled() or renderKey(ui) ~= key then
-            return
+        local job = require("workers.simple_job").run(function()
+            return scanVisibleMarks(ui, entities)
+        end, {
+            on_done = function(marks)
+                if self._scan_token ~= token or self._scan_pending ~= key
+                    or self.ui ~= ui or not Marks.enabled() or renderKey(ui) ~= key then
+                    return
+                end
+                self._scan_job = nil
+                self._scan_pending = nil
+                self._marks = marks or {}
+                self._render_key = key
+                if ui.dialog then
+                    UIManager:setDirty(ui.dialog, "ui")
+                end
+            end,
+            on_failed = function(err)
+                if self._scan_token ~= token then return end
+                self._scan_job = nil
+                self._scan_pending = nil
+                self._marks = {}
+                self._render_key = key
+                logger.warn("book.xray marks scan failed", err)
+            end,
+        })
+        if self._scan_token == token and not job.settled then
+            self._scan_job = job
         end
-        self._scan_pending = nil
-        self._marks = marks
-        self._render_key = key
-        if ui.dialog then
-            UIManager:setDirty(ui.dialog, "ui")
-        end
-    end)
+    end
+    self._scan_timer = timer
+    UIManager:scheduleIn(SCAN_DEBOUNCE, timer)
 end
 
 ---@param pos table|nil
@@ -417,7 +463,7 @@ function Marks.install(ui)
         return
     end
     ui._book_xray_marks = true
-    Marks._scan_pending = nil
+    resetMarks(Marks)
     Marks.ui = ui
     if ui.view and ui.view.registerViewModule then
         ui.view:registerViewModule("book_xray_marks", Marks)
