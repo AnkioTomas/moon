@@ -59,6 +59,16 @@ local function decode(raw)
     return ok and type(value) == "table" and value or nil
 end
 
+---@param id any
+---@param face any
+---@return boolean
+local function idMatchesFace(id, face)
+    if type(id) ~= "string" or id == "" or type(face) ~= "string" or face == "" then
+        return false
+    end
+    return MoonFont.faceForId(id) == face
+end
+
 ---@param ui table|nil
 ---@return BookIdentity|nil
 function M.identityForUi(ui)
@@ -89,10 +99,17 @@ function M.capture(ui)
         end
     end
     local doc = ui.doc_settings
+    local font_id = doc and doc:readSetting("book_reader_font_id") or nil
+    local font_face = ui.font.font_face or (doc and doc:readSetting("font_face") or nil)
+    -- book_reader_font_id 只负责让插件字体在下次启动时重新注册，不是第二份字体状态。
+    -- 用户经 KOReader 原生菜单换字体后，旧 id 不得反过来覆盖当前 font_face。
+    if not idMatchesFace(font_id, font_face) then
+        font_id = nil
+    end
     return {
-        font_id = doc and doc:readSetting("book_reader_font_id") or nil,
-        font_name = doc and doc:readSetting("book_reader_font_name") or nil,
-        font_face = doc and doc:readSetting("font_face") or nil,
+        font_id = font_id,
+        font_name = font_id and doc:readSetting("book_reader_font_name") or nil,
+        font_face = font_face,
         copt = copt,
     }
 end
@@ -148,7 +165,7 @@ function M.captureAndSave(ui, identity)
     if existing then
         local id = prefs.font_id
         if (type(id) ~= "string" or id == "")
-            and type(existing.font_id) == "string" and existing.font_id ~= "" then
+            and idMatchesFace(existing.font_id, prefs.font_face) then
             prefs.font_id = existing.font_id
             prefs.font_name = existing.font_name or prefs.font_name
         end

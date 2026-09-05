@@ -119,7 +119,7 @@ local ReaderPrefs = require("book.reader_prefs")
 
 local ui = {
     font = {
-        font_face = "Old",
+        font_face = "Demo Face",
         onSetFont = function(self, face) self.font_face = face end,
         onSaveSettings = function(self)
             self.saved_face = self.font_face
@@ -201,6 +201,19 @@ ui.doc_settings.data.book_reader_font_id = nil
 Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
 loaded = ReaderPrefs.load(identity)
 Assert.eq(loaded.font_id, "demo.ttf")
+
+-- 原生菜单改成其他字体后，旧插件 id 只是过期的加载提示，不能覆盖当前 font_face。
+ui.font.font_face = "Native Face"
+ui.doc_settings.data.font_face = "Old Sidecar Face"
+ui.doc_settings.data.book_reader_font_id = "demo.ttf"
+Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
+loaded = ReaderPrefs.load(identity)
+Assert.is_nil(loaded.font_id)
+Assert.eq(loaded.font_face, "Native Face")
+local reopened = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
+Assert.is_true(ReaderPrefs.inject(reopened, { file = "/chapter.html", setFontFace = function() end }))
+Assert.eq(reopened.data.font_face, "Native Face")
+Assert.eq(reopened.data.book_reader_font_id, "")
 
 -- 同步写库失败直接返回 false，并留下日志。
 fail_write = true
