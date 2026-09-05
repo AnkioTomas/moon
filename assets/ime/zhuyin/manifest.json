@@ -1,0 +1,14 @@
+{
+  "tag": "openvanilla/McBopomofo@master",
+  "built_at": "2026-09-05 23:24:25",
+  "entries": 171986,
+  "raw_sha256": "09b98a3af76a46a6560dca20572029361a959aacb6af79eca09f75cae1961da4",
+  "raw_size": 13602816,
+  "parts": [
+    {
+      "file": "dictionary.sqlite3.part.001",
+      "size": 13602816,
+      "sha256": "09b98a3af76a46a6560dca20572029361a959aacb6af79eca09f75cae1961da4"
+    }
+  ]
+}
