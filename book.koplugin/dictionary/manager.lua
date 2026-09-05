@@ -205,14 +205,64 @@ local function assembleAndExtract(item, dir, target)
     assert(os.rename(staging, target))
 end
 
+--- 把 HTTP body 增量写入临时文件，成功后原子改名；进度来自实际接收字节。
+---@param url string
+---@param dest string
+---@param on_progress fun(bytes: number)
+---@param cb fun(ok: boolean, err: any)
+---@return table
+local function downloadPart(url, dest, on_progress, cb)
+    local temp = dest .. ".part"
+    local file, open_err = io.open(temp, "wb")
+    if not file then
+        cb(false, open_err or "cannot open dictionary part")
+        return { cancel = function() end }
+    end
+    local received, write_err = 0, nil
+    return Request.stream({
+        url = url,
+        method = "GET",
+        timeout = 300,
+        allow_redirects = true,
+    }, {
+        on_data = function(chunk)
+            if write_err then return end
+            local wrote, err = file:write(chunk)
+            if not wrote then
+                write_err = err or "dictionary part write failed"
+                return
+            end
+            received = received + #chunk
+            on_progress(received)
+        end,
+        on_done = function(err)
+            local closed, close_err = file:close()
+            if err or write_err or not closed then
+                os.remove(temp)
+                cb(false, err or write_err or close_err or "dictionary part close failed")
+                return
+            end
+            os.remove(dest)
+            local moved, rename_err = os.rename(temp, dest)
+            if not moved then
+                os.remove(temp)
+                cb(false, rename_err or "dictionary part rename failed")
+                return
+            end
+            cb(true)
+        end,
+    })
+end
+
 --- 逐片下载（递归推进，串行；已完整的片直接跳过 = 续传），全部到位后转入解压安装。
 --- 任一片失败即删除该片、清 `_downloading` 并回调失败，不重试。
 ---@param item table 清单项
 ---@param dir string 临时目录
 ---@param idx number 当前分片序号（从 1 起）
+---@param completed number 已完成分片的总字节数
 ---@param done table `{ data_dir = string, callback = fun(ok: boolean, err: any) }`
 ---@param report fun(stage: string, done: number, total: number, idx: number, count: number) stage 为 "part"/"install"
-local function downloadParts(item, dir, idx, done, report)
+local function downloadParts(item, dir, idx, completed, done, report)
     local part = item.parts[idx]
     if not part then
         report("install", item.size, item.size, #item.parts, #item.parts)
@@ -237,22 +287,27 @@ local function downloadParts(item, dir, idx, done, report)
         return
     end
     if partComplete(dir, part) then
-        report("part", idx, #item.parts, idx, #item.parts)
-        downloadParts(item, dir, idx + 1, done, report)
+        completed = completed + tonumber(part.size)
+        report("part", completed, item.size, idx, #item.parts)
+        downloadParts(item, dir, idx + 1, completed, done, report)
         return
     end
-    _job = Request.download({
-        url = BASE_URL .. "/" .. part.file,
-        method = "GET", timeout = 300, allow_redirects = true,
-    }, dir .. "/" .. part.file, function(ok, err)
+    _job = downloadPart(
+        BASE_URL .. "/" .. part.file,
+        dir .. "/" .. part.file,
+        function(bytes)
+            report("part", completed + bytes, item.size, idx, #item.parts)
+        end,
+        function(ok, err)
         if not ok or not partComplete(dir, part) then
             os.remove(dir .. "/" .. part.file)
             _downloading, _job = false, nil
             done.callback(false, err or "part size mismatch")
             return
         end
-        report("part", idx, #item.parts, idx, #item.parts)
-        downloadParts(item, dir, idx + 1, done, report)
+        completed = completed + tonumber(part.size)
+        report("part", completed, item.size, idx, #item.parts)
+        downloadParts(item, dir, idx + 1, completed, done, report)
     end)
 end
 
@@ -280,7 +335,7 @@ function Manager.install(item, data_dir, cb, on_progress)
     if not dir_ok then cb(false, dir_err); return end
     _downloading = true
     local report = on_progress or function() end
-    downloadParts(item, dir, 1, { data_dir = data_dir, callback = cb }, report)
+    downloadParts(item, dir, 1, 0, { data_dir = data_dir, callback = cb }, report)
 end
 
 --- 当前是否有下载/安装任务在跑。

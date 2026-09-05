@@ -15,6 +15,24 @@ local Text = require("utils.text")
 
 local Dictionary = {}
 
+--- 词典目录属于 KOReader 数据目录，不属于 ReaderUI 生命周期。
+--- 桌面没有打开阅读器时构造最小上下文；下次 ReaderDictionary.init 会重新扫描目录。
+---@param ui table|nil ReaderUI
+---@return table|nil
+local function dictionaryContext(ui)
+    if ui and ui.dictionary and ui.dictionary.data_dir then
+        return ui.dictionary
+    end
+    local data_dir = G_defaults and G_defaults:readSetting("STARDICT_DATA_DIR")
+        or os.getenv("STARDICT_DATA_DIR")
+        or require("datastorage"):getDataDir() .. "/data/dict"
+    if type(data_dir) ~= "string" or data_dir == "" then return nil end
+    return {
+        data_dir = data_dir,
+        dicts_disabled = G_reader_settings and G_reader_settings:readSetting("dicts_disabled", {}) or {},
+    }
+end
+
 --- 弹一条自动消失的提示。
 ---@param text string 提示文案
 ---@param timeout number|nil 停留秒数，默认 3
@@ -46,7 +64,7 @@ end
 ---@param ui table|nil ReaderUI 实例
 ---@param changed_callback function|nil
 function Dictionary.manage(ui, changed_callback)
-    local dictionary = ui and ui.dictionary
+    local dictionary = dictionaryContext(ui)
     if not dictionary or not dictionary.data_dir then info(_("字典模块不可用")); return end
     local Manager = require("dictionary.manager")
     local paths = Manager.installed(dictionary.data_dir)
@@ -104,14 +122,18 @@ end
 ---@param ui table|nil ReaderUI 实例
 ---@param item table 目录项，含 id / name / size
 local function install(ui, item)
-    local dictionary = ui and ui.dictionary
+    local dictionary = dictionaryContext(ui)
     if not dictionary or not dictionary.data_dir then info(_("字典模块不可用")); return end
-    local loading = require("ui/widget/infomessage"):new{
-        text = T(_("正在下载字典：%1"), item.name),
+    local loading = require("ui/widget/progressbardialog"):new{
+        title = T(_("正在下载字典：%1"), item.name),
+        subtitle = string.format("%.1f MB", item.size / 1048576),
+        progress_max = item.size,
+        refresh_time_seconds = 0.1,
+        dismissable = false,
     }
-    UIManager:show(loading)
+    loading:show()
     require("dictionary.manager").install(item, dictionary.data_dir, function(ok, err)
-        UIManager:close(loading)
+        loading:close()
         if not ok then info(T(_("字典安装失败：%1"), tostring(err))); return end
         require("dictionary.manager").refresh(dictionary)
         local installed = require("dictionary.manager").installed(dictionary.data_dir)
@@ -124,6 +146,8 @@ local function install(ui, item)
             end
         end
         info(_("字典已安装并切换"))
+    end, function(_, done, total)
+        if total and total > 0 then loading:reportProgress(done) end
     end)
 end
 
@@ -150,7 +174,7 @@ end
 ---@param lang_name string
 ---@param items table[]
 local function downloadLang(ui, lang_name, items)
-    local dictionary = ui and ui.dictionary
+    local dictionary = dictionaryContext(ui)
     local rows = {}
     for index = 1, #items do
         local item = items[index]

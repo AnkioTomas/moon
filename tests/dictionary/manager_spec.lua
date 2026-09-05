@@ -3,7 +3,15 @@
 local Assert = require("support.assert")
 
 package.preload["json"] = function() return {} end
-package.preload["http.request"] = function() return {} end
+local stream_handler
+package.preload["http.request"] = function()
+    return {
+        stream = function(_, handlers)
+            stream_handler = handlers
+            return { cancel = function() end }
+        end,
+    }
+end
 package.preload["utils.paths"] = function()
     return { root = function() return "/tmp" end, ensureSettings = function() end }
 end
@@ -12,11 +20,12 @@ package.preload["util"] = function()
 end
 
 local target_mode
+local part_present = true
 local tmp_mode = "directory"
 local lfs = {}
 function lfs.attributes(path, name)
     local attr
-    if path == "/tmp/dict-xhzd.dl/xhzd.part.001" then
+    if path == "/tmp/dict-xhzd.dl/xhzd.part.001" and part_present then
         attr = { mode = "file", size = 5 }
     end
     return name and attr and attr[name] or attr
@@ -89,15 +98,53 @@ Manager.refresh(dictionary)
 Assert.is_false(available_ifos)
 Assert.eq(init_calls, 1)
 
-local install_result
+local install_result, progress = nil, {}
 Manager.install(item, "/dict", function(ok, err)
     install_result = { ok, err }
+end, function(...)
+    progress[#progress + 1] = { ... }
 end)
 Assert.is_true(Manager.downloading())
 Assert.is_nil(install_result)
+Assert.eq(progress[1][1], "part")
+Assert.eq(progress[1][2], 5)
+Assert.eq(progress[1][3], 5)
+Assert.eq(progress[2][1], "install")
 Manager.cancel()
 Assert.eq(abort_self, worker_job)
 Assert.is_false(Manager.downloading())
+
+-- 未完成分片按实际接收字节上报进度，而不是等整片写完才跳格。
+part_present = false
+progress = {}
+local original_open, original_rename = io.open, os.rename
+io.open = function(path, mode)
+    if path == "/tmp/dict-xhzd.dl/xhzd.part.001.part" and mode == "wb" then
+        return {
+            write = function(_, data) return #data end,
+            close = function() return true end,
+        }
+    end
+    return original_open(path, mode)
+end
+os.rename = function(from, to)
+    if from == "/tmp/dict-xhzd.dl/xhzd.part.001.part"
+        and to == "/tmp/dict-xhzd.dl/xhzd.part.001" then
+        part_present = true
+        return true
+    end
+    return original_rename(from, to)
+end
+Manager.install(item, "/dict", function() end, function(...)
+    progress[#progress + 1] = { ... }
+end)
+stream_handler.on_data("123")
+Assert.eq(progress[1][2], 3)
+stream_handler.on_data("45")
+Assert.eq(progress[2][2], 5)
+stream_handler.on_done(nil)
+io.open, os.rename = original_open, original_rename
+Manager.cancel()
 
 target_mode = "link"
 Assert.is_false(Manager.isInstalled("/dict", "xhzd"))
