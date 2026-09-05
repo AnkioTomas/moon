@@ -39,6 +39,12 @@ stub("translate.init", { install = function() calls.translate = (calls.translate
 stub("baike.init", { install = function() calls.baike = (calls.baike or 0) + 1 end })
 stub("dictionary.init", { install = function() calls.dictionary = (calls.dictionary or 0) + 1 end })
 stub("ui.panel.native", { install = function() calls.panel = (calls.panel or 0) + 1 end })
+stub("book.reader_prefs", {
+    inject = function(doc_settings, document)
+        calls.doc_settings = doc_settings
+        calls.document = document
+    end,
+})
 stub("lockscreen.init", {
     bootstrap = function() calls.lockscreen = (calls.lockscreen or 0) + 1 end,
     refresh = function(_, force) calls.lock_refresh = force end,
@@ -69,6 +75,11 @@ plugin:init()
 Assert.is_true(saved.footnote_link_in_popup)
 Assert.is_true(saved.book_footnote_popup_initialized)
 Assert.eq(calls.screenshot_share, 1)
+
+local doc_settings, document = {}, {}
+plugin:onDocSettingsLoad(doc_settings, document)
+Assert.eq(calls.doc_settings, doc_settings)
+Assert.eq(calls.document, document)
 
 saved.footnote_link_in_popup = false
 plugin:init()
