@@ -12,6 +12,7 @@ local StatsDB = require("db.stats")
 local logger = require("utils.log")
 local SourceCapabilities = require("types.book_source").SourceCapabilities
 local Stats = {}
+local PUSH_BATCH = 200
 
 --- 当前阅读页的内存计时会话。
 ---@class ReadingStatsSession
@@ -121,7 +122,7 @@ function Stats.push(source, done)
         if done then done(false, "unsupported") end
         return
     end
-    local rows = StatsDB.unsyncedBySource(source.id)
+    local rows = StatsDB.unsyncedBySource(source.id, PUSH_BATCH)
     if #rows == 0 then
         if done then done(true, "empty") end
         return
@@ -231,7 +232,14 @@ function Stats.syncAsync(source, _opts, cb)
     ---@param value SyncResult|nil nil 表示失败
     ---@param err any
     local function finish(value, err)
-        if not cancelled and cb then cb(value, err) end
+        if cancelled then return end
+        if value and source and source.id then
+            local compacted = StatsDB.compactSynced(source.id, os.time() - 30 * 86400, 1000)
+            if compacted == nil then
+                logger.warn("book.stats compact failed", source.id)
+            end
+        end
+        if cb then cb(value, err) end
     end
     if not can_pull and not can_push then
         require("ui/uimanager"):nextTick(function()
@@ -260,24 +268,25 @@ function Stats.syncAsync(source, _opts, cb)
             finish(result)
         end)
     end
-    --- 上传本地未确认的统计行，然后继续拉取远端。
-    --- 无待传行或源不支持推送时直接进入拉取；result.pushed 取源确认条数，
-    --- 源没回报确认数时退回本次待传条数。
+    --- 分批上传本地未确认统计，单批确认后再取下一批，内存占用与请求体有上限。
     local function push()
         if cancelled then return end
         if not can_push then pull(); return end
-        local pending = #StatsDB.unsyncedBySource(source.id)
-        if pending == 0 then pull(); return end
         current_job = Stats.push(source, function(ok, value, confirmed)
             current_job = nil
+            if cancelled then return end
             if not ok then
                 push_error = value or "stats push failed"
                 logger.warn("book.stats push failed; continue pulling", source.id, push_error)
                 pull()
                 return
             end
-            result.pushed = confirmed or pending
-            pull()
+            if value == "empty" or not confirmed or confirmed == 0 then
+                pull()
+                return
+            end
+            result.pushed = result.pushed + confirmed
+            push()
         end)
     end
     require("ui/uimanager"):nextTick(push)

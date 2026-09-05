@@ -34,6 +34,7 @@ local function clearMods()
     for _, name in ipairs({
         "utils.paths",
         "utils.task",
+        "workers.context",
         "lua-ljsqlite3/init",
         "ffi/sha2",
         "db.base",
@@ -66,36 +67,29 @@ do
     clearMods()
 end
 
--- ── 子进程 open / close ─────────────────────────────────
+-- ── 子进程禁止通过数据库原语隐式打开连接 ────────────────
 do
-    local closed = 0
     local opened = 0
 
-    stubTask(true)
     stubDbDeps()
+    package.preload["workers.context"] = function()
+        return { inSubProcess = function() return true end }
+    end
     package.preload["lua-ljsqlite3/init"] = function()
         return {
             open = function()
                 opened = opened + 1
-                return {
-                    exec = function() end,
-                    close = function()
-                        closed = closed + 1
-                    end,
-                    rowexec = function() return nil end,
-                }
+                return { exec = function() end, close = function() end }
             end,
         }
     end
     package.loaded["db.base"] = nil
 
     local DbBase = require("db.base")
-    Assert.is_true(DbBase.open() ~= nil)
-    Assert.eq(opened, 1)
-    Assert.is_true(DbBase.open() ~= nil)
-    Assert.eq(opened, 1)
-    DbBase.close()
-    Assert.eq(closed, 1)
+    Assert.errors(function()
+        DbBase.exec("DELETE FROM books;")
+    end, "database access is forbidden in subprocess")
+    Assert.eq(opened, 0)
     clearMods()
 end
 
@@ -243,11 +237,13 @@ do
     }))
     local insert = calls[#calls]
     Assert.is_true(insert.sql:find("INSERT INTO reading_stats", 1, true) ~= nil)
-    Assert.eq(insert.argc, 10)
+    Assert.eq(insert.argc, 12)
     Assert.eq(insert.args[1], "moon")
     Assert.eq(insert.args[2], "a.epub")
     Assert.eq(insert.args[4], 3)
     Assert.eq(insert.args[10], 0)
+    Assert.eq(insert.args[11], 1)
+    Assert.eq(insert.args[12], 0)
 
     -- 非法时长仍拒绝
     Assert.is_false(StatsDB.add({ source_id = "moon", stable_id = "a", start_time = 1, duration = 0 }))
@@ -260,7 +256,7 @@ do
     Assert.is_false(StatsDB.exists(miss))
     local probe = calls[#calls]
     Assert.is_true(probe.sql:find("SELECT 1 FROM reading_stats", 1, true) ~= nil)
-    Assert.eq(probe.argc, 5, "exists 必须走参数化唯一索引查询")
+    Assert.eq(probe.argc, 6, "exists 必须走参数化唯一索引查询")
 
     -- replaceSynced：清理 + 写入同事务；命中的算 skipped，未命中的算 imported
     local mark = #calls
@@ -297,7 +293,8 @@ do
             updates = updates + 1
         end
     end
-    Assert.eq(updates, 2)
+    Assert.eq(updates, 1)
+    Assert.eq(calls[#calls - 1].argc, 2)
 
     DbBase.close()
     clearMods()
@@ -473,7 +470,7 @@ do
                         end
                         return nil
                     end
-                    if sql:find("MAX(start_time)", 1, true) then
+                    if sql:find("MAX(CASE WHEN record_type='page_rollup'", 1, true) then
                         return { 3660, 3, 2000 }, { "s", "c", "m" }
                     end
                     return nil
@@ -486,7 +483,7 @@ do
                             { 1800 },
                         }, 1
                     end
-                    if sql:find("record_type='page'", 1, true) then
+                    if sql:find("MAX(page)", 1, true) then
                         return {
                             { day2 },
                             { "/books/a.epub" },

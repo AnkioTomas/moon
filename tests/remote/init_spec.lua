@@ -94,7 +94,7 @@ package.loaded["utils.paths"] = nil
 local Remote = require("remote.init")
 Assert.is_true(Remote.start())
 
-local wallpapers = data .. "/.moon/screensaver/wallpapers"
+local wallpapers = data .. "/.moon/screensaver"
 Assert.is_true(dirs[wallpapers], "启动远程管理时应创建锁屏壁纸目录")
 
 local shortcut

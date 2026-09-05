@@ -114,6 +114,34 @@ function Base.exec(sql, ...)
     return true
 end
 
+--- 执行 UPDATE/DELETE，并确认至少改动一行。
+---@param sql string
+---@param ... any 绑定到 ? 占位符的值
+---@return boolean
+function Base.execChanged(sql, ...)
+    Base.ensure()
+    if not conn then return false end
+    local argc = select("#", ...)
+    local args = { ... }
+    local stmt
+    local ok, changed = pcall(function()
+        stmt = conn:prepare(sql)
+        if argc > 0 then
+            stmt:bind(unpack(args, 1, argc))
+        end
+        stmt:step()
+        closeStmt(stmt)
+        stmt = nil
+        return tonumber(conn:rowexec("SELECT changes();")) or 0
+    end)
+    closeStmt(stmt)
+    if not ok then
+        logger.warn("book.db changed exec failed", changed, sql and sql:sub(1, 120))
+        return false
+    end
+    return changed > 0
+end
+
 --- 执行并取一行多列（失败返回 nil）
 ---@param sql string
 ---@param ... any 绑定到 ? 占位符的值

@@ -48,7 +48,7 @@ Assert.eq(calls[1].args[1], "moon")
 Assert.eq(calls[1].args[2], 100)
 Assert.eq(calls[1].args[3], 200)
 -- 书数/页数只数真实书的记录
-Assert.is_true(calls[1].sql:find("record_type='page'", 1, true) ~= nil)
+Assert.is_true(calls[1].sql:find("record_type IN ('page','page_rollup')", 1, true) ~= nil)
 
 calls = {}
 local books = Stats.periodBooks("moon", 100, 200, 3)
@@ -58,7 +58,7 @@ Assert.eq(books[1].seconds, 1800)
 Assert.eq(books[1].percent, 42)
 Assert.eq(calls[1].args[4], 3)
 Assert.is_true(calls[1].sql:find("start_time>=?", 1, true) ~= nil)
-Assert.is_true(calls[1].sql:find("record_type='page'", 1, true) ~= nil)
+Assert.is_true(calls[1].sql:find("record_type IN ('page','page_rollup')", 1, true) ~= nil)
 
 calls = {}
 local days = Stats.periodDays("moon", 100, 200)

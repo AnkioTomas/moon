@@ -102,6 +102,8 @@ sources.wechat = {
 -- dirty_only 只处理指定源的本地脏项，上传成功按版本确认，绝不拉远端。
 local sync_result
 Progress.syncAsync(sources.moon, { dirty_only = true }, function(result) sync_result = result end)
+local duplicate_result
+Progress.syncAsync(sources.moon, { dirty_only = true }, function(result) duplicate_result = result end)
 Stubs.flush()
 Assert.len(pushed, 1)
 Assert.eq(#marked, 1)
@@ -111,7 +113,38 @@ Assert.eq(rows[1].sync_status, 1)
 Assert.eq(rows[2].sync_status, 0)
 Assert.eq(rows[3].sync_status, 1)
 Assert.eq(sync_result.pushed, 1)
+Assert.eq(duplicate_result, sync_result)
 Assert.eq(pulled, 0)
+
+-- 单个订阅取消不影响共享任务；全部取消才取消底层，之后同 key 可重新启动。
+rows[#rows + 1] = {
+    source_id = "cancel", stable_id = "c.epub", fraction = 0.3,
+    updated_at = 30, sync_status = 0,
+}
+local starts, cancels, callbacks = 0, 0, {}
+local cancel_source = {
+    id = "cancel",
+    putProgressAsync = function(_, _, _, cb)
+        starts = starts + 1
+        callbacks[#callbacks + 1] = cb
+        return { cancel = function() cancels = cancels + 1 end }
+    end,
+}
+local first = Progress.syncAsync(cancel_source, { dirty_only = true })
+local second = Progress.syncAsync(cancel_source, { dirty_only = true })
+Stubs.flush()
+Assert.eq(starts, 1)
+first.cancel()
+Assert.eq(cancels, 0)
+second.cancel()
+Assert.eq(cancels, 1)
+
+local restarted
+Progress.syncAsync(cancel_source, { dirty_only = true }, function(result) restarted = result end)
+Stubs.flush()
+Assert.eq(starts, 2)
+callbacks[2](true)
+Assert.eq(restarted.pushed, 1)
 
 -- 进度保存总是生成一个未同步版本，尚未保存完成时不上传。
 local ui = {

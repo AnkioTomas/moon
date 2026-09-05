@@ -18,6 +18,7 @@ local _ = require("gettext")
 local Progress = {}
 local asked_conflicts = {}
 local last_revision = 0
+local sync_runs = {}
 
 --- 生成单调递增的进度修订号（同一进程内不会重复）。
 --- 秒级时间戳在同一秒内多次写入会撞号，而修订号是 pending_progress 判定新旧的
@@ -222,7 +223,7 @@ end
 ---@param opts { identity?: BookIdentity, dirty_only?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)|nil
 ---@return { cancel: fun() }
-function Progress.syncAsync(source, opts, cb)
+local function syncOnce(source, opts, cb)
     opts = opts or {}
     local target = opts.identity and opts.identity.stable_id or "all"
     local can_pull = source and type(source.getProgressAsync) == "function"
@@ -341,6 +342,49 @@ function Progress.syncAsync(source, opts, cb)
         cancel = function()
             cancelled = true
             if current_job and current_job.cancel then current_job:cancel() end
+        end,
+    }
+end
+
+--- 合并完全相同的重入同步；不同书籍/模式仍各自执行，不能混用结果。
+---@param source BookSource
+---@param opts { identity?: BookIdentity, dirty_only?: boolean }|nil
+---@param cb fun(result: SyncResult|nil, err: any)|nil
+---@return { cancel: fun() }
+function Progress.syncAsync(source, opts, cb)
+    opts = opts or {}
+    local identity = opts.identity
+    local key = table.concat({
+        tostring(source),
+        tostring(identity and identity.stable_id or "all"),
+        tostring(identity and identity.chapter_idx or 0),
+        opts.dirty_only and "dirty" or "full",
+    }, "\31")
+    local subscriber = { active = true, cb = cb }
+    local run = sync_runs[key]
+    if run then
+        run.subscribers[#run.subscribers + 1] = subscriber
+    else
+        run = { subscribers = { subscriber } }
+        sync_runs[key] = run
+        run.job = syncOnce(source, opts, function(result, err)
+            if sync_runs[key] == run then sync_runs[key] = nil end
+            for _, item in ipairs(run.subscribers) do
+                if item.active and item.cb then item.cb(result, err) end
+            end
+        end)
+    end
+    return {
+        cancel = function()
+            if not subscriber.active then return end
+            subscriber.active = false
+            for _, item in ipairs(run.subscribers) do
+                if item.active then return end
+            end
+            if sync_runs[key] == run then
+                sync_runs[key] = nil
+                if run.job and run.job.cancel then run.job.cancel() end
+            end
         end,
     }
 end

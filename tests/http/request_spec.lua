@@ -92,21 +92,20 @@ end
 
 -- ── download 原子落位 ────────────────────────────────────
 do
-    local original_request = Request.request
-    local original_write = Request.writeResponseToFile
+    local original_stream = Request.stream
     local real_rename = os.rename
     local real_remove = os.remove
-    local write_dest
+    local dest = Config.dir() .. "/.moon/test_download.bin"
     local renamed
     local removed
+    local progress = {}
+    pcall(real_remove, dest .. ".part")
 
-    Request.request = function(_, cb)
-        cb({ code = 200, body = "payload" })
-        return { cancel = function() end }
-    end
-    Request.writeResponseToFile = function(_, dest, _, cb)
-        write_dest = dest
-        cb(true)
+    Request.stream = function(_, handlers)
+        handlers.on_headers(200, { ["Content-Length"] = "7" })
+        handlers.on_data("pay")
+        handlers.on_data("load")
+        handlers.on_done()
         return { cancel = function() end }
     end
     os.rename = function(from, to)
@@ -119,21 +118,25 @@ do
     end
 
     local ok_d, err_d
-    Request.download({ url = "https://example.test/file" }, "/tmp/download.bin", function(ok, err)
+    Request.download({
+        url = "https://example.test/file",
+        on_progress = function(n) progress[#progress + 1] = n end,
+    }, dest, function(ok, err)
         ok_d, err_d = ok, err
     end)
 
-    Request.request = original_request
-    Request.writeResponseToFile = original_write
+    Request.stream = original_stream
     os.rename = real_rename
     os.remove = real_remove
 
-    Assert.eq(write_dest, "/tmp/download.bin.part")
-    Assert.eq(renamed[1], "/tmp/download.bin.part")
-    Assert.eq(renamed[2], "/tmp/download.bin")
+    Assert.eq(renamed[1], dest .. ".part")
+    Assert.eq(renamed[2], dest)
     Assert.is_nil(removed)
+    Assert.eq(progress[1], 3)
+    Assert.eq(progress[2], 7)
     Assert.is_true(ok_d)
     Assert.is_nil(err_d)
+    pcall(real_remove, dest .. ".part")
 end
 
 -- ── writeResponseToFile ──────────────────────────────────

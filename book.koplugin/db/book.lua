@@ -22,22 +22,34 @@ CREATE TABLE IF NOT EXISTS books (
   toc TEXT, toc_fetched_at INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (source_id, stable_id)
 );
+]]) then return false end
+    local columns, nrows = Base.query("PRAGMA table_info(books);")
+    local present = {}
+    local missing = {
+        { "cover", "cover TEXT" },
+        { "in_library", "in_library INTEGER NOT NULL DEFAULT 1" },
+        { "metadata_dirty", "metadata_dirty INTEGER NOT NULL DEFAULT 0" },
+        { "metadata_updated_at", "metadata_updated_at INTEGER NOT NULL DEFAULT 0" },
+        { "reader_prefs", "reader_prefs TEXT" },
+        { "toc", "toc TEXT" },
+        { "toc_fetched_at", "toc_fetched_at INTEGER NOT NULL DEFAULT 0" },
+    }
+    if columns then
+        for i = 1, nrows do
+            present[columns[2][i]] = true
+        end
+        for _, column in ipairs(missing) do
+            if not present[column[1]]
+                and not Base.exec("ALTER TABLE books ADD COLUMN " .. column[2] .. ";") then
+                return false
+            end
+        end
+    end
+    return Base.exec([[
 CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(source_id, md5);
 CREATE INDEX IF NOT EXISTS idx_books_path ON books(path);
 CREATE INDEX IF NOT EXISTS idx_books_library ON books(source_id, in_library, stable_id);
-]]) then return false end
-    local columns, nrows = Base.query("PRAGMA table_info(books);")
-    local has_cover = false
-    for i = 1, nrows do
-        if columns[2][i] == "cover" then
-            has_cover = true
-            break
-        end
-    end
-    if not has_cover and not Base.exec("ALTER TABLE books ADD COLUMN cover TEXT;") then
-        return false
-    end
-    return true
+]]) ~= nil
 end
 
 --- 插入或更新 books 行（本地可信写入：扫盘/本地登记），不制造待上传状态。
@@ -116,37 +128,49 @@ function BookDB.upsertRemote(row)
     ) ~= nil
 end
 
---- 批量写入远端书架行。大书架同步不能为每本书 prepare/close 一次；
---- 每批 8 行（88 个绑定参数）：兼容低端设备上的 SQLite/LuaJIT 绑定实现，
---- 同时避免每本书都重复 prepare/close。
+--- 批量写入远端行；按“是否明确携带书架成员关系”分组，不能把普通缓存误加入书架。
+--- 每批 8 行，兼容低端设备 SQLite 的绑定参数上限。
 ---@param rows table[]
 ---@return boolean
 function BookDB.upsertRemoteMany(rows)
     if #rows == 0 then return true end
-    for start = 1, #rows, 8 do
-        local values, args = {}, {}
-        local finish = math.min(start + 7, #rows)
-        -- 绑定参数允许 NULL，不能用 #args+1 追加（nil 不增长表长，后续列会整体左移错位）；
-        -- 按 (行序-1)*11 + 列序 显式定位。
-        for i = start, finish do
-            local row = rows[i]
-            local base = #values * 12
-            values[#values + 1] = "(?,?,?,?,?,?,?,?,?,?,?,?,1)"
-            args[base + 1] = row.source_id
-            args[base + 2] = row.stable_id
-            args[base + 3] = row.md5
-            args[base + 4] = row.title
-            args[base + 5] = row.authors
-            args[base + 6] = tonumber(row.percent) or 0
-            args[base + 7] = row.category
-            args[base + 8] = row.series
-            args[base + 9] = row.intro
-            args[base + 10] = row.cover
-            args[base + 11] = tonumber(row.fetched_at) or os.time()
-            args[base + 12] = row.path
-        end
-        local ok = Base.exec(
-            [[INSERT INTO books (
+    local groups = { explicit = {}, cache = {} }
+    for _, row in ipairs(rows) do
+        local group = row.in_library ~= nil and groups.explicit or groups.cache
+        group[#group + 1] = row
+    end
+    for _, group_name in ipairs({ "explicit", "cache" }) do
+        local group = groups[group_name]
+        local explicit = group_name == "explicit"
+        for start = 1, #group, 8 do
+            local values, args = {}, {}
+            local finish = math.min(start + 7, #group)
+            local columns = explicit and 13 or 12
+            for i = start, finish do
+                local row = group[i]
+                local base = #values * columns
+                values[#values + 1] = explicit
+                    and "(?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                    or "(?,?,?,?,?,?,?,?,?,?,?,?,0)"
+                args[base + 1] = row.source_id
+                args[base + 2] = row.stable_id
+                args[base + 3] = row.md5
+                args[base + 4] = row.title
+                args[base + 5] = row.authors
+                args[base + 6] = tonumber(row.percent) or 0
+                args[base + 7] = row.category
+                args[base + 8] = row.series
+                args[base + 9] = row.intro
+                args[base + 10] = row.cover
+                args[base + 11] = tonumber(row.fetched_at) or os.time()
+                args[base + 12] = row.path
+                if explicit then
+                    args[base + 13] = (row.in_library == true or tonumber(row.in_library) == 1) and 1 or 0
+                end
+            end
+            local membership_update = explicit and ", in_library=excluded.in_library" or ""
+            local ok = Base.exec(
+                [[INSERT INTO books (
                 source_id, stable_id, md5, title, authors, percent, category,
                 series, intro, cover, fetched_at, path, in_library
               ) VALUES ]] .. table.concat(values, ",") .. [[
@@ -165,16 +189,14 @@ function BookDB.upsertRemoteMany(rows)
                 cover=COALESCE(excluded.cover, books.cover),
                 percent=excluded.percent,
                 fetched_at=excluded.fetched_at,
-                path=COALESCE(excluded.path, books.path),
-                in_library=1;]],
-            -- args 内允许 NULL；不能用不带上界的 unpack，否则会在第一个 nil 处截断。
-            unpack(args, 1, #values * 12)
-        )
-        if not ok then
-            -- 某些旧版 SQLite/绑定对多行 UPSERT 支持不完整；批量失败时回退
-            -- 单行写入，不能让一次刷新把整个书架清空。
-            for i = start, finish do
-                if not BookDB.upsertRemote(rows[i]) then return false end
+                path=COALESCE(excluded.path, books.path)]]
+                    .. membership_update .. ";",
+                unpack(args, 1, #values * columns)
+            )
+            if not ok then
+                for i = start, finish do
+                    if not BookDB.upsertRemote(group[i]) then return false end
+                end
             end
         end
     end
@@ -208,10 +230,16 @@ end
 --- 远端书架快照入库：先 upsert 全部条目，再把本次未刷新的成员标为不活跃（不删行）。
 ---@param source_id string
 ---@param books table[]
+---@param opts { clear_missing_paths: boolean|nil }|nil
 ---@return boolean
-function BookDB.reconcile(source_id, books)
+function BookDB.reconcile(source_id, books, opts)
+    opts = opts or {}
     if not Base.exec("BEGIN IMMEDIATE;") then return false end
     local sync_at = os.time()
+    local deactivate = opts.clear_missing_paths
+        and [[UPDATE books SET in_library=0, path=NULL WHERE source_id=? AND in_library=1;]]
+        or [[UPDATE books SET in_library=0 WHERE source_id=? AND in_library=1;]]
+    local ok = Base.exec(deactivate, source_id) ~= nil
     local batch = {}
     for _, row in ipairs(books) do
         local copy = {}
@@ -221,14 +249,7 @@ function BookDB.reconcile(source_id, books)
         copy.fetched_at = sync_at
         batch[#batch + 1] = copy
     end
-    local ok = BookDB.upsertRemoteMany(batch)
-    if ok then
-        ok = Base.exec(
-            [[UPDATE books SET in_library=0
-              WHERE source_id=? AND fetched_at<? AND in_library=1;]],
-            source_id, sync_at
-        ) ~= nil
-    end
+    if ok then ok = BookDB.upsertRemoteMany(batch) end
     if ok and Base.exec("COMMIT;") then return true end
     Base.exec("ROLLBACK;")
     return false
@@ -466,8 +487,11 @@ function BookDB.renameStableId(source_id, old_stable_id, new_stable_id, category
         [[UPDATE xray_entities SET stable_id=? WHERE source_id=? AND stable_id=?;]],
         new_stable_id, source_id, old_stable_id
     )
-    Base.exec(ok and [[COMMIT;]] or [[ROLLBACK;]])
-    return ok == true
+    if ok and Base.exec([[COMMIT;]]) then
+        return true
+    end
+    Base.exec([[ROLLBACK;]])
+    return false
 end
 
 --- 单列字符串查询 → string[]

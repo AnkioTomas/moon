@@ -16,6 +16,7 @@ local StatsDB = {}
 local DAY_RECORD = "day"
 local BOOK_RECORD = "book"
 local TOTAL_RECORD = "total"
+local ROLLUP_RECORD = "page_rollup"
 
 --- 创建阅读统计表及聚合查询索引。
 --- 仅在 Base.open() 的一次性 schema 初始化阶段调用。
@@ -28,13 +29,37 @@ CREATE TABLE IF NOT EXISTS reading_stats (
   page INTEGER NOT NULL DEFAULT 0,
   start_time INTEGER NOT NULL, duration INTEGER NOT NULL DEFAULT 0,
   total_pages INTEGER NOT NULL DEFAULT 0, chapter_idx INTEGER,
-  chapter_fraction REAL, sync_status INTEGER NOT NULL DEFAULT 0
+  chapter_fraction REAL, sync_status INTEGER NOT NULL DEFAULT 0,
+  event_count INTEGER NOT NULL DEFAULT 1,
+  last_time INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_reading_stats_time ON reading_stats(source_id, start_time);
 ]]) then return false end
 
-    if not Base.exec([[CREATE UNIQUE INDEX IF NOT EXISTS idx_reading_stats_identity
-        ON reading_stats(source_id, stable_id, page, start_time, duration);]]) then
+    local columns, nrows = Base.query("PRAGMA table_info(reading_stats);")
+    if columns then
+        local present = {}
+        for i = 1, nrows do
+            present[columns[2][i]] = true
+        end
+        for _, column in ipairs({
+            { "event_count", "event_count INTEGER NOT NULL DEFAULT 1" },
+            { "last_time", "last_time INTEGER NOT NULL DEFAULT 0" },
+        }) do
+            if not present[column[1]]
+                and not Base.exec("ALTER TABLE reading_stats ADD COLUMN " .. column[2] .. ";") then
+                return false
+            end
+        end
+    end
+
+    -- v1 身份漏了 record_type，单行压缩会与原 page 行碰撞后被删除。
+    if not Base.exec([[DROP INDEX IF EXISTS idx_reading_stats_identity;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reading_stats_identity_v2
+  ON reading_stats(source_id, stable_id, record_type, page, start_time, duration);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reading_stats_rollup_bucket
+  ON reading_stats(source_id, stable_id, record_type, start_time)
+  WHERE record_type='page_rollup';]]) then
         return false
     end
     return true
@@ -75,7 +100,7 @@ end
 
 --- 云端日桶/书桶是合成行：按书、按小时统计里必须排掉，否则同一天既算云端整天
 --- 时长又算本地逐页时长，账单直接翻倍。
-local NOT_SYNTHETIC = " AND record_type='page' "
+local NOT_SYNTHETIC = " AND record_type IN ('page','page_rollup') "
 
 --- 按天合并云端日桶与本地页记录：有云端日桶的日期以云端为准。
 ---@param source_id string
@@ -92,7 +117,8 @@ local function mergedDailyRows(source_id, start_ts, end_ts)
     end
     local result, nrows = Base.query(
         [[SELECT date(start_time,'unixepoch','localtime') AS day,
-                 stable_id, record_type, COALESCE(SUM(duration),0), COUNT(*)
+                 stable_id, record_type, COALESCE(SUM(duration),0),
+                 COALESCE(SUM(event_count),0)
           FROM reading_stats WHERE source_id=]] .. "?" .. range .. [[
           GROUP BY day, stable_id, record_type ORDER BY day;]],
         unpack(args, 1, #args)
@@ -143,9 +169,9 @@ function StatsDB.add(row, synced)
     return Base.exec(
         [[INSERT INTO reading_stats (
             source_id, stable_id, record_type, page, start_time, duration, total_pages,
-            chapter_idx, chapter_fraction, sync_status
-          ) VALUES (?,?,?,?,?,?,?,?,?,?)
-          ON CONFLICT(source_id, stable_id, page, start_time, duration)
+            chapter_idx, chapter_fraction, sync_status, event_count, last_time
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(source_id, stable_id, record_type, page, start_time, duration)
           DO UPDATE SET sync_status=MAX(reading_stats.sync_status, excluded.sync_status);]],
         source_id,
         row.stable_id,
@@ -156,19 +182,23 @@ function StatsDB.add(row, synced)
         tonumber(row.total_pages) or 0,
         tonumber(row.chapter_idx),
         tonumber(row.chapter_fraction),
-        synced and 1 or 0
+        synced and 1 or 0,
+        math.max(1, tonumber(row.event_count) or 1),
+        tonumber(row.last_time) or 0
     ) ~= nil
 end
 
 --- 列出指定源的待上传统计。
 ---@param source_id string
+---@param limit number|nil
 ---@return table[]
-function StatsDB.unsyncedBySource(source_id)
+function StatsDB.unsyncedBySource(source_id, limit)
     local result, nrows = Base.query(
         [[SELECT id, stable_id, page, start_time, duration, total_pages,
                  chapter_idx, chapter_fraction, sync_status
-          FROM reading_stats WHERE source_id=? AND sync_status=0 ORDER BY start_time ASC;]],
-        source_id
+          FROM reading_stats WHERE source_id=? AND sync_status=0
+          ORDER BY start_time ASC, id ASC LIMIT ?;]],
+        source_id, math.max(1, tonumber(limit) or 500)
     )
     local rows = {}
     if result and nrows and nrows > 0 then
@@ -196,10 +226,11 @@ function StatsDB.exists(row)
     local source_id = row.source_id
     return Base.rowexec(
         [[SELECT 1 FROM reading_stats
-          WHERE source_id=? AND stable_id=? AND page=? AND start_time=?
-            AND duration=? LIMIT 1;]],
+          WHERE source_id=? AND stable_id=? AND record_type=? AND page=?
+            AND start_time=? AND duration=? LIMIT 1;]],
         source_id,
         row.stable_id,
+        row.record_type,
         tonumber(row.page) or 0,
         tonumber(row.start_time) or 0,
         tonumber(row.duration) or 0
@@ -313,8 +344,11 @@ end
 ---@return { total_seconds: number, pages: number, last_read: number }
 function StatsDB.summaryByBook(source_id, stable_id)
     local total_seconds, pages, last_read = Base.rowexec(
-        [[SELECT COALESCE(SUM(duration),0), COUNT(*), COALESCE(MAX(start_time),0)
-          FROM reading_stats WHERE source_id=? AND stable_id=?;]],
+        [[SELECT COALESCE(SUM(duration),0), COALESCE(SUM(event_count),0),
+                 COALESCE(MAX(CASE WHEN record_type='page_rollup'
+                    THEN last_time ELSE start_time END),0)
+          FROM reading_stats WHERE source_id=? AND stable_id=?
+            AND record_type IN ('page','page_rollup');]],
         source_id,
         stable_id
     )
@@ -334,8 +368,9 @@ end
 function StatsDB.dailyByBook(source_id, stable_id, limit)
     local result, nrows = Base.query(
         [[SELECT date(start_time,'unixepoch','localtime') AS day,
-                 SUM(duration), COUNT(*)
+                 SUM(duration), SUM(event_count)
           FROM reading_stats WHERE source_id=? AND stable_id=?
+            AND record_type IN ('page','page_rollup')
           GROUP BY day ORDER BY day DESC LIMIT ?;]],
         source_id,
         stable_id,
@@ -370,7 +405,7 @@ function StatsDB.dailyBooksBySource(source_id)
         [[SELECT date(start_time,'unixepoch','localtime') AS day,
                  stable_id, SUM(duration), MAX(page), MAX(total_pages)
           FROM reading_stats WHERE source_id=?
-            AND record_type='page'
+            AND record_type IN ('page','page_rollup')
           GROUP BY day, stable_id ORDER BY day, 3 DESC;]],
         source_id
     )
@@ -426,7 +461,7 @@ function StatsDB.periodSummary(source_id, start_ts, end_ts)
     -- 书数/页数只看真实书的记录；总时长按天走「云端日桶优先」的合并口径，
     -- 与洞察日历保持一致，也避免同一天双重计数。
     local _, books, pages = Base.rowexec(
-        [[SELECT 0, COUNT(DISTINCT stable_id), COUNT(*)
+        [[SELECT 0, COUNT(DISTINCT stable_id), COALESCE(SUM(event_count),0)
           FROM reading_stats WHERE source_id=? AND start_time>=? AND start_time<?]]
         .. NOT_SYNTHETIC .. ";",
         source_id, tonumber(start_ts) or 0, tonumber(end_ts) or 0
@@ -451,11 +486,11 @@ end
 function StatsDB.periodBooks(source_id, start_ts, end_ts, limit)
     local result, nrows = Base.query(
         [[SELECT r.stable_id, b.title, b.authors, b.percent,
-                 SUM(r.duration), COUNT(*)
+                 SUM(r.duration), SUM(r.event_count)
           FROM reading_stats r LEFT JOIN books b
             ON b.source_id=r.source_id AND b.stable_id=r.stable_id
           WHERE r.source_id=? AND r.start_time>=? AND r.start_time<?
-            AND r.record_type='page'
+            AND r.record_type IN ('page','page_rollup')
           GROUP BY r.stable_id ORDER BY 5 DESC LIMIT ?;]],
         source_id, tonumber(start_ts) or 0, tonumber(end_ts) or 0,
         math.max(1, tonumber(limit) or 5)
@@ -494,7 +529,7 @@ end
 function StatsDB.periodHours(source_id, start_ts, end_ts)
     local result, nrows = Base.query(
         [[SELECT CAST(strftime('%H', start_time, 'unixepoch', 'localtime') AS INTEGER),
-                 SUM(duration), COUNT(*)
+                 SUM(duration), SUM(event_count)
           FROM reading_stats WHERE source_id=? AND start_time>=? AND start_time<?]]
         .. NOT_SYNTHETIC .. [[
           GROUP BY 1 ORDER BY 1;]],
@@ -513,6 +548,96 @@ function StatsDB.periodHours(source_id, start_ts, end_ts)
     return rows
 end
 
+--- 把较老的已同步逐页记录按书籍和本地小时压成汇总行。
+--- 未同步行绝不参与；event_count 保留原页事件数，所有展示聚合口径不变。
+---@param source_id string
+---@param before_ts number
+---@param limit number|nil
+---@return integer|nil compacted 原始行数；失败返回 nil
+function StatsDB.compactSynced(source_id, before_ts, limit)
+    local result, nrows = Base.query(
+        [[SELECT id, stable_id, page, start_time, duration, total_pages, event_count
+          FROM reading_stats
+          WHERE source_id=? AND sync_status=1 AND record_type='page' AND start_time<?
+          ORDER BY start_time ASC, id ASC LIMIT ?;]],
+        source_id, tonumber(before_ts) or 0, math.max(1, tonumber(limit) or 1000)
+    )
+    if not result or nrows == 0 then return 0 end
+
+    local groups, order, ids = {}, {}, {}
+    for i = 1, nrows do
+        local ts = tonumber(result[4][i]) or 0
+        local clock = os.date("*t", ts)
+        clock.min, clock.sec = 0, 0
+        local hour = os.time(clock)
+        local stable_id = result[2][i]
+        local key = stable_id .. "\31" .. tostring(hour)
+        local group = groups[key]
+        if not group then
+            group = {
+                source_id = source_id, stable_id = stable_id,
+                record_type = ROLLUP_RECORD, page = 0, start_time = hour,
+                duration = 0, total_pages = 0, event_count = 0,
+                last_time = ts,
+            }
+            groups[key] = group
+            order[#order + 1] = group
+        end
+        group.page = math.max(group.page, tonumber(result[3][i]) or 0)
+        group.last_time = math.max(group.last_time, ts)
+        group.duration = group.duration + (tonumber(result[5][i]) or 0)
+        group.total_pages = math.max(group.total_pages, tonumber(result[6][i]) or 0)
+        group.event_count = group.event_count + math.max(1, tonumber(result[7][i]) or 1)
+        ids[#ids + 1] = tonumber(result[1][i])
+    end
+
+    if not Base.exec("BEGIN IMMEDIATE;") then return nil end
+    local ok = true
+    for _, group in ipairs(order) do
+        if not Base.exec(
+            [[INSERT INTO reading_stats (
+                source_id, stable_id, record_type, page, start_time, duration,
+                total_pages, sync_status, event_count, last_time
+              ) VALUES (?,?,?,?,?,?,?,?,?,?)
+              ON CONFLICT(source_id, stable_id, record_type, start_time)
+                WHERE record_type='page_rollup'
+              DO UPDATE SET
+                page=MAX(reading_stats.page, excluded.page),
+                duration=reading_stats.duration + excluded.duration,
+                total_pages=MAX(reading_stats.total_pages, excluded.total_pages),
+                event_count=reading_stats.event_count + excluded.event_count,
+                last_time=MAX(reading_stats.last_time, excluded.last_time);]],
+            group.source_id, group.stable_id, group.record_type, group.page,
+            group.start_time, group.duration, group.total_pages, 1,
+            group.event_count, group.last_time
+        ) then
+            ok = false
+            break
+        end
+    end
+    if ok then
+        for start = 1, #ids, 500 do
+            local finish = math.min(start + 499, #ids)
+            local placeholders, args = {}, {}
+            for i = start, finish do
+                placeholders[#placeholders + 1] = "?"
+                args[#args + 1] = ids[i]
+            end
+            if not Base.exec(
+                "DELETE FROM reading_stats WHERE id IN ("
+                    .. table.concat(placeholders, ",") .. ");",
+                unpack(args)
+            ) then
+                ok = false
+                break
+            end
+        end
+    end
+    if ok and Base.exec("COMMIT;") then return #ids end
+    Base.exec("ROLLBACK;")
+    return nil
+end
+
 --- 标记已被 Source 确认的记录。
 ---@param ids number[]
 ---@return boolean
@@ -523,8 +648,18 @@ function StatsDB.markSynced(ids)
     if not Base.exec("BEGIN IMMEDIATE;") then
         return false
     end
-    for _, id in ipairs(ids) do
-        if not Base.exec([[UPDATE reading_stats SET sync_status=1 WHERE id=?;]], id) then
+    for start = 1, #ids, 500 do
+        local finish = math.min(start + 499, #ids)
+        local placeholders, args = {}, {}
+        for i = start, finish do
+            placeholders[#placeholders + 1] = "?"
+            args[#args + 1] = ids[i]
+        end
+        if not Base.exec(
+            "UPDATE reading_stats SET sync_status=1 WHERE id IN ("
+                .. table.concat(placeholders, ",") .. ");",
+            unpack(args)
+        ) then
             Base.exec("ROLLBACK;")
             return false
         end

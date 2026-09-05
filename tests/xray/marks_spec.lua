@@ -24,10 +24,11 @@ package.preload["xray.ui"] = function()
 end
 
 local entity = { kind = "character", name = "John Doe", aliases = { "John" } }
+local list_calls = 0
 
 -- 滚动文档（CreDocument）：下一 tick 只调用视口 findText，不碰全书 findAllText。
 package.preload["db.xray"] = function()
-    return { list = function() return { entity } end }
+    return { list = function() list_calls = list_calls + 1; return { entity } end }
 end
 package.loaded["db.xray"] = nil
 package.loaded["xray.ui"] = nil
@@ -65,6 +66,7 @@ Assert.len(find_calls, 0)
 Stubs.flush()
 Assert.len(find_calls, 2)
 Assert.len(Marks._marks, 2)
+Assert.eq(list_calls, 1)
 Assert.eq(Marks._marks[1].entity.name, "John Doe")
 Assert.eq(Marks._marks[1].box.x, 0)
 
@@ -77,6 +79,7 @@ Marks:rebuild()
 current_pos = 100
 Marks:rebuild()
 Stubs.flush()
+Assert.eq(list_calls, 2, "同一实体 revision 翻页不得重复查库")
 Assert.len(find_calls, 4)
 Assert.eq(find_calls[3].pos, 100)
 Assert.eq(find_calls[4].pos, 100)

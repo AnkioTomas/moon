@@ -39,6 +39,8 @@ local ORDER = { "moon", "wechat", "local" }
 local _active = nil
 ---@type SourceId|nil
 local _active_id = nil
+---@type table<SourceId, BookSource>
+local _resolved = {}
 
 --- 只取 meta，不构造 Source 实例
 ---@param id SourceId
@@ -162,6 +164,10 @@ function Registry.invalidate()
     _active = nil
     _active_id = nil
     closeSource(old)
+    for id, source in pairs(_resolved) do
+        if source ~= old then closeSource(source) end
+        _resolved[id] = nil
+    end
 end
 
 --- 原子替换活跃源
@@ -169,8 +175,13 @@ end
 ---@param id SourceId
 function Registry.activate(source, id)
     local old = _active
+    local cached = _resolved[id]
+    _resolved[id] = nil
     _active = source
     _active_id = id
+    if cached and cached ~= source and cached ~= old then
+        closeSource(cached)
+    end
     if old and old ~= source then
         closeSource(old)
     end
@@ -183,7 +194,10 @@ function Registry.current()
     if _active and _active_id == id then
         return _active
     end
-    local src, err = Registry.create(id)
+    local src = _resolved[id]
+    local err
+    _resolved[id] = nil
+    if not src then src, err = Registry.create(id) end
     if not src then
         return nil, err
     end
@@ -200,7 +214,11 @@ function Registry.resolve(id)
     if current and current.id == id then
         return current
     end
+    if _resolved[id] then
+        return _resolved[id]
+    end
     local source, create_err = Registry.create(id)
+    if source then _resolved[id] = source end
     return source, create_err or err
 end
 
@@ -228,7 +246,10 @@ function Registry.setActive(id)
     if not FACTORIES[id] then
         return nil, T(_("未知数据源: %1"), tostring(id))
     end
-    local candidate, err = Registry.create(id)
+    local candidate = _resolved[id]
+    local err
+    _resolved[id] = nil
+    if not candidate then candidate, err = Registry.create(id) end
     if not candidate then
         return nil, err
     end

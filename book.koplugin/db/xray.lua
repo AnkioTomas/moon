@@ -132,8 +132,11 @@ function XrayDB.replace(source_id, stable_id, entities, updated_at)
             end
         end
     end
-    Base.exec(ok and "COMMIT;" or "ROLLBACK;")
-    return ok
+    if ok and Base.exec("COMMIT;") then
+        return true
+    end
+    Base.exec("ROLLBACK;")
+    return false
 end
 
 return XrayDB

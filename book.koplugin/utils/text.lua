@@ -265,14 +265,32 @@ function Text.hasRemoteImageSrc(s)
     if type(s) ~= "string" then
         return false
     end
-    local found = false
-    s:gsub("src=([\"'])(.-)%1", function(_, src)
-        local url = tostring(src or ""):gsub("&amp;", "&")
-        if url:match("^//") or url:match("^https?://") then
-            found = true
+    local lower = s:lower()
+    return lower:find([[src%s*=%s*["']%s*https?://]]) ~= nil
+        or lower:find([[src%s*=%s*["']%s*//]]) ~= nil
+end
+
+--- 流式检查文件是否含远程图片；空文件或打不开返回 nil。
+---@param path string
+---@return boolean|nil
+function Text.hasRemoteImageSrcInFile(path)
+    local file = io.open(path, "rb")
+    if not file then return nil end
+    local carry = ""
+    local saw_data = false
+    while true do
+        local chunk = file:read(64 * 1024)
+        if not chunk then break end
+        saw_data = true
+        local scan = carry .. chunk
+        if Text.hasRemoteImageSrc(scan) then
+            file:close()
+            return true
         end
-    end)
-    return found
+        carry = scan:sub(-256)
+    end
+    file:close()
+    return saw_data and false or nil
 end
 
 --- 抽取多个拼接 HTML 文档里的全部 <body> 内容。

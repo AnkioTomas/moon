@@ -15,6 +15,7 @@ function HttpDB.ensureSchema()
 CREATE TABLE IF NOT EXISTS http (
   key TEXT PRIMARY KEY, value TEXT NOT NULL, expires INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_http_expires ON http(expires);
 ]]) ~= nil
 end
 
