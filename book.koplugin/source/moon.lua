@@ -215,25 +215,27 @@ function Source:openBookAsync(identity, _opts, cb)
             local book = identity.book or {}
             local title = book.title
                 or (identity.stable_id:match("([^/\\]+)$") or identity.stable_id)
-            local function showDownloadDialog(total)
-                if dialog or not total or total <= 0 then return end
-                local has_dialog, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
-                if not has_dialog or not ProgressbarDialog then return end
+            local size = tonumber(book.fileSize or book.filesize or book.size or book.file_size)
+            local has_dialog, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
+            if has_dialog and ProgressbarDialog then
                 dialog = ProgressbarDialog:new{
                     title = _("正在下载…"),
                     subtitle = title,
-                    progress_max = total,
+                    progress_max = (size and size > 0) and size or nil,
                     refresh_time_seconds = 1,
                     dismissable = false,
                 }
                 dialog:show()
+            else
+                require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
+                    text = _("正在下载…"),
+                })
             end
 
             local temp_path = path .. ".part"
-            self._client:downloadBookAsync(identity.stable_id, temp_path, function(bytes, total)
-                showDownloadDialog(total)
+            self._client:downloadBookAsync(identity.stable_id, temp_path, dialog and function(bytes)
                 if dialog then dialog:reportProgress(bytes) end
-            end, function(ok, err)
+            end or nil, function(ok, err)
                 closeDialog()
                 if not ok then
                     os.remove(temp_path)
@@ -252,7 +254,7 @@ function Source:openBookAsync(identity, _opts, cb)
                     return
                 end
                 done(true, path)
-            end, showDownloadDialog)
+            end)
         end, function(ok, local_path, err)
             if cancelled then return end
             if not ok then
@@ -283,35 +285,6 @@ local function listQuery(opts)
         series = opts.series or "",
         category = opts.category or "",
     }
-end
-
---- 拉取服务端最近阅读，保存元数据和远端进度后直接按服务端顺序返回。
----@param limit number|nil
----@param cb fun(data: BookListResult|nil, err: string|nil)
----@return table|nil
-function Source:recentBooksAsync(limit, cb)
-    limit = math.max(1, math.min(50, tonumber(limit) or 24))
-    return self._client:recentBooksAsync(limit, function(wire, err)
-        if not wire then
-            SourceBase.recentBooksAsync(self, limit, cb)
-            return
-        end
-        local mapped = Mapper.list(wire)
-        for _, book in ipairs(mapped.data) do
-            book.in_library = true
-        end
-        require("book.store").rememberMany(mapped.data)
-        local raw = type(wire.data) == "table" and wire.data or {}
-        local ProgressDB = require("db.progress")
-        for _, row in ipairs(raw) do
-            local book = Mapper.book(row)
-            local pos = Mapper.progress({ data = row })
-            if book and pos then
-                ProgressDB.upsertRemote(self.id, book.stable_id, pos)
-            end
-        end
-        cb(mapped)
-    end)
 end
 
 --- 清空 Moon 书库/统计相关 HTTP 缓存。
