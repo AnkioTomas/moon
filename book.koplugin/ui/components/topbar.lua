@@ -56,9 +56,19 @@ local CacheQueue = require("source.cache_queue")
 
 local TopBar = {}
 local cache_rect
+local source_rect
 
 --- 顶栏小图标逻辑尺寸（小于底栏的 24）。
 local ICON_SIZE = 14
+
+--- 顶栏项目是否显示。缺失或损坏的旧配置按显示处理，保持升级前行为。
+---@param id string
+---@return boolean
+local function visible(id)
+    local home = MoonSettings.get("home")
+    local items = type(home.home_topbar_items) == "table" and home.home_topbar_items or {}
+    return items[id] ~= false
+end
 
 --- 通用「图标 + 文案」指标行；text 空则整项省略。
 ---@param icon_name string
@@ -136,39 +146,10 @@ local function cacheStatus()
     return _("缓存中")
 end
 
---- 当前源标签在屏幕上的可点区域（与 build 左栏布局一致）。
+--- 当前源标签在屏幕上的可点区域。
 ---@return table|nil
 function TopBar.sourceTapRect()
-    local sw = Screen:getWidth()
-    local th = UI.topBarH()
-    local pad = UI.pagePad()
-    local gap_w = UI.sz(8)
-    local inner_w = sw - pad * 2
-
-    local clock = TextWidget:new{
-        text = datetime.secondsToHour(os.time(), G_reader_settings:isTrue("twelve_hour_clock")),
-        face = UI.face("xx_smallinfofont", 12),
-        fgcolor = Blitbuffer.COLOR_BLACK,
-    }
-    local source = Icon.label{
-        name = "source",
-        text = sourceName(),
-        size = ICON_SIZE,
-        font_size = 12,
-        gap = UI.sz(4),
-        max_width = math.floor(inner_w * 0.36),
-    }
-    local clock_size = clock:getSize()
-    local source_size = source:getSize()
-    if not clock_size or not source_size then
-        return nil
-    end
-    return Geom:new{
-        x = pad + clock_size.w + gap_w,
-        y = 0,
-        w = source_size.w,
-        h = th,
-    }
+    return source_rect
 end
 
 --- 当前缓存指标在顶栏上的可点区域；无任务时返回 nil。
@@ -189,24 +170,38 @@ function TopBar.build()
     local inner_w = sw - pad * 2
 
     -- 左：时钟最左，其后当前源（过长截断）。
-    local clock = datetime.secondsToHour(os.time(), G_reader_settings:isTrue("twelve_hour_clock"))
-    local left = HorizontalGroup:new{
-        align = "center",
-        TextWidget:new{
-            text = clock,
+    local left = HorizontalGroup:new{ align = "center" }
+    local left_w = 0
+    if visible("clock") then
+        local clock = TextWidget:new{
+            text = datetime.secondsToHour(os.time(), G_reader_settings:isTrue("twelve_hour_clock")),
             face = UI.face("xx_smallinfofont", 12),
             fgcolor = Blitbuffer.COLOR_BLACK,
-        },
-        HorizontalSpan:new{ width = gap_w },
-        Icon.label{
+        }
+        table.insert(left, clock)
+        local size = clock:getSize()
+        left_w = size and size.w or 0
+    end
+    source_rect = nil
+    if visible("source") then
+        if #left > 0 then
+            table.insert(left, HorizontalSpan:new{ width = gap_w })
+            left_w = left_w + gap_w
+        end
+        local source = Icon.label{
             name = "source",
             text = sourceName(),
             size = ICON_SIZE,
             font_size = 12,
             gap = UI.sz(4),
             max_width = math.floor(inner_w * 0.36),
-        },
-    }
+        }
+        table.insert(left, source)
+        local size = source:getSize()
+        if size then
+            source_rect = Geom:new{ x = pad + left_w, y = 0, w = size.w, h = th }
+        end
+    end
 
     -- 右：剩余内存、后台缓存、剩余存储、Wi-Fi、亮度、电池（电池贴最右）。
     local right = HorizontalGroup:new{ align = "center" }
@@ -227,31 +222,42 @@ function TopBar.build()
     end
 
     -- 剩余内存（calcFreeMem 返回字节；macOS 模拟器无 /proc/meminfo 则省略）。
-    local mem_avail = util.calcFreeMem()
-    if mem_avail then
-        add(metric("memory", util.getFriendlySize(mem_avail)))
+    if visible("memory") then
+        local mem_avail = util.calcFreeMem()
+        if mem_avail then
+            add(metric("memory", util.getFriendlySize(mem_avail)))
+        end
     end
 
-    local cache_widget = metric("download", cacheStatus())
+    local cache_widget
+    if visible("cache") then
+        cache_widget = metric("download", cacheStatus())
+    end
     add(cache_widget)
 
     -- 剩余存储：数据目录所在文件系统的可用空间（f_bavail；接口在 ffi/util）。
-    local _, _, disk_avail = ffiUtil.df(DataStorage:getDataDir())
-    if disk_avail then
-        add(metric("hard_drive", util.getFriendlySize(disk_avail)))
+    if visible("storage") then
+        local _, _, disk_avail = ffiUtil.df(DataStorage:getDataDir())
+        if disk_avail then
+            add(metric("hard_drive", util.getFriendlySize(disk_avail)))
+        end
     end
 
-    local wifi_on = NetworkMgr:isWifiOn()
-    add(Icon.widget{ name = wifi_on and "wifi" or "wifi_off", size = ICON_SIZE })
+    if visible("wifi") then
+        local wifi_on = NetworkMgr:isWifiOn()
+        add(Icon.widget{ name = wifi_on and "wifi" or "wifi_off", size = ICON_SIZE })
+    end
 
-    if Device:hasFrontlight() and Device.powerd and Device.powerd.frontlightIntensity then
+    if visible("brightness")
+        and Device:hasFrontlight() and Device.powerd and Device.powerd.frontlightIntensity
+    then
         local lvl = Device.powerd:frontlightIntensity()
         if type(lvl) == "number" then
             add(metric("brightness_6", string.format("%d%%", lvl)))
         end
     end
 
-    if Device:hasBattery() and Device.powerd then
+    if visible("battery") and Device:hasBattery() and Device.powerd then
         local pct = Device.powerd:getCapacity()
         if type(pct) == "number" then
             add(batteryMetric(pct, Device.powerd:isCharging()))

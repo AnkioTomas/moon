@@ -69,6 +69,16 @@ local DEFAULTS = {
     },
     home = {
         home_layout = { "recent_hero", "recent_list" },
+        home_topbar_items = {
+            clock = true,
+            source = true,
+            memory = true,
+            cache = true,
+            storage = true,
+            wifi = true,
+            brightness = true,
+            battery = true,
+        },
         home_excerpt_index = 0,
     },
     ai = { ai_endpoint = "", ai_api_key = "", ai_model = "" },

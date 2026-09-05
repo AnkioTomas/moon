@@ -2,7 +2,6 @@
 @module koplugin.book.ui.desktop.settings.desktop
 --]]
 
-local MoonSettings = require("utils.settings")
 local Base = require("ui.desktop.home.components.base")
 local SettingRow = require("ui.components.settingrow")
 local Host = require("host")
