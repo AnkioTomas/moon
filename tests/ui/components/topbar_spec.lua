@@ -134,6 +134,14 @@ local cache_status
 package.preload["source.cache_queue"] = function()
     return { status = function() return cache_status end }
 end
+local topbar_items = {}
+package.loaded["utils.settings"] = nil
+package.preload["utils.settings"] = function()
+    return {
+        activeSourceId = function() return "moon" end,
+        get = function() return { home_topbar_items = topbar_items } end,
+    }
+end
 
 local previous_settings = _G.G_reader_settings
 _G.G_reader_settings = {
@@ -225,6 +233,16 @@ powerd.charging = false
 TopBar.build()
 Assert.eq(icon_calls[6].name, "battery_android_full")
 Assert.eq(icon_calls[6].text, "100%")
+
+-- 用户隐藏的项目不再构建，也不留下可点击区域。
+topbar_items = { source = false, memory = false, battery = false }
+icon_calls = {}
+TopBar.build()
+Assert.is_nil(TopBar.sourceTapRect())
+Assert.eq(icon_calls[1].name, "hard_drive")
+Assert.eq(icon_calls[2].name, "wifi_off")
+Assert.eq(icon_calls[3].name, "brightness_6")
+topbar_items = {}
 
 -- df 失败：存储指标省略，不炸
 package.loaded["ffi/util"] = nil

@@ -31,6 +31,7 @@ local Display = require("ui.desktop.settings.display")
 local Lockscreen = require("ui.desktop.settings.lockscreen")
 local DesktopSettings = require("ui.desktop.settings.desktop")
 local HomeSettings = require("ui.desktop.settings.home")
+local TopbarSettings = require("ui.desktop.settings.topbar")
 local Language = require("ui.desktop.settings.language")
 local QuickPanel = require("ui.panel.settings")
 local Maintenance = require("ui.desktop.settings.maintenance")
@@ -106,7 +107,7 @@ function Settings.build(desktop)
     local packed = {}
     local sub = desktop._settings_sub
     local valid_sub = {
-        sources = true, display = true, lockscreen = true, desktop = true,
+        sources = true, display = true, lockscreen = true, desktop = true, topbar = true,
         home = true, language = true, remote = true, quickpanel = true, ai = true,
         reader = true,
     }
@@ -151,6 +152,12 @@ function Settings.build(desktop)
                     kind = "nav", icon = "desktop_windows", title = _("桌面"),
                     status = open_on and _("开") or _("关"), status_on = open_on,
                     callback = function() desktop:showSettingsSub("desktop") end,
+                })
+            end,
+            function(iw)
+                return SettingRow.build(iw, {
+                    kind = "nav", icon = "vertical_align_top", title = _("顶部状态栏"),
+                    callback = function() desktop:showSettingsSub("topbar") end,
                 })
             end,
             function(iw)
@@ -204,6 +211,8 @@ function Settings.build(desktop)
             appendSection(packed, card_w, _("锁屏"), Lockscreen.rows(desktop))
         elseif sub == "desktop" then
             appendSection(packed, card_w, _("桌面"), DesktopSettings.rows(desktop, open_on))
+        elseif sub == "topbar" then
+            appendSection(packed, card_w, _("顶部状态栏"), TopbarSettings.rows(desktop))
         elseif sub == "home" then
             for _idx, section in ipairs(HomeSettings.sections(desktop)) do
                 appendSection(packed, card_w, section.title, section.rows)
