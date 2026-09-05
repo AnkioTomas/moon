@@ -5,7 +5,6 @@
 --]]
 
 local StatsDB = require("db.stats")
-local Chart = require("ui.components.chart")
 local Blitbuffer = require("ffi/blitbuffer")
 local Library = require("lockscreen.components.library")
 local U = require("lockscreen.components.util")
@@ -58,36 +57,6 @@ function M.periodLabel(period)
     return (PERIOD_BY_ID[period] or PERIOD_BY_ID["7d"]).label
 end
 
---- 组一个图表桶；row 缺失时秒数与页数归零。
----@param key string
----@param label string
----@param row table|nil 统计行（seconds / pages）
----@return table
-local function bucket(key, label, row)
-    return {
-        key = key, label = label,
-        seconds = row and (tonumber(row.seconds) or 0) or 0,
-        pages = row and (tonumber(row.pages) or 0) or 0,
-    }
-end
-
---- 把按小时统计行铺成 0~23 点的 24 个桶，缺失小时补零。
----@param rows table[]|nil 每行含 hour / seconds / pages
----@return table[]
-local function hourBuckets(rows)
-    local by_hour = {}
-    for _, row in ipairs(rows or {}) do
-        local hour = tonumber(row.hour)
-        if hour then by_hour[hour] = row end
-    end
-    local buckets = {}
-    for hour = 0, 23 do
-        local key = string.format("%02d", hour)
-        buckets[#buckets + 1] = bucket(key, key, by_hour[hour])
-    end
-    return buckets
-end
-
 --- 账单周期换算成半开区间 [start, end)，end 一律取明日零点（含今天）。
 ---@param period string today / 7d / 30d / month，其余按 7d 处理
 ---@return number start_ts, number end_ts
@@ -113,18 +82,12 @@ function M.data()
     local period = settings.lock_screen_bill_period or "7d"
     local start_ts, end_ts = billRange(period)
     local source_id = Library.activeSourceId()
-    local grain = period == "today" and "hour" or "day"
-    local buckets = grain == "hour"
-        and hourBuckets(StatsDB.periodHours(source_id, start_ts, end_ts))
-        or U.dayBuckets(StatsDB.periodDays(source_id, start_ts, end_ts), start_ts, end_ts)
     return {
         period = period,
         start_ts = start_ts,
         end_ts = end_ts,
         summary = StatsDB.periodSummary(source_id, start_ts, end_ts),
         books = StatsDB.periodBooks(source_id, start_ts, end_ts, 5),
-        grain = grain,
-        buckets = buckets,
     }
 end
 
@@ -137,104 +100,204 @@ local function duration(seconds)
         or T(_("%1分钟"), minutes)
 end
 
---- 账单主体固定使用宽屏高卡片，并在底部复用公共柱图组件。
+--- 追加热敏小票常见的虚线分隔。
+---@param blocks table[]
+---@param x number
+---@param y number
+---@param width number
+local function appendDashes(blocks, x, y, width)
+    local right = x + width
+    while x < right do
+        blocks[#blocks + 1] = {
+            kind = "rule", x = x, y = y, width = math.min(6, right - x),
+            height = 1, color = U.DIM,
+        }
+        x = x + 10
+    end
+end
+
+--- 生成装饰条码；账单号仍以文字显示，不把装饰冒充可扫码编码。
+---@param blocks table[]
+---@param x number
+---@param y number
+---@param width number
+---@param height number
+---@param seed string
+local function appendBarcode(blocks, x, y, width, height, seed)
+    local right, i = x + width, 1
+    while x < right do
+        local byte = seed:byte((i - 1) % #seed + 1)
+        local bar = 1 + byte % 3
+        if i % 4 ~= 0 then
+            blocks[#blocks + 1] = {
+                kind = "vbar", x = x, y = y, width = math.min(bar, right - x),
+                height = height, value = 1, color = Blitbuffer.COLOR_BLACK,
+            }
+        end
+        x = x + bar + 1 + byte % 2
+        i = i + 1
+    end
+end
+
+--- 在热敏纸上下边缘切出连续齿口。
+---@param blocks table[]
+---@param x number
+---@param y number
+---@param width number
+---@param height number
+---@param radius number
+local function appendCutouts(blocks, x, y, width, height, radius)
+    local step = radius * 3
+    local center = x + step
+    while center <= x + width - step do
+        blocks[#blocks + 1] = {
+            kind = "cutout_circle", x = center, y = y, radius = radius,
+        }
+        blocks[#blocks + 1] = {
+            kind = "cutout_circle", x = center, y = y + height, radius = radius,
+        }
+        center = center + step
+    end
+end
+
+--- 账单主体：窄长热敏纸、消费明细、合计与条码。
 ---@param rect table
 ---@return table[]
 function M.blocks(rect)
     local bill = M.data()
     local summary = bill.summary or {}
-    local grain = bill.grain or "day"
-    local buckets = bill.buckets or {}
-    local avg_div
-    if grain == "hour" then
-        avg_div = math.max(1, (tonumber(os.date("%H")) or 0) + 1)
-    else
-        avg_div = math.max(1, #buckets)
-    end
-
-    local inner_x, inner_w = rect.text_x, rect.text_w
-    local pad = rect.pad
-    local h = rect.h
-    local y0 = rect.y
+    local inset = math.floor(rect.w * 0.08)
+    local paper_x = rect.x + inset
+    local paper_w = rect.w - inset * 2
+    local paper_y, paper_h = rect.y, rect.h
+    local pad = math.max(18, rect.pad)
+    local inner_x, inner_w = paper_x + pad, paper_w - pad * 2
+    local number = os.date("%Y%m%d", (bill.end_ts or os.time()) - 1)
 
     local blocks = {
         {
-            kind = "panel", x = rect.x, y = y0, width = rect.w, height = h,
-            radius = rect.radius, shadow = 2, color = Blitbuffer.COLOR_WHITE,
+            kind = "panel", x = paper_x, y = paper_y, width = paper_w, height = paper_h,
+            radius = 1, shadow = 2, color = Blitbuffer.COLOR_WHITE,
         },
         {
-            text = _("阅读账单"), x = inner_x, y = y0 + pad,
-            width = inner_w, size = 22, bold = true, box = false, align = "right",
+            text = "MOON READING CLUB", x = inner_x, y = paper_y + math.floor(paper_h * 0.045),
+            width = inner_w, size = 24, bold = true, align = "center", box = false,
         },
         {
-            text = os.date("NO.%Y%m%d", (bill.end_ts or os.time()) - 1),
-            x = inner_x, y = y0 + pad + 4, width = inner_w / 2, size = 14, box = false, color = U.MUTED,
+            text = _("阅读账单"), x = inner_x, y = paper_y + math.floor(paper_h * 0.09),
+            width = inner_w, size = 15, align = "center", box = false, color = U.MUTED,
+        },
+        {
+            text = "NO." .. number, x = inner_x, y = paper_y + math.floor(paper_h * 0.135),
+            width = math.floor(inner_w * 0.5), size = 12, box = false,
+        },
+        {
+            text = os.date("%Y-%m-%d %H:%M"), x = inner_x + math.floor(inner_w * 0.5),
+            y = paper_y + math.floor(paper_h * 0.135), width = math.floor(inner_w * 0.5),
+            size = 12, align = "right", box = false,
         },
         {
             text = M.periodLabel(bill.period) .. "  "
                 .. os.date("%Y.%m.%d", bill.start_ts or os.time()) .. " - "
                 .. os.date("%Y.%m.%d", (bill.end_ts or os.time()) - 1),
-            x = inner_x, y = y0 + math.floor(h * 0.10), width = inner_w, size = 15, box = false, color = U.MUTED,
-        },
-        { kind = "rule", x = inner_x, y = y0 + math.floor(h * 0.15), width = inner_w, height = 1, color = U.RULE },
-        {
-            text = duration(summary.total_seconds),
-            x = inner_x, y = y0 + math.floor(h * 0.18), width = inner_w * 0.58, size = 36, bold = true, box = false,
+            x = inner_x, y = paper_y + math.floor(paper_h * 0.175),
+            width = inner_w, size = 12, align = "center", box = false, color = U.MUTED,
         },
         {
-            text = T(_("阅读 %1 本 · %2 页"), summary.book_count or 0, summary.pages or 0),
-            x = math.floor(inner_x + inner_w * 0.55), y = y0 + math.floor(h * 0.20),
-            width = math.floor(inner_w * 0.45), size = 15, align = "right", box = false, color = U.MUTED,
+            text = "ITEM", x = inner_x, y = paper_y + math.floor(paper_h * 0.235),
+            width = math.floor(inner_w * 0.58), size = 13, bold = true, box = false,
         },
         {
-            text = _("书单") .. " TOP 5",
-            x = inner_x, y = y0 + math.floor(h * 0.28), width = inner_w, size = 16, bold = true, box = false,
+            text = "PAGES", x = inner_x + math.floor(inner_w * 0.58),
+            y = paper_y + math.floor(paper_h * 0.235),
+            width = math.floor(inner_w * 0.17), size = 12, align = "right", bold = true, box = false,
         },
-        { kind = "rule", x = inner_x, y = y0 + math.floor(h * 0.32), width = inner_w, height = 1, color = U.RULE },
+        {
+            text = "TIME", x = inner_x + math.floor(inner_w * 0.77),
+            y = paper_y + math.floor(paper_h * 0.235),
+            width = math.floor(inner_w * 0.23), size = 12, align = "right", bold = true, box = false,
+        },
     }
 
-    local y = y0 + math.floor(h * 0.34)
-    local row_h = math.floor(h * 0.07)
+    appendDashes(blocks, inner_x, paper_y + math.floor(paper_h * 0.215), inner_w)
+    appendDashes(blocks, inner_x, paper_y + math.floor(paper_h * 0.27), inner_w)
+
+    local row_y = paper_y + math.floor(paper_h * 0.29)
+    local row_h = math.floor(paper_h * 0.073)
     local books = bill.books or {}
     if #books == 0 then
         blocks[#blocks + 1] = {
             text = _("本周期暂无阅读记录"),
-            x = inner_x, y = y, width = inner_w, size = 18, box = false, color = U.MUTED,
+            x = inner_x, y = row_y, width = inner_w, size = 16,
+            align = "center", box = false, color = U.MUTED,
         }
     else
         for i, book in ipairs(books) do
             if i > 5 then break end
             blocks[#blocks + 1] = {
-                text = string.format("NO.%02d  %s", i, book.title or book.stable_id or ""),
-                x = inner_x, y = y, width = inner_w, size = 16, bold = true, box = false,
+                text = string.format("%02d  %s", i, book.title or book.stable_id or ""),
+                x = inner_x, y = row_y, width = math.floor(inner_w * 0.58),
+                size = 14, bold = true, box = false,
             }
             blocks[#blocks + 1] = {
-                text = string.format("%s · %.0f%% · %s",
-                    book.authors or "", book.percent or 0, duration(book.seconds)),
-                x = inner_x, y = y + math.floor(row_h * 0.42),
-                width = inner_w, size = 13, box = false, color = U.DIM,
+                text = book.authors or "", x = inner_x, y = row_y + math.floor(row_h * 0.42),
+                width = math.floor(inner_w * 0.58), size = 11, box = false, color = U.DIM,
             }
-            y = y + row_h
+            blocks[#blocks + 1] = {
+                text = tostring(tonumber(book.pages) or 0),
+                x = inner_x + math.floor(inner_w * 0.58), y = row_y,
+                width = math.floor(inner_w * 0.17), size = 13, align = "right", box = false,
+            }
+            blocks[#blocks + 1] = {
+                text = duration(book.seconds),
+                x = inner_x + math.floor(inner_w * 0.77), y = row_y,
+                width = math.floor(inner_w * 0.23), size = 13, align = "right", box = false,
+            }
+            row_y = row_y + row_h
         end
     end
 
-    local chart_y = y0 + math.floor(h * 0.72)
-    local avg_label = grain == "hour" and _("时均") or _("日均")
-    blocks[#blocks + 1] = { kind = "rule", x = inner_x, y = chart_y - 16, width = inner_w, height = 1, color = U.RULE }
+    appendDashes(blocks, inner_x, paper_y + math.floor(paper_h * 0.675), inner_w)
     blocks[#blocks + 1] = {
-        text = avg_label .. " " .. duration((summary.total_seconds or 0) / avg_div),
-        x = inner_x, y = chart_y, width = inner_w, size = 15, bold = true, box = false,
+        text = _("书籍"), x = inner_x, y = paper_y + math.floor(paper_h * 0.70),
+        width = math.floor(inner_w * 0.5), size = 13, box = false,
     }
-    Chart.appendBars(blocks, {
-        points = buckets,
-        value_key = "seconds",
-        x = inner_x,
-        y = y0 + math.floor(h * 0.78),
-        width = inner_w,
-        height = math.floor(h * 0.14),
-        label_color = U.DIM,
-        label_mode = "auto",
-    })
+    blocks[#blocks + 1] = {
+        text = tostring(summary.book_count or 0),
+        x = inner_x + math.floor(inner_w * 0.5), y = paper_y + math.floor(paper_h * 0.70),
+        width = math.floor(inner_w * 0.5), size = 13, align = "right", box = false,
+    }
+    blocks[#blocks + 1] = {
+        text = _("页数"), x = inner_x, y = paper_y + math.floor(paper_h * 0.735),
+        width = math.floor(inner_w * 0.5), size = 13, box = false,
+    }
+    blocks[#blocks + 1] = {
+        text = tostring(summary.pages or 0),
+        x = inner_x + math.floor(inner_w * 0.5), y = paper_y + math.floor(paper_h * 0.735),
+        width = math.floor(inner_w * 0.5), size = 13, align = "right", box = false,
+    }
+    appendDashes(blocks, inner_x, paper_y + math.floor(paper_h * 0.775), inner_w)
+    blocks[#blocks + 1] = {
+        text = "TOTAL", x = inner_x, y = paper_y + math.floor(paper_h * 0.795),
+        width = math.floor(inner_w * 0.35), size = 18, bold = true, box = false,
+    }
+    blocks[#blocks + 1] = {
+        text = duration(summary.total_seconds),
+        x = inner_x + math.floor(inner_w * 0.35), y = paper_y + math.floor(paper_h * 0.785),
+        width = math.floor(inner_w * 0.65), size = 28, bold = true, align = "right", box = false,
+    }
+    blocks[#blocks + 1] = {
+        text = _("谢谢阅读"), x = inner_x, y = paper_y + math.floor(paper_h * 0.845),
+        width = inner_w, size = 13, align = "center", box = false, color = U.MUTED,
+    }
+    appendBarcode(blocks, inner_x, paper_y + math.floor(paper_h * 0.88),
+        inner_w, math.max(24, math.floor(paper_h * 0.04)), number)
+    blocks[#blocks + 1] = {
+        text = "NO." .. number, x = inner_x, y = paper_y + math.floor(paper_h * 0.935),
+        width = inner_w, size = 10, align = "center", box = false, color = U.MUTED,
+    }
+    appendCutouts(blocks, paper_x, paper_y, paper_w, paper_h,
+        math.max(7, math.floor(pad * 0.4)))
     return blocks
 end
 
