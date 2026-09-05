@@ -44,6 +44,7 @@ local function showTranslation(translator, text, detailed_view, source_lang, tar
         text = text,
         source_lang = source_lang or translator:getSourceLanguage(),
         target_lang = target_lang or translator:getTargetLanguage(),
+        full_page = detailed_view == false,
         from_highlight = from_highlight,
         index = index,
     }
