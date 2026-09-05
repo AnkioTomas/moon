@@ -1,8 +1,37 @@
 <p align="center">
-  <img src="logo.png" width="180" alt="月读 logo">
+  <img src="logo.png" width="160" alt="月读 Logo">
 </p>
 
-# 月读
+<h1 align="center">月读 · Moon</h1>
+
+<p align="center">
+  <strong>把 KOReader 变成真正属于你的阅读系统</strong>
+</p>
+
+<p align="center">
+  本地优先 · 多源同步 · 阅读统计 · AI 阅读工具 · 组合锁屏 · 局域网管理
+</p>
+
+<p align="center">
+  <a href="https://github.com/AnkioTomas/moon/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/AnkioTomas/moon?display_name=tag&sort=semver&style=flat-square"></a>
+  <a href="https://github.com/AnkioTomas/moon/releases"><img alt="下载量" src="https://img.shields.io/github/downloads/AnkioTomas/moon/total?style=flat-square"></a>
+  <a href="LICENSE"><img alt="GPL-3.0 许可证" src="https://img.shields.io/github/license/AnkioTomas/moon?style=flat-square"></a>
+  <img alt="LuaJIT" src="https://img.shields.io/badge/Lua-LuaJIT-2C2D72?logo=lua&logoColor=white&style=flat-square">
+  <a href="https://koreader.rocks/"><img alt="KOReader 插件" src="https://img.shields.io/badge/KOReader-plugin-222222?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="#安装"><strong>安装</strong></a> ·
+  <a href="#功能一览"><strong>功能</strong></a> ·
+  <a href="#界面预览"><strong>截图</strong></a> ·
+  <a href="#数据源"><strong>数据源</strong></a> ·
+  <a href="#开发与测试"><strong>开发</strong></a>
+</p>
+
+<p align="center">
+  <img src="screenshots/PixPin_2026-09-05_14-07-22.png" width="48%" alt="月读首页">
+  <img src="screenshots/PixPin_2026-09-05_14-07-43.png" width="48%" alt="KOReader 阅读页">
+</p>
 
 月读是面向 [KOReader](https://koreader.rocks/) 的本地优先阅读增强插件。它不是另一个阅读器，而是在 KOReader 之上补齐书库桌面、多数据源、同步、统计、阅读工具、组合锁屏、拼音输入和局域网管理。
 
@@ -10,8 +39,19 @@
 
 > **项目状态：** 功能仍在快速迭代。升级前建议保留 `.moon/` 数据目录；涉及翻页动画等补丁功能时，请按界面提示重启 KOReader。
 
+## 功能一览
+
+| 书库 | 阅读 | 同步与统计 | 系统增强 |
+|---|---|---|---|
+| 全屏书库桌面 | 阅读状态栏 | 本地 / 月读服务 / 微信读书 | 组合锁屏 |
+| 搜索、筛选、分类、系列 | 目录与章节预取 | 进度冲突处理 | 拼音候选栏 |
+| 元数据刮削与封面缓存 | X-Ray、翻译、百科、词典 | 笔记、划线、统计同步 | 局域网文件与输入管理 |
+| Z-Library 导入 | TXT / MOBI 重排为 EPUB | 日历、连续阅读、年度记录 | 快捷面板与翻页动画 |
+
 ## 目录
 
+- [功能一览](#功能一览)
+- [界面预览](#界面预览)
 - [增强了什么](#增强了什么)
 - [完整功能](#完整功能)
 - [数据源](#数据源)
@@ -19,6 +59,20 @@
 - [快速开始](#快速开始)
 - [数据与安全](#数据与安全)
 - [开发与测试](#开发与测试)
+
+## 界面预览
+
+| 图书馆 | 书籍详情 |
+|:---:|:---:|
+| <img src="screenshots/PixPin_2026-09-05_14-15-17.png" alt="图书馆" width="360"> | <img src="screenshots/PixPin_2026-09-05_14-08-13.png" alt="书籍详情" width="360"> |
+
+| 阅读统计 | 组合锁屏 |
+|:---:|:---:|
+| <img src="screenshots/PixPin_2026-09-05_14-15-24.png" alt="阅读统计日历" width="360"> | <img src="screenshots/PixPin_2026-09-05_14-16-12.png" alt="阅读回执锁屏" width="360"> |
+
+| 远程管理 | 文件管理 |
+|:---:|:---:|
+| <img src="screenshots/PixPin_2026-09-05_14-19-23.png" alt="远程管理首页" width="480"> | <img src="screenshots/PixPin_2026-09-05_14-19-43.png" alt="远程文件管理" width="480"> |
 
 ## 增强了什么
 
@@ -32,11 +86,9 @@
 - 书籍详情集中展示封面、作者、简介、阅读进度、阅读统计和当前数据源允许的操作。
 - 桌面字号、界面缩放和封面网格列数均可调整，布局面向墨水屏和触控操作。
 
-> 📷 **截图占位：月读首页**
-> 建议截图内容：顶部状态栏、当前阅读卡片、最近阅读封面和底部导航。
-
-> 📷 **截图占位：图书馆与书籍详情**
-> 建议并排放两张图：图书馆搜索/筛选页，以及一本书的详情页。
+| 书架视图 | 封面墙 |
+|:---:|:---:|
+| <img src="screenshots/PixPin_2026-09-05_14-16-57.png" alt="书架视图" width="360"> | <img src="screenshots/PixPin_2026-09-05_14-17-10.png" alt="书库封面墙" width="360"> |
 
 ### 2. 把不同来源的书统一为可靠的书籍身份
 
@@ -47,6 +99,10 @@
 - 本地整本文件与微信读书按章内容走同一套书籍详情、阅读会话和统计界面。
 - 章节文件通过物理路径精确登记；`.moon` 内的孤立章节不会被误认为普通本地书籍。
 
+<p align="center">
+  <img src="screenshots/PixPin_2026-09-05_14-15-56.png" width="48%" alt="数据源设置">
+</p>
+
 ### 3. 阅读进度、笔记和统计形成闭环
 
 - 自动记录阅读页数、时长和会话统计，不依赖 KOReader 自带统计插件。
@@ -56,8 +112,9 @@
 - 关闭文档、休眠和网络恢复时会结清或重试待同步数据。
 - 统计页提供概览、按日书单、连续阅读和年度记录；微信读书数据还可按周查看阅读书目。
 
-> 📷 **截图占位：阅读统计**
-> 建议截图内容：统计概览、阅读日历以及某日阅读书单。
+| 每日书单 | 连续阅读 |
+|:---:|:---:|
+| <img src="screenshots/PixPin_2026-09-05_14-15-31.png" alt="每日阅读书单" width="360"> | <img src="screenshots/PixPin_2026-09-05_14-15-37.png" alt="年度阅读与连续记录" width="360"> |
 
 ### 4. 增强阅读页，而不复制 KOReader
 
@@ -69,8 +126,13 @@
 - 读完后提供返回首页或删除本书的结束操作。
 - 可启用翻页动画补丁；补丁由月读管理并在需要时提示重启。
 
-> 📷 **截图占位：阅读页增强**
-> 建议并排放三张图：顶部菜单“月读”Tab、顶部/底部状态栏、可排序的划词工具栏。
+| 划词工具栏 | 百度百科 | 翻译 |
+|:---:|:---:|:---:|
+| <img src="screenshots/Reader_book.epub_p172_2026-09-05_141327.png" alt="可排序的划词工具栏" width="300"> | <img src="screenshots/Reader_book.epub_p172_2026-09-05_141337.png" alt="百度百科查询" width="300"> | <img src="screenshots/Reader_book.epub_p172_2026-09-05_141346.png" alt="划词翻译" width="300"> |
+
+| 章节目录 | 阅读字体 |
+|:---:|:---:|
+| <img src="screenshots/PixPin_2026-09-05_14-08-26.png" alt="章节目录" width="360"> | <img src="screenshots/PixPin_2026-09-05_14-12-46.png" alt="阅读字体选择" width="360"> |
 
 ### 5. 增加真正用于阅读的内容工具
 
@@ -84,6 +146,14 @@
 
 AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址、API 密钥和模型；设置页提供最小请求的连接测试。
 
+| X-Ray 实体 | 实体详情 |
+|:---:|:---:|
+| <img src="screenshots/PixPin_2026-09-05_14-08-47.png" alt="X-Ray 实体列表" width="360"> | <img src="screenshots/PixPin_2026-09-05_14-08-55.png" alt="X-Ray 实体详情" width="360"> |
+
+| StarDict 词典下载 | 查询无结果状态 |
+|:---:|:---:|
+| <img src="screenshots/PixPin_2026-09-05_14-11-18.png" alt="StarDict 词典下载" width="360"> | <img src="screenshots/Reader_book.epub_p172_2026-09-05_141358.png" alt="词典查询无结果状态" width="360"> |
+
 ### 6. 把锁屏变成可组合的信息页
 
 月读可以继续使用 KOReader 原生锁屏，也可以生成“背景 × 主体 × 位置”的组合锁屏图片。
@@ -94,8 +164,9 @@ AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址�
 - 阅读统计可展示累计时长、进度和近 7 日图表；阅读账单支持今日、近 7 天、近 30 天和本月周期。
 - 锁屏图先在后台完整生成，再替换显示文件；生成失败时保留上一张可用图片。
 
-> 📷 **截图占位：组合锁屏**
-> 建议用四宫格展示：当前阅读、阅读统计、书架和封面海报。
+| 当前阅读 | 阅读账单 | 阅读统计 |
+|:---:|:---:|:---:|
+| <img src="screenshots/PixPin_2026-09-05_14-16-27.png" alt="当前阅读锁屏" width="300"> | <img src="screenshots/PixPin_2026-09-05_14-16-42.png" alt="阅读账单锁屏" width="300"> | <img src="screenshots/PixPin_2026-09-05_14-17-25.png" alt="阅读统计锁屏" width="300"> |
 
 ### 7. 改善墨水屏上的中文输入
 
@@ -106,8 +177,9 @@ AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址�
 - 在线下载不便时，可从 GitHub Release 手动放入词库文件。
 - 非中文布局、数字输入框、词库缺失以及物理键盘输入保持 KOReader 原生行为。
 
-> 📷 **截图占位：拼音候选栏**
-> 建议截图内容：中文虚拟键盘、已输入拼音和首行候选词。
+<p align="center">
+  <img src="screenshots/PixPin_2026-09-05_14-15-45.png" width="48%" alt="语言、输入与系统设置入口">
+</p>
 
 ### 8. 从电脑或手机管理阅读器
 
@@ -121,8 +193,7 @@ AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址�
 - **连接配置：** 在电脑上填写 AI、月读服务和 Z-Library 等不适合用墨水屏键盘输入的配置。
 - **生命周期：** 可配置端口和开机自启；设备休眠时停止服务，唤醒后按配置恢复。
 
-> 📷 **截图占位：远程管理网页**
-> 建议并排放两张图：远程管理首页，以及带拖拽上传区域的文件管理页。
+远程管理是设备内运行的轻量 HTTP 服务，不依赖云端中转；页面截图见[界面预览](#界面预览)。
 
 ## 完整功能
 
@@ -305,7 +376,7 @@ AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址�
 
 新增数据源遵循 `source/base.lua` 和 `source/registry.lua` 接口。文字处理复用 `utils/text.lua`，SQLite 访问必须使用参数化查询，耗时文件与解析任务放到 worker，数据库写入留在主进程。
 
-更完整的架构约定见 [AGENTS.md](AGENTS.md) 和 [DESIGN.md](DESIGN.md)。
+更完整的架构说明见 [DESIGN.md](DESIGN.md)。
 
 ## 版本与发布
 
