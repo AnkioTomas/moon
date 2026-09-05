@@ -414,6 +414,7 @@ do
             category = "分类",
             series = "系列",
             intro = "简介",
+            cover = "https://img.test/a.jpg",
             path = "/should/not/persist.epub", -- rememberMany 不写 path
         },
         { title = "无身份临时条目" },
@@ -428,6 +429,7 @@ do
     Assert.eq(book_upserts[1].category, "分类")
     Assert.eq(book_upserts[1].series, "系列")
     Assert.eq(book_upserts[1].intro, "简介")
+    Assert.eq(book_upserts[1].cover, "https://img.test/a.jpg")
     Assert.is_true(type(book_upserts[1].fetched_at) == "number")
     Assert.is_nil(book_upserts[1].path) -- path 由 touchPath 单独维护
     book_upserts = {}

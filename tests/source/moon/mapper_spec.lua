@@ -33,10 +33,12 @@ do
         favorite = "小说",
         category = "标签",
         description = "简介",
+        coverUrl = "https://img.test/x.jpg",
         hasReadTag = true,
     })
     Assert.eq(b.category, "小说")
     Assert.eq(b.intro, "简介")
+    Assert.eq(b.cover, "https://img.test/x.jpg")
     Assert.eq(b.percent, 100)
 end
 

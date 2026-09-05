@@ -16,7 +16,7 @@ function BookDB.ensureSchema()
 CREATE TABLE IF NOT EXISTS books (
   source_id TEXT NOT NULL, stable_id TEXT NOT NULL, md5 TEXT, title TEXT,
   authors TEXT, percent REAL DEFAULT 0, category TEXT,
-  series TEXT, intro TEXT, fetched_at INTEGER NOT NULL DEFAULT 0, path TEXT,
+  series TEXT, intro TEXT, cover TEXT, fetched_at INTEGER NOT NULL DEFAULT 0, path TEXT,
   in_library INTEGER NOT NULL DEFAULT 1, metadata_dirty INTEGER NOT NULL DEFAULT 0,
   metadata_updated_at INTEGER NOT NULL DEFAULT 0, reader_prefs TEXT,
   toc TEXT, toc_fetched_at INTEGER NOT NULL DEFAULT 0,
@@ -26,6 +26,17 @@ CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(source_id, md5);
 CREATE INDEX IF NOT EXISTS idx_books_path ON books(path);
 CREATE INDEX IF NOT EXISTS idx_books_library ON books(source_id, in_library, stable_id);
 ]]) then return false end
+    local columns, nrows = Base.query("PRAGMA table_info(books);")
+    local has_cover = false
+    for i = 1, nrows do
+        if columns[2][i] == "cover" then
+            has_cover = true
+            break
+        end
+    end
+    if not has_cover and not Base.exec("ALTER TABLE books ADD COLUMN cover TEXT;") then
+        return false
+    end
     return true
 end
 
@@ -38,8 +49,8 @@ function BookDB.upsert(row)
     return Base.exec(
         [[INSERT INTO books (
             source_id, stable_id, md5, title, authors,
-            percent, category, series, intro, fetched_at, path, in_library
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,1)
+            percent, category, series, intro, cover, fetched_at, path, in_library
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             md5=COALESCE(excluded.md5, books.md5),
             title=excluded.title,
@@ -48,6 +59,7 @@ function BookDB.upsert(row)
             category=excluded.category,
             series=excluded.series,
             intro=excluded.intro,
+            cover=COALESCE(excluded.cover, books.cover),
             fetched_at=excluded.fetched_at,
             path=COALESCE(excluded.path, books.path),
             in_library=1;]],
@@ -60,6 +72,7 @@ function BookDB.upsert(row)
         row.category,
         row.series,
         row.intro,
+        row.cover,
         tonumber(row.fetched_at) or os.time(),
         row.path
     ) ~= nil
@@ -76,9 +89,9 @@ function BookDB.upsertRemote(row)
     return Base.exec(
         [[INSERT INTO books (
             source_id, stable_id, md5, title, authors, percent, category,
-            series, intro, fetched_at, path, in_library,
+            series, intro, cover, fetched_at, path, in_library,
             metadata_dirty, metadata_updated_at
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,0)
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             md5=COALESCE(excluded.md5, books.md5),
             title=CASE WHEN books.metadata_dirty=0
@@ -91,13 +104,14 @@ function BookDB.upsertRemote(row)
                 THEN COALESCE(excluded.series, books.series) ELSE books.series END,
             intro=CASE WHEN books.metadata_dirty=0
                 THEN COALESCE(excluded.intro, books.intro) ELSE books.intro END,
+            cover=COALESCE(excluded.cover, books.cover),
             percent=excluded.percent,
             fetched_at=excluded.fetched_at,
             path=COALESCE(excluded.path, books.path),
             in_library=CASE WHEN ?=1 THEN excluded.in_library ELSE books.in_library END;]],
         source_id, stable_id, row.md5, row.title, row.authors,
         tonumber(row.percent) or 0, row.category,
-        row.series, row.intro, tonumber(row.fetched_at) or os.time(), row.path,
+        row.series, row.intro, row.cover, tonumber(row.fetched_at) or os.time(), row.path,
         in_library and 1 or 0, has_membership and 1 or 0
     ) ~= nil
 end
@@ -116,8 +130,8 @@ function BookDB.upsertRemoteMany(rows)
         -- 按 (行序-1)*11 + 列序 显式定位。
         for i = start, finish do
             local row = rows[i]
-            local base = #values * 11
-            values[#values + 1] = "(?,?,?,?,?,?,?,?,?,?,?,1)"
+            local base = #values * 12
+            values[#values + 1] = "(?,?,?,?,?,?,?,?,?,?,?,?,1)"
             args[base + 1] = row.source_id
             args[base + 2] = row.stable_id
             args[base + 3] = row.md5
@@ -127,13 +141,14 @@ function BookDB.upsertRemoteMany(rows)
             args[base + 7] = row.category
             args[base + 8] = row.series
             args[base + 9] = row.intro
-            args[base + 10] = tonumber(row.fetched_at) or os.time()
-            args[base + 11] = row.path
+            args[base + 10] = row.cover
+            args[base + 11] = tonumber(row.fetched_at) or os.time()
+            args[base + 12] = row.path
         end
         local ok = Base.exec(
             [[INSERT INTO books (
                 source_id, stable_id, md5, title, authors, percent, category,
-                series, intro, fetched_at, path, in_library
+                series, intro, cover, fetched_at, path, in_library
               ) VALUES ]] .. table.concat(values, ",") .. [[
               ON CONFLICT(source_id, stable_id) DO UPDATE SET
                 md5=COALESCE(excluded.md5, books.md5),
@@ -147,12 +162,13 @@ function BookDB.upsertRemoteMany(rows)
                     THEN COALESCE(excluded.series, books.series) ELSE books.series END,
                 intro=CASE WHEN books.metadata_dirty=0
                     THEN COALESCE(excluded.intro, books.intro) ELSE books.intro END,
+                cover=COALESCE(excluded.cover, books.cover),
                 percent=excluded.percent,
                 fetched_at=excluded.fetched_at,
                 path=COALESCE(excluded.path, books.path),
                 in_library=1;]],
             -- args 内允许 NULL；不能用不带上界的 unpack，否则会在第一个 nil 处截断。
-            unpack(args, 1, #values * 11)
+            unpack(args, 1, #values * 12)
         )
         if not ok then
             -- 某些旧版 SQLite/绑定对多行 UPSERT 支持不完整；批量失败时回退
@@ -233,7 +249,7 @@ function BookDB.setLibraryMembership(source_id, stable_id, in_library, clear_pat
 end
 
 local COLUMNS =
-    "source_id, stable_id, md5, title, authors, percent, category, series, intro, fetched_at, path, in_library, metadata_dirty, metadata_updated_at"
+    "source_id, stable_id, md5, title, authors, percent, category, series, intro, cover, fetched_at, path, in_library, metadata_dirty, metadata_updated_at"
 
 --- rowexec 位置参数 → Book 表
 --- 形参顺序必须与 COLUMNS 一致；sqlite 返回的都是字符串，数值列在此统一 tonumber。
@@ -246,13 +262,14 @@ local COLUMNS =
 ---@param category string|nil
 ---@param series string|nil
 ---@param intro string|nil
+---@param cover string|nil
 ---@param fetched_at any 元数据拉取时间戳，缺失算 0
 ---@param path string|nil 本地文件路径
 ---@param in_library any 非 0 即视为在书架内
 ---@param metadata_dirty any
 ---@param metadata_updated_at any
 ---@return Book|nil
-local function rowToBook(source_id_r, stable_id_r, digest, title, authors, percent, category, series, intro, fetched_at, path, in_library, metadata_dirty, metadata_updated_at)
+local function rowToBook(source_id_r, stable_id_r, digest, title, authors, percent, category, series, intro, cover, fetched_at, path, in_library, metadata_dirty, metadata_updated_at)
     if not source_id_r then
         return nil
     end
@@ -266,6 +283,7 @@ local function rowToBook(source_id_r, stable_id_r, digest, title, authors, perce
         category = category,
         series = series,
         intro = intro,
+        cover = cover,
         fetched_at = tonumber(fetched_at) or 0,
         path = path,
         in_library = tonumber(in_library) ~= 0,
@@ -518,7 +536,7 @@ function BookDB.listBySource(source_id, opts)
     local offset = tonumber(opts.offset) or 0
     local sel = [[SELECT b.stable_id, b.title, b.authors,
                         COALESCE(p.fraction * 100, b.percent),
-                        b.category, b.series, b.intro, b.fetched_at
+                        b.category, b.series, b.intro, b.cover, b.fetched_at
                    FROM books b LEFT JOIN pending_progress p
                      ON p.source_id=b.source_id AND p.stable_id=b.stable_id
                   WHERE ]] .. where .. " ORDER BY b.stable_id"
@@ -540,7 +558,8 @@ function BookDB.listBySource(source_id, opts)
                 category = result[5][i],
                 series = result[6][i],
                 intro = result[7][i],
-                fetched_at = tonumber(result[8][i]) or 0,
+                cover = result[8][i],
+                fetched_at = tonumber(result[9][i]) or 0,
             }
         end
     end

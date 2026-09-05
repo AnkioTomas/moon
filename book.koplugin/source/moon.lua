@@ -194,6 +194,15 @@ function Source:openBookAsync(identity, _opts, cb)
         end
     end
 
+    local book = identity.book
+    if not book or not book.path then
+        book = require("db.book").get(identity.source_id, identity.stable_id) or book
+    end
+    local registered_path = book and book.path
+    if registered_path and validBook(registered_path, identity.stable_id) then
+        register(registered_path)
+        return { cancel = function() cancelled = true end }
+    end
     if validBook(path) then
         register(path)
         return { cancel = function() cancelled = true end }

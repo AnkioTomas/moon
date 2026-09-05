@@ -110,8 +110,44 @@ local function loadBook(connection)
     return DbBase, BookDB
 end
 
+-- 旧库没有 cover 列时原地迁移；已有列不得重复 ALTER。
+do
+    local connection, calls = makeConn({
+        exec = function(sql)
+            if sql == "PRAGMA table_info(books);" then
+                return { { 0, 1 }, { "source_id", "stable_id" } }, 2
+            end
+        end,
+    })
+    local DbBase = loadBook(connection)
+    local alters = 0
+    for _, call in ipairs(calls) do
+        if call.sql == "ALTER TABLE books ADD COLUMN cover TEXT;" then alters = alters + 1 end
+    end
+    Assert.eq(alters, 1)
+    DbBase.close()
+    clearMods()
+end
+
+do
+    local connection, calls = makeConn({
+        exec = function(sql)
+            if sql == "PRAGMA table_info(books);" then
+                return { { 0, 1 }, { "source_id", "cover" } }, 2
+            end
+        end,
+    })
+    local DbBase = loadBook(connection)
+    for _, call in ipairs(calls) do
+        Assert.is_false(call.sql == "ALTER TABLE books ADD COLUMN cover TEXT;")
+    end
+    DbBase.close()
+    clearMods()
+end
+
 -- upsert 绑定列序：1 source_id, 2 stable_id, 3 md5, 4 title, 5 authors,
---                 6 percent, 7 category, 8 series, 9 intro, 10 fetched_at, 11 path
+--                 6 percent, 7 category, 8 series, 9 intro, 10 cover,
+--                 11 fetched_at, 12 path
 
 -- ── upsert：字段绑定 ────────────────────────────────────
 do
@@ -123,7 +159,7 @@ do
     local q = calls[#calls]
     Assert.is_true(q.sql:find("INSERT INTO books", 1, true) ~= nil)
     Assert.is_true(q.sql:find("ON CONFLICT(source_id, stable_id) DO UPDATE", 1, true) ~= nil)
-    Assert.eq(q.argc, 11)
+    Assert.eq(q.argc, 12)
 
     DbBase.close()
     clearMods()
@@ -144,11 +180,12 @@ do
         category = "科幻",
         series = "三部曲",
         intro = "简介\n换行",
+        cover = "https://img.test/cover.jpg",
         fetched_at = 1000,
         path = "/cache/local/book/x/book.epub",
     }))
     local q = calls[#calls]
-    Assert.eq(q.argc, 11)
+    Assert.eq(q.argc, 12)
     Assert.eq(q.args[1], "local")
     Assert.eq(q.args[2], 12345)
     Assert.eq(q.args[3], "d41d8cd9")
@@ -157,16 +194,17 @@ do
     Assert.eq(q.args[7], "科幻")
     Assert.eq(q.args[8], "三部曲")
     Assert.eq(q.args[9], "简介\n换行")
-    Assert.eq(q.args[10], 1000)
-    Assert.eq(q.args[11], "/cache/local/book/x/book.epub")
+    Assert.eq(q.args[10], "https://img.test/cover.jpg")
+    Assert.eq(q.args[11], 1000)
+    Assert.eq(q.args[12], "/cache/local/book/x/book.epub")
     Assert.is_false(q.sql:find("书'名", 1, true) ~= nil)
 
     -- fetched_at 缺省 → os.time()；percent 缺省 → 0；path 缺省 → NULL
     Assert.is_true(BookDB.upsert({ source_id = "local", stable_id = "/b.epub" }))
     q = calls[#calls]
     Assert.eq(q.args[6], 0)
-    Assert.eq(type(q.args[10]), "number")
-    Assert.eq(q.args[11], nil)
+    Assert.eq(type(q.args[11]), "number")
+    Assert.eq(q.args[12], nil)
 
     -- md5 冲突时 COALESCE 保留旧值（契约：身份摘要不覆盖）
     Assert.is_true(q.sql:find("md5=COALESCE(excluded.md5, books.md5)", 1, true) ~= nil)
@@ -184,22 +222,24 @@ do
 
     Assert.is_true(BookDB.upsertRemote({ source_id = "moon", stable_id = "store.epub" }))
     local q = calls[#calls]
-    -- 12 列绑定 + ON CONFLICT 成员标志 = 13；VALUES 不得多一个 ?
+    -- 13 列绑定 + ON CONFLICT 成员标志 = 14；VALUES 不得多一个 ?
     local qmarks = select(2, q.sql:gsub("%?", "%?"))
-    Assert.eq(qmarks, 13)
-    Assert.eq(q.argc, 13)
-    Assert.eq(q.args[12], 0, "新缓存行默认不进入书架")
-    Assert.eq(q.args[13], 0, "未指定成员关系时冲突行必须保留原值")
+    Assert.eq(qmarks, 14)
+    Assert.eq(q.argc, 14)
+    Assert.eq(q.args[13], 0, "新缓存行默认不进入书架")
+    Assert.eq(q.args[14], 0, "未指定成员关系时冲突行必须保留原值")
     Assert.is_true(q.sql:find("CASE WHEN ?=1 THEN excluded.in_library ELSE books.in_library END", 1, true) ~= nil)
     Assert.is_true(q.sql:find("COALESCE(excluded.intro, books.intro)", 1, true) ~= nil,
         "稀疏远端行不得清空已有简介")
+    Assert.is_true(q.sql:find("cover=COALESCE(excluded.cover, books.cover)", 1, true) ~= nil,
+        "稀疏远端行不得清空已有封面地址")
 
     Assert.is_true(BookDB.upsertRemote({
         source_id = "moon", stable_id = "shelf.epub", in_library = true,
     }))
     q = calls[#calls]
-    Assert.eq(q.args[12], 1)
     Assert.eq(q.args[13], 1)
+    Assert.eq(q.args[14], 1)
 
     DbBase.close()
     clearMods()
@@ -221,15 +261,15 @@ do
         end
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
-            Assert.eq(call.argc, 22) -- 2 行 × 11 个绑定参数，in_library 由 SQL 常量置 1
+            Assert.eq(call.argc, 24) -- 2 行 × 12 个绑定参数，in_library 由 SQL 常量置 1
             Assert.is_true(call.sql:find("COALESCE(excluded.intro, books.intro)", 1, true) ~= nil,
                 "书架批量对账不得用 NULL 清空已有简介")
             -- NULL 列不得让后续列左移：md5 为空时 title 仍在第 4 位
             Assert.eq(call.args[1], "moon")
             Assert.is_nil(call.args[3])
             Assert.eq(call.args[4], "A")
-            Assert.eq(call.args[12], "moon") -- 未带 source_id 的行也归到本源
-            Assert.eq(call.args[15], "B")
+            Assert.eq(call.args[13], "moon") -- 未带 source_id 的行也归到本源
+            Assert.eq(call.args[16], "B")
         end
         if call.sql == "COMMIT;" then commit = true end
     end
@@ -253,7 +293,7 @@ do
     for _, call in ipairs(calls) do
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
-            Assert.is_true(call.argc == 88 or call.argc == 11) -- 8/1 行 × 11 个绑定参数
+            Assert.is_true(call.argc == 96 or call.argc == 12) -- 8/1 行 × 12 个绑定参数
         end
     end
     Assert.eq(inserts, 2)
@@ -280,11 +320,11 @@ do
         step = function()
             return {
                 "moon", "id'1", "md5x", "标题", "作者",
-                66, "分类", "系列", "简介", 1000,
+                66, "分类", "系列", "简介", "https://img.test/cover.jpg", 1000,
                 "/cache/moon/book/x/book.epub", 1, 0, 0,
             }, {
                 "source_id", "stable_id", "md5", "title", "authors",
-                "percent", "category", "series", "intro", "fetched_at",
+                "percent", "category", "series", "intro", "cover", "fetched_at",
                 "path", "in_library", "metadata_dirty", "metadata_updated_at",
             }
         end,
@@ -298,6 +338,7 @@ do
     Assert.eq(book.md5, "md5x")
     Assert.eq(book.title, "标题")
     Assert.eq(book.percent, 66)
+    Assert.eq(book.cover, "https://img.test/cover.jpg")
     Assert.eq(book.fetched_at, 1000)
     Assert.eq(book.path, "/cache/moon/book/x/book.epub")
     local q = calls[#calls]
@@ -329,11 +370,11 @@ do
         step = function()
             return {
                 "moon", "b1", nil, "标题", nil,
-                0, nil, nil, nil, 0,
+                0, nil, nil, nil, nil, 0,
                 "/cache/moon/book/x/book.epub", 1, 0, 0,
             }, {
                 "source_id", "stable_id", "md5", "title", "authors",
-                "percent", "category", "series", "intro", "fetched_at",
+                "percent", "category", "series", "intro", "cover", "fetched_at",
                 "path", "in_library", "metadata_dirty", "metadata_updated_at",
             }
         end,

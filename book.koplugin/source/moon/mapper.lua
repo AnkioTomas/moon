@@ -71,7 +71,7 @@ function Mapper.book(row)
         ),
         category = row.favorite or row.category,
         series = row.series,
-        cover = type(row.cover) == "string" and row.cover or nil,
+        cover = type(row.coverUrl) == "string" and row.coverUrl or nil,
     }
     local intro = row.description or row.intro or row.summary
     if type(intro) == "string" and intro ~= "" then out.intro = intro end
