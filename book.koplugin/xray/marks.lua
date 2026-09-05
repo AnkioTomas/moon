@@ -257,7 +257,7 @@ local function renderKey(ui)
     }, "\0")
 end
 
---- 防抖后扫描当前页；快速翻页会取消旧计时器或尚未执行的任务。
+--- 防抖后在子进程扫描当前页；快速翻页会取消旧计时器或旧 Job。
 ---@param self table
 ---@param key string
 ---@param entities table[]
@@ -287,9 +287,11 @@ local function scheduleScan(self, key, entities)
             if self._scan_pending == key then self._scan_pending = nil end
             return
         end
-        local job = require("workers.simple_job").run(function()
+        local job = require("workers.job").run(function()
             return scanVisibleMarks(ui, entities)
         end, {
+            name = "xray.marks",
+            timeout = 30,
             on_done = function(marks)
                 if self._scan_token ~= token or self._scan_pending ~= key
                     or self.ui ~= ui or not Marks.enabled() or renderKey(ui) ~= key then
