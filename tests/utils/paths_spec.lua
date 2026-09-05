@@ -9,10 +9,9 @@ utils.paths 离线用例
 
 local Assert = require("support.assert")
 
--- 其它 spec 可能把 libs/libkoreader-lfs 的假桩泄进 package.preload/package.loaded；
--- 本文件必须用真实 native lfs / sha2 验证建目录与 md5，先强制清掉再 require。
+-- 其它 spec 可能把模块实例泄进 package.loaded；保留 runner 安装的基线 loader，
+-- 这样同一组行为测试既能跑真实 native 模块，也能跑裸 LuaJIT 测试桩。
 for _, name in ipairs({ "libs/libkoreader-lfs", "ffi/sha2", "utils.paths" }) do
-    package.preload[name] = nil
     package.loaded[name] = nil
 end
 
