@@ -140,6 +140,10 @@ function Mapper.progress(wire)
         node.percent or node.progress or node.progressPercent or node.readingProgress,
         finished
     )
+    local updated_at = tonumber(node.timestamp or node.progressTimestamp or node.readUpdateTime)
+    if updated_at and updated_at > 1e12 then
+        updated_at = math.floor(updated_at / 1000)
+    end
     return {
         fraction = ProgressPosition.clampFraction(percent / 100),
         chapter_idx = tonumber(node.chapter_idx or node.chapterIdx or node.spine),
@@ -147,9 +151,7 @@ function Mapper.progress(wire)
         -- 服务端在 locator 过期时回空串；归一成 nil，免得下游到处判空串。
         locator = node.locator ~= "" and node.locator or nil,
         extra = tonumber(node.offset) and { offset = tonumber(node.offset) } or nil,
-        updated_at = (tonumber(node.timestamp) or 0) > 1e12
-            and math.floor(tonumber(node.timestamp) / 1000)
-            or tonumber(node.timestamp),
+        updated_at = updated_at,
     }
 end
 

@@ -290,14 +290,17 @@ function Source:recentBooksAsync(limit, cb)
             return
         end
         local mapped = Mapper.list(wire)
+        for _, book in ipairs(mapped.data) do
+            book.in_library = true
+        end
         require("book.store").rememberMany(mapped.data)
         local raw = type(wire.data) == "table" and wire.data or {}
         local ProgressDB = require("db.progress")
         for _, row in ipairs(raw) do
-            local stable_id = Mapper.stableId(row)
+            local book = Mapper.book(row)
             local pos = Mapper.progress({ data = row })
-            if stable_id and pos then
-                ProgressDB.upsertRemote(self.id, stable_id, pos)
+            if book and pos then
+                ProgressDB.upsertRemote(self.id, book.stable_id, pos)
             end
         end
         cb(mapped)

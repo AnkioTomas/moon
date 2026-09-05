@@ -80,6 +80,7 @@ end
 ---@field conflicts integer
 ---@field skipped boolean
 ---@field reason string|nil
+---@field push_error any|nil 拉取成功但本地统计上报失败时保留错误
 
 --- 单条阅读会话统计（落盘 reading_stats 后上报）。
 ---@class BookStatsRow
