@@ -861,6 +861,30 @@ do
 end
 
 
+-- ── 首页设备状态 ───────────────────────────────────────
+
+do
+    local handlers, calls = fakeHandlers({})
+    calls.status = {
+        battery = 63,
+        charging = true,
+        storage_available = 123456,
+        reading = true,
+        book = "测试书籍",
+    }
+    local client = newClient({ "GET /api/status HTTP/1.1\r\n\r\n" })
+    drain(serve(client, handlers))
+    local data = require("support.json_stub").decode(select(2, parseResponse(client:output())))
+    Assert.eq(data.battery, 63)
+    Assert.is_true(data.charging)
+    Assert.eq(data.storage_available, 123456)
+    Assert.eq(data.book, "测试书籍")
+
+    local bad = newClient({ "POST /api/status HTTP/1.1\r\nContent-Length: 0\r\n\r\n" })
+    drain(serve(bad, handlers))
+    Assert.eq((parseResponse(bad:output())), 405)
+end
+
 -- ── 远程输入（光标处追加）──────────────────────────────
 
 do

@@ -7,6 +7,7 @@ Stubs.install()
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
 local job_runs, job_cancels = 0, 0
+local scan_document
 package.preload["workers.job"] = function()
     return {
         run = function(worker, opts)
@@ -35,6 +36,15 @@ package.preload["workers.job"] = function()
             return job
         end,
     }
+end
+package.preload["document/documentregistry"] = function()
+    return {
+        getProvider = function() return "provider" end,
+        openDocument = function() return scan_document end,
+    }
+end
+package.preload["apps/reader/readerui"] = function()
+    return { extendProvider = function(_, _, provider) return provider end }
 end
 package.preload["utils.settings"] = function()
     return { get = function() return {} end }
@@ -81,6 +91,9 @@ Marks.ui = {
     },
 }
 Marks.view = Marks.ui.view
+Marks.ui.document.file = "book.epub"
+Marks.ui.document.close = function() end
+scan_document = Marks.ui.document
 Marks._matches_key = nil
 Marks._render_key = nil
 Marks:rebuild()
@@ -129,6 +142,9 @@ Marks.ui = {
     },
 }
 Marks.view = Marks.ui.view
+Marks.ui.document.file = "book.pdf"
+Marks.ui.document.close = function() end
+scan_document = Marks.ui.document
 package.preload["db.xray"] = function()
     return { list = function() return { { kind = "term", name = "Whitby", aliases = {} } } end }
 end
