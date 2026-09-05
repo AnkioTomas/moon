@@ -9,6 +9,7 @@ package.preload["l10n"] = function() return { apply = function() end } end
 
 local lists = {}
 local sheets = {}
+local shown = {}
 package.preload["ui.components.popup"] = function()
     return {
         list = function(opts) lists[#lists + 1] = opts end,
@@ -17,14 +18,37 @@ package.preload["ui.components.popup"] = function()
     }
 end
 package.preload["ui/uimanager"] = function()
-    return { show = function() end, close = function() end }
+    return {
+        show = function(_, widget) shown[#shown + 1] = widget end,
+        close = function() end,
+    }
 end
 package.preload["ui/widget/infomessage"] = function()
     return { new = function(_, opts) return opts end }
 end
+package.preload["ui/widget/confirmbox"] = function()
+    return { new = function(_, opts) return opts end }
+end
+local progress_dialog
+package.preload["ui/widget/progressbardialog"] = function()
+    return {
+        new = function(_, opts)
+            progress_dialog = opts
+            opts.progress = {}
+            opts.show = function() opts.shown = true end
+            opts.close = function() opts.closed = true end
+            opts.reportProgress = function(_, value) opts.progress[#opts.progress + 1] = value end
+            return opts
+        end,
+    }
+end
+package.preload["datastorage"] = function()
+    return { getDataDir = function() return "/data" end }
+end
 local installed_paths = {}
 local catalog_items = {}
 local activated
+local install_dir
 package.preload["dictionary.manager"] = function()
     return {
         installed = function() return installed_paths end,
@@ -33,7 +57,11 @@ package.preload["dictionary.manager"] = function()
         activate = function(_, path) activated = path end,
         remove = function() return true end,
         refresh = function() end,
-        install = function(_, _, cb) cb(true) end,
+        install = function(_, data_dir, cb, on_progress)
+            install_dir = data_dir
+            on_progress("part", 1, 1, 1, 1)
+            cb(true)
+        end,
     }
 end
 package.preload["ui/network/manager"] = function()
@@ -71,6 +99,22 @@ Assert.len(language_list.items, 2)
 Assert.is_true(language_list.items[1].keep_menu_open)
 language_list.items[1].callback()
 Assert.eq(lists[3].title, "下载字典 · 简体中文")
+lists[3].items[1].callback()
+shown[#shown].ok_callback()
+Assert.eq(install_dir, "/tmp")
+Assert.is_true(progress_dialog.shown)
+Assert.is_true(progress_dialog.closed)
+Assert.eq(progress_dialog.progress[1], 1)
+
+-- 桌面没有 ReaderUI 时仍按 KOReader 默认目录安装。
+catalog_items = {
+    { id = "zh", name = "中文", size = 1, lang = "zh_CN", lang_name = "简体中文" },
+}
+Dictionary.download(nil)
+local desktop_download = lists[#lists]
+desktop_download.items[1].callback()
+shown[#shown].ok_callback()
+Assert.eq(install_dir, "/data/data/dict")
 
 Assert.is_true(type(Dictionary.download) == "function")
 Assert.is_true(type(Dictionary.pick) == "function")

@@ -629,7 +629,13 @@ function Request.stream(opts, handlers)
             end
             if content_length and tonumber(content_length) and tonumber(content_length) > 0
                 and self.kwargs.method ~= "HEAD" then
-                self.iostream:read_bytes(tonumber(content_length), self._handle_body, self)
+                self.iostream:read_bytes(
+                    tonumber(content_length),
+                    self._handle_body,
+                    self,
+                    function(_, chunk) emit(chunk) end,
+                    self
+                )
                 return
             end
             -- 无 Content-Length / 非 chunked：按连接关闭读（SSE 常见）
