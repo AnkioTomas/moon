@@ -79,10 +79,14 @@ Assert.eq(#sources, 2)
 local barcode, cutouts = 0, 0
 local texts = {}
 local logo_block
+local brand_block
+local brand_subtitle
 for _, block in ipairs(blocks) do
     if block.kind == "vbar" then barcode = barcode + 1 end
     if block.kind == "cutout_circle" then cutouts = cutouts + 1 end
     if block.kind == "image" then logo_block = block end
+    if block.text == "MOON READING" then brand_block = block end
+    if block.text == "阅读账单" then brand_subtitle = block end
     if block.text then texts[#texts + 1] = block.text end
 end
 Assert.contains(texts, "MOON READING")
@@ -90,3 +94,6 @@ Assert.contains(texts, "TOTAL")
 Assert.is_true(barcode > 20)
 Assert.is_true(cutouts > 4)
 Assert.matches(logo_block.file, "book%.koplugin/logo%.png$")
+Assert.is_true(logo_block.height >= 64)
+Assert.eq(brand_block.y, logo_block.y + 2)
+Assert.eq(brand_subtitle.y, brand_block.y + 42)
