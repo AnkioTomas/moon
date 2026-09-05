@@ -1,12 +1,13 @@
 --[[--
-拼音候选栏：zh_CN 键盘首行候选条。
+中文输入法候选栏：复用 zh_CN 键盘并按当前方法解释按键。
 
-@module koplugin.book.pinyin.candidate_bar
+@module koplugin.book.ime.candidate_bar
 --]]
 
 local Bar = {}
 
-local Strip = require("pinyin.strip")
+local Strip = require("ime.strip")
+local Registry = require("ime.registry")
 local util = require("util")
 local SimpleJob = require("workers/simple_job")
 
@@ -20,8 +21,11 @@ local _want = false
 local _active = false
 local _keyboard
 local _strip
+local _profile
 local lookup = {
     code = "",
+    tokens = {},
+    preedit = {},
     pages = {},
     page = 1,
     debounce = nil,
@@ -108,20 +112,80 @@ local function syncRow(want)
     if type(keys) ~= "table" then
         return
     end
-    if (keys[1] and keys[1]._pinyin_bar == true) == want then
+    if (keys[1] and keys[1]._ime_bar == true) == want then
         return
     end
     if not want then
         table.remove(keys, 1)
         return
     end
-    local row = { _pinyin_bar = true }
+    local row = { _ime_bar = true }
     for i = 1, 10 do
         row[i] = { label = "", width = 1.0 }
     end
     row[1].label = "◀"
     row[10].label = "▶"
     table.insert(keys, 1, row)
+end
+
+local keyboard_baseline
+
+---@param value any
+---@return any
+local function copyValue(value)
+    if type(value) ~= "table" then return value end
+    local out = {}
+    for key, nested in pairs(value) do out[key] = copyValue(nested) end
+    return out
+end
+
+---@param value any
+---@return string|nil
+local function primaryChar(value)
+    if type(value) == "string" then return #value == 1 and value or nil end
+    if type(value) ~= "table" then return nil end
+    for i = 1, #value do
+        local found = primaryChar(value[i])
+        if found then return found end
+    end
+end
+
+--- 每次初始化先恢复原始 zh_CN 键帽，再应用当前输入法标签。
+---@param profile table|nil
+local function applyKeyboardLabels(profile)
+    local layout = require(ZH_MODULE)
+    if not keyboard_baseline then
+        keyboard_baseline = copyValue(layout.keys)
+    end
+    local restored = copyValue(keyboard_baseline)
+    for key in pairs(layout.keys) do layout.keys[key] = nil end
+    for key, value in pairs(restored) do layout.keys[key] = value end
+    local labels = profile and profile.labels
+    if type(labels) ~= "table" then return end
+    for _, row in ipairs(layout.keys) do
+        for _, key in ipairs(row) do
+            if type(key) == "table" then
+                for layer = 1, 2 do
+                    local raw = primaryChar(key[layer])
+                    local code = raw and raw:lower()
+                    local label = code and labels[code]
+                    if label then
+                        local value = key[layer]
+                        if type(value) == "table" then
+                            value.label = label
+                            if profile.show_codes then value.alt_label = code:upper() end
+                        else
+                            key[layer] = {
+                                label = label,
+                                alt_label = profile.show_codes and code:upper() or nil,
+                                value,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+    end
 end
 
 --- 把当前键盘标记为脏区，让候选行在本轮刷新里重画（无键盘时无操作）。
@@ -151,6 +215,8 @@ local function clearCode()
     end
     lookup.job = nil
     lookup.code = ""
+    lookup.tokens = {}
+    lookup.preedit = {}
     lookup.pages = {}
     lookup.page = 1
 end
@@ -181,9 +247,9 @@ local function codeAtCursor(inputbox)
     if not pos then
         return false
     end
-    for i = #lookup.code, 1, -1 do
+    for i = #lookup.preedit, 1, -1 do
         pos = pos - 1
-        if inputbox.charlist[pos] ~= lookup.code:sub(i, i) then
+        if inputbox.charlist[pos] ~= lookup.preedit[i] then
             return false
         end
     end
@@ -202,7 +268,7 @@ local function commit(word)
         clearCode()
         return false
     end
-    if not rawReplaceBeforeCursor(inputbox, #lookup.code, word) then
+    if not rawReplaceBeforeCursor(inputbox, #lookup.preedit, word) then
         return false
     end
     clearCode()
@@ -244,7 +310,7 @@ end
 ---@return boolean 是否装上候选条
 local function installStrip(kb)
     _strip = nil
-    if not (kb.KEYS and kb.KEYS[1] and kb.KEYS[1]._pinyin_bar) then
+    if not (kb.KEYS and kb.KEYS[1] and kb.KEYS[1]._ime_bar) then
         return false
     end
     local vg = kb[1] and kb[1][1] and kb[1][1][1] and kb[1][1][1][1]
@@ -284,7 +350,7 @@ local function showCodeOnly()
     if lookup.code == "" then
         lookup.pages = {}
     else
-        lookup.pages = makePages({ lookup.code })
+        lookup.pages = makePages({ table.concat(lookup.preedit) })
     end
     lookup.page = 1
 end
@@ -297,11 +363,12 @@ local function startLookup(keyboard, code)
         return
     end
     local generation = lookup.generation
+    local profile = _profile
     lookup.job = SimpleJob.run(function()
-        return require("pinyin.dictionary").lookup(code)
+        return Registry.lookup(profile, code)
     end, {
         on_done = function(words)
-            if generation ~= lookup.generation
+            if generation ~= lookup.generation or profile ~= _profile
                     or keyboard ~= _keyboard or code ~= lookup.code then
                 return
             end
@@ -363,8 +430,10 @@ end
 --- number 输入框从符号层起步、不打字，候选行直接不装。
 ---@param ... any 透传给原方法
 local function wrappedInit(self, ...)
-    _want = not not (_enabled() and require("pinyin.dictionary").isAvailable()
+    _profile = Registry.current()
+    _want = not not (_enabled() and Registry.isAvailable(_profile)
         and not (self.inputbox and self.inputbox.input_type == "number"))
+    applyKeyboardLabels(_want and _profile or nil)
     syncRow(_want)
     clearCode()
     orig_init(self, ...)
@@ -386,15 +455,18 @@ local function wrappedAddChar(self, key)
     if lookup.code ~= "" and not codeAtCursor(self.inputbox) then
         clearCode()
     end
-    if key:match("^%a$") then
-        lookup.code = lookup.code .. key:lower()
-        rawAddChars(self.inputbox, key:lower())
+    local token, display = _profile.mapKey(key)
+    if token then
+        lookup.tokens[#lookup.tokens + 1] = token
+        lookup.preedit[#lookup.preedit + 1] = display
+        lookup.code = table.concat(lookup.tokens)
+        rawAddChars(self.inputbox, display)
         showCodeOnly()
         refresh()
         requestLookup(self, lookup.code)
         return
     end
-    if key == " " and lookup.code ~= "" then
+    if _profile.commit_space and key == " " and lookup.code ~= "" then
         local first = lookup.pages[1] and lookup.pages[1][1]
         if first and commit(first) then
             refresh()
@@ -424,7 +496,9 @@ local function wrappedDelChar(self)
             redraw()
             return orig_delChar(self)
         end
-        lookup.code = lookup.code:sub(1, -2)
+        table.remove(lookup.tokens)
+        table.remove(lookup.preedit)
+        lookup.code = table.concat(lookup.tokens)
         rawDelChar(self.inputbox)
         showCodeOnly()
         refresh()

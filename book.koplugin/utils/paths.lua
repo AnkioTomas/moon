@@ -165,10 +165,23 @@ function P.logPath()
     return P.root() .. "/book.log"
 end
 
---- 拼音词库 SQLite 路径：$DATA/.moon/dictionary.sqlite3（经 pinyin/download 下载落盘）
+--- 拼音词库 SQLite 路径：$DATA/.moon/dictionary.sqlite3（保留历史 API）
 ---@return string
 function P.pinyinDictPath()
-    return P.root() .. "/dictionary.sqlite3"
+    return P.imeDictPath("pinyin")
+end
+
+--- 中文输入法词库路径；拼音保留历史文件名，其余使用 dictionary-<id>.sqlite3。
+---@param id "pinyin"|"wubi"|"cangjie"|"zhuyin"
+---@return string
+function P.imeDictPath(id)
+    if id == "pinyin" then
+        return P.root() .. "/dictionary.sqlite3"
+    end
+    if id ~= "wubi" and id ~= "cangjie" and id ~= "zhuyin" then
+        error("imeDictPath: unsupported input method " .. tostring(id))
+    end
+    return P.root() .. "/dictionary-" .. id .. ".sqlite3"
 end
 
 --- settings 目录

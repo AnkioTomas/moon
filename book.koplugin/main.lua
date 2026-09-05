@@ -62,7 +62,7 @@ function BookPlugin:init()
     if not ok_share then
         logger.warn("book screenshot share install failed:", err_share)
     end
-    require("pinyin.init").bootstrap()
+    require("ime.init").bootstrap()
     require("patch.manager").init({ plugin_root = self.path })
     UIManager:nextTick(function()
         local ok_animation, err_animation = pcall(function()

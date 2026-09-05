@@ -64,16 +64,25 @@ jobs:
           echo "Packaged ${ASSET} (version ${VERSION})"
           unzip -l "$ASSET" | head -n 30
 
-      - name: Assemble pinyin dictionary
-        id: pinyin
+      - name: Assemble input method dictionaries
+        id: ime
         run: |
           set -euo pipefail
           TAG="${{ steps.ver.outputs.tag }}"
-          DICT="pinyin-dictionary-${TAG}.sqlite3"
+
+          PINYIN="pinyin-dictionary-${TAG}.sqlite3"
           python3 tools/build_pinyin_dict.py --assemble-only --out-dir assets/pinyin
-          mv assets/pinyin/dictionary.sqlite3 "$DICT"
-          ls -lh "$DICT"
-          echo "asset=${DICT}" >> "$GITHUB_OUTPUT"
+          mv assets/pinyin/dictionary.sqlite3 "$PINYIN"
+
+          ASSETS=("$PINYIN")
+          for METHOD in wubi cangjie zhuyin; do
+            python3 tools/build_ime_dict.py "$METHOD" --assemble-only
+            DICT="${METHOD}-dictionary-${TAG}.sqlite3"
+            mv "assets/ime/${METHOD}/dictionary.sqlite3" "$DICT"
+            ASSETS+=("$DICT")
+          done
+          ls -lh "${ASSETS[@]}"
+          printf 'assets=%s\n' "${ASSETS[*]}" >> "$GITHUB_OUTPUT"
 
       - name: Build release notes
         run: |
@@ -95,11 +104,12 @@ jobs:
             echo
             echo "KOReader 插件包：\`${{ steps.ver.outputs.asset }}\`"
             echo
-            echo "拼音词库（整库，手动 sideload）：\`${{ steps.pinyin.outputs.asset }}\`"
+            echo "输入法词库（整库，手动 sideload）：\`${{ steps.ime.outputs.assets }}\`"
             echo
             echo "安装：解压后将 \`book.koplugin\` 复制到 KOReader 的 \`plugins\` 目录，然后重启。"
             echo
-            echo "拼音词库 sideload：从 Release 下载 \`${{ steps.pinyin.outputs.asset }}\`，重命名为 \`dictionary.sqlite3\`，"
+            echo "词库 sideload：拼音重命名为 \`dictionary.sqlite3\`；其他布局重命名为"
+            echo "\`dictionary-wubi.sqlite3\`、\`dictionary-cangjie.sqlite3\` 或 \`dictionary-zhuyin.sqlite3\`，"
             echo "放入 KOReader 数据目录下的 \`.moon/\`（与 \`book.sqlite3\` 同级），然后重启。"
             echo
             echo "### 更新内容"
@@ -167,8 +177,8 @@ jobs:
           set -euo pipefail
           TAG="${{ steps.ver.outputs.tag }}"
           ASSET="${{ steps.ver.outputs.asset }}"
-          DICT="${{ steps.pinyin.outputs.asset }}"
-          ARGS=(release create "$TAG" "$ASSET" "$DICT" --title "月读 ${TAG}" --notes-file RELEASE_NOTES.md)
+          read -r -a DICTS <<< "${{ steps.ime.outputs.assets }}"
+          ARGS=(release create "$TAG" "$ASSET" "${DICTS[@]}" --title "月读 ${TAG}" --notes-file RELEASE_NOTES.md)
 
           if [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
             ARGS+=(--prerelease)

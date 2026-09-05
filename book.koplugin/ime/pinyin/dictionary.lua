@@ -1,7 +1,7 @@
 --[[--
 拼音词库只读查询（rime-ice 转换产物 dictionary.sqlite3）。
 
-库由 pinyin/download 下载落盘到 $DATA/.moon/dictionary.sqlite3；
+库由 ime/download 下载落盘到 $DATA/.moon/dictionary.sqlite3；
 文件缺失 / 打不开 / 查询失败一律降级为空结果，绝不影响原生单字候选。
 
 schema（tools/build_pinyin_dict.py 生成）：
@@ -15,7 +15,7 @@ schema（tools/build_pinyin_dict.py 生成）：
 `mode + code` 的等值读取。长码命中集合已足够小，才退回 `code GLOB 'nihao*'`
 或 `initials GLOB 'nhg*'`。输入码只允许小写 ASCII；单字母半截不查。
 
-@module koplugin.book.pinyin.dictionary
+@module koplugin.book.ime.pinyin.dictionary
 --]]
 
 local lfs = require("libs/libkoreader-lfs")
