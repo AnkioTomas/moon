@@ -16,6 +16,8 @@ local Screen = Device.screen
 local HEADER_FONT_SIZE_DEFAULT = 20
 --- 比 CRE 原生页头额外增加的固定高度，不跟文档页边距变化。
 local TOP_BAR_EXTRA_HEIGHT = 12
+--- 顶栏固定水平留白，不跟书籍左右页边距变化。
+local TOP_BAR_HORIZONTAL_PADDING = 12
 --- 底栏文字向屏幕内侧偏移，避免视觉上贴住边缘。
 local BOTTOM_CONTENT_INSET = 4
 --- 顶栏额外高度（已按屏幕缩放）。
@@ -359,17 +361,11 @@ function Bars.topHeight(ui)
     return ui.document:getHeaderHeight() + topBarExtraHeight()
 end
 
---- 顶栏水平内边距（左、右），跟文档页边距一致。
----@param ui table|nil
+--- 顶栏固定水平内边距（左、右）。
 ---@return number, number
-local function topMargins(ui)
-    ui = ui or Bars.ui
-    local config = ui and ui.document and ui.document.configurable
-    if not config or not config.h_page_margins then
-        return 0, 0
-    end
-    return Screen:scaleBySize(config.h_page_margins[1]),
-        Screen:scaleBySize(config.h_page_margins[2])
+local function topMargins()
+    local margin = Screen:scaleBySize(TOP_BAR_HORIZONTAL_PADDING)
+    return margin, margin
 end
 
 --- 底栏水平内边距（左、右），跟 ReaderFooter 一致。
@@ -623,12 +619,12 @@ function Bars:paintTo(bb, x, y)
         local bar_y, bar_h = topBandGeometry(ui, y)
         if bar_y and bar_h then
             bb:paintRect(x, bar_y, w, bar_h, bg)
-            local margin_l, margin_r = topMargins(ui)
+            local margin_l, margin_r = topMargins()
             local inner_w = math.max(1, w - margin_l - margin_r)
             local gap = Screen:scaleBySize(4)
             local text_y = bar_y
             local text_h = bar_h
-            local face = topTextFace(ui, text_h)
+            local face = topTextFace(ui, ui.document:getHeaderHeight())
 
             local time_text = Bars.timeText()
             local time = cachedTextWidget("time",
