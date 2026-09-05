@@ -44,6 +44,7 @@ function Store.rememberMany(books)
                 category = book.category,
                 series = book.series,
                 intro = book.intro,
+                cover = book.cover,
                 fetched_at = fetched_at,
                 in_library = book.in_library,
             }

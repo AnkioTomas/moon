@@ -25,7 +25,7 @@
 ---@field in_library boolean|nil 是否属于当前源书架；false 时仍保留身份与历史
 ---@field metadata_dirty integer|nil 本地展示元数据尚未被远端确认
 ---@field metadata_updated_at integer|nil 本地展示元数据版本
----@field cover string|nil 封面 URL，不入库；存在时 UI 直接下载
+---@field cover string|nil 封面 URL；随展示元数据入库，Image 负责磁盘图片缓存
 ---@field cover_headers table|nil 封面请求头
 
 local Book = {}

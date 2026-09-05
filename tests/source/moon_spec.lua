@@ -37,7 +37,10 @@ package.preload["utils.paths"] = function()
 end
 
 package.preload["db.book"] = function()
-    return { libraryStableIdsBySource = function() return { "a.epub", "b.epub" } end }
+    return {
+        libraryStableIdsBySource = function() return { "a.epub", "b.epub" } end,
+        get = function() return rec.stored_book end,
+    }
 end
 package.preload["db.progress"] = function()
     return {
@@ -323,6 +326,22 @@ do
     Assert.eq(opened, path)
     Assert.is_nil(open_err)
     Assert.eq(touches[1].path, path)
+
+    local registered_path = open_dir .. "/legacy.epub"
+    local registered = assert(io.open(registered_path, "wb"))
+    registered:write("PK\003\004book")
+    registered:close()
+    resetRec()
+    rec.stored_book = { path = registered_path }
+    opened = nil
+    src:openBookAsync({
+        source_id = "moon",
+        stable_id = "library/a.epub",
+        book = { title = "旧缓存" },
+    }, nil, function(p) opened = p end)
+    Assert.is_nil(rec.download_count)
+    Assert.eq(opened, registered_path)
+    os.remove(registered_path)
 
     resetRec()
     opened = nil

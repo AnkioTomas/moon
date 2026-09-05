@@ -144,3 +144,11 @@ for _, block in ipairs(narrow) do
     narrow_max_x = math.max(narrow_max_x, block.x + block.width)
 end
 Assert.is_true(narrow_max_x > 200)
+
+-- 空书库必须显示明确空态，不能静默退化成纯壁纸。
+recent = {}
+db_rows = {}
+local empty = Poster.blocks({ x = 0, y = 0, w = 540, h = 720 })
+Assert.eq(#empty, 1)
+Assert.eq(empty[1].text, "书库暂无书籍")
+Assert.eq(empty[1].align, "center")

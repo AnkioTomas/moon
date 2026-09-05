@@ -32,12 +32,8 @@ package.preload["db.stats"] = function()
     }
 end
 
-package.preload["ui.components.chart"] = function()
-    return { appendBars = function() end }
-end
-
 package.preload["ffi/blitbuffer"] = function()
-    return { COLOR_WHITE = 255 }
+    return { COLOR_BLACK = 0, COLOR_WHITE = 255 }
 end
 
 package.preload["lockscreen.components.library"] = function()
@@ -47,7 +43,6 @@ end
 package.preload["lockscreen.components.util"] = function()
     return {
         dayStart = function() return 100000 end,
-        dayBuckets = function() return {} end,
         MUTED = 1,
         DIM = 2,
         RULE = 3,
@@ -69,7 +64,29 @@ package.loaded["lockscreen.components.bill"] = nil
 local Bill = require("lockscreen.components.bill")
 Bill.data()
 
-Assert.eq(#sources, 3)
+Assert.eq(#sources, 2)
 for _, source_id in ipairs(sources) do
     Assert.eq(source_id, "moon")
 end
+
+sources = {}
+local blocks = Bill.blocks({
+    x = 0, y = 0, w = 500, h = 800,
+    text_x = 20, text_w = 460, pad = 20, radius = 10,
+})
+Assert.eq(#sources, 2)
+
+local barcode, cutouts = 0, 0
+local texts = {}
+local logo_block
+for _, block in ipairs(blocks) do
+    if block.kind == "vbar" then barcode = barcode + 1 end
+    if block.kind == "cutout_circle" then cutouts = cutouts + 1 end
+    if block.kind == "image" then logo_block = block end
+    if block.text then texts[#texts + 1] = block.text end
+end
+Assert.contains(texts, "MOON READING")
+Assert.contains(texts, "TOTAL")
+Assert.is_true(barcode > 20)
+Assert.is_true(cutouts > 4)
+Assert.matches(logo_block.file, "book%.koplugin/logo%.png$")

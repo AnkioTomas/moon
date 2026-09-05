@@ -45,7 +45,7 @@ local _ = require("gettext")
 local BookInfo = {}
 
 --- 下载的网络封面同时落到源专属路径，供锁屏离屏渲染复用。
---- books 表不保存 URL，锁屏不能在渲染阶段重新构造在线请求。
+--- 锁屏离屏渲染不发网络请求，因此仍需要稳定的本地文件路径。
 ---@param book table|nil
 ---@param path string|nil
 local function persistCover(book, path)

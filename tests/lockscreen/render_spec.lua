@@ -11,6 +11,10 @@ local ensured = 0
 local removed
 local renamed
 local rename_ok = true
+local snapshot_frees = 0
+local cutout_blits = 0
+local image_paints = 0
+local image_frees = 0
 local warnings = 0
 local writes = 0
 
@@ -19,7 +23,10 @@ local function buffer()
         fill = function() end,
         paintRect = function() end,
         paintRoundedRect = function() end,
-        blitFrom = function() end,
+        blitFrom = function() cutout_blits = cutout_blits + 1 end,
+        copy = function()
+            return { free = function() snapshot_frees = snapshot_frees + 1 end }
+        end,
         writePNG = function(_, path)
             writes = writes + 1
             Assert.matches(path, "%.part$")
@@ -46,7 +53,14 @@ package.preload["ui/font"] = function()
 end
 
 package.preload["ui/widget/imagewidget"] = function()
-    return { new = function() error("unexpected background image") end }
+    return {
+        new = function(_, opts)
+            return {
+                paintTo = function() image_paints = image_paints + 1 end,
+                free = function() image_frees = image_frees + 1 end,
+            }
+        end,
+    }
 end
 
 package.preload["ui/widget/textboxwidget"] = function()
@@ -91,6 +105,10 @@ local function reset()
     removed = nil
     renamed = nil
     rename_ok = true
+    snapshot_frees = 0
+    cutout_blits = 0
+    image_paints = 0
+    image_frees = 0
     warnings = 0
     writes = 0
 end
@@ -118,6 +136,28 @@ local ok_run, err_run = pcall(function()
     Assert.eq(renamed[2], "/tmp/compose.png")
     Assert.is_nil(removed)
     Assert.eq(ensured, 1)
+
+    -- 票根缺口必须逐行恢复原背景，并释放背景快照。
+    reset()
+    ok, err = Render.write("/tmp/compose.png", nil, {
+        { kind = "panel", x = 10, y = 10, width = 80, height = 100 },
+        { kind = "cutout_circle", x = 10, y = 50, radius = 6 },
+    })
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.is_true(cutout_blits > 0)
+    Assert.eq(snapshot_frees, 1)
+    Assert.eq(canvas_frees, 1)
+
+    -- 静态图片块由渲染层创建并在绘制后立即释放。
+    reset()
+    ok, err = Render.write("/tmp/compose.png", nil, {
+        { kind = "image", file = "/plugin/logo.png", x = 10, y = 10, width = 32, height = 32 },
+    })
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(image_paints, 1)
+    Assert.eq(image_frees, 1)
 
     -- widget 绘制抛错时仍要释放 widget 和画布，且不得进入文件替换。
     reset()

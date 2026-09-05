@@ -339,6 +339,7 @@ do
                         { "sub" },
                         { "第一辑" },
                         { "介绍" },
+                        { "https://img.test/a.jpg" },
                         { 1000 },
                     }, 1
                 end,
@@ -367,6 +368,7 @@ do
     Assert.eq(rows[1].title, "书名")
     Assert.eq(rows[1].percent, 42)
     Assert.eq(rows[1].series, "第一辑")
+    Assert.eq(rows[1].cover, "https://img.test/a.jpg")
     local count_q = calls[#calls - 1]
     Assert.is_true(count_q.sql:find("WHERE source_id=%?", 1) ~= nil or count_q.sql:find("source_id=?", 1, true) ~= nil)
     Assert.is_false(count_q.sql:find("category=", 1, true) ~= nil)
