@@ -172,13 +172,14 @@ local function paintWidget(bb, block, canvas_w, canvas_h)
     end
 end
 
---- 分发非文本图形块：线、柱、卡片、点和离屏 widget。
+--- 分发非文本图形块：线、柱、卡片、票根缺口、点和离屏 widget。
 --- 封面 / 进度条不再走 DSL；主体通过 kind=widget 复用 ui.components。
 ---@param bb userdata 目标 Blitbuffer
 ---@param block table 图形块描述
 ---@param w number 输出宽度
 ---@param h number 输出高度
-local function paintShape(bb, block, w, h)
+---@param background userdata|nil 绘制主体前的背景副本
+local function paintShape(bb, block, w, h, background)
     local x = block.x or math.floor(w * 0.08)
     local y = block.y or 0
     local width = block.width or (w - x * 2)
@@ -245,6 +246,19 @@ local function paintShape(bb, block, w, h)
     elseif block.kind == "dot" then
         local size = math.max(1, math.floor(tonumber(block.size) or 4))
         paintRect(bb, x, y, size, size, block.color or Blitbuffer.COLOR_BLACK, 0)
+    elseif block.kind == "cutout_circle" then
+        if not background then error("cutout_circle requires background snapshot") end
+        local radius = math.max(1, math.floor(tonumber(block.radius) or 1))
+        local center_x, center_y = math.floor(x), math.floor(y)
+        for dy = -radius, radius do
+            local half = math.floor(math.sqrt(radius * radius - dy * dy))
+            local src_x = math.max(0, center_x - half)
+            local src_y = center_y + dy
+            local span = math.min(w, center_x + half + 1) - src_x
+            if src_y >= 0 and src_y < h and span > 0 then
+                bb:blitFrom(background, src_x, src_y, src_x, src_y, span, 1)
+            end
+        end
     elseif block.kind == "widget" then
         paintWidget(bb, block, w, h)
     end
@@ -273,14 +287,21 @@ function M.write(path, background, blocks)
     Paths.ensureScreensaverDir()
     local w, h = Layout.portraitSize()
     local bb = Blitbuffer.new(w, h, Blitbuffer.TYPE_BB8)
+    local background_copy
     local ok, err = pcall(function()
         local bg_ok, bg_err = paintBackground(bb, background, w, h)
         if not bg_ok then
             error(bg_err)
         end
         for _, block in ipairs(blocks) do
+            if block.kind == "cutout_circle" then
+                background_copy = bb:copy()
+                break
+            end
+        end
+        for _, block in ipairs(blocks) do
             if block.kind then
-                paintShape(bb, block, w, h)
+                paintShape(bb, block, w, h, background_copy)
             else
                 paintText(bb, block, w)
             end
@@ -293,6 +314,7 @@ function M.write(path, background, blocks)
         end
     end)
     freeWidgets(blocks)
+    if background_copy then background_copy:free() end
     bb:free()
     return ok, err
 end
