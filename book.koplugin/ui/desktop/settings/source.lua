@@ -162,32 +162,8 @@ function Source.sections(ctx)
             })
         end
     end
-    if source then
-        extra_rows[#extra_rows + 1] = function(iw)
-            return SettingRow.build(iw, {
-                kind = "action", icon = "sync", title = _("立即同步"),
-                callback = function()
-                    UIManager:show(InfoMessage:new{ text = _("正在同步…"), timeout = 2 })
-                    require("book.sync").runAsync(source, nil, function(result, err)
-                        if desktop._closed then return end
-                        if result then
-                            require("ui.desktop.home").invalidate(desktop)
-                            desktop._library_state = nil
-                            desktop._insight_state = nil
-                            desktop._insight_loaded = false
-                            desktop:rebuild()
-                        end
-                        UIManager:show(InfoMessage:new{
-                            text = result and _("同步完成") or (err and tostring(err) or _("同步失败")),
-                            timeout = 2,
-                        })
-                    end)
-                end,
-            })
-        end
-    end
     if #extra_rows > 0 then
-        sections[#sections + 1] = { title = _("同步与书城"), rows = extra_rows }
+        sections[#sections + 1] = { title = _("书城"), rows = extra_rows }
     end
     return sections
 end
