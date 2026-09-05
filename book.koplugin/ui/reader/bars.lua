@@ -14,14 +14,14 @@ local _ = require("gettext")
 local Screen = Device.screen
 
 local HEADER_FONT_SIZE_DEFAULT = 20
---- CRE 页头 HEADER_MARGIN + 亚像素缝，overlay 多盖一点。
-local TOP_BAND_BLEED = 9
---- 文字向屏幕内侧偏移，避免视觉上贴住上下边缘。
-local EDGE_CONTENT_INSET = 4
---- overlay 顶部额外覆盖的像素数（已按屏幕缩放）。
+--- 比 CRE 原生页头额外增加的固定高度，不跟文档页边距变化。
+local TOP_BAR_EXTRA_HEIGHT = 12
+--- 底栏文字向屏幕内侧偏移，避免视觉上贴住边缘。
+local BOTTOM_CONTENT_INSET = 4
+--- 顶栏额外高度（已按屏幕缩放）。
 ---@return number
-local function bandBleed()
-    return Screen:scaleBySize(TOP_BAND_BLEED)
+local function topBarExtraHeight()
+    return Screen:scaleBySize(TOP_BAR_EXTRA_HEIGHT)
 end
 
 local Bars = {
@@ -288,13 +288,13 @@ function Bars.bottomVisible(ui)
     return Bars.systemBottomVisible(ui)
 end
 
---- 顶栏 overlay 在 ReaderView paintTo 坐标下的 y / 高度（对齐 CRE 页头绘制位置）。
----@param view table|nil
+--- 顶栏 overlay 在 ReaderView paintTo 坐标下的 y / 高度。
+--- ReaderView.state.offset 属于文档可视区，不是状态栏几何，不能混进来。
 ---@param ui table|nil
 ---@param paint_y number
 ---@return number|nil band_y
 ---@return number|nil band_h
-local function topBandGeometry(view, ui, paint_y)
+local function topBandGeometry(ui, paint_y)
     if not Bars.topVisible(ui) then
         return nil, nil
     end
@@ -303,17 +303,7 @@ local function topBandGeometry(view, ui, paint_y)
     if not header_h or header_h <= 0 then
         return nil, nil
     end
-    local y_off = 0
-    if view and view.state and view.state.offset then
-        y_off = tonumber(view.state.offset.y) or 0
-    end
-    if y_off < 0 then
-        y_off = 0
-    end
-  -- 从 ReaderView 顶边铺满到页头下缘，避免 offset 上方与页头底部分缝。
-    local band_y = paint_y
-    local band_h = y_off + header_h + bandBleed()
-    return band_y, band_h
+    return paint_y, header_h + topBarExtraHeight()
 end
 
 --- 底栏 overlay 在 ReaderView paintTo 坐标下的 y / 高度（对齐 BottomContainer 内容区）。
@@ -358,21 +348,7 @@ local function bottomBandGeometry(view, ui, paint_y)
     return band_y, band_h
 end
 
---- 顶栏 overlay 相对 paintTo 原点的垂直偏移（CRE 页头随 state.offset 下移）。
----@param ui table|nil
----@return number
-function Bars.topOffset(ui)
-    if not Bars.topVisible(ui) then
-        return 0
-    end
-    local view = Bars.view or (ui and ui.view)
-    if view and view.state and view.state.offset then
-        return tonumber(view.state.offset.y) or 0
-    end
-    return 0
-end
-
---- 系统顶栏高度（像素）；overlay 未启用时为 0。
+--- Book 顶栏整体高度（像素）；overlay 未启用时为 0。
 ---@param ui table|nil
 ---@return number
 function Bars.topHeight(ui)
@@ -380,7 +356,7 @@ function Bars.topHeight(ui)
         return 0
     end
     ui = ui or Bars.ui
-    return ui.document:getHeaderHeight()
+    return ui.document:getHeaderHeight() + topBarExtraHeight()
 end
 
 --- 顶栏水平内边距（左、右），跟文档页边距一致。
@@ -641,17 +617,17 @@ function Bars:paintTo(bb, x, y)
     local UI = require("ui.components.bookui")
     local Session = require("ui.reader.session")
     local bg = barBackground()
-    local edge_inset = Screen:scaleBySize(EDGE_CONTENT_INSET)
+    local bottom_inset = Screen:scaleBySize(BOTTOM_CONTENT_INSET)
 
     if Bars.topVisible(ui) then
-        local bar_y, bar_h = topBandGeometry(self.view, ui, y)
+        local bar_y, bar_h = topBandGeometry(ui, y)
         if bar_y and bar_h then
             bb:paintRect(x, bar_y, w, bar_h, bg)
             local margin_l, margin_r = topMargins(ui)
             local inner_w = math.max(1, w - margin_l - margin_r)
             local gap = Screen:scaleBySize(4)
-            local text_y = bar_y + Bars.topOffset(ui) + edge_inset
-            local text_h = Bars.topHeight(ui)
+            local text_y = bar_y
+            local text_h = bar_h
             local face = topTextFace(ui, text_h)
 
             local time_text = Bars.timeText()
@@ -681,8 +657,8 @@ function Bars:paintTo(bb, x, y)
         local bottom_y, bar_h = bottomBandGeometry(self.view, ui, y)
         if bottom_y and bar_h then
             -- 内容上移时同时向内扩背景，不能让文字或进度条漏到正文上。
-            bottom_y = bottom_y - edge_inset
-            bb:paintRect(x, bottom_y, w, bar_h + edge_inset, bg)
+            bottom_y = bottom_y - bottom_inset
+            bb:paintRect(x, bottom_y, w, bar_h + bottom_inset, bg)
 
         local margin_l, margin_r = bottomMargins(ui)
         local inner_w = math.max(1, w - margin_l - margin_r)

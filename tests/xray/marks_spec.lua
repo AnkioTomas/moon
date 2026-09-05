@@ -10,7 +10,7 @@ package.preload["utils.settings"] = function()
 end
 local job_runs, job_cancels = 0, 0
 local hold_jobs = false
-package.preload["workers.simple_job"] = function()
+package.preload["workers.job"] = function()
     return {
         run = function(worker, opts)
             job_runs = job_runs + 1
