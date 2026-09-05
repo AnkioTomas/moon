@@ -23,6 +23,7 @@ local chapter_range_html
 local chapter_fetches = 0
 local progress_ui = { shown = 0, closed = 0, progress = {} }
 local remembered_stats_books = {}
+local existing_book
 
 -- 目录缓存 payload 要真解码才能取出 chapter_uid
 stub("json", function()
@@ -36,6 +37,7 @@ end)
 local toc_payload = {}
 stub("db.book", function()
     return {
+        get = function() return existing_book end,
         getToc = function(_, stable_id) return toc_payload[stable_id] end,
         setToc = function(_, stable_id, payload)
             toc_payload[stable_id] = payload
@@ -271,10 +273,11 @@ end
 -- getDetailAsync：wire 经 mapper 转 Book，并把封面 URL 记进缓存供 coverRequest 用
 do
     local src = WeChat.new()
+    existing_book = { percent = 37 }
     fake_client.bookInfoAsync = function(_, book_id, cb)
         Assert.eq(book_id, "b1")
         cb({ book = { bookId = "b1", title = "详情书", author = "某人",
-                      cover = "https://img.weread.qq.com/c.jpg" } })
+                      intro = "完整简介", cover = "https://img.weread.qq.com/c.jpg" } })
         return { cancel = function() end }
     end
     local book, err
@@ -282,6 +285,11 @@ do
     Assert.is_nil(err)
     Assert.eq(book.stable_id, "b1")
     Assert.eq(book.title, "详情书")
+    Assert.eq(book.intro, "完整简介")
+    Assert.eq(book.percent, 37, "详情接口缺进度时必须保留数据库进度")
+    Assert.len(remembered_stats_books, 1)
+    Assert.eq(remembered_stats_books[1].intro, "完整简介",
+        "完整详情必须持久化，不能只活在当前详情页")
     Assert.eq(src:coverRequest(REF).url, "https://img.weread.qq.com/c.jpg")
 
     -- 空 wire → 明确报错而非返回半个 Book
@@ -303,6 +311,7 @@ do
     Assert.is_nil(book)
     Assert.eq(err, "详情拉取失败")
     fake_client.bookInfoAsync = nil
+    existing_book = nil
 end
 
 -- openBookAsync：源自己管理联网/进度 UI，成功首参只返回已入库物理路径。

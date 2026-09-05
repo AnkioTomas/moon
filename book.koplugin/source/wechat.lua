@@ -278,6 +278,9 @@ function Source:getDetailAsync(identity, cb)
             return
         end
         if cover then rememberCover(self, b.stable_id, cover) end
+        local existing = require("db.book").get(self.id, b.stable_id)
+        if existing then b.percent = existing.percent end
+        require("book.store").rememberMany({ b })
         cb(b)
     end)
 end
