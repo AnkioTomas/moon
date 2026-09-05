@@ -109,10 +109,11 @@ end
 
 --- 读 sidecar 前：把全书排版偏好写进本章 sidecar，由原生模块加载
 ---@param doc_settings table
+---@param document table
 ---@return nil
-function BookPlugin:onDocSettingsLoad(doc_settings)
+function BookPlugin:onDocSettingsLoad(doc_settings, document)
     logger.dbg("book lifecycle doc_settings_load")
-    require("book.reader_prefs").inject(doc_settings, self.document)
+    require("book.reader_prefs").inject(doc_settings, document)
 end
 
 --- 阅读器就绪：建阅读会话；统计计时；拉进度；按章落点；挂阅读页

@@ -71,17 +71,6 @@ local function appendRowList(out, width, row_builders)
     end
 end
 
---- 切换设置子页并重建；页码重置到第一页。
----@param desktop table 桌面实例
----@param sub string|nil 子页标识；nil 回到设置主菜单
----@param parent string|nil 返回时的父级子页
-local function gotoSub(desktop, sub, parent)
-    desktop._settings_sub = sub
-    desktop._settings_parent = parent
-    desktop._settings_page = 1
-    desktop:rebuild()
-end
-
 --- 造子页顶部「返回」行的构造器。
 ---@param desktop table 桌面实例
 ---@return fun(iw: number): table
@@ -89,7 +78,7 @@ local function backRow(desktop)
     return function(iw)
         return SettingRow.build(iw, {
             kind = "action", icon = "arrow_back", title = _("返回"),
-            callback = function() gotoSub(desktop, desktop._settings_parent) end,
+            callback = function() desktop:showSettingsSub(desktop._settings_parent) end,
         })
     end
 end
@@ -132,21 +121,21 @@ function Settings.build(desktop)
             function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "source", title = _("数据源"), status = active_name, status_on = true,
-                    callback = function() gotoSub(desktop, "sources") end,
+                    callback = function() desktop:showSettingsSub("sources") end,
                 })
             end,
             function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "menu_book", title = _("阅读"),
                     status_on = true,
-                    callback = function() gotoSub(desktop, "reader") end,
+                    callback = function() desktop:showSettingsSub("reader") end,
                 })
             end,
             function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "display_settings", title = _("显示"),
                     status = string.format("%d%%", scale), status_on = true,
-                    callback = function() gotoSub(desktop, "display") end,
+                    callback = function() desktop:showSettingsSub("display") end,
                 })
             end,
             function(iw)
@@ -154,21 +143,21 @@ function Settings.build(desktop)
                     kind = "nav", icon = "wallpaper", title = _("锁屏"),
                     status = LockSettings.isCompose() and _("开") or _("关"),
                     status_on = LockSettings.isCompose(),
-                    callback = function() gotoSub(desktop, "lockscreen") end,
+                    callback = function() desktop:showSettingsSub("lockscreen") end,
                 })
             end,
             function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "desktop_windows", title = _("桌面"),
                     status = open_on and _("开") or _("关"), status_on = open_on,
-                    callback = function() gotoSub(desktop, "desktop") end,
+                    callback = function() desktop:showSettingsSub("desktop") end,
                 })
             end,
             function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "language", title = _("语言与输入"),
                     status = require("ui/language"):getLanguageName(G_reader_settings:readSetting("language") or "C"),
-                    status_on = true, callback = function() gotoSub(desktop, "language") end,
+                    status_on = true, callback = function() desktop:showSettingsSub("language") end,
                 })
             end,
             function(iw)
@@ -177,21 +166,21 @@ function Settings.build(desktop)
                     kind = "nav", icon = "psychology", title = _("AI 服务"),
                     status = configured and MoonSettings.get().ai_model or _("未配置"),
                     status_on = configured,
-                    callback = function() gotoSub(desktop, "ai") end,
+                    callback = function() desktop:showSettingsSub("ai") end,
                 })
             end,
             function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "folder", title = _("远程管理"),
                     status = Remote.isRunning() and _("运行中") or nil, status_on = Remote.isRunning(),
-                    callback = function() gotoSub(desktop, "remote") end,
+                    callback = function() desktop:showSettingsSub("remote") end,
                 })
             end,
             function(iw)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "dashboard_customize", title = _("快捷面板"),
                     status = T(_("已启用 %1 项"), QuickPanel.enabledCount()), status_on = true,
-                    callback = function() gotoSub(desktop, "quickpanel") end,
+                    callback = function() desktop:showSettingsSub("quickpanel") end,
                 })
             end,
             Maintenance.cacheRow(desktop),

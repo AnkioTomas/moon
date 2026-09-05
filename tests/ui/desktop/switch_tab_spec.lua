@@ -1,4 +1,4 @@
---[[-- 桌面切换统计 Tab 时必须废弃旧统计缓存。 --]]
+--[[-- 桌面 Tab 与设置子页导航状态。 --]]
 
 local Assert = require("support.assert")
 
@@ -59,4 +59,15 @@ Assert.eq(desktop._insight_ui_page, 1)
 Assert.is_nil(desktop._insight_state)
 Assert.is_false(desktop._insight_loaded)
 Assert.eq(rebuilds, 1)
+
+Desktop.showSettingsSub(desktop, "home", "desktop")
+Assert.eq(desktop._settings_sub, "home")
+Assert.eq(desktop._settings_parent, "desktop")
+Assert.eq(desktop._settings_page, 1)
+Assert.eq(rebuilds, 2)
+
+Desktop.showSettingsSub(desktop, nil)
+Assert.is_nil(desktop._settings_sub)
+Assert.is_nil(desktop._settings_parent)
+Assert.eq(rebuilds, 3)
 

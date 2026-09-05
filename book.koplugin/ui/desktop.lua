@@ -333,6 +333,16 @@ function Desktop:switchTab(id)
     self:rebuild()
 end
 
+--- 切换设置子页并重建；页码重置到第一页。
+---@param sub string|nil 子页标识；nil 回到设置主菜单
+---@param parent string|nil 返回时的父级子页
+function Desktop:showSettingsSub(sub, parent)
+    self._settings_sub = sub
+    self._settings_parent = parent
+    self._settings_page = 1
+    self:rebuild()
+end
+
 -- 各 Tab 的在飞取数任务；换源和关桌面都必须全部取消（漏一个就是关了页还在跑网络+写库）
 local FETCH_JOB_KEYS = {
     "_home_fetch_cancel",
