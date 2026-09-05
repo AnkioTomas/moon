@@ -112,14 +112,33 @@ end
 ---@param document table
 ---@return nil
 function BookPlugin:onDocSettingsLoad(doc_settings, document)
-    logger.dbg("book lifecycle doc_settings_load")
-    require("book.reader_prefs").inject(doc_settings, document)
+    local font_id = doc_settings:readSetting("book_reader_font_id")
+    local font_face = doc_settings:readSetting("font_face")
+    local injected = require("book.reader_prefs").inject(doc_settings, document)
+    logger.dbg(
+        "book font doc_settings_load",
+        document and document.file or "",
+        "font_id=" .. tostring(font_id),
+        "font_face=" .. tostring(font_face),
+        "injected=" .. tostring(injected),
+        "loaded_font_id=" .. tostring(doc_settings:readSetting("book_reader_font_id")),
+        "loaded_font_face=" .. tostring(doc_settings:readSetting("font_face"))
+    )
 end
 
 --- 阅读器就绪：建阅读会话；统计计时；拉进度；按章落点；挂阅读页
 ---@return nil
 function BookPlugin:onReaderReady()
-    logger.info("book lifecycle reader_ready")
+    local ui = self.ui
+    local doc_settings = ui and ui.doc_settings
+    logger.info(
+        "book font reader_ready",
+        ui and ui.document and ui.document.file or "",
+        "font_id=" .. tostring(doc_settings and doc_settings:readSetting("book_reader_font_id")),
+        "sidecar_font_face=" .. tostring(doc_settings and doc_settings:readSetting("font_face")),
+        "reader_font_face=" .. tostring(ui and ui.font and ui.font.font_face),
+        "global_font_face=" .. tostring(G_reader_settings:readSetting("cre_font"))
+    )
     require("ui.reader.session").onReaderReady(self)
 end
 

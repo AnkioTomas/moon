@@ -76,7 +76,11 @@ Assert.is_true(saved.footnote_link_in_popup)
 Assert.is_true(saved.book_footnote_popup_initialized)
 Assert.eq(calls.screenshot_share, 1)
 
-local doc_settings, document = {}, {}
+local doc_settings = {
+    data = {},
+    readSetting = function(self, key) return self.data[key] end,
+}
+local document = {}
 plugin:onDocSettingsLoad(doc_settings, document)
 Assert.eq(calls.doc_settings, doc_settings)
 Assert.eq(calls.document, document)

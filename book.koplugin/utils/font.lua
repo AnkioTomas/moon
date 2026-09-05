@@ -495,7 +495,15 @@ function MoonFont.faceForId(id)
         return nil, _("应用字体失败")
     end
     local cre = require("document/credocument"):engineInit()
-    pcall(cre.registerFont, path)
+    local registered, register_err = pcall(cre.registerFont, path)
+    logger.dbg(
+        "book font register",
+        "id=" .. tostring(id),
+        "path=" .. path,
+        "face=" .. info[1].name,
+        "registered=" .. tostring(registered),
+        "error=" .. tostring(register_err)
+    )
     return info[1].name
 end
 
@@ -563,11 +571,19 @@ function MoonFont.applyToReader(ui, id, name)
     end
     local face, err = MoonFont.faceForId(id)
     if not face then
+        logger.warn("book font apply resolve failed", "id=" .. tostring(id), "error=" .. tostring(err))
         return nil, err
     end
     if not MoonFont.applyFaceToReader(ui, face, id, name) then
+        logger.warn("book font apply failed", "id=" .. tostring(id), "face=" .. face)
         return nil, _("应用字体失败")
     end
+    logger.dbg(
+        "book font applied",
+        ui.document and ui.document.file or "",
+        "id=" .. tostring(id),
+        "face=" .. face
+    )
     require("book.reader_prefs").captureAndSave(ui)
     require("ui/uimanager"):setDirty(ui.dialog, "ui")
     return true
