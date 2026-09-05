@@ -97,22 +97,30 @@ local function downloadAndSave(opts, item)
     local id, name = item.id or "", item.name or item.id or ""
     local zip_max = tonumber(item.zip_size) or 0
     local dialog
+    local install_job
+    local cancelled = false
     local ok_dlg, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
     if ok_dlg and ProgressbarDialog then
         dialog = ProgressbarDialog:new{
             title = T(_("正在下载字体 %1"), name),
             subtitle = zip_max > 0 and string.format("%.1fMB", zip_max / (1024 * 1024)) or _("请稍候…"),
             progress_max = zip_max > 0 and zip_max or nil,
-            refresh_time_seconds = 0.1,
-            dismissable = false,
+            refresh_time_seconds = 0.5,
+            dismissable = true,
         }
+        dialog.dismiss_callback = function()
+            cancelled = true
+            if install_job then install_job.cancel() end
+        end
         dialog:show()
     end
-    MoonFont.ensureInstalledAsync(item, function(bytes)
-        if dialog and zip_max > 0 then dialog:reportProgress(bytes) end
+    install_job = MoonFont.ensureInstalledAsync(item, function(bytes)
+        if not cancelled and dialog and zip_max > 0 then dialog:reportProgress(bytes) end
     end, function(ok, err)
+        if cancelled then return end
         if dialog then
             if ok and zip_max > 0 then dialog:reportProgress(zip_max) end
+            dialog.dismiss_callback = nil
             dialog:close()
         end
         if ok then

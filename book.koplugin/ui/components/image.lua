@@ -52,6 +52,8 @@ local EXTS = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg" }
 local dl_seq = 0
 local decode_seq = 0
 local jobs = {}
+local decode_queue = {}
+local decode_active
 
 --- 登记在飞下载 job（{ cancel }）。
 ---@param job table|nil
@@ -256,21 +258,32 @@ local function readDecodedFile(raw)
     return data
 end
 
---- 在子进程解码图片为定尺寸 BB，序列化落中间文件后回主进程。
----@param path string
----@param w number
----@param h number
----@param alpha boolean|nil
----@param cb fun(widget: table|nil)
----@return table 可 abort 的 job
-local function decodeAsync(path, w, h, alpha, cb)
-    local cancelled = false
+--- 串行启动图片解码。fork 本身发生在 UI 线程；批量图片若同时启动会卡死低性能设备。
+local function pumpDecodeQueue()
+    if decode_active then return end
+    while decode_queue[1] and decode_queue[1].cancelled do
+        table.remove(decode_queue, 1)
+    end
+    local task = table.remove(decode_queue, 1)
+    if not task then return end
+    decode_active = task
     Paths.ensureCacheRoot()
     local tmp = decodeTmpPath()
-    local job = Job.run(function()
+    task.tmp = tmp
+
+    local function finish(widget)
+        if decode_active ~= task then return end
+        decode_active = nil
+        task.job = nil
+        task.done = true
+        if not task.cancelled then task.cb(widget) end
+        pumpDecodeQueue()
+    end
+
+    task.job = Job.run(function()
         local RenderImage = require("ui/renderimage")
         local Blitbuffer = require("ffi/blitbuffer")
-        local bb = RenderImage:renderImageFile(path, false, w, h)
+        local bb = RenderImage:renderImageFile(task.path, false, task.w, task.h)
         if not bb then
             return nil
         end
@@ -291,21 +304,46 @@ local function decodeAsync(path, w, h, alpha, cb)
     end, {
         name = "image.decode",
         on_done = function(result)
-            if not cancelled then
-                cb(result and unmarshal(readDecodedFile(result), alpha) or nil)
-            end
+            finish(result and unmarshal(readDecodedFile(result), task.alpha) or nil)
         end,
         on_failed = function()
-            if not cancelled then
-                cb(nil)
-            end
+            os.remove(tmp)
+            finish(nil)
+        end,
+        on_cancelled = function()
+            os.remove(tmp)
+            finish(nil)
         end,
     })
+end
+
+--- 在子进程解码图片为定尺寸 BB，序列化落中间文件后回主进程。
+--- 解码任务全局串行，避免一页图片同时 fork、争抢 CPU 并饿死 UI 事件循环。
+---@param path string
+---@param w number
+---@param h number
+---@param alpha boolean|nil
+---@param cb fun(widget: table|nil)
+---@return table 可 abort 的 job
+local function decodeAsync(path, w, h, alpha, cb)
+    local task = {
+        path = path,
+        w = w,
+        h = h,
+        alpha = alpha,
+        cb = cb,
+    }
+    decode_queue[#decode_queue + 1] = task
+    pumpDecodeQueue()
     return {
         abort = function()
-            cancelled = true
-            job:abort()
-            os.remove(tmp)
+            if task.done or task.cancelled then return end
+            task.cancelled = true
+            if decode_active == task and task.job then
+                task.job:abort()
+            elseif not decode_active then
+                pumpDecodeQueue()
+            end
         end,
     }
 end
