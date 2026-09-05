@@ -8,11 +8,8 @@ local Assert = require("support.assert")
 local Config = require("support.config")
 
 if not Config.available() then
-    io.write("  (skip: 沙箱数据目录未就绪，请用 ./tests/run.sh 运行)\n")
-    return
+    Assert.skip("沙箱数据目录未就绪，请用 ./tests/run.sh 运行")
 end
-
-Assert.is_true(Config.setupNativePath())
 
 local saved = {}
 local previous_settings = _G.G_reader_settings

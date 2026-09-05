@@ -140,7 +140,7 @@ do
                     ["1767225600"] = 3600,
                 },
             })
-        elseif mode == "annually" and base_time == 1_735_689_600 then
+        elseif mode == "annually" and base_time == 1735689600 then
             cb({
                 baseTime = base_time,
                 readTimes = { [tostring(base_time)] = 900 },
@@ -171,7 +171,7 @@ do
     Assert.eq(requests[2][1], "annually")
     Assert.eq(requests[3][1], "annually")
     Assert.eq(requests[4][1], "monthly")
-    Assert.eq(requests[4][2], 1_735_689_600)
+    Assert.eq(requests[4][2], 1735689600)
     Assert.eq(requests[5][1], "weekly")
     Assert.eq(requests[6][1], "weekly")
     Assert.not_nil(requests[2][2])

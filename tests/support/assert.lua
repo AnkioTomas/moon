@@ -11,8 +11,15 @@ local Assert = {}
 --- 当前文件的断言计数（runner 每 spec 前 reset_count）
 Assert.count = 0
 
+Assert.SKIP_PREFIX = "__BOOK_TEST_SKIP__:"
+
 function Assert.reset_count()
     Assert.count = 0
+end
+
+---@param reason string
+function Assert.skip(reason)
+    error(Assert.SKIP_PREFIX .. tostring(reason), 0)
 end
 
 local function bump()

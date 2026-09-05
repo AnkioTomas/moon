@@ -9,8 +9,7 @@ local Config = require("support.config")
 local Stubs = require("support.stubs")
 
 if not Config.available() then
-    io.write("  (skip: 沙箱数据目录未就绪，请用 ./tests/run.sh 运行)\n")
-    return
+    Assert.skip("沙箱数据目录未就绪，请用 ./tests/run.sh 运行")
 end
 
 local Settings = Config.settings()

@@ -7,7 +7,7 @@ do
     local result = Stats.fromWires("wechat", {
         totalReadTime = 7200,
     }, { {
-        baseTime = 1_704_067_200,
+        baseTime = 1704067200,
         readTimes = {
             ["1704067200"] = 9999,
             ["1704240000"] = 8888,
@@ -20,7 +20,7 @@ do
             { book = { bookId = "42" }, readTime = 1500 },
         },
     } }, nil, { {
-        baseTime = 1_704_067_200,
+        baseTime = 1704067200,
         readLongest = {
             { book = { bookId = "42", title = "测试书" }, readTime = 1500 },
         },
@@ -44,8 +44,8 @@ do
 end
 
 do
-    local january = 1_704_067_200
-    local february = 1_706_745_600
+    local january = 1704067200
+    local february = 1706745600
     local annual = {
         readTimes = {
             [tostring(january)] = 1200,
