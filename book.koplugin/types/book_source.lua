@@ -87,11 +87,13 @@ end
 ---@field id number|nil 本地 reading_stats 行 id（push 时由调用方带入，供 synced_ids 回报）
 ---@field source_id string 源标识
 ---@field stable_id string 源内书籍身份
----@field record_type string 记录类型：page/day/book/total
+---@field record_type string 记录类型：page/page_rollup/day/book/total
 ---@field page number 结束页
 ---@field start_time number 会话开始时间戳（秒）
 ---@field duration number 阅读时长（秒）
 ---@field total_pages number 全书页数
+---@field event_count number|nil 汇总行包含的原始页事件数
+---@field last_time number|nil 汇总行中最后一条原始事件时间
 
 --- pullStatsAsync 可选替换范围：入库前删除本地已同步行，避免云端聚合与本地页记录双计。
 ---@class BookStatsPullReplaceRange

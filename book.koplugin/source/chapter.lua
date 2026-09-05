@@ -16,18 +16,6 @@ local Chapter = {}
 local lfs = require("libs/libkoreader-lfs")
 local ready_cache = {}
 
---- 读取整个文件的字节；路径无效或打不开返回 nil。
----@param path string|nil
----@return string|nil
-local function readFile(path)
-    if type(path) ~= "string" or path == "" then return nil end
-    local f = io.open(path, "rb")
-    if not f then return nil end
-    local data = f:read("*a")
-    f:close()
-    return data
-end
-
 --- 章节 HTML 是否可直接复用（存在且远程 img 已内联）。
 ---@param path string|nil
 ---@return boolean
@@ -45,12 +33,12 @@ local function chapterReady(path)
     if cached and cached.signature == signature then
         return cached.ready
     end
-    local html = readFile(path)
-    if not html or html == "" then
+    local has_remote = Text.hasRemoteImageSrcInFile(path)
+    if has_remote == nil then
         ready_cache[path] = { signature = signature, ready = false }
         return false
     end
-    local ready = not Text.hasRemoteImageSrc(html)
+    local ready = not has_remote
     ready_cache[path] = { signature = signature, ready = ready }
     return ready
 end

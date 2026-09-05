@@ -3,8 +3,12 @@
 local Assert = require("support.assert")
 
 local calls = {}
+local fail_commit = false
 local connection = {
-    exec = function(connection, sql) calls[#calls + 1] = { sql = sql, args = {} } end,
+    exec = function(connection, sql)
+        calls[#calls + 1] = { sql = sql, args = {} }
+        if fail_commit and sql == "COMMIT;" then error("commit failed") end
+    end,
     close = function() end,
     prepare = function(connection, sql)
         local call = { sql = sql }
@@ -46,3 +50,7 @@ Assert.eq(call.args[4], "Mina")
 Assert.eq(call.args[5], "A、B")
 Assert.eq(call.args[6], "hero")
 Assert.eq(call.args[7], "brave")
+
+fail_commit = true
+Assert.is_false(XrayDB.replace("moon", "b1", {}))
+Assert.eq(calls[#calls].sql, "ROLLBACK;")

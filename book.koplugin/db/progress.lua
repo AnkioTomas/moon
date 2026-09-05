@@ -253,13 +253,13 @@ end
 ---@return boolean
 function ProgressDB.markSynced(source_id, stable_id, updated_at)
     updated_at = tonumber(updated_at)
-    return Base.exec(
+    return Base.execChanged(
         [[UPDATE pending_progress SET sync_status=1
           WHERE source_id=? AND stable_id=? AND updated_at=?;]],
         source_id,
         stable_id,
         updated_at
-    ) ~= nil
+    )
 end
 
 return ProgressDB

@@ -67,6 +67,7 @@ end
 local book_rows_by_path = {} -- path → books 行
 local book_rows_by_id = {} -- "sid\0stid" → books 行
 local book_upserts = {}
+local book_batch_calls = 0
 local touch_calls = {} -- { source_id, stable_id, path, chapter_idx }
 local touch_ok = true
 package.preload["db.book"] = function()
@@ -83,6 +84,11 @@ package.preload["db.book"] = function()
         end,
         upsertRemote = function(row)
             book_upserts[#book_upserts + 1] = row
+            return true
+        end,
+        upsertRemoteMany = function(rows)
+            book_batch_calls = book_batch_calls + 1
+            for _, row in ipairs(rows) do book_upserts[#book_upserts + 1] = row end
             return true
         end,
         getToc = function(source_id, stable_id)
@@ -432,7 +438,9 @@ do
     Assert.eq(book_upserts[1].cover, "https://img.test/a.jpg")
     Assert.is_true(type(book_upserts[1].fetched_at) == "number")
     Assert.is_nil(book_upserts[1].path) -- path 由 touchPath 单独维护
+    Assert.eq(book_batch_calls, 1)
     book_upserts = {}
+    book_batch_calls = 0
 end
 
 -- ── rememberMany：全部无身份 → 一条都不写 ────────────────
@@ -440,6 +448,7 @@ do
     Store.rememberMany({ { title = "x" }, { title = "y" } })
     Store.rememberMany({})
     Assert.eq(#book_upserts, 0)
+    Assert.eq(book_batch_calls, 0)
 end
 
 for _, k in ipairs({

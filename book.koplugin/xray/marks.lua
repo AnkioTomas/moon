@@ -17,6 +17,8 @@ local Marks = {
     _render_key = nil,
     _revision = 0,
     _scan_pending = nil,
+    _entity_cache_key = nil,
+    _entity_cache = nil,
 }
 
 --- 页内实体标记是否开启。
@@ -49,7 +51,13 @@ local function loadEntities()
     if not identity then
         return {}
     end
-    return require("db.xray").list(identity.source_id, identity.stable_id)
+    local key = identity.source_id .. "\0" .. identity.stable_id
+        .. "\0" .. tostring(Marks._revision)
+    if Marks._entity_cache_key ~= key then
+        Marks._entity_cache_key = key
+        Marks._entity_cache = require("db.xray").list(identity.source_id, identity.stable_id)
+    end
+    return Marks._entity_cache
 end
 
 ---@param ui table
@@ -214,9 +222,8 @@ end
 
 --- 当前视口缓存键：身份 + 实体修订号 + 屏幕尺寸 + 实时页码/滚动位置。
 ---@param ui table
----@param entities table[]
 ---@return string|nil 无阅读会话时 nil
-local function renderKey(ui, entities)
+local function renderKey(ui)
     local cur = require("ui.reader.session").current()
     if not cur or not cur.identity then
         return nil
@@ -230,7 +237,7 @@ local function renderKey(ui, entities)
     end
     return table.concat({
         cur.identity.source_id, cur.identity.stable_id,
-        tostring(cur.identity.chapter_idx or 0), tostring(#entities), tostring(Marks._revision),
+        tostring(cur.identity.chapter_idx or 0), tostring(Marks._revision),
         tostring(w or 0), tostring(h or 0), tostring(currentPage(ui)), pos,
     }, "\0")
 end
@@ -249,13 +256,13 @@ local function scheduleScan(self, key, entities)
         if self._scan_pending ~= key or self.ui ~= ui then
             return
         end
-        if not Marks.enabled() or renderKey(ui, entities) ~= key then
+        if not Marks.enabled() or renderKey(ui) ~= key then
             if self._scan_pending == key then self._scan_pending = nil end
             return
         end
         local marks = scanVisibleMarks(ui, entities)
         if self._scan_pending ~= key or self.ui ~= ui
-            or not Marks.enabled() or renderKey(ui, entities) ~= key then
+            or not Marks.enabled() or renderKey(ui) ~= key then
             return
         end
         self._scan_pending = nil
@@ -282,6 +289,8 @@ end
 --- 丢弃当前页缓存并重绘阅读视图（实体增删改或开关变化后调用）。
 function Marks.invalidate()
     Marks._revision = Marks._revision + 1
+    Marks._entity_cache_key = nil
+    Marks._entity_cache = nil
     resetMarks(Marks)
     if Marks.ui and Marks.ui.dialog then
         UIManager:setDirty(Marks.ui.dialog, "ui")
@@ -297,8 +306,7 @@ function Marks:rebuild()
         resetMarks(self)
         return
     end
-    local entities = loadEntities()
-    local key = renderKey(self.ui, entities)
+    local key = renderKey(self.ui)
     if not key then
         resetMarks(self)
         return
@@ -306,6 +314,7 @@ function Marks:rebuild()
     if key == self._render_key or key == self._scan_pending then
         return
     end
+    local entities = loadEntities()
     self._marks = {}
     self._render_key = nil
     scheduleScan(self, key, entities)

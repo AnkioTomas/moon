@@ -1,6 +1,7 @@
 --[[-- utils.text：trim / 斜杠 / BOM / 换行 / XML 转义解码 / URL 与 form 编码 / 文本段落化 --]]
 
 local Assert = require("support.assert")
+local Config = require("support.config")
 
 local Text = require("utils.text")
 
@@ -126,6 +127,19 @@ do
     Assert.is_false(Text.hasRemoteImageSrc('<img src="foo.jpg"/>'))
     Assert.is_false(Text.hasRemoteImageSrc("https://cdn/x.png"))
     Assert.is_false(Text.hasRemoteImageSrc(nil))
+
+    local remote_path = Config.dir() .. "/remote-image-boundary.html"
+    local file = assert(io.open(remote_path, "wb"))
+    file:write(string.rep("x", 64 * 1024 - 2), [[src="https://cdn/x.png">]])
+    file:close()
+    Assert.is_true(Text.hasRemoteImageSrcInFile(remote_path))
+    pcall(os.remove, remote_path)
+
+    local empty_path = Config.dir() .. "/empty-chapter.html"
+    file = assert(io.open(empty_path, "wb"))
+    file:close()
+    Assert.is_nil(Text.hasRemoteImageSrcInFile(empty_path))
+    pcall(os.remove, empty_path)
 
     Assert.eq(Text.htmlBodyFragment('<html><head><title>x</title></head><body><p>hi</p></body></html>'), "<p>hi</p>")
     Assert.eq(Text.htmlBodyFragment('<html><body>title</body></html><html><body><p>main</p></body></html>'), "title\n<p>main</p>")

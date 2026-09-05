@@ -72,6 +72,10 @@ local function makeConn(opts)
     opts = opts or {}
     local calls = {}
     local connection = {
+        rowexec = function()
+            if opts.changes then return opts.changes() end
+            return 1
+        end,
         exec = function(_, sql)
             calls[#calls + 1] = { sql = sql, argc = 0, args = {} }
             if opts.exec then
@@ -353,6 +357,17 @@ do
 
     local before = #calls
     Assert.eq(#calls, before)
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── markSynced：revision 已过期时零行更新必须失败 ─────────
+do
+    local connection = makeConn({ changes = function() return 0 end })
+    local DbBase, ProgressDB = loadProgress(connection)
+
+    Assert.is_false(ProgressDB.markSynced("moon", "a.epub", 1234))
 
     DbBase.close()
     clearMods()

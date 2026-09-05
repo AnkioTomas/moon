@@ -346,51 +346,48 @@ end
 --- 否则才是真新书。
 ---@param files table[] parseFile 产物
 ---@param known table<string, Book>
-local function commitFiles(files, known)
+---@param full_snapshot boolean|nil
+---@return boolean
+local function commitFiles(files, known, full_snapshot)
     local BookDB = require("db.book")
     for _, f in ipairs(files) do
         local cached = known[f.path]
-        if cached then
-            if cached.in_library == false then
-                BookDB.setLibraryMembership(SOURCE_ID, f.path, true)
-            end
-        else
+        local existing = cached
+        local renamed = false
+        if not cached then
             local by_md5 = f.md5 and BookDB.getByMd5(SOURCE_ID, f.md5)
             if by_md5 and by_md5.stable_id ~= f.path then
-                BookDB.renameStableId(SOURCE_ID, by_md5.stable_id, f.path, f.category, f.series)
+                existing = by_md5
+                if not BookDB.renameStableId(
+                    SOURCE_ID, by_md5.stable_id, f.path, f.category, f.series
+                ) then
+                    return false
+                end
                 moveBookArtifacts(by_md5.stable_id, f.path)
-            else
-                BookDB.upsert({
-                    source_id = SOURCE_ID,
-                    stable_id = f.path,
-                    md5 = f.md5,
-                    title = f.title,
-                    authors = f.authors,
-                    intro = f.intro,
-                    category = f.category,
-                    series = f.series,
-                    fetched_at = os.time(),
-                    path = f.path,
-                })
+                renamed = true
             end
         end
-    end
-end
-
---- 扫描后隐藏失效书籍并清路径，身份、进度、笔记、统计和封面缓存保留。
---- 改名/移动的书已在 commitFiles 里原地更新 stable_id，这里的 keep 集合天然包含它们。
----@param files table[]
-local function pruneMissing(files)
-    local keep = {}
-    for _, f in ipairs(files) do
-        keep[f.path] = true
-    end
-    local BookDB = require("db.book")
-    for _, stable_id in ipairs(BookDB.stableIdsBySource(SOURCE_ID)) do
-        if not keep[stable_id] then
-            BookDB.setLibraryMembership(SOURCE_ID, stable_id, false, true)
+        if full_snapshot then
+            f.source_id = SOURCE_ID
+            f.stable_id = f.path
+            f.in_library = true
+            f.percent = existing and existing.percent or 0
+        elseif cached then
+            if cached.in_library == false
+                and not BookDB.setLibraryMembership(SOURCE_ID, f.path, true) then
+                return false
+            end
+        elseif not renamed and not BookDB.upsert({
+            source_id = SOURCE_ID, stable_id = f.path, md5 = f.md5,
+            title = f.title, authors = f.authors, intro = f.intro,
+            category = f.category, series = f.series,
+            fetched_at = os.time(), path = f.path,
+        }) then
+            return false
         end
     end
+    return not full_snapshot
+        or BookDB.reconcile(SOURCE_ID, files, { clear_missing_paths = true })
 end
 
 --- 扫盘任务：遍历与解析在子进程，落库在主进程，cancel 杀子进程。
@@ -411,9 +408,12 @@ local function scanJob(root, on_done)
             files[#files + 1] = f
         end,
         on_done = function()
-            commitFiles(files, known)
-            pruneMissing(files)
-            on_done()
+            if commitFiles(files, known, true) then
+                on_done()
+            else
+                require("utils.log").warn("book local scan commit failed")
+                on_done("failed to commit local scan")
+            end
         end,
         on_failed = function(err)
             require("utils.log").warn("book local scan failed", err)
@@ -682,8 +682,11 @@ function Client:indexOneAsync(path, cb)
     end, {
         name = "local.index",
         on_done = function(f)
-            commitFiles({ f }, known)
-            cb(true)
+            if commitFiles({ f }, known) then
+                cb(true)
+            else
+                cb(nil, "failed to commit local book")
+            end
         end,
         on_failed = function(err)
             require("utils.log").warn("book local index failed", err)
@@ -709,8 +712,8 @@ function Client:scanAsync(cb)
         return nil
     end
     local root = rootPath(self.cfg)
-    return scanJob(root, function()
-        cb(true)
+    return scanJob(root, function(scan_err)
+        cb(scan_err == nil, scan_err)
     end)
 end
 
@@ -760,8 +763,8 @@ function Client:autoScanAsync(cb)
         return nil
     end
     local root = rootPath(self.cfg)
-    return scanJob(root, function()
-        cb(true)
+    return scanJob(root, function(scan_err)
+        cb(scan_err == nil)
     end)
 end
 

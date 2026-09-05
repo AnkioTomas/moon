@@ -270,6 +270,26 @@ package.preload["db.book"] = function()
             if not in_library then removed[#removed + 1] = stable_id end
             return true
         end,
+        reconcile = function(source_id, rows, opts)
+            local keep = {}
+            for _, row in ipairs(rows) do
+                keep[row.stable_id] = true
+                local old = db_rows[rowKey(source_id, row.stable_id)] or {}
+                for key, value in pairs(row) do old[key] = value end
+                old.source_id = source_id
+                old.in_library = true
+                db_rows[rowKey(source_id, row.stable_id)] = old
+                upserts[#upserts + 1] = row
+            end
+            for _, row in pairs(db_rows) do
+                if row.source_id == source_id and not keep[row.stable_id] then
+                    row.in_library = false
+                    if opts and opts.clear_missing_paths then row.path = nil end
+                    removed[#removed + 1] = row.stable_id
+                end
+            end
+            return true
+        end,
         listBySource = stubListBySource,
         categoriesBySource = function(source_id)
             local seen, out = {}, {}
@@ -527,6 +547,7 @@ do
     Stubs.flush()
     Assert.len(opened, 5)
     Assert.eq(props_read, 5)
+    db_rows[rowKey("local", "/books/a.epub")].percent = 42
 
     opened = {}
     upserts = {}
@@ -538,7 +559,8 @@ do
     Assert.len(opened, 5)
     Assert.eq(props_read, 5)
     Assert.len(covers_saved, 5)
-    Assert.len(upserts, 0)
+    Assert.len(upserts, 6) -- 缓存命中不重解析，但完整快照仍批量恢复书架成员
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].percent, 42)
 
     -- 非 force 纯查库
     dirs_scanned = {}

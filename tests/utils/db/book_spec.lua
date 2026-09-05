@@ -120,11 +120,17 @@ do
         end,
     })
     local DbBase = loadBook(connection)
-    local alters = 0
+    local alters = {}
     for _, call in ipairs(calls) do
-        if call.sql == "ALTER TABLE books ADD COLUMN cover TEXT;" then alters = alters + 1 end
+        local name = call.sql:match("^ALTER TABLE books ADD COLUMN ([%w_]+)")
+        if name then alters[name] = true end
     end
-    Assert.eq(alters, 1)
+    for _, name in ipairs({
+        "cover", "in_library", "metadata_dirty", "metadata_updated_at",
+        "reader_prefs", "toc", "toc_fetched_at",
+    }) do
+        Assert.is_true(alters[name], "旧库必须补列: " .. name)
+    end
     DbBase.close()
     clearMods()
 end
@@ -245,6 +251,32 @@ do
     clearMods()
 end
 
+-- ── upsertRemoteMany：普通缓存与显式书架成员关系不能混写 ──
+do
+    local connection, calls = makeConn()
+    local DbBase, BookDB = loadBook(connection)
+    local before = #calls
+
+    Assert.is_true(BookDB.upsertRemoteMany({
+        { source_id = "moon", stable_id = "cache.epub" },
+        { source_id = "moon", stable_id = "hidden.epub", in_library = false },
+    }))
+    local inserts = {}
+    for i = before + 1, #calls do
+        if calls[i].sql:find("INSERT INTO books", 1, true) then
+            inserts[#inserts + 1] = calls[i]
+        end
+    end
+    Assert.eq(#inserts, 2)
+    Assert.eq(inserts[1].argc, 13)
+    Assert.is_true(inserts[1].sql:find("in_library=excluded.in_library", 1, true) ~= nil)
+    Assert.eq(inserts[2].argc, 12)
+    Assert.is_true(inserts[2].sql:find("in_library=excluded.in_library", 1, true) == nil)
+
+    DbBase.close()
+    clearMods()
+end
+
 -- ── reconcile：先 upsert 快照，再把 fetched_at 未刷新的成员标 inactive ──
 do
     local connection, calls = makeConn()
@@ -256,20 +288,20 @@ do
     local deactivate, inserts, commit = 0, 0, false
     for _, call in ipairs(calls) do
         if call.sql:find("UPDATE books SET in_library=0", 1, true)
-            and call.sql:find("fetched_at<?", 1, true) then
+            and call.sql:find("source_id=? AND in_library=1", 1, true) then
             deactivate = deactivate + 1
         end
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
-            Assert.eq(call.argc, 24) -- 2 行 × 12 个绑定参数，in_library 由 SQL 常量置 1
+            Assert.eq(call.argc, 26) -- 2 行 × 13 个绑定参数，显式携带书架成员关系
             Assert.is_true(call.sql:find("COALESCE(excluded.intro, books.intro)", 1, true) ~= nil,
                 "书架批量对账不得用 NULL 清空已有简介")
             -- NULL 列不得让后续列左移：md5 为空时 title 仍在第 4 位
             Assert.eq(call.args[1], "moon")
             Assert.is_nil(call.args[3])
             Assert.eq(call.args[4], "A")
-            Assert.eq(call.args[13], "moon") -- 未带 source_id 的行也归到本源
-            Assert.eq(call.args[16], "B")
+            Assert.eq(call.args[14], "moon") -- 未带 source_id 的行也归到本源
+            Assert.eq(call.args[17], "B")
         end
         if call.sql == "COMMIT;" then commit = true end
     end
@@ -293,7 +325,7 @@ do
     for _, call in ipairs(calls) do
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
-            Assert.is_true(call.argc == 96 or call.argc == 12) -- 8/1 行 × 12 个绑定参数
+            Assert.is_true(call.argc == 104 or call.argc == 13) -- 8/1 行 × 13 个绑定参数
         end
     end
     Assert.eq(inserts, 2)
@@ -578,6 +610,26 @@ do
         end
     end
     Assert.eq(updates, 3)
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── renameStableId：COMMIT 失败不得谎报成功 ───────────────
+do
+    local commits = 0
+    local connection, calls = makeConn({
+        exec = function(sql)
+            if sql == "COMMIT;" then
+                commits = commits + 1
+                if commits == 2 then error("commit failed") end
+            end
+        end,
+    })
+    local DbBase, BookDB = loadBook(connection)
+
+    Assert.is_false(BookDB.renameStableId("local", "/old.epub", "/new.epub"))
+    Assert.eq(calls[#calls].sql, "ROLLBACK;")
 
     DbBase.close()
     clearMods()

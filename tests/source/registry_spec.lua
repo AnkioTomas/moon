@@ -137,6 +137,31 @@ do
     Assert.is_false(Registry.setEnabled("nope", true))
 end
 
+-- 非活跃属主源复用，并在注册表关闭时恰好释放一次。
+do
+    Registry.shutdown()
+    local original_create = Registry.create
+    local created, closed = {}, {}
+    Registry.create = function(id)
+        created[id] = (created[id] or 0) + 1
+        return {
+            id = id,
+            close = function()
+                closed[id] = (closed[id] or 0) + 1
+            end,
+        }
+    end
+
+    local first = Registry.resolve("wechat")
+    local second = Registry.resolve("wechat")
+    Assert.eq(first, second)
+    Assert.eq(created.wechat, 1)
+    Registry.shutdown()
+    Assert.eq(closed.wechat, 1)
+    Assert.eq(closed.moon, 1)
+    Registry.create = original_create
+end
+
 -- 清理 preload，避免污染后续用例
 for _, k in ipairs({
     "utils.settings",

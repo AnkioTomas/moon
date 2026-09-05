@@ -53,9 +53,7 @@ function Store.rememberMany(books)
     if #payload == 0 then
         return
     end
-    for i = 1, #payload do
-        BookDB.upsertRemote(payload[i])
-    end
+    BookDB.upsertRemoteMany(payload)
 end
 
 --- 用完整书架快照对账 books 表：upsert 全部远端条目，未刷新的成员标 inactive（不删行）。

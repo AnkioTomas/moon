@@ -458,6 +458,7 @@ function Request.stream(opts, handlers)
     local url = safeUrl(opts.url)
     local started_at = Perf.now()
     local received = 0
+    local response_code
     logger.dbg("book.http stream start", request_id, method, url)
 
     --- 收束流：只回调一次 on_done，并归还此前占用的输入超时计数。
@@ -489,6 +490,9 @@ function Request.stream(opts, handlers)
             return
         end
         if type(chunk) == "string" and #chunk > 0 then
+            if opts.allow_redirects and (response_code == 301 or response_code == 302) then
+                return
+            end
             received = received + #chunk
             if handlers.on_data then handlers.on_data(chunk) end
         end
@@ -567,7 +571,9 @@ function Request.stream(opts, handlers)
             if data and data:len() > 2 then
                 emit(data:sub(1, data:len() - 2))
             end
-            return orig_chunked(self, data)
+            -- Turbo 原实现把每个 chunk 追加进 _read_buffer，长 SSE/大文件会把
+            -- 整个响应永久留在内存。流式调用者已经消费数据，只需继续读下一块。
+            self.iostream:read_until("\r\n", self._handle_chunked_encoding, self)
         end
 
         client._handle_body = function(self, data)
@@ -576,7 +582,13 @@ function Request.stream(opts, handlers)
         end
 
         client._finalize_request = function(self)
+            local redirect_before = self.redirect
             orig_finalize(self)
+            -- 301/302 的原始收尾会立即启动下一跳；此时 future 尚未完成，
+            -- 不能把中间响应当最终 HTTP 错误。
+            if self.redirect ~= redirect_before then
+                return
+            end
             if state.done or state.cancelled then
                 return
             end
@@ -615,6 +627,7 @@ function Request.stream(opts, handlers)
                 return
             end
 
+            response_code = code
             if not state.cancelled and handlers.on_headers then
                 handlers.on_headers(code, self.response_headers)
             end
@@ -636,6 +649,12 @@ function Request.stream(opts, handlers)
                     function(_, chunk) emit(chunk) end,
                     self
                 )
+                return
+            end
+            if opts.allow_redirects and (code == 301 or code == 302) then
+                -- Turbo 自身把无长度响应视为无 body；跟随重定向必须立即收尾，
+                -- 否则 keep-alive 连接不会关闭，只能等请求超时。
+                self:_finalize_request()
                 return
             end
             -- 无 Content-Length / 非 chunked：按连接关闭读（SSE 常见）
@@ -786,63 +805,78 @@ function Request.writeResponseToFile(res, dest, opts, cb)
     return makeJob(state)
 end
 
---- 非阻塞下载：request → 校验 2xx → writeResponseToFile。
+--- 非阻塞下载：响应数据直接写入临时文件，成功后原子落位。
 ---@param opts table 同 request；可带 on_progress
 ---@param dest string
 ---@param cb fun(ok: boolean, err: any, res: table|nil)
 ---@return { cancel: fun() }
 function Request.download(opts, dest, cb)
     local state = { cancelled = false }
-    local request_job
-    local write_job
+    local stream_job
     local tmp = dest .. ".part"
     local target = fileName(dest)
+    local file, open_err = io.open(tmp, "wb")
+    local written = 0
+    local response = {}
+    local write_err
     logger.dbg("book.http download start", target, safeUrl(opts and opts.url))
 
     local function done(ok, err, res)
+        if state.cancelled then return end
         logger.dbg("book.http download done", target,
             ok and "ok" or ("error=" .. tostring(err)))
         cb(ok, err, res)
     end
 
-    request_job = Request.request(opts, function(res, err)
-        if state.cancelled then
-            return
-        end
-        if err then
-            done(false, err, res)
-            return
-        end
-        if not Request.ok(res and res.code) then
-            done(false, "HTTP " .. tostring(res and res.code), res)
-            return
-        end
-        write_job = Request.writeResponseToFile(res, tmp, {
-            on_progress = opts and opts.on_progress,
-        }, function(ok, write_err)
-            if state.cancelled then return end
+    if not file then
+        UIManager:nextTick(function()
+            done(false, open_err or "cannot create file")
+        end)
+        return makeJob(state)
+    end
+
+    stream_job = Request.stream(opts, {
+        on_headers = function(code, headers)
+            response.code = code
+            response.headers = headers
+        end,
+        on_data = function(chunk)
+            if write_err or not Request.ok(response.code) then return end
+            local ok, err = file:write(chunk)
             if not ok then
-                done(false, write_err, res)
+                write_err = err or "write failed"
+                return
+            end
+            written = written + #chunk
+            if opts and opts.on_progress then opts.on_progress(written) end
+        end,
+        on_done = function(err)
+            local pok, closed, close_err = pcall(function() return file:close() end)
+            file = nil
+            if not err and write_err then err = write_err end
+            if not err and (not pok or not closed) then
+                err = close_err or "close failed"
+            end
+            if err or not Request.ok(response.code) then
+                pcall(os.remove, tmp)
+                done(false, err or ("HTTP " .. tostring(response.code)), response)
                 return
             end
             local moved, rename_err = os.rename(tmp, dest)
             if not moved then
                 pcall(os.remove, tmp)
-                done(false, rename_err or "rename failed", res)
+                done(false, rename_err or "rename failed", response)
                 return
             end
-            done(true, nil, res)
-        end)
-    end)
+            done(true, nil, response)
+        end,
+    })
 
     return makeJob(state, function()
         logger.dbg("book.http download cancel", target)
-        if request_job then
-            request_job.cancel()
-        end
-        if write_job then
-            write_job.cancel()
-        end
+        if stream_job then stream_job.cancel() end
+        if file then pcall(function() file:close() end); file = nil end
+        pcall(os.remove, tmp)
     end)
 end
 
