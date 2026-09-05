@@ -1,10 +1,10 @@
 --[[--
-pinyin.dictionary：音节切分 / 短码索引 / 长码降级
+ime.pinyin.dictionary：音节切分 / 短码索引 / 长码降级
 
 ljsqlite3 用内存假库 mock（对齐 tests/utils/db/ 先例），不碰真 sqlite 文件；
 只验证 schema、绑定参数、音节边界、不可用降级。
 
-@module tests.pinyin.dictionary_spec
+@module tests.ime.pinyin.dictionary_spec
 --]]
 
 local Assert = require("support.assert")
@@ -132,7 +132,7 @@ package.preload["lua-ljsqlite3/init"] = function()
     }
 end
 
-local Dict = require("pinyin.dictionary")
+local Dict = require("ime.pinyin.dictionary")
 
 -- ── 纯逻辑：音节切分 ────────────────────────────────
 local p, complete = Dict.toPrefix("nihao")
@@ -211,8 +211,8 @@ Assert.len(Dict.lookup(""), 0)
 
 -- ── 降级：库打不开 → 空结果，不报错 ───────────────────
 open_ok = false
-package.loaded["pinyin.dictionary"] = nil
-local Dict2 = require("pinyin.dictionary")
+package.loaded["ime.pinyin.dictionary"] = nil
+local Dict2 = require("ime.pinyin.dictionary")
 Assert.is_false(Dict2.isAvailable())
 Assert.eq(Dict2.entries(), nil)
 Assert.len(Dict2.lookup("nihao"), 0)

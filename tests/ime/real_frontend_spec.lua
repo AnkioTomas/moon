@@ -1,5 +1,5 @@
 --[[--
-pinyin.candidate_bar × 真实 KOReader 前端集成用例。
+ime.candidate_bar × 真实 KOReader 前端集成用例。
 
 与 candidate_bar_spec（全 stub）不同，这里加载真家伙：
 真实 VirtualKeyboard / 真实 zh_CN 键盘布局 / 真实 generic_ime / 真实 util.wrapMethod，
@@ -11,7 +11,7 @@ pinyin.candidate_bar × 真实 KOReader 前端集成用例。
 3. 换层（Sym/ABC，number 输入框的 layer 4 起点）后候选行仍绑在新键位上；
 4. 🌐 切布局 en→zh→en：uwrap_func revert 与重包装后拦截依然生效，en 下完全原生。
 
-@module tests.pinyin.real_frontend_spec
+@module tests.ime.real_frontend_spec
 --]]
 
 local Assert = require("support.assert")
@@ -240,7 +240,7 @@ package.preload["util"] = nil
 local dict_available = true
 local lookup_calls = {}
 local WORDS = { "你好", "你好吗", "内耗", "拟合", "泥沼", "尼龙", "匿迹", "逆转", "匿名", "溺爱" }
-package.preload["pinyin.dictionary"] = function()
+package.preload["ime.pinyin.dictionary"] = function()
     return {
         isAvailable = function()
             return dict_available
@@ -255,6 +255,24 @@ package.preload["pinyin.dictionary"] = function()
             end
             return {}
         end,
+    }
+end
+local current_profile
+package.preload["ime.registry"] = function()
+    current_profile = {
+        id = "pinyin",
+        commit_space = true,
+        mapKey = function(key)
+            if type(key) == "string" and key:match("^%a$") then
+                key = key:lower()
+                return key, key
+            end
+        end,
+    }
+    return {
+        current = function() return current_profile end,
+        isAvailable = function() return require("ime.pinyin.dictionary").isAvailable() end,
+        lookup = function(_, code) return require("ime.pinyin.dictionary").lookup(code) end,
     }
 end
 
@@ -332,7 +350,7 @@ local lfs = require("libs/libkoreader-lfs")
 local old_cwd = lfs.currentdir()
 lfs.chdir(KO)
 
-local Bar = require("pinyin.candidate_bar")
+local Bar = require("ime.candidate_bar")
 Bar.install({ enabled = function()
     return true
 end })
@@ -358,7 +376,7 @@ end
 -- （本设计不碰包装表，拦截点在 VirtualKeyboard.addChar）
 do
     local kb = newKeyboard()
-    Assert.is_true(ZH.keys[1]._pinyin_bar == true, "候选行必须插到真实 zh_CN 布局第一行")
+    Assert.is_true(ZH.keys[1]._ime_bar == true, "候选行必须插到真实 zh_CN 布局第一行")
     Assert.eq(#ZH.keys, 6, "zh_CN 原 5 行 + 候选行")
     Assert.eq(#kb.KEYS, 6)
     Assert.eq(#kb.layout, 6, "真实 addKeys 必须造出 6 行")
@@ -372,7 +390,36 @@ do
     Assert.is_true(type(ac.raw_method_call) == "function", "raw 直写通道必须可用")
 end
 
--- 2. 字母直写 + 候选上键 + 点候选提交（真 wrapMethod raw_method_call 链）+ 退格回退
+-- 2. 形码键帽：字根居中，编码字母使用原生 alt_label 画在右上角。
+do
+    local pinyin_profile = current_profile
+    current_profile = {
+        id = "cangjie",
+        commit_space = true,
+        labels = { q = "手", a = "日" },
+        show_codes = true,
+        mapKey = pinyin_profile.mapKey,
+    }
+    local cangjie = newKeyboard()
+    Assert.eq(cangjie.layout[3][1].label, "手")
+    Assert.eq(cangjie.layout[3][1].alt_label, "Q")
+    Assert.eq(cangjie.layout[4][1].label, "日")
+    Assert.eq(cangjie.layout[4][1].alt_label, "A")
+
+    current_profile = {
+        id = "wubi",
+        commit_space = true,
+        labels = { q = "金勹儿" },
+        show_codes = true,
+        mapKey = pinyin_profile.mapKey,
+    }
+    local wubi = newKeyboard()
+    Assert.eq(wubi.layout[3][1].label, "金勹儿")
+    Assert.eq(wubi.layout[3][1].alt_label, "Q")
+    current_profile = pinyin_profile
+end
+
+-- 3. 字母直写 + 候选上键 + 点候选提交（真 wrapMethod raw_method_call 链）+ 退格回退
 do
     local kb = newKeyboard()
     kb:addChar("n")
@@ -430,7 +477,7 @@ do
     local zh_rows_before = #ZH.keys
     local kb = newKeyboard()
     Assert.eq(#kb.KEYS, 5, "词库缺失时候选行必须摘掉")
-    Assert.is_nil(ZH.keys[1]._pinyin_bar, "布局里的候选行标记必须移除")
+    Assert.is_nil(ZH.keys[1]._ime_bar, "布局里的候选行标记必须移除")
     Assert.is_true(kb.layout[1][1].flash_keyboard, "词库缺失时不得改变原生键盘反馈")
     Assert.eq(zh_rows_before, 6)
     kb:addChar("n") -- 走原生 generic_ime（真身），不得崩
@@ -441,7 +488,7 @@ end
 -- 6. 词库回来后下次键盘 init 自动恢复
 do
     local kb = newKeyboard()
-    Assert.is_true(ZH.keys[1]._pinyin_bar == true, "词库可用后候选行回来")
+    Assert.is_true(ZH.keys[1]._ime_bar == true, "词库可用后候选行回来")
     kb:addChar("n")
     kb:addChar("i")
     Assert.eq(cellText(kb, 2), "你好")

@@ -1,10 +1,10 @@
 --[[--
-pinyin.init：开关编排（布局 / 候选栏安装 / 词库下载 / 状态文案）
+ime.init：开关编排（布局 / 候选栏安装 / 词库下载 / 状态文案）
 
 candidate_bar / download / dictionary 全部 stub；只验证编排逻辑：
 开关行为、bootstrap 时机、dictStatus 文案。候选合并本身见 candidate_bar_spec。
 
-@module tests.pinyin.init_spec
+@module tests.ime.init_spec
 --]]
 
 local Assert = require("support.assert")
@@ -38,7 +38,7 @@ _G.G_reader_settings = {
 -- candidate_bar 假实现：记录 install
 local install_calls = 0
 local install_opts
-package.preload["pinyin.candidate_bar"] = function()
+package.preload["ime.candidate_bar"] = function()
     return {
         install = function(opts)
             install_calls = install_calls + 1
@@ -50,9 +50,9 @@ end
 -- download 假实现：记录 ensure 调用
 local ensure_calls = 0
 local downloading_now = false
-package.preload["pinyin.download"] = function()
+package.preload["ime.download"] = function()
     return {
-        ensure = function(cb)
+        ensure = function(_, cb)
             ensure_calls = ensure_calls + 1
             if cb then
                 cb(true)
@@ -66,7 +66,7 @@ end
 
 -- dictionary 假实现：可开关可用性
 local dict_available = false
-package.preload["pinyin.dictionary"] = function()
+package.preload["ime.pinyin.dictionary"] = function()
     return {
         isAvailable = function()
             return dict_available
@@ -83,7 +83,20 @@ package.preload["pinyin.dictionary"] = function()
     }
 end
 
-local Pinyin = require("pinyin.init")
+package.preload["ime.registry"] = function()
+    local method = { id = "pinyin", label = "拼音" }
+    return {
+        current = function() return method end,
+        get = function(id) return id == "pinyin" and method or method end,
+        list = function() return { method } end,
+        isAvailable = function() return require("ime.pinyin.dictionary").isAvailable() end,
+        fileExists = function() return require("ime.pinyin.dictionary").fileExists() end,
+        entries = function() return require("ime.pinyin.dictionary").entries() end,
+        builtAt = function() return require("ime.pinyin.dictionary").builtAt() end,
+    }
+end
+
+local Pinyin = require("ime.init")
 
 -- ── bootstrap：关闭时不装候选栏 ───────────────────────
 fake_settings.pinyin_enabled = false
