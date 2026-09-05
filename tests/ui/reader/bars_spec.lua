@@ -9,6 +9,9 @@ local Stubs = require("support.stubs")
 Stubs.install()
 Stubs.reset()
 
+G_reader_settings = G_reader_settings or {}
+G_reader_settings.saveSetting = function() end
+
 package.preload["device"] = function()
     return {
         screen = {
@@ -104,7 +107,12 @@ local ui_top = {
         footer_visible = true,
         footer = {
             getHeight = function() return 32 end,
-            onToggleFooterMode = function() end,
+            mode = 1,
+            mode_list = { off = 0, page_progress = 1 },
+            applyFooterMode = function(self, mode)
+                self.mode = mode
+                self.ui.view.footer_visible = mode ~= self.mode_list.off
+            end,
             footer_positioner = {
                 dimen = { h = 800, y = 0 },
                 contentRange = function()
@@ -115,6 +123,7 @@ local ui_top = {
     },
     handleEvent = function(_, event) events[#events + 1] = event end,
 }
+ui_top.view.footer.ui = ui_top
 Assert.is_true(Bars.systemTopVisible(ui_top))
 Assert.is_true(Bars.systemBottomVisible(ui_top))
 Assert.is_true(Bars.topVisible(ui_top))
@@ -129,6 +138,12 @@ Assert.eq(Bars.topHeight(ui_top), 0)
 ui_top.document.getHeaderHeight = function() return 28 end
 ui_top.view.view_mode = "scroll"
 Assert.is_false(Bars.systemTopVisible(ui_top))
+
+-- 渲染不可见不等于配置关闭：滚动模式下仍须写入 status_line。
+ui_top.document.configurable.status_line = 0
+events = {}
+Bars.setSystemTop(ui_top, false)
+Assert.eq(events[1].args[2], 1)
 
 ui_top.view.view_mode = "page"
 ui_top.view.footer_visible = false
@@ -146,17 +161,21 @@ Assert.eq(events[2].name, "SetStatusLine")
 Assert.eq(events[2].args[1], 1)
 -- 顶栏已隐藏，打开它 → status_line 置 0
 ui_top.document.getHeaderHeight = function() return 0 end
+ui_top.document.configurable.status_line = 1
 events = {}
 Bars.setTopBarPreference(true, ui_top)
 Assert.eq(events[1].args[2], 0)
 Assert.eq(events[2].args[1], 0)
 
--- setSystemBottom：调 footer:onToggleFooterMode
-local toggled = false
-ui_top.view.footer.onToggleFooterMode = function() toggled = true end
+-- setSystemBottom：直接落到目标模式，关闭后可恢复原模式
+ui_top.view.footer.mode = 1
 ui_top.view.footer_visible = true
 Bars.setSystemBottom(ui_top, false)
-Assert.is_true(toggled)
+Assert.eq(ui_top.view.footer.mode, 0)
+Assert.is_false(ui_top.view.footer_visible)
+Bars.setSystemBottom(ui_top, true)
+Assert.eq(ui_top.view.footer.mode, 1)
+Assert.is_true(ui_top.view.footer_visible)
 
 -- hijackFooter：底栏可见时 TapFooter / onHoldFooter 吞手势
 local footer = {

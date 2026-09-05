@@ -6,7 +6,6 @@
 
 require("l10n").apply()
 
-local MoonSettings = require("utils.settings")
 local ActionList = require("ui.panel.action_list")
 local Registry = require("ui.panel.actions.registry")
 

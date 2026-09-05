@@ -16,6 +16,8 @@ local Screen = Device.screen
 local HEADER_FONT_SIZE_DEFAULT = 20
 --- CRE 页头 HEADER_MARGIN + 亚像素缝，overlay 多盖一点。
 local TOP_BAND_BLEED = 9
+--- 文字向屏幕内侧偏移，避免视觉上贴住上下边缘。
+local EDGE_CONTENT_INSET = 4
 --- overlay 顶部额外覆盖的像素数（已按屏幕缩放）。
 ---@return number
 local function bandBleed()
@@ -142,14 +144,14 @@ function Bars.setSystemTop(ui, enabled)
     if not ui or not ui.rolling or not ui.document or not ui.handleEvent then
         return
     end
-    if Bars.systemTopVisible(ui) == enabled then
-        return
-    end
     local config = ui.document.configurable
     if not config then
         return
     end
     local next_val = enabled and 0 or 1
+    if tonumber(config.status_line) == next_val then
+        return
+    end
     local Event = require("ui/event")
     ui:handleEvent(Event:new("ConfigChange", "status_line", next_val))
     ui:handleEvent(Event:new("SetStatusLine", next_val))
@@ -169,8 +171,29 @@ function Bars.setSystemBottom(ui, enabled)
         return
     end
     local footer = ui.view and ui.view.footer
-    if footer and footer.onToggleFooterMode then
-        footer:onToggleFooterMode()
+    if not footer or not footer.applyFooterMode then
+        return
+    end
+    local mode
+    if enabled then
+        mode = footer._book_bars_mode
+            or (footer.mode_list and footer.mode_list.page_progress)
+    else
+        footer._book_bars_mode = footer.mode
+        mode = footer.mode_list and footer.mode_list.off
+    end
+    if mode == nil then
+        return
+    end
+    footer:applyFooterMode(mode)
+    if G_reader_settings then
+        G_reader_settings:saveSetting("reader_footer_mode", mode)
+    end
+    if footer.onUpdateFooter then
+        footer:onUpdateFooter(true)
+    end
+    if footer.rescheduleFooterAutoRefreshIfNeeded then
+        footer:rescheduleFooterAutoRefreshIfNeeded()
     end
 end
 
@@ -618,6 +641,7 @@ function Bars:paintTo(bb, x, y)
     local UI = require("ui.components.bookui")
     local Session = require("ui.reader.session")
     local bg = barBackground()
+    local edge_inset = Screen:scaleBySize(EDGE_CONTENT_INSET)
 
     if Bars.topVisible(ui) then
         local bar_y, bar_h = topBandGeometry(self.view, ui, y)
@@ -626,7 +650,7 @@ function Bars:paintTo(bb, x, y)
             local margin_l, margin_r = topMargins(ui)
             local inner_w = math.max(1, w - margin_l - margin_r)
             local gap = Screen:scaleBySize(4)
-            local text_y = bar_y + Bars.topOffset(ui)
+            local text_y = bar_y + Bars.topOffset(ui) + edge_inset
             local text_h = Bars.topHeight(ui)
             local face = topTextFace(ui, text_h)
 
@@ -656,7 +680,9 @@ function Bars:paintTo(bb, x, y)
         local footer = ui.view.footer
         local bottom_y, bar_h = bottomBandGeometry(self.view, ui, y)
         if bottom_y and bar_h then
-            bb:paintRect(x, bottom_y, w, bar_h, bg)
+            -- 内容上移时同时向内扩背景，不能让文字或进度条漏到正文上。
+            bottom_y = bottom_y - edge_inset
+            bb:paintRect(x, bottom_y, w, bar_h + edge_inset, bg)
 
         local margin_l, margin_r = bottomMargins(ui)
         local inner_w = math.max(1, w - margin_l - margin_r)
@@ -676,25 +702,25 @@ function Bars:paintTo(bb, x, y)
             })
 
         if settings.disable_progress_bar then
-            info.max_width = inner_w
+            info:setMaxWidth(inner_w)
             paintCentered(info, bb, x + margin_l, bottom_y, bar_h)
         elseif settings.progress_bar_position == "above" then
             local prog_h = footer.progress_bar and footer.progress_bar.height or UI.sz(6)
             local prog_w = math.max(1, inner_w)
             local gap = Screen:scaleBySize(4)
+            info:setMaxWidth(inner_w)
             local info_h = info:getSize().h
             local stack_h = prog_h + gap + info_h
             local stack_y = bottom_y + math.floor((bar_h - stack_h) / 2)
             local bar = UI.progressBar(prog_w, prog_h, pct)
             bar:paintTo(bb, x + margin_l, stack_y)
             bar:free()
-            info.max_width = inner_w
             info:paintTo(bb, x + margin_l, stack_y + prog_h + gap)
         elseif settings.progress_bar_position == "below" then
             local prog_h = footer.progress_bar and footer.progress_bar.height or UI.sz(6)
             local prog_w = math.max(1, inner_w)
             local gap = Screen:scaleBySize(4)
-            info.max_width = inner_w
+            info:setMaxWidth(inner_w)
             local info_h = info:getSize().h
             local stack_h = info_h + gap + prog_h
             local stack_y = bottom_y + math.floor((bar_h - stack_h) / 2)
@@ -710,10 +736,10 @@ function Bars:paintTo(bb, x, y)
             local prog_w
             if settings.progress_bar_lock_width then
                 prog_w = math.max(1, math.floor(min_bar_pct / 100 * inner_w))
-                info.max_width = math.max(1, inner_w - prog_w - gap)
+                info:setMaxWidth(math.max(1, inner_w - prog_w - gap))
             else
                 local text_max_ratio = (100 - min_bar_pct) / 100
-                info.max_width = math.max(1, math.floor(text_max_ratio * inner_w))
+                info:setMaxWidth(math.max(1, math.floor(text_max_ratio * inner_w)))
                 local is = info:getSize()
                 prog_w = math.max(1, inner_w - is.w - gap)
             end

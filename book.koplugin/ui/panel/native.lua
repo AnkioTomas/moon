@@ -98,8 +98,10 @@ end
 ---@return nil
 local function exitReading(ui, menu)
     Menu.close(menu)
-    if ui and ui.onClose then ui:onClose() end
-    openBookDesktop()
+    UIManager:nextTick(function()
+        if ui and ui.onClose then ui:onClose() end
+        openBookDesktop()
+    end)
 end
 
 --- 用白底 FrameContainer 包裹面板主体。
@@ -363,8 +365,10 @@ local function patchFileBrowserButton(ReaderMenu)
             fm.callback = function()
                 self:onTapCloseMenu()
                 local ui = self.ui
-                if ui and ui.onClose then ui:onClose() end
-                openBookDesktop()
+                UIManager:nextTick(function()
+                    if ui and ui.onClose then ui:onClose() end
+                    openBookDesktop()
+                end)
             end
         end
         return buttons
