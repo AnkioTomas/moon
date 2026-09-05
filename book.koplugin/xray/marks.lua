@@ -9,6 +9,7 @@ require("l10n").apply()
 local Text = require("utils.text")
 local UIManager = require("ui/uimanager")
 local Context = require("xray.context")
+local logger = require("utils.log")
 local _ = require("gettext")
 
 local Marks = {
@@ -19,6 +20,8 @@ local Marks = {
     _marks = {},
     _render_key = nil,
     _revision = 0,
+    _scan_job = nil,
+    _scan_pending = nil,
 }
 
 --- 页内实体标记是否开启。
@@ -87,17 +90,10 @@ local function findMatches(document, is_reflow, text, max_hits)
     return ok and matches or nil
 end
 
---- 用 findAllText 一次扫出整本书里实体名/别名的所有出现位置。
----@param ui table
+--- 展平实体名与别名，并去重。
 ---@param entities table[]
 ---@return table[]
-local function buildMatches(ui, entities)
-    local document = ui and ui.document
-    if not document or not document.findAllText then
-        return {}
-    end
-    local is_reflow = document.getScreenBoxesFromPositions ~= nil
-    local max_hits = 5000
+local function collectNames(entities)
     local names = {}
     local seen = {}
     for index, entity in ipairs(entities) do
@@ -114,17 +110,7 @@ local function buildMatches(ui, entities)
             end
         end
     end
-
-    local out = {}
-    for index, item in ipairs(names) do
-        local matches = findMatches(document, is_reflow, item.name, max_hits)
-        if matches then
-            for index, match in ipairs(matches) do
-                out[#out + 1] = { entity = item.entity, match = match }
-            end
-        end
-    end
-    return out
+    return names
 end
 
 --- 把 xpointer / page boxes 匹配解析成当前屏幕上的框。
@@ -254,6 +240,9 @@ end
 --- 丢弃扫描与渲染缓存并重绘阅读视图（实体增删改或开关变化后调用）。
 function Marks.invalidate()
     Marks._revision = Marks._revision + 1
+    if Marks._scan_job then Marks._scan_job:cancel() end
+    Marks._scan_job = nil
+    Marks._scan_pending = nil
     resetMarks(Marks)
     if Marks.ui and Marks.ui.dialog then
         UIManager:setDirty(Marks.ui.dialog, "ui")
@@ -263,32 +252,97 @@ function Marks.invalidate()
     end
 end
 
---- 排一次全书扫描到下一个 tick，完成后重绘。
+--- 用子进程扫描整本书，完成后重绘。
 ---
---- 扫描是每个实体名一趟 findAllText，几十个实体的书要好几秒。rebuild 的调用点是
---- paintTo：在那里同步扫描等于开书/翻页首帧直接卡死。放到 nextTick 后，页面先出来，
---- 下划线晚一帧补上。
+--- 实体已在主进程读库；Job 只使用 fork 继承的 document，禁止在子进程碰数据库。
+--- 匹配按小批次回传，避免一次结果超过 Worker IPC 的帧上限。
 ---@param key string 本次扫描对应的 scanKey
 ---@param entities table[]
 function Marks:scheduleScan(key, entities)
     if self._scan_pending == key then
         return
     end
+    if self._scan_job then
+        self._scan_job:cancel()
+        self._scan_job = nil
+    end
     self._scan_pending = key
     local ui = self.ui
-    UIManager:nextTick(function()
+    local document = ui and ui.document
+    local file = document and document.file
+    if not file then
         self._scan_pending = nil
-        -- 期间换书/关书：这次结果作废
-        if self.ui ~= ui or not Marks.enabled() or scanKey(entities) ~= key then
-            return
-        end
-        self._matches = buildMatches(ui, entities)
+        self._matches = {}
         self._matches_key = key
-        self._render_key = nil
-        if ui.dialog then
-            UIManager:setDirty(ui.dialog, "ui")
+        return
+    end
+    local names = collectNames(entities)
+    local out = {}
+    self._scan_job = require("workers.job").run(function(ctx)
+        local DocumentRegistry = require("document/documentregistry")
+        local ReaderUI = require("apps/reader/readerui")
+        local provider = ReaderUI:extendProvider(file, DocumentRegistry:getProvider(file))
+        local scan_document = DocumentRegistry:openDocument(file, provider)
+        if not scan_document then error("cannot open scan document") end
+
+        local ok, err = xpcall(function()
+            if scan_document.loadDocument then
+                -- 子进程只做搜索，不得写入与主进程共用的 CRE cache。
+                local cre = require("document/credocument"):engineInit()
+                cre.initCache("", 0, true, 40)
+                if not scan_document:loadDocument() then
+                    error("cannot load scan document")
+                end
+            end
+            local is_reflow = scan_document.getScreenBoxesFromPositions ~= nil
+            for name_index, item in ipairs(names) do
+                local matches = findMatches(scan_document, is_reflow, item.name, 5000) or {}
+                for first = 1, #matches, 100 do
+                    local batch = {}
+                    for match_index = first, math.min(first + 99, #matches) do
+                        batch[#batch + 1] = matches[match_index]
+                    end
+                    ctx.post({ name_index = name_index, matches = batch })
+                end
+            end
+        end, debug.traceback)
+        scan_document:close()
+        if not ok then
+            error(err)
         end
-    end)
+        return true
+    end, {
+        name = "xray.scan",
+        timeout = 120,
+        on_progress = function(message)
+            if self._scan_pending ~= key or self.ui ~= ui then return end
+            local item = names[tonumber(message.name_index)]
+            if not item then return end
+            for match_index, match in ipairs(message.matches or {}) do
+                out[#out + 1] = { entity = item.entity, match = match }
+            end
+        end,
+        on_done = function()
+            if self._scan_pending ~= key or self.ui ~= ui
+                or not Marks.enabled() or scanKey(entities) ~= key then
+                return
+            end
+            self._scan_job = nil
+            self._scan_pending = nil
+            self._matches = out
+            self._matches_key = key
+            self._render_key = nil
+            if ui.dialog then UIManager:setDirty(ui.dialog, "ui") end
+        end,
+        on_failed = function(err)
+            if self._scan_pending ~= key or self.ui ~= ui then return end
+            self._scan_job = nil
+            self._scan_pending = nil
+            self._matches = {}
+            self._matches_key = key
+            logger.warn("book.xray scan failed", err)
+        end,
+    })
 end
 
 --- 按需重算当前屏幕上的标记框：扫描键变了就排一次异步全书重扫，
@@ -415,6 +469,9 @@ function Marks.install(ui)
         return
     end
     ui._book_xray_marks = true
+    if Marks._scan_job then Marks._scan_job:cancel() end
+    Marks._scan_job = nil
+    Marks._scan_pending = nil
     Marks.ui = ui
     if ui.view and ui.view.registerViewModule then
         ui.view:registerViewModule("book_xray_marks", Marks)

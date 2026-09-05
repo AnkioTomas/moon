@@ -17,11 +17,13 @@ local _ = require("gettext")
 ---@field name string|nil
 ---@field type BookSourceType
 ---@field _books_refresh_at number|nil 最近一次书架同步完成时间
+---@field _stats_refresh_at number|nil 最近一次统计同步尝试时间
 local SourceBase = {}
 SourceBase.__index = SourceBase
 
 -- 首页重新可见时允许检查一次书架；具体同步和网络缓存由各源决定。
 local BOOKS_REFRESH_INTERVAL = 5 * 60
+local STATS_REFRESH_INTERVAL = 5 * 60
 
 --- 返回默认全 false 能力集。
 ---@return SourceCapabilities
@@ -121,7 +123,8 @@ end
 --- 后台双向同步统计；成功后作废依赖本地 reading_stats 的桌面缓存。
 ---@param self SourceBase
 ---@param desktop table
-local function syncDesktopStats(self, desktop)
+---@param opts { force?: boolean }|nil
+local function syncDesktopStats(self, desktop, opts)
     local can_pull = SourceCapabilities.supportsStatsPull(self)
     local can_push = type(self.pushStatsAsync) == "function"
     if not can_pull and not can_push then return end
@@ -129,7 +132,13 @@ local function syncDesktopStats(self, desktop)
         logger.dbg("book stats sync skipped", self.id, "pending")
         return
     end
+    if not (opts and opts.force) and self._stats_refresh_at
+        and os.time() - self._stats_refresh_at < STATS_REFRESH_INTERVAL then
+        logger.dbg("book stats sync skipped", self.id, "throttled")
+        return
+    end
     logger.dbg("book stats sync start", self.id)
+    self._stats_refresh_at = os.time()
     desktop._stats_sync_pending = true
     local request = {}
     desktop._stats_sync_request = request
@@ -173,7 +182,7 @@ function SourceBase:onEvent(event, payload)
         return
     end
     if event == "library_refresh_request" then
-        syncDesktopStats(self, desktop)
+        syncDesktopStats(self, desktop, { force = true })
         syncDesktopBooks(self, desktop, { force = true })
         return
     end
