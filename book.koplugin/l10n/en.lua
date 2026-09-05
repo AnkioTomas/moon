@@ -596,6 +596,8 @@ return {
     ["未获取到 Skills API Key"] = "No Skills API key received",
     ["未设置"] = "Not set",
     ["未配置本地路径"] = "Local path not configured",
+    ["请先设置本地书库目录，再扫描书籍。"] = "Set a local library folder before scanning for books.",
+    ["立即设置"] = "Set now",
     ["本地书籍"] = "Local books",
     ["本地书籍文件不存在"] = "Local book file not found",
     ["本周没有阅读书目"] = "No books read this week",

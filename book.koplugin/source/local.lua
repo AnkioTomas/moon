@@ -58,6 +58,25 @@ function Source:configured()
     return self._client:configured()
 end
 
+--- 手动扫盘缺少目录时直接引导设置；后台生命周期仍由基类静默跳过。
+---@param event string
+---@param payload table|nil
+function Source:onEvent(event, payload)
+    if event == "library_refresh_request" and not self:configured() then
+        local UIManager = require("ui/uimanager")
+        local ConfirmBox = require("ui/widget/confirmbox")
+        UIManager:show(ConfirmBox:new{
+            text = _("请先设置本地书库目录，再扫描书籍。"),
+            ok_text = _("立即设置"),
+            ok_callback = function()
+                require("source.local.setting").open(payload and payload.plugin)
+            end,
+        })
+        return
+    end
+    return SourceBase.onEvent(self, event, payload)
+end
+
 --- 删除本地原书及其本地登记。
 ---@param identity BookIdentity
 ---@param cb fun(ok: boolean, err: string|nil)
