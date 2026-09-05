@@ -1,10 +1,410 @@
-# 月读 UI 规范
+# 月读系统设计
 
-> 适用版本：当前 `book.koplugin/` UI
+> 适用版本：当前 `book.koplugin/`
 >
-> 这是一份实现规范，不是视觉提案。尺寸、颜色和组件契约以代码为准；新增界面应优先复用现有组件，而不是另起一套视觉语言。
+> 这是一份实现文档，不是未来架构提案。模块边界、数据所有权、异步契约和 UI 组件以代码为准。
 
-月读的界面服务于三件事：找到书、判断状态、开始阅读。它运行在墨水屏设备上，因此优先保证可读性、稳定布局和低认知负担。桌面 UI、书籍详情、阅读页控制台和组合锁屏共享黑白灰语言，但各自有独立的布局边界。
+月读是运行在 KOReader 内的纯 Lua/LuaJIT 插件。唯一交付物是 `book.koplugin/`，不引入独立运行时，不复制 KOReader 已有的阅读器能力。系统围绕一个核心事实组织：书籍身份由物理路径解析，业务状态按 `(source_id, stable_id)` 隔离，所有网络源最终收敛到本地数据库供 UI 读取。
+
+# 第一部分：系统架构
+
+## 1. 设计目标与边界
+
+### 1.1 目标
+
+- 在 KOReader 之上提供统一书库、数据源、同步、统计和阅读增强。
+- 网络不可用时仍能浏览已同步书库、打开已缓存书籍并记录阅读状态。
+- 整本文件与按章内容共享同一套书籍身份、详情、统计和同步模型。
+- FileManager、Reader、锁屏和远程服务使用同一份持久化数据，不维护互相冲突的副本。
+- 耗时 IO 不阻塞 UI；SQLite 和 KOReader UI 只在主进程访问。
+
+### 1.2 非目标
+
+- 不替代 KOReader 的排版、渲染、文档格式支持和基础阅读交互。
+- 不把远程服务、Z-Library、锁屏或拼音实现伪装成数据源。
+- 不为假想扩展增加 Service、Manager、Factory 等转发层。
+- 不在插件外维护必须参与运行的构建产物或依赖。
+
+### 1.3 兼容性原则
+
+- 已写入 `.moon/` 的配置、数据库和缓存路径是用户数据契约。
+- 数据源能力决定 UI 入口；不支持的功能隐藏或明确禁用。
+- 切换当前数据源不能改变已打开书籍的属主源。
+- 网络同步失败必须保留本地脏数据，不能用旧远端值覆盖新本地值。
+
+## 2. 总体分层
+
+```mermaid
+flowchart TD
+    KO[KOReader 生命周期与 UI] --> Main[main.lua / host.lua]
+    Main --> UI[ui/ 呈现与交互]
+    Main --> Session[ui/reader/session.lua]
+    UI --> Book[book/ 领域编排]
+    Session --> Book
+    Book --> Source[source/ 数据源协议]
+    Book --> DB[db/ SQLite]
+    Source --> HTTP[http/ Turbo 网络栈]
+    Source --> Book
+    UI --> Global[全局功能]
+    Global --> HTTP
+    Global --> Worker[workers/ 子进程任务]
+    Worker -->|结果回主进程| Book
+    Book --> DB
+```
+
+依赖方向必须保持单向：
+
+1. `main.lua` 只接 KOReader 事件并转交下游，不承载业务规则。
+2. `ui/` 读取领域结果并触发动作，不直接实现远端协议。
+3. `book/` 拥有身份、进度、笔记、统计和同步编排。
+4. `source/` 适配外部系统；默认查询本地 catalog，远端结果写回本地。
+5. `db/` 是 SQLite 的唯一访问层。
+6. `workers/` 只处理文件、解析和计算，不接触 UI 或数据库。
+
+## 3. 目录结构
+
+| 路径 | 责任 | 关键入口 |
+|---|---|---|
+| `main.lua` | KOReader 生命周期接线、桌面打开、源事件分发 | `BookPlugin:init`、`openDesktop`、`emitToSource` |
+| `host.lua` | 菜单、Dispatcher、启动行为和 FileManager 宿主 | `Host.attach`、`Host.onShow` |
+| `book/` | 书籍领域：身份、打开、目录、进度、笔记、统计、同步、重排 | `store.lua`、`open.lua`、`progress.lua`、`note.lua`、`stats.lua` |
+| `source/` | 数据源基类、注册表、三种源和按章公共逻辑 | `base.lua`、`registry.lua`、`chapter.lua` |
+| `db/` | SQLite 连接、schema 和参数化查询 | `base.lua`、`book.lua`、`chapter.lua`、`progress.lua` |
+| `ui/desktop/` | 首页、图书馆、书城、统计、详情和设置 | `ui/desktop.lua` |
+| `ui/reader/` | 阅读会话、状态条、划词菜单和结束处理 | `session.lua`、`bars.lua` |
+| `ui/panel/` | 注入 KOReader 原生顶部菜单的桌面/阅读快捷动作 | `native.lua`、`actions/registry.lua` |
+| `ui/components/` | 墨水屏公共组件和视觉度量 | `bookui.lua`、`bookinfo.lua`、`pager.lua` |
+| `http/` | Turbo 非阻塞请求、Header 和 HTTP 缓存 | `request.lua` |
+| `workers/` | 子进程 Job、主线程 SimpleJob 和进程上下文 | `job.lua`、`simple_job.lua` |
+| `remote/` | 局域网 HTTP 服务、文件、输入、剪贴板和静态页面 | `init.lua`、`server.lua` |
+| `lockscreen/` | 背景、主体、布局、离屏渲染和 KOReader 锁屏设置 | `init.lua`、`compose.lua` |
+| `pinyin/` | 中文键盘 hook、候选栏、词库查询和分片下载 | `init.lua`、`candidate_bar.lua` |
+| `dictionary/` | StarDict 下载、安装、启停和 ReaderDictionary 接管 | `init.lua`、`manager.lua` |
+| `translate/` | Edge 翻译和翻译弹窗 | `init.lua`、`edge.lua` |
+| `baike/` | 百度百科查询和 ReaderWikipedia 接管 | `init.lua`、`client.lua` |
+| `ai/`、`ai.lua` | OpenAI 兼容接口、SSE 和 JSON 提取 | `ai.lua`、`client.lua` |
+| `xray/` | 人物、地点、专有名词提取、存储、标记和查询 | `fetch.lua`、`store.lua`、`marks.lua` |
+| `zlib/` | 全局 Z-Library 书城；不是 `BookSource` | `init.lua`、`client.lua` |
+| `scrape/` | 豆瓣、微信读书元数据搜索与本地书刮削 | `search.lua`、`ui.lua` |
+| `convert/` | TXT/MOBI 到 EPUB 的转换任务 | `text2epub.lua`、`mobi2epub.lua` |
+| `patch/`、`patches/` | KOReader 核心补丁安装、备份和翻页动画补丁 | `patch/manager.lua` |
+| `utils/` | 路径、配置、日志、文字和性能原语 | `paths.lua`、`settings.lua`、`text.lua` |
+| `types/` | LuaLS 纯表结构注解 | `book.lua`、`book_source.lua` |
+| `l10n/` | 英文和繁体中文资源 | `en.lua`、`zh_TW.lua` |
+
+源模块顶层不得加载 KOReader UI 模块。网络状态、弹窗等 UI 依赖必须在函数内延迟加载，否则离线测试无法直接加载源实现。
+
+## 4. 运行时与生命周期
+
+KOReader 会分别为 FileManager 和 Reader 创建插件实例。Reader 实例只服务当前文档；关书后由 FileManager 实例承载月读桌面。`main.lua` 因此是事件接线板，而不是全局单例。
+
+### 4.1 初始化
+
+```text
+BookPlugin:init
+├── 启动日志与 Turbo
+├── Host 菜单和启动行为
+├── 翻译 / 百科 / 词典 hook
+├── 原生顶部菜单动作
+├── 锁屏与远程服务
+├── 截图分享与拼音候选栏
+├── KOReader 补丁管理
+└── Reader 实例发出 reader_open
+```
+
+Turbo 必须在 `UIManager:run()` 前启用。可选增强初始化失败时应记录真实错误，但不能让无关阅读主流程整体失效。
+
+### 4.2 KOReader 事件映射
+
+| KOReader 事件 | 处理 |
+|---|---|
+| `onShow` | FileManager 宿主接管；发出 `fm_open` |
+| `onDocSettingsLoad` | 将全书阅读偏好注入当前文档 sidecar |
+| `onReaderReady` | 建立阅读会话、解析身份、启动统计和阅读 UI |
+| `onCloseDocument` | 保存偏好、进度、笔记和统计；区分切章与真关书 |
+| `onStartOfBook` / `onEndOfBook` | 按章模式切换相邻章节 |
+| `onPageUpdate` / `onPosUpdate` | 更新快照、统计和阅读状态条 |
+| `onAnnotationsModified` | 按当前身份保存完整注解快照 |
+| `onSuspend` | 结清阅读状态、生成锁屏、停止远程服务 |
+| `onResume` | 恢复统计、锁屏、远程服务和桌面数据 |
+| `onNetworkConnected` | 重试脏数据、通知源、刷新锁屏 |
+| `onExit` | 停止远程服务并刷日志 |
+
+### 4.3 数据源事件
+
+`plugin:emitToSource(event, payload, source)` 是唯一生命周期分发入口。第三个参数用于指定书籍属主源；省略时才使用当前活跃源。
+
+| 事件 | 语义 |
+|---|---|
+| `reader_open`、`fm_open` | 对应插件实例已创建或显示 |
+| `desktop_open`、`desktop_resume`、`home_open` | 桌面可见；基类按节流策略同步书架和统计 |
+| `library_refresh_request` | 用户要求强制刷新 |
+| `document_close`、`suspend` | 阅读状态已开始结清 |
+| `chapter_changed` | 按章会话完成切章 |
+| `network_connected` | 网络恢复 |
+| `page_changed` | 属主书籍页码变化 |
+| `book_info_request` | 阅读面板请求最新书籍信息 |
+
+## 5. 书籍身份与数据所有权
+
+### 5.1 唯一身份
+
+所有业务数据使用 `(source_id, stable_id)` 隔离；`chapter_idx` 只表示同一本书中的章节位置，不参与书籍主键。
+
+```text
+BookIdentity
+├── source_id
+├── stable_id
+├── chapter_idx?    # 非 nil 即按章模式
+├── book?           # 本地元数据快照
+└── source?         # ensureIdentity 解析出的属主源实例
+```
+
+当前数据源是 UI 选择，属主源是书籍身份的一部分，两者不能混用。打开旧来源书籍时，必须使用 `identity.source`；拿 `registry.current()` 同步会把进度、笔记和统计写到错误来源。
+
+### 5.2 路径解析规则
+
+`book/store.lua` 只有一条身份解析规则：物理路径精确查库。
+
+```mermaid
+flowchart TD
+    P[Reader 文档路径] --> C{chapters.path 命中?}
+    C -->|是| CH[章节身份 + chapter_idx]
+    C -->|否| B{books.path 命中?}
+    B -->|是| BK[整本身份]
+    B -->|否| M{路径位于 .moon/?}
+    M -->|是| R[拒绝自动认领，提示从月读打开]
+    M -->|否| L[登记为 local 源书籍]
+```
+
+在线章节只有在文件落地后，才通过 `Store.touch` 在同一事务登记最新元数据、`books.path`、目录和 `chapters.path`。未知 `.moon/` 文件不能猜身份，否则缓存残片会污染进度。
+
+### 5.3 所有权
+
+| 数据 | 所有者 | 消费者 |
+|---|---|---|
+| 书籍元数据和书架成员 | `books` 表；数据源同步负责收敛 | `book/catalog.lua`、桌面 UI |
+| 章节路径映射 | `chapters` 表 | `book/store.lua`、阅读会话 |
+| 本地进度与同步状态 | `pending_progress` | `book/progress.lua`、数据源 |
+| 注解快照 | `notes` | `book/note.lua`、数据源 |
+| 阅读统计 | `reading_stats` | `book/stats.lua`、统计页、数据源 |
+| HTTP 响应缓存 | `http` | `http/cache.lua` |
+| X-Ray 实体 | `xray_entities` | `xray/store.lua`、阅读 UI |
+| 当前阅读会话 | `ui/reader/session.lua` | Reader 生命周期处理 |
+| 当前活跃数据源 | `source/registry.lua` | 桌面和设置 |
+
+UI 不拥有业务数据。页面状态只保存加载中、分页、筛选和请求代次等瞬时信息。
+
+## 6. 持久化设计
+
+### 6.1 文件布局
+
+```text
+$DATA/.moon/
+├── book.sqlite3
+├── book.log
+├── dictionary.sqlite3
+├── cache/
+│   ├── image/
+│   └── <source>/
+│       ├── book/<md5(stable_id)>/
+│       └── image/
+├── settings/
+│   ├── common.lua
+│   ├── <source>.lua
+│   └── <feature>.lua
+├── screensaver/
+├── backups/patches/
+└── fonts/
+```
+
+`stable_id` 可能包含斜杠，不能直接作为目录名。`utils/paths.lua` 使用 `md5(stable_id)` 生成同源内稳定且安全的工作目录。
+
+### 6.2 SQLite
+
+`db/base.lua` 维护主进程内唯一连接，启用 WAL 和 `busy_timeout=5000`。schema 由各 `db/*.lua` 按固定顺序在事务中建立。
+
+| 表 | 主要内容 |
+|---|---|
+| `books` | 元数据、物理路径、目录缓存、阅读偏好、书架状态 |
+| `chapters` | 章节文件路径到书籍身份和章序号的映射 |
+| `pending_progress` | 本地进度和同步状态 |
+| `notes` | 按书籍/章节保存的注解快照 |
+| `reading_stats` | 阅读时段、页数和同步状态 |
+| `http` | 可失效的 HTTP 响应缓存 |
+| `xray_entities` | 人物、地点和专有名词 |
+
+所有动态值必须绑定到 SQL 参数。数据库访问在当前进程同步执行；`db/base.lua` 会直接拒绝 worker 子进程访问。
+
+## 7. 数据源模型
+
+### 7.1 注册表
+
+`source/registry.lua` 注册 `moon`、`wechat`、`local` 三个源：
+
+- 同一时间只有一个活跃实例。
+- `current()` 严格按配置创建，不做静默 fallback。
+- `resolve(id)` 在身份与当前源不同时创建非活跃属主实例，不改变用户选择。
+- 切换源先创建候选实例，成功后再原子替换并关闭旧实例。
+- 活跃源不能被禁用；旧配置没有 `enabled_sources` 时保持全部启用。
+
+### 7.2 基类契约
+
+`source/base.lua` 提供本地 catalog 查询，以及进度、笔记和统计的公共同步编排。源只覆盖真实支持的远端传输方法。
+
+- IO 方法使用 `XxxAsync(..., cb)`，可取消时返回 `{ cancel }`。
+- 不支持的同步方向异步返回 `skipped`，不能伪造成功数据。
+- `recentBooksAsync`、`listLibraryAsync`、`filtersAsync` 和 `readingInsightAsync` 默认读取本地数据库。
+- 桌面先渲染本地结果，再由后台同步回调刷新。
+- 回调必须检查桌面是否关闭、数据源是否变化、请求是否过期。
+
+### 7.3 能力矩阵
+
+| 能力 | 本地 `local` | 月读服务 `moon` | 微信读书 `wechat` |
+|---|---|---|---|
+| 阅读形态 | 整本文件 | 整本文件 | 连续章节 |
+| 稳定 ID | 文件绝对路径 | 远端文件名 | 微信 `bookId` |
+| 书架来源 | 扫描本地目录 | 服务端书架 | 微信书架 |
+| 打开方式 | 直接打开路径 | 下载并校验后打开 | 下载章节 HTML 后打开 |
+| 远端进度 | 无 | 双向同步 | 双向同步 |
+| 远端笔记 | 无 | 双向同步 | 微信注解协议 |
+| 远端统计 | 无 | 支持 | 支持 |
+| 编辑/刮削 | 支持 | 不支持 | 不支持 |
+| 源内书城 | 无 | 无 | 支持 |
+| 全本章节缓存 | 不适用 | 不适用 | 支持 |
+
+Z-Library 位于顶层 `zlib/`，是全局书城而不是第四种 `BookSource`。下载结果仍通过当前来源的导入能力进入书库。
+
+## 8. 核心数据流
+
+### 8.1 打开书籍
+
+```text
+UI 选择 Book
+→ book/open.lua 按 book.source_id 解析属主源
+→ source:openBookAsync
+→ 文件下载/准备完成
+→ Store.touch 同步登记物理路径
+→ KOReader ReaderUI 打开文档
+```
+
+文件登记失败时不能继续打开，否则 ReaderReady 无法恢复可靠身份。
+
+### 8.2 阅读会话
+
+```mermaid
+sequenceDiagram
+    participant KO as KOReader
+    participant S as ui/reader/session
+    participant Store as book/store
+    participant Domain as progress/note/stats
+    participant Source as identity.source
+
+    KO->>S: onReaderReady
+    S->>Store: ensureIdentity(document.file)
+    Store-->>S: BookIdentity
+    S->>Domain: start / applyLocal / pull
+    S->>S: attach reader UI
+    KO->>S: page changed
+    S->>Domain: update snapshot and stats
+    S->>Source: page_changed
+    KO->>S: close or suspend
+    S->>Domain: save local state
+    Domain->>Source: dirty-only push
+```
+
+`ReaderSessionSnapshot` 随单个文档创建和销毁；按章阅读的章节会话跨 `switchDocument` 保留，直到真正关书。是否按章只看 `chapter_idx`。
+
+关书时只上推本地新进度，不立即回拉。部分远端服务存在收敛延迟，立即回拉会用旧值覆盖刚上传的新值。
+
+### 8.3 全量同步
+
+`book/sync.lua` 按书架、进度、笔记、统计顺序执行。网络恢复只重试已持久化的脏数据。任一远端失败不能删除本地待同步状态。
+
+### 8.4 章节阅读
+
+`source/chapter.lua` 提供按章来源的公共打开、预取和切章逻辑。起始章优先级为：
+
+1. 本地待同步进度；
+2. `books.last_chapter_idx`；
+3. 远端进度。
+
+目录优先使用数据库缓存；进度章序超出缓存时丢弃缓存并重新拉取一次。
+
+## 9. 异步与并发边界
+
+| 机制 | 用途 | 允许访问 |
+|---|---|---|
+| Turbo + `http/request.lua` | 所有外部 HTTP | 网络；回调回到 UI 编排 |
+| `workers/job.lua` | 重文件 IO、解析、转换、校验 | 文件系统和纯计算 |
+| `workers/simple_job.lua` | 主线程下一 tick 的短任务 | UI、SQLite，但不能执行重活 |
+| `UIManager:scheduleIn/nextTick` | UI 延迟、节流和状态刷新 | KOReader 主线程 |
+| `remote/server.lua` 状态机 | LuaSocket 增量 HTTP | 注入的受限 IO handler |
+
+必须遵守：
+
+- worker 输入输出只能是可序列化数据。
+- worker 不得加载 `db/`、操作 Widget 或持有 KOReader 对象。
+- 解析结果回主进程后再写数据库。
+- 异步回调使用 request token、generation、`Session.isCurrent` 或 `Store.isCurrentDocument` 丢弃旧结果。
+- 取消只阻止后续副作用，不能留下“加载中”状态或半写文件。
+
+## 10. 全局功能
+
+### 10.1 远程管理
+
+`remote/server.lua` 是零 UI 依赖的 LuaSocket HTTP 状态机，`remote/init.lua` 注入文件、输入、剪贴板和配置 handler，并负责启动、休眠停止、唤醒恢复。
+
+文件操作只允许落在解析后的受管根目录中：KOReader 父目录、书籍根、字体目录、插件目录和本插件目录。HTML/CSS/JS 经静态路由下发，不做模板注入。
+
+### 10.2 组合锁屏
+
+```text
+Background.ensure
+× 可选压暗
+× components/*.blocks
+× layout.panel
+→ render.lua
+→ compose.png
+→ KOReader screensaver 设置
+```
+
+锁屏先完整生成新文件，再替换当前图片。失败时保留上一张可用图片。新增主体只需要一个 `lockscreen/components/` 模块和注册表一项。
+
+### 10.3 拼音
+
+`pinyin/candidate_bar.lua` hook `VirtualKeyboard` 的 `init/addKeys/addChar/delChar`。候选栏用自足 `Strip` 替换中文键盘首行；不修改通用 IME 包装结构。
+
+词库由 `pinyin/download.lua` 下载 manifest 和分片，worker 校验、拼接后原子落到 `.moon/dictionary.sqlite3`。文件变化后必须重置 `pinyin/dictionary.lua` 的连接与负缓存。
+
+### 10.4 AI 与阅读工具
+
+- `ai.lua` 是 OpenAI 兼容 Chat API 门面。
+- X-Ray 使用 AI 提取结构化实体，写入 `xray_entities` 后由阅读页标记和查询。
+- 翻译、百度百科和词典分别接管 KOReader 对应入口，不复制阅读器主体。
+- 网络客户端统一经过 `http/request.lua`，不能各自引入同步 `socket.http`。
+
+## 11. 测试设计
+
+离线测试由 `tests/run.lua` 自研 runner 执行，目录镜像 `book.koplugin/`：
+
+```text
+book.koplugin/book/store.lua
+tests/book/store_spec.lua
+```
+
+- `tests/run.sh` 创建 `test/` 沙箱并通过 `KO_HOME` 注入数据目录。
+- `tests/support/stubs.lua` 只模拟测试实际触达的 KOReader 模块。
+- `Stubs.flush()` 同步冲刷 `nextTick` 和 `scheduleIn`。
+- 每个 spec 前恢复 `package.preload`、`package.loaded`、`os` 和 `io` 基线。
+- 0 断言文件直接失败，防止假绿。
+- 模拟器 `./run.sh` 用于验证真实 Widget、键盘、触控和不同屏幕尺寸。
+
+测试不得写入真实 `config/`。子进程测试必须继续验证数据库访问禁令和回主进程落库边界。
+
+# 第二部分：墨水屏 UI 规范
+
+月读的界面服务于三件事：找到书、判断状态、开始阅读。它运行在墨水屏设备上，因此优先保证可读性、稳定布局和低认知负担。桌面 UI、书籍详情、阅读页增强和组合锁屏共享黑白灰语言，但各自有独立的布局边界。
 
 ## 1. 设计原则
 
@@ -87,7 +487,7 @@
 | 弱化内容 | `UI.dim()` / `COLOR_GRAY_4` | 分类、系列、图表标签、辅助说明 |
 | 分割线 | `UI.rule()` / `COLOR_GRAY_5` | 顶栏、底栏和必要的内容分隔 |
 | 浅表面 | `UI.surface()` / `COLOR_GRAY_E` | 卡片底、设置行底、进度空轨 |
-| 动作表面 | `UI.actionSurface()` / `COLOR_GRAY_D` | 阅读控制台的激活项 |
+| 动作表面 | `UI.actionSurface()` / `COLOR_GRAY_D` | 原生快捷面板的激活项 |
 | 非激活导航 | `COLOR_GRAY_6` | 桌面底栏未选中标签 |
 | 阴影 | `COLOR_GRAY_D` | `Surface.card` 默认偏移约 2 |
 
@@ -258,19 +658,21 @@ Hero：封面 / 书名 / 作者 / 分类·系列 / 摘要 / 进度
 
 阅读正文和排版由 KOReader 管理，Book 只增加轻量入口，不复制原生阅读设置。
 
-### 5.1 阅读控制台
+### 5.1 原生快捷面板
 
-中部点按打开悬浮控制台，控制台上下两组等宽动作，中间保留关闭热区：
+阅读动作注入 KOReader 原生顶部菜单，不额外创建覆盖正文的中部控制台。接线由 `ui/panel/native.lua` 完成，动作状态和调度收口在 `ui/panel/reader.lua` 与 `ui/panel/actions/registry.lua`。
+
+默认阅读动作依次为：
 
 ```text
-顶部：阅读风格 | 阅读字体 | 阅读设置
-底部：目录     | 书签       | 书签与高亮
+目录 | 阅读字体 | 优化排版 | 高亮 | X-Ray
 ```
 
-- 使用 `UI.barH()` 作为上下栏高度，图标与文案纵向排列。
-- 当前激活项使用 `UI.actionSurface()`、黑色文字和 cfont；普通项使用 `UI.surface()`、灰阶层级。
-- 字体、目录、书签、OCR、AI 和 X-Ray 等动作通过 KOReader 或已有模块打开；控制台不持有重复状态。
-- 不支持的能力保持不可用或不显示，不弹出空白页面。
+- 每个动作只描述 `id`、标题、图标、可用性、激活态和执行函数。
+- 不支持的动作根据 `available` 隐藏，不打开空页面。
+- 排序和启停保存到快捷面板配置，固定动作不能被错误移除。
+- 动作调用 KOReader 或已有领域模块，不复制目录、字体、高亮和 X-Ray 状态。
+- 桌面快捷动作使用同一注册表契约，但与阅读动作分别排序和配置。
 
 ### 5.2 阅读状态条
 
@@ -290,7 +692,7 @@ Hero：封面 / 书名 / 作者 / 分类·系列 / 摘要 / 进度
 |---|---|---|
 | 是否接管 | `lock_screen` | `ko` / `compose` |
 | 背景 | `lock_screen_background` | 自定义、必应、当前封面、文件夹、无 |
-| 主体 | `lock_screen_component` | 阅读统计、当前阅读、一言、高亮、阅读账单、自定义留言、摸鱼日报、书架、无 |
+| 主体 | `lock_screen_component` | `stats`、`hitokoto`、`highlight`、`current`、`receipt`、`bill`、`message`、`myrl`、`bookshelf`、`poster`、`none` |
 | 位置 | `lock_screen_position` | 九宫格 `top/center/bottom × left/center/right` |
 | 形态 | `lock_screen_wide` | 宽屏 / 窄屏；统计和账单固定宽屏 |
 
@@ -356,7 +758,10 @@ Hero：封面 / 书名 / 作者 / 分类·系列 / 摘要 / 进度
 | `ui/components/chart.lua` | 桌面和锁屏柱图/折线图 |
 | `ui/desktop.lua` | 桌面壳、Tab、手势和生命周期 |
 | `ui/desktop/*.lua` | 首页、图书馆、书城、统计、设置和详情内容 |
-| `ui/reader.lua` / `ui/reader/` | 阅读期入口、控制台、状态条和原生菜单注入 |
+| `ui/reader.lua` / `ui/reader/` | 阅读会话、状态条、划词菜单和结束处理 |
+| `ui/panel/native.lua` | 向 KOReader 原生顶部菜单注入快捷动作 |
+| `ui/panel/reader.lua` / `ui/panel/desktop.lua` | 阅读与桌面动作调度 |
+| `ui/panel/actions/registry.lua` | 快捷动作注册、顺序、可用性和激活态 |
 | `lockscreen/layout.lua` | 锁屏面板和九宫格布局 |
 | `lockscreen/compose.lua` | 背景 × 主体的组合和缓存键 |
 | `lockscreen/render.lua` | 纯数据块到 PNG 的离屏渲染 |
@@ -377,4 +782,4 @@ Hero：封面 / 书名 / 作者 / 分类·系列 / 摘要 / 进度
 - [ ] 详情、阅读页、锁屏和原生 KOReader UI 没有互相覆盖错误的生命周期或状态。
 - [ ] 已运行相关测试，并在模拟器或实际设备上检查不同屏幕尺寸与 UI 缩放。
 
-规范的目标不是让每个页面长得一模一样，而是让每个页面都遵守同一套数据优先、灰阶、尺寸和交互契约。
+本文档的目标不是冻结代码，而是固定真正不能混乱的边界：身份跟物理路径走，业务状态按来源隔离，远端数据收敛到本地，重活离开 UI 线程，界面遵守同一套墨水屏组件契约。
