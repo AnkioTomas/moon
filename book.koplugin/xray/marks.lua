@@ -8,19 +8,14 @@ require("l10n").apply()
 
 local Text = require("utils.text")
 local UIManager = require("ui/uimanager")
-local Context = require("xray.context")
-local logger = require("utils.log")
 local _ = require("gettext")
 
 local Marks = {
     view = nil,
     ui = nil,
-    _matches = {},
-    _matches_key = nil,
     _marks = {},
     _render_key = nil,
     _revision = 0,
-    _scan_job = nil,
     _scan_pending = nil,
 }
 
@@ -72,22 +67,28 @@ local function screenSize(ui)
     return nil, nil
 end
 
---- 滚动文档（CreDocument）与分页文档（PDF/DJVU）的 findAllText 签名不同。
----@param document table
----@param is_reflow boolean
----@param text string
----@param max_hits integer
----@return table|nil
-local function findMatches(document, is_reflow, text, max_hits)
-    if not document or not document.findAllText then
-        return nil
+--- 读取阅读器实时页码；session.page 可能晚于当前绘制帧。
+---@param ui table|nil
+---@return integer
+local function currentPage(ui)
+    if ui and ui.getCurrentPage then
+        local ok, page = pcall(ui.getCurrentPage, ui)
+        if ok and tonumber(page) then return tonumber(page) end
     end
-    if is_reflow then
-        local ok, matches = pcall(document.findAllText, document, text, true, 0, max_hits, false)
-        return ok and matches or nil
+    local paging = ui and ui.paging
+    if paging and tonumber(paging.current_page) then
+        return tonumber(paging.current_page)
     end
-    local ok, matches = pcall(document.findAllText, document, text, true, 0, max_hits)
-    return ok and matches or nil
+    local rolling = ui and ui.rolling
+    if rolling and tonumber(rolling.current_page) then
+        return tonumber(rolling.current_page)
+    end
+    local document = ui and ui.document
+    if document and document.getCurrentPage then
+        local ok, page = pcall(document.getCurrentPage, document)
+        if ok and tonumber(page) then return tonumber(page) end
+    end
+    return 0
 end
 
 --- 展平实体名与别名，并去重。
@@ -113,19 +114,28 @@ local function collectNames(entities)
     return names
 end
 
---- 把 xpointer / page boxes 匹配解析成当前屏幕上的框。
+---@param box table|nil
+---@param width number|nil
+---@param height number|nil
+---@return boolean
+local function intersectsScreen(box, width, height)
+    return box ~= nil and box.x ~= nil and box.y ~= nil and box.w ~= nil and box.h ~= nil
+        and box.w > 0 and box.h > 0
+        and (not width or (box.x < width and box.x + box.w > 0))
+        and (not height or (box.y < height and box.y + box.h > 0))
+end
+
+--- 仅查当前可见页，并直接解析成屏幕框。
 ---@param ui table
----@param matches table[]
+---@param entities table[]
 ---@return table[]
-local function resolveMarks(ui, matches)
+local function scanVisibleMarks(ui, entities)
     local document = ui and ui.document
     if not document then
         return {}
     end
-    local is_reflow = document.getScreenBoxesFromPositions ~= nil
     local width, height = screenSize(ui)
     local out = {}
-    local page = is_reflow and 0 or Context.currentPage()
 
     local function addMark(entity, box)
         out[#out + 1] = {
@@ -134,44 +144,59 @@ local function resolveMarks(ui, matches)
         }
     end
 
-    for index, item in ipairs(matches) do
-        local match = item.match
-        local entity = item.entity
-        if is_reflow then
-            local start_xp = match and match.start
-            local end_xp = match and match["end"]
-            if start_xp and end_xp then
-                local ok, boxes = pcall(document.getScreenBoxesFromPositions, document, start_xp, end_xp, true)
-                if ok and boxes then
-                    for index, box in ipairs(boxes) do
-                        if type(box) == "table" and box.x and box.y and box.w and box.h then
-                            if (not height or (box.y >= 0 and box.y < height))
-                                and (not width or (box.x >= 0 and box.x < width)) then
-                                addMark(entity, box)
+    local names = collectNames(entities)
+    if document.getScreenBoxesFromPositions and document.findText then
+        for _, item in ipairs(names) do
+            -- CRE 的 findText 只搜索当前视口附近有限高度；结果仍按屏幕相交严格裁剪。
+            local ok, matches = pcall(document.findText, document,
+                item.name, 0, 0, true, nil, false, 5000, 0)
+            if ok and matches then
+                for _, match in ipairs(matches) do
+                    local start_xp = match and match.start
+                    local end_xp = match and match["end"]
+                    if start_xp and end_xp then
+                        local boxes_ok, boxes = pcall(document.getScreenBoxesFromPositions,
+                            document, start_xp, end_xp, true)
+                        if boxes_ok and boxes then
+                            for _, box in ipairs(boxes) do
+                                if intersectsScreen(box, width, height) then
+                                    addMark(item.entity, box)
+                                end
                             end
                         end
                     end
                 end
             end
-        else
-            if match and match.start and match.start == page and match.boxes and page > 0 then
-                for index, native in ipairs(match.boxes) do
-                    local page_box = native
-                    if document.nativeToPageRectTransform then
-                        local ok, transformed = pcall(document.nativeToPageRectTransform, document, page, native)
-                        if ok and transformed then
-                            page_box = transformed
-                        end
-                    end
-                    local view = ui.view
-                    if view and view.pageToScreenTransform then
-                        local ok, screen_box = pcall(view.pageToScreenTransform, view, page, page_box)
-                        if ok and screen_box then
-                            addMark(entity, screen_box)
-                        end
+        end
+        -- findText 会把最后一次命中写进 CRE 原生 selection；X-Ray 只需要坐标。
+        if document.clearSelection then
+            pcall(document.clearSelection, document)
+        end
+        return out
+    end
+
+    local page = currentPage(ui)
+    local kopt = document.koptinterface
+    if page < 1 or not kopt or not kopt.findAllMatches then
+        return out
+    end
+    for _, item in ipairs(names) do
+        local ok, boxes = pcall(kopt.findAllMatches, kopt, document, item.name, true, page)
+        if ok and boxes then
+            for _, page_box in ipairs(boxes) do
+                local screen_box = page_box
+                local view = ui.view
+                if view and view.pageToScreenTransform then
+                    local transformed_ok, transformed = pcall(
+                        view.pageToScreenTransform, view, page, page_box)
+                    if transformed_ok and transformed then
+                        screen_box = transformed
                     else
-                        addMark(entity, page_box)
+                        screen_box = nil
                     end
+                end
+                if screen_box and intersectsScreen(screen_box, width, height) then
+                    addMark(item.entity, screen_box)
                 end
             end
         end
@@ -179,37 +204,21 @@ local function resolveMarks(ui, matches)
     return out
 end
 
---- 清空命中与当前屏幕标记；旧扫描任务完成后会按缓存键自行作废。
+--- 清空当前屏幕标记；已排队任务会按缓存键自行作废。
 ---@param self table
 local function resetMarks(self)
-    self._matches = {}
-    self._matches_key = nil
     self._marks = {}
     self._render_key = nil
+    self._scan_pending = nil
 end
 
---- 全书扫描结果的缓存键：身份 + 章节 + 实体数量 + 内存修订号。
---- 实体写入路径会主动 invalidate，无须每次绘制都遍历更新时间戳。
----@param entities table[]
----@return string|nil 无阅读会话时 nil
-local function scanKey(entities)
-    local cur = require("ui.reader.session").current()
-    if not cur or not cur.identity then
-        return nil
-    end
-    return table.concat({
-        cur.identity.source_id, cur.identity.stable_id,
-        tostring(cur.identity.chapter_idx or 0), tostring(#entities), tostring(Marks._revision),
-    }, "\0")
-end
-
---- 屏幕框解析结果的缓存键：在扫描键基础上再加屏幕尺寸、页码与滚动位置。
+--- 当前视口缓存键：身份 + 实体修订号 + 屏幕尺寸 + 实时页码/滚动位置。
 ---@param ui table
 ---@param entities table[]
 ---@return string|nil 无阅读会话时 nil
 local function renderKey(ui, entities)
-    local key = scanKey(entities)
-    if not key then
+    local cur = require("ui.reader.session").current()
+    if not cur or not cur.identity then
         return nil
     end
     local w, h = screenSize(ui)
@@ -220,9 +229,42 @@ local function renderKey(ui, entities)
         if ok then pos = tostring(p or "") end
     end
     return table.concat({
-        key, tostring(w or 0), tostring(h or 0),
-        tostring(Context.currentPage()), pos,
+        cur.identity.source_id, cur.identity.stable_id,
+        tostring(cur.identity.chapter_idx or 0), tostring(#entities), tostring(Marks._revision),
+        tostring(w or 0), tostring(h or 0), tostring(currentPage(ui)), pos,
     }, "\0")
+end
+
+--- 把当前页扫描排到首帧之后；快速翻页时旧键任务直接作废。
+---@param self table
+---@param key string
+---@param entities table[]
+local function scheduleScan(self, key, entities)
+    if self._scan_pending == key then
+        return
+    end
+    self._scan_pending = key
+    local ui = self.ui
+    UIManager:nextTick(function()
+        if self._scan_pending ~= key or self.ui ~= ui then
+            return
+        end
+        if not Marks.enabled() or renderKey(ui, entities) ~= key then
+            if self._scan_pending == key then self._scan_pending = nil end
+            return
+        end
+        local marks = scanVisibleMarks(ui, entities)
+        if self._scan_pending ~= key or self.ui ~= ui
+            or not Marks.enabled() or renderKey(ui, entities) ~= key then
+            return
+        end
+        self._scan_pending = nil
+        self._marks = marks
+        self._render_key = key
+        if ui.dialog then
+            UIManager:setDirty(ui.dialog, "ui")
+        end
+    end)
 end
 
 ---@param pos table|nil
@@ -237,12 +279,9 @@ local function hitScreenBox(pos, box)
         and pos.y >= box.y - pad and pos.y <= box.y + box.h + 2
 end
 
---- 丢弃扫描与渲染缓存并重绘阅读视图（实体增删改或开关变化后调用）。
+--- 丢弃当前页缓存并重绘阅读视图（实体增删改或开关变化后调用）。
 function Marks.invalidate()
     Marks._revision = Marks._revision + 1
-    if Marks._scan_job then Marks._scan_job:cancel() end
-    Marks._scan_job = nil
-    Marks._scan_pending = nil
     resetMarks(Marks)
     if Marks.ui and Marks.ui.dialog then
         UIManager:setDirty(Marks.ui.dialog, "ui")
@@ -252,124 +291,24 @@ function Marks.invalidate()
     end
 end
 
---- 用子进程扫描整本书，完成后重绘。
----
---- 实体已在主进程读库；Job 只使用 fork 继承的 document，禁止在子进程碰数据库。
---- 匹配按小批次回传，避免一次结果超过 Worker IPC 的帧上限。
----@param key string 本次扫描对应的 scanKey
----@param entities table[]
-function Marks:scheduleScan(key, entities)
-    if self._scan_pending == key then
-        return
-    end
-    if self._scan_job then
-        self._scan_job:cancel()
-        self._scan_job = nil
-    end
-    self._scan_pending = key
-    local ui = self.ui
-    local document = ui and ui.document
-    local file = document and document.file
-    if not file then
-        self._scan_pending = nil
-        self._matches = {}
-        self._matches_key = key
-        return
-    end
-    local names = collectNames(entities)
-    local out = {}
-    self._scan_job = require("workers.job").run(function(ctx)
-        local DocumentRegistry = require("document/documentregistry")
-        local ReaderUI = require("apps/reader/readerui")
-        local provider = ReaderUI:extendProvider(file, DocumentRegistry:getProvider(file))
-        local scan_document = DocumentRegistry:openDocument(file, provider)
-        if not scan_document then error("cannot open scan document") end
-
-        local ok, err = xpcall(function()
-            if scan_document.loadDocument then
-                -- 子进程只做搜索，不得写入与主进程共用的 CRE cache。
-                local cre = require("document/credocument"):engineInit()
-                cre.initCache("", 0, true, 40)
-                if not scan_document:loadDocument() then
-                    error("cannot load scan document")
-                end
-            end
-            local is_reflow = scan_document.getScreenBoxesFromPositions ~= nil
-            for name_index, item in ipairs(names) do
-                local matches = findMatches(scan_document, is_reflow, item.name, 5000) or {}
-                for first = 1, #matches, 100 do
-                    local batch = {}
-                    for match_index = first, math.min(first + 99, #matches) do
-                        batch[#batch + 1] = matches[match_index]
-                    end
-                    ctx.post({ name_index = name_index, matches = batch })
-                end
-            end
-        end, debug.traceback)
-        scan_document:close()
-        if not ok then
-            error(err)
-        end
-        return true
-    end, {
-        name = "xray.scan",
-        timeout = 120,
-        on_progress = function(message)
-            if self._scan_pending ~= key or self.ui ~= ui then return end
-            local item = names[tonumber(message.name_index)]
-            if not item then return end
-            for match_index, match in ipairs(message.matches or {}) do
-                out[#out + 1] = { entity = item.entity, match = match }
-            end
-        end,
-        on_done = function()
-            if self._scan_pending ~= key or self.ui ~= ui
-                or not Marks.enabled() or scanKey(entities) ~= key then
-                return
-            end
-            self._scan_job = nil
-            self._scan_pending = nil
-            self._matches = out
-            self._matches_key = key
-            self._render_key = nil
-            if ui.dialog then UIManager:setDirty(ui.dialog, "ui") end
-        end,
-        on_failed = function(err)
-            if self._scan_pending ~= key or self.ui ~= ui then return end
-            self._scan_job = nil
-            self._scan_pending = nil
-            self._matches = {}
-            self._matches_key = key
-            logger.warn("book.xray scan failed", err)
-        end,
-    })
-end
-
---- 按需重算当前屏幕上的标记框：扫描键变了就排一次异步全书重扫，
---- 渲染键变了才重解析屏幕坐标。未开启或无阅读会话时清空标记。
+--- 当前视口变化时排一次页内扫描；绘制路径自身不执行文本搜索。
 function Marks:rebuild()
     if not self.ui or not Marks.enabled() then
         resetMarks(self)
         return
     end
     local entities = loadEntities()
-    local matches_key = scanKey(entities)
-    if not matches_key then
+    local key = renderKey(self.ui, entities)
+    if not key then
         resetMarks(self)
         return
     end
-    if matches_key ~= self._matches_key then
-        -- 旧命中属于别的书/别的实体集合，画出来就是错位下划线
-        resetMarks(self)
-        self:scheduleScan(matches_key, entities)
+    if key == self._render_key or key == self._scan_pending then
         return
     end
-    local r_key = renderKey(self.ui, entities)
-    if r_key == self._render_key then
-        return
-    end
-    self._render_key = r_key
-    self._marks = resolveMarks(self.ui, self._matches)
+    self._marks = {}
+    self._render_key = nil
+    scheduleScan(self, key, entities)
 end
 
 ---@param bb any
@@ -469,8 +408,6 @@ function Marks.install(ui)
         return
     end
     ui._book_xray_marks = true
-    if Marks._scan_job then Marks._scan_job:cancel() end
-    Marks._scan_job = nil
     Marks._scan_pending = nil
     Marks.ui = ui
     if ui.view and ui.view.registerViewModule then
