@@ -81,11 +81,16 @@ function BookDB.upsertRemote(row)
           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,0)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             md5=COALESCE(excluded.md5, books.md5),
-            title=CASE WHEN books.metadata_dirty=0 THEN excluded.title ELSE books.title END,
-            authors=CASE WHEN books.metadata_dirty=0 THEN excluded.authors ELSE books.authors END,
-            category=CASE WHEN books.metadata_dirty=0 THEN excluded.category ELSE books.category END,
-            series=CASE WHEN books.metadata_dirty=0 THEN excluded.series ELSE books.series END,
-            intro=CASE WHEN books.metadata_dirty=0 THEN excluded.intro ELSE books.intro END,
+            title=CASE WHEN books.metadata_dirty=0
+                THEN COALESCE(excluded.title, books.title) ELSE books.title END,
+            authors=CASE WHEN books.metadata_dirty=0
+                THEN COALESCE(excluded.authors, books.authors) ELSE books.authors END,
+            category=CASE WHEN books.metadata_dirty=0
+                THEN COALESCE(excluded.category, books.category) ELSE books.category END,
+            series=CASE WHEN books.metadata_dirty=0
+                THEN COALESCE(excluded.series, books.series) ELSE books.series END,
+            intro=CASE WHEN books.metadata_dirty=0
+                THEN COALESCE(excluded.intro, books.intro) ELSE books.intro END,
             percent=excluded.percent,
             fetched_at=excluded.fetched_at,
             path=COALESCE(excluded.path, books.path),
@@ -132,11 +137,16 @@ function BookDB.upsertRemoteMany(rows)
               ) VALUES ]] .. table.concat(values, ",") .. [[
               ON CONFLICT(source_id, stable_id) DO UPDATE SET
                 md5=COALESCE(excluded.md5, books.md5),
-                title=CASE WHEN books.metadata_dirty=0 THEN excluded.title ELSE books.title END,
-                authors=CASE WHEN books.metadata_dirty=0 THEN excluded.authors ELSE books.authors END,
-                category=CASE WHEN books.metadata_dirty=0 THEN excluded.category ELSE books.category END,
-                series=CASE WHEN books.metadata_dirty=0 THEN excluded.series ELSE books.series END,
-                intro=CASE WHEN books.metadata_dirty=0 THEN excluded.intro ELSE books.intro END,
+                title=CASE WHEN books.metadata_dirty=0
+                    THEN COALESCE(excluded.title, books.title) ELSE books.title END,
+                authors=CASE WHEN books.metadata_dirty=0
+                    THEN COALESCE(excluded.authors, books.authors) ELSE books.authors END,
+                category=CASE WHEN books.metadata_dirty=0
+                    THEN COALESCE(excluded.category, books.category) ELSE books.category END,
+                series=CASE WHEN books.metadata_dirty=0
+                    THEN COALESCE(excluded.series, books.series) ELSE books.series END,
+                intro=CASE WHEN books.metadata_dirty=0
+                    THEN COALESCE(excluded.intro, books.intro) ELSE books.intro END,
                 percent=excluded.percent,
                 fetched_at=excluded.fetched_at,
                 path=COALESCE(excluded.path, books.path),

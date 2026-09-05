@@ -191,6 +191,8 @@ do
     Assert.eq(q.args[12], 0, "新缓存行默认不进入书架")
     Assert.eq(q.args[13], 0, "未指定成员关系时冲突行必须保留原值")
     Assert.is_true(q.sql:find("CASE WHEN ?=1 THEN excluded.in_library ELSE books.in_library END", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("COALESCE(excluded.intro, books.intro)", 1, true) ~= nil,
+        "稀疏远端行不得清空已有简介")
 
     Assert.is_true(BookDB.upsertRemote({
         source_id = "moon", stable_id = "shelf.epub", in_library = true,
@@ -220,6 +222,8 @@ do
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
             Assert.eq(call.argc, 22) -- 2 行 × 11 个绑定参数，in_library 由 SQL 常量置 1
+            Assert.is_true(call.sql:find("COALESCE(excluded.intro, books.intro)", 1, true) ~= nil,
+                "书架批量对账不得用 NULL 清空已有简介")
             -- NULL 列不得让后续列左移：md5 为空时 title 仍在第 4 位
             Assert.eq(call.args[1], "moon")
             Assert.is_nil(call.args[3])
