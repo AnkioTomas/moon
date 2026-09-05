@@ -91,14 +91,17 @@ function Pinyin.dictStatus()
     return string.format("%s · %s", entries, built_at)
 end
 
---- 手动下载或更新词库；网络不可用时由 NetworkMgr 延后执行。
+--- 手动下载或更新词库；离线时立即失败，由用户恢复网络后手动重试。
 ---@param cb fun(ok: boolean, err: any)|nil
 ---@param on_progress fun(stage: string, done: number|nil, total: number|nil, idx: number|nil, count: number|nil)|nil
 function Pinyin.downloadDict(cb, on_progress)
     local NetworkMgr = require("ui/network/manager")
-    NetworkMgr:runWhenOnline(function()
-        require("pinyin.download").ensure(cb, on_progress)
-    end)
+    cb = cb or function() end
+    if not NetworkMgr:isOnline() then
+        cb(false, _("网络不可用，请先连接 Wi-Fi"))
+        return
+    end
+    require("pinyin.download").ensure(cb, on_progress)
 end
 
 return Pinyin
