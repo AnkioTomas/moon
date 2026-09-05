@@ -12,6 +12,15 @@ local Mapper = {}
 
 local SOURCE_ID = "moon"
 
+---@param value any
+---@return number|nil
+local function percentNumber(value)
+    if type(value) == "string" then
+        value = value:match("^%s*([%+%-]?[%d%.]+)%%?%s*$")
+    end
+    return tonumber(value)
+end
+
 --- 从列表行提取稳定书 ID（filename 优先）。
 ---@param row table|nil
 ---@return string|nil
@@ -136,16 +145,18 @@ function Mapper.progress(wire)
         return nil
     end
     local finished = userFinished(node)
-    local percent = Book.clampPercent(
-        node.percent or node.progress or node.progressPercent or node.readingProgress,
-        finished
+    local percent = percentNumber(
+        node.percent or node.progress or node.progressPercent or node.readingProgress
     )
+    local fraction = percent and ProgressPosition.clampFraction(percent / 100)
+        or ProgressPosition.clampFraction(node.frac)
+    if finished then fraction = 1 end
     local updated_at = tonumber(node.timestamp or node.progressTimestamp or node.readUpdateTime)
     if updated_at and updated_at > 1e12 then
         updated_at = math.floor(updated_at / 1000)
     end
     return {
-        fraction = ProgressPosition.clampFraction(percent / 100),
+        fraction = fraction,
         chapter_idx = tonumber(node.chapter_idx or node.chapterIdx or node.spine),
         page = tonumber(node.page or node.pageIndex),
         -- 服务端在 locator 过期时回空串；归一成 nil，免得下游到处判空串。

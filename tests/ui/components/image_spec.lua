@@ -1,4 +1,4 @@
---[[-- ui.components.image：图片解码采用两个并发槽，并正确补位/取消。 --]]
+--[[-- ui.components.image：图片下载/解码采用有限并发，并正确补位/取消。 --]]
 
 local Assert = require("support.assert")
 local Config = require("support.config")
@@ -159,11 +159,17 @@ for i = 10, 16 do
     }
 end
 Assert.eq(#downloads, before_abort + download_limit)
+local direct = Image.fetchAsync("https://example.test/direct.png", nil, function() end)
 Image.abortPending()
-Assert.eq(#downloads, before_abort + download_limit, "批量取消时不得启动队列中的下载")
+Assert.eq(#downloads, before_abort + download_limit + 1,
+    "批量取消不得丢弃不属于 Widget 的排队下载")
 for i = before_abort + 1, #downloads do
-    Assert.is_true(downloads[i].cancelled)
+    if downloads[i].opts.url ~= "https://example.test/direct.png" then
+        Assert.is_true(downloads[i].cancelled)
+    end
 end
+Assert.eq(downloads[#downloads].opts.url, "https://example.test/direct.png")
+direct.cancel()
 
 os.remove(image_path)
 

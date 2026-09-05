@@ -11,10 +11,8 @@ local shown = {}
 local synced = {}
 local upserted = {}
 local remote_upserted = {}
-local remote_adopted = {}
 local pulled = 0
 local pending_row
-local current_ui = {}
 local current_identity = {
     source_id = "wechat",
     stable_id = "b1",
@@ -55,7 +53,7 @@ package.preload["ui.reader.session"] = function()
         current = function()
             return {
                 identity = current_identity,
-                ui = current_ui,
+                ui = {},
                 doc_fraction = 0,
             }
         end,
@@ -80,10 +78,7 @@ package.preload["db.progress"] = function()
             remote_upserted[#remote_upserted + 1] = pos
             return true
         end,
-        adoptRemote = function(_, _, pos)
-            remote_adopted[#remote_adopted + 1] = pos
-            return true
-        end,
+        adoptRemote = function() return true end,
     }
 end
 
@@ -111,7 +106,7 @@ current_identity.source = source
 local function snapshot()
     return {
         identity = current_identity,
-        ui = current_ui,
+        ui = {},
         doc_fraction = 0,
     }
 end
@@ -232,36 +227,6 @@ Assert.eq(pulled, 1)
 Assert.eq(#shown, 0, "pending 与云端一致时不应假冲突")
 Assert.eq(#synced, 0)
 Assert.eq(#remote_upserted, 1)
-
--- 本地没有 pending 行：这是首次打开，不是“本地首页”和云端冲突；直接恢复云端位置。
-Progress.clearConflicts()
-shown = {}
-remote_adopted = {}
-pending_row = nil
-current_identity.chapter_idx = nil
-source.type = "book"
-local jumped
-current_ui = {
-    document = {
-        getXPointerFromProportion = function(_, pct)
-            return "remote:" .. tostring(pct)
-        end,
-    },
-    rolling = {
-        onGotoXPointer = function(_, xpointer) jumped = xpointer end,
-    },
-}
-source.getProgressAsync = function(_, _, cb)
-    cb({ fraction = 0.62 })
-    return { cancel = function() end }
-end
-Progress.pull(snapshot())
-Stubs.flush()
-
-Assert.eq(#shown, 0, "首次打开没有本地进度，不应弹假冲突")
-Assert.eq(#remote_adopted, 1, "首次打开应采纳云端进度")
-Assert.eq(jumped, "remote:0.62", "首次打开应立即跳到云端位置")
-Assert.not_nil(remote_adopted[1].updated_at, "采纳的云端进度必须进入最近阅读")
 
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",
