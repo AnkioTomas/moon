@@ -13,15 +13,15 @@ local CANGJIE = {
     a = "日", b = "月", c = "金", d = "木", e = "水", f = "火", g = "土",
     h = "竹", i = "戈", j = "十", k = "大", l = "中", m = "一", n = "弓",
     o = "人", p = "心", q = "手", r = "口", s = "尸", t = "廿", u = "山",
-    v = "女", w = "田", x = "難", y = "卜", z = "符",
+    v = "女", w = "田", x = "難", y = "卜",
 }
 
 local WUBI = {
-    q = "金勹儿", w = "人亻八", e = "月彡乃", r = "白扌斤", t = "禾竹攵",
-    y = "言讠方", u = "立辛门", i = "水氵小", o = "火灬米", p = "之宀辶",
-    a = "工艹匚", s = "木丁西", d = "大犬石", f = "土士十", g = "王一五",
-    h = "目止卜", j = "日刂虫", k = "口川", l = "田囗车",
-    x = "纟幺弓", c = "又巴马", v = "女刀九", b = "子耳阝", n = "已尸心", m = "山贝冂",
+    q = "金", w = "人", e = "月", r = "白", t = "禾",
+    y = "言", u = "立", i = "水", o = "火", p = "之",
+    a = "工", s = "木", d = "大", f = "土", g = "王",
+    h = "目", j = "日", k = "口", l = "田",
+    x = "纟", c = "又", v = "女", b = "子", n = "已", m = "山",
 }
 
 local ZHUYIN = {
@@ -50,12 +50,6 @@ local function mappedKey(map, key)
     return symbol, symbol
 end
 
-local function codedKey(labels, key)
-    if type(key) ~= "string" or not key:match("^%a$") then return nil end
-    local code = key:lower()
-    return code, labels[code] or code
-end
-
 local METHODS = {
     pinyin = {
         id = "pinyin",
@@ -69,7 +63,7 @@ local METHODS = {
         commit_space = true,
         labels = WUBI,
         show_codes = true,
-        mapKey = function(key) return codedKey(WUBI, key) end,
+        mapKey = letterKey,
     },
     cangjie = {
         id = "cangjie",
@@ -77,7 +71,7 @@ local METHODS = {
         commit_space = true,
         labels = CANGJIE,
         show_codes = true,
-        mapKey = function(key) return codedKey(CANGJIE, key) end,
+        mapKey = letterKey,
     },
     zhuyin = {
         id = "zhuyin",

@@ -388,7 +388,7 @@ do
     Assert.is_true(kb.KEYS[1][2].width > 0, "占位键宽必须有效（addKeys 基准行）")
 end
 
--- 形码内部仍查 ASCII 编码，但输入框显示用户实际按下的字根。
+-- 仓颉键帽显示字根，但预编辑和词库查询都使用字母编码。
 do
     local pinyin_profile = current_profile
     local roots = { o = "人", n = "弓" }
@@ -398,16 +398,16 @@ do
         labels = roots,
         mapKey = function(key)
             key = type(key) == "string" and key:lower() or nil
-            if key and roots[key] then return key, roots[key] end
+            if key and roots[key] then return key, key end
         end,
     }
     local kb = newKeyboard()
     typeCode(kb, "on")
-    Assert.eq(text(kb), "人弓", "仓颉预编辑必须显示字根而不是 on")
+    Assert.eq(text(kb), "on", "仓颉预编辑必须显示字母编码")
     flush()
     Assert.eq(lookup_calls[#lookup_calls], "on", "仓颉词库仍按 ASCII 码查询")
     VK.delChar(kb)
-    Assert.eq(text(kb), "人", "退格按一个字根删除")
+    Assert.eq(text(kb), "o", "退格按一个编码字母删除")
     kb:onCloseWidget()
     current_profile = pinyin_profile
 end

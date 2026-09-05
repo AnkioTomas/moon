@@ -409,12 +409,12 @@ do
     current_profile = {
         id = "wubi",
         commit_space = true,
-        labels = { q = "金勹儿" },
+        labels = { q = "金" },
         show_codes = true,
         mapKey = pinyin_profile.mapKey,
     }
     local wubi = newKeyboard()
-    Assert.eq(wubi.layout[3][1].label, "金勹儿")
+    Assert.eq(wubi.layout[3][1].label, "金")
     Assert.eq(wubi.layout[3][1].alt_label, "Q")
     current_profile = pinyin_profile
 end
