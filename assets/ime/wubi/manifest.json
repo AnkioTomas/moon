@@ -1,0 +1,14 @@
+{
+  "tag": "KyleBing/rime-wubi86-jidian@master",
+  "built_at": "2026-09-05 23:20:24",
+  "entries": 91443,
+  "raw_sha256": "6aa14c7434bed3379b8ae18aea9e3d065e42aa66d80207e0c17b314433502d91",
+  "raw_size": 3977216,
+  "parts": [
+    {
+      "file": "dictionary.sqlite3.part.001",
+      "size": 3977216,
+      "sha256": "6aa14c7434bed3379b8ae18aea9e3d065e42aa66d80207e0c17b314433502d91"
+    }
+  ]
+}

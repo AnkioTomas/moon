@@ -1,0 +1,14 @@
+{
+  "tag": "Jackchows/Cangjie5@master",
+  "built_at": "2026-09-05 23:20:13",
+  "entries": 132419,
+  "raw_sha256": "f6ed87e9f57dcd16f682c75a944684f4f4721f64c154cbcfb5327c9c4ad4b789",
+  "raw_size": 5050368,
+  "parts": [
+    {
+      "file": "dictionary.sqlite3.part.001",
+      "size": 5050368,
+      "sha256": "f6ed87e9f57dcd16f682c75a944684f4f4721f64c154cbcfb5327c9c4ad4b789"
+    }
+  ]
+}
