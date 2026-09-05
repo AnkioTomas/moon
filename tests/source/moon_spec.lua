@@ -152,12 +152,6 @@ function client:listBooksAsync(query, cb)
     return { cancel = function() end }
 end
 
-function client:recentBooksAsync(limit, cb)
-    rec.recent_limit = limit
-    cb(rec.recent_wire, rec.recent_err)
-    return { cancel = function() end }
-end
-
 function client:filtersAsync(cb)
     cb(rec.filters_wire, rec.filters_err)
     return { cancel = function() end }
@@ -249,34 +243,13 @@ do
     Assert.eq(result.pulled, 1)
 end
 
--- 最近阅读直接使用服务端顺序，并把元数据与进度保存到本地供离线回退。
+-- 最近阅读统一读取本地 pending_progress；Moon 不得为首页另开远端协议。
 do
     resetRec()
-    rec.recent_wire = {
-        data = {
-            {
-                filename = "recent.epub",
-                title = "最近",
-                progressPercent = 42,
-                progressTimestamp = 1700000000000,
-            },
-        },
-        count = 1,
-    }
     local result
     src:recentBooksAsync(8, function(value) result = value end)
-    Assert.eq(rec.recent_limit, 8)
-    Assert.eq(result.data[1].stable_id, "recent.epub")
-    Assert.eq(rec.remembered_books[1].stable_id, "recent.epub")
-    Assert.is_true(rec.remembered_books[1].in_library)
-    Assert.eq(rec.remote_progress[1].stable_id, "recent.epub")
-    Assert.eq(rec.remote_progress[1].pos.fraction, 0.42)
-    Assert.eq(rec.remote_progress[1].pos.updated_at, 1700000000)
-
-    resetRec()
-    rec.recent_err = "offline"
-    src:recentBooksAsync(8, function(value) result = value end)
     Assert.eq(rec.recent_fallback.source_id, "moon")
+    Assert.eq(rec.recent_fallback.limit, 8)
     Assert.eq(result.data[1].stable_id, "cached.epub")
 end
 
