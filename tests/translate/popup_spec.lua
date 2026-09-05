@@ -55,6 +55,9 @@ local Button = class({ w = 0, h = 24 })
 function Button:getSize()
     return { w = self.width or 0, h = 24 }
 end
+function Button:setText(text)
+    self.text = text
+end
 
 local Span = class()
 function Span:getSize()
@@ -76,6 +79,27 @@ local CenterContainer = class()
 local TextBoxWidget = class()
 function TextBoxWidget:getSize()
     return { w = self.width, h = self.height }
+end
+function TextBoxWidget:setText(text)
+    self.text = text
+end
+local ScrollTextWidget = class()
+function ScrollTextWidget:new(args)
+    args.text_widget = TextBoxWidget:new{
+        text = args.text,
+        width = args.width,
+        height = args.height,
+    }
+    return setmetatable(args, { __index = self })
+end
+function ScrollTextWidget:getSize()
+    return { w = self.width, h = self.height }
+end
+function ScrollTextWidget:resetScroll()
+    self.reset_calls = (self.reset_calls or 0) + 1
+end
+function ScrollTextWidget:scrollToTop()
+    self.top_calls = (self.top_calls or 0) + 1
 end
 
 local line_calls = {}
@@ -118,6 +142,7 @@ package.preload["ui/widget/horizontalspan"] = function() return Span end
 package.preload["ui/widget/verticalgroup"] = function() return container() end
 package.preload["ui/widget/verticalspan"] = function() return Span end
 package.preload["ui/widget/linewidget"] = function() return LineWidget end
+package.preload["ui/widget/scrolltextwidget"] = function() return ScrollTextWidget end
 package.preload["ui/widget/textboxwidget"] = function() return TextBoxWidget end
 package.preload["ui/widget/titlebar"] = function()
     local TitleBar = class({ w = 0, h = 30 })
@@ -134,7 +159,7 @@ package.preload["ui/size"] = function()
     }
 end
 package.preload["ui/font"] = function() return { getFace = function() return {} end } end
-package.preload["ui/uimanager"] = function() return {} end
+package.preload["ui/uimanager"] = function() return { setDirty = function() end } end
 package.preload["ui.components.popup"] = function() return {} end
 
 local Popup = require("translate.popup")
@@ -151,3 +176,22 @@ Assert.eq(popup.text_box.width, popup.width - 20)
 Assert.eq(#line_calls, 2)
 Assert.eq(line_calls[1].background, "black")
 Assert.eq(line_calls[2].background, "gray")
+
+local detailed_popup = Popup.TranslatePopup:new{
+    translator = {},
+    text = "整页原文",
+    source_lang = "zh",
+    target_lang = "ko",
+    translated = "整页译文",
+    full_page = true,
+}
+Assert.eq(popup.text_box.height, math.floor(800 * 0.26))
+Assert.eq(detailed_popup.text_box.height, math.floor(800 * 0.62))
+Assert.is_true(detailed_popup.text_box.height > popup.text_box.height)
+Assert.is_true(detailed_popup.text_box.scroll_by_pan)
+Assert.eq(detailed_popup.text_box.text_widget.text, "整页译文")
+detailed_popup.translated = string.rep("长译文", 100)
+detailed_popup:refreshView()
+Assert.eq(detailed_popup.text_box.text_widget.text, detailed_popup.translated)
+Assert.eq(detailed_popup.text_box.reset_calls, 1)
+Assert.eq(detailed_popup.text_box.top_calls, 1)

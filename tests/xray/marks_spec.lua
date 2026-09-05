@@ -1,58 +1,17 @@
---[[-- xray.marks：页内实体标记（findAllText → 屏幕框）。 --]]
+--[[-- xray.marks：只扫描当前可见页并映射到屏幕框。 --]]
 
 local Assert = require("support.assert")
--- 全书扫描走后台 Job，测试桩把 Job 完成回调排到 nextTick。
 local Stubs = require("support.stubs")
 Stubs.install()
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
-local job_runs, job_cancels = 0, 0
-local scan_document
-package.preload["workers.job"] = function()
-    return {
-        run = function(worker, opts)
-            job_runs = job_runs + 1
-            local cancelled = false
-            local job = {
-                cancel = function()
-                    cancelled = true
-                    job_cancels = job_cancels + 1
-                end,
-            }
-            require("ui/uimanager"):nextTick(function()
-                if cancelled then return end
-                local ok, result = pcall(worker, {
-                    post = function(message)
-                        if not cancelled and opts.on_progress then opts.on_progress(message) end
-                    end,
-                })
-                if cancelled then return end
-                if ok then
-                    if opts.on_done then opts.on_done(result) end
-                elseif opts.on_failed then
-                    opts.on_failed(result)
-                end
-            end)
-            return job
-        end,
-    }
-end
-package.preload["document/documentregistry"] = function()
-    return {
-        getProvider = function() return "provider" end,
-        openDocument = function() return scan_document end,
-    }
-end
-package.preload["apps/reader/readerui"] = function()
-    return { extendProvider = function(_, _, provider) return provider end }
-end
 package.preload["utils.settings"] = function()
     return { get = function() return {} end }
 end
 package.preload["ui.reader.session"] = function()
     return {
         current = function()
-            return { page = 3, identity = { source_id = "moon", stable_id = "book", chapter_idx = 0 } }
+            return { page = 0, identity = { source_id = "moon", stable_id = "book", chapter_idx = 0 } }
         end,
     }
 end
@@ -66,62 +25,69 @@ end
 
 local entity = { kind = "character", name = "John Doe", aliases = { "John" } }
 
--- 滚动文档（CreDocument）：findAllText 给 xpointer，getScreenBoxesFromPositions 给屏幕框。
+-- 滚动文档（CreDocument）：下一 tick 只调用视口 findText，不碰全书 findAllText。
 package.preload["db.xray"] = function()
     return { list = function() return { entity } end }
 end
 package.loaded["db.xray"] = nil
 package.loaded["xray.ui"] = nil
 
+local current_pos = 0
+local find_calls = {}
 Marks.ui = {
     getCurrentPage = function() return 1 end,
     dialog = {},
     view = { dimen = { w = 100, h = 50 } },
     document = {
-        findAllText = function(document, pattern)
+        getCurrentPos = function() return current_pos end,
+        findAllText = function()
+            error("X-Ray must not scan the whole document")
+        end,
+        findText = function(document, pattern)
+            find_calls[#find_calls + 1] = { pattern = pattern, pos = current_pos }
             if pattern == "John Doe" then return { { start = "xp0", ["end"] = "xp1" } } end
             if pattern == "John" then return { { start = "xp2", ["end"] = "xp3" } } end
             return {}
         end,
         getScreenBoxesFromPositions = function(document, start_xp, end_xp)
             if start_xp == "xp0" then return { { x = 0, y = 0, w = 80, h = 20 } } end
+            -- 左上角出屏但矩形仍与屏幕相交，也必须保留。
             if start_xp == "xp2" then return { { x = 90, y = 0, w = 40, h = 20 } } end
             return {}
         end,
     },
 }
 Marks.view = Marks.ui.view
-Marks.ui.document.file = "book.epub"
-Marks.ui.document.close = function() end
-scan_document = Marks.ui.document
-Marks._matches_key = nil
 Marks._render_key = nil
 Marks:rebuild()
-Assert.len(Marks._marks, 0, "首帧不做全书扫描，标记要等下一 tick")
-Assert.eq(job_runs, 1)
+Assert.len(Marks._marks, 0, "首帧不能执行文本搜索")
+Assert.len(find_calls, 0)
 Stubs.flush()
-Marks:rebuild()
+Assert.len(find_calls, 2)
 Assert.len(Marks._marks, 2)
 Assert.eq(Marks._marks[1].entity.name, "John Doe")
 Assert.eq(Marks._marks[1].box.x, 0)
 
 Marks.invalidate()
-Assert.len(Marks._matches, 0)
 Assert.len(Marks._marks, 0)
 Assert.eq(Marks._revision, 1)
 
--- 实体变化或关书必须取消尚未完成的扫描。
+-- 快速滚动时，旧位置任务必须作废，只扫描最新位置。
 Marks:rebuild()
-Assert.eq(job_runs, 2)
-Marks.invalidate()
-Assert.eq(job_cancels, 1)
+current_pos = 100
+Marks:rebuild()
 Stubs.flush()
+Assert.len(find_calls, 4)
+Assert.eq(find_calls[3].pos, 100)
+Assert.eq(find_calls[4].pos, 100)
 
--- 分页文档（PDF/DJVU）：findAllText 给页码 + boxes，nativeToPageRectTransform 转页面坐标。
+-- 分页文档（PDF/DJVU）：koptinterface 只接收 ReaderUI 的实时当前页。
 package.loaded["xray.marks"] = nil
 Marks = require("xray.marks")
+local page = 3
+local searched_pages = {}
 Marks.ui = {
-    getCurrentPage = function() return 3 end,
+    getCurrentPage = function() return page end,
     dialog = {},
     view = {
         dimen = { w = 100, h = 50 },
@@ -130,36 +96,38 @@ Marks.ui = {
         end,
     },
     document = {
-        findAllText = function(document, pattern, case_insensitive, context, max_hits)
-            return { {
-                start = 3,
-                boxes = { { x = 10, y = 5, w = 40, h = 20 } },
-            } }
+        findAllText = function()
+            error("X-Ray must not scan the whole document")
         end,
-        nativeToPageRectTransform = function(document, page, box)
-            return { x = box.x, y = box.y, w = box.w, h = box.h }
-        end,
+        koptinterface = {
+            findAllMatches = function(interface, document, pattern, case_insensitive, current_page)
+                searched_pages[#searched_pages + 1] = current_page
+                return { { x = 10, y = 5, w = 40, h = 20 } }
+            end,
+        },
     },
 }
 Marks.view = Marks.ui.view
-Marks.ui.document.file = "book.pdf"
-Marks.ui.document.close = function() end
-scan_document = Marks.ui.document
 package.preload["db.xray"] = function()
     return { list = function() return { { kind = "term", name = "Whitby", aliases = {} } } end }
 end
 package.loaded["db.xray"] = nil
-Marks._matches_key = nil
 Marks._render_key = nil
 Marks:rebuild()
+Assert.len(searched_pages, 0)
 Stubs.flush()
-Marks:rebuild()
+Assert.eq(searched_pages[1], 3, "不能使用滞后的 session.page=0")
 Assert.len(Marks._marks, 1)
 Assert.eq(Marks._marks[1].box.x, 20)
 Assert.eq(Marks._marks[1].box.w, 80)
 
 Assert.is_true(Marks:onTap({ pos = { x = 25, y = 12 } }))
 Assert.eq(opened, "Whitby")
+
+page = 4
+Marks:rebuild()
+Stubs.flush()
+Assert.eq(searched_pages[2], 4)
 
 -- 开关：setEnabled 持久化并反映到 enabled()。
 package.preload["utils.settings"] = function()
