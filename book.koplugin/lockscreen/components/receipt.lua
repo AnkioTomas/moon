@@ -165,8 +165,10 @@ function M.blocks(rect)
         sync = true,
         shadow = false,
     }))
-    local logo_size = math.max(38, math.floor(height * 0.055))
+    local logo_size = math.max(34, math.floor(height * 0.045))
+    local logo_y = y + pad
     local brand_x = x + logo_size + math.floor(pad * 0.6)
+    local brand_y = logo_y + math.floor((logo_size - 16) / 2)
     local blocks = {
         {
             kind = "panel", x = rect.x, y = y, width = rect.w, height = height,
@@ -174,20 +176,20 @@ function M.blocks(rect)
         },
         {
             kind = "image", file = logoPath(),
-            x = x, y = y + pad, width = logo_size, height = logo_size,
+            x = x, y = logo_y, width = logo_size, height = logo_size,
             scale_factor = 0, alpha = false,
         },
         {
-            text = "MOON READING", x = brand_x, y = y + pad,
+            text = "MOON READING", x = brand_x, y = brand_y,
             width = math.floor(width * 0.48), size = 13, bold = true,
             box = false, color = U.MUTED,
         },
         {
-            text = "READ RECEIPT", x = brand_x, y = y + math.floor(height * 0.065),
-            width = width - (brand_x - x), size = 27, bold = true, box = false,
+            text = "READ RECEIPT", x = x, y = logo_y + logo_size + 5,
+            width = width, size = 27, bold = true, box = false,
         },
         {
-            text = os.date("NO.%Y%m%d"), x = x + math.floor(width * 0.55), y = y + pad,
+            text = os.date("NO.%Y%m%d"), x = x + math.floor(width * 0.55), y = brand_y,
             width = math.floor(width * 0.45), size = 13, align = "right",
             box = false, color = U.MUTED,
         },

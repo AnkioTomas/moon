@@ -181,8 +181,19 @@ function M.blocks(rect)
     local pad = math.max(18, rect.pad)
     local inner_x, inner_w = paper_x + pad, paper_w - pad * 2
     local number = os.date("%Y%m%d", (bill.end_ts or os.time()) - 1)
-    local logo_size = math.max(38, math.floor(paper_h * 0.06))
+    local logo_size = math.max(54, math.floor(paper_h * 0.072))
     local brand_x = inner_x + logo_size + math.floor(pad * 0.6)
+    local brand_w = inner_w - (brand_x - inner_x)
+    local Render = require("lockscreen.render")
+    local name_h = Render.measureText("MOON READING", brand_w, 24, true)
+    local subtitle_h = Render.measureText(_("阅读账单"), brand_w, 15)
+    local line_gap = math.max(6, math.floor(pad * 0.25))
+    local group_h = name_h + line_gap + subtitle_h
+    local header_h = math.max(logo_size, group_h)
+    local header_y = paper_y + math.floor(paper_h * 0.035)
+    local logo_y = header_y + math.floor((header_h - logo_size) / 2)
+    local brand_y = header_y + math.floor((header_h - group_h) / 2)
+    local subtitle_y = brand_y + name_h + line_gap
 
     local blocks = {
         {
@@ -191,16 +202,16 @@ function M.blocks(rect)
         },
         {
             kind = "image", file = logoPath(),
-            x = inner_x, y = paper_y + math.floor(paper_h * 0.035),
+            x = inner_x, y = logo_y,
             width = logo_size, height = logo_size, scale_factor = 0, alpha = false,
         },
         {
-            text = "MOON READING", x = brand_x, y = paper_y + math.floor(paper_h * 0.045),
-            width = inner_w - (brand_x - inner_x), size = 24, bold = true, box = false,
+            text = "MOON READING", x = brand_x, y = brand_y,
+            width = brand_w, size = 24, bold = true, box = false,
         },
         {
-            text = _("阅读账单"), x = brand_x, y = paper_y + math.floor(paper_h * 0.09),
-            width = inner_w - (brand_x - inner_x), size = 15, box = false, color = U.MUTED,
+            text = _("阅读账单"), x = brand_x, y = subtitle_y,
+            width = brand_w, size = 15, box = false, color = U.MUTED,
         },
         {
             text = "NO." .. number, x = inner_x, y = paper_y + math.floor(paper_h * 0.135),
