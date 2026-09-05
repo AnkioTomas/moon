@@ -13,7 +13,7 @@ VerticalGroup 只要求 getSize/paintTo，事件经 WidgetContainer.propagateEve
 - 队列没坐满 7 个槽（词少或有词放不下）时整体居中：余量均分到两侧空档；
   坐满才左对齐、余量归右空档。条总宽恒定，◀▶ 钉在两端。
 
-@module koplugin.book.pinyin.strip
+@module koplugin.book.ime.strip
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")

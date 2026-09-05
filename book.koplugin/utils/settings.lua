@@ -31,7 +31,12 @@ local DEFAULTS = {
         lock_screen_asset_cache = {},
     },
     remote = { remote_port = 9528, remote_autostart = false },
-    pinyin = { pinyin_enabled = false },
+    pinyin = {
+        pinyin_enabled = false,
+        ime_layout = "pinyin",
+        ime_dict_built_at = {},
+        ime_dict_sha256 = {},
+    },
     quickpanel = {
         -- 新安装默认启用注册表中的全部动作；已有配置仍保持用户选择。
         quick_panel_actions = {
@@ -101,7 +106,10 @@ for _, key in ipairs({
 }) do
     KEY_SECTION[key] = "lockscreen"
 end
-for _, key in ipairs({ "pinyin_dict_built_at", "pinyin_dict_sha256", "pinyin_dict_source" }) do
+for _, key in ipairs({
+    "pinyin_dict_built_at", "pinyin_dict_sha256", "pinyin_dict_source",
+    "ime_layout", "ime_dict_built_at", "ime_dict_sha256",
+}) do
     KEY_SECTION[key] = "pinyin"
 end
 KEY_SECTION.enabled_sources = "common"

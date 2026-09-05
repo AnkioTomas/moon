@@ -1,7 +1,7 @@
 --[[--
-拼音词库下载：manifest + 原始分片下载 → 子进程拼接 → 校验落位。
+中文输入法词库下载：manifest + 原始分片下载 → 子进程拼接 → 校验落位。
 
-词库产物在仓库 assets/pinyin/（tools/build_pinyin_dict.py 生成）：
+拼音产物在 assets/pinyin/，其余产物在 assets/ime/<method>/。
 
   manifest.json                { tag, built_at, entries, raw_sha256, raw_size, parts:[{file,size,sha256}] }
   dictionary.sqlite3.part.NNN  原始 SQLite 二进制分片，按序拼出原始 sqlite
@@ -10,9 +10,9 @@
 下载逐片走 Request.download（Turbo，不堵 UI）；拼接/分片 SHA-256/落位放 Job 子进程
 （大文件 IO，主进程做会卡 UI）。
 
-落盘：$DATA/.moon/dictionary.sqlite3（见 Paths.pinyinDictPath）。
+落盘文件名由 Paths.imeDictPath 决定。
 
-@module koplugin.book.pinyin.download
+@module koplugin.book.ime.download
 --]]
 
 local lfs = require("libs/libkoreader-lfs")
@@ -24,8 +24,8 @@ local Perf = require("utils.perf")
 local MoonSettings = require("utils.settings")
 local Job = require("workers.job")
 
--- 与桌面设置页使用同一仓库；jsdelivr 按 main 分发原始分片。
-local BASE_URL = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/pinyin"
+-- 拼音保留旧 CDN 路径，避免已发布插件访问 main 时失效。
+local BASE_ROOT = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets"
 
 local M = {}
 
@@ -42,14 +42,15 @@ function M.downloading()
 end
 
 --- 分片续传用的临时目录。
+---@param method string
 ---@return string
-local function tmpDir()
-    return Paths.root() .. "/pinyin_dict.dl"
+local function tmpDir(method)
+    return Paths.root() .. "/ime_" .. method .. "_dict.dl"
 end
 
 --- 删掉临时目录及其中全部分片；目录不存在时无操作。
-local function cleanupTmp()
-    local dir = tmpDir()
+local function cleanupTmp(method)
+    local dir = tmpDir(method)
     local ok, iter, dir_obj = pcall(lfs.dir, dir)
     if not ok or not iter then
         return
@@ -64,8 +65,8 @@ end
 
 --- 临时目录里记录本批分片所属 manifest 版本的文件路径。
 ---@return string
-local function tmpManifestPath()
-    return tmpDir() .. "/.manifest.json"
+local function tmpManifestPath(method)
+    return tmpDir(method) .. "/.manifest.json"
 end
 
 ---@param value any
@@ -109,8 +110,8 @@ end
 --- 临时分片必须属于同一版 manifest，不能把新旧词库拼在一起。
 ---@param manifest table 至少含 built_at 与 raw_sha256
 ---@return boolean, string|nil
-local function syncTmpManifest(manifest)
-    local path = tmpManifestPath()
+local function syncTmpManifest(manifest, method)
+    local path = tmpManifestPath(method)
     local f = io.open(path, "rb")
     if f then
         local body = f:read("*a")
@@ -119,10 +120,10 @@ local function syncTmpManifest(manifest)
         if not ok or type(saved) ~= "table"
             or saved.built_at ~= manifest.built_at
             or saved.raw_sha256 ~= manifest.raw_sha256 then
-            cleanupTmp()
+            cleanupTmp(method)
         end
     end
-    if lfs.attributes(tmpDir(), "mode") ~= "directory" and not lfs.mkdir(tmpDir()) then
+    if lfs.attributes(tmpDir(method), "mode") ~= "directory" and not lfs.mkdir(tmpDir(method)) then
         return false, "cannot create dictionary temp directory"
     end
     local ok, encoded = pcall(JSON.encode, {
@@ -148,8 +149,8 @@ end
 --- 分片是否已完整落在临时目录（只比字节数，内容由拼接期 sha256 把关）。
 ---@param part table manifest 分片项（file / size）
 ---@return boolean
-local function partComplete(part)
-    local attr = lfs.attributes(tmpDir() .. "/" .. part.file)
+local function partComplete(part, method)
+    local attr = lfs.attributes(tmpDir(method) .. "/" .. part.file)
     return attr and attr.mode == "file" and attr.size == tonumber(part.size)
 end
 
@@ -206,18 +207,26 @@ local function assemble(manifest, dir, dest)
 end
 
 --- 按 manifest 下载有更新的分片并落位。重复请求通过 cb 返回失败，不并发写同一目标。
+---@param method "pinyin"|"wubi"|"cangjie"|"zhuyin"
 ---@param cb fun(ok: boolean, err: any)|nil
 ---@param on_progress fun(stage: string, done: number|nil, total: number|nil, idx: number|nil, count: number|nil)|nil
-function M.ensure(cb, on_progress)
+function M.ensure(method, cb, on_progress)
     cb = cb or function() end
+    if method ~= "pinyin" and method ~= "wubi"
+        and method ~= "cangjie" and method ~= "zhuyin"
+    then
+        cb(false, "unsupported input method")
+        return
+    end
     if _downloading then
         cb(false, "already downloading")
         return
     end
-    local dest = Paths.pinyinDictPath()
+    local dest = Paths.imeDictPath(method)
+    local base_url = BASE_ROOT .. (method == "pinyin" and "/pinyin" or "/ime/" .. method)
     local started_at = Perf.now()
     _downloading = true
-    logger.dbg("book.pinyin dict download start", dest)
+    logger.dbg("book ime dict download start", method, dest)
     --- 转发进度给调用方（未传 on_progress 时静默丢弃）。
     ---@param ... any 阶段名及可选的进度数值
     local function report(...)
@@ -237,15 +246,15 @@ function M.ensure(cb, on_progress)
         _downloading = false
         _job = nil
         if ok then
-            logger.dbg("book.pinyin dict download done", Perf.elapsedMs(started_at), "ms")
+            logger.dbg("book ime dict download done", method, Perf.elapsedMs(started_at), "ms")
         else
-            logger.warn("book.pinyin dict download failed", Perf.elapsedMs(started_at), "ms", err)
+            logger.warn("book ime dict download failed", method, Perf.elapsedMs(started_at), "ms", err)
         end
         cb(ok, err)
     end
 
     report("manifest")
-    _job = Request.get(BASE_URL .. "/manifest.json", { timeout = 30 }, function(body, err)
+    _job = Request.get(base_url .. "/manifest.json", { timeout = 30 }, function(body, err)
         if err then
             done(false, err)
             return
@@ -262,86 +271,96 @@ function M.ensure(cb, on_progress)
         end
         local attr = lfs.attributes(dest)
         local settings = MoonSettings.get()
+        local versions = type(settings.ime_dict_built_at) == "table"
+            and settings.ime_dict_built_at or {}
+        local installed = method == "pinyin"
+            and settings.pinyin_dict_built_at or versions[method]
         if attr and attr.mode == "file" and attr.size == tonumber(manifest.raw_size)
-            and settings.pinyin_dict_built_at == manifest.built_at then
+            and installed == manifest.built_at then
             done(true)
             return
         end
         report("manifest", 0, total, 0, #manifest.parts)
         Paths.ensureSettings() -- 内含 ensureDir(root)
-        local synced, sync_err = syncTmpManifest(manifest)
+        local synced, sync_err = syncTmpManifest(manifest, method)
         if not synced then
             done(false, sync_err)
             return
         end
-        downloadParts(manifest, 1, dest, done, report, 0, total)
+        downloadParts(method, base_url, manifest, 1, dest, done, report, 0, total)
     end)
 end
 
 -- 前向声明的实现。
-downloadParts = function(manifest, idx, dest, done, report, done_bytes, total)
+downloadParts = function(method, base_url, manifest, idx, dest, done, report, done_bytes, total)
     local parts = manifest.parts
     if idx > #parts then
-        assembleInJob(manifest, dest, done, report)
+        assembleInJob(method, manifest, dest, done, report)
         return
     end
     local part = parts[idx]
-    if partComplete(part) then
+    if partComplete(part, method) then
         local size = tonumber(part.size) or 0
         report("part", done_bytes + size, total, idx, #parts)
-        downloadParts(manifest, idx + 1, dest, done, report, done_bytes + size, total)
+        downloadParts(method, base_url, manifest, idx + 1, dest, done, report, done_bytes + size, total)
         return
     end
     -- 网络响应尚未返回时也先通知当前分片，避免进度框长时间停在上一阶段。
     report("part", done_bytes, total, idx, #parts)
     _job = Request.download({
-        url = BASE_URL .. "/" .. part.file,
+        url = base_url .. "/" .. part.file,
         method = "GET",
         timeout = 300,
         allow_redirects = true,
         on_progress = total > 0 and function(written)
             report("part", done_bytes + written, total, idx, #parts)
         end or nil,
-    }, tmpDir() .. "/" .. part.file, function(ok, err)
+    }, tmpDir(method) .. "/" .. part.file, function(ok, err)
         if not ok then
-            os.remove(tmpDir() .. "/" .. part.file)
+            os.remove(tmpDir(method) .. "/" .. part.file)
             done(false, err)
             return
         end
-        if not partComplete(part) then
-            os.remove(tmpDir() .. "/" .. part.file)
+        if not partComplete(part, method) then
+            os.remove(tmpDir(method) .. "/" .. part.file)
             done(false, "part size mismatch: " .. part.file)
             return
         end
-        downloadParts(manifest, idx + 1, dest, done, report,
+        downloadParts(method, base_url, manifest, idx + 1, dest, done, report,
             done_bytes + (tonumber(part.size) or 0), total)
     end)
 end
 
-assembleInJob = function(manifest, dest, done, report)
+assembleInJob = function(method, manifest, dest, done, report)
     report("assemble")
-    local dir = tmpDir()
+    local dir = tmpDir(method)
     _job = Job.run(function()
         local err = assemble(manifest, dir, dest)
         if err then
             error(err)
         end
     end, {
-        name = "pinyin.assemble",
+        name = "ime." .. method .. ".assemble",
         timeout = 300,
         on_done = function()
-            cleanupTmp()
+            cleanupTmp(method)
             local attr = lfs.attributes(dest)
             if not attr or attr.mode ~= "file" or (attr.size or 0) == 0 then
                 done(false, "dictionary file missing: " .. dest)
                 return
             end
-            require("pinyin.dictionary").reset()
+            require("ime.registry").reset(method)
             local c = MoonSettings.get()
-            c.pinyin_dict_built_at = manifest.built_at
-            c.pinyin_dict_sha256 = manifest.raw_sha256
+            c.ime_dict_built_at = type(c.ime_dict_built_at) == "table" and c.ime_dict_built_at or {}
+            c.ime_dict_sha256 = type(c.ime_dict_sha256) == "table" and c.ime_dict_sha256 or {}
+            c.ime_dict_built_at[method] = manifest.built_at
+            c.ime_dict_sha256[method] = manifest.raw_sha256
+            if method == "pinyin" then
+                c.pinyin_dict_built_at = manifest.built_at
+                c.pinyin_dict_sha256 = manifest.raw_sha256
+            end
             MoonSettings.save()
-            logger.info("book.pinyin dict installed:", manifest.tag, manifest.entries)
+            logger.info("book ime dict installed:", method, manifest.tag, manifest.entries)
             done(true)
         end,
         on_failed = function(err)

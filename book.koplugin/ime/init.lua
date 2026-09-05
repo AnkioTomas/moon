@@ -1,19 +1,40 @@
 --[[--
-中文键盘入口 + 拼音候选栏。
+中文键盘入口与输入法选择。
 
-@module koplugin.book.pinyin
+@module koplugin.book.ime
 --]]
 
 local Settings = require("utils.settings")
+local Registry = require("ime.registry")
 local _ = require("gettext")
 require("l10n").apply()
 
-local Pinyin = {}
+local IME = {}
 local PREVIOUS_LAYOUTS_KEY = "book_pinyin_previous_keyboard_layouts"
 
 --- 当前是否启用中文键盘入口。
-function Pinyin.isEnabled()
+function IME.isEnabled()
     return Settings.get().pinyin_enabled == true
+end
+
+---@return string
+function IME.layout()
+    return Registry.current().id
+end
+
+---@param id string
+---@return boolean
+function IME.setLayout(id)
+    local selected = Registry.get(id)
+    if selected.id ~= id then return false end
+    local settings = Settings.get()
+    settings.ime_layout = id
+    Settings.save(settings)
+    return true
+end
+
+function IME.layouts()
+    return Registry.list()
 end
 
 --- 浅拷贝布局列表：快照要跟 G_reader_settings 里的表脱钩，否则后续改写会连快照一起改。
@@ -50,8 +71,8 @@ end
 --- 写入开关；词库不可用时拒绝开启，避免留下无效键盘入口。
 ---@param value boolean
 ---@return boolean
-function Pinyin.setEnabled(value)
-    if value == true and not require("pinyin.dictionary").isAvailable() then
+function IME.setEnabled(value)
+    if value == true and not Registry.isAvailable(Registry.current()) then
         return false
     end
     local settings = Settings.get()
@@ -59,7 +80,7 @@ function Pinyin.setEnabled(value)
     Settings.save(settings)
     if settings.pinyin_enabled then
         ensureLayouts()
-        require("pinyin.candidate_bar").install({ enabled = Pinyin.isEnabled })
+        require("ime.candidate_bar").install({ enabled = IME.isEnabled })
     else
         restoreLayouts()
     end
@@ -67,41 +88,45 @@ function Pinyin.setEnabled(value)
 end
 
 --- 插件启动时恢复已启用的候选栏钩子。
-function Pinyin.bootstrap()
-    if not Pinyin.isEnabled() then
+function IME.bootstrap()
+    if not IME.isEnabled() then
         return
     end
-    require("pinyin.candidate_bar").install({ enabled = Pinyin.isEnabled })
+    require("ime.candidate_bar").install({ enabled = IME.isEnabled })
 end
 
 --- 设置页词库状态：未下载、下载中、不可用或词条数与构建版本。
-function Pinyin.dictStatus()
-    if require("pinyin.download").downloading() then
+function IME.dictStatus()
+    if require("ime.download").downloading() then
         return _("下载中…")
     end
-    local Dict = require("pinyin.dictionary")
-    if not Dict.isAvailable() then
-        if Dict.fileExists() then
+    local method = Registry.current()
+    if not Registry.isAvailable(method) then
+        if Registry.fileExists(method) then
             return _("词库文件存在但不可用")
         end
         return _("未下载")
     end
-    local entries = Dict.entries() or "?"
-    local built_at = Dict.builtAt() or Settings.get().pinyin_dict_built_at or "?"
+    local entries = Registry.entries(method) or "?"
+    local settings = Settings.get()
+    local versions = type(settings.ime_dict_built_at) == "table" and settings.ime_dict_built_at or {}
+    local built_at = Registry.builtAt(method)
+        or (method.id == "pinyin" and settings.pinyin_dict_built_at)
+        or versions[method.id] or "?"
     return string.format("%s · %s", entries, built_at)
 end
 
 --- 手动下载或更新词库；离线时立即失败，由用户恢复网络后手动重试。
 ---@param cb fun(ok: boolean, err: any)|nil
 ---@param on_progress fun(stage: string, done: number|nil, total: number|nil, idx: number|nil, count: number|nil)|nil
-function Pinyin.downloadDict(cb, on_progress)
+function IME.downloadDict(cb, on_progress)
     local NetworkMgr = require("ui/network/manager")
     cb = cb or function() end
     if not NetworkMgr:isOnline() then
         cb(false, _("网络不可用，请先连接 Wi-Fi"))
         return
     end
-    require("pinyin.download").ensure(cb, on_progress)
+    require("ime.download").ensure(Registry.current().id, cb, on_progress)
 end
 
-return Pinyin
+return IME
