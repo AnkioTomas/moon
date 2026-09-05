@@ -371,11 +371,11 @@ Background.ensure
 
 锁屏先完整生成新文件，再替换当前图片。失败时保留上一张可用图片。新增主体只需要一个 `lockscreen/components/` 模块和注册表一项。
 
-### 10.3 拼音
+### 10.3 中文输入法
 
-`pinyin/candidate_bar.lua` hook `VirtualKeyboard` 的 `init/addKeys/addChar/delChar`。候选栏用自足 `Strip` 替换中文键盘首行；不修改通用 IME 包装结构。
+`ime/candidate_bar.lua` hook `VirtualKeyboard` 的 `init/addKeys/addChar/delChar`。候选栏用自足 `Strip` 替换中文键盘首行；不修改通用 IME 包装结构。`ime/registry.lua` 只保存四种布局的按键映射，候选状态机不为输入法复制分支。
 
-词库由 `pinyin/download.lua` 下载 manifest 和分片，worker 校验、拼接后原子落到 `.moon/dictionary.sqlite3`。文件变化后必须重置 `pinyin/dictionary.lua` 的连接与负缓存。
+词库由 `ime/download.lua` 按当前布局下载 manifest 和分片，worker 校验、拼接后原子落位。拼音沿用 `.moon/dictionary.sqlite3`，其余使用 `dictionary-<method>.sqlite3`；文件变化后必须重置对应词库连接与负缓存。
 
 ### 10.4 AI 与阅读工具
 
