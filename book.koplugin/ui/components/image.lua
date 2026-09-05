@@ -52,10 +52,16 @@ local EXTS = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg" }
 local dl_seq = 0
 local decode_seq = 0
 local jobs = {}
+local download_queue = {}
+local download_active_count = 0
+local download_paused = false
+local failed_urls = {}
 local decode_queue = {}
 local decode_active = {}
 local decode_active_count = 0
-local MAX_DECODE_JOBS = 2
+local MAX_DOWNLOAD_JOBS = 5
+local MAX_DECODE_JOBS = 5
+local FAILED_URL_TTL = 5 * 60
 
 --- 登记在飞下载 job（{ cancel }）。
 ---@param job table|nil
@@ -260,7 +266,7 @@ local function readDecodedFile(raw)
     return data
 end
 
---- 有限并发启动图片解码。两个槽避免批量 fork 卡 UI，也不会让整页封面逐张等待。
+--- 有限并发启动图片解码，避免批量 fork 卡 UI，也不会让整页封面逐张等待。
 local function pumpDecodeQueue()
     if decode_active_count >= MAX_DECODE_JOBS then return end
     while decode_queue[1] and decode_queue[1].cancelled do
@@ -319,11 +325,10 @@ local function pumpDecodeQueue()
             finish(nil)
         end,
     })
-    pumpDecodeQueue()
 end
 
 --- 在子进程解码图片为定尺寸 BB，序列化落中间文件后回主进程。
---- 解码任务最多两个并发，避免一页图片无限 fork，也避免串行加载拖慢封面。
+--- 解码任务有限并发，避免一页图片无限 fork，也避免串行加载拖慢封面。
 ---@param path string
 ---@param w number
 ---@param h number
@@ -371,68 +376,135 @@ local function cachedPath(url)
     return nil
 end
 
---- 异步下载到缓存；成功回调最终路径（已缓存则下一拍直接回调）。
+--- 有限并发下载到缓存；成功回调最终路径（已缓存则下一拍直接回调）。
 ---@param url string
 ---@param headers table|nil
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return { cancel: fun() }
+local pumpDownloadQueue
+
+--- 收口下载：失败清理临时文件，取消任务不回调。
+---@param task table
+---@param path string|nil
+---@param err any
+local function completeDownload(task, path, err)
+    if not path then
+        pcall(os.remove, task.tmp)
+    end
+    pumpDownloadQueue()
+    if not task.cancelled then
+        task.cb(path, err)
+    end
+end
+
+---@param task table
+---@param ok boolean
+---@param err any
+local function finishDownload(task, ok, err)
+    if task.settled then return end
+    task.settled = true
+    if task.running then
+        task.running = false
+        download_active_count = download_active_count - 1
+    end
+    if task.cancelled then
+        return completeDownload(task)
+    end
+    if not ok then
+        if tostring(err):find("HTTP 404", 1, true) then
+            failed_urls[task.url] = os.time() + FAILED_URL_TTL
+        end
+        return completeDownload(task, nil, err or "download failed")
+    end
+    local attr = lfs.attributes(task.tmp)
+    if not attr or not attr.size or attr.size < 1 then
+        return completeDownload(task, nil, "empty")
+    end
+    local ext = sniffExt(task.tmp)
+    if not ext then
+        local path = task.url:match("^[^%?#]+") or task.url
+        local from_url = path:match("%.([%w]+)$")
+        if from_url then
+            from_url = "." .. from_url:lower()
+            for _, candidate in ipairs(EXTS) do
+                if candidate == from_url then
+                    ext = candidate
+                    break
+                end
+            end
+        end
+    end
+    if not ext then
+        return completeDownload(task, nil, "unknown type")
+    end
+    local final = task.base .. ext
+    if not os.rename(task.tmp, final) then
+        return completeDownload(task, nil, "rename failed")
+    end
+    completeDownload(task, final)
+end
+
+pumpDownloadQueue = function()
+    if download_paused then return end
+    while download_active_count < MAX_DOWNLOAD_JOBS do
+        while download_queue[1] and download_queue[1].cancelled do
+            table.remove(download_queue, 1)
+        end
+        local task = table.remove(download_queue, 1)
+        if not task then return end
+        task.running = true
+        download_active_count = download_active_count + 1
+        task.request = Request.download({
+            url = task.url,
+            method = "GET",
+            headers = task.headers,
+            timeout = 60,
+            connect_timeout = 30,
+        }, task.tmp, function(ok, err)
+            finishDownload(task, ok, err)
+        end)
+    end
+end
+
 function Image.fetchAsync(url, headers, cb)
     local cached = cachedPath(url)
     if cached then
-        UIManager:nextTick(function()
-            cb(cached)
-        end)
+        UIManager:nextTick(function() cb(cached) end)
         return { cancel = function() end }
     end
+    local retry_at = failed_urls[url]
+    if retry_at and retry_at > os.time() then
+        UIManager:nextTick(function() cb(nil, "HTTP 404") end)
+        return { cancel = function() end }
+    end
+    failed_urls[url] = nil
     Paths.ensureImageRoot()
     local base = cacheBase(url)
     dl_seq = dl_seq + 1
     local tmp = string.format("%s.%d.part", base, dl_seq)
-    return Request.download({
+    local task = {
         url = url,
-        method = "GET",
         headers = headers,
-        timeout = 60,
-    }, tmp, function(ok, err)
-        if not ok then
-            pcall(os.remove, tmp)
-            cb(nil, err or "download failed")
-            return
-        end
-        local attr = lfs.attributes(tmp)
-        if not attr or not attr.size or attr.size < 1 then
-            pcall(os.remove, tmp)
-            cb(nil, "empty")
-            return
-        end
-        local ext = sniffExt(tmp)
-        if not ext then
-            local path = url:match("^[^%?#]+") or url
-            local from_url = path:match("%.([%w]+)$")
-            if from_url then
-                from_url = "." .. from_url:lower()
-                for _, e in ipairs(EXTS) do
-                    if e == from_url then
-                        ext = e
-                        break
-                    end
-                end
+        cb = cb,
+        base = base,
+        tmp = tmp,
+    }
+    download_queue[#download_queue + 1] = task
+    pumpDownloadQueue()
+    return {
+        cancel = function()
+            if task.settled or task.cancelled then return end
+            task.cancelled = true
+            task.settled = true
+            if task.running then
+                task.running = false
+                download_active_count = download_active_count - 1
+                if task.request then task.request.cancel() end
             end
-        end
-        if not ext then
             pcall(os.remove, tmp)
-            cb(nil, "unknown type")
-            return
-        end
-        local final = base .. ext
-        pcall(os.remove, final)
-        if not os.rename(tmp, final) then
-            pcall(os.remove, tmp)
-            cb(nil, "rename failed")
-            return
-        end
-        cb(final)
-    end)
+            pumpDownloadQueue()
+        end,
+    }
 end
 
 --- 解析为可读路径。HTTP 查缓存；绝对路径直接用；其余相对插件根。
@@ -459,9 +531,12 @@ end
 function Image.abortPending()
     local list = jobs
     jobs = {}
+    download_paused = true
     for i = 1, #list do
         list[i].cancel()
     end
+    download_paused = false
+    pumpDownloadQueue()
 end
 
 --- 嵌套占位不是 window-level widget；必须脏 show_parent。
