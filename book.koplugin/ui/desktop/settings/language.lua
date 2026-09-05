@@ -12,7 +12,8 @@ local Popup = require("ui.components.popup")
 local SettingRow = require("ui.components.settingrow")
 local UI = require("ui.components.bookui")
 local Paths = require("utils.paths")
-local Pinyin = require("pinyin.init")
+local IME = require("ime.init")
+local Registry = require("ime.registry")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -54,12 +55,29 @@ local function pickLanguage()
     Popup.list{ title = _("语言"), items = items }
 end
 
---- 下载拼音词库，全程用进度对话框回报 manifest / 分片 / 拼接三个阶段。
+--- 选择当前中文输入法。
+---@param desktop table
+local function pickInputMethod(desktop)
+    local current = IME.layout()
+    local items = {}
+    for _, method in ipairs(IME.layouts()) do
+        items[#items + 1] = {
+            text = method.id == current and "✓ " .. method.label or method.label,
+            callback = function()
+                IME.setLayout(method.id)
+                desktop:rebuild()
+            end,
+        }
+    end
+    Popup.sheet{ title = _("键盘布局"), items = items }
+end
+
+--- 下载当前输入法词库，全程用进度对话框回报 manifest / 分片 / 拼接三个阶段。
 --- 已在下载中则直接返回，避免并发拉取。
 ---@param desktop table 桌面实例，结束后重建以刷新状态文案
----@param enable_after boolean|nil 下载成功后是否顺带开启拼音增强
+---@param enable_after boolean|nil 下载成功后是否顺带开启中文输入增强
 local function download(desktop, enable_after)
-    if require("pinyin.download").downloading() then return end
+    if require("ime.download").downloading() then return end
     local dialog
     local dialog_has_bar = false
     --- 关掉当前进度对话框（若有）。
@@ -79,18 +97,18 @@ local function download(desktop, enable_after)
     end
     -- manifest 拉取前无总量，先给即时反馈，避免确认框关闭后长时间空白。
     openDialog{
-        title = _("正在准备下载拼音词库…"),
+        title = _("正在准备下载输入法词库…"),
         subtitle = _("请稍候…"),
         refresh_time_seconds = 1,
         dismissable = false,
     }
-    Pinyin.downloadDict(function(ok, err)
+    IME.downloadDict(function(ok, err)
         closeDialog()
         UIManager:show(InfoMessage:new{
-            text = ok and _("拼音词库已就绪") or T(_("下载失败: %1"), tostring(err or "未知错误")),
+            text = ok and _("输入法词库已就绪") or T(_("下载失败: %1"), tostring(err or "未知错误")),
             timeout = 2,
         })
-        if ok and enable_after then Pinyin.setEnabled(true) end
+        if ok and enable_after then IME.setEnabled(true) end
         desktop:rebuild()
     end, function(stage, done_bytes, total, _idx, count)
         if stage == "assemble" then
@@ -101,7 +119,8 @@ local function download(desktop, enable_after)
         if (stage == "manifest" or stage == "part") and total and total > 0 then
             if not dialog_has_bar then
                 openDialog{
-                    title = stage == "manifest" and _("正在准备下载拼音词库…") or _("正在下载拼音词库…"),
+                    title = stage == "manifest"
+                        and _("正在准备下载输入法词库…") or _("正在下载输入法词库…"),
                     subtitle = T(_("共 %1 片"), count) .. string.format(" · %.1f MB", total / 1048576),
                     progress_max = total, refresh_time_seconds = 1, dismissable = false,
                 }
@@ -114,7 +133,7 @@ end
 
 --- 下载词库前先确认，提醒新词库可能要求新版插件。
 ---@param desktop table 桌面实例
----@param enable_after boolean|nil 下载成功后是否顺带开启拼音增强
+---@param enable_after boolean|nil 下载成功后是否顺带开启中文输入增强
 local function confirmDownload(desktop, enable_after)
     UIManager:show(ConfirmBox:new{
         text = _("新词库可能需要新版插件支持。是否继续下载？"),
@@ -127,6 +146,8 @@ end
 function Language.rows(desktop)
     local lang = G_reader_settings:readSetting("language") or "C"
     local LanguageApi = require("ui/language")
+    local method = Registry.current()
+    local dict_path = Paths.imeDictPath(method.id)
     return {
         function(iw)
             return SettingRow.build(iw, {
@@ -137,14 +158,14 @@ function Language.rows(desktop)
         end,
         function(iw)
             return SettingRow.build(iw, {
-                kind = "toggle", icon = "translate", title = _("拼音输入增强"),
-                status = Pinyin.isEnabled() and _("开") or _("关"), status_on = Pinyin.isEnabled(),
+                kind = "toggle", icon = "translate", title = _("中文输入法增强"),
+                status = IME.isEnabled() and _("开") or _("关"), status_on = IME.isEnabled(),
                 callback = function()
-                    if not Pinyin.isEnabled() and not require("pinyin.dictionary").isAvailable() then
+                    if not IME.isEnabled() and not Registry.isAvailable(method) then
                         confirmDownload(desktop, true)
                         return
                     end
-                    local on = Pinyin.setEnabled(not Pinyin.isEnabled())
+                    local on = IME.setEnabled(not IME.isEnabled())
                     UIManager:show(InfoMessage:new{
                         text = on and _("中文键盘已启用，点键盘上的 🌐 键切换中英文") or _("中文键盘已停用"),
                         timeout = 3,
@@ -155,17 +176,23 @@ function Language.rows(desktop)
         end,
         function(iw)
             return SettingRow.build(iw, {
-                kind = "nav", icon = "spellcheck", title = _("拼音词库"),
-                status = Pinyin.dictStatus(),
-                status_on = require("pinyin.dictionary").isAvailable(),
+                kind = "nav", icon = "keyboard", title = _("键盘布局"),
+                status = method.label, status_on = true,
+                callback = function() pickInputMethod(desktop) end,
+            })
+        end,
+        function(iw)
+            return SettingRow.build(iw, {
+                kind = "nav", icon = "spellcheck", title = _("输入法词库"),
+                status = IME.dictStatus(),
+                status_on = Registry.isAvailable(method),
                 callback = function() confirmDownload(desktop) end,
             })
         end,
         function(iw)
             return hintRow(iw, T(_(
-                "若在线下载过慢，可到 GitHub Release（%1）下载 pinyin-dictionary-版本号.sqlite3，"
-                .. "重命名为 dictionary.sqlite3 后放入：%2"
-            ), RELEASES_URL, Paths.pinyinDictPath()))
+                "若在线下载过慢，可到 GitHub Release（%1）下载对应词库，重命名后放入：%2"
+            ), RELEASES_URL, dict_path))
         end,
     }
 end
