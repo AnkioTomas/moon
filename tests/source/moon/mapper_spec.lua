@@ -67,5 +67,13 @@ do
     Assert.eq(pos.updated_at, 1700000000)
 end
 
+do
+    local pos = Mapper.progress({ data = { frac = 0.42 } })
+    Assert.eq(pos.fraction, 0.42)
+
+    pos = Mapper.progress({ data = { percent = "62.50%" } })
+    Assert.eq(pos.fraction, 0.625)
+end
+
 Assert.is_nil(Mapper.book(nil))
 Assert.is_nil(Mapper.book({ title = "no id" }))

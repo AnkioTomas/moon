@@ -36,6 +36,14 @@ package.preload["ffi/blitbuffer"] = function()
     return { COLOR_BLACK = 0, COLOR_WHITE = 255 }
 end
 
+package.preload["lockscreen.render"] = function()
+    return {
+        measureText = function(_, _, size)
+            return size == 24 and 30 or 20
+        end,
+    }
+end
+
 package.preload["lockscreen.components.library"] = function()
     return { activeSourceId = function() return "moon" end }
 end
@@ -94,6 +102,8 @@ Assert.contains(texts, "TOTAL")
 Assert.is_true(barcode > 20)
 Assert.is_true(cutouts > 4)
 Assert.matches(logo_block.file, "book%.koplugin/logo%.png$")
-Assert.is_true(logo_block.height >= 64)
-Assert.eq(brand_block.y, logo_block.y + 2)
-Assert.eq(brand_subtitle.y, brand_block.y + 42)
+Assert.is_true(logo_block.height >= 54)
+Assert.eq(brand_subtitle.y, brand_block.y + 36)
+local logo_center = logo_block.y + logo_block.height / 2
+local brand_center = brand_block.y + (30 + 6 + 20) / 2
+Assert.is_true(math.abs(logo_center - brand_center) <= 1)
