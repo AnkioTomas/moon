@@ -31,7 +31,7 @@ function M.plan()
     if component.supports_position == false or not Layout.validPosition(position) then
         position = "center-center"
     end
-    local wide = component.supports_narrow ~= false and settings.lock_screen_wide ~= false
+    local wide = component.supports_narrow == false or settings.lock_screen_wide ~= false
     local source_path = Background.resolve(asset)
     return {
         component = component,
