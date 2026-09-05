@@ -18,8 +18,8 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local LineWidget = require("ui/widget/linewidget")
+local ScrollTextWidget = require("ui/widget/scrolltextwidget")
 local Size = require("ui/size")
-local TextBoxWidget = require("ui/widget/textboxwidget")
 local TitleBar = require("ui/widget/titlebar")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -68,7 +68,9 @@ function TranslatePopup:refreshView()
         self.target_btn:setText(langButtonText(self, _("目标语言"), self.target_lang, false))
     end
     if self.text_box then
-        self.text_box:setText(self.translated or "")
+        self.text_box.text_widget:setText(self.translated or "")
+        self.text_box:resetScroll()
+        self.text_box:scrollToTop()
     end
     UIManager:setDirty(self, "ui")
 end
@@ -222,7 +224,7 @@ function TranslatePopup:init()
     self.width = math.floor(math.min(Screen:getWidth(), Screen:getHeight()) * 0.88)
     local pad = Size.padding.default
     local lang_w = math.floor((self.width - pad * 3) / 2)
-    local text_h = math.floor(Screen:getHeight() * 0.26)
+    local text_h = math.floor(Screen:getHeight() * (self.full_page and 0.62 or 0.26))
     local inner_w = self.width - pad * 2
 
     self.source_btn = Button:new{
@@ -254,12 +256,14 @@ function TranslatePopup:init()
         end,
     }
 
-    self.text_box = TextBoxWidget:new{
+    self.text_box = ScrollTextWidget:new{
         text = self.translated or "",
         face = require("ui/font"):getFace("x_smallinfofont"),
         width = inner_w,
         height = text_h,
+        dialog = self,
         alignment = "left",
+        scroll_by_pan = true,
     }
 
     local title_bar = TitleBar:new{
@@ -357,6 +361,7 @@ local function open(opts)
         text = opts.text,
         source_lang = opts.source_lang,
         target_lang = opts.target_lang,
+        full_page = opts.full_page == true,
         from_highlight = opts.from_highlight,
         note_index = opts.index,
         translated = "",
