@@ -64,7 +64,7 @@ local function books(limit)
     return result
 end
 
---- 全屏海报墙；书库为空时不出任何块，直接留背景。
+--- 全屏海报墙；书库为空时明确显示空态，不能伪装成普通壁纸。
 ---@param rect table 全屏矩形
 ---@return table[]
 function M.blocks(rect)
@@ -72,7 +72,14 @@ function M.blocks(rect)
     local w = math.max(1, tonumber(rect.w) or 1)
     local shelf = books(128)
     local count = #shelf
-    if count == 0 then return {} end
+    if count == 0 then
+        return {{
+            text = _("书库暂无书籍"),
+            x = math.floor(w * 0.1), y = math.floor((rect.h or 1) * 0.47),
+            width = math.floor(w * 0.8), size = 22,
+            bold = true, align = "center", box = false,
+        }}
+    end
 
     local pad_x = UI.sz(6)
     local gap_v = UI.sz(8)

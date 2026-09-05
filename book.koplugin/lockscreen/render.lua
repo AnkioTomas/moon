@@ -259,6 +259,17 @@ local function paintShape(bb, block, w, h, background)
                 bb:blitFrom(background, src_x, src_y, src_x, src_y, span, 1)
             end
         end
+    elseif block.kind == "image" then
+        local image = ImageWidget:new{
+            file = assert(block.file, "image block file required"),
+            width = width,
+            height = block.height,
+            scale_factor = block.scale_factor or 0,
+            alpha = block.alpha == true,
+        }
+        local ok, err = pcall(image.paintTo, image, bb, x, y)
+        image:free()
+        if not ok then error(err) end
     elseif block.kind == "widget" then
         paintWidget(bb, block, w, h)
     end

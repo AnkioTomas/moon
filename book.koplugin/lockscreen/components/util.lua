@@ -105,7 +105,7 @@ function U.emptyBlocks(rect, title, message)
         },
         {
             text = title, x = rect.text_x, y = rect.y + rect.pad,
-            width = rect.text_w, size = 18, box = false, color = U.MUTED,
+            width = rect.text_w, size = 20, bold = true, box = false,
         },
         {
             kind = "rule", x = rect.text_x, y = rect.y + rect.pad + 28,
@@ -114,7 +114,7 @@ function U.emptyBlocks(rect, title, message)
         {
             text = message,
             x = rect.text_x, y = rect.y + math.floor(rect.h * 0.48),
-            width = rect.text_w, size = 20, align = "center", box = false, color = U.MUTED,
+            width = rect.text_w, size = 16, align = "center", box = false, color = U.MUTED,
         },
     }
 end

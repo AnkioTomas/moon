@@ -23,6 +23,14 @@ local M = {
     end,
 }
 
+local function logoPath()
+    local info = debug.getinfo(logoPath, "S")
+    local source = info and info.source
+    local root = source and source:sub(1, 1) == "@"
+        and source:sub(2):match("(.*/)lockscreen/components/[^/]+$")
+    return (root or "") .. "logo.png"
+end
+
 local PERIODS = {
     { id = "today", label = _("今日") },
     { id = "7d", label = _("最近 7 天") },
@@ -173,6 +181,8 @@ function M.blocks(rect)
     local pad = math.max(18, rect.pad)
     local inner_x, inner_w = paper_x + pad, paper_w - pad * 2
     local number = os.date("%Y%m%d", (bill.end_ts or os.time()) - 1)
+    local logo_size = math.max(38, math.floor(paper_h * 0.06))
+    local brand_x = inner_x + logo_size + math.floor(pad * 0.6)
 
     local blocks = {
         {
@@ -180,12 +190,17 @@ function M.blocks(rect)
             radius = 1, shadow = 2, color = Blitbuffer.COLOR_WHITE,
         },
         {
-            text = "MOON READING CLUB", x = inner_x, y = paper_y + math.floor(paper_h * 0.045),
-            width = inner_w, size = 24, bold = true, align = "center", box = false,
+            kind = "image", file = logoPath(),
+            x = inner_x, y = paper_y + math.floor(paper_h * 0.035),
+            width = logo_size, height = logo_size, scale_factor = 0, alpha = false,
         },
         {
-            text = _("阅读账单"), x = inner_x, y = paper_y + math.floor(paper_h * 0.09),
-            width = inner_w, size = 15, align = "center", box = false, color = U.MUTED,
+            text = "MOON READING", x = brand_x, y = paper_y + math.floor(paper_h * 0.045),
+            width = inner_w - (brand_x - inner_x), size = 24, bold = true, box = false,
+        },
+        {
+            text = _("阅读账单"), x = brand_x, y = paper_y + math.floor(paper_h * 0.09),
+            width = inner_w - (brand_x - inner_x), size = 15, box = false, color = U.MUTED,
         },
         {
             text = "NO." .. number, x = inner_x, y = paper_y + math.floor(paper_h * 0.135),
