@@ -128,8 +128,10 @@ Assert.is_true(Bars.systemTopVisible(ui_top))
 Assert.is_true(Bars.systemBottomVisible(ui_top))
 Assert.is_true(Bars.topVisible(ui_top))
 Assert.is_true(Bars.bottomVisible(ui_top))
-Assert.eq(Bars.topHeight(ui_top), 28)
-Assert.eq(Bars.topOffset(ui_top), 12)
+Assert.eq(Bars.topHeight(ui_top), 40)
+-- 文档可视区 offset 会受页面布局影响，不能改变顶栏位置或高度。
+ui_top.view.state.offset.y = 30
+Assert.eq(Bars.topHeight(ui_top), 40)
 
 ui_top.document.getHeaderHeight = function() return 0 end
 Assert.is_false(Bars.systemTopVisible(ui_top))
