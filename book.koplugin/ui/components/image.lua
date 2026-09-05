@@ -53,7 +53,9 @@ local dl_seq = 0
 local decode_seq = 0
 local jobs = {}
 local decode_queue = {}
-local decode_active
+local decode_active = {}
+local decode_active_count = 0
+local MAX_DECODE_JOBS = 2
 
 --- 登记在飞下载 job（{ cancel }）。
 ---@param job table|nil
@@ -258,22 +260,24 @@ local function readDecodedFile(raw)
     return data
 end
 
---- 串行启动图片解码。fork 本身发生在 UI 线程；批量图片若同时启动会卡死低性能设备。
+--- 有限并发启动图片解码。两个槽避免批量 fork 卡 UI，也不会让整页封面逐张等待。
 local function pumpDecodeQueue()
-    if decode_active then return end
+    if decode_active_count >= MAX_DECODE_JOBS then return end
     while decode_queue[1] and decode_queue[1].cancelled do
         table.remove(decode_queue, 1)
     end
     local task = table.remove(decode_queue, 1)
     if not task then return end
-    decode_active = task
+    decode_active[task] = true
+    decode_active_count = decode_active_count + 1
     Paths.ensureCacheRoot()
     local tmp = decodeTmpPath()
     task.tmp = tmp
 
     local function finish(widget)
-        if decode_active ~= task then return end
-        decode_active = nil
+        if not decode_active[task] then return end
+        decode_active[task] = nil
+        decode_active_count = decode_active_count - 1
         task.job = nil
         task.done = true
         if not task.cancelled then task.cb(widget) end
@@ -315,10 +319,11 @@ local function pumpDecodeQueue()
             finish(nil)
         end,
     })
+    pumpDecodeQueue()
 end
 
 --- 在子进程解码图片为定尺寸 BB，序列化落中间文件后回主进程。
---- 解码任务全局串行，避免一页图片同时 fork、争抢 CPU 并饿死 UI 事件循环。
+--- 解码任务最多两个并发，避免一页图片无限 fork，也避免串行加载拖慢封面。
 ---@param path string
 ---@param w number
 ---@param h number
@@ -339,9 +344,9 @@ local function decodeAsync(path, w, h, alpha, cb)
         abort = function()
             if task.done or task.cancelled then return end
             task.cancelled = true
-            if decode_active == task and task.job then
+            if decode_active[task] and task.job then
                 task.job:abort()
-            elseif not decode_active then
+            else
                 pumpDecodeQueue()
             end
         end,
