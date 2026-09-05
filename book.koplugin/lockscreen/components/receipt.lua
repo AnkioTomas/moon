@@ -26,6 +26,14 @@ local function ensureUI()
     if not BookInfo then BookInfo = require("ui.components.bookinfo") end
 end
 
+local function logoPath()
+    local info = debug.getinfo(logoPath, "S")
+    local source = info and info.source
+    local root = source and source:sub(1, 1) == "@"
+        and source:sub(2):match("(.*/)lockscreen/components/[^/]+$")
+    return (root or "") .. "logo.png"
+end
+
 --- 找出当前书今天的统计桶。
 ---@param book table
 ---@return table
@@ -157,18 +165,26 @@ function M.blocks(rect)
         sync = true,
         shadow = false,
     }))
+    local logo_size = math.max(38, math.floor(height * 0.055))
+    local brand_x = x + logo_size + math.floor(pad * 0.6)
     local blocks = {
         {
             kind = "panel", x = rect.x, y = y, width = rect.w, height = height,
             radius = 2, shadow = 2, color = Blitbuffer.COLOR_WHITE,
         },
         {
-            text = _("阅读票根"), x = x, y = y + pad,
-            width = width, size = 14, bold = true, box = false, color = U.MUTED,
+            kind = "image", file = logoPath(),
+            x = x, y = y + pad, width = logo_size, height = logo_size,
+            scale_factor = 0, alpha = false,
         },
         {
-            text = "READ RECEIPT", x = x, y = y + math.floor(height * 0.065),
-            width = width, size = 28, bold = true, box = false,
+            text = "MOON READING", x = brand_x, y = y + pad,
+            width = math.floor(width * 0.48), size = 13, bold = true,
+            box = false, color = U.MUTED,
+        },
+        {
+            text = "READ RECEIPT", x = brand_x, y = y + math.floor(height * 0.065),
+            width = width - (brand_x - x), size = 27, bold = true, box = false,
         },
         {
             text = os.date("NO.%Y%m%d"), x = x + math.floor(width * 0.55), y = y + pad,

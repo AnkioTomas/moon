@@ -10,7 +10,6 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local Current = require("lockscreen.components.current")
 local Chart = require("ui.components.chart")
-local Layout = require("lockscreen.layout")
 local U = require("lockscreen.components.util")
 local _ = require("gettext")
 
@@ -18,8 +17,7 @@ local M = {
     id = "stats",
     label = _("阅读统计"),
     supports_narrow = false,
-    -- 柱图占屏高 30%，卡片整体需要更高的定位预算。
-    preferred_height = 0.72,
+    preferred_height = 0.88,
 }
 
 local BookInfo
@@ -47,13 +45,16 @@ function M.blocks(rect)
     end
     local day_avg = week_seconds / math.max(1, #buckets)
     local pct, page_line = U.progress(book)
-    local chapter = U.chapterLine(book)
-    local subtitle = chapter ~= "" and (_("章节") .. " · " .. chapter) or nil
+    local subtitle
+    if (book.chapter_title and book.chapter_title ~= "")
+        or (book.chapter_count and book.chapter_count > 0) then
+        subtitle = _("章节") .. " · " .. U.chapterLine(book)
+    end
 
-    -- 锁屏统计卡要呼吸感：边距和段间距都比桌面 hero 更松。
+    -- 间距与图表高度都从面板预算中计算，不能再拿全屏高度硬撑卡片。
     local pad = math.max(24, math.min(rect.pad or 24, 32))
-    local inset_v = 24
-    local gap = 22
+    local inset_v = math.max(10, math.floor(rect.h * 0.03))
+    local gap = math.max(8, math.floor(rect.h * 0.025))
     local inner_x = rect.x + pad
     local inner_w = math.max(1, rect.w - pad * 2)
 
@@ -66,26 +67,26 @@ function M.blocks(rect)
     })
     local progress, progress_h = BookInfo.progressRow(inner_w, pct)
 
-    local screen_h = select(2, Layout.portraitSize())
-    local chart_h = math.max(96, math.floor(screen_h * 0.30))
-    local chart_label_h = 24
-    local meta_row_h = 36
-    local meta_gap = 12
+    local chart_label_h = 18
+    local meta_row_h = math.max(24, math.floor(rect.h * 0.055))
+    local meta_gap = 8
     local meta_h = meta_row_h * 2 + meta_gap
-    local chart_header_h = 26
-    local after_progress = 18
-    local after_rule = 18
-    local before_chart = 14
+    local chart_header_h = 22
+    local after_progress = math.max(8, math.floor(rect.h * 0.02))
+    local after_rule = math.max(8, math.floor(rect.h * 0.02))
+    local before_chart = 8
 
-    local card_h = inset_v
+    local fixed_h = inset_v
         + hero_h + gap
         + progress_h + after_progress
         + meta_h + gap
         + 1 + after_rule
         + chart_header_h + before_chart
-        + chart_h + chart_label_h
+        + chart_label_h
         + inset_v
-    local card_y = rect.y + math.max(0, math.floor((rect.h - card_h) / 2))
+    local chart_h = math.max(0, rect.h - fixed_h)
+    local card_h = rect.h
+    local card_y = rect.y + math.floor((rect.h - card_h) / 2)
 
     local y = card_y + inset_v
     local hero_y = y
