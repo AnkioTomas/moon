@@ -295,6 +295,19 @@ end
 -- 异步源返回目标章后，Session 切换文档并在新 ReaderReady 继续沿用目录。
 do
     local toc = { { idx = 1 }, { idx = 2 } }
+    local UIManager = require("ui/uimanager")
+    local old_show, old_close = UIManager.show, UIManager.close
+    local transition_notice, transition_closes = nil, 0
+    UIManager.show = function(self, widget)
+        if widget and widget.text == "正在切换章节，请稍候…" then
+            transition_notice = widget
+        end
+        return old_show(self, widget)
+    end
+    UIManager.close = function(self, widget)
+        if widget == transition_notice then transition_closes = transition_closes + 1 end
+        return old_close(self, widget)
+    end
     local source = {
         type = "chapter",
         openBookAsync = function(_, _, opts, cb)
@@ -325,9 +338,12 @@ do
     Assert.is_true(Session.gotoChapter(2))
     Stubs.flush()
     Assert.eq(calls.switched_path, "/cache/2.html")
+    Assert.not_nil(transition_notice)
+    Assert.eq(transition_closes, 0, "新 ReaderReady 前切章提示继续显示")
     plugin.ui.document.file = "/cache/2.html"
     local toc_reads_before_switch_ready = toc_reads
     Session.onReaderReady(plugin)
+    Assert.eq(transition_closes, 1, "目标章节 ReaderReady 后必须关闭切章提示")
     Assert.eq(countPulls(), pulls_before + 1, "连续切章不应再 pull")
     Assert.eq(toc_reads, toc_reads_before_switch_ready, "连续切章复用已加载目录")
     Assert.len(Session.toc(), 2)
@@ -348,6 +364,7 @@ do
 
     Session.onCloseDocument(plugin)
     resolved_source = nil
+    UIManager.show, UIManager.close = old_show, old_close
 end
 
 -- .moon 外文档统一归 local，并按 local 属主源分发

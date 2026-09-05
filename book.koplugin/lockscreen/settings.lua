@@ -142,16 +142,14 @@ function M.setMode(mode)
     MoonSettings.save()
 end
 
---- 切换主体；不支持窄屏的主体强制回到宽屏。
+--- 切换主体；组件自身的固定形态由 compose 解析，不污染共享形态偏好。
 ---@param id string 未注册的 ID 直接忽略
 function M.setComponent(id)
     local Components = require("lockscreen.components.base")
-    local selected = Components.find(id)
-    if not selected then return end
+    if not Components.find(id) then return end
     invalidate()
     local c = MoonSettings.get()
     c.lock_screen_component = id
-    if selected.supports_narrow == false then c.lock_screen_wide = true end
     MoonSettings.save()
 end
 
@@ -169,10 +167,12 @@ function M.setPosition(position)
     end
 end
 
---- 设置宽/窄面板；不支持窄屏的主体永远存宽屏。
+--- 设置宽/窄面板；固定形态主体忽略该设置，保留其他主体的偏好。
 ---@param wide boolean
 function M.setWide(wide)
-    save("lock_screen_wide", component().supports_narrow == false or wide == true)
+    if component().supports_narrow ~= false then
+        save("lock_screen_wide", wide == true)
+    end
 end
 
 --- 设置账单周期；非法值忽略。

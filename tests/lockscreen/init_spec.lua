@@ -208,16 +208,26 @@ local ok_run, err_run = pcall(function()
     Assert.eq(saved.screensaver_type, "cover", "尚未接管前不得改动用户锁屏方式")
     Assert.eq(saved.screensaver_document_cover, "/old/cover.png")
 
-    -- 账单是完整报告卡，位置固定居中，且底层 API 不能写入位置配置。
+    -- 账单是完整报告卡：固定居中、固定宽屏，但不能污染其他主体的布局偏好。
     local previous_position = common.lock_screen_position
+    local previous_wide = common.lock_screen_wide
+    common.lock_screen_wide = false
     Settings.setComponent("bill")
     common.lock_screen_position = "top-left"
     MoonSettings.save()
     Assert.eq(Compose.plan().position, "center-center")
+    Assert.is_true(Compose.plan().wide)
+    Assert.is_false(common.lock_screen_wide)
     Settings.setPosition("bottom-right")
     Assert.eq(common.lock_screen_position, "top-left")
-    Settings.setComponent("current")
+    Settings.setWide(true)
+    Assert.is_false(common.lock_screen_wide)
+    Settings.setComponent("message")
+    Assert.eq(Compose.plan().component.id, "message")
+    Assert.is_false(Compose.plan().wide)
+    Settings.setComponent("bill")
     common.lock_screen_position = previous_position
+    common.lock_screen_wide = previous_wide
     MoonSettings.save()
     local done, ok_dl
     LockScreen.refresh(function(ok)
