@@ -7,8 +7,12 @@ package.preload["gettext"] = function() return function(value) return value end 
 package.preload["logger"] = function() return { err = function() end } end
 package.preload["device"] = function() return { isTouchDevice = function() return true end } end
 
+local next_tick
 package.preload["ui/uimanager"] = function()
-    return { show = function() end }
+    return {
+        show = function() end,
+        nextTick = function(_, callback) next_tick = callback end,
+    }
 end
 package.preload["ui.panel.native_settings"] = function() return { inject = function() end } end
 package.preload["ui.panel.desktop"] = function() return { menuActions = function() return {} end } end
@@ -55,7 +59,10 @@ package.preload["apps/reader/modules/readermenu"] = function() return ReaderMenu
 local Native = require("ui.panel.native")
 Native.install({}, { reader = true })
 
-local menu = setmetatable({ ui = { onClose = function() end } }, { __index = ReaderMenu })
+local reader_closed = 0
+local menu = setmetatable({
+    ui = { onClose = function() reader_closed = reader_closed + 1 end },
+}, { __index = ReaderMenu })
 local buttons = menu:getDefaultMenuButtons()
 Assert.not_nil(buttons.filemanager)
 Assert.is_true(type(buttons.filemanager.callback) == "function")
@@ -65,6 +72,11 @@ Assert.is_false(buttons.filemanager.remember)
 
 buttons.filemanager.callback()
 Assert.is_true(menu.closed)
+Assert.eq(reader_closed, 0, "菜单关闭后不得在点击调用栈里同步关闭文档")
+Assert.eq(opened_desktop, 0)
+Assert.not_nil(next_tick)
+next_tick()
+Assert.eq(reader_closed, 1)
 Assert.eq(opened_desktop, 1)
 
 _G.G_reader_settings = previous_settings
