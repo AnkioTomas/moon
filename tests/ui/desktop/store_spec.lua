@@ -44,6 +44,7 @@ local desktop = {
 -- 书城复用图书馆网格，但工具栏只允许搜索。
 Store.build({ desktop = desktop }, {}, {})
 Assert.is_true(build_opts.search_only)
+Assert.is_false(build_opts.show_status)
 Assert.is_true(type(build_opts.on_search) == "function")
 Assert.is_true(type(build_opts.on_clear) == "function")
 
