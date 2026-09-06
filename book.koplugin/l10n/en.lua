@@ -761,4 +761,6 @@ return {
     ["响应无效"] = "Invalid response",
     ["请求失败"] = "Request failed",
     ["账号被风控，请稍后再试"] = "Account is rate-limited, try again later",
+    ["月读需要 KOReader 2026.07.1 或更高版本。\n\n当前版本："] = "Moon Reader requires KOReader 2026.07.1 or newer.\n\nCurrent version: ",
+    ["未知"] = "unknown",
 }
