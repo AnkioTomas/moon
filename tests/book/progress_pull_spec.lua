@@ -255,6 +255,17 @@ Assert.len(goto_calls, 1, "缺失 chapter_idx 时仍应按全书比例切章")
 Assert.eq(goto_calls[1].idx, 4)
 Assert.eq(goto_calls[1].opts.within, 0.25)
 
+-- 拉失败只记日志，不弹窗：离线开缓存书必须能继续读
+Progress.clearConflicts()
+shown = {}
+source.getProgressAsync = function(_, _, cb)
+    cb(nil, "common/turbo/iostream.lua:476: attempt to index local 'self' (a string value)")
+    return { cancel = function() end }
+end
+Progress.pull(snapshot())
+Stubs.flush()
+Assert.eq(#shown, 0, "进度拉取失败不应打断阅读")
+
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",
     "ui.reader.session.toc", "ui.reader.session", "logger",

@@ -1,8 +1,8 @@
 --[[--
-http.request 离线用例：ok / header / writeResponseToFile / SNI 补丁（纯本地，无网络）
+http.request 离线用例：ok / header / writeResponseToFile / Turbo 补丁（纯本地，无网络）
 
 request/get/post/download/ensureTurbo 的真实网络路径不在离线范围；
-SNI 补丁经 stub 的 turbo/turbo.crypto 间接验证。
+SNI / LuaSocket 连接失败补丁经 stub 的 turbo 模块间接验证。
 
 @module tests.http.request_spec
 --]]
@@ -419,8 +419,20 @@ do
             end,
         }
     end
+    -- 复现 turbo LuaSocket 路径：connect 立刻失败时用点号调用 _handle_connect_fail。
+    package.preload["turbo.iostream"] = function()
+        local IOStream = {}
+        function IOStream:_handle_connect_fail(err)
+            self.fail_self = self
+            self.fail_err = err
+        end
+        function IOStream:connect(_address, _port)
+            self._handle_connect_fail("Network is unreachable")
+        end
+        return { IOStream = IOStream }
+    end
 
-    -- 触发一次请求让 patchTurboSsl 装上补丁
+    -- 触发一次请求让 patchTurbo 装上 SNI / 连接失败补丁
     local got_code
     Request.request({
         url = "https://api.ankio.net/myrl",
@@ -454,6 +466,17 @@ do
     Assert.eq(#sni_hosts, 1)
     -- 原始握手都被透传
     Assert.eq(handshake_calls, 4)
+
+    -- LuaSocket 点号调用必须把流对象补回去，否则离线开书会炸 iostream.lua:476
+    local iostream = require("turbo.iostream")
+    local fail_stream = {}
+    iostream.IOStream.connect(fail_stream, "example.com", 443)
+    Assert.eq(fail_stream.fail_err, "Network is unreachable")
+    Assert.eq(fail_stream.fail_self, fail_stream)
+    fail_stream.fail_err = nil
+    fail_stream:_handle_connect_fail("timeout")
+    Assert.eq(fail_stream.fail_err, "timeout")
+    Assert.eq(fail_stream.fail_self, fail_stream)
 
     -- 普通请求在 yield 后取消必须立即关连接，不能只抑制回调却继续占用网络。
     local queued
