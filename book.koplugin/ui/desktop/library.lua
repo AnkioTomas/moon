@@ -261,6 +261,7 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open, show_status)
     local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, {
         badge = true,
         ribbon = show_status ~= false,
+        download = show_status ~= false,
         show_parent = ctx.desktop,
     }))
     local title_gap = UI.sz(4)

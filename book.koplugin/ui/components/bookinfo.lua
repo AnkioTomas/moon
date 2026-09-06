@@ -4,12 +4,12 @@
 
 布局：
 
-  progressBadge（叠在封面上）     progressRow
-  +----------+                   +--------------------+
-  |     [NN%]|                   | NN%  ========····  |
-  |  cover   |                   +--------------------+
-  |          |
-  +----------+
+  封面状态（Kindle：右上互斥，左下本地下载）
+  +----------+     +----------+
+  |     [NN%]|     |     已\\  |
+  |          | 或  |      读\\ |
+  | ✓        |     | ✓        |
+  +----------+     +----------+
 
   hero（左封面，右栏等高）
   +------+  +---------------------------+
@@ -37,6 +37,7 @@ local TextWidget = require("ui/widget/textwidget")
 local Widget = require("ui/widget/widget")
 local GestureRange = require("ui/gesturerange")
 local Image = require("ui.components.image")
+local Icon = require("ui.components.icon")
 local UI = require("ui.components.bookui")
 local Surface = require("ui.components.surface")
 local Paths = require("utils.paths")
@@ -44,6 +45,85 @@ local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
 
 local BookInfo = {}
+
+--- Kindle 状态叠层用近黑灰，和封面拉开对比。
+---@return any
+local function statusInk()
+    return Blitbuffer.COLOR_GRAY_3 or Blitbuffer.COLOR_BLACK
+end
+
+--- Kindle 缎带：沿 \ 从顶边接到右边，定宽，角尖不填。
+---@param bb table
+---@param x number
+---@param y number
+---@param size number
+---@param band number
+---@param color any
+local function paintSash(bb, x, y, size, band, color)
+    for dy = 0, size - 1 do
+        local x0 = dy
+        local x1 = dy + band
+        if x1 > size then x1 = size end
+        if x1 > x0 then
+            bb:paintRect(x + x0, y + dy, x1 - x0, 1, color)
+        end
+    end
+end
+
+--- 白像素外接盒；旋转按墨水中心，不按字体框。
+---@param src table
+---@return number, number, number, number
+local function inkRect(src)
+    local sw, sh = src:getWidth(), src:getHeight()
+    local x0, y0, x1, y1 = sw, sh, -1, -1
+    for j = 0, sh - 1 do
+        for i = 0, sw - 1 do
+            local pix = src:getPixel(i, j)
+            local lum = pix.getColor8 and pix:getColor8().a or pix.a
+            if lum and lum > 128 then
+                if i < x0 then x0 = i end
+                if j < y0 then y0 = j end
+                if i > x1 then x1 = i end
+                if j > y1 then y1 = j end
+            end
+        end
+    end
+    if x1 < x0 then
+        return 0, 0, sw, sh
+    end
+    return x0, y0, x1 - x0 + 1, y1 - y0 + 1
+end
+
+--- 已在顶、读在右，字头朝外角。dest = 屏坐标顺时针 45°。
+---@param dst table
+---@param src table
+---@param dx number
+---@param dy number
+---@param ox number
+---@param oy number
+---@param sw number
+---@param sh number
+local function blitInk45(dst, src, dx, dy, ox, oy, sw, sh)
+    local k = 0.70710678
+    local dw = math.ceil((sw + sh) * k)
+    local scx, scy = (sw - 1) / 2, (sh - 1) / 2
+    local dcx = (dw - 1) / 2
+    for j = 0, dw - 1 do
+        for i = 0, dw - 1 do
+            local fx, fy = i - dcx, j - dcx
+            local sx = math.floor(fx * k + fy * k + scx + 0.5) + ox
+            local sy = math.floor(-fx * k + fy * k + scy + 0.5) + oy
+            if sx >= ox and sy >= oy and sx < ox + sw and sy < oy + sh then
+                local pix = src:getPixel(sx, sy)
+                local lum = pix.getColor8 and pix:getColor8().a or pix.a
+                if lum and lum > 128 then
+                    dst:setPixelClamped(dx + i, dy + j, Blitbuffer.COLOR_WHITE)
+                end
+            end
+        end
+    end
+    return dw
+end
 
 --- 下载的网络封面同时落到源专属路径，供锁屏离屏渲染复用。
 --- 锁屏离屏渲染不发网络请求，因此仍需要稳定的本地文件路径。
@@ -160,7 +240,26 @@ function BookInfo.tappable(w, h, on_tap, on_hold)
     return tap
 end
 
---- 封面右上角进度角标；pct≤0 返回 nil。
+--- 已读：read_state=1。
+---@param book Book|table|nil
+---@return boolean
+function BookInfo.isRead(book)
+    return tonumber(book and book.read_state) == 1
+end
+
+--- 封面状态：已读与进度互斥，下载独立。
+---@param book Book|table|nil
+---@return { read: boolean, percent: boolean, downloaded: boolean }
+function BookInfo.statusOverlays(book)
+    local read = BookInfo.isRead(book)
+    return {
+        read = read,
+        percent = (not read) and BookInfo.pct(book) > 0,
+        downloaded = require("book.store").isDownloaded(book),
+    }
+end
+
+--- 封面右上角进度角标；pct≤0 返回 nil。Kindle：小圆角胶囊、贴角留缝。
 ---@param cw number
 ---@param pct number|nil
 ---@return table|nil
@@ -168,17 +267,19 @@ function BookInfo.progressBadge(cw, pct)
     if not pct or pct <= 0 then return nil end
     local badge = Surface.pill(TextWidget:new{
             text = string.format("%.0f%%", pct),
-            face = UI.face("xx_smallinfofont", 11),
+            face = UI.face("xx_smallinfofont", 10),
             fgcolor = Blitbuffer.COLOR_WHITE,
         }, {
-            padding = UI.sz(2),
+            padding = UI.sz(4),
+            padding_top = UI.sz(1),
+            padding_bottom = UI.sz(1),
             width = nil,
-            height = UI.sz(20),
-            background = Blitbuffer.COLOR_BLACK,
+            height = UI.sz(16),
+            background = statusInk(),
             shadow = false,
         })
     local bz = badge:getSize()
-    local inset = UI.sz(3)
+    local inset = UI.sz(4)
     badge.overlap_offset = {
         math.max(0, cw - bz.w - inset),
         inset,
@@ -186,48 +287,106 @@ function BookInfo.progressBadge(cw, pct)
     return badge
 end
 
---- 封面状态单字；新书优先于已读/未读。
----@param book Book|table|nil
----@return string
-function BookInfo.statusChar(book)
-    if book and book.is_new then return _("新") end
-    if tonumber(book and book.read_state) == 1 then return _("读") end
-    return _("未")
-end
-
---- 右下角阅读状态折角。
----@param book Book|table|nil
+--- 右上角「已读」斜条；文字沿 45° 走，贴齐封面角。
+---@param cw number
 ---@return table
-function BookInfo.statusCornerFold(book)
-    local size = UI.sz(28)
+function BookInfo.readRibbon(cw)
     local text = TextWidget:new{
-        text = BookInfo.statusChar(book),
-        face = UI.face("xx_smallinfofont", 11),
+        text = _("已读"),
+        face = UI.face("xx_smallinfofont", 10),
         fgcolor = Blitbuffer.COLOR_WHITE,
+        padding = 0,
     }
-    local fold = Widget:new{
+    local ts = text:getSize()
+    local band = math.max(UI.sz(16), math.ceil((ts.h + UI.sz(6)) * 1.41421356))
+    local size = math.max(UI.sz(40), ts.w + band)
+    local ribbon = Widget:new{
         dimen = Geom:new{ w = size, h = size },
         text = text,
+        band = band,
     }
-    function fold:getSize()
+    function ribbon:getSize()
         return self.dimen
     end
-    function fold:paintTo(bb, x, y)
-        for dy = 0, size - 1 do
-            local width = dy + 1
-            bb:paintRect(x + size - width, y + dy, width, 1, Blitbuffer.COLOR_BLACK)
+    function ribbon:paintTo(bb, x, y)
+        local ink = statusInk()
+        paintSash(bb, x, y, size, self.band, ink)
+        if type(Blitbuffer.new) ~= "function" then
+            return
         end
-        local ts = self.text:getSize()
-        self.text:paintTo(
-            bb,
-            x + size - ts.w - UI.sz(2),
-            y + size - ts.h - UI.sz(1)
-        )
+        local src = Blitbuffer.new(ts.w, ts.h)
+        src:fill(ink)
+        self.text:paintTo(src, 0, 0)
+        local ix, iy, iw, ih = inkRect(src)
+        local dw = math.ceil((iw + ih) * 0.70710678)
+        -- 缎带平行四边形中心：中线 x=y+band/2，长度中点再收 band/4。
+        local ox = x + math.floor(size / 2 + self.band / 4 - dw / 2)
+        local oy = y + math.floor(size / 2 - self.band / 4 - dw / 2)
+        blitInk45(bb, src, ox, oy, ix, iy, iw, ih)
+        src:free()
     end
-    function fold:free()
+    function ribbon:free()
         self.text:free()
     end
-    return fold
+    ribbon.overlap_offset = {
+        math.max(0, cw - size),
+        0,
+    }
+    return ribbon
+end
+
+--- 左下角本地下载：实心圆 + 白勾，贴边留缝。
+---@param ch number
+---@return table
+function BookInfo.downloadMark(ch)
+    local size = UI.sz(18)
+    local icon = Icon.widget{
+        name = "check",
+        size = 12,
+        color = Blitbuffer.COLOR_WHITE,
+        box = false,
+    }
+    local mark = Widget:new{
+        dimen = Geom:new{ w = size, h = size },
+        icon = icon,
+    }
+    function mark:getSize()
+        return self.dimen
+    end
+    function mark:paintTo(bb, x, y)
+        local r = math.floor(size / 2)
+        local cx, cy = x + r, y + r
+        local ink = statusInk()
+        if bb.paintCircle then
+            bb:paintCircle(cx, cy, r, ink)
+        else
+            for dy = -r, r do
+                local span = math.floor(math.sqrt(math.max(0, r * r - dy * dy)) + 0.5)
+                if span > 0 then
+                    bb:paintRect(cx - span, cy + dy, span * 2, 1, ink)
+                end
+            end
+        end
+        if self.icon then
+            local iz = self.icon:getSize()
+            self.icon:paintTo(
+                bb,
+                cx - math.floor(iz.w / 2),
+                cy - math.floor(iz.h / 2)
+            )
+        end
+    end
+    function mark:free()
+        if self.icon and self.icon.free then
+            self.icon:free()
+        end
+    end
+    local inset = UI.sz(4)
+    mark.overlap_offset = {
+        inset,
+        math.max(0, ch - size - inset),
+    }
+    return mark
 end
 
 --- 「NN%」+ 进度条；百分比在左。
@@ -254,7 +413,10 @@ function BookInfo.progressRow(width, pct)
     return row, math.max(label:getSize().h, bar_h)
 end
 
---- 封面 widget；opts.badge=true 叠进度角标，opts.ribbon=true 叠状态绑带。
+--- 封面 widget。
+--- opts.badge: 未读且有进度时叠右上角百分比
+--- opts.ribbon: 已读时叠右上角「已读」绑带
+--- opts.download: 已本地下载时叠左下角勾（章节源看全本缓存，整本源看 path）
 --- opts.show_parent: 窗口级父（Desktop / Detail）
 --- opts.on_ready: 图片就绪回调
 --- opts.src / opts.headers: 直接指定封面（刮削结果没有 source.coverRequest）
@@ -307,24 +469,23 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
         clip_background = UI.surface(),
         shadow = opts.shadow,
     })
-    if opts.badge or opts.ribbon then
+    local status = BookInfo.statusOverlays(book)
+    local show_read = opts.ribbon and status.read
+    local show_pct = opts.badge and status.percent
+    local show_dl = opts.download and status.downloaded
+    if show_read or show_pct or show_dl then
         local overlays = {
             dimen = Geom:new{ w = cw, h = ch },
             show_parent = opts.show_parent,
             cover,
         }
-        if opts.ribbon then
-            local fold = BookInfo.statusCornerFold(book)
-            local fs = fold:getSize()
-            fold.overlap_offset = {
-                math.max(0, cw - fs.w),
-                math.max(0, ch - fs.h),
-            }
-            overlays[#overlays + 1] = fold
+        if show_read then
+            overlays[#overlays + 1] = BookInfo.readRibbon(cw)
+        elseif show_pct then
+            overlays[#overlays + 1] = BookInfo.progressBadge(cw, pct)
         end
-        local badge = BookInfo.progressBadge(cw, pct)
-        if opts.badge and badge then
-            overlays[#overlays + 1] = badge
+        if show_dl then
+            overlays[#overlays + 1] = BookInfo.downloadMark(ch)
         end
         cover = OverlapGroup:new(overlays)
     end

@@ -85,7 +85,7 @@ function M.data()
     return { reading = reading, covers = covers }
 end
 
---- 创建与桌面书库相同的封面格子：封面角标 + 单行书名。
+--- 创建与桌面书库相同的封面格子：干净封面 + 单行书名，不叠阅读状态。
 ---@param book table
 ---@param slot_w number
 ---@param cover_w number
@@ -93,7 +93,6 @@ end
 ---@return table
 local function coverCell(book, slot_w, cover_w, cover_h)
     local cover = select(1, BookInfo.cover(nil, nil, book, cover_w, cover_h, {
-        badge = true,
         sync = true,
     }))
     local title = TextWidget:new{
@@ -171,8 +170,7 @@ end
 --- 生成全屏书库。
 ---
 --- 网格参数与 ui.desktop.library 完全同源；每个封面格子作为 widget 交给
---- render.lua 离屏绘制，因此 BookInfo.cover 的圆角、表面、阴影和角标都能
---- 保持一致。
+--- render.lua 离屏绘制，因此 BookInfo.cover 的圆角、表面和阴影都能保持一致。
 ---@param rect table
 ---@return table[]
 function M.blocks(rect)
