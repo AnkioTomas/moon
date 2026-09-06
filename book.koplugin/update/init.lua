@@ -8,6 +8,7 @@
 
 local ConfirmBox = require("ui/widget/confirmbox")
 local InfoMessage = require("ui/widget/infomessage")
+local ProgressbarDialog = require("ui/widget/progressbardialog")
 local UIManager = require("ui/uimanager")
 local JSON = require("json")
 local Request = require("http.request")
@@ -79,6 +80,7 @@ local function parseRelease(body)
         version = version,
         tag = tag,
         url = zip.browser_download_url,
+        size = tonumber(zip.size),
         sha256 = digest and digest:lower() or nil,
         checksum_url = checksum and checksum.browser_download_url or nil,
         available = newer(version, currentVersion()),
@@ -118,7 +120,7 @@ function Update.check(cb)
     return _job
 end
 
-local function installWithChecksum(release, plugin_root, checksum, cb)
+local function installWithChecksum(release, plugin_root, checksum, cb, on_progress)
     Paths.ensureSettings()
     local archive = Paths.root() .. "/plugin-update.zip"
     os.remove(archive)
@@ -128,6 +130,7 @@ local function installWithChecksum(release, plugin_root, checksum, cb)
         timeout = 300,
         allow_redirects = true,
         max_bytes = Install.MAX_ARCHIVE_BYTES,
+        on_progress = on_progress,
     }, archive, function(ok, err)
         if not ok then
             _installing = false
@@ -161,14 +164,15 @@ end
 ---@param release table Update.check 返回值
 ---@param plugin_root string 当前插件目录
 ---@param cb fun(ok: boolean, err: any)
-function Update.install(release, plugin_root, cb)
+---@param on_progress fun(bytes: number)|nil
+function Update.install(release, plugin_root, cb, on_progress)
     if _installing then
         cb(false, "already installing")
         return
     end
     _installing = true
     if release.sha256 then
-        installWithChecksum(release, plugin_root, release.sha256, cb)
+        installWithChecksum(release, plugin_root, release.sha256, cb, on_progress)
         return
     end
     _job = Request.get(release.checksum_url, {
@@ -188,7 +192,7 @@ function Update.install(release, plugin_root, cb)
             cb(false, "invalid update checksum")
             return
         end
-        installWithChecksum(release, plugin_root, checksum:lower(), cb)
+        installWithChecksum(release, plugin_root, checksum:lower(), cb, on_progress)
     end)
 end
 
@@ -217,8 +221,17 @@ local function promptInstall(release, plugin_root)
         cancel_text = _("稍后"),
         ok_callback = function()
             UIManager:close(dialog)
-            UIManager:show(InfoMessage:new{ text = _("正在下载月读更新…"), timeout = 2 })
+            local size = tonumber(release.size)
+            local loading = ProgressbarDialog:new{
+                title = _("正在下载月读更新…"),
+                subtitle = T(_("版本 %1"), release.version),
+                progress_max = size and size > 0 and size or nil,
+                refresh_time_seconds = 0.2,
+                dismissable = false,
+            }
+            loading:show()
             Update.install(release, plugin_root, function(ok, err)
+                loading:close()
                 if ok then
                     promptRestart()
                 else
@@ -227,6 +240,8 @@ local function promptInstall(release, plugin_root)
                         timeout = 5,
                     })
                 end
+            end, function(bytes)
+                loading:reportProgress(bytes)
             end)
         end,
     }
@@ -236,8 +251,10 @@ end
 --- 用户主动检查；始终显示结果。
 ---@param plugin_root string
 function Update.manualCheck(plugin_root)
-    UIManager:show(InfoMessage:new{ text = _("正在检查月读更新…"), timeout = 1 })
+    local loading = InfoMessage:new{ text = _("正在检查月读更新…") }
+    UIManager:show(loading)
     Update.check(function(release, err)
+        UIManager:close(loading)
         if err then
             UIManager:show(InfoMessage:new{
                 text = T(_("检查更新失败：%1"), tostring(err)),
