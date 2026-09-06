@@ -8,9 +8,9 @@
   +----------+     +----------+
 
   Image.widget{
-    src = "https://...",   -- 网络 URL → 缓存命中直接显；未命中先占位，
-                           -- 下载完只刷新该占位组件
-    -- src = "/abs/path.png"  -- 本地文件
+    src = "https://...",   -- 网络 URL → 缓存命中也先占位，后台解码后替换；
+                           -- 未命中先下载，再后台解码
+    -- src = "/abs/path.png"  -- 本地文件，后台解码
     headers = { Authorization = "Bearer …" },  -- 仅网络请求
     width = n, height = n,
     alpha = true,
@@ -25,7 +25,8 @@ UI 图标请用 ui.components.icon（Material Icons 字体），不要走本组�
   Image.abortPending()
   Image.fetchAsync(url, headers, function(path, err) end)  -- 只下载不显示（刮削封面）
 
-下载直写磁盘；下载与解码均异步，不在主线程解码图片。
+下载直写磁盘，图片解码走 workers.job，不阻塞 UI 线程。
+占位尺寸固定；图片晚到时只刷新图片区域。
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -57,10 +58,8 @@ local download_active_count = 0
 local download_paused = false
 local failed_urls = {}
 local decode_queue = {}
-local decode_active = {}
-local decode_active_count = 0
+local decode_active
 local MAX_DOWNLOAD_JOBS = 5
-local MAX_DECODE_JOBS = 5
 local FAILED_URL_TTL = 5 * 60
 local failed_url_checks = 0
 local function reapFailedUrls()
@@ -190,7 +189,7 @@ local function placeholder(w, h, fb, border)
     return frame(child, w, h, border)
 end
 
---- 同步解码为定尺寸 BB，再包成 ImageWidget。
+--- 同步解码为定尺寸 BB，再包成 ImageWidget。只给 sync=true 的离屏渲染使用。
 ---@param path string
 ---@param w number
 ---@param h number
@@ -217,7 +216,7 @@ local function decodeTmpPath()
     return Paths.cacheDir() .. "/image-decode-" .. tostring(os.time()) .. "-" .. tostring(decode_seq) .. ".bin"
 end
 
---- 从序列化字符串重建 BB / ImageWidget（主进程，轻量）。
+--- 从序列化字符串重建 BB / ImageWidget（主进程只做 IPC 反序列化）。
 ---@param data string|nil
 ---@param alpha boolean|nil
 ---@return table|nil
@@ -265,60 +264,63 @@ local function readFile(path)
     return data
 end
 
-
 --- 读回并删除子进程写出的中间文件。
 ---@param raw string|nil
 ---@return string|nil
 local function readDecodedFile(raw)
     local data = readFile(raw)
-    os.remove(raw)
+    if raw then
+        os.remove(raw)
+    end
     return data
 end
 
---- 有限并发启动图片解码，避免批量 fork 卡 UI，也不会让整页封面逐张等待。
+--- 启动下一个图片解码；全局只保留一个子进程，避免 CPU/内存争抢。
 local function pumpDecodeQueue()
-    if decode_active_count >= MAX_DECODE_JOBS then return end
+    if decode_active then return end
     while decode_queue[1] and decode_queue[1].cancelled do
         table.remove(decode_queue, 1)
     end
     local task = table.remove(decode_queue, 1)
     if not task then return end
-    decode_active[task] = true
-    decode_active_count = decode_active_count + 1
+
+    decode_active = task
     Paths.ensureCacheRoot()
     local tmp = decodeTmpPath()
     task.tmp = tmp
 
     local function finish(widget)
-        if not decode_active[task] then return end
-        decode_active[task] = nil
-        decode_active_count = decode_active_count - 1
+        if decode_active ~= task then return end
+        decode_active = nil
         task.job = nil
         task.done = true
-        if not task.cancelled then task.cb(widget) end
+        if not task.cancelled then
+            task.cb(widget)
+        end
         pumpDecodeQueue()
     end
 
     task.job = Job.run(function()
         local RenderImage = require("ui/renderimage")
-        local Blitbuffer = require("ffi/blitbuffer")
+        local WorkerBlitbuffer = require("ffi/blitbuffer")
         local bb = RenderImage:renderImageFile(task.path, false, task.w, task.h)
         if not bb then
             return nil
         end
-        local header = JSON.encode({
+        local header = JSON.encode{
             w = tonumber(bb.w),
             h = tonumber(bb.h),
             stride = tonumber(bb.stride),
             fmt = bb:getType(),
-        })
-        local pixels = Blitbuffer.tostring(bb)
+        }
+        local pixels = WorkerBlitbuffer.tostring(bb)
         bb:free()
         local f = io.open(tmp, "wb")
-        if f then
-            f:write(header, "\n", pixels)
-            f:close()
+        if not f then
+            return nil
         end
+        f:write(header, "\n", pixels)
+        f:close()
         return tmp
     end, {
         name = "image.decode",
@@ -336,14 +338,13 @@ local function pumpDecodeQueue()
     })
 end
 
---- 在子进程解码图片为定尺寸 BB，序列化落中间文件后回主进程。
---- 解码任务有限并发，避免一页图片无限 fork，也避免串行加载拖慢封面。
+--- 排队解码；abort 取消排队或终止正在解的子进程。
 ---@param path string
 ---@param w number
 ---@param h number
 ---@param alpha boolean|nil
 ---@param cb fun(widget: table|nil)
----@return table 可 abort 的 job
+---@return table 可 abort 的任务句柄
 local function decodeAsync(path, w, h, alpha, cb)
     local task = {
         path = path,
@@ -358,7 +359,7 @@ local function decodeAsync(path, w, h, alpha, cb)
         abort = function()
             if task.done or task.cancelled then return end
             task.cancelled = true
-            if decode_active[task] and task.job then
+            if decode_active == task and task.job then
                 task.job:abort()
             else
                 pumpDecodeQueue()
@@ -537,8 +538,18 @@ local function resolve(src)
     return nil
 end
 
---- 取消在飞下载（桌面关闭 / 清缓存）。
+--- 取消在飞下载与排队解码（桌面关闭 / 清缓存）。
 function Image.abortPending()
+    for i = 1, #decode_queue do
+        decode_queue[i].cancelled = true
+    end
+    decode_queue = {}
+    if decode_active then
+        decode_active.cancelled = true
+        if decode_active.job then
+            decode_active.job:abort()
+        end
+    end
     local list = jobs
     jobs = {}
     download_paused = true
@@ -549,26 +560,22 @@ function Image.abortPending()
     pumpDownloadQueue()
 end
 
---- 嵌套占位不是 window-level widget；必须脏 show_parent。
---- WidgetContainer 不会把 dimen 写成屏幕绝对坐标，必须靠 paintTo 记下 _screen。
+--- 没上过屏就不 setDirty，否则会为尚未显示的占位额外刷新。
 ---@param box table
 local function requestPaint(box)
+    if not box._screen then
+        return
+    end
     local host = box.show_parent
-    if not host then
+    if not host and UIManager.getTopmostVisibleWidget then
         host = UIManager:getTopmostVisibleWidget()
     end
     if not host then
         host = "all"
     end
-    local region = box._screen
-    if region then
-        UIManager:setDirty(host, function()
-            return "ui", box._screen
-        end)
-    else
-        -- 尚未 paint（同步缓存命中等）：只能脏整窗，禁止用相对 dimen 瞎刷
-        UIManager:setDirty(host, "ui")
-    end
+    UIManager:setDirty(host, function()
+        return "ui", box._screen
+    end)
 end
 
 --- 同步解码并呈现（子进程内锁屏离屏渲染用）。
@@ -593,7 +600,7 @@ local function presentSync(path, w, h, alpha, border, fb)
     return placeholder(w, h, fb, border)
 end
 
---- 通用异步图片框：定尺寸占位，下载/解码完成后只替换自身。
+--- 通用异步图片框：固定尺寸占位，路径解析/下载完成后后台解码。
 ---@param src string|nil
 ---@param headers table|nil
 ---@param w number
@@ -632,7 +639,7 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     local job
     local decode_job
 
-    --- 解码完成后替换占位内容。
+    --- 解码完成后替换占位。
     ---@param widget table|nil
     ---@param path string|nil
     local function apply(widget, path)
@@ -647,15 +654,6 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
         if type(on_ready) == "function" then
             pcall(on_ready, path)
         end
-    end
-
-    --- 异步解码本地图片并替换占位；句柄存在 decode_job 里供 free 时中止。
-    ---@param path string 本地图片路径
-    local function decode(path)
-        decode_job = decodeAsync(path, inner_w, inner_h, alpha, function(widget)
-            decode_job = nil
-            apply(widget, path)
-        end)
     end
 
     --- 释放占位并取消在飞下载/解码。
@@ -674,27 +672,35 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
         WidgetContainer.free(self, full)
     end
 
+    local function decode(path)
+        decode_job = decodeAsync(path, inner_w, inner_h, alpha, function(widget)
+            decode_job = nil
+            apply(widget, path)
+        end)
+    end
+
     local path = resolve(src)
     if path then
         decode(path)
-        return box
-    end
-    if isHttp(src) then
-        job = Image.fetchAsync(src, headers, function(path, err)
+    elseif isHttp(src) then
+        job = Image.fetchAsync(src, headers, function(downloaded, err)
             forgetJob(job)
             job = nil
-            if path then
-                decode(path)
-            else
-                logger.warn("book image async failed", src, err)
+            if not alive then
+                return
             end
+            if not downloaded then
+                logger.warn("book image async failed", src, err)
+                return
+            end
+            decode(downloaded)
         end)
         rememberJob(job)
     end
     return box
 end
 
---- 构建图片 widget。默认异步解码；opts.sync=true 时同步解码（锁屏离屏渲染）。
+--- 默认异步下载/解码；sync=true 只用于锁屏离屏渲染。
 ---@param opts table|nil
 ---@return table
 function Image.widget(opts)
@@ -716,14 +722,12 @@ function Image.widget(opts)
         local path = resolve(src)
         if path then
             local ready = presentSync(path, w, h, alpha, border, fb)
-            if ready then
-                if type(on_ready) == "function" then
-                    UIManager:nextTick(function()
-                        pcall(on_ready, path)
-                    end)
-                end
-                return ready
+            if type(on_ready) == "function" then
+                UIManager:nextTick(function()
+                    pcall(on_ready, path)
+                end)
             end
+            return ready
         end
         return placeholder(w, h, fb, border)
     end
