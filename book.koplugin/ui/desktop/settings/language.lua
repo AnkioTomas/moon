@@ -191,7 +191,7 @@ function Language.rows(desktop)
         end,
         function(iw)
             return hintRow(iw, T(_(
-                "若在线下载过慢，可到 GitHub Release（%1）下载对应词库，重命名后放入：%2"
+                "若在线下载过慢，可到 GitHub Release（%1）下载对应词库，直接放入：%2"
             ), RELEASES_URL, dict_path))
         end,
     }
