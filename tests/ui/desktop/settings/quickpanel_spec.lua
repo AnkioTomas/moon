@@ -82,16 +82,14 @@ end
 
 local QuickPanel = require("ui.panel.settings")
 local desktop = { rebuild = function() end }
-local sections = QuickPanel.sections(desktop)
+local desktop_rows = QuickPanel.desktopRows(desktop)
+local reader_rows = QuickPanel.readerRows(desktop)
 
-Assert.len(sections, 2)
-Assert.eq(sections[1].title, "桌面")
-Assert.eq(sections[2].title, "阅读")
-Assert.len(sections[1].rows, 2)
-Assert.len(sections[2].rows, 1)
+Assert.len(desktop_rows, 2)
+Assert.len(reader_rows, 1)
 
 -- 桌面动作与其他动作一样可配置。
-sections[1].rows[1](400)
+desktop_rows[1](400)
 Assert.eq(built.title, "夜间模式")
 Assert.eq(built.status, "第 1 位")
 Assert.is_true(built.chevron)
@@ -104,16 +102,17 @@ Assert.eq(captured_dialog.buttons[2][1].text, "上移")
 Assert.eq(captured_dialog.buttons[2][2].text, "下移")
 Assert.eq(captured_dialog.buttons[3][1].text, "关闭")
 
-sections[1].rows[2](400)
+desktop_rows[2](400)
 Assert.eq(built.title, "休眠")
 Assert.eq(built.status, "当前设备不可用")
 Assert.is_false(built.chevron)
 Assert.is_nil(built.callback)
 
 -- 阅读页动作走同一套配置流程。
-sections[2].rows[1](400)
+reader_rows[1](400)
 Assert.eq(built.title, "目录")
 Assert.eq(built.status, "第 1 位")
 Assert.is_true(built.chevron)
 
-Assert.eq(QuickPanel.enabledCount(), 2)
+Assert.eq(QuickPanel.desktopEnabledCount(), 1)
+Assert.eq(QuickPanel.readerEnabledCount(), 1)

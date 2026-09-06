@@ -328,6 +328,9 @@ do
                     if sql:find("DISTINCT series", 1, true) then
                         return { { "第一辑", "第二辑" } }, 2
                     end
+                    if sql:find("COUNT(*)", 1, true) and sql:find("GROUP BY", 1, true) then
+                        return { { "sub", "" }, { 3, 2 } }, 2
+                    end
                     return {
                         { "/books/a.epub" },
                         { "书名" },
@@ -338,6 +341,8 @@ do
                         { "介绍" },
                         { "https://img.test/a.jpg" },
                         { 1000 },
+                        { 1 },
+                        { 1 },
                     }, 1
                 end,
                 close = function() end,
@@ -366,6 +371,8 @@ do
     Assert.eq(rows[1].percent, 42)
     Assert.eq(rows[1].series, "第一辑")
     Assert.eq(rows[1].cover, "https://img.test/a.jpg")
+    Assert.eq(rows[1].read_state, 1)
+    Assert.is_true(rows[1].is_new)
     local count_q = calls[#calls - 1]
     Assert.is_true(count_q.sql:find("WHERE source_id=%?", 1) ~= nil or count_q.sql:find("source_id=?", 1, true) ~= nil)
     Assert.is_false(count_q.sql:find("category=", 1, true) ~= nil)
@@ -395,6 +402,16 @@ do
     Assert.eq(count_q.args[5], "%鲁%")
     Assert.eq(count_q.args[6], "%鲁%")
 
+    calls = {}
+    BookDB.listBySource("local", { read_status = "unread" })
+    Assert.is_true(calls[1].sql:find("b.read_state<>1", 1, true) ~= nil)
+    calls = {}
+    BookDB.listBySource("local", { read_status = "read" })
+    Assert.is_true(calls[1].sql:find("b.read_state=1", 1, true) ~= nil)
+    calls = {}
+    BookDB.listBySource("local", { uncategorized = true })
+    Assert.is_true(calls[1].sql:find("b.category IS NULL OR b.category=''", 1, true) ~= nil)
+
     -- 分类列表
     local cats = BookDB.categoriesBySource("local")
     Assert.eq(#cats, 2)
@@ -402,6 +419,11 @@ do
     local series = BookDB.seriesBySource("local")
     Assert.eq(#series, 2)
     Assert.eq(series[1], "第一辑")
+    local category_counts = BookDB.categoryCountsBySource("local")
+    Assert.eq(category_counts[1].category, "sub")
+    Assert.eq(category_counts[1].count, 3)
+    Assert.eq(category_counts[2].category, "")
+    Assert.eq(category_counts[2].count, 2)
 
     DbBase.close()
     clearMods()

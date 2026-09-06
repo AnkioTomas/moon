@@ -95,7 +95,9 @@ do
                 return {
                     get_status_code = function() return response.code end,
                     get = function(_, name)
-                        if name == "Content-Length" then return response.length end
+                        if name == "Content-Length" and response.length then
+                            return response.length, 99
+                        end
                     end,
                 }
             end,
@@ -122,8 +124,9 @@ do
             local client = setmetatable({ redirect = 0 }, { __index = methods })
             client.iostream = {
                 read_bytes = function(_, count, callback, arg, streaming, streaming_arg)
-                    if streaming then streaming(streaming_arg, string.rep("x", count)) end
-                    callback(arg, "")
+                    Assert.is_nil(streaming)
+                    Assert.is_nil(streaming_arg)
+                    callback(arg, string.rep("x", count))
                 end,
                 read_until_close = function() end,
                 closed = function() return false end,

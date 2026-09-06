@@ -166,8 +166,10 @@ do
     local sync = calls[#calls]
     Assert.is_true(sync.sql:find("UPDATE books SET percent=", 1, true) ~= nil)
     Assert.eq(sync.args[1], 50)
-    Assert.eq(sync.args[2], "moon")
-    Assert.eq(sync.args[3], "book'1")
+    Assert.eq(sync.args[2], 0.5)
+    Assert.eq(sync.args[3], "moon")
+    Assert.eq(sync.args[4], "book'1")
+    Assert.is_true(sync.sql:find("CASE WHEN ?>=1 THEN 1", 1, true) ~= nil)
 
     -- 可选字段缺省时绑定 nil；非法页码（0）也落成 nil
     Assert.is_true(ProgressDB.upsert("moon", "b2", { fraction = 0.1, page = 0, total_pages = -1 }))

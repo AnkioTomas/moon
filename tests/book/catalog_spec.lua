@@ -11,8 +11,10 @@ local FakeBooks = {
     list_rows = {},
     list_count = 0,
     categories = {},
+    category_counts = {},
     series = {},
     recent = {},
+    list_opts = nil,
 }
 local FakeStats = {
     summary = { total_seconds = 0 },
@@ -22,11 +24,15 @@ local FakeStats = {
 
 package.preload["db.book"] = function()
     return {
-        listBySource = function()
+        listBySource = function(_, opts)
+            FakeBooks.list_opts = opts
             return FakeBooks.list_rows, FakeBooks.list_count
         end,
         categoriesBySource = function()
             return FakeBooks.categories
+        end,
+        categoryCountsBySource = function()
+            return FakeBooks.category_counts
         end,
         seriesBySource = function()
             return FakeBooks.series
@@ -81,7 +87,9 @@ do -- listLibraryAsync 读假库
     FakeBooks.list_rows = { { stable_id = "b.epub", title = "B" } }
     FakeBooks.list_count = 1
     local got
-    Catalog.listLibraryAsync("local", { page = 1, page_size = 10 }, function(res, err)
+    Catalog.listLibraryAsync("local", {
+        page = 1, page_size = 10, read_status = "unread",
+    }, function(res, err)
         got = { res = res, err = err }
     end)
     Stubs.flush()
@@ -89,10 +97,12 @@ do -- listLibraryAsync 读假库
     Assert.eq(got.res.count, 1)
     Assert.eq(got.res.data[1].source_id, "local")
     Assert.eq(got.res.data[1].title, "B")
+    Assert.eq(FakeBooks.list_opts.read_status, "unread")
 end
 
 do -- filtersAsync
     FakeBooks.categories = { "科幻" }
+    FakeBooks.category_counts = { { category = "科幻", count = 2 } }
     FakeBooks.series = { "三体" }
     local got
     Catalog.filtersAsync("local", function(res)
@@ -100,6 +110,7 @@ do -- filtersAsync
     end)
     Stubs.flush()
     Assert.eq(got.data.category[1], "科幻")
+    Assert.eq(got.data.category_counts[1].count, 2)
     Assert.eq(got.data.series[1], "三体")
 end
 

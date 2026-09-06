@@ -9,12 +9,14 @@ local Stubs = require("support.stubs")
 Stubs.install()
 Stubs.reset()
 
-local calls = { tracker = {}, progress = {}, chapter = {}, reader = {} }
+local calls = { tracker = {}, progress = {}, chapter = {}, reader = {}, book = {} }
 local defer_tracker_stop = false
 local tracker_stop_done
 local resolved_source
 local stored_toc = {}
 local toc_reads = 0
+local book_fraction = 0.25
+local auto_mark_read = false
 local default_source = {
     id = "moon",
     type = "book",
@@ -103,6 +105,30 @@ package.preload["book.reader_prefs"] = function()
     }
 end
 
+package.preload["db.book"] = function()
+    return {
+        markOpened = function(source_id, stable_id)
+            calls.book[#calls.book + 1] = { "opened", source_id, stable_id }
+            return true
+        end,
+        markReadAutomatically = function(source_id, stable_id)
+            calls.book[#calls.book + 1] = { "auto_read", source_id, stable_id }
+            return true
+        end,
+        markReadComplete = function(source_id, stable_id)
+            calls.book[#calls.book + 1] = { "complete", source_id, stable_id }
+            return true
+        end,
+    }
+end
+package.preload["utils.settings"] = function()
+    return {
+        get = function()
+            return { auto_mark_read_at_99 = auto_mark_read }
+        end,
+    }
+end
+
 package.preload["book.stats"] = function()
     return {
         start = function(ui, identity)
@@ -163,7 +189,7 @@ package.preload["book.progress"] = function()
         position = function(snapshot)
             local identity = snapshot and snapshot.identity
             calls.progress_position_identity = identity
-            local fraction = identity and identity.chapter_idx and 0.75 or 0.25
+            local fraction = identity and identity.chapter_idx and 0.75 or book_fraction
             return {
                 fraction = fraction,
                 chapter_idx = identity and identity.chapter_idx,
@@ -185,6 +211,14 @@ package.preload["ui.reader"] = function()
 end
 package.preload["ui/widget/infomessage"] = function()
     return { new = function(_, opts) return opts end }
+end
+local end_dialog_identity
+package.preload["ui.reader.end_dialog"] = function()
+    return {
+        show = function(_, _, identity)
+            end_dialog_identity = identity
+        end,
+    }
 end
 
 package.preload["db.stats"] = function()
@@ -453,6 +487,7 @@ do
     Assert.is_nil(Session.toc(), "整本书没有章节目录")
     Assert.is_nil(Session.chapterTitle(), "整本书无章节标题")
     Assert.eq(cur.identity.source.id, "moon", "属主源来自身份")
+    Assert.eq(calls.book[#calls.book][1], "opened", "ReaderReady 清除新书状态")
     -- 统计拿到的是内存身份（DB 写入异步，同 tick 查不到）
     local start_call = calls.tracker[#calls.tracker]
     Assert.eq(start_call[1], "start")
@@ -472,6 +507,25 @@ do
     -- 滚动视图同路径
     Session.onPageChanged(plugin, 7)
     Assert.eq(emitted[#emitted].payload.page, 7)
+
+    local book_calls = #calls.book
+    book_fraction = 0.989
+    Session.onPageChanged(plugin, 198)
+    Assert.eq(#calls.book, book_calls, "98.9% 不自动标记已读")
+    book_fraction = 0.99
+    Session.onPageChanged(plugin, 199)
+    Assert.eq(#calls.book, book_calls, "默认关闭时 99% 不自动标记已读")
+    auto_mark_read = true
+    Session.onPageChanged(plugin, 199)
+    Assert.eq(calls.book[#calls.book][1], "auto_read", "99% 自动标记已读")
+    Assert.eq(cur.identity.book.read_state, 1)
+    cur.identity.book.read_state = 2
+    auto_mark_read = false
+    book_fraction = 1
+    Session.onPageChanged(plugin, 200)
+    Assert.eq(calls.book[#calls.book][1], "complete", "100% 必须覆盖手动未读")
+    Assert.eq(cur.identity.book.read_state, 1)
+    book_fraction = 0.25
 
     -- 关文档：推进度/结清/通知源/清会话（真关书还会清进度冲突记忆）
     defer_tracker_stop = true
@@ -519,6 +573,31 @@ do
     Assert.is_nil(calls.chapter[#calls.chapter], "章节落点不再由 chapters 门面处理")
     Session.onCloseDocument(plugin)
     Assert.is_false(Session.gotoChapter(1), "真关书清除目录状态")
+end
+
+-- 已停在末页的文档 ReaderReady 后无需再翻页，也必须收敛为已读。
+do
+    local plugin = mkPlugin("/x/book.epub")
+    book_fraction = 1
+    Session.onReaderReady(plugin)
+    Assert.eq(calls.book[#calls.book][1], "complete")
+    Assert.eq(Session.current().identity.book.read_state, 1)
+    book_fraction = 0.25
+    Session.onCloseDocument(plugin)
+end
+
+-- 真正 EndOfBook 是 100% 完成兜底，即使快照比例不足且用户手动标过未读。
+do
+    local plugin = mkPlugin("/x/book.epub")
+    plugin.ui.status = { onEndOfBook = function() end }
+    book_fraction = 0.95
+    Session.onReaderReady(plugin)
+    Session.current().identity.book.read_state = 2
+    Assert.is_true(plugin.ui.status.onEndOfBook(plugin.ui.status))
+    Assert.eq(calls.book[#calls.book][1], "complete")
+    Assert.eq(end_dialog_identity.stable_id, "b1")
+    book_fraction = 0.25
+    Session.onCloseDocument(plugin)
 end
 
 -- 按章阅读：拦截 KOReader 原生 EndOfBook 弹窗，改由会话切下一章。
@@ -626,9 +705,12 @@ for _, name in ipairs({
     "book.store", "book.stats", "book.progress",
     "book.note",
     "ui.reader",
+    "db.book",
+    "utils.settings",
     "db.stats",
     "ui/widget/confirmbox",
     "ui/widget/infomessage",
+    "ui.reader.end_dialog",
     "apps/reader/readerui",
 }) do
     package.preload[name] = nil

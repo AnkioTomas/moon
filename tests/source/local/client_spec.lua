@@ -303,6 +303,22 @@ package.preload["db.book"] = function()
             table.sort(out)
             return out
         end,
+        categoryCountsBySource = function(source_id)
+            local counts = {}
+            for _, row in pairs(db_rows) do
+                if row.source_id == source_id and row.in_library ~= false then
+                    local category = row.category or ""
+                    counts[category] = (counts[category] or 0) + 1
+                end
+            end
+            local keys, out = {}, {}
+            for category in pairs(counts) do keys[#keys + 1] = category end
+            table.sort(keys)
+            for _, category in ipairs(keys) do
+                out[#out + 1] = { category = category, count = counts[category] }
+            end
+            return out
+        end,
         seriesBySource = function(source_id)
             local seen, out = {}, {}
             for _, row in pairs(db_rows) do
@@ -883,6 +899,7 @@ do
     Stubs.flush()
     Assert.not_nil(res)
     Assert.len(res.data.category, 2)
+    Assert.len(res.data.category_counts, 3)
     Assert.eq(res.data.category[1], "sub")
     Assert.eq(res.data.category[2], "zeta")
     Assert.len(res.data.series, 2)

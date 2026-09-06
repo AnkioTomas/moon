@@ -94,7 +94,8 @@ Assert.eq(touches[1].book.title, "书")
 local f = assert(io.open(path, "rb"))
 local html = f:read("*a")
 f:close()
-Assert.is_true(html:find("<h1>二</h1>", 1, true) ~= nil)
+Assert.is_true(html:find("<title>二</title>", 1, true) ~= nil)
+Assert.is_nil(html:find("<h1", 1, true))
 Assert.is_true(html:find("<p>正文2</p>", 1, true) ~= nil)
 
 -- 已落盘且无远程 img 时直接复用，不再请求正文。

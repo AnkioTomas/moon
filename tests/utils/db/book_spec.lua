@@ -127,7 +127,7 @@ do
     end
     for _, name in ipairs({
         "cover", "in_library", "metadata_dirty", "metadata_updated_at",
-        "reader_prefs", "toc", "toc_fetched_at",
+        "reader_prefs", "toc", "toc_fetched_at", "read_state", "is_new",
     }) do
         Assert.is_true(alters[name], "旧库必须补列: " .. name)
     end
@@ -228,12 +228,14 @@ do
 
     Assert.is_true(BookDB.upsertRemote({ source_id = "moon", stable_id = "store.epub" }))
     local q = calls[#calls]
-    -- 13 列绑定 + ON CONFLICT 成员标志 = 14；VALUES 不得多一个 ?
+    -- 14 列绑定 + ON CONFLICT 两个成员标志 = 16。
     local qmarks = select(2, q.sql:gsub("%?", "%?"))
-    Assert.eq(qmarks, 14)
-    Assert.eq(q.argc, 14)
+    Assert.eq(qmarks, 16)
+    Assert.eq(q.argc, 16)
     Assert.eq(q.args[13], 0, "新缓存行默认不进入书架")
-    Assert.eq(q.args[14], 0, "未指定成员关系时冲突行必须保留原值")
+    Assert.eq(q.args[14], 0, "普通缓存不能成为新书")
+    Assert.eq(q.args[15], 0, "未指定成员关系时不得重置新书状态")
+    Assert.eq(q.args[16], 0, "未指定成员关系时冲突行必须保留原值")
     Assert.is_true(q.sql:find("CASE WHEN ?=1 THEN excluded.in_library ELSE books.in_library END", 1, true) ~= nil)
     Assert.is_true(q.sql:find("COALESCE(excluded.intro, books.intro)", 1, true) ~= nil,
         "稀疏远端行不得清空已有简介")
@@ -246,6 +248,8 @@ do
     q = calls[#calls]
     Assert.eq(q.args[13], 1)
     Assert.eq(q.args[14], 1)
+    Assert.eq(q.args[15], 0)
+    Assert.eq(q.args[16], 1)
 
     DbBase.close()
     clearMods()
@@ -268,7 +272,7 @@ do
         end
     end
     Assert.eq(#inserts, 2)
-    Assert.eq(inserts[1].argc, 13)
+    Assert.eq(inserts[1].argc, 14)
     Assert.is_true(inserts[1].sql:find("in_library=excluded.in_library", 1, true) ~= nil)
     Assert.eq(inserts[2].argc, 12)
     Assert.is_true(inserts[2].sql:find("in_library=excluded.in_library", 1, true) == nil)
@@ -293,21 +297,46 @@ do
         end
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
-            Assert.eq(call.argc, 26) -- 2 行 × 13 个绑定参数，显式携带书架成员关系
+            Assert.eq(call.argc, 28) -- 2 行 × 14 个绑定参数，显式携带书架成员关系
             Assert.is_true(call.sql:find("COALESCE(excluded.intro, books.intro)", 1, true) ~= nil,
                 "书架批量对账不得用 NULL 清空已有简介")
             -- NULL 列不得让后续列左移：md5 为空时 title 仍在第 4 位
             Assert.eq(call.args[1], "moon")
             Assert.is_nil(call.args[3])
             Assert.eq(call.args[4], "A")
-            Assert.eq(call.args[14], "moon") -- 未带 source_id 的行也归到本源
-            Assert.eq(call.args[17], "B")
+            Assert.eq(call.args[15], "moon") -- 未带 source_id 的行也归到本源
+            Assert.eq(call.args[18], "B")
         end
         if call.sql == "COMMIT;" then commit = true end
     end
     Assert.eq(deactivate, 1)
     Assert.eq(inserts, 1)
     Assert.is_true(commit)
+    DbBase.close()
+    clearMods()
+end
+
+-- 对账前仍在书架的记录不能因临时 deactivate 被重新标为新书。
+do
+    local connection, calls = makeConn({
+        resultset = function(sql)
+            if sql:find("SELECT stable_id FROM books", 1, true) then
+                return { { "existing.epub" } }, 1
+            end
+        end,
+    })
+    local DbBase, BookDB = loadBook(connection)
+    Assert.is_true(BookDB.reconcile("moon", {
+        { stable_id = "existing.epub" },
+        { stable_id = "new.epub" },
+    }))
+    local insert
+    for _, call in ipairs(calls) do
+        if call.sql:find("INSERT INTO books", 1, true) then insert = call end
+    end
+    Assert.eq(insert.args[14], 0, "已有成员刷新后保持原新书状态")
+    Assert.eq(insert.args[28], 1, "首次入架记录标为新书")
+
     DbBase.close()
     clearMods()
 end
@@ -325,7 +354,7 @@ do
     for _, call in ipairs(calls) do
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
-            Assert.is_true(call.argc == 104 or call.argc == 13) -- 8/1 行 × 13 个绑定参数
+            Assert.is_true(call.argc == 112 or call.argc == 14) -- 8/1 行 × 14 个绑定参数
         end
     end
     Assert.eq(inserts, 2)
@@ -353,11 +382,12 @@ do
             return {
                 "moon", "id'1", "md5x", "标题", "作者",
                 66, "分类", "系列", "简介", "https://img.test/cover.jpg", 1000,
-                "/cache/moon/book/x/book.epub", 1, 0, 0,
+                "/cache/moon/book/x/book.epub", 1, 0, 0, 1, 1,
             }, {
                 "source_id", "stable_id", "md5", "title", "authors",
                 "percent", "category", "series", "intro", "cover", "fetched_at",
                 "path", "in_library", "metadata_dirty", "metadata_updated_at",
+                "read_state", "is_new",
             }
         end,
     })
@@ -373,6 +403,8 @@ do
     Assert.eq(book.cover, "https://img.test/cover.jpg")
     Assert.eq(book.fetched_at, 1000)
     Assert.eq(book.path, "/cache/moon/book/x/book.epub")
+    Assert.eq(book.read_state, 1)
+    Assert.is_true(book.is_new)
     local q = calls[#calls]
     Assert.is_true(q.sql:find("FROM books WHERE source_id=? AND stable_id=? LIMIT 1;", 1, true) ~= nil)
     Assert.eq(q.argc, 2)
@@ -403,11 +435,12 @@ do
             return {
                 "moon", "b1", nil, "标题", nil,
                 0, nil, nil, nil, nil, 0,
-                "/cache/moon/book/x/book.epub", 1, 0, 0,
+                "/cache/moon/book/x/book.epub", 1, 0, 0, 0, 0,
             }, {
                 "source_id", "stable_id", "md5", "title", "authors",
                 "percent", "category", "series", "intro", "cover", "fetched_at",
                 "path", "in_library", "metadata_dirty", "metadata_updated_at",
+                "read_state", "is_new",
             }
         end,
     })
@@ -443,6 +476,27 @@ do
     Assert.is_true(q.sql:find("last_open", 1, true) == nil)
     -- 第二次登记仍只覆盖路径
     Assert.is_true(BookDB.touchPath("moon", "b1", "/cache/moon/book/x/book.epub"))
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── 阅读状态：手动未读独立编码，自动规则不得覆盖 ──────────
+do
+    local connection, calls = makeConn()
+    local DbBase, BookDB = loadBook(connection)
+
+    Assert.is_true(BookDB.setRead("moon", "b1", true))
+    Assert.eq(calls[#calls].args[1], 1)
+    Assert.is_true(BookDB.setRead("moon", "b1", false))
+    Assert.eq(calls[#calls].args[1], 2)
+    Assert.is_true(BookDB.markReadAutomatically("moon", "b1"))
+    Assert.is_true(calls[#calls].sql:find("AND read_state=0", 1, true) ~= nil)
+    Assert.is_true(BookDB.markReadComplete("moon", "b1"))
+    Assert.is_true(calls[#calls].sql:find("read_state=0", 1, true) == nil,
+        "100% 完成不得受手动未读保护")
+    Assert.is_true(BookDB.markOpened("moon", "b1"))
+    Assert.is_true(calls[#calls].sql:find("SET is_new=0", 1, true) ~= nil)
 
     DbBase.close()
     clearMods()
@@ -540,7 +594,7 @@ do
     -- 身份更新包在事务里：BEGIN 在首个 UPDATE 之前，末条是 COMMIT
     local first_update
     for i, c in ipairs(calls) do
-        if c.sql:find("UPDATE books", 1, true) then
+        if c.sql:find("UPDATE books SET stable_id=", 1, true) then
             first_update = i
             break
         end
