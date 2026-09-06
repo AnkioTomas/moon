@@ -222,10 +222,12 @@ function Manager.install(feature)
     end
 
     for _, name in ipairs(def.patches) do
-        if not fileExists(featureDir(feature) .. "/" .. name) then
+        local src = featureDir(feature) .. "/" .. name
+        if not fileExists(src) then
             return { ok = false, err = "missing patch payload: " .. feature .. "/" .. name }
         end
-        if not fileExists(patchesDir() .. "/" .. name) then
+        -- 只看存在会把旧负载冻死：源文件改过也永远不重拷。
+        if readFile(src) ~= readFile(patchesDir() .. "/" .. name) then
             changed = true
         end
     end
