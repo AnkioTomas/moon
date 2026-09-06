@@ -14,6 +14,24 @@ local logger = require("utils.log")
 require("l10n")
 local _ = require("gettext")
 
+local MIN_KOREADER_VERSION = 202607010000
+
+local function checkKOReaderVersion()
+    local ok, Version = pcall(require, "version")
+    local current = ok and Version and Version:getNormalizedCurrentVersion()
+    if type(current) == "number" and current >= MIN_KOREADER_VERSION then
+        return true
+    end
+
+    local ConfirmBox = require("ui/widget/confirmbox")
+    local display = ok and Version and Version.getShortVersion and Version:getShortVersion() or _("未知")
+    UIManager:show(ConfirmBox:new {
+        text = _("月读需要 KOReader 2026.07.1 或更高版本。\n\n当前版本：") .. tostring(display),
+        ok_text = _("关闭"),
+    })
+    return false
+end
+
 local SourceRegistry = require("source.registry")
 local Desktop = require("ui.desktop")
 local Host = require("host")
@@ -35,6 +53,9 @@ local BookPlugin = WidgetContainer:extend {
 --- 插件初始化：挂接 Host（菜单 / 开机打开等）
 ---@return nil
 function BookPlugin:init()
+    if not checkKOReaderVersion() then
+        return
+    end
     logger.start()
     logger.info("book plugin init", self.ui and self.ui.document and "reader" or "filemanager")
     -- HTTP 依赖 Turbo ioloop；必须在 UIManager:run() 前打开 DUSE_TURBO_LIB

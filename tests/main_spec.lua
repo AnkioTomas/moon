@@ -20,13 +20,24 @@ function WidgetContainer:extend(def)
 end
 
 local calls = {}
+local version_current = 202607010000
 local function stub(name, value)
     package.preload[name] = function() return value end
 end
 
 stub("ui/widget/container/widgetcontainer", WidgetContainer)
-stub("ui/uimanager", { nextTick = function(_, fn) fn() end })
+stub("ui/uimanager", {
+    nextTick = function(_, fn) fn() end,
+    show = function(_, dialog) calls.version_dialog = dialog end,
+})
 stub("ui/widget/infomessage", {})
+stub("ui/widget/confirmbox", {
+    new = function(_, fields) calls.version_dialog = fields return fields end,
+})
+stub("version", {
+    getNormalizedCurrentVersion = function() return version_current end,
+    getShortVersion = function() return version_current >= 202607010000 and "2026.07.1" or "2026.07.0" end,
+})
 stub("logger", { err = function() end, info = function() end })
 stub("l10n", {})
 stub("gettext", setmetatable({}, { __call = function(_, text) return text end }))
@@ -111,3 +122,9 @@ resumed_desktop.tab = "home"
 plugin:onResume()
 Assert.eq(calls.home_enter, resumed_desktop)
 Assert.eq(calls.source_event, "desktop_resume", "首页刷新事件由 Home.refreshOnEnter 负责发送")
+
+version_current = 202607000000
+local attach_count = calls.host
+setmetatable({ path = "book.koplugin" }, Main):init()
+Assert.eq(calls.host, attach_count, "不支持的 KOReader 版本不得进入插件")
+Assert.eq(calls.version_dialog.text, "月读需要 KOReader 2026.07.1 或更高版本。\n\n当前版本：2026.07.0")
