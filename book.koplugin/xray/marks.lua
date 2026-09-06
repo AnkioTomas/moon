@@ -397,14 +397,11 @@ end
 ---@param ges table
 ---@return boolean
 function Marks:onTap(ges)
-    if not Marks.enabled() or not self.ui then
-        return false
-    end
-    if not ges or not ges.pos then
+    if not Marks.enabled() or not self.ui or not ges or not ges.pos then
         return false
     end
     self:rebuild()
-    for index, mark in ipairs(self._marks) do
+    for _, mark in ipairs(self._marks) do
         if hitScreenBox(ges.pos, mark.box) then
             require("xray.ui").showEntity(mark.entity)
             return true
@@ -413,7 +410,7 @@ function Marks:onTap(ges)
     return false
 end
 
---- 注册全屏 tap 区（只装一次）：命中实体才消费，否则让翻页/菜单等原有手势继续。
+--- 实体点击必须先于全屏翻页区处理；未命中实体立即返回 false，继续原生翻页。
 ---@param ui table ReaderUI
 local function registerTouch(ui)
     if ui._book_xray_marks_touch then
