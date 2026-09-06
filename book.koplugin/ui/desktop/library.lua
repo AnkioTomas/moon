@@ -255,11 +255,12 @@ end
 ---@param cw number
 ---@param ch number
 ---@param on_open fun(book: table)|nil
+---@param show_status boolean|nil
 ---@return table, number
-local function coverCell(ctx, book, slot_w, cw, ch, on_open)
+local function coverCell(ctx, book, slot_w, cw, ch, on_open, show_status)
     local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, {
         badge = true,
-        ribbon = true,
+        ribbon = show_status ~= false,
         show_parent = ctx.desktop,
     }))
     local title_gap = UI.sz(4)
@@ -325,8 +326,9 @@ end
 ---@param books table
 ---@param m table
 ---@param on_open fun(book: table)|nil
+---@param show_status boolean|nil
 ---@return table, number
-local function buildGrid(ctx, books, m, on_open)
+local function buildGrid(ctx, books, m, on_open, show_status)
     local pad, gap, row_gap = m.pad, m.gap, m.row_gap
     local cols, slot_w, cw, ch = m.cols, m.slot_w, m.cw, m.ch
     local cell_h = m.cell_h
@@ -362,7 +364,7 @@ local function buildGrid(ctx, books, m, on_open)
         if col_i == 0 and grid_used + cell_h > grid_h then
             break
         end
-        local cell = coverCell(ctx, book, slot_w, cw, ch, on_open)
+        local cell = coverCell(ctx, book, slot_w, cw, ch, on_open, show_status)
         if col_i > 0 then
             table.insert(row_group, HorizontalSpan:new{ width = gap })
         end
@@ -689,7 +691,7 @@ function Library.build(ctx, state, opts)
     elseif #books == 0 then
         placeholder(state.err or opts.empty_text or _("没有书籍"))
     else
-        local grid, grid_h = buildGrid(ctx, books, m, on_open)
+        local grid, grid_h = buildGrid(ctx, books, m, on_open, opts.show_status)
         table.insert(kids, grid)
         used = used + grid_h
     end

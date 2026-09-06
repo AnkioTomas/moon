@@ -47,6 +47,7 @@ function Store.build(ctx, state, opts)
     opts.loading_text = opts.loading_text or _("加载中…")
     opts.empty_text = opts.empty_text or _("书城暂无内容")
     opts.search_only = true
+    opts.show_status = false
     opts.on_search = opts.on_search or function()
         if ctx.desktop then Store.showSearch(ctx.desktop) end
     end
