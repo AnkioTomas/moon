@@ -101,10 +101,11 @@ end
 
 --- 候选行随 want 插入/摘除 zh_CN 布局数据（幂等）。
 --- 必须在 VirtualKeyboard:init 读 keys 之前调用——键盘高度按行数算。
---- 行内保留 10 个空键：addKeys 以 #KEYS[1] 为基准键宽。建出来的首行随后
+--- 行内空键数量决定 addKeys 的基准键宽。建出来的首行随后
 --- 被 Strip 整条顶掉，这些键只是占位。
 ---@param want boolean 候选行是否应存在
-local function syncRow(want)
+---@param columns number 普通布局 10，完整注音布局 11
+local function syncRow(want, columns)
     if not (want or package.loaded[ZH_MODULE]) then
         return
     end
@@ -112,19 +113,18 @@ local function syncRow(want)
     if type(keys) ~= "table" then
         return
     end
-    if (keys[1] and keys[1]._ime_bar == true) == want then
-        return
-    end
+    local has_row = keys[1] and keys[1]._ime_bar == true
     if not want then
-        table.remove(keys, 1)
+        if has_row then table.remove(keys, 1) end
         return
     end
+    if has_row then table.remove(keys, 1) end
     local row = { _ime_bar = true }
-    for i = 1, 10 do
+    for i = 1, columns do
         row[i] = { label = "", width = 1.0 }
     end
     row[1].label = "◀"
-    row[10].label = "▶"
+    row[columns].label = "▶"
     table.insert(keys, 1, row)
 end
 
@@ -150,6 +150,20 @@ local function primaryChar(value)
     end
 end
 
+--- 大千注音默认层需要 11/10/10/11 个字符键。
+--- zh_CN 基于英文布局：缺少 - , . /，且分号在 Shift 层；这里只修正这些真实键位。
+---@param keys table
+local function applyZhuyinKeys(keys)
+    keys[1][11] = { "-", "-", "-", "-" }
+    keys[3][10][2] = copyValue(keys[3][10][1])
+
+    local row = keys[4]
+    if row[1] and row[1].label then table.remove(row, 1) end
+    table.insert(row, #row, { ",", ",", ",", "," })
+    table.insert(row, #row, { ".", ".", ".", "." })
+    table.insert(row, #row, { "/", "/", "/", "/" })
+end
+
 --- 每次初始化先恢复原始 zh_CN 键帽，再应用当前输入法标签。
 ---@param profile table|nil
 local function applyKeyboardLabels(profile)
@@ -160,6 +174,9 @@ local function applyKeyboardLabels(profile)
     local restored = copyValue(keyboard_baseline)
     for key in pairs(layout.keys) do layout.keys[key] = nil end
     for key, value in pairs(restored) do layout.keys[key] = value end
+    if profile and profile.id == "zhuyin" then
+        applyZhuyinKeys(layout.keys)
+    end
     local labels = profile and profile.labels
     if type(labels) ~= "table" then return end
     for _, row in ipairs(layout.keys) do
@@ -434,7 +451,7 @@ local function wrappedInit(self, ...)
     _want = not not (_enabled() and Registry.isAvailable(_profile)
         and not (self.inputbox and self.inputbox.input_type == "number"))
     applyKeyboardLabels(_want and _profile or nil)
-    syncRow(_want)
+    syncRow(_want, _profile.id == "zhuyin" and 11 or 10)
     clearCode()
     orig_init(self, ...)
 end
