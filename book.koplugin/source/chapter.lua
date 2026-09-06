@@ -15,6 +15,18 @@ local _ = require("gettext")
 local Chapter = {}
 local lfs = require("libs/libkoreader-lfs")
 local ready_cache = {}
+local READY_CACHE_LIMIT = 512
+local ready_cache_size = 0
+local function cacheReady(path, value)
+    if ready_cache[path] == nil then ready_cache_size = ready_cache_size + 1 end
+    ready_cache[path] = value
+    if ready_cache_size <= READY_CACHE_LIMIT then return end
+    for cached_path in pairs(ready_cache) do
+        ready_cache[cached_path] = nil
+        ready_cache_size = ready_cache_size - 1
+        break
+    end
+end
 
 --- 章节 HTML 是否可直接复用（存在且远程 img 已内联）。
 ---@param path string|nil
@@ -25,7 +37,10 @@ local function chapterReady(path)
     end
     local attr = lfs.attributes(path)
     if not attr or attr.mode ~= "file" then
-        ready_cache[path] = nil
+        if ready_cache[path] ~= nil then
+            ready_cache[path] = nil
+            ready_cache_size = ready_cache_size - 1
+        end
         return false
     end
     local signature = tostring(attr.size or "") .. ":" .. tostring(attr.modification or "")
@@ -35,11 +50,11 @@ local function chapterReady(path)
     end
     local has_remote = Text.hasRemoteImageSrcInFile(path)
     if has_remote == nil then
-        ready_cache[path] = { signature = signature, ready = false }
+        cacheReady(path, { signature = signature, ready = false })
         return false
     end
     local ready = not has_remote
-    ready_cache[path] = { signature = signature, ready = ready }
+    cacheReady(path, { signature = signature, ready = ready })
     return ready
 end
 
@@ -156,10 +171,10 @@ local function write(path, payload, cb, opts)
         end
         local attr = lfs.attributes(path)
         if attr then
-            ready_cache[path] = {
+            cacheReady(path, {
                 signature = tostring(attr.size or "") .. ":" .. tostring(attr.modification or ""),
                 ready = true,
-            }
+            })
         end
         cb(path)
     end

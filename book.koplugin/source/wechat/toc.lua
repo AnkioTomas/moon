@@ -20,6 +20,15 @@ local FORMAT_VERSION = 2
 
 ---@type table<string, WechatTocEntry>
 local cache = {}
+local CACHE_LIMIT = 32
+local function putCache(key, value)
+    cache[key] = value
+    local count = 0
+    for cached_key in pairs(cache) do
+        count = count + 1
+        if count > CACHE_LIMIT then cache[cached_key] = nil; break end
+    end
+end
 
 ---@param source_id string
 ---@param stable_id string
@@ -67,7 +76,7 @@ local function entryOf(source_id, stable_id)
         return nil
     end
     local entry = buildEntry(decoded)
-    cache[key] = entry
+    putCache(key, entry)
     return entry
 end
 
@@ -92,7 +101,7 @@ function Toc.put(source_id, stable_id, list)
     if not ok or not encoded then
         return
     end
-    cache[cacheKey(source_id, stable_id)] = buildEntry(list)
+    putCache(cacheKey(source_id, stable_id), buildEntry(list))
     require("db.book").setToc(source_id, stable_id, encoded)
 end
 
