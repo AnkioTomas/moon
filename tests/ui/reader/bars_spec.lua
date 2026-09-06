@@ -179,19 +179,23 @@ Bars.setSystemBottom(ui_top, true)
 Assert.eq(ui_top.view.footer.mode, 1)
 Assert.is_true(ui_top.view.footer_visible)
 
--- hijackFooter：底栏可见时 TapFooter / onHoldFooter 吞手势
+-- hijackFooter：底栏可见时短按透传给翻页区，长按阻止切换模式
 local footer = {
     ui = ui_top,
-    TapFooter = function() return false end,
-    onHoldFooter = function() return false end,
+    TapFooter = function() return "original tap" end,
+    onHoldFooter = function() return "original hold" end,
     getHeight = function() return 32 end,
 }
 ui_top.view.footer = footer
 ui_top._book_bars_installed = nil
-local touch_zones
-ui_top.registerTouchZones = function(_, zones) touch_zones = zones end
+local registered_touch_zone = false
+ui_top.registerTouchZones = function() registered_touch_zone = true end
 Bars.install(ui_top)
-Assert.is_true(footer:TapFooter())
+Assert.is_false(footer:TapFooter())
 Assert.is_true(footer:onHoldFooter())
-Assert.eq(touch_zones[1].screen_zone.ratio_y, 0.96)
-Assert.eq(touch_zones[1].screen_zone.ratio_h, 0.04)
+Assert.is_false(registered_touch_zone)
+
+-- 底栏关闭后恢复 ReaderFooter 原有行为
+ui_top.view.footer_visible = false
+Assert.eq(footer:TapFooter(), "original tap")
+Assert.eq(footer:onHoldFooter(), "original hold")

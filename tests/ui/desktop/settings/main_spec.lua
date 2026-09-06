@@ -113,6 +113,8 @@ package.preload["ui.desktop.settings.maintenance"] = function()
     return {
         cacheRow = function() return row("清理缓存") end,
         debugLogRow = function() return row("调试日志") end,
+        autoUpdateRow = function() return row("自动检查更新") end,
+        updateRow = function() return row("检查更新") end,
         aboutRow = function() return row("关于") end,
         closeRow = function() return row("关闭桌面") end,
     }
@@ -135,7 +137,7 @@ local desktop = {
 }
 
 require("ui.desktop.settings").build(desktop)
-Assert.len(built_rows, 10)
+Assert.len(built_rows, 12)
 
 local expected = {
     ["书库与账号"] = "sources",
@@ -156,7 +158,9 @@ for _, row in ipairs(built_rows) do
 end
 Assert.eq(categories, 6)
 
-for _, title in ipairs({ "清理缓存", "调试日志", "关于", "关闭桌面" }) do
+for _, title in ipairs({
+    "清理缓存", "调试日志", "自动检查更新", "检查更新", "关于", "关闭桌面",
+}) do
     local found = false
     for _, row in ipairs(built_rows) do
         if row.title == title then found = true break end

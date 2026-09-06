@@ -48,7 +48,7 @@ local Marks = require("xray.marks")
 
 local opened
 package.preload["xray.ui"] = function()
-    return { showEntity = function(e) opened = e.name end }
+    return { showEntity = function(entity) opened = entity.name end }
 end
 
 local entity = { kind = "character", name = "John Doe", aliases = { "John" } }
@@ -59,7 +59,6 @@ package.preload["db.xray"] = function()
     return { list = function() list_calls = list_calls + 1; return { entity } end }
 end
 package.loaded["db.xray"] = nil
-package.loaded["xray.ui"] = nil
 
 local current_pos = 0
 local find_calls = {}
@@ -171,7 +170,10 @@ Assert.len(Marks._marks, 1)
 Assert.eq(Marks._marks[1].box.x, 20)
 Assert.eq(Marks._marks[1].box.w, 80)
 
-Assert.is_true(Marks:onTap({ pos = { x = 25, y = 12 } }))
+-- 排版框与真机触点存在偏差：文字上下保留容错，远离实体仍须透传。
+Assert.is_false(Marks:onTap({ pos = { x = 25, y = -11 } }))
+Assert.is_nil(opened)
+Assert.is_true(Marks:onTap({ pos = { x = 25, y = 5 } }))
 Assert.eq(opened, "Whitby")
 
 page = 4
@@ -199,3 +201,23 @@ Marks.setEnabled(false)
 Assert.is_false(Marks.enabled())
 Marks.setEnabled(true)
 Assert.is_true(Marks.enabled())
+
+-- 实体 tap 未命中时透传，但注册顺序必须先于原生全屏翻页区。
+local registered_module
+local registered_touch_zones
+local ui = {
+    view = {
+        registerViewModule = function(_, name, module)
+            registered_module = { name = name, module = module }
+        end,
+    },
+    registerTouchZones = function(_, zones)
+        registered_touch_zones = zones
+    end,
+}
+Marks.install(ui)
+Assert.eq(registered_module.name, "book_xray_marks")
+Assert.eq(registered_module.module, Marks)
+Assert.eq(registered_touch_zones[1].id, "book_xray_entity_tap")
+Assert.contains(registered_touch_zones[1].overrides, "tap_forward")
+Assert.contains(registered_touch_zones[1].overrides, "tap_backward")
