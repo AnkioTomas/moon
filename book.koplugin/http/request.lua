@@ -70,10 +70,18 @@ local function networkConnected()
     end
     -- isOnline() performs an active DNS probe in KOReader.  Calling it here
     -- would violate the very guarantee this gate provides.
-    local probe = manager.getConnectionState or manager.isConnected
-    if type(probe) ~= "function" then return true end
-    local state_ok, connected = pcall(probe, manager)
-    return not state_ok or connected ~= false
+    local connected
+    if type(manager.getConnectionState) == "function" then
+        local state_ok
+        state_ok, connected = pcall(manager.getConnectionState, manager)
+        if not state_ok then return true end
+    end
+    if connected == nil and type(manager.isConnected) == "function" then
+        local state_ok
+        state_ok, connected = pcall(manager.isConnected, manager)
+        if not state_ok then return true end
+    end
+    return connected ~= false
 end
 
 ---@param callback fun()
