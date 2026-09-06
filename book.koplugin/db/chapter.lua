@@ -111,10 +111,4 @@ function ChapterDB.all()
     return out
 end
 
---- 清空全部章节登记（清缓存）
----@return boolean
-function ChapterDB.clear()
-    return Base.exec([[DELETE FROM chapters;]]) ~= nil
-end
-
 return ChapterDB

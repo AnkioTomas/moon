@@ -265,15 +265,3 @@ do
     DbBase.close()
     clearMods()
 end
-
--- ── clear：全表清空 ─────────────────────────────────────
-do
-    local connection, calls = makeConn()
-    local DbBase, ChapterDB = loadChapter(connection)
-
-    Assert.is_true(ChapterDB.clear())
-    Assert.eq(calls[#calls].sql, "DELETE FROM chapters;")
-
-    DbBase.close()
-    clearMods()
-end

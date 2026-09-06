@@ -573,18 +573,6 @@ do
     clearMods()
 end
 
--- ── clearPaths：清空全部路径登记 ─────────────────────────
-do
-    local connection, calls = makeConn()
-    local DbBase, BookDB = loadBook(connection)
-
-    Assert.is_true(BookDB.clearPaths())
-    Assert.eq(calls[#calls].sql, "UPDATE books SET path=NULL;")
-
-    DbBase.close()
-    clearMods()
-end
-
 -- ── renameStableId：身份表同步改写，全参数化 ─────────────
 do
     local connection, calls = makeConn()
@@ -735,44 +723,6 @@ do
     Assert.eq(q.args[1], "local")
     Assert.eq(q.args[2], "/a'); DROP TABLE books;--")
     Assert.is_false(q.sql:find("DROP TABLE", 1, true) ~= nil)
-
-    DbBase.close()
-    clearMods()
-end
-
--- ── stripMeta：无 WHERE 全表清元数据（保留键与 md5）──────
-do
-    local connection, calls = makeConn()
-    local DbBase, BookDB = loadBook(connection)
-
-    Assert.is_true(BookDB.stripMeta())
-    local q = calls[#calls]
-    Assert.is_true(q.sql:find("UPDATE books SET", 1, true) ~= nil)
-    Assert.is_false(q.sql:find("WHERE", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("title=NULL", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("fetched_at=0", 1, true) ~= nil)
-    Assert.is_false(q.sql:find("md5=NULL", 1, true) ~= nil) -- md5 必须保留
-    Assert.eq(q.argc, 0)
-
-    DbBase.close()
-    clearMods()
-end
-
--- ── expireBefore：WHERE 绑定时间戳；非数字按 0 处理 ──────
-do
-    local connection, calls = makeConn()
-    local DbBase, BookDB = loadBook(connection)
-
-    Assert.is_true(BookDB.expireBefore(1700000000))
-    local q = calls[#calls]
-    Assert.is_true(q.sql:find("UPDATE books SET", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("WHERE fetched_at > 0 AND fetched_at < ?;", 1, true) ~= nil)
-    Assert.eq(q.argc, 1)
-    Assert.eq(q.args[1], 1700000000)
-    Assert.is_false(q.sql:find("1700000000", 1, true) ~= nil)
-
-    Assert.is_true(BookDB.expireBefore("not-a-number"))
-    Assert.eq(calls[#calls].args[1], 0)
 
     DbBase.close()
     clearMods()

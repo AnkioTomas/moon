@@ -17,8 +17,7 @@ local ProgressDB = require("db.progress")
 
 local Cache = {}
 
-local META_TTL = 7 * 24 * 60 * 60
-local LOCAL_BOOK_TTL = 90 * 24 * 60 * 60
+local LOCAL_BOOK_TTL = 365 * 24 * 60 * 60
 
 --- path 的父目录
 ---@param path string
@@ -83,12 +82,12 @@ local function purgeEntry(path, mode)
     return true
 end
 
---- 清理过期 meta，并删掉连续 90 天未打开的书目录；顺带清失效路径登记
+--- 删掉连续 90 天未打开的缓存书目录；顺带清失效路径登记。
+--- 书籍元数据不是缓存，不在这里过期。
 ---@return number 删除的目录/文件数
 function Cache.cleanupStale()
     Paths.ensureCacheRoot()
     local now = os.time()
-    BookDB.expireBefore(now - META_TTL)
 
     local book_rows = BookDB.pathsAll()
     local chapter_rows = ChapterDB.all()
@@ -306,7 +305,7 @@ function Cache.sizeBytesAsync(cb)
     }
 end
 
---- Clear file cache + 打开记录 without monopolising the UI thread.
+--- 清空文件缓存及其路径登记，不动书籍元数据。
 ---@param cb fun(ok: boolean, err: any)|nil
 ---@return { cancel: fun() }
 function Cache.clearAsync(cb)
@@ -315,9 +314,10 @@ function Cache.clearAsync(cb)
     local dir = Paths.cacheDir()
     local cancelled = false
     local purge_job
+    -- 只清 cache 目录下的路径登记；本地源外部文件路径与书籍元数据必须保留。
     -- 先清 DB 再删文件：即使文件删除失败，DB 记录已干净，不会产生孤立引用。
     -- db.* 不抛错，失败只体现在返回值上。
-    if not (ChapterDB.clear() and BookDB.clearPaths() and BookDB.stripMeta()) then
+    if not (ChapterDB.deleteUnder(dir) and BookDB.clearPathsUnder(dir)) then
         logger.warn("book cache db clear failed, skipping file purge")
         cb(false, "db clear failed")
         return { cancel = function() end }

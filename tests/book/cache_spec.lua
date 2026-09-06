@@ -96,18 +96,6 @@ package.preload["db.book"] = function()
         end
     end
     return {
-        expireBefore = function(ts)
-            db_log.expire_before = ts
-        end,
-        stripMeta = function()
-            db_log.strip_meta = (db_log.strip_meta or 0) + 1
-            return true
-        end,
-        clearPaths = function()
-            db_log.clear_opens = (db_log.clear_opens or 0) + 1
-            book_rows = {}
-            return true
-        end,
         pathsAll = function()
             return book_rows
         end,
@@ -123,6 +111,7 @@ package.preload["db.book"] = function()
             removeWhere(function(row)
                 return row.path and row.path:sub(1, #prefix) == prefix
             end)
+            return true
         end,
     }
 end
@@ -165,10 +154,6 @@ package.preload["db.chapter"] = function()
                     table.remove(chapter_rows, i)
                 end
             end
-        end,
-        clear = function()
-            db_log.chapter_clear = (db_log.chapter_clear or 0) + 1
-            chapter_rows = {}
             return true
         end,
     }
@@ -227,6 +212,7 @@ do
     writeFile(CACHE .. "/moon/image/c.png", 10)
     book_rows = {
         { source_id = "moon", stable_id = "aaa", path = CACHE .. "/moon/book/aaa/1.html", updated_at = os.time() },
+        { source_id = "local", stable_id = "/books/local.epub", path = "/books/local.epub", title = "本地书" },
     }
     chapter_rows = {
         { path = CACHE .. "/moon/book/aaa/sub/2.html", source_id = "moon", stable_id = "aaa", chapter_idx = 2 },
@@ -244,11 +230,12 @@ do
     Assert.is_true(ok_result)
     Assert.is_nil(lfs.attributes(CACHE .. "/moon")) -- 整树被删
     Assert.eq(lfs.attributes(CACHE, "mode"), "directory") -- ensureCacheRoot 重建空根
-    -- DB 阶段依次：ChapterDB.clear → BookDB.clearPaths → BookDB.stripMeta
-    Assert.eq(db_log.chapter_clear, 1)
-    Assert.eq(db_log.clear_opens, 1)
-    Assert.eq(db_log.strip_meta, 1)
-    Assert.eq(#book_rows, 0)
+    -- 只清 cache 内的路径登记；本地书路径与元数据不是缓存。
+    Assert.contains(db_log.chapter_delete_under, CACHE)
+    Assert.contains(db_log.book_clear_under, CACHE)
+    Assert.eq(#book_rows, 1)
+    Assert.eq(book_rows[1].path, "/books/local.epub")
+    Assert.eq(book_rows[1].title, "本地书")
     Assert.eq(#chapter_rows, 0)
 end
 
@@ -312,8 +299,8 @@ do
     Assert.is_true(called)
     Assert.is_false(ok_result)
     Assert.not_nil(err_result)
-    Assert.eq(db_log.chapter_clear, 1) -- 文件失败前 db 已清
-    Assert.eq(db_log.clear_opens, 1)
+    Assert.contains(db_log.chapter_delete_under, CACHE) -- 文件失败前 DB 路径登记已清
+    Assert.contains(db_log.book_clear_under, CACHE)
     Assert.eq(lfs.attributes(CACHE, "mode"), "directory") -- 失败后仍重建空根
 end
 
@@ -347,10 +334,6 @@ do
     Assert.is_nil(lfs.attributes(CACHE .. "/moon/book/loose.epub"))
     Assert.eq(lfs.attributes(CACHE .. "/moon/book/newbook", "mode"), "directory") -- 近期打开不删
     Assert.eq(lfs.attributes(CACHE .. "/moon/book/norecord", "mode"), "directory") -- 无记录回退 mtime（新建）不删
-
-    -- meta 过期用 7 天 TTL
-    Assert.not_nil(db_log.expire_before)
-    Assert.is_true(math.abs((now - db_log.expire_before) - 7 * 24 * 60 * 60) <= 2)
 
     -- purge 书目录：连带清目录下的 books/chapters 登记
     Assert.contains(db_log.book_clear_under, CACHE .. "/moon/book/oldbook")
