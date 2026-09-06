@@ -507,12 +507,6 @@ function BookDB.pathsAll()
     return out
 end
 
---- 清空全部路径登记（清缓存）。
----@return boolean
-function BookDB.clearPaths()
-    return Base.exec([[UPDATE books SET path=NULL;]]) ~= nil
-end
-
 --- 按 (source_id, md5) 找已入库的行（本地源用内容摘要识别文件改名/移动）。
 ---@param source_id string
 ---@param md5 string
@@ -875,29 +869,6 @@ function BookDB.setReaderPrefs(source_id, stable_id, payload)
         stable_id,
         payload
     ) ~= nil
-end
-
---- 清空全部书籍展示元数据（保留键与 md5）
----@return boolean
-function BookDB.stripMeta()
-    return Base.exec([[
-UPDATE books SET
-  title=NULL, authors=NULL, percent=0, category=NULL,
-          series=NULL, intro=NULL, fetched_at=0;
-]]) ~= nil
-end
-
---- 清空 fetched_at 早于 before_ts 的书籍展示元数据
----@param before_ts number
----@return boolean
-function BookDB.expireBefore(before_ts)
-    before_ts = tonumber(before_ts) or 0
-    return Base.exec([[
-UPDATE books SET
-  title=NULL, authors=NULL, percent=0, category=NULL,
-  series=NULL, intro=NULL, fetched_at=0
-WHERE fetched_at > 0 AND fetched_at < ?;
-]], before_ts) ~= nil
 end
 
 return BookDB
