@@ -515,15 +515,15 @@ local function applyChosenPos(ui, id, pos, pct, show_msg)
     local toc = chapterToc(id)
     if toc then
         local count = #toc
-        local target_idx = pos.chapter_idx
-        local within
-        if pos.chapter_fraction ~= nil then
-            within = pos.chapter_fraction
-        elseif not target_idx then
+        local target_idx = tonumber(pos.chapter_idx)
+        local within = pos.chapter_fraction
+        if not target_idx then
             local p = pct * count
             target_idx = math.max(1, math.min(count, math.floor(p) + 1))
-            within = p - (target_idx - 1)
-        else
+            if within == nil then
+                within = p - (target_idx - 1)
+            end
+        elseif within == nil then
             local p = pct * count
             local expect = math.floor(p) + 1
             if expect == target_idx then
