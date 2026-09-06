@@ -174,6 +174,21 @@ local function runFetch(ui, identity, force)
     Fetch.comprehensive(ui, identity, { force = force == true }, cb)
 end
 
+--- 强制重新生成当前书籍的 X-Ray。
+---@param ui table|nil
+---@param identity BookIdentity|nil
+function UI.refresh(ui, identity)
+    identity = identity or currentIdentity()
+    if not ui or not identity then
+        info(_("当前书籍没有可用身份"))
+        return
+    end
+    if not ensureConfigured() then return end
+    require("ui/network/manager"):runWhenOnline(function()
+        runFetch(ui, identity, true)
+    end)
+end
+
 --- 打开 X-Ray 主菜单（底部分栏，左上角重新生成）。
 ---@param ui table|nil
 ---@param initial_tab string|nil
@@ -206,10 +221,7 @@ function UI.openMain(ui, initial_tab)
         items = rowsForTab(initial_tab, identity),
         bottom_tabs = { tabs = Kinds, active = initial_tab, on_tab = switch },
         on_left_tap = function()
-            if not ensureConfigured() then return end
-            require("ui/network/manager"):runWhenOnline(function()
-                runFetch(ui, identity, true)
-            end)
+            UI.refresh(ui, identity)
         end,
         close_callback = function()
             if main_holder == holder then
