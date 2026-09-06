@@ -64,6 +64,7 @@ do
     end
     Assert.is_true(ids.moon)
     Assert.is_true(ids.wechat)
+    Assert.is_true(ids.jdread)
     Assert.is_true(ids["local"])
 end
 
@@ -95,6 +96,17 @@ end
 
 do
     Assert.eq(Registry.meta("wechat").type, "chapter")
+    Assert.eq(Registry.meta("jdread").type, "chapter")
+end
+
+do
+    local src, err = Registry.create("jdread")
+    Assert.is_true(src ~= nil, err)
+    local caps = src:capabilities()
+    Assert.is_true(caps.store)
+    Assert.is_true(caps.insight)
+    Assert.is_false(caps.stats_pull)
+    Assert.is_false(type(src.pushStatsAsync) == "function")
 end
 
 do

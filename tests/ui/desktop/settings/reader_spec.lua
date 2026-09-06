@@ -43,6 +43,8 @@ for _, section in ipairs(sections) do
 end
 Assert.is_true(reading ~= nil)
 Assert.eq(reading.rows[1](600).title, "阅读页顶栏")
+Assert.eq(reading.rows[4](600).title, "读到 99% 自动标记已读")
+Assert.is_false(reading.rows[4](600).status_on)
 
 local popup_rows = Settings.popupRows(desktop)
 Assert.len(popup_rows, 11)

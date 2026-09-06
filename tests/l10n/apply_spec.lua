@@ -22,6 +22,16 @@ Assert.eq(en_catalog[EN_KEY], "月读")
 Assert.eq(zh_catalog[EN_KEY], "月讀")
 EN_ONLY_KEY = "下载失败"
 Assert.not_nil(en_catalog[EN_ONLY_KEY])
+for _, key in ipairs({
+    "阅读状态", "已读", "未读",
+    "标记为已读", "标记为未读", "更新阅读状态失败", "确定删除《%1》？",
+    "读到 99% 自动标记已读", "新", "读", "未",
+    "分类视图", "书架视图", "返回分类", "未分类", "共%1类", "%1 本书",
+    "没有分类", "当前数据源不支持分类",
+}) do
+    Assert.not_nil(en_catalog[key], "英文目录缺少: " .. key)
+    Assert.not_nil(zh_catalog[key], "繁中目录缺少: " .. key)
+end
 
 local function clearTranslation()
     for k in pairs(GetText.translation) do
