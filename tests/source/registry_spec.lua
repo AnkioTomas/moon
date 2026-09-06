@@ -65,6 +65,7 @@ do
     Assert.is_true(ids.moon)
     Assert.is_true(ids.wechat)
     Assert.is_true(ids.jdread)
+    Assert.is_true(ids.copymanga)
     Assert.is_true(ids["local"])
 end
 
@@ -97,6 +98,7 @@ end
 do
     Assert.eq(Registry.meta("wechat").type, "chapter")
     Assert.eq(Registry.meta("jdread").type, "chapter")
+    Assert.eq(Registry.meta("copymanga").type, "chapter")
 end
 
 do
@@ -114,6 +116,14 @@ do
     Assert.is_true(src ~= nil, err)
     Assert.is_false(src:capabilities().scrape)
     Assert.is_false(src:capabilities().edit)
+end
+
+do
+    local src, err = Registry.create("copymanga")
+    Assert.is_true(src ~= nil, err)
+    Assert.is_true(src:configured())
+    Assert.is_true(src:capabilities().store)
+    Assert.is_true(src:capabilities().search)
 end
 
 do

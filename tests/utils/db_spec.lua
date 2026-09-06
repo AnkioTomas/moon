@@ -349,6 +349,7 @@ do
                         { 1000 },
                         { 1 },
                         { 1 },
+                        { "/cache/a.epub" },
                     }, 1
                 end,
                 close = function() end,
@@ -379,6 +380,7 @@ do
     Assert.eq(rows[1].cover, "https://img.test/a.jpg")
     Assert.eq(rows[1].read_state, 1)
     Assert.is_true(rows[1].is_new)
+    Assert.eq(rows[1].path, "/cache/a.epub")
     local count_q = calls[#calls - 1]
     Assert.is_true(count_q.sql:find("WHERE source_id=%?", 1) ~= nil or count_q.sql:find("source_id=?", 1, true) ~= nil)
     Assert.is_false(count_q.sql:find("category=", 1, true) ~= nil)

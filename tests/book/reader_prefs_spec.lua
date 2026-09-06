@@ -9,6 +9,7 @@ local Assert = require("support.assert")
 local saved_payload
 local fail_write
 local warnings = {}
+local resolved_font_ids = {}
 package.preload["db.book"] = function()
     return {
         getReaderPrefs = function(source_id, stable_id)
@@ -67,6 +68,7 @@ package.preload["utils.font"] = function()
             return ui and ui.font ~= nil and ui.document and ui.document.setFontFace
         end,
         faceForId = function(id)
+            resolved_font_ids[#resolved_font_ids + 1] = id
             if id == "demo.ttf" then return "Demo Face" end
         end,
         applyFaceToReader = function() return true end,
@@ -191,6 +193,15 @@ Assert.is_false(ReaderPrefs.captureAndSave(ui, whole_book))
 local whole_book_settings = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
 Assert.is_false(ReaderPrefs.inject(whole_book_settings, { file = "/x.epub", setFontFace = function() end }))
 Assert.is_nil(next(whole_book_settings.data))
+
+-- 整本书无需注入跨章节偏好，但冷启动时必须按 sidecar 的 id 重新注册插件字体。
+local cold_book_settings = {
+    data = { book_reader_font_id = "demo.ttf", font_face = "Demo Face" },
+    saveSetting = ui.doc_settings.saveSetting,
+    readSetting = ui.doc_settings.readSetting,
+}
+Assert.is_false(ReaderPrefs.inject(cold_book_settings, { file = "/x.epub", setFontFace = function() end }))
+Assert.eq(resolved_font_ids[#resolved_font_ids], "demo.ttf")
 
 -- 非 CRE 文档不落 copt_
 local kopt = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
