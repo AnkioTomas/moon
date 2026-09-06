@@ -63,6 +63,7 @@ local function toBook(row, source_id)
         percent = tonumber(row.percent) or 0,
         read_state = tonumber(row.read_state) or 0,
         is_new = row.is_new == true or tonumber(row.is_new) == 1,
+        path = row.path,
         chapter_idx = row.chapter_idx,
         chapter_title = row.chapter_title,
         page = row.page,

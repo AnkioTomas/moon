@@ -640,7 +640,7 @@ function BookDB.listBySource(source_id, opts)
     local sel = [[SELECT b.stable_id, b.title, b.authors,
                         COALESCE(p.fraction * 100, b.percent),
                         b.category, b.series, b.intro, b.cover, b.fetched_at,
-                        b.read_state, b.is_new
+                        b.read_state, b.is_new, b.path
                    FROM books b LEFT JOIN pending_progress p
                      ON p.source_id=b.source_id AND p.stable_id=b.stable_id
                   WHERE ]] .. where .. " ORDER BY b.stable_id"
@@ -666,6 +666,7 @@ function BookDB.listBySource(source_id, opts)
                 fetched_at = tonumber(result[9][i]) or 0,
                 read_state = tonumber(result[10][i]) or 0,
                 is_new = tonumber(result[11][i]) ~= 0,
+                path = result[12][i],
             }
         end
     end
