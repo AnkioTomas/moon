@@ -309,4 +309,48 @@ function Source:openBookAsync(identity, opts, cb)
     }
 end
 
+--- 阅读中后台预取后续章节 CBZ。会话侧固定预取后面 3 章。
+---@param identity BookIdentity
+---@param toc BookChapter[]
+---@param from_idx integer
+---@param count integer
+---@param cb fun()|nil
+---@return { cancel: fun() }
+function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
+    return require("source.copymanga.chapter").prefetchAsync(
+        self._client, identity, toc, from_idx, count, nil, cb
+    )
+end
+
+--- 缓存整本漫画；已落盘章节自动跳过，章与章之间留间隔以免打爆接口。
+---@param identity BookIdentity
+---@param on_progress fun(done: integer, total: integer)|nil
+---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
+---@return { cancel: fun() }
+function Source:cacheAllChaptersAsync(identity, on_progress, cb)
+    local cancelled, active = false, nil
+    active = self:loadTocAsync(identity, function(toc, err)
+        if cancelled then return end
+        if not toc then cb(false, 0, err or _("漫画目录为空"), 0, 0); return end
+        active = require("source.copymanga.chapter").prefetchAsync(
+            self._client, identity, toc, 0, #toc,
+            {
+                progress = on_progress,
+                interval_seconds = 1.5,
+            },
+            function(cached, total, failed, last_err)
+                if not cancelled then
+                    cb(failed == 0, cached, last_err, total, failed)
+                end
+            end
+        )
+    end)
+    return {
+        cancel = function()
+            cancelled = true
+            if active and active.cancel then active.cancel() end
+        end,
+    }
+end
+
 return Copymanga
