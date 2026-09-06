@@ -82,7 +82,7 @@ local function purgeEntry(path, mode)
     return true
 end
 
---- 删掉连续 90 天未打开的缓存书目录；顺带清失效路径登记。
+--- 删掉连续 365 天未打开的缓存书目录；顺带清失效路径登记。
 --- 书籍元数据不是缓存，不在这里过期。
 ---@return number 删除的目录/文件数
 function Cache.cleanupStale()
