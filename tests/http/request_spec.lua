@@ -139,6 +139,49 @@ do
     pcall(real_remove, dest .. ".part")
 end
 
+-- max_bytes：响应超过上限时删除临时文件，不得把半截内容落位。
+do
+    local original_stream = Request.stream
+    local real_rename = os.rename
+    local real_remove = os.remove
+    local dest = Config.dir() .. "/.moon/test_download_limit.bin"
+    local renamed, removed
+
+    Request.stream = function(_, handlers)
+        handlers.on_headers(200, {})
+        handlers.on_data("pay")
+        handlers.on_data("load")
+        handlers.on_done()
+        return { cancel = function() end }
+    end
+    os.rename = function()
+        renamed = true
+        return true
+    end
+    os.remove = function(path)
+        removed = path
+        return true
+    end
+
+    local ok_d, err_d
+    Request.download({
+        url = "https://example.test/file",
+        max_bytes = 6,
+    }, dest, function(ok, err)
+        ok_d, err_d = ok, err
+    end)
+
+    Request.stream = original_stream
+    os.rename = real_rename
+    os.remove = real_remove
+
+    Assert.is_false(ok_d)
+    Assert.eq(err_d, "download too large")
+    Assert.is_nil(renamed)
+    Assert.eq(removed, dest .. ".part")
+    pcall(real_remove, dest .. ".part")
+end
+
 -- ── writeResponseToFile ──────────────────────────────────
 local TMP_DIR = Config.dir() .. "/.moon"
 local TMP_PREFIX = TMP_DIR .. "/test_request_spec_"
