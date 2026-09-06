@@ -725,4 +725,5 @@ return {
     ["决定书库中可以切换哪些书籍来源"] = "Choose which book sources are available in the library",
     ["书籍来源"] = "Book sources",
     ["账号与登录"] = "Account & sign-in",
+    ["刷新 X-Ray"] = "Refresh X-Ray",
 }
