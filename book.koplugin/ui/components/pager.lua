@@ -208,21 +208,25 @@ function Pager.pack(widgets, avail_h)
     local pages = {}
     local cur = { align = "left" }
     local used = 0
+    --- 当前页已有内容才切页 / 落盘。`#cur` 不含 align 字段，单行页必须靠 used 判断。
+    local function flush()
+        if used > 0 or #pages == 0 then
+            table.insert(pages, cur)
+        end
+        cur = { align = "left" }
+        used = 0
+    end
     for _, w in ipairs(widgets or {}) do
         if w then
             local wh = w.getSize and w:getSize().h or 0
-            if #cur > 1 and used + wh > avail_h then
-                table.insert(pages, cur)
-                cur = { align = "left" }
-                used = 0
+            if used > 0 and used + wh > avail_h then
+                flush()
             end
             table.insert(cur, w)
             used = used + wh
         end
     end
-    if #cur > 1 or #pages == 0 then
-        table.insert(pages, cur)
-    end
+    flush()
     return pages
 end
 
