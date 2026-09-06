@@ -74,6 +74,8 @@ end
 local function coverCell(ctx, book, slot_w, cw, ch, on_open)
     local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, {
         badge = true,
+        ribbon = true,
+        download = true,
         show_parent = ctx.desktop,
     }))
     local tap = BookInfo.tappable(slot_w, ch + titleExtra(), function()

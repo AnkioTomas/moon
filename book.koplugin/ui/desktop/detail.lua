@@ -204,7 +204,7 @@ function Detail:init()
             self:rebuild()
             require("ui/uimanager"):setDirty(self, "ui")
         end)
-    elseif kind == "wechat" and self.source and self.source.getDetailAsync then
+    elseif kind == "source" and self.source and self.source.getDetailAsync then
         local book = self.book
         self._store_detail_job = self.source:getDetailAsync({
             source_id = book.source_id,
@@ -767,10 +767,7 @@ function Detail:rebuild()
             or self.source.type == "chapter")
     local can_cache = can_read and self.source.type == "chapter"
         and type(self.source.cacheAllChaptersAsync) == "function"
-        and not Store.allChaptersCached({
-            source_id = book.source_id,
-            stable_id = book.stable_id,
-        })
+        and not Store.isDownloaded(book)
 
     local title_bar, title_h = self:buildTopBar(w)
 
