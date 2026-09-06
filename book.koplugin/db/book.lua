@@ -425,15 +425,34 @@ function BookDB.touchPath(source_id, stable_id, path)
     ) ~= nil
 end
 
---- 手动标记已读/未读；未读状态会阻止 99% 自动规则再次覆盖。
+--- 手动标记已读/未读。
+--- 已读：read_state=1 且进度抬到 100%（并脏写 pending_progress，供云端进度同步收敛）。
+--- 未读：read_state=2，阻止 99% 自动规则再次覆盖；不回退进度。
 ---@param source_id string
 ---@param stable_id string
 ---@param is_read boolean
 ---@return boolean
 function BookDB.setRead(source_id, stable_id, is_read)
-    return Base.exec([[UPDATE books SET read_state=?
+    if not is_read then
+        return Base.exec([[UPDATE books SET read_state=2
+            WHERE source_id=? AND stable_id=?;]],
+            source_id, stable_id) ~= nil
+    end
+    if not Base.exec([[UPDATE books SET read_state=1, percent=100
         WHERE source_id=? AND stable_id=?;]],
-        is_read and 1 or 2, source_id, stable_id) ~= nil
+        source_id, stable_id) then
+        return false
+    end
+    -- 只抬 fraction，保留章节定位字段；sync_status=0 等进度同步推云端。
+    return Base.exec([[
+INSERT INTO pending_progress
+  (source_id, stable_id, fraction, updated_at, sync_status)
+VALUES (?,?,1,?,0)
+ON CONFLICT(source_id, stable_id) DO UPDATE SET
+  fraction=1,
+  sync_status=0,
+  updated_at=excluded.updated_at;]],
+        source_id, stable_id, os.time()) ~= nil
 end
 
 --- 自动标记已读；只允许更新从未被用户强制标为未读的书。
