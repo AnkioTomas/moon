@@ -33,5 +33,5 @@ local ok, err = pcall(function()
 end)
 
 if not ok then
-    require("utils.log").warn("[PdfSwipeAnimationPatch] failed:", err)
+    require("logger").warn("[PdfSwipeAnimationPatch] failed:", err)
 end
