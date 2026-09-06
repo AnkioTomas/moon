@@ -107,28 +107,40 @@ function Source:configured()
     return Auth.hasSession()
 end
 
---- 删除微信读书的本地章节缓存、封面和登记；不删除云端书架。
+--- 删除微信读书云端书架条目，并清理本地章节缓存与登记。
 ---@param identity BookIdentity
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return table
 function Source:deleteBookAsync(identity, cb)
-    local cancelled = false
-    require("ui/uimanager"):nextTick(function()
+    local cancelled, job = false, nil
+    require("ui/network/manager"):runWhenOnline(function()
         if cancelled then return end
-        local Paths = require("utils.paths")
-        local Util = require("ffi/util")
-        local dir = Paths.bookWorkDir(identity.stable_id, self.id)
-        if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory"
-            and not Util.purgeDir(dir) then
-            cb(false, _("删除本书失败"))
-            return
-        end
-        os.remove(Paths.coverPath(identity.stable_id, self.id))
-        require("db.book").remove(self.id, identity.stable_id)
-        require("db.chapter").deleteUnder(dir)
-        cb(true)
+        job = self._client:removeFromShelfAsync(identity.stable_id, function(wire, err)
+            if cancelled then return end
+            if not wire then
+                cb(false, err or _("删除本书失败"))
+                return
+            end
+            local Paths = require("utils.paths")
+            local Util = require("ffi/util")
+            local dir = Paths.bookWorkDir(identity.stable_id, self.id)
+            if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory"
+                and not Util.purgeDir(dir) then
+                cb(false, _("删除本书失败"))
+                return
+            end
+            os.remove(Paths.coverPath(identity.stable_id, self.id))
+            require("db.book").remove(self.id, identity.stable_id)
+            require("db.chapter").deleteUnder(dir)
+            cb(true)
+        end)
     end)
-    return { cancel = function() cancelled = true end }
+    return {
+        cancel = function()
+            cancelled = true
+            if job and job.cancel then job.cancel() end
+        end,
+    }
 end
 
 --- 清空封面 URL、阅读上下文与目录缓存。

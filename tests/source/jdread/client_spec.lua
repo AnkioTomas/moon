@@ -139,6 +139,16 @@ do
 end
 
 do
+    local wire, err
+    client:removeFromShelfAsync("30533530", function(value, e) wire, err = value, e end)
+    local body = require("json").decode(requests[#requests].body)
+    Assert.is_nil(err)
+    Assert.not_nil(wire)
+    Assert.eq(body.items[1].action, 1)
+    Assert.eq(body.items[1].ebook_id, 30533530)
+end
+
+do
     local _, err
     local first = #requests + 1
     client:chapterInfosAsync("30451107", function(value, e) _, err = value, e end)

@@ -65,6 +65,7 @@ end
 local Base = require("ui.desktop.home.components.base")
 local Layout = require("ui.desktop.home.layout")
 
+Assert.len(Base.components, 7)
 local defaults = Base.enabledLayout()
 Assert.len(defaults, 2)
 Assert.eq(defaults[1], "recent_hero")

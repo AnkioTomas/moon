@@ -141,28 +141,40 @@ function Source:configured()
     return self._client:configured()
 end
 
---- 删除 Moon 书籍的本地文件、封面和登记；不删除云端原书。
+--- 删除 Moon 云端原书，并清理本地缓存与登记。
 ---@param identity BookIdentity
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return table
 function Source:deleteBookAsync(identity, cb)
-    local cancelled = false
-    require("ui/uimanager"):nextTick(function()
+    local cancelled, job = false, nil
+    require("ui/network/manager"):runWhenOnline(function()
         if cancelled then return end
-        local Paths = require("utils.paths")
-        local Util = require("ffi/util")
-        local dir = Paths.bookWorkDir(identity.stable_id, self.id)
-        if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory"
-            and not Util.purgeDir(dir) then
-            cb(false, _("删除本书失败"))
-            return
-        end
-        os.remove(Paths.coverPath(identity.stable_id, self.id))
-        require("db.book").remove(self.id, identity.stable_id)
-        require("db.chapter").deleteUnder(dir)
-        cb(true)
+        job = self._client:deleteBooksAsync({ identity.stable_id }, function(wire, err)
+            if cancelled then return end
+            if not wire then
+                cb(false, (type(err) == "table" and err.message) or err or _("删除本书失败"))
+                return
+            end
+            local Paths = require("utils.paths")
+            local Util = require("ffi/util")
+            local dir = Paths.bookWorkDir(identity.stable_id, self.id)
+            if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory"
+                and not Util.purgeDir(dir) then
+                cb(false, _("删除本书失败"))
+                return
+            end
+            os.remove(Paths.coverPath(identity.stable_id, self.id))
+            require("db.book").remove(self.id, identity.stable_id)
+            require("db.chapter").deleteUnder(dir)
+            cb(true)
+        end)
     end)
-    return { cancel = function() cancelled = true end }
+    return {
+        cancel = function()
+            cancelled = true
+            if job and job.cancel then job.cancel() end
+        end,
+    }
 end
 
 --- 打开 Moon 整本书：缓存命中直开，否则下载、校验并登记物理路径。

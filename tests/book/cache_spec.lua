@@ -55,6 +55,7 @@ local function resetTree()
     db_log = {
         book_clear_path = {},
         book_clear_under = {},
+        book_clear_toc = {},
         chapter_deleted = {},
         chapter_delete_under = {},
     }
@@ -73,6 +74,12 @@ package.preload["utils.paths"] = function()
         end,
         ensureCacheRoot = function()
             mkdirs(CACHE)
+        end,
+        bookWorkDir = function(stable_id, id)
+            return CACHE .. "/" .. id .. "/book/" .. stable_id
+        end,
+        coverPath = function(stable_id, id)
+            return CACHE .. "/" .. id .. "/image/" .. stable_id .. ".png"
         end,
     }
 end
@@ -111,6 +118,10 @@ package.preload["db.book"] = function()
             removeWhere(function(row)
                 return row.path and row.path:sub(1, #prefix) == prefix
             end)
+            return true
+        end,
+        clearToc = function(source_id, stable_id)
+            db_log.book_clear_toc[#db_log.book_clear_toc + 1] = source_id .. "\0" .. stable_id
             return true
         end,
     }
@@ -392,6 +403,77 @@ do
     Assert.eq(#db_log.chapter_deleted, 0)
     Assert.eq(#book_rows, 1)
     Assert.eq(#chapter_rows, 1)
+end
+
+-- ── clearBookAsync：只清这一本的工作目录/封面/登记，其它书不动 ──
+do
+    resetTree()
+    writeFile(CACHE .. "/moon/book/b1/1.html", 10)
+    writeFile(CACHE .. "/moon/book/b1/sub/2.html", 10)
+    writeFile(CACHE .. "/moon/image/b1.png", 10)
+    writeFile(CACHE .. "/moon/book/b2/1.html", 10)
+    writeFile(CACHE .. "/moon/image/b2.png", 10)
+    book_rows = {
+        { source_id = "moon", stable_id = "b1", path = CACHE .. "/moon/book/b1/1.html" },
+        { source_id = "moon", stable_id = "b2", path = CACHE .. "/moon/book/b2/1.html" },
+        { source_id = "local", stable_id = "/books/local.epub", path = "/books/local.epub" },
+    }
+    chapter_rows = {
+        { path = CACHE .. "/moon/book/b1/sub/2.html", source_id = "moon", stable_id = "b1", chapter_idx = 2 },
+        { path = CACHE .. "/moon/book/b2/1.html", source_id = "moon", stable_id = "b2", chapter_idx = 1 },
+    }
+
+    local called, ok_result = false, nil
+    Cache.clearBookAsync("moon", "b1", function(ok)
+        called = true
+        ok_result = ok
+    end)
+    Assert.is_false(called)
+    Stubs.flush()
+    Assert.is_true(called)
+    Assert.is_true(ok_result)
+    Assert.is_nil(lfs.attributes(CACHE .. "/moon/book/b1"))
+    Assert.is_nil(lfs.attributes(CACHE .. "/moon/image/b1.png"))
+    Assert.eq(lfs.attributes(CACHE .. "/moon/book/b2/1.html", "mode"), "file")
+    Assert.eq(lfs.attributes(CACHE .. "/moon/image/b2.png", "mode"), "file")
+    Assert.contains(db_log.chapter_delete_under, CACHE .. "/moon/book/b1")
+    Assert.contains(db_log.book_clear_under, CACHE .. "/moon/book/b1")
+    Assert.contains(db_log.book_clear_toc, "moon\0b1")
+    Assert.eq(#book_rows, 2)
+    Assert.eq(book_rows[1].stable_id, "b2")
+    Assert.eq(book_rows[2].path, "/books/local.epub")
+    Assert.eq(#chapter_rows, 1)
+    Assert.eq(chapter_rows[1].stable_id, "b2")
+end
+
+-- ── clearBookAsync：没有工作目录时只删封面，仍成功 ──
+do
+    resetTree()
+    writeFile(CACHE .. "/wechat/image/only.png", 10)
+    local called, ok_result = false, nil
+    Cache.clearBookAsync("wechat", "only", function(ok)
+        called = true
+        ok_result = ok
+    end)
+    Stubs.flush()
+    Assert.is_true(called)
+    Assert.is_true(ok_result)
+    Assert.is_nil(lfs.attributes(CACHE .. "/wechat/image/only.png"))
+    Assert.contains(db_log.book_clear_toc, "wechat\0only")
+end
+
+-- ── clearBookAsync：cancel 后不再回调、不删目录 ──
+do
+    resetTree()
+    writeFile(CACHE .. "/moon/book/keep/1.html", 10)
+    local called = false
+    local handle = Cache.clearBookAsync("moon", "keep", function()
+        called = true
+    end)
+    handle.cancel()
+    Stubs.flush()
+    Assert.is_false(called)
+    Assert.eq(lfs.attributes(CACHE .. "/moon/book/keep/1.html", "mode"), "file")
 end
 
 -- ── 收尾：清临时树 + 还原打桩，别污染后续 spec ─────────

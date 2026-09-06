@@ -221,6 +221,20 @@ function Client:addToShelfAsync(book_id, cb)
     }, cb)
 end
 
+--- 从京东书架移除。action=0 加入，action=1 移除（与官方客户端同步协议一致）。
+---@param book_id string|number
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:removeFromShelfAsync(book_id, cb)
+    return self:apiPostAsync("/jdread/api/bookshelf/book/sync", {
+        version = os.time() * 1000,
+        first_sync = 1,
+        items = {
+            { action = 1, ebook_id = tonumber(book_id) or tostring(book_id) },
+        },
+    }, cb)
+end
+
 ---@param endpoint string
 ---@param query table
 ---@param cb fun(data: table|nil, err: string|nil, retryable: boolean|nil)

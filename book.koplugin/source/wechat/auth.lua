@@ -534,6 +534,21 @@ function Auth.webApiPostAsync(path, body_tbl, cb)
     end)
 end
 
+--- 移动端 API JSON POST（``i.weread.qq.com``）；复用 Web 会话 Cookie + X-Vid/X-Skey。
+---@param path string 相对 i.weread 的路径，如 ``/shelf/delete``
+---@param body_tbl table|nil
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Auth.apiPostAsync(path, body_tbl, cb)
+    return Auth.webPostAsync(absUrl(API, path), JSON.encode(body_tbl or {}), nil, function(raw, err)
+        if not raw then
+            cb(nil, err)
+            return
+        end
+        cb(decodeJson(raw))
+    end)
+end
+
 --- 用 Web 会话拉取 Skills API Key 并落盘（``GET /api/skills/apikeyGet``）。
 ---@param cb fun(key: string|nil, err: string|nil)
 ---@return { cancel: fun() }|nil

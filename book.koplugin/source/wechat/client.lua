@@ -84,6 +84,27 @@ function Client:addToShelfAsync(bookId, cb)
     end)
 end
 
+--- 从微信读书书架删除。
+---@param bookId string|number
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:removeFromShelfAsync(bookId, cb)
+    bookId = tostring(bookId or "")
+    if bookId == "" then
+        cb(nil, _("无效书籍"))
+        return nil
+    end
+    return Auth.apiPostAsync("/shelf/delete", {
+        bookIds = { bookId },
+        albumIds = {},
+        archiveIds = {},
+    }, function(data, err)
+        if acceptWebWire(data, err, cb) then
+            cb(data)
+        end
+    end)
+end
+
 --- 逐页拉取并合并 ``books``，直到凑满 limit 或服务端说没有更多。
 ---
 --- 书城榜单与搜索的翻页规则完全一致（游标取末条 ``searchIdx``，``hasMore`` 判停），

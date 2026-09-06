@@ -287,6 +287,27 @@ function Client:updateProgressAsync(body, cb)
     end)
 end
 
+--- 按 filename 删除云端原书（表单：filenames=JSON 数组）。
+--- 服务端原 delete 只认数字 id；插件身份是 filename，故走 filenames。
+---@param filenames string[]
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:deleteBooksAsync(filenames, cb)
+    local ok, encoded = pcall(JSON.encode, filenames or {})
+    if not ok or type(encoded) ~= "string" then
+        cb(nil, _("JSON 编码失败"))
+        return nil
+    end
+    return self:_jsonAsync("POST", "/index/book/delete", {
+        body = { filenames = encoded },
+    }, function(res, err)
+        if res then
+            Request.clearCache("/index/book/list")
+        end
+        cb(res, err)
+    end)
+end
+
 --- Download without blocking the UI on LuaSocket.
 ---@param filename string
 ---@param temp_path string

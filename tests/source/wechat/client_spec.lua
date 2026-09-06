@@ -57,6 +57,12 @@ package.preload["source.wechat.auth"] = function()
             cb({ succ = 1 })
             return { cancel = function() end }
         end,
+        apiPostAsync = function(path, body, cb)
+            posted.api_path = path
+            posted.api_body = body
+            cb({ succ = 1 })
+            return { cancel = function() end }
+        end,
         webPostAsync = function(url, body, _, cb)
             posted.url = url
             posted.raw = body
@@ -145,6 +151,15 @@ do
     client:addToShelfAsync("123", function(data) ok = data end)
     Assert.is_true(posted.path:find("/web/shelf/add", 1, true) ~= nil)
     Assert.eq(posted.body.bookIds[1], "123")
+    Assert.not_nil(ok)
+end
+
+do
+    posted = {}
+    local ok
+    client:removeFromShelfAsync("123", function(data) ok = data end)
+    Assert.eq(posted.api_path, "/shelf/delete")
+    Assert.eq(posted.api_body.bookIds[1], "123")
     Assert.not_nil(ok)
 end
 

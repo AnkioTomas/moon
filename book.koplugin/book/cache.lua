@@ -1,5 +1,5 @@
 --[[--
-缓存文件管理：扫盘统计、过期清理、整库清空。
+缓存文件管理：扫盘统计、过期清理、整库清空、单书清空。
 
   只管 `.moon/cache/` 下的落盘文件与对应 books/chapters 路径登记；
   书籍身份与元数据门面在 book.store。
@@ -336,6 +336,57 @@ function Cache.clearAsync(cb)
         logger.info("book cache cleared", dir)
         cb(true)
     end)
+    return {
+        cancel = function()
+            cancelled = true
+            if purge_job then
+                purge_job:cancel()
+            end
+        end,
+    }
+end
+
+--- 清空单本书的可再生成缓存：工作目录、封面、路径登记、章节登记、目录缓存。
+--- 不动书籍身份、进度、笔记和统计。
+---@param source_id string
+---@param stable_id string
+---@param cb fun(ok: boolean, err: any)|nil
+---@return { cancel: fun() }
+function Cache.clearBookAsync(source_id, stable_id, cb)
+    cb = cb or function() end
+    local dir = Paths.bookWorkDir(stable_id, source_id)
+    local cover = Paths.coverPath(stable_id, source_id)
+    local cancelled = false
+    local purge_job
+    -- 先清 DB 再删文件：即使文件删除失败，也不会留下指向已删文件的登记。
+    if not (ChapterDB.deleteUnder(dir) and BookDB.clearPathsUnder(dir)
+        and BookDB.clearToc(source_id, stable_id)) then
+        logger.warn("book cache db clear failed, skipping file purge", source_id, stable_id)
+        cb(false, "db clear failed")
+        return { cancel = function() end }
+    end
+    os.remove(cover)
+
+    --- 文件阶段收尾；已取消的任务静默丢弃结果。
+    ---@param ok boolean
+    ---@param err any
+    local function finish(ok, err)
+        if cancelled then return end
+        if ok then
+            logger.info("book cache cleared", source_id, stable_id)
+        else
+            logger.warn("book cache file purge failed (db already cleared)", dir, err)
+        end
+        cb(ok, err)
+    end
+
+    if lfs.attributes(dir, "mode") == "directory" then
+        purge_job = purgeDirAsync(dir, finish)
+    else
+        UIManager:nextTick(function()
+            finish(true)
+        end)
+    end
     return {
         cancel = function()
             cancelled = true

@@ -103,3 +103,32 @@ do
     Assert.eq(result.data[1].authors, "作者丙")
     Assert.is_true(result.data[1].in_library)
 end
+
+do
+    local pos, uid = Mapper.progress({
+        results = {
+            browse = {
+                chapter_uuid = "chap-uuid-9",
+                chapter_name = "第九话",
+            },
+        },
+    })
+    Assert.eq(uid, "chap-uuid-9")
+    Assert.eq(pos.chapter_title, "第九话")
+    Assert.eq(pos.fraction, 0)
+end
+
+do
+    local pos, uid = Mapper.progress({
+        results = { browse = { chapter_id = "fallback-id" } },
+    })
+    Assert.eq(uid, "fallback-id")
+    Assert.is_nil(pos.chapter_title)
+end
+
+do
+    Assert.is_nil(Mapper.progress({ results = { browse = nil } }))
+    Assert.is_nil(Mapper.progress({ results = { browse = { chapter_name = "无id" } } }))
+    Assert.is_nil(Mapper.progress({ results = {} }))
+    Assert.is_nil(Mapper.progress(nil))
+end

@@ -43,6 +43,24 @@ stub("db.book", function()
             toc_payload[stable_id] = payload
             return true
         end,
+        setRead = function(source_id, stable_id, is_read)
+            remembered_stats_books.set_read = {
+                source_id = source_id, stable_id = stable_id, is_read = is_read,
+            }
+            return true
+        end,
+        remove = function(source_id, stable_id)
+            remembered_stats_books.removed = { source_id = source_id, stable_id = stable_id }
+            return true
+        end,
+    }
+end)
+stub("db.chapter", function()
+    return {
+        deleteUnder = function(dir)
+            remembered_stats_books.chapter_deleted_under = dir
+            return true
+        end,
     }
 end)
 stub("utils.settings", function()
@@ -853,6 +871,24 @@ do
     Assert.is_true(ok)
     Assert.eq(#calls, 0)
     os.remove(chapter_path)
+end
+
+-- 长按删除：先写云端再收敛本地
+do
+    local removed
+    fake_client.removeFromShelfAsync = function(_, bookId, cb)
+        removed = bookId
+        cb({ ok = true })
+        return { cancel = function() end }
+    end
+    local src = WeChat.new()
+    local ok
+    src:deleteBookAsync({ source_id = "wechat", stable_id = "del1" }, function(success)
+        ok = success
+    end)
+    Assert.is_true(ok)
+    Assert.eq(removed, "del1")
+    Assert.eq(remembered_stats_books.removed.stable_id, "del1")
 end
 
 -- 还原打桩，避免影响本文件之后的其它用例

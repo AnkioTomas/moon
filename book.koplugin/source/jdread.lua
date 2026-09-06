@@ -65,6 +65,42 @@ function Source:close()
     self._covers = {}
 end
 
+--- 从京东书架移除，并清理本地章节缓存与登记。
+---@param identity BookIdentity
+---@param cb fun(ok: boolean, err: string|nil)
+---@return table
+function Source:deleteBookAsync(identity, cb)
+    local cancelled, job = false, nil
+    require("ui/network/manager"):runWhenOnline(function()
+        if cancelled then return end
+        job = self._client:removeFromShelfAsync(identity.stable_id, function(wire, err)
+            if cancelled then return end
+            if not wire then
+                cb(false, err or _("删除本书失败"))
+                return
+            end
+            local Paths = require("utils.paths")
+            local Util = require("ffi/util")
+            local dir = Paths.bookWorkDir(identity.stable_id, self.id)
+            if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory"
+                and not Util.purgeDir(dir) then
+                cb(false, _("删除本书失败"))
+                return
+            end
+            os.remove(Paths.coverPath(identity.stable_id, self.id))
+            require("db.book").remove(self.id, identity.stable_id)
+            require("db.chapter").deleteUnder(dir)
+            cb(true)
+        end)
+    end)
+    return {
+        cancel = function()
+            cancelled = true
+            if job and job.cancel then job.cancel() end
+        end,
+    }
+end
+
 ---@param identity BookIdentity
 ---@return BookCoverRequest|nil, string|nil
 function Source:coverRequest(identity)
