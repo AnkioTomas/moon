@@ -29,8 +29,14 @@ end
 package.preload["ui.components.bookui"] = function()
     return { sz = function(value) return value end }
 end
+local body_show_parent
 package.preload["ui.panel.widget.body"] = function()
-    return { new = function(o) return setmetatable(o, { __index = { getSize = function() return { h = 100 } end } }) end }
+    return {
+        new = function(_, o)
+            body_show_parent = o.show_parent
+            return setmetatable(o, { __index = { getSize = function() return { h = 100 } end } })
+        end,
+    }
 end
 package.preload["ui.panel.widget.header"] = function()
     return { new = function(o) return o end }
@@ -125,6 +131,7 @@ Native.install()
 TouchMenu.cur_tab = 1
 TouchMenu:updateItems()
 Assert.eq(icon_synced, 1)
+Assert.eq(body_show_parent, TouchMenu.show_parent, "动态子控件必须把窗口级 show_parent 用于重绘")
 Assert.is_false(switch_seen == native_switch, "回调期间 switchMenuTab 必须是 noop")
 Assert.eq(switch_calls, 0, "noop 期间的切 tab 不得真的执行")
 Assert.eq(TouchMenu.switchMenuTab, native_switch, "回调结束必须还原 switchMenuTab")
