@@ -160,7 +160,7 @@ local function paintWidget(bb, block, canvas_w, canvas_h)
         end
         return
     end
-    local tmp = Blitbuffer.new(ww, wh, Blitbuffer.TYPE_BB8)
+    local tmp = Blitbuffer.new(ww, wh, Blitbuffer.TYPE_BBRGB32)
     tmp:fill(Blitbuffer.COLOR_WHITE)
     local ok, err = pcall(function()
         widget:paintTo(tmp, 0, 0)
@@ -297,7 +297,8 @@ end
 function M.write(path, background, blocks)
     Paths.ensureScreensaverDir()
     local w, h = Layout.portraitSize()
-    local bb = Blitbuffer.new(w, h, Blitbuffer.TYPE_BB8)
+    -- 保留背景和 widget 的原始颜色；黑白设备会在最终显示时自行转灰。
+    local bb = Blitbuffer.new(w, h, Blitbuffer.TYPE_BBRGB32)
     local background_copy
     local ok, err = pcall(function()
         local bg_ok, bg_err = paintBackground(bb, background, w, h)

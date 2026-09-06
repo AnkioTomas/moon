@@ -17,6 +17,7 @@ local image_paints = 0
 local image_frees = 0
 local warnings = 0
 local writes = 0
+local buffer_types = {}
 
 local function buffer()
     return {
@@ -40,11 +41,15 @@ end
 package.preload["ffi/blitbuffer"] = function()
     return {
         TYPE_BB8 = 1,
+        TYPE_BBRGB32 = 2,
         COLOR_WHITE = 0,
         COLOR_BLACK = 1,
         COLOR_GRAY_5 = 5,
         COLOR_GRAY_D = 13,
-        new = function() return buffer() end,
+        new = function(_, _, buffer_type)
+            buffer_types[#buffer_types + 1] = buffer_type
+            return buffer()
+        end,
     }
 end
 
@@ -111,6 +116,7 @@ local function reset()
     image_frees = 0
     warnings = 0
     writes = 0
+    buffer_types = {}
 end
 
 local ok_run, err_run = pcall(function()
@@ -136,6 +142,7 @@ local ok_run, err_run = pcall(function()
     Assert.eq(renamed[2], "/tmp/compose.png")
     Assert.is_nil(removed)
     Assert.eq(ensured, 1)
+    Assert.eq(buffer_types[1], 2, "组合图必须使用彩色缓冲，不能提前丢弃背景颜色")
 
     -- 票根缺口必须逐行恢复原背景，并释放背景快照。
     reset()
