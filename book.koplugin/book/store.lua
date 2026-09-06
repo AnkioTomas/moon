@@ -168,6 +168,22 @@ function Store.allChaptersCached(identity)
     return ChapterDB.countByBook(identity.source_id, identity.stable_id) == #toc
 end
 
+--- 本地下载：章节源要目录齐且章文件登齐；整本源有 path 即可。
+---@param book Book|table|nil
+---@return boolean
+function Store.isDownloaded(book)
+    if type(book) ~= "table" then return false end
+    local source_id = book.source_id
+    local meta = type(source_id) == "string" and require("source.registry").meta(source_id) or nil
+    if meta and meta.type == "chapter" then
+        return Store.allChaptersCached({
+            source_id = source_id,
+            stable_id = book.stable_id,
+        })
+    end
+    return type(book.path) == "string" and book.path ~= ""
+end
+
 --- 进度/面板用身份：BookIdentity（含 source_id/stable_id）。
 --- 唯一规则 = 路径精确查库：chapters（章节文件）→ books.path（整本书）。
 ---@param path string
