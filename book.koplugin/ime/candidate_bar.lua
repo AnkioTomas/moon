@@ -162,6 +162,7 @@ local function applyZhuyinKeys(keys)
     table.insert(row, #row, { ",", ",", ",", "," })
     table.insert(row, #row, { ".", ".", ".", "." })
     table.insert(row, #row, { "/", "/", "/", "/" })
+    row[#row].width = 1.0
 end
 
 --- 每次初始化先恢复原始 zh_CN 键帽，再应用当前输入法标签。
@@ -190,7 +191,7 @@ local function applyKeyboardLabels(profile)
                         local value = key[layer]
                         if type(value) == "table" then
                             value.label = label
-                            if profile.show_codes then value.alt_label = code:upper() end
+                            value.alt_label = profile.show_codes and code:upper() or nil
                         else
                             key[layer] = {
                                 label = label,

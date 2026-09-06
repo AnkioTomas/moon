@@ -304,11 +304,11 @@ do
     Assert.eq(lfs.attributes(CACHE, "mode"), "directory") -- 失败后仍重建空根
 end
 
--- ── cleanupStale：90 天 TTL 判定 + 失效路径登记清理 ──────
+-- ── cleanupStale：365 天 TTL 判定 + 失效路径登记清理 ─────
 do
     resetTree()
     local now = os.time()
-    local TTL = 90 * 24 * 60 * 60
+    local TTL = 365 * 24 * 60 * 60
     writeFile(CACHE .. "/moon/book/oldbook/1.html", 10)
     writeFile(CACHE .. "/moon/book/newbook/1.html", 10)
     writeFile(CACHE .. "/moon/book/newbook/ch1.html", 10)
