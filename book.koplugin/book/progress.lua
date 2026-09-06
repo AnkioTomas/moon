@@ -708,8 +708,8 @@ function Progress.pull(snapshot)
             return
         end
         if not remote_pos then
+            -- 离线开缓存书是正常路径；拉不到云端进度只记日志，不能打断阅读。
             logger.warn("book.progress reader pull failed", id.source_id, id.stable_id, err)
-            UIManager:show(InfoMessage:new{ text = err or _("拉取失败") })
             return
         end
         local local_position = localProgressForPull(id, snapshot)
