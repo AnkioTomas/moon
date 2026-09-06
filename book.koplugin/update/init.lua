@@ -9,11 +9,13 @@
 local ConfirmBox = require("ui/widget/confirmbox")
 local InfoMessage = require("ui/widget/infomessage")
 local ProgressbarDialog = require("ui/widget/progressbardialog")
+local TextViewer = require("ui/widget/textviewer")
 local UIManager = require("ui/uimanager")
 local JSON = require("json")
 local Request = require("http.request")
 local Paths = require("utils.paths")
 local MoonSettings = require("utils.settings")
+local Text = require("utils.text")
 local Job = require("workers.job")
 local Install = require("update.install")
 local _ = require("gettext")
@@ -61,6 +63,36 @@ local function findAsset(assets, name)
     end
 end
 
+--- 把 GitHub Release body 收成可读纯文本：优先「更新内容」段，丢掉安装说明与对比链接。
+---@param body any
+---@return string|nil
+local function formatNotes(body)
+    if type(body) ~= "string" then return nil end
+    body = Text.normalizeNewlines(Text.trim(body))
+    if body == "" then return nil end
+    local section = body:match("###%s*更新内容%s*\n+(.*)$") or body
+    section = section:gsub("\n###%s*完整对比[%s%S]*$", "")
+    section = section:gsub(":[%w_+-]+:%s*", "")
+    section = section:gsub("`([^`\n]*)`", "%1")
+    local out, blank = {}, false
+    for line in (section .. "\n"):gmatch("(.-)\n") do
+        line = line:gsub("^#+%s*", "")
+        line = line:gsub("%*%*([^*]+)%*%*", "%1")
+        line = Text.rtrim(line)
+        if line == "" then
+            if not blank and #out > 0 then
+                out[#out + 1] = ""
+                blank = true
+            end
+        else
+            out[#out + 1] = line
+            blank = false
+        end
+    end
+    local notes = Text.trim(table.concat(out, "\n"))
+    return notes ~= "" and notes or nil
+end
+
 local function parseRelease(body)
     local ok, release = pcall(JSON.decode, body)
     if not ok or type(release) ~= "table" or release.draft or release.prerelease then
@@ -83,6 +115,7 @@ local function parseRelease(body)
         size = tonumber(zip.size),
         sha256 = digest and digest:lower() or nil,
         checksum_url = checksum and checksum.browser_download_url or nil,
+        notes = formatNotes(release.body),
         available = newer(version, currentVersion()),
     }
 end
@@ -210,40 +243,58 @@ local function promptRestart()
     UIManager:show(dialog)
 end
 
+local function startInstall(release, plugin_root)
+    local size = tonumber(release.size)
+    local loading = ProgressbarDialog:new{
+        title = _("正在下载月读更新…"),
+        subtitle = T(_("版本 %1"), release.version),
+        progress_max = size and size > 0 and size or nil,
+        refresh_time_seconds = 0.2,
+        dismissable = false,
+    }
+    loading:show()
+    Update.install(release, plugin_root, function(ok, err)
+        loading:close()
+        if ok then
+            promptRestart()
+        else
+            UIManager:show(InfoMessage:new{
+                text = T(_("月读更新失败：%1"), tostring(err)),
+                timeout = 5,
+            })
+        end
+    end, function(bytes)
+        loading:reportProgress(bytes)
+    end)
+end
+
 local function promptInstall(release, plugin_root)
     if _offered_version == release.version then return end
     _offered_version = release.version
+    local header = T(_("发现月读 %1（当前 %2）。下载并完整替换插件目录？"),
+        release.version, currentVersion())
+    local text = release.notes and (header .. "\n\n" .. release.notes) or header
+    local Screen = require("device").screen
     local dialog
-    dialog = ConfirmBox:new{
-        text = T(_("发现月读 %1（当前 %2）。下载并完整替换插件目录？"),
-            release.version, currentVersion()),
-        ok_text = _("下载并安装"),
-        cancel_text = _("稍后"),
-        ok_callback = function()
-            UIManager:close(dialog)
-            local size = tonumber(release.size)
-            local loading = ProgressbarDialog:new{
-                title = _("正在下载月读更新…"),
-                subtitle = T(_("版本 %1"), release.version),
-                progress_max = size and size > 0 and size or nil,
-                refresh_time_seconds = 0.2,
-                dismissable = false,
-            }
-            loading:show()
-            Update.install(release, plugin_root, function(ok, err)
-                loading:close()
-                if ok then
-                    promptRestart()
-                else
-                    UIManager:show(InfoMessage:new{
-                        text = T(_("月读更新失败：%1"), tostring(err)),
-                        timeout = 5,
-                    })
-                end
-            end, function(bytes)
-                loading:reportProgress(bytes)
-            end)
-        end,
+    dialog = TextViewer:new{
+        title = _("更新日志"),
+        text = text,
+        height = math.floor(Screen:getHeight() * 0.75),
+        buttons_table = {{
+            {
+                text = _("稍后"),
+                callback = function()
+                    dialog:onClose()
+                end,
+            },
+            {
+                text = _("下载并安装"),
+                callback = function()
+                    dialog:onClose()
+                    startInstall(release, plugin_root)
+                end,
+            },
+        }},
     }
     UIManager:show(dialog)
 end
@@ -298,5 +349,6 @@ end
 
 Update._newer = newer
 Update._parseRelease = parseRelease
+Update._formatNotes = formatNotes
 
 return Update
