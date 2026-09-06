@@ -37,6 +37,9 @@ package.preload["ui/widget/infomessage"] = widgetModule
 package.preload["ffi/blitbuffer"] = function()
     return { COLOR_WHITE = 0, COLOR_BLACK = 1 }
 end
+package.preload["ui/geometry"] = function()
+    return { new = function(_, opts) return opts end }
+end
 package.preload["device"] = function()
     return { screen = { getWidth = function() return 100 end } }
 end
