@@ -481,15 +481,22 @@ do
     clearMods()
 end
 
--- ── 阅读状态：手动未读独立编码，自动规则不得覆盖 ──────────
+-- ── 阅读状态：手动已读抬进度；手动未读独立编码，自动规则不得覆盖 ──
 do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection)
 
     Assert.is_true(BookDB.setRead("moon", "b1", true))
-    Assert.eq(calls[#calls].args[1], 1)
+    Assert.is_true(calls[#calls - 1].sql:find("read_state=1, percent=100", 1, true) ~= nil)
+    Assert.is_true(calls[#calls].sql:find("pending_progress", 1, true) ~= nil)
+    Assert.is_true(calls[#calls].sql:find("fraction=1", 1, true) ~= nil)
+    Assert.eq(calls[#calls].args[1], "moon")
+    Assert.eq(calls[#calls].args[2], "b1")
     Assert.is_true(BookDB.setRead("moon", "b1", false))
-    Assert.eq(calls[#calls].args[1], 2)
+    Assert.is_true(calls[#calls].sql:find("read_state=2", 1, true) ~= nil)
+    Assert.eq(calls[#calls].args[1], "moon")
+    Assert.is_true(calls[#calls].sql:find("percent", 1, true) == nil,
+        "标记未读不得回退进度")
     Assert.is_true(BookDB.markReadAutomatically("moon", "b1"))
     Assert.is_true(calls[#calls].sql:find("AND read_state=0", 1, true) ~= nil)
     Assert.is_true(BookDB.markReadComplete("moon", "b1"))

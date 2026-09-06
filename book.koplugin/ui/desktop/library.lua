@@ -207,8 +207,39 @@ local function showBookActions(ctx, book)
                         UIManager:show(InfoMessage:new{ text = _("更新阅读状态失败") })
                         return
                     end
-                    book.read_state = is_read and 2 or 1
+                    if is_read then
+                        book.read_state = 2
+                    else
+                        book.read_state = 1
+                        book.percent = 100
+                    end
                     if desktop then refreshPage(desktop) end
+                end,
+            },
+            {
+                text = _("清理缓存"),
+                callback = function()
+                    UIManager:show(ConfirmBox:new{
+                        text = T(_("确定清理《%1》的缓存？"), BookInfo.title(book)),
+                        ok_text = _("清理"),
+                        ok_callback = function()
+                            UIManager:show(InfoMessage:new{ text = _("正在清理缓存…"), timeout = 1 })
+                            require("book.cache").clearBookAsync(book.source_id, book.stable_id, function(ok)
+                                if desktop and desktop._closed then return end
+                                if ok then
+                                    local source = ctx.source
+                                    if source and source.clearCaches then
+                                        source:clearCaches()
+                                    end
+                                    if desktop then refreshPage(desktop) end
+                                end
+                                UIManager:show(InfoMessage:new{
+                                    text = ok and _("已清理") or _("清理失败"),
+                                    timeout = 2,
+                                })
+                            end)
+                        end,
+                    })
                 end,
             },
             {

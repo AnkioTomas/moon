@@ -63,6 +63,56 @@ function Source:close()
     self._covers = {}
 end
 
+--- 取消云端收藏，并清理本地章节缓存与登记。
+---@param identity BookIdentity
+---@param cb fun(ok: boolean, err: string|nil)
+---@return table
+function Source:deleteBookAsync(identity, cb)
+    local cancelled, job = false, nil
+    require("ui/network/manager"):runWhenOnline(function()
+        if cancelled then return end
+        job = self._client:detailAsync(identity.stable_id, function(wire, err)
+            if cancelled then return end
+            if not wire then
+                cb(false, err or _("删除本书失败"))
+                return
+            end
+            local comic_id = Mapper.comicId(wire)
+            if not comic_id then
+                cb(false, _("漫画详情解析失败"))
+                return
+            end
+            job = self._client:setCollectAsync(comic_id, false, function(collect_wire, collect_err)
+                if cancelled then return end
+                if not collect_wire then
+                    cb(false, collect_err or _("删除本书失败"))
+                    return
+                end
+                local Paths = require("utils.paths")
+                local Util = require("ffi/util")
+                local dir = Paths.bookWorkDir(identity.stable_id, self.id)
+                if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory"
+                    and not Util.purgeDir(dir) then
+                    cb(false, _("删除本书失败"))
+                    return
+                end
+                os.remove(Paths.coverPath(identity.stable_id, self.id))
+                require("db.book").remove(self.id, identity.stable_id)
+                require("db.chapter").deleteUnder(dir)
+                Toc.clear()
+                self._covers[identity.stable_id] = nil
+                cb(true)
+            end)
+        end)
+    end)
+    return {
+        cancel = function()
+            cancelled = true
+            if job and job.cancel then job.cancel() end
+        end,
+    }
+end
+
 ---@param identity BookIdentity
 ---@return BookCoverRequest|nil, string|nil
 function Source:coverRequest(identity)
@@ -320,6 +370,105 @@ function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
     return require("source.copymanga.chapter").prefetchAsync(
         self._client, identity, toc, from_idx, count, nil, cb
     )
+end
+
+--- 拉取云端浏览记录，用目录把 chapter_uuid 换成本地章序号。
+--- 官方只有章粒度，没有页内坐标。
+---@param identity BookIdentity
+---@param cb fun(pos: ProgressPosition|nil, err: string|nil, meta: table|nil)
+---@return { cancel: fun() }
+function Source:getProgressAsync(identity, cb)
+    if not require("source.copymanga.auth").hasSession() then
+        cb(nil, nil, { empty = true })
+        return { cancel = function() end }
+    end
+    local cancelled, toc_job
+    local request = self._client:getProgressAsync(identity.stable_id, function(wire, err)
+        if cancelled then return end
+        if not wire then cb(nil, err); return end
+        local pos, uid = Mapper.progress(wire)
+        if not pos or not uid then cb(nil, nil, { empty = true }); return end
+
+        local function finish(idx)
+            if not idx then cb(nil, nil, { empty = true }); return end
+            pos.chapter_idx = idx
+            pos.fraction = Toc.wholeFraction(
+                identity.source_id, identity.stable_id, idx, pos.chapter_fraction
+            ) or pos.fraction
+            pos.extra = { chapter_uid = uid, chapter_idx = idx }
+            cb(pos)
+        end
+
+        local idx = Toc.index(identity.source_id, identity.stable_id, uid)
+        if idx then
+            finish(idx)
+            return
+        end
+        toc_job = self:loadTocAsync(identity, function(toc, toc_err)
+            if cancelled then return end
+            if not toc then cb(nil, toc_err); return end
+            finish(Toc.index(identity.source_id, identity.stable_id, uid))
+        end)
+    end)
+    return {
+        cancel = function()
+            cancelled = true
+            if request and request.cancel then request.cancel() end
+            if toc_job and toc_job.cancel then toc_job.cancel() end
+        end,
+    }
+end
+
+--- 推送当前章到云端。官方没有独立浏览写入接口；
+--- 带 Token 的 chapter2 GET 就是打开章节时写入浏览记录的副作用。
+---@param identity BookIdentity
+---@param pos ProgressPosition|nil
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:putProgressAsync(identity, pos, cb)
+    if not require("source.copymanga.auth").hasSession() then
+        cb(nil, _("请先登录拷贝漫画账号"))
+        return { cancel = function() end }
+    end
+    pos = pos or {}
+    local cancelled, toc_job, push_job
+    local chapter_idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx) or 1
+    local extra = pos.extra
+    local cached_uid = extra and tonumber(extra.chapter_idx) == chapter_idx
+        and extra.chapter_uid or nil
+
+    local function push(uid)
+        if type(uid) ~= "string" or uid == "" then
+            cb(nil, _("缺少章节信息"))
+            return
+        end
+        push_job = self._client:chapterAsync(identity.stable_id, uid, function(wire, err)
+            if cancelled then return end
+            cb(wire and true or nil, err)
+        end)
+    end
+
+    local function resolve()
+        local uid = cached_uid or Toc.uid(identity.source_id, identity.stable_id, chapter_idx)
+        if uid then
+            push(uid)
+            return
+        end
+        toc_job = self:loadTocAsync(identity, function(toc, err)
+            if cancelled then return end
+            if not toc then cb(nil, err); return end
+            push(Toc.uid(identity.source_id, identity.stable_id, chapter_idx))
+        end)
+    end
+
+    resolve()
+    return {
+        cancel = function()
+            cancelled = true
+            if toc_job and toc_job.cancel then toc_job.cancel() end
+            if push_job and push_job.cancel then push_job.cancel() end
+        end,
+    }
 end
 
 --- 缓存整本漫画；已落盘章节自动跳过，章与章之间留间隔以免打爆接口。

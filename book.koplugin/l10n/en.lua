@@ -119,6 +119,7 @@ return {
     ["标记为未读"] = "Mark as unread",
     ["更新阅读状态失败"] = "Failed to update reading status",
     ["确定删除《%1》？"] = "Delete “%1”?",
+    ["确定清理《%1》的缓存？"] = "Clear cache for “%1”?",
     ["读到 99% 自动标记已读"] = "Mark as read at 99%",
     ["分类视图"] = "Categories",
     ["系列视图"] = "Series",

@@ -163,4 +163,21 @@ function Mapper.chapters(rows)
     return #chapters > 0 and chapters or nil
 end
 
+--- comic2/query wire → 占位进度 + 章节 uuid。browse 为 null 表示从未读过。
+--- 云端只有章粒度，fraction 由门面按目录换算。
+---@param wire table|nil
+---@return ProgressPosition|nil, string|nil
+function Mapper.progress(wire)
+    local results = type(wire) == "table" and wire.results or nil
+    local browse = type(results) == "table" and results.browse or nil
+    if type(browse) ~= "table" then return nil end
+    local uid = browse.chapter_uuid or browse.chapter_id
+    if type(uid) ~= "string" or uid == "" then return nil end
+    local title = browse.chapter_name
+    return {
+        fraction = 0,
+        chapter_title = type(title) == "string" and title ~= "" and title or nil,
+    }, uid
+end
+
 return Mapper

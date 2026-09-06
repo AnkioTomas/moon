@@ -133,6 +133,17 @@ function Client:detailAsync(stable_id, cb)
     return self:_getJson("/api/v3/comic2/" .. Text.urlEncode(stable_id) .. "?platform=1", cb)
 end
 
+--- 云端浏览记录（需登录）。browse 为 null 表示从未读过。
+---@param stable_id string
+---@param cb fun(wire: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:getProgressAsync(stable_id, cb)
+    return self:_getJson(
+        "/api/v3/comic2/" .. Text.urlEncode(stable_id) .. "/query?platform=1",
+        cb
+    )
+end
+
 --- 按分组分页拉全量章节行（uuid / name / group_*）。
 ---@param stable_id string
 ---@param groups { path_word: string, name: string }[]|nil

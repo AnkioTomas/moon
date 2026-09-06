@@ -1,4 +1,4 @@
---[[-- ui.desktop.library：阅读状态筛选、长按标记与删除。 --]]
+--[[-- ui.desktop.library：阅读状态筛选、长按标记、清理缓存与删除。 --]]
 
 local Assert = require("support.assert")
 
@@ -97,6 +97,16 @@ package.preload["ui.components.bookinfo"] = function()
     }
 end
 
+local cleared
+package.preload["book.cache"] = function()
+    return {
+        clearBookAsync = function(source_id, stable_id, cb)
+            cleared = { source_id, stable_id }
+            cb(true)
+        end,
+    }
+end
+
 local set_read
 package.preload["db.book"] = function()
     return {
@@ -134,8 +144,10 @@ local Library = require("ui.desktop.library")
 local rebuilds = 0
 local deleted
 local requested
+local caches_cleared = 0
 local source = {
     capabilities = function() return { search = true } end,
+    clearCaches = function() caches_cleared = caches_cleared + 1 end,
     filtersAsync = function(_, cb) cb({ data = { category = {}, series = {} } }) end,
     listLibraryAsync = function(_, opts, cb)
         requested = opts
@@ -183,11 +195,22 @@ Assert.eq(set_read[1], "moon")
 Assert.eq(set_read[2], "b1")
 Assert.is_true(set_read[3])
 Assert.eq(book.read_state, 1)
+Assert.eq(book.percent, 100)
 Assert.eq(rebuilds, 1)
 
 hold_callback()
 Assert.eq(popup_sheet.items[1].text, "标记为未读")
+Assert.eq(popup_sheet.items[2].text, "清理缓存")
+Assert.eq(popup_sheet.items[3].text, "删除")
 popup_sheet.items[2].callback()
+Assert.eq(shown.text, "确定清理《书一》的缓存？")
+shown.ok_callback()
+Assert.eq(cleared[1], "moon")
+Assert.eq(cleared[2], "b1")
+Assert.eq(caches_cleared, 1)
+Assert.eq(rebuilds, 2)
+
+popup_sheet.items[3].callback()
 Assert.eq(shown.text, "确定删除《书一》？")
 shown.ok_callback()
 Assert.eq(deleted.stable_id, "b1")

@@ -33,6 +33,7 @@ package.preload["utils.paths"] = function()
     return {
         ensureBookWork = function() end,
         bookWorkDir = function() return open_dir end,
+        coverPath = function() return open_dir .. "/cover.jpg" end,
     }
 end
 
@@ -40,6 +41,28 @@ package.preload["db.book"] = function()
     return {
         libraryStableIdsBySource = function() return { "a.epub", "b.epub" } end,
         get = function() return rec.stored_book end,
+        setRead = function(source_id, stable_id, is_read)
+            rec.set_read = { source_id = source_id, stable_id = stable_id, is_read = is_read }
+            return true
+        end,
+        remove = function(source_id, stable_id)
+            rec.removed = { source_id = source_id, stable_id = stable_id }
+            return true
+        end,
+    }
+end
+package.preload["db.chapter"] = function()
+    return {
+        deleteUnder = function(dir)
+            rec.chapter_deleted_under = dir
+            return true
+        end,
+    }
+end
+package.preload["ffi/util"] = function()
+    return {
+        purgeDir = function() return true end,
+        template = function(s) return s end,
     }
 end
 package.preload["db.progress"] = function()
@@ -167,6 +190,16 @@ function client:updateProgressAsync(payload, cb)
     rec.put_payload = payload
     if rec.put_err then
         cb(nil, rec.put_err)
+    else
+        cb({ ok = true })
+    end
+    return { cancel = function() end }
+end
+
+function client:deleteBooksAsync(filenames, cb)
+    rec.delete_books = filenames
+    if rec.delete_err then
+        cb(nil, rec.delete_err)
     else
         cb({ ok = true })
     end
@@ -550,12 +583,27 @@ do
     Assert.eq(rows.rows[2].duration, 30)
 end
 
+-- 长按删除：先删云端再清本地登记
+do
+    resetRec()
+    local ok, err
+    src:deleteBookAsync({ source_id = "moon", stable_id = "a.epub" }, function(success, e)
+        ok, err = success, e
+    end)
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(rec.delete_books[1], "a.epub")
+    Assert.eq(rec.removed.stable_id, "a.epub")
+end
+
 -- 还原 preload/loaded，避免影响本文件之后的用例
 for _, name in ipairs({
     "utils.settings",
     "utils.paths",
     "db.book",
+    "db.chapter",
     "db.progress",
+    "ffi/util",
     "source.moon.client",
     "ui/network/manager",
     "ui/widget/progressbardialog",
