@@ -35,7 +35,7 @@ end
 do
     -- payload 是目录数组（与 Mapper.chapters 输出一致），按数组索引定位。
     store["b2"] = [[
-        [{"idx":1,"source_idx":2,"uid":"u1"},{"idx":2,"source_idx":4,"uid":"u2"}]
+        [{"idx":1,"source_idx":2,"uid":"u1","toc_version":2},{"idx":2,"source_idx":4,"uid":"u2"}]
     ]]
     Assert.eq(Toc.uid("wechat", "b2", 1), "u1")
     Assert.eq(Toc.uid("wechat", "b2", 2), "u2")
@@ -45,6 +45,13 @@ do
     Assert.eq(Toc.sourceIndex("wechat", "b2", 1), 2)
     Assert.eq(Toc.sourceIndex("wechat", "b2", 2), 4)
     Assert.is_nil(Toc.sourceIndex("wechat", "b2", 99))
+end
+
+do
+    store["old"] = [[{"idx":1,"source_idx":2,"uid":"old"}]]
+    local old = Toc.read("wechat", "old")
+    Assert.not_nil(old, "旧目录仍须支持离线读取")
+    Assert.is_false(Toc.isCurrent(old))
 end
 
 do

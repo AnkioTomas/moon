@@ -278,13 +278,16 @@ function Chapter.afterBootstrap(plugin, session)
     local chapter = Chapter.activeChapter(session)
     if not chapter then return end
     plugin:emitToSource("chapter_changed", { identity = session.identity }, session.identity.source)
-    if type(chapter.toc) == "table" and #chapter.toc > 0 then
+    local source = chapter.identity.source
+    local toc_current = not (source and type(source.isTocCurrent) == "function")
+        or source:isTocCurrent(chapter.toc)
+    if toc_current and type(chapter.toc) == "table" and #chapter.toc > 0 then
         schedulePrefetch(chapter)
         return
     end
-    local source = chapter.identity.source
-    if not source or type(source.loadTocAsync) ~= "function" then return end
-    chapter.toc_job = source:loadTocAsync(chapter.identity, function(toc)
+    local load_toc = source and (toc_current and source.loadTocAsync or source.refreshTocAsync)
+    if type(load_toc) ~= "function" then return end
+    chapter.toc_job = load_toc(source, chapter.identity, function(toc)
         chapter.toc_job = nil
         if chapter_session ~= chapter or session.chapter ~= chapter
             or type(toc) ~= "table" or #toc == 0 then

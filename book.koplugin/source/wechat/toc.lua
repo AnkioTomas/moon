@@ -11,6 +11,7 @@
 local Toc = {}
 
 local TTL = 6 * 60 * 60
+local FORMAT_VERSION = 2
 
 ---@class WechatTocEntry
 ---@field list BookChapter[]
@@ -84,12 +85,24 @@ end
 ---@param stable_id string
 ---@param list BookChapter[]
 function Toc.put(source_id, stable_id, list)
+    if type(list[1]) == "table" then
+        list[1].toc_version = FORMAT_VERSION
+    end
     local ok, encoded = pcall(require("json").encode, list)
     if not ok or not encoded then
         return
     end
     cache[cacheKey(source_id, stable_id)] = buildEntry(list)
     require("db.book").setToc(source_id, stable_id, encoded)
+end
+
+--- 当前目录是否包含章内锚点格式；旧缓存返回 false，触发源重新拉取。
+---@param list BookChapter[]|nil
+---@return boolean
+function Toc.isCurrent(list)
+    return type(list) == "table"
+        and type(list[1]) == "table"
+        and tonumber(list[1].toc_version) == FORMAT_VERSION
 end
 
 --- 按 1-based 章节序号取 chapter.uid。

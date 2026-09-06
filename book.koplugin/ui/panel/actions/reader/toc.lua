@@ -4,38 +4,28 @@
 
 local _ = require("gettext")
 
---- 显示 Book 会话目录；未命中时回退到 KOReader 原生目录。
+--- 显示目录：整书复用 KOReader 原生树形目录，连续章节使用 Book 会话目录。
 ---@param ctx BookQuickPanelContext|nil
 ---@return void
 local function showToc(ctx)
     local ui = ctx and ctx.ui
     local session = require("ui.reader.session")
+    local native_toc = ui and ui.toc and ui.toc.onShowToc
+    if not session.isChapterMode() and native_toc then
+        ui.toc:onShowToc()
+        return
+    end
+
     local toc = session.toc()
     if not toc then
-        if ui and ui.toc and ui.toc.onShowToc then
+        if native_toc then
             ui.toc:onShowToc()
         end
         return
     end
-    local current_idx = session.chapterIndex()
-    local items = {}
-    for _, chapter in ipairs(toc) do
-        local idx = tonumber(chapter.idx) or 0
-        items[#items + 1] = {
-            text = chapter.title or ("#" .. idx),
-            value = idx,
-            checked = idx == current_idx,
-        }
-    end
-    require("ui.components.popup").list{
-        title = _("目录"),
-        items = items,
-        choice_icons = true,
-        --- 选择章节后跳转到 Book 会话对应章。
-        ---@param idx number
-        ---@return void
-        on_select = function(idx) session.gotoChapter(idx) end,
-    }
+    require("ui.reader.chapter_toc").show(toc, session.chapterIndex(), function(idx)
+        session.gotoChapter(idx)
+    end)
 end
 
 ---@type BookQuickPanelAction
@@ -53,6 +43,6 @@ return {
         return require("ui.reader.session").toc() ~= nil
             or (ui.toc and ui.toc.onShowToc ~= nil)
     end,
-    --- 打开目录，并从本地 Book 会话目录数据构建选项。
+    --- 整书打开 KOReader 原生目录；连续章节从 Book 会话目录构建选项。
     run = showToc,
 }

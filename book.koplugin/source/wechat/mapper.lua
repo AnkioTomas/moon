@@ -296,11 +296,24 @@ function Mapper.chapters(data, bookId)
         local wc = tonumber(ch.wordCount or 0) or 0
         local title = tostring(ch.title or "")
         if wc > 0 and title ~= "封面" then
+            local depth = math.max(1, math.floor(tonumber(ch.level) or 1))
+            local anchors = {}
+            for _, anchor in ipairs(ch.anchors or {}) do
+                local anchor_title = tostring(anchor.title or "")
+                if anchor_title ~= "" then
+                    anchors[#anchors + 1] = {
+                        title = anchor_title,
+                        depth = math.max(1, math.floor(tonumber(anchor.level) or (depth + 1))),
+                    }
+                end
+            end
             staged[#staged + 1] = {
                 source_idx = ch.chapterIdx or ch.idx,
                 uid = ch.chapterUid or ch.uid,
                 title = title,
                 tar = type(ch.tar) == "string" and ch.tar or nil,
+                depth = depth,
+                anchors = #anchors > 0 and anchors or nil,
             }
         end
     end
@@ -315,6 +328,8 @@ function Mapper.chapters(data, bookId)
         end
         chapters[#chapters + 1] = {
             idx = i,
+            depth = ch.depth,
+            anchors = ch.anchors,
             source_idx = ch.source_idx ~= nil and tostring(ch.source_idx) or nil,
             uid = ch.uid ~= nil and tostring(ch.uid) or nil,
             title = title,
@@ -324,6 +339,7 @@ function Mapper.chapters(data, bookId)
     if #chapters == 0 then
         return nil, "empty"
     end
+    chapters[1].toc_version = 2
     return chapters
 end
 

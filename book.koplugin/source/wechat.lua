@@ -285,17 +285,18 @@ function Source:getDetailAsync(identity, cb)
     end)
 end
 
---- 取目录：命中本地 toc 缓存则下一个 tick 直接回调（返回 nil，无可取消 job），
---- 未命中才拉章节信息并写回缓存。也是阅读会话目录恢复入口。
+--- 旧目录没有章内 anchors，阅读会话必须重新拉取后再展示。
+---@param toc BookChapter[]|nil
+---@return boolean
+function Source:isTocCurrent(toc)
+    return Toc.isCurrent(toc)
+end
+
+---@param self WechatSource
 ---@param identity BookIdentity
 ---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
-function Source:loadTocAsync(identity, cb)
-    local cached = Toc.read(identity.source_id, identity.stable_id)
-    if cached and #cached > 0 then
-        require("ui/uimanager"):nextTick(function() cb(cached) end)
-        return
-    end
+local function fetchTocAsync(self, identity, cb)
     return self._client:chapterInfosAsync(identity.stable_id, function(wire, err)
         if not wire then
             cb(nil, err)
@@ -309,6 +310,28 @@ function Source:loadTocAsync(identity, cb)
         Toc.put(identity.source_id, identity.stable_id, chapters)
         cb(chapters)
     end)
+end
+
+--- 取目录：命中本地 toc 缓存则下一个 tick 直接回调（返回 nil，无可取消 job），
+--- 未命中才拉章节信息并写回缓存。也是阅读会话目录恢复入口。
+---@param identity BookIdentity
+---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:loadTocAsync(identity, cb)
+    local cached = Toc.read(identity.source_id, identity.stable_id)
+    if cached and #cached > 0 then
+        require("ui/uimanager"):nextTick(function() cb(cached) end)
+        return
+    end
+    return fetchTocAsync(self, identity, cb)
+end
+
+--- 强制刷新目录格式；失败时调用方继续使用旧缓存。
+---@param identity BookIdentity
+---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:refreshTocAsync(identity, cb)
+    return fetchTocAsync(self, identity, cb)
 end
 
 --- 目录缓存缺失时先拉 toc，再解析 chapter_uid。

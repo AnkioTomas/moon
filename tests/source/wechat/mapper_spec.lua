@@ -97,8 +97,11 @@ do
             {
                 bookId = "1",
                 updated = {
-                    { chapterIdx = 2, chapterUid = "u2", title = "二", wordCount = 10 },
-                    { chapterIdx = 1, chapterUid = "u1", title = "一", wordCount = 10 },
+                    { chapterIdx = 2, chapterUid = "u2", title = "二", wordCount = 10, level = 2 },
+                    {
+                        chapterIdx = 1, chapterUid = "u1", title = "一", wordCount = 10, level = 1,
+                        anchors = { { title = "第一章", level = 2 } },
+                    },
                     { chapterIdx = 3, chapterUid = "u3", title = "封面", wordCount = 10 },
                 },
             },
@@ -107,7 +110,12 @@ do
     Assert.eq(#chapters, 2)
     Assert.eq(chapters[1].idx, 1)
     Assert.eq(chapters[1].uid, "u1")
+    Assert.eq(chapters[1].depth, 1)
+    Assert.eq(chapters[1].anchors[1].title, "第一章")
+    Assert.eq(chapters[1].anchors[1].depth, 2)
+    Assert.eq(chapters[1].toc_version, 2)
     Assert.eq(chapters[2].title, "二")
+    Assert.eq(chapters[2].depth, 2)
 end
 
 do

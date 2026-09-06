@@ -13,6 +13,7 @@ local upserted = {}
 local remote_upserted = {}
 local pulled = 0
 local pending_row
+local goto_calls = {}
 local current_identity = {
     source_id = "wechat",
     stable_id = "b1",
@@ -58,7 +59,10 @@ package.preload["ui.reader.session"] = function()
             }
         end,
         chapterTitle = function() return "" end,
-        gotoChapter = function() return false end,
+        gotoChapter = function(idx, opts)
+            goto_calls[#goto_calls + 1] = { idx = idx, opts = opts }
+            return true
+        end,
     }
 end
 package.loaded["ui.reader.session"] = nil
@@ -227,6 +231,29 @@ Assert.eq(pulled, 1)
 Assert.eq(#shown, 0, "pending 与云端一致时不应假冲突")
 Assert.eq(#synced, 0)
 Assert.eq(#remote_upserted, 1)
+
+-- 远端只有全书比例和章内比例时，也必须先推导章节号，不能把 nil 传给 gotoChapter。
+Progress.clearConflicts()
+shown = {}
+goto_calls = {}
+pending_row = {
+    fraction = 0.4,
+    chapter_idx = 3,
+    chapter_fraction = 0.1,
+    sync_status = 1,
+}
+source.getProgressAsync = function(_, _, cb)
+    cb({ fraction = 0.6, chapter_fraction = 0.25 })
+    return { cancel = function() end }
+end
+Progress.pull(snapshot())
+Stubs.flush()
+Assert.len(shown, 1)
+shown[1].ok_callback()
+Stubs.flush()
+Assert.len(goto_calls, 1, "缺失 chapter_idx 时仍应按全书比例切章")
+Assert.eq(goto_calls[1].idx, 4)
+Assert.eq(goto_calls[1].opts.within, 0.25)
 
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",
