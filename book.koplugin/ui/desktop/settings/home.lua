@@ -4,7 +4,6 @@
 
 local ButtonDialog = require("ui/widget/buttondialog")
 local UIManager = require("ui/uimanager")
-local Popup = require("ui.components.popup")
 local SettingRow = require("ui.components.settingrow")
 local MoonSettings = require("utils.settings")
 local Base = require("ui.desktop.home.components.base")
@@ -130,32 +129,6 @@ local function configure(desktop, comp)
     UIManager:show(dialog)
 end
 
---- 弹出已启用组件的排序列表，点按进入单组件操作面板。
---- 一个都没启用时不弹空列表。
----@param desktop table 桌面实例
-local function openSortList(desktop)
-    local layout = Base.enabledLayout()
-    local items = {}
-    for i, id in ipairs(layout) do
-        local comp = Base.find(id)
-        if comp then
-            items[#items + 1] = {
-                text = comp.label,
-                icon = comp.icon,
-                mandatory = T(_("第 %1 位"), i),
-                callback = function()
-                    configure(desktop, comp)
-                end,
-            }
-        end
-    end
-    Popup.list{
-        title = _("组件排序"),
-        subtitle = _("点按可上移或下移"),
-        items = items,
-    }
-end
-
 --- 造一个组件设置行的构造器（延迟到拿到内容宽度时才建 widget）。
 ---@param desktop table 桌面实例
 ---@param comp table 组件定义（id / label / icon）
@@ -190,18 +163,6 @@ function HomeSettings.sections(desktop)
         enabled_set[id] = i
     end
 
-    local layout_rows = {
-        function(iw)
-            return SettingRow.build(iw, {
-                kind = "nav",
-                icon = "sort",
-                title = _("组件排序"),
-                status = T(_("%1 项"), #layout),
-                status_on = true,
-                callback = function() openSortList(desktop) end,
-            })
-        end,
-    }
     local enabled_rows = {}
     for i, id in ipairs(layout) do
         local comp = Base.find(id)
@@ -217,14 +178,12 @@ function HomeSettings.sections(desktop)
         end
     end
 
-    local sections = {
-        { title = _("布局"), rows = layout_rows },
-    }
+    local sections = {}
     if #enabled_rows > 0 then
-        sections[#sections + 1] = { title = _("已启用"), rows = enabled_rows }
+        sections[#sections + 1] = { title = _("首页组件"), rows = enabled_rows }
     end
     if #disabled_rows > 0 then
-        sections[#sections + 1] = { title = _("未启用"), rows = disabled_rows }
+        sections[#sections + 1] = { title = _("可添加组件"), rows = disabled_rows }
     end
     return sections
 end

@@ -20,20 +20,22 @@ function Display.rows(ctx)
     return {
         function(iw)
             return SettingRow.build(iw, {
-                kind = "nav", icon = "text_fields", title = _("字体"),
+                kind = "nav", icon = "text_fields", title = _("界面字体"),
+                subtitle = _("只影响月读界面，不影响书籍正文"),
                 status = font_name, status_on = true,
                 callback = function()
-                    FontPicker.open{ title = _("字体"), on_done = function() desktop:rebuild() end }
+                    FontPicker.open{ title = _("界面字体"), on_done = function() desktop:rebuild() end }
                 end,
             })
         end,
         function(iw)
             return SettingRow.build(iw, {
-                kind = "nav", icon = "format_size", title = _("字号"),
+                kind = "nav", icon = "format_size", title = _("界面缩放"),
+                subtitle = _("调整月读界面的整体大小"),
                 status = string.format("%d%%", scale), status_on = true,
                 callback = function()
                     Popup.spin{
-                        title = _("字号"), value = UI.getScale(),
+                        title = _("界面缩放"), value = UI.getScale(),
                         value_min = UI.scaleMin(), value_max = UI.scaleMax(),
                         value_step = UI.scaleStep(), unit = "%", ok_always_enabled = true,
                         callback = function(spin)
@@ -47,11 +49,12 @@ function Display.rows(ctx)
         end,
         function(iw)
             return SettingRow.build(iw, {
-                kind = "nav", icon = "grid_view", title = _("每行网格数量"),
+                kind = "nav", icon = "grid_view", title = _("书架每行数量"),
+                subtitle = _("调整书库和书城每行显示的卡片数"),
                 status = tostring(grid_max_cols), status_on = true,
                 callback = function()
                     Popup.spin{
-                        title = _("每行网格数量"), value = UI.getGridMaxCols(),
+                        title = _("书架每行数量"), value = UI.getGridMaxCols(),
                         value_min = UI.gridMaxColsMin(), value_max = UI.gridMaxColsMax(),
                         value_step = 1, ok_always_enabled = true,
                         callback = function(spin)

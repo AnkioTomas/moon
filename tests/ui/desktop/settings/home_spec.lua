@@ -52,9 +52,6 @@ package.preload["ui/uimanager"] = function()
         close = function() end,
     }
 end
-package.preload["ui.components.popup"] = function()
-    return { list = function(opts) shown = opts end }
-end
 package.preload["ui.components.settingrow"] = function()
     return { build = function(_, opts) return opts end }
 end
@@ -65,9 +62,19 @@ end
 local Settings = require("ui.desktop.settings.home")
 local desktop = { rebuild = function() end }
 
+local function sectionByTitle(sections, title)
+    for _, section in ipairs(sections) do
+        if section.title == title then return section end
+    end
+end
+
 local sections = Settings.sections(desktop)
-Assert.len(sections[1].rows, 1)
-local enabled_row = sections[2].rows[1](600)
+local enabled = sectionByTitle(sections, "首页组件")
+local available = sectionByTitle(sections, "可添加组件")
+Assert.len(enabled.rows, 2)
+Assert.len(available.rows, 1)
+
+local enabled_row = enabled.rows[1](600)
 enabled_row.callback()
 local toggle = shown.buttons[1][1]
 Assert.is_true(toggle.enabled)
@@ -78,6 +85,9 @@ Assert.eq(layout[1], "recent_list")
 layout = { "clock" }
 home.home_layout = layout
 sections = Settings.sections(desktop)
-Assert.len(sections[1].rows, 1)
+enabled = sectionByTitle(sections, "首页组件")
+available = sectionByTitle(sections, "可添加组件")
+Assert.len(enabled.rows, 1)
+Assert.len(available.rows, 2)
 
 return true

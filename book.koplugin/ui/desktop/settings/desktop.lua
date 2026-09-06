@@ -18,21 +18,32 @@ function DesktopSettings.rows(desktop, open_on)
     return {
         function(iw)
             return SettingRow.build(iw, {
-                kind = "toggle", icon = "visibility", title = _("启动打开桌面"),
-                status = open_on and _("开") or _("关"), status_on = open_on,
+                kind = "nav", icon = "home", title = _("首页组件"),
+                subtitle = _("选择首页内容并调整显示顺序"),
+                status = T(_("已启用 %1 项"), count), status_on = count > 0,
                 callback = function()
-                    if open_on then G_reader_settings:saveSetting("start_with", "filemanager")
-                    else G_reader_settings:saveSetting("start_with", Host.OPEN_ON_START_ID) end
-                    desktop:rebuild()
+                    desktop:showSettingsSub("home", "appearance")
                 end,
             })
         end,
         function(iw)
             return SettingRow.build(iw, {
-                kind = "nav", icon = "home", title = _("首页布局"),
-                status = T(_("已启用 %1 项"), count), status_on = count > 0,
+                kind = "nav", icon = "vertical_align_top", title = _("首页顶栏"),
+                subtitle = _("选择首页顶部显示的信息"),
                 callback = function()
-                    desktop:showSettingsSub("home", "desktop")
+                    desktop:showSettingsSub("topbar", "appearance")
+                end,
+            })
+        end,
+        function(iw)
+            return SettingRow.build(iw, {
+                kind = "toggle", icon = "visibility", title = _("启动打开桌面"),
+                subtitle = _("KOReader 启动后直接进入月读"),
+                status = open_on and _("开") or _("关"), status_on = open_on,
+                callback = function()
+                    if open_on then G_reader_settings:saveSetting("start_with", "filemanager")
+                    else G_reader_settings:saveSetting("start_with", Host.OPEN_ON_START_ID) end
+                    desktop:rebuild()
                 end,
             })
         end,
