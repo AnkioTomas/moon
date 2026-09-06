@@ -62,6 +62,15 @@ local decode_active_count = 0
 local MAX_DOWNLOAD_JOBS = 5
 local MAX_DECODE_JOBS = 5
 local FAILED_URL_TTL = 5 * 60
+local failed_url_checks = 0
+local function reapFailedUrls()
+    failed_url_checks = failed_url_checks + 1
+    if failed_url_checks % 64 ~= 0 then return end
+    local now = os.time()
+    for url, expires in pairs(failed_urls) do
+        if expires <= now then failed_urls[url] = nil end
+    end
+end
 
 --- 登记在飞下载 job（{ cancel }）。
 ---@param job table|nil
@@ -467,6 +476,7 @@ pumpDownloadQueue = function()
 end
 
 function Image.fetchAsync(url, headers, cb)
+    reapFailedUrls()
     local cached = cachedPath(url)
     if cached then
         UIManager:nextTick(function() cb(cached) end)
