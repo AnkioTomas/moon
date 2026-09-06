@@ -58,6 +58,32 @@ local function fileName(path)
     return tostring(path or ""):match("([^/]+)$") or "<unknown>"
 end
 
+--- 只通过 KOReader 网络管理器判断当前是否可联网。
+---
+--- 连接状态不可用时保守放行；不能因为测试桩或旧版宿主缺少该接口而让
+--- 本地功能失效。
+---@return boolean
+local function networkConnected()
+    local ok, manager = pcall(require, "ui/network/manager")
+    if not ok or type(manager) ~= "table" or type(manager.isConnected) ~= "function" then
+        return true
+    end
+    local state_ok, connected = pcall(manager.isConnected, manager)
+    return not state_ok or connected ~= false
+end
+
+---@param callback fun()
+---@return { cancel: fun() }
+local function deferCancelled(callback)
+    local cancelled = false
+    UIManager:nextTick(function()
+        if not cancelled then callback() end
+    end)
+    return {
+        cancel = function() cancelled = true end,
+    }
+end
+
 ------------------------------------------------------------------------
 -- 内部
 ------------------------------------------------------------------------
@@ -306,6 +332,13 @@ function Request.request(opts, cb)
         cb(res, err)
     end
 
+    if not networkConnected() then
+        logger.dbg("book.http skip offline", request_id, method, url)
+        return deferCancelled(function()
+            deliver(nil, _("网络不可用，请先连接 Wi-Fi"))
+        end)
+    end
+
     if not Request.ensureTurbo() then
         UIManager:nextTick(function()
             if not state.cancelled then
@@ -532,6 +565,13 @@ function Request.stream(opts, handlers)
             received = received + #chunk
             if handlers.on_data then handlers.on_data(chunk) end
         end
+    end
+
+    if not networkConnected() then
+        logger.dbg("book.http stream skip offline", request_id, method, url)
+        return deferCancelled(function()
+            if handlers.on_done then handlers.on_done(_("网络不可用，请先连接 Wi-Fi")) end
+        end)
     end
 
     if not Request.ensureTurbo() then
@@ -867,6 +907,14 @@ function Request.download(opts, dest, cb)
     local stream_job
     local tmp = dest .. ".part"
     local target = fileName(dest)
+
+    if not networkConnected() then
+        logger.dbg("book.http download skip offline", target)
+        return deferCancelled(function()
+            cb(false, _("网络不可用，请先连接 Wi-Fi"))
+        end)
+    end
+
     local file, open_err = io.open(tmp, "wb")
     local written = 0
     local response = {}
