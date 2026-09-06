@@ -15,17 +15,18 @@ local T = require("ffi/util").template
 -- 官方种子镜像（不带尾斜杠）。前排入口来自上游域名清单，并经
 -- eAPI /info/ok 实测可用；旧入口保留作地区性回退。
 local SEED_URLS = {
+    "https://zlib.bz",
+    "https://lexlib.tw",
+    "https://librella.fi",
+    "https://lexlib.fi",
+    "https://bookabooki.tw",
+    "https://bookabooki.fi",
+    "https://librella.tw",
     "https://fuckfbi.ru",
     "https://zh.chris101.ru",
     "https://zh.z-lib.gd",
     "https://z-library.la",
-    "https://librella.tw",
-    "https://bookabooki.tw",
     "https://zh.z-library.sk",
-    "https://librella.fi",
-    "https://lexlib.tw",
-    "https://lexlib.fi",
-    "https://bookabooki.fi",
     "https://z-library.sk",
     "https://thai-books.sk",
     "https://frenchbooks.sk",
@@ -265,6 +266,9 @@ function Client:_jsonAsync(method, path, opts, cb)
         end
         current_base = bases[bi]
         local url = current_base .. path
+        logger.dbg("book.zlib mirror attempt", method, path,
+            "attempt", bi, "of", #bases, current_base,
+            "timeout", opts.timeout or 30)
         issue(url, method, body, headers, { [url] = true }, 0)
     end
 
@@ -301,10 +305,14 @@ function Client:_jsonAsync(method, path, opts, cb)
                 local target = absoluteUrl(url, Request.header(res, "location"))
                 if not target then
                     last_err = T(_("HTTP %1"), code)
+                    logger.dbg("book.zlib failover", method, path,
+                        current_base, "invalid_redirect", code)
                     tryNextBase()
                     return
                 end
                 if seen[target] or hops + 1 > MAX_REDIRECT_HOPS then
+                    logger.dbg("book.zlib request stopped", method, path,
+                        current_base, "redirect_loop", target, "hops", hops + 1)
                     cb(nil, _("重定向过多"))
                     return
                 end
@@ -360,10 +368,23 @@ function Client:_jsonAsync(method, path, opts, cb)
 
             local data, decode_err = decode(res.body)
             if not Request.ok(code) then
-                cb(nil, apiError(data, T(_("HTTP %1"), code)))
+                local api_err = apiError(data, T(_("HTTP %1"), code))
+                logger.dbg("book.zlib request rejected", method, path,
+                    "attempt", bi, "of", #bases, selected,
+                    "status", code, api_err)
+                cb(nil, api_err)
                 return
             end
-            if not data then cb(nil, decode_err); return end
+            if not data then
+                logger.dbg("book.zlib invalid response", method, path,
+                    "attempt", bi, "of", #bases, selected,
+                    "status", code, "bytes",
+                    type(res.body) == "string" and #res.body or 0, decode_err)
+                cb(nil, decode_err)
+                return
+            end
+            logger.dbg("book.zlib request success", method, path,
+                "attempt", bi, "of", #bases, selected, "status", code)
             if cache_key then Cache.set(cache_key, data, cache_ttl) end
             cb(data)
         end)
