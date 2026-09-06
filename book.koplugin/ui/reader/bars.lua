@@ -10,6 +10,7 @@
 
 local Device = require("device")
 local Blitbuffer = require("ffi/blitbuffer")
+local Geom = require("ui/geometry")
 local _ = require("gettext")
 local Screen = Device.screen
 
@@ -510,7 +511,16 @@ function Bars:startClock()
             return
         end
         if Bars.topVisible(ui) and require("ui.reader.session").current() then
-            UIManager:setDirty(ui.dialog, "ui")
+            local dimen = ui.view and ui.view.dimen
+            local header_h = ui.document and ui.document:getHeaderHeight()
+            if dimen and header_h and header_h > 0 then
+                UIManager:setDirty(ui.dialog, "ui", Geom:new{
+                    x = 0,
+                    y = 0,
+                    w = dimen.w,
+                    h = header_h + topBarExtraHeight(),
+                })
+            end
         end
         UIManager:scheduleIn(61 - tonumber(os.date("%S")), tick)
     end
