@@ -20,6 +20,28 @@ local M = {
     preferred_height = 0.88,
 }
 
+--- 统计值变化时必须重新合成锁屏图，不能沿用当天旧缓存。
+---@return string
+function M.cache_key()
+    local book = Current.book(true)
+    if not book then return "none" end
+    local parts = {
+        tostring(book.source_id or ""),
+        tostring(book.stable_id or ""),
+        tostring(book.percent or 0),
+        tostring(book.page or 0),
+        tostring(book.total_seconds or 0),
+    }
+    for _, bucket in ipairs(book.buckets or {}) do
+        parts[#parts + 1] = table.concat({
+            tostring(bucket.key or ""),
+            tostring(bucket.seconds or 0),
+            tostring(bucket.pages or 0),
+        }, ",")
+    end
+    return table.concat(parts, ":")
+end
+
 local BookInfo
 
 --- 延迟加载桌面同源组件。

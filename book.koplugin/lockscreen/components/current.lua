@@ -43,6 +43,7 @@ local function buildBook(opts)
         total_pages = tonumber(opts.total_pages) or 0,
         chapter_idx = tonumber(opts.chapter_idx),
         chapter_title = opts.chapter_title,
+        chapter_count = tonumber(opts.chapter_count),
         cover = Library.coverPath(stable_id, source_id),
     }
 end
@@ -86,6 +87,7 @@ local function currentBook()
         percent = row.percent,
         chapter_idx = row.chapter_idx,
         chapter_title = row.chapter_title,
+        chapter_count = row.chapter_count,
         page = row.page,
         total_pages = row.total_pages,
     }

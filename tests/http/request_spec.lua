@@ -15,7 +15,9 @@ local network_connected = true
 package.loaded["ui/network/manager"] = nil
 package.preload["ui/network/manager"] = function()
     return {
-        isOnline = function() return network_connected end,
+        -- Calling isOnline would perform an active DNS probe in KOReader;
+        -- the request gate must use cached connection state instead.
+        isOnline = function() error("active network probe must not run") end,
         getConnectionState = function() return network_connected end,
     }
 end
