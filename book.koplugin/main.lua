@@ -64,6 +64,9 @@ function BookPlugin:init()
     end
     require("ime.init").bootstrap()
     require("patch.manager").init({ plugin_root = self.path })
+    if self.ui and not self.ui.document then
+        require("update.init").bootstrap(self.path)
+    end
     UIManager:nextTick(function()
         local ok_animation, err_animation = pcall(function()
             require("patch.page_turn_animation").checkStartup()
@@ -193,6 +196,7 @@ end
 ---@return nil
 function BookPlugin:onExit()
     logger.info("book plugin exit")
+    require("update.init").cancel()
     require("remote.init").onExit()
     logger.flush()
 end
@@ -204,6 +208,9 @@ function BookPlugin:onNetworkConnected()
     require("book.sync").retryDirtyAsync()
     self:emitToSource("network_connected")
     require("lockscreen.init").refresh(nil, true, "network_connected")
+    if self.ui and not self.ui.document then
+        require("update.init").autoCheck(self.path)
+    end
 end
 
 --- 翻页（分页视图）：统计换页；分发 page_changed

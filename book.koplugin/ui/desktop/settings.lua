@@ -161,6 +161,8 @@ function Settings.build(desktop)
         appendSection(packed, card_w, _("维护与信息"), {
             Maintenance.cacheRow(desktop),
             Maintenance.debugLogRow(desktop),
+            Maintenance.autoUpdateRow(desktop),
+            Maintenance.updateRow(desktop),
             Maintenance.aboutRow(),
             Maintenance.closeRow(desktop),
         })

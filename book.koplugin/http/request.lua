@@ -824,7 +824,7 @@ function Request.writeResponseToFile(res, dest, opts, cb)
 end
 
 --- 非阻塞下载：响应数据直接写入临时文件，成功后原子落位。
----@param opts table 同 request；可带 on_progress
+---@param opts table 同 request；可带 on_progress / max_bytes
 ---@param dest string
 ---@param cb fun(ok: boolean, err: any, res: table|nil)
 ---@return { cancel: fun() }
@@ -857,9 +857,19 @@ function Request.download(opts, dest, cb)
         on_headers = function(code, headers)
             response.code = code
             response.headers = headers
+            local max_bytes = tonumber(opts and opts.max_bytes)
+            local content_length = headers and headers.get and headers:get("Content-Length", true)
+            if max_bytes and tonumber(content_length) and tonumber(content_length) > max_bytes then
+                write_err = "download too large"
+            end
         end,
         on_data = function(chunk)
             if write_err or not Request.ok(response.code) then return end
+            local max_bytes = tonumber(opts and opts.max_bytes)
+            if max_bytes and written + #chunk > max_bytes then
+                write_err = "download too large"
+                return
+            end
             local ok, err = file:write(chunk)
             if not ok then
                 write_err = err or "write failed"
