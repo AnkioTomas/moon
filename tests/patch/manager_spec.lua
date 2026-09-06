@@ -116,6 +116,19 @@ do
     Assert.eq(count(read(paths.target), "-- Execute the software wipe animation"), 1)
 end
 
+-- 负载内容变了：重拷运行时补丁，不再插 uimanager
+do
+    local paths = setup(FAKE_TARGET)
+    Assert.is_true(Manager.install("page_turn_animation").ok)
+    local core = paths.patches .. "/2-swipe-animation-core.lua"
+    write(core, "-- stale payload\n")
+    local again = Manager.install("page_turn_animation")
+    Assert.is_true(again.ok, again.err)
+    Assert.eq(again.changed, true)
+    Assert.is_true(read(core):find("require(\"logger\")", 1, true) ~= nil)
+    Assert.eq(count(read(paths.target), "-- Execute the software wipe animation"), 1)
+end
+
 -- 备份→恢复：文件回到逐字节原样，补丁文件被清掉
 do
     local paths = setup(FAKE_TARGET)

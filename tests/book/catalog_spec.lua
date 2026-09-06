@@ -84,11 +84,12 @@ local Catalog = require("book.catalog")
 
 do -- toList 带 source_id
     local list = Catalog.toList({
-        { stable_id = "a.epub", title = "A", percent = 10 },
+        { stable_id = "a.epub", title = "A", percent = 10, path = "/cache/a.epub" },
     }, 3, "moon")
     Assert.eq(list.count, 3)
     Assert.eq(list.data[1].source_id, "moon")
     Assert.eq(list.data[1].title, "A")
+    Assert.eq(list.data[1].path, "/cache/a.epub")
 end
 
 do -- listLibraryAsync 读假库

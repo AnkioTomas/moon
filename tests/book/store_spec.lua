@@ -145,6 +145,15 @@ package.preload["source.registry"] = function()
             registry_created[#registry_created + 1] = id
             return { id = id }
         end,
+        meta = function(id)
+            if id == "wechat" or id == "jdread" or id == "copymanga" then
+                return { id = id, type = "chapter" }
+            end
+            if type(id) == "string" and id ~= "" then
+                return { id = id, type = "book" }
+            end
+            return nil
+        end,
     }
 end
 
@@ -162,6 +171,30 @@ do
     Assert.is_false(Store.allChaptersCached({ source_id = "wechat", stable_id = "no-toc" }))
     toc_rows["wechat\0cached-book"] = nil
     chapter_counts["wechat\0cached-book"] = nil
+end
+
+-- ── isDownloaded：章节源看全本缓存，整本源看 path ──
+do
+    local identity = { source_id = "wechat", stable_id = "cached-book" }
+    toc_rows["wechat\0cached-book"] = "toc:cached"
+    json_values["toc:cached"] = { { idx = 1 }, { idx = 2 } }
+    chapter_counts["wechat\0cached-book"] = 2
+    Assert.is_true(Store.isDownloaded({
+        source_id = "wechat", stable_id = "cached-book", path = "/ch/1.html",
+    }))
+    chapter_counts["wechat\0cached-book"] = 1
+    Assert.is_false(Store.isDownloaded({
+        source_id = "wechat", stable_id = "cached-book", path = "/ch/1.html",
+    }))
+    Assert.is_false(Store.isDownloaded(identity))
+    toc_rows["wechat\0cached-book"] = nil
+    chapter_counts["wechat\0cached-book"] = nil
+
+    Assert.is_true(Store.isDownloaded({ source_id = "local", path = "/books/a.epub" }))
+    Assert.is_true(Store.isDownloaded({ source_id = "moon", path = "/cache/a.epub" }))
+    Assert.is_false(Store.isDownloaded({ source_id = "local", path = "" }))
+    Assert.is_false(Store.isDownloaded({ source_id = "moon" }))
+    Assert.is_false(Store.isDownloaded(nil))
 end
 
 -- ── identityFor：chapters 命中 → 章节身份（优先于 books.path）──
