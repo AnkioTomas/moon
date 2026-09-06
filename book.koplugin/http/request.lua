@@ -29,6 +29,8 @@ local _ = require("gettext")
 
 local Request = {}
 
+local FIXED_READ_CHUNK = 64 * 1024
+
 --- 并发请求期间拉长 UI 输入超时的引用计数。
 local input_timeouts = 0
 local request_seq = 0
@@ -632,7 +634,10 @@ function Request.stream(opts, handlers)
                 handlers.on_headers(code, self.response_headers)
             end
 
-            local content_length = self.response_headers:get("Content-Length", true)
+            -- HTTPHeaders:get may return more than one value. Keep only the header:
+            -- passing its second return into tonumber turns it into an invalid base.
+            local content_length_header = self.response_headers:get("Content-Length", true)
+            local content_length = tonumber(content_length_header)
             local transfer = self.response_headers:get("Transfer-Encoding", true)
             if transfer and tostring(transfer):lower() == "chunked" and self.kwargs.method ~= "HEAD" then
                 self._chunked = true
@@ -640,13 +645,26 @@ function Request.stream(opts, handlers)
                 self.iostream:read_until("\r\n", self._handle_chunked_encoding, self)
                 return
             end
-            if content_length and tonumber(content_length) and tonumber(content_length) > 0
-                and self.kwargs.method ~= "HEAD" then
+            if content_length and content_length > 0 and self.kwargs.method ~= "HEAD" then
+                local remaining = content_length
+                local function readFixedChunk(client_, chunk)
+                    chunk = chunk or ""
+                    emit(chunk)
+                    remaining = remaining - #chunk
+                    if remaining <= 0 then
+                        client_.payload = ""
+                        client_:_finalize_request()
+                        return
+                    end
+                    client_.iostream:read_bytes(
+                        math.min(remaining, FIXED_READ_CHUNK),
+                        readFixedChunk,
+                        client_
+                    )
+                end
                 self.iostream:read_bytes(
-                    tonumber(content_length),
-                    self._handle_body,
-                    self,
-                    function(_, chunk) emit(chunk) end,
+                    math.min(remaining, FIXED_READ_CHUNK),
+                    readFixedChunk,
                     self
                 )
                 return
