@@ -40,7 +40,8 @@ local WRITE_CHUNK = 64 * 1024
 
 --- Turbo/LuaSec 即使 verify_ca=false 仍会加载默认 CA
 --- （/etc/ssl/certs/ca-certificates.crt），macOS 等设备上不存在会直接炸。
-local ssl_patched = false
+--- 会话内只打一次：SNI / 无 CA 上下文 / LuaSocket 连接失败点号调用。
+local turbo_patched = false
 
 --- 日志只保留 scheme/host/path；query、fragment、userinfo 可能带令牌，禁止落盘。
 ---@param url any
@@ -84,38 +85,71 @@ local function patchTurboSni(crypto)
     end
 end
 
+--- Turbo LuaSocket 路径写成 `self._handle_connect_fail(err)`，离线立刻失败时
+--- `self` 变成错误字符串。读字段碰巧能过（string metatable），写字段直接炸：
+--- `iostream.lua:476 attempt to index local 'self' (a string value)`。
+--- 实例上包一层：点号调用时把流对象补回去，冒号调用保持原语义。
+local function patchTurboConnectFail()
+    local ok, iostream = pcall(require, "turbo.iostream")
+    if not ok or type(iostream) ~= "table" then
+        return
+    end
+    local IOStream = iostream.IOStream
+    if type(IOStream) ~= "table" or type(IOStream.connect) ~= "function" then
+        return
+    end
+    if IOStream._book_connect_fail_patched then
+        return
+    end
+    local orig_connect = IOStream.connect
+    local orig_fail = IOStream._handle_connect_fail
+    if type(orig_fail) ~= "function" then
+        return
+    end
+    IOStream.connect = function(self, address, port, family, callback, fail_callback, arg)
+        self._handle_connect_fail = function(first, second)
+            if type(first) ~= "table" then
+                return orig_fail(self, first)
+            end
+            return orig_fail(first, second)
+        end
+        return orig_connect(self, address, port, family, callback, fail_callback, arg)
+    end
+    IOStream._book_connect_fail_patched = true
+end
+
 --- 忽略校验时不传 cafile，避免「error loading CA locations」。
-local function patchTurboSsl()
-    if ssl_patched then
+--- 连接失败补丁不依赖 crypto：crypto 加载失败也必须装上，否则离线开书会炸。
+local function patchTurbo()
+    if turbo_patched then
         return
     end
-    ssl_patched = true
+    turbo_patched = true
     local ok, crypto = pcall(require, "turbo.crypto")
-    if not ok then
-        return
-    end
-    patchTurboSni(crypto)
-    if type(crypto.ssl_create_client_context) ~= "function" then
-        return
-    end
-    local orig = crypto.ssl_create_client_context
-    crypto.ssl_create_client_context = function(cert_file, prv_file, ca_cert_path, verify, sslv)
-        if verify then
-            return orig(cert_file, prv_file, ca_cert_path, verify, sslv)
+    if ok then
+        patchTurboSni(crypto)
+        if type(crypto.ssl_create_client_context) == "function" then
+            local orig = crypto.ssl_create_client_context
+            crypto.ssl_create_client_context = function(cert_file, prv_file, ca_cert_path, verify, sslv)
+                if verify then
+                    return orig(cert_file, prv_file, ca_cert_path, verify, sslv)
+                end
+                local ssl = require("ssl")
+                local ctx, err = ssl.newcontext({
+                    mode = "client",
+                    protocol = "sslv23",
+                    key = prv_file,
+                    certificate = cert_file,
+                    options = {"all"},
+                })
+                if not ctx then
+                    return -1, err
+                end
+                return 0, ctx
+            end
         end
-        local ssl = require("ssl")
-        local ctx, err = ssl.newcontext({
-            mode = "client",
-            protocol = "sslv23",
-            key = prv_file,
-            certificate = cert_file,
-            options = {"all"},
-        })
-        if not ctx then
-            return -1, err
-        end
-        return 0, ctx
     end
+    patchTurboConnectFail()
 end
 
 ---@param res table|nil
@@ -313,7 +347,7 @@ function Request.request(opts, cb)
         end
         turbo.log.categories.success = false
         turbo.log.categories.warning = false
-        local patched, patch_err = pcall(patchTurboSsl)
+        local patched, patch_err = pcall(patchTurbo)
         if not patched then
             if finish() and not state.cancelled then
                 deliver(nil, patch_err)
@@ -539,7 +573,7 @@ function Request.stream(opts, handlers)
         end
         turbo.log.categories.success = false
         turbo.log.categories.warning = false
-        local patched, patch_err = pcall(patchTurboSsl)
+        local patched, patch_err = pcall(patchTurbo)
         if not patched then
             finish(patch_err)
             return
