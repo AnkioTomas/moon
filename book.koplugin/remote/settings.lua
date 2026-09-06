@@ -75,6 +75,7 @@ function SettingsApi.snapshot()
     local Settings = require("utils.settings")
     local ai = Settings.get("ai")
     local moon = Settings.getSource("moon")
+    local copymanga = Settings.getSource("copymanga") or {}
     local zlib = Settings.getSource("zlib")
     return {
         ai = {
@@ -85,6 +86,11 @@ function SettingsApi.snapshot()
         moon = {
             base_url = asStr(moon.base_url),
             token = maskValue(moon.token, true),
+        },
+        copymanga = {
+            base_url = asStr(copymanga.base_url),
+            username = asStr(copymanga.username),
+            password = maskValue(copymanga.password, true),
         },
         zlib = {
             email = asStr(zlib.email),
@@ -170,6 +176,21 @@ function SettingsApi.apply(payload)
         end
         if zlib_changed then
             Settings.saveSource("zlib", cfg)
+            changed = true
+        end
+    end
+
+    if hasGroup(payload.copymanga) then
+        local cfg = Settings.getSource("copymanga") or {}
+        local g = payload.copymanga
+        local changed_group = false
+        if applyField(cfg, "base_url", g.base_url, Text.rtrimSlashes) then changed_group = true end
+        if applyField(cfg, "username", g.username, Text.trim) then changed_group = true end
+        if applyField(cfg, "password", g.password, tostring) then changed_group = true end
+        if changed_group then
+            -- Credentials and endpoint affect the active client/session.
+            Settings.saveSource("copymanga", cfg)
+            require("source.registry").invalidate()
             changed = true
         end
     end
