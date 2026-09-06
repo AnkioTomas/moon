@@ -329,6 +329,12 @@ do
                         return { { "第一辑", "第二辑" } }, 2
                     end
                     if sql:find("COUNT(*)", 1, true) and sql:find("GROUP BY", 1, true) then
+                        if sql:find("WHEN is_new=1", 1, true) then
+                            return { { "new", "read", "unread" }, { 1, 2, 4 } }, 3
+                        end
+                        if sql:find("CASE WHEN series", 1, true) then
+                            return { { "第一辑", "" }, { 5, 2 } }, 2
+                        end
                         return { { "sub", "" }, { 3, 2 } }, 2
                     end
                     return {
@@ -411,6 +417,12 @@ do
     calls = {}
     BookDB.listBySource("local", { uncategorized = true })
     Assert.is_true(calls[1].sql:find("b.category IS NULL OR b.category=''", 1, true) ~= nil)
+    calls = {}
+    BookDB.listBySource("local", { unseries = true })
+    Assert.is_true(calls[1].sql:find("b.series IS NULL OR b.series=''", 1, true) ~= nil)
+    calls = {}
+    BookDB.listBySource("local", { read_status = "new" })
+    Assert.is_true(calls[1].sql:find("b.is_new=1", 1, true) ~= nil)
 
     -- 分类列表
     local cats = BookDB.categoriesBySource("local")
@@ -424,6 +436,15 @@ do
     Assert.eq(category_counts[1].count, 3)
     Assert.eq(category_counts[2].category, "")
     Assert.eq(category_counts[2].count, 2)
+    local series_counts = BookDB.seriesCountsBySource("local")
+    Assert.eq(series_counts[1].series, "第一辑")
+    Assert.eq(series_counts[1].count, 5)
+    Assert.eq(series_counts[2].series, "")
+    local read_counts = BookDB.readStatusCountsBySource("local")
+    Assert.eq(read_counts[1].status, "new")
+    Assert.eq(read_counts[1].count, 1)
+    Assert.eq(read_counts[2].count, 2)
+    Assert.eq(read_counts[3].count, 4)
 
     DbBase.close()
     clearMods()

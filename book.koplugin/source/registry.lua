@@ -29,11 +29,12 @@ local Registry = {}
 local FACTORIES = {
     moon = function() return require("source.moon") end,
     wechat = function() return require("source.wechat") end,
+    jdread = function() return require("source.jdread") end,
     ["local"] = function() return require("source.local") end,
 }
 
 -- local 默认源，列表垫底
-local ORDER = { "moon", "wechat", "local" }
+local ORDER = { "moon", "wechat", "jdread", "local" }
 
 ---@type BookSource|nil
 local _active = nil

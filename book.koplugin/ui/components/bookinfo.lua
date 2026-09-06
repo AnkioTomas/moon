@@ -34,6 +34,7 @@ local TextBoxWidget = require("ui/widget/textboxwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local TextWidget = require("ui/widget/textwidget")
+local Widget = require("ui/widget/widget")
 local GestureRange = require("ui/gesturerange")
 local Image = require("ui.components.image")
 local UI = require("ui.components.bookui")
@@ -122,12 +123,13 @@ function BookInfo.pct(book)
     return p
 end
 
---- 包一层可点击容器。
+--- 包一层可点击/长按容器。
 ---@param w number
 ---@param h number
 ---@param on_tap fun()|nil
+---@param on_hold fun()|nil
 ---@return table
-function BookInfo.tappable(w, h, on_tap)
+function BookInfo.tappable(w, h, on_tap, on_hold)
     local tap = InputContainer:new{
         dimen = Geom:new{ w = w, h = h },
     }
@@ -139,6 +141,18 @@ function BookInfo.tappable(w, h, on_tap)
             },
         },
     }
+    if on_hold then
+        tap.ges_events.HoldBookInfo = {
+            GestureRange:new{
+                ges = "hold",
+                range = function() return tap:getSize() end,
+            },
+        }
+        tap.onHoldBookInfo = function()
+            on_hold()
+            return true
+        end
+    end
     tap.onTapBookInfo = function()
         if on_tap then on_tap() end
         return true
@@ -172,6 +186,50 @@ function BookInfo.progressBadge(cw, pct)
     return badge
 end
 
+--- 封面状态单字；新书优先于已读/未读。
+---@param book Book|table|nil
+---@return string
+function BookInfo.statusChar(book)
+    if book and book.is_new then return _("新") end
+    if tonumber(book and book.read_state) == 1 then return _("读") end
+    return _("未")
+end
+
+--- 右下角阅读状态折角。
+---@param book Book|table|nil
+---@return table
+function BookInfo.statusCornerFold(book)
+    local size = UI.sz(28)
+    local text = TextWidget:new{
+        text = BookInfo.statusChar(book),
+        face = UI.face("xx_smallinfofont", 11),
+        fgcolor = Blitbuffer.COLOR_WHITE,
+    }
+    local fold = Widget:new{
+        dimen = Geom:new{ w = size, h = size },
+        text = text,
+    }
+    function fold:getSize()
+        return self.dimen
+    end
+    function fold:paintTo(bb, x, y)
+        for dy = 0, size - 1 do
+            local width = dy + 1
+            bb:paintRect(x + size - width, y + dy, width, 1, Blitbuffer.COLOR_BLACK)
+        end
+        local ts = self.text:getSize()
+        self.text:paintTo(
+            bb,
+            x + size - ts.w - UI.sz(2),
+            y + size - ts.h - UI.sz(1)
+        )
+    end
+    function fold:free()
+        self.text:free()
+    end
+    return fold
+end
+
 --- 「NN%」+ 进度条；百分比在左。
 ---@param width number
 ---@param pct number|nil
@@ -196,7 +254,7 @@ function BookInfo.progressRow(width, pct)
     return row, math.max(label:getSize().h, bar_h)
 end
 
---- 封面 widget；opts.badge=true 叠进度角标；缺图由 Image 自更新占位。
+--- 封面 widget；opts.badge=true 叠进度角标，opts.ribbon=true 叠状态绑带。
 --- opts.show_parent: 窗口级父（Desktop / Detail）
 --- opts.on_ready: 图片就绪回调
 --- opts.src / opts.headers: 直接指定封面（刮削结果没有 source.coverRequest）
@@ -249,16 +307,26 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
         clip_background = UI.surface(),
         shadow = opts.shadow,
     })
-    if opts.badge then
-        local badge = BookInfo.progressBadge(cw, pct)
-        if badge then
-            cover = OverlapGroup:new{
-                dimen = Geom:new{ w = cw, h = ch },
-                show_parent = opts.show_parent,
-                cover,
-                badge,
+    if opts.badge or opts.ribbon then
+        local overlays = {
+            dimen = Geom:new{ w = cw, h = ch },
+            show_parent = opts.show_parent,
+            cover,
+        }
+        if opts.ribbon then
+            local fold = BookInfo.statusCornerFold(book)
+            local fs = fold:getSize()
+            fold.overlap_offset = {
+                math.max(0, cw - fs.w),
+                math.max(0, ch - fs.h),
             }
+            overlays[#overlays + 1] = fold
         end
+        local badge = BookInfo.progressBadge(cw, pct)
+        if opts.badge and badge then
+            overlays[#overlays + 1] = badge
+        end
+        cover = OverlapGroup:new(overlays)
     end
     return cover, cw, ch
 end

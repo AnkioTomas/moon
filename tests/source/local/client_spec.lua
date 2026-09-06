@@ -319,6 +319,27 @@ package.preload["db.book"] = function()
             end
             return out
         end,
+        seriesCountsBySource = function(source_id)
+            local counts = {}
+            for _, row in pairs(db_rows) do
+                if row.source_id == source_id and row.in_library ~= false then
+                    local series = row.series or ""
+                    counts[series] = (counts[series] or 0) + 1
+                end
+            end
+            local out = {}
+            for series, count in pairs(counts) do
+                out[#out + 1] = { series = series, count = count }
+            end
+            return out
+        end,
+        readStatusCountsBySource = function()
+            return {
+                { status = "new", count = 0 },
+                { status = "read", count = 0 },
+                { status = "unread", count = 4 },
+            }
+        end,
         seriesBySource = function(source_id)
             local seen, out = {}, {}
             for _, row in pairs(db_rows) do
@@ -900,6 +921,8 @@ do
     Assert.not_nil(res)
     Assert.len(res.data.category, 2)
     Assert.len(res.data.category_counts, 3)
+    Assert.not_nil(res.data.series_counts)
+    Assert.len(res.data.read_counts, 3)
     Assert.eq(res.data.category[1], "sub")
     Assert.eq(res.data.category[2], "zeta")
     Assert.len(res.data.series, 2)

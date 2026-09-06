@@ -3,7 +3,7 @@
 
 --- 路径解析出的阅读身份（Store.identityFor / ensureIdentity 返回值）。
 ---@class BookIdentity
----@field source_id string 源标识（moon / wechat / local 等）
+---@field source_id string 源标识（moon / wechat / jdread / local 等）
 ---@field stable_id string 源内稳定身份
 ---@field chapter_idx number|nil 章节文件时为章号；整本书为 nil
 ---@field book Book|nil books 表元数据行；刚登记/未入库时可能为内存行或 nil
@@ -27,6 +27,8 @@
 ---@field metadata_updated_at integer|nil 本地展示元数据版本
 ---@field cover string|nil 封面 URL；随展示元数据入库，Image 负责磁盘图片缓存
 ---@field cover_headers table|nil 封面请求头
+---@field read_state integer|nil 0=未读且可自动标记，1=已读，2=用户强制未读
+---@field is_new boolean|nil 首次打开前为 true
 
 local Book = {}
 

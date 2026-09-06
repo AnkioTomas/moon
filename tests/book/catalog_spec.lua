@@ -12,6 +12,8 @@ local FakeBooks = {
     list_count = 0,
     categories = {},
     category_counts = {},
+    series_counts = {},
+    read_counts = {},
     series = {},
     recent = {},
     list_opts = nil,
@@ -33,6 +35,12 @@ package.preload["db.book"] = function()
         end,
         categoryCountsBySource = function()
             return FakeBooks.category_counts
+        end,
+        seriesCountsBySource = function()
+            return FakeBooks.series_counts
+        end,
+        readStatusCountsBySource = function()
+            return FakeBooks.read_counts
         end,
         seriesBySource = function()
             return FakeBooks.series
@@ -103,6 +111,8 @@ end
 do -- filtersAsync
     FakeBooks.categories = { "科幻" }
     FakeBooks.category_counts = { { category = "科幻", count = 2 } }
+    FakeBooks.series_counts = { { series = "三体", count = 2 } }
+    FakeBooks.read_counts = { { status = "read", count = 1 } }
     FakeBooks.series = { "三体" }
     local got
     Catalog.filtersAsync("local", function(res)
@@ -111,6 +121,8 @@ do -- filtersAsync
     Stubs.flush()
     Assert.eq(got.data.category[1], "科幻")
     Assert.eq(got.data.category_counts[1].count, 2)
+    Assert.eq(got.data.series_counts[1].series, "三体")
+    Assert.eq(got.data.read_counts[1].status, "read")
     Assert.eq(got.data.series[1], "三体")
 end
 

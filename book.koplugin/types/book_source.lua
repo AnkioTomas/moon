@@ -1,6 +1,6 @@
 --- Source 接口与能力表。可 require：仅 SourceCapabilities.defaults 为运行时。
 
----@alias SourceId "moon"|"wechat"|"local"|string
+---@alias SourceId "moon"|"wechat"|"jdread"|"local"|string
 
 ---@alias BookSourceType
 ---| '"book"' # 整本文件
@@ -69,9 +69,9 @@ function SourceCapabilities.supportsEdit(source)
     return source:capabilities().edit == true
 end
 
---- 图书馆筛选项；只支持分类和系列。
+--- 图书馆筛选项与分类索引。
 ---@class BookFiltersResult
----@field data { category: string[]|nil, series: string[]|nil }|nil
+---@field data { category: string[]|nil, category_counts: { category: string, count: integer }[]|nil, series: string[]|nil, series_counts: { series: string, count: integer }[]|nil, read_counts: { status: string, count: integer }[]|nil }|nil
 
 ---@class SyncResult
 ---@field pulled integer

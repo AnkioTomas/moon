@@ -61,6 +61,8 @@ local function toBook(row, source_id)
         category = row.category,
         series = row.series,
         percent = tonumber(row.percent) or 0,
+        read_state = tonumber(row.read_state) or 0,
+        is_new = row.is_new == true or tonumber(row.is_new) == 1,
         chapter_idx = row.chapter_idx,
         chapter_title = row.chapter_title,
         page = row.page,
@@ -215,8 +217,11 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
         end
         local rows, count = require("db.book").listBySource(source_id, {
             category = opts.category,
+            uncategorized = opts.uncategorized,
             series = opts.series,
+            unseries = opts.unseries,
             search = opts.search,
+            read_status = opts.read_status,
             limit = page_size,
             offset = (page - 1) * page_size,
         })
@@ -243,7 +248,10 @@ function Catalog.filtersAsync(source_id, cb)
         cb({
             data = {
                 category = BookDB.categoriesBySource(source_id),
+                category_counts = BookDB.categoryCountsBySource(source_id),
                 series = BookDB.seriesBySource(source_id),
+                series_counts = BookDB.seriesCountsBySource(source_id),
+                read_counts = BookDB.readStatusCountsBySource(source_id),
             },
         })
     end)

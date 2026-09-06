@@ -26,6 +26,25 @@ local handlers = {
 ---@type ReaderSessionSnapshot|nil
 local current_session
 
+--- 按全书进度收敛已读状态：100% 是事实，99% 仅是用户可选便利规则。
+---@param session ReaderSessionSnapshot|nil
+---@param complete boolean|nil EndOfBook 的完成兜底
+local function updateReadState(session, complete)
+    if not session or not session.identity then return end
+    local book = session.identity.book
+    local read_state = tonumber(book and book.read_state) or 0
+    local finished = complete == true or (tonumber(session.fraction) or 0) >= 1
+    local BookDB = require("db.book")
+    local ok
+    if finished and read_state ~= 1 then
+        ok = BookDB.markReadComplete(session.identity.source_id, session.identity.stable_id)
+    elseif not finished and session.percent >= 99 and read_state == 0
+        and require("utils.settings").get("reader").auto_mark_read_at_99 == true then
+        ok = BookDB.markReadAutomatically(session.identity.source_id, session.identity.stable_id)
+    end
+    if ok and book then book.read_state = 1 end
+end
+
 --- 安装本插件的书籍结束处理，屏蔽 KOReader 默认的结束菜单。
 ---@param plugin table
 ---@param ui table
@@ -40,6 +59,7 @@ local function installEndOfBookHandler(plugin, ui)
         if Session.isChapterMode() and Session.onChapterBoundary(1) then
             return true
         end
+        updateReadState(current_session, true)
         require("ui.reader.end_dialog").show(plugin, ui, current_session and current_session.identity)
         return true
     end
@@ -144,10 +164,13 @@ function Session.onReaderReady(plugin)
         return
     end
 
+    require("db.book").markOpened(identity.source_id, identity.stable_id)
+    if identity.book then identity.book.is_new = false end
     current_session = Snapshot.new(ui, identity)
     installEndOfBookHandler(plugin, ui)
     local mode = Mode.resolve(identity)
     local skip_pull = handlers[mode].onReaderReady(plugin, current_session)
+    updateReadState(current_session)
     bootstrapReading(plugin, current_session, skip_pull)
     if mode == "chapter" then
         ChapterMode.afterBootstrap(plugin, current_session)
@@ -211,6 +234,7 @@ function Session.onPageChanged(plugin, page)
         return
     end
     Snapshot.refresh(session, page)
+    updateReadState(session)
     require("book.stats").onPage(session)
     require("ui.reader").refresh(plugin)
     local source = session.identity.source

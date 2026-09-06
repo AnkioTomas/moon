@@ -138,6 +138,7 @@ function ReaderSettings.sections(desktop)
     local marks_on = reader.book_xray_show_marks ~= false
     local top_on = Bars.topBarPreference()
     local bottom_on = Bars.bottomBarPreference()
+    local auto_mark_read = reader.auto_mark_read_at_99 == true
     local animation_on = PageTurnAnimation.isEnabled()
     local edge_translation_on = reader.edge_translation_enabled ~= false
     local baike_on = reader.baike_enabled ~= false
@@ -276,6 +277,17 @@ function ReaderSettings.sections(desktop)
                             end
                             desktop:rebuild()
                             PageTurnAnimation.promptRestart()
+                        end,
+                    })
+                end,
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "toggle", icon = "done_all", title = _("读到 99% 自动标记已读"),
+                        status = auto_mark_read and _("开") or _("关"), status_on = auto_mark_read,
+                        callback = function()
+                            reader.auto_mark_read_at_99 = not auto_mark_read
+                            MoonSettings.saveSection("reader", reader)
+                            desktop:rebuild()
                         end,
                     })
                 end,

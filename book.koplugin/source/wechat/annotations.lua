@@ -2,7 +2,7 @@
 微信读书 ``range`` ↔ 章节正文文本互转。
 
 微信 ``range`` 是原始章节 HTML（含标签）上的 0-based 半开区间 rune 索引，
-与 KOReader 章节壳注入的 ``<h1>`` 标题无关。定位划线一律用已解码的 ``markText``
+与本地章节 HTML 无关。定位划线一律用已解码的 ``markText``
 在可见正文里匹配，``range`` 只用于重复文本消歧；不能按可见文本去切片 ``range``。
 
 @module koplugin.book.source.wechat.annotations
@@ -226,7 +226,7 @@ function Annotations.stripInjected(html)
     return html
 end
 
---- 清理微信章节正文：社区虚线、正文内重复的 ``<title>``（外层 ``write`` 已写 h1/title）。
+--- 清理微信章节正文：社区虚线和正文内不应显示的 ``<title>``。
 ---@param html string
 ---@return string
 function Annotations.cleanChapterHtml(html)
@@ -238,7 +238,7 @@ function Annotations.cleanChapterHtml(html)
     return Text.trim(html)
 end
 
---- 去掉 KOReader 章节壳里的 ``<h1>`` 标题，取可见正文的搜索范围。
+--- 取可见正文的搜索范围，并兼容旧缓存中注入的 ``<h1>`` 标题。
 ---@param html string
 ---@return string
 function Annotations.rangeHtml(html)
@@ -270,7 +270,7 @@ function Annotations.plainRunes(html)
     return runes
 end
 
---- 可见正文 rune 序列（不含章节 ``<h1>``；用于本地文本匹配，不用于切片 ``range``）。
+--- 可见正文 rune 序列（兼容旧缓存中的章节 ``<h1>``；用于本地文本匹配，不用于切片 ``range``）。
 ---@param html string
 ---@return string[]
 function Annotations.plainBodyRunes(html)
@@ -419,12 +419,12 @@ local function headAtXPointer(flow, pos)
     return nil
 end
 
---- 在章节壳内定位划线原文，返回 crengine xpointer（支持跨段划线）。
+--- 在本地章节 HTML 内定位划线原文，返回 crengine xpointer（支持跨段划线）。
 ---
 --- 不用 ``document:findText``：那是跨页模糊搜索，命中与否取决于渲染状态，而段落偏移是
---- 确定的。wire ``range`` 与本地壳不是同一坐标系，不能拿它猜本地段落；重复文本若
+--- 确定的。wire ``range`` 与本地 HTML 不是同一坐标系，不能拿它猜本地段落；重复文本若
 --- 没有已保存的 xpointer 就拒绝定位，避免把高亮画到错误位置。
----@param source string|WechatRuneFlow 章节壳 HTML（含 ``<h1>``）或已建好的 rune 流
+---@param source string|WechatRuneFlow 本地章节 HTML 或已建好的 rune 流
 ---@param needle string 划线原文
 ---@param range_str string|nil 兼容旧调用；不参与本地坐标计算
 ---@return string|nil pos0

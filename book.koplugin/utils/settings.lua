@@ -19,6 +19,7 @@ local DEFAULTS = {
     },
     display = {
         ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,
+        library_view = "flat",
     },
     lockscreen = {
         lock_screen = "ko",
@@ -49,6 +50,7 @@ local DEFAULTS = {
         book_xray_show_marks = true,
         book_reader_top_bar = true,
         book_reader_bottom_bar = true,
+        auto_mark_read_at_99 = false,
         edge_translation_enabled = true,
         baike_enabled = true,
         dictionary_enabled = true,
