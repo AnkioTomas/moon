@@ -194,7 +194,8 @@ local function existingChapter(identity, opts)
     if not idx then return nil end
     path = Paths.bookWorkDir(identity.stable_id, identity.source_id)
         .. "/" .. tostring(idx) .. ".cbz"
-    if lfs.attributes(path, "mode") == "file" then
+    local attr = lfs.attributes(path)
+    if attr and attr.mode == "file" and (tonumber(attr.size) or 0) > 0 then
         return path, idx
     end
     return nil
