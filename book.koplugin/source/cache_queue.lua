@@ -22,6 +22,7 @@ local change_scheduled = false
 
 local MAX_ATTEMPTS = 3
 local RETRY_DELAY_SECONDS = 15
+local MAX_PENDING = 64
 
 --- 通知首页状态栏刷新；订阅者只是 UI 观察者，绝不拥有或取消任务。
 local function flushChanged()
@@ -156,6 +157,7 @@ function Queue.enqueue(source, identity)
     end
     local key = keyFor(source, identity)
     if by_key[key] then return by_key[key], false end
+    if #pending >= MAX_PENDING then return nil, false end
     local job = {
         key = key,
         source = source,

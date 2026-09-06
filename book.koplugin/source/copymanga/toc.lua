@@ -9,6 +9,12 @@ local JSON = require("json")
 local Toc = {}
 local TTL = 6 * 60 * 60
 local cache = {}
+local CACHE_LIMIT = 32
+local function putCache(cache_key, value)
+    cache[cache_key] = value
+    local count = 0
+    for key in pairs(cache) do count = count + 1; if count > CACHE_LIMIT then cache[key] = nil; break end end
+end
 
 ---@param source_id string
 ---@param stable_id string
@@ -27,7 +33,7 @@ function Toc.read(source_id, stable_id)
     if not payload then return nil end
     local ok, list = pcall(JSON.decode, payload)
     if not ok or type(list) ~= "table" or #list == 0 then return nil end
-    cache[cache_key] = list
+    putCache(cache_key, list)
     return list
 end
 
@@ -39,7 +45,7 @@ function Toc.put(source_id, stable_id, list)
     local ok, payload = pcall(JSON.encode, list)
     if not ok or type(payload) ~= "string" then return false end
     if not require("db.book").setToc(source_id, stable_id, payload) then return false end
-    cache[key(source_id, stable_id)] = list
+    putCache(key(source_id, stable_id), list)
     return true
 end
 
