@@ -62,13 +62,21 @@ local function appendSection(out, width, title, row_builders)
     end
 end
 
----@param out table
----@param width number
----@param row_builders table
-local function appendRowList(out, width, row_builders)
-    for i, build in ipairs(row_builders) do
-        if i > 1 then table.insert(out, rowGap()) end
-        table.insert(out, build(width))
+--- 造主设置页的分类导航行。
+---@param desktop table
+---@param opts table
+---@return fun(iw: number): table
+local function categoryRow(desktop, opts)
+    return function(iw)
+        return SettingRow.build(iw, {
+            kind = "nav",
+            icon = opts.icon,
+            title = opts.title,
+            subtitle = opts.subtitle,
+            status = opts.status,
+            status_on = opts.status_on,
+            callback = function() desktop:showSettingsSub(opts.sub) end,
+        })
     end
 end
 
@@ -107,9 +115,9 @@ function Settings.build(desktop)
     local packed = {}
     local sub = desktop._settings_sub
     local valid_sub = {
-        sources = true, display = true, lockscreen = true, desktop = true, topbar = true,
-        home = true, language = true, remote = true, quickpanel = true, ai = true,
-        reader = true,
+        sources = true, reader = true, appearance = true, lockscreen = true,
+        language = true, services = true, reader_popup = true,
+        quickpanel_reader = true, quickpanel_desktop = true, home = true, topbar = true,
     }
     if sub ~= nil and not valid_sub[sub] then
         sub = nil
@@ -118,78 +126,39 @@ function Settings.build(desktop)
     end
 
     if sub == nil then
-        appendRowList(packed, card_w, {
-            function(iw)
-                return SettingRow.build(iw, {
-                    kind = "nav", icon = "source", title = _("数据源"), status = active_name, status_on = true,
-                    callback = function() desktop:showSettingsSub("sources") end,
-                })
-            end,
-            function(iw)
-                return SettingRow.build(iw, {
-                    kind = "nav", icon = "menu_book", title = _("阅读"),
-                    status_on = true,
-                    callback = function() desktop:showSettingsSub("reader") end,
-                })
-            end,
-            function(iw)
-                return SettingRow.build(iw, {
-                    kind = "nav", icon = "display_settings", title = _("显示"),
-                    status = string.format("%d%%", scale), status_on = true,
-                    callback = function() desktop:showSettingsSub("display") end,
-                })
-            end,
-            function(iw)
-                return SettingRow.build(iw, {
-                    kind = "nav", icon = "wallpaper", title = _("锁屏"),
-                    status = LockSettings.isCompose() and _("开") or _("关"),
-                    status_on = LockSettings.isCompose(),
-                    callback = function() desktop:showSettingsSub("lockscreen") end,
-                })
-            end,
-            function(iw)
-                return SettingRow.build(iw, {
-                    kind = "nav", icon = "desktop_windows", title = _("桌面"),
-                    status = open_on and _("开") or _("关"), status_on = open_on,
-                    callback = function() desktop:showSettingsSub("desktop") end,
-                })
-            end,
-            function(iw)
-                return SettingRow.build(iw, {
-                    kind = "nav", icon = "vertical_align_top", title = _("顶部状态栏"),
-                    callback = function() desktop:showSettingsSub("topbar") end,
-                })
-            end,
-            function(iw)
-                return SettingRow.build(iw, {
-                    kind = "nav", icon = "language", title = _("语言与输入"),
-                    status = require("ui/language"):getLanguageName(G_reader_settings:readSetting("language") or "C"),
-                    status_on = true, callback = function() desktop:showSettingsSub("language") end,
-                })
-            end,
-            function(iw)
-                local configured = require("ai").isConfigured()
-                return SettingRow.build(iw, {
-                    kind = "nav", icon = "psychology", title = _("AI 服务"),
-                    status = configured and MoonSettings.get().ai_model or _("未配置"),
-                    status_on = configured,
-                    callback = function() desktop:showSettingsSub("ai") end,
-                })
-            end,
-            function(iw)
-                return SettingRow.build(iw, {
-                    kind = "nav", icon = "folder", title = _("远程管理"),
-                    status = Remote.isRunning() and _("运行中") or nil, status_on = Remote.isRunning(),
-                    callback = function() desktop:showSettingsSub("remote") end,
-                })
-            end,
-            function(iw)
-                return SettingRow.build(iw, {
-                    kind = "nav", icon = "dashboard_customize", title = _("快捷面板"),
-                    status = T(_("已启用 %1 项"), QuickPanel.enabledCount()), status_on = true,
-                    callback = function() desktop:showSettingsSub("quickpanel") end,
-                })
-            end,
+        appendSection(packed, card_w, _("功能设置"), {
+            categoryRow(desktop, {
+                sub = "sources", icon = "source", title = _("书库与账号"),
+                subtitle = _("切换书籍来源，管理账号和本地目录"),
+                status = active_name, status_on = true,
+            }),
+            categoryRow(desktop, {
+                sub = "reader", icon = "menu_book", title = _("阅读与工具"),
+                subtitle = _("阅读界面、划词工具和快捷操作"),
+            }),
+            categoryRow(desktop, {
+                sub = "appearance", icon = "display_settings", title = _("界面与首页"),
+                subtitle = _("月读界面、首页组件和首页顶栏"),
+                status = string.format("%d%%", scale), status_on = true,
+            }),
+            categoryRow(desktop, {
+                sub = "lockscreen", icon = "wallpaper", title = _("锁屏"),
+                status = LockSettings.isCompose() and _("开") or _("关"),
+                status_on = LockSettings.isCompose(),
+            }),
+            categoryRow(desktop, {
+                sub = "language", icon = "language", title = _("语言与输入"),
+                status = require("ui/language"):getLanguageName(G_reader_settings:readSetting("language") or "C"),
+                status_on = true,
+            }),
+            categoryRow(desktop, {
+                sub = "services", icon = "dns", title = _("连接与服务"),
+                subtitle = _("AI 服务和远程管理"),
+                status = Remote.isRunning() and _("运行中") or nil,
+                status_on = Remote.isRunning(),
+            }),
+        })
+        appendSection(packed, card_w, _("维护与信息"), {
             Maintenance.cacheRow(desktop),
             Maintenance.debugLogRow(desktop),
             Maintenance.aboutRow(),
@@ -203,34 +172,61 @@ function Settings.build(desktop)
             }) do
                 appendSection(packed, card_w, section.title, section.rows)
             end
-        elseif sub == "display" then
-            appendSection(packed, card_w, _("显示"), Display.rows{
+        elseif sub == "reader" then
+            for _, section in ipairs(ReaderSettings.sections(desktop)) do
+                appendSection(packed, card_w, section.title, section.rows)
+            end
+            appendSection(packed, card_w, _("菜单与快捷操作"), {
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "nav", icon = "format_ink_highlighter", title = _("划词菜单"),
+                        subtitle = _("设置选中文字后显示的操作和顺序"),
+                        callback = function() desktop:showSettingsSub("reader_popup", "reader") end,
+                    })
+                end,
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "nav", icon = "dashboard_customize", title = _("阅读快捷面板"),
+                        subtitle = _("设置阅读页顶部的快捷操作"),
+                        status = T(_("已启用 %1 项"), QuickPanel.readerEnabledCount()), status_on = true,
+                        callback = function() desktop:showSettingsSub("quickpanel_reader", "reader") end,
+                    })
+                end,
+            })
+        elseif sub == "reader_popup" then
+            appendSection(packed, card_w, _("划词菜单"), ReaderSettings.popupRows(desktop))
+        elseif sub == "appearance" then
+            appendSection(packed, card_w, _("首页与启动"), DesktopSettings.rows(desktop, open_on))
+            appendSection(packed, card_w, _("快捷操作"), {
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "nav", icon = "dashboard_customize", title = _("桌面快捷面板"),
+                        subtitle = _("设置月读桌面顶部的快捷操作"),
+                        status = T(_("已启用 %1 项"), QuickPanel.desktopEnabledCount()), status_on = true,
+                        callback = function() desktop:showSettingsSub("quickpanel_desktop", "appearance") end,
+                    })
+                end,
+            })
+            appendSection(packed, card_w, _("界面显示"), Display.rows{
                 desktop = desktop, font_name = font_name, scale = scale, grid_max_cols = grid_max_cols,
             })
         elseif sub == "lockscreen" then
             appendSection(packed, card_w, _("锁屏"), Lockscreen.rows(desktop))
-        elseif sub == "desktop" then
-            appendSection(packed, card_w, _("桌面"), DesktopSettings.rows(desktop, open_on))
         elseif sub == "topbar" then
-            appendSection(packed, card_w, _("顶部状态栏"), TopbarSettings.rows(desktop))
+            appendSection(packed, card_w, _("首页顶栏"), TopbarSettings.rows(desktop))
         elseif sub == "home" then
             for _idx, section in ipairs(HomeSettings.sections(desktop)) do
                 appendSection(packed, card_w, section.title, section.rows)
             end
         elseif sub == "language" then
             appendSection(packed, card_w, _("语言与输入"), Language.rows(desktop))
-        elseif sub == "remote" then
-            appendSection(packed, card_w, _("远程管理"), RemoteUI.menuRows(desktop))
-        elseif sub == "quickpanel" then
-            for _, section in ipairs(QuickPanel.sections(desktop)) do
-                appendSection(packed, card_w, section.title, section.rows)
-            end
-        elseif sub == "ai" then
+        elseif sub == "quickpanel_reader" then
+            appendSection(packed, card_w, _("阅读快捷面板"), QuickPanel.readerRows(desktop))
+        elseif sub == "quickpanel_desktop" then
+            appendSection(packed, card_w, _("桌面快捷面板"), QuickPanel.desktopRows(desktop))
+        elseif sub == "services" then
             appendSection(packed, card_w, _("AI 服务"), AISettings.rows(desktop))
-        elseif sub == "reader" then
-            for _, section in ipairs(ReaderSettings.sections(desktop)) do
-                appendSection(packed, card_w, section.title, section.rows)
-            end
+            appendSection(packed, card_w, _("远程管理"), RemoteUI.menuRows(desktop))
         end
     end
 

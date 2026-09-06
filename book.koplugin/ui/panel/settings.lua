@@ -11,8 +11,10 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 
 ---@class BookQuickPanelSettings
----@field enabledCount fun(): number
----@field sections fun(desktop: table): BookQuickPanelSettingSection[]
+---@field desktopEnabledCount fun(): number
+---@field readerEnabledCount fun(): number
+---@field desktopRows fun(desktop: table): BookQuickPanelSettingRowFactory[]
+---@field readerRows fun(desktop: table): BookQuickPanelSettingRowFactory[]
 
 local QuickPanel = {}
 
@@ -118,20 +120,30 @@ local function optionRows(desktop, options)
     return rows
 end
 
---- 当前启用的可配置快捷动作总数。
+--- 当前启用的桌面快捷动作数。
 ---@return number
-function QuickPanel.enabledCount()
-    return DesktopPanel.enabledCount() + ReaderPanel.enabledCount()
+function QuickPanel.desktopEnabledCount()
+    return DesktopPanel.enabledCount()
 end
 
---- 按桌面/阅读分组生成快捷面板设置页。
+--- 当前启用的阅读快捷动作数。
+---@return number
+function QuickPanel.readerEnabledCount()
+    return ReaderPanel.enabledCount()
+end
+
+--- 生成桌面快捷面板设置行。
 ---@param desktop table
----@return BookQuickPanelSettingSection[]
-function QuickPanel.sections(desktop)
-    return {
-        { title = _("桌面"), rows = optionRows(desktop, DesktopPanel.options()) },
-        { title = _("阅读"), rows = optionRows(desktop, ReaderPanel.options()) },
-    }
+---@return BookQuickPanelSettingRowFactory[]
+function QuickPanel.desktopRows(desktop)
+    return optionRows(desktop, DesktopPanel.options())
+end
+
+--- 生成阅读快捷面板设置行。
+---@param desktop table
+---@return BookQuickPanelSettingRowFactory[]
+function QuickPanel.readerRows(desktop)
+    return optionRows(desktop, ReaderPanel.options())
 end
 
 ---@type BookQuickPanelSettings

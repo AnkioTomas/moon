@@ -103,13 +103,14 @@ function Source.sections(ctx)
         function(iw)
             return SettingRow.build(iw, {
                 kind = "nav", icon = "checklist", title = _("已启用的数据源"),
+                subtitle = _("决定书库中可以切换哪些书籍来源"),
                 status = T(_("已启用 %1/%2"), #enabled, #SourceRegistry.list()),
                 status_on = true,
                 callback = function() pickEnabledSources(desktop) end,
             })
         end,
     }
-    local sections = { { title = _("数据源"), rows = common_rows } }
+    local sections = { { title = _("书籍来源"), rows = common_rows } }
 
     for _idx, meta in ipairs(enabled) do
         if meta.id ~= "local" then
@@ -117,7 +118,7 @@ function Source.sections(ctx)
             if mod and (type(mod.rows) == "function" or type(mod.open) == "function") then
                 local status, status_on
                 if type(mod.rowStatus) == "function" then status, status_on = mod.rowStatus() end
-                local title = (mod.rowTitle and mod.rowTitle()) or _("源设置")
+                local title = (mod.rowTitle and mod.rowTitle()) or _("账号与登录")
                 local icon = (mod.rowIcon and mod.rowIcon()) or "dns"
                 local rows = type(mod.rows) == "function" and mod.rows(plugin) or { function(iw)
                     return SettingRow.build(iw, {

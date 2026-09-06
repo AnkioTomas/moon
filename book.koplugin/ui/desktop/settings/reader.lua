@@ -119,6 +119,17 @@ local function popupConfigureRow(desktop, item)
     end
 end
 
+--- 构建划词菜单操作列表。
+---@param desktop table
+---@return function[]
+function ReaderSettings.popupRows(desktop)
+    local rows = {}
+    for _, item in ipairs(POPUP_BUTTONS) do
+        rows[#rows + 1] = popupConfigureRow(desktop, item)
+    end
+    return rows
+end
+
 ---@param desktop table
 ---@return BookQuickPanelSettingSection[]
 function ReaderSettings.sections(desktop)
@@ -132,10 +143,6 @@ function ReaderSettings.sections(desktop)
     local baike_on = reader.baike_enabled ~= false
     local dictionary_on = reader.dictionary_enabled ~= false
 
-    local popup_rows = {}
-    for _, item in ipairs(POPUP_BUTTONS) do
-        popup_rows[#popup_rows + 1] = popupConfigureRow(desktop, item)
-    end
     local translation_rows = {
         function(iw)
             return SettingRow.build(iw, {
@@ -214,7 +221,7 @@ function ReaderSettings.sections(desktop)
                 end,
                 function(iw)
                     return SettingRow.build(iw, {
-                        kind = "toggle", icon = "format_underlined", title = _("X-Ray实体画线"),
+                        kind = "toggle", icon = "format_underlined", title = _("X-Ray 实体画线"),
                         status = (xray_on and marks_on) and _("开") or _("关"),
                         status_on = xray_on and marks_on,
                         callback = function()
@@ -230,11 +237,11 @@ function ReaderSettings.sections(desktop)
             },
         },
         {
-            title = _("阅读页"),
+            title = _("阅读界面"),
             rows = {
                 function(iw)
                     return SettingRow.build(iw, {
-                        kind = "toggle", icon = "vertical_align_top", title = _("顶部状态栏"),
+                        kind = "toggle", icon = "vertical_align_top", title = _("阅读页顶栏"),
                         status = top_on and _("开") or _("关"), status_on = top_on,
                         callback = function()
                             Bars.setTopBarPreference(not top_on, readerUi())
@@ -273,10 +280,6 @@ function ReaderSettings.sections(desktop)
                     })
                 end,
             },
-        },
-        {
-            title = _("阅读弹窗"),
-            rows = popup_rows,
         },
         {
             title = _("词典"),
