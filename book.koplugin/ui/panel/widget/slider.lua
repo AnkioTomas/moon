@@ -20,6 +20,7 @@ local UI = require("ui.components.bookui")
 ---@field title string
 ---@field value number
 ---@field on_level fun(kind: string, fraction: number): boolean|nil
+---@field show_parent table
 ---@field bar_x number
 ---@field bar_w number
 ---@field progress table
@@ -34,8 +35,6 @@ function SliderRow:init()
     self.dimen = Geom:new{ w = self.width, h = self.height }
     self.ges_events = {
         Tap = { GestureRange:new{ ges = "tap", range = self.dimen } },
-        Pan = { GestureRange:new{ ges = "pan", range = self.dimen } },
-        PanRelease = { GestureRange:new{ ges = "pan_release", range = self.dimen } },
     }
     local label_w, value_w = UI.sz(72), UI.sz(42)
     local bar_w = self.width - label_w - value_w - UI.sz(16)
@@ -63,18 +62,20 @@ function SliderRow:init()
     }
 end
 
---- 根据点击/拖拽位置更新亮度或暖色并刷新 UI。
+--- 根据点击位置更新亮度或暖色并刷新 UI。
 ---@param self BookQuickPanelSliderRow
 ---@param pos { x: number, y: number }|nil
 ---@return boolean
 function SliderRow:setFromPosition(pos)
     if not pos then return false end
     local fraction = math.max(0, math.min(1, (pos.x - self.dimen.x - self.bar_x) / self.bar_w))
-    if not self.on_level(self.kind, fraction) then return false end
     local value = math.floor(fraction * 100 + 0.5)
+    if value == self.value then return true end
+    if not self.on_level(self.kind, fraction) then return false end
+    self.value = value
     self.progress:setPercent(value)
     self.value_label:setText(string.format("%d%%", value))
-    UIManager:setDirty(self, "ui")
+    UIManager:setDirty(self.show_parent, "ui", self.dimen)
     return true
 end
 
@@ -84,18 +85,6 @@ end
 ---@param ges table|nil
 ---@return boolean
 function SliderRow:onTap(_, ges) return self:setFromPosition(ges and ges.pos) end
---- 拖拽滑杆时设置当前值。
----@param self BookQuickPanelSliderRow
----@param _ table|nil
----@param ges table|nil
----@return boolean
-function SliderRow:onPan(_, ges) return self:setFromPosition(ges and ges.pos) end
---- 松开拖拽时设置当前值。
----@param self BookQuickPanelSliderRow
----@param _ table|nil
----@param ges table|nil
----@return boolean
-function SliderRow:onPanRelease(_, ges) return self:setFromPosition(ges and ges.pos) end
 
 ---@type BookQuickPanelSliderRow
 return SliderRow

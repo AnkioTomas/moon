@@ -39,6 +39,7 @@ end
 ---@field header table|nil
 ---@field on_action fun(id: string)|nil
 ---@field on_level fun(kind: string, fraction: number): boolean|nil
+---@field show_parent table|nil
 
 local Body = InputContainer:extend{
     name = "book_quick_panel_body",
@@ -101,6 +102,7 @@ function Body:rebuild()
             title = slider.title,
             value = slider.value,
             on_level = self.on_level,
+            show_parent = self.show_parent,
         })
     end
 

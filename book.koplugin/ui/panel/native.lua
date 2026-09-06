@@ -135,6 +135,7 @@ local function buildPanel(menu, W)
     local callbacks = menuCallbacks(menu)
     local body_opts = {
         width = content_w,
+        show_parent = menu,
         on_action = function(id)
             if mode == "reader" then
                 W.ReaderPanel.executeAction(id, tab._book_ui, callbacks)
