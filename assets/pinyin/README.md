@@ -18,9 +18,8 @@
 $DATA/.moon/dictionary.sqlite3。切片是因为单片超 jsdelivr
 ~20MB 单文件上限。
 
-手动 sideload：GitHub Release 附带 `pinyin-dictionary-vX.Y.Z.sqlite3`
-（由 CI `--assemble-only` 从分片拼出），重命名为 `dictionary.sqlite3`
-放入 `$DATA/.moon/` 即可。
+手动 sideload：GitHub Release 附带 `dictionary.sqlite3`
+（由 CI `--assemble-only` 从分片拼出），直接放入 `$DATA/.moon/` 即可。
 
 schema（解压后的 sqlite）：
 

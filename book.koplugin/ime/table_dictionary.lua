@@ -28,8 +28,7 @@ end
 
 ---@return table|nil
 function Dictionary:open()
-    if self.conn ~= nil then return self.conn or nil end
-    self.conn = false
+    if self.conn then return self.conn end
     local path = Paths.imeDictPath(self.id)
     local attr = lfs.attributes(path)
     if not attr or attr.mode ~= "file" or (attr.size or 0) == 0 then return nil end
@@ -62,7 +61,7 @@ function Dictionary:fileExists()
 end
 
 function Dictionary:reset()
-    if self.conn and self.conn ~= false then
+    if self.conn then
         pcall(function() self.conn:close() end)
     end
     self.conn = nil

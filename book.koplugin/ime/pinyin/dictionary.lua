@@ -93,7 +93,7 @@ for _, s in ipairs(SYLLABLES) do
     end
 end
 
-local _conn -- lua-ljsqlite3 连接；false = 已判定不可用
+local _conn -- lua-ljsqlite3 连接
 local _meta -- meta 缓存
 local _statements -- 高频查询的预编译语句，跟连接同生命周期
 
@@ -124,12 +124,9 @@ local function fetch(conn, name, sql, ...)
     return rows
 end
 
--- 只尝试打开一次；失败缓存为不可用，直到 reset 后重试。
+-- 只缓存成功连接。手动落盘或替换词库后，下次检查必须能直接重试。
 local function ensureOpen()
-    if _conn ~= nil then
-        return _conn or nil
-    end
-    _conn = false
+    if _conn then return _conn end
     local path = Paths.pinyinDictPath()
     local attr = lfs.attributes(path)
     if not attr or attr.mode ~= "file" or (attr.size or 0) == 0 then
@@ -171,9 +168,9 @@ function M.fileExists()
     return attr ~= nil and attr.mode == "file" and (attr.size or 0) > 0
 end
 
---- 下载或更新落盘后调用，使连接和负缓存失效。
+--- 下载或更新落盘后调用，使旧连接失效。
 function M.reset()
-    if _conn and _conn ~= false then
+    if _conn then
         pcall(function()
             _conn:close()
         end)
