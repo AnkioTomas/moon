@@ -191,4 +191,76 @@ function Chapter.materializeAsync(client, identity, chapter, chapter_idx, on_pro
     }
 end
 
+--- 后台预取章节 CBZ；已有文件由 materializeAsync 直接复用。
+--- 单章失败不阻断后续。不 touch 书架路径，避免阅读中改掉当前章登记。
+---@param client CopymangaClient
+---@param identity BookIdentity
+---@param toc BookChapter[]
+---@param from_idx integer 当前章序号（预取 from_idx+1 …）；0 表示从第一章开始
+---@param count integer
+---@param ops { progress: fun(done: integer, total: integer)|nil, interval_seconds: number|nil }|nil
+---@param cb fun(cached: integer, total: integer, failed: integer, err: any)|nil
+---@return { cancel: fun() }
+function Chapter.prefetchAsync(client, identity, toc, from_idx, count, ops, cb)
+    from_idx = tonumber(from_idx) or 0
+    count = tonumber(count) or 0
+    ops = ops or {}
+    local cancelled, active = false, nil
+    local cached_count, failed_count, last_error = 0, 0, nil
+    local indices = {}
+    if type(toc) == "table" then
+        for i = 1, count do
+            local idx = from_idx + i
+            if toc[idx] then indices[#indices + 1] = idx end
+        end
+    end
+
+    local pos = 1
+    local interval = math.max(0, tonumber(ops.interval_seconds) or 0)
+    local step
+    local function report()
+        if ops.progress then
+            ops.progress(cached_count + failed_count, #indices)
+        end
+    end
+    local function continueNext()
+        local UIManager = require("ui/uimanager")
+        if interval > 0 then
+            UIManager:scheduleIn(interval, step)
+        else
+            UIManager:nextTick(step)
+        end
+    end
+
+    step = function()
+        if cancelled then return end
+        local idx = indices[pos]
+        pos = pos + 1
+        if not idx then
+            if cb then cb(cached_count, #indices, failed_count, last_error) end
+            return
+        end
+        active = Chapter.materializeAsync(client, identity, toc[idx], idx, nil, function(path, err)
+            active = nil
+            if cancelled then return end
+            if path then
+                cached_count = cached_count + 1
+            else
+                failed_count = failed_count + 1
+                last_error = err or last_error
+            end
+            report()
+            continueNext()
+        end)
+    end
+
+    require("ui/uimanager"):nextTick(step)
+    return {
+        cancel = function()
+            cancelled = true
+            if active and active.cancel then active.cancel() end
+        end,
+    }
+end
+
 return Chapter
