@@ -14,6 +14,7 @@ local rows = {
         stable_id = "reading", title = "Reading", authors = "B", percent = 55,
     chapter_idx = 7,
     chapter_title = "数据库章节",
+    chapter_count = 12,
     page = 12,
     total_pages = 80,
     },
@@ -80,6 +81,7 @@ Assert.eq(book.authors, "B")
 Assert.eq(math.floor(book.percent + 0.5), 55)
 Assert.eq(book.chapter_idx, 7)
 Assert.eq(book.chapter_title, "数据库章节")
+Assert.eq(book.chapter_count, 12)
 Assert.eq(book.page, 12)
 Assert.eq(book.total_pages, 80)
 Assert.eq(book.cover, "moon/reading.png")
