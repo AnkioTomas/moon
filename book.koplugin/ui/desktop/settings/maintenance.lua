@@ -125,6 +125,39 @@ function Maintenance.debugLogRow(desktop)
     end
 end
 
+--- 造「自动检查更新」开关；只自动查询并提示，不自动安装。
+---@param desktop table 桌面实例
+---@return fun(iw: number): table
+function Maintenance.autoUpdateRow(desktop)
+    return function(iw)
+        local enabled = MoonSettings.get("maintenance").auto_update_check
+        return SettingRow.build(iw, {
+            kind = "toggle", icon = "update", title = _("自动检查更新"),
+            subtitle = _("每天最多检查一次，只提示不自动安装"),
+            status = enabled and _("开") or _("关"), status_on = enabled,
+            callback = function()
+                MoonSettings.save({ auto_update_check = not enabled })
+                desktop:rebuild()
+            end,
+        })
+    end
+end
+
+--- 造手动检查更新入口。
+---@param desktop table 桌面实例
+---@return fun(iw: number): table
+function Maintenance.updateRow(desktop)
+    return function(iw)
+        return SettingRow.build(iw, {
+            kind = "action", icon = "system_update", title = _("检查更新"),
+            status = pluginVersion(), status_on = true,
+            callback = function()
+                require("update.init").manualCheck(desktop.plugin.path)
+            end,
+        })
+    end
+end
+
 --- 造「关于」设置行的构造器，状态位显示当前版本号。
 ---@return fun(iw: number): table
 function Maintenance.aboutRow()

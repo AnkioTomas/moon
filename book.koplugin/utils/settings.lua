@@ -32,6 +32,10 @@ local DEFAULTS = {
         lock_screen_asset_cache = {},
     },
     remote = { remote_port = 9528, remote_autostart = false },
+    maintenance = {
+        auto_update_check = false,
+        update_last_checked_at = 0,
+    },
     pinyin = {
         pinyin_enabled = false,
         ime_layout = "pinyin",
@@ -91,7 +95,10 @@ local DEFAULTS = {
     ai = { ai_endpoint = "", ai_api_key = "", ai_model = "" },
 }
 
-local SECTIONS = { "common", "display", "lockscreen", "remote", "pinyin", "quickpanel", "reader", "home", "ai" }
+local SECTIONS = {
+    "common", "display", "lockscreen", "remote", "maintenance",
+    "pinyin", "quickpanel", "reader", "home", "ai",
+}
 local KEY_SECTION = {}
 for section, defaults in pairs(DEFAULTS) do
     for key in pairs(defaults) do KEY_SECTION[key] = section end
