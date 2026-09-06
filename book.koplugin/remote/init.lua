@@ -55,6 +55,7 @@ local function storageLayout()
         lfs.mkdir(wallpapers)
     end
     wallpapers = real(wallpapers)
+    local moon = real(Paths.root())
     local crash_log = real(data .. "/crash.log")
     local plugin_log = real(data .. "/.moon/book.log")
     local roots = {}
@@ -80,6 +81,7 @@ local function storageLayout()
             { label = "书籍根目录", path = book },
             { label = "截图文件夹", path = screenshot_dir },
             { label = "锁屏壁纸", path = wallpapers },
+            { label = "月读数据目录", path = moon },
             {
                 label = "KOReader 崩溃日志", path = crash_log, kind = "file", name = "crash.log",
                 missing = "尚未生成 KOReader 崩溃日志。",
