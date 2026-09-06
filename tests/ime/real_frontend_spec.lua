@@ -419,7 +419,48 @@ do
     current_profile = pinyin_profile
 end
 
--- 3. 字母直写 + 候选上键 + 点候选提交（真 wrapMethod raw_method_call 链）+ 退格回退
+-- 3. 注音默认层必须完整：ㄦ、ㄝ、ㄡ、ㄥ不可缺，ㄤ不可藏在 Shift 层。
+do
+    local pinyin_profile = current_profile
+    local labels = {
+        ["1"] = "ㄅ", ["2"] = "ㄉ", ["3"] = "ˇ", ["4"] = "ˋ", ["5"] = "ㄓ",
+        ["6"] = "ˊ", ["7"] = "˙", ["8"] = "ㄚ", ["9"] = "ㄞ", ["0"] = "ㄢ",
+        ["-"] = "ㄦ", n = "ㄙ", m = "ㄩ", [","] = "ㄝ", ["."] = "ㄡ",
+        ["/"] = "ㄥ", [";"] = "ㄤ",
+    }
+    current_profile = {
+        id = "zhuyin",
+        commit_space = true,
+        labels = labels,
+        mapKey = function(key)
+            local value = labels[key]
+            if value then return value, value end
+        end,
+    }
+    local zhuyin = newKeyboard()
+    Assert.eq(#zhuyin.layout[2], 11, "注音数字行必须容纳 ㄦ")
+    Assert.eq(zhuyin.layout[2][11].label, "ㄦ")
+    Assert.is_nil(zhuyin.layout[2][1].alt_label, "注音键不得残留英文符号角标")
+    Assert.eq(zhuyin.layout[4][10].label, "ㄤ", "ㄤ必须位于默认层")
+    Assert.eq(#zhuyin.layout[5], 11, "注音末行必须容纳四个韵母和退格")
+    Assert.eq(zhuyin.layout[5][6].label, "ㄙ")
+    Assert.eq(zhuyin.layout[5][7].label, "ㄩ")
+    Assert.eq(zhuyin.layout[5][8].label, "ㄝ")
+    Assert.eq(zhuyin.layout[5][9].label, "ㄡ")
+    Assert.eq(zhuyin.layout[5][10].label, "ㄥ")
+    Assert.eq(zhuyin.layout[5][11].width, zhuyin.layout[5][10].width,
+        "退格键不得把 11 列键盘撑出屏幕")
+    zhuyin:addChar(zhuyin.layout[2][11].key)
+    zhuyin:addChar(zhuyin.layout[5][8].key)
+    Assert.eq(text(zhuyin.inputbox), "ㄦㄝ", "新增键位必须可触摸输入")
+
+    current_profile = pinyin_profile
+    local pinyin = newKeyboard()
+    Assert.eq(#pinyin.layout[2], 10, "切回拼音必须恢复原始数字行")
+    Assert.eq(#pinyin.layout[5], 9, "切回拼音必须恢复 Shift 与原始末行")
+end
+
+-- 4. 字母直写 + 候选上键 + 点候选提交（真 wrapMethod raw_method_call 链）+ 退格回退
 do
     local kb = newKeyboard()
     kb:addChar("n")
@@ -439,7 +480,7 @@ do
     Assert.eq(cellText(kb, 2), "", "提交后候选行清空")
 end
 
--- 3. 换层（Shift→Sym→ABC，number 输入框从 layer 4 起步）：addKeys 重建后候选行仍活
+-- 5. 换层（Shift→Sym→ABC，number 输入框从 layer 4 起步）：addKeys 重建后候选行仍活
 do
     local kb = newKeyboard(4) -- input_type="number" 的起点层
     Assert.eq(#kb.layout, 6, "符号层也有候选行")

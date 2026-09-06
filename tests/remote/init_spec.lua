@@ -98,13 +98,16 @@ local wallpapers = data .. "/.moon/screensaver"
 Assert.is_true(dirs[wallpapers], "启动远程管理时应创建锁屏壁纸目录")
 
 local shortcut
+local moon_shortcut
 for _, item in ipairs(server_opts.shortcuts) do
     if item.label == "锁屏壁纸" then
         shortcut = item
-        break
+    elseif item.label == "月读数据目录" then
+        moon_shortcut = item
     end
 end
 Assert.eq(shortcut and shortcut.path, wallpapers)
+Assert.eq(moon_shortcut and moon_shortcut.path, data .. "/.moon")
 
 local wallpaper = wallpapers .. "/cover.png"
 files[wallpaper] = true
