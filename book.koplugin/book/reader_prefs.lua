@@ -184,6 +184,12 @@ function M.inject(doc_settings, document)
     if type(document) ~= "table" or type(document.setFontFace) ~= "function" then
         return false
     end
+    -- 整本书不需要跨文件偏好注入，但插件字体仍须在原生 ReadSettings 前重新注册。
+    -- 否则 sidecar 虽保留 font_face，CRE 冷启动时找不到该字体，只会静默回退默认字体。
+    local persisted_font_id = doc_settings:readSetting("book_reader_font_id")
+    if type(persisted_font_id) == "string" and persisted_font_id ~= "" then
+        MoonFont.faceForId(persisted_font_id)
+    end
     local identity = Store.identityFor(document.file)
     if not isChapter(identity) then
         return false
