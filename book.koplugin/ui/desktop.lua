@@ -390,6 +390,8 @@ function Desktop:sourceChanged(source)
     self._tabs = desktopTabs(source)
     clampTab(self)
     self._library_state = nil
+    self._library_groups_state = nil
+    self._library_group = nil
     self._store_state = nil
     self._store_books = nil
     self.store_search = nil

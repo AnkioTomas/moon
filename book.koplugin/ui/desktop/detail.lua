@@ -64,11 +64,11 @@ local Detail = InputContainer:extend{
     store_preview = false,
 }
 
---- 书城预览书：zlib 待下载；微信读书仅书城 Tab 进入时为预览。
+--- 书城预览书：zlib 待下载；源自带书城的书加入该源远端书架。
 ---@param book table|nil
 ---@param source table|nil
 ---@param store_preview boolean|nil
----@return "zlib"|"wechat"|nil
+---@return "zlib"|"source"|nil
 local function storeKind(book, source, store_preview)
     if type(book) ~= "table" then
         return nil
@@ -76,8 +76,9 @@ local function storeKind(book, source, store_preview)
     if book.source_id == "zlib" then
         return "zlib"
     end
-    if store_preview and book.source_id == "wechat" and source and source.id == "wechat" then
-        return "wechat"
+    if store_preview and source and book.source_id == source.id
+        and type(source.addStoreBookAsync) == "function" then
+        return "source"
     end
     return nil
 end
@@ -364,7 +365,7 @@ function Detail:cacheAllChapters()
     })
 end
 
---- 书城书动作：zlib 下载导入；微信读书加入远端书架并同步。
+--- 书城书动作：zlib 下载导入；源自带书城的书加入远端书架并同步。
 ---@return nil
 function Detail:installStoreBook()
     local book = self.book or {}
@@ -372,9 +373,11 @@ function Detail:installStoreBook()
         return
     end
     local kind = storeKind(book, self.source, self.store_preview)
-    if kind == "wechat" then
+    if kind == "source" then
         if not self.source or not self.source.configured or not self.source:configured() then
-            require("source.wechat.setting").open(self.plugin)
+            require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
+                text = _("请先在设置里配置当前数据源"),
+            })
             return
         end
         local UIManager = require("ui/uimanager")
@@ -776,7 +779,7 @@ function Detail:rebuild()
     local footer_pad_v = UI.sz(12)
     local footer, footer_h
     if store_book then
-        local action_enabled = store_kind == "wechat"
+        local action_enabled = store_kind == "source"
             and self.source and self.source.configured and self.source:configured()
             or store_kind == "zlib"
                 and type(self.source and self.source.importBookAsync) == "function"
@@ -784,7 +787,7 @@ function Detail:rebuild()
             width = content_w,
             buttons = { {
                 {
-                    text = store_kind == "wechat" and _("加入书架") or _("加入书库"),
+                    text = store_kind == "source" and _("加入书架") or _("加入书库"),
                     font_size = UI.buttonFontSize(),
                     enabled = action_enabled,
                     callback = function()

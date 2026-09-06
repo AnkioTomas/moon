@@ -71,15 +71,10 @@ package.preload["ui.components.pager"] = function()
     }
 end
 
-local popup_sheet, popup_list
+local popup_sheet
 package.preload["ui.components.popup"] = function()
     return {
         sheet = function(opts) popup_sheet = opts return opts end,
-        list = function(opts) popup_list = opts return opts end,
-        setListItems = function(menu, title, items)
-            menu.title = title
-            menu.items = items
-        end,
     }
 end
 

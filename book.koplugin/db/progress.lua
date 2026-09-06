@@ -26,7 +26,13 @@ CREATE TABLE IF NOT EXISTS pending_progress (
 CREATE INDEX IF NOT EXISTS idx_pending_progress_recent
   ON pending_progress(source_id, updated_at DESC);
 ]]) then return false end
-    return true
+    return Base.exec([[UPDATE books SET read_state=1
+        WHERE read_state=0 AND EXISTS (
+            SELECT 1 FROM pending_progress p
+            WHERE p.source_id=books.source_id
+              AND p.stable_id=books.stable_id
+              AND p.fraction>=1
+        );]]) ~= nil
 end
 
 local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, extra, updated_at, sync_status"
@@ -48,8 +54,11 @@ end
 local function syncBookPercent(source_id, stable_id, fraction)
     local percent = Book.clampPercent(fraction, false, true)
     Base.exec(
-        [[UPDATE books SET percent=? WHERE source_id=? AND stable_id=?;]],
+        [[UPDATE books SET percent=?,
+            read_state=CASE WHEN ?>=1 THEN 1 ELSE read_state END
+          WHERE source_id=? AND stable_id=?;]],
         percent,
+        fraction,
         source_id,
         stable_id
     )

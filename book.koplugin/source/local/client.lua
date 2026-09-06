@@ -782,7 +782,10 @@ function Client:filtersAsync(cb)
         cb({
             data = {
                 category = BookDB.categoriesBySource(SOURCE_ID),
+                category_counts = BookDB.categoryCountsBySource(SOURCE_ID),
                 series = BookDB.seriesBySource(SOURCE_ID),
+                series_counts = BookDB.seriesCountsBySource(SOURCE_ID),
+                read_counts = BookDB.readStatusCountsBySource(SOURCE_ID),
             },
         })
     end)

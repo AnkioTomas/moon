@@ -24,7 +24,11 @@ local Dictionary = require("ime.table_dictionary")
 
 selected = "wubi"
 local wubi = Dictionary:new("wubi")
-Assert.is_true(wubi:isAvailable())
+local wubi_path = paths.wubi
+paths.wubi = "test/.missing-wubi-dictionary.sqlite3"
+Assert.is_false(wubi:isAvailable())
+paths.wubi = wubi_path
+Assert.is_true(wubi:isAvailable(), "手动落盘后不得要求重启或显式 reset")
 Assert.contains(wubi:lookup("wq"), "你")
 Assert.is_true(tonumber(wubi:entries()) > 90000)
 wubi:reset()

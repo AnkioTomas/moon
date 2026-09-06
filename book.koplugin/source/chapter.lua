@@ -131,7 +131,7 @@ local function write(path, payload, cb, opts)
         return
     end
     local escaped = Text.xmlEscape(title)
-    local html = string.format([[<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"/><title>%s</title><style>body{margin:5%%;line-height:1.8;text-align:justify;}h1{text-align:center;}p{text-indent:2em;margin:.45em 0;}img{max-width:100%%;}</style></head><body><h1>%s</h1>%s</body></html>]], escaped, escaped, content)
+    local html = string.format([[<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"/><title>%s</title><style>body{margin:5%%;line-height:1.8;text-align:justify;}p{text-indent:2em;margin:.45em 0;}img{max-width:100%%;}</style></head><body>%s</body></html>]], escaped, content)
     local tmp = path .. ".part"
     pcall(os.remove, tmp)
     local f, err = io.open(tmp, "wb")
