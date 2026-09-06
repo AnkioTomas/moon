@@ -3,7 +3,7 @@
 
 纯绘制叠加层：叠在 KOReader 原生顶栏 / 底栏之上，背景不透明盖住引擎内容。
 几何跟系统状态栏同步；Book 设置项控制 overlay 是否绘制。
-底栏 tap/hold 劫持原生 ReaderFooter 手势。
+底栏短按透传给原生翻页区，长按只用于阻止 ReaderFooter 切换模式。
 
 @module koplugin.book.ui.reader.bars
 --]]
@@ -444,37 +444,8 @@ local function paintCentered(widget, bb, px, band_y, band_h)
     widget:paintTo(bb, px, band_y + math.floor((band_h - sz.h) / 2))
 end
 
---- 底栏触摸区（跟 footer 实际高度对齐，fallback 到 DTAP_ZONE_MINIBAR）。
----@param ui table|nil
----@return table
-local function footerTouchZone(ui)
-    ui = ui or Bars.ui
-    local screen_h = Screen:getHeight()
-    local footer = ui and ui.view and ui.view.footer
-    local band_h = footer and footer.getHeight and tonumber(footer:getHeight())
-    if band_h and band_h > 0 and band_h < screen_h then
-        return {
-            ratio_x = 0,
-            ratio_y = (screen_h - band_h) / screen_h,
-            ratio_w = 1,
-            ratio_h = band_h / screen_h,
-        }
-    end
-    if G_defaults then
-        local minib = G_defaults:readSetting("DTAP_ZONE_MINIBAR")
-        if minib then
-            return {
-                ratio_x = minib.x,
-                ratio_y = minib.y,
-                ratio_w = minib.w,
-                ratio_h = minib.h,
-            }
-        end
-    end
-    return { ratio_x = 0, ratio_y = 0.9, ratio_w = 1, ratio_h = 0.1 }
-end
-
---- 包装 ReaderFooter：底栏可见时吞掉 tap/hold，禁止切换模式。
+--- 包装 ReaderFooter：底栏可见时禁止切换模式；短按继续交给原生翻页区，
+--- 兼容把蓝牙按钮转换为屏幕点击的翻页器。
 ---@param ui table
 ---@return nil
 local function hijackFooter(ui)
@@ -485,7 +456,7 @@ local function hijackFooter(ui)
     local orig_tap = footer.TapFooter
     footer.TapFooter = function(self, ges)
         if Bars.systemBottomVisible(self.ui) then
-            return true
+            return false
         end
         return orig_tap(self, ges)
     end
@@ -499,52 +470,7 @@ local function hijackFooter(ui)
     footer._book_bars_hijacked = true
 end
 
---- 注册底栏触摸劫持（覆盖 readerfooter_tap / readerfooter_hold）。
----@param ui table
----@return nil
-local function registerFooterTouchZones(ui)
-    if not ui.registerTouchZones then
-        return
-    end
-    local zone = footerTouchZone(ui)
-    ui:registerTouchZones({
-        {
-            id = "book_bars_footer_tap",
-            ges = "tap",
-            screen_zone = zone,
-            overrides = {
-                "readerfooter_tap",
-                "readerconfigmenu_ext_tap",
-                "readerconfigmenu_tap",
-                "tap_forward",
-                "tap_backward",
-            },
-            handler = function()
-                if Bars.bottomVisible(ui) then
-                    return true
-                end
-                return false
-            end,
-        },
-        {
-            id = "book_bars_footer_hold",
-            ges = "hold",
-            screen_zone = zone,
-            overrides = {
-                "readerfooter_hold",
-                "readerhighlight_hold",
-            },
-            handler = function()
-                if Bars.bottomVisible(ui) then
-                    return true
-                end
-                return false
-            end,
-        },
-    })
-end
-
---- 安装底栏劫持：ReaderReady 后重注册触摸区（晚于 ReaderFooter）。
+--- 安装底栏模式保护。
 ---@param ui table
 ---@return nil
 function Bars.install(ui)
@@ -553,12 +479,10 @@ function Bars.install(ui)
     end
     ui._book_bars_installed = true
     hijackFooter(ui)
-    registerFooterTouchZones(ui)
     -- Reader.attach 在 ReaderReady 内执行，postInitCallback 此时已为 nil。
     if ui.registerPostReaderReadyCallback then
         ui:registerPostReaderReadyCallback(function()
             hijackFooter(ui)
-            registerFooterTouchZones(ui)
             Bars.applyPreferences(ui)
         end)
     end
