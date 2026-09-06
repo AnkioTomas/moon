@@ -29,6 +29,11 @@ package.preload["ui/event"] = function()
         end,
     }
 end
+package.preload["ui/geometry"] = function()
+    return {
+        new = function(_, opts) return opts end,
+    }
+end
 
 package.preload["ui.reader.session"] = function()
     return {
