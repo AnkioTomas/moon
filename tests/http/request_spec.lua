@@ -12,6 +12,7 @@ local Stubs = require("support.stubs")
 local Config = require("support.config")
 
 local network_connected = true
+package.loaded["ui/network/manager"] = nil
 package.preload["ui/network/manager"] = function()
     return {
         isOnline = function() return network_connected end,

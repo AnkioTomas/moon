@@ -65,7 +65,7 @@ end
 ---@return boolean
 local function networkConnected()
     local ok, manager = pcall(require, "ui/network/manager")
-    if not ok or type(manager) ~= "table" or type(manager.isConnected) ~= "function" then
+    if not ok or type(manager) ~= "table" then
         return true
     end
     local probe = manager.isOnline or manager.getConnectionState or manager.isConnected
