@@ -198,7 +198,7 @@ function Setting.rows(plugin)
             end
             return require("ui.components.settingrow").build(iw, {
                 kind = "nav",
-                icon = "account",
+                icon = "account_circle",
                 title = _("拷贝漫画账号"),
                 status = status,
                 status_on = status_on,
