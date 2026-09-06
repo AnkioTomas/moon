@@ -11,6 +11,14 @@ local Assert = require("support.assert")
 local Stubs = require("support.stubs")
 local Config = require("support.config")
 
+local network_connected = true
+package.preload["ui/network/manager"] = function()
+    return {
+        isOnline = function() return network_connected end,
+        getConnectionState = function() return network_connected end,
+    }
+end
+
 local Request = require("http.request")
 
 -- ── ok：2xx 判定边界 ─────────────────────────────────────
@@ -25,6 +33,32 @@ do
     Assert.is_false(Request.ok("abc"))
     Assert.is_false(Request.ok(nil))
     Assert.is_false(Request.ok(true))
+end
+
+-- 离线出口：不创建 Turbo client、不打开下载文件，只异步报告失败。
+do
+    network_connected = false
+    local request_err, stream_err, download_ok, download_err
+    Request.request({ url = "https://example.test/offline" }, function(_, err)
+        request_err = err
+    end)
+    Request.stream({ url = "https://example.test/offline" }, {
+        on_done = function(err) stream_err = err end,
+    })
+    local dest = Config.dir() .. "/.moon/offline-download.bin"
+    pcall(os.remove, dest)
+    pcall(os.remove, dest .. ".part")
+    Request.download({ url = "https://example.test/offline" }, dest, function(ok, err)
+        download_ok, download_err = ok, err
+    end)
+    Stubs.flush()
+    Assert.matches(request_err, "网络不可用")
+    Assert.matches(stream_err, "网络不可用")
+    Assert.is_false(download_ok)
+    Assert.matches(download_err, "网络不可用")
+    Assert.is_nil(io.open(dest, "rb"))
+    Assert.is_nil(io.open(dest .. ".part", "rb"))
+    network_connected = true
 end
 
 -- ── header：Turbo headers 对象 / 普通 table 双兼容 ────────

@@ -68,7 +68,9 @@ local function networkConnected()
     if not ok or type(manager) ~= "table" or type(manager.isConnected) ~= "function" then
         return true
     end
-    local state_ok, connected = pcall(manager.isConnected, manager)
+    local probe = manager.isOnline or manager.getConnectionState or manager.isConnected
+    if type(probe) ~= "function" then return true end
+    local state_ok, connected = pcall(probe, manager)
     return not state_ok or connected ~= false
 end
 

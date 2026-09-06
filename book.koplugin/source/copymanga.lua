@@ -8,6 +8,8 @@ local Client = require("source.copymanga.client")
 local Mapper = require("source.copymanga.mapper")
 local SourceBase = require("source.base")
 local Toc = require("source.copymanga.toc")
+local Paths = require("utils.paths")
+local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
 
 local Copymanga = {}
@@ -171,6 +173,33 @@ local function loadChapters(client, stable_id, groups, cb)
     end)
 end
 
+--- 已缓存漫画章节直接交给阅读器；这条路径不能先经过联网门控。
+---@param identity BookIdentity
+---@param opts table|nil
+---@return string|nil, integer|nil
+local function existingChapter(identity, opts)
+    local idx = tonumber(opts and opts.chapter_idx)
+    local book = identity and identity.book
+    if not book then
+        book = require("db.book").get(identity.source_id, identity.stable_id)
+    end
+    local path = book and book.path
+    if not idx and type(path) == "string" then
+        idx = tonumber(path:match("[/\\](%d+)%.cbz$"))
+    end
+    if not idx then
+        local pending = require("db.progress").get(identity.source_id, identity.stable_id)
+        idx = pending and tonumber(pending.chapter_idx)
+    end
+    if not idx then return nil end
+    path = Paths.bookWorkDir(identity.stable_id, identity.source_id)
+        .. "/" .. tostring(idx) .. ".cbz"
+    if lfs.attributes(path, "mode") == "file" then
+        return path, idx
+    end
+    return nil
+end
+
 function Source:listStoreAsync(opts, cb)
     opts = opts or {}
     local search = tostring(opts.search or "")
@@ -301,6 +330,20 @@ end
 function Source:openBookAsync(identity, opts, cb)
     opts = opts or {}
     local cancelled, active, dialog = false, nil, nil
+
+    local cached_path, cached_idx = existingChapter(identity, opts)
+    if cached_path then
+        require("ui/uimanager"):nextTick(function()
+            if cancelled then return end
+            local ok, err = require("book.store").touch(cached_path, identity, {
+                chapter_idx = cached_idx,
+            })
+            cb(ok and cached_path or nil, err)
+        end)
+        return {
+            cancel = function() cancelled = true end,
+        }
+    end
 
     local function closeDialog()
         if dialog then dialog:close(); dialog = nil end
