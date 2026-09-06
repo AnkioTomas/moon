@@ -105,6 +105,8 @@ function Settings.build(desktop)
     local card_w = math.max(UI.sz(100), w - page_pad * 2)
     local band_h = Pager.bandH()
     local body_h = math.max(1, h - band_h)
+    local bottom_pad = UI.sz(4)
+    local pack_h = math.max(1, body_h - page_pad - bottom_pad)
 
     local active_id = MoonSettings.activeSourceId()
     local active_name = active_id
@@ -232,12 +234,12 @@ function Settings.build(desktop)
         end
     end
 
-    local pages_kids = Pager.pack(packed, body_h)
+    local pages_kids = Pager.pack(packed, pack_h)
     local pages = #pages_kids
     local page = Pager.clamp(desktop._settings_page, pages)
     desktop._settings_page = page
     local page_body = FrameContainer:new{
-        bordersize = 0, padding = page_pad, padding_bottom = UI.sz(4), margin = 0,
+        bordersize = 0, padding = page_pad, padding_bottom = bottom_pad, margin = 0,
         background = Blitbuffer.COLOR_WHITE, dimen = Geom:new{ w = w, h = body_h },
         VerticalGroup:new(pages_kids[page]),
     }
