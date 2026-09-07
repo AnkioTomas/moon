@@ -1,8 +1,5 @@
 --[[--
-双向 Worker IPC 协议：8 位十六进制长度 + JSON payload。
-
-协议是字节流协议，不能假设一次 read 就得到一个完整消息。
-本模块只做编码和增量解码，不依赖 KOReader UI 或进程实现。
+Worker IPC：8 位十六进制长度 + JSON。半包必须拼，不能假设一次 read 就是一帧。
 
 @module koplugin.book.workers.protocol
 --]]
@@ -10,25 +7,7 @@
 local JSON = require("json")
 
 local Protocol = {}
----@type number
 Protocol.MAX_FRAME = 4 * 1024 * 1024
-
----@class WorkerMessage
----@field type "ready"|"fatal"|"request"|"cancel"|"response"|"shutdown"|"stopped"|"error"|"progress"|"started"|"done"|"failed"
----@field id number|nil
----@field op string|nil
----@field args table|nil
----@field ok boolean|nil
----@field result any
----@field value WorkerProgress|nil
----@field error string|nil
-
----@alias WorkerState "stopped"|"starting"|"ready"|"dead"
----@alias WorkerHandler fun(args: table|nil): any
----@alias WorkerRequestCallback fun(result: any, err: string|nil)
-
----@class WorkerDecoder
----@field buffer string
 
 ---@param value table
 ---@return string
@@ -43,15 +22,14 @@ function Protocol.encode(value)
     return string.format("%08x", #payload) .. payload
 end
 
----@return WorkerDecoder
+---@return { buffer: string }
 function Protocol.newDecoder()
     return { buffer = "" }
 end
 
---- 增量喂入字节并取出完整消息。
----@param decoder WorkerDecoder
+---@param decoder { buffer: string }
 ---@param bytes string
----@return WorkerMessage[]|nil messages, string|nil err
+---@return table[]|nil messages, string|nil err
 function Protocol.feed(decoder, bytes)
     if type(bytes) ~= "string" then
         return nil, "worker protocol: bytes must be string"
@@ -59,8 +37,7 @@ function Protocol.feed(decoder, bytes)
     decoder.buffer = decoder.buffer .. bytes
     local out = {}
     while #decoder.buffer >= 8 do
-        local size_text = decoder.buffer:sub(1, 8)
-        local size = tonumber(size_text, 16)
+        local size = tonumber(decoder.buffer:sub(1, 8), 16)
         if not size or size < 0 or size > Protocol.MAX_FRAME then
             return nil, "worker protocol: invalid frame length"
         end
@@ -75,15 +52,13 @@ function Protocol.feed(decoder, bytes)
         end
         out[#out + 1] = value
     end
-    -- 只有未消费的前缀才受此限制；一次 read 携带多个完整帧是合法的。
     if #decoder.buffer > Protocol.MAX_FRAME + 8 then
         return nil, "worker protocol: frame too large"
     end
     return out
 end
 
---- 子进程 EOF 时调用；残留字节表示协议损坏。
----@param decoder WorkerDecoder
+---@param decoder { buffer: string }
 ---@return boolean, string|nil
 function Protocol.finish(decoder)
     if decoder.buffer ~= "" then
