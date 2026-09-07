@@ -6,6 +6,7 @@
   medium   fork，2s
   heavy    fork，5s
 
+Job.run 对 fork 任务只做发布；workers.system 按设备性能限流。
 子进程禁止碰 sqlite；库操作必须走 instant。
 
 @module koplugin.book.workers.job
@@ -22,6 +23,44 @@ Job.__index = Job
 
 --- fork 子进程里为 true。父进程这份永远是 false。
 local in_child = false
+
+---@return number|nil MB
+local function memAvailableMB()
+    local f = io.open("/proc/meminfo", "r")
+    if not f then
+        return nil
+    end
+    local avail, free
+    for line in f:lines() do
+        local key, kb = line:match("^(%w+):%s*(%d+)")
+        if key == "MemAvailable" then
+            avail = tonumber(kb)
+        elseif key == "MemFree" then
+            free = tonumber(kb)
+        end
+    end
+    f:close()
+    local kb = avail or free
+    return kb and (kb / 1024) or nil
+end
+
+--- 同时允许的 fork 数：每 32MB 可用内存一个槽，夹在 1～10。
+--- 读不到 /proc/meminfo 按 1。
+---@return number
+function Job.concurrency()
+    local mem = memAvailableMB()
+    if not mem then
+        return 4
+    end
+    local slots = math.floor(mem / 32)
+    if slots < 1 then
+        return 1
+    end
+    if slots > 10 then
+        return 10
+    end
+    return slots
+end
 
 function Job.inSubProcess()
     return in_child
@@ -108,6 +147,10 @@ function Job:_finish(state, result, err)
         notify(self.on_cancelled, self)
     end
     self:_release()
+    if self._slotted then
+        self._slotted = false
+        require("workers.system").release()
+    end
 end
 
 function Job:_dispatch(message)
@@ -154,6 +197,16 @@ function Job:_poll()
 end
 
 function Job:cancel()
+    if self.settled then
+        return
+    end
+    if self.kind ~= "instant" and not self._slotted then
+        self.settled = true
+        self.state = "cancelled"
+        logger.dbg("book.worker", self.name, self.kind, "cancelled", "")
+        notify(self.on_cancelled, self)
+        return
+    end
     self:_finish("cancelled")
 end
 
@@ -178,31 +231,11 @@ local function runInstant(self, worker)
     return self
 end
 
----@param worker fun(): any
----@param opts { name: string, kind: "instant"|"light"|"medium"|"heavy", on_done: function|nil, on_failed: function|nil, on_cancelled: function|nil, timeout: number|nil }
----@return table
-function Job.run(worker, opts)
-    assert(type(worker) == "function", "workers.job.run: worker must be function")
-    opts = opts or {}
-    assert(type(opts.name) == "string" and opts.name ~= "",
-        "workers.job.run: opts.name required")
-    local poll = KINDS[opts.kind]
-    assert(poll, "workers.job.run: kind must be instant|light|medium|heavy")
-    local self = setmetatable({
-        name = opts.name,
-        kind = opts.kind,
-        poll = poll,
-        state = "queued",
-        on_done = opts.on_done,
-        on_failed = opts.on_failed,
-        on_cancelled = opts.on_cancelled,
-    }, Job)
-    logger.dbg("book.worker queued", self.name, self.kind)
-
-    if opts.kind == "instant" then
-        return runInstant(self, worker)
-    end
-
+--- 真正 fork。只由 system 在拿到槽位后调用。
+function Job:_start()
+    self._slotted = true
+    local worker = self._worker
+    self._worker = nil
     self.decoder = Protocol.newDecoder()
     local pid, read_fd = ffiUtil.runInSubProcess(function(_, write_fd)
         in_child = true
@@ -218,20 +251,50 @@ function Job.run(worker, opts)
 
     if not pid then
         self:_finish("failed", nil, tostring(read_fd))
-        return self
+        return
     end
 
     self.pid, self.read_fd = pid, read_fd
     self.state = "running"
     self.ui = require("ui/uimanager")
     self:_arm()
-    local timeout = tonumber(opts.timeout)
+    local timeout = tonumber(self.timeout)
     if timeout and timeout > 0 then
         self.timeout_fn = function()
             self:_finish("failed", nil, "timeout")
         end
         self.ui:scheduleIn(timeout, self.timeout_fn)
     end
+end
+
+---@param worker fun(): any
+---@param opts { name: string, kind: "instant"|"light"|"medium"|"heavy", on_done: function|nil, on_failed: function|nil, on_cancelled: function|nil, timeout: number|nil }
+---@return table
+function Job.run(worker, opts)
+    assert(type(worker) == "function", "workers.job.run: worker must be function")
+    opts = opts or {}
+    assert(type(opts.name) == "string" and opts.name ~= "",
+        "workers.job.run: opts.name required")
+    local poll = KINDS[opts.kind]
+    assert(poll, "workers.job.run: kind must be instant|light|medium|heavy")
+    local self = setmetatable({
+        name = opts.name,
+        kind = opts.kind,
+        poll = poll,
+        timeout = opts.timeout,
+        state = "queued",
+        on_done = opts.on_done,
+        on_failed = opts.on_failed,
+        on_cancelled = opts.on_cancelled,
+    }, Job)
+    logger.dbg("book.worker queued", self.name, self.kind)
+
+    if opts.kind == "instant" then
+        return runInstant(self, worker)
+    end
+
+    self._worker = worker
+    require("workers.system").publish(self)
     return self
 end
 
