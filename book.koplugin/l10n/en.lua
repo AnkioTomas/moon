@@ -433,6 +433,7 @@ return {
     ["全屏刷新"] = "Full screen refresh",
     ["截屏"] = "Screenshot",
     ["前光开关"] = "Toggle frontlight",
+    ["自动亮度"] = "Auto brightness",
     ["休眠"] = "Sleep",
     ["亮度"] = "Brightness",
     ["冷暖色调"] = "Warmth",

@@ -84,6 +84,7 @@ function BookPlugin:init()
         logger.warn("book screenshot share install failed:", err_share)
     end
     require("ime.init").bootstrap()
+    require("ui.auto_brightness"):bootstrap()
     require("patch.manager").init({ plugin_root = self.path })
     if self.ui and not self.ui.document then
         require("update.init").bootstrap(self.path)
@@ -191,6 +192,7 @@ end
 ---@return nil
 function BookPlugin:onSuspend()
     logger.info("book lifecycle suspend")
+    require("ui.auto_brightness"):onSuspend()
     require("ui.reader.session").onSuspend(self)
     require("lockscreen.init").refresh(nil, true, "suspend")
     require("remote.init").onSuspend()
@@ -201,6 +203,7 @@ end
 ---@return nil
 function BookPlugin:onResume()
     logger.info("book lifecycle resume")
+    require("ui.auto_brightness"):onResume()
     require("ui.reader.session").onResume(self)
     require("lockscreen.init").onResume()
     require("remote.init").onResume()
@@ -217,6 +220,7 @@ end
 ---@return nil
 function BookPlugin:onExit()
     logger.info("book plugin exit")
+    require("ui.auto_brightness"):shutdown()
     require("update.init").cancel()
     require("remote.init").onExit()
     logger.flush()
