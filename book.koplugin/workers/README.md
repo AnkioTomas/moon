@@ -1,6 +1,6 @@
 # Workers
 
-只有 `Job`。`kind` 决定堵不堵 UI，以及隔多久看一眼结果。
+`Job.run` 发布任务。`instant` 当场 `nextTick`；其余 fork 进 `workers.system` 排队，按 `Job.concurrency()`（可用内存 / 128MB，夹在 1～10）同时跑。
 
 | kind | 怎么跑 | 何时收结果 |
 | --- | --- | --- |
