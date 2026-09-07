@@ -1,7 +1,8 @@
 --[[--
 环境光自动亮度控制器。
 
-只在设备同时具备前光和可读环境光传感器时工作。传感器不可用时不创建
+只在设备同时具备前光和环境光传感器时工作。能力优先看
+Device:hasLightSensor()；未声明时再探测 sysfs / LIPC。传感器不可用时不创建
 定时任务，也不修改设备亮度。
 
 @module koplugin.book.ui.auto_brightness
@@ -57,6 +58,7 @@ local AutoBrightness = {
     sensor_path = nil,
     sensor_source = nil,
     lipc_handle = nil,
+    owns_lipc = false,
     native_auto_before = nil,
     powerd = nil,
     original_set_intensity = nil,
@@ -81,6 +83,12 @@ local function hasFrontlight()
     return Device.hasFrontlight and Device:hasFrontlight()
 end
 
+--- KOReader 已声明环境光传感器。Kindle 用这个标志，不靠此刻能否读到 lux。
+---@return boolean
+local function hasDeclaredALS()
+    return Device.hasLightSensor and Device:hasLightSensor()
+end
+
 ---@param path string
 ---@return number|nil
 function AutoBrightness:readALSPath(path)
@@ -95,9 +103,16 @@ end
 ---@return boolean
 function AutoBrightness:openLipc()
     if self.lipc_handle then return true end
+    local powerd = powerDevice()
+    if powerd and powerd.lipc_handle then
+        self.lipc_handle = powerd.lipc_handle
+        self.owns_lipc = false
+        return true
+    end
     local ok, lipc = pcall(require, "liblipclua")
     if not ok or not lipc then return false end
     self.lipc_handle = lipc.init("com.github.koreader.book.autobrightness")
+    self.owns_lipc = self.lipc_handle ~= nil
     return self.lipc_handle ~= nil
 end
 
@@ -107,8 +122,9 @@ function AutoBrightness:readPowerdALS()
     local ok, value = pcall(function()
         return self.lipc_handle:get_int_property("com.lab126.powerd", "alsLux")
     end)
-    if ok and type(value) == "number" and value >= 0 then return value end
-    return nil
+    if not ok or type(value) ~= "number" then return nil end
+    -- 属性存在即为传感器接口；未就绪时 Kindle 返回 -1，按 0 lux 处理。
+    return math.max(0, value)
 end
 
 ---@param name string
@@ -166,11 +182,9 @@ end
 
 ---@return boolean
 function AutoBrightness:isSupported()
+    if not hasFrontlight() then return false end
+    if hasDeclaredALS() then return true end
     if self.supported ~= nil then return self.supported end
-    if not hasFrontlight() then
-        self.supported = false
-        return false
-    end
     self.supported = self:readALS() ~= nil
     return self.supported
 end
@@ -233,7 +247,11 @@ function AutoBrightness:sample()
     if not self.enabled or self.suspended then return end
     local lux = self:readALS()
     if lux == nil then
-        -- 传感器在运行中消失时停止控制，避免继续覆盖用户亮度。
+        -- 设备声明有传感器时，单次读失败只跳过本轮，不把能力改成“不支持”。
+        if hasDeclaredALS() then
+            self:scheduleNext()
+            return
+        end
         self.supported = false
         self:stop(false)
         return
@@ -396,11 +414,17 @@ function AutoBrightness:shutdown()
             and self.powerd.setIntensity == self.wrapped_set_intensity then
         self.powerd.setIntensity = self.original_set_intensity
     end
-    if self.lipc_handle and self.lipc_handle.close then self.lipc_handle:close() end
+    if self.owns_lipc and self.lipc_handle and self.lipc_handle.close then
+        self.lipc_handle:close()
+    end
     self.lipc_handle = nil
+    self.owns_lipc = false
     self.powerd = nil
     self.original_set_intensity = nil
     self.wrapped_set_intensity = nil
+    self.supported = nil
+    self.sensor_path = nil
+    self.sensor_source = nil
     self.bootstrapped = false
 end
 
