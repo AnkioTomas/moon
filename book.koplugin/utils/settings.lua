@@ -20,6 +20,7 @@ local DEFAULTS = {
     display = {
         ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,
         library_view = "flat",
+        auto_brightness_enabled = false,
     },
     lockscreen = {
         lock_screen = "ko",
@@ -45,7 +46,7 @@ local DEFAULTS = {
     quickpanel = {
         -- 新安装默认启用注册表中的全部动作；已有配置仍保持用户选择。
         quick_panel_actions = {
-            "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "suspend",
+            "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "auto_brightness", "suspend",
         },
         quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "xray" },
     },

@@ -50,6 +50,12 @@ stub("translate.init", { install = function() calls.translate = (calls.translate
 stub("baike.init", { install = function() calls.baike = (calls.baike or 0) + 1 end })
 stub("dictionary.init", { install = function() calls.dictionary = (calls.dictionary or 0) + 1 end })
 stub("ui.panel.native", { install = function() calls.panel = (calls.panel or 0) + 1 end })
+stub("ui.auto_brightness", {
+    bootstrap = function() calls.auto_brightness = (calls.auto_brightness or 0) + 1 end,
+    onSuspend = function() calls.auto_suspend = true end,
+    onResume = function() calls.auto_resume = (calls.auto_resume or 0) + 1 end,
+    shutdown = function() calls.auto_shutdown = (calls.auto_shutdown or 0) + 1 end,
+})
 stub("book.reader_prefs", {
     inject = function(doc_settings, document)
         calls.doc_settings = doc_settings
@@ -104,6 +110,7 @@ plugin:onSuspend()
 Assert.is_true(calls.session_suspend)
 Assert.is_true(calls.lock_refresh)
 Assert.is_true(calls.remote_suspend)
+Assert.is_true(calls.auto_suspend)
 
 local resumed_desktop = { tab = "library" }
 plugin.desktop = resumed_desktop
@@ -115,6 +122,7 @@ plugin:onResume()
 Assert.eq(calls.session_resume, 1)
 Assert.eq(calls.lock_resume, 1)
 Assert.eq(calls.remote_resume, 1)
+Assert.eq(calls.auto_resume, 1)
 Assert.eq(calls.source_event, "desktop_resume")
 Assert.eq(calls.source_payload, resumed_desktop)
 

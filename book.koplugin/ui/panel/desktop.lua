@@ -177,6 +177,10 @@ function Panel.setLevel(kind, fraction)
     if kind == "brightness" then
         local min, max = tonumber(powerd.fl_min) or 0, tonumber(powerd.fl_max) or 100
         local native = math.floor(min + fraction * (max - min) + 0.5)
+        if native > min then
+            -- 这是明确的用户调光；自动亮度控制器会停止后再执行实际写入。
+            require("ui.auto_brightness"):onManualBrightness(native)
+        end
         if native <= min then
             powerd:turnOffFrontlight()
         else
