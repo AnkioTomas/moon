@@ -24,43 +24,6 @@ Job.__index = Job
 --- fork 子进程里为 true。父进程这份永远是 false。
 local in_child = false
 
----@return number|nil MB
-local function memAvailableMB()
-    local f = io.open("/proc/meminfo", "r")
-    if not f then
-        return nil
-    end
-    local avail, free
-    for line in f:lines() do
-        local key, kb = line:match("^(%w+):%s*(%d+)")
-        if key == "MemAvailable" then
-            avail = tonumber(kb)
-        elseif key == "MemFree" then
-            free = tonumber(kb)
-        end
-    end
-    f:close()
-    local kb = avail or free
-    return kb and (kb / 1024) or nil
-end
-
---- 同时允许的 fork 数：每 32MB 可用内存一个槽，夹在 1～10。
---- 读不到 /proc/meminfo 按 1。
----@return number
-function Job.concurrency()
-    local mem = memAvailableMB()
-    if not mem then
-        return 4
-    end
-    local slots = math.floor(mem / 32)
-    if slots < 1 then
-        return 1
-    end
-    if slots > 20 then
-        return 20
-    end
-    return slots
-end
 
 function Job.inSubProcess()
     return in_child
@@ -130,9 +93,7 @@ end
 ---@param state "done"|"failed"|"cancelled"
 ---@param result any
 ---@param err string|nil
-function Job:_finish(state, result, err)
-    if self.settled then return end
-    self.settled = true
+function Job:_teardown(state, result, err)
     self.state = state
     self.error = err
     if state ~= "done" and self.pid then
@@ -149,9 +110,34 @@ function Job:_finish(state, result, err)
     self:_release()
     if self._slotted then
         self._slotted = false
-        require("workers.system").release()
+        require("workers.system"):release()
     end
 end
+
+---@param state "done"|"failed"|"cancelled"
+---@param result any
+---@param err string|nil
+function Job:_finish(state, result, err)
+    if self.settled then return end
+    self.settled = true
+    self:_teardown(state, result, err)
+end
+
+function Job:cancel()
+    if self.settled then
+        return
+    end
+    if self.kind ~= "instant" and not self._slotted then
+        self.settled = true
+        self.state = "cancelled"
+        logger.dbg("book.worker", self.name, self.kind, "cancelled", "")
+        notify(self.on_cancelled, self)
+        return
+    end
+    self:_finish("cancelled")
+end
+
+Job.abort = Job.cancel
 
 function Job:_dispatch(message)
     if message.type == "done" then
@@ -195,22 +181,6 @@ function Job:_poll()
     end
     self:_arm()
 end
-
-function Job:cancel()
-    if self.settled then
-        return
-    end
-    if self.kind ~= "instant" and not self._slotted then
-        self.settled = true
-        self.state = "cancelled"
-        logger.dbg("book.worker", self.name, self.kind, "cancelled", "")
-        notify(self.on_cancelled, self)
-        return
-    end
-    self:_finish("cancelled")
-end
-
-Job.abort = Job.cancel
 
 ---@param self table
 ---@param worker fun(): any
@@ -294,7 +264,7 @@ function Job.run(worker, opts)
     end
 
     self._worker = worker
-    require("workers.system").publish(self)
+    require("workers.system"):publish(self)
     return self
 end
 

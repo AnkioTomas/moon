@@ -1,6 +1,6 @@
 # Workers
 
-`Job.run` 发布任务。`instant` 当场 `nextTick`；其余 fork 进 `workers.system` 排队，按 `Job.concurrency()`（可用内存 / 128MB，夹在 1～10）同时跑。
+`Job.run` 发布任务，返回 Job，`:cancel()` 取消。`instant` 当场 `nextTick`；其余丢给 `workers.system` 排队，按 `System:concurrency()`（可用内存 / 32MB，夹在 1～20）同时跑。
 
 | kind | 怎么跑 | 何时收结果 |
 | --- | --- | --- |
@@ -25,7 +25,7 @@ end, {
     timeout = 30,
 })
 
-job:cancel() -- abort 是同义词
+job:cancel() -- abort 是别名，新代码只写 cancel
 ```
 
 fork 闭包在子进程继承，返回值必须是 JSON 可编码的 table。不要捕获 UI、SQLite、socket、userdata。父进程不挂 ZMQ。
