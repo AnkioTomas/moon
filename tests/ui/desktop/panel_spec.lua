@@ -75,6 +75,18 @@ end
 package.preload["ui/network/manager"] = function()
     return { isWifiOn = function() return false end }
 end
+local auto_brightness_enabled = false
+package.preload["ui.auto_brightness"] = function()
+    return {
+        isSupported = function() return true end,
+        isEnabled = function() return auto_brightness_enabled end,
+        toggle = function()
+            auto_brightness_enabled = not auto_brightness_enabled
+            return auto_brightness_enabled
+        end,
+        onManualBrightness = function() end,
+    }
+end
 -- registry 一次性加载全部动作模块，font 动作会拉真身 utils.font（ui/font + fontlist）
 package.preload["utils.font"] = function()
     return { supportsReader = function() return true end }
@@ -169,3 +181,14 @@ Assert.eq(powerd.warmth, 75)
 -- 亮度滑到最左端关闭前光。
 Assert.is_true(Panel.setLevel("brightness", 0))
 Assert.eq(powerd.intensity, 0)
+
+-- 自动亮度作为桌面动作加入同一套面板；按钮激活态跟随控制器。
+Panel.setEnabled("auto_brightness", true)
+local auto_action
+for _, action in ipairs(Panel.menuActions()) do
+    if action.id == "auto_brightness" then auto_action = action end
+end
+Assert.not_nil(auto_action)
+Assert.is_false(auto_action.active)
+Assert.is_true(Panel.executeAction("auto_brightness"))
+Assert.is_true(auto_brightness_enabled)
