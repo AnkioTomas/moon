@@ -58,13 +58,6 @@ function BookPlugin:init()
     end
     logger.start()
     logger.info("book plugin init", self.ui and self.ui.document and "reader" or "filemanager")
-    -- HTTP 依赖 Turbo ioloop；必须在 UIManager:run() 前打开 DUSE_TURBO_LIB
-    local ok_turbo, err_turbo = pcall(function()
-        require("http.request").ensureTurbo()
-    end)
-    if not ok_turbo then
-        logger.error("book turbo init failed:", err_turbo)
-    end
     Host.attach(self)
     -- ReaderLink 已原生处理脚注识别、内容提取和弹窗跳转。升级后的第一次
     -- 初始化也要打开一次，之后用户可在「链接」菜单关闭，月读不再覆盖选择。
