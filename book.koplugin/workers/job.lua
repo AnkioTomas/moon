@@ -56,8 +56,8 @@ function Job.concurrency()
     if slots < 1 then
         return 1
     end
-    if slots > 10 then
-        return 10
+    if slots > 20 then
+        return 20
     end
     return slots
 end
