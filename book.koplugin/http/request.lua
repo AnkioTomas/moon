@@ -4,7 +4,6 @@ HTTP 请求原语（Turbo，非阻塞，唯一网络栈）
 禁止 luasocket / socket.http / socketutil 超时路径。
 网络请求只有这一条：回调 + `{ cancel }`。
 
-  Request.ensureTurbo() → boolean  -- 须在 UIManager:run 前调用
   Request.request(opts, cb) → { cancel }
   Request.get(url, opts, cb) → { cancel }
   Request.post(url, body, opts, cb) → { cancel }
@@ -19,29 +18,19 @@ HTTP 请求原语（Turbo，非阻塞，唯一网络栈）
 @module koplugin.book.http.request
 --]]
 
-local UIManager = require("ui/uimanager")
 local Header = require("http.header")
 local Cache = require("http.cache")
+local Turbo = require("http.turbo")
+local NetworkMgr = require("ui/network/manager")
 local logger = require("utils.log")
 local Perf = require("utils.perf")
 local T = require("ffi/util").template
 local _ = require("gettext")
 
+---@class Request
 local Request = {}
 
-local FIXED_READ_CHUNK = 64 * 1024
-
---- 并发请求期间拉长 UI 输入超时的引用计数。
-local input_timeouts = 0
 local request_seq = 0
-
---- 写盘切片。太大单拍卡；太小 nextTick 开销高。
-local WRITE_CHUNK = 64 * 1024
-
---- Turbo/LuaSec 即使 verify_ca=false 仍会加载默认 CA
---- （/etc/ssl/certs/ca-certificates.crt），macOS 等设备上不存在会直接炸。
---- 会话内只打一次：SNI / 无 CA 上下文 / LuaSocket 连接失败点号调用。
-local turbo_patched = false
 
 --- 日志只保留 scheme/host/path；query、fragment、userinfo 可能带令牌，禁止落盘。
 ---@param url any
@@ -52,144 +41,18 @@ local function safeUrl(url)
     return (value:gsub("^(https?://)[^/@]+@", "%1"))
 end
 
+--- 日志用文件名，只要最后一段。
 ---@param path any
 ---@return string
 local function fileName(path)
     return tostring(path or ""):match("([^/]+)$") or "<unknown>"
 end
 
---- 只通过 KOReader 网络管理器判断当前是否可联网。
----
---- 连接状态不可用时保守放行；不能因为测试桩或旧版宿主缺少该接口而让
---- 本地功能失效。
----@return boolean
-local function networkConnected()
-    local ok, manager = pcall(require, "ui/network/manager")
-    if not ok or type(manager) ~= "table" then
-        return true
-    end
-    -- isOnline() performs an active DNS probe in KOReader.  Calling it here
-    -- would violate the very guarantee this gate provides.
-    local connected
-    if type(manager.getConnectionState) == "function" then
-        local state_ok
-        state_ok, connected = pcall(manager.getConnectionState, manager)
-        if not state_ok then return true end
-    end
-    if connected == nil and type(manager.isConnected) == "function" then
-        local state_ok
-        state_ok, connected = pcall(manager.isConnected, manager)
-        if not state_ok then return true end
-    end
-    return connected ~= false
-end
-
----@param callback fun()
----@return { cancel: fun() }
-local function deferCancelled(callback)
-    local cancelled = false
-    UIManager:nextTick(function()
-        if not cancelled then callback() end
-    end)
-    return {
-        cancel = function() cancelled = true end,
-    }
-end
-
 ------------------------------------------------------------------------
 -- 内部
 ------------------------------------------------------------------------
 
---- Turbo 的 SSLIOStream 存了 _ssl_hostname 却从不设置 SNI；
---- Cloudflare 等按 SNI 分流的服务器直接拒绝无 SNI 握手（然后无限等 read，表现为超时）。
---- 握手前用 luasec 的 sni() 补上；IP 直连不发 SNI。
----@param crypto table turbo.crypto 模块
-local function patchTurboSni(crypto)
-    if type(crypto.ssl_do_handshake) ~= "function" then
-        return
-    end
-    local orig = crypto.ssl_do_handshake
-    crypto.ssl_do_handshake = function(stream)
-        local sock = stream and stream._ssl
-        if sock and not stream._sni_done and type(sock.sni) == "function" then
-            stream._sni_done = true
-            local host = stream._ssl_hostname
-            -- IP 字面量（v4 纯数字点 / v6 含冒号）不是合法 SNI，只有域名才发
-            if type(host) == "string" and not host:find(":") and not host:match("^[%d%.]+$") then
-                pcall(sock.sni, sock, host)
-            end
-        end
-        return orig(stream)
-    end
-end
-
---- Turbo LuaSocket 路径写成 `self._handle_connect_fail(err)`，离线立刻失败时
---- `self` 变成错误字符串。读字段碰巧能过（string metatable），写字段直接炸：
---- `iostream.lua:476 attempt to index local 'self' (a string value)`。
---- 实例上包一层：点号调用时把流对象补回去，冒号调用保持原语义。
-local function patchTurboConnectFail()
-    local ok, iostream = pcall(require, "turbo.iostream")
-    if not ok or type(iostream) ~= "table" then
-        return
-    end
-    local IOStream = iostream.IOStream
-    if type(IOStream) ~= "table" or type(IOStream.connect) ~= "function" then
-        return
-    end
-    if IOStream._book_connect_fail_patched then
-        return
-    end
-    local orig_connect = IOStream.connect
-    local orig_fail = IOStream._handle_connect_fail
-    if type(orig_fail) ~= "function" then
-        return
-    end
-    IOStream.connect = function(self, address, port, family, callback, fail_callback, arg)
-        self._handle_connect_fail = function(first, second)
-            if type(first) ~= "table" then
-                return orig_fail(self, first)
-            end
-            return orig_fail(first, second)
-        end
-        return orig_connect(self, address, port, family, callback, fail_callback, arg)
-    end
-    IOStream._book_connect_fail_patched = true
-end
-
---- 忽略校验时不传 cafile，避免「error loading CA locations」。
---- 连接失败补丁不依赖 crypto：crypto 加载失败也必须装上，否则离线开书会炸。
-local function patchTurbo()
-    if turbo_patched then
-        return
-    end
-    turbo_patched = true
-    local ok, crypto = pcall(require, "turbo.crypto")
-    if ok then
-        patchTurboSni(crypto)
-        if type(crypto.ssl_create_client_context) == "function" then
-            local orig = crypto.ssl_create_client_context
-            crypto.ssl_create_client_context = function(cert_file, prv_file, ca_cert_path, verify, sslv)
-                if verify then
-                    return orig(cert_file, prv_file, ca_cert_path, verify, sslv)
-                end
-                local ssl = require("ssl")
-                local ctx, err = ssl.newcontext({
-                    mode = "client",
-                    protocol = "sslv23",
-                    key = prv_file,
-                    certificate = cert_file,
-                    options = {"all"},
-                })
-                if not ctx then
-                    return -1, err
-                end
-                return 0, ctx
-            end
-        end
-    end
-    patchTurboConnectFail()
-end
-
+--- Turbo HTTPResponse.error → 可读字符串；无 error 返回 nil。
 ---@param res table|nil
 ---@return string|nil
 local function responseError(res)
@@ -205,11 +68,12 @@ local function responseError(res)
     return tostring(res.error)
 end
 
---- Turbo appends these after on_headers; adding one in the callback duplicates it.
+--- turbo 在 on_headers 之后会自己补 Content-Length；回调里再加会重复。
 local TURBO_SKIP_HEADERS = {
     ["content-length"] = true,
 }
 
+--- 普通 table 头，大小写不敏感。
 ---@param values table|nil
 ---@param name string
 ---@return any
@@ -222,6 +86,7 @@ local function getHeader(values, name)
     end
 end
 
+--- 写入 Turbo HTTPHeaders。已有键 set，新键 add；跳过 Content-Length。
 ---@param headers any Turbo HTTPHeaders
 ---@param values table|nil
 local function addHeaders(headers, values)
@@ -242,9 +107,10 @@ local function addHeaders(headers, values)
     end
 end
 
+--- 已占泵或进行中的请求句柄。cancel 幂等。
 ---@param state { cancelled: boolean }
 ---@param on_cancel fun()|nil
----@return { cancel: fun() }
+---@return HttpJob
 local function makeJob(state, on_cancel)
     return {
         cancel = function()
@@ -255,6 +121,48 @@ local function makeJob(state, on_cancel)
             if on_cancel then
                 on_cancel()
             end
+        end,
+    }
+end
+
+--- 占泵。失败不要 release。
+---@return table|nil ioloop
+---@return string|nil err
+local function open()
+    local ioloop = Turbo.acquire()
+    if not ioloop then
+        return nil, "turbo looper unavailable"
+    end
+    return ioloop
+end
+
+--- 取消时关掉 iostream，打断未完成的 fetch。
+---@param client table|nil
+local function closeClient(client)
+    if client and client.iostream and not client.iostream:closed() then
+        pcall(function()
+            client.iostream:close()
+        end)
+    end
+end
+
+--- 拼 turbo HTTPClient:fetch 的 kwargs。timeout 是未传 opts.timeout 时的默认秒。
+---@param opts HttpRequestOpts
+---@param user_agent any
+---@param timeout number
+---@return table
+local function fetchOpts(opts, user_agent, timeout)
+    return {
+        method = opts.method or "GET",
+        body = opts.body,
+        request_timeout = opts.timeout or timeout,
+        connect_timeout = opts.connect_timeout or 20,
+        allow_redirects = opts.allow_redirects,
+        auth_username = opts.auth_username,
+        auth_password = opts.auth_password,
+        user_agent = user_agent and tostring(user_agent) or nil,
+        on_headers = function(headers)
+            addHeaders(headers, opts.headers)
         end,
     }
 end
@@ -293,38 +201,18 @@ function Request.header(res, name)
 end
 
 ------------------------------------------------------------------------
--- Turbo ioloop
-------------------------------------------------------------------------
-
---- 打开 Turbo ioloop（会话级）。必须在 UIManager:run() 进入主循环之前调用，
---- 否则主循环走 classic 路径，looper:add_callback 永远不会被泵。
---- KOReader 默认 DUSE_TURBO_LIB=false；本插件 HTTP 只走 Turbo。
----@return boolean
-function Request.ensureTurbo()
-    if UIManager.looper then
-        return true
-    end
-    if G_defaults and not G_defaults:isTrue("DUSE_TURBO_LIB") then
-        G_defaults:saveSetting("DUSE_TURBO_LIB", true)
-    end
-    UIManager:initLooper()
-    return UIManager.looper ~= nil
-end
-
-------------------------------------------------------------------------
 -- 请求
 ------------------------------------------------------------------------
 
---- 非阻塞 HTTP 请求。
----
---- opts：url, method, body, headers, timeout, connect_timeout,
----       auth_username, auth_password
---- cb(res, err)：err 非 nil 时不要信任 res.body。
----
----@param opts table
+--- 非阻塞 HTTP。err 非 nil 时不要信任 res.body。
+---@param opts HttpRequestOpts
 ---@param cb fun(res: table|nil, err: any)
----@return { cancel: fun() }
+---@return HttpJob
 function Request.request(opts, cb)
+    if not NetworkMgr:isOnline() then
+        cb(nil, _("网络不可用，请先连接 Wi-Fi"))
+        return { cancel = function() end }
+    end
     opts = opts or {}
     local state = { cancelled = false, done = false, client = nil }
     local user_agent = getHeader(opts.headers, "User-Agent")
@@ -335,6 +223,8 @@ function Request.request(opts, cb)
     local started_at = Perf.now()
     logger.dbg("book.http start", request_id, method, url)
 
+    ---@param res table|nil
+    ---@param err any
     local function deliver(res, err)
         logger.dbg("book.http done", request_id, method, url,
             "status", res and res.code or "-", "ms",
@@ -344,96 +234,46 @@ function Request.request(opts, cb)
         cb(res, err)
     end
 
-    if not networkConnected() then
-        logger.dbg("book.http skip offline", request_id, method, url)
-        return deferCancelled(function()
-            deliver(nil, _("网络不可用，请先连接 Wi-Fi"))
-        end)
+    local ioloop, err = open()
+    if not ioloop then
+        logger.dbg("book.http skip", request_id, method, url, err)
+        deliver(nil, err)
+        return { cancel = function() end }
     end
 
-    if not Request.ensureTurbo() then
-        UIManager:nextTick(function()
-            if not state.cancelled then
-                deliver(nil, "turbo looper unavailable")
-            end
-        end)
-        return makeJob(state)
-    end
-
-    UIManager:setInputTimeout(1000)
-    input_timeouts = input_timeouts + 1
-
-    --- 归还一次输入超时引用；取消、初始化失败与正常响应共用这条收口。
-    ---@return boolean released
-    local function finish()
+    --- 先回调再 release，连环请求不会把泵拆了又装。
+    ---@param res table|nil
+    ---@param err any
+    local function settle(res, err)
         if state.done then
-            return false
+            return
         end
         state.done = true
         state.client = nil
-        input_timeouts = math.max(0, input_timeouts - 1)
-        if input_timeouts == 0 then
-            UIManager:resetInputTimeout()
+        if not state.cancelled then
+            deliver(res, err)
         end
-        return true
+        Turbo.release()
     end
 
-    UIManager.looper:add_callback(function()
+    ioloop:add_callback(function()
         if state.cancelled then
-            finish()
+            settle()
             return
         end
-        local ok, turbo = pcall(require, "turbo")
-        if not ok then
-            if finish() and not state.cancelled then
-                deliver(nil, turbo)
-            end
-            return
-        end
-        turbo.log.categories.success = false
-        turbo.log.categories.warning = false
-        local patched, patch_err = pcall(patchTurbo)
-        if not patched then
-            if finish() and not state.cancelled then
-                deliver(nil, patch_err)
-            end
-            return
-        end
-
-        local made, client = pcall(turbo.async.HTTPClient, { verify_ca = false })
-        if not made then
-            if finish() and not state.cancelled then
-                deliver(nil, client)
-            end
+        local client, turbo = Turbo.client()
+        if not client then
+            settle(nil, turbo)
             return
         end
         state.client = client
-        local fetch_opts = {
-            method = opts.method,
-            body = opts.body,
-            request_timeout = opts.timeout or 30,
-            connect_timeout = opts.connect_timeout or 10,
-            -- 显式 true 才跟随 301/302（turbo 对 307/308 本来就不跟）；默认不跟随
-            allow_redirects = opts.allow_redirects,
-            auth_username = opts.auth_username,
-            auth_password = opts.auth_password,
-            user_agent = user_agent and tostring(user_agent) or nil,
-            on_headers = function(headers)
-                addHeaders(headers, opts.headers)
-            end,
-        }
-        local fetched, future = pcall(client.fetch, client, opts.url, fetch_opts)
+        local fetched, future = pcall(client.fetch, client, opts.url, fetchOpts(opts, user_agent, 30))
         if not fetched then
-            if finish() and not state.cancelled then
-                deliver(nil, future)
-            end
+            settle(nil, future)
             return
         end
         local res = coroutine.yield(future)
-
-        if finish() and not state.cancelled then
-            deliver(res, responseError(res))
-        end
+        settle(res, responseError(res))
     end)
 
     return makeJob(state, function()
@@ -441,54 +281,26 @@ function Request.request(opts, cb)
             return
         end
         logger.dbg("book.http cancel", request_id, method, url)
-        local client = state.client
-        if client and client.iostream and not client.iostream:closed() then
-            pcall(function()
-                client.iostream:close()
-            end)
-        end
-        finish()
+        closeClient(state.client)
+        settle()
     end)
 end
 
---- GET；成功 cb(body, nil, res)，失败 cb(nil, err, res)。
----@param url string
----@param opts table|nil
----@param cb fun(body: string|nil, err: any, res: table|nil)
----@return { cancel: fun() }
-function Request.get(url, opts, cb)
-    opts = opts or {}
-    return Request.request({
-        url = url,
-        method = "GET",
-        headers = Header.forRequest(opts.headers, opts.accept),
-        timeout = opts.timeout or opts.block_timeout or 30,
-        connect_timeout = opts.connect_timeout or 10,
-        allow_redirects = opts.allow_redirects,
-        auth_username = opts.user or opts.auth_username,
-        auth_password = opts.password or opts.auth_password,
-    }, function(res, err)
-        if err then
-            cb(nil, err, res)
-        elseif not Request.ok(res and res.code) then
-            cb(nil, T(_("HTTP %1"), tostring(res and res.code)), res)
-        else
-            local response = assert(res)
-            cb(response.body or "", nil, response)
-        end
-    end)
-end
-
---- POST；成功 cb(body, nil, res)，失败 cb(nil, err, res)。
+--- GET / POST 共用：成功 cb(body, nil, res)，失败 cb(nil, err, res)。
+---@param method string
 ---@param url string
 ---@param body string|nil
----@param opts table|nil
+---@param opts HttpRequestOpts|nil
 ---@param cb fun(body: string|nil, err: any, res: table|nil)
----@return { cancel: fun() }
-function Request.post(url, body, opts, cb)
+---@return HttpJob
+local function send(method, url, body, opts, cb)
+    if not NetworkMgr:isOnline() then
+        cb(nil, _("网络不可用，请先连接 Wi-Fi"))
+        return { cancel = function() end }
+    end
     opts = opts or {}
     local headers = Header.forRequest(opts.headers, opts.accept)
-    if body ~= nil then
+    if method == "POST" and body ~= nil then
         body = tostring(body)
         headers["Content-Type"] = opts.content_type
             or headers["Content-Type"]
@@ -496,7 +308,7 @@ function Request.post(url, body, opts, cb)
     end
     return Request.request({
         url = url,
-        method = "POST",
+        method = method,
         body = body,
         headers = headers,
         timeout = opts.timeout or opts.block_timeout or 30,
@@ -510,25 +322,42 @@ function Request.post(url, body, opts, cb)
         elseif not Request.ok(res and res.code) then
             cb(nil, T(_("HTTP %1"), tostring(res and res.code)), res)
         else
-            local response = assert(res)
-            cb(response.body or "", nil, response)
+            cb(res.body or "", nil, res)
         end
     end)
 end
 
---- 流式 HTTP：body 字节到达即 on_data，结束时 on_done(err)。
---- 用于 SSE / chunked；仍走 Turbo，不引入第二网络栈。
----
---- opts：同 request（url/method/body/headers/timeout/…）
---- handlers：
----   on_headers(code, headers) 可选
----   on_data(chunk) 原始 body 增量
----   on_done(err) err 为 nil 表示成功收完
----
----@param opts table
----@param handlers { on_headers?: fun(code: any, headers: any), on_data?: fun(chunk: string), on_done?: fun(err: any) }
----@return { cancel: fun() }
+--- GET。成功 cb(body, nil, res)，失败 cb(nil, err, res)。
+---@param url string
+---@param opts HttpRequestOpts|nil
+---@param cb fun(body: string|nil, err: any, res: table|nil)
+---@return HttpJob
+function Request.get(url, opts, cb)
+    return send("GET", url, nil, opts, cb)
+end
+
+--- POST。成功 cb(body, nil, res)，失败 cb(nil, err, res)。
+---@param url string
+---@param body string|nil
+---@param opts HttpRequestOpts|nil
+---@param cb fun(body: string|nil, err: any, res: table|nil)
+---@return HttpJob
+function Request.post(url, body, opts, cb)
+    return send("POST", url, body, opts, cb)
+end
+
+--- 流式 HTTP：body 到达即 on_data，结束时 on_done(err)。
+--- 用于 SSE / chunked。官方 turbo 会把整段 body 攒内存，这里改读路径。
+---@param opts HttpRequestOpts
+---@param handlers HttpStreamHandlers|nil
+---@return HttpJob
 function Request.stream(opts, handlers)
+    if not NetworkMgr:isOnline() then
+        if handlers and handlers.on_done then
+            handlers.on_done(_("网络不可用，请先连接 Wi-Fi"))
+        end
+        return { cancel = function() end }
+    end
     opts = opts or {}
     handlers = handlers or {}
     local state = { cancelled = false, done = false, client = nil }
@@ -539,11 +368,9 @@ function Request.stream(opts, handlers)
     local url = safeUrl(opts.url)
     local started_at = Perf.now()
     local received = 0
-    local response_code
     logger.dbg("book.http stream start", request_id, method, url)
 
-    --- 收束流：只回调一次 on_done，并归还此前占用的输入超时计数。
-    --- 计数归零才 resetInputTimeout，避免并发流互相把对方的 1s 轮询关掉。
+    --- 收束流：只回调一次 on_done。on_done 后再 release，方便连环开流。
     ---@param err any nil 表示正常收完
     local function finish(err)
         if state.done then
@@ -551,10 +378,6 @@ function Request.stream(opts, handlers)
         end
         state.done = true
         state.client = nil
-        input_timeouts = math.max(0, input_timeouts - 1)
-        if input_timeouts == 0 then
-            UIManager:resetInputTimeout()
-        end
         logger.dbg("book.http stream done", request_id, method, url, "ms",
             Perf.elapsedMs(started_at),
             "bytes", received,
@@ -562,6 +385,7 @@ function Request.stream(opts, handlers)
         if handlers.on_done then
             handlers.on_done(err)
         end
+        Turbo.release()
     end
 
     --- 把 body 增量丢给 on_data，已取消或已结束后一律丢弃。
@@ -571,86 +395,42 @@ function Request.stream(opts, handlers)
             return
         end
         if type(chunk) == "string" and #chunk > 0 then
-            if opts.allow_redirects and (response_code == 301 or response_code == 302) then
-                return
-            end
             received = received + #chunk
             if handlers.on_data then handlers.on_data(chunk) end
         end
     end
 
-    if not networkConnected() then
-        logger.dbg("book.http stream skip offline", request_id, method, url)
-        return deferCancelled(function()
-            if handlers.on_done then handlers.on_done(_("网络不可用，请先连接 Wi-Fi")) end
-        end)
+    local ioloop, err = open()
+    if not ioloop then
+        logger.dbg("book.http stream skip", request_id, method, url, err)
+        if handlers.on_done then handlers.on_done(err) end
+        return { cancel = function() end }
     end
 
-    if not Request.ensureTurbo() then
-        UIManager:nextTick(function()
-            if state.done then
-                return
-            end
-            state.done = true
-            logger.dbg("book.http stream done", request_id, method, url,
-                state.cancelled and "cancelled" or "error=turbo looper unavailable")
-            if handlers.on_done then
-                handlers.on_done(state.cancelled and "cancelled" or "turbo looper unavailable")
-            end
-        end)
-        return makeJob(state, function()
-            if state.done then
-                return
-            end
-            state.done = true
-            if handlers.on_done then
-                handlers.on_done("cancelled")
-            end
-        end)
-    end
-
-    UIManager:setInputTimeout(1000)
-    input_timeouts = input_timeouts + 1
-
-    UIManager.looper:add_callback(function()
+    ioloop:add_callback(function()
         if state.cancelled then
             finish("cancelled")
             return
         end
 
-        local ok, turbo = pcall(require, "turbo")
-        if not ok then
+        local client, turbo = Turbo.client()
+        if not client then
             finish(turbo)
             return
         end
-        turbo.log.categories.success = false
-        turbo.log.categories.warning = false
-        local patched, patch_err = pcall(patchTurbo)
-        if not patched then
-            finish(patch_err)
-            return
-        end
-
         local got_httputil, httputil = pcall(require, "turbo.httputil")
         local got_buffer, buffer = pcall(require, "turbo.structs.buffer")
         if not got_httputil or not got_buffer then
             finish(got_httputil and buffer or httputil)
             return
         end
-        local made, client = pcall(turbo.async.HTTPClient, { verify_ca = false })
-        if not made then
-            finish(client)
-            return
-        end
         state.client = client
 
-        local HTTPClient = getmetatable(client)
-        HTTPClient = HTTPClient and HTTPClient.__index or turbo.async.HTTPClient
-        local orig_chunked = HTTPClient._chunked_data
-        local orig_body = HTTPClient._handle_body
-        local orig_finalize = HTTPClient._finalize_request
-        if type(orig_chunked) ~= "function" or type(orig_body) ~= "function"
-                or type(orig_finalize) ~= "function" then
+        -- 官方 turbo 把整段 body 攒在内存里，SSE/大文件会炸。
+        -- 只改读路径：有长度走 iostream 增量回调，chunked 不入 _read_buffer，
+        -- 无长度按连接关闭读。301/302 先收尾再跟下一跳。
+        local orig_finalize = client._finalize_request
+        if type(orig_finalize) ~= "function" then
             finish("unsupported Turbo HTTPClient")
             return
         end
@@ -659,25 +439,13 @@ function Request.stream(opts, handlers)
             if data and data:len() > 2 then
                 emit(data:sub(1, data:len() - 2))
             end
-            -- Turbo 原实现把每个 chunk 追加进 _read_buffer，长 SSE/大文件会把
-            -- 整个响应永久留在内存。流式调用者已经消费数据，只需继续读下一块。
             self.iostream:read_until("\r\n", self._handle_chunked_encoding, self)
-        end
-
-        client._handle_body = function(self, data)
-            emit(data)
-            return orig_body(self, data)
         end
 
         client._finalize_request = function(self)
             local redirect_before = self.redirect
             orig_finalize(self)
-            -- 301/302 的原始收尾会立即启动下一跳；此时 future 尚未完成，
-            -- 不能把中间响应当最终 HTTP 错误。
-            if self.redirect ~= redirect_before then
-                return
-            end
-            if state.done or state.cancelled then
+            if self.redirect ~= redirect_before or state.done or state.cancelled then
                 return
             end
             local code = self.response_headers
@@ -707,90 +475,37 @@ function Request.stream(opts, handlers)
             end
             self.response_headers = headers
             local code = self.response_headers:get_status_code()
-            if code == 101 then
-                self:_finalize_request()
-                return
-            elseif 100 <= code and code < 200 then
-                self.iostream:read_until_pattern("\r?\n\r?\n", self._handle_headers, self)
-                return
-            end
-
-            response_code = code
             if not state.cancelled and handlers.on_headers then
                 handlers.on_headers(code, self.response_headers)
             end
-
-            -- HTTPHeaders:get may return more than one value. Keep only the header:
-            -- passing its second return into tonumber turns it into an invalid base.
-            local content_length_header = self.response_headers:get("Content-Length", true)
-            local content_length = tonumber(content_length_header)
+            if opts.allow_redirects and (code == 301 or code == 302) then
+                self:_finalize_request()
+                return
+            end
             local transfer = self.response_headers:get("Transfer-Encoding", true)
-            if transfer and tostring(transfer):lower() == "chunked" and self.kwargs.method ~= "HEAD" then
+            if transfer and tostring(transfer):lower() == "chunked" then
                 self._chunked = true
                 self._read_buffer = buffer()
                 self.iostream:read_until("\r\n", self._handle_chunked_encoding, self)
                 return
             end
-            if content_length and content_length > 0 and self.kwargs.method ~= "HEAD" then
-                local remaining = content_length
-                local function readFixedChunk(client_, chunk)
-                    chunk = chunk or ""
-                    emit(chunk)
-                    remaining = remaining - #chunk
-                    if remaining <= 0 then
-                        client_.payload = ""
-                        client_:_finalize_request()
-                        return
-                    end
-                    client_.iostream:read_bytes(
-                        math.min(remaining, FIXED_READ_CHUNK),
-                        readFixedChunk,
-                        client_
-                    )
-                end
-                self.iostream:read_bytes(
-                    math.min(remaining, FIXED_READ_CHUNK),
-                    readFixedChunk,
-                    self
-                )
-                return
-            end
-            if opts.allow_redirects and (code == 301 or code == 302) then
-                -- Turbo 自身把无长度响应视为无 body；跟随重定向必须立即收尾，
-                -- 否则 keep-alive 连接不会关闭，只能等请求超时。
-                self:_finalize_request()
-                return
-            end
-            -- 无 Content-Length / 非 chunked：按连接关闭读（SSE 常见）
-            if self.kwargs.method == "HEAD" then
-                self:_finalize_request()
+            -- get() 可能多返回值；第二值进 tonumber 会当成进制。
+            local content_length = tonumber((self.response_headers:get("Content-Length", true)))
+            if content_length and content_length > 0 then
+                self.iostream:read_bytes(content_length, function(self_)
+                    self_.payload = ""
+                    self_:_finalize_request()
+                end, self, emit)
                 return
             end
             self.iostream:read_until_close(function(self_, final_data)
-                if final_data and #final_data > 0 then
-                    -- streaming_callback 已推送过的部分可能重复；只补尚未发出的尾部
-                    emit(final_data)
-                end
-                self_.payload = final_data or ""
+                emit(final_data)
+                self_.payload = ""
                 self_:_finalize_request()
-            end, self, function(_, chunk)
-                emit(chunk)
-            end, self)
+            end, self, emit)
         end
 
-        local fetched, future = pcall(client.fetch, client, opts.url, {
-            method = opts.method or "GET",
-            body = opts.body,
-            request_timeout = opts.timeout or 180,
-            connect_timeout = opts.connect_timeout or 10,
-            allow_redirects = opts.allow_redirects,
-            auth_username = opts.auth_username,
-            auth_password = opts.auth_password,
-            user_agent = user_agent and tostring(user_agent) or nil,
-            on_headers = function(headers)
-                addHeaders(headers, opts.headers)
-            end,
-        })
+        local fetched, future = pcall(client.fetch, client, opts.url, fetchOpts(opts, user_agent, 180))
         if not fetched then
             finish(future)
             return
@@ -804,12 +519,7 @@ function Request.stream(opts, handlers)
     end)
 
     return makeJob(state, function()
-        local client = state.client
-        if client and client.iostream and not client.iostream:closed() then
-            pcall(function()
-                client.iostream:close()
-            end)
-        end
+        closeClient(state.client)
         if not state.done then
             finish("cancelled")
         end
@@ -817,115 +527,23 @@ function Request.stream(opts, handlers)
 end
 
 ------------------------------------------------------------------------
--- 写盘 / 下载
+-- 下载
 ------------------------------------------------------------------------
 
---- 把响应 body 按切片写入文件（不堵单拍 UI）。
----@param res table|nil
----@param dest string
----@param opts { on_progress: fun(bytes: number)|nil }|nil
----@param cb fun(ok: boolean, err: any)
----@return { cancel: fun() }
-function Request.writeResponseToFile(res, dest, opts, cb)
-    opts = opts or {}
-    local state = { cancelled = false }
-    local body = res and res.body
-    local target = fileName(dest)
-    logger.dbg("book.http file write start", target, "bytes",
-        type(body) == "string" and #body or 0)
-
-    if type(body) ~= "string" then
-        UIManager:nextTick(function()
-            if not state.cancelled then
-                logger.dbg("book.http file write done", target, "error=empty response")
-                cb(false, "empty response")
-            end
-        end)
-        return makeJob(state)
-    end
-
-    local file, open_err = io.open(dest, "wb")
-    if not file then
-        UIManager:nextTick(function()
-            if not state.cancelled then
-                logger.dbg("book.http file write done", target,
-                    "error=" .. tostring(open_err or "cannot create file"))
-                cb(false, open_err or "cannot create file")
-            end
-        end)
-        return makeJob(state)
-    end
-
-    local offset = 1
-    local written = 0
-
-    --- 关闭文件并回调结果；失败时删除半截文件，不留下损坏的 dest。
-    --- 已取消的任务不回调（调用方已经不关心结果了），但清理照做。
-    ---@param ok boolean
-    ---@param reason any 失败原因
-    local function finish(ok, reason)
-        -- close 的返回值必须判：写入走缓冲，磁盘满时前面每片 write 都「成功」，
-        -- 错误只在最后 flush 时冒出来。丢掉它就等于把半截文件当成功下载交出去。
-        local pok, closed, close_err = pcall(function() return file:close() end)
-        if ok and (not pok or not closed) then
-            ok, reason = false, close_err or "close failed"
-        end
-        if not ok then
-            pcall(os.remove, dest)
-        end
-        logger.dbg("book.http file write done", target, "bytes", written,
-            ok and "ok" or ("error=" .. tostring(reason)))
-        if not state.cancelled then
-            cb(ok, reason)
-        end
-    end
-
-    --- 每个 nextTick 写一片 WRITE_CHUNK，写完再排下一片。
-    --- 分片是为了不在一次事件循环里卡住 UI；写满即 finish(true)。
-    local function writeNext()
-        if state.cancelled then
-            finish(false, "cancelled")
-            return
-        end
-        if offset > #body then
-            finish(true)
-            return
-        end
-        local chunk = body:sub(offset, offset + WRITE_CHUNK - 1)
-        local ok, write_err = file:write(chunk)
-        if not ok then
-            finish(false, write_err or "write failed")
-            return
-        end
-        offset = offset + #chunk
-        written = written + #chunk
-        if opts.on_progress then
-            opts.on_progress(written)
-        end
-        UIManager:nextTick(writeNext)
-    end
-
-    UIManager:nextTick(writeNext)
-    return makeJob(state)
-end
-
---- 非阻塞下载：响应数据直接写入临时文件，成功后原子落位。
----@param opts table 同 request；可带 on_progress / max_bytes
+--- 非阻塞下载：写入 dest.part，成功后原子改名为 dest。
+---@param opts HttpRequestOpts 可带 on_progress / max_bytes
 ---@param dest string
 ---@param cb fun(ok: boolean, err: any, res: table|nil)
----@return { cancel: fun() }
+---@return HttpJob
 function Request.download(opts, dest, cb)
+    if not NetworkMgr:isOnline() then
+        cb(false, _("网络不可用，请先连接 Wi-Fi"))
+        return { cancel = function() end }
+    end
     local state = { cancelled = false }
     local stream_job
     local tmp = dest .. ".part"
     local target = fileName(dest)
-
-    if not networkConnected() then
-        logger.dbg("book.http download skip offline", target)
-        return deferCancelled(function()
-            cb(false, _("网络不可用，请先连接 Wi-Fi"))
-        end)
-    end
 
     local file, open_err = io.open(tmp, "wb")
     local written = 0
@@ -933,6 +551,9 @@ function Request.download(opts, dest, cb)
     local write_err
     logger.dbg("book.http download start", target, safeUrl(opts and opts.url))
 
+    ---@param ok boolean
+    ---@param err any
+    ---@param res table|nil
     local function done(ok, err, res)
         if state.cancelled then return end
         logger.dbg("book.http download done", target,
@@ -941,10 +562,8 @@ function Request.download(opts, dest, cb)
     end
 
     if not file then
-        UIManager:nextTick(function()
-            done(false, open_err or "cannot create file")
-        end)
-        return makeJob(state)
+        done(false, open_err or "cannot create file")
+        return { cancel = function() end }
     end
 
     stream_job = Request.stream(opts, {
