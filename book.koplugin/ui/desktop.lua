@@ -14,9 +14,10 @@
   +-----------------------------------------------+
   手势：底栏 tap 切 Tab；内容区左右滑转给当前页；顶栏点源名换源、点其他区域或下滑开快捷面板。
 
-  生命周期由 main.lua 驱动，不继承 ui/lifecycle.lua（Desktop 已经是 InputContainer）：
-    onCreate → onStart → onResume
-    onPause → onStop → onDestroy
+  生命周期：init/onCreate；打开时 onStart+onResume；休眠 Pause+Stop。
+  唤醒只靠 KOReader 广播 Resume（Desktop 在窗口栈上自己收）。
+  插件的 onResume 不再转发，避免和系统广播跑两遍。
+  Desktop 已经是 InputContainer，不继承 ui/lifecycle.lua（组合 attach）。
 
   KOReader 自己的手势 / 关窗走 onSwipe / onTapBar / onClose。
   Desktop:onEvent 只广播；换源先改自己的 source/tab。
@@ -245,12 +246,12 @@ function Desktop:onCreate()
     notify(self[TAB_COMPONENT[self.tab]], "onResume")
 end
 
---- 启动：通知顶栏开始心跳。
+--- 启动：通知孩子挂环境。
 function Desktop:onStart()
     broadcast(self, "onStart")
 end
 
---- 恢复工作：通知顶栏与当前页。同一轮事件只处理一次。
+--- 恢复工作：通知顶栏与当前页。系统唤醒也会进这里，只这一条路。
 function Desktop:onResume()
     broadcast(self, "onResume")
 
