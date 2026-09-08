@@ -59,4 +59,35 @@ function Cache:onDestroy()
     self:onStop()
 end
 
+--- 打开全本缓存任务快照；队列本身继续在后台运行。
+---@return nil
+function Cache:show()
+    local tasks = CacheQueue.tasks()
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local UIManager = require("ui/uimanager")
+    local rows = {}
+    for _i, task in ipairs(tasks) do
+        local state = task.state == "running" and _("正在缓存")
+            or task.state == "retry_wait" and _("缓存重试中")
+            or _("等待缓存")
+        local text = tostring(task.title or task.stable_id or "") .. " · " .. state
+        if task.total > 0 then
+            text = text .. " " .. tostring(task.cached) .. "/" .. tostring(task.total)
+        end
+        rows[#rows + 1] = {{ text = text, enabled = false }}
+    end
+    if #rows == 0 then
+        rows[1] = {{ text = _("当前没有缓存任务"), enabled = false }}
+    end
+    local dialog
+    rows[#rows + 1] = {{ text = _("关闭"), callback = function()
+        if dialog then UIManager:close(dialog) end
+    end }}
+    dialog = ButtonDialog:new{
+        title = _("缓存任务"),
+        buttons = rows,
+    }
+    UIManager:show(dialog)
+end
+
 return Cache

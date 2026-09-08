@@ -14,6 +14,10 @@
   +-----------------------------------------------+
   手势：底栏 tap 切 Tab；内容区左右滑翻图书馆/书城页；顶栏点源名换源、点其他区域或下滑开快捷面板。
 
+  生命周期由 main.lua 驱动，不继承 ui/lifecycle.lua（Desktop 已经是 InputContainer）：
+    onCreate → onStart → onResume
+    onPause → onStop → onDestroy
+
 @module koplugin.book.ui.desktop
 --]]
 
@@ -24,6 +28,7 @@ local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
@@ -38,9 +43,7 @@ local Insight = require("ui.desktop.insight")
 local Settings = require("ui.desktop.settings")
 local Detail = require("ui.desktop.detail")
 local NativePanel = require("ui.panel.native")
-local Image = require("ui.components.image")
 local TopBar = require("ui.components.topbar")
-local SourceSettings = require("ui.desktop.settings.source")
 local BottomBar = require("ui.components.bottombar")
 local UI = require("ui.components.bookui")
 local BookStore = require("book.store")
@@ -54,9 +57,27 @@ local Desktop = InputContainer:extend{
     filter = nil,
 }
 
--- 首页状态作废入口挂成 Desktop 方法：source 层拿到 desktop 就能刷首页，不用反向 require UI。
-Desktop.invalidateHome = Home.invalidate
-Desktop.refreshHome = Home.refreshData
+--- 首页状态作废：source 层拿到 desktop 就能刷首页，不用反向 require UI。
+function Desktop:invalidateHome()
+    if self.home then self.home:invalidate() end
+end
+
+--- 向已创建的子组件广播业务事件，不消费 KOReader 手势事件。
+---@param event string|table
+---@param payload any
+function Desktop:onEvent(event, payload)
+    if self._closed then return end
+    for _, key in ipairs({ "topbar", "bottombar", "home", "library", "store", "insight", "settings", "detail" }) do
+        local child = self[key]
+        if child and child.onEvent then
+            child:onEvent(event, payload)
+        end
+    end
+end
+
+function Desktop:refreshHome(reason)
+    if self.home then self.home:refreshData(reason) end
+end
 
 --- 按数据源能力生成 Desktop 底栏 Tab。
 ---@param source table|nil
@@ -88,24 +109,47 @@ local function clampTab(self)
     self.tab = "home"
 end
 
---- 初始化手势区与默认分页状态，立刻 rebuild。
+-- 换源和关桌面都必须全部取消（漏一个就是关了页还在跑网络+写库）
+local FETCH_JOB_KEYS = {
+    "_books_sync_cancel",
+    "_stats_sync_cancel",
+}
+
+local MAINTENANCE_JOB_KEYS = {
+    "_cache_size_job",
+    "_cache_clear_job",
+    "_local_cleanup_job",
+}
+
+---@param self table
+---@param keys string[]
+local function cancelJobs(self, keys)
+    for _, key in ipairs(keys) do
+        local job = self[key]
+        if type(job) == "table" and type(job.cancel) == "function" then
+            pcall(function() job:cancel() end)
+        elseif type(job) == "function" then
+            pcall(job)
+        end
+        self[key] = nil
+    end
+end
+
+--- 初始化手势区与默认分页状态，再 onCreate 画出第一帧。
 function Desktop:init()
-    self.filter = self.filter or {}
     self._tabs = desktopTabs(self.source)
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
-    self.page = 1
-    self.page_size = 12
-    self.total = 0
-    self.store_page = 1
-    self.store_page_size = 12
-    self.store_total = 0
     self.source_generation = self.source_generation or 0
     self.tab = self.tab or "home"
+    self.home = Home.new(self)
+    self.library = Library.new(self)
+    self.store = StorePage.new(self)
+    self.insight = Insight.new(self)
+    self.settings = Settings.new(self)
+    self.topbar = TopBar.new(self)
+    self.bottombar = BottomBar.new()
     clampTab(self)
     self._closed = false
-    self._cache_queue_watch = require("source.cache_queue").watch(function()
-        if not self._closed then self:refreshTopBar() end
-    end)
     self.ges_events = {
         SwipeTopBar = {
             GestureRange:new{
@@ -161,12 +205,88 @@ function Desktop:init()
             },
         },
     }
+    self:onCreate()
+end
+
+--- 创建：挂长期对象，画出第一帧。启动由 main.lua 在 show 之后调用。
+function Desktop:onCreate()
+    if self.topbar then self.topbar:onCreate() end
     self:rebuild()
-    UIManager:nextTick(function()
-        if not self._closed then
-            self:scheduleClockTick()
-        end
-    end)
+end
+
+--- 启动：通知顶栏开始心跳。
+function Desktop:onStart()
+    if self._closed or self._started then return end
+    self._started = true
+    if self.topbar then self.topbar:onStart() end
+end
+
+--- 恢复工作：通知顶栏与首页。同一轮事件只处理一次。
+function Desktop:onResume()
+    if self._closed or self._resume_lock then return end
+    self._resume_lock = true
+    UIManager:nextTick(function() self._resume_lock = false end)
+    if self.topbar then self.topbar:onResume() end
+    if self.home then self.home:onResume() end
+    if self.tab ~= "home" and self.plugin and self.plugin.emitToSource then
+        self.plugin:emitToSource("desktop_resume", self)
+    end
+end
+
+--- 暂停：通知顶栏停心跳，桌面仍在。
+function Desktop:onPause()
+    if self.topbar then self.topbar:onPause() end
+end
+
+--- 停止：停顶栏心跳，并停掉各 Tab 的在飞工作。
+function Desktop:onStop()
+    if self.topbar then self.topbar:onStop() end
+    if self.home then self.home:onStop() end
+    if self.library then self.library:onStop() end
+    if self.store then self.store:onStop() end
+    if self.insight then self.insight:onStop() end
+    self._started = false
+end
+
+--- 取消在飞请求，不拆窗体。
+function Desktop:onCancel()
+    cancelJobs(self, FETCH_JOB_KEYS)
+    cancelJobs(self, MAINTENANCE_JOB_KEYS)
+    if self.home then self.home:onCancel() end
+    if self.library then self.library:onCancel() end
+    if self.store then self.store:onCancel() end
+    if self.insight then self.insight:onCancel() end
+    if self.detail then self.detail:onCancel() end
+end
+
+--- 销毁：停时钟，释放监听、在飞任务和浮层。
+function Desktop:onDestroy()
+    if self._closed then return end
+    self._closed = true
+    if self.topbar then self.topbar:onDestroy() end
+    self:onCancel()
+    self.ges_events = nil
+    if self.panel then
+        local panel = self.panel
+        self.panel = nil
+        pcall(UIManager.close, UIManager, panel)
+    end
+    if self.detail then
+        pcall(function()
+            self.detail._closed = true
+            self.detail.ges_events = nil
+            UIManager:close(self.detail)
+        end)
+        self.detail = nil
+    end
+    if self._filter_root then
+        pcall(UIManager.close, UIManager, self._filter_root)
+        self._filter_root = nil
+    end
+    if self._filter_menu then
+        pcall(UIManager.close, UIManager, self._filter_menu)
+        self._filter_menu = nil
+    end
 end
 
 --- 顶栏向下滑：打开 KOReader 原生菜单的 Book 快捷 Tab。
@@ -174,11 +294,7 @@ end
 ---@param ges_ev table|nil
 ---@return boolean
 function Desktop:onSwipeTopBar(_, ges_ev)
-    if type(ges_ev) ~= "table" or ges_ev.direction ~= "south" then
-        return true
-    end
-    NativePanel.show("desktop")
-    return true
+    return self.topbar:onSwipe(_, ges_ev)
 end
 
 --- 顶栏点击：缓存指标打开任务列表，源名区域切换数据源，其余区域打开原生快捷面板 Tab。
@@ -186,63 +302,9 @@ end
 ---@param ges table|nil
 ---@return boolean
 function Desktop:onTapTopBar(_, ges)
-    if ges and ges.pos then
-        local cache_rect = TopBar.cacheTapRect()
-        if cache_rect then
-            local x, y = ges.pos.x, ges.pos.y
-            if x >= cache_rect.x and x < cache_rect.x + cache_rect.w
-                and y >= cache_rect.y and y < cache_rect.y + cache_rect.h
-            then
-                self:showCacheQueue()
-                return true
-            end
-        end
-        local rect = TopBar.sourceTapRect()
-        if rect then
-            local x, y = ges.pos.x, ges.pos.y
-            if x >= rect.x and x < rect.x + rect.w
-                and y >= rect.y and y < rect.y + rect.h
-            then
-                SourceSettings.pickActive(self, self.plugin)
-                return true
-            end
-        end
-    end
-    NativePanel.show("desktop")
-    return true
+    return self.topbar:onTap(_, ges)
 end
 
---- 打开全本缓存任务快照；队列本身继续在后台运行。
----@return nil
-function Desktop:showCacheQueue()
-    local Queue = require("source.cache_queue")
-    local tasks = Queue.tasks()
-    local ButtonDialog = require("ui/widget/buttondialog")
-    local UIManager = require("ui/uimanager")
-    local rows = {}
-    for _i, task in ipairs(tasks) do
-        local state = task.state == "running" and _("正在缓存")
-            or task.state == "retry_wait" and _("缓存重试中")
-            or _("等待缓存")
-        local text = tostring(task.title or task.stable_id or "") .. " · " .. state
-        if task.total > 0 then
-            text = text .. " " .. tostring(task.cached) .. "/" .. tostring(task.total)
-        end
-        rows[#rows + 1] = {{ text = text, enabled = false }}
-    end
-    if #rows == 0 then
-        rows[1] = {{ text = _("当前没有缓存任务"), enabled = false }}
-    end
-    local dialog
-    rows[#rows + 1] = {{ text = _("关闭"), callback = function()
-        if dialog then UIManager:close(dialog) end
-    end }}
-    dialog = ButtonDialog:new{
-        title = _("缓存任务"),
-        buttons = rows,
-    }
-    UIManager:show(dialog)
-end
 
 --- 内容区高度（扣除顶栏 + 底栏）。
 ---@return number
@@ -259,7 +321,7 @@ function Desktop:ctx()
         plugin = self.plugin,
         source = self.source,
         desktop = self,
-        filter = self.filter,
+        filter = self.library.filter,
     }
 end
 
@@ -290,15 +352,15 @@ function Desktop:onSwipe(_, ges_ev)
     -- 不下滑关闭：内容区任意 south 都关太容易误触；退出走设置
     if self.tab == "library" then
         if direction == "west" then
-            Library.gotoPage(self, self.page + 1)
+            self.library:gotoPage(self.library.page + 1)
         elseif direction == "east" then
-            Library.gotoPage(self, self.page - 1)
+            self.library:gotoPage(self.library.page - 1)
         end
     elseif self.tab == "store" then
         if direction == "west" then
-            StorePage.gotoPage(self, (self.store_page or 1) + 1)
+            self.store:gotoPage((self.store.page or 1) + 1)
         elseif direction == "east" then
-            StorePage.gotoPage(self, (self.store_page or 1) - 1)
+            self.store:gotoPage((self.store.page or 1) - 1)
         end
     end
     return true
@@ -308,26 +370,24 @@ end
 ---@param id string
 function Desktop:switchTab(id)
     if id == "library" and self.tab ~= "library" then
-        self._library_state = nil
+        self.library.state = nil
     end
     if id == "store" and self.tab ~= "store" then
-        self._store_state = nil
+        self.store.state = nil
     end
     if id == "settings" then
-        self._settings_page = 1
-        self._settings_sub = nil
-        self._settings_parent = nil
+        self.settings:reset()
         self._cache_size_label = nil
     end
     if id == "stats" and self.tab ~= "stats" then
-        self._insight_ui_page = 1
-        self._insight_state = nil
-        self._insight_loaded = false
+        self.insight.ui_page = 1
+        self.insight.state = nil
+        self.insight.loaded = false
     end
     self.tab = id
     if id == "home" then
         -- 进首页一律刷新一遍：清状态 + rebuild + 通知源查书架。
-        Home.refreshOnEnter(self)
+        self.home:refreshOnEnter()
         return
     end
     self:rebuild()
@@ -337,70 +397,27 @@ end
 ---@param sub string|nil 子页标识；nil 回到设置主菜单
 ---@param parent string|nil 返回时的父级子页
 function Desktop:showSettingsSub(sub, parent)
-    self._settings_sub = sub
-    self._settings_parent = parent
-    self._settings_page = 1
-    self:rebuild()
-end
-
--- 各 Tab 的在飞取数任务；换源和关桌面都必须全部取消（漏一个就是关了页还在跑网络+写库）
-local FETCH_JOB_KEYS = {
-    "_home_fetch_cancel",
-    "_library_fetch_cancel",
-    "_store_fetch_cancel",
-    "_insight_fetch_cancel",
-    "_books_sync_cancel",
-    "_stats_sync_cancel",
-}
-
--- 只在关闭时清的后台维护任务
-local MAINTENANCE_JOB_KEYS = {
-    "_cache_size_job",
-    "_cache_clear_job",
-    "_local_cleanup_job",
-}
-
---- 取消并清空 self 上登记的任务句柄。job.cancel 一律是零参闭包。
----@param self table
----@param keys string[]
-local function cancelJobs(self, keys)
-    for _, key in ipairs(keys) do
-        local job = self[key]
-        if type(job) == "table" and type(job.cancel) == "function" then
-            pcall(job.cancel)
-        elseif type(job) == "function" then
-            pcall(job)
-        end
-        self[key] = nil
-    end
+    self.settings:showSub(sub, parent)
 end
 
 --- 数据源切换：取消在飞请求、清各 Tab 缓存、回退不支持的 Tab 并重建。
 ---@param source BookSource|nil
 function Desktop:sourceChanged(source)
     self.source_generation = (self.source_generation or 0) + 1
-    cancelJobs(self, FETCH_JOB_KEYS)
+    self:onCancel()
+    if self.library then self.library:reset() end
+    if self.store then self.store:reset() end
+    if self.insight then self.insight:reset() end
+    if self.settings then self.settings:reset() end
     self._books_sync_pending = false
     self._books_sync_request = nil
     self._stats_sync_pending = false
     self._stats_sync_request = nil
-    -- 只取消旧页面的在飞任务；已落盘图片缓存必须保留，切回源时可直接复用。
-    Image.abortPending()
+    -- 旧页面在飞封面随 rebuild 里 old:free() 逐张取消；已落盘缓存保留。
     self.source = source
     self._tabs = desktopTabs(source)
     clampTab(self)
-    self._library_state = nil
-    self._library_groups_state = nil
-    self._library_group = nil
-    self._store_state = nil
-    self._store_books = nil
-    self.store_search = nil
-    self.store_page = 1
-    self.store_total = 0
-    self._insight_state = nil
-    self._insight_loaded = false
-    self.filter = nil
-    Home.invalidate(self)
+    if self.home then self.home:invalidate() end
     if self.tab ~= "home" then
         self:rebuild()
     end
@@ -417,16 +434,18 @@ function Desktop:rebuild()
         local sh = Screen:getHeight()
         self.dimen = Geom:new{ x = 0, y = 0, w = sw, h = sh }
         local content
-        if self.tab == "home" then
-            content = Home.page(self)
+        if true then -- 临时诊断：只保留顶栏
+            content = WidgetContainer:new{}
+        elseif self.tab == "home" then
+            content = self.home:content()
         elseif self.tab == "library" then
-            content = Library.page(self)
+            content = self.library:content()
         elseif self.tab == "store" then
-            content = StorePage.page(self)
+            content = self.store:content()
         elseif self.tab == "stats" then
-            content = Insight.page(self)
+            content = self.insight:content()
         else
-            content = Settings.build(self)
+            content = self.settings:build()
         end
         local content_h = self:contentHeight()
         local top_h = UI.topBarH()
@@ -438,12 +457,12 @@ function Desktop:rebuild()
         end
         content.overlap_offset = { 0, top_h }
 
-        local top = TopBar.build()
+        local top = self.topbar:build()
         top.overlap_offset = { 0, 0 }
 
         self._tabs = desktopTabs(self.source)
         clampTab(self)
-        local bar = BottomBar.build(self._tabs, self.tab)
+        local bar = WidgetContainer:new{ dimen = Geom:new{ w = sw, h = UI.barH() } }
         bar.overlap_offset = { 0, sh - UI.barH() }
 
         local root = OverlapGroup:new{
@@ -482,13 +501,14 @@ end
 
 --- 只换顶栏并区域刷新；分钟心跳禁止整页 rebuild / full flash。
 function Desktop:refreshTopBar()
+    logger.dbg("desktop refreshTopBar")
     local root = self[1] and self[1][1]
     if not root or not root[2] then
         self:rebuild()
         return
     end
     local ok, err = pcall(function()
-        local top = TopBar.build()
+        local top = self.topbar:build()
         top.overlap_offset = { 0, 0 }
         if root[2].free then
             root[2]:free()
@@ -510,11 +530,11 @@ end
 
 --- 原地刷新首页时钟；不重建整页，避免重置封面和异步图片任务。
 function Desktop:refreshHomeClock()
-    if self.tab ~= "home" or type(self._home_clock_refresh) ~= "function" then
+    if self.tab ~= "home" or type(self.home.clock_refresh) ~= "function" then
         return
     end
-    self._home_clock_refresh()
-    local region = self._home_clock_region
+    self.home.clock_refresh()
+    local region = self.home.clock_region
     if not region then return end
     UIManager:setDirty(self, "ui", Geom:new{
         x = region.x,
@@ -522,21 +542,6 @@ function Desktop:refreshHomeClock()
         w = region.w,
         h = region.h,
     })
-end
-
---- 按分钟对齐调度顶栏时钟刷新。
-function Desktop:scheduleClockTick()
-    if self._clock_tick then
-        UIManager:unschedule(self._clock_tick)
-    end
-    self._clock_tick = function()
-        if self._closed then return end
-        self:refreshHomeClock()
-        self:refreshTopBar()
-        self:scheduleClockTick()
-    end
-    local delay = math.max(1, 61 - (tonumber(os.date("%S")) or 0))
-    UIManager:scheduleIn(delay, self._clock_tick)
 end
 
 --- 打开书籍详情浮层。
@@ -565,8 +570,8 @@ function Desktop:showDetail(book)
             end
             if dirty then
                 -- 详情里改过数据（编辑/刮削）：列表与首页缓存已失效，重建触发重拉
-                desk._library_state = nil
-                Home.invalidate(desk)
+                if desk.library then desk.library.state = nil end
+                if desk.home then desk.home:invalidate() end
                 if desk.tab ~= "home" then
                     desk:rebuild()
                 end
@@ -579,54 +584,14 @@ function Desktop:showDetail(book)
     UIManager:setDirty(self.detail, "ui")
 end
 
---- 关闭桌面：取消在飞请求、中止图片下载、回 FM。
+--- KOReader 关窗入口，不是生命周期。关窗前走完 pause/stop/destroy。
 ---@return boolean
 function Desktop:onClose()
     logger.info("book.desktop close")
-    self._closed = true
-    if self._cache_queue_watch then
-        self._cache_queue_watch.cancel()
-        self._cache_queue_watch = nil
-    end
-    if self._clock_tick then
-        UIManager:unschedule(self._clock_tick)
-        self._clock_tick = nil
-    end
-    if self._home_refresh_debounce then
-        self._home_refresh_debounce:cancel()
-        self._home_refresh_debounce = nil
-    end
-    self._home_refresh_reasons = nil
-    cancelJobs(self, FETCH_JOB_KEYS)
-    cancelJobs(self, MAINTENANCE_JOB_KEYS)
-    self._home_refresh_pending = false
-    self._library_refresh_pending = false
-    self._insight_refresh_pending = false
-    self._store_refresh_pending = false
-    self._settings_refresh_pending = false
-    self.ges_events = nil
-    Image.abortPending()
-    if self.panel then
-        local panel = self.panel
-        self.panel = nil
-        pcall(UIManager.close, UIManager, panel)
-    end
-    if self.detail then
-        pcall(function()
-            self.detail._closed = true
-            self.detail.ges_events = nil
-            UIManager:close(self.detail)
-        end)
-        self.detail = nil
-    end
-    if self._filter_root then
-        pcall(UIManager.close, UIManager, self._filter_root)
-        self._filter_root = nil
-    end
-    if self._filter_menu then
-        pcall(UIManager.close, UIManager, self._filter_menu)
-        self._filter_menu = nil
-    end
+    if self._closed then return true end
+    self:onPause()
+    self:onStop()
+    self:onDestroy()
     UIManager:close(self)
     if self.close_callback then
         pcall(self.close_callback)
@@ -642,24 +607,12 @@ function Desktop:onClose()
     return true
 end
 
---- Widget 关闭回调：停时钟、清手势、中止图片下载。
+--- Widget 关闭回调：若尚未走完生命周期，补齐停止与销毁。
 function Desktop:onCloseWidget()
-    self._closed = true
-    if self._cache_queue_watch then
-        self._cache_queue_watch.cancel()
-        self._cache_queue_watch = nil
-    end
-    if self._clock_tick then
-        UIManager:unschedule(self._clock_tick)
-        self._clock_tick = nil
-    end
-    self.ges_events = nil
-    if self.panel then
-        local panel = self.panel
-        self.panel = nil
-        pcall(UIManager.close, UIManager, panel)
-    end
-    Image.abortPending()
+    if self._closed then return end
+    self:onPause()
+    self:onStop()
+    self:onDestroy()
 end
 
 return Desktop
