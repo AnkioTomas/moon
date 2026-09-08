@@ -1,5 +1,5 @@
 --[[--
-顶栏剩余存储。唤醒时原地刷新。
+顶栏剩余存储。Resume 起每 10 分钟刷新。
 
 @module koplugin.book.ui.components.topbar.storage
 --]]
@@ -9,14 +9,11 @@ local ffiUtil = require("ffi/util")
 local util = require("util")
 local Base = require("ui.components.topbar.base")
 
+---@class BookTopBarStorage : BookTopBarItem
 local Storage = setmetatable({}, Base)
 Storage.__index = Storage
 Storage.id = "storage"
-
-function Storage:onResume()
-    local text, icon = self:read()
-    self:updateMetric(icon, text)
-end
+Storage.interval = 600
 
 ---@return string|nil
 function Storage:read()

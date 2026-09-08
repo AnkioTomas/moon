@@ -1,5 +1,5 @@
 --[[--
-顶栏电池。唤醒时原地刷新图标和电量。
+顶栏电池。充电事件立刻刷，Resume 起每 10 分钟刷一次。
 
 @module koplugin.book.ui.components.topbar.battery
 --]]
@@ -7,13 +7,17 @@
 local Device = require("device")
 local Base = require("ui.components.topbar.base")
 
+---@class BookTopBarBattery : BookTopBarItem
 local Battery = setmetatable({}, Base)
 Battery.__index = Battery
 Battery.id = "battery"
+Battery.interval = 600
 
-function Battery:onResume()
-    local text, icon = self:read()
-    self:updateMetric(icon, text)
+---@param event string|table
+function Battery:onEvent(event)
+    if event == "Charging" or event == "NotCharging" then
+        self:refresh()
+    end
 end
 
 --- 电池图标：非充电使用 battery_android_0..6/full，充电使用电量档位图标。
