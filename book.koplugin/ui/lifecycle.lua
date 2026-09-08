@@ -120,7 +120,9 @@ end
 ---
 --- 子类可以通过继承 Lifecycle，并调用 new() 创建实例。
 ---
----@return Lifecycle
+---@generic T : Lifecycle
+---@param self T
+---@return T
 function Lifecycle:new()
     local instance = setmetatable({ state = "new", jobs = {}, http = {} }, self)
     bind(instance, instance)
