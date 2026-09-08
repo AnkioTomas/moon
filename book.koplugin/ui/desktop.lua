@@ -20,6 +20,7 @@
 
   KOReader 自己的手势 / 关窗走 onSwipe / onTapBar / onClose。
   Desktop:onEvent 只广播；换源先改自己的 source/tab。
+  先画壳（白内容 + 顶栏 + 底栏），不填页。页在 onResume / rebuild 里自己刷内容槽。
   详情走 Detail.open，设置子页走 Settings:showSub。
 
 @module koplugin.book.ui.desktop
@@ -35,6 +36,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local Lifecycle = require("ui.lifecycle")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local UIManager = require("ui/uimanager")
+local Widget = require("ui/widget/widget")
 local logger = require("utils.log")
 local Perf = require("utils.perf")
 local _ = require("gettext")
@@ -219,10 +221,11 @@ function Desktop:init()
     self:onCreate()
 end
 
---- 创建：挂长期对象，画出第一帧。启动由 main.lua 在 show 之后调用。
+--- 创建：挂长期对象，先画壳，当前页自己刷内容。
 function Desktop:onCreate()
     broadcast(self, "onCreate")
     self:rebuild()
+    notify(self[TAB_COMPONENT[self.tab]], "onResume")
 end
 
 --- 启动：通知顶栏开始心跳。
@@ -327,70 +330,64 @@ function Desktop:onSwipe(_, ges_ev)
     return true
 end
 
---- 切换底栏 Tab 并重建。页数据跟着页对象走，不在切入时拆掉。
+--- 切换底栏 Tab。页数据跟着页对象走；内容由页 rebuild。
 ---@param id string
 function Desktop:switchTab(id)
     if not TAB_COMPONENT[id] then return end
     local changed = self.tab ~= id
     if changed then notify(self[TAB_COMPONENT[self.tab]], "onPause") end
     self.tab = id
-    local page = self[TAB_COMPONENT[id]]
-    notify(page, "onResume", changed)
+    notify(self[TAB_COMPONENT[id]], "onResume", changed)
     self:rebuild()
 end
 
---- 重建顶栏 + 内容 + 底栏。
+--- 没壳：只画三个槽。有壳：只换内容槽和底栏，顶栏不动。
 function Desktop:rebuild()
     local started_at = Perf.now()
-    pcall(function()
-        require("utils.font").applyCurrent()
-    end)
+    local root = self[1] and self[1][1]
+    self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
+    self._tabs = desktopTabs(self.source)
+    clampTab(self)
     local ok, err = pcall(function()
-        local sw = Screen:getWidth()
-        local sh = Screen:getHeight()
-        self.dimen = Geom:new{ x = 0, y = 0, w = sw, h = sh }
-        self._tabs = desktopTabs(self.source)
-        clampTab(self)
-        local page = self[TAB_COMPONENT[self.tab]]
-        local content = self.tab == "settings" and page:build() or page:content()
-        local content_h = self:contentHeight()
-        local top_h = UI.topBarH()
-        if content.dimen then
-            content.dimen.w = sw
-            content.dimen.h = content_h
-        else
-            content.dimen = Geom:new{ w = sw, h = content_h }
-        end
-        content.overlap_offset = { 0, top_h }
-
-        local top = self.topbar:build()
-        top.overlap_offset = { 0, 0 }
-
+        local sw, sh = Screen:getWidth(), Screen:getHeight()
         local bar = self.bottombar:build(self._tabs, self.tab)
         bar.overlap_offset = { 0, sh - UI.barH() }
-
-        local root = OverlapGroup:new{
-            dimen = Geom:new{ w = sw, h = sh },
-            content,
-            top,
-            bar,
-        }
-        local frame = FrameContainer:new{
+        if root then
+            local page = self[TAB_COMPONENT[self.tab]]
+            local content = self.tab == "settings" and page:build() or page:content()
+            local h = self:contentHeight()
+            if content.dimen then
+                content.dimen.w = sw
+                content.dimen.h = h
+            else
+                content.dimen = Geom:new{ w = sw, h = h }
+            end
+            content.overlap_offset = { 0, UI.topBarH() }
+            local old = root[1]
+            root[1] = content
+            if old and old.free then old:free() end
+            old = root[3]
+            root[3] = bar
+            if old and old.free then old:free() end
+            return
+        end
+        pcall(function() require("utils.font").applyCurrent() end)
+        -- FrameContainer:getSize 固定读 self[1]，空壳不能用无孩子的 FrameContainer。
+        -- 外层已经是白底，这里只要占住内容槽尺寸。
+        local content = Widget:new{ dimen = Geom:new{ w = sw, h = self:contentHeight() } }
+        content.overlap_offset = { 0, UI.topBarH() }
+        local top = self.topbar:build()
+        top.overlap_offset = { 0, 0 }
+        self[1] = FrameContainer:new{
             bordersize = 0,
             padding = 0,
             margin = 0,
             background = Blitbuffer.COLOR_WHITE,
-            root,
+            OverlapGroup:new{
+                dimen = Geom:new{ w = sw, h = sh },
+                content, top, bar,
+            },
         }
-        -- 先建新树、后释放旧树。反过来的话，页面构建抛错时 self[1] 已经是被 free
-        -- 过的树，接下来照样会被 paintTo（下面只 return，不清 self[1]）。
-        -- 旧树必须显式释放：里面的图片 asyncBox 只在 free 时取消在飞下载/解码，
-        -- 否则每次切 Tab 都留下一批解好的 BlitBuffer 挂在孤立 widget 上等 GC。
-        local old = self[1]
-        self[1] = frame
-        if old and old.free then
-            old:free()
-        end
     end)
     logger.dbg("book.perf desktop.rebuild", Perf.elapsedMs(started_at), "ms",
         self.tab or "-", ok and "ok" or "failed")
@@ -398,7 +395,6 @@ function Desktop:rebuild()
         logger.err("book desktop rebuild failed:", err)
         local InfoMessage = require("ui/widget/infomessage")
         UIManager:show(InfoMessage:new{ text = _("桌面构建失败:\n") .. tostring(err) })
-        return
     end
     UIManager:setDirty(self, "ui")
 end
