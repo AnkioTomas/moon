@@ -34,9 +34,69 @@
 ---@class Lifecycle
 ---@field state LifecycleState 当前进入的阶段，处理异常不会回滚状态
 ---@field owner? table 组合模式的处理对象，其业务状态保持独立
+---@field jobs table[] Job.run 返回的任务
+---@field http table[] HTTP / 源异步返回的 { cancel }
 local Lifecycle = {}
 
 Lifecycle.__index = Lifecycle
+
+local ABORT_STAGES = { Pause = true, Stop = true, Destroy = true }
+
+--- 取消单个句柄。Job 是 :cancel()，HTTP 是 .cancel()，两种都能走这一下。
+---@param handle table|nil
+local function cancelOne(handle)
+    if type(handle) ~= "table" then return end
+    local cancel = handle.cancel
+    if type(cancel) == "function" then
+        pcall(cancel, handle)
+    end
+end
+
+--- 取消并清空 jobs / http。Pause 由 bind 先调；未走 bind 的实例自己调。
+function Lifecycle:abortWork()
+    local jobs = self.jobs
+    self.jobs = {}
+    if jobs then
+        for i = 1, #jobs do
+            cancelOne(jobs[i])
+        end
+    end
+    local http = self.http
+    self.http = {}
+    if http then
+        for i = 1, #http do
+            cancelOne(http[i])
+        end
+    end
+end
+
+--- 登记 Job。Pause / Stop / Destroy 时取消。
+---@param job table|nil
+---@return table|nil
+function Lifecycle:addJob(job)
+    if type(job) ~= "table" then return job end
+    local jobs = self.jobs
+    if not jobs then
+        jobs = {}
+        self.jobs = jobs
+    end
+    jobs[#jobs + 1] = job
+    return job
+end
+
+--- 登记 HTTP / 源异步句柄。Pause / Stop / Destroy 时取消。
+---@param handle table|nil
+---@return table|nil
+function Lifecycle:addHttp(handle)
+    if type(handle) ~= "table" then return handle end
+    local http = self.http
+    if not http then
+        http = {}
+        self.http = http
+    end
+    http[#http + 1] = handle
+    return handle
+end
 
 --- 实例级绑定，捕获子类覆写；不修改类或其他实例。
 ---@param lifecycle Lifecycle
@@ -47,6 +107,9 @@ local function bind(lifecycle, owner)
         local handler = owner[name]
         owner[name] = function(self, ...)
             lifecycle.state = stage
+            if ABORT_STAGES[stage] then
+                lifecycle:abortWork()
+            end
             if handler then return handler(self, ...) end
         end
     end
@@ -59,7 +122,7 @@ end
 ---
 ---@return Lifecycle
 function Lifecycle:new()
-    local instance = setmetatable({ state = "new" }, self)
+    local instance = setmetatable({ state = "new", jobs = {}, http = {} }, self)
     bind(instance, instance)
     return instance
 end
@@ -68,7 +131,7 @@ end
 ---@param owner table
 ---@return Lifecycle
 function Lifecycle.attach(owner)
-    local lifecycle = setmetatable({ owner = owner, state = "new" }, Lifecycle)
+    local lifecycle = setmetatable({ owner = owner, state = "new", jobs = {}, http = {} }, Lifecycle)
     bind(lifecycle, owner)
     return lifecycle
 end
@@ -155,11 +218,8 @@ end
 ---
 --- 表示暂时不应该继续执行活跃任务，但本身仍然存在。
 ---
---- 适合进行：
----   - 暂停后台任务
----   - 暂停定时器
----   - 暂停 UI 更新
----   - 暂停不必要的资源消耗
+--- bind 会先 abortWork()，取消 jobs / http，再进到这里。
+--- 子类只处理 UI / 定时器等不在那两张表里的东西。
 ---
 --- 暂停后仍然可以通过 onResume() 恢复工作。
 function Lifecycle:onPause()
