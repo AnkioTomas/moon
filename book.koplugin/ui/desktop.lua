@@ -148,6 +148,23 @@ function Desktop:onEvent(event, payload)
     broadcast(self, "onEvent", event, payload)
 end
 
+-- KOReader 广播：桌面在栈上时转到内部 onEvent，顶栏自己认。
+local KO_EVENTS = {
+    "NetworkConnected",
+    "NetworkDisconnected",
+    "NetworkConnecting",
+    "NetworkDisconnecting",
+    "FrontlightStateChanged",
+    "Charging",
+    "NotCharging",
+}
+for i = 1, #KO_EVENTS do
+    local event = KO_EVENTS[i]
+    Desktop["on" .. event] = function(self)
+        self:onEvent(event)
+    end
+end
+
 --- 初始化手势区与默认分页状态，再 onCreate 画出第一帧。
 function Desktop:init()
     self.lifecycle = Lifecycle.attach(self)
@@ -376,7 +393,7 @@ function Desktop:rebuild()
         -- 外层已经是白底，这里只要占住内容槽尺寸。
         local content = Widget:new{ dimen = Geom:new{ w = sw, h = self:contentHeight() } }
         content.overlap_offset = { 0, UI.topBarH() }
-        local top = self.topbar:build()
+        local top = self.topbar.widget or self.topbar:build()
         top.overlap_offset = { 0, 0 }
         self[1] = FrameContainer:new{
             bordersize = 0,

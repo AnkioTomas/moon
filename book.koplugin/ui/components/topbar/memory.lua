@@ -1,5 +1,5 @@
 --[[--
-顶栏剩余内存。唤醒时原地刷新。
+顶栏剩余内存。Resume 起每 120 秒刷新。
 
 @module koplugin.book.ui.components.topbar.memory
 --]]
@@ -7,14 +7,11 @@
 local util = require("util")
 local Base = require("ui.components.topbar.base")
 
+---@class BookTopBarMemory : BookTopBarItem
 local Memory = setmetatable({}, Base)
 Memory.__index = Memory
 Memory.id = "memory"
-
-function Memory:onResume()
-    local text, icon = self:read()
-    self:updateMetric(icon, text)
-end
+Memory.interval = 120
 
 ---@return string|nil
 function Memory:read()

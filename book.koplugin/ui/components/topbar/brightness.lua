@@ -1,5 +1,5 @@
 --[[--
-顶栏前光亮度。唤醒时原地刷新。
+顶栏前光亮度。前光状态事件立刻刷。
 
 @module koplugin.book.ui.components.topbar.brightness
 --]]
@@ -7,13 +7,16 @@
 local Device = require("device")
 local Base = require("ui.components.topbar.base")
 
+---@class BookTopBarBrightness : BookTopBarItem
 local Brightness = setmetatable({}, Base)
 Brightness.__index = Brightness
 Brightness.id = "brightness"
 
-function Brightness:onResume()
-    local text, icon = self:read()
-    self:updateMetric(icon, text)
+---@param event string|table
+function Brightness:onEvent(event)
+    if event == "FrontlightStateChanged" then
+        self:refresh()
+    end
 end
 
 ---@return string|nil
