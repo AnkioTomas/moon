@@ -17,7 +17,7 @@
 
 各阶段职责独立，**禁止生命周期方法互相调用或互设别名**。调用顺序由拥有者编排，Lifecycle 不校验转换顺序、不自动补调阶段，也不跳过重复调用。组件应避免重复注册监听、重复调度或重复释放资源。
 
-业务事件 `onEvent(event, payload)` 不改变生命周期状态，不能通过 `dispatch()` 分发业务事件。
+业务事件 `onEvent(event, payload)` 不改变生命周期状态，不能通过 `dispatch()` 分发业务事件。Desktop:onEvent 只广播；换源先改自己的 source/tab。详情走 `Detail.open`，设置子页走 `Settings:showSub`，不要再经 Desktop 分流。
 
 ## 继承
 
@@ -39,7 +39,7 @@ assert(component:uiReady())
 
 `Lifecycle:new()` 在实例上绑定六个阶段方法，因此子类覆写的方法也会记录状态。处理方法必须在构造前定义，绑定后不要重新赋值覆盖这些方法。
 
-自定义构造函数需要调用 `Lifecycle.new(self)`，再补充业务字段；仅用 `setmetatable({}, self)` 不会执行绑定。继承模式的 `state` 保留给生命周期，不能再用作页面数据字段。
+子类直接 `Class:new()`，走继承来的构造；不要再写一遍 `Lifecycle.new`。业务字段用的时候再赋值。仅用 `setmetatable({}, self)` 不会执行绑定。继承模式的 `state` 保留给生命周期，不能再用作页面数据字段。
 
 ## 组合
 
@@ -71,6 +71,19 @@ end
 它用于判断异步回调能否提交 UI 更新，不保证控件存在，也不判断窗口遮挡、请求是否过期或数据是否属于当前源。任务取消和旧回调的身份校验仍由任务拥有者负责。
 
 `Alive()` 判断是否处于活跃状态：`new`、`Create`、`Start`、`Resume` 返回 true，`Pause`、`Stop`、`Destroy` 返回 false。不记录历史，不增加状态字段。
+
+## jobs / http
+
+每个 Lifecycle 实例（`new` / `attach`）自带 `jobs` 和 `http` 两张表。组件自己的异步句柄入表，不要另挂模块级 `_job`。
+
+| 表 | 登记 | 句柄 |
+| --- | --- | --- |
+| `jobs` | `self:addJob(job)` | `Job.run` 返回值，`:cancel()` |
+| `http` | `self:addHttp(handle)` | HTTP / 源异步的 `{ cancel }` |
+
+组合模式把句柄登记到该对象自己的 `lifecycle:addHttp` / `addJob`，不要塞进 Desktop。Desktop 只转发阶段，各子组件 Pause 时取消自己的表。
+
+进入 `Pause` / `Stop` / `Destroy` 时 bind 先 `abortWork()` 取消两张表，再调用组件自己的 `onPause` 等。未走 `Lifecycle.new` / `attach` 的实例（例如 Home 占用了 `state` 做页面数据）必须在自己的 `onPause` 里调用 `self:abortWork()`。
 
 ## 父子组件约定
 

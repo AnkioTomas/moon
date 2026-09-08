@@ -119,18 +119,12 @@ end
 --- 创建一个 Lifecycle 实例。
 ---
 --- 子类可以通过继承 Lifecycle，并调用 new() 创建实例。
---- 业务字段放进 o 一次构造，不要 new 完再补。
 ---
----@param o table|nil
 ---@return Lifecycle
-function Lifecycle:new(o)
-    o = o or {}
-    o.state = "new"
-    o.jobs = {}
-    o.http = {}
-    setmetatable(o, self)
-    bind(o, o)
-    return o
+function Lifecycle:new()
+    local instance = setmetatable({ state = "new", jobs = {}, http = {} }, self)
+    bind(instance, instance)
+    return instance
 end
 
 --- 为已有父类的控件创建独立生命周期对象。
