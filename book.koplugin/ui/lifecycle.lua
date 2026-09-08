@@ -75,9 +75,18 @@ end
 
 --- 仅 Resume 阶段允许修改 UI；不判断控件存在性或窗口遮挡。
 ---@return boolean
-function Lifecycle:uiAvailable()
+function Lifecycle:uiReady()
     return self.state == "Resume"
 end
+
+--- 是否处于活跃状态；Pause、Stop、Destroy 返回 false。
+---@return boolean
+function Lifecycle:Alive()
+    return self.state == "new" or self.state == "Create"
+        or self.state == "Start" or self.state == "Resume"
+end
+
+
 
 --- 按名称分发，不限制调用顺序；每次调用都执行对应方法，异常原样传播。
 ---@param event LifecycleStage

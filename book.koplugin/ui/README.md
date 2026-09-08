@@ -34,7 +34,7 @@ local component = Component:new()
 component:onCreate()
 component:onStart()
 component:onResume()
-assert(component:uiAvailable())
+assert(component:uiReady())
 ```
 
 `Lifecycle:new()` 在实例上绑定六个阶段方法，因此子类覆写的方法也会记录状态。处理方法必须在构造前定义，绑定后不要重新赋值覆盖这些方法。
@@ -66,9 +66,11 @@ end
 
 `dispatch(stage, ...)` 接受表中六个阶段名，记录状态并调用对应的 `onXxx(...)`；参数和返回值原样传递。它与直接调用绑定后的阶段方法一样，每次都会执行处理函数。
 
-`uiAvailable()` 仅在 `state == "Resume"` 时返回 `true`。继承模式调用 `component:uiAvailable()`；组合模式调用 `desktop.lifecycle:uiAvailable()`。
+`uiReady()` 仅在 `state == "Resume"` 时返回 `true`。继承模式调用 `component:uiReady()`；组合模式调用 `desktop.lifecycle:uiReady()`。
 
 它用于判断异步回调能否提交 UI 更新，不保证控件存在，也不判断窗口遮挡、请求是否过期或数据是否属于当前源。任务取消和旧回调的身份校验仍由任务拥有者负责。
+
+`Alive()` 判断是否处于活跃状态：`new`、`Create`、`Start`、`Resume` 返回 true，`Pause`、`Stop`、`Destroy` 返回 false。不记录历史，不增加状态字段。
 
 ## 父子组件约定
 
