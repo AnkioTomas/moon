@@ -31,6 +31,7 @@ local Screen = Device.screen
 local UI = require("ui.components.bookui")
 local Lifecycle = require("ui.lifecycle")
 local logger = require("utils.log")
+local NativePanel = require("ui.panel.native")
 
 local Base = require("ui.components.topbar.base")
 local Clock = require("ui.components.topbar.clock")
@@ -136,12 +137,47 @@ function TopBar:onDestroy()
     emit(self, "onDestroy")
 end
 
+---@param event string|table
+---@param payload any
+function TopBar:onEvent(event, payload)
+    if self._closed then return end
+    for _, child in ipairs(self._children) do
+        if child.onEvent then child:onEvent(event, payload) end
+    end
+end
+
 function TopBar:sourceTapRect()
     return self.source and self.source.rect
 end
 
 function TopBar:cacheTapRect()
     return self.cache and self.cache.rect
+end
+
+function TopBar:onSwipe(_, ges_ev)
+    if type(ges_ev) == "table" and ges_ev.direction == "south" then
+        NativePanel.show("desktop")
+    end
+    return true
+end
+
+function TopBar:onTap(_, ges)
+    local desktop = self.desktop
+    if ges and ges.pos and desktop then
+        local x, y = ges.pos.x, ges.pos.y
+        local rect = self:cacheTapRect()
+        if rect and x >= rect.x and x < rect.x + rect.w and y >= rect.y and y < rect.y + rect.h then
+            self.cache:show()
+            return true
+        end
+        rect = self:sourceTapRect()
+        if rect and x >= rect.x and x < rect.x + rect.w and y >= rect.y and y < rect.y + rect.h then
+            desktop.settings.source:pickActive(desktop, desktop.plugin)
+            return true
+        end
+    end
+    NativePanel.show("desktop")
+    return true
 end
 
 --- 记录组件在顶栏上的区域，供点击和局部刷新使用。
