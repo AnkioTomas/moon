@@ -157,7 +157,8 @@ function Desktop:init()
     self.store = StorePage.new(self)
     self.insight = Insight.new(self)
     self.settings = Settings.new(self)
-    self.topbar = TopBar.new(self)
+    self.topbar = TopBar:new()
+    self.topbar.desktop = self
     self.bottombar = BottomBar.new()
     clampTab(self)
     self.ges_events = {
@@ -326,7 +327,7 @@ function Desktop:onSwipe(_, ges_ev)
     return true
 end
 
---- 切换底栏 Tab 并重建；进页时清对应缓存状态。
+--- 切换底栏 Tab 并重建。页数据跟着页对象走，不在切入时拆掉。
 ---@param id string
 function Desktop:switchTab(id)
     if not TAB_COMPONENT[id] then return end
@@ -335,9 +336,6 @@ function Desktop:switchTab(id)
     self.tab = id
     local page = self[TAB_COMPONENT[id]]
     notify(page, "onResume", changed)
-    if id == "home" then
-        return
-    end
     self:rebuild()
 end
 
