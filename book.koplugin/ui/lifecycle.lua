@@ -1,4 +1,4 @@
---[[
+--[[--
     KOReader  Lifecycle 基类
 
     用于定义统一的生命周期和事件入口。
@@ -22,22 +22,72 @@
         事件：
             描述「现在发生了什么事情」
 
-    具体可以继承 Lifecycle，并按需重写生命周期
-    或事件处理方法。
+    继承：Subclass:new()；组合：Lifecycle.attach(owner)。
+    dispatch("Create") 等负责记录 state 并调用对应阶段，不自动补调其他阶段。
+    new/attach 绑定后的 onXxx 直接调用也记录状态，但不校验转换顺序。
+    阶段处理函数应在 new/attach 前定义，不在绑定后替换。
+    @module koplugin.book.ui.lifecycle
 --]]
 
+---@alias LifecycleState 'new'|'Create'|'Start'|'Resume'|'Pause'|'Stop'|'Destroy'
+---@alias LifecycleStage 'Create'|'Start'|'Resume'|'Pause'|'Stop'|'Destroy'
+---@class Lifecycle
+---@field state LifecycleState 当前进入的阶段，处理异常不会回滚状态
+---@field owner? table 组合模式的处理对象，其业务状态保持独立
 local Lifecycle = {}
 
 Lifecycle.__index = Lifecycle
+
+--- 实例级绑定，捕获子类覆写；不修改类或其他实例。
+---@param lifecycle Lifecycle
+---@param owner table
+local function bind(lifecycle, owner)
+    for _, stage in ipairs({ "Create", "Start", "Resume", "Pause", "Stop", "Destroy" }) do
+        local name = "on" .. stage
+        local handler = owner[name]
+        owner[name] = function(self, ...)
+            lifecycle.state = stage
+            if handler then return handler(self, ...) end
+        end
+    end
+end
 
 
 --- 创建一个 Lifecycle 实例。
 ---
 --- 子类可以通过继承 Lifecycle，并调用 new() 创建实例。
 ---
---- @return table Lifecycle 实例
+---@return Lifecycle
 function Lifecycle:new()
-    return setmetatable({}, self)
+    local instance = setmetatable({ state = "new" }, self)
+    bind(instance, instance)
+    return instance
+end
+
+--- 为已有父类的控件创建独立生命周期对象。
+---@param owner table
+---@return Lifecycle
+function Lifecycle.attach(owner)
+    local lifecycle = setmetatable({ owner = owner, state = "new" }, Lifecycle)
+    bind(lifecycle, owner)
+    return lifecycle
+end
+
+--- 仅 Resume 阶段允许修改 UI；不判断控件存在性或窗口遮挡。
+---@return boolean
+function Lifecycle:uiAvailable()
+    return self.state == "Resume"
+end
+
+--- 按名称分发，不限制调用顺序；每次调用都执行对应方法，异常原样传播。
+---@param event LifecycleStage
+---@param ... any 阶段处理参数
+---@return any ... 阶段处理函数的返回值
+function Lifecycle:dispatch(event, ...)
+    self.state = event
+    local owner = self.owner or self
+    local handler = owner["on" .. event]
+    if handler then return handler(owner, ...) end
 end
 
 
