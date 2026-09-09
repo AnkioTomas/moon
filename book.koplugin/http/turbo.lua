@@ -194,7 +194,10 @@ function Turbo.acquire()
     inflight = inflight + 1
     if inflight == 1 then
         if not pump then
-            pump = { waitEvent = kick }
+            pump = {
+                waitEvent = kick,
+                stop = function() end,
+            }
             UIManager:insertZMQ(pump)
         end
         UIManager:nextTick(kick)
