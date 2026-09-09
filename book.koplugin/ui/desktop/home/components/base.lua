@@ -1,55 +1,17 @@
 --[[--
-首页组件注册表。
+首页子组件基类：Lifecycle。书架和日数据在 Home 上，孩子读 self.home。
 
 @module koplugin.book.ui.desktop.home.components.base
 --]]
 
-local MoonSettings = require("utils.settings")
-local _ = require("gettext")
+local Lifecycle = require("ui.lifecycle")
 
-local M = {}
+---@class BookHomeComponent : Lifecycle
+---@field id string
+---@field label string
+---@field icon string
+---@field home BookHome|nil
+local Base = setmetatable({}, Lifecycle)
+Base.__index = Base
 
-local DEFAULT_COMPONENTS = { "recent_hero", "recent_list" }
-
-local COMPONENT_MODULES = {
-    "clock", "stats", "hitokoto", "excerpt",
-    "recent_hero", "recent_list", "recent_cards",
-}
-
-M.components = {}
-local by_id = {}
-
-for _, name in ipairs(COMPONENT_MODULES) do
-    local component = require("ui.desktop.home.components." .. name)
-    M.components[#M.components + 1] = component
-    by_id[component.id] = component
-end
-
---- 按 id 查找组件定义。
----@param id string|nil
----@return table|nil
-function M.find(id)
-    return id and by_id[id] or nil
-end
-
---- 读取并净化用户启用的有序组件 id 列表。
----@return string[]
-function M.enabledLayout()
-    local raw = MoonSettings.get("home").home_layout
-    if type(raw) ~= "table" or #raw == 0 then
-        return { DEFAULT_COMPONENTS[1], DEFAULT_COMPONENTS[2] }
-    end
-    local out, seen = {}, {}
-    for _, id in ipairs(raw) do
-        if type(id) == "string" and id ~= "" and not seen[id] and M.find(id) then
-            seen[id] = true
-            out[#out + 1] = id
-        end
-    end
-    if #out == 0 then
-        return { DEFAULT_COMPONENTS[1], DEFAULT_COMPONENTS[2] }
-    end
-    return out
-end
-
-return M
+return Base
