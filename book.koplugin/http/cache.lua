@@ -84,11 +84,9 @@ function Cache.getAsync(key, cb)
         cb(nil)
     end)
 
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
-        end,
-    }
+        end }
 end
 
 --- 写入缓存；ttl<=0 或 value 无法 JSON 编码则跳过。

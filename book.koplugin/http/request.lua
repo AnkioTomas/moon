@@ -147,7 +147,7 @@ local function closeClient(client)
 end
 
 --- 拼 turbo HTTPClient:fetch 的 kwargs。timeout 是未传 opts.timeout 时的默认秒。
----@param opts HttpRequestOpts
+---@param opts HttpRequest
 ---@param user_agent any
 ---@param timeout number
 ---@return table
@@ -205,7 +205,7 @@ end
 ------------------------------------------------------------------------
 
 --- 非阻塞 HTTP。err 非 nil 时不要信任 res.body。
----@param opts HttpRequestOpts
+---@param opts HttpRequest
 ---@param cb fun(res: table|nil, err: any)
 ---@return HttpJob
 function Request.request(opts, cb)
@@ -287,6 +287,7 @@ function Request.request(opts, cb)
 end
 
 --- GET / POST 共用：成功 cb(body, nil, res)，失败 cb(nil, err, res)。
+--- GET 且 cache_ttl>0 时先读 http.cache，命中不触网；成功才写入。
 ---@param method string
 ---@param url string
 ---@param body string|nil
@@ -294,37 +295,82 @@ end
 ---@param cb fun(body: string|nil, err: any, res: table|nil)
 ---@return HttpJob
 local function send(method, url, body, opts, cb)
-    if not NetworkMgr:isOnline() then
-        cb(nil, _("网络不可用，请先连接 Wi-Fi"))
-        return { cancel = function() end }
-    end
     opts = opts or {}
-    local headers = Header.forRequest(opts.headers, opts.accept)
-    if method == "POST" and body ~= nil then
-        body = tostring(body)
-        headers["Content-Type"] = opts.content_type
-            or headers["Content-Type"]
-            or "application/x-www-form-urlencoded"
-    end
-    return Request.request({
-        url = url,
-        method = method,
-        body = body,
-        headers = headers,
-        timeout = opts.timeout or opts.block_timeout or 30,
-        connect_timeout = opts.connect_timeout or 10,
-        allow_redirects = opts.allow_redirects,
-        auth_username = opts.user or opts.auth_username,
-        auth_password = opts.password or opts.auth_password,
-    }, function(res, err)
-        if err then
-            cb(nil, err, res)
-        elseif not Request.ok(res and res.code) then
-            cb(nil, T(_("HTTP %1"), tostring(res and res.code)), res)
-        else
-            cb(res.body or "", nil, res)
+    local cache_ttl = method == "GET" and (tonumber(opts.cache_ttl) or 0) or 0
+    local cache_key = cache_ttl > 0 and Cache.key(method, url, opts.query) or nil
+    local cancelled = false
+    local cache_job
+    local request_job
+
+    local function doRequest()
+        if cancelled then
+            return
         end
-    end)
+        if not NetworkMgr:isOnline() then
+            cb(nil, _("网络不可用，请先连接 Wi-Fi"))
+            return
+        end
+        local headers = Header.forRequest(opts.headers, opts.accept)
+        if method == "POST" and body ~= nil then
+            body = tostring(body)
+            headers["Content-Type"] = opts.content_type
+                or headers["Content-Type"]
+                or "application/x-www-form-urlencoded"
+        end
+        request_job = Request.request({
+            url = url,
+            method = method,
+            body = body,
+            headers = headers,
+            timeout = opts.timeout or opts.block_timeout or 30,
+            connect_timeout = opts.connect_timeout or 10,
+            allow_redirects = opts.allow_redirects,
+            auth_username = opts.user or opts.auth_username,
+            auth_password = opts.password or opts.auth_password,
+        }, function(res, err)
+            if cancelled then
+                return
+            end
+            if err then
+                cb(nil, err, res)
+            elseif not Request.ok(res and res.code) then
+                cb(nil, T(_("HTTP %1"), tostring(res and res.code)), res)
+            else
+                local payload = res.body or ""
+                if cache_key then
+                    Cache.set(cache_key, payload, cache_ttl)
+                end
+                cb(payload, nil, res)
+            end
+        end)
+    end
+
+    if cache_key then
+        cache_job = Cache.getAsync(cache_key, function(hit)
+            if cancelled then
+                return
+            end
+            if hit ~= nil then
+                cb(type(hit) == "string" and hit or tostring(hit))
+                return
+            end
+            doRequest()
+        end)
+    else
+        doRequest()
+    end
+
+    return {
+        cancel = function()
+            cancelled = true
+            if cache_job then
+                cache_job.cancel()
+            end
+            if request_job then
+                request_job.cancel()
+            end
+        end,
+    }
 end
 
 --- GET。成功 cb(body, nil, res)，失败 cb(nil, err, res)。
@@ -348,7 +394,7 @@ end
 
 --- 流式 HTTP：body 到达即 on_data，结束时 on_done(err)。
 --- 用于 SSE / chunked。官方 turbo 会把整段 body 攒内存，这里改读路径。
----@param opts HttpRequestOpts
+---@param opts HttpRequest
 ---@param handlers HttpStreamHandlers|nil
 ---@return HttpJob
 function Request.stream(opts, handlers)
@@ -531,7 +577,7 @@ end
 ------------------------------------------------------------------------
 
 --- 非阻塞下载：写入 dest.part，成功后原子改名为 dest。
----@param opts HttpRequestOpts 可带 on_progress / max_bytes
+---@param opts HttpRequest 可带 on_progress / max_bytes
 ---@param dest string
 ---@param cb fun(ok: boolean, err: any, res: table|nil)
 ---@return HttpJob
@@ -615,7 +661,7 @@ function Request.download(opts, dest, cb)
 
     return makeJob(state, function()
         logger.dbg("book.http download cancel", target)
-        if stream_job then stream_job.cancel() end
+        if stream_job then stream_job:cancel() end
         if file then pcall(function() file:close() end); file = nil end
         pcall(os.remove, tmp)
     end)
