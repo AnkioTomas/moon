@@ -95,4 +95,51 @@ function Hitokoto:load()
     return Hitokoto.fallback()
 end
 
+--- 「作者 · 作品」拆成右侧两行；拆不开就整段当作者。
+---@param source string|nil
+---@return string
+---@return string
+local function splitSource(source)
+    source = type(source) == "string" and source or ""
+    local who, work = source:match("^(.-) · (.+)$")
+    if who and work then return who, work end
+    return source, ""
+end
+
+---@param pool { text: string, author: string, title: string }[]
+---@param avoid string|nil
+---@return { text: string, author: string, title: string }
+local function choose(pool, avoid)
+    if #pool == 0 then return { text = "", author = "", title = "" } end
+    if #pool == 1 then return pool[1] end
+    local i = math.random(#pool)
+    if avoid and pool[i].text == avoid then
+        i = i % #pool + 1
+    end
+    return pool[i]
+end
+
+--- 首页一言：回退句 + 缓存 + 当日日报，resume 随机抽，不跟日缓存绑死。
+---@param daily { quote_text: string|nil, quote_from: string|nil }|nil
+---@param avoid string|nil
+---@return { text: string, author: string, title: string }
+function Hitokoto.random(daily, avoid)
+    local seen, pool = {}, {}
+    local function push(text, source)
+        if type(text) ~= "string" or text == "" or seen[text] then return end
+        seen[text] = true
+        local author, title = splitSource(source)
+        pool[#pool + 1] = { text = text, author = author, title = title }
+    end
+    for i = 1, #FALLBACKS do
+        push(FALLBACKS[i].text, FALLBACKS[i].source)
+    end
+    local settings = MoonSettings.get()
+    push(settings.lock_screen_quote_cache, settings.lock_screen_quote_source_cache)
+    if type(daily) == "table" then
+        push(daily.quote_text, daily.quote_from)
+    end
+    return choose(pool, avoid)
+end
+
 return Hitokoto
