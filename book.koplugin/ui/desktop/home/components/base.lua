@@ -1,5 +1,5 @@
 --[[--
-首页子组件基类：Lifecycle。书架和日数据在 Home 上，孩子读 self.home。
+首页子组件基类：Lifecycle。数据各自读 catalog / online；home 只是父拼装器。
 
 @module koplugin.book.ui.desktop.home.components.base
 --]]
