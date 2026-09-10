@@ -109,22 +109,22 @@ function M:updateView()
 end
 
 function M:onResume()
-    calendar(self):onResume()
+    if self.calendar then self.calendar:onResume() end
     self:updateView()
 end
 
 function M:onPause()
     if self._tick then UIManager:unschedule(self._tick) end
     self._tick = nil
-    calendar(self):onPause()
+    if self.calendar then self.calendar:onPause() end
 end
 
 function M:onStop()
-    calendar(self):onStop()
+    if self.calendar then self.calendar:onStop() end
 end
 
 function M:onDestroy()
-    calendar(self):onDestroy()
+    if self.calendar then self.calendar:onDestroy() end
     self.time_widget = nil
     self.region = nil
     self.desktop = nil
