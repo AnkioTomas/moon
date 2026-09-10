@@ -22,7 +22,8 @@
         事件：
             描述「现在发生了什么事情」
 
-    继承：Subclass:new()；组合：Lifecycle.attach(owner)。
+    继承：Subclass:new(init?)；组合：Lifecycle.attach(owner)。
+    new 可收可选 init 表，字段拷进实例；state / jobs / http 由框架覆盖，调用方表不被改写。
     dispatch("Create") 等负责记录 state 并调用对应阶段，不自动补调其他阶段。
     new/attach 绑定后的 onXxx 直接调用也记录状态，但不校验转换顺序。
     阶段处理函数应在 new/attach 前定义，不在绑定后替换。
@@ -118,13 +119,24 @@ end
 
 --- 创建一个 Lifecycle 实例。
 ---
---- 子类可以通过继承 Lifecycle，并调用 new() 创建实例。
+--- 子类：`Subclass:new()` 或 `Subclass:new({ field = value })`。
+--- init 可选；拷贝字段到新表，不改写调用方。state / jobs / http 始终由框架写入。
 ---
 ---@generic T : Lifecycle
 ---@param self T
+---@param init table|nil
 ---@return T
-function Lifecycle:new()
-    local instance = setmetatable({ state = "new", jobs = {}, http = {} }, self)
+function Lifecycle:new(init)
+    local instance = {}
+    if type(init) == "table" then
+        for k, v in pairs(init) do
+            instance[k] = v
+        end
+    end
+    instance.state = "new"
+    instance.jobs = {}
+    instance.http = {}
+    setmetatable(instance, self)
     bind(instance, instance)
     return instance
 end
