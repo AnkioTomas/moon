@@ -16,6 +16,7 @@ local LineWidget = require("ui/widget/linewidget")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
 local Icon = require("ui.components.icon")
+local logger = require("utils.log")
 local _ = require("gettext")
 
 ---@class BookPageStrip
@@ -33,6 +34,7 @@ end
 ---@param on_tap fun() 点击命中区域时执行的回调
 ---@return table
 local function sideButton(name, enabled, on_tap)
+    logger.dbg("page strip button", name, enabled and "enabled" or "disabled")
     local size = UI.sz(36)
     local tap = InputContainer:new{ dimen = Geom:new{ w = size, h = size } }
     tap[1] = CenterContainer:new{
@@ -40,9 +42,8 @@ local function sideButton(name, enabled, on_tap)
         Icon.widget{
             name = name,
             size = 22,
-            -- 显式设置颜色；部分图标实现不会读取 dim，仅设置 dim 会仍保持黑色。
-            color = enabled and Blitbuffer.COLOR_BLACK or UI.muted(),
-            dim = not enabled,
+            -- 使用可见度更高的浅灰；UI.muted() 的 0x33 在部分屏幕上接近黑色。
+            color = enabled and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_9,
         },
     }
     if not enabled then return tap end
@@ -52,6 +53,7 @@ local function sideButton(name, enabled, on_tap)
         },
     }
     tap.onTapPageStrip = function()
+        logger.dbg("page strip tap", name)
         on_tap()
         return true
     end
@@ -128,6 +130,9 @@ function PageStrip.widget(opts)
     local page = math.max(1, math.floor(tonumber(opts.page) or 1))
     local pages = math.max(1, math.floor(tonumber(opts.pages) or 1))
     page = math.min(page, pages)
+    logger.dbg("page strip build", "page", page, "pages", pages,
+        "prev", page > 1, "next", page < pages,
+        "center", opts.center or "dots")
     local band_h = PageStrip.bandH()
     local side_w = UI.sz(44)
     local mid_w = math.max(1, width - side_w * 2)
