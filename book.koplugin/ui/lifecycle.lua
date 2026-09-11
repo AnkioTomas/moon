@@ -45,6 +45,7 @@ Lifecycle.__index = Lifecycle
 local logger = require("utils.log")
 
 local ABORT_STAGES = { Pause = true, Stop = true, Destroy = true }
+local BOUND = setmetatable({}, { __mode = "k" })
 
 -- 只补齐进入目标阶段所必需的边界阶段，不重放已经完成的阶段。
 local function completeBefore(lifecycle, owner, stage)
@@ -136,7 +137,7 @@ local function bind(lifecycle, owner)
     for _, stage in ipairs({ "Create", "Start", "Resume", "Pause", "Stop", "Destroy" }) do
         local name = "on" .. stage
         local handler = owner[name]
-        owner[name] = function(self, ...)
+        local wrapped = function(self, ...)
             if not completeBefore(lifecycle, self, stage) then return end
             local prev = lifecycle.state
             lifecycle.state = stage
@@ -146,6 +147,8 @@ local function bind(lifecycle, owner)
             end
             if handler then return handler(self, ...) end
         end
+        BOUND[wrapped] = true
+        owner[name] = wrapped
     end
 end
 
@@ -209,6 +212,9 @@ function Lifecycle:dispatch(event, ...)
     -- dispatch 也支持绑定后替换的处理函数：先补全，再交付最终阶段。
     if event == "Resume" or event == "Destroy" then
         completeBefore(self, owner, event)
+    end
+    if BOUND[handler] then
+        return handler(owner, ...)
     end
     self.state = event
     return handler(owner, ...)
