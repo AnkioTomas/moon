@@ -24,6 +24,7 @@
 
     继承：Subclass:new(init?)；组合：Lifecycle.attach(owner)。
     new 可收可选 init 表，字段拷进实例；state / jobs / http 由框架覆盖，调用方表不被改写。
+    阶段入口统一打 DEBUG 日志：book.lifecycle <name|id> <from> -> <stage>（受 book_debug_enabled）。
     dispatch("Create") 等负责记录 state 并调用对应阶段，不自动补调其他阶段。
     new/attach 绑定后的 onXxx 直接调用也记录状态，但不校验转换顺序。
     阶段处理函数应在 new/attach 前定义，不在绑定后替换。
@@ -41,7 +42,20 @@ local Lifecycle = {}
 
 Lifecycle.__index = Lifecycle
 
+local logger = require("utils.log")
+
 local ABORT_STAGES = { Pause = true, Stop = true, Destroy = true }
+
+--- 日志主体名：name / id，否则退回 tostring。
+---@param owner table
+---@return string
+local function subject(owner)
+    local tag = owner.name or owner.id
+    if type(tag) == "string" and tag ~= "" then
+        return tag
+    end
+    return tostring(owner)
+end
 
 --- 取消单个句柄。Job 是 :cancel()，HTTP 是 .cancel()，两种都能走这一下。
 ---@param handle table|nil
@@ -100,6 +114,7 @@ function Lifecycle:addHttp(handle)
 end
 
 --- 实例级绑定，捕获子类覆写；不修改类或其他实例。
+--- 每次阶段入口打 DEBUG 日志（受 book_debug_enabled 控制；无 logger 时静默）。
 ---@param lifecycle Lifecycle
 ---@param owner table
 local function bind(lifecycle, owner)
@@ -107,7 +122,9 @@ local function bind(lifecycle, owner)
         local name = "on" .. stage
         local handler = owner[name]
         owner[name] = function(self, ...)
+            local prev = lifecycle.state
             lifecycle.state = stage
+            logger.dbg("moon.lifecycle", subject(self), prev, "->", stage)
             if ABORT_STAGES[stage] then
                 lifecycle:abortWork()
             end
