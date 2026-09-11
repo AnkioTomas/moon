@@ -1,8 +1,11 @@
 --[[--
 Book 独立文件日志。
 
-同一天内重启继续追加日志，跨天首次启动时清空旧日志；后续日志积攒 10 条后经
-SimpleJob 批量追加到 $DATA/.moon/book.log，不经过 KOReader logger。
+同一天内重启继续追加日志，跨天首次启动时清空旧日志；后续日志积攒 10 条后经 nextTick
+批量追加到 $DATA/.moon/book.log。
+
+调试模式（book_debug_enabled）打开时：dbg/info 才写文件，且所有级别同步镜像到
+KOReader `logger`（crash.log / 控制台），方便和系统日志一起看。
 
 @module koplugin.book.utils.log
 --]]
@@ -17,6 +20,8 @@ local log_path
 local buffer = {}
 local flush_pending = false
 local flush_requested = false
+--- false=不可用；table=KOReader logger；nil=尚未探测。
+local ko_logger
 
 local function start()
     if started then return true end
@@ -84,12 +89,10 @@ scheduleFlush = function(force)
     end
 
     local ok = pcall(function()
-        require("workers.simple_job").run(function()
-            return writeBatch(batch)
-        end, {
-            on_done = complete,
-            on_failed = function() complete(false) end,
-        })
+        require("ui/uimanager"):nextTick(function()
+            local write_ok = writeBatch(batch)
+            complete(write_ok)
+        end)
     end)
     if not ok then complete(false) end
 end
@@ -114,6 +117,21 @@ local function debugEnabled()
     return ok and enabled == true
 end
 
+--- 调试模式下镜像到 KOReader logger；探测失败只记一次。
+---@param method string dbg|info|warn|err
+local function mirrorKo(method, ...)
+    if ko_logger == false then return end
+    if ko_logger == nil then
+        local ok, mod = pcall(require, "logger")
+        ko_logger = (ok and type(mod) == "table") and mod or false
+        if not ko_logger then return end
+    end
+    local fn = ko_logger[method]
+    if type(fn) == "function" then
+        pcall(fn, ...)
+    end
+end
+
 ---@return string
 function Log.path()
     return Paths.logPath()
@@ -124,30 +142,36 @@ function Log.start()
     start()
 end
 
---- 提交当前尾批；实际写盘仍在下一次 UI tick 的 SimpleJob 中完成。
+--- 提交当前尾批；实际写盘仍在下一次 UI tick 完成。
 ---@return nil
 function Log.flush()
     scheduleFlush(true)
 end
 
 function Log.dbg(...)
-    if debugEnabled() then
-        write("DEBUG", ...)
-    end
+    if not debugEnabled() then return end
+    write("DEBUG", ...)
+    mirrorKo("dbg", ...)
 end
 
 function Log.info(...)
-    if debugEnabled() then
-        write("INFO", ...)
-    end
+    if not debugEnabled() then return end
+    write("INFO", ...)
+    mirrorKo("info", ...)
 end
 
 function Log.warn(...)
     write("WARN", ...)
+    if debugEnabled() then
+        mirrorKo("warn", ...)
+    end
 end
 
 function Log.error(...)
     write("ERROR", ...)
+    if debugEnabled() then
+        mirrorKo("err", ...)
+    end
 end
 
 -- 兼容现有 KOReader logger.err 调用；迁移期间不改变调用方错误语义。
