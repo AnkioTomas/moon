@@ -25,7 +25,7 @@
     继承：Subclass:new(init?)；组合：Lifecycle.attach(owner)。
     new 可收可选 init 表，字段拷进实例；state / jobs / http 由框架覆盖，调用方表不被改写。
     阶段入口统一打 DEBUG 日志：book.lifecycle <name|id> <from> -> <stage>（受 book_debug_enabled）。
-    dispatch("Create") 等负责记录 state 并调用对应阶段，不自动补调其他阶段。
+    dispatch("Create") 等负责记录 state 并调用对应阶段；Resume / Destroy 会补齐必要阶段。
     new/attach 绑定后的 onXxx 直接调用也记录状态，但不校验转换顺序。
     阶段处理函数应在 new/attach 前定义，不在绑定后替换。
     @module koplugin.book.ui.lifecycle
@@ -45,6 +45,21 @@ Lifecycle.__index = Lifecycle
 local logger = require("utils.log")
 
 local ABORT_STAGES = { Pause = true, Stop = true, Destroy = true }
+
+-- 只补齐进入目标阶段所必需的边界阶段，不重放已经完成的阶段。
+local function completeBefore(lifecycle, owner, stage)
+    local state = lifecycle.state
+    if stage == "Resume" then
+        if state == "Destroy" then error("cannot resume destroyed lifecycle", 0) end
+        if state == "new" then owner:onCreate(); state = lifecycle.state end
+        if state == "Create" or state == "Stop" then owner:onStart() end
+    elseif stage == "Destroy" then
+        if state == "Destroy" then return false end
+        if state == "Resume" then owner:onPause(); state = lifecycle.state end
+        if state == "Create" or state == "Start" or state == "Pause" then owner:onStop() end
+    end
+    return true
+end
 
 --- 日志主体名：name / id，否则退回 tostring。
 ---@param owner table
@@ -122,6 +137,7 @@ local function bind(lifecycle, owner)
         local name = "on" .. stage
         local handler = owner[name]
         owner[name] = function(self, ...)
+            if not completeBefore(lifecycle, self, stage) then return end
             local prev = lifecycle.state
             lifecycle.state = stage
             logger.dbg("moon.lifecycle", subject(self), prev, "->", stage)
@@ -187,10 +203,15 @@ end
 ---@param ... any 阶段处理参数
 ---@return any ... 阶段处理函数的返回值
 function Lifecycle:dispatch(event, ...)
-    self.state = event
     local owner = self.owner or self
     local handler = owner["on" .. event]
-    if handler then return handler(owner, ...) end
+    if not handler then return end
+    -- dispatch 也支持绑定后替换的处理函数：先补全，再交付最终阶段。
+    if event == "Resume" or event == "Destroy" then
+        completeBefore(self, owner, event)
+    end
+    self.state = event
+    return handler(owner, ...)
 end
 
 
