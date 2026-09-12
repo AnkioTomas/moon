@@ -8,9 +8,9 @@
   +----------+     +----------+
 
   Image.widget{
-    src = "https://...",   -- 网络 URL → 缓存命中也先占位，后台解码后替换；
-                           -- 未命中先下载，再后台解码
-    -- src = "/abs/path.png"  -- 本地文件，后台解码
+    src = "https://...",   -- 网络 URL：磁盘缓存命中再出图；
+                           -- 未命中先下载，落地后再出图
+    -- src = "/abs/path.png"  -- 本地文件
     headers = { Authorization = "Bearer …" },  -- 仅网络请求
     width = n, height = n,
     alpha = true,
@@ -22,112 +22,89 @@
 
 UI 图标请用 ui.components.icon（Material Icons 字体），不要走本组件。
 
-  Image.abortPending()
   Image.fetchAsync(url, headers, function(path, err) end)  -- 只下载不显示（刮削封面）
+  Image.await(root, cb)  -- 已构建树内的图片落定后回调（锁屏写 PNG）
+  box:cancel()  -- 只取消这一张的下载
 
-下载直写磁盘，图片解码走 workers.job，不阻塞 UI 线程。
-占位尺寸固定；图片晚到时只刷新图片区域。
+下载单独限流。解码走 ImageWidget（file=，自带 BB 缓存），不 fork。
+小图（目标面积且文件都小）当场解；封面这种大图 nextTick 排队，一帧一张。
+
+@module koplugin.book.ui.components.image
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
-local ImageWidget = require("ui/widget/imagewidget")
 local UIManager = require("ui/uimanager")
 local Widget = require("ui/widget/widget")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local TextWidget = require("ui/widget/textwidget")
-local md5 = require("ffi/sha2").md5
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("utils.log")
 local UI = require("ui.components.bookui")
-local Paths = require("utils.paths")
-local Request = require("http.request")
-local JSON = require("json")
-local Job = require("workers.job")
+local Download = require("ui.components.image.download")
+local ImageWidget = require("ui/widget/imagewidget")
 
+---@class BookImage
 local Image = {}
 
-local EXTS = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg" }
-local dl_seq = 0
-local decode_seq = 0
-local jobs = {}
-local download_queue = {}
-local download_active_count = 0
-local download_paused = false
-local failed_urls = {}
-local decode_queue = {}
-local decode_active
-local MAX_DOWNLOAD_JOBS = 5
-local FAILED_URL_TTL = 5 * 60
-local failed_url_checks = 0
-local function reapFailedUrls()
-    failed_url_checks = failed_url_checks + 1
-    if failed_url_checks % 64 ~= 0 then return end
-    local now = os.time()
-    for url, expires in pairs(failed_urls) do
-        if expires <= now then failed_urls[url] = nil end
-    end
-end
-
---- 登记在飞下载 job（{ cancel }）。
----@param job table|nil
-local function rememberJob(job)
-    if not job then
-        return
-    end
-    jobs[#jobs + 1] = job
-end
-
---- 从在飞列表移除 job。
----@param job table|nil
-local function forgetJob(job)
-    if not job then
-        return
-    end
-    for i = #jobs, 1, -1 do
-        if jobs[i] == job then
-            table.remove(jobs, i)
+---- 等待一棵已构建 Widget 树内的图片落定。批次归调用者，不拦截全局构建。
+--- 取消只移除本批监听；图片任务由拥有 Widget 的视图释放。
+---@param root table 待遍历的 Widget 根节点或根节点数组
+---@param cb fun() 本次异步等待结束时执行的回调
+---@return table
+function Image.await(root, cb)
+    local pending, closed, finished = 0, false, false
+    local subscriptions = {}
+    local seen = {}
+    --- 记录一个子任务结束，所有子任务完成后通知调用者。
+    ---@return nil
+    local function done()
+        pending = pending - 1
+        if closed and pending == 0 and not finished then
+            finished = true
+            cb()
         end
     end
-end
-
---- 按文件头嗅探图片扩展名。
----@param path string
----@return string|nil
-local function sniffExt(path)
-    local f = io.open(path, "rb")
-    if not f then return nil end
-    local head = f:read(16) or ""
-    f:close()
-    if head:sub(1, 3) == "\255\216\255" then return ".jpg" end
-    if head:sub(1, 8) == "\137PNG\r\n\26\n" then return ".png" end
-    if head:sub(1, 4) == "RIFF" and head:sub(9, 12) == "WEBP" then return ".webp" end
-    if head:sub(1, 6) == "GIF87a" or head:sub(1, 6) == "GIF89a" then return ".gif" end
-    local lower = head:lower()
-    if lower:find("<svg", 1, true) or lower:find("<?xml", 1, true) then
-        return ".svg"
+    --- 遍历 Widget 数字索引子树，订阅未落定的图片，同一节点只访问一次。
+    ---@param widget table 参与布局或绘制的 Widget
+    ---@return nil
+    local function visit(widget)
+        if seen[widget] then return end
+        seen[widget] = true
+        if widget._image_waiters and not widget._settled then
+            pending = pending + 1
+            widget._image_waiters[done] = true
+            subscriptions[#subscriptions + 1] = widget
+        end
+        for _, child in ipairs(widget) do
+            if type(child) == "table" then visit(child) end
+        end
     end
-    return nil
+    visit(root)
+    closed = true
+    if pending == 0 then
+        finished = true
+        cb()
+    end
+    return { cancel = function()
+        finished = true
+        for _, widget in ipairs(subscriptions) do
+            widget._image_waiters[done] = nil
+        end
+    end }
 end
 
 --- 是否 HTTP(S) URL。
----@param src any
+---@param src any 图片来源地址或参与像素读取的源画布，具体形式由参数类型限定
 ---@return boolean
 local function isHttp(src)
     return type(src) == "string" and (src:match("^https?://") ~= nil)
 end
 
---- 网络图缓存路径前缀（无扩展名）。
----@param url string
----@return string
-local function cacheBase(url)
-    return Paths.imageRootDir() .. "/" .. md5(url)
-end
-
 --- 截断占位文案。
----@param fb any
+---@param fb any 图片不可用时显示的占位内容
 ---@return string
 local function truncFallback(fb)
     local label = fb or "?"
@@ -141,10 +118,10 @@ local function truncFallback(fb)
 end
 
 --- 居中并可选加边框包裹子控件。
----@param child table
----@param w number
----@param h number
----@param border boolean|nil
+---@param child table 要包装或接收事件的子控件
+---@param w number 可用宽度，单位像素
+---@param h number 可用高度，单位像素
+---@param border boolean|nil 是否绘制边框
 ---@return table
 local function frame(child, w, h, border)
     local centered = CenterContainer:new{
@@ -167,10 +144,10 @@ local function frame(child, w, h, border)
 end
 
 --- 空白或文案占位；border 时带边框（封面格子）。
----@param w number
----@param h number
----@param fb any
----@param border boolean|nil
+---@param w number 可用宽度，单位像素
+---@param h number 可用高度，单位像素
+---@param fb any 图片不可用时显示的占位内容
+---@param border boolean|nil 是否绘制边框
 ---@return table
 local function placeholder(w, h, fb, border)
     w = math.max(1, tonumber(w) or 1)
@@ -189,344 +166,15 @@ local function placeholder(w, h, fb, border)
     return frame(child, w, h, border)
 end
 
---- 同步解码为定尺寸 BB，再包成 ImageWidget。只给 sync=true 的离屏渲染使用。
----@param path string
----@param w number
----@param h number
----@param alpha boolean|nil
----@return table|nil
-local function decodeSync(path, w, h, alpha)
-    local RenderImage = require("ui/renderimage")
-    local bb = RenderImage:renderImageFile(path, false, w, h)
-    if not bb then
-        return nil
-    end
-    return ImageWidget:new{
-        image = bb,
-        image_disposable = true,
-        scale_factor = 1,
-        alpha = alpha and true or false,
-    }
-end
-
---- 子进程解码中间文件路径。
----@return string
-local function decodeTmpPath()
-    decode_seq = decode_seq + 1
-    return Paths.cacheDir() .. "/image-decode-" .. tostring(os.time()) .. "-" .. tostring(decode_seq) .. ".bin"
-end
-
---- 从序列化字符串重建 BB / ImageWidget（主进程只做 IPC 反序列化）。
----@param data string|nil
----@param alpha boolean|nil
----@return table|nil
-local function unmarshal(data, alpha)
-    if type(data) ~= "string" or data == "" then
-        return nil
-    end
-    local nl = data:find("\n", 1, true)
-    if not nl then
-        return nil
-    end
-    local ok, head = pcall(JSON.decode, data:sub(1, nl - 1))
-    if not ok or type(head) ~= "table" then
-        return nil
-    end
-    local pixels = data:sub(nl + 1)
-    if #pixels ~= head.stride * head.h then
-        return nil
-    end
-    local ok_bb, bb = pcall(Blitbuffer.fromstring, head.w, head.h, head.fmt, pixels, head.stride)
-    if not ok_bb or not bb then
-        return nil
-    end
-    return ImageWidget:new{
-        image = bb,
-        image_disposable = true,
-        scale_factor = 1,
-        alpha = alpha and true or false,
-    }
-end
-
---- 读取文件全部内容；失败返回 nil。
----@param path string|nil
----@return string|nil
-local function readFile(path)
-    if type(path) ~= "string" or path == "" then
-        return nil
-    end
-    local f = io.open(path, "rb")
-    if not f then
-        return nil
-    end
-    local data = f:read("*a")
-    f:close()
-    return data
-end
-
---- 读回并删除子进程写出的中间文件。
----@param raw string|nil
----@return string|nil
-local function readDecodedFile(raw)
-    local data = readFile(raw)
-    if raw then
-        os.remove(raw)
-    end
-    return data
-end
-
---- 启动下一个图片解码；全局只保留一个子进程，避免 CPU/内存争抢。
-local function pumpDecodeQueue()
-    if decode_active then return end
-    while decode_queue[1] and decode_queue[1].cancelled do
-        table.remove(decode_queue, 1)
-    end
-    local task = table.remove(decode_queue, 1)
-    if not task then return end
-
-    decode_active = task
-    Paths.ensureCacheRoot()
-    local tmp = decodeTmpPath()
-    task.tmp = tmp
-
-    local function finish(widget)
-        if decode_active ~= task then return end
-        decode_active = nil
-        task.job = nil
-        task.done = true
-        if not task.cancelled then
-            task.cb(widget)
-        end
-        pumpDecodeQueue()
-    end
-
-    task.job = Job.run(function()
-        local RenderImage = require("ui/renderimage")
-        local WorkerBlitbuffer = require("ffi/blitbuffer")
-        local bb = RenderImage:renderImageFile(task.path, false, task.w, task.h)
-        if not bb then
-            return nil
-        end
-        local header = JSON.encode{
-            w = tonumber(bb.w),
-            h = tonumber(bb.h),
-            stride = tonumber(bb.stride),
-            fmt = bb:getType(),
-        }
-        local pixels = WorkerBlitbuffer.tostring(bb)
-        bb:free()
-        local f = io.open(tmp, "wb")
-        if not f then
-            return nil
-        end
-        f:write(header, "\n", pixels)
-        f:close()
-        return tmp
-    end, {
-        name = "image.decode",
-        on_done = function(result)
-            finish(result and unmarshal(readDecodedFile(result), task.alpha) or nil)
-        end,
-        on_failed = function()
-            os.remove(tmp)
-            finish(nil)
-        end,
-        on_cancelled = function()
-            os.remove(tmp)
-            finish(nil)
-        end,
-    })
-end
-
---- 排队解码；abort 取消排队或终止正在解的子进程。
----@param path string
----@param w number
----@param h number
----@param alpha boolean|nil
----@param cb fun(widget: table|nil)
----@return table 可 abort 的任务句柄
-local function decodeAsync(path, w, h, alpha, cb)
-    local task = {
-        path = path,
-        w = w,
-        h = h,
-        alpha = alpha,
-        cb = cb,
-    }
-    decode_queue[#decode_queue + 1] = task
-    pumpDecodeQueue()
-    return {
-        abort = function()
-            if task.done or task.cancelled then return end
-            task.cancelled = true
-            if decode_active == task and task.job then
-                task.job:abort()
-            else
-                pumpDecodeQueue()
-            end
-        end,
-    }
-end
-
---- 已缓存的网络图路径；未命中返回 nil。
----@param url string
----@return string|nil
-local function cachedPath(url)
-    if type(url) ~= "string" or url == "" then
-        return nil
-    end
-    local base = cacheBase(url)
-    for _, ext in ipairs(EXTS) do
-        local path = base .. ext
-        local attr = lfs.attributes(path)
-        if attr and attr.mode == "file" and attr.size and attr.size > 0 then
-            return path
-        end
-    end
-    return nil
-end
-
---- 有限并发下载到缓存；成功回调最终路径（已缓存则下一拍直接回调）。
----@param url string
----@param headers table|nil
----@param cb fun(path: string|nil, err: string|nil)
----@return { cancel: fun() }
-local pumpDownloadQueue
-
---- 收口下载：失败清理临时文件，取消任务不回调。
----@param task table
----@param path string|nil
----@param err any
-local function completeDownload(task, path, err)
-    if not path then
-        pcall(os.remove, task.tmp)
-    end
-    pumpDownloadQueue()
-    if not task.cancelled then
-        task.cb(path, err)
-    end
-end
-
----@param task table
----@param ok boolean
----@param err any
-local function finishDownload(task, ok, err)
-    if task.settled then return end
-    task.settled = true
-    if task.running then
-        task.running = false
-        download_active_count = download_active_count - 1
-    end
-    if task.cancelled then
-        return completeDownload(task)
-    end
-    if not ok then
-        if tostring(err):find("HTTP 404", 1, true) then
-            failed_urls[task.url] = os.time() + FAILED_URL_TTL
-        end
-        return completeDownload(task, nil, err or "download failed")
-    end
-    local attr = lfs.attributes(task.tmp)
-    if not attr or not attr.size or attr.size < 1 then
-        return completeDownload(task, nil, "empty")
-    end
-    local ext = sniffExt(task.tmp)
-    if not ext then
-        local path = task.url:match("^[^%?#]+") or task.url
-        local from_url = path:match("%.([%w]+)$")
-        if from_url then
-            from_url = "." .. from_url:lower()
-            for _, candidate in ipairs(EXTS) do
-                if candidate == from_url then
-                    ext = candidate
-                    break
-                end
-            end
-        end
-    end
-    if not ext then
-        return completeDownload(task, nil, "unknown type")
-    end
-    local final = task.base .. ext
-    if not os.rename(task.tmp, final) then
-        return completeDownload(task, nil, "rename failed")
-    end
-    completeDownload(task, final)
-end
-
-pumpDownloadQueue = function()
-    if download_paused then return end
-    while download_active_count < MAX_DOWNLOAD_JOBS do
-        while download_queue[1] and download_queue[1].cancelled do
-            table.remove(download_queue, 1)
-        end
-        local task = table.remove(download_queue, 1)
-        if not task then return end
-        task.running = true
-        download_active_count = download_active_count + 1
-        task.request = Request.download({
-            url = task.url,
-            method = "GET",
-            headers = task.headers,
-            timeout = 60,
-            connect_timeout = 30,
-        }, task.tmp, function(ok, err)
-            finishDownload(task, ok, err)
-        end)
-    end
-end
-
-function Image.fetchAsync(url, headers, cb)
-    reapFailedUrls()
-    local cached = cachedPath(url)
-    if cached then
-        UIManager:nextTick(function() cb(cached) end)
-        return { cancel = function() end }
-    end
-    local retry_at = failed_urls[url]
-    if retry_at and retry_at > os.time() then
-        UIManager:nextTick(function() cb(nil, "HTTP 404") end)
-        return { cancel = function() end }
-    end
-    failed_urls[url] = nil
-    Paths.ensureImageRoot()
-    local base = cacheBase(url)
-    dl_seq = dl_seq + 1
-    local tmp = string.format("%s.%d.part", base, dl_seq)
-    local task = {
-        url = url,
-        headers = headers,
-        cb = cb,
-        base = base,
-        tmp = tmp,
-    }
-    download_queue[#download_queue + 1] = task
-    pumpDownloadQueue()
-    return {
-        cancel = function()
-            if task.settled or task.cancelled then return end
-            task.cancelled = true
-            task.settled = true
-            if task.running then
-                task.running = false
-                download_active_count = download_active_count - 1
-                if task.request then task.request.cancel() end
-            end
-            pcall(os.remove, tmp)
-            pumpDownloadQueue()
-        end,
-    }
-end
-
 --- 解析为可读路径。HTTP 查缓存；绝对路径直接用；其余相对插件根。
----@param src string
+---@param src string 图片来源地址或参与像素读取的源画布，具体形式由参数类型限定
 ---@return string|nil
 local function resolve(src)
     if type(src) ~= "string" or src == "" then
         return nil
     end
     if isHttp(src) then
-        return cachedPath(src)
+        return Download.cached(src)
     end
     if lfs.attributes(src, "mode") == "file" then
         return src
@@ -538,30 +186,73 @@ local function resolve(src)
     return nil
 end
 
---- 取消在飞下载与排队解码（桌面关闭 / 清缓存）。
-function Image.abortPending()
-    for i = 1, #decode_queue do
-        decode_queue[i].cancelled = true
+--- 只下载不解码。刮削封面用。取消走返回对象的 :cancel()。
+---@param url string 要下载的 HTTP(S) 图片地址
+---@param headers table|nil 图片下载所需的 HTTP 请求头
+---@param cb fun(path: string|nil, err: string|nil)
+---@return table
+function Image.fetchAsync(url, headers, cb)
+    return Download.new(url, headers, cb):start()
+end
+
+-- 小图：天气图标级别。超过任一阈值就排队，避免图书馆一页 12 张封面卡死拼页。
+local SMALL_PIXELS = 80 * 80
+local SMALL_BYTES = 32 * 1024
+
+local wait = {}
+local pumping = false
+
+--- 按目标像素数和文件体积判断图片能否立即解码。
+---@param path string 图片或书籍的本地文件路径
+---@param w number 可用宽度，单位像素
+---@param h number 可用高度，单位像素
+---@return boolean
+local function cheap(path, w, h)
+    if w * h > SMALL_PIXELS then
+        return false
     end
-    decode_queue = {}
-    if decode_active then
-        decode_active.cancelled = true
-        if decode_active.job then
-            decode_active.job:abort()
+    local attr = lfs.attributes(path)
+    local size = attr and tonumber(attr.size) or 0
+    return size <= SMALL_BYTES
+end
+
+--- 跳过失效图片任务，每个 UI tick 最多解码一张仍存活的排队图片。
+---@return nil
+local function pump()
+    pumping = false
+    while wait[1] do
+        local item = table.remove(wait, 1)
+        local box = item.box
+        if not box._alive then
+            box:_settle()
+        else
+            box:_applyFile(item.path)
+            box:_settle()
+            if wait[1] then
+                pumping = true
+                UIManager:nextTick(pump)
+            end
+            return
         end
     end
-    local list = jobs
-    jobs = {}
-    download_paused = true
-    for i = 1, #list do
-        list[i].cancel()
+end
+
+--- 将图片解码加入队列，尚未调度时安排下一个 UI tick。
+---@param box table 持有图片状态与取消句柄的占位容器
+---@param path string 图片或书籍的本地文件路径
+---@return nil
+local function enqueue(box, path)
+    wait[#wait + 1] = { box = box, path = path }
+    if pumping then
+        return
     end
-    download_paused = false
-    pumpDownloadQueue()
+    pumping = true
+    UIManager:nextTick(pump)
 end
 
 --- 没上过屏就不 setDirty，否则会为尚未显示的占位额外刷新。
----@param box table
+---@param box table 持有图片状态与取消句柄的占位容器
+---@return nil
 local function requestPaint(box)
     if not box._screen then
         return
@@ -578,37 +269,15 @@ local function requestPaint(box)
     end)
 end
 
---- 同步解码并呈现（子进程内锁屏离屏渲染用）。
----@param path string|nil
----@param w number
----@param h number
----@param alpha boolean|nil
----@param border boolean|nil
----@param fb any
----@return table
-local function presentSync(path, w, h, alpha, border, fb)
-    local inner_w, inner_h = w, h
-    if border then
-        local line = UI.line()
-        inner_w = math.max(1, w - line * 2)
-        inner_h = math.max(1, h - line * 2)
-    end
-    local img = path and decodeSync(path, inner_w, inner_h, alpha)
-    if img then
-        return frame(img, w, h, border)
-    end
-    return placeholder(w, h, fb, border)
-end
-
---- 通用异步图片框：固定尺寸占位，路径解析/下载完成后后台解码。
----@param src string|nil
----@param headers table|nil
----@param w number
----@param h number
----@param alpha boolean|nil
----@param border boolean|nil
----@param fb any
----@param show_parent table|nil
+--- 通用图片框：固定尺寸占位；文件就绪后交给 ImageWidget（和封面浏览器一样）。
+---@param src string|nil 图片来源地址或参与像素读取的源画布，具体形式由参数类型限定
+---@param headers table|nil 图片下载所需的 HTTP 请求头
+---@param w number 可用宽度，单位像素
+---@param h number 可用高度，单位像素
+---@param alpha boolean|nil 是否保留图片透明通道
+---@param border boolean|nil 是否绘制边框
+---@param fb any 图片不可用时显示的占位内容
+---@param show_parent table|nil 异步图片就绪时请求刷新的屏幕宿主
 ---@param on_ready fun(path: string)|nil
 ---@return table
 local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_ready)
@@ -620,9 +289,10 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     }
 
     --- 记录屏幕绝对位置；勿写回 dimen.x/y（WidgetContainer:paintTo 会再加一次）。
-    ---@param bb any
-    ---@param x number
-    ---@param y number
+    ---@param bb any 用于绘制的 Blitbuffer 画布
+    ---@param x number 目标区域左上角横坐标，单位像素
+    ---@param y number 目标区域左上角纵坐标，单位像素
+    ---@return nil
     function box:paintTo(bb, x, y)
         self._screen = Geom:new{ x = x, y = y, w = self.dimen.w, h = self.dimen.h }
         WidgetContainer.paintTo(self, bb, x, y)
@@ -635,73 +305,136 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
         inner_h = math.max(1, h - line * 2)
     end
 
-    local alive = true
-    local job
-    local decode_job
+    box._alive = true
+    box._image_waiters = {}
+    box._settled = false
+    box._on_ready = on_ready
+    box._w = w
+    box._h = h
+    box._border = border
+    box._inner_w = inner_w
+    box._inner_h = inner_h
+    box._alpha = alpha
 
-    --- 解码完成后替换占位。
-    ---@param widget table|nil
-    ---@param path string|nil
-    local function apply(widget, path)
-        if not alive or not widget then
+    --- 把本张图片标记为落定，并且仅一次通知等待该图片的批次。
+    ---@return nil
+    function box:_settle()
+        if self._settled then return end
+        self._settled = true
+        local callbacks = self._image_waiters
+        self._image_waiters = {}
+        for cb in pairs(callbacks) do cb() end
+    end
+
+    --- 只取消这一张的下载。
+    ---@return nil
+    function box:cancel()
+        if self._download then
+            self._download:cancel()
+            self._download = nil
+        end
+    end
+    box.abort = box.cancel
+
+    --- 暂停时保留已绘制内容，但取消下载并拒绝后到的图片结果。
+    -- 首页暂停时保留已绘制的图片，但停止任务并拒绝晚到结果。
+    ---@return nil
+    function box:onHomePause()
+        self._alive = false
+        self:cancel()
+        self:_settle()
+    end
+
+    --- 换成已落地的图片。
+    ---@param widget table|nil 参与布局或绘制的 Widget
+    ---@param path string|nil 图片或书籍的本地文件路径
+    ---@return nil
+    function box:_apply(widget, path)
+        if not widget then
             return
         end
-        if box[1] and box[1].free then
-            box[1]:free()
+        if not self._alive then
+            widget:free()
+            return
         end
-        box[1] = frame(widget, w, h, border)
-        requestPaint(box)
-        if type(on_ready) == "function" then
-            pcall(on_ready, path)
+        if self[1] and self[1].free then
+            self[1]:free()
+        end
+        self[1] = frame(widget, self._w, self._h, self._border)
+        requestPaint(self)
+        if self._on_ready then
+            self._on_ready(path)
         end
     end
 
-    --- 释放占位并取消在飞下载/解码。
-    ---@param full any
+    --- 释放占位并取消在飞下载。
+    ---@param full any 原样传给子控件 free 的释放选项
+    ---@return nil
     function box:free(full)
-        alive = false
-        if job then
-            job.cancel()
-            forgetJob(job)
-            job = nil
-        end
-        if decode_job then
-            decode_job.abort()
-            decode_job = nil
-        end
+        self._alive = false
+        self:cancel()
+        self:_settle()
         WidgetContainer.free(self, full)
     end
 
-    local function decode(path)
-        decode_job = decodeAsync(path, inner_w, inner_h, alpha, function(widget)
-            decode_job = nil
-            apply(widget, path)
+    --- 解这一张。getSize 会触发 ImageWidget:_render。
+    ---@param path string 图片或书籍的本地文件路径
+    ---@return nil
+    function box:_applyFile(path)
+        local widget
+        local ok, err = pcall(function()
+            widget = ImageWidget:new{
+                file = path,
+                width = self._inner_w,
+                height = self._inner_h,
+                alpha = self._alpha and true or false,
+            }
+            widget:getSize()
         end)
+        if not ok then
+            if widget then widget:free() end
+            logger.warn("book image decode failed", path, err)
+            return
+        end
+        self:_apply(widget, path)
+    end
+
+    --- 小图当场解；大图进队，一帧一张。
+    ---@param path string 图片或书籍的本地文件路径
+    ---@return nil
+    function box:_showFile(path)
+        if cheap(path, self._inner_w, self._inner_h) then
+            self:_applyFile(path)
+            self:_settle()
+            return
+        end
+        enqueue(self, path)
     end
 
     local path = resolve(src)
     if path then
-        decode(path)
+        box:_showFile(path)
     elseif isHttp(src) then
-        job = Image.fetchAsync(src, headers, function(downloaded, err)
-            forgetJob(job)
-            job = nil
-            if not alive then
+        box._download = Download.new(src, headers, function(downloaded, err)
+            box._download = nil
+            if not box._alive then
                 return
             end
             if not downloaded then
                 logger.warn("book image async failed", src, err)
+                box:_settle()
                 return
             end
-            decode(downloaded)
-        end)
-        rememberJob(job)
+            box:_showFile(downloaded)
+        end):start()
+    else
+        box:_settle()
     end
     return box
 end
 
---- 默认异步下载/解码；sync=true 只用于锁屏离屏渲染。
----@param opts table|nil
+--- 网络先下载；本地/缓存直接出图。锁屏离屏渲染用 await 等这棵树的图片结束再画。
+---@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table
 function Image.widget(opts)
     opts = opts or {}
@@ -714,25 +447,7 @@ function Image.widget(opts)
         alpha = true
     end
     local border = opts.border and true or false
-    local fb = opts.fallback
-    local show_parent = opts.show_parent
-    local on_ready = opts.on_ready
-
-    if opts.sync then
-        local path = resolve(src)
-        if path then
-            local ready = presentSync(path, w, h, alpha, border, fb)
-            if type(on_ready) == "function" then
-                UIManager:nextTick(function()
-                    pcall(on_ready, path)
-                end)
-            end
-            return ready
-        end
-        return placeholder(w, h, fb, border)
-    end
-
-    return asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_ready)
+    return asyncBox(src, headers, w, h, alpha, border, opts.fallback, opts.show_parent, opts.on_ready)
 end
 
 return Image
