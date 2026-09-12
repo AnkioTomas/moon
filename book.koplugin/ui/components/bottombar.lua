@@ -16,7 +16,7 @@
 调用方提供 tabs：
   { id = "home", text = _("首页"), icon = "home" }
 
-  BottomBar.build(tabs, active_id)
+  BottomBar:new{ data = { tabs = tabs, active = active_id } }:build()
 
 @module koplugin.book.ui.components.bottombar
 --]]
@@ -38,18 +38,24 @@ local Screen = Device.screen
 local UI = require("ui.components.bookui")
 local Icon = require("ui.components.icon")
 
-local BottomBar = {}
+---@class BookBottomBarTab
+---@field id string
+---@field text string
+---@field icon string
 
---- 构建底栏 widget。
----@param tabs table[] { id, text, icon }，逐项等分整屏宽度
----@param active string|nil 当前选中 tab id
----@param on_tab fun(id: string)|nil 点击回调；为 nil 时整栏不接受点按
----@param parent table|nil 事件归属父控件（当前实现未使用，仅保留调用约定）
+local BaseView = require("ui.baseview")
+---@class BookBottomBar : BaseView
+local BottomBar = setmetatable({}, BaseView)
+BottomBar.__index = BottomBar
+
+--- 构建底栏内容；根骨架由 BaseView 缓存。
+---@param self BookBottomBar 当前视图或布局实例
 ---@return table
-function BottomBar.build(tabs, active, on_tab, parent)
-    tabs = tabs or {}
-    local sw = Screen:getWidth()
-    local bh = UI.barH()
+local function contents(self)
+    local data = self.data or {}
+    local tabs, active, on_tab = data.tabs or {}, data.active, data.on_tab
+    local sw = self.width or Screen:getWidth()
+    local bh = self.height or UI.barH()
     local icon_sz = UI.iconSz()
     local n = math.max(1, #tabs)
     local cell_w = math.floor(sw / n)
@@ -115,20 +121,44 @@ function BottomBar.build(tabs, active, on_tab, parent)
         end
         table.insert(row, cell)
     end
-    return FrameContainer:new{
+    return VerticalGroup:new{
+        align = "left",
+        LineWidget:new{
+            background = UI.rule(),
+            dimen = Geom:new{ w = sw, h = UI.line() },
+        },
+        row,
+    }
+end
+
+--- 构建底栏外框和 Tab 内容，并登记供局部替换的 tabs 区域。
+---@return table widget 底栏外框和 Tab 内容
+function BottomBar:createWidget()
+    local root = FrameContainer:new{
         bordersize = 0,
         padding = 0,
         background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = sw, h = bh },
-        VerticalGroup:new{
-            align = "left",
-            LineWidget:new{
-                background = UI.rule(),
-                dimen = Geom:new{ w = sw, h = UI.line() },
-            },
-            row,
-        },
+        dimen = Geom:new{ w = self.width or Screen:getWidth(), h = self.height or UI.barH() },
+        contents(self),
     }
+    self:registerRegion("tabs", root, 1, function() return root.dimen end)
+    return root
+end
+
+--- 更新 Tab 数据和尺寸，只替换 tabs 区域并保留底栏根骨架。
+---@param data table tabs/active/on_tab
+---@return table
+function BottomBar:updateView(data)
+    self.data = data
+    if not self.widget then return self:build() end
+    local frame = self.regions.tabs.container
+    frame.dimen.w = self.width or Screen:getWidth()
+    frame.dimen.h = self.height or UI.barH()
+    if self.widget.dimen then
+        self.widget.dimen.w, self.widget.dimen.h = frame.dimen.w, frame.dimen.h
+    end
+    self:replaceRegion("tabs", contents(self))
+    return self.widget
 end
 
 return BottomBar
