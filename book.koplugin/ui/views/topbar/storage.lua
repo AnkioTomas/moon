@@ -1,17 +1,18 @@
 --[[--
 顶栏剩余存储。Resume 起每 10 分钟刷新。
 
-@module koplugin.book.ui.components.topbar.storage
+@module koplugin.book.ui.views.topbar.storage
 --]]
 
 local DataStorage = require("datastorage")
 local ffiUtil = require("ffi/util")
 local util = require("util")
-local Base = require("ui.components.topbar.base")
+local Base = require("ui.views.topbar.base")
 
 ---@class BookTopBarStorage : BookTopBarItem
-local Storage = setmetatable({}, Base)
+local Storage = {}
 Storage.__index = Storage
+setmetatable(Storage, Base)
 Storage.id = "storage"
 Storage.interval = 600
 

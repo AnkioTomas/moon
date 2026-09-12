@@ -4,6 +4,7 @@
 
 local _ = require("gettext")
 
+---@type BookQuickPanelAction
 return {
     id = "native_menu",
     title = _("原生顶部面板"),

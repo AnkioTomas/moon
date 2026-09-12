@@ -4,17 +4,25 @@
 
 local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
-local Popup = require("ui.components.popup")
+local Popup = require("ui.views.popup")
 local SettingRow = require("ui.components.settingrow")
 local FontPicker = require("ui.components.fontpicker")
 local UI = require("ui.components.bookui")
 local _ = require("gettext")
 
+---@class BookSettingsDisplay
 local Display = {}
+Display.__index = Display
+
+---@return BookSettingsDisplay
+function Display.new()
+    return setmetatable({}, Display)
+end
+
 
 ---@param ctx table
 ---@return table
-function Display.rows(ctx)
+function Display:rows(ctx)
     local desktop = ctx.desktop
     local font_name, scale, grid_max_cols = ctx.font_name, ctx.scale, ctx.grid_max_cols
     return {
@@ -24,7 +32,10 @@ function Display.rows(ctx)
                 subtitle = _("只影响月读界面，不影响书籍正文"),
                 status = font_name, status_on = true,
                 callback = function()
-                    FontPicker.open{ title = _("界面字体"), on_done = function() desktop:rebuild() end }
+                    FontPicker.open{ title = _("界面字体"), on_done = function()
+                        pcall(function() require("utils.font").applyCurrent() end)
+                        desktop:updateView()
+                    end }
                 end,
             })
         end,
@@ -41,7 +52,8 @@ function Display.rows(ctx)
                         callback = function(spin)
                             local n = UI.setScale(spin.value)
                             UIManager:show(InfoMessage:new{ text = string.format("%d%%", n), timeout = 1.5 })
-                            desktop:rebuild()
+                            pcall(function() require("utils.font").applyCurrent() end)
+                            desktop:updateView()
                         end,
                     }
                 end,
@@ -59,9 +71,9 @@ function Display.rows(ctx)
                         value_step = 1, ok_always_enabled = true,
                         callback = function(spin)
                             UI.setGridMaxCols(spin.value)
-                            desktop._library_state = nil
-                            desktop._store_state = nil
-                            desktop:rebuild()
+                            if desktop.library then desktop.library.state = nil end
+                            if desktop.store then desktop.store.state = nil end
+                            desktop:updateView()
                         end,
                     }
                 end,

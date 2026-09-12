@@ -6,6 +6,7 @@
 
 require("l10n").apply()
 
+---@class BookScreenshotShare
 local M = {}
 
 --- KOReader 用 bidi isolate 包裹标题里的文件路径；这是展示标记，不能传给 realpath。

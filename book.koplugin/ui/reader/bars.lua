@@ -27,6 +27,12 @@ local function topBarExtraHeight()
     return Screen:scaleBySize(TOP_BAR_EXTRA_HEIGHT)
 end
 
+---@class BookReaderBars
+---@field view table|nil
+---@field ui table|nil
+---@field _clock fun()|nil
+---@field _paint_widgets table
+---@field _paint_widget_keys table
 local Bars = {
     view = nil,
     ui = nil,

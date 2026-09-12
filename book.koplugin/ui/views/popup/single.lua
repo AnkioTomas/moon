@@ -3,11 +3,12 @@
 opts.current = value 或项上 checked=true 标记当前项并跳页；
 opts.choice_icons=true 显示 Material 单选图标。
 
-@module koplugin.book.ui.components.popup.single
+@module koplugin.book.ui.views.popup.single
 --]]
 
-local List = require("ui.components.popup.list")
+local List = require("ui.views.popup.list")
 
+---@class BookPopupSingle
 local Single = {}
 
 --- 把调用方 items 规范成 Menu 可用结构。

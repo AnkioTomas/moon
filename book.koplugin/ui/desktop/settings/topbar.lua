@@ -6,7 +6,15 @@ local SettingRow = require("ui.components.settingrow")
 local MoonSettings = require("utils.settings")
 local _ = require("gettext")
 
+---@class BookSettingsTopbar
 local TopbarSettings = {}
+TopbarSettings.__index = TopbarSettings
+
+---@return BookSettingsTopbar
+function TopbarSettings.new()
+    return setmetatable({}, TopbarSettings)
+end
+
 
 local ITEMS = {
     { id = "clock", label = _("时钟"), icon = "schedule" },
@@ -21,7 +29,7 @@ local ITEMS = {
 
 ---@param desktop table
 ---@return table
-function TopbarSettings.rows(desktop)
+function TopbarSettings:rows(desktop)
     local home = MoonSettings.get("home")
     local config = type(home.home_topbar_items) == "table" and home.home_topbar_items or {}
     local rows = {}
@@ -40,7 +48,7 @@ function TopbarSettings.rows(desktop)
                     end
                     home.home_topbar_items[item.id] = not enabled
                     MoonSettings.saveSection("home", home)
-                    desktop:rebuild()
+                    if desktop.onEvent then desktop:onEvent("topbar_changed") end
                 end,
             })
         end

@@ -1,15 +1,16 @@
 --[[--
 顶栏电池。充电事件立刻刷，Resume 起每 10 分钟刷一次。
 
-@module koplugin.book.ui.components.topbar.battery
+@module koplugin.book.ui.views.topbar.battery
 --]]
 
 local Device = require("device")
-local Base = require("ui.components.topbar.base")
+local Base = require("ui.views.topbar.base")
 
 ---@class BookTopBarBattery : BookTopBarItem
-local Battery = setmetatable({}, Base)
+local Battery = {}
 Battery.__index = Battery
+setmetatable(Battery, Base)
 Battery.id = "battery"
 Battery.interval = 600
 

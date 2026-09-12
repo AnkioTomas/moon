@@ -11,7 +11,7 @@ Desktop 顶部状态条。拼装小组件，并把生命周期传下去。
 onCreate / build 建孩子排 UI。关掉的走完 Pause / Stop / Destroy。
 设置开关经 desktop 事件 topbar_changed → updateView。
 
-@module koplugin.book.ui.components.topbar
+@module koplugin.book.ui.views.topbar
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -28,18 +28,18 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local Screen = Device.screen
 
 local UI = require("ui.components.bookui")
-local BaseView = require("ui.baseview")
+local View = require("ui.view")
 local NativePanel = require("ui.panel.native")
 
-local Base = require("ui.components.topbar.base")
-local Clock = require("ui.components.topbar.clock")
-local Source = require("ui.components.topbar.source")
-local Memory = require("ui.components.topbar.memory")
-local Cache = require("ui.components.topbar.cache")
-local Storage = require("ui.components.topbar.storage")
-local Wifi = require("ui.components.topbar.wifi")
-local Brightness = require("ui.components.topbar.brightness")
-local Battery = require("ui.components.topbar.battery")
+local Base = require("ui.views.topbar.base")
+local Clock = require("ui.views.topbar.clock")
+local Source = require("ui.views.topbar.source")
+local Memory = require("ui.views.topbar.memory")
+local Cache = require("ui.views.topbar.cache")
+local Storage = require("ui.views.topbar.storage")
+local Wifi = require("ui.views.topbar.wifi")
+local Brightness = require("ui.views.topbar.brightness")
+local Battery = require("ui.views.topbar.battery")
 
 ---@type BookTopBarItem[]
 local SLOTS = {
@@ -51,7 +51,7 @@ local SLOTS = {
 ---@field th number 顶栏总高度
 ---@field pad number 左右 padding
 
----@class BookTopBar : BaseView
+---@class BookTopBar : View
 ---@field desktop BookDesktop|nil
 ---@field widget table|nil
 ---@field clock BookTopBarClock|nil
@@ -62,8 +62,9 @@ local SLOTS = {
 ---@field wifi BookTopBarWifi|nil
 ---@field brightness BookTopBarBrightness|nil
 ---@field battery BookTopBarBattery|nil
-local TopBar = setmetatable({}, BaseView)
+local TopBar = {}
 TopBar.__index = TopBar
+setmetatable(TopBar, View)
 
 
 --- 按设置对齐孩子：该显示的创建，不该显示的拆掉。

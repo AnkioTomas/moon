@@ -4,6 +4,7 @@
 
 local _ = require("gettext")
 
+---@type BookQuickPanelAction
 return {
     id = "ocr",
     title = _("OCR"),

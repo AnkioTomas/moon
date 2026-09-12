@@ -11,6 +11,7 @@ require("l10n").apply()
 
 local _ = require("gettext")
 
+---@class BookReaderChapterToc
 local ChapterToc = {}
 
 ---@param toc BookChapter[]

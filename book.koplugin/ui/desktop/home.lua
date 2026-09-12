@@ -1,301 +1,594 @@
 --[[--
-主页：可组合组件（默认当前阅读大卡片 + 最近阅读书架）。
+首页拼装器：钉页组件板。长按进编辑；PageStrip 翻页。
+
+onCreate → build。设置/翻页/换源/编辑 → updateView。
+非当前页停在 Create；当前页才 Start+Resume。
 
 @module koplugin.book.ui.home
 --]]
 
-local Blitbuffer = require("ffi/blitbuffer")
-local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
-local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local UIManager = require("ui/uimanager")
-local TextWidget = require("ui/widget/textwidget")
-local BookInfo = require("ui.components.bookinfo")
+local VerticalGroup = require("ui/widget/verticalgroup")
+local VerticalSpan = require("ui/widget/verticalspan")
+local FrameContainer = require("ui/widget/container/framecontainer")
+local InputContainer = require("ui/widget/container/inputcontainer")
+local GestureRange = require("ui/gesturerange")
+local Blitbuffer = require("ffi/blitbuffer")
 local UI = require("ui.components.bookui")
-local MoonSettings = require("utils.settings")
-local HomeStats = require("ui.desktop.home.stats")
 local Layout = require("ui.desktop.home.layout")
-local Highlights = require("book.highlights")
-local logger = require("utils.log")
-local Timing = require("utils.timing")
-local gettext = require("gettext")
+local Components = require("ui.desktop.home.registry")
+local Widgets = require("ui.desktop.home.widgets")
+local PageStrip = require("ui.components.pagestrip")
+local Edit = require("ui.desktop.home.edit_overlay")
+local View = require("ui.view")
 local Screen = Device.screen
+local _ = require("gettext")
 
+---@class BookHome : View
+---@field desktop BookDesktop|nil
+---@field source BookSource|nil
+---@field plugin BookPlugin|nil
+---@field children table<string, BookHomeComponent>
+---@field components table<string, BookHomeComponent>
+---@field layout BookHomeLayout
+---@field page number
+---@field pages number
+---@field visible table<string, boolean>
+---@field editing boolean
+---@field widget table|nil
 local Home = {}
-local REFRESH_DEBOUNCE_SECONDS = 0.2
+Home.__index = Home
+setmetatable(Home, View)
 
---- 废弃当前首页查询；是否清除已显示状态由调用方决定。
----@param desktop table
-local function cancelFetch(desktop)
-    desktop._home_fetch_request = nil
-    local job = desktop._home_fetch_cancel
-    if type(job) == "table" and type(job.cancel) == "function" then
-        pcall(job.cancel)
-    end
-    desktop._home_fetch_cancel = nil
-    desktop._home_fetching = false
+--- 初始化首页持有的组件映射、布局和分页状态，保留已有状态。
+---@param self BookHome 当前视图或布局实例
+---@return nil
+local function ensure(self)
+    if not self.components then self.components = self.children end
+    if not self.layout then self.layout = Layout.new() end
+    if not self.page then self.page = 1 end
+    if not self.pages then self.pages = 1 end
+    if self.editing == nil then self.editing = false end
 end
 
---- 书摘：按当前索引取一条，不递增。
----@param recent table|nil
----@return table|nil
-local function pickExcerpt(recent)
-    if not recent or not recent.source_id or not recent.stable_id then
-        return nil
-    end
-    local chapter_idx = recent.chapter_idx
-    local home = MoonSettings.get("home")
-    local index = tonumber(home.home_excerpt_index) or 0
-    local text, source = Highlights.pick(
-        recent.source_id, recent.stable_id, chapter_idx, index + 1
-    )
-    if not text then return nil end
-    return { text = text, source = source }
+--- 销毁移除的子组件；Lifecycle 按当前状态补齐 Pause/Stop。
+---@param child BookHomeComponent 要包装或接收事件的子控件
+---@return nil
+local function retire(child)
+    child:onDestroy()
 end
 
---- 书摘轮换：递增索引后取一条（仅离开阅读回到桌面时调用）。
----@param recent table|nil
----@return table|nil
-local function rotateExcerpt(recent)
-    if not recent or not recent.source_id or not recent.stable_id then
-        return nil
-    end
-    local chapter_idx = recent.chapter_idx
-    local items = Highlights.collect(recent.source_id, recent.stable_id, chapter_idx)
-    if #items == 0 then return nil end
-    local home = MoonSettings.get("home")
-    local index = (tonumber(home.home_excerpt_index) or 0) + 1
-    home.home_excerpt_index = index
-    MoonSettings.saveSection("home", home)
-    local text, source = Highlights.pick(
-        recent.source_id, recent.stable_id, chapter_idx, index
-    )
-    if not text then return nil end
-    return { text = text, source = source }
+--- 调用指定子视图的事件或生命周期方法；不存在的接收者直接跳过。
+---@param child BookHomeComponent|nil 要包装或接收事件的子控件
+---@param method string 子组件上的方法名
+---@param ... any 原样传给目标方法的参数
+---@return nil
+local function notify(child, method, ...)
+    if child and child[method] then child[method](child, ...) end
 end
 
---- 一言 / 书摘只读缓存与本地高亮，不做定时或重复网络刷新。
----@param state table
----@param rotate_excerpt boolean|nil
-local function fillExtras(state, rotate_excerpt)
-    local c = MoonSettings.get()
-    state.quote = {
-        text = c.lock_screen_quote_cache,
-        source = c.lock_screen_quote_source_cache,
-    }
-    if state.recent then
-        local excerpt = rotate_excerpt and rotateExcerpt(state.recent) or pickExcerpt(state.recent)
-        if excerpt then
-            state.excerpt = excerpt
+--- 按组件注册顺序把同一事件和参数分发给子视图。
+---@param self BookHome 当前视图或布局实例
+---@param method string 子组件上的方法名
+---@param ... any 原样传给目标方法的参数
+---@return nil
+local function broadcast(self, method, ...)
+    for _i, id in ipairs(Components.enabledLayout()) do
+        notify(self.components[id], method, ...)
+    end
+end
+
+--- 暂停离开当前页的组件，仅恢复当前首页中可见的组件。
+---@param self BookHome 当前视图或布局实例
+---@return nil
+local function applyVisible(self)
+    local visible = self.visible or {}
+    local active = self.lifecycle.state == "Resume" and self.desktop and self.desktop.tab == "home"
+    local layout = Components.enabledLayout()
+    for _i, id in ipairs(layout) do
+        local child = self.components[id]
+        if child and child.lifecycle.state == "Resume" and not (active and visible[id]) then
+            child:onPause()
         end
     end
-    return state
-end
-
---- 首页数据作废：取消在飞取数、清全部首页状态；当前在首页则立即重建（重建会重新 fetch）。
---- 这是唯一允许清首页状态的地方，禁止在别处手写 _home_state / _home_loaded。
----@param desktop table
-function Home.invalidate(desktop)
-    if not desktop or desktop._closed then return end
-    if desktop._home_refresh_debounce then desktop._home_refresh_debounce:cancel() end
-    desktop._home_refresh_reasons = nil
-    desktop._home_refresh_pending = nil
-    -- 先废弃回调资格，再取消句柄。cancel 只是尽力而为，旧回调仍可能晚到。
-    cancelFetch(desktop)
-    desktop._home_state = nil
-    desktop._home_loaded = false
-    desktop._home_reading_page = 1
-    if desktop.tab == "home" then
-        desktop:rebuild()
-    end
-end
-
---- 后台数据变化后的静默刷新：保留旧页面，200ms 内多次请求合并，取数完成只重建一次。
----@param desktop table
----@param reason string|nil
-function Home.refreshData(desktop, reason)
-    if not desktop or desktop._closed then return end
-    desktop._home_refresh_reasons = desktop._home_refresh_reasons or {}
-    desktop._home_refresh_reasons[reason or "background"] = true
-    if not desktop._home_refresh_debounce then
-        desktop._home_refresh_debounce = Timing.debounce(function()
-            if desktop._closed then return end
-            local reasons = {}
-            for value in pairs(desktop._home_refresh_reasons or {}) do
-                reasons[#reasons + 1] = value
-            end
-            table.sort(reasons)
-            desktop._home_refresh_reasons = nil
-            logger.dbg("book home refresh", table.concat(reasons, ","))
-            if desktop._home_fetching then
-                -- 同步完成可能撞上首页正在取数。取消 Turbo 请求只会丢弃回调，
-                -- 底层超时定时器仍会存活并在 30 秒后报 async.lua -6。
-                -- 让当前请求自然结束，再补一次刷新即可。
-                desktop._home_refresh_pending = true
-                return
-            end
-            cancelFetch(desktop)
-            if desktop.tab ~= "home" then
-                desktop._home_state = nil
-                desktop._home_loaded = false
-                desktop._home_reading_page = 1
-                return
-            end
-            Home.fetch(desktop)
-        end, REFRESH_DEBOUNCE_SECONDS)
-    end
-    desktop._home_refresh_debounce()
-end
-
---- 进入首页时刷新：Tab 切入 / 唤醒都走这里，语义固定为「刷新一遍」。
----@param desktop table
-function Home.refreshOnEnter(desktop)
-    if not desktop or desktop._closed then return end
-    Home.invalidate(desktop)
-    desktop:scheduleClockTick()
-    if desktop.plugin and desktop.plugin.emitToSource then
-        desktop.plugin:emitToSource("home_open", desktop)
-    end
-end
-
---- 离开阅读回到桌面：标记书摘轮换，然后按统一入口刷新（fetch 完成时轮换）。
----@param desktop table
-function Home.onReturnToDesktop(desktop)
-    if not desktop or desktop._closed then return end
-    desktop._home_rotate_excerpt = true
-    Home.invalidate(desktop)
-end
-
---- 异步拉取最近阅读与本地统计。
----@param desktop table
-function Home.fetch(desktop)
-    if desktop._home_fetching then return end
-    desktop._home_fetching = true
-    logger.dbg("book home fetch start", desktop.source and desktop.source.id or "unavailable")
-
-    if desktop._home_fetch_cancel then
-        desktop._home_fetch_cancel:cancel()
-        desktop._home_fetch_cancel = nil
-    end
-
-    local source = desktop.source
-    local generation = desktop.source_generation or 0
-    local request = {}
-    desktop._home_fetch_request = request
-    --- 本次拉取结果是否还该采用。
-    --- 桌面已关或期间换过源（source_generation 变化）时回调必须丢弃，否则会串源写状态。
-    ---@return boolean
-    local function valid()
-        return not desktop._closed
-            and desktop.source == source
-            and (desktop.source_generation or 0) == generation
-            and desktop._home_fetch_request == request
-    end
-
-    if not desktop._local_cleanup_done then
-        desktop._local_cleanup_done = true
-        desktop._local_cleanup_job = require("book.cache").cleanupStaleAsync(function(ok, n)
-            desktop._local_cleanup_job = nil
-            if ok and n and n > 0 then
-                logger.info("book cleaned stale local books:", n)
-            elseif not ok then
-                logger.warn("book local cleanup failed")
-            end
-        end)
-    end
-
-    --- 写入主页状态并重建。
-    ---@param state table|nil
-    local function finish(state)
-        if not valid() then return end
-        desktop._home_fetching = false
-        desktop._home_fetch_cancel = nil
-        local rotate = desktop._home_rotate_excerpt
-        desktop._home_rotate_excerpt = nil
-        state = fillExtras(state or {}, rotate)
-        desktop._home_state = state
-        desktop._home_loaded = true
-        logger.dbg("book home fetch done", source and source.id or "unavailable",
-            "reading", #(state.reading or {}), state.recent_err and "error" or "ok")
-        local visible = desktop.tab == "home"
-        -- 成功回调也只能消费一次；后到的重复回调视为失效。
-        desktop._home_fetch_request = nil
-        if visible then desktop:rebuild() end
-        if desktop._home_refresh_pending then
-            desktop._home_refresh_pending = nil
-            Home.refreshData(desktop, "pending")
+    if not active then return end
+    for _i, id in ipairs(layout) do
+        local child = self.components[id]
+        if child and visible[id]
+            and child.lifecycle.state ~= "Resume"
+            and child.lifecycle.state ~= "Destroy" then
+            child:onResume()
         end
     end
+end
 
-    if not source then finish({ recent_err = gettext("当前数据源不可用"), reading = {} }); return end
-    local job = source:recentBooksAsync(24, function(res, err)
-        if not valid() then
-            -- 取消只是尽力而为；旧回调不能碰新一轮请求的任何状态。
-            return
-        end
-        local applied, boom = pcall(function()
-            if not res then
-                finish({
-                    recent = nil,
-                    recent_err = err or gettext("加载失败"),
-                    reading = {},
-                })
-                return
+--- 按启用配置创建缺失组件，按生命周期退役不再需要的实例。
+---@return nil
+function Home:sync()
+    if self.lifecycle.state == "Destroy" then return end
+    ensure(self)
+    local wanted = {}
+    for _i, id in ipairs(Components.enabledLayout()) do
+        wanted[id] = true
+        if not self.components[id] then
+            local class = Components.find(id)
+            if class then
+                local child = class:new()
+                child.home = self
+                child.name = "home." .. id
+                self.components[id] = child
             end
-            local rows = res.data or {}
-            local recent = rows[1]
-            local skip = recent and BookInfo.file(recent)
-            local reading = {}
-            for i, book in ipairs(rows) do
-                if BookInfo.file(book) ~= skip then
-                    table.insert(reading, book)
+        end
+    end
+    for id, child in pairs(self.components) do
+        if not wanted[id] then
+            retire(child)
+            self.components[id] = nil
+        end
+    end
+end
+
+--- 旧 home_layout 迁移后：用 paginate 切页一次并落盘。
+---@param self BookHome 当前视图或布局实例
+---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
+---@param body_h number 扣除固定控件后的正文高度，单位像素
+---@return nil
+local function maybeSplit(self, ctx, body_h)
+    if not Components.needsSplit() then return end
+    local placements = Components.widgets()
+    local gap = UI.sz(8)
+    local ranges = {}
+    for _i, place in ipairs(placements) do
+        local comp = self.components[place.id]
+        if comp then
+            local range = comp:heightRange(ctx, { width = ctx.width, height = body_h })
+            range.id = place.id
+            ranges[#ranges + 1] = range
+        end
+    end
+    local packs = self.layout:paginate(ranges, body_h, gap)
+    local next_list = Widgets.applyPacks(placements, packs)
+    Components.saveWidgets(next_list)
+    Components.clearNeedsSplit()
+end
+
+--- 把当前组件摆放位置和高度保存到首页设置。
+---@param self BookHome 当前视图或布局实例
+---@return nil
+local function persist(self)
+    local list = Components.widgets()
+    Components.saveWidgets(Widgets.compactPages(list))
+end
+
+--- 移除指定组件的摆放记录并刷新首页布局。
+---@param self BookHome 当前视图或布局实例
+---@param id string 组件、分页或数据源的标识
+---@return nil
+local function deleteWidget(self, id)
+    local list = Components.widgets()
+    if #list <= 1 then return end
+    local out = {}
+    for _i, item in ipairs(list) do
+        if item.id ~= id then out[#out + 1] = item end
+    end
+    Components.saveWidgets(out)
+    self:updateView()
+end
+
+--- 在当前页内移动指定组件，保存顺序并重新排版。
+---@param self BookHome 当前视图或布局实例
+---@param id string 组件、分页或数据源的标识
+---@param delta number 相对于当前位置的偏移量
+---@return nil
+local function moveInPage(self, id, delta)
+    local list = Components.widgets()
+    local item = Widgets.find(list, id)
+    if not item then return end
+    local page_items = Widgets.onPage(list, item.page)
+    local pos
+    for i, row in ipairs(page_items) do
+        if row.id == id then pos = i break end
+    end
+    if not pos then return end
+    local next_pos = pos + delta
+    if next_pos < 1 or next_pos > #page_items then return end
+    local a, b = page_items[pos], page_items[next_pos]
+    a.order, b.order = b.order, a.order
+    Components.saveWidgets(list)
+    self:updateView()
+end
+
+--- 把指定组件移到相邻页，保存分页位置并重新排版。
+---@param self BookHome 当前视图或布局实例
+---@param id string 组件、分页或数据源的标识
+---@param delta_page number 目标页相对于当前页的偏移量
+---@return nil
+local function movePage(self, id, delta_page)
+    local list = Components.widgets()
+    local item = Widgets.find(list, id)
+    if not item then return end
+    local target = item.page + delta_page
+    if target < 1 then return end
+    local pages = Widgets.pageCount(list)
+    if target > pages + 1 then target = pages + 1 end
+    item.page = target
+    item.order = #Widgets.onPage(list, target) + 1
+    Components.saveWidgets(Widgets.reindex(list))
+    self.page = target
+    self:updateView()
+end
+
+--- 根据当前组件位置生成可用的页内移动和跨页移动操作。
+---@param self BookHome 当前视图或布局实例
+---@param id string 组件、分页或数据源的标识
+---@return nil
+local function showMove(self, id)
+    local list = Components.widgets()
+    local item = Widgets.find(list, id)
+    if not item then return end
+    local page_items = Widgets.onPage(list, item.page)
+    local pos
+    for i, row in ipairs(page_items) do
+        if row.id == id then pos = i break end
+    end
+    Edit.showMoveDialog({
+        can_up = pos and pos > 1,
+        can_down = pos and pos < #page_items,
+        can_prev_page = item.page > 1,
+        can_next_page = true,
+        on_up = function() moveInPage(self, id, -1) end,
+        on_down = function() moveInPage(self, id, 1) end,
+        on_prev_page = function() movePage(self, id, -1) end,
+        on_next_page = function() movePage(self, id, 1) end,
+    })
+end
+
+--- 打开组件高度设置，应用默认高度、填满或指定高度后重排。
+---@param self BookHome 当前视图或布局实例
+---@param id string 组件、分页或数据源的标识
+---@param range table 组件允许的高度约束
+---@param placement table 当前组件保存的页码、顺序和高度记录
+---@return nil
+local function showHeight(self, id, range, placement)
+    local comp = Components.find(id)
+    Edit.showHeightDialog({
+        label = comp and comp.label or id,
+        range = range,
+        current = placement.height,
+        on_apply = function(height)
+            local list = Components.widgets()
+            local item = Widgets.find(list, id)
+            if not item then return end
+            item.height = height
+            Components.saveWidgets(list)
+            self:updateView()
+        end,
+    })
+end
+
+--- 筛选当前页剩余空间能够容纳的组件，选择后添加并保存。
+---@param self BookHome 当前视图或布局实例
+---@param body_h number 扣除固定控件后的正文高度，单位像素
+---@param width number 目标宽度，单位像素
+---@return nil
+local function showAdd(self, body_h, width)
+    local list = Components.widgets()
+    local placed = {}
+    for _i, item in ipairs(list) do placed[item.id] = true end
+    local page_items = Widgets.onPage(list, self.page)
+    local mins = {}
+    local ctx = self.desktop and self.desktop:ctx() or { width = self.width, height = self.height, source = self.source, plugin = self.plugin }
+    for _i, place in ipairs(page_items) do
+        local comp = self.components[place.id]
+        if comp then
+            local range = comp:heightRange(ctx, { width = width, height = body_h })
+            mins[#mins + 1] = range.min
+        end
+    end
+    local gap = UI.sz(8)
+    local candidates = {}
+    for _i, comp in ipairs(Components.components) do
+        if not placed[comp.id] then
+            local range = comp:heightRange(ctx, { width = width, height = body_h })
+            if Widgets.canFit(mins, range.min, body_h, gap) then
+                candidates[#candidates + 1] = { id = comp.id, label = comp.label }
+            end
+        end
+    end
+    if #candidates == 0 then return end
+    Edit.showAddDialog(candidates, function(id)
+        local next_list = Components.widgets()
+        next_list[#next_list + 1] = {
+            id = id,
+            page = self.page,
+            order = #Widgets.onPage(next_list, self.page) + 1,
+            height = "default",
+        }
+        Components.saveWidgets(next_list)
+        self:updateView()
+    end)
+end
+
+--- 按当前尺寸和配置拼装组件布局，返回供根骨架安装的内容树。
+---@param self BookHome 当前视图或布局实例
+---@return table
+local function assemble(self)
+    ensure(self)
+    local ctx = self.desktop and self.desktop:ctx() or { width = self.width, height = self.height, source = self.source, plugin = self.plugin }
+    ctx.width = self.width or ctx.width
+    ctx.height = self.height or ctx.height
+    local w = ctx.width
+    local h = ctx.height
+    local strip_h = PageStrip.bandH()
+    local add_h = self.editing and UI.sz(44) or 0
+    local add_gap = self.editing and UI.sz(8) or 0
+    local body_h = math.max(1, h - strip_h)
+
+    if self.desktop and not self.offscreen then maybeSplit(self, ctx, body_h) end
+
+    local show_add = false
+    if self.editing then
+        local list = Components.widgets()
+        local page_items = Widgets.onPage(list, math.max(1, self.page or 1))
+        local mins = {}
+        for _i, place in ipairs(page_items) do
+            local comp = self.components[place.id]
+            if comp then
+                local range = comp:heightRange(ctx, { width = w, height = body_h })
+                mins[#mins + 1] = range.min
+            end
+        end
+        local placed = {}
+        for _i, item in ipairs(list) do placed[item.id] = true end
+        for _i, comp in ipairs(Components.components) do
+            if not placed[comp.id] then
+                local range = comp:heightRange(ctx, { width = w, height = body_h })
+                if Widgets.canFit(mins, range.min, body_h - add_h - add_gap, UI.sz(8)) then
+                    show_add = true
+                    break
                 end
             end
-            finish({
-                recent = recent,
-                reading = reading,
-                stats = HomeStats.summarize(source.id),
-            })
-        end)
-        if not applied then
-            logger.err("book home fetch apply failed:", boom)
-            finish({ recent_err = tostring(boom), reading = {} })
         end
-    end)
-    -- 有些本地源同步回调；完成后不能把已结束任务句柄重新挂回桌面。
-    if desktop._home_fetch_request == request then
-        desktop._home_fetch_cancel = job
+    end
+
+    local widget_h = show_add and math.max(1, body_h - add_h - add_gap) or body_h
+
+    local wrap
+    if self.editing then
+        wrap = function(widget, meta)
+            return Edit.wrap(widget, meta, {
+                on_delete = function(id) deleteWidget(self, id) end,
+                on_move = function(id) showMove(self, id) end,
+                on_height = function(id, range, placement)
+                    showHeight(self, id, range, placement)
+                end,
+            })
+        end
+    end
+
+    local body, page, pages, visible = self.layout:build(ctx, self.components, self.page, {
+        body_height = widget_h,
+        wrap = wrap,
+    })
+    self.page = page or 1
+    self.pages = pages or 1
+    self.visible = visible or {}
+
+    local column = { align = "left", body }
+    if show_add then
+        column[#column + 1] = VerticalSpan:new{ width = add_gap }
+        column[#column + 1] = Edit.addRow(w, function() showAdd(self, widget_h, w) end)
+    end
+    column[#column + 1] = PageStrip.widget({
+        width = w,
+        page = self.page,
+        pages = self.pages,
+        center = self.editing and "title" or "dots",
+        title = _("完成"),
+        on_prev = function() self:turn(-1) end,
+        on_next = function() self:turn(1) end,
+        on_center = self.editing and function() self:exitEdit() end or nil,
+    })
+
+    local root = VerticalGroup:new(column)
+    local holder = InputContainer:new{
+        dimen = Geom:new{ w = w, h = h },
+    }
+    holder[1] = FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        width = w,
+        height = h,
+        dimen = Geom:new{ w = w, h = h },
+        root,
+    }
+    if not self.editing then
+        holder.ges_events = {
+            HoldHomeEdit = {
+                GestureRange:new{ ges = "hold", range = function() return holder.dimen end },
+            },
+        }
+        holder.onHoldHomeEdit = function()
+            self:enterEdit()
+            return true
+        end
+    end
+    return holder
+end
+
+--- 将首页根节点安装到桌面内容槽；非首页 Tab 或已销毁实例不安装。
+---@param self BookHome 当前视图或布局实例
+---@return nil
+local function install(self)
+    local desktop = self.desktop
+    if self.lifecycle.state == "Destroy" or not desktop or not desktop.lifecycle
+        or desktop.lifecycle.state == "Destroy" then
+        return
+    end
+    if desktop.tab ~= "home" then return end
+    local root = desktop[1] and desktop[1][1]
+    local page = self.widget
+    if not root or not page then return end
+    local h = desktop:contentHeight()
+    local w = Screen:getWidth()
+    if page.dimen then
+        page.dimen.w = w
+        page.dimen.h = h
+    else
+        page.dimen = Geom:new{ w = w, h = h }
+    end
+    page.overlap_offset = { 0, UI.topBarH() }
+    desktop.view:replaceRegion("content", page)
+end
+
+--- 同步组件实例并补发创建阶段，然后拼装当前首页内容树。
+---@return table widget 当前首页内容树
+function Home:createWidget()
+    self:sync()
+    for _, child in pairs(self.components) do
+        if child.lifecycle.state == "new" then child:onCreate() end
+    end
+    return assemble(self)
+end
+
+--- 把首页页码限制在有效范围内，页码变化时刷新布局。
+---@param delta number 相对于当前位置的偏移量
+---@return nil
+function Home:turn(delta)
+    local next_page = math.max(1, math.min(self.pages or 1, (self.page or 1) + delta))
+    if next_page == self.page then return end
+    self.page = next_page
+    self:updateView()
+end
+
+--- 进入首页组件编辑模式，重复进入时不重建。
+---@return nil
+function Home:enterEdit()
+    if self.editing then return end
+    self.editing = true
+    self:updateView()
+end
+
+--- 退出编辑模式并保存组件布局，然后恢复普通首页内容。
+---@return nil
+function Home:exitEdit()
+    if not self.editing then return end
+    self.editing = false
+    persist(self)
+    self:updateView()
+end
+
+--- 重建首页内容、同步可见组件生命周期并安装到桌面内容槽。
+---@return table
+function Home:updateView()
+    if self.lifecycle.state == "Destroy" then return self.widget end
+    self:rebuild()
+    applyVisible(self)
+    install(self)
+    return self.widget
+end
+
+--- 为普通首页绑定桌面刷新宿主并构建根骨架；离屏首页不绑定宿主。
+---@return nil
+function Home:onCreate()
+    self.host = not self.offscreen and self.desktop or nil
+    self:build()
+end
+
+--- 等待当前可见组件完成数据加载，汇总首个失败并通知调用者。
+---@param cb fun(ok:boolean, err:any)|nil 全部子视图加载完成后的结果回调
+---@return nil
+function Home:onStart(cb)
+    local children = {}
+    for id in pairs(self.visible or {}) do
+        if self.components[id] then children[#children + 1] = self.components[id] end
+    end
+    local left = #children
+    if left == 0 then if cb then cb(true) end return end
+    local failure
+    for _, child in ipairs(children) do
+        child:onStart(function(ok, err)
+            if self.lifecycle.state == "Destroy" then return end
+            if not ok then failure = failure or err end
+            if ok and child.widget then child:rebuild() end
+            left = left - 1
+            if left == 0 and cb then cb(failure == nil, failure) end
+        end)
     end
 end
 
---- Desktop rebuild 入口：未加载则触发 fetch。
----@param desktop table
----@return table
-function Home.page(desktop)
-    local h = desktop:contentHeight()
-    local w = (desktop.dimen and desktop.dimen.w) or Screen:getWidth()
-    if not desktop._home_loaded then
-        UIManager:nextTick(function()
-            if desktop._closed or desktop.tab ~= "home" then return end
-            Home.fetch(desktop)
-        end)
-        return FrameContainer:new{
-            bordersize = 0,
-            padding = 0,
-            background = Blitbuffer.COLOR_WHITE,
-            dimen = Geom:new{ w = w, h = h },
-            CenterContainer:new{
-                dimen = Geom:new{ w = w, h = h },
-                TextWidget:new{
-                    text = gettext("加载主页…"),
-                    face = UI.face("cfont", 18),
-                    fgcolor = UI.muted(),
-                },
-            },
-        }
+--- 首页 Tab 活跃时恢复可见组件，其余组件保持暂停。
+---@return nil
+function Home:onResume()
+    if not self.desktop or self.desktop.tab ~= "home" then return end
+    applyVisible(self)
+end
+
+--- 保存并退出编辑态，然后暂停当前仍在运行的组件。
+---@return nil
+function Home:onPause()
+    if self.editing then
+        self.editing = false
+        persist(self)
     end
-    return Layout.build(desktop:ctx(), desktop._home_state or {})
+    for _i, id in ipairs(Components.enabledLayout()) do
+        local child = self.components[id]
+        if child and child.lifecycle.state == "Resume" then
+            child:onPause()
+        end
+    end
+end
+
+--- 向启用的首页组件广播停止阶段。
+---@return nil
+function Home:onStop()
+    broadcast(self, "onStop")
+end
+
+--- 销毁首页组件并清除桌面、内容树和编辑状态引用。
+---@return nil
+function Home:onDestroy()
+    broadcast(self, "onDestroy")
+    self.widget = nil
+    self.desktop = nil
+    self.components = {}
+    self.editing = false
+end
+
+--- 处理布局设置、编辑、换源和滑动事件，其余事件继续分发给子组件。
+---@param event string|table 父组件转发的事件名称或事件对象
+---@param payload any 与事件一起传入的数据
+---@return nil
+function Home:onEvent(event, payload)
+    if self.lifecycle.state == "Destroy" then return end
+    if event == "home_changed" then
+        self:updateView()
+        return
+    end
+    if event == "home_edit" then
+        self:enterEdit()
+        return
+    end
+    if event == "source_changed" or event == "home_refresh" or event == "detail_dirty" then
+        broadcast(self, "onEvent", event, payload)
+        self:updateView()
+        return
+    end
+    if event == "swipe" then
+        if self.editing then return end
+        if self.desktop and self.desktop.tab == "home" and payload then
+            if payload.direction == "west" then
+                self:turn(1)
+            elseif payload.direction == "east" then
+                self:turn(-1)
+            end
+        end
+        return
+    end
+    broadcast(self, "onEvent", event, payload)
 end
 
 return Home

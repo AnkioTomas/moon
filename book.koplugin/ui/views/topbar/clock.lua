@@ -1,16 +1,17 @@
 --[[--
 顶栏时钟：Resume 挂分钟心跳，Pause 拆掉，只脏时钟区域。
 
-@module koplugin.book.ui.components.topbar.clock
+@module koplugin.book.ui.views.topbar.clock
 --]]
 
 local datetime = require("datetime")
 local UIManager = require("ui/uimanager")
-local Base = require("ui.components.topbar.base")
+local Base = require("ui.views.topbar.base")
 
 ---@class BookTopBarClock : BookTopBarItem
-local Clock = setmetatable({}, Base)
+local Clock = {}
 Clock.__index = Clock
+setmetatable(Clock, Base)
 Clock.id = "clock"
 Clock.align = "left"
 

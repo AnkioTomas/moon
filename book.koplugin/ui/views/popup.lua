@@ -40,7 +40,7 @@ list 选择语义（实现在 popup/single.lua 与 popup/multi.lua，共享底�
   多选 点按只切换 Material 勾选图标、不关闭；on_toggle(value, checked, item, selected)
     每次切换触发（selected 为当前全部勾选值列表）；最终结果在 close_callback 里读取。
 
-@module koplugin.book.ui.components.popup
+@module koplugin.book.ui.views.popup
 --]]
 
 local ButtonDialog = require("ui/widget/buttondialog")
@@ -48,8 +48,8 @@ local Menu = require("ui/widget/menu")
 local SpinWidget = require("ui/widget/spinwidget")
 local UIManager = require("ui/uimanager")
 local UI = require("ui.components.bookui")
-local Single = require("ui.components.popup.single")
-local Multi = require("ui.components.popup.multi")
+local Single = require("ui.views.popup.single")
+local Multi = require("ui.views.popup.multi")
 
 ---@class BookPopup
 local Popup = {}

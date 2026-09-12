@@ -2,7 +2,7 @@
 Popup 列表的共享底座：Menu 构造与项内嵌控件，不含单选/多选语义。
 单选见 popup/single.lua，多选见 popup/multi.lua。
 
-@module koplugin.book.ui.components.popup.list
+@module koplugin.book.ui.views.popup.list
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -20,19 +20,20 @@ local Image = require("ui.components.image")
 local Icon = require("ui.components.icon")
 local Surface = require("ui.components.surface")
 
+---@class BookPopupList
 local List = {}
 
 --- 图片是否顶替文案。
----@param raw table
+---@param raw table 尚未规范化的接口数据或布局约束
 ---@return boolean
 function List.imageOnly(raw)
     return raw.image and (raw.text == nil or raw.text == false or raw.image_only)
 end
 
 --- 项内嵌控件：widget > image > icon。
----@param raw table
----@param image_only boolean
----@param opts table
+---@param raw table 尚未规范化的接口数据或布局约束
+---@param image_only boolean 是否只保留图片、隐藏其他书籍信息
+---@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table|nil inner, number inner_w
 function List.buildInner(raw, image_only, opts)
     local icon_sz = opts.icon_size or UI.iconSz()
@@ -61,8 +62,8 @@ function List.buildInner(raw, image_only, opts)
 end
 
 --- Menu 项基础字段（禁用项在此收口：无回调、置灰）。
----@param raw table
----@param image_only boolean
+---@param raw table 尚未规范化的接口数据或布局约束
+---@param image_only boolean 是否只保留图片、隐藏其他书籍信息
 ---@return table
 function List.baseItem(raw, image_only)
     local item = {
@@ -81,11 +82,11 @@ function List.baseItem(raw, image_only)
 end
 
 --- 前置 Material 选择图标（multi=checkbox，否则 radio），可与 inner 组合。
----@param inner table|nil
----@param inner_w number
----@param selected boolean
----@param multi boolean
----@param opts table
+---@param inner table|nil 待放入外层容器的内容 Widget
+---@param inner_w number 扣除左右留白后的内容宽度，单位像素
+---@param selected boolean 项目是否处于选中状态
+---@param multi boolean 是否允许多选
+---@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table state, number state_w
 function List.withChoiceMark(inner, inner_w, selected, multi, opts)
     local icon_sz = opts.icon_size or UI.iconSz()
@@ -106,13 +107,15 @@ end
 --- Material 图标标题栏左侧操作（与阅读面板头部同款胶囊按钮）。
 --- TitleBar 居中布局会为右侧关闭键对称预留左侧空位，按钮叠在预留区即可。
 --- title_shrink_font_to_fit 下 setTitle 会 clear+init，左侧按钮须每次重挂。
----@param title_bar table
----@param opts table
+---@param title_bar table 安装左侧操作按钮的标题栏
+---@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
+---@return nil
 local function attachMaterialLeftAction(title_bar, opts)
     if not opts.title_material_icon then
         return
     end
     --- 往标题栏左侧预留区叠一个胶囊图标按钮（直接 table.insert 进 TitleBar 的重叠组）。
+    ---@return nil
     local function insertLeft()
         local btn_w = UI.sz(44)
         local bar_h = title_bar:getHeight()
@@ -136,16 +139,16 @@ local function attachMaterialLeftAction(title_bar, opts)
         end
         tap[1] = CenterContainer:new{
             dimen = dimen,
-            Surface.pill(Icon.widget{
+            Surface.build{ child = Icon.widget{
                 name = opts.title_material_icon,
                 size = 22,
                 color = Blitbuffer.COLOR_BLACK,
-            }, {
+            }, options = {
                 width = btn_w,
                 height = UI.sz(36),
                 background = UI.surface(),
                 shadow = false,
-            }),
+            }, kind = "pill" },
         }
         table.insert(title_bar, tap)
     end
@@ -160,18 +163,20 @@ end
 --- 底部 Tab 栏（仅全屏列表）：完整 pager 行之下再加一行全宽等分 Tab。
 --- bt: { tabs = { { id = ..., text = ... }, ... }, active = 当前 id, on_tab = fun(id) }
 --- 给 menu 挂 setBottomTabActive(id) 供调用方切选中态。
----@param menu table
----@param bt table
+---@param menu table 需要安装底部 Tab 的菜单实例
+---@param bt table 底部 Tab 的项目、选中值和切换回调
+---@return nil
 local function attachBottomTabs(menu, bt)
-    local BottomBar = require("ui.components.bottombar")
-    --- 按当前 bt.active 重建底部 Tab 栏；点已选中的 Tab 不触发回调。
-    ---@return table
-    local function buildBar()
-        return BottomBar.build(bt.tabs or {}, bt.active, function(id)
+    local BottomBar = require("ui.views.bottombar")
+    local view = BottomBar:new{ host = menu, data = {
+        tabs = bt.tabs or {}, active = bt.active,
+        on_tab = function(id)
             if id ~= bt.active and bt.on_tab then bt.on_tab(id) end
-        end, menu)
-    end
-    local bar = buildBar()
+        end,
+    } }
+    view:onCreate()
+    local bar = view:build()
+    view:onResume()
     local bar_h = bar:getSize().h
     -- footer 是底对齐的 BottomContainer：子件换成「pager 在上、Tab 栏在下」的竖排。
     -- menu → FrameContainer → OverlapGroup(content_group, page_return, footer)
@@ -197,11 +202,12 @@ local function attachBottomTabs(menu, bt)
         end
     end
     --- 切换选中 Tab 并重绘页脚。
-    ---@param self table
-    ---@param id any
+    ---@param self table 当前视图或布局实例
+    ---@param id any 组件、分页或数据源的标识
     menu.setBottomTabActive = function(self, id)
         bt.active = id
-        stack[2] = buildBar()
+        view.data.active = id
+        view:updateView(view.data)
         stack:resetLayout()
         UIManager:setDirty(self, "ui")
     end
@@ -211,13 +217,14 @@ end
 --- 全屏选项列表（翻页，不滚动）。normalize 由 single/multi 注入。
 --- opts: title / subtitle / items / current / on_select / on_toggle
 ---       / close_callback / icon_size / image_size / centered / bottom_tabs …
----@param opts table|nil
+---@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@param normalize fun(items: table|nil, ctx: table, opts: table): table, number, number|nil
 ---@return table
 function List.openList(opts, normalize)
     opts = opts or {}
     local holder = { menu = nil }
     --- 关闭当前 list 菜单（仅关闭，不触发回调——Menu 的 close_callback 会处理）。
+    ---@return nil
     local function close()
         if holder.menu then
             UIManager:close(holder.menu)
@@ -225,6 +232,7 @@ function List.openList(opts, normalize)
         end
     end
     --- 重绘当前页（多选勾选切换用）。
+    ---@return nil
     local function refresh()
         if holder.menu then
             holder.menu:updateItems(nil, true)

@@ -12,7 +12,15 @@ local PageTurnAnimation = require("patch.page_turn_animation")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+---@class BookSettingsReader
 local ReaderSettings = {}
+ReaderSettings.__index = ReaderSettings
+
+---@return BookSettingsReader
+function ReaderSettings.new()
+    return setmetatable({}, ReaderSettings)
+end
+
 
 ---@type { id: string, title: string, icon: string }[]
 local POPUP_BUTTONS = {
@@ -88,7 +96,7 @@ local function popupConfigureRow(desktop, item)
                                 reader.reader_popup_buttons[item.id] = not enabled
                                 MoonSettings.saveSection("reader", reader)
                                 UIManager:close(dialog)
-                                desktop:rebuild()
+                                desktop:updateView()
                             end,
                         },
                     },
@@ -100,7 +108,7 @@ local function popupConfigureRow(desktop, item)
                         reader.reader_popup_button_order = order
                         MoonSettings.saveSection("reader", reader)
                         UIManager:close(dialog)
-                        desktop:rebuild()
+                        desktop:updateView()
                     end
                     actions[#actions + 1] = {
                         { text = _("上移"), enabled = position > 1, callback = function() move(-1) end },
@@ -122,7 +130,7 @@ end
 --- 构建划词菜单操作列表。
 ---@param desktop table
 ---@return function[]
-function ReaderSettings.popupRows(desktop)
+function ReaderSettings:popupRows(desktop)
     local rows = {}
     for _, item in ipairs(POPUP_BUTTONS) do
         rows[#rows + 1] = popupConfigureRow(desktop, item)
@@ -132,7 +140,7 @@ end
 
 ---@param desktop table
 ---@return BookQuickPanelSettingSection[]
-function ReaderSettings.sections(desktop)
+function ReaderSettings:sections(desktop)
     local reader = MoonSettings.get("reader")
     local xray_on = reader.book_xray_enabled ~= false
     local marks_on = reader.book_xray_show_marks ~= false
@@ -152,7 +160,7 @@ function ReaderSettings.sections(desktop)
                 callback = function()
                     reader.edge_translation_enabled = not edge_translation_on
                     MoonSettings.saveSection("reader", reader)
-                    desktop:rebuild()
+                    desktop:updateView()
                 end,
             })
         end,
@@ -180,7 +188,7 @@ function ReaderSettings.sections(desktop)
                 callback = function()
                     reader.dictionary_enabled = not dictionary_on
                     MoonSettings.saveSection("reader", reader)
-                    desktop:rebuild()
+                    desktop:updateView()
                 end,
             })
         end,
@@ -216,7 +224,7 @@ function ReaderSettings.sections(desktop)
                             reader.book_xray_enabled = not xray_on
                             MoonSettings.saveSection("reader", reader)
                             require("xray.marks").invalidate()
-                            desktop:rebuild()
+                            desktop:updateView()
                         end,
                     })
                 end,
@@ -231,7 +239,7 @@ function ReaderSettings.sections(desktop)
                             MoonSettings.saveSection("reader", reader)
                             require("xray.marks").invalidate()
                             refreshReaderUi()
-                            desktop:rebuild()
+                            desktop:updateView()
                         end,
                     })
                 end,
@@ -247,7 +255,7 @@ function ReaderSettings.sections(desktop)
                         callback = function()
                             Bars.setTopBarPreference(not top_on, readerUi())
                             refreshReaderUi()
-                            desktop:rebuild()
+                            desktop:updateView()
                         end,
                     })
                 end,
@@ -258,7 +266,7 @@ function ReaderSettings.sections(desktop)
                         callback = function()
                             Bars.setBottomBarPreference(not bottom_on, readerUi())
                             refreshReaderUi()
-                            desktop:rebuild()
+                            desktop:updateView()
                         end,
                     })
                 end,
@@ -275,7 +283,7 @@ function ReaderSettings.sections(desktop)
                                 })
                                 return
                             end
-                            desktop:rebuild()
+                            desktop:updateView()
                             PageTurnAnimation.promptRestart()
                         end,
                     })
@@ -287,7 +295,7 @@ function ReaderSettings.sections(desktop)
                         callback = function()
                             reader.auto_mark_read_at_99 = not auto_mark_read
                             MoonSettings.saveSection("reader", reader)
-                            desktop:rebuild()
+                            desktop:updateView()
                         end,
                     })
                 end,
@@ -311,7 +319,7 @@ function ReaderSettings.sections(desktop)
                         callback = function()
                             reader.baike_enabled = not baike_on
                             MoonSettings.saveSection("reader", reader)
-                            desktop:rebuild()
+                            desktop:updateView()
                         end,
                     })
                 end,

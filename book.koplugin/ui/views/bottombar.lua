@@ -18,7 +18,7 @@
 
   BottomBar:new{ data = { tabs = tabs, active = active_id } }:build()
 
-@module koplugin.book.ui.components.bottombar
+@module koplugin.book.ui.views.bottombar
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -43,12 +43,13 @@ local Icon = require("ui.components.icon")
 ---@field text string
 ---@field icon string
 
-local BaseView = require("ui.baseview")
----@class BookBottomBar : BaseView
-local BottomBar = setmetatable({}, BaseView)
+local View = require("ui.view")
+---@class BookBottomBar : View
+local BottomBar = {}
 BottomBar.__index = BottomBar
+setmetatable(BottomBar, View)
 
---- 构建底栏内容；根骨架由 BaseView 缓存。
+--- 构建底栏内容；根骨架由 View 缓存。
 ---@param self BookBottomBar 当前视图或布局实例
 ---@return table
 local function contents(self)

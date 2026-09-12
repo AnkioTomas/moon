@@ -1,16 +1,17 @@
 --[[--
 顶栏 Wi-Fi 状态。网络事件立刻刷图标。
 
-@module koplugin.book.ui.components.topbar.wifi
+@module koplugin.book.ui.views.topbar.wifi
 --]]
 
 local NetworkMgr = require("ui/network/manager")
 local Icon = require("ui.components.icon")
-local Base = require("ui.components.topbar.base")
+local Base = require("ui.views.topbar.base")
 
 ---@class BookTopBarWifi : BookTopBarItem
-local Wifi = setmetatable({}, Base)
+local Wifi = {}
 Wifi.__index = Wifi
+setmetatable(Wifi, Base)
 Wifi.id = "wifi"
 
 local NETWORK_EVENTS = {

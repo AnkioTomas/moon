@@ -4,14 +4,22 @@
 
 local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
-local Popup = require("ui.components.popup")
+local Popup = require("ui.views.popup")
 local SettingRow = require("ui.components.settingrow")
 local MoonSettings = require("utils.settings")
 local SourceRegistry = require("source.registry")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+---@class BookSettingsSource
 local Source = {}
+Source.__index = Source
+
+---@return BookSettingsSource
+function Source.new()
+    return setmetatable({}, Source)
+end
+
 
 --- 取某个源的 setting 模块。
 --- 源不一定带设置模块，require 失败即视为没有，不作为错误。
@@ -51,7 +59,7 @@ local function pickSource(desktop, plugin, active_id)
             UIManager:show(InfoMessage:new{
                 text = T(_("已切换数据源：%1"), name), timeout = 2,
             })
-            desktop:rebuild()
+            desktop:updateView()
         end,
     }
 end
@@ -59,7 +67,7 @@ end
 --- 弹出已启用数据源列表并切换当前源。
 ---@param desktop table
 ---@param plugin table|nil
-function Source.pickActive(desktop, plugin)
+function Source:pickActive(desktop, plugin)
     pickSource(desktop, plugin, MoonSettings.activeSourceId())
 end
 
@@ -80,17 +88,17 @@ local function pickEnabledSources(desktop)
     Popup.list{
         title = _("启用源"), select_mode = "multi", items = items,
         on_toggle = function(id, on) SourceRegistry.setEnabled(id, on) end,
-        close_callback = function() desktop:rebuild() end,
+        close_callback = function() desktop:updateView() end,
     }
 end
 
 --- 构建数据源子页分组。
 ---@param ctx table
 ---@return table
-function Source.sections(ctx)
+function Source:sections(ctx)
     local desktop, plugin = ctx.desktop, ctx.plugin
     local active_id, active_name = ctx.active_id, ctx.active_name
-    local source = plugin and plugin.getSource and plugin:getSource() or nil
+    local source = SourceRegistry.current()
     local enabled = SourceRegistry.listEnabled()
     local common_rows = {
         function(iw)

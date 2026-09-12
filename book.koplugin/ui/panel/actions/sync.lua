@@ -5,6 +5,7 @@
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 
+---@type BookQuickPanelAction
 return {
     id = "sync",
     title = _("同步"),

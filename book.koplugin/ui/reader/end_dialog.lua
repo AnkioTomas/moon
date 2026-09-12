@@ -9,6 +9,7 @@ local InfoMessage = require("ui/widget/infomessage")
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 
+---@class BookReaderEndDialog
 local EndDialog = {}
 
 ---@param plugin table

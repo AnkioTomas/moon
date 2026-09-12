@@ -6,7 +6,7 @@ local Device = require("device")
 local NetworkMgr = require("ui/network/manager")
 local _ = require("gettext")
 
----@class BookQuickPanelAction
+---@type BookQuickPanelAction
 return {
     id = "wifi",
     title = _("Wi-Fi"),
