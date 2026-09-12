@@ -5,7 +5,7 @@
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local Lifecycle = require("ui.lifecycle")
+local BaseView = require("ui.baseview")
 local Icon = require("ui.components.icon")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
@@ -13,19 +13,21 @@ local UIManager = require("ui/uimanager")
 local MoonSettings = require("utils.settings")
 local logger = require("utils.log")
 
----@class BookTopBarItem : Lifecycle
----@field id string
+---@class BookTopBarItem : BaseView
+---@field id string 顶栏项目注册标识
 ---@field interval number|nil Resume 后的固定刷新间隔（秒）
----@field topbar BookTopBar
----@field widget table|nil
----@field rect table|nil
----@field _tick fun()|nil
-local Base = setmetatable({}, Lifecycle)
+---@field topbar BookTopBar 拥有本项目的顶栏实例
+---@field widget table|nil BaseView 拥有的稳定根容器
+---@field metric_widget table|nil 实際图标或文字控件，与稳定根分离
+---@field ctx BookTopBarBuildCtx|nil 当前顶栏构建尺寸
+---@field rect table|nil 本项目在屏幕上的绝对刷新矩形
+---@field _tick fun()|nil 当前定时刷新回调，用于取消调度
+local Base = setmetatable({}, BaseView)
 Base.__index = Base
 Base.ICON_SIZE = 14
 
 --- 顶栏项目是否显示。缺失或损坏的旧配置按显示处理。
----@param id string
+---@param id string 组件、分页或数据源的标识
 ---@return boolean
 function Base.visible(id)
     local home = MoonSettings.get("home")
@@ -33,19 +35,21 @@ function Base.visible(id)
     return items[id] ~= false
 end
 
+--- 取得仍存活的所属桌面；顶栏或桌面已销毁时返回 nil。
 ---@return table|nil
 function Base:desktop()
     local topbar = self.topbar
     local desktop = topbar and topbar.desktop
-    if not desktop or desktop.lifecycle.state == "Destroy" or (topbar and topbar.state == "Destroy") then
+    if not desktop or desktop.lifecycle.state == "Destroy" or (topbar and topbar.lifecycle.state == "Destroy") then
         return nil
     end
     return desktop
 end
 
 --- 只脏自己那一块。Resume 以外不改屏。
+---@return nil
 function Base:dirty()
-    if not self:uiReady() then return end
+    if not self.lifecycle:uiReady() then return end
     local desktop = self:desktop()
     if desktop and self.rect then
         UIManager:setDirty(desktop, "ui", self.rect)
@@ -53,9 +57,9 @@ function Base:dirty()
 end
 
 --- 顶栏一项。有图标走图标+文案，没有就纯文字；text 空则整项省略。
----@param icon_name string|nil
----@param text string|nil
----@param opts table|nil
+---@param icon_name string|nil 图标名称；nil 时按纯文字处理
+---@param text string|nil 需要展示的文字
+---@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table|nil
 function Base.metric(icon_name, text, opts)
     if not text or text == "" then
@@ -80,45 +84,50 @@ function Base.metric(icon_name, text, opts)
 end
 
 --- 原地改图标/文案。显隐变化才整条重排。
----@param icon_name string|nil
----@param text string|nil
+---@param icon_name string|nil 图标名称；nil 时按纯文字处理
+---@param text string|nil 需要展示的文字
+---@return nil
 function Base:updateMetric(icon_name, text)
-    if not self:uiReady() then return end
+    if not self.lifecycle:uiReady() then return end
     local show = text ~= nil and text ~= ""
-    if show ~= (self.widget ~= nil) then
+    if show ~= (self.metric_widget ~= nil) then
         local topbar = self.topbar
-        logger.dbg("topbar metric visibility change", self.id, show, self.widget ~= nil)
-        if topbar then topbar:recreate() end
+        logger.dbg("topbar metric visibility change", self.id, show, self.metric_widget ~= nil)
+        if topbar then topbar:updateView() end
         return
     end
-    if not self.widget then
+    if not self.metric_widget then
         return
     end
     if icon_name then
-        local icon = self.widget.icon
+        local icon = self.metric_widget.icon
         local tw = icon and (icon.setText and icon or icon[1])
         if tw and tw.setText then
             tw:setText(icon_name)
         end
     end
-    if self.widget.label then
-        self.widget.label:setText(text)
-    elseif self.widget.setText then
-        self.widget:setText(text)
+    if self.metric_widget.label then
+        self.metric_widget.label:setText(text)
+    elseif self.metric_widget.setText then
+        self.metric_widget:setText(text)
     end
-    local size = self.widget.getSize and self.widget:getSize()
-    if size and self.rect then
-        self.rect.w = size.w
+    local size = self.metric_widget.getSize and self.metric_widget:getSize()
+    if size and self.rect and size.w ~= self.rect.w and self.topbar then
+        self.topbar:updateView()
+        return
     end
     self:dirty()
 end
 
---- 按 read() 原地刷新。Resume 以外不改屏。
-function Base:refresh()
+--- 按 read() 原地改 UI。Resume 以外不改屏。
+---@return nil
+function Base:updateView()
     local text, icon = self:read()
     self:updateMetric(icon, text)
 end
 
+--- 取消顶栏项目的定时刷新回调并清除句柄。
+---@return nil
 function Base:unschedule()
     if self._tick then
         UIManager:unschedule(self._tick)
@@ -127,45 +136,61 @@ function Base:unschedule()
 end
 
 --- 固定间隔刷新。Clock 的分钟对齐心跳不走这里。
----@param seconds number
+---@param seconds number 刷新周期，单位秒
+---@return nil
 function Base:scheduleEvery(seconds)
     self:unschedule()
-    if not self:uiReady() then return end
+    if not self.lifecycle:uiReady() then return end
     self._tick = function()
-        if not self:uiReady() then return end
-        self:refresh()
+        if not self.lifecycle:uiReady() then return end
+        self:updateView()
         self:scheduleEvery(seconds)
     end
     UIManager:scheduleIn(seconds, self._tick)
 end
 
+--- 立即更新指标，并为配置了周期的项目启动定时刷新。
+---@return nil
 function Base:onResume()
-    self:refresh()
+    self:updateView()
     if self.interval then
         self:scheduleEvery(self.interval)
     end
 end
 
+--- 暂停顶栏项目时取消定时刷新。
+---@return nil
 function Base:onPause()
     self:unschedule()
 end
 
+--- 读当前要显示的值；子类实现。
+---@return string|nil text
+---@return string|nil icon
+function Base:read()
+    error("topbar item must implement read")
+end
+
+--- 保存构建上下文并返回 BaseView 缓存的稳定根容器。
+---@param ctx BookTopBarBuildCtx|nil 构建上下文，提供尺寸、数据源和桌面宿主
+---@return table|nil
+function Base:build(ctx)
+    self.ctx = ctx
+    return BaseView.build(self)
+end
+
+--- 停止顶栏项目时取消定时刷新。
+---@return nil
 function Base:onStop()
     self:unschedule()
 end
 
+--- 取消定时刷新并清除指标 Widget 和屏幕矩形引用。
+---@return nil
 function Base:onDestroy()
     self:unschedule()
-end
-
---- 读当前要显示的值；子类实现。
----@return string|nil, string|nil  text, icon
-function Base:read()
-end
-
----@param _ctx BookTopBarBuildCtx|nil
----@return table|nil
-function Base:build(_ctx)
+    self.metric_widget = nil
+    self.rect = nil
 end
 
 return Base
