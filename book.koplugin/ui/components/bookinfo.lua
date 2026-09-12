@@ -44,6 +44,7 @@ local Paths = require("utils.paths")
 local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
 
+---@class BookInfo
 local BookInfo = {}
 
 --- Kindle 状态叠层用近黑灰，和封面拉开对比。
@@ -53,12 +54,13 @@ local function statusInk()
 end
 
 --- Kindle 缎带：沿 \ 从顶边接到右边，定宽，角尖不填。
----@param bb table
----@param x number
----@param y number
----@param size number
----@param band number
----@param color any
+---@param bb table 用于绘制的 Blitbuffer 画布
+---@param x number 目标区域左上角横坐标，单位像素
+---@param y number 目标区域左上角纵坐标，单位像素
+---@param size number 绘制区域边长，单位像素
+---@param band number 斜角缎带宽度，单位像素
+---@param color any Blitbuffer 使用的颜色值
+---@return nil
 local function paintSash(bb, x, y, size, band, color)
     for dy = 0, size - 1 do
         local x0 = dy
@@ -71,7 +73,7 @@ local function paintSash(bb, x, y, size, band, color)
 end
 
 --- 白像素外接盒；旋转按墨水中心，不按字体框。
----@param src table
+---@param src table 图片来源地址或参与像素读取的源画布，具体形式由参数类型限定
 ---@return number, number, number, number
 local function inkRect(src)
     local sw, sh = src:getWidth(), src:getHeight()
@@ -95,14 +97,15 @@ local function inkRect(src)
 end
 
 --- 已在顶、读在右，字头朝外角。dest = 屏坐标顺时针 45°。
----@param dst table
----@param src table
----@param dx number
----@param dy number
----@param ox number
----@param oy number
----@param sw number
----@param sh number
+---@param dst table 接收绘制结果的目标画布
+---@param src table 图片来源地址或参与像素读取的源画布，具体形式由参数类型限定
+---@param dx number 目标画布横向偏移，单位像素
+---@param dy number 目标画布纵向偏移，单位像素
+---@param ox number 源内容横向起点，单位像素
+---@param oy number 源内容纵向起点，单位像素
+---@param sw number 源内容宽度，单位像素
+---@param sh number 源内容高度，单位像素
+---@return number width 旋转绘制区域的宽度
 local function blitInk45(dst, src, dx, dy, ox, oy, sw, sh)
     local k = 0.70710678
     local dw = math.ceil((sw + sh) * k)
@@ -127,8 +130,9 @@ end
 
 --- 下载的网络封面同时落到源专属路径，供锁屏离屏渲染复用。
 --- 锁屏离屏渲染不发网络请求，因此仍需要稳定的本地文件路径。
----@param book table|nil
----@param path string|nil
+---@param book table|nil 当前操作或展示的书籍数据
+---@param path string|nil 图片或书籍的本地文件路径
+---@return nil
 local function persistCover(book, path)
     if type(book) ~= "table" or type(path) ~= "string" or path == "" then return end
     local source_id, stable_id = book.source_id, book.stable_id
@@ -159,7 +163,7 @@ local function persistCover(book, path)
 end
 
 --- 取书籍 stable_id（文件身份）。
----@param book Book|table|nil
+---@param book Book|table|nil 当前操作或展示的书籍数据
 ---@return string|nil
 function BookInfo.file(book)
     if type(book) ~= "table" then return nil end
@@ -170,14 +174,14 @@ function BookInfo.file(book)
 end
 
 --- 取书名；缺省回退文件 id 或「?」。
----@param book Book|table|nil
+---@param book Book|table|nil 当前操作或展示的书籍数据
 ---@return string
 function BookInfo.title(book)
     return (book and book.title) or BookInfo.file(book) or "?"
 end
 
 --- 取作者。
----@param book Book|table|nil
+---@param book Book|table|nil 当前操作或展示的书籍数据
 ---@return string
 function BookInfo.author(book)
     if type(book) ~= "table" then return "" end
@@ -185,7 +189,7 @@ function BookInfo.author(book)
 end
 
 --- 取简介。
----@param book Book|BookDetail|table|nil
+---@param book Book|BookDetail|table|nil 当前操作或展示的书籍数据
 ---@return string
 function BookInfo.desc(book)
     if type(book) ~= "table" then return "" end
@@ -193,7 +197,7 @@ function BookInfo.desc(book)
 end
 
 --- 取阅读进度百分比（0–100）。
----@param book Book|table|nil
+---@param book Book|table|nil 当前操作或展示的书籍数据
 ---@return number
 function BookInfo.pct(book)
     if type(book) ~= "table" then return 0 end
@@ -204,10 +208,10 @@ function BookInfo.pct(book)
 end
 
 --- 包一层可点击/长按容器。
----@param w number
----@param h number
----@param on_tap fun()|nil
----@param on_hold fun()|nil
+---@param w number 可用宽度，单位像素
+---@param h number 可用高度，单位像素
+---@param on_tap fun()|nil 点击命中区域时执行的回调
+---@param on_hold fun()|nil 长按命中区域时执行的回调
 ---@return table
 function BookInfo.tappable(w, h, on_tap, on_hold)
     local tap = InputContainer:new{
@@ -241,14 +245,14 @@ function BookInfo.tappable(w, h, on_tap, on_hold)
 end
 
 --- 已读：read_state=1。
----@param book Book|table|nil
+---@param book Book|table|nil 当前操作或展示的书籍数据
 ---@return boolean
 function BookInfo.isRead(book)
     return tonumber(book and book.read_state) == 1
 end
 
 --- 封面状态：已读与进度互斥，下载独立。
----@param book Book|table|nil
+---@param book Book|table|nil 当前操作或展示的书籍数据
 ---@return { read: boolean, percent: boolean, downloaded: boolean }
 function BookInfo.statusOverlays(book)
     local read = BookInfo.isRead(book)
@@ -260,16 +264,16 @@ function BookInfo.statusOverlays(book)
 end
 
 --- 封面右上角进度角标；pct≤0 返回 nil。Kindle：小圆角胶囊、贴角留缝。
----@param cw number
----@param pct number|nil
+---@param cw number 封面宽度，单位像素
+---@param pct number|nil 阅读进度百分比，范围 0 到 100
 ---@return table|nil
 function BookInfo.progressBadge(cw, pct)
     if not pct or pct <= 0 then return nil end
-    local badge = Surface.pill(TextWidget:new{
+    local badge = Surface:new{ child = TextWidget:new{
             text = string.format("%.0f%%", pct),
             face = UI.face("xx_smallinfofont", 10),
             fgcolor = Blitbuffer.COLOR_WHITE,
-        }, {
+        }, options = {
             padding = UI.sz(4),
             padding_top = UI.sz(1),
             padding_bottom = UI.sz(1),
@@ -277,7 +281,7 @@ function BookInfo.progressBadge(cw, pct)
             height = UI.sz(16),
             background = statusInk(),
             shadow = false,
-        })
+        }, kind = "pill" }:build()
     local bz = badge:getSize()
     local inset = UI.sz(4)
     badge.overlap_offset = {
@@ -288,7 +292,7 @@ function BookInfo.progressBadge(cw, pct)
 end
 
 --- 右上角「已读」斜条；文字沿 45° 走，贴齐封面角。
----@param cw number
+---@param cw number 封面宽度，单位像素
 ---@return table
 function BookInfo.readRibbon(cw)
     local text = TextWidget:new{
@@ -305,9 +309,16 @@ function BookInfo.readRibbon(cw)
         text = text,
         band = band,
     }
+    --- 返回已读缎带的固定包围盒。
+    ---@return table
     function ribbon:getSize()
         return self.dimen
     end
+    --- 绘制斜角已读缎带，并将文字旋转后绘制到缎带中央。
+    ---@param bb userdata 用于绘制的 Blitbuffer 画布
+    ---@param x number 目标区域左上角横坐标，单位像素
+    ---@param y number 目标区域左上角纵坐标，单位像素
+    ---@return nil
     function ribbon:paintTo(bb, x, y)
         local ink = statusInk()
         paintSash(bb, x, y, size, self.band, ink)
@@ -325,6 +336,8 @@ function BookInfo.readRibbon(cw)
         blitInk45(bb, src, ox, oy, ix, iy, iw, ih)
         src:free()
     end
+    --- 释放缎带拥有的文字控件。
+    ---@return nil
     function ribbon:free()
         self.text:free()
     end
@@ -336,7 +349,7 @@ function BookInfo.readRibbon(cw)
 end
 
 --- 左下角本地下载：实心圆 + 白勾，贴边留缝。
----@param ch number
+---@param ch number 封面高度，单位像素
 ---@return table
 function BookInfo.downloadMark(ch)
     local size = UI.sz(18)
@@ -350,9 +363,16 @@ function BookInfo.downloadMark(ch)
         dimen = Geom:new{ w = size, h = size },
         icon = icon,
     }
+    --- 返回下载完成标记的固定包围盒。
+    ---@return table
     function mark:getSize()
         return self.dimen
     end
+    --- 绘制下载完成的圆形底色和居中勾选图标。
+    ---@param bb userdata 用于绘制的 Blitbuffer 画布
+    ---@param x number 目标区域左上角横坐标，单位像素
+    ---@param y number 目标区域左上角纵坐标，单位像素
+    ---@return nil
     function mark:paintTo(bb, x, y)
         local r = math.floor(size / 2)
         local cx, cy = x + r, y + r
@@ -376,6 +396,8 @@ function BookInfo.downloadMark(ch)
             )
         end
     end
+    --- 释放下载完成标记拥有的图标控件。
+    ---@return nil
     function mark:free()
         if self.icon and self.icon.free then
             self.icon:free()
@@ -390,8 +412,8 @@ function BookInfo.downloadMark(ch)
 end
 
 --- 「NN%」+ 进度条；百分比在左。
----@param width number
----@param pct number|nil
+---@param width number 目标宽度，单位像素
+---@param pct number|nil 阅读进度百分比，范围 0 到 100
 ---@return table, number
 function BookInfo.progressRow(width, pct)
     pct = tonumber(pct) or 0
@@ -420,12 +442,12 @@ end
 --- opts.show_parent: 窗口级父（Desktop / Detail）
 --- opts.on_ready: 图片就绪回调
 --- opts.src / opts.headers: 直接指定封面（刮削结果没有 source.coverRequest）
----@param plugin table|nil
----@param source table|nil
----@param book table|nil
----@param cw number
----@param ch number
----@param opts table|nil
+---@param plugin table|nil 插件实例，用于打开书籍和调用插件功能
+---@param source table|nil 书籍所属数据源实例
+---@param book table|nil 当前操作或展示的书籍数据
+---@param cw number 封面宽度，单位像素
+---@param ch number 封面高度，单位像素
+---@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table, number, number
 function BookInfo.cover(plugin, source, book, cw, ch, opts)
     opts = opts or {}
@@ -459,16 +481,15 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
             persistCover(book, path)
             if on_ready then on_ready(path) end
         end,
-        sync = opts.sync,
     }
-    local cover = Surface.card(image, {
+    local cover = Surface:new{ child = image, options = {
         padding = cover_pad,
         radius = UI.cardRadius(),
         background = UI.surface(),
         clip = true,
         clip_background = UI.surface(),
         shadow = opts.shadow,
-    })
+    }, kind = "card" }:build()
     local status = BookInfo.statusOverlays(book)
     local show_read = opts.ribbon and status.read
     local show_pct = opts.badge and status.percent
@@ -496,10 +517,10 @@ end
 --- 上：书名/作者[/副文案]/简介（简介吃满中间余量，不写死行数）
 --- 下：进度条贴底（opts.show_progress=false 时隐藏，刮削结果用）
 --- opts: width, pad, on_tap, show_progress, subtitle, src, headers；返回 widget, height
----@param plugin table|nil
----@param source table|nil
----@param book table|nil
----@param opts table|nil
+---@param plugin table|nil 插件实例，用于打开书籍和调用插件功能
+---@param source table|nil 书籍所属数据源实例
+---@param book table|nil 当前操作或展示的书籍数据
+---@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table, number
 function BookInfo.hero(plugin, source, book, opts)
     opts = opts or {}
@@ -523,7 +544,6 @@ function BookInfo.hero(plugin, source, book, opts)
         on_ready = opts.on_ready,
         src = opts.src,
         headers = opts.headers,
-        sync = opts.sync,
     }))
     local cover_box = cover
     if opts.on_tap then
@@ -614,7 +634,7 @@ function BookInfo.hero(plugin, source, book, opts)
     end
 
     local pad_v = UI.sz(6)
-    local widget = Surface.card(HorizontalGroup:new{
+    local widget = Surface:new{ child = HorizontalGroup:new{
             align = "top",
             cover_box,
             HorizontalSpan:new{ width = gap },
@@ -622,14 +642,14 @@ function BookInfo.hero(plugin, source, book, opts)
                 dimen = Geom:new{ w = info_w, h = ch },
                 info,
             },
-        }, {
+        }, options = {
         padding = pad,
         padding_top = pad_v,
         padding_bottom = pad_v,
         background = false,
         radius = 0,
         shadow = false,
-    })
+    }, kind = "card" }:build()
     return widget, widget:getSize().h
 end
 

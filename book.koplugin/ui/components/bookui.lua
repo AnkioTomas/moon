@@ -27,6 +27,7 @@ local Blitbuffer = require("ffi/blitbuffer")
 local MoonSettings = require("utils.settings")
 local Screen = Device.screen
 
+---@class BookUI
 local UI = {}
 
 local _plugin_root
