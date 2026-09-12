@@ -16,7 +16,6 @@ local LineWidget = require("ui/widget/linewidget")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
 local Icon = require("ui.components.icon")
-local logger = require("utils.log")
 local _ = require("gettext")
 
 ---@class BookPageStrip
@@ -28,13 +27,23 @@ function PageStrip.bandH()
     return UI.sz(40)
 end
 
+--- 把页码限制到有效范围，供使用 PageStrip 的短分页页面复用。
+---@param page number|nil 当前页码
+---@param pages number|nil 总页数
+---@return integer page 规范化后的当前页码
+---@return integer pages 至少为 1 的总页数
+function PageStrip.clamp(page, pages)
+    pages = math.max(1, math.floor(tonumber(pages) or 1))
+    page = math.max(1, math.floor(tonumber(page) or 1))
+    return math.min(page, pages), pages
+end
+
 --- 构建翻页侧按钮；不可翻页时仅显示淡色图标，不注册点击事件。
 ---@param name string 区域、组件或图标名称
 ---@param enabled boolean 按钮是否可点击
 ---@param on_tap fun() 点击命中区域时执行的回调
 ---@return table
 local function sideButton(name, enabled, on_tap)
-    logger.dbg("page strip button", name, enabled and "enabled" or "disabled")
     local size = UI.sz(36)
     local tap = InputContainer:new{ dimen = Geom:new{ w = size, h = size } }
     tap[1] = CenterContainer:new{
@@ -53,7 +62,6 @@ local function sideButton(name, enabled, on_tap)
         },
     }
     tap.onTapPageStrip = function()
-        logger.dbg("page strip tap", name)
         on_tap()
         return true
     end
@@ -127,12 +135,7 @@ end
 ---@return table
 function PageStrip.widget(opts)
     local width = math.max(1, math.floor(tonumber(opts.width) or 1))
-    local page = math.max(1, math.floor(tonumber(opts.page) or 1))
-    local pages = math.max(1, math.floor(tonumber(opts.pages) or 1))
-    page = math.min(page, pages)
-    logger.dbg("page strip build", "page", page, "pages", pages,
-        "prev", page > 1, "next", page < pages,
-        "center", opts.center or "dots")
+    local page, pages = PageStrip.clamp(opts.page, opts.pages)
     local band_h = PageStrip.bandH()
     local side_w = UI.sz(44)
     local mid_w = math.max(1, width - side_w * 2)
