@@ -8,8 +8,8 @@ Desktop 顶部状态条。拼装小组件，并把生命周期传下去。
   +---------------------------------------------------+
   左：时钟、源名。右：内存、缓存、存储、Wi‑Fi、亮度、电池。
 
-onCreate / recreate 按设置建孩子、排 UI。关掉的走完 Pause / Stop / Destroy。
-设置开关经 desktop 事件 topbar_changed 进来，不提供 refresh。
+onCreate / build 建孩子排 UI。关掉的走完 Pause / Stop / Destroy。
+设置开关经 desktop 事件 topbar_changed → updateView。
 
 @module koplugin.book.ui.components.topbar
 --]]
@@ -26,10 +26,9 @@ local OverlapGroup = require("ui/widget/overlapgroup")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local Screen = Device.screen
-local UIManager = require("ui/uimanager")
 
 local UI = require("ui.components.bookui")
-local Lifecycle = require("ui.lifecycle")
+local BaseView = require("ui.baseview")
 local NativePanel = require("ui.panel.native")
 
 local Base = require("ui.components.topbar.base")
@@ -52,7 +51,7 @@ local SLOTS = {
 ---@field th number 顶栏总高度
 ---@field pad number 左右 padding
 
----@class BookTopBar : Lifecycle
+---@class BookTopBar : BaseView
 ---@field desktop BookDesktop|nil
 ---@field widget table|nil
 ---@field clock BookTopBarClock|nil
@@ -63,20 +62,14 @@ local SLOTS = {
 ---@field wifi BookTopBarWifi|nil
 ---@field brightness BookTopBarBrightness|nil
 ---@field battery BookTopBarBattery|nil
-local TopBar = setmetatable({}, Lifecycle)
+local TopBar = setmetatable({}, BaseView)
 TopBar.__index = TopBar
 
---- 隐藏一项时走完暂停 / 停止 / 销毁。
----@param child BookTopBarItem
-local function retire(child)
-    child:onPause()
-    child:onStop()
-    child:onDestroy()
-end
 
 --- 按设置对齐孩子：该显示的创建，不该显示的拆掉。
+---@return nil
 function TopBar:sync()
-    if self.state == "Destroy" then return end
+    if self.lifecycle.state == "Destroy" then return end
     for i = 1, #SLOTS do
         local class = SLOTS[i]
         local key = class.id
@@ -85,25 +78,32 @@ function TopBar:sync()
             if not child then
                 child = class:new()
                 child.topbar = self
+                child.name = "topbar." .. key
                 self[key] = child
+                self.children[key] = child
             end
         elseif child then
-            retire(child)
+            child:onDestroy()
             self[key] = nil
+            self.children[key] = nil
         end
     end
 end
 
----@param child BookTopBarItem|nil
----@param method string
----@param ... any
+--- 调用指定子视图的事件或生命周期方法；不存在的接收者直接跳过。
+---@param child BookTopBarItem|nil 要包装或接收事件的子控件
+---@param method string 子组件上的方法名
+---@param ... any 原样传给目标方法的参数
+---@return nil
 local function notify(child, method, ...)
     if child and child[method] then child[method](child, ...) end
 end
 
----@param self BookTopBar
----@param method string
----@param ... any
+--- 按组件注册顺序把同一事件和参数分发给子视图。
+---@param self BookTopBar 当前视图或布局实例
+---@param method string 子组件上的方法名
+---@param ... any 原样传给目标方法的参数
+---@return nil
 local function broadcast(self, method, ...)
     for i = 1, #SLOTS do
         notify(self[SLOTS[i].id], method, ...)
@@ -111,9 +111,9 @@ local function broadcast(self, method, ...)
 end
 
 --- 点是否落在孩子记录的矩形内。
----@param rect table|nil
----@param x number
----@param y number
+---@param rect table|nil 屏幕绝对矩形，或返回该矩形的函数
+---@param x number 目标区域左上角横坐标，单位像素
+---@param y number 目标区域左上角纵坐标，单位像素
 ---@return boolean
 local function hit(rect, x, y)
     return rect ~= nil
@@ -122,10 +122,11 @@ local function hit(rect, x, y)
 end
 
 --- 记录组件在顶栏上的区域，供点击和局部刷新使用。
----@param child BookTopBarItem
----@param widget table|nil
----@param x number
----@param th number
+---@param child BookTopBarItem 要包装或接收事件的子控件
+---@param widget table|nil 参与布局或绘制的 Widget
+---@param x number 目标区域左上角横坐标，单位像素
+---@param th number 顶栏总高度，单位像素
+---@return nil
 local function place(child, widget, x, th)
     child.rect = nil
     if not widget then return end
@@ -136,10 +137,11 @@ local function place(child, widget, x, th)
 end
 
 --- 按当前可见孩子拼一整条顶栏。
+---@param self BookTopBar 当前视图或布局实例
 ---@return table
-function TopBar:compose()
-    local sw = Screen:getWidth()
-    local th = UI.topBarH()
+local function assemble(self)
+    local sw = self.width or Screen:getWidth()
+    local th = self.height or UI.topBarH()
     local pad = UI.pagePad()
     local gap_w = UI.sz(8)
     local line_h = UI.line()
@@ -156,8 +158,12 @@ function TopBar:compose()
     for i = 1, #SLOTS do
         local class = SLOTS[i]
         local child = self[class.id]
-        local widget = child and child:build(ctx)
-        if widget then
+        local widget
+        if child then
+            child.ctx = ctx
+            widget = child.widget and child:rebuild() or child:build(ctx)
+        end
+        if widget and child.metric_widget then
             if class.align == "left" then
                 if #left > 0 then
                     table.insert(left, HorizontalSpan:new{ width = gap_w })
@@ -223,21 +229,12 @@ function TopBar:compose()
     }
 end
 
---- 首帧或测试取 widget。已经 create / recreate 过就复用。
----@return table
-function TopBar:build()
-    if not self.widget then
-        self:sync()
-        self.widget = self:compose()
-    end
-    return self.widget
-end
-
---- 有壳就换自己那一槽；没壳等 Desktop 首帧 rebuild。
----@param self BookTopBar
+--- 有壳就换自己那一槽；没壳等 Desktop:build。
+---@param self BookTopBar 当前视图或布局实例
+---@return nil
 local function install(self)
     local desktop = self.desktop
-    if self.state == "Destroy" or not desktop or not desktop.lifecycle
+    if self.lifecycle.state == "Destroy" or not desktop or not desktop.lifecycle
         or desktop.lifecycle.state == "Destroy" then
         return
     end
@@ -245,86 +242,98 @@ local function install(self)
     local top = self.widget
     if not root or not top then return end
     top.overlap_offset = { 0, 0 }
-    if root[2] and root[2].free then root[2]:free() end
-    root[2] = top
-    UIManager:setDirty(desktop, "ui", Geom:new{
-        x = 0,
-        y = 0,
-        w = Screen:getWidth(),
-        h = UI.topBarH(),
-    })
+    desktop.view:replaceRegion("topbar", top)
 end
 
---- 按当前设置重建：关掉的走完关闭生命周期，新开的补到父阶段，再换 UI。
-function TopBar:recreate()
-    if self.state == "Destroy" then return end
+--- 同步顶栏项目并补发创建阶段，按当前屏幕宽度组装左右分区。
+---@return table widget 顶栏内容树
+function TopBar:createWidget()
     self:sync()
-    local created = {}
     for i = 1, #SLOTS do
         local child = self[SLOTS[i].id]
-        if child and child.state == "new" then
-            created[#created + 1] = child
-            child:onCreate()
-        end
+        if child and child.lifecycle.state == "new" then child:onCreate() end
     end
-    self.widget = self:compose()
-    for i = 1, #created do
-        if self.state == "Start" or self.state == "Resume" then
-            created[i]:onStart()
-        end
-        if self.state == "Resume" then
-            created[i]:onResume()
+    return assemble(self)
+end
+
+--- 重排顶栏内容并启动新增项目，将稳定根节点安装回桌面。
+---@return table
+function TopBar:updateView()
+    if self.lifecycle.state == "Destroy" then return self.widget end
+    self:rebuild()
+    for i = 1, #SLOTS do
+        local child = self[SLOTS[i].id]
+        if child and child.lifecycle.state == "Create"
+            and (self.lifecycle.state == "Start" or self.lifecycle.state == "Resume") then
+            child:onStart()
+            if self.lifecycle.state == "Resume" then child:onResume() end
         end
     end
     install(self)
+    return self.widget
 end
 
 --- 创建：按设置建孩子并排好 UI。
+---@return nil
 function TopBar:onCreate()
-    self:recreate()
+    self.host = not self.offscreen and self.desktop or nil
+    self:build()
 end
 
 --- 启动：通知孩子开工（时钟心跳、缓存监听）。
-function TopBar:onStart()
+---@param cb fun(ok:boolean, err:any)|nil 全部子视图加载完成后的结果回调
+---@return nil
+function TopBar:onStart(cb)
     broadcast(self, "onStart")
+    if cb then cb(true) end
 end
 
---- 恢复：通知孩子原地刷新。
+--- 恢复：通知孩子原地刷新（updateView）。
+---@return nil
 function TopBar:onResume()
     broadcast(self, "onResume")
 end
 
---- 暂停：通知孩子停工。
+--- 暂停：只停正在 Resume 的孩子。
+---@return nil
 function TopBar:onPause()
-    broadcast(self, "onPause")
+    for i = 1, #SLOTS do
+        local child = self[SLOTS[i].id]
+        if child and child.lifecycle.state == "Resume" then
+            child:onPause()
+        end
+    end
 end
 
 --- 停止：通知孩子停止运行资源。
+---@return nil
 function TopBar:onStop()
     broadcast(self, "onStop")
 end
 
 --- 销毁：通知孩子释放引用。
+---@return nil
 function TopBar:onDestroy()
     broadcast(self, "onDestroy")
     self.widget = nil
 end
 
---- 设置改顶栏项：整条重建。其余事件原样转给孩子。
----@param event string|table
----@param payload any
+--- 设置改顶栏项：updateView。其余事件原样转给孩子。
+---@param event string|table 父组件转发的事件名称或事件对象
+---@param payload any 与事件一起传入的数据
+---@return nil
 function TopBar:onEvent(event, payload)
-    if self.state == "Destroy" then return end
+    if self.lifecycle.state == "Destroy" then return end
     if event == "topbar_changed" then
-        self:recreate()
+        self:updateView()
         return
     end
     broadcast(self, "onEvent", event, payload)
 end
 
 --- 顶栏下滑打开桌面快捷面板。
----@param _ any
----@param ges_ev table|nil
+---@param _ any 事件框架传入但本实现不使用的参数
+---@param ges_ev table|nil KOReader 手势数据，含方向和位置
 ---@return boolean
 function TopBar:onSwipe(_, ges_ev)
     if type(ges_ev) == "table" and ges_ev.direction == "south" then
@@ -334,8 +343,8 @@ function TopBar:onSwipe(_, ges_ev)
 end
 
 --- 顶栏点击：缓存打开任务列表，源名换源，其余打开快捷面板。
----@param _ any
----@param ges table|nil
+---@param _ any 事件框架传入但本实现不使用的参数
+---@param ges table|nil KOReader 手势数据，含方向和位置
 ---@return boolean
 function TopBar:onTap(_, ges)
     local desktop = self.desktop
