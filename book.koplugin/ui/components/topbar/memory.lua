@@ -13,6 +13,7 @@ Memory.__index = Memory
 Memory.id = "memory"
 Memory.interval = 120
 
+--- 读取系统可用内存；设置隐藏或数据不可用时返回 nil。
 ---@return string|nil
 function Memory:read()
     if not Base.visible("memory") then
@@ -25,12 +26,13 @@ function Memory:read()
     return util.getFriendlySize(mem_avail)
 end
 
+--- 构建系统可用内存对应的指标控件；隐藏时返回零尺寸占位 Widget。
 ---@return table|nil
-function Memory:build()
-    self.widget = nil
+function Memory:createWidget()
+    self.metric_widget = nil
     self.rect = nil
-    self.widget = Base.metric("memory", self:read())
-    return self.widget
+    self.metric_widget = Base.metric("memory", self:read())
+    return self.metric_widget or require("ui/widget/widget"):new{ dimen = require("ui/geometry"):new{ w = 0, h = 0 } }
 end
 
 return Memory

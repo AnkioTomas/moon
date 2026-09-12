@@ -13,49 +13,48 @@ local Cache = setmetatable({}, Base)
 Cache.__index = Cache
 Cache.id = "cache"
 
+--- 订阅缓存队列变化并立即刷新进度；订阅句柄由 Lifecycle 拥有。
+---@return nil
 function Cache:onResume()
     if not self._watch then
-        self._watch = self:addHttp(CacheQueue.watch(function()
-            self:updateMetric("download", self:read())
+        self._watch = self.lifecycle:addHttp(CacheQueue.watch(function()
+            self:updateView()
         end))
     end
-    local text, icon = self:read()
-    self:updateMetric(icon, text)
+    self:updateView()
 end
 
----@return string|nil
+--- 读取后台缓存任务进度和下载图标；设置隐藏或数据不可用时返回 nil。
+---@return string|nil, string|nil
 function Cache:read()
     if not Base.visible("cache") then
         return nil
     end
     local status = CacheQueue.status()
     if not status then return nil end
+    local text
     if status.state == "retry_wait" then
-        return _("缓存重试中")
+        text = _("缓存重试中")
+    elseif status.total > 0 then
+        text = _("缓存") .. " " .. tostring(status.cached) .. "/" .. tostring(status.total)
+    else
+        text = _("缓存中")
     end
-    if status.total > 0 then
-        return _("缓存") .. " " .. tostring(status.cached) .. "/" .. tostring(status.total)
-    end
-    return _("缓存中")
+    return text, "download"
 end
 
+--- 构建后台缓存任务进度和下载图标对应的指标控件；隐藏时返回零尺寸占位 Widget。
 ---@return table|nil
-function Cache:build()
-    self.widget = nil
+function Cache:createWidget()
+    self.metric_widget = nil
     self.rect = nil
-    self.widget = Base.metric("download", self:read())
-    return self.widget
+    self.metric_widget = Base.metric("download", self:read())
+    return self.metric_widget or require("ui/widget/widget"):new{ dimen = require("ui/geometry"):new{ w = 0, h = 0 } }
 end
 
+--- 清除已由 Lifecycle 取消的缓存队列订阅引用。
+---@return nil
 function Cache:onPause()
-    self._watch = nil
-end
-
-function Cache:onStop()
-    self._watch = nil
-end
-
-function Cache:onDestroy()
     self._watch = nil
 end
 

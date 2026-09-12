@@ -15,6 +15,7 @@ Storage.__index = Storage
 Storage.id = "storage"
 Storage.interval = 600
 
+--- 读取数据目录可用存储空间；设置隐藏或数据不可用时返回 nil。
 ---@return string|nil
 function Storage:read()
     if not Base.visible("storage") then
@@ -27,12 +28,13 @@ function Storage:read()
     return util.getFriendlySize(disk_avail)
 end
 
+--- 构建数据目录可用存储空间对应的指标控件；隐藏时返回零尺寸占位 Widget。
 ---@return table|nil
-function Storage:build()
-    self.widget = nil
+function Storage:createWidget()
+    self.metric_widget = nil
     self.rect = nil
-    self.widget = Base.metric("hard_drive", self:read())
-    return self.widget
+    self.metric_widget = Base.metric("hard_drive", self:read())
+    return self.metric_widget or require("ui/widget/widget"):new{ dimen = require("ui/geometry"):new{ w = 0, h = 0 } }
 end
 
 return Storage
