@@ -24,6 +24,7 @@ local UI = require("ui.components.bookui")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+---@class BookFontPicker
 local FontPicker = {}
 local TABS = {
     { "weread", "在线", "cloud" },
