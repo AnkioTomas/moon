@@ -47,13 +47,13 @@ local logger = require("utils.log")
 local ABORT_STAGES = { Pause = true, Stop = true, Destroy = true }
 local BOUND = setmetatable({}, { __mode = "k" })
 
--- 只补齐进入目标阶段所必需的边界阶段，不重放已经完成的阶段。
+-- 补齐进入目标阶段所必需的边界阶段，保证生命周期顺序连续。
 local function completeBefore(lifecycle, owner, stage)
     local state = lifecycle.state
     if stage == "Resume" then
         if state == "Destroy" then error("cannot resume destroyed lifecycle", 0) end
         if state == "new" then owner:onCreate(); state = lifecycle.state end
-        if state == "Create" or state == "Stop" then owner:onStart() end
+        if state == "Create" then owner:onStart() end
     elseif stage == "Destroy" then
         if state == "Destroy" then return false end
         if state == "Resume" then owner:onPause(); state = lifecycle.state end
@@ -201,7 +201,7 @@ end
 
 
 
---- 按名称分发，不限制调用顺序；每次调用都执行对应方法，异常原样传播。
+--- 按名称分发；Resume/Destroy 自动补齐必需阶段，非法恢复终态时抛错。
 ---@param event LifecycleStage
 ---@param ... any 阶段处理参数
 ---@return any ... 阶段处理函数的返回值
@@ -209,13 +209,10 @@ function Lifecycle:dispatch(event, ...)
     local owner = self.owner or self
     local handler = owner["on" .. event]
     if not handler then return end
-    -- dispatch 也支持绑定后替换的处理函数：先补全，再交付最终阶段。
-    if event == "Resume" or event == "Destroy" then
-        completeBefore(self, owner, event)
-    end
     if BOUND[handler] then
         return handler(owner, ...)
     end
+    if not completeBefore(self, owner, event) then return end
     self.state = event
     return handler(owner, ...)
 end
