@@ -46,8 +46,8 @@ package.preload["ai"] = function()
 end
 
 local AI = require("ui.desktop.settings.ai")
-local desktop = { rebuild = function() end, _closed = false }
-local rows = AI.rows(desktop)
+local desktop = { updateView = function() end, lifecycle = { state = "Resume" } }
+local rows = AI.new():rows(desktop)
 Assert.len(rows, 4)
 
 -- 第 4 行是测试连接
@@ -92,7 +92,7 @@ Assert.eq(shown[#shown].text, "测试失败：401 bad key")
 -- 桌面已关闭：关闭 loading，结果回调不再弹窗
 shown = {}
 closed = {}
-desktop._closed = true
+desktop.lifecycle.state = "Destroy"
 built.callback()
 Assert.len(chat_calls, 3)
 chat_calls[3].cb("late")

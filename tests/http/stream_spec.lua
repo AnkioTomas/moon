@@ -1,56 +1,48 @@
 --[[-- http.request.stream：无 Turbo 时 on_done 报错；cancel 可用。 --]]
 
 local Assert = require("support.assert")
-local Stubs = require("support.stubs")
 
 local Request = require("http.request")
+local Turbo = require("http.turbo")
 
--- Turbo 不可用路径
+-- Turbo 不可用：当场失败，cancel 是空操作
 do
-    local orig = Request.ensureTurbo
-    Request.ensureTurbo = function() return false end
-    local done_err
-    Request.stream({ url = "https://example.test/" }, {
-        on_done = function(err) done_err = err end,
-    })
-    Stubs.flush()
-    Assert.eq(done_err, "turbo looper unavailable")
-    Request.ensureTurbo = orig
-end
-
--- cancel 在启动前
-do
-    local orig = Request.ensureTurbo
-    Request.ensureTurbo = function() return false end
+    local orig = Turbo.acquire
+    Turbo.acquire = function() return nil end
     local done_err
     local job = Request.stream({ url = "https://example.test/" }, {
         on_done = function(err) done_err = err end,
     })
+    Assert.eq(done_err, "turbo looper unavailable")
     job.cancel()
-    Stubs.flush()
-    -- cancel 抢先 finish；或 turbo 不可用回调——两者都可接受已完成
-    Assert.is_true(done_err == "cancelled" or done_err == "turbo looper unavailable")
-    Request.ensureTurbo = orig
+    Turbo.acquire = orig
 end
 
--- looper 可用但 Turbo 初始化失败：必须 on_done 收口，不能让输入超时引用泄漏。
+-- loop 已占但 HTTPClient 初始化失败：必须 on_done 收口。
 do
-    local UIManager = require("ui/uimanager")
-    local orig = Request.ensureTurbo
-    local resets = 0
-    Request.ensureTurbo = function() return true end
-    UIManager.setInputTimeout = function() end
-    UIManager.resetInputTimeout = function() resets = resets + 1 end
-    UIManager.looper = {
-        add_callback = function(_, fn)
-            local co = coroutine.create(fn)
-            local ok, err = coroutine.resume(co)
-            if not ok then error(err) end
-        end,
-    }
     package.loaded["turbo"] = nil
     package.preload["turbo"] = function()
-        error("turbo load failed")
+        return {
+            ioloop = {
+                IOLoop = function()
+                    return {
+                        add_callback = function(_, fn)
+                            local co = coroutine.create(fn)
+                            local ok, future = coroutine.resume(co)
+                            if not ok then error(future) end
+                            if coroutine.status(co) == "suspended" then
+                                assert(coroutine.resume(co, future))
+                            end
+                        end,
+                    }
+                end,
+            },
+            async = {
+                HTTPClient = function()
+                    error("turbo load failed")
+                end,
+            },
+        }
     end
 
     local done_err
@@ -58,30 +50,16 @@ do
         on_done = function(err) done_err = err end,
     })
 
-    Request.ensureTurbo = orig
     package.preload["turbo"] = nil
     package.loaded["turbo"] = nil
     Assert.matches(tostring(done_err), "turbo load failed")
-    Assert.eq(resets, 1)
 end
 
 -- 301/302 跟随后不得把中间响应当最终错误。
 do
     local UIManager = require("ui/uimanager")
-    local orig = Request.ensureTurbo
-    Request.ensureTurbo = function() return true end
     UIManager.setInputTimeout = function() end
     UIManager.resetInputTimeout = function() end
-    UIManager.looper = {
-        add_callback = function(_, fn)
-            local co = coroutine.create(fn)
-            local ok, future = coroutine.resume(co)
-            if not ok then error(future) end
-            if coroutine.status(co) == "suspended" then
-                assert(coroutine.resume(co, future))
-            end
-        end,
-    }
 
     local responses = {
         first = { code = 302 },
@@ -124,9 +102,15 @@ do
             local client = setmetatable({ redirect = 0 }, { __index = methods })
             client.iostream = {
                 read_bytes = function(_, count, callback, arg, streaming, streaming_arg)
-                    Assert.is_nil(streaming)
-                    Assert.is_nil(streaming_arg)
-                    callback(arg, string.rep("x", count))
+                    local data = string.rep("x", count)
+                    if streaming then
+                        if streaming_arg then
+                            streaming(streaming_arg, data)
+                        else
+                            streaming(data)
+                        end
+                    end
+                    callback(arg, streaming and "" or data)
                 end,
                 read_until_close = function() end,
                 closed = function() return false end,
@@ -141,6 +125,20 @@ do
         end
         return {
             log = { categories = {} },
+            ioloop = {
+                IOLoop = function()
+                    return {
+                        add_callback = function(_, fn)
+                            local co = coroutine.create(fn)
+                            local ok, future = coroutine.resume(co)
+                            if not ok then error(future) end
+                            if coroutine.status(co) == "suspended" then
+                                assert(coroutine.resume(co, future))
+                            end
+                        end,
+                    }
+                end,
+            },
             async = {
                 HTTPClient = newClient,
                 errors = { NO_HEADERS = 1, PARSE_ERROR_HEADERS = 2 },
@@ -159,7 +157,6 @@ do
     Assert.eq(table.concat(chunks), "xx")
     Assert.is_nil(done_err)
 
-    Request.ensureTurbo = orig
     for _, name in ipairs({ "turbo", "turbo.httputil", "turbo.structs.buffer" }) do
         package.preload[name] = nil
         package.loaded[name] = nil

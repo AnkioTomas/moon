@@ -3,7 +3,6 @@
 local Assert = require("support.assert")
 
 local built_rows = {}
-local shown_sub
 
 package.preload["gettext"] = function() return function(text) return text end end
 package.preload["ffi/util"] = function()
@@ -46,7 +45,10 @@ package.preload["ui.components.pager"] = function()
         bandH = function() return 0 end,
         pack = function(items) return { items } end,
         clamp = function() return 1 end,
-        frame = function(_, _, opts) return opts end,
+        frame = function(w, h, opts)
+            opts.getSize = function() return { w = w, h = h } end
+            return opts
+        end,
     }
 end
 package.preload["ui.components.settingrow"] = function()
@@ -79,19 +81,38 @@ package.preload["ui/language"] = function()
     return { getLanguageName = function() return "简体中文" end }
 end
 
-package.preload["ui.desktop.settings.source"] = function() return { sections = function() return {} end } end
-package.preload["ui.desktop.settings.display"] = function() return { rows = function() return {} end } end
-package.preload["ui.desktop.settings.lockscreen"] = function() return { rows = function() return {} end } end
-package.preload["ui.desktop.settings.desktop"] = function() return { rows = function() return {} end } end
-package.preload["ui.desktop.settings.home"] = function() return { sections = function() return {} end } end
-package.preload["ui.desktop.settings.topbar"] = function() return { rows = function() return {} end } end
-package.preload["ui.desktop.settings.language"] = function() return { rows = function() return {} end } end
-package.preload["ui.desktop.settings.ai"] = function() return { rows = function() return {} end } end
+local function pageMod(api)
+    return { new = function() return api end }
+end
+package.preload["ui.desktop.settings.source"] = function()
+    return pageMod({ sections = function() return {} end })
+end
+package.preload["ui.desktop.settings.display"] = function()
+    return pageMod({ rows = function() return {} end })
+end
+package.preload["ui.desktop.settings.lockscreen"] = function()
+    return pageMod({ rows = function() return {} end })
+end
+package.preload["ui.desktop.settings.desktop"] = function()
+    return pageMod({ rows = function() return {} end })
+end
+package.preload["ui.desktop.settings.home"] = function()
+    return pageMod({ sections = function() return {} end })
+end
+package.preload["ui.desktop.settings.topbar"] = function()
+    return pageMod({ rows = function() return {} end })
+end
+package.preload["ui.desktop.settings.language"] = function()
+    return pageMod({ rows = function() return {} end })
+end
+package.preload["ui.desktop.settings.ai"] = function()
+    return pageMod({ rows = function() return {} end })
+end
 package.preload["ui.desktop.settings.reader"] = function()
-    return {
+    return pageMod({
         sections = function() return {} end,
         popupRows = function() return {} end,
-    }
+    })
 end
 package.preload["remote.ui"] = function() return { menuRows = function() return {} end } end
 package.preload["ui.panel.settings"] = function()
@@ -110,14 +131,14 @@ package.preload["ui.desktop.settings.maintenance"] = function()
             })
         end
     end
-    return {
+    return pageMod({
         cacheRow = function() return row("清理缓存") end,
         debugLogRow = function() return row("调试日志") end,
         autoUpdateRow = function() return row("自动检查更新") end,
         updateRow = function() return row("检查更新") end,
         aboutRow = function() return row("关于") end,
         closeRow = function() return row("关闭桌面") end,
-    }
+    })
 end
 
 local previous_settings = _G.G_reader_settings
@@ -131,12 +152,12 @@ _G.G_reader_settings = {
 local desktop = {
     plugin = {},
     dimen = { w = 600 },
-    _settings_page = 1,
     contentHeight = function() return 800 end,
-    showSettingsSub = function(_, sub) shown_sub = sub end,
+    updateView = function() end,
 }
-
-require("ui.desktop.settings").build(desktop)
+local settings = require("ui.desktop.settings"):new{ desktop = desktop }
+desktop.settings = settings
+settings:updateView()
 Assert.len(built_rows, 12)
 
 local expected = {
@@ -153,7 +174,7 @@ for _, row in ipairs(built_rows) do
     if sub then
         categories = categories + 1
         row.callback()
-        Assert.eq(shown_sub, sub)
+        Assert.eq(settings.sub, sub)
     end
 end
 Assert.eq(categories, 6)
@@ -170,12 +191,12 @@ end
 
 local function assertSubpageLink(page, title, target)
     built_rows = {}
-    desktop._settings_sub = page
-    require("ui.desktop.settings").build(desktop)
+    settings.sub = page
+    settings:updateView()
     for _, row in ipairs(built_rows) do
         if row.title == title then
             row.callback()
-            Assert.eq(shown_sub, target)
+            Assert.eq(settings.sub, target)
             return
         end
     end

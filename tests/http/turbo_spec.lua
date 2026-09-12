@@ -1,0 +1,178 @@
+--[[--
+http.turbo：acquire/release 管泵；补丁经第一次 acquire 挂上。
+--]]
+
+local Assert = require("support.assert")
+local Stubs = require("support.stubs")
+
+local UIManager = require("ui/uimanager")
+local Turbo = require("http.turbo")
+
+-- SNI / 点号 connect_fail 必须在第一次 acquire 时装上（补丁只打一次）。
+do
+    package.loaded["turbo"] = nil
+    package.preload["turbo"] = function()
+        return {
+            log = { categories = {} },
+            async = { HTTPClient = function() end },
+            ioloop = {
+                IOLoop = function()
+                    return { add_callback = function() end }
+                end,
+            },
+        }
+    end
+    local handshake_calls = 0
+    package.preload["turbo.crypto"] = function()
+        return {
+            ssl_create_client_context = function() return 0, {} end,
+            ssl_do_handshake = function()
+                handshake_calls = handshake_calls + 1
+                return true
+            end,
+        }
+    end
+    package.preload["turbo.iostream"] = function()
+        local IOStream = {}
+        function IOStream:_handle_connect_fail(err)
+            self.fail_self = self
+            self.fail_err = err
+        end
+        function IOStream:connect()
+            self._handle_connect_fail("Network is unreachable")
+        end
+        function IOStream:_read_from_buffer()
+            return self._read_buffer_size, self._read_bytes
+        end
+        return { IOStream = IOStream }
+    end
+
+    Assert.not_nil(Turbo.acquire())
+    local crypto = require("turbo.crypto")
+    local sni_hosts = {}
+    local fake_sock = {
+        sni = function(_, host)
+            sni_hosts[#sni_hosts + 1] = host
+        end,
+    }
+    local stream = { _ssl = fake_sock, _ssl_hostname = "api.ankio.net" }
+    crypto.ssl_do_handshake(stream)
+    crypto.ssl_do_handshake(stream)
+    Assert.eq(#sni_hosts, 1)
+    Assert.eq(sni_hosts[1], "api.ankio.net")
+    crypto.ssl_do_handshake({ _ssl = fake_sock, _ssl_hostname = "1.2.3.4" })
+    crypto.ssl_do_handshake({ _ssl = fake_sock, _ssl_hostname = "2001:db8::1" })
+    Assert.eq(#sni_hosts, 1)
+    Assert.eq(handshake_calls, 4)
+
+    local iostream = require("turbo.iostream")
+    local fail_stream = {}
+    iostream.IOStream.connect(fail_stream, "example.com", 443)
+    Assert.eq(fail_stream.fail_err, "Network is unreachable")
+    Assert.eq(fail_stream.fail_self, fail_stream)
+    local ffi = require("ffi")
+    local sized = {
+        _read_buffer_size = ffi.new("int64_t", 16),
+        _read_bytes = ffi.new("uint64_t", 32),
+    }
+    local got_size, got_bytes = iostream.IOStream._read_from_buffer(sized)
+    Assert.eq(got_size, 16)
+    Assert.eq(got_bytes, 32)
+    Assert.eq(type(got_size), "number")
+    Assert.eq(type(got_bytes), "number")
+    Turbo.release()
+
+    for _, name in ipairs({ "turbo", "turbo.crypto", "turbo.iostream" }) do
+        package.preload[name] = nil
+        package.loaded[name] = nil
+    end
+end
+
+-- 自建 loop：acquire 插泵，release 拔掉；官方 looper 存在也照样插泵。
+do
+    package.loaded["http.turbo"] = nil
+    local Turbo = require("http.turbo")
+    local zmq = { n = 0 }
+    function UIManager:insertZMQ(handle)
+        zmq.n = zmq.n + 1
+        zmq.handle = handle
+    end
+    function UIManager:removeZMQ(handle)
+        zmq.n = zmq.n - 1
+        zmq.removed = handle
+    end
+    local standby = 0
+    function UIManager:preventStandby()
+        standby = standby + 1
+    end
+    function UIManager:allowStandby()
+        standby = standby - 1
+    end
+    local loop
+    package.loaded["turbo"] = nil
+    package.preload["turbo"] = function()
+        return {
+            ioloop = {
+                IOLoop = function()
+                    loop = {
+                        _callbacks = {},
+                        _co_cbs = {},
+                        _timeouts = {},
+                        _timeouts_sz = 0,
+                        add_callback = function(self, fn)
+                            self._callbacks[#self._callbacks + 1] = { fn }
+                        end,
+                        _run_callback = function(_, cb)
+                            cb[1]()
+                        end,
+                        _resume_coroutine = function() end,
+                        _event_poll = function() end,
+                    }
+                    return loop
+                end,
+            },
+        }
+    end
+
+    Assert.eq(Turbo.acquire(), loop)
+    Assert.eq(zmq.n, 1)
+    Assert.eq(standby, 1)
+    local pumped = false
+    loop._callbacks = { { function() pumped = true end } }
+    zmq.handle.waitEvent()
+    Assert.is_true(pumped)
+    Turbo.release()
+    Assert.eq(zmq.n, 0)
+    Assert.eq(standby, 0)
+    Assert.eq(zmq.removed, zmq.handle)
+
+    Assert.eq(Turbo.acquire(), loop)
+    Assert.eq(Turbo.acquire(), loop)
+    Assert.eq(zmq.n, 1)
+    Assert.eq(standby, 1)
+    Turbo.release()
+    Assert.eq(zmq.n, 1)
+    Turbo.release()
+    Assert.eq(zmq.n, 0)
+    Assert.eq(standby, 0)
+
+    UIManager.looper = { add_callback = function() end }
+    local got = Turbo.acquire()
+    Assert.eq(got, loop)
+    Assert.is_true(got ~= UIManager.looper)
+    Assert.eq(zmq.n, 1)
+    Assert.eq(standby, 1)
+    Turbo.release()
+    Assert.eq(zmq.n, 0)
+    Assert.eq(standby, 0)
+
+    package.preload["turbo"] = nil
+    package.loaded["turbo"] = nil
+    function UIManager:insertZMQ() end
+    function UIManager:removeZMQ() end
+    function UIManager:preventStandby() end
+    function UIManager:allowStandby() end
+    UIManager.looper = nil
+end
+
+Stubs.flush()

@@ -291,10 +291,11 @@ package.preload["utils.timing"] = function()
     }
 end
 
--- startLookup 使用 SimpleJob；集成用例同步执行任务体，专注验证真实键盘包装。
-package.preload["workers/simple_job"] = function()
+-- startLookup 使用 instant Job；集成用例同步执行任务体，专注验证真实键盘包装。
+package.preload["workers.job"] = function()
     return {
         run = function(fn, opts)
+            opts = opts or {}
             local ok, result = pcall(fn)
             if ok then
                 if opts.on_done then opts.on_done(result) end
@@ -312,7 +313,7 @@ local function fakeInputBox()
     local ib = {
         charlist = {},
         charpos = 1,
-        layout_rebuilds = 0,
+        layout_view_updates = 0,
     }
     ib.addChars = function(self, s)
         for c in tostring(s):gmatch("[%z\1-\127\194-\244][\128-\191]*") do
@@ -327,7 +328,7 @@ local function fakeInputBox()
         end
     end
     ib.initTextBox = function(self)
-        self.layout_rebuilds = self.layout_rebuilds + 1
+        self.layout_view_updates = self.layout_view_updates + 1
     end
     -- wrapInputBox 还会包这些（导航/清空类，本用例不触发）
     for _, name in ipairs({
@@ -473,10 +474,10 @@ do
     Assert.eq(text(kb.inputbox), "n")
     Assert.eq(lookup_calls[#lookup_calls], "n")
     kb:addChar("i")
-    local rebuilds_before = kb.inputbox.layout_rebuilds
+    local view_updates_before = kb.inputbox.layout_view_updates
     kb.layout[1][1].cells[2].callback() -- 点「你好」
     Assert.eq(text(kb.inputbox), "你好", "点候选：插整词")
-    Assert.eq(kb.inputbox.layout_rebuilds, rebuilds_before + 1, "候选提交只能重建一次文本布局")
+    Assert.eq(kb.inputbox.layout_view_updates, view_updates_before + 1, "候选提交只能重建一次文本布局")
     Assert.eq(cellText(kb, 2), "", "提交后候选行清空")
 end
 

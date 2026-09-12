@@ -24,15 +24,20 @@ local source = setmetatable({
     end,
 }, { __index = SourceBase })
 
-local rebuilds, refreshes = 0, 0
+local view_updates, refreshes = 0, 0
 local desktop = {
+    lifecycle = { state = "Resume" },
     source = source,
     tab = "home",
-    rebuild = function() rebuilds = rebuilds + 1 end,
-    refreshHome = function() refreshes = refreshes + 1 end,
+    library = { state = { books = { 1 } } },
+    insight = { state = { has_data = true }, loaded = true },
+    updateView = function() view_updates = view_updates + 1 end,
+    onEvent = function(_, event)
+        if event == "home_refresh" then refreshes = refreshes + 1 end
+    end,
 }
 source:onEvent("home_open", desktop)
-Assert.eq(rebuilds, 0)
+Assert.eq(view_updates, 0)
 Assert.is_false(desktop._books_sync_pending)
 Assert.eq(sync_calls, 1)
 Assert.eq(stats_calls, 1)
@@ -40,7 +45,7 @@ Assert.is_true(desktop._stats_sync_pending)
 
 -- 统计同步在飞时复用生命周期，不得重复发起。
 source:onEvent("home_open", desktop)
-Assert.eq(rebuilds, 0)
+Assert.eq(view_updates, 0)
 Assert.eq(sync_calls, 2)
 Assert.eq(stats_calls, 1)
 
@@ -48,7 +53,7 @@ Assert.eq(stats_calls, 1)
 stats_callbacks[1]({ pulled = 2, pushed = 1 })
 Assert.is_false(desktop._stats_sync_pending)
 Assert.eq(refreshes, 1)
-Assert.eq(rebuilds, 0)
+Assert.eq(view_updates, 0)
 
 -- 唤醒事件的书架与统计分别节流；过期后统计才重新同步。
 source._books_refresh_at = os.time()
@@ -58,9 +63,10 @@ source:onEvent("desktop_resume", desktop)
 Assert.eq(sync_calls, 2)
 Assert.eq(stats_calls, 2)
 stats_callbacks[2]({ pulled = 1, pushed = 0 })
-Assert.is_false(desktop._insight_loaded)
+Assert.is_false(desktop.insight.loaded)
+Assert.is_nil(desktop.insight.state)
 Assert.eq(refreshes, 2)
-Assert.eq(rebuilds, 1)
+Assert.eq(view_updates, 1)
 
 -- 新建桌面不沿用唤醒节流：首次可见必须立即同步书架和统计。
 source._stats_refresh_at = os.time() - 301
@@ -70,6 +76,6 @@ Assert.eq(sync_calls, 3)
 Assert.eq(stats_calls, 3)
 stats_callbacks[3]({ pulled = 1, pushed = 1 })
 Assert.eq(refreshes, 3)
-Assert.eq(rebuilds, 1)
+Assert.eq(view_updates, 1)
 
 return true

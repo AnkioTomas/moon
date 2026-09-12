@@ -1,4 +1,4 @@
---[[-- 旧首页组合模式无损迁移为两个独立组件。 --]]
+--[[-- 旧 home_layout / recent_list_mode 迁移为 home_widgets。 --]]
 
 local Assert = require("support.assert")
 
@@ -42,15 +42,20 @@ end
 
 local home = migrate("hero_grid")
 Assert.is_nil(home.home_recent_list_mode)
-Assert.eq(home.home_layout[1], "clock")
-Assert.eq(home.home_layout[2], "recent_hero")
-Assert.eq(home.home_layout[3], "recent_list")
-Assert.eq(home.home_layout[4], "stats")
+Assert.is_nil(home.home_layout)
+Assert.eq(home.home_widgets[1].id, "clock")
+Assert.eq(home.home_widgets[2].id, "recent_hero")
+Assert.eq(home.home_widgets[3].id, "recent_list")
+Assert.eq(home.home_widgets[4].id, "stats")
+Assert.eq(home.home_widgets[1].page, 1)
+Assert.eq(home.home_widgets[1].height, "default")
+Assert.is_true(home.home_widgets_need_split)
 
 home = migrate("list_only")
-Assert.is_nil(home.home_recent_list_mode)
-Assert.eq(home.home_layout[1], "clock")
-Assert.eq(home.home_layout[2], "recent_list")
-Assert.eq(home.home_layout[3], "stats")
+Assert.is_nil(home.home_layout)
+Assert.eq(home.home_widgets[1].id, "clock")
+Assert.eq(home.home_widgets[2].id, "recent_list")
+Assert.eq(home.home_widgets[3].id, "stats")
+Assert.is_true(home.home_widgets_need_split)
 
 return true

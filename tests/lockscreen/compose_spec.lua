@@ -59,6 +59,14 @@ package.preload["lockscreen.components.base"] = function()
     }
 end
 
+package.preload["ui.components.image"] = function()
+    return {
+        await = function(root, cb)
+            cb()
+        end,
+    }
+end
+
 package.preload["lockscreen.render"] = function()
     return {
         write = function(_, background, blocks)

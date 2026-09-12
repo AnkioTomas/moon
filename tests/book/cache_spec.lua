@@ -84,9 +84,6 @@ package.preload["utils.paths"] = function()
     }
 end
 
-package.preload["ui.components.image"] = function()
-    return { abortPending = function() end }
-end
 package.preload["utils.log"] = function()
     return { info = function() end, warn = function() end }
 end

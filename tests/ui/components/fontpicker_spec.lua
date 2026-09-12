@@ -144,7 +144,7 @@ package.preload["utils.font"] = function()
     }
 end
 
-package.preload["ui.components.popup"] = function()
+package.preload["ui.views.popup"] = function()
     return {
         single = function(opts)
             local item_table = {}
@@ -201,7 +201,7 @@ package.preload["device"] = function()
 end
 
 package.loaded["ui.components.fontpicker"] = nil
-package.loaded["ui.components.popup"] = nil
+package.loaded["ui.views.popup"] = nil
 package.loaded["ui.components.image"] = nil
 package.loaded["ui.components.bookui"] = nil
 package.loaded["utils.font"] = nil

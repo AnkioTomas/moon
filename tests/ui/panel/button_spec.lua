@@ -48,7 +48,7 @@ package.preload["ui.components.icon"] = function()
 end
 package.preload["ui.components.surface"] = function()
     return {
-        pill = function(child, opts) return { child = child, opts = opts } end,
+        build = function(opts) return { child = opts.child, opts = opts.options } end,
     }
 end
 

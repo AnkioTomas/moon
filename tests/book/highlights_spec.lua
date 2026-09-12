@@ -19,6 +19,30 @@ package.preload["db.note"] = function()
             end
             return nil
         end,
+        all = function()
+            return {
+                {
+                    source_id = "moon",
+                    stable_id = "book-1",
+                    payload = '[{"drawer":"lighten","text":"划线句子","chapter":"序章","pageno":3}]',
+                },
+                {
+                    source_id = "moon",
+                    stable_id = "book-2",
+                    payload = '[{"drawer":"lighten","text":"另一句","chapter":"尾声"}]',
+                },
+            }
+        end,
+    }
+end
+package.preload["db.book"] = function()
+    return {
+        get = function(_, stable_id)
+            if stable_id == "book-1" then
+                return { title = "活着", authors = "余华" }
+            end
+            return { title = "兄弟", authors = "余华" }
+        end,
     }
 end
 package.preload["json"] = function()
@@ -26,6 +50,9 @@ package.preload["json"] = function()
         decode = function(s)
             if s:find("划线") then
                 return { { drawer = "lighten", text = "划线句子", chapter = "序章", pageno = 3 } }
+            end
+            if s:find("另一句") then
+                return { { drawer = "lighten", text = "另一句", chapter = "尾声" } }
             end
             return nil
         end,
@@ -45,5 +72,15 @@ Assert.eq(items[1].text, "划线句子")
 local text, source = Highlights.pick("moon", "book-1", 0, 1)
 Assert.eq(text, "划线句子")
 Assert.is_true(source and source:find("序章"))
+
+local all = Highlights.collectAll()
+Assert.len(all, 2)
+Assert.eq(all[1].author, "余华")
+Assert.eq(all[1].title, "活着")
+
+local first = Highlights.random("不存在")
+Assert.is_true(first.text == "划线句子" or first.text == "另一句")
+local other = Highlights.random(first.text)
+Assert.is_true(other.text ~= first.text)
 
 return true

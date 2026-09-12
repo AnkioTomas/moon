@@ -1,24 +1,20 @@
 --[[--
-http.request 离线用例：ok / header / writeResponseToFile / Turbo 补丁（纯本地，无网络）
+http.request 离线用例：ok / header / download / 请求补丁路径（纯本地，无网络）
 
-request/get/post/download/ensureTurbo 的真实网络路径不在离线范围；
-SNI / LuaSocket 连接失败补丁经 stub 的 turbo 模块间接验证。
+request/get/post/download 的真实网络路径不在离线范围。
+泵与补丁见 tests/http/turbo_spec.lua。
 
 @module tests.http.request_spec
 --]]
 
 local Assert = require("support.assert")
-local Stubs = require("support.stubs")
 local Config = require("support.config")
 
 local network_connected = true
 package.loaded["ui/network/manager"] = nil
 package.preload["ui/network/manager"] = function()
     return {
-        -- Calling isOnline would perform an active DNS probe in KOReader;
-        -- the request gate must use cached connection state instead.
-        isOnline = function() error("active network probe must not run") end,
-        getConnectionState = function() return network_connected end,
+        isOnline = function() return network_connected end,
     }
 end
 
@@ -38,7 +34,7 @@ do
     Assert.is_false(Request.ok(true))
 end
 
--- 离线出口：不创建 Turbo client、不打开下载文件，只异步报告失败。
+-- 离线出口：不创建 Turbo client、不打开下载文件，当场失败。
 do
     network_connected = false
     local request_err, stream_err, download_ok, download_err
@@ -54,11 +50,19 @@ do
     Request.download({ url = "https://example.test/offline" }, dest, function(ok, err)
         download_ok, download_err = ok, err
     end)
-    Stubs.flush()
+    local get_err, post_err
+    Request.get("https://example.test/offline", {}, function(_, err)
+        get_err = err
+    end)
+    Request.post("https://example.test/offline", "x", {}, function(_, err)
+        post_err = err
+    end)
     Assert.matches(request_err, "网络不可用")
     Assert.matches(stream_err, "网络不可用")
     Assert.is_false(download_ok)
     Assert.matches(download_err, "网络不可用")
+    Assert.matches(get_err, "网络不可用")
+    Assert.matches(post_err, "网络不可用")
     Assert.is_nil(io.open(dest, "rb"))
     Assert.is_nil(io.open(dest .. ".part", "rb"))
     network_connected = true
@@ -219,177 +223,13 @@ do
     pcall(real_remove, dest .. ".part")
 end
 
--- ── writeResponseToFile ──────────────────────────────────
-local TMP_DIR = Config.dir() .. "/.moon"
-local TMP_PREFIX = TMP_DIR .. "/test_request_spec_"
-
-local function tmp(name)
-    return TMP_PREFIX .. name
-end
-
--- 预清理上次中途失败可能留下的临时文件
-for _, name in ipairs({
-    "nostring.tmp",
-    "chunked.tmp",
-    "empty.tmp",
-    "cancel.tmp",
-    "writefail.tmp",
-}) do
-    pcall(os.remove, tmp(name))
-end
-
--- body 非字符串：nextTick 报 empty response
-do
-    local ok_r, err_r
-    Request.writeResponseToFile({ body = nil }, tmp("nostring.tmp"), nil, function(ok, err)
-        ok_r, err_r = ok, err
-    end)
-    Stubs.flush()
-    Assert.is_false(ok_r)
-    Assert.eq(err_r, "empty response")
-
-    ok_r, err_r = nil, nil
-    Request.writeResponseToFile(nil, tmp("nostring.tmp"), nil, function(ok, err)
-        ok_r, err_r = ok, err
-    end)
-    Stubs.flush()
-    Assert.is_false(ok_r)
-    Assert.eq(err_r, "empty response")
-end
-
--- dest 父目录不存在：open 失败
-do
-    local ok_r, err_r
-    Request.writeResponseToFile(
-        { body = "abc" },
-        tmp("no_such_dir/x.tmp"),
-        nil,
-        function(ok, err)
-            ok_r, err_r = ok, err
-        end
-    )
-    Stubs.flush()
-    Assert.is_false(ok_r)
-    Assert.not_nil(err_r)
-end
-
--- >64KB 数据分片写盘 + on_progress 累计序列 + 内容校验
-do
-    local CHUNK = 64 * 1024
-    local body = string.rep("a", CHUNK) .. string.rep("b", CHUNK) .. string.rep("c", 100)
-    local dest = tmp("chunked.tmp")
-    local progress = {}
-    local ok_w, err_w
-    Request.writeResponseToFile({ body = body }, dest, {
-        on_progress = function(n)
-            progress[#progress + 1] = n
-        end,
-    }, function(ok, err)
-        ok_w, err_w = ok, err
-    end)
-    Stubs.flush()
-
-    Assert.is_true(ok_w)
-    Assert.is_nil(err_w)
-    Assert.len(progress, 3) -- 64K + 64K + 100 三片
-    Assert.eq(progress[1], CHUNK)
-    Assert.eq(progress[2], CHUNK * 2)
-    Assert.eq(progress[3], CHUNK * 2 + 100)
-
-    local fh = io.open(dest, "rb")
-    Assert.not_nil(fh)
-    local data = fh:read("*a")
-    fh:close()
-    Assert.eq(#data, #body)
-    Assert.eq(data, body)
-    pcall(os.remove, dest)
-end
-
--- 空 body 字符串：立即成功，无 progress，写出空文件
-do
-    local dest = tmp("empty.tmp")
-    local progress = {}
-    local ok_w
-    Request.writeResponseToFile({ body = "" }, dest, {
-        on_progress = function(n)
-            progress[#progress + 1] = n
-        end,
-    }, function(ok)
-        ok_w = ok
-    end)
-    Stubs.flush()
-    Assert.is_true(ok_w)
-    Assert.len(progress, 0)
-    local fh = io.open(dest, "rb")
-    Assert.not_nil(fh)
-    Assert.eq(fh:read("*a"), "")
-    fh:close()
-    pcall(os.remove, dest)
-end
-
--- cancel：冲刷前取消 → 不再回调，残留文件删除；cancel 幂等
-do
-    local dest = tmp("cancel.tmp")
-    local calls = 0
-    local job = Request.writeResponseToFile({ body = string.rep("x", 64 * 1024 * 2) }, dest, nil, function()
-        calls = calls + 1
-    end)
-    job.cancel()
-    job.cancel() -- 二次取消无副作用
-    Stubs.flush()
-    Assert.eq(calls, 0)
-    Assert.is_nil(io.open(dest, "rb")) -- 残留已删
-end
-
--- 写失败（假句柄）：finish(false) 删除预先存在的残留文件
-do
-    local dest = tmp("writefail.tmp")
-    local fh = io.open(dest, "wb")
-    fh:write("stale")
-    fh:close()
-
-    local real_open = io.open
-    io.open = function(path, mode)
-        if path == dest then
-            return {
-                write = function()
-                    return nil, "disk full"
-                end,
-                close = function() end,
-            }
-        end
-        return real_open(path, mode)
-    end
-    local ok_f, err_f
-    Request.writeResponseToFile({ body = "data" }, dest, nil, function(ok, err)
-        ok_f, err_f = ok, err
-    end)
-    io.open = real_open
-    Stubs.flush()
-
-    Assert.is_false(ok_f)
-    Assert.eq(err_f, "disk full")
-    Assert.is_nil(io.open(dest, "rb")) -- 残留已删
-end
-
--- 兜底清理（正常路径均已自删，防中途失败留渣）
-for _, name in ipairs({
-    "nostring.tmp",
-    "chunked.tmp",
-    "empty.tmp",
-    "cancel.tmp",
-    "writefail.tmp",
-}) do
-    pcall(os.remove, tmp(name))
-end
-
 -- ── SNI 补丁：turbo 握手前对域名补 SNI（无 SNI 时 Cloudflare 类主机直接挂起到超时）──
 do
     local UIManager = require("ui/uimanager")
     UIManager.setInputTimeout = function() end
     UIManager.resetInputTimeout = function() end
-    -- looper:add_callback 里的 fn 会 yield fetch 结果，用协程模拟 turbo 的 _resume_coroutine
-    UIManager.looper = {
+    -- 自建 loop:add_callback 里的 fn 会 yield fetch 结果，用协程模拟 turbo 的 _resume_coroutine
+    local ioloop = {
         add_callback = function(_, fn)
             local co = coroutine.create(fn)
             local _, res = coroutine.resume(co)
@@ -398,9 +238,15 @@ do
             end
         end,
     }
+    package.loaded["turbo"] = nil
     package.preload["turbo"] = function()
         return {
             log = { categories = {} },
+            ioloop = {
+                IOLoop = function()
+                    return ioloop
+                end,
+            },
             async = {
                 HTTPClient = function()
                     return {
@@ -517,11 +363,9 @@ do
 
     -- 普通请求在 yield 后取消必须立即关连接，不能只抑制回调却继续占用网络。
     local queued
-    UIManager.looper = {
-        add_callback = function(_, fn)
-            queued = fn
-        end,
-    }
+    ioloop.add_callback = function(_, fn)
+        queued = fn
+    end
     local turbo = require("turbo")
     local closed = 0
     turbo.async.HTTPClient = function()
@@ -546,3 +390,4 @@ do
     Assert.eq(closed, 1)
     Assert.eq(calls, 0)
 end
+

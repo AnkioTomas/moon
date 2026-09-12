@@ -293,9 +293,12 @@ do
     rec.list_wire = { data = { { filename = "home.epub", title = "Home" } }, count = 1 }
     local refreshes = 0
     local desktop = {
+    lifecycle = { state = "Resume" },
         source = src,
         tab = "home",
-        refreshHome = function() refreshes = refreshes + 1 end,
+        onEvent = function(_, event)
+            if event == "home_refresh" then refreshes = refreshes + 1 end
+        end,
     }
     src:onEvent("home_open", desktop)
     Assert.is_true(rec.query ~= nil)
