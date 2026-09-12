@@ -39,12 +39,13 @@ local UI = require("ui.components.bookui")
 local Icon = require("ui.components.icon")
 local Surface = require("ui.components.surface")
 
+---@class BookSettingRow
 local SettingRow = {}
 
 --- 包一层可点击容器。
----@param w number
----@param h number
----@param on_tap fun()|nil
+---@param w number 可用宽度，单位像素
+---@param h number 可用高度，单位像素
+---@param on_tap fun()|nil 点击命中区域时执行的回调
 ---@return table
 local function tappable(w, h, on_tap)
     local tap = InputContainer:new{
@@ -66,8 +67,8 @@ local function tappable(w, h, on_tap)
 end
 
 --- 构建设置行（图标 + 标题 + 状态/箭头）。
----@param width number
----@param opts table|nil
+---@param width number 目标宽度，单位像素
+---@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table
 function SettingRow.build(width, opts)
     opts = opts or {}
@@ -157,14 +158,14 @@ function SettingRow.build(width, opts)
     if background == nil then background = false end
 
     local tap = tappable(width, row_h, opts.callback)
-    tap[1] = Surface.card(inner, {
+    tap[1] = Surface.build{ child = inner, options = {
         width = width,
         height = row_h,
         padding = 0,
         radius = UI.cardRadius(),
         background = background,
         shadow = false,
-    })
+    }, kind = "card" }
     tap.status_widget = status_widget
     return tap
 end
