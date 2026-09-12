@@ -13,6 +13,7 @@ DESIGN：底对齐、黑填充、灰标签、空档不画柱；折线 1px + 端�
 
 local Blitbuffer = require("ffi/blitbuffer")
 
+---@class BookChart
 local Chart = {}
 
 local DIM = Blitbuffer.COLOR_GRAY_4
