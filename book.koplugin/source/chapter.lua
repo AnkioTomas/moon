@@ -205,14 +205,12 @@ local function write(path, payload, cb, opts)
         UIManager:nextTick(writeNext)
     end
     UIManager:nextTick(writeNext)
-    return {
-        cancel = function()
+    return { cancel = function()
             if completed then return end
             completed = true
             pcall(function() f:close() end)
             pcall(os.remove, tmp)
-        end,
-    }
+        end }
 end
 
 --- 确保第 idx 章正文已在本地：已就绪则直接用（源提供 refreshCached 时交它决定是否刷新），
@@ -315,16 +313,14 @@ function Chapter.openAsync(source, identity, book, opts, ops, cb)
     else
         withBook(book)
     end
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             local job = active and active.job
             active = nil
             if job and job.cancel then
                 job.cancel()
             end
-        end,
-    }
+        end }
 end
 
 --- 带进度对话框的按章打开：本地命中快开；否则联网准备。
@@ -351,11 +347,9 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
         require("ui/uimanager"):nextTick(function()
             if not cancelled then cb(touched and local_path or nil, touch_err) end
         end)
-        return {
-            cancel = function()
+        return { cancel = function()
                 cancelled = true
-            end,
-        }
+            end }
     end
 
     --- 关掉进度对话框并置空句柄；重复调用无副作用。
@@ -389,15 +383,13 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
             end)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job then
                 job.cancel()
             end
             closeDialog()
-        end,
-    }
+        end }
 end
 
 --- 后台预取章节：已有文件跳过，逐章落盘并统计成功/失败。
@@ -511,14 +503,12 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
         if cancelled then return end
         nextIndex()
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             local job = active
             active = nil
             if job and job.cancel then job.cancel() end
-        end,
-    }
+        end }
 end
 
 return Chapter

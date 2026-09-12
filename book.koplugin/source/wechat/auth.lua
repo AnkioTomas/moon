@@ -707,13 +707,11 @@ function Auth.beginQrLoginAsync(cb)
             cb({ uid = uid, qr_payload = WEB .. "/web/confirm?pf=2&uid=" .. uid })
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if first then first.cancel() end
             if second then second.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 长轮询等待扫码确认，最多等 90 秒。
@@ -785,12 +783,10 @@ function Auth.waitQrLoginAsync(uid, cb)
         end)
     end
     poll()
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if request_job then request_job.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 落盘扫码得到的会话，并补拉用户昵称与 Skills API Key。

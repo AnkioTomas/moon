@@ -153,14 +153,12 @@ local function collectPagesAsync(limit, fetchPage, cb)
     end
 
     fetchNext()
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then
                 job:cancel()
             end
-        end,
-    }
+        end }
 end
 
 --- 单次请求上限：微信读书每页最多 20 条。

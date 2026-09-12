@@ -21,9 +21,7 @@ return {
         request = function()
             local w, h = Layout.portraitSize()
             return {
-                url = string.format(
-                    "https://api.ankio.net/myrl?ink=1&width=%d&height=%d", w, h
-                ),
+                url = require("online.myrl"):imageUrl(w, h),
                 method = "GET",
                 timeout = 60,
             }

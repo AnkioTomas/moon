@@ -169,12 +169,10 @@ function Source:deleteBookAsync(identity, cb)
             cb(true)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then job.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 打开 Moon 整本书：缓存命中直开，否则下载、校验并登记物理路径。
@@ -277,12 +275,10 @@ function Source:openBookAsync(identity, _opts, cb)
         end)
     end)
 
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             closeDialog()
-        end,
-    }
+        end }
 end
 
 --- 把 BookListOpts 转成 Moon list API 的 query 表。

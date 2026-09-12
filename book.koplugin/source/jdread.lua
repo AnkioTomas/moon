@@ -93,12 +93,10 @@ function Source:deleteBookAsync(identity, cb)
             cb(true)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then job.cancel() end
-        end,
-    }
+        end }
 end
 
 ---@param identity BookIdentity
@@ -187,12 +185,10 @@ function Source:listStoreAsync(opts, cb)
         end
         nextSeed()
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 将书城书籍加入京东书架，再以远端书架收敛本地图书馆。
@@ -215,12 +211,10 @@ function Source:addStoreBookAsync(book, cb)
             cb(true, nil, book.title)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end
-        end,
-    }
+        end }
 end
 
 ---@param identity BookIdentity
@@ -322,12 +316,10 @@ function Source:cacheAllChaptersAsync(identity, on_progress, cb)
             end
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 拉取云端进度，以 catalogId 映射本地连续章节号。
@@ -356,13 +348,11 @@ function Source:getProgressAsync(identity, cb)
             cb(pos)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if request and request.cancel then request.cancel() end
             if toc_job and toc_job.cancel then toc_job.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 推送全书比例和当前 catalogId。旧正文协议没有稳定段落坐标，故从章节起点恢复。
@@ -406,13 +396,11 @@ function Source:putProgressAsync(identity, pos, cb)
             push(value)
         end)
     end
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if toc_job and toc_job.cancel then toc_job.cancel() end
             if push_job and push_job.cancel then push_job.cancel() end
-        end,
-    }
+        end }
 end
 
 return Jdread

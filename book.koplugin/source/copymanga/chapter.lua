@@ -125,9 +125,7 @@ function Chapter.materializeAsync(client, identity, chapter, chapter_idx, on_pro
         require("ui/uimanager"):nextTick(function()
             if not state.cancelled then cb(archive_path) end
         end)
-        return {
-            cancel = function() state.cancelled = true end,
-        }
+        return { cancel = function() state.cancelled = true end }
     end
 
     state.active = client:chapterAsync(identity.stable_id, tostring(chapter.uid), function(wire, err)
@@ -180,15 +178,13 @@ function Chapter.materializeAsync(client, identity, chapter, chapter_idx, on_pro
         nextImage()
     end)
 
-    return {
-        cancel = function()
+    return { cancel = function()
             if state.cancelled then return end
             state.cancelled = true
             if state.active and state.active.cancel then state.active.cancel() end
             if state.writer then state.writer:close() end
             pcall(os.remove, archive_path .. ".part")
-        end,
-    }
+        end }
 end
 
 --- 后台预取章节 CBZ；已有文件由 materializeAsync 直接复用。
@@ -255,12 +251,10 @@ function Chapter.prefetchAsync(client, identity, toc, from_idx, count, ops, cb)
     end
 
     require("ui/uimanager"):nextTick(step)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end
-        end,
-    }
+        end }
 end
 
 return Chapter

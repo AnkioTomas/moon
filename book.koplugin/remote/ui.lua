@@ -20,8 +20,8 @@ function M.menuRows(desktop)
     local T = require("ffi/util").template
 
     local function rebuild()
-        if not desktop._closed then
-            desktop:rebuild()
+        if desktop.lifecycle.state ~= "Destroy" then
+            desktop:updateView()
         end
     end
 

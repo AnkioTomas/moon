@@ -33,7 +33,7 @@ local function edit(plugin, key, title, hint, password, normalize)
                 end
                 require("utils.settings").saveSource("zlib", cfg)
                 UIManager:close(dialog)
-                if plugin and plugin.desktop and not plugin.desktop._closed then plugin.desktop:rebuild() end
+                if plugin and plugin.desktop and plugin.desktop.lifecycle.state ~= "Destroy" then plugin.desktop:updateView() end
             end },
         }},
     }
@@ -114,7 +114,7 @@ function Setting.open(plugin)
                 Settings.saveSource("zlib", cfg)
                 UIManager:close(dialog)
                 UIManager:show(InfoMessage:new{ text = _("已保存"), timeout = 2 })
-                if plugin and plugin.desktop and not plugin.desktop._closed then plugin.desktop:rebuild() end
+                if plugin and plugin.desktop and plugin.desktop.lifecycle.state ~= "Destroy" then plugin.desktop:updateView() end
             end },
         }},
     }

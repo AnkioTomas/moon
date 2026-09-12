@@ -80,7 +80,20 @@ local DEFAULTS = {
         translate_languages = { "en", "zh", "ja", "fr", "de", "ko", "es", "ru", "zh_TW" },
     },
     home = {
-        home_layout = { "recent_hero", "recent_list" },
+        -- 钉页放置表：{ id, page, order, height }；height = "default"|"fill"|像素
+        home_widgets = {
+            { id = "clock", page = 1, order = 1, height = "default" },
+            { id = "weather", page = 1, order = 2, height = "default" },
+            { id = "clock_weather", page = 1, order = 3, height = "default" },
+            { id = "stats", page = 1, order = 4, height = "default" },
+            { id = "hitokoto", page = 1, order = 5, height = "default" },
+            { id = "excerpt", page = 1, order = 6, height = "default" },
+            { id = "history", page = 1, order = 7, height = "default" },
+            { id = "news", page = 1, order = 8, height = "default" },
+            { id = "recent_hero", page = 1, order = 9, height = "default" },
+            { id = "recent_list", page = 1, order = 10, height = "default" },
+            { id = "recent_cards", page = 1, order = 11, height = "default" },
+        },
         home_topbar_items = {
             clock = true,
             source = true,
@@ -91,7 +104,8 @@ local DEFAULTS = {
             brightness = true,
             battery = true,
         },
-        home_excerpt_index = 0,
+        home_weather_city = "",
+        home_clock_weather_order = "weather_left",
     },
     ai = { ai_endpoint = "", ai_api_key = "", ai_model = "" },
 }
@@ -106,6 +120,8 @@ for section, defaults in pairs(DEFAULTS) do
 end
 -- 旧版首页把大卡片和列表塞在同一个组件里；仅用于迁移后删除。
 KEY_SECTION.home_recent_list_mode = "home"
+KEY_SECTION.home_layout = "home"
+KEY_SECTION.home_widgets_need_split = "home"
 -- These are runtime/cache values, not user-facing defaults, but belong beside
 -- the lockscreen settings rather than in common.lua.
 for _, key in ipairs({
@@ -174,6 +190,52 @@ local function migrateHomeLayout(data)
     return true
 end
 
+--- 旧 home_layout（有序 id[]）→ home_widgets；首次 paint 再按高度切页。
+---@param data table
+---@return boolean
+local function migrateHomeWidgets(data)
+    local dirty = false
+    local layout = data.home_layout
+    local widgets = data.home_widgets
+    local has_widgets = type(widgets) == "table" and #widgets > 0
+        and type(widgets[1]) == "table" and type(widgets[1].id) == "string"
+
+    if type(layout) == "table" and #layout > 0 and type(layout[1]) == "string" then
+        if not has_widgets then
+            local out = {}
+            local seen = {}
+            for _, id in ipairs(layout) do
+                if type(id) == "string" and id ~= "" and not seen[id] then
+                    seen[id] = true
+                    out[#out + 1] = {
+                        id = id,
+                        page = 1,
+                        order = #out + 1,
+                        height = "default",
+                    }
+                end
+            end
+            if #out > 0 then
+                data.home_widgets = out
+                data.home_widgets_need_split = true
+                dirty = true
+                has_widgets = true
+            end
+        end
+        data.home_layout = nil
+        dirty = true
+    elseif layout ~= nil then
+        data.home_layout = nil
+        dirty = true
+    end
+
+    if not has_widgets and type(widgets) == "table" and #widgets > 0 then
+        -- 损坏的 widgets：留给 registry 回退默认
+        return dirty
+    end
+    return dirty
+end
+
 --- 按路径打开并缓存 LuaSettings 实例。
 --- 同一路径全程复用一个实例：多份实例会各自持有 data 副本，flush 时互相覆盖。
 ---@param path string
@@ -217,8 +279,9 @@ local function initialize()
                 dirty, common_dirty = true, true
             end
         end
-        if fillDefaults(file.data, DEFAULTS[section]) then dirty = true end
         if section == "home" and migrateHomeLayout(file.data) then dirty = true end
+        if section == "home" and migrateHomeWidgets(file.data) then dirty = true end
+        if fillDefaults(file.data, DEFAULTS[section]) then dirty = true end
         if dirty then file:flush() end
     end
     if common.data.enabled_sources == nil and old.enabled_sources ~= nil then

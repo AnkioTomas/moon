@@ -318,12 +318,10 @@ local function runSyncAsync(source, opts, cb)
         pullRemote()
     end
     require("ui/uimanager"):nextTick(nextIdentity)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if current_job and current_job.cancel then current_job:cancel() end
-        end,
-    }
+        end }
 end
 
 local sync_queues = {}
@@ -361,8 +359,7 @@ function Note.syncAsync(source, opts, cb)
         end)
     end
     startNext()
-    return {
-        cancel = function()
+    return { cancel = function()
             task.cancelled = true
             if task.job and task.job.cancel then
                 task.job:cancel()
@@ -370,8 +367,7 @@ function Note.syncAsync(source, opts, cb)
                 queue.running = false
                 startNext()
             end
-        end,
-    }
+        end }
 end
 
 --- 把本地 notes 快照定位并写入阅读器注解。

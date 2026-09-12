@@ -73,9 +73,9 @@ flowchart TD
 | `ui/desktop/` | 首页、图书馆、书城、统计、详情和设置 | `ui/desktop.lua` |
 | `ui/reader/` | 阅读会话、状态条、划词菜单和结束处理 | `session.lua`、`bars.lua` |
 | `ui/panel/` | 注入 KOReader 原生顶部菜单的桌面/阅读快捷动作 | `native.lua`、`actions/registry.lua` |
-| `ui/components/` | 墨水屏公共组件和视觉度量 | `bookui.lua`、`bookinfo.lua`、`pager.lua` |
-| `http/` | Turbo 非阻塞请求、Header 和 HTTP 缓存 | `request.lua` |
-| `workers/` | 子进程 Job、主线程 SimpleJob 和进程上下文 | `job.lua`、`simple_job.lua` |
+| `ui/components/` | 墨水屏公共组件和视觉度量（首页/锁屏共享的 Widget 工厂） | `bookui.lua`、`bookinfo.lua`、`quote.lua`、`pager.lua` |
+| `http/` | Turbo 非阻塞请求、ioloop 生命周期、Header 和 HTTP 缓存 | `request.lua`、`turbo.lua` |
+| `workers/` | 按 kind 区分的一次性 Job（instant / light / medium / heavy） | `job.lua`、`protocol.lua` |
 | `remote/` | 局域网 HTTP 服务、文件、输入、剪贴板和静态页面 | `init.lua`、`server.lua` |
 | `lockscreen/` | 背景、主体、布局、离屏渲染和 KOReader 锁屏设置 | `init.lua`、`compose.lua` |
 | `pinyin/` | 中文键盘 hook、候选栏、词库查询和分片下载 | `init.lua`、`candidate_bar.lua` |
@@ -125,10 +125,10 @@ Turbo 必须在 `UIManager:run()` 前启用。可选增强初始化失败时应�
 | `onStartOfBook` / `onEndOfBook` | 按章模式切换相邻章节 |
 | `onPageUpdate` / `onPosUpdate` | 更新快照、统计和阅读状态条 |
 | `onAnnotationsModified` | 按当前身份保存完整注解快照 |
-| `onSuspend` | 结清阅读状态、生成锁屏、停止远程服务 |
-| `onResume` | 恢复统计、锁屏、远程服务和桌面数据 |
+| `onSuspend` | 结清阅读状态、生成锁屏、停止远程服务；桌面走 `onPause` → `onStop` |
+| `onResume` | 恢复统计、锁屏、远程服务；桌面走 `onStart` → `onResume` |
 | `onNetworkConnected` | 重试脏数据、通知源、刷新锁屏 |
-| `onExit` | 停止远程服务并刷日志 |
+| `onExit` | 停止远程服务，销毁仍打开的桌面，并刷日志 |
 
 ### 4.3 数据源事件
 
@@ -335,9 +335,8 @@ sequenceDiagram
 
 | 机制 | 用途 | 允许访问 |
 |---|---|---|
-| Turbo + `http/request.lua` | 所有外部 HTTP | 网络；回调回到 UI 编排 |
-| `workers/job.lua` | 重文件 IO、解析、转换、校验 | 文件系统和纯计算 |
-| `workers/simple_job.lua` | 主线程下一 tick 的短任务 | UI、SQLite，但不能执行重活 |
+| Turbo + `http/request.lua` + `http/turbo.lua` | 所有外部 HTTP | 请求语义 / ioloop 与补丁 |
+| `workers/job.lua` | instant：主线程 nextTick（可碰 sqlite）；light/medium/heavy：fork | instant 可碰 UI/SQLite；fork 只做文件系统和纯计算 |
 | `UIManager:scheduleIn/nextTick` | UI 延迟、节流和状态刷新 | KOReader 主线程 |
 | `remote/server.lua` 状态机 | LuaSocket 增量 HTTP | 注入的受限 IO handler |
 
@@ -348,6 +347,7 @@ sequenceDiagram
 - 解析结果回主进程后再写数据库。
 - 异步回调使用 request token、generation、`Session.isCurrent` 或 `Store.isCurrentDocument` 丢弃旧结果。
 - 取消只阻止后续副作用，不能留下“加载中”状态或半写文件。
+- 可取消异步：Job 用 `job:cancel()`，其余返回 `{ cancel }`。
 
 ## 10. 全局功能
 
@@ -369,7 +369,7 @@ Background.ensure
 → KOReader screensaver 设置
 ```
 
-锁屏先完整生成新文件，再替换当前图片。失败时保留上一张可用图片。新增主体只需要一个 `lockscreen/components/` 模块和注册表一项。
+锁屏先完整生成新文件，再替换当前图片。失败时保留上一张可用图片。新增主体只需要一个 `lockscreen/components/` 模块和注册表一项；能复用的画面先查 `ui/components/`，经 `kind=widget` 嵌入，不要复制桌面拼装。
 
 ### 10.3 中文输入法
 
@@ -593,19 +593,23 @@ tests/book/store_spec.lua
 ### 4.2 首页
 
 ```text
-最近阅读的 Hero 书籍
+用户钉页的组件板（多屏）
+  PageStrip：‹ ··· › / 编辑态「完成」
         ↓
-最近阅读 · N
-        ↓
-封面网格（封面 + 进度角标）
-        ↓
-Pager
+长按进入编辑：叠层删 / 移 / 调高；页底可添加
 ```
 
+- 放置数据在 `home.home_widgets`：`{ id, page, order, height }`。`height` 为 `default`（组件 preferred）、`fill`（占满页内剩余）或像素自定义。
+- 页边界由用户钉死，不再按高度自动甩页。旧 `home_layout` 启动时迁成 widgets，并按旧分页算法切一次页。
+- 长按首页进入编辑态；编辑态组件不响应点击，叠层提供删除、移动（上下/跨页）、高度（默认/占满/自定义 Spin）。页内仍有空位时显示「添加组件」。点 PageStrip「完成」或离开首页退出并保存；空页退出时压缩。
+- 翻页用 `ui/components/pagestrip.lua`（两侧按钮 + 中间圆点/标题），不用图书馆那套 Pager。左右滑仍翻页；编辑态禁用左右滑。
+- 设置页保留天气地点与组件只读摘要，主编辑入口是「在首页编辑」。
+- 可复用的画面（引言、书封、进度、柱图等）放在 `ui/components/` 纯 Widget 工厂；首页组件只做 Lifecycle + 拉数 + 高度预算。
 - Hero 点击直接开始或继续阅读。
 - 最近阅读网格点击打开书籍详情；封面保持约 2:3，按可用高度动态计算列数和行数。
 - 没有最近阅读时显示一句可点击的引导文案，指向图书馆。
 - 没有在读书籍时显示单行空态，不插图、不造一个空卡片。
+- 新闻、历史上的今天、一言等由各组件 `onResume` 自拉（`online/`）。时钟下的日历、天气组件各自打网：成功才刷自己那一块，失败停在默认。地点留空走 `?city=`（IP）；填写须用英文字母，设置页可测试。图标是仓库 `assets/weather/`，和字典一样经 jsDelivr 拉，不进插件包。
 
 ### 4.3 图书馆和书城
 
@@ -701,9 +705,10 @@ Hero：封面 / 书名 / 作者 / 分类·系列 / 摘要 / 进度
 ### 6.1 组合和布局
 
 - 编排顺序为：背景资源 → 主体块 → 统一面板布局 → 离屏 PNG；主体组件只返回绘制数据，不各自维护屏幕坐标。
+- **共享 UI**：与桌面同构的画面放在 `ui/components/`（无 Lifecycle、无锁屏 Layout）；锁屏适配用 `{ kind="widget", widget=... }` 嵌入（`render.lua` 已支持）。引言走 `ui/components/quote.lua`；封面/进度走 `bookinfo`；柱图走 `chart`。票根等装饰仍用 DSL。
 - 锁屏图片始终按竖屏尺寸生成，普通主体共用 `lockscreen/layout.lua` 的面板矩形、边距、圆角和文字区域。
 - 普通面板使用白色、圆角和约 2 像素阴影；主体文字仍遵守黑、muted、dim 三层灰阶。
-- 引用/留言类主体根据实际文字高度计算面板，不截断为固定行数；长文案先缩小到可读范围，仍放不下才截断。
+- 引用/留言类主体根据实际文字高度计算面板；长文案先缩小到可读范围，仍放不下才截断，再交给共享 Quote 画正文。
 - `摸鱼日报` 和 `书架` 是全屏主体：前者直接使用每日图片，后者直接绘制海报墙，不再叠加普通背景或九宫格面板。
 - 背景下载、组合图和主体数据都完成后才替换锁屏文件；失败时保留旧图或白底，不能安装半张图片。
 
@@ -752,6 +757,7 @@ Hero：封面 / 书名 / 作者 / 分类·系列 / 摘要 / 进度
 | `ui/components/icon.lua` | Material Symbols 图标和图标文案组合 |
 | `ui/components/image.lua` | 本地/网络图片、固定尺寸占位和异步替换 |
 | `ui/components/bookinfo.lua` | 书名、作者、简介、封面、进度角标和 Hero |
+| `ui/components/quote.lua` | 共享引言（首页一言/书摘、锁屏语句面板） |
 | `ui/components/settingrow.lua` | 设置行 |
 | `ui/components/topbar.lua` | 桌面顶部状态栏 |
 | `ui/components/bottombar.lua` | 桌面底部 Tab |
@@ -767,7 +773,7 @@ Hero：封面 / 书名 / 作者 / 分类·系列 / 摘要 / 进度
 | `lockscreen/layout.lua` | 锁屏面板和九宫格布局 |
 | `lockscreen/compose.lua` | 背景 × 主体的组合和缓存键 |
 | `lockscreen/render.lua` | 纯数据块到 PNG 的离屏渲染 |
-| `lockscreen/components/` | 锁屏主体；新增主体在注册表增加一项 |
+| `lockscreen/components/` | 锁屏主体适配；能复用先看 `ui/components`，再写 `blocks`；新增主体在注册表增加一项 |
 
 新增页面前先回答三个问题：现有哪个组件已经覆盖这个形态、数据是否有稳定的所有权、溢出和异步状态如何闭环。回答不清楚时，不要先新增 Service、Manager、Factory、Adapter 或 Wrapper。
 

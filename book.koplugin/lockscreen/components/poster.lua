@@ -98,7 +98,6 @@ function M.blocks(rect)
         local rows = base + (col < extra and 1 or 0)
         for row = 0, rows - 1 do
             local widget = select(1, BookInfo.cover(nil, nil, shelf[book_idx], poster_w, poster_h, {
-                sync = true,
                 shadow = false,
             }))
             blocks[#blocks + 1] = {

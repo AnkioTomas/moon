@@ -11,7 +11,9 @@ reading_stats 是本地唯一事实来源：本地采集写成待同步记录，
 local StatsDB = require("db.stats")
 local logger = require("utils.log")
 local SourceCapabilities = require("types.book_source").SourceCapabilities
-local Stats = {}
+local Stats = {
+    session = nil,
+}
 local PUSH_BATCH = 200
 
 --- 当前阅读页的内存计时会话。
@@ -22,9 +24,6 @@ local PUSH_BATCH = 200
 ---@field chapter_idx integer|nil 当前章节序号（整本书为 nil）
 ---@field chapter_fraction number|nil 当前章节阅读比例（0..1）
 ---@field started_at integer 当前页开始计时的 Unix 时间戳
-
----@type ReadingStatsSession|nil
-local session
 
 --- 结清一个页面计时段并写入待同步统计。
 --- 停留不足 1 秒时直接丢弃；数据库错误通过 done 返回。
@@ -60,8 +59,8 @@ end
 ---@param done fun(err: any|nil)|nil
 ---@return nil
 local function stopSession(done)
-    local current = session
-    session = nil
+    local current = Stats.session
+    Stats.session = nil
     if current then
         settle(current, done)
     elseif done then
@@ -76,7 +75,7 @@ end
 function Stats.start(snapshot)
     stopSession()
     if not snapshot or not snapshot.identity then return end
-    session = {
+    Stats.session = {
         identity = snapshot.identity,
         page = tonumber(snapshot.page) or 0,
         total_pages = tonumber(snapshot.total_pages) or 0,
@@ -91,7 +90,7 @@ end
 ---@param snapshot ReaderSessionSnapshot
 ---@return nil
 function Stats.onPage(snapshot)
-    local current = session
+    local current = Stats.session
     if not snapshot then return end
     local page = tonumber(snapshot.page)
     if not current or not page or page == current.page then return end
@@ -290,12 +289,10 @@ function Stats.syncAsync(source, _opts, cb)
         end)
     end
     require("ui/uimanager"):nextTick(push)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if current_job and current_job.cancel then current_job:cancel() end
-        end,
-    }
+        end }
 end
 
 return Stats

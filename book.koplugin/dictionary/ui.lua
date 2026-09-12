@@ -107,11 +107,11 @@ function Dictionary.manage(ui, changed_callback)
                         end,
                     }
                 end
-                require("ui.components.popup").sheet{ title = name, items = actions }
+                require("ui.views.popup").sheet{ title = name, items = actions }
             end,
         }
     end
-    require("ui.components.popup").list{
+    require("ui.views.popup").list{
         title = _("管理已安装字典"),
         subtitle = _("选择当前字典，或删除月读安装的字典"),
         items = items,
@@ -194,7 +194,7 @@ local function downloadLang(ui, lang_name, items)
             end,
         }
     end
-    require("ui.components.popup").list{
+    require("ui.views.popup").list{
         title = T(_("下载字典 · %1"), lang_name),
         subtitle = _("选择要安装的 StarDict 字典"),
         items = rows,
@@ -245,7 +245,7 @@ function Dictionary.download(ui)
                     end,
                 }
             end
-            require("ui.components.popup").list{
+            require("ui.views.popup").list{
                 title = _("下载 StarDict 字典"),
                 subtitle = _("按语言选择"),
                 items = rows,
@@ -286,7 +286,7 @@ function Dictionary.pick(ui, opts)
             icon = "book",
         }
     end
-    require("ui.components.popup").single{
+    require("ui.views.popup").single{
         title = _("切换词典"),
         subtitle = _("选择后重新查询当前词"),
         choice_icons = true,

@@ -128,12 +128,10 @@ function Client:shelfSyncAsync(cb)
         end
         nextBatch()
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 拉取书籍元数据。
@@ -190,12 +188,10 @@ function Client:searchAsync(keyword, page, page_size, cb)
         end)
     end
     nextPage()
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 拉取指定书籍的相关推荐。
@@ -291,12 +287,10 @@ function Client:readerAutoAsync(endpoint, book_id, key, extra, cb)
         end)
     end
     attempt()
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 拉取旧阅读器目录。

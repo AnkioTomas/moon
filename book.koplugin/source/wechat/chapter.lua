@@ -75,12 +75,10 @@ function Chapter.ensurePsvtsAsync(bookId, chapter_uid, cb)
         Context.rememberPsvts(bookId, chapter_uid, psvts)
         cb(true)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then job.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 异步拉取章节 HTML 正文。
@@ -99,7 +97,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     --- 中止取正文：置位取消标记并终止在途请求。
     local function cancel()
         cancelled = true
-        if active_job then active_job.cancel() end
+        if active_job then active_job:cancel() end
     end
     --- 以错误收尾；已取消则丢弃。
     ---@param err any 失败原因
@@ -278,13 +276,11 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
             cb({ title = title, html = localized })
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if fetch_job and fetch_job.cancel then fetch_job:cancel() end
             if asset_job and asset_job.cancel then asset_job:cancel() end
-        end,
-    }
+        end }
 end
 
 --- 已缓存章节：清除旧版误注入的社区热度虚线。

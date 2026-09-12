@@ -92,9 +92,7 @@ end
 ---@param cover_h number
 ---@return table
 local function coverCell(book, slot_w, cover_w, cover_h)
-    local cover = select(1, BookInfo.cover(nil, nil, book, cover_w, cover_h, {
-        sync = true,
-    }))
+    local cover = select(1, BookInfo.cover(nil, nil, book, cover_w, cover_h, {}))
     local title = TextWidget:new{
         text = BookInfo.title(book),
         face = UI.face("xx_smallinfofont", 13),

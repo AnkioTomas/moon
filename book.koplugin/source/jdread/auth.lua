@@ -132,13 +132,11 @@ function Auth.beginQrLoginAsync(cb)
         end
         cb({ qr_path = path, token = token })
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             job.cancel()
             pcall(os.remove, path)
-        end,
-    }
+        end }
 end
 
 --- 轮询京东扫码状态，最多等待 120 秒。
@@ -192,13 +190,11 @@ function Auth.waitQrLoginAsync(token, cb)
         end)
     end
     poll()
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if request_job then request_job.cancel() end
             pcall(os.remove, qrPath())
-        end,
-    }
+        end }
 end
 
 --- 使用扫码 ticket 换取登录 Cookie 并原子保存源配置。
@@ -253,13 +249,11 @@ function Auth.completeQrLoginAsync(info, cb)
         pcall(os.remove, qrPath())
         cb({ user_name = name })
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             job.cancel()
             pcall(os.remove, qrPath())
-        end,
-    }
+        end }
 end
 
 return Auth

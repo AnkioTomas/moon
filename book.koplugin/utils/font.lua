@@ -322,6 +322,7 @@ function MoonFont.listAsync(force, cb)
         return { settings = settings, system = system }
     end, {
         name = "font.scan",
+        kind = "medium",
         on_done = function(data)
             if cancelled then return end
             local settings, system = {}, {}
@@ -393,14 +394,12 @@ function MoonFont.listAsync(force, cb)
         end)
     end
 
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if scan_job then scan_job:abort() end
             if cache_job and cache_job.cancel then cache_job.cancel() end
             if net_job and net_job.cancel then net_job.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 把字体文件路径插到 FontList 队首，让 KOReader 能解析到它。
@@ -715,6 +714,7 @@ function MoonFont.ensureInstalledAsync(item, on_progress, cb)
             extractInstalledFont(zip_path, dest)
         end, {
             name = "font.extract",
+            kind = "heavy",
             on_done = function()
                 if cancelled then return end
                 if lfs.attributes(dest, "mode") == "file" then
@@ -729,13 +729,11 @@ function MoonFont.ensureInstalledAsync(item, on_progress, cb)
             end,
         })
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if download_job then download_job.cancel() end
             if extract_job then extract_job:abort() end
-        end,
-    }
+        end }
 end
 
 ---@param id string|nil 空=恢复默认 fontmap

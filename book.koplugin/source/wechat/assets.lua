@@ -278,12 +278,10 @@ local function downloadRemoteImagesAsync(xhtml, images_dir, cb)
         end)
     end
     nextUrl()
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active_job and active_job.cancel then active_job:cancel() end
-        end,
-    }
+        end }
 end
 
 --- 把章节 HTML 内图片下载到章节工作目录并改写为相对路径。
@@ -330,14 +328,12 @@ function Assets.localizeAsync(book_id, chapter, html, referer, cb)
         afterTar({})
     end
 
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             for _, job in ipairs(jobs) do
                 if job.cancel then job:cancel() end
             end
-        end,
-    }
+        end }
 end
 
 return Assets

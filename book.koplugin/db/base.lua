@@ -10,7 +10,6 @@
 
 local logger = require("utils.log")
 local Paths = require("utils.paths")
-local Context = require("workers.context")
 local Perf = require("utils.perf")
 
 local Base = {}
@@ -280,11 +279,11 @@ function Base.close()
 end
 
 --- 确保连接可用（未开则 Base.open）。
---- 读写操作均在当前进程同步执行。
 ---@return userdata|nil, string|nil
 function Base.ensure()
-    if Context.inSubProcess() then
-        error("book.db: database access is forbidden in subprocess; use workers.simple_job", 3)
+    local Job = package.loaded["workers.job"]
+    if Job and Job.inSubProcess and Job.inSubProcess() then
+        error("book.db: database access is forbidden in subprocess; use an instant job", 3)
     end
 
     if conn then

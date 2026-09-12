@@ -68,6 +68,33 @@ local function patchConnectFail()
     IOStream._book_connect_fail_patched = true
 end
 
+--- buffer:len() / 已读字节是 FFI int64。stream 的增量路径会 math.min，cdata 直接炸。
+---@param value any
+---@return number|nil
+local function luaNumber(value)
+    if value == nil then return nil end
+    if type(value) == "number" then return value end
+    return tonumber(value)
+end
+
+local function patchReadSize()
+    local ok, iostream = pcall(require, "turbo.iostream")
+    local IOStream = ok and iostream and iostream.IOStream
+    if type(IOStream) ~= "table" or type(IOStream._read_from_buffer) ~= "function" then
+        return
+    end
+    if IOStream._book_read_size_patched then
+        return
+    end
+    local orig = IOStream._read_from_buffer
+    IOStream._read_from_buffer = function(self)
+        self._read_buffer_size = luaNumber(self._read_buffer_size) or 0
+        self._read_bytes = luaNumber(self._read_bytes)
+        return orig(self)
+    end
+    IOStream._book_read_size_patched = true
+end
+
 --- 会话内只打一次。忽略校验时不加载系统 CA（macOS 上默认 cafile 不存在会炸）。
 local function patch()
     if patched then
@@ -99,6 +126,7 @@ local function patch()
         end
     end
     patchConnectFail()
+    patchReadSize()
 end
 
 ------------------------------------------------------------------------

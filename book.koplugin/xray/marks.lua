@@ -291,6 +291,7 @@ local function scheduleScan(self, key, entities)
             return scanVisibleMarks(ui, entities)
         end, {
             name = "xray.marks",
+            kind = "light",
             timeout = 30,
             on_done = function(marks)
                 if self._scan_token ~= token or self._scan_pending ~= key
@@ -349,7 +350,7 @@ function Marks.invalidate()
 end
 
 --- 当前视口变化时排一次页内扫描；绘制路径自身不执行文本搜索。
-function Marks:rebuild()
+function Marks:updateView()
     if not self.ui or not Marks.enabled() then
         resetMarks(self)
         return
@@ -388,7 +389,7 @@ function Marks:paintTo(bb)
     if not Marks.enabled() then
         return
     end
-    self:rebuild()
+    self:updateView()
     for index, mark in ipairs(self._marks) do
         paintDashedUnderscore(bb, mark.box)
     end
@@ -400,7 +401,7 @@ function Marks:onTap(ges)
     if not Marks.enabled() or not self.ui or not ges or not ges.pos then
         return false
     end
-    self:rebuild()
+    self:updateView()
     for _, mark in ipairs(self._marks) do
         if hitScreenBox(ges.pos, mark.box) then
             require("xray.ui").showEntity(mark.entity)

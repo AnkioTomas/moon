@@ -6,6 +6,18 @@
 
 local Highlights = {}
 
+--- 注解快照是 JSON 数组；坏数据当空，不把解码失败吞成业务空以外的东西。
+---@param payload string|nil
+---@return table[]
+local function decodePayload(payload)
+    if type(payload) ~= "string" or payload == "" then return {} end
+    local jok, JSON = pcall(require, "json")
+    if not jok then return {} end
+    local dok, data = pcall(JSON.decode, payload)
+    if not dok or type(data) ~= "table" then return {} end
+    return data
+end
+
 --- 算高亮条目的去重键：有 id 就用 id，否则用文本+章节+页码+起止位置拼串。
 --- 拼串用 \0 分隔，避免字段内容里的分隔符造成误撞。
 ---@param item table 注解条目（会话 annotation 或 notes 表反序列化结果）
@@ -55,13 +67,7 @@ function Highlights.collect(source_id, stable_id, chapter_idx, current_items)
     if not ok or not NoteDB then return items end
     local idx = tonumber(chapter_idx) or 0
     local row = NoteDB.get(source_id, stable_id, idx)
-    local payload = row and row.payload
-    if type(payload) ~= "string" or payload == "" then return items end
-    local jok, JSON = pcall(require, "json")
-    if not jok then return items end
-    local dok, data = pcall(JSON.decode, payload)
-    if not dok or type(data) ~= "table" then return items end
-    for _, item in ipairs(data) do push(item) end
+    for _, item in ipairs(decodePayload(row and row.payload)) do push(item) end
     return items
 end
 
@@ -92,6 +98,66 @@ function Highlights.pick(source_id, stable_id, chapter_idx, index, current_items
     local _ = require("gettext")
     local source = #parts > 0 and table.concat(parts, " · ") or _("来自当前书籍高亮")
     return picked.text, source
+end
+
+--- 从 notes 全表收划线，带上书名作者与身份。首页书摘用这个，不跟当前书绑死。
+---@return { text: string, author: string, title: string, source_id: string, stable_id: string }[]
+function Highlights.collectAll()
+    local items = {}
+    local ok, NoteDB = pcall(require, "db.note")
+    if not ok or not NoteDB then return items end
+    local bok, BookDB = pcall(require, "db.book")
+    local books = {}
+    local function bookOf(source_id, stable_id)
+        local key = tostring(source_id) .. "\0" .. tostring(stable_id)
+        if books[key] == nil then
+            books[key] = (bok and BookDB and BookDB.get(source_id, stable_id)) or false
+        end
+        return books[key] or nil
+    end
+    local seen = {}
+    for _, row in ipairs(NoteDB.all()) do
+        local book = bookOf(row.source_id, row.stable_id)
+        for _, item in ipairs(decodePayload(row.payload)) do
+            if type(item) == "table" and item.drawer
+                    and type(item.text) == "string" and item.text ~= "" then
+                local key = highlightKey(item) .. "\0" .. tostring(row.source_id)
+                    .. "\0" .. tostring(row.stable_id)
+                if not seen[key] then
+                    seen[key] = true
+                    local chapter = item.chapter
+                        or (type(item.chapters) == "table" and item.chapters[1])
+                    items[#items + 1] = {
+                        text = item.text,
+                        author = book and book.authors or "",
+                        title = book and book.title or "",
+                        chapter = type(chapter) == "string" and chapter or "",
+                        source_id = row.source_id,
+                        stable_id = row.stable_id,
+                    }
+                end
+            end
+        end
+    end
+    return items
+end
+
+--- 全库随机一条书摘。有多条时躲开上一句。
+---@param avoid string|nil
+---@return { text: string, author: string, title: string, source_id: string|nil, stable_id: string|nil }|nil
+function Highlights.random(avoid)
+    local items = Highlights.collectAll()
+    if #items == 0 then return nil end
+    local i = math.random(#items)
+    if #items > 1 and avoid and items[i].text == avoid then
+        i = i % #items + 1
+    end
+    local picked = items[i]
+    if picked.author == "" and picked.title == "" then
+        local _ = require("gettext")
+        picked.title = picked.chapter ~= "" and picked.chapter or _("书摘")
+    end
+    return picked
 end
 
 return Highlights

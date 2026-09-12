@@ -199,12 +199,10 @@ function Client:chaptersAsync(stable_id, groups, cb)
     end
 
     step()
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end
-        end,
-    }
+        end }
 end
 
 ---@param stable_id string
@@ -305,12 +303,10 @@ function Client:collectAllAsync(cb)
     end
 
     step()
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end
-        end,
-    }
+        end }
 end
 
 return Client

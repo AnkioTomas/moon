@@ -154,7 +154,7 @@ local BACKGROUNDS = {
         path = function() return Paths.screensaverDir() .. "/bing.jpg" end,
         request = function()
             return {
-                url = "https://api.ankio.net/bing",
+                url = require("online.bing"):imageUrl(),
                 method = "GET",
                 allow_redirects = true,
                 timeout = 60,
@@ -287,12 +287,10 @@ local function ensureDaily(asset, cb)
             cb(nil, asset.id .. " background download failed")
         end
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if request_job and request_job.cancel then request_job.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 准备任意资源；每日下载和本地资源共用同一入口。

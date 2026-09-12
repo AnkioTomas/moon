@@ -1,5 +1,5 @@
 --[[--
-锁屏语句面板：一言 / 高亮共用绘制。
+锁屏语句面板：白底 panel + 共享 Quote Widget。
 
 @module koplugin.book.lockscreen.components.quote_panel
 --]]
@@ -10,16 +10,16 @@ local Text = require("utils.text")
 
 local M = {}
 
--- quote 主体需要根据实际字体测量高度，不能套用固定普通面板高度。
---- 统一绘制引号、正文、分割线和出处。
+--- 统一绘制引号、正文、分割线和出处（共享 UI 组件）。
 ---@param text string
 ---@param source string
 ---@param position string
 ---@param wide boolean
 ---@return table[]
 function M.blocks(text, source, position, wide)
-    local sw, sh = Layout.portraitSize()
-    local rect = Layout.panel({
+    -- 延迟加载：避免 lockscreen 注册表 require 时拉进 KOReader Widget。
+    local Quote = require("ui.views.quote")
+    local sw, sh = Layout.portraitSize()    local rect = Layout.panel({
         position = position,
         wide = wide,
         screen_w = sw,
@@ -51,13 +51,25 @@ function M.blocks(text, source, position, wide)
         text = fitted
     end
 
-    local quote_h = math.min(50, font_size + 16)
-    local text_top = rect.pad + quote_h + 4
-    local source_h = 22
-    local gap = math.max(14, rect.pad)
+    local mark_size = math.min(50, font_size + 16)
+    local line_em = 0.35
+    local line_px = math.max(1, math.floor((1 + line_em) * font_size + 0.5))
+    local lines = math.max(2, math.ceil(text_h / line_px))
+    local quote_opts = {
+        body_size = font_size,
+        mark_size = mark_size,
+        attr_size = 16,
+        lines = lines,
+        line_em = line_em,
+        pad_x = 0,
+        gap_mark = 4,
+        gap_rule = math.max(14, rect.pad),
+        gap_attr = math.max(14, rect.pad),
+    }
+    local content_h = Quote.contentHeight(quote_opts)
     local panel_h = math.max(
         math.floor(sh * 0.32),
-        text_top + text_h + gap + 1 + gap + source_h + rect.pad
+        rect.pad * 2 + content_h
     )
     panel_h = math.min(panel_h, math.floor(sh * 0.88))
     rect = Layout.panel({
@@ -67,26 +79,36 @@ function M.blocks(text, source, position, wide)
         screen_w = sw,
         screen_h = sh,
     })
-    local text_x = rect.text_x
-    local text_y = rect.y + text_top
-    local rule_y = text_y + text_h + gap
+
+    local inner_h = math.max(1, rect.h - rect.pad * 2)
+    local parts = Quote:new{
+        data = { text = text, source = source },
+        width = text_w,
+        height = inner_h,
+        body_size = quote_opts.body_size,
+        mark_size = quote_opts.mark_size,
+        attr_size = quote_opts.attr_size,
+        lines = quote_opts.lines,
+        line_em = quote_opts.line_em,
+        pad_x = 0,
+        gap_mark = quote_opts.gap_mark,
+        gap_rule = quote_opts.gap_rule,
+        gap_attr = quote_opts.gap_attr,
+    }
+    local widget = parts:build()
+
     return {
         {
             kind = "panel", x = rect.x, y = rect.y, width = rect.w, height = rect.h,
             radius = rect.radius, shadow = 2, color = Blitbuffer.COLOR_WHITE,
         },
         {
-            text = "“", x = text_x, y = rect.y + rect.pad,
-            width = text_w, size = quote_h, bold = true, box = false, color = Blitbuffer.COLOR_GRAY_4,
-        },
-        {
-            text = text, x = text_x, y = text_y,
-            width = text_w, size = font_size, bold = true, box = false,
-        },
-        { kind = "rule", x = text_x, y = rule_y, width = text_w, height = 1, color = Blitbuffer.COLOR_GRAY_5 },
-        {
-            text = source, x = text_x, y = rule_y + gap,
-            width = text_w, size = 16, align = "right", box = false, color = Blitbuffer.COLOR_GRAY_3,
+            kind = "widget",
+            widget = widget,
+            x = rect.text_x,
+            y = rect.y + rect.pad,
+            width = text_w,
+            height = inner_h,
         },
     }
 end

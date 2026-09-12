@@ -17,13 +17,20 @@ local Settings = require("utils.settings")
 local Text = require("utils.text")
 local _ = require("gettext")
 
-local Remote = {}
+local Remote = {
+    _server = nil, ---@type table|nil server 实例（也是 insertZMQ 的句柄）
+    _resume = false, ---@type boolean suspend 前在跑，resume 时恢复
+    _temp_seq = 0,
+    --- Kindle 实际打孔的端口：stop 必须用它拆规则，不能读当前配置（运行中改端口会泄漏旧规则）
+    _punched_port = nil, ---@type number|nil
+    _layout = nil,
+    _io_queue = {},
+    _io_job = nil,
+    _io_stopping = false,
+    _clip = "", ---@type string 设备最后复制的文本镜像
+    _clip_hooked = false,
+}
 
-local _server = nil ---@type table|nil server 实例（也是 insertZMQ 的句柄）
-local _resume = false ---@type boolean suspend 前在跑，resume 时恢复
-local _temp_seq = 0
---- Kindle 实际打孔的端口：stop 必须用它拆规则，不能读当前配置（运行中改端口会泄漏旧规则）
-local _punched_port = nil ---@type number|nil
 
 --- 构造可访问根、快捷入口和保护路径。全部转成真实绝对路径，堵住软链接逃逸。
 --- 注意字体/插件/本插件目录在部分环境是软链（模拟器指向源码树）：
@@ -117,15 +124,13 @@ local function storageLayout()
     }
 end
 
-local _layout
-
 --- 取存储布局（首次调用时构造并缓存；start 会重新构造一次刷新配置变更）。
 ---@return table
 local function layout()
-    if not _layout then
-        _layout = storageLayout()
+    if not Remote._layout then
+        Remote._layout = storageLayout()
     end
-    return _layout
+    return Remote._layout
 end
 
 --- 路径是否落在任一 managed root 之内。
@@ -236,21 +241,17 @@ end
 
 ---@return boolean
 function Remote.isRunning()
-    return _server ~= nil
+    return Remote._server ~= nil
 end
 
 -- 文件系统重活串行跑子进程：避免阻塞 UI，也避免多个远程请求同时 fork 撑爆设备。
-local _io_queue = {}
-local _io_job
-local _io_stopping = false
-
 local function pumpIO()
-    if _io_job or _io_stopping or #_io_queue == 0 then return end
-    local item = table.remove(_io_queue, 1)
-    _io_job = true -- Job.run 失败时会同步回调；先放哨兵避免回调后被覆盖。
+    if Remote._io_job or Remote._io_stopping or #Remote._io_queue == 0 then return end
+    local item = table.remove(Remote._io_queue, 1)
+    Remote._io_job = true -- Job.run 失败时会同步回调；先放哨兵避免回调后被覆盖。
 
     local function finish(result, err)
-        _io_job = nil
+        Remote._io_job = nil
         item.done(result, err)
         pumpIO()
     end
@@ -268,7 +269,7 @@ local function pumpIO()
             finish(nil, "cancelled")
         end,
     })
-    if _io_job then _io_job = job end
+    if Remote._io_job then Remote._io_job = job end
 end
 
 ---@param name string
@@ -276,7 +277,7 @@ end
 ---@param cb fun(value: any, err: any)
 ---@param cleanup fun()|nil
 local function runFilesystem(name, operation, cb, cleanup)
-    _io_queue[#_io_queue + 1] = {
+    Remote._io_queue[#Remote._io_queue + 1] = {
         name = name,
         worker = function()
             local value, err = operation()
@@ -300,14 +301,14 @@ local function runFilesystem(name, operation, cb, cleanup)
 end
 
 local function stopFilesystemJobs()
-    _io_stopping = true
-    if type(_io_job) == "table" then _io_job:cancel() end
-    _io_job = nil
-    for _, item in ipairs(_io_queue) do
+    Remote._io_stopping = true
+    if type(Remote._io_job) == "table" then Remote._io_job:cancel() end
+    Remote._io_job = nil
+    for _, item in ipairs(Remote._io_queue) do
         if item.cleanup then item.cleanup() end
     end
-    _io_queue = {}
-    _io_stopping = false
+    Remote._io_queue = {}
+    Remote._io_stopping = false
 end
 
 -- ── handlers（server 的全部 IO 接缝）──────────────────
@@ -452,8 +453,8 @@ local function saveUpload(temp, dir, name, cb, conflict)
         cb(true)
         return
     end
-    _temp_seq = _temp_seq + 1
-    local staging = string.format("%s.moon-upload-%d-%d.part", target, os.time(), _temp_seq)
+    Remote._temp_seq = Remote._temp_seq + 1
+    local staging = string.format("%s.moon-upload-%d-%d.part", target, os.time(), Remote._temp_seq)
     runFilesystem("remote-upload-copy", function()
         return copyFile(temp, staging)
     end, function(copy_ok, copy_err)
@@ -710,18 +711,15 @@ end
 -- ── 共享剪贴板 ────────────────────────────────────────
 --
 -- 设备侧一切「复制」都汇到 Device.input.setClipboardText（阅读划线复制、
--- 链接复制、输入框长按复制、翻译复制……），在这里包一层镜像到 _clip，
+-- 链接复制、输入框长按复制、翻译复制……），在这里包一层镜像到 Remote._clip，
 -- GET /api/clipboard 读的就是它；setClipboard 写回并同步进激活输入框。
 -- 直接读 Device.input.getClipboardText 会穿透到平台层（SDL/Android 系统
 -- 剪贴板），拿不到内部复制历史，所以必须自己镜像。
 
-local _clip = "" ---@type string 设备最后复制的文本镜像
-local _clip_hooked = false
-
---- 包一层 Device.input.setClipboardText，把设备侧每次复制镜像到 _clip（只装一次）。
+--- 包一层 Device.input.setClipboardText，把设备侧每次复制镜像到 Remote._clip（只装一次）。
 --- 无剪贴板能力的设备直接跳过。
 local function hookClipboard()
-    if _clip_hooked then
+    if Remote._clip_hooked then
         return
     end
     local Device = require("device")
@@ -730,21 +728,21 @@ local function hookClipboard()
     end
     local orig = Device.input.setClipboardText
     Device.input.setClipboardText = function(text)
-        _clip = text or ""
+        Remote._clip = text or ""
         return orig(text)
     end
-    _clip_hooked = true
+    Remote._clip_hooked = true
 end
 
 ---@return { text: string }
 local function getClipboard()
-    return { text = _clip }
+    return { text = Remote._clip }
 end
 
 --- 网页 → 设备：写设备剪贴板 + 同步进激活输入框（无激活框只写剪贴板）。
 ---@param text string
 local function setClipboard(text)
-    _clip = text or ""
+    Remote._clip = text or ""
     local ok, Device = pcall(require, "device")
     if ok and Device:hasClipboard() and Device.input then
         pcall(Device.input.setClipboardText, text)
@@ -788,19 +786,19 @@ end
 local function tempPath(_name)
     local Paths = require("utils.paths")
     Paths.ensureCacheRoot()
-    _temp_seq = _temp_seq + 1
+    Remote._temp_seq = Remote._temp_seq + 1
     return string.format(
         "%s/upload-%d-%d.part",
         Paths.cacheDir(),
         os.time(),
-        _temp_seq
+        Remote._temp_seq
     )
 end
 
 -- ── 启停 ─────────────────────────────────────────────
 
 --- Kindle 防火墙打孔（照 httpinspector 语义：start 打、stop 堵）。
---- 端口必须用打孔时记下的 _punched_port：运行中改了端口的话，读当前配置
+--- 端口必须用打孔时记下的 Remote._punched_port：运行中改了端口的话，读当前配置
 --- 会拆错规则，把旧端口的 ACCEPT 永久留在 iptables 里。
 ---@param add boolean
 local function kindleHole(add)
@@ -811,9 +809,9 @@ local function kindleHole(add)
     local verb = add and "-A" or "-D"
     local port = Remote.port()
     if not add then
-        port = _punched_port or port
+        port = Remote._punched_port or port
     end
-    _punched_port = add and port or nil
+    Remote._punched_port = add and port or nil
     os.execute(string.format(
         "iptables %s INPUT -p tcp --dport %d -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT",
         verb, port))
@@ -828,14 +826,14 @@ function Remote.start()
     if Remote.isRunning() then
         return true
     end
-    _layout = storageLayout()
+    Remote._layout = storageLayout()
     local server = require("remote.server").new {
         host = "*",
         port = Remote.port(),
-        root = _layout.root,
-        roots = _layout.roots,
-        home = _layout.home,
-        shortcuts = _layout.shortcuts,
+        root = Remote._layout.root,
+        roots = Remote._layout.roots,
+        home = Remote._layout.home,
+        shortcuts = Remote._layout.shortcuts,
         handlers = {
             list_dir = listDirAsync,
             is_dir = isDir,
@@ -865,7 +863,7 @@ function Remote.start()
     end
     hookClipboard()
     kindleHole(true)
-    _server = server
+    Remote._server = server
     require("ui/uimanager"):insertZMQ(server)
     logger.info("book remote started on port", Remote.port())
     return true
@@ -876,9 +874,9 @@ function Remote.stop()
     if not Remote.isRunning() then
         return
     end
-    require("ui/uimanager"):removeZMQ(_server)
-    _server:stop()
-    _server = nil
+    require("ui/uimanager"):removeZMQ(Remote._server)
+    Remote._server:stop()
+    Remote._server = nil
     stopFilesystemJobs()
     kindleHole(false)
     logger.info("book remote stopped")
@@ -900,14 +898,14 @@ end
 
 --- 休眠：记下当前是否在跑再停服（睡眠中留着监听既没用又费电）。
 function Remote.onSuspend()
-    _resume = Remote.isRunning()
+    Remote._resume = Remote.isRunning()
     Remote.stop()
 end
 
 --- 唤醒：休眠前在跑、或开了自启，就重新起服。
 function Remote.onResume()
-    if _resume or Remote.autostartOn() then
-        _resume = false
+    if Remote._resume or Remote.autostartOn() then
+        Remote._resume = false
         local ok, err = Remote.start()
         if not ok then
             logger.warn("book remote resume failed:", err)
@@ -950,9 +948,9 @@ end
 function Remote.shareUrl(path)
     -- 截图目录可在服务运行期间被用户修改；分享时以当前配置重建范围，
     -- 否则新目录会被旧 roots 快照误判为越界。
-    _layout = storageLayout()
-    if _server then
-        _server:updateLayout(_layout)
+    Remote._layout = storageLayout()
+    if Remote._server then
+        Remote._server:updateLayout(Remote._layout)
     end
     local real = existingPath(path)
     if not real or require("libs/libkoreader-lfs").attributes(real, "mode") ~= "file" then

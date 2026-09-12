@@ -4,33 +4,32 @@
 @module koplugin.book.ime.candidate_bar
 --]]
 
-local Bar = {}
-
 local Strip = require("ime.strip")
 local Registry = require("ime.registry")
 local util = require("util")
-local SimpleJob = require("workers/simple_job")
+local Job = require("workers.job")
 
 local ZH_MODULE = "ui/data/keyboardlayouts/zh_CN_keyboard"
 local SLOT_COUNT = Strip.SLOT_COUNT
 
-local _enabled
-local _hooked = false
-
-local _want = false
-local _active = false
-local _keyboard
-local _strip
-local _profile
-local lookup = {
-    code = "",
-    tokens = {},
-    preedit = {},
-    pages = {},
-    page = 1,
-    debounce = nil,
-    job = nil,
-    generation = 0,
+local Bar = {
+    _enabled = nil,
+    _hooked = false,
+    _want = false,
+    _active = false,
+    _keyboard = nil,
+    _strip = nil,
+    _profile = nil,
+    lookup = {
+        code = "",
+        tokens = {},
+        preedit = {},
+        pages = {},
+        page = 1,
+        debounce = nil,
+        job = nil,
+        generation = 0,
+    },
 }
 
 -- ── 基础工具 ─────────────────────────────────────────
@@ -212,11 +211,11 @@ end
 --- 刷新类型必须留灰阶（ui）：fast 在 Kindle 上是 DU 波形（2 级灰），
 --- 会把键缝透出的浅灰分割线量化成白，打字后候选行就没线了。
 local function redraw()
-    if not _keyboard then
+    if not Bar._keyboard then
         return
     end
-    require("ui/uimanager"):setDirty(_keyboard, function()
-        return "ui", _keyboard.dimen
+    require("ui/uimanager"):setDirty(Bar._keyboard, function()
+        return "ui", Bar._keyboard.dimen
     end)
 end
 
@@ -224,19 +223,19 @@ end
 
 --- 结束本次拼写：取消在途查询，清空输入码与候选分页。
 local function clearCode()
-    lookup.generation = lookup.generation + 1
-    if lookup.debounce then
-        lookup.debounce:cancel()
+    Bar.lookup.generation = Bar.lookup.generation + 1
+    if Bar.lookup.debounce then
+        Bar.lookup.debounce:cancel()
     end
-    if lookup.job then
-        lookup.job:cancel()
+    if Bar.lookup.job then
+        Bar.lookup.job:cancel()
     end
-    lookup.job = nil
-    lookup.code = ""
-    lookup.tokens = {}
-    lookup.preedit = {}
-    lookup.pages = {}
-    lookup.page = 1
+    Bar.lookup.job = nil
+    Bar.lookup.code = ""
+    Bar.lookup.tokens = {}
+    Bar.lookup.preedit = {}
+    Bar.lookup.pages = {}
+    Bar.lookup.page = 1
 end
 
 --- 按候选槽数把词表切成分页（保持词频序）。
@@ -265,9 +264,9 @@ local function codeAtCursor(inputbox)
     if not pos then
         return false
     end
-    for i = #lookup.preedit, 1, -1 do
+    for i = #Bar.lookup.preedit, 1, -1 do
         pos = pos - 1
-        if inputbox.charlist[pos] ~= lookup.preedit[i] then
+        if inputbox.charlist[pos] ~= Bar.lookup.preedit[i] then
             return false
         end
     end
@@ -278,15 +277,15 @@ end
 ---@param word string
 ---@return boolean 无输入码、光标已离开输入码或替换失败时 false
 local function commit(word)
-    local inputbox = _keyboard and _keyboard.inputbox
-    if not inputbox or lookup.code == "" then
+    local inputbox = Bar._keyboard and Bar._keyboard.inputbox
+    if not inputbox or Bar.lookup.code == "" then
         return false
     end
     if not codeAtCursor(inputbox) then
         clearCode()
         return false
     end
-    if not rawReplaceBeforeCursor(inputbox, #lookup.preedit, word) then
+    if not rawReplaceBeforeCursor(inputbox, #Bar.lookup.preedit, word) then
         return false
     end
     clearCode()
@@ -296,19 +295,19 @@ end
 --- 页码收口后把当前页词表交给候选条重建 cells（布局规则全在 strip.lua）。
 --- 同时挂上翻页与选词回调；未装候选条时无操作。
 local function refresh()
-    local strip = _strip
+    local strip = Bar._strip
     if not strip then
         return
     end
-    local pages = math.max(1, #lookup.pages)
-    if lookup.page > pages then
-        lookup.page = pages
+    local pages = math.max(1, #Bar.lookup.pages)
+    if Bar.lookup.page > pages then
+        Bar.lookup.page = pages
     end
-    strip:setCells(lookup.pages[lookup.page] or {}, {
-        page = lookup.page,
+    strip:setCells(Bar.lookup.pages[Bar.lookup.page] or {}, {
+        page = Bar.lookup.page,
         pages = pages,
         on_page = function(delta)
-            lookup.page = lookup.page + delta
+            Bar.lookup.page = Bar.lookup.page + delta
             refresh()
             redraw()
         end,
@@ -327,7 +326,7 @@ end
 ---@param kb table VirtualKeyboard 实例
 ---@return boolean 是否装上候选条
 local function installStrip(kb)
-    _strip = nil
+    Bar._strip = nil
     if not (kb.KEYS and kb.KEYS[1] and kb.KEYS[1]._ime_bar) then
         return false
     end
@@ -352,7 +351,7 @@ local function installStrip(kb)
     }
     vg[1] = strip -- 顶掉的首行是 addKeys 刚建的（空标签，无 xtext），丢弃无泄漏
     kb.layout[1] = { strip } -- FocusManager 方向键导航按 layout 遍历：整行一个部件
-    _strip = strip
+    Bar._strip = strip
     return true
 end
 
@@ -365,36 +364,38 @@ local LOOKUP_WAIT = 0.15
 
 --- 查库结果回来之前先只显示输入码本身，避免候选行空一拍。
 local function showCodeOnly()
-    if lookup.code == "" then
-        lookup.pages = {}
+    if Bar.lookup.code == "" then
+        Bar.lookup.pages = {}
     else
-        lookup.pages = makePages({ table.concat(lookup.preedit) })
+        Bar.lookup.pages = makePages({ table.concat(Bar.lookup.preedit) })
     end
-    lookup.page = 1
+    Bar.lookup.page = 1
 end
 
 --- 实际查词并刷新候选行（debounce 到期后执行）。
 ---@param keyboard table 发起查询的 VirtualKeyboard 实例
 ---@param code string 输入码（小写字母串）
 local function startLookup(keyboard, code)
-    if keyboard ~= _keyboard or code == "" or code ~= lookup.code then
+    if keyboard ~= Bar._keyboard or code == "" or code ~= Bar.lookup.code then
         return
     end
-    local generation = lookup.generation
-    local profile = _profile
-    lookup.job = SimpleJob.run(function()
+    local generation = Bar.lookup.generation
+    local profile = Bar._profile
+    Bar.lookup.job = Job.run(function()
         return Registry.lookup(profile, code)
     end, {
+        name = "ime.lookup",
+        kind = "instant",
         on_done = function(words)
-            if generation ~= lookup.generation or profile ~= _profile
-                    or keyboard ~= _keyboard or code ~= lookup.code then
+            if generation ~= Bar.lookup.generation or profile ~= Bar._profile
+                    or keyboard ~= Bar._keyboard or code ~= Bar.lookup.code then
                 return
             end
             if type(words) ~= "table" or #words == 0 then
                 words = { code }
             end
-            lookup.pages = makePages(words)
-            lookup.page = 1
+            Bar.lookup.pages = makePages(words)
+            Bar.lookup.page = 1
             refresh()
             redraw()
         end,
@@ -405,16 +406,16 @@ end
 ---@param keyboard table 发起查询的 VirtualKeyboard 实例
 ---@param code string 输入码
 local function requestLookup(keyboard, code)
-    if lookup.job then
-        lookup.job:cancel()
-        lookup.job = nil
+    if Bar.lookup.job then
+        Bar.lookup.job:cancel()
+        Bar.lookup.job = nil
     end
-    if not lookup.debounce then
-        lookup.debounce = require("utils.timing").debounce(startLookup, LOOKUP_WAIT)
+    if not Bar.lookup.debounce then
+        Bar.lookup.debounce = require("utils.timing").debounce(startLookup, LOOKUP_WAIT)
     end
     -- The debounce handle is shared, so keep the owner in its arguments. A
     -- callback from an old keyboard must never repaint the current one.
-    lookup.debounce(keyboard, code)
+    Bar.lookup.debounce(keyboard, code)
 end
 
 --- 关掉该键盘实例所有按键的闪烁：原生闪烁会在字符回调前强制提交一次墨水刷新，
@@ -433,12 +434,12 @@ end
 ---@param ... any 透传给原方法
 local function wrappedAddKeys(self, ...)
     orig_addKeys(self, ...)
-    if _want then
+    if Bar._want then
         -- 只改这个键盘实例；插件关闭或词库不可用时仍服从 KOReader 设置。
         disableKeyFlash(self)
     end
-    _keyboard = self
-    _active = _want and installStrip(self)
+    Bar._keyboard = self
+    Bar._active = Bar._want and installStrip(self)
     refresh()
 end
 
@@ -448,11 +449,11 @@ end
 --- number 输入框从符号层起步、不打字，候选行直接不装。
 ---@param ... any 透传给原方法
 local function wrappedInit(self, ...)
-    _profile = Registry.current()
-    _want = not not (_enabled() and Registry.isAvailable(_profile)
+    Bar._profile = Registry.current()
+    Bar._want = not not (Bar._enabled() and Registry.isAvailable(Bar._profile)
         and not (self.inputbox and self.inputbox.input_type == "number"))
-    applyKeyboardLabels(_want and _profile or nil)
-    syncRow(_want, _profile.id == "zhuyin" and 11 or 10)
+    applyKeyboardLabels(Bar._want and Bar._profile or nil)
+    syncRow(Bar._want, Bar._profile.id == "zhuyin" and 11 or 10)
     clearCode()
     orig_init(self, ...)
 end
@@ -463,29 +464,29 @@ end
 --- 上游偶发非字符串键（如空键位）会被吞掉：透传给原生会 addChars(nil) 直接崩。
 ---@param key string 按键字符
 local function wrappedAddChar(self, key)
-    _keyboard = self
+    Bar._keyboard = self
     if type(key) ~= "string" then
         return
     end
-    if not _active then
+    if not Bar._active then
         return orig_addChar(self, key)
     end
-    if lookup.code ~= "" and not codeAtCursor(self.inputbox) then
+    if Bar.lookup.code ~= "" and not codeAtCursor(self.inputbox) then
         clearCode()
     end
-    local token, display = _profile.mapKey(key)
+    local token, display = Bar._profile.mapKey(key)
     if token then
-        lookup.tokens[#lookup.tokens + 1] = token
-        lookup.preedit[#lookup.preedit + 1] = display
-        lookup.code = table.concat(lookup.tokens)
+        Bar.lookup.tokens[#Bar.lookup.tokens + 1] = token
+        Bar.lookup.preedit[#Bar.lookup.preedit + 1] = display
+        Bar.lookup.code = table.concat(Bar.lookup.tokens)
         rawAddChars(self.inputbox, display)
         showCodeOnly()
         refresh()
-        requestLookup(self, lookup.code)
+        requestLookup(self, Bar.lookup.code)
         return
     end
-    if _profile.commit_space and key == " " and lookup.code ~= "" then
-        local first = lookup.pages[1] and lookup.pages[1][1]
+    if Bar._profile.commit_space and key == " " and Bar.lookup.code ~= "" then
+        local first = Bar.lookup.pages[1] and Bar.lookup.pages[1][1]
         if first and commit(first) then
             refresh()
             redraw()
@@ -495,7 +496,7 @@ local function wrappedAddChar(self, key)
         redraw()
         return orig_addChar(self, key)
     end
-    if lookup.code ~= "" then
+    if Bar.lookup.code ~= "" then
         clearCode()
         refresh()
         redraw()
@@ -506,21 +507,21 @@ end
 --- VirtualKeyboard:delChar 包装：拼写中逐字母回退输入码并重查，
 --- 光标已离开输入码则先结束拼写再走原路。
 local function wrappedDelChar(self)
-    _keyboard = self
-    if _active and lookup.code ~= "" then
+    Bar._keyboard = self
+    if Bar._active and Bar.lookup.code ~= "" then
         if not codeAtCursor(self.inputbox) then
             clearCode()
             refresh()
             redraw()
             return orig_delChar(self)
         end
-        table.remove(lookup.tokens)
-        table.remove(lookup.preedit)
-        lookup.code = table.concat(lookup.tokens)
+        table.remove(Bar.lookup.tokens)
+        table.remove(Bar.lookup.preedit)
+        Bar.lookup.code = table.concat(Bar.lookup.tokens)
         rawDelChar(self.inputbox)
         showCodeOnly()
         refresh()
-        requestLookup(self, lookup.code)
+        requestLookup(self, Bar.lookup.code)
         return
     end
     return orig_delChar(self)
@@ -529,7 +530,7 @@ end
 --- 键盘关闭时取消尚未触发或尚未完成的查询；保留当前 Strip 引用，
 --- 因为 KOReader 隐藏后可能复用同一个键盘实例。
 local function wrappedOnCloseWidget(self, ...)
-    if self == _keyboard then
+    if self == Bar._keyboard then
         clearCode()
         refresh()
     end
@@ -539,8 +540,8 @@ end
 --- 安装 VirtualKeyboard 钩子；重复安装不重复包装方法。
 ---@param opts { enabled: fun(): boolean }
 function Bar.install(opts)
-    _enabled = opts.enabled
-    if _hooked then
+    Bar._enabled = opts.enabled
+    if Bar._hooked then
         return
     end
     local VK = require("ui/widget/virtualkeyboard")
@@ -554,7 +555,7 @@ function Bar.install(opts)
     VK.addChar = wrappedAddChar
     VK.delChar = wrappedDelChar
     if orig_onCloseWidget then VK.onCloseWidget = wrappedOnCloseWidget end
-    _hooked = true
+    Bar._hooked = true
 end
 
 return Bar

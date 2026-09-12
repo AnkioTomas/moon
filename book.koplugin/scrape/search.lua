@@ -52,14 +52,12 @@ function Search.searchAsync(query, cb)
         end
     end)
 
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if current_job then
                 current_job.cancel()
             end
-        end,
-    }
+        end }
 end
 
 return Search

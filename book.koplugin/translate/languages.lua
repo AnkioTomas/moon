@@ -127,7 +127,7 @@ end
 ---@return nil
 function Languages.openSettingsPicker(translator, desktop)
     local items = Languages.settingsItems(translator)
-    require("ui.components.popup").multi{
+    require("ui.views.popup").multi{
         title = _("常用翻译语言"),
         subtitle = _("划词翻译时优先显示这些语言"),
         items = items,
@@ -139,8 +139,8 @@ function Languages.openSettingsPicker(translator, desktop)
                 end
             end
             Languages.saveFavorites(codes)
-            if desktop and desktop.rebuild then
-                desktop:rebuild()
+            if desktop and desktop.updateView then
+                desktop:updateView()
             end
         end,
     }

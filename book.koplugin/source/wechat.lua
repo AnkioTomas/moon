@@ -135,12 +135,10 @@ function Source:deleteBookAsync(identity, cb)
             cb(true)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then job.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 清空封面 URL、阅读上下文与目录缓存。
@@ -263,14 +261,12 @@ function Source:addStoreBookAsync(book, cb)
             cb(true, nil, book and book.title)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then
                 job:cancel()
             end
-        end,
-    }
+        end }
 end
 
 --- 拉取书籍详情并缓存封面 URL；映射不出书籍时按「详情为空」失败。
@@ -442,12 +438,10 @@ function Source:cacheAllChaptersAsync(identity, on_progress, cb)
             end
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 拉取云端进度并补齐本地需要的坐标。
@@ -504,13 +498,11 @@ function Source:getProgressAsync(identity, cb)
             finish()
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if first then first.cancel() end
             if second then second.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 上报阅读进度：需要 chapter_uid，优先复用 pos.extra 缓存的坐标，否则回查目录解析。
@@ -570,14 +562,12 @@ function Source:putProgressAsync(identity, pos, cb)
             startPush(uid)
         end)
     end
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if resolve_job and resolve_job.cancel then resolve_job.cancel() end
             if ensure_job and ensure_job.cancel then ensure_job.cancel() end
             if push_job and push_job.cancel then push_job.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 补报阅读时长：对每章现拉 psvts 后发 web/book/read。
@@ -733,12 +723,10 @@ function Source:pushStatsAsync(rows, cb)
     end
 
     nextItem()
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then job:cancel() end
-        end,
-    }
+        end }
 end
 
 --- 拉取累计总量，再按年定位月份、按月拉取真实日明细。
@@ -803,14 +791,12 @@ function Source:pullStatsAsync(cb)
             end)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             for _, slot in ipairs(jobs) do
                 if slot.job and slot.job.cancel then slot.job:cancel() end
             end
-        end,
-    }
+        end }
 end
 
 --- 拉取某本书的划线与想法，合并成 KOReader 注解数组。
@@ -848,12 +834,10 @@ function Source:pullNotesAsync(identity, cb)
             cb(annotations, nil, { authoritative = authoritative })
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then job.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 开章后把通用注解转为 KOReader 可读坐标。
@@ -1298,13 +1282,11 @@ function Source:pushNotesAsync(identity, annotations, cb)
             preflight(chapter_uid)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if resolve_job and resolve_job.cancel then resolve_job.cancel() end
             if current_job and current_job.cancel then current_job:cancel() end
-        end,
-    }
+        end }
 end
 
 return WeChat

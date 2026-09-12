@@ -14,6 +14,7 @@ local TextBoxWidget = require("ui/widget/textboxwidget")
 local Paths = require("utils.paths")
 local Layout = require("lockscreen.layout")
 
+local Canvas = require("ui.render")
 local M = {}
 
 --- 按实际渲染参数测量文本高度，供样式计算动态布局。
@@ -120,58 +121,6 @@ local function paintRect(bb, x, y, width, height, color, radius)
     end
 end
 
---- 将 widget 绘制到画布；越过任一画布边缘时裁剪，避免 blit 越界。
----@param bb userdata
----@param block table
----@param canvas_w number
----@param canvas_h number
-local function paintWidget(bb, block, canvas_w, canvas_h)
-    local widget = block.widget
-    if not widget or type(widget.paintTo) ~= "function" then
-        error("invalid lockscreen widget block")
-    end
-    local x = math.floor(block.x or 0)
-    local y = math.floor(block.y or 0)
-    if x >= canvas_w or y >= canvas_h then
-        return
-    end
-    local size = widget.getSize and widget:getSize()
-    if not size then
-        local ok, err = pcall(widget.paintTo, widget, bb, math.max(0, x), math.max(0, y))
-        if not ok then
-            error(err)
-        end
-        return
-    end
-    local ww, wh = size.w, size.h
-    local src_x = math.max(0, -x)
-    local src_y = math.max(0, -y)
-    local dst_x = math.max(0, x)
-    local dst_y = math.max(0, y)
-    local visible_w = math.min(ww - src_x, canvas_w - dst_x)
-    local visible_h = math.min(wh - src_y, canvas_h - dst_y)
-    if visible_w <= 0 or visible_h <= 0 then
-        return
-    end
-    if src_x == 0 and src_y == 0 and visible_w == ww and visible_h == wh then
-        local ok, err = pcall(widget.paintTo, widget, bb, x, y)
-        if not ok then
-            error(err)
-        end
-        return
-    end
-    local tmp = Blitbuffer.new(ww, wh, Blitbuffer.TYPE_BBRGB32)
-    tmp:fill(Blitbuffer.COLOR_WHITE)
-    local ok, err = pcall(function()
-        widget:paintTo(tmp, 0, 0)
-        bb:blitFrom(tmp, dst_x, dst_y, src_x, src_y, visible_w, visible_h)
-    end)
-    tmp:free()
-    if not ok then
-        error(err)
-    end
-end
-
 --- 分发非文本图形块：线、柱、卡片、票根缺口、点和离屏 widget。
 --- 封面 / 进度条不再走 DSL；主体通过 kind=widget 复用 ui.components。
 ---@param bb userdata 目标 Blitbuffer
@@ -271,7 +220,7 @@ local function paintShape(bb, block, w, h, background)
         image:free()
         if not ok then error(err) end
     elseif block.kind == "widget" then
-        paintWidget(bb, block, w, h)
+        Canvas.paintWidget(bb, block, w, h)
     end
 end
 
@@ -297,14 +246,10 @@ end
 function M.write(path, background, blocks)
     Paths.ensureScreensaverDir()
     local w, h = Layout.portraitSize()
-    -- 保留背景和 widget 的原始颜色；黑白设备会在最终显示时自行转灰。
-    local bb = Blitbuffer.new(w, h, Blitbuffer.TYPE_BBRGB32)
     local background_copy
-    local ok, err = pcall(function()
+    local ok, err = Canvas.write(path, w, h, function(bb)
         local bg_ok, bg_err = paintBackground(bb, background, w, h)
-        if not bg_ok then
-            error(bg_err)
-        end
+        if not bg_ok then error(bg_err) end
         for _, block in ipairs(blocks) do
             if block.kind == "cutout_circle" then
                 background_copy = bb:copy()
@@ -315,19 +260,12 @@ function M.write(path, background, blocks)
             if block.kind then
                 paintShape(bb, block, w, h, background_copy)
             else
-                paintText(bb, block, w)
+                paintText(bb, block, w, h)
             end
-        end
-        local tmp = path .. ".part"
-        bb:writePNG(tmp)
-        if not os.rename(tmp, path) then
-            os.remove(tmp)
-            error("rename failed")
         end
     end)
     freeWidgets(blocks)
     if background_copy then background_copy:free() end
-    bb:free()
     return ok, err
 end
 

@@ -10,10 +10,10 @@ local logger = require("utils.log")
 local Store = require("book.store")
 local _ = require("gettext")
 
-local Open = {}
-
-local pending_job
-local open_generation = 0
+local Open = {
+    pending_job = nil,
+    generation = 0,
+}
 
 --- 关闭仍属于本次打开动作的书架桌面与详情页。
 ---@param plugin table
@@ -30,10 +30,10 @@ end
 
 --- 取消上一次尚未交给 ReaderReady 的打开动作。
 local function cancelPending()
-    open_generation = open_generation + 1
-    local job = pending_job
-    pending_job = nil
-    if job and job.cancel then job.cancel() end
+    Open.generation = Open.generation + 1
+    local job = Open.pending_job
+    Open.pending_job = nil
+    if job and job.cancel then job:cancel() end
 end
 
 --- 下一拍打开阅读器；用户已切到其他文档时丢弃本次交接。
@@ -43,7 +43,7 @@ end
 local function showReader(plugin, path, generation)
     local ReaderUI = require("apps/reader/readerui")
     UIManager:nextTick(function()
-        if generation ~= open_generation then return end
+        if generation ~= Open.generation then return end
         local ui = ReaderUI.instance
         if ui and ui.document and ui.document.file ~= path then
             logger.dbg("book.open showReader skip: user reading other doc")
@@ -81,7 +81,7 @@ function Open.book(plugin, book)
     end
 
     cancelPending()
-    local generation = open_generation
+    local generation = Open.generation
     Store.rememberMany({ book })
     local identity = {
         source_id = book.source_id,
@@ -89,9 +89,9 @@ function Open.book(plugin, book)
         source = source,
         book = book,
     }
-    pending_job = source:openBookAsync(identity, nil, function(path, open_err)
-        if generation ~= open_generation then return end
-        pending_job = nil
+    Open.pending_job = source:openBookAsync(identity, nil, function(path, open_err)
+        if generation ~= Open.generation then return end
+        Open.pending_job = nil
         if not path then
             UIManager:show(InfoMessage:new{ text = open_err or _("无法打开书籍") })
             return
