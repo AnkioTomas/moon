@@ -18,6 +18,9 @@ local UI = require("ui.components.bookui")
 
 local Surface = {}
 
+---@class BookRoundedClip : WidgetContainer
+---@field radius number
+---@field background any
 local RoundedClip = WidgetContainer:extend{}
 
 --- 尺寸由构造时传入的 dimen 决定，不随子件变化。
@@ -31,6 +34,7 @@ end
 ---@param bb table 目标 Blitbuffer
 ---@param x number 左上角横坐标
 ---@param y number 左上角纵坐标
+---@return nil
 function RoundedClip:paintTo(bb, x, y)
     self[1]:paintTo(bb, x, y)
     local w, h, r = self.dimen.w, self.dimen.h, self.radius
@@ -112,8 +116,7 @@ local function frame(child, opts)
 end
 
 --- 浅背景卡片；默认带轻阴影。
----@param child table
----@param opts table|nil
+---@param opts table child/options/kind
 ---@return table
 function Surface.card(child, opts)
     opts = opts or {}
@@ -139,22 +142,23 @@ function Surface.card(child, opts)
     }
 end
 
---- 胶囊按钮；圆角固定为实际高度的一半。
----@param child table
----@param opts table|nil
----@return table
 function Surface.pill(child, opts)
     opts = opts or {}
     local size = child:getSize()
-    local height = opts.height or (opts.dimen and opts.dimen.h)
-        or size.h + verticalPadding(opts)
+    local height = opts.height or (opts.dimen and opts.dimen.h) or size.h + verticalPadding(opts)
     local pill_opts = {}
-    for key, value in pairs(opts) do
-        pill_opts[key] = value
-    end
+    for key, value in pairs(opts) do pill_opts[key] = value end
     pill_opts.radius = UI.pillRadius(height)
     pill_opts.shadow = opts.shadow == true
     return Surface.card(child, pill_opts)
+end
+
+-- Compatibility adapter for the table-shaped call sites; this module remains stateless.
+function Surface.build(args)
+    assert(args and args.child, "surface child required")
+    local opts = args.options or {}
+    if args.kind == "pill" then return Surface.pill(args.child, opts) end
+    return Surface.card(args.child, opts)
 end
 
 return Surface
