@@ -95,7 +95,7 @@ function Results:init()
             Close = { { Device.input.group.Back } },
         }
     end
-    self:rebuild()
+    self:updateView()
 end
 
 --- 返回结果页尺寸。
@@ -134,7 +134,7 @@ function Results:pick(result)
 end
 
 --- 重建标题栏、当前页卡片与分页带。
-function Results:rebuild()
+function Results:updateView()
     local w, h = Screen:getWidth(), Screen:getHeight()
     local pad = UI.pagePad()
     local content_w = w - pad * 2
@@ -173,7 +173,7 @@ function Results:rebuild()
     ---@param n number
     local function turn(n)
         self.page = n
-        self:rebuild()
+        self:updateView()
         UIManager:setDirty(self, "full")
     end
 

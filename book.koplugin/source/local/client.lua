@@ -307,7 +307,7 @@ end
 ---   子进程只做文件系统 / 渲染引擎重活（遍历、md5、解析元数据、落封面），**不碰 sqlite**——
 ---   db.base 禁止子进程访问库（fork 会继承父进程的连接句柄）。
 ---   主进程在 fork 前查好「已入库且标题非空」的行交给子进程判断是否要解析，
----   子进程把每个扫描产物经 ctx.post 逐条回传（避开单帧 4MB 上限），主进程收齐后落库。
+---   子进程返回扫描产物列表，主进程收齐后落库。
 
 --- 主进程：本地源已入库且标题非空的行，按 stable_id（即路径）索引。
 ---@return table<string, Book>
@@ -397,18 +397,17 @@ end
 ---@return { cancel: fun() }
 local function scanJob(root, on_done)
     local known = knownBooks()
-    local files = {}
-    local job = Job.run(function(ctx)
-        for _, f in ipairs(scanFiles(root)) do
-            ctx.post(parseFile(f, known))
+    local job = Job.run(function()
+        local files = scanFiles(root)
+        for i = 1, #files do
+            files[i] = parseFile(files[i], known)
         end
+        return files
     end, {
         name = "local.scan",
-        on_progress = function(f)
-            files[#files + 1] = f
-        end,
-        on_done = function()
-            if commitFiles(files, known, true) then
+        kind = "medium",
+        on_done = function(files)
+            if commitFiles(files or {}, known, true) then
                 on_done()
             else
                 require("utils.log").warn("book local scan commit failed")
@@ -420,11 +419,9 @@ local function scanJob(root, on_done)
             on_done()
         end,
     })
-    return {
-        cancel = function()
+    return { cancel = function()
             job:abort()
-        end,
-    }
+        end }
 end
 
 --- 直查 books 表（图书馆分页/分类/系列/搜索）。
@@ -681,6 +678,7 @@ function Client:indexOneAsync(path, cb)
         return parseFile({ name = name, path = path }, known)
     end, {
         name = "local.index",
+        kind = "light",
         on_done = function(f)
             if commitFiles({ f }, known) then
                 cb(true)
@@ -693,11 +691,9 @@ function Client:indexOneAsync(path, cb)
             cb(nil, err)
         end,
     })
-    return {
-        cancel = function()
+    return { cancel = function()
             job:abort()
-        end,
-    }
+        end }
 end
 
 --- 强制扫盘写库（不查询）。供 syncBooksAsync(force) 使用。

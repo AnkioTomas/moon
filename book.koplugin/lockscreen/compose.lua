@@ -130,13 +130,22 @@ function M.build(plan, cb)
     local finished = false
     local asset_job
     local text_job
-    local job = {
-        cancel = function()
-            cancelled = true
-            if asset_job and asset_job.cancel then asset_job.cancel() end
-            if text_job and text_job.cancel then text_job.cancel() end
-        end,
-    }
+    local image_job
+    local blocks
+
+    local function freeBlocks()
+        for _, block in ipairs(blocks or {}) do
+            if block.widget and block.widget.free then block.widget:free() end
+        end
+        blocks = nil
+    end
+    local job = { cancel = function()
+        cancelled = true
+        if asset_job and asset_job.cancel then asset_job:cancel() end
+        if text_job and text_job.cancel then text_job:cancel() end
+        if image_job then image_job:cancel() end
+        freeBlocks()
+    end }
 
     --- 回调一次即封口：已取消或已回调过都不再触发 cb。
     ---@param ok boolean
@@ -165,14 +174,22 @@ function M.build(plan, cb)
             return
         end
         if not text_ready then return end
-        Paths.ensureScreensaverDir()
-        local blocks = buildBlocks(component, plan.position, plan.wide, text_data)
-        local Render = require("lockscreen.render")
-        local ok, err = Render.write(COMPOSE_PATH, asset_path, blocks)
-        if not ok and asset_path and tostring(err):find("cannot decode background", 1, true) then
-            Background.invalidate(plan.asset)
+        blocks = buildBlocks(component, plan.position, plan.wide, text_data)
+        local widgets = {}
+        for _, block in ipairs(blocks) do
+            if block.widget then widgets[#widgets + 1] = block.widget end
         end
-        finish(ok, err, nil)
+        image_job = require("ui.components.image").await(widgets, function()
+            if cancelled or finished then return end
+            Paths.ensureScreensaverDir()
+            local Render = require("lockscreen.render")
+            local ok, err = Render.write(COMPOSE_PATH, asset_path, blocks)
+            blocks = nil -- Render.write 消费这些离屏 Widget。
+            if not ok and asset_path and tostring(err):find("cannot decode background", 1, true) then
+                Background.invalidate(plan.asset)
+            end
+            finish(ok, err, nil)
+        end)
     end
 
     --- 背景资源就绪后，直接检查是否已具备生成条件。

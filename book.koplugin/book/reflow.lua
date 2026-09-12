@@ -245,7 +245,7 @@ function Reflow.startFromReader(ui, identity)
     local kind = fileKind(path)
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
-    local Popup = require("ui.components.popup")
+    local Popup = require("ui.views.popup")
     local holder = { analyze_job = nil, apply_job = nil, dialog = nil }
 
     --- 关掉当前进度提示框（幂等，没有框时什么都不做）。

@@ -25,7 +25,7 @@ local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Languages = require("translate.languages")
-local Popup = require("ui.components.popup")
+local Popup = require("ui.views.popup")
 local _ = require("gettext")
 local T = require("ffi/util").template
 

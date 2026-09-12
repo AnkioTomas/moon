@@ -6,7 +6,7 @@ X-Ray 阅读 UI：底部分栏主菜单、TextViewer 详情、划词补全。
 
 require("l10n").apply()
 
-local Popup = require("ui.components.popup")
+local Popup = require("ui.views.popup")
 local UIManager = require("ui/uimanager")
 local Text = require("utils.text")
 local Kinds = require("xray.kinds")

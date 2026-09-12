@@ -11,5 +11,19 @@
 ---@field name string|nil
 ---@field ui table|nil
 ---@field dimen table|nil
----@field extend fun(self: WidgetContainer, o: table|nil): WidgetContainer
----@field new fun(self: WidgetContainer, o: table|nil): WidgetContainer
+local WidgetContainer = {}
+
+---@generic T : WidgetContainer
+---@param o table|nil
+---@return T
+function WidgetContainer:extend(o) end
+
+---@generic T : WidgetContainer
+---@param o table|nil
+---@return T
+function WidgetContainer:new(o) end
+
+--- ui/widget/container/inputcontainer.lua
+---@class InputContainer : WidgetContainer
+---@field ges_events table|nil
+---@field covers_fullscreen boolean|nil

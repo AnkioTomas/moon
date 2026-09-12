@@ -191,11 +191,9 @@ local function defer(cb, ...)
             cb(unpack(args))
         end
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
-        end,
-    }
+        end }
 end
 
 --- 图书馆分页 / 搜索 / 筛选（直查 books 表）。
@@ -228,11 +226,9 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
         })
         cb(Catalog.toList(rows, count, source_id))
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
-        end,
-    }
+        end }
 end
 
 --- 分类 / 系列筛选项。
@@ -256,6 +252,29 @@ function Catalog.filtersAsync(source_id, cb)
             },
         })
     end)
+end
+
+--- 首页书架：第一本当前阅读，其余在读；source 无效时带错误文案。
+---@param source_id string|nil
+---@param limit number|nil
+---@return Book|nil
+---@return Book[]
+---@return string|nil
+function Catalog.recentShelf(source_id, limit)
+    if type(source_id) ~= "string" or source_id == "" then
+        return nil, {}, require("gettext")("当前数据源不可用")
+    end
+    local rows = Catalog.recentBooks(source_id, limit or 24)
+    local recent = rows[1]
+    local skip = recent and recent.stable_id
+    local reading = {}
+    for i = 1, #rows do
+        local book = rows[i]
+        if book.stable_id ~= skip then
+            reading[#reading + 1] = book
+        end
+    end
+    return recent, reading, nil
 end
 
 --- 最近阅读同步快照：进度决定准入、顺序和阅读位置，books 只补书库元数据。

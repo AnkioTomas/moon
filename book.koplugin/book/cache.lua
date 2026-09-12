@@ -234,11 +234,9 @@ local function purgeDirAsync(dir, done)
         end
     end
     UIManager:nextTick(step)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
-        end,
-    }
+        end }
 end
 
 --- Cooperative cache size scan. Never walk the cache tree during widget build.
@@ -298,11 +296,9 @@ function Cache.sizeBytesAsync(cb)
         end
     end
     UIManager:nextTick(step)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
-        end,
-    }
+        end }
 end
 
 --- 清空文件缓存及其路径登记，不动书籍元数据。
@@ -310,7 +306,6 @@ end
 ---@return { cancel: fun() }
 function Cache.clearAsync(cb)
     cb = cb or function() end
-    require("ui.components.image").abortPending()
     local dir = Paths.cacheDir()
     local cancelled = false
     local purge_job
@@ -336,14 +331,12 @@ function Cache.clearAsync(cb)
         logger.info("book cache cleared", dir)
         cb(true)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if purge_job then
                 purge_job:cancel()
             end
-        end,
-    }
+        end }
 end
 
 --- 清空单本书的可再生成缓存：工作目录、封面、路径登记、章节登记、目录缓存。
@@ -387,14 +380,12 @@ function Cache.clearBookAsync(source_id, stable_id, cb)
             finish(true)
         end)
     end
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if purge_job then
                 purge_job:cancel()
             end
-        end,
-    }
+        end }
 end
 
 return Cache

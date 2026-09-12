@@ -204,8 +204,7 @@ function Client:_jsonAsync(method, path, opts, cb)
         doRequest()
     end
 
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if cache_job then
                 cache_job.cancel()
@@ -213,8 +212,7 @@ function Client:_jsonAsync(method, path, opts, cb)
             if request_job then
                 request_job.cancel()
             end
-        end,
-    }
+        end }
 end
 
 --- 拉取书架列表（缓存 5 分钟）。

@@ -27,10 +27,10 @@ local Job = require("workers.job")
 -- 拼音保留旧 CDN 路径，避免已发布插件访问 main 时失效。
 local BASE_ROOT = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets"
 
-local M = {}
-
-local _job -- 当前在飞 job（Request job 或 Job）
-local _downloading = false
+local M = {
+    _job = nil, -- 当前在飞 job（Request job 或 Job）
+    _downloading = false,
+}
 
 -- 下载和拼接相互递归，先声明以保持主流程顺序。
 local downloadParts
@@ -38,7 +38,7 @@ local assembleInJob
 
 --- 是否有下载或拼接任务在运行。
 function M.downloading()
-    return _downloading
+    return M._downloading
 end
 
 --- 分片续传用的临时目录。
@@ -218,14 +218,14 @@ function M.ensure(method, cb, on_progress)
         cb(false, "unsupported input method")
         return
     end
-    if _downloading then
+    if M._downloading then
         cb(false, "already downloading")
         return
     end
     local dest = Paths.imeDictPath(method)
     local base_url = BASE_ROOT .. (method == "pinyin" and "/pinyin" or "/ime/" .. method)
     local started_at = Perf.now()
-    _downloading = true
+    M._downloading = true
     logger.dbg("book ime dict download start", method, dest)
     --- 转发进度给调用方（未传 on_progress 时静默丢弃）。
     ---@param ... any 阶段名及可选的进度数值
@@ -243,8 +243,8 @@ function M.ensure(method, cb, on_progress)
             return
         end
         done_called = true
-        _downloading = false
-        _job = nil
+        M._downloading = false
+        M._job = nil
         if ok then
             logger.dbg("book ime dict download done", method, Perf.elapsedMs(started_at), "ms")
         else
@@ -254,7 +254,7 @@ function M.ensure(method, cb, on_progress)
     end
 
     report("manifest")
-    _job = Request.get(base_url .. "/manifest.json", { timeout = 30 }, function(body, err)
+    M._job = Request.get(base_url .. "/manifest.json", { timeout = 30 }, function(body, err)
         if err then
             done(false, err)
             return
@@ -307,7 +307,7 @@ downloadParts = function(method, base_url, manifest, idx, dest, done, report, do
     end
     -- 网络响应尚未返回时也先通知当前分片，避免进度框长时间停在上一阶段。
     report("part", done_bytes, total, idx, #parts)
-    _job = Request.download({
+    M._job = Request.download({
         url = base_url .. "/" .. part.file,
         method = "GET",
         timeout = 300,
@@ -334,13 +334,14 @@ end
 assembleInJob = function(method, manifest, dest, done, report)
     report("assemble")
     local dir = tmpDir(method)
-    _job = Job.run(function()
+    M._job = Job.run(function()
         local err = assemble(manifest, dir, dest)
         if err then
             error(err)
         end
     end, {
         name = "ime." .. method .. ".assemble",
+        kind = "heavy",
         timeout = 300,
         on_done = function()
             cleanupTmp(method)
@@ -371,11 +372,11 @@ end
 
 --- 中止当前网络或拼接任务；保留已完成分片供下次继续。
 function M.cancel()
-    if _job then
-        if _job.cancel then _job:cancel() end
+    if M._job then
+        if M._job.cancel then M._job:cancel() end
     end
-    _job = nil
-    _downloading = false
+    M._job = nil
+    M._downloading = false
 end
 
 return M

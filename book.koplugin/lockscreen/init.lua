@@ -4,7 +4,7 @@
 @module koplugin.book.lockscreen
 --]]
 
-local SimpleJob = require("workers/simple_job")
+local Job = require("workers.job")
 local Compose = require("lockscreen.compose")
 local Settings = require("lockscreen.settings")
 local MoonSettings = require("utils.settings")
@@ -75,7 +75,10 @@ end
 
 --- 唤醒后补一次刷新（跨天或书籍变化时换图）。
 function M.onResume()
-   SimpleJob.run(function() M.refresh(nil, false, "resume") end)
+    Job.run(function() M.refresh(nil, false, "resume") end, {
+        name = "lockscreen.resume",
+        kind = "instant",
+    })
 end
 
 --- 插件启动：先用有效缓存立刻接管，再后台强制重生成一次。
@@ -92,7 +95,10 @@ function M.bootstrap()
         Settings.clearCover()
         logger.dbg("book.lockscreen bootstrap cache", "invalid")
     end
-    SimpleJob.run(function() M.refresh(nil, true, "bootstrap") end)
+    Job.run(function() M.refresh(nil, true, "bootstrap") end, {
+        name = "lockscreen.bootstrap",
+        kind = "instant",
+    })
 end
 
 return M

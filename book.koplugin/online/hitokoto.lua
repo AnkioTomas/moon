@@ -119,11 +119,10 @@ local function choose(pool, avoid)
     return pool[i]
 end
 
---- 首页一言：回退句 + 缓存 + 当日日报，resume 随机抽，不跟日缓存绑死。
----@param daily { quote_text: string|nil, quote_from: string|nil }|nil
+--- 首页一言：回退句 + 设置缓存，resume 随机抽。日报一句由 myrl 缓存另走。
 ---@param avoid string|nil
 ---@return { text: string, author: string, title: string }
-function Hitokoto.random(daily, avoid)
+function Hitokoto.random(avoid)
     local seen, pool = {}, {}
     local function push(text, source)
         if type(text) ~= "string" or text == "" or seen[text] then return end
@@ -136,9 +135,6 @@ function Hitokoto.random(daily, avoid)
     end
     local settings = MoonSettings.get()
     push(settings.lock_screen_quote_cache, settings.lock_screen_quote_source_cache)
-    if type(daily) == "table" then
-        push(daily.quote_text, daily.quote_from)
-    end
     return choose(pool, avoid)
 end
 

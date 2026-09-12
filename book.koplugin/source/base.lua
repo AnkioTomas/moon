@@ -13,9 +13,6 @@ local logger = require("utils.log")
 local _ = require("gettext")
 
 ---@class SourceBase : BookSource
----@field id SourceId
----@field name string|nil
----@field type BookSourceType
 ---@field _books_refresh_at number|nil 最近一次书架同步完成时间
 ---@field _stats_refresh_at number|nil 最近一次统计同步尝试时间
 local SourceBase = {}
@@ -70,7 +67,7 @@ end
 ---   book_info_request — 阅读面板详情页请求书籍信息，payload = { identity, book, refresh }
 ---     （源可拉最新详情写 Store.rememberMany 后调 refresh() 重绘面板；基类空操作即可）
 local function syncDesktopBooks(self, desktop, opts)
-    if type(desktop) ~= "table" or desktop._closed then return end
+    if type(desktop) ~= "table" or desktop.lifecycle.state == "Destroy" then return end
     if desktop._books_sync_pending and not (opts and opts.force) then
         logger.dbg("book shelf refresh skipped", self.id, "pending")
         return
@@ -90,13 +87,13 @@ local function syncDesktopBooks(self, desktop, opts)
         end
         desktop._books_sync_cancel = nil
         desktop._books_sync_pending = false
-        if desktop._closed or desktop.source ~= self then return end
+        if desktop.lifecycle.state == "Destroy" or desktop.source ~= self then return end
         if not result then
             require("utils.log").warn("book shelf sync failed", self.id, err)
-            desktop:refreshHome("shelf_sync_failed")
-            if desktop.tab == "library" then
-                desktop._library_state = { books = {}, err = err or _("同步失败") }
-                desktop:rebuild()
+            desktop:onEvent("home_refresh", "shelf_sync_failed")
+            if desktop.tab == "library" and desktop.library then
+                desktop.library.state = { books = {}, err = err or _("同步失败") }
+                desktop:updateView()
             end
             return
         end
@@ -110,9 +107,9 @@ local function syncDesktopBooks(self, desktop, opts)
             "pushed", tonumber(result.pushed) or 0,
             "hidden", tonumber(result.hidden) or 0)
         self._books_refresh_at = os.time()
-        desktop._library_state = nil
-        desktop:refreshHome("shelf_sync")
-        if desktop.tab == "library" then desktop:rebuild() end
+        if desktop.library then desktop.library.state = nil end
+        desktop:onEvent("home_refresh", "shelf_sync")
+        if desktop.tab == "library" then desktop:updateView() end
     end)
     -- 某些源会同步回调；避免把已完成的 job 句柄残留到桌面状态。
     if desktop._books_sync_request == request and desktop._books_sync_pending then
@@ -146,7 +143,7 @@ local function syncDesktopStats(self, desktop, opts)
         if desktop._stats_sync_request ~= request then return end
         desktop._stats_sync_cancel = nil
         desktop._stats_sync_pending = false
-        if desktop._closed or desktop.source ~= self then return end
+        if desktop.lifecycle.state == "Destroy" or desktop.source ~= self then return end
         if not result then
             logger.warn("book stats sync failed", self.id, err)
             return
@@ -155,10 +152,12 @@ local function syncDesktopStats(self, desktop, opts)
             "pulled", tonumber(result.pulled) or 0,
             "pushed", tonumber(result.pushed) or 0)
         if not result.skipped then
-            desktop._insight_state = nil
-            desktop._insight_loaded = false
-            desktop:refreshHome("stats_sync")
-            if desktop.tab == "stats" then desktop:rebuild() end
+            if desktop.insight then
+                desktop.insight.state = nil
+                desktop.insight.loaded = false
+            end
+            desktop:onEvent("home_refresh", "stats_sync")
+            if desktop.tab == "stats" then desktop:updateView() end
         end
     end)
     if desktop._stats_sync_request == request and desktop._stats_sync_pending then

@@ -31,11 +31,12 @@ local FACTORIES = {
     wechat = function() return require("source.wechat") end,
     jdread = function() return require("source.jdread") end,
     copymanga = function() return require("source.copymanga") end,
+    fanqie = function() return require("source.fanqie") end,
     ["local"] = function() return require("source.local") end,
 }
 
 -- local 默认源，列表垫底
-local ORDER = { "moon", "wechat", "jdread", "copymanga", "local" }
+local ORDER = { "moon", "wechat", "jdread", "copymanga", "fanqie", "local" }
 
 ---@type BookSource|nil
 local _active = nil

@@ -21,15 +21,15 @@ local Install = require("update.install")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
-local Update = {}
+local Update = {
+    _checking = false,
+    _installing = false,
+    _offered_version = nil,
+    _job = nil,
+}
 
 local API_URL = "https://api.github.com/repos/AnkioTomas/moon/releases/latest"
 local CHECK_INTERVAL = 24 * 60 * 60
-local _checking = false
-local _installing = false
-local _offered_version
-local _job
-
 local function currentVersion()
     local ok, version = pcall(require, "bookversion")
     if ok and type(version) == "string" then return version end
@@ -124,20 +124,20 @@ end
 ---@param cb fun(release: table|nil, err: any)
 ---@return table|nil
 function Update.check(cb)
-    if _checking then
+    if Update._checking then
         cb(nil, "already checking")
         return nil
     end
-    _checking = true
-    _job = Request.get(API_URL, {
+    Update._checking = true
+    Update._job = Request.get(API_URL, {
         timeout = 30,
         headers = {
             Accept = "application/vnd.github+json",
             ["X-GitHub-Api-Version"] = "2022-11-28",
         },
     }, function(body, err)
-        _checking = false
-        _job = nil
+        Update._checking = false
+        Update._job = nil
         if err then
             cb(nil, err)
             return
@@ -150,14 +150,14 @@ function Update.check(cb)
         MoonSettings.save({ update_last_checked_at = os.time() })
         cb(release)
     end)
-    return _job
+    return Update._job
 end
 
 local function installWithChecksum(release, plugin_root, checksum, cb, on_progress)
     Paths.ensureSettings()
     local archive = Paths.root() .. "/plugin-update.zip"
     os.remove(archive)
-    _job = Request.download({
+    Update._job = Request.download({
         url = release.url,
         method = "GET",
         timeout = 300,
@@ -166,27 +166,28 @@ local function installWithChecksum(release, plugin_root, checksum, cb, on_progre
         on_progress = on_progress,
     }, archive, function(ok, err)
         if not ok then
-            _installing = false
-            _job = nil
+            Update._installing = false
+            Update._job = nil
             cb(false, err)
             return
         end
-        _job = Job.run(function()
+        Update._job = Job.run(function()
             local installed, install_err = Install.run(archive, plugin_root, release.version, checksum)
             if not installed then error(install_err) end
         end, {
             name = "plugin.update",
+            kind = "heavy",
             timeout = 120,
             on_done = function()
                 os.remove(archive)
-                _installing = false
-                _job = nil
+                Update._installing = false
+                Update._job = nil
                 cb(true)
             end,
             on_failed = function(install_err)
                 os.remove(archive)
-                _installing = false
-                _job = nil
+                Update._installing = false
+                Update._job = nil
                 cb(false, install_err)
             end,
         })
@@ -199,29 +200,29 @@ end
 ---@param cb fun(ok: boolean, err: any)
 ---@param on_progress fun(bytes: number)|nil
 function Update.install(release, plugin_root, cb, on_progress)
-    if _installing then
+    if Update._installing then
         cb(false, "already installing")
         return
     end
-    _installing = true
+    Update._installing = true
     if release.sha256 then
         installWithChecksum(release, plugin_root, release.sha256, cb, on_progress)
         return
     end
-    _job = Request.get(release.checksum_url, {
+    Update._job = Request.get(release.checksum_url, {
         timeout = 30,
         allow_redirects = true,
     }, function(body, err)
         if err then
-            _installing = false
-            _job = nil
+            Update._installing = false
+            Update._job = nil
             cb(false, err)
             return
         end
         local checksum = type(body) == "string" and body:match("^%s*([%da-fA-F]+)")
         if not checksum or #checksum ~= 64 then
-            _installing = false
-            _job = nil
+            Update._installing = false
+            Update._job = nil
             cb(false, "invalid update checksum")
             return
         end
@@ -269,8 +270,8 @@ local function startInstall(release, plugin_root)
 end
 
 local function promptInstall(release, plugin_root)
-    if _offered_version == release.version then return end
-    _offered_version = release.version
+    if Update._offered_version == release.version then return end
+    Update._offered_version = release.version
     local header = T(_("发现月读 %1（当前 %2）。下载并完整替换插件目录？"),
         release.version, currentVersion())
     local text = release.notes and (header .. "\n\n" .. release.notes) or header
@@ -312,7 +313,7 @@ function Update.manualCheck(plugin_root)
                 timeout = 4,
             })
         elseif release.available then
-            _offered_version = nil
+            Update._offered_version = nil
             promptInstall(release, plugin_root)
         else
             UIManager:show(InfoMessage:new{
@@ -341,10 +342,10 @@ function Update.bootstrap(plugin_root)
 end
 
 function Update.cancel()
-    if _job and _job.cancel then _job:cancel() end
-    _job = nil
-    _checking = false
-    _installing = false
+    if Update._job and Update._job.cancel then Update._job:cancel() end
+    Update._job = nil
+    Update._checking = false
+    Update._installing = false
 end
 
 Update._newer = newer

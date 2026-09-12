@@ -27,7 +27,7 @@ end
 function Setting.open(plugin)
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
-    local Popup = require("ui.components.popup")
+    local Popup = require("ui.views.popup")
     local MoonSettings = require("utils.settings")
     local cfg = MoonSettings.getSource(SOURCE_ID)
     local start_path = cfg.path

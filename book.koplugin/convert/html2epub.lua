@@ -610,6 +610,7 @@ function Html2Epub.build(opts, cb)
             return ok and "ok" or ("err:" .. tostring(err or "pack failed"))
         end, {
             name = "epub.pack",
+            kind = "heavy",
             on_done = function(result)
                 pack_task = nil
                 if cancelled then
@@ -706,8 +707,7 @@ function Html2Epub.build(opts, cb)
         processChapter(1)
     end)
 
-    return {
-        cancel = function()
+    return { cancel = function()
             if cancelled then
                 return
             end
@@ -718,8 +718,7 @@ function Html2Epub.build(opts, cb)
             if pack_task then
                 pack_task:abort()
             end
-        end,
-    }
+        end }
 end
 
 -- 测试可见的纯函数

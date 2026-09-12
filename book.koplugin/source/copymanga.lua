@@ -107,12 +107,10 @@ function Source:deleteBookAsync(identity, cb)
             end)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then job.cancel() end
-        end,
-    }
+        end }
 end
 
 ---@param identity BookIdentity
@@ -151,12 +149,10 @@ function Source:syncBooksAsync(_opts, cb)
         local result, rerr = require("book.store").reconcile(self.id, list.data or {})
         cb(result, rerr)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then job.cancel() end
-        end,
-    }
+        end }
 end
 
 ---@param client CopymangaClient
@@ -241,12 +237,10 @@ function Source:getDetailAsync(identity, cb)
             cb(book)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then job.cancel() end
-        end,
-    }
+        end }
 end
 
 ---@param book Book|nil
@@ -285,12 +279,10 @@ function Source:addStoreBookAsync(book, cb)
             end)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then job.cancel() end
-        end,
-    }
+        end }
 end
 
 ---@param identity BookIdentity
@@ -316,12 +308,10 @@ function Source:loadTocAsync(identity, cb)
             cb(chapters)
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if job and job.cancel then job.cancel() end
-        end,
-    }
+        end }
 end
 
 ---@param identity BookIdentity
@@ -341,9 +331,7 @@ function Source:openBookAsync(identity, opts, cb)
             })
             cb(ok and cached_path or nil, err)
         end)
-        return {
-            cancel = function() cancelled = true end,
-        }
+        return { cancel = function() cancelled = true end }
     end
 
     local function closeDialog()
@@ -394,13 +382,11 @@ function Source:openBookAsync(identity, opts, cb)
         end)
     end)
 
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end
             closeDialog()
-        end,
-    }
+        end }
 end
 
 --- 阅读中后台预取后续章节 CBZ。会话侧固定预取后面 3 章。
@@ -454,13 +440,11 @@ function Source:getProgressAsync(identity, cb)
             finish(Toc.index(identity.source_id, identity.stable_id, uid))
         end)
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if request and request.cancel then request.cancel() end
             if toc_job and toc_job.cancel then toc_job.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 推送当前章到云端。官方没有独立浏览写入接口；
@@ -506,13 +490,11 @@ function Source:putProgressAsync(identity, pos, cb)
     end
 
     resolve()
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if toc_job and toc_job.cancel then toc_job.cancel() end
             if push_job and push_job.cancel then push_job.cancel() end
-        end,
-    }
+        end }
 end
 
 --- 缓存整本漫画；已落盘章节自动跳过，章与章之间留间隔以免打爆接口。
@@ -538,12 +520,10 @@ function Source:cacheAllChaptersAsync(identity, on_progress, cb)
             end
         )
     end)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end
-        end,
-    }
+        end }
 end
 
 return Copymanga

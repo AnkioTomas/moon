@@ -15,18 +15,19 @@ local Position = require("book.progress.position")
 local Text = require("utils.text")
 local _ = require("gettext")
 
-local Progress = {}
-local asked_conflicts = {}
-local last_revision = 0
-local sync_runs = {}
+local Progress = {
+    asked_conflicts = {},
+    last_revision = 0,
+    sync_runs = {},
+}
 
 --- 生成单调递增的进度修订号（同一进程内不会重复）。
 --- 秒级时间戳在同一秒内多次写入会撞号，而修订号是 pending_progress 判定新旧的
 --- 依据，必须严格递增。
 ---@return integer
 local function nextRevision()
-    last_revision = math.max(os.time(), last_revision + 1)
-    return last_revision
+    Progress.last_revision = math.max(os.time(), Progress.last_revision + 1)
+    return Progress.last_revision
 end
 
 --- 按位置填充翻译串里的 %1、%2… 占位符（每个占位符只替换首次出现）。
@@ -338,12 +339,10 @@ local function syncOnce(source, opts, cb)
         pullRemote()
     end
     require("ui/uimanager"):nextTick(nextIdentity)
-    return {
-        cancel = function()
+    return { cancel = function()
             cancelled = true
             if current_job and current_job.cancel then current_job:cancel() end
-        end,
-    }
+        end }
 end
 
 --- 合并完全相同的重入同步；不同书籍/模式仍各自执行，不能混用结果。
@@ -361,32 +360,30 @@ function Progress.syncAsync(source, opts, cb)
         opts.dirty_only and "dirty" or "full",
     }, "\31")
     local subscriber = { active = true, cb = cb }
-    local run = sync_runs[key]
+    local run = Progress.sync_runs[key]
     if run then
         run.subscribers[#run.subscribers + 1] = subscriber
     else
         run = { subscribers = { subscriber } }
-        sync_runs[key] = run
+        Progress.sync_runs[key] = run
         run.job = syncOnce(source, opts, function(result, err)
-            if sync_runs[key] == run then sync_runs[key] = nil end
+            if Progress.sync_runs[key] == run then Progress.sync_runs[key] = nil end
             for _, item in ipairs(run.subscribers) do
                 if item.active and item.cb then item.cb(result, err) end
             end
         end)
     end
-    return {
-        cancel = function()
+    return { cancel = function()
             if not subscriber.active then return end
             subscriber.active = false
             for _, item in ipairs(run.subscribers) do
                 if item.active then return end
             end
-            if sync_runs[key] == run then
-                sync_runs[key] = nil
+            if Progress.sync_runs[key] == run then
+                Progress.sync_runs[key] = nil
                 if run.job and run.job.cancel then run.job.cancel() end
             end
-        end,
-    }
+        end }
 end
 
 --- 异步进度回调是否仍对同一本书有效（不比 chapter_idx，避免切章后丢弃拉取结果）。
@@ -621,7 +618,7 @@ end
 ---@param remote_pos ProgressPosition
 local function askProgressConflict(id, snapshot, local_pos, remote_pos)
     local key = id.source_id .. "\31" .. id.stable_id
-    if asked_conflicts[key] then return end
+    if Progress.asked_conflicts[key] then return end
     local ConfirmBox = require("ui/widget/confirmbox")
     local local_desc = conflictLabel(local_pos, id, snapshot)
     local remote_desc = conflictLabel(remote_pos, id, snapshot)
@@ -634,7 +631,7 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
         ok_callback = function()
             -- 置位挪进回调：点空白关闭弹窗时两个回调都不跑，
             -- 在 show 之前置位会让本次会话再也不问，脏本地进度既不推也不采纳。
-            asked_conflicts[key] = true
+            Progress.asked_conflicts[key] = true
             local Session = require("ui.reader.session")
             local current = Session.current()
             if not current or not isSameBook(id) then
@@ -661,7 +658,7 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
             end
         end,
         cancel_callback = function()
-            asked_conflicts[key] = true
+            Progress.asked_conflicts[key] = true
             local Session = require("ui.reader.session")
             if not Session.current() or not isSameBook(id) then
                 return
@@ -736,7 +733,7 @@ end
 --- 清空「已问过进度冲突」的记忆，下次开书会重新弹 ConfirmBox。
 --- 由 Session.onCloseDocument 在真正关书（非切章）时调用。
 function Progress.clearConflicts()
-    asked_conflicts = {}
+    Progress.asked_conflicts = {}
 end
 
 return Progress

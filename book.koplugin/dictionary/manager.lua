@@ -12,11 +12,11 @@ local Paths = require("utils.paths")
 local Job = require("workers.job")
 local lfs = require("libs/libkoreader-lfs")
 
-local Manager = {}
+local Manager = {
+    _job = nil,
+    _downloading = false,
+}
 local BASE_URL = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/dict"
-local _job
-local _downloading = false
-
 --- 校验字典 id：清单来自网络，id 会拼进目录名与分片文件名，
 --- 只放行 `[%w_-]`，否则 `../` 之类能写到数据目录外。
 ---@param value any
@@ -255,7 +255,7 @@ local function downloadPart(url, dest, on_progress, cb)
 end
 
 --- 逐片下载（递归推进，串行；已完整的片直接跳过 = 续传），全部到位后转入解压安装。
---- 任一片失败即删除该片、清 `_downloading` 并回调失败，不重试。
+--- 任一片失败即删除该片、清 `Manager._downloading` 并回调失败，不重试。
 ---@param item table 清单项
 ---@param dir string 临时目录
 ---@param idx number 当前分片序号（从 1 起）
@@ -267,11 +267,12 @@ local function downloadParts(item, dir, idx, completed, done, report)
     if not part then
         report("install", item.size, item.size, #item.parts, #item.parts)
         local target = installTarget(done.data_dir, item.id)
-        _job = Job.run(function() assembleAndExtract(item, dir, target) end, {
+        Manager._job = Job.run(function() assembleAndExtract(item, dir, target) end, {
             name = "dictionary.install",
+            kind = "heavy",
             timeout = 300,
             on_done = function()
-                _downloading, _job = false, nil
+                Manager._downloading, Manager._job = false, nil
                 if lfs.attributes(target, "mode") ~= "directory" then
                     done.callback(false, "dictionary installation failed")
                     return
@@ -280,7 +281,7 @@ local function downloadParts(item, dir, idx, completed, done, report)
                 done.callback(true)
             end,
             on_failed = function(err)
-                _downloading, _job = false, nil
+                Manager._downloading, Manager._job = false, nil
                 done.callback(false, err)
             end,
         })
@@ -292,7 +293,7 @@ local function downloadParts(item, dir, idx, completed, done, report)
         downloadParts(item, dir, idx + 1, completed, done, report)
         return
     end
-    _job = downloadPart(
+    Manager._job = downloadPart(
         BASE_URL .. "/" .. part.file,
         dir .. "/" .. part.file,
         function(bytes)
@@ -301,7 +302,7 @@ local function downloadParts(item, dir, idx, completed, done, report)
         function(ok, err)
         if not ok or not partComplete(dir, part) then
             os.remove(dir .. "/" .. part.file)
-            _downloading, _job = false, nil
+            Manager._downloading, Manager._job = false, nil
             done.callback(false, err or "part size mismatch")
             return
         end
@@ -320,7 +321,7 @@ function Manager.install(item, data_dir, cb, on_progress)
     cb = cb or function() end
     local checked, err = Manager.validateManifest({ dictionaries = { item } })
     if not checked then cb(false, err); return end
-    if _downloading then cb(false, "already downloading"); return end
+    if Manager._downloading then cb(false, "already downloading"); return end
     if Manager.isInstalled(data_dir, item.id) then cb(false, "dictionary already installed"); return end
     Paths.ensureSettings()
     local util_ok, make_err = require("util").makePath(data_dir)
@@ -333,7 +334,7 @@ function Manager.install(item, data_dir, cb, on_progress)
     end
     local dir_ok, dir_err = require("util").makePath(dir)
     if not dir_ok then cb(false, dir_err); return end
-    _downloading = true
+    Manager._downloading = true
     local report = on_progress or function() end
     downloadParts(item, dir, 1, 0, { data_dir = data_dir, callback = cb }, report)
 end
@@ -341,15 +342,15 @@ end
 --- 当前是否有下载/安装任务在跑。
 ---@return boolean
 function Manager.downloading()
-    return _downloading
+    return Manager._downloading
 end
 
 --- 取消进行中的下载或安装任务。
 function Manager.cancel()
-    if _job then
-        if _job.abort then _job:abort() elseif _job.cancel then _job:cancel() end
+    if Manager._job then
+        if Manager._job.cancel then Manager._job:cancel() end
     end
-    _job, _downloading = nil, false
+    Manager._job, Manager._downloading = nil, false
 end
 
 --- 递归收集 `.ifo` 路径（StarDict 词典的标识文件）。跳过 `res`（词典自带资源目录，里面没有 .ifo）。

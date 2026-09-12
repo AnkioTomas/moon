@@ -162,7 +162,6 @@ function M.blocks(rect)
     local cover_y = y + math.floor(height * 0.195)
     local info_w = math.max(1, cover_x - x - pad)
     local cover = select(1, BookInfo.cover(nil, nil, book, cover_w, cover_h, {
-        sync = true,
         shadow = false,
     }))
     local logo_size = math.max(34, math.floor(height * 0.045))
