@@ -42,6 +42,7 @@ local lfs = require("libs/libkoreader-lfs")
 
 local UI = require("ui.components.bookui")
 
+---@class BookIcon
 local Icon = {}
 
 local FACE = "moon_icon"
@@ -149,6 +150,8 @@ function Icon.label(opts)
             table.insert(col, VerticalSpan:new{ width = gap })
         end
         table.insert(col, label)
+        col.icon = icon
+        col.label = label
         return col
     end
     local row = HorizontalGroup:new{ align = "center" }
@@ -157,6 +160,8 @@ function Icon.label(opts)
         table.insert(row, HorizontalSpan:new{ width = gap })
     end
     table.insert(row, label)
+    row.icon = icon
+    row.label = label
     return row
 end
 
