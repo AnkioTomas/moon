@@ -13,7 +13,7 @@ function WidgetContainer:extend(def)
 end
 
 local calls = {}
-local version_current = 202607010000
+local version_current = 202607000000
 local function stub(name, value)
     package.preload[name] = function() return value end
 end
@@ -32,7 +32,7 @@ stub("ui/widget/confirmbox", {
 })
 stub("version", {
     getNormalizedCurrentVersion = function() return version_current end,
-    getShortVersion = function() return version_current >= 202607010000 and "2026.07.1" or "2026.07.0" end,
+    getShortVersion = function() return version_current >= 202607000000 and "2026.07" or "2026.06" end,
 })
 stub("utils.log", {
     start = function() end,
@@ -126,8 +126,8 @@ calls.desktop_event = nil
 plugin:onSourceChanged()
 Assert.is_nil(calls.desktop_event, "已销毁的桌面不再收 onEvent")
 
-version_current = 202607000000
+version_current = 202606000000
 local attach_count = calls.host
 setmetatable({ path = "book.koplugin" }, Main):init()
 Assert.eq(calls.host, attach_count, "不支持的 KOReader 版本不得进入插件")
-Assert.eq(calls.version_dialog.text, "月读需要 KOReader 2026.07.1 或更高版本。\n\n当前版本：2026.07.0")
+Assert.eq(calls.version_dialog.text, "月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：2026.06 (202606000000)")
