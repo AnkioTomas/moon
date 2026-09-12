@@ -35,7 +35,7 @@ local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local Lifecycle = require("ui.lifecycle")
-local BaseView = require("ui.baseview")
+local View = require("ui.view")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
@@ -48,8 +48,8 @@ local Library = require("ui.desktop.library")
 local StorePage = require("ui.desktop.store")
 local Insight = require("ui.desktop.insight")
 local Settings = require("ui.desktop.settings")
-local TopBar = require("ui.components.topbar")
-local BottomBar = require("ui.components.bottombar")
+local TopBar = require("ui.views.topbar")
+local BottomBar = require("ui.views.bottombar")
 local UI = require("ui.components.bookui")
 
 ---@class BookDesktop : InputContainer
@@ -199,7 +199,7 @@ end
 ---@return nil
 function Desktop:init()
     self.lifecycle = Lifecycle.attach(self)
-    self.view = BaseView.attach(self)
+    self.view = View.attach(self)
     self._tabs = desktopTabs(self.source)
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.tab = self.tab or "home"
