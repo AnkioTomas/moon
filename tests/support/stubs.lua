@@ -350,6 +350,14 @@ local function installUIManager()
         end
         function UIManager:setDirty(widget, refresh)
         end
+        function UIManager:insertZMQ()
+        end
+        function UIManager:removeZMQ()
+        end
+        function UIManager:preventStandby()
+        end
+        function UIManager:allowStandby()
+        end
         return UIManager
     end
 end
@@ -468,6 +476,11 @@ function Stubs.install()
         installLeafStubs()
     end
     installUIManager()
+    installIfMissing("ui/network/manager", function()
+        return {
+            isOnline = function() return true end,
+        }
+    end)
     installLogger()
     installBookLog()
     installGettext()

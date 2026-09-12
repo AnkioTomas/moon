@@ -124,7 +124,7 @@ end
 
 local native_adds = {}
 local native_dels = 0
-local layout_rebuilds = 0
+local layout_view_updates = 0
 
 local function fakeKey(width)
     return {
@@ -155,7 +155,7 @@ local function fakeInputBox()
         end,
     }
     function inputbox:initTextBox()
-        layout_rebuilds = layout_rebuilds + 1
+        layout_view_updates = layout_view_updates + 1
     end
     return inputbox
 end
@@ -438,10 +438,10 @@ end
 do
     local kb = newKeyboard()
     typeAndLookup(kb, "nihao")
-    local rebuilds_before = layout_rebuilds
+    local view_updates_before = layout_view_updates
     wordCell(kb, 2).callback() -- 第 2 个候选「你好吗」
     Assert.eq(text(kb), "你好吗")
-    Assert.eq(layout_rebuilds, rebuilds_before + 1, "候选提交只能重建一次文本布局")
+    Assert.eq(layout_view_updates, view_updates_before + 1, "候选提交只能重建一次文本布局")
     Assert.is_nil(wordCell(kb, 1), "提交后候选条清空")
 end
 

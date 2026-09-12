@@ -1,17 +1,10 @@
 --[[--
-插件启动默认启用原生脚注弹窗，且只初始化一次。
+插件入口只挂桌面：Host、打开桌面、休眠/唤醒生命周期。
 
 @module tests.main_spec
 --]]
 
 local Assert = require("support.assert")
-
-local saved = {}
-local reader_settings = {
-    isTrue = function(_, key) return saved[key] == true end,
-    saveSetting = function(_, key, value) saved[key] = value end,
-}
-_G.G_reader_settings = reader_settings
 
 local WidgetContainer = {}
 function WidgetContainer:extend(def)
@@ -28,7 +21,10 @@ end
 stub("ui/widget/container/widgetcontainer", WidgetContainer)
 stub("ui/uimanager", {
     nextTick = function(_, fn) fn() end,
-    show = function(_, dialog) calls.version_dialog = dialog end,
+    show = function(_, widget)
+        calls.version_dialog = widget
+    end,
+    setDirty = function() end,
 })
 stub("ui/widget/infomessage", {})
 stub("ui/widget/confirmbox", {
@@ -38,98 +34,97 @@ stub("version", {
     getNormalizedCurrentVersion = function() return version_current end,
     getShortVersion = function() return version_current >= 202607010000 and "2026.07.1" or "2026.07.0" end,
 })
-stub("logger", { err = function() end, info = function() end })
+stub("utils.log", {
+    start = function() end,
+    info = function() end,
+    dbg = function() end,
+    error = function() end,
+    flush = function() end,
+})
 stub("l10n", {})
 stub("gettext", setmetatable({}, { __call = function(_, text) return text end }))
-stub("source.registry", {})
-stub("ui.desktop", {})
-stub("book.open", {})
-stub("host", { attach = function() calls.host = (calls.host or 0) + 1 end })
-stub("http.request", { ensureTurbo = function() end })
-stub("translate.init", { install = function() calls.translate = (calls.translate or 0) + 1 end })
-stub("baike.init", { install = function() calls.baike = (calls.baike or 0) + 1 end })
-stub("dictionary.init", { install = function() calls.dictionary = (calls.dictionary or 0) + 1 end })
-stub("ui.panel.native", { install = function() calls.panel = (calls.panel or 0) + 1 end })
-stub("ui.auto_brightness", {
-    bootstrap = function() calls.auto_brightness = (calls.auto_brightness or 0) + 1 end,
-    onSuspend = function() calls.auto_suspend = true end,
-    onResume = function() calls.auto_resume = (calls.auto_resume or 0) + 1 end,
-    shutdown = function() calls.auto_shutdown = (calls.auto_shutdown or 0) + 1 end,
+local current_source
+stub("source.registry", {
+    current = function() return current_source end,
 })
-stub("book.reader_prefs", {
-    inject = function(doc_settings, document)
-        calls.doc_settings = doc_settings
-        calls.document = document
+local desk_life = {}
+stub("ui.desktop", {
+    new = function()
+        return {
+            lifecycle = { state = "new" },
+            onStart = function() desk_life[#desk_life + 1] = "Start" end,
+            onResume = function() desk_life[#desk_life + 1] = "Resume" end,
+        }
     end,
 })
-stub("lockscreen.init", {
-    bootstrap = function() calls.lockscreen = (calls.lockscreen or 0) + 1 end,
-    refresh = function(_, force) calls.lock_refresh = force end,
-    onResume = function() calls.lock_resume = (calls.lock_resume or 0) + 1 end,
+stub("utils.paths", { ensureLayout = function() end })
+stub("host", {
+    attach = function() calls.host = (calls.host or 0) + 1 end,
+    onShow = function() calls.host_show = (calls.host_show or 0) + 1 end,
 })
-stub("ui.reader.session", {
-    onSuspend = function() calls.session_suspend = true end,
-    onResume = function() calls.session_resume = (calls.session_resume or 0) + 1 end,
-})
-stub("remote.init", {
-    bootstrap = function() calls.remote = (calls.remote or 0) + 1 end,
-    onSuspend = function() calls.remote_suspend = true end,
-    onResume = function() calls.remote_resume = (calls.remote_resume or 0) + 1 end,
-})
-stub("ui.desktop.home", {
-    refreshOnEnter = function(desktop)
-        calls.home_enter = desktop
-    end,
-})
-stub("ui.screenshot_share", { install = function() calls.screenshot_share = (calls.screenshot_share or 0) + 1 end })
-stub("ime.init", { bootstrap = function() calls.pinyin = (calls.pinyin or 0) + 1 end })
-stub("patch.manager", { init = function() calls.patch = (calls.patch or 0) + 1 end })
-stub("patch.page_turn_animation", { checkStartup = function() calls.animation = (calls.animation or 0) + 1 end })
 
 local Main = require("main")
 local plugin = setmetatable({ path = "book.koplugin" }, Main)
 plugin:init()
-Assert.is_true(saved.footnote_link_in_popup)
-Assert.is_true(saved.book_footnote_popup_initialized)
-Assert.eq(calls.screenshot_share, 1)
+Assert.eq(calls.host, 1)
 
-local doc_settings = {
-    data = {},
-    readSetting = function(self, key) return self.data[key] end,
+local resumed_desktop = {
+    lifecycle = { state = "Resume" },
+    tab = "library",
+    onPause = function()
+        calls.desktop_pause = (calls.desktop_pause or 0) + 1
+    end,
+    onStart = function()
+        calls.desktop_start = (calls.desktop_start or 0) + 1
+    end,
+    onResume = function(self)
+        if self.tab == "home" then
+            calls.home_enter = self
+        else
+            calls.library_resume = self
+        end
+    end,
+    onStop = function()
+        calls.desktop_stop = (calls.desktop_stop or 0) + 1
+    end,
+    onDestroy = function(self)
+        calls.desktop_destroy = (calls.desktop_destroy or 0) + 1
+        self.lifecycle.state = "Destroy"
+    end,
+    onEvent = function(_, event, payload)
+        calls.desktop_event = event
+        calls.desktop_event_payload = payload
+    end,
 }
-local document = {}
-plugin:onDocSettingsLoad(doc_settings, document)
-Assert.eq(calls.doc_settings, doc_settings)
-Assert.eq(calls.document, document)
-
-saved.footnote_link_in_popup = false
-plugin:init()
-Assert.is_false(saved.footnote_link_in_popup, "用户关闭后不得在后续启动时重新打开")
-
-plugin:onSuspend()
-Assert.is_true(calls.session_suspend)
-Assert.is_true(calls.lock_refresh)
-Assert.is_true(calls.remote_suspend)
-Assert.is_true(calls.auto_suspend)
-
-local resumed_desktop = { tab = "library" }
 plugin.desktop = resumed_desktop
-plugin.emitToSource = function(_, event, payload)
-    calls.source_event = event
-    calls.source_payload = payload
-end
 plugin:onResume()
-Assert.eq(calls.session_resume, 1)
-Assert.eq(calls.lock_resume, 1)
-Assert.eq(calls.remote_resume, 1)
-Assert.eq(calls.auto_resume, 1)
-Assert.eq(calls.source_event, "desktop_resume")
-Assert.eq(calls.source_payload, resumed_desktop)
+Assert.is_nil(calls.library_resume, "唤醒不经插件再转 Desktop:onResume")
 
 resumed_desktop.tab = "home"
 plugin:onResume()
-Assert.eq(calls.home_enter, resumed_desktop)
-Assert.eq(calls.source_event, "desktop_resume", "首页刷新事件由 Home.refreshOnEnter 负责发送")
+Assert.is_nil(calls.home_enter, "唤醒不经插件再转 Desktop:onResume")
+
+current_source = { id = "local" }
+plugin.desktop = nil
+plugin:openDesktop()
+Assert.eq(table.concat(desk_life, ","), "Start,Resume")
+plugin.desktop = resumed_desktop
+
+plugin:onSourceChanged()
+Assert.eq(calls.desktop_event, "source_changed")
+Assert.eq(calls.desktop_event_payload, current_source)
+
+plugin:onSuspend()
+Assert.eq(calls.desktop_pause, 1)
+Assert.eq(calls.desktop_stop, 1, "Pause 之后仍要能进 onStop，不能用 Alive() 当门槛")
+
+plugin:onExit()
+Assert.eq(calls.desktop_destroy, 1)
+Assert.eq(resumed_desktop.lifecycle.state, "Destroy")
+
+calls.desktop_event = nil
+plugin:onSourceChanged()
+Assert.is_nil(calls.desktop_event, "已销毁的桌面不再收 onEvent")
 
 version_current = 202607000000
 local attach_count = calls.host

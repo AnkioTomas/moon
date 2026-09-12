@@ -10,7 +10,7 @@ package.preload["ffi/util"] = function()
         end,
     }
 end
-package.preload["ui.desktop.home.components.base"] = function()
+package.preload["ui.desktop.home.registry"] = function()
     return { enabledLayout = function() return { "recent_hero", "recent_list" } end }
 end
 package.preload["ui.components.settingrow"] = function()
@@ -25,14 +25,16 @@ _G.G_reader_settings = { saveSetting = function() end }
 
 local shown_sub, shown_parent
 local desktop = {
-    rebuild = function() end,
-    showSettingsSub = function(_, sub, parent)
-        shown_sub, shown_parent = sub, parent
-    end,
+    updateView = function() end,
+    settings = {
+        showSub = function(_, sub, parent)
+            shown_sub, shown_parent = sub, parent
+        end,
+    },
 }
 
 local Settings = require("ui.desktop.settings.desktop")
-local rows = Settings.rows(desktop, false)
+local rows = Settings.new():rows(desktop, false)
 Assert.len(rows, 3)
 Assert.eq(rows[1](600).title, "首页组件")
 Assert.eq(rows[2](600).title, "首页顶栏")

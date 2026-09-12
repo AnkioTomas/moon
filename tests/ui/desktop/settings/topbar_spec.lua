@@ -19,11 +19,15 @@ package.preload["ui.components.settingrow"] = function()
     return { build = function(_, opts) return opts end }
 end
 
-local rebuilds = 0
-local desktop = { rebuild = function() rebuilds = rebuilds + 1 end }
+local events = {}
+local desktop = {
+    onEvent = function(_, event)
+        events[#events + 1] = event
+    end,
+}
 local Settings = require("ui.desktop.settings.topbar")
 
-local rows = Settings.rows(desktop)
+local rows = Settings.new():rows(desktop)
 Assert.len(rows, 8)
 local memory = rows[3](600)
 Assert.eq(memory.title, "剩余内存")
@@ -31,9 +35,10 @@ Assert.eq(memory.status, "开")
 memory.callback()
 Assert.is_false(home.home_topbar_items.memory)
 Assert.eq(saves, 1)
-Assert.eq(rebuilds, 1)
+Assert.eq(events[1], "topbar_changed")
+Assert.len(events, 1)
 
-rows = Settings.rows(desktop)
+rows = Settings.new():rows(desktop)
 Assert.eq(rows[3](600).status, "关")
 
 return true

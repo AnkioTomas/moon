@@ -6,17 +6,6 @@ db：open、schema 与 reading_stats CRUD
 
 local Assert = require("support.assert")
 
-local function stubTask(in_sub)
-    package.preload["utils.task"] = function()
-        return {
-            inSubProcess = function()
-                return in_sub
-            end,
-        }
-    end
-    package.loaded["utils.task"] = nil
-end
-
 local function stubDbDeps()
     package.preload["utils.paths"] = function()
         return {
@@ -33,8 +22,7 @@ end
 local function clearMods()
     for _, name in ipairs({
         "utils.paths",
-        "utils.task",
-        "workers.context",
+        "workers.job",
         "lua-ljsqlite3/init",
         "ffi/sha2",
         "db.base",
@@ -53,7 +41,6 @@ end
 
 -- ── 主进程 open 应成功（WAL 模式 + busy_timeout，读操作安全）───
 do
-    stubTask(false)
     stubDbDeps()
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return { exec = function() end, close = function() end } end }
@@ -72,9 +59,10 @@ do
     local opened = 0
 
     stubDbDeps()
-    package.preload["workers.context"] = function()
-        return { inSubProcess = function() return true end }
-    end
+    -- Base.ensure 只看 package.loaded["workers.job"]，不 require。
+    package.loaded["workers.job"] = {
+        inSubProcess = function() return true end,
+    }
     package.preload["lua-ljsqlite3/init"] = function()
         return {
             open = function()
@@ -119,7 +107,6 @@ do
         end,
     }
 
-    stubTask(true)
     stubDbDeps()
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
@@ -214,7 +201,6 @@ do
         end,
     }
 
-    stubTask(true)
     stubDbDeps()
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
@@ -357,7 +343,6 @@ do
         end,
     }
 
-    stubTask(true)
     stubDbDeps()
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
@@ -468,7 +453,6 @@ do
             }
         end,
     }
-    stubTask(true)
     stubDbDeps()
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
@@ -564,7 +548,6 @@ do
         end,
     }
 
-    stubTask(true)
     stubDbDeps()
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }

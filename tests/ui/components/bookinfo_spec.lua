@@ -53,7 +53,7 @@ package.preload["ui.components.bookui"] = function()
     return { face = function() return {} end, sz = function(v) return v end }
 end
 package.preload["ui.components.surface"] = function()
-    return { card = function(child) return child end, pill = function(child) return child end }
+    return { build = function(opts) return opts.child end }
 end
 package.preload["utils.paths"] = function() return {} end
 package.preload["book.store"] = function()

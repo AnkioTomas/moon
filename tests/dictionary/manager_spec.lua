@@ -45,7 +45,7 @@ package.preload["libs/libkoreader-lfs"] = function() return lfs end
 
 local abort_self
 local worker_job = {
-    abort = function(self)
+    cancel = function(self)
         abort_self = self
     end,
 }

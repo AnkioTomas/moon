@@ -63,8 +63,7 @@ package.preload["ui.components.icon"] = function()
 end
 package.preload["ui.components.surface"] = function()
     return {
-        pill = function(child) return child end,
-        card = function(child) return child end,
+        build = function(opts) return opts.child end,
     }
 end
 package.preload["ui.components.pager"] = function()
@@ -75,7 +74,7 @@ package.preload["ui.components.pager"] = function()
 end
 
 local popup_sheet
-package.preload["ui.components.popup"] = function()
+package.preload["ui.views.popup"] = function()
     return {
         sheet = function(opts) popup_sheet = opts return opts end,
     }
@@ -141,7 +140,7 @@ end
 package.loaded["ui.desktop.library"] = nil
 local Library = require("ui.desktop.library")
 
-local rebuilds = 0
+local view_updates = 0
 local deleted
 local requested
 local caches_cleared = 0
@@ -164,14 +163,16 @@ local desktop = {
     height = 200,
     dimen = { w = 100 },
     tab = "library",
-    page = 2,
-    total = 1,
-    filter = { search = "书" },
     source = source,
     source_generation = 0,
     contentHeight = function() return 200 end,
-    rebuild = function() rebuilds = rebuilds + 1 end,
+    updateView = function() view_updates = view_updates + 1 end,
 }
+local library = Library.new(desktop)
+desktop.library = library
+library.page = 2
+library.total = 1
+library.filter = { search = "书" }
 local ctx = {
     width = 100,
     height = 200,
@@ -186,7 +187,7 @@ local book = {
     read_state = 0,
 }
 
-Library.build(ctx, { books = { book } }, { page = 1, pages = 1, total = 1 })
+library:build(ctx, { books = { book } }, { page = 1, pages = 1, total = 1 })
 Assert.not_nil(hold_callback)
 hold_callback()
 Assert.eq(popup_sheet.items[1].text, "标记为已读")
@@ -196,7 +197,7 @@ Assert.eq(set_read[2], "b1")
 Assert.is_true(set_read[3])
 Assert.eq(book.read_state, 1)
 Assert.eq(book.percent, 100)
-Assert.eq(rebuilds, 1)
+Assert.eq(view_updates, 1)
 
 hold_callback()
 Assert.eq(popup_sheet.items[1].text, "标记为未读")
@@ -208,29 +209,29 @@ shown.ok_callback()
 Assert.eq(cleared[1], "moon")
 Assert.eq(cleared[2], "b1")
 Assert.eq(caches_cleared, 1)
-Assert.eq(rebuilds, 2)
+Assert.eq(view_updates, 2)
 
 popup_sheet.items[3].callback()
 Assert.eq(shown.text, "确定删除《书一》？")
 shown.ok_callback()
 Assert.eq(deleted.stable_id, "b1")
 Assert.eq(deleted.source, source)
-Assert.eq(desktop.page, 1)
+Assert.eq(library.page, 1)
 
-Library.showViewPicker(desktop)
+library:showViewPicker()
 Assert.eq(popup_sheet.title, "图书馆视图")
 Assert.eq(#popup_sheet.items, 4)
 Assert.eq(popup_sheet.items[2].text, "分类视图")
 Assert.eq(popup_sheet.items[3].text, "系列视图")
 Assert.eq(popup_sheet.items[4].text, "阅读状态视图")
 
-desktop._library_state = nil
-Library.fetch(desktop)
+library.state = nil
+library:fetch()
 Assert.eq(requested.search, "书")
 
-Library.setView(desktop, "category")
+library:setView("category")
 Assert.eq(display.library_view, "category")
-Assert.is_true(Library.isGroupIndex(desktop))
+Assert.is_true(library:isGroupIndex())
 source.filtersAsync = function(_, cb)
     cb({ data = {
         category_counts = {
@@ -246,33 +247,33 @@ source.filtersAsync = function(_, cb)
         },
     } })
 end
-Library.fetchGroups(desktop)
-Assert.eq(desktop._library_groups_state.groups[1].category, "科幻")
-Assert.eq(desktop._library_groups_state.groups[2].count, 2)
-Assert.not_nil(Library.page(desktop))
-Assert.eq(Library.pages(desktop), 2)
-Library.gotoPage(desktop, 2)
-Assert.eq(desktop.page, 2)
+library:fetchGroups()
+Assert.eq(library.groups_state.groups[1].category, "科幻")
+Assert.eq(library.groups_state.groups[2].count, 2)
+Assert.not_nil(library:updateView())
+Assert.eq(library:pages(), 2)
+library:gotoPage(2)
+Assert.eq(library.page, 2)
 
-Library.enterGroup(desktop, "")
-Assert.is_false(Library.isGroupIndex(desktop))
-Library.fetch(desktop)
+library:enterGroup("")
+Assert.is_false(library:isGroupIndex())
+library:fetch()
 Assert.is_true(requested.uncategorized)
-Library.leaveGroup(desktop)
-Assert.is_true(Library.isGroupIndex(desktop))
+library:leaveGroup()
+Assert.is_true(library:isGroupIndex())
 
-Library.setView(desktop, "series")
-Library.fetchGroups(desktop)
-Assert.eq(desktop._library_groups_state.groups[1].series, "系列一")
-Library.enterGroup(desktop, "系列一")
-Library.fetch(desktop)
+library:setView("series")
+library:fetchGroups()
+Assert.eq(library.groups_state.groups[1].series, "系列一")
+library:enterGroup("系列一")
+library:fetch()
 Assert.eq(requested.series, "系列一")
 
-Library.setView(desktop, "status")
-Library.fetchGroups(desktop)
-Assert.eq(#desktop._library_groups_state.groups, 3)
-Library.enterGroup(desktop, "new")
-Library.fetch(desktop)
+library:setView("status")
+library:fetchGroups()
+Assert.eq(#library.groups_state.groups, 3)
+library:enterGroup("new")
+library:fetch()
 Assert.eq(requested.read_status, "new")
 
 package.loaded["ui.desktop.library"] = nil

@@ -160,7 +160,7 @@ package.preload["ui/size"] = function()
 end
 package.preload["ui/font"] = function() return { getFace = function() return {} end } end
 package.preload["ui/uimanager"] = function() return { setDirty = function() end } end
-package.preload["ui.components.popup"] = function() return {} end
+package.preload["ui.views.popup"] = function() return {} end
 
 local Popup = require("translate.popup")
 local popup = Popup.TranslatePopup:new{

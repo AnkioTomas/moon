@@ -10,7 +10,6 @@ for _, name in ipairs({
     "ui/geometry",
     "ui/gesturerange",
     "ui/widget/overlapgroup",
-    "ui/uimanager",
     "utils.log",
     "utils.perf",
     "ui.desktop.library",
@@ -20,13 +19,16 @@ for _, name in ipairs({
     "ui.desktop.detail",
     "ui.panel.native",
     "ui.components.image",
-    "ui.components.topbar",
+    "ui.views.topbar",
     "ui.desktop.settings.source",
-    "ui.components.bottombar",
+    "ui.views.bottombar",
     "ui.components.bookui",
     "book.store",
 }) do
     package.preload[name] = emptyModule
+end
+package.preload["ui/uimanager"] = function()
+    return { nextTick = function(_, fn) fn() end, setDirty = function() end }
 end
 package.preload["device"] = function() return { screen = {} } end
 package.preload["gettext"] = function()
@@ -38,36 +40,72 @@ package.preload["ui/widget/container/inputcontainer"] = function()
     }
 end
 package.preload["ui.desktop.home"] = function()
-    return { refreshOnEnter = function() end }
+    return { new = function() return {} end }
 end
 
 package.loaded["ui.desktop"] = nil
 local Desktop = require("ui.desktop")
 
-local rebuilds = 0
-local desktop = {
+local view_updates = 0
+local pauses, resumes = 0, 0
+local desktop
+desktop = {
+    lifecycle = { state = "Resume" },
     tab = "home",
-    _insight_ui_page = 3,
-    _insight_state = { stale = true },
-    _insight_loaded = true,
-    rebuild = function() rebuilds = rebuilds + 1 end,
+    insight = {
+        onResume = function(self, changed)
+            Assert.is_true(changed)
+            self.resumed = true
+        end,
+        ui_page = 3,
+        state = { stale = true },
+        loaded = true,
+    },
+    settings = {
+        showSub = function(self, sub, parent)
+            self.sub = sub
+            self.parent = parent
+            self.page = 1
+            desktop:updateView()
+        end,
+    },
+    home = {
+        onPause = function() pauses = pauses + 1 end,
+        onResume = function() resumes = resumes + 1 end,
+    },
+    library = {},
+    store = {},
+    updateView = function() view_updates = view_updates + 1 end,
 }
 
 Desktop.switchTab(desktop, "stats")
 Assert.eq(desktop.tab, "stats")
-Assert.eq(desktop._insight_ui_page, 1)
-Assert.is_nil(desktop._insight_state)
-Assert.is_false(desktop._insight_loaded)
-Assert.eq(rebuilds, 1)
+Assert.is_true(desktop.insight.resumed)
+Assert.eq(desktop.insight.ui_page, 3)
+Assert.not_nil(desktop.insight.state)
+Assert.is_true(desktop.insight.loaded)
+Assert.eq(view_updates, 1)
 
-Desktop.showSettingsSub(desktop, "home", "desktop")
-Assert.eq(desktop._settings_sub, "home")
-Assert.eq(desktop._settings_parent, "desktop")
-Assert.eq(desktop._settings_page, 1)
-Assert.eq(rebuilds, 2)
+desktop.settings:showSub("home", "desktop")
+Assert.eq(desktop.settings.sub, "home")
+Assert.eq(desktop.settings.parent, "desktop")
+Assert.eq(desktop.settings.page, 1)
+Assert.eq(view_updates, 2)
 
-Desktop.showSettingsSub(desktop, nil)
-Assert.is_nil(desktop._settings_sub)
-Assert.is_nil(desktop._settings_parent)
-Assert.eq(rebuilds, 3)
+desktop.settings:showSub()
+Assert.is_nil(desktop.settings.sub)
+Assert.is_nil(desktop.settings.parent)
+Assert.eq(view_updates, 3)
+Assert.eq(pauses, 1)
+Desktop.switchTab(desktop, "home")
+Assert.eq(resumes, 1)
+Assert.eq(pauses, 1)
+Assert.eq(view_updates, 4)
 
+local swipes = {}
+desktop.library.onEvent = function(_, event, payload)
+    swipes[#swipes + 1] = { event = event, direction = payload and payload.direction }
+end
+Desktop.onEvent(desktop, "swipe", { direction = "west" })
+Assert.eq(swipes[1].event, "swipe")
+Assert.eq(swipes[1].direction, "west")

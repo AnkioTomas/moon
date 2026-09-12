@@ -10,7 +10,7 @@ package.preload["l10n"] = function() return { apply = function() end } end
 local lists = {}
 local sheets = {}
 local shown = {}
-package.preload["ui.components.popup"] = function()
+package.preload["ui.views.popup"] = function()
     return {
         list = function(opts) lists[#lists + 1] = opts end,
         single = function(opts) lists[#lists + 1] = opts end,

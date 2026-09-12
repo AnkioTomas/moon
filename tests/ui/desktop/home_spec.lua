@@ -1,168 +1,291 @@
 --[[--
-首页加载状态：书架同步在飞时也先读本地数据，完成后再刷新。
+首页拼装器：钉页、编辑态、翻页生命周期。
 
 @module tests.ui.desktop.home_spec
 --]]
 
 local Assert = require("support.assert")
+local Lifecycle = require("ui.view")
+local child_events = {}
 
-local ticks = {}
-package.preload["ui/uimanager"] = function()
+local Clock = setmetatable({ id = "clock" }, Lifecycle)
+Clock.__index = Clock
+function Clock:onCreate() child_events[#child_events + 1] = "create" end
+function Clock:onStart() child_events[#child_events + 1] = "start" end
+function Clock:onPause() child_events[#child_events + 1] = "pause" end
+function Clock:onResume() child_events[#child_events + 1] = "resume" end
+function Clock:onStop() child_events[#child_events + 1] = "stop" end
+function Clock:onDestroy() child_events[#child_events + 1] = "destroy" end
+function Clock:build()
+    return { widget = { id = "clock" } }
+end
+function Clock:heightRange()
+    return { min = 10, preferred = 10, max = 10 }
+end
+
+local Weather = setmetatable({ id = "weather" }, Lifecycle)
+Weather.__index = Weather
+function Weather:onCreate() child_events[#child_events + 1] = "weather.create" end
+function Weather:onStart() child_events[#child_events + 1] = "weather.start" end
+function Weather:onPause() child_events[#child_events + 1] = "weather.pause" end
+function Weather:onResume() child_events[#child_events + 1] = "weather.resume" end
+function Weather:onStop() child_events[#child_events + 1] = "weather.stop" end
+function Weather:onDestroy() child_events[#child_events + 1] = "weather.destroy" end
+function Weather:build()
+    return { widget = { id = "weather" } }
+end
+function Weather:heightRange()
+    return { min = 10, preferred = 10, max = 10 }
+end
+
+local enabled = { "clock" }
+local placements = {
+    { id = "clock", page = 1, order = 1, height = "default" },
+}
+package.preload["ui.desktop.home.registry"] = function()
     return {
-        nextTick = function(_, fn)
-            ticks[#ticks + 1] = fn
+        components = { Clock, Weather },
+        find = function(id)
+            if id == "clock" then return Clock end
+            if id == "weather" then return Weather end
         end,
-        scheduleIn = function(_, _, fn)
-            ticks[#ticks + 1] = fn
+        enabledLayout = function() return enabled end,
+        widgets = function() return placements end,
+        saveWidgets = function(list)
+            placements = list
+            enabled = {}
+            for _, item in ipairs(list) do enabled[#enabled + 1] = item.id end
         end,
-        unschedule = function(_, fn)
-            for i = #ticks, 1, -1 do
-                if ticks[i] == fn then table.remove(ticks, i) end
+        needsSplit = function() return false end,
+        clearNeedsSplit = function() end,
+    }
+end
+package.preload["ui.desktop.home.widgets"] = function()
+    return {
+        pageCount = function(list)
+            local max_p = 1
+            for _, item in ipairs(list) do
+                if item.page > max_p then max_p = item.page end
             end
+            return max_p
+        end,
+        onPage = function(list, page)
+            local out = {}
+            for _, item in ipairs(list) do
+                if item.page == page then out[#out + 1] = item end
+            end
+            return out
+        end,
+        find = function(list, id)
+            for i, item in ipairs(list) do
+                if item.id == id then return item, i end
+            end
+        end,
+        compactPages = function(list) return list end,
+        reindex = function(list) return list end,
+        canFit = function() return true end,
+        applyPacks = function(list) return list end,
+        ids = function(list)
+            local out = {}
+            for _, item in ipairs(list) do out[#out + 1] = item.id end
+            return out
         end,
     }
 end
-package.preload["ffi/blitbuffer"] = function()
-    return { COLOR_WHITE = 255 }
+package.preload["book.cache"] = function()
+    return { cleanupStaleAsync = function() return { cancel = function() end } end }
+end
+package.preload["gettext"] = function() return function(s) return s end end
+package.preload["book.catalog"] = function()
+    return {
+        recentBooks = function() return {} end,
+        recentShelf = function() return nil, {}, nil end,
+    }
+end
+package.preload["ui/uimanager"] = function()
+    return { setDirty = function() end }
 end
 package.preload["device"] = function()
     return { screen = { getWidth = function() return 600 end } }
 end
 package.preload["ui/geometry"] = function()
-    return { new = function(_, opts) return opts end }
-end
-local function widget()
-    return { new = function(_, opts) return opts end }
-end
-package.preload["ui/widget/container/centercontainer"] = widget
-package.preload["ui/widget/container/framecontainer"] = widget
-package.preload["ui/widget/textwidget"] = widget
-package.preload["ui.components.bookinfo"] = function()
-    return { file = function(book) return book and book.stable_id end }
+    return { new = function(_, opts)
+        opts.getSize = function(self) return self.dimen or { w = self.width or 0, h = self.height or 0 } end
+        return opts
+    end }
 end
 package.preload["ui.components.bookui"] = function()
-    return { face = function() return {} end, muted = function() return 0 end }
+    return { topBarH = function() return 30 end, sz = function(n) return n end, face = function() return {} end }
 end
-package.preload["utils.settings"] = function()
-    return { get = function() return {} end }
+package.preload["ffi/blitbuffer"] = function()
+    return { COLOR_WHITE = 255, COLOR_BLACK = 0, COLOR_LIGHT_GRAY = 200 }
 end
-package.preload["ui.desktop.home.stats"] = function()
-    return { summarize = function() return {} end }
-end
-package.preload["book.highlights"] = function()
-    return { pick = function() end, collect = function() return {} end }
-end
+local layout_pages = 1
 package.preload["ui.desktop.home.layout"] = function()
-    return { build = function(_, state) return { state = state } end }
+    return {
+        new = function()
+            return {
+                paginate = function() return { {} } end,
+                build = function(_, _, components, page, opts)
+                    local pages = layout_pages
+                    page = math.max(1, math.min(pages, math.floor(tonumber(page) or 1)))
+                    local visible = {}
+                    if #enabled <= 1 or pages <= 1 then
+                        for i = 1, #enabled do visible[enabled[i]] = true end
+                        return {
+                            kid = components[enabled[1] or "clock"],
+                            dimen = { w = 600, h = (opts and opts.body_height) or 360 },
+                        }, page, pages, visible
+                    end
+                    local shown = page == 1 and enabled[1] or enabled[2]
+                    visible[shown] = true
+                    return {
+                        kid = components[shown],
+                        dimen = { w = 600, h = (opts and opts.body_height) or 360 },
+                    }, page, pages, visible
+                end,
+            }
+        end,
+    }
 end
-package.preload["logger"] = function()
-    return { err = function() end }
+package.preload["ui.components.pagestrip"] = function()
+    return {
+        bandH = function() return 40 end,
+        widget = function(opts)
+            return { strip = true, page = opts.page, pages = opts.pages, center = opts.center }
+        end,
+    }
 end
-package.preload["gettext"] = function()
-    return function(text) return text end
+package.preload["ui.desktop.home.edit_overlay"] = function()
+    return {
+        wrap = function(widget) return { edited = true, widget = widget } end,
+        addRow = function() return { add = true } end,
+        showMoveDialog = function() end,
+        showHeightDialog = function() end,
+        showAddDialog = function() end,
+    }
 end
+local function widgetStub()
+    return {
+        new = function(_, opts)
+            opts = opts or {}
+            opts.getSize = function(self) return self.dimen or { w = 600, h = 400 } end
+            return opts
+        end,
+    }
+end
+package.preload["ui.components.icon"] = function()
+    return { widget = function(opts) return { name = opts.name, dim = opts.dim } end }
+end
+package.preload["ui/widget/overlapgroup"] = widgetStub
+package.preload["ui/widget/container/framecontainer"] = widgetStub
+package.preload["ui/widget/horizontalgroup"] = widgetStub
+package.preload["ui/widget/verticalgroup"] = widgetStub
+package.preload["ui/widget/verticalspan"] = widgetStub
+package.preload["ui/widget/container/centercontainer"] = widgetStub
+package.preload["ui/widget/container/inputcontainer"] = widgetStub
+package.preload["ui/gesturerange"] = widgetStub
 
 local Home = require("ui.desktop.home")
-local calls = 0
 local desktop = {
+    lifecycle = { state = "Resume" },
     tab = "home",
-    _books_sync_pending = true,
-    _local_cleanup_done = true,
-    source_generation = 0,
-    source = {
-        id = "local",
-        recentBooksAsync = function(_, _, cb)
-            calls = calls + 1
-            cb({ data = { { stable_id = "book-1" } } })
-            return { cancel = function() end }
-        end,
-    },
+    source = { id = "local" },
     contentHeight = function() return 400 end,
-    ctx = function(self) return { desktop = self } end,
-    rebuild = function(self) self.rebuilds = (self.rebuilds or 0) + 1 end,
+    ctx = function(self)
+        return { width = 600, height = 400, desktop = self, source = self.source }
+    end,
 }
+local home = Home:new({ desktop = desktop })
+desktop.home = home
+Assert.eq(home.lifecycle.state, "new")
+Assert.is_nil(home.components)
+home:onCreate()
+Assert.eq(home.lifecycle.state, "Create")
+Assert.not_nil(home.components.clock)
+Assert.eq(home.components.clock.lifecycle.state, "Create")
+Assert.not_nil(home.widget)
 
--- 首屏不等待网络同步，直接读取本地最近阅读。
-Home.page(desktop)
-Assert.is_false(desktop._home_loaded and true or false)
-Assert.eq(#ticks, 1)
-ticks[1]()
-Assert.is_true(desktop._home_loaded)
-Assert.eq(calls, 1)
-Assert.eq(desktop._home_state.recent.stable_id, "book-1")
+home:onResume()
+Assert.eq(home.lifecycle.state, "Resume")
+Assert.eq(home.components.clock.lifecycle.state, "Resume")
 
--- cancel 只是尽力而为：同源旧请求的晚到回调不得覆盖新一轮状态。
-local callbacks = {}
-desktop.source.recentBooksAsync = function(_, _, cb)
-    callbacks[#callbacks + 1] = cb
-    return { cancel = function() end }
-end
-Home.invalidate(desktop)
-ticks[#ticks]()
-local first = callbacks[#callbacks]
-Home.invalidate(desktop)
-ticks[#ticks]()
-local second = callbacks[#callbacks]
-second({ data = { { stable_id = "new" } } })
-first({ data = { { stable_id = "old" } } })
-Assert.eq(desktop._home_state.recent.stable_id, "new")
+-- 设置改布局：关掉的走完关闭生命周期。
+enabled = {}
+placements = {}
+child_events = {}
+home:onEvent("home_changed")
+Assert.is_nil(home.components.clock)
+Assert.eq(table.concat(child_events, ","), "pause,stop,destroy")
 
--- 后台更新保留旧内容；200ms 内重复通知合并，取数完成后只重建一次。
-ticks = {}
-desktop._home_loaded = true
-desktop._home_state = { recent = { stable_id = "visible" } }
-desktop.source.recentBooksAsync = function(_, _, cb)
-    calls = calls + 1
-    cb({ data = { { stable_id = "refreshed" } } })
-    return { cancel = function() end }
-end
-local before_refresh = desktop.rebuilds or 0
-Home.refreshData(desktop)
-Home.refreshData(desktop)
-Assert.eq(#ticks, 1)
-Assert.eq(desktop._home_state.recent.stable_id, "visible")
-ticks[1]()
-Assert.eq(desktop.rebuilds, before_refresh + 1)
-Assert.eq(calls, 2)
+enabled = { "clock" }
+placements = { { id = "clock", page = 1, order = 1, height = "default" } }
+home:onEvent("home_changed")
+child_events = {}
+home:onEvent("source_changed")
+Assert.eq(table.concat(child_events, ""), "")
 
--- 后台同步撞上在飞首页请求时不取消 Turbo；当前请求结束后顺序补拉。
-ticks = {}
-local pending_callback
-local cancels = 0
-desktop.source.recentBooksAsync = function(_, _, cb)
-    calls = calls + 1
-    pending_callback = cb
-    return { cancel = function() cancels = cancels + 1 end }
-end
-Home.fetch(desktop)
-Home.refreshData(desktop, "stats_sync")
-ticks[1]()
-Assert.eq(cancels, 0)
-Assert.is_true(desktop._home_refresh_pending)
-pending_callback({ data = { { stable_id = "pending" } } })
-Assert.is_false(desktop._home_refresh_pending and true or false)
-Assert.eq(#ticks, 1)
-ticks[1]()
-Assert.eq(cancels, 0)
-
--- 进入首页统一入口：清状态 + 重建 + 通知源，下一次 page 必然重拉。
-local emitted
-desktop.plugin = {
-    emitToSource = function(_, event) emitted = event end,
+-- PageStrip 翻页；越界不重建。
+layout_pages = 3
+placements = {
+    { id = "clock", page = 1, order = 1, height = "default" },
 }
-desktop.scheduleClockTick = function() end
-local before = desktop.rebuilds or 0
-Home.refreshOnEnter(desktop)
-Assert.is_false(desktop._home_loaded)
-Assert.is_nil(desktop._home_state)
-Assert.eq(desktop.rebuilds, before + 1)
-Assert.eq(emitted, "home_open")
+enabled = { "clock" }
+home.page = 1
+home:updateView()
+Assert.eq(home.page, 1)
+Assert.eq(home.pages, 3)
+Assert.is_true(home.widget[1] ~= nil)
+home:turn(1)
+Assert.eq(home.page, 2)
+home:onEvent("swipe", { direction = "west" })
+Assert.eq(home.page, 3)
+home:turn(1)
+Assert.eq(home.page, 3)
+home:onEvent("swipe", { direction = "east" })
+Assert.eq(home.page, 2)
+home:turn(-10)
+Assert.eq(home.page, 1)
+layout_pages = 1
+home:updateView()
+Assert.eq(home.page, 1)
+Assert.eq(home.pages, 1)
 
--- 不在首页时只作废状态，不重建（避免在设置页乱刷屏）。
-desktop.tab = "settings"
-desktop._home_loaded = true
-Home.invalidate(desktop)
-Assert.is_false(desktop._home_loaded)
-Assert.eq(desktop.rebuilds, before + 1)
+-- 翻页：当前页 Resume，离开的页 onPause。非当前页停在 Create。
+enabled = { "clock", "weather" }
+placements = {
+    { id = "clock", page = 1, order = 1, height = "default" },
+    { id = "weather", page = 2, order = 1, height = "default" },
+}
+layout_pages = 2
+home.page = 1
+child_events = {}
+home:updateView()
+Assert.eq(home.components.clock.lifecycle.state, "Resume")
+Assert.eq(home.components.weather.lifecycle.state, "Create")
+Assert.eq(table.concat(child_events, ","), "weather.create")
+child_events = {}
+home:turn(1)
+Assert.eq(home.page, 2)
+Assert.eq(home.components.clock.lifecycle.state, "Pause")
+Assert.eq(home.components.weather.lifecycle.state, "Resume")
+Assert.eq(table.concat(child_events, ","), "pause,weather.start,weather.resume")
+child_events = {}
+home:turn(-1)
+Assert.eq(home.components.clock.lifecycle.state, "Resume")
+Assert.eq(home.components.weather.lifecycle.state, "Pause")
+Assert.eq(table.concat(child_events, ","), "weather.pause,resume")
+
+-- 长按进编辑；暂停退出编辑并保存。
+Assert.is_false(home.editing)
+home:enterEdit()
+Assert.is_true(home.editing)
+home:onPause()
+Assert.is_false(home.editing)
+
+home:onDestroy()
+Assert.eq(home.lifecycle.state, "Destroy")
+home:onResume()
+Assert.is_nil(home.desktop)
 
 return true

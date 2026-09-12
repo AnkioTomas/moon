@@ -1,7 +1,6 @@
 --[[-- HTTP 调试日志必须可追踪请求，且不能泄露 URL 凭据与查询参数。 --]]
 
 local Assert = require("support.assert")
-local Stubs = require("support.stubs")
 
 local lines = {}
 package.preload["utils.log"] = function()
@@ -18,7 +17,8 @@ package.loaded["utils.log"] = nil
 package.loaded["http.request"] = nil
 
 local Request = require("http.request")
-Request.ensureTurbo = function() return false end
+local Turbo = require("http.turbo")
+Turbo.acquire = function() return nil end
 
 local received
 Request.request({
@@ -27,7 +27,6 @@ Request.request({
 }, function(_, err)
     received = err
 end)
-Stubs.flush()
 
 local output = table.concat(lines, "\n")
 Assert.not_nil(output:find("book.http start", 1, true))

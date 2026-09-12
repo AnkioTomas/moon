@@ -64,40 +64,67 @@ package.preload["ui.components.bookinfo"] = function()
         end,
     }
 end
-package.preload["ui.components.pager"] = function()
+package.preload["ui.components.pagestrip"] = function()
     return {
         bandH = function() return 20 end,
         clamp = function(page, pages)
             return math.max(1, math.min(pages, page))
         end,
-        band = function(_, page, pages, handlers)
-            pager = { page = page, pages = pages, handlers = handlers }
+        widget = function(opts)
+            pager = {
+                page = opts.page,
+                pages = opts.pages,
+                handlers = { on_prev = opts.on_prev, on_next = opts.on_next },
+            }
             return pager
         end,
     }
 end
 
-local List = require("ui.desktop.home.components.recent_list")
-local range = List.heightRange({}, {}, { width = 600 })
+local dirty = 0
+package.preload["ui/uimanager"] = function()
+    return { setDirty = function() dirty = dirty + 1 end }
+end
+package.preload["ui/event"] = function()
+    return { new = function(_, name) return { handler = "on" .. name } end }
+end
+
+local shelf_reading = {}
+package.preload["book.catalog"] = function()
+    return {
+        recentShelf = function()
+            return nil, shelf_reading, nil
+        end,
+    }
+end
+
+local List = require("ui.desktop.home.views.recent_list")
+local list = List:new()
+local range = list:heightRange({}, { width = 600 })
 Assert.eq(range.min, 218)
 Assert.eq(range.preferred, 404)
 Assert.eq(range.max, 590)
 Assert.eq(range.step, 186)
 
 local opened
-local rebuilds = 0
+package.preload["ui.desktop.detail"] = function()
+    return { open = function(_, book) opened = book end }
+end
+local view_updates = 0
 local desktop = {
-    showDetail = function(_, book) opened = book end,
-    rebuild = function() rebuilds = rebuilds + 1 end,
+    updateView = function() view_updates = view_updates + 1 end,
 }
 local books = {}
 for i = 1, 5 do books[i] = { title = "book" .. i } end
-local part = List.build({ desktop = desktop }, { reading = books }, {
+shelf_reading = books
+list.lifecycle.state = "Resume"
+local part = list:build({ desktop = desktop, source = { id = "local" } }, {
     width = 600,
     height = 404,
     desktop = desktop,
+    y = 40,
 })
-Assert.eq(part.height, 404)
+Assert.eq(part:getSize().h, 404)
 Assert.len(covers, 4)
 Assert.eq(covers[1].w, 100)
 Assert.eq(taps[1].w, 100)
@@ -107,8 +134,24 @@ Assert.eq(pager.pages, 2)
 Assert.eq(texts[#texts], "最近阅读 · 5")
 taps[1].callback()
 Assert.eq(opened, books[1])
+covers = {}
 pager.handlers.on_next()
-Assert.eq(desktop._home_reading_page, 2)
-Assert.eq(rebuilds, 1)
+Assert.eq(list.page, 2)
+Assert.eq(view_updates, 0)
+Assert.eq(dirty, 1)
+Assert.len(covers, 1)
+Assert.eq(pager.page, 2)
+list:onEvent("source_changed")
+Assert.is_nil(list.page)
+
+local pauses = 0
+list.content_widget = { handleEvent = function(_, event)
+    Assert.eq(event.handler, "onHomePause")
+    pauses = pauses + 1
+end }
+list:onPause()
+list:onDestroy()
+Assert.eq(pauses, 1)
+Assert.is_nil(list.widget)
 
 return true

@@ -35,7 +35,7 @@ package.preload["ui/uimanager"] = function() return {} end
 local Settings = require("ui.desktop.settings.reader")
 local desktop = {}
 
-local sections = Settings.sections(desktop)
+local sections = Settings.new():sections(desktop)
 local reading
 for _, section in ipairs(sections) do
     Assert.is_true(section.title ~= "阅读弹窗")
@@ -46,7 +46,7 @@ Assert.eq(reading.rows[1](600).title, "阅读页顶栏")
 Assert.eq(reading.rows[4](600).title, "读到 99% 自动标记已读")
 Assert.is_false(reading.rows[4](600).status_on)
 
-local popup_rows = Settings.popupRows(desktop)
+local popup_rows = Settings.new():popupRows(desktop)
 Assert.len(popup_rows, 11)
 Assert.eq(popup_rows[1](600).title, "选择")
 Assert.eq(popup_rows[11](600).title, "搜索")

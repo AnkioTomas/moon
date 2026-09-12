@@ -6,19 +6,23 @@ local build_opts
 local search_apply
 local remembered
 package.preload["ui.desktop.library"] = function()
-    return {
-        build = function(_ctx, _state, opts)
-            build_opts = opts
-            return { books = _state.books, opts = opts }
-        end,
-        showSearch = function(_desktop, apply)
-            search_apply = apply
-        end,
-        syncPageSize = function(desktop)
-            desktop.page_size = 2
-            return 2
-        end,
-    }
+    local Library = {}
+    Library.__index = Library
+    function Library.new(desktop)
+        return setmetatable({ desktop = desktop, page_size = 2 }, Library)
+    end
+    function Library:build(_ctx, _state, opts)
+        build_opts = opts
+        return { books = _state.books, opts = opts }
+    end
+    function Library:showSearch(apply)
+        search_apply = apply
+    end
+    function Library:syncPageSize()
+        self.page_size = 2
+        return 2
+    end
+    return Library
 end
 package.preload["book.store"] = function()
     return { rememberMany = function(books) remembered = books end }
@@ -31,18 +35,19 @@ package.preload["gettext"] = function()
 end
 
 local Store = require("ui.desktop.store")
-local rebuilds = 0
+local view_updates = 0
 local desktop = {
+    lifecycle = { state = "Resume" },
     filter = { category = "历史" },
-    store_page = 4,
-    _store_state = { books = {} },
     tab = "library",
-    rebuild = function() rebuilds = rebuilds + 1 end,
+    updateView = function() view_updates = view_updates + 1 end,
     ctx = function(self) return { desktop = self } end,
 }
+local store = Store.new(desktop)
+desktop.store = store
 
 -- 书城复用图书馆网格，但工具栏只允许搜索。
-Store.build({ desktop = desktop }, {}, {})
+store:build({ desktop = desktop }, {}, {})
 Assert.is_true(build_opts.search_only)
 Assert.is_false(build_opts.show_status)
 Assert.is_true(type(build_opts.on_search) == "function")
@@ -52,17 +57,17 @@ Assert.is_true(type(build_opts.on_clear) == "function")
 build_opts.on_search()
 Assert.is_true(type(search_apply) == "function")
 search_apply("Lua")
-Assert.eq(desktop.store_search, "Lua")
+Assert.eq(store.search, "Lua")
 Assert.eq(desktop.filter.category, "历史")
-Assert.eq(desktop.store_page, 1)
-Assert.is_nil(desktop._store_state)
+Assert.eq(store.page, 1)
+Assert.is_nil(store.state)
 Assert.eq(desktop.tab, "store")
-Assert.eq(rebuilds, 1)
+Assert.eq(view_updates, 1)
 
 -- 输入框内也能清空搜索。
 search_apply("")
-Assert.is_nil(desktop.store_search)
-Assert.eq(rebuilds, 2)
+Assert.is_nil(store.search)
+Assert.eq(view_updates, 2)
 
 -- 后端固定只请求第一页最多 200 本，后续页在内存中切片。
 local requests = 0
@@ -81,37 +86,44 @@ desktop.source = {
 }
 desktop.source_generation = 1
 desktop.tab = "store"
-desktop.store_page = 1
-Store.fetch(desktop)
+store.page = 1
+store:fetch()
 Assert.eq(request_opts.page, 1)
 Assert.eq(request_opts.page_size, 200)
 Assert.eq(requests, 1)
-Assert.len(desktop._store_books, 200)
+Assert.len(store.books, 200)
 Assert.len(remembered, 200)
-Assert.eq(desktop.store_total, 200)
-Assert.len(desktop._store_state.books, 2)
-Assert.eq(desktop._store_state.books[1].stable_id, "1")
+Assert.eq(store.total, 200)
+Assert.len(store.state.books, 2)
+Assert.eq(store.state.books[1].stable_id, "1")
 
-Store.gotoPage(desktop, 2)
+store:gotoPage(2)
 Assert.eq(requests, 1)
-Assert.eq(desktop.store_page, 2)
-Assert.len(desktop._store_state.books, 2)
-Assert.eq(desktop._store_state.books[1].stable_id, "3")
+Assert.eq(store.page, 2)
+Assert.len(store.state.books, 2)
+Assert.eq(store.state.books[1].stable_id, "3")
+store:onEvent("swipe", { direction = "east" })
+Assert.eq(store.page, 1)
+store:onEvent("swipe", { direction = "west" })
+Assert.eq(store.page, 2)
 
 -- 切 Tab 清掉渲染态后仍复用已加载结果。
-desktop._store_state = nil
-local page = Store.page(desktop)
+store.state = nil
+local page = store:updateView()
 Assert.eq(requests, 1)
 Assert.eq(page.books[1].stable_id, "3")
 
 -- 搜索和清除会换查询；HTTP 层负责命中持久化缓存。
-Store.applySearch(desktop, "Lua")
-Store.fetch(desktop)
+store:applySearch("Lua")
+store:fetch()
 Assert.eq(requests, 2)
 Assert.eq(request_opts.search, "Lua")
-Store.build({ desktop = desktop }, {}, {})
+store:build({ desktop = desktop }, {}, {})
 build_opts.on_clear()
-Assert.is_nil(desktop.store_search)
-Store.fetch(desktop)
+Assert.is_nil(store.search)
+store:fetch()
 Assert.eq(requests, 3)
 Assert.eq(request_opts.search, "")
+store:onEvent("source_changed")
+Assert.is_nil(store.books)
+Assert.eq(store.page, 1)

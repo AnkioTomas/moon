@@ -11,7 +11,7 @@ end
 package.preload["ui/uimanager"] = function()
     return { show = function() end, close = function() end }
 end
-package.preload["ui.components.popup"] = function()
+package.preload["ui.views.popup"] = function()
     return { list = function() end }
 end
 
@@ -81,7 +81,7 @@ package.preload["ffi/util"] = function()
 end
 
 local QuickPanel = require("ui.panel.settings")
-local desktop = { rebuild = function() end }
+local desktop = { updateView = function() end }
 local desktop_rows = QuickPanel.desktopRows(desktop)
 local reader_rows = QuickPanel.readerRows(desktop)
 

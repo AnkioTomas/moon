@@ -40,31 +40,45 @@ package.preload["ui.components.bookui"] = function()
     }
 end
 
-local Hero = require("ui.desktop.home.components.recent_hero")
-local range = Hero.heightRange({}, {}, { height = 500 })
+local shelf_recent = { stable_id = "book" }
+local shelf_err
+package.preload["book.catalog"] = function()
+    return {
+        recentShelf = function()
+            return shelf_recent, {}, shelf_err
+        end,
+    }
+end
+
+local Hero = require("ui.desktop.home.views.recent_hero")
+local hero = Hero:new()
+local range = hero:heightRange({}, { height = 500 })
 Assert.eq(range.min, 132)
 Assert.eq(range.max, 500)
 
 local opened
-local book = { stable_id = "book" }
-local part = Hero.build({
+local book = shelf_recent
+local part = hero:build({
     plugin = { openBook = function(_, value) opened = value end },
-}, { recent = book }, { width = 600, height = 160 })
-Assert.eq(part.height, 160)
+    source = { id = "local" },
+}, { width = 600, height = 160 })
+Assert.eq(part:getSize().h, 160)
 Assert.eq(hero_cover_width, 98)
-Hero.build({
+hero:build({
     plugin = { openBook = function(_, value) opened = value end },
-}, { recent = book }, { width = 600, height = 300 })
+    source = { id = "local" },
+}, { width = 600, height = 300 })
 Assert.eq(hero_cover_width, 192)
 hero_tap()
 Assert.eq(opened, book)
 
 local switched
-Hero.build({
+shelf_recent, shelf_err = nil, nil
+hero:build({
     desktop = {
         switchTab = function(_, tab) switched = tab end,
     },
-}, {}, { width = 600, height = 160 })
+}, { width = 600, height = 160 })
 empty_tap()
 Assert.eq(switched, "library")
 

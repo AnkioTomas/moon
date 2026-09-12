@@ -11,7 +11,7 @@ for _, name in ipairs({
     "ui/geometry",
     "ui/widget/infomessage",
     "ui/network/manager",
-    "ui.components.pager",
+    "ui.components.pagestrip",
     "book.store",
     "db.book",
     "ui.components.bookui",
@@ -32,11 +32,20 @@ end
 package.preload["book.stats"] = function()
     error("统计页面不得直接同步远端")
 end
+for _, name in ipairs({
+    "ui.desktop.insight.overview",
+    "ui.desktop.insight.day",
+    "ui.desktop.insight.records",
+}) do
+    package.preload[name] = function()
+        return { new = function() return {} end }
+    end
+end
 
 package.loaded["ui.desktop.insight"] = nil
 local Insight = require("ui.desktop.insight")
 
-local insight_reads, rebuilds = 0, 0
+local insight_reads, view_updates = 0, 0
 local source = {
     id = "wechat",
     capabilities = function() return { insight = true, stats_pull = true } end,
@@ -51,15 +60,19 @@ local source = {
     end,
 }
 local desktop = {
+    lifecycle = { state = "Resume" },
     tab = "stats",
     source = source,
     source_generation = 1,
-    rebuild = function() rebuilds = rebuilds + 1 end,
+    updateView = function() view_updates = view_updates + 1 end,
 }
 
-Insight.fetch(desktop)
+local insight = Insight.new(desktop)
+desktop.insight = insight
+insight:fetch()
 Assert.eq(insight_reads, 1)
-Assert.is_true(desktop._insight_loaded)
-Assert.is_false(desktop._insight_fetching)
-Assert.eq(rebuilds, 1)
+Assert.is_true(insight.loaded)
+Assert.is_false(insight.fetching)
+Assert.eq(view_updates, 1)
 
+return true

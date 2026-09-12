@@ -87,7 +87,7 @@ Marks.ui = {
 }
 Marks.view = Marks.ui.view
 Marks._render_key = nil
-Marks:rebuild()
+Marks:updateView()
 Assert.len(Marks._marks, 0, "首帧不能执行文本搜索")
 Assert.len(find_calls, 0)
 Stubs.flush()
@@ -103,9 +103,9 @@ Assert.len(Marks._marks, 0)
 Assert.eq(Marks._revision, 1)
 
 -- 快速滚动时，旧位置任务必须作废，只扫描最新位置。
-Marks:rebuild()
+Marks:updateView()
 current_pos = 100
-Marks:rebuild()
+Marks:updateView()
 Stubs.flush()
 Assert.eq(job_runs, 2, "防抖后只能为最新位置启动一个任务")
 Assert.eq(job_cancels, 0, "尚未启动的防抖任务不需要取消")
@@ -117,11 +117,11 @@ Assert.eq(find_calls[4].pos, 100)
 -- 防抖结束后已排队的旧页任务，也必须在下一次翻页时取消。
 hold_jobs = true
 current_pos = 200
-Marks:rebuild()
+Marks:updateView()
 Stubs.flush()
 Assert.eq(job_runs, 3)
 current_pos = 300
-Marks:rebuild()
+Marks:updateView()
 Assert.eq(job_cancels, 1)
 hold_jobs = false
 Stubs.flush()
@@ -161,7 +161,7 @@ package.preload["db.xray"] = function()
 end
 package.loaded["db.xray"] = nil
 Marks._render_key = nil
-Marks:rebuild()
+Marks:updateView()
 Assert.len(searched_pages, 0)
 Stubs.flush()
 Assert.eq(job_runs, 5)
@@ -177,7 +177,7 @@ Assert.is_true(Marks:onTap({ pos = { x = 25, y = 5 } }))
 Assert.eq(opened, "Whitby")
 
 page = 4
-Marks:rebuild()
+Marks:updateView()
 Stubs.flush()
 Assert.eq(searched_pages[2], 4)
 

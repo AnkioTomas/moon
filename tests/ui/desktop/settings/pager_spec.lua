@@ -69,16 +69,35 @@ package.preload["host"] = function() return { OPEN_ON_START_ID = "book" } end
 package.preload["ui/language"] = function()
     return { getLanguageName = function() return "简体中文" end }
 end
-package.preload["ui.desktop.settings.source"] = function() return { sections = function() return {} end } end
-package.preload["ui.desktop.settings.display"] = function() return { rows = function() return {} end } end
-package.preload["ui.desktop.settings.lockscreen"] = function() return { rows = function() return {} end } end
-package.preload["ui.desktop.settings.desktop"] = function() return { rows = function() return {} end } end
-package.preload["ui.desktop.settings.home"] = function() return { sections = function() return {} end } end
-package.preload["ui.desktop.settings.topbar"] = function() return { rows = function() return {} end } end
-package.preload["ui.desktop.settings.language"] = function() return { rows = function() return {} end } end
-package.preload["ui.desktop.settings.ai"] = function() return { rows = function() return {} end } end
+local function pageMod(api)
+    return { new = function() return api end }
+end
+package.preload["ui.desktop.settings.source"] = function()
+    return pageMod({ sections = function() return {} end })
+end
+package.preload["ui.desktop.settings.display"] = function()
+    return pageMod({ rows = function() return {} end })
+end
+package.preload["ui.desktop.settings.lockscreen"] = function()
+    return pageMod({ rows = function() return {} end })
+end
+package.preload["ui.desktop.settings.desktop"] = function()
+    return pageMod({ rows = function() return {} end })
+end
+package.preload["ui.desktop.settings.home"] = function()
+    return pageMod({ sections = function() return {} end })
+end
+package.preload["ui.desktop.settings.topbar"] = function()
+    return pageMod({ rows = function() return {} end })
+end
+package.preload["ui.desktop.settings.language"] = function()
+    return pageMod({ rows = function() return {} end })
+end
+package.preload["ui.desktop.settings.ai"] = function()
+    return pageMod({ rows = function() return {} end })
+end
 package.preload["ui.desktop.settings.reader"] = function()
-    return { sections = function() return {} end, popupRows = function() return {} end }
+    return pageMod({ sections = function() return {} end, popupRows = function() return {} end })
 end
 package.preload["remote.ui"] = function() return { menuRows = function() return {} end } end
 package.preload["ui.panel.settings"] = function()
@@ -93,10 +112,10 @@ package.preload["ui.desktop.settings.maintenance"] = function()
     local function row()
         return function() return {} end
     end
-    return {
+    return pageMod({
         cacheRow = row, debugLogRow = row, autoUpdateRow = row,
         updateRow = row, aboutRow = row, closeRow = row,
-    }
+    })
 end
 
 local previous_settings = _G.G_reader_settings
@@ -104,13 +123,15 @@ _G.G_reader_settings = {
     readSetting = function() return nil end,
 }
 
-require("ui.desktop.settings").build({
+local desktop = {
     plugin = {},
     dimen = { w = 600 },
-    _settings_page = 1,
     contentHeight = function() return 800 end,
-    showSettingsSub = function() end,
-})
+    updateView = function() end,
+}
+local settings = require("ui.desktop.settings"):new{ desktop = desktop }
+desktop.settings = settings
+settings:build()
 
 -- 800 内容高 - 50 分页带 - 16 顶边距 - 4 底边距
 Assert.eq(packed_h, 730)

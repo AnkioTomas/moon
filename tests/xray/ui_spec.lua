@@ -7,7 +7,7 @@ package.preload["gettext"] = function() return function(value) return value end 
 package.preload["ffi/util"] = function()
     return { template = function(value) return value end }
 end
-package.preload["ui.components.popup"] = function() return {} end
+package.preload["ui.views.popup"] = function() return {} end
 package.preload["ui/uimanager"] = function()
     return { show = function() end, close = function() end }
 end

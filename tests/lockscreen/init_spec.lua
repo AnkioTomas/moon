@@ -95,6 +95,14 @@ package.preload["lockscreen.components.current"] = function()
     }
 end
 
+package.preload["ui.components.image"] = function()
+    return {
+        await = function(root, cb)
+            cb()
+        end,
+    }
+end
+
 package.preload["lockscreen.render"] = function()
     return {
         size = function() return 480, 800 end,
@@ -120,6 +128,7 @@ _G.G_reader_settings = {
 package.loaded["http.request"] = nil
 package.loaded["ui/network/manager"] = nil
 package.loaded["lockscreen.background"] = nil
+package.loaded["ui.components.image"] = nil
 package.loaded["lockscreen.compose"] = nil
 package.loaded["lockscreen.components.current"] = nil
 package.loaded["lockscreen.init"] = nil

@@ -36,7 +36,6 @@ package.preload["ui.components.bookinfo"] = function()
     return {
         cover = function(_, _, book, width, height, opts)
             cover_book = book
-            Assert.is_true(opts.sync)
             Assert.is_false(opts.shadow)
             return {
                 getSize = function() return { w = width, h = height } end,

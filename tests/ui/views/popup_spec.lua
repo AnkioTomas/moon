@@ -1,10 +1,10 @@
 --[[--
-ui.components.popup 离线用例：单选/多选、current 跳页、setListItems。
+ui.views.popup 离线用例：单选/多选、current 跳页、setListItems。
 
 Menu/ButtonDialog/SpinWidget/CheckMark 等 KOReader 控件用最小假身，
 只复刻 popup 依赖的行为（页码计算、switchItemTable 的 itemnumber 语义）。
 
-@module tests.ui.components.popup_spec
+@module tests.ui.views.popup_spec
 --]]
 
 local Assert = require("support.assert")
@@ -72,22 +72,26 @@ package.preload["ffi/blitbuffer"] = function()
     return { COLOR_BLACK = 1, COLOR_WHITE = 0 }
 end
 
-package.preload["ui.components.bottombar"] = function()
+package.preload["ui.views.bottombar"] = function()
     return {
-        build = function(tabs, active, on_tab)
-            return {
-                _tabs = tabs,
-                _active = active,
-                _on_tab = on_tab,
+        new = function(_, opts)
+            local data = opts.data
+            local widget = {
+                _tabs = data.tabs,
+                _active = data.active,
+                _on_tab = data.on_tab,
                 getSize = function() return { w = 400, h = 60 } end,
             }
+            return { data = data, onCreate = function() end, onStart = function() end,
+                onResume = function() end, build = function() return widget end,
+                updateView = function(_, next_data) widget._active = next_data.active return widget end }
         end,
     }
 end
 
 package.preload["ui.components.surface"] = function()
     return {
-        pill = function(inner) return { _pill = inner } end,
+        build = function(opts) return { _pill = opts.child } end,
     }
 end
 
@@ -207,7 +211,7 @@ UIManager.close = function(_, w)
     closed_widgets[#closed_widgets + 1] = w
 end
 
-local Popup = require("ui.components.popup")
+local Popup = require("ui.views.popup")
 
 -- —— 单选：点按关闭并回传 value ——
 
