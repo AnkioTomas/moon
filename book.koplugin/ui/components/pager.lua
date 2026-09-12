@@ -40,6 +40,7 @@ local T = require("ffi/util").template
 
 local Screen = Device.screen
 
+---@class BookPager
 local Pager = {}
 
 --- 底部分页带高度（含贴底 padding）。

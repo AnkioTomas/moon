@@ -51,6 +51,7 @@ local UI = require("ui.components.bookui")
 local Single = require("ui.components.popup.single")
 local Multi = require("ui.components.popup.multi")
 
+---@class BookPopup
 local Popup = {}
 
 --- 全屏选项列表（翻页，不滚动）。
