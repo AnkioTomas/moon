@@ -269,7 +269,7 @@ end
 ---@return table|nil
 function BookInfo.progressBadge(cw, pct)
     if not pct or pct <= 0 then return nil end
-    local badge = Surface:new{ child = TextWidget:new{
+    local badge = Surface.build{ child = TextWidget:new{
             text = string.format("%.0f%%", pct),
             face = UI.face("xx_smallinfofont", 10),
             fgcolor = Blitbuffer.COLOR_WHITE,
@@ -281,7 +281,7 @@ function BookInfo.progressBadge(cw, pct)
             height = UI.sz(16),
             background = statusInk(),
             shadow = false,
-        }, kind = "pill" }:build()
+        }, kind = "pill" }
     local bz = badge:getSize()
     local inset = UI.sz(4)
     badge.overlap_offset = {
@@ -482,14 +482,14 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
             if on_ready then on_ready(path) end
         end,
     }
-    local cover = Surface:new{ child = image, options = {
+    local cover = Surface.build{ child = image, options = {
         padding = cover_pad,
         radius = UI.cardRadius(),
         background = UI.surface(),
         clip = true,
         clip_background = UI.surface(),
         shadow = opts.shadow,
-    }, kind = "card" }:build()
+    }, kind = "card" }
     local status = BookInfo.statusOverlays(book)
     local show_read = opts.ribbon and status.read
     local show_pct = opts.badge and status.percent
@@ -634,7 +634,7 @@ function BookInfo.hero(plugin, source, book, opts)
     end
 
     local pad_v = UI.sz(6)
-    local widget = Surface:new{ child = HorizontalGroup:new{
+    local widget = Surface.build{ child = HorizontalGroup:new{
             align = "top",
             cover_box,
             HorizontalSpan:new{ width = gap },
@@ -649,7 +649,7 @@ function BookInfo.hero(plugin, source, book, opts)
         background = false,
         radius = 0,
         shadow = false,
-    }, kind = "card" }:build()
+    }, kind = "card" }
     return widget, widget:getSize().h
 end
 
