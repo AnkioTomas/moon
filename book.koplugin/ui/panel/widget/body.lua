@@ -51,13 +51,13 @@ local Body = InputContainer:extend{
 function Body:init()
     self.gap = UI.sz(6)
     self.tile_h = UI.sz(64)
-    self:rebuild()
+    self:updateView()
 end
 
 --- 重新计算网格列数并重建完整纵向布局。
 ---@param self BookQuickPanelBody
 ---@return void
-function Body:rebuild()
+function Body:updateView()
     local actions = self.actions or {}
     local sliders = self.sliders or {}
     local columns = columnCount(self.width, #actions, self.gap)

@@ -6,6 +6,7 @@
 
 local Event = require("ui/event")
 
+---@class ReaderDocumentToc
 local DocumentToc = {}
 local list_cache = setmetatable({}, { __mode = "k" })
 

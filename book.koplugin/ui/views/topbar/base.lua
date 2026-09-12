@@ -1,11 +1,11 @@
 --[[--
 顶栏小组件基类：Lifecycle + 可见性 + 原地刷新。
 
-@module koplugin.book.ui.components.topbar.base
+@module koplugin.book.ui.views.topbar.base
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local BaseView = require("ui.baseview")
+local View = require("ui.view")
 local Icon = require("ui.components.icon")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
@@ -13,17 +13,18 @@ local UIManager = require("ui/uimanager")
 local MoonSettings = require("utils.settings")
 local logger = require("utils.log")
 
----@class BookTopBarItem : BaseView
+---@class BookTopBarItem : View
 ---@field id string 顶栏项目注册标识
 ---@field interval number|nil Resume 后的固定刷新间隔（秒）
 ---@field topbar BookTopBar 拥有本项目的顶栏实例
----@field widget table|nil BaseView 拥有的稳定根容器
+---@field widget table|nil View 拥有的稳定根容器
 ---@field metric_widget table|nil 实際图标或文字控件，与稳定根分离
 ---@field ctx BookTopBarBuildCtx|nil 当前顶栏构建尺寸
 ---@field rect table|nil 本项目在屏幕上的绝对刷新矩形
 ---@field _tick fun()|nil 当前定时刷新回调，用于取消调度
-local Base = setmetatable({}, BaseView)
+local Base = {}
 Base.__index = Base
+setmetatable(Base, View)
 Base.ICON_SIZE = 14
 
 --- 顶栏项目是否显示。缺失或损坏的旧配置按显示处理。
@@ -171,12 +172,12 @@ function Base:read()
     error("topbar item must implement read")
 end
 
---- 保存构建上下文并返回 BaseView 缓存的稳定根容器。
+--- 保存构建上下文并返回 View 缓存的稳定根容器。
 ---@param ctx BookTopBarBuildCtx|nil 构建上下文，提供尺寸、数据源和桌面宿主
 ---@return table|nil
 function Base:build(ctx)
     self.ctx = ctx
-    return BaseView.build(self)
+    return View.build(self)
 end
 
 --- 停止顶栏项目时取消定时刷新。

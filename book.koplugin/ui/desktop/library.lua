@@ -36,7 +36,7 @@ local UI = require("ui.components.bookui")
 local Icon = require("ui.components.icon")
 local Surface = require("ui.components.surface")
 local Pager = require("ui.components.pager")
-local Popup = require("ui.components.popup")
+local Popup = require("ui.views.popup")
 local BookDB = require("db.book")
 local MoonSettings = require("utils.settings")
 local _ = require("gettext")
@@ -44,7 +44,47 @@ local T = require("ffi/util").template
 local Screen = Device.screen
 
 local Library = {}
+Library.__index = Library
 
+---@class BookLibrary
+---@field desktop BookDesktop
+---@field filter table
+---@field page number
+---@field page_size number
+---@field total number
+---@field group table|nil
+---@field groups_state table|nil
+---@field state table|nil
+---@field fetch_cancel table|nil
+---@field view_picker table|nil
+
+--- 创建图书馆实例，独立持有筛选、分组、分页和请求句柄。
+---@param desktop BookDesktop 所属桌面实例
+---@return BookLibrary
+function Library.new(desktop)
+    return setmetatable({
+        desktop = desktop,
+        filter = {},
+        page = 1,
+        page_size = 12,
+        total = 0,
+        group = nil,
+        groups_state = nil,
+        state = nil,
+        fetch_cancel = nil,
+        view_picker = nil,
+    }, Library)
+end
+
+--- 从桌面取得其拥有的图书馆实例；无桌面时返回 nil。
+---@param desktop BookDesktop|nil 所属桌面实例
+---@return BookLibrary|nil library 所属图书馆实例
+local function libraryOf(desktop)
+    return desktop and desktop.library
+end
+
+
+--- 读取已保存的图书馆视图模式，未知值回退到平铺书架。
 ---@return "flat"|"category"|"series"|"status"
 local function viewMode()
     local mode = MoonSettings.get("display").library_view
@@ -54,50 +94,54 @@ local function viewMode()
     return "flat"
 end
 
----@param desktop table
+--- 判断是否处于分组视图的索引页，而不是某个分组内部。
 ---@return boolean
-function Library.isGroupIndex(desktop)
-    return viewMode() ~= "flat" and desktop._library_group == nil
+function Library:isGroupIndex()
+    return viewMode() ~= "flat" and self.group == nil
 end
 
----@param desktop table
----@param mode "flat"|"category"|"series"|"status"
-function Library.setView(desktop, mode)
+--- 保存新的书架视图模式，清空旧筛选和分组状态后刷新桌面。
+---@param mode "flat"|"category"|"series"|"status" 当前布局、筛选或展示模式
+---@return nil
+function Library:setView(mode)
     local display = MoonSettings.get("display")
     display.library_view = mode
     MoonSettings.saveSection("display", display)
-    desktop._library_group = nil
-    desktop._library_groups_state = nil
-    desktop._library_state = nil
-    desktop.filter = {}
-    desktop.page = 1
-    desktop.total = 0
-    desktop:rebuild()
+    self.group = nil
+    self.groups_state = nil
+    self.state = nil
+    self.filter = {}
+    self.page = 1
+    self.total = 0
+    self.desktop:updateView()
 end
 
----@param desktop table
+--- 进入选定分组，重置书籍列表和分页后刷新桌面。
 ---@param value string 空串表示未分类/无系列
-function Library.enterGroup(desktop, value)
-    desktop._library_group = { mode = viewMode(), value = value }
-    desktop._library_state = nil
-    desktop.filter = {}
-    desktop.page = 1
-    desktop.total = 0
-    desktop:rebuild()
+---@return nil
+function Library:enterGroup(value)
+    self.group = { mode = viewMode(), value = value }
+    self.state = nil
+    self.filter = {}
+    self.page = 1
+    self.total = 0
+    self.desktop:updateView()
 end
 
----@param desktop table
-function Library.leaveGroup(desktop)
-    desktop._library_group = nil
-    desktop._library_state = nil
-    desktop.filter = {}
-    desktop.page = 1
-    local state = desktop._library_groups_state
-    desktop.total = state and #(state.groups or {}) or 0
-    desktop:rebuild()
+--- 退出分组并恢复分组索引页的总数和初始分页。
+---@return nil
+function Library:leaveGroup()
+    self.group = nil
+    self.state = nil
+    self.filter = {}
+    self.page = 1
+    local state = self.groups_state
+    self.total = state and #(state.groups or {}) or 0
+    self.desktop:updateView()
 end
 
----@param mode string
+--- 取得分类、系列或阅读状态分组使用的数据字段和显示文案。
+---@param mode string 当前布局、筛选或展示模式
 ---@return table
 local function groupDefinition(mode)
     if mode == "series" then
@@ -118,8 +162,9 @@ local function groupDefinition(mode)
     }
 end
 
----@param desktop table
-function Library.showViewPicker(desktop)
+--- 显示书架视图模式菜单，选择后应用并持久化模式。
+---@return nil
+function Library:showViewPicker()
     local current = viewMode()
     local choices = {
         { value = "flat", text = _("书架视图") },
@@ -133,20 +178,20 @@ function Library.showViewPicker(desktop)
         items[#items + 1] = {
             text = choice.text,
             checked = value == current,
-            callback = function() Library.setView(desktop, value) end,
+            callback = function() self:setView(value) end,
         }
     end
-    desktop._library_view_picker = Popup.sheet{
+    self.view_picker = Popup.sheet{
         title = _("图书馆视图"),
         items = items,
-        close_callback = function() desktop._library_view_picker = nil end,
+        close_callback = function() self.view_picker = nil end,
     }
 end
 
 --- 顶栏入口：图标 + 文字，无边框。
----@param icon_name string
----@param text string
----@param callback fun()|nil
+---@param icon_name string 图标名称；nil 时按纯文字处理
+---@param text string 需要展示的文字
+---@param callback fun()|nil 用户触发操作后执行的回调
 ---@return table
 local function iconAction(icon_name, text, callback)
     local content = Icon.label{
@@ -164,38 +209,42 @@ local function iconAction(icon_name, text, callback)
     local tap = BookInfo.tappable(tw, th, callback)
     tap[1] = CenterContainer:new{
         dimen = Geom:new{ w = tw, h = th },
-        Surface.pill(content, {
+        Surface.build{ child = content, options = {
             padding = UI.sz(6),
             width = tw,
             height = th,
             shadow = false,
-        }),
+        }, kind = "pill" },
     }
     return tap
 end
 
 --- 应用书名搜索。
----@param desktop table
----@param value string|nil
-function Library.applySearch(desktop, value)
-    desktop.filter = value and value ~= "" and { search = value } or {}
-    desktop.page = 1
-    desktop._library_state = nil
-    desktop.tab = "library"
-    desktop:rebuild()
+---@param value string|nil 当前设置项的值
+---@return nil
+function Library:applySearch(value)
+    self.filter = value and value ~= "" and { search = value } or {}
+    self.page = 1
+    self.state = nil
+    self.desktop.tab = "library"
+    self.desktop:updateView()
 end
 
 --- 状态变更后重新查询当前页，确保筛选结果立即收敛。
----@param desktop table
-local function refreshPage(desktop)
-    desktop._library_state = nil
-    desktop:rebuild()
+---@param library BookLibrary 拥有筛选和查询状态的图书馆实例
+---@return nil
+local function refreshPage(library)
+    library.state = nil
+    library.desktop:updateView()
 end
 
----@param ctx table
----@param book Book
+--- 打开书籍操作菜单，操作完成后刷新当前筛选结果。
+---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
+---@param book Book 当前操作或展示的书籍数据
+---@return nil
 local function showBookActions(ctx, book)
     local desktop = ctx.desktop
+    local library = libraryOf(desktop)
     local is_read = tonumber(book.read_state) == 1
     Popup.sheet{
         title = BookInfo.title(book),
@@ -213,7 +262,7 @@ local function showBookActions(ctx, book)
                         book.read_state = 1
                         book.percent = 100
                     end
-                    if desktop then refreshPage(desktop) end
+                    if library then refreshPage(library) end
                 end,
             },
             {
@@ -231,7 +280,7 @@ local function showBookActions(ctx, book)
                                     if source and source.clearCaches then
                                         source:clearCaches()
                                     end
-                                    if desktop then refreshPage(desktop) end
+                                    if library then refreshPage(library) end
                                 end
                                 UIManager:show(InfoMessage:new{
                                     text = ok and _("已清理") or _("清理失败"),
@@ -266,9 +315,9 @@ local function showBookActions(ctx, book)
                                     })
                                     return
                                 end
-                                if desktop then
-                                    desktop.page = 1
-                                    refreshPage(desktop)
+                                if library then
+                                    library.page = 1
+                                    refreshPage(library)
                                 end
                             end)
                         end,
@@ -280,13 +329,13 @@ local function showBookActions(ctx, book)
 end
 
 --- 封面 + 单行书名。
----@param ctx table
----@param book table
----@param slot_w number
----@param cw number
----@param ch number
+---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
+---@param book table 当前操作或展示的书籍数据
+---@param slot_w number 单个封面槽位宽度，单位像素
+---@param cw number 封面宽度，单位像素
+---@param ch number 封面高度，单位像素
 ---@param on_open fun(book: table)|nil
----@param show_status boolean|nil
+---@param show_status boolean|nil 是否显示书籍状态信息
 ---@return table, number
 local function coverCell(ctx, book, slot_w, cw, ch, on_open, show_status)
     local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, {
@@ -321,8 +370,8 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open, show_status)
 end
 
 --- 按内容区尺寸算出网格容量；请求 page_size 必须与此一致。
----@param w number
----@param h number
+---@param w number 可用宽度，单位像素
+---@param h number 可用高度，单位像素
 ---@return table
 function Library.gridMetrics(w, h)
     w = math.max(1, tonumber(w) or 1)
@@ -354,11 +403,11 @@ function Library.gridMetrics(w, h)
 end
 
 --- 按网格度量铺满一页封面格子。
----@param ctx table
----@param books table
----@param m table
+---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
+---@param books table 按展示顺序排列的书籍列表
+---@param m table 预先计算的网格布局尺寸
 ---@param on_open fun(book: table)|nil
----@param show_status boolean|nil
+---@param show_status boolean|nil 是否显示书籍状态信息
 ---@return table, number
 local function buildGrid(ctx, books, m, on_open, show_status)
     local pad, gap, row_gap = m.pad, m.gap, m.row_gap
@@ -373,6 +422,7 @@ local function buildGrid(ctx, books, m, on_open, show_status)
     local grid_used = 0
 
     --- 冲刷当前行进网格。
+    ---@return nil
     local function flushRow()
         if row_n > 0 then
             table.insert(grid, VerticalSpan:new{ width = row_gap })
@@ -412,8 +462,9 @@ local function buildGrid(ctx, books, m, on_open, show_status)
     return grid, grid_used
 end
 
----@param w number
----@param h number
+--- 根据可用宽高计算图书馆分组卡片的行列和分页容量。
+---@param w number 可用宽度，单位像素
+---@param h number 可用高度，单位像素
 ---@return table
 local function groupMetrics(w, h)
     local pad = UI.sz(10)
@@ -433,9 +484,10 @@ local function groupMetrics(w, h)
     }
 end
 
----@param ctx table
----@param state table
----@param opts table
+--- 按当前分组数据构建卡片页，并连接进入分组的点击回调。
+---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
+---@param state table 当前页面的数据和分页状态
+---@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table
 local function buildGroupPage(ctx, state, opts)
     local w, h = ctx.width, ctx.height
@@ -450,15 +502,16 @@ local function buildGroupPage(ctx, state, opts)
     local tools = HorizontalGroup:new{
         align = "center",
         iconAction("refresh", _("刷新"), function()
-            if ctx.desktop then
-                Library.rescan(ctx.desktop)
-                ctx.desktop._library_groups_state = nil
-                ctx.desktop:rebuild()
+            local library = libraryOf(ctx.desktop)
+            if library then
+                library:rescan()
+                library.groups_state = nil
+                library.desktop:updateView()
             end
         end),
         HorizontalSpan:new{ width = UI.sz(8) },
         iconAction("view_module", _("视图"), function()
-            if ctx.desktop then Library.showViewPicker(ctx.desktop) end
+            if ctx.desktop then libraryOf(ctx.desktop):showViewPicker() end
         end),
     }
     local total_label = TextWidget:new{
@@ -532,16 +585,16 @@ local function buildGroupPage(ctx, state, opts)
                     },
                 }
                 local tap = BookInfo.tappable(m.slot_w, m.cell_h, function()
-                    Library.enterGroup(ctx.desktop, value)
+                    libraryOf(ctx.desktop):enterGroup(value)
                 end)
                 tap[1] = CenterContainer:new{
                     dimen = Geom:new{ w = m.slot_w, h = m.cell_h },
-                    Surface.card(content, {
+                    Surface.build{ child = content, options = {
                         width = m.slot_w,
                         height = m.cell_h,
                         padding = UI.sz(8),
                         shadow = false,
-                    }),
+                    }, kind = "card" },
                 }
                 line[#line + 1] = tap
                 index = index + 1
@@ -565,45 +618,46 @@ local function buildGroupPage(ctx, state, opts)
     }
 end
 
----@param desktop table
-function Library.fetchGroups(desktop)
-    if desktop._library_fetch_cancel then
-        desktop._library_fetch_cancel:cancel()
-        desktop._library_fetch_cancel = nil
+--- 查询分组统计，维护加载状态并在结果返回后刷新索引页。
+---@return nil
+function Library:fetchGroups()
+    if self.fetch_cancel then
+        self.fetch_cancel:cancel()
+        self.fetch_cancel = nil
     end
-    local source = desktop.source
-    local generation = desktop.source_generation or 0
+    local source = self.desktop.source
+    local generation = self.desktop.source_generation or 0
     local mode = viewMode()
     local def = groupDefinition(mode)
     if not source or type(source.filtersAsync) ~= "function" then
-        desktop._library_groups_state = { groups = {}, err = _("当前数据源不支持分组") }
-        desktop:rebuild()
+        self.groups_state = { groups = {}, err = _("当前数据源不支持分组") }
+        self.desktop:updateView()
         return
     end
-    desktop._library_fetch_cancel = source:filtersAsync(function(res, err)
-        if desktop._closed or desktop.source ~= source
-            or (desktop.source_generation or 0) ~= generation
-            or not Library.isGroupIndex(desktop) or viewMode() ~= mode then
+    self.fetch_cancel = source:filtersAsync(function(res, err)
+        if self.desktop._closed or self.desktop.source ~= source
+            or (self.desktop.source_generation or 0) ~= generation
+            or not self:isGroupIndex() or viewMode() ~= mode then
             return
         end
-        desktop._library_fetch_cancel = nil
+        self.fetch_cancel = nil
         local data = res and res.data or {}
         local groups = data[def.data_key] or {}
-        desktop._library_groups_state = {
+        self.groups_state = {
             groups = groups,
             err = res and nil or (err or _("加载失败")),
         }
-        desktop.total = #groups
-        desktop:rebuild()
+        self.total = #groups
+        self.desktop:updateView()
     end)
 end
 
 --- 构建图书馆页 UI（工具栏 + 网格 + 分页）。
----@param ctx table
----@param state table
----@param opts table|nil
+---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
+---@param state table 当前页面的数据和分页状态
+---@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table
-function Library.build(ctx, state, opts)
+function Library:build(ctx, state, opts)
     opts = opts or {}
     local w = ctx.width
     local h = ctx.height
@@ -627,15 +681,15 @@ function Library.build(ctx, state, opts)
     local group_drill = opts.group_drill == true
     local has_tool = false
     if group_drill then
-        local group = ctx.desktop and ctx.desktop._library_group
+        local group = ctx.desktop and ctx.desktop.library.group
         local title = groupDefinition(group and group.mode or viewMode()).title
         table.insert(tools_kids, iconAction("arrow_back", T(_("返回%1"), title), function()
-            if ctx.desktop then Library.leaveGroup(ctx.desktop) end
+            if ctx.desktop then libraryOf(ctx.desktop):leaveGroup() end
         end))
         has_tool = true
     elseif not search_only and caps.refresh then
         table.insert(tools_kids, iconAction("refresh", _("刷新"), function()
-            if ctx.desktop then Library.rescan(ctx.desktop) end
+            if ctx.desktop then libraryOf(ctx.desktop):rescan() end
         end))
         has_tool = true
         if caps.search then
@@ -647,7 +701,7 @@ function Library.build(ctx, state, opts)
             if opts.on_search then
                 opts.on_search()
             elseif ctx.desktop then
-                Library.showSearch(ctx.desktop)
+                libraryOf(ctx.desktop):showSearch()
             end
         end))
         has_tool = true
@@ -658,7 +712,7 @@ function Library.build(ctx, state, opts)
             if opts.on_clear then
                 opts.on_clear()
             elseif ctx.desktop then
-                Library.clearFilters(ctx.desktop)
+                libraryOf(ctx.desktop):clearFilters()
             end
         end))
     end
@@ -667,7 +721,7 @@ function Library.build(ctx, state, opts)
             table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
         end
         table.insert(tools_kids, iconAction("view_module", _("视图"), function()
-            if ctx.desktop then Library.showViewPicker(ctx.desktop) end
+            if ctx.desktop then libraryOf(ctx.desktop):showViewPicker() end
         end))
     end
     local tools = HorizontalGroup:new(tools_kids)
@@ -704,7 +758,8 @@ function Library.build(ctx, state, opts)
     local band_h = m.bottom_h
 
     --- 空态/加载占位。
-    ---@param msg string
+    ---@param msg string 需要显示的提示文字
+    ---@return nil
     local function placeholder(msg)
         local ph = math.max(1, h - band_h - used)
         table.insert(kids, CenterContainer:new{
@@ -745,35 +800,36 @@ function Library.build(ctx, state, opts)
 end
 
 --- 异步拉取图书馆列表。
----@param desktop table
-function Library.fetch(desktop)
+---@return nil
+function Library:fetch()
     --- 写入图书馆状态并重建。
-    ---@param books table|nil
-    ---@param err string|nil
+    ---@param books table|nil 按展示顺序排列的书籍列表
+    ---@param err string|nil 操作失败的原因
+    ---@return nil
     local function done(books, err)
-        if desktop._closed or desktop.tab ~= "library" then
+        if self.desktop._closed or self.desktop.tab ~= "library" then
             return
         end
-        desktop._library_state = {
+        self.state = {
             books = books or {},
             err = err,
         }
-        desktop:rebuild()
+        self.desktop:updateView()
     end
 
-    if desktop._library_fetch_cancel then
-        desktop._library_fetch_cancel:cancel()
-        desktop._library_fetch_cancel = nil
+    if self.fetch_cancel then
+        self.fetch_cancel:cancel()
+        self.fetch_cancel = nil
     end
 
-    Library.syncPageSize(desktop)
-    local source = desktop.source
-    local generation = desktop.source_generation or 0
-    local page = desktop.page or 1
-    local page_size = desktop.page_size or 1
-    local f = desktop.filter or {}
+    self:syncPageSize()
+    local source = self.desktop.source
+    local generation = self.desktop.source_generation or 0
+    local page = self.page or 1
+    local page_size = self.page_size or 1
+    local f = self.filter or {}
     local search = f.search or ""
-    local group = desktop._library_group
+    local group = self.group
     local category = f.category or ""
     local uncategorized = false
     local series = f.series or ""
@@ -793,7 +849,7 @@ function Library.fetch(desktop)
         done({}, _("当前数据源不支持书库"))
         return
     end
-    desktop._library_fetch_cancel = source:listLibraryAsync({
+    self.fetch_cancel = source:listLibraryAsync({
         page = page,
         page_size = page_size,
         search = search,
@@ -803,112 +859,111 @@ function Library.fetch(desktop)
         unseries = unseries,
         read_status = read_status,
     }, function(res, err)
-        if desktop._closed or desktop.tab ~= "library"
-            or desktop.source ~= source or (desktop.source_generation or 0) ~= generation then
+        if self.desktop._closed or self.desktop.tab ~= "library"
+            or self.desktop.source ~= source or (self.desktop.source_generation or 0) ~= generation then
             return
         end
-        desktop._library_fetch_cancel = nil
+        self.fetch_cancel = nil
         if not res then
             done({}, err or _("加载失败"))
             return
         end
-        desktop.total = tonumber(res.count) or 0
+        self.total = tonumber(res.count) or 0
         local books = res.data or {}
         done(books)
     end)
 end
 
 --- 按当前网格容量同步 page_size。
----@param desktop table
 ---@return number
-function Library.syncPageSize(desktop)
-    local width = (desktop.dimen and desktop.dimen.w) or Screen:getWidth()
-    local height = desktop:contentHeight()
-    local m = Library.isGroupIndex(desktop)
+function Library:syncPageSize()
+    local width = (self.desktop.dimen and self.desktop.dimen.w) or Screen:getWidth()
+    local height = self.desktop:contentHeight()
+    local m = self:isGroupIndex()
         and groupMetrics(width, height)
         or Library.gridMetrics(width, height)
     local n = math.max(1, m.page_size or 1)
-    if desktop.page_size ~= n then
-        desktop.page_size = n
-        desktop._library_state = nil
-        local pages = math.max(1, math.ceil((desktop.total or 0) / n))
-        if (desktop.page or 1) > pages then
-            desktop.page = pages
+    if self.page_size ~= n then
+        self.page_size = n
+        self.state = nil
+        local pages = math.max(1, math.ceil((self.total or 0) / n))
+        if (self.page or 1) > pages then
+            self.page = pages
         end
     end
-    return desktop.page_size
+    return self.page_size
 end
 
 --- 计算图书馆总页数。
----@param desktop table
 ---@return number
-function Library.pages(desktop)
-    local ps = Library.syncPageSize(desktop)
-    return math.max(1, math.ceil((desktop.total or 0) / ps))
+function Library:pages()
+    local ps = self:syncPageSize()
+    return math.max(1, math.ceil((self.total or 0) / ps))
 end
 
 --- 跳转到指定页并重建。
----@param desktop table
----@param page number
-function Library.gotoPage(desktop, page)
-    local pages = Library.pages(desktop)
+---@param page number 当前页码，从 1 开始
+---@return nil
+function Library:gotoPage(page)
+    local pages = self:pages()
     page = math.max(1, math.min(pages, tonumber(page) or 1))
-    local group_index = Library.isGroupIndex(desktop)
+    local group_index = self:isGroupIndex()
     local state_ready = group_index
-        and desktop._library_groups_state
-        and desktop._library_groups_state.groups
-        or desktop._library_state and desktop._library_state.books
-    if page == desktop.page and state_ready then
+        and self.groups_state
+        and self.groups_state.groups
+        or self.state and self.state.books
+    if page == self.page and state_ready then
         return
     end
-    desktop.page = page
-    desktop.tab = "library"
+    self.page = page
+    self.desktop.tab = "library"
     if group_index then
-        desktop:rebuild()
+        self.desktop:updateView()
         return
     end
-    desktop._library_state = nil
-    desktop:rebuild()
+    self.state = nil
+    self.desktop:updateView()
 end
 
 --- 手动强制刷新书库；具体动作由当前源决定（本地源扫盘，远端源拉全量）。
----@param desktop table
-function Library.rescan(desktop)
-    local source = desktop.source
+---@return nil
+function Library:rescan()
+    local source = self.desktop.source
     if not source or not source.syncBooksAsync then return end
-    if desktop.plugin and desktop.plugin.emitToSource then
-        desktop.plugin:emitToSource("library_refresh_request", desktop, source)
+    if self.desktop.plugin and self.desktop.plugin.emitToSource then
+        self.desktop.plugin:emitToSource("library_refresh_request", self.desktop, source)
     end
 end
 
 --- 清除全部筛选条件。
----@param desktop table
-function Library.clearFilters(desktop)
-    desktop.filter = {}
-    desktop.page = 1
-    desktop._library_state = nil
-    desktop.tab = "library"
-    desktop:rebuild()
+---@return nil
+function Library:clearFilters()
+    self.filter = {}
+    self.page = 1
+    self.state = nil
+    self.desktop.tab = "library"
+    self.desktop:updateView()
 end
 
 --- 弹出搜索输入框。
----@param desktop table
 ---@param on_apply fun(query: string)|nil
----@param initial_query string|nil
-function Library.showSearch(desktop, on_apply, initial_query)
+---@param initial_query string|nil 搜索框初始文字
+---@return nil
+function Library:showSearch(on_apply, initial_query)
     --- 提交搜索词；调用方没给 on_apply 时落到书库的独占搜索筛选。
     ---@param query string 搜索词，空串表示清除
+    ---@return nil
     local function apply(query)
         if on_apply then
             on_apply(query)
         else
-            Library.applySearch(desktop, query)
+            self:applySearch(query)
         end
     end
     local dialog
     dialog = InputDialog:new{
         title = _("搜索书籍"),
-        input = initial_query or (desktop.filter and desktop.filter.search) or "",
+        input = initial_query or (self.filter and self.filter.search) or "",
         input_hint = _("书名或作者"),
         buttons = {{
             {
@@ -938,55 +993,121 @@ function Library.showSearch(desktop, on_apply, initial_query)
     dialog:onShowKeyboard()
 end
 
---- Desktop rebuild 入口：同步 page_size、缺态触发 fetch、拼分页 UI。
----@param desktop table
+--- Desktop 入口：同步 page_size、缺态触发 fetch、拼分页 UI。
 ---@return table
-function Library.page(desktop)
-    Library.syncPageSize(desktop)
-    if Library.isGroupIndex(desktop) then
-        local group_state = desktop._library_groups_state
+function Library:updateView()
+    self:syncPageSize()
+    local widget
+    if self:isGroupIndex() then
+        local group_state = self.groups_state
         if not group_state then
             UIManager:nextTick(function()
-                if desktop._closed or desktop.tab ~= "library"
-                    or not Library.isGroupIndex(desktop) then return end
-                Library.fetchGroups(desktop)
+                if self.desktop._closed or self.desktop.tab ~= "library"
+                    or not self:isGroupIndex() then return end
+                self:fetchGroups()
             end)
         end
-        return buildGroupPage(desktop:ctx(), group_state or {}, {
-            page = desktop.page,
-            pages = Library.pages(desktop),
-            total = desktop.total or 0,
-            on_prev = function() Library.gotoPage(desktop, desktop.page - 1) end,
-            on_next = function() Library.gotoPage(desktop, desktop.page + 1) end,
-            on_first = function() Library.gotoPage(desktop, 1) end,
-            on_last = function() Library.gotoPage(desktop, Library.pages(desktop)) end,
+        widget = buildGroupPage(self.desktop:ctx(), group_state or {}, {
+            page = self.page,
+            pages = self:pages(),
+            total = self.total or 0,
+            on_prev = function() self:gotoPage(self.page - 1) end,
+            on_next = function() self:gotoPage(self.page + 1) end,
+            on_first = function() self:gotoPage(1) end,
+            on_last = function() self:gotoPage(self:pages()) end,
+        })
+    else
+        local state = self.state
+        if not state then
+            UIManager:nextTick(function()
+                if self.desktop._closed or self.desktop.tab ~= "library" then return end
+                self:fetch()
+            end)
+        end
+        widget = self:build(self.desktop:ctx(), state or {}, {
+            page = self.page,
+            pages = self:pages(),
+            total = self.total or 0,
+            group_drill = self.group ~= nil,
+            on_prev = function()
+                self:gotoPage(self.page - 1)
+            end,
+            on_next = function()
+                self:gotoPage(self.page + 1)
+            end,
+            on_first = function()
+                self:gotoPage(1)
+            end,
+            on_last = function()
+                self:gotoPage(self:pages())
+            end,
         })
     end
-    local state = desktop._library_state
-    if not state then
-        UIManager:nextTick(function()
-            if desktop._closed or desktop.tab ~= "library" then return end
-            Library.fetch(desktop)
-        end)
-    end
-    return Library.build(desktop:ctx(), state or {}, {
-        page = desktop.page,
-        pages = Library.pages(desktop),
-        total = desktop.total or 0,
-        group_drill = desktop._library_group ~= nil,
-        on_prev = function()
-            Library.gotoPage(desktop, desktop.page - 1)
-        end,
-        on_next = function()
-            Library.gotoPage(desktop, desktop.page + 1)
-        end,
-        on_first = function()
-            Library.gotoPage(desktop, 1)
-        end,
-        on_last = function()
-            Library.gotoPage(desktop, Library.pages(desktop))
-        end,
-    })
+    self.widget = widget
+    return widget
 end
+
+--- 仅取消本实例当前的列表查询，并清空请求句柄。
+---@return nil
+function Library:cancel()
+    if self.fetch_cancel then
+        self.fetch_cancel:cancel()
+        self.fetch_cancel = nil
+    end
+end
+
+--- 取消旧查询并清除筛选、分组、分页及列表缓存。
+---@return nil
+function Library:reset()
+    self:cancel()
+    self.filter = {}
+    self.page = 1
+    self.total = 0
+    self.group = nil
+    self.groups_state = nil
+    self.state = nil
+end
+
+--- 取消图书馆实例的在飞查询，避免离开页面后旧结果继续更新界面。
+---@return nil
+function Library:onCancel()
+    self:cancel()
+end
+
+--- 取消图书馆实例的在飞查询，避免离开页面后旧结果继续更新界面。
+---@return nil
+function Library:onPause()
+    self:cancel()
+end
+
+--- 取消图书馆实例的在飞查询，避免离开页面后旧结果继续更新界面。
+---@return nil
+function Library:onStop()
+    self:cancel()
+end
+
+--- 取消图书馆实例的在飞查询，避免离开页面后旧结果继续更新界面。
+---@return nil
+function Library:onDestroy()
+    self:cancel()
+end
+
+--- 处理换源重置和左右滑动分页，忽略不属于图书馆的事件。
+---@param event string 父组件转发的事件名称或事件对象
+---@param payload table|nil 与事件一起传入的数据
+---@return nil
+function Library:onEvent(event, payload)
+    if event == "source_changed" then
+        self:reset()
+        return
+    end
+    if event ~= "swipe" or type(payload) ~= "table" then return end
+    if payload.direction == "west" then
+        self:gotoPage((self.page or 1) + 1)
+    elseif payload.direction == "east" then
+        self:gotoPage((self.page or 1) - 1)
+    end
+end
+
 
 return Library

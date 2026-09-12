@@ -7,6 +7,7 @@
 local Chapter = require("ui.reader.session.chapter")
 local Snapshot = require("ui.reader.session.snapshot")
 
+---@class ReaderBookSession
 local Book = {}
 
 ---@param plugin table

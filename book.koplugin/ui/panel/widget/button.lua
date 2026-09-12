@@ -24,7 +24,7 @@ local UI = require("ui.components.bookui")
 local ActionButton = InputContainer:extend{}
 
 --- 根据宽高、图标、标题和状态构造胶囊按钮。
----@param self BookQuickPanelActionButton
+---@param self BookQuickPanelActionButton 当前视图或布局实例
 ---@return void
 function ActionButton:init()
     self.dimen = Geom:new{ w = self.width, h = self.height }
@@ -32,7 +32,7 @@ function ActionButton:init()
     local enabled = self.enabled ~= false
     local active = enabled and self.active == true
     local color = Blitbuffer.COLOR_BLACK
-    self[1] = Surface.pill(Icon.label{
+    self[1] = Surface.build{ child = Icon.label{
         name = self.icon,
         text = self.title,
         direction = "column",
@@ -42,16 +42,16 @@ function ActionButton:init()
         max_width = math.max(UI.sz(36), self.width - UI.sz(8)),
         gap = UI.sz(2),
         dim = not enabled,
-    }, {
+    }, options = {
         width = self.width,
         height = self.height,
         background = active and UI.actionSurface() or UI.surface(),
         shadow = false,
-    })
+    }, kind = "pill" }
 end
 
 --- 处理按钮点击；禁用时吞掉事件，不触发动作。
----@param self BookQuickPanelActionButton
+---@param self BookQuickPanelActionButton 当前视图或布局实例
 ---@return boolean
 function ActionButton:onTap()
     if self.enabled == false then return true end

@@ -1,15 +1,16 @@
 --[[--
 顶栏前光亮度。前光状态事件立刻刷。
 
-@module koplugin.book.ui.components.topbar.brightness
+@module koplugin.book.ui.views.topbar.brightness
 --]]
 
 local Device = require("device")
-local Base = require("ui.components.topbar.base")
+local Base = require("ui.views.topbar.base")
 
 ---@class BookTopBarBrightness : BookTopBarItem
-local Brightness = setmetatable({}, Base)
+local Brightness = {}
 Brightness.__index = Brightness
+setmetatable(Brightness, Base)
 Brightness.id = "brightness"
 
 --- 前光状态变化时立即刷新亮度百分比。

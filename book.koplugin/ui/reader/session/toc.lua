@@ -8,6 +8,7 @@ local Mode = require("ui.reader.session.mode")
 local Chapter = require("ui.reader.session.chapter")
 local DocumentToc = require("ui.reader.session.document_toc")
 
+---@class ReaderSessionToc
 local Toc = {}
 
 ---@param session ReaderSessionSnapshot|nil

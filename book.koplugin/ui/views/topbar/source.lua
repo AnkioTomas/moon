@@ -1,18 +1,19 @@
 --[[--
 顶栏数据源名。唤醒或换源时原地刷新。
 
-@module koplugin.book.ui.components.topbar.source
+@module koplugin.book.ui.views.topbar.source
 --]]
 
 local UI = require("ui.components.bookui")
 local SourceRegistry = require("source.registry")
 local MoonSettings = require("utils.settings")
 local _ = require("gettext")
-local Base = require("ui.components.topbar.base")
+local Base = require("ui.views.topbar.base")
 
 ---@class BookTopBarSource : BookTopBarItem
-local Source = setmetatable({}, Base)
+local Source = {}
 Source.__index = Source
+setmetatable(Source, Base)
 Source.id = "source"
 Source.align = "left"
 

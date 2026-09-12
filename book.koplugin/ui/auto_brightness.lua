@@ -40,16 +40,11 @@ local DEFAULT_CURVE = {
 }
 
 ---@class BookAutoBrightness
----@field isSupported fun(): boolean
----@field isEnabled fun(): boolean
----@field start fun(): boolean
----@field stop fun(persist: boolean|nil): void
----@field toggle fun(): boolean
----@field bootstrap fun(): void
----@field onSuspend fun(): void
----@field onResume fun(): void
----@field shutdown fun(): void
----@field onManualBrightness fun(intensity: number): void
+---@field enabled boolean
+---@field suspended boolean
+---@field supported boolean|nil
+---@field sensor_path string|nil
+---@field sensor_source string|nil
 
 local AutoBrightness = {
     enabled = false,

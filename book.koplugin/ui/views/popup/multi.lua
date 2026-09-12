@@ -3,11 +3,12 @@
 on_toggle(value, checked, item, selected) 每次切换触发（selected 为当前全部勾选值列表）；
 最终结果在 close_callback 里读取。
 
-@module koplugin.book.ui.components.popup.multi
+@module koplugin.book.ui.views.popup.multi
 --]]
 
-local List = require("ui.components.popup.list")
+local List = require("ui.views.popup.list")
 
+---@class BookPopupMulti
 local Multi = {}
 
 --- 把调用方 items 规范成 Menu 可用结构。

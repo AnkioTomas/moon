@@ -13,7 +13,15 @@ local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+---@class BookSettingsAI
 local AI = {}
+AI.__index = AI
+
+---@return BookSettingsAI
+function AI.new()
+    return setmetatable({}, AI)
+end
+
 
 --- 弹输入框编辑一项 AI 配置，保存后写入 ai 分区并重建桌面。
 ---@param desktop table 桌面实例
@@ -36,7 +44,7 @@ local function edit(desktop, key, title, hint, password, normalize)
                 cfg[key] = normalize(dialog:getInputText())
                 Settings.saveSection("ai", cfg)
                 UIManager:close(dialog)
-                desktop:rebuild()
+                desktop:updateView()
             end },
         }},
     }
@@ -89,7 +97,7 @@ local function testRow(desktop)
                     function(content, err)
                         testing = false
                         UIManager:close(loading)
-                        if desktop._closed then
+                        if desktop.lifecycle.state == "Destroy" then
                             return
                         end
                         local text
@@ -107,7 +115,7 @@ end
 
 ---@param desktop table
 ---@return table
-function AI.rows(desktop)
+function AI:rows(desktop)
     return {
         row(desktop, "ai_endpoint", _("接口地址"), "https://api.example.com/v1", false,
             function(value) return Text.rtrimSlashes(Text.trim(value)) end),

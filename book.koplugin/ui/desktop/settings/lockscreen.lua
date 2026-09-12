@@ -6,7 +6,7 @@ local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
-local Popup = require("ui.components.popup")
+local Popup = require("ui.views.popup")
 local SettingRow = require("ui.components.settingrow")
 local LockScreen = require("lockscreen.init")
 local Settings = require("lockscreen.settings")
@@ -19,13 +19,21 @@ local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+---@class BookSettingsLockscreen
 local Lockscreen = {}
+Lockscreen.__index = Lockscreen
+
+---@return BookSettingsLockscreen
+function Lockscreen.new()
+    return setmetatable({}, Lockscreen)
+end
+
 
 --- 设置项变更后重建设置页，并重新合成锁屏图。
 --- 只有当前配置能离线出图时才直接生成，否则等联网——不然壁纸源拉不到会白跑一次。
 ---@param desktop table 桌面实例
 local function refreshAfterChange(desktop)
-    desktop:rebuild()
+    desktop:updateView()
     --- 合成一次锁屏图并提示结果。
     local function refresh()
         UIManager:show(InfoMessage:new{ text = _("正在生成锁屏图…"), timeout = 2 })
@@ -67,7 +75,7 @@ end
 
 ---@param desktop table
 ---@return table
-function Lockscreen.rows(desktop)
+function Lockscreen:rows(desktop)
     local enabled = Settings.isCompose()
     local rows = {
         function(iw)
@@ -77,7 +85,7 @@ function Lockscreen.rows(desktop)
                 callback = function()
                     Settings.setMode(enabled and "ko" or "compose")
                     if enabled then
-                        desktop:rebuild()
+                        desktop:updateView()
                     else
                         refreshAfterChange(desktop)
                     end

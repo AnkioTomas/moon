@@ -12,6 +12,7 @@ require("l10n").apply()
 local MoonSettings = require("utils.settings")
 local _ = require("gettext")
 
+---@class BookReaderHighlightMenu
 local HighlightMenu = {}
 
 local TOOLBAR_COLUMNS = 5

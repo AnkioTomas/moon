@@ -17,7 +17,15 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+---@class BookInsightDay
 local Day = {}
+Day.__index = Day
+
+---@return BookInsightDay
+function Day.new()
+    return setmetatable({}, Day)
+end
+
 
 local function weekStart(ymd)
     local year, month, day = tostring(ymd or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
@@ -50,7 +58,7 @@ end
 ---@param avail_h number 可用高度。
 ---@param open_book fun(book: table) 打开书籍详情的回调。
 ---@return table
-function Day.build(desktop, state, width, avail_h, open_book)
+function Day:build(desktop, state, width, avail_h, open_book)
     local selected = state.selected or ""
     local calendar = state.calendar or {}
     local days = calendar.days or {}

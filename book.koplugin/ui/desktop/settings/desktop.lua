@@ -2,19 +2,27 @@
 @module koplugin.book.ui.desktop.settings.desktop
 --]]
 
-local Base = require("ui.desktop.home.components.base")
+local Registry = require("ui.desktop.home.registry")
 local SettingRow = require("ui.components.settingrow")
 local Host = require("host")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+---@class BookSettingsDesktop
 local DesktopSettings = {}
+DesktopSettings.__index = DesktopSettings
+
+---@return BookSettingsDesktop
+function DesktopSettings.new()
+    return setmetatable({}, DesktopSettings)
+end
+
 
 ---@param desktop table
 ---@param open_on boolean
 ---@return table
-function DesktopSettings.rows(desktop, open_on)
-    local count = #Base.enabledLayout()
+function DesktopSettings:rows(desktop, open_on)
+    local count = #Registry.enabledLayout()
     return {
         function(iw)
             return SettingRow.build(iw, {
@@ -22,7 +30,7 @@ function DesktopSettings.rows(desktop, open_on)
                 subtitle = _("选择首页内容并调整显示顺序"),
                 status = T(_("已启用 %1 项"), count), status_on = count > 0,
                 callback = function()
-                    desktop:showSettingsSub("home", "appearance")
+                    desktop.settings:showSub("home", "appearance")
                 end,
             })
         end,
@@ -31,7 +39,7 @@ function DesktopSettings.rows(desktop, open_on)
                 kind = "nav", icon = "vertical_align_top", title = _("首页顶栏"),
                 subtitle = _("选择首页顶部显示的信息"),
                 callback = function()
-                    desktop:showSettingsSub("topbar", "appearance")
+                    desktop.settings:showSub("topbar", "appearance")
                 end,
             })
         end,
@@ -43,7 +51,7 @@ function DesktopSettings.rows(desktop, open_on)
                 callback = function()
                     if open_on then G_reader_settings:saveSetting("start_with", "filemanager")
                     else G_reader_settings:saveSetting("start_with", Host.OPEN_ON_START_ID) end
-                    desktop:rebuild()
+                    desktop:updateView()
                 end,
             })
         end,

@@ -54,6 +54,15 @@ local SourceCapabilities = require("types.book_source").SourceCapabilities
 local _ = require("gettext")
 local Screen = Device.screen
 
+---@class BookDetailPage : InputContainer
+---@field book Book|BookDetail|table
+---@field plugin BookPlugin|nil
+---@field source BookSource|nil
+---@field desktop BookDesktop|nil
+---@field store_preview boolean
+---@field close_callback fun()|nil
+---@field _dirty boolean|nil
+---@field _closed boolean|nil
 local Detail = InputContainer:extend{
     name = "book_detail",
     covers_fullscreen = true,
@@ -64,10 +73,52 @@ local Detail = InputContainer:extend{
     store_preview = false,
 }
 
+--- 打开详情浮层。详情页自己的入口，不要经 Desktop:onEvent 分流。
+---@param desktop BookDesktop 所属桌面实例
+---@param book table 当前操作或展示的书籍数据
+---@return nil
+function Detail.open(desktop, book)
+    if type(book) ~= "table" then return end
+    local UIManager = require("ui/uimanager")
+    if desktop.detail then
+        UIManager:close(desktop.detail)
+        desktop.detail = nil
+    end
+    if book.source_id and book.source_id ~= "zlib" then
+        Store.rememberMany({ book })
+    end
+    local desk = desktop
+    desktop.detail = Detail:new{
+        book = book,
+        plugin = desktop.plugin,
+        source = desktop.source,
+        desktop = desktop,
+        store_preview = desktop.tab == "store",
+        covers_fullscreen = true,
+        close_callback = function()
+            local dirty = desk.detail and desk.detail._dirty
+            desk.detail = nil
+            if desk.lifecycle.state == "Destroy" then
+                return
+            end
+            if dirty then
+                desk:onEvent("detail_dirty")
+                if desk.tab ~= "home" then
+                    desk:updateView()
+                end
+            else
+                UIManager:setDirty(desk, "ui")
+            end
+        end,
+    }
+    UIManager:show(desktop.detail)
+    UIManager:setDirty(desktop.detail, "ui")
+end
+
 --- 书城预览书：zlib 待下载；源自带书城的书加入该源远端书架。
----@param book table|nil
----@param source table|nil
----@param store_preview boolean|nil
+---@param book table|nil 当前操作或展示的书籍数据
+---@param source table|nil 书籍所属数据源实例
+---@param store_preview boolean|nil 是否按书城预览模式构建详情
 ---@return "zlib"|"source"|nil
 local function storeKind(book, source, store_preview)
     if type(book) ~= "table" then
@@ -84,8 +135,8 @@ local function storeKind(book, source, store_preview)
 end
 
 --- 按书籍属主源判断是否可刮削（不用当前活跃源冒充）。
----@param book table|nil
----@param fallback_source table|nil
+---@param book table|nil 当前操作或展示的书籍数据
+---@param fallback_source table|nil 书籍未提供源标识时使用的数据源
 ---@return boolean
 local function bookSupportsScrape(book, fallback_source)
     if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
@@ -96,8 +147,8 @@ local function bookSupportsScrape(book, fallback_source)
 end
 
 --- 按书籍属主源判断是否可编辑元信息。
----@param book table|nil
----@param fallback_source table|nil
+---@param book table|nil 当前操作或展示的书籍数据
+---@param fallback_source table|nil 书籍未提供源标识时使用的数据源
 ---@return boolean
 local function bookSupportsEdit(book, fallback_source)
     if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
@@ -108,8 +159,8 @@ local function bookSupportsEdit(book, fallback_source)
 end
 
 --- 小节标题（书城书的简介用）。
----@param text string
----@param width number
+---@param text string 需要展示的文字
+---@param width number 目标宽度，单位像素
 ---@return table
 local function sectionTitle(text, width)
     return LeftContainer:new{
@@ -123,15 +174,15 @@ local function sectionTitle(text, width)
 end
 
 --- 动作 chip：等宽描边按钮，Material 图标 + 文案（不加粗），整颗可点。
----@param w number
----@param h number
+---@param w number 可用宽度，单位像素
+---@param h number 可用高度，单位像素
 ---@param icon string Material Icons 原名
----@param text string
----@param on_tap fun()
+---@param text string 需要展示的文字
+---@param on_tap fun() 点击命中区域时执行的回调
 ---@return table
 local function actionChip(w, h, icon, text, on_tap)
     local tap = BookInfo.tappable(w, h, on_tap)
-    tap[1] = Surface.pill(Icon.label{
+    tap[1] = Surface.build{ child = Icon.label{
                 name = icon,
                 text = text,
                 direction = "row",
@@ -139,18 +190,18 @@ local function actionChip(w, h, icon, text, on_tap)
                 font_size = 14,
                 gap = UI.sz(6),
                 max_width = w - UI.sz(16),
-            }, {
+            }, options = {
         width = w,
         height = h,
         shadow = false,
-    })
+    }, kind = "pill" }
     return tap
 end
 
 --- KPI 卡片：描边白底，上值下标签。
----@param w number
----@param value string
----@param label string
+---@param w number 可用宽度，单位像素
+---@param value string 当前设置项的值
+---@param label string 展示给用户的标签文字
 ---@return table, number 卡片 widget 与其高度
 local function kpiCard(w, value, label)
     local pad = UI.sz(10)
@@ -168,7 +219,7 @@ local function kpiCard(w, value, label)
         fgcolor = UI.muted(),
     }
     local h = pad * 2 + value_w:getSize().h + UI.sz(4) + label_w:getSize().h
-    local card = Surface.card(CenterContainer:new{
+    local card = Surface.build{ child = CenterContainer:new{
             dimen = Geom:new{ w = inner_w, h = h - pad * 2 },
             VerticalGroup:new{
                 align = "center",
@@ -176,16 +227,17 @@ local function kpiCard(w, value, label)
                 VerticalSpan:new{ width = UI.sz(4) },
                 label_w,
             },
-        }, {
+        }, options = {
         width = w,
         height = h,
         padding = pad,
         shadow = true,
-    })
+    }, kind = "card" }
     return card, h
 end
 
 --- 初始化全屏尺寸、返回键，rebuild 并拉本机阅读统计。
+---@return nil
 function Detail:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     if Device:hasKeys() then
@@ -193,7 +245,7 @@ function Detail:init()
             Close = { { Device.input.group.Back } },
         }
     end
-    self:rebuild()
+    self:updateView()
     self:fetchStats()
     local kind = storeKind(self.book, self.source, self.store_preview)
     if kind == "zlib" then
@@ -201,7 +253,7 @@ function Detail:init()
             self._store_detail_job = nil
             if self._closed or not detail then return end
             self.book = detail
-            self:rebuild()
+            self:updateView()
             require("ui/uimanager"):setDirty(self, "ui")
         end)
     elseif kind == "source" and self.source and self.source.getDetailAsync then
@@ -214,7 +266,7 @@ function Detail:init()
             self._store_detail_job = nil
             if self._closed or not detail then return end
             self.book = detail
-            self:rebuild()
+            self:updateView()
             require("ui/uimanager"):setDirty(self, "ui")
         end)
     end
@@ -230,7 +282,7 @@ end
 --- TitleBar 只认 KOReader svg 图标，塞不进 Material 字体图标，故自绘。
 --- 热区按内容实际宽度算：固定宽度 + CenterContainer 会让内容溢出
 --- （图标越过左对齐线、文字右半在热区外点不到）。
----@param w number
+---@param w number 可用宽度，单位像素
 ---@return table, number 顶栏 widget 与其高度
 function Detail:buildTopBar(w)
     local pad = UI.pagePad()
@@ -280,22 +332,30 @@ function Detail:fetchStats()
     self._stats = StatsDB.summaryByBook(book.source_id, book.stable_id)
     self._daily = StatsDB.dailyByBook(book.source_id, book.stable_id, 30)
     if self._closed then return end
-    self:rebuild()
+    self:updateView()
     require("ui/uimanager"):setDirty(self, "ui")
+end
+
+--- 取消详情页尚未结束的数据加载和相关异步工作。
+---@return nil
+function Detail:onCancel()
+    if self._store_detail_job and self._store_detail_job.cancel then self._store_detail_job.cancel() end
+    if self._install_job and self._install_job.cancel then self._install_job.cancel() end
+    self._store_detail_job = nil
+    self._install_job = nil
 end
 
 --- 关闭详情并强制重绘下层桌面。
 ---@return boolean
 function Detail:onClose()
     self._closed = true
-    if self._store_detail_job and self._store_detail_job.cancel then self._store_detail_job.cancel() end
-    if self._install_job and self._install_job.cancel then self._install_job.cancel() end
+    self:onCancel()
     local UIManager = require("ui/uimanager")
     local desk = self.desktop
     UIManager:close(self)
     -- 全屏详情关闭后重绘下层桌面；无需为普通 UI 切换强制闪屏。
     UIManager:nextTick(function()
-        if desk and not desk._closed then
+        if desk and desk.lifecycle.state ~= "Destroy" then
             UIManager:setDirty(desk, "ui")
         else
             UIManager:setDirty("all", "ui")
@@ -307,6 +367,7 @@ end
 --- 刮削/编辑结束后重读 books 行并重绘：元数据与封面都只在 rebuild 时取，
 --- 光 setDirty 只会把旧数据再画一遍。
 --- 走到这说明底层数据已变，打脏标记，关闭详情时桌面要清缓存重建而不是纯重绘。
+---@return nil
 function Detail:reload()
     self._dirty = true
     local book = self.book
@@ -317,11 +378,12 @@ function Detail:reload()
         row.stable_id = book.stable_id
         self.book = row
     end
-    self:rebuild()
+    self:updateView()
     require("ui/uimanager"):setDirty(self, "ui")
 end
 
 --- Widget 关闭时触发 close_callback。
+---@return nil
 function Detail:onCloseWidget()
     self._closed = true
     if self[1] and self[1].free then
@@ -340,7 +402,7 @@ function Detail:openBook()
     local plugin = self.plugin
     local b = self.book
     self:onClose()
-    if plugin and plugin.openBook then plugin:openBook(b) end
+    if plugin then require("book.open").book(plugin, b) end
 end
 
 --- 缓存章节模式整本正文。
@@ -416,9 +478,11 @@ function Detail:installStoreBook()
                     text = _("已加入书架：") .. tostring(title or book.title),
                     timeout = 3,
                 })
-                if desk and not desk._closed then
-                    desk._library_state = nil
-                    desk.page = 1
+                if desk and desk.lifecycle.state ~= "Destroy" then
+                    if desk.library then
+                        desk.library.state = nil
+                        desk.library.page = 1
+                    end
                     desk:switchTab("library")
                 end
             end)
@@ -457,9 +521,11 @@ function Detail:installStoreBook()
                 text = _("已加入书库：") .. tostring(filename or book.title),
                 timeout = 3,
             })
-            if desk and not desk._closed then
-                desk._library_state = nil
-                desk.page = 1
+            if desk and desk.lifecycle.state ~= "Destroy" then
+                if desk.library then
+                    desk.library.state = nil
+                    desk.library.page = 1
+                end
                 desk:switchTab("library")
             end
         end)
@@ -547,7 +613,7 @@ function Detail:saveMeta(fields)
         return
     end
     --- 空串归一为 nil：空标题才能回退 stable_id 显示
-    ---@param s any
+    ---@param s any 待格式化的文本或状态值
     ---@return string|nil
     local function nonempty(s)
         s = Text.trim(type(s) == "string" and s or "")
@@ -609,8 +675,8 @@ function Detail:saveMeta(fields)
 end
 
 --- 最近几天（平铺，无卡片壳）+ Pager：行高固定，按可用高度定每页行数，翻页只重建本区。
----@param w number
----@param avail_h number
+---@param w number 可用宽度，单位像素
+---@param avail_h number 可用高度，单位像素
 ---@return table|nil, number 区块 widget 与实占高度；放不下返回 nil, 0
 function Detail:buildRecent(w, avail_h)
     local daily = self._daily or {}
@@ -686,10 +752,11 @@ function Detail:buildRecent(w, avail_h)
     local used = kids:getSize().h
     if show_pager then
         --- 翻页：改页码重建。
-        ---@param p number
+        ---@param p number 当前项目使用的配置值
+        ---@return nil
         local function goto2(p)
             self._daily_page = p
-            self:rebuild()
+            self:updateView()
             require("ui/uimanager"):setDirty(self, "ui")
         end
         local pager = Pager.widget(page, pages, {
@@ -709,8 +776,8 @@ function Detail:buildRecent(w, avail_h)
 end
 
 --- 阅读情况区：KPI 卡片三列 + 最近几天（平铺分页）；无本机记录时单行占位。
----@param w number
----@param avail_h number
+---@param w number 可用宽度，单位像素
+---@param avail_h number 可用高度，单位像素
 ---@return table
 function Detail:buildStatsArea(w, avail_h)
     local st = self._stats
@@ -751,7 +818,8 @@ function Detail:buildStatsArea(w, avail_h)
 end
 
 --- 重建书籍信息、阅读情况卡片与底部动作行。
-function Detail:rebuild()
+---@return nil
+function Detail:updateView()
     local book = self.book or {}
     local w = Screen:getWidth()
     local h = Screen:getHeight()

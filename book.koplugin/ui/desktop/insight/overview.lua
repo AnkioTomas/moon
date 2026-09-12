@@ -19,7 +19,15 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+---@class BookInsightOverview
 local Overview = {}
+Overview.__index = Overview
+
+---@return BookInsightOverview
+function Overview.new()
+    return setmetatable({}, Overview)
+end
+
 local DOW = { _("日"), _("一"), _("二"), _("三"), _("四"), _("五"), _("六") }
 
 --- 年月字符串按月偏移。
@@ -216,7 +224,7 @@ local function buildCalendar(desktop, state, width, max_height)
         align = "center",
         navBtn("‹", button_w, nav_h, function()
             state.ym = shiftYm(ym, -1)
-            desktop:rebuild()
+            desktop:updateView()
         end),
         CenterContainer:new{
             dimen = Geom:new{ w = label_w, h = nav_h },
@@ -229,7 +237,7 @@ local function buildCalendar(desktop, state, width, max_height)
         },
         navBtn("›", button_w, nav_h, function()
             state.ym = shiftYm(ym, 1)
-            desktop:rebuild()
+            desktop:updateView()
         end),
     }
 
@@ -275,8 +283,8 @@ local function buildCalendar(desktop, state, width, max_height)
         local cell = calCell(size, cd, seconds > 0, out, key == selected, function()
             state.selected = key
             if out then state.ym = string.format("%04d-%02d", cy, cm) end
-            desktop._insight_ui_page = 2
-            desktop:rebuild()
+            desktop.insight.ui_page = 2
+            desktop:updateView()
         end)
         table.insert(row, CenterContainer:new{
             dimen = Geom:new{ w = col_w, h = size },
@@ -301,7 +309,7 @@ end
 ---@param width number 内容宽度。
 ---@param avail_h number 可用高度。
 ---@return table
-function Overview.build(desktop, state, width, avail_h)
+function Overview:build(desktop, state, width, avail_h)
     local col = VerticalGroup:new{ align = "left", buildHero(state, width) }
     if state.error then
         table.insert(col, VerticalSpan:new{ width = UI.sz(12) })

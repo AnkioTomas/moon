@@ -16,15 +16,17 @@ local ChapterMode = require("ui.reader.session.chapter")
 local Toc = require("ui.reader.session.toc")
 local _ = require("gettext")
 
-local Session = {}
+---@class BookReaderSession
+---@field _snapshot ReaderSessionSnapshot|nil
+local Session = {
+    ---@type ReaderSessionSnapshot|nil
+    _snapshot = nil,
+}
 
 local handlers = {
     book = BookMode,
     chapter = ChapterMode,
 }
-
----@type ReaderSessionSnapshot|nil
-local current_session
 
 --- 按全书进度收敛已读状态：100% 是事实，99% 仅是用户可选便利规则。
 ---@param session ReaderSessionSnapshot|nil
@@ -59,8 +61,8 @@ local function installEndOfBookHandler(plugin, ui)
         if Session.isChapterMode() and Session.onChapterBoundary(1) then
             return true
         end
-        updateReadState(current_session, true)
-        require("ui.reader.end_dialog").show(plugin, ui, current_session and current_session.identity)
+        updateReadState(Session._snapshot, true)
+        require("ui.reader.end_dialog").show(plugin, ui, Session._snapshot and Session._snapshot.identity)
         return true
     end
 end
@@ -82,15 +84,15 @@ end
 --- 当前阅读快照；调用方只读，不得修改其字段。
 ---@return ReaderSessionSnapshot|nil
 function Session.current()
-    return current_session
+    return Session._snapshot
 end
 
 --- 当前是否为连续章节阅读模式。
 ---@param identity BookIdentity|nil 缺省当前会话身份
 ---@return boolean
 function Session.isChapterMode(identity)
-    if identity == nil and current_session then
-        identity = current_session.identity
+    if identity == nil and Session._snapshot then
+        identity = Session._snapshot.identity
     end
     return Mode.isChapter(identity)
 end
@@ -98,14 +100,14 @@ end
 --- 当前活跃书籍目录；整书来自 KOReader 文档 TOC，连续章节来自 books.toc。
 ---@return BookChapter[]|nil
 function Session.toc()
-    return Toc.list(current_session)
+    return Toc.list(Session._snapshot)
 end
 
 --- 当前目录章序号；两种模式在 toc 可用时均有效。
 ---@param snapshot ReaderSessionSnapshot|nil 缺省当前会话
 ---@return integer|nil
 function Session.chapterIndex(snapshot)
-    snapshot = snapshot or current_session
+    snapshot = snapshot or Session._snapshot
     local current = Toc.current(snapshot)
     return current and current.idx or nil
 end
@@ -114,7 +116,7 @@ end
 ---@param snapshot ReaderSessionSnapshot|nil 缺省当前会话
 ---@return string|nil
 function Session.chapterTitle(snapshot)
-    snapshot = snapshot or current_session
+    snapshot = snapshot or Session._snapshot
     local current = Toc.current(snapshot)
     return current and current.title or nil
 end
@@ -123,7 +125,7 @@ end
 ---@param identity BookIdentity|nil
 ---@return boolean
 function Session.isCurrent(identity)
-    local current = current_session
+    local current = Session._snapshot
     local current_id = current and current.identity
     return current_id ~= nil and identity ~= nil
         and current_id.source_id == identity.source_id
@@ -134,7 +136,7 @@ end
 --- 当前会话的进度位置快照。
 ---@return ProgressPosition|nil
 function Session.position()
-    local current = current_session
+    local current = Session._snapshot
     if not current then return nil end
     return require("book.progress").position(current)
 end
@@ -142,13 +144,13 @@ end
 --- 全书剩余阅读时间估算（秒）；数据不足或已读完返回 nil。
 ---@return number|nil
 function Session.remainingSeconds()
-    return Snapshot.remainingSeconds(current_session)
+    return Snapshot.remainingSeconds(Session._snapshot)
 end
 
 --- ReaderReady：按物理路径重建阅读快照并启动统计、进度和阅读 UI。
 ---@param plugin table Book 插件实例
 function Session.onReaderReady(plugin)
-    current_session = nil
+    Session._snapshot = nil
     local ui = plugin.ui
     local identity = Store.ensureIdentity(ui.document.file)
     if not identity then
@@ -166,14 +168,14 @@ function Session.onReaderReady(plugin)
 
     require("db.book").markOpened(identity.source_id, identity.stable_id)
     if identity.book then identity.book.is_new = false end
-    current_session = Snapshot.new(ui, identity)
+    Session._snapshot = Snapshot.new(ui, identity)
     installEndOfBookHandler(plugin, ui)
     local mode = Mode.resolve(identity)
-    local skip_pull = handlers[mode].onReaderReady(plugin, current_session)
-    updateReadState(current_session)
-    bootstrapReading(plugin, current_session, skip_pull)
+    local skip_pull = handlers[mode].onReaderReady(plugin, Session._snapshot)
+    updateReadState(Session._snapshot)
+    bootstrapReading(plugin, Session._snapshot, skip_pull)
     if mode == "chapter" then
-        ChapterMode.afterBootstrap(plugin, current_session)
+        ChapterMode.afterBootstrap(plugin, Session._snapshot)
     end
 end
 
@@ -181,10 +183,10 @@ end
 ---@param plugin table
 ---@param event string
 local function syncReading(plugin, event)
-    local identity = current_session and current_session.identity
+    local identity = Session._snapshot and Session._snapshot.identity
     local source = identity and identity.source
     if source and identity then
-        require("book.progress").save(current_session, function(ok)
+        require("book.progress").save(Session._snapshot, function(ok)
             if ok and source.syncProgressAsync then
                 -- 关书只负责把本地新版本推上去。立即回拉可能读到微信尚未收敛的
                 -- 旧值，再把刚上传的进度覆盖掉；远端拉取统一留给下次 ReaderReady。
@@ -214,21 +216,21 @@ end
 --- CloseDocument：结清阅读状态；切章保留目录，真正关书清除全部章节状态。
 ---@param plugin table Book 插件实例
 function Session.onCloseDocument(plugin)
-    if current_session and plugin.ui then
-        require("book.reader_prefs").captureAndSave(plugin.ui, current_session.identity)
+    if Session._snapshot and plugin.ui then
+        require("book.reader_prefs").captureAndSave(plugin.ui, Session._snapshot.identity)
     end
     syncReading(plugin, "document_close")
-    if ChapterMode.onCloseDocument(current_session) then
+    if ChapterMode.onCloseDocument(Session._snapshot) then
         require("book.progress").clearConflicts()
     end
-    current_session = nil
+    Session._snapshot = nil
 end
 
 --- 页码变化：结清上一页统计、刷新快照和阅读 UI，并通知属主源。
 ---@param plugin table Book 插件实例
 ---@param page number|nil
 function Session.onPageChanged(plugin, page)
-    local session = current_session
+    local session = Session._snapshot
     if not session then
         require("book.stats").onPage(nil)
         return
@@ -252,8 +254,8 @@ end
 ---@param plugin table Book 插件实例
 ---@param _items table KOReader 变更描述；完整数据从 annotation.annotations 读取
 function Session.onAnnotationsModified(plugin, _items)
-    if current_session then
-        require("book.note").save(plugin.ui, current_session.identity)
+    if Session._snapshot then
+        require("book.note").save(plugin.ui, Session._snapshot.identity)
     end
 end
 
@@ -261,8 +263,8 @@ end
 ---@param plugin table Book 插件实例
 function Session.onSuspend(plugin)
     if not plugin.ui.document then return end
-    if current_session then
-        require("book.reader_prefs").captureAndSave(plugin.ui, current_session.identity)
+    if Session._snapshot then
+        require("book.reader_prefs").captureAndSave(plugin.ui, Session._snapshot.identity)
     end
     syncReading(plugin, "suspend")
 end
@@ -270,8 +272,8 @@ end
 --- 唤醒后恢复当前阅读会话的统计计时。
 ---@param plugin table Book 插件实例
 function Session.onResume(plugin)
-    if plugin.ui.document and current_session then
-        require("book.stats").start(current_session)
+    if plugin.ui.document and Session._snapshot then
+        require("book.stats").start(Session._snapshot)
     end
 end
 
@@ -280,14 +282,14 @@ end
 ---@param opts { within: number|nil, direction: "prev"|"next"|nil }|nil
 ---@return boolean started
 function Session.gotoChapter(idx, opts)
-    return Toc.gotoChapter(current_session, idx, opts)
+    return Toc.gotoChapter(Session._snapshot, idx, opts)
 end
 
 --- 从页首/页尾边界发起相邻章节切换，并立即锁住重复边界事件。
 ---@param delta integer -1 表示上一章，1 表示下一章
 ---@return boolean handled
 function Session.onChapterBoundary(delta)
-    return Toc.onBoundary(current_session, delta)
+    return Toc.onBoundary(Session._snapshot, delta)
 end
 
 return Session

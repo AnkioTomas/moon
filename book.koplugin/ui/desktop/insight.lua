@@ -16,7 +16,7 @@ local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local InfoMessage = require("ui/widget/infomessage")
 local NetworkMgr = require("ui/network/manager")
-local Pager = require("ui.components.pager")
+local PageStrip = require("ui.components.pagestrip")
 local Store = require("book.store")
 local BookDB = require("db.book")
 local UI = require("ui.components.bookui")
@@ -28,7 +28,75 @@ local logger = require("utils.log")
 local _ = require("gettext")
 local META_TTL = 7 * 24 * 60 * 60
 
+---@class BookInsight
+---@field desktop BookDesktop
+---@field state table|nil
+---@field loaded boolean
+---@field fetching boolean
+---@field fetch_cancel table|nil
+---@field ui_page number
+---@field opening boolean
+---@field overview BookInsightOverview
+---@field day BookInsightDay
+---@field records BookInsightRecords
 local Insight = {}
+Insight.__index = Insight
+
+---@param desktop BookDesktop
+---@return BookInsight
+function Insight.new(desktop)
+    return setmetatable({
+        desktop = desktop,
+        state = nil,
+        loaded = false,
+        fetching = false,
+        fetch_cancel = nil,
+        ui_page = 1,
+        opening = false,
+        overview = require("ui.desktop.insight.overview").new(),
+        day = require("ui.desktop.insight.day").new(),
+        records = require("ui.desktop.insight.records").new(),
+    }, Insight)
+end
+
+function Insight:cancel()
+    if self.fetch_cancel then
+        self.fetch_cancel:cancel()
+        self.fetch_cancel = nil
+    end
+    self.fetching = false
+end
+
+function Insight:reset()
+    self:cancel()
+    self.state = nil
+    self.loaded = false
+    self.ui_page = 1
+    self.opening = false
+end
+
+function Insight:onPause()
+    self:cancel()
+end
+
+function Insight:onDestroy()
+    self:cancel()
+end
+
+function Insight:onStop()
+    self:cancel()
+end
+
+function Insight:onCancel()
+    self:cancel()
+end
+
+---@param event string
+function Insight:onEvent(event)
+    if event == "source_changed" then
+        self:reset()
+    end
+end
 
 --- 取路径末段文件名。
 ---@param path string|nil 文件路径。
@@ -40,8 +108,9 @@ end
 --- 统计页点书：优先使用本地缓存，缓存过期后按文件名从书库查询。
 ---@param desktop table 桌面实例。
 ---@param hint table 洞察日书单条目，必须有 source_id 和 stable_id。
-function Insight.openBookDetail(desktop, hint)
-    if not desktop or desktop._closed or desktop._insight_opening then return end
+function Insight:openBookDetail(hint)
+    local desktop = self.desktop
+    if not desktop or desktop.lifecycle.state == "Destroy" or self.opening then return end
     if type(hint) ~= "table" or type(hint.source_id) ~= "string"
         or type(hint.stable_id) ~= "string" then
         UIManager:show(InfoMessage:new{ text = _("没有这本书"), timeout = 2 })
@@ -57,7 +126,7 @@ function Insight.openBookDetail(desktop, hint)
         if hint.percent ~= nil and (not cached.percent or cached.percent == 0) then
             cached.percent = tonumber(hint.percent) or cached.percent or 0
         end
-        desktop:showDetail(cached)
+        require("ui.desktop.detail").open(desktop, cached)
         return
     end
 
@@ -74,25 +143,25 @@ function Insight.openBookDetail(desktop, hint)
     end
 
     NetworkMgr:runWhenOnline(function()
-        if desktop._closed or desktop._insight_opening then return end
-        desktop._insight_opening = true
+        if desktop.lifecycle.state == "Destroy" or self.opening then return end
+        self.opening = true
         local loading = InfoMessage:new{ text = _("正在拉取书籍信息…") }
         UIManager:show(loading)
         --- 结束书籍详情查询并关闭加载提示。
         ---@param book table|nil 查询到的书籍。
         ---@param err_text string|nil 错误文案。
         local function finish(book, err_text)
-            desktop._insight_opening = false
+            self.opening = false
             UIManager:close(loading)
-            if desktop._closed then return end
+            if desktop.lifecycle.state == "Destroy" then return end
             if book then
-                desktop:showDetail(book)
+                require("ui.desktop.detail").open(desktop, book)
             else
                 UIManager:show(InfoMessage:new{ text = err_text or _("没有这本书"), timeout = 2 })
             end
         end
         api:listLibraryAsync({ page = 1, page_size = 50, search = search }, function(res, req_err)
-            if desktop._closed then return end
+            if desktop.lifecycle.state == "Destroy" then return end
             if not res then
                 finish(nil, req_err or _("拉取失败"))
                 return
@@ -117,48 +186,42 @@ end
 ---@param width number 内容宽度。
 ---@param height number 内容高度。
 ---@return table
-local function buildPage(desktop, page, state, width, height)
+local function buildPage(insight, page, state, width, height)
+    local desktop = insight.desktop
     if page == 1 then
-        return require("ui.desktop.insight.overview").build(desktop, state, width, height)
+        return insight.overview:build(desktop, state, width, height)
     elseif page == 2 then
-        return require("ui.desktop.insight.day").build(
+        return insight.day:build(
             desktop, state, width, height,
-            function(book) Insight.openBookDetail(desktop, book) end
+            function(book) insight:openBookDetail(book) end
         )
     end
-    return require("ui.desktop.insight.records").build(state, width, height)
+    return insight.records:build(state, width, height)
 end
 
 --- 构建统计 Tab 整页 UI。
 ---@param desktop table 桌面实例。
 ---@return table
-function Insight.build(desktop)
+function Insight:build()
+    local desktop = self.desktop
     local height = desktop:contentHeight()
     local width = desktop.dimen.w
     local page_pad = UI.sz(10)
     local content_w = math.max(UI.sz(100), width - page_pad * 2)
-    local state = desktop._insight_state or {}
-    local body_h = math.max(1, height - Pager.bandH())
+    local state = self.state or {}
+    local body_h = math.max(1, height - PageStrip.bandH())
     local inner_h = math.max(1, body_h - page_pad * 2)
 
     local has_data = state.has_data and not state.error
     local pages = has_data and 3 or 1
-    local page = Pager.clamp(desktop._insight_ui_page, pages)
-    desktop._insight_ui_page = page
-    local body = buildPage(desktop, page, state, content_w, inner_h)
+    local page = PageStrip.clamp(self.ui_page, pages)
+    self.ui_page = page
+    local body = buildPage(self, page, state, content_w, inner_h)
     local filler = math.max(0, inner_h - body:getSize().h)
     local body_kids = { align = "left", body }
     if filler > 0 then table.insert(body_kids, VerticalSpan:new{ width = filler }) end
 
     local labels = { _("概览"), _("今日总览"), _("连续记录") }
-    local handlers = {
-        info_text = pages > 1 and labels[page] or nil,
-        on_prev = function() desktop._insight_ui_page = page - 1 desktop:rebuild() end,
-        on_next = function() desktop._insight_ui_page = page + 1 desktop:rebuild() end,
-        on_first = function() desktop._insight_ui_page = 1 desktop:rebuild() end,
-        on_last = function() desktop._insight_ui_page = pages desktop:rebuild() end,
-    }
-
     return FrameContainer:new{
         bordersize = 0,
         padding = 0,
@@ -173,32 +236,39 @@ function Insight.build(desktop)
                 dimen = Geom:new{ w = width, h = body_h },
                 VerticalGroup:new(body_kids),
             },
-            Pager.band(width, page, pages, handlers),
+            PageStrip.widget{
+                width = width,
+                page = page,
+                pages = pages,
+                center = "title",
+                title = labels[page],
+                on_prev = function() self.ui_page = page - 1; desktop:updateView() end,
+                on_next = function() self.ui_page = page + 1; desktop:updateView() end,
+            },
         },
     }
 end
 
 --- 异步拉取阅读统计 insight。
 ---@param desktop table 桌面实例。
-function Insight.fetch(desktop)
-    if desktop._insight_fetching then return end
-    desktop._insight_fetching = true
-    if desktop._insight_fetch_cancel then
-        desktop._insight_fetch_cancel:cancel()
-        desktop._insight_fetch_cancel = nil
-    end
+function Insight:fetch()
+    if self.fetching then return end
+    local desktop = self.desktop
+    self.fetching = true
+    self:cancel()
+    self.fetching = true
     local source = desktop.source
     local generation = desktop.source_generation or 0
 
     --- 写入统计状态并重建页面。
     ---@param state table|nil 新状态。
     local function finish(state)
-        desktop._insight_fetching = false
-        desktop._insight_fetch_cancel = nil
-        desktop._insight_state = state or {}
-        desktop._insight_loaded = true
-        if desktop._closed or desktop.tab ~= "stats" then return end
-        desktop:rebuild()
+        self.fetching = false
+        self.fetch_cancel = nil
+        self.state = state or {}
+        self.loaded = true
+        if desktop.lifecycle.state == "Destroy" or desktop.tab ~= "stats" then return end
+        desktop:updateView()
     end
 
     if not source then finish({ has_data = false, error = _("当前数据源不可用") }); return end
@@ -211,12 +281,12 @@ function Insight.fetch(desktop)
     --- 向当前源拉统计并归一化成插件内部状态；期间换源或关桌面则丢弃结果。
     --- 解析用 pcall 包住：源返回的结构不受本地控制，脏数据只该退化成一条错误提示。
     local function loadInsight()
-        desktop._insight_fetch_cancel = source:readingInsightAsync(function(res, err)
-            if desktop._closed or desktop.source ~= source
+        self.fetch_cancel = source:readingInsightAsync(function(res, err)
+            if desktop.lifecycle.state == "Destroy" or desktop.source ~= source
                 or (desktop.source_generation or 0) ~= generation then
                 -- 结果作废也要放掉在飞标记，否则换回该源后统计页永久不再拉取
-                desktop._insight_fetching = false
-                desktop._insight_fetch_cancel = nil
+                self.fetching = false
+                self.fetch_cancel = nil
                 return
             end
             if not res then
@@ -256,18 +326,18 @@ function Insight.fetch(desktop)
     loadInsight()
 end
 
---- Desktop rebuild 入口：未加载则触发 fetch。
----@param desktop table 桌面实例。
+--- 统计 widget。未加载则触发 fetch。
 ---@return table
-function Insight.page(desktop)
+function Insight:updateView()
+    local desktop = self.desktop
     local height = desktop:contentHeight()
     local width = desktop.dimen.w
-    if not desktop._insight_loaded then
+    if not self.loaded then
         UIManager:nextTick(function()
-            if desktop._closed or desktop.tab ~= "stats" then return end
-            Insight.fetch(desktop)
+            if desktop.lifecycle.state == "Destroy" or desktop.tab ~= "stats" then return end
+            self:fetch()
         end)
-        return FrameContainer:new{
+        self.widget = FrameContainer:new{
             bordersize = 0,
             padding = 0,
             background = Blitbuffer.COLOR_WHITE,
@@ -281,8 +351,10 @@ function Insight.page(desktop)
                 },
             },
         }
+        return self.widget
     end
-    return Insight.build(desktop)
+    self.widget = self:build()
+    return self.widget
 end
 
 return Insight

@@ -10,6 +10,7 @@ ui.panel.reader，本模块只挂载阅读状态条。
 local Event = require("ui/event")
 local UIManager = require("ui/uimanager")
 
+---@class BookReader
 local Reader = {}
 
 --- 当前阅读页的图标动作；原生 Tab 每次重绘都重新取状态。

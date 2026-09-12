@@ -4,6 +4,9 @@
 @module koplugin.book.ui.reader.session.mode
 --]]
 
+---@alias ReaderSessionMode 'book'|'chapter'
+
+---@class ReaderSessionModeResolver
 local Mode = {}
 
 ---@param identity BookIdentity|nil

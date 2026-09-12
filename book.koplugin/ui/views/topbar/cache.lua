@@ -1,16 +1,17 @@
 --[[--
 顶栏后台缓存任务。Resume 听队列，Pause 停听，进度原地更新。
 
-@module koplugin.book.ui.components.topbar.cache
+@module koplugin.book.ui.views.topbar.cache
 --]]
 
 local CacheQueue = require("source.cache_queue")
 local _ = require("gettext")
-local Base = require("ui.components.topbar.base")
+local Base = require("ui.views.topbar.base")
 
 ---@class BookTopBarCache : BookTopBarItem
-local Cache = setmetatable({}, Base)
+local Cache = {}
 Cache.__index = Cache
+setmetatable(Cache, Base)
 Cache.id = "cache"
 
 --- 订阅缓存队列变化并立即刷新进度；订阅句柄由 Lifecycle 拥有。

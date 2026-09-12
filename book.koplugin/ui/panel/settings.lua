@@ -48,7 +48,7 @@ local function configure(desktop, option)
         callback = function()
             panel.setEnabled(option.id, not option.enabled)
             UIManager:close(dialog)
-            desktop:rebuild()
+            desktop:updateView()
         end,
     }}
     if option.enabled then
@@ -60,7 +60,7 @@ local function configure(desktop, option)
                 callback = function()
                     panel.move(option.id, -1)
                     UIManager:close(dialog)
-                    desktop:rebuild()
+                    desktop:updateView()
                 end,
             },
             {
@@ -70,7 +70,7 @@ local function configure(desktop, option)
                 callback = function()
                     panel.move(option.id, 1)
                     UIManager:close(dialog)
-                    desktop:rebuild()
+                    desktop:updateView()
                 end,
             },
         }

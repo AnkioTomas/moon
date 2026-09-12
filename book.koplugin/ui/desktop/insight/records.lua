@@ -18,7 +18,16 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+---@class BookInsightRecords
 local Records = {}
+Records.__index = Records
+
+--- 创建阅读记录页的独立分页和查询状态。
+---@return BookInsightRecords
+function Records.new()
+    return setmetatable({}, Records)
+end
+
 
 --- 将秒数格式化为统计页短时长文案。
 ---@param seconds number|nil 阅读秒数。
@@ -149,15 +158,15 @@ local function recordCard(width, value, label)
     }
     local height = pad * 2 + value_widget:getSize().h
         + UI.sz(4) + label_widget:getSize().h
-    return Surface.card(CenterContainer:new{
+    return Surface.build{ child = CenterContainer:new{
         dimen = Geom:new{ w = inner_w, h = height - pad * 2 },
         VerticalGroup:new{ align = "center", value_widget, VerticalSpan:new{ width = UI.sz(4) }, label_widget },
-    }, {
+    }, options = {
         width = width,
         height = height,
         padding = pad,
         shadow = true,
-    }), height
+    }, kind = "card" }, height
 end
 
 --- 将指标卡片排成一行。
@@ -203,7 +212,7 @@ end
 ---@param width number 内容宽度。
 ---@param avail_h number 可用高度。
 ---@return table
-function Records.build(state, width, avail_h)
+function Records:build(state, width, avail_h)
     local stats = aggregate(state)
     local gap = UI.sz(8)
     local col = VerticalGroup:new{ align = "left" }
@@ -211,6 +220,7 @@ function Records.build(state, width, avail_h)
     --- 追加控件并累计高度。
     ---@param widget table 子控件。
     ---@param widget_h number 控件高度。
+    ---@return nil
     local function push(widget, widget_h)
         table.insert(col, widget)
         used = used + (widget_h or 0)

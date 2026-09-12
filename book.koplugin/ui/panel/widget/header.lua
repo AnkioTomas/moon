@@ -24,7 +24,6 @@ local _ = require("gettext")
 ---@class BookQuickPanelHeader : WidgetContainer
 ---@field width number
 ---@field height number
----@field ui table|nil
 ---@field on_exit fun()|nil
 
 local Header = InputContainer:extend{
@@ -32,7 +31,7 @@ local Header = InputContainer:extend{
 }
 
 --- 从当前阅读会话提取书名和章节/作者副标题。
----@param ui table|nil
+---@param ui table|nil KOReader 阅读界面实例
 ---@return string, string
 local function bookTexts(ui)
     local current = Session.current() or {}
@@ -54,7 +53,7 @@ local function bookTexts(ui)
 end
 
 --- 构建标题文本和退出按钮布局。
----@param self BookQuickPanelHeader
+---@param self BookQuickPanelHeader 当前视图或布局实例
 ---@return void
 function Header:init()
     local title, subtitle = bookTexts(self.ui)
@@ -95,16 +94,16 @@ function Header:init()
     exit_btn.on_exit = self.on_exit
     exit_btn[1] = CenterContainer:new{
         dimen = Geom:new{ w = exit_w, h = self.height },
-        Surface.pill(Icon.widget{
+        Surface.build{ child = Icon.widget{
             name = "close",
             size = 22,
             color = Blitbuffer.COLOR_BLACK,
-        }, {
+        }, options = {
             width = exit_w,
             height = UI.sz(36),
             background = UI.surface(),
             shadow = false,
-        }),
+        }, kind = "pill" },
     }
     self.dimen = Geom:new{ w = self.width, h = self.height }
     self[1] = HorizontalGroup:new{

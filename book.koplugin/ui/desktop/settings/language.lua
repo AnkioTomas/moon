@@ -8,7 +8,7 @@ local InfoMessage = require("ui/widget/infomessage")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local UIManager = require("ui/uimanager")
-local Popup = require("ui.components.popup")
+local Popup = require("ui.views.popup")
 local SettingRow = require("ui.components.settingrow")
 local UI = require("ui.components.bookui")
 local Paths = require("utils.paths")
@@ -17,7 +17,15 @@ local Registry = require("ime.registry")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+---@class BookSettingsLanguage
 local Language = {}
+Language.__index = Language
+
+---@return BookSettingsLanguage
+function Language.new()
+    return setmetatable({}, Language)
+end
+
 local RELEASES_URL = "https://github.com/AnkioTomas/moon/releases"
 
 --- 造一行小字灰色提示，高度按文本实测撑开。
@@ -65,7 +73,7 @@ local function pickInputMethod(desktop)
             text = method.id == current and "✓ " .. method.label or method.label,
             callback = function()
                 IME.setLayout(method.id)
-                desktop:rebuild()
+                desktop:updateView()
             end,
         }
     end
@@ -109,7 +117,7 @@ local function download(desktop, enable_after)
             timeout = 2,
         })
         if ok and enable_after then IME.setEnabled(true) end
-        desktop:rebuild()
+        desktop:updateView()
     end, function(stage, done_bytes, total, _idx, count)
         if stage == "assemble" then
             closeDialog()
@@ -143,7 +151,7 @@ end
 
 ---@param desktop table
 ---@return table
-function Language.rows(desktop)
+function Language:rows(desktop)
     local lang = G_reader_settings:readSetting("language") or "C"
     local LanguageApi = require("ui/language")
     local method = Registry.current()
@@ -170,7 +178,7 @@ function Language.rows(desktop)
                         text = on and _("中文键盘已启用，点键盘上的 🌐 键切换中英文") or _("中文键盘已停用"),
                         timeout = 3,
                     })
-                    desktop:rebuild()
+                    desktop:updateView()
                 end,
             })
         end,

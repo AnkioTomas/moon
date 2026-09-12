@@ -4,6 +4,7 @@
 
 local _ = require("gettext")
 
+---@type BookQuickPanelAction
 return {
     id = "bookmark",
     title = _("书签"),

@@ -19,7 +19,15 @@ local MoonSettings = require("utils.settings")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+---@class BookSettingsMaintenance
 local Maintenance = {}
+Maintenance.__index = Maintenance
+
+---@return BookSettingsMaintenance
+function Maintenance.new()
+    return setmetatable({}, Maintenance)
+end
+
 local REPO_URL = "https://github.com/AnkioTomas/moon"
 local REPO_HOST = "github.com/AnkioTomas/moon"
 
@@ -69,18 +77,19 @@ end
 --- 清理会连带作废首页与书库状态，因为封面等资源就在 cache 里。
 ---@param desktop table 桌面实例
 ---@return fun(iw: number): table
-function Maintenance.cacheRow(desktop)
+function Maintenance:cacheRow(desktop)
     return function(iw)
         local cache_size = desktop._cache_size_label or _("计算中…")
         if desktop._cache_size_label == nil and not desktop._cache_size_job then
-            desktop._cache_size_job = Cache.sizeBytesAsync(function(bytes)
+            local job = Cache.sizeBytesAsync(function(bytes)
                 desktop._cache_size_job = nil
-                if desktop._closed then return end
+                if desktop.lifecycle.state == "Destroy" then return end
                 local label = bytes > 0
                     and (require("util").getFriendlySize(bytes) or tostring(bytes)) or "0"
                 desktop._cache_size_label = label
-                if desktop.tab == "settings" then desktop:rebuild() end
+                if desktop.tab == "settings" then desktop:updateView() end
             end)
+            desktop._cache_size_job = job
         end
         return SettingRow.build(iw, {
             kind = "action", icon = "delete", title = _("清理缓存"), status = cache_size, status_on = true,
@@ -90,17 +99,18 @@ function Maintenance.cacheRow(desktop)
                     ok_callback = function()
                         if desktop._cache_clear_job then return end
                         UIManager:show(InfoMessage:new{ text = _("正在清理缓存…"), timeout = 1 })
-                        desktop._cache_clear_job = Cache.clearAsync(function(ok)
+                        local job = Cache.clearAsync(function(ok)
                             desktop._cache_clear_job = nil
-                            if desktop._closed then return end
+                            if desktop.lifecycle.state == "Destroy" then return end
                             if ok then
                                 desktop._cache_size_label = "0"
-                                require("ui.desktop.home").invalidate(desktop)
-                                desktop._library_state = nil
-                                desktop:rebuild()
+                                if desktop.home then desktop:onEvent("home_refresh") end
+                                if desktop.library then desktop.library.state = nil end
+                                desktop:updateView()
                             end
                             UIManager:show(InfoMessage:new{ text = ok and _("已清理") or _("清理失败"), timeout = 2 })
                         end)
+                        desktop._cache_clear_job = job
                     end,
                 })
             end,
@@ -111,7 +121,7 @@ end
 --- 造「调试日志」开关；控制 DEBUG/INFO，WARN/ERROR 始终写入独立日志。
 ---@param desktop table 桌面实例
 ---@return fun(iw: number): table
-function Maintenance.debugLogRow(desktop)
+function Maintenance:debugLogRow(desktop)
     return function(iw)
         local enabled = MoonSettings.get("common").book_debug_enabled
         return SettingRow.build(iw, {
@@ -119,7 +129,7 @@ function Maintenance.debugLogRow(desktop)
             status = enabled and _("开") or _("关"), status_on = enabled,
             callback = function()
                 MoonSettings.save({ book_debug_enabled = not enabled })
-                desktop:rebuild()
+                desktop:updateView()
             end,
         })
     end
@@ -128,7 +138,7 @@ end
 --- 造「自动检查更新」开关；只自动查询并提示，不自动安装。
 ---@param desktop table 桌面实例
 ---@return fun(iw: number): table
-function Maintenance.autoUpdateRow(desktop)
+function Maintenance:autoUpdateRow(desktop)
     return function(iw)
         local enabled = MoonSettings.get("maintenance").auto_update_check
         return SettingRow.build(iw, {
@@ -137,7 +147,7 @@ function Maintenance.autoUpdateRow(desktop)
             status = enabled and _("开") or _("关"), status_on = enabled,
             callback = function()
                 MoonSettings.save({ auto_update_check = not enabled })
-                desktop:rebuild()
+                desktop:updateView()
             end,
         })
     end
@@ -146,7 +156,7 @@ end
 --- 造手动检查更新入口。
 ---@param desktop table 桌面实例
 ---@return fun(iw: number): table
-function Maintenance.updateRow(desktop)
+function Maintenance:updateRow(desktop)
     return function(iw)
         return SettingRow.build(iw, {
             kind = "action", icon = "system_update", title = _("检查更新"),
@@ -160,7 +170,7 @@ end
 
 --- 造「关于」设置行的构造器，状态位显示当前版本号。
 ---@return fun(iw: number): table
-function Maintenance.aboutRow()
+function Maintenance:aboutRow()
     return function(iw)
         return SettingRow.build(iw, { kind = "nav", icon = "info", title = _("关于"), status = pluginVersion(), status_on = true, callback = showAbout })
     end
@@ -169,7 +179,7 @@ end
 --- 造「关闭桌面」设置行的构造器。
 ---@param desktop table 桌面实例
 ---@return fun(iw: number): table
-function Maintenance.closeRow(desktop)
+function Maintenance:closeRow(desktop)
     return function(iw)
         return SettingRow.build(iw, { kind = "action", icon = "close", title = _("关闭桌面"), callback = function() desktop:onClose() end })
     end

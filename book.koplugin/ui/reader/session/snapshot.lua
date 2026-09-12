@@ -15,7 +15,6 @@
 ---@field percent number 全书阅读百分比（0..100）
 ---@field reading_chapter_idx integer|nil 当前目录章序号（两种模式 toc 可用时）
 ---@field chapter ReaderChapterSession|nil 当前文档的章节上下文
-
 local Snapshot = {}
 
 ---@type string|nil
