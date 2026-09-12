@@ -19,9 +19,9 @@
   插件的 onResume 不再转发，避免和系统广播跑两遍。
   Desktop 已经是 InputContainer，不继承 ui/lifecycle.lua（组合 attach）。
 
+  UI 契约：build 一生一次建壳；updateView 换内容槽/底栏。页自己 build/updateView。
   KOReader 自己的手势 / 关窗走 onSwipe / onTapBar / onClose。
   Desktop:onEvent 只广播；换源先改自己的 source/tab。
-  先画壳（白内容 + 顶栏 + 底栏），不填页。页在 onResume / rebuild 里自己刷内容槽。
   详情走 Detail.open，设置子页走 Settings:showSub。
 
 @module koplugin.book.ui.desktop
@@ -35,9 +35,9 @@ local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local Lifecycle = require("ui.lifecycle")
+local BaseView = require("ui.baseview")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local UIManager = require("ui/uimanager")
-local Widget = require("ui/widget/widget")
 local logger = require("utils.log")
 local Perf = require("utils.perf")
 local _ = require("gettext")
@@ -88,16 +88,26 @@ local TAB_COMPONENT = { home = "home", library = "library", store = "store", sta
 local CHILDREN = { "topbar", "bottombar", "home", "library", "store", "insight", "settings" }
 
 
+--- 调用指定子视图的事件或生命周期方法；不存在的接收者直接跳过。
+---@param child table|nil 接收事件的子视图；nil 时跳过
+---@param method string 子视图上的方法名
+---@param ... any 原样传给接收方法的参数
+---@return nil
 local function notify(child, method, ...)
     if child and child[method] then child[method](child, ...) end
 end
 
+--- 按组件注册顺序把同一事件和参数分发给子视图。
+---@param self BookDesktop 拥有子视图的父实例
+---@param method string 子视图上的方法名
+---@param ... any 原样传给接收方法的参数
+---@return nil
 local function broadcast(self, method, ...)
     for _, key in ipairs(CHILDREN) do notify(self[key], method, ...) end
 end
 
 --- 按数据源能力生成 Desktop 底栏 Tab。
----@param source table|nil
+---@param source table|nil 书籍所属数据源实例
 ---@return table
 local function desktopTabs(source)
     local tabs = {
@@ -116,7 +126,8 @@ local function desktopTabs(source)
 end
 
 --- 当前 tab 不在 tabs 列表中则回退 home（换源 / 能力变化后调用）。
----@param self BookDesktop
+---@param self BookDesktop 当前视图或布局实例
+---@return nil
 local function clampTab(self)
     for _, t in ipairs(self._tabs) do
         if t.id == self.tab then
@@ -128,8 +139,9 @@ end
 
 
 --- 换源：取消窗口任务、更新 Tab，再广播给各页自己复位。
----@param self BookDesktop
----@param source BookSource|nil
+---@param self BookDesktop 当前视图或布局实例
+---@param source BookSource|nil 书籍所属数据源实例
+---@return nil
 local function applySource(self, source)
     self.source = source
     self._tabs = desktopTabs(source)
@@ -138,8 +150,9 @@ local function applySource(self, source)
 end
 
 --- 只广播。换源改的是 Desktop 自己的 source/tab，不是替孩子分流。
----@param event string|table
----@param payload any
+---@param event string|table 父组件转发的事件名称或事件对象
+---@param payload any 与事件一起传入的数据
+---@return nil
 function Desktop:onEvent(event, payload)
     if self.lifecycle.state == "Destroy" then return end
     if event == "source_changed" then
@@ -149,37 +162,54 @@ function Desktop:onEvent(event, payload)
     broadcast(self, "onEvent", event, payload)
 end
 
--- KOReader 广播：桌面在栈上时转到内部 onEvent，顶栏自己认。
-local KO_EVENTS = {
-    "NetworkConnected",
-    "NetworkDisconnected",
-    "NetworkConnecting",
-    "NetworkDisconnecting",
-    "FrontlightStateChanged",
-    "Charging",
-    "NotCharging",
-}
-for i = 1, #KO_EVENTS do
-    local event = KO_EVENTS[i]
-    Desktop["on" .. event] = function(self)
-        self:onEvent(event)
-    end
+--- KOReader 电源 / 网络 / 前光事件 → 统一 onEvent 名。
+---@return nil
+function Desktop:onCharging()
+    self:onEvent("Charging")
+end
+--- 将停止充电事件转发给桌面子组件。
+---@return nil
+function Desktop:onNotCharging()
+    self:onEvent("NotCharging")
+end
+--- 将网络连接成功事件转发给桌面子组件。
+---@return nil
+function Desktop:onNetworkConnected()
+    self:onEvent("NetworkConnected")
+end
+--- 将网络断开事件转发给桌面子组件。
+---@return nil
+function Desktop:onNetworkDisconnected()
+    self:onEvent("NetworkDisconnected")
+end
+--- 将前光状态变化事件转发给桌面子组件。
+---@return nil
+function Desktop:onFrontlightStateChanged()
+    self:onEvent("FrontlightStateChanged")
+end
+
+--- 系统 Resume 广播进桌面（窗口在栈上时）。
+---@return nil
+function Desktop:onResumeEvent()
+    if self.lifecycle.state == "Destroy" then return end
+    self:onResume()
 end
 
 --- 初始化手势区与默认分页状态，再 onCreate 画出第一帧。
+---@return nil
 function Desktop:init()
     self.lifecycle = Lifecycle.attach(self)
+    self.view = BaseView.attach(self)
     self._tabs = desktopTabs(self.source)
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.tab = self.tab or "home"
-    self.home = Home.new(self)
+    self.home = Home:new({ desktop = self, name = "home" })
     self.library = Library.new(self)
     self.store = StorePage.new(self)
     self.insight = Insight.new(self)
-    self.settings = Settings.new(self)
-    self.topbar = TopBar:new()
-    self.topbar.desktop = self
-    self.bottombar = BottomBar.new()
+    self.settings = Settings:new{ desktop = self }
+    self.topbar = TopBar:new({ desktop = self, name = "topbar" })
+    self.bottombar = BottomBar:new{ host = self }
     clampTab(self)
     self.ges_events = {
         SwipeTopBar = {
@@ -212,12 +242,12 @@ function Desktop:init()
             GestureRange:new{
                 ges = "tap",
                 range = function()
-                    local h = UI.barH()
+                    local h = Screen:getHeight()
                     return Geom:new{
                         x = 0,
-                        y = Screen:getHeight() - h,
+                        y = h - UI.barH(),
                         w = Screen:getWidth(),
-                        h = h,
+                        h = UI.barH(),
                     }
                 end,
             },
@@ -239,42 +269,47 @@ function Desktop:init()
     self:onCreate()
 end
 
---- 创建：挂长期对象，先画壳，当前页自己刷内容。
+--- 创建：挂长期对象，build 一生一次的壳。
+---@return nil
 function Desktop:onCreate()
     broadcast(self, "onCreate")
-    self:rebuild()
-    notify(self[TAB_COMPONENT[self.tab]], "onResume")
+    self:build()
 end
 
 --- 启动：通知孩子挂环境。
+---@return nil
 function Desktop:onStart()
     broadcast(self, "onStart")
 end
 
 --- 恢复工作：通知顶栏与当前页。系统唤醒也会进这里，只这一条路。
+---@return nil
 function Desktop:onResume()
     broadcast(self, "onResume")
-
     -- todo source tasks, such as http sync or download
 
 end
 
 --- 暂停：
+---@return nil
 function Desktop:onPause()
     broadcast(self, "onPause")
 end
 
 --- 停止：通知所有子组件停工。
+---@return nil
 function Desktop:onStop()
     broadcast(self, "onStop")
 end
 
 --- 取消在飞请求，不拆窗体。
+---@return nil
 function Desktop:onCancel()
     broadcast(self, "onCancel")
 end
 
 --- 销毁：通知子组件销毁，再拆手势和详情浮层。
+---@return nil
 function Desktop:onDestroy()
     broadcast(self, "onDestroy")
     self.ges_events = nil
@@ -285,16 +320,16 @@ function Desktop:onDestroy()
 end
 
 --- 顶栏向下滑：打开 KOReader 原生菜单的 Book 快捷 Tab。
----@param _ any
----@param ges_ev table|nil
+---@param _ any 事件框架传入但本实现不使用的参数
+---@param ges_ev table|nil KOReader 手势数据，含方向和位置
 ---@return boolean
 function Desktop:onSwipeTopBar(_, ges_ev)
     return self.topbar:onSwipe(_, ges_ev)
 end
 
 --- 顶栏点击：缓存指标打开任务列表，源名区域切换数据源，其余区域打开原生快捷面板 Tab。
----@param _ any
----@param ges table|nil
+---@param _ any 事件框架传入但本实现不使用的参数
+---@param ges table|nil KOReader 手势数据，含方向和位置
 ---@return boolean
 function Desktop:onTapTopBar(_, ges)
     return self.topbar:onTap(_, ges)
@@ -320,8 +355,8 @@ function Desktop:ctx()
 end
 
 --- 底栏点击：按 x 落点切换 Tab。
----@param _ any
----@param ges table|nil
+---@param _ any 事件框架传入但本实现不使用的参数
+---@param ges table|nil KOReader 手势数据，含方向和位置
 ---@return boolean
 function Desktop:onTapBar(_, ges)
     if not ges or not ges.pos then return false end
@@ -336,8 +371,8 @@ function Desktop:onTapBar(_, ges)
 end
 
 --- 内容区左右滑：转给当前页，桌面不认图书馆/书城。
----@param _ any
----@param ges_ev table|nil
+---@param _ any 事件框架传入但本实现不使用的参数
+---@param ges_ev table|nil KOReader 手势数据，含方向和位置
 ---@return boolean
 function Desktop:onSwipe(_, ges_ev)
     if type(ges_ev) ~= "table" or not ges_ev.direction then return true end
@@ -348,52 +383,58 @@ function Desktop:onSwipe(_, ges_ev)
     return true
 end
 
---- 切换底栏 Tab。页数据跟着页对象走；内容由页 rebuild。
----@param id string
+--- 切换底栏 Tab。页数据跟着页对象走；壳用 updateView 换槽。
+---@param id string 组件、分页或数据源的标识
+---@return nil
 function Desktop:switchTab(id)
     if not TAB_COMPONENT[id] then return end
     local changed = self.tab ~= id
     if changed then notify(self[TAB_COMPONENT[self.tab]], "onPause") end
     self.tab = id
     notify(self[TAB_COMPONENT[id]], "onResume", changed)
-    self:rebuild()
+    self:updateView()
 end
 
---- 没壳：只画三个槽。有壳：只换内容槽和底栏，顶栏不动。
-function Desktop:rebuild()
+--- 取当前页内容 widget。
+--- home：一生一次 build 的缓存；其余页 updateView 按状态重拼（原 content 语义）。
+---@param self BookDesktop 当前视图或布局实例
+---@return table
+local function currentContent(self)
+    local page = self[TAB_COMPONENT[self.tab]]
+    if self.tab == "home" then
+        if page.widget then
+            local size = page.widget:getSize()
+            if size.w ~= Screen:getWidth() or size.h ~= self:contentHeight() then
+                return page:updateView()
+            end
+        end
+        return page.widget or page:build()
+    end
+    return page:updateView()
+end
+
+--- 一生一次：拼顶栏 + 当前页 + 底栏壳。
+---@return table|nil widget 根内容树；构建失败且尚无根节点时为 nil
+function Desktop:build()
+    if self[1] then return self[1] end
     local started_at = Perf.now()
-    local root = self[1] and self[1][1]
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self._tabs = desktopTabs(self.source)
     clampTab(self)
     local ok, err = pcall(function()
         local sw, sh = Screen:getWidth(), Screen:getHeight()
-        local bar = self.bottombar:build(self._tabs, self.tab)
+        local bar = self.bottombar:updateView({ tabs = self._tabs, active = self.tab })
         bar.overlap_offset = { 0, sh - UI.barH() }
-        if root then
-            local page = self[TAB_COMPONENT[self.tab]]
-            local content = self.tab == "settings" and page:build() or page:content()
-            local h = self:contentHeight()
-            if content.dimen then
-                content.dimen.w = sw
-                content.dimen.h = h
-            else
-                content.dimen = Geom:new{ w = sw, h = h }
-            end
-            content.overlap_offset = { 0, UI.topBarH() }
-            local old = root[1]
-            root[1] = content
-            if old and old.free then old:free() end
-            old = root[3]
-            root[3] = bar
-            if old and old.free then old:free() end
-            return
+        local content = currentContent(self)
+        local h = self:contentHeight()
+        if content.dimen then
+            content.dimen.w = sw
+            content.dimen.h = h
+        else
+            content.dimen = Geom:new{ w = sw, h = h }
         end
-        pcall(function() require("utils.font").applyCurrent() end)
-        -- FrameContainer:getSize 固定读 self[1]，空壳不能用无孩子的 FrameContainer。
-        -- 外层已经是白底，这里只要占住内容槽尺寸。
-        local content = Widget:new{ dimen = Geom:new{ w = sw, h = self:contentHeight() } }
         content.overlap_offset = { 0, UI.topBarH() }
+        pcall(function() require("utils.font").applyCurrent() end)
         local top = self.topbar.widget or self.topbar:build()
         top.overlap_offset = { 0, 0 }
         self[1] = FrameContainer:new{
@@ -406,35 +447,88 @@ function Desktop:rebuild()
                 content, top, bar,
             },
         }
+        self.view:registerRegion("content", self[1][1], 1, function()
+            return Geom:new{ x = 0, y = UI.topBarH(), w = Screen:getWidth(), h = self:contentHeight() }
+        end)
+        self.view:registerRegion("topbar", self[1][1], 2, function()
+            return Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = UI.topBarH() }
+        end)
+        self.view:registerRegion("bottombar", self[1][1], 3, function()
+            return Geom:new{ x = 0, y = Screen:getHeight() - UI.barH(), w = Screen:getWidth(), h = UI.barH() }
+        end)
     end)
-    logger.dbg("book.perf desktop.rebuild", Perf.elapsedMs(started_at), "ms",
+    logger.dbg("book.perf desktop.build", Perf.elapsedMs(started_at), "ms",
         self.tab or "-", ok and "ok" or "failed")
     if not ok then
-        logger.err("book desktop rebuild failed:", err)
+        logger.err("book desktop build failed:", err)
         local InfoMessage = require("ui/widget/infomessage")
         UIManager:show(InfoMessage:new{ text = _("桌面构建失败:\n") .. tostring(err) })
     end
     UIManager:setDirty(self, "ui")
+    return self[1]
 end
 
---- KOReader 关窗入口，不是生命周期。关窗前走完 pause/stop/destroy。
+--- 刷新：只换内容槽和底栏，顶栏不动（已有壳）；无壳则走 build。
+---@return table|nil widget 尚无骨架时返回构建结果，否则原地更新不返回值
+function Desktop:updateView()
+    local root = self[1] and self[1][1]
+    if not root then
+        return self:build()
+    end
+    local started_at = Perf.now()
+    local sw, sh = Screen:getWidth(), Screen:getHeight()
+    local resized = self.dimen.w ~= sw or self.dimen.h ~= sh
+    self.dimen = Geom:new{ x = 0, y = 0, w = sw, h = sh }
+    self._tabs = desktopTabs(self.source)
+    clampTab(self)
+    local ok, err = pcall(function()
+        root.dimen.w, root.dimen.h = sw, sh
+        local top = self.topbar.widget
+        if resized or (top and top:getSize().h ~= UI.topBarH()) then
+            self.topbar:updateView()
+        end
+        local bar = self.bottombar:updateView({ tabs = self._tabs, active = self.tab })
+        bar.overlap_offset = { 0, sh - UI.barH() }
+        local content = currentContent(self)
+        local h = self:contentHeight()
+        if content.dimen then
+            content.dimen.w = sw
+            content.dimen.h = h
+        else
+            content.dimen = Geom:new{ w = sw, h = h }
+        end
+        content.overlap_offset = { 0, UI.topBarH() }
+        local owner = root[1] and root[1]._view_owner
+        self.view:replaceRegion("content", content, owner and owner.desktop == self)
+        self.view:replaceRegion("bottombar", bar)
+    end)
+    logger.dbg("book.perf desktop.updateView", Perf.elapsedMs(started_at), "ms",
+        self.tab or "-", ok and "ok" or "failed")
+    if not ok then
+        logger.err("book desktop updateView failed:", err)
+        local InfoMessage = require("ui/widget/infomessage")
+        UIManager:show(InfoMessage:new{ text = _("桌面构建失败:\n") .. tostring(err) })
+    end
+    if resized and self.lifecycle:uiReady() then UIManager:setDirty(self, "ui") end
+end
+
+--- KOReader 关窗入口，不是生命周期。关窗前 Destroy 会按状态补齐 Pause/Stop。
 ---@return boolean
 function Desktop:onClose()
     logger.info("book.desktop close")
-    if not self.lifecycle:Alive() then return true end
-    self:onPause()
-    self:onStop()
+    if self.lifecycle.state == "Destroy" then return true end
     self:onDestroy()
+    logger.flush()
     UIManager:close(self, "ui")
     return true
 end
 
---- Widget 关闭回调：若尚未走完生命周期，补齐停止与销毁。
+--- Widget 关闭回调：若尚未销毁，走 Destroy（含停止系列补全）。
+---@return nil
 function Desktop:onCloseWidget()
-    if not self.lifecycle:Alive() then return end
-    self:onPause()
-    self:onStop()
+    if self.lifecycle.state == "Destroy" then return end
     self:onDestroy()
+    logger.flush()
 end
 
 return Desktop
