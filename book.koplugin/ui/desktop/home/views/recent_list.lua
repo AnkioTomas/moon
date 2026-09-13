@@ -14,6 +14,7 @@ local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local LeftContainer = require("ui/widget/container/leftcontainer")
+local MoonSettings = require("utils.settings")
 local PageStrip = require("ui.components.pagestrip")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
@@ -21,6 +22,9 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local _ = require("gettext")
 local T = require("ffi/util").template
+
+local MIN_ROWS, MAX_ROWS, DEFAULT_ROWS = 1, 2, 2
+local MIN_COLS, MAX_COLS, DEFAULT_COLS = 3, 8, 4
 
 ---@class BookHomeRecentList : BookHomeComponent
 local M = {
@@ -31,7 +35,106 @@ local M = {
 setmetatable(M, require("ui.desktop.home.views.base"))
 M.__index = M
 
+--- 读取最近阅读网格行数；非法值回退到两行。
+---@return number
+function M.rows()
+    local n = math.floor(tonumber(MoonSettings.get("home").home_recent_list_rows) or DEFAULT_ROWS)
+    if n == MIN_ROWS then return MIN_ROWS end
+    return MAX_ROWS
+end
 
+--- 规范化并保存最近阅读网格行数。
+---@param n number|nil
+---@return nil
+function M.saveRows(n)
+    n = math.floor(tonumber(n) or DEFAULT_ROWS)
+    if n ~= MIN_ROWS then n = MAX_ROWS end
+    local home = MoonSettings.get("home")
+    home.home_recent_list_rows = n
+    MoonSettings.saveSection("home", home)
+end
+
+--- 读取最近阅读网格列数；夹到书架列数范围。
+---@return number
+function M.cols()
+    local n = math.floor(tonumber(MoonSettings.get("home").home_recent_list_cols) or DEFAULT_COLS)
+    return math.max(MIN_COLS, math.min(MAX_COLS, n))
+end
+
+--- 规范化并保存最近阅读网格列数。
+---@param n number|nil
+---@return nil
+function M.saveCols(n)
+    n = math.max(MIN_COLS, math.min(MAX_COLS, math.floor(tonumber(n) or DEFAULT_COLS)))
+    local home = MoonSettings.get("home")
+    home.home_recent_list_cols = n
+    MoonSettings.saveSection("home", home)
+end
+
+--- 编辑态设置：行数 1/2，列数 3–8。
+---@param desktop table|nil
+---@return nil
+function M:showSettings(desktop)
+    desktop = desktop or self.desktop or (self.home and self.home.desktop)
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local UIManager = require("ui/uimanager")
+    local dialog
+    --- 保存后走首页刷新，列数变化时高度不变也必须重建网格。
+    ---@return nil
+    local function refresh()
+        if desktop and desktop.onEvent then desktop:onEvent("home_refresh") end
+    end
+    --- 选定行数；与当前相同则只关对话框。
+    ---@param n number
+    ---@return nil
+    local function pickRows(n)
+        UIManager:close(dialog)
+        if M.rows() == n then return end
+        M.saveRows(n)
+        refresh()
+    end
+    local rows = M.rows()
+    dialog = ButtonDialog:new{
+        title = M.label,
+        buttons = {
+            {
+                {
+                    text = rows == MIN_ROWS and _("✓ 一行") or _("一行"),
+                    callback = function() pickRows(MIN_ROWS) end,
+                },
+                {
+                    text = rows == MAX_ROWS and _("✓ 两行") or _("两行"),
+                    callback = function() pickRows(MAX_ROWS) end,
+                },
+            },
+            {{
+                text = T(_("每行 %1 本"), M.cols()),
+                callback = function()
+                    UIManager:close(dialog)
+                    local SpinWidget = require("ui/widget/spinwidget")
+                    UIManager:show(SpinWidget:new{
+                        title_text = _("每行数量"),
+                        value = M.cols(),
+                        value_min = MIN_COLS,
+                        value_max = MAX_COLS,
+                        value_step = 1,
+                        default_value = DEFAULT_COLS,
+                        ok_always_enabled = true,
+                        callback = function(spin)
+                            M.saveCols(spin.value)
+                            refresh()
+                        end,
+                    })
+                end,
+            }},
+            {{
+                text = _("关闭"),
+                callback = function() UIManager:close(dialog) end,
+            }},
+        },
+    }
+    UIManager:show(dialog)
+end
 
 --- 返回最近阅读网格封面下方的标题和间隔高度。
 ---@return number height 封面下方标题与间隔高度，单位像素
@@ -39,7 +142,9 @@ local function titleExtra()
     return UI.sz(4) + UI.sz(22)
 end
 
---- 根据网格宽度和可用高度计算封面尺寸、列数及行间距。
+--- 按用户列数算封面；固定列时 denseCoverMetrics 不会加列压高，这里自己封顶。
+--- area_h 有值时再收到「行×列刚好装进分配高度」：页溢出缩放后仍按完整行列画
+--- 会画出屏幕 BB，模拟器直接 SIGSEGV。
 ---@param width number 目标宽度，单位像素
 ---@param area_h number|nil 封面网格可用高度，单位像素
 ---@return number slot_w
@@ -51,27 +156,48 @@ end
 ---@return number cell_h
 local function gridMetrics(width, area_h)
     local pad = UI.sz(10)
-    -- budget 传 0：两行压缩会把「只够一行」的高度误判成「压矮封面塞两行」。
-    return UI.denseCoverMetrics(math.max(1, width - pad * 2), 0, {
-        title_extra = titleExtra(),
-        max_h = UI.gridCoverMaxH(area_h),
+    local cols = M.cols()
+    local extra = titleExtra()
+    local max_h = UI.gridCoverMaxH(area_h)
+    local slot_w, cw, ch, _cols, gap, row_gap, cell_h = UI.denseCoverMetrics(
+        math.max(1, math.floor(tonumber(width) or 1) - pad * 2), 0, {
+        title_extra = extra,
+        max_h = max_h,
+        min_cols = cols,
+        max_cols = cols,
     })
+    if ch > max_h then
+        ch = max_h
+        cw = math.max(1, math.min(slot_w, math.floor(ch * 2 / 3)))
+        cell_h = ch + extra
+    end
+    area_h = math.floor(tonumber(area_h) or 0)
+    local rows = M.rows()
+    if area_h > 0 then
+        local gaps = row_gap * math.max(0, rows - 1)
+        local need = cell_h * rows + gaps
+        if need > area_h then
+            local fit_cell = math.max(1, math.floor((area_h - gaps) / rows))
+            ch = math.max(1, math.min(ch, fit_cell - extra))
+            cw = math.max(1, math.min(slot_w, math.floor(ch * 2 / 3)))
+            cell_h = math.min(ch + extra, fit_cell)
+        end
+    end
+    return slot_w, cw, ch, cols, gap, row_gap, cell_h
 end
 
---- 返回当前组件的最小、首选和最大高度，供首页布局分配空间。
+--- 高度按所选行数固定，不按剩余空间加行。
 ---@param _ctx table 为保持组件接口一致保留的上下文，本实现不读取
 ---@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table
 function M:heightRange(_ctx, opts)
     local _slot_w, _cw, _ch, _cols, _gap, row_gap, cell_h = gridMetrics(opts.width)
-    local fixed = UI.sz(22) + PageStrip.bandH()
-    local one_row = fixed + cell_h
+    local h = UI.sz(22) + PageStrip.bandH() + cell_h + (M.rows() - 1) * (row_gap + cell_h)
     return {
-        min = one_row,
-        preferred = one_row + row_gap + cell_h,
-        max = one_row + (row_gap + cell_h) * 2,
-        grow = 6,
-        step = row_gap + cell_h,
+        min = h,
+        preferred = h,
+        max = h,
+        grow = 0,
     }
 end
 
@@ -124,7 +250,7 @@ end
 local function buildGrid(ctx, books, width, grid_h, page, on_open)
     local pad = UI.sz(10)
     local slot_w, cw, ch, cols, gap, row_gap, cell_h = gridMetrics(width, grid_h)
-    local rows = math.max(1, math.floor((grid_h + row_gap) / (cell_h + row_gap)))
+    local rows = M.rows()
     local page_size = math.max(1, cols * rows)
     local pages = math.max(1, math.ceil(#books / page_size))
     page = PageStrip.clamp(page, pages)
@@ -272,6 +398,7 @@ end
 ---@return nil
 function M:onEvent(event)
     if event == "source_changed" then self.page = nil end
+    require("ui.desktop.home.views.base").onEvent(self, event)
 end
 
 --- 恢复显示时重建网格内容以同步最近阅读记录。

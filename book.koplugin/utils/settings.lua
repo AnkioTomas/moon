@@ -106,6 +106,8 @@ local DEFAULTS = {
         },
         home_weather_city = "",
         home_clock_weather_order = "weather_left",
+        home_recent_list_rows = 2,
+        home_recent_list_cols = 4,
     },
     ai = { ai_endpoint = "", ai_api_key = "", ai_model = "" },
 }
