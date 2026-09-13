@@ -15,6 +15,7 @@ return {
     ["桌面打开失败:\n"] = "Failed to open desktop:\n",
     ["无效文件名"] = "Invalid filename",
     ["正在下载…"] = "Downloading…",
+    ["正在打开"] = "Opening",
     ["下载失败"] = "Download failed",
     ["优化排版"] = "Improve layout",
     ["正在优化排版…"] = "Improving layout…",
