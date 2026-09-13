@@ -86,9 +86,9 @@ Assert.not_nil(desktop.insight.state)
 Assert.is_true(desktop.insight.loaded)
 Assert.eq(view_updates, 1)
 
-desktop.settings:showSub("home", "desktop")
-Assert.eq(desktop.settings.sub, "home")
-Assert.eq(desktop.settings.parent, "desktop")
+desktop.settings:showSub("topbar", "appearance")
+Assert.eq(desktop.settings.sub, "topbar")
+Assert.eq(desktop.settings.parent, "appearance")
 Assert.eq(desktop.settings.page, 1)
 Assert.eq(view_updates, 2)
 

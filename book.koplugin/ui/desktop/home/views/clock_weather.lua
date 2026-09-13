@@ -1,5 +1,5 @@
 --[[--
-主体：时间天气。左右两栏同构排版；左右顺序由设置页配置。
+主体：时间天气。左右两栏同构排版；左右顺序和天气地点由组件设置配置。
 
 @module koplugin.book.ui.desktop.home.views.clock_weather
 --]]
@@ -54,7 +54,7 @@ function M.order()
     return ORDER_WEATHER
 end
 
---- 把当前左右顺序转换为设置页显示文案。
+--- 把当前左右顺序转换为设置文案。
 ---@return string
 function M.orderLabel()
     if M.order() == ORDER_CLOCK then
@@ -70,6 +70,46 @@ function M.saveOrder(value)
     local home = MoonSettings.get("home")
     home.home_clock_weather_order = value == ORDER_CLOCK and ORDER_CLOCK or ORDER_WEATHER
     MoonSettings.saveSection("home", home)
+end
+
+--- 编辑态设置：天气地点 + 左右顺序。
+---@param desktop table|nil
+---@return nil
+function M:showSettings(desktop)
+    desktop = desktop or self.desktop or (self.home and self.home.desktop)
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local UIManager = require("ui/uimanager")
+    local dialog
+    dialog = ButtonDialog:new{
+        title = M.label,
+        buttons = {
+            {{
+                text = _("天气地点"),
+                callback = function()
+                    UIManager:close(dialog)
+                    Weather:showSettings(desktop)
+                end,
+            }},
+            {{
+                text = M.orderLabel(),
+                callback = function()
+                    UIManager:close(dialog)
+                    if M.order() == ORDER_WEATHER then
+                        M.saveOrder(ORDER_CLOCK)
+                    else
+                        M.saveOrder(ORDER_WEATHER)
+                    end
+                    if desktop and desktop.onEvent then desktop:onEvent("home_changed") end
+                    if desktop and desktop.updateView then desktop:updateView() end
+                end,
+            }},
+            {{
+                text = _("关闭"),
+                callback = function() UIManager:close(dialog) end,
+            }},
+        },
+    }
+    UIManager:show(dialog)
 end
 
 --- 惰性创建时钟和天气子视图，登记到父视图拥有的 children 映射。

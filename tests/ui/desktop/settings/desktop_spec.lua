@@ -3,16 +3,6 @@
 local Assert = require("support.assert")
 
 package.preload["gettext"] = function() return function(text) return text end end
-package.preload["ffi/util"] = function()
-    return {
-        template = function(text, value)
-            return (text:gsub("%%1", tostring(value)))
-        end,
-    }
-end
-package.preload["ui.desktop.home.registry"] = function()
-    return { enabledLayout = function() return { "recent_hero", "recent_list" } end }
-end
 package.preload["ui.components.settingrow"] = function()
     return { build = function(_, opts) return opts end }
 end
@@ -35,23 +25,11 @@ local desktop = {
 
 local Settings = require("ui.desktop.settings.desktop")
 local rows = Settings.new():rows(desktop, false)
-Assert.len(rows, 3)
-Assert.eq(rows[1](600).title, "首页组件")
-Assert.eq(rows[2](600).title, "首页顶栏")
-Assert.eq(rows[3](600).title, "启动打开桌面")
+Assert.len(rows, 2)
+Assert.eq(rows[1](600).title, "首页顶栏")
+Assert.eq(rows[2](600).title, "启动打开桌面")
 
-local function rowByTitle(title)
-    for _, build in ipairs(rows) do
-        local row = build(600)
-        if row.title == title then return row end
-    end
-end
-
-rowByTitle("首页组件").callback()
-Assert.eq(shown_sub, "home")
-Assert.eq(shown_parent, "appearance")
-
-rowByTitle("首页顶栏").callback()
+rows[1](600).callback()
 Assert.eq(shown_sub, "topbar")
 Assert.eq(shown_parent, "appearance")
 

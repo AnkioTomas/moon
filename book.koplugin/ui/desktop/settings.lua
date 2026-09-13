@@ -30,7 +30,6 @@ local Source = require("ui.desktop.settings.source")
 local Display = require("ui.desktop.settings.display")
 local Lockscreen = require("ui.desktop.settings.lockscreen")
 local DesktopSettings = require("ui.desktop.settings.desktop")
-local HomeSettings = require("ui.desktop.settings.home")
 local TopbarSettings = require("ui.desktop.settings.topbar")
 local Language = require("ui.desktop.settings.language")
 local QuickPanel = require("ui.panel.settings")
@@ -48,7 +47,6 @@ local View = require("ui.view")
 ---@field display BookSettingsDisplay
 ---@field lockscreen BookSettingsLockscreen
 ---@field desktop_settings BookSettingsDesktop
----@field home_settings BookSettingsHome
 ---@field topbar_settings BookSettingsTopbar
 ---@field language BookSettingsLanguage
 ---@field maintenance BookSettingsMaintenance
@@ -72,7 +70,6 @@ function Settings:new(opts)
         display = Display.new(),
         lockscreen = Lockscreen.new(),
         desktop_settings = DesktopSettings.new(),
-        home_settings = HomeSettings.new(),
         topbar_settings = TopbarSettings.new(),
         language = Language.new(),
         maintenance = Maintenance.new(),
@@ -203,7 +200,7 @@ function Settings:createWidget()
     local valid_sub = {
         sources = true, reader = true, appearance = true, lockscreen = true,
         language = true, services = true, reader_popup = true,
-        quickpanel_reader = true, quickpanel_desktop = true, home = true, topbar = true,
+        quickpanel_reader = true, quickpanel_desktop = true, topbar = true,
     }
     if sub ~= nil and not valid_sub[sub] then
         sub = nil
@@ -224,7 +221,7 @@ function Settings:createWidget()
             }),
             categoryRow(desktop, {
                 sub = "appearance", icon = "display_settings", title = _("界面与首页"),
-                subtitle = _("月读界面、首页组件和首页顶栏"),
+                subtitle = _("月读界面和首页顶栏"),
                 status = string.format("%d%%", scale), status_on = true,
             }),
             categoryRow(desktop, {
@@ -302,10 +299,6 @@ function Settings:createWidget()
             appendSection(packed, card_w, _("锁屏"), self.lockscreen:rows(desktop))
         elseif sub == "topbar" then
             appendSection(packed, card_w, _("首页顶栏"), self.topbar_settings:rows(desktop))
-        elseif sub == "home" then
-            for _idx, section in ipairs(self.home_settings:sections(desktop)) do
-                appendSection(packed, card_w, section.title, section.rows)
-            end
         elseif sub == "language" then
             appendSection(packed, card_w, _("语言与输入"), self.language:rows(desktop))
         elseif sub == "quickpanel_reader" then
