@@ -204,12 +204,12 @@ function Desktop:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.tab = self.tab or "home"
     self.home = Home:new({ desktop = self, name = "home" })
-    self.library = Library.new(self)
-    self.store = StorePage.new(self)
-    self.insight = Insight.new(self)
+    self.library = Library:new{ desktop = self, name = "library" }
+    self.store = StorePage:new{ desktop = self, name = "store" }
+    self.insight = Insight:new{ desktop = self, name = "insight" }
     self.settings = Settings:new{ desktop = self }
     self.topbar = TopBar:new({ desktop = self, name = "topbar" })
-    self.bottombar = BottomBar:new{ host = self }
+    self.bottombar = BottomBar:new{ host = self, name = "bottombar" }
     clampTab(self)
     self.ges_events = {
         SwipeTopBar = {

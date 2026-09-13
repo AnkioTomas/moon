@@ -37,6 +37,7 @@ local Icon = require("ui.components.icon")
 local Surface = require("ui.components.surface")
 local Pager = require("ui.components.pager")
 local Popup = require("ui.views.popup")
+local View = require("ui.view")
 local BookDB = require("db.book")
 local MoonSettings = require("utils.settings")
 local _ = require("gettext")
@@ -45,6 +46,7 @@ local Screen = Device.screen
 
 local Library = {}
 Library.__index = Library
+setmetatable(Library, View)
 
 ---@class BookLibrary
 ---@field desktop BookDesktop
@@ -61,19 +63,20 @@ Library.__index = Library
 --- 创建图书馆实例，独立持有筛选、分组、分页和请求句柄。
 ---@param desktop BookDesktop 所属桌面实例
 ---@return BookLibrary
-function Library.new(desktop)
-    return setmetatable({
-        desktop = desktop,
-        filter = {},
-        page = 1,
-        page_size = 12,
-        total = 0,
-        group = nil,
-        groups_state = nil,
-        state = nil,
-        fetch_cancel = nil,
-        view_picker = nil,
-    }, Library)
+-- 使用 View 继承的 :new，生命周期字段由基类统一初始化。
+-- 页面内容仍由现有 updateView 负责拼装。
+function Library:new(opts)
+    opts = opts or {}
+    opts.desktop = opts.desktop or opts[1]
+    opts.filter = opts.filter or {}
+    opts.page = opts.page or 1
+    opts.page_size = opts.page_size or 12
+    opts.total = opts.total or 0
+    opts.fetch_cancel = opts.fetch_cancel
+    return View.new(self, opts)
+end
+Library.new = function(desktop)
+    return Library:new{ desktop = desktop, name = "library" }
 end
 
 --- 从桌面取得其拥有的图书馆实例；无桌面时返回 nil。

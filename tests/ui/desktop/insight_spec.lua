@@ -23,7 +23,7 @@ for _, name in ipairs({
 end
 package.preload["ui/uimanager"] = emptyModule
 package.preload["utils.log"] = function()
-    return { err = function() end }
+    return { err = function() end, dbg = function() end }
 end
 package.preload["gettext"] = function()
     return function(text) return text end
@@ -69,6 +69,9 @@ local desktop = {
 
 local insight = Insight.new(desktop)
 desktop.insight = insight
+Assert.eq(insight.lifecycle.state, "new")
+insight:onCreate()
+Assert.eq(insight.lifecycle.state, "Create")
 insight:fetch()
 Assert.eq(insight_reads, 1)
 Assert.is_true(insight.loaded)

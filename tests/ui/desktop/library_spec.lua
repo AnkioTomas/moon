@@ -116,7 +116,7 @@ package.preload["db.book"] = function()
     }
 end
 package.preload["utils.log"] = function()
-    return { warn = function() end }
+    return { warn = function() end, dbg = function() end }
 end
 package.preload["gettext"] = function() return function(s) return s end end
 local display = { library_view = "flat" }
@@ -169,6 +169,9 @@ local desktop = {
     updateView = function() view_updates = view_updates + 1 end,
 }
 local library = Library.new(desktop)
+Assert.eq(library.lifecycle.state, "new")
+library:onCreate()
+Assert.eq(library.lifecycle.state, "Create")
 desktop.library = library
 library.page = 2
 library.total = 1

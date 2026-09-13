@@ -44,6 +44,9 @@ local desktop = {
     ctx = function(self) return { desktop = self } end,
 }
 local store = Store.new(desktop)
+Assert.eq(store.lifecycle.state, "new")
+store:onCreate()
+Assert.eq(store.lifecycle.state, "Create")
 desktop.store = store
 
 -- 书城复用图书馆网格，但工具栏只允许搜索。

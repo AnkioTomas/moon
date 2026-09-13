@@ -19,6 +19,7 @@ local Library = require("ui.desktop.library")
 local BookStore = require("book.store")
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
+local View = require("ui.view")
 
 ---@class BookStorePage
 ---@field desktop BookDesktop
@@ -31,13 +32,22 @@ local _ = require("gettext")
 ---@field total number
 local Store = {}
 Store.__index = Store
+setmetatable(Store, View)
 
 local MAX_RESULTS = 200
+
+function Store:new(opts)
+    opts = opts or {}
+    opts.page = opts.page or 1
+    opts.page_size = opts.page_size or 12
+    opts.total = opts.total or 0
+    return View.new(self, opts)
+end
 
 ---@param desktop BookDesktop
 ---@return BookStorePage
 function Store.new(desktop)
-    return setmetatable({
+    return View.new(Store, {
         desktop = desktop,
         state = nil,
         books = nil,
@@ -46,7 +56,7 @@ function Store.new(desktop)
         page = 1,
         page_size = 12,
         total = 0,
-    }, Store)
+    })
 end
 
 function Store:cancel()
@@ -126,7 +136,7 @@ function Store:build(ctx, state, opts)
     opts.on_clear = opts.on_clear or function()
         self:applySearch("")
     end
-    local library = ctx.desktop and ctx.desktop.library or Library.new(ctx.desktop)
+    local library = ctx.desktop and ctx.desktop.library or Library:new{ desktop = ctx.desktop, name = "library" }
     return library:build(ctx, state, opts)
 end
 
@@ -146,7 +156,7 @@ end
 
 --- 弹出书城搜索框。
 function Store:showSearch()
-    local library = self.desktop.library or Library.new(self.desktop)
+    local library = self.desktop.library or Library:new{ desktop = self.desktop, name = "library" }
     library:showSearch(function(query)
         self:applySearch(query)
     end, self.search)
@@ -155,7 +165,7 @@ end
 --- 同步书城 page_size（与图书馆网格容量一致）。
 ---@return number
 function Store:syncPageSize()
-    local library = self.desktop.library or Library.new(self.desktop)
+    local library = self.desktop.library or Library:new{ desktop = self.desktop, name = "library" }
     library:syncPageSize()
     self.page_size = library.page_size
     return self.page_size

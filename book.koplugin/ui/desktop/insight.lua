@@ -26,6 +26,7 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local logger = require("utils.log")
 local _ = require("gettext")
+local View = require("ui.view")
 local META_TTL = 7 * 24 * 60 * 60
 
 ---@class BookInsight
@@ -41,24 +42,26 @@ local META_TTL = 7 * 24 * 60 * 60
 ---@field records BookInsightRecords
 local Insight = {}
 Insight.__index = Insight
+setmetatable(Insight, View)
+
+function Insight:new(opts)
+    opts = opts or {}
+    opts.state = opts.state
+    opts.loaded = opts.loaded or false
+    opts.fetching = opts.fetching or false
+    opts.ui_page = opts.ui_page or 1
+    opts.opening = opts.opening or false
+    opts.overview = opts.overview or require("ui.desktop.insight.overview").new()
+    opts.day = opts.day or require("ui.desktop.insight.day").new()
+    opts.records = opts.records or require("ui.desktop.insight.records").new()
+    return View.new(self, opts)
+end
+Insight.new = function(desktop)
+    return Insight:new{ desktop = desktop, name = "insight" }
+end
 
 ---@param desktop BookDesktop
 ---@return BookInsight
-function Insight.new(desktop)
-    return setmetatable({
-        desktop = desktop,
-        state = nil,
-        loaded = false,
-        fetching = false,
-        fetch_cancel = nil,
-        ui_page = 1,
-        opening = false,
-        overview = require("ui.desktop.insight.overview").new(),
-        day = require("ui.desktop.insight.day").new(),
-        records = require("ui.desktop.insight.records").new(),
-    }, Insight)
-end
-
 function Insight:cancel()
     if self.fetch_cancel then
         self.fetch_cancel:cancel()
