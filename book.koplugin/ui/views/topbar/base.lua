@@ -15,10 +15,12 @@ local logger = require("utils.log")
 
 ---@class BookTopBarItem : View
 ---@field id string 顶栏项目注册标识
+---@field align string|nil "left" 进左栏，其余进右栏
+---@field always boolean|nil 为真时不受 home_topbar_items 开关影响，sync 必建
 ---@field interval number|nil Resume 后的固定刷新间隔（秒）
 ---@field topbar BookTopBar 拥有本项目的顶栏实例
 ---@field widget table|nil View 拥有的稳定根容器
----@field metric_widget table|nil 实際图标或文字控件，与稳定根分离
+---@field metric_widget table|nil 实際图标或文字控件，与稳定根分离；nil 表示不进布局
 ---@field ctx BookTopBarBuildCtx|nil 当前顶栏构建尺寸
 ---@field rect table|nil 本项目在屏幕上的绝对刷新矩形
 ---@field _tick fun()|nil 当前定时刷新回调，用于取消调度

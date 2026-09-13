@@ -22,9 +22,10 @@ local _ = require("gettext")
 
 --- 阅读页快捷面板头部：标题、副标题和退出阅读按钮。
 ---@class BookQuickPanelHeader : WidgetContainer
----@field width number
----@field height number
----@field on_exit fun()|nil
+---@field width number 头部宽度，单位像素
+---@field height number 头部高度，单位像素
+---@field ui table|nil 当前 ReaderUI，用于取书名/章节
+---@field on_exit fun()|nil 点击退出阅读
 
 local Header = InputContainer:extend{
     name = "book_quick_panel_header",
