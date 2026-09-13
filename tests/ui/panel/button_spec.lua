@@ -66,6 +66,22 @@ local active = ActionButton:new{
 Assert.not_nil(active[1])
 Assert.is_true(active.onTap(active))
 
+local held = false
+local with_hold = ActionButton:new{
+    width = 80,
+    height = 64,
+    id = "wifi",
+    title = "Wi-Fi",
+    icon = "wifi",
+    on_action = function() end,
+    on_hold = function()
+        held = true
+        return true
+    end,
+}
+Assert.is_true(with_hold:onHold())
+Assert.is_true(held)
+
 local disabled = ActionButton:new{
     width = 80,
     height = 64,

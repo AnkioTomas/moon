@@ -20,6 +20,7 @@ local UI = require("ui.components.bookui")
 ---@field active boolean|nil
 ---@field enabled boolean|nil
 ---@field on_action fun(id: string)
+---@field on_hold fun()|nil
 
 local ActionButton = InputContainer:extend{}
 
@@ -28,7 +29,10 @@ local ActionButton = InputContainer:extend{}
 ---@return void
 function ActionButton:init()
     self.dimen = Geom:new{ w = self.width, h = self.height }
-    self.ges_events = { Tap = { GestureRange:new{ ges = "tap", range = self.dimen } } }
+    self.ges_events = {
+        Tap = { GestureRange:new{ ges = "tap", range = self.dimen } },
+        Hold = { GestureRange:new{ ges = "hold", range = self.dimen } },
+    }
     local enabled = self.enabled ~= false
     local active = enabled and self.active == true
     local color = Blitbuffer.COLOR_BLACK
@@ -57,6 +61,13 @@ function ActionButton:onTap()
     if self.enabled == false then return true end
     self.on_action(self.id)
     return true
+end
+
+--- 长按交给上层（用于进入现场编辑）。
+---@return boolean
+function ActionButton:onHold()
+    if self.on_hold then return self.on_hold() end
+    return false
 end
 
 ---@type BookQuickPanelActionButton

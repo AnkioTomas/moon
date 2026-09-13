@@ -799,6 +799,8 @@ return {
     ["移到上一页"] = "Move to previous page",
     ["移到下一页"] = "Move to next page",
     ["添加组件"] = "Add widget",
+    ["添加动作"] = "Add action",
+    ["没有可添加的动作"] = "No actions available to add",
     ["完成"] = "Done",
     ["左右顺序"] = "Left/right order",
     ["X-Ray 实体画线"] = "Underline X-Ray entities",

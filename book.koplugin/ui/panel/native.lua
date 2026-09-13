@@ -32,7 +32,11 @@ local READER_TAB_ICON = "appbar.pageview"
 ---@return BookQuickPanelExecuteOpts
 local function menuCallbacks(menu)
     return {
-        close = function() Menu.close(menu) end,
+        close = function()
+            local tab = menu.item_table
+            if tab then tab._book_panel_editing = false end
+            Menu.close(menu)
+        end,
         refresh = function() Menu.refresh(menu) end,
     }
 end
@@ -133,15 +137,47 @@ local function buildPanel(menu, W)
     local width, pad = menu.item_width, W.UI.sz(8)
     local content_w = width - pad * 2
     local callbacks = menuCallbacks(menu)
+    local panel = mode == "reader" and W.ReaderPanel or W.Desktop
     local body_opts = {
         width = content_w,
         show_parent = menu.show_parent,
+        editing = tab._book_panel_editing == true,
         on_action = function(id)
             if mode == "reader" then
                 W.ReaderPanel.executeAction(id, tab._book_ui, callbacks)
             else
                 W.Desktop.executeAction(id, callbacks)
             end
+        end,
+        on_enter_edit = function()
+            tab._book_panel_editing = true
+            Menu.refresh(menu)
+        end,
+        on_exit_edit = function()
+            tab._book_panel_editing = false
+            Menu.refresh(menu)
+        end,
+        on_move = function(id, delta)
+            panel.move(id, delta)
+            Menu.refresh(menu)
+        end,
+        on_disable = function(id)
+            if panel.enabledCount() <= 1 then return end
+            panel.setEnabled(id, false)
+            Menu.refresh(menu)
+        end,
+        on_add = function(id)
+            panel.setEnabled(id, true)
+            Menu.refresh(menu)
+        end,
+        addable = function()
+            local out = {}
+            for _, option in ipairs(panel.options()) do
+                if option.available and not option.enabled then
+                    out[#out + 1] = option
+                end
+            end
+            return out
         end,
     }
     if mode == "reader" then
@@ -155,9 +191,11 @@ local function buildPanel(menu, W)
         body_opts.actions = W.ReaderPanel.actions(ui)
     else
         body_opts.actions = W.Desktop.menuActions()
-        body_opts.sliders = W.Desktop.sliders()
-        body_opts.on_level = function(kind, fraction)
-            return W.Desktop.setLevel(kind, fraction)
+        if not body_opts.editing then
+            body_opts.sliders = W.Desktop.sliders()
+            body_opts.on_level = function(kind, fraction)
+                return W.Desktop.setLevel(kind, fraction)
+            end
         end
     end
     return wrapPanel(W.Body:new(body_opts), W, width, pad)
