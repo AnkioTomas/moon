@@ -67,7 +67,7 @@ local desktop = {
     updateView = function() view_updates = view_updates + 1 end,
 }
 
-local insight = Insight.new(desktop)
+local insight = Insight:new{ desktop = desktop, name = "insight" }
 desktop.insight = insight
 Assert.eq(insight.lifecycle.state, "new")
 insight:onCreate()

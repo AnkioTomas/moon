@@ -198,17 +198,25 @@ end
 --- 初始化手势区与默认分页状态，再 onCreate 画出第一帧。
 ---@return nil
 function Desktop:init()
+    logger.info("book desktop init begin")
     self.lifecycle = Lifecycle.attach(self)
     self.view = View.attach(self)
     self._tabs = desktopTabs(self.source)
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.tab = self.tab or "home"
+    logger.info("book desktop init home")
     self.home = Home:new({ desktop = self, name = "home" })
+    logger.info("book desktop init library")
     self.library = Library:new{ desktop = self, name = "library" }
+    logger.info("book desktop init store")
     self.store = StorePage:new{ desktop = self, name = "store" }
+    logger.info("book desktop init insight")
     self.insight = Insight:new{ desktop = self, name = "insight" }
+    logger.info("book desktop init settings")
     self.settings = Settings:new{ desktop = self }
+    logger.info("book desktop init topbar")
     self.topbar = TopBar:new({ desktop = self, name = "topbar" })
+    logger.info("book desktop init bottombar")
     self.bottombar = BottomBar:new{ host = self, name = "bottombar" }
     clampTab(self)
     self.ges_events = {
@@ -266,7 +274,9 @@ function Desktop:init()
             },
         },
     }
+    logger.info("book desktop init onCreate begin")
     self:onCreate()
+    logger.info("book desktop init end")
 end
 
 --- 创建：挂长期对象，build 一生一次的壳。
@@ -417,14 +427,17 @@ end
 ---@return table|nil widget 根内容树；构建失败且尚无根节点时为 nil
 function Desktop:build()
     if self[1] then return self[1] end
+    logger.info("book desktop build begin", self.tab or "-")
     local started_at = Perf.now()
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self._tabs = desktopTabs(self.source)
     clampTab(self)
     local ok, err = pcall(function()
         local sw, sh = Screen:getWidth(), Screen:getHeight()
+        logger.info("book desktop build bottombar")
         local bar = self.bottombar:updateView({ tabs = self._tabs, active = self.tab })
         bar.overlap_offset = { 0, sh - UI.barH() }
+        logger.info("book desktop build content", self.tab or "-")
         local content = currentContent(self)
         local h = self:contentHeight()
         if content.dimen then
@@ -435,6 +448,7 @@ function Desktop:build()
         end
         content.overlap_offset = { 0, UI.topBarH() }
         pcall(function() require("utils.font").applyCurrent() end)
+        logger.info("book desktop build topbar")
         local top = self.topbar.widget or self.topbar:build()
         top.overlap_offset = { 0, 0 }
         self[1] = FrameContainer:new{
@@ -457,6 +471,7 @@ function Desktop:build()
             return Geom:new{ x = 0, y = Screen:getHeight() - UI.barH(), w = Screen:getWidth(), h = UI.barH() }
         end)
     end)
+    logger.info("book desktop build end", ok and "ok" or "failed")
     logger.dbg("book.perf desktop.build", Perf.elapsedMs(started_at), "ms",
         self.tab or "-", ok and "ok" or "failed")
     if not ok then
