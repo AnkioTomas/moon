@@ -520,10 +520,9 @@ function Home:onStart(cb)
     end
 end
 
---- 首页 Tab 活跃时恢复可见组件，其余组件保持暂停。
+--- 首页 Tab 活跃时恢复可见组件。
 ---@return nil
 function Home:onResume()
-    if not self.desktop or self.desktop.tab ~= "home" then return end
     applyVisible(self)
 end
 
@@ -578,13 +577,11 @@ function Home:onEvent(event, payload)
         return
     end
     if event == "swipe" then
-        if self.editing then return end
-        if self.desktop and self.desktop.tab == "home" and payload then
-            if payload.direction == "west" then
-                self:turn(1)
-            elseif payload.direction == "east" then
-                self:turn(-1)
-            end
+        if self.editing or not payload then return end
+        if payload.direction == "west" then
+            self:turn(1)
+        elseif payload.direction == "east" then
+            self:turn(-1)
         end
         return
     end

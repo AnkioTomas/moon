@@ -157,7 +157,7 @@ local function syncDesktopStats(self, desktop, opts)
                 desktop.insight.loaded = false
             end
             desktop:onEvent("home_refresh", "stats_sync")
-            if desktop.tab == "stats" then desktop:updateView() end
+            if desktop.tab == "insight" then desktop:updateView() end
         end
     end)
     if desktop._stats_sync_request == request and desktop._stats_sync_pending then

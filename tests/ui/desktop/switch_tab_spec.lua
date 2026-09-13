@@ -78,8 +78,8 @@ desktop = {
     updateView = function() view_updates = view_updates + 1 end,
 }
 
-Desktop.switchTab(desktop, "stats")
-Assert.eq(desktop.tab, "stats")
+Desktop.switchTab(desktop, "insight")
+Assert.eq(desktop.tab, "insight")
 Assert.is_true(desktop.insight.resumed)
 Assert.eq(desktop.insight.ui_page, 3)
 Assert.not_nil(desktop.insight.state)

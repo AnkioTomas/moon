@@ -285,7 +285,7 @@ Assert.is_false(home.editing)
 
 home:onDestroy()
 Assert.eq(home.lifecycle.state, "Destroy")
-home:onResume()
 Assert.is_nil(home.desktop)
+Assert.errors(function() home:onResume() end)
 
 return true

@@ -61,7 +61,7 @@ local source = {
 }
 local desktop = {
     lifecycle = { state = "Resume" },
-    tab = "stats",
+    tab = "insight",
     source = source,
     source_generation = 1,
     updateView = function() view_updates = view_updates + 1 end,
