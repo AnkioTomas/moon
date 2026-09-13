@@ -71,7 +71,22 @@ function M.saveCols(n)
     MoonSettings.saveSection("home", home)
 end
 
---- 编辑态设置：行数 1/2，列数 3–8。
+--- 读取封面下是否显示书名；缺省视为显示。
+---@return boolean
+function M.showTitle()
+    return MoonSettings.get("home").home_recent_list_show_title ~= false
+end
+
+--- 规范化并保存封面下是否显示书名。
+---@param on boolean|nil
+---@return nil
+function M.saveShowTitle(on)
+    local home = MoonSettings.get("home")
+    home.home_recent_list_show_title = on ~= false
+    MoonSettings.saveSection("home", home)
+end
+
+--- 编辑态设置：行数 1/2，列数 3–8，封面下标题开关。
 ---@param desktop table|nil
 ---@return nil
 function M:showSettings(desktop)
@@ -128,6 +143,14 @@ function M:showSettings(desktop)
                 end,
             }},
             {{
+                text = M.showTitle() and _("✓ 显示标题") or _("显示标题"),
+                callback = function()
+                    UIManager:close(dialog)
+                    M.saveShowTitle(not M.showTitle())
+                    refresh()
+                end,
+            }},
+            {{
                 text = _("关闭"),
                 callback = function() UIManager:close(dialog) end,
             }},
@@ -136,9 +159,10 @@ function M:showSettings(desktop)
     UIManager:show(dialog)
 end
 
---- 返回最近阅读网格封面下方的标题和间隔高度。
+--- 返回最近阅读网格封面下方的标题和间隔高度；关闭标题时为 0。
 ---@return number height 封面下方标题与间隔高度，单位像素
 local function titleExtra()
+    if not M.showTitle() then return 0 end
     return UI.sz(4) + UI.sz(22)
 end
 
@@ -158,8 +182,10 @@ local function gridMetrics(width, area_h)
     local pad = UI.sz(10)
     local cols = M.cols()
     local extra = titleExtra()
-    local max_h = UI.gridCoverMaxH(area_h)
-    local slot_w, cw, ch, _cols, gap, row_gap, cell_h = UI.denseCoverMetrics(
+    -- 单行时宽度决定封面尺寸；用剩余高度压缩会留下无意义的横向空隙。
+    -- 多行才需要受区域高度约束，避免整组网格溢出。
+    local max_h = M.rows() == 1 and math.huge or UI.gridCoverMaxH(area_h)
+    local slot_w, cw, ch, _, gap, row_gap, cell_h = UI.denseCoverMetrics(
         math.max(1, math.floor(tonumber(width) or 1) - pad * 2), 0, {
         title_extra = extra,
         max_h = max_h,
@@ -173,7 +199,7 @@ local function gridMetrics(width, area_h)
     end
     area_h = math.floor(tonumber(area_h) or 0)
     local rows = M.rows()
-    if area_h > 0 then
+    if area_h > 0 and rows > 1 then
         local gaps = row_gap * math.max(0, rows - 1)
         local need = cell_h * rows + gaps
         if need > area_h then
@@ -216,23 +242,27 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open)
         download = true,
         show_parent = ctx.desktop,
     }))
-    local tap = BookInfo.tappable(slot_w, ch + titleExtra(), function()
+    local extra = titleExtra()
+    local tap = BookInfo.tappable(slot_w, ch + extra, function()
         on_open(book)
     end)
-    tap[1] = VerticalGroup:new{
+    local kids = {
         align = "center",
         CenterContainer:new{
             dimen = Geom:new{ w = slot_w, h = ch },
             cover,
         },
-        VerticalSpan:new{ width = UI.sz(4) },
-        TextWidget:new{
+    }
+    if extra > 0 then
+        kids[#kids + 1] = VerticalSpan:new{ width = UI.sz(4) }
+        kids[#kids + 1] = TextWidget:new{
             text = BookInfo.title(book),
             face = UI.face("xx_smallinfofont", 13),
             max_width = slot_w,
             fgcolor = Blitbuffer.COLOR_BLACK,
-        },
-    }
+        }
+    end
+    tap[1] = VerticalGroup:new(kids)
     return tap
 end
 
@@ -259,13 +289,12 @@ local function buildGrid(ctx, books, width, grid_h, page, on_open)
     local grid = VerticalGroup:new{ align = "left" }
     local row = HorizontalGroup:new{}
     local col = 0
-    local row_count = 0
     local used = 0
 
     --- 把当前累计的网格单元打包为一行并清空行缓冲。
     ---@return nil
     local function flushRow()
-        if row_count > 0 then
+        if used > 0 then
             table.insert(grid, VerticalSpan:new{ width = row_gap })
             used = used + row_gap
         end
@@ -280,7 +309,6 @@ local function buildGrid(ctx, books, width, grid_h, page, on_open)
         used = used + cell_h
         row = HorizontalGroup:new{}
         col = 0
-        row_count = row_count + 1
     end
 
     for i = first, last do
