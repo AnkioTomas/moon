@@ -78,15 +78,11 @@ local function summarize(source_id)
 end
 
 
---- 返回当前组件的最小、首选和最大高度，供首页布局分配空间。
----@return BookHomeHeightRange range 首页布局使用的高度约束
+--- 三张统计卡的内容高度（内边距 + 数值 + 说明）。
+---@return BookHomeHeightSpec
 function M:heightRange()
-    return {
-        min = UI.sz(62),
-        preferred = UI.sz(76),
-        max = UI.sz(104),
-        grow = 1,
-    }
+    local pad = UI.sz(8)
+    return { height = pad * 2 + UI.fontSize(15) + UI.sz(4) + UI.fontSize(11) }
 end
 
 --- 造一张「数值 + 说明」统计卡；高度按文本实测撑开。

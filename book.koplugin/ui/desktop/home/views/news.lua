@@ -32,17 +32,6 @@ local M = {
 setmetatable(M, require("ui.desktop.home.views.base"))
 M.__index = M
 
---- 返回当前组件的最小、首选和最大高度，供首页布局分配空间。
----@return BookHomeHeightRange range 首页布局使用的高度约束
-function M:heightRange()
-    return {
-        min = UI.sz(78),
-        preferred = UI.sz(96),
-        max = UI.sz(120),
-        grow = 0,
-    }
-end
-
 --- 从日报数据提取供新闻列表显示的标题。
 ---@param news string[]|nil 日报新闻标题数组
 ---@return string[]
@@ -89,6 +78,23 @@ local function line(index, title, inner_w)
         HorizontalSpan:new{ width = gap },
         body,
     }, body, h
+end
+
+--- 返回热点新闻内容高度；不吃剩余空间。
+---@param _ctx table|nil
+---@param opts table|nil
+---@return BookHomeHeightSpec
+function M:heightRange(_ctx, opts)
+    local inner_w = math.max(1, (opts and opts.width or UI.sz(300)) - UI.sz(20))
+    local title = TextWidget:new{
+        text = _("热点新闻"),
+        face = UI.face("cfont", 12),
+        bold = true,
+        max_width = inner_w,
+    }
+    local row_h = select(3, line("00", "--", inner_w))
+    local gap = UI.sz(ROW_GAP)
+    return { height = title:getSize().h + gap + LINES * row_h + (LINES - 1) * gap }
 end
 
 --- 构建日报新闻标题及固定新闻行，保存文字控件供原地更新。

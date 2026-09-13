@@ -32,17 +32,6 @@ local M = {
 setmetatable(M, require("ui.desktop.home.views.base"))
 M.__index = M
 
---- 返回当前组件的最小、首选和最大高度，供首页布局分配空间。
----@return BookHomeHeightRange range 首页布局使用的高度约束
-function M:heightRange()
-    return {
-        min = UI.sz(80),
-        preferred = UI.sz(100),
-        max = UI.sz(120),
-        grow = 0,
-    }
-end
-
 --- 从历史事件数据提取年份和标题，供固定行数布局使用。
 ---@param history { year: string, title: string }[]|nil
 ---@return { year: string, title: string }[]
@@ -91,6 +80,23 @@ local function line(year, title, inner_w)
         HorizontalSpan:new{ width = gap },
         body,
     }, mark, body, h
+end
+
+--- 返回历史上的今天内容高度；不吃剩余空间。
+---@param _ctx table|nil
+---@param opts table|nil
+---@return BookHomeHeightSpec
+function M:heightRange(_ctx, opts)
+    local inner_w = math.max(1, (opts and opts.width or UI.sz(300)) - UI.sz(20))
+    local title = TextWidget:new{
+        text = _("历史上的今天"),
+        face = UI.face("cfont", 12),
+        bold = true,
+        max_width = inner_w,
+    }
+    local row_h = select(4, line("0000", "--", inner_w))
+    local gap = UI.sz(ROW_GAP)
+    return { height = title:getSize().h + gap + LINES * row_h + (LINES - 1) * gap }
 end
 
 --- 构建历史上的今天列表，保存年份和标题控件供原地更新。

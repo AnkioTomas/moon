@@ -35,15 +35,10 @@ M.__index = M
 M.ORDER_WEATHER = ORDER_WEATHER
 M.ORDER_CLOCK = ORDER_CLOCK
 
---- 返回当前组件的最小、首选和最大高度，供首页布局分配空间。
----@return BookHomeHeightRange range 首页布局使用的高度约束
+--- 与时钟同高：左右两栏并排，高度由较高内容决定。
+---@return BookHomeHeightSpec
 function M:heightRange()
-    return {
-        min = UI.sz(80),
-        preferred = UI.sz(96),
-        max = UI.sz(120),
-        grow = 0,
-    }
+    return { height = Clock.contentHeight() }
 end
 
 --- 读取时间天气组件的左右顺序；未知配置回退到天气在左。

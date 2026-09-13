@@ -141,16 +141,12 @@ Assert.eq(List.rows(), 2)
 
 local list = List:new()
 local range = list:heightRange({}, { width = 600 })
-Assert.eq(range.min, 404)
-Assert.eq(range.preferred, 404)
-Assert.eq(range.max, 404)
-Assert.eq(range.grow, 0)
+Assert.eq(range.height, 404)
+Assert.eq(range.fill, true)
 
 List.saveRows(1)
 range = list:heightRange({}, { width = 600 })
-Assert.eq(range.min, 218)
-Assert.eq(range.preferred, 218)
-Assert.eq(range.max, 218)
+Assert.eq(range.height, 218)
 List.saveRows(2)
 
 local opened
@@ -253,7 +249,7 @@ texts = {}
 covers = {}
 taps = {}
 range = list:heightRange({}, { width = 600 })
-Assert.eq(range.min, 352)
+Assert.eq(range.height, 352)
 local untitled = List:new()
 untitled.lifecycle.state = "Resume"
 untitled:build({ desktop = desktop, source = { id = "local" } }, {

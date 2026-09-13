@@ -599,7 +599,7 @@ tests/book/store_spec.lua
 长按进入编辑：叠层删 / 移 / 调高；页底可添加
 ```
 
-- 放置数据在 `home.home_widgets`：`{ id, page, order, height }`。`height` 为 `default`（组件 preferred）、`fill`（占满页内剩余）或像素自定义。
+- 放置数据在 `home.home_widgets`：`{ id, page, order, height }`。`height` 为 `default`（累加组件内容高度）、`fill`（占满页内剩余）或像素自定义。组件报 `{ height, fill }`：默认只占内容高，声明 `fill` 的组件（当前阅读 / 最近阅读）自动吃剩余。无 min/max。
 - 页边界由用户钉死，不再按高度自动甩页。旧 `home_layout` 启动时迁成 widgets，并按旧分页算法切一次页。
 - 长按首页进入编辑态；编辑态组件不响应点击，叠层提供删除、移动（上下/跨页）、高度（默认/占满/自定义 Spin）。页内仍有空位时显示「添加组件」。点 PageStrip「完成」或离开首页退出并保存；空页退出时压缩。
 - 翻页用 `ui/components/pagestrip.lua`（两侧按钮 + 中间圆点/标题），不用图书馆那套 Pager。左右滑仍翻页；编辑态禁用左右滑。

@@ -224,15 +224,17 @@ function Edit.showMoveDialog(opts)
 end
 
 --- 高度菜单：默认 / 占满 / 自定义（SpinWidget）。
----@param opts { 布局尺寸、样式及行为选项；缺省项使用组件默认值
+---@param opts {
 ---   label: string,
----   range: { min: number, preferred: number, max: number, step?: number },
+---   range: { height: number, fill?: boolean, limit?: number },
 ---   current: "default"|"fill"|number,
 ---   on_apply: fun(height: "default"|"fill"|number),
 --- }
 ---@return nil
 function Edit.showHeightDialog(opts)
-    local range = opts.range
+    local range = opts.range or {}
+    local natural = math.max(1, math.floor(tonumber(range.height) or 1))
+    local limit = math.max(natural, math.floor(tonumber(range.limit) or natural))
     local dialog
     --- 关闭高度菜单并调用组件高度应用回调。
     ---@param height number|string 目标高度，单位像素
@@ -256,16 +258,15 @@ function Edit.showHeightDialog(opts)
                 or _("自定义高度…"),
             callback = function()
                 UIManager:close(dialog)
-                local cur = type(opts.current) == "number" and opts.current or range.preferred
-                local step = math.max(1, math.floor(tonumber(range.step) or 1))
+                local cur = type(opts.current) == "number" and opts.current or natural
                 local spin = SpinWidget:new{
                     title_text = opts.label or _("高度"),
                     info_text = _("拖动或点按调整组件高度"),
                     value = cur,
-                    value_min = range.min,
-                    value_max = range.max,
-                    value_step = step,
-                    default_value = range.preferred,
+                    value_min = 1,
+                    value_max = limit,
+                    value_step = 1,
+                    default_value = natural,
                     callback = function(spin_widget)
                         opts.on_apply(math.floor(spin_widget.value))
                     end,
