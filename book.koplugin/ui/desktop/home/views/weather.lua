@@ -287,6 +287,16 @@ function M:scheduleHourly()
     UIManager:scheduleIn(INTERVAL, self._tick)
 end
 
+--- 换源或首页刷新后重建，并按当前地点重拉天气。
+---@param event string
+---@return nil
+function M:onEvent(event)
+    require("ui.desktop.home.views.base").onEvent(self, event)
+    if event == "home_refresh" or event == "source_changed" then
+        self:pull()
+    end
+end
+
 --- 绘制已有天气，立即拉取新数据并启动周期刷新。
 ---@return nil
 function M:onResume()
@@ -392,8 +402,7 @@ function M:showSettings(desktop)
                     home.home_weather_city = city
                     MoonSettings.saveSection("home", home)
                     UIManager:close(dialog)
-                    if desktop and desktop.onEvent then desktop:onEvent("home_changed") end
-                    if desktop and desktop.updateView then desktop:updateView() end
+                    if desktop and desktop.onEvent then desktop:onEvent("home_refresh") end
                 end,
             },
         }},

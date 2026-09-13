@@ -111,6 +111,10 @@ local part = comp:build({ desktop = {} }, { width = 600, height = 96, y = 0 })
 Assert.eq(part:getSize().h, 96)
 Assert.not_nil(comp.clock)
 Assert.not_nil(comp.weather)
+comp.lifecycle.state = "Pause"
+comp:onResume()
+comp:onEvent("home_refresh")
+Assert.not_nil(comp.weather)
 comp:onPause()
 comp:onDestroy()
 Assert.is_nil(comp.clock)
@@ -124,9 +128,9 @@ ClockWeather:showSettings({
 })
 Assert.eq(shown.title, "时间天气")
 Assert.eq(shown.buttons[1][1].text, "天气地点")
-Assert.eq(shown.buttons[2][1].text, "天气在左")
+Assert.eq(shown.buttons[2][1].text, "时间在左")
 shown.buttons[2][1].callback()
 Assert.eq(ClockWeather.order(), "clock_left")
-Assert.eq(events[1], "home_changed")
+Assert.eq(events[1], "home_refresh")
 
 return true

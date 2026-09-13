@@ -91,7 +91,8 @@ function M:showSettings(desktop)
                 end,
             }},
             {{
-                text = M.orderLabel(),
+                -- 按钮是动作：当前时间在左就写「天气在左」。
+                text = M.order() == ORDER_CLOCK and _("天气在左") or _("时间在左"),
                 callback = function()
                     UIManager:close(dialog)
                     if M.order() == ORDER_WEATHER then
@@ -99,8 +100,7 @@ function M:showSettings(desktop)
                     else
                         M.saveOrder(ORDER_WEATHER)
                     end
-                    if desktop and desktop.onEvent then desktop:onEvent("home_changed") end
-                    if desktop and desktop.updateView then desktop:updateView() end
+                    if desktop and desktop.onEvent then desktop:onEvent("home_refresh") end
                 end,
             }},
             {{
@@ -199,6 +199,14 @@ function M:onResume()
     ensureKids(self)
     if self.clock then self.clock:onResume() end
     if self.weather then self.weather:onResume() end
+end
+
+--- 把刷新交给天气子视图，再按当前左右序重建。
+---@param event string
+---@return nil
+function M:onEvent(event)
+    if self.weather then self.weather:onEvent(event) end
+    require("ui.desktop.home.views.base").onEvent(self, event)
 end
 
 --- 暂停两个子视图的周期工作和在飞请求。
