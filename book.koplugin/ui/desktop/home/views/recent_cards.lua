@@ -322,9 +322,9 @@ function M:createWidget()
     books = rotateBooks(books, self.focus)
     local center_book = books[1]
 
-    local pad = UI.sz(10)
+    local pad = 0
     local gap_cap = UI.sz(8)
-    local avail_w = math.max(1, w - pad * 2)
+    local avail_w = w
     local caption_w = math.min(avail_w, UI.sz(220))
     local caption, caption_h = captionBlock(center_book, caption_w, function()
         openBook(ctx, center_book)

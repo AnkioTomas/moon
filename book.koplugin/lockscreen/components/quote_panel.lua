@@ -10,7 +10,7 @@ local Text = require("utils.text")
 
 local M = {}
 
---- 统一绘制引号、正文、分割线和出处（共享 UI 组件）。
+--- 绘制正文和出处（共享 UI 组件）。
 ---@param text string
 ---@param source string
 ---@param position string
@@ -19,7 +19,8 @@ local M = {}
 function M.blocks(text, source, position, wide)
     -- 延迟加载：避免 lockscreen 注册表 require 时拉进 KOReader Widget。
     local Quote = require("ui.views.quote")
-    local sw, sh = Layout.portraitSize()    local rect = Layout.panel({
+    local sw, sh = Layout.portraitSize()
+    local rect = Layout.panel({
         position = position,
         wide = wide,
         screen_w = sw,
@@ -51,19 +52,15 @@ function M.blocks(text, source, position, wide)
         text = fitted
     end
 
-    local mark_size = math.min(50, font_size + 16)
     local line_em = 0.35
     local line_px = math.max(1, math.floor((1 + line_em) * font_size + 0.5))
     local lines = math.max(2, math.ceil(text_h / line_px))
     local quote_opts = {
         body_size = font_size,
-        mark_size = mark_size,
         attr_size = 16,
         lines = lines,
         line_em = line_em,
         pad_x = 0,
-        gap_mark = 4,
-        gap_rule = math.max(14, rect.pad),
         gap_attr = math.max(14, rect.pad),
     }
     local content_h = Quote.contentHeight(quote_opts)
@@ -86,13 +83,10 @@ function M.blocks(text, source, position, wide)
         width = text_w,
         height = inner_h,
         body_size = quote_opts.body_size,
-        mark_size = quote_opts.mark_size,
         attr_size = quote_opts.attr_size,
         lines = quote_opts.lines,
         line_em = quote_opts.line_em,
         pad_x = 0,
-        gap_mark = quote_opts.gap_mark,
-        gap_rule = quote_opts.gap_rule,
         gap_attr = quote_opts.gap_attr,
     }
     local widget = parts:build()

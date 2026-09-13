@@ -19,8 +19,9 @@ function Clock:onDestroy() child_events[#child_events + 1] = "destroy" end
 function Clock:build()
     return { widget = { id = "clock" } }
 end
+local clock_h = 10
 function Clock:heightRange()
-    return { height = 10 }
+    return { height = clock_h }
 end
 
 local Weather = setmetatable({ id = "weather" }, Lifecycle)
@@ -42,6 +43,9 @@ local enabled = { "clock" }
 local placements = {
     { id = "clock", page = 1, order = 1, height = "default" },
 }
+local can_fit = true
+local last_strip
+local last_add
 package.preload["ui.desktop.home.registry"] = function()
     return {
         components = { Clock, Weather },
@@ -83,7 +87,21 @@ package.preload["ui.desktop.home.widgets"] = function()
         end,
         compactPages = function(list) return list end,
         reindex = function(list) return list end,
-        canFit = function() return true end,
+        canFit = function() return can_fit end,
+        appendSlot = function(list, current, fits)
+            if fits then
+                local n = 0
+                for _, item in ipairs(list) do
+                    if item.page == current then n = n + 1 end
+                end
+                return current, n + 1
+            end
+            local max_p = 1
+            for _, item in ipairs(list) do
+                if item.page > max_p then max_p = item.page end
+            end
+            return max_p + 1, 1
+        end,
         applyPacks = function(list) return list end,
         ids = function(list)
             local out = {}
@@ -115,7 +133,12 @@ package.preload["ui/geometry"] = function()
     end }
 end
 package.preload["ui.components.bookui"] = function()
-    return { topBarH = function() return 30 end, sz = function(n) return n end, face = function() return {} end }
+    return {
+        topBarH = function() return 30 end,
+        sz = function(n) return n end,
+        face = function() return {} end,
+        pagePad = function() return 16 end,
+    }
 end
 package.preload["ffi/blitbuffer"] = function()
     return { COLOR_WHITE = 255, COLOR_BLACK = 0, COLOR_LIGHT_GRAY = 200 }
@@ -152,6 +175,7 @@ package.preload["ui.components.pagestrip"] = function()
     return {
         bandH = function() return 40 end,
         widget = function(opts)
+            last_strip = opts
             return { strip = true, page = opts.page, pages = opts.pages, center = opts.center }
         end,
     }
@@ -162,7 +186,9 @@ package.preload["ui.desktop.home.edit_overlay"] = function()
         addRow = function() return { add = true } end,
         showMoveDialog = function() end,
         showHeightDialog = function() end,
-        showAddDialog = function() end,
+        showAddDialog = function(candidates, on_pick)
+            last_add = { candidates = candidates, on_pick = on_pick }
+        end,
     }
 end
 local function widgetStub()
@@ -276,10 +302,51 @@ Assert.eq(home.components.clock.lifecycle.state, "Resume")
 Assert.eq(home.components.weather.lifecycle.state, "Pause")
 Assert.eq(table.concat(child_events, ","), "weather.pause,resume")
 
+-- 编辑态：底栏「添加 / 完成」；当前页塞不下则新建页。
+enabled = { "clock" }
+placements = { { id = "clock", page = 1, order = 1, height = "default" } }
+layout_pages = 1
+home.page = 1
+home.editing = false
+can_fit = true
+last_add = nil
+home:enterEdit()
+Assert.is_true(home.editing)
+Assert.eq(last_strip.center, "title")
+Assert.eq(last_strip.actions[1].text, "添加")
+Assert.eq(last_strip.actions[2].text, "完成")
+last_strip.actions[1].on_tap()
+Assert.eq(last_add.candidates[1].id, "weather")
+last_add.on_pick("weather")
+Assert.eq(placements[#placements].id, "weather")
+Assert.eq(placements[#placements].page, 1)
+Assert.eq(home.page, 1)
+
+enabled = { "clock" }
+placements = { { id = "clock", page = 1, order = 1, height = "default" } }
+home.page = 1
+can_fit = false
+last_add = nil
+home:updateView()
+Assert.eq(last_strip.actions[1].text, "添加")
+last_strip.actions[1].on_tap()
+Assert.eq(last_add.candidates[1].id, "weather")
+
 -- 长按进编辑；暂停退出编辑并保存。
+enabled = { "clock", "weather" }
+placements = {
+    { id = "clock", page = 1, order = 1, height = "default" },
+    { id = "weather", page = 2, order = 1, height = "default" },
+}
+layout_pages = 2
+home.page = 1
+can_fit = true
+home.editing = false
+home:updateView()
 Assert.is_false(home.editing)
 home:enterEdit()
 Assert.is_true(home.editing)
+Assert.eq(last_strip.actions[1].text, "完成")
 home:onPause()
 Assert.is_false(home.editing)
 

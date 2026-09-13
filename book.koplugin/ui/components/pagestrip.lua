@@ -91,12 +91,12 @@ local function dotsCenter(page, pages, width)
     }
 end
 
---- 构建翻页条中央标题；提供回调时将标题包装为点击区域。
+--- 中央文字按钮；提供回调时包装为点击区域。
 ---@param title string 显示标题
 ---@param width number 目标宽度，单位像素
 ---@param on_tap fun()|nil 点击命中区域时执行的回调
 ---@return table
-local function titleCenter(title, width, on_tap)
+local function textButton(title, width, on_tap)
     local label = TextWidget:new{
         text = title,
         face = UI.face("cfont", 14),
@@ -121,6 +121,34 @@ local function titleCenter(title, width, on_tap)
     return tap
 end
 
+--- 构建翻页条中央标题；提供回调时将标题包装为点击区域。
+---@param title string 显示标题
+---@param width number 目标宽度，单位像素
+---@param on_tap fun()|nil 点击命中区域时执行的回调
+---@return table
+local function titleCenter(title, width, on_tap)
+    return textButton(title, width, on_tap)
+end
+
+--- 中央并排文字按钮（编辑态：添加 / 完成）。
+---@param actions { text: string, on_tap: fun()|nil }[]
+---@param width number 目标宽度，单位像素
+---@return table
+local function actionsCenter(actions, width)
+    local n = #actions
+    local gap = UI.sz(16)
+    local btn_w = math.max(1, math.floor((width - gap * math.max(0, n - 1)) / math.max(1, n)))
+    local kids = { align = "center" }
+    for i, action in ipairs(actions) do
+        if i > 1 then table.insert(kids, HorizontalSpan:new{ width = gap }) end
+        kids[#kids + 1] = textButton(action.text, btn_w, action.on_tap)
+    end
+    return CenterContainer:new{
+        dimen = Geom:new{ w = width, h = PageStrip.bandH() },
+        HorizontalGroup:new(kids),
+    }
+end
+
 --- 拼一条翻页带。 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@param opts {
 ---   width: number,
@@ -128,6 +156,7 @@ end
 ---   pages: number,
 ---   center?: "dots"|"title",
 ---   title?: string,
+---   actions?: { text: string, on_tap: fun()|nil }[],
 ---   on_prev?: fun(),
 ---   on_next?: fun(),
 ---   on_center?: fun(),
@@ -142,7 +171,11 @@ function PageStrip.widget(opts)
 
     local center
     if opts.center == "title" then
-        center = titleCenter(opts.title or _("完成"), mid_w, opts.on_center)
+        if type(opts.actions) == "table" and #opts.actions > 0 then
+            center = actionsCenter(opts.actions, mid_w)
+        else
+            center = titleCenter(opts.title or _("完成"), mid_w, opts.on_center)
+        end
     else
         center = dotsCenter(page, pages, mid_w)
     end

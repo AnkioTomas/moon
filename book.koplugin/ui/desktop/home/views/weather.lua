@@ -193,7 +193,7 @@ function M:createWidget()
     local temp_h = math.max(1, total_h - sub_h * 2 - gap * 2)
     local y = opts.y or 0
     local temp, detail, extra = texts(self.wx)
-    local max_w = math.max(1, w - UI.sz(20))
+    local max_w = w
     self.temp = TextWidget:new{
         text = temp,
         face = UI.face("cfont", 36),

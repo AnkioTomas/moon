@@ -86,7 +86,7 @@ end
 ---@param opts table|nil
 ---@return BookHomeHeightSpec
 function M:heightRange(_ctx, opts)
-    local inner_w = math.max(1, (opts and opts.width or UI.sz(300)) - UI.sz(20))
+    local inner_w = math.max(1, opts and opts.width or UI.sz(300))
     local title = TextWidget:new{
         text = _("历史上的今天"),
         face = UI.face("cfont", 12),
@@ -104,8 +104,8 @@ function M:createWidget()
     local ctx, opts = self.ctx, self.opts
     local w = opts.width
     local total_h = opts.height
-    local pad_x = UI.sz(10)
-    local inner_w = math.max(1, w - pad_x * 2)
+    local pad_x = 0
+    local inner_w = w
     local title = TextWidget:new{
         text = _("历史上的今天"),
         face = UI.face("cfont", 12),

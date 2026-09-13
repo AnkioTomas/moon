@@ -10,7 +10,6 @@ onCreate → build。设置/翻页/换源/编辑 → updateView。
 local Device = require("device")
 local Geom = require("ui/geometry")
 local VerticalGroup = require("ui/widget/verticalgroup")
-local VerticalSpan = require("ui/widget/verticalspan")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local GestureRange = require("ui/gesturerange")
@@ -123,16 +122,19 @@ local function maybeSplit(self, ctx, body_h)
     if not Components.needsSplit() then return end
     local placements = Components.widgets()
     local gap = UI.sz(8)
+    local inset = UI.pagePad()
+    local inner_w = math.max(1, ctx.width - inset * 2)
+    local inner_h = math.max(1, body_h - inset * 2)
     local ranges = {}
     for _i, place in ipairs(placements) do
         local comp = self.components[place.id]
         if comp then
-            local range = comp:heightRange(ctx, { width = ctx.width, height = body_h })
+            local range = comp:heightRange(ctx, { width = inner_w, height = inner_h })
             range.id = place.id
             ranges[#ranges + 1] = range
         end
     end
-    local packs = self.layout:paginate(ranges, body_h, gap)
+    local packs = self.layout:paginate(ranges, inner_h, gap)
     local next_list = Widgets.applyPacks(placements, packs)
     Components.saveWidgets(next_list)
     Components.clearNeedsSplit()
@@ -244,7 +246,7 @@ local function showHeight(self, id, range, placement)
     })
 end
 
---- 筛选当前页剩余空间能够容纳的组件，选择后添加并保存。
+--- 未上屏的组件均可添加；当前页放不下则落到新页。
 ---@param self BookHome 当前视图或布局实例
 ---@param body_h number 扣除固定控件后的正文高度，单位像素
 ---@param width number 目标宽度，单位像素
@@ -253,33 +255,37 @@ local function showAdd(self, body_h, width)
     local list = Components.widgets()
     local placed = {}
     for _i, item in ipairs(list) do placed[item.id] = true end
-    local page_items = Widgets.onPage(list, self.page)
-    local mins = {}
-    local ctx = self.desktop and self.desktop:ctx() or { width = self.width, height = self.height, source = self.source, plugin = self.plugin }
-    for _i, place in ipairs(page_items) do
-        local comp = self.components[place.id]
-        if comp then
-            local range = comp:heightRange(ctx, { width = width, height = body_h })
-            mins[#mins + 1] = range.height
-        end
-    end
-    local gap = UI.sz(8)
     local candidates = {}
     for _i, comp in ipairs(Components.components) do
         if not placed[comp.id] then
-            local range = comp:heightRange(ctx, { width = width, height = body_h })
-            if Widgets.canFit(mins, range.height, body_h, gap) then
-                candidates[#candidates + 1] = { id = comp.id, label = comp.label }
-            end
+            candidates[#candidates + 1] = { id = comp.id, label = comp.label }
         end
     end
     if #candidates == 0 then return end
     Edit.showAddDialog(candidates, function(id)
         local next_list = Components.widgets()
+        local ctx = self.desktop and self.desktop:ctx() or { width = self.width, height = self.height, source = self.source, plugin = self.plugin }
+        local inset = UI.pagePad()
+        local inner_w = math.max(1, width - inset * 2)
+        local inner_h = math.max(1, body_h - inset * 2)
+        local gap = UI.sz(8)
+        local page_items = Widgets.onPage(next_list, self.page)
+        local mins = {}
+        for _i, place in ipairs(page_items) do
+            local spec = self.components[place.id] or Components.find(place.id)
+            if spec then
+                mins[#mins + 1] = spec:heightRange(ctx, { width = inner_w, height = inner_h }).height
+            end
+        end
+        local spec = Components.find(id)
+        local need = spec and spec:heightRange(ctx, { width = inner_w, height = inner_h }).height or 1
+        local fits = #page_items == 0 or Widgets.canFit(mins, need, inner_h, gap)
+        local page, order = Widgets.appendSlot(next_list, self.page, fits)
+        self.page = page
         next_list[#next_list + 1] = {
             id = id,
-            page = self.page,
-            order = #Widgets.onPage(next_list, self.page) + 1,
+            page = page,
+            order = order,
             height = "default",
         }
         Components.saveWidgets(next_list)
@@ -298,38 +304,24 @@ local function assemble(self)
     local w = ctx.width
     local h = ctx.height
     local strip_h = PageStrip.bandH()
-    local add_h = self.editing and UI.sz(44) or 0
-    local add_gap = self.editing and UI.sz(8) or 0
     local body_h = math.max(1, h - strip_h)
 
     if self.desktop and not self.offscreen then maybeSplit(self, ctx, body_h) end
 
-    local show_add = false
+    local can_add = false
     if self.editing then
         local list = Components.widgets()
-        local page_items = Widgets.onPage(list, math.max(1, self.page or 1))
-        local mins = {}
-        for _i, place in ipairs(page_items) do
-            local comp = self.components[place.id]
-            if comp then
-                local range = comp:heightRange(ctx, { width = w, height = body_h })
-                mins[#mins + 1] = range.height
-            end
-        end
         local placed = {}
         for _i, item in ipairs(list) do placed[item.id] = true end
         for _i, comp in ipairs(Components.components) do
             if not placed[comp.id] then
-                local range = comp:heightRange(ctx, { width = w, height = body_h })
-                if Widgets.canFit(mins, range.height, body_h - add_h - add_gap, UI.sz(8)) then
-                    show_add = true
-                    break
-                end
+                can_add = true
+                break
             end
         end
     end
 
-    local widget_h = show_add and math.max(1, body_h - add_h - add_gap) or body_h
+    local widget_h = body_h
 
     local wrap
     if self.editing then
@@ -357,17 +349,28 @@ local function assemble(self)
     self.pages = pages or 1
     self.visible = visible or {}
 
-    local column = { align = "left", body }
-    if show_add then
-        column[#column + 1] = VerticalSpan:new{ width = add_gap }
-        column[#column + 1] = Edit.addRow(w, function() showAdd(self, widget_h, w) end)
+    local actions
+    if self.editing then
+        actions = {}
+        if can_add then
+            actions[#actions + 1] = {
+                text = _("添加"),
+                on_tap = function() showAdd(self, widget_h, w) end,
+            }
+        end
+        actions[#actions + 1] = {
+            text = _("完成"),
+            on_tap = function() self:exitEdit() end,
+        }
     end
+    local column = { align = "left", body }
     column[#column + 1] = PageStrip.widget({
         width = w,
         page = self.page,
         pages = self.pages,
         center = self.editing and "title" or "dots",
         title = _("完成"),
+        actions = actions,
         on_prev = function() self:turn(-1) end,
         on_next = function() self:turn(1) end,
         on_center = self.editing and function() self:exitEdit() end or nil,

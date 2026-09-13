@@ -225,6 +225,20 @@ function M.canFit(placed, candidate, available, gap)
     return used + need <= available
 end
 
+--- 当前页能放下则留在 current，否则落到末页之后。
+---@param list BookHomeWidgetPlacement[]
+---@param current_page number
+---@param fits boolean
+---@return number page
+---@return number order
+function M.appendSlot(list, current_page, fits)
+    current_page = math.max(1, math.floor(tonumber(current_page) or 1))
+    if fits then
+        return current_page, #M.onPage(list, current_page) + 1
+    end
+    return M.pageCount(list) + 1, 1
+end
+
 --- 按旧 paginate 结果给放置表赋 page/order（迁移用）。
 ---@param list BookHomeWidgetPlacement[] 按全局顺序
 ---@param packs table[] paginate 返回的页，每页含 {id=...} 或带 id 的 range

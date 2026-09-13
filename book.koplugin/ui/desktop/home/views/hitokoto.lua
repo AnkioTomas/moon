@@ -22,7 +22,7 @@ M.__index = M
 ---@param opts table|nil
 ---@return BookHomeHeightSpec
 function M:heightRange(_ctx, opts)
-    return Quote.heightRange({ width = opts and opts.width })
+    return Quote.heightRange({ width = opts and opts.width, card = true })
 end
 
 --- 随机选择与上一次不同的一言，并记录文本以供下次避重。
@@ -41,6 +41,7 @@ function M:createWidget()
         data = self:sample(),
         width = opts.width,
         height = opts.height,
+        card = true,
     }
     local widget = parts:build()
     self.parts = parts
