@@ -36,7 +36,11 @@ package.preload["ui/geometry"] = widgetStub
 package.preload["ui/widget/verticalgroup"] = widgetStub
 package.preload["ui/widget/verticalspan"] = widgetStub
 package.preload["ui.components.bookui"] = function()
-    return { sz = function(n) return n end, topBarH = function() return 30 end }
+    return {
+        sz = function(n) return n end,
+        topBarH = function() return 30 end,
+        pagePad = function() return 16 end,
+    }
 end
 
 local function stubComponent(id)

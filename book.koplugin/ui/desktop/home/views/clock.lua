@@ -90,7 +90,7 @@ function M:createWidget()
     local sub_h = math.min(UI.sz(SUB_H), math.max(1, math.floor((total_h - UI.sz(36) - gap * 2) / 2)))
     local time_h = math.max(1, total_h - sub_h * 2 - gap * 2)
     local y = opts.y or 0
-    local max_w = math.max(1, w - UI.sz(20))
+    local max_w = w
     self.time_widget = TextWidget:new{
         text = os.date("%H:%M"),
         face = UI.face("cfont", 36),

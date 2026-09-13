@@ -70,6 +70,7 @@ local function normalize(raw)
 end
 
 --- 钉页分配：default 用内容高，自定义用像素，剩余均分给 fill。
+--- 页边距由 build 整页扣一次，这里只算内容高和 gap。
 ---@param ranges BookHomeHeightSpec[] 各组件的内容高度与 fill 标记
 ---@param available number 当前布局可用的总高度，单位像素
 ---@param gap number 相邻项目间距，单位像素
@@ -176,12 +177,15 @@ function Layout:build(ctx, components, page, opts)
     local pages = Widgets.pageCount(placements)
     page = math.max(1, math.min(pages, math.floor(tonumber(page) or 1)))
 
+    local inset = UI.pagePad()
+    local inner_w = math.max(1, w - inset * 2)
+    local inner_h = math.max(1, body_h - inset * 2)
     local page_items = Widgets.onPage(placements, page)
     local ranges = {}
     for _, place in ipairs(page_items) do
         local comp = components[place.id]
         if comp then
-            local range = comp:heightRange(ctx, { width = w, height = body_h })
+            local range = comp:heightRange(ctx, { width = inner_w, height = inner_h })
             range.comp = comp
             range.id = place.id
             range.placement = place
@@ -189,7 +193,7 @@ function Layout:build(ctx, components, page, opts)
         end
     end
 
-    local selected, heights, unused = self:allocate(ranges, body_h, gap)
+    local selected, heights, unused = self:allocate(ranges, inner_h, gap)
     local kids = { align = "left" }
     local used = 0
     local visible = {}
@@ -201,23 +205,23 @@ function Layout:build(ctx, components, page, opts)
         end
         local allocated = heights[i]
         local part = item.comp:build(ctx, {
-            width = w,
+            width = inner_w,
             height = allocated,
             budget = allocated,
             desktop = ctx.desktop,
-            y = UI.topBarH() + used,
+            y = UI.topBarH() + inset + used,
         })
         local widget = part
         if opts.wrap then
-            widget = opts.wrap(widget, {
+            widget = opts.wrap(part, {
                 id = item.id,
                 height = allocated,
-                width = w,
+                width = inner_w,
                 placement = item.placement,
                 range = {
                     height = item.height,
                     fill = item.fill,
-                    limit = body_h,
+                    limit = inner_h,
                 },
             })
         end
@@ -230,7 +234,7 @@ function Layout:build(ctx, components, page, opts)
 
     local body = FrameContainer:new{
         bordersize = 0,
-        padding = 0,
+        padding = inset,
         margin = 0,
         background = Blitbuffer.COLOR_WHITE,
         width = w,

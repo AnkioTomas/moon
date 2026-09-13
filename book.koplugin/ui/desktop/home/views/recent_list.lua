@@ -179,14 +179,13 @@ end
 ---@return number row_gap
 ---@return number cell_h
 local function gridMetrics(width, area_h)
-    local pad = UI.sz(10)
     local cols = M.cols()
     local extra = titleExtra()
     -- 单行时宽度决定封面尺寸；用剩余高度压缩会留下无意义的横向空隙。
     -- 多行才需要受区域高度约束，避免整组网格溢出。
     local max_h = M.rows() == 1 and math.huge or UI.gridCoverMaxH(area_h)
     local slot_w, cw, ch, _, gap, row_gap, cell_h = UI.denseCoverMetrics(
-        math.max(1, math.floor(tonumber(width) or 1) - pad * 2), 0, {
+        math.max(1, math.floor(tonumber(width) or 1)), 0, {
         title_extra = extra,
         max_h = max_h,
         min_cols = cols,
@@ -273,7 +272,6 @@ end
 ---@return number
 ---@return number
 local function buildGrid(ctx, books, width, grid_h, page, on_open)
-    local pad = UI.sz(10)
     local slot_w, cw, ch, cols, gap, row_gap, cell_h = gridMetrics(width, grid_h)
     local rows = M.rows()
     local page_size = math.max(1, cols * rows)
@@ -296,8 +294,6 @@ local function buildGrid(ctx, books, width, grid_h, page, on_open)
         table.insert(grid, FrameContainer:new{
             bordersize = 0,
             padding = 0,
-            padding_left = pad,
-            padding_right = pad,
             margin = 0,
             row,
         })
@@ -379,7 +375,6 @@ function M:createWidget()
             FrameContainer:new{
                 bordersize = 0,
                 padding = 0,
-                padding_left = UI.sz(10),
                 padding_bottom = UI.sz(4),
                 margin = 0,
                 TextWidget:new{

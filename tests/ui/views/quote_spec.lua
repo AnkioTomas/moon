@@ -1,5 +1,5 @@
 --[[--
-共享引言块：大引号、正文、细线、一行署名。
+共享引言块：正文 + 一行署名；首页可包浅底卡片。
 @module tests.ui.views.quote_spec
 --]]
 
@@ -20,7 +20,7 @@ end
 for _, name in ipairs({
     "container/widgetcontainer", "container/framecontainer", "container/leftcontainer", "container/rightcontainer",
     "horizontalgroup", "horizontalspan", "verticalgroup", "verticalspan",
-    "textwidget", "textboxwidget", "linewidget",
+    "textwidget", "textboxwidget",
 }) do package.preload["ui/widget/" .. name] = widget end
 package.preload["ui/geometry"] = widget
 package.preload["ffi/blitbuffer"] = function() return { COLOR_BLACK = 0 } end
@@ -36,11 +36,14 @@ package.preload["ui.components.bookui"] = function()
 end
 
 local Quote = require("ui.views.quote")
+-- 桩：正文 21*2 + 空隙 8 + 署名 16
 local range = Quote.heightRange()
--- 桩：引号16 + 空隙2 + 正文40 + 线上下12 + 线1 + 署名16 = 87，再加默认内边距 16
-Assert.eq(range.height, 103)
+Assert.eq(range.height, 66)
 Assert.is_nil(range.min)
 Assert.is_nil(range.max)
+
+local card = Quote.heightRange({ card = true, width = 320 })
+Assert.eq(card.height, 90)
 
 Assert.eq(Quote.attribution({ author = "陆游", title = "冬夜读书示子聿" }), "—— 陆游 · 冬夜读书示子聿")
 Assert.eq(Quote.attribution({ source = "陆游" }), "—— 陆游")
@@ -55,8 +58,8 @@ parts:build()
 Assert.eq(parts.body.text, "纸上得来终觉浅")
 Assert.eq(parts.attr.text, "—— 陆游 · 冬夜读书示子聿")
 Assert.eq(parts.height, 96)
-Assert.eq(parts.body.width, 320 - 28)
-Assert.eq(parts.body.height, math.floor(1.35 * 15 + 0.5) * 2)
+Assert.eq(parts.body.width, 320)
+Assert.eq(parts.body.height, math.floor(1.4 * 15 + 0.5) * 2)
 
 parts:updateView({ text = "新句", author = "苏轼", title = "题西林壁" })
 Assert.eq(parts.body.text, "新句")
@@ -69,9 +72,9 @@ local lock = Quote:new{ data = { text = "锁屏句", source = "出处" },
     width = 200,
     height = 200,
     body_size = 30,
-    mark_size = 46,
     attr_size = 16,
     lines = 4,
+    line_em = 0.35,
     pad_x = 0,
 }
 lock:build()

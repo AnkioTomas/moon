@@ -37,4 +37,15 @@ Assert.eq(Widgets.pageCount(compacted), 2)
 Assert.is_true(Widgets.canFit({}, 40, 40, 8))
 Assert.is_false(Widgets.canFit({ 30 }, 20, 40, 8))
 
+local page, order = Widgets.appendSlot({
+    { id = "clock", page = 1, order = 1, height = "default" },
+}, 1, true)
+Assert.eq(page, 1)
+Assert.eq(order, 2)
+page, order = Widgets.appendSlot({
+    { id = "clock", page = 1, order = 1, height = "default" },
+}, 1, false)
+Assert.eq(page, 2)
+Assert.eq(order, 1)
+
 return true

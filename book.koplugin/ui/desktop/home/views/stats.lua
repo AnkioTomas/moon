@@ -130,8 +130,7 @@ function M:createWidget()
     local ctx, opts = self.ctx, self.opts
     local w = opts.width
     local total_h = opts.height
-    local margin = UI.sz(10)
-    local inner_w = math.max(1, w - margin * 2)
+    local inner_w = w
     local stats = ctx.source and summarize(ctx.source.id) or {}
     local gap = UI.sz(8)
     local items = {
