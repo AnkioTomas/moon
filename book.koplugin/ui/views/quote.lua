@@ -1,24 +1,28 @@
 --[[--
-共享引言块：正文 + 一行署名。首页可包成浅底卡片。
+共享引言块：左侧引号 + 正文，署名靠右。无卡片。
 
 @module koplugin.book.ui.views.quote
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
 local FrameContainer = require("ui/widget/container/framecontainer")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
-local VerticalGroup = require("ui/widget/verticalgroup")
-local VerticalSpan = require("ui/widget/verticalspan")
 
 local DEFAULTS = {
     lines = 2,
     body_size = 15,
     line_em = 0.4,
     attr_size = 12,
+    mark_size = 28,
+    gap_mark = 8,
     gap_attr = 8,
 }
+
+local ATTR_RATIO = 0.36
 
 local View = require("ui.view")
 ---@class BookQuote : View
@@ -38,9 +42,10 @@ local function resolve(opts)
         body_size = math.max(1, math.floor(tonumber(opts.body_size) or DEFAULTS.body_size)),
         line_em = tonumber(opts.line_em) or DEFAULTS.line_em,
         attr_size = math.max(1, math.floor(tonumber(opts.attr_size) or DEFAULTS.attr_size)),
+        mark_size = math.max(1, math.floor(tonumber(opts.mark_size) or DEFAULTS.mark_size)),
+        gap_mark = math.max(0, math.floor(tonumber(opts.gap_mark) or DEFAULTS.gap_mark)),
         gap_attr = math.max(0, math.floor(tonumber(opts.gap_attr) or DEFAULTS.gap_attr)),
         pad_x = opts.pad_x ~= nil and math.max(0, math.floor(tonumber(opts.pad_x) or 0)) or 0,
-        card = opts.card == true,
         width = math.max(1, math.floor(tonumber(opts.width) or UI.sz(300))),
     }
 end
@@ -64,53 +69,65 @@ function M.attribution(quote)
     return ""
 end
 
---- 卡片内边距。
----@return number
-local function cardPad()
-    return UI.sz(12)
-end
-
---- 按真实控件量引言列。
+--- 按真实控件量引言行：引号 + 正文 + 右署名。
 ---@param opts table|nil
 ---@param quote table|nil
 ---@return table
 local function assemble(opts, quote)
     local o = resolve(opts)
     local inner_w = math.max(1, o.width - o.pad_x * 2)
-    if o.card then inner_w = math.max(1, inner_w - cardPad() * 2) end
+    local mark = TextWidget:new{
+        text = "“",
+        face = UI.face("cfont", o.mark_size),
+        max_width = UI.sz(o.mark_size),
+        fgcolor = UI.muted(),
+    }
+    local mark_w = mark:getSize().w
+    local gap_mark = UI.sz(o.gap_mark)
+    local attr_text = M.attribution(quote)
+    local attr, attr_w, gap_attr = nil, 0, 0
+    if attr_text ~= "" then
+        gap_attr = UI.sz(o.gap_attr)
+        local attr_max = math.max(1, math.floor(inner_w * ATTR_RATIO))
+        attr = TextWidget:new{
+            text = attr_text,
+            face = UI.face("xx_smallinfofont", o.attr_size),
+            max_width = attr_max,
+            fgcolor = UI.muted(),
+        }
+        attr_w = attr:getSize().w
+    end
     local face = UI.face("cfont", o.body_size)
     local px = (face and face.size) or UI.fontSize(o.body_size)
     local line_px = math.max(1, math.floor((1 + o.line_em) * px + 0.5))
+    local body_w = math.max(1, inner_w - mark_w - gap_mark - gap_attr - attr_w)
     local body = TextBoxWidget:new{
         text = quote and quote.text or "",
         face = face,
-        width = inner_w,
+        width = body_w,
         height = line_px * o.lines,
         line_height = o.line_em,
         fgcolor = Blitbuffer.COLOR_BLACK,
         height_overflow_show_ellipsis = true,
     }
-    local attr = TextWidget:new{
-        text = M.attribution(quote),
-        face = UI.face("xx_smallinfofont", o.attr_size),
-        max_width = inner_w,
-        fgcolor = UI.muted(),
-    }
-    local gap = UI.sz(o.gap_attr)
-    local col = VerticalGroup:new{
-        align = "left",
-        body,
-        VerticalSpan:new{ width = gap },
-        attr,
-    }
+    local row = HorizontalGroup:new{ align = "center", mark }
+    if gap_mark > 0 then
+        table.insert(row, HorizontalSpan:new{ width = gap_mark })
+    end
+    table.insert(row, body)
+    if attr then
+        if gap_attr > 0 then
+            table.insert(row, HorizontalSpan:new{ width = gap_attr })
+        end
+        table.insert(row, attr)
+    end
     return {
-        col = col,
+        row = row,
         body = body,
         attr = attr,
         pad_x = o.pad_x,
-        card = o.card,
         width = o.width,
-        inner_h = body:getSize().h + gap + attr:getSize().h,
+        inner_h = math.max(mark:getSize().h, body:getSize().h, attr and attr:getSize().h or 0),
     }
 end
 
@@ -118,9 +135,7 @@ end
 ---@param opts table|nil
 ---@return number
 function M.contentHeight(opts)
-    local built = assemble(opts, opts and opts.data)
-    if resolve(opts).card then return built.inner_h + cardPad() * 2 end
-    return built.inner_h
+    return assemble(opts, opts and opts.data).inner_h
 end
 
 --- 首页内容高度。
@@ -130,31 +145,16 @@ function M.heightRange(opts)
     return { height = M.contentHeight(opts) }
 end
 
---- 构建正文与署名；首页 card 时包浅底卡片。
+--- 构建引号、正文和右署名。
 ---@return table
 function M:createWidget()
     local opts = self
     local quote = self.data or {}
     local built = assemble(opts, quote)
     local inner_h = built.inner_h
-    local min_h = inner_h + (built.card and cardPad() * 2 or 0)
-    local height = math.max(1, math.floor(tonumber(opts.height) or min_h))
+    local height = math.max(1, math.floor(tonumber(opts.height) or inner_h))
     self.body, self.attr = built.body, built.attr
     self.height = height
-    if built.card then
-        local Surface = require("ui.components.surface")
-        local pad = cardPad()
-        return Surface.build{
-            child = built.col,
-            options = {
-                width = built.width,
-                height = height,
-                padding = pad,
-                shadow = true,
-            },
-            kind = "card",
-        }
-    end
     local extra = math.max(0, height - inner_h)
     local pad_top = math.floor(extra / 2)
     return FrameContainer:new{
@@ -165,7 +165,7 @@ function M:createWidget()
         padding_top = pad_top,
         padding_bottom = extra - pad_top,
         margin = 0,
-        built.col,
+        built.row,
     }
 end
 
@@ -176,7 +176,9 @@ function M:updateView(quote)
     self.data = quote
     if not self.body then return end
     self.body:setText(quote and quote.text or "")
-    self.attr:setText(M.attribution(quote))
+    if self.attr then
+        self.attr:setText(M.attribution(quote))
+    end
     self:dirty("content")
 end
 
