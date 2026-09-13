@@ -23,7 +23,7 @@ M.__index = M
 ---@param opts table|nil
 ---@return BookHomeHeightSpec
 function M:heightRange(_ctx, opts)
-    return Quote.heightRange({ width = opts and opts.width, card = true })
+    return Quote.heightRange({ width = opts and opts.width })
 end
 
 --- 优先随机选择书摘，空库时回退一言，并记录书籍身份及文本。
@@ -44,7 +44,6 @@ function M:createWidget()
         data = quote,
         width = opts.width,
         height = opts.height,
-        card = true,
     }
     local widget = parts:build()
     if quote.source_id and quote.stable_id then

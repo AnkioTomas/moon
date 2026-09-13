@@ -1,5 +1,5 @@
 --[[--
-共享引言块：正文 + 一行署名；首页可包浅底卡片。
+共享引言块：左侧引号 + 正文，署名靠右。
 @module tests.ui.views.quote_spec
 --]]
 
@@ -36,14 +36,11 @@ package.preload["ui.components.bookui"] = function()
 end
 
 local Quote = require("ui.views.quote")
--- 桩：正文 21*2 + 空隙 8 + 署名 16
+-- 桩：无署名时高度 = 正文 21*2
 local range = Quote.heightRange()
-Assert.eq(range.height, 66)
+Assert.eq(range.height, 42)
 Assert.is_nil(range.min)
 Assert.is_nil(range.max)
-
-local card = Quote.heightRange({ card = true, width = 320 })
-Assert.eq(card.height, 90)
 
 Assert.eq(Quote.attribution({ author = "陆游", title = "冬夜读书示子聿" }), "—— 陆游 · 冬夜读书示子聿")
 Assert.eq(Quote.attribution({ source = "陆游" }), "—— 陆游")
@@ -58,7 +55,8 @@ parts:build()
 Assert.eq(parts.body.text, "纸上得来终觉浅")
 Assert.eq(parts.attr.text, "—— 陆游 · 冬夜读书示子聿")
 Assert.eq(parts.height, 96)
-Assert.eq(parts.body.width, 320)
+local attr_w = math.floor(320 * 0.36)
+Assert.eq(parts.body.width, 320 - 28 - 8 - 8 - attr_w)
 Assert.eq(parts.body.height, math.floor(1.4 * 15 + 0.5) * 2)
 
 parts:updateView({ text = "新句", author = "苏轼", title = "题西林壁" })
