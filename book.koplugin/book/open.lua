@@ -64,19 +64,29 @@ end
 --- 打开书籍：Book 身份决定属主源，源负责返回已登记的物理文档。
 ---@param plugin table
 ---@param book Book
-function Open.book(plugin, book)
+---@param on_done fun(ok: boolean)|nil 异步结束（成功开阅读器或失败）后回调；被更新一代打开取消时不调用
+function Open.book(plugin, book, on_done)
+    --- 只在本代打开仍有效时通知调用方。
+    ---@param ok boolean
+    ---@return nil
+    local function done(ok)
+        if on_done then on_done(ok) end
+    end
     if not book or not book.source_id or not book.stable_id then
         UIManager:show(InfoMessage:new{ text = _("无效书籍身份") })
+        done(false)
         return
     end
 
     local source, err = require("source.registry").resolve(book.source_id)
     if not source then
         UIManager:show(InfoMessage:new{ text = err or _("数据源不可用") })
+        done(false)
         return
     end
     if not source.openBookAsync then
         UIManager:show(InfoMessage:new{ text = _("当前数据源不支持打开书籍") })
+        done(false)
         return
     end
 
@@ -94,8 +104,10 @@ function Open.book(plugin, book)
         Open.pending_job = nil
         if not path then
             UIManager:show(InfoMessage:new{ text = open_err or _("无法打开书籍") })
+            done(false)
             return
         end
+        done(true)
         showReader(plugin, path, generation)
     end)
 end
