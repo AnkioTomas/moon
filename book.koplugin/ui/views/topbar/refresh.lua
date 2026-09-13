@@ -12,7 +12,6 @@ local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
 local Icon = require("ui.components.icon")
 local UIManager = require("ui/uimanager")
-local Widget = require("ui/widget/widget")
 local Base = require("ui.views.topbar.base")
 
 ---@class BookTopBarRefresh : BookTopBarItem
@@ -213,7 +212,11 @@ function Refresh:createWidget()
     self.rect = nil
     if not self:isShown() then
         self.metric_widget = nil
-        return Widget:new{ dimen = Geom:new{ w = 0, h = 0 } }
+        local dimen = Geom:new{ w = 0, h = 0 }
+        return {
+            dimen = dimen,
+            getSize = function(self) return self.dimen end,
+        }
     end
     self.metric_widget = self:ensureBox()
     return self.metric_widget
