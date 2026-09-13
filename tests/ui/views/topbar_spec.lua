@@ -34,7 +34,6 @@ package.preload["ui/widget/container/leftcontainer"] = widget
 package.preload["ui/widget/linewidget"] = widget
 package.preload["ui/widget/overlapgroup"] = widget
 package.preload["ui/widget/container/rightcontainer"] = widget
-package.preload["ui/widget/widget"] = widget
 package.preload["ui/widget/textwidget"] = function()
     return {
         new = function(_, opts)
