@@ -52,7 +52,8 @@ package.preload["ui.components.bookui"] = function()
         gridCoverMaxH = function() return 200 end,
         denseCoverMetrics = function(_, _, opts)
             local cols = opts and opts.min_cols or 2
-            return 100, 100, 150, cols, 8, 10, 176
+            local extra = opts and opts.title_extra or 0
+            return 100, 100, 150, cols, 8, 10, 150 + extra
         end,
         face = function() return {} end,
         muted = function() return 128 end,
@@ -125,6 +126,11 @@ end
 local List = require("ui.desktop.home.views.recent_list")
 Assert.eq(List.rows(), 2)
 Assert.eq(List.cols(), 4)
+Assert.eq(List.showTitle(), true)
+List.saveShowTitle(false)
+Assert.eq(List.showTitle(), false)
+List.saveShowTitle(true)
+Assert.eq(List.showTitle(), true)
 List.saveCols(2)
 Assert.eq(List.cols(), 3)
 List.saveCols(9)
@@ -216,6 +222,7 @@ Assert.eq(shown.title, "最近阅读列表")
 Assert.eq(shown.buttons[1][1].text, "一行")
 Assert.eq(shown.buttons[1][2].text, "✓ 两行")
 Assert.eq(shown.buttons[2][1].text, "每行 4 本")
+Assert.eq(shown.buttons[3][1].text, "✓ 显示标题")
 shown.buttons[1][1].callback()
 Assert.eq(List.rows(), 1)
 Assert.eq(events[1], "home_refresh")
@@ -223,6 +230,13 @@ Assert.eq(events[1], "home_refresh")
 shown = nil
 List:showSettings(desktop)
 Assert.eq(shown.buttons[1][1].text, "✓ 一行")
+shown.buttons[3][1].callback()
+Assert.eq(List.showTitle(), false)
+Assert.eq(events[2], "home_refresh")
+List.saveShowTitle(true)
+
+shown = nil
+List:showSettings(desktop)
 shown.buttons[2][1].callback()
 Assert.eq(shown.title_text, "每行数量")
 Assert.eq(shown.value, 4)
@@ -230,7 +244,29 @@ Assert.eq(shown.value_min, 3)
 Assert.eq(shown.value_max, 8)
 shown.callback({ value = 5 })
 Assert.eq(List.cols(), 5)
-Assert.eq(events[2], "home_refresh")
+Assert.eq(events[3], "home_refresh")
+
+List.saveRows(2)
+List.saveCols(4)
+List.saveShowTitle(false)
+texts = {}
+covers = {}
+taps = {}
+range = list:heightRange({}, { width = 600 })
+Assert.eq(range.min, 352)
+local untitled = List:new()
+untitled.lifecycle.state = "Resume"
+untitled:build({ desktop = desktop, source = { id = "local" } }, {
+    width = 600,
+    height = 352,
+    desktop = desktop,
+    y = 40,
+})
+Assert.len(covers, 5)
+Assert.eq(taps[1].h, 150)
+Assert.eq(texts[1], "最近阅读 · 5")
+Assert.len(texts, 1)
+List.saveShowTitle(true)
 
 -- 分配高度不够两行时必须压封面，不能按完整格子往屏幕外画。
 List.saveRows(2)

@@ -585,6 +585,8 @@ return {
     ["✓ 两行"] = "✓ 2 rows",
     ["每行 %1 本"] = "%1 per row",
     ["每行数量"] = "Books per row",
+    ["显示标题"] = "Show titles",
+    ["✓ 显示标题"] = "✓ Show titles",
     ["时钟"] = "Clock",
     ["天气"] = "Weather",
     ["高度"] = "Height",
