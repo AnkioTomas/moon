@@ -226,7 +226,7 @@ end
 --- 打开组件高度设置，应用默认高度、填满或指定高度后重排。
 ---@param self BookHome 当前视图或布局实例
 ---@param id string 组件、分页或数据源的标识
----@param range BookHomeHeightSpec 组件内容高度与 fill 标记
+---@param range BookHomeHeightSpec 组件内容高度
 ---@param placement table 当前组件保存的页码、顺序和高度记录
 ---@return nil
 local function showHeight(self, id, range, placement)

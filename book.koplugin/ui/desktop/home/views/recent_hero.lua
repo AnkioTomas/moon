@@ -22,10 +22,10 @@ local M = {
 setmetatable(M, require("ui.desktop.home.views.base"))
 M.__index = M
 
---- 主角卡内容高度；页内有剩余时把空间给封面。
+--- 主角卡内容高度。
 ---@return BookHomeHeightSpec
 function M:heightRange()
-    return { height = UI.sz(148), fill = true }
+    return { height = UI.sz(148) }
 end
 
 --- 进入桌面图书馆并清除旧的筛选及分页状态。

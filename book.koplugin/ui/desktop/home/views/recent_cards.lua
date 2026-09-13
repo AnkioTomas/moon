@@ -74,10 +74,10 @@ function Perspective:paintTo(bb, x, y)
     bb:lightenRect(x, y, self.dimen.w, self.dimen.h)
 end
 
---- 封面堆叠的内容高度；页内有剩余时把空间给封面。
+--- 封面堆叠的内容高度。
 ---@return BookHomeHeightSpec
 function M:heightRange()
-    return { height = PREFERRED_H, fill = true }
+    return { height = PREFERRED_H }
 end
 
 --- 空书架点击后进入图书馆，同时清除旧筛选和分页状态。

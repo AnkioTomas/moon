@@ -15,7 +15,6 @@ local Widgets = require("ui.desktop.home.widgets")
 
 ---@class BookHomeHeightSpec
 ---@field height number 内容自然高度
----@field fill boolean|nil 为真时从内容高度往上吃剩余，无上限
 
 ---@class BookHomeBuildOpts
 ---@field width number
@@ -50,28 +49,24 @@ local function height(value, fallback)
     return math.max(1, math.floor(tonumber(value) or fallback))
 end
 
---- 放置模式 + 组件 fill：自定义像素锁死，fill 或组件声明则吃剩余。
+--- 放置模式：自定义像素锁死，fill 吃剩余，default 只用内容高。
 ---@param raw table
 ---@return table
 local function normalize(raw)
     local mode = raw.placement and raw.placement.height or "default"
-    local fill = false
-    if type(mode) ~= "number" then
-        fill = raw.fill == true or mode == "fill"
-    end
     return {
         comp = raw.comp,
         id = raw.id,
         placement = raw.placement,
         height = specHeight(raw),
-        fill = fill,
+        fill = mode == "fill",
         mode = mode,
     }
 end
 
 --- 钉页分配：default 用内容高，自定义用像素，剩余均分给 fill。
 --- 页边距由 build 整页扣一次，这里只算内容高和 gap。
----@param ranges BookHomeHeightSpec[] 各组件的内容高度与 fill 标记
+---@param ranges BookHomeHeightSpec[] 各组件的内容高度
 ---@param available number 当前布局可用的总高度，单位像素
 ---@param gap number 相邻项目间距，单位像素
 ---@return table[] selected
