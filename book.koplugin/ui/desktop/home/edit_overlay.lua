@@ -1,5 +1,5 @@
 --[[--
-首页编辑叠层：盖在组件上，吞掉点击，提供删除 / 移动 / 高度。
+首页编辑叠层：盖在组件上，吞掉点击，提供删除 / 移动 / 高度 / 组件设置。
 
 @module koplugin.book.ui.desktop.home.edit_overlay
 --]]
@@ -49,32 +49,37 @@ local function toolButton(name, on_tap)
     return tap
 end
 
---- 把组件包进编辑模板。
+--- 把组件包进编辑模板。有 on_settings 才画设置按钮。
 ---@param widget table 参与布局或绘制的 Widget
 ---@param meta { id: string, width: number, height: number, placement: table, range: table }
----@param handlers { 翻页、编辑或选择操作的回调集合
+---@param handlers {
 ---   on_delete: fun(id: string),
 ---   on_move: fun(id: string),
 ---   on_height: fun(id: string, range: table, placement: table),
+---   on_settings: fun(id: string)|nil,
 --- }
 ---@return table
 function Edit.wrap(widget, meta, handlers)
     local w = meta.width
     local h = meta.height
+    local kids = { align = "center" }
+    local function add(name, on_tap)
+        if #kids > 0 then kids[#kids + 1] = HorizontalSpan:new{ width = UI.sz(8) } end
+        kids[#kids + 1] = toolButton(name, on_tap)
+    end
+    add("delete", function() handlers.on_delete(meta.id) end)
+    add("swap_vert", function() handlers.on_move(meta.id) end)
+    add("height", function()
+        handlers.on_height(meta.id, meta.range, meta.placement)
+    end)
+    if handlers.on_settings then
+        add("settings", function() handlers.on_settings(meta.id) end)
+    end
     local tools = FrameContainer:new{
         bordersize = 0,
         padding = UI.sz(4),
         background = Blitbuffer.COLOR_WHITE,
-        HorizontalGroup:new{
-            align = "center",
-            toolButton("delete", function() handlers.on_delete(meta.id) end),
-            HorizontalSpan:new{ width = UI.sz(8) },
-            toolButton("swap_vert", function() handlers.on_move(meta.id) end),
-            HorizontalSpan:new{ width = UI.sz(8) },
-            toolButton("height", function()
-                handlers.on_height(meta.id, meta.range, meta.placement)
-            end),
-        },
+        HorizontalGroup:new(kids),
     }
     tools.overlap_align = "top"
 

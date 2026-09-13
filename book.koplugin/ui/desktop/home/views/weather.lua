@@ -313,4 +313,93 @@ function M:onDestroy()
     self.desktop = nil
 end
 
+--- 地名必须是英文字母（接口不吃中文）。
+---@param city string
+---@return boolean
+local function latinPlace(city)
+    return city:find("[A-Za-z]") ~= nil
+end
+
+--- 编辑态设置：天气地点输入框。
+---@param desktop table|nil
+---@return nil
+function M:showSettings(desktop)
+    desktop = desktop or self.desktop or (self.home and self.home.desktop)
+    local InfoMessage = require("ui/widget/infomessage")
+    local InputDialog = require("ui/widget/inputdialog")
+    local home = MoonSettings.get("home")
+    local testing = false
+    local dialog
+    local function probe()
+        if testing then return end
+        local city = Text.trim(dialog:getInputText())
+        if city ~= "" and not latinPlace(city) then
+            UIManager:show(InfoMessage:new{
+                text = _("请用英文字母填写地名，例如 Shanghai"),
+                timeout = 3,
+            })
+            return
+        end
+        testing = true
+        local loading = InfoMessage:new{ text = _("正在测试…") }
+        UIManager:show(loading)
+        OnlineWeather:fetch({ city = city, ttl = 0 }, function(wx)
+            testing = false
+            UIManager:close(loading)
+            if desktop and desktop.lifecycle and desktop.lifecycle.state == "Destroy" then return end
+            if wx.temp then
+                local place = wx.city or (city == "" and _("当前 IP") or city)
+                local text = place .. " · " .. wx.temp .. "°"
+                if wx.desc then
+                    text = text .. " · " .. wx.desc
+                end
+                UIManager:show(InfoMessage:new{ text = text, timeout = 4 })
+            else
+                UIManager:show(InfoMessage:new{
+                    text = T(_("测试失败：%1"), _("没有查到天气")),
+                    timeout = 4,
+                })
+            end
+        end)
+    end
+    dialog = InputDialog:new{
+        title = _("天气地点"),
+        input = tostring(home.home_weather_city or ""),
+        input_hint = "Shanghai",
+        description = _("留空按 IP 定位。填写请用英文字母，例如 Shanghai。"),
+        buttons = {{
+            {
+                text = _("取消"),
+                id = "close",
+                callback = function() UIManager:close(dialog) end,
+            },
+            {
+                text = _("测试"),
+                callback = probe,
+            },
+            {
+                text = _("保存"),
+                is_enter_default = true,
+                callback = function()
+                    local city = Text.trim(dialog:getInputText())
+                    if city ~= "" and not latinPlace(city) then
+                        UIManager:show(InfoMessage:new{
+                            text = _("请用英文字母填写地名，例如 Shanghai"),
+                            timeout = 3,
+                        })
+                        return
+                    end
+                    home.home_weather_city = city
+                    MoonSettings.saveSection("home", home)
+                    UIManager:close(dialog)
+                    if desktop and desktop.onEvent then desktop:onEvent("home_changed") end
+                    if desktop and desktop.updateView then desktop:updateView() end
+                end,
+            },
+        }},
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
 return M

@@ -9,7 +9,6 @@ onCreate → build。设置/翻页/换源/编辑 → updateView。
 
 local Device = require("device")
 local Geom = require("ui/geometry")
-local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -53,22 +52,6 @@ local function ensure(self)
     if self.editing == nil then self.editing = false end
 end
 
---- 销毁移除的子组件；Lifecycle 按当前状态补齐 Pause/Stop。
----@param child BookHomeComponent 要包装或接收事件的子控件
----@return nil
-local function retire(child)
-    child:onDestroy()
-end
-
---- 调用指定子视图的事件或生命周期方法；不存在的接收者直接跳过。
----@param child BookHomeComponent|nil 要包装或接收事件的子控件
----@param method string 子组件上的方法名
----@param ... any 原样传给目标方法的参数
----@return nil
-local function notify(child, method, ...)
-    if child and child[method] then child[method](child, ...) end
-end
-
 --- 按组件注册顺序把同一事件和参数分发给子视图。
 ---@param self BookHome 当前视图或布局实例
 ---@param method string 子组件上的方法名
@@ -76,7 +59,8 @@ end
 ---@return nil
 local function broadcast(self, method, ...)
     for _i, id in ipairs(Components.enabledLayout()) do
-        notify(self.components[id], method, ...)
+        local child = self.components[id]
+        if child and child[method] then child[method](child, ...) end
     end
 end
 
@@ -124,7 +108,7 @@ function Home:sync()
     end
     for id, child in pairs(self.components) do
         if not wanted[id] then
-            retire(child)
+            child:onDestroy()
             self.components[id] = nil
         end
     end
@@ -152,14 +136,6 @@ local function maybeSplit(self, ctx, body_h)
     local next_list = Widgets.applyPacks(placements, packs)
     Components.saveWidgets(next_list)
     Components.clearNeedsSplit()
-end
-
---- 把当前组件摆放位置和高度保存到首页设置。
----@param self BookHome 当前视图或布局实例
----@return nil
-local function persist(self)
-    local list = Components.widgets()
-    Components.saveWidgets(Widgets.compactPages(list))
 end
 
 --- 移除指定组件的摆放记录并刷新首页布局。
@@ -358,12 +334,17 @@ local function assemble(self)
     local wrap
     if self.editing then
         wrap = function(widget, meta)
+            local child = self.components[meta.id]
             return Edit.wrap(widget, meta, {
                 on_delete = function(id) deleteWidget(self, id) end,
                 on_move = function(id) showMove(self, id) end,
                 on_height = function(id, range, placement)
                     showHeight(self, id, range, placement)
                 end,
+                on_settings = child and child.showSettings and function(id)
+                    local inst = self.components[id]
+                    if inst then inst:showSettings(self.desktop) end
+                end or nil,
             })
         end
     end
@@ -477,7 +458,7 @@ end
 function Home:exitEdit()
     if not self.editing then return end
     self.editing = false
-    persist(self)
+    Components.saveWidgets(Components.widgets())
     self:updateView()
 end
 
@@ -531,7 +512,7 @@ end
 function Home:onPause()
     if self.editing then
         self.editing = false
-        persist(self)
+        Components.saveWidgets(Components.widgets())
     end
     for _i, id in ipairs(Components.enabledLayout()) do
         local child = self.components[id]
@@ -565,10 +546,6 @@ function Home:onEvent(event, payload)
     if self.lifecycle.state == "Destroy" then return end
     if event == "home_changed" then
         self:updateView()
-        return
-    end
-    if event == "home_edit" then
-        self:enterEdit()
         return
     end
     if event == "source_changed" or event == "home_refresh" or event == "detail_dirty" then

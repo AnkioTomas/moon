@@ -96,9 +96,6 @@ end
 package.preload["ui.desktop.settings.desktop"] = function()
     return pageMod({ rows = function() return {} end })
 end
-package.preload["ui.desktop.settings.home"] = function()
-    return pageMod({ sections = function() return {} end })
-end
 package.preload["ui.desktop.settings.topbar"] = function()
     return pageMod({ rows = function() return {} end })
 end

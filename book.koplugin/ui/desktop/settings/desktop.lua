@@ -2,11 +2,9 @@
 @module koplugin.book.ui.desktop.settings.desktop
 --]]
 
-local Registry = require("ui.desktop.home.registry")
 local SettingRow = require("ui.components.settingrow")
 local Host = require("host")
 local _ = require("gettext")
-local T = require("ffi/util").template
 
 ---@class BookSettingsDesktop
 local DesktopSettings = {}
@@ -22,18 +20,7 @@ end
 ---@param open_on boolean
 ---@return table
 function DesktopSettings:rows(desktop, open_on)
-    local count = #Registry.enabledLayout()
     return {
-        function(iw)
-            return SettingRow.build(iw, {
-                kind = "nav", icon = "home", title = _("首页组件"),
-                subtitle = _("选择首页内容并调整显示顺序"),
-                status = T(_("已启用 %1 项"), count), status_on = count > 0,
-                callback = function()
-                    desktop.settings:showSub("home", "appearance")
-                end,
-            })
-        end,
         function(iw)
             return SettingRow.build(iw, {
                 kind = "nav", icon = "vertical_align_top", title = _("首页顶栏"),

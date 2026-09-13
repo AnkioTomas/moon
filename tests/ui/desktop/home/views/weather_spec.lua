@@ -52,11 +52,17 @@ end
 
 local settings = { home_weather_city = "Shanghai" }
 package.preload["utils.settings"] = function()
-    return { get = function() return settings end }
+    return {
+        get = function() return settings end,
+        saveSection = function(_, values)
+            if type(values) == "table" then settings = values end
+        end,
+    }
 end
 
 local paints = 0
 local scheduled = {}
+local shown
 package.preload["ui/uimanager"] = function()
     return {
         setDirty = function() paints = paints + 1 end,
@@ -68,7 +74,21 @@ package.preload["ui/uimanager"] = function()
                 if scheduled[i] == fn then table.remove(scheduled, i) end
             end
         end,
+        show = function(_, widget) shown = widget end,
+        close = function() end,
     }
+end
+package.preload["ui/widget/inputdialog"] = function()
+    return {
+        new = function(_, opts)
+            opts.getInputText = function() return opts.input or "" end
+            opts.onShowKeyboard = function() end
+            return opts
+        end,
+    }
+end
+package.preload["ui/widget/infomessage"] = function()
+    return { new = function(_, opts) return opts end }
 end
 
 local images = {}
@@ -119,6 +139,8 @@ do -- 默认空态：多云占位 + --°；失败不改字
     Assert.eq(weather.picture.src, empty_icon)
     Assert.len(images, 1, "空态多云占位")
     Assert.eq(weather.hero[3], weather.temp)
+    -- 从 Pause 恢复，避免 Lifecycle 补 onStart 后又被 pull 取消。
+    weather.lifecycle.state = "Pause"
     weather:onResume()
     Assert.eq(fetch_args.city, "Shanghai")
     Assert.len(images, 1, "空占位同 src 复用")
@@ -205,6 +227,40 @@ do -- 有温度没图：按 icon 键回退 CDN
     Assert.eq(weather.picture.src, ICON_URL .. "sunny.png")
     Assert.eq(weather.extra.text, "日出 06:12 AM · 日落 06:40 PM")
     weather:onDestroy()
+end
+
+do -- 编辑设置：地点输入、中文拒绝、测试成功
+    shown, fetch_cb, fetch_args = nil, nil, nil
+    settings.home_weather_city = ""
+    local events = {}
+    Weather:showSettings({
+        onEvent = function(_, event) events[#events + 1] = event end,
+        updateView = function() end,
+    })
+    Assert.eq(shown.description, "留空按 IP 定位。填写请用英文字母，例如 Shanghai。")
+    shown.input = "上海"
+    shown.buttons[1][2].callback()
+    Assert.is_nil(fetch_cb)
+    Assert.eq(shown.text, "请用英文字母填写地名，例如 Shanghai")
+    Weather:showSettings({
+        onEvent = function(_, event) events[#events + 1] = event end,
+        updateView = function() end,
+    })
+    local dialog = shown
+    dialog.input = "Shanghai"
+    dialog.buttons[1][2].callback()
+    Assert.eq(fetch_args.city, "Shanghai")
+    Assert.eq(fetch_args.ttl, 0)
+    fetch_cb({ temp = "26", city = "Shanghai", desc = "阴" })
+    Assert.eq(shown.text, "Shanghai · 26° · 阴")
+    dialog.input = "Shanghai"
+    dialog.buttons[1][3].callback()
+    Assert.eq(settings.home_weather_city, "Shanghai")
+    Assert.eq(events[1], "home_changed")
+    local inst = Weather:new()
+    inst.desktop = { onEvent = function() end }
+    inst:showSettings()
+    Assert.eq(shown.title, "天气地点")
 end
 
 return true
