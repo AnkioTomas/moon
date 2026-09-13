@@ -4,7 +4,6 @@ Desktop 顶部状态条。拼装小组件，并把生命周期传下去。
 布局：
   +---------------------------------------------------+
   | 12:00  [源] 源名              内存  存储  Wi‑Fi  ☀  🔋 |
-  |───────────────────────────────────────────────────|
   +---------------------------------------------------+
   左：时钟、源名。右：内存、缓存、存储、Wi‑Fi、亮度、电池。
 
@@ -21,10 +20,8 @@ local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local LeftContainer = require("ui/widget/container/leftcontainer")
-local LineWidget = require("ui/widget/linewidget")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local RightContainer = require("ui/widget/container/rightcontainer")
-local VerticalGroup = require("ui/widget/verticalgroup")
 local Screen = Device.screen
 
 local UI = require("ui.components.bookui")
@@ -145,8 +142,6 @@ local function assemble(self)
     local th = self.height or UI.topBarH()
     local pad = UI.pagePad()
     local gap_w = UI.sz(8)
-    local line_h = UI.line()
-    local inner_h = th - line_h
     local inner_w = sw - pad * 2
     ---@type BookTopBarBuildCtx
     local ctx = { inner_w = inner_w, th = th, pad = pad }
@@ -199,13 +194,13 @@ local function assemble(self)
     end
 
     local row = OverlapGroup:new{
-        dimen = Geom:new{ w = inner_w, h = inner_h },
+        dimen = Geom:new{ w = inner_w, h = th },
         LeftContainer:new{
-            dimen = Geom:new{ w = inner_w, h = inner_h },
+            dimen = Geom:new{ w = inner_w, h = th },
             left,
         },
         RightContainer:new{
-            dimen = Geom:new{ w = inner_w, h = inner_h },
+            dimen = Geom:new{ w = inner_w, h = th },
             right,
         },
     }
@@ -215,17 +210,10 @@ local function assemble(self)
         padding = 0,
         background = Blitbuffer.COLOR_WHITE,
         dimen = Geom:new{ w = sw, h = th },
-        VerticalGroup:new{
-            align = "left",
-            HorizontalGroup:new{
-                HorizontalSpan:new{ width = pad },
-                row,
-                HorizontalSpan:new{ width = pad },
-            },
-            LineWidget:new{
-                background = UI.rule(),
-                dimen = Geom:new{ w = sw, h = line_h },
-            },
+        HorizontalGroup:new{
+            HorizontalSpan:new{ width = pad },
+            row,
+            HorizontalSpan:new{ width = pad },
         },
     }
 end
