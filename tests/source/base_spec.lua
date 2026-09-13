@@ -58,7 +58,7 @@ Assert.eq(view_updates, 0)
 -- 唤醒事件的书架与统计分别节流；过期后统计才重新同步。
 source._books_refresh_at = os.time()
 source._stats_refresh_at = os.time() - 301
-desktop.tab = "stats"
+desktop.tab = "insight"
 source:onEvent("desktop_resume", desktop)
 Assert.eq(sync_calls, 2)
 Assert.eq(stats_calls, 2)

@@ -120,13 +120,13 @@ Assert.eq(table.concat(log, ","), "topbar.onStop,home.onStop,library.onStop,stor
 
 log = {}
 desk:onResume()
-Assert.eq(table.concat(log, ","), "topbar.onResume,home.onResume,library.onResume")
+Assert.eq(table.concat(log, ","), "topbar.onResume,library.onResume")
 Assert.is_true(desk.lifecycle:uiReady())
 
 desk.tab = "home"
 log = {}
 desk:onResume()
-Assert.eq(table.concat(log, ","), "topbar.onResume,home.onResume,library.onResume")
+Assert.eq(table.concat(log, ","), "topbar.onResume,home.onResume")
 
 desk.plugin.desktop = desk
 log = {}

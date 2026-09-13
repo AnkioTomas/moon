@@ -267,7 +267,7 @@ function Insight:fetch()
         self.fetch_cancel = nil
         self.state = state or {}
         self.loaded = true
-        if desktop.lifecycle.state == "Destroy" or desktop.tab ~= "stats" then return end
+        if desktop.lifecycle.state == "Destroy" or desktop.tab ~= "insight" then return end
         desktop:updateView()
     end
 
@@ -334,7 +334,7 @@ function Insight:updateView()
     local width = desktop.dimen.w
     if not self.loaded then
         UIManager:nextTick(function()
-            if desktop.lifecycle.state == "Destroy" or desktop.tab ~= "stats" then return end
+            if desktop.lifecycle.state == "Destroy" or desktop.tab ~= "insight" then return end
             self:fetch()
         end)
         self.widget = FrameContainer:new{
