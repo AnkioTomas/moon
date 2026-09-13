@@ -52,6 +52,12 @@ end
 
 local Edit = require("ui.desktop.home.edit_overlay")
 local settings = {}
+local function collectTaps(node, out)
+    if type(node) ~= "table" then return end
+    if node.onTapHomeEdit then out[#out + 1] = node end
+    for i = 1, #node do collectTaps(node[i], out) end
+end
+
 local overlay = Edit.wrap({ id = "clock" }, {
     id = "clock",
     width = 200,
@@ -67,7 +73,11 @@ Assert.eq(#icons, 3)
 Assert.eq(icons[1].name, "delete")
 Assert.eq(icons[2].name, "swap_vert")
 Assert.eq(icons[3].name, "height")
-Assert.eq(#overlay[3][1], 5)
+local taps = {}
+collectTaps(overlay[3], taps)
+Assert.eq(#taps, 3)
+Assert.is_true(overlay[3].onHomeEditBarTap())
+Assert.is_true(overlay[2].onHomeEditShieldTap())
 
 icons = {}
 local with_settings = Edit.wrap({ id = "weather" }, {
@@ -84,8 +94,10 @@ local with_settings = Edit.wrap({ id = "weather" }, {
 })
 Assert.eq(#icons, 4)
 Assert.eq(icons[4].name, "settings")
-local tools = with_settings[3][1]
-Assert.is_true(tools[7].onTapHomeEdit() == true)
+taps = {}
+collectTaps(with_settings[3], taps)
+Assert.eq(#taps, 4)
+Assert.is_true(taps[4].onTapHomeEdit() == true)
 Assert.eq(settings[1], "weather")
 
 return true
