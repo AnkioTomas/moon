@@ -430,6 +430,55 @@ function BookInfo.moreMark(cw, ch)
     )
 end
 
+--- 封面正中「正在打开」黑条。
+---@param cw number 封面宽度，单位像素
+---@param ch number 封面高度，单位像素
+---@return table
+function BookInfo.openingBar(cw, ch)
+    local bar_h = UI.sz(22)
+    local text = TextWidget:new{
+        text = _("正在打开"),
+        face = UI.face("xx_smallinfofont", 11),
+        fgcolor = Blitbuffer.COLOR_WHITE,
+    }
+    local bar = Widget:new{
+        dimen = Geom:new{ w = cw, h = bar_h },
+        text = text,
+    }
+    --- 返回打开中条带的固定包围盒。
+    ---@return table
+    function bar:getSize()
+        return self.dimen
+    end
+    --- 绘制通栏黑底和居中文案。
+    ---@param bb userdata 用于绘制的 Blitbuffer 画布
+    ---@param x number 目标区域左上角横坐标，单位像素
+    ---@param y number 目标区域左上角纵坐标，单位像素
+    ---@return nil
+    function bar:paintTo(bb, x, y)
+        bb:paintRect(x, y, cw, bar_h, Blitbuffer.COLOR_BLACK)
+        if not self.text then return end
+        local tz = self.text:getSize()
+        self.text:paintTo(
+            bb,
+            x + math.floor((cw - tz.w) / 2),
+            y + math.floor((bar_h - tz.h) / 2)
+        )
+    end
+    --- 释放条带拥有的文字控件。
+    ---@return nil
+    function bar:free()
+        if self.text and self.text.free then
+            self.text:free()
+        end
+    end
+    bar.overlap_offset = {
+        0,
+        math.max(0, math.floor((ch - bar_h) / 2)),
+    }
+    return bar
+end
+
 --- 「NN%」+ 进度条；百分比在左。
 ---@param width number 目标宽度，单位像素
 ---@param pct number|nil 阅读进度百分比，范围 0 到 100
