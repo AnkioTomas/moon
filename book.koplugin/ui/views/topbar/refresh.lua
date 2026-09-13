@@ -15,10 +15,12 @@ local UIManager = require("ui/uimanager")
 local Base = require("ui.views.topbar.base")
 
 ---@class BookTopBarRefresh : BookTopBarItem
----@field status string|nil idle|running|ok|error
----@field status_icon string|nil 覆盖默认图标
----@field _box table|nil 图标方盒（显隐复用）
+---@field id string 固定为 "refresh"
+---@field align string 固定为 "left"
 ---@field always boolean 顶栏必建，不受设置开关影响
+---@field status string|nil idle|running|ok|error；缺省按 idle
+---@field status_icon string|nil 覆盖默认图标的 Material 名
+---@field _box table|nil 图标方盒（显隐复用，带 _spin_angle）
 local Refresh = {}
 Refresh.__index = Refresh
 setmetatable(Refresh, Base)
@@ -36,8 +38,8 @@ local RESET_SEC = 2
 local SPIN_SEC = 0.2
 
 --- 取出方盒内的 TextWidget（真实 CenterContainer 或测试桩）。
----@param box table|nil
----@return table|nil
+---@param box table|nil 图标方盒
+---@return table|nil 可 setText 的文字控件
 local function textWidget(box)
     if not box then return nil end
     if box.setText then return box end
@@ -47,8 +49,8 @@ local function textWidget(box)
 end
 
 --- 给方盒挂旋转绘制：running 时按 _spin_angle 滚 90° 步进。
----@param box table
----@return table
+---@param box table Icon.widget 返回的方盒
+---@return table 同一方盒（已挂 paintTo）
 local function enableSpinPaint(box)
     if box._spin_paint then return box end
     box._spin_paint = true
@@ -57,6 +59,9 @@ local function enableSpinPaint(box)
     if type(inner) ~= "function" then
         return box
     end
+    ---@param bb table BlitBuffer
+    ---@param x number
+    ---@param y number
     function box:paintTo(bb, x, y)
         local angle = self._spin_angle or 0
         if angle == 0 then
@@ -78,7 +83,8 @@ local function enableSpinPaint(box)
     return box
 end
 
---- 是否应出现在顶栏布局中。
+--- 是否应出现在顶栏布局中（非 idle）。
+---@param self BookTopBarRefresh
 ---@return boolean
 function Refresh:isShown()
     local state = self.status or "idle"
@@ -86,7 +92,8 @@ function Refresh:isShown()
 end
 
 --- 当前图标名。
----@return string
+---@param self BookTopBarRefresh
+---@return string Material 图标名
 function Refresh:iconName()
     if self.status_icon and self.status_icon ~= "" then
         return self.status_icon
@@ -96,7 +103,8 @@ function Refresh:iconName()
 end
 
 --- 确保图标方盒存在并写成当前字形。
----@return table
+---@param self BookTopBarRefresh
+---@return table 图标方盒
 function Refresh:ensureBox()
     if not self._box then
         self._box = enableSpinPaint(Icon.widget{
@@ -113,7 +121,8 @@ function Refresh:ensureBox()
 end
 
 --- 原地改字形，只 dirty 自己。
----@param name string
+---@param self BookTopBarRefresh
+---@param name string Material 图标名
 ---@return nil
 function Refresh:setIcon(name)
     local tw = textWidget(self._box or self.metric_widget)
@@ -124,6 +133,7 @@ function Refresh:setIcon(name)
 end
 
 --- 滚动角度归零（不停定时器）。
+---@param self BookTopBarRefresh
 ---@return nil
 function Refresh:clearAngle()
     local box = self._box or self.metric_widget
@@ -133,6 +143,7 @@ function Refresh:clearAngle()
 end
 
 --- 停滚动定时器并归零角度。
+---@param self BookTopBarRefresh
 ---@return nil
 function Refresh:stopSpin()
     self:unschedule()
@@ -140,6 +151,7 @@ function Refresh:stopSpin()
 end
 
 --- running 时安排下一帧 90° 滚动；只脏本矩形。
+---@param self BookTopBarRefresh
 ---@return nil
 function Refresh:startSpin()
     self:unschedule()
@@ -160,8 +172,9 @@ function Refresh:startSpin()
     UIManager:scheduleIn(SPIN_SEC, self._tick)
 end
 
---- 应用状态；忽略 text。ok/error 定时回 idle。
----@param payload string|table|nil
+--- 应用状态；忽略 text（避免改宽重排）。ok/error 定时回 idle。
+---@param self BookTopBarRefresh
+---@param payload string|table|nil 状态字符串，或 { state=, icon= }
 ---@return nil
 function Refresh:applyStatus(payload)
     self:stopSpin()
@@ -196,8 +209,10 @@ function Refresh:applyStatus(payload)
     UIManager:scheduleIn(RESET_SEC, self._tick)
 end
 
---- 与 Base 契约对齐。
----@return string|nil, string|nil
+--- 与 Base 契约对齐；未显示时返回 nil。
+---@param self BookTopBarRefresh
+---@return string|nil text
+---@return string|nil icon
 function Refresh:read()
     if not self:isShown() then
         return nil
@@ -207,7 +222,8 @@ function Refresh:read()
 end
 
 --- idle 返回零尺寸占位（不进左栏）；有状态时返回图标方盒。
----@return table
+---@param self BookTopBarRefresh
+---@return table View 内容树根
 function Refresh:createWidget()
     self.rect = nil
     if not self:isShown() then
@@ -223,6 +239,7 @@ function Refresh:createWidget()
 end
 
 --- 显隐变化整条重排一次；可见期间滚动/换图标只脏自己。
+---@param self BookTopBarRefresh
 ---@return nil
 function Refresh:updateView()
     if not self.lifecycle:uiReady() then return end
@@ -255,9 +272,10 @@ function Refresh:updateView()
     self:setIcon(self:iconName())
 end
 
---- 接受 refresh_status。
----@param event string|table
----@param payload any
+--- 接受 refresh_status，更新显示。
+---@param self BookTopBarRefresh
+---@param event string|table 父组件转发的事件名称或事件对象
+---@param payload any 与事件一起传入的数据
 ---@return nil
 function Refresh:onEvent(event, payload)
     if event == "refresh_status" then
@@ -267,12 +285,14 @@ function Refresh:onEvent(event, payload)
 end
 
 --- Resume：按当前显隐同步；running 则继续滚动。
+---@param self BookTopBarRefresh
 ---@return nil
 function Refresh:onResume()
     self:updateView()
 end
 
 --- Pause：停滚动定时器。
+---@param self BookTopBarRefresh
 ---@return nil
 function Refresh:onPause()
     self:stopSpin()

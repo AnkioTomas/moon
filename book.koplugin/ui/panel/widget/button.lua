@@ -64,7 +64,8 @@ function ActionButton:onTap()
 end
 
 --- 长按交给上层（用于进入现场编辑）。
----@return boolean
+---@param self BookQuickPanelActionButton
+---@return boolean 是否已消费
 function ActionButton:onHold()
     if self.on_hold then return self.on_hold() end
     return false

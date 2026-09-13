@@ -23,14 +23,33 @@ local UI = require("ui.components.bookui")
 local Icon = require("ui.components.icon")
 local _ = require("gettext")
 
+---@class BookQuickPanelEditMeta
+---@field id string 动作标识
+---@field width number 按钮宽度，单位像素
+---@field height number 按钮高度，单位像素
+---@field index number 在启用列表中的 1-based 位次
+---@field count number 当前启用动作总数
+
+---@class BookQuickPanelEditHandlers
+---@field on_move fun(id: string, delta: number) 前移 (-1) 或后移 (+1)
+---@field on_disable fun(id: string) 从启用列表移除该动作
+
+---@class BookQuickPanelEditAddOption
+---@field id string 动作标识
+---@field title string 展示标题
+
 ---@class BookQuickPanelEditOverlay
+---@field wrap fun(widget: table, meta: BookQuickPanelEditMeta, handlers: BookQuickPanelEditHandlers): table
+---@field doneRow fun(width: number, on_tap: fun()): table
+---@field addRow fun(width: number, on_tap: fun()): table
+---@field showAddDialog fun(options: BookQuickPanelEditAddOption[], on_pick: fun(id: string)): nil
 local Edit = {}
 
---- 构建编辑工具按钮。
----@param name string
----@param enabled boolean
----@param on_tap fun()
----@return table
+--- 构建编辑工具按钮，并把命中范围内的点击交给操作回调。
+---@param name string Material 图标名
+---@param enabled boolean 为假时不挂手势（灰显）
+---@param on_tap fun() 点击命中区域时执行的回调
+---@return table 可放入布局的 InputContainer
 local function toolButton(name, enabled, on_tap)
     local size = UI.sz(28)
     local tap = InputContainer:new{ dimen = Geom:new{ w = size, h = size } }
@@ -52,14 +71,11 @@ local function toolButton(name, enabled, on_tap)
     return tap
 end
 
---- 把动作按钮包进编辑叠层。
----@param widget table
----@param meta { id: string, width: number, height: number, index: number, count: number }
----@param handlers {
----   on_move: fun(id: string, delta: number),
----   on_disable: fun(id: string),
---- }
----@return table
+--- 把动作按钮包进编辑叠层（底层按钮 + 透明盾 + 顶栏工具钮）。
+---@param widget table 参与布局或绘制的动作按钮 Widget
+---@param meta BookQuickPanelEditMeta 尺寸与列表位次
+---@param handlers BookQuickPanelEditHandlers 移动与停用回调
+---@return table OverlapGroup 叠层根节点
 function Edit.wrap(widget, meta, handlers)
     local w, h = meta.width, meta.height
     local can_prev = meta.index > 1
@@ -110,9 +126,9 @@ function Edit.wrap(widget, meta, handlers)
         shield,
         tools,
     }
-    --- 事件从顶到底：先工具钮，再遮罩。
-    ---@param event table
-    ---@return boolean
+    --- 事件从顶到底：先工具钮，再遮罩，避免点击穿透到底层动作。
+    ---@param event table KOReader 事件对象
+    ---@return boolean 是否已消费
     function overlay:propagateEvent(event)
         for i = #self, 1, -1 do
             if self[i]:handleEvent(event) then return true end
@@ -122,10 +138,10 @@ function Edit.wrap(widget, meta, handlers)
     return overlay
 end
 
---- 「完成」行。
----@param width number
----@param on_tap fun()
----@return table
+--- 「完成」行：退出现场编辑。
+---@param width number 行宽，单位像素
+---@param on_tap fun() 点击回调
+---@return table InputContainer
 function Edit.doneRow(width, on_tap)
     local h = UI.sz(40)
     local tap = InputContainer:new{ dimen = Geom:new{ w = width, h = h } }
@@ -156,10 +172,10 @@ function Edit.doneRow(width, on_tap)
     return tap
 end
 
---- 「添加动作」行。
----@param width number
----@param on_tap fun()
----@return table
+--- 「添加动作」行：打开未启用动作列表。
+---@param width number 行宽，单位像素
+---@param on_tap fun() 点击回调
+---@return table InputContainer
 function Edit.addRow(width, on_tap)
     local h = UI.sz(40)
     local tap = InputContainer:new{ dimen = Geom:new{ w = width, h = h } }
@@ -191,8 +207,8 @@ function Edit.addRow(width, on_tap)
 end
 
 --- 从未启用动作里挑选要添加的项。
----@param options { id: string, title: string }[]
----@param on_pick fun(id: string)
+---@param options BookQuickPanelEditAddOption[] 可添加的动作选项
+---@param on_pick fun(id: string) 选中后的回调
 ---@return nil
 function Edit.showAddDialog(options, on_pick)
     local dialog
@@ -221,4 +237,5 @@ function Edit.showAddDialog(options, on_pick)
     UIManager:show(dialog)
 end
 
+---@type BookQuickPanelEditOverlay
 return Edit

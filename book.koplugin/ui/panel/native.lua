@@ -57,10 +57,11 @@ local Widgets
 ---@field FrameContainer table
 ---@field Geom table
 ---@field UI table
+---@field VerticalSpan table
 ---@field Body BookQuickPanelBody
 ---@field Header BookQuickPanelHeader
----@field Desktop table
----@field ReaderPanel table
+---@field Desktop BookQuickPanelDesktop
+---@field ReaderPanel BookQuickPanelReader
 
 --- 延迟加载并缓存面板自绘所需的 UI 模块。
 ---@return BookQuickPanelWidgets
@@ -302,10 +303,11 @@ local function populateReader(tab)
 end
 
 ---@class BookQuickPanelNativeTab
----@field icon string
----@field remember boolean
----@field _book_ui table|nil
----@field callback fun()|nil
+---@field icon string Tab 栏图标资源名
+---@field remember boolean 是否记忆上次打开的 Tab
+---@field _book_ui table|nil 阅读面板绑定的 ReaderUI
+---@field _book_panel_editing boolean|nil 现场编辑态；关菜单时清掉
+---@field callback fun()|nil 非触屏设备填充原生 menu item
 
 --- 创建并预填充桌面面板 Tab。
 ---@return BookQuickPanelNativeTab
