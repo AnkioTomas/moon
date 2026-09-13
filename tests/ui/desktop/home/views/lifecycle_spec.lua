@@ -144,3 +144,9 @@ do -- 库空时复用一言回退池，不造「暂无书摘」
     Assert.is_true(found, "excerpt reuses hitokoto fallback")
     component:onDestroy()
 end
+
+do -- 阅读统计槽位按实测文字 + 阴影，不用字号冒充控件高。
+    local Stats = require("ui.desktop.home.views.stats")
+    local range = Stats:heightRange()
+    Assert.eq(range.height, 54)
+end

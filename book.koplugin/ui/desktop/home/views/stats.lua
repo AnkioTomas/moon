@@ -78,11 +78,32 @@ local function summarize(source_id)
 end
 
 
---- 三张统计卡的内容高度（内边距 + 数值 + 说明）。
+local CARD_PAD = 8
+local VALUE_LABEL_GAP = 4
+local SHADOW = 2
+
+--- 按真实文字控件量一张统计卡高度（含卡内边距，不含阴影）。
+---@return number
+local function cardHeight()
+    local pad = UI.sz(CARD_PAD)
+    local value = TextWidget:new{
+        text = "0",
+        face = UI.face("cfont", 15),
+    }
+    local label = TextWidget:new{
+        text = "—",
+        face = UI.face("xx_smallinfofont", 11),
+    }
+    local height = pad * 2 + value:getSize().h + UI.sz(VALUE_LABEL_GAP) + label:getSize().h
+    if value.free then value:free() end
+    if label.free then label:free() end
+    return height
+end
+
+--- 三张统计卡的内容高度（实测文字 + 卡内边距 + 底阴影）。
 ---@return BookHomeHeightSpec
 function M:heightRange()
-    local pad = UI.sz(8)
-    return { height = pad * 2 + UI.fontSize(15) + UI.sz(4) + UI.fontSize(11) }
+    return { height = cardHeight() + UI.sz(SHADOW) }
 end
 
 --- 造一张「数值 + 说明」统计卡；高度按文本实测撑开。
@@ -90,9 +111,9 @@ end
 ---@param value string|number 主数值
 ---@param label string 下方说明文案
 ---@return table card 卡片 widget
----@return number height 卡片高度
+---@return table value_widget 可原地改字的数值控件
 local function recordCard(width, value, label)
-    local pad = UI.sz(8)
+    local pad = UI.sz(CARD_PAD)
     local inner_w = math.max(1, width - pad * 2)
     local value_widget = TextWidget:new{
         text = tostring(value),
@@ -106,13 +127,13 @@ local function recordCard(width, value, label)
         max_width = inner_w,
         fgcolor = UI.muted(),
     }
-    local height = pad * 2 + value_widget:getSize().h + UI.sz(4) + label_widget:getSize().h
+    local height = pad * 2 + value_widget:getSize().h + UI.sz(VALUE_LABEL_GAP) + label_widget:getSize().h
     local card = Surface.build{ child = CenterContainer:new{
         dimen = Geom:new{ w = inner_w, h = height - pad * 2 },
         VerticalGroup:new{
             align = "center",
             value_widget,
-            VerticalSpan:new{ width = UI.sz(4) },
+            VerticalSpan:new{ width = UI.sz(VALUE_LABEL_GAP) },
             label_widget,
         },
     }, options = {
@@ -130,7 +151,8 @@ function M:createWidget()
     local ctx, opts = self.ctx, self.opts
     local w = opts.width
     local total_h = opts.height
-    local inner_w = w
+    local shadow = UI.sz(SHADOW)
+    local inner_w = math.max(1, w - shadow)
     local stats = ctx.source and summarize(ctx.source.id) or {}
     local gap = UI.sz(8)
     local items = {
