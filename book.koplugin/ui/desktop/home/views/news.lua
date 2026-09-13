@@ -10,7 +10,6 @@ local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local Myrl = require("online.myrl")
-local RightContainer = require("ui/widget/container/rightcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -18,7 +17,6 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local _ = require("gettext")
 
 local LINES = 4
-local INDEX_W = 20
 local ROW_GAP = 4
 
 ---@class BookHomeNews : BookHomeComponent
@@ -53,27 +51,22 @@ end
 ---@return table
 ---@return number
 local function line(index, title, inner_w)
-    local index_w = UI.sz(INDEX_W)
     local gap = UI.sz(8)
     local mark = TextWidget:new{
         text = index,
         face = UI.face("cfont", 12),
-        max_width = index_w,
         fgcolor = UI.dim(),
     }
     local body = TextWidget:new{
         text = title,
         face = UI.face("cfont", 13),
-        max_width = math.max(1, inner_w - index_w - gap),
+        max_width = math.max(1, inner_w - mark:getSize().w - gap),
         fgcolor = Blitbuffer.COLOR_BLACK,
     }
     local h = math.max(mark:getSize().h, body:getSize().h)
     return HorizontalGroup:new{
         align = "center",
-        RightContainer:new{
-            dimen = Geom:new{ w = index_w, h = h },
-            mark,
-        },
+        mark,
         HorizontalSpan:new{ width = gap },
         body,
     }, body, h
