@@ -482,10 +482,14 @@ function Home:onCreate()
     self:build()
 end
 
---- 等待当前可见组件完成数据加载，汇总首个失败并通知调用者。
+--- 前台数据延迟到 Resume；离屏导出等待当前可见组件完成加载。
 ---@param cb fun(ok:boolean, err:any)|nil 全部子视图加载完成后的结果回调
 ---@return nil
 function Home:onStart(cb)
+    if not self.offscreen then
+        if cb then cb(true) end
+        return
+    end
     local children = {}
     for id in pairs(self.visible or {}) do
         if self.components[id] then children[#children + 1] = self.components[id] end
@@ -552,6 +556,12 @@ function Home:onEvent(event, payload)
         return
     end
     if event == "source_changed" or event == "home_refresh" or event == "detail_dirty" then
+        if event == "source_changed" then
+            self.source = payload
+            for _, child in pairs(self.components or {}) do
+                if child.ctx then child.ctx.source = payload end
+            end
+        end
         broadcast(self, "onEvent", event, payload)
         self:updateView()
         return

@@ -5,6 +5,7 @@
 
 local Assert = require("support.assert")
 
+local frees = 0
 local function widget()
     return { new = function(_, opts)
         opts.getSize = function(self)
@@ -14,6 +15,7 @@ local function widget()
             }
         end
         opts.setText = function(self, text) self.text = text end
+        opts.free = function() frees = frees + 1 end
         return opts
     end }
 end
@@ -39,6 +41,7 @@ local Quote = require("ui.views.quote")
 -- 桩：正文 21*2 + 间距 8 + 署名 16；无数据也预留署名行
 local range = Quote.heightRange()
 Assert.eq(range.height, 42 + 8 + 16)
+Assert.eq(frees, 1, "height measurement must release its temporary widget tree")
 Assert.is_nil(range.min)
 Assert.is_nil(range.max)
 
@@ -61,6 +64,7 @@ Assert.eq(Quote.contentHeight({
     data = { text = "纸上得来终觉浅", author = "陆游" },
     width = 320,
 }), 42 + 8 + 16)
+Assert.eq(frees, 2)
 
 parts:updateView({ text = "新句", author = "苏轼", title = "题西林壁" })
 Assert.eq(parts.body.text, "新句")
@@ -87,5 +91,6 @@ local bare = Quote:new{ data = { text = "无署名" }, width = 320 }
 bare:build()
 Assert.is_nil(bare.attr)
 Assert.eq(Quote.contentHeight({ data = { text = "无署名" }, width = 320 }), 42)
+Assert.eq(frees, 3)
 
 return true

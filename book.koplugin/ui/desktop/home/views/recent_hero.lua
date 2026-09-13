@@ -109,4 +109,10 @@ function M:createWidget()
         }
 end
 
+--- 返回首页时重读最近书架，避免继续显示阅读前的主角书籍和进度。
+---@return nil
+function M:onResume()
+    if self.widget then self:rebuild() end
+end
+
 return M

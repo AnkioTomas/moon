@@ -113,3 +113,25 @@ cancelled:cancel()
 Assert.eq(cancellations, 1)
 pending[2]("too late")
 Assert.eq(writes, 1)
+
+-- 前台首页 Start 不拉数据，Resume 只拉一次；离屏路径已在上面验证仍会加载。
+local runtime_loads = 0
+local Runtime = setmetatable({ id = "runtime" }, require("ui.desktop.home.views.base"))
+Runtime.__index = Runtime
+function Runtime:loadData(done)
+    runtime_loads = runtime_loads + 1
+    done("runtime")
+end
+function Runtime:createWidget()
+    return { getSize = function() return { w = 10, h = 10 } end, free = function() end }
+end
+function Runtime:onResume()
+    self:load(function() end)
+end
+local runtime = Runtime:new()
+runtime.home = { offscreen = false }
+runtime:build({}, { width = 10, height = 10 })
+runtime:onStart()
+Assert.eq(runtime_loads, 0)
+runtime:onResume()
+Assert.eq(runtime_loads, 1)

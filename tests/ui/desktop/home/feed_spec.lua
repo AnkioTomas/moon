@@ -34,9 +34,11 @@ package.preload["ui.components.bookui"] = function()
         dim = function() return 2 end,
     }
 end
+local frees = 0
 local function containerStub()
     return { new = function(_, opts)
         opts.getSize = function(self) return self.dimen or { w = self.width or 0, h = self.height or 0 } end
+        opts.free = function() frees = frees + 1 end
         return opts
     end }
 end
@@ -56,6 +58,7 @@ package.preload["ui/widget/textwidget"] = function()
             local widget = { text = opts.text }
             function widget:setText(text) self.text = text end
             function widget:getSize() return { w = 80, h = 16 } end
+            function widget:free() frees = frees + 1 end
             texts[#texts + 1] = widget
             return widget
         end,
@@ -81,6 +84,10 @@ do -- 新闻 / 历史自己拉 myrl，空态一行
         package.loaded["ui.desktop.home.views." .. name] = nil
         local Comp = require("ui.desktop.home.views." .. name)
         local comp = Comp:new()
+        local before_measure = frees
+        comp:heightRange(nil, opts)
+        Assert.eq(frees, before_measure + 2,
+            name .. " height measurement releases title and row probe")
         comp.lifecycle.state = "Resume"
         if name == "news" then
             fetch_payload = { news = { "冷空气", "上海生娃" } }

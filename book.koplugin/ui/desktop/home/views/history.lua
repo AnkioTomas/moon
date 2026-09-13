@@ -93,9 +93,12 @@ function M:heightRange(_ctx, opts)
         bold = true,
         max_width = inner_w,
     }
-    local row_h = select(4, line("0000", "--", inner_w))
+    local probe, _mark, _body, row_h = line("0000", "--", inner_w)
     local gap = UI.sz(ROW_GAP)
-    return { height = title:getSize().h + gap + LINES * row_h + (LINES - 1) * gap }
+    local total = title:getSize().h + gap + LINES * row_h + (LINES - 1) * gap
+    if title.free then title:free() end
+    if probe.free then probe:free() end
+    return { height = total }
 end
 
 --- 构建历史上的今天列表，保存年份和标题控件供原地更新。

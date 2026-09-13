@@ -68,9 +68,10 @@ package.preload["book.highlights"] = function()
     }
 end
 local seconds = 10
+local expected_source = "owner"
 package.preload["db.stats"] = function()
     return {
-        summaryBySource = function(id) Assert.eq(id, "owner"); return { total_seconds = seconds } end,
+        summaryBySource = function(id) Assert.eq(id, expected_source); return { total_seconds = seconds } end,
         dailyBySource = function() return {} end,
     }
 end
@@ -81,6 +82,8 @@ end
 local ctx = { desktop = {}, source = { id = "owner" } }
 local opts = { width = 400, height = 180, y = 30 }
 for _, name in ipairs({ "hitokoto", "excerpt", "stats" }) do
+    ctx.source = { id = "owner" }
+    expected_source = "owner"
     texts = {}
     quote_text = "old"
     excerpt_text = "old excerpt"
@@ -98,6 +101,15 @@ for _, name in ipairs({ "hitokoto", "excerpt", "stats" }) do
     local found = false
     for _, text in ipairs(texts) do if text.text == expected then found = true end end
     Assert.is_true(found, name .. " refreshes its own content")
+    if name == "stats" then
+        expected_source = "wechat"
+        ctx.source = { id = expected_source }
+        seconds = 30
+        component:onResume()
+        local switched = false
+        for _, text in ipairs(texts) do if text.text == "30" then switched = true end end
+        Assert.is_true(switched, "stats reads the current context source")
+    end
     if name == "excerpt" then
         excerpt_text = "third excerpt"
         component:onResume()
