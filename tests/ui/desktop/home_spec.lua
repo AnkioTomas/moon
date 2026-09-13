@@ -251,6 +251,13 @@ child_events = {}
 home:onEvent("source_changed")
 Assert.eq(table.concat(child_events, ""), "")
 
+-- 换源必须先更新已构建子组件的上下文，再交给组件重建。
+local next_source = { id = "wechat" }
+home.components.clock.ctx = { source = desktop.source }
+home:onEvent("source_changed", next_source)
+Assert.eq(home.source, next_source)
+Assert.eq(home.components.clock.ctx.source, next_source)
+
 -- PageStrip 翻页；越界不重建。
 layout_pages = 3
 placements = {

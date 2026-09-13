@@ -84,9 +84,12 @@ function M:heightRange(_ctx, opts)
         bold = true,
         max_width = inner_w,
     }
-    local row_h = select(3, line("00", "--", inner_w))
+    local probe, _body, row_h = line("00", "--", inner_w)
     local gap = UI.sz(ROW_GAP)
-    return { height = title:getSize().h + gap + LINES * row_h + (LINES - 1) * gap }
+    local total = title:getSize().h + gap + LINES * row_h + (LINES - 1) * gap
+    if title.free then title:free() end
+    if probe.free then probe:free() end
+    return { height = total }
 end
 
 --- 构建日报新闻标题及固定新闻行，保存文字控件供原地更新。

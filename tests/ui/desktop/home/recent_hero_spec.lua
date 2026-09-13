@@ -42,9 +42,11 @@ end
 
 local shelf_recent = { stable_id = "book" }
 local shelf_err
+local shelf_calls = 0
 package.preload["book.catalog"] = function()
     return {
         recentShelf = function()
+            shelf_calls = shelf_calls + 1
             return shelf_recent, {}, shelf_err
         end,
     }
@@ -71,6 +73,10 @@ hero:build({
 Assert.eq(hero_cover_width, 192)
 hero_tap()
 Assert.eq(opened, book)
+
+local before_resume = shelf_calls
+hero:onResume()
+Assert.eq(shelf_calls, before_resume + 1, "resume must refresh the current-reading card")
 
 local switched
 shelf_recent, shelf_err = nil, nil

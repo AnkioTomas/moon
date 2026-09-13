@@ -158,7 +158,6 @@ function M:createWidget()
         },
     }
     self.values = values
-    self.source = ctx.source
     self.desktop = ctx.desktop
     self.region = Geom:new{ x = 0, y = opts.y or 0, w = w, h = total_h }
     return widget
@@ -168,7 +167,8 @@ end
 ---@return nil
 function M:updateView()
     if not self.values then return end
-    local latest = self.source and summarize(self.source.id) or {}
+    local source = self.ctx and self.ctx.source
+    local latest = source and summarize(source.id) or {}
     self.values[1]:setText(T(_("%1天"), latest.streak or 0))
     self.values[2]:setText(latest.total_text or "—")
     self.values[3]:setText(latest.today_text or "—")
@@ -181,13 +181,12 @@ function M:onResume()
     self:updateView()
 end
 
---- 清除统计文字控件及数据源引用。
+--- 清除统计文字控件及桌面引用。
 ---@return nil
 function M:onDestroy()
     self.desktop = nil
     self.region = nil
     self.values = nil
-    self.source = nil
 end
 
 return M

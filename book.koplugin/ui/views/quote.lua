@@ -143,7 +143,10 @@ function M.contentHeight(opts)
     if not data then
         data = { source = "——" }
     end
-    return assemble(opts, data).inner_h
+    local built = assemble(opts, data)
+    local height = built.inner_h
+    if built.stack.free then built.stack:free() end
+    return height
 end
 
 --- 首页内容高度。
