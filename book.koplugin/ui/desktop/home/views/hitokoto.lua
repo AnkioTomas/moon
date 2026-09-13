@@ -18,9 +18,11 @@ setmetatable(M, require("ui.desktop.home.views.base"))
 M.__index = M
 
 --- 返回一言内容高度；不吃剩余空间。
+---@param _ctx table|nil
+---@param opts table|nil
 ---@return BookHomeHeightSpec
-function M:heightRange()
-    return Quote.heightRange()
+function M:heightRange(_ctx, opts)
+    return Quote.heightRange({ width = opts and opts.width })
 end
 
 --- 随机选择与上一次不同的一言，并记录文本以供下次避重。

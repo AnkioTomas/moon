@@ -19,9 +19,11 @@ setmetatable(M, require("ui.desktop.home.views.base"))
 M.__index = M
 
 --- 返回书摘引言内容高度；不吃剩余空间。
+---@param _ctx table|nil
+---@param opts table|nil
 ---@return BookHomeHeightSpec
-function M:heightRange()
-    return Quote.heightRange()
+function M:heightRange(_ctx, opts)
+    return Quote.heightRange({ width = opts and opts.width })
 end
 
 --- 优先随机选择书摘，空库时回退一言，并记录书籍身份及文本。

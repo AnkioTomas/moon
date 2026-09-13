@@ -9,7 +9,6 @@ local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
-local LeftContainer = require("ui/widget/container/leftcontainer")
 local Myrl = require("online.myrl")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local TextWidget = require("ui/widget/textwidget")
@@ -125,22 +124,20 @@ function M:createWidget()
         items[i] = body
         table.insert(kids, group)
     end
+    local col = VerticalGroup:new(kids)
     local inner_h = title:getSize().h + UI.sz(ROW_GAP)
         + LINES * row_h + (LINES - 1) * UI.sz(ROW_GAP)
-    local pad_y = math.max(0, math.floor((total_h - inner_h) / 2))
+    local extra = math.max(0, total_h - inner_h)
+    local pad_top = math.floor(extra / 2)
     local widget = FrameContainer:new{
         bordersize = 0,
         padding = 0,
         padding_left = pad_x,
         padding_right = pad_x,
-        padding_top = pad_y,
-        padding_bottom = pad_y,
+        padding_top = pad_top,
+        padding_bottom = extra - pad_top,
         margin = 0,
-        dimen = Geom:new{ w = w, h = total_h },
-        LeftContainer:new{
-            dimen = Geom:new{ w = inner_w, h = inner_h },
-            VerticalGroup:new(kids),
-        },
+        col,
     }
     self.items = items
     self.desktop = ctx.desktop

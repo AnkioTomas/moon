@@ -37,8 +37,8 @@ end
 
 local Quote = require("ui.views.quote")
 local range = Quote.heightRange()
--- 实绘 93 + 默认上下内边距 16
-Assert.eq(range.height, 109)
+-- 桩：引号16 + 空隙2 + 正文40 + 线上下12 + 线1 + 署名16 = 87，再加默认内边距 16
+Assert.eq(range.height, 103)
 Assert.is_nil(range.min)
 Assert.is_nil(range.max)
 
