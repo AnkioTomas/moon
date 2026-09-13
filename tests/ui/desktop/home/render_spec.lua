@@ -101,19 +101,20 @@ local border = overlay[2][1]
 Assert.eq(border:getSize().w, 300)
 Assert.eq(border:getSize().h, 100)
 local painted_border = 0
+local saw_component
 bb.paintBorder = function(_, _, _, w, h)
-    Assert.eq(w, 300)
-    Assert.eq(h, 100)
     painted_border = painted_border + 1
+    if w == 300 and h == 100 then saw_component = true end
 end
 local reader_settings = G_reader_settings
 G_reader_settings = { nilOrTrue = function() return true end }
 local painted, err = pcall(overlay.paintTo, overlay, bb, 30, 60)
 G_reader_settings = reader_settings
 Assert.is_true(painted, err)
-Assert.eq(painted_border, 1)
-Assert.is_true(overlay[2]:onTapHomeEditShield())
-Assert.is_true(overlay[2]:onHoldHomeEditShield())
+Assert.eq(painted_border, 2)
+Assert.is_true(saw_component)
+Assert.is_true(overlay[2]:onHomeEditShieldTap())
+Assert.is_true(overlay[2]:onHomeEditShieldHold())
 local Event = require("ui/event")
 local Geom = require("ui/geometry")
 local function gesture(kind, x, y)

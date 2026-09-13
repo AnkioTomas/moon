@@ -1,5 +1,5 @@
 --[[--
-首页编辑叠层：盖在组件上，吞掉点击，提供删除 / 移动 / 高度 / 组件设置。
+首页编辑叠层：组件顶栏一簇图标，遮罩吞掉底层点击。
 
 @module koplugin.book.ui.desktop.home.edit_overlay
 --]]
@@ -26,8 +26,29 @@ local T = require("ffi/util").template
 ---@class BookHomeEditOverlay
 local Edit = {}
 
+--- 用控件已绘制的 dimen 做命中，避免 getSize() 丢坐标导致点空穿透。
+---@param host table
+---@param ges string
+---@return table
+local function dimenRange(host, ges)
+    return GestureRange:new{ ges = ges, range = function() return host.dimen end }
+end
+
+--- 在命中范围内吞掉手势，不让底层组件收到。
+---@param host table
+---@param prefix string
+---@return table
+local function swallowEvents(host, prefix)
+    return {
+        [prefix .. "Tap"] = { dimenRange(host, "tap") },
+        [prefix .. "Hold"] = { dimenRange(host, "hold") },
+        [prefix .. "Swipe"] = { dimenRange(host, "swipe") },
+        [prefix .. "Pan"] = { dimenRange(host, "pan") },
+    }
+end
+
 --- 构建编辑工具按钮，并把命中范围内的点击交给操作回调。
----@param name string 区域、组件或图标名称
+---@param name string Material 图标名
 ---@param on_tap fun() 点击命中区域时执行的回调
 ---@return table
 local function toolButton(name, on_tap)
@@ -38,9 +59,7 @@ local function toolButton(name, on_tap)
         Icon.widget{ name = name, size = 20 },
     }
     tap.ges_events = {
-        TapHomeEdit = {
-            GestureRange:new{ ges = "tap", range = function() return tap:getSize() end },
-        },
+        TapHomeEdit = { dimenRange(tap, "tap") },
     }
     tap.onTapHomeEdit = function()
         on_tap()
@@ -75,15 +94,24 @@ function Edit.wrap(widget, meta, handlers)
     if handlers.on_settings then
         add("settings", function() handlers.on_settings(meta.id) end)
     end
-    local tools = FrameContainer:new{
-        bordersize = 0,
+    local frame = FrameContainer:new{
+        bordersize = 1,
+        color = Blitbuffer.COLOR_BLACK,
         padding = UI.sz(4),
         background = Blitbuffer.COLOR_WHITE,
         HorizontalGroup:new(kids),
     }
-    tools.overlap_align = "top"
+    local size = frame:getSize()
+    local tools = InputContainer:new{
+        dimen = Geom:new{ w = size.w, h = size.h },
+    }
+    tools[1] = frame
+    tools.ges_events = swallowEvents(tools, "HomeEditBar")
+    tools.onHomeEditBarTap = function() return true end
+    tools.onHomeEditBarHold = function() return true end
+    tools.onHomeEditBarSwipe = function() return true end
+    tools.onHomeEditBarPan = function() return true end
 
-    -- 全高透明层吞掉组件自身点击；边框提示编辑态。
     local shield = InputContainer:new{
         dimen = Geom:new{ w = w, h = h },
     }
@@ -96,16 +124,11 @@ function Edit.wrap(widget, meta, handlers)
         dimen = Geom:new{ w = w, h = h },
         Widget:new{ dimen = Geom:new{ w = math.max(0, w - 2), h = math.max(0, h - 2) } },
     }
-    shield.ges_events = {
-        TapHomeEditShield = {
-            GestureRange:new{ ges = "tap", range = function() return shield.dimen end },
-        },
-        HoldHomeEditShield = {
-            GestureRange:new{ ges = "hold", range = function() return shield.dimen end },
-        },
-    }
-    shield.onTapHomeEditShield = function() return true end
-    shield.onHoldHomeEditShield = function() return true end
+    shield.ges_events = swallowEvents(shield, "HomeEditShield")
+    shield.onHomeEditShieldTap = function() return true end
+    shield.onHomeEditShieldHold = function() return true end
+    shield.onHomeEditShieldSwipe = function() return true end
+    shield.onHomeEditShieldPan = function() return true end
 
     local overlay = OverlapGroup:new{
         allow_mirroring = false,
@@ -114,8 +137,7 @@ function Edit.wrap(widget, meta, handlers)
         shield,
         tools,
     }
-    --- 按从顶到底的顺序分发事件，先按钮后遮罩，避免点击穿透。
-    -- 绘制从底到顶，事件则从顶到底：先按钮，再遮罩，最后底层组件。
+    --- 绘制从底到顶；事件从顶到底：先图标簇，再遮罩，最后底层组件。
     ---@param event table 父组件转发的事件名称或事件对象
     ---@return boolean
     function overlay:propagateEvent(event)
