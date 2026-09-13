@@ -354,12 +354,12 @@ local function assemble(self)
         actions = {}
         if can_add then
             actions[#actions + 1] = {
-                text = _("添加"),
+                icon = "add",
                 on_tap = function() showAdd(self, widget_h, w) end,
             }
         end
         actions[#actions + 1] = {
-            text = _("完成"),
+            icon = "check",
             on_tap = function() self:exitEdit() end,
         }
     end

@@ -309,7 +309,7 @@ Assert.eq(home.components.clock.lifecycle.state, "Resume")
 Assert.eq(home.components.weather.lifecycle.state, "Pause")
 Assert.eq(table.concat(child_events, ","), "weather.pause,resume")
 
--- 编辑态：底栏「添加 / 完成」；当前页塞不下则新建页。
+-- 编辑态：底栏 add / check 图标；当前页塞不下则新建页。
 enabled = { "clock" }
 placements = { { id = "clock", page = 1, order = 1, height = "default" } }
 layout_pages = 1
@@ -320,8 +320,8 @@ last_add = nil
 home:enterEdit()
 Assert.is_true(home.editing)
 Assert.eq(last_strip.center, "title")
-Assert.eq(last_strip.actions[1].text, "添加")
-Assert.eq(last_strip.actions[2].text, "完成")
+Assert.eq(last_strip.actions[1].icon, "add")
+Assert.eq(last_strip.actions[2].icon, "check")
 last_strip.actions[1].on_tap()
 Assert.eq(last_add.candidates[1].id, "weather")
 last_add.on_pick("weather")
@@ -335,7 +335,7 @@ home.page = 1
 can_fit = false
 last_add = nil
 home:updateView()
-Assert.eq(last_strip.actions[1].text, "添加")
+Assert.eq(last_strip.actions[1].icon, "add")
 last_strip.actions[1].on_tap()
 Assert.eq(last_add.candidates[1].id, "weather")
 
@@ -353,7 +353,7 @@ home:updateView()
 Assert.is_false(home.editing)
 home:enterEdit()
 Assert.is_true(home.editing)
-Assert.eq(last_strip.actions[1].text, "完成")
+Assert.eq(last_strip.actions[1].icon, "check")
 home:onPause()
 Assert.is_false(home.editing)
 
