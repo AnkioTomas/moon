@@ -206,7 +206,7 @@ function Insight:build()
     local desktop = self.desktop
     local height = desktop:contentHeight()
     local width = desktop.dimen.w
-    local page_pad = UI.sz(10)
+    local page_pad = UI.pagePad()
     local content_w = math.max(UI.sz(100), width - page_pad * 2)
     local state = self.state or {}
     local body_h = math.max(1, height - PageStrip.bandH())
