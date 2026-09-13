@@ -1,6 +1,6 @@
 --[[--
 书籍详情：Material 返回顶栏 + 书籍信息（hero，点按开始阅读）+ 阅读情况 + 底部动作行
-  单页，禁止 ScrollableContainer；「最近几天」用 Pager 分页，不做高度裁剪。
+  单页，禁止 ScrollableContainer；「最近几天」用 PageStrip 分页，不做高度裁剪。
   书城书（zlib / 微信未上架）未入库：无编辑/统计，hero 不显示简介摘要与进度，完整简介直下，
   底部：zlib「加入书库」下载导入；微信「加入书架」。
 
@@ -18,9 +18,10 @@
   | 最近几天（平铺，无卡片）                        |
   | 08-15  ========····  42分钟                    |
   | 08-14  ====········  25分钟                    |
-  |           |«  ‹  1/3  ›  »|                   | Pager（>1 页才出现）
+  |           ‹  ● ● ○  ›                         | PageStrip（>1 页才出现）
   |-----------------------------------------------|
-  | [✏ 编辑]  [🔍 刮削]  [▶ 继续阅读]              | 等宽图标 chip（不加粗）
+  | [编辑] [刮削] [下载] [标记已读] [删除]          | 工具行：等宽竖排 chip
+  | [▶ 继续阅读 / 开始阅读]                        | 主按钮单独一行
   +-----------------------------------------------+
 
 @module koplugin.book.ui.detail
@@ -45,13 +46,14 @@ local TextWidget = require("ui/widget/textwidget")
 local Catalog = require("book.catalog")
 local BookInfo = require("ui.components.bookinfo")
 local Icon = require("ui.components.icon")
-local Pager = require("ui.components.pager")
+local PageStrip = require("ui.components.pagestrip")
 local UI = require("ui.components.bookui")
 local Surface = require("ui.components.surface")
 local Text = require("utils.text")
 local Store = require("book.store")
 local SourceCapabilities = require("types.book_source").SourceCapabilities
 local _ = require("gettext")
+local T = require("ffi/util").template
 local Screen = Device.screen
 
 ---@class BookDetailPage : InputContainer
@@ -134,6 +136,17 @@ local function storeKind(book, source, store_preview)
     return nil
 end
 
+--- 书籍属主源：身份匹配当前源则复用，否则按 source_id 解析。
+---@param book table|nil 当前操作或展示的书籍数据
+---@param fallback_source table|nil 书籍未提供源标识时使用的数据源
+---@return table|nil
+local function bookOwnerSource(book, fallback_source)
+    if type(book) ~= "table" or type(book.source_id) ~= "string" then
+        return fallback_source
+    end
+    return require("source.registry").resolve(book.source_id) or fallback_source
+end
+
 --- 按书籍属主源判断是否可刮削（不用当前活跃源冒充）。
 ---@param book table|nil 当前操作或展示的书籍数据
 ---@param fallback_source table|nil 书籍未提供源标识时使用的数据源
@@ -142,8 +155,7 @@ local function bookSupportsScrape(book, fallback_source)
     if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
         return false
     end
-    local src = require("source.registry").resolve(book.source_id) or fallback_source
-    return SourceCapabilities.supportsScrape(src)
+    return SourceCapabilities.supportsScrape(bookOwnerSource(book, fallback_source))
 end
 
 --- 按书籍属主源判断是否可编辑元信息。
@@ -154,8 +166,7 @@ local function bookSupportsEdit(book, fallback_source)
     if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
         return false
     end
-    local src = require("source.registry").resolve(book.source_id) or fallback_source
-    return SourceCapabilities.supportsEdit(src)
+    return SourceCapabilities.supportsEdit(bookOwnerSource(book, fallback_source))
 end
 
 --- 小节标题（书城书的简介用）。
@@ -179,23 +190,46 @@ end
 ---@param icon string Material Icons 原名
 ---@param text string 需要展示的文字
 ---@param on_tap fun() 点击命中区域时执行的回调
+---@param direction string|nil "row"（默认）或 "column"
 ---@return table
-local function actionChip(w, h, icon, text, on_tap)
+local function actionChip(w, h, icon, text, on_tap, direction)
+    direction = direction or "row"
+    local column = direction == "column"
     local tap = BookInfo.tappable(w, h, on_tap)
     tap[1] = Surface.build{ child = Icon.label{
                 name = icon,
                 text = text,
-                direction = "row",
-                size = 18,
-                font_size = 14,
-                gap = UI.sz(6),
-                max_width = w - UI.sz(16),
+                direction = direction,
+                size = column and 20 or 18,
+                font_size = column and 11 or 14,
+                gap = column and UI.sz(2) or UI.sz(6),
+                max_width = w - UI.sz(8),
             }, options = {
         width = w,
         height = h,
         shadow = false,
     }, kind = "pill" }
     return tap
+end
+
+--- 等宽 chip 行。
+---@param width number 行宽，单位像素
+---@param height number 按钮高度，单位像素
+---@param chips table[] { icon, text, fn }
+---@param direction string|nil "row" 或 "column"
+---@return table
+local function chipRow(width, height, chips, direction)
+    local gap = UI.sz(8)
+    local n = #chips
+    local cell_w = n > 0 and math.floor((width - gap * (n - 1)) / n) or width
+    local row = HorizontalGroup:new{ align = "center" }
+    for i, chip in ipairs(chips) do
+        if i > 1 then
+            table.insert(row, HorizontalSpan:new{ width = gap })
+        end
+        table.insert(row, actionChip(cell_w, height, chip.icon, chip.text, chip.fn, direction))
+    end
+    return row
 end
 
 --- KPI 卡片：描边白底，上值下标签。
@@ -370,6 +404,9 @@ end
 ---@return nil
 function Detail:reload()
     self._dirty = true
+    if self.desktop and self.desktop.library then
+        self.desktop.library.state = nil
+    end
     local book = self.book
     local row = require("db.book").get(book.source_id, book.stable_id)
     if self._closed then return end
@@ -410,7 +447,8 @@ end
 function Detail:cacheAllChapters()
     if self._cache_job and not self._cache_job.done then return end
     if self._closed then return end
-    local source, book = self.source, self.book
+    local book = self.book
+    local source = bookOwnerSource(book, self.source)
     if not source or type(source.cacheAllChaptersAsync) ~= "function" then return end
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
@@ -530,6 +568,113 @@ function Detail:installStoreBook()
             end
         end)
     end)
+end
+
+--- 手动切换已读 / 未读（语义与图书馆长按菜单相同）。
+---@return nil
+function Detail:toggleRead()
+    local book = self.book
+    if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
+        return
+    end
+    local is_read = tonumber(book.read_state) == 1
+    if not require("db.book").setRead(book.source_id, book.stable_id, not is_read) then
+        require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
+            text = _("更新阅读状态失败"),
+            timeout = 2,
+        })
+        return
+    end
+    if self._closed then
+        return
+    end
+    self:reload()
+end
+
+--- 删除本书：确认后走属主源 deleteBookAsync，成功则关详情并刷新桌面。
+---@return nil
+function Detail:deleteBook()
+    local book = self.book
+    if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
+        return
+    end
+    local UIManager = require("ui/uimanager")
+    UIManager:show(require("ui/widget/confirmbox"):new{
+        text = T(_("确定删除《%1》？"), BookInfo.title(book)),
+        ok_text = _("删除"),
+        ok_callback = function()
+            local source = bookOwnerSource(book, self.source)
+            if not source or type(source.deleteBookAsync) ~= "function" then
+                UIManager:show(require("ui/widget/infomessage"):new{
+                    text = _("当前数据源不支持删除本书"),
+                })
+                return
+            end
+            source:deleteBookAsync({
+                source_id = book.source_id,
+                stable_id = book.stable_id,
+                book = book,
+                source = source,
+            }, function(ok, err)
+                if not ok then
+                    UIManager:show(require("ui/widget/infomessage"):new{
+                        text = err or _("删除本书失败"),
+                    })
+                    return
+                end
+                if self._closed then
+                    return
+                end
+                self._dirty = true
+                local desk = self.desktop
+                if desk and desk.library then
+                    desk.library.state = nil
+                    desk.library.page = 1
+                end
+                self:onClose()
+            end)
+        end,
+    })
+end
+
+--- 库内书底栏动作：工具行 + 最后一行阅读主按钮。
+--- 编辑/刮削/下载按属主源能力出现；已读切换与删除只要身份完整就给。
+---@param book table 当前书籍
+---@param owner table|nil 属主源
+---@return table, table|nil tools, primary
+function Detail.actionPlan(book, owner)
+    local tools = {}
+    if bookSupportsEdit(book, owner) then
+        tools[#tools + 1] = { id = "edit", icon = "edit", text = _("编辑") }
+    end
+    if bookSupportsScrape(book, owner) then
+        tools[#tools + 1] = { id = "scrape", icon = "search", text = _("刮削") }
+    end
+    local can_read = owner ~= nil and (owner.type == "book" or owner.type == "chapter")
+    local can_cache = can_read and owner.type == "chapter"
+        and type(owner.cacheAllChaptersAsync) == "function"
+        and not Store.isDownloaded(book)
+    if can_cache then
+        tools[#tools + 1] = { id = "download", icon = "download", text = _("下载") }
+    end
+    if type(book) == "table" and type(book.source_id) == "string" and type(book.stable_id) == "string" then
+        if tonumber(book.read_state) == 1 then
+            tools[#tools + 1] = { id = "unread", icon = "undo", text = _("标记未读") }
+        else
+            tools[#tools + 1] = { id = "read", icon = "done_all", text = _("标记已读") }
+        end
+        tools[#tools + 1] = { id = "delete", icon = "delete", text = _("删除") }
+    end
+    local primary
+    if can_read then
+        local pct = BookInfo.pct(book)
+        primary = {
+            id = "open",
+            icon = "play_arrow",
+            text = pct > 0 and pct < 100 and _("继续阅读") or _("开始阅读"),
+        }
+    end
+    return tools, primary
 end
 
 --- 启动刮削（底部按钮入口，条件与原底部按钮一致）。
@@ -674,7 +819,7 @@ function Detail:saveMeta(fields)
     })
 end
 
---- 最近几天（平铺，无卡片壳）+ Pager：行高固定，按可用高度定每页行数，翻页只重建本区。
+--- 最近几天（平铺，无卡片壳）+ PageStrip：行高固定，按可用高度定每页行数，翻页只重建本区。
 ---@param w number 可用宽度，单位像素
 ---@param avail_h number 可用高度，单位像素
 ---@return table|nil, number 区块 widget 与实占高度；放不下返回 nil, 0
@@ -691,7 +836,7 @@ function Detail:buildRecent(w, avail_h)
         fgcolor = UI.muted(),
     }
     local fixed_h = header:getSize().h + row_gap
-    local pager_h = UI.iconSz() + UI.sz(12)
+    local pager_h = PageStrip.bandH()
 
     --- 预算内能放的行数。
     ---@param budget number 可用高度
@@ -709,7 +854,7 @@ function Detail:buildRecent(w, avail_h)
         per = math.max(1, rowsFit(avail_h - pager_h))
     end
     per = math.min(per, #daily)
-    local page, pages = Pager.clamp(self._daily_page, math.ceil(#daily / per))
+    local page, pages = PageStrip.clamp(self._daily_page, math.ceil(#daily / per))
     self._daily_page = page
 
     -- 条形按全部天数里最大当天时长归一
@@ -752,25 +897,22 @@ function Detail:buildRecent(w, avail_h)
     local used = kids:getSize().h
     if show_pager then
         --- 翻页：改页码重建。
-        ---@param p number 当前项目使用的配置值
+        ---@param p number 目标页码
         ---@return nil
         local function goto2(p)
             self._daily_page = p
             self:updateView()
             require("ui/uimanager"):setDirty(self, "ui")
         end
-        local pager = Pager.widget(page, pages, {
-            on_first = function() goto2(1) end,
+        local pager = PageStrip.widget{
+            width = w,
+            page = page,
+            pages = pages,
             on_prev = function() goto2(page - 1) end,
             on_next = function() goto2(page + 1) end,
-            on_last = function() goto2(pages) end,
-        }, w)
-        table.insert(kids, VerticalSpan:new{ width = UI.sz(4) })
-        table.insert(kids, CenterContainer:new{
-            dimen = Geom:new{ w = w, h = pager:getSize().h },
-            pager,
-        })
-        used = used + UI.sz(4) + pager:getSize().h
+        }
+        table.insert(kids, pager)
+        used = used + pager:getSize().h
     end
     return kids, used
 end
@@ -828,19 +970,13 @@ function Detail:updateView()
 
     local store_kind = storeKind(book, self.source, self.store_preview)
     local store_book = store_kind ~= nil
-    local can_scrape = bookSupportsScrape(book, self.source)
-    local can_edit = bookSupportsEdit(book, self.source)
-    local can_read = not store_book and self.source ~= nil
-        and (self.source.type == "book"
-            or self.source.type == "chapter")
-    local can_cache = can_read and self.source.type == "chapter"
-        and type(self.source.cacheAllChaptersAsync) == "function"
-        and not Store.isDownloaded(book)
+    local owner = bookOwnerSource(book, self.source)
+    local can_read = not store_book and owner ~= nil
+        and (owner.type == "book" or owner.type == "chapter")
 
     local title_bar, title_h = self:buildTopBar(w)
 
-    -- 底部动作行：书城书只有「加入书库」（ButtonTable，有禁用态）；
-    -- 库内书是等宽图标 chip：编辑 / 刮削? / 继续阅读
+    -- 底部：书城书只有「加入书库/书架」；库内书两行——工具行 + 继续阅读。
     local footer_pad_v = UI.sz(12)
     local footer, footer_h
     if store_book then
@@ -865,39 +1001,27 @@ function Detail:updateView()
         }
         footer_h = footer:getSize().h + footer_pad_v * 2
     else
-        local defs = {}
-        if can_edit then
-            defs[#defs + 1] = { icon = "edit", text = _("编辑"), fn = function()
-                self:openEditor()
-            end }
+        local tools, primary = Detail.actionPlan(book, owner)
+        local fns = {
+            edit = function() self:openEditor() end,
+            scrape = function() self:startScrape() end,
+            download = function() self:cacheAllChapters() end,
+            read = function() self:toggleRead() end,
+            unread = function() self:toggleRead() end,
+            delete = function() self:deleteBook() end,
+        }
+        local tool_chips = {}
+        for _, def in ipairs(tools) do
+            tool_chips[#tool_chips + 1] = {
+                icon = def.icon,
+                text = def.text,
+                fn = fns[def.id],
+            }
         end
-        if can_scrape then
-            table.insert(defs, { icon = "search", text = _("刮削"), fn = function()
-                self:startScrape()
-            end })
-        end
-        if can_read then
-            local pct = BookInfo.pct(book)
-            table.insert(defs, {
-                icon = "play_arrow",
-                text = pct > 0 and pct < 100 and _("继续阅读") or _("开始阅读"),
-                fn = function()
-                    self:openBook()
-                end,
-            })
-        end
-        if can_cache then
-            table.insert(defs, {
-                icon = "download",
-                text = _("缓存全本"),
-                fn = function()
-                    self:cacheAllChapters()
-                end,
-            })
-        end
-        local btn_h = UI.sz(44)
-        local btn_gap = UI.sz(10)
-        if #defs == 0 then
+        local tool_h = UI.sz(56)
+        local read_h = UI.sz(44)
+        local row_gap = UI.sz(8)
+        if #tool_chips == 0 and not primary then
             footer = TextWidget:new{
                 text = _("暂无可用操作"),
                 face = UI.face("xx_smallinfofont", 13),
@@ -906,16 +1030,23 @@ function Detail:updateView()
             }
             footer_h = footer:getSize().h + footer_pad_v * 2
         else
-        local cell_w = math.floor((content_w - btn_gap * (#defs - 1)) / #defs)
-        local row = HorizontalGroup:new{ align = "center" }
-        for i, def in ipairs(defs) do
-            if i > 1 then
-                table.insert(row, HorizontalSpan:new{ width = btn_gap })
+            local kids = VerticalGroup:new{ align = "center" }
+            footer_h = footer_pad_v * 2
+            if #tool_chips > 0 then
+                table.insert(kids, chipRow(content_w, tool_h, tool_chips, "column"))
+                footer_h = footer_h + tool_h
             end
-            table.insert(row, actionChip(cell_w, btn_h, def.icon, def.text, def.fn))
-        end
-        footer = row
-        footer_h = btn_h + footer_pad_v * 2
+            if primary then
+                if #tool_chips > 0 then
+                    table.insert(kids, VerticalSpan:new{ width = row_gap })
+                    footer_h = footer_h + row_gap
+                end
+                table.insert(kids, actionChip(content_w, read_h, primary.icon, primary.text, function()
+                    self:openBook()
+                end))
+                footer_h = footer_h + read_h
+            end
+            footer = kids
         end
     end
 

@@ -116,6 +116,8 @@ return {
     ["未读"] = "Unread",
     ["标记为已读"] = "Mark as read",
     ["标记为未读"] = "Mark as unread",
+    ["标记已读"] = "Mark read",
+    ["标记未读"] = "Mark unread",
     ["更新阅读状态失败"] = "Failed to update reading status",
     ["确定删除《%1》？"] = "Delete “%1”?",
     ["确定清理《%1》的缓存？"] = "Clear cache for “%1”?",

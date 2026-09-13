@@ -4,11 +4,11 @@
 
 布局：
 
-  封面状态（Kindle：右上互斥，左下本地下载）
+  封面状态（Kindle：右上互斥，左下本地下载，右下更多）
   +----------+     +----------+
   |     [NN%]|     |     已\\  |
   |          | 或  |      读\\ |
-  | ✓        |     | ✓        |
+  | ✓     ···|     | ✓     ···|
   +----------+     +----------+
 
   hero（左封面，右栏等高）
@@ -348,13 +348,15 @@ function BookInfo.readRibbon(cw)
     return ribbon
 end
 
---- 左下角本地下载：实心圆 + 白勾，贴边留缝。
----@param ch number 封面高度，单位像素
+--- 封面角标：实心圆 + 白图标。ox/oy 是相对封面左上的叠层偏移。
+---@param name string Material 图标名
+---@param ox number 叠层横向偏移，单位像素
+---@param oy number 叠层纵向偏移，单位像素
 ---@return table
-function BookInfo.downloadMark(ch)
+local function circleMark(name, ox, oy)
     local size = UI.sz(18)
     local icon = Icon.widget{
-        name = "check",
+        name = name,
         size = 12,
         color = Blitbuffer.COLOR_WHITE,
         box = false,
@@ -363,12 +365,12 @@ function BookInfo.downloadMark(ch)
         dimen = Geom:new{ w = size, h = size },
         icon = icon,
     }
-    --- 返回下载完成标记的固定包围盒。
+    --- 返回圆形角标的固定包围盒。
     ---@return table
     function mark:getSize()
         return self.dimen
     end
-    --- 绘制下载完成的圆形底色和居中勾选图标。
+    --- 绘制圆形底色和居中图标。
     ---@param bb userdata 用于绘制的 Blitbuffer 画布
     ---@param x number 目标区域左上角横坐标，单位像素
     ---@param y number 目标区域左上角纵坐标，单位像素
@@ -396,19 +398,36 @@ function BookInfo.downloadMark(ch)
             )
         end
     end
-    --- 释放下载完成标记拥有的图标控件。
+    --- 释放圆形角标拥有的图标控件。
     ---@return nil
     function mark:free()
         if self.icon and self.icon.free then
             self.icon:free()
         end
     end
-    local inset = UI.sz(4)
-    mark.overlap_offset = {
-        inset,
-        math.max(0, ch - size - inset),
-    }
+    mark.overlap_offset = { ox, oy }
     return mark
+end
+
+--- 左下角本地下载：实心圆 + 白勾，贴边留缝。
+---@param ch number 封面高度，单位像素
+---@return table
+function BookInfo.downloadMark(ch)
+    local size, inset = UI.sz(18), UI.sz(4)
+    return circleMark("check", inset, math.max(0, ch - size - inset))
+end
+
+--- 右下角「更多」：实心圆 + more_horiz，贴边留缝。
+---@param cw number 封面宽度，单位像素
+---@param ch number 封面高度，单位像素
+---@return table
+function BookInfo.moreMark(cw, ch)
+    local size, inset = UI.sz(18), UI.sz(4)
+    return circleMark(
+        "more_horiz",
+        math.max(0, cw - size - inset),
+        math.max(0, ch - size - inset)
+    )
 end
 
 --- 「NN%」+ 进度条；百分比在左。
@@ -439,6 +458,7 @@ end
 --- opts.badge: 未读且有进度时叠右上角百分比
 --- opts.ribbon: 已读时叠右上角「已读」绑带
 --- opts.download: 已本地下载时叠左下角勾（章节源看全本缓存，整本源看 path）
+--- opts.more: 叠右下角「更多」；true 只画，function 同时可点
 --- opts.show_parent: 窗口级父（Desktop / Detail）
 --- opts.on_ready: 图片就绪回调
 --- opts.src / opts.headers: 直接指定封面（刮削结果没有 source.coverRequest）
@@ -494,7 +514,8 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
     local show_read = opts.ribbon and status.read
     local show_pct = opts.badge and status.percent
     local show_dl = opts.download and status.downloaded
-    if show_read or show_pct or show_dl then
+    local show_more = opts.more
+    if show_read or show_pct or show_dl or show_more then
         local overlays = {
             dimen = Geom:new{ w = cw, h = ch },
             show_parent = opts.show_parent,
@@ -507,6 +528,17 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
         end
         if show_dl then
             overlays[#overlays + 1] = BookInfo.downloadMark(ch)
+        end
+        if show_more then
+            local mark = BookInfo.moreMark(cw, ch)
+            if type(opts.more) == "function" then
+                local mz = mark:getSize()
+                local tap = BookInfo.tappable(mz.w, mz.h, opts.more)
+                tap[1] = mark
+                tap.overlap_offset = mark.overlap_offset
+                mark = tap
+            end
+            overlays[#overlays + 1] = mark
         end
         cover = OverlapGroup:new(overlays)
     end
