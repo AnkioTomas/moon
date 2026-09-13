@@ -5,7 +5,7 @@ Desktop 顶部状态条。拼装小组件，并把生命周期传下去。
   +---------------------------------------------------+
   | 12:00  [源] 源名              内存  存储  Wi‑Fi  ☀  🔋 |
   +---------------------------------------------------+
-  左：时钟、源名。右：内存、缓存、存储、Wi‑Fi、亮度、电池。
+  左：时钟、源名（刷新有状态时插在最左）。右：内存、缓存、存储、Wi‑Fi、亮度、电池。
 
 onCreate / build 建孩子排 UI。关掉的走完 Pause / Stop / Destroy。
 设置开关经 desktop 事件 topbar_changed → updateView。
@@ -29,6 +29,7 @@ local View = require("ui.view")
 local NativePanel = require("ui.panel.native")
 
 local Base = require("ui.views.topbar.base")
+local Refresh = require("ui.views.topbar.refresh")
 local Clock = require("ui.views.topbar.clock")
 local Source = require("ui.views.topbar.source")
 local Memory = require("ui.views.topbar.memory")
@@ -40,7 +41,7 @@ local Battery = require("ui.views.topbar.battery")
 
 ---@type BookTopBarItem[]
 local SLOTS = {
-    Clock, Source, Memory, Cache, Storage, Wifi, Brightness, Battery,
+    Refresh, Clock, Source, Memory, Cache, Storage, Wifi, Brightness, Battery,
 }
 
 ---@class BookTopBarBuildCtx
@@ -51,6 +52,7 @@ local SLOTS = {
 ---@class BookTopBar : View
 ---@field desktop BookDesktop|nil
 ---@field widget table|nil
+---@field refresh BookTopBarRefresh|nil
 ---@field clock BookTopBarClock|nil
 ---@field source BookTopBarSource|nil
 ---@field memory BookTopBarMemory|nil
@@ -64,7 +66,7 @@ TopBar.__index = TopBar
 setmetatable(TopBar, View)
 
 
---- 按设置对齐孩子：该显示的创建，不该显示的拆掉。
+--- 按设置对齐孩子：该显示的创建，不该显示的拆掉。always 槽位必建。
 ---@return nil
 function TopBar:sync()
     if self.lifecycle.state == "Destroy" then return end
@@ -72,7 +74,7 @@ function TopBar:sync()
         local class = SLOTS[i]
         local key = class.id
         local child = self[key]
-        if Base.visible(key) then
+        if class.always or Base.visible(key) then
             if not child then
                 child = class:new()
                 child.topbar = self
@@ -331,7 +333,7 @@ function TopBar:onSwipe(_, ges_ev)
     return true
 end
 
---- 顶栏点击：缓存打开任务列表，源名换源，其余打开快捷面板。
+--- 顶栏点击：刷新发 refresh_request，缓存打开任务列表，源名换源，其余打开快捷面板。
 ---@param _ any 事件框架传入但本实现不使用的参数
 ---@param ges table|nil KOReader 手势数据，含方向和位置
 ---@return boolean
@@ -339,6 +341,10 @@ function TopBar:onTap(_, ges)
     local desktop = self.desktop
     if ges and ges.pos and desktop then
         local x, y = ges.pos.x, ges.pos.y
+        if self.refresh and hit(self.refresh.rect, x, y) then
+            desktop:onEvent("refresh_request")
+            return true
+        end
         if self.cache and hit(self.cache.rect, x, y) then
             self.cache:show()
             return true
