@@ -9,7 +9,6 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
-local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local TextBoxWidget = require("ui/widget/textboxwidget")
@@ -76,34 +75,13 @@ function M.attribution(quote)
     return ""
 end
 
---- 引言实绘高度（与 build 同构）。
----@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
----@return number
-function M.contentHeight(opts)
-    local o = resolve(opts)
-    local body_px = UI.fontSize(o.body_size)
-    local line_px = math.max(1, math.floor((1 + o.line_em) * body_px + 0.5))
-    return UI.fontSize(o.mark_size) + UI.sz(o.gap_mark) + line_px * o.lines
-        + UI.sz(o.gap_rule) + UI.line() + UI.sz(o.gap_attr) + UI.fontSize(o.attr_size)
-end
-
---- 首页内容高度：实绘 + 默认上下内边距。
----@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
----@return BookHomeHeightSpec
-function M.heightRange(opts)
-    return { height = M.contentHeight(opts) + UI.sz(resolve(opts).pad_pref) }
-end
-
---- 按指定宽高和样式构建引号、正文、分隔线与署名，保存可更新的文字控件。
+--- 按真实控件量引言列；高度与绘制同一条路径，禁止估矮后画出格子。
+---@param opts table|nil
+---@param quote table|nil
 ---@return table
-function M:createWidget()
-    local opts = self
-    local quote = self.data
+local function assemble(opts, quote)
     local o = resolve(opts)
-    local width = math.max(1, math.floor(tonumber(opts.width) or 1))
-    local height = math.max(1, math.floor(tonumber(opts.height) or M.contentHeight(opts)))
-    quote = quote or {}
-
+    local width = math.max(1, math.floor(tonumber(opts and opts.width) or UI.sz(300)))
     local inner_w = math.max(1, width - o.pad_x * 2)
     local mark = TextWidget:new{
         text = "“",
@@ -115,8 +93,17 @@ function M:createWidget()
     local px = (face and face.size) or UI.fontSize(o.body_size)
     local line_px = math.max(1, math.floor((1 + o.line_em) * px + 0.5))
     local box_h = line_px * o.lines
+    local gap_mark = UI.sz(o.gap_mark)
+    local gap_rule = UI.sz(o.gap_rule)
+    local gap_attr = UI.sz(o.gap_attr)
+    local attr = TextWidget:new{
+        text = M.attribution(quote),
+        face = UI.face("xx_smallinfofont", o.attr_size),
+        max_width = inner_w,
+        fgcolor = UI.muted(),
+    }
     local body = TextBoxWidget:new{
-        text = quote.text or "",
+        text = quote and quote.text or "",
         face = face,
         width = inner_w,
         height = box_h,
@@ -129,15 +116,6 @@ function M:createWidget()
         dimen = Geom:new{ w = inner_w, h = UI.line() },
         background = UI.dim(),
     }
-    local attr = TextWidget:new{
-        text = M.attribution(quote),
-        face = UI.face("xx_smallinfofont", o.attr_size),
-        max_width = inner_w,
-        fgcolor = UI.muted(),
-    }
-    local gap_mark = UI.sz(o.gap_mark)
-    local gap_rule = UI.sz(o.gap_rule)
-    local gap_attr = UI.sz(o.gap_attr)
     local col = VerticalGroup:new{
         align = "left",
         mark,
@@ -151,26 +129,57 @@ function M:createWidget()
             attr,
         },
     }
-    local inner_h = mark:getSize().h + gap_mark + box_h
-        + gap_rule + UI.line() + gap_attr + attr:getSize().h
-    local pad_y = math.max(0, math.floor((height - inner_h) / 2))
-    self.body, self.attr = body, attr
+    return {
+        col = col,
+        body = body,
+        attr = attr,
+        pad_x = o.pad_x,
+        inner_h = mark:getSize().h + gap_mark + body:getSize().h
+            + gap_rule + rule:getSize().h + gap_attr + attr:getSize().h,
+    }
+end
+
+--- 引言实绘高度（与 build 同构，按控件 getSize）。
+---@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
+---@return number
+function M.contentHeight(opts)
+    return assemble(opts, opts and opts.data).inner_h
+end
+
+--- 首页内容高度：实绘 + 默认上下内边距。
+---@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
+---@return BookHomeHeightSpec
+function M.heightRange(opts)
+    return { height = M.contentHeight(opts) + UI.sz(resolve(opts).pad_pref) }
+end
+
+--- 按指定宽高和样式构建引号、正文、分隔线与署名，保存可更新的文字控件。
+---@return table
+function M:createWidget()
+    local opts = self
+    local quote = self.data or {}
+    local width = math.max(1, math.floor(tonumber(opts.width) or 1))
+    local built = assemble(opts, quote)
+    local inner_h = built.inner_h
+    local height = math.max(inner_h, math.floor(tonumber(opts.height) or inner_h))
+    local extra = height - inner_h
+    local pad_top = math.floor(extra / 2)
+    local pad_bottom = extra - pad_top
+    self.body, self.attr = built.body, built.attr
     self.height = height
-    local widget = FrameContainer:new{
-            bordersize = 0,
-            padding = 0,
-            padding_left = o.pad_x,
-            padding_right = o.pad_x,
-            padding_top = pad_y,
-            padding_bottom = pad_y,
-            margin = 0,
-            dimen = Geom:new{ w = width, h = height },
-            LeftContainer:new{
-                dimen = Geom:new{ w = inner_w, h = inner_h },
-                col,
-            },
-        }
-    return widget
+    -- FrameContainer.getSize 会加上 padding；不用 LeftContainer 假 dimen，
+    -- 否则子件比盒子高时往上下画出格子。
+    return FrameContainer:new{
+        bordersize = 0,
+        padding = 0,
+        padding_left = built.pad_x,
+        padding_right = built.pad_x,
+        padding_top = pad_top,
+        padding_bottom = pad_bottom,
+        margin = 0,
+        width = width,
+        built.col,
+    }
 end
 
 --- 替换引言数据并原地更新正文、署名，保留现有根骨架。
