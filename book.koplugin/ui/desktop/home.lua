@@ -224,7 +224,7 @@ end
 --- 打开组件高度设置，应用默认高度、填满或指定高度后重排。
 ---@param self BookHome 当前视图或布局实例
 ---@param id string 组件、分页或数据源的标识
----@param range table 组件允许的高度约束
+---@param range BookHomeHeightSpec 组件内容高度与 fill 标记
 ---@param placement table 当前组件保存的页码、顺序和高度记录
 ---@return nil
 local function showHeight(self, id, range, placement)
@@ -260,7 +260,7 @@ local function showAdd(self, body_h, width)
         local comp = self.components[place.id]
         if comp then
             local range = comp:heightRange(ctx, { width = width, height = body_h })
-            mins[#mins + 1] = range.min
+            mins[#mins + 1] = range.height
         end
     end
     local gap = UI.sz(8)
@@ -268,7 +268,7 @@ local function showAdd(self, body_h, width)
     for _i, comp in ipairs(Components.components) do
         if not placed[comp.id] then
             local range = comp:heightRange(ctx, { width = width, height = body_h })
-            if Widgets.canFit(mins, range.min, body_h, gap) then
+            if Widgets.canFit(mins, range.height, body_h, gap) then
                 candidates[#candidates + 1] = { id = comp.id, label = comp.label }
             end
         end
@@ -313,7 +313,7 @@ local function assemble(self)
             local comp = self.components[place.id]
             if comp then
                 local range = comp:heightRange(ctx, { width = w, height = body_h })
-                mins[#mins + 1] = range.min
+                mins[#mins + 1] = range.height
             end
         end
         local placed = {}
@@ -321,7 +321,7 @@ local function assemble(self)
         for _i, comp in ipairs(Components.components) do
             if not placed[comp.id] then
                 local range = comp:heightRange(ctx, { width = w, height = body_h })
-                if Widgets.canFit(mins, range.min, body_h - add_h - add_gap, UI.sz(8)) then
+                if Widgets.canFit(mins, range.height, body_h - add_h - add_gap, UI.sz(8)) then
                     show_add = true
                     break
                 end

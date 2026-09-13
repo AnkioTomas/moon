@@ -205,23 +205,23 @@ function M.load(find)
     return M.sanitize(home.home_widgets, find)
 end
 
---- 本页已用最小高度 + gap 后，能否再塞 candidate_min。
----@param placed_mins number[]
----@param candidate_min number
+--- 本页已用内容高度 + gap 后，能否再塞 candidate。
+---@param placed number[]
+---@param candidate number
 ---@param available number
 ---@param gap number
 ---@return boolean
-function M.canFit(placed_mins, candidate_min, available, gap)
+function M.canFit(placed, candidate, available, gap)
     available = math.max(0, math.floor(tonumber(available) or 0))
     gap = math.max(0, math.floor(tonumber(gap) or 0))
-    candidate_min = math.max(1, math.floor(tonumber(candidate_min) or 1))
+    candidate = math.max(1, math.floor(tonumber(candidate) or 1))
     local used = 0
-    for i, min_h in ipairs(placed_mins) do
-        used = used + math.max(1, math.floor(min_h))
+    for i, h in ipairs(placed) do
+        used = used + math.max(1, math.floor(h))
         if i > 1 then used = used + gap end
     end
-    local need = candidate_min
-    if #placed_mins > 0 then need = need + gap end
+    local need = candidate
+    if #placed > 0 then need = need + gap end
     return used + need <= available
 end
 

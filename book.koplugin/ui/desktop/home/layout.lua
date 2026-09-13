@@ -1,5 +1,5 @@
 --[[--
-首页垂直布局：按用户钉页组装；高度 default / 自定义 / fill。
+首页垂直布局：默认累加各组件内容高度，fill 吃页内剩余。
 
 @module koplugin.book.ui.desktop.home.layout
 --]]
@@ -13,12 +13,9 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Registry = require("ui.desktop.home.registry")
 local Widgets = require("ui.desktop.home.widgets")
 
----@class BookHomeHeightRange
----@field min number
----@field preferred number
----@field max number
----@field grow number|nil
----@field step number|nil
+---@class BookHomeHeightSpec
+---@field height number 内容自然高度
+---@field fill boolean|nil 为真时从内容高度往上吃剩余，无上限
 
 ---@class BookHomeBuildOpts
 ---@field width number
@@ -37,106 +34,43 @@ function Layout.new()
     return setmetatable({}, Layout)
 end
 
---- 把输入高度规范化为至少一个像素的整数，缺省使用回退值。
----@param value number|nil 当前设置项的值
----@param fallback number 输入无效时采用的回退值
+--- 读组件报的内容高度；兼容旧 min/preferred 字段。
+---@param raw table
+---@return number
+local function specHeight(raw)
+    local h = tonumber(raw.height) or tonumber(raw.preferred) or tonumber(raw.min)
+    return math.max(1, math.floor(h or 1))
+end
+
+--- 把输入高度规范化为至少一个像素的整数。
+---@param value number|nil
+---@param fallback number
 ---@return number
 local function height(value, fallback)
     return math.max(1, math.floor(tonumber(value) or fallback))
 end
 
---- 把剩余高度按权重扩到指定上限。
----@param items table[] 按布局顺序排列的项目
----@param heights number[] 与项目对应的当前高度数组；分配过程中原地更新
----@param remaining number 尚未分配的高度，单位像素
----@param target string 本次高度分配使用的目标字段名
----@param weighted boolean 是否按组件 grow 权重分配剩余高度
----@return number
-local function grow(items, heights, remaining, target, weighted)
-    while remaining > 0 do
-        local total_weight = 0
-        for i, item in ipairs(items) do
-            if item.step == 0 and heights[i] < item[target] then
-                total_weight = total_weight + (weighted and item.grow or 1)
-            end
-        end
-        if total_weight <= 0 then break end
-
-        local before = remaining
-        for i, item in ipairs(items) do
-            local weight = weighted and item.grow or 1
-            local capacity = item[target] - heights[i]
-            if item.step == 0 and capacity > 0 and weight > 0 and remaining > 0 then
-                local share = math.max(1, math.floor(before * weight / total_weight))
-                local add = math.min(capacity, share, remaining)
-                heights[i] = heights[i] + add
-                remaining = remaining - add
-            end
-        end
-        if remaining == before then break end
-    end
-    return remaining
-end
-
---- 离散组件只能按完整步长增长。
----@param items table[] 按布局顺序排列的项目
----@param heights number[] 与项目对应的当前高度数组；分配过程中原地更新
----@param remaining number 尚未分配的高度，单位像素
----@param target string 本次高度分配使用的目标字段名
----@return number
-local function growStepped(items, heights, remaining, target)
-    for i, item in ipairs(items) do
-        while item.step > 0
-            and heights[i] + item.step <= item[target]
-            and remaining >= item.step
-        do
-            heights[i] = heights[i] + item.step
-            remaining = remaining - item.step
-        end
-    end
-    return remaining
-end
-
---- 规范化组件高度约束，确保最小值、首选值、最大值和增长步长一致。
----@param raw BookHomeHeightRange 尚未规范化的接口数据或布局约束
+--- 放置模式 + 组件 fill：自定义像素锁死，fill 或组件声明则吃剩余。
+---@param raw table
 ---@return table
-local function normalizeRange(raw)
-    local min_h = height(raw.min, 1)
-    local preferred = math.max(min_h, height(raw.preferred, min_h))
-    local max_h = math.max(preferred, height(raw.max, preferred))
-    local step = math.max(0, math.floor(tonumber(raw.step) or 0))
+local function normalize(raw)
+    local mode = raw.placement and raw.placement.height or "default"
+    local fill = false
+    if type(mode) ~= "number" then
+        fill = raw.fill == true or mode == "fill"
+    end
     return {
         comp = raw.comp,
         id = raw.id,
         placement = raw.placement,
-        min = min_h,
-        preferred = preferred,
-        max = max_h,
-        grow = math.max(0, tonumber(raw.grow) or 1),
-        step = step,
-        mode = raw.placement and raw.placement.height or "default",
+        height = specHeight(raw),
+        fill = fill,
+        mode = mode,
     }
 end
 
---- 解析非 fill 的目标高度。
----@param item table 当前布局项目及其高度配置
----@return number
-local function fixedTarget(item)
-    local mode = item.mode
-    if type(mode) == "number" then
-        local h = math.max(item.min, math.min(item.max, math.floor(mode)))
-        if item.step > 0 then
-            local base = item.min
-            local steps = math.floor((h - base) / item.step + 0.5)
-            h = math.max(item.min, math.min(item.max, base + steps * item.step))
-        end
-        return h
-    end
-    return item.preferred
-end
-
---- 钉页分配：先定 default/custom，剩余给 fill；超高则整体压回 available。
----@param ranges BookHomeHeightRange[] 各组件的最小、首选和最大高度约束
+--- 钉页分配：default 用内容高，自定义用像素，剩余均分给 fill。
+---@param ranges BookHomeHeightSpec[] 各组件的内容高度与 fill 标记
 ---@param available number 当前布局可用的总高度，单位像素
 ---@param gap number 相邻项目间距，单位像素
 ---@return table[] selected
@@ -147,74 +81,51 @@ function Layout:allocate(ranges, available, gap)
     gap = math.max(0, math.floor(tonumber(gap) or 0))
     local selected = {}
     for _, raw in ipairs(ranges) do
-        selected[#selected + 1] = normalizeRange(raw)
+        selected[#selected + 1] = normalize(raw)
     end
     if #selected == 0 then return selected, {}, available end
 
     local gaps = gap * (#selected - 1)
     local heights = {}
     local fill_idx = {}
-    local fixed_sum = 0
     for i, item in ipairs(selected) do
-        if item.mode == "fill" then
-            heights[i] = item.min
-            fill_idx[#fill_idx + 1] = i
+        if type(item.mode) == "number" then
+            heights[i] = height(item.mode, item.height)
         else
-            heights[i] = fixedTarget(item)
-            fixed_sum = fixed_sum + heights[i]
+            heights[i] = item.height
         end
-    end
-
-    local fill_min = 0
-    for _, i in ipairs(fill_idx) do fill_min = fill_min + selected[i].min end
-    local remaining = available - gaps - fixed_sum - fill_min
-
-    if remaining < 0 then
-        -- 超页：按比例压非 fill，再压 fill 的 min。
-        local scale = (available - gaps) / math.max(1, fixed_sum + fill_min)
-        for i, item in ipairs(selected) do
-            if item.mode == "fill" then
-                heights[i] = math.max(1, math.floor(item.min * scale))
-            else
-                heights[i] = math.max(1, math.floor(heights[i] * scale))
-            end
-        end
-        local used = gaps
-        for i = 1, #heights do used = used + heights[i] end
-        return selected, heights, math.max(0, available - used)
-    end
-
-    -- fill 先拿到 min，再分剩余。
-    if #fill_idx > 0 and remaining > 0 then
-        local fill_items = {}
-        local fill_heights = {}
-        for j, i in ipairs(fill_idx) do
-            local item = selected[i]
-            fill_items[j] = {
-                min = item.min,
-                preferred = item.max,
-                max = item.max,
-                grow = item.grow > 0 and item.grow or 1,
-                step = item.step,
-            }
-            fill_heights[j] = item.min
-        end
-        remaining = growStepped(fill_items, fill_heights, remaining, "preferred")
-        remaining = grow(fill_items, fill_heights, remaining, "preferred", false)
-        remaining = grow(fill_items, fill_heights, remaining, "max", true)
-        remaining = growStepped(fill_items, fill_heights, remaining, "max")
-        for j, i in ipairs(fill_idx) do
-            heights[i] = fill_heights[j]
-        end
+        if item.fill then fill_idx[#fill_idx + 1] = i end
     end
 
     local used = gaps
     for i = 1, #heights do used = used + heights[i] end
-    return selected, heights, math.max(0, available - used)
+    local remaining = available - used
+
+    if remaining < 0 then
+        local scale = (available - gaps) / math.max(1, used - gaps)
+        for i = 1, #heights do
+            heights[i] = math.max(1, math.floor(heights[i] * scale))
+        end
+        used = gaps
+        for i = 1, #heights do used = used + heights[i] end
+        return selected, heights, math.max(0, available - used)
+    end
+
+    if #fill_idx > 0 and remaining > 0 then
+        local n = #fill_idx
+        local share = math.floor(remaining / n)
+        local extra = remaining % n
+        for j, i in ipairs(fill_idx) do
+            heights[i] = heights[i] + share + (j <= extra and 1 or 0)
+        end
+        remaining = 0
+    end
+
+    return selected, heights, remaining
 end
 
---- 迁移用：按理想高度自动切页（旧行为）。
----@param ranges BookHomeHeightRange[] 各组件的最小、首选和最大高度约束
+--- 迁移用：按内容高度自动切页（旧行为）。
+---@param ranges BookHomeHeightSpec[] 各组件的内容高度
 ---@param available number 当前布局可用的总高度，单位像素
 ---@param gap number 相邻项目间距，单位像素
 ---@return table[] pages
@@ -222,41 +133,24 @@ function Layout:paginate(ranges, available, gap)
     available = math.max(0, math.floor(tonumber(available) or 0))
     gap = math.max(0, math.floor(tonumber(gap) or 0))
     local pages, cur = {}, {}
-    local used, slack = 0, 0
+    local used = 0
 
     --- 把当前累积的组件提交为一页，开始下一页的布局。
     ---@return nil
     local function flush()
         pages[#pages + 1] = cur
-        cur, used, slack = {}, 0, 0
+        cur, used = {}, 0
     end
 
     for _, raw in ipairs(ranges) do
-        local min_h = height(raw.min, 1)
-        local pref_h = math.max(min_h, height(raw.preferred, min_h))
-        local grow_w = math.max(0, tonumber(raw.grow) or 1)
-        local step = math.max(0, math.floor(tonumber(raw.step) or 0))
+        local h = specHeight(raw)
         local pad = #cur > 0 and gap or 0
-        local need = pad + min_h
-        if #cur > 0 and used + need > available then
-            local short = used + need - available
-            if slack >= short then
-                used = used - short
-                slack = slack - short
-            else
-                flush()
-                pad = 0
-            end
-        end
-        local take = pref_h
-        if used + pad + pref_h > available then
-            take = min_h
+        if #cur > 0 and used + pad + h > available then
+            flush()
+            pad = 0
         end
         cur[#cur + 1] = raw
-        used = used + pad + take
-        if grow_w > 0 or step > 0 then
-            slack = slack + (take - min_h)
-        end
+        used = used + pad + h
     end
     if #cur > 0 then pages[#pages + 1] = cur end
     if #pages == 0 then pages[1] = {} end
@@ -321,10 +215,9 @@ function Layout:build(ctx, components, page, opts)
                 width = w,
                 placement = item.placement,
                 range = {
-                    min = item.min,
-                    preferred = item.preferred,
-                    max = item.max,
-                    step = item.step,
+                    height = item.height,
+                    fill = item.fill,
+                    limit = body_h,
                 },
             })
         end

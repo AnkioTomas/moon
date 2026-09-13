@@ -20,7 +20,7 @@ function Clock:build()
     return { widget = { id = "clock" } }
 end
 function Clock:heightRange()
-    return { min = 10, preferred = 10, max = 10 }
+    return { height = 10 }
 end
 
 local Weather = setmetatable({ id = "weather" }, Lifecycle)
@@ -35,7 +35,7 @@ function Weather:build()
     return { widget = { id = "weather" } }
 end
 function Weather:heightRange()
-    return { min = 10, preferred = 10, max = 10 }
+    return { height = 10 }
 end
 
 local enabled = { "clock" }

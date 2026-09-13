@@ -18,8 +18,8 @@ local M = {
 setmetatable(M, require("ui.desktop.home.views.base"))
 M.__index = M
 
---- 返回当前组件的最小、首选和最大高度，供首页布局分配空间。
----@return BookHomeHeightRange range 首页布局使用的高度约束
+--- 返回书摘引言内容高度；不吃剩余空间。
+---@return BookHomeHeightSpec
 function M:heightRange()
     return Quote.heightRange()
 end

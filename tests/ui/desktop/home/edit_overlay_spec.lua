@@ -57,7 +57,7 @@ local overlay = Edit.wrap({ id = "clock" }, {
     width = 200,
     height = 80,
     placement = { height = "default" },
-    range = { min = 10, preferred = 20, max = 30 },
+    range = { height = 20, limit = 80 },
 }, {
     on_delete = function() end,
     on_move = function() end,
@@ -75,7 +75,7 @@ local with_settings = Edit.wrap({ id = "weather" }, {
     width = 200,
     height = 80,
     placement = { height = "default" },
-    range = { min = 10, preferred = 20, max = 30 },
+    range = { height = 20, limit = 80 },
 }, {
     on_delete = function() end,
     on_move = function() end,

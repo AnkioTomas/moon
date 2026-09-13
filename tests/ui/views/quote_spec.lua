@@ -37,11 +37,10 @@ end
 
 local Quote = require("ui.views.quote")
 local range = Quote.heightRange()
-Assert.eq(range.grow, 0)
-Assert.is_true(range.min <= range.preferred)
-Assert.is_true(range.preferred <= range.max)
--- min 必须盖住实绘：引号26 + 空隙2 + 两行正文40 + 线上下12 + 线1 + 署名12 = 93
-Assert.eq(range.min, 93)
+-- 实绘 93 + 默认上下内边距 16
+Assert.eq(range.height, 109)
+Assert.is_nil(range.min)
+Assert.is_nil(range.max)
 
 Assert.eq(Quote.attribution({ author = "陆游", title = "冬夜读书示子聿" }), "—— 陆游 · 冬夜读书示子聿")
 Assert.eq(Quote.attribution({ source = "陆游" }), "—— 陆游")

@@ -28,7 +28,6 @@ local DEFAULTS = {
     gap_rule = 6,
     gap_attr = 6,
     pad_pref = 16,
-    pad_max = 40,
 }
 
 local View = require("ui.view")
@@ -55,7 +54,6 @@ local function resolve(opts)
         gap_attr = math.max(0, math.floor(tonumber(opts.gap_attr) or DEFAULTS.gap_attr)),
         pad_x = opts.pad_x ~= nil and math.max(0, math.floor(tonumber(opts.pad_x) or 0)) or UI.sz(14),
         pad_pref = DEFAULTS.pad_pref,
-        pad_max = DEFAULTS.pad_max,
     }
 end
 
@@ -78,7 +76,7 @@ function M.attribution(quote)
     return ""
 end
 
---- 引言实绘高度（与 build 同构）。heightRange.min 必须 ≥ 此值。
+--- 引言实绘高度（与 build 同构）。
 ---@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return number
 function M.contentHeight(opts)
@@ -89,18 +87,11 @@ function M.contentHeight(opts)
         + UI.sz(o.gap_rule) + UI.line() + UI.sz(o.gap_attr) + UI.fontSize(o.attr_size)
 end
 
---- 首页默认高度范围。
+--- 首页内容高度：实绘 + 默认上下内边距。
 ---@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
----@return { min: number, preferred: number, max: number, grow: number }
+---@return BookHomeHeightSpec
 function M.heightRange(opts)
-    local content = M.contentHeight(opts)
-    local o = resolve(opts)
-    return {
-        min = content,
-        preferred = content + UI.sz(o.pad_pref),
-        max = content + UI.sz(o.pad_max),
-        grow = 0,
-    }
+    return { height = M.contentHeight(opts) + UI.sz(resolve(opts).pad_pref) }
 end
 
 --- 按指定宽高和样式构建引号、正文、分隔线与署名，保存可更新的文字控件。

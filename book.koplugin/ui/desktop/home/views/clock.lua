@@ -37,15 +37,16 @@ local M = {
 setmetatable(M, require("ui.desktop.home.views.base"))
 M.__index = M
 
---- 返回当前组件的最小、首选和最大高度，供首页布局分配空间。
----@return BookHomeHeightRange range 首页布局使用的高度约束
+--- 时间 + 两行辅文的内容高度。
+---@return number
+function M.contentHeight()
+    return UI.sz(36) + UI.sz(GAP) * 2 + UI.sz(SUB_H) * 2
+end
+
+--- 返回时钟内容高度；不吃剩余空间。
+---@return BookHomeHeightSpec
 function M:heightRange()
-    return {
-        min = UI.sz(80),
-        preferred = UI.sz(96),
-        max = UI.sz(120),
-        grow = 0,
-    }
+    return { height = M.contentHeight() }
 end
 
 --- 组合当前日期与本地化星期文案。

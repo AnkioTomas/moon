@@ -22,18 +22,10 @@ local M = {
 setmetatable(M, require("ui.desktop.home.views.base"))
 M.__index = M
 
---- 返回当前组件的最小、首选和最大高度，供首页布局分配空间。
----@param _ctx table|nil 为保持组件接口一致保留的上下文，本实现不读取
----@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
----@return BookHomeHeightRange range 首页布局使用的高度约束
-function M:heightRange(_ctx, opts)
-    local preferred = UI.sz(148)
-    return {
-        min = UI.sz(132),
-        preferred = preferred,
-        max = math.max(preferred, (opts and opts.height) or UI.sz(180)),
-        grow = 2,
-    }
+--- 主角卡内容高度；页内有剩余时把空间给封面。
+---@return BookHomeHeightSpec
+function M:heightRange()
+    return { height = UI.sz(148), fill = true }
 end
 
 --- 进入桌面图书馆并清除旧的筛选及分页状态。

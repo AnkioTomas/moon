@@ -74,15 +74,10 @@ function Perspective:paintTo(bb, x, y)
     bb:lightenRect(x, y, self.dimen.w, self.dimen.h)
 end
 
---- 返回首页网格使用的高度约束，优先给封面分配剩余空间。
----@return table 高度约束：min/preferred/max/grow
+--- 封面堆叠的内容高度；页内有剩余时把空间给封面。
+---@return BookHomeHeightSpec
 function M:heightRange()
-    return {
-        min = UI.sz(160),
-        preferred = PREFERRED_H,
-        max = UI.sz(280),
-        grow = 2,
-    }
+    return { height = PREFERRED_H, fill = true }
 end
 
 --- 空书架点击后进入图书馆，同时清除旧筛选和分页状态。
