@@ -256,11 +256,26 @@ do -- 编辑设置：地点输入、中文拒绝、测试成功
     dialog.input = "Shanghai"
     dialog.buttons[1][3].callback()
     Assert.eq(settings.home_weather_city, "Shanghai")
-    Assert.eq(events[1], "home_changed")
+    Assert.eq(events[1], "home_refresh")
     local inst = Weather:new()
     inst.desktop = { onEvent = function() end }
     inst:showSettings()
     Assert.eq(shown.title, "天气地点")
+end
+
+do -- 首页刷新按当前地点重拉
+    fetch_cb, fetch_args = nil, nil
+    local weather = Weather:new()
+    weather.home = {}
+    weather:build(ctx, opts)
+    weather.lifecycle.state = "Pause"
+    weather:onResume()
+    Assert.not_nil(fetch_cb)
+    fetch_cb({ temp = "10", city = "Shanghai" })
+    fetch_cb, fetch_args = nil, nil
+    weather:onEvent("home_refresh")
+    Assert.eq(fetch_args.city, "Shanghai")
+    weather:onDestroy()
 end
 
 return true
