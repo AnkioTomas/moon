@@ -38,12 +38,12 @@ function PageStrip.clamp(page, pages)
     return math.min(page, pages), pages
 end
 
---- 构建翻页侧按钮；不可翻页时仅显示淡色图标，不注册点击事件。
----@param name string 区域、组件或图标名称
+--- 构建图标按钮；不可点时仅显示淡色图标，不注册点击事件。
+---@param name string Material 图标名
 ---@param enabled boolean 按钮是否可点击
----@param on_tap fun() 点击命中区域时执行的回调
+---@param on_tap fun()|nil 点击命中区域时执行的回调
 ---@return table
-local function sideButton(name, enabled, on_tap)
+local function iconButton(name, enabled, on_tap)
     local size = UI.sz(36)
     local tap = InputContainer:new{ dimen = Geom:new{ w = size, h = size } }
     tap[1] = CenterContainer:new{
@@ -55,7 +55,7 @@ local function sideButton(name, enabled, on_tap)
             color = enabled and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_GRAY_9,
         },
     }
-    if not enabled then return tap end
+    if not enabled or not on_tap then return tap end
     tap.ges_events = {
         TapPageStrip = {
             GestureRange:new{ ges = "tap", range = function() return tap:getSize() end },
@@ -130,18 +130,16 @@ local function titleCenter(title, width, on_tap)
     return textButton(title, width, on_tap)
 end
 
---- 中央并排文字按钮（编辑态：添加 / 完成）。
----@param actions { text: string, on_tap: fun()|nil }[]
+--- 中央并排图标按钮（编辑态：添加 / 完成）。
+---@param actions { icon: string, on_tap: fun()|nil }[]
 ---@param width number 目标宽度，单位像素
 ---@return table
 local function actionsCenter(actions, width)
-    local n = #actions
     local gap = UI.sz(16)
-    local btn_w = math.max(1, math.floor((width - gap * math.max(0, n - 1)) / math.max(1, n)))
     local kids = { align = "center" }
     for i, action in ipairs(actions) do
         if i > 1 then table.insert(kids, HorizontalSpan:new{ width = gap }) end
-        kids[#kids + 1] = textButton(action.text, btn_w, action.on_tap)
+        kids[#kids + 1] = iconButton(action.icon, true, action.on_tap)
     end
     return CenterContainer:new{
         dimen = Geom:new{ w = width, h = PageStrip.bandH() },
@@ -156,7 +154,7 @@ end
 ---   pages: number,
 ---   center?: "dots"|"title",
 ---   title?: string,
----   actions?: { text: string, on_tap: fun()|nil }[],
+---   actions?: { icon: string, on_tap: fun()|nil }[],
 ---   on_prev?: fun(),
 ---   on_next?: fun(),
 ---   on_center?: fun(),
@@ -184,12 +182,12 @@ function PageStrip.widget(opts)
         align = "center",
         CenterContainer:new{
             dimen = Geom:new{ w = side_w, h = band_h },
-            sideButton("chevron_left", page > 1, opts.on_prev or function() end),
+            iconButton("chevron_left", page > 1, opts.on_prev),
         },
         center,
         CenterContainer:new{
             dimen = Geom:new{ w = side_w, h = band_h },
-            sideButton("chevron_right", page < pages, opts.on_next or function() end),
+            iconButton("chevron_right", page < pages, opts.on_next),
         },
     }
 

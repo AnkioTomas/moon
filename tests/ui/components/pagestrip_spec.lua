@@ -1,4 +1,4 @@
---[[-- PageStrip：两侧翻页 + 中间 dots / title / 双按钮。 --]]
+--[[-- PageStrip：两侧翻页 + 中间 dots / title / 图标按钮。 --]]
 
 local Assert = require("support.assert")
 
@@ -112,15 +112,15 @@ strip = PageStrip.widget({
     pages = 1,
     center = "title",
     actions = {
-        { text = "添加", on_tap = function() add = add + 1 end },
-        { text = "完成", on_tap = function() done = done + 1 end },
+        { icon = "add", on_tap = function() add = add + 1 end },
+        { icon = "check", on_tap = function() done = done + 1 end },
     },
 })
 local mid = strip[1][2][1]
-Assert.eq(mid[1][1][1].text, "添加")
-Assert.eq(mid[3][1][1].text, "完成")
-mid[1]:onTapPageStripTitle()
-mid[3]:onTapPageStripTitle()
+Assert.eq(mid[1][1][1].name, "add")
+Assert.eq(mid[3][1][1].name, "check")
+mid[1]:onTapPageStrip()
+mid[3]:onTapPageStrip()
 Assert.eq(add, 1)
 Assert.eq(done, 1)
 
