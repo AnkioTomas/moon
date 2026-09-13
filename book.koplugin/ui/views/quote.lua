@@ -1,15 +1,19 @@
 --[[--
-共享引言块：左侧引号 + 正文，署名靠右。无卡片。
+共享引言块：上方正文（左侧引号），下方署名靠右。无卡片。
 
 @module koplugin.book.ui.views.quote
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
 local FrameContainer = require("ui/widget/container/framecontainer")
+local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
+local RightContainer = require("ui/widget/container/rightcontainer")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
+local VerticalGroup = require("ui/widget/verticalgroup")
+local VerticalSpan = require("ui/widget/verticalspan")
 local UI = require("ui.components.bookui")
 
 local DEFAULTS = {
@@ -21,8 +25,6 @@ local DEFAULTS = {
     gap_mark = 8,
     gap_attr = 8,
 }
-
-local ATTR_RATIO = 0.36
 
 local View = require("ui.view")
 ---@class BookQuote : View
@@ -69,7 +71,7 @@ function M.attribution(quote)
     return ""
 end
 
---- 按真实控件量引言行：引号 + 正文 + 右署名。
+--- 按真实控件量引言：正文在上，署名在下靠右。
 ---@param opts table|nil
 ---@param quote table|nil
 ---@return table
@@ -82,29 +84,14 @@ local function assemble(opts, quote)
         max_width = UI.sz(o.mark_size),
         fgcolor = UI.muted(),
     }
-    local mark_w = mark:getSize().w
     local gap_mark = UI.sz(o.gap_mark)
-    local attr_text = M.attribution(quote)
-    local attr, attr_w, gap_attr = nil, 0, 0
-    if attr_text ~= "" then
-        gap_attr = UI.sz(o.gap_attr)
-        local attr_max = math.max(1, math.floor(inner_w * ATTR_RATIO))
-        attr = TextWidget:new{
-            text = attr_text,
-            face = UI.face("xx_smallinfofont", o.attr_size),
-            max_width = attr_max,
-            fgcolor = UI.muted(),
-        }
-        attr_w = attr:getSize().w
-    end
     local face = UI.face("cfont", o.body_size)
     local px = (face and face.size) or UI.fontSize(o.body_size)
     local line_px = math.max(1, math.floor((1 + o.line_em) * px + 0.5))
-    local body_w = math.max(1, inner_w - mark_w - gap_mark - gap_attr - attr_w)
     local body = TextBoxWidget:new{
         text = quote and quote.text or "",
         face = face,
-        width = body_w,
+        width = math.max(1, inner_w - mark:getSize().w - gap_mark),
         height = line_px * o.lines,
         line_height = o.line_em,
         fgcolor = Blitbuffer.COLOR_BLACK,
@@ -115,27 +102,48 @@ local function assemble(opts, quote)
         table.insert(row, HorizontalSpan:new{ width = gap_mark })
     end
     table.insert(row, body)
-    if attr then
+    local stack = VerticalGroup:new{ align = "left", row }
+    local inner_h = math.max(mark:getSize().h, body:getSize().h)
+    local attr_text = M.attribution(quote)
+    local attr = nil
+    if attr_text ~= "" then
+        local gap_attr = UI.sz(o.gap_attr)
+        attr = TextWidget:new{
+            text = attr_text,
+            face = UI.face("xx_smallinfofont", o.attr_size),
+            max_width = inner_w,
+            fgcolor = UI.muted(),
+        }
         if gap_attr > 0 then
-            table.insert(row, HorizontalSpan:new{ width = gap_attr })
+            table.insert(stack, VerticalSpan:new{ width = gap_attr })
+            inner_h = inner_h + gap_attr
         end
-        table.insert(row, attr)
+        local attr_h = attr:getSize().h
+        table.insert(stack, RightContainer:new{
+            dimen = Geom:new{ w = inner_w, h = attr_h },
+            attr,
+        })
+        inner_h = inner_h + attr_h
     end
     return {
-        row = row,
+        stack = stack,
         body = body,
         attr = attr,
         pad_x = o.pad_x,
         width = o.width,
-        inner_h = math.max(mark:getSize().h, body:getSize().h, attr and attr:getSize().h or 0),
+        inner_h = inner_h,
     }
 end
 
---- 引言实绘高度（与 build 同构）。
+--- 引言实绘高度（与 build 同构）。无数据时预留一行署名，避免首页槽位溢出。
 ---@param opts table|nil
 ---@return number
 function M.contentHeight(opts)
-    return assemble(opts, opts and opts.data).inner_h
+    local data = opts and opts.data
+    if not data then
+        data = { source = "——" }
+    end
+    return assemble(opts, data).inner_h
 end
 
 --- 首页内容高度。
@@ -145,7 +153,7 @@ function M.heightRange(opts)
     return { height = M.contentHeight(opts) }
 end
 
---- 构建引号、正文和右署名。
+--- 构建上方正文和右下署名。
 ---@return table
 function M:createWidget()
     local opts = self
@@ -165,7 +173,7 @@ function M:createWidget()
         padding_top = pad_top,
         padding_bottom = extra - pad_top,
         margin = 0,
-        built.row,
+        built.stack,
     }
 end
 

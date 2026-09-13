@@ -1,5 +1,5 @@
 --[[--
-共享引言块：左侧引号 + 正文，署名靠右。
+共享引言块：上方正文，下方署名靠右。
 @module tests.ui.views.quote_spec
 --]]
 
@@ -36,9 +36,9 @@ package.preload["ui.components.bookui"] = function()
 end
 
 local Quote = require("ui.views.quote")
--- 桩：无署名时高度 = 正文 21*2
+-- 桩：正文 21*2 + 间距 8 + 署名 16；无数据也预留署名行
 local range = Quote.heightRange()
-Assert.eq(range.height, 42)
+Assert.eq(range.height, 42 + 8 + 16)
 Assert.is_nil(range.min)
 Assert.is_nil(range.max)
 
@@ -55,9 +55,12 @@ parts:build()
 Assert.eq(parts.body.text, "纸上得来终觉浅")
 Assert.eq(parts.attr.text, "—— 陆游 · 冬夜读书示子聿")
 Assert.eq(parts.height, 96)
-local attr_w = math.floor(320 * 0.36)
-Assert.eq(parts.body.width, 320 - 28 - 8 - 8 - attr_w)
+Assert.eq(parts.body.width, 320 - 28 - 8)
 Assert.eq(parts.body.height, math.floor(1.4 * 15 + 0.5) * 2)
+Assert.eq(Quote.contentHeight({
+    data = { text = "纸上得来终觉浅", author = "陆游" },
+    width = 320,
+}), 42 + 8 + 16)
 
 parts:updateView({ text = "新句", author = "苏轼", title = "题西林壁" })
 Assert.eq(parts.body.text, "新句")
@@ -78,5 +81,11 @@ local lock = Quote:new{ data = { text = "锁屏句", source = "出处" },
 lock:build()
 Assert.eq(lock.attr.text, "—— 出处")
 Assert.eq(lock.body.height, math.floor(1.35 * 30 + 0.5) * 4)
+Assert.eq(lock.body.width, 200 - 28 - 8)
+
+local bare = Quote:new{ data = { text = "无署名" }, width = 320 }
+bare:build()
+Assert.is_nil(bare.attr)
+Assert.eq(Quote.contentHeight({ data = { text = "无署名" }, width = 320 }), 42)
 
 return true
