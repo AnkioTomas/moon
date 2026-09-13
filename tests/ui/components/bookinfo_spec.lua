@@ -50,7 +50,12 @@ package.preload["ui.components.icon"] = function()
     }
 end
 package.preload["ui.components.bookui"] = function()
-    return { face = function() return {} end, sz = function(v) return v end }
+    return {
+        face = function() return {} end,
+        sz = function(v) return v end,
+        cardRadius = function() return 0 end,
+        surface = function() return 0 end,
+    }
 end
 package.preload["ui.components.surface"] = function()
     return { build = function(opts) return opts.child end }
@@ -119,6 +124,28 @@ mark:paintTo({
 Assert.is_true(#marks > 0)
 Assert.eq(mark.overlap_offset[1], 4)
 Assert.eq(mark.overlap_offset[2], 120 - 18 - 4)
+
+local more = BookInfo.moreMark(80, 120)
+Assert.eq(more.overlap_offset[1], 80 - 18 - 4)
+Assert.eq(more.overlap_offset[2], 120 - 18 - 4)
+
+local bare = select(1, BookInfo.cover(nil, nil, {}, 80, 120, {}))
+Assert.is_nil(bare.overlap_offset)
+
+local with_more = select(1, BookInfo.cover(nil, nil, {}, 80, 120, { more = true }))
+Assert.eq(with_more.dimen.w, 80)
+Assert.eq(with_more.dimen.h, 120)
+Assert.eq(with_more[2].overlap_offset[1], 80 - 18 - 4)
+Assert.eq(with_more[2].overlap_offset[2], 120 - 18 - 4)
+
+local more_taps = 0
+local with_tap = select(1, BookInfo.cover(nil, nil, {}, 80, 120, {
+    more = function()
+        more_taps = more_taps + 1
+    end,
+}))
+Assert.is_true(with_tap[2]:onTapBookInfo())
+Assert.eq(more_taps, 1)
 
 local tapped, held = 0, 0
 local widget = BookInfo.tappable(100, 150, function()
