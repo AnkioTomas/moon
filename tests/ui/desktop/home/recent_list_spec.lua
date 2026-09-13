@@ -142,7 +142,7 @@ Assert.eq(List.rows(), 2)
 local list = List:new()
 local range = list:heightRange({}, { width = 600 })
 Assert.eq(range.height, 404)
-Assert.eq(range.fill, true)
+Assert.is_nil(range.fill)
 
 List.saveRows(1)
 range = list:heightRange({}, { width = 600 })

@@ -91,14 +91,14 @@ Assert.eq(heights[1], 30)
 Assert.eq(heights[2], 70)
 Assert.eq(unused, 0)
 
--- 组件声明 fill 时，default 放置也吃剩余。
+-- default 只用内容高；组件声明 fill 不能偷偷吃剩余。
 selected, heights, unused = layout:allocate({
     { id = "a", height = 20, placement = { height = "default" } },
     { id = "b", height = 40, fill = true, placement = { height = "default" } },
 }, 100, 0)
 Assert.eq(heights[1], 20)
-Assert.eq(heights[2], 80)
-Assert.eq(unused, 0)
+Assert.eq(heights[2], 40)
+Assert.eq(unused, 40)
 
 -- 自定义高度不夹内容高，也不吃剩余。
 selected, heights, unused = layout:allocate({

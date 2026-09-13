@@ -56,7 +56,7 @@ local Hero = require("ui.desktop.home.views.recent_hero")
 local hero = Hero:new()
 local range = hero:heightRange()
 Assert.eq(range.height, 148)
-Assert.eq(range.fill, true)
+Assert.is_nil(range.fill)
 
 local opened
 local book = shelf_recent

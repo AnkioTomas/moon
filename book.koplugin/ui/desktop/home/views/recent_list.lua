@@ -211,14 +211,14 @@ local function gridMetrics(width, area_h)
     return slot_w, cw, ch, cols, gap, row_gap, cell_h
 end
 
---- 按所选行列计算内容高度；页内剩余给封面，不加行。
+--- 按所选行列计算内容高度。
 ---@param _ctx table 为保持组件接口一致保留的上下文，本实现不读取
 ---@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return table
 function M:heightRange(_ctx, opts)
     local _slot_w, _cw, _ch, _cols, _gap, row_gap, cell_h = gridMetrics(opts.width)
     local h = UI.sz(22) + PageStrip.bandH() + cell_h + (M.rows() - 1) * (row_gap + cell_h)
-    return { height = h, fill = true }
+    return { height = h }
 end
 
 --- 构建带书籍状态标记的网格封面和标题，点击时打开对应书籍。
