@@ -6,17 +6,24 @@
   +-----------------------------------------------+
   | TopBar（时钟 · 源名 · 剩余内存/存储/Wi‑Fi/亮度/电量） |
   |-----------------------------------------------|
+  |                                               |
   |          Tab 内容区（contentHeight）           |
+  |                                               |
   |-----------------------------------------------|
   | BottomBar  首页|图书馆|[书城]|[统计]|设置      |
   +-----------------------------------------------+
   手势：底栏 tap 切 Tab；内容区左右滑转给当前页；顶栏点源名换源、点其他区域或下滑开快捷面板。
 
   生命周期：init/onCreate；打开时 onStart+onResume；休眠 Pause+Stop。
-  唤醒只靠 KOReader 广播 Resume（窗口栈上自己收）。
-  Desktop 是 InputContainer，组合 attach Lifecycle。
-  build 一生一次建壳；updateView 换内容槽/底栏。
-  onEvent 只广播；换源改自己的 source/tab。Resume 只打顶栏和当前页。
+  唤醒只靠 KOReader 广播 Resume（Desktop 在窗口栈上自己收）。
+  插件的 onResume 不再转发，避免和系统广播跑两遍。
+  Desktop 已经是 InputContainer，不继承 ui/lifecycle.lua（组合 attach）。
+
+  UI 契约：build 一生一次建壳；updateView 换内容槽/底栏。页自己 build/updateView。
+  KOReader 自己的手势 / 关窗走 onSwipe / onTapBar / onClose。
+  Desktop:onEvent 只广播；换源先改自己的 source/tab。
+  Resume 只打顶栏和当前页；切 Tab 由 switchTab 暂停旧页、恢复新页。
+  详情走 Detail.open，设置子页走 Settings:showSub。
 
 @module koplugin.book.ui.desktop
 --]]
@@ -77,25 +84,43 @@ local Desktop = InputContainer:extend{
 local PAGES = { home = true, library = true, store = true, insight = true, settings = true }
 local CHILDREN = { "topbar", "bottombar", "home", "library", "store", "insight", "settings" }
 
+
+--- 调用指定子视图的事件或生命周期方法；不存在的接收者直接跳过。
+---@param child table|nil 接收事件的子视图；nil 时跳过
+---@param method string 子视图上的方法名
+---@param ... any 原样传给接收方法的参数
+---@return nil
 local function notify(child, method, ...)
     if child and child[method] then child[method](child, ...) end
 end
 
+--- 按组件注册顺序把同一事件和参数分发给子视图。
+---@param self BookDesktop 拥有子视图的父实例
+---@param method string 子视图上的方法名
+---@param ... any 原样传给接收方法的参数
+---@return nil
 local function broadcast(self, method, ...)
     for _, key in ipairs(CHILDREN) do notify(self[key], method, ...) end
 end
 
+--- 当前底栏 Tab 对应的页对象。
+---@param self BookDesktop 当前桌面实例
+---@return table|nil
 local function tabPage(self)
     return self[self.tab]
 end
 
+--- 取当前页内容 widget。页实现了 updateView 则走它，否则用已有 widget / build。
+---@param self BookDesktop 当前桌面实例
+---@return table
 local function tabContent(self)
     local page = tabPage(self)
     if page.updateView then return page:updateView() end
     return page.widget or page:build()
 end
 
----@param source table|nil
+--- 按数据源能力生成 Desktop 底栏 Tab。
+---@param source table|nil 书籍所属数据源实例
 ---@return table
 local function desktopTabs(source)
     local tabs = {
@@ -113,13 +138,22 @@ local function desktopTabs(source)
     return tabs
 end
 
+--- 当前 tab 不在 tabs 列表中则回退 home（换源 / 能力变化后调用）。
+---@param self BookDesktop 当前视图或布局实例
+---@return nil
 local function clampTab(self)
     for _, t in ipairs(self._tabs) do
-        if t.id == self.tab then return end
+        if t.id == self.tab then
+            return
+        end
     end
     self.tab = "home"
 end
 
+--- 换源：更新 Tab，广播给各页自己复位，再回到首页。
+---@param self BookDesktop 当前视图或布局实例
+---@param source BookSource|nil 书籍所属数据源实例
+---@return nil
 local function applySource(self, source)
     self.source = source
     self._tabs = desktopTabs(source)
@@ -127,6 +161,11 @@ local function applySource(self, source)
     self:switchTab("home")
 end
 
+--- 构造全宽手势区；y / h 是取当前屏幕坐标的函数。
+---@param ges string KOReader 手势名，如 tap / swipe
+---@param y fun():number 手势区顶部 y
+---@param h fun():number 手势区高度
+---@return table
 local function gesRange(ges, y, h)
     return {
         GestureRange:new{
@@ -138,6 +177,13 @@ local function gesRange(ges, y, h)
     }
 end
 
+--- 把 widget 放到 OverlapGroup 指定偏移；传入 w 时同时写入 dimen。
+---@param widget table 参与叠层的子控件
+---@param x number 相对 OverlapGroup 的 x 偏移
+---@param y number 相对 OverlapGroup 的 y 偏移
+---@param w number|nil 内容区宽度；省略则只改 overlap_offset
+---@param h number|nil 内容区高度，与 w 成对使用
+---@return table widget 原样返回，便于链式安装
 local function overlapAt(widget, x, y, w, h)
     if w then
         if widget.dimen then
@@ -150,8 +196,9 @@ local function overlapAt(widget, x, y, w, h)
     return widget
 end
 
----@param event string|table
----@param payload any
+--- 只广播。换源改的是 Desktop 自己的 source/tab，不是替孩子分流。
+---@param event string|table 父组件转发的事件名称或事件对象
+---@param payload any 与事件一起传入的数据
 ---@return nil
 function Desktop:onEvent(event, payload)
     if self.lifecycle.state == "Destroy" then return end
@@ -162,17 +209,41 @@ function Desktop:onEvent(event, payload)
     broadcast(self, "onEvent", event, payload)
 end
 
-function Desktop:onCharging() self:onEvent("Charging") end
-function Desktop:onNotCharging() self:onEvent("NotCharging") end
-function Desktop:onNetworkConnected() self:onEvent("NetworkConnected") end
-function Desktop:onNetworkDisconnected() self:onEvent("NetworkDisconnected") end
-function Desktop:onFrontlightStateChanged() self:onEvent("FrontlightStateChanged") end
+--- KOReader 电源 / 网络 / 前光事件 → 统一 onEvent 名。
+---@return nil
+function Desktop:onCharging()
+    self:onEvent("Charging")
+end
+--- 将停止充电事件转发给桌面子组件。
+---@return nil
+function Desktop:onNotCharging()
+    self:onEvent("NotCharging")
+end
+--- 将网络连接成功事件转发给桌面子组件。
+---@return nil
+function Desktop:onNetworkConnected()
+    self:onEvent("NetworkConnected")
+end
+--- 将网络断开事件转发给桌面子组件。
+---@return nil
+function Desktop:onNetworkDisconnected()
+    self:onEvent("NetworkDisconnected")
+end
+--- 将前光状态变化事件转发给桌面子组件。
+---@return nil
+function Desktop:onFrontlightStateChanged()
+    self:onEvent("FrontlightStateChanged")
+end
 
+--- 系统 Resume 广播进桌面（窗口在栈上时）。
+---@return nil
 function Desktop:onResumeEvent()
     if self.lifecycle.state == "Destroy" then return end
     self:onResume()
 end
 
+--- 初始化手势区与默认分页状态，再 onCreate 画出第一帧。
+---@return nil
 function Desktop:init()
     self.lifecycle = Lifecycle.attach(self)
     self.view = View.attach(self)
@@ -198,21 +269,46 @@ function Desktop:init()
     self:onCreate()
 end
 
+--- 创建：挂长期对象，build 一生一次的壳。
+---@return nil
 function Desktop:onCreate()
     broadcast(self, "onCreate")
     self:build()
 end
 
-function Desktop:onStart() broadcast(self, "onStart") end
-function Desktop:onPause() broadcast(self, "onPause") end
-function Desktop:onStop() broadcast(self, "onStop") end
-function Desktop:onCancel() broadcast(self, "onCancel") end
+--- 启动：通知孩子挂环境。
+---@return nil
+function Desktop:onStart()
+    broadcast(self, "onStart")
+end
 
+--- 恢复工作：只通知顶栏与当前页。系统唤醒也会进这里，只这一条路。
+---@return nil
 function Desktop:onResume()
     notify(self.topbar, "onResume")
     notify(tabPage(self), "onResume")
 end
 
+--- 暂停：通知所有子组件停活跃任务。
+---@return nil
+function Desktop:onPause()
+    broadcast(self, "onPause")
+end
+
+--- 停止：通知所有子组件停工。
+---@return nil
+function Desktop:onStop()
+    broadcast(self, "onStop")
+end
+
+--- 取消在飞请求，不拆窗体。
+---@return nil
+function Desktop:onCancel()
+    broadcast(self, "onCancel")
+end
+
+--- 销毁：通知子组件销毁，再拆手势并断开插件引用。
+---@return nil
 function Desktop:onDestroy()
     broadcast(self, "onDestroy")
     self.ges_events = nil
@@ -222,19 +318,29 @@ function Desktop:onDestroy()
     end
 end
 
+--- 顶栏向下滑：打开 KOReader 原生菜单的 Book 快捷 Tab。
+---@param _ any 事件框架传入但本实现不使用的参数
+---@param ges_ev table|nil KOReader 手势数据，含方向和位置
+---@return boolean
 function Desktop:onSwipeTopBar(_, ges_ev)
     return self.topbar:onSwipe(_, ges_ev)
 end
 
+--- 顶栏点击：缓存指标打开任务列表，源名区域切换数据源，其余区域打开原生快捷面板 Tab。
+---@param _ any 事件框架传入但本实现不使用的参数
+---@param ges table|nil KOReader 手势数据，含方向和位置
+---@return boolean
 function Desktop:onTapTopBar(_, ges)
     return self.topbar:onTap(_, ges)
 end
 
+--- 内容区高度（扣除顶栏 + 底栏）。
 ---@return number
 function Desktop:contentHeight()
     return math.max(1, Screen:getHeight() - UI.barH() - UI.topBarH())
 end
 
+--- 传给各 Tab 的上下文：plugin / source / desktop。
 ---@return BookDesktopCtx
 function Desktop:ctx()
     return {
@@ -246,6 +352,10 @@ function Desktop:ctx()
     }
 end
 
+--- 底栏点击：按 x 落点切换 Tab。
+---@param _ any 事件框架传入但本实现不使用的参数
+---@param ges table|nil KOReader 手势数据，含方向和位置
+---@return boolean
 function Desktop:onTapBar(_, ges)
     if not ges or not ges.pos then return false end
     if ges.pos.y < self.dimen.h - UI.barH() then return false end
@@ -256,6 +366,10 @@ function Desktop:onTapBar(_, ges)
     return true
 end
 
+--- 内容区左右滑：只转给当前页。
+---@param _ any 事件框架传入但本实现不使用的参数
+---@param ges_ev table|nil KOReader 手势数据，含方向和位置
+---@return boolean
 function Desktop:onSwipe(_, ges_ev)
     if type(ges_ev) ~= "table" or not ges_ev.direction then return true end
     if ges_ev.pos and ges_ev.pos.y >= self.dimen.h - UI.barH() then return true end
@@ -265,7 +379,8 @@ function Desktop:onSwipe(_, ges_ev)
     return true
 end
 
----@param id string
+--- 切换底栏 Tab。页数据跟着页对象走；壳用 updateView 换槽。
+---@param id string 底栏 Tab 标识，须在 PAGES 内
 ---@return nil
 function Desktop:switchTab(id)
     if not PAGES[id] then return end
@@ -276,7 +391,8 @@ function Desktop:switchTab(id)
     self:updateView()
 end
 
----@return table|nil
+--- 一生一次：拼顶栏 + 当前页 + 底栏壳。
+---@return table|nil widget 根内容树；已有壳时返回原根
 function Desktop:build()
     if self[1] then return self[1] end
     local started_at = Perf.now()
@@ -312,10 +428,13 @@ function Desktop:build()
     return self[1]
 end
 
----@return table|nil
+--- 刷新：只换内容槽和底栏，顶栏不动（已有壳）；无壳则走 build。
+---@return table|nil widget 尚无骨架时返回构建结果，否则原地更新不返回值
 function Desktop:updateView()
     local root = self[1] and self[1][1]
-    if not root then return self:build() end
+    if not root then
+        return self:build()
+    end
     local started_at = Perf.now()
     local sw, sh = Screen:getWidth(), Screen:getHeight()
     local resized = self.dimen.w ~= sw or self.dimen.h ~= sh
@@ -335,6 +454,8 @@ function Desktop:updateView()
     if resized and self.lifecycle:uiReady() then UIManager:setDirty(self, "ui") end
 end
 
+--- KOReader 关窗入口，不是生命周期。关窗前 Destroy 会按状态补齐 Pause/Stop。
+---@return boolean
 function Desktop:onClose()
     if self.lifecycle.state == "Destroy" then return true end
     self:onDestroy()
@@ -343,6 +464,8 @@ function Desktop:onClose()
     return true
 end
 
+--- Widget 关闭回调：若尚未销毁，走 Destroy（含停止系列补全）。
+---@return nil
 function Desktop:onCloseWidget()
     if self.lifecycle.state == "Destroy" then return end
     self:onDestroy()
