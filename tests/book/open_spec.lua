@@ -114,3 +114,13 @@ Open.book(failed_plugin, book)
 open_callbacks[5]("/broken.epub")
 Stubs.flush()
 Assert.eq(failed_plugin.desktop ~= nil, true)
+
+-- 可选 on_done：成功先回调再进 Reader；失败也要回调。
+local done_ok
+Open.book({ desktop = {} }, book, function(ok) done_ok = ok end)
+open_callbacks[6]("/library/book.epub")
+Assert.is_true(done_ok)
+done_ok = nil
+Open.book({ desktop = {} }, book, function(ok) done_ok = ok end)
+open_callbacks[7](nil, "boom")
+Assert.is_false(done_ok)

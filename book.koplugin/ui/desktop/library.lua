@@ -24,8 +24,6 @@ local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local UIManager = require("ui/uimanager")
-local ConfirmBox = require("ui/widget/confirmbox")
-local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -38,7 +36,6 @@ local Surface = require("ui.components.surface")
 local Pager = require("ui.components.pager")
 local Popup = require("ui.views.popup")
 local View = require("ui.view")
-local BookDB = require("db.book")
 local MoonSettings = require("utils.settings")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -59,6 +56,9 @@ setmetatable(Library, View)
 ---@field state table|nil
 ---@field fetch_cancel table|nil
 ---@field view_picker table|nil
+---@field _opening_cover table|nil
+---@field _opening_bar table|nil
+---@field _open_token table|nil
 
 --- 创建图书馆实例，独立持有筛选、分组、分页和请求句柄。
 ---@param desktop BookDesktop 所属桌面实例
@@ -230,102 +230,30 @@ function Library:applySearch(value)
     self.desktop:updateView()
 end
 
---- 状态变更后重新查询当前页，确保筛选结果立即收敛。
----@param library BookLibrary 拥有筛选和查询状态的图书馆实例
+--- 打开书籍详情。
+---@param ctx table 构建上下文
+---@param book Book
 ---@return nil
-local function refreshPage(library)
-    library.state = nil
-    library.desktop:updateView()
+local function openDetail(ctx, book)
+    if ctx.desktop then
+        require("ui.desktop.detail").open(ctx.desktop, book)
+    end
 end
 
---- 打开书籍操作菜单，操作完成后刷新当前筛选结果。
----@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
----@param book Book 当前操作或展示的书籍数据
+--- 清除当前封面的打开中条。
+---@param library BookLibrary
 ---@return nil
-local function showBookActions(ctx, book)
-    local desktop = ctx.desktop
-    local library = libraryOf(desktop)
-    local is_read = tonumber(book.read_state) == 1
-    Popup.sheet{
-        title = BookInfo.title(book),
-        items = {
-            {
-                text = is_read and _("标记为未读") or _("标记为已读"),
-                callback = function()
-                    if not BookDB.setRead(book.source_id, book.stable_id, not is_read) then
-                        UIManager:show(InfoMessage:new{ text = _("更新阅读状态失败") })
-                        return
-                    end
-                    if is_read then
-                        book.read_state = 2
-                    else
-                        book.read_state = 1
-                        book.percent = 100
-                    end
-                    if library then refreshPage(library) end
-                end,
-            },
-            {
-                text = _("清理缓存"),
-                callback = function()
-                    UIManager:show(ConfirmBox:new{
-                        text = T(_("确定清理《%1》的缓存？"), BookInfo.title(book)),
-                        ok_text = _("清理"),
-                        ok_callback = function()
-                            UIManager:show(InfoMessage:new{ text = _("正在清理缓存…"), timeout = 1 })
-                            require("book.cache").clearBookAsync(book.source_id, book.stable_id, function(ok)
-                                if desktop and desktop._closed then return end
-                                if ok then
-                                    local source = ctx.source
-                                    if source and source.clearCaches then
-                                        source:clearCaches()
-                                    end
-                                    if library then refreshPage(library) end
-                                end
-                                UIManager:show(InfoMessage:new{
-                                    text = ok and _("已清理") or _("清理失败"),
-                                    timeout = 2,
-                                })
-                            end)
-                        end,
-                    })
-                end,
-            },
-            {
-                text = _("删除"),
-                callback = function()
-                    UIManager:show(ConfirmBox:new{
-                        text = T(_("确定删除《%1》？"), BookInfo.title(book)),
-                        ok_text = _("删除"),
-                        ok_callback = function()
-                            local source = ctx.source
-                            if not source or type(source.deleteBookAsync) ~= "function" then
-                                UIManager:show(InfoMessage:new{ text = _("当前数据源不支持删除本书") })
-                                return
-                            end
-                            source:deleteBookAsync({
-                                source_id = book.source_id,
-                                stable_id = book.stable_id,
-                                book = book,
-                                source = source,
-                            }, function(ok, err)
-                                if not ok then
-                                    UIManager:show(InfoMessage:new{
-                                        text = err or _("删除本书失败"),
-                                    })
-                                    return
-                                end
-                                if library then
-                                    library.page = 1
-                                    refreshPage(library)
-                                end
-                            end)
-                        end,
-                    })
-                end,
-            },
-        },
-    }
+local function clearOpening(library)
+    local cover, bar = library._opening_cover, library._opening_bar
+    library._opening_cover, library._opening_bar = nil, nil
+    if not cover or not bar then return end
+    for i = #cover, 1, -1 do
+        if cover[i] == bar then
+            table.remove(cover, i)
+            break
+        end
+    end
+    if bar.free then bar:free() end
 end
 
 --- 封面 + 单行书名。
@@ -334,7 +262,7 @@ end
 ---@param slot_w number 单个封面槽位宽度，单位像素
 ---@param cw number 封面宽度，单位像素
 ---@param ch number 封面高度，单位像素
----@param on_open fun(book: table)|nil
+---@param on_open fun(book: table, cover: table, cw: number, ch: number)|nil
 ---@param show_status boolean|nil 是否显示书籍状态信息
 ---@return table, number
 local function coverCell(ctx, book, slot_w, cw, ch, on_open, show_status)
@@ -342,16 +270,35 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open, show_status)
         badge = true,
         ribbon = show_status ~= false,
         download = show_status ~= false,
+        more = true,
         show_parent = ctx.desktop,
     }))
     local title_gap = UI.sz(4)
     local title_h = UI.sz(22)
     local total_h = ch + title_gap + title_h
     local tap = BookInfo.tappable(slot_w, total_h, function()
-        if on_open then on_open(book) end
-    end, function()
-        showBookActions(ctx, book)
+        if on_open then on_open(book, cover, cw, ch) end
     end)
+    --- 一个手势容器完成分流，避免封面与更多按钮嵌套后争抢同名事件。
+    ---@param _ table
+    ---@param ges table|nil
+    ---@return boolean
+    tap.onTapBookInfo = function(_, ges)
+        local pos, dimen = ges and ges.pos, tap.dimen
+        if pos and dimen then
+            local size, inset = UI.sz(18), UI.sz(4)
+            local cover_x = dimen.x + math.floor((slot_w - cw) / 2)
+            if pos.x >= cover_x + cw - size - inset
+                and pos.x < cover_x + cw - inset
+                and pos.y >= dimen.y + ch - size - inset
+                and pos.y < dimen.y + ch - inset then
+                openDetail(ctx, book)
+                return true
+            end
+        end
+        if on_open then on_open(book, cover, cw, ch) end
+        return true
+    end
     tap[1] = VerticalGroup:new{
         align = "center",
         CenterContainer:new{
@@ -667,12 +614,33 @@ function Library:build(ctx, state, opts)
     local pages = opts.pages or 1
     local total = opts.total or 0
     local books = state.books
-    --- 点封面进书籍详情页。
+    --- 点封面直接打开书。
     ---@param book Book 被点中的书
-    local on_open = function(book)
-        if ctx.desktop and ctx.desktop.showDetail then
-            ctx.desktop:showDetail(book)
-        end
+    ---@param cover table 封面叠层
+    ---@param cw number 封面宽度
+    ---@param ch number 封面高度
+    local on_open = function(book, cover, cw, ch)
+        local desktop = ctx.desktop
+        local plugin = ctx.plugin or (desktop and desktop.plugin)
+        if not plugin then return end
+        clearOpening(self)
+        local bar = BookInfo.openingBar(cw, ch)
+        cover[#cover + 1] = bar
+        self._opening_cover, self._opening_bar = cover, bar
+        local token = {}
+        self._open_token = token
+        if desktop and desktop.onEvent then desktop:onEvent("refresh_status", "running") end
+        if desktop then UIManager:setDirty(desktop, "ui") end
+        UIManager:nextTick(function()
+            if self._open_token ~= token then return end
+            require("book.open").book(plugin, book, function()
+                if self._open_token ~= token then return end
+                self._open_token = nil
+                clearOpening(self)
+                if desktop and desktop.onEvent then desktop:onEvent("refresh_status", "idle") end
+                if desktop then UIManager:setDirty(desktop, "ui") end
+            end)
+        end)
     end
 
     local tools_kids = { align = "center" }

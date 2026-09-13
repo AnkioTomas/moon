@@ -129,6 +129,10 @@ local more = BookInfo.moreMark(80, 120)
 Assert.eq(more.overlap_offset[1], 80 - 18 - 4)
 Assert.eq(more.overlap_offset[2], 120 - 18 - 4)
 
+local opening = BookInfo.openingBar(80, 120)
+Assert.eq(opening.overlap_offset[1], 0)
+Assert.eq(opening.overlap_offset[2], math.floor((120 - 22) / 2))
+
 local bare = select(1, BookInfo.cover(nil, nil, {}, 80, 120, {}))
 Assert.is_nil(bare.overlap_offset)
 

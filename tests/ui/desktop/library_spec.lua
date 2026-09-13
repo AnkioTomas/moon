@@ -1,4 +1,4 @@
---[[-- ui.desktop.library：阅读状态筛选、长按标记、清理缓存与删除。 --]]
+--[[-- ui.desktop.library：封面点开书、更多进详情、视图筛选。 --]]
 
 local Assert = require("support.assert")
 
@@ -30,6 +30,7 @@ package.preload["ui/uimanager"] = function()
     return {
         show = function(_, widget) shown = widget end,
         nextTick = function(_, cb) cb() end,
+        setDirty = function() end,
     }
 end
 package.preload["ui/widget/confirmbox"] = widgetModule
@@ -80,40 +81,39 @@ package.preload["ui.views.popup"] = function()
     }
 end
 
+local tap_callback
+local tap_widget
+local more_option
 local hold_callback
 package.preload["ui.components.bookinfo"] = function()
     return {
         title = function(book) return book.title end,
-        cover = function() return { getSize = function() return { w = 40, h = 60 } end } end,
+        cover = function(_, _, _, _, _, opts)
+            more_option = opts and opts.more
+            return { getSize = function() return { w = 40, h = 60 } end }
+        end,
+        openingBar = function() return { kind = "opening" } end,
         tappable = function(w, h, on_tap, on_hold)
-            if on_hold then hold_callback = on_hold end
-            return {
-                dimen = { w = w, h = h },
+            tap_callback = on_tap
+            hold_callback = on_hold
+            tap_widget = {
+                dimen = { x = 0, y = 0, w = w, h = h },
                 getSize = function(self) return self.dimen end,
                 on_tap = on_tap,
             }
+            return tap_widget
         end,
     }
 end
 
-local cleared
-package.preload["book.cache"] = function()
-    return {
-        clearBookAsync = function(source_id, stable_id, cb)
-            cleared = { source_id, stable_id }
-            cb(true)
-        end,
-    }
+local opened_detail
+package.preload["ui.desktop.detail"] = function()
+    return { open = function(_, book) opened_detail = book end }
 end
-
-local set_read
-package.preload["db.book"] = function()
-    return {
-        setRead = function(source_id, stable_id, value)
-            set_read = { source_id, stable_id, value }
-            return true
-        end,
-    }
+local opened_book
+local open_done
+package.preload["book.open"] = function()
+    return { book = function(_, book, done) opened_book, open_done = book, done end }
 end
 package.preload["utils.log"] = function()
     return { warn = function() end, dbg = function() end }
@@ -141,24 +141,18 @@ package.loaded["ui.desktop.library"] = nil
 local Library = require("ui.desktop.library")
 
 local view_updates = 0
-local deleted
 local requested
-local caches_cleared = 0
 local source = {
     capabilities = function() return { search = true } end,
-    clearCaches = function() caches_cleared = caches_cleared + 1 end,
     filtersAsync = function(_, cb) cb({ data = { category = {}, series = {} } }) end,
     listLibraryAsync = function(_, opts, cb)
         requested = opts
         cb({ data = {}, count = 0 })
         return { cancel = function() end }
     end,
-    deleteBookAsync = function(_, identity, cb)
-        deleted = identity
-        cb(true)
-    end,
 }
 local desktop = {
+    plugin = {},
     width = 100,
     height = 200,
     dimen = { w = 100 },
@@ -168,6 +162,10 @@ local desktop = {
     contentHeight = function() return 200 end,
     updateView = function() view_updates = view_updates + 1 end,
 }
+local refresh_statuses = {}
+desktop.onEvent = function(_, event, value)
+    if event == "refresh_status" then refresh_statuses[#refresh_statuses + 1] = value end
+end
 local library = Library:new{ desktop = desktop, name = "library" }
 Assert.eq(library.lifecycle.state, "new")
 library:onCreate()
@@ -181,6 +179,7 @@ local ctx = {
     height = 200,
     desktop = desktop,
     source = source,
+    plugin = desktop.plugin,
 }
 desktop.ctx = function() return ctx end
 local book = {
@@ -191,35 +190,18 @@ local book = {
 }
 
 library:build(ctx, { books = { book } }, { page = 1, pages = 1, total = 1 })
-Assert.not_nil(hold_callback)
-hold_callback()
-Assert.eq(popup_sheet.items[1].text, "标记为已读")
-popup_sheet.items[1].callback()
-Assert.eq(set_read[1], "moon")
-Assert.eq(set_read[2], "b1")
-Assert.is_true(set_read[3])
-Assert.eq(book.read_state, 1)
-Assert.eq(book.percent, 100)
-Assert.eq(view_updates, 1)
-
-hold_callback()
-Assert.eq(popup_sheet.items[1].text, "标记为未读")
-Assert.eq(popup_sheet.items[2].text, "清理缓存")
-Assert.eq(popup_sheet.items[3].text, "删除")
-popup_sheet.items[2].callback()
-Assert.eq(shown.text, "确定清理《书一》的缓存？")
-shown.ok_callback()
-Assert.eq(cleared[1], "moon")
-Assert.eq(cleared[2], "b1")
-Assert.eq(caches_cleared, 1)
-Assert.eq(view_updates, 2)
-
-popup_sheet.items[3].callback()
-Assert.eq(shown.text, "确定删除《书一》？")
-shown.ok_callback()
-Assert.eq(deleted.stable_id, "b1")
-Assert.eq(deleted.source, source)
-Assert.eq(library.page, 1)
+Assert.is_true(more_option)
+Assert.not_nil(tap_callback)
+Assert.is_nil(hold_callback)
+tap_widget:onTapBookInfo({ pos = { x = 35, y = 55 } })
+Assert.eq(opened_detail, book)
+Assert.is_nil(opened_book)
+tap_widget:onTapBookInfo({ pos = { x = 20, y = 20 } })
+Assert.eq(opened_book, book)
+Assert.eq(refresh_statuses[1], "running")
+Assert.eq(type(open_done), "function")
+open_done(true)
+Assert.eq(refresh_statuses[2], "idle")
 
 library:showViewPicker()
 Assert.eq(popup_sheet.title, "图书馆视图")
