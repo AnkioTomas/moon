@@ -168,7 +168,7 @@ local desktop = {
     contentHeight = function() return 200 end,
     updateView = function() view_updates = view_updates + 1 end,
 }
-local library = Library.new(desktop)
+local library = Library:new{ desktop = desktop, name = "library" }
 Assert.eq(library.lifecycle.state, "new")
 library:onCreate()
 Assert.eq(library.lifecycle.state, "Create")

@@ -56,9 +56,6 @@ function Insight:new(opts)
     opts.records = opts.records or require("ui.desktop.insight.records").new()
     return View.new(self, opts)
 end
-Insight.new = function(desktop)
-    return Insight:new{ desktop = desktop, name = "insight" }
-end
 
 ---@param desktop BookDesktop
 ---@return BookInsight

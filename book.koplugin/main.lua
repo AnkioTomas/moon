@@ -157,12 +157,14 @@ function BookPlugin:openDesktop()
         self.desktop = nil
     end
 
+    logger.info("book openDesktop create desktop begin")
     local ok, desk = pcall(function()
         return Desktop:new {
             plugin = self,
             source = source,
         }
     end)
+    logger.info("book openDesktop create desktop end", ok and "ok" or "failed")
     if not ok then
         logger.error("book desktop create failed:", desk)
         UIManager:show(InfoMessage:new {
@@ -172,10 +174,16 @@ function BookPlugin:openDesktop()
     end
     ---@cast desk BookDesktop
     self.desktop = desk
+    logger.info("book openDesktop show begin")
     UIManager:show(self.desktop)
+    logger.info("book openDesktop show end")
     UIManager:setDirty(self.desktop, "ui")
+    logger.info("book openDesktop onStart begin")
     desktopLife(self, "onStart")
+    logger.info("book openDesktop onStart end")
+    logger.info("book openDesktop onResume begin")
     desktopLife(self, "onResume")
+    logger.info("book openDesktop onResume end")
 end
 
 return BookPlugin

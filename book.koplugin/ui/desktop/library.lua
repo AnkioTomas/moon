@@ -75,9 +75,6 @@ function Library:new(opts)
     opts.fetch_cancel = opts.fetch_cancel
     return View.new(self, opts)
 end
-Library.new = function(desktop)
-    return Library:new{ desktop = desktop, name = "library" }
-end
 
 --- 从桌面取得其拥有的图书馆实例；无桌面时返回 nil。
 ---@param desktop BookDesktop|nil 所属桌面实例

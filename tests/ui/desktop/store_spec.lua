@@ -8,7 +8,7 @@ local remembered
 package.preload["ui.desktop.library"] = function()
     local Library = {}
     Library.__index = Library
-    function Library.new(desktop)
+    function Library:new(desktop)
         return setmetatable({ desktop = desktop, page_size = 2 }, Library)
     end
     function Library:build(_ctx, _state, opts)
