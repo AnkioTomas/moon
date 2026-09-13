@@ -59,16 +59,35 @@ package.preload["ui.components.bookui"] = function()
         muted = function() return 128 end,
     }
 end
+local opened_detail
+local opened_book
+local open_done
+package.preload["ui.desktop.detail"] = function()
+    return { open = function(_, book) opened_detail = book end }
+end
+package.preload["book.open"] = function()
+    return {
+        book = function(_, book, on_done)
+            opened_book = book
+            open_done = on_done
+        end,
+    }
+end
 package.preload["ui.components.bookinfo"] = function()
     return {
-        cover = function(_, _, book, w, h)
-            covers[#covers + 1] = { book = book, w = w, h = h }
-            return {}
+        cover = function(_, _, book, w, h, opts)
+            local widget = {}
+            covers[#covers + 1] = { book = book, w = w, h = h, more = opts and opts.more, widget = widget }
+            return widget
+        end,
+        openingBar = function()
+            return { kind = "opening" }
         end,
         title = function(book) return book.title end,
-        tappable = function(w, h, callback)
-            taps[#taps + 1] = { w = w, h = h, callback = callback }
-            return {}
+        tappable = function(w, h, callback, on_hold)
+            local tap = { dimen = { x = 0, y = 0, w = w, h = h } }
+            taps[#taps + 1] = { w = w, h = h, callback = callback, on_hold = on_hold, widget = tap }
+            return tap
         end,
     }
 end
@@ -91,6 +110,7 @@ end
 package.preload["ui/uimanager"] = function()
     return {
         setDirty = function() dirty = dirty + 1 end,
+        nextTick = function(_, cb) cb() end,
         show = function(_, widget) shown = widget end,
         close = function() end,
     }
@@ -149,21 +169,24 @@ range = list:heightRange({}, { width = 600 })
 Assert.eq(range.height, 218)
 List.saveRows(2)
 
-local opened
-package.preload["ui.desktop.detail"] = function()
-    return { open = function(_, book) opened = book end }
-end
 local view_updates = 0
 local events = {}
+local refresh_statuses = {}
 local desktop = {
+    plugin = {},
     updateView = function() view_updates = view_updates + 1 end,
-    onEvent = function(_, event) events[#events + 1] = event end,
+    onEvent = function(_, event, payload)
+        events[#events + 1] = event
+        if event == "refresh_status" then
+            refresh_statuses[#refresh_statuses + 1] = payload
+        end
+    end,
 }
 local books = {}
 for i = 1, 5 do books[i] = { title = "book" .. i } end
 shelf_reading = books
 list.lifecycle.state = "Resume"
-local part = list:build({ desktop = desktop, source = { id = "local" } }, {
+local part = list:build({ desktop = desktop, source = { id = "local" }, plugin = desktop.plugin }, {
     width = 600,
     height = 404,
     desktop = desktop,
@@ -172,13 +195,24 @@ local part = list:build({ desktop = desktop, source = { id = "local" } }, {
 Assert.eq(part:getSize().h, 404)
 Assert.len(covers, 5)
 Assert.eq(covers[1].w, 100)
+Assert.is_true(covers[1].more)
 Assert.eq(taps[1].w, 100)
 Assert.eq(taps[1].h, 176)
+Assert.is_nil(taps[1].on_hold)
+local tap = taps[1].widget
+tap:onTapBookInfo({ pos = { x = 90, y = 140 } })
+Assert.eq(opened_detail, books[1])
+Assert.is_nil(opened_book)
 Assert.eq(pager.page, 1)
 Assert.eq(pager.pages, 1)
 Assert.eq(texts[#texts], "最近阅读 · 5")
-taps[1].callback()
-Assert.eq(opened, books[1])
+tap:onTapBookInfo({ pos = { x = 50, y = 70 } })
+Assert.eq(opened_book, books[1])
+Assert.eq(covers[1].widget[1].kind, "opening")
+Assert.eq(refresh_statuses[1], "running")
+open_done(true)
+Assert.eq(refresh_statuses[2], "idle")
+Assert.is_nil(covers[1].widget[1])
 
 List.saveRows(1)
 List.saveCols(3)
