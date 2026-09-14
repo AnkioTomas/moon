@@ -85,12 +85,14 @@ end
 
 local desk = {
     tab = "library",
-    home = child("home", { "onStart", "onResume", "onPause", "onStop", "onDestroy", "onCancel" }),
-    library = child("library", { "onResume", "onPause", "onStop", "onCancel", "onDestroy" }),
-    store = child("store", { "onStop", "onCancel", "onDestroy" }),
-    insight = child("insight", { "onStop", "onCancel", "onDestroy" }),
+    home = child("home", { "onResume", "onPause", "onDestroy", "onCancel" }),
+    library = child("library", { "onResume", "onPause", "onCancel", "onDestroy" }),
+    store = child("store", { "onPause", "onCancel", "onDestroy" }),
+    insight = child("insight", { "onPause", "onCancel", "onDestroy" }),
+    settings = child("settings", { "onPause", "onDestroy" }),
+    bottombar = child("bottombar", { "onPause", "onDestroy" }),
     detail = child("detail", { "onCancel" }),
-    topbar = child("topbar", { "onStart", "onResume", "onPause", "onStop", "onDestroy" }),
+    topbar = child("topbar", { "onResume", "onPause", "onDestroy" }),
     _books_sync_cancel = { cancel = function() log[#log + 1] = "books.cancel" end },
     plugin = {
         emitToSource = function(_, event)
@@ -98,25 +100,16 @@ local desk = {
         end,
     },
 }
-for _, name in ipairs({ "onStart", "onResume", "onPause", "onStop", "onCancel", "onDestroy" }) do
+for _, name in ipairs({ "onResume", "onPause", "onCancel", "onDestroy" }) do
     desk[name] = Desktop[name]
 end
 
 desk.lifecycle = require("ui.lifecycle").attach(desk)
-desk:onStart()
-Assert.eq(desk.lifecycle.state, "Start")
-Assert.eq(table.concat(log, ","), "topbar.onStart,home.onStart")
-desk:onStart()
-Assert.eq(table.concat(log, ","), "topbar.onStart,home.onStart,topbar.onStart,home.onStart")
 
 log = {}
 desk:onPause()
-Assert.eq(table.concat(log, ","), "topbar.onPause,home.onPause,library.onPause")
-
-log = {}
-desk:onStop()
-Assert.eq(desk.lifecycle.state, "Stop")
-Assert.eq(table.concat(log, ","), "topbar.onStop,home.onStop,library.onStop,store.onStop,insight.onStop")
+Assert.eq(table.concat(log, ","),
+    "topbar.onPause,bottombar.onPause,home.onPause,library.onPause,store.onPause,insight.onPause,settings.onPause")
 
 log = {}
 desk:onResume()
@@ -134,7 +127,7 @@ desk:onDestroy()
 Assert.eq(desk.lifecycle.state, "Destroy")
 Assert.is_nil(desk.plugin.desktop)
 Assert.eq(table.concat(log, ","),
-    "topbar.onPause,home.onPause,library.onPause,topbar.onStop,home.onStop,library.onStop,store.onStop,insight.onStop,topbar.onDestroy,home.onDestroy,library.onDestroy,store.onDestroy,insight.onDestroy")
+    "topbar.onPause,bottombar.onPause,home.onPause,library.onPause,store.onPause,insight.onPause,settings.onPause,topbar.onDestroy,bottombar.onDestroy,home.onDestroy,library.onDestroy,store.onDestroy,insight.onDestroy,settings.onDestroy")
 
 log = {}
 desk:onDestroy()

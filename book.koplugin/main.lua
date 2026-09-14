@@ -22,8 +22,7 @@ local SourceRegistry = require("source.registry")
 local Desktop = require("ui.desktop")
 local Host = require("host")
 
---- 调用当前桌面方法（生命周期或 onEvent）。无桌面或已销毁则跳过。
---- 门槛是 Destroy，不是 Alive()：Pause/Stop 后还要能进 onStop / onDestroy / onResume。
+--- 调桌面方法；已 Destroy 则跳过。
 ---@param plugin table
 ---@param name string
 ---@param ... any
@@ -87,12 +86,9 @@ function BookPlugin:addToMainMenu(menu_items)
     }
 end
 
---- 休眠：桌面走 onPause → onStop。
----@return nil
 function BookPlugin:onSuspend()
     logger.info("book lifecycle suspend")
     desktopLife(self, "onPause")
-    desktopLife(self, "onStop")
     logger.flush()
 end
 
@@ -150,8 +146,6 @@ function BookPlugin:openDesktop()
     logger.info("book openDesktop", source.id)
     if self.desktop then
         local old = self.desktop
-        desktopLife(self, "onPause")
-        desktopLife(self, "onStop")
         desktopLife(self, "onDestroy")
         UIManager:close(old)
         self.desktop = nil
@@ -178,9 +172,6 @@ function BookPlugin:openDesktop()
     UIManager:show(self.desktop)
     logger.info("book openDesktop show end")
     UIManager:setDirty(self.desktop, "ui")
-    logger.info("book openDesktop onStart begin")
-    desktopLife(self, "onStart")
-    logger.info("book openDesktop onStart end")
     logger.info("book openDesktop onResume begin")
     desktopLife(self, "onResume")
     logger.info("book openDesktop onResume end")

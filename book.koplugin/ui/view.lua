@@ -299,16 +299,6 @@ end
 function View:onCreate()
 end
 
---- 启动本实例的数据加载；未指定完成回调时更新已构建的视图。
----@param self View 视图实例
----@param cb fun(ok:boolean, err:any)|nil
----@return table operation 可取消的本实例加载操作
-function View:onStart(cb)
-    return self:load(cb or function(ok)
-        if ok and self.widget then self:updateView(self.data) end
-    end)
-end
-
 --- 恢复显示时把当前数据写入已存在的内容树。
 ---@param self View 视图实例
 ---@return nil
@@ -320,12 +310,6 @@ end
 ---@param self View 视图实例
 ---@return nil
 function View:onPause()
-end
-
---- 停止阶段扩展点；默认不执行额外的子类清理。
----@param self View 视图实例
----@return nil
-function View:onStop()
 end
 
 --- 销毁阶段扩展点；根 Widget 和子视图由构造器安装的清理逻辑释放。
@@ -361,13 +345,11 @@ function View:renderToImage(opts, cb)
     args.offscreen = true
     local view = self:new(args)
     local finished, image_wait = false, nil
-    --- 取消图片等待并停止、销毁离屏视图；清理异常在释放后继续传播。
+    --- 取消图片等待并销毁离屏视图；清理异常在释放后继续传播。
     ---@return nil
     local function dispose()
         if image_wait then image_wait:cancel() end
-        local stopped, stop_error = pcall(view.onStop, view)
         local destroyed, destroy_error = pcall(view.onDestroy, view)
-        if not stopped then error(stop_error, 0) end
         if not destroyed then error(destroy_error, 0) end
     end
     --- 仅完成一次导出，释放离屏资源后交付成功路径或失败原因。
@@ -414,7 +396,7 @@ function View:renderToImage(opts, cb)
     end
     guard(function()
         view:onCreate()
-        view:onStart(loaded)
+        view:load(loaded)
     end)
     return { cancel = function()
         if finished then return end

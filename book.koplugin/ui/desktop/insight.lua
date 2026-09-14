@@ -83,10 +83,6 @@ function Insight:onDestroy()
     self:cancel()
 end
 
-function Insight:onStop()
-    self:cancel()
-end
-
 function Insight:onCancel()
     self:cancel()
 end

@@ -114,7 +114,7 @@ Assert.eq(cancellations, 1)
 pending[2]("too late")
 Assert.eq(writes, 1)
 
--- 前台首页 Start 不拉数据，Resume 只拉一次；离屏路径已在上面验证仍会加载。
+-- 前台首页不经 load 拉数据，Resume 只拉一次；离屏路径已在上面验证仍会加载。
 local runtime_loads = 0
 local Runtime = setmetatable({ id = "runtime" }, require("ui.desktop.home.views.base"))
 Runtime.__index = Runtime
@@ -131,7 +131,6 @@ end
 local runtime = Runtime:new()
 runtime.home = { offscreen = false }
 runtime:build({}, { width = 10, height = 10 })
-runtime:onStart()
 Assert.eq(runtime_loads, 0)
 runtime:onResume()
 Assert.eq(runtime_loads, 1)

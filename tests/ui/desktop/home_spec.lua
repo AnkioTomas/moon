@@ -11,10 +11,8 @@ local child_events = {}
 local Clock = setmetatable({ id = "clock" }, Lifecycle)
 Clock.__index = Clock
 function Clock:onCreate() child_events[#child_events + 1] = "create" end
-function Clock:onStart() child_events[#child_events + 1] = "start" end
 function Clock:onPause() child_events[#child_events + 1] = "pause" end
 function Clock:onResume() child_events[#child_events + 1] = "resume" end
-function Clock:onStop() child_events[#child_events + 1] = "stop" end
 function Clock:onDestroy() child_events[#child_events + 1] = "destroy" end
 function Clock:build()
     return { widget = { id = "clock" } }
@@ -27,10 +25,8 @@ end
 local Weather = setmetatable({ id = "weather" }, Lifecycle)
 Weather.__index = Weather
 function Weather:onCreate() child_events[#child_events + 1] = "weather.create" end
-function Weather:onStart() child_events[#child_events + 1] = "weather.start" end
 function Weather:onPause() child_events[#child_events + 1] = "weather.pause" end
 function Weather:onResume() child_events[#child_events + 1] = "weather.resume" end
-function Weather:onStop() child_events[#child_events + 1] = "weather.stop" end
 function Weather:onDestroy() child_events[#child_events + 1] = "weather.destroy" end
 function Weather:build()
     return { widget = { id = "weather" } }
@@ -242,7 +238,7 @@ placements = {}
 child_events = {}
 home:onEvent("home_changed")
 Assert.is_nil(home.components.clock)
-Assert.eq(table.concat(child_events, ","), "pause,stop,destroy")
+Assert.eq(table.concat(child_events, ","), "pause,destroy")
 
 enabled = { "clock" }
 placements = { { id = "clock", page = 1, order = 1, height = "default" } }
@@ -302,7 +298,7 @@ home:turn(1)
 Assert.eq(home.page, 2)
 Assert.eq(home.components.clock.lifecycle.state, "Pause")
 Assert.eq(home.components.weather.lifecycle.state, "Resume")
-Assert.eq(table.concat(child_events, ","), "pause,weather.start,weather.resume")
+Assert.eq(table.concat(child_events, ","), "pause,weather.resume")
 child_events = {}
 home:turn(-1)
 Assert.eq(home.components.clock.lifecycle.state, "Resume")

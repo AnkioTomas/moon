@@ -1,9 +1,5 @@
 --[[--
 首页拼装器：钉页组件板。长按进编辑；PageStrip 翻页。
-
-onCreate → build。设置/翻页/换源/编辑 → updateView。
-非当前页停在 Create；当前页才 Start+Resume。
-
 @module koplugin.book.ui.home
 --]]
 
@@ -482,12 +478,12 @@ function Home:onCreate()
     self:build()
 end
 
---- 前台数据延迟到 Resume；离屏导出等待当前可见组件完成加载。
----@param cb fun(ok:boolean, err:any)|nil 全部子视图加载完成后的结果回调
----@return nil
-function Home:onStart(cb)
+--- 离屏：等可见组件 load 完。
+---@param done fun(data:any, err:any)
+---@return table|nil
+function Home:loadData(done)
     if not self.offscreen then
-        if cb then cb(true) end
+        done(self.data)
         return
     end
     local children = {}
@@ -495,15 +491,17 @@ function Home:onStart(cb)
         if self.components[id] then children[#children + 1] = self.components[id] end
     end
     local left = #children
-    if left == 0 then if cb then cb(true) end return end
+    if left == 0 then done(self.data) return end
     local failure
     for _, child in ipairs(children) do
-        child:onStart(function(ok, err)
+        child:load(function(ok, err)
             if self.lifecycle.state == "Destroy" then return end
             if not ok then failure = failure or err end
             if ok and child.widget then child:rebuild() end
             left = left - 1
-            if left == 0 and cb then cb(failure == nil, failure) end
+            if left == 0 then
+                if failure then done(nil, failure) else done(self.data) end
+            end
         end)
     end
 end
@@ -527,12 +525,6 @@ function Home:onPause()
             child:onPause()
         end
     end
-end
-
---- 向启用的首页组件广播停止阶段。
----@return nil
-function Home:onStop()
-    broadcast(self, "onStop")
 end
 
 --- 销毁首页组件并清除桌面、内容树和编辑状态引用。

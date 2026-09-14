@@ -247,17 +247,15 @@ function TopBar:createWidget()
     return assemble(self)
 end
 
---- 重排顶栏内容并启动新增项目，将稳定根节点安装回桌面。
+--- 重排顶栏内容并恢复新增项目，将稳定根节点安装回桌面。
 ---@return table
 function TopBar:updateView()
     if self.lifecycle.state == "Destroy" then return self.widget end
     self:rebuild()
     for i = 1, #SLOTS do
         local child = self[SLOTS[i].id]
-        if child and child.lifecycle.state == "Create"
-            and (self.lifecycle.state == "Start" or self.lifecycle.state == "Resume") then
-            child:onStart()
-            if self.lifecycle.state == "Resume" then child:onResume() end
+        if child and child.lifecycle.state == "Create" and self.lifecycle.state == "Resume" then
+            child:onResume()
         end
     end
     install(self)
@@ -269,14 +267,6 @@ end
 function TopBar:onCreate()
     self.host = not self.offscreen and self.desktop or nil
     self:build()
-end
-
---- 启动：通知孩子开工（时钟心跳、缓存监听）。
----@param cb fun(ok:boolean, err:any)|nil 全部子视图加载完成后的结果回调
----@return nil
-function TopBar:onStart(cb)
-    broadcast(self, "onStart")
-    if cb then cb(true) end
 end
 
 --- 恢复：通知孩子原地刷新（updateView）。
@@ -294,12 +284,6 @@ function TopBar:onPause()
             child:onPause()
         end
     end
-end
-
---- 停止：通知孩子停止运行资源。
----@return nil
-function TopBar:onStop()
-    broadcast(self, "onStop")
 end
 
 --- 销毁：通知孩子释放引用。

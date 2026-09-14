@@ -13,17 +13,7 @@
   | BottomBar  首页|图书馆|[书城]|[统计]|设置      |
   +-----------------------------------------------+
   手势：底栏 tap 切 Tab；内容区左右滑转给当前页；顶栏点源名换源、点其他区域或下滑开快捷面板。
-
-  生命周期：init/onCreate；打开时 onStart+onResume；休眠 Pause+Stop。
-  唤醒只靠 KOReader 广播 Resume（Desktop 在窗口栈上自己收）。
-  插件的 onResume 不再转发，避免和系统广播跑两遍。
-  Desktop 已经是 InputContainer，不继承 ui/lifecycle.lua（组合 attach）。
-
-  UI 契约：build 一生一次建壳；updateView 换内容槽/底栏。页自己 build/updateView。
-  KOReader 自己的手势 / 关窗走 onSwipe / onTapBar / onClose。
-  Desktop:onEvent 只广播；换源先改自己的 source/tab。
-  Resume 只打顶栏和当前页；切 Tab 由 switchTab 暂停旧页、恢复新页。
-  详情走 Detail.open，设置子页走 Settings:showSub。
+  Lifecycle：Create → Resume ↔ Pause → Destroy；Resume 只打 topbar+当前 Tab；弹窗自管 _closed。
 
 @module koplugin.book.ui.desktop
 --]]
@@ -269,46 +259,24 @@ function Desktop:init()
     self:onCreate()
 end
 
---- 创建：挂长期对象，build 一生一次的壳。
----@return nil
 function Desktop:onCreate()
     broadcast(self, "onCreate")
     self:build()
 end
 
---- 启动：通知孩子挂环境。
----@return nil
-function Desktop:onStart()
-    broadcast(self, "onStart")
-end
-
---- 恢复工作：只通知顶栏与当前页。系统唤醒也会进这里，只这一条路。
----@return nil
 function Desktop:onResume()
     notify(self.topbar, "onResume")
     notify(tabPage(self), "onResume")
 end
 
---- 暂停：通知所有子组件停活跃任务。
----@return nil
 function Desktop:onPause()
     broadcast(self, "onPause")
 end
 
---- 停止：通知所有子组件停工。
----@return nil
-function Desktop:onStop()
-    broadcast(self, "onStop")
-end
-
---- 取消在飞请求，不拆窗体。
----@return nil
 function Desktop:onCancel()
     broadcast(self, "onCancel")
 end
 
---- 销毁：通知子组件销毁，再拆手势并断开插件引用。
----@return nil
 function Desktop:onDestroy()
     broadcast(self, "onDestroy")
     self.ges_events = nil

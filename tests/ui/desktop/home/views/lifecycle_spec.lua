@@ -123,7 +123,6 @@ for _, name in ipairs({ "hitokoto", "excerpt", "stats" }) do
     component:onResume()
     Assert.eq(paints, before + 1)
     component:onPause()
-    component:onStop()
     component:onDestroy()
     before = paints
     Assert.errors(function() component:onResume() end)

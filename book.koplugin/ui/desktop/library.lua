@@ -713,12 +713,6 @@ end
 
 --- 取消图书馆实例的在飞查询，避免离开页面后旧结果继续更新界面。
 ---@return nil
-function Library:onStop()
-    self:cancel()
-end
-
---- 取消图书馆实例的在飞查询，避免离开页面后旧结果继续更新界面。
----@return nil
 function Library:onDestroy()
     self:cancel()
 end
