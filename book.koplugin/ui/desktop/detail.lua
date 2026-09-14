@@ -3,7 +3,7 @@
   单页，禁止 ScrollableContainer；「最近几天」用 PageStrip 分页，不做高度裁剪。
   书城书（zlib / 微信未上架）未入库：无编辑/统计，hero 不显示简介摘要与进度，完整简介直下，
   底部：zlib「加入书库」下载导入；微信「加入书架」。
-  弹窗：自管 _closed。
+  Lifecycle.attach：Create → Resume ↔ Pause → Destroy；异步句柄入 lifecycle.http。
 
 布局：
   +-----------------------------------------------+
@@ -21,7 +21,8 @@
   | 08-14  ====········  25分钟                    |
   |           ‹  ● ● ○  ›                         | PageStrip（>1 页才出现）
   |-----------------------------------------------|
-  | [编辑] [刮削] [下载] [标记已读] [删除]          | 工具行：等宽竖排 chip
+  | [编辑] [刮削] [下载]                          | 能力行：等宽竖排 chip
+  | [✓ 标记已读] [🗑 删除]                        | 状态行：左图标右文本
   | [▶ 继续阅读 / 开始阅读]                        | 主按钮单独一行
   +-----------------------------------------------+
 
@@ -50,6 +51,7 @@ local Icon = require("ui.components.icon")
 local PageStrip = require("ui.components.pagestrip")
 local UI = require("ui.components.bookui")
 local Surface = require("ui.components.surface")
+local Lifecycle = require("ui.lifecycle")
 local Text = require("utils.text")
 local Store = require("book.store")
 local SourceCapabilities = require("types.book_source").SourceCapabilities
@@ -64,8 +66,8 @@ local Screen = Device.screen
 ---@field desktop BookDesktop|nil
 ---@field store_preview boolean
 ---@field close_callback fun()|nil
+---@field lifecycle Lifecycle
 ---@field _dirty boolean|nil
----@field _closed boolean|nil
 local Detail = InputContainer:extend{
     name = "book_detail",
     covers_fullscreen = true,
@@ -271,39 +273,42 @@ local function kpiCard(w, value, label)
     return card, h
 end
 
---- 初始化全屏尺寸、返回键，rebuild 并拉本机阅读统计。
+--- 初始化全屏尺寸、返回键，挂生命周期后 rebuild 并拉本机阅读统计。
 ---@return nil
 function Detail:init()
+    self.lifecycle = Lifecycle.attach(self)
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     if Device:hasKeys() then
         self.key_events = {
             Close = { { Device.input.group.Back } },
         }
     end
+    self:onCreate()
+    self:onResume()
     self:updateView()
     self:fetchStats()
     local kind = storeKind(self.book, self.source, self.store_preview)
     if kind == "zlib" then
-        self._store_detail_job = require("zlib.init").getDetailAsync(self.book, function(detail)
+        self._store_detail_job = self.lifecycle:addHttp(require("zlib.init").getDetailAsync(self.book, function(detail)
             self._store_detail_job = nil
-            if self._closed or not detail then return end
+            if not self.lifecycle:uiReady() or not detail then return end
             self.book = detail
             self:updateView()
             require("ui/uimanager"):setDirty(self, "ui")
-        end)
+        end))
     elseif kind == "source" and self.source and self.source.getDetailAsync then
         local book = self.book
-        self._store_detail_job = self.source:getDetailAsync({
+        self._store_detail_job = self.lifecycle:addHttp(self.source:getDetailAsync({
             source_id = book.source_id,
             stable_id = book.stable_id,
             book = book,
         }, function(detail, err)
             self._store_detail_job = nil
-            if self._closed or not detail then return end
+            if not self.lifecycle:uiReady() or not detail then return end
             self.book = detail
             self:updateView()
             require("ui/uimanager"):setDirty(self, "ui")
-        end)
+        end))
     end
 end
 
@@ -366,7 +371,7 @@ function Detail:fetchStats()
     local StatsDB = require("db.stats")
     self._stats = StatsDB.summaryByBook(book.source_id, book.stable_id)
     self._daily = StatsDB.dailyByBook(book.source_id, book.stable_id, 30)
-    if self._closed then return end
+    if not self.lifecycle:uiReady() then return end
     self:updateView()
     require("ui/uimanager"):setDirty(self, "ui")
 end
@@ -374,8 +379,17 @@ end
 --- 取消详情页尚未结束的数据加载和相关异步工作。
 ---@return nil
 function Detail:onCancel()
-    if self._store_detail_job and self._store_detail_job.cancel then self._store_detail_job.cancel() end
-    if self._install_job and self._install_job.cancel then self._install_job.cancel() end
+    self.lifecycle:abortWork()
+    self._store_detail_job = nil
+    self._install_job = nil
+end
+
+function Detail:onPause()
+    self._store_detail_job = nil
+    self._install_job = nil
+end
+
+function Detail:onDestroy()
     self._store_detail_job = nil
     self._install_job = nil
 end
@@ -383,8 +397,9 @@ end
 --- 关闭详情并强制重绘下层桌面。
 ---@return boolean
 function Detail:onClose()
-    self._closed = true
-    self:onCancel()
+    if self.lifecycle.state ~= "Destroy" then
+        self:onDestroy()
+    end
     local UIManager = require("ui/uimanager")
     local desk = self.desktop
     UIManager:close(self)
@@ -410,7 +425,7 @@ function Detail:reload()
     end
     local book = self.book
     local row = require("db.book").get(book.source_id, book.stable_id)
-    if self._closed then return end
+    if not self.lifecycle:uiReady() then return end
     if row then
         row.source_id = book.source_id
         row.stable_id = book.stable_id
@@ -420,10 +435,12 @@ function Detail:reload()
     require("ui/uimanager"):setDirty(self, "ui")
 end
 
---- Widget 关闭时触发 close_callback。
+--- Widget 关闭时走 Destroy（若尚未销毁）并触发 close_callback。
 ---@return nil
 function Detail:onCloseWidget()
-    self._closed = true
+    if self.lifecycle.state ~= "Destroy" then
+        self:onDestroy()
+    end
     if self[1] and self[1].free then
         self[1]:free()
     end
@@ -447,7 +464,7 @@ end
 ---@return nil
 function Detail:cacheAllChapters()
     if self._cache_job and not self._cache_job.done then return end
-    if self._closed then return end
+    if not self.lifecycle:uiReady() then return end
     local book = self.book
     local source = bookOwnerSource(book, self.source)
     if not source or type(source.cacheAllChaptersAsync) ~= "function" then return end
@@ -492,7 +509,7 @@ function Detail:installStoreBook()
         }
         dialog:show()
         require("ui/network/manager"):runWhenOnline(function()
-            if self._closed then
+            if not self.lifecycle:uiReady() then
                 dialog:close()
                 return
             end
@@ -501,10 +518,10 @@ function Detail:installStoreBook()
                 UIManager:show(InfoMessage:new{ text = _("当前数据源不支持书城") })
                 return
             end
-            self._install_job = self.source:addStoreBookAsync(book, function(ok, err, title)
+            self._install_job = self.lifecycle:addHttp(self.source:addStoreBookAsync(book, function(ok, err, title)
                 self._install_job = nil
                 dialog:close()
-                if self._closed then
+                if not self.lifecycle:uiReady() then
                     return
                 end
                 if not ok then
@@ -524,7 +541,7 @@ function Detail:installStoreBook()
                     end
                     desk:switchTab("library")
                 end
-            end)
+            end))
         end)
         return
     end
@@ -543,13 +560,13 @@ function Detail:installStoreBook()
     }
     dialog:show()
     require("ui/network/manager"):runWhenOnline(function()
-        if self._closed then dialog:close(); return end
-        self._install_job = require("zlib.init").installAsync(self.source, book, function(bytes)
+        if not self.lifecycle:uiReady() then dialog:close(); return end
+        self._install_job = self.lifecycle:addHttp(require("zlib.init").installAsync(self.source, book, function(bytes)
             dialog:reportProgress(bytes)
         end, function(ok, err, filename)
             self._install_job = nil
             dialog:close()
-            if self._closed then return end
+            if not self.lifecycle:uiReady() then return end
             if not ok then
                 UIManager:show(InfoMessage:new{ text = err or _("下载失败") })
                 return
@@ -567,7 +584,7 @@ function Detail:installStoreBook()
                 end
                 desk:switchTab("library")
             end
-        end)
+        end))
     end)
 end
 
@@ -586,7 +603,7 @@ function Detail:toggleRead()
         })
         return
     end
-    if self._closed then
+    if not self.lifecycle:uiReady() then
         return
     end
     self:reload()
@@ -623,7 +640,7 @@ function Detail:deleteBook()
                     })
                     return
                 end
-                if self._closed then
+                if not self.lifecycle:uiReady() then
                     return
                 end
                 self._dirty = true
@@ -801,7 +818,7 @@ function Detail:saveMeta(fields)
             fetched_at = os.time(),
         })
     end
-    if self._closed then
+    if not self.lifecycle:uiReady() then
         return
     end
     local UIManager = require("ui/uimanager")
@@ -1011,18 +1028,24 @@ function Detail:updateView()
             unread = function() self:toggleRead() end,
             delete = function() self:deleteBook() end,
         }
-        local tool_chips = {}
+        local cap_chips, status_chips = {}, {}
         for _, def in ipairs(tools) do
-            tool_chips[#tool_chips + 1] = {
+            local chip = {
                 icon = def.icon,
                 text = def.text,
                 fn = fns[def.id],
             }
+            if def.id == "read" or def.id == "unread" or def.id == "delete" then
+                status_chips[#status_chips + 1] = chip
+            else
+                cap_chips[#cap_chips + 1] = chip
+            end
         end
-        local tool_h = UI.sz(56)
+        local cap_h = UI.sz(56)
+        local status_h = UI.sz(44)
         local read_h = UI.sz(44)
         local row_gap = UI.sz(8)
-        if #tool_chips == 0 and not primary then
+        if #cap_chips == 0 and #status_chips == 0 and not primary then
             footer = TextWidget:new{
                 text = _("暂无可用操作"),
                 face = UI.face("xx_smallinfofont", 13),
@@ -1033,19 +1056,25 @@ function Detail:updateView()
         else
             local kids = VerticalGroup:new{ align = "center" }
             footer_h = footer_pad_v * 2
-            if #tool_chips > 0 then
-                table.insert(kids, chipRow(content_w, tool_h, tool_chips, "column"))
-                footer_h = footer_h + tool_h
-            end
-            if primary then
-                if #tool_chips > 0 then
+            local function appendRow(row, height)
+                if kids[1] then
                     table.insert(kids, VerticalSpan:new{ width = row_gap })
                     footer_h = footer_h + row_gap
                 end
-                table.insert(kids, actionChip(content_w, read_h, primary.icon, primary.text, function()
+                table.insert(kids, row)
+                footer_h = footer_h + height
+            end
+            if #cap_chips > 0 then
+                appendRow(chipRow(content_w, cap_h, cap_chips, "column"), cap_h)
+            end
+            if #status_chips > 0 then
+                -- 标记已读 / 删除：左图标右文本
+                appendRow(chipRow(content_w, status_h, status_chips, "row"), status_h)
+            end
+            if primary then
+                appendRow(actionChip(content_w, read_h, primary.icon, primary.text, function()
                     self:openBook()
-                end))
-                footer_h = footer_h + read_h
+                end), read_h)
             end
             footer = kids
         end

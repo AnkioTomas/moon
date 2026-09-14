@@ -62,7 +62,9 @@ local desktop = {
     updateView = function() view_updates = view_updates + 1 end,
     ctx = function(self) return { desktop = self } end,
 }
-local store = Store.new(desktop)
+local store = Store:new{ desktop = desktop, name = "store" }
+Assert.eq(store.name, "store")
+Assert.eq(store.desktop, desktop)
 Assert.eq(store.lifecycle.state, "new")
 store:onCreate()
 Assert.eq(store.lifecycle.state, "Create")

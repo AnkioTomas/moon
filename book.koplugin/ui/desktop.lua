@@ -13,7 +13,7 @@
   | BottomBar  首页|图书馆|[书城]|[统计]|设置      |
   +-----------------------------------------------+
   手势：底栏 tap 切 Tab；内容区左右滑转给当前页；顶栏点源名换源、点其他区域或下滑开快捷面板。
-  Lifecycle：Create → Resume ↔ Pause → Destroy；Resume 只打 topbar+当前 Tab；弹窗自管 _closed。
+  Lifecycle：Create → Resume ↔ Pause → Destroy；Resume 只打 topbar+当前 Tab；详情浮层自挂 Lifecycle。
 
 @module koplugin.book.ui.desktop
 --]]
