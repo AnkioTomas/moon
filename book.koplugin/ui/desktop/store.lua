@@ -15,11 +15,14 @@
 @module koplugin.book.ui.store
 --]]
 
+local Device = require("device")
 local Library = require("ui.desktop.library")
 local BookStore = require("book.store")
+local UI = require("ui.components.bookui")
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 local View = require("ui.view")
+local Screen = Device.screen
 
 ---@class BookStorePage
 ---@field desktop BookDesktop
@@ -158,12 +161,16 @@ function Store:showSearch()
     end, self.search)
 end
 
---- 同步书城 page_size（与图书馆网格容量一致）。
+--- 同步书城 page_size（与图书馆同网格公式；不碰图书馆实例）。
 ---@return number
 function Store:syncPageSize()
-    local library = self.desktop.library or Library:new{ desktop = self.desktop, name = "library" }
-    library:syncPageSize()
-    self.page_size = library.page_size
+    local desktop = self.desktop
+    local width = (desktop.dimen and desktop.dimen.w) or Screen:getWidth()
+    local height = type(desktop.contentHeight) == "function"
+        and desktop:contentHeight()
+        or math.max(1, Screen:getHeight() - UI.barH() - UI.topBarH())
+    local m = Library.gridMetrics(width, height)
+    self.page_size = math.max(1, m.page_size or 1)
     return self.page_size
 end
 
