@@ -8,8 +8,12 @@ local remembered
 package.preload["ui.desktop.library"] = function()
     local Library = {}
     Library.__index = Library
-    function Library:new(desktop)
-        return setmetatable({ desktop = desktop, page_size = 2 }, Library)
+    function Library:new(opts)
+        opts = opts or {}
+        return setmetatable({
+            desktop = opts.desktop or opts[1],
+            page_size = 2,
+        }, Library)
     end
     function Library:build(_ctx, _state, opts)
         build_opts = opts
@@ -18,9 +22,8 @@ package.preload["ui.desktop.library"] = function()
     function Library:showSearch(apply)
         search_apply = apply
     end
-    function Library:syncPageSize()
-        self.page_size = 2
-        return 2
+    function Library.gridMetrics()
+        return { page_size = 2 }
     end
     return Library
 end
@@ -29,6 +32,20 @@ package.preload["book.store"] = function()
 end
 package.preload["ui/uimanager"] = function()
     return { nextTick = function() end }
+end
+package.preload["device"] = function()
+    return {
+        screen = {
+            getWidth = function() return 600 end,
+            getHeight = function() return 800 end,
+        },
+    }
+end
+package.preload["ui.components.bookui"] = function()
+    return {
+        barH = function() return 48 end,
+        topBarH = function() return 36 end,
+    }
 end
 package.preload["gettext"] = function()
     return function(value) return value end
@@ -40,6 +57,8 @@ local desktop = {
     lifecycle = { state = "Resume" },
     filter = { category = "历史" },
     tab = "library",
+    dimen = { w = 600, h = 800 },
+    contentHeight = function() return 716 end,
     updateView = function() view_updates = view_updates + 1 end,
     ctx = function(self) return { desktop = self } end,
 }
@@ -115,6 +134,10 @@ store.state = nil
 local page = store:updateView()
 Assert.eq(requests, 1)
 Assert.eq(page.books[1].stable_id, "3")
+
+-- syncPageSize 走 gridMetrics，不借调图书馆实例。
+Assert.eq(store:syncPageSize(), 2)
+Assert.eq(store.page_size, 2)
 
 -- 搜索和清除会换查询；HTTP 层负责命中持久化缓存。
 store:applySearch("Lua")
