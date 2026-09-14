@@ -221,6 +221,8 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             unseries = opts.unseries,
             search = opts.search,
             read_status = opts.read_status,
+            sort = opts.sort,
+            sort_desc = opts.sort_desc,
             limit = page_size,
             offset = (page - 1) * page_size,
         })
