@@ -450,6 +450,10 @@ function Desktop:updateView()
     local content = overlapAt(tabContent(self), 0, UI.topBarH(), sw, self:contentHeight())
     self.view:replaceRegion("content", content, root[1] and root[1]._view_owner)
     self.view:replaceRegion("bottombar", bar)
+    -- 底栏根 widget 身份不变，replaceRegion 会 early-return；选中态已在内部换掉，必须显式 dirty。
+    if self.lifecycle:uiReady() then
+        self.view:dirty("bottombar")
+    end
     logger.dbg("book.perf desktop.updateView", Perf.elapsedMs(started_at), "ms", self.tab)
     if resized and self.lifecycle:uiReady() then UIManager:setDirty(self, "ui") end
 end
