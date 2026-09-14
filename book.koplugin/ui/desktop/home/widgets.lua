@@ -192,8 +192,6 @@ end
 function M.save(list)
     local home = MoonSettings.get("home")
     home.home_widgets = list
-    home.home_layout = nil
-    home.home_widgets_need_split = false
     MoonSettings.saveSection("home", home)
 end
 

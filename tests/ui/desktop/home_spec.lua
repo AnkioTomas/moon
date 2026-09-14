@@ -40,6 +40,8 @@ local placements = {
     { id = "clock", page = 1, order = 1, height = "default" },
 }
 local can_fit = true
+local needs_layout = false
+local paginate_calls = 0
 local last_strip
 local last_add
 package.preload["ui.desktop.home.registry"] = function()
@@ -56,8 +58,7 @@ package.preload["ui.desktop.home.registry"] = function()
             enabled = {}
             for _, item in ipairs(list) do enabled[#enabled + 1] = item.id end
         end,
-        needsSplit = function() return false end,
-        clearNeedsSplit = function() end,
+        needsLayout = function() return needs_layout end,
     }
 end
 package.preload["ui.desktop.home.widgets"] = function()
@@ -98,7 +99,20 @@ package.preload["ui.desktop.home.widgets"] = function()
             end
             return max_p + 1, 1
         end,
-        applyPacks = function(list) return list end,
+        applyPacks = function(list, packs)
+            local out = {}
+            for page, pack in ipairs(packs) do
+                for order, raw in ipairs(pack) do
+                    out[#out + 1] = {
+                        id = raw.id,
+                        page = page,
+                        order = order,
+                        height = "default",
+                    }
+                end
+            end
+            return #out > 0 and out or list
+        end,
         ids = function(list)
             local out = {}
             for _, item in ipairs(list) do out[#out + 1] = item.id end
@@ -144,7 +158,10 @@ package.preload["ui.desktop.home.layout"] = function()
     return {
         new = function()
             return {
-                paginate = function() return { {} } end,
+                paginate = function(_, ranges)
+                    paginate_calls = paginate_calls + 1
+                    return { { ranges[1] }, { ranges[2] } }
+                end,
                 build = function(_, _, components, page, opts)
                     local pages = layout_pages
                     page = math.max(1, math.min(pages, math.floor(tonumber(page) or 1)))
@@ -222,11 +239,23 @@ local home = Home:new({ desktop = desktop })
 desktop.home = home
 Assert.eq(home.lifecycle.state, "new")
 Assert.is_nil(home.components)
+enabled = { "clock", "weather" }
+placements = {
+    { id = "clock", page = 1, order = 1, height = "default" },
+    { id = "weather", page = 1, order = 2, height = "default" },
+}
+needs_layout = true
 home:onCreate()
 Assert.eq(home.lifecycle.state, "Create")
 Assert.not_nil(home.components.clock)
 Assert.eq(home.components.clock.lifecycle.state, "Create")
 Assert.not_nil(home.widget)
+Assert.eq(paginate_calls, 1)
+Assert.eq(placements[1].page, 1)
+Assert.eq(placements[2].page, 2)
+needs_layout = false
+home:updateView()
+Assert.eq(paginate_calls, 1)
 
 home:onResume()
 Assert.eq(home.lifecycle.state, "Resume")
@@ -238,7 +267,11 @@ placements = {}
 child_events = {}
 home:onEvent("home_changed")
 Assert.is_nil(home.components.clock)
-Assert.eq(table.concat(child_events, ","), "pause,destroy")
+Assert.len(child_events, 4)
+Assert.contains(child_events, "pause")
+Assert.contains(child_events, "destroy")
+Assert.contains(child_events, "weather.pause")
+Assert.contains(child_events, "weather.destroy")
 
 enabled = { "clock" }
 placements = { { id = "clock", page = 1, order = 1, height = "default" } }

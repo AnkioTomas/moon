@@ -109,13 +109,13 @@ function Home:sync()
     end
 end
 
---- 旧 home_layout 迁移后：用 paginate 切页一次并落盘。
+--- 首次显示时按真实屏幕高度生成默认分页并落盘。
 ---@param self BookHome 当前视图或布局实例
 ---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
 ---@param body_h number 扣除固定控件后的正文高度，单位像素
 ---@return nil
-local function maybeSplit(self, ctx, body_h)
-    if not Components.needsSplit() then return end
+local function ensureLayout(self, ctx, body_h)
+    if not Components.needsLayout() then return end
     local placements = Components.widgets()
     local gap = UI.sz(8)
     local inset = UI.pagePad()
@@ -133,7 +133,6 @@ local function maybeSplit(self, ctx, body_h)
     local packs = self.layout:paginate(ranges, inner_h, gap)
     local next_list = Widgets.applyPacks(placements, packs)
     Components.saveWidgets(next_list)
-    Components.clearNeedsSplit()
 end
 
 --- 移除指定组件的摆放记录并刷新首页布局。
@@ -302,7 +301,7 @@ local function assemble(self)
     local strip_h = PageStrip.bandH()
     local body_h = math.max(1, h - strip_h)
 
-    if self.desktop and not self.offscreen then maybeSplit(self, ctx, body_h) end
+    if self.desktop and not self.offscreen then ensureLayout(self, ctx, body_h) end
 
     local can_add = false
     if self.editing then

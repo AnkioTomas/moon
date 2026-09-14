@@ -51,18 +51,10 @@ function M.enabledLayout()
     return Widgets.ids(M.widgets())
 end
 
---- 是否需要在首次已知屏高时按旧 paginate 切页。
+--- 是否尚未按真实屏幕高度生成首页布局。
 ---@return boolean
-function M.needsSplit()
-    return MoonSettings.get("home").home_widgets_need_split == true
-end
-
---- 清除切页标记。
-function M.clearNeedsSplit()
-    local home = MoonSettings.get("home")
-    if home.home_widgets_need_split == false then return end
-    home.home_widgets_need_split = false
-    MoonSettings.saveSection("home", home)
+function M.needsLayout()
+    return MoonSettings.get("home").home_widgets == nil
 end
 
 return M
