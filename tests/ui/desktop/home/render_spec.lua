@@ -54,6 +54,7 @@ local bb = {
     paintRect = function(_, x, y, w, h, color)
         dots[#dots + 1] = { x = x, y = y, w = w, h = h, color = color }
     end,
+    setPixel = function() end,
 }
 for _, pages in ipairs({ 1, 4 }) do
     for page = 1, pages do

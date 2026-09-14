@@ -1,5 +1,5 @@
 --[[--
-首页编辑叠层：组件顶栏一簇图标，遮罩吞掉底层点击。
+首页编辑叠层：组件顶栏 Action，其余区域 MeshMask 压暗并吞点击。
 
 @module koplugin.book.ui.desktop.home.edit_overlay
 --]]
@@ -16,10 +16,10 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local SpinWidget = require("ui/widget/spinwidget")
 local TextWidget = require("ui/widget/textwidget")
-local Widget = require("ui/widget/widget")
 local UIManager = require("ui/uimanager")
 local UI = require("ui.components.bookui")
 local Icon = require("ui.components.icon")
+local MeshMask = require("ui.components.meshmask")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -115,6 +115,7 @@ function Edit.wrap(widget, meta, handlers)
     local shield = InputContainer:new{
         dimen = Geom:new{ w = w, h = h },
     }
+    -- 网状遮罩盖住组件内容；Action 工具条叠在上层，不被遮罩糊住。
     shield[1] = FrameContainer:new{
         bordersize = 1,
         padding = 0,
@@ -122,7 +123,10 @@ function Edit.wrap(widget, meta, handlers)
         width = w,
         height = h,
         dimen = Geom:new{ w = w, h = h },
-        Widget:new{ dimen = Geom:new{ w = math.max(0, w - 2), h = math.max(0, h - 2) } },
+        MeshMask.widget{
+            width = math.max(0, w - 2),
+            height = math.max(0, h - 2),
+        },
     }
     shield.ges_events = swallowEvents(shield, "HomeEditShield")
     shield.onHomeEditShieldTap = function() return true end
@@ -137,7 +141,7 @@ function Edit.wrap(widget, meta, handlers)
         shield,
         tools,
     }
-    --- 绘制从底到顶；事件从顶到底：先图标簇，再遮罩，最后底层组件。
+    --- 绘制从底到顶；事件从顶到底：先 Action，再遮罩，最后底层组件。
     ---@param event table 父组件转发的事件名称或事件对象
     ---@return boolean
     function overlay:propagateEvent(event)
