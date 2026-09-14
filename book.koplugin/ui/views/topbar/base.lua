@@ -182,12 +182,6 @@ function Base:build(ctx)
     return View.build(self)
 end
 
---- 停止顶栏项目时取消定时刷新。
----@return nil
-function Base:onStop()
-    self:unschedule()
-end
-
 --- 取消定时刷新并清除指标 Widget 和屏幕矩形引用。
 ---@return nil
 function Base:onDestroy()

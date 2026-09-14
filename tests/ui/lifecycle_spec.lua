@@ -7,7 +7,7 @@ local Lifecycle = require("ui.lifecycle")
 local Child = setmetatable({}, Lifecycle)
 Child.__index = Child
 local calls = {}
-for _, stage in ipairs({ "Create", "Start", "Resume", "Pause", "Stop", "Destroy" }) do
+for _, stage in ipairs({ "Create", "Resume", "Pause", "Destroy" }) do
     Child["on" .. stage] = function(self)
         Assert.eq(self.state, stage)
         calls[#calls + 1] = stage
@@ -18,35 +18,29 @@ local first, second = Child:new(), Child:new()
 Assert.is_false(first:uiReady())
 Assert.eq(first.state, "new")
 
--- 显示：从 new 直接 Resume，补 Create + Start。
+-- 显示：从 new 直接 Resume，补 Create。
 calls = {}
 first:onResume()
 Assert.eq(first.state, "Resume")
-Assert.eq(table.concat(calls, ","), "Create,Start,Resume")
+Assert.eq(table.concat(calls, ","), "Create,Resume")
 Assert.is_true(first:uiReady())
 
--- 已 Resume 再 Resume：只再进一次，不重放 Create/Start。
+-- 已 Resume 再 Resume：只再进一次，不重放 Create。
 calls = {}
 first:onResume()
 Assert.eq(table.concat(calls, ","), "Resume")
 
--- 暂停后恢复：不补 Start。
+-- 暂停后恢复：不补 Create。
 calls = {}
 first:onPause()
 first:onResume()
 Assert.eq(table.concat(calls, ","), "Pause,Resume")
 
--- 停止后直接恢复，不重复 Start。
-calls = {}
-first:onStop()
-first:onResume()
-Assert.eq(table.concat(calls, ","), "Stop,Resume")
-
--- 销毁：从 Resume 补 Pause + Stop。
+-- 销毁：从 Resume 补 Pause。
 calls = {}
 first:onDestroy()
 Assert.eq(first.state, "Destroy")
-Assert.eq(table.concat(calls, ","), "Pause,Stop,Destroy")
+Assert.eq(table.concat(calls, ","), "Pause,Destroy")
 Assert.is_false(first:uiReady())
 
 -- 已 Destroy 再 Destroy：无操作。
@@ -66,29 +60,21 @@ second:dispatch("Destroy")
 Assert.eq(table.concat(calls, ","), "Destroy")
 Assert.eq(second.state, "Destroy")
 
--- Create 后直接 Destroy：补 Stop。
+-- Create 后直接 Destroy：不补 Pause。
 local mid = Child:new()
 calls = {}
 mid:onCreate()
 mid:onDestroy()
-Assert.eq(table.concat(calls, ","), "Create,Stop,Destroy")
+Assert.eq(table.concat(calls, ","), "Create,Destroy")
 
--- Start 后直接 Destroy：补 Stop。
-local started = Child:new()
-calls = {}
-started:onCreate()
-started:onStart()
-started:onDestroy()
-Assert.eq(table.concat(calls, ","), "Create,Start,Stop,Destroy")
-
--- Pause 后直接 Destroy：补 Stop。
+-- Pause 后直接 Destroy：不补 Pause。
 local paused = Child:new()
 calls = {}
 paused:onResume()
 paused:onPause()
 calls = {}
 paused:onDestroy()
-Assert.eq(table.concat(calls, ","), "Stop,Destroy")
+Assert.eq(table.concat(calls, ","), "Destroy")
 
 local parent = { marker = true }
 local owner = setmetatable({ state = { books = {} } }, { __index = parent })
@@ -104,8 +90,6 @@ owner.lifecycle:dispatch("Create")
 Assert.eq(count, 1)
 Assert.eq(owner.state, data)
 Assert.is_true(owner.marker)
-owner.lifecycle:dispatch("Start")
-Assert.eq(owner.lifecycle.state, "Start")
 owner.onResume = function() error("handler failure") end
 Assert.errors(function() owner.lifecycle:dispatch("Resume") end)
 Assert.eq(owner.lifecycle.state, "Resume")
@@ -150,7 +134,7 @@ local queries = {
 local probe = Lifecycle:new()
 local owner_probe = {}
 local attached = Lifecycle.attach(owner_probe)
-for _, stage in ipairs({ "new", "Create", "Start", "Resume", "Pause", "Stop", "Destroy" }) do
+for _, stage in ipairs({ "new", "Create", "Resume", "Pause", "Destroy" }) do
     if stage ~= "new" then
         probe["on" .. stage](probe)
         owner_probe["on" .. stage](owner_probe)
@@ -159,9 +143,6 @@ for _, stage in ipairs({ "new", "Create", "Start", "Resume", "Pause", "Stop", "D
         Assert.eq(probe[method](probe), stage == expected)
         Assert.eq(attached[method](attached), stage == expected)
     end
-    local alive = stage == "new" or stage == "Create" or stage == "Start" or stage == "Resume"
-    Assert.eq(probe:Alive(), alive)
-    Assert.eq(attached:Alive(), alive)
 end
 
 -- Pause 取消 jobs / http；表被清空。

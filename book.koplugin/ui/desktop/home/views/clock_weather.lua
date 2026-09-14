@@ -169,23 +169,25 @@ function M:createWidget()
         }
 end
 
---- 启动两个子视图的数据加载，待两者结束后汇总成功或失败。
----@param cb fun(ok:boolean, err:any)|nil 全部子视图加载完成后的结果回调
+--- 离屏：并行 load 子视图。
+---@param done fun(data:any, err:any)
 ---@return nil
-function M:onStart(cb)
+function M:loadData(done)
     ensureKids(self)
     local remaining, failure = 2, nil
     --- 记录一个子任务结束，所有子任务完成后通知调用者。
     ---@param ok boolean 本次操作是否成功
     ---@param err any 操作失败的原因
     ---@return nil
-    local function done(ok, err)
+    local function finish(ok, err)
         if not ok then failure = failure or err end
         remaining = remaining - 1
-        if remaining == 0 and cb then cb(failure == nil, failure) end
+        if remaining == 0 then
+            if failure then done(nil, failure) else done(self.data) end
+        end
     end
-    self.clock:onStart(done)
-    self.weather:onStart(done)
+    self.clock:load(finish)
+    self.weather:load(finish)
 end
 
 --- 恢复时钟与天气子视图的显示及周期工作。
@@ -209,13 +211,6 @@ end
 function M:onPause()
     if self.clock then self.clock:onPause() end
     if self.weather then self.weather:onPause() end
-end
-
---- 把停止阶段传递给时钟和天气子视图。
----@return nil
-function M:onStop()
-    if self.clock then self.clock:onStop() end
-    if self.weather then self.weather:onStop() end
 end
 
 --- 销毁两个子视图并清除父视图保存的引用。

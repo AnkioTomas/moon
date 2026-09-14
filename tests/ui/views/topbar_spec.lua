@@ -357,10 +357,6 @@ bar:onCreate()
 Assert.not_nil(bar.clock.metric_widget)
 Assert.eq(bar.cache.metric_widget.label.text, "缓存 1/10")
 bar.clock.metric_widget:setText("old")
-bar:onStart()
-Assert.eq(bar.lifecycle.state, "Start")
-Assert.eq(#scheduled, 0, "onStart 不挂心跳")
-Assert.is_nil(cache_watch_cb, "onStart 不订 watch")
 bar:onResume()
 Assert.eq(bar.lifecycle.state, "Resume")
 Assert.eq(#scheduled, 4, "时钟 + 内存 120s + 存储 600s + 电池 600s")
@@ -471,7 +467,6 @@ Assert.eq(bar.brightness.metric_widget.label.text, "12%")
 
 bar:onPause()
 Assert.eq(cache_watch_cancel, 2, "Pause 取消一次，Resume 重订后 Pause 再取消")
-bar:onStop()
 bar:onDestroy()
 Assert.eq(bar.lifecycle.state, "Destroy")
 Assert.eq(cache_watch_cancel, 2)
@@ -502,7 +497,7 @@ paused.desktop = {
     lifecycle = { state = "Resume" },
 }
 paused:onCreate()
-paused:onStart()
+paused:onResume()
 paused:onPause()
 topbar_items = { clock = false }
 paused:updateView()

@@ -87,10 +87,6 @@ function Store:onDestroy()
     self:cancel()
 end
 
-function Store:onStop()
-    self:cancel()
-end
-
 ---@param event string
 ---@param payload table|nil
 function Store:onEvent(event, payload)

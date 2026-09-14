@@ -52,7 +52,6 @@ stub("ui.desktop", {
     new = function()
         return {
             lifecycle = { state = "new" },
-            onStart = function() desk_life[#desk_life + 1] = "Start" end,
             onResume = function() desk_life[#desk_life + 1] = "Resume" end,
         }
     end,
@@ -74,18 +73,12 @@ local resumed_desktop = {
     onPause = function()
         calls.desktop_pause = (calls.desktop_pause or 0) + 1
     end,
-    onStart = function()
-        calls.desktop_start = (calls.desktop_start or 0) + 1
-    end,
     onResume = function(self)
         if self.tab == "home" then
             calls.home_enter = self
         else
             calls.library_resume = self
         end
-    end,
-    onStop = function()
-        calls.desktop_stop = (calls.desktop_stop or 0) + 1
     end,
     onDestroy = function(self)
         calls.desktop_destroy = (calls.desktop_destroy or 0) + 1
@@ -107,7 +100,7 @@ Assert.is_nil(calls.home_enter, "唤醒不经插件再转 Desktop:onResume")
 current_source = { id = "local" }
 plugin.desktop = nil
 plugin:openDesktop()
-Assert.eq(table.concat(desk_life, ","), "Start,Resume")
+Assert.eq(table.concat(desk_life, ","), "Resume")
 plugin.desktop = resumed_desktop
 
 plugin:onSourceChanged()
@@ -116,7 +109,6 @@ Assert.eq(calls.desktop_event_payload, current_source)
 
 plugin:onSuspend()
 Assert.eq(calls.desktop_pause, 1)
-Assert.eq(calls.desktop_stop, 1, "Pause 之后仍要能进 onStop，不能用 Alive() 当门槛")
 
 plugin:onExit()
 Assert.eq(calls.desktop_destroy, 1)

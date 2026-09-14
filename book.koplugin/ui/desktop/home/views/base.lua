@@ -34,18 +34,6 @@ function Base:build(ctx, opts)
     return View.build(self)
 end
 
---- 前台首页的数据由 Resume 拉取，避免 Start 后紧接 Resume 重复请求。
---- 离屏导出没有 Resume，仍须在 Start 等待数据落定。
----@param cb fun(ok:boolean, err:any)|nil
----@return table|nil
-function Base:onStart(cb)
-    if self.home and not self.home.offscreen then
-        if cb then cb(true) end
-        return nil
-    end
-    return View.onStart(self, cb)
-end
-
 --- 换源、首页刷新或书籍详情变化时重建已存在的内容树。
 ---@param event string 父组件转发的事件名称或事件对象
 ---@return nil

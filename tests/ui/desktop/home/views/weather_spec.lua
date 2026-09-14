@@ -157,7 +157,6 @@ do -- 成功才补温度和彩图；同 URL 复用框；两行辅文
     local weather = Weather:new()
     weather.home = {}
     weather:onCreate()
-    weather:onStart()
     local part = weather:build(ctx, opts)
     Assert.eq(part:getSize().h, 96)
     weather:onResume()
@@ -211,7 +210,6 @@ do -- 成功才补温度和彩图；同 URL 复用框；两行辅文
     Assert.not_nil(fetch_cb)
 
     weather:onPause()
-    weather:onStop()
     weather:onDestroy()
     Assert.is_nil(weather.picture)
 end
