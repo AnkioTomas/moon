@@ -47,21 +47,6 @@ function Store:new(opts)
     return View.new(self, opts)
 end
 
----@param desktop BookDesktop
----@return BookStorePage
-function Store.new(desktop)
-    return View.new(Store, {
-        desktop = desktop,
-        state = nil,
-        books = nil,
-        fetch_cancel = nil,
-        search = nil,
-        page = 1,
-        page_size = 12,
-        total = 0,
-    })
-end
-
 function Store:cancel()
     if self.fetch_cancel then
         self.fetch_cancel:cancel()

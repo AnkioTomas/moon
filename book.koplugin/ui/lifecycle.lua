@@ -1,6 +1,6 @@
 --[[--
 Desktop 生命周期：Create / Resume / Pause / Destroy。
-归属 Desktop 渲染树；弹窗用 _closed。组合：Lifecycle.attach(owner)。
+归属 Desktop 渲染树；全屏浮层（如详情）自行 Lifecycle.attach。组合：Lifecycle.attach(owner)。
 @module koplugin.book.ui.lifecycle
 --]]
 

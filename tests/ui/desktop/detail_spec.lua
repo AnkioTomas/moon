@@ -145,6 +145,9 @@ package.preload["ffi/util"] = function()
         end,
     }
 end
+package.preload["utils.log"] = function()
+    return { dbg = function() end, info = function() end, warn = function() end, err = function() end }
+end
 
 local resolved
 package.preload["source.registry"] = function()
@@ -168,7 +171,9 @@ package.preload["db.book"] = function()
 end
 
 package.loaded["ui.desktop.detail"] = nil
+package.loaded["ui.lifecycle"] = nil
 local Detail = require("ui.desktop.detail")
+local Lifecycle = require("ui.lifecycle")
 
 local function ids(tools)
     local out = {}
@@ -239,6 +244,9 @@ local page = setmetatable({
     },
     updateView = function() end,
 }, { __index = Detail })
+page.lifecycle = Lifecycle.attach(page)
+page:onCreate()
+page:onResume()
 
 page:toggleRead()
 Assert.eq(set_read[1], "wechat")
@@ -265,7 +273,6 @@ resolved = {
         cb(true)
     end,
 }
-page._closed = false
 page._dirty = nil
 page.desktop.library.page = 4
 page:deleteBook()
@@ -275,7 +282,7 @@ Assert.eq(deleted.source_id, "wechat")
 Assert.eq(deleted.stable_id, "w2")
 Assert.eq(deleted.source, resolved)
 Assert.is_true(page._dirty)
-Assert.is_true(page._closed)
+Assert.eq(page.lifecycle.state, "Destroy")
 Assert.eq(page.desktop.library.page, 1)
 
 shown = nil
@@ -285,11 +292,27 @@ resolved = {
         cb(false, "云端拒绝")
     end,
 }
-page._closed = false
-page:deleteBook()
+local page2 = setmetatable({
+    book = {
+        source_id = "wechat",
+        stable_id = "w2",
+        title = "书一",
+        read_state = 0,
+    },
+    source = local_src,
+    desktop = {
+        library = { state = nil, page = 1 },
+        lifecycle = { state = "Resume" },
+    },
+    updateView = function() end,
+}, { __index = Detail })
+page2.lifecycle = Lifecycle.attach(page2)
+page2:onCreate()
+page2:onResume()
+page2:deleteBook()
 shown.ok_callback()
 Assert.eq(shown.text, "云端拒绝")
-Assert.is_false(page._closed)
+Assert.eq(page2.lifecycle.state, "Resume")
 
 local recent = setmetatable({
     _daily = {
