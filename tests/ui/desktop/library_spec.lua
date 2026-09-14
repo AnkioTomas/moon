@@ -1,4 +1,4 @@
---[[-- ui.desktop.library：封面点开书、更多进详情、视图筛选。 --]]
+--[[-- ui.desktop.library：封面点开书、更多进详情、筛选排序。 --]]
 
 local Assert = require("support.assert")
 
@@ -25,10 +25,9 @@ for _, name in ipairs({
     package.preload[name] = widgetModule
 end
 
-local shown
 package.preload["ui/uimanager"] = function()
     return {
-        show = function(_, widget) shown = widget end,
+        show = function() end,
         nextTick = function(_, cb) cb() end,
         setDirty = function() end,
     }
@@ -74,13 +73,6 @@ package.preload["ui.components.pager"] = function()
     }
 end
 
-local popup_sheet
-package.preload["ui.views.popup"] = function()
-    return {
-        sheet = function(opts) popup_sheet = opts return opts end,
-    }
-end
-
 local tap_callback
 local tap_widget
 local more_option
@@ -119,7 +111,7 @@ package.preload["utils.log"] = function()
     return { warn = function() end, dbg = function() end }
 end
 package.preload["gettext"] = function() return function(s) return s end end
-local display = { library_view = "flat" }
+local display = { library_sort = "recent_added" }
 package.preload["utils.settings"] = function()
     return {
         get = function(section)
@@ -207,7 +199,6 @@ library.state = nil
 library:fetch()
 Assert.eq(requested.search, "书")
 Assert.eq(requested.sort, "recent_added")
-Assert.is_false(library:isGroupIndex())
 
 library.filter = { search = "书", category = "科幻", series = "系列一", read_status = "unread" }
 library.state = nil
@@ -216,5 +207,6 @@ Assert.eq(requested.search, "书")
 Assert.eq(requested.category, "科幻")
 Assert.eq(requested.series, "系列一")
 Assert.eq(requested.read_status, "unread")
+Assert.eq(requested.sort, "recent_added")
 
 package.loaded["ui.desktop.library"] = nil

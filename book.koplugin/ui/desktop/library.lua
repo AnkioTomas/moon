@@ -1,11 +1,9 @@
 --[[--
-图书馆：可持久化切换书架、分类、系列和阅读状态视图。
-  书架顶栏：搜索 / 清除 / 视图 + 右上角总数
-  分组视图：先显示分组与数量，点击后进入对应封面书架
+图书馆：平铺封面书架 + 筛选/搜索/排序。
 
 布局：
   +-----------------------------------------------+
-  | [🔍搜索] [清除] [视图]              共N       |
+  | [刷新] [筛选] [搜索] [清除]         共N       |
   | +----+ +----+ +----+ +----+                   |
   | |封面| |封面| |封面| |封面|                   |
   | |书名| |书名| |书名| |书名|                   |
@@ -57,7 +55,7 @@ setmetatable(Library, View)
 ---@field _opening_bar table|nil
 ---@field _open_token table|nil
 
---- 创建图书馆实例，独立持有筛选、分组、分页和请求句柄。
+--- 创建图书馆实例，独立持有筛选、分页和请求句柄。
 ---@param desktop BookDesktop 所属桌面实例
 ---@return BookLibrary
 -- 使用 View 继承的 :new，生命周期字段由基类统一初始化。
@@ -100,12 +98,6 @@ function Library:showFilter()
     end) or nil
 end
 
---- 从桌面取得其拥有的图书馆实例；无桌面时返回 nil。
----@param desktop BookDesktop|nil 所属桌面实例
----@return BookLibrary|nil library 所属图书馆实例
-local function libraryOf(desktop)
-    return desktop and desktop.library
-end
 --- 顶栏入口：图标 + 文字，无边框。
 ---@param icon_name string 图标名称；nil 时按纯文字处理
 ---@param text string 需要展示的文字
@@ -327,196 +319,6 @@ local function buildGrid(ctx, books, m, on_open, show_status)
     return grid, grid_used
 end
 
---- 根据可用宽高计算图书馆分组卡片的行列和分页容量。
----@param w number 可用宽度，单位像素
----@param h number 可用高度，单位像素
----@return table
-local function groupMetrics(w, h)
-    local pad = UI.sz(10)
-    local top_h = UI.sz(52)
-    local bottom_h = Pager.bandH()
-    local grid_h = math.max(1, h - top_h - bottom_h)
-    local cols = w >= 600 and 3 or 2
-    local gap = UI.sz(10)
-    local slot_w = math.max(1, math.floor((w - pad * 2 - gap * (cols - 1)) / cols))
-    local cell_h = UI.sz(76)
-    local row_gap = UI.sz(10)
-    local rows = math.max(1, math.floor((grid_h + row_gap) / (cell_h + row_gap)))
-    return {
-        pad = pad, top_h = top_h, bottom_h = bottom_h, grid_h = grid_h,
-        cols = cols, gap = gap, row_gap = row_gap, slot_w = slot_w,
-        cell_h = cell_h, rows = rows, page_size = cols * rows,
-    }
-end
-
---- 按当前分组数据构建卡片页，并连接进入分组的点击回调。
----@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
----@param state table 当前页面的数据和分页状态
----@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
----@return table
-local function buildGroupPage(ctx, state, opts)
-    local w, h = ctx.width, ctx.height
-    local m = groupMetrics(w, h)
-    local def = groupDefinition(viewMode())
-    local groups = state.groups
-    local page = opts.page or 1
-    local page_size = m.page_size
-    local pages = opts.pages or 1
-    local total = opts.total or 0
-
-    local tools = HorizontalGroup:new{
-        align = "center",
-        iconAction("refresh", _("刷新"), function()
-            local library = libraryOf(ctx.desktop)
-            if library then
-                library:rescan()
-                library.groups_state = nil
-                library.desktop:updateView()
-            end
-        end),
-        HorizontalSpan:new{ width = UI.sz(8) },
-        iconAction("view_module", _("视图"), function()
-            if ctx.desktop then libraryOf(ctx.desktop):showViewPicker() end
-        end),
-    }
-    local total_label = TextWidget:new{
-        text = T(_("共%1组"), total),
-        face = UI.face("xx_smallinfofont", 13),
-        fgcolor = UI.muted(),
-    }
-    local mid = math.max(UI.sz(8), w - m.pad * 2 - tools:getSize().w - total_label:getSize().w)
-    local kids = {
-        align = "left",
-        FrameContainer:new{
-            bordersize = 0,
-            padding = m.pad,
-            padding_bottom = UI.sz(4),
-            background = Blitbuffer.COLOR_WHITE,
-            dimen = Geom:new{ w = w, h = m.top_h },
-            HorizontalGroup:new{
-                align = "center", tools, HorizontalSpan:new{ width = mid }, total_label,
-            },
-        },
-    }
-    local used = m.top_h
-
-    if not groups then
-        kids[#kids + 1] = CenterContainer:new{
-            dimen = Geom:new{ w = w, h = m.grid_h },
-            TextWidget:new{ text = _("加载中…"), face = UI.face("xx_smallinfofont", 14), fgcolor = UI.muted() },
-        }
-        used = used + m.grid_h
-    elseif #groups == 0 then
-        kids[#kids + 1] = CenterContainer:new{
-            dimen = Geom:new{ w = w, h = m.grid_h },
-            TextWidget:new{ text = state.err or _("没有分组"), face = UI.face("xx_smallinfofont", 14), fgcolor = UI.muted() },
-        }
-        used = used + m.grid_h
-    else
-        local grid = VerticalGroup:new{ align = "left" }
-        local first = (page - 1) * page_size + 1
-        local last = math.min(#groups, first + page_size - 1)
-        local index = first
-        local rows_used = 0
-        for row = 1, m.rows do
-            if index > last then break end
-            if rows_used > 0 then
-                grid[#grid + 1] = VerticalSpan:new{ width = m.row_gap }
-                used = used + m.row_gap
-            end
-            local line = HorizontalGroup:new{}
-            line[#line + 1] = HorizontalSpan:new{ width = m.pad }
-            for col = 1, m.cols do
-                if index > last then break end
-                if col > 1 then line[#line + 1] = HorizontalSpan:new{ width = m.gap } end
-                local item = groups[index]
-                local value = item[def.value_key] or ""
-                local name = def.labels and def.labels[value]
-                    or (value == "" and def.empty_label or value)
-                local content = VerticalGroup:new{
-                    align = "center",
-                    TextWidget:new{
-                        text = name,
-                        face = UI.face("cfont", 16),
-                        bold = true,
-                        max_width = m.slot_w - UI.sz(16),
-                        fgcolor = Blitbuffer.COLOR_BLACK,
-                    },
-                    VerticalSpan:new{ width = UI.sz(5) },
-                    TextWidget:new{
-                        text = T(_("%1 本书"), item.count),
-                        face = UI.face("xx_smallinfofont", 12),
-                        fgcolor = UI.muted(),
-                    },
-                }
-                local tap = BookInfo.tappable(m.slot_w, m.cell_h, function()
-                    libraryOf(ctx.desktop):enterGroup(value)
-                end)
-                tap[1] = CenterContainer:new{
-                    dimen = Geom:new{ w = m.slot_w, h = m.cell_h },
-                    Surface.build{ child = content, options = {
-                        width = m.slot_w,
-                        height = m.cell_h,
-                        padding = UI.sz(8),
-                        shadow = false,
-                    }, kind = "card" },
-                }
-                line[#line + 1] = tap
-                index = index + 1
-            end
-            grid[#grid + 1] = line
-            rows_used = rows_used + 1
-            used = used + m.cell_h
-        end
-        kids[#kids + 1] = grid
-    end
-    local filler = math.max(0, h - m.bottom_h - used)
-    if filler > 0 then
-        kids[#kids + 1] = VerticalSpan:new{ width = filler }
-    end
-    kids[#kids + 1] = Pager.band(w, page, pages, opts)
-    return FrameContainer:new{
-        bordersize = 0, padding = 0, margin = 0,
-        background = Blitbuffer.COLOR_WHITE,
-        dimen = Geom:new{ w = w, h = h },
-        VerticalGroup:new(kids),
-    }
-end
-
---- 查询分组统计，维护加载状态并在结果返回后刷新索引页。
----@return nil
-function Library:fetchGroups()
-    if self.fetch_cancel then
-        self.fetch_cancel:cancel()
-        self.fetch_cancel = nil
-    end
-    local source = self.desktop.source
-    local generation = self.desktop.source_generation or 0
-    local mode = viewMode()
-    local def = groupDefinition(mode)
-    if not source or type(source.filtersAsync) ~= "function" then
-        self.groups_state = { groups = {}, err = _("当前数据源不支持分组") }
-        self.desktop:updateView()
-        return
-    end
-    self.fetch_cancel = source:filtersAsync(function(res, err)
-        if self.desktop._closed or self.desktop.source ~= source
-            or (self.desktop.source_generation or 0) ~= generation
-            or not self:isGroupIndex() or viewMode() ~= mode then
-            return
-        end
-        self.fetch_cancel = nil
-        local data = res and res.data or {}
-        local groups = data[def.data_key] or {}
-        self.groups_state = {
-            groups = groups,
-            err = res and nil or (err or _("加载失败")),
-        }
-        self.total = #groups
-        self.desktop:updateView()
-    end)
-end
-
 --- 构建图书馆页 UI（工具栏 + 网格 + 分页）。
 ---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
 ---@param state table 当前页面的数据和分页状态
@@ -532,6 +334,7 @@ function Library:build(ctx, state, opts)
     local pages = opts.pages or 1
     local total = opts.total or 0
     local books = state.books
+    local library = ctx.desktop and ctx.desktop.library
     --- 点封面直接打开书。
     ---@param book Book 被点中的书
     ---@param cover table 封面叠层
@@ -563,47 +366,34 @@ function Library:build(ctx, state, opts)
 
     local tools_kids = { align = "center" }
     local search_only = opts.search_only == true
-    local group_drill = false
-    local has_tool = false
-    if group_drill then
-        local group = ctx.desktop and ctx.desktop.library.group
-        local title = groupDefinition(group and group.mode or viewMode()).title
-        table.insert(tools_kids, iconAction("arrow_back", T(_("返回%1"), title), function()
-            if ctx.desktop then libraryOf(ctx.desktop):leaveGroup() end
-        end))
-        has_tool = true
-    elseif not search_only then
+    if not search_only then
         table.insert(tools_kids, iconAction("refresh", _("刷新"), function()
-            if ctx.desktop then libraryOf(ctx.desktop):rescan() end
+            if library then library:rescan() end
         end))
-        has_tool = true
         table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
     end
     local supports_filter = ctx.source and type(ctx.source.filtersAsync) == "function"
-    if not group_drill and not search_only and supports_filter then
-        table.insert(tools_kids, iconAction("filter_list", _("筛选"), function() libraryOf(ctx.desktop):showFilter() end))
+    if not search_only and supports_filter then
+        table.insert(tools_kids, iconAction("filter_list", _("筛选"), function()
+            if library then library:showFilter() end
+        end))
         table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
     end
-    if not group_drill then
-        table.insert(tools_kids, iconAction("search", _("搜索"), function()
-            if opts.on_search then
-                opts.on_search()
-            elseif ctx.desktop then
-                libraryOf(ctx.desktop):showSearch()
-            end
-        end))
-        has_tool = true
-    end
-    if not group_drill then
-        table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
-        table.insert(tools_kids, iconAction("clear", _("清除"), function()
-            if opts.on_clear then
-                opts.on_clear()
-            elseif ctx.desktop then
-                libraryOf(ctx.desktop):clearFilters()
-            end
-        end))
-    end
+    table.insert(tools_kids, iconAction("search", _("搜索"), function()
+        if opts.on_search then
+            opts.on_search()
+        elseif library then
+            library:showSearch()
+        end
+    end))
+    table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
+    table.insert(tools_kids, iconAction("clear", _("清除"), function()
+        if opts.on_clear then
+            opts.on_clear()
+        elseif library then
+            library:clearFilters()
+        end
+    end))
     local tools = HorizontalGroup:new(tools_kids)
     local total_label = TextWidget:new{
         text = T(_("共%1"), total),
@@ -899,7 +689,7 @@ function Library:cancel()
     end
 end
 
---- 取消旧查询并清除筛选、分组、分页及列表缓存。
+--- 取消旧查询并清除筛选、分页及列表缓存。
 ---@return nil
 function Library:reset()
     self:cancel()
