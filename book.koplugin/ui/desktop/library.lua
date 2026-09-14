@@ -193,7 +193,7 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open, show_status)
     ---@param _ table
     ---@param ges table|nil
     ---@return boolean
-    tap.onTapBookInfo = function(_, ges)
+    tap.onTapBookInfo = function(_, _arg, ges)
         local pos, dimen = ges and ges.pos, tap.dimen
         if pos and dimen then
             local size, inset = UI.sz(18), UI.sz(4)
@@ -538,8 +538,12 @@ end
 --- 按当前网格容量同步 page_size。
 ---@return number
 function Library:syncPageSize()
-    local width = (self.desktop.dimen and self.desktop.dimen.w) or Screen:getWidth()
-    local height = self.desktop:contentHeight()
+    local desktop = self.desktop
+    local width = (desktop and desktop.dimen and desktop.dimen.w) or Screen:getWidth()
+    -- desktop 必须是 Desktop 实例；防御误把 ctx/opts 表塞进来的调用方。
+    local height = desktop and type(desktop.contentHeight) == "function"
+        and desktop:contentHeight()
+        or math.max(1, Screen:getHeight() - UI.barH() - UI.topBarH())
     local m = Library.gridMetrics(width, height)
     local n = math.max(1, m.page_size or 1)
     if self.page_size ~= n then

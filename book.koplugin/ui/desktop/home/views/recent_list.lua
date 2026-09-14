@@ -269,7 +269,7 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open)
     ---@param _ table
     ---@param ges table|nil
     ---@return boolean
-    tap.onTapBookInfo = function(_, ges)
+    tap.onTapBookInfo = function(_, _arg, ges)
         local pos, dimen = ges and ges.pos, tap.dimen
         if pos and dimen then
             local size, inset = UI.sz(18), UI.sz(4)
