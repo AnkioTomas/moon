@@ -19,7 +19,8 @@ local DEFAULTS = {
     },
     display = {
         ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,
-        library_view = "flat",
+        library_view = "flat", -- legacy, ignored by the library UI
+        library_sort = "recent_added",
         auto_brightness_enabled = false,
     },
     lockscreen = {

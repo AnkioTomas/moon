@@ -203,62 +203,18 @@ Assert.eq(type(open_done), "function")
 open_done(true)
 Assert.eq(refresh_statuses[2], "idle")
 
-library:showViewPicker()
-Assert.eq(popup_sheet.title, "图书馆视图")
-Assert.eq(#popup_sheet.items, 4)
-Assert.eq(popup_sheet.items[2].text, "分类视图")
-Assert.eq(popup_sheet.items[3].text, "系列视图")
-Assert.eq(popup_sheet.items[4].text, "阅读状态视图")
-
 library.state = nil
 library:fetch()
 Assert.eq(requested.search, "书")
-
-library:setView("category")
-Assert.eq(display.library_view, "category")
-Assert.is_true(library:isGroupIndex())
-source.filtersAsync = function(_, cb)
-    cb({ data = {
-        category_counts = {
-            { category = "科幻", count = 3 },
-            { category = "", count = 2 },
-            { category = "历史", count = 1 },
-        },
-        series_counts = { { series = "系列一", count = 6 } },
-        read_counts = {
-            { status = "new", count = 1 },
-            { status = "read", count = 2 },
-            { status = "unread", count = 3 },
-        },
-    } })
-end
-library:fetchGroups()
-Assert.eq(library.groups_state.groups[1].category, "科幻")
-Assert.eq(library.groups_state.groups[2].count, 2)
-Assert.not_nil(library:updateView())
-Assert.eq(library:pages(), 2)
-library:gotoPage(2)
-Assert.eq(library.page, 2)
-
-library:enterGroup("")
+Assert.eq(requested.sort, "recent_added")
 Assert.is_false(library:isGroupIndex())
-library:fetch()
-Assert.is_true(requested.uncategorized)
-library:leaveGroup()
-Assert.is_true(library:isGroupIndex())
 
-library:setView("series")
-library:fetchGroups()
-Assert.eq(library.groups_state.groups[1].series, "系列一")
-library:enterGroup("系列一")
+library.filter = { search = "书", category = "科幻", series = "系列一", read_status = "unread" }
+library.state = nil
 library:fetch()
+Assert.eq(requested.search, "书")
+Assert.eq(requested.category, "科幻")
 Assert.eq(requested.series, "系列一")
-
-library:setView("status")
-library:fetchGroups()
-Assert.eq(#library.groups_state.groups, 3)
-library:enterGroup("new")
-library:fetch()
-Assert.eq(requested.read_status, "new")
+Assert.eq(requested.read_status, "unread")
 
 package.loaded["ui.desktop.library"] = nil

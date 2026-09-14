@@ -611,7 +611,7 @@ function BookDB.libraryStableIdsBySource(source_id)
         WHERE source_id=? AND in_library=1 ORDER BY stable_id;]], source_id)
 end
 
---- 按源分页查询书库（图书馆直查数据库；排序与扫盘序一致 = stable_id）。
+--- 按源分页查询书库（图书馆直查数据库）。
 ---@param source_id string
 ---@param opts { category: string|nil, uncategorized: boolean|nil, series: string|nil, unseries: boolean|nil, search: string|nil, read_status: string|nil, limit: number|nil, offset: number|nil }|nil
 ---@return table[] rows, number count
@@ -656,13 +656,27 @@ function BookDB.listBySource(source_id, opts)
     end
     local limit = tonumber(opts.limit) or 0
     local offset = tonumber(opts.offset) or 0
+    local sort_sql = {
+        title = "COALESCE(b.title, '') COLLATE NOCASE %s, b.stable_id ASC",
+        author = "COALESCE(b.authors, '') COLLATE NOCASE %s, COALESCE(b.title, '') COLLATE NOCASE %s, b.stable_id ASC",
+        recent_read = "COALESCE(p.updated_at, 0) DESC, b.stable_id ASC",
+        recent_added = "b.fetched_at DESC, b.stable_id ASC",
+    }
+    local sort = opts.sort or "recent_added"
+    local order = sort_sql[sort] or sort_sql.recent_added
+    if sort == "title" then
+        order = string.format(order, opts.sort_desc and "DESC" or "ASC")
+    elseif sort == "author" then
+        local direction = opts.sort_desc and "DESC" or "ASC"
+        order = string.format(order, direction, direction)
+    end
     local sel = [[SELECT b.stable_id, b.title, b.authors,
                         COALESCE(p.fraction * 100, b.percent),
                         b.category, b.series, b.intro, b.cover, b.fetched_at,
                         b.read_state, b.is_new, b.path
                    FROM books b LEFT JOIN pending_progress p
                      ON p.source_id=b.source_id AND p.stable_id=b.stable_id
-                  WHERE ]] .. where .. " ORDER BY b.stable_id"
+                   WHERE ]] .. where .. " ORDER BY " .. order
     if limit > 0 then
         sel = sel .. " LIMIT ? OFFSET ?"
         args[#args + 1] = limit
