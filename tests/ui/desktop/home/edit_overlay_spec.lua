@@ -49,6 +49,16 @@ package.preload["ui.components.icon"] = function()
         end,
     }
 end
+package.preload["ui.components.meshmask"] = function()
+    return {
+        widget = function(opts)
+            return {
+                dimen = { w = opts.width, h = opts.height },
+                getSize = function(self) return self.dimen end,
+            }
+        end,
+    }
+end
 
 local Edit = require("ui.desktop.home.edit_overlay")
 local settings = {}
