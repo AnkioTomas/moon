@@ -122,7 +122,7 @@ function Insight:openBookDetail(hint)
         if hint.percent ~= nil and (not cached.percent or cached.percent == 0) then
             cached.percent = tonumber(hint.percent) or cached.percent or 0
         end
-        require("ui.desktop.detail").open(desktop, cached)
+        require("ui.desktop.detail").open(desktop, "library", cached)
         return
     end
 
@@ -151,7 +151,7 @@ function Insight:openBookDetail(hint)
             UIManager:close(loading)
             if desktop.lifecycle.state == "Destroy" then return end
             if book then
-                require("ui.desktop.detail").open(desktop, book)
+                require("ui.desktop.detail").open(desktop, "library", book)
             else
                 UIManager:show(InfoMessage:new{ text = err_text or _("没有这本书"), timeout = 2 })
             end

@@ -64,7 +64,7 @@ function M:createWidget()
             if plugin then
                 require("book.open").book(plugin, book)
             elseif ctx.desktop then
-                require("ui.desktop.detail").open(ctx.desktop, book)
+                require("ui.desktop.detail").open(ctx.desktop, "library", book)
             end
         end)
         tap[1] = widget
