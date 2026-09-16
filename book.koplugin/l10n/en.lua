@@ -401,7 +401,6 @@ return {
     ["未知书名"] = "Unknown title",
     ["详情为空"] = "Book details are empty",
     ["当前数据源不支持导入书籍"] = "The current source cannot import books",
-    ["加入书库"] = "Add to library",
     ["正在加入书库…"] = "Adding to library…",
     ["已加入书库："] = "Added to library: ",
     ["加入书架"] = "Add to shelf",

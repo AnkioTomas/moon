@@ -251,7 +251,7 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open)
     ---@return nil
     local function openDetail()
         if ctx.desktop then
-            require("ui.desktop.detail").open(ctx.desktop, book)
+            require("ui.desktop.detail").open(ctx.desktop, "library", book)
         end
     end
     local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, {

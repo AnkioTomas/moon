@@ -104,7 +104,7 @@ local function openBook(ctx, book)
         return
     end
     if ctx.desktop then
-        require("ui.desktop.detail").open(ctx.desktop, book)
+        require("ui.desktop.detail").open(ctx.desktop, "library", book)
     end
 end
 

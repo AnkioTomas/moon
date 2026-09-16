@@ -146,7 +146,7 @@ end
 ---@return nil
 local function openDetail(ctx, book)
     if ctx.desktop then
-        require("ui.desktop.detail").open(ctx.desktop, book)
+        require("ui.desktop.detail").open(ctx.desktop, ctx.desktop.tab == "store" and "store" or "library", book)
     end
 end
 

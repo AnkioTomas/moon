@@ -100,7 +100,7 @@ end
 
 local opened_detail
 package.preload["ui.desktop.detail"] = function()
-    return { open = function(_, book) opened_detail = book end }
+    return { open = function(_, origin, book) opened_detail = book; Assert.eq(origin, "library") end }
 end
 local opened_book
 local open_done

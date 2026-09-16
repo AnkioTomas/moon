@@ -206,13 +206,13 @@ local unread = {
     read_state = 0,
     percent = 12,
 }
-local tools, primary = Detail.actionPlan(unread, local_src)
+local tools, primary = Detail.actionPlan(unread, local_src, "library")
 Assert.eq(ids(tools), "edit,scrape,read,delete")
 Assert.eq(primary.id, "open")
 Assert.eq(primary.text, "继续阅读")
 
 unread.percent = 0
-_, primary = Detail.actionPlan(unread, local_src)
+_, primary = Detail.actionPlan(unread, local_src, "library")
 Assert.eq(primary.text, "开始阅读")
 
 local read_book = {
@@ -222,12 +222,12 @@ local read_book = {
     read_state = 1,
     percent = 100,
 }
-tools, primary = Detail.actionPlan(read_book, chapter_src)
+tools, primary = Detail.actionPlan(read_book, chapter_src, "library")
 Assert.eq(ids(tools), "download,unread,delete")
 Assert.eq(primary.text, "开始阅读")
 
 read_book.downloaded = true
-tools = Detail.actionPlan(read_book, chapter_src)
+tools = Detail.actionPlan(read_book, chapter_src, "library")
 Assert.eq(ids(tools), "unread,delete")
 
 local page = setmetatable({
