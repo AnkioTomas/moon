@@ -100,12 +100,31 @@ function Source:sections(ctx)
     local active_id, active_name = ctx.active_id, ctx.active_name
     local source = SourceRegistry.current()
     local enabled = SourceRegistry.listEnabled()
+    local mixed = MoonSettings.libraryMixed()
     local common_rows = {
         function(iw)
             return SettingRow.build(iw, {
                 kind = "nav", icon = "source", title = _("当前数据源"),
                 status = active_name, status_on = true,
                 callback = function() Source.pickActive(desktop, plugin) end,
+            })
+        end,
+        function(iw)
+            return SettingRow.build(iw, {
+                kind = "toggle", icon = "join", title = _("混合模式"),
+                subtitle = _("书库、首页与统计合并已启用源；阅读仍按书所属源"),
+                status = mixed and _("开") or _("关"),
+                status_on = mixed,
+                callback = function()
+                    MoonSettings.save({ library_mixed = not mixed })
+                    -- 复用换源复位路径：各页按新展示范围重拉，不碰阅读身份。
+                    if plugin and plugin.onSourceChanged then
+                        plugin:onSourceChanged()
+                    elseif desktop and desktop.onEvent then
+                        desktop:onEvent("source_changed", desktop.source)
+                    end
+                    desktop:updateView()
+                end,
             })
         end,
         function(iw)
