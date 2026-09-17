@@ -15,6 +15,7 @@ local M = {}
 local DEFAULTS = {
     common = {
         active_source = "local",
+        library_mixed = false,
         book_debug_enabled = false,
     },
     display = {
@@ -317,6 +318,12 @@ end
 ---@return string
 function M.activeSourceId()
     return M.get("common").active_source or "local"
+end
+
+--- 书库/首页/统计等展示是否跨已启用源混合（阅读仍按书的 source_id）。
+---@return boolean
+function M.libraryMixed()
+    return M.get("common").library_mixed == true
 end
 
 --- 取设备标识，没有就生成一个并立即落盘。
