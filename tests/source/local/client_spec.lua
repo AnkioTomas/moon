@@ -903,6 +903,11 @@ end
 -- ── filtersAsync：分类/系列 DISTINCT 直查 DB ───────
 do
     reset()
+    package.loaded["utils.settings"] = nil
+    package.preload["utils.settings"] = function()
+        return { libraryMixed = function() return false end }
+    end
+    package.loaded["book.catalog"] = nil
     for i, cat in ipairs({ "sub", "zeta", "sub", "" }) do
         local path = string.format("/books/f%d.epub", i)
         db_rows[rowKey("local", path)] = {

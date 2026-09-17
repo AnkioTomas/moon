@@ -151,8 +151,14 @@ package.preload["ui.components.icon"] = function()
         end,
     }
 end
+local library_mixed = false
+local topbar_items = {}
 package.preload["utils.settings"] = function()
-    return { activeSourceId = function() return "moon" end }
+    return {
+        activeSourceId = function() return "moon" end,
+        libraryMixed = function() return library_mixed end,
+        get = function() return { home_topbar_items = topbar_items } end,
+    }
 end
 local source_name = "书库"
 package.preload["source.registry"] = function()
@@ -185,14 +191,6 @@ package.preload["ui/uimanager"] = function()
         setDirty = function(_, widget, _, region)
             dirty[#dirty + 1] = { widget = widget, region = region }
         end,
-    }
-end
-local topbar_items = {}
-package.loaded["utils.settings"] = nil
-package.preload["utils.settings"] = function()
-    return {
-        activeSourceId = function() return "moon" end,
-        get = function() return { home_topbar_items = topbar_items } end,
     }
 end
 
@@ -516,5 +514,18 @@ topbar_items = {}
 paused:updateView()
 Assert.eq(paused.clock.lifecycle.state, "Resume")
 Assert.not_nil(paused.clock._tick)
+
+-- 混合模式：源名槽位整项拆掉（图标和文案都不留）。
+source_name = "书库"
+local mixed_bar = TopBar:new()
+mixed_bar:updateView()
+Assert.not_nil(mixed_bar.source)
+library_mixed = true
+mixed_bar:onEvent("source_changed")
+Assert.is_nil(mixed_bar.source)
+library_mixed = false
+mixed_bar:onEvent("source_changed")
+Assert.not_nil(mixed_bar.source)
+Assert.eq(mixed_bar.source.metric_widget.label.text, "书库")
 
 _G.G_reader_settings = previous_settings

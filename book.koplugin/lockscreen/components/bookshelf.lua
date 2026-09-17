@@ -65,10 +65,14 @@ function M.data()
         for _, row in ipairs(rows or {}) do
             if #target >= limit then return end
             local id = row.stable_id
-            if type(id) == "string" and id ~= "" and not seen[id]
-                    and (not accept or accept(row)) then
-                target[#target + 1] = Library.shelfBook(row, source_id)
-                seen[id] = true
+            if type(id) ~= "string" or id == "" then
+                -- skip
+            else
+                local key = tostring(row.source_id or source_id) .. "\0" .. id
+                if not seen[key] and (not accept or accept(row)) then
+                    target[#target + 1] = Library.shelfBook(row, source_id)
+                    seen[key] = true
+                end
             end
         end
     end

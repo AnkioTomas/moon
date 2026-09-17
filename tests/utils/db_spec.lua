@@ -51,6 +51,17 @@ do
     local ok, conn = pcall(DbBase.open)
     Assert.is_true(ok)
     Assert.is_true(conn ~= nil)
+
+    -- sourceClause：单源 =?；单元素表同单源；多源 IN
+    local frag, args = DbBase.sourceClause("source_id", "local")
+    Assert.eq(frag, "source_id=?")
+    Assert.eq(args[1], "local")
+    frag, args = DbBase.sourceClause("b.source_id", { "local" })
+    Assert.eq(frag, "b.source_id=?")
+    frag, args = DbBase.sourceClause("source_id", { "local", "wechat" })
+    Assert.eq(frag, "source_id IN (?,?)")
+    Assert.eq(args[1], "local")
+    Assert.eq(args[2], "wechat")
     clearMods()
 end
 
@@ -324,6 +335,7 @@ do
                         return { { "sub", "" }, { 3, 2 } }, 2
                     end
                     return {
+                        { "local" },
                         { "/books/a.epub" },
                         { "书名" },
                         { "作者" },
@@ -358,6 +370,7 @@ do
     local rows, count = BookDB.listBySource("local", { limit = 24, offset = 48 })
     Assert.eq(count, 7)
     Assert.eq(#rows, 1)
+    Assert.eq(rows[1].source_id, "local")
     Assert.eq(rows[1].stable_id, "/books/a.epub")
     Assert.eq(rows[1].title, "书名")
     Assert.eq(rows[1].percent, 42)
@@ -515,6 +528,7 @@ do
                     if sql:find("MAX(page)", 1, true) then
                         return {
                             { day2 },
+                            { "local" },
                             { "/books/a.epub" },
                             { 600 },
                             { 10 },
@@ -576,6 +590,7 @@ do
 
     local books = StatsDB.dailyBooksBySource("local")
     Assert.eq(#books, 1)
+    Assert.eq(books[1].source_id, "local")
     Assert.eq(books[1].stable_id, "/books/a.epub")
     Assert.eq(books[1].max_page, 10)
     Assert.eq(books[1].max_total_pages, 20)

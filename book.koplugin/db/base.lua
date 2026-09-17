@@ -292,4 +292,28 @@ function Base.ensure()
     return Base.open()
 end
 
+--- 把 source_id（单源字符串或多源表）收成 `col=?` / `col IN (…)`，并追加绑定参数。
+---@param column string SQL 列名（调用方保证可信，不含用户输入）
+---@param source_id string|string[]
+---@param args table|nil 既有参数表；省略则新建
+---@return string fragment
+---@return table args
+function Base.sourceClause(column, source_id, args)
+    args = args or {}
+    if type(source_id) ~= "table" then
+        args[#args + 1] = source_id
+        return column .. "=?", args
+    end
+    if #source_id == 1 then
+        args[#args + 1] = source_id[1]
+        return column .. "=?", args
+    end
+    local placeholders = {}
+    for i = 1, #source_id do
+        placeholders[i] = "?"
+        args[#args + 1] = source_id[i]
+    end
+    return column .. " IN (" .. table.concat(placeholders, ",") .. ")", args
+end
+
 return Base

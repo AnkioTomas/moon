@@ -323,7 +323,7 @@ end
 --- 书库/首页/统计等展示是否跨已启用源混合（阅读仍按书的 source_id）。
 ---@return boolean
 function M.libraryMixed()
-    return M.get("common").library_mixed == true
+    return M.get("common").library_mixed
 end
 
 --- 取设备标识，没有就生成一个并立即落盘。

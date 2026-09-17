@@ -511,8 +511,9 @@ end
 --- opts.show_parent: 窗口级父（Desktop / Detail）
 --- opts.on_ready: 图片就绪回调
 --- opts.src / opts.headers: 直接指定封面（刮削结果没有 source.coverRequest）
+--- 有 book.source_id 时按属主源 coverRequest，禁止用活跃源冒充。
 ---@param plugin table|nil 插件实例，用于打开书籍和调用插件功能
----@param source table|nil 书籍所属数据源实例
+---@param source table|nil 书无 source_id 时的数据源（书城未入库项）
 ---@param book table|nil 当前操作或展示的书籍数据
 ---@param cw number 封面宽度，单位像素
 ---@param ch number 封面高度，单位像素
@@ -529,9 +530,24 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
         req = { url = book.cover_url, headers = book.cover_headers }
     elseif type(book) == "table" and type(book.cover) == "string" and book.cover ~= "" then
         req = { url = book.cover, headers = book.cover_headers }
-    elseif source and type(source.coverRequest) == "function"
-        and type(book) == "table" and type(book.stable_id) == "string" then
-        req = select(1, source:coverRequest(book))
+    end
+    if not req and type(book) == "table" and type(book.stable_id) == "string" then
+        local sid = book.source_id
+        if type(sid) == "string" and sid ~= "" then
+            local cached = Paths.coverPath(book.stable_id, sid)
+            if lfs.attributes(cached, "mode") == "file" then
+                req = { url = cached }
+            end
+        end
+        if not req then
+            local owner = source
+            if type(sid) == "string" and sid ~= "" and (not source or source.id ~= sid) then
+                owner = require("source.registry").resolve(sid)
+            end
+            if owner and type(owner.coverRequest) == "function" then
+                req = select(1, owner:coverRequest(book))
+            end
+        end
     end
     local cover_pad = UI.sz(2)
     local cover_w = math.max(UI.sz(16), cw - cover_pad * 2)

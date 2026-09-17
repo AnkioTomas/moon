@@ -5,6 +5,8 @@ reading_stats 提供统计。
 约定：
   - UI 查询经 SourceBase 的本地方法到达此处
   - 远端源只负责 sync* 把变更写入本地库；读路径与源协议解耦
+  - library_mixed 打开时，列表/筛选/最近/洞察跨已启用源聚合；
+    每本书仍带真实 source_id，阅读打开走属主源
 
 @module koplugin.book.catalog
 --]]
@@ -44,16 +46,34 @@ function Catalog.formatDuration(seconds)
     return T(_("%1分钟"), math.max(1, m))
 end
 
+--- 展示查询范围：混合 → 已启用源 id 列表；否则原样返回 preferred_id。
+--- 单元素列表收成字符串，SQL 走 `=` 而不是 `IN`。
+---@param preferred_id string|nil
+---@return string|string[]|nil
+function Catalog.libraryScope(preferred_id)
+    if not require("utils.settings").libraryMixed() then
+        return preferred_id
+    end
+    local ids = {}
+    for _, meta in ipairs(require("source.registry").listEnabled()) do
+        ids[#ids + 1] = meta.id
+    end
+    if #ids == 1 then
+        return ids[1]
+    end
+    return ids
+end
+
 --- books 表行 → Book。
 ---@param row table
----@param source_id string
+---@param source_id string|nil 行内缺 source_id 时使用
 ---@return Book|nil
 local function toBook(row, source_id)
     if type(row) ~= "table" or type(row.stable_id) ~= "string" or row.stable_id == "" then
         return nil
     end
     return {
-        source_id = source_id,
+        source_id = row.source_id or source_id,
         stable_id = row.stable_id,
         title = row.title,
         authors = row.authors,
@@ -74,7 +94,7 @@ end
 --- books 表行 → BookListResult。
 ---@param rows table[]|nil
 ---@param count number|nil
----@param source_id string
+---@param source_id string|nil 行内缺 source_id 时使用
 ---@return BookListResult
 function Catalog.toList(rows, count, source_id)
     local books = {}
@@ -88,7 +108,7 @@ function Catalog.toList(rows, count, source_id)
 end
 
 --- 阅读统计聚合 → StatsInsight。
----@param source_id string
+---@param source_id string|string[] 单源字符串或多源列表；多源一律按日书单（不用微信周桶）
 ---@param summary table|nil
 ---@param daily table[]|nil
 ---@param daily_books table[]|nil
@@ -109,20 +129,10 @@ function Catalog.toInsight(source_id, summary, daily, daily_books, weekly_books)
     local BookDB = require("db.book")
     local week_scope = source_id == "wechat"
     local book_rows = week_scope and (weekly_books or {}) or (daily_books or {})
-    local stable_ids = {}
-    for _, b in ipairs(book_rows) do
-        if type(b.stable_id) == "string" and b.stable_id ~= "" then
-            stable_ids[#stable_ids + 1] = b.stable_id
-        end
-    end
-    local metadata = BookDB.getMany and BookDB.getMany(source_id, stable_ids) or nil
     local function appendBook(day, b)
         if day and type(b.stable_id) == "string" and b.stable_id ~= "" then
-            local meta = metadata and metadata[b.stable_id]
-            if not metadata then
-                -- Compatibility with lightweight test doubles and old embedders.
-                meta = BookDB.get(source_id, b.stable_id)
-            end
+            local sid = b.source_id or source_id
+            local meta = type(sid) == "string" and BookDB.get(sid, b.stable_id) or nil
             local max_total = tonumber(b.max_total_pages) or 0
             local percent = 0
             if max_total > 0 then
@@ -138,7 +148,7 @@ function Catalog.toInsight(source_id, summary, daily, daily_books, weekly_books)
                 title = (b.stable_id:match("([^/]+)$") or b.stable_id):gsub("%.[^.]+$", "")
             end
             day.books[#day.books + 1] = {
-                source_id = source_id,
+                source_id = sid,
                 stable_id = b.stable_id,
                 title = title,
                 authors = meta and meta.authors or nil,
@@ -196,6 +206,13 @@ local function defer(cb, ...)
         end }
 end
 
+---@param scope string|string[]|nil
+---@return boolean
+local function validScope(scope)
+    return type(scope) == "string" and scope ~= ""
+        or type(scope) == "table" and #scope > 0
+end
+
 --- 图书馆分页 / 搜索 / 筛选（直查 books 表）。
 ---@param source_id string
 ---@param opts BookListOpts|nil
@@ -210,11 +227,12 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
         if cancelled then
             return
         end
-        if type(source_id) ~= "string" or source_id == "" then
+        local scope = Catalog.libraryScope(source_id)
+        if not validScope(scope) then
             cb(nil, "invalid source_id")
             return
         end
-        local rows, count = require("db.book").listBySource(source_id, {
+        local rows, count = require("db.book").listBySource(scope, {
             category = opts.category,
             uncategorized = opts.uncategorized,
             series = opts.series,
@@ -226,7 +244,7 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             limit = page_size,
             offset = (page - 1) * page_size,
         })
-        cb(Catalog.toList(rows, count, source_id))
+        cb(Catalog.toList(rows, count, type(scope) == "string" and scope or nil))
     end)
     return { cancel = function()
             cancelled = true
@@ -239,18 +257,19 @@ end
 ---@return { cancel: fun() }
 function Catalog.filtersAsync(source_id, cb)
     return defer(function()
-        if type(source_id) ~= "string" or source_id == "" then
+        local scope = Catalog.libraryScope(source_id)
+        if not validScope(scope) then
             cb(nil, "invalid source_id")
             return
         end
         local BookDB = require("db.book")
         cb({
             data = {
-                category = BookDB.categoriesBySource(source_id),
-                category_counts = BookDB.categoryCountsBySource(source_id),
-                series = BookDB.seriesBySource(source_id),
-                series_counts = BookDB.seriesCountsBySource(source_id),
-                read_counts = BookDB.readStatusCountsBySource(source_id),
+                category = BookDB.categoriesBySource(scope),
+                category_counts = BookDB.categoryCountsBySource(scope),
+                series = BookDB.seriesBySource(scope),
+                series_counts = BookDB.seriesCountsBySource(scope),
+                read_counts = BookDB.readStatusCountsBySource(scope),
             },
         })
     end)
@@ -263,16 +282,18 @@ end
 ---@return Book[]
 ---@return string|nil
 function Catalog.recentShelf(source_id, limit)
-    if type(source_id) ~= "string" or source_id == "" then
+    local scope = Catalog.libraryScope(source_id)
+    if not validScope(scope) then
         return nil, {}, require("gettext")("当前数据源不可用")
     end
     local rows = Catalog.recentBooks(source_id, limit or 24)
     local recent = rows[1]
+    local skip_source = recent and recent.source_id
     local skip = recent and recent.stable_id
     local reading = {}
     for i = 1, #rows do
         local book = rows[i]
-        if book.stable_id ~= skip then
+        if not (book.stable_id == skip and book.source_id == skip_source) then
             reading[#reading + 1] = book
         end
     end
@@ -284,15 +305,17 @@ end
 ---@param limit number|nil
 ---@return Book[]
 function Catalog.recentBooks(source_id, limit)
-    local progress_rows = require("db.progress").recent(source_id, limit)
-    local stable_ids = {}
-    for _, row in ipairs(progress_rows) do
-        stable_ids[#stable_ids + 1] = row.stable_id
+    local scope = Catalog.libraryScope(source_id)
+    if not validScope(scope) then
+        return {}
     end
-    local metadata = require("db.book").getMany(source_id, stable_ids)
+    local progress_rows = require("db.progress").recent(scope, limit)
     local books = {}
+    local BookDB = require("db.book")
     for _, progress in ipairs(progress_rows) do
-        local book = toBook(metadata[progress.stable_id], source_id)
+        -- 按 (source_id, stable_id) 取元数据，避免跨源 stable_id 碰撞。
+        local meta = BookDB.get(progress.source_id, progress.stable_id)
+        local book = toBook(meta, progress.source_id)
         if book then
             book.percent = math.floor((tonumber(progress.fraction) or 0) * 100 + 0.5)
             book.chapter_idx = progress.chapter_idx
@@ -312,12 +335,13 @@ end
 ---@return { cancel: fun() }
 function Catalog.recentBooksAsync(source_id, limit, cb)
     return defer(function()
-        if type(source_id) ~= "string" or source_id == "" then
+        local scope = Catalog.libraryScope(source_id)
+        if not validScope(scope) then
             cb(nil, "invalid source_id")
             return
         end
         local rows = Catalog.recentBooks(source_id, limit or 24)
-        cb(Catalog.toList(rows, nil, source_id))
+        cb(Catalog.toList(rows, nil, type(scope) == "string" and scope or nil))
     end)
 end
 
@@ -327,18 +351,20 @@ end
 ---@return { cancel: fun() }
 function Catalog.readingInsightAsync(source_id, cb)
     return defer(function()
-        if type(source_id) ~= "string" or source_id == "" then
+        local scope = Catalog.libraryScope(source_id)
+        if not validScope(scope) then
             cb(nil, "invalid source_id")
             return
         end
         local StatsDB = require("db.stats")
+        local weekly = scope == "wechat" and StatsDB.weeklyBooksBySource(scope) or nil
         cb({
             data = Catalog.toInsight(
-                source_id,
-                StatsDB.summaryBySource(source_id),
-                StatsDB.dailyBySource(source_id),
-                StatsDB.dailyBooksBySource(source_id),
-                StatsDB.weeklyBooksBySource and StatsDB.weeklyBooksBySource(source_id) or nil
+                scope,
+                StatsDB.summaryBySource(scope),
+                StatsDB.dailyBySource(scope),
+                StatsDB.dailyBooksBySource(scope),
+                weekly
             ),
         })
     end)

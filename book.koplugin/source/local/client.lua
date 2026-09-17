@@ -764,28 +764,18 @@ function Client:autoScanAsync(cb)
     end)
 end
 
---- 分类和系列列表（DISTINCT 直查数据库）。
+--- 分类和系列列表（DISTINCT 直查数据库；混合模式走 Catalog 跨源）。
 ---@param cb fun(data: BookFiltersResult|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:filtersAsync(cb)
     local ok, err = self:validatePath()
-    uiManager():nextTick(function()
-        if not ok then
+    if not ok then
+        uiManager():nextTick(function()
             cb(nil, err)
-            return
-        end
-        local BookDB = require("db.book")
-        cb({
-            data = {
-                category = BookDB.categoriesBySource(SOURCE_ID),
-                category_counts = BookDB.categoryCountsBySource(SOURCE_ID),
-                series = BookDB.seriesBySource(SOURCE_ID),
-                series_counts = BookDB.seriesCountsBySource(SOURCE_ID),
-                read_counts = BookDB.readStatusCountsBySource(SOURCE_ID),
-            },
-        })
-    end)
-    return nil
+        end)
+        return nil
+    end
+    return require("book.catalog").filtersAsync(SOURCE_ID, cb)
 end
 
 --- 封面缓存路径（已存在才返回；绝不现提取，coverRequest 在 UI 线程同步调用）。

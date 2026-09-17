@@ -46,9 +46,12 @@ local function books(limit)
         for _, row in ipairs(rows or {}) do
             if #result >= cap then return end
             local id = row.stable_id
-            if type(id) == "string" and id ~= "" and not seen[id] then
-                seen[id] = true
-                result[#result + 1] = Library.shelfBook(row, source_id)
+            if type(id) == "string" and id ~= "" then
+                local key = tostring(row.source_id or source_id) .. "\0" .. id
+                if not seen[key] then
+                    seen[key] = true
+                    result[#result + 1] = Library.shelfBook(row, source_id)
+                end
             end
         end
     end

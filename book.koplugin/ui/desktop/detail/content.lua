@@ -25,9 +25,16 @@ function Detail:buildHero(w, book, origin, can_read)
     local category = book.category
     if type(category) == "string" and category ~= "" then category = category:gsub("[,\n]+", " · ") else category = nil end
     local parts = {}
+    local sid = book.source_id
+    if type(sid) == "string" and sid ~= "" then
+        local name = sid == "zlib" and _("书城")
+            or (require("source.registry").meta(sid) or {}).name
+            or sid
+        parts[#parts + 1] = name
+    end
     if category then parts[#parts + 1] = category end
     if type(book.series) == "string" and book.series ~= "" then parts[#parts + 1] = book.series end
-    return BookInfo.hero(self.plugin, self.source, book, {
+    return BookInfo.hero(self.plugin, Common.bookOwnerSource(book, self.source), book, {
         width = w, pad = 0,
         subtitle = #parts > 0 and table.concat(parts, " · ") or nil,
         on_tap = can_read and function() self:openBook() end or nil,

@@ -10,10 +10,10 @@ local lfs = require("libs/libkoreader-lfs")
 
 local M = {}
 
---- 当前数据源 ID；锁屏只展示这一个源的书。
----@return string
+--- 展示查询用的源范围（混合模式由 Catalog.libraryScope 展开）。
+---@return string|string[]
 function M.activeSourceId()
-    return MoonSettings.activeSourceId()
+    return require("book.catalog").libraryScope(MoonSettings.activeSourceId())
 end
 
 --- 本地封面缓存路径；锁屏不触网，文件不存在就返回 nil 走占位。
@@ -27,18 +27,19 @@ function M.coverPath(stable_id, source_id)
 end
 
 --- 把数据库行转成书架格子需要的字段（书名 / 作者 / 进度 / 封面）。
----@param book table 数据库行
----@param source_id string 行内缺 source_id 时的兜底
+---@param book table 数据库行（混合模式下列内必有 source_id）
+---@param source_id string|nil 行内缺 source_id 时使用
 ---@return table
 function M.shelfBook(book, source_id)
     local stable_id = book.stable_id
+    local sid = book.source_id or source_id
     return {
-        source_id = source_id,
+        source_id = sid,
         stable_id = stable_id,
         title = book.title or stable_id or "",
         authors = book.authors or "",
         percent = tonumber(book.percent) or 0,
-        cover = M.coverPath(stable_id, source_id),
+        cover = M.coverPath(stable_id, sid),
     }
 end
 

@@ -56,12 +56,13 @@ local function currentStreak(daily)
     return streak
 end
 
---- 按源汇总首页三卡指标。
----@param source_id string 查询阅读统计的数据源标识
+--- 按展示范围汇总首页三卡指标（混合模式跨已启用源）。
+---@param source_id string|nil 当前活跃源；混合时由 Catalog.libraryScope 展开
 ---@return table
 local function summarize(source_id)
-    local summary = StatsDB.summaryBySource(source_id)
-    local daily = StatsDB.dailyBySource(source_id)
+    local scope = Catalog.libraryScope(source_id)
+    local summary = StatsDB.summaryBySource(scope)
+    local daily = StatsDB.dailyBySource(scope)
     local today_ymd = os.date("%Y-%m-%d")
     local today_seconds = 0
     for i, row in ipairs(daily) do

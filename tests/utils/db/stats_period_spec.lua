@@ -11,6 +11,11 @@ package.preload["db.base"] = function()
     return {
         requireSourceId = function(id) return id ~= "" and id or nil end,
         ensure = function() end,
+        sourceClause = function(column, source_id, args)
+            args = args or {}
+            args[#args + 1] = source_id
+            return column .. "=?", args
+        end,
         rowexec = function(sql, ...)
             calls[#calls + 1] = { sql = sql, args = { ... } }
             return 3600, 2, 9
@@ -31,7 +36,7 @@ package.preload["db.base"] = function()
                 }, 2
             end
             return {
-                { "b1" }, { "书名" }, { "作者" }, { 42 }, { 1800 }, { 5 },
+                { "moon" }, { "b1" }, { "书名" }, { "作者" }, { 42 }, { 1800 }, { 5 },
             }, 1
         end,
     }
@@ -53,6 +58,7 @@ Assert.is_true(calls[1].sql:find("record_type IN ('page','page_rollup')", 1, tru
 calls = {}
 local books = Stats.periodBooks("moon", 100, 200, 3)
 Assert.len(books, 1)
+Assert.eq(books[1].source_id, "moon")
 Assert.eq(books[1].stable_id, "b1")
 Assert.eq(books[1].seconds, 1800)
 Assert.eq(books[1].percent, 42)

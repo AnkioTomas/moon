@@ -447,6 +447,8 @@ return {
     ["拼接校验词库…"] = "Joining and verifying dictionary…",
     ["共 %1 片"] = "%1 parts",
     ["已启用的数据源"] = "Enabled sources",
+    ["混合模式"] = "Mixed mode",
+    ["书库、首页与统计合并已启用源；阅读仍按书所属源"] = "Merge library, home and stats across enabled sources; reading still uses each book's source",
     ["在线"] = "Online",
     ["本地"] = "Local",
     ["系统"] = "System",
