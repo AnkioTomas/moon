@@ -135,7 +135,7 @@ end
 function Filter.open(opts)
     local data, draft = opts.data or {}, copy(opts.current)
     draft.sort = opts.sort or "recent_added"
-    local page = { category = 1, series = 1, read_status = 1, sort = 1 }
+    local page = { source_id = 1, category = 1, series = 1, read_status = 1, sort = 1 }
     local dialog
     local status = {
         { value = "new", text = _("新书"), count = 0 },
@@ -147,17 +147,33 @@ function Filter.open(opts)
             if item.value == row.status then item.count = tonumber(row.count) or 0 end
         end
     end
-    local groups = {
-        { kind = "category", title = _("分类"), values = values(data.category_counts, "category", _("未分类")) },
-        { kind = "series", title = _("系列"), values = values(data.series_counts, "series", _("无系列")) },
-        { kind = "read_status", title = _("阅读状态"), values = status },
-        { kind = "sort", title = _("排序"), values = {
-            { value = "recent_added", text = _("最近添加") },
-            { value = "recent_read", text = _("最近阅读") },
-            { value = "title", text = _("书名") },
-            { value = "author", text = _("作者") },
-        } },
-    }
+    local groups = {}
+    -- 混合模式才有 source_counts；单源不显示源组。
+    if data.source_counts and #data.source_counts > 0 then
+        local src = {}
+        for _, row in ipairs(data.source_counts) do
+            local id = row.source_id or ""
+            if id ~= "" then
+                src[#src + 1] = {
+                    value = id,
+                    text = (type(row.name) == "string" and row.name ~= "" and row.name) or id,
+                    count = tonumber(row.count) or 0,
+                }
+            end
+        end
+        if #src > 0 then
+            groups[#groups + 1] = { kind = "source_id", title = _("数据源"), values = src }
+        end
+    end
+    groups[#groups + 1] = { kind = "category", title = _("分类"), values = values(data.category_counts, "category", _("未分类")) }
+    groups[#groups + 1] = { kind = "series", title = _("系列"), values = values(data.series_counts, "series", _("无系列")) }
+    groups[#groups + 1] = { kind = "read_status", title = _("阅读状态"), values = status }
+    groups[#groups + 1] = { kind = "sort", title = _("排序"), values = {
+        { value = "recent_added", text = _("最近添加") },
+        { value = "recent_read", text = _("最近阅读") },
+        { value = "title", text = _("书名") },
+        { value = "author", text = _("作者") },
+    } }
     local function apply()
         local filter = copy(draft)
         local sort = filter.sort or "recent_added"

@@ -504,6 +504,7 @@ function Library:fetch()
     local series = f.series or ""
     local unseries = not not f.unseries
     local read_status = f.read_status or ""
+    local filter_source = f.source_id or ""
     if not source then done({}, _("当前数据源不可用")); return end
     if not source.listLibraryAsync then
         done({}, _("当前数据源不支持书库"))
@@ -518,6 +519,7 @@ function Library:fetch()
         series = series,
         unseries = unseries,
         read_status = read_status,
+        source_id = filter_source,
         sort = self.sort,
     }, function(res, err)
         if self.desktop._closed or self.desktop.tab ~= "library"
