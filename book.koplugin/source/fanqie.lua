@@ -50,7 +50,6 @@ function Source:capabilities()
         edit = false,
         insight = true,
         stats_pull = false,
-        store = false,
     }
 end
 

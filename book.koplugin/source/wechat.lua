@@ -97,7 +97,6 @@ function Source:capabilities()
         edit = false,
         insight = true,
         stats_pull = true,
-        store = true,
     }
 end
 
@@ -199,78 +198,6 @@ function Source:syncBooksAsync(_opts, cb)
         cancelled = true
         if job and job.cancel then job:cancel() end
     end }
-end
-
---- 书城列表：无关键词走分类榜单，有关键词走搜索。
---- 两条路径的 wire 都按搜索结果格式映射，并顺手记下封面 URL 供后续取图。
----@param opts BookListOpts|nil
----@param cb fun(data: BookListResult|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Source:listStoreAsync(opts, cb)
-    opts = opts or {}
-    local search = opts.search or ""
-    --- 把书城 wire 映射成书籍列表；失败原样透传错误。
-    ---@param wire table|nil
-    ---@param err string|nil
-    local on_wire = function(wire, err)
-        if wire then
-            cb(Mapper.searchList(wire, function(id, url)
-                rememberCover(self, id, url)
-            end))
-        else
-            cb(nil, err)
-        end
-    end
-    if search == "" then
-        return self._client:storeCatalogAsync({
-            limit = opts.page_size or 20,
-            category = opts.category or "all",
-            rank = 1,
-        }, on_wire)
-    end
-    return self._client:searchAsync(search, opts.page_size, opts.scope, on_wire)
-end
-
---- 书城书加入微信读书书架，并同步到本地图书馆。
----@param book Book|nil
----@param cb fun(ok: boolean|nil, err: string|nil, title: string|nil)
----@return { cancel: fun() }|nil
-function Source:addStoreBookAsync(book, cb)
-    if not self:configured() then
-        cb(nil, _("请先扫码登录微信读书"))
-        return nil
-    end
-    local book_id = book and book.stable_id
-    if type(book_id) ~= "string" or book_id == "" then
-        cb(nil, _("无效书籍"))
-        return nil
-    end
-    local cancelled, job = false, nil
-    job = self._client:addToShelfAsync(book_id, function(wire, err)
-        if cancelled then
-            return
-        end
-        if not wire then
-            cb(nil, err)
-            return
-        end
-        job = self:syncBooksAsync(nil, function(result, sync_err)
-            if cancelled then
-                return
-            end
-            if not result then
-                cb(nil, sync_err)
-                return
-            end
-            cb(true, nil, book and book.title)
-        end)
-    end)
-    return { cancel = function()
-            cancelled = true
-            if job and job.cancel then
-                job:cancel()
-            end
-        end }
 end
 
 --- 拉取书籍详情并缓存封面 URL；映射不出书籍时按「详情为空」失败。

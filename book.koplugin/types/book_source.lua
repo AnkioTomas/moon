@@ -20,7 +20,6 @@
 ---@field edit boolean 支持编辑展示元信息（仅 local 为 true；wechat/moon 明确 false）
 ---@field insight boolean 阅读洞察 / 统计页（readingInsightAsync）
 ---@field stats_pull boolean 是否从远端拉取阅读统计并写入本地 reading_stats（各源自决映射与替换策略）
----@field store boolean 源自带书城（listStoreAsync；无则走全局 zlib）
 ---@field cacheAllChaptersAsync fun(identity: BookIdentity, on_progress: function|nil, cb: function)|nil 章节模式全本缓存
 
 local SourceCapabilities = {}
@@ -35,7 +34,6 @@ function SourceCapabilities.defaults()
         edit = false,
         insight = false,
         stats_pull = false,
-        store = false,
     }
 end
 
@@ -153,7 +151,6 @@ end
 ---@field syncStatsAsync fun(self: BookSource, opts: { dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛统计
 ---@field deleteBookAsync fun(self: BookSource, identity: BookIdentity, cb: fun(ok: boolean, err: string|nil)): table|nil 删除源拥有的书籍（在线源应同步云端）
 ---@field listLibraryAsync fun(self: BookSource, opts: BookListOpts|nil, cb: fun(data: BookListResult|nil, err: string|nil)): table|nil 图书馆列表
----@field listStoreAsync fun(self: BookSource, opts: BookListOpts|nil, cb: fun(data: BookListResult|nil, err: string|nil)): table|nil 书城列表
 ---@field recentBooksAsync fun(self: BookSource, limit: number|nil, cb: fun(data: BookListResult|nil, err: string|nil)): table|nil 最近阅读（默认读本地库）
 ---@field filtersAsync fun(self: BookSource, cb: fun(data: BookFiltersResult|nil, err: string|nil)): table|nil 筛选项
 ---@field readingInsightAsync fun(self: BookSource, cb: fun(data: BookInsightResult|nil, err: string|nil)): table|nil 阅读洞察
@@ -164,7 +161,7 @@ end
 ---@field getProgressAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: ProgressPosition|nil, err: string|nil, meta: table|nil)): table|nil 拉取远端进度；meta.empty 表示远端无记录
 ---@field putProgressAsync fun(self: BookSource, identity: BookIdentity, pos: ProgressPosition, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 推送进度
 ---@field coverRequest fun(self: BookSource, identity: BookIdentity): (BookCoverRequest|nil, string|nil) 封面请求描述（纯构造，无 IO）
----@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil 书城导入目标（local 移入）
+---@field importBookAsync fun(self: BookSource, local_path: string, filename: string, cb: fun(ok: boolean|nil, err: string|nil)): table|nil Z-Library 导入目标（local 移入）
 ---@field replaceBook fun(self: BookSource, temp_path: string, stable_id: string): (string|nil, string|nil)|nil 本地转换后替换原书（仅 local）
 ---@field pushStatsAsync fun(self: BookSource, rows: BookStatsRow[], cb: fun(data: BookStatsPushResult|nil, err: string|nil)): table|nil 上报领域统计记录；协议细节由源处理
 ---@field pullStatsAsync fun(self: BookSource, cb: fun(result: BookStatsRow[]|BookStatsPullResult|nil, err: string|nil)): table|nil 拉取领域统计记录（可选 replace 覆盖策略）

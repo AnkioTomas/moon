@@ -10,7 +10,7 @@
   |          Tab 内容区（contentHeight）           |
   |                                               |
   |-----------------------------------------------|
-  | BottomBar  首页|图书馆|[书城]|[统计]|设置      |
+  | BottomBar  首页|图书馆|[z站]|[统计]|设置       |
   +-----------------------------------------------+
   手势：底栏 tap 切 Tab；内容区左右滑转给当前页；顶栏点源名换源、点其他区域或下滑开快捷面板。
   Lifecycle：Create → Resume ↔ Pause → Destroy；Resume 只打 topbar+当前 Tab；详情浮层自挂 Lifecycle。
@@ -109,7 +109,7 @@ local function tabContent(self)
     return page.widget or page:build()
 end
 
---- 按数据源能力生成 Desktop 底栏 Tab。
+--- 按开关生成 Desktop 底栏 Tab（Z-Library 默认关）。
 ---@param source table|nil 书籍所属数据源实例
 ---@return table
 local function desktopTabs(source)
@@ -117,10 +117,10 @@ local function desktopTabs(source)
         { id = "home", text = _("首页"), icon = "home" },
         { id = "library", text = _("图书馆"), icon = "local_library" },
     }
-    local caps = source and source.capabilities and source:capabilities() or {}
-    if caps.store or (source and type(source.importBookAsync) == "function") then
-        tabs[#tabs + 1] = { id = "store", text = _("书城"), icon = "storefront" }
+    if require("utils.settings").zlibEnabled() then
+        tabs[#tabs + 1] = { id = "store", text = _("z站"), icon = "storefront" }
     end
+    local caps = source and source.capabilities and source:capabilities() or {}
     if caps.insight then
         tabs[#tabs + 1] = { id = "insight", text = _("统计"), icon = "bar_chart" }
     end

@@ -16,6 +16,7 @@ local DEFAULTS = {
     common = {
         active_source = "local",
         library_mixed = false,
+        zlib_enabled = false,
         book_debug_enabled = false,
     },
     display = {
@@ -324,6 +325,12 @@ end
 ---@return boolean
 function M.libraryMixed()
     return M.get("common").library_mixed
+end
+
+--- 是否启用 Z-Library 底栏入口（默认关）。
+---@return boolean
+function M.zlibEnabled()
+    return M.get("common").zlib_enabled
 end
 
 --- 取设备标识，没有就生成一个并立即落盘。

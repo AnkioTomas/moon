@@ -36,19 +36,18 @@ function Detail:updateView()
 
     local title_bar, title_h = self:buildTopBar(w)
 
-    -- 底部最多两行：书城只有加入书架；图书馆是工具行 + 阅读主操作。
+    -- 底部最多两行：Z-Library 只有加入书库；图书馆是工具行 + 阅读主操作。
     local footer_pad_v = UI.sz(12)
     local footer, footer_h
     if store_book then
-        local action_enabled = store_kind == "source"
-            and self.source and self.source.configured and self.source:configured()
-            or store_kind == "zlib"
-                and type(self.source and self.source.importBookAsync) == "function"
+        local local_src = require("source.registry").resolve("local")
+        local action_enabled = store_kind == "zlib"
+            and type(local_src and local_src.importBookAsync) == "function"
         footer = ButtonTable:new{
             width = content_w,
             buttons = { {
                 {
-                    text = _("加入书架"),
+                    text = _("加入书库"),
                     font_size = UI.buttonFontSize(),
                     enabled = action_enabled,
                     callback = function()

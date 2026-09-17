@@ -18,16 +18,9 @@ local SourceCapabilities = require("types.book_source").SourceCapabilities
 
 local M = {}
 
-function M.storeKind(book, source, origin)
-    if type(book) ~= "table" then
-        return nil
-    end
-    if book.source_id == "zlib" then
+function M.storeKind(book, _source, _origin)
+    if type(book) == "table" and book.source_id == "zlib" then
         return "zlib"
-    end
-    if origin == "store" and source and book.source_id == source.id
-        and type(source.addStoreBookAsync) == "function" then
-        return "source"
     end
     return nil
 end

@@ -98,7 +98,6 @@ end
 function Source:sections(ctx)
     local desktop, plugin = ctx.desktop, ctx.plugin
     local active_id, active_name = ctx.active_id, ctx.active_name
-    local source = SourceRegistry.current()
     local enabled = SourceRegistry.listEnabled()
     local mixed = MoonSettings.libraryMixed()
     local common_rows = {
@@ -178,21 +177,38 @@ function Source:sections(ctx)
         }
     end
 
-    local extra_rows = {}
-    if type(source and source.importBookAsync) == "function" then
+    local extra_rows = {
+        function(iw)
+            local on = MoonSettings.zlibEnabled()
+            return SettingRow.build(iw, {
+                kind = "toggle", icon = "storefront", title = _("Z-Library"),
+                subtitle = _("底栏显示 z站；下载后导入本地书库"),
+                status = on and _("开") or _("关"),
+                status_on = on,
+                callback = function()
+                    MoonSettings.save({ zlib_enabled = not on })
+                    if plugin and plugin.onSourceChanged then
+                        plugin:onSourceChanged()
+                    elseif desktop and desktop.onEvent then
+                        desktop:onEvent("source_changed", desktop.source)
+                    end
+                    desktop:updateView()
+                end,
+            })
+        end,
+    }
+    if MoonSettings.zlibEnabled() then
         local store_setting = require("zlib.setting")
         local status, status_on = store_setting.rowStatus()
         extra_rows[#extra_rows + 1] = function(iw)
             return SettingRow.build(iw, {
-                kind = "nav", icon = "storefront", title = _("Z-Library 账号"),
+                kind = "nav", icon = "vpn_key", title = _("Z-Library 账号"),
                 status = status, status_on = status_on,
                 callback = function() store_setting.open(plugin) end,
             })
         end
     end
-    if #extra_rows > 0 then
-        sections[#sections + 1] = { title = _("书城"), rows = extra_rows }
-    end
+    sections[#sections + 1] = { title = _("Z-Library"), rows = extra_rows }
     return sections
 end
 

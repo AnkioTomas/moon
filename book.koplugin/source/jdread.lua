@@ -47,7 +47,6 @@ function Source:capabilities()
         edit = false,
         insight = true,
         stats_pull = false,
-        store = true,
     }
 end
 
@@ -122,99 +121,6 @@ function Source:syncBooksAsync(_opts, cb)
         local result, reconcile_err = require("book.store").reconcile(self.id, list.data or {})
         cb(result, reconcile_err)
     end)
-end
-
---- 京东书城：关键词走搜索；空关键词聚合书架前十本书的相关推荐。
----@param opts BookListOpts|nil
----@param cb fun(data: BookListResult|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Source:listStoreAsync(opts, cb)
-    opts = opts or {}
-    local search = opts.search or ""
-    local function map(wire, err)
-        if not wire then cb(nil, err); return end
-        cb(Mapper.storeList(wire, function(id, url)
-            self._covers[id] = url
-        end))
-    end
-    if search ~= "" then
-        return self._client:searchAsync(search, opts.page, opts.page_size, map)
-    end
-
-    local cancelled, active = false, nil
-    active = self._client:shelfSyncAsync(function(wire, err)
-        if cancelled then return end
-        if not wire then cb(nil, err); return end
-        local rows = wire.data and wire.data.books or {}
-        local wanted = math.max(1, math.floor(tonumber(opts.page_size) or 20))
-        local seed_ids, seen, books = {}, {}, {}
-        for _, row in ipairs(rows) do
-            local book = Mapper.book(row)
-            if book then
-                seen[book.stable_id] = true
-                if #seed_ids < 10 then seed_ids[#seed_ids + 1] = book.stable_id end
-            end
-        end
-        local seed_index, first_err = 0, nil
-        local function nextSeed()
-            if cancelled then return end
-            seed_index = seed_index + 1
-            if seed_index > #seed_ids or #books >= wanted then
-                if #books == 0 and first_err then cb(nil, first_err); return end
-                cb(BookListResult.new(books, #books))
-                return
-            end
-            active = self._client:recommendAsync(seed_ids[seed_index], function(recommended, recommend_err)
-                if cancelled then return end
-                if recommended then
-                    local result = Mapper.storeList(recommended, function(id, url)
-                        self._covers[id] = url
-                    end)
-                    for _, book in ipairs(result.data or {}) do
-                        if #books >= wanted then break end
-                        if not seen[book.stable_id] then
-                            seen[book.stable_id] = true
-                            books[#books + 1] = book
-                        end
-                    end
-                else
-                    first_err = first_err or recommend_err
-                end
-                nextSeed()
-            end)
-        end
-        nextSeed()
-    end)
-    return { cancel = function()
-            cancelled = true
-            if active and active.cancel then active.cancel() end
-        end }
-end
-
---- 将书城书籍加入京东书架，再以远端书架收敛本地图书馆。
----@param book Book|nil
----@param cb fun(ok: boolean|nil, err: string|nil, title: string|nil)
----@return { cancel: fun() }|nil
-function Source:addStoreBookAsync(book, cb)
-    local book_id = book and book.stable_id
-    if type(book_id) ~= "string" or book_id == "" then
-        cb(nil, _("无效书籍"))
-        return nil
-    end
-    local cancelled, active = false, nil
-    active = self._client:addToShelfAsync(book_id, function(wire, err)
-        if cancelled then return end
-        if not wire then cb(nil, err); return end
-        active = self:syncBooksAsync(nil, function(result, sync_err)
-            if cancelled then return end
-            if not result then cb(nil, sync_err); return end
-            cb(true, nil, book.title)
-        end)
-    end)
-    return { cancel = function()
-            cancelled = true
-            if active and active.cancel then active.cancel() end
-        end }
 end
 
 ---@param identity BookIdentity

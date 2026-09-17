@@ -47,7 +47,6 @@ function Source:capabilities()
         edit = false,
         insight = true,
         stats_pull = false,
-        store = true,
     }
 end
 
@@ -196,27 +195,6 @@ local function existingChapter(identity, opts)
     end
     return nil
 end
-
-function Source:listStoreAsync(opts, cb)
-    opts = opts or {}
-    local search = tostring(opts.search or "")
-    local function on_wire(wire, err)
-        if not wire then cb(nil, err); return end
-        local result = Mapper.search(wire)
-        for _, book in ipairs(result.data) do
-            rememberCover(self, book)
-        end
-        cb(result)
-    end
-    if search ~= "" then
-        return self._client:searchAsync(search, opts.page, opts.page_size, on_wire)
-    end
-    return self._client:discoverAsync(opts.page, opts.page_size, on_wire)
-end
-
----@param identity BookIdentity
----@param cb fun(book: Book|nil, err: string|nil)
----@return { cancel: fun() }
 function Source:getDetailAsync(identity, cb)
     local cancelled, job = false, nil
     job = self._client:detailAsync(identity.stable_id, function(wire, err)
@@ -242,52 +220,6 @@ function Source:getDetailAsync(identity, cb)
             if job and job.cancel then job.cancel() end
         end }
 end
-
----@param book Book|nil
----@param cb fun(ok: boolean|nil, err: string|nil, title: string|nil)
----@return { cancel: fun() }|nil
-function Source:addStoreBookAsync(book, cb)
-    if not require("source.copymanga.auth").hasSession() then
-        cb(nil, _("请先登录拷贝漫画账号"))
-        return nil
-    end
-    if not book or type(book.stable_id) ~= "string" or book.stable_id == "" then
-        cb(nil, _("无效书籍"))
-        return nil
-    end
-    local cancelled, job = false, nil
-    job = self._client:detailAsync(book.stable_id, function(wire, err)
-        if cancelled then return end
-        if not wire then cb(nil, err); return end
-        local detail = Mapper.detail(book.stable_id, wire)
-        local comic_id = Mapper.comicId(wire)
-        if not detail or not comic_id then cb(nil, _("漫画详情解析失败")); return end
-        job = self._client:setCollectAsync(comic_id, true, function(collect_wire, collect_err)
-            if cancelled then return end
-            if not collect_wire then cb(nil, collect_err); return end
-            detail.in_library = true
-            job = loadChapters(self._client, book.stable_id, Mapper.groups(wire), function(chapters, chapter_err)
-                if cancelled then return end
-                if not chapters then cb(nil, chapter_err); return end
-                if not Toc.put(self.id, book.stable_id, chapters) then
-                    cb(nil, _("漫画目录保存失败"))
-                    return
-                end
-                require("book.store").rememberMany({ detail })
-                rememberCover(self, detail)
-                cb(true, nil, detail.title)
-            end)
-        end)
-    end)
-    return { cancel = function()
-            cancelled = true
-            if job and job.cancel then job.cancel() end
-        end }
-end
-
----@param identity BookIdentity
----@param cb fun(toc: BookChapter[]|nil, err: string|nil)
----@return { cancel: fun() }|nil
 function Source:loadTocAsync(identity, cb)
     local cached = Toc.read(identity.source_id, identity.stable_id)
     if cached then

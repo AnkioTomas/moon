@@ -131,7 +131,6 @@ function Source:capabilities()
         edit = false,
         insight = true,
         stats_pull = true,
-        store = false,
     }
 end
 

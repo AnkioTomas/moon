@@ -41,7 +41,6 @@ local Jdread = require("source.jdread")
 do
     local source = Jdread.new()
     local caps = source:capabilities()
-    Assert.is_true(caps.store)
     Assert.is_true(caps.insight)
     Assert.is_false(caps.stats_pull)
     Assert.is_false(type(source.pushStatsAsync) == "function")
@@ -62,88 +61,6 @@ do
     Assert.eq(err, "无封面")
 end
 
-do
-    local called
-    fake_client.searchAsync = function(_, keyword, page, page_size, cb)
-        called = { keyword = keyword, page = page, page_size = page_size }
-        cb({
-            data = {
-                total_count = 1,
-                product_search_infos = {
-                    { product_id = 7, product_name = "搜索书" },
-                },
-            },
-        })
-        return { cancel = function() end }
-    end
-    local source = Jdread.new()
-    local result
-    source:listStoreAsync({ search = "Lua", page = 2, page_size = 30 }, function(value)
-        result = value
-    end)
-    Assert.eq(called.keyword, "Lua")
-    Assert.eq(called.page, 2)
-    Assert.eq(called.page_size, 30)
-    Assert.eq(result.data[1].stable_id, "7")
-end
-
-do
-    fake_client.shelfSyncAsync = function(_, cb)
-        cb({ data = { books = {
-            { ebook_id = 8, name = "书架种子一" },
-            { ebook_id = 10, name = "书架种子二" },
-        } } })
-        return { cancel = function() end }
-    end
-    local seeds = {}
-    fake_client.recommendAsync = function(_, book_id, cb)
-        seeds[#seeds + 1] = book_id
-        if book_id == "8" then
-            cb({ data = {
-                { ebook_id = 9, name = "推荐书一" },
-                { ebook_id = 11, name = "共同推荐" },
-            } })
-        else
-            cb({ data = {
-                { ebook_id = 11, name = "共同推荐" },
-                { ebook_id = 12, name = "推荐书二" },
-            } })
-        end
-        return { cancel = function() end }
-    end
-    local source = Jdread.new()
-    local result
-    source:listStoreAsync({}, function(value) result = value end)
-    Assert.eq(seeds[1], "8")
-    Assert.eq(seeds[2], "10")
-    Assert.len(result.data, 3)
-    Assert.eq(result.data[1].stable_id, "9")
-    Assert.eq(result.data[2].stable_id, "11")
-    Assert.eq(result.data[3].stable_id, "12")
-end
-
-do
-    local added
-    fake_client.addToShelfAsync = function(_, book_id, cb)
-        added = book_id
-        cb({ result_code = 0 })
-        return { cancel = function() end }
-    end
-    fake_client.shelfSyncAsync = function(_, cb)
-        cb({ data = { books = { { ebook_id = 10, name = "已入架" } } } })
-        return { cancel = function() end }
-    end
-    local source = Jdread.new()
-    local ok, err, title
-    source:addStoreBookAsync({ stable_id = "10", title = "测试书" }, function(value, e, t)
-        ok, err, title = value, e, t
-    end)
-    Assert.eq(added, "10")
-    Assert.is_true(ok)
-    Assert.is_nil(err)
-    Assert.eq(title, "测试书")
-    Assert.eq(remembered[1].stable_id, "10")
-end
 
 do
     local prefetch_opts
