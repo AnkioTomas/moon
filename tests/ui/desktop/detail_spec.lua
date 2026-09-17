@@ -113,13 +113,15 @@ package.preload["ui.components.pagestrip"] = function()
         end,
     }
 end
+local hero_opts
 package.preload["ui.components.bookinfo"] = function()
     return {
         title = function(book) return book.title or "" end,
         author = function() return "" end,
         pct = function(book) return tonumber(book.percent) or 0 end,
         tappable = function(w, h, on_tap) return { w = w, h = h, on_tap = on_tap } end,
-        hero = function()
+        hero = function(_, source, book, opts)
+            hero_opts = { source = source, book = book, opts = opts }
             return { getSize = function() return { w = 100, h = 80 } end }, 80
         end,
         desc = function() return "" end,
@@ -152,7 +154,14 @@ end
 local resolved
 package.preload["source.registry"] = function()
     return {
-        resolve = function() return resolved end,
+        resolve = function(id)
+            return resolved
+        end,
+        meta = function(id)
+            if id == "wechat" then return { id = "wechat", name = "微信读书" } end
+            if id == "local" then return { id = "local", name = "本地书籍" } end
+            return { id = id, name = id }
+        end,
     }
 end
 
@@ -336,3 +345,22 @@ recent.rebuilt = false
 recent:buildRecent(300, 80)
 strip_opts.on_next()
 Assert.eq(recent._daily_page, 2)
+
+-- Hero 副文案带属主源名（混合模式同屏多源时可读）。
+hero_opts = nil
+resolved = { id = "wechat" }
+local hero_page = setmetatable({
+    plugin = {},
+    source = { id = "local" },
+    openBook = function() end,
+}, { __index = Detail })
+hero_page:buildHero(400, {
+    source_id = "wechat",
+    stable_id = "b1",
+    title = "书",
+    category = "科幻",
+    series = "三体",
+}, "library", true)
+Assert.eq(hero_opts.opts.subtitle, "微信读书 · 科幻 · 三体")
+Assert.eq(hero_opts.source.id, "wechat")
+resolved = nil

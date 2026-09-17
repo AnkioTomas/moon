@@ -594,6 +594,14 @@ do
     Assert.eq(req.url, "https://cdn.example.com/a.jpg")
     Assert.eq(req.headers.Cookie, "wr_skey=stub")
 
+    -- 新源实例没有内存缓存，必须从 Book/数据库恢复封面。
+    local fresh = WeChat.new()
+    local direct = fresh:coverRequest({
+        source_id = "wechat", stable_id = "b1", cover = "https://cdn.example.com/a.jpg",
+    })
+    Assert.eq(direct.url, "https://cdn.example.com/a.jpg")
+    Assert.eq(direct.headers.Cookie, "wr_skey=stub")
+
     -- 非 http(s) 前缀的封面不入缓存
     local req2, err2 = src:coverRequest({ source_id = "wechat", stable_id = "b2" })
     Assert.is_nil(req2)

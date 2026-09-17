@@ -72,7 +72,7 @@ setmetatable(TopBar, View)
 ---@return nil
 function TopBar:sync()
     if self.lifecycle.state == "Destroy" then return end
-    local mixed = type(MoonSettings.libraryMixed) == "function" and MoonSettings.libraryMixed()
+    local mixed = MoonSettings.libraryMixed()
     for i = 1, #SLOTS do
         local class = SLOTS[i]
         local key = class.id

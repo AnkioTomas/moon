@@ -612,13 +612,14 @@ function BookDB.libraryStableIdsBySource(source_id)
 end
 
 --- 按源分页查询书库（图书馆直查数据库）。
----@param source_id string
+--- source_id 可为单源字符串，或已启用源 id 列表（混合模式）。
+---@param source_id string|string[]
 ---@param opts { category: string|nil, uncategorized: boolean|nil, series: string|nil, unseries: boolean|nil, search: string|nil, read_status: string|nil, limit: number|nil, offset: number|nil }|nil
 ---@return table[] rows, number count
 function BookDB.listBySource(source_id, opts)
     opts = opts or {}
-    local where = "b.source_id=? AND b.in_library=1"
-    local args = { source_id }
+    local where, args = Base.sourceClause("b.source_id", source_id)
+    where = where .. " AND b.in_library=1"
     if opts.uncategorized then
         where = where .. " AND (b.category IS NULL OR b.category='')"
     elseif opts.category and opts.category ~= "" then
@@ -670,7 +671,7 @@ function BookDB.listBySource(source_id, opts)
         local direction = opts.sort_desc and "DESC" or "ASC"
         order = string.format(order, direction, direction)
     end
-    local sel = [[SELECT b.stable_id, b.title, b.authors,
+    local sel = [[SELECT b.source_id, b.stable_id, b.title, b.authors,
                         COALESCE(p.fraction * 100, b.percent),
                         b.category, b.series, b.intro, b.cover, b.fetched_at,
                         b.read_state, b.is_new, b.path
@@ -687,19 +688,19 @@ function BookDB.listBySource(source_id, opts)
     if result and nrows and nrows > 0 then
         for i = 1, nrows do
             rows[#rows + 1] = {
-                source_id = source_id,
-                stable_id = result[1][i],
-                title = result[2][i],
-                authors = result[3][i],
-                percent = tonumber(result[4][i]) or 0,
-                category = result[5][i],
-                series = result[6][i],
-                intro = result[7][i],
-                cover = result[8][i],
-                fetched_at = tonumber(result[9][i]) or 0,
-                read_state = tonumber(result[10][i]) or 0,
-                is_new = tonumber(result[11][i]) ~= 0,
-                path = result[12][i],
+                source_id = result[1][i],
+                stable_id = result[2][i],
+                title = result[3][i],
+                authors = result[4][i],
+                percent = tonumber(result[5][i]) or 0,
+                category = result[6][i],
+                series = result[7][i],
+                intro = result[8][i],
+                cover = result[9][i],
+                fetched_at = tonumber(result[10][i]) or 0,
+                read_state = tonumber(result[11][i]) or 0,
+                is_new = tonumber(result[12][i]) ~= 0,
+                path = result[13][i],
             }
         end
     end
@@ -707,30 +708,32 @@ function BookDB.listBySource(source_id, opts)
 end
 
 --- 某源的书库分类列表（DISTINCT category，非空，字典序）。
----@param source_id string
+---@param source_id string|string[]
 ---@return string[]
 function BookDB.categoriesBySource(source_id)
+    local where, args = Base.sourceClause("source_id", source_id)
     return stringColumn(
         [[SELECT DISTINCT category FROM books
-          WHERE source_id=? AND in_library=1 AND category IS NOT NULL AND category<>''
+          WHERE ]] .. where .. [[ AND in_library=1 AND category IS NOT NULL AND category<>''
           ORDER BY category;]],
-        source_id
+        unpack(args)
     )
 end
 
 --- 某源书架按分类聚合；空字符串代表未分类桶。
----@param source_id string
+---@param source_id string|string[]
 ---@return { category: string, count: integer }[]
 function BookDB.categoryCountsBySource(source_id)
+    local where, args = Base.sourceClause("source_id", source_id)
     local result, nrows = Base.query(
         [[SELECT CASE WHEN category IS NULL OR category='' THEN '' ELSE category END,
                  COUNT(*)
           FROM books
-          WHERE source_id=? AND in_library=1
+          WHERE ]] .. where .. [[ AND in_library=1
           GROUP BY CASE WHEN category IS NULL OR category='' THEN '' ELSE category END
           ORDER BY CASE WHEN category IS NULL OR category='' THEN 1 ELSE 0 END,
                    category;]],
-        source_id
+        unpack(args)
     )
     local rows = {}
     if result and nrows and nrows > 0 then
@@ -745,30 +748,32 @@ function BookDB.categoryCountsBySource(source_id)
 end
 
 --- 某源的书库系列列表（DISTINCT series，非空，字典序）。
----@param source_id string
+---@param source_id string|string[]
 ---@return string[]
 function BookDB.seriesBySource(source_id)
+    local where, args = Base.sourceClause("source_id", source_id)
     return stringColumn(
         [[SELECT DISTINCT series FROM books
-          WHERE source_id=? AND in_library=1 AND series IS NOT NULL AND series<>''
+          WHERE ]] .. where .. [[ AND in_library=1 AND series IS NOT NULL AND series<>''
           ORDER BY series;]],
-        source_id
+        unpack(args)
     )
 end
 
 --- 某源书架按系列聚合；空字符串代表无系列桶。
----@param source_id string
+---@param source_id string|string[]
 ---@return { series: string, count: integer }[]
 function BookDB.seriesCountsBySource(source_id)
+    local where, args = Base.sourceClause("source_id", source_id)
     local result, nrows = Base.query(
         [[SELECT CASE WHEN series IS NULL OR series='' THEN '' ELSE series END,
                  COUNT(*)
           FROM books
-          WHERE source_id=? AND in_library=1
+          WHERE ]] .. where .. [[ AND in_library=1
           GROUP BY CASE WHEN series IS NULL OR series='' THEN '' ELSE series END
           ORDER BY CASE WHEN series IS NULL OR series='' THEN 1 ELSE 0 END,
                    series;]],
-        source_id
+        unpack(args)
     )
     local rows = {}
     if result and nrows and nrows > 0 then
@@ -783,9 +788,10 @@ function BookDB.seriesCountsBySource(source_id)
 end
 
 --- 某源书架按视觉阅读状态聚合；新书优先，三组始终返回。
----@param source_id string
+---@param source_id string|string[]
 ---@return { status: "new"|"read"|"unread", count: integer }[]
 function BookDB.readStatusCountsBySource(source_id)
+    local where, args = Base.sourceClause("source_id", source_id)
     local result, nrows = Base.query(
         [[SELECT CASE
                    WHEN is_new=1 THEN 'new'
@@ -794,13 +800,13 @@ function BookDB.readStatusCountsBySource(source_id)
                  END,
                  COUNT(*)
           FROM books
-          WHERE source_id=? AND in_library=1
+          WHERE ]] .. where .. [[ AND in_library=1
           GROUP BY CASE
                      WHEN is_new=1 THEN 'new'
                      WHEN read_state=1 THEN 'read'
                      ELSE 'unread'
                    END;]],
-        source_id
+        unpack(args)
     )
     local counts = { new = 0, read = 0, unread = 0 }
     if result and nrows and nrows > 0 then

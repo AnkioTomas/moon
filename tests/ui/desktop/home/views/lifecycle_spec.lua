@@ -76,7 +76,10 @@ package.preload["db.stats"] = function()
     }
 end
 package.preload["book.catalog"] = function()
-    return { formatDuration = function(n) return tostring(n) end }
+    return {
+        formatDuration = function(n) return tostring(n) end,
+        libraryScope = function(id) return id end,
+    }
 end
 
 local ctx = { desktop = {}, source = { id = "owner" } }

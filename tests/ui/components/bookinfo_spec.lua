@@ -60,7 +60,14 @@ end
 package.preload["ui.components.surface"] = function()
     return { build = function(opts) return opts.child end }
 end
-package.preload["utils.paths"] = function() return {} end
+package.preload["utils.paths"] = function()
+    return {
+        coverPath = function(stable_id, source_id)
+            return "/covers/" .. tostring(source_id) .. "/" .. tostring(stable_id)
+        end,
+        ensureLayout = function() end,
+    }
+end
 package.preload["book.store"] = function()
     return {
         isDownloaded = function(book)
@@ -68,7 +75,23 @@ package.preload["book.store"] = function()
         end,
     }
 end
-package.preload["libs/libkoreader-lfs"] = function() return {} end
+package.preload["libs/libkoreader-lfs"] = function()
+    return { attributes = function() return nil end }
+end
+local resolved = {}
+package.preload["source.registry"] = function()
+    return {
+        resolve = function(id)
+            resolved[#resolved + 1] = id
+            return {
+                id = id,
+                coverRequest = function(_, book)
+                    return { url = "https://" .. id .. "/" .. book.stable_id, headers = { X = id } }
+                end,
+            }
+        end,
+    }
+end
 package.preload["ffi/blitbuffer"] = function()
     return { COLOR_WHITE = 0, COLOR_BLACK = 1, COLOR_GRAY_3 = 2 }
 end
@@ -135,6 +158,38 @@ Assert.eq(opening.overlap_offset[2], math.floor((120 - 22) / 2))
 
 local bare = select(1, BookInfo.cover(nil, nil, {}, 80, 120, {}))
 Assert.is_nil(bare.overlap_offset)
+
+-- 混合模式：封面按书的 source_id 解析属主源，不用活跃源冒充。
+resolved = {}
+local active = {
+    id = "local",
+    coverRequest = function()
+        error("must not use active source for foreign book")
+    end,
+}
+local image = select(1, BookInfo.cover(nil, active, {
+    source_id = "wechat",
+    stable_id = "book-1",
+    title = "跨源书",
+}, 80, 120, {}))
+Assert.eq(resolved[1], "wechat")
+Assert.eq(image.src, "https://wechat/book-1")
+Assert.eq(image.headers.X, "wechat")
+
+-- 活跃源就是属主源时不 resolve。
+resolved = {}
+local same = {
+    id = "wechat",
+    coverRequest = function(_, book)
+        return { url = "https://same/" .. book.stable_id }
+    end,
+}
+image = select(1, BookInfo.cover(nil, same, {
+    source_id = "wechat",
+    stable_id = "book-2",
+}, 80, 120, {}))
+Assert.len(resolved, 0)
+Assert.eq(image.src, "https://same/book-2")
 
 local with_more = select(1, BookInfo.cover(nil, nil, {}, 80, 120, { more = true }))
 Assert.eq(with_more.dimen.w, 80)

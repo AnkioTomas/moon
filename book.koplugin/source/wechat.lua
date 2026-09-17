@@ -158,7 +158,11 @@ end
 ---@param identity BookIdentity
 ---@return BookCoverRequest|nil, string|nil
 function Source:coverRequest(identity)
-    local url = self._covers[identity.stable_id]
+    local url = identity.cover_url or identity.cover or self._covers[identity.stable_id]
+    if type(url) ~= "string" or url == "" then
+        local stored = require("db.book").get(self.id, identity.stable_id)
+        url = stored and stored.cover
+    end
     if type(url) ~= "string" or url == "" then
         return nil, _("无封面")
     end

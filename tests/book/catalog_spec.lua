@@ -7,6 +7,8 @@ book.catalog：本地唯一读入口离线用例。
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
 
+local mixed_on = false
+local seen_scope
 local FakeBooks = {
     list_rows = {},
     list_count = 0,
@@ -17,6 +19,7 @@ local FakeBooks = {
     series = {},
     recent = {},
     list_opts = nil,
+    meta = nil,
 }
 local FakeStats = {
     summary = { total_seconds = 0 },
@@ -24,35 +27,28 @@ local FakeStats = {
     daily_books = {},
 }
 
+package.preload["utils.settings"] = function()
+    return { libraryMixed = function() return mixed_on end }
+end
+package.preload["source.registry"] = function()
+    return {
+        listEnabled = function()
+            return { { id = "local" }, { id = "wechat" } }
+        end,
+    }
+end
 package.preload["db.book"] = function()
     return {
-        listBySource = function(_, opts)
+        listBySource = function(scope, opts)
+            seen_scope = scope
             FakeBooks.list_opts = opts
             return FakeBooks.list_rows, FakeBooks.list_count
         end,
-        categoriesBySource = function()
-            return FakeBooks.categories
-        end,
-        categoryCountsBySource = function()
-            return FakeBooks.category_counts
-        end,
-        seriesCountsBySource = function()
-            return FakeBooks.series_counts
-        end,
-        readStatusCountsBySource = function()
-            return FakeBooks.read_counts
-        end,
-        seriesBySource = function()
-            return FakeBooks.series
-        end,
-        getMany = function(source_id, stable_ids)
-            local out = {}
-            for _, stable_id in ipairs(stable_ids) do
-                out[stable_id] = FakeBooks.meta
-                    and FakeBooks.meta[source_id .. "\n" .. tostring(stable_id)]
-            end
-            return out
-        end,
+        categoriesBySource = function() return FakeBooks.categories end,
+        categoryCountsBySource = function() return FakeBooks.category_counts end,
+        seriesCountsBySource = function() return FakeBooks.series_counts end,
+        readStatusCountsBySource = function() return FakeBooks.read_counts end,
+        seriesBySource = function() return FakeBooks.series end,
         get = function(source_id, stable_id)
             return FakeBooks.meta and FakeBooks.meta[source_id .. "\n" .. tostring(stable_id)]
         end,
@@ -60,22 +56,18 @@ package.preload["db.book"] = function()
 end
 package.preload["db.progress"] = function()
     return {
-        recent = function()
+        recent = function(scope)
+            seen_scope = scope
             return FakeBooks.recent
         end,
     }
 end
 package.preload["db.stats"] = function()
     return {
-        summaryBySource = function()
-            return FakeStats.summary
-        end,
-        dailyBySource = function()
-            return FakeStats.daily
-        end,
-        dailyBooksBySource = function()
-            return FakeStats.daily_books
-        end,
+        summaryBySource = function() return FakeStats.summary end,
+        dailyBySource = function() return FakeStats.daily end,
+        dailyBooksBySource = function() return FakeStats.daily_books end,
+        weeklyBooksBySource = function() return {} end,
     }
 end
 package.loaded["book.catalog"] = nil
@@ -107,6 +99,7 @@ do -- listLibraryAsync 读假库
     Assert.eq(got.res.data[1].source_id, "local")
     Assert.eq(got.res.data[1].title, "B")
     Assert.eq(FakeBooks.list_opts.read_status, "unread")
+    Assert.eq(seen_scope, "local")
 end
 
 do -- filtersAsync
@@ -174,10 +167,37 @@ do -- 非法 source_id
     Assert.eq(got.err, "invalid source_id")
 end
 
-package.preload["db.book"] = nil
-package.preload["db.progress"] = nil
-package.preload["db.stats"] = nil
-package.loaded["db.book"] = nil
-package.loaded["db.progress"] = nil
-package.loaded["db.stats"] = nil
-package.loaded["book.catalog"] = nil
+do -- 混合模式：多源 scope 下发给 DB，行上保留真实 source_id
+    mixed_on = true
+    FakeBooks.list_rows = {
+        { source_id = "local", stable_id = "a.epub", title = "A" },
+        { source_id = "wechat", stable_id = "b", title = "B" },
+    }
+    FakeBooks.list_count = 2
+    FakeBooks.recent = {
+        { source_id = "wechat", stable_id = "b", fraction = 0.5, updated_at = 2 },
+        { source_id = "local", stable_id = "a.epub", fraction = 0.1, updated_at = 1 },
+    }
+    FakeBooks.meta = {
+        ["wechat\nb"] = { source_id = "wechat", stable_id = "b", title = "B" },
+        ["local\na.epub"] = { source_id = "local", stable_id = "a.epub", title = "A" },
+    }
+
+    local got
+    Catalog.listLibraryAsync("local", { page = 1, page_size = 10 }, function(res, err)
+        got = { res = res, err = err }
+    end)
+    Stubs.flush()
+    Assert.is_nil(got.err)
+    Assert.eq(seen_scope[1], "local")
+    Assert.eq(seen_scope[2], "wechat")
+    Assert.eq(got.res.data[1].source_id, "local")
+    Assert.eq(got.res.data[2].source_id, "wechat")
+
+    local recent = Catalog.recentBooks("local", 24)
+    Assert.eq(seen_scope[1], "local")
+    Assert.eq(recent[1].source_id, "wechat")
+    Assert.eq(recent[1].percent, 50)
+    Assert.eq(recent[2].source_id, "local")
+    mixed_on = false
+end

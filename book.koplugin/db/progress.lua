@@ -238,21 +238,23 @@ end
 
 --- 当前书库中有阅读进度的书，按进度更新时间倒序。
 --- books 只负责成员资格；最近阅读的准入与排序完全由 pending_progress 决定。
----@param source_id string
+--- source_id 可为单源字符串，或已启用源 id 列表（混合模式）。
+---@param source_id string|string[]
 ---@param limit number|nil
 ---@return PendingProgress[]
 function ProgressDB.recent(source_id, limit)
+    local where, args = Base.sourceClause("p.source_id", source_id)
+    args[#args + 1] = math.max(1, tonumber(limit) or 24)
     return rows(Base.query(
         [[SELECT ]] .. COLUMNS .. [[ FROM pending_progress p
-          WHERE p.source_id=? AND p.updated_at>0
+          WHERE ]] .. where .. [[ AND p.updated_at>0
             AND EXISTS (
               SELECT 1 FROM books b
                WHERE b.source_id=p.source_id AND b.stable_id=p.stable_id
                  AND b.in_library=1
             )
           ORDER BY p.updated_at DESC, p.stable_id ASC LIMIT ?;]],
-        source_id,
-        math.max(1, tonumber(limit) or 24)
+        unpack(args)
     ))
 end
 
