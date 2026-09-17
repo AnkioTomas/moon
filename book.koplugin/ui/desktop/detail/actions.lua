@@ -43,70 +43,25 @@ function Detail:cacheAllChapters()
     })
 end
 
---- 书城书动作：zlib 下载导入；源自带书城的书加入远端书架并同步。
+--- Z-Library 书：下载后导入本地书库。
 ---@return nil
 function Detail:installStoreBook()
     local book = self.book or {}
     if self._install_job then
         return
     end
-    local kind = storeKind(book, self.source, self.origin)
-    if kind == "source" then
-        if not self.source or not self.source.configured or not self.source:configured() then
-            require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
-                text = _("请先在设置里配置当前数据源"),
-            })
-            return
-        end
-        local UIManager = require("ui/uimanager")
-        local InfoMessage = require("ui/widget/infomessage")
-        local ProgressbarDialog = require("ui/widget/progressbardialog")
-        local dialog = ProgressbarDialog:new{
-            title = _("正在加入书架…"),
-            subtitle = book.title,
-            progress_max = 1,
-            dismissable = false,
-        }
-        dialog:show()
-        require("ui/network/manager"):runWhenOnline(function()
-            if not self.lifecycle:uiReady() then
-                dialog:close()
-                return
-            end
-            if type(self.source.addStoreBookAsync) ~= "function" then
-                dialog:close()
-                UIManager:show(InfoMessage:new{ text = _("当前数据源不支持书城") })
-                return
-            end
-            self._install_job = self.lifecycle:addHttp(self.source:addStoreBookAsync(book, function(ok, err, title)
-                self._install_job = nil
-                dialog:close()
-                if not self.lifecycle:uiReady() then
-                    return
-                end
-                if not ok then
-                    UIManager:show(InfoMessage:new{ text = err or _("加入书架失败") })
-                    return
-                end
-                local desk = self.desktop
-                self:onClose()
-                UIManager:show(InfoMessage:new{
-                    text = _("已加入书架：") .. tostring(title or book.title),
-                    timeout = 3,
-                })
-                if desk and desk.lifecycle.state ~= "Destroy" then
-                    if desk.library then
-                        desk.library.state = nil
-                        desk.library.page = 1
-                    end
-                    desk:switchTab("library")
-                end
-            end))
-        end)
+    if storeKind(book, self.source, self.origin) ~= "zlib" then
         return
     end
     if not require("zlib.init").hasCredentials() then
         require("zlib.setting").open(self.plugin)
+        return
+    end
+    local local_src = require("source.registry").resolve("local")
+    if not local_src or type(local_src.importBookAsync) ~= "function" then
+        require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
+            text = _("当前数据源不支持导入书籍"),
+        })
         return
     end
     local ProgressbarDialog = require("ui/widget/progressbardialog")
@@ -121,7 +76,7 @@ function Detail:installStoreBook()
     dialog:show()
     require("ui/network/manager"):runWhenOnline(function()
         if not self.lifecycle:uiReady() then dialog:close(); return end
-        self._install_job = self.lifecycle:addHttp(require("zlib.init").installAsync(self.source, book, function(bytes)
+        self._install_job = self.lifecycle:addHttp(require("zlib.init").installAsync(local_src, book, function(bytes)
             dialog:reportProgress(bytes)
         end, function(ok, err, filename)
             self._install_job = nil
@@ -222,7 +177,7 @@ end
 ---@return table, table|nil tools, primary
 function Detail.actionPlan(book, owner, origin)
     if origin == "store" then
-        return {}, { id = "shelf", icon = "add", text = _("加入书架") }
+        return {}, { id = "shelf", icon = "add", text = _("加入书库") }
     end
     local tools = {}
     if bookSupportsEdit(book, owner) then

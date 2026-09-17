@@ -107,7 +107,6 @@ do
     local src, err = Registry.create("jdread")
     Assert.is_true(src ~= nil, err)
     local caps = src:capabilities()
-    Assert.is_true(caps.store)
     Assert.is_true(caps.insight)
     Assert.is_false(caps.stats_pull)
     Assert.is_false(type(src.pushStatsAsync) == "function")
@@ -125,14 +124,12 @@ do
     Assert.is_true(src ~= nil, err)
     Assert.is_false(src:configured())
     Assert.is_true(src:capabilities().refresh)
-    Assert.is_false(src:capabilities().store)
 end
 
 do
     local src, err = Registry.create("copymanga")
     Assert.is_true(src ~= nil, err)
     Assert.is_true(src:configured())
-    Assert.is_true(src:capabilities().store)
     Assert.is_true(src:capabilities().search)
 end
 

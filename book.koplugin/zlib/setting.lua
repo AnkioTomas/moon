@@ -96,7 +96,7 @@ function Setting.open(plugin)
     local cfg = Settings.getSource("zlib")
     local dialog
     dialog = MultiInputDialog:new{
-        title = _("Z-Library 账号（下载）"),
+        title = _("Z-Library 账号"),
         fields = {
             { text = tostring(cfg.email or ""), hint = _("邮箱") },
             { text = tostring(cfg.password or ""), hint = _("密码"), text_type = "password" },

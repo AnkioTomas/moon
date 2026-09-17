@@ -1,8 +1,8 @@
 --[[--
 书籍详情框架：返回栏 + Hero 卡片 + 来源内容区 + 最多两行按钮区。
   单页，禁止 ScrollableContainer；「最近几天」用 PageStrip 分页，不做高度裁剪。
-  书城书（zlib / 微信未上架）未入库：无编辑/统计，hero 不显示简介摘要与进度，完整简介直下，
-  书城显示简介和「加入书架」；图书馆显示统计及源支持的操作。
+  Z-Library 预览书未入库：无编辑/统计，hero 不显示简介摘要与进度，完整简介直下，
+  底栏「加入书库」；图书馆显示统计及源支持的操作。
   Lifecycle.attach：Create → Resume ↔ Pause → Destroy；异步句柄入 lifecycle.http。
 
 布局：
@@ -107,7 +107,7 @@ function Detail.open(desktop, origin, book)
     UIManager:setDirty(desktop.detail, "ui")
 end
 
---- 书城预览书：zlib 待下载；源自带书城的书加入该源远端书架。
+--- Z-Library 预览书：待下载导入本地书库。
 ---@param book table|nil 当前操作或展示的书籍数据
 ---@param source table|nil 书籍所属数据源实例
 ---@param origin "store"|"library" 详情来源
@@ -131,19 +131,6 @@ function Detail:init()
     local kind = storeKind(self.book, self.source, self.origin)
     if kind == "zlib" then
         self._store_detail_job = self.lifecycle:addHttp(require("zlib.init").getDetailAsync(self.book, function(detail)
-            self._store_detail_job = nil
-            if not self.lifecycle:uiReady() or not detail then return end
-            self.book = detail
-            self:updateView()
-            require("ui/uimanager"):setDirty(self, "ui")
-        end))
-    elseif kind == "source" and self.source and self.source.getDetailAsync then
-        local book = self.book
-        self._store_detail_job = self.lifecycle:addHttp(self.source:getDetailAsync({
-            source_id = book.source_id,
-            stable_id = book.stable_id,
-            book = book,
-        }, function(detail, err)
             self._store_detail_job = nil
             if not self.lifecycle:uiReady() or not detail then return end
             self.book = detail
@@ -199,7 +186,7 @@ function Detail:buildTopBar(w)
 end
 
 --- 异步拉本机阅读统计（汇总 + 最近 N 天），完成后重建阅读情况区。
---- 书城预览书未读过，无本机数据可查，直接跳过。
+--- Z-Library 预览书未读过，无本机数据可查，直接跳过。
 ---@return nil
 function Detail:fetchStats()
     local book = self.book

@@ -11,5 +11,5 @@ local _ = require("gettext")
 
 return {
     fullname = _("月读"),
-    description = _("图书馆、书城、阅读进度、统计与多源同步。"),
+    description = _("图书馆、阅读进度、统计与多源同步；可选 Z-Library。"),
 }

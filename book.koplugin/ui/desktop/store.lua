@@ -1,6 +1,5 @@
 --[[--
-书城 Tab：浏览目录。
-  local 使用全局 Z-Library；自带书城能力的源仍走 source.listStoreAsync。
+Z-Library Tab：浏览 / 搜索目录，下载后导入本地书库。
 
 布局（同 Library.build）：
   +-----------------------------------------------+
@@ -103,7 +102,7 @@ function Store:pageBooks()
     return books
 end
 
---- 复用图书馆网格构建书城页。
+--- 复用图书馆网格构建 Z-Library 页。
 ---@param ctx table
 ---@param state table
 ---@param opts table|nil
@@ -111,7 +110,7 @@ end
 function Store:build(ctx, state, opts)
     opts = opts or {}
     opts.loading_text = opts.loading_text or _("加载中…")
-    opts.empty_text = opts.empty_text or _("书城暂无内容")
+    opts.empty_text = opts.empty_text or _("z站暂无内容")
     opts.search_only = true
     opts.show_status = false
     opts.on_search = opts.on_search or function()
@@ -124,7 +123,7 @@ function Store:build(ctx, state, opts)
     return library:build(ctx, state, opts)
 end
 
---- 应用书城搜索，搜索词与图书馆筛选状态分开保存。
+--- 应用搜索；与图书馆筛选状态分开保存。
 ---@param query string|nil
 function Store:applySearch(query)
     local desktop = self.desktop
@@ -138,7 +137,7 @@ function Store:applySearch(query)
     self.desktop:updateView()
 end
 
---- 弹出书城搜索框。
+--- 弹出搜索框。
 function Store:showSearch()
     local library = self.desktop.library or Library:new{ desktop = self.desktop, name = "library" }
     library:showSearch(function(query)
@@ -146,7 +145,7 @@ function Store:showSearch()
     end, self.search)
 end
 
---- 同步书城 page_size（与图书馆同网格公式；不碰图书馆实例）。
+--- 同步 page_size（与图书馆同网格公式；不碰图书馆实例）。
 ---@return number
 function Store:syncPageSize()
     local desktop = self.desktop
@@ -159,14 +158,14 @@ function Store:syncPageSize()
     return self.page_size
 end
 
---- 计算书城总页数。
+--- 计算总页数。
 ---@return number
 function Store:pages()
     local ps = self.page_size or 1
     return math.max(1, math.ceil((self.total or 0) / ps))
 end
 
---- 跳转到书城指定页并重建。
+--- 跳转到指定页并重建。
 ---@param page number
 function Store:gotoPage(page)
     page = tonumber(page) or 1
@@ -181,12 +180,11 @@ function Store:gotoPage(page)
     self.desktop:updateView()
 end
 
---- 异步拉取书城列表。
+--- 异步拉取 Z-Library 列表。
 function Store:fetch()
     local desktop = self.desktop
     self:cancel()
     self:syncPageSize()
-    local source = desktop.source
     local generation = desktop.source_generation or 0
     local search = self.search or ""
 
@@ -200,22 +198,14 @@ function Store:fetch()
         self.desktop:updateView()
     end
 
-    if not source or not source.configured or not source:configured() then
-        fail(_("请先在设置里配置当前数据源"))
-        return
-    end
-    local backend = type(source.importBookAsync) == "function" and require("zlib.init") or source
-    if not backend.listStoreAsync then
-        fail(_("当前数据源不支持书城"))
-        return
-    end
-    self.fetch_cancel = backend:listStoreAsync({
+    local zlib = require("zlib.init")
+    self.fetch_cancel = zlib:listStoreAsync({
         page = 1,
         page_size = MAX_RESULTS,
         search = search,
     }, function(res, err)
         if desktop.lifecycle.state == "Destroy" or desktop.tab ~= "store"
-            or desktop.source ~= source or (desktop.source_generation or 0) ~= generation
+            or (desktop.source_generation or 0) ~= generation
             or (self.search or "") ~= search then
             return
         end
@@ -228,9 +218,7 @@ function Store:fetch()
         for i = 1, math.min(#(res.data or {}), MAX_RESULTS) do
             books[#books + 1] = res.data[i]
         end
-        if backend == source then
-            BookStore.rememberMany(books)
-        end
+        BookStore.rememberMany(books)
         self.books = books
         self.total = #books
         local pages = self:pages()
@@ -240,7 +228,7 @@ function Store:fetch()
     end)
 end
 
---- 书城 widget。
+--- Z-Library widget。
 ---@return table
 function Store:updateView()
     local desktop = self.desktop
@@ -269,7 +257,7 @@ function Store:updateView()
         pages = self:pages(),
         total = self.total or 0,
         loading_text = _("加载中…"),
-        empty_text = _("书城暂无内容"),
+        empty_text = _("z站暂无内容"),
         on_prev = function()
             self:gotoPage((self.page or 1) - 1)
         end,
