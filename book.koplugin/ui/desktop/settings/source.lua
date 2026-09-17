@@ -182,7 +182,7 @@ function Source:sections(ctx)
             local on = MoonSettings.zlibEnabled()
             return SettingRow.build(iw, {
                 kind = "toggle", icon = "storefront", title = _("Z-Library"),
-                subtitle = _("底栏显示 z站；下载后导入本地书库"),
+                subtitle = _("底栏显示 Z站；下载后导入本地书库"),
                 status = on and _("开") or _("关"),
                 status_on = on,
                 callback = function()

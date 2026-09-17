@@ -62,7 +62,7 @@ function Display:rows(ctx)
         function(iw)
             return SettingRow.build(iw, {
                 kind = "nav", icon = "grid_view", title = _("书架每行数量"),
-                subtitle = _("调整书库和 z站 每行显示的卡片数"),
+                subtitle = _("调整书库和 Z站 每行显示的卡片数"),
                 status = tostring(grid_max_cols), status_on = true,
                 callback = function()
                     Popup.spin{

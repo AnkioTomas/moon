@@ -99,8 +99,9 @@ package.preload["ui.components.bookinfo"] = function()
 end
 
 local opened_detail
+local opened_origin
 package.preload["ui.desktop.detail"] = function()
-    return { open = function(_, origin, book) opened_detail = book; Assert.eq(origin, "library") end }
+    return { open = function(_, origin, book) opened_origin, opened_detail = origin, book end }
 end
 local opened_book
 local open_done
@@ -186,6 +187,7 @@ Assert.is_true(more_option)
 Assert.not_nil(tap_callback)
 Assert.is_nil(hold_callback)
 tap_widget:onTapBookInfo(nil, { pos = { x = 35, y = 55 } })
+Assert.eq(opened_origin, "library")
 Assert.eq(opened_detail, book)
 Assert.is_nil(opened_book)
 tap_widget:onTapBookInfo(nil, { pos = { x = 20, y = 20 } })
@@ -194,6 +196,19 @@ Assert.eq(refresh_statuses[1], "running")
 Assert.eq(type(open_done), "function")
 open_done(true)
 Assert.eq(refresh_statuses[2], "idle")
+
+-- Z站：无右下角更多；点封面进详情，不直接打开书。
+opened_detail, opened_origin, opened_book, more_option = nil, nil, nil, nil
+desktop.tab = "store"
+library:build(ctx, { books = { book } }, {
+    page = 1, pages = 1, total = 1, show_status = false, search_only = true,
+})
+Assert.is_false(more_option)
+tap_widget:onTapBookInfo(nil, { pos = { x = 20, y = 20 } })
+Assert.eq(opened_origin, "store")
+Assert.eq(opened_detail, book)
+Assert.is_nil(opened_book)
+desktop.tab = "library"
 
 library.state = nil
 library:fetch()

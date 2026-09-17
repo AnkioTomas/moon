@@ -10,7 +10,7 @@
   |          Tab 内容区（contentHeight）           |
   |                                               |
   |-----------------------------------------------|
-  | BottomBar  首页|图书馆|[z站]|[统计]|设置       |
+  | BottomBar  首页|图书馆|[Z站]|[统计]|设置       |
   +-----------------------------------------------+
   手势：底栏 tap 切 Tab；内容区左右滑转给当前页；顶栏点源名换源、点其他区域或下滑开快捷面板。
   Lifecycle：Create → Resume ↔ Pause → Destroy；Resume 只打 topbar+当前 Tab；详情浮层自挂 Lifecycle。
@@ -118,7 +118,7 @@ local function desktopTabs(source)
         { id = "library", text = _("图书馆"), icon = "local_library" },
     }
     if require("utils.settings").zlibEnabled() then
-        tabs[#tabs + 1] = { id = "store", text = _("z站"), icon = "storefront" }
+        tabs[#tabs + 1] = { id = "store", text = _("Z站"), icon = "storefront" }
     end
     local caps = source and source.capabilities and source:capabilities() or {}
     if caps.insight then
