@@ -180,7 +180,8 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open, show_status)
         badge = true,
         ribbon = show_status ~= false,
         download = show_status ~= false,
-        more = true,
+        -- 图书馆右下角进详情；Z站整卡即详情，不画「更多」。
+        more = show_status ~= false,
         show_parent = ctx.desktop,
     }))
     local title_gap = UI.sz(4)
@@ -195,7 +196,7 @@ local function coverCell(ctx, book, slot_w, cw, ch, on_open, show_status)
     ---@return boolean
     tap.onTapBookInfo = function(_, _arg, ges)
         local pos, dimen = ges and ges.pos, tap.dimen
-        if pos and dimen then
+        if show_status ~= false and pos and dimen then
             local size, inset = UI.sz(18), UI.sz(4)
             local cover_x = dimen.x + math.floor((slot_w - cw) / 2)
             if pos.x >= cover_x + cw - size - inset
@@ -335,33 +336,42 @@ function Library:build(ctx, state, opts)
     local total = opts.total or 0
     local books = state.books
     local library = ctx.desktop and ctx.desktop.library
-    --- 点封面直接打开书。
+    --- 点封面：图书馆直接打开书；Z站（show_status=false）进详情。
     ---@param book Book 被点中的书
     ---@param cover table 封面叠层
     ---@param cw number 封面宽度
     ---@param ch number 封面高度
-    local on_open = function(book, cover, cw, ch)
-        local desktop = ctx.desktop
-        local plugin = ctx.plugin or (desktop and desktop.plugin)
-        if not plugin then return end
-        clearOpening(self)
-        local bar = BookInfo.openingBar(cw, ch)
-        cover[#cover + 1] = bar
-        self._opening_cover, self._opening_bar = cover, bar
-        local token = {}
-        self._open_token = token
-        if desktop and desktop.onEvent then desktop:onEvent("refresh_status", "running") end
-        if desktop then UIManager:setDirty(desktop, "ui") end
-        UIManager:nextTick(function()
-            if self._open_token ~= token then return end
-            require("book.open").book(plugin, book, function()
-                if self._open_token ~= token then return end
-                self._open_token = nil
+    local on_open = opts.on_open
+    if type(on_open) ~= "function" then
+        if opts.show_status == false then
+            on_open = function(book)
+                openDetail(ctx, book)
+            end
+        else
+            on_open = function(book, cover, cw, ch)
+                local desktop = ctx.desktop
+                local plugin = ctx.plugin or (desktop and desktop.plugin)
+                if not plugin then return end
                 clearOpening(self)
-                if desktop and desktop.onEvent then desktop:onEvent("refresh_status", "idle") end
+                local bar = BookInfo.openingBar(cw, ch)
+                cover[#cover + 1] = bar
+                self._opening_cover, self._opening_bar = cover, bar
+                local token = {}
+                self._open_token = token
+                if desktop and desktop.onEvent then desktop:onEvent("refresh_status", "running") end
                 if desktop then UIManager:setDirty(desktop, "ui") end
-            end)
-        end)
+                UIManager:nextTick(function()
+                    if self._open_token ~= token then return end
+                    require("book.open").book(plugin, book, function()
+                        if self._open_token ~= token then return end
+                        self._open_token = nil
+                        clearOpening(self)
+                        if desktop and desktop.onEvent then desktop:onEvent("refresh_status", "idle") end
+                        if desktop then UIManager:setDirty(desktop, "ui") end
+                    end)
+                end)
+            end
+        end
     end
 
     local tools_kids = { align = "center" }

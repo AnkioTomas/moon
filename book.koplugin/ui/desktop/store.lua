@@ -110,7 +110,7 @@ end
 function Store:build(ctx, state, opts)
     opts = opts or {}
     opts.loading_text = opts.loading_text or _("加载中…")
-    opts.empty_text = opts.empty_text or _("z站暂无内容")
+    opts.empty_text = opts.empty_text or _("Z站暂无内容")
     opts.search_only = true
     opts.show_status = false
     opts.on_search = opts.on_search or function()
@@ -257,7 +257,7 @@ function Store:updateView()
         pages = self:pages(),
         total = self.total or 0,
         loading_text = _("加载中…"),
-        empty_text = _("z站暂无内容"),
+        empty_text = _("Z站暂无内容"),
         on_prev = function()
             self:gotoPage((self.page or 1) - 1)
         end,

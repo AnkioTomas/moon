@@ -613,7 +613,8 @@ end
 --- 英雄卡：左封面，右栏高度对齐封面。
 --- 上：书名/作者[/副文案]/简介（简介吃满中间余量，不写死行数）
 --- 下：进度条贴底（opts.show_progress=false 时隐藏，刮削结果用）
---- opts: width, pad, on_tap, show_progress, subtitle, src, headers；返回 widget, height
+--- opts: width, pad, on_tap, show_progress, show_desc, subtitle, src, headers；返回 widget, height
+--- show_desc=false：Z站详情只在下方「简介」区展示全文，避免英雄卡再摘要一遍。
 ---@param plugin table|nil 插件实例，用于打开书籍和调用插件功能
 ---@param source table|nil 书籍所属数据源实例
 ---@param book table|nil 当前操作或展示的书籍数据
@@ -634,6 +635,7 @@ function BookInfo.hero(plugin, source, book, opts)
     end
     local ch = math.floor(cw * 3 / 2)
     local show_progress = opts.show_progress ~= false
+    local show_desc = opts.show_desc ~= false
 
     local cover = select(1, BookInfo.cover(plugin, source, book, cw, ch, {
         badge = false,
@@ -651,7 +653,7 @@ function BookInfo.hero(plugin, source, book, opts)
     local info_w = math.max(UI.sz(40), avail - cw - gap)
     local title = BookInfo.title(book)
     local author = BookInfo.author(book)
-    local desc = BookInfo.desc(book)
+    local desc = show_desc and BookInfo.desc(book) or ""
     local pct = BookInfo.pct(book)
     local subtitle = opts.subtitle
 

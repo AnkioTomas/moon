@@ -91,7 +91,7 @@ Assert.is_true(build_opts.search_only)
 Assert.is_false(build_opts.show_status)
 Assert.is_true(type(build_opts.on_search) == "function")
 Assert.is_true(type(build_opts.on_clear) == "function")
-Assert.eq(build_opts.empty_text, "z站暂无内容")
+Assert.eq(build_opts.empty_text, "Z站暂无内容")
 
 -- 搜索由本页接管：留在 store tab、回第一页并丢弃旧结果。
 build_opts.on_search()

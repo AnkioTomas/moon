@@ -1,7 +1,6 @@
 --[[-- 书籍详情子模块。 @module ui.desktop.detail --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local ButtonTable = require("ui/widget/buttontable")
 local Device = require("device")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -15,7 +14,6 @@ local Screen = Device.screen
 
 
 local Common = require("ui.desktop.detail.common")
-local storeKind = Common.storeKind
 local bookOwnerSource = Common.bookOwnerSource
 local actionChip = Common.actionChip
 local chipRow = Common.chipRow
@@ -28,7 +26,6 @@ function Detail:updateView()
     local pad = UI.pagePad()
     local content_w = w - pad * 2
 
-    local store_kind = storeKind(book, self.source, self.origin)
     local store_book = self.origin == "store"
     local owner = bookOwnerSource(book, self.source)
     local can_read = not store_book and owner ~= nil
@@ -36,29 +33,15 @@ function Detail:updateView()
 
     local title_bar, title_h = self:buildTopBar(w)
 
-    -- 底部最多两行：Z-Library 只有加入书库；图书馆是工具行 + 阅读主操作。
+    -- 底部最多两行：Z站只有加入书库（与图书馆主按钮同款 chip）；图书馆是工具行 + 阅读主操作。
     local footer_pad_v = UI.sz(12)
     local footer, footer_h
     if store_book then
-        local local_src = require("source.registry").resolve("local")
-        local action_enabled = store_kind == "zlib"
-            and type(local_src and local_src.importBookAsync) == "function"
-        footer = ButtonTable:new{
-            width = content_w,
-            buttons = { {
-                {
-                    text = _("加入书库"),
-                    font_size = UI.buttonFontSize(),
-                    enabled = action_enabled,
-                    callback = function()
-                        self:installStoreBook()
-                    end,
-                },
-            } },
-            zero_sep = true,
-            show_parent = self,
-        }
-        footer_h = footer:getSize().h + footer_pad_v * 2
+        local read_h = UI.sz(44)
+        footer = actionChip(content_w, read_h, "add", _("加入书库"), function()
+            self:installStoreBook()
+        end)
+        footer_h = read_h + footer_pad_v * 2
     else
         local tools, primary = Detail.actionPlan(book, owner, self.origin)
         local fns = {
