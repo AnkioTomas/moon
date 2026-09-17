@@ -27,6 +27,7 @@ local Screen = Device.screen
 local UI = require("ui.components.bookui")
 local View = require("ui.view")
 local NativePanel = require("ui.panel.native")
+local MoonSettings = require("utils.settings")
 
 local Base = require("ui.views.topbar.base")
 local Refresh = require("ui.views.topbar.refresh")
@@ -67,14 +68,20 @@ setmetatable(TopBar, View)
 
 
 --- 按设置对齐孩子：该显示的创建，不该显示的拆掉。always 槽位必建。
+--- 混合模式不按源区分展示，源名槽位整项拆掉（图标+文案+点击换源一起没）。
 ---@return nil
 function TopBar:sync()
     if self.lifecycle.state == "Destroy" then return end
+    local mixed = type(MoonSettings.libraryMixed) == "function" and MoonSettings.libraryMixed()
     for i = 1, #SLOTS do
         local class = SLOTS[i]
         local key = class.id
         local child = self[key]
-        if class.always or Base.visible(key) then
+        local want = class.always or Base.visible(key)
+        if key == "source" and mixed then
+            want = false
+        end
+        if want then
             if not child then
                 child = class:new()
                 child.topbar = self
@@ -293,13 +300,13 @@ function TopBar:onDestroy()
     self.widget = nil
 end
 
---- 设置改顶栏项：updateView。其余事件原样转给孩子。
+--- 设置改顶栏项：updateView。换源/混合开关也要 sync（源名槽位可能整项拆装）。
 ---@param event string|table 父组件转发的事件名称或事件对象
 ---@param payload any 与事件一起传入的数据
 ---@return nil
 function TopBar:onEvent(event, payload)
     if self.lifecycle.state == "Destroy" then return end
-    if event == "topbar_changed" then
+    if event == "topbar_changed" or event == "source_changed" then
         self:updateView()
         return
     end
