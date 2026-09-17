@@ -614,12 +614,17 @@ end
 --- 按源分页查询书库（图书馆直查数据库）。
 --- source_id 可为单源字符串，或已启用源 id 列表（混合模式）。
 ---@param source_id string|string[]
----@param opts { category: string|nil, uncategorized: boolean|nil, series: string|nil, unseries: boolean|nil, search: string|nil, read_status: string|nil, limit: number|nil, offset: number|nil }|nil
+---@param opts { category: string|nil, uncategorized: boolean|nil, series: string|nil, unseries: boolean|nil, search: string|nil, read_status: string|nil, source_id: string|nil, limit: number|nil, offset: number|nil }|nil
 ---@return table[] rows, number count
 function BookDB.listBySource(source_id, opts)
     opts = opts or {}
     local where, args = Base.sourceClause("b.source_id", source_id)
     where = where .. " AND b.in_library=1"
+    -- 混合模式下再按单源收窄；非混合时 scope 已是单源，此项为空。
+    if type(opts.source_id) == "string" and opts.source_id ~= "" then
+        where = where .. " AND b.source_id=?"
+        args[#args + 1] = opts.source_id
+    end
     if opts.uncategorized then
         where = where .. " AND (b.category IS NULL OR b.category='')"
     elseif opts.category and opts.category ~= "" then
@@ -780,6 +785,31 @@ function BookDB.seriesCountsBySource(source_id)
         for i = 1, nrows do
             rows[#rows + 1] = {
                 series = result[1][i] or "",
+                count = tonumber(result[2][i]) or 0,
+            }
+        end
+    end
+    return rows
+end
+
+--- 范围内按 source_id 聚合册数（混合筛选「数据源」组）。
+---@param source_id string|string[]
+---@return { source_id: string, count: integer }[]
+function BookDB.sourceCountsBySource(source_id)
+    local where, args = Base.sourceClause("source_id", source_id)
+    local result, nrows = Base.query(
+        [[SELECT source_id, COUNT(*)
+          FROM books
+          WHERE ]] .. where .. [[ AND in_library=1
+          GROUP BY source_id
+          ORDER BY source_id;]],
+        unpack(args)
+    )
+    local rows = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            rows[#rows + 1] = {
+                source_id = result[1][i],
                 count = tonumber(result[2][i]) or 0,
             }
         end

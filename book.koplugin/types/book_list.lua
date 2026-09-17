@@ -12,6 +12,7 @@
 ---@field uncategorized boolean|nil 只查询 category 为 NULL/空串的未分类桶
 ---@field unseries boolean|nil 只查询 series 为 NULL/空串的无系列桶
 ---@field read_status "read"|"unread"|nil 按独立阅读状态筛选
+---@field source_id string|nil 混合模式下按书行所属源筛选
 ---@field force boolean|nil 强制重扫、忽略扫描缓存（本地源手动刷新）
 ---@field sort "title"|"author"|"recent_read"|"recent_added"|nil 排序字段
 ---@field sort_desc boolean|nil 是否降序

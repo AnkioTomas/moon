@@ -239,6 +239,7 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             unseries = opts.unseries,
             search = opts.search,
             read_status = opts.read_status,
+            source_id = opts.source_id,
             sort = opts.sort,
             sort_desc = opts.sort_desc,
             limit = page_size,
@@ -251,7 +252,7 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
         end }
 end
 
---- 分类 / 系列筛选项。
+--- 分类 / 系列 /（混合时）数据源筛选项。
 ---@param source_id string
 ---@param cb fun(data: BookFiltersResult|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -263,15 +264,35 @@ function Catalog.filtersAsync(source_id, cb)
             return
         end
         local BookDB = require("db.book")
-        cb({
-            data = {
-                category = BookDB.categoriesBySource(scope),
-                category_counts = BookDB.categoryCountsBySource(scope),
-                series = BookDB.seriesBySource(scope),
-                series_counts = BookDB.seriesCountsBySource(scope),
-                read_counts = BookDB.readStatusCountsBySource(scope),
-            },
-        })
+        local data = {
+            category = BookDB.categoriesBySource(scope),
+            category_counts = BookDB.categoryCountsBySource(scope),
+            series = BookDB.seriesBySource(scope),
+            series_counts = BookDB.seriesCountsBySource(scope),
+            read_counts = BookDB.readStatusCountsBySource(scope),
+        }
+        -- 仅多源混合时给出源分组；顺序跟已启用列表，册数来自聚合。
+        if type(scope) == "table" then
+            local by_id = {}
+            for _, row in ipairs(BookDB.sourceCountsBySource(scope)) do
+                by_id[row.source_id] = row.count
+            end
+            local Registry = require("source.registry")
+            local source_counts = {}
+            for _, meta in ipairs(Registry.listEnabled()) do
+                local name = meta.name
+                if type(name) ~= "string" or name == "" then
+                    name = meta.id
+                end
+                source_counts[#source_counts + 1] = {
+                    source_id = meta.id,
+                    name = name,
+                    count = by_id[meta.id] or 0,
+                }
+            end
+            data.source_counts = source_counts
+        end
+        cb({ data = data })
     end)
 end
 

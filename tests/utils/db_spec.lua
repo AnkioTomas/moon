@@ -329,6 +329,9 @@ do
                         if sql:find("WHEN is_new=1", 1, true) then
                             return { { "new", "read", "unread" }, { 1, 2, 4 } }, 3
                         end
+                        if sql:find("GROUP BY source_id", 1, true) then
+                            return { { "local", "wechat" }, { 3, 5 } }, 2
+                        end
                         if sql:find("CASE WHEN series", 1, true) then
                             return { { "第一辑", "" }, { 5, 2 } }, 2
                         end
@@ -423,6 +426,13 @@ do
     calls = {}
     BookDB.listBySource("local", { read_status = "new" })
     Assert.is_true(calls[1].sql:find("b.is_new=1", 1, true) ~= nil)
+    calls = {}
+    BookDB.listBySource({ "local", "wechat" }, { source_id = "wechat" })
+    Assert.is_true(calls[1].sql:find("b.source_id IN (?,?)", 1, true) ~= nil)
+    Assert.is_true(calls[1].sql:find("AND b.source_id=?", 1, true) ~= nil)
+    Assert.eq(calls[1].args[1], "local")
+    Assert.eq(calls[1].args[2], "wechat")
+    Assert.eq(calls[1].args[3], "wechat")
 
     -- 分类列表
     local cats = BookDB.categoriesBySource("local")
@@ -436,6 +446,11 @@ do
     Assert.eq(category_counts[1].count, 3)
     Assert.eq(category_counts[2].category, "")
     Assert.eq(category_counts[2].count, 2)
+    local source_counts = BookDB.sourceCountsBySource({ "local", "wechat" })
+    Assert.eq(source_counts[1].source_id, "local")
+    Assert.eq(source_counts[1].count, 3)
+    Assert.eq(source_counts[2].source_id, "wechat")
+    Assert.eq(source_counts[2].count, 5)
     local series_counts = BookDB.seriesCountsBySource("local")
     Assert.eq(series_counts[1].series, "第一辑")
     Assert.eq(series_counts[1].count, 5)

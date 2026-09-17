@@ -87,6 +87,10 @@ local Filter = require("ui.desktop.library_filter")
 local applied, applied_sort
 Filter.open{
     data = {
+        source_counts = {
+            { source_id = "local", name = "本地书籍", count = 3 },
+            { source_id = "wechat", name = "微信读书", count = 5 },
+        },
         category_counts = { { category = "科幻", count = 2 } },
         series_counts = { { series = "系列一", count = 1 }, { series = "", count = 3 } },
         read_counts = { { status = "read", count = 4 } },
@@ -108,10 +112,24 @@ local body = frame[1]
 -- 标题行：OverlapGroup 左右同排
 Assert.eq(body[1][1][1].text, "筛选")
 Assert.eq(body[1][2][1][1].text, "全部清除")
-Assert.eq(body[5][1].text, "分类")
-Assert.eq(body[7][1].text, "系列")
-Assert.eq(body[9][1].text, "阅读状态")
-Assert.eq(body[11][1].text, "排序")
+Assert.eq(body[5][1].text, "数据源")
+Assert.eq(body[7][1].text, "分类")
+Assert.eq(body[9][1].text, "系列")
+Assert.eq(body[11][1].text, "阅读状态")
+Assert.eq(body[13][1].text, "排序")
 body[1][2][1].callback()
 Assert.not_nil(applied)
 Assert.eq(applied_sort, "recent_added")
+
+-- 无 source_counts：不出现数据源组
+shown = nil
+Filter.open{
+    data = {
+        category_counts = { { category = "科幻", count = 2 } },
+        series_counts = { { series = "系列一", count = 1 } },
+        read_counts = {},
+    },
+    current = {},
+    on_apply = function() end,
+}
+Assert.eq(shown[1][2][1][2][1][5][1].text, "分类")

@@ -16,6 +16,7 @@ local FakeBooks = {
     category_counts = {},
     series_counts = {},
     read_counts = {},
+    source_counts = {},
     series = {},
     recent = {},
     list_opts = nil,
@@ -33,7 +34,10 @@ end
 package.preload["source.registry"] = function()
     return {
         listEnabled = function()
-            return { { id = "local" }, { id = "wechat" } }
+            return {
+                { id = "local", name = "本地书籍" },
+                { id = "wechat", name = "微信读书" },
+            }
         end,
     }
 end
@@ -49,6 +53,7 @@ package.preload["db.book"] = function()
         seriesCountsBySource = function() return FakeBooks.series_counts end,
         readStatusCountsBySource = function() return FakeBooks.read_counts end,
         seriesBySource = function() return FakeBooks.series end,
+        sourceCountsBySource = function() return FakeBooks.source_counts end,
         get = function(source_id, stable_id)
             return FakeBooks.meta and FakeBooks.meta[source_id .. "\n" .. tostring(stable_id)]
         end,
@@ -118,6 +123,7 @@ do -- filtersAsync
     Assert.eq(got.data.series_counts[1].series, "三体")
     Assert.eq(got.data.read_counts[1].status, "read")
     Assert.eq(got.data.series[1], "三体")
+    Assert.is_nil(got.data.source_counts)
 end
 
 do -- recentBooksAsync：进度定顺序和位置，books 只补元数据
@@ -182,6 +188,10 @@ do -- 混合模式：多源 scope 下发给 DB，行上保留真实 source_id
         ["wechat\nb"] = { source_id = "wechat", stable_id = "b", title = "B" },
         ["local\na.epub"] = { source_id = "local", stable_id = "a.epub", title = "A" },
     }
+    FakeBooks.source_counts = {
+        { source_id = "local", count = 3 },
+        { source_id = "wechat", count = 5 },
+    }
 
     local got
     Catalog.listLibraryAsync("local", { page = 1, page_size = 10 }, function(res, err)
@@ -193,6 +203,25 @@ do -- 混合模式：多源 scope 下发给 DB，行上保留真实 source_id
     Assert.eq(seen_scope[2], "wechat")
     Assert.eq(got.res.data[1].source_id, "local")
     Assert.eq(got.res.data[2].source_id, "wechat")
+
+    Catalog.listLibraryAsync("local", {
+        page = 1, page_size = 10, source_id = "wechat",
+    }, function(res, err)
+        got = { res = res, err = err }
+    end)
+    Stubs.flush()
+    Assert.eq(FakeBooks.list_opts.source_id, "wechat")
+    Assert.eq(seen_scope[1], "local")
+
+    local filters
+    Catalog.filtersAsync("local", function(res) filters = res end)
+    Stubs.flush()
+    Assert.eq(filters.data.source_counts[1].source_id, "local")
+    Assert.eq(filters.data.source_counts[1].name, "本地书籍")
+    Assert.eq(filters.data.source_counts[1].count, 3)
+    Assert.eq(filters.data.source_counts[2].source_id, "wechat")
+    Assert.eq(filters.data.source_counts[2].name, "微信读书")
+    Assert.eq(filters.data.source_counts[2].count, 5)
 
     local recent = Catalog.recentBooks("local", 24)
     Assert.eq(seen_scope[1], "local")
