@@ -3,7 +3,6 @@
 @module koplugin.book.ui.home
 --]]
 
-local Device = require("device")
 local Geom = require("ui/geometry")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local FrameContainer = require("ui/widget/container/framecontainer")
@@ -17,7 +16,6 @@ local Widgets = require("ui.desktop.home.widgets")
 local PageStrip = require("ui.components.pagestrip")
 local Edit = require("ui.desktop.home.edit_overlay")
 local View = require("ui.view")
-local Screen = Device.screen
 local _ = require("gettext")
 
 ---@class BookHome : View
@@ -398,31 +396,6 @@ local function assemble(self)
     return holder
 end
 
---- 将首页根节点安装到桌面内容槽；非首页 Tab 或已销毁实例不安装。
----@param self BookHome 当前视图或布局实例
----@return nil
-local function install(self)
-    local desktop = self.desktop
-    if self.lifecycle.state == "Destroy" or not desktop or not desktop.lifecycle
-        or desktop.lifecycle.state == "Destroy" then
-        return
-    end
-    if desktop.tab ~= "home" then return end
-    local root = desktop[1] and desktop[1][1]
-    local page = self.widget
-    if not root or not page then return end
-    local h = desktop:contentHeight()
-    local w = Screen:getWidth()
-    if page.dimen then
-        page.dimen.w = w
-        page.dimen.h = h
-    else
-        page.dimen = Geom:new{ w = w, h = h }
-    end
-    page.overlap_offset = { 0, UI.topBarH() }
-    desktop.view:replaceRegion("content", page)
-end
-
 --- 同步组件实例并补发创建阶段，然后拼装当前首页内容树。
 ---@return table widget 当前首页内容树
 function Home:createWidget()
@@ -460,13 +433,14 @@ function Home:exitEdit()
     self:updateView()
 end
 
---- 重建首页内容、同步可见组件生命周期并安装到桌面内容槽。
+--- 重建首页内容并同步可见组件生命周期。
+--- 内容槽换页由 Desktop:updateView 负责；此处不得 replaceRegion，
+--- 否则会在 keep_old 缺失时 free 掉设置等 View 根，Destroy 其 lifecycle。
 ---@return table
 function Home:updateView()
     if self.lifecycle.state == "Destroy" then return self.widget end
     self:rebuild()
     applyVisible(self)
-    install(self)
     return self.widget
 end
 
