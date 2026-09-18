@@ -155,6 +155,7 @@ local topbar_items = {}
 package.preload["utils.settings"] = function()
     return {
         activeSourceId = function() return "moon" end,
+        libraryMixed = function() return false end,
         get = function() return { home_topbar_items = topbar_items } end,
     }
 end

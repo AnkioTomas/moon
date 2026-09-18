@@ -26,11 +26,14 @@ function Source:onEvent(event)
     end
 end
 
---- 读取当前数据源名称；设置隐藏或数据不可用时返回 nil。
+--- 读取当前数据源名称；混合开启时显示「混合模式」。设置隐藏时返回 nil。
 ---@return string|nil
 function Source:read()
     if not Base.visible("source") then
         return nil
+    end
+    if MoonSettings.libraryMixed() then
+        return _("混合模式")
     end
     local id = MoonSettings.activeSourceId()
     local meta = id and SourceRegistry.meta(id)

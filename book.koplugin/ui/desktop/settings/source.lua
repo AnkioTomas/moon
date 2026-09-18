@@ -11,6 +11,9 @@ local SourceRegistry = require("source.registry")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
+--- 选择器哨兵：与真实源 id 并列，表示开启混合展示。
+local MIXED = "__mixed__"
+
 ---@class BookSettingsSource
 local Source = {}
 Source.__index = Source
@@ -20,6 +23,13 @@ function Source.new()
     return setmetatable({}, Source)
 end
 
+--- 当前数据源状态文案：混合开启时显示「混合模式」，否则为活跃源名。
+---@param active_name string|nil
+---@return string
+function Source.displayName(active_name)
+    if MoonSettings.libraryMixed() then return _("混合模式") end
+    return active_name or MoonSettings.activeSourceId() or _("未知源")
+end
 
 --- 取某个源的 setting 模块。
 --- 源不一定带设置模块，require 失败即视为没有，不作为错误。
@@ -31,27 +41,52 @@ local function loadSourceSetting(id)
     return nil
 end
 
---- 弹出已启用源列表，选中后切换当前源并通知插件。
---- 选回当前源视为无操作，避免白重建一次桌面。
+--- 换展示范围后通知桌面重拉；混合开关与换源共用。
+---@param desktop table
+---@param plugin table|nil
+local function notifyScopeChanged(desktop, plugin)
+    if plugin and plugin.onSourceChanged then
+        plugin:onSourceChanged()
+    elseif desktop and desktop.onEvent then
+        desktop:onEvent("source_changed", desktop.source)
+    end
+    desktop:updateView()
+end
+
+--- 弹出：混合模式（置顶）+ 已启用源。选混合只改 library_mixed；选源则关混合并切活跃源。
 ---@param desktop table 桌面实例
 ---@param plugin table|nil 插件实例，用于回调 onSourceChanged
 ---@param active_id string|nil 当前源标识，用于打勾与去重
 local function pickSource(desktop, plugin, active_id)
     local sources = SourceRegistry.listEnabled()
     if #sources == 0 then return end
-    local items = {}
+    local mixed = MoonSettings.libraryMixed()
+    local items = {
+        { text = mixed and ("✓ " .. _("混合模式")) or _("混合模式"), value = MIXED },
+    }
     for _idx, meta in ipairs(sources) do
         local id = meta.id
         local name = meta.name or meta.id
-        items[#items + 1] = { text = id == active_id and "✓ " .. name or name, value = id }
+        local checked = not mixed and id == active_id
+        items[#items + 1] = { text = checked and ("✓ " .. name) or name, value = id }
     end
     Popup.sheet{
         title = _("选择数据源"),
         items = items,
         on_select = function(id)
-            if not id or id == active_id then return end
+            if id == MIXED then
+                if mixed then return end
+                MoonSettings.save({ library_mixed = true })
+                UIManager:show(InfoMessage:new{
+                    text = T(_("已切换数据源：%1"), _("混合模式")), timeout = 2,
+                })
+                notifyScopeChanged(desktop, plugin)
+                return
+            end
+            if not id then return end
+            if not mixed and id == active_id then return end
+            if mixed then MoonSettings.save({ library_mixed = false }) end
             SourceRegistry.setActive(id)
-            if plugin and plugin.onSourceChanged then plugin:onSourceChanged() end
             local name = id
             for _idx, meta in ipairs(sources) do
                 if meta.id == id then name = meta.name or meta.id break end
@@ -59,12 +94,12 @@ local function pickSource(desktop, plugin, active_id)
             UIManager:show(InfoMessage:new{
                 text = T(_("已切换数据源：%1"), name), timeout = 2,
             })
-            desktop:updateView()
+            notifyScopeChanged(desktop, plugin)
         end,
     }
 end
 
---- 弹出已启用数据源列表并切换当前源。
+--- 弹出已启用数据源列表并切换当前源（含置顶的混合模式）。
 ---@param desktop table
 ---@param plugin table|nil
 function Source:pickActive(desktop, plugin)
@@ -92,32 +127,6 @@ local function pickEnabledSources(desktop)
     }
 end
 
---- 混合模式开关行：挂在当前活跃源分区顶部。
----@param desktop table
----@param plugin table|nil
----@return fun(iw: number): table
-local function mixedToggleRow(desktop, plugin)
-    local mixed = MoonSettings.libraryMixed()
-    return function(iw)
-        return SettingRow.build(iw, {
-            kind = "toggle", icon = "join", title = _("混合模式"),
-            subtitle = _("书库、首页与统计合并已启用源；阅读仍按书所属源"),
-            status = mixed and _("开") or _("关"),
-            status_on = mixed,
-            callback = function()
-                MoonSettings.save({ library_mixed = not mixed })
-                -- 复用换源复位路径：各页按新展示范围重拉，不碰阅读身份。
-                if plugin and plugin.onSourceChanged then
-                    plugin:onSourceChanged()
-                elseif desktop and desktop.onEvent then
-                    desktop:onEvent("source_changed", desktop.source)
-                end
-                desktop:updateView()
-            end,
-        })
-    end
-end
-
 --- 构建数据源子页分组。
 ---@param ctx table
 ---@return table
@@ -129,7 +138,7 @@ function Source:sections(ctx)
         function(iw)
             return SettingRow.build(iw, {
                 kind = "nav", icon = "source", title = _("当前数据源"),
-                status = active_name, status_on = true,
+                status = Source.displayName(active_name), status_on = true,
                 callback = function() Source.pickActive(desktop, plugin) end,
             })
         end,
@@ -145,21 +154,6 @@ function Source:sections(ctx)
     }
     local sections = { { title = _("书籍来源"), rows = common_rows } }
 
-    --- 活跃源分区插在最前；混合开关永远是该分区第一行。
-    ---@param title string
-    ---@param rows table
-    ---@param is_active boolean
-    local function pushSourceSection(title, rows, is_active)
-        if is_active then
-            local with_mixed = { mixedToggleRow(desktop, plugin) }
-            for i = 1, #rows do with_mixed[#with_mixed + 1] = rows[i] end
-            table.insert(sections, 2, { title = title, rows = with_mixed })
-        else
-            sections[#sections + 1] = { title = title, rows = rows }
-        end
-    end
-
-    local active_has_section = false
     for _idx, meta in ipairs(enabled) do
         if meta.id ~= "local" then
             local mod = loadSourceSetting(meta.id)
@@ -175,9 +169,10 @@ function Source:sections(ctx)
                         callback = function() mod.open(plugin) end,
                     })
                 end }
-                local is_active = meta.id == active_id
-                if is_active then active_has_section = true end
-                pushSourceSection(meta.name or meta.id, rows, is_active)
+                sections[#sections + 1] = {
+                    title = meta.name or meta.id,
+                    rows = rows,
+                }
             end
         end
     end
@@ -192,16 +187,10 @@ function Source:sections(ctx)
                 callback = function() local_setting.open(plugin) end,
             })
         end }
-        local is_active = active_id == "local"
-        if is_active then active_has_section = true end
-        pushSourceSection(_("本地"), rows, is_active)
-    end
-
-    if not active_has_section and active_id then
-        table.insert(sections, 2, {
-            title = active_name or active_id,
-            rows = { mixedToggleRow(desktop, plugin) },
-        })
+        sections[#sections + 1] = {
+            title = _("本地"),
+            rows = rows,
+        }
     end
 
     local extra_rows = {
@@ -214,12 +203,7 @@ function Source:sections(ctx)
                 status_on = on,
                 callback = function()
                     MoonSettings.save({ zlib_enabled = not on })
-                    if plugin and plugin.onSourceChanged then
-                        plugin:onSourceChanged()
-                    elseif desktop and desktop.onEvent then
-                        desktop:onEvent("source_changed", desktop.source)
-                    end
-                    desktop:updateView()
+                    notifyScopeChanged(desktop, plugin)
                 end,
             })
         end,

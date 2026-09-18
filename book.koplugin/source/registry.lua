@@ -35,8 +35,8 @@ local FACTORIES = {
     ["local"] = function() return require("source.local") end,
 }
 
--- local 默认源，列表垫底
-local ORDER = { "moon", "wechat", "jdread", "copymanga", "fanqie", "local" }
+-- local 排第二：选择器为「混合 → 本地 → 其余在线源」
+local ORDER = { "local", "moon", "wechat", "jdread", "copymanga", "fanqie" }
 
 ---@type BookSource|nil
 local _active = nil

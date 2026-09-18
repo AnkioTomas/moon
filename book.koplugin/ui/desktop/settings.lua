@@ -194,6 +194,7 @@ function Settings:createWidget()
     for _idx, meta in ipairs(SourceRegistry.list()) do
         if meta.id == active_id then active_name = meta.name or meta.id break end
     end
+    active_name = require("ui.desktop.settings.source").displayName(active_name)
 
     local packed = {}
     local sub = self.sub
