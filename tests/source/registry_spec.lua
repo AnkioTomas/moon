@@ -58,6 +58,7 @@ local Registry = require("source.registry")
 
 do
     local list = Registry.list()
+    Assert.eq(list[1].id, "local", "本地排源列表第一（选择器混合置顶后为第二）")
     local ids = {}
     for _, m in ipairs(list) do
         ids[m.id] = true
