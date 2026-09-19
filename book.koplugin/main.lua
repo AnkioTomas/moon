@@ -68,14 +68,6 @@ function BookPlugin:init()
     if self.ui and not self.ui.document then
         require("update.init").onCreate(self.path)
     end
-    UIManager:nextTick(function()
-        local ok_animation, err_animation = pcall(function()
-            require("patch.page_turn_animation").checkStartup()
-        end)
-        if not ok_animation then
-            logger.warn("book page turn animation check failed:", err_animation)
-        end
-    end)
     if self.ui and self.ui.document then
         self:emitToSource("reader_open")
     end
