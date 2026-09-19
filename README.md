@@ -380,7 +380,7 @@ AI 功能使用兼容 `/chat/completions` 的接口，需要配置接口地址�
 
 新增数据源遵循 `source/base.lua` 和 `source/registry.lua` 接口。文字处理复用 `utils/text.lua`，SQLite 访问必须使用参数化查询，耗时文件与解析任务放到 worker，数据库写入留在主进程。
 
-更完整的架构说明见 [DESIGN.md](DESIGN.md)。
+更完整的架构说明见 [`docs/`](docs/README.md)（按模块契约，对齐 `docs/db`）。
 
 ## 版本与发布
 

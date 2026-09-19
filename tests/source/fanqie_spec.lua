@@ -1,5 +1,5 @@
 --[[--
-source.fanqie 门面离线用例（来自 PR#29，改为 Assert）。
+source.fanqie 门面离线用例。
 
 @module tests.source.fanqie_spec
 --]]
@@ -31,50 +31,47 @@ package.preload["source.fanqie.client"] = function()
     return {
         new = function()
             return {
-                fetch_shelf_detail = function()
-                    return {
-                        data = {
-                            detail_list = {
-                                {
-                                    book_id = "1234567890123456789",
-                                    book_name = "测试",
-                                    author = "作者",
+                fetchShelfDetailAsync = function(_, _force, cb)
+                    require("ui/uimanager"):nextTick(function()
+                        cb({
+                            data = {
+                                detail_list = {
+                                    {
+                                        book_id = "1234567890123456789",
+                                        book_name = "测试",
+                                        author = "作者",
+                                    },
                                 },
                             },
-                        },
-                    }
+                        })
+                    end)
+                    return { cancel = function() end }
                 end,
-                fetch_chapter_directory = function()
-                    return {
-                        data = {
-                            chapterList = {
-                                { itemId = "9876543210987654321", title = "第一章" },
+                fetchChapterDirectoryAsync = function(_, _id, cb)
+                    require("ui/uimanager"):nextTick(function()
+                        cb({
+                            data = {
+                                chapterList = {
+                                    { itemId = "9876543210987654321", title = "第一章" },
+                                },
                             },
-                        },
-                    }
+                        })
+                    end)
+                    return { cancel = function() end }
                 end,
-                official_get_content = function()
-                    return { title = "第一章", content = "<p>测试正文</p>" }
+                officialGetContentAsync = function(_, _bid, _iid, cb)
+                    require("ui/uimanager"):nextTick(function()
+                        cb({ title = "第一章", content = "<p>测试正文</p>" })
+                    end)
+                    return { cancel = function() end }
                 end,
-                fetch_read_progress = function()
-                    return { data = {} }
+                fetchReadProgressAsync = function(_, cb)
+                    require("ui/uimanager"):nextTick(function()
+                        cb({ data = {} })
+                    end)
+                    return { cancel = function() end }
                 end,
             }
-        end,
-    }
-end
-package.preload["workers.job"] = function()
-    return {
-        run = function(work, opts)
-            require("ui/uimanager"):nextTick(function()
-                local ok, r = pcall(work)
-                if ok then
-                    if opts.on_done then opts.on_done(r) end
-                else
-                    if opts.on_failed then opts.on_failed(r) end
-                end
-            end)
-            return { cancel = function() end }
         end,
     }
 end
