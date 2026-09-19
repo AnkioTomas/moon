@@ -1,14 +1,14 @@
 --[[--
-番茄小说 HTTP 客户端：只走 http.request，返回 wire。
+番茄小说 HTTP 客户端：只走 http.request。
 
 @module koplugin.book.source.fanqie.client
 --]]
 
 local Cookie = require("source.fanqie.cookie")
 local FanQie = require("source.fanqie.fanqie")
-local H = require("source.fanqie.helper")
 local JSON = require("json")
 local Request = require("http.request")
+local Text = require("utils.text")
 local logger = require("utils.log")
 
 local Client = {}
@@ -23,19 +23,9 @@ local AUTH_ERROR_CODES = {
     [-2041] = true,
 }
 
----@param settings table
----@return FanqieClient
-function Client:new(settings)
-    return setmetatable({ settings = settings }, self)
-end
-
-function Client:clear_shelf_cache()
-    SHELF_CACHE = {}
-end
-
 ---@param text string|nil
 ---@return table|nil, string|nil
-function Client:json_decode(text)
+local function decodeJson(text)
     if type(text) ~= "string" or text == "" then
         return nil, "empty json"
     end
@@ -46,10 +36,14 @@ function Client:json_decode(text)
     return data
 end
 
----@param data table
----@return string
-function Client:json_encode(data)
-    return JSON.encode(data)
+---@param settings table
+---@return FanqieClient
+function Client:new(settings)
+    return setmetatable({ settings = settings }, self)
+end
+
+function Client:clear_shelf_cache()
+    SHELF_CACHE = {}
 end
 
 ---@param cookies table
@@ -73,19 +67,18 @@ local function absorbCookies(self, res)
     self.settings:flush()
 end
 
----@param self FanqieClient
 ---@param code number|nil
 ---@param body string|nil
 ---@param res table|nil
 ---@return boolean
-local function isAuthError(self, code, body, res)
+local function isAuthError(code, body, res)
     if code == 401 or code == 403 then return true end
     body = tostring(body or "")
     local content_type = tostring(Request.header(res, "Content-Type") or "")
     local looks_json = content_type:lower():find("json", 1, true)
         or body:match("^%s*{") ~= nil
     if not looks_json or #body > 65536 then return false end
-    local data = select(1, self:json_decode(body))
+    local data = select(1, decodeJson(body))
     if type(data) ~= "table" then return false end
     local err_code = data.errCode or data.errcode or data.code
     if AUTH_ERROR_CODES[err_code] then return true end
@@ -93,22 +86,21 @@ local function isAuthError(self, code, body, res)
     return msg:find("登录", 1, true) ~= nil
 end
 
----@param self FanqieClient
 ---@param method string
 ---@param url string
 ---@param code number|nil
 ---@param body string|nil
 ---@param res table|nil
 ---@return string
-local function httpError(self, method, url, code, body, res)
+local function httpError(method, url, code, body, res)
     local parts = {
         method .. " " .. tostring(url),
         "HTTP " .. tostring(code),
     }
-    if isAuthError(self, code, body, res) then
+    if isAuthError(code, body, res) then
         parts[#parts + 1] = "auth_expired=true"
     end
-    local data = select(1, self:json_decode(body))
+    local data = select(1, decodeJson(body))
     if type(data) == "table" then
         local err_code = data.errCode or data.errcode or data.code
         local err_message = data.errMsg or data.errmsg or data.message or data.msg
@@ -143,7 +135,7 @@ local function sessionHeaders(self, extra)
     return headers
 end
 
---- 底层请求。allow_redirects 默认 false（与扫码/阅读页需求一致）。
+--- 底层请求。allow_redirects 默认 false。
 ---@param opts { url: string, method?: string, body?: string, headers?: table, timeout?: number, allow_redirects?: boolean }
 ---@param cb fun(res: table|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -189,10 +181,10 @@ function Client:getJsonAsync(url, opts, cb)
         local code = tonumber(res.code)
         local body = res.body
         if not Request.ok(code) then
-            cb(nil, httpError(self, "GET", url, code, body, res))
+            cb(nil, httpError("GET", url, code, body, res))
             return
         end
-        local data, decode_err = self:json_decode(body)
+        local data, decode_err = decodeJson(body)
         if not data then cb(nil, decode_err or "invalid json"); return end
         cb(data)
     end)
@@ -217,7 +209,7 @@ function Client:postJsonAsync(url, data, opts, cb)
         url = url,
         method = "POST",
         headers = headers,
-        body = self:json_encode(data),
+        body = JSON.encode(data),
         timeout = opts.timeout,
         allow_redirects = true,
     }, function(res, err)
@@ -225,10 +217,10 @@ function Client:postJsonAsync(url, data, opts, cb)
         local code = tonumber(res.code)
         local body = res.body
         if not Request.ok(code) then
-            cb(nil, httpError(self, "POST", url, code, body, res))
+            cb(nil, httpError("POST", url, code, body, res))
             return
         end
-        local decoded, decode_err = self:json_decode(body)
+        local decoded, decode_err = decodeJson(body)
         if not decoded then cb(nil, decode_err or "invalid json"); return end
         cb(decoded)
     end)
@@ -237,12 +229,9 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:fetchShelfInfoAsync(cb)
-    local params = FanQie.make_shelf_params()
-    local parts = {}
-    for key, value in pairs(params) do
-        parts[#parts + 1] = key .. "=" .. H.url_encode(tostring(value))
-    end
-    return self:getJsonAsync(FanQie.shelf_url() .. "?" .. table.concat(parts, "&"), nil, cb)
+    return self:getJsonAsync(
+        FanQie.shelf_url() .. "?" .. Text.formEncode(FanQie.make_shelf_params()),
+        nil, cb)
 end
 
 ---@param cb fun(data: table|nil, err: string|nil)

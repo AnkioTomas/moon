@@ -1,49 +1,10 @@
--- Official chapter normalization, font mapping, and legacy-cache reads only.
-local H = require("source.fanqie.helper")
+--[[--
+番茄正文：PUA 字体解码 + 目录归一化。章缓存走 source.chapter。
+
+@module koplugin.book.source.fanqie.content
+--]]
+
 local Content = {}
-local function basename_safe(value)
-    value = tostring(value or ""):gsub("[^%w%._-]", "_")
-    if value == "" then
-        value = "fanqie"
-    end
-    return value
-end
-
-
-
-function Content.book_cache_dir(settings, book_id)
-    return settings.cache_dir .. "/" .. basename_safe(book_id)
-end
-
--- Cache index: persists item_id → file path mapping across restarts
-
-function Content.load_cache_index(settings, book_id)
-    local ok_state, _state = pcall(require, "source.fanqie.state")
-    if ok_state and _state then
-        local cached = _state.getChapterIndexCache(book_id)
-        if cached then
-            return cached
-        end
-    end
-
-    local dir = Content.book_cache_dir(settings, book_id)
-    local index_path = H.join_path(dir, "cache_index.lua")
-    if not H.file_exists(index_path) then
-        return {}
-    end
-
-    local ok, index = pcall(dofile, index_path)
-    if not ok or not H.is_tbl(index) then
-        return {}
-    end
-
-    if ok_state and _state then
-        _state.setChapterIndexCache(book_id, index)
-    end
-
-    return index
-end
-
 
 local PUA_CODE = { { 58344, 58715 }, { 58345, 58716 } }
 local PUA_CHARSET = {
@@ -206,24 +167,14 @@ function Content.normalize_chapters(payload, book_id)
     return records
 end
 
-function Content.first_readable_chapter(chapters)
-    for chapter_index, chapter in ipairs(chapters or {}) do
-        if tostring(chapter.title or "") ~= "封面" then
-            return chapter
-        end
-    end
-end
-
 function Content.readable_chapters(chapters)
     local out = {}
-    for chapter_index, chapter in ipairs(chapters or {}) do
+    for _, chapter in ipairs(chapters or {}) do
         if tostring(chapter.title or "") ~= "封面" then
-            table.insert(out, chapter)
+            out[#out + 1] = chapter
         end
     end
     return out
 end
-
--- Helper functions for image handling
 
 return Content

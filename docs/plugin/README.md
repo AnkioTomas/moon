@@ -26,6 +26,8 @@ BookPlugin:init
 | `true` | `start_with == bookshelf_book`，下次 FM `onShow` 自动开桌面 |
 | `false` | 不再自动开 |
 
+首次安装（`common.start_with_seeded` 仍为 false）时，`Host.attach` 会**强制**把 KOReader 的 `start_with` 写成 `bookshelf_book`，不跟系统默认 `filemanager`。只种一次；之后设置里「启动打开桌面」或系统启动项由用户改。
+
 `openDesktop`：若在 Reader 实例上调用，先关文档，再委托 **FM 实例**打开，避免叠层。
 
 ### 源事件

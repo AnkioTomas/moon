@@ -13,7 +13,7 @@
 | `wechat` | chapter | 微信 bookId | 快照↔ + add/delete | 章 HTML | 双向；`stats_pull` | 源内书城；全章缓存能力 |
 | `jdread` | chapter | 京东侧 ID | 远端书架 | 章内容 | 进度等（无 `stats_pull`） | search/refresh/insight |
 | `copymanga` | chapter | 漫画 ID | 收藏列表；删=取消收藏 | 章 CBZ | 进度（章粒度；push 靠带 token 的 chapter GET 副作用） | search/insight |
-| `fanqie` | chapter | 番茄侧 ID | 书架（暂无脏成员推送；`dirty_only` skipped） | 官方网页正文 | 阅读位置由章节框架管 | cookie/扫码；可复用旧插件 `settings/fanqie.lua` |
+| `fanqie` | chapter | 番茄侧 ID | 书架（暂无脏成员推送；`dirty_only` skipped） | 官方网页正文 | 阅读位置由章节框架管 | cookie/扫码；旧插件 Cookie 迁入 `.moon/settings/fanqie.lua` |
 
 ## 能力字段（UI 实际读取）
 
@@ -31,8 +31,9 @@
 ## 番茄补充
 
 - 正文仅官方网页接口；无完整阅读权限时返回错误。
-- 阻塞 HTTP/解析走 `workers.job`，不要源内自造 Async。
+- 网络只走 `http.request`（异步 + `{ cancel }`），禁止 `socket.http` / 源内自造 Async。
 - 协议改编自 fanqie.koplugin 网页适配版；发布物不含 Cookie/正文缓存。
+- 章缓存走 `source.chapter` → `Paths.chapterPath`；配置走 `utils.settings.getSource("fanqie")`。
 
 ## 怎么加一个源
 

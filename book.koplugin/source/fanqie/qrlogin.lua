@@ -20,8 +20,8 @@ local InfoMessage = require("ui/widget/infomessage")
 local Request = require("http.request")
 
 local Cookie = require("source.fanqie.cookie")
-local H = require("source.fanqie.helper")
-local Log = require("source.fanqie.logger")
+local Text = require("utils.text")
+local logger = require("utils.log")
 local JSON = require("json")
 local _ = require("gettext")
 
@@ -45,15 +45,6 @@ local COMMON_PARAMS = {
     account_sdk_source = "web",
 }
 
-local function build_query(params)
-    local parts = {}
-    for k, v in pairs(params) do
-        parts[#parts + 1] = tostring(k) .. "=" .. H.url_encode(tostring(v))
-    end
-    table.sort(parts)
-    return table.concat(parts, "&")
-end
-
 local function extract_csrf(jar)
     if not jar then return "" end
     return jar["passport_csrf_token"] or ""
@@ -71,12 +62,11 @@ local function absolute_url(base, location)
     return prefix .. location
 end
 
---- @param client  source.fanqie.client（保留签名兼容，HTTP 不经它，避免扫码中途污染 settings）
+--- @param _client unused（签名兼容 setting.lua）
 --- @param settings source.fanqie.settings
 --- @param plugin   提供 showBusy/closeBusy
-function QRLogin:new(client, settings, plugin)
+function QRLogin:new(_client, settings, plugin)
     local self = setmetatable({}, QRLogin)
-    self.client = client
     self.settings = settings
     self.plugin = plugin
     self.generation = 0
@@ -184,13 +174,13 @@ function QRLogin:_begin()
     local gen = self.generation
     self.started = os.time()
     self.plugin:showBusy(_("获取二维码中..."))
-    Log.info("[FanQieQR] 开始获取二维码")
+    logger.info("[FanQieQR] 开始获取二维码")
 
     self._job = self:_http_get(LOGIN_PAGE, nil, nil, function(login_res, login_err)
         if gen ~= self.generation then return end
         if not login_res then
             self.plugin:closeBusy()
-            Log.warn("[FanQieQR] 预热失败:", login_err)
+            logger.warn("[FanQieQR] 预热失败:", login_err)
             self:show_retry(_("获取二维码失败:") .. "\n" .. tostring(login_err))
             return
         end
@@ -201,13 +191,13 @@ function QRLogin:_begin()
         for k, v in pairs(COMMON_PARAMS) do params[k] = v end
         params["need_logo"] = "true"
         params["next"] = LOGIN_PAGE
-        local qr_url = GET_QRCODE_URL .. "?" .. build_query(params)
+        local qr_url = GET_QRCODE_URL .. "?" .. Text.formEncode(params)
 
         self._job = self:_http_get(qr_url, jar, csrf, function(qr_res, qr_err)
             self.plugin:closeBusy()
             if gen ~= self.generation then return end
             if not qr_res then
-                Log.warn("[FanQieQR] 获取二维码失败:", qr_err)
+                logger.warn("[FanQieQR] 获取二维码失败:", qr_err)
                 self:show_retry(_("获取二维码失败:") .. "\n" .. tostring(qr_err))
                 return
             end
@@ -249,7 +239,7 @@ function QRLogin:_begin()
             }
             self.dialog = dialog
             UIManager:show(dialog)
-            Log.info("[FanQieQR] 二维码已显示，开始轮询 token=", tostring(token):sub(1, 12))
+            logger.info("[FanQieQR] 二维码已显示，开始轮询 token=", tostring(token):sub(1, 12))
             self:_schedule(gen, token, csrf, tonumber(d.expire_time) or 0)
         end)
     end)
@@ -270,7 +260,7 @@ function QRLogin:_schedule(gen, token, csrf, expire_time)
     for k, v in pairs(COMMON_PARAMS) do params[k] = v end
     params["token"] = token
     params["next"] = "/"
-    local url = CHECK_QR_URL .. "?" .. build_query(params)
+    local url = CHECK_QR_URL .. "?" .. Text.formEncode(params)
 
     -- 禁用自动重定向：302 + Set-Cookie(sessionid) 必须自己吃。
     self._job = self:_http_get(url, self.jar, csrf, function(res, err)
@@ -278,7 +268,7 @@ function QRLogin:_schedule(gen, token, csrf, expire_time)
         if not res then
             self.poll_failures = (self.poll_failures or 0) + 1
             if self.poll_failures == 1 or self.poll_failures % 5 == 0 then
-                Log.warn("[FanQieQR] 轮询失败 #" .. self.poll_failures .. ":", err)
+                logger.warn("[FanQieQR] 轮询失败 #" .. self.poll_failures .. ":", err)
             end
             UIManager:scheduleIn(POLL_INTERVAL, function()
                 self:_schedule(gen, token, csrf, expire_time)
@@ -292,8 +282,8 @@ function QRLogin:_schedule(gen, token, csrf, expire_time)
         self.jar = new_jar
         local has_sessionid = new_jar.sessionid and new_jar.sessionid ~= ""
 
-        Log.debug("[FanQieQR] 轮询 Set-Cookie(前300): " .. tostring(raw_set_cookie):sub(1, 300))
-        Log.debug("[FanQieQR] has_sessionid=" .. tostring(has_sessionid))
+        logger.dbg("[FanQieQR] 轮询 Set-Cookie(前300): " .. tostring(raw_set_cookie):sub(1, 300))
+        logger.dbg("[FanQieQR] has_sessionid=" .. tostring(has_sessionid))
 
         if has_sessionid then
             self:_finish_login_success(gen)
@@ -311,7 +301,7 @@ function QRLogin:_schedule(gen, token, csrf, expire_time)
 
         if not data then
             local location = Request.header(res, "Location") or ""
-            Log.debug("[FanQieQR] 非JSON响应, location=" .. tostring(location):sub(1, 100))
+            logger.dbg("[FanQieQR] 非JSON响应, location=" .. tostring(location):sub(1, 100))
             UIManager:scheduleIn(POLL_INTERVAL, function()
                 self:_schedule(gen, token, csrf, expire_time)
             end)
@@ -321,24 +311,24 @@ function QRLogin:_schedule(gen, token, csrf, expire_time)
         local d = data.data or {}
         local status = d.status or ""
         if status == "confirmed" or status == "success" then
-            Log.info("[FanQieQR] 确认状态 data=" .. tostring(text):sub(1, 500))
+            logger.info("[FanQieQR] 确认状态 data=" .. tostring(text):sub(1, 500))
         end
 
         if status == "success" or status == "confirmed" then
-            Log.info("[FanQieQR] 用户已确认 status=" .. status)
+            logger.info("[FanQieQR] 用户已确认 status=" .. status)
             if d.redirect_url and d.redirect_url ~= "" then
                 self:_finish_with_redirect(gen, d.redirect_url, csrf)
             else
-                Log.warn("[FanQieQR] " .. status .. " 但无 redirect_url")
+                logger.warn("[FanQieQR] " .. status .. " 但无 redirect_url")
                 self:_finish_login_success(gen)
             end
         elseif status == "expired" then
             self:show_retry(_("二维码已过期"))
         else
             if status == "scanned" or status == "confirming" or status == "confirm" then
-                Log.info("[FanQieQR] 用户已扫码/确认中 status=", status)
+                logger.info("[FanQieQR] 用户已扫码/确认中 status=", status)
             else
-                Log.debug("[FanQieQR] 轮询中 status=", status)
+                logger.dbg("[FanQieQR] 轮询中 status=", status)
             end
             UIManager:scheduleIn(POLL_INTERVAL, function()
                 self:_schedule(gen, token, csrf, expire_time)
@@ -350,7 +340,7 @@ end
 function QRLogin:_finish_with_redirect(gen, redirect_url, csrf)
     if gen ~= self.generation then return end
     self.plugin:showBusy(_("正在完成登录..."))
-    Log.info("[FanQieQR] 访问 redirect_url:", tostring(redirect_url):sub(1, 80))
+    logger.info("[FanQieQR] 访问 redirect_url:", tostring(redirect_url):sub(1, 80))
 
     local max_redirects = 5
     local hop = 0
@@ -368,13 +358,13 @@ function QRLogin:_finish_with_redirect(gen, redirect_url, csrf)
             if gen ~= self.generation then return end
             if not res then
                 self.plugin:closeBusy()
-                Log.warn("[FanQieQR] 访问 redirect_url 失败:", err)
+                logger.warn("[FanQieQR] 访问 redirect_url 失败:", err)
                 self:show_retry(_("完成登录失败:") .. "\n" .. tostring(err))
                 return
             end
             self.jar = Cookie.merge_set_cookie(self.jar, Request.header(res, "Set-Cookie"))
             if self.jar.sessionid and self.jar.sessionid ~= "" then
-                Log.info("[FanQieQR] 第" .. hop .. "跳获取到 sessionid")
+                logger.info("[FanQieQR] 第" .. hop .. "跳获取到 sessionid")
                 self.plugin:closeBusy()
                 self:_finish_login_success(gen)
                 return
@@ -384,11 +374,11 @@ function QRLogin:_finish_with_redirect(gen, redirect_url, csrf)
                 self.plugin:closeBusy()
                 local keys = {}
                 for k in pairs(self.jar) do keys[#keys + 1] = k end
-                Log.warn("[FanQieQR] redirect 后仍无 sessionid, jar keys=" .. table.concat(keys, ","))
+                logger.warn("[FanQieQR] redirect 后仍无 sessionid, jar keys=" .. table.concat(keys, ","))
                 self:show_retry(_("登录失败：未获取到 sessionid"))
                 return
             end
-            Log.debug("[FanQieQR] 重定向第" .. hop .. "跳 -> " .. tostring(location):sub(1, 80))
+            logger.dbg("[FanQieQR] 重定向第" .. hop .. "跳 -> " .. tostring(location):sub(1, 80))
             url = location
             step()
         end)
@@ -411,7 +401,7 @@ function QRLogin:_finish_login_success(gen)
         count = count + 1
     end
     table.sort(keys)
-    Log.info("[FanQieQR] 登录成功，扫码获取到 " .. count .. " 个 cookie: " .. table.concat(keys, ", "))
+    logger.info("[FanQieQR] 登录成功，扫码获取到 " .. count .. " 个 cookie: " .. table.concat(keys, ", "))
     self.settings:set("cookies", jar)
     self.settings:flush()
     self.jar = jar

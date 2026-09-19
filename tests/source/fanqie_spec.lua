@@ -21,7 +21,6 @@ package.preload["source.fanqie.settings"] = function()
     return {
         new = function()
             return {
-                cache_dir = "missing",
                 is_cookie_configured = function() return true end,
             }
         end,
@@ -75,9 +74,6 @@ package.preload["source.fanqie.client"] = function()
         end,
     }
 end
-package.preload["source.fanqie.helper"] = function()
-    return { make_dir = function() end }
-end
 package.preload["libs/libkoreader-lfs"] = function()
     return { attributes = function() return nil end }
 end
@@ -85,6 +81,7 @@ package.preload["utils.paths"] = function()
     return {
         imageDir = function() return "missing" end,
         coverPath = function() return "missing/cover.jpg" end,
+        ensureLayout = function() end,
     }
 end
 

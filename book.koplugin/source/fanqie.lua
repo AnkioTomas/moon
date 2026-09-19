@@ -59,6 +59,31 @@ local function errMsg(err)
     return tostring(err or "番茄请求失败")
 end
 
+--- 旧 fanqie.koplugin 封面：DataStorage/fanqie/cache/covers/<title>.jpg → .moon/cache
+---@param title string
+---@param stable_id string
+local function migrateLegacyCover(title, stable_id)
+    local Paths = require("utils.paths")
+    local target = Paths.coverPath(stable_id, "fanqie")
+    if require("libs/libkoreader-lfs").attributes(target, "size") then return end
+    local ok_ds, DS = pcall(require, "datastorage")
+    if not ok_ds or type(DS) ~= "table" then return end
+    local ok_dir, root = pcall(function() return DS:getFullDataDir() end)
+    if not ok_dir or type(root) ~= "string" then return end
+    local old_cover = root
+        .. "/fanqie/cache/covers/"
+        .. title:gsub('[/\\:%*%?"<>|]', "_")
+        .. ".jpg"
+    local input = io.open(old_cover, "rb")
+    if not input then return end
+    local bytes = input:read("*a")
+    input:close()
+    local output = io.open(target, "wb")
+    if not output then return end
+    output:write(bytes)
+    output:close()
+end
+
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
     -- 番茄暂无书架删/加推送；dirty_only 不得全量 pull。
@@ -92,29 +117,13 @@ function Source:syncBooksAsync(opts, cb)
             cb(nil, "番茄书架响应不完整，保留本地书架")
             return
         end
-        require("source.fanqie.helper").make_dir(require("utils.paths").imageDir("fanqie"))
+        require("utils.paths").ensureLayout("fanqie")
         local books = {}
         for _, row in ipairs(rows) do
             local id = row.book_id or row.bookId or row.id
             if id then
                 local title = row.book_name or row.title or row.name or "未知"
-                local old_cover = self.settings.cache_dir
-                    .. "/covers/"
-                    .. title:gsub('[/\\:%*%?"<>|]', "_")
-                    .. ".jpg"
-                local target = require("utils.paths").coverPath(tostring(id), "fanqie")
-                if not require("libs/libkoreader-lfs").attributes(target, "size") then
-                    local input = io.open(old_cover, "rb")
-                    if input then
-                        local bytes = input:read("*a")
-                        input:close()
-                        local output = io.open(target, "wb")
-                        if output then
-                            output:write(bytes)
-                            output:close()
-                        end
-                    end
-                end
+                migrateLegacyCover(title, tostring(id))
                 books[#books + 1] = {
                     source_id = "fanqie",
                     stable_id = tostring(id),
@@ -189,22 +198,6 @@ end
 
 local function fetch(self, identity, chapter, cb)
     local Content = require("source.fanqie.content")
-    local index = Content.load_cache_index(self.settings, identity.stable_id)
-    local path = index and index[chapter.uid]
-    if path then
-        local file = io.open(path, "rb")
-        if file then
-            local html = file:read("*a")
-            file:close()
-            local body = html:match("<body[^>]*>(.-)</body>")
-            if body and body:match("%S") then
-                require("ui/uimanager"):nextTick(function()
-                    cb({ title = chapter.title, html = body })
-                end)
-                return { cancel = function() end }
-            end
-        end
-    end
     local h = handle()
     h.job = self.client:officialGetContentAsync(identity.stable_id, chapter.uid, function(result, err)
         if h.cancelled then return end

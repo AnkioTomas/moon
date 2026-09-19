@@ -5,6 +5,7 @@
 --]]
 
 local Cookie = require("source.fanqie.cookie")
+local JSON = require("json")
 
 local Official = {}
 
@@ -120,9 +121,9 @@ function Official.fetchAsync(client, book_id, item_id, cb)
             return
         end
         local ok, result = pcall(Official.parse, res.body, function(raw)
-            local data, decode_err = client:json_decode(raw)
-            if not data then
-                error(decode_err or "invalid json")
+            local decoded, data = pcall(JSON.decode, raw)
+            if not decoded or type(data) ~= "table" then
+                error("invalid json")
             end
             return data
         end, book_id, item_id)
