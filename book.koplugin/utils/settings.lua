@@ -18,6 +18,8 @@ local DEFAULTS = {
         library_mixed = false,
         zlib_enabled = false,
         book_debug_enabled = false,
+        -- 首次安装已把 KOReader start_with 种成月读；之后尊重用户改动。
+        start_with_seeded = false,
     },
     display = {
         ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,
