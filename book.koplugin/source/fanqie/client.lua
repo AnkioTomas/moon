@@ -1,568 +1,394 @@
-local ltn12 = require("ltn12")
+--[[--
+番茄小说 HTTP 客户端：只走 http.request，返回 wire。
+
+@module koplugin.book.source.fanqie.client
+--]]
+
 local Cookie = require("source.fanqie.cookie")
 local FanQie = require("source.fanqie.fanqie")
 local H = require("source.fanqie.helper")
-
-local ok_https, https = pcall(require, "ssl.https")
-local ok_http, http = pcall(require, "socket.http")
-
--- High-resolution wall-clock timer for perf logging (millisecond precision).
--- Falls back to os.clock() (CPU time) if socket is unavailable.
-local ok_socket_perf, socket_perf = pcall(require, "socket")
-local function now_ms()
-    if ok_socket_perf and socket_perf and socket_perf.gettime then
-        return socket_perf.gettime() * 1000
-    end
-    return os.clock() * 1000
-end
-
-local ok_json, json = pcall(require, "json")
-if not ok_json then
-    ok_json, json = pcall(require, "rapidjson")
-end
-
-local DEFAULT_TIMEOUT_SECONDS = 15
-local SHELF_CACHE_TTL = 5 * 60 -- 5 minutes for shelf cache
-local unpack_args = unpack or table.unpack
-
--- Rate limiting is now handled per-source by source.fanqie.sources.SourceManager,
--- invoked from get_chapter_content_with_fallback (not inside each fetcher).
+local JSON = require("json")
+local Request = require("http.request")
+local logger = require("utils.log")
 
 local Client = {}
 Client.__index = Client
 
--- SHELF_CACHE：fetch_shelf_detail 内部短缓存，按 cookie_hash 做 key，10 分钟 TTL。
--- 仅用于避免短时间内重复网络请求，不是显示层数据源。
--- 显示层数据源由 bookshelf.lua 的 SHELF_MEM_CACHE（内存主源 + 文件后备）承担。
+local DEFAULT_TIMEOUT = 15
+local SHELF_CACHE_TTL = 5 * 60
 local SHELF_CACHE = {}
-
-local function header_value(headers, name)
-    if not headers then
-        return nil
-    end
-    local target = name:lower()
-    for key, value in pairs(headers) do
-        if tostring(key):lower() == target then
-            return value
-        end
-    end
-    return nil
-end
 
 local AUTH_ERROR_CODES = {
     [-2012] = true,
     [-2041] = true,
 }
 
-local function is_auth_error(client, code, text, headers)
-    if code == 401 or code == 403 then
-        return true
-    end
-    text = tostring(text or "")
-    local content_type = tostring(header_value(headers, "content-type") or "unknown")
-    local looks_like_json = content_type:lower():find("json", 1, true)
-        or text:match("^%s*{") ~= nil
-        or text:match("^%s*%[") ~= nil
-    if looks_like_json and #text <= 65536 then
-        local ok, data = pcall(function()
-            return client:json_decode(text)
-        end)
-        if ok and type(data) == "table" then
-            local err_code = data.errCode or data.errcode or data.code
-            if AUTH_ERROR_CODES[err_code] then
-                return true
-            end
-            local err_message = data.errMsg or data.errmsg or data.message or data.msg or ""
-            if tostring(err_message):find("登录", 1, true) or tostring(err_message):find("登录", 1, true) then
-                return true
-            end
-        end
-    end
-    return false
-end
-
-local function http_error(client, code, text, headers)
-    text = tostring(text or "")
-    local content_type = tostring(header_value(headers, "content-type") or "unknown")
-    local parts = {
-        "HTTP " .. tostring(code),
-        "content_type=" .. content_type,
-        "body_bytes=" .. tostring(#text),
-    }
-    if is_auth_error(client, code, text, headers) then
-        table.insert(parts, "auth_expired=true")
-    end
-    local looks_like_json = content_type:lower():find("json", 1, true)
-        or text:match("^%s*{") ~= nil
-        or text:match("^%s*%[") ~= nil
-    if looks_like_json and #text <= 65536 then
-        local ok, data = pcall(function()
-            return client:json_decode(text)
-        end)
-        if ok and type(data) == "table" then
-            local err_code = data.errCode or data.errcode or data.code
-            local err_message = data.errMsg or data.errmsg or data.message or data.msg
-            if err_code ~= nil then
-                table.insert(parts, "error_code=" .. tostring(err_code))
-            end
-            if err_message ~= nil then
-                local message = tostring(err_message):gsub("[%c]+", " "):sub(1, 200)
-                table.insert(parts, "error_message=" .. message)
-            end
-        end
-    end
-    return table.concat(parts, ", ")
-end
-
-local function transport_request(transport, request, timeout)
-    timeout = timeout or DEFAULT_TIMEOUT_SECONDS
-    local previous_timeout = transport.TIMEOUT
-    transport.TIMEOUT = timeout
-    local t0 = now_ms()
-    local ok, result1, result2, result3, result4 = pcall(transport.request, request)
-    local elapsed = now_ms() - t0
-    transport.TIMEOUT = previous_timeout
-
-    -- Perf log: how long the raw HTTP request took (network + TLS + server).
-    local ok_logger, logger_mod = pcall(require, "source.fanqie.logger")
-    if ok_logger and logger_mod then
-        local method = (request and request.method) or "GET"
-        local url = (request and request.url) or "?"
-        -- socket.http returns 1 on success (not the body); the body is
-        -- collected by the ltn12 sink, so we can't get its length here.
-        -- Only strings/tables support the # operator — numbers don't.
-        local body_len = 0
-        if type(result1) == "string" or type(result1) == "table" then
-            body_len = #result1
-        end
-        logger_mod.debug("[FanQie][perf] transport_request:",
-            "method=" .. method,
-            "elapsed=" .. string.format("%.0f", elapsed) .. "ms",
-            "code=" .. tostring(result2),
-            "result_type=" .. type(result1),
-            "url=" .. url)
-    end
-
-    if not ok then
-        error("transport_request抛异常: " .. tostring(result1))
-    end
-    -- LuaSocket returns: body, code, headers, status 或 nil, error_message
-    -- 检查是否为nil错误（连接失败、超时等）
-    if result1 == nil and type(result2) == "string" then
-        error("transport_request连接失败: " .. result2)
-    end
-    return result1, result2, result3, result4
-end
-
+---@param settings table
+---@return FanqieClient
 function Client:new(settings)
-    local obj = setmetatable({
-        settings = settings,
-    }, self)
-    -- Source fetcher dispatch table: source_id -> function(book_id, item_id, opts).
-    -- Note: qingtian_get_content takes (item_id, book_id), so we swap args.
-    obj._source_fetchers = {
-        official = function(bid, iid) return obj:official_get_content(bid, iid) end,
-    }
-    return obj
-end
-
-function Client:json_encode(data)
-    if not ok_json then
-        error("JSON module is not available")
-    end
-    if json.encode then
-        return json.encode(data)
-    end
-    return json:encode(data)
-end
-
-function Client:json_decode(text)
-    if not ok_json then
-        error("JSON module is not available")
-    end
-    if json.decode then
-        return json.decode(text)
-    end
-    return json:decode(text)
-end
-
-function Client:request(opts)
-    local body = opts.body
-    local response = {}
-    local headers = opts.headers or {}
-    headers["User-Agent"] = headers["User-Agent"] or FanQie.USER_AGENT
-    headers["Accept"] = headers["Accept"] or "application/json, text/plain, */*"
-    headers["Accept-Encoding"] = "identity"
-    headers["Connection"] = "keep-alive"
-
-    if body then
-        headers["Content-Length"] = tostring(#body)
-    end
-
-    local transport = opts.url:match("^https:") and https or http
-    if opts.url:match("^https:") and not ok_https then
-        error("ssl.https is not available")
-    elseif not transport and not ok_http then
-        error("socket.http is not available")
-    end
-
-    local request_tbl = {
-        url = opts.url,
-        method = opts.method or (body and "POST" or "GET"),
-        headers = headers,
-        source = body and ltn12.source.string(body) or nil,
-        sink = ltn12.sink.table(response),
-    }
-    -- 透传 redirect 选项（socket.http 默认 true 自动跟随，设 false 可手动处理重定向以保留中间 Set-Cookie）
-    if opts.redirect ~= nil then
-        request_tbl.redirect = opts.redirect
-    end
-
-    local _, code, resp_headers, status = transport_request(transport, request_tbl, opts.timeout)
-
-    return table.concat(response), tonumber(code), resp_headers or {}, status
-end
-
-function Client:request_follow(opts, max_redirects)
-    max_redirects = max_redirects or 5
-    local url = opts.url
-    for redirect_index = 1, max_redirects + 1 do
-        opts.url = url
-        local text, code, resp_headers, status = self:request(opts)
-        if code == 301 or code == 302 or code == 303 or code == 307 or code == 308 then
-            local location = header_value(resp_headers, "location")
-            if not location then
-                return text, code, resp_headers, status
-            end
-            if location:match("^https?://") then
-                url = location
-            else
-                local scheme, host = url:match("^(https?)://([^/]+)")
-                if scheme then
-                    if location:sub(1, 1) == "/" then
-                        url = scheme .. "://" .. host .. location
-                    else
-                        local prefix = url:match("^(https?://.*/)") or (scheme .. "://" .. host .. "/")
-                        url = prefix .. location
-                    end
-                else
-                    url = location
-                end
-            end
-            opts.method = "GET"
-            opts.body = nil
-            opts.headers = opts.headers or {}
-            opts.headers["Content-Length"] = nil
-        else
-            return text, code, resp_headers, status
-        end
-    end
-    error("Too many redirects")
-end
-
--- ============================================================================
--- Server detection (check-servers with short-circuit optimization)
--- ============================================================================
-
--- Check if a single server is available by sending GET to /login
--- Returns (available:bool, response_code:number)
-function Client:download_binary(url)
-    local headers = {
-        ["User-Agent"] = FanQie.USER_AGENT,
-        ["Accept"] = "*/*",
-        ["Accept-Encoding"] = "identity",
-        ["Connection"] = "keep-alive",
-    }
-    local text, code = self:request_follow({
-        url = url,
-        method = "GET",
-        headers = headers,
-    })
-    if code and code >= 200 and code < 300 then
-        return text, code
-    end
-    return nil, code
-end
-
-function Client:post_json(url, data, opts)
-    opts = opts or {}
-    local cookies = self.settings:get("cookies", {})
-    local headers = {
-        ["Content-Type"] = "application/json;charset=UTF-8",
-        ["Origin"] = FanQie.BASE_URL,
-        ["Referer"] = opts.referer or (FanQie.BASE_URL .. "/"),
-    }
-    local cookie_header = Cookie.to_header(cookies)
-    if cookie_header ~= "" then
-        headers["Cookie"] = cookie_header
-    end
-    if opts.headers then
-        for key, value in pairs(opts.headers) do
-            headers[key] = value
-        end
-    end
-
-    local text, code, resp_headers = self:request({
-        url = url,
-        method = "POST",
-        headers = headers,
-        body = self:json_encode(data),
-    })
-    local set_cookie = header_value(resp_headers, "set-cookie")
-    if set_cookie then
-        self.settings:set("cookies", Cookie.merge_set_cookie(cookies, set_cookie))
-        self.settings:flush()
-    end
-    if code and code >= 200 and code < 300 then
-        return self:json_decode(text), code, resp_headers
-    end
-    local err_detail = http_error(self, code, text, resp_headers)
-    local err_msg = string.format("POST %s => %s", url, err_detail)
-    if is_auth_error(self, code, text, resp_headers) then
-        error({ auth_expired = true, message = err_msg })
-    else
-        error(err_msg)
-    end
-end
-
-function Client:get_json(url, opts)
-    opts = opts or {}
-    local cookies = self.settings:get("cookies", {})
-    local headers = {
-        ["Accept"] = "application/json, text/plain, */*",
-        ["Referer"] = opts.referer or (FanQie.BASE_URL .. "/"),
-    }
-    local cookie_header = Cookie.to_header(cookies)
-    if cookie_header ~= "" then
-        headers["Cookie"] = cookie_header
-    end
-    if opts.headers then
-        for key, value in pairs(opts.headers) do
-            headers[key] = value
-        end
-    end
-
-    local text, code, resp_headers = self:request({
-        url = url,
-        method = "GET",
-        headers = headers,
-    })
-    local set_cookie = header_value(resp_headers, "set-cookie")
-    if set_cookie then
-        self.settings:set("cookies", Cookie.merge_set_cookie(cookies, set_cookie))
-        self.settings:flush()
-    end
-    if code and code >= 200 and code < 300 then
-        return self:json_decode(text), code, resp_headers
-    end
-    local err_detail = http_error(self, code, text, resp_headers)
-    local err_msg = string.format("GET %s => %s", url, err_detail)
-    if is_auth_error(self, code, text, resp_headers) then
-        error({ auth_expired = true, message = err_msg })
-    else
-        error(err_msg)
-    end
-end
-
-function Client:get_text(url, opts)
-    opts = opts or {}
-    local cookies = self.settings:get("cookies", {})
-    local headers = {
-        ["Accept"] = opts.accept or "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        ["Referer"] = opts.referer or (FanQie.BASE_URL .. "/"),
-        ["Cookie"] = Cookie.to_header(cookies),
-    }
-    local text, code, resp_headers = self:request({
-        url = url,
-        method = "GET",
-        headers = headers,
-    })
-    local set_cookie = header_value(resp_headers, "set-cookie")
-    if set_cookie then
-        self.settings:set("cookies", Cookie.merge_set_cookie(cookies, set_cookie))
-        self.settings:flush()
-    end
-    if code and code >= 200 and code < 300 then
-        return text
-    end
-    local err_msg = http_error(self, code, text, resp_headers)
-    if is_auth_error(self, code, text, resp_headers) then
-        error({ auth_expired = true, message = err_msg })
-    else
-        error(err_msg)
-    end
-end
-
-function Client:get_binary(url, opts)
-    opts = opts or {}
-    local cookies = self.settings:get("cookies", {})
-    local headers = {
-        ["Accept"] = opts.accept or "*/*",
-        ["Cookie"] = Cookie.to_header(cookies),
-    }
-    -- Referer: explicit string → use it; false → send none; nil → default base URL.
-    -- Some CDNs (e.g. fqnovelpic.com) reject any Referer as anti-leech.
-    if opts.referer == false then
-        -- intentionally no Referer header
-    elseif opts.referer then
-        headers["Referer"] = opts.referer
-    else
-        headers["Referer"] = FanQie.BASE_URL .. "/"
-    end
-    if opts.headers then
-        for key, value in pairs(opts.headers) do
-            headers[key] = value
-        end
-    end
-    local text, code, resp_headers = self:request_follow({
-        url = url,
-        method = "GET",
-        headers = headers,
-    })
-    local set_cookie = header_value(resp_headers, "set-cookie")
-    if set_cookie then
-        self.settings:set("cookies", Cookie.merge_set_cookie(cookies, set_cookie))
-        self.settings:flush()
-    end
-    if code and code >= 200 and code < 300 then
-        return text, code, resp_headers
-    end
-    local err_msg = http_error(self, code, text, resp_headers)
-    if is_auth_error(self, code, text, resp_headers) then
-        error({ auth_expired = true, message = err_msg })
-    else
-        error(err_msg)
-    end
-end
-
-function Client:fetch_shelf_info()
-    local params = FanQie.make_shelf_params()
-    local url = FanQie.shelf_url() .. "?"
-    local parts = {}
-    for key, value in pairs(params) do
-        table.insert(parts, key .. "=" .. H.url_encode(value))
-    end
-    return self:get_json(url .. table.concat(parts, "&"))
+    return setmetatable({ settings = settings }, self)
 end
 
 function Client:clear_shelf_cache()
     SHELF_CACHE = {}
 end
 
-local function get_cookie_hash(cookies)
+---@param text string|nil
+---@return table|nil, string|nil
+function Client:json_decode(text)
+    if type(text) ~= "string" or text == "" then
+        return nil, "empty json"
+    end
+    local ok, data = pcall(JSON.decode, text)
+    if not ok or type(data) ~= "table" then
+        return nil, "invalid json"
+    end
+    return data
+end
+
+---@param data table
+---@return string
+function Client:json_encode(data)
+    return JSON.encode(data)
+end
+
+---@param cookies table
+---@return string
+local function cookieHash(cookies)
     local parts = {}
-    for k, v in pairs(cookies) do
-        table.insert(parts, k .. "=" .. v)
+    for k, v in pairs(cookies or {}) do
+        parts[#parts + 1] = k .. "=" .. tostring(v)
     end
     table.sort(parts)
     return table.concat(parts, ";")
 end
 
-function Client:fetch_shelf_detail(force_refresh)
-    local now = os.time()
+---@param self FanqieClient
+---@param res table|nil
+local function absorbCookies(self, res)
+    local set_cookie = Request.header(res, "Set-Cookie")
+    if not set_cookie then return end
     local cookies = self.settings:get("cookies", {})
-    local cache_key = next(cookies) and get_cookie_hash(cookies) or "default"
-    local cached = SHELF_CACHE[cache_key]
-    if not force_refresh and cached and (now - cached.timestamp) < SHELF_CACHE_TTL then
-        return cached.data
-    end
+    self.settings:set("cookies", Cookie.merge_set_cookie(cookies, set_cookie))
+    self.settings:flush()
+end
 
-    -- 书架直接使用官方 API
-    local shelf_info = self:fetch_shelf_info()
-    if type(shelf_info) ~= "table" or (shelf_info.code ~= nil and tonumber(shelf_info.code) ~= 0)
-        or type(shelf_info.data) ~= "table" then
-        error("番茄书架请求失败，请检查登录状态")
-    end
+---@param self FanqieClient
+---@param code number|nil
+---@param body string|nil
+---@param res table|nil
+---@return boolean
+local function isAuthError(self, code, body, res)
+    if code == 401 or code == 403 then return true end
+    body = tostring(body or "")
+    local content_type = tostring(Request.header(res, "Content-Type") or "")
+    local looks_json = content_type:lower():find("json", 1, true)
+        or body:match("^%s*{") ~= nil
+    if not looks_json or #body > 65536 then return false end
+    local data = select(1, self:json_decode(body))
+    if type(data) ~= "table" then return false end
+    local err_code = data.errCode or data.errcode or data.code
+    if AUTH_ERROR_CODES[err_code] then return true end
+    local msg = tostring(data.errMsg or data.errmsg or data.message or data.msg or "")
+    return msg:find("登录", 1, true) ~= nil
+end
 
-    local book_shelf_info = shelf_info.data.book_shelf_info or shelf_info.data.bookShelfInfo or shelf_info.data
-    if type(book_shelf_info) ~= "table" or #book_shelf_info == 0 then
-        return { code = 0, data = { detail_list = {} } }
-    end
-
-    local shelf_book_ids = {}
-    for _, item in ipairs(book_shelf_info) do
-        if item.book_id then
-            table.insert(shelf_book_ids, item.book_id)
-        end
-    end
-
-    local progress_result = self:fetch_read_progress()
-    local progress_map = {}
-    if progress_result and progress_result.data then
-        for _, item in ipairs(progress_result.data) do
-            progress_map[tostring(item.book_id)] = {
-                read_progress = item.read_progress,
-                index = item.index,
-                item_id = item.item_id,
-            }
-        end
-    end
-
-    local books = {}
-    for _, book_id in ipairs(shelf_book_ids) do
-        local progress = progress_map[tostring(book_id)]
-        table.insert(books, {
-            book_id = book_id,
-            item_id = progress and progress.item_id or "0",
-        })
-    end
-
-    local detail_result = self:post_json(FanQie.bookshelf_multidetail_url(), { books = books })
-    if detail_result and detail_result.data and detail_result.data.detail_list then
-        for _, book in ipairs(detail_result.data.detail_list) do
-            local progress = progress_map[tostring(book.book_id)]
-            if progress then
-                book.read_progress = progress.read_progress
-                book.index = progress.index
-                book.latest_read_item_id = progress.item_id
-            end
-        end
-    end
-
-    SHELF_CACHE[cache_key] = {
-        timestamp = now,
-        data = detail_result,
+---@param self FanqieClient
+---@param method string
+---@param url string
+---@param code number|nil
+---@param body string|nil
+---@param res table|nil
+---@return string
+local function httpError(self, method, url, code, body, res)
+    local parts = {
+        method .. " " .. tostring(url),
+        "HTTP " .. tostring(code),
     }
-
-    return detail_result
+    if isAuthError(self, code, body, res) then
+        parts[#parts + 1] = "auth_expired=true"
+    end
+    local data = select(1, self:json_decode(body))
+    if type(data) == "table" then
+        local err_code = data.errCode or data.errcode or data.code
+        local err_message = data.errMsg or data.errmsg or data.message or data.msg
+        if err_code ~= nil then
+            parts[#parts + 1] = "error_code=" .. tostring(err_code)
+        end
+        if err_message ~= nil then
+            parts[#parts + 1] = "error_message="
+                .. tostring(err_message):gsub("[%c]+", " "):sub(1, 200)
+        end
+    end
+    return table.concat(parts, ", ")
 end
 
-function Client:fetch_read_progress()
-    return self:get_json(FanQie.progress_url())
+---@param self FanqieClient
+---@return table
+local function sessionHeaders(self, extra)
+    local cookies = self.settings:get("cookies", {})
+    local headers = {
+        ["User-Agent"] = FanQie.USER_AGENT,
+        ["Accept"] = "application/json, text/plain, */*",
+        ["Accept-Encoding"] = "identity",
+        ["Referer"] = FanQie.BASE_URL .. "/",
+    }
+    local cookie_header = Cookie.to_header(cookies)
+    if cookie_header ~= "" then
+        headers["Cookie"] = cookie_header
+    end
+    for k, v in pairs(extra or {}) do
+        headers[k] = v
+    end
+    return headers
 end
 
-function Client:update_read_progress(book_id, item_id, index, progress)
-    return self:post_json(FanQie.update_progress_url(), {
+--- 底层请求。allow_redirects 默认 false（与扫码/阅读页需求一致）。
+---@param opts { url: string, method?: string, body?: string, headers?: table, timeout?: number, allow_redirects?: boolean }
+---@param cb fun(res: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:requestAsync(opts, cb)
+    return Request.request({
+        url = opts.url,
+        method = opts.method or (opts.body and "POST" or "GET"),
+        body = opts.body,
+        headers = opts.headers,
+        timeout = opts.timeout or DEFAULT_TIMEOUT,
+        allow_redirects = opts.allow_redirects == true,
+    }, function(res, err)
+        if err then
+            cb(nil, tostring(err))
+            return
+        end
+        absorbCookies(self, res)
+        cb(res)
+    end)
+end
+
+---@param url string
+---@param opts { referer?: string, headers?: table, timeout?: number }|nil
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:getJsonAsync(url, opts, cb)
+    opts = opts or {}
+    local headers = sessionHeaders(self, {
+        ["Accept"] = "application/json, text/plain, */*",
+        ["Referer"] = opts.referer or (FanQie.BASE_URL .. "/"),
+    })
+    for k, v in pairs(opts.headers or {}) do
+        headers[k] = v
+    end
+    return self:requestAsync({
+        url = url,
+        method = "GET",
+        headers = headers,
+        timeout = opts.timeout,
+        allow_redirects = true,
+    }, function(res, err)
+        if not res then cb(nil, err); return end
+        local code = tonumber(res.code)
+        local body = res.body
+        if not Request.ok(code) then
+            cb(nil, httpError(self, "GET", url, code, body, res))
+            return
+        end
+        local data, decode_err = self:json_decode(body)
+        if not data then cb(nil, decode_err or "invalid json"); return end
+        cb(data)
+    end)
+end
+
+---@param url string
+---@param data table
+---@param opts { referer?: string, headers?: table, timeout?: number }|nil
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:postJsonAsync(url, data, opts, cb)
+    opts = opts or {}
+    local headers = sessionHeaders(self, {
+        ["Content-Type"] = "application/json;charset=UTF-8",
+        ["Origin"] = FanQie.BASE_URL,
+        ["Referer"] = opts.referer or (FanQie.BASE_URL .. "/"),
+    })
+    for k, v in pairs(opts.headers or {}) do
+        headers[k] = v
+    end
+    return self:requestAsync({
+        url = url,
+        method = "POST",
+        headers = headers,
+        body = self:json_encode(data),
+        timeout = opts.timeout,
+        allow_redirects = true,
+    }, function(res, err)
+        if not res then cb(nil, err); return end
+        local code = tonumber(res.code)
+        local body = res.body
+        if not Request.ok(code) then
+            cb(nil, httpError(self, "POST", url, code, body, res))
+            return
+        end
+        local decoded, decode_err = self:json_decode(body)
+        if not decoded then cb(nil, decode_err or "invalid json"); return end
+        cb(decoded)
+    end)
+end
+
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:fetchShelfInfoAsync(cb)
+    local params = FanQie.make_shelf_params()
+    local parts = {}
+    for key, value in pairs(params) do
+        parts[#parts + 1] = key .. "=" .. H.url_encode(tostring(value))
+    end
+    return self:getJsonAsync(FanQie.shelf_url() .. "?" .. table.concat(parts, "&"), nil, cb)
+end
+
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:fetchReadProgressAsync(cb)
+    return self:getJsonAsync(FanQie.progress_url(), nil, cb)
+end
+
+---@param book_id string
+---@param item_id string
+---@param index number
+---@param progress number
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:updateReadProgressAsync(book_id, item_id, index, progress, cb)
+    return self:postJsonAsync(FanQie.update_progress_url(), {
         book_id = book_id,
         item_id = item_id,
         read_progress = progress or 0,
         index = index,
         read_timestamp = tostring(math.floor(os.time())),
         genre_type = 0,
-    })
+    }, nil, cb)
 end
 
-function Client:fetch_chapter_directory(book_id)
-    -- 目录直接使用官方 API
-    local ok, result = pcall(function()
-        return self:get_json(FanQie.directory_url(book_id))
+---@param book_id string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:fetchChapterDirectoryAsync(book_id, cb)
+    return self:getJsonAsync(FanQie.directory_url(book_id), nil, function(data, err)
+        if not data then
+            cb(nil, err or "官方 API 获取目录失败")
+            return
+        end
+        if tonumber(data.code) ~= 0 or type(data.data) ~= "table" then
+            cb(nil, "官方 API 获取目录失败: code="
+                .. tostring(data.code) .. " message=" .. tostring(data.message or ""))
+            return
+        end
+        cb(data)
     end)
-
-    if ok and result and result.code == 0 and result.data then
-        return result
-    end
-
-    local err_msg = "官方 API 获取目录失败"
-    if result then
-        err_msg = err_msg .. ": code=" .. tostring(result.code) .. " message=" .. tostring(result.message or "")
-    end
-    error(err_msg)
 end
 
--- Fetch chapter content via the official FanQie API (public, no login needed).
--- Returns {content, title, author} on success; errors on failure.
-function Client:official_get_content(book_id, item_id)
-    return require("source.fanqie.official").fetch(self, book_id, item_id)
+---@param force_refresh boolean|nil
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:fetchShelfDetailAsync(force_refresh, cb)
+    local now = os.time()
+    local cookies = self.settings:get("cookies", {})
+    local cache_key = next(cookies) and cookieHash(cookies) or "default"
+    local cached = SHELF_CACHE[cache_key]
+    if not force_refresh and cached and (now - cached.timestamp) < SHELF_CACHE_TTL then
+        require("ui/uimanager"):nextTick(function() cb(cached.data) end)
+        return { cancel = function() end }
+    end
+
+    local cancelled = false
+    local job
+    local handle = {
+        cancel = function()
+            cancelled = true
+            if job and job.cancel then job.cancel() end
+        end,
+    }
+
+    job = self:fetchShelfInfoAsync(function(shelf_info, err)
+        if cancelled then return end
+        if type(shelf_info) ~= "table"
+            or (shelf_info.code ~= nil and tonumber(shelf_info.code) ~= 0)
+            or type(shelf_info.data) ~= "table"
+        then
+            cb(nil, err or "番茄书架请求失败，请检查登录状态")
+            return
+        end
+        local book_shelf_info = shelf_info.data.book_shelf_info
+            or shelf_info.data.bookShelfInfo
+            or shelf_info.data
+        if type(book_shelf_info) ~= "table" or #book_shelf_info == 0 then
+            local empty = { code = 0, data = { detail_list = {} } }
+            SHELF_CACHE[cache_key] = { timestamp = os.time(), data = empty }
+            cb(empty)
+            return
+        end
+
+        local shelf_book_ids = {}
+        for _, item in ipairs(book_shelf_info) do
+            if item.book_id then
+                shelf_book_ids[#shelf_book_ids + 1] = item.book_id
+            end
+        end
+
+        job = self:fetchReadProgressAsync(function(progress_result, progress_err)
+            if cancelled then return end
+            if not progress_result and progress_err then
+                logger.warn("fanqie shelf progress", progress_err)
+            end
+            local progress_map = {}
+            for _, item in ipairs(progress_result and progress_result.data or {}) do
+                progress_map[tostring(item.book_id)] = {
+                    read_progress = item.read_progress,
+                    index = item.index,
+                    item_id = item.item_id,
+                }
+            end
+            local books = {}
+            for _, book_id in ipairs(shelf_book_ids) do
+                local progress = progress_map[tostring(book_id)]
+                books[#books + 1] = {
+                    book_id = book_id,
+                    item_id = progress and progress.item_id or "0",
+                }
+            end
+            job = self:postJsonAsync(FanQie.bookshelf_multidetail_url(), { books = books }, nil,
+                function(detail_result, detail_err)
+                    if cancelled then return end
+                    if not detail_result then
+                        cb(nil, detail_err or "番茄书架详情失败")
+                        return
+                    end
+                    if detail_result.data and detail_result.data.detail_list then
+                        for _, book in ipairs(detail_result.data.detail_list) do
+                            local progress = progress_map[tostring(book.book_id)]
+                            if progress then
+                                book.read_progress = progress.read_progress
+                                book.index = progress.index
+                                book.latest_read_item_id = progress.item_id
+                            end
+                        end
+                    end
+                    SHELF_CACHE[cache_key] = {
+                        timestamp = os.time(),
+                        data = detail_result,
+                    }
+                    cb(detail_result)
+                end)
+        end)
+    end)
+    return handle
+end
+
+---@param book_id string
+---@param item_id string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:officialGetContentAsync(book_id, item_id, cb)
+    return require("source.fanqie.official").fetchAsync(self, book_id, item_id, cb)
 end
 
 return Client

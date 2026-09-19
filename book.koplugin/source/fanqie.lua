@@ -1,5 +1,5 @@
 --[[--
-番茄小说官方数据源（PR#29）。
+番茄小说官方数据源。
 
 @module koplugin.book.source.fanqie
 --]]
@@ -38,28 +38,25 @@ function Source:capabilities()
     return { refresh = true, insight = true }
 end
 
-local function run(work, done, opts)
-    opts = opts or {}
-    local cancelled = false
-    local job = require("workers.job").run(work, {
-        name = opts.name or "fanqie.task",
-        kind = opts.kind or "medium",
-        timeout = opts.timeout,
-        on_done = function(value)
-            if not cancelled then done(value, nil) end
-        end,
-        on_failed = function(err)
-            if not cancelled then
-                done(nil, tostring(err or "番茄请求失败"))
-            end
-        end,
-    })
-    return {
-        cancel = function()
-            cancelled = true
-            if job then job:cancel() end
-        end,
-    }
+---@return { cancel: fun(), job: any, cancelled: boolean }
+local function handle()
+    local h = { job = nil, cancelled = false }
+    function h.cancel()
+        h.cancelled = true
+        if h.job and h.job.cancel then
+            h.job.cancel()
+        end
+    end
+    return h
+end
+
+---@param err any
+---@return string
+local function errMsg(err)
+    if type(err) == "table" then
+        return tostring(err.message or err.err or "番茄请求失败")
+    end
+    return tostring(err or "番茄请求失败")
 end
 
 function Source:syncBooksAsync(opts, cb)
@@ -82,11 +79,18 @@ function Source:syncBooksAsync(opts, cb)
         cb(nil, "请在数据源设置中扫码登录番茄小说")
         return { cancel = function() end }
     end
-    return run(function()
-        local wire = self.client:fetch_shelf_detail(opts.force)
-        local rows = wire and wire.data and wire.data.detail_list
+
+    local h = handle()
+    h.job = self.client:fetchShelfDetailAsync(opts.force, function(wire, err)
+        if h.cancelled then return end
+        if not wire then
+            cb(nil, errMsg(err))
+            return
+        end
+        local rows = wire.data and wire.data.detail_list
         if type(rows) ~= "table" then
-            error("番茄书架响应不完整，保留本地书架")
+            cb(nil, "番茄书架响应不完整，保留本地书架")
+            return
         end
         require("source.fanqie.helper").make_dir(require("utils.paths").imageDir("fanqie"))
         local books = {}
@@ -121,15 +125,10 @@ function Source:syncBooksAsync(opts, cb)
                 }
             end
         end
-        return books
-    end, function(books, err)
-        if not books then
-            cb(nil, err)
-            return
-        end
         local result, reason = require("book.store").reconcile(self.id, books)
         cb(result, reason)
     end)
+    return h
 end
 
 function Source:coverRequest(identity)
@@ -158,9 +157,15 @@ function Source:loadTocAsync(identity, cb)
         require("ui/uimanager"):nextTick(function() cb(cached) end)
         return { cancel = function() end }
     end
-    return run(function()
-        local rows = Content.readable_chapters(Content.normalize_chapters(
-            self.client:fetch_chapter_directory(identity.stable_id), identity.stable_id))
+    local h = handle()
+    h.job = self.client:fetchChapterDirectoryAsync(identity.stable_id, function(wire, err)
+        if h.cancelled then return end
+        if not wire then
+            cb(nil, errMsg(err))
+            return
+        end
+        local rows = Content.readable_chapters(
+            Content.normalize_chapters(wire, identity.stable_id))
         local toc = {}
         for _, row in ipairs(rows) do
             local uid = row.itemId or row.item_id
@@ -172,37 +177,47 @@ function Source:loadTocAsync(identity, cb)
                 }
             end
         end
-        if #toc == 0 then error("番茄目录为空") end
-        return toc
-    end, function(toc, err)
-        if toc then Toc.put(self.id, identity.stable_id, toc) end
-        cb(toc, err)
+        if #toc == 0 then
+            cb(nil, "番茄目录为空")
+            return
+        end
+        Toc.put(self.id, identity.stable_id, toc)
+        cb(toc)
     end)
+    return h
 end
 
 local function fetch(self, identity, chapter, cb)
     local Content = require("source.fanqie.content")
-    return run(function()
-        local index = Content.load_cache_index(self.settings, identity.stable_id)
-        local path = index and index[chapter.uid]
-        if path then
-            local file = io.open(path, "rb")
-            if file then
-                local html = file:read("*a")
-                file:close()
-                local body = html:match("<body[^>]*>(.-)</body>")
-                if body and body:match("%S") then
-                    return { title = chapter.title, html = body }
-                end
+    local index = Content.load_cache_index(self.settings, identity.stable_id)
+    local path = index and index[chapter.uid]
+    if path then
+        local file = io.open(path, "rb")
+        if file then
+            local html = file:read("*a")
+            file:close()
+            local body = html:match("<body[^>]*>(.-)</body>")
+            if body and body:match("%S") then
+                require("ui/uimanager"):nextTick(function()
+                    cb({ title = chapter.title, html = body })
+                end)
+                return { cancel = function() end }
             end
         end
-        local result = self.client:official_get_content(identity.stable_id, chapter.uid)
-        local html = Content.decode_pua_content(result.content)
-        return {
+    end
+    local h = handle()
+    h.job = self.client:officialGetContentAsync(identity.stable_id, chapter.uid, function(result, err)
+        if h.cancelled then return end
+        if not result then
+            cb(nil, errMsg(err))
+            return
+        end
+        cb({
             title = result.title ~= "" and result.title or chapter.title,
-            html = html,
-        }
-    end, cb)
+            html = Content.decode_pua_content(result.content),
+        })
+    end)
+    return h
 end
 
 function Source:openBookAsync(identity, opts, cb)
@@ -223,22 +238,35 @@ end
 
 function Source:getProgressAsync(identity, cb)
     local Toc = require("source.fanqie.toc")
-    local cancelled, request, toc_job = false, nil, nil
-    request = run(function()
-        local wire = self.client:fetch_read_progress()
-        for _, row in ipairs(wire and wire.data or {}) do
-            if tostring(row.book_id) == identity.stable_id then return row end
+    local h = handle()
+    h.job = self.client:fetchReadProgressAsync(function(wire, err)
+        if h.cancelled then return end
+        if not wire then
+            cb(nil, errMsg(err))
+            return
         end
-        return {}
-    end, function(row, err)
-        if cancelled then return end
-        if not row then cb(nil, err); return end
-        if not row.item_id then cb(nil, nil, { empty = true }); return end
-        toc_job = self:loadTocAsync(identity, function(toc, reason)
-            if cancelled then return end
-            if not toc then cb(nil, reason); return end
+        local row
+        for _, item in ipairs(wire.data or {}) do
+            if tostring(item.book_id) == identity.stable_id then
+                row = item
+                break
+            end
+        end
+        if not row or not row.item_id then
+            cb(nil, nil, { empty = true })
+            return
+        end
+        h.job = self:loadTocAsync(identity, function(toc, reason)
+            if h.cancelled then return end
+            if not toc then
+                cb(nil, reason)
+                return
+            end
             local idx = Toc.index(self.id, identity.stable_id, row.item_id)
-            if not idx then cb(nil, nil, { empty = true }); return end
+            if not idx then
+                cb(nil, nil, { empty = true })
+                return
+            end
             local within = tonumber(row.read_progress) or 0
             if within > 1 then within = within / 10000 end
             within = math.max(0, math.min(1, within))
@@ -250,42 +278,36 @@ function Source:getProgressAsync(identity, cb)
             })
         end)
     end)
-    return {
-        cancel = function()
-            cancelled = true
-            if request then request.cancel() end
-            if toc_job and toc_job.cancel then toc_job.cancel() end
-        end,
-    }
+    return h
 end
 
 function Source:putProgressAsync(identity, pos, cb)
-    local cancelled, request, toc_job = false, nil, nil
-    toc_job = self:loadTocAsync(identity, function(toc, err)
-        if cancelled then return end
-        if not toc then cb(nil, err); return end
+    local h = handle()
+    h.job = self:loadTocAsync(identity, function(toc, err)
+        if h.cancelled then return end
+        if not toc then
+            cb(nil, err)
+            return
+        end
         local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
         local chapter = idx and toc[idx]
-        if not chapter then cb(nil, "缺少番茄章节位置"); return end
-        request = run(function()
-            local wire = self.client:update_read_progress(
-                identity.stable_id, chapter.uid, idx - 1,
-                math.max(0, math.min(1, tonumber(pos.chapter_fraction) or 0)))
-            if not wire or tonumber(wire.code or 0) ~= 0 then
-                error("番茄进度上传失败")
-            end
-            return true
-        end, function(ok, reason)
-            if not cancelled then cb(ok, reason) end
-        end)
+        if not chapter then
+            cb(nil, "缺少番茄章节位置")
+            return
+        end
+        h.job = self.client:updateReadProgressAsync(
+            identity.stable_id, chapter.uid, idx - 1,
+            math.max(0, math.min(1, tonumber(pos.chapter_fraction) or 0)),
+            function(wire, reason)
+                if h.cancelled then return end
+                if not wire or tonumber(wire.code or 0) ~= 0 then
+                    cb(nil, reason and errMsg(reason) or "番茄进度上传失败")
+                    return
+                end
+                cb(true)
+            end)
     end)
-    return {
-        cancel = function()
-            cancelled = true
-            if request then request.cancel() end
-            if toc_job and toc_job.cancel then toc_job.cancel() end
-        end,
-    }
+    return h
 end
 
 return M
