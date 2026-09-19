@@ -36,12 +36,4 @@ function BookListResult.new(books, count)
     }
 end
 
---- 空列表（可带已有 books）。
----@param books Book[]|nil
----@param count number|nil
----@return BookListResult
-function BookListResult.empty(books, count)
-    return BookListResult.new(books, count)
-end
-
 return BookListResult

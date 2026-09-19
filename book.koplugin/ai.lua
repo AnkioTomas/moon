@@ -59,6 +59,4 @@ function AI.jsonExtract(messages, opts, cb)
     end)
 end
 
-AI.decodeJson = AiJson.decode
-
 return AI

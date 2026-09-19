@@ -153,7 +153,7 @@ function Surface.pill(child, opts)
     return Surface.card(child, pill_opts)
 end
 
--- Compatibility adapter for the table-shaped call sites; this module remains stateless.
+-- Table-shaped entry for call sites; this module remains stateless.
 function Surface.build(args)
     assert(args and args.child, "surface child required")
     local opts = args.options or {}

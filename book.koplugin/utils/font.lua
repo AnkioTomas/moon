@@ -396,7 +396,7 @@ function MoonFont.listAsync(force, cb)
 
     return { cancel = function()
             cancelled = true
-            if scan_job then scan_job:abort() end
+            if scan_job then scan_job:cancel() end
             if cache_job and cache_job.cancel then cache_job.cancel() end
             if net_job and net_job.cancel then net_job.cancel() end
         end }
@@ -732,7 +732,7 @@ function MoonFont.ensureInstalledAsync(item, on_progress, cb)
     return { cancel = function()
             cancelled = true
             if download_job then download_job.cancel() end
-            if extract_job then extract_job:abort() end
+            if extract_job then extract_job:cancel() end
         end }
 end
 

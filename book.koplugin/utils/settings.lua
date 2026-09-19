@@ -246,14 +246,6 @@ function M.save(values)
     refreshMerged()
 end
 
---- Explicitly replace all functional settings; missing keys are removed.
----@param values table
-function M.replace(values)
-    initialize()
-    saveMerged(values or {}, true)
-    refreshMerged()
-end
-
 --- Persist one functional section without merging unrelated settings.
 ---@param section string
 ---@param values table|nil

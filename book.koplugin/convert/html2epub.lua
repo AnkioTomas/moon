@@ -716,7 +716,7 @@ function Html2Epub.build(opts, cb)
                 active_job.cancel()
             end
             if pack_task then
-                pack_task:abort()
+                pack_task:cancel()
             end
         end }
 end

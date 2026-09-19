@@ -209,7 +209,7 @@ function Download:_onHttp(ok, err)
     self:_complete(final)
 end
 
-function Download:abort()
+function Download:cancel()
     if self.settled or self.cancelled then
         return
     end
@@ -222,8 +222,6 @@ function Download:abort()
     Queue:release(self)
     Queue:pump()
 end
-
-Download.cancel = Download.abort
 
 function Download:start()
     local cached = Download.cached(self.url)

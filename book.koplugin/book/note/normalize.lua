@@ -33,7 +33,7 @@ function Normalize.clean(items, total_pages)
     return result
 end
 
---- 解包持久化快照；旧版数组 payload 继续兼容。
+--- 解包持久化快照：权威快照为 `{ items, authoritative }`，否则为裸数组。
 ---@param value any
 ---@return table[]
 ---@return boolean

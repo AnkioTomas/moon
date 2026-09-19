@@ -68,7 +68,7 @@ end
 ---@param wire table|nil
 ---@return BookListResult
 function Mapper.list(wire)
-    if type(wire) ~= "table" then return BookListResult.empty() end
+    if type(wire) ~= "table" then return BookListResult.new() end
     local rows = wire.books or (wire.exactMatch and wire.exactMatch.books) or {}
     local books = {}
     for _, row in ipairs(rows) do
