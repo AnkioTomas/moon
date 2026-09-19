@@ -48,11 +48,39 @@ package.preload["source.wechat.mapper"] = function() return {} end
 package.preload["source.wechat.chapter"] = function()
     return { ensure = function() return true end }
 end
+package.preload["source.fanqie.settings"] = function()
+    return {
+        new = function()
+            return {
+                cache_dir = "missing",
+                is_cookie_configured = function() return false end,
+            }
+        end,
+    }
+end
+package.preload["source.fanqie.client"] = function()
+    local C = {}
+    function C:new() return setmetatable({}, { __index = C }) end
+    return C
+end
+package.preload["workers.job"] = function()
+    return {
+        run = function(_, opts)
+            if opts and opts.on_done then opts.on_done({}) end
+            return { cancel = function() end }
+        end,
+    }
+end
+package.preload["source.fanqie.content"] = function() return {} end
+package.preload["source.fanqie.toc"] = function()
+    return { read = function() return nil end, put = function() end, index = function() end }
+end
 
 -- 清掉可能缓存的模块
 package.loaded["source.registry"] = nil
 package.loaded["source.moon"] = nil
 package.loaded["source.wechat"] = nil
+package.loaded["source.fanqie"] = nil
 
 local Registry = require("source.registry")
 
@@ -67,7 +95,7 @@ do
     Assert.is_true(ids.wechat)
     Assert.is_true(ids.jdread)
     Assert.is_true(ids.copymanga)
-    Assert.is_nil(ids.fanqie)
+    Assert.is_true(ids.fanqie)
     Assert.is_true(ids["local"])
 end
 
@@ -101,7 +129,7 @@ do
     Assert.eq(Registry.meta("wechat").type, "chapter")
     Assert.eq(Registry.meta("jdread").type, "chapter")
     Assert.eq(Registry.meta("copymanga").type, "chapter")
-    Assert.is_nil(Registry.meta("fanqie"))
+    Assert.eq(Registry.meta("fanqie").type, "chapter")
 end
 
 do
@@ -122,8 +150,9 @@ end
 
 do
     local src, err = Registry.create("fanqie")
-    Assert.is_nil(src)
-    Assert.not_nil(err)
+    Assert.is_true(src ~= nil, err)
+    Assert.eq(src.id, "fanqie")
+    Assert.is_true(src:capabilities().refresh)
 end
 
 do
