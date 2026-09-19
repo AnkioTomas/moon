@@ -116,6 +116,15 @@ function Manager.onCreate(opts)
     _install_dir = opts.install_dir
     _backups_root = opts.backups_root
     _patches_dir = opts.patches_dir
+    -- 功能门面启动自检（延迟 require，离线只测 install/restore 时不碰 UI）
+    require("ui/uimanager"):nextTick(function()
+        local ok, err = pcall(function()
+            require("patch.page_turn_animation").checkStartup()
+        end)
+        if not ok then
+            require("utils.log").warn("book patch page_turn_animation check failed:", err)
+        end
+    end)
 end
 
 --- KOReader 安装目录（被补丁的核心文件所在），未注入时取当前工作目录。

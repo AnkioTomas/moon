@@ -14,7 +14,7 @@ BookPlugin:init
 ├── Host.onCreate   ← 字体图标、主菜单、Dispatcher、start_with 种入
 ├── translate / baike / dictionary / panel.native  → onCreate
 ├── lockscreen / remote / ime → onCreate
-├── patch.manager.onCreate + 翻页动画检查；FM 侧 update.onCreate
+├── patch.manager.onCreate（内含补丁启动自检）；FM 侧 update.onCreate
 └── Reader → emitToSource("reader_open")
 ```
 
