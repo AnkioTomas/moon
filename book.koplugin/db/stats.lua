@@ -534,10 +534,13 @@ function StatsDB.periodBooks(source_id, start_ts, end_ts, limit)
     args[#args + 1] = tonumber(end_ts) or 0
     args[#args + 1] = math.max(1, tonumber(limit) or 5)
     local result, nrows = Base.query(
-        [[SELECT r.source_id, r.stable_id, b.title, b.authors, b.percent,
+        [[SELECT r.source_id, r.stable_id, b.title, b.authors,
+                 COALESCE(p.fraction * 100, 0),
                  SUM(r.duration), SUM(r.event_count)
           FROM reading_stats r LEFT JOIN books b
             ON b.source_id=r.source_id AND b.stable_id=r.stable_id
+          LEFT JOIN pending_progress p
+            ON p.source_id=r.source_id AND p.stable_id=r.stable_id
           WHERE ]] .. where .. [[ AND r.start_time>=? AND r.start_time<?
             AND r.record_type IN ('page','page_rollup')
           GROUP BY r.source_id, r.stable_id ORDER BY 6 DESC LIMIT ?;]],

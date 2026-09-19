@@ -106,9 +106,7 @@ function Detail:saveMeta(fields)
             category = category,
             series = series,
             intro = existing and existing.intro or nil,
-            percent = existing and existing.percent or 0,
             md5 = existing and existing.md5 or nil,
-            fetched_at = os.time(),
         })
     end
     if not self.lifecycle:uiReady() then

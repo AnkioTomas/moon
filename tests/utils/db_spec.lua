@@ -326,8 +326,8 @@ do
                         return { { "第一辑", "第二辑" } }, 2
                     end
                     if sql:find("COUNT(*)", 1, true) and sql:find("GROUP BY", 1, true) then
-                        if sql:find("WHEN is_new=1", 1, true) then
-                            return { { "new", "read", "unread" }, { 1, 2, 4 } }, 3
+                        if sql:find("WHEN read_state=1 THEN 'read'", 1, true) then
+                            return { { "read", "unread" }, { 2, 4 } }, 2
                         end
                         if sql:find("GROUP BY source_id", 1, true) then
                             return { { "local", "wechat" }, { 3, 5 } }, 2
@@ -348,7 +348,6 @@ do
                         { "介绍" },
                         { "https://img.test/a.jpg" },
                         { 1000 },
-                        { 1 },
                         { 1 },
                         { "/cache/a.epub" },
                     }, 1
@@ -379,13 +378,18 @@ do
     Assert.eq(rows[1].percent, 42)
     Assert.eq(rows[1].series, "第一辑")
     Assert.eq(rows[1].cover, "https://img.test/a.jpg")
+    Assert.eq(rows[1].inserted_at, 1000)
     Assert.eq(rows[1].read_state, 1)
-    Assert.is_true(rows[1].is_new)
     Assert.eq(rows[1].path, "/cache/a.epub")
+    Assert.is_true(rows[1].in_library)
+    Assert.eq(rows[1].deleted, 0)
     local count_q = calls[#calls - 1]
     Assert.is_true(count_q.sql:find("WHERE source_id=%?", 1) ~= nil or count_q.sql:find("source_id=?", 1, true) ~= nil)
+    Assert.is_true(count_q.sql:find("b.deleted=0", 1, true) ~= nil)
     Assert.is_false(count_q.sql:find("category=", 1, true) ~= nil)
     local list_q = calls[#calls]
+    Assert.is_true(list_q.sql:find("b.inserted_at", 1, true) ~= nil)
+    Assert.is_true(list_q.sql:find("is_new", 1, true) == nil)
     Assert.is_true(list_q.sql:find("LIMIT ? OFFSET ?", 1, true) ~= nil)
     Assert.eq(list_q.args[#list_q.args - 1], 24)
     Assert.eq(list_q.args[#list_q.args], 48)
@@ -424,9 +428,6 @@ do
     BookDB.listBySource("local", { unseries = true })
     Assert.is_true(calls[1].sql:find("b.series IS NULL OR b.series=''", 1, true) ~= nil)
     calls = {}
-    BookDB.listBySource("local", { read_status = "new" })
-    Assert.is_true(calls[1].sql:find("b.is_new=1", 1, true) ~= nil)
-    calls = {}
     BookDB.listBySource({ "local", "wechat" }, { source_id = "wechat" })
     Assert.is_true(calls[1].sql:find("b.source_id IN (?,?)", 1, true) ~= nil)
     Assert.is_true(calls[1].sql:find("AND b.source_id=?", 1, true) ~= nil)
@@ -456,10 +457,11 @@ do
     Assert.eq(series_counts[1].count, 5)
     Assert.eq(series_counts[2].series, "")
     local read_counts = BookDB.readStatusCountsBySource("local")
-    Assert.eq(read_counts[1].status, "new")
-    Assert.eq(read_counts[1].count, 1)
-    Assert.eq(read_counts[2].count, 2)
-    Assert.eq(read_counts[3].count, 4)
+    Assert.eq(#read_counts, 2)
+    Assert.eq(read_counts[1].status, "read")
+    Assert.eq(read_counts[1].count, 2)
+    Assert.eq(read_counts[2].status, "unread")
+    Assert.eq(read_counts[2].count, 4)
 
     DbBase.close()
     clearMods()

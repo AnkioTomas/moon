@@ -59,4 +59,115 @@ do
     Assert.is_false(finished)
 end
 
+-- 编排层对进度/笔记强制 dirty_only（pull 只走开书路径）。
+do
+    local seen = {}
+    local source = {
+        id = "moon",
+        syncBooksAsync = function(_, opts, cb)
+            seen.books = opts.dirty_only
+            cb({ pulled = 1 })
+            return { cancel = function() end }
+        end,
+        syncProgressAsync = function(_, opts, cb)
+            seen.progress = opts.dirty_only
+            cb({ pushed = 1 })
+            return { cancel = function() end }
+        end,
+        syncNotesAsync = function(_, opts, cb)
+            seen.notes = opts.dirty_only
+            cb({ pushed = 1 })
+            return { cancel = function() end }
+        end,
+        syncStatsAsync = function(_, opts, cb)
+            seen.stats = opts.dirty_only
+            cb({ pulled = 1 })
+            return { cancel = function() end }
+        end,
+    }
+    Sync.runAsync(source, nil, function() end)
+    Stubs.flush()
+    Assert.is_nil(seen.books)
+    Assert.is_true(seen.progress)
+    Assert.is_true(seen.notes)
+    Assert.is_nil(seen.stats)
+end
+
+-- retryDirtyAsync：有 books 脏行时不得 skip_books，且 books 带 dirty_only。
+do
+    local calls = {}
+    package.preload["source.registry"] = function()
+        return {
+            listEnabled = function()
+                return { { id = "moon" } }
+            end,
+            resolve = function()
+                return {
+                    id = "moon",
+                    syncBooksAsync = function(_, opts, cb)
+                        calls[#calls + 1] = {
+                            "books", opts.skip_books, opts.dirty_only,
+                        }
+                        cb({ pushed = 1 })
+                        return { cancel = function() end }
+                    end,
+                    syncProgressAsync = function(_, opts, cb)
+                        calls[#calls + 1] = { "progress", opts.dirty_only }
+                        cb({ pushed = 0 })
+                        return { cancel = function() end }
+                    end,
+                    syncNotesAsync = function(_, opts, cb)
+                        calls[#calls + 1] = { "notes", opts.dirty_only }
+                        cb({ pushed = 0 })
+                        return { cancel = function() end }
+                    end,
+                    syncStatsAsync = function(_, opts, cb)
+                        calls[#calls + 1] = { "stats", opts.dirty_only }
+                        cb({ pushed = 0 })
+                        return { cancel = function() end }
+                    end,
+                }, nil
+            end,
+        }
+    end
+    package.preload["db.book"] = function()
+        return {
+            unsynced = function()
+                return { { source_id = "moon", stable_id = "b1", deleted = 1 } }
+            end,
+            markSynced = function()
+                error("bookshelf must not blanket markSynced")
+            end,
+        }
+    end
+    package.preload["db.progress"] = function()
+        return { unsynced = function() return {} end }
+    end
+    package.preload["db.note"] = function()
+        return { unsynced = function() return {} end }
+    end
+    package.preload["db.stats"] = function()
+        return { unsyncedBySource = function() return {} end }
+    end
+    for _, name in ipairs({
+        "book.sync", "source.registry", "db.book", "db.progress", "db.note", "db.stats",
+    }) do
+        package.loaded[name] = nil
+    end
+    local Sync2 = require("book.sync")
+    Sync2.retryDirtyAsync()
+    Stubs.flush()
+    Assert.eq(calls[1][1], "books")
+    Assert.is_false(calls[1][2], "books 脏时不得 skip_books")
+    Assert.is_true(calls[1][3], "books 脏重试必须 dirty_only")
+    Assert.is_true(calls[2][2], "progress 强制 dirty_only")
+    Assert.is_true(calls[3][2], "notes 强制 dirty_only")
+    Assert.is_true(calls[4][2], "stats 继承 dirty_only")
+end
+
 package.loaded["book.sync"] = nil
+package.loaded["source.registry"] = nil
+package.loaded["db.book"] = nil
+package.loaded["db.progress"] = nil
+package.loaded["db.note"] = nil
+package.loaded["db.stats"] = nil

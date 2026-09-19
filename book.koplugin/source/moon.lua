@@ -140,38 +140,33 @@ function Source:configured()
     return self._client:configured()
 end
 
---- 删除 Moon 云端原书，并清理本地缓存与登记。
+--- 删除：本地先标 deleted，能上网时再推云端真删。
 ---@param identity BookIdentity
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return table
 function Source:deleteBookAsync(identity, cb)
+    local Store = require("book.store")
+    if not Store.markDeleted(self.id, identity.stable_id) then
+        require("ui/uimanager"):nextTick(function()
+            cb(false, _("删除本书失败"))
+        end)
+        return { cancel = function() end }
+    end
     local cancelled, job = false, nil
+    require("ui/uimanager"):nextTick(function()
+        if not cancelled then cb(true) end
+    end)
     require("ui/network/manager"):runWhenOnline(function()
         if cancelled then return end
-        job = self._client:deleteBooksAsync({ identity.stable_id }, function(wire, err)
+        job = self._client:deleteBooksAsync({ identity.stable_id }, function(wire)
             if cancelled then return end
-            if not wire then
-                cb(false, (type(err) == "table" and err.message) or err or _("删除本书失败"))
-                return
-            end
-            local Paths = require("utils.paths")
-            local Util = require("ffi/util")
-            local dir = Paths.bookWorkDir(identity.stable_id, self.id)
-            if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory"
-                and not Util.purgeDir(dir) then
-                cb(false, _("删除本书失败"))
-                return
-            end
-            os.remove(Paths.coverPath(identity.stable_id, self.id))
-            require("db.book").remove(self.id, identity.stable_id)
-            require("db.chapter").deleteUnder(dir)
-            cb(true)
+            if wire then Store.finalizeDeleted(self.id, identity.stable_id) end
         end)
     end)
     return { cancel = function()
-            cancelled = true
-            if job and job.cancel then job.cancel() end
-        end }
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
 end
 
 --- 打开 Moon 整本书：缓存命中直开，否则下载、校验并登记物理路径。
@@ -314,16 +309,59 @@ function Source:coverRequest(identity)
     return req
 end
 
---- 分页拉取完整 Moon 书架，全部成功后一次性对账本地库。
----@param opts { force?: boolean }|nil
+--- 分页拉取完整 Moon 书架；先推本地待删，再对账。
+---@param opts { force?: boolean, dirty_only?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }
 function Source:syncBooksAsync(opts, cb)
-    if opts and opts.force then self:clearCaches() end
+    opts = opts or {}
+    if opts.force then self:clearCaches() end
+    local Store = require("book.store")
+    local cancelled, job, delete_job = false, nil, nil
+    local deleted_n = 0
+
+    --- dirty_only：只推待删，不拉书架。
+    if opts.dirty_only then
+        local pending = require("db.book").pendingDeleteIds(self.id)
+        if #pending == 0 then
+            require("ui/uimanager"):nextTick(function()
+                if not cancelled then
+                    cb({ pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false })
+                end
+            end)
+            return { cancel = function() cancelled = true end }
+        end
+        local index = 0
+        local function nextDelete()
+            if cancelled then return end
+            index = index + 1
+            if index > #pending then
+                cb({
+                    pulled = 0, pushed = deleted_n, hidden = 0, conflicts = 0, skipped = false,
+                })
+                return
+            end
+            local stable_id = pending[index]
+            delete_job = self._client:deleteBooksAsync({ stable_id }, function(wire)
+                delete_job = nil
+                if cancelled then return end
+                if wire then
+                    Store.finalizeDeleted(self.id, stable_id)
+                    deleted_n = deleted_n + 1
+                end
+                nextDelete()
+            end)
+        end
+        nextDelete()
+        return { cancel = function()
+            cancelled = true
+            if delete_job and delete_job.cancel then delete_job:cancel() end
+        end }
+    end
+
     local page, page_size = 1, 200
-    local books, cancelled, job = {}, false, nil
-    --- 拉下一页书架；累计条数够 count 或本页为空即收尾并对账入库。
-    local function nextPage()
+    local books = {}
+    local function pullPages()
         if cancelled then return end
         job = self._client:listBooksAsync(listQuery({ page = page, page_size = page_size }), function(wire, err)
             job = nil
@@ -334,16 +372,46 @@ function Source:syncBooksAsync(opts, cb)
             local count = tonumber(mapped.count) or #books
             if #books < count and #(mapped.data or {}) > 0 then
                 page = page + 1
-                nextPage()
+                pullPages()
                 return
             end
-            cb(require("book.store").reconcile(self.id, books))
+            local result, rerr = require("book.store").reconcile(self.id, books)
+            if result then result.pushed = deleted_n end
+            cb(result, rerr)
         end)
     end
-    nextPage()
+    local pending = require("db.book").pendingDeleteIds(self.id)
+    if #pending == 0 then
+        pullPages()
+        return { cancel = function()
+            cancelled = true
+            if job and job.cancel then job:cancel() end
+        end }
+    end
+    local index = 0
+    local function nextDelete()
+        if cancelled then return end
+        index = index + 1
+        if index > #pending then
+            pullPages()
+            return
+        end
+        local stable_id = pending[index]
+        delete_job = self._client:deleteBooksAsync({ stable_id }, function(wire)
+            delete_job = nil
+            if cancelled then return end
+            if wire then
+                Store.finalizeDeleted(self.id, stable_id)
+                deleted_n = deleted_n + 1
+            end
+            nextDelete()
+        end)
+    end
+    nextDelete()
     return { cancel = function()
         cancelled = true
         if job and job.cancel then job:cancel() end
+        if delete_job and delete_job.cancel then delete_job:cancel() end
     end }
 end
 

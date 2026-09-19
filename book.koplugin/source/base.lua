@@ -2,7 +2,12 @@
 数据源运行时基类。
 
 各适配器继承本类，只覆盖自己支持的传输方法。
-四类同步中不支持的方向异步成功跳过；所有查询默认读取本地 catalog。
+四类同步中不支持的方向异步 skipped；所有查询默认读取本地 catalog。
+书架：远端快照 reconcile（pulled）+ 本地脏成员经 add/delete 上行（pushed）。
+本地删除只标 deleted；同步时推云端真删。
+全量同步：本地优先 push，再 pull。进度 pull 仅开书（冲突让用户选）；笔记有网即推、开书再拉。
+脏 progress/notes/stats 的网络恢复重试由 book.sync.retryDirtyAsync 单通道负责，
+本类 onEvent("network_connected") 不重复推脏。
 
 @module koplugin.book.source.base
 @see types.book_source
@@ -62,7 +67,7 @@ end
 ---   home_open       — 用户进入首页；源侧按节流策略检查书架
 ---   library_refresh_request — 用户在图书馆点击刷新，要求源强制刷新书架
 ---   suspend         — 设备休眠前（有打开文档时）
----   network_connected — 网络恢复，源可重试持久化上报队列
+---   network_connected — 网络恢复（脏重试由 Sync.retryDirtyAsync 负责，基类不重复推）
 ---   page_changed    — 翻页（仅源身份书籍），payload = { identity, page, total_pages, percent }
 ---   book_info_request — 阅读面板详情页请求书籍信息，payload = { identity, book, refresh }
 ---     （源可拉最新详情写 Store.rememberMany 后调 refresh() 重绘面板；基类空操作即可）
@@ -165,6 +170,7 @@ local function syncDesktopStats(self, desktop, opts)
     end
 end
 
+---   network_connected — 网络恢复（脏重试由 book.sync.retryDirtyAsync 负责，基类不重复推）
 ---@param event string 事件名
 ---@param payload table|nil 事件载荷，含义随事件而定
 function SourceBase:onEvent(event, payload)

@@ -138,7 +138,6 @@ function Filter.open(opts)
     local page = { source_id = 1, category = 1, series = 1, read_status = 1, sort = 1 }
     local dialog
     local status = {
-        { value = "new", text = _("新书"), count = 0 },
         { value = "read", text = _("已读"), count = 0 },
         { value = "unread", text = _("未读"), count = 0 },
     }

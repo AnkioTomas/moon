@@ -9,27 +9,28 @@
 ---@field book Book|nil books 表元数据行；刚登记/未入库时可能为内存行或 nil
 ---@field source BookSource|nil 属主源实例；仅 ensureIdentity（打开时）解析，identityFor 不挂
 
---- 对应表 books：身份列 + 展示元数据 + 统计 md5。
+--- 对应表 books：身份列 + 展示元数据 + 软删成员 + sync_status。
 ---@class Book
 ---@field source_id string 源标识；与 stable_id 共同组成 PRIMARY KEY
 ---@field stable_id string 源内稳定身份；本地源即文件绝对路径
 ---@field md5 string|nil 内容 partialMD5；本地源用它识别文件改名/移动
 ---@field title string|nil 书名
 ---@field authors string|nil 作者
----@field percent number 阅读进度 0..100（DB REAL，默认 0）
+---@field percent number|nil 展示用进度 0..100（来自 pending_progress.fraction，非 books 列）
 ---@field category string|nil 分类 / 标签
 ---@field series string|nil 系列名
 ---@field intro string|nil 简介
----@field fetched_at integer 元数据拉取时间戳；0 表示仅身份行
----@field path string|nil 本地文件路径；身份解析唯一入口（下载/登记后由各源收口更新）
----@field in_library boolean|nil 是否属于当前源书架；false 时仍保留身份与历史
----@field metadata_dirty integer|nil 本地展示元数据尚未被远端确认
----@field metadata_updated_at integer|nil 本地展示元数据版本
----@field cover string|nil 封面 URL；随展示元数据入库，Image 负责磁盘图片缓存
+---@field inserted_at integer 本行首次写入时间；0 表示仅身份行
+---@field path string|nil 本地文件路径；身份解析唯一入口
+---@field deleted integer|nil 0=在架有效，1=软删/非成员
+---@field in_library boolean|nil 兼容字段：deleted==0 时为 true
+---@field sync_status integer|nil 0=待上传，1=已同步
+---@field cover string|nil 封面 URL
 ---@field cover_headers table|nil 封面请求头
 ---@field read_state integer|nil 0=未读且可自动标记，1=已读，2=用户强制未读
----@field is_new boolean|nil 首次打开前为 true
-
+---@field reader_prefs string|nil 全书排版偏好 JSON（仅本地）
+---@field toc string|nil 目录缓存 JSON（仅本地）
+---@field toc_fetched_at integer|nil 目录缓存时间
 local Book = {}
 
 --- 百分比钳制到 0..100 整数。

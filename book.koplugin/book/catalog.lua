@@ -82,7 +82,6 @@ local function toBook(row, source_id)
         series = row.series,
         percent = tonumber(row.percent) or 0,
         read_state = tonumber(row.read_state) or 0,
-        is_new = row.is_new == true or tonumber(row.is_new) == 1,
         path = row.path,
         chapter_idx = row.chapter_idx,
         chapter_title = row.chapter_title,
@@ -140,8 +139,11 @@ function Catalog.toInsight(source_id, summary, daily, daily_books, weekly_books)
                 if percent > 100 then
                     percent = 100
                 end
-            elseif week_scope then
-                percent = tonumber(meta and meta.percent) or 0
+            elseif week_scope and type(sid) == "string" then
+                local progress = require("db.progress").get(sid, b.stable_id)
+                if progress then
+                    percent = math.floor((tonumber(progress.fraction) or 0) * 100 + 0.5)
+                end
             end
             local title = meta and meta.title or nil
             if not title or title == "" then

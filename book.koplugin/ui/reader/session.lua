@@ -166,8 +166,6 @@ function Session.onReaderReady(plugin)
         return
     end
 
-    require("db.book").markOpened(identity.source_id, identity.stable_id)
-    if identity.book then identity.book.is_new = false end
     Session._snapshot = Snapshot.new(ui, identity)
     installEndOfBookHandler(plugin, ui)
     local mode = Mode.resolve(identity)
@@ -198,7 +196,11 @@ local function syncReading(plugin, event)
         end)
         require("book.note").save(plugin.ui, identity, function(ok)
             if ok and source.syncNotesAsync then
-                source:syncNotesAsync({ identity = identity }, function() end)
+                -- 关书只推脏注解；完整 pull 留给下次 ReaderReady，避免未收敛远端盖本地。
+                source:syncNotesAsync({
+                    identity = identity,
+                    dirty_only = true,
+                }, function() end)
             end
         end)
     end
@@ -250,13 +252,20 @@ function Session.onPageChanged(plugin, page)
     end
 end
 
---- 注解变化：按当前阅读身份保存完整快照。
+--- 注解变化：落盘后有网即 dirty push；完整 pull 留给开书 Note.pull。
 ---@param plugin table Book 插件实例
 ---@param _items table KOReader 变更描述；完整数据从 annotation.annotations 读取
 function Session.onAnnotationsModified(plugin, _items)
-    if Session._snapshot then
-        require("book.note").save(plugin.ui, Session._snapshot.identity)
-    end
+    if not Session._snapshot then return end
+    local identity = Session._snapshot.identity
+    require("book.note").save(plugin.ui, identity, function(ok)
+        if not ok then return end
+        local source = identity and identity.source
+        if not source or not source.syncNotesAsync then return end
+        require("ui/network/manager"):runWhenOnline(function()
+            source:syncNotesAsync({ identity = identity, dirty_only = true }, function() end)
+        end)
+    end)
 end
 
 --- 休眠前：结清计时并同步当前进度、注解和源事件；会话继续保留。

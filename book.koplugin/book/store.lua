@@ -31,22 +31,23 @@ end
 ---@param books table
 function Store.rememberMany(books)
     local payload = {}
-    local fetched_at = os.time()
     for _, book in ipairs(books) do
         if book.source_id and book.stable_id then
+            local deleted = book.deleted
+            if deleted == nil and book.in_library ~= nil then
+                deleted = (book.in_library == true or tonumber(book.in_library) == 1) and 0 or 1
+            end
             payload[#payload + 1] = {
                 source_id = book.source_id,
                 stable_id = book.stable_id,
                 md5 = book.md5,
                 title = book.title,
                 authors = book.authors,
-                percent = tonumber(book.percent) or 0,
                 category = book.category,
                 series = book.series,
                 intro = book.intro,
                 cover = book.cover,
-                fetched_at = fetched_at,
-                in_library = book.in_library,
+                deleted = deleted,
             }
         end
     end
@@ -56,7 +57,8 @@ function Store.rememberMany(books)
     BookDB.upsertRemoteMany(payload)
 end
 
---- 用完整书架快照对账 books 表：upsert 全部远端条目，未刷新的成员标 inactive（不删行）。
+--- 用远端书架快照对账 books 表。
+--- pulled/hidden 在此计算；pushed 由源在 add/delete 上行后自行累加。
 ---@param source_id string
 ---@param books Book[]
 ---@return SyncResult|nil result
@@ -74,6 +76,32 @@ function Store.reconcile(source_id, books)
         return nil, "failed to reconcile books"
     end
     return { pulled = #books, pushed = 0, hidden = hidden, conflicts = 0, skipped = false }
+end
+
+--- 本地删除：标 deleted 待同步，并清章节缓存/封面。书架列表立刻看不到。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function Store.markDeleted(source_id, stable_id)
+    if not BookDB.markDeleted(source_id, stable_id) then
+        return false
+    end
+    local Util = require("ffi/util")
+    local dir = Paths.bookWorkDir(stable_id, source_id)
+    if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory" then
+        Util.purgeDir(dir)
+    end
+    ChapterDB.deleteUnder(dir)
+    os.remove(Paths.coverPath(stable_id, source_id))
+    return true
+end
+
+--- 云端删除已确认：撕掉本地墓碑行。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function Store.finalizeDeleted(source_id, stable_id)
+    return BookDB.remove(source_id, stable_id)
 end
 
 --- 章节登记事务体：最新元数据、books.path、toc、chapters 四步任一失败即返回错误。
@@ -251,7 +279,7 @@ function Store.ensureIdentity(path)
         stable_id = path,
         md5 = require("util").partialMD5(path),
         title = basename(path):gsub("%.[^%.]+$", ""),
-        fetched_at = os.time(),
+        inserted_at = os.time(),
         path = path,
     }
     if not BookDB.get("local", path) then
