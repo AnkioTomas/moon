@@ -137,8 +137,6 @@ function Job:cancel()
     self:_finish("cancelled")
 end
 
-Job.abort = Job.cancel
-
 function Job:_dispatch(message)
     if message.type == "done" then
         self:_finish("done", message.result)

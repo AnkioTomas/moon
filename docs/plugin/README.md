@@ -12,9 +12,8 @@ KOReader 为 FileManager 与 Reader **各创建一个**插件实例。Reader 实
 BookPlugin:init
 ├── 版本检查 / logger / Turbo（须在 UIManager:run 前由别处启用）
 ├── Host.onCreate   ← 字体图标、主菜单、Dispatcher、start_with 种入
-├── 脚注弹窗一次性默认
 ├── translate / baike / dictionary / panel.native  → onCreate
-├── lockscreen / remote / screenshot_share / ime → onCreate
+├── lockscreen / remote / ime → onCreate
 ├── patch.manager.onCreate + 翻页动画检查；FM 侧 update.onCreate
 └── Reader → emitToSource("reader_open")
 ```

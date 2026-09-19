@@ -32,19 +32,32 @@ package.preload["ui/widget/infomessage"] = function() return {} end
 package.preload["ui/widget/buttondialog"] = function() return {} end
 package.preload["ui/uimanager"] = function() return {} end
 
+_G.G_reader_settings = {
+    isTrue = function() return false end,
+    saveSetting = function() end,
+}
+
 local Settings = require("ui.desktop.settings.reader")
 local desktop = {}
 
 local sections = Settings.new():sections(desktop)
-local reading
+local reading, optimize
 for _, section in ipairs(sections) do
     Assert.is_true(section.title ~= "阅读弹窗")
     if section.title == "阅读界面" then reading = section end
+    if section.title == "阅读优化" then optimize = section end
 end
 Assert.is_true(reading ~= nil)
+Assert.eq(#reading.rows, 2)
 Assert.eq(reading.rows[1](600).title, "阅读页顶栏")
-Assert.eq(reading.rows[4](600).title, "读到 99% 自动标记已读")
-Assert.is_false(reading.rows[4](600).status_on)
+Assert.eq(reading.rows[2](600).title, "底部进度栏")
+
+Assert.is_true(optimize ~= nil)
+Assert.eq(optimize.rows[1](600).title, "脚注弹窗")
+Assert.is_false(optimize.rows[1](600).status_on)
+Assert.eq(optimize.rows[2](600).title, "翻页动画")
+Assert.eq(optimize.rows[3](600).title, "读到 99% 自动标记已读")
+Assert.is_false(optimize.rows[3](600).status_on)
 
 local popup_rows = Settings.new():popupRows(desktop)
 Assert.len(popup_rows, 11)
