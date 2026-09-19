@@ -2,6 +2,7 @@
 chapters 表：章节文件路径 → 所属书籍身份。
 
 章节不进入 books 表；身份解析的唯一入口是 path 精确匹配。
+无云同步。updated_at 随 upsert 写入，查询不读（历史列，不扩语义）。
 
 @module koplugin.book.db.chapter
 --]]

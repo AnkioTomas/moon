@@ -64,52 +64,40 @@ function Source:close()
     self._covers = {}
 end
 
---- 取消云端收藏，并清理本地章节缓存与登记。
+--- 删除：本地先标 deleted，能上网时再取消云端收藏。
 ---@param identity BookIdentity
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return table
 function Source:deleteBookAsync(identity, cb)
+    local Store = require("book.store")
+    if not Store.markDeleted(self.id, identity.stable_id) then
+        require("ui/uimanager"):nextTick(function()
+            cb(false, _("删除本书失败"))
+        end)
+        return { cancel = function() end }
+    end
+    Toc.clear()
+    self._covers[identity.stable_id] = nil
     local cancelled, job = false, nil
+    require("ui/uimanager"):nextTick(function()
+        if not cancelled then cb(true) end
+    end)
     require("ui/network/manager"):runWhenOnline(function()
         if cancelled then return end
-        job = self._client:detailAsync(identity.stable_id, function(wire, err)
-            if cancelled then return end
-            if not wire then
-                cb(false, err or _("删除本书失败"))
-                return
-            end
+        job = self._client:detailAsync(identity.stable_id, function(wire)
+            if cancelled or not wire then return end
             local comic_id = Mapper.comicId(wire)
-            if not comic_id then
-                cb(false, _("漫画详情解析失败"))
-                return
-            end
-            job = self._client:setCollectAsync(comic_id, false, function(collect_wire, collect_err)
+            if not comic_id then return end
+            job = self._client:setCollectAsync(comic_id, false, function(collect_wire)
                 if cancelled then return end
-                if not collect_wire then
-                    cb(false, collect_err or _("删除本书失败"))
-                    return
-                end
-                local Paths = require("utils.paths")
-                local Util = require("ffi/util")
-                local dir = Paths.bookWorkDir(identity.stable_id, self.id)
-                if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory"
-                    and not Util.purgeDir(dir) then
-                    cb(false, _("删除本书失败"))
-                    return
-                end
-                os.remove(Paths.coverPath(identity.stable_id, self.id))
-                require("db.book").remove(self.id, identity.stable_id)
-                require("db.chapter").deleteUnder(dir)
-                Toc.clear()
-                self._covers[identity.stable_id] = nil
-                cb(true)
+                if collect_wire then Store.finalizeDeleted(self.id, identity.stable_id) end
             end)
         end)
     end)
     return { cancel = function()
-            cancelled = true
-            if job and job.cancel then job.cancel() end
-        end }
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
 end
 
 ---@param identity BookIdentity
@@ -126,15 +114,72 @@ local function rememberCover(self, book)
     if book and book.cover then self._covers[book.stable_id] = book.cover end
 end
 
----@param _opts table|nil
+--- 本地已标删：推云端取消收藏，成功则撕墓碑。
+---@param self CopymangaSource
+---@param cb fun(pushed: integer)
+---@return { cancel: fun() }|nil
+local function pushDeletedCollects(self, cb)
+    local Store = require("book.store")
+    local pending = require("db.book").pendingDeleteIds(self.id)
+    if #pending == 0 then
+        cb(0)
+        return nil
+    end
+    local cancelled, job, pushed, index = false, nil, 0, 0
+    local function nextDelete()
+        if cancelled then return end
+        index = index + 1
+        if index > #pending then
+            cb(pushed)
+            return
+        end
+        local stable_id = pending[index]
+        job = self._client:detailAsync(stable_id, function(wire)
+            if cancelled then return end
+            local comic_id = wire and Mapper.comicId(wire)
+            if not comic_id then
+                nextDelete()
+                return
+            end
+            job = self._client:setCollectAsync(comic_id, false, function(collect_wire)
+                if cancelled then return end
+                if collect_wire then
+                    Store.finalizeDeleted(self.id, stable_id)
+                    pushed = pushed + 1
+                end
+                nextDelete()
+            end)
+        end)
+    end
+    nextDelete()
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
+end
+
+---@param opts { dirty_only?: boolean, force?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }
-function Source:syncBooksAsync(_opts, cb)
+function Source:syncBooksAsync(opts, cb)
+    opts = opts or {}
     local Auth = require("source.copymanga.auth")
     if not Auth.hasSession() then
-        return require("source.base").syncBooksAsync(self, _opts, cb)
+        return require("source.base").syncBooksAsync(self, opts, cb)
     end
-    local cancelled, job = false, nil
+    local cancelled, job, delete_job = false, nil, nil
+    if opts.dirty_only then
+        delete_job = pushDeletedCollects(self, function(pushed)
+            if cancelled then return end
+            cb({
+                pulled = 0, pushed = pushed or 0, hidden = 0, conflicts = 0, skipped = false,
+            })
+        end)
+        return { cancel = function()
+            cancelled = true
+            if delete_job and delete_job.cancel then delete_job:cancel() end
+        end }
+    end
     job = self._client:collectAllAsync(function(wire, err)
         if cancelled then return end
         if not wire then
@@ -204,8 +249,11 @@ function Source:getDetailAsync(identity, cb)
         if not book then cb(nil, _("漫画详情解析失败")); return end
         local existing = require("db.book").get(self.id, identity.stable_id)
         if existing then
-            book.percent = existing.percent
-            book.in_library = existing.in_library
+            book.deleted = existing.deleted
+        end
+        local progress = require("db.progress").get(self.id, identity.stable_id)
+        if progress then
+            book.percent = require("types.book").Book.clampPercent(progress.fraction, false, true)
         end
         rememberCover(self, book)
         job = loadChapters(self._client, identity.stable_id, Mapper.groups(wire), function(chapters)

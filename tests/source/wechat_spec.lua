@@ -43,6 +43,11 @@ stub("db.book", function()
             toc_payload[stable_id] = payload
             return true
         end,
+        libraryStableIdsBySource = function()
+            return remembered_stats_books.local_library or {}
+        end,
+        pendingDeleteIds = function() return {} end,
+        markSynced = function() return true end,
         setRead = function(source_id, stable_id, is_read)
             remembered_stats_books.set_read = {
                 source_id = source_id, stable_id = stable_id, is_read = is_read,
@@ -53,6 +58,13 @@ stub("db.book", function()
             remembered_stats_books.removed = { source_id = source_id, stable_id = stable_id }
             return true
         end,
+    }
+end)
+local existing_progress
+stub("db.progress", function()
+    return {
+        get = function() return existing_progress end,
+        upsertRemote = function() return true end,
     }
 end)
 stub("db.chapter", function()
@@ -78,7 +90,15 @@ stub("source.wechat.auth", function()
 end)
 stub("source.wechat.client", function()
     return {
-        new = function() return fake_client end,
+        new = function()
+            if not fake_client.addToShelfAsync then
+                fake_client.addToShelfAsync = function(_, _, cb)
+                    if cb then cb({ ok = true }) end
+                    return { cancel = function() end }
+                end
+            end
+            return fake_client
+        end,
     }
 end)
 stub("source.wechat.chapter", function()
@@ -129,6 +149,14 @@ stub("book.store", function()
         rememberMany = function(books) remembered_stats_books = books end,
         reconcile = function(_, books)
             return { pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
+        end,
+        markDeleted = function(source_id, stable_id)
+            remembered_stats_books.marked_deleted = { source_id = source_id, stable_id = stable_id }
+            return true
+        end,
+        finalizeDeleted = function(source_id, stable_id)
+            remembered_stats_books.removed = { source_id = source_id, stable_id = stable_id }
+            return true
         end,
     }
 end)
@@ -291,7 +319,8 @@ end
 -- getDetailAsync：wire 经 mapper 转 Book，并把封面 URL 记进缓存供 coverRequest 用
 do
     local src = WeChat.new()
-    existing_book = { percent = 37 }
+    existing_book = { deleted = 0 }
+    existing_progress = { fraction = 0.37 }
     fake_client.bookInfoAsync = function(_, book_id, cb)
         Assert.eq(book_id, "b1")
         cb({ book = { bookId = "b1", title = "详情书", author = "某人",
@@ -330,6 +359,7 @@ do
     Assert.eq(err, "详情拉取失败")
     fake_client.bookInfoAsync = nil
     existing_book = nil
+    existing_progress = nil
 end
 
 -- openBookAsync：源自己管理联网/进度 UI，成功首参只返回已入库物理路径。
@@ -570,6 +600,35 @@ do
     src:clearCaches()
     local req4 = src:coverRequest({ source_id = "wechat", stable_id = "b1" })
     Assert.is_nil(req4)
+end
+
+-- syncBooksAsync：本地独有成员经 addToShelf 上行，SyncResult.pushed 填实
+do
+    local added = {}
+    local shelf_calls = 0
+    fake_client.shelfSyncAsync = function(_, cb)
+        shelf_calls = shelf_calls + 1
+        cb({
+            books = {
+                { book = { bookId = "remote1", title = "远端书" } },
+            },
+        })
+        return { cancel = function() end }
+    end
+    fake_client.addToShelfAsync = function(_, bookId, cb)
+        added[#added + 1] = bookId
+        cb({ ok = true })
+        return { cancel = function() end }
+    end
+    remembered_stats_books.local_library = { "remote1", "local_only" }
+    local src = WeChat.new()
+    local result
+    src:syncBooksAsync(nil, function(r) result = r end)
+    Assert.not_nil(result)
+    Assert.eq(result.pushed, 1)
+    Assert.eq(added[1], "local_only")
+    Assert.eq(shelf_calls, 2, "有上行后应再拉一次书架再 reconcile")
+    remembered_stats_books.local_library = nil
 end
 
 -- pullNotesAsync：微信原始 chapterIdx 必须按 uid 映射成本地过滤后的章节序号。
@@ -823,7 +882,7 @@ do
     os.remove(chapter_path)
 end
 
--- 长按删除：先写云端再收敛本地
+-- 长按删除：本地先标删，在线时推云端真删并撕墓碑
 do
     local removed
     fake_client.removeFromShelfAsync = function(_, bookId, cb)
@@ -836,7 +895,9 @@ do
     src:deleteBookAsync({ source_id = "wechat", stable_id = "del1" }, function(success)
         ok = success
     end)
+    require("support.stubs").flush()
     Assert.is_true(ok)
+    Assert.eq(remembered_stats_books.marked_deleted.stable_id, "del1")
     Assert.eq(removed, "del1")
     Assert.eq(remembered_stats_books.removed.stable_id, "del1")
 end

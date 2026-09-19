@@ -36,33 +36,6 @@ do
 end
 
 do
-    local rows = Mapper.shelfProgressRows({
-        bookProgress = {
-            { bookId = "1", progress = 40, readUpdateTime = 1700000000 },
-        },
-    })
-    Assert.eq(rows[1].updated_at, 1700000000)
-end
-
-do
-    local rows = Mapper.shelfProgressRows({
-        books = { { bookId = "9", readUpdateTime = 1800000000 } },
-        bookProgress = { { bookId = "9", progress = 20 } },
-    })
-    Assert.eq(#rows, 1)
-    Assert.eq(rows[1].stable_id, "9")
-    Assert.eq(rows[1].updated_at, 1800000000)
-end
-
-do
-    local rows = Mapper.shelfProgressRows({
-        books = { { bookId = "9", readUpdateTime = 1800000000 } },
-        bookProgress = {},
-    })
-    Assert.eq(#rows, 0, "没有阅读进度的书不得进入最近阅读")
-end
-
-do
     local shelf = {
         books = { { bookId = "1", title = "A" } },
         recentBooks = { { bookId = "2", title = "B" } },

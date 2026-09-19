@@ -85,7 +85,12 @@ local function pageMod(api)
     return { new = function() return api end }
 end
 package.preload["ui.desktop.settings.source"] = function()
-    return pageMod({ sections = function() return {} end })
+    return {
+        new = function()
+            return { sections = function() return {} end }
+        end,
+        displayName = function(name) return name end,
+    }
 end
 package.preload["ui.desktop.settings.display"] = function()
     return pageMod({ rows = function() return {} end })

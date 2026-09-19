@@ -135,11 +135,21 @@ function Source:coverRequest(identity)
 end
 
 --- 扫盘写 books：force 立即扫；否则走节流自动扫。
----@param opts { force?: boolean }|nil
+---@param opts { force?: boolean, dirty_only?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
+    -- local 无远端书架；dirty_only 跳过扫盘。
+    if opts.dirty_only then
+        require("ui/uimanager"):nextTick(function()
+            cb({
+                pulled = 0, pushed = 0, hidden = 0, conflicts = 0,
+                skipped = true, reason = "local dirty_only",
+            })
+        end)
+        return { cancel = function() end }
+    end
     if opts.force then
         return self._client:scanAsync(function(ok, err)
             if ok == false then cb(nil, err); return end

@@ -370,10 +370,9 @@ local function commitFiles(files, known, full_snapshot)
         if full_snapshot then
             f.source_id = SOURCE_ID
             f.stable_id = f.path
-            f.in_library = true
-            f.percent = existing and existing.percent or 0
+            f.deleted = 0
         elseif cached then
-            if cached.in_library == false
+            if (tonumber(cached.deleted) or 0) ~= 0
                 and not BookDB.setLibraryMembership(SOURCE_ID, f.path, true) then
                 return false
             end
@@ -381,7 +380,7 @@ local function commitFiles(files, known, full_snapshot)
             source_id = SOURCE_ID, stable_id = f.path, md5 = f.md5,
             title = f.title, authors = f.authors, intro = f.intro,
             category = f.category, series = f.series,
-            fetched_at = os.time(), path = f.path,
+            inserted_at = os.time(), path = f.path,
         }) then
             return false
         end

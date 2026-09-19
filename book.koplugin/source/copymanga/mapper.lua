@@ -45,7 +45,8 @@ function Mapper.book(row)
         intro = row.intro or row.brief,
         cover = row.cover,
         percent = tonumber(row.percent) or 0,
-        in_library = row.in_library,
+        deleted = (row.deleted == true or tonumber(row.deleted) == 1) and 1
+            or ((row.in_library == true or tonumber(row.in_library) == 1) and 0 or nil),
     }
 end
 
@@ -68,7 +69,7 @@ end
 function Mapper.collect(wire)
     local result = Mapper.search(wire)
     for _, book in ipairs(result.data) do
-        book.in_library = true
+        book.deleted = 0
     end
     return result
 end

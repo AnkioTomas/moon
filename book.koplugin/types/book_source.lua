@@ -1,6 +1,6 @@
 --- Source 接口与能力表。可 require：仅 SourceCapabilities.defaults 为运行时。
 
----@alias SourceId "moon"|"wechat"|"jdread"|"copymanga"|"fanqie"|"local"|string
+---@alias SourceId "moon"|"wechat"|"jdread"|"copymanga"|"local"|string
 
 ---@alias BookSourceType
 ---| '"book"' # 整本文件
@@ -130,8 +130,13 @@ end
 --- IO 方法一律异步：XxxAsync(...) 经 cb(data, err) 回传，返回值是可取消 job 或 nil；
 --- 同步只保留无 IO 的元信息与本地描述方法（capabilities / configured / coverRequest 等）。
 ---
---- 本地唯一入口：书架、筛选、书架搜索、进度、笔记和统计查询只读 SQLite；
---- 四个 sync*Async 负责远端收敛，打开书和正文下载仍走源协议。
+--- 本地唯一入口：书架、筛选、书架搜索、进度、笔记和统计查询只读 SQLite。
+--- 四个 sync*Async 按源与各自云端双向收敛；打开书和正文下载仍走源协议。
+--- 不支持的域异步 skipped（不失败）。探测：progress=get+put；notes=push+pull；
+--- stats=pushStatsAsync +（pull 另需 capabilities.stats_pull）。
+---
+--- 书架：远端快照 reconcile + 本地独有成员经 addToShelf 上行（wechat/jdread）；
+--- 删除经 deleteBookAsync。local 扫盘；moon 无 add API（list/delete）。
 ---@class BookSource
 ---@field id SourceId|nil 源标识
 ---@field name string|nil 展示名
@@ -141,7 +146,7 @@ end
 ---@field configured fun(self: BookSource): boolean 是否已配置到可请求
 ---@field clearCaches fun(self: BookSource) 清空源侧缓存
 ---@field close fun(self: BookSource)|nil 释放资源
----@field syncBooksAsync fun(self: BookSource, opts: { force?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛书架
+---@field syncBooksAsync fun(self: BookSource, opts: { force?: boolean, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛书架；dirty_only 只推本地删/加
 ---@field syncProgressAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛进度
 ---@field syncNotesAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛笔记
 ---@field cleanAnnotations fun(self: BookSource, items: table[], total_pages: integer|nil): table[]|nil 清洗并透传源私有注解字段

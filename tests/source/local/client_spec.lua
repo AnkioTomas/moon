@@ -132,12 +132,12 @@ local upserts = {}
 local removed = {}
 local renames = {}
 
---- 模拟 BookDB.listBySource 的 SQL 语义：category/series 精确 / search 包含 / stable_id 排序 / 分页。
+--- 模拟 BookDB.listBySource 的 SQL 语义：deleted=0 / category/series 精确 / search 包含 / stable_id 排序 / 分页。
 local function stubListBySource(source_id, opts)
     opts = opts or {}
     local matched = {}
     for _, row in pairs(db_rows) do
-        if row.source_id == source_id and row.in_library ~= false then
+        if row.source_id == source_id and (tonumber(row.deleted) or 0) == 0 then
             local keep = true
             if type(opts.category) == "string" and opts.category ~= "" and row.category ~= opts.category then
                 keep = false
@@ -242,7 +242,7 @@ package.preload["db.book"] = function()
         end,
         upsert = function(row)
             upserts[#upserts + 1] = row
-            row.in_library = true
+            row.deleted = 0
             db_rows[rowKey(row.source_id, row.stable_id)] = row
             return true
         end,
@@ -261,13 +261,13 @@ package.preload["db.book"] = function()
             db_rows[rowKey(source_id, stable_id)] = nil
             return true
         end,
-        setLibraryMembership = function(source_id, stable_id, in_library, clear_path)
+        setLibraryMembership = function(source_id, stable_id, on_shelf, clear_path)
             local row = db_rows[rowKey(source_id, stable_id)]
             if row then
-                row.in_library = in_library
-                if clear_path then row.path = nil end
+                row.deleted = on_shelf and 0 or 1
+                if clear_path and not on_shelf then row.path = nil end
             end
-            if not in_library then removed[#removed + 1] = stable_id end
+            if not on_shelf then removed[#removed + 1] = stable_id end
             return true
         end,
         reconcile = function(source_id, rows, opts)
@@ -277,13 +277,13 @@ package.preload["db.book"] = function()
                 local old = db_rows[rowKey(source_id, row.stable_id)] or {}
                 for key, value in pairs(row) do old[key] = value end
                 old.source_id = source_id
-                old.in_library = true
+                old.deleted = 0
                 db_rows[rowKey(source_id, row.stable_id)] = old
                 upserts[#upserts + 1] = row
             end
             for _, row in pairs(db_rows) do
                 if row.source_id == source_id and not keep[row.stable_id] then
-                    row.in_library = false
+                    row.deleted = 1
                     if opts and opts.clear_missing_paths then row.path = nil end
                     removed[#removed + 1] = row.stable_id
                 end
@@ -295,7 +295,8 @@ package.preload["db.book"] = function()
             local seen, out = {}, {}
             for _, row in pairs(db_rows) do
                 local c = row.category
-                if row.source_id == source_id and type(c) == "string" and c ~= "" and not seen[c] then
+                if row.source_id == source_id and (tonumber(row.deleted) or 0) == 0
+                    and type(c) == "string" and c ~= "" and not seen[c] then
                     seen[c] = true
                     out[#out + 1] = c
                 end
@@ -306,7 +307,7 @@ package.preload["db.book"] = function()
         categoryCountsBySource = function(source_id)
             local counts = {}
             for _, row in pairs(db_rows) do
-                if row.source_id == source_id and row.in_library ~= false then
+                if row.source_id == source_id and (tonumber(row.deleted) or 0) == 0 then
                     local category = row.category or ""
                     counts[category] = (counts[category] or 0) + 1
                 end
@@ -322,7 +323,7 @@ package.preload["db.book"] = function()
         seriesCountsBySource = function(source_id)
             local counts = {}
             for _, row in pairs(db_rows) do
-                if row.source_id == source_id and row.in_library ~= false then
+                if row.source_id == source_id and (tonumber(row.deleted) or 0) == 0 then
                     local series = row.series or ""
                     counts[series] = (counts[series] or 0) + 1
                 end
@@ -335,7 +336,6 @@ package.preload["db.book"] = function()
         end,
         readStatusCountsBySource = function()
             return {
-                { status = "new", count = 0 },
                 { status = "read", count = 0 },
                 { status = "unread", count = 4 },
             }
@@ -344,7 +344,8 @@ package.preload["db.book"] = function()
             local seen, out = {}, {}
             for _, row in pairs(db_rows) do
                 local series = row.series
-                if row.source_id == source_id and type(series) == "string"
+                if row.source_id == source_id and (tonumber(row.deleted) or 0) == 0
+                    and type(series) == "string"
                     and series ~= "" and not seen[series] then
                     seen[series] = true
                     out[#out + 1] = series
@@ -546,7 +547,7 @@ do
     -- 失效书只退出书架，身份与历史仍保留；存活书不动
     Assert.is_true(hasValue(removed, "/books/gone.epub"))
     Assert.not_nil(db_rows[rowKey("local", "/books/gone.epub")])
-    Assert.is_false(db_rows[rowKey("local", "/books/gone.epub")].in_library)
+    Assert.eq(db_rows[rowKey("local", "/books/gone.epub")].deleted, 1)
     Assert.is_nil(db_rows[rowKey("local", "/books/gone.epub")].path)
     Assert.is_false(hasValue(removed_files, "/data/.moon/cache/local/image//books/gone.epub.png"))
     Assert.not_nil(db_rows[rowKey("local", "/books/a.epub")])
@@ -927,7 +928,7 @@ do
     Assert.len(res.data.category, 2)
     Assert.len(res.data.category_counts, 3)
     Assert.not_nil(res.data.series_counts)
-    Assert.len(res.data.read_counts, 3)
+    Assert.len(res.data.read_counts, 2)
     Assert.eq(res.data.category[1], "sub")
     Assert.eq(res.data.category[2], "zeta")
     Assert.len(res.data.series, 2)

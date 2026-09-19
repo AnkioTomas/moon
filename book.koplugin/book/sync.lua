@@ -67,8 +67,16 @@ function Sync.runAsync(source, opts, cb)
             return
         end
         logger.dbg("book.sync domain start", sync_id, domain.name)
+        -- 进度/笔记：编排层永远只推。进度 pull+冲突在开书 Progress.pull；
+        -- 笔记 pull 在开书 Note.pull。禁止静默 upsertRemote 抹平冲突。
+        local domain_opts = opts
+        if domain.name == "progress" or domain.name == "notes" then
+            domain_opts = {}
+            for k, v in pairs(opts) do domain_opts[k] = v end
+            domain_opts.dirty_only = true
+        end
         local completed = false
-        local job = method(source, opts, function(result, err)
+        local job = method(source, domain_opts, function(result, err)
             completed = true
             current_job = nil
             if cancelled then return end
@@ -95,22 +103,29 @@ function Sync.runAsync(source, opts, cb)
     end }
 end
 
---- 网络恢复时只重试有本地脏数据的源，不主动全量拉取。
+--- 网络恢复时只重试有本地脏数据的源：本地优先 push，不做全量 pull。
+--- 书架 dirty_only = 只推删/加；进度/笔记由编排层强制 dirty_only；统计 dirty_only 只推。
 ---@return nil
 function Sync.retryDirtyAsync()
     local Registry = require("source.registry")
+    local BookDB = require("db.book")
     local ProgressDB = require("db.progress")
     local NoteDB = require("db.note")
     local StatsDB = require("db.stats")
     for _, meta in ipairs(Registry.listEnabled()) do
         local id = meta.id
-        local dirty = #ProgressDB.unsynced(id) > 0
+        local books_dirty = #BookDB.unsynced(id) > 0
+        local dirty = books_dirty
+            or #ProgressDB.unsynced(id) > 0
             or #NoteDB.unsynced(id) > 0
             or #StatsDB.unsyncedBySource(id) > 0
         if dirty then
             local source, err = Registry.resolve(id)
             if source then
-                Sync.runAsync(source, { dirty_only = true, skip_books = true }, function(_, sync_err)
+                Sync.runAsync(source, {
+                    dirty_only = true,
+                    skip_books = not books_dirty,
+                }, function(_, sync_err)
                     if sync_err then require("utils.log").warn("book dirty sync failed", id, sync_err) end
                 end)
             elseif err then

@@ -219,7 +219,7 @@ local function rowPosition(row)
     }
 end
 
---- 将一个 Source 的本地进度与远端收敛。本地脏版本先上传，干净后才拉取。
+--- 将一个 Source 的本地脏进度推到远端。Pull 只走 Progress.pull（开书冲突 UI）。
 ---@param source BookSource
 ---@param opts { identity?: BookIdentity, dirty_only?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)|nil
@@ -227,7 +227,6 @@ end
 local function syncOnce(source, opts, cb)
     opts = opts or {}
     local target = opts.identity and opts.identity.stable_id or "all"
-    local can_pull = source and type(source.getProgressAsync) == "function"
     local can_push = source and type(source.putProgressAsync) == "function"
     local cancelled, current_job = false, nil
     local result = { pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
@@ -247,7 +246,7 @@ local function syncOnce(source, opts, cb)
         end
         if cb then cb(value, err) end
     end
-    if not source or (not can_pull and not can_push) then
+    if not source or not can_push then
         require("ui/uimanager"):nextTick(function()
             result.skipped, result.reason = true, "unsupported"
             finish(result)
@@ -283,45 +282,21 @@ local function syncOnce(source, opts, cb)
     end
 
     local index = 1
-    --- 处理队列里的下一个身份：本地脏行先推、确认后再拉远端；队列空即 finish。
-    --- 串行推进（每步在回调里递归），保证同一本书不会同时推和拉。
+    --- 处理队列里的下一个身份：本地脏行先推；队列空即 finish。从不 pull。
     local function nextIdentity()
         if cancelled then return end
         local identity = identities[index]
         index = index + 1
         if not identity then finish(result); return end
 
-        --- 拉当前身份的远端进度落库，再推进到下一个身份。
-        --- dirty_only 模式或源不支持拉取时直接跳过。
-        local function pullRemote()
-            if opts.dirty_only or not can_pull then nextIdentity(); return end
-            current_job = source:getProgressAsync(identity, function(pos, err, meta)
-                current_job = nil
-                if cancelled then return end
-                if type(meta) == "table" and meta.empty then nextIdentity(); return end
-                if not pos then finish(nil, err or "progress pull failed"); return end
-                if ProgressDB.upsertRemote(source.id, identity.stable_id, pos) then
-                    result.pulled = result.pulled + 1
-                    nextIdentity()
-                else
-                    finish(nil, "failed to save remote progress")
-                end
-            end)
-        end
-
         local row = ProgressDB.get(source.id, identity.stable_id)
         if row and row.sync_status == 0 then
-            if not can_push then
-                result.conflicts = result.conflicts + 1
-                nextIdentity()
-                return
-            end
             current_job = source:putProgressAsync(identity, rowPosition(row), function(ok, err)
                 current_job = nil
                 if cancelled then return end
                 if ok ~= true then
+                    result.conflicts = result.conflicts + 1
                     if opts.dirty_only then
-                        result.conflicts = result.conflicts + 1
                         nextIdentity()
                         return
                     end
@@ -331,12 +306,12 @@ local function syncOnce(source, opts, cb)
                 confirm(source.id, identity.stable_id, row.updated_at, function(confirmed)
                     if not confirmed then finish(nil, "progress confirm failed"); return end
                     result.pushed = result.pushed + 1
-                    pullRemote()
+                    nextIdentity()
                 end)
             end)
             return
         end
-        pullRemote()
+        nextIdentity()
     end
     require("ui/uimanager"):nextTick(nextIdentity)
     return { cancel = function()
@@ -677,14 +652,14 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
                 applyChosenPos(live.ui, live.identity, adopt, adopt.fraction, false)
             end
             if id.source and id.source.syncProgressAsync then
-                id.source:syncProgressAsync({ identity = id }, function() end)
+                id.source:syncProgressAsync({ identity = id, dirty_only = true }, function() end)
             end
         end,
     })
 end
 
 --- 开书后拉远端进度并与当前阅读位置对比；冲突时弹窗，一致则直接收敛。
---- 必须先拉后比：syncProgressAsync 会先推脏本地，会把冲突静默抹平。
+--- syncProgressAsync 只推不拉；本函数是进度 pull 的唯一入口。
 ---@param snapshot ReaderSessionSnapshot
 function Progress.pull(snapshot)
     local id = snapshot and snapshot.identity

@@ -101,7 +101,7 @@ do
     Assert.eq(result.data[1].stable_id, "fav-comic")
     Assert.eq(result.data[1].title, "收藏漫画")
     Assert.eq(result.data[1].authors, "作者丙")
-    Assert.is_true(result.data[1].in_library)
+    Assert.is_true(result.data[1].deleted == 0)
 end
 
 do

@@ -27,7 +27,7 @@ local default_source = {
     end,
     syncNotesAsync = function(_, opts, cb)
         calls.notes = calls.notes or {}
-        calls.notes[#calls.notes + 1] = { opts.identity, "sync" }
+        calls.notes[#calls.notes + 1] = { opts.identity, opts.dirty_only and "dirty" or "sync" }
         if cb then cb({}) end
     end,
     syncStatsAsync = function(_, _, cb) if cb then cb({}) end end,
@@ -107,10 +107,6 @@ end
 
 package.preload["db.book"] = function()
     return {
-        markOpened = function(source_id, stable_id)
-            calls.book[#calls.book + 1] = { "opened", source_id, stable_id }
-            return true
-        end,
         markReadAutomatically = function(source_id, stable_id)
             calls.book[#calls.book + 1] = { "auto_read", source_id, stable_id }
             return true
@@ -414,15 +410,20 @@ do
     Assert.eq(calls.reader[#calls.reader][1], "attach")
 end
 
--- 注解事件只由活动 ReaderSession 以当前身份保存完整文档快照。
+-- 注解事件：落盘后有网即 dirty push。
 do
     local plugin = mkPlugin("/x/book.epub")
     plugin.ui.annotation = { annotations = { { text = "高亮" } } }
     Session.onReaderReady(plugin)
+    local notes_before = #(calls.notes or {})
     Session.onAnnotationsModified(plugin, { { text = "变更描述" } })
-    local saved = calls.notes[#calls.notes]
+    Stubs.flush()
+    local saved = calls.notes[notes_before + 1]
     Assert.eq(saved[1].stable_id, "b1")
     Assert.eq(saved[2], plugin.ui)
+    local pushed = calls.notes[notes_before + 2]
+    Assert.eq(pushed[1].stable_id, "b1")
+    Assert.eq(pushed[2], "dirty")
     Session.onCloseDocument(plugin)
 end
 
@@ -487,7 +488,6 @@ do
     Assert.is_nil(Session.toc(), "整本书没有章节目录")
     Assert.is_nil(Session.chapterTitle(), "整本书无章节标题")
     Assert.eq(cur.identity.source.id, "moon", "属主源来自身份")
-    Assert.eq(calls.book[#calls.book][1], "opened", "ReaderReady 清除新书状态")
     -- 统计拿到的是内存身份（DB 写入异步，同 tick 查不到）
     local start_call = calls.tracker[#calls.tracker]
     Assert.eq(start_call[1], "start")
@@ -543,7 +543,7 @@ do
     Assert.eq(calls.tracker[#calls.tracker][1], "stop")
     Assert.eq(emitted[#emitted].ev, "document_close")
     Assert.eq(calls.notes[#calls.notes][1].stable_id, "b1", "注解同步复用阅读身份")
-    Assert.eq(calls.notes[#calls.notes][2], "sync", "注解保存成功后才触发同步")
+    Assert.eq(calls.notes[#calls.notes][2], "dirty", "关书注解只推脏，完整 pull 留给下次开书")
     Assert.is_nil(Session.current(), "关闭文档清理阅读状态")
 
     -- 不活跃时翻页：统计照收，源不收事件

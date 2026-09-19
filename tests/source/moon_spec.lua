@@ -40,6 +40,8 @@ end
 package.preload["db.book"] = function()
     return {
         libraryStableIdsBySource = function() return { "a.epub", "b.epub" } end,
+        pendingDeleteIds = function() return {} end,
+        markSynced = function() return true end,
         get = function() return rec.stored_book end,
         setRead = function(source_id, stable_id, is_read)
             rec.set_read = { source_id = source_id, stable_id = stable_id, is_read = is_read }
@@ -135,6 +137,14 @@ package.preload["book.store"] = function()
         end,
         rememberMany = function(books)
             rec.remembered_books = books
+        end,
+        markDeleted = function(source_id, stable_id)
+            rec.marked_deleted = { source_id = source_id, stable_id = stable_id }
+            return true
+        end,
+        finalizeDeleted = function(source_id, stable_id)
+            rec.removed = { source_id = source_id, stable_id = stable_id }
+            return true
         end,
     }
 end
@@ -586,15 +596,17 @@ do
     Assert.eq(rows.rows[2].duration, 30)
 end
 
--- 长按删除：先删云端再清本地登记
+-- 长按删除：本地先标删，在线时推云端真删并撕墓碑
 do
     resetRec()
     local ok, err
     src:deleteBookAsync({ source_id = "moon", stable_id = "a.epub" }, function(success, e)
         ok, err = success, e
     end)
+    require("support.stubs").flush()
     Assert.is_true(ok)
     Assert.is_nil(err)
+    Assert.eq(rec.marked_deleted.stable_id, "a.epub")
     Assert.eq(rec.delete_books[1], "a.epub")
     Assert.eq(rec.removed.stable_id, "a.epub")
 end

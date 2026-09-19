@@ -21,6 +21,7 @@ package.preload["utils.settings"] = function()
 end
 
 local remembered
+local local_library = {}
 package.preload["book.store"] = function()
     return {
         reconcile = function(_, books)
@@ -28,12 +29,22 @@ package.preload["book.store"] = function()
             return { pulled = #books, pushed = 0, hidden = 0, conflicts = 0 }
         end,
         rememberMany = function(books) remembered = books; return true end,
+        markDeleted = function() return true end,
+        finalizeDeleted = function() return true end,
+    }
+end
+package.preload["db.book"] = function()
+    return {
+        libraryStableIdsBySource = function() return local_library end,
+        pendingDeleteIds = function() return {} end,
+        markSynced = function() return true end,
     }
 end
 
 package.loaded["source.jdread.client"] = nil
 package.loaded["utils.settings"] = nil
 package.loaded["book.store"] = nil
+package.loaded["db.book"] = nil
 package.loaded["source.jdread"] = nil
 
 local Jdread = require("source.jdread")
@@ -61,6 +72,44 @@ do
     Assert.eq(err, "无封面")
 end
 
+-- syncBooksAsync：本地独有成员上行，pushed 填实
+do
+    local added, shelf_calls = {}, 0
+    local list_calls = 0
+    fake_client.shelfSyncAsync = function(_, cb)
+        shelf_calls = shelf_calls + 1
+        cb({
+            books = {
+                { ebook_id = "10", name = "远端" },
+            },
+        })
+        return { cancel = function() end }
+    end
+    fake_client.addToShelfAsync = function(_, book_id, cb)
+        added[#added + 1] = tostring(book_id)
+        cb({ ok = true })
+        return { cancel = function() end }
+    end
+    -- 绕过 mapper：直接让 shelfList 返回可控列表
+    local real_mapper = require("source.jdread.mapper")
+    local orig_shelf = real_mapper.shelfList
+    real_mapper.shelfList = function()
+        list_calls = list_calls + 1
+        return { data = { { stable_id = "10", title = "远端" } } }
+    end
+    local_library = { "10", "99" }
+    local src = Jdread.new()
+    local result, err
+    src:syncBooksAsync(nil, function(r, e) result, err = r, e end)
+    real_mapper.shelfList = orig_shelf
+    Assert.is_nil(err)
+    Assert.not_nil(result)
+    Assert.eq(result.pushed, 1)
+    Assert.eq(added[1], "99")
+    Assert.eq(shelf_calls, 2)
+    Assert.eq(list_calls, 2)
+    local_library = {}
+end
 
 do
     local prefetch_opts
@@ -80,12 +129,14 @@ do
         }
     end
     package.loaded["source.chapter"] = nil
+    package.loaded["source.jdread"] = nil
+    local Jd = require("source.jdread")
     fake_client.chapterContentAsync = function(_, _, _, cb)
         cb({ contentList = { { content = "<p>正文</p>" } } })
         return { cancel = function() end }
     end
 
-    local source = Jdread.new()
+    local source = Jd.new()
     source.loadTocAsync = function(_, _, cb)
         cb({
             { idx = 1, uid = "c1", title = "第一章" },

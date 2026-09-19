@@ -126,8 +126,8 @@ do
         if name then alters[name] = true end
     end
     for _, name in ipairs({
-        "cover", "in_library", "metadata_dirty", "metadata_updated_at",
-        "reader_prefs", "toc", "toc_fetched_at", "read_state", "is_new",
+        "cover", "inserted_at", "deleted", "sync_status",
+        "reader_prefs", "toc", "toc_fetched_at", "read_state",
     }) do
         Assert.is_true(alters[name], "旧库必须补列: " .. name)
     end
@@ -152,8 +152,8 @@ do
 end
 
 -- upsert 绑定列序：1 source_id, 2 stable_id, 3 md5, 4 title, 5 authors,
---                 6 percent, 7 category, 8 series, 9 intro, 10 cover,
---                 11 fetched_at, 12 path
+--                 6 category, 7 series, 8 intro, 9 cover, 10 inserted_at, 11 path
+--                 deleted/sync_status 字面 0（在架 + 脏）
 
 -- ── upsert：字段绑定 ────────────────────────────────────
 do
@@ -165,7 +165,10 @@ do
     local q = calls[#calls]
     Assert.is_true(q.sql:find("INSERT INTO books", 1, true) ~= nil)
     Assert.is_true(q.sql:find("ON CONFLICT(source_id, stable_id) DO UPDATE", 1, true) ~= nil)
-    Assert.eq(q.argc, 12)
+    Assert.eq(q.argc, 11)
+    Assert.is_true(q.sql:find("VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0)", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("deleted=0", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("sync_status=0", 1, true) ~= nil)
 
     DbBase.close()
     clearMods()
@@ -182,35 +185,33 @@ do
         md5 = "d41d8cd9",
         title = "书'名",
         authors = "作者",
-        percent = "42.5", -- 字符串进度被 tonumber
         category = "科幻",
         series = "三部曲",
         intro = "简介\n换行",
         cover = "https://img.test/cover.jpg",
-        fetched_at = 1000,
+        inserted_at = 1000,
         path = "/cache/local/book/x/book.epub",
     }))
     local q = calls[#calls]
-    Assert.eq(q.argc, 12)
+    Assert.eq(q.argc, 11)
     Assert.eq(q.args[1], "local")
     Assert.eq(q.args[2], 12345)
     Assert.eq(q.args[3], "d41d8cd9")
     Assert.eq(q.args[4], "书'名")
-    Assert.eq(q.args[6], 42.5)
-    Assert.eq(q.args[7], "科幻")
-    Assert.eq(q.args[8], "三部曲")
-    Assert.eq(q.args[9], "简介\n换行")
-    Assert.eq(q.args[10], "https://img.test/cover.jpg")
-    Assert.eq(q.args[11], 1000)
-    Assert.eq(q.args[12], "/cache/local/book/x/book.epub")
+    Assert.eq(q.args[5], "作者")
+    Assert.eq(q.args[6], "科幻")
+    Assert.eq(q.args[7], "三部曲")
+    Assert.eq(q.args[8], "简介\n换行")
+    Assert.eq(q.args[9], "https://img.test/cover.jpg")
+    Assert.eq(q.args[10], 1000)
+    Assert.eq(q.args[11], "/cache/local/book/x/book.epub")
     Assert.is_false(q.sql:find("书'名", 1, true) ~= nil)
 
-    -- fetched_at 缺省 → os.time()；percent 缺省 → 0；path 缺省 → NULL
+    -- inserted_at 缺省 → os.time()；path 缺省 → NULL
     Assert.is_true(BookDB.upsert({ source_id = "local", stable_id = "/b.epub" }))
     q = calls[#calls]
-    Assert.eq(q.args[6], 0)
-    Assert.eq(type(q.args[11]), "number")
-    Assert.eq(q.args[12], nil)
+    Assert.eq(type(q.args[10]), "number")
+    Assert.eq(q.args[11], nil)
 
     -- md5 冲突时 COALESCE 保留旧值（契约：身份摘要不覆盖）
     Assert.is_true(q.sql:find("md5=COALESCE(excluded.md5, books.md5)", 1, true) ~= nil)
@@ -221,24 +222,24 @@ do
     clearMods()
 end
 
--- ── upsertRemote：普通缓存不改变书架成员；完整快照显式恢复成员 ──
+-- ── upsertRemote：无 membership 默认 deleted=1；有 deleted/in_library 时写成员 ──
 do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection)
 
     Assert.is_true(BookDB.upsertRemote({ source_id = "moon", stable_id = "store.epub" }))
     local q = calls[#calls]
-    -- 14 列绑定 + ON CONFLICT 两个成员标志 = 16。
+    -- VALUES 12 绑定 + sync_status 字面 1；UPDATE 两个 ?=1 成员标志 → argc=14
     local qmarks = select(2, q.sql:gsub("%?", "%?"))
-    Assert.eq(qmarks, 16)
-    Assert.eq(q.argc, 16)
-    Assert.eq(q.args[13], 0, "新缓存行默认不进入书架")
-    Assert.eq(q.args[14], 0, "普通缓存不能成为新书")
-    Assert.eq(q.args[15], 0, "未指定成员关系时不得重置新书状态")
-    Assert.eq(q.args[16], 0, "未指定成员关系时冲突行必须保留原值")
-    Assert.is_true(q.sql:find("CASE WHEN ?=1 THEN excluded.in_library ELSE books.in_library END", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("COALESCE(excluded.intro, books.intro)", 1, true) ~= nil,
-        "稀疏远端行不得清空已有简介")
+    Assert.eq(qmarks, 14)
+    Assert.eq(q.argc, 14)
+    Assert.eq(q.args[12], 1, "无 membership 时 deleted 默认 1")
+    Assert.eq(q.args[13], 0, "未指定成员关系时不得改 deleted")
+    Assert.eq(q.args[14], 0, "未指定成员关系时不得改 sync_status")
+    Assert.is_true(q.sql:find("VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("WHEN books.sync_status=0", 1, true) ~= nil,
+        "脏行保留展示字段与成员")
+    Assert.is_true(q.sql:find("THEN books.title", 1, true) ~= nil)
     Assert.is_true(q.sql:find("cover=COALESCE(excluded.cover, books.cover)", 1, true) ~= nil,
         "稀疏远端行不得清空已有封面地址")
 
@@ -246,16 +247,22 @@ do
         source_id = "moon", stable_id = "shelf.epub", in_library = true,
     }))
     q = calls[#calls]
+    Assert.eq(q.args[12], 0, "in_library=true → deleted=0")
     Assert.eq(q.args[13], 1)
     Assert.eq(q.args[14], 1)
-    Assert.eq(q.args[15], 0)
-    Assert.eq(q.args[16], 1)
+
+    Assert.is_true(BookDB.upsertRemote({
+        source_id = "moon", stable_id = "gone.epub", deleted = 1,
+    }))
+    q = calls[#calls]
+    Assert.eq(q.args[12], 1)
+    Assert.eq(q.args[13], 1)
 
     DbBase.close()
     clearMods()
 end
 
--- ── upsertRemoteMany：普通缓存与显式书架成员关系不能混写 ──
+-- ── upsertRemoteMany：逐条 upsertRemote（不再批量 VALUES）──
 do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection)
@@ -273,15 +280,17 @@ do
     end
     Assert.eq(#inserts, 2)
     Assert.eq(inserts[1].argc, 14)
-    Assert.is_true(inserts[1].sql:find("in_library=excluded.in_library", 1, true) ~= nil)
-    Assert.eq(inserts[2].argc, 12)
-    Assert.is_true(inserts[2].sql:find("in_library=excluded.in_library", 1, true) == nil)
+    Assert.eq(inserts[1].args[12], 1)
+    Assert.eq(inserts[1].args[13], 0)
+    Assert.eq(inserts[2].argc, 14)
+    Assert.eq(inserts[2].args[12], 1, "in_library=false → deleted=1")
+    Assert.eq(inserts[2].args[13], 1)
 
     DbBase.close()
     clearMods()
 end
 
--- ── reconcile：先 upsert 快照，再把 fetched_at 未刷新的成员标 inactive ──
+-- ── reconcile：先软删已同步在架行，再逐条 upsertRemote(deleted=0) ──
 do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection)
@@ -290,58 +299,91 @@ do
         { source_id = "moon", stable_id = "b.epub", title = "B" },
     }))
     local deactivate, inserts, commit = 0, 0, false
+    local insert_calls = {}
     for _, call in ipairs(calls) do
-        if call.sql:find("UPDATE books SET in_library=0", 1, true)
-            and call.sql:find("source_id=? AND in_library=1", 1, true) then
+        if call.sql:find("UPDATE books SET deleted=1", 1, true)
+            and call.sql:find("deleted=0 AND sync_status=1", 1, true) then
             deactivate = deactivate + 1
         end
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
-            Assert.eq(call.argc, 28) -- 2 行 × 14 个绑定参数，显式携带书架成员关系
-            Assert.is_true(call.sql:find("COALESCE(excluded.intro, books.intro)", 1, true) ~= nil,
-                "书架批量对账不得用 NULL 清空已有简介")
-            -- NULL 列不得让后续列左移：md5 为空时 title 仍在第 4 位
-            Assert.eq(call.args[1], "moon")
-            Assert.is_nil(call.args[3])
-            Assert.eq(call.args[4], "A")
-            Assert.eq(call.args[15], "moon") -- 未带 source_id 的行也归到本源
-            Assert.eq(call.args[18], "B")
+            insert_calls[#insert_calls + 1] = call
+            Assert.eq(call.argc, 14)
+            Assert.eq(call.args[12], 0, "对账入架 deleted=0")
+            Assert.eq(call.args[13], 1)
+            Assert.eq(call.args[14], 1)
         end
         if call.sql == "COMMIT;" then commit = true end
     end
     Assert.eq(deactivate, 1)
-    Assert.eq(inserts, 1)
+    Assert.eq(inserts, 2)
+    Assert.eq(insert_calls[1].args[1], "moon")
+    Assert.is_nil(insert_calls[1].args[3])
+    Assert.eq(insert_calls[1].args[4], "A")
+    Assert.eq(insert_calls[2].args[1], "moon")
+    Assert.eq(insert_calls[2].args[4], "B")
     Assert.is_true(commit)
     DbBase.close()
     clearMods()
 end
 
--- 对账前仍在书架的记录不能因临时 deactivate 被重新标为新书。
+-- ── markDeleted / pendingDeleteIds：本地软删入脏队列 ──
 do
     local connection, calls = makeConn({
         resultset = function(sql)
-            if sql:find("SELECT stable_id FROM books", 1, true) then
-                return { { "existing.epub" } }, 1
+            if sql:find("deleted=1 AND sync_status=0", 1, true) then
+                return { { "del1", "del2" } }, 2
             end
+            return nil, 0
         end,
     })
     local DbBase, BookDB = loadBook(connection)
-    Assert.is_true(BookDB.reconcile("moon", {
-        { stable_id = "existing.epub" },
-        { stable_id = "new.epub" },
-    }))
-    local insert
-    for _, call in ipairs(calls) do
-        if call.sql:find("INSERT INTO books", 1, true) then insert = call end
+    Assert.is_true(BookDB.markDeleted("wechat", "del1"))
+    local q
+    for i = #calls, 1, -1 do
+        if calls[i].sql:find("UPDATE books SET deleted=1", 1, true) then
+            q = calls[i]
+            break
+        end
     end
-    Assert.eq(insert.args[14], 0, "已有成员刷新后保持原新书状态")
-    Assert.eq(insert.args[28], 1, "首次入架记录标为新书")
+    Assert.not_nil(q)
+    Assert.is_true(q.sql:find("sync_status=0", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("path=NULL", 1, true) ~= nil)
+    Assert.eq(q.args[1], "wechat")
+    Assert.eq(q.args[2], "del1")
+
+    local pending = BookDB.pendingDeleteIds("wechat")
+    Assert.eq(#pending, 2)
+    Assert.eq(pending[1], "del1")
+    Assert.eq(pending[2], "del2")
 
     DbBase.close()
     clearMods()
 end
 
--- 大书架走批量 upsert，避免每本书重复 prepare/close。
+-- ── pendingShelfAddIds：脏加架队列 ──
+do
+    local connection, calls = makeConn({
+        resultset = function(sql)
+            if sql:find("deleted=0 AND sync_status=0", 1, true) then
+                return { { "add1", "add2" } }, 2
+            end
+            return nil, 0
+        end,
+    })
+    local DbBase, BookDB = loadBook(connection)
+    local pending = BookDB.pendingShelfAddIds("wechat")
+    Assert.eq(#pending, 2)
+    Assert.eq(pending[1], "add1")
+    Assert.eq(pending[2], "add2")
+    local q = calls[#calls]
+    Assert.is_true(q.sql:find("deleted=0 AND sync_status=0", 1, true) ~= nil)
+
+    DbBase.close()
+    clearMods()
+end
+
+-- 大书架也是逐条 upsertRemote。
 do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection)
@@ -354,10 +396,10 @@ do
     for _, call in ipairs(calls) do
         if call.sql:find("INSERT INTO books", 1, true) then
             inserts = inserts + 1
-            Assert.is_true(call.argc == 112 or call.argc == 14) -- 8/1 行 × 14 个绑定参数
+            Assert.eq(call.argc, 14)
         end
     end
-    Assert.eq(inserts, 2)
+    Assert.eq(inserts, 9)
     DbBase.close()
     clearMods()
 end
@@ -381,13 +423,12 @@ do
         step = function()
             return {
                 "moon", "id'1", "md5x", "标题", "作者",
-                66, "分类", "系列", "简介", "https://img.test/cover.jpg", 1000,
-                "/cache/moon/book/x/book.epub", 1, 0, 0, 1, 1,
+                "分类", "系列", "简介", "https://img.test/cover.jpg", 1000,
+                "/cache/moon/book/x/book.epub", 0, 1, 1,
             }, {
                 "source_id", "stable_id", "md5", "title", "authors",
-                "percent", "category", "series", "intro", "cover", "fetched_at",
-                "path", "in_library", "metadata_dirty", "metadata_updated_at",
-                "read_state", "is_new",
+                "category", "series", "intro", "cover", "inserted_at",
+                "path", "deleted", "sync_status", "read_state",
             }
         end,
     })
@@ -399,12 +440,14 @@ do
     Assert.eq(book.stable_id, "id'1")
     Assert.eq(book.md5, "md5x")
     Assert.eq(book.title, "标题")
-    Assert.eq(book.percent, 66)
+    Assert.eq(book.percent, 0, "进度不在 books 表，percent 恒为 0")
     Assert.eq(book.cover, "https://img.test/cover.jpg")
-    Assert.eq(book.fetched_at, 1000)
+    Assert.eq(book.inserted_at, 1000)
     Assert.eq(book.path, "/cache/moon/book/x/book.epub")
+    Assert.eq(book.deleted, 0)
+    Assert.is_true(book.in_library)
+    Assert.eq(book.sync_status, 1)
     Assert.eq(book.read_state, 1)
-    Assert.is_true(book.is_new)
     local q = calls[#calls]
     Assert.is_true(q.sql:find("FROM books WHERE source_id=? AND stable_id=? LIMIT 1;", 1, true) ~= nil)
     Assert.eq(q.argc, 2)
@@ -434,13 +477,12 @@ do
         step = function()
             return {
                 "moon", "b1", nil, "标题", nil,
-                0, nil, nil, nil, nil, 0,
-                "/cache/moon/book/x/book.epub", 1, 0, 0, 0, 0,
+                nil, nil, nil, nil, 0,
+                "/cache/moon/book/x/book.epub", 1, 1, 0,
             }, {
                 "source_id", "stable_id", "md5", "title", "authors",
-                "percent", "category", "series", "intro", "cover", "fetched_at",
-                "path", "in_library", "metadata_dirty", "metadata_updated_at",
-                "read_state", "is_new",
+                "category", "series", "intro", "cover", "inserted_at",
+                "path", "deleted", "sync_status", "read_state",
             }
         end,
     })
@@ -451,6 +493,8 @@ do
     Assert.eq(book.source_id, "moon")
     Assert.eq(book.stable_id, "b1")
     Assert.eq(book.path, "/cache/moon/book/x/book.epub")
+    Assert.eq(book.deleted, 1)
+    Assert.is_false(book.in_library)
     local q = calls[#calls]
     Assert.is_true(q.sql:find("FROM books WHERE path=? LIMIT 1;", 1, true) ~= nil)
     Assert.eq(q.argc, 1)
@@ -460,14 +504,18 @@ do
     clearMods()
 end
 
--- ── touchPath：只登记 path，不制造阅读状态 ────────────────
+-- ── touchPath：只登记 path，不制造书架成员 ────────────────
 do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection)
 
     Assert.is_true(BookDB.touchPath("local", "/a.epub", "/a.epub"))
     local q = calls[#calls]
-    Assert.is_true(q.sql:find("INSERT INTO books (source_id, stable_id, fetched_at, path)", 1, true) ~= nil)
+    Assert.is_true(q.sql:find(
+        "INSERT INTO books (source_id, stable_id, inserted_at, path, deleted, sync_status)",
+        1, true) ~= nil)
+    Assert.is_true(q.sql:find("VALUES (?,?,0,?,1,1)", 1, true) ~= nil,
+        "身份行必须 deleted=1, sync_status=1, inserted_at=0")
     Assert.is_true(q.sql:find("ON CONFLICT(source_id, stable_id) DO UPDATE", 1, true) ~= nil)
     Assert.eq(q.argc, 3)
     Assert.eq(q.args[1], "local")
@@ -487,7 +535,9 @@ do
     local DbBase, BookDB = loadBook(connection)
 
     Assert.is_true(BookDB.setRead("moon", "b1", true))
-    Assert.is_true(calls[#calls - 1].sql:find("read_state=1, percent=100", 1, true) ~= nil)
+    Assert.is_true(calls[#calls - 1].sql:find("SET read_state=1", 1, true) ~= nil)
+    Assert.is_true(calls[#calls - 1].sql:find("percent", 1, true) == nil,
+        "已读只改 read_state，不写 books.percent")
     Assert.is_true(calls[#calls].sql:find("pending_progress", 1, true) ~= nil)
     Assert.is_true(calls[#calls].sql:find("fraction=1", 1, true) ~= nil)
     Assert.eq(calls[#calls].args[1], "moon")
@@ -502,8 +552,6 @@ do
     Assert.is_true(BookDB.markReadComplete("moon", "b1"))
     Assert.is_true(calls[#calls].sql:find("read_state=0", 1, true) == nil,
         "100% 完成不得受手动未读保护")
-    Assert.is_true(BookDB.markOpened("moon", "b1"))
-    Assert.is_true(calls[#calls].sql:find("SET is_new=0", 1, true) ~= nil)
 
     DbBase.close()
     clearMods()

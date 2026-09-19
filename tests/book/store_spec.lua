@@ -331,7 +331,7 @@ do
     Assert.eq(book_upserts[1].md5, "digest-new")
     Assert.eq(book_upserts[1].title, "new.book") -- 文件名只去末尾扩展名
     Assert.eq(book_upserts[1].path, "/lib/new.book.epub")
-    Assert.is_true(type(book_upserts[1].fetched_at) == "number")
+    Assert.is_true(type(book_upserts[1].inserted_at) == "number")
     Assert.eq(#touch_calls, 1)
     Assert.eq(touch_calls[1].source_id, "local")
     Assert.eq(touch_calls[1].stable_id, "/lib/new.book.epub")
@@ -464,12 +464,12 @@ do
     Assert.eq(book_upserts[1].md5, "m1")
     Assert.eq(book_upserts[1].title, "标题")
     Assert.eq(book_upserts[1].authors, "作者")
-    Assert.eq(book_upserts[1].percent, 12)
     Assert.eq(book_upserts[1].category, "分类")
     Assert.eq(book_upserts[1].series, "系列")
     Assert.eq(book_upserts[1].intro, "简介")
     Assert.eq(book_upserts[1].cover, "https://img.test/a.jpg")
-    Assert.is_true(type(book_upserts[1].fetched_at) == "number")
+    Assert.is_nil(book_upserts[1].percent)
+    Assert.is_nil(book_upserts[1].inserted_at)
     Assert.is_nil(book_upserts[1].path) -- path 由 touchPath 单独维护
     Assert.eq(book_batch_calls, 1)
     book_upserts = {}

@@ -140,7 +140,7 @@ do
         locator = "/body[1]/p[2]",
         extra = { chapter_uid = 42 },
     }))
-    local q = calls[#calls - 1]
+    local q = calls[#calls]
     Assert.is_true(q.sql:find("INSERT INTO pending_progress", 1, true) ~= nil)
     Assert.is_true(q.sql:find("ON CONFLICT(source_id, stable_id) DO UPDATE", 1, true) ~= nil)
     Assert.is_true(q.sql:find("chapter_title", 1, true) ~= nil)
@@ -163,17 +163,21 @@ do
     Assert.eq(type(q.args[11]), "number") -- updated_at = os.time()
     Assert.is_false(q.sql:find("book'1", 1, true) ~= nil)
 
+    -- fraction<1 不改 books；进度真源在 pending_progress
+    Assert.is_true(q.sql:find("UPDATE books", 1, true) == nil)
+
+    -- fraction>=1 才抬 read_state
+    Assert.is_true(ProgressDB.upsert("moon", "done", { fraction = 1 }))
     local sync = calls[#calls]
-    Assert.is_true(sync.sql:find("UPDATE books SET percent=", 1, true) ~= nil)
-    Assert.eq(sync.args[1], 50)
-    Assert.eq(sync.args[2], 0.5)
-    Assert.eq(sync.args[3], "moon")
-    Assert.eq(sync.args[4], "book'1")
-    Assert.is_true(sync.sql:find("CASE WHEN ?>=1 THEN 1", 1, true) ~= nil)
+    Assert.is_true(sync.sql:find("UPDATE books SET read_state=1", 1, true) ~= nil)
+    Assert.eq(sync.args[1], "moon")
+    Assert.eq(sync.args[2], "done")
+    Assert.is_true(sync.sql:find("percent", 1, true) == nil)
 
     -- 可选字段缺省时绑定 nil；非法页码（0）也落成 nil
     Assert.is_true(ProgressDB.upsert("moon", "b2", { fraction = 0.1, page = 0, total_pages = -1 }))
-    q = calls[#calls - 1]
+    q = calls[#calls]
+    Assert.is_true(q.sql:find("INSERT INTO pending_progress", 1, true) ~= nil)
     Assert.eq(q.argc, 12)
     Assert.eq(q.args[4], nil)
     Assert.eq(q.args[5], nil)
@@ -184,10 +188,10 @@ do
     Assert.eq(q.args[10], nil) -- extra 缺省与空表都落 NULL
 
     Assert.is_true(ProgressDB.upsert("moon", "b4", { fraction = 0.1, extra = {} }))
-    Assert.eq(calls[#calls - 1].args[10], nil)
+    Assert.eq(calls[#calls].args[10], nil)
 
     Assert.is_true(ProgressDB.upsert("moon", "b3", { fraction = 0.2, updated_at = 1234 }))
-    Assert.eq(calls[#calls - 1].args[11], 1234)
+    Assert.eq(calls[#calls].args[11], 1234)
 
     DbBase.close()
     clearMods()
@@ -207,16 +211,17 @@ do
     local DbBase, ProgressDB = loadProgress(connection)
     local before = #calls
 
-    -- 返回 true（本地版本更新算正常结果），但不写 pending_progress 也不动 books.percent
+    -- 返回 true（本地版本更新算正常结果），但不写 pending_progress 也不动 books
     Assert.is_true(ProgressDB.upsertRemote("moon", "b1", { fraction = 0.2 }))
     for i = before + 1, #calls do
         Assert.is_true(calls[i].sql:find("INSERT INTO pending_progress", 1, true) == nil)
+        Assert.is_true(calls[i].sql:find("UPDATE books SET read_state=", 1, true) == nil)
         Assert.is_true(calls[i].sql:find("UPDATE books SET percent=", 1, true) == nil)
     end
 
     -- adoptRemote 是用户显式选择云端：无条件覆盖
     Assert.is_true(ProgressDB.adoptRemote("moon", "b1", { fraction = 0.2 }))
-    local q = calls[#calls - 1]
+    local q = calls[#calls]
     Assert.is_true(q.sql:find("INSERT INTO pending_progress", 1, true) ~= nil)
     Assert.eq(q.args[12], 1)
 
@@ -229,7 +234,7 @@ do
     local connection, calls = makeConn()
     local DbBase, ProgressDB = loadProgress(connection)
     Assert.is_true(ProgressDB.upsertRemote("wechat", "99", { fraction = 0.4 }))
-    local q = calls[#calls - 1]
+    local q = calls[#calls]
     Assert.eq(q.args[1], "wechat")
     Assert.eq(q.args[2], "99")
     Assert.eq(q.args[11], 0)
@@ -316,7 +321,8 @@ do
     local q = calls[#calls]
     Assert.is_true(q.sql:find("FROM pending_progress p", 1, true) ~= nil)
     Assert.is_true(q.sql:find("EXISTS", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("b.in_library=1", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("b.deleted=0", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("in_library", 1, true) == nil)
     Assert.is_true(q.sql:find("last_open", 1, true) == nil)
     Assert.is_true(q.sql:find("ORDER BY p.updated_at DESC, p.stable_id ASC", 1, true) ~= nil)
     Assert.eq(q.args[1], "moon")

@@ -1,5 +1,12 @@
 --[[--
-books 表：BookIdentity + 展示元数据 + 统计 md5
+books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版本地缓存。
+
+列职责：
+  身份：source_id + stable_id（PK）、md5、path、inserted_at（0=仅身份行）
+  成员：deleted（0=在架有效，1=软删/非成员）；sync_status（0 待上传，1 已同步）
+  展示：title/authors/category/series/intro/cover
+  本地-only：reader_prefs、toc、toc_fetched_at、read_state
+  进度真源在 pending_progress；本表不存 percent。
 
 @module koplugin.book.db.book
 --]]
@@ -15,12 +22,11 @@ function BookDB.ensureSchema()
     if not Base.exec([[
 CREATE TABLE IF NOT EXISTS books (
   source_id TEXT NOT NULL, stable_id TEXT NOT NULL, md5 TEXT, title TEXT,
-  authors TEXT, percent REAL DEFAULT 0, category TEXT,
-  series TEXT, intro TEXT, cover TEXT, fetched_at INTEGER NOT NULL DEFAULT 0, path TEXT,
-  in_library INTEGER NOT NULL DEFAULT 1, metadata_dirty INTEGER NOT NULL DEFAULT 0,
-  metadata_updated_at INTEGER NOT NULL DEFAULT 0, reader_prefs TEXT,
-  toc TEXT, toc_fetched_at INTEGER NOT NULL DEFAULT 0,
-  read_state INTEGER NOT NULL DEFAULT 0, is_new INTEGER NOT NULL DEFAULT 0,
+  authors TEXT, category TEXT, series TEXT, intro TEXT, cover TEXT,
+  inserted_at INTEGER NOT NULL DEFAULT 0, path TEXT,
+  deleted INTEGER NOT NULL DEFAULT 1, sync_status INTEGER NOT NULL DEFAULT 1,
+  reader_prefs TEXT, toc TEXT, toc_fetched_at INTEGER NOT NULL DEFAULT 0,
+  read_state INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (source_id, stable_id)
 );
 ]]) then return false end
@@ -28,14 +34,13 @@ CREATE TABLE IF NOT EXISTS books (
     local present = {}
     local missing = {
         { "cover", "cover TEXT" },
-        { "in_library", "in_library INTEGER NOT NULL DEFAULT 1" },
-        { "metadata_dirty", "metadata_dirty INTEGER NOT NULL DEFAULT 0" },
-        { "metadata_updated_at", "metadata_updated_at INTEGER NOT NULL DEFAULT 0" },
+        { "inserted_at", "inserted_at INTEGER NOT NULL DEFAULT 0" },
+        { "deleted", "deleted INTEGER NOT NULL DEFAULT 1" },
+        { "sync_status", "sync_status INTEGER NOT NULL DEFAULT 1" },
         { "reader_prefs", "reader_prefs TEXT" },
         { "toc", "toc TEXT" },
         { "toc_fetched_at", "toc_fetched_at INTEGER NOT NULL DEFAULT 0" },
         { "read_state", "read_state INTEGER NOT NULL DEFAULT 0" },
-        { "is_new", "is_new INTEGER NOT NULL DEFAULT 0" },
     }
     if columns then
         for i = 1, nrows do
@@ -47,207 +52,147 @@ CREATE TABLE IF NOT EXISTS books (
                 return false
             end
         end
-    end
-    if not Base.exec([[UPDATE books SET read_state=1
-        WHERE read_state=0 AND percent>=100;]]) then
-        return false
+        -- 旧库：fetched_at → inserted_at；in_library → deleted（取反）
+        if present.fetched_at and present.inserted_at then
+            if not Base.exec([[UPDATE books SET inserted_at=fetched_at
+                WHERE inserted_at=0 AND fetched_at<>0;]]) then
+                return false
+            end
+        end
+        if present.in_library and present.deleted then
+            if not Base.exec([[UPDATE books SET deleted=CASE WHEN in_library=1 THEN 0 ELSE 1 END;]]) then
+                return false
+            end
+        end
     end
     return Base.exec([[
 CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(source_id, md5);
 CREATE INDEX IF NOT EXISTS idx_books_path ON books(path);
-CREATE INDEX IF NOT EXISTS idx_books_library ON books(source_id, in_library, stable_id);
+CREATE INDEX IF NOT EXISTS idx_books_library ON books(source_id, deleted, stable_id);
+CREATE INDEX IF NOT EXISTS idx_books_sync ON books(source_id, sync_status);
 ]]) ~= nil
 end
 
---- 插入或更新 books 行（本地可信写入：扫盘/本地登记），不制造待上传状态。
+--- 插入或更新 books 行（本地可信写入：扫盘/本地登记），标脏待上传。
 ---@param row table
 ---@return boolean
 function BookDB.upsert(row)
     local source_id = row.source_id
     local stable_id = row.stable_id
+    local now = tonumber(row.inserted_at) or os.time()
     return Base.exec(
         [[INSERT INTO books (
             source_id, stable_id, md5, title, authors,
-            percent, category, series, intro, cover, fetched_at, path, in_library, is_new
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,1)
+            category, series, intro, cover, inserted_at, path, deleted, sync_status
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             md5=COALESCE(excluded.md5, books.md5),
             title=excluded.title,
             authors=excluded.authors,
-            percent=excluded.percent,
             category=excluded.category,
             series=excluded.series,
             intro=excluded.intro,
             cover=COALESCE(excluded.cover, books.cover),
-            fetched_at=excluded.fetched_at,
             path=COALESCE(excluded.path, books.path),
-            is_new=CASE WHEN books.in_library=0 THEN 1 ELSE books.is_new END,
-            in_library=1;]],
+            deleted=0,
+            sync_status=0;]],
         source_id,
         stable_id,
         row.md5,
         row.title,
         row.authors,
-        tonumber(row.percent) or 0,
         row.category,
         row.series,
         row.intro,
         row.cover,
-        tonumber(row.fetched_at) or os.time(),
+        now,
         row.path
     ) ~= nil
 end
 
---- 远端书架行写入。存在本地编辑时保留本地展示元数据。
+--- 远端书架行写入。本地脏行（sync_status=0）保留展示字段。
 ---@param row table
 ---@return boolean
 function BookDB.upsertRemote(row)
     local source_id = row.source_id
     local stable_id = row.stable_id
-    local has_membership = row.in_library ~= nil
-    local in_library = row.in_library == true or tonumber(row.in_library) == 1
-    local new_known = row.is_new ~= nil
-    local is_new = row.is_new == true or tonumber(row.is_new) == 1
-    if not new_known then is_new = in_library end
+    local has_membership = row.deleted ~= nil or row.in_library ~= nil
+    local deleted = 1
+    if row.deleted ~= nil then
+        deleted = (row.deleted == true or tonumber(row.deleted) == 1) and 1 or 0
+    elseif row.in_library ~= nil then
+        deleted = (row.in_library == true or tonumber(row.in_library) == 1) and 0 or 1
+    end
+    local now = tonumber(row.inserted_at) or tonumber(row.fetched_at) or os.time()
     return Base.exec(
         [[INSERT INTO books (
-            source_id, stable_id, md5, title, authors, percent, category,
-            series, intro, cover, fetched_at, path, in_library,
-            metadata_dirty, metadata_updated_at, is_new
-          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?)
+            source_id, stable_id, md5, title, authors, category,
+            series, intro, cover, inserted_at, path, deleted, sync_status
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             md5=COALESCE(excluded.md5, books.md5),
-            title=CASE WHEN books.metadata_dirty=0
-                THEN COALESCE(excluded.title, books.title) ELSE books.title END,
-            authors=CASE WHEN books.metadata_dirty=0
-                THEN COALESCE(excluded.authors, books.authors) ELSE books.authors END,
-            category=CASE WHEN books.metadata_dirty=0
-                THEN COALESCE(excluded.category, books.category) ELSE books.category END,
-            series=CASE WHEN books.metadata_dirty=0
-                THEN COALESCE(excluded.series, books.series) ELSE books.series END,
-            intro=CASE WHEN books.metadata_dirty=0
-                THEN COALESCE(excluded.intro, books.intro) ELSE books.intro END,
+            title=CASE WHEN books.sync_status=0
+                THEN books.title ELSE COALESCE(excluded.title, books.title) END,
+            authors=CASE WHEN books.sync_status=0
+                THEN books.authors ELSE COALESCE(excluded.authors, books.authors) END,
+            category=CASE WHEN books.sync_status=0
+                THEN books.category ELSE COALESCE(excluded.category, books.category) END,
+            series=CASE WHEN books.sync_status=0
+                THEN books.series ELSE COALESCE(excluded.series, books.series) END,
+            intro=CASE WHEN books.sync_status=0
+                THEN books.intro ELSE COALESCE(excluded.intro, books.intro) END,
             cover=COALESCE(excluded.cover, books.cover),
-            percent=excluded.percent,
-            fetched_at=excluded.fetched_at,
             path=COALESCE(excluded.path, books.path),
-            is_new=CASE
-                WHEN ?=1 THEN CASE WHEN excluded.is_new=1 THEN 1 ELSE books.is_new END
-                WHEN books.in_library=0 AND excluded.in_library=1 THEN 1
-                ELSE books.is_new END,
-            in_library=CASE WHEN ?=1 THEN excluded.in_library ELSE books.in_library END;]],
+            deleted=CASE
+                WHEN books.sync_status=0 THEN books.deleted
+                WHEN ?=1 THEN excluded.deleted
+                ELSE books.deleted END,
+            sync_status=CASE
+                WHEN books.sync_status=0 THEN 0
+                WHEN ?=1 THEN 1
+                ELSE books.sync_status END;]],
         source_id, stable_id, row.md5, row.title, row.authors,
-        tonumber(row.percent) or 0, row.category,
-        row.series, row.intro, row.cover, tonumber(row.fetched_at) or os.time(), row.path,
-        in_library and 1 or 0, is_new and 1 or 0,
-        new_known and 1 or 0, has_membership and 1 or 0
+        row.category, row.series, row.intro, row.cover, now, row.path,
+        deleted,
+        has_membership and 1 or 0, has_membership and 1 or 0
     ) ~= nil
 end
 
---- 批量写入远端行；按“是否明确携带书架成员关系”分组，不能把普通缓存误加入书架。
---- 每批 8 行，兼容低端设备 SQLite 的绑定参数上限。
+--- 批量写入远端行；按“是否明确携带书架成员关系”分组。
 ---@param rows table[]
 ---@return boolean
 function BookDB.upsertRemoteMany(rows)
     if #rows == 0 then return true end
-    local groups = { explicit = {}, cache = {} }
     for _, row in ipairs(rows) do
-        local group = row.in_library ~= nil and groups.explicit or groups.cache
-        group[#group + 1] = row
-    end
-    for _, group_name in ipairs({ "explicit", "cache" }) do
-        local group = groups[group_name]
-        local explicit = group_name == "explicit"
-        for start = 1, #group, 8 do
-            local values, args = {}, {}
-            local finish = math.min(start + 7, #group)
-            local columns = explicit and 14 or 12
-            for i = start, finish do
-                local row = group[i]
-                local base = #values * columns
-                values[#values + 1] = explicit
-                    and "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
-                    or "(?,?,?,?,?,?,?,?,?,?,?,?,0,0)"
-                args[base + 1] = row.source_id
-                args[base + 2] = row.stable_id
-                args[base + 3] = row.md5
-                args[base + 4] = row.title
-                args[base + 5] = row.authors
-                args[base + 6] = tonumber(row.percent) or 0
-                args[base + 7] = row.category
-                args[base + 8] = row.series
-                args[base + 9] = row.intro
-                args[base + 10] = row.cover
-                args[base + 11] = tonumber(row.fetched_at) or os.time()
-                args[base + 12] = row.path
-                if explicit then
-                    args[base + 13] = (row.in_library == true or tonumber(row.in_library) == 1) and 1 or 0
-                    args[base + 14] = (row.is_new == true or tonumber(row.is_new) == 1) and 1 or 0
-                end
-            end
-            local membership_update = explicit and [[,
-                is_new=CASE WHEN excluded.is_new=1 THEN 1 ELSE books.is_new END,
-                in_library=excluded.in_library]] or ""
-            local ok = Base.exec(
-                [[INSERT INTO books (
-                source_id, stable_id, md5, title, authors, percent, category,
-                series, intro, cover, fetched_at, path, in_library, is_new
-              ) VALUES ]] .. table.concat(values, ",") .. [[
-              ON CONFLICT(source_id, stable_id) DO UPDATE SET
-                md5=COALESCE(excluded.md5, books.md5),
-                title=CASE WHEN books.metadata_dirty=0
-                    THEN COALESCE(excluded.title, books.title) ELSE books.title END,
-                authors=CASE WHEN books.metadata_dirty=0
-                    THEN COALESCE(excluded.authors, books.authors) ELSE books.authors END,
-                category=CASE WHEN books.metadata_dirty=0
-                    THEN COALESCE(excluded.category, books.category) ELSE books.category END,
-                series=CASE WHEN books.metadata_dirty=0
-                    THEN COALESCE(excluded.series, books.series) ELSE books.series END,
-                intro=CASE WHEN books.metadata_dirty=0
-                    THEN COALESCE(excluded.intro, books.intro) ELSE books.intro END,
-                cover=COALESCE(excluded.cover, books.cover),
-                percent=excluded.percent,
-                fetched_at=excluded.fetched_at,
-                path=COALESCE(excluded.path, books.path)]]
-                    .. membership_update .. ";",
-                unpack(args, 1, #values * columns)
-            )
-            if not ok then
-                for i = start, finish do
-                    if not BookDB.upsertRemote(group[i]) then return false end
-                end
-            end
-        end
+        if not BookDB.upsertRemote(row) then return false end
     end
     return true
 end
 
---- 用户编辑展示元数据；版本用于异步确认，旧回调不能清掉新编辑。
+--- 用户编辑/刮削写入展示元数据，标脏待上传。
 ---@param row table
 ---@return boolean
 function BookDB.upsertLocal(row)
     local source_id = row.source_id
     local stable_id = row.stable_id
-    local revision = tonumber(row.metadata_updated_at) or os.time()
+    local now = tonumber(row.inserted_at) or tonumber(row.fetched_at) or os.time()
     return Base.exec(
         [[INSERT INTO books (
-            source_id, stable_id, title, authors, percent, category,
-            series, intro, fetched_at, in_library, metadata_dirty, metadata_updated_at, is_new
-          ) VALUES (?,?,?,?,?,?,?,?,?,1,1,?,1)
+            source_id, stable_id, title, authors, category,
+            series, intro, inserted_at, deleted, sync_status
+          ) VALUES (?,?,?,?,?,?,?,?,0,0)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             title=excluded.title, authors=excluded.authors,
             category=excluded.category,
             series=excluded.series, intro=excluded.intro,
-            fetched_at=excluded.fetched_at, in_library=1,
-            is_new=CASE WHEN books.in_library=0 THEN 1 ELSE books.is_new END,
-            metadata_dirty=1, metadata_updated_at=excluded.metadata_updated_at;]],
-        source_id, stable_id, row.title, row.authors, tonumber(row.percent) or 0,
-        row.category, row.series, row.intro,
-        tonumber(row.fetched_at) or os.time(), revision
+            deleted=0,
+            sync_status=CASE WHEN books.deleted=1 THEN 0 ELSE books.sync_status END;]],
+        source_id, stable_id, row.title, row.authors,
+        row.category, row.series, row.intro, now
     ) ~= nil
 end
 
---- 远端书架快照入库：先 upsert 全部条目，再把本次未刷新的成员标为不活跃（不删行）。
+--- 远端书架快照入库：先把当前在架标软删，再 upsert 远端成员。
 ---@param source_id string
 ---@param books table[]
 ---@param opts { clear_missing_paths: boolean|nil }|nil
@@ -255,23 +200,19 @@ end
 function BookDB.reconcile(source_id, books, opts)
     opts = opts or {}
     if not Base.exec("BEGIN IMMEDIATE;") then return false end
-    local active = {}
-    for _, stable_id in ipairs(BookDB.libraryStableIdsBySource(source_id)) do
-        active[stable_id] = true
-    end
-    local sync_at = os.time()
     local deactivate = opts.clear_missing_paths
-        and [[UPDATE books SET in_library=0, path=NULL WHERE source_id=? AND in_library=1;]]
-        or [[UPDATE books SET in_library=0 WHERE source_id=? AND in_library=1;]]
+        and [[UPDATE books SET deleted=1, path=NULL
+            WHERE source_id=? AND deleted=0 AND sync_status=1;]]
+        or [[UPDATE books SET deleted=1
+            WHERE source_id=? AND deleted=0 AND sync_status=1;]]
     local ok = Base.exec(deactivate, source_id) ~= nil
     local batch = {}
     for _, row in ipairs(books) do
         local copy = {}
         for k, v in pairs(row) do copy[k] = v end
         copy.source_id = source_id
-        copy.in_library = true
-        copy.is_new = not active[tostring(row.stable_id)]
-        copy.fetched_at = sync_at
+        copy.deleted = 0
+        copy.in_library = nil
         batch[#batch + 1] = copy
     end
     if ok then ok = BookDB.upsertRemoteMany(batch) end
@@ -280,69 +221,96 @@ function BookDB.reconcile(source_id, books, opts)
     return false
 end
 
+--- 设置书架成员：on_shelf=true → deleted=0；false → deleted=1（软删待同步）。
 ---@param source_id string
 ---@param stable_id string
----@param in_library boolean
+---@param on_shelf boolean
 ---@param clear_path boolean|nil
 ---@return boolean
-function BookDB.setLibraryMembership(source_id, stable_id, in_library, clear_path)
-    if clear_path and not in_library then
-        return Base.exec([[UPDATE books SET in_library=0, path=NULL
+function BookDB.setLibraryMembership(source_id, stable_id, on_shelf, clear_path)
+    local deleted = on_shelf and 0 or 1
+    if clear_path and not on_shelf then
+        return Base.exec([[UPDATE books SET deleted=1, path=NULL, sync_status=0
             WHERE source_id=? AND stable_id=?;]], source_id, stable_id) ~= nil
     end
-    local value = in_library and 1 or 0
-    return Base.exec([[UPDATE books SET
-            is_new=CASE WHEN in_library=0 AND ?=1 THEN 1 ELSE is_new END,
-            in_library=?
+    return Base.exec([[UPDATE books SET deleted=?, sync_status=0
         WHERE source_id=? AND stable_id=?;]],
-        value, value, source_id, stable_id) ~= nil
+        deleted, source_id, stable_id) ~= nil
+end
+
+--- 本地删除：标 deleted=1、sync_status=0。书架立刻消失，等同步时推云端真删。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function BookDB.markDeleted(source_id, stable_id)
+    return BookDB.setLibraryMembership(source_id, stable_id, false, true)
+end
+
+--- 待推送到云端删除的 stable_id（deleted=1 且脏）。
+---@param source_id string
+---@return string[]
+function BookDB.pendingDeleteIds(source_id)
+    local result, nrows = Base.query(
+        [[SELECT stable_id FROM books
+          WHERE source_id=? AND deleted=1 AND sync_status=0
+          ORDER BY inserted_at ASC;]],
+        source_id
+    )
+    local out = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            out[i] = result[1][i]
+        end
+    end
+    return out
+end
+
+--- 待推送到云端加架的 stable_id（deleted=0 且脏）。
+---@param source_id string
+---@return string[]
+function BookDB.pendingShelfAddIds(source_id)
+    local result, nrows = Base.query(
+        [[SELECT stable_id FROM books
+          WHERE source_id=? AND deleted=0 AND sync_status=0
+          ORDER BY inserted_at ASC;]],
+        source_id
+    )
+    local out = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            out[i] = result[1][i]
+        end
+    end
+    return out
 end
 
 local COLUMNS =
-    "source_id, stable_id, md5, title, authors, percent, category, series, intro, cover, fetched_at, path, in_library, metadata_dirty, metadata_updated_at, read_state, is_new"
+    "source_id, stable_id, md5, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state"
 
 --- rowexec 位置参数 → Book 表
---- 形参顺序必须与 COLUMNS 一致；sqlite 返回的都是字符串，数值列在此统一 tonumber。
----@param source_id_r string|nil 为 nil 表示没查到行
----@param stable_id_r string|nil
----@param digest string|nil books.md5 列
----@param title string|nil
----@param authors string|nil
----@param percent any 阅读进度 0..100
----@param category string|nil
----@param series string|nil
----@param intro string|nil
----@param cover string|nil
----@param fetched_at any 元数据拉取时间戳，缺失算 0
----@param path string|nil 本地文件路径
----@param in_library any 非 0 即视为在书架内
----@param metadata_dirty any
----@param metadata_updated_at any
----@param read_state any
----@param is_new any
 ---@return Book|nil
-local function rowToBook(source_id_r, stable_id_r, digest, title, authors, percent, category, series, intro, cover, fetched_at, path, in_library, metadata_dirty, metadata_updated_at, read_state, is_new)
+local function rowToBook(source_id_r, stable_id_r, digest, title, authors, category, series, intro, cover, inserted_at, path, deleted, sync_status, read_state)
     if not source_id_r then
         return nil
     end
+    local del = tonumber(deleted) or 1
     return {
         source_id = source_id_r,
         stable_id = stable_id_r,
         md5 = digest,
         title = title,
         authors = authors,
-        percent = tonumber(percent) or 0,
         category = category,
         series = series,
         intro = intro,
         cover = cover,
-        fetched_at = tonumber(fetched_at) or 0,
+        inserted_at = tonumber(inserted_at) or 0,
         path = path,
-        in_library = tonumber(in_library) ~= 0,
-        metadata_dirty = tonumber(metadata_dirty) or 0,
-        metadata_updated_at = tonumber(metadata_updated_at) or 0,
+        deleted = del,
+        in_library = del == 0,
+        sync_status = tonumber(sync_status) or 1,
         read_state = tonumber(read_state) or 0,
-        is_new = tonumber(is_new) ~= 0,
+        percent = 0,
     }
 end
 
@@ -373,7 +341,6 @@ function BookDB.getMany(source_id, stable_ids)
     if #ids == 0 then return {} end
 
     local out = {}
-    -- Keep below SQLite's usual 999 bind parameter limit.
     for start = 1, #ids, 500 do
         local finish = math.min(start + 499, #ids)
         local placeholders = {}
@@ -397,7 +364,7 @@ function BookDB.getMany(source_id, stable_ids)
     return out
 end
 
---- 按本地路径取 books 行（身份解析唯一入口：整本书精确匹配）
+--- 按本地路径取 books 行
 ---@param path string
 ---@return Book|nil
 function BookDB.getByPath(path)
@@ -408,15 +375,15 @@ function BookDB.getByPath(path)
 end
 
 --- 文件落地后登记物理路径。
---- 行不存在时补一行身份（fetched_at=0 表示仅身份行）。
+--- 行不存在时补身份行：deleted=1（非书架成员）、sync_status=1。
 ---@param source_id string
 ---@param stable_id string
 ---@param path string
 ---@return boolean
 function BookDB.touchPath(source_id, stable_id, path)
     return Base.exec(
-        [[INSERT INTO books (source_id, stable_id, fetched_at, path)
-          VALUES (?,?,0,?)
+        [[INSERT INTO books (source_id, stable_id, inserted_at, path, deleted, sync_status)
+          VALUES (?,?,0,?,1,1)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             path=excluded.path;]],
         source_id,
@@ -426,8 +393,8 @@ function BookDB.touchPath(source_id, stable_id, path)
 end
 
 --- 手动标记已读/未读。
---- 已读：read_state=1 且进度抬到 100%（并脏写 pending_progress，供云端进度同步收敛）。
---- 未读：read_state=2，阻止 99% 自动规则再次覆盖；不回退进度。
+--- 已读：read_state=1 且进度抬到 100%（脏写 pending_progress）。
+--- 未读：read_state=2；不回退进度。
 ---@param source_id string
 ---@param stable_id string
 ---@param is_read boolean
@@ -438,12 +405,11 @@ function BookDB.setRead(source_id, stable_id, is_read)
             WHERE source_id=? AND stable_id=?;]],
             source_id, stable_id) ~= nil
     end
-    if not Base.exec([[UPDATE books SET read_state=1, percent=100
+    if not Base.exec([[UPDATE books SET read_state=1
         WHERE source_id=? AND stable_id=?;]],
         source_id, stable_id) then
         return false
     end
-    -- 只抬 fraction，保留章节定位字段；sync_status=0 等进度同步推云端。
     return Base.exec([[
 INSERT INTO pending_progress
   (source_id, stable_id, fraction, updated_at, sync_status)
@@ -475,17 +441,7 @@ function BookDB.markReadComplete(source_id, stable_id)
         source_id, stable_id) ~= nil
 end
 
---- 首次打开后清除新书状态。
----@param source_id string
----@param stable_id string
----@return boolean
-function BookDB.markOpened(source_id, stable_id)
-    return Base.exec([[UPDATE books SET is_new=0
-        WHERE source_id=? AND stable_id=?;]],
-        source_id, stable_id) ~= nil
-end
-
---- 清掉指向某文件的 path 登记（缓存失效；不动身份行本身）
+--- 清掉指向某文件的 path 登记
 ---@param path string
 ---@return boolean
 function BookDB.clearPath(path)
@@ -495,11 +451,10 @@ function BookDB.clearPath(path)
     ) ~= nil
 end
 
---- 清掉某目录下全部 path 登记（缓存目录被清理）
+--- 清掉某目录下全部 path 登记
 ---@param dir string
 ---@return boolean
 function BookDB.clearPathsUnder(dir)
-    -- 空目录会拼成 LIKE '/%'，会清掉全部绝对路径登记。
     if not dir or dir == "" then
         return false
     end
@@ -509,7 +464,7 @@ function BookDB.clearPathsUnder(dir)
     ) ~= nil
 end
 
---- 全部已登记路径（清缓存对账）
+--- 全部已登记路径
 ---@return { source_id: string, stable_id: string, path: string }[]
 function BookDB.pathsAll()
     local result, nrows = Base.query([[SELECT source_id, stable_id, path FROM books WHERE path IS NOT NULL;]])
@@ -526,7 +481,7 @@ function BookDB.pathsAll()
     return out
 end
 
---- 按 (source_id, md5) 找已入库的行（本地源用内容摘要识别文件改名/移动）。
+--- 按 (source_id, md5) 找已入库的行
 ---@param source_id string
 ---@param md5 string
 ---@return Book|nil
@@ -538,9 +493,7 @@ function BookDB.getByMd5(source_id, md5)
     ))
 end
 
---- 改名/移动：把某本书的 stable_id 换成新值（本地源文件路径变化，身份仍由 md5 认定）。
---- category/series 由文件所在目录派生，随新位置一并刷新（传 nil 即清除）。
---- 本地源 path==stable_id，同步改写 path；所有书籍身份表一并联动，目录缓存直接失效。
+--- 改名/移动：把某本书的 stable_id 换成新值
 ---@param source_id string
 ---@param old_stable_id string
 ---@param new_stable_id string
@@ -551,7 +504,6 @@ function BookDB.renameStableId(source_id, old_stable_id, new_stable_id, category
     if old_stable_id == new_stable_id then
         return true
     end
-    -- 身份必须同生共死：包事务，任何一步失败整体回滚
     if not Base.exec([[BEGIN IMMEDIATE;]]) then
         return false
     end
@@ -583,7 +535,7 @@ end
 
 --- 单列字符串查询 → string[]
 ---@param sql string
----@param ... any 绑定参数
+---@param ... any
 ---@return string[]
 local function stringColumn(sql, ...)
     local result, nrows = Base.query(sql, ...)
@@ -608,19 +560,46 @@ end
 ---@return string[]
 function BookDB.libraryStableIdsBySource(source_id)
     return stringColumn([[SELECT stable_id FROM books
-        WHERE source_id=? AND in_library=1 ORDER BY stable_id;]], source_id)
+        WHERE source_id=? AND deleted=0 ORDER BY stable_id;]], source_id)
 end
 
---- 按源分页查询书库（图书馆直查数据库）。
---- source_id 可为单源字符串，或已启用源 id 列表（混合模式）。
+--- 某源待上传书架行。
+---@param source_id string
+---@return Book[]
+function BookDB.unsynced(source_id)
+    local result, nrows = Base.query(
+        "SELECT " .. COLUMNS .. " FROM books WHERE source_id=? AND sync_status=0 ORDER BY inserted_at ASC;",
+        source_id
+    )
+    local out = {}
+    if result and nrows and nrows > 0 then
+        for i = 1, nrows do
+            local row = {}
+            for c = 1, #result do row[c] = result[c][i] end
+            local book = rowToBook(unpack(row, 1, #result))
+            if book then out[#out + 1] = book end
+        end
+    end
+    return out
+end
+
+--- push 成功后清脏。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function BookDB.markSynced(source_id, stable_id)
+    return Base.exec([[UPDATE books SET sync_status=1
+        WHERE source_id=? AND stable_id=?;]], source_id, stable_id) ~= nil
+end
+
+--- 按源分页查询书库。
 ---@param source_id string|string[]
----@param opts { category: string|nil, uncategorized: boolean|nil, series: string|nil, unseries: boolean|nil, search: string|nil, read_status: string|nil, source_id: string|nil, limit: number|nil, offset: number|nil }|nil
+---@param opts table|nil
 ---@return table[] rows, number count
 function BookDB.listBySource(source_id, opts)
     opts = opts or {}
     local where, args = Base.sourceClause("b.source_id", source_id)
-    where = where .. " AND b.in_library=1"
-    -- 混合模式下再按单源收窄；非混合时 scope 已是单源，此项为空。
+    where = where .. " AND b.deleted=0"
     if type(opts.source_id) == "string" and opts.source_id ~= "" then
         where = where .. " AND b.source_id=?"
         args[#args + 1] = opts.source_id
@@ -638,7 +617,6 @@ function BookDB.listBySource(source_id, opts)
         args[#args + 1] = opts.series
     end
     if opts.search and opts.search ~= "" then
-        -- 转义 LIKE 通配符：用户输入的 % _ 是字面量
         where = where .. [[ AND (b.title LIKE ? ESCAPE '\' OR b.authors LIKE ? ESCAPE '\' OR b.stable_id LIKE ? ESCAPE '\')]]
         local like = "%" .. opts.search:gsub("([%%_\\])", "\\%1") .. "%"
         args[#args + 1] = like
@@ -646,11 +624,9 @@ function BookDB.listBySource(source_id, opts)
         args[#args + 1] = like
     end
     if opts.read_status == "read" then
-        where = where .. " AND b.is_new=0 AND b.read_state=1"
+        where = where .. " AND b.read_state=1"
     elseif opts.read_status == "unread" then
-        where = where .. " AND b.is_new=0 AND b.read_state<>1"
-    elseif opts.read_status == "new" then
-        where = where .. " AND b.is_new=1"
+        where = where .. " AND b.read_state<>1"
     end
     local total = Base.rowexec(
         "SELECT COUNT(*) FROM books b WHERE " .. where .. ";",
@@ -666,7 +642,7 @@ function BookDB.listBySource(source_id, opts)
         title = "COALESCE(b.title, '') COLLATE NOCASE %s, b.stable_id ASC",
         author = "COALESCE(b.authors, '') COLLATE NOCASE %s, COALESCE(b.title, '') COLLATE NOCASE %s, b.stable_id ASC",
         recent_read = "COALESCE(p.updated_at, 0) DESC, b.stable_id ASC",
-        recent_added = "b.fetched_at DESC, b.stable_id ASC",
+        recent_added = "b.inserted_at DESC, b.stable_id ASC",
     }
     local sort = opts.sort or "recent_added"
     local order = sort_sql[sort] or sort_sql.recent_added
@@ -677,9 +653,9 @@ function BookDB.listBySource(source_id, opts)
         order = string.format(order, direction, direction)
     end
     local sel = [[SELECT b.source_id, b.stable_id, b.title, b.authors,
-                        COALESCE(p.fraction * 100, b.percent),
-                        b.category, b.series, b.intro, b.cover, b.fetched_at,
-                        b.read_state, b.is_new, b.path
+                        COALESCE(p.fraction * 100, 0),
+                        b.category, b.series, b.intro, b.cover, b.inserted_at,
+                        b.read_state, b.path
                    FROM books b LEFT JOIN pending_progress p
                      ON p.source_id=b.source_id AND p.stable_id=b.stable_id
                    WHERE ]] .. where .. " ORDER BY " .. order
@@ -702,30 +678,31 @@ function BookDB.listBySource(source_id, opts)
                 series = result[7][i],
                 intro = result[8][i],
                 cover = result[9][i],
-                fetched_at = tonumber(result[10][i]) or 0,
+                inserted_at = tonumber(result[10][i]) or 0,
                 read_state = tonumber(result[11][i]) or 0,
-                is_new = tonumber(result[12][i]) ~= 0,
-                path = result[13][i],
+                path = result[12][i],
+                deleted = 0,
+                in_library = true,
             }
         end
     end
     return rows, total
 end
 
---- 某源的书库分类列表（DISTINCT category，非空，字典序）。
+--- 某源的书库分类列表
 ---@param source_id string|string[]
 ---@return string[]
 function BookDB.categoriesBySource(source_id)
     local where, args = Base.sourceClause("source_id", source_id)
     return stringColumn(
         [[SELECT DISTINCT category FROM books
-          WHERE ]] .. where .. [[ AND in_library=1 AND category IS NOT NULL AND category<>''
+          WHERE ]] .. where .. [[ AND deleted=0 AND category IS NOT NULL AND category<>''
           ORDER BY category;]],
         unpack(args)
     )
 end
 
---- 某源书架按分类聚合；空字符串代表未分类桶。
+--- 某源书架按分类聚合
 ---@param source_id string|string[]
 ---@return { category: string, count: integer }[]
 function BookDB.categoryCountsBySource(source_id)
@@ -734,7 +711,7 @@ function BookDB.categoryCountsBySource(source_id)
         [[SELECT CASE WHEN category IS NULL OR category='' THEN '' ELSE category END,
                  COUNT(*)
           FROM books
-          WHERE ]] .. where .. [[ AND in_library=1
+          WHERE ]] .. where .. [[ AND deleted=0
           GROUP BY CASE WHEN category IS NULL OR category='' THEN '' ELSE category END
           ORDER BY CASE WHEN category IS NULL OR category='' THEN 1 ELSE 0 END,
                    category;]],
@@ -752,20 +729,20 @@ function BookDB.categoryCountsBySource(source_id)
     return rows
 end
 
---- 某源的书库系列列表（DISTINCT series，非空，字典序）。
+--- 某源的书库系列列表
 ---@param source_id string|string[]
 ---@return string[]
 function BookDB.seriesBySource(source_id)
     local where, args = Base.sourceClause("source_id", source_id)
     return stringColumn(
         [[SELECT DISTINCT series FROM books
-          WHERE ]] .. where .. [[ AND in_library=1 AND series IS NOT NULL AND series<>''
+          WHERE ]] .. where .. [[ AND deleted=0 AND series IS NOT NULL AND series<>''
           ORDER BY series;]],
         unpack(args)
     )
 end
 
---- 某源书架按系列聚合；空字符串代表无系列桶。
+--- 某源书架按系列聚合
 ---@param source_id string|string[]
 ---@return { series: string, count: integer }[]
 function BookDB.seriesCountsBySource(source_id)
@@ -774,7 +751,7 @@ function BookDB.seriesCountsBySource(source_id)
         [[SELECT CASE WHEN series IS NULL OR series='' THEN '' ELSE series END,
                  COUNT(*)
           FROM books
-          WHERE ]] .. where .. [[ AND in_library=1
+          WHERE ]] .. where .. [[ AND deleted=0
           GROUP BY CASE WHEN series IS NULL OR series='' THEN '' ELSE series END
           ORDER BY CASE WHEN series IS NULL OR series='' THEN 1 ELSE 0 END,
                    series;]],
@@ -792,7 +769,7 @@ function BookDB.seriesCountsBySource(source_id)
     return rows
 end
 
---- 范围内按 source_id 聚合册数（混合筛选「数据源」组）。
+--- 范围内按 source_id 聚合册数
 ---@param source_id string|string[]
 ---@return { source_id: string, count: integer }[]
 function BookDB.sourceCountsBySource(source_id)
@@ -800,7 +777,7 @@ function BookDB.sourceCountsBySource(source_id)
     local result, nrows = Base.query(
         [[SELECT source_id, COUNT(*)
           FROM books
-          WHERE ]] .. where .. [[ AND in_library=1
+          WHERE ]] .. where .. [[ AND deleted=0
           GROUP BY source_id
           ORDER BY source_id;]],
         unpack(args)
@@ -817,41 +794,38 @@ function BookDB.sourceCountsBySource(source_id)
     return rows
 end
 
---- 某源书架按视觉阅读状态聚合；新书优先，三组始终返回。
+--- 某源书架按阅读状态聚合（read / unread）。
 ---@param source_id string|string[]
----@return { status: "new"|"read"|"unread", count: integer }[]
+---@return { status: "read"|"unread", count: integer }[]
 function BookDB.readStatusCountsBySource(source_id)
     local where, args = Base.sourceClause("source_id", source_id)
     local result, nrows = Base.query(
         [[SELECT CASE
-                   WHEN is_new=1 THEN 'new'
                    WHEN read_state=1 THEN 'read'
                    ELSE 'unread'
                  END,
                  COUNT(*)
           FROM books
-          WHERE ]] .. where .. [[ AND in_library=1
+          WHERE ]] .. where .. [[ AND deleted=0
           GROUP BY CASE
-                     WHEN is_new=1 THEN 'new'
                      WHEN read_state=1 THEN 'read'
                      ELSE 'unread'
                    END;]],
         unpack(args)
     )
-    local counts = { new = 0, read = 0, unread = 0 }
+    local counts = { read = 0, unread = 0 }
     if result and nrows and nrows > 0 then
         for i = 1, nrows do
             counts[result[1][i]] = tonumber(result[2][i]) or 0
         end
     end
     return {
-        { status = "new", count = counts.new },
         { status = "read", count = counts.read },
         { status = "unread", count = counts.unread },
     }
 end
 
---- 按 (source_id, stable_id) 删除 books 行（不动 reading_stats），连带清目录缓存
+--- 按 (source_id, stable_id) 删除 books 行
 ---@param source_id string
 ---@param stable_id string
 ---@return boolean
@@ -868,17 +842,17 @@ end
 ---@param max_age number|nil
 ---@return string|nil, number|nil
 function BookDB.getToc(source_id, stable_id, max_age)
-    local payload, fetched_at = Base.rowexec(
+    local payload, toc_at = Base.rowexec(
         [[SELECT toc, toc_fetched_at FROM books
           WHERE source_id=? AND stable_id=? LIMIT 1;]],
         source_id, stable_id
     )
     if not payload then return nil end
-    fetched_at = tonumber(fetched_at) or 0
-    if max_age and os.time() - fetched_at >= max_age then
+    toc_at = tonumber(toc_at) or 0
+    if max_age and os.time() - toc_at >= max_age then
         return nil
     end
-    return payload, fetched_at
+    return payload, toc_at
 end
 
 --- 写入书籍目录缓存。
@@ -888,8 +862,8 @@ end
 ---@return boolean
 function BookDB.setToc(source_id, stable_id, payload)
     return Base.exec(
-        [[INSERT INTO books (source_id, stable_id, toc, toc_fetched_at)
-          VALUES (?,?,?,?)
+        [[INSERT INTO books (source_id, stable_id, toc, toc_fetched_at, deleted, sync_status)
+          VALUES (?,?,?,?,1,1)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             toc=excluded.toc,
             toc_fetched_at=excluded.toc_fetched_at;]],
@@ -923,16 +897,15 @@ function BookDB.getReaderPrefs(source_id, stable_id)
 end
 
 --- 写入全书阅读排版偏好（JSON 串）。
+--- 新建行 deleted=1：存排版 ≠ 上架。
 ---@param source_id string
 ---@param stable_id string
 ---@param payload string
 ---@return boolean
 function BookDB.setReaderPrefs(source_id, stable_id, payload)
     return Base.exec(
-        -- in_library=0：存排版偏好不代表这本书在书架上，
-        -- 写成 1 会让对账隐藏过的书凭空回到书架。
-        [[INSERT INTO books (source_id, stable_id, reader_prefs, in_library)
-          VALUES (?, ?, ?, 0)
+        [[INSERT INTO books (source_id, stable_id, reader_prefs, deleted, sync_status)
+          VALUES (?, ?, ?, 1, 1)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             reader_prefs=excluded.reader_prefs;]],
         source_id,

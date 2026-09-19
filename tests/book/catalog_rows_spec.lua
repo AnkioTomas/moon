@@ -9,6 +9,7 @@ local Assert = require("support.assert")
 
 -- 可控假 books 表：key = source_id .. "\n" .. stable_id
 local FakeBooks = {}
+local FakeProgress = {}
 package.preload["db.book"] = function()
     return {
         get = function(source_id, stable_id)
@@ -16,7 +17,15 @@ package.preload["db.book"] = function()
         end,
     }
 end
+package.preload["db.progress"] = function()
+    return {
+        get = function(source_id, stable_id)
+            return FakeProgress[source_id .. "\n" .. tostring(stable_id)]
+        end,
+    }
+end
 package.loaded["book.catalog"] = nil
+package.loaded["db.progress"] = nil
 
 local Catalog = require("book.catalog")
 
@@ -207,7 +216,8 @@ do -- max_total_pages 为 0 / nil 时 percent 为 0；无 daily 时 days 为空
 end
 
 do -- 微信日历点日展示该日期所在周的远端书单
-    FakeBooks["wechat\n42"] = { title = "长安的荔枝", authors = "马伯庸", percent = 60 }
+    FakeBooks["wechat\n42"] = { title = "长安的荔枝", authors = "马伯庸" }
+    FakeProgress["wechat\n42"] = { fraction = 0.60 }
     local r = Catalog.toInsight("wechat",
         { total_seconds = 1800 },
         {
@@ -234,4 +244,6 @@ end
 -- 收尾：不影响同进程内后续用例
 package.preload["db.book"] = nil
 package.loaded["db.book"] = nil
+package.preload["db.progress"] = nil
+package.loaded["db.progress"] = nil
 package.loaded["book.catalog"] = nil

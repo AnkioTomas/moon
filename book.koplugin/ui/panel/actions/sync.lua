@@ -25,9 +25,11 @@ return {
             if not progress_ok then return end
             require("book.note").save(ui, identity, function(notes_ok)
                 if not notes_ok then return end
+                -- 面板只推脏数据。进度/笔记 pull 仅开书（Progress.pull / Note.pull）。
                 require("book.sync").runAsync(source, {
                     identity = identity,
                     skip_books = true,
+                    dirty_only = true,
                 }, function(result, err)
                     UIManager:show(require("ui/widget/infomessage"):new{
                         text = result and _("同步完成")

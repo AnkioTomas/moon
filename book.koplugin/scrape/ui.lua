@@ -95,9 +95,7 @@ local function applyResult(identity, result, done)
         intro = result.intro,
         category = existing and existing.category or nil,
         series = result.series,
-        percent = existing and existing.percent or 0,
         md5 = existing and existing.md5 or nil,
-        fetched_at = os.time(),
     })
     if not ok then
         done(_("元数据更新失败"))

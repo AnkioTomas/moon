@@ -5,7 +5,6 @@
 --]]
 
 local Base = require("db.base")
-local Book = require("types.book").Book
 local JSON = require("json")
 local logger = require("utils.log")
 
@@ -47,18 +46,15 @@ local function positiveInt(value)
     return math.floor(n)
 end
 
---- 进度落盘后同步 books.percent，避免只读 books 表的 UI 显示旧值。
+--- 进度满时抬 books.read_state（进度真源在本表，不再写 books.percent）。
 ---@param source_id string
 ---@param stable_id string
 ---@param fraction number
-local function syncBookPercent(source_id, stable_id, fraction)
-    local percent = Book.clampPercent(fraction, false, true)
+local function syncReadState(source_id, stable_id, fraction)
+    if (tonumber(fraction) or 0) < 1 then return end
     Base.exec(
-        [[UPDATE books SET percent=?,
-            read_state=CASE WHEN ?>=1 THEN 1 ELSE read_state END
-          WHERE source_id=? AND stable_id=?;]],
-        percent,
-        fraction,
+        [[UPDATE books SET read_state=1
+          WHERE source_id=? AND stable_id=? AND read_state=0;]],
         source_id,
         stable_id
     )
@@ -98,10 +94,7 @@ end
 ---@return boolean
 local function write(source_id, stable_id, pos, status, keep_dirty)
     local fraction = tonumber(pos.fraction)
-    -- keep_dirty 必须在这里判定：靠 SQL 的 WHERE 只能让 UPDATE 静默 no-op，
-    -- 下面的 syncBookPercent 仍会把 books.percent 改成远端值，
-    -- 于是 pending_progress 是本地进度、books.percent 是云端进度，两处显示打架。
-    -- 本地版本更新算正常结果，返回 true（调用方 assert 成功）。
+    -- keep_dirty：本地脏行整行跳过，避免远端覆盖。
     if keep_dirty and tonumber(Base.rowexec(
             "SELECT sync_status FROM pending_progress WHERE source_id=? AND stable_id=?;",
             source_id, stable_id)) == 0 then
@@ -130,7 +123,7 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
     ) then
         return false
     end
-    syncBookPercent(source_id, stable_id, fraction)
+    syncReadState(source_id, stable_id, fraction)
     return true
 end
 
@@ -251,7 +244,7 @@ function ProgressDB.recent(source_id, limit)
             AND EXISTS (
               SELECT 1 FROM books b
                WHERE b.source_id=p.source_id AND b.stable_id=p.stable_id
-                 AND b.in_library=1
+                 AND b.deleted=0
             )
           ORDER BY p.updated_at DESC, p.stable_id ASC LIMIT ?;]],
         unpack(args)
