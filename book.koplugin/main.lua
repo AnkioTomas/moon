@@ -57,22 +57,12 @@ function BookPlugin:init()
     logger.start()
     logger.info("book plugin init", self.ui and self.ui.document and "reader" or "filemanager")
     Host.onCreate(self)
-    -- ReaderLink 已原生处理脚注；升级后第一次初始化打开一次，之后用户可在「链接」菜单关闭。
-    if G_reader_settings and not G_reader_settings:isTrue("book_footnote_popup_initialized") then
-        G_reader_settings:saveSetting("footnote_link_in_popup", true)
-        G_reader_settings:saveSetting("book_footnote_popup_initialized", true)
-    end
     require("translate.init").onCreate()
     require("baike.init").onCreate()
     require("dictionary.init").onCreate()
     require("ui.panel.native").onCreate(self.ui)
     require("lockscreen.init").onCreate()
     require("remote.init").onCreate()
-    -- ButtonDialog 依赖设备后端；离线加载插件时该后端不存在，不能让无关功能整个失效。
-    local ok_share, err_share = pcall(function() require("ui.screenshot_share").onCreate() end)
-    if not ok_share then
-        logger.warn("book screenshot share onCreate failed:", err_share)
-    end
     require("ime.init").onCreate()
     require("patch.manager").onCreate({ plugin_root = self.path })
     if self.ui and not self.ui.document then

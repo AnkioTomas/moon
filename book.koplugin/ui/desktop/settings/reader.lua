@@ -1,4 +1,4 @@
---[[-- 阅读设置：X-Ray、顶底栏、翻页动画、划词弹窗项显隐。
+--[[-- 阅读设置：X-Ray、顶底栏、阅读优化、划词弹窗项显隐。
 @module koplugin.book.ui.desktop.settings.reader
 --]]
 
@@ -266,6 +266,23 @@ function ReaderSettings:sections(desktop)
                         callback = function()
                             Bars.setBottomBarPreference(not bottom_on, readerUi())
                             refreshReaderUi()
+                            desktop:updateView()
+                        end,
+                    })
+                end,
+            },
+        },
+        {
+            title = _("阅读优化"),
+            rows = {
+                function(iw)
+                    local footnote_on = G_reader_settings:isTrue("footnote_link_in_popup")
+                    return SettingRow.build(iw, {
+                        kind = "toggle", icon = "article", title = _("脚注弹窗"),
+                        subtitle = _("脚注链接在弹窗中显示，而不是跳转"),
+                        status = footnote_on and _("开") or _("关"), status_on = footnote_on,
+                        callback = function()
+                            G_reader_settings:saveSetting("footnote_link_in_popup", not footnote_on)
                             desktop:updateView()
                         end,
                     })
