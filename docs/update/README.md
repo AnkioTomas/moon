@@ -11,6 +11,7 @@
 - `install.lua`：解压/替换（Job）
 - API：`https://api.github.com/repos/AnkioTomas/moon/releases/latest`
 - 检查间隔默认 24h；当前版本来自 `bookversion`
+- 自动检查入口：`Desktop:onResume` → `Update.autoCheck`（仅提示，不自动装）
 - `_checking` / `_installing` 防重入；在飞 job 可 cancel
 
 版本文件必须叫 `bookversion.lua`（不能叫 `version.lua`，与 KOReader 冲突）。CI 在 `v*` tag 注入版本。
@@ -21,7 +22,7 @@
 local Update = require("update")
 
 Update.checkAsync({ interactive = true })  -- 设置页「检查更新」
-Update.checkAsync({ interactive = false }) -- 启动静默检查（仅提示）
+-- 静默检查：Desktop:onResume → Update.autoCheck（仅有新版本才提示）
 
 -- 用户确认后内部走 download + Install
 ```

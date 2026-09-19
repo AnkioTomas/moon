@@ -165,7 +165,7 @@ do
     plugin:emitToSource("network_connected") -- 不得抛出
 end
 
--- 网络恢复：脏重试 + 源事件 + 锁屏刷新 + FM 自动更新检查
+-- 网络恢复：脏重试 + 源事件 + 锁屏刷新；更新检查不在这里（桌面 onResume）
 do
     local seen = {}
     current_source = {
@@ -184,7 +184,7 @@ do
     plugin:onNetworkConnected()
     Assert.eq(calls.retry_dirty, 1)
     Assert.eq(calls.lock_refresh, 1)
-    Assert.eq(calls.update_check, 1)
+    Assert.eq(calls.update_check, 0, "自动更新检查只在 Desktop:onResume")
     Assert.eq(table.concat(seen, ","), "network_connected,desktop_net")
 end
 
@@ -274,7 +274,7 @@ Assert.is_nil(calls.desktop_event, "已销毁的桌面不再收 onEvent")
 
 version_current = 202606000000
 local attach_count = calls.host
-package.loaded["version.adapter"] = nil
+package.loaded["ko_version"] = nil
 setmetatable({ path = "book.koplugin", ui = {} }, Main):init()
 Assert.eq(calls.host, attach_count, "不支持的 KOReader 版本不得进入插件")
 Assert.eq(calls.version_dialog.text, "月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：2026.06 (202606000000)")

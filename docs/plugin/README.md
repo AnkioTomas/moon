@@ -10,7 +10,8 @@ KOReader 为 FileManager 与 Reader **各创建一个**插件实例。Reader 实
 
 ```text
 BookPlugin:init
-├── 版本检查 / logger / Turbo（须在 UIManager:run 前由别处启用）
+├── ko_version.check（KOReader 本地门槛；不满足则 return）
+├── logger / Turbo（须在 UIManager:run 前由别处启用）
 ├── Host.onCreate   ← 字体图标、主菜单、Dispatcher、start_with 种入
 ├── translate / baike / dictionary / panel.native  → onCreate
 ├── lockscreen / remote / ime → onCreate
@@ -71,7 +72,7 @@ self:emitToSource("page_changed", payload, identity.source)
 | `onReaderReady` / `onCloseDocument` / 章界 / 翻页 / 注解 | `Session` |
 | `onSuspend` | → 各模块 `onPause`（Session / 锁屏 / 远程 / 桌面） |
 | `onResume` | → 各模块 `onResume`（桌面在栈上自收 Resume） |
-| `onNetworkConnected` | 脏重试 + 源事件 + 锁屏 + FM 更新检查 + 桌面 |
+| `onNetworkConnected` | 脏重试 + 源事件 + 锁屏 + 桌面 |
 | `onExit` | → 各模块 `onDestroy`（更新 / 远程 / 桌面） |
 
 | 源事件 | 含义 |

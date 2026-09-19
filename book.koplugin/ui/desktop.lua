@@ -267,6 +267,11 @@ end
 function Desktop:onResume()
     notify(self.topbar, "onResume")
     notify(tabPage(self), "onResume")
+    -- 插件更新检查走桌面 Resume，不在插件 init / 网络回调里抢跑。
+    local root = self.plugin and self.plugin.path
+    if root then
+        require("update.init").autoCheck(root)
+    end
 end
 
 function Desktop:onPause()

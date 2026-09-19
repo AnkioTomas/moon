@@ -121,6 +121,21 @@ log = {}
 desk:onResume()
 Assert.eq(table.concat(log, ","), "topbar.onResume,home.onResume")
 
+-- 有 plugin.path 时 Resume 触发静默更新检查
+local update_checks = 0
+package.preload["update.init"] = function()
+    return {
+        autoCheck = function(root)
+            update_checks = update_checks + 1
+            Assert.eq(root, "/plugins/book.koplugin")
+        end,
+    }
+end
+package.loaded["update.init"] = nil
+desk.plugin.path = "/plugins/book.koplugin"
+desk:onResume()
+Assert.eq(update_checks, 1)
+
 desk.plugin.desktop = desk
 log = {}
 desk:onDestroy()
