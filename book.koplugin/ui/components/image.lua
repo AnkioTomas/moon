@@ -334,7 +334,6 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
             self._download = nil
         end
     end
-    box.abort = box.cancel
 
     --- 暂停时保留已绘制内容，但取消下载并拒绝后到的图片结果。
     -- 首页暂停时保留已绘制的图片，但停止任务并拒绝晚到结果。

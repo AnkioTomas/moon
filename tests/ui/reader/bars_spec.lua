@@ -97,7 +97,7 @@ Assert.eq(Bars.remainingText(59), "")
 Assert.eq(Bars.remainingText(60), "约 1 分钟")
 Assert.eq(Bars.remainingText(5400), "约 1 小时 30 分")
 
--- systemTopVisible / systemBottomVisible
+-- topVisible / bottomVisible
 local events = {}
 local ui_top = {
     rolling = true,
@@ -129,8 +129,6 @@ local ui_top = {
     handleEvent = function(_, event) events[#events + 1] = event end,
 }
 ui_top.view.footer.ui = ui_top
-Assert.is_true(Bars.systemTopVisible(ui_top))
-Assert.is_true(Bars.systemBottomVisible(ui_top))
 Assert.is_true(Bars.topVisible(ui_top))
 Assert.is_true(Bars.bottomVisible(ui_top))
 Assert.eq(Bars.topHeight(ui_top), 40)
@@ -139,12 +137,12 @@ ui_top.view.state.offset.y = 30
 Assert.eq(Bars.topHeight(ui_top), 40)
 
 ui_top.document.getHeaderHeight = function() return 0 end
-Assert.is_false(Bars.systemTopVisible(ui_top))
+Assert.is_false(Bars.topVisible(ui_top))
 Assert.eq(Bars.topHeight(ui_top), 0)
 
 ui_top.document.getHeaderHeight = function() return 28 end
 ui_top.view.view_mode = "scroll"
-Assert.is_false(Bars.systemTopVisible(ui_top))
+Assert.is_false(Bars.topVisible(ui_top))
 
 -- 渲染不可见不等于配置关闭：滚动模式下仍须写入 status_line。
 ui_top.document.configurable.status_line = 0
@@ -154,7 +152,7 @@ Assert.eq(events[1].args[2], 1)
 
 ui_top.view.view_mode = "page"
 ui_top.view.footer_visible = false
-Assert.is_false(Bars.systemBottomVisible(ui_top))
+Assert.is_false(Bars.bottomVisible(ui_top))
 
 -- setTopBarPreference：按显隐同步 ConfigChange + SetStatusLine
 -- 顶栏当前可见（getHeaderHeight 28 + page 模式），关掉它 → status_line 置 1

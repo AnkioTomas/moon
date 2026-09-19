@@ -26,7 +26,7 @@ do
         },
     } })
     Assert.eq(result.replace.mode, "ranges")
-    Assert.len(result.replace.ranges, 4)
+    Assert.len(result.replace.ranges, 3)
     local by_id = {}
     for _, row in ipairs(result.rows) do by_id[row.stable_id] = row end
     Assert.eq(by_id[Stats.TOTAL_ID].duration, 7200)

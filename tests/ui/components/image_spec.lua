@@ -164,7 +164,7 @@ Assert.is_true(downloads[before_abort + 1].cancelled, "abort 只杀这一张")
 for i = before_abort + 2, #downloads do
     Assert.is_false(downloads[i].cancelled, "abort 不得误杀其它下载")
 end
-direct:abort()
+direct:cancel()
 for i = 1, #extras do extras[i]:free() end
 
 -- 磁盘缓存命中不再下载，直接 ImageWidget。

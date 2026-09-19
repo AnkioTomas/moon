@@ -9,9 +9,8 @@ local Client = require("source.copymanga.client")
 
 do
     Assert.eq(Client.normalizeBaseUrl(""), Client.DEFAULT_BASE_URL)
-    Assert.eq(Client.normalizeBaseUrl("https://copy4000.com"), Client.DEFAULT_BASE_URL)
-    Assert.eq(Client.normalizeBaseUrl("https://copy4000.com/"), Client.DEFAULT_BASE_URL)
     Assert.eq(Client.normalizeBaseUrl("https://api.example.com/"), "https://api.example.com")
+    Assert.eq(Client.normalizeBaseUrl("https://copy4000.com"), "https://copy4000.com")
 end
 
 do

@@ -13,7 +13,6 @@ local Stats = {}
 
 local DAY_PREFIX = "__wr:day:"
 local WEEK_PREFIX = "__wr:week:"
-local LEGACY_BOOK_PREFIX = "__wr:book:"
 local TOTAL_ID = "__wr:total"
 
 local function field(wire, key)
@@ -208,9 +207,6 @@ function Stats.fromWires(source_id, overall, annuals, monthlies, weeklies)
         local from_ts, to_ts = yearRange(annual)
         ranges[#ranges + 1] = {
             stable_prefix = DAY_PREFIX, from_ts = from_ts, to_ts = to_ts,
-        }
-        ranges[#ranges + 1] = {
-            stable_prefix = LEGACY_BOOK_PREFIX, from_ts = from_ts, to_ts = to_ts,
         }
     end
     for _, monthly in ipairs(monthlies or {}) do

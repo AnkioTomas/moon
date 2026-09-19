@@ -107,7 +107,7 @@ end
 ---@return BookListResult
 function Mapper.list(wire)
     if type(wire) ~= "table" then
-        return BookListResult.empty()
+        return BookListResult.new()
     end
     local list = wire.data or wire.list or wire.books or {}
     local out = {}

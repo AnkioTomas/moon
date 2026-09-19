@@ -80,7 +80,6 @@ package.preload["ui.components.bookui"] = function()
         line = function() return 1 end,
         rule = function() return 0 end,
         iconSz = function() return 24 end,
-        buttonFontSize = function() return 14 end,
         progressBar = function() return { getSize = function() return { w = 10, h = 6 } end } end,
     }
 end

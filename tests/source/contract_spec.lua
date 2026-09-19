@@ -56,7 +56,7 @@ Assert.eq(ProgressPosition.clampFraction(0.42), 0.42)
 Assert.eq(ProgressPosition.clampFraction(42), 0.42)
 
 do
-    local list = BookListResult.empty()
+    local list = BookListResult.new()
     Assert.eq(list.count, 0)
     Assert.eq(#list.data, 0)
 end

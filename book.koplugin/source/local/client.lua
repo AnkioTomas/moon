@@ -419,7 +419,7 @@ local function scanJob(root, on_done)
         end,
     })
     return { cancel = function()
-            job:abort()
+            job:cancel()
         end }
 end
 
@@ -691,7 +691,7 @@ function Client:indexOneAsync(path, cb)
         end,
     })
     return { cancel = function()
-            job:abort()
+            job:cancel()
         end }
 end
 

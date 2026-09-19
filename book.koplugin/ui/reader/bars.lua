@@ -176,7 +176,7 @@ end
 ---@param enabled boolean 是否显示系统底栏
 function Bars.setSystemBottom(ui, enabled)
     ui = ui or Bars.ui
-    if not ui or Bars.systemBottomVisible(ui) == enabled then
+    if not ui or Bars.bottomVisible(ui) == enabled then
         return
     end
     local footer = ui.view and ui.view.footer
@@ -260,10 +260,10 @@ function Bars.applyPreferences(ui)
     Bars.setSystemBottom(ui, Bars.bottomBarPreference())
 end
 
---- 系统顶栏（CRe Alt Status Bar）是否启用。
+--- 顶栏 overlay 是否应绘制（系统 Alt Status Bar 开）。
 ---@param ui table|nil
 ---@return boolean
-function Bars.systemTopVisible(ui)
+function Bars.topVisible(ui)
     ui = ui or Bars.ui
     if not ui or not ui.document or not ui.rolling then
         return false
@@ -274,27 +274,13 @@ function Bars.systemTopVisible(ui)
     return ui.document:getHeaderHeight() > 0
 end
 
---- 系统底栏（ReaderFooter）是否可见。
----@param ui table|nil
----@return boolean
-function Bars.systemBottomVisible(ui)
-    ui = ui or Bars.ui
-    local view = ui and ui.view
-    return view and view.footer_visible
-end
-
---- 顶栏 overlay 是否应绘制（= 系统 Alt Status Bar 开）。
----@param ui table|nil
----@return boolean
-function Bars.topVisible(ui)
-    return Bars.systemTopVisible(ui)
-end
-
---- 底栏 overlay 是否应绘制（= 系统 ReaderFooter 开）。
+--- 底栏 overlay 是否应绘制（系统 ReaderFooter 开）。
 ---@param ui table|nil
 ---@return boolean
 function Bars.bottomVisible(ui)
-    return Bars.systemBottomVisible(ui)
+    ui = ui or Bars.ui
+    local view = ui and ui.view
+    return view and view.footer_visible
 end
 
 --- 顶栏 overlay 在 ReaderView paintTo 坐标下的 y / 高度。
@@ -462,14 +448,14 @@ local function hijackFooter(ui)
     end
     local orig_tap = footer.TapFooter
     footer.TapFooter = function(self, ges)
-        if Bars.systemBottomVisible(self.ui) then
+        if Bars.bottomVisible(self.ui) then
             return false
         end
         return orig_tap(self, ges)
     end
     local orig_hold = footer.onHoldFooter
     footer.onHoldFooter = function(self, ges)
-        if Bars.systemBottomVisible(self.ui) then
+        if Bars.bottomVisible(self.ui) then
             return true
         end
         return orig_hold(self, ges)

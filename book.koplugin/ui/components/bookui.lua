@@ -110,14 +110,6 @@ function UI.setScale(n)
     return n
 end
 
---- 循环切换到下一档缩放。
----@return number
-function UI.cycleScale()
-    local n = UI.getScale() + STEP
-    if n > MAX_SCALE then n = MIN_SCALE end
-    return UI.setScale(n)
-end
-
 --- 网格最大列数下限。
 ---@return number
 function UI.gridMaxColsMin()
@@ -292,12 +284,6 @@ function UI.menuFontSize()
     return UI.fontSize(22)
 end
 
---- 按钮字号。
----@return number
-function UI.buttonFontSize()
-    return UI.fontSize(20)
-end
-
 --- 网格封面高度上限：跟屏高走，避免宽屏三列把封面撑到半屏。
 ---@param area_h number|nil
 ---@return number
@@ -379,28 +365,6 @@ function UI.denseCoverMetrics(avail_w, budget_h, opts)
     end
 
     return slot_w, cw, ch, cols, gap, row_gap, cell_h
-end
-
---- 网格尺度：列宽铺满屏幕；封面在格子里保持 2:3。
---- 返回 slot_w, cover_w, cover_h, cols, gap
----@param avail_w number
----@param area_h number
----@param opts table|nil
----@return number, number, number, number, number
-function UI.coverGridMetrics(avail_w, area_h, opts)
-    opts = opts or {}
-    local title_extra = opts.title_extra or 0
-    local slot_w, cw, ch, cols, gap = UI.denseCoverMetrics(avail_w, area_h, {
-        gap = opts.gap or UI.sz(12),
-        min_cw = opts.min_cw,
-        min_cols = opts.min_cols,
-        max_cols = opts.max_cols,
-        target_cw = opts.target_cw or opts.min_cw or UI.sz(56),
-        title_extra = title_extra,
-        row_gap = opts.row_gap,
-        max_h = opts.max_h,
-    })
-    return slot_w, cw, ch, cols, gap
 end
 
 --- 最近阅读主角封面最大高度。
