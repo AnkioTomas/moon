@@ -33,10 +33,6 @@ function Store.rememberMany(books)
     local payload = {}
     for _, book in ipairs(books) do
         if book.source_id and book.stable_id then
-            local deleted = book.deleted
-            if deleted == nil and book.in_library ~= nil then
-                deleted = (book.in_library == true or tonumber(book.in_library) == 1) and 0 or 1
-            end
             payload[#payload + 1] = {
                 source_id = book.source_id,
                 stable_id = book.stable_id,
@@ -47,7 +43,7 @@ function Store.rememberMany(books)
                 series = book.series,
                 intro = book.intro,
                 cover = book.cover,
-                deleted = deleted,
+                deleted = book.deleted,
             }
         end
     end

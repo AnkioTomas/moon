@@ -125,7 +125,7 @@ package.preload["apps/reader/readerui"] = function()
 end
 
 local Native = require("ui.panel.native")
-Native.install()
+Native.onCreate()
 
 -- 渲染当前 tab：调对应 icon callback，回调里 switchMenuTab 被 noop 掉，事后还原
 TouchMenu.cur_tab = 1

@@ -52,18 +52,6 @@ CREATE TABLE IF NOT EXISTS books (
                 return false
             end
         end
-        -- 旧库：fetched_at → inserted_at；in_library → deleted（取反）
-        if present.fetched_at and present.inserted_at then
-            if not Base.exec([[UPDATE books SET inserted_at=fetched_at
-                WHERE inserted_at=0 AND fetched_at<>0;]]) then
-                return false
-            end
-        end
-        if present.in_library and present.deleted then
-            if not Base.exec([[UPDATE books SET deleted=CASE WHEN in_library=1 THEN 0 ELSE 1 END;]]) then
-                return false
-            end
-        end
     end
     return Base.exec([[
 CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(source_id, md5);
@@ -116,14 +104,12 @@ end
 function BookDB.upsertRemote(row)
     local source_id = row.source_id
     local stable_id = row.stable_id
-    local has_membership = row.deleted ~= nil or row.in_library ~= nil
+    local has_membership = row.deleted ~= nil
     local deleted = 1
     if row.deleted ~= nil then
         deleted = (row.deleted == true or tonumber(row.deleted) == 1) and 1 or 0
-    elseif row.in_library ~= nil then
-        deleted = (row.in_library == true or tonumber(row.in_library) == 1) and 0 or 1
     end
-    local now = tonumber(row.inserted_at) or tonumber(row.fetched_at) or os.time()
+    local now = tonumber(row.inserted_at) or os.time()
     return Base.exec(
         [[INSERT INTO books (
             source_id, stable_id, md5, title, authors, category,
@@ -175,7 +161,7 @@ end
 function BookDB.upsertLocal(row)
     local source_id = row.source_id
     local stable_id = row.stable_id
-    local now = tonumber(row.inserted_at) or tonumber(row.fetched_at) or os.time()
+    local now = tonumber(row.inserted_at) or os.time()
     return Base.exec(
         [[INSERT INTO books (
             source_id, stable_id, title, authors, category,
@@ -212,7 +198,6 @@ function BookDB.reconcile(source_id, books, opts)
         for k, v in pairs(row) do copy[k] = v end
         copy.source_id = source_id
         copy.deleted = 0
-        copy.in_library = nil
         batch[#batch + 1] = copy
     end
     if ok then ok = BookDB.upsertRemoteMany(batch) end
@@ -307,7 +292,6 @@ local function rowToBook(source_id_r, stable_id_r, digest, title, authors, categ
         inserted_at = tonumber(inserted_at) or 0,
         path = path,
         deleted = del,
-        in_library = del == 0,
         sync_status = tonumber(sync_status) or 1,
         read_state = tonumber(read_state) or 0,
         percent = 0,
@@ -682,7 +666,6 @@ function BookDB.listBySource(source_id, opts)
                 read_state = tonumber(result[11][i]) or 0,
                 path = result[12][i],
                 deleted = 0,
-                in_library = true,
             }
         end
     end

@@ -2,7 +2,7 @@
 KOReader 宿主钩子：启动项菜单 + 桌面接管。
 
 对外：
-  attach(plugin) — init（菜单 + 启动项 + 可选自动开桌面）
+  onCreate(plugin) — init（菜单 + 启动项 + 可选自动开桌面）
   onShow(plugin) — FM 显示且 want 则开桌面
 
 状态只要 want：nil 未见过 FM / true 待开 / false 不自动开
@@ -167,7 +167,7 @@ end
 --- 插件 init：挂钩菜单；FM 侧按 start_with 决定是否自动开桌面
 ---@param plugin table
 ---@return nil
-function Host.attach(plugin)
+function Host.onCreate(plugin)
     pcall(function()
         require("utils.font").applyCurrent()
     end)

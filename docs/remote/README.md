@@ -45,12 +45,15 @@ local Remote = require("remote")
 Remote.start()    -- 设置页开关 / autostart
 Remote.stop()
 
--- main.lua
+-- main.lua：KOReader onSuspend/onExit → 模块生命周期
 function BookPlugin:onSuspend()
-    Remote.onSuspend()  -- 或 init 导出的同名
+    Remote.onPause()
 end
 function BookPlugin:onResume()
     Remote.onResume()
+end
+function BookPlugin:onExit()
+    Remote.onDestroy()
 end
 ```
 

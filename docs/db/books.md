@@ -35,8 +35,7 @@
 | `read_state` | 0 可自动已读 / 1 已读 / 2 强制未读 | `setRead` / 进度完成 | 筛选与绑带 | 与 `pending_progress.fraction` 联动 |
 
 已删除列：`percent`、`in_library`、`metadata_dirty`、`metadata_updated_at`、`is_new`、`fetched_at`。
-
-旧库迁移：`fetched_at`→`inserted_at`；`in_library=1`→`deleted=0`，否则 `deleted=1`。旧列可残留但不再读写。
+成员状态只看 `deleted`（0 在架 / 1 软删）。
 
 ## 数据流
 

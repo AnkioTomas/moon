@@ -58,7 +58,7 @@ local _ensured = false
 local function ensureFont(face, filename)
     local path = UI.pluginRoot() .. "fonts/" .. filename
     if lfs.attributes(path, "mode") ~= "file" then
-        logger.err("book.icon missing font", path)
+        logger.error("book.icon missing font", path)
         return false
     end
     FontList:getFontList()

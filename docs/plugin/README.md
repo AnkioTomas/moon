@@ -10,13 +10,19 @@ KOReader 为 FileManager 与 Reader **各创建一个**插件实例。Reader 实
 
 ```text
 BookPlugin:init
-├── 版本检查 / logger / Turbo（须在 UIManager:run 前）
-├── Host.attach     ← 字体图标、主菜单、Dispatcher、start_with
-├── main 侧增强     ← 翻译/百科/词典、panel、锁屏、远程、IME、补丁…
+├── 版本检查 / logger / Turbo（须在 UIManager:run 前由别处启用）
+├── Host.onCreate   ← 字体图标、主菜单、Dispatcher、start_with 种入
+├── 脚注弹窗一次性默认
+├── translate / baike / dictionary / panel.native  → onCreate
+├── lockscreen / remote / screenshot_share / ime → onCreate
+├── patch.manager.onCreate + 翻页动画检查；FM 侧 update.onCreate
 └── Reader → emitToSource("reader_open")
 ```
 
-`Host` 不管锁屏/远程/IME。可选增强失败只记日志，不得拖垮阅读主流程。
+`Host` 不管锁屏/远程/IME。可选增强失败只记日志（如截图分享），不得拖垮阅读主流程。
+
+插件增强模块统一 Desktop 生命周期名：`onCreate` / `onPause` / `onResume` / `onDestroy`。  
+KOReader 宿主事件仍叫 `onSuspend` / `onExit`（契约），内部再转发到上述名字。
 
 ### Host.want
 
@@ -26,7 +32,7 @@ BookPlugin:init
 | `true` | `start_with == bookshelf_book`，下次 FM `onShow` 自动开桌面 |
 | `false` | 不再自动开 |
 
-首次安装（`common.start_with_seeded` 仍为 false）时，`Host.attach` 会**强制**把 KOReader 的 `start_with` 写成 `bookshelf_book`，不跟系统默认 `filemanager`。只种一次；之后设置里「启动打开桌面」或系统启动项由用户改。
+首次安装（`common.start_with_seeded` 仍为 false）时，`Host.onCreate` 会**强制**把 KOReader 的 `start_with` 写成 `bookshelf_book`，不跟系统默认 `filemanager`。只种一次；之后设置里「启动打开桌面」或系统启动项由用户改。
 
 `openDesktop`：若在 Reader 实例上调用，先关文档，再委托 **FM 实例**打开，避免叠层。
 
@@ -64,9 +70,10 @@ self:emitToSource("page_changed", payload, identity.source)
 | `onShow` | Host：FM 显示且 want→开桌面；`fm_open` |
 | `onDocSettingsLoad` | 全书阅读偏好注入 sidecar |
 | `onReaderReady` / `onCloseDocument` / 章界 / 翻页 / 注解 | `Session` |
-| `onSuspend` / `onResume` | 会话结清/恢复；远程与锁屏 |
-| `onNetworkConnected` | 脏重试 + 源事件 + 锁屏 |
-| `onExit` | 停远程、毁桌面、刷日志 |
+| `onSuspend` | → 各模块 `onPause`（Session / 锁屏 / 远程 / 桌面） |
+| `onResume` | → 各模块 `onResume`（桌面在栈上自收 Resume） |
+| `onNetworkConnected` | 脏重试 + 源事件 + 锁屏 + FM 更新检查 + 桌面 |
+| `onExit` | → 各模块 `onDestroy`（更新 / 远程 / 桌面） |
 
 | 源事件 | 含义 |
 |---|---|

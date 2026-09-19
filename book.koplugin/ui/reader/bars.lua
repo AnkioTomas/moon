@@ -486,7 +486,7 @@ function Bars.install(ui)
     end
     ui._book_bars_installed = true
     hijackFooter(ui)
-    -- Reader.attach 在 ReaderReady 内执行，postInitCallback 此时已为 nil。
+    -- Reader.onCreate 在 ReaderReady 内执行，postInitCallback 此时已为 nil。
     if ui.registerPostReaderReadyCallback then
         ui:registerPostReaderReadyCallback(function()
             hijackFooter(ui)

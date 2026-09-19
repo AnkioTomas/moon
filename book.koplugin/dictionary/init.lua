@@ -45,7 +45,7 @@ end
 
 --- 安装一次；只修改入口方法，不触碰 KOReader 源码。
 ---@return nil
-function DictInit.install()
+function DictInit.onCreate()
     local ReaderDictionary = require("apps/reader/modules/readerdictionary")
     if ReaderDictionary._book_dict_installed then
         return

@@ -33,7 +33,7 @@ _G.G_reader_settings = {
 }
 
 local Native = require("ui.panel.native")
-Native.install({}, { reader = true })
+Native.onCreate({}, { reader = true })
 Assert.eq(saved.show_bottom_menu, false)
 
 ReaderMenu:onShowMenu(nil)

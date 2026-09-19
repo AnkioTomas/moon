@@ -139,7 +139,7 @@ local function cleanup()
     os.remove(dest)
     os.remove(dest .. ".part")
     os.execute("rm -rf " .. TMP)
-    fake_settings.pinyin_dict_built_at = nil
+    fake_settings.ime_dict_built_at = nil
 end
 
 local ok_run, err_run = pcall(function()
@@ -219,8 +219,8 @@ local ok_run, err_run = pcall(function()
     f:close()
 
     -- manifest built_at 是本地词库版本，供下次更新比较。
-    Assert.eq(MoonSettings.get().pinyin_dict_built_at, manifest.built_at)
-    Assert.eq(MoonSettings.get().pinyin_dict_sha256, raw_sha)
+    Assert.eq(MoonSettings.get().ime_dict_built_at.pinyin, manifest.built_at)
+    Assert.eq(MoonSettings.get().ime_dict_sha256.pinyin, raw_sha)
 
     -- 临时目录已清理
     Assert.is_nil(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/ime_pinyin_dict.dl"))
@@ -246,7 +246,7 @@ local ok_run, err_run = pcall(function()
     -- built_at 未变时只检查 manifest，不重复下载或拼接词库；
     -- SHA 只是下载完整性记录，不能作为用户可见版本。
     local downloads_before = #downloads
-    fake_settings.pinyin_dict_sha256 = "stale-sha"
+    fake_settings.ime_dict_sha256 = { pinyin = "stale-sha" }
     local done_again, ok_again
     Download.ensure("pinyin", function(ok)
         done_again = true

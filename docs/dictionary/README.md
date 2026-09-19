@@ -19,8 +19,8 @@
 local Dict = require("dictionary")
 
 Dict.isEnabled()
-Dict.install()    -- main 初始化时 hook
-Dict.uninstall()  -- 或 setEnabled(false) 回退原生
+Dict.onCreate()   -- main 初始化时 hook
+-- setEnabled(false) 回退原生
 
 -- 管理/下载由菜单进入；业务代码一般只调 init
 ```

@@ -58,7 +58,7 @@ local function setup(target)
     if target ~= nil then
         write(install .. "/frontend/ui/uimanager.lua", target)
     end
-    Manager.init({
+    Manager.onCreate({
         plugin_root = PLUGIN_ROOT,
         install_dir = install,
         backups_root = base .. "/backups",

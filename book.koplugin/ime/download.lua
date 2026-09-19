@@ -273,8 +273,7 @@ function M.ensure(method, cb, on_progress)
         local settings = MoonSettings.get()
         local versions = type(settings.ime_dict_built_at) == "table"
             and settings.ime_dict_built_at or {}
-        local installed = method == "pinyin"
-            and settings.pinyin_dict_built_at or versions[method]
+        local installed = versions[method]
         if attr and attr.mode == "file" and attr.size == tonumber(manifest.raw_size)
             and installed == manifest.built_at then
             done(true)
@@ -356,10 +355,6 @@ assembleInJob = function(method, manifest, dest, done, report)
             c.ime_dict_sha256 = type(c.ime_dict_sha256) == "table" and c.ime_dict_sha256 or {}
             c.ime_dict_built_at[method] = manifest.built_at
             c.ime_dict_sha256[method] = manifest.raw_sha256
-            if method == "pinyin" then
-                c.pinyin_dict_built_at = manifest.built_at
-                c.pinyin_dict_sha256 = manifest.raw_sha256
-            end
             MoonSettings.save()
             logger.info("book ime dict installed:", method, manifest.tag, manifest.entries)
             done(true)

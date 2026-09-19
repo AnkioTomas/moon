@@ -22,7 +22,7 @@ package.preload["gettext"] = function()
 end
 
 local Share = require("ui.screenshot_share")
-Share.install()
+Share.onCreate()
 
 local saved = ButtonDialog:new{
     -- Screenshoter 用 BD.filepath 包住路径；真实 KOReader 标题含不可见 bidi isolate。

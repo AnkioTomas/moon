@@ -107,7 +107,7 @@ end
 
 local Baike = require("baike.init")
 Assert.is_true(Baike.isEnabled())
-Baike.install()
+Baike.onCreate()
 
 ReaderWikipedia:lookupWikipedia("第一次")
 Assert.eq(requests[1].word, "第一次")
@@ -156,5 +156,5 @@ Assert.eq(native_input_calls, 1)
 Assert.eq(native_menu_calls, 1)
 Assert.eq(DictQuickLookup:_getButtonPool().wikipedia.text, "Wikipedia")
 
-Baike.install()
+Baike.onCreate()
 Assert.eq(native_lookup_calls, 1)

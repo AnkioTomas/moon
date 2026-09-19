@@ -1,7 +1,7 @@
 --[[--
 弹出层选项。
 
-  Popup.list   — 列表（兼容入口：按 select_mode 分发到 single/multi）
+  Popup.list   — 列表（按 select_mode 分发到 single/multi）
   Popup.single — 单选列表（popup/single.lua）
   Popup.multi  — 多选列表（popup/multi.lua）
   Popup.sheet  — 居中动作表（ButtonDialog，适合少量动作）

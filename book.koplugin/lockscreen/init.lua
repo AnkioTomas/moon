@@ -82,23 +82,28 @@ function M.onResume()
 end
 
 --- 插件启动：先用有效缓存立刻接管，再后台强制重生成一次。
-function M.bootstrap()
+function M.onCreate()
     if not Settings.isCompose() then
-        logger.dbg("book.lockscreen bootstrap skipped", "mode_disabled")
+        logger.dbg("book.lockscreen onCreate skipped", "mode_disabled")
         return
     end
     local plan = Compose.plan()
     if Compose.cacheValid(plan) then
         Settings.applyCover(plan.output_path)
-        logger.dbg("book.lockscreen bootstrap cache", plan.output_path)
+        logger.dbg("book.lockscreen onCreate cache", plan.output_path)
     else
         Settings.clearCover()
-        logger.dbg("book.lockscreen bootstrap cache", "invalid")
+        logger.dbg("book.lockscreen onCreate cache", "invalid")
     end
-    Job.run(function() M.refresh(nil, true, "bootstrap") end, {
-        name = "lockscreen.bootstrap",
+    Job.run(function() M.refresh(nil, true, "onCreate") end, {
+        name = "lockscreen.onCreate",
         kind = "instant",
     })
+end
+
+--- 休眠前强制刷新锁屏图。
+function M.onPause()
+    M.refresh(nil, true, "suspend")
 end
 
 return M

@@ -45,8 +45,7 @@ function Mapper.book(row)
         intro = row.intro or row.brief,
         cover = row.cover,
         percent = tonumber(row.percent) or 0,
-        deleted = (row.deleted == true or tonumber(row.deleted) == 1) and 1
-            or ((row.in_library == true or tonumber(row.in_library) == 1) and 0 or nil),
+        deleted = (row.deleted == true or tonumber(row.deleted) == 1) and 1 or nil,
     }
 end
 

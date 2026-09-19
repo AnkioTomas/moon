@@ -174,7 +174,4 @@ function Log.error(...)
     end
 end
 
--- 兼容现有 KOReader logger.err 调用；迁移期间不改变调用方错误语义。
-Log.err = Log.error
-
 return Log

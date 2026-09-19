@@ -40,7 +40,7 @@ local function installWith(existing)
     }
     package.loaded["ui.panel.native"] = nil
     package.loaded["apps/reader/modules/readermenu"] = nil
-    require("ui.panel.native").install({}, { reader = true })
+    require("ui.panel.native").onCreate({}, { reader = true })
     return saved
 end
 

@@ -222,7 +222,7 @@ do
     clearMods()
 end
 
--- ── upsertRemote：无 membership 默认 deleted=1；有 deleted/in_library 时写成员 ──
+-- ── upsertRemote：无 membership 默认 deleted=1；有 deleted 时写成员 ──
 do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection)
@@ -244,10 +244,10 @@ do
         "稀疏远端行不得清空已有封面地址")
 
     Assert.is_true(BookDB.upsertRemote({
-        source_id = "moon", stable_id = "shelf.epub", in_library = true,
+        source_id = "moon", stable_id = "shelf.epub", deleted = 0,
     }))
     q = calls[#calls]
-    Assert.eq(q.args[12], 0, "in_library=true → deleted=0")
+    Assert.eq(q.args[12], 0, "deleted=0 → 在架")
     Assert.eq(q.args[13], 1)
     Assert.eq(q.args[14], 1)
 
@@ -270,7 +270,7 @@ do
 
     Assert.is_true(BookDB.upsertRemoteMany({
         { source_id = "moon", stable_id = "cache.epub" },
-        { source_id = "moon", stable_id = "hidden.epub", in_library = false },
+        { source_id = "moon", stable_id = "hidden.epub", deleted = 1 },
     }))
     local inserts = {}
     for i = before + 1, #calls do
@@ -283,7 +283,7 @@ do
     Assert.eq(inserts[1].args[12], 1)
     Assert.eq(inserts[1].args[13], 0)
     Assert.eq(inserts[2].argc, 14)
-    Assert.eq(inserts[2].args[12], 1, "in_library=false → deleted=1")
+    Assert.eq(inserts[2].args[12], 1, "deleted=1")
     Assert.eq(inserts[2].args[13], 1)
 
     DbBase.close()
@@ -445,7 +445,6 @@ do
     Assert.eq(book.inserted_at, 1000)
     Assert.eq(book.path, "/cache/moon/book/x/book.epub")
     Assert.eq(book.deleted, 0)
-    Assert.is_true(book.in_library)
     Assert.eq(book.sync_status, 1)
     Assert.eq(book.read_state, 1)
     local q = calls[#calls]
@@ -494,7 +493,6 @@ do
     Assert.eq(book.stable_id, "b1")
     Assert.eq(book.path, "/cache/moon/book/x/book.epub")
     Assert.eq(book.deleted, 1)
-    Assert.is_false(book.in_library)
     local q = calls[#calls]
     Assert.is_true(q.sql:find("FROM books WHERE path=? LIMIT 1;", 1, true) ~= nil)
     Assert.eq(q.argc, 1)

@@ -153,7 +153,7 @@ end
 
 --- 安装一次；只修改 KOReader 的入口方法，不触碰其源码。
 ---@return nil
-function Baike.install()
+function Baike.onCreate()
     local ReaderWikipedia = require("apps/reader/modules/readerwikipedia")
     if ReaderWikipedia._book_baike_installed then
         return

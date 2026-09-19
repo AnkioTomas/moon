@@ -85,7 +85,7 @@ end
 package.loaded["dictionary.init"] = nil
 local DictInit = require("dictionary.init")
 Assert.is_true(DictInit.isEnabled())
-DictInit.install()
+DictInit.onCreate()
 Assert.is_true(ReaderDictionary._book_dict_installed)
 Assert.eq(reader_order.search[2], "dictionary_download")
 Assert.eq(filemanager_order.search[2], "dictionary_download")

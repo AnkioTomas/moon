@@ -33,12 +33,11 @@ function Layout.new()
     return setmetatable({}, Layout)
 end
 
---- 读组件报的内容高度；兼容旧 min/preferred 字段。
+--- 读组件报的内容高度。
 ---@param raw table
 ---@return number
 local function specHeight(raw)
-    local h = tonumber(raw.height) or tonumber(raw.preferred) or tonumber(raw.min)
-    return math.max(1, math.floor(h or 1))
+    return math.max(1, math.floor(tonumber(raw.height) or 1))
 end
 
 --- 把输入高度规范化为至少一个像素的整数。
@@ -120,7 +119,7 @@ function Layout:allocate(ranges, available, gap)
     return selected, heights, remaining
 end
 
---- 迁移用：按内容高度自动切页（旧行为）。
+--- 按内容高度自动切页（首装 `home_widgets==nil` 时用）。
 ---@param ranges BookHomeHeightSpec[] 各组件的内容高度
 ---@param available number 当前布局可用的总高度，单位像素
 ---@param gap number 相邻项目间距，单位像素

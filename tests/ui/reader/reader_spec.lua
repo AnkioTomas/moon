@@ -40,7 +40,10 @@ end
 
 local native_ui
 package.preload["ui.panel.native"] = function()
-    return { install = function(ui) native_ui = ui end }
+    return { onCreate = function(ui) native_ui = ui end }
+end
+package.preload["ui.reader.highlight_menu"] = function()
+    return { install = function() end }
 end
 
 local active = true
@@ -123,14 +126,14 @@ Assert.eq(actions[4].id, "xray_refresh")
 
 Assert.is_false(Reader.executeAction("missing", ui))
 
-Reader.attach(plugin)
+Reader.onCreate(plugin)
 Assert.eq(native_ui, ui)
 Assert.eq(registered_module.name, "book_bars")
 Assert.eq(bars_installed_on, ui, "install 的首参必须是 ReaderUI，不能是模块自己")
 Assert.is_nil(ui._zones, "不应注册覆盖原生菜单的触摸区")
 
 native_ui = nil
-Reader.attach(plugin)
+Reader.onCreate(plugin)
 Assert.is_nil(native_ui, "同一 ReaderUI 不应重复安装")
 
 Reader.refresh(plugin)

@@ -88,7 +88,7 @@ function IME.setEnabled(value)
 end
 
 --- 插件启动时恢复已启用的候选栏钩子。
-function IME.bootstrap()
+function IME.onCreate()
     if not IME.isEnabled() then
         return
     end
@@ -111,7 +111,6 @@ function IME.dictStatus()
     local settings = Settings.get()
     local versions = type(settings.ime_dict_built_at) == "table" and settings.ime_dict_built_at or {}
     local built_at = Registry.builtAt(method)
-        or (method.id == "pinyin" and settings.pinyin_dict_built_at)
         or versions[method.id] or "?"
     return string.format("%s · %s", entries, built_at)
 end

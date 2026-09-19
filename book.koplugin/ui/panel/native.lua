@@ -520,12 +520,12 @@ end
 
 ---@param host_ui table|nil
 ---@param opts table|nil { reader: boolean|nil }
-function Native.install(host_ui, opts)
+function Native.onCreate(host_ui, opts)
     opts = opts or {}
     patchTouchMenu()
     if opts.reader then
         local ok, err = pcall(installReaderMenu)
-        if not ok then logger.err("book reader native menu install failed:", err) end
+        if not ok then logger.error("book reader native menu install failed:", err) end
         if host_ui and host_ui.menu then
             NativeSettings.inject(host_ui.menu)
             injectDesktopTab(host_ui.menu)
@@ -534,7 +534,7 @@ function Native.install(host_ui, opts)
         return
     end
     local ok, err = pcall(installFileManagerMenu)
-    if not ok then logger.err("book native quick panel install failed for file manager:", err) end
+    if not ok then logger.error("book native quick panel install failed for file manager:", err) end
     if host_ui and host_ui.menu and not host_ui.document then
         injectDesktopTab(host_ui.menu)
     end

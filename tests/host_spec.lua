@@ -67,7 +67,7 @@ local Host = require("host")
 -- 系统默认 filemanager → 首次 attach 强制月读并开桌面
 saved.start_with = "filemanager"
 local opened = 0
-Host.attach({
+Host.onCreate({
     ui = {},
     openDesktop = function() opened = opened + 1 end,
 })
@@ -81,7 +81,7 @@ Assert.eq(opened, 1)
 saved.start_with = "filemanager"
 local seeded_saves = #settings_saves
 opened = 0
-Host.attach({
+Host.onCreate({
     ui = {},
     openDesktop = function() opened = opened + 1 end,
 })
