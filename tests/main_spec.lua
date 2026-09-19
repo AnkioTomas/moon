@@ -85,9 +85,6 @@ stub("ui.reader.session", {
 stub("book.sync", {
     retryDirtyAsync = function() calls.retry_dirty = (calls.retry_dirty or 0) + 1 end,
 })
-stub("ui.desktop.home", {
-    onReturnToDesktop = function() calls.home_rotate = true end,
-})
 
 local function noop_mod(extra)
     local mod = {

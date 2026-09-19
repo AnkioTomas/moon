@@ -257,7 +257,6 @@ function BookPlugin:openDesktop()
             local fm = FileManager.instance
             local fm_plugin = fm and fm.book
             if fm_plugin and type(fm_plugin.openDesktop) == "function" then
-                fm_plugin._home_rotate_on_open = true
                 fm_plugin:openDesktop()
             end
         end
@@ -295,10 +294,6 @@ function BookPlugin:openDesktop()
     end
     ---@cast desk BookDesktop
     self.desktop = desk
-    if self._home_rotate_on_open then
-        self._home_rotate_on_open = nil
-        require("ui.desktop.home").onReturnToDesktop(desk)
-    end
     logger.info("book openDesktop show begin")
     UIManager:show(self.desktop)
     logger.info("book openDesktop show end")
