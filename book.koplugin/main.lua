@@ -51,7 +51,7 @@ local BookPlugin = WidgetContainer:extend {
 --- 插件初始化：挂接 Host（菜单 / 开机打开等）与各增强模块
 ---@return nil
 function BookPlugin:init()
-    if not require("version.adapter").checkKOReaderVersion() then
+    if not require("ko_version").check() then
         return
     end
     logger.start()
@@ -65,9 +65,6 @@ function BookPlugin:init()
     require("remote.init").onCreate()
     require("ime.init").onCreate()
     require("patch.manager").onCreate({ plugin_root = self.path })
-    if self.ui and not self.ui.document then
-        require("update.init").onCreate(self.path)
-    end
     if self.ui and self.ui.document then
         self:emitToSource("reader_open")
     end
@@ -168,16 +165,13 @@ function BookPlugin:onExit()
     logger.flush()
 end
 
---- 网络恢复：重试脏数据、通知源、刷新锁屏；FM 侧顺带自动检查更新。
+--- 网络恢复：重试脏数据、通知源、刷新锁屏。
 ---@return nil
 function BookPlugin:onNetworkConnected()
     logger.info("book lifecycle network_connected")
     require("book.sync").retryDirtyAsync()
     self:emitToSource("network_connected")
     require("lockscreen.init").refresh(nil, true, "network_connected")
-    if self.ui and not self.ui.document then
-        require("update.init").autoCheck(self.path)
-    end
     desktopLife(self, "onNetworkConnected")
 end
 

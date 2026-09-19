@@ -23,6 +23,11 @@
 
 `Desktop:onEvent` **只广播**。换源先改 `desktop.source` 再广播。详情走 `Detail.open`，设置子页走 `Settings:showSub`，不要经 Desktop 做业务分流。
 
+### 插件更新
+
+`Desktop:onResume` 调 `update.autoCheck`（网络请求）；不在插件 init / `onNetworkConnected` 里抢跑。
+KOReader 宿主版本门槛在 `ko_version`，与桌面无关。
+
 ---
 
 ## 用法
