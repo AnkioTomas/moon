@@ -14,6 +14,11 @@ local Config = require("support.config")
 Stubs.install()
 Stubs.reset()
 
+-- onCreate 会 nextTick 跑翻页动画自检；本文件只测 install/restore，不跑自检。
+package.preload["ui/uimanager"] = function()
+    return { nextTick = function() end }
+end
+
 local Manager = require("patch.manager")
 
 local PLUGIN_ROOT = Config.root() .. "/book.koplugin"
