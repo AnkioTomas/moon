@@ -52,7 +52,6 @@ package.preload["source.fanqie.settings"] = function()
     return {
         new = function()
             return {
-                cache_dir = "missing",
                 is_cookie_configured = function() return false end,
             }
         end,
