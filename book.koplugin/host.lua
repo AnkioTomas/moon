@@ -44,6 +44,19 @@ local function isOpenOnStart()
     return G_reader_settings:readSetting("start_with", "filemanager") == Host.OPEN_ON_START_ID
 end
 
+--- 首次安装（尚未种过）时强制 start_with=月读，不跟系统默认 filemanager。
+--- 只跑一次；之后设置里「启动打开桌面」或系统启动项由用户自己改。
+---@return nil
+local function seedStartWithOnInstall()
+    local Settings = require("utils.settings")
+    if Settings.get().start_with_seeded then
+        return
+    end
+    logger.info("book.host seed start_with on install", Host.OPEN_ON_START_ID)
+    G_reader_settings:saveSetting("start_with", Host.OPEN_ON_START_ID)
+    Settings.save({ start_with_seeded = true })
+end
+
 --- 立刻开桌面；成功则 want=false
 ---@param plugin table
 ---@return boolean
@@ -164,6 +177,8 @@ function Host.attach(plugin)
     registerMenu(plugin)
     pinSettingsMenu()
     patchStartWithMenu()
+    -- Reader / FM 实例都会 attach；种一次即可，必须在读 isOpenOnStart 之前。
+    pcall(seedStartWithOnInstall)
     if not isFileManager(plugin) then
         return
     end
