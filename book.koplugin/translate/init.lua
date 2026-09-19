@@ -51,7 +51,7 @@ local function showTranslation(translator, text, detailed_view, source_lang, tar
 end
 
 --- 安装 Edge 翻译入口；重复调用无副作用。
-function Translate.install()
+function Translate.onCreate()
     local Translator = require("ui/translator")
     if Translator._book_edge_translation then
         return

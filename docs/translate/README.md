@@ -24,7 +24,7 @@
 local Translate = require("translate")
 
 Translate.isEnabled()
-Translate.install()   -- main 里 hook Translator
+Translate.onCreate()  -- main 里 hook Translator
 
 -- 一般不直接调 edge；由 Translator 路径进入 popup
 -- 需要裸请求时：

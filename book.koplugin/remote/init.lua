@@ -884,8 +884,8 @@ end
 
 -- ── 生命周期（main.lua 一行转发）───────────────────────
 
---- 插件 init：autostart 开启时自举（双实例调用幂等）。
-function Remote.bootstrap()
+--- 插件 onCreate：autostart 开启时自举（双实例调用幂等）。
+function Remote.onCreate()
     if Remote.autostartOn() then
         require("ui/uimanager"):nextTick(function()
             local ok, err = Remote.start()
@@ -897,7 +897,7 @@ function Remote.bootstrap()
 end
 
 --- 休眠：记下当前是否在跑再停服（睡眠中留着监听既没用又费电）。
-function Remote.onSuspend()
+function Remote.onPause()
     Remote._resume = Remote.isRunning()
     Remote.stop()
 end
@@ -914,7 +914,7 @@ function Remote.onResume()
 end
 
 --- 退出 KOReader：停服，避免残留监听与 iptables 规则。
-function Remote.onExit()
+function Remote.onDestroy()
     Remote.stop()
 end
 
@@ -980,13 +980,6 @@ end
 ---@return string status, boolean running
 function Remote.status()
     return statusLabel()
-end
-
---- 兼容旧调用方；设置页新代码直接使用 remote.ui。
----@param desktop table
----@return function[]
-function Remote.menuRows(desktop)
-    return require("remote.ui").menuRows(desktop)
 end
 
 return Remote

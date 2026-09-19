@@ -19,7 +19,7 @@
 local Baike = require("baike")
 
 Baike.isEnabled()
-Baike.install()    -- main 初始化
+Baike.onCreate()   -- main 初始化
 -- 关闭后完整回退原生 Wikipedia
 ```
 

@@ -2,7 +2,7 @@
 ime.init：开关编排（布局 / 候选栏安装 / 词库下载 / 状态文案）
 
 candidate_bar / download / dictionary 全部 stub；只验证编排逻辑：
-开关行为、bootstrap 时机、dictStatus 文案。候选合并本身见 candidate_bar_spec。
+开关行为、onCreate 时机、dictStatus 文案。候选合并本身见 candidate_bar_spec。
 
 @module tests.ime.init_spec
 --]]
@@ -98,14 +98,14 @@ end
 
 local Pinyin = require("ime.init")
 
--- ── bootstrap：关闭时不装候选栏 ───────────────────────
+-- ── onCreate：关闭时不装候选栏 ───────────────────────
 fake_settings.pinyin_enabled = false
-Pinyin.bootstrap()
-Assert.eq(install_calls, 0, "关闭时 bootstrap 不装候选栏")
+Pinyin.onCreate()
+Assert.eq(install_calls, 0, "关闭时 onCreate 不装候选栏")
 
--- ── bootstrap：开启后装候选栏，enabled 判定跟随开关 ────
+-- ── onCreate：开启后装候选栏，enabled 判定跟随开关 ────
 fake_settings.pinyin_enabled = true
-Pinyin.bootstrap()
+Pinyin.onCreate()
 Assert.eq(install_calls, 1)
 Assert.is_true(type(install_opts.enabled) == "function")
 Assert.is_true(install_opts.enabled(), "enabled 必须读到开启状态")

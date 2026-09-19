@@ -17,8 +17,8 @@ local T = require("ffi/util").template
 
 local PageTurnAnimation = {}
 
-function PageTurnAnimation.init(_, plugin)
-    Manager.init({ plugin_root = plugin.path })
+function PageTurnAnimation.onCreate(_, plugin)
+    Manager.onCreate({ plugin_root = plugin.path })
     local UIManager = require("ui/uimanager")
     UIManager:nextTick(function() PageTurnAnimation.checkStartup() end)
 end

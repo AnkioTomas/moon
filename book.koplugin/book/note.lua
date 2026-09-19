@@ -41,15 +41,10 @@ local function cleanAnnotations(source, items, total_pages)
     return Normalize.clean(items, total_pages)
 end
 
-local function decodePayload(source, payload)
+local function decodePayload(payload)
     local ok, value = pcall(JSON.decode, payload or "[]")
     if not ok or type(value) ~= "table" then return nil, false end
-    local items, authoritative = Normalize.unpack(value)
-    if not authoritative and source
-            and type(source.legacyAuthoritativeAnnotations) == "function" then
-        authoritative = source:legacyAuthoritativeAnnotations(items)
-    end
-    return items, authoritative
+    return Normalize.unpack(value)
 end
 
 --- 远端注解按 ``chapter_idx`` 分片落库；完整快照状态存于 payload 外层元数据。
@@ -126,7 +121,7 @@ function Note.save(ui, identity, done)
     local source = identity.source
     local clean = cleanAnnotations(source, items, total_pages)
     if current then
-        local previous = decodePayload(source, current.payload)
+        local previous = decodePayload(current.payload)
         if previous and source and type(source.prepareLocalAnnotations) == "function" then
             source:prepareLocalAnnotations(previous, clean)
         end
@@ -272,7 +267,7 @@ local function runSyncAsync(source, opts, cb)
                 pullRemote()
                 return
             end
-            local annotations = decodePayload(source, row.payload)
+            local annotations = decodePayload(row.payload)
             if not annotations then
                 finish(nil, "invalid local notes")
                 return
@@ -387,7 +382,7 @@ function Note.applyLocal(ui, identity)
         return 0
     end
     local row = NoteDB.get(identity.source_id, identity.stable_id, identity.chapter_idx)
-    local annotations, authoritative = decodePayload(source, row and row.payload or "[]")
+    local annotations, authoritative = decodePayload(row and row.payload or "[]")
     if not annotations then
         return 0
     end

@@ -337,11 +337,11 @@ end
 
 --- FileManager 插件实例启动后触发一次自动检查。
 ---@param plugin_root string
-function Update.bootstrap(plugin_root)
+function Update.onCreate(plugin_root)
     UIManager:nextTick(function() Update.autoCheck(plugin_root) end)
 end
 
-function Update.cancel()
+function Update.onDestroy()
     if Update._job and Update._job.cancel then Update._job:cancel() end
     Update._job = nil
     Update._checking = false

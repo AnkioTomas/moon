@@ -195,10 +195,11 @@ package.preload["book.progress"] = function()
     }
 end
 
+package.loaded["ui.reader"] = nil
 package.preload["ui.reader"] = function()
     return {
-        attach = function(plugin)
-            calls.reader[#calls.reader + 1] = { "attach" }
+        onCreate = function(plugin)
+            calls.reader[#calls.reader + 1] = { "onCreate" }
         end,
         refresh = function(plugin)
             calls.reader[#calls.reader + 1] = { "refresh" }
@@ -407,7 +408,7 @@ do
     Assert.eq(Session.current().identity.source.id, "local")
     Assert.eq(calls.tracker[#calls.tracker][1], "start")
     Assert.eq(calls.progress[progress_before + 1][1], "pull")
-    Assert.eq(calls.reader[#calls.reader][1], "attach")
+    Assert.eq(calls.reader[#calls.reader][1], "onCreate")
 end
 
 -- 注解事件：落盘后有网即 dirty push。

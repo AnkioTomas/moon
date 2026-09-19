@@ -19,7 +19,7 @@
 ```
 
 Merge 策略：远端「空列表」与「字段缺失」在 wire 上无法区分。  
-**宁可漏掉云端删除，也不清本地划线。** 仅当快照带 `authoritative=true`（或源 `legacyAuthoritativeAnnotations`）时，才把「远端未返回的已同步分片」视为空桶。
+**宁可漏掉云端删除，也不清本地划线。** 仅当快照带 `authoritative=true` 时，才把「远端未返回的已同步分片」视为空桶。
 
 无进度那种 ConfirmBox——靠 dirty 位 + merge 收敛。
 

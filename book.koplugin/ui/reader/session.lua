@@ -72,7 +72,7 @@ end
 ---@param skip_pull boolean|nil 连续章节切章导航：跳过云端进度拉取与注解拉取
 local function bootstrapReading(plugin, session, skip_pull)
     require("book.stats").start(session)
-    require("ui.reader").attach(plugin)
+    require("ui.reader").onCreate(plugin)
     -- 首绘前同步写入注解：晚一个 tick 云端划线就要等下次刷新才出现。切章同样要重来，
     -- 因为注解按 chapter_idx 分片。
     require("book.note").applyLocal(plugin.ui, session.identity)
@@ -270,7 +270,7 @@ end
 
 --- 休眠前：结清计时并同步当前进度、注解和源事件；会话继续保留。
 ---@param plugin table Book 插件实例
-function Session.onSuspend(plugin)
+function Session.onPause(plugin)
     if not plugin.ui.document then return end
     if Session._snapshot then
         require("book.reader_prefs").captureAndSave(plugin.ui, Session._snapshot.identity)

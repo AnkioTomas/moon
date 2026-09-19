@@ -104,14 +104,14 @@ do
     Assert.eq(cleaned[1].total_pages, 100)
 end
 
--- ── payload 元数据使用通用外层，旧数组仍可读取 ──
+-- ── payload：权威快照带外层元数据；非权威为裸数组 ──
 do
     local items = { { page = "/body/a" } }
     local packed = Normalize.pack(items, true)
     local unpacked, authoritative = Normalize.unpack(packed)
     Assert.eq(unpacked, items)
     Assert.is_true(authoritative)
-    local legacy, legacy_authoritative = Normalize.unpack(items)
-    Assert.eq(legacy, items)
-    Assert.is_false(legacy_authoritative)
+    local bare, bare_authoritative = Normalize.unpack(items)
+    Assert.eq(bare, items)
+    Assert.is_false(bare_authoritative)
 end

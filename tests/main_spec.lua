@@ -60,7 +60,7 @@ stub("ui.desktop", {
 })
 stub("utils.paths", { ensureLayout = function() end })
 stub("host", {
-    attach = function() calls.host = (calls.host or 0) + 1 end,
+    onCreate = function() calls.host = (calls.host or 0) + 1 end,
     onShow = function() calls.host_show = (calls.host_show or 0) + 1 end,
 })
 stub("book.open", {
@@ -74,7 +74,7 @@ stub("ui.reader.session", {
     onCloseDocument = function() calls.session = calls.session or {} ; calls.session.close = true end,
     onPageChanged = function(_, page) calls.session = calls.session or {} ; calls.session.page = page end,
     onAnnotationsModified = function() calls.session = calls.session or {} ; calls.session.notes = true end,
-    onSuspend = function() calls.session = calls.session or {} ; calls.session.suspend = true end,
+    onPause = function() calls.session = calls.session or {} ; calls.session.suspend = true end,
     onResume = function() calls.session = calls.session or {} ; calls.session.resume = true end,
     onChapterBoundary = function(delta)
         calls.session = calls.session or {}
@@ -89,11 +89,46 @@ stub("ui.desktop.home", {
     onReturnToDesktop = function() calls.home_rotate = true end,
 })
 
+local function noop_mod(extra)
+    local mod = {
+        onCreate = function() calls.boot = (calls.boot or 0) + 1 end,
+        onPause = function() calls.feat_suspend = (calls.feat_suspend or 0) + 1 end,
+        onResume = function() calls.feat_resume = (calls.feat_resume or 0) + 1 end,
+        onDestroy = function() calls.feat_exit = (calls.feat_exit or 0) + 1 end,
+        refresh = function() calls.lock_refresh = (calls.lock_refresh or 0) + 1 end,
+        autoCheck = function() calls.update_check = (calls.update_check or 0) + 1 end,
+        checkStartup = function() calls.animation_check = (calls.animation_check or 0) + 1 end,
+    }
+    for k, v in pairs(extra or {}) do mod[k] = v end
+    return mod
+end
+stub("translate.init", noop_mod())
+stub("baike.init", noop_mod())
+stub("dictionary.init", noop_mod())
+stub("ui.panel.native", noop_mod())
+stub("lockscreen.init", noop_mod({
+    onPause = function() calls.lock_refresh = (calls.lock_refresh or 0) + 1 end,
+}))
+stub("remote.init", noop_mod())
+stub("ui.screenshot_share", noop_mod())
+stub("ime.init", noop_mod())
+stub("patch.manager", noop_mod())
+stub("patch.page_turn_animation", noop_mod())
+stub("update.init", noop_mod())
+
+_G.G_reader_settings = {
+    isTrue = function() return true end,
+    saveSetting = function() end,
+    readSetting = function(_, _, default) return default end,
+}
+
 package.loaded["main"] = nil
 local Main = require("main")
 local plugin = setmetatable({ path = "book.koplugin", ui = {} }, Main)
 plugin:init()
 Assert.eq(calls.host, 1)
+Assert.is_true((calls.boot or 0) >= 8, "init 应挂上翻译/百科/词典/面板/锁屏/远程/IME/补丁等")
+Assert.eq(calls.animation_check, 1)
 
 -- emitToSource：缺省用当前源；指定源优先；抛错不打断
 do
@@ -124,7 +159,7 @@ do
     plugin:emitToSource("network_connected") -- 不得抛出
 end
 
--- 网络恢复：脏重试 + 源事件（单通道）
+-- 网络恢复：脏重试 + 源事件 + 锁屏刷新 + FM 自动更新检查
 do
     local seen = {}
     current_source = {
@@ -132,13 +167,18 @@ do
         onEvent = function(_, event) seen[#seen + 1] = event end,
     }
     calls.retry_dirty = 0
+    calls.lock_refresh = 0
+    calls.update_check = 0
     local net_desk = {
         lifecycle = { state = "Resume" },
         onNetworkConnected = function() seen[#seen + 1] = "desktop_net" end,
     }
     plugin.desktop = net_desk
+    plugin.ui = {} -- FM
     plugin:onNetworkConnected()
     Assert.eq(calls.retry_dirty, 1)
+    Assert.eq(calls.lock_refresh, 1)
+    Assert.eq(calls.update_check, 1)
     Assert.eq(table.concat(seen, ","), "network_connected,desktop_net")
 end
 
@@ -202,13 +242,25 @@ Assert.eq(calls.desktop_event, "source_changed")
 Assert.eq(calls.desktop_event_payload.id, "local")
 
 calls.session = nil
+calls.feat_suspend = 0
+calls.lock_refresh = 0
 plugin:onSuspend()
 Assert.is_true(calls.session.suspend)
 Assert.eq(calls.desktop_pause, 1)
+Assert.is_true(calls.feat_suspend >= 1, "休眠应通知远程")
+Assert.eq(calls.lock_refresh, 1)
 
+calls.session = nil
+calls.feat_resume = 0
+plugin:onResume()
+Assert.is_true(calls.session.resume)
+Assert.is_true(calls.feat_resume >= 2, "唤醒应通知锁屏/远程")
+
+calls.feat_exit = 0
 plugin:onExit()
 Assert.eq(calls.desktop_destroy, 1)
 Assert.eq(resumed_desktop.lifecycle.state, "Destroy")
+Assert.is_true(calls.feat_exit >= 2, "退出应停更新/远程")
 
 calls.desktop_event = nil
 plugin:onSourceChanged()

@@ -247,7 +247,7 @@ function Insight:fetch()
             })
         end)
         if not applied then
-            logger.err("book insight fetch apply failed:", boom)
+            logger.error("book insight fetch apply failed:", boom)
             finish({ has_data = false, error = tostring(boom) })
         end
     end)

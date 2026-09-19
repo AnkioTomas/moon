@@ -195,14 +195,6 @@ function Languages.allItems(translator, include_auto)
     return items
 end
 
---- 源/目标语言选项（兼容旧调用；等价于 allItems）。
----@param translator table
----@param include_auto boolean|nil
----@return table[]
-function Languages.options(translator, include_auto)
-    return Languages.allItems(translator, include_auto)
-end
-
 --- 展示用语言名；auto 时优先 detected，否则「自动检测」。
 ---@param translator table
 ---@param code string|nil

@@ -381,7 +381,6 @@ do
     Assert.eq(rows[1].inserted_at, 1000)
     Assert.eq(rows[1].read_state, 1)
     Assert.eq(rows[1].path, "/cache/a.epub")
-    Assert.is_true(rows[1].in_library)
     Assert.eq(rows[1].deleted, 0)
     local count_q = calls[#calls - 1]
     Assert.is_true(count_q.sql:find("WHERE source_id=%?", 1) ~= nil or count_q.sql:find("source_id=?", 1, true) ~= nil)

@@ -23,7 +23,6 @@
 ---@field inserted_at integer 本行首次写入时间；0 表示仅身份行
 ---@field path string|nil 本地文件路径；身份解析唯一入口
 ---@field deleted integer|nil 0=在架有效，1=软删/非成员
----@field in_library boolean|nil 兼容字段：deleted==0 时为 true
 ---@field sync_status integer|nil 0=待上传，1=已同步
 ---@field cover string|nil 封面 URL
 ---@field cover_headers table|nil 封面请求头

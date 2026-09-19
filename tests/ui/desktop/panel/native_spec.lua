@@ -56,15 +56,15 @@ package.preload["apps/filemanager/filemanager"] = function() return { instance =
 package.preload["apps/reader/readerui"] = function() return { instance = nil } end
 
 local NativePanel = require("ui.panel.native")
-NativePanel.install()
-NativePanel.install()
+NativePanel.onCreate()
+NativePanel.onCreate()
 Assert.is_true(TouchMenu._book_panel_patched)
 TouchMenu:updateItems()
 TouchMenu.updateItems({ item_table = { _book_quick_panel = true } })
 Assert.eq(native_update_calls, 2)
 
 local existing = { menu = { tab_item_table = {{ icon = "appbar.menu" }} } }
-NativePanel.install(existing)
+NativePanel.onCreate(existing)
 Assert.is_true(existing.menu.tab_item_table[1]._book_quick_panel)
 
 local file_menu = setmetatable({}, { __index = FileManagerMenu })

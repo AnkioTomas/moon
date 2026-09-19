@@ -58,7 +58,7 @@ function BookPlugin:onAnnotationsModified(items)
     require("ui.reader.session").onAnnotationsModified(self, items)
 end
 function BookPlugin:onSuspend()
-    require("ui.reader.session").onSuspend(self)
+    require("ui.reader.session").onPause(self)
 end
 function BookPlugin:onResume()
     require("ui.reader.session").onResume(self)

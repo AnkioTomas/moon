@@ -23,9 +23,7 @@ local DEFAULTS = {
     },
     display = {
         ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,
-        library_view = "flat", -- legacy, ignored by the library UI
         library_sort = "recent_added",
-        auto_brightness_enabled = false,
     },
     lockscreen = {
         lock_screen = "ko",
@@ -51,7 +49,7 @@ local DEFAULTS = {
     quickpanel = {
         -- 新安装默认启用注册表中的全部动作；已有配置仍保持用户选择。
         quick_panel_actions = {
-            "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "auto_brightness", "suspend",
+            "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "suspend",
         },
         quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "xray" },
     },
@@ -124,7 +122,6 @@ for _, key in ipairs({
     KEY_SECTION[key] = "lockscreen"
 end
 for _, key in ipairs({
-    "pinyin_dict_built_at", "pinyin_dict_sha256", "pinyin_dict_source",
     "ime_layout", "ime_dict_built_at", "ime_dict_sha256",
 }) do
     KEY_SECTION[key] = "pinyin"
@@ -180,46 +177,16 @@ local function sectionFile(section)
     return openFile(section == "common" and Paths.commonPath() or Paths.sectionPath(section))
 end
 
---- 首次访问配置时做一次迁移与补默认，只跑一遍。
---- 迁移方向：老版本全塞在 common.lua 的键，按 KEY_SECTION 搬到各分区文件，
---- 分区已有该键则以分区值为准（不回写覆盖），搬走后从 common 删除。
---- 顺带把已下线的 rss 源从 active_source / enabled_sources 里剔掉。
+--- 首次访问配置时补默认，只跑一遍。
 local function initialize()
     if _initialized then return end
     _initialized = true
-
-    local common = sectionFile("common")
-    local old = {}
-    for key, value in pairs(common.data) do old[key] = value end
-    local common_dirty = false
-
     for _, section in ipairs(SECTIONS) do
         local file = sectionFile(section)
-        local dirty = false
-        for key, value in pairs(old) do
-            if KEY_SECTION[key] == section and file.data[key] == nil then
-                file.data[key] = value
-                common.data[key] = nil
-                dirty, common_dirty = true, true
-            end
+        if fillDefaults(file.data, DEFAULTS[section]) then
+            file:flush()
         end
-        if fillDefaults(file.data, DEFAULTS[section]) then dirty = true end
-        if dirty then file:flush() end
     end
-    if common.data.enabled_sources == nil and old.enabled_sources ~= nil then
-        common.data.enabled_sources = old.enabled_sources
-        common_dirty = true
-    end
-    if fillDefaults(common.data, DEFAULTS.common) then common_dirty = true end
-    if common.data.active_source == "rss" then
-        common.data.active_source = "local"
-        common_dirty = true
-    end
-    if type(common.data.enabled_sources) == "table" and common.data.enabled_sources.rss ~= nil then
-        common.data.enabled_sources.rss = nil
-        common_dirty = true
-    end
-    if common_dirty then common:flush() end
 end
 
 --- 把所有分区平铺成一张表，供 get() 的无参形态返回。

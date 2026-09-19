@@ -29,14 +29,14 @@ function Reader.executeAction(id, ui, opts)
     return require("ui.panel.reader").executeAction(id, ui, opts)
 end
 
---- 给当前 ReaderUI 安装原生菜单注入和阅读状态条。
+--- 阅读页 Create：挂原生菜单注入与阅读状态条。
 ---@param plugin table
-function Reader.attach(plugin)
+function Reader.onCreate(plugin)
     local ui = plugin and plugin.ui
     if not ui or ui._book_reader_attached then return end
     ui._book_reader_attached = true
 
-    require("ui.panel.native").install(ui, { reader = true })
+    require("ui.panel.native").onCreate(ui, { reader = true })
     if ui.view and ui.view.registerViewModule then
         local bars = require("ui.reader.bars")
         ui.view:registerViewModule("book_bars", bars)

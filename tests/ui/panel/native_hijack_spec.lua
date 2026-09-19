@@ -42,7 +42,7 @@ package.preload["apps/filemanager/filemanager"] = function() return { instance =
 package.preload["apps/reader/readerui"] = function() return { instance = nil } end
 
 local Native = require("ui.panel.native")
-Native.install()
+Native.onCreate()
 
 local function findTab(id)
     for _, tab in ipairs(fm_menu.tab_item_table or {}) do

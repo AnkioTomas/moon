@@ -69,8 +69,8 @@ local ui = {
     font = { font_face = "Book Sans", onSetFont = function() end },
 }
 local Native = require("ui.panel.native")
-Native.install(ui, { reader = true })
-Native.install(ui, { reader = true })
+Native.onCreate(ui, { reader = true })
+Native.onCreate(ui, { reader = true })
 Assert.is_true(TouchMenu._book_panel_patched)
 Assert.is_true(ReaderMenu._book_reader_panel_patched)
 TouchMenu:updateItems()
@@ -100,7 +100,7 @@ Assert.eq(action_ui, ui)
 Assert.eq(refreshed, 1)
 
 local first_menu_patch = ReaderMenu.setUpdateItemTable
-Native.install(ui, { reader = true })
+Native.onCreate(ui, { reader = true })
 Assert.eq(ReaderMenu.setUpdateItemTable, first_menu_patch)
 
 local shown_tab

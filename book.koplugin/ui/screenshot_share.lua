@@ -19,7 +19,7 @@ local function rawPath(path)
     return path
 end
 
-function M.install()
+function M.onCreate()
     local ButtonDialog = require("ui/widget/buttondialog")
     if ButtonDialog._book_share_patched then
         return

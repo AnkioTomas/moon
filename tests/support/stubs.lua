@@ -372,7 +372,7 @@ local function installLogger()
         function logger.dbg() end
         function logger.info() end
         function logger.warn() end
-        function logger.err() end
+        function logger.error() end
         function logger:setLevel() end
         return logger
     end

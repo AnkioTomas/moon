@@ -14,10 +14,6 @@ local Client = {}
 Client.__index = Client
 
 local DEFAULT_BASE_URL = "https://api.copy202601.com"
-local LEGACY_BASE_URLS = {
-    ["https://copy4000.com"] = true,
-    ["http://copy4000.com"] = true,
-}
 
 Client.DEFAULT_BASE_URL = DEFAULT_BASE_URL
 
@@ -25,7 +21,7 @@ Client.DEFAULT_BASE_URL = DEFAULT_BASE_URL
 ---@return string
 function Client.normalizeBaseUrl(url)
     url = Text.rtrimSlashes(Text.stripWhitespace(url))
-    if url == "" or LEGACY_BASE_URLS[url] then
+    if url == "" then
         return DEFAULT_BASE_URL
     end
     return url

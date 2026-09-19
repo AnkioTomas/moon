@@ -283,7 +283,7 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
         end }
 end
 
---- 已缓存章节：清除旧版误注入的社区热度虚线。
+--- 已缓存章节：清除社区热度虚线。
 ---
 --- 纯本地文件操作，同步完成；无论清理成败都回原路径，调用方照常开章。
 ---@param path string

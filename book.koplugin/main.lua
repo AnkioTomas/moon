@@ -48,7 +48,7 @@ local BookPlugin = WidgetContainer:extend {
 
 -- ── 生命周期事件 ─────────────────────────────────────
 
---- 插件初始化：挂接 Host（菜单 / 开机打开等）
+--- 插件初始化：挂接 Host（菜单 / 开机打开等）与各增强模块
 ---@return nil
 function BookPlugin:init()
     if not require("version.adapter").checkKOReaderVersion() then
@@ -56,7 +56,36 @@ function BookPlugin:init()
     end
     logger.start()
     logger.info("book plugin init", self.ui and self.ui.document and "reader" or "filemanager")
-    Host.attach(self)
+    Host.onCreate(self)
+    -- ReaderLink 已原生处理脚注；升级后第一次初始化打开一次，之后用户可在「链接」菜单关闭。
+    if G_reader_settings and not G_reader_settings:isTrue("book_footnote_popup_initialized") then
+        G_reader_settings:saveSetting("footnote_link_in_popup", true)
+        G_reader_settings:saveSetting("book_footnote_popup_initialized", true)
+    end
+    require("translate.init").onCreate()
+    require("baike.init").onCreate()
+    require("dictionary.init").onCreate()
+    require("ui.panel.native").onCreate(self.ui)
+    require("lockscreen.init").onCreate()
+    require("remote.init").onCreate()
+    -- ButtonDialog 依赖设备后端；离线加载插件时该后端不存在，不能让无关功能整个失效。
+    local ok_share, err_share = pcall(function() require("ui.screenshot_share").onCreate() end)
+    if not ok_share then
+        logger.warn("book screenshot share onCreate failed:", err_share)
+    end
+    require("ime.init").onCreate()
+    require("patch.manager").onCreate({ plugin_root = self.path })
+    if self.ui and not self.ui.document then
+        require("update.init").onCreate(self.path)
+    end
+    UIManager:nextTick(function()
+        local ok_animation, err_animation = pcall(function()
+            require("patch.page_turn_animation").checkStartup()
+        end)
+        if not ok_animation then
+            logger.warn("book page turn animation check failed:", err_animation)
+        end
+    end)
     if self.ui and self.ui.document then
         self:emitToSource("reader_open")
     end
@@ -127,36 +156,46 @@ function BookPlugin:onStartOfBook()
     return require("ui.reader.session").onChapterBoundary(-1)
 end
 
---- 休眠前：结清阅读状态；暂停桌面。
+--- 休眠前：结清阅读状态，生成锁屏图，停远程服务，暂停桌面。
 ---@return nil
 function BookPlugin:onSuspend()
     logger.info("book lifecycle suspend")
-    require("ui.reader.session").onSuspend(self)
+    require("ui.reader.session").onPause(self)
+    require("lockscreen.init").onPause()
+    require("remote.init").onPause()
     desktopLife(self, "onPause")
     logger.flush()
 end
 
---- 唤醒：恢复阅读统计；桌面在窗口栈上时自己收 Resume。
+--- 唤醒：恢复阅读统计与后台服务；桌面在窗口栈上时自行收 Resume。
 ---@return nil
 function BookPlugin:onResume()
     logger.info("book lifecycle resume")
     require("ui.reader.session").onResume(self)
+    require("lockscreen.init").onResume()
+    require("remote.init").onResume()
 end
 
---- 退出：销毁仍打开的桌面。
+--- 退出：停更新任务、远程服务，并销毁仍打开的桌面。
 ---@return nil
 function BookPlugin:onExit()
     logger.info("book plugin exit")
+    require("update.init").onDestroy()
+    require("remote.init").onDestroy()
     desktopLife(self, "onDestroy")
     logger.flush()
 end
 
---- 网络恢复：只重试本地脏数据，再通知源（源侧勿再开一路全量脏推）。
+--- 网络恢复：重试脏数据、通知源、刷新锁屏；FM 侧顺带自动检查更新。
 ---@return nil
 function BookPlugin:onNetworkConnected()
     logger.info("book lifecycle network_connected")
     require("book.sync").retryDirtyAsync()
     self:emitToSource("network_connected")
+    require("lockscreen.init").refresh(nil, true, "network_connected")
+    if self.ui and not self.ui.document then
+        require("update.init").autoCheck(self.path)
+    end
     desktopLife(self, "onNetworkConnected")
 end
 

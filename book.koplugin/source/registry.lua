@@ -73,7 +73,7 @@ function Registry.list()
     return out
 end
 
---- 源是否启用。common.enabled_sources 为 nil = 全部启用（兼容旧配置）；
+--- 源是否启用。common.enabled_sources 为 nil = 全部启用；
 --- 活跃源恒 true（配置被手改的兜底，picker/设置页都依赖这条）。
 ---@param id SourceId
 ---@return boolean
@@ -232,13 +232,6 @@ function Registry.requireActive()
     if not src then
         error(err or "no active source")
     end
-    return src
-end
-
---- 旧名：返回当前源或 nil，不做 fallback、不抛错。
----@return BookSource|nil
-function Registry.getActive()
-    local src = Registry.current()
     return src
 end
 

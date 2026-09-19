@@ -206,7 +206,7 @@ local UNDERLINE_PATTERNS = {
     "<span[^>]-class='[^']-wr%-underline[^']-'[^>]*>(.-)</span>",
 }
 
---- 移除 ``wr-underline`` 社区热度虚线（远端正文自带或旧版误注入）。
+--- 移除 ``wr-underline`` 社区热度虚线（远端正文可能自带）。
 --- 绝大多数章节不含虚线，先用定长子串探一次，避免整章跑正则。
 ---@param html string
 ---@return string
@@ -238,7 +238,7 @@ function Annotations.cleanChapterHtml(html)
     return Text.trim(html)
 end
 
---- 取可见正文的搜索范围，并兼容旧缓存中注入的 ``<h1>`` 标题。
+--- 取可见正文的搜索范围；章节壳带 ``<h1>`` 标题时跳过标题区。
 ---@param html string
 ---@return string
 function Annotations.rangeHtml(html)
@@ -270,7 +270,7 @@ function Annotations.plainRunes(html)
     return runes
 end
 
---- 可见正文 rune 序列（兼容旧缓存中的章节 ``<h1>``；用于本地文本匹配，不用于切片 ``range``）。
+--- 可见正文 rune 序列（跳过章节壳 ``<h1>``；用于本地文本匹配，不用于切片 ``range``）。
 ---@param html string
 ---@return string[]
 function Annotations.plainBodyRunes(html)
@@ -426,7 +426,7 @@ end
 --- 没有已保存的 xpointer 就拒绝定位，避免把高亮画到错误位置。
 ---@param source string|WechatRuneFlow 本地章节 HTML 或已建好的 rune 流
 ---@param needle string 划线原文
----@param range_str string|nil 兼容旧调用；不参与本地坐标计算
+---@param range_str string|nil 保留参数位；不参与本地坐标计算
 ---@return string|nil pos0
 ---@return string|nil pos1
 ---@return string|nil err

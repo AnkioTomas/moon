@@ -188,7 +188,7 @@ function HighlightMenu.install(ui)
         return
     end
     HighlightMenu.ensureWrapped(ui.highlight)
-    -- Reader.attach 在 ReaderReady 事件内执行，此时 postInitCallback 已被清空。
+    -- Reader.onCreate 在 ReaderReady 事件内执行，此时 postInitCallback 已被清空。
     if ui.registerPostReaderReadyCallback then
         ui:registerPostReaderReadyCallback(function()
             HighlightMenu.ensureWrapped(ui.highlight)

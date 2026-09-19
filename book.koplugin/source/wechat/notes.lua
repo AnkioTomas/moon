@@ -52,7 +52,7 @@ function Notes.cleanAnnotations(items, total_pages)
                 wr_review_id = item.wr_review_id,
                 wr_deleted = true,
             }
-        elseif type(item) == "table" and not item.wr_snapshot then
+        elseif type(item) == "table" then
             local placeholder = not item.page and not item.pageref and item.wr_range
             local source = item
             if placeholder then
@@ -142,17 +142,6 @@ function Notes.prepareLocalAnnotations(previous, current)
     return current
 end
 
----@param items table[]|nil
----@return boolean
-function Notes.legacyAuthoritative(items)
-    for _, item in ipairs(items or {}) do
-        if type(item) == "table" and (item.wr_authoritative or item.wr_snapshot) then
-            return true
-        end
-    end
-    return false
-end
-
 --- 是否为个人划线（bookmarklist ``updated`` 条目；排除 type=0 书签位）。
 ---@param row table
 ---@return boolean
@@ -212,7 +201,7 @@ function Notes.localizeAnnotations(document, annotations, html_path, current)
             if saved or location then
                 ann = {}
                 for k, v in pairs(item) do ann[k] = v end
-                -- 当前章节文本能唯一确定时以重算结果为准，顺手修复旧版本留下的错位坐标；
+                -- 当前章节文本能唯一确定时以重算结果为准，避免错位坐标；
                 -- 只有仍然歧义时才保留同 bookmarkId 的既有原生位置。
                 if location then
                     ann.pos0, ann.pos1, ann.page = location.pos0, location.pos1, location.pos0
@@ -253,10 +242,10 @@ function Notes.mergeAnnotations(remote, local_items, paging, authoritative)
         end
         return table.concat({ item.text, item.note }, "\31")
     end
-    authoritative = authoritative or Notes.legacyAuthoritative(remote)
+    authoritative = authoritative == true
     local merged, seen = {}, {}
     for _, item in ipairs(remote or {}) do
-        if type(item) == "table" and not item.wr_snapshot
+        if type(item) == "table"
                 and Normalize.renderable(item, paging) then
             if item.wr_bookmark_id then seen["bookmark:" .. tostring(item.wr_bookmark_id)] = true end
             if item.wr_review_id then seen["review:" .. tostring(item.wr_review_id)] = true end

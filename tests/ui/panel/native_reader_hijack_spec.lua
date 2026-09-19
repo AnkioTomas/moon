@@ -57,7 +57,7 @@ function ReaderMenu:onTapCloseMenu() self.closed = true end
 package.preload["apps/reader/modules/readermenu"] = function() return ReaderMenu end
 
 local Native = require("ui.panel.native")
-Native.install({}, { reader = true })
+Native.onCreate({}, { reader = true })
 
 local reader_closed = 0
 local menu = setmetatable({

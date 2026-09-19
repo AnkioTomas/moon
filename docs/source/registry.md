@@ -8,7 +8,7 @@
 - **同一时间一个活跃实例**（`_active`）。`current()` 严格按配置创建，不做静默 fallback。
 - `resolve(id)`：与 current 同 id 则复用；否则在 `_resolved` 里建/取**非活跃**属主实例，**不改**用户选择的活跃源。这是「打开旧书不串源」的关键。
 - 切换：先 `create` 候选 → 成功再 `activate` 原子替换 → `close` 旧实例。
-- `enabled_sources`：`nil` = 全部启用（旧配置兼容）；活跃源恒视为启用（不能关自己）。
+- `enabled_sources`：`nil` = 全部启用；活跃源恒视为启用（不能关自己）。
 
 ---
 
@@ -47,7 +47,7 @@ Registry.shutdown()    -- 退出时 close 全部
 | `isEnabled(id)` | 活跃源恒 true |
 | `setEnabled(id, on)` | 首次写入时用「当前全部启用」初始化集合 |
 | `create(id)` | 构造新实例（不激活） |
-| `current()` / `getActive()` | 活跃实例 |
+| `current()` | 活跃实例 |
 | `requireActive()` | 未配置则 error/明确失败 |
 | `resolve(id)` | 属主实例（可非活跃） |
 | `setActive(id)` | 候选创建 + 原子切换 |

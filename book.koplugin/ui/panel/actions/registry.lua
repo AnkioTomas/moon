@@ -15,7 +15,7 @@ local logger = require("utils.log")
 local Registry = {}
 
 local DESKTOP_ORDER = {
-    "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "auto_brightness", "suspend",
+    "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "suspend",
 }
 local READER_ORDER = {
     "toc", "font", "reflow", "highlights", "xray", "xray_refresh",
@@ -84,7 +84,7 @@ function Registry.available(action, ctx)
     if not action.available then return true end
     local ok, result = pcall(action.available, ctx)
     if not ok then
-        logger.err("book quick panel action availability failed:", result)
+        logger.error("book quick panel action availability failed:", result)
         return false
     end
     return result == true
@@ -99,7 +99,7 @@ function Registry.active(id, action, ctx)
     if not action or not action.active then return false end
     local ok, result = pcall(action.active, ctx)
     if not ok then
-        logger.err("book quick panel action state failed:", id, result)
+        logger.error("book quick panel action state failed:", id, result)
         return false
     end
     return result == true

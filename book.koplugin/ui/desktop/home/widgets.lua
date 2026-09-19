@@ -30,19 +30,6 @@ function M.defaults()
     return out
 end
 
---- 从旧 home_layout id 列表生成放置表（暂全在第 1 页；首次 paint 可再切页）。
----@param ids string[]
----@return BookHomeWidgetPlacement[]
-function M.fromIds(ids)
-    local out = {}
-    for i, id in ipairs(ids) do
-        if type(id) == "string" and id ~= "" then
-            out[#out + 1] = { id = id, page = 1, order = #out + 1, height = "default" }
-        end
-    end
-    return out
-end
-
 ---@param height any
 ---@return "default"|"fill"|number
 local function normalizeHeight(height)
@@ -237,7 +224,7 @@ function M.appendSlot(list, current_page, fits)
     return M.pageCount(list) + 1, 1
 end
 
---- 按旧 paginate 结果给放置表赋 page/order（迁移用）。
+--- 按 paginate 结果给放置表赋 page/order（首装钉页）。
 ---@param list BookHomeWidgetPlacement[] 按全局顺序
 ---@param packs table[] paginate 返回的页，每页含 {id=...} 或带 id 的 range
 ---@return BookHomeWidgetPlacement[]
