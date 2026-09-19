@@ -110,9 +110,15 @@ stub("lockscreen.init", noop_mod({
     onPause = function() calls.lock_refresh = (calls.lock_refresh or 0) + 1 end,
 }))
 stub("remote.init", noop_mod())
-stub("ui.screenshot_share", noop_mod())
 stub("ime.init", noop_mod())
-stub("patch.manager", noop_mod())
+stub("patch.manager", noop_mod({
+    onCreate = function()
+        calls.boot = (calls.boot or 0) + 1
+        require("ui/uimanager"):nextTick(function()
+            require("patch.page_turn_animation").checkStartup()
+        end)
+    end,
+}))
 stub("patch.page_turn_animation", noop_mod())
 stub("update.init", noop_mod())
 

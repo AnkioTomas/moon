@@ -1,5 +1,5 @@
 --[[--
-远程管理服务：生命周期 + 文件系统 IO。
+远程管理服务：生命周期 + 文件系统 IO + 截图分享入口。
 
 模块级单例（FM / Reader 两个插件实例共享一份 server）；
 KOReader UI 依赖全部函数内延迟加载（离线测试只碰 server.lua）。
@@ -884,8 +884,15 @@ end
 
 -- ── 生命周期（main.lua 一行转发）───────────────────────
 
---- 插件 onCreate：autostart 开启时自举（双实例调用幂等）。
+--- 插件 onCreate：挂截图分享入口；autostart 开启时自举（双实例调用幂等）。
 function Remote.onCreate()
+    -- ButtonDialog 依赖设备后端；离线加载插件时该后端不存在，不能拖垮远程主流程。
+    local ok_share, err_share = pcall(function()
+        require("remote.screenshot").onCreate()
+    end)
+    if not ok_share then
+        logger.warn("book remote screenshot share onCreate failed:", err_share)
+    end
     if Remote.autostartOn() then
         require("ui/uimanager"):nextTick(function()
             local ok, err = Remote.start()
