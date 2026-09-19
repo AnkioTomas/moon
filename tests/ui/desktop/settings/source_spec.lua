@@ -1,5 +1,5 @@
 --[[--
-数据源选择：5 个书源 + 置顶的混合模式。
+数据源选择：6 个书源 + 置顶的混合模式。
 @module tests.ui.desktop.settings.source_spec
 --]]
 
@@ -16,6 +16,7 @@ local enabled = {
     { id = "wechat", name = "微信读书" },
     { id = "jdread", name = "京东读书" },
     { id = "copymanga", name = "拷贝漫画" },
+    { id = "fanqie", name = "番茄小说" },
 }
 package.preload["utils.settings"] = function()
     return {
@@ -39,7 +40,7 @@ package.preload["source.registry"] = function()
         meta = function(id) return { id = id, name = id } end,
     }
 end
-for _, id in ipairs({ "moon", "wechat", "jdread", "copymanga" }) do
+for _, id in ipairs({ "moon", "wechat", "jdread", "copymanga", "fanqie" }) do
     package.preload["source." .. id .. ".setting"] = function()
         return { rows = function() return { function() return { id = id .. "-row" } end } end }
     end
@@ -81,7 +82,7 @@ src:pickActive(desktop, nil)
 Assert.not_nil(sheet)
 Assert.eq(sheet.items[1].value, "__mixed__", "混合模式置顶")
 Assert.eq(sheet.items[2].value, "local", "本地排第二")
-Assert.eq(#sheet.items, 6, "5 源 + 1 混合")
+Assert.eq(#sheet.items, 7, "6 源 + 1 混合")
 Assert.eq(sheet.items[4].text, "✓ 微信读书")
 
 sheet.on_select("__mixed__")
