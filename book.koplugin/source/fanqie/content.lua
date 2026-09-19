@@ -45,26 +45,25 @@ function Content.decode_pua_content(content)
         if not code then
             table.insert(result, content:sub(i, i))
             i = i + 1
-            goto continue
-        end
-        local decoded = false
-        for mode = 1, 2 do
-            local range = PUA_CODE[mode]
-            if code >= range[1] and code <= range[2] then
-                local bias = code - range[1]
-                local charset = PUA_CHARSET[mode]
-                if bias + 1 <= #charset and charset[bias + 1] ~= "?" then
-                    table.insert(result, charset[bias + 1])
-                    decoded = true
+        else
+            local decoded = false
+            for mode = 1, 2 do
+                local range = PUA_CODE[mode]
+                if code >= range[1] and code <= range[2] then
+                    local bias = code - range[1]
+                    local charset = PUA_CHARSET[mode]
+                    if bias + 1 <= #charset and charset[bias + 1] ~= "?" then
+                        table.insert(result, charset[bias + 1])
+                        decoded = true
+                    end
+                    break
                 end
-                break
             end
+            if not decoded then
+                table.insert(result, content:sub(i, next_i - 1))
+            end
+            i = next_i
         end
-        if not decoded then
-            table.insert(result, content:sub(i, next_i - 1))
-        end
-        i = next_i
-        ::continue::
     end
     return table.concat(result)
 end
