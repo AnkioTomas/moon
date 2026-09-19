@@ -315,7 +315,8 @@ end
 ---@param opts { within: number|nil, direction: "prev"|"next"|nil }
 local function requestChapter(chapter, idx, opts)
     cancelPrefetch()
-    showTransitionNotice()
+    local quiet = chapter.identity.source_id == "fanqie"
+    if not quiet then showTransitionNotice() end
     local identity = chapter.identity
     chapter.request = identity.source:openBookAsync(identity, { chapter_idx = idx }, function(path, err)
         chapter.request = nil
@@ -343,7 +344,7 @@ local function requestChapter(chapter, idx, opts)
         -- 先把提示实际刷到屏幕，再让出一个 tick 启动 KOReader 的阻塞式 HTML 打开。
         -- 直接调用 switchDocument 会立刻被 ReaderUI 的 invisible opening message 覆盖，
         -- 用户看不到“正在切换”提示。
-        if UIManager.forceRePaint then
+        if not quiet and UIManager.forceRePaint then
             UIManager:forceRePaint()
         end
         UIManager:nextTick(function()

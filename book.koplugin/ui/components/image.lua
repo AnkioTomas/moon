@@ -46,6 +46,7 @@ local Paths = require("utils.paths")
 local Request = require("http.request")
 local JSON = require("json")
 local Job = require("workers.job")
+local ThumbnailCache = require("ui.components.image_cache")
 
 local Image = {}
 
@@ -233,9 +234,17 @@ local function unmarshal(data, alpha)
         return nil
     end
     local pixels = data:sub(nl + 1)
-    if #pixels ~= head.stride * head.h then
+    if type(head.w) ~= "number" or type(head.h) ~= "number"
+        or type(head.stride) ~= "number" or type(head.fmt) ~= "number"
+        or head.w < 1 or head.h < 1 or head.w > 4096 or head.h > 4096
+        or head.w % 1 ~= 0 or head.h % 1 ~= 0 or head.stride % 1 ~= 0
+        or head.stride < math.ceil(head.w / 2) or head.stride > head.w * 4
+        or head.fmt % 1 ~= 0 or head.fmt < 0 or head.fmt > 5
+        or #pixels ~= head.stride * head.h then
         return nil
     end
+    local bytes_per_pixel = ({[0]=0.5,1,2,2,3,4})[head.fmt]
+    if head.stride < math.ceil(head.w * bytes_per_pixel) then return nil end
     local ok_bb, bb = pcall(Blitbuffer.fromstring, head.w, head.h, head.fmt, pixels, head.stride)
     if not ok_bb or not bb then
         return nil
@@ -325,7 +334,12 @@ local function pumpDecodeQueue()
     end, {
         name = "image.decode",
         on_done = function(result)
-            finish(result and unmarshal(readDecodedFile(result), task.alpha) or nil)
+            local data = result and readDecodedFile(result)
+            local widget = data and unmarshal(data, task.alpha)
+            if widget and task.cache_key == ThumbnailCache.key(task.path, task.w, task.h) then
+                pcall(ThumbnailCache.put, task.cache_key, data)
+            end
+            finish(widget)
         end,
         on_failed = function()
             os.remove(tmp)
@@ -346,7 +360,15 @@ end
 ---@param cb fun(widget: table|nil)
 ---@return table 可 abort 的任务句柄
 local function decodeAsync(path, w, h, alpha, cb)
+    local key = ThumbnailCache.key(path, w, h)
+    local data = ThumbnailCache.get(key)
+    if data then
+        local widget = unmarshal(data, alpha)
+        if widget then cb(widget); return {abort=function() end} end
+        ThumbnailCache.remove(key)
+    end
     local task = {
+        cache_key = key,
         path = path,
         w = w,
         h = h,

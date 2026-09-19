@@ -27,6 +27,7 @@ local Registry = {}
 
 ---@type table<SourceId, fun(): table>
 local FACTORIES = {
+    fanqie = function() return require("source.fanqie") end,
     moon = function() return require("source.moon") end,
     wechat = function() return require("source.wechat") end,
     jdread = function() return require("source.jdread") end,
@@ -35,7 +36,7 @@ local FACTORIES = {
 }
 
 -- local 默认源，列表垫底
-local ORDER = { "moon", "wechat", "jdread", "copymanga", "local" }
+local ORDER = { "fanqie", "moon", "wechat", "jdread", "copymanga", "local" }
 
 ---@type BookSource|nil
 local _active = nil
