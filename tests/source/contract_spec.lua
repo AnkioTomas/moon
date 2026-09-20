@@ -1,10 +1,9 @@
 -- 拆分后的领域类型契约离线用例。
 
 local Assert = require("support.assert")
-local BookTypes = require("types.book")
-local SourceCapabilities = require("types.book_source").SourceCapabilities
-local ProgressPosition = require("types.book_progress")
-local BookListResult = require("types.book_list")
+local Progress = require("book.progress")
+local SourceCapabilities = require("source.base").SourceCapabilities
+local Catalog = require("book.catalog")
 
 do
     local c = SourceCapabilities.defaults()
@@ -49,14 +48,14 @@ do
     Assert.eq(identity.stable_id, "a.epub")
 end
 
-Assert.eq(BookTypes.Book.clampPercent(42), 42)
-Assert.eq(BookTypes.Book.clampPercent(0.5), 50)
-Assert.eq(BookTypes.Book.clampPercent(12, true), 100)
-Assert.eq(ProgressPosition.clampFraction(0.42), 0.42)
-Assert.eq(ProgressPosition.clampFraction(42), 0.42)
+Assert.eq(Progress.clampPercent(42), 42)
+Assert.eq(Progress.clampPercent(0.5), 50)
+Assert.eq(Progress.clampPercent(12, true), 100)
+Assert.eq(Progress.clampFraction(0.42), 0.42)
+Assert.eq(Progress.clampFraction(42), 0.42)
 
 do
-    local list = BookListResult.new()
+    local list = Catalog.listResult()
     Assert.eq(list.count, 0)
     Assert.eq(#list.data, 0)
 end

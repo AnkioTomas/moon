@@ -7,8 +7,28 @@
 @module koplugin.book.source.chapter
 --]]
 
+---@class BookChapterAnchor
+---@field title string 章内目录标题
+---@field depth integer 展示层级（1-based）
+
+--- online / article 源目录中的一章。
+---@class BookChapter
+---@field idx integer 连续章序号（1-based）
+---@field depth integer|nil 展示层级（1-based）
+---@field anchors BookChapterAnchor[]|nil 章内目录节点
+---@field toc_version integer|nil 目录缓存格式版本（仅首章携带）
+---@field source_idx string|nil 源端非连续章节号
+---@field uid string|nil 源侧章节身份
+---@field title string 章节标题
+---@field name string|nil 章节标题别名（部分源/目录）
+---@field page number|nil KOReader 文档目录起始页
+---@field xpointer string|nil KOReader 文档目录定位点
+---@field tar string|nil 微信章节资源包 URL
+---@field href string|nil EPUB 内相对路径（html2epub）
+---@field toc boolean|nil 是否写入 EPUB 导航（html2epub；缺省 true）
+
 local Paths = require("utils.paths")
-local ProgressPosition = require("types.book_progress")
+local Progress = require("book.progress")
 local Text = require("utils.text")
 local _ = require("gettext")
 
@@ -286,7 +306,7 @@ function Chapter.openAsync(source, identity, book, opts, ops, cb)
                 local pos = localPosition(identity)
                 idx = pos and tonumber(pos.chapter_idx)
                 if not idx and pos then
-                    idx = math.floor(ProgressPosition.clampFraction(pos.fraction) * #toc) + 1
+                    idx = math.floor(Progress.clampFraction(pos.fraction) * #toc) + 1
                 end
             end
             idx = math.max(1, math.min(#toc, idx or 1))

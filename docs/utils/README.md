@@ -20,6 +20,6 @@ local Text = require("utils.text")
 Text.trim(s)
 ```
 
-类型注解：`book.koplugin/types/`。i18n：源字符串即简体中文；`l10n/zh_TW.lua`、`en.lua`。版本文件必须叫 `bookversion.lua`。
+类型桩（KOReader / FFI）：`book.koplugin/types/`。业务类型写在拥有模块。i18n：源字符串即简体中文；`l10n/zh_TW.lua`、`en.lua`。版本文件必须叫 `bookversion.lua`。
 
 测试写 `test/` 沙箱（`KO_HOME`），禁止写真实 `config/`。

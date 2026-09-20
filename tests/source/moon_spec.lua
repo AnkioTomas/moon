@@ -81,6 +81,10 @@ end
 
 package.preload["book.catalog"] = function()
     return {
+        listResult = function(books, count)
+            local data = books or {}
+            return { data = data, count = tonumber(count) or #data }
+        end,
         listLibraryAsync = function(source_id, opts, cb)
             rec.catalog_source = source_id
             rec.catalog_opts = opts

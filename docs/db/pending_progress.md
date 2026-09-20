@@ -67,4 +67,4 @@
 
 - [`book.koplugin/db/progress.lua`](../../book.koplugin/db/progress.lua)
 - [`book.koplugin/book/progress.lua`](../../book.koplugin/book/progress.lua)
-- 类型：[`types/pending_progress.lua`](../../book.koplugin/types/pending_progress.lua)、[`types/book_progress.lua`](../../book.koplugin/types/book_progress.lua)
+- 类型：[`book.koplugin/db/progress.lua`](../../book.koplugin/db/progress.lua)（`PendingProgress`）、[`book.koplugin/book/progress.lua`](../../book.koplugin/book/progress.lua)（`ProgressPosition`）

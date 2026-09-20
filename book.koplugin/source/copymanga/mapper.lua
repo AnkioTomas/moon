@@ -4,7 +4,7 @@
 @module koplugin.book.source.copymanga.mapper
 --]]
 
-local BookListResult = require("types.book_list")
+local Catalog = require("book.catalog")
 
 local Mapper = {}
 local SOURCE_ID = "copymanga"
@@ -59,7 +59,7 @@ function Mapper.search(wire)
         local book = Mapper.book(row)
         if book then books[#books + 1] = book end
     end
-    return BookListResult.new(books, tonumber(root.total) or #books)
+    return Catalog.listResult(books, tonumber(root.total) or #books)
 end
 
 --- 收藏列表：同一 list 结构，标记在架。

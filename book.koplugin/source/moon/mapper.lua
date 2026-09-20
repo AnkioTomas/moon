@@ -4,9 +4,8 @@ Moon wire → 领域对象
 @module koplugin.book.source.moon.mapper
 --]]
 
-local Book = require("types.book").Book
-local ProgressPosition = require("types.book_progress")
-local BookListResult = require("types.book_list")
+local Progress = require("book.progress")
+local Catalog = require("book.catalog")
 
 local Mapper = {}
 
@@ -74,7 +73,7 @@ function Mapper.book(row)
         source_id = SOURCE_ID, stable_id = sid,
         title = row.title or row.bookName or row.name,
         authors = row.authors or row.author,
-        percent = Book.clampPercent(
+        percent = Progress.clampPercent(
             row.percent or row.progress or row.progressPercent or row.readProgress,
             finished
         ),
@@ -107,7 +106,7 @@ end
 ---@return BookListResult
 function Mapper.list(wire)
     if type(wire) ~= "table" then
-        return BookListResult.new()
+        return Catalog.listResult()
     end
     local list = wire.data or wire.list or wire.books or {}
     local out = {}
@@ -119,7 +118,7 @@ function Mapper.list(wire)
             end
         end
     end
-    return BookListResult.new(out, tonumber(wire.count) or #out)
+    return Catalog.listResult(out, tonumber(wire.count) or #out)
 end
 
 --- Moon 进度 wire → ProgressPosition
@@ -134,10 +133,10 @@ function Mapper.progress(wire)
         if type(wire.data) == "table" then
             node = wire.data
         elseif type(wire.data) == "number" then
-            return { fraction = ProgressPosition.clampFraction(wire.data) }
+            return { fraction = Progress.clampFraction(wire.data) }
         end
     elseif type(wire) == "number" then
-        return { fraction = ProgressPosition.clampFraction(wire) }
+        return { fraction = Progress.clampFraction(wire) }
     else
         return nil
     end
@@ -148,8 +147,8 @@ function Mapper.progress(wire)
     local percent = percentNumber(
         node.percent or node.progress or node.progressPercent or node.readingProgress
     )
-    local fraction = percent and ProgressPosition.clampFraction(percent / 100)
-        or ProgressPosition.clampFraction(node.frac)
+    local fraction = percent and Progress.clampFraction(percent / 100)
+        or Progress.clampFraction(node.frac)
     if finished then fraction = 1 end
     local updated_at = tonumber(node.timestamp or node.progressTimestamp or node.readUpdateTime)
     if updated_at and updated_at > 1e12 then

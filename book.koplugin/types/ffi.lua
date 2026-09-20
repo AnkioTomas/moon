@@ -95,7 +95,8 @@ function SQLiteStatement:clearbind() end
 
 function SQLiteStatement:close() end
 
---- 可取消异步句柄（HTTP / Job / 源 Async）
----@class CancelHandle
----@field cancel fun(self: CancelHandle|nil)|fun()
-local CancelHandle = {}
+--- ffi/archiver Writer（copymanga CBZ 等）
+---@class ArchiverWriter
+local ArchiverWriter = {}
+
+function ArchiverWriter:close() end
