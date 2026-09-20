@@ -4,9 +4,8 @@
 @module koplugin.book.source.wechat.mapper
 --]]
 
-local Book = require("types.book").Book
-local ProgressPosition = require("types.book_progress")
-local BookListResult = require("types.book_list")
+local Progress = require("book.progress")
+local Catalog = require("book.catalog")
 
 local Mapper = {}
 
@@ -80,7 +79,7 @@ function Mapper.book(row)
         source_id = SOURCE_ID, stable_id = id,
         title = book.title or book.bookName or book.name,
         authors = book.authors or book.author,
-        percent = Book.clampPercent(
+        percent = Progress.clampPercent(
             book.percent or book.progress or book.progressPercent or book.readProgress,
             finished
         ),
@@ -130,7 +129,7 @@ function Mapper.albumBook(album)
         source_id = SOURCE_ID, stable_id = tostring(id),
         title = info.name or info.title,
         authors = info.authorName or info.author,
-        percent = Book.clampPercent(0, finished),
+        percent = Progress.clampPercent(0, finished),
         cover = cover,
     }, cover
 end
@@ -145,7 +144,7 @@ function Mapper.applyProgress(book, p)
     end
     local prog = tonumber(p.progress)
     if prog then
-        book.percent = Book.clampPercent(prog, false)
+        book.percent = Progress.clampPercent(prog, false)
     end
     if p.finishReading == 1 or p.finishReading == true then
         book.percent = 100
@@ -224,7 +223,7 @@ function Mapper.shelfList(shelf, on_cover)
             books[#books + 1] = b
         end
     end
-    return BookListResult.new(books)
+    return Catalog.listResult(books)
 end
 
 --- 搜索结果 wire → BookListResult。
@@ -263,7 +262,7 @@ function Mapper.searchList(data, on_cover)
             books[#books + 1] = b
         end
     end
-    return BookListResult.new(books)
+    return Catalog.listResult(books)
 end
 
 --- 章节列表 wire → BookChapter[]。
@@ -352,9 +351,9 @@ local function normalizeChapterOffset(raw)
         return nil
     end
     if n > 1 then
-        return ProgressPosition.clampFraction(n / 10000)
+        return Progress.clampFraction(n / 10000)
     end
-    return ProgressPosition.clampFraction(n)
+    return Progress.clampFraction(n)
 end
 
 --- 进度 wire 解包：getProgress 进度在 book 子对象里。
@@ -389,8 +388,8 @@ function Mapper.progress(data)
     local percent = tonumber(node.percent or node.progress or node.progressPercent or node.readingProgress)
     local fraction
     if percent and (percent > 0 or not chapter_idx) then
-        fraction = ProgressPosition.clampFraction(
-            Book.clampPercent(percent, finished) / 100
+        fraction = Progress.clampFraction(
+            Progress.clampPercent(percent, finished) / 100
         )
     else
         fraction = 0

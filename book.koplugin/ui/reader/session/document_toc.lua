@@ -164,7 +164,7 @@ function DocumentToc.gotoIndex(ui, idx, opts)
     local entry = list[idx]
     if not entry or not ui or not ui.handleEvent then return false end
     if opts and opts.within ~= nil and entry.page and ui.document then
-        local within = require("types.book_progress").clampFraction(opts.within)
+        local within = require("book.progress").clampFraction(opts.within)
         if type(ui.document.getXPointerFromProportion) == "function" then
             local ok, xptr = pcall(function()
                 local start = entry.xpointer

@@ -13,7 +13,7 @@ local BookInfo = require("ui.components.bookinfo")
 local Icon = require("ui.components.icon")
 local UI = require("ui.components.bookui")
 local Surface = require("ui.components.surface")
-local SourceCapabilities = require("types.book_source").SourceCapabilities
+local SourceCapabilities = require("source.base").SourceCapabilities
 
 
 local M = {}

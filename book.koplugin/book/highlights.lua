@@ -4,6 +4,15 @@
 @module koplugin.book.book.highlights
 --]]
 
+--- 首页书摘 / 一言共用展示结构。
+---@class BookExcerptQuote
+---@field text string
+---@field author string
+---@field title string
+---@field chapter string|nil
+---@field source_id string|nil
+---@field stable_id string|nil
+
 local Highlights = {}
 
 --- 注解快照是 JSON 数组；坏数据当空，不把解码失败吞成业务空以外的东西。

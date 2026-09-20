@@ -73,4 +73,4 @@
 - 表访问：[`book.koplugin/db/book.lua`](../../book.koplugin/db/book.lua)
 - 身份 / 对账：[`book.koplugin/book/store.lua`](../../book.koplugin/book/store.lua)
 - 列表：[`book.koplugin/book/catalog.lua`](../../book.koplugin/book/catalog.lua)
-- 类型：[`book.koplugin/types/book.lua`](../../book.koplugin/types/book.lua)
+- 类型：[`book.koplugin/db/book.lua`](../../book.koplugin/db/book.lua)（`Book` / `BookIdentity` / `BookDetail`）

@@ -141,7 +141,7 @@ local function applyChapterTarget(chapter, ui)
         if chapter_session ~= chapter or ui.document.file ~= target.path then return end
         local page
         if within ~= nil then
-            within = require("types.book_progress").clampFraction(within)
+            within = require("book.progress").clampFraction(within)
             if ui.document.getXPointerFromProportion then
                 local xptr = ui.document:getXPointerFromProportion(within)
                 if xptr and ui.rolling then

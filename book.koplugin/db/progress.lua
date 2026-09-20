@@ -4,6 +4,21 @@
 @module koplugin.book.db.progress
 --]]
 
+--- 对应表 pending_progress：待上传进度（一书一条）
+---@class PendingProgress : ProgressPosition
+---@field source_id string PRIMARY KEY 与 stable_id 复合主键
+---@field stable_id string PRIMARY KEY 与 source_id 复合主键
+---@field fraction number 全书比例
+---@field chapter_idx integer|nil 章节序号；部分源没有
+---@field chapter_title string|nil 当前章节标题
+---@field chapter_fraction number|nil 章内比例
+---@field page integer|nil 当前文档页码（1-based）
+---@field total_pages integer|nil 当前文档总页数
+---@field locator string|nil XPointer/CFI 等精确定位
+---@field extra table|nil 源私有定位字段（JSON 落库），如微信 chapter_uid
+---@field updated_at integer 更新时间戳
+---@field sync_status integer 0=待同步，1=已同步
+
 local Base = require("db.base")
 local JSON = require("json")
 local logger = require("utils.log")

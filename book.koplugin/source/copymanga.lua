@@ -253,7 +253,7 @@ function Source:getDetailAsync(identity, cb)
         end
         local progress = require("db.progress").get(self.id, identity.stable_id)
         if progress then
-            book.percent = require("types.book").Book.clampPercent(progress.fraction, false, true)
+            book.percent = require("book.progress").clampPercent(progress.fraction, false, true)
         end
         rememberCover(self, book)
         job = loadChapters(self._client, identity.stable_id, Mapper.groups(wire), function(chapters)

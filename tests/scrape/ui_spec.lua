@@ -77,7 +77,7 @@ end
 package.preload["utils.paths"] = function()
     return { coverPath = function() return cover_path end }
 end
-package.preload["types.book_source"] = function()
+package.preload["source.base"] = function()
     return {
         SourceCapabilities = {
             supportsScrape = function() return true end,
@@ -91,7 +91,7 @@ end
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/inputdialog", "ui/widget/infomessage",
     "scrape.results", "scrape.search", "ui.components.image", "db.book",
-    "utils.paths", "types.book_source", "source.registry", "scrape.ui",
+    "utils.paths", "source.base", "source.registry", "scrape.ui",
 }) do
     package.loaded[name] = nil
 end

@@ -7,9 +7,8 @@
 local Client = require("source.jdread.client")
 local Mapper = require("source.jdread.mapper")
 local Toc = require("source.jdread.toc")
-local BookListResult = require("types.book_list")
 local SourceBase = require("source.base")
-local ProgressPosition = require("types.book_progress")
+local Progress = require("book.progress")
 local _ = require("gettext")
 
 local Jdread = {}
@@ -275,7 +274,7 @@ function Source:getDetailAsync(identity, cb)
         end
         local progress = require("db.progress").get(self.id, book.stable_id)
         if progress then
-            book.percent = require("types.book").Book.clampPercent(progress.fraction, false, true)
+            book.percent = require("book.progress").clampPercent(progress.fraction, false, true)
         end
         require("book.store").rememberMany({ book })
         cb(book)
@@ -427,7 +426,7 @@ function Source:putProgressAsync(identity, pos, cb)
             chapter_id = uid,
             epub_chapter_title = pos.chapter_title or (chapter and chapter.title) or "",
             quote_text = "",
-            percent = ProgressPosition.clampFraction(pos.fraction),
+            percent = Progress.clampFraction(pos.fraction),
             created_at = os.time(),
         }, function(wire, err)
             if cancelled then return end

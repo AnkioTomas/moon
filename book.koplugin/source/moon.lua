@@ -9,7 +9,7 @@ Book (moon) 数据源门面
 local Client = require("source.moon.client")
 local Mapper = require("source.moon.mapper")
 local SourceBase = require("source.base")
-local ProgressPosition = require("types.book_progress")
+local Progress = require("book.progress")
 local _ = require("gettext")
 
 local Moon = {}
@@ -554,7 +554,7 @@ end
 ---@return table|nil
 function Source:putProgressAsync(identity, pos, cb)
     pos = pos or {}
-    local frac = ProgressPosition.clampFraction(pos.fraction)
+    local frac = Progress.clampFraction(pos.fraction)
     -- locator 是唯一能跨设备对齐的坐标：百分比会随字号排版漂移。
     -- 不发它的话，mapper 拉回来的 locator 永远是 nil，恢复位置只能靠百分比。
     return self._client:updateProgressAsync({

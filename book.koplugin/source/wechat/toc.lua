@@ -160,7 +160,7 @@ function Toc.wholeFraction(source_id, stable_id, chapter_idx, chapter_fraction)
         return nil
     end
     local within = chapter_fraction or 0
-    return require("types.book_progress").clampFraction(
+    return require("book.progress").clampFraction(
         (chapter_idx - 1 + within) / #list
     )
 end

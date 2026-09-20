@@ -1,6 +1,6 @@
 # source.base — 数据源基类
 
-代码：[`source/base.lua`](../../book.koplugin/source/base.lua)。类型：[`types/book_source.lua`](../../book.koplugin/types/book_source.lua)。
+代码：[`source/base.lua`](../../book.koplugin/source/base.lua)（含 `BookSource` / `SourceCapabilities` 等注解与能力表运行时）。
 
 ## 设计
 

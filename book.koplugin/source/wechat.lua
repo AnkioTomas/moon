@@ -12,7 +12,7 @@ local Notes = require("source.wechat.notes")
 local Annotations = require("source.wechat.annotations")
 local Toc = require("source.wechat.toc")
 local SourceBase = require("source.base")
-local ProgressPosition = require("types.book_progress")
+local Progress = require("book.progress")
 local JSON = require("json")
 local Protocol = require("source.wechat.protocol")
 local logger = require("utils.log")
@@ -340,7 +340,7 @@ function Source:getDetailAsync(identity, cb)
         end
         local progress = require("db.progress").get(self.id, b.stable_id)
         if progress then
-            b.percent = require("types.book").Book.clampPercent(progress.fraction, false, true)
+            b.percent = require("book.progress").clampPercent(progress.fraction, false, true)
         end
         require("book.store").rememberMany({ b })
         cb(b)
@@ -566,11 +566,11 @@ end
 ---@return { cancel: fun() }
 function Source:putProgressAsync(identity, pos, cb)
     pos = pos or {}
-    local frac = ProgressPosition.clampFraction(pos.fraction)
+    local frac = Progress.clampFraction(pos.fraction)
     local progress = math.max(0, math.min(100, math.floor(frac * 100 + 0.5)))
     local chapter_idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx) or 0
     local chapter_frac = pos.chapter_fraction
-    local offset = chapter_frac and math.floor(ProgressPosition.clampFraction(chapter_frac) * 10000) or 0
+    local offset = chapter_frac and math.floor(Progress.clampFraction(chapter_frac) * 10000) or 0
     local summary = pos.chapter_title or ""
     local cancelled = false
     local resolve_job, ensure_job, push_job
@@ -713,7 +713,7 @@ function Source:pushStatsAsync(rows, cb)
             chapter_uid = chapter_uid,
             chapter_idx = Toc.sourceIndex(self.id, bucket.stable_id, bucket.chapter_idx)
                 or bucket.chapter_idx,
-            chapter_offset = math.floor(ProgressPosition.clampFraction(bucket.chapter_fraction) * 10000),
+            chapter_offset = math.floor(Progress.clampFraction(bucket.chapter_fraction) * 10000),
             summary = "",
             progress = 0,
             psvts = psvts or "",

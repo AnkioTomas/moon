@@ -5,12 +5,20 @@
 @module koplugin.book.book.progress
 --]]
 
-local Event = require("ui/event")
-local UIManager = require("ui/uimanager")
-local InfoMessage = require("ui/widget/infomessage")
+--- 统一阅读位置（拉/推进度唯一形态）。
+---@class ProgressPosition
+---@field fraction number 全书比例 0..1，必填
+---@field chapter_idx integer|nil 连续章序号（1-based）；部分源没有
+---@field chapter_title string|nil 当前章节标题（跨源可读，不依赖 idx）
+---@field chapter_fraction number|nil 章内比例 0..1
+---@field page integer|nil 当前文档页码（1-based）
+---@field total_pages integer|nil 当前文档总页数
+---@field locator string|nil XPointer/CFI 等精确定位
+---@field extra table|nil 源私有定位字段，原样往返本地库；跨源代码不得解读其内容
+---@field updated_at integer|nil 进度/阅读最后活跃时间（含远端 readUpdateTime）
+
 local logger = require("utils.log")
 local ProgressDB = require("db.progress")
-local ProgressPosition = require("types.book_progress")
 local Position = require("book.progress.position")
 local Text = require("utils.text")
 local _ = require("gettext")
@@ -20,6 +28,49 @@ local Progress = {
     last_revision = 0,
     sync_runs = {},
 }
+
+--- fraction 钳制到 0..1。
+---@param raw any
+---@return number
+function Progress.clampFraction(raw)
+    local n = tonumber(raw)
+    if not n then
+        return 0
+    end
+    if n > 1 and n <= 100 then
+        n = n / 100
+    end
+    if n < 0 then
+        return 0
+    end
+    if n > 1 then
+        return 1
+    end
+    return n
+end
+
+--- 百分比钳制到 0..100 整数。
+--- as_frac 或 (0,1) 区间值按比例换算；finished 为真且未满则抬到 100。
+---@param raw any 原始进度（百分数或 0..1 比例）
+---@param finished boolean|nil 是否已读完
+---@param as_frac boolean|nil 强制按 0..1 比例解释
+---@return number
+function Progress.clampPercent(raw, finished, as_frac)
+    local n = tonumber(raw) or 0
+    if as_frac or (n > 0 and n < 1) then
+        n = n * 100
+    end
+    n = math.floor(n + 0.5)
+    if n < 0 then
+        n = 0
+    elseif n > 100 then
+        n = 100
+    end
+    if finished and n < 100 then
+        return 100
+    end
+    return n
+end
 
 --- 生成单调递增的进度修订号（同一进程内不会重复）。
 --- 秒级时间戳在同一秒内多次写入会撞号，而修订号是 pending_progress 判定新旧的
@@ -124,6 +175,7 @@ local function gotoPage(ui, pos)
     if not page or not recorded_total or not doc or not doc.getPageCount then return false end
     local total = doc:getPageCount()
     if not total or total ~= recorded_total or page < 1 or page > total then return false end
+    local Event = require("ui/event")
     ui:handleEvent(Event:new("GotoPage", math.floor(page)))
     return true
 end
@@ -136,7 +188,7 @@ end
 ---@param pos ProgressPosition|nil 位置；缺精确坐标时退回 pct
 ---@param pct number 文档内比例，最后手段
 local function applyPosition(ui, pos, pct)
-    pct = ProgressPosition.clampFraction(pct)
+    pct = Progress.clampFraction(pct)
     if not gotoLocator(ui, pos and pos.locator) and not gotoPage(ui, pos) then
         local doc = ui.document
         if doc and doc.getXPointerFromProportion then
@@ -149,6 +201,7 @@ local function applyPosition(ui, pos, pct)
         elseif doc and doc.getPageCount then
             local total = doc:getPageCount() or 1
             local page = math.max(1, math.min(total, math.floor(pct * total + 0.5)))
+            local Event = require("ui/event")
             ui:handleEvent(Event:new("GotoPage", page))
         else
             return
@@ -510,6 +563,8 @@ local function applyChosenPos(ui, id, pos, pct, show_msg)
                 return
             end
             if show_msg then
+                local UIManager = require("ui/uimanager")
+                local InfoMessage = require("ui/widget/infomessage")
                 UIManager:show(InfoMessage:new{
                     text = T(_("已跳转到 %1"), conflictLabel(pos, id)),
                     timeout = 2,
@@ -523,6 +578,8 @@ local function applyChosenPos(ui, id, pos, pct, show_msg)
         applyPosition(ui, pos, pct)
     end
     if show_msg then
+        local UIManager = require("ui/uimanager")
+        local InfoMessage = require("ui/widget/infomessage")
         UIManager:show(InfoMessage:new{
             text = T(_("已跳转到 %1"), conflictLabel(pos, id)),
             timeout = 2,
@@ -594,6 +651,7 @@ end
 local function askProgressConflict(id, snapshot, local_pos, remote_pos)
     local key = id.source_id .. "\31" .. id.stable_id
     if Progress.asked_conflicts[key] then return end
+    local UIManager = require("ui/uimanager")
     local ConfirmBox = require("ui/widget/confirmbox")
     local local_desc = conflictLabel(local_pos, id, snapshot)
     local remote_desc = conflictLabel(remote_pos, id, snapshot)

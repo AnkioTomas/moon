@@ -4,7 +4,7 @@ Z-Library wire → 书城展示对象。
 @module koplugin.book.zlib.mapper
 --]]
 
-local BookListResult = require("types.book_list")
+local Catalog = require("book.catalog")
 local Text = require("utils.text")
 local _ = require("gettext")
 
@@ -68,7 +68,7 @@ end
 ---@param wire table|nil
 ---@return BookListResult
 function Mapper.list(wire)
-    if type(wire) ~= "table" then return BookListResult.new() end
+    if type(wire) ~= "table" then return Catalog.listResult() end
     local rows = wire.books or (wire.exactMatch and wire.exactMatch.books) or {}
     local books = {}
     for _, row in ipairs(rows) do
@@ -78,7 +78,7 @@ function Mapper.list(wire)
     local count = wire.pagination and tonumber(wire.pagination.total_items)
         or tonumber(wire.exactBooksCount)
         or #books
-    return BookListResult.new(books, count)
+    return Catalog.listResult(books, count)
 end
 
 return Mapper
