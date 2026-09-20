@@ -223,7 +223,7 @@ do
     Assert.not_nil(requests[2][2])
     Assert.not_nil(requests[3][2])
     Assert.eq(result.replace.mode, "ranges")
-    Assert.len(result.replace.ranges, 7)
+    Assert.len(result.replace.ranges, 5)
     local total, monthly_day
     for _, row in ipairs(result.rows) do
         if row.record_type == "total" then total = row.duration end

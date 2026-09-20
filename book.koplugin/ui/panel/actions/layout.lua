@@ -26,7 +26,6 @@ return {
     end,
     --- 打开阅读风格与更多排版入口。
     ---@param ctx BookQuickPanelContext
-    ---@return void
     run = function(ctx)
         Layout.showMenu(ctx.ui)
     end,

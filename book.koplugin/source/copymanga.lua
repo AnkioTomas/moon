@@ -203,7 +203,7 @@ end
 ---@param stable_id string
 ---@param groups table[]|nil
 ---@param cb fun(chapters: BookChapter[]|nil, err: string|nil)
----@return { cancel: fun() }
+---@return CancelHandle|nil
 local function loadChapters(client, stable_id, groups, cb)
     return client:chaptersAsync(stable_id, groups, function(rows, err)
         if not rows then cb(nil, err); return end

@@ -18,7 +18,7 @@ Prompts.system = [[你是文学阅读助手。只输出合法 JSON，不要 Mark
 
 可用训练知识辅助理解书名、消歧与撰写简介；但实体 name 或其 aliases 中至少有一项必须在 READING CONTEXT 原文中逐字出现，禁止仅凭外部知识编造名称。]]
 
----@param snapshot table
+---@param snapshot table|nil
 ---@return string
 local function formatExisting(snapshot)
     snapshot = snapshot or { characters = {}, locations = {}, terms = {} }
@@ -27,6 +27,9 @@ local function formatExisting(snapshot)
     ---@param label string 小标题
     ---@param items table[]|nil
     local function section(label, items)
+        if not items then
+            return
+        end
         if #items == 0 then
             return
         end

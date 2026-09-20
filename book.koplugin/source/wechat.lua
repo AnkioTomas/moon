@@ -127,7 +127,11 @@ function Source:coverRequest(identity)
     local url = identity.cover_url or identity.cover or self._covers[identity.stable_id]
     if type(url) ~= "string" or url == "" then
         local stored = require("db.book").get(self.id, identity.stable_id)
-        url = stored and stored.cover
+        local cover = stored and stored.cover
+        if type(cover) ~= "string" or cover == "" then
+            return nil, _("无封面")
+        end
+        url = cover
     end
     if type(url) ~= "string" or url == "" then
         return nil, _("无封面")
@@ -852,7 +856,7 @@ end
 --- 拉取某本书的划线与想法，合并成 KOReader 注解数组。
 --- 想法接口失败只记日志不算错：划线本身已经可用。
 ---@param identity BookIdentity
----@param cb fun(annotations: table[]|nil, err: string|nil)
+---@param cb fun(annotations: table[]|nil, err: string|nil, meta: table|nil)
 ---@return { cancel: fun() }|nil
 function Source:pullNotesAsync(identity, cb)
     if not self:configured() then
@@ -1185,7 +1189,7 @@ function Source:pushNotesAsync(identity, annotations, cb)
             finish(nil, _("缺少章节信息"))
             return
         end
-        current_job = WChapter.fetchHtmlAsync(book_id, chapter, function(_, err, range_html)
+        current_job = WChapter.fetchHtmlAsync(book_id, chapter, function(_html, err, range_html)
             current_job = nil
             if cancelled then return end
             if not range_html then

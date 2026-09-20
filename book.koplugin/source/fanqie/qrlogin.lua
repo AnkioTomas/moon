@@ -62,9 +62,9 @@ local function absolute_url(base, location)
     return prefix .. location
 end
 
---- @param _client unused（签名兼容 setting.lua）
---- @param settings source.fanqie.settings
---- @param plugin   提供 showBusy/closeBusy
+---@param _client any 签名兼容 setting.lua，调用方传 nil
+---@param settings FanqieSettings
+---@param plugin table 提供 showBusy/closeBusy
 function QRLogin:new(_client, settings, plugin)
     local self = setmetatable({}, QRLogin)
     self.settings = settings

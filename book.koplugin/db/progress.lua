@@ -49,7 +49,7 @@ end
 --- 进度满时抬 books.read_state（进度真源在本表，不再写 books.percent）。
 ---@param source_id string
 ---@param stable_id string
----@param fraction number
+---@param fraction number|nil
 local function syncReadState(source_id, stable_id, fraction)
     if (tonumber(fraction) or 0) < 1 then return end
     Base.exec(
@@ -256,13 +256,13 @@ end
 ---@param updated_at number
 ---@return boolean
 function ProgressDB.markSynced(source_id, stable_id, updated_at)
-    updated_at = tonumber(updated_at)
+    local ts = tonumber(updated_at)
     return Base.execChanged(
         [[UPDATE pending_progress SET sync_status=1
           WHERE source_id=? AND stable_id=? AND updated_at=?;]],
         source_id,
         stable_id,
-        updated_at
+        ts
     )
 end
 

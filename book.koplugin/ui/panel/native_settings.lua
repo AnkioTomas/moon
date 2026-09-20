@@ -11,7 +11,7 @@ local Menu = require("ui.panel.menu")
 local _ = require("gettext")
 
 ---@class BookQuickPanelNativeSettings
----@field inject fun(menu: table): void
+---@field inject fun(menu: table)
 
 local NativeSettings = {}
 

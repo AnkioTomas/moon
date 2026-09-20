@@ -30,8 +30,14 @@ end
 local function weekStart(ymd)
     local year, month, day = tostring(ymd or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
     if not year then return nil end
+    local y = assert(tonumber(year))
+    local mo = assert(tonumber(month))
+    local d = assert(tonumber(day))
+    ---@cast y integer
+    ---@cast mo integer
+    ---@cast d integer
     local noon = os.time({
-        year = tonumber(year), month = tonumber(month), day = tonumber(day), hour = 12,
+        year = y, month = mo, day = d, hour = 12,
     })
     local date = os.date("*t", noon)
     return os.date("%Y-%m-%d", noon - ((date.wday + 5) % 7) * 86400)

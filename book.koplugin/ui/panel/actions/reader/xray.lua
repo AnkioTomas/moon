@@ -16,7 +16,6 @@ return {
         return require("utils.settings").get().book_xray_enabled ~= false
     end,
     ---@param ctx BookQuickPanelContext
-    ---@return void
     run = function(ctx)
         require("xray.ui").openMain(ctx.ui)
     end,

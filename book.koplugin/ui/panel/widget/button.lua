@@ -11,7 +11,7 @@ local Surface = require("ui.components.surface")
 local UI = require("ui.components.bookui")
 
 --- 单个快捷动作按钮：图标、文字、激活态和点击回调。
----@class BookQuickPanelActionButton : WidgetContainer
+---@class BookQuickPanelActionButton : InputContainer
 ---@field width number
 ---@field height number
 ---@field id string
@@ -20,13 +20,12 @@ local UI = require("ui.components.bookui")
 ---@field active boolean|nil
 ---@field enabled boolean|nil
 ---@field on_action fun(id: string)
----@field on_hold fun()|nil
+---@field on_hold fun(): boolean|nil
 
 local ActionButton = InputContainer:extend{}
 
 --- 根据宽高、图标、标题和状态构造胶囊按钮。
 ---@param self BookQuickPanelActionButton 当前视图或布局实例
----@return void
 function ActionButton:init()
     self.dimen = Geom:new{ w = self.width, h = self.height }
     self.ges_events = {
@@ -65,7 +64,7 @@ end
 
 --- 长按交给上层（用于进入现场编辑）。
 ---@param self BookQuickPanelActionButton
----@return boolean 是否已消费
+---@return boolean|nil 是否已消费
 function ActionButton:onHold()
     if self.on_hold then return self.on_hold() end
     return false

@@ -104,16 +104,25 @@ local function parseRelease(body)
     local zip_name = "book.koplugin-" .. tag .. ".zip"
     local zip = findAsset(release.assets, zip_name)
     if not zip then return nil, "release has no plugin archive" end
-    local digest = type(zip.digest) == "string" and zip.digest:match("^sha256:([%da-fA-F]+)$")
-    if digest and #digest ~= 64 then digest = nil end
+    local digest
+    if type(zip.digest) == "string" then
+        local matched = zip.digest:match("^sha256:([%da-fA-F]+)$")
+        if type(matched) == "string" and #matched == 64 then
+            digest = matched
+        end
+    end
     local checksum = findAsset(release.assets, zip_name .. ".sha256")
     if not digest and not checksum then return nil, "release has no plugin checksum" end
-    return {
+        local sha256
+        if digest then
+            sha256 = digest:lower()
+        end
+        return {
         version = version,
         tag = tag,
         url = zip.browser_download_url,
         size = tonumber(zip.size),
-        sha256 = digest and digest:lower() or nil,
+        sha256 = sha256,
         checksum_url = checksum and checksum.browser_download_url or nil,
         notes = formatNotes(release.body),
         available = newer(version, currentVersion()),
@@ -312,14 +321,16 @@ function Update.manualCheck(plugin_root)
                 text = T(_("检查更新失败：%1"), tostring(err)),
                 timeout = 4,
             })
-        elseif release.available then
-            Update._offered_version = nil
-            promptInstall(release, plugin_root)
-        else
-            UIManager:show(InfoMessage:new{
-                text = T(_("已是最新版本（%1）"), currentVersion()),
-                timeout = 3,
-            })
+        elseif release then
+            if release.available then
+                Update._offered_version = nil
+                promptInstall(release, plugin_root)
+            else
+                UIManager:show(InfoMessage:new{
+                    text = T(_("已是最新版本（%1）"), currentVersion()),
+                    timeout = 3,
+                })
+            end
         end
     end)
 end
@@ -331,7 +342,8 @@ function Update.autoCheck(plugin_root)
     if not settings.auto_update_check then return end
     if os.time() - (tonumber(settings.update_last_checked_at) or 0) < CHECK_INTERVAL then return end
     Update.check(function(release)
-        if release and release.available then promptInstall(release, plugin_root) end
+        if not release then return end
+        if release.available then promptInstall(release, plugin_root) end
     end)
 end
 

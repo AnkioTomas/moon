@@ -121,7 +121,7 @@ end
 
 --- 首页一言：回退句 + 设置缓存，resume 随机抽。日报一句由 myrl 缓存另走。
 ---@param avoid string|nil
----@return { text: string, author: string, title: string }
+---@return BookExcerptQuote
 function Hitokoto.random(avoid)
     local seen, pool = {}, {}
     local function push(text, source)

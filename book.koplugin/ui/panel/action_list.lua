@@ -7,15 +7,15 @@ local Registry = require("ui.panel.actions.registry")
 
 ---@class BookQuickPanelActionList
 ---@field ids fun(): string[]
----@field save fun(ids: string[]): void
----@field setEnabled fun(id: string, enabled: boolean): void
----@field move fun(id: string, delta: number): void
+---@field save fun(ids: string[])
+---@field setEnabled fun(id: string, enabled: boolean)
+---@field move fun(id: string, delta: number)
 ---@field options fun(order_fn: fun(): string[]): BookQuickPanelOption[]
 
 ---@param scope "desktop"|"reader"
 ---@param settings_key string
 ---@param default_ids string[]|fun(): string[]
----@param opts { before_read: (fun(): void)|nil, can_enable: (fun(action: BookQuickPanelAction): boolean)|nil, settings_available: (fun(action: BookQuickPanelAction): boolean)|nil }|nil
+---@param opts { before_read: (fun())|nil, can_enable: (fun(action: BookQuickPanelAction): boolean)|nil, settings_available: (fun(action: BookQuickPanelAction): boolean)|nil }|nil
 ---@return BookQuickPanelActionList
 local function create(scope, settings_key, default_ids, opts)
     opts = opts or {}
@@ -23,12 +23,15 @@ local function create(scope, settings_key, default_ids, opts)
     ---@return string[]
     local function ids()
         if opts.before_read then opts.before_read() end
-        local configured = MoonSettings.get()[settings_key]
-        if type(configured) ~= "table" then
-            configured = type(default_ids) == "function" and default_ids() or default_ids
+        local raw = MoonSettings.get()[settings_key]
+        if type(raw) ~= "table" then
+            raw = type(default_ids) == "function" and default_ids() or default_ids
+        end
+        if type(raw) ~= "table" then
+            return {}
         end
         local seen, result = {}, {}
-        for _, id in ipairs(configured) do
+        for _, id in ipairs(raw) do
             local action = Registry.get(id)
             if action and action.scope == scope and not seen[id] then
                 seen[id] = true
@@ -92,18 +95,20 @@ local function create(scope, settings_key, default_ids, opts)
         local result = {}
         for _, action_id in ipairs(order_fn()) do
             local action = Registry.get(action_id)
-            local available = opts.settings_available
-                and opts.settings_available(action)
-                or Registry.available(action)
-            result[#result + 1] = {
-                id = action_id,
-                scope = scope,
-                title = action.title,
-                icon = action.icon,
-                enabled = enabled[action_id] ~= nil,
-                position = enabled[action_id],
-                available = available,
-            }
+            if action then
+                local available = opts.settings_available
+                    and opts.settings_available(action)
+                    or Registry.available(action)
+                result[#result + 1] = {
+                    id = action_id,
+                    scope = scope,
+                    title = action.title,
+                    icon = action.icon,
+                    enabled = enabled[action_id] ~= nil,
+                    position = enabled[action_id],
+                    available = available,
+                }
+            end
         end
         return result
     end

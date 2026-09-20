@@ -102,7 +102,7 @@ local function b64decode(data)
         end
         return r
     end)
-    return bits:gsub("%d%d%d?%d?%d?%d?%d?%d?", function(x)
+    return (bits:gsub("%d%d%d?%d?%d?%d?%d?%d?", function(x)
         if #x ~= 8 then
             return ""
         end
@@ -113,7 +113,7 @@ local function b64decode(data)
             end
         end
         return string.char(c)
-    end)
+    end))
 end
 
 ---@param bytes string

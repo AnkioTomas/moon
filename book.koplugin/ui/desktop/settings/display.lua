@@ -42,7 +42,7 @@ local function refreshRateLabel(rate)
 end
 
 ---@param desktop table
----@return fun(width: number): table|nil
+---@return (fun(width: number): table|nil)|nil
 local function refreshRow(desktop)
     if not Device:hasEinkScreen() then return nil end
     return function(iw)
@@ -75,7 +75,7 @@ local function refreshRow(desktop)
 end
 
 ---@param desktop table
----@return fun(width: number): table|nil
+---@return (fun(width: number): table|nil)|nil
 local function colorRow(desktop)
     local Screen = Device.screen
     local can_color = Screen.isColorScreen and Screen:isColorScreen()

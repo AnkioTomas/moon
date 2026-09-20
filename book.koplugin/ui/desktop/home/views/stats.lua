@@ -61,6 +61,14 @@ end
 ---@return table
 local function summarize(source_id)
     local scope = Catalog.libraryScope(source_id)
+    if not (type(scope) == "string" and scope ~= "" or type(scope) == "table" and #scope > 0) then
+        return {
+            streak = 0,
+            total_text = Catalog.formatDuration(0),
+            today_text = Catalog.formatDuration(0),
+        }
+    end
+    ---@cast scope string|string[]
     local summary = StatsDB.summaryBySource(scope)
     local daily = StatsDB.dailyBySource(scope)
     local today_ymd = os.date("%Y-%m-%d")

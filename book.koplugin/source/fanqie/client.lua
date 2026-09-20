@@ -388,7 +388,7 @@ end
 ---@param book_id string
 ---@param item_id string
 ---@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }
+---@return CancelHandle|nil
 function Client:officialGetContentAsync(book_id, item_id, cb)
     return require("source.fanqie.official").fetchAsync(self, book_id, item_id, cb)
 end

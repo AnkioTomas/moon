@@ -20,7 +20,6 @@ return {
     end,
     --- 打开高亮、书签和笔记列表。
     ---@param ctx BookQuickPanelContext
-    ---@return void
     run = function(ctx)
         ctx.ui.bookmark:onShowBookmark()
     end,

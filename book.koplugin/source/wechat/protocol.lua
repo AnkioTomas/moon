@@ -181,16 +181,16 @@ local function swapPositions(encoded)
         until byte == 0
         tmp[#tmp + 1] = tostring(tonumber(table.concat(bin), 4) or 0)
     end
-    tmp = table.concat(tmp)
+    local packed = table.concat(tmp)
     local result = {}
     local m = length - n - 2
     local step = #tostring(m)
     local i = 1
-    while #result < 10 and i + step - 1 < #tmp do
-        result[#result + 1] = (tonumber(tmp:sub(i, i + step - 1)) or 0) % m
-        local end2 = math.min(i + step, #tmp)
-        if i + 1 <= #tmp then
-            result[#result + 1] = (tonumber(tmp:sub(i + 1, end2)) or 0) % m
+    while #result < 10 and i + step - 1 < #packed do
+        result[#result + 1] = (tonumber(packed:sub(i, i + step - 1)) or 0) % m
+        local end2 = math.min(i + step, #packed)
+        if i + 1 <= #packed then
+            result[#result + 1] = (tonumber(packed:sub(i + 1, end2)) or 0) % m
         end
         i = i + step
     end

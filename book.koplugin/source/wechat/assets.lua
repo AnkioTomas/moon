@@ -17,7 +17,7 @@ local WEB = "https://weread.qq.com"
 ---@param value string|nil
 ---@return string
 local function trimNulls(value)
-    return tostring(value or ""):gsub("%z.*$", ""):gsub("%s+$", "")
+    return (tostring(value or ""):gsub("%z.*$", ""):gsub("%s+$", ""))
 end
 
 ---@param path string|nil
@@ -159,7 +159,7 @@ function Assets.rewriteImageSources(xhtml, src_map)
     if type(xhtml) ~= "string" or not src_map or not next(src_map) then
         return xhtml
     end
-    return xhtml:gsub("src=(['\"])(.-)%1", function(quote, src)
+    return (xhtml:gsub("src=(['\"])(.-)%1", function(quote, src)
         local clean = tostring(src or ""):gsub("&amp;", "&")
         local bare = clean:match("^[^%?#]+") or clean
         local href = src_map[clean] or src_map[bare] or src_map[basename(bare)]
@@ -167,7 +167,7 @@ function Assets.rewriteImageSources(xhtml, src_map)
             return "src=" .. quote .. href .. quote
         end
         return "src=" .. quote .. src .. quote
-    end)
+    end))
 end
 
 ---@param url string

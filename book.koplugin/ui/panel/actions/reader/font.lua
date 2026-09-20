@@ -25,7 +25,6 @@ return {
     end,
     --- 打开 Book 字体选择器并应用到当前阅读文档。
     ---@param ctx BookQuickPanelContext
-    ---@return void
     run = function(ctx)
         -- registry 会把所有动作模块一次性 require 进来：整棵 widget 树延迟到真正用时再拉
         local InfoMessage = require("ui/widget/infomessage")

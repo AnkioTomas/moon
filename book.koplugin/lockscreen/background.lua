@@ -19,7 +19,9 @@ local M = {}
 --- 返回本地日期；每日资源和组合缓存共用此时钟。
 ---@return string YYYY-MM-DD
 function M.dayKey()
-    return os.date("%Y-%m-%d")
+    local day = os.date("%Y-%m-%d")
+    ---@cast day string
+    return day
 end
 
 local IMAGE_EXTS = {

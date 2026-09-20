@@ -279,7 +279,7 @@ function Base.close()
 end
 
 --- 确保连接可用（未开则 Base.open）。
----@return userdata|nil, string|nil
+---@return SQLiteConnection|nil, string|nil
 function Base.ensure()
     local Job = package.loaded["workers.job"]
     if Job and Job.inSubProcess and Job.inSubProcess() then

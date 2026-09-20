@@ -33,8 +33,7 @@
 ---@field body string|nil
 
 --- 未完成的请求句柄。cancel 幂等。
----@class HttpJob
----@field cancel fun()
+---@class HttpJob : CancelHandle
 
 --- Request.stream 的增量回调。
 ---@class HttpStreamHandlers

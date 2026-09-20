@@ -82,13 +82,19 @@ end
 ---@param ui table|nil
 ---@return string|nil, integer
 function Context.visibleText(ui)
-    local document = ui and ui.document
+    if not ui then return nil, 0 end
+    local document = ui.document
     if not document then return nil, 0 end
     local page = currentPage()
     local text
     if ui.rolling and document.getTextFromPositions then
-        local width = ui.view and ui.view.dimen and ui.view.dimen.w
-        local height = ui.view and ui.view.dimen and ui.view.dimen.h
+        local view = ui.view
+        local dimen = view and view.dimen
+        local width, height
+        if dimen then
+            width = dimen.w
+            height = dimen.h
+        end
         if not width or not height then
             local ok, Device = pcall(require, "device")
             local screen = ok and Device and Device.screen

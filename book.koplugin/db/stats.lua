@@ -77,9 +77,9 @@ end
 ---@param prefix string|nil 限定 stable_id 前缀；缺省则窗口内全部合成行
 ---@return boolean
 function StatsDB.deleteSyntheticInRange(source_id, from_ts, to_ts, prefix)
-    from_ts = tonumber(from_ts)
-    to_ts = tonumber(to_ts)
-    if not from_ts or not to_ts then
+    local from_n = tonumber(from_ts)
+    local to_n = tonumber(to_ts)
+    if not from_n or not to_n then
         return false
     end
     if prefix ~= nil then
@@ -87,14 +87,14 @@ function StatsDB.deleteSyntheticInRange(source_id, from_ts, to_ts, prefix)
             [[DELETE FROM reading_stats
               WHERE source_id=? AND record_type IN ('day','book','total')
                 AND start_time>=? AND start_time<=? AND stable_id LIKE ?;]],
-            source_id, from_ts, to_ts, prefix .. "%"
+            source_id, from_n, to_n, prefix .. "%"
         ) ~= nil
     end
     return Base.exec(
         [[DELETE FROM reading_stats
           WHERE source_id=? AND record_type IN ('day','book','total')
             AND start_time>=? AND start_time<=?;]],
-        source_id, from_ts, to_ts
+        source_id, from_n, to_n
     ) ~= nil
 end
 
@@ -278,7 +278,7 @@ end
 ---@param source_id string
 ---@param replace BookStatsPullReplace|nil
 ---@param rows table[]|nil
----@return { imported: integer, skipped: integer }|nil
+---@return { imported: integer, skipped: integer, failed: integer|nil }|nil
 function StatsDB.replaceSynced(source_id, replace, rows)
     rows = rows or {}
     -- 清理范围由本批数据自己界定：回包没覆盖到的时间段一律不动。
@@ -620,6 +620,7 @@ function StatsDB.compactSynced(source_id, before_ts, limit)
     for i = 1, nrows do
         local ts = tonumber(result[4][i]) or 0
         local clock = os.date("*t", ts)
+        ---@cast clock osdate
         clock.min, clock.sec = 0, 0
         local hour = os.time(clock)
         local stable_id = result[2][i]

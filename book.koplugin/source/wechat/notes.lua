@@ -223,7 +223,7 @@ function Notes.localizeAnnotations(document, annotations, html_path, current)
                 if location then
                     ann.pos0, ann.pos1, ann.page = location.pos0, location.pos1, location.pos0
                     ann.pageno = nil
-                else
+                elseif saved then
                     ann.pos0, ann.pos1 = saved.pos0, saved.pos1
                     ann.page, ann.pageno = saved.page or saved.pos0, saved.pageno
                 end

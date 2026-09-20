@@ -87,8 +87,7 @@ end
 
 --- 翻页时结清旧页并开始新页计时。
 --- 没有活动会话、页码非法或页码未变化时不执行任何操作。
----@param snapshot ReaderSessionSnapshot
----@return nil
+---@param snapshot ReaderSessionSnapshot|nil
 function Stats.onPage(snapshot)
     local current = Stats.session
     if not snapshot then return end
@@ -260,6 +259,10 @@ function Stats.syncAsync(source, _opts, cb)
                     pull_error = tostring(push_error) .. "; " .. tostring(pull_error)
                 end
                 finish(nil, pull_error)
+                return
+            end
+            if type(pulled) ~= "table" then
+                finish(result)
                 return
             end
             result.pulled = pulled.imported

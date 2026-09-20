@@ -148,7 +148,11 @@ end
 ---@param region ViewRegion 已登记的区域
 ---@return table rect 当前区域矩形
 local function rectangle(region)
-    return type(region.rect) == "function" and region.rect() or region.rect
+    local rect = region.rect
+    if type(rect) == "function" then
+        return rect()
+    end
+    return rect
 end
 
 --- 仅刷新挂载且 Resume 的视图。区域矩形必须包含受影响的布局范围。

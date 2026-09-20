@@ -7,12 +7,12 @@
 ---@class ReaderSessionSnapshot
 ---@field ui table 当前 ReaderUI
 ---@field identity BookIdentity 当前物理文档身份
----@field page integer 当前文档页码
----@field total_pages integer 当前文档页数
----@field doc_fraction number 当前文档阅读比例（0..1）
----@field fraction number 全书阅读比例（0..1）
+---@field page integer|nil 当前文档页码
+---@field total_pages integer|nil 当前文档页数
+---@field doc_fraction number|nil 当前文档阅读比例（0..1）
+---@field fraction number|nil 全书阅读比例（0..1）
 ---@field chapter_fraction number|nil 当前章节阅读比例（0..1）
----@field percent number 全书阅读百分比（0..100）
+---@field percent number|nil 全书阅读百分比（0..100）
 ---@field reading_chapter_idx integer|nil 当前目录章序号（两种模式 toc 可用时）
 ---@field chapter ReaderChapterSession|nil 当前文档的章节上下文
 local Snapshot = {}

@@ -51,7 +51,7 @@ end
 ---
 --- 只覆盖远端确实报告了的分片：远端一条都没报时不写任何分片。协议字段缺失与
 --- 「远端确实为空」在 wire 上无法区分，宁可漏掉云端删除，也不能把本地划线清空。
----@param source_id string
+---@param source table
 ---@param stable_id string
 ---@param annotations table[]
 ---@param authoritative boolean|nil 远端明确返回完整快照时，缺失分片视为空
@@ -391,6 +391,9 @@ function Note.applyLocal(ui, identity)
         annotations = source:localizeAnnotations(
             ui.document, annotations, ui.document and ui.document.file, current
         )
+    end
+    if not annotations then
+        return 0
     end
     -- 注解形态跟文档走：ReaderUI 只会挂 rolling 或 paging 其中之一
     if source and type(source.mergeAnnotations) == "function" then

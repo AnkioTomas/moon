@@ -225,8 +225,9 @@ end
 ---@param tbl table|nil
 ---@return string
 function Text.formEncode(tbl)
+    local form = tbl or {}
     local keys = {}
-    for k in pairs(tbl or {}) do
+    for k in pairs(form) do
         keys[#keys + 1] = k
     end
     table.sort(keys, function(a, b)
@@ -234,7 +235,7 @@ function Text.formEncode(tbl)
     end)
     local parts = {}
     for _, k in ipairs(keys) do
-        local v = tbl[k]
+        local v = form[k]
         if v ~= nil then
             parts[#parts + 1] = Text.urlEncode(k) .. "=" .. Text.urlEncode(v)
         end

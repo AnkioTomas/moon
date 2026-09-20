@@ -3,8 +3,8 @@
 --]]
 
 ---@class BookQuickPanelMenu
----@field close fun(menu: table|nil): void
----@field refresh fun(menu: table|nil): void
+---@field close fun(menu: table|nil)
+---@field refresh fun(menu: table|nil)
 
 local Menu = {}
 

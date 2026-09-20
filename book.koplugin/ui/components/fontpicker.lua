@@ -35,7 +35,7 @@ local TABS = {
 ---@class FontPickerOpts
 ---@field title string|nil
 ---@field on_done fun(id: string, name: string)|nil
----@field current_id fun(): string|nil|nil
+---@field current_id? fun(): string|nil
 ---@field on_select fun(item: MoonFontItem|table, id: string, name: string)|nil
 
 ---@param it MoonFontItem|table

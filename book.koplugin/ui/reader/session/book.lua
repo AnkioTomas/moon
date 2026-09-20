@@ -10,7 +10,7 @@ local Snapshot = require("ui.reader.session.snapshot")
 ---@class ReaderBookSession
 local Book = {}
 
----@param plugin table
+---@param _plugin table
 ---@param session ReaderSessionSnapshot
 function Book.onReaderReady(_plugin, session)
     Chapter.clearActiveChapter(session)

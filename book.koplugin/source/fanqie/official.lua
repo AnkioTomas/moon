@@ -86,7 +86,7 @@ end
 ---@param book_id string
 ---@param item_id string
 ---@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }
+---@return CancelHandle|nil
 function Official.fetchAsync(client, book_id, item_id, cb)
     book_id, item_id = tostring(book_id or ""), tostring(item_id or "")
     if not book_id:match("^%d+$") or not item_id:match("^%d+$") then

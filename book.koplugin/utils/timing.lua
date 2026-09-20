@@ -50,8 +50,11 @@ function Timing.debounce(fn, wait)
     if type(fn) ~= "function" then
         error("Timing.debounce: fn must be function", 2)
     end
-    wait = tonumber(wait)
-    if not wait or wait < 0 then
+    local delay = tonumber(wait)
+    if type(delay) ~= "number" then
+        error("Timing.debounce: wait must be >= 0", 2)
+    end
+    if delay < 0 then
         error("Timing.debounce: wait must be >= 0", 2)
     end
 
@@ -72,7 +75,7 @@ function Timing.debounce(fn, wait)
         n_args = select("#", ...)
         args = { ... }
         UIManager:unschedule(fire)
-        UIManager:scheduleIn(wait, fire)
+        UIManager:scheduleIn(delay, fire)
     end, function()
         UIManager:unschedule(fire)
         n_args = nil
@@ -89,8 +92,11 @@ function Timing.throttle(fn, wait)
     if type(fn) ~= "function" then
         error("Timing.throttle: fn must be function", 2)
     end
-    wait = tonumber(wait)
-    if not wait or wait < 0 then
+    local delay = tonumber(wait)
+    if type(delay) ~= "number" then
+        error("Timing.throttle: wait must be >= 0", 2)
+    end
+    if delay < 0 then
         error("Timing.throttle: wait must be >= 0", 2)
     end
 
@@ -98,7 +104,7 @@ function Timing.throttle(fn, wait)
 
     return handle(function(...)
         local now = os.time()
-        if last_at and now - last_at < wait then
+        if last_at and now - last_at < delay then
             return
         end
         last_at = now

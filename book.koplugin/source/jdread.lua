@@ -262,7 +262,7 @@ end
 
 ---@param identity BookIdentity
 ---@param cb fun(book: Book|nil, err: string|nil)
----@return { cancel: fun() }
+---@return CancelHandle|nil
 function Source:getDetailAsync(identity, cb)
     return self._client:bookInfoAsync(identity.stable_id, function(wire, err)
         if not wire then cb(nil, err); return end
@@ -304,7 +304,7 @@ end
 ---@param identity BookIdentity
 ---@param chapter BookChapter
 ---@param cb fun(payload: ChapterContentPayload|nil, err: string|nil)
----@return { cancel: fun() }
+---@return CancelHandle|nil
 local function fetchContent(self, identity, chapter, cb)
     return self._client:chapterContentAsync(identity.stable_id, chapter.uid, function(wire, err)
         if not wire then cb(nil, err); return end

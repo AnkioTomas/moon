@@ -2,7 +2,7 @@
 --- 仅 EmmyLua 类型注释，运行时不要 require。
 --- 对应表 pending_progress：待上传进度（一书一条）
 
----@class PendingProgress
+---@class PendingProgress : ProgressPosition
 ---@field source_id string PRIMARY KEY 与 stable_id 复合主键
 ---@field stable_id string PRIMARY KEY 与 source_id 复合主键
 ---@field fraction number 全书比例

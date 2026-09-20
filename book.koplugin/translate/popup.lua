@@ -32,7 +32,7 @@ local T = require("ffi/util").template
 local Screen = Device.screen
 
 ---@class BookTranslatePopup : InputContainer
----@field translator string|nil Edge 翻译器标识
+---@field translator table|nil KOReader Translator 单例
 ---@field text string 待译原文
 ---@field translated string|nil 译文或状态占位
 ---@field source_lang string|nil

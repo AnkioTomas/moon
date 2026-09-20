@@ -19,8 +19,10 @@ end
 ---@param ui table|nil
 ---@return table|nil
 local function rawToc(ui)
+    if not ui then return nil end
+    local document = ui.document
     local toc_mod = readerToc(ui)
-    if not toc_mod or not ui.document then
+    if not toc_mod or not document then
         return nil
     end
     -- ReaderToc.fillToc 可能触发文档解析；TOC 在同一 ReaderUI 生命周期内是
@@ -29,16 +31,16 @@ local function rawToc(ui)
         return toc_mod.toc
     elseif type(toc_mod.fillToc) == "function" then
         pcall(toc_mod.fillToc, toc_mod)
-    elseif type(ui.document.getToc) == "function" then
-        local ok, items = pcall(ui.document.getToc, ui.document)
+    elseif type(document.getToc) == "function" then
+        local ok, items = pcall(document.getToc, document)
         if ok and type(items) == "table" then
             toc_mod.toc = items
         end
     end
     local items = toc_mod.toc
     if type(items) ~= "table" or #items == 0 then
-        if type(ui.document.getToc) == "function" then
-            local ok, fallback = pcall(ui.document.getToc, ui.document)
+        if type(document.getToc) == "function" then
+            local ok, fallback = pcall(document.getToc, document)
             items = ok and fallback or nil
         end
     end

@@ -116,11 +116,6 @@ function Detail.open(desktop, origin, book)
     UIManager:setDirty(desktop.detail, "ui")
 end
 
---- Z-Library 预览书：待下载导入本地书库。
----@param book table|nil 当前操作或展示的书籍数据
----@param source table|nil 书籍所属数据源实例
----@param origin "store"|"library" 详情来源
----@return "zlib"|"source"|nil
 local storeKind = require("ui.desktop.detail.common").storeKind
 
 --- 初始化全屏尺寸、返回键，挂生命周期后 rebuild 并拉本机阅读统计。

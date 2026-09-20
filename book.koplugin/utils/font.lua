@@ -129,11 +129,13 @@ end
 ---@param id_or_item string|MoonFontItem 字体 id 或列表项
 ---@return boolean
 function MoonFont.isInstalled(id_or_item)
+    local id = id_or_item
     if type(id_or_item) == "table" then
         if id_or_item.kind == "local" or id_or_item.kind == "system" then return true end
-        id_or_item = id_or_item.id
+        id = id_or_item.id
     end
-    local path = wereadPath(id_or_item)
+    if type(id) ~= "string" then return false end
+    local path = wereadPath(id)
     return path ~= nil and lfs.attributes(path, "mode") == "file"
 end
 
@@ -355,9 +357,19 @@ function MoonFont.listAsync(force, cb)
             timeout = 30,
         }, function(res, err)
             if cancelled then return end
-            if err or not Request.ok(res and res.code) then
+            if err then
                 local fallback = _weread_cache or readDiskWeread()
                 finishWeread(fallback, err or _("获取字体列表失败"))
+                return
+            end
+            if not res then
+                local fallback = _weread_cache or readDiskWeread()
+                finishWeread(fallback, _("获取字体列表失败"))
+                return
+            end
+            if not Request.ok(res.code) then
+                local fallback = _weread_cache or readDiskWeread()
+                finishWeread(fallback, _("获取字体列表失败"))
                 return
             end
             local ok, data = pcall(JSON.decode, res.body or "")
@@ -550,6 +562,9 @@ end
 ---@param name string|nil
 ---@return boolean
 function MoonFont.applyFaceToReader(ui, face, id, name)
+    if not ui then
+        return false
+    end
     if not MoonFont.supportsReader(ui) or not setReaderFontFace(ui, face) then
         return false
     end
@@ -565,6 +580,9 @@ end
 ---@param name string|nil
 ---@return boolean|nil, string|nil
 function MoonFont.applyToReader(ui, id, name)
+    if not ui then
+        return nil, _("当前文档不支持字体与排版调整")
+    end
     if not MoonFont.supportsReader(ui) then
         return nil, _("当前文档不支持字体与排版调整")
     end
@@ -577,9 +595,17 @@ function MoonFont.applyToReader(ui, id, name)
         logger.warn("book font apply failed", "id=" .. tostring(id), "face=" .. face)
         return nil, _("应用字体失败")
     end
+    local file = ""
+    local document = ui.document
+    if type(document) == "table" then
+        local name = document.file
+        if type(name) == "string" then
+            file = name
+        end
+    end
     logger.dbg(
         "book font applied",
-        ui.document and ui.document.file or "",
+        file,
         "id=" .. tostring(id),
         "face=" .. face
     )
@@ -592,6 +618,7 @@ end
 ---@return boolean|nil, string|nil
 local function apply(id)
     saveFontmapDefaults()
+    ---@cast _defaults table
     id = sanitizeId(id or "")
     if id == "" then
         for key, val in pairs(_defaults) do
@@ -692,7 +719,15 @@ function MoonFont.ensureInstalledAsync(item, on_progress, cb)
         cb(nil, path_err)
         return { cancel = function() end }
     end
-    if dest == "" or not zip_path then
+    if type(dest) ~= "string" then
+        cb(true)
+        return { cancel = function() end }
+    end
+    if dest == "" then
+        cb(true)
+        return { cancel = function() end }
+    end
+    if type(zip_path) ~= "string" then
         cb(true)
         return { cancel = function() end }
     end

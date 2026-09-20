@@ -261,7 +261,7 @@ function Source:openBookAsync(identity, _opts, cb)
             end)
         end, function(ok, local_path, err)
             if cancelled then return end
-            if not ok then
+            if not ok or type(local_path) ~= "string" then
                 cb(nil, err or _("下载失败"))
                 return
             end
@@ -508,7 +508,7 @@ end
 
 --- 拉取某本书的划线/书签；远端没有注解字段时按空数组处理。
 ---@param identity BookIdentity
----@param cb fun(annotations: table[]|nil, err: string|nil)
+---@param cb fun(annotations: table[]|nil, err: string|nil, meta: table|nil)
 ---@return table|nil
 function Source:pullNotesAsync(identity, cb)
     return self._client:getAnnotationsAsync(identity.stable_id, function(wire, err)
@@ -524,7 +524,7 @@ end
 
 --- 拉取云端阅读进度；wire 映射不出有效位置时按「进度为空」失败。
 ---@param identity BookIdentity
----@param cb fun(pos: ProgressPosition|nil, err: string|nil)
+---@param cb fun(pos: ProgressPosition|nil, err: string|nil, meta: table|nil)
 ---@return table|nil
 function Source:getProgressAsync(identity, cb)
     return self._client:getProgressAsync(identity.stable_id, function(wire, err)

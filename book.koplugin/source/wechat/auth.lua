@@ -694,7 +694,11 @@ function Auth.beginQrLoginAsync(cb)
                 cb(nil, err)
                 return
             end
-            if not Request.ok(res and res.code) then
+            if not res then
+                cb(nil, _("获取登录 uid 失败"))
+                return
+            end
+            if not Request.ok(res.code) then
                 cb(nil, _("获取登录 uid 失败"))
                 return
             end
@@ -749,8 +753,16 @@ function Auth.waitQrLoginAsync(uid, cb)
                 require("ui/uimanager"):scheduleIn(3, poll)
                 return
             end
-            if err or not Request.ok(res and res.code) then
+            if err then
                 cb(nil, err or _("二维码已失效，请重新登录"), "error")
+                return
+            end
+            if not res then
+                cb(nil, _("二维码已失效，请重新登录"), "error")
+                return
+            end
+            if not Request.ok(res.code) then
+                cb(nil, _("二维码已失效，请重新登录"), "error")
                 return
             end
             jarMerge(asyncHeaders(res))

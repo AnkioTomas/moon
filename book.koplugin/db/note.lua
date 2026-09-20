@@ -158,13 +158,16 @@ end
 ---@param payload string|nil 源侧回填过 id 的快照
 ---@return boolean false 表示参数非法或 SQL 失败
 function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at, payload)
-    chapter_idx = tonumber(chapter_idx) or 0
-    updated_at = tonumber(updated_at)
+    local idx = tonumber(chapter_idx)
+    if type(idx) ~= "number" then
+        idx = 0
+    end
+    local ts = tonumber(updated_at)
     if payload ~= nil then
         return Base.exec(
             [[UPDATE notes SET sync_status=1, payload=?
               WHERE source_id=? AND stable_id=? AND chapter_idx=? AND updated_at=?;]],
-            payload, source_id, stable_id, chapter_idx, updated_at
+            payload, source_id, stable_id, idx, ts
         ) ~= nil
     end
     return Base.exec(
@@ -172,8 +175,8 @@ function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at, payloa
           WHERE source_id=? AND stable_id=? AND chapter_idx=? AND updated_at=?;]],
         source_id,
         stable_id,
-        chapter_idx,
-        updated_at
+        idx,
+        ts
     ) ~= nil
 end
 

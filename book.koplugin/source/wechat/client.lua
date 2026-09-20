@@ -15,6 +15,7 @@ local Protocol = require("source.wechat.protocol")
 local Text = require("utils.text")
 local _ = require("gettext")
 
+---@class WechatClient
 local Client = {}
 Client.__index = Client
 

@@ -109,8 +109,13 @@ end
 ---@param wire table|nil
 ---@return { path_word: string, name: string }[]
 function Mapper.groups(wire)
-    local raw = type(wire) == "table" and wire.results
-    raw = type(raw) == "table" and raw.groups or nil
+    local raw
+    if type(wire) == "table" then
+        local results = wire.results
+        if type(results) == "table" then
+            raw = results.groups
+        end
+    end
     local list = {}
     if type(raw) == "table" then
         for _, group in pairs(raw) do

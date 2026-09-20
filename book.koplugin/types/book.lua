@@ -19,10 +19,14 @@
 ---@field title string|nil 书名
 ---@field authors string|nil 作者
 ---@field percent number|nil 展示用进度 0..100（来自 pending_progress.fraction，非 books 列）
+---@field chapter_idx integer|nil 展示用章节序号（来自 pending_progress，非 books 列）
+---@field chapter_title string|nil 展示用章节标题（来自 pending_progress，非 books 列）
+---@field page integer|nil 展示用页码（来自 pending_progress，非 books 列）
+---@field total_pages integer|nil 展示用总页数（来自 pending_progress，非 books 列）
 ---@field category string|nil 分类 / 标签
 ---@field series string|nil 系列名
 ---@field intro string|nil 简介
----@field inserted_at integer 本行首次写入时间；0 表示仅身份行
+---@field inserted_at integer|nil 本行首次写入时间；0 表示仅身份行；内存展示行可能没有
 ---@field path string|nil 本地文件路径；身份解析唯一入口
 ---@field deleted integer|nil 0=在架有效，1=软删/非成员
 ---@field sync_status integer|nil 0=待上传，1=已同步
@@ -41,6 +45,15 @@
 ---@field toc string|nil 目录缓存 JSON（仅本地）
 ---@field toc_fetched_at integer|nil 目录缓存时间
 local Book = {}
+
+--- 首页书摘 / 一言共用展示结构。
+---@class BookExcerptQuote
+---@field text string
+---@field author string
+---@field title string
+---@field chapter string|nil
+---@field source_id string|nil
+---@field stable_id string|nil
 
 --- 百分比钳制到 0..100 整数。
 --- as_frac 或 (0,1) 区间值按比例换算；finished 为真且未满则抬到 100。

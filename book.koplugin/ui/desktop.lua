@@ -59,6 +59,8 @@ local UI = require("ui.components.bookui")
 ---@field source_generation integer|nil 换源代数，页内请求防串
 ---@field _tabs table[]
 ---@field _closed boolean|nil 桌面已关闭，异步回调短路
+---@field _cache_size_label string|nil 设置页缓存体积文案
+---@field _cache_size_job CancelHandle|nil 缓存体积测量任务
 local Desktop = InputContainer:extend{
     name = "book_desktop",
     covers_fullscreen = true,
@@ -108,6 +110,7 @@ end
 ---@return table
 local function tabContent(self)
     local page = tabPage(self)
+    if not page then return {} end
     if page.updateView then return page:updateView() end
     return page.widget or page:build()
 end

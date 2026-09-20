@@ -51,7 +51,7 @@ end
 ---@param password boolean|nil 是否按密码输入（状态列显示为 ******）
 ---@param normalize fun(value: string|nil): string 存盘前的归一化函数
 ---@param icon string|nil 行图标名，缺省 edit
----@return fun(iw: table): table 设置行构造器
+---@return fun(iw: number): table 设置行构造器
 local function field(plugin, key, title, hint, password, normalize, icon)
     return function(iw)
         local value = require("utils.settings").getSource(SOURCE_ID)[key] or ""
@@ -67,7 +67,7 @@ end
 
 --- Moon 设置页的行构造器列表：服务器地址、长期令牌。
 ---@param plugin table|nil 保存后回调 onSourceChanged 刷新 UI
----@return table[] 设置行构造器数组，元素为 fun(iw: table): table
+---@return table[] 设置行构造器数组，元素为 fun(iw: number): table
 function Setting.rows(plugin)
     return {
         field(plugin, "base_url", _("服务器地址"), "https://book.example.com", false, Text.stripWhitespace, "dns"),

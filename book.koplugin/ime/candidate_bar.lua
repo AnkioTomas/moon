@@ -177,26 +177,30 @@ local function applyKeyboardLabels(profile)
     if profile and profile.id == "zhuyin" then
         applyZhuyinKeys(layout.keys)
     end
-    local labels = profile and profile.labels
+    if not profile then return end
+    local labels = profile.labels
     if type(labels) ~= "table" then return end
     for _, row in ipairs(layout.keys) do
         for _, key in ipairs(row) do
             if type(key) == "table" then
                 for layer = 1, 2 do
                     local raw = primaryChar(key[layer])
-                    local code = raw and raw:lower()
-                    local label = code and labels[code]
-                    if label then
-                        local value = key[layer]
-                        if type(value) == "table" then
-                            value.label = label
-                            value.alt_label = profile.show_codes and code:upper() or nil
-                        else
-                            key[layer] = {
-                                label = label,
-                                alt_label = profile.show_codes and code:upper() or nil,
-                                value,
-                            }
+                    if type(raw) == "string" then
+                        local code = raw:lower()
+                        local label = labels[code]
+                        if label then
+                            local value = key[layer]
+                            local alt = profile.show_codes and code:upper() or nil
+                            if type(value) == "table" then
+                                value.label = label
+                                value.alt_label = alt
+                            else
+                                key[layer] = {
+                                    label = label,
+                                    alt_label = alt,
+                                    value,
+                                }
+                            end
                         end
                     end
                 end

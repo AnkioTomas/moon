@@ -107,7 +107,12 @@ end
 ---@param method table|string
 ---@return table
 function M.dictionary(method)
-    local id = type(method) == "table" and method.id or method
+    local id
+    if type(method) == "table" then
+        id = method.id
+    else
+        id = method
+    end
     return require("ime." .. M.get(id).id .. ".dictionary")
 end
 
@@ -116,7 +121,12 @@ end
 ---@param ... any
 ---@return any
 local function callDictionary(method, name, ...)
-    local profile = type(method) == "table" and method or M.get(method)
+    local profile
+    if type(method) == "table" then
+        profile = method
+    else
+        profile = M.get(method)
+    end
     local dictionary = M.dictionary(profile)
     if profile.id == "pinyin" then
         return dictionary[name](...)

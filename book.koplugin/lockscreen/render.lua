@@ -127,7 +127,7 @@ end
 ---@param block table 图形块描述
 ---@param w number 输出宽度
 ---@param h number 输出高度
----@param background userdata|nil 绘制主体前的背景副本
+---@param background BlitBuffer|nil 绘制主体前的背景副本
 local function paintShape(bb, block, w, h, background)
     local x = block.x or math.floor(w * 0.08)
     local y = block.y or 0
@@ -260,7 +260,7 @@ function M.write(path, background, blocks)
             if block.kind then
                 paintShape(bb, block, w, h, background_copy)
             else
-                paintText(bb, block, w, h)
+                paintText(bb, block, w)
             end
         end
     end)

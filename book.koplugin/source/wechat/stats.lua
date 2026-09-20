@@ -74,7 +74,8 @@ end
 
 local function yearRange(wire)
     local base_time = tonumber(field(wire, "baseTime")) or os.time()
-    local year = tonumber(os.date("%Y", base_time))
+    local year = assert(tonumber(os.date("%Y", base_time)))
+    ---@cast year integer
     local from_ts = os.time({ year = year, month = 1, day = 1, hour = 0 })
     local to_ts = os.time({ year = year + 1, month = 1, day = 1, hour = 0 }) - 1
     return from_ts, to_ts
@@ -94,7 +95,8 @@ function Stats.annualBaseTimes(overall)
             end
         end
     end
-    local current_year = tonumber(os.date("%Y"))
+    local current_year = assert(tonumber(os.date("%Y")))
+    ---@cast current_year integer
     by_year[current_year] = by_year[current_year]
         or os.time({ year = current_year, month = 1, day = 1, hour = 0 })
     local years = {}

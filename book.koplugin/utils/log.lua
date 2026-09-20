@@ -47,7 +47,7 @@ local function start()
 end
 
 ---@param batch string[]
----@return boolean
+---@return boolean, string|nil
 local function writeBatch(batch)
     local file = io.open(log_path, "a")
     if not file then return false end

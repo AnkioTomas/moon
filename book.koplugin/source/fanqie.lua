@@ -43,21 +43,24 @@ function Source:capabilities()
     return { refresh = true, insight = true }
 end
 
----@class FanqieAsyncHandle
+---@class FanqieAsyncHandle : CancelHandle
 ---@field job CancelHandle|nil
 ---@field cancelled boolean
----@field cancel fun(self: FanqieAsyncHandle|nil)
 
 ---@return FanqieAsyncHandle
 local function handle()
     ---@type FanqieAsyncHandle
-    local h = { job = nil, cancelled = false }
-    function h.cancel()
-        h.cancelled = true
-        if h.job and h.job.cancel then
-            h.job.cancel()
-        end
-    end
+    local h
+    h = {
+        job = nil,
+        cancelled = false,
+        cancel = function()
+            h.cancelled = true
+            if h.job and h.job.cancel then
+                h.job.cancel()
+            end
+        end,
+    }
     return h
 end
 

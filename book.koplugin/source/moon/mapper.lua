@@ -89,7 +89,7 @@ end
 
 --- 详情行 wire → BookDetail。
 ---@param row table|nil
----@return BookDetail|nil
+---@return Book|nil
 function Mapper.detail(row)
     local book = Mapper.book(row)
     if not book then

@@ -33,7 +33,7 @@ local Header = InputContainer:extend{
 
 --- 从当前阅读会话提取书名和章节/作者副标题。
 ---@param ui table|nil KOReader 阅读界面实例
----@return string, string
+---@return string, string|nil
 local function bookTexts(ui)
     local current = Session.current() or {}
     local identity = current.identity
@@ -55,7 +55,6 @@ end
 
 --- 构建标题文本和退出按钮布局。
 ---@param self BookQuickPanelHeader 当前视图或布局实例
----@return void
 function Header:init()
     local title, subtitle = bookTexts(self.ui)
     local exit_w = UI.sz(44)

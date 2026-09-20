@@ -36,7 +36,6 @@ end
 --- 弹出单个快捷动作设置对话框，处理启用、上下移动和关闭。
 ---@param desktop table
 ---@param option BookQuickPanelOption
----@return void
 local function configure(desktop, option)
     local panel = panelFor(option)
     local dialog
@@ -44,7 +43,6 @@ local function configure(desktop, option)
     buttons[#buttons + 1] = {{
         text = option.enabled and _("停用") or _("启用"),
         --- 切换动作启用状态后刷新设置页。
-        ---@return void
         callback = function()
             panel.setEnabled(option.id, not option.enabled)
             UIManager:close(dialog)
@@ -56,7 +54,6 @@ local function configure(desktop, option)
             {
                 text = _("上移"), enabled = option.position and option.position > 1,
                 --- 把动作向前移动一位后刷新设置页。
-                ---@return void
                 callback = function()
                     panel.move(option.id, -1)
                     UIManager:close(dialog)
@@ -66,7 +63,6 @@ local function configure(desktop, option)
             {
                 text = _("下移"), enabled = option.position and option.position < panel.enabledCount(),
                 --- 把动作向后移动一位后刷新设置页。
-                ---@return void
                 callback = function()
                     panel.move(option.id, 1)
                     UIManager:close(dialog)
@@ -77,7 +73,6 @@ local function configure(desktop, option)
     end
     buttons[#buttons + 1] = {{
         --- 关闭动作配置对话框。
-        ---@return void
         text = _("关闭"), callback = function() UIManager:close(dialog) end,
     }}
     dialog = ButtonDialog:new{
@@ -112,7 +107,6 @@ local function optionRows(desktop, options)
                 -- 设备不可用的动作不可配置，避免「启用后不可见」的假状态。
                 chevron = current.available,
                 --- 点击整行打开该动作的配置对话框。
-                ---@return void
                 callback = current.available and function() configure(desktop, current) end or nil,
             })
         end

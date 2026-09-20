@@ -28,7 +28,7 @@ local logger = require("utils.log")
 local _ = require("gettext")
 local View = require("ui.view")
 
----@class BookInsight
+---@class BookInsight : View
 ---@field desktop BookDesktop
 ---@field state table|nil
 ---@field loaded boolean
@@ -234,8 +234,11 @@ function Insight:fetch()
             for day in pairs(per_day) do days[#days + 1] = day end
             table.sort(days)
             local today = os.date("%Y-%m-%d")
+            ---@cast today string
             local selected = per_day[today] and today or (days[#days] or "")
-            local ym = raw.calendar.initial_ym or os.date("%Y-%m")
+            local ym_now = os.date("%Y-%m")
+            ---@cast ym_now string
+            local ym = raw.calendar.initial_ym or ym_now
             local yy, mm = selected:match("^(%d%d%d%d)%-(%d%d)")
             if yy and mm then ym = yy .. "-" .. mm end
             finish({

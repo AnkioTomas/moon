@@ -213,7 +213,9 @@ function Mobi2Epub.build(opts, cb)
         error("mobi2epub.build: cb must be function", 2)
     end
 
+    ---@type { cancel: fun() }|nil
     local active_job
+    ---@type { cancel: fun() }|nil
     local extract_job = Mobi2Epub.extract(opts, function(text, err)
         if not text then
             cb(nil, err)

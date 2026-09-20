@@ -23,7 +23,7 @@ local _ = require("gettext")
 local View = require("ui.view")
 local Screen = Device.screen
 
----@class BookStorePage
+---@class BookStorePage : View
 ---@field desktop BookDesktop
 ---@field state table|nil
 ---@field books table[]|nil

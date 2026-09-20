@@ -42,7 +42,7 @@ end
 --- 确保章节 psvts 已缓存（进度/时长上报依赖）。
 ---@param bookId string
 ---@param chapter_uid string|number
----@param cb fun(ok: boolean, err: any)
+---@param cb fun(ok: boolean|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Chapter.ensurePsvtsAsync(bookId, chapter_uid, cb)
     bookId = tostring(bookId or "")
@@ -88,7 +88,8 @@ end
 ---@return { cancel: fun() }
 function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     bookId = tostring(bookId or "")
-    if not chapter or not chapter.uid then
+    local uid = chapter and chapter.uid
+    if type(uid) ~= "string" or uid == "" then
         cb(nil, _("章节缺少 uid"))
         return { cancel = function() end }
     end
@@ -140,7 +141,6 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
             end
         )
     end
-    local uid = chapter.uid
     local reader_url = Protocol.readerUrl(bookId, uid)
     active_job = Auth.webGetAsync(reader_url, {
         accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -153,7 +153,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
             return
         end
         local psvts = extractPsvts(html)
-        if not psvts or psvts == "" then
+        if type(psvts) ~= "string" or psvts == "" then
             fail(_("阅读页缺少 psvts"))
             return
         end

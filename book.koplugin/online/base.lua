@@ -27,6 +27,7 @@ Online.timeout = 20
 function Online.untilMidnight()
     local now = os.time()
     local t = os.date("*t", now)
+    ---@cast t osdate
     t.hour, t.min, t.sec = 0, 0, 0
     t.day = t.day + 1
     local left = os.time(t) - now

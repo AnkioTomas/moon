@@ -202,14 +202,24 @@ end
 ---@return string
 function Languages.displayName(translator, code, detected)
     if code == "auto" then
-        if detected then
-            local norm = normalizeCode(detected)
-            return languageName(translator, norm) or translator:getLanguageName(norm, detected)
+        if type(detected) ~= "string" then
+            return _("自动检测")
         end
-        return _("自动检测")
+        local norm = normalizeCode(detected)
+        if type(norm) ~= "string" then
+            return _("自动检测")
+        end
+        return languageName(translator, norm) or translator:getLanguageName(norm, detected)
     end
     local norm = normalizeCode(code)
-    return languageName(translator, norm) or translator:getLanguageName(norm, code or "?")
+    if type(norm) ~= "string" then
+        return "?"
+    end
+    local shown = code
+    if type(shown) ~= "string" then
+        shown = "?"
+    end
+    return languageName(translator, norm) or translator:getLanguageName(norm, shown)
 end
 
 --- 写入 KOReader 源语言设置。

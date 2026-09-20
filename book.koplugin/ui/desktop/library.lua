@@ -38,7 +38,7 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 local Screen = Device.screen
 
----@class BookLibrary
+---@class BookLibrary : View
 ---@field desktop BookDesktop
 ---@field filter table
 ---@field page number
@@ -58,7 +58,7 @@ Library.__index = Library
 setmetatable(Library, View)
 
 --- 创建图书馆实例，独立持有筛选、分页和请求句柄。
----@param desktop BookDesktop 所属桌面实例
+---@param opts table|nil
 ---@return BookLibrary
 -- 使用 View 继承的 :new，生命周期字段由基类统一初始化。
 -- 页面内容仍由现有 updateView 负责拼装。
@@ -338,11 +338,6 @@ function Library:build(ctx, state, opts)
     local total = opts.total or 0
     local books = state.books
     local library = ctx.desktop and ctx.desktop.library
-    --- 点封面：图书馆直接打开书；Z站（show_status=false）进详情。
-    ---@param book Book 被点中的书
-    ---@param cover table 封面叠层
-    ---@param cw number 封面宽度
-    ---@param ch number 封面高度
     local on_open = opts.on_open
     if type(on_open) ~= "function" then
         if opts.show_status == false then
@@ -515,7 +510,7 @@ function Library:fetch()
     local uncategorized = not not f.uncategorized
     local series = f.series or ""
     local unseries = not not f.unseries
-    local read_status = f.read_status or ""
+    local read_status = f.read_status
     local filter_source = f.source_id or ""
     if not source then done({}, _("当前数据源不可用")); return end
     if not source.listLibraryAsync then

@@ -454,7 +454,12 @@ function Annotations.locate(source, needle, range_str)
     if needle == "" then
         return nil, nil
     end
-    local flow = type(source) == "table" and source or Annotations.flow(source)
+    local flow
+    if type(source) == "string" then
+        flow = Annotations.flow(source)
+    else
+        flow = source
+    end
     local want = countRunes(needle)
     if want == 0 or want > flow.count then
         return nil, nil
@@ -480,7 +485,12 @@ end
 ---@param items table[]
 ---@return table<table, { pos0: string, pos1: string }>
 function Annotations.locateBatch(source, items)
-    local flow = type(source) == "table" and source or Annotations.flow(source)
+    local flow
+    if type(source) == "string" then
+        flow = Annotations.flow(source)
+    else
+        flow = source
+    end
     local entries = {}
     for ordinal, item in ipairs(items or {}) do
         local needle = type(item) == "table" and normalizeText(item.text or "") or ""
