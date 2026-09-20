@@ -41,6 +41,8 @@ end
 ---@class BookPlugin : WidgetContainer
 ---@field is_doc_only boolean
 ---@field desktop BookDesktop|nil 当前全屏桌面实例
+---@field path string 插件根目录
+---@field ui table|nil KOReader FileManager / ReaderUI
 local BookPlugin = WidgetContainer:extend {
     name = "book",
     is_doc_only = false,

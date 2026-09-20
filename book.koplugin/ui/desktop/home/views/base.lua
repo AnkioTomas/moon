@@ -10,6 +10,7 @@ local View = require("ui.view")
 ---@field heightRange fun(self: BookHomeComponent, ctx: table|nil, opts: table|nil): BookHomeHeightSpec
 ---@field showSettings fun(self: BookHomeComponent, desktop: table|nil)|nil 有组件设置时由编辑叠层调用
 ---@field home BookHome|nil 拥有本组件的首页实例
+---@field desktop BookDesktop|nil 桌面宿主（部分组件直接挂）
 ---@field ctx table 当前构建上下文，提供数据源、尺寸和宿主
 ---@field opts table 当前布局分配的宽高和屏幕纵坐标
 local Base = {}

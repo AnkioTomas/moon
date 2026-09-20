@@ -64,7 +64,7 @@ local SCALE = { [0] = 1, 0.91, 0.82, 0.73, 0.64 }
 ---@field side integer 负数在左侧，正数在右侧
 local Perspective = WidgetContainer:extend{}
 --- 临时画布仅归本次绘制所有；成功或异常都释放，子控件仍由容器持有。
----@param bb userdata 目标画布
+---@param bb BlitBuffer 目标画布
 ---@param x integer 目标左上角横坐标
 ---@param y integer 目标左上角纵坐标
 ---@return nil

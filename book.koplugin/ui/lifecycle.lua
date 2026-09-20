@@ -6,11 +6,22 @@ Desktop 生命周期：Create / Resume / Pause / Destroy。
 
 ---@alias LifecycleState 'new'|'Create'|'Resume'|'Pause'|'Destroy'
 ---@alias LifecycleStage 'Create'|'Resume'|'Pause'|'Destroy'
+
+--- 可挂 Lifecycle 的宿主：须具备四阶段方法（可空实现；bind 会包装）。
+---@class LifecycleOwner
+---@field name string|nil
+---@field id string|nil
+---@field lifecycle Lifecycle|nil
+---@field onCreate fun(self: LifecycleOwner, ...: any): any
+---@field onResume fun(self: LifecycleOwner, ...: any): any
+---@field onPause fun(self: LifecycleOwner, ...: any): any
+---@field onDestroy fun(self: LifecycleOwner, ...: any): any
+
 ---@class Lifecycle
 ---@field state LifecycleState 当前进入的阶段，处理异常不会回滚状态
----@field owner? table 组合模式的处理对象，其业务状态保持独立
+---@field owner? LifecycleOwner 组合模式的处理对象，其业务状态保持独立
 ---@field jobs table[] Job.run 返回的任务
----@field http table[] HTTP / 源异步返回的 { cancel }
+---@field http CancelHandle[] HTTP / 源异步返回的 { cancel }
 local Lifecycle = {}
 
 Lifecycle.__index = Lifecycle
@@ -21,6 +32,10 @@ local ABORT_STAGES = { Pause = true, Destroy = true }
 local BOUND = setmetatable({}, { __mode = "k" })
 
 -- 补齐进入目标阶段所必需的边界阶段，保证生命周期顺序连续。
+---@param lifecycle Lifecycle
+---@param owner LifecycleOwner
+---@param stage LifecycleStage
+---@return boolean
 local function completeBefore(lifecycle, owner, stage)
     local state = lifecycle.state
     if stage == "Resume" then
@@ -34,7 +49,7 @@ local function completeBefore(lifecycle, owner, stage)
 end
 
 --- 日志主体名：name / id，否则退回 tostring。
----@param owner table
+---@param owner LifecycleOwner|table
 ---@return string
 local function subject(owner)
     local tag = owner.name or owner.id
@@ -87,8 +102,8 @@ function Lifecycle:addJob(job)
 end
 
 --- 登记 HTTP / 源异步句柄。Pause / Destroy 时取消。
----@param handle table|nil
----@return table|nil
+---@param handle CancelHandle|table|nil
+---@return CancelHandle|table|nil
 function Lifecycle:addHttp(handle)
     if type(handle) ~= "table" then return handle end
     local http = self.http
@@ -103,7 +118,7 @@ end
 --- 实例级绑定，捕获子类覆写；不修改类或其他实例。
 --- 每次阶段入口打 DEBUG 日志（受 book_debug_enabled 控制；无 logger 时静默）。
 ---@param lifecycle Lifecycle
----@param owner table
+---@param owner LifecycleOwner
 local function bind(lifecycle, owner)
     for _, stage in ipairs({ "Create", "Resume", "Pause", "Destroy" }) do
         local name = "on" .. stage
@@ -149,7 +164,7 @@ function Lifecycle:new(init)
 end
 
 --- 为已有父类的控件创建独立生命周期对象。
----@param owner table
+---@param owner LifecycleOwner
 ---@return Lifecycle
 function Lifecycle.attach(owner)
     local lifecycle = setmetatable({ owner = owner, state = "new", jobs = {}, http = {} }, Lifecycle)

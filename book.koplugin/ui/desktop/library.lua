@@ -38,10 +38,6 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 local Screen = Device.screen
 
-local Library = {}
-Library.__index = Library
-setmetatable(Library, View)
-
 ---@class BookLibrary
 ---@field desktop BookDesktop
 ---@field filter table
@@ -49,11 +45,17 @@ setmetatable(Library, View)
 ---@field page_size number
 ---@field total number
 ---@field state table|nil
----@field fetch_cancel table|nil
----@field filter_cancel table|nil
+---@field fetch_cancel CancelHandle|nil
+---@field filter_cancel CancelHandle|nil
 ---@field _opening_cover table|nil
 ---@field _opening_bar table|nil
 ---@field _open_token table|nil
+---@field build fun(self: BookLibrary, ctx: table, state: table, opts: table|nil): table
+---@field showSearch fun(self: BookLibrary, on_apply: fun(query: string)|nil, initial_query: string|nil)
+---@field cancel fun(self: BookLibrary)
+local Library = {}
+Library.__index = Library
+setmetatable(Library, View)
 
 --- 创建图书馆实例，独立持有筛选、分页和请求句柄。
 ---@param desktop BookDesktop 所属桌面实例

@@ -13,6 +13,17 @@ local _ = require("gettext")
 local Client = {}
 Client.__index = Client
 
+---@class CopymangaClient
+---@field base_url string
+---@field token string
+---@field configured fun(self: CopymangaClient): boolean
+---@field detailAsync fun(self: CopymangaClient, stable_id: string, cb: function): CancelHandle|nil
+---@field getProgressAsync fun(self: CopymangaClient, stable_id: string, cb: function): CancelHandle|nil
+---@field chaptersAsync fun(self: CopymangaClient, stable_id: string, groups: any, cb: function): CancelHandle|nil
+---@field chapterAsync fun(self: CopymangaClient, stable_id: string, chapter_uid: string, cb: function): CancelHandle|nil
+---@field setCollectAsync fun(self: CopymangaClient, comic_id: string, collect: boolean, cb: function): CancelHandle|nil
+---@field collectAllAsync fun(self: CopymangaClient, cb: function): CancelHandle|nil
+
 local DEFAULT_BASE_URL = "https://api.copy202601.com"
 
 Client.DEFAULT_BASE_URL = DEFAULT_BASE_URL

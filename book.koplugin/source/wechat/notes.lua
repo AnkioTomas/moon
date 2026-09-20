@@ -37,6 +37,21 @@ local WR_FIELDS = {
     "wr_delete_review", "wr_update_review", "wr_update_bookmark",
 }
 
+--- 阅读器注解条目（KOReader annotations + 微信扩展字段）。
+---@class WechatAnnotation
+---@field pos0 string|nil
+---@field pos1 string|nil
+---@field page string|number|nil
+---@field pageno number|nil
+---@field text string|nil
+---@field wr_bookmark_id string|number|nil
+---@field wr_range string|nil
+---@field wr_review_id string|number|nil
+---@field wr_deleted boolean|nil
+---@field chapter_idx number|nil
+---@field datetime string|nil
+---@field [any] any
+
 ---@param items table[]|nil
 ---@param total_pages integer|nil
 ---@return table[]
@@ -179,6 +194,7 @@ function Notes.localizeAnnotations(document, annotations, html_path, current)
     end
     -- rune 流只随 HTML 变，整章建一次给所有划线复用。
     local flow = Annotations.flow(html)
+    ---@type table<string, WechatAnnotation>
     local positioned = {}
     for _, item in ipairs(current or {}) do
         if type(item) == "table" and item.wr_bookmark_id and item.pos0 and item.pos1 then
@@ -196,6 +212,7 @@ function Notes.localizeAnnotations(document, annotations, html_path, current)
     for _, item in ipairs(annotations) do
         local ann = item
         if type(item) == "table" and not item.pos0 then
+            ---@type WechatAnnotation|nil
             local saved = item.wr_bookmark_id and positioned[tostring(item.wr_bookmark_id)] or nil
             local location = located[item]
             if saved or location then

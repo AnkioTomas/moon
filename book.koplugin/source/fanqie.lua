@@ -7,6 +7,11 @@
 local Base = require("source.base")
 
 local M = {}
+
+---@class FanqieSource : BookSource
+---@field settings FanqieSettings
+---@field client FanqieClient
+
 local Source = setmetatable({}, { __index = Base })
 Source.__index = Source
 
@@ -38,8 +43,14 @@ function Source:capabilities()
     return { refresh = true, insight = true }
 end
 
----@return { cancel: fun(), job: any, cancelled: boolean }
+---@class FanqieAsyncHandle
+---@field job CancelHandle|nil
+---@field cancelled boolean
+---@field cancel fun(self: FanqieAsyncHandle|nil)
+
+---@return FanqieAsyncHandle
 local function handle()
+    ---@type FanqieAsyncHandle
     local h = { job = nil, cancelled = false }
     function h.cancel()
         h.cancelled = true
@@ -59,6 +70,9 @@ local function errMsg(err)
     return tostring(err or "番茄请求失败")
 end
 
+---@param opts { force?: boolean, dirty_only?: boolean }|nil
+---@param cb fun(result: SyncResult|nil, err: any)
+---@return CancelHandle|nil
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
     -- 番茄暂无书架删/加推送；dirty_only 不得全量 pull。

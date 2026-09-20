@@ -59,6 +59,7 @@ end
 ---@field show_parent table|nil 原生菜单宿主，供滑杆脏区使用
 ---@field dimen table|nil 当前内容绝对尺寸
 ---@field ges_events table|nil 非编辑态挂长按进编辑
+---@field updateView fun(self: BookQuickPanelBody)
 
 local Body = InputContainer:extend{
     name = "book_quick_panel_body",

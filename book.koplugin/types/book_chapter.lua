@@ -14,5 +14,9 @@
 ---@field source_idx string|nil 源端非连续章节号
 ---@field uid string|nil 源侧章节身份
 ---@field title string 章节标题
+---@field name string|nil 章节标题别名（部分源/目录）
 ---@field page number|nil KOReader 文档目录起始页
 ---@field xpointer string|nil KOReader 文档目录定位点
+---@field tar string|nil 微信章节资源包 URL
+---@field href string|nil EPUB 内相对路径（html2epub）
+---@field toc boolean|nil 是否写入 EPUB 导航（html2epub；缺省 true）

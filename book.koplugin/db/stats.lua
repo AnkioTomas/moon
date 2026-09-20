@@ -192,7 +192,7 @@ local function mergedDailyRows(source_id, start_ts, end_ts)
 end
 
 --- 追加一条阅读统计。
----@param row { source_id: string, stable_id: string, page: number, start_time: number, duration: number, total_pages: number }
+---@param row BookStatsRow
 ---@param synced boolean|nil
 ---@return boolean
 function StatsDB.add(row, synced)

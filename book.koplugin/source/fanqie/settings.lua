@@ -6,6 +6,13 @@
 
 local SOURCE_ID = "fanqie"
 
+---@class FanqieSettings
+---@field cfg table
+---@field get fun(self: FanqieSettings, key: string, default: any): any
+---@field set fun(self: FanqieSettings, key: string, value: any)
+---@field flush fun(self: FanqieSettings)
+---@field is_cookie_configured fun(self: FanqieSettings): boolean
+
 local Settings = {}
 Settings.__index = Settings
 

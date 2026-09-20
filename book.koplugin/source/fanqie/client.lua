@@ -14,6 +14,19 @@ local logger = require("utils.log")
 local Client = {}
 Client.__index = Client
 
+---@class FanqieClient
+---@field settings FanqieSettings
+---@field clear_shelf_cache fun(self: FanqieClient)
+---@field requestAsync fun(self: FanqieClient, opts: table, cb: function): CancelHandle|nil
+---@field getJsonAsync fun(self: FanqieClient, url: string, opts: table|nil, cb: function): CancelHandle|nil
+---@field postJsonAsync fun(self: FanqieClient, url: string, data: table, opts: table|nil, cb: function): CancelHandle|nil
+---@field fetchShelfInfoAsync fun(self: FanqieClient, cb: function): CancelHandle|nil
+---@field fetchReadProgressAsync fun(self: FanqieClient, cb: function): CancelHandle|nil
+---@field updateReadProgressAsync fun(self: FanqieClient, book_id: string, item_id: string, index: number, progress: number, cb: function): CancelHandle|nil
+---@field fetchChapterDirectoryAsync fun(self: FanqieClient, book_id: string, cb: function): CancelHandle|nil
+---@field fetchShelfDetailAsync fun(self: FanqieClient, force_refresh: boolean|nil, cb: function): CancelHandle|nil
+---@field officialGetContentAsync fun(self: FanqieClient, book_id: string, item_id: string, cb: function): CancelHandle|nil
+
 local DEFAULT_TIMEOUT = 15
 local SHELF_CACHE_TTL = 5 * 60
 local SHELF_CACHE = {}

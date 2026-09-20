@@ -46,14 +46,23 @@ local Store = require("book.store")
 local _ = require("gettext")
 local Screen = Device.screen
 
----@class BookDetailPage : InputContainer
+---@class BookDetailPage : InputContainer, LifecycleOwner
 ---@field book Book|BookDetail|table
 ---@field plugin BookPlugin|nil
 ---@field source BookSource|nil
 ---@field desktop BookDesktop|nil
+---@field origin "store"|"library"
 ---@field close_callback fun()|nil
 ---@field lifecycle Lifecycle
 ---@field _dirty boolean|nil
+---@field _stats table|nil
+---@field _daily table|nil
+---@field _store_detail_job CancelHandle|nil
+---@field _install_job CancelHandle|nil
+---@field updateView fun(self: BookDetailPage)
+---@field onCancel fun(self: BookDetailPage)
+---@field onClose fun(self: BookDetailPage): boolean
+---@field onCloseWidget fun(self: BookDetailPage)
 local Detail = InputContainer:extend{
     name = "book_detail",
     covers_fullscreen = true,

@@ -11,6 +11,25 @@
 local Annotations = {}
 local Text = require("utils.text")
 
+--- 微信原始 HTML 上的 wire 映射：可见 rune ↔ 0-based wire 坐标。
+---@class WechatWireMapping
+---@field text string 规范化可见正文
+---@field runes string[] 可见 rune 序列
+---@field starts integer[] 每个 rune 在 wire HTML 上的 0-based 起始
+---@field ends integer[] 每个 rune 在 wire HTML 上的 0-based 半开上界
+---@field rune_at_byte table<integer, integer> 字节偏移 → rune 下标
+---@field count integer rune 数
+
+--- 本地章节 HTML 的跨段 rune 流（定位划线用）。
+---@class WechatRuneFlow
+---@field text string 剥空白后拼接的可见正文
+---@field para integer[] 每个 rune 所属段落号（1-based）
+---@field offset integer[] 每个 rune 在段内的 0-based 偏移
+---@field rune_at_byte table<integer, integer>
+---@field para_first_byte table<integer, integer>
+---@field count integer
+---@field paragraphs { index: integer, runes: string[] }[]
+
 ---@param str string
 ---@return string[]
 local function toRunes(str)
@@ -166,7 +185,7 @@ function Annotations.wireMapping(html)
         rune_at_byte[byte_pos] = index
         byte_pos = byte_pos + #rune
     end
-    ---@class WechatWireMapping
+    ---@type WechatWireMapping
     return {
         text = table.concat(runes),
         runes = runes,
@@ -347,7 +366,7 @@ local function buildFlow(paragraphs)
             byte_pos = byte_pos + #rune
         end
     end
-    ---@class WechatRuneFlow
+    ---@type WechatRuneFlow
     return {
         text = table.concat(runes),
         para = para,
@@ -373,7 +392,7 @@ local function normalizeText(text)
     return mapping.text
 end
 
----@param flow table
+---@param flow WechatRuneFlow|WechatWireMapping
 ---@param needle string
 ---@return integer[]
 local function matchingHeads(flow, needle)

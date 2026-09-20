@@ -22,6 +22,8 @@ local Widgets = require("ui.desktop.home.widgets")
 ---@field budget number|nil
 ---@field desktop BookDesktop|nil
 ---@field y number|nil
+---@field wrap fun(widget: table, meta: table): table|nil
+---@field body_height number|nil
 
 ---@class BookHomeLayout
 local Layout = {}
@@ -156,12 +158,13 @@ end
 ---@param ctx BookDesktopCtx 构建上下文，提供尺寸、数据源和桌面宿主
 ---@param components table<string, BookHomeComponent>
 ---@param page number|nil 当前页码，从 1 开始
----@param opts { wrap?: fun(widget, meta): table, body_height?: number }|nil
+---@param opts BookHomeBuildOpts|nil
 ---@return table widget
 ---@return number page
 ---@return number pages
 ---@return table<string, boolean> visible
 function Layout:build(ctx, components, page, opts)
+    ---@type BookHomeBuildOpts
     opts = opts or {}
     local w = ctx.width
     local h = ctx.height

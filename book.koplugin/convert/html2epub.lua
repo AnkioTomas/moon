@@ -237,7 +237,7 @@ end
 ---   author: string|nil,
 ---   language: string|nil,
 ---   identifier: string|nil,
----   chapters: { title: string, href: string, xhtml: string }[],
+---   chapters: { title: string, href: string, xhtml: string, toc?: boolean }[],
 ---   images: { href: string, mime: string, bytes: string }[],
 --- }
 ---@param dest string

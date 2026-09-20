@@ -12,7 +12,11 @@ local JSON = require("json")
 local SSE = {}
 
 --- 新建 SSE 解析器：feed 吃 chunk，finish 返回全文。
----@return { feed: fun(chunk: string): string|nil, finish: fun(): string }
+---@class AiSseParser
+---@field feed fun(chunk: string): string|nil
+---@field finish fun(): string
+
+---@return AiSseParser
 function SSE.parser()
     local buf = ""
     local full = {}
@@ -43,6 +47,7 @@ function SSE.parser()
         return content
     end
 
+    ---@type AiSseParser
     return {
         ---@param chunk string
         ---@return string|nil 本次新冒泡的正文（可能多行合并）

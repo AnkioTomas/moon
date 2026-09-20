@@ -41,6 +41,7 @@ local list = ActionList.create("desktop", "quick_panel_actions", Registry.deskto
 ---@field enabled boolean
 ---@field position number|nil
 ---@field available boolean
+---@field scope "desktop"|"reader"|nil
 
 --- 原生菜单按钮使用的桌面快捷动作项。
 ---@class BookQuickPanelMenuItem

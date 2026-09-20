@@ -13,6 +13,19 @@ local _ = require("gettext")
 local Client = {}
 Client.__index = Client
 
+---@class JdreadClient
+---@field cookie string|nil
+---@field uuid string|nil
+---@field configured fun(self: JdreadClient): boolean
+---@field shelfSyncAsync fun(self: JdreadClient, cb: function): CancelHandle|nil
+---@field bookInfoAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
+---@field addToShelfAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
+---@field removeFromShelfAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
+---@field chapterInfosAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
+---@field chapterContentAsync fun(self: JdreadClient, book_id: string, chapter_id: string, cb: function): CancelHandle|nil
+---@field getProgressAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
+---@field putProgressAsync fun(self: JdreadClient, book_id: string, marker: table, cb: function): CancelHandle|nil
+
 local API = "https://e.m.jd.com"
 local READER = "https://cread.jd.com"
 
