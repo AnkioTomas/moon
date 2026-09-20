@@ -34,7 +34,33 @@ local SHELF_CACHE = {}
 local AUTH_ERROR_CODES = {
     [-2012] = true,
     [-2041] = true,
+    [101119] = true, -- BOOKSHELF_GET_ERROR：无有效 sessionid
 }
+
+---@param data table|nil
+---@param fallback string
+---@return string
+local function businessError(data, fallback)
+    if type(data) ~= "table" then
+        return fallback
+    end
+    local err_code = data.errCode or data.errcode or data.code
+    local err_message = data.errMsg or data.errmsg or data.message or data.msg
+    local parts = { fallback }
+    if err_code ~= nil then
+        parts[#parts + 1] = "code=" .. tostring(err_code)
+    end
+    if err_message ~= nil and tostring(err_message) ~= "" then
+        parts[#parts + 1] = "message="
+            .. tostring(err_message):gsub("[%c]+", " "):sub(1, 200)
+    end
+    if AUTH_ERROR_CODES[tonumber(err_code)]
+        or (err_message and tostring(err_message):find("登录", 1, true))
+    then
+        parts[#parts + 1] = "请重新扫码登录"
+    end
+    return table.concat(parts, ", ")
+end
 
 ---@param text string|nil
 ---@return table|nil, string|nil
@@ -94,7 +120,7 @@ local function isAuthError(code, body, res)
     local data = select(1, decodeJson(body))
     if type(data) ~= "table" then return false end
     local err_code = data.errCode or data.errcode or data.code
-    if AUTH_ERROR_CODES[err_code] then return true end
+    if AUTH_ERROR_CODES[tonumber(err_code)] then return true end
     local msg = tostring(data.errMsg or data.errmsg or data.message or data.msg or "")
     return msg:find("登录", 1, true) ~= nil
 end
@@ -302,21 +328,25 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
     end
 
     local cancelled = false
-    local job
+    local shelf_job
+    local detail_jobs = {}
     local handle = {
         cancel = function()
             cancelled = true
-            if job and job.cancel then job.cancel() end
+            if shelf_job and shelf_job.cancel then shelf_job.cancel() end
+            for _, j in pairs(detail_jobs) do
+                if j and j.cancel then j.cancel() end
+            end
         end,
     }
 
-    job = self:fetchShelfInfoAsync(function(shelf_info, err)
+    shelf_job = self:fetchShelfInfoAsync(function(shelf_info, err)
         if cancelled then return end
         if type(shelf_info) ~= "table"
             or (shelf_info.code ~= nil and tonumber(shelf_info.code) ~= 0)
             or type(shelf_info.data) ~= "table"
         then
-            cb(nil, err or "番茄书架请求失败，请检查登录状态")
+            cb(nil, err or businessError(shelf_info, "番茄书架请求失败"))
             return
         end
         local book_shelf_info = shelf_info.data.book_shelf_info
@@ -332,55 +362,60 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
         local shelf_book_ids = {}
         for _, item in ipairs(book_shelf_info) do
             if item.book_id then
-                shelf_book_ids[#shelf_book_ids + 1] = item.book_id
+                shelf_book_ids[#shelf_book_ids + 1] = tostring(item.book_id)
             end
         end
+        if #shelf_book_ids == 0 then
+            local empty = { code = 0, data = { detail_list = {} } }
+            SHELF_CACHE[cache_key] = { timestamp = os.time(), data = empty }
+            cb(empty)
+            return
+        end
 
-        job = self:fetchReadProgressAsync(function(progress_result, progress_err)
-            if cancelled then return end
-            if not progress_result and progress_err then
-                logger.warn("fanqie shelf progress", progress_err)
-            end
-            local progress_map = {}
-            for _, item in ipairs(progress_result and progress_result.data or {}) do
-                progress_map[tostring(item.book_id)] = {
-                    read_progress = item.read_progress,
-                    index = item.index,
-                    item_id = item.item_id,
-                }
-            end
-            local books = {}
+        -- web multidetail 无作者；手机端 multi-detail 现已空响应。
+        -- 用 /api/book/info 拿书名/作者，封面走手机 CDN（thumb_uri 稳定、不签名过期）。
+        local pending = #shelf_book_ids
+        local by_id = {}
+        local function finish()
+            local detail_list = {}
             for _, book_id in ipairs(shelf_book_ids) do
-                local progress = progress_map[tostring(book_id)]
-                books[#books + 1] = {
-                    book_id = book_id,
-                    item_id = progress and progress.item_id or "0",
-                }
+                local row = by_id[book_id]
+                if row then
+                    detail_list[#detail_list + 1] = row
+                end
             end
-            job = self:postJsonAsync(FanQie.bookshelf_multidetail_url(), { books = books }, nil,
-                function(detail_result, detail_err)
-                    if cancelled then return end
-                    if not detail_result then
-                        cb(nil, detail_err or "番茄书架详情失败")
-                        return
-                    end
-                    if detail_result.data and detail_result.data.detail_list then
-                        for _, book in ipairs(detail_result.data.detail_list) do
-                            local progress = progress_map[tostring(book.book_id)]
-                            if progress then
-                                book.read_progress = progress.read_progress
-                                book.index = progress.index
-                                book.latest_read_item_id = progress.item_id
-                            end
-                        end
-                    end
-                    SHELF_CACHE[cache_key] = {
-                        timestamp = os.time(),
-                        data = detail_result,
+            if #detail_list == 0 then
+                cb(nil, "番茄书架详情失败")
+                return
+            end
+            local result = { code = 0, data = { detail_list = detail_list } }
+            SHELF_CACHE[cache_key] = { timestamp = os.time(), data = result }
+            cb(result)
+        end
+
+        for _, book_id in ipairs(shelf_book_ids) do
+            detail_jobs[book_id] = self:getJsonAsync(FanQie.book_info_url(book_id), nil, function(info, info_err)
+                if cancelled then return end
+                if type(info) == "table" and type(info.data) == "table"
+                    and (info.code == nil or tonumber(info.code) == 0)
+                then
+                    local d = info.data
+                    by_id[book_id] = {
+                        book_id = book_id,
+                        book_name = d.bookName or d.book_name or d.title,
+                        author_name = d.authorName or d.author_name or d.author or "",
+                        abstract = d.abstract or d.description or "",
+                        thumb_url = FanQie.mobileCover(d.thumbUri or d.thumb_uri or d.thumbUrl),
                     }
-                    cb(detail_result)
-                end)
-        end)
+                elseif info_err then
+                    logger.warn("fanqie book info", book_id, info_err)
+                end
+                pending = pending - 1
+                if pending <= 0 then
+                    finish()
+                end
+            end)
+        end
     end)
     return handle
 end

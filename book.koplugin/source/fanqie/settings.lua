@@ -43,7 +43,11 @@ end
 
 ---@return boolean
 function Settings:is_cookie_configured()
-    return type(self.cfg.cookies) == "table" and next(self.cfg.cookies) ~= nil
+    -- 书架接口要 HttpOnly 会话 cookie；只有 novel_web_id 等可见 cookie 会返回 101119。
+    local cookies = self.cfg.cookies
+    return type(cookies) == "table"
+        and type(cookies.sessionid) == "string"
+        and cookies.sessionid ~= ""
 end
 
 return Settings

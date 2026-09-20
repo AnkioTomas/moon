@@ -85,7 +85,7 @@ end
 function Toc.wholeFraction(source_id, stable_id, chapter_idx, chapter_fraction)
     local list = Toc.read(source_id, stable_id)
     if not list or #list == 0 then return nil end
-    return require("types.book_progress").clampFraction(
+    return require("book.progress").clampFraction(
         (chapter_idx - 1 + (chapter_fraction or 0)) / #list
     )
 end

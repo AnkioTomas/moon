@@ -38,7 +38,9 @@ package.preload["source.fanqie.client"] = function()
                                     {
                                         book_id = "1234567890123456789",
                                         book_name = "测试",
-                                        author = "作者",
+                                        author_name = "作者",
+                                        thumb_url = "https://p6-novel.byteimg.com/novel-pic/x~tplv-shrink:320:0.image",
+                                        abstract = "简介",
                                     },
                                 },
                             },
@@ -135,6 +137,9 @@ end)
 drain()
 Assert.eq(count, 1)
 Assert.eq(stored[1].stable_id, "1234567890123456789")
+Assert.eq(stored[1].authors, "作者")
+Assert.eq(stored[1].title, "测试")
+Assert.matches(stored[1].cover, "p6%-novel%.byteimg%.com")
 
 local ref = { source_id = "fanqie", stable_id = "1234567890123456789" }
 src:openBookAsync(ref, { chapter_idx = 1 }, function(path)

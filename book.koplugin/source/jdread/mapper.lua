@@ -4,9 +4,8 @@
 @module koplugin.book.source.jdread.mapper
 --]]
 
-local Book = require("types.book").Book
-local BookListResult = require("types.book_list")
-local ProgressPosition = require("types.book_progress")
+local Progress = require("book.progress")
+local Catalog = require("book.catalog")
 local Text = require("utils.text")
 
 local Mapper = {}
@@ -43,7 +42,7 @@ function Mapper.book(row)
         title = row.name or row.product_name
             or row.ebook_name or row.ebookName or row.book_name or row.bookName,
         authors = row.author or row.authors,
-        percent = Book.clampPercent(percent),
+        percent = Progress.clampPercent(percent),
         category = category,
         intro = row.intro or row.info or row.content_info or row.description or row.summary,
         cover = cover,
@@ -65,7 +64,7 @@ function Mapper.shelfList(wire, on_cover)
             books[#books + 1] = book
         end
     end
-    return BookListResult.new(books, root.total or root.total_count)
+    return Catalog.listResult(books, root.total or root.total_count)
 end
 
 --- 京东书城搜索 / 推荐 wire → BookListResult。
@@ -83,7 +82,7 @@ function Mapper.storeList(wire, on_cover)
             books[#books + 1] = book
         end
     end
-    return BookListResult.new(books, root.total_count)
+    return Catalog.listResult(books, root.total_count)
 end
 
 --- cread 目录 wire → BookChapter[]。
@@ -147,7 +146,7 @@ function Mapper.progress(wire)
     end
     if not current then return nil end
     return {
-        fraction = ProgressPosition.clampFraction(current.percent),
+        fraction = Progress.clampFraction(current.percent),
         chapter_title = current.epub_chapter_title,
         updated_at = tonumber(current.version or current.created_at),
     }, current.chapter_id and tostring(current.chapter_id) or nil
