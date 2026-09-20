@@ -17,7 +17,7 @@ Desktop 生命周期：Create / Resume / Pause / Destroy。
 ---@field onPause fun(self: LifecycleOwner, ...: any): any
 ---@field onDestroy fun(self: LifecycleOwner, ...: any): any
 
----@class Lifecycle
+---@class Lifecycle : LifecycleOwner
 ---@field state LifecycleState 当前进入的阶段，处理异常不会回滚状态
 ---@field owner? LifecycleOwner 组合模式的处理对象，其业务状态保持独立
 ---@field jobs table[] Job.run 返回的任务

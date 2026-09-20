@@ -24,7 +24,6 @@ return {
     end,
     --- 先预览章节目录，确认后再转换替换。
     ---@param ctx BookQuickPanelContext
-    ---@return void
     run = function(ctx)
         local session = require("ui.reader.session").current()
         local identity = session and session.identity

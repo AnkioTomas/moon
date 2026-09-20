@@ -9,7 +9,7 @@ require("l10n").apply()
 local _ = require("gettext")
 
 ---@class BookQuickPanelNativeFont
----@field install fun(ui: table|nil): void
+---@field install fun(ui: table|nil)
 
 local NativeFont = {}
 

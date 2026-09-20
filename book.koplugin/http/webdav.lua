@@ -39,14 +39,7 @@ Webdav.__index = Webdav
 
 local PROPFIND_LIST = [[<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/></d:prop></d:propfind>]]
 
---- 去掉首尾斜杠
----@param s string|nil
----@return string
 local trimSlashes = Text.trimSlashes
-
---- 去掉尾部斜杠
----@param s string|nil
----@return string
 local rtrimSlashes = Text.rtrimSlashes
 
 --- HTTP 状态码转用户可读错误文案
@@ -171,12 +164,18 @@ function Webdav:listAsync(path, cb)
     }, function(res, err)
         if err then
             cb(nil, err)
-        elseif not Request.ok(res and res.code) then
-            cb(nil, statusErr(res and res.code))
-        else
-            local xml = res.body or ""
-            cb(xml == "" and {} or parseList(xml, url, path))
+            return
         end
+        if not res then
+            cb(nil, statusErr(nil))
+            return
+        end
+        if not Request.ok(res.code) then
+            cb(nil, statusErr(res.code))
+            return
+        end
+        local xml = res.body or ""
+        cb(xml == "" and {} or parseList(xml, url, path))
     end)
 end
 

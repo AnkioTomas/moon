@@ -33,7 +33,11 @@ function EndDialog.show(plugin, ui, identity)
     end
     local function deleteBook()
         close()
-        local source = identity and identity.source
+        if not identity then
+            UIManager:show(InfoMessage:new{ text = _("当前数据源不支持删除本书") })
+            return
+        end
+        local source = identity.source
         if not source or type(source.deleteBookAsync) ~= "function" then
             UIManager:show(InfoMessage:new{ text = _("当前数据源不支持删除本书") })
             return

@@ -42,7 +42,7 @@ end
 ---@param row table
 ---@param context string
 ---@param hint string|nil
----@return boolean
+---@return boolean|nil
 local function isGrounded(row, context, hint)
     if appearsInText(row.name, context) then
         return true
@@ -120,7 +120,7 @@ end
 
 --- 按三类实体组成返回给调用方的结果表。
 ---@param entities table[]
----@return { characters: table[], locations: table[], terms: table[] }
+---@return { characters: table[], locations: table[], terms: table[], cached: boolean|nil }
 local function fetchResult(entities)
     local result = { characters = {}, locations = {}, terms = {} }
     local buckets = {
@@ -180,7 +180,11 @@ function Fetch.comprehensive(ui, identity, opts, cb)
     end
     local title, author = bookMeta(identity)
     local session = require("ui.reader.session").current()
-    local progress = math.max(1, math.floor(session.percent + 0.5))
+    local percent = 0
+    if session and type(session.percent) == "number" then
+        percent = session.percent
+    end
+    local progress = math.max(1, math.floor(percent + 0.5))
     local existing_snapshot = Store.promptSnapshot(existing)
     local messages = {
         { role = "system", content = Prompts.system },

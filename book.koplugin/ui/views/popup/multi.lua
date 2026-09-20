@@ -37,7 +37,7 @@ function Multi.normalize(items, ctx, opts)
     --- 勾选框 state，可与 icon/image/widget 并存。
     ---@param raw table
     ---@param image_only boolean
-    ---@return table state, number state_w
+    ---@return table|nil state, number state_w
     local function buildState(raw, image_only)
         local inner, inner_w = List.buildInner(raw, image_only, opts)
         return List.withChoiceMark(inner, inner_w, raw.checked == true, true, opts)

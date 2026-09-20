@@ -143,7 +143,7 @@ local function openAccount(plugin)
                     callback = function()
                         UIManager:close(dialog)
                         local username, password = Auth.credentials()
-                        if username then
+                        if type(username) == "string" and type(password) == "string" then
                             doLogin(plugin, username, password)
                             return
                         end

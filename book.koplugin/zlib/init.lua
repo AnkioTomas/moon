@@ -114,11 +114,16 @@ end
 ---@param cb fun(ok: boolean|nil, err: string|nil, filename: string|nil)
 ---@return { cancel: fun() }|nil
 function Zlib.installAsync(source, book, on_progress, cb)
-    if not source or type(source.importBookAsync) ~= "function" then
+    if not source then
         cb(nil, _("当前数据源不支持导入书籍"))
         return nil
     end
-    local id, hash = Mapper.parse(book and book.stable_id)
+    if type(source.importBookAsync) ~= "function" then
+        cb(nil, _("当前数据源不支持导入书籍"))
+        return nil
+    end
+    if not book then cb(nil, _("无效书籍身份")); return nil end
+    local id, hash = Mapper.parse(book.stable_id)
     if not id then cb(nil, _("无效书籍身份")); return nil end
     logger.dbg("book.zlib install start", book.stable_id, source.id or "unknown")
     local api, cancelled, job, temp = client(), false, nil, nil
@@ -155,7 +160,8 @@ function Zlib.installAsync(source, book, on_progress, cb)
             end)
         end)
     end
-    if book.format and book.format ~= "" then run(book) else
+    local format = book.format
+    if type(format) == "string" and format ~= "" then run(book) else
         job = api:detailAsync(id, hash, function(row, err)
             if cancelled then return end
             if not row then cb(nil, err); return end

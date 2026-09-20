@@ -104,13 +104,17 @@ end
 
 --- 确保图标方盒存在并写成当前字形。
 ---@param self BookTopBarRefresh
----@return table 图标方盒
+---@return table|nil 图标方盒
 function Refresh:ensureBox()
     if not self._box then
-        self._box = enableSpinPaint(Icon.widget{
+        local box = Icon.widget{
             name = self:iconName(),
             size = Base.ICON_SIZE,
-        })
+        }
+        if not box then
+            return nil
+        end
+        self._box = enableSpinPaint(box)
     else
         local tw = textWidget(self._box)
         if tw and tw.setText then

@@ -102,7 +102,7 @@ local function applyThinkingPolicy(payload, opts)
     payload.chat_template_kwargs = { enable_thinking = false }
 end
 
----@param model string
+---@param model string|nil
 ---@param messages table[]
 ---@param opts table|nil
 ---@param stream boolean
@@ -128,7 +128,7 @@ end
 
 --- AI 请求超时：连接与整包共用同一预算（默认 120s）。
 ---@param opts table|nil
----@return integer, integer timeout, connect_timeout
+---@return integer timeout, integer connect_timeout
 local function httpTimeouts(opts)
     opts = opts or {}
     local timeout = opts.timeout or Client.DEFAULT_TIMEOUT

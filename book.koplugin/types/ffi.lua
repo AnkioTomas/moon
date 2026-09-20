@@ -42,7 +42,7 @@ function BlitBuffer:paintCircle(x, y, radius, color, setter) end
 ---@param y number
 ---@param w number
 ---@param h number
----@param by number
+---@param by number|nil 缺省 0.5
 function BlitBuffer:lightenRect(x, y, w, h, by) end
 
 ---@param color any

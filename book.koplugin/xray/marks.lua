@@ -83,7 +83,7 @@ end
 
 --- 读取阅读器实时页码；session.page 可能晚于当前绘制帧。
 ---@param ui table|nil
----@return integer
+---@return number|nil
 local function currentPage(ui)
     if ui and ui.getCurrentPage then
         local ok, page = pcall(ui.getCurrentPage, ui)

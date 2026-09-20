@@ -127,7 +127,7 @@ local function rowsForTab(tab_id, identity)
     return items
 end
 
----@param holder table
+---@param holder table|nil
 ---@param opts table|nil
 local function refreshMainTab(holder, opts)
     opts = opts or {}

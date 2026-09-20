@@ -87,7 +87,7 @@ end
 ---@param selected boolean 项目是否处于选中状态
 ---@param multi boolean 是否允许多选
 ---@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
----@return table state, number state_w
+---@return table|nil state, number state_w
 function List.withChoiceMark(inner, inner_w, selected, multi, opts)
     local icon_sz = opts.icon_size or UI.iconSz()
     local gap = UI.sz(6)

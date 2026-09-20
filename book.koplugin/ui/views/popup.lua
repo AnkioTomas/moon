@@ -215,7 +215,7 @@ end
 
 --- 目录选择器。只在给定根目录下浏览；左上取消，右上确认当前目录。
 ---@param opts table { path: string, root: string|nil, title: string|nil, on_select: fun(path: string)|nil, on_cancel: fun()|nil }
----@return table
+---@return table|nil
 function Popup.directory(opts)
     opts = opts or {}
     local lfs = require("libs/libkoreader-lfs")
@@ -236,6 +236,7 @@ function Popup.directory(opts)
     end
     --- 展示指定目录一层的选择菜单；进入子目录靠关掉当前菜单再递归调用自身。
     ---@param path string 要展示的目录绝对路径
+    ---@return table|nil
     local function open(path)
         local holder = { menu = nil }
         --- 关闭当前层菜单；仅左上取消时才回调 on_cancel。

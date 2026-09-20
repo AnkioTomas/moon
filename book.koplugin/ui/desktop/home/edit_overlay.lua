@@ -188,16 +188,7 @@ function Edit.addRow(width, on_tap)
 end
 
 --- 移动菜单。
----@param opts { 布局尺寸、样式及行为选项；缺省项使用组件默认值
----   can_up: boolean,
----   can_down: boolean,
----   can_prev_page: boolean,
----   can_next_page: boolean,
----   on_up: fun(),
----   on_down: fun(),
----   on_prev_page: fun(),
----   on_next_page: fun(),
---- }
+---@param opts { can_up: boolean, can_down: boolean, can_prev_page: boolean, can_next_page: boolean, on_up: fun(), on_down: fun(), on_prev_page: fun(), on_next_page: fun() }
 ---@return nil
 function Edit.showMoveDialog(opts)
     local dialog

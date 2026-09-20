@@ -20,8 +20,8 @@ local Registry = require("ui.panel.actions.registry")
 ---@field lightPercent fun(kind: "brightness"|"warmth"): number
 ---@field options fun(): BookQuickPanelOption[]
 ---@field enabledCount fun(): number
----@field setEnabled fun(id: string, enabled: boolean): void
----@field move fun(id: string, delta: number): void
+---@field setEnabled fun(id: string, enabled: boolean)
+---@field move fun(id: string, delta: number)
 ---@field sliders fun(): BookQuickPanelSlider[]
 ---@field menuActions fun(): BookQuickPanelMenuItem[]
 ---@field executeAction fun(id: string, opts: BookQuickPanelExecuteOpts|nil): boolean
@@ -130,7 +130,7 @@ function Panel.menuActions()
     local actions = {}
     for _, id in ipairs(list.ids()) do
         local action = Registry.get(id)
-        if Registry.available(action) then
+        if action and Registry.available(action) then
             actions[#actions + 1] = {
                 id = id,
                 title = action.title,

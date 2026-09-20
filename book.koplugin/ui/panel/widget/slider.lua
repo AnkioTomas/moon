@@ -13,7 +13,7 @@ local UIManager = require("ui/uimanager")
 local UI = require("ui.components.bookui")
 
 --- 灯光滑杆行：标题、进度条和百分比数值。
----@class BookQuickPanelSliderRow : WidgetContainer
+---@class BookQuickPanelSliderRow : InputContainer
 ---@field width number
 ---@field height number
 ---@field kind "brightness"|"warmth"
@@ -31,7 +31,6 @@ local SliderRow = InputContainer:extend{}
 
 --- 初始化手势区、进度条和数值标签。
 ---@param self BookQuickPanelSliderRow
----@return void
 function SliderRow:init()
     self.dimen = Geom:new{ w = self.width, h = self.height }
     self.ges_events = {

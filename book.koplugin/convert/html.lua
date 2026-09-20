@@ -30,6 +30,8 @@ function Html.normalizeBody(payload)
     if body ~= "" and not Text.looksLikeHtml(body) then
         body = Text.textToBody(body)
     end
+    ---@cast body string
+    ---@cast title string
     return body, title
 end
 

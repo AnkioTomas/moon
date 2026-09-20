@@ -27,7 +27,7 @@ function M:heightRange(_ctx, opts)
 end
 
 --- 优先随机选择书摘，空库时回退一言，并记录书籍身份及文本。
----@return { text: string, author: string, title: string, source_id: string|nil, stable_id: string|nil }
+---@return BookExcerptQuote
 function M:sample()
     local quote = Highlights.random(self.text) or Hitokoto.random(self.text)
     self.text = quote.text

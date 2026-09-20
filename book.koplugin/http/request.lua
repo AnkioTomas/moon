@@ -333,15 +333,21 @@ local function send(method, url, body, opts, cb)
             end
             if err then
                 cb(nil, err, res)
-            elseif not Request.ok(res and res.code) then
-                cb(nil, T(_("HTTP %1"), tostring(res and res.code)), res)
-            else
-                local payload = res.body or ""
-                if cache_key then
-                    Cache.set(cache_key, payload, cache_ttl)
-                end
-                cb(payload, nil, res)
+                return
             end
+            if not res then
+                cb(nil, T(_("HTTP %1"), "nil"), res)
+                return
+            end
+            if not Request.ok(res.code) then
+                cb(nil, T(_("HTTP %1"), tostring(res.code)), res)
+                return
+            end
+            local payload = res.body or ""
+            if cache_key then
+                Cache.set(cache_key, payload, cache_ttl)
+            end
+            cb(payload, nil, res)
         end)
     end
 

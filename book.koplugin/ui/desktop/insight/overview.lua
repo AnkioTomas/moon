@@ -217,6 +217,8 @@ local function buildCalendar(desktop, state, width, max_height)
         y, m = tonumber(os.date("%Y")), tonumber(os.date("%m"))
         ym = string.format("%04d-%02d", y, m)
     end
+    ---@cast y integer
+    ---@cast m integer
 
     local nav_h, button_w = UI.sz(36), UI.sz(48)
     local label_w = math.max(1, width - button_w * 2)

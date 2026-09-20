@@ -93,21 +93,21 @@ function P.ensureScreensaverDir()
 end
 
 --- 某源的缓存目录：cache/<source>/
----@param id string|nil
+---@param id string
 ---@return string
 function P.sourceCacheDir(id)
     return P.cacheDir() .. "/" .. P.sanitizeSourceId(id)
 end
 
 --- 正文 epub 根目录：cache/<source>/book/
----@param id string|nil
+---@param id string
 ---@return string
 function P.bookDir(id)
     return P.sourceCacheDir(id) .. "/" .. KIND_BOOK
 end
 
 --- 封面/网络图目录：cache/<source>/image/
----@param id string|nil
+---@param id string
 ---@return string
 function P.imageDir(id)
     return P.sourceCacheDir(id) .. "/" .. KIND_IMAGE
@@ -129,7 +129,7 @@ end
 --- 单书封面缓存：cache/<source>/image/<slug>.png
 --- 扫描提取与刮削下载共用；文件存在即封面可用，不入库。
 ---@param stable_id string
----@param id string|nil
+---@param id string
 ---@return string
 function P.coverPath(stable_id, id)
     return P.imageDir(id) .. "/" .. P.slugFor(stable_id) .. ".png"
@@ -137,7 +137,7 @@ end
 
 --- 单书工作目录：cache/<source>/book/<slug>/
 ---@param stable_id string
----@param id string|nil
+---@param id string
 ---@return string
 function P.bookWorkDir(stable_id, id)
     return P.bookDir(id) .. "/" .. P.slugFor(stable_id)
@@ -273,7 +273,7 @@ function P.ensureImageRoot()
 end
 
 --- 确保 .moon 与指定源的 cache/book/image 目录存在
----@param id string|nil
+---@param id string
 ---@return nil
 function P.ensureLayout(id)
     P.ensureCacheRoot()
@@ -286,7 +286,7 @@ end
 --- 确保某书的工作目录存在：cache/<source>/book/<slug>/。
 --- slug 是 md5(stable_id)，阅读时通过 books 表反查，不落额外身份文件。
 ---@param stable_id string
----@param id string|nil
+---@param id string
 ---@return nil
 function P.ensureBookWork(stable_id, id)
     P.ensureLayout(id)

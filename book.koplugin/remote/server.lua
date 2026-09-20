@@ -436,6 +436,7 @@ function Server:_route(conn, head)
     end
     local path, qs = uri:match("^([^?]*)%??(.*)$")
     path = Text.urlDecode(path or "")
+    ---@cast path string
     local query = parseQuery(qs)
 
     -- 静态页面/资源（GET）：index/file/input 三页 + css/js

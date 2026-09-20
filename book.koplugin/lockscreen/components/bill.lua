@@ -77,6 +77,7 @@ local function billRange(period)
         return U.dayStart(now) - 29 * 86400, finish
     elseif period == "month" then
         local t = os.date("*t", now)
+        ---@cast t osdate
         t.day, t.hour, t.min, t.sec = 1, 0, 0, 0
         return os.time(t), finish
     end
@@ -90,12 +91,21 @@ function M.data()
     local period = settings.lock_screen_bill_period or "7d"
     local start_ts, end_ts = billRange(period)
     local source_id = Library.activeSourceId()
+    local summary, books
+    if type(source_id) == "string" and source_id ~= "" or type(source_id) == "table" and #source_id > 0 then
+        ---@cast source_id string|string[]
+        summary = StatsDB.periodSummary(source_id, start_ts, end_ts)
+        books = StatsDB.periodBooks(source_id, start_ts, end_ts, 5)
+    else
+        summary = { total_seconds = 0, book_count = 0, pages = 0 }
+        books = {}
+    end
     return {
         period = period,
         start_ts = start_ts,
         end_ts = end_ts,
-        summary = StatsDB.periodSummary(source_id, start_ts, end_ts),
-        books = StatsDB.periodBooks(source_id, start_ts, end_ts, 5),
+        summary = summary,
+        books = books,
     }
 end
 
@@ -181,6 +191,7 @@ function M.blocks(rect)
     local pad = math.max(18, rect.pad)
     local inner_x, inner_w = paper_x + pad, paper_w - pad * 2
     local number = os.date("%Y%m%d", (bill.end_ts or os.time()) - 1)
+    ---@cast number string
     local logo_size = math.max(54, math.floor(paper_h * 0.072))
     local brand_x = inner_x + logo_size + math.floor(pad * 0.6)
     local brand_w = inner_w - (brand_x - inner_x)

@@ -82,7 +82,8 @@ function M.data()
     end)
     if #reading == 0 then append(reading, recent, 8) end
     append(covers, recent, 36)
-    if #covers < 24 then
+    if #covers < 24 and (type(source_id) == "string" and source_id ~= "" or type(source_id) == "table" and #source_id > 0) then
+        ---@cast source_id string|string[]
         local rows = select(1, BookDB.listBySource(source_id, { limit = 48, offset = 0 }))
         append(covers, rows, 36)
     end

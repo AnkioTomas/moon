@@ -15,7 +15,6 @@ return {
     scope = "desktop",
     --- 面板已在 executeAction 里关闭；此处等重绘完成再截屏。
     ---@param _ctx BookQuickPanelContext|nil
-    ---@return void
     run = function(_ctx)
         UIManager:forceRePaint()
         if Device:hasEinkScreen() then

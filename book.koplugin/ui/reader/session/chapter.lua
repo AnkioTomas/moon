@@ -9,12 +9,12 @@ local Snapshot = require("ui.reader.session.snapshot")
 local _ = require("gettext")
 
 ---@class ReaderChapterSession
----@field identity BookIdentity 书籍身份与属主源
+---@field identity BookIdentity|nil 书籍身份与属主源
 ---@field toc BookChapter[] 从 books.toc 恢复的目录快照
 ---@field request { cancel: fun() }|nil 在途章节打开任务
 ---@field target { path: string, within: number|nil, direction: "prev"|"next"|nil }|nil 已下载、等待 ReaderReady 的目标
 ---@field toc_job { cancel: fun() }|nil 目录恢复任务
----@field switching boolean 已进入 switchDocument，同步 CloseDocument 应保留本书会话
+---@field switching boolean|nil 已进入 switchDocument，同步 CloseDocument 应保留本书会话
 
 local Chapter = {}
 
@@ -179,14 +179,18 @@ end
 ---@param position fun(view: table): number
 ---@param atStart fun(before: number, after: number): boolean
 local function wrapBoundary(view, position, atStart)
-    local original = view and view.onGotoViewRel
-    if not original then return end
+    if not view then return end
+    local original = view.onGotoViewRel
+    if type(original) ~= "function" then return end
     view.onGotoViewRel = function(self, diff)
         if not chapter_session then return original(self, diff) end
         local before = position(self)
         local result = original(self, diff)
         if diff < 0 and atStart(before, position(self)) then
-            self.ui:handleEvent(require("ui/event"):new("StartOfBook"))
+            local reader_ui = self.ui
+            if reader_ui then
+                reader_ui:handleEvent(require("ui/event"):new("StartOfBook"))
+            end
         end
         return result
     end
@@ -216,10 +220,12 @@ local function schedulePrefetch(chapter)
     cancelPrefetch()
     if not chapter or chapter.request or chapter.target or chapter.switching then return end
     local identity = chapter.identity
-    local source = identity and identity.source
-    local idx = identity and identity.chapter_idx
-    if not source or not idx or type(chapter.toc) ~= "table"
-        or type(source.prefetchChaptersAsync) ~= "function" then
+    if not identity then return end
+    local source = identity.source
+    local idx = identity.chapter_idx
+    if not source then return end
+    if not idx then return end
+    if type(chapter.toc) ~= "table" or type(source.prefetchChaptersAsync) ~= "function" then
         return
     end
     prefetch_job = source:prefetchChaptersAsync(identity, chapter.toc, idx, PREFETCH_AHEAD)
@@ -238,9 +244,14 @@ function Chapter.onReaderReady(plugin, session)
         and previous.identity.stable_id == identity.stable_id
     local chapter
     if same_book then
+        ---@cast previous ReaderChapterSession
         chapter = previous
         cancelPrefetch()
-        if chapter.request and chapter.request.cancel then chapter.request.cancel() end
+        local request = chapter.request
+        if request then
+            local cancel = request.cancel
+            if cancel then cancel() end
+        end
         chapter.request = nil
         chapter.identity = identity
     else
@@ -278,16 +289,18 @@ function Chapter.afterBootstrap(plugin, session)
     local chapter = Chapter.activeChapter(session)
     if not chapter then return end
     plugin:emitToSource("chapter_changed", { identity = session.identity }, session.identity.source)
-    local source = chapter.identity.source
-    local toc_current = not (source and type(source.isTocCurrent) == "function")
-        or source:isTocCurrent(chapter.toc)
+    local identity = chapter.identity
+    if not identity then return end
+    local source = identity.source
+    if not source then return end
+    local toc_current = type(source.isTocCurrent) ~= "function" or source:isTocCurrent(chapter.toc)
     if toc_current and type(chapter.toc) == "table" and #chapter.toc > 0 then
         schedulePrefetch(chapter)
         return
     end
-    local load_toc = source and (toc_current and source.loadTocAsync or source.refreshTocAsync)
+    local load_toc = toc_current and source.loadTocAsync or source.refreshTocAsync
     if type(load_toc) ~= "function" then return end
-    chapter.toc_job = load_toc(source, chapter.identity, function(toc)
+    chapter.toc_job = load_toc(source, identity, function(toc)
         chapter.toc_job = nil
         if chapter_session ~= chapter or session.chapter ~= chapter
             or type(toc) ~= "table" or #toc == 0 then
@@ -317,7 +330,10 @@ local function requestChapter(chapter, idx, opts)
     cancelPrefetch()
     showTransitionNotice()
     local identity = chapter.identity
-    chapter.request = identity.source:openBookAsync(identity, { chapter_idx = idx }, function(path, err)
+    if not identity then return end
+    local source = identity.source
+    if not source then return end
+    chapter.request = source:openBookAsync(identity, { chapter_idx = idx }, function(path, err)
         chapter.request = nil
         if chapter_session ~= chapter then return end
         if not path then

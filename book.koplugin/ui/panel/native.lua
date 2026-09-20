@@ -18,7 +18,7 @@ local NativeSettings = require("ui.panel.native_settings")
 
 ---@class BookQuickPanelNative
 ---@field show fun(mode: "desktop"|"reader"|nil): boolean
----@field install fun(host_ui: table|nil, opts: table|nil): void
+---@field install fun(host_ui: table|nil, opts: table|nil)
 
 local Native = {}
 
@@ -353,7 +353,8 @@ end
 ---@param menu table|nil
 ---@return nil
 local function injectReaderTab(menu)
-    local tabs = menu and menu.tab_item_table
+    if not menu then return end
+    local tabs = menu.tab_item_table
     if type(tabs) ~= "table" then return end
     for _, tab in ipairs(tabs) do
         if tab[READER_MARKER] then

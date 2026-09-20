@@ -143,8 +143,13 @@ end
 ---@param err any
 ---@return string
 local function classifyTransportError(res, err)
-    local code = type(res and res.error) == "table" and res.error.code or nil
-    local msg = tostring(type(res and res.error) == "table" and res.error.message or err or "")
+    local err_obj = res and res.error
+    local code, message
+    if type(err_obj) == "table" then
+        code = err_obj.code
+        message = err_obj.message
+    end
+    local msg = tostring(message or err or "")
     if code == -5 or code == -6 then -- CONNECT_TIMEOUT / REQUEST_TIMEOUT
         return _("连接超时，请检查网络")
     end
@@ -299,6 +304,7 @@ function Client:_jsonAsync(method, path, opts, cb)
                 tryNextBase()
                 return
             end
+            ---@cast res table
 
             -- 30x：手动跟随（Turbo 默认不跟随）
             if REDIRECT_CODES[code] then

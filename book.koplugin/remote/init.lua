@@ -318,10 +318,11 @@ end
 ---@return table[]|nil, any
 local function listDir(path)
     local lfs = require("libs/libkoreader-lfs")
-    path = existingPath(path)
-    if not path then
+    local resolved = existingPath(path)
+    if not resolved then
         return nil, "path outside managed roots"
     end
+    path = resolved
     local attr = lfs.attributes(path)
     if not attr or attr.mode ~= "directory" then
         return nil, "not a directory"
@@ -366,10 +367,11 @@ end
 ---@param path string
 ---@return string|nil
 local function resolveDownload(path)
-    path = existingPath(path)
-    if not path then
+    local resolved = existingPath(path)
+    if not resolved then
         return nil
     end
+    path = resolved
     if require("libs/libkoreader-lfs").attributes(path, "mode") ~= "file" then
         return nil
     end
@@ -420,11 +422,12 @@ end
 ---@param conflict "overwrite"|"skip"|"rename"|nil
 local function saveUpload(temp, dir, name, cb, conflict)
     local lfs = require("libs/libkoreader-lfs")
-    dir = existingPath(dir)
-    if not dir then
+    local resolved = existingPath(dir)
+    if not resolved then
         cb(nil, "path outside managed roots")
         return
     end
+    dir = resolved
     local stem, ext = name:match("^(.*)(%.[^.]*)$")
     stem, ext = stem or name, ext or ""
     local target, n = dir .. "/" .. name, 2
@@ -473,26 +476,27 @@ end
 ---@param path string
 ---@return boolean
 local function pathExists(path)
-    path = existingPath(path)
-    return path ~= nil and require("libs/libkoreader-lfs").attributes(path) ~= nil
+    local resolved = existingPath(path)
+    return resolved ~= nil and require("libs/libkoreader-lfs").attributes(resolved) ~= nil
 end
 
 ---@param path string
 ---@return boolean
 local function isDir(path)
-    path = existingPath(path)
-    return path ~= nil
-        and require("libs/libkoreader-lfs").attributes(path, "mode") == "directory"
+    local resolved = existingPath(path)
+    return resolved ~= nil
+        and require("libs/libkoreader-lfs").attributes(resolved, "mode") == "directory"
 end
 
 ---@param path string
 ---@return boolean|nil, any
 local function mkdirOne(path)
     local lfs = require("libs/libkoreader-lfs")
-    path = newPath(path)
-    if not path then
+    local resolved = newPath(path)
+    if not resolved then
         return nil, "path outside managed roots"
     end
+    path = resolved
     if lfs.attributes(path) then
         return nil, "already exists"
     end
@@ -507,10 +511,11 @@ local function deleteRecursive(path)
     if isProtected(path) then
         return nil, "protected path"
     end
-    path = existingPath(path)
-    if not path then
+    local resolved = existingPath(path)
+    if not resolved then
         return nil, "path outside managed roots"
     end
+    path = resolved
     local attr = lfs.attributes(path)
     if not attr then
         return nil, "not found"
@@ -549,10 +554,11 @@ local MAX_EXTRACT_BYTES = 2 * 1024 * 1024 * 1024
 ---@return string|nil err
 local function extractZip(archive)
     local lfs = require("libs/libkoreader-lfs")
-    archive = existingPath(archive)
-    if not archive or lfs.attributes(archive, "mode") ~= "file" then
+    local resolved = existingPath(archive)
+    if not resolved or lfs.attributes(resolved, "mode") ~= "file" then
         return nil, "not found"
     end
+    archive = resolved
     if isSecret(archive) then
         return nil, "protected path"
     end
@@ -641,10 +647,11 @@ local function renameTo(path, to)
     if isProtected(path) or isProtected(to) then
         return nil, "protected path"
     end
-    path, to = existingPath(path), newPath(to)
-    if not path or not to then
+    local src, dst = existingPath(path), newPath(to)
+    if not src or not dst then
         return nil, "path outside managed roots"
     end
+    path, to = src, dst
     -- isProtected 只挡凭证目录本身及其祖先，挡不住目录里的单个文件：
     -- 把 settings/moon.lua 改名搬出去，再 /download 就能拿到 token。
     if isSecret(path) or isSecret(to) then

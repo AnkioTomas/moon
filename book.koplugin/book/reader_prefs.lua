@@ -82,10 +82,17 @@ end
 ---@param ui table|nil
 ---@return table|nil
 function M.capture(ui)
+    if not ui then
+        return nil
+    end
     if not MoonFont.supportsReader(ui) then
         return nil
     end
-    local config = ui.document.configurable
+    local document = ui.document
+    if not document then
+        return nil
+    end
+    local config = document.configurable
     if not config then
         return nil
     end
@@ -99,8 +106,18 @@ function M.capture(ui)
         end
     end
     local doc = ui.doc_settings
-    local font_id = doc and doc:readSetting("book_reader_font_id") or nil
-    local font_face = ui.font.font_face or (doc and doc:readSetting("font_face") or nil)
+    local font_id
+    if doc then
+        font_id = doc:readSetting("book_reader_font_id")
+    end
+    local font = ui.font
+    local font_face
+    if font then
+        font_face = font.font_face
+    end
+    if not font_face and doc then
+        font_face = doc:readSetting("font_face")
+    end
     -- book_reader_font_id 只负责让插件字体在下次启动时重新注册，不是第二份字体状态。
     -- 用户经 KOReader 原生菜单换字体后，旧 id 不得反过来覆盖当前 font_face。
     if not idMatchesFace(font_id, font_face) then
@@ -118,7 +135,7 @@ end
 ---@param prefs table|nil
 ---@return boolean 是否成功写入数据库
 function M.save(identity, prefs)
-    if not isChapter(identity) or not prefs then
+    if not identity or not prefs or not isChapter(identity) then
         return false
     end
     local source_id = identity.source_id
@@ -141,7 +158,7 @@ end
 ---@param identity BookIdentity|nil
 ---@return table|nil
 function M.load(identity)
-    if not isChapter(identity) then
+    if not identity or not isChapter(identity) then
         return nil
     end
     return decode(BookDB.getReaderPrefs(identity.source_id, identity.stable_id))

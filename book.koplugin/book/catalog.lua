@@ -48,7 +48,7 @@ end
 
 --- 展示查询范围：混合 → 已启用源 id 列表；否则原样返回 preferred_id。
 --- 单元素列表收成字符串，SQL 走 `=` 而不是 `IN`。
----@param preferred_id string|nil
+---@param preferred_id string|string[]|nil
 ---@return string|string[]|nil
 function Catalog.libraryScope(preferred_id)
     if not require("utils.settings").libraryMixed() then
@@ -65,7 +65,7 @@ function Catalog.libraryScope(preferred_id)
 end
 
 --- books 表行 → Book。
----@param row table
+---@param row table|nil
 ---@param source_id string|nil 行内缺 source_id 时使用
 ---@return Book|nil
 local function toBook(row, source_id)
@@ -234,6 +234,7 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             cb(nil, "invalid source_id")
             return
         end
+        ---@cast scope string|string[]
         local rows, count = require("db.book").listBySource(scope, {
             category = opts.category,
             uncategorized = opts.uncategorized,
@@ -265,6 +266,7 @@ function Catalog.filtersAsync(source_id, cb)
             cb(nil, "invalid source_id")
             return
         end
+        ---@cast scope string|string[]
         local BookDB = require("db.book")
         local data = {
             category = BookDB.categoriesBySource(scope),
@@ -309,6 +311,7 @@ function Catalog.recentShelf(source_id, limit)
     if not validScope(scope) then
         return nil, {}, require("gettext")("当前数据源不可用")
     end
+    ---@cast scope string|string[]
     local rows = Catalog.recentBooks(source_id, limit or 24)
     local recent = rows[1]
     local skip_source = recent and recent.source_id
@@ -324,7 +327,7 @@ function Catalog.recentShelf(source_id, limit)
 end
 
 --- 最近阅读同步快照：进度决定准入、顺序和阅读位置，books 只补书库元数据。
----@param source_id string
+---@param source_id string|string[]|nil
 ---@param limit number|nil
 ---@return Book[]
 function Catalog.recentBooks(source_id, limit)
@@ -332,6 +335,7 @@ function Catalog.recentBooks(source_id, limit)
     if not validScope(scope) then
         return {}
     end
+    ---@cast scope string|string[]
     local progress_rows = require("db.progress").recent(scope, limit)
     local books = {}
     local BookDB = require("db.book")
@@ -363,6 +367,7 @@ function Catalog.recentBooksAsync(source_id, limit, cb)
             cb(nil, "invalid source_id")
             return
         end
+        ---@cast scope string|string[]
         local rows = Catalog.recentBooks(source_id, limit or 24)
         cb(Catalog.toList(rows, nil, type(scope) == "string" and scope or nil))
     end)
@@ -379,6 +384,7 @@ function Catalog.readingInsightAsync(source_id, cb)
             cb(nil, "invalid source_id")
             return
         end
+        ---@cast scope string|string[]
         local StatsDB = require("db.stats")
         local weekly = scope == "wechat" and StatsDB.weeklyBooksBySource(scope) or nil
         cb({

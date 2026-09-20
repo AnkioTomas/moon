@@ -18,9 +18,12 @@ return {
     run = function(ctx)
         local ui = ctx and ctx.ui
         local current = require("ui.reader.session").current()
-        local identity = current and current.identity
-        local source = identity and identity.source
-        if not ui or not identity or not source then return end
+        if not current then return end
+        if not ui then return end
+        local identity = current.identity
+        if not identity then return end
+        local source = identity.source
+        if not source then return end
         require("book.progress").save(current, function(progress_ok)
             if not progress_ok then return end
             require("book.note").save(ui, identity, function(notes_ok)

@@ -148,7 +148,8 @@ function Registry.create(id)
     if not mod or not mod.new then
         return nil, T(_("数据源加载失败: %1"), tostring(id))
     end
-    return mod.new()
+    local source = mod.new()
+    return source
 end
 
 --- 安全关闭源实例（忽略 close 异常）。
@@ -200,9 +201,13 @@ function Registry.current()
     local src = _resolved[id]
     local err
     _resolved[id] = nil
-    if not src then src, err = Registry.create(id) end
     if not src then
-        return nil, err
+        local created
+        created, err = Registry.create(id)
+        if not created then
+            return nil, err
+        end
+        src = created
     end
     Registry.activate(src, id)
     return _active
@@ -245,9 +250,13 @@ function Registry.setActive(id)
     local candidate = _resolved[id]
     local err
     _resolved[id] = nil
-    if not candidate then candidate, err = Registry.create(id) end
     if not candidate then
-        return nil, err
+        local created
+        created, err = Registry.create(id)
+        if not created then
+            return nil, err
+        end
+        candidate = created
     end
     local common = MoonSettings.get()
     common.active_source = id

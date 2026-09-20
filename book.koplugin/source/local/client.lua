@@ -23,6 +23,8 @@ local function uiManager()
     return _uimanager
 end
 
+---@class LocalClient
+---@field cfg table
 local Client = {}
 Client.__index = Client
 
@@ -392,7 +394,7 @@ end
 --- 扫盘任务：遍历与解析在子进程，落库在主进程，cancel 杀子进程。
 --- 扫描成败都调 on_done：子进程崩溃/启动失败时库里是旧数据，照查，不让 UI 空转。
 ---@param root string
----@param on_done fun()
+---@param on_done fun(err: string|nil)
 ---@return { cancel: fun() }
 local function scanJob(root, on_done)
     local known = knownBooks()
@@ -506,7 +508,7 @@ end
 ---@param stable_id string 当前文件绝对路径
 ---@param category string|nil
 ---@param series string|nil
----@return string|nil new_stable_id 位置没变返回原值；失败返回 nil + err
+---@return string|nil, string|nil err
 function Client:moveBook(stable_id, category, series)
     local root = rootPath(self.cfg)
     if root == "" then

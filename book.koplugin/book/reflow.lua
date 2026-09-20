@@ -236,7 +236,6 @@ end
 --- 阅读页入口：先预览目录，确认后再转换替换并重新打开。
 ---@param ui table|nil
 ---@param identity BookIdentity
----@return void
 function Reflow.startFromReader(ui, identity)
     if not Reflow.canReflow(identity) then
         return

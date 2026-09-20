@@ -12,8 +12,8 @@ local Registry = require("ui.panel.actions.registry")
 ---@class BookQuickPanelReader
 ---@field options fun(): BookQuickPanelOption[]
 ---@field enabledCount fun(): number
----@field setEnabled fun(id: string, enabled: boolean): void
----@field move fun(id: string, delta: number): void
+---@field setEnabled fun(id: string, enabled: boolean)
+---@field move fun(id: string, delta: number)
 ---@field actions fun(ui: table|nil): BookQuickPanelReaderAction[]
 ---@field executeAction fun(id: string, ui: table|nil, opts: { close: fun()|nil, refresh: fun()|nil }|nil): boolean
 
@@ -55,7 +55,6 @@ end
 --- 启用或停用某个阅读页动作。
 ---@param id string
 ---@param enabled boolean
----@return void
 function ReaderPanel.setEnabled(id, enabled)
     list.setEnabled(id, enabled)
 end
@@ -63,7 +62,6 @@ end
 --- 上移或下移某个阅读页动作。
 ---@param id string
 ---@param delta number
----@return void
 function ReaderPanel.move(id, delta)
     list.move(id, delta)
 end
@@ -76,7 +74,7 @@ function ReaderPanel.actions(ui)
     local result = {}
     for _, id in ipairs(list.ids()) do
         local action = Registry.get(id)
-        if Registry.available(action, ctx) then
+        if action and Registry.available(action, ctx) then
             local active = Registry.active(id, action, ctx)
             result[#result + 1] = {
                 id = id,

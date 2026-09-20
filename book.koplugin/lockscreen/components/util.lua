@@ -24,6 +24,7 @@ U.FALLBACK_MESSAGE = "读书不觉已春深，一寸光阴一寸金。"
 ---@return number
 function U.dayStart(ts)
     local t = os.date("*t", ts or os.time())
+    ---@cast t osdate
     t.hour, t.min, t.sec = 0, 0, 0
     return os.time(t)
 end
@@ -44,6 +45,7 @@ function U.dayBuckets(rows, start_ts, end_ts)
     local cursor = os.time{ year = t.year, month = t.month, day = t.day, hour = 12 }
     while cursor < end_ts do
         local ymd = os.date("%Y-%m-%d", cursor)
+        ---@cast ymd string
         local row = by_ymd[ymd]
         buckets[#buckets + 1] = {
             key = ymd, label = ymd:sub(6),
@@ -51,6 +53,7 @@ function U.dayBuckets(rows, start_ts, end_ts)
             pages = row and (tonumber(row.pages) or 0) or 0,
         }
         local next_day = os.date("*t", cursor)
+        ---@cast next_day osdate
         cursor = os.time{
             year = next_day.year, month = next_day.month,
             day = next_day.day + 1, hour = 12,

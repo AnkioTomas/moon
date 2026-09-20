@@ -57,7 +57,8 @@ local function books(limit)
     end
 
     append(recent, limit)
-    if #result < limit then
+    if #result < limit and (type(source_id) == "string" and source_id ~= "" or type(source_id) == "table" and #source_id > 0) then
+        ---@cast source_id string|string[]
         local rows = select(1, BookDB.listBySource(source_id, {
             limit = limit * 2,
             offset = 0,

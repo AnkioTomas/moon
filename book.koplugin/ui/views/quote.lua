@@ -53,7 +53,7 @@ local function resolve(opts)
 end
 
 --- 署名一行：优先 source；否则 —— 作者 · 书名。
----@param quote { author: string|nil, title: string|nil, source: string|nil }
+---@param quote { author: string|nil, title: string|nil, source: string|nil }|nil
 ---@return string
 function M.attribution(quote)
     quote = quote or {}

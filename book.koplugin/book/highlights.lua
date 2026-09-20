@@ -144,7 +144,7 @@ end
 
 --- 全库随机一条书摘。有多条时躲开上一句。
 ---@param avoid string|nil
----@return { text: string, author: string, title: string, chapter: string, source_id: string|nil, stable_id: string|nil }|nil
+---@return BookExcerptQuote|nil
 function Highlights.random(avoid)
     local items = Highlights.collectAll()
     if #items == 0 then return nil end

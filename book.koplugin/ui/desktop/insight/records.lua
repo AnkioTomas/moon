@@ -93,18 +93,22 @@ local function aggregate(state)
         local y, m, d = parseYmd(ymd)
         local seconds = tonumber(info and info.duration_seconds) or 0
         if y and seconds > 0 then
-            local day = dayNumber(y, m, d)
-            local wday = tonumber(os.date("%w", os.time{ year = y, month = m, day = d, hour = 12 })) or 0
+            local yy, mm, dd = assert(y), assert(m), assert(d)
+            ---@cast yy integer
+            ---@cast mm integer
+            ---@cast dd integer
+            local day = dayNumber(yy, mm, dd)
+            local wday = tonumber(os.date("%w", os.time{ year = yy, month = mm, day = dd, hour = 12 })) or 0
             local monday = day - ((wday + 6) % 7)
             local week = math.floor(monday / 7)
-            local month = y * 12 + m
+            local month = yy * 12 + mm
             all_weeks[week] = true
             all_months[month] = true
             week_seconds[week] = (week_seconds[week] or 0) + seconds
             day_seconds[day] = (day_seconds[day] or 0) + seconds
-            if y == year then
+            if yy == year then
                 year_seconds = year_seconds + seconds
-                month_seconds[m] = month_seconds[m] + seconds
+                month_seconds[mm] = month_seconds[mm] + seconds
                 year_days[day] = true
             end
         end

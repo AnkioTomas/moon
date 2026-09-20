@@ -211,10 +211,17 @@ function Weather:parse(body)
         if #days >= 3 then break end
     end
     local today = days[1] or {}
-    local astro = type(payload.weather) == "table"
-        and type(payload.weather[1]) == "table"
-        and payload.weather[1].astronomy
-    astro = type(astro) == "table" and astro[1] or nil
+    local astro
+    local weather = payload.weather
+    if type(weather) == "table" then
+        local day1 = weather[1]
+        if type(day1) == "table" then
+            local astronomy = day1.astronomy
+            if type(astronomy) == "table" then
+                astro = astronomy[1]
+            end
+        end
+    end
     return {
         temp = numberish(current.temp_C),
         feels = numberish(current.FeelsLikeC),

@@ -76,7 +76,9 @@ end
 ---@param now number|nil os.time 时间戳（缺省当前）
 ---@return string
 function Bars.timeText(now)
-    return os.date("%H:%M", now)
+    local text = os.date("%H:%M", now)
+    ---@cast text string
+    return text
 end
 
 --- 当前章节名称：session 目录里的 title。
@@ -276,7 +278,7 @@ end
 
 --- 底栏 overlay 是否应绘制（系统 ReaderFooter 开）。
 ---@param ui table|nil
----@return boolean
+---@return boolean|nil
 function Bars.bottomVisible(ui)
     ui = ui or Bars.ui
     local view = ui and ui.view
@@ -294,7 +296,14 @@ local function topBandGeometry(ui, paint_y)
         return nil, nil
     end
     ui = ui or Bars.ui
-    local header_h = ui.document:getHeaderHeight()
+    if not ui then
+        return nil, nil
+    end
+    local document = ui.document
+    if not document then
+        return nil, nil
+    end
+    local header_h = document:getHeaderHeight()
     if not header_h or header_h <= 0 then
         return nil, nil
     end
@@ -313,7 +322,14 @@ local function bottomBandGeometry(view, ui, paint_y)
     end
     ui = ui or Bars.ui
     view = view or Bars.view
-    local footer = ui.view and ui.view.footer
+    if not ui then
+        return nil, nil
+    end
+    local reader_view = ui.view
+    if not reader_view then
+        return nil, nil
+    end
+    local footer = reader_view.footer
     if not footer then
         return nil, nil
     end
@@ -351,7 +367,14 @@ function Bars.topHeight(ui)
         return 0
     end
     ui = ui or Bars.ui
-    return ui.document:getHeaderHeight() + topBarExtraHeight()
+    if not ui then
+        return 0
+    end
+    local document = ui.document
+    if not document then
+        return 0
+    end
+    return document:getHeaderHeight() + topBarExtraHeight()
 end
 
 --- 顶栏固定水平内边距（左、右）。
@@ -499,12 +522,23 @@ function Bars:startClock()
     end
     --- 刷一次顶条并把自己排到下一个整分；换书或退出阅读后不再续排。
     local function tick()
+        if not ui then
+            return
+        end
         if require("apps/reader/readerui").instance ~= ui then
             return
         end
         if Bars.topVisible(ui) and require("ui.reader.session").current() then
-            local dimen = ui.view and ui.view.dimen
-            local header_h = ui.document and ui.document:getHeaderHeight()
+            local view = ui.view
+            local dimen
+            if view then
+                dimen = view.dimen
+            end
+            local document = ui.document
+            local header_h
+            if document then
+                header_h = document:getHeaderHeight()
+            end
             if dimen and header_h and header_h > 0 then
                 UIManager:setDirty(ui.dialog, "ui", Geom:new{
                     x = 0,

@@ -17,7 +17,6 @@ return {
     end,
     --- 切换远程管理服务，并给出启动地址或失败原因。
     ---@param _ctx BookQuickPanelContext|nil
-    ---@return void
     run = function(_ctx)
         local Remote = require("remote.init")
         local UIManager = require("ui/uimanager")

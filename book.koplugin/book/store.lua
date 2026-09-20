@@ -138,7 +138,13 @@ end
 ---@return string|nil err
 function Store.touch(path, identity, opts)
     local source_id, stable_id = identity.source_id, identity.stable_id
-    local chapter_idx = opts and opts.chapter_idx
+    if not opts then
+        if not BookDB.touchPath(source_id, stable_id, path) then
+            return false, "failed to register book path"
+        end
+        return true
+    end
+    local chapter_idx = opts.chapter_idx
     if not chapter_idx then
         if not BookDB.touchPath(source_id, stable_id, path) then
             return false, "failed to register book path"
@@ -187,6 +193,7 @@ end
 ---@param identity BookIdentity|nil
 ---@return boolean
 function Store.allChaptersCached(identity)
+    if not identity then return false end
     local toc = Store.toc(identity)
     if not toc or #toc == 0 then return false end
     return ChapterDB.countByBook(identity.source_id, identity.stable_id) == #toc

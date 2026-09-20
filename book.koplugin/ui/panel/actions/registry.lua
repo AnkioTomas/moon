@@ -44,7 +44,6 @@ local loaded = false
 ---@field run nil|fun(ctx: BookQuickPanelContext)
 
 --- 一次性加载桌面和阅读页内置动作。
----@return void
 local function ensureLoaded()
     if loaded then return end
     loaded = true

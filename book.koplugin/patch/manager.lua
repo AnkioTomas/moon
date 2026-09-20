@@ -53,7 +53,7 @@ end
 ---@return string|nil err
 local function readFile(path)
     local fh, err = io.open(path, "rb")
-    if not fh then return nil, err or "cannot open " .. path end
+    if not fh then return nil, err or ("cannot open " .. path) end
     local content = fh:read("*a")
     fh:close()
     return content
@@ -69,7 +69,7 @@ local function writeFile(path, content)
     if dir then ensureDir(dir) end
     local tmp = path .. ".tmp"
     local fh, err = io.open(tmp, "wb")
-    if not fh then return nil, err or "cannot open " .. tmp end
+    if not fh then return nil, err or ("cannot open " .. tmp) end
     local ok, werr = fh:write(content)
     -- close 也要判：写入走缓冲，磁盘满 / 断电前的 flush 失败只在 close 时报出来。
     -- 不判就会把半截文件 rename 成正式补丁，KOReader 下次启动直接加载坏文件。
@@ -98,7 +98,7 @@ end
 ---@return string|nil err
 local function copyFile(src, dst)
     local content, err = readFile(src)
-    if content == nil then return nil, err or "cannot read " .. src end
+    if content == nil then return nil, err or ("cannot read " .. src) end
     return writeFile(dst, content)
 end
 

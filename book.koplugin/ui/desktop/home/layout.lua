@@ -15,10 +15,13 @@ local Widgets = require("ui.desktop.home.widgets")
 
 ---@class BookHomeHeightSpec
 ---@field height number 内容自然高度
+---@field id string|nil 组件标识（布局阶段补上）
+---@field comp BookHomeComponent|nil 组件实例（布局阶段补上）
+---@field placement BookHomeWidgetPlacement|nil 钉页记录（布局阶段补上）
 
 ---@class BookHomeBuildOpts
----@field width number
----@field height number
+---@field width number|nil
+---@field height number|nil
 ---@field budget number|nil
 ---@field desktop BookDesktop|nil
 ---@field y number|nil

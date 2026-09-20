@@ -167,7 +167,7 @@ local function placeholder(w, h, fb, border)
 end
 
 --- 解析为可读路径。HTTP 查缓存；绝对路径直接用；其余相对插件根。
----@param src string 图片来源地址或参与像素读取的源画布，具体形式由参数类型限定
+---@param src string|nil 图片来源地址或参与像素读取的源画布，具体形式由参数类型限定
 ---@return string|nil
 local function resolve(src)
     if type(src) ~= "string" or src == "" then
@@ -278,7 +278,7 @@ end
 ---@param border boolean|nil 是否绘制边框
 ---@param fb any 图片不可用时显示的占位内容
 ---@param show_parent table|nil 异步图片就绪时请求刷新的屏幕宿主
----@param on_ready fun(path: string)|nil
+---@param on_ready fun(path: string|nil)|nil
 ---@return table
 local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_ready)
     local box = WidgetContainer:new{
@@ -413,7 +413,7 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     local path = resolve(src)
     if path then
         box:_showFile(path)
-    elseif isHttp(src) then
+    elseif type(src) == "string" and isHttp(src) then
         box._download = Download.new(src, headers, function(downloaded, err)
             box._download = nil
             if not box._alive then
