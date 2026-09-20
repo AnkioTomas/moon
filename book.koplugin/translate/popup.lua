@@ -32,6 +32,20 @@ local T = require("ffi/util").template
 local Screen = Device.screen
 
 ---@class BookTranslatePopup : InputContainer
+---@field translator string|nil Edge 翻译器标识
+---@field text string 待译原文
+---@field translated string|nil 译文或状态占位
+---@field source_lang string|nil
+---@field target_lang string|nil
+---@field detected_lang string|nil
+---@field note_index number|nil 改写既有笔记时的下标
+---@field from_highlight boolean|nil 是否从划词入口打开
+---@field full_page boolean|nil 是否用整页高度
+---@field job CancelHandle|nil
+---@field source_btn table|nil
+---@field target_btn table|nil
+---@field text_box table|nil
+---@field width number|nil
 local TranslatePopup = InputContainer:extend{
     name = "book_translate_popup",
 }

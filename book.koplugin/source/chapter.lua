@@ -328,7 +328,11 @@ end
 ---@param identity BookIdentity
 ---@param book Book
 ---@param opts table|nil
----@param ops { loadToc: fun(identity: BookIdentity, cb: function), fetchContent: fun(identity: BookIdentity, chapter: BookChapter, cb: function) }
+---@param ops {
+---   loadToc: fun(identity: BookIdentity, cb: function),
+---   fetchContent: fun(identity: BookIdentity, chapter: BookChapter, cb: function),
+---   progress: fun(step: number)|nil,
+--- }
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Chapter.openWithUi(source, identity, book, opts, ops, cb)
@@ -398,7 +402,13 @@ end
 ---@param toc BookChapter[]
 ---@param from_idx integer 当前章序号（预取 from_idx+1 …）
 ---@param count integer 预取章数
----@param ops { fetchContent: fun(identity: BookIdentity, chapter: BookChapter, cb: function), progress: fun(done: integer, total: integer)|nil, interval_seconds: number|nil }
+---@param ops {
+---   fetchContent: fun(identity: BookIdentity, chapter: BookChapter, cb: function),
+---   progress: fun(done: integer, total: integer)|nil,
+---   interval_seconds: number|nil,
+---   persist_toc: boolean|nil,
+---   persist_book: boolean|nil,
+--- }
 ---@param cb fun(cached: integer, total: integer, failed: integer, err: any)|nil 完成统计
 ---@return { cancel: fun() }
 function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)

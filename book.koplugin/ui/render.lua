@@ -6,7 +6,7 @@ local Blitbuffer = require("ffi/blitbuffer")
 local Render = {}
 
 --- 将 widget 绘制到画布；越过任一画布边缘时裁剪，避免 blit 越界。
----@param bb userdata 用于绘制的 Blitbuffer 画布
+---@param bb BlitBuffer 用于绘制的 Blitbuffer 画布
 ---@param block table 包含 widget 与目标 x/y 坐标的绘制块
 ---@param canvas_w number 目标画布宽度，单位像素
 ---@param canvas_h number 目标画布高度，单位像素
@@ -52,7 +52,7 @@ end
 ---@param path string 图片或书籍的本地文件路径
 ---@param width number 目标宽度，单位像素
 ---@param height number 目标高度，单位像素
----@param paint fun(bb: userdata)
+---@param paint fun(bb: BlitBuffer)
 ---@return boolean, any
 function Render.write(path, width, height, paint)
     assert(width > 0 and width == math.floor(width), "invalid image width")

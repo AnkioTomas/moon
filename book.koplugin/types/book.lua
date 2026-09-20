@@ -8,6 +8,8 @@
 ---@field chapter_idx number|nil 章节文件时为章号；整本书为 nil
 ---@field book Book|nil books 表元数据行；刚登记/未入库时可能为内存行或 nil
 ---@field source BookSource|nil 属主源实例；仅 ensureIdentity（打开时）解析，identityFor 不挂
+---@field cover string|nil 封面 URL（部分源直接挂在身份上）
+---@field cover_url string|nil 封面 URL 别名
 
 --- 对应表 books：身份列 + 展示元数据 + 软删成员 + sync_status。
 ---@class Book
@@ -25,7 +27,15 @@
 ---@field deleted integer|nil 0=在架有效，1=软删/非成员
 ---@field sync_status integer|nil 0=待上传，1=已同步
 ---@field cover string|nil 封面 URL
+---@field cover_url string|nil 封面 URL（部分源别名）
 ---@field cover_headers table|nil 封面请求头
+---@field format string|nil 文件格式（epub/pdf 等，zlib 预览书）
+---@field author string|nil 作者（部分源单数字段；展示优先 authors）
+---@field fileSize number|nil 文件大小（字节，驼峰）
+---@field filesize number|nil 文件大小（字节）
+---@field file_size number|nil 文件大小（字节，蛇形）
+---@field size number|nil 文件大小（字节，泛用）
+---@field chapter table|nil 当前章元数据（阅读态）
 ---@field read_state integer|nil 0=未读且可自动标记，1=已读，2=用户强制未读
 ---@field reader_prefs string|nil 全书排版偏好 JSON（仅本地）
 ---@field toc string|nil 目录缓存 JSON（仅本地）

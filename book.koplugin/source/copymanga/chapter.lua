@@ -120,6 +120,7 @@ function Chapter.materializeAsync(client, identity, chapter, chapter_idx, on_pro
     Paths.ensureBookWork(identity.stable_id, identity.source_id)
     local work_dir = Paths.bookWorkDir(identity.stable_id, identity.source_id)
     local archive_path = work_dir .. "/" .. chapter_idx .. ".cbz"
+    ---@type { cancelled: boolean, active: CancelHandle|nil, writer: ArchiverWriter|nil }
     local state = { cancelled = false, active = nil, writer = nil }
     if fileReady(archive_path) then
         require("ui/uimanager"):nextTick(function()

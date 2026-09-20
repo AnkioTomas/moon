@@ -36,7 +36,7 @@ function M.measureText(text, width, size, bold)
 end
 
 --- 绘制背景图片；图片缺失时保留纯白底并由调用方决定是否报错。
----@param bb userdata 目标 Blitbuffer
+---@param bb BlitBuffer 目标 Blitbuffer
 ---@param path string|nil 背景图片路径；nil 时使用纯白背景
 ---@param w number 输出宽度
 ---@param h number 输出高度
@@ -80,7 +80,7 @@ local function paintBackground(bb, path, w, h)
 end
 
 --- 将文本块绘制到离屏缓冲。
----@param bb userdata 目标 Blitbuffer
+---@param bb BlitBuffer 目标 Blitbuffer
 ---@param block table 文本块描述
 ---@param w number 输出宽度
 local function paintText(bb, block, w)
@@ -105,7 +105,7 @@ local function paintText(bb, block, w)
 end
 
 --- 绘制圆角矩形；radius 为 0/nil 时退化为直角。
----@param bb userdata
+---@param bb BlitBuffer
 ---@param x number
 ---@param y number
 ---@param width number
@@ -123,7 +123,7 @@ end
 
 --- 分发非文本图形块：线、柱、卡片、票根缺口、点和离屏 widget。
 --- 封面 / 进度条不再走 DSL；主体通过 kind=widget 复用 ui.components。
----@param bb userdata 目标 Blitbuffer
+---@param bb BlitBuffer 目标 Blitbuffer
 ---@param block table 图形块描述
 ---@param w number 输出宽度
 ---@param h number 输出高度

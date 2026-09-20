@@ -55,7 +55,7 @@ local function readTarget(sql)
 end
 
 --- 打开 SQLite 连接（不改模块级 conn）
----@return userdata|nil, string|nil
+---@return SQLiteConnection|nil, string|nil
 local function openSqlite()
     local ok, SQ3 = pcall(require, "lua-ljsqlite3/init")
     if not ok or not SQ3 then
@@ -70,7 +70,7 @@ local function openSqlite()
 end
 
 --- stmt 用完即关，close 本身失败不影响主流程
----@param stmt userdata|nil
+---@param stmt SQLiteStatement|nil
 local function closeStmt(stmt)
     if stmt then
         pcall(function()
@@ -247,7 +247,7 @@ end
 --- 打开（或复用）全局 SQLite 连接并确保 schema。
 --- WAL 模式 + busy_timeout=5000。
 --- SQL 在当前进程同步执行；调用方自行保证写操作顺序。
----@return userdata|nil, string|nil
+---@return SQLiteConnection|nil, string|nil
 function Base.open()
     if conn then
         return conn

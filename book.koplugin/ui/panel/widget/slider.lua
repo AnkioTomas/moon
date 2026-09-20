@@ -25,6 +25,7 @@ local UI = require("ui.components.bookui")
 ---@field bar_w number
 ---@field progress table
 ---@field value_label table
+---@field setFromPosition fun(self: BookQuickPanelSliderRow, pos: { x: number, y: number }|nil): boolean
 
 local SliderRow = InputContainer:extend{}
 

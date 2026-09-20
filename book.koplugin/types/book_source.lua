@@ -90,6 +90,8 @@ end
 ---@field start_time number 会话开始时间戳（秒）
 ---@field duration number 阅读时长（秒）
 ---@field total_pages number 全书页数
+---@field chapter_idx number|nil 章节序号（按章阅读）
+---@field chapter_fraction number|nil 章内进度 0..1
 ---@field event_count number|nil 汇总行包含的原始页事件数
 ---@field last_time number|nil 汇总行中最后一条原始事件时间
 
@@ -171,6 +173,10 @@ end
 ---@field pullStatsAsync fun(self: BookSource, cb: fun(result: BookStatsRow[]|BookStatsPullResult|nil, err: string|nil)): table|nil 拉取领域统计记录（可选 replace 覆盖策略）
 ---@field pushNotesAsync fun(self: BookSource, identity: BookIdentity, annotations: table[], cb: fun(data: table|nil, err: string|nil)): table|nil 上传划线/书签
 ---@field pullNotesAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: table[]|nil, err: string|nil)): table|nil 拉取划线/书签
+---@field localizeAnnotations fun(self: BookSource, document: table|nil, annotations: table[], html_path: string|nil, current: table[]|nil): table[]|nil 按章 HTML 把远端划线定位到本地 xpointer
+---@field cacheAllChaptersAsync fun(self: BookSource, identity: BookIdentity, on_progress: function|nil, cb: function): table|nil 章节模式全本缓存
+---@field isTocCurrent fun(self: BookSource, toc: BookChapter[]|nil): boolean|nil 本地目录缓存是否仍有效
+---@field refreshTocAsync fun(self: BookSource, identity: BookIdentity, cb: fun(toc: BookChapter[]|nil, err: string|nil)): table|nil 强制刷新目录
 
 return {
     SourceCapabilities = SourceCapabilities,

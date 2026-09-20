@@ -5,6 +5,27 @@
 ---@meta
 
 ---@class Widget
+local Widget = {}
+
+---@generic T : Widget
+---@param o table|nil
+---@return T
+function Widget:extend(o) end
+
+---@generic T : Widget
+---@param o table|nil
+---@return T
+function Widget:new(o) end
+
+function Widget:free() end
+
+---@param bb BlitBuffer
+---@param x number
+---@param y number
+function Widget:paintTo(bb, x, y) end
+
+---@return table
+function Widget:getSize() end
 
 --- ui/widget/container/widgetcontainer.lua
 ---@class WidgetContainer : Widget
@@ -27,3 +48,17 @@ function WidgetContainer:new(o) end
 ---@class InputContainer : WidgetContainer
 ---@field ges_events table|nil
 ---@field covers_fullscreen boolean|nil
+
+--- ui/widget/menu.lua
+---@class Menu : InputContainer
+local Menu = {}
+
+---@param select_number number|nil
+---@param no_recalculate_dimen boolean|nil
+function Menu:updateItems(select_number, no_recalculate_dimen) end
+
+--- ffi/archiver Writer（copymanga CBZ 等）
+---@class ArchiverWriter
+local ArchiverWriter = {}
+
+function ArchiverWriter:close() end

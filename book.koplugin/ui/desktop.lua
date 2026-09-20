@@ -43,7 +43,7 @@ local TopBar = require("ui.views.topbar")
 local BottomBar = require("ui.views.bottombar")
 local UI = require("ui.components.bookui")
 
----@class BookDesktop : InputContainer
+---@class BookDesktop : InputContainer, LifecycleOwner
 ---@field plugin BookPlugin|nil
 ---@field source BookSource|nil
 ---@field tab string
@@ -55,7 +55,10 @@ local UI = require("ui.components.bookui")
 ---@field settings BookSettings
 ---@field topbar BookTopBar
 ---@field bottombar BookBottomBar
+---@field detail BookDetailPage|nil
+---@field source_generation integer|nil 换源代数，页内请求防串
 ---@field _tabs table[]
+---@field _closed boolean|nil 桌面已关闭，异步回调短路
 local Desktop = InputContainer:extend{
     name = "book_desktop",
     covers_fullscreen = true,

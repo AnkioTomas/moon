@@ -101,7 +101,7 @@ function Highlights.pick(source_id, stable_id, chapter_idx, index, current_items
 end
 
 --- 从 notes 全表收划线，带上书名作者与身份。首页书摘用这个，不跟当前书绑死。
----@return { text: string, author: string, title: string, source_id: string, stable_id: string }[]
+---@return { text: string, author: string, title: string, chapter: string, source_id: string, stable_id: string }[]
 function Highlights.collectAll()
     local items = {}
     local ok, NoteDB = pcall(require, "db.note")
@@ -144,7 +144,7 @@ end
 
 --- 全库随机一条书摘。有多条时躲开上一句。
 ---@param avoid string|nil
----@return { text: string, author: string, title: string, source_id: string|nil, stable_id: string|nil }|nil
+---@return { text: string, author: string, title: string, chapter: string, source_id: string|nil, stable_id: string|nil }|nil
 function Highlights.random(avoid)
     local items = Highlights.collectAll()
     if #items == 0 then return nil end

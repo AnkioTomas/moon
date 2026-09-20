@@ -222,6 +222,7 @@ end
 ---@return table
 function List.openList(opts, normalize)
     opts = opts or {}
+    ---@type { menu: Menu|nil }
     local holder = { menu = nil }
     --- 关闭当前 list 菜单（仅关闭，不触发回调——Menu 的 close_callback 会处理）。
     ---@return nil

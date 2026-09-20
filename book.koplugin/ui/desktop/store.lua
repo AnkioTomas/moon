@@ -27,11 +27,14 @@ local Screen = Device.screen
 ---@field desktop BookDesktop
 ---@field state table|nil
 ---@field books table[]|nil
----@field fetch_cancel table|nil
+---@field fetch_cancel CancelHandle|nil
 ---@field search string|nil
 ---@field page number
 ---@field page_size number
 ---@field total number
+---@field cancel fun(self: BookStorePage)
+---@field showSearch fun(self: BookStorePage)
+---@field build fun(self: BookStorePage, ctx: table, state: table, opts: table|nil): table
 local Store = {}
 Store.__index = Store
 setmetatable(Store, View)

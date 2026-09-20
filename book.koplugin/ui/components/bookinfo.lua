@@ -54,7 +54,7 @@ local function statusInk()
 end
 
 --- Kindle 缎带：沿 \ 从顶边接到右边，定宽，角尖不填。
----@param bb table 用于绘制的 Blitbuffer 画布
+---@param bb BlitBuffer 用于绘制的 Blitbuffer 画布
 ---@param x number 目标区域左上角横坐标，单位像素
 ---@param y number 目标区域左上角纵坐标，单位像素
 ---@param size number 绘制区域边长，单位像素
@@ -315,7 +315,7 @@ function BookInfo.readRibbon(cw)
         return self.dimen
     end
     --- 绘制斜角已读缎带，并将文字旋转后绘制到缎带中央。
-    ---@param bb userdata 用于绘制的 Blitbuffer 画布
+    ---@param bb BlitBuffer 用于绘制的 Blitbuffer 画布
     ---@param x number 目标区域左上角横坐标，单位像素
     ---@param y number 目标区域左上角纵坐标，单位像素
     ---@return nil
@@ -371,7 +371,7 @@ local function circleMark(name, ox, oy)
         return self.dimen
     end
     --- 绘制圆形底色和居中图标。
-    ---@param bb userdata 用于绘制的 Blitbuffer 画布
+    ---@param bb BlitBuffer 用于绘制的 Blitbuffer 画布
     ---@param x number 目标区域左上角横坐标，单位像素
     ---@param y number 目标区域左上角纵坐标，单位像素
     ---@return nil
@@ -451,7 +451,7 @@ function BookInfo.openingBar(cw, ch)
         return self.dimen
     end
     --- 绘制通栏黑底和居中文案。
-    ---@param bb userdata 用于绘制的 Blitbuffer 画布
+    ---@param bb BlitBuffer 用于绘制的 Blitbuffer 画布
     ---@param x number 目标区域左上角横坐标，单位像素
     ---@param y number 目标区域左上角纵坐标，单位像素
     ---@return nil
