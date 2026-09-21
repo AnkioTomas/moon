@@ -46,6 +46,12 @@ function FanQie.directory_url(book_id)
     return FanQie.BASE_URL .. "/api/reader/directory/detail?bookId=" .. Text.urlEncode(book_id)
 end
 
+---@param item_id string
+---@return string
+function FanQie.reader_full_url(item_id)
+    return FanQie.BASE_URL .. "/api/reader/full?itemId=" .. Text.urlEncode(tostring(item_id))
+end
+
 --- 把 thumb_uri / 签名 URL 收成手机端稳定封面。
 ---@param thumb string|nil
 ---@return string|nil

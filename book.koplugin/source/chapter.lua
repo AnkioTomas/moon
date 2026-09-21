@@ -380,11 +380,13 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
     end
 
     --- 关掉进度对话框并置空句柄；重复调用无副作用。
+    --- 先摘掉 dismiss_callback，避免正常结束被当成用户取消。
     local function closeDialog()
-        if dialog then
-            dialog:close()
-            dialog = nil
-        end
+        if not dialog then return end
+        local current = dialog
+        dialog = nil
+        current.dismiss_callback = nil
+        current:close()
     end
     require("ui/network/manager"):runWhenOnline(function()
         if cancelled then
@@ -395,7 +397,14 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
             subtitle = book.title or identity.stable_id,
             progress_max = 4,
             refresh_time_seconds = 0.05,
-            dismissable = false,
+            dismissable = true,
+            dismiss_callback = function()
+                if cancelled then return end
+                cancelled = true
+                dialog = nil
+                if job and job.cancel then job.cancel() end
+                cb(nil, _("已取消"))
+            end,
         }
         dialog:show()
         ops.progress = function(step)

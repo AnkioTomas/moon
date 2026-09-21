@@ -319,8 +319,11 @@ function QRLogin:_schedule(gen, token, csrf, expire_time)
             if d.redirect_url and d.redirect_url ~= "" then
                 self:_finish_with_redirect(gen, d.redirect_url, csrf)
             else
-                logger.warn("[FanQieQR] " .. status .. " 但无 redirect_url")
-                self:_finish_login_success(gen)
+                -- 无 redirect 时不要假装成功：登录态以 sessionid 为准，继续轮询等 Set-Cookie。
+                logger.warn("[FanQieQR] " .. status .. " 但无 redirect_url / sessionid，继续轮询")
+                UIManager:scheduleIn(POLL_INTERVAL, function()
+                    self:_schedule(gen, token, csrf, expire_time)
+                end)
             end
         elseif status == "expired" then
             self:show_retry(_("二维码已过期"))
@@ -388,6 +391,11 @@ end
 
 function QRLogin:_finish_login_success(gen)
     if gen ~= self.generation then return end
+    if not (self.jar.sessionid and self.jar.sessionid ~= "") then
+        logger.warn("[FanQieQR] 完成登录时 jar 无 sessionid")
+        self:show_retry(_("登录失败：未获取到 sessionid"))
+        return
+    end
     local jar = {}
     for k, v in pairs(self.jar) do jar[k] = v end
     self.login_completed = true
@@ -406,6 +414,9 @@ function QRLogin:_finish_login_success(gen)
     self.settings:flush()
     self.jar = jar
     self:toast(_("登录成功"))
+    if type(self.plugin.onLoginSuccess) == "function" then
+        self.plugin:onLoginSuccess()
+    end
 end
 
 function QRLogin:show_retry(msg)
