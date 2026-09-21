@@ -180,12 +180,64 @@ local function open()
     return ioloop
 end
 
---- 取消时关掉 iostream，打断未完成的 fetch。
+--- 丢掉属于这次请求的已入队回调。写完成回调已经进 _callbacks 时，
+--- 关 socket 拦不住它，下次泵会在已关闭的流上 read。
+---@param callbacks table|nil
+---@param client table
+---@param stream table|nil
+local function dropQueued(callbacks, client, stream)
+    if type(callbacks) ~= "table" then
+        return
+    end
+    local i = 1
+    while callbacks[i] do
+        local arg = callbacks[i][2]
+        local owned = arg == client
+            or (stream and type(arg) == "table" and arg[1] == stream)
+        if owned then
+            table.remove(callbacks, i)
+        else
+            i = i + 1
+        end
+    end
+end
+
+--- 取消时先拆 turbo 的连接/请求超时和已入队回调，再关 iostream。
+--- 只关 socket 的话，超时还挂在私有 ioloop 上，下一次泵补跑并打出错误。
 ---@param client table|nil
 local function closeClient(client)
-    if client and client.iostream and not client.iostream:closed() then
+    if not client then
+        return
+    end
+    local loop = client.io_loop
+    if loop and type(loop.remove_timeout) == "function" then
+        if client.connect_timeout_ref then
+            loop:remove_timeout(client.connect_timeout_ref)
+        end
+        if client.request_timeout_ref then
+            loop:remove_timeout(client.request_timeout_ref)
+        end
+    end
+    client.connect_timeout_ref = nil
+    client.request_timeout_ref = nil
+    local stream = client.iostream
+    if stream then
+        stream._write_callback = nil
+        stream._write_callback_arg = nil
+        stream._read_callback = nil
+        stream._read_callback_arg = nil
+        stream._connect_callback = nil
+        stream._connect_callback_arg = nil
+        stream._connect_fail_callback = nil
+        stream._ssl_connect_callback = nil
+        stream._ssl_connect_callback_arg = nil
+    end
+    if loop then
+        dropQueued(loop._callbacks, client, stream)
+    end
+    if stream and not stream:closed() then
         pcall(function()
-            client.iostream:close()
+            stream:close()
         end)
     end
 end

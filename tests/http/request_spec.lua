@@ -361,23 +361,47 @@ do
     Assert.eq(fail_stream.fail_err, "timeout")
     Assert.eq(fail_stream.fail_self, fail_stream)
 
-    -- 普通请求在 yield 后取消必须立即关连接，不能只抑制回调却继续占用网络。
+    -- 普通请求在 yield 后取消必须立即关连接，并拆掉超时和已入队回调。
+    -- 只关 socket 时，连接超时和写完成回调会在下一次泵里补跑。
     local queued
     ioloop.add_callback = function(_, fn)
         queued = fn
     end
+    ioloop._timeouts = { [3] = true, [4] = true, [7] = true }
+    ioloop._timeouts_sz = 3
+    ioloop.remove_timeout = function(self, ref)
+        if not self._timeouts[ref] then
+            return false
+        end
+        self._timeouts[ref] = nil
+        self._timeouts_sz = self._timeouts_sz - 1
+        return true
+    end
     local turbo = require("turbo")
     local closed = 0
+    local stream = {
+        closed = function() return false end,
+        close = function() closed = closed + 1 end,
+        _write_callback = function() end,
+    }
+    local keeper = function() end
+    local client
     turbo.async.HTTPClient = function()
-        return {
-            iostream = {
-                closed = function() return false end,
-                close = function() closed = closed + 1 end,
-            },
+        client = {
+            io_loop = ioloop,
+            connect_timeout_ref = 3,
+            request_timeout_ref = 7,
+            iostream = stream,
             fetch = function()
                 return {}
             end,
         }
+        ioloop._callbacks = {
+            { function() end, { stream, function() end } },
+            { function() end, client },
+            { keeper, { marker = true } },
+        }
+        return client
     end
     local calls = 0
     local job = Request.request({ url = "https://api.ankio.net/pending" }, function()
@@ -389,5 +413,14 @@ do
     job.cancel()
     Assert.eq(closed, 1)
     Assert.eq(calls, 0)
+    Assert.is_nil(client.connect_timeout_ref)
+    Assert.is_nil(client.request_timeout_ref)
+    Assert.is_nil(ioloop._timeouts[3])
+    Assert.is_true(ioloop._timeouts[4])
+    Assert.is_nil(ioloop._timeouts[7])
+    Assert.eq(ioloop._timeouts_sz, 1)
+    Assert.is_nil(stream._write_callback)
+    Assert.eq(#ioloop._callbacks, 1)
+    Assert.eq(ioloop._callbacks[1][1], keeper)
 end
 
