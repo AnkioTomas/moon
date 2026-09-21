@@ -45,7 +45,8 @@ end
 
 local PREV_REFRESH_KEY = "swipe_animations_prev_refresh_rate"
 
---- 动画开启时把完全刷新率强制为「从不」，避免全刷闪烁打断动画；先备份原值。
+--- 动画开启时默认把完全刷新率改成「从不」，避免全刷闪烁打断动画。
+--- 只改一次并备份原值；之后用户仍可再改，不再拦截。
 ---@return nil
 local function forceFullRefreshNever()
     if G_reader_settings:has(PREV_REFRESH_KEY) then return end
@@ -73,23 +74,6 @@ local function restoreFullRefresh()
         G_reader_settings:delSetting("night_full_refresh_count")
     end
     G_reader_settings:delSetting(PREV_REFRESH_KEY)
-end
-
-local _refresh_guard_installed = false
-
---- 运行时拦截刷新率设置：动画开启期间强制为「从不」（0），避免全刷闪烁打断
---- 动画。纯内存包装，不修改任何 KOReader 文件，重启后失效。
----@return nil
-local function installRefreshGuard()
-    if _refresh_guard_installed then return end
-    _refresh_guard_installed = true
-    local orig = UIManager.setRefreshRate
-    UIManager.setRefreshRate = function(self, rate, night_rate)
-        if PageTurnAnimation.isEnabled() then
-            rate, night_rate = 0, 0
-        end
-        return orig(self, rate, night_rate)
-    end
 end
 
 --- 开启/关闭动画：先装/卸补丁，成功后再落设置。
@@ -137,7 +121,6 @@ end
 function PageTurnAnimation.checkStartup()
     if _startup_checked then return end
     _startup_checked = true
-    installRefreshGuard()
     if unsupportedReason() then return end
     if not PageTurnAnimation.isEnabled() then return end
     if PageTurnAnimation.isApplied() then

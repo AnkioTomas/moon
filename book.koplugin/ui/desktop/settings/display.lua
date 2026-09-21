@@ -49,7 +49,7 @@ local function refreshRow(desktop)
         local day = select(1, UIManager:getRefreshRate())
         return SettingRow.build(iw, {
             kind = "nav", icon = "autorenew", title = _("屏幕刷新"),
-            subtitle = _("墨水屏全刷间隔；翻页动画开启时会临时改为从不"),
+            subtitle = _("墨水屏全刷间隔；翻页动画开启时默认改为从不"),
             status = refreshRateLabel(day), status_on = true,
             callback = function()
                 local items = {}
