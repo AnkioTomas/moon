@@ -7,6 +7,7 @@
 local Client = require("source.jdread.client")
 local Mapper = require("source.jdread.mapper")
 local Toc = require("source.jdread.toc")
+local Assets = require("source.jdread.assets")
 local SourceBase = require("source.base")
 local Progress = require("book.progress")
 local _ = require("gettext")
@@ -312,19 +313,32 @@ end
 ---@param cb fun(payload: ChapterContentPayload|nil, err: string|nil)
 ---@return CancelHandle|nil
 local function fetchContent(self, identity, chapter, cb)
+    local cancelled, asset_job = false, nil
     local done = function(wire, err)
+        if cancelled then return end
         if not wire then cb(nil, err); return end
         local payload = Mapper.content(wire, chapter.title)
         if not payload then
             cb(nil, err or _("京东读书无可用阅读权限"))
             return
         end
-        cb(payload)
+        asset_job = Assets.localizeAsync(identity.stable_id, payload.html, function(html)
+            if cancelled then return end
+            payload.html = html
+            cb(payload)
+        end)
     end
+    local fetch_job
     if useDownload(identity) then
-        return self._client:downloadChapterAsync(identity.stable_id, chapter.uid, done)
+        fetch_job = self._client:downloadChapterAsync(identity.stable_id, chapter.uid, done)
+    else
+        fetch_job = self._client:chapterContentAsync(identity.stable_id, chapter.uid, done)
     end
-    return self._client:chapterContentAsync(identity.stable_id, chapter.uid, done)
+    return { cancel = function()
+            cancelled = true
+            if fetch_job and fetch_job.cancel then fetch_job.cancel() end
+            if asset_job and asset_job.cancel then asset_job.cancel() end
+        end }
 end
 
 ---@param identity BookIdentity
