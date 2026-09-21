@@ -7,9 +7,12 @@
 local Client = require("source.jdread.client")
 local Mapper = require("source.jdread.mapper")
 local Toc = require("source.jdread.toc")
-local Assets = require("source.jdread.assets")
+local Assets = require("source.assets")
+local Paths = require("utils.paths")
+local Request = require("http.request")
 local SourceBase = require("source.base")
 local Progress = require("book.progress")
+local logger = require("utils.log")
 local _ = require("gettext")
 
 local Jdread = {}
@@ -307,6 +310,27 @@ local function useDownload(identity)
     return toc ~= nil and toc[1] ~= nil and toc[1].toc_version == 2
 end
 
+---@param url string
+---@param cb fun(data: string|nil, err: any)
+---@return { cancel: fun() }|nil
+local function downloadImage(url, cb)
+    return Request.get(url, {
+        accept = "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        headers = {
+            ["Referer"] = "https://e.m.jd.com/",
+        },
+        block_timeout = 90,
+        allow_redirects = true,
+    }, function(raw, err)
+        if not raw or raw == "" then
+            logger.dbg("jdread image download failed", url, err)
+            cb(nil, err)
+        else
+            cb(raw)
+        end
+    end)
+end
+
 ---@param self JdreadSource
 ---@param identity BookIdentity
 ---@param chapter BookChapter
@@ -322,11 +346,16 @@ local function fetchContent(self, identity, chapter, cb)
             cb(nil, err or _("京东读书无可用阅读权限"))
             return
         end
-        asset_job = Assets.localizeAsync(identity.stable_id, payload.html, function(html)
-            if cancelled then return end
-            payload.html = html
-            cb(payload)
-        end)
+        asset_job = Assets.localizeAsync(
+            payload.html,
+            Paths.bookWorkDir(identity.stable_id, "jdread") .. "/images",
+            downloadImage,
+            function(html)
+                if cancelled then return end
+                payload.html = html
+                cb(payload)
+            end
+        )
     end
     local fetch_job
     if useDownload(identity) then

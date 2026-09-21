@@ -1,18 +1,19 @@
 --[[--
-微信读书章节插图：tar 资源包 + 正文远程 img → 下载到章节工作目录并改写为相对路径。
+微信读书章节插图：tar 资源包解出后，远程 img 走 source.assets 落地。
 
 @module koplugin.book.source.wechat.assets
 --]]
 
 local Auth = require("source.wechat.auth")
+local Shared = require("source.assets")
 local Paths = require("utils.paths")
-local lfs = require("libs/libkoreader-lfs")
-local md5 = require("ffi/sha2").md5
 local logger = require("utils.log")
 
 local Assets = {}
 
 local WEB = "https://weread.qq.com"
+
+Assets.rewriteImageSources = Shared.rewriteImageSources
 
 ---@param value string|nil
 ---@return string
@@ -25,90 +26,6 @@ end
 local function basename(path)
     path = tostring(path or "")
     return path:match("([^/\\]+)$") or path
-end
-
----@param data string
----@return string mime
-local function mimeFor(data)
-    if data:sub(1, 8) == "\137PNG\r\n\026\n" then
-        return "image/png"
-    elseif data:sub(1, 3) == "\255\216\255" then
-        return "image/jpeg"
-    elseif data:sub(1, 6) == "GIF87a" or data:sub(1, 6) == "GIF89a" then
-        return "image/gif"
-    elseif data:sub(1, 4) == "RIFF" and data:sub(9, 12) == "WEBP" then
-        return "image/webp"
-    end
-    return "application/octet-stream"
-end
-
----@param mime string
----@return string
-local function extFor(mime)
-    if mime == "image/png" then
-        return ".png"
-    elseif mime == "image/jpeg" then
-        return ".jpg"
-    elseif mime == "image/gif" then
-        return ".gif"
-    elseif mime == "image/webp" then
-        return ".webp"
-    end
-    return ""
-end
-
---- 递归建目录；已存在或路径为空直接返回。
----@param dir string|nil
-local function ensureDir(dir)
-    if not dir or dir == "" then
-        return
-    end
-    if lfs.attributes(dir, "mode") == "directory" then
-        return
-    end
-    local parent = dir:match("(.+)/[^/]+$")
-    if parent then
-        ensureDir(parent)
-    end
-    lfs.mkdir(dir)
-end
-
---- 把图片写入 images/ 目录并返回相对 href（内容寻址，重复图片自动复用）。
----@param images_dir string
----@param data string
----@return string|nil
-local function materializeImage(images_dir, data)
-    local mime = mimeFor(data)
-    if not mime:match("^image/") then
-        return nil
-    end
-    local name = md5(data) .. extFor(mime)
-    local path = images_dir .. "/" .. name
-    local f = io.open(path, "rb")
-    if not f then
-        local w = io.open(path, "wb")
-        if not w then
-            return nil
-        end
-        w:write(data)
-        w:close()
-    else
-        f:close()
-    end
-    return "images/" .. name
-end
-
----@param src string|nil
----@return string|nil
-local function remoteUrl(src)
-    local url = tostring(src or ""):gsub("&amp;", "&")
-    if url:match("^//") then
-        url = "https:" .. url
-    end
-    if url:match("^https?://") then
-        return url
-    end
-    return nil
 end
 
 ---@param data string
@@ -149,25 +66,6 @@ local function absTarUrl(tar)
         return WEB .. tar
     end
     return tar
-end
-
---- 把 tar/远程 URL 映射后的相对图片路径写回 img src。
----@param xhtml string
----@param src_map table<string, string>
----@return string
-function Assets.rewriteImageSources(xhtml, src_map)
-    if type(xhtml) ~= "string" or not src_map or not next(src_map) then
-        return xhtml
-    end
-    return (xhtml:gsub("src=(['\"])(.-)%1", function(quote, src)
-        local clean = tostring(src or ""):gsub("&amp;", "&")
-        local bare = clean:match("^[^%?#]+") or clean
-        local href = src_map[clean] or src_map[bare] or src_map[basename(bare)]
-        if href then
-            return "src=" .. quote .. href .. quote
-        end
-        return "src=" .. quote .. src .. quote
-    end))
 end
 
 ---@param url string
@@ -213,7 +111,7 @@ local function downloadTarAsync(tar, referer, images_dir, cb)
         end
         local src_map = {}
         for _, entry in ipairs(tarEntries(raw)) do
-            local href = materializeImage(images_dir, entry.data)
+            local href = Shared.materializeImage(images_dir, entry.data)
             if href then
                 local name = basename(entry.name)
                 src_map[name] = href
@@ -227,63 +125,6 @@ local function downloadTarAsync(tar, referer, images_dir, cb)
     end)
 end
 
---- 下载正文里仍指向 http(s) 的 img 并写入 images/。
----@param xhtml string
----@param images_dir string
----@param cb fun(html: string)
----@return table|nil
-local function downloadRemoteImagesAsync(xhtml, images_dir, cb)
-    local urls = {}
-    local seen = {}
-    xhtml:gsub('src=(["\'])(.-)%1', function(_, src)
-        local url = remoteUrl(src)
-        if url and not seen[url] then
-            seen[url] = true
-            urls[#urls + 1] = url
-        end
-    end)
-    if #urls == 0 then
-        cb(xhtml)
-        return nil
-    end
-    local url_hrefs, index = {}, 1
-    local cancelled, active_job = false, nil
-    --- 下载队列中的下一张远程图片；下完全部后统一把 src 改写成本地相对路径。
-    --- 单张下载失败不中断，只是该 src 保持原样。
-    local function nextUrl()
-        if cancelled then return end
-        local url = urls[index]
-        index = index + 1
-        if not url then
-            local out = xhtml:gsub('src=(["\'])(.-)%1', function(quote, src)
-                local abs = remoteUrl(src)
-                local href = abs and url_hrefs[abs]
-                if href then
-                    return "src=" .. quote .. href .. quote
-                end
-                return "src=" .. quote .. src .. quote
-            end)
-            cb(out)
-            return
-        end
-        active_job = downloadBinaryAsync(url, WEB .. "/", function(raw)
-            if cancelled then return end
-            if raw then
-                local href = materializeImage(images_dir, raw)
-                if href then
-                    url_hrefs[url] = href
-                end
-            end
-            nextUrl()
-        end)
-    end
-    nextUrl()
-    return { cancel = function()
-            cancelled = true
-            if active_job and active_job.cancel then active_job:cancel() end
-        end }
-end
-
 --- 把章节 HTML 内图片下载到章节工作目录并改写为相对路径。
 ---@param book_id string
 ---@param chapter BookChapter
@@ -295,7 +136,6 @@ function Assets.localizeAsync(book_id, chapter, html, referer, cb)
     local cancelled = false
     local jobs = {}
     local images_dir = Paths.bookWorkDir(book_id, "wechat") .. "/images"
-    ensureDir(images_dir)
 
     --- 交付改写后的 HTML；已取消则丢弃。
     ---@param out string
@@ -307,11 +147,11 @@ function Assets.localizeAsync(book_id, chapter, html, referer, cb)
     ---@param src_map table<string, string>|nil 原始 src → 本地相对路径
     local function afterTar(src_map)
         if cancelled then return end
-        local rewritten = Assets.rewriteImageSources(html, src_map or {})
-        local job = downloadRemoteImagesAsync(rewritten, images_dir, finish)
-        if job then
-            jobs[#jobs + 1] = job
-        end
+        local rewritten = Shared.rewriteImageSources(html, src_map or {})
+        local job = Shared.localizeAsync(rewritten, images_dir, function(url, done)
+            return downloadBinaryAsync(url, WEB .. "/", done)
+        end, finish)
+        jobs[#jobs + 1] = job
     end
 
     if type(chapter.tar) == "string" and chapter.tar ~= "" then
