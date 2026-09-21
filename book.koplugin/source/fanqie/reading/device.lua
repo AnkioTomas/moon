@@ -7,7 +7,7 @@
 
 local JSON = require("json")
 local Request = require("http.request")
-local Aes = require("source.fanqie.reading.aes")
+local Aes = require("crypto.aes")
 local logger = require("utils.log")
 local bit = require("bit")
 

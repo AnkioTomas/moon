@@ -1,7 +1,7 @@
 --[[--
-AES-128（ECB/CBC）+ PKCS7。纯 LuaJIT，移植自 fanqie-re。
+AES-128（ECB/CBC）+ PKCS7。纯 LuaJIT。
 
-@module koplugin.book.source.fanqie.reading.aes
+@module koplugin.book.crypto.aes
 --]]
 
 local bit = require("bit")
@@ -121,7 +121,6 @@ local function expand_key(key)
         w[i * 4 + 3] = bxor(w[(i - 4) * 4 + 3], t2)
         w[i * 4 + 4] = bxor(w[(i - 4) * 4 + 4], t3)
     end
-    -- w indexed from 0*4+1 for round 0 → 43*4+4; flatten to 176 bytes 1-based
     local rk = {}
     for i = 0, 43 do
         for j = 1, 4 do
@@ -190,6 +189,22 @@ function Aes.ecb_encrypt(data, key)
         out[#out + 1] = encrypt_block(padded:sub(i, i + 15), rk)
     end
     return table.concat(out)
+end
+
+---@param data string
+---@param key string 16 bytes
+---@param pad boolean|nil default true (strip pkcs7)
+---@return string
+function Aes.ecb_decrypt(data, key, pad)
+    assert(#key == 16 and #data % 16 == 0)
+    local rk = expand_key(key)
+    local out = {}
+    for i = 1, #data, 16 do
+        out[#out + 1] = decrypt_block(data:sub(i, i + 15), rk)
+    end
+    local raw = table.concat(out)
+    if pad == false then return raw end
+    return Aes.pkcs7_unpad(raw, 16)
 end
 
 ---@param data string already multiple of 16, no padding expected if nopad

@@ -5,7 +5,7 @@
 @module koplugin.book.source.fanqie.reading.sign
 --]]
 
-local Aes = require("source.fanqie.reading.aes")
+local Aes = require("crypto.aes")
 local Sm3 = require("source.fanqie.reading.sm3")
 local Text = require("utils.text")
 local md5 = require("ffi/sha2").md5

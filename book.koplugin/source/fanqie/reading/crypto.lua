@@ -5,7 +5,7 @@
 @module koplugin.book.source.fanqie.reading.crypto
 --]]
 
-local Aes = require("source.fanqie.reading.aes")
+local Aes = require("crypto.aes")
 local Text = require("utils.text")
 
 local Crypto = {}
