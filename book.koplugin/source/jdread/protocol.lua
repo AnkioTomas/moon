@@ -7,11 +7,21 @@
 local bit = require("bit")
 local md5 = require("ffi/sha2").md5
 local JSON = require("json")
+local Aes = require("crypto.aes")
+local Text = require("utils.text")
 
 local Protocol = {}
 
 local APP = "jdread-m"
 local PC1_KEY = "0000000000000000"
+
+---@param raw string
+---@return string
+local function md5bin(raw)
+    return (md5(raw):gsub("(%x%x)", function(pair)
+        return string.char(tonumber(pair, 16))
+    end))
+end
 
 ---@param bytes string
 ---@param decrypt boolean
@@ -170,6 +180,54 @@ function Protocol.chapterKey(book_id, chapter_id)
         tostring(chapter_id)
     )
     return hexEncode(pc1(asciiToUtf16be(raw), false))
+end
+
+--- 下载接口强制偶数时间戳，只走 AES，避开 DES 分支。
+---@param tm integer|nil
+---@return integer
+function Protocol.evenTime(tm)
+    tm = tm or (os.time() * 1000 + math.random(0, 998))
+    if tm % 2 ~= 0 then
+        tm = tm + 1
+    end
+    return tm
+end
+
+--- 加密 e.m.jd.com 下载接口的已签名 query。
+---@param query string
+---@param tm integer
+---@return string
+function Protocol.encryptQuery(query, tm)
+    local raw = Aes.ecb_encrypt(query, md5bin(tostring(tm) .. APP))
+    return (Text.base64Encode(raw):gsub("+", "-"):gsub("/", "_"))
+end
+
+--- 解开 /jdread/api/download/chapter 的 AES 正文。
+---@param raw string
+---@param tm integer
+---@return table|nil, string|nil
+function Protocol.decodeDownload(raw, tm)
+    if type(raw) ~= "string" or raw == "" then
+        return nil, "empty JD download"
+    end
+    if raw:sub(1, 1) == "{" then
+        local ok, envelope = pcall(JSON.decode, raw)
+        if ok and type(envelope) == "table" then
+            if tonumber(envelope.result_code) ~= 0 then
+                return nil, envelope.message or ("JD error " .. tostring(envelope.result_code))
+            end
+            return envelope
+        end
+    end
+    local ok, text = pcall(Aes.ecb_decrypt, Text.base64Decode(raw), md5bin(tostring(tm) .. APP))
+    if not ok or type(text) ~= "string" or text == "" then
+        return nil, "invalid JD download"
+    end
+    local decoded_ok, decoded = pcall(JSON.decode, text)
+    if not decoded_ok or type(decoded) ~= "table" then
+        return nil, "invalid JD download payload"
+    end
+    return decoded
 end
 
 --- 解开 cread 外层响应及 PC1 content。

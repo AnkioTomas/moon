@@ -306,22 +306,75 @@ function Client:readerAutoAsync(endpoint, book_id, key, extra, cb)
         end }
 end
 
---- 拉取旧阅读器目录。
+--- 拉取新阅读器目录。EPUB / 会员书走这条，不经过 cread。
+---@param book_id string|number
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:catalogAsync(book_id, cb)
+    return self:apiGetAsync("/jdread/api/ebook/catalog/" .. tostring(book_id), nil, cb)
+end
+
+--- 拉取新阅读器章节正文。indexes 是 0-based。
+---@param book_id string|number
+---@param index string|number
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client:downloadChapterAsync(book_id, index, cb)
+    local path = "/jdread/api/download/chapter/" .. tostring(book_id)
+    local tm = Protocol.evenTime()
+    local signed = Protocol.signedParams(path, self.uuid, nil, tm)
+    local url = API .. path .. "?" .. Text.formEncode({
+        enc = 1,
+        app = "jdread-m",
+        tm = tm,
+        params = Protocol.encryptQuery(Text.formEncode(signed), tm),
+        indexes = index,
+    })
+    return Request.get(url, {
+        headers = self:headers(API .. "/reader/"),
+    }, function(raw, err)
+        if not raw then cb(nil, err); return end
+        local wire, decode_err = Protocol.decodeDownload(raw, tm)
+        cb(wire, decode_err)
+    end)
+end
+
+--- 拉取目录：新接口优先，旧 cread 兜底。
 ---@param book_id string|number
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:chapterInfosAsync(book_id, cb)
-    return self:readerAutoAsync("/read/lC.action", book_id, Protocol.bookKey(book_id), {
-        bookId = tostring(book_id),
-    }, cb)
+    local cancelled, active = false, nil
+    book_id = tostring(book_id)
+    active = self:catalogAsync(book_id, function(wire, err)
+        if cancelled then return end
+        local rows = type(wire) == "table" and type(wire.data) == "table"
+            and wire.data.chapter_info
+        if type(rows) == "table" and #rows > 0 then
+            self._read_types[book_id] = "download"
+            cb(wire)
+            return
+        end
+        active = self:readerAutoAsync("/read/lC.action", book_id, Protocol.bookKey(book_id), {
+            bookId = book_id,
+        }, cb)
+    end)
+    return { cancel = function()
+            cancelled = true
+            if active and active.cancel then active.cancel() end
+        end }
 end
 
---- 拉取旧阅读器章节正文。
+--- 拉取章节正文：新下载协议或旧 cread。
 ---@param book_id string|number
 ---@param chapter_id string|number
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:chapterContentAsync(book_id, chapter_id, cb)
+    book_id = tostring(book_id)
+    if self._read_types[book_id] == "download" then
+        return self:downloadChapterAsync(book_id, chapter_id, cb)
+    end
     return self:readerAutoAsync(
         "/read/gC.action",
         book_id,

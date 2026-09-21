@@ -94,6 +94,41 @@ do
 end
 
 do
+    local toc = Mapper.chapters({
+        data = {
+            format = "epub",
+            chapter_info = {
+                { chapter_index = 0, chapter_name = "封面", chapter_id = "" },
+                { chapter_index = 1, chapter_name = "版权信息", chapter_id = "" },
+            },
+        },
+    })
+    Assert.len(toc, 2)
+    Assert.eq(toc[1].uid, "0")
+    Assert.eq(toc[1].toc_version, 2)
+    Assert.eq(toc[2].title, "版权信息")
+end
+
+do
+    local payload = Mapper.content({
+        data = {
+            chapter = {{
+                chapter_index = 0,
+                content = '<?xml version="1.0"?><html><body><p>试读</p></body></html>',
+            }},
+        },
+    }, "封面")
+    Assert.eq(payload.title, "封面")
+    Assert.matches(payload.html, "<p>试读</p>")
+end
+
+do
+    Assert.is_nil(Mapper.content({
+        data = { chapter = {{ chapter_index = 14, can_read = false, content = "" }} },
+    }, "锁章"))
+end
+
+do
     local pos, uid = Mapper.progress({
         data = {{
             list = {

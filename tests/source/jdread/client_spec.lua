@@ -25,6 +25,10 @@ package.preload["http.request"] = function()
                     .. '"total_count":1},"result_code":0}')
             elseif url:find("/recommend", 1, true) then
                 cb('{"data":[{"ebook_id":4,"name":"推荐书"}],"result_code":0}')
+            elseif url:find("/jdread/api/ebook/catalog/30394360", 1, true) then
+                cb('{"data":{"format":"epub","chapter_info":[{"chapter_index":0,"chapter_name":"封面"}]},"result_code":0}')
+            elseif url:find("/jdread/api/download/chapter/30394360", 1, true) then
+                cb('{"result_code":1,"message":"UNKNOWN_ERROR"}')
             else
                 cb('{"code":"-1","msg":"stop"}')
             end
@@ -152,13 +156,35 @@ do
     local _, err
     local first = #requests + 1
     client:chapterInfosAsync("30451107", function(value, e) _, err = value, e end)
-    local req = requests[first]
+    Assert.matches(requests[first].url, "^https://e%.m%.jd%.com/jdread/api/ebook/catalog/30451107%?")
+    local req = requests[first + 1]
     Assert.matches(req.url, "^https://cread%.jd%.com/read/lC%.action%?")
     Assert.matches(req.url, "[?&]readType=3")
     Assert.matches(req.url, "k=c32bc1eceb889c09")
-    Assert.matches(requests[first + 1].url, "[?&]readType=0")
-    Assert.matches(requests[first + 2].url, "[?&]readType=1")
+    Assert.matches(requests[first + 2].url, "[?&]readType=0")
+    Assert.matches(requests[first + 3].url, "[?&]readType=1")
     Assert.eq(err, "stop")
+end
+
+do
+    local wire, err
+    client:chapterInfosAsync("30394360", function(value, e) wire, err = value, e end)
+    Assert.is_nil(err)
+    Assert.eq(wire.data.chapter_info[1].chapter_name, "封面")
+    Assert.eq(client._read_types["30394360"], "download")
+end
+
+do
+    local _, err
+    local first = #requests + 1
+    client._read_types["30394360"] = "download"
+    client:chapterContentAsync("30394360", 0, function(value, e) _, err = value, e end)
+    local req = requests[first]
+    Assert.matches(req.url, "^https://e%.m%.jd%.com/jdread/api/download/chapter/30394360%?")
+    Assert.matches(req.url, "[?&]enc=1")
+    Assert.matches(req.url, "[?&]indexes=0")
+    Assert.matches(req.url, "[?&]params=")
+    Assert.eq(err, "UNKNOWN_ERROR")
 end
 
 do

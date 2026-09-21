@@ -60,3 +60,33 @@ do
     Assert.eq(err, "未购买")
     Assert.is_true(retryable)
 end
+
+do
+    Assert.eq(Protocol.evenTime(1700000000001), 1700000000002)
+    Assert.eq(Protocol.evenTime(1700000000000), 1700000000000)
+    local tm = 1700000000000
+    local query = "app=jdread-m&tm=1700000000000&uuid=h5-test"
+    local enc = Protocol.encryptQuery(query, tm)
+    Assert.is_true(enc:find("[-_A-Za-z0-9]+") ~= nil)
+    Assert.is_nil(enc:find("+", 1, true))
+    Assert.is_nil(enc:find("/", 1, true))
+    local wire, err = Protocol.decodeDownload(
+        require("utils.text").base64Encode(
+            require("crypto.aes").ecb_encrypt(
+                '{"data":{"chapter":[{"content":"<p>一</p>"}]}}',
+                (require("ffi/sha2").md5(tostring(tm) .. "jdread-m"):gsub("(%x%x)", function(pair)
+                    return string.char(tonumber(pair, 16))
+                end))
+            )
+        ),
+        tm
+    )
+    Assert.is_nil(err)
+    Assert.eq(wire.data.chapter[1].content, "<p>一</p>")
+end
+
+do
+    local wire, err = Protocol.decodeDownload('{"result_code":1,"message":"UNKNOWN_ERROR"}', 1)
+    Assert.is_nil(wire)
+    Assert.eq(err, "UNKNOWN_ERROR")
+end

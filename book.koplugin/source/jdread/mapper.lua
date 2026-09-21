@@ -85,10 +85,40 @@ function Mapper.storeList(wire, on_cover)
     return Catalog.listResult(books, root.total_count)
 end
 
---- cread 目录 wire → BookChapter[]。
+--- 新阅读器目录 /jdread/api/ebook/catalog/{id} → BookChapter[]。
+--- 该接口 chapter_id 常为空，下载只认 0-based indexes，故 uid 就是 index。
+---@param rows table
+---@return BookChapter[]|nil
+local function downloadChapters(rows)
+    local chapters = {}
+    for _, row in ipairs(rows) do
+        local index = tonumber(row.chapter_index)
+        if index == nil then index = #chapters end
+        local title = row.chapter_name or row.catalogName or row.catalog_name
+        if title == nil or tostring(title) == "" then
+            title = "第" .. (index + 1) .. "章"
+        end
+        chapters[#chapters + 1] = {
+            idx = #chapters + 1,
+            source_idx = tostring(index),
+            uid = tostring(index),
+            title = tostring(title),
+            depth = 1,
+        }
+    end
+    if #chapters == 0 then return nil end
+    chapters[1].toc_version = 2
+    return chapters
+end
+
+--- cread / 新阅读器目录 wire → BookChapter[]。
 ---@param wire table
 ---@return BookChapter[]|nil
 function Mapper.chapters(wire)
+    local root = type(wire.data) == "table" and wire.data or wire
+    if type(root.chapter_info) == "table" then
+        return downloadChapters(root.chapter_info)
+    end
     local rows = wire.catalogList or wire.catalog_list
     if type(rows) ~= "table" then return nil end
     table.sort(rows, function(a, b)
@@ -112,15 +142,19 @@ function Mapper.chapters(wire)
     return chapters
 end
 
---- cread 正文 wire → 标准章节内容。
+--- 正文 wire → 标准章节内容。兼容 cread contentList 与 download/chapter。
 ---@param wire table
 ---@param title string|nil
 ---@return ChapterContentPayload|nil
 function Mapper.content(wire, title)
-    local parts = wire.contentList or wire.content_list
+    local data = type(wire.data) == "table" and wire.data or wire
+    local parts = data.chapter or wire.contentList or wire.content_list
     if type(parts) ~= "table" then return nil end
     local html = {}
     for _, part in ipairs(parts) do
+        if type(part) == "table" and part.can_read == false then
+            return nil
+        end
         local content = type(part) == "table" and part.content or part
         if type(content) == "string" and content ~= "" then
             html[#html + 1] = Text.htmlBodyFragment(content)

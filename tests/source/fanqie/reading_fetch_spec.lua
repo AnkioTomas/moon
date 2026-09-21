@@ -48,9 +48,9 @@ end
 package.loaded["json"] = nil
 
 -- 用真实 crypto 解一把已知向量，给 fetch 罐装响应
-package.loaded["source.fanqie.reading.aes"] = nil
+package.loaded["crypto.aes"] = nil
 package.loaded["source.fanqie.reading.crypto"] = nil
-local Aes = require("source.fanqie.reading.aes")
+local Aes = require("crypto.aes")
 local Crypto = require("source.fanqie.reading.crypto")
 local Text = require("utils.text")
 

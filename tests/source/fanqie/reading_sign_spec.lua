@@ -7,10 +7,10 @@
 local Assert = require("support.assert")
 
 package.loaded["source.fanqie.reading.sign"] = nil
-package.loaded["source.fanqie.reading.aes"] = nil
+package.loaded["crypto.aes"] = nil
 package.loaded["source.fanqie.reading.sm3"] = nil
 
-local Aes = require("source.fanqie.reading.aes")
+local Aes = require("crypto.aes")
 local Sm3 = require("source.fanqie.reading.sm3")
 local Sign = require("source.fanqie.reading.sign")
 

@@ -299,18 +299,32 @@ function Source:loadTocAsync(identity, cb)
     end)
 end
 
+---@param identity BookIdentity
+---@return boolean
+local function useDownload(identity)
+    local toc = Toc.read(identity.source_id, identity.stable_id)
+    return toc ~= nil and toc[1] ~= nil and toc[1].toc_version == 2
+end
+
 ---@param self JdreadSource
 ---@param identity BookIdentity
 ---@param chapter BookChapter
 ---@param cb fun(payload: ChapterContentPayload|nil, err: string|nil)
 ---@return CancelHandle|nil
 local function fetchContent(self, identity, chapter, cb)
-    return self._client:chapterContentAsync(identity.stable_id, chapter.uid, function(wire, err)
+    local done = function(wire, err)
         if not wire then cb(nil, err); return end
         local payload = Mapper.content(wire, chapter.title)
-        if not payload then cb(nil, _("章节内容为空")); return end
+        if not payload then
+            cb(nil, err or _("京东读书无可用阅读权限"))
+            return
+        end
         cb(payload)
-    end)
+    end
+    if useDownload(identity) then
+        return self._client:downloadChapterAsync(identity.stable_id, chapter.uid, done)
+    end
+    return self._client:chapterContentAsync(identity.stable_id, chapter.uid, done)
 end
 
 ---@param identity BookIdentity
@@ -382,6 +396,16 @@ function Source:getProgressAsync(identity, cb)
         local pos, uid = Mapper.progress(wire)
         if not pos then cb(nil, nil, { empty = true }); return end
         local idx = Toc.index(identity.source_id, identity.stable_id, uid)
+        if not idx and pos.chapter_title then
+            local toc = Toc.read(identity.source_id, identity.stable_id)
+            for _, chapter in ipairs(toc or {}) do
+                if chapter.title == pos.chapter_title then
+                    idx = chapter.idx
+                    uid = chapter.uid
+                    break
+                end
+            end
+        end
         if idx then
             pos.chapter_idx = idx
             pos.extra = { chapter_uid = uid, chapter_idx = idx }

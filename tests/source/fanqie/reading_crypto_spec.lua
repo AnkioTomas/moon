@@ -7,9 +7,9 @@
 local Assert = require("support.assert")
 
 package.loaded["source.fanqie.reading.crypto"] = nil
-package.loaded["source.fanqie.reading.aes"] = nil
+package.loaded["crypto.aes"] = nil
 
-local Aes = require("source.fanqie.reading.aes")
+local Aes = require("crypto.aes")
 local Crypto = require("source.fanqie.reading.crypto")
 
 local key = Aes.from_hex(Crypto.HARDCODED_KEY_HEX)
