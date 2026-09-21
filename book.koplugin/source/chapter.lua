@@ -196,7 +196,7 @@ local function write(path, payload, cb, opts)
         if attr then
             cacheReady(path, {
                 signature = tostring(attr.size or "") .. ":" .. tostring(attr.modification or ""),
-                ready = true,
+                ready = not Text.hasRemoteImageSrc(html),
             })
         end
         cb(path)
