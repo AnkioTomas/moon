@@ -50,7 +50,9 @@ end
 Assert.is_true(reading ~= nil)
 Assert.eq(#reading.rows, 2)
 Assert.eq(reading.rows[1](600).title, "阅读页顶栏")
+Assert.eq(reading.rows[1](600).kind, "nav")
 Assert.eq(reading.rows[2](600).title, "底部进度栏")
+Assert.eq(reading.rows[2](600).kind, "nav")
 
 Assert.is_true(optimize ~= nil)
 Assert.eq(optimize.rows[1](600).title, "脚注弹窗")

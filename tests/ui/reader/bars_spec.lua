@@ -35,6 +35,13 @@ package.preload["ui/geometry"] = function()
     }
 end
 
+package.preload["ui.reader.bars.layout"] = function()
+    return {
+        replace = function() return true end,
+        get = function() return {} end,
+        setReplace = function() end,
+    }
+end
 package.preload["ui.reader.session"] = function()
     return {
         chapterTitle = function(snapshot)

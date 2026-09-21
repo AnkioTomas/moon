@@ -101,6 +101,13 @@ end
 package.preload["ui.desktop.settings.reader"] = function()
     return pageMod({ sections = function() return {} end, popupRows = function() return {} end })
 end
+package.preload["ui.desktop.settings.reader_bar"] = function()
+    return pageMod({
+        page = function()
+            return { preview = function() return {} end, sections = {} }
+        end,
+    })
+end
 package.preload["remote.ui"] = function() return { menuRows = function() return {} end } end
 package.preload["ui.panel.settings"] = function()
     return {
