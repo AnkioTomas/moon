@@ -110,6 +110,23 @@ Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, 
 Assert.eq(fetched[#fetched], 2)
 Assert.len(fetched, 2)
 
+-- write() 留下远程 img 时不得标 ready，同进程再开仍要重拉。
+local remote_n = 0
+local remote_ops = {
+    loadToc = function(_, cb) cb(toc) end,
+    fetchContent = function(_, item, cb)
+        remote_n = remote_n + 1
+        cb({ title = item.title, html = '<p><img src="https://cdn/remote.png"/></p>' })
+    end,
+}
+local remote_stale = io.open(tmp .. "/2.html", "wb")
+remote_stale:write('<!DOCTYPE html><html><body><img src="https://cdn/stale.png"/></body></html>')
+remote_stale:close()
+Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, remote_ops, function() end)
+Assert.eq(remote_n, 1)
+Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, remote_ops, function() end)
+Assert.eq(remote_n, 2)
+
 -- 未指定章时优先使用本地 pending_progress。
 pending = { chapter_idx = 3 }
 Chapter.openAsync({ type = "chapter" }, identity, {}, nil, ops, function(p) path = p end)

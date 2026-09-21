@@ -38,6 +38,8 @@ package.preload["db.book"] = function()
         libraryStableIdsBySource = function() return local_library end,
         pendingDeleteIds = function() return {} end,
         markSynced = function() return true end,
+        getToc = function() return nil end,
+        setToc = function() end,
     }
 end
 
