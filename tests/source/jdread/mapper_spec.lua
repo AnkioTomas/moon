@@ -129,6 +129,20 @@ do
 end
 
 do
+    local payload = Mapper.content({
+        data = {
+            chapter = {{
+                content = '<html><body><p class="img_content">'
+                    .. '<img alt="" src="https://img30.360buyimg.com/ebookadmin/jfs/x.jpg" '
+                    .. 'href="./image/Images/x.jpg"/></p></body></html>',
+            }},
+        },
+    }, "插图")
+    Assert.matches(payload.html, 'src="https://img30.360buyimg.com/ebookadmin/jfs/x.jpg"')
+    Assert.matches(payload.html, 'href="./image/Images/x.jpg"')
+end
+
+do
     local pos, uid = Mapper.progress({
         data = {{
             list = {
