@@ -247,6 +247,40 @@ do
     Assert.eq(req.auth_password, "p")
 end
 
+-- ── ensurePathAsync：逐级 MKCOL，已存在目录（405）继续 ─────
+do
+    local dav = Webdav.new({ url = "http://example.com/dav/", username = "u", password = "p" })
+    canned_res = { code = 405, body = "" }
+    local ok, err
+    dav:ensurePathAsync("Apps/Books/.Moon+", function(v, e) ok, err = v, e end)
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    local count = 0
+    for i = #captured - 2, #captured do
+        count = count + 1
+        Assert.eq(captured[i].method, "MKCOL")
+        Assert.eq(captured[i].auth_username, "u")
+        Assert.eq(captured[i].auth_password, "p")
+    end
+    Assert.eq(count, 3)
+end
+
+-- ── deleteAsync：DELETE 文件与 Basic 凭据 ─────────────────
+do
+    canned_res = { code = 204, body = "" }
+    canned_err = nil
+    local dav = Webdav.new({ url = "http://example.com/dav/", username = "u", password = "p" })
+    local ok, err
+    dav:deleteAsync("Apps/Books/a.epub", function(v, e) ok, err = v, e end)
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    local req = captured[#captured]
+    Assert.eq(req.method, "DELETE")
+    Assert.eq(req.url, "http://example.com/dav/Apps/Books/a.epub")
+    Assert.eq(req.auth_username, "u")
+    Assert.eq(req.auth_password, "p")
+end
+
 -- ── 还原现场（不影响后续 spec 文件）────────────────────────
 package.preload["http.request"] = nil
 package.loaded["http.request"] = nil

@@ -81,6 +81,16 @@ end
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return table
 function Source:deleteBookAsync(identity, cb)
+    if self._client:isWebdav() then
+        return self._client:deleteWebdavAsync(identity.stable_id, function(ok, err)
+            if ok then
+                require("db.book").remove(self.id, identity.stable_id)
+                cb(true)
+            else
+                cb(false, err or _("删除 WebDAV 书籍失败"))
+            end
+        end)
+    end
     local cancelled = false
     require("ui/uimanager"):nextTick(function()
         if cancelled then return end
@@ -104,6 +114,13 @@ end
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:openBookAsync(identity, _opts, cb)
+    if self._client:isWebdav() then
+        return self._client:openWebdavAsync(identity.stable_id, function(path, err)
+            if not path then cb(nil, err); return end
+            local ok, store_err = require("book.store").touch(path, identity)
+            if ok then cb(path) else cb(nil, store_err) end
+        end)
+    end
     local cancelled = false
     require("ui/uimanager"):nextTick(function()
         if cancelled then return end
@@ -168,12 +185,43 @@ function Source:syncBooksAsync(opts, cb)
     end)
 end
 
+--- 关书时推送 WebDAV 阅读进度；远端拉取在下次书库同步时完成。
+function Source:syncProgressAsync(opts, cb)
+    if not self._client:isWebdav() then
+        cb({ skipped = true, reason = "local source" })
+        return { cancel = function() end }
+    end
+    return self._client:syncWebdavProgressAsync(opts and opts.identity, function(ok, err)
+        cb(ok and { pushed = 1 } or nil, err)
+    end)
+end
+
 --- 把书城下载文件移入本地书库根目录，并单本入库（不重扫）。
 ---@param temp_path string
 ---@param filename string
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return table|nil
 function Source:importBookAsync(temp_path, filename, cb)
+    if self._client:isWebdav() then
+        filename = tostring(filename or ""):gsub("[/\\]", "_")
+        if filename == "" then
+            cb(nil, _("无效文件名"))
+            return nil
+        end
+        local job
+        job = self._client.dav:ensurePathAsync(self._client:webdavPath(), function(ok_dir, dir_err)
+            if not ok_dir then cb(nil, dir_err); return end
+            job = self._client.dav:putFileAsync(
+                self._client:webdavPath() .. "/" .. filename,
+                temp_path,
+                function(ok, err)
+                    if not ok then cb(nil, err); return end
+                    cb(true)
+                end
+            )
+        end)
+        return job
+    end
     return self._client:importAsync(temp_path, filename, cb)
 end
 
