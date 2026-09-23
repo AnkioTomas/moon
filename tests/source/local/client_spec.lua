@@ -555,6 +555,20 @@ do
     Assert.len(covers_saved, 5)
 end
 
+-- ── 已有行缺少作者/简介时，扫描必须补齐元数据，不能被 title 命中永久冻结 ──
+do
+    reset()
+    db_rows[rowKey("local", "/books/a.epub")] = {
+        source_id = "local", stable_id = "/books/a.epub", title = "旧书名",
+    }
+    Client.new({ path = "/books" }):listAsync({ force = true }, function() end)
+    Stubs.flush()
+    local a = db_rows[rowKey("local", "/books/a.epub")]
+    Assert.eq(a.title, "T:/books/a.epub")
+    Assert.eq(a.authors, "A:/books/a.epub")
+    Assert.eq(a.intro, "D:/books/a.epub")
+end
+
 -- ── 改名识别：新路径按内容 md5 命中旧行时原地改 stable_id，不当新书插入 ──────
 do
     reset()

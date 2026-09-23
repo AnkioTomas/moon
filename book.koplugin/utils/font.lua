@@ -52,6 +52,7 @@ local UI_FACES = {
 
 local _defaults = nil
 local _weread_cache = nil
+local findInstalledFont
 
 ---@class MoonFontItem
 ---@field id string 写入 ui_font；空=恢复默认 fontmap
@@ -131,12 +132,19 @@ end
 function MoonFont.isInstalled(id_or_item)
     local id = id_or_item
     if type(id_or_item) == "table" then
-        if id_or_item.kind == "local" or id_or_item.kind == "system" then return true end
+        -- 列表中出现不等于文件仍然存在：字体目录可能在列表扫描后被移除。
+        -- 以前这里对 local/system 无条件返回 true，选择后才在 resolvePath
+        -- 失败，用户看到的是误导性的“应用字体失败”。
+        if id_or_item.kind == "local" or id_or_item.kind == "system" then
+            return type(id_or_item.path) == "string"
+                and lfs.attributes(id_or_item.path, "mode") == "file"
+        end
         id = id_or_item.id
     end
     if type(id) ~= "string" then return false end
     local path = wereadPath(id)
-    return path ~= nil and lfs.attributes(path, "mode") == "file"
+    if path and lfs.attributes(path, "mode") == "file" then return true end
+    return findInstalledFont(id) ~= nil
 end
 
 --- 递归扫描目录内字体；seen 按 basename 去重。
@@ -445,7 +453,7 @@ end
 --- 设置目录或 FontList 里按 basename 找字体。
 ---@param id string
 ---@return string|nil
-local function findInstalledFont(id)
+findInstalledFont = function(id)
     local path = findInDir(settingsFontsDir(), id)
     if path then return path end
     FontList:getFontList()
