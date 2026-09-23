@@ -11,27 +11,19 @@ package.preload["host"] = function()
 end
 
 local previous_settings = _G.G_reader_settings
-_G.G_reader_settings = { saveSetting = function() end }
+local saved
+_G.G_reader_settings = { saveSetting = function(_, key, value) saved = { key, value } end }
 
-local shown_sub, shown_parent
-local desktop = {
-    updateView = function() end,
-    settings = {
-        showSub = function(_, sub, parent)
-            shown_sub, shown_parent = sub, parent
-        end,
-    },
-}
-
+local desktop = { updateView = function() end }
 local Settings = require("ui.desktop.settings.desktop")
 local rows = Settings.new():rows(desktop, false)
-Assert.len(rows, 2)
-Assert.eq(rows[1](600).title, "首页顶栏")
-Assert.eq(rows[2](600).title, "启动打开桌面")
+Assert.len(rows, 1)
+Assert.eq(rows[1](600).title, "启动打开桌面")
+Assert.eq(rows[1](600).kind, "toggle")
 
 rows[1](600).callback()
-Assert.eq(shown_sub, "topbar")
-Assert.eq(shown_parent, "appearance")
+Assert.eq(saved[1], "start_with")
+Assert.eq(saved[2], "book")
 
 _G.G_reader_settings = previous_settings
 

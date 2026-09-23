@@ -1,8 +1,9 @@
---[[-- 设置主菜单只暴露六个按任务归类的入口。 --]]
+--[[-- 设置根页按功能分组，点击打开叠层。 --]]
 
 local Assert = require("support.assert")
 
 local built_rows = {}
+local opened
 
 package.preload["gettext"] = function() return function(text) return text end end
 package.preload["ffi/util"] = function()
@@ -19,10 +20,8 @@ end
 
 for _, name in ipairs({
     "ui/widget/container/framecontainer",
-    "ui/widget/container/leftcontainer",
     "ui/widget/verticalgroup",
     "ui/widget/verticalspan",
-    "ui/widget/textwidget",
 }) do
     package.preload[name] = function()
         return { new = function(_, opts) return opts or {} end }
@@ -62,6 +61,7 @@ end
 package.preload["utils.settings"] = function()
     return {
         activeSourceId = function() return "local" end,
+        get = function() return { reader_popup_buttons = {}, ai_model = "" } end,
     }
 end
 package.preload["utils.font"] = function()
@@ -71,14 +71,35 @@ package.preload["lockscreen.settings"] = function()
     return { isCompose = function() return false end }
 end
 package.preload["remote.init"] = function()
-    return { isRunning = function() return false end }
+    return { isRunning = function() return false end, status = function() return "关" end }
 end
 package.preload["source.registry"] = function()
-    return { list = function() return { { id = "local", name = "本地" } } end }
+    return {
+        list = function() return { { id = "local", name = "本地" } } end,
+        listEnabled = function() return { { id = "local", name = "本地" } } end,
+    }
 end
 package.preload["host"] = function() return { OPEN_ON_START_ID = "book" } end
 package.preload["ui/language"] = function()
     return { getLanguageName = function() return "简体中文" end }
+end
+package.preload["ui.desktop.settings.overlay"] = function()
+    return {
+        appendSection = function(_, _, _, row_builders)
+            for _, build in ipairs(row_builders or {}) do
+                build(600)
+            end
+        end,
+        open = function(_, spec)
+            opened = spec and spec.id
+        end,
+        close = function() end,
+        previewBox = function() return { dimen = { h = 20 } } end,
+        previewPlaceholder = function() return { dimen = { h = 20 } } end,
+    }
+end
+package.preload["ui.reader.bars.preview"] = function()
+    return { build = function() return { dimen = { h = 20 } } end }
 end
 
 local function pageMod(api)
@@ -87,7 +108,10 @@ end
 package.preload["ui.desktop.settings.source"] = function()
     return {
         new = function()
-            return { sections = function() return {} end }
+            return {
+                scopeSections = function() return {} end,
+                configSections = function() return {} end,
+            }
         end,
         displayName = function(name) return name end,
     }
@@ -96,16 +120,22 @@ package.preload["ui.desktop.settings.display"] = function()
     return pageMod({ rows = function() return {} end })
 end
 package.preload["ui.desktop.settings.lockscreen"] = function()
-    return pageMod({ rows = function() return {} end })
+    return pageMod({
+        rows = function() return {} end,
+        preview = function() return { dimen = { h = 20 } } end,
+    })
 end
 package.preload["ui.desktop.settings.desktop"] = function()
     return pageMod({ rows = function() return {} end })
 end
 package.preload["ui.desktop.settings.topbar"] = function()
-    return pageMod({ rows = function() return {} end })
+    return pageMod({
+        rows = function() return {} end,
+        preview = function() return { dimen = { h = 20 } } end,
+    })
 end
 package.preload["ui.desktop.settings.language"] = function()
-    return pageMod({ rows = function() return {} end })
+    return pageMod({ sections = function() return {} end })
 end
 package.preload["ui.desktop.settings.ai"] = function()
     return pageMod({ rows = function() return {} end })
@@ -113,6 +143,7 @@ end
 package.preload["ui.desktop.settings.reader"] = function()
     return pageMod({
         sections = function() return {} end,
+        lookupSections = function() return {} end,
         popupRows = function() return {} end,
     })
 end
@@ -130,6 +161,7 @@ package.preload["ui.panel.settings"] = function()
         readerEnabledCount = function() return 2 end,
         desktopRows = function() return {} end,
         readerRows = function() return {} end,
+        preview = function() return { dimen = { h = 20 } } end,
     }
 end
 package.preload["ui.desktop.settings.maintenance"] = function()
@@ -167,26 +199,33 @@ local desktop = {
 local settings = require("ui.desktop.settings"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 12)
+Assert.len(built_rows, 19)
 
 local expected = {
-    ["书库与账号"] = "sources",
-    ["阅读与工具"] = "reader",
-    ["界面与首页"] = "appearance",
-    ["锁屏"] = "lockscreen",
-    ["语言与输入"] = "language",
-    ["连接与服务"] = "services",
+    { title = "书籍来源", id = "sources" },
+    { title = "账号", id = "source_config" },
+    { title = "显示", id = "display" },
+    { title = "顶栏", id = "topbar" },
+    { title = "锁屏", id = "lockscreen" },
+    { title = "快捷", id = "quickpanel_desktop" },
+    { title = "顶栏", id = "reader_top" },
+    { title = "底栏", id = "reader_bottom" },
+    { title = "划词", id = "lookup" },
+    { title = "快捷", id = "quickpanel_reader" },
+    { title = "语言", id = "language" },
+    { title = "AI", id = "ai" },
+    { title = "远程", id = "remote" },
 }
-local categories = 0
+local nav = 1
 for _, row in ipairs(built_rows) do
-    local sub = expected[row.title]
-    if sub then
-        categories = categories + 1
+    local item = expected[nav]
+    if item and row.title == item.title and row.kind == "nav" then
         row.callback()
-        Assert.eq(settings.sub, sub)
+        Assert.eq(opened, item.id)
+        nav = nav + 1
     end
 end
-Assert.eq(categories, 6)
+Assert.eq(nav, #expected + 1)
 
 for _, title in ipairs({
     "清理缓存", "调试日志", "自动检查更新", "检查更新", "关于", "关闭桌面",
@@ -198,22 +237,20 @@ for _, title in ipairs({
     Assert.is_true(found)
 end
 
-local function assertSubpageLink(page, title, target)
-    built_rows = {}
-    settings.sub = page
-    settings:updateView()
-    for _, row in ipairs(built_rows) do
-        if row.title == title then
-            row.callback()
-            Assert.eq(settings.sub, target)
-            return
-        end
-    end
-    Assert.is_true(false, "缺少设置入口: " .. title)
-end
+local spec = settings:spec("reader_top")
+Assert.eq(spec.title, "顶栏")
+Assert.not_nil(spec.preview)
+Assert.not_nil(spec.sections)
+Assert.eq(#spec.sections(), 0)
 
-assertSubpageLink("reader", "阅读快捷面板", "quickpanel_reader")
-assertSubpageLink("appearance", "桌面快捷面板", "quickpanel_desktop")
+local lookup = settings:spec("lookup")
+Assert.eq(lookup.title, "划词")
+Assert.is_nil(lookup.preview)
+Assert.eq(#lookup.sections(), 1)
+
+local display = settings:spec("display")
+Assert.eq(display.title, "显示")
+Assert.is_nil(display.preview)
 
 _G.G_reader_settings = previous_settings
 

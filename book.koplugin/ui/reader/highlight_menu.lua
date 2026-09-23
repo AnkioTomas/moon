@@ -165,6 +165,13 @@ local function patchShowMenu()
         self.highlight_dialog = ButtonDialog:new{
             buttons = buttons,
             anchor = function()
+                local Selection = require("ui.reader.selection")
+                if not index and Selection.enabled() then
+                    local placed, pop_down = Selection.menuAnchorFor(self, self.highlight_dialog)
+                    if placed then
+                        return placed, pop_down
+                    end
+                end
                 return self:_getDialogAnchor(self.highlight_dialog, index)
             end,
             tap_close_callback = function()
@@ -174,6 +181,7 @@ local function patchShowMenu()
             end,
         }
         UIManager:show(self.highlight_dialog, "[ui]")
+        require("ui.reader.selection").attach(self, index)
         return true
     end
 end

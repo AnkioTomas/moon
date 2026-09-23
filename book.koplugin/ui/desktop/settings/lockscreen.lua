@@ -236,4 +236,36 @@ function Lockscreen:rows(desktop)
     return rows
 end
 
+--- 已合成图缩略居中；关 / 未生成走同一高度空框。
+---@param width number
+---@return table
+function Lockscreen.preview(width)
+    local Overlay = require("ui.desktop.settings.overlay")
+    local UI = require("ui.components.bookui")
+    local preview_h = UI.sz(144)
+    if not Settings.isCompose() then
+        return Overlay.previewPlaceholder(width, preview_h, _("关"))
+    end
+    local lfs = require("libs/libkoreader-lfs")
+    local path = Compose.plan().output_path
+    local attr = type(path) == "string" and path ~= "" and lfs.attributes(path)
+    if not attr or attr.mode ~= "file" or (attr.size or 0) < 8 then
+        return Overlay.previewPlaceholder(width, preview_h, _("未生成"))
+    end
+    local Geom = require("ui/geometry")
+    local CenterContainer = require("ui/widget/container/centercontainer")
+    local ImageWidget = require("ui/widget/imagewidget")
+    local inner_w = math.max(1, width - 2)
+    local inner_h = math.max(1, preview_h - 2)
+    return Overlay.previewBox(width, CenterContainer:new{
+        dimen = Geom:new{ w = inner_w, h = inner_h },
+        ImageWidget:new{
+            file = path,
+            width = inner_w,
+            height = inner_h,
+            scale_factor = 0,
+        },
+    }, preview_h)
+end
+
 return Lockscreen

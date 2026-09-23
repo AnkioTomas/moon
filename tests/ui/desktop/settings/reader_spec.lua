@@ -1,4 +1,4 @@
---[[-- 阅读设置摘要与划词菜单详情分离。 --]]
+--[[-- 阅读设置：行为一组，划词能力一组。 --]]
 
 local Assert = require("support.assert")
 
@@ -19,12 +19,6 @@ end
 package.preload["ui.components.settingrow"] = function()
     return { build = function(_, opts) return opts end }
 end
-package.preload["ui.reader.bars"] = function()
-    return {
-        topBarPreference = function() return true end,
-        bottomBarPreference = function() return true end,
-    }
-end
 package.preload["patch.page_turn_animation"] = function()
     return { isEnabled = function() return false end }
 end
@@ -41,25 +35,25 @@ local Settings = require("ui.desktop.settings.reader")
 local desktop = {}
 
 local sections = Settings.new():sections(desktop)
-local reading, optimize
-for _, section in ipairs(sections) do
-    Assert.is_true(section.title ~= "阅读弹窗")
-    if section.title == "阅读界面" then reading = section end
-    if section.title == "阅读优化" then optimize = section end
-end
-Assert.is_true(reading ~= nil)
-Assert.eq(#reading.rows, 2)
-Assert.eq(reading.rows[1](600).title, "阅读页顶栏")
-Assert.eq(reading.rows[1](600).kind, "nav")
-Assert.eq(reading.rows[2](600).title, "底部进度栏")
-Assert.eq(reading.rows[2](600).kind, "nav")
+Assert.eq(#sections, 1)
+Assert.eq(sections[1].title, "行为")
+Assert.eq(sections[1].rows[1](600).title, "脚注弹窗")
+Assert.is_false(sections[1].rows[1](600).status_on)
+Assert.eq(sections[1].rows[2](600).title, "翻页动画")
+Assert.eq(sections[1].rows[3](600).title, "读到 99% 自动标记已读")
 
-Assert.is_true(optimize ~= nil)
-Assert.eq(optimize.rows[1](600).title, "脚注弹窗")
-Assert.is_false(optimize.rows[1](600).status_on)
-Assert.eq(optimize.rows[2](600).title, "翻页动画")
-Assert.eq(optimize.rows[3](600).title, "读到 99% 自动标记已读")
-Assert.is_false(optimize.rows[3](600).status_on)
+local lookup = Settings.new():lookupSections(desktop)
+local titles = {}
+for _, section in ipairs(lookup) do
+    titles[#titles + 1] = section.title
+end
+Assert.eq(titles[1], "选区")
+Assert.eq(titles[2], "词典")
+Assert.eq(titles[3], "翻译")
+Assert.eq(titles[4], "百科")
+Assert.eq(titles[5], "X-Ray")
+Assert.eq(lookup[1].rows[1](600).title, "划词手柄")
+Assert.is_true(lookup[1].rows[1](600).status_on)
 
 local popup_rows = Settings.new():popupRows(desktop)
 Assert.len(popup_rows, 11)

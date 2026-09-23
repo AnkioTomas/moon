@@ -1,4 +1,4 @@
---[[-- 阅读设置：X-Ray、顶底栏、阅读优化、划词弹窗项显隐。
+--[[-- 阅读设置：阅读行为、划词能力、划词菜单项。
 @module koplugin.book.ui.desktop.settings.reader
 --]]
 
@@ -7,7 +7,6 @@ local ButtonDialog = require("ui/widget/buttondialog")
 local UIManager = require("ui/uimanager")
 local MoonSettings = require("utils.settings")
 local SettingRow = require("ui.components.settingrow")
-local Bars = require("ui.reader.bars")
 local PageTurnAnimation = require("patch.page_turn_animation")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -142,12 +141,65 @@ end
 ---@return BookQuickPanelSettingSection[]
 function ReaderSettings:sections(desktop)
     local reader = MoonSettings.get("reader")
-    local xray_on = reader.book_xray_enabled ~= false
-    local marks_on = reader.book_xray_show_marks ~= false
-    local top_on = Bars.topBarPreference()
-    local bottom_on = Bars.bottomBarPreference()
     local auto_mark_read = reader.auto_mark_read_at_99 == true
     local animation_on = PageTurnAnimation.isEnabled()
+    return {
+        {
+            title = _("行为"),
+            rows = {
+                function(iw)
+                    local footnote_on = G_reader_settings:isTrue("footnote_link_in_popup")
+                    return SettingRow.build(iw, {
+                        kind = "toggle", icon = "article", title = _("脚注弹窗"),
+                        subtitle = _("脚注链接在弹窗中显示，而不是跳转"),
+                        status = footnote_on and _("开") or _("关"), status_on = footnote_on,
+                        callback = function()
+                            G_reader_settings:saveSetting("footnote_link_in_popup", not footnote_on)
+                            desktop:updateView()
+                        end,
+                    })
+                end,
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "toggle", icon = "animation", title = _("翻页动画"),
+                        status = animation_on and _("开") or _("关"), status_on = animation_on,
+                        callback = function()
+                            local res = PageTurnAnimation.setEnabled(not animation_on)
+                            if not res.ok then
+                                UIManager:show(InfoMessage:new{
+                                    text = T(_("翻页动画补丁操作失败：%1"), tostring(res.err or "")),
+                                    timeout = 3,
+                                })
+                                return
+                            end
+                            desktop:updateView()
+                            PageTurnAnimation.promptRestart()
+                        end,
+                    })
+                end,
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "toggle", icon = "done_all", title = _("读到 99% 自动标记已读"),
+                        status = auto_mark_read and _("开") or _("关"), status_on = auto_mark_read,
+                        callback = function()
+                            reader.auto_mark_read_at_99 = not auto_mark_read
+                            MoonSettings.saveSection("reader", reader)
+                            desktop:updateView()
+                        end,
+                    })
+                end,
+            },
+        },
+    }
+end
+
+--- 划词能力：词典 / 翻译 / 百科 / X-Ray。
+---@param desktop table
+---@return BookQuickPanelSettingSection[]
+function ReaderSettings:lookupSections(desktop)
+    local reader = MoonSettings.get("reader")
+    local xray_on = reader.book_xray_enabled ~= false
+    local marks_on = reader.book_xray_show_marks ~= false
     local edge_translation_on = reader.edge_translation_enabled ~= false
     local baike_on = reader.baike_enabled ~= false
     local dictionary_on = reader.dictionary_enabled ~= false
@@ -212,7 +264,56 @@ function ReaderSettings:sections(desktop)
         end
     end
 
+    local handles_on = reader.selection_handles_enabled ~= false
+
     return {
+        {
+            title = _("选区"),
+            rows = {
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "toggle", icon = "swipe", title = _("划词手柄"),
+                        subtitle = _("选区两端可拖指示器"),
+                        status = handles_on and _("开") or _("关"), status_on = handles_on,
+                        callback = function()
+                            reader.selection_handles_enabled = not handles_on
+                            MoonSettings.saveSection("reader", reader)
+                            if handles_on then
+                                local ui = readerUi()
+                                if ui and ui.highlight then
+                                    require("ui.reader.selection").detach(ui.highlight)
+                                end
+                            end
+                            desktop:updateView()
+                        end,
+                    })
+                end,
+            },
+        },
+        {
+            title = _("词典"),
+            rows = dictionary_rows,
+        },
+        {
+            title = _("翻译"),
+            rows = translation_rows,
+        },
+        {
+            title = _("百科"),
+            rows = {
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "toggle", icon = "language", title = _("百度百科"),
+                        status = baike_on and _("开") or _("关"), status_on = baike_on,
+                        callback = function()
+                            reader.baike_enabled = not baike_on
+                            MoonSettings.saveSection("reader", reader)
+                            desktop:updateView()
+                        end,
+                    })
+                end,
+            },
+        },
         {
             title = _("X-Ray"),
             rows = {
@@ -239,103 +340,6 @@ function ReaderSettings:sections(desktop)
                             MoonSettings.saveSection("reader", reader)
                             require("xray.marks").invalidate()
                             refreshReaderUi()
-                            desktop:updateView()
-                        end,
-                    })
-                end,
-            },
-        },
-        {
-            title = _("阅读界面"),
-            rows = {
-                function(iw)
-                    return SettingRow.build(iw, {
-                        kind = "toggle", icon = "vertical_align_top", title = _("阅读页顶栏"),
-                        status = top_on and _("开") or _("关"), status_on = top_on,
-                        callback = function()
-                            Bars.setTopBarPreference(not top_on, readerUi())
-                            refreshReaderUi()
-                            desktop:updateView()
-                        end,
-                    })
-                end,
-                function(iw)
-                    return SettingRow.build(iw, {
-                        kind = "toggle", icon = "horizontal_rule", title = _("底部进度栏"),
-                        status = bottom_on and _("开") or _("关"), status_on = bottom_on,
-                        callback = function()
-                            Bars.setBottomBarPreference(not bottom_on, readerUi())
-                            refreshReaderUi()
-                            desktop:updateView()
-                        end,
-                    })
-                end,
-            },
-        },
-        {
-            title = _("阅读优化"),
-            rows = {
-                function(iw)
-                    local footnote_on = G_reader_settings:isTrue("footnote_link_in_popup")
-                    return SettingRow.build(iw, {
-                        kind = "toggle", icon = "article", title = _("脚注弹窗"),
-                        subtitle = _("脚注链接在弹窗中显示，而不是跳转"),
-                        status = footnote_on and _("开") or _("关"), status_on = footnote_on,
-                        callback = function()
-                            G_reader_settings:saveSetting("footnote_link_in_popup", not footnote_on)
-                            desktop:updateView()
-                        end,
-                    })
-                end,
-                function(iw)
-                    return SettingRow.build(iw, {
-                        kind = "toggle", icon = "animation", title = _("翻页动画"),
-                        status = animation_on and _("开") or _("关"), status_on = animation_on,
-                        callback = function()
-                            local res = PageTurnAnimation.setEnabled(not animation_on)
-                            if not res.ok then
-                                UIManager:show(InfoMessage:new{
-                                    text = T(_("翻页动画补丁操作失败：%1"), tostring(res.err or "")),
-                                    timeout = 3,
-                                })
-                                return
-                            end
-                            desktop:updateView()
-                            PageTurnAnimation.promptRestart()
-                        end,
-                    })
-                end,
-                function(iw)
-                    return SettingRow.build(iw, {
-                        kind = "toggle", icon = "done_all", title = _("读到 99% 自动标记已读"),
-                        status = auto_mark_read and _("开") or _("关"), status_on = auto_mark_read,
-                        callback = function()
-                            reader.auto_mark_read_at_99 = not auto_mark_read
-                            MoonSettings.saveSection("reader", reader)
-                            desktop:updateView()
-                        end,
-                    })
-                end,
-            },
-        },
-        {
-            title = _("词典"),
-            rows = dictionary_rows,
-        },
-        {
-            title = _("翻译"),
-            rows = translation_rows,
-        },
-        {
-            title = _("百科"),
-            rows = {
-                function(iw)
-                    return SettingRow.build(iw, {
-                        kind = "toggle", icon = "language", title = _("百度百科"),
-                        status = baike_on and _("开") or _("关"), status_on = baike_on,
-                        callback = function()
-                            reader.baike_enabled = not baike_on
-                            MoonSettings.saveSection("reader", reader)
                             desktop:updateView()
                         end,
                     })

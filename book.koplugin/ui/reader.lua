@@ -50,6 +50,7 @@ function Reader.onCreate(plugin)
     end
     require("xray.marks").install(ui)
     require("ui.reader.highlight_menu").install(ui)
+    require("ui.reader.selection").install(ui)
 end
 
 ---@param plugin table
