@@ -101,13 +101,6 @@ function Progress.fraction(snapshot)
     return Position.fraction(snapshot, toc)
 end
 
---- 当前章节标题（顶栏 / 进度上报共用）。
----@param snapshot ReaderSessionSnapshot|nil
----@return string
-function Progress.chapterTitle(snapshot)
-    return require("ui.reader.session").chapterTitle(snapshot) or ""
-end
-
 --- 当前 ProgressPosition；位置完全来自 ReaderSession 快照。
 ---@param snapshot ReaderSessionSnapshot
 ---@return ProgressPosition

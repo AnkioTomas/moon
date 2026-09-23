@@ -81,16 +81,18 @@ function Sync.runAsync(source, opts, cb)
             current_job = nil
             if cancelled then return end
             if not result then finish(nil, err); return end
+            local pulled = tonumber(result.pulled) or 0
+            local pushed = tonumber(result.pushed) or 0
+            local hidden = tonumber(result.hidden) or 0
+            local conflicts = tonumber(result.conflicts) or 0
             logger.dbg("book.sync domain done", sync_id, domain.name,
-                "pulled", tonumber(result.pulled) or 0,
-                "pushed", tonumber(result.pushed) or 0,
-                "hidden", tonumber(result.hidden) or 0,
-                "conflicts", tonumber(result.conflicts) or 0)
+                "pulled", pulled, "pushed", pushed,
+                "hidden", hidden, "conflicts", conflicts)
             summary.domains[domain.name] = result
-            summary.pulled = summary.pulled + (tonumber(result.pulled) or 0)
-            summary.pushed = summary.pushed + (tonumber(result.pushed) or 0)
-            summary.hidden = summary.hidden + (tonumber(result.hidden) or 0)
-            summary.conflicts = summary.conflicts + (tonumber(result.conflicts) or 0)
+            summary.pulled = summary.pulled + pulled
+            summary.pushed = summary.pushed + pushed
+            summary.hidden = summary.hidden + hidden
+            summary.conflicts = summary.conflicts + conflicts
             nextDomain()
         end)
         if not completed then current_job = job end

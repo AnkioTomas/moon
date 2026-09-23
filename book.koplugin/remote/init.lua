@@ -397,20 +397,27 @@ local function copyFile(src, dst)
         input:close()
         return nil, err
     end
+    local failure
     while true do
-        local chunk = input:read(64 * 1024)
+        local chunk, read_err = input:read(64 * 1024)
         if not chunk then
+            failure = read_err
             break
         end
-        if not output:write(chunk) then
-            input:close()
-            output:close()
-            pcall(os.remove, dst)
-            return nil, "write failed"
+        local written, write_err = output:write(chunk)
+        if not written then
+            failure = write_err or "write failed"
+            break
         end
     end
-    input:close()
-    output:close()
+    local input_ok, input_err = input:close()
+    local output_ok, output_err = output:close()
+    failure = failure or (not input_ok and (input_err or "read close failed"))
+        or (not output_ok and (output_err or "write close failed"))
+    if failure then
+        os.remove(dst)
+        return nil, failure
+    end
     return true
 end
 
@@ -466,7 +473,11 @@ local function saveUpload(temp, dir, name, cb, conflict)
         end
         pcall(os.remove, staging)
         pcall(os.remove, temp)
-        cb(copy_ok, copy_err or err)
+        if copy_ok then
+            cb(true)
+        else
+            cb(nil, copy_err or err)
+        end
     end, function()
         pcall(os.remove, temp)
         pcall(os.remove, staging)

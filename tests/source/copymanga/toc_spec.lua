@@ -7,13 +7,18 @@
 local Assert = require("support.assert")
 
 local store = {}
+local now = 1000
+local original_time = os.time
+os.time = function() return now end
 package.preload["db.book"] = function()
     return {
-        getToc = function(source_id, stable_id)
-            return store[source_id .. "\31" .. stable_id]
+        getToc = function(source_id, stable_id, max_age)
+            local row = store[source_id .. "\31" .. stable_id]
+            if not row or now - row.at >= max_age then return nil end
+            return row.payload, row.at
         end,
         setToc = function(source_id, stable_id, payload)
-            store[source_id .. "\31" .. stable_id] = payload
+            store[source_id .. "\31" .. stable_id] = { payload = payload, at = now }
             return true
         end,
     }
@@ -54,3 +59,7 @@ do
     Toc.clear()
     Assert.eq(Toc.index("copymanga", "comic-a", "u1"), 1)
 end
+
+now = now + 6 * 60 * 60
+Assert.is_nil(Toc.read("copymanga", "comic-a"))
+os.time = original_time

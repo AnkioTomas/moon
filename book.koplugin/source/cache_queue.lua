@@ -150,11 +150,6 @@ end
 ---@return table|nil job
 ---@return boolean queued 是否新入队
 function Queue.enqueue(source, identity)
-    if not source or type(source.cacheAllChaptersAsync) ~= "function"
-        or type(identity) ~= "table" or type(identity.stable_id) ~= "string"
-        or identity.stable_id == "" then
-        return nil, false
-    end
     local key = keyFor(source, identity)
     if by_key[key] then return by_key[key], false end
     if #pending >= MAX_PENDING then return nil, false end
