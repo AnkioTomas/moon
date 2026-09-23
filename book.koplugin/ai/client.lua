@@ -88,20 +88,6 @@ local function credentials()
     return endpoint, api_key, model
 end
 
---- 关闭推理/thinking 扩展字段（多网关字段名不一致，按需全部写入）。
----@param payload table
----@param opts table|nil
-local function applyThinkingPolicy(payload, opts)
-    if opts and opts.thinking == true then
-        return
-    end
-    -- OpenRouter / 多数兼容网关
-    payload.reasoning = { enabled = false }
-    -- Qwen 官方 / vLLM 直连
-    payload.enable_thinking = false
-    payload.chat_template_kwargs = { enable_thinking = false }
-end
-
 ---@param model string|nil
 ---@param messages table[]
 ---@param opts table|nil
@@ -118,7 +104,6 @@ local function encodeBody(model, messages, opts, stream)
     if stream then
         payload.stream = true
     end
-    applyThinkingPolicy(payload, opts)
     local ok, body = pcall(JSON.encode, payload)
     if not ok then
         return nil, body
