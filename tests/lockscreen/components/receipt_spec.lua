@@ -61,12 +61,37 @@ package.preload["lockscreen.components.util"] = function()
     }
 end
 
+package.preload["lockscreen.render"] = function()
+    return {
+        measureText = function(text, width, size)
+            return math.ceil(#text * size / 2 / width) * size
+        end,
+    }
+end
+
 package.loaded["lockscreen.components.receipt"] = nil
 local Receipt = require("lockscreen.components.receipt")
 
 Assert.eq(Receipt.id, "receipt")
 Assert.is_false(Receipt.supports_narrow)
 Assert.is_false(Receipt.supports_position)
+
+current_book.title = string.rep("很长的书名", 20)
+local long_blocks = Receipt.blocks({
+    x = 20, y = 30, w = 500, h = 700,
+    text_x = 40, text_w = 460, pad = 20, radius = 10,
+})
+local found_long_title = false
+for _, block in ipairs(long_blocks) do
+    if block.text and block.y == 30 + math.floor(700 * 0.235)
+            and block.size and block.size <= 30 and block.bold then
+        Assert.matches(block.text, "…$")
+        found_long_title = true
+        break
+    end
+end
+Assert.is_true(found_long_title)
+current_book.title = "测试书"
 
 local cache_key = Receipt.cache_key()
 current_book.page = 51

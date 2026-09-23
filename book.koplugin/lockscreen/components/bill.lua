@@ -196,6 +196,7 @@ function M.blocks(rect)
     local brand_x = inner_x + logo_size + math.floor(pad * 0.6)
     local brand_w = inner_w - (brand_x - inner_x)
     local Render = require("lockscreen.render")
+    local Title = require("lockscreen.title")
     local name_h = Render.measureText("MOON READING", brand_w, 24, true)
     local subtitle_h = Render.measureText(_("阅读账单"), brand_w, 15)
     local line_gap = math.max(6, math.floor(pad * 0.25))
@@ -271,10 +272,17 @@ function M.blocks(rect)
     else
         for i, book in ipairs(books) do
             if i > 5 then break end
+            local title, title_size = Title.fitSingleLine(
+                string.format("%02d  %s", i, book.title or book.stable_id or ""),
+                math.floor(inner_w * 0.58), 14, 10,
+                function(text, width, size)
+                    return Render.measureText(text, width, size, true)
+                end
+            )
             blocks[#blocks + 1] = {
-                text = string.format("%02d  %s", i, book.title or book.stable_id or ""),
+                text = title,
                 x = inner_x, y = row_y, width = math.floor(inner_w * 0.58),
-                size = 14, bold = true, box = false,
+                size = title_size, bold = true, box = false,
             }
             blocks[#blocks + 1] = {
                 text = book.authors or "", x = inner_x, y = row_y + math.floor(row_h * 0.42),
