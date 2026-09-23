@@ -104,7 +104,11 @@ local ui
 ui = {
     font = {
         font_face = "Old",
-        onSetFont = function(self, face) self.font_face = face end,
+        onSetFont = function(self, face)
+            self.font_face = face
+            ui.document:setFontFace(face)
+            ui:handleEvent({ name = "UpdatePos" })
+        end,
         onSaveSettings = function(self)
             self.saved_face = self.font_face
         end,

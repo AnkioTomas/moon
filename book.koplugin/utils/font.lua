@@ -577,6 +577,14 @@ local function setReaderFontFace(ui, face)
     if type(face) ~= "string" or face == "" then
         return false
     end
+    if type(ui.font.onSetFont) == "function" then
+        ui.font:onSetFont(face)
+        if ui.font.font_face ~= face then
+            return false
+        end
+        ui.font:onSaveSettings()
+        return true
+    end
     ui.font.font_face = face
     ui.document:setFontFace(face)
     ui.font:onSaveSettings()
