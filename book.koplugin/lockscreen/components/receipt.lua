@@ -150,6 +150,8 @@ function M.blocks(rect)
         return U.emptyBlocks(rect, _("阅读票根"), _("当前没有正在阅读的书籍"))
     end
     ensureUI()
+    local Render = require("lockscreen.render")
+    local Title = require("lockscreen.title")
 
     local today = todayStats(book)
     local x, width = rect.text_x, rect.text_w
@@ -161,6 +163,12 @@ function M.blocks(rect)
     local cover_x = x + width - cover_w
     local cover_y = y + math.floor(height * 0.195)
     local info_w = math.max(1, cover_x - x - pad)
+    local title, title_size = Title.fitSingleLine(
+        book.title or book.stable_id or "", info_w, 30, 18,
+        function(text, width, size)
+            return Render.measureText(text, width, size, true)
+        end
+    )
     local cover = select(1, BookInfo.cover(nil, nil, book, cover_w, cover_h, {
         shadow = false,
     }))
@@ -203,9 +211,9 @@ function M.blocks(rect)
             width = info_w, size = 14, bold = true, box = false,
         },
         {
-            text = book.title or book.stable_id or "",
+            text = title,
             x = x, y = y + math.floor(height * 0.235),
-            width = info_w, size = 30, bold = true, box = false,
+            width = info_w, size = title_size, bold = true, box = false,
         },
         {
             text = book.authors or "", x = x, y = y + math.floor(height * 0.325),
