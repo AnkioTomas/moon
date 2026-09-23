@@ -51,7 +51,7 @@ local DEFAULTS = {
         quick_panel_actions = {
             "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "suspend",
         },
-        quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "xray" },
+        quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "bookorbit", "xray" },
     },
     reader = {
         book_xray_enabled = true,
