@@ -100,18 +100,29 @@ Assert.eq(saved.library_mixed, false)
 Assert.eq(set_active, "moon")
 Assert.is_false(mixed)
 
-local sections = src:sections{
+local scope = src:scopeSections{
     desktop = desktop,
     plugin = nil,
     active_id = "wechat",
     active_name = "微信读书",
 }
-Assert.eq(sections[1].rows[1]().status, "微信读书")
-Assert.eq(sections[1].rows[1]().title, "当前数据源")
-for i = 2, #sections do
-    local first = sections[i].rows[1]
+Assert.eq(#scope, 1)
+Assert.eq(scope[1].title, "书籍来源")
+Assert.eq(scope[1].rows[1]().status, "微信读书")
+Assert.eq(scope[1].rows[1]().title, "当前数据源")
+Assert.eq(scope[1].rows[2]().title, "已启用的数据源")
+
+local config = src:configSections{
+    desktop = desktop,
+    plugin = nil,
+}
+Assert.is_true(#config >= 2)
+Assert.eq(config[1].title, "Moon")
+Assert.eq(config[#config].title, "Z-Library")
+for i = 1, #config do
+    local first = config[i].rows[1]
     if first then
-        Assert.is_true(first().title ~= "混合模式", sections[i].title)
+        Assert.is_true(first().title ~= "混合模式", config[i].title)
     end
 end
 

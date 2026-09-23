@@ -1,5 +1,5 @@
 --[[--
-设置页编排：主菜单、分类路由与分页。
+设置页编排：根页功能目录，子页走详情叠层。
 
 各设置项位于 ui/desktop/settings/，本文件不拥有分类业务逻辑。
 
@@ -9,10 +9,7 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
-local LeftContainer = require("ui/widget/container/leftcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
-local VerticalSpan = require("ui/widget/verticalspan")
-local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
 local Pager = require("ui.components.pager")
 local SettingRow = require("ui.components.settingrow")
@@ -23,6 +20,7 @@ local Remote = require("remote.init")
 local RemoteUI = require("remote.ui")
 local SourceRegistry = require("source.registry")
 local Host = require("host")
+local Overlay = require("ui.desktop.settings.overlay")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -36,13 +34,12 @@ local QuickPanel = require("ui.panel.settings")
 local Maintenance = require("ui.desktop.settings.maintenance")
 local AISettings = require("ui.desktop.settings.ai")
 local ReaderSettings = require("ui.desktop.settings.reader")
+local ReaderBarSettings = require("ui.desktop.settings.reader_bar")
 
 local View = require("ui.view")
 ---@class BookSettings : View
 ---@field desktop BookDesktop
 ---@field page number
----@field sub string|nil
----@field parent string|nil
 ---@field source BookSettingsSource
 ---@field display BookSettingsDisplay
 ---@field lockscreen BookSettingsLockscreen
@@ -52,6 +49,7 @@ local View = require("ui.view")
 ---@field maintenance BookSettingsMaintenance
 ---@field ai BookSettingsAI
 ---@field reader BookSettingsReader
+---@field reader_bar BookSettingsReaderBar
 local Settings = {}
 Settings.__index = Settings
 setmetatable(Settings, View)
@@ -64,8 +62,6 @@ function Settings:new(opts)
     view.host = not view.offscreen and view.desktop or nil
     local defaults = {
         page = 1,
-        sub = nil,
-        parent = nil,
         source = Source.new(),
         display = Display.new(),
         lockscreen = Lockscreen.new(),
@@ -75,6 +71,7 @@ function Settings:new(opts)
         maintenance = Maintenance.new(),
         ai = AISettings.new(),
         reader = ReaderSettings.new(),
+        reader_bar = ReaderBarSettings.new(),
     }
     for key, value in pairs(defaults) do
         if view[key] == nil then view[key] = value end
@@ -82,8 +79,8 @@ function Settings:new(opts)
     return view
 end
 
---- 由 Tab 切换恢复时重置设置导航；系统唤醒时保留当前位置。
----@param changed boolean|nil TAB 点击时传 boolean；桌面唤醒时不重置设置位置
+--- 由 Tab 切换恢复时关掉叠层；系统唤醒时保留。
+---@param changed boolean|nil TAB 点击时传 boolean；桌面唤醒时不重置
 ---@return nil
 function Settings:onResume(changed)
     if changed == nil then return end
@@ -91,15 +88,14 @@ function Settings:onResume(changed)
     self.desktop._cache_size_label = nil
 end
 
---- 回到设置根页并清除子页及父页导航记录。
+--- 回到设置根页并关闭功能叠层。
 ---@return nil
 function Settings:reset()
     self.page = 1
-    self.sub = nil
-    self.parent = nil
+    Overlay.close(self.desktop)
 end
 
---- 换源后清除旧设置导航，避免停留在不适用的源子页。
+--- 换源后关掉叠层，避免停在过期的来源页。
 ---@param event string 父组件转发的事件名称或事件对象
 ---@return nil
 function Settings:onEvent(event)
@@ -108,46 +104,181 @@ function Settings:onEvent(event)
     end
 end
 
---- 进入指定设置子页并刷新桌面内容区域。
----@param sub string 要进入的设置子页标识
----@param parent string|nil 返回导航对应的父设置页标识
----@return nil
-function Settings:showSub(sub, parent)
-    self.sub = sub
-    self.parent = parent
-    self.page = 1
-    self.desktop:updateView()
-end
-
---- 设置行之间的留白，替代把每行切开的硬分割线。
----@return table widget 设置行之间的间隔控件
-local function rowGap()
-    return VerticalSpan:new{ width = UI.sz(6) }
-end
-
---- 分组标题和行构建器展平进分页数据。
----@param out table 追加构建结果的控件数组
----@param width number 目标宽度，单位像素
----@param title string 显示标题
----@param row_builders table 返回设置行的构建函数数组
----@return nil
-local function appendSection(out, width, title, row_builders)
-    if #out > 0 then table.insert(out, VerticalSpan:new{ width = UI.sectionGap() }) end
-    table.insert(out, LeftContainer:new{
-        dimen = Geom:new{ w = width, h = UI.sz(28) },
-        TextWidget:new{ text = title, face = UI.face("cfont", 13), max_width = width, fgcolor = UI.muted() },
-    })
-    for i, build in ipairs(row_builders) do
-        if i > 1 then table.insert(out, rowGap()) end
-        table.insert(out, build(width))
+---@param settings BookSettings
+---@return string, string
+local function activeSource()
+    local active_id = MoonSettings.activeSourceId()
+    local active_name = active_id
+    for _idx, meta in ipairs(SourceRegistry.list()) do
+        if meta.id == active_id then active_name = meta.name or meta.id break end
     end
+    return active_id, Source.displayName(active_name)
 end
 
---- 造主设置页的分类导航行。
----@param desktop BookDesktop 所属桌面实例
----@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
+--- 功能叠层规格。preview 只给有可视化的页；sections 每次重建都重算。
+---@param self BookSettings
+---@param id string
+---@return BookSettingsOverlaySpec|nil
+function Settings:spec(id)
+    local desktop = self.desktop
+    local plugin = desktop.plugin
+    if id == "sources" then
+        local active_id, active_name = activeSource()
+        return {
+            id = id,
+            title = _("书籍来源"),
+            sections = function()
+                return self.source:scopeSections{
+                    desktop = desktop, plugin = plugin, active_id = active_id, active_name = active_name,
+                }
+            end,
+        }
+    end
+    if id == "source_config" then
+        return {
+            id = id,
+            title = _("账号"),
+            sections = function()
+                return self.source:configSections{ desktop = desktop, plugin = plugin }
+            end,
+        }
+    end
+    if id == "reader_top" or id == "reader_bottom" then
+        local which = id == "reader_top" and "top" or "bottom"
+        return {
+            id = id,
+            title = which == "top" and _("顶栏") or _("底栏"),
+            preview = function(width)
+                return self.reader_bar:page(desktop, which).preview(width)
+            end,
+            sections = function()
+                local out = {}
+                for _i, section in ipairs(self.reader_bar:page(desktop, which).sections) do
+                    out[#out + 1] = section
+                end
+                if which == "bottom" then
+                    for _j, section in ipairs(self.reader:sections(desktop)) do
+                        out[#out + 1] = section
+                    end
+                end
+                return out
+            end,
+        }
+    end
+    if id == "lookup" then
+        return {
+            id = id,
+            title = _("划词"),
+            sections = function()
+                local sections = self.reader:lookupSections(desktop)
+                sections[#sections + 1] = { title = _("菜单"), rows = self.reader:popupRows(desktop) }
+                return sections
+            end,
+        }
+    end
+    if id == "quickpanel_desktop" or id == "quickpanel_reader" then
+        local scope = id == "quickpanel_reader" and "reader" or "desktop"
+        return {
+            id = id,
+            title = _("快捷"),
+            preview = function(width)
+                return QuickPanel.preview(scope, width)
+            end,
+            sections = function()
+                if scope == "reader" then
+                    return {{ title = _("阅读"), rows = QuickPanel.readerRows(desktop) }}
+                end
+                return {{ title = _("桌面"), rows = QuickPanel.desktopRows(desktop) }}
+            end,
+        }
+    end
+    if id == "topbar" then
+        return {
+            id = id,
+            title = _("顶栏"),
+            preview = function(width)
+                return TopbarSettings.preview(width)
+            end,
+            sections = function()
+                return {{ title = _("顶栏"), rows = self.topbar_settings:rows(desktop) }}
+            end,
+        }
+    end
+    if id == "display" then
+        return {
+            id = id,
+            title = _("显示"),
+            sections = function()
+                local scale, grid_max_cols = UI.getScale(), UI.getGridMaxCols()
+                local font_name = MoonFont.currentName()
+                local open_on = G_reader_settings:readSetting("start_with") == Host.OPEN_ON_START_ID
+                return {
+                    { title = _("启动"), rows = self.desktop_settings:rows(desktop, open_on) },
+                    {
+                        title = _("显示"),
+                        rows = self.display:rows{
+                            desktop = desktop, font_name = font_name, scale = scale, grid_max_cols = grid_max_cols,
+                        },
+                    },
+                }
+            end,
+        }
+    end
+    if id == "lockscreen" then
+        return {
+            id = id,
+            title = _("锁屏"),
+            preview = function(width)
+                return Lockscreen.preview(width)
+            end,
+            sections = function()
+                return {{ title = _("锁屏"), rows = self.lockscreen:rows(desktop) }}
+            end,
+        }
+    end
+    if id == "language" then
+        return {
+            id = id,
+            title = _("语言"),
+            sections = function()
+                return self.language:sections(desktop)
+            end,
+        }
+    end
+    if id == "ai" then
+        return {
+            id = id,
+            title = _("AI"),
+            sections = function()
+                return {{ title = _("AI"), rows = self.ai:rows(desktop) }}
+            end,
+        }
+    end
+    if id == "remote" then
+        return {
+            id = id,
+            title = _("远程"),
+            sections = function()
+                return {{ title = _("远程"), rows = RemoteUI.menuRows(desktop) }}
+            end,
+        }
+    end
+    return nil
+end
+
+--- 打开指定功能叠层。
+---@param id string
+---@return nil
+function Settings:open(id)
+    local spec = self:spec(id)
+    if spec then Overlay.open(self.desktop, spec) end
+end
+
+--- 造根页功能入口。
+---@param desktop BookDesktop
+---@param opts table
 ---@return fun(iw: number): table
-local function categoryRow(desktop, opts)
+local function featureRow(desktop, opts)
     return function(iw)
         return SettingRow.build(iw, {
             kind = "nav",
@@ -156,32 +287,16 @@ local function categoryRow(desktop, opts)
             subtitle = opts.subtitle,
             status = opts.status,
             status_on = opts.status_on,
-            callback = function() desktop.settings:showSub(opts.sub) end,
+            callback = function() desktop.settings:open(opts.id) end,
         })
     end
 end
 
---- 造子页顶部「返回」行的构造器。
----@param desktop BookDesktop 桌面实例
----@return fun(iw: number): table
-local function backRow(desktop)
-    return function(iw)
-        return SettingRow.build(iw, {
-            kind = "action", icon = "arrow_back", title = _("返回"),
-            callback = function() desktop.settings:showSub(desktop.settings.parent) end,
-        })
-    end
-end
-
---- 构建设置页主菜单或当前分类子页。
+--- 构建设置根页。
 ---@return table
 function Settings:createWidget()
     local desktop = self.desktop
     local h, w = self.height or desktop:contentHeight(), self.width or desktop.dimen.w
-    local plugin = desktop.plugin
-    local open_on = G_reader_settings:readSetting("start_with") == Host.OPEN_ON_START_ID
-    local scale, grid_max_cols = UI.getScale(), UI.getGridMaxCols()
-    local font_name = MoonFont.currentName()
     local page_pad = UI.pagePad()
     local card_w = math.max(UI.sz(100), w - page_pad * 2)
     local band_h = Pager.bandH()
@@ -189,128 +304,76 @@ function Settings:createWidget()
     local bottom_pad = UI.sz(4)
     local pack_h = math.max(1, body_h - page_pad - bottom_pad)
 
-    local active_id = MoonSettings.activeSourceId()
-    local active_name = active_id
-    for _idx, meta in ipairs(SourceRegistry.list()) do
-        if meta.id == active_id then active_name = meta.name or meta.id break end
-    end
-    active_name = require("ui.desktop.settings.source").displayName(active_name)
-
+    local active_name = select(2, activeSource())
+    local scale = UI.getScale()
     local packed = {}
-    local sub = self.sub
-    local valid_sub = {
-        sources = true, reader = true, appearance = true, lockscreen = true,
-        language = true, services = true, reader_popup = true,
-        quickpanel_reader = true, quickpanel_desktop = true, topbar = true,
-    }
-    if sub ~= nil and not valid_sub[sub] then
-        sub = nil
-        self.sub = nil
-        self.parent = nil
-    end
-
-    if sub == nil then
-        appendSection(packed, card_w, _("功能设置"), {
-            categoryRow(desktop, {
-                sub = "sources", icon = "source", title = _("书库与账号"),
-                subtitle = _("切换书籍来源，管理账号和本地目录"),
-                status = active_name, status_on = true,
-            }),
-            categoryRow(desktop, {
-                sub = "reader", icon = "menu_book", title = _("阅读与工具"),
-                subtitle = _("阅读界面、划词工具和快捷操作"),
-            }),
-            categoryRow(desktop, {
-                sub = "appearance", icon = "display_settings", title = _("界面与首页"),
-                subtitle = _("月读界面和首页顶栏"),
-                status = string.format("%d%%", scale), status_on = true,
-            }),
-            categoryRow(desktop, {
-                sub = "lockscreen", icon = "wallpaper", title = _("锁屏"),
-                status = LockSettings.isCompose() and _("开") or _("关"),
-                status_on = LockSettings.isCompose(),
-            }),
-            categoryRow(desktop, {
-                sub = "language", icon = "language", title = _("语言与输入"),
-                status = require("ui/language"):getLanguageName(G_reader_settings:readSetting("language") or "C"),
-                status_on = true,
-            }),
-            categoryRow(desktop, {
-                sub = "services", icon = "dns", title = _("连接与服务"),
-                subtitle = _("AI 服务和远程管理"),
-                status = Remote.isRunning() and _("运行中") or nil,
-                status_on = Remote.isRunning(),
-            }),
-        })
-        appendSection(packed, card_w, _("维护与信息"), {
-            self.maintenance:cacheRow(desktop),
-            self.maintenance:debugLogRow(desktop),
-            self.maintenance:autoUpdateRow(desktop),
-            self.maintenance:updateRow(desktop),
-            self.maintenance:aboutRow(),
-            self.maintenance:closeRow(desktop),
-        })
-    else
-        table.insert(packed, backRow(desktop)(card_w))
-        if sub == "sources" then
-            for _idx, section in ipairs(self.source:sections{
-                desktop = desktop, plugin = plugin, active_id = active_id, active_name = active_name,
-            }) do
-                appendSection(packed, card_w, section.title, section.rows)
-            end
-        elseif sub == "reader" then
-            for _, section in ipairs(self.reader:sections(desktop)) do
-                appendSection(packed, card_w, section.title, section.rows)
-            end
-            appendSection(packed, card_w, _("菜单与快捷操作"), {
-                function(iw)
-                    return SettingRow.build(iw, {
-                        kind = "nav", icon = "format_ink_highlighter", title = _("划词菜单"),
-                        subtitle = _("设置选中文字后显示的操作和顺序"),
-                        callback = function() desktop.settings:showSub("reader_popup", "reader") end,
-                    })
-                end,
-                function(iw)
-                    return SettingRow.build(iw, {
-                        kind = "nav", icon = "dashboard_customize", title = _("阅读快捷面板"),
-                        subtitle = _("设置阅读页顶部的快捷操作"),
-                        status = T(_("已启用 %1 项"), QuickPanel.readerEnabledCount()), status_on = true,
-                        callback = function() desktop.settings:showSub("quickpanel_reader", "reader") end,
-                    })
-                end,
-            })
-        elseif sub == "reader_popup" then
-            appendSection(packed, card_w, _("划词菜单"), self.reader:popupRows(desktop))
-        elseif sub == "appearance" then
-            appendSection(packed, card_w, _("首页与启动"), self.desktop_settings:rows(desktop, open_on))
-            appendSection(packed, card_w, _("快捷操作"), {
-                function(iw)
-                    return SettingRow.build(iw, {
-                        kind = "nav", icon = "dashboard_customize", title = _("桌面快捷面板"),
-                        subtitle = _("设置月读桌面顶部的快捷操作"),
-                        status = T(_("已启用 %1 项"), QuickPanel.desktopEnabledCount()), status_on = true,
-                        callback = function() desktop.settings:showSub("quickpanel_desktop", "appearance") end,
-                    })
-                end,
-            })
-            appendSection(packed, card_w, _("界面显示"), self.display:rows{
-                desktop = desktop, font_name = font_name, scale = scale, grid_max_cols = grid_max_cols,
-            })
-        elseif sub == "lockscreen" then
-            appendSection(packed, card_w, _("锁屏"), self.lockscreen:rows(desktop))
-        elseif sub == "topbar" then
-            appendSection(packed, card_w, _("首页顶栏"), self.topbar_settings:rows(desktop))
-        elseif sub == "language" then
-            appendSection(packed, card_w, _("语言与输入"), self.language:rows(desktop))
-        elseif sub == "quickpanel_reader" then
-            appendSection(packed, card_w, _("阅读快捷面板"), QuickPanel.readerRows(desktop))
-        elseif sub == "quickpanel_desktop" then
-            appendSection(packed, card_w, _("桌面快捷面板"), QuickPanel.desktopRows(desktop))
-        elseif sub == "services" then
-            appendSection(packed, card_w, _("AI 服务"), self.ai:rows(desktop))
-            appendSection(packed, card_w, _("远程管理"), RemoteUI.menuRows(desktop))
-        end
-    end
+    Overlay.appendSection(packed, card_w, _("书库"), {
+        featureRow(desktop, {
+            id = "sources", icon = "source", title = _("书籍来源"),
+            status = active_name, status_on = true,
+        }),
+        featureRow(desktop, {
+            id = "source_config", icon = "tune", title = _("账号"),
+        }),
+    })
+    Overlay.appendSection(packed, card_w, _("桌面"), {
+        featureRow(desktop, {
+            id = "display", icon = "display_settings", title = _("显示"),
+            status = string.format("%d%%", scale), status_on = true,
+        }),
+        featureRow(desktop, {
+            id = "topbar", icon = "toolbar", title = _("顶栏"),
+        }),
+        featureRow(desktop, {
+            id = "lockscreen", icon = "wallpaper", title = _("锁屏"),
+            status = LockSettings.isCompose() and _("开") or _("关"),
+            status_on = LockSettings.isCompose(),
+        }),
+        featureRow(desktop, {
+            id = "quickpanel_desktop", icon = "dashboard_customize", title = _("快捷"),
+            status = T(_("已启用 %1 项"), QuickPanel.desktopEnabledCount()),
+            status_on = true,
+        }),
+    })
+    Overlay.appendSection(packed, card_w, _("阅读"), {
+        featureRow(desktop, {
+            id = "reader_top", icon = "vertical_align_top", title = _("顶栏"),
+        }),
+        featureRow(desktop, {
+            id = "reader_bottom", icon = "horizontal_rule", title = _("底栏"),
+        }),
+        featureRow(desktop, {
+            id = "lookup", icon = "format_ink_highlighter", title = _("划词"),
+        }),
+        featureRow(desktop, {
+            id = "quickpanel_reader", icon = "dashboard_customize", title = _("快捷"),
+            status = T(_("已启用 %1 项"), QuickPanel.readerEnabledCount()),
+            status_on = true,
+        }),
+    })
+    Overlay.appendSection(packed, card_w, _("系统"), {
+        featureRow(desktop, {
+            id = "language", icon = "language", title = _("语言"),
+            status = require("ui/language"):getLanguageName(G_reader_settings:readSetting("language") or "C"),
+            status_on = true,
+        }),
+        featureRow(desktop, {
+            id = "ai", icon = "psychology", title = _("AI"),
+        }),
+        featureRow(desktop, {
+            id = "remote", icon = "dns", title = _("远程"),
+            status = Remote.isRunning() and _("运行中") or nil,
+            status_on = Remote.isRunning(),
+        }),
+    })
+    Overlay.appendSection(packed, card_w, _("维护"), {
+        self.maintenance:cacheRow(desktop),
+        self.maintenance:debugLogRow(desktop),
+        self.maintenance:autoUpdateRow(desktop),
+        self.maintenance:updateRow(desktop),
+        self.maintenance:aboutRow(),
+        self.maintenance:closeRow(desktop),
+    })
 
     local pages_kids = Pager.pack(packed, pack_h)
     local pages = #pages_kids

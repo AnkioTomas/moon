@@ -2,7 +2,7 @@
 上下进度条（ReaderView view module）。
 
 纯绘制叠加层：叠在 KOReader 原生顶栏 / 底栏之上，背景不透明盖住引擎内容。
-几何跟系统状态栏同步；Book 设置项控制 overlay 是否绘制。
+几何跟系统状态栏同步；开启跟随系统，替代开关决定要不要盖住原栏。
 底栏短按透传给原生翻页区，长按只用于阻止 ReaderFooter 切换模式。
 
 @module koplugin.book.ui.reader.bars
@@ -42,25 +42,6 @@ local Bars = {
     _paint_widgets = {},
     _paint_widget_keys = {},
 }
-
----@param slot string
----@param key string
----@param opts table
----@return table
-local function cachedTextWidget(slot, key, opts)
-    local old_key = Bars._paint_widget_keys[slot]
-    local widget = Bars._paint_widgets[slot]
-    if not widget or old_key ~= key then
-        if widget and widget.free then
-            widget:free()
-        end
-        local TextWidget = require("ui/widget/textwidget")
-        widget = TextWidget:new(opts)
-        Bars._paint_widgets[slot] = widget
-        Bars._paint_widget_keys[slot] = key
-    end
-    return widget
-end
 
 local function clearPaintWidgets()
     for slot, widget in pairs(Bars._paint_widgets) do
@@ -250,6 +231,32 @@ function Bars.setBottomBarPreference(enabled, ui)
     end
 end
 
+--- 是否用月读顶栏盖住系统顶栏。
+---@return boolean
+function Bars.replaceTopBar()
+    return require("ui.reader.bars.layout").replace("top")
+end
+
+--- 是否用月读底栏盖住系统底栏。
+---@return boolean
+function Bars.replaceBottomBar()
+    return require("ui.reader.bars.layout").replace("bottom")
+end
+
+--- 写入顶栏替代开关。
+---@param on boolean
+---@return nil
+function Bars.setReplaceTopBar(on)
+    require("ui.reader.bars.layout").setReplace("top", on)
+end
+
+--- 写入底栏替代开关。
+---@param on boolean
+---@return nil
+function Bars.setReplaceBottomBar(on)
+    require("ui.reader.bars.layout").setReplace("bottom", on)
+end
+
 --- 按 Book 设置同步系统顶底栏。
 ---@param ui table|nil
 ---@return nil
@@ -292,22 +299,11 @@ end
 ---@return number|nil band_y
 ---@return number|nil band_h
 local function topBandGeometry(ui, paint_y)
+    ui = ui or Bars.ui
     if not Bars.topVisible(ui) then
         return nil, nil
     end
-    ui = ui or Bars.ui
-    if not ui then
-        return nil, nil
-    end
-    local document = ui.document
-    if not document then
-        return nil, nil
-    end
-    local header_h = document:getHeaderHeight()
-    if not header_h or header_h <= 0 then
-        return nil, nil
-    end
-    return paint_y, header_h + topBarExtraHeight()
+    return paint_y, ui.document:getHeaderHeight() + topBarExtraHeight()
 end
 
 --- 底栏 overlay 在 ReaderView paintTo 坐标下的 y / 高度（对齐 BottomContainer 内容区）。
@@ -367,14 +363,7 @@ function Bars.topHeight(ui)
         return 0
     end
     ui = ui or Bars.ui
-    if not ui then
-        return 0
-    end
-    local document = ui.document
-    if not document then
-        return 0
-    end
-    return document:getHeaderHeight() + topBarExtraHeight()
+    return ui.document:getHeaderHeight() + topBarExtraHeight()
 end
 
 --- 顶栏固定水平内边距（左、右）。
@@ -443,23 +432,6 @@ local function bottomTextColor(ui)
     return Blitbuffer.COLOR_BLACK
 end
 
---- 不透明背景色（跟 ReaderFooter FrameContainer 一致）。
----@return any
-local function barBackground()
-    return Blitbuffer.COLOR_WHITE
-end
-
---- 在条带内垂直居中绘制 TextWidget。
----@param widget table
----@param bb any
----@param px number
----@param band_y number
----@param band_h number
-local function paintCentered(widget, bb, px, band_y, band_h)
-    local sz = widget:getSize()
-    widget:paintTo(bb, px, band_y + math.floor((band_h - sz.h) / 2))
-end
-
 --- 包装 ReaderFooter：底栏可见时禁止切换模式；短按继续交给原生翻页区，
 --- 兼容把蓝牙按钮转换为屏幕点击的翻页器。
 ---@param ui table
@@ -471,14 +443,14 @@ local function hijackFooter(ui)
     end
     local orig_tap = footer.TapFooter
     footer.TapFooter = function(self, ges)
-        if Bars.bottomVisible(self.ui) then
+        if Bars.bottomVisible(self.ui) and Bars.replaceBottomBar() then
             return false
         end
         return orig_tap(self, ges)
     end
     local orig_hold = footer.onHoldFooter
     footer.onHoldFooter = function(self, ges)
-        if Bars.bottomVisible(self.ui) then
+        if Bars.bottomVisible(self.ui) and Bars.replaceBottomBar() then
             return true
         end
         return orig_hold(self, ges)
@@ -528,7 +500,7 @@ function Bars:startClock()
         if require("apps/reader/readerui").instance ~= ui then
             return
         end
-        if Bars.topVisible(ui) and require("ui.reader.session").current() then
+        if Bars.topVisible(ui) and Bars.replaceTopBar() and require("ui.reader.session").current() then
             local view = ui.view
             local dimen
             if view then
@@ -554,14 +526,38 @@ function Bars:startClock()
     UIManager:scheduleIn(61 - tonumber(os.date("%S")), tick)
 end
 
---- 绘制顶条（章节名 + 时间）与底条（进度文案 + 进度条）叠加层。
+--- 当前阅读会话给栏组件用的上下文。
+---@return table|nil
+local function liveContext()
+    local Session = require("ui.reader.session")
+    local cur = Session.current()
+    if not cur then
+        return nil
+    end
+    local identity = cur.identity or {}
+    local book = identity.book or {}
+    local toc = Session.toc()
+    return {
+        chapter = Bars.chapterTitle(cur),
+        title = book.title or "",
+        clock = Bars.timeText(),
+        percent = cur.percent,
+        chapter_idx = tonumber(cur.reading_chapter_idx) or tonumber(identity.chapter_idx),
+        chapter_count = toc and #toc or nil,
+        page = cur.page,
+        total_pages = cur.total_pages,
+        remaining = Bars.remainingText(Session.remainingSeconds()),
+    }
+end
+
+--- 绘制顶条 / 底条叠加层；替代开关关掉时不画，露出系统原栏。
 ---@param bb any blitbuffer
 ---@param x number ReaderView 原点
 ---@param y number
 ---@return nil
 function Bars:paintTo(bb, x, y)
-    local cur = require("ui.reader.session").current()
-    if not cur then
+    local ctx = liveContext()
+    if not ctx then
         return
     end
     local ui = self.ui
@@ -569,120 +565,49 @@ function Bars:paintTo(bb, x, y)
         return
     end
     local dimen = self.view and self.view.dimen or Screen:getSize()
-    local w, h = dimen.w, dimen.h
-    local UI = require("ui.components.bookui")
-    local Session = require("ui.reader.session")
-    local bg = barBackground()
-    local bottom_inset = Screen:scaleBySize(BOTTOM_CONTENT_INSET)
+    local w = dimen.w
+    local Layout = require("ui.reader.bars.layout")
+    local Items = require("ui.reader.bars.items")
+    local bg = Blitbuffer.COLOR_WHITE
+    local cache = { widgets = Bars._paint_widgets, keys = Bars._paint_widget_keys }
 
-    if Bars.topVisible(ui) then
+    if Bars.topVisible(ui) and Layout.replace("top") then
         local bar_y, bar_h = topBandGeometry(ui, y)
         if bar_y and bar_h then
             bb:paintRect(x, bar_y, w, bar_h, bg)
             local margin_l, margin_r = topMargins()
-            local inner_w = math.max(1, w - margin_l - margin_r)
-            local gap = Screen:scaleBySize(4)
-            local text_y = bar_y
-            local text_h = bar_h
-            local face = topTextFace(ui, ui.document:getHeaderHeight())
-
-            local time_text = Bars.timeText()
-            local time = cachedTextWidget("time",
-                table.concat({ time_text, tostring(face), tostring(text_h) }, "\0"), {
-                    text = time_text,
-                    face = face,
+            Items.paint(
+                bb, x + margin_l, bar_y, math.max(1, w - margin_l - margin_r), bar_h,
+                Layout.get("top"), ctx, {
+                    face = topTextFace(ui, ui.document:getHeaderHeight()),
                     fgcolor = Blitbuffer.COLOR_BLACK,
-                })
-            local ts = time:getSize()
-            local title_text = Bars.chapterTitle(Session.current())
-            local title_width = math.max(1, inner_w - ts.w - gap)
-            local title = cachedTextWidget("title",
-                table.concat({ title_text, tostring(face), tostring(title_width), tostring(text_h) }, "\0"), {
-                    text = title_text,
-                    face = face,
-                    fgcolor = Blitbuffer.COLOR_BLACK,
-                    max_width = title_width,
-                })
-            paintCentered(title, bb, x + margin_l, text_y, text_h)
-            time:paintTo(bb, x + w - margin_r - ts.w, text_y + math.floor((text_h - ts.h) / 2))
+                    cache = cache,
+                    prefix = "top:",
+                }
+            )
         end
     end
 
-    if Bars.bottomVisible(ui) then
-        local footer = ui.view.footer
+    if Bars.bottomVisible(ui) and Layout.replace("bottom") then
         local bottom_y, bar_h = bottomBandGeometry(self.view, ui, y)
         if bottom_y and bar_h then
+            local bottom_inset = Screen:scaleBySize(BOTTOM_CONTENT_INSET)
             -- 内容上移时同时向内扩背景，不能让文字或进度条漏到正文上。
             bottom_y = bottom_y - bottom_inset
             bb:paintRect(x, bottom_y, w, bar_h + bottom_inset, bg)
-
-        local margin_l, margin_r = bottomMargins(ui)
-        local inner_w = math.max(1, w - margin_l - margin_r)
-        local face = bottomTextFace(ui)
-        local fgcolor = bottomTextColor(ui)
-        local settings = footer.settings or {}
-        local pct = math.max(0, math.min(100, tonumber(cur.percent) or 0))
-        local info_text = Bars.progressText(cur, Session.toc(), Session.remainingSeconds())
-
-        local bold = footer.footer_text and footer.footer_text.bold
-        local info = cachedTextWidget("info",
-            table.concat({ info_text, tostring(face), tostring(fgcolor), tostring(bold) }, "\0"), {
-                text = info_text,
-                face = face,
-                fgcolor = fgcolor,
-                bold = bold,
-            })
-
-        if settings.disable_progress_bar then
-            info:setMaxWidth(inner_w)
-            paintCentered(info, bb, x + margin_l, bottom_y, bar_h)
-        elseif settings.progress_bar_position == "above" then
-            local prog_h = footer.progress_bar and footer.progress_bar.height or UI.sz(6)
-            local prog_w = math.max(1, inner_w)
-            local gap = Screen:scaleBySize(4)
-            info:setMaxWidth(inner_w)
-            local info_h = info:getSize().h
-            local stack_h = prog_h + gap + info_h
-            local stack_y = bottom_y + math.floor((bar_h - stack_h) / 2)
-            local bar = UI.progressBar(prog_w, prog_h, pct)
-            bar:paintTo(bb, x + margin_l, stack_y)
-            bar:free()
-            info:paintTo(bb, x + margin_l, stack_y + prog_h + gap)
-        elseif settings.progress_bar_position == "below" then
-            local prog_h = footer.progress_bar and footer.progress_bar.height or UI.sz(6)
-            local prog_w = math.max(1, inner_w)
-            local gap = Screen:scaleBySize(4)
-            info:setMaxWidth(inner_w)
-            local info_h = info:getSize().h
-            local stack_h = info_h + gap + prog_h
-            local stack_y = bottom_y + math.floor((bar_h - stack_h) / 2)
-            info:paintTo(bb, x + margin_l, stack_y)
-            local bar = UI.progressBar(prog_w, prog_h, pct)
-            bar:paintTo(bb, x + margin_l, stack_y + info_h + gap)
-            bar:free()
-        else
-            -- 跟 ReaderFooter alongside：文字优先占满，进度条用剩余宽度（至少 min_width_pct）。
-            local gap = Screen:scaleBySize(8)
-            local min_bar_pct = tonumber(settings.progress_bar_min_width_pct) or 20
-            local prog_h = footer.progress_bar and footer.progress_bar.height or UI.sz(6)
-            local prog_w
-            if settings.progress_bar_lock_width then
-                prog_w = math.max(1, math.floor(min_bar_pct / 100 * inner_w))
-                info:setMaxWidth(math.max(1, inner_w - prog_w - gap))
-            else
-                local text_max_ratio = (100 - min_bar_pct) / 100
-                info:setMaxWidth(math.max(1, math.floor(text_max_ratio * inner_w)))
-                local is = info:getSize()
-                prog_w = math.max(1, inner_w - is.w - gap)
-            end
-            local is = info:getSize()
-            local row_h = math.max(is.h, prog_h)
-            local row_y = bottom_y + math.floor((bar_h - row_h) / 2)
-            local bar = UI.progressBar(prog_w, prog_h, pct)
-            bar:paintTo(bb, x + margin_l, row_y + math.floor((row_h - prog_h) / 2))
-            bar:free()
-            info:paintTo(bb, x + margin_l + prog_w + gap, row_y + math.floor((row_h - is.h) / 2))
-        end
+            local margin_l, margin_r = bottomMargins(ui)
+            local footer = ui.view and ui.view.footer
+            local prog_h = footer and footer.progress_bar and footer.progress_bar.height
+            Items.paint(
+                bb, x + margin_l, bottom_y, math.max(1, w - margin_l - margin_r), bar_h,
+                Layout.get("bottom"), ctx, {
+                    face = bottomTextFace(ui),
+                    fgcolor = bottomTextColor(ui),
+                    cache = cache,
+                    bar_h = prog_h,
+                    prefix = "bottom:",
+                }
+            )
         end
     end
 end

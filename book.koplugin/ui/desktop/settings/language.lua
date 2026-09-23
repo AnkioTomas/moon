@@ -150,58 +150,68 @@ local function confirmDownload(desktop, enable_after)
 end
 
 ---@param desktop table
----@return table
-function Language:rows(desktop)
+---@return BookQuickPanelSettingSection[]
+function Language:sections(desktop)
     local lang = G_reader_settings:readSetting("language") or "C"
     local LanguageApi = require("ui/language")
     local method = Registry.current()
     local dict_path = Paths.imeDictPath(method.id)
     return {
-        function(iw)
-            return SettingRow.build(iw, {
-                kind = "nav", icon = "language", title = _("语言"),
-                status = LanguageApi:getLanguageName(lang), status_on = true,
-                callback = pickLanguage,
-            })
-        end,
-        function(iw)
-            return SettingRow.build(iw, {
-                kind = "toggle", icon = "translate", title = _("中文输入法增强"),
-                status = IME.isEnabled() and _("开") or _("关"), status_on = IME.isEnabled(),
-                callback = function()
-                    if not IME.isEnabled() and not Registry.isAvailable(method) then
-                        confirmDownload(desktop, true)
-                        return
-                    end
-                    local on = IME.setEnabled(not IME.isEnabled())
-                    UIManager:show(InfoMessage:new{
-                        text = on and _("中文键盘已启用，点键盘上的 🌐 键切换中英文") or _("中文键盘已停用"),
-                        timeout = 3,
+        {
+            title = _("语言"),
+            rows = {
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "nav", icon = "language", title = _("语言"),
+                        status = LanguageApi:getLanguageName(lang), status_on = true,
+                        callback = pickLanguage,
                     })
-                    desktop:updateView()
                 end,
-            })
-        end,
-        function(iw)
-            return SettingRow.build(iw, {
-                kind = "nav", icon = "keyboard", title = _("键盘布局"),
-                status = method.label, status_on = true,
-                callback = function() pickInputMethod(desktop) end,
-            })
-        end,
-        function(iw)
-            return SettingRow.build(iw, {
-                kind = "nav", icon = "spellcheck", title = _("输入法词库"),
-                status = IME.dictStatus(),
-                status_on = Registry.isAvailable(method),
-                callback = function() confirmDownload(desktop) end,
-            })
-        end,
-        function(iw)
-            return hintRow(iw, T(_(
-                "若在线下载过慢，可到 GitHub Release（%1）下载对应词库，直接放入：%2"
-            ), RELEASES_URL, dict_path))
-        end,
+            },
+        },
+        {
+            title = _("输入法"),
+            rows = {
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "toggle", icon = "translate", title = _("中文输入法增强"),
+                        status = IME.isEnabled() and _("开") or _("关"), status_on = IME.isEnabled(),
+                        callback = function()
+                            if not IME.isEnabled() and not Registry.isAvailable(method) then
+                                confirmDownload(desktop, true)
+                                return
+                            end
+                            local on = IME.setEnabled(not IME.isEnabled())
+                            UIManager:show(InfoMessage:new{
+                                text = on and _("中文键盘已启用，点键盘上的 🌐 键切换中英文") or _("中文键盘已停用"),
+                                timeout = 3,
+                            })
+                            desktop:updateView()
+                        end,
+                    })
+                end,
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "nav", icon = "keyboard", title = _("键盘布局"),
+                        status = method.label, status_on = true,
+                        callback = function() pickInputMethod(desktop) end,
+                    })
+                end,
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "nav", icon = "spellcheck", title = _("输入法词库"),
+                        status = IME.dictStatus(),
+                        status_on = Registry.isAvailable(method),
+                        callback = function() confirmDownload(desktop) end,
+                    })
+                end,
+                function(iw)
+                    return hintRow(iw, T(_(
+                        "若在线下载过慢，可到 GitHub Release（%1）下载对应词库，直接放入：%2"
+                    ), RELEASES_URL, dict_path))
+                end,
+            },
+        },
     }
 end
 

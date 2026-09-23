@@ -56,6 +56,7 @@ local UI = require("ui.components.bookui")
 ---@field topbar BookTopBar
 ---@field bottombar BookBottomBar
 ---@field detail BookDetailPage|nil
+---@field settings_overlay BookSettingsOverlay|nil
 ---@field source_generation integer|nil 换源代数，页内请求防串
 ---@field _tabs table[]
 ---@field _closed boolean|nil 桌面已关闭，异步回调短路
@@ -289,6 +290,8 @@ function Desktop:onCancel()
 end
 
 function Desktop:onDestroy()
+    local overlay = self.settings_overlay
+    if overlay then overlay:onClose() end
     broadcast(self, "onDestroy")
     self.ges_events = nil
     local plugin = self.plugin
@@ -435,6 +438,9 @@ function Desktop:updateView()
     end
     logger.dbg("book.perf desktop.updateView", Perf.elapsedMs(started_at), "ms", self.tab)
     if resized and self.lifecycle:uiReady() then UIManager:setDirty(self, "ui") end
+    if self.settings_overlay then
+        self.settings_overlay:updateView()
+    end
 end
 
 --- KOReader 关窗入口，不是生命周期。关窗前 Destroy 会按状态补齐 Pause/Stop。

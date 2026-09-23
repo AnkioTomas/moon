@@ -140,5 +140,46 @@ function QuickPanel.readerRows(desktop)
     return optionRows(desktop, ReaderPanel.options())
 end
 
+--- 已启用动作的图标横条；不实例化面板主体。
+---@param scope string "desktop"|"reader"
+---@param width number
+---@return table
+function QuickPanel.preview(scope, width)
+    local Overlay = require("ui.desktop.settings.overlay")
+    local Icon = require("ui.components.icon")
+    local UI = require("ui.components.bookui")
+    local Geom = require("ui/geometry")
+    local HorizontalGroup = require("ui/widget/horizontalgroup")
+    local HorizontalSpan = require("ui/widget/horizontalspan")
+    local LeftContainer = require("ui/widget/container/leftcontainer")
+    local options = scope == "reader" and ReaderPanel.options() or DesktopPanel.options()
+    local bar_h = UI.sz(48)
+    local pad = UI.sz(10)
+    local gap = UI.sz(12)
+    local row = HorizontalGroup:new{ align = "center" }
+    local n = 0
+    for _idx, option in ipairs(options) do
+        if option.enabled and option.available then
+            if n > 0 then table.insert(row, HorizontalSpan:new{ width = gap }) end
+            table.insert(row, Icon.widget{ name = option.icon, size = 22 } or Icon.label{
+                name = option.icon, text = option.title, size = 18,
+            })
+            n = n + 1
+        end
+    end
+    if n == 0 then
+        return Overlay.previewPlaceholder(width, bar_h, _("无"))
+    end
+    local inner_w = math.max(1, width - 2)
+    local inner_h = math.max(1, bar_h - 2)
+    return Overlay.previewBox(width, LeftContainer:new{
+        dimen = Geom:new{ w = inner_w, h = inner_h },
+        HorizontalGroup:new{
+            HorizontalSpan:new{ width = pad },
+            row,
+        },
+    }, bar_h)
+end
+
 ---@type BookQuickPanelSettings
 return QuickPanel

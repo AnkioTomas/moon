@@ -62,11 +62,13 @@ desktop = {
         loaded = true,
     },
     settings = {
-        showSub = function(self, sub, parent)
-            self.sub = sub
-            self.parent = parent
+        reset = function(self)
             self.page = 1
-            desktop:updateView()
+            desktop.settings_overlay = nil
+        end,
+        onResume = function(self, changed)
+            if changed == nil then return end
+            self:reset()
         end,
     },
     home = {
@@ -86,21 +88,18 @@ Assert.not_nil(desktop.insight.state)
 Assert.is_true(desktop.insight.loaded)
 Assert.eq(view_updates, 1)
 
-desktop.settings:showSub("topbar", "appearance")
-Assert.eq(desktop.settings.sub, "topbar")
-Assert.eq(desktop.settings.parent, "appearance")
+desktop.settings_overlay = { id = "home" }
+Desktop.switchTab(desktop, "settings")
+Assert.eq(desktop.tab, "settings")
+Assert.is_nil(desktop.settings_overlay)
 Assert.eq(desktop.settings.page, 1)
+Assert.eq(pauses, 1)
 Assert.eq(view_updates, 2)
 
-desktop.settings:showSub()
-Assert.is_nil(desktop.settings.sub)
-Assert.is_nil(desktop.settings.parent)
-Assert.eq(view_updates, 3)
-Assert.eq(pauses, 1)
 Desktop.switchTab(desktop, "home")
 Assert.eq(resumes, 1)
 Assert.eq(pauses, 1)
-Assert.eq(view_updates, 4)
+Assert.eq(view_updates, 3)
 
 local swipes = {}
 desktop.library.onEvent = function(_, event, payload)

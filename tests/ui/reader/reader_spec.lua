@@ -45,6 +45,9 @@ end
 package.preload["ui.reader.highlight_menu"] = function()
     return { install = function() end }
 end
+package.preload["ui.reader.selection"] = function()
+    return { install = function() end }
+end
 
 local active = true
 local sync_source = { id = "moon" }

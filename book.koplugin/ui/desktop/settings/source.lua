@@ -127,34 +127,43 @@ local function pickEnabledSources(desktop)
     }
 end
 
---- 构建数据源子页分组。
+--- 书籍来源：当前源 + 启用哪些。
 ---@param ctx table
 ---@return table
-function Source:sections(ctx)
+function Source:scopeSections(ctx)
     local desktop, plugin = ctx.desktop, ctx.plugin
-    local active_id, active_name = ctx.active_id, ctx.active_name
+    local active_name = ctx.active_name
     local enabled = SourceRegistry.listEnabled()
-    local common_rows = {
-        function(iw)
-            return SettingRow.build(iw, {
-                kind = "nav", icon = "source", title = _("当前数据源"),
-                status = Source.displayName(active_name), status_on = true,
-                callback = function() Source.pickActive(desktop, plugin) end,
-            })
-        end,
-        function(iw)
-            return SettingRow.build(iw, {
-                kind = "nav", icon = "checklist", title = _("已启用的数据源"),
-                subtitle = _("决定书库中可以切换哪些书籍来源"),
-                status = T(_("已启用 %1/%2"), #enabled, #SourceRegistry.list()),
-                status_on = true,
-                callback = function() pickEnabledSources(desktop) end,
-            })
-        end,
-    }
-    local sections = { { title = _("书籍来源"), rows = common_rows } }
+    return {{
+        title = _("书籍来源"),
+        rows = {
+            function(iw)
+                return SettingRow.build(iw, {
+                    kind = "nav", icon = "source", title = _("当前数据源"),
+                    status = Source.displayName(active_name), status_on = true,
+                    callback = function() Source.pickActive(desktop, plugin) end,
+                })
+            end,
+            function(iw)
+                return SettingRow.build(iw, {
+                    kind = "nav", icon = "checklist", title = _("已启用的数据源"),
+                    subtitle = _("决定书库中可以切换哪些书籍来源"),
+                    status = T(_("已启用 %1/%2"), #enabled, #SourceRegistry.list()),
+                    status_on = true,
+                    callback = function() pickEnabledSources(desktop) end,
+                })
+            end,
+        },
+    }}
+end
 
-    for _idx, meta in ipairs(enabled) do
+--- 来源配置：各源账号 / 本地目录 / Z-Lib。一页展开，不按源再钻一层。
+---@param ctx table
+---@return table
+function Source:configSections(ctx)
+    local desktop, plugin = ctx.desktop, ctx.plugin
+    local sections = {}
+    for _idx, meta in ipairs(SourceRegistry.listEnabled()) do
         if meta.id ~= "local" then
             local mod = loadSourceSetting(meta.id)
             if mod and (type(mod.rows) == "function" or type(mod.open) == "function") then

@@ -58,10 +58,23 @@ local DEFAULTS = {
         book_xray_show_marks = true,
         book_reader_top_bar = true,
         book_reader_bottom_bar = true,
+        book_reader_replace_top_bar = true,
+        book_reader_replace_bottom_bar = true,
+        book_reader_top_bar_layout = {
+            { id = "chapter", align = "left" },
+            { id = "clock", align = "right" },
+        },
+        book_reader_bottom_bar_layout = {
+            { id = "progress_bar", align = "left" },
+            { id = "percent", align = "right" },
+            { id = "chapter_idx", align = "right" },
+            { id = "remaining", align = "right" },
+        },
         auto_mark_read_at_99 = false,
         edge_translation_enabled = true,
         baike_enabled = true,
         dictionary_enabled = true,
+        selection_handles_enabled = true,
         -- 划词菜单的显示顺序；关闭状态仍由 reader_popup_buttons 单独保存。
         reader_popup_button_order = {
             "select", "highlight", "copy", "add_note", "dictionary", "translate",

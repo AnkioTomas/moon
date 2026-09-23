@@ -23,15 +23,6 @@ function DesktopSettings:rows(desktop, open_on)
     return {
         function(iw)
             return SettingRow.build(iw, {
-                kind = "nav", icon = "vertical_align_top", title = _("首页顶栏"),
-                subtitle = _("选择首页顶部显示的信息"),
-                callback = function()
-                    desktop.settings:showSub("topbar", "appearance")
-                end,
-            })
-        end,
-        function(iw)
-            return SettingRow.build(iw, {
                 kind = "toggle", icon = "visibility", title = _("启动打开桌面"),
                 subtitle = _("KOReader 启动后直接进入月读"),
                 status = open_on and _("开") or _("关"), status_on = open_on,

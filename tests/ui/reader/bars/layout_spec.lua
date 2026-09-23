@@ -84,7 +84,6 @@ Assert.eq(cleaned[1].align, "left")
 
 store.book_reader_top_bar_layout = {}
 local fallback = Layout.get("top")
-Assert.eq(fallback[1].id, "chapter")
-Assert.eq(fallback[2].id, "clock")
+Assert.eq(#fallback, 0)
 
 return true

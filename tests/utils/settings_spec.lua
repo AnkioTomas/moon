@@ -34,6 +34,7 @@ Assert.eq(type(Settings.get("lockscreen").lock_screen), "string")
 Assert.eq(type(Settings.get("quickpanel").quick_panel_reader_actions), "table")
 Assert.is_true(Settings.get("reader").edge_translation_enabled)
 Assert.is_true(Settings.get("reader").baike_enabled)
+Assert.is_true(Settings.get("reader").selection_handles_enabled)
 Assert.is_false(Settings.get("reader").auto_mark_read_at_99)
 
 local active = Settings.activeSourceId()
