@@ -279,8 +279,9 @@ end
 ---@param fb any 图片不可用时显示的占位内容
 ---@param show_parent table|nil 异步图片就绪时请求刷新的屏幕宿主
 ---@param on_ready fun(path: string|nil)|nil
+---@param fallback_src string|nil 远程下载失败时使用的本地图片
 ---@return table
-local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_ready)
+local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_ready, fallback_src)
     local box = WidgetContainer:new{
         dimen = Geom:new{ x = 0, y = 0, w = w, h = h },
         align = "center",
@@ -421,7 +422,12 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
             end
             if not downloaded then
                 logger.warn("book image async failed", src, err)
-                box:_settle()
+                local fallback = resolve(fallback_src)
+                if fallback then
+                    box:_showFile(fallback)
+                else
+                    box:_settle()
+                end
                 return
             end
             box:_showFile(downloaded)
@@ -446,7 +452,10 @@ function Image.widget(opts)
         alpha = true
     end
     local border = opts.border and true or false
-    return asyncBox(src, headers, w, h, alpha, border, opts.fallback, opts.show_parent, opts.on_ready)
+    return asyncBox(
+        src, headers, w, h, alpha, border, opts.fallback, opts.show_parent,
+        opts.on_ready, opts.fallback_src
+    )
 end
 
 return Image

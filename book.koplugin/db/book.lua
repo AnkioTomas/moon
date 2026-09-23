@@ -175,7 +175,7 @@ function BookDB.upsertRemote(row)
                 THEN books.series ELSE COALESCE(excluded.series, books.series) END,
             intro=CASE WHEN books.sync_status=0
                 THEN books.intro ELSE COALESCE(excluded.intro, books.intro) END,
-            cover=COALESCE(excluded.cover, books.cover),
+            cover=COALESCE(NULLIF(excluded.cover, ''), books.cover),
             path=COALESCE(excluded.path, books.path),
             deleted=CASE
                 WHEN books.sync_status=0 THEN books.deleted
