@@ -863,6 +863,8 @@ function Client:scanWebdavAsync(cb)
         if not walk_ok then cb(false, walk_err); return end
         local BookDB = require("db.book")
         local metadata = {}
+        local remote_by_rel = {}
+        for _, item in ipairs(files) do remote_by_rel[item.rel] = item end
         local function saveBooksSync(done)
             if not meta_entry then done(); return end
             local temp = self:webdavCacheRoot() .. "/.books.sync"
@@ -959,6 +961,67 @@ function Client:scanWebdavAsync(cb)
                 next_cover()
             end)
         end
+        local function uploadLocalFiles(done)
+            local root = rootPath(self.cfg)
+            if root == "" or not lfs.attributes(root, "mode") then done(); return end
+            local job = Job.run(function()
+                return scanFiles(root)
+            end, {
+                name = "local.webdav.upload",
+                kind = "medium",
+                on_done = function(local_files)
+                    local pending = {}
+                    for _, item in ipairs(local_files or {}) do
+                        local rel = item.name
+                        if item.category and item.category ~= "" then rel = item.category .. "/" .. rel end
+                        if item.series and item.series ~= "" then
+                            rel = item.category .. "/" .. item.series .. "/" .. item.name
+                        end
+                        if not remote_by_rel[rel] then
+                            pending[#pending + 1] = { item = item, rel = rel }
+                        end
+                    end
+                    local index = 0
+                    local function next_file()
+                        index = index + 1
+                        local pending_item = pending[index]
+                        if not pending_item then done(); return end
+                        local item, rel = pending_item.item, pending_item.rel
+                        local parent = rel:match("(.+)/[^/]+$")
+                        local function upload()
+                            self.dav:putFileAsync(self:webdavPath() .. "/" .. rel, item.path,
+                                function(ok_upload)
+                                    if ok_upload then
+                                        local title, authors = parseFilename(item.name)
+                                        local stable_id = remoteStableId(rel)
+                                        remote_by_rel[rel] = { rel = rel }
+                                        files[#files + 1] = { rel = rel, entry = { name = item.name } }
+                                        BookDB.upsertRemote({
+                                            source_id = SOURCE_ID, stable_id = stable_id,
+                                            title = title, authors = authors,
+                                            category = item.category, series = item.series,
+                                            deleted = 0,
+                                        })
+                                    end
+                                    next_file()
+                                end)
+                        end
+                        if parent then
+                            self.dav:ensurePathAsync(self:webdavPath() .. "/" .. parent,
+                                function(ok_dir)
+                                    if ok_dir then upload() else next_file() end
+                                end)
+                        else
+                            upload()
+                        end
+                    end
+                    next_file()
+                end,
+                on_failed = function()
+                    done()
+                end,
+            })
+        end
         saveBooksSync(function()
             local seen = {}
             for _, item in ipairs(files) do
@@ -1050,8 +1113,10 @@ function Client:scanWebdavAsync(cb)
         end
         syncRemoteProgress(function()
             syncRemoteCovers(function()
-                uploadLocalCovers(function()
-                    uploadBooksSync(function() cb(true) end)
+                uploadLocalFiles(function()
+                    uploadLocalCovers(function()
+                        uploadBooksSync(function() cb(true) end)
+                    end)
                 end)
             end)
         end)
