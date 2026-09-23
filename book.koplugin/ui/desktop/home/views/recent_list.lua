@@ -386,7 +386,7 @@ function M:createWidget()
     local content
     local content_h = 0
 
-    --- 点封面打开书：封面盖「正在打开」条，顶栏 refresh_status=running，结束后 idle。
+    --- 点封面打开书：封面盖「正在打开」条。
     ---@param book Book 当前操作或展示的书籍数据
     ---@param cover table 封面包围盒，用于叠打开中条
     ---@param cw number 封面宽度
@@ -403,9 +403,6 @@ function M:createWidget()
         self._opening_bar = bar
         local token = {}
         self._open_token = token
-        if desktop and desktop.onEvent then
-            desktop:onEvent("refresh_status", "running")
-        end
         if desktop then
             UIManager:setDirty(desktop, "ui")
         end
@@ -415,9 +412,6 @@ function M:createWidget()
                 if self._open_token ~= token then return end
                 self._open_token = nil
                 clearOpening(self)
-                if desktop and desktop.onEvent then
-                    desktop:onEvent("refresh_status", "idle")
-                end
                 if desktop then UIManager:setDirty(desktop, "ui") end
             end)
         end)

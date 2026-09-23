@@ -155,9 +155,7 @@ local desktop = {
     contentHeight = function() return 200 end,
     updateView = function() view_updates = view_updates + 1 end,
 }
-local refresh_statuses = {}
 desktop.onEvent = function(_, event, value)
-    if event == "refresh_status" then refresh_statuses[#refresh_statuses + 1] = value end
 end
 local library = Library:new{ desktop = desktop, name = "library" }
 Assert.eq(library.lifecycle.state, "new")
@@ -192,10 +190,8 @@ Assert.eq(opened_detail, book)
 Assert.is_nil(opened_book)
 tap_widget:onTapBookInfo(nil, { pos = { x = 20, y = 20 } })
 Assert.eq(opened_book, book)
-Assert.eq(refresh_statuses[1], "running")
 Assert.eq(type(open_done), "function")
 open_done(true)
-Assert.eq(refresh_statuses[2], "idle")
 
 -- Z站：无右下角更多；点封面进详情，不直接打开书。
 opened_detail, opened_origin, opened_book, more_option = nil, nil, nil, nil

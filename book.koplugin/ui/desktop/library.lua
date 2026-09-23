@@ -355,7 +355,6 @@ function Library:build(ctx, state, opts)
                 self._opening_cover, self._opening_bar = cover, bar
                 local token = {}
                 self._open_token = token
-                if desktop and desktop.onEvent then desktop:onEvent("refresh_status", "running") end
                 if desktop then UIManager:setDirty(desktop, "ui") end
                 UIManager:nextTick(function()
                     if self._open_token ~= token then return end
@@ -363,7 +362,6 @@ function Library:build(ctx, state, opts)
                         if self._open_token ~= token then return end
                         self._open_token = nil
                         clearOpening(self)
-                        if desktop and desktop.onEvent then desktop:onEvent("refresh_status", "idle") end
                         if desktop then UIManager:setDirty(desktop, "ui") end
                     end)
                 end)
