@@ -45,8 +45,8 @@ end
 
 local PREV_REFRESH_KEY = "swipe_animations_prev_refresh_rate"
 
---- 动画开启时默认把完全刷新率改成「从不」，避免全刷闪烁打断动画。
---- 只改一次并备份原值；之后用户仍可再改，不再拦截。
+--- 动画首次开启时把完全刷新率改成「从不」，避免全刷闪烁打断动画。
+--- 只改一次并备份原值；用户之后可以自行改回，Moon 不再反复覆盖。
 ---@return nil
 local function forceFullRefreshNever()
     if G_reader_settings:has(PREV_REFRESH_KEY) then return end
@@ -63,14 +63,15 @@ end
 local function restoreFullRefresh()
     local prev = G_reader_settings:readSetting(PREV_REFRESH_KEY)
     if prev == nil then return end
-    if prev.day ~= nil then
+    -- 只恢复仍保持旧版本强制值 0 的一侧；用户后来手动修改过就不能覆盖。
+    if prev.day ~= nil and G_reader_settings:readSetting("full_refresh_count") == 0 then
         G_reader_settings:saveSetting("full_refresh_count", prev.day)
-    else
+    elseif prev.day == nil and G_reader_settings:readSetting("full_refresh_count") == 0 then
         G_reader_settings:delSetting("full_refresh_count")
     end
-    if prev.night ~= nil then
+    if prev.night ~= nil and G_reader_settings:readSetting("night_full_refresh_count") == 0 then
         G_reader_settings:saveSetting("night_full_refresh_count", prev.night)
-    else
+    elseif prev.night == nil and G_reader_settings:readSetting("night_full_refresh_count") == 0 then
         G_reader_settings:delSetting("night_full_refresh_count")
     end
     G_reader_settings:delSetting(PREV_REFRESH_KEY)
