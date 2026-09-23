@@ -52,6 +52,7 @@ local UI_FACES = {
 
 local _defaults = nil
 local _weread_cache = nil
+local _registered_fonts = {}
 local findInstalledFont
 
 ---@class MoonFontItem
@@ -513,6 +514,9 @@ function MoonFont.faceForId(id)
     if not info or not info[1] or not info[1].name then
         return nil, _("应用字体失败")
     end
+    if _registered_fonts[path] then
+        return info[1].name
+    end
     local cre = require("document/credocument"):engineInit()
     local registered, register_err = pcall(cre.registerFont, path)
     logger.dbg(
@@ -523,6 +527,25 @@ function MoonFont.faceForId(id)
         "registered=" .. tostring(registered),
         "error=" .. tostring(register_err)
     )
+    if not registered then
+        return nil, _("应用字体失败")
+    end
+    _registered_fonts[path] = true
+    return info[1].name
+end
+
+--- 只解析字体名，不触发 CRE 注册；用于偏好比较和保存。
+---@param id string|nil
+---@return string|nil, string|nil
+function MoonFont.faceNameForId(id)
+    local path, err = resolvePath(id)
+    if not path or path == "" then
+        return nil, err or _("字体文件不存在")
+    end
+    local info = ensureFontInfo(path)
+    if not info or not info[1] or not info[1].name then
+        return nil, _("应用字体失败")
+    end
     return info[1].name
 end
 
