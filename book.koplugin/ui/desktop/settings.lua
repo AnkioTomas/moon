@@ -368,6 +368,7 @@ function Settings:createWidget()
     })
     Overlay.appendSection(packed, card_w, _("维护"), {
         self.maintenance:cacheRow(desktop),
+        self.maintenance:clearStatsRow(desktop),
         self.maintenance:debugLogRow(desktop),
         self.maintenance:autoUpdateRow(desktop),
         self.maintenance:updateRow(desktop),

@@ -6,11 +6,16 @@ db.stats：账单周期查询必须参数化并正确映射结果。
 
 local Assert = require("support.assert")
 local calls = {}
+local deletes = {}
 
 package.preload["db.base"] = function()
     return {
         requireSourceId = function(id) return id ~= "" and id or nil end,
         ensure = function() end,
+        exec = function(sql, ...)
+            deletes[#deletes + 1] = { sql = sql, args = { ... } }
+            return true
+        end,
         sourceClause = function(column, source_id, args)
             args = args or {}
             args[#args + 1] = source_id
@@ -44,6 +49,15 @@ end
 package.loaded["db.stats"] = nil
 
 local Stats = require("db.stats")
+Assert.is_true(Stats.deleteLocal("moon"))
+Assert.eq(deletes[1].args[1], "moon")
+Assert.is_true(deletes[1].sql:find("DELETE FROM reading_stats WHERE source_id=%?", 1) ~= nil)
+Assert.is_true(Stats.deleteLocal("moon", "b1", 100, 200))
+Assert.eq(deletes[2].args[1], "moon")
+Assert.eq(deletes[2].args[2], "b1")
+Assert.eq(deletes[2].args[3], 100)
+Assert.eq(deletes[2].args[4], 200)
+Assert.is_false(Stats.deleteLocal("moon", "b1", 200, 100))
 local summary = Stats.periodSummary("moon", 100, 200)
 -- 总时长走「云端日桶优先」，不是 3000+600
 Assert.eq(summary.total_seconds, 3000)
