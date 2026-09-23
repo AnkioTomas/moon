@@ -12,6 +12,7 @@ local fontinfo = {
     ["/tmp/reader-font.ttf"] = { { name = "Reader Demo" } },
 }
 local registered = {}
+local register_calls = 0
 
 package.preload["ffi/archiver"] = function()
     return { Reader = { new = function() return { open = function() end } end } }
@@ -79,7 +80,10 @@ end
 package.preload["document/credocument"] = function()
     return {
         engineInit = function()
-            return { registerFont = function(path) registered[path] = true end }
+            return { registerFont = function(path)
+                register_calls = register_calls + 1
+                registered[path] = true
+            end }
         end,
     }
 end
@@ -121,10 +125,18 @@ ui = {
 Assert.is_true(MoonFont.supportsReader(ui))
 Assert.is_false(MoonFont.supportsReader({ document = {} }))
 
+local face_name, face_name_err = MoonFont.faceNameForId("reader-font.ttf")
+Assert.eq(face_name, "Reader Demo")
+Assert.is_nil(face_name_err)
+Assert.eq(register_calls, 0, "偏好比较不应注册 CRE 字体")
+
 local face, err = MoonFont.faceForId("reader-font.ttf")
 Assert.is_nil(err)
 Assert.eq(face, "Reader Demo")
 Assert.is_true(registered["/tmp/reader-font.ttf"])
+Assert.eq(register_calls, 1)
+Assert.eq(MoonFont.faceForId("reader-font.ttf"), "Reader Demo")
+Assert.eq(register_calls, 1, "同一路径只注册一次")
 Assert.is_true(MoonFont.isInstalled("reader-font.ttf"), "字符串 ID 应识别设置目录字体")
 Assert.is_false(MoonFont.isInstalled({
     id = "missing.ttf", kind = "local", path = "/tmp/missing.ttf",
