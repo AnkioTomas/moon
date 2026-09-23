@@ -206,6 +206,16 @@ package.preload["ui.reader"] = function()
         end,
     }
 end
+local bar_apply_count = 0
+local current_resume_plugin
+package.preload["ui.reader.bars"] = function()
+    return {
+        applyPreferences = function(ui)
+            bar_apply_count = bar_apply_count + 1
+            Assert.eq(ui, current_resume_plugin and current_resume_plugin.ui)
+        end,
+    }
+end
 package.preload["ui/widget/infomessage"] = function()
     return { new = function(_, opts) return opts end }
 end
@@ -259,6 +269,15 @@ local function mkPlugin(path)
         end,
     }
     return plugin, emitted
+end
+
+-- 唤醒阅读器时必须重新应用顶栏/底栏偏好，防止 KOReader 恢复流程覆盖关闭状态。
+do
+    local plugin = mkPlugin("/other/plain.epub")
+    current_resume_plugin = plugin
+    Session.onResume(plugin)
+    Assert.eq(bar_apply_count, 1)
+    current_resume_plugin = nil
 end
 
 -- 首次路径由源解析；Session 只接管 ReaderReady 交接和后续切章。
