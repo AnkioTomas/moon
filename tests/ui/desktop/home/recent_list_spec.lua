@@ -171,15 +171,11 @@ List.saveRows(2)
 
 local view_updates = 0
 local events = {}
-local refresh_statuses = {}
 local desktop = {
     plugin = {},
     updateView = function() view_updates = view_updates + 1 end,
     onEvent = function(_, event, payload)
         events[#events + 1] = event
-        if event == "refresh_status" then
-            refresh_statuses[#refresh_statuses + 1] = payload
-        end
     end,
 }
 local books = {}
@@ -209,9 +205,7 @@ Assert.eq(texts[#texts], "最近阅读 · 5")
 tap:onTapBookInfo(nil, { pos = { x = 50, y = 70 } })
 Assert.eq(opened_book, books[1])
 Assert.eq(covers[1].widget[1].kind, "opening")
-Assert.eq(refresh_statuses[1], "running")
 open_done(true)
-Assert.eq(refresh_statuses[2], "idle")
 Assert.is_nil(covers[1].widget[1])
 
 List.saveRows(1)

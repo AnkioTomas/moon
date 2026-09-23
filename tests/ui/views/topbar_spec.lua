@@ -220,12 +220,10 @@ bar:updateView()
 
 local rect = bar.source.rect
 Assert.is_true(rect ~= nil)
--- idle 时刷新不占位：时钟 + gap + 源名
+-- 时钟 + gap + 源名
 Assert.eq(rect.x, 12 + #"1:23 PM" * 8 + 8)
 Assert.eq(rect.w, #"书库" * 8 + 20)
 Assert.eq(rect.h, 40)
-Assert.is_nil(bar.refresh.metric_widget)
-
 Assert.eq(icon_calls[1].name, "source")
 Assert.eq(icon_calls[2].name, "memory")
 Assert.eq(icon_calls[2].text, "268.4 MB")
@@ -297,8 +295,6 @@ Assert.is_nil(bar.memory)
 Assert.is_nil(bar.battery)
 Assert.eq(hidden_source.lifecycle.state, "Destroy")
 Assert.not_nil(bar.clock)
-Assert.not_nil(bar.refresh)
-Assert.is_nil(bar.refresh.metric_widget)
 Assert.eq(icon_calls[1].name, "hard_drive")
 Assert.eq(icon_calls[2].name, "wifi_off")
 Assert.eq(icon_calls[3].name, "brightness_6")
@@ -419,39 +415,6 @@ Assert.eq(topbar_paints, before_resume_paints, "换源只改源名，不整页 D
 wifi_on = false
 bar:onEvent("NetworkDisconnected")
 Assert.eq(bar.wifi.metric_widget[1].text, "wifi_off")
-
--- 刷新：idle 不占位；出现/消失各重排一次；滚动只脏自己。
-Assert.is_nil(bar.refresh.metric_widget)
-local idle_source_x = bar.source.rect.x
-bar:onEvent("refresh_status", "running")
-Assert.eq(bar.refresh.status, "running")
-Assert.not_nil(bar.refresh.metric_widget)
-Assert.eq(bar.refresh.metric_widget[1].text, "autorenew")
-Assert.eq(bar.source.rect.x, idle_source_x + 14 + 8, "出现在最左，源名右移")
-local spin = scheduled[#scheduled]
-Assert.eq(spin.delay, 0.2)
-local before_spin_x = bar.source.rect.x
-spin.fn()
-Assert.eq(bar.refresh.metric_widget._spin_angle, 90)
-Assert.eq(bar.source.rect.x, before_spin_x, "滚动不得带动其它项")
-
-bar:onEvent("refresh_status", { state = "ok", text = "完成" })
-Assert.eq(bar.refresh.status, "ok")
-Assert.eq(bar.refresh.metric_widget[1].text, "check")
-Assert.eq(bar.refresh.metric_widget._spin_angle, 0)
-Assert.eq(bar.source.rect.x, before_spin_x, "仍显示时不重排")
-local reset = scheduled[#scheduled]
-Assert.eq(reset.delay, 2)
-reset.fn()
-Assert.eq(bar.refresh.status, "idle")
-Assert.is_nil(bar.refresh.metric_widget)
-Assert.eq(bar.source.rect.x, idle_source_x, "隐藏后收回占位")
-
--- 设置关掉 refresh 仍必建
-topbar_items = { refresh = false }
-bar:onEvent("topbar_changed")
-Assert.not_nil(bar.refresh)
-topbar_items = {}
 
 powerd.capacity = 20
 powerd.charging = false
