@@ -54,6 +54,8 @@ Assert.eq(titles[4], "百科")
 Assert.eq(titles[5], "X-Ray")
 Assert.eq(lookup[1].rows[1](600).title, "划词手柄")
 Assert.is_true(lookup[1].rows[1](600).status_on)
+Assert.eq(lookup[5].rows[3](600).title, "X-Ray 下划线样式")
+Assert.eq(lookup[5].rows[3](600).status, "虚线")
 
 local popup_rows = Settings.new():popupRows(desktop)
 Assert.len(popup_rows, 11)

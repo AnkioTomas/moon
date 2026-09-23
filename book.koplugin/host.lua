@@ -83,6 +83,12 @@ local function registerMenu(plugin)
             general = true,
             filemanager = true,
         })
+        Dispatcher:registerAction("book_xray_refresh", {
+            category = "none",
+            event = "BookXrayRefresh",
+            title = _("刷新 X-Ray"),
+            reader = true,
+        })
     end
     if plugin.ui and plugin.ui.menu and plugin.ui.menu.registerToMainMenu then
         plugin.ui.menu:registerToMainMenu(plugin)

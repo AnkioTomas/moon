@@ -89,6 +89,16 @@ function BookPlugin:onBookOpenShelf()
     return true
 end
 
+--- Dispatcher 手势：强制刷新当前书籍的 X-Ray。
+---@return boolean
+function BookPlugin:onBookXrayRefresh()
+    if not self.ui or not self.ui.document then
+        return false
+    end
+    require("xray.ui").refresh(self.ui)
+    return true
+end
+
 --- 主菜单回调（由 Host.registerMenu → registerToMainMenu 挂上）
 ---@param menu_items table KOReader 主菜单项表（就地写入）
 ---@return nil
