@@ -56,6 +56,7 @@ local DEFAULTS = {
     reader = {
         book_xray_enabled = true,
         book_xray_show_marks = true,
+        book_xray_mark_style = "dashed",
         book_reader_top_bar = true,
         book_reader_bottom_bar = true,
         book_reader_replace_top_bar = true,

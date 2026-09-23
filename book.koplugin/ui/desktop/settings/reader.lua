@@ -200,6 +200,7 @@ function ReaderSettings:lookupSections(desktop)
     local reader = MoonSettings.get("reader")
     local xray_on = reader.book_xray_enabled ~= false
     local marks_on = reader.book_xray_show_marks ~= false
+    local mark_style = reader.book_xray_mark_style == "solid" and "solid" or "dashed"
     local edge_translation_on = reader.edge_translation_enabled ~= false
     local baike_on = reader.baike_enabled ~= false
     local dictionary_on = reader.dictionary_enabled ~= false
@@ -337,6 +338,19 @@ function ReaderSettings:lookupSections(desktop)
                         callback = function()
                             if not xray_on then return end
                             reader.book_xray_show_marks = not marks_on
+                            MoonSettings.saveSection("reader", reader)
+                            require("xray.marks").invalidate()
+                            refreshReaderUi()
+                            desktop:updateView()
+                        end,
+                    })
+                end,
+                function(iw)
+                    return SettingRow.build(iw, {
+                        kind = "nav", icon = "border_style", title = _("X-Ray 下划线样式"),
+                        status = mark_style == "solid" and _("实线") or _("虚线"),
+                        callback = function()
+                            reader.book_xray_mark_style = mark_style == "solid" and "dashed" or "solid"
                             MoonSettings.saveSection("reader", reader)
                             require("xray.marks").invalidate()
                             refreshReaderUi()

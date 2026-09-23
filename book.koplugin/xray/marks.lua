@@ -383,6 +383,18 @@ local function paintDashedUnderscore(bb, rect)
     end
 end
 
+local function paintUnderscore(bb, rect)
+    local style = require("utils.settings").get().book_xray_mark_style
+    if style == "solid" then
+        local Blitbuffer = require("ffi/blitbuffer")
+        local Size = require("ui/size")
+        bb:paintRect(rect.x, rect.y + rect.h - 1, rect.w, Size.line.thick,
+            Blitbuffer.COLOR_DARK_GRAY)
+        return
+    end
+    paintDashedUnderscore(bb, rect)
+end
+
 --- 作为 view module 被调用：先刷新标记框，再给每个命中画虚线下划线。
 ---@param bb any Blitbuffer
 function Marks:paintTo(bb)
@@ -391,7 +403,7 @@ function Marks:paintTo(bb)
     end
     self:updateView()
     for index, mark in ipairs(self._marks) do
-        paintDashedUnderscore(bb, mark.box)
+        paintUnderscore(bb, mark.box)
     end
 end
 
