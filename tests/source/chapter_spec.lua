@@ -133,6 +133,19 @@ Chapter.openAsync({ type = "chapter" }, identity, {}, nil, ops, function(p) path
 Assert.eq(touches[#touches].chapter_idx, 3)
 Assert.eq(fetched[#fetched], 3)
 
+-- books.path 只代表最近下载/落盘的章节；没有阅读进度时不能从第 50 章启动。
+pending = nil
+book_row = { path = tmp .. "/2.html" }
+local first_path
+Chapter.openWithUi({ type = "chapter" }, identity, {}, nil, ops, function(p)
+    first_path = p
+end)
+Stubs.flush()
+Assert.eq(first_path, tmp .. "/1.html")
+Assert.eq(touches[#touches].chapter_idx, 1)
+progress_ui.shown = 0
+book_row = nil
+
 -- 书籍记录可能存在但尚未登记 path；缓存检查必须把 nil 当作未命中，不能传给 lfs。
 book_row = { path = nil }
 local nil_path_err

@@ -120,16 +120,15 @@ local function existingLocalPath(identity, opts)
         if chapterReady(path) then return path, idx end
         return nil
     end
-    local book = identity.book
-    if not book or not book.path then
-        book = require("db.book").get(identity.source_id, identity.stable_id)
-    end
-    if book and chapterReady(book.path) then
-        idx = tonumber(book.path:match("[/\\](%d+)%.html$"))
-        if idx then return book.path, idx end
-    end
     local pos = localPosition(identity)
-    idx = pos and tonumber(pos.chapter_idx) or 1
+    if pos then
+        -- 只有明确的本地阅读进度才能决定快开章节。books.path 只是最近
+        -- 一次落盘章节的物理路径，不能把“下载过第 50 章”伪装成阅读进度。
+        idx = tonumber(pos.chapter_idx)
+        if not idx then return nil end
+    else
+        idx = 1
+    end
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
     if chapterReady(path) then return path, idx end
     return nil

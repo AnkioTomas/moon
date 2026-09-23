@@ -1,5 +1,5 @@
 --[[--
-翻页动画：开启时默认把全刷改成从不，但不拦截用户再改。
+翻页动画：首次开启时把全刷间隔设为从不，之后允许用户自行修改。
 
 @module tests.patch.page_turn_animation_spec
 --]]
@@ -69,5 +69,25 @@ Assert.eq(store.full_refresh_count, 6)
 Assert.eq(store.night_full_refresh_count, 6)
 Assert.is_nil(store.swipe_animations_prev_refresh_rate)
 Assert.eq(store.swipe_animations, false)
+
+-- 再次开启只在没有备份时执行；用户自行改回的值不被重复覆盖。
+store.full_refresh_count = 6
+store.night_full_refresh_count = 6
+Assert.is_true(PageTurnAnimation.setEnabled(true).ok)
+Assert.eq(store.full_refresh_count, 0)
+Assert.eq(store.night_full_refresh_count, 0)
+store.full_refresh_count = 3
+store.night_full_refresh_count = 1
+Assert.is_true(PageTurnAnimation.setEnabled(false).ok)
+Assert.eq(store.full_refresh_count, 3)
+Assert.eq(store.night_full_refresh_count, 1)
+
+-- 兼容旧版本遗留备份：用户手动改过的一侧不能被关闭动画覆盖。
+store.swipe_animations_prev_refresh_rate = { day = 6, night = 6 }
+store.full_refresh_count = 3
+store.night_full_refresh_count = 0
+Assert.is_true(PageTurnAnimation.setEnabled(false).ok)
+Assert.eq(store.full_refresh_count, 3)
+Assert.eq(store.night_full_refresh_count, 6)
 
 return true
