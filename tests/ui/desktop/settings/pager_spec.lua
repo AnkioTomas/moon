@@ -155,7 +155,7 @@ package.preload["ui.desktop.settings.maintenance"] = function()
         return function() return {} end
     end
     return pageMod({
-        cacheRow = row, debugLogRow = row, autoUpdateRow = row,
+        cacheRow = row, clearStatsRow = row, debugLogRow = row, autoUpdateRow = row,
         updateRow = row, aboutRow = row, closeRow = row,
     })
 end

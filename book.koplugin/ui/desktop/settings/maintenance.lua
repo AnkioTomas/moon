@@ -118,6 +118,43 @@ function Maintenance:cacheRow(desktop)
     end
 end
 
+--- 清除当前源的本地阅读统计；不向远端发送删除请求。
+---@param desktop table
+---@return fun(iw: number): table
+function Maintenance:clearStatsRow(desktop)
+    return function(iw)
+        return SettingRow.build(iw, {
+            kind = "action", icon = "delete_sweep", title = _("清除当前源统计"),
+            subtitle = _("仅清除本地数据，不影响云端"), status_on = true,
+            callback = function()
+                local source = desktop.source
+                local source_id = source and source.id
+                if not source_id then
+                    UIManager:show(InfoMessage:new{ text = _("当前没有可用数据源"), timeout = 2 })
+                    return
+                end
+                local dialog
+                dialog = ConfirmBox:new{
+                    text = T(_("清除“%1”当前源的全部本地阅读统计？"), source.name or source_id),
+                    ok_text = _("清除"),
+                    ok_callback = function()
+                        UIManager:close(dialog)
+                        local ok = require("db.stats").deleteLocal(source_id)
+                        if desktop.home then desktop:onEvent("home_refresh") end
+                        if desktop.library then desktop.library.state = nil end
+                        desktop:updateView()
+                        UIManager:show(InfoMessage:new{
+                            text = ok and _("已清除本地统计") or _("清除统计失败"), timeout = 2,
+                        })
+                    end,
+                    cancel_text = _("取消"),
+                }
+                UIManager:show(dialog)
+            end,
+        })
+    end
+end
+
 --- 造「调试日志」开关；控制 DEBUG/INFO，WARN/ERROR 始终写入独立日志。
 ---@param desktop table 桌面实例
 ---@return fun(iw: number): table

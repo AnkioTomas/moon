@@ -65,6 +65,36 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_reading_stats_rollup_bucket
     return true
 end
 
+--- 删除本地阅读统计。
+--- 这是纯本地操作，不会触碰远端；缺少 stable_id 时按源清除，
+--- 传入时间范围时使用半开区间 [from_ts, to_ts)。
+---@param source_id string
+---@param stable_id string|nil nil=当前源全部
+---@param from_ts number|nil 起始时间（含）
+---@param to_ts number|nil 结束时间（不含）
+---@return boolean
+function StatsDB.deleteLocal(source_id, stable_id, from_ts, to_ts)
+    if type(source_id) ~= "string" or source_id == "" then
+        return false
+    end
+    local where = { "source_id=?" }
+    local args = { source_id }
+    if stable_id ~= nil then
+        if type(stable_id) ~= "string" or stable_id == "" then return false end
+        where[#where + 1] = "stable_id=?"
+        args[#args + 1] = stable_id
+    end
+    if from_ts ~= nil or to_ts ~= nil then
+        local from_n, to_n = tonumber(from_ts), tonumber(to_ts)
+        if not from_n or not to_n or to_n <= from_n then return false end
+        where[#where + 1] = "start_time>=?"
+        where[#where + 1] = "start_time<?"
+        args[#args + 1] = from_n
+        args[#args + 1] = to_n
+    end
+    return Base.exec("DELETE FROM reading_stats WHERE " .. table.concat(where, " AND ") .. ";", unpack(args)) ~= nil
+end
+
 --- 云端 pull 覆盖前的清理：**只删本次回包时间窗口内的合成行**。
 ---
 --- 两条边界都是数据事故的教训，不能放宽：

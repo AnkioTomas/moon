@@ -174,6 +174,7 @@ package.preload["ui.desktop.settings.maintenance"] = function()
     end
     return pageMod({
         cacheRow = function() return row("清理缓存") end,
+        clearStatsRow = function() return row("清除当前源统计") end,
         debugLogRow = function() return row("调试日志") end,
         autoUpdateRow = function() return row("自动检查更新") end,
         updateRow = function() return row("检查更新") end,
@@ -199,7 +200,7 @@ local desktop = {
 local settings = require("ui.desktop.settings"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 19)
+Assert.len(built_rows, 20)
 
 local expected = {
     { title = "书籍来源", id = "sources" },
