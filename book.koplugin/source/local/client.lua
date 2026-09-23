@@ -820,6 +820,8 @@ function Client:scanWebdavAsync(cb)
         return nil
     end
     local files = {}
+    local progress_files = {}
+    local cover_files = {}
     local meta_entry
     local cancelled = false
     local active
@@ -1256,6 +1258,9 @@ function Client:autoScanAsync(cb)
     if not self:validatePath() then
         cb(false, "invalid local library path")
         return nil
+    end
+    if self:isWebdav() then
+        return self:scanWebdavAsync(cb)
     end
     if not self._auto_scan then
         -- 门闩：窗口内再调返回 nil
