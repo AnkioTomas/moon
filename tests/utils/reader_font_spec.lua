@@ -125,6 +125,10 @@ local face, err = MoonFont.faceForId("reader-font.ttf")
 Assert.is_nil(err)
 Assert.eq(face, "Reader Demo")
 Assert.is_true(registered["/tmp/reader-font.ttf"])
+Assert.is_true(MoonFont.isInstalled("reader-font.ttf"), "字符串 ID 应识别设置目录字体")
+Assert.is_false(MoonFont.isInstalled({
+    id = "missing.ttf", kind = "local", path = "/tmp/missing.ttf",
+}), "列表项路径失效后不能继续报告已安装")
 
 local ok, apply_err = MoonFont.applyToReader(ui, "reader-font.ttf", "Demo")
 Assert.is_true(ok)

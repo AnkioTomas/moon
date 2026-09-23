@@ -317,7 +317,11 @@ local function knownBooks()
     local BookDB = require("db.book")
     local rows = BookDB.getMany(SOURCE_ID, BookDB.stableIdsBySource(SOURCE_ID))
     for stable_id, row in pairs(rows) do
-        if type(row.title) ~= "string" or row.title == "" then
+        -- 任何展示元数据缺失都要允许本次扫描补齐；只看 title 会把
+        -- “有书名但没有作者/简介”的旧行永久冻结。
+        if (type(row.title) ~= "string" or row.title == "")
+            or (type(row.authors) ~= "string" or row.authors == "")
+            or (type(row.intro) ~= "string" or row.intro == "") then
             rows[stable_id] = nil
         end
     end
@@ -376,6 +380,17 @@ local function commitFiles(files, known, full_snapshot)
         elseif cached then
             if (tonumber(cached.deleted) or 0) ~= 0
                 and not BookDB.setLibraryMembership(SOURCE_ID, f.path, true) then
+                return false
+            end
+        elseif existing then
+            -- knownBooks 只把元数据完整的行交给 worker；缺字段的旧行会
+            -- 在这里用本次解析结果补齐。不要把“已存在”误当成“无需更新”。
+            if not BookDB.upsert({
+                source_id = SOURCE_ID, stable_id = f.path, md5 = f.md5,
+                title = f.title, authors = f.authors, intro = f.intro,
+                category = f.category, series = f.series,
+                inserted_at = existing.inserted_at, path = f.path,
+            }) then
                 return false
             end
         elseif not renamed and not BookDB.upsert({

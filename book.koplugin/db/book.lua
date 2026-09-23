@@ -123,12 +123,12 @@ function BookDB.upsert(row)
           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             md5=COALESCE(excluded.md5, books.md5),
-            title=excluded.title,
-            authors=excluded.authors,
+            title=COALESCE(NULLIF(excluded.title, ''), books.title),
+            authors=COALESCE(NULLIF(excluded.authors, ''), books.authors),
             category=excluded.category,
             series=excluded.series,
-            intro=excluded.intro,
-            cover=COALESCE(excluded.cover, books.cover),
+            intro=COALESCE(NULLIF(excluded.intro, ''), books.intro),
+            cover=COALESCE(NULLIF(excluded.cover, ''), books.cover),
             path=COALESCE(excluded.path, books.path),
             deleted=0,
             sync_status=0;]],
