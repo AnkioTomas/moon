@@ -281,7 +281,13 @@ end
 --- 唤醒后恢复当前阅读会话的统计计时。
 ---@param plugin table Book 插件实例
 function Session.onResume(plugin)
-    if plugin.ui.document and Session._snapshot then
+    if not plugin.ui.document then
+        return
+    end
+    -- KOReader 在唤醒时可能重新应用 ReaderFooter/status_line 设置。
+    -- 月读的用户偏好是持久状态，恢复阅读时必须再次收敛原生栏状态。
+    require("ui.reader.bars").applyPreferences(plugin.ui)
+    if Session._snapshot then
         require("book.stats").start(Session._snapshot)
     end
 end
