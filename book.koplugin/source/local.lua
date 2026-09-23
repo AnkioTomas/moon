@@ -157,9 +157,14 @@ function Source:syncBooksAsync(opts, cb)
                 skipped = false, scanned = true })
         end)
     end
-    return self._client:autoScanAsync(function(scanned)
+    return self._client:autoScanAsync(function(scanned, err, skipped)
+        if err then
+            cb(nil, err)
+            return
+        end
         cb({ pulled = scanned and 1 or 0, pushed = 0, hidden = 0, conflicts = 0,
-            skipped = not scanned, reason = scanned and nil or "throttled", scanned = not not scanned })
+            skipped = skipped == true, reason = skipped and "throttled" or nil,
+            scanned = not not scanned })
     end)
 end
 

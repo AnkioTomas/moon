@@ -432,7 +432,7 @@ local function scanJob(root, on_done)
         end,
         on_failed = function(err)
             require("utils.log").warn("book local scan failed", err)
-            on_done()
+            on_done(err or "local scan failed")
         end,
     })
     return { cancel = function()
@@ -757,11 +757,11 @@ function Client:listAsync(opts, cb)
 end
 
 --- 打开桌面时的自动扫描（节流 AUTO_SCAN_INTERVAL 秒）：扫盘写库 + 清失效。
----@param cb fun(scanned: boolean)
+---@param cb fun(scanned: boolean, err: string|nil, skipped: boolean|nil)
 ---@return { cancel: fun() }|nil
 function Client:autoScanAsync(cb)
     if not self:validatePath() then
-        cb(false)
+        cb(false, "invalid local library path")
         return nil
     end
     if not self._auto_scan then
@@ -771,12 +771,12 @@ function Client:autoScanAsync(cb)
         end, AUTO_SCAN_INTERVAL)
     end
     if not self._auto_scan() then
-        cb(false)
+        cb(false, nil, true)
         return nil
     end
     local root = rootPath(self.cfg)
     return scanJob(root, function(scan_err)
-        cb(scan_err == nil)
+        cb(scan_err == nil, scan_err)
     end)
 end
 
