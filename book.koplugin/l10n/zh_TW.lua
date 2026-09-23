@@ -837,5 +837,16 @@ return {
     ["每页"] = "每頁",
     ["脚注弹窗"] = "腳註彈窗",
     ["脚注链接在弹窗中显示，而不是跳转"] = "腳註連結在彈窗中顯示，而不是跳轉",
+    ["WebDAV 下载失败"] = "WebDAV 下載失敗",
+    ["WebDAV 地址"] = "WebDAV 位址",
+    ["WebDAV 地址必须以 http:// 或 https:// 开头"] = "WebDAV 位址必須以 http:// 或 https:// 開頭",
+    ["WebDAV 密码"] = "WebDAV 密碼",
+    ["WebDAV 用户名"] = "WebDAV 使用者名稱",
+    ["WebDAV 目录"] = "WebDAV 資料夾",
+    ["删除 WebDAV 书籍失败"] = "刪除 WebDAV 書籍失敗",
+    ["无效的 WebDAV 书籍路径"] = "無效的 WebDAV 書籍路徑",
+    ["无法保存 WebDAV 书籍"] = "無法儲存 WebDAV 書籍",
+    ["无法保存 WebDAV 阅读进度"] = "無法儲存 WebDAV 閱讀進度",
+    ["本地书库目录"] = "本機書庫資料夾",
 
 }

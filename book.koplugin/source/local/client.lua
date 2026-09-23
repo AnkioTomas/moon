@@ -13,6 +13,7 @@ local util = require("util")
 local Text = require("utils.text")
 local _ = require("gettext")
 local Job = require("workers.job")
+local Webdav = require("http.webdav")
 
 -- 源模块顶部不许 require KOReader UI 模块（离线测试直接 require 源文件）
 local _uimanager
@@ -76,18 +77,95 @@ end
 ---@return LocalClient
 function Client.new(cfg)
     cfg = cfg or {}
-    return setmetatable({ cfg = cfg }, Client)
+    return setmetatable({
+        cfg = cfg,
+        dav = Webdav.new{
+            url = cfg.webdav_url,
+            username = cfg.webdav_username,
+            password = cfg.webdav_password,
+        },
+    }, Client)
+end
+
+---@return boolean
+function Client:isWebdav()
+    return Text.trim(self.cfg.webdav_url or "") ~= ""
+end
+
+---@return string
+function Client:webdavPath()
+    local path = Text.trimSlashes(Text.trim(self.cfg.webdav_path or "Apps/Books"))
+    return path ~= "" and path or "Apps/Books"
+end
+
+---@return string
+function Client:webdavCacheRoot()
+    return require("utils.paths").bookDir(SOURCE_ID) .. "/webdav"
+end
+
+---@param path string
+local function ensureDir(path)
+    local parent = path:match("(.+)/[^/]+/?$")
+    if parent and parent ~= path then ensureDir(parent) end
+    if lfs.attributes(path, "mode") ~= "directory" then lfs.mkdir(path) end
+end
+
+---@param rel string
+---@return string
+local function remoteStableId(rel)
+    return "webdav://" .. rel
+end
+
+---@param stable_id string
+---@return string|nil
+local function remoteRelativePath(stable_id)
+    if type(stable_id) ~= "string" then return nil end
+    local rel = stable_id:match("^webdav://(.+)$")
+    return rel and rel ~= "" and rel or nil
+end
+
+local function progressFileName(rel)
+    return rel:match("([^/]+)$")
+end
+
+local function encodeProgress(pos)
+    local ts = tonumber(pos.updated_at) or os.time()
+    local pct = math.floor((tonumber(pos.fraction) or 0) * 100 + 0.5)
+    if pos.chapter_idx ~= nil then
+        return string.format("{%d}*%d@%d#0:%d%%", ts,
+            tonumber(pos.chapter_idx) or 0, tonumber(pos.page) or 1, pct)
+    end
+    return string.format("{%d}*%d:%d%%", ts, tonumber(pos.page) or 1, pct)
+end
+
+local function decodeProgress(raw)
+    if type(raw) ~= "string" then return nil end
+    local ts, chapter, page, pct = raw:match("{%s*(%d+)%s*}%*(%-?%d+)@(%d+)[^:]*:(%d+)%%")
+    if not ts then
+        ts, page, pct = raw:match("{%s*(%d+)%s*}%*(%d+):(%d+)%%")
+    end
+    if not ts then return nil end
+    return {
+        updated_at = tonumber(ts), chapter_idx = chapter and tonumber(chapter) or nil,
+        page = tonumber(page), fraction = math.min(100, tonumber(pct) or 0) / 100,
+    }
 end
 
 --- 是否已配置本地路径。
 ---@return boolean
 function Client:configured()
-    return Text.stripWhitespace(self.cfg.path) ~= ""
+    return self:isWebdav() or Text.stripWhitespace(self.cfg.path) ~= ""
 end
 
 --- 本地路径是否有效（存在、是目录、且不在插件数据目录内）。
 ---@return boolean, string|nil
 function Client:validatePath()
+    if self:isWebdav() then
+        if not self.cfg.webdav_url:match("^https?://") then
+            return false, _("WebDAV 地址必须以 http:// 或 https:// 开头")
+        end
+        return true
+    end
     local path = rootPath(self.cfg)
     if path == "" then
         return false, _("未配置本地路径")
@@ -716,6 +794,9 @@ end
 ---@param cb fun(ok: boolean, err: any)
 ---@return { cancel: fun() }|nil
 function Client:scanAsync(cb)
+    if self:isWebdav() then
+        return self:scanWebdavAsync(cb)
+    end
     local ok, err = self:validatePath()
     if not ok then
         uiManager():nextTick(function()
@@ -727,6 +808,353 @@ function Client:scanAsync(cb)
     return scanJob(root, function(scan_err)
         cb(scan_err == nil, scan_err)
     end)
+end
+
+--- WebDAV 只同步书目，不下载正文；正文由 openAsync 按需拉取。
+---@param cb fun(ok: boolean, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:scanWebdavAsync(cb)
+    local ok, err = self:validatePath()
+    if not ok then
+        uiManager():nextTick(function() cb(false, err) end)
+        return nil
+    end
+    local files = {}
+    local meta_entry
+    local cancelled = false
+    local active
+    local function walk(path, prefix, done)
+        if cancelled then return end
+        active = self.dav:listAsync(path, function(entries, list_err)
+            if cancelled then return end
+            if list_err then done(nil, list_err); return end
+            local index = 0
+            local function next_entry()
+                if cancelled then return end
+                index = index + 1
+                local entry = entries[index]
+                if not entry then done(true); return end
+                local rel = prefix ~= "" and prefix .. "/" .. entry.name or entry.name
+                if entry.is_dir then
+                    walk(entry.path, rel, function(ok_walk, walk_err)
+                        if not ok_walk then done(nil, walk_err); return end
+                        next_entry()
+                    end)
+                else
+                    local name = entry.name or ""
+                    if rel == ".Moon+/books.sync" then
+                        meta_entry = entry
+                    end
+                    if isBookFile(name) then
+                        files[#files + 1] = { rel = rel, entry = entry }
+                    elseif rel:match("^%.Moon%+/Cache/[^/]+%.po$") then
+                        progress_files[#progress_files + 1] = rel
+                    elseif rel:match("^%.Moon%+/Cover/[^/]+%.png$") then
+                        cover_files[#cover_files + 1] = rel
+                    end
+                    next_entry()
+                end
+            end
+            next_entry()
+        end)
+    end
+    walk(self:webdavPath(), "", function(walk_ok, walk_err)
+        if cancelled then return end
+        if not walk_ok then cb(false, walk_err); return end
+        local BookDB = require("db.book")
+        local metadata = {}
+        local function saveBooksSync(done)
+            if not meta_entry then done(); return end
+            local temp = self:webdavCacheRoot() .. "/.books.sync"
+            ensureDir(temp:match("(.+)/[^/]+$") or temp)
+            self.dav:getAsync(self:webdavPath() .. "/.Moon+/books.sync", temp, nil, function(ok_meta)
+                if ok_meta then
+                    local file = io.open(temp, "rb")
+                    local raw = file and file:read("*a")
+                    if file then file:close() end
+                    if raw then
+                        local JSON = require("json")
+                        local ok_json, decoded = pcall(JSON.decode, raw)
+                        if not ok_json then
+                            local ok_zlib, Zlib = pcall(require, "ffi/zlib")
+                            if ok_zlib then
+                                for _, size in ipairs({ 65536, 262144, 1048576, 4194304, 16777216 }) do
+                                    local inflated_ok, inflated = pcall(Zlib.zlib_uncompress, raw, size)
+                                    if inflated_ok then
+                                        ok_json, decoded = pcall(JSON.decode, inflated)
+                                        if ok_json then break end
+                                    end
+                                end
+                            end
+                        end
+                        if ok_json and type(decoded) == "table" then
+                            for _, row in ipairs(decoded) do
+                                if type(row) == "table" and type(row.filename) == "string" then
+                                    metadata[row.filename] = row
+                                end
+                            end
+                        end
+                    end
+                end
+                done()
+            end)
+        end
+        local function uploadBooksSync(done)
+            local rows = {}
+            for _, item in ipairs(files) do
+                local stable_id = remoteStableId(item.rel)
+                local row = BookDB.get(SOURCE_ID, stable_id)
+                if row then
+                    rows[#rows + 1] = {
+                        filename = item.rel, bookName = row.title,
+                        authors = row.authors, category = row.category,
+                        series = row.series, intro = row.intro,
+                        coverUrl = row.cover,
+                    }
+                end
+            end
+            local JSON = require("json")
+            local ok_json, encoded = pcall(JSON.encode, rows)
+            if not ok_json then done(); return end
+            local ok_zlib, Zlib = pcall(require, "ffi/zlib")
+            if not ok_zlib then done(); return end
+            local ok_compress, compressed = pcall(Zlib.zlib_compress, encoded)
+            if not ok_compress then done(); return end
+            local temp = self:webdavCacheRoot() .. "/.books.sync.upload"
+            ensureDir(temp:match("(.+)/[^/]+$") or temp)
+            local out = io.open(temp, "wb")
+            if not out then done(); return end
+            out:write(compressed); out:close()
+            self.dav:ensurePathAsync(self:webdavPath() .. "/.Moon+", function(ok_dir)
+                if not ok_dir then os.remove(temp); done(); return end
+                self.dav:putFileAsync(self:webdavPath() .. "/.Moon+/books.sync", temp, function()
+                    os.remove(temp)
+                    done()
+                end)
+            end)
+        end
+        local function uploadLocalCovers(done)
+            local pending = {}
+            for _, item in ipairs(files) do
+                local local_cover = coverPath(remoteStableId(item.rel))
+                if lfs.attributes(local_cover, "mode") == "file" then
+                    pending[#pending + 1] = { rel = item.rel, path = local_cover }
+                end
+            end
+            if #pending == 0 then done(); return end
+            self.dav:ensurePathAsync(self:webdavPath() .. "/.Moon+/Cover", function(ok_dir)
+                if not ok_dir then done(); return end
+                local index = 0
+                local function next_cover()
+                    index = index + 1
+                    local item = pending[index]
+                    if not item then done(); return end
+                    local key = progressFileName(item.rel)
+                    self.dav:putFileAsync(
+                        self:webdavPath() .. "/.Moon+/Cover/" .. key .. "_2.png",
+                        item.path,
+                        function() next_cover() end
+                    )
+                end
+                next_cover()
+            end)
+        end
+        saveBooksSync(function()
+            local seen = {}
+            for _, item in ipairs(files) do
+                local rel = item.rel
+                local stable_id = remoteStableId(rel)
+                seen[stable_id] = true
+                local remote = metadata[rel] or {}
+                local title = remote.bookName or remote.title or rel:match("([^/]+)$") or rel
+                title = title:gsub("%.[^.]+$", "")
+                if not BookDB.upsertRemote({
+                    source_id = SOURCE_ID, stable_id = stable_id,
+                    title = title, authors = remote.authors,
+                    category = remote.category, series = remote.series,
+                    intro = remote.intro, cover = remote.coverUrl, deleted = 0,
+                }) then
+                    cb(false, "failed to save WebDAV book metadata")
+                    return
+                end
+            end
+            for _, stable_id in ipairs(BookDB.stableIdsBySource(SOURCE_ID)) do
+                if stable_id:match("^webdav://") and not seen[stable_id] then
+                    BookDB.setLibraryMembership(SOURCE_ID, stable_id, false, false)
+                end
+            end
+        local function syncRemoteProgress(done)
+            if #progress_files == 0 then done(); return end
+            local ProgressDB = require("db.progress")
+            local by_name = {}
+            for _, item in ipairs(files) do
+                by_name[progressFileName(item.rel)] = remoteStableId(item.rel)
+            end
+            local index = 0
+            local function next_progress()
+                index = index + 1
+                local rel = progress_files[index]
+                if not rel then done(); return end
+                local temp = self:webdavCacheRoot() .. "/.progress"
+                ensureDir(temp:match("(.+)/[^/]+$") or temp)
+                self.dav:getAsync(self:webdavPath() .. "/" .. rel, temp, nil, function(ok_progress)
+                    if ok_progress then
+                        local file = io.open(temp, "rb")
+                        local raw = file and file:read("*a")
+                        if file then file:close() end
+                        local pos = decodeProgress(raw)
+                        local stable_id = by_name[progressFileName(rel)]
+                        if pos and stable_id then
+                            local local_pos = ProgressDB.get(SOURCE_ID, stable_id)
+                            if not local_pos or (local_pos.sync_status ~= 0 and
+                                    pos.updated_at > (local_pos.updated_at or 0)) then
+                                ProgressDB.upsertRemote(SOURCE_ID, stable_id, pos)
+                            end
+                        end
+                    end
+                    os.remove(temp)
+                    next_progress()
+                end)
+            end
+            next_progress()
+        end
+        local function syncRemoteCovers(done)
+            if #cover_files == 0 then done(); return end
+            local by_name = {}
+            for _, item in ipairs(files) do
+                by_name[progressFileName(item.rel)] = remoteStableId(item.rel)
+            end
+            local index = 0
+            local function next_cover()
+                index = index + 1
+                local rel = cover_files[index]
+                if not rel then done(); return end
+                local key = rel:match("([^/]+)%.png$")
+                key = key and key:gsub("_2$", "")
+                local stable_id = key and by_name[key]
+                if not stable_id then next_cover(); return end
+                local target = coverPath(stable_id)
+                if lfs.attributes(target, "mode") == "file" then next_cover(); return end
+                ensureDir(target:match("(.+)/[^/]+$") or target)
+                self.dav:getAsync(self:webdavPath() .. "/" .. rel, target .. ".part", nil, function(ok_cover)
+                    if ok_cover then
+                        os.remove(target)
+                        os.rename(target .. ".part", target)
+                    else
+                        os.remove(target .. ".part")
+                    end
+                    next_cover()
+                end)
+            end
+            next_cover()
+        end
+        syncRemoteProgress(function()
+            syncRemoteCovers(function()
+                uploadLocalCovers(function()
+                    uploadBooksSync(function() cb(true) end)
+                end)
+            end)
+        end)
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if active and active.cancel then active:cancel() end
+    end }
+end
+
+---@param stable_id string
+---@param cb fun(path: string|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:openWebdavAsync(stable_id, cb)
+    local rel = remoteRelativePath(stable_id)
+    if not rel then cb(nil, _("无效的 WebDAV 书籍路径")); return nil end
+    local root = self:webdavCacheRoot()
+    local target = root .. "/" .. rel
+    local attr = lfs.attributes(target, "mode")
+    if attr == "file" then
+        uiManager():nextTick(function() cb(target) end)
+        return { cancel = function() end }
+    end
+    ensureDir(target:match("(.+)/[^/]+$") or target)
+    local part = target .. ".part"
+    local cancelled = false
+    local job = self.dav:getAsync(self:webdavPath() .. "/" .. rel, part, nil, function(ok, get_err)
+        if cancelled then return end
+        if not ok then
+            os.remove(part)
+            cb(nil, get_err or _("WebDAV 下载失败"))
+            return
+        end
+        os.remove(target)
+        if not os.rename(part, target) then
+            cb(nil, _("无法保存 WebDAV 书籍"))
+            return
+        end
+        cb(target)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job:cancel() end
+        os.remove(part)
+    end }
+end
+
+---@param stable_id string
+---@param cb fun(ok: boolean, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:deleteWebdavAsync(stable_id, cb)
+    local rel = remoteRelativePath(stable_id)
+    if not rel then cb(false, _("无效的 WebDAV 书籍路径")); return nil end
+    return self.dav:deleteAsync(self:webdavPath() .. "/" .. rel, function(ok, err)
+        cb(ok == true, err)
+    end)
+end
+
+--- 推送本地 WebDAV 书的阅读进度；关书时只推脏行。
+---@param identity table|nil
+---@param cb fun(ok: boolean, err: string|nil)
+function Client:syncWebdavProgressAsync(identity, cb)
+    local ProgressDB = require("db.progress")
+    local pending
+    if identity and identity.stable_id then
+        local pos = ProgressDB.get(SOURCE_ID, identity.stable_id)
+        pending = pos and pos.sync_status == 0 and { pos } or {}
+    else
+        pending = ProgressDB.unsynced(SOURCE_ID)
+    end
+    local index = 0
+    local cancelled = false
+    local active
+    local function next_progress()
+        if cancelled then return end
+        index = index + 1
+        local pos = pending[index]
+        if not pos then cb(true); return end
+        local rel = remoteRelativePath(pos.stable_id)
+        if not rel then next_progress(); return end
+        local filename = progressFileName(rel)
+        local temp = self:webdavCacheRoot() .. "/.progress.upload"
+        ensureDir(temp:match("(.+)/[^/]+$") or temp)
+        local file = io.open(temp, "wb")
+        if not file then cb(false, "无法保存 WebDAV 阅读进度"); return end
+        file:write(encodeProgress(pos)); file:close()
+        local path = self:webdavPath() .. "/.Moon+/Cache/" .. filename
+        active = self.dav:ensurePathAsync(self:webdavPath() .. "/.Moon+/Cache", function(ok_dir, dir_err)
+            if not ok_dir then os.remove(temp); cb(false, dir_err); return end
+            active = self.dav:putFileAsync(path, temp, function(ok_put, put_err)
+                os.remove(temp)
+                if not ok_put then cb(false, put_err); return end
+                ProgressDB.markSynced(SOURCE_ID, pos.stable_id, pos.updated_at)
+                next_progress()
+            end)
+        end)
+    end
+    next_progress()
+    return { cancel = function()
+        cancelled = true
+        if active and active.cancel then active:cancel() end
+    end }
 end
 
 --- 书库查询（异步）：默认直查数据库；opts.force 先真实扫盘写库再查。

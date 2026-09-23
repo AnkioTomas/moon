@@ -33,6 +33,8 @@ local T = require("ffi/util").template
 ---@field listAsync fun(self: WebdavClient, path: string|nil, cb: fun(entries: WebdavEntry[]|nil, err: string|nil)): { cancel: fun() }
 ---@field getAsync fun(self: WebdavClient, path: string, dest: string, opts: table|nil, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }
 ---@field putFileAsync fun(self: WebdavClient, path: string, local_path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
+---@field makeCollectionAsync fun(self: WebdavClient, path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
+---@field ensurePathAsync fun(self: WebdavClient, path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
 
 local Webdav = {}
 Webdav.__index = Webdav
@@ -243,6 +245,70 @@ function Webdav:putFileAsync(path, local_path, cb)
         else
             cb(true)
         end
+    end)
+end
+
+--- 创建目录。WebDAV 对已存在目录通常返回 405/409，这两种结果都视为成功。
+function Webdav:makeCollectionAsync(path, cb)
+    return Request.request({
+        url = self:join(path, true),
+        method = "MKCOL",
+        auth_username = self.username,
+        auth_password = self.password,
+    }, function(res, err)
+        if err then cb(nil, err); return end
+        local code = tonumber(res and res.code)
+        if Request.ok(code) or code == 405 or code == 409 then
+            cb(true)
+        else
+            cb(nil, statusErr(code))
+        end
+    end)
+end
+
+--- 按层创建目录，上传前调用一次即可。
+function Webdav:ensurePathAsync(path, cb)
+    local clean = trimSlashes(path or "")
+    if clean == "" then cb(true); return nil end
+    local parts = {}
+    for part in clean:gmatch("[^/]+") do parts[#parts + 1] = part end
+    local index = 0
+    local cancelled = false
+    local active
+    local function next_part()
+        if cancelled then return end
+        index = index + 1
+        if not parts[index] then cb(true); return end
+        local current = table.concat(parts, "/", 1, index)
+        active = self:makeCollectionAsync(current, function(ok, err)
+            if not ok then cb(nil, err); return end
+            next_part()
+        end)
+    end
+    next_part()
+    return { cancel = function()
+        cancelled = true
+        if active and active.cancel then active:cancel() end
+    end }
+end
+
+--- 删除远端文件。
+---@param path string
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }
+function Webdav:deleteAsync(path, cb)
+    return Request.request({
+        url = self:join(path, false),
+        method = "DELETE",
+        auth_username = self.username,
+        auth_password = self.password,
+    }, function(res, err)
+        if err then cb(nil, err); return end
+        if not Request.ok(res and res.code) then
+            cb(nil, statusErr(res and res.code))
+            return
+        end
+        cb(true)
     end)
 end
 
