@@ -74,7 +74,7 @@ function Mapper.book(row)
         return nil
     end
     local finished = userFinished(book)
-    local cover = type(book.cover) == "string" and book.cover or nil
+    local cover = type(book.cover) == "string" and book.cover ~= "" and book.cover or nil
     local out = {
         source_id = SOURCE_ID, stable_id = id,
         title = book.title or book.bookName or book.name,
@@ -123,7 +123,7 @@ function Mapper.albumBook(album)
     if not id then
         return nil
     end
-    local cover = type(info.cover) == "string" and info.cover or nil
+    local cover = type(info.cover) == "string" and info.cover ~= "" and info.cover or nil
     local finished = info.finish == 1 or info.finish == true or info.finishStatus == "已完结"
     return {
         source_id = SOURCE_ID, stable_id = tostring(id),

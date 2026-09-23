@@ -240,7 +240,7 @@ do
     Assert.is_true(q.sql:find("WHEN books.sync_status=0", 1, true) ~= nil,
         "脏行保留展示字段与成员")
     Assert.is_true(q.sql:find("THEN books.title", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("cover=COALESCE(excluded.cover, books.cover)", 1, true) ~= nil,
+    Assert.is_true(q.sql:find("cover=COALESCE(NULLIF(excluded.cover, ''), books.cover)", 1, true) ~= nil,
         "稀疏远端行不得清空已有封面地址")
 
     Assert.is_true(BookDB.upsertRemote({

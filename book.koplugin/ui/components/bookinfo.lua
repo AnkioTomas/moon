@@ -524,6 +524,7 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
     local title = BookInfo.title(book)
     local pct = BookInfo.pct(book)
     local req
+    local cached_cover
     if type(opts.src) == "string" and opts.src ~= "" then
         req = { url = opts.src, headers = opts.headers }
     elseif type(book) == "table" and type(book.cover_url) == "string" and book.cover_url ~= "" then
@@ -531,14 +532,18 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
     elseif type(book) == "table" and type(book.cover) == "string" and book.cover ~= "" then
         req = { url = book.cover, headers = book.cover_headers }
     end
+    if type(book) == "table" and type(book.stable_id) == "string"
+        and type(book.source_id) == "string" and book.source_id ~= "" then
+        local cached = Paths.coverPath(book.stable_id, book.source_id)
+        if lfs.attributes(cached, "mode") == "file" then
+            cached_cover = cached
+        end
+    end
+    if not req and cached_cover then
+        req = { url = cached_cover }
+    end
     if not req and type(book) == "table" and type(book.stable_id) == "string" then
         local sid = book.source_id
-        if type(sid) == "string" and sid ~= "" then
-            local cached = Paths.coverPath(book.stable_id, sid)
-            if lfs.attributes(cached, "mode") == "file" then
-                req = { url = cached }
-            end
-        end
         if not req then
             local owner = source
             if type(sid) == "string" and sid ~= "" and (not source or source.id ~= sid) then
@@ -561,6 +566,7 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
         alpha = false,
         border = false,
         fallback = title,
+        fallback_src = cached_cover and cached_cover ~= (req and req.url) and cached_cover or nil,
         show_parent = opts.show_parent,
         on_ready = function(path)
             persistCover(book, path)

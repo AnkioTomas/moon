@@ -148,6 +148,19 @@ Assert.eq(#downloads, download_limit + 1)
 failed:free()
 for i = 1, #network do network[i]:free() end
 
+-- 网络封面失败时，已有源专属本地封面必须回退显示。
+local before_fallback = #image_widgets
+local fallback = Image.widget{
+    src = "https://example.test/remote-fallback.jpg",
+    fallback_src = image_path,
+    width = 40,
+    height = 60,
+}
+downloads[#downloads].cb(false, "HTTP 404")
+Assert.eq(#image_widgets, before_fallback + 1)
+Assert.eq(image_widgets[#image_widgets].file, image_path)
+fallback:free()
+
 local before_abort = #downloads
 local extras = {}
 for i = 20, 32 do

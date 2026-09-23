@@ -29,6 +29,13 @@ do
     Assert.is_nil(b.id)
 end
 
+-- 空封面必须视为缺失，不能参与远端 upsert 覆盖本地已有封面。
+do
+    local b, cover = Mapper.book({ bookId = "wx-empty", title = "保留封面", cover = "" })
+    Assert.is_nil(b.cover)
+    Assert.is_nil(cover)
+end
+
 -- 微信作品完结 finished=1 不当作用户读完
 do
     local b = Mapper.book({ bookId = "1", finished = 1, progress = 20 })
