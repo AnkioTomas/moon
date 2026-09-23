@@ -99,10 +99,15 @@ package.preload["book.store"] = function()
 end
 
 local toc
+local toc_writable = true
 package.preload["source.fanqie.toc"] = function()
     return {
         read = function() return toc end,
-        put = function(_, _, v) toc = v end,
+        put = function(_, _, v)
+            if not toc_writable then return false end
+            toc = v
+            return true
+        end,
     }
 end
 package.preload["source.chapter"] = function()
@@ -159,6 +164,29 @@ src:prefetchChaptersAsync(ref, {}, 1, 3, function()
     count = count + 1
 end)
 Assert.eq(count, 3)
+
+do
+    toc = nil
+    toc_writable = false
+    local chapters, err
+    src:loadTocAsync(ref, function(value, reason)
+        chapters, err = value, reason
+    end)
+    drain()
+    Assert.is_nil(chapters)
+    Assert.eq(err, "章节目录保存失败")
+    Assert.is_nil(toc)
+
+    toc_writable = true
+    src:loadTocAsync(ref, function(value) chapters = value end)
+    drain()
+    Assert.eq(chapters[1].uid, "9876543210987654321")
+    local called = false
+    local cached = src:loadTocAsync(ref, function() called = true end)
+    cached:cancel()
+    drain()
+    Assert.is_false(called)
+end
 
 do
     local result

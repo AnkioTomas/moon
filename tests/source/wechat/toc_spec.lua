@@ -6,14 +6,23 @@ local Assert = require("support.assert")
 local store = {}
 local upserted = {}
 local reads = 0
+local now = 1000
+local original_time = os.time
+os.time = function() return now end
+local writes = true
 package.preload["db.book"] = function()
     return {
-        getToc = function(_source_id, stable_id)
+        getToc = function(_source_id, stable_id, max_age)
             reads = reads + 1
-            return store[stable_id]
+            local row = store[stable_id]
+            if not row or (max_age and now - row.at >= max_age) then return nil end
+            return row.payload, row.at
         end,
         setToc = function(_source_id, stable_id, payload)
+            if not writes then return false end
             upserted[stable_id] = payload
+            store[stable_id] = { payload = payload, at = now }
+            return true
         end,
     }
 end
@@ -34,9 +43,9 @@ end
 
 do
     -- payload 是目录数组（与 Mapper.chapters 输出一致），按数组索引定位。
-    store["b2"] = [[
+    store["b2"] = { payload = [[
         [{"idx":1,"source_idx":2,"uid":"u1","toc_version":2},{"idx":2,"source_idx":4,"uid":"u2"}]
-    ]]
+    ]], at = now }
     Assert.eq(Toc.uid("wechat", "b2", 1), "u1")
     Assert.eq(Toc.uid("wechat", "b2", 2), "u2")
     Assert.is_nil(Toc.uid("wechat", "b2", 99))
@@ -48,7 +57,7 @@ do
 end
 
 do
-    store["old"] = [[{"idx":1,"source_idx":2,"uid":"old"}]]
+    store["old"] = { payload = [[{"idx":1,"source_idx":2,"uid":"old"}]], at = now }
     local old = Toc.read("wechat", "old")
     Assert.not_nil(old, "旧目录仍须支持离线读取")
     Assert.is_false(Toc.isCurrent(old))
@@ -84,3 +93,15 @@ do
     Assert.eq(Toc.wholeFraction("wechat", "b3", 3, 1), 1)
     Assert.is_nil(Toc.wholeFraction("wechat", "unknown", 1, 0))
 end
+
+do
+    local list = { { idx = 1, uid = "failed" } }
+    writes = false
+    Assert.is_false(Toc.put("wechat", "failed", list))
+    Assert.is_nil(Toc.read("wechat", "failed"))
+    writes = true
+    now = now + 6 * 60 * 60
+    Assert.is_nil(Toc.read("wechat", "b3"), "过期内存缓存不能绕过数据库 TTL")
+end
+
+os.time = original_time

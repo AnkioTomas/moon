@@ -17,6 +17,7 @@ local FORMAT_VERSION = 2
 ---@field list BookChapter[]
 ---@field idx_by_uid table<string, integer>
 ---@field source_idx_by_idx table<integer, integer>
+---@field fetched_at integer
 
 ---@type table<string, WechatTocEntry>
 local cache = {}
@@ -40,7 +41,7 @@ end
 --- 建立 uid → idx 反查表，省掉每次定位的线性扫。
 ---@param list BookChapter[]
 ---@return WechatTocEntry
-local function buildEntry(list)
+local function buildEntry(list, fetched_at)
     local idx_by_uid = {}
     local source_idx_by_idx = {}
     for _, chapter in ipairs(list) do
@@ -54,7 +55,8 @@ local function buildEntry(list)
             end
         end
     end
-    return { list = list, idx_by_uid = idx_by_uid, source_idx_by_idx = source_idx_by_idx }
+    return { list = list, idx_by_uid = idx_by_uid, source_idx_by_idx = source_idx_by_idx,
+        fetched_at = fetched_at }
 end
 
 --- 取解码后的目录条目（含 uid 反查表）；未命中/过期/非法 JSON 一律返回 nil。
@@ -64,10 +66,11 @@ end
 local function entryOf(source_id, stable_id)
     local key = cacheKey(source_id, stable_id)
     local hit = cache[key]
-    if hit then
+    if hit and os.time() - hit.fetched_at < TTL then
         return hit
     end
-    local payload = require("db.book").getToc(source_id, stable_id, TTL)
+    cache[key] = nil
+    local payload, fetched_at = require("db.book").getToc(source_id, stable_id, TTL)
     if not payload then
         return nil
     end
@@ -75,7 +78,7 @@ local function entryOf(source_id, stable_id)
     if not ok or type(decoded) ~= "table" then
         return nil
     end
-    local entry = buildEntry(decoded)
+    local entry = buildEntry(decoded, fetched_at or os.time())
     putCache(key, entry)
     return entry
 end
@@ -93,16 +96,16 @@ end
 ---@param source_id string
 ---@param stable_id string
 ---@param list BookChapter[]
+---@return boolean
 function Toc.put(source_id, stable_id, list)
     if type(list[1]) == "table" then
         list[1].toc_version = FORMAT_VERSION
     end
     local ok, encoded = pcall(require("json").encode, list)
-    if not ok or not encoded then
-        return
-    end
-    putCache(cacheKey(source_id, stable_id), buildEntry(list))
-    require("db.book").setToc(source_id, stable_id, encoded)
+    if not ok or type(encoded) ~= "string" then return false end
+    if not require("db.book").setToc(source_id, stable_id, encoded) then return false end
+    putCache(cacheKey(source_id, stable_id), buildEntry(list, os.time()))
+    return true
 end
 
 --- 当前目录是否包含章内锚点格式；旧缓存返回 false，触发源重新拉取。

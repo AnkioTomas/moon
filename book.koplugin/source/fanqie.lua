@@ -5,6 +5,8 @@
 --]]
 
 local Base = require("source.base")
+require("l10n").apply()
+local _ = require("gettext")
 
 local M = {}
 
@@ -88,10 +90,6 @@ function Source:syncBooksAsync(opts, cb)
         end)
         return { cancel = function() end }
     end
-    local Settings = require("source.fanqie.settings")
-    local Client = require("source.fanqie.client")
-    self.settings = Settings:new()
-    self.client = Client:new(self.settings)
     if not self:configured() then
         cb(nil, "请在数据源设置中扫码登录番茄小说")
         return { cancel = function() end }
@@ -154,8 +152,11 @@ function Source:loadTocAsync(identity, cb)
     local Content = require("source.fanqie.content")
     local cached = Toc.read(self.id, identity.stable_id)
     if cached and #cached > 0 then
-        require("ui/uimanager"):nextTick(function() cb(cached) end)
-        return { cancel = function() end }
+        local cancelled = false
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled then cb(cached) end
+        end)
+        return { cancel = function() cancelled = true end }
     end
     local h = handle()
     h.job = self.client:fetchChapterDirectoryAsync(identity.stable_id, function(wire, err)
@@ -181,7 +182,10 @@ function Source:loadTocAsync(identity, cb)
             cb(nil, "番茄目录为空")
             return
         end
-        Toc.put(self.id, identity.stable_id, toc)
+        if not Toc.put(self.id, identity.stable_id, toc) then
+            cb(nil, _("章节目录保存失败"))
+            return
+        end
         cb(toc)
     end)
     return h

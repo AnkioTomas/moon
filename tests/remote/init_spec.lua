@@ -117,6 +117,72 @@ local secret = data .. "/.moon/settings/moon.lua"
 files[secret] = true
 Assert.is_nil(server_opts.handlers.resolve_download(secret))
 
+-- 跨设备上传：读错或刷盘失败不能将临时文件改名成正式文件。
+package.preload["workers.job"] = function()
+    return {
+        run = function(work, opts)
+            opts.on_done(work())
+            return { cancel = function() end }
+        end,
+    }
+end
+package.loaded["workers.job"] = nil
+local original_open, original_rename = io.open, os.rename
+local failure_mode, published, rename_calls, read_calls
+io.open = function(path, mode)
+    if mode == "rb" then
+        return {
+            read = function()
+                if failure_mode == "read" then return nil, "read failed" end
+                read_calls = read_calls + 1
+                if read_calls == 1 then return "book data" end
+                return nil
+            end,
+            close = function() return true end,
+        }
+    end
+    Assert.matches(path, "moon%-upload")
+    return {
+        write = function()
+            if failure_mode == "write" then return nil, "write failed" end
+            return true
+        end,
+        close = function()
+            if failure_mode == "close" then return nil, "flush failed" end
+            return true
+        end,
+    }
+end
+os.rename = function(_, target)
+    rename_calls = rename_calls + 1
+    if rename_calls > 1 and target == book .. "/upload.epub" then
+        published = true
+        return true
+    end
+    return nil, "cross-device"
+end
+
+for _, mode in ipairs({ "read", "write", "close" }) do
+    failure_mode, published, rename_calls, read_calls = mode, false, 0, 0
+    local result, reason
+    server_opts.handlers.save("upload.tmp", book, "upload.epub", function(ok, err)
+        result, reason = ok, err
+    end)
+    Assert.is_nil(result)
+    Assert.matches(reason, mode == "close" and "flush failed" or mode .. " failed")
+    Assert.is_false(published)
+end
+
+failure_mode, published, rename_calls, read_calls = nil, false, 0, 0
+local saved, save_err
+server_opts.handlers.save("upload.tmp", book, "upload.epub", function(ok, err)
+    saved, save_err = ok, err
+end)
+Assert.is_true(saved)
+Assert.is_nil(save_err)
+Assert.is_true(published)
+io.open, os.rename = original_open, original_rename
+
 Remote.stop()
 
 return true

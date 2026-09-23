@@ -14,14 +14,15 @@
 ---@field stable_id string|nil
 
 local Highlights = {}
+local JSON = require("json")
+local NoteDB = require("db.note")
+local BookDB = require("db.book")
 
 --- 注解快照是 JSON 数组；坏数据当空，不把解码失败吞成业务空以外的东西。
 ---@param payload string|nil
 ---@return table[]
 local function decodePayload(payload)
     if type(payload) ~= "string" or payload == "" then return {} end
-    local jok, JSON = pcall(require, "json")
-    if not jok then return {} end
     local dok, data = pcall(JSON.decode, payload)
     if not dok or type(data) ~= "table" then return {} end
     return data
@@ -72,8 +73,6 @@ function Highlights.collect(source_id, stable_id, chapter_idx, current_items)
     if type(source_id) ~= "string" or type(stable_id) ~= "string" then
         return items
     end
-    local ok, NoteDB = pcall(require, "db.note")
-    if not ok or not NoteDB then return items end
     local idx = tonumber(chapter_idx) or 0
     local row = NoteDB.get(source_id, stable_id, idx)
     for _, item in ipairs(decodePayload(row and row.payload)) do push(item) end
@@ -113,14 +112,11 @@ end
 ---@return { text: string, author: string, title: string, chapter: string, source_id: string, stable_id: string }[]
 function Highlights.collectAll()
     local items = {}
-    local ok, NoteDB = pcall(require, "db.note")
-    if not ok or not NoteDB then return items end
-    local bok, BookDB = pcall(require, "db.book")
     local books = {}
     local function bookOf(source_id, stable_id)
         local key = tostring(source_id) .. "\0" .. tostring(stable_id)
         if books[key] == nil then
-            books[key] = (bok and BookDB and BookDB.get(source_id, stable_id)) or false
+            books[key] = BookDB.get(source_id, stable_id) or false
         end
         return books[key] or nil
     end

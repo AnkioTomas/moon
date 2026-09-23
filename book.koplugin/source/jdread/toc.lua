@@ -24,12 +24,12 @@ end
 
 ---@param list BookChapter[]
 ---@return table
-local function build(list)
+local function build(list, fetched_at)
     local by_uid = {}
     for _, chapter in ipairs(list) do
         if chapter.uid ~= nil then by_uid[tostring(chapter.uid)] = chapter.idx end
     end
-    return { list = list, by_uid = by_uid }
+    return { list = list, by_uid = by_uid, fetched_at = fetched_at }
 end
 
 ---@param source_id string
@@ -37,12 +37,14 @@ end
 ---@return table|nil
 local function entry(source_id, stable_id)
     local key = keyOf(source_id, stable_id)
-    if cache[key] then return cache[key] end
-    local payload = require("db.book").getToc(source_id, stable_id, TTL)
+    local hit = cache[key]
+    if hit and os.time() - hit.fetched_at < TTL then return hit end
+    cache[key] = nil
+    local payload, fetched_at = require("db.book").getToc(source_id, stable_id, TTL)
     if not payload then return nil end
     local ok, list = pcall(require("json").decode, payload)
     if not ok or type(list) ~= "table" then return nil end
-    putCache(key, build(list))
+    putCache(key, build(list, fetched_at or os.time()))
     return cache[key]
 end
 
@@ -57,11 +59,13 @@ end
 ---@param source_id string
 ---@param stable_id string
 ---@param list BookChapter[]
+---@return boolean
 function Toc.put(source_id, stable_id, list)
     local ok, payload = pcall(require("json").encode, list)
-    if not ok or type(payload) ~= "string" then return end
-    putCache(keyOf(source_id, stable_id), build(list))
-    require("db.book").setToc(source_id, stable_id, payload)
+    if not ok or type(payload) ~= "string" then return false end
+    if not require("db.book").setToc(source_id, stable_id, payload) then return false end
+    putCache(keyOf(source_id, stable_id), build(list, os.time()))
+    return true
 end
 
 ---@param source_id string

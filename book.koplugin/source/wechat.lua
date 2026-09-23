@@ -369,12 +369,15 @@ local function fetchTocAsync(self, identity, cb)
             cb(nil, _("章节列表为空"))
             return
         end
-        Toc.put(identity.source_id, identity.stable_id, chapters)
+        if not Toc.put(identity.source_id, identity.stable_id, chapters) then
+            cb(nil, _("章节目录保存失败"))
+            return
+        end
         cb(chapters)
     end)
 end
 
---- 取目录：命中本地 toc 缓存则下一个 tick 直接回调（返回 nil，无可取消 job），
+--- 取目录：命中本地 toc 缓存则下一个 tick 直接回调，
 --- 未命中才拉章节信息并写回缓存。也是阅读会话目录恢复入口。
 ---@param identity BookIdentity
 ---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
@@ -382,8 +385,11 @@ end
 function Source:loadTocAsync(identity, cb)
     local cached = Toc.read(identity.source_id, identity.stable_id)
     if cached and #cached > 0 then
-        require("ui/uimanager"):nextTick(function() cb(cached) end)
-        return
+        local cancelled = false
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled then cb(cached) end
+        end)
+        return { cancel = function() cancelled = true end }
     end
     return fetchTocAsync(self, identity, cb)
 end

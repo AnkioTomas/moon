@@ -291,14 +291,20 @@ end
 function Source:loadTocAsync(identity, cb)
     local cached = Toc.read(identity.source_id, identity.stable_id)
     if cached and #cached > 0 then
-        require("ui/uimanager"):nextTick(function() cb(cached) end)
-        return nil
+        local cancelled = false
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled then cb(cached) end
+        end)
+        return { cancel = function() cancelled = true end }
     end
     return self._client:chapterInfosAsync(identity.stable_id, function(wire, err)
         if not wire then cb(nil, err); return end
         local chapters = Mapper.chapters(wire)
         if not chapters then cb(nil, _("章节列表为空")); return end
-        Toc.put(identity.source_id, identity.stable_id, chapters)
+        if not Toc.put(identity.source_id, identity.stable_id, chapters) then
+            cb(nil, _("章节目录保存失败"))
+            return
+        end
         cb(chapters)
     end)
 end

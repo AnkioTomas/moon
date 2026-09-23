@@ -11,17 +11,11 @@ local DocumentToc = {}
 local list_cache = setmetatable({}, { __mode = "k" })
 
 ---@param ui table|nil
----@return table|nil ReaderToc
-local function readerToc(ui)
-    return ui and ui.toc
-end
-
----@param ui table|nil
 ---@return table|nil
 local function rawToc(ui)
     if not ui then return nil end
     local document = ui.document
-    local toc_mod = readerToc(ui)
+    local toc_mod = ui.toc
     if not toc_mod or not document then
         return nil
     end
@@ -101,7 +95,7 @@ end
 ---@param ui table|nil
 ---@return integer|nil
 local function currentIndex(ui)
-    local toc_mod = readerToc(ui)
+    local toc_mod = ui and ui.toc
     local locator = currentLocator(ui)
     if not toc_mod or locator == nil then return nil end
     if type(toc_mod.getTocIndexByPage) == "function" then
@@ -138,7 +132,7 @@ end
 ---@param ui table|nil
 ---@return number|nil
 function DocumentToc.chapterFraction(ui)
-    local toc_mod = readerToc(ui)
+    local toc_mod = ui and ui.toc
     local page = tonumber(currentLocator(ui))
     if not toc_mod or not page then return nil end
     if type(toc_mod.getChapterPagesDone) == "function"
@@ -212,7 +206,7 @@ end
 ---@param delta integer
 ---@return boolean
 function DocumentToc.onBoundary(ui, delta)
-    local toc_mod = readerToc(ui)
+    local toc_mod = ui and ui.toc
     local page = tonumber(currentLocator(ui))
     if not toc_mod or not page or not ui or not ui.handleEvent then return false end
     local target

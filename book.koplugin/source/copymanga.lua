@@ -271,8 +271,11 @@ end
 function Source:loadTocAsync(identity, cb)
     local cached = Toc.read(identity.source_id, identity.stable_id)
     if cached then
-        require("ui/uimanager"):nextTick(function() cb(cached) end)
-        return nil
+        local cancelled = false
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled then cb(cached) end
+        end)
+        return { cancel = function() cancelled = true end }
     end
     local cancelled, job = false, nil
     job = self._client:detailAsync(identity.stable_id, function(wire, err)

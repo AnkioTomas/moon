@@ -28,12 +28,14 @@ end
 ---@return BookChapter[]|nil
 function Toc.read(source_id, stable_id)
     local cache_key = key(source_id, stable_id)
-    if cache[cache_key] then return cache[cache_key] end
-    local payload = require("db.book").getToc(source_id, stable_id, TTL)
+    local hit = cache[cache_key]
+    if hit and os.time() - hit.fetched_at < TTL then return hit.list end
+    cache[cache_key] = nil
+    local payload, fetched_at = require("db.book").getToc(source_id, stable_id, TTL)
     if not payload then return nil end
     local ok, list = pcall(JSON.decode, payload)
     if not ok or type(list) ~= "table" or #list == 0 then return nil end
-    putCache(cache_key, list)
+    putCache(cache_key, { list = list, fetched_at = fetched_at or os.time() })
     return list
 end
 
@@ -45,7 +47,7 @@ function Toc.put(source_id, stable_id, list)
     local ok, payload = pcall(JSON.encode, list)
     if not ok or type(payload) ~= "string" then return false end
     if not require("db.book").setToc(source_id, stable_id, payload) then return false end
-    putCache(key(source_id, stable_id), list)
+    putCache(key(source_id, stable_id), { list = list, fetched_at = os.time() })
     return true
 end
 
