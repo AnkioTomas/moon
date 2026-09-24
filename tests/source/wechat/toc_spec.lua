@@ -92,6 +92,13 @@ do
     Assert.eq(Toc.wholeFraction("wechat", "b3", 2, 0.5), 0.5)
     Assert.eq(Toc.wholeFraction("wechat", "b3", 3, 1), 1)
     Assert.is_nil(Toc.wholeFraction("wechat", "unknown", 1, 0))
+
+    local cached_reads = reads
+    Assert.eq(Toc.uid("wechat", "b3", 1), "p1")
+    Assert.eq(reads, cached_reads)
+    Toc.invalidate("wechat", "b3")
+    Toc.read("wechat", "b3")
+    Assert.is_true(reads > cached_reads, "invalidate 后必须回库")
 end
 
 do

@@ -258,7 +258,7 @@ function Chapter.onReaderReady(plugin, session)
         Chapter.clearActiveChapter(nil)
         chapter = {
             identity = identity,
-            toc = Store.toc(identity),
+            toc = Store.toc(identity, Store.TOC_MAX_AGE),
             switching = false,
         }
         chapter_session = chapter

@@ -50,6 +50,30 @@ local before = reads
 Assert.eq(Toc.index("jdread", "book-1", "chapter-1"), 1)
 Assert.eq(reads, before)
 
+do
+    local list = {
+        { idx = 1, uid = "u1" },
+        { idx = 2, uid = "u2" },
+        { idx = 3, uid = "u3" },
+    }
+    Assert.is_true(Toc.put("jdread", "frac", list))
+    Assert.eq(Toc.wholeFraction("jdread", "frac", 1, 0), 0)
+    Assert.eq(Toc.wholeFraction("jdread", "frac", 2, 0), 1 / 3)
+    Assert.eq(Toc.wholeFraction("jdread", "frac", 3, 0.5), (2 + 0.5) / 3)
+    Assert.is_nil(Toc.wholeFraction("jdread", "missing", 1, 0))
+end
+
+do
+    Assert.is_true(Toc.put("jdread", "drop", { { idx = 1, uid = "old" } }))
+    Assert.eq(Toc.uid("jdread", "drop", 1), "old")
+    rows["jdread:drop"] = {
+        payload = require("json").encode({ { idx = 1, uid = "new" } }),
+        at = now,
+    }
+    Toc.invalidate("jdread", "drop")
+    Assert.eq(Toc.uid("jdread", "drop", 1), "new")
+end
+
 now = now + 6 * 60 * 60
 Assert.is_nil(Toc.read("jdread", "book-1"))
 Assert.is_true(reads > before)

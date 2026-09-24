@@ -168,6 +168,13 @@ function Toc.wholeFraction(source_id, stable_id, chapter_idx, chapter_fraction)
     )
 end
 
+--- 丢掉一本的进程内目录缓存；落库的 books.toc 不受影响。
+---@param source_id string
+---@param stable_id string
+function Toc.invalidate(source_id, stable_id)
+    cache[cacheKey(source_id, stable_id)] = nil
+end
+
 --- 清空进程内目录缓存；落库的 books.toc 不受影响。
 function Toc.clear()
     cache = {}

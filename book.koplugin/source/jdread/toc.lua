@@ -88,6 +88,27 @@ function Toc.uid(source_id, stable_id, idx)
     return chapter and chapter.uid
 end
 
+--- 章序号 + 章内比例 → 全书 fraction；目录未缓存时返回 nil。
+---@param source_id string
+---@param stable_id string
+---@param chapter_idx integer
+---@param chapter_fraction number|nil
+---@return number|nil
+function Toc.wholeFraction(source_id, stable_id, chapter_idx, chapter_fraction)
+    local list = Toc.read(source_id, stable_id)
+    if not list or #list == 0 then return nil end
+    return require("book.progress").clampFraction(
+        (chapter_idx - 1 + (chapter_fraction or 0)) / #list
+    )
+end
+
+--- 丢掉一本的进程内目录缓存；落库的 books.toc 不受影响。
+---@param source_id string
+---@param stable_id string
+function Toc.invalidate(source_id, stable_id)
+    cache[keyOf(source_id, stable_id)] = nil
+end
+
 function Toc.clear()
     cache = {}
 end

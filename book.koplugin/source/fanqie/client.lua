@@ -425,7 +425,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return CancelHandle|nil
 function Client:officialGetContentAsync(book_id, item_id, cb)
-    return require("source.fanqie.official").fetchAsync(self, book_id, item_id, cb)
+    return require("source.fanqie.reading").fetchAsync(self.settings, book_id, item_id, cb)
 end
 
 return Client

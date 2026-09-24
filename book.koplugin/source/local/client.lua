@@ -14,6 +14,7 @@ local Text = require("utils.text")
 local _ = require("gettext")
 local Job = require("workers.job")
 local Webdav = require("http.webdav")
+local Paths = require("utils.paths")
 
 -- 源模块顶部不许 require KOReader UI 模块（离线测试直接 require 源文件）
 local _uimanager
@@ -101,13 +102,6 @@ end
 ---@return string
 function Client:webdavCacheRoot()
     return require("utils.paths").bookDir(SOURCE_ID) .. "/webdav"
-end
-
----@param path string
-local function ensureDir(path)
-    local parent = path:match("(.+)/[^/]+/?$")
-    if parent and parent ~= path then ensureDir(parent) end
-    if lfs.attributes(path, "mode") ~= "directory" then lfs.mkdir(path) end
 end
 
 ---@param rel string
@@ -870,7 +864,7 @@ function Client:scanWebdavAsync(cb)
         local function saveBooksSync(done)
             if not meta_entry then done(); return end
             local temp = self:webdavCacheRoot() .. "/.books.sync"
-            ensureDir(temp:match("(.+)/[^/]+$") or temp)
+            Paths.ensureDir(temp:match("(.+)/[^/]+$") or temp)
             self.dav:getAsync(self:webdavPath() .. "/.Moon+/books.sync", temp, nil, function(ok_meta)
                 if ok_meta then
                     local file = io.open(temp, "rb")
@@ -925,7 +919,7 @@ function Client:scanWebdavAsync(cb)
             local ok_compress, compressed = pcall(Zlib.zlib_compress, encoded)
             if not ok_compress then done(); return end
             local temp = self:webdavCacheRoot() .. "/.books.sync.upload"
-            ensureDir(temp:match("(.+)/[^/]+$") or temp)
+            Paths.ensureDir(temp:match("(.+)/[^/]+$") or temp)
             local out = io.open(temp, "wb")
             if not out then done(); return end
             out:write(compressed); out:close()
@@ -1061,7 +1055,7 @@ function Client:scanWebdavAsync(cb)
                 local rel = progress_files[index]
                 if not rel then done(); return end
                 local temp = self:webdavCacheRoot() .. "/.progress"
-                ensureDir(temp:match("(.+)/[^/]+$") or temp)
+                Paths.ensureDir(temp:match("(.+)/[^/]+$") or temp)
                 self.dav:getAsync(self:webdavPath() .. "/" .. rel, temp, nil, function(ok_progress)
                     if ok_progress then
                         local file = io.open(temp, "rb")
@@ -1100,7 +1094,7 @@ function Client:scanWebdavAsync(cb)
                 if not stable_id then next_cover(); return end
                 local target = coverPath(stable_id)
                 if lfs.attributes(target, "mode") == "file" then next_cover(); return end
-                ensureDir(target:match("(.+)/[^/]+$") or target)
+                Paths.ensureDir(target:match("(.+)/[^/]+$") or target)
                 self.dav:getAsync(self:webdavPath() .. "/" .. rel, target .. ".part", nil, function(ok_cover)
                     if ok_cover then
                         os.remove(target)
@@ -1143,7 +1137,7 @@ function Client:openWebdavAsync(stable_id, cb)
         uiManager():nextTick(function() cb(target) end)
         return { cancel = function() end }
     end
-    ensureDir(target:match("(.+)/[^/]+$") or target)
+    Paths.ensureDir(target:match("(.+)/[^/]+$") or target)
     local part = target .. ".part"
     local cancelled = false
     local job = self.dav:getAsync(self:webdavPath() .. "/" .. rel, part, nil, function(ok, get_err)
@@ -1202,7 +1196,7 @@ function Client:syncWebdavProgressAsync(identity, cb)
         if not rel then next_progress(); return end
         local filename = progressFileName(rel)
         local temp = self:webdavCacheRoot() .. "/.progress.upload"
-        ensureDir(temp:match("(.+)/[^/]+$") or temp)
+        Paths.ensureDir(temp:match("(.+)/[^/]+$") or temp)
         local file = io.open(temp, "wb")
         if not file then cb(false, "无法保存 WebDAV 阅读进度"); return end
         file:write(encodeProgress(pos)); file:close()

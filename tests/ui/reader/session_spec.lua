@@ -606,6 +606,35 @@ do
     Session.onCloseDocument(plugin)
 end
 
+-- 目录过期/缺失时 afterBootstrap 必须走 loadTocAsync。
+do
+    stored_toc.chapters = nil
+    local loaded
+    local source = {
+        type = "chapter",
+        loadTocAsync = function(_, identity, cb)
+            loaded = identity.stable_id
+            cb({ { idx = 1, title = "新" }, { idx = 2 } })
+            return { cancel = function() end }
+        end,
+        prefetchChaptersAsync = function()
+            return { cancel = function() end }
+        end,
+        putProgressAsync = default_source.putProgressAsync,
+        syncProgressAsync = default_source.syncProgressAsync,
+        syncNotesAsync = default_source.syncNotesAsync,
+        syncStatsAsync = default_source.syncStatsAsync,
+    }
+    resolved_source = source
+    local plugin = mkPlugin("/cache/1.html")
+    Session.onReaderReady(plugin)
+    Assert.eq(loaded, "chapters")
+    Assert.len(Session.toc(), 2)
+    Assert.eq(Session.toc()[1].title, "新")
+    Session.onCloseDocument(plugin)
+    resolved_source = nil
+end
+
 -- 真正 EndOfBook 是 100% 完成兜底，即使快照比例不足且用户手动标过未读。
 do
     local plugin = mkPlugin("/x/book.epub")

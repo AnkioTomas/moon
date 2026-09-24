@@ -7,8 +7,8 @@
 @module koplugin.book.source.assets
 --]]
 
-local lfs = require("libs/libkoreader-lfs")
 local md5 = require("ffi/sha2").md5
+local Paths = require("utils.paths")
 
 local Assets = {}
 
@@ -42,21 +42,6 @@ local function extFor(mime)
     return ""
 end
 
----@param dir string|nil
-local function ensureDir(dir)
-    if not dir or dir == "" then
-        return
-    end
-    if lfs.attributes(dir, "mode") == "directory" then
-        return
-    end
-    local parent = dir:match("(.+)/[^/]+$")
-    if parent then
-        ensureDir(parent)
-    end
-    lfs.mkdir(dir)
-end
-
 ---@param path string|nil
 ---@return string
 local function basename(path)
@@ -86,7 +71,7 @@ function Assets.materializeImage(images_dir, data)
     if not mime:match("^image/") then
         return nil
     end
-    ensureDir(images_dir)
+    Paths.ensureDir(images_dir)
     local name = md5(data) .. extFor(mime)
     local path = images_dir .. "/" .. name
     local f = io.open(path, "rb")
@@ -155,7 +140,7 @@ function Assets.localizeAsync(html, images_dir, download, cb)
         return { cancel = function() end }
     end
 
-    ensureDir(images_dir)
+    Paths.ensureDir(images_dir)
 
     local url_hrefs, index = {}, 1
     local cancelled, active_job = false, nil

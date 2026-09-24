@@ -130,8 +130,9 @@ local function pushDeletedMembers(self, cb)
         job = self._client:removeFromShelfAsync(stable_id, function(wire, err)
             if cancelled then return end
             if wire then
-                Store.finalizeDeleted(self.id, stable_id)
-                pushed = pushed + 1
+                if Store.finalizeDeleted(self.id, stable_id) then
+                    pushed = pushed + 1
+                end
             elseif err then
                 logger.warn("jdread shelf delete push failed", stable_id, err)
             end

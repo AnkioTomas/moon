@@ -129,8 +129,13 @@ package.preload["db.book"] = function()
             for _, row in ipairs(rows) do book_upserts[#book_upserts + 1] = row end
             return true
         end,
-        getToc = function(source_id, stable_id)
-            return toc_rows[source_id .. "\0" .. stable_id]
+        getToc = function(source_id, stable_id, max_age)
+            local row = toc_rows[source_id .. "\0" .. stable_id]
+            if type(row) == "table" then
+                if max_age and os.time() - (row.at or 0) >= max_age then return nil end
+                return row.payload, row.at
+            end
+            return row
         end,
         setToc = function(source_id, stable_id, payload)
             toc_upserts[#toc_upserts + 1] = {
@@ -541,6 +546,44 @@ do
     Assert.eq(book_batch_calls, 1)
     book_upserts = {}
     book_batch_calls = 0
+end
+
+-- ── toc：传 max_age 才过期；不传则仍可读旧目录 ──────────
+do
+    local identity = { source_id = "wechat", stable_id = "stale-toc" }
+    toc_rows["wechat\0stale-toc"] = {
+        payload = "toc:stale",
+        at = os.time() - Store.TOC_MAX_AGE - 1,
+    }
+    json_values["toc:stale"] = { { idx = 1, title = "旧" } }
+    Assert.is_nil(Store.toc(identity, Store.TOC_MAX_AGE))
+    Assert.eq(Store.toc(identity)[1].title, "旧")
+    toc_rows["wechat\0stale-toc"] = nil
+end
+
+-- ── touch 写 toc 后必须丢掉源进程内缓存 ────────────────
+do
+    local dropped = {}
+    package.preload["source.wechat.toc"] = function()
+        return {
+            invalidate = function(source_id, stable_id)
+                dropped[#dropped + 1] = source_id .. "\0" .. stable_id
+            end,
+        }
+    end
+    package.loaded["source.wechat.toc"] = nil
+    local identity = { source_id = "wechat", stable_id = "s-toc" }
+    Assert.is_true(Store.touch("/cache/wechat/1.html", identity, {
+        chapter_idx = 1,
+        toc = { { idx = 1, title = "一" } },
+    }))
+    Assert.eq(dropped[1], "wechat\0s-toc")
+    package.preload["source.wechat.toc"] = nil
+    package.loaded["source.wechat.toc"] = nil
+    toc_upserts = {}
+    chapter_upserts = {}
+    touch_calls = {}
+    db_sql = {}
 end
 
 -- ── rememberMany：全部无身份 → 一条都不写 ────────────────

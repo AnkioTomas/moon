@@ -291,11 +291,9 @@ end
 
 --- 清空 Moon 书库/统计相关 HTTP 缓存。
 function Source:clearCaches()
-    local ok, Request = pcall(require, "http.request")
-    if ok and Request and Request.clearCache then
-        Request.clearCache("/index/book/")
-        Request.clearCache("/index/stats/")
-    end
+    local Request = require("http.request")
+    Request.clearCache("/index/book/")
+    Request.clearCache("/index/stats/")
 end
 
 --- 构造 Moon 封面请求。
@@ -309,6 +307,41 @@ function Source:coverRequest(identity)
     return req
 end
 
+--- 串行推待删：成功撕墓碑才计入。
+---@param self MoonSource
+---@param on_done fun(deleted_n: integer)
+---@return { cancel: fun() }|nil
+local function pushPendingDeletes(self, on_done)
+    local Store = require("book.store")
+    local pending = require("db.book").pendingDeleteIds(self.id)
+    if #pending == 0 then
+        return nil
+    end
+    local cancelled, delete_job, deleted_n, index = false, nil, 0, 0
+    local function nextDelete()
+        if cancelled then return end
+        index = index + 1
+        if index > #pending then
+            on_done(deleted_n)
+            return
+        end
+        local stable_id = pending[index]
+        delete_job = self._client:deleteBooksAsync({ stable_id }, function(wire)
+            delete_job = nil
+            if cancelled then return end
+            if wire and Store.finalizeDeleted(self.id, stable_id) then
+                deleted_n = deleted_n + 1
+            end
+            nextDelete()
+        end)
+    end
+    nextDelete()
+    return { cancel = function()
+        cancelled = true
+        if delete_job and delete_job.cancel then delete_job:cancel() end
+    end }
+end
+
 --- 分页拉取完整 Moon 书架；先推本地待删，再对账。
 ---@param opts { force?: boolean, dirty_only?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
@@ -316,43 +349,24 @@ end
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
     if opts.force then self:clearCaches() end
-    local Store = require("book.store")
     local cancelled, job, delete_job = false, nil, nil
     local deleted_n = 0
 
     --- dirty_only：只推待删，不拉书架。
     if opts.dirty_only then
-        local pending = require("db.book").pendingDeleteIds(self.id)
-        if #pending == 0 then
+        delete_job = pushPendingDeletes(self, function(n)
+            if cancelled then return end
+            cb({
+                pulled = 0, pushed = n, hidden = 0, conflicts = 0, skipped = false,
+            })
+        end)
+        if not delete_job then
             require("ui/uimanager"):nextTick(function()
                 if not cancelled then
                     cb({ pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false })
                 end
             end)
-            return { cancel = function() cancelled = true end }
         end
-        local index = 0
-        local function nextDelete()
-            if cancelled then return end
-            index = index + 1
-            if index > #pending then
-                cb({
-                    pulled = 0, pushed = deleted_n, hidden = 0, conflicts = 0, skipped = false,
-                })
-                return
-            end
-            local stable_id = pending[index]
-            delete_job = self._client:deleteBooksAsync({ stable_id }, function(wire)
-                delete_job = nil
-                if cancelled then return end
-                if wire then
-                    Store.finalizeDeleted(self.id, stable_id)
-                    deleted_n = deleted_n + 1
-                end
-                nextDelete()
-            end)
-        end
-        nextDelete()
         return { cancel = function()
             cancelled = true
             if delete_job and delete_job.cancel then delete_job:cancel() end
@@ -380,34 +394,14 @@ function Source:syncBooksAsync(opts, cb)
             cb(result, rerr)
         end)
     end
-    local pending = require("db.book").pendingDeleteIds(self.id)
-    if #pending == 0 then
-        pullPages()
-        return { cancel = function()
-            cancelled = true
-            if job and job.cancel then job:cancel() end
-        end }
-    end
-    local index = 0
-    local function nextDelete()
+    delete_job = pushPendingDeletes(self, function(n)
         if cancelled then return end
-        index = index + 1
-        if index > #pending then
-            pullPages()
-            return
-        end
-        local stable_id = pending[index]
-        delete_job = self._client:deleteBooksAsync({ stable_id }, function(wire)
-            delete_job = nil
-            if cancelled then return end
-            if wire then
-                Store.finalizeDeleted(self.id, stable_id)
-                deleted_n = deleted_n + 1
-            end
-            nextDelete()
-        end)
+        deleted_n = n
+        pullPages()
+    end)
+    if not delete_job then
+        pullPages()
     end
-    nextDelete()
     return { cancel = function()
         cancelled = true
         if job and job.cancel then job:cancel() end

@@ -152,6 +152,32 @@ do
     pending_deletes = {}
 end
 
+-- dirty_only：云端删除成功但本地撕墓碑失败，不得计 pushed
+do
+    finalized = {}
+    pending_deletes = { "gone" }
+    pending_adds = {}
+    local Store = require("book.store")
+    Store.finalizeDeleted = function(_, stable_id)
+        finalized[#finalized + 1] = stable_id
+        return false
+    end
+    fake_client.removeFromShelfAsync = function(_, _, cb)
+        cb({ ok = true })
+        return { cancel = function() end }
+    end
+    local src = Jdread.new()
+    local result
+    src:syncBooksAsync({ dirty_only = true }, function(r) result = r end)
+    Assert.eq(result.pushed, 0)
+    Assert.eq(#finalized, 1)
+    Store.finalizeDeleted = function(_, stable_id)
+        finalized[#finalized + 1] = stable_id
+        return true
+    end
+    pending_deletes = {}
+end
+
 -- dirty_only：加架失败不 markSynced，且必须留下日志
 do
     warnings = {}

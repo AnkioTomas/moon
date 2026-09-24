@@ -57,20 +57,28 @@ Assert.is_false(queued_again)
 -- 425 退避 15 秒后重试；已缓存章节由 source.chapter 自动跳过。
 callbacks[1](false, 34, "HTTP 425", 35, 1)
 Assert.eq(Queue.tasks()[1].state, "retry_wait")
+local other, other_queued = Queue.enqueue(source, { source_id = "wechat", stable_id = "book-2" })
+Assert.is_true(other_queued)
+Assert.eq(#callbacks, 1, "重试等待不得启动第二本书")
+Assert.eq(Queue.tasks()[2].stable_id, "book-2")
 local retry_schedule
 for _, item in ipairs(scheduled) do
     if item.delay == 15 then retry_schedule = item break end
 end
 Assert.not_nil(retry_schedule)
 retry_schedule.fn()
-Assert.eq(#callbacks, 2)
+Assert.eq(#callbacks, 2, "退避结束后先续跑第一本")
+Assert.eq(Queue.tasks()[1].stable_id, "book-1")
 
 callbacks[2](true, 35, nil, 35, 0)
 Assert.is_true(job.done)
-Assert.eq(#Queue.tasks(), 0)
 Assert.eq(job.result.cached, 35)
 Assert.eq(job.result.total, 35)
 Assert.eq(notices[#notices], "全本缓存完成：35 / 35 章")
+Assert.eq(#callbacks, 3, "第一本完成后才跑排队的第二本")
+callbacks[3](true, 10, nil, 10, 0)
+Assert.is_true(other.done)
+Assert.eq(#Queue.tasks(), 0)
 
 -- pending 满 64 本后拒绝入队，并带 queue_full
 do

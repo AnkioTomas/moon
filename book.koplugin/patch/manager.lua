@@ -35,19 +35,6 @@ local function paths()
     return require("utils.paths")
 end
 
---- 递归创建目录（已存在则跳过）。
----@param path string|nil
----@return nil
-local function ensureDir(path)
-    if not path or path == "" then return end
-    if lfs().attributes(path, "mode") == "directory" then return end
-    local parent = path:match("(.+)/[^/]+/?$")
-    if parent and parent ~= "" and parent ~= path then
-        ensureDir(parent)
-    end
-    lfs().mkdir(path)
-end
-
 ---@param path string
 ---@return string|nil content
 ---@return string|nil err
@@ -66,7 +53,7 @@ end
 ---@return string|nil err
 local function writeFile(path, content)
     local dir = path:match("(.+)/[^/]+$")
-    if dir then ensureDir(dir) end
+    if dir then paths().ensureDir(dir) end
     local tmp = path .. ".tmp"
     local fh, err = io.open(tmp, "wb")
     if not fh then return nil, err or ("cannot open " .. tmp) end

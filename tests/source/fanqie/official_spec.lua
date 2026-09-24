@@ -1,5 +1,5 @@
 --[[--
-番茄正文入口：走 reading API。
+番茄正文入口：client 直调 reading API。
 
 @module tests.source.fanqie.official_spec
 --]]
@@ -7,6 +7,7 @@
 local Assert = require("support.assert")
 
 package.loaded["source.fanqie.official"] = nil
-local Official = require("source.fanqie.official")
+package.loaded["source.fanqie.reading"] = nil
+local Reading = require("source.fanqie.reading")
 
-Assert.eq(type(Official.fetchAsync), "function")
+Assert.eq(type(Reading.fetchAsync), "function")
