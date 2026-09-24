@@ -21,6 +21,25 @@ local logger = require("utils.log")
 
 local Store = {}
 
+--- 源目录缓存 TTL（秒）。阅读会话 bootstrap 用这个值；下载完成判断不传 max_age。
+Store.TOC_MAX_AGE = 6 * 60 * 60
+
+local TOC_MEMORY = {
+    wechat = "source.wechat.toc",
+    jdread = "source.jdread.toc",
+    fanqie = "source.jdread.toc",
+    copymanga = "source.jdread.toc",
+}
+
+--- Store.touch 直写 books.toc 后丢掉源进程内缓存，避免 Toc.read 仍返回旧快照。
+---@param source_id string
+---@param stable_id string
+local function dropTocMemory(source_id, stable_id)
+    local modname = TOC_MEMORY[source_id]
+    if not modname then return end
+    require(modname).invalidate(source_id, stable_id)
+end
+
 --- 路径末段文件名
 ---@param path string
 ---@return string
@@ -124,6 +143,9 @@ local function registerChapter(path, source_id, stable_id, opts)
     if opts.toc_payload and not BookDB.setToc(source_id, stable_id, opts.toc_payload) then
         return "failed to save chapter toc"
     end
+    if opts.toc_payload then
+        dropTocMemory(source_id, stable_id)
+    end
     if not ChapterDB.upsert({
         path = path,
         source_id = source_id,
@@ -183,12 +205,14 @@ function Store.touch(path, identity, opts)
     return true
 end
 
---- 从数据库读取书籍目录；目录缺失或损坏返回 nil。
+--- 从数据库读取书籍目录；目录缺失、损坏或超出 max_age 返回 nil。
+--- 不传 max_age 则不过期（下载完成判断仍要旧目录）。
 ---@param identity BookIdentity
+---@param max_age number|nil
 ---@return BookChapter[]|nil
-function Store.toc(identity)
+function Store.toc(identity, max_age)
     if not identity or not identity.source_id or not identity.stable_id then return nil end
-    local payload = BookDB.getToc(identity.source_id, identity.stable_id)
+    local payload = BookDB.getToc(identity.source_id, identity.stable_id, max_age)
     if not payload then return nil end
     local ok, toc = pcall(require("json").decode, payload)
     if not ok or type(toc) ~= "table" or #toc == 0 then return nil end

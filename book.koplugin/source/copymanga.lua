@@ -144,8 +144,7 @@ local function pushDeletedCollects(self, cb)
             end
             job = self._client:setCollectAsync(comic_id, false, function(collect_wire)
                 if cancelled then return end
-                if collect_wire then
-                    Store.finalizeDeleted(self.id, stable_id)
+                if collect_wire and Store.finalizeDeleted(self.id, stable_id) then
                     pushed = pushed + 1
                 end
                 nextDelete()
@@ -273,7 +272,7 @@ function Source:getDetailAsync(identity, cb)
 end
 function Source:loadTocAsync(identity, cb)
     local cached = Toc.read(identity.source_id, identity.stable_id)
-    if cached then
+    if cached and #cached > 0 then
         local cancelled = false
         require("ui/uimanager"):nextTick(function()
             if not cancelled then cb(cached) end

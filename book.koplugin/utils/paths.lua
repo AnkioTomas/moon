@@ -33,7 +33,7 @@ local KIND_IMAGE = "image"
 --- 递归创建目录（已存在则跳过）
 ---@param path string|nil
 ---@return nil
-local function ensureDir(path)
+function P.ensureDir(path)
     if not path or path == "" then
         return
     end
@@ -42,7 +42,7 @@ local function ensureDir(path)
     end
     local parent = path:match("(.+)/[^/]+/?$")
     if parent and parent ~= "" and parent ~= path then
-        ensureDir(parent)
+        P.ensureDir(parent)
     end
     lfs.mkdir(path)
 end
@@ -89,7 +89,7 @@ end
 
 ---@return nil
 function P.ensureScreensaverDir()
-    ensureDir(P.screensaverDir())
+    P.ensureDir(P.screensaverDir())
 end
 
 --- 某源的缓存目录：cache/<source>/
@@ -220,8 +220,8 @@ end
 --- 只保证 settings 树存在。打开配置文件必须走这里，不能调 ensureLayout。
 ---@return nil
 function P.ensureSettings()
-    ensureDir(P.root())
-    ensureDir(P.settingsDir())
+    P.ensureDir(P.root())
+    P.ensureDir(P.settingsDir())
 end
 
 --- 补丁备份根目录：$DATA/.moon/backups/patches
@@ -241,21 +241,21 @@ end
 ---@param feature string
 ---@return nil
 function P.ensurePatchBackupDir(feature)
-    ensureDir(P.patchBackupDir(feature))
+    P.ensureDir(P.patchBackupDir(feature))
 end
 
 --- 保证 fonts 目录存在
 ---@return nil
 function P.ensureFonts()
-    ensureDir(P.root())
-    ensureDir(P.fontsDir())
+    P.ensureDir(P.root())
+    P.ensureDir(P.fontsDir())
 end
 
 --- 只保证共享缓存根存在；清理流程不能凭空猜测活跃 source_id。
 ---@return nil
 function P.ensureCacheRoot()
     P.ensureSettings()
-    ensureDir(P.cacheDir())
+    P.ensureDir(P.cacheDir())
     P.ensureScreensaverDir()
 end
 
@@ -269,7 +269,7 @@ end
 ---@return nil
 function P.ensureImageRoot()
     P.ensureCacheRoot()
-    ensureDir(P.imageRootDir())
+    P.ensureDir(P.imageRootDir())
 end
 
 --- 确保 .moon 与指定源的 cache/book/image 目录存在
@@ -278,9 +278,9 @@ end
 function P.ensureLayout(id)
     P.ensureCacheRoot()
     id = P.sanitizeSourceId(id)
-    ensureDir(P.sourceCacheDir(id))
-    ensureDir(P.bookDir(id))
-    ensureDir(P.imageDir(id))
+    P.ensureDir(P.sourceCacheDir(id))
+    P.ensureDir(P.bookDir(id))
+    P.ensureDir(P.imageDir(id))
 end
 
 --- 确保某书的工作目录存在：cache/<source>/book/<slug>/。
@@ -291,7 +291,7 @@ end
 function P.ensureBookWork(stable_id, id)
     P.ensureLayout(id)
     local dir = P.bookWorkDir(stable_id, id)
-    ensureDir(dir)
+    P.ensureDir(dir)
 end
 
 return P

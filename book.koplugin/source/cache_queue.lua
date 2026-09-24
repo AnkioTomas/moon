@@ -100,7 +100,7 @@ local function retryOrFinish(job, result)
             job.retry_tick = nil
             if waiting_retry == job then waiting_retry = nil end
             if not job.cancelled then
-                pending[#pending + 1] = job
+                table.insert(pending, 1, job)
                 changed()
                 startNext()
             end
@@ -114,8 +114,9 @@ local function retryOrFinish(job, result)
 end
 
 --- 取一个后台任务执行；一次只跑一本书，减少服务端限流和内存占用。
+--- 重试等待也占槽，避免退避窗口里第二本书开跑。
 startNext = function()
-    if active then return end
+    if active or waiting_retry then return end
     local job = table.remove(pending, 1)
     while job and job.cancelled do
         by_key[job.key] = nil
