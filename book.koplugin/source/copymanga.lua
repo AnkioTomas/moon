@@ -10,6 +10,7 @@ local SourceBase = require("source.base")
 local Toc = require("source.copymanga.toc")
 local Paths = require("utils.paths")
 local lfs = require("libs/libkoreader-lfs")
+local logger = require("utils.log")
 local _ = require("gettext")
 
 local Copymanga = {}
@@ -258,7 +259,9 @@ function Source:getDetailAsync(identity, cb)
         rememberCover(self, book)
         job = loadChapters(self._client, identity.stable_id, Mapper.groups(wire), function(chapters)
             if cancelled then return end
-            if chapters then Toc.put(self.id, identity.stable_id, chapters) end
+            if chapters and not Toc.put(self.id, identity.stable_id, chapters) then
+                logger.warn("copymanga toc persist failed", identity.stable_id)
+            end
             require("book.store").rememberMany({ book })
             cb(book)
         end)

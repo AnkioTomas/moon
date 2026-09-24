@@ -149,10 +149,11 @@ end
 ---@param identity BookIdentity
 ---@return table|nil job
 ---@return boolean queued 是否新入队
+---@return string|nil reason 入队失败原因（目前只有 queue_full）
 function Queue.enqueue(source, identity)
     local key = keyFor(source, identity)
     if by_key[key] then return by_key[key], false end
-    if #pending >= MAX_PENDING then return nil, false end
+    if #pending >= MAX_PENDING then return nil, false, "queue_full" end
     local job = {
         key = key,
         source = source,

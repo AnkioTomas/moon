@@ -17,6 +17,7 @@ local Paths = require("utils.paths")
 local DbBase = require("db.base")
 local BookDB = require("db.book")
 local ChapterDB = require("db.chapter")
+local logger = require("utils.log")
 
 local Store = {}
 
@@ -77,19 +78,24 @@ end
 --- 本地删除：标 deleted 待同步，并清章节缓存/封面。书架列表立刻看不到。
 ---@param source_id string
 ---@param stable_id string
----@return boolean
+---@return boolean ok
+---@return string|nil leftover purge 失败时为 "partial"
 function Store.markDeleted(source_id, stable_id)
     if not BookDB.markDeleted(source_id, stable_id) then
         return false
     end
     local Util = require("ffi/util")
     local dir = Paths.bookWorkDir(stable_id, source_id)
+    local leftover
     if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory" then
-        Util.purgeDir(dir)
+        if not Util.purgeDir(dir) then
+            logger.warn("book delete purge failed", dir)
+            leftover = "partial"
+        end
     end
     ChapterDB.deleteUnder(dir)
     os.remove(Paths.coverPath(stable_id, source_id))
-    return true
+    return true, leftover
 end
 
 --- 云端删除已确认：撕掉本地墓碑行。
@@ -269,7 +275,9 @@ function Store.ensureIdentity(path)
     if id then
         id.source = registry.resolve(id.source_id)
         -- 路径已在库里（chapters/books.path 命中），只需刷新打开时间
-        BookDB.touchPath(id.source_id, id.stable_id, path)
+        if not BookDB.touchPath(id.source_id, id.stable_id, path) then
+            logger.warn("book identity touch failed", id.source_id, id.stable_id, path)
+        end
         return id
     end
     if Paths.isMoonPath(path) then
@@ -277,6 +285,7 @@ function Store.ensureIdentity(path)
     end
     -- 未入库 → 当本地书登记（标题取文件名；md5 供扫盘改名识别）。
     -- 已有行（如扫盘已解析元数据、仅 path 被清掉）只补 path，不覆盖元数据。
+    -- 入库失败仍返回身份，阅读继续；书架可能暂时没有这本书。
     local row = {
         source_id = "local",
         stable_id = path,
@@ -286,9 +295,13 @@ function Store.ensureIdentity(path)
         path = path,
     }
     if not BookDB.get("local", path) then
-        BookDB.upsert(row)
+        if not BookDB.upsert(row) then
+            logger.warn("book identity register failed", path)
+        end
     end
-    BookDB.touchPath("local", path, path)
+    if not BookDB.touchPath("local", path, path) then
+        logger.warn("book identity touch failed", "local", path, path)
+    end
     return {
         source_id = "local",
         stable_id = path,

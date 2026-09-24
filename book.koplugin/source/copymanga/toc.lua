@@ -23,20 +23,39 @@ local function key(source_id, stable_id)
     return source_id .. "\31" .. stable_id
 end
 
+---@param list BookChapter[]
+---@param fetched_at integer
+---@return table
+local function build(list, fetched_at)
+    local by_uid = {}
+    for _, chapter in ipairs(list) do
+        if chapter.uid ~= nil then by_uid[tostring(chapter.uid)] = chapter.idx end
+    end
+    return { list = list, by_uid = by_uid, fetched_at = fetched_at }
+end
+
 ---@param source_id string
 ---@param stable_id string
----@return BookChapter[]|nil
-function Toc.read(source_id, stable_id)
+---@return table|nil
+local function entry(source_id, stable_id)
     local cache_key = key(source_id, stable_id)
     local hit = cache[cache_key]
-    if hit and os.time() - hit.fetched_at < TTL then return hit.list end
+    if hit and os.time() - hit.fetched_at < TTL then return hit end
     cache[cache_key] = nil
     local payload, fetched_at = require("db.book").getToc(source_id, stable_id, TTL)
     if not payload then return nil end
     local ok, list = pcall(JSON.decode, payload)
     if not ok or type(list) ~= "table" or #list == 0 then return nil end
-    putCache(cache_key, { list = list, fetched_at = fetched_at or os.time() })
-    return list
+    putCache(cache_key, build(list, fetched_at or os.time()))
+    return cache[cache_key]
+end
+
+---@param source_id string
+---@param stable_id string
+---@return BookChapter[]|nil
+function Toc.read(source_id, stable_id)
+    local hit = entry(source_id, stable_id)
+    return hit and hit.list
 end
 
 ---@param source_id string
@@ -47,24 +66,19 @@ function Toc.put(source_id, stable_id, list)
     local ok, payload = pcall(JSON.encode, list)
     if not ok or type(payload) ~= "string" then return false end
     if not require("db.book").setToc(source_id, stable_id, payload) then return false end
-    putCache(key(source_id, stable_id), { list = list, fetched_at = os.time() })
+    putCache(key(source_id, stable_id), build(list, os.time()))
     return true
 end
 
 --- 按 chapter.uid 反查 1-based idx。
 ---@param source_id string
 ---@param stable_id string
----@param uid string|nil
+---@param uid string|number|nil
 ---@return integer|nil
 function Toc.index(source_id, stable_id, uid)
     if uid == nil then return nil end
-    uid = tostring(uid)
-    local list = Toc.read(source_id, stable_id)
-    if not list then return nil end
-    for _, chapter in ipairs(list) do
-        if chapter.uid == uid then return chapter.idx end
-    end
-    return nil
+    local hit = entry(source_id, stable_id)
+    return hit and hit.by_uid[tostring(uid)]
 end
 
 --- 按 1-based idx 取 chapter.uid。
@@ -73,8 +87,8 @@ end
 ---@param idx integer|nil
 ---@return string|nil
 function Toc.uid(source_id, stable_id, idx)
-    local list = Toc.read(source_id, stable_id)
-    local chapter = list and list[tonumber(idx)]
+    local hit = entry(source_id, stable_id)
+    local chapter = hit and hit.list[tonumber(idx)]
     return chapter and chapter.uid
 end
 

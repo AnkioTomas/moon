@@ -16,6 +16,38 @@ package.preload["utils.paths"] = function()
         isMoonPath = function(path)
             return moon_paths[path] == true
         end,
+        bookWorkDir = function(stable_id, source_id)
+            return "/cache/" .. source_id .. "/" .. stable_id
+        end,
+        coverPath = function(stable_id, source_id)
+            return "/cache/" .. source_id .. "/" .. stable_id .. ".jpg"
+        end,
+    }
+end
+
+local warnings = {}
+package.preload["utils.log"] = function()
+    return {
+        warn = function(...)
+            warnings[#warnings + 1] = { ... }
+        end,
+        dbg = function() end,
+        info = function() end,
+    }
+end
+
+local purge_ok = true
+package.preload["libs/libkoreader-lfs"] = function()
+    return {
+        attributes = function(_, field)
+            if field == "mode" then return "directory" end
+            return nil
+        end,
+    }
+end
+package.preload["ffi/util"] = function()
+    return {
+        purgeDir = function() return purge_ok end,
     }
 end
 
@@ -46,6 +78,7 @@ package.preload["db.chapter"] = function()
         countByBook = function(source_id, stable_id)
             return chapter_counts[source_id .. "\0" .. stable_id] or 0
         end,
+        deleteUnder = function() return true end,
     }
 end
 
@@ -67,9 +100,11 @@ end
 local book_rows_by_path = {} -- path → books 行
 local book_rows_by_id = {} -- "sid\0stid" → books 行
 local book_upserts = {}
+local book_upsert_ok = true
 local book_batch_calls = 0
 local touch_calls = {} -- { source_id, stable_id, path, chapter_idx }
 local touch_ok = true
+local mark_deleted_ok = true
 package.preload["db.book"] = function()
     return {
         getByPath = function(path)
@@ -80,7 +115,10 @@ package.preload["db.book"] = function()
         end,
         upsert = function(row)
             book_upserts[#book_upserts + 1] = row
-            return true
+            return book_upsert_ok
+        end,
+        markDeleted = function()
+            return mark_deleted_ok
         end,
         upsertRemote = function(row)
             book_upserts[#book_upserts + 1] = row
@@ -372,6 +410,35 @@ do
     Assert.eq(#touch_calls, 1)
     book_upserts = {}
     touch_calls = {}
+end
+
+-- ── ensureIdentity：入库失败仍返回身份，并记 warn ──
+do
+    warnings = {}
+    book_upsert_ok = false
+    touch_ok = false
+    local id = Store.ensureIdentity("/lib/fail-register.epub")
+    Assert.eq(id.source_id, "local")
+    Assert.eq(id.stable_id, "/lib/fail-register.epub")
+    Assert.eq(warnings[1][1], "book identity register failed")
+    Assert.eq(warnings[2][1], "book identity touch failed")
+    book_upsert_ok = true
+    touch_ok = true
+    book_upserts = {}
+    touch_calls = {}
+    warnings = {}
+end
+
+-- ── markDeleted：标删成功、目录 purge 失败仍返回 true ──
+do
+    warnings = {}
+    purge_ok = false
+    local ok, leftover = Store.markDeleted("wechat", "gone")
+    Assert.is_true(ok)
+    Assert.eq(leftover, "partial")
+    Assert.eq(warnings[1][1], "book delete purge failed")
+    purge_ok = true
+    warnings = {}
 end
 
 -- ── touch：章节详情、目录和路径在同一事务登记 ──

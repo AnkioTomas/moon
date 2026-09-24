@@ -37,12 +37,6 @@ function PageTurnAnimation.isEnabled()
     return G_reader_settings:isTrue("swipe_animations")
 end
 
---- 补丁当前是否完整安装。
----@return boolean
-function PageTurnAnimation.isApplied()
-    return Manager.isApplied(PageTurnAnimation.FEATURE)
-end
-
 local PREV_REFRESH_KEY = "swipe_animations_prev_refresh_rate"
 
 --- 动画首次开启时把完全刷新率改成「从不」，避免全刷闪烁打断动画。
@@ -124,7 +118,7 @@ function PageTurnAnimation.checkStartup()
     _startup_checked = true
     if unsupportedReason() then return end
     if not PageTurnAnimation.isEnabled() then return end
-    if PageTurnAnimation.isApplied() then
+    if Manager.isApplied(PageTurnAnimation.FEATURE) then
         forceFullRefreshNever()
         return
     end
