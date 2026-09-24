@@ -6,6 +6,17 @@
 
 local Assert = require("support.assert")
 
+local warnings = {}
+package.preload["utils.log"] = function()
+    return {
+        warn = function(...)
+            warnings[#warnings + 1] = { ... }
+        end,
+        dbg = function() end,
+        info = function() end,
+    }
+end
+
 local fake_client = {
     configured = function() return true end,
 }
@@ -22,6 +33,9 @@ end
 
 local remembered
 local local_library = {}
+local pending_deletes = {}
+local pending_adds = {}
+local finalized = {}
 package.preload["book.store"] = function()
     return {
         reconcile = function(_, books)
@@ -30,13 +44,17 @@ package.preload["book.store"] = function()
         end,
         rememberMany = function(books) remembered = books; return true end,
         markDeleted = function() return true end,
-        finalizeDeleted = function() return true end,
+        finalizeDeleted = function(_, stable_id)
+            finalized[#finalized + 1] = stable_id
+            return true
+        end,
     }
 end
 package.preload["db.book"] = function()
     return {
         libraryStableIdsBySource = function() return local_library end,
-        pendingDeleteIds = function() return {} end,
+        pendingDeleteIds = function() return pending_deletes end,
+        pendingShelfAddIds = function() return pending_adds end,
         markSynced = function() return true end,
         getToc = function() return nil end,
         setToc = function() end,
@@ -111,6 +129,51 @@ do
     Assert.eq(shelf_calls, 2)
     Assert.eq(list_calls, 2)
     local_library = {}
+end
+
+-- dirty_only：远端删除失败不撕墓碑，且必须留下日志
+do
+    warnings = {}
+    finalized = {}
+    pending_deletes = { "gone" }
+    pending_adds = {}
+    fake_client.removeFromShelfAsync = function(_, stable_id, cb)
+        cb(nil, "network")
+        return { cancel = function() end }
+    end
+    local src = Jdread.new()
+    local result, err
+    src:syncBooksAsync({ dirty_only = true }, function(r, e) result, err = r, e end)
+    Assert.is_nil(err)
+    Assert.eq(result.pushed, 0)
+    Assert.eq(#finalized, 0)
+    Assert.eq(warnings[1][1], "jdread shelf delete push failed")
+    Assert.eq(warnings[1][2], "gone")
+    pending_deletes = {}
+end
+
+-- dirty_only：加架失败不 markSynced，且必须留下日志
+do
+    warnings = {}
+    pending_deletes = {}
+    pending_adds = { "99" }
+    local synced = {}
+    package.loaded["db.book"].markSynced = function(_, stable_id)
+        synced[#synced + 1] = stable_id
+        return true
+    end
+    fake_client.addToShelfAsync = function(_, stable_id, cb)
+        cb(nil, "denied")
+        return { cancel = function() end }
+    end
+    local src = Jdread.new()
+    local result
+    src:syncBooksAsync({ dirty_only = true }, function(r) result = r end)
+    Assert.eq(result.pushed, 0)
+    Assert.eq(#synced, 0)
+    Assert.eq(warnings[1][1], "jdread shelf push failed")
+    Assert.eq(warnings[1][2], "99")
+    pending_adds = {}
 end
 
 do

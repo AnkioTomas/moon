@@ -131,7 +131,9 @@ end
 
 package.loaded["source.fanqie"] = nil
 local src = require("source.fanqie").new()
+local settings = src.settings
 Assert.is_true(src:configured())
+Assert.eq(src.settings, settings)
 
 local count = 0
 src:syncBooksAsync({}, function(r, e)

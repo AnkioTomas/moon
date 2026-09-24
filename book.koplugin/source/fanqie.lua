@@ -35,9 +35,6 @@ function M.new()
 end
 
 function Source:configured()
-    local Settings = require("source.fanqie.settings")
-    self.settings = Settings:new()
-    self.client.settings = self.settings
     return self.settings:is_cookie_configured()
 end
 

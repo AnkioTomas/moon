@@ -46,12 +46,6 @@ function Client:new(o)
     return o
 end
 
---- 是否已登录（有会话）。
----@return boolean
-function Client:configured()
-    return Auth.hasSession()
-end
-
 --- 全量拉取书架（synckey=0 表示不做增量）。
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil

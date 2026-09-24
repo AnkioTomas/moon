@@ -82,7 +82,7 @@ function Crypto.maybe_decompress(data, compress_status)
 
     local ffi = require("ffi")
     if not Crypto._inflate_ready then
-        pcall(function()
+        local ok_cdef = pcall(function()
             ffi.cdef[[
                 typedef struct z_stream_s {
                     const unsigned char *next_in;
@@ -106,7 +106,9 @@ function Crypto.maybe_decompress(data, compress_status)
                 const char *zlibVersion(void);
             ]]
         end)
-        Crypto._inflate_ready = true
+        if ok_cdef then
+            Crypto._inflate_ready = true
+        end
     end
 
     local ok_lib, libz = pcall(function()

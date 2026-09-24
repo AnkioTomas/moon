@@ -46,6 +46,11 @@ do
     Assert.is_nil(Toc.uid("copymanga", "comic-a", 99))
     Assert.is_nil(Toc.index("copymanga", "comic-a", "missing"))
     Assert.is_nil(Toc.index("copymanga", "comic-a", nil))
+    -- 数字 uid 与字符串 uid 同一键
+    local numbered = { { idx = 1, uid = 10, title = "话" } }
+    Assert.is_true(Toc.put("copymanga", "comic-n", numbered))
+    Assert.eq(Toc.index("copymanga", "comic-n", 10), 1)
+    Assert.eq(Toc.index("copymanga", "comic-n", "10"), 1)
 end
 
 do

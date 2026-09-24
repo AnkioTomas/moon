@@ -127,11 +127,13 @@ local function pushDeletedMembers(self, cb)
             return
         end
         local stable_id = pending[index]
-        job = self._client:removeFromShelfAsync(stable_id, function(wire)
+        job = self._client:removeFromShelfAsync(stable_id, function(wire, err)
             if cancelled then return end
             if wire then
                 Store.finalizeDeleted(self.id, stable_id)
                 pushed = pushed + 1
+            elseif err then
+                logger.warn("jdread shelf delete push failed", stable_id, err)
             end
             nextDelete()
         end)
@@ -173,12 +175,14 @@ local function pushMissingShelfMembers(self, remote_ids, cb)
             return
         end
         local stable_id = missing[index]
-        job = self._client:addToShelfAsync(stable_id, function(wire)
+        job = self._client:addToShelfAsync(stable_id, function(wire, err)
             if cancelled then return end
             if wire then
                 pushed = pushed + 1
                 if remote_ids then remote_ids[stable_id] = true end
                 BookDB.markSynced(self.id, stable_id)
+            elseif err then
+                logger.warn("jdread shelf push failed", stable_id, err)
             end
             nextMissing()
         end)

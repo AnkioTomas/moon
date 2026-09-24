@@ -35,7 +35,10 @@ function Detail:cacheAllChapters()
         stable_id = book.stable_id,
         book = book,
     })
-    if not job then return end
+    if not job then
+        UIManager:show(InfoMessage:new{ text = _("缓存队列已满"), timeout = 3 })
+        return
+    end
     self._cache_job = job
     UIManager:show(InfoMessage:new{
         text = queued and _("已加入后台缓存队列") or _("全本缓存任务已在后台运行"),

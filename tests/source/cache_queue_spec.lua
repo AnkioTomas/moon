@@ -71,3 +71,22 @@ Assert.eq(#Queue.tasks(), 0)
 Assert.eq(job.result.cached, 35)
 Assert.eq(job.result.total, 35)
 Assert.eq(notices[#notices], "全本缓存完成：35 / 35 章")
+
+-- pending 满 64 本后拒绝入队，并带 queue_full
+do
+    local running, queued = Queue.enqueue(source, { stable_id = "fill-1" })
+    Assert.not_nil(running)
+    Assert.is_true(queued)
+    local accepted = 1
+    local reason
+    for i = 2, 80 do
+        local next_job, _, why = Queue.enqueue(source, { stable_id = "fill-" .. i })
+        if not next_job then
+            reason = why
+            break
+        end
+        accepted = accepted + 1
+    end
+    Assert.eq(accepted, 65)
+    Assert.eq(reason, "queue_full")
+end
