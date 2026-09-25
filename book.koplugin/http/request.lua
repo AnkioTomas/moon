@@ -42,7 +42,7 @@ HTTP 请求原语（Turbo，非阻塞，唯一网络栈）
 ---@field password string|nil auth_password 别名（get/post）
 ---@field accept string|nil get/post 默认 Accept
 ---@field content_type string|nil POST body 的 Content-Type
----@field on_progress fun(bytes: number)|nil 仅 download
+---@field on_progress fun(bytes: number, total: number|nil)|nil 仅 download；total 取自 Content-Length
 ---@field max_bytes number|nil 仅 download；超限失败
 ---@field cache_ttl number|nil 仅 GET；>0 时走 http.cache，秒
 ---@field query table|nil 仅参与 cache 键；url 已带 query 时可省略
@@ -675,7 +675,7 @@ function Request.download(opts, dest, cb)
     local max_bytes = tonumber(opts and opts.max_bytes)
 
     local file, open_err = io.open(tmp, "wb")
-    local written = 0
+    local written, total = 0, nil
     local response = {}
     local write_err
     logger.dbg("book.http download start", target, safeUrl(opts and opts.url))
@@ -705,8 +705,8 @@ function Request.download(opts, dest, cb)
         on_headers = function(code, headers)
             response.code = code
             response.headers = headers
-            local content_length = headers and headers.get and headers:get("Content-Length", true)
-            if max_bytes and tonumber(content_length) and tonumber(content_length) > max_bytes then
+            total = tonumber(headers and headers.get and headers:get("Content-Length", true))
+            if max_bytes and total and total > max_bytes then
                 abort("download too large")
             end
         end,
@@ -722,7 +722,7 @@ function Request.download(opts, dest, cb)
                 return
             end
             written = written + #chunk
-            if opts and opts.on_progress then opts.on_progress(written) end
+            if opts and opts.on_progress then opts.on_progress(written, total) end
         end,
         on_done = function(err)
             local pok, closed, close_err = pcall(function() return file:close() end)

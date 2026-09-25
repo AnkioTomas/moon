@@ -114,6 +114,7 @@ local dialog = { shown = 0, closed = 0, progress = nil }
 package.preload["ui/widget/progressbardialog"] = function()
     return {
         new = function(_, opts)
+            dialog.opts = opts
             return {
                 show = function() dialog.shown = dialog.shown + 1 end,
                 close = function() dialog.closed = dialog.closed + 1 end,
@@ -259,7 +260,7 @@ function client:downloadBookAsync(stable_id, path, on_progress, cb)
     local file = assert(io.open(path, "wb"))
     file:write(rec.download_body or "PK\003\004book")
     file:close()
-    if on_progress then on_progress(8) end
+    if on_progress then on_progress(8, rec.download_total) end
     cb(rec.download_ok ~= false, rec.download_err)
     return { cancel = function() end }
 end
@@ -335,20 +336,36 @@ do
     resetRec()
     touches = {}
     dialog.shown, dialog.closed, dialog.progress = 0, 0, nil
+    rec.download_total = 8
 
     local opened, open_err
     src:openBookAsync({
         source_id = "moon",
         stable_id = "library/a.epub",
-        book = { title = "A", fileSize = 8 },
+        book = { title = "A" },
     }, nil, function(p, err) opened, open_err = p, err end)
     Assert.eq(rec.download_count, 1)
     Assert.eq(rec.download_id, "library/a.epub")
     Assert.eq(rec.download_path, path .. ".part")
+    -- 先出无进度条的框，Content-Length 到了换成带条的，结束全部关掉。
+    Assert.eq(dialog.shown, 2)
+    Assert.eq(dialog.closed, 2)
+    Assert.eq(dialog.opts.progress_max, 8)
     Assert.eq(dialog.progress, 8)
     Assert.eq(opened, path)
     Assert.is_nil(open_err)
     Assert.eq(touches[1].path, path)
+
+    -- 服务端不给 Content-Length：只显示标题框，不重建。
+    os.remove(path)
+    resetRec()
+    dialog.shown, dialog.closed, dialog.progress = 0, 0, nil
+    opened = nil
+    src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p) opened = p end)
+    Assert.eq(dialog.shown, 1)
+    Assert.eq(dialog.closed, 1)
+    Assert.is_nil(dialog.opts.progress_max)
+    Assert.eq(opened, path)
 
     local registered_path = open_dir .. "/legacy.epub"
     local registered = assert(io.open(registered_path, "wb"))

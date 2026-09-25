@@ -226,27 +226,30 @@ function Source:openBookAsync(identity, _opts, cb)
             local book = identity.book or {}
             local title = book.title
                 or (identity.stable_id:match("([^/\\]+)$") or identity.stable_id)
-            local size = tonumber(book.fileSize or book.filesize or book.size or book.file_size)
-            local has_dialog, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
-            if has_dialog and ProgressbarDialog then
+            local ProgressbarDialog = require("ui/widget/progressbardialog")
+            local dialog_total
+            -- progress_max 只能在构造时给；先出无进度条的框，拿到 Content-Length 后换成带条的。
+            ---@param total number|nil
+            local function showDialog(total)
+                closeDialog()
+                dialog_total = total
                 dialog = ProgressbarDialog:new{
                     title = _("正在下载…"),
                     subtitle = title,
-                    progress_max = (size and size > 0) and size or nil,
+                    progress_max = total,
                     refresh_time_seconds = 1,
                     dismissable = false,
                 }
                 dialog:show()
-            else
-                require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
-                    text = _("正在下载…"),
-                })
             end
+            showDialog(nil)
 
             local temp_path = path .. ".part"
-            self._client:downloadBookAsync(identity.stable_id, temp_path, dialog and function(bytes)
-                if dialog then dialog:reportProgress(bytes) end
-            end or nil, function(ok, err)
+            self._client:downloadBookAsync(identity.stable_id, temp_path, function(bytes, total)
+                if not dialog then return end
+                if total and total > 0 and total ~= dialog_total then showDialog(total) end
+                dialog:reportProgress(bytes)
+            end, function(ok, err)
                 closeDialog()
                 if not ok then
                     os.remove(temp_path)

@@ -308,7 +308,7 @@ end
 --- Download without blocking the UI on LuaSocket.
 ---@param filename string
 ---@param temp_path string
----@param on_progress fun(bytes: number)|nil
+---@param on_progress fun(bytes: number, total: number|nil)|nil
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:downloadBookAsync(filename, temp_path, on_progress, cb)
