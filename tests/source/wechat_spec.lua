@@ -788,6 +788,35 @@ do
     Assert.eq(calls[1].abstract, "旧划线")
     Assert.eq(chapter_fetches, 0)
 
+    -- 想法列表只拿到一页（hasMore）：不在这页的 review id 不能当云端已删清掉，
+    -- 否则会走 addReview 在云端重建一条重复想法。
+    local real_my_reviews = fake_client.myReviewsAsync
+    fake_client.myReviewsAsync = function(_, _, cb)
+        cb({ reviews = { { review = { reviewId = "rv1" } } }, hasMore = 1, totalCount = 101 })
+        return { cancel = function() end }
+    end
+    local far = {
+        drawer = "lighten", text = "旧划线", wr_range = "0-3",
+        wr_bookmark_id = "bm1", wr_review_id = "rv-far", note = "第101条想法",
+        wr_update_review = true,
+    }
+    ok, err = push({ far })
+    Assert.is_true(ok, tostring(err))
+    Assert.eq(#calls, 1)
+    Assert.eq(calls[1].api, "editReview")
+    Assert.eq(calls[1].review_id, "rv-far")
+
+    -- 全量列表里确实没有：视为云端已删，按新想法重建（原有语义）。
+    fake_client.myReviewsAsync = function(_, _, cb)
+        cb({ reviews = { { review = { reviewId = "rv1" } } }, hasMore = 0, totalCount = 1 })
+        return { cancel = function() end }
+    end
+    far.wr_review_id, far.wr_update_review = "rv-far", true
+    ok = push({ far })
+    Assert.is_true(ok)
+    Assert.eq(calls[1].api, "addReview")
+    fake_client.myReviewsAsync = real_my_reviews
+
     -- 已有划线但还没有 review：走 add
     ok = push({
         { drawer = "lighten", text = "旧划线", wr_range = "0-3", wr_bookmark_id = "bm1", note = "新想法" },

@@ -133,7 +133,7 @@ end
 local Download = require("ime.download")
 local MoonSettings = require("utils.settings")
 
-local dest = Paths.pinyinDictPath()
+local dest = Paths.imeDictPath("pinyin")
 
 local function cleanup()
     os.remove(dest)

@@ -86,7 +86,7 @@ do
     Assert.eq(Paths.bookWorkDir("sid", "moon"),
         root .. "/cache/moon/book/" .. Paths.slugFor("sid"))
     Assert.eq(Paths.dbPath(), root .. "/book.sqlite3")
-    Assert.eq(Paths.pinyinDictPath(), root .. "/dictionary.sqlite3")
+    Assert.eq(Paths.imeDictPath("pinyin"), root .. "/dictionary.sqlite3")
     Assert.eq(Paths.imeDictPath("wubi"), root .. "/dictionary-wubi.sqlite3")
     Assert.eq(Paths.imeDictPath("cangjie"), root .. "/dictionary-cangjie.sqlite3")
     Assert.eq(Paths.imeDictPath("zhuyin"), root .. "/dictionary-zhuyin.sqlite3")

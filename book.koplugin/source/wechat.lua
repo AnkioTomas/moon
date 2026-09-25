@@ -640,6 +640,16 @@ function Source:pullStatsAsync(cb)
         end }
 end
 
+--- myReviewsAsync 只取一页；只有确认是全量时，“不在列表里”才等于“云端已删”。
+---@param reviews table|nil
+---@return boolean
+local function reviewsComplete(reviews)
+    if type(reviews) ~= "table" then return false end
+    local total_count = tonumber(reviews.totalCount)
+    return tonumber(reviews.hasMore or 0) ~= 1
+        and (not total_count or total_count <= #(reviews.reviews or {}))
+end
+
 --- 拉取某本书的划线与想法，合并成 KOReader 注解数组。
 --- 想法接口失败只记日志不算错：划线本身已经可用。
 ---@param identity BookIdentity
@@ -667,12 +677,7 @@ function Source:pullNotesAsync(identity, cb)
             local annotations = Notes.toAnnotations(
                 wire, nil, reviews, identity.source_id, identity.stable_id
             )
-            local review_count = type(reviews) == "table" and #(reviews.reviews or {}) or 0
-            local total_count = type(reviews) == "table" and tonumber(reviews.totalCount) or nil
-            local authoritative = type(reviews) == "table"
-                and tonumber(reviews.hasMore or 0) ~= 1
-                and (not total_count or total_count <= review_count)
-            cb(annotations, nil, { authoritative = authoritative })
+            cb(annotations, nil, { authoritative = reviewsComplete(reviews) })
         end)
     end)
     return { cancel = function()
@@ -1094,8 +1099,9 @@ function Source:pushNotesAsync(identity, annotations, cb)
                     finish(nil, review_err or _("想法上传失败"))
                     return
                 end
-                local review_ids = Notes.reviewIds(reviews)
-                for _, item in ipairs(annotations or {}) do
+                -- 只拿到一页时保留 id：误清会让 addReviewAsync 在云端重建重复想法。
+                local review_ids = reviewsComplete(reviews) and Notes.reviewIds(reviews)
+                for _, item in ipairs(review_ids and annotations or {}) do
                     if type(item) == "table" and not item.wr_deleted and item.wr_review_id
                             and not review_ids[tostring(item.wr_review_id)] then
                         item.wr_review_id = nil
