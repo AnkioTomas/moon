@@ -149,6 +149,7 @@ function Session.onReaderReady(plugin)
     else
         ChapterMode.clearActiveChapter(Session._snapshot)
         Snapshot.refresh(Session._snapshot)
+        require("ui.reader.session.auto_toc").start(Session._snapshot)
     end
     updateReadState(Session._snapshot)
     bootstrapReading(plugin, Session._snapshot, skip_pull)
@@ -210,6 +211,7 @@ function Session.onCloseDocument(plugin)
         require("book.reader_prefs").captureAndSave(plugin.ui, Session._snapshot.identity)
     end
     syncReading(plugin, "document_close")
+    require("ui.reader.session.auto_toc").stop(Session._snapshot)
     if ChapterMode.onCloseDocument(Session._snapshot) then
         require("book.progress").clearConflicts()
     end
