@@ -6,8 +6,8 @@
 
 ## 设计
 
-- 传输：`ai/client.lua` 走 `http.request`（含 SSE）
-- `ai/sse.lua` 解析流式；`ai/json.lua` 从模型输出里抽 JSON
+- 传输：`ai/client.lua` 走 `http.request` 的非流式 POST；当前不支持流式输出
+- `ai/json.lua` 从模型输出里抽 JSON
 - 密钥/端点/模型在设置里；**禁止写进日志**
 - X-Ray 等上层只调门面，不关心 provider 细节
 
@@ -25,12 +25,7 @@ AI.chat({
     …
 end)
 
-local h = AI.chatStream(messages, {
-    on_delta = function(chunk) end,
-}, function(full, err) end)
-h.cancel()
-
--- 让模型吐结构化 JSON 再解析
+-- 让模型吐结构化 JSON 再解析；opts 可省略（第二参直接传 cb）
 AI.jsonExtract(messages, opts, function(obj, err) end)
 ```
 

@@ -18,8 +18,8 @@
 local Manager = require("patch.manager")
 
 Manager.install("page_turn_animation")
-Manager.uninstall("page_turn_animation")
-Manager.isInstalled("page_turn_animation")
+Manager.restore("page_turn_animation")    -- 从备份还原
+Manager.isApplied("page_turn_animation")
 ```
 
 main 初始化时 `patch.manager.onCreate` 顺带跑各补丁门面的启动自检（如翻页动画）。失败要保留备份并报真实错误，不能留下半应用内核。

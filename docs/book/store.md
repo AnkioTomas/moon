@@ -20,7 +20,7 @@ flowchart TD
 `ensureIdentity` 在解析成功后还会：
 
 1. `registry.resolve(source_id)` → 写入 `identity.source`（current 匹配则复用，否则建非活跃实例）
-2. `BookDB.touchPath` 刷新打开时间
+2. `BookDB.touchPath` 登记 / 刷新 `books.path`（不写时间戳）
 
 `.moon` 内未知文件返回 `nil`（缓存残片不能猜身份）。`.moon` 外未入库文件当 local 登记：已有行只补 path，不覆盖元数据。
 
@@ -75,7 +75,7 @@ if not Store.isCurrentDocument(ui, identity) then return end
 | `isDownloaded(book)` | bool | 章源看全章缓存；整本看 `path` |
 | `reconcile(source_id, books)` | `SyncResult?, err` | 远端快照对账 |
 | `rememberMany(books)` | — | `upsertRemoteMany` |
-| `markDeleted(source_id, stable_id)` | — | 软删 + 清工作目录/章缓存 |
+| `markDeleted(source_id, stable_id)` | `ok, leftover?` | 软删 + 清工作目录/章缓存；清理不完整时 `leftover="partial"` |
 | `finalizeDeleted(...)` | — | 云端真删成功后撕墓碑 |
 | `isCurrentDocument(ui, identity)` | bool | 比 source/stable/chapter |
 

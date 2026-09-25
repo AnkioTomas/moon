@@ -34,7 +34,7 @@ IME.layout()
 IME.layouts()              -- 供设置页
 
 -- main 初始化
-require("ime.candidate_bar").install()
+require("ime.candidate_bar").install({ enabled = IME.isEnabled })  -- 由 IME.onCreate / setEnabled(true) 调用
 ```
 
 设置页：总开关 + 当前方案选择 + 词库下载入口（见 [`dictionary`](dictionary.md)）。

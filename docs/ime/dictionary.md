@@ -21,12 +21,12 @@
 ```lua
 local Download = require("ime.download")
 
-Download.start(layout_id, {
-    on_progress = function(pct) end,
-    on_done = function(ok, err)
-        -- 成功后 dictionary 模块须 reset 连接
-    end,
-})
+-- method: "pinyin" | "wubi" | "cangjie" | "zhuyin"；已在下载时 cb(false, "already downloading")
+Download.ensure(method, function(ok, err)
+    -- 落位后 download 已调用 Registry.reset(method)，调用方无需再 reset
+end, function(stage, done, total, idx, count) end)
+
+Download.downloading()  -- 是否有下载在进行
 ```
 
 查询走各方法的 `dictionary.lua`（由候选栏调用），业务代码不要直接拼 SQL 路径。

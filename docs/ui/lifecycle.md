@@ -9,9 +9,9 @@ new → Create → Resume ↔ Pause → Destroy
 ```
 
 Resume / Destroy 会自动补中间阶段。处理函数抛错时状态**不回滚**。  
-Pause / Destroy 进入前 bind 层先 `abortWork()`，取消已登记的 jobs 与 http。
+Pause / Destroy 进入前 bind 层先 `abortWork()`，取消已登记的句柄（`http` 一张表）。
 
-业务事件用 `onEvent`，**不**改变生命周期状态，也不能经 `dispatch` 当分发业务事件。
+业务事件用 `onEvent`，**不**改变生命周期状态。阶段补全由 bind 内部完成，没有公开的 `dispatch`。
 
 ---
 
@@ -56,7 +56,7 @@ function Desktop:onResume()
 end
 ```
 
-组合模式把句柄登记到 **该对象自己的** `lifecycle:addHttp/addJob`，不要塞进 Desktop。Desktop 只转发阶段。
+组合模式把句柄登记到 **该对象自己的** `lifecycle:addHttp`，不要塞进 Desktop。Desktop 只转发阶段。
 
 ### API
 
@@ -64,12 +64,11 @@ end
 |---|---|
 | `Lifecycle:new()` / `attach(owner)` | 继承构造 / 组合 |
 | `onCreate` / `onResume` / `onPause` / `onDestroy` | 阶段入口 |
-| `dispatch(stage, …)` | 按名分发；Resume/Destroy 带补全 |
 | `uiReady()` | 仅 `state == "Resume"` |
-| `addJob(job)` / `addHttp(handle)` | 登记；Pause/Destroy 取消 |
-| `abortWork()` | 手动清空两张表 |
+| `addHttp(handle)` | 登记任何带 `cancel` 的句柄（HTTP、源异步、Job）；Pause/Destroy 取消 |
+| `abortWork()` | 手动取消并清空已登记句柄 |
 
-Job 认 `:cancel()`，HTTP 认 `.cancel()`；`abortWork` 两种都处理。
+取消统一以 `pcall(handle.cancel, handle)` 调用，`.cancel()` 与 `:cancel()` 两种写法的句柄都能正确取消；单个失败不影响其它。
 
 ### 父子约定
 

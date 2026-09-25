@@ -23,7 +23,7 @@ Catalog.listLibraryAsync(source_id, {
     search = "关键词",
     category = "…",
     page = 1,
-    per_page = 20,
+    page_size = 24,  -- 缺省 24，须与网格容量一致
 }, function(data, err)
     -- data: BookListResult { data = Book[], … }
 end)

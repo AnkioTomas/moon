@@ -15,17 +15,18 @@ local h = Request.get(url, {
     headers = { Authorization = "…" },
     cache_ttl = 3600,
     timeout = 20,
-}, function(res, err)
-    if not Request.ok(res and res.code) then return end
-    local body = res.body
+}, function(body, err, res)
+    -- 成功：body 为响应体字符串，err 为 nil；失败：body 为 nil，err 为原因
+    -- 需要状态码 / 响应头时看第三参 res
+    if not body then return end
 end)
 
-Request.post(url, body, { headers = … }, cb)
+Request.post(url, body, { headers = … }, cb)  -- 回调同 get：cb(body, err, res)
 Request.download({ url = url }, dest_path, cb)
 Request.stream({ url = url }, {
-    on_headers = function(res) end,
-    on_chunk = function(chunk) end,
-    on_done = function(res, err) end,
+    on_headers = function(code, headers) end,
+    on_data = function(chunk) end,
+    on_done = function(err) end,  -- err 为 nil 表示成功收完
 })
 
 h.cancel()

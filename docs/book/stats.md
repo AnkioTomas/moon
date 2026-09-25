@@ -12,7 +12,7 @@
 - 时长 `<1s` 或 `page<1` → 丢弃
 - 落库：`record_type=page`，`sync_status=0`
 
-推送批次 `PUSH_BATCH=200`。是否从远端拉合成桶看源能力 `stats_pull`。有云端 day 桶的日期以云端为准，避免双计（细节见 db 文档）。
+推送批次 `PUSH_BATCH=200`。同一源同时只允许一批在飞：`Stats.push` 在读行前检查按 `source.id` 记录的令牌，已有推送时直接 `done(true, "busy")`，不读行、不调源；`syncAsync` 把 `busy` 当作“本轮无可推”转去拉取，在飞那一轮会循环推到空。令牌在源回调或 `job:cancel()` 时释放，被取消那轮的迟到回调不会清掉新一轮的令牌。这条约束防止关书推送与联网重推（`book.sync.retryDirtyAsync`）重叠时同一批行被报两遍。是否从远端拉合成桶看源能力 `stats_pull`。有云端 day 桶的日期以云端为准，避免双计（细节见 db 文档）。
 
 worker 子进程禁止写本表。
 
@@ -36,7 +36,7 @@ end)
 
 -- 全量或编排
 Stats.syncAsync(source, opts, cb)
-Stats.push(source, done)
+Stats.push(source, done)   -- done(ok, result, confirmed)；result 为源结果 / "empty" / "busy" / 错误
 Stats.pull(source, done)   -- 仅 stats_pull=true 的源有意义
 ```
 

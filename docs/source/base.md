@@ -77,8 +77,9 @@ end
 
 | 事件 | 基类默认 |
 |---|---|
-| `desktop_open` / `desktop_resume` / `home_open` | 节流 syncBooks / syncStats |
-| `library_refresh_request` | `force` 书架同步 |
+| `home_open` / `desktop_resume` | syncStats（内部节流）+ syncBooks（`BOOKS_REFRESH_INTERVAL` 节流） |
+| `desktop_open` | syncStats（内部节流）+ 每次 syncBooks |
+| `library_refresh_request` | `force` 同时刷统计与书架 |
 | `network_connected` | 空 |
 | `reader_open` / `fm_open` / `document_close` / `suspend` / `chapter_changed` / `page_changed` / `book_info_request` | 空 |
 

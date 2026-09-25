@@ -29,7 +29,7 @@ Translate.onCreate()  -- main 里 hook Translator
 -- 一般不直接调 edge；由 Translator 路径进入 popup
 -- 需要裸请求时：
 local Edge = require("translate.edge")
-Edge.translate(text, source_lang, target_lang, cb)
+Edge.translateAsync(text, target_lang, source_lang, function(translated, detected_lang, err) end)  -- 注意目标语在前
 ```
 
 划词菜单触发时可带 `from_highlight` / `index`，决定弹窗是否显示「存笔记」以及编辑哪一条。

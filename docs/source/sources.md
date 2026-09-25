@@ -8,12 +8,12 @@
 
 | id | 形态 | stable_id | 书架 | 打开 | 进度/笔记/统计 | 其它 |
 |---|---|---|---|---|---|---|
-| `local` | book | 文件绝对路径 | 扫盘 | 直接 path + touch | 无远端 | scrape/edit；`dirty_only` 跳过扫盘 |
+| `local` | book | 文件绝对路径；WebDAV 模式为 `webdav://相对路径` | 扫盘（WebDAV 模式扫远端目录并同步书目） | 直接 path + touch；WebDAV 按需下载 | 无云书库 API；WebDAV 模式经 `syncProgressAsync` 推进度文件 | scrape/edit；`dirty_only` 跳过扫盘 |
 | `moon` | book | 远端文件名 | 快照↔（无 add API，delete↑） | 下载校验后打开 | 双向；`stats_pull` | search/refresh/insight |
-| `wechat` | chapter | 微信 bookId | 快照↔ + add/delete | 章 HTML | 双向；`stats_pull` | 源内书城；全章缓存能力 |
+| `wechat` | chapter | 微信 bookId | 快照↔ + add/delete | 章 HTML | 双向；`stats_pull` | 全章缓存（`cacheAllChaptersAsync`） |
 | `jdread` | chapter | 京东侧 ID | 远端书架 | 章内容 | 进度等（无 `stats_pull`） | search/refresh/insight |
 | `copymanga` | chapter | 漫画 ID | 收藏列表；删=取消收藏 | 章 CBZ | 进度（章粒度；push 靠带 token 的 chapter GET 副作用） | search/insight |
-| `fanqie` | chapter | 番茄侧 ID | 书架（暂无脏成员推送；`dirty_only` skipped） | 官方网页正文 | 阅读位置由章节框架管 | cookie/扫码；旧插件 Cookie 迁入 `.moon/settings/fanqie.lua` |
+| `fanqie` | chapter | 番茄侧 ID | 书架（暂无脏成员推送；`dirty_only` skipped） | App reading API 正文（`batch_full` 解密） | 进度双向（`getProgressAsync` / `putProgressAsync`）；无笔记、无 `stats_pull` | cookie/扫码；配置落 `utils.settings.getSource("fanqie")` |
 
 ## 能力字段（UI 实际读取）
 
@@ -30,9 +30,9 @@
 
 ## 番茄补充
 
-- 正文仅官方网页接口；无完整阅读权限时返回错误。
+- 正文仅走 App reading API（`registerkey` → `batch_full` → 解密）；失败时 `cb(nil, err)`（风控空响应、解密失败等）。
 - 网络只走 `http.request`（异步 + `{ cancel }`），禁止 `socket.http` / 源内自造 Async。
-- 协议改编自 fanqie.koplugin 网页适配版；发布物不含 Cookie/正文缓存。
+- 书架 / 目录等走网页 API；正文协议来自 fanqie-re（见 `source/fanqie/reading.lua`）。发布物不含 Cookie/正文缓存。
 - 章缓存走 `source.chapter` → `Paths.chapterPath`；配置走 `utils.settings.getSource("fanqie")`。
 
 ## 怎么加一个源

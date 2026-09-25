@@ -8,7 +8,7 @@
 
 | 文档 | 讲什么 |
 |---|---|
-| [`lifecycle`](lifecycle.md) | Create/Resume/Pause/Destroy、addJob/addHttp |
+| [`lifecycle`](lifecycle.md) | Create/Resume/Pause/Destroy、addHttp |
 | [`desktop`](desktop.md) | 全屏壳、Tab、首页组件 |
 | [`session`](session.md) | 阅读会话、切章、关书只推 |
 

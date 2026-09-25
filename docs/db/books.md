@@ -31,7 +31,7 @@
 | `deleted` | `0` 在架有效 / `1` 软删或非成员 | reconcile / `setLibraryMembership` / upsert | catalog | 列表过滤 `deleted=0` |
 | `sync_status` | `0` 待上传 / `1` 已同步 | 本地写=0；远端收敛=1 | unsynced / sync | 成员与展示共用 |
 | `reader_prefs` | 全书排版 JSON | `setReaderPrefs` | 开书注入 sidecar | 仅本地；INSERT 时 `deleted=1` |
-| `toc` / `toc_fetched_at` | 目录缓存 | `setToc` / `clearToc` | 按章会话 / 源 | 不透明 JSON；TTL 由调用方解释 |
+| `toc` / `toc_fetched_at` | 目录缓存 | `setToc`（读侧 `getToc(..., max_age)`） | 按章会话 / 源 | 不透明 JSON；TTL 由调用方解释，过期只让 `getToc` 返回 nil，不删列（没有 `clearToc`） |
 | `read_state` | 0 可自动已读 / 1 已读 / 2 强制未读 | `setRead` / 进度完成 | 筛选与绑带 | 与 `pending_progress.fraction` 联动 |
 
 已删除列：`percent`、`in_library`、`metadata_dirty`、`metadata_updated_at`、`is_new`、`fetched_at`。

@@ -59,4 +59,4 @@ end
 
 路由拆分约定：`file.lua` / `input.lua` 等函数**首参即 self**，由 server 装配为 `_route*`，**不要**反向 require server。
 
-静态页在 `remote/html/`：`index.html`（入口）、`file.html`、`input.html`。
+静态页在 `remote/html/`：`index.html`（入口）、`file.html`、`input.html`、`clipboard.html`、`settings.html`（各配同名 js，公共样式 `style.css`）。

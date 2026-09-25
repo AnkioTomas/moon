@@ -16,7 +16,7 @@
 
 ```lua
 local Weather = require("online.weather")
-Weather:fetch(function(data, err) end)
+Weather:fetch({}, function(data, err) end)  -- 第一参 args（可含 ttl 覆盖，0=不走缓存）
 
 -- 新接口：
 local Online = require("online.base")

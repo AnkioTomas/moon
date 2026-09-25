@@ -10,10 +10,10 @@
 起始章（未指定 `chapter_idx` 时）：
 
 1. 读 `pending_progress`（有 `chapter_idx`，或仅有 `fraction>0` 时用 fraction×toc 折算）
-2. 再回落远端进度  
-夹到 `[1, #toc]`。已无 `books.last_chapter_idx`。
+2. 否则第 1 章  
+夹到 `[1, #toc]`。远端进度不参与选章，由开书后 `Progress.pull` 收敛（不一致时弹冲突框，可跳章）。已无 `books.last_chapter_idx`。
 
-目录：优先 `books.toc` / `toc_fetched_at`；TTL 由调用方解释（如 wechat ~6h）。进度章序超出缓存 → 弃缓存重拉一次。
+目录：优先 `books.toc` / `toc_fetched_at`；TTL 由调用方解释（如 wechat ~6h）。wechat 拉进度时若 `chapter_uid` 不在缓存目录里，会走一次 `loadTocAsync`，但缓存仍在 TTL 内时直接复用缓存，不强制重拉。
 
 落盘：写 `.part` 再 rename；**`Store.touch` 成功**才把 path 交给调用方。  
 HTML ready = 文件存在且远程 `img src` 已内联；按 size+mtime 签名缓存，上限 512 条。
@@ -30,7 +30,7 @@ HTML ready = 文件存在且远程 `img src` 已内联；按 size+mtime 签名�
 
 ```lua
 function Source:openBookAsync(identity, opts, cb)
-    return require("source.chapter").openWithUi(self, identity, opts, {
+    return require("source.chapter").openWithUi(self, identity, identity.book, opts, {
         -- 注入：loadToc / downloadChapter / progress 等
     }, cb)
 end

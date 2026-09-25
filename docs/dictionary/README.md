@@ -20,7 +20,7 @@ local Dict = require("dictionary")
 
 Dict.isEnabled()
 Dict.onCreate()   -- main 初始化时 hook
--- setEnabled(false) 回退原生
+-- 开关是阅读设置 dictionary_enabled（设置页 readerToggle）；关掉即回退原生，没有 Dict.setEnabled
 
 -- 管理/下载由菜单进入；业务代码一般只调 init
 ```
