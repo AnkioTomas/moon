@@ -8,16 +8,20 @@ Stubs.reset()
 package.preload["l10n"] = function() return { apply = function() end } end
 
 local shown, closed, dirty = {}, {}, {}
+local shown_region, closed_mode, dirty_mode, dirty_region
 package.preload["ui/uimanager"] = function()
     return {
-        show = function(_, widget)
+        show = function(_, widget, _, region)
             shown[#shown + 1] = widget
+            shown_region = region
         end,
-        close = function(_, widget)
+        close = function(_, widget, mode)
             closed[#closed + 1] = widget
+            closed_mode = mode
         end,
-        setDirty = function(_, widget)
+        setDirty = function(_, widget, mode, region)
             dirty[#dirty + 1] = widget
+            dirty_mode, dirty_region = mode, region
         end,
     }
 end
@@ -47,6 +51,14 @@ package.preload["ui/geometry"] = function()
         o.x, o.y = o.x or 0, o.y or 0
         o.w, o.h = o.w or 0, o.h or 0
         return setmetatable(o, { __index = self })
+    end
+    function Geom:combine(o)
+        local x, y = math.min(self.x, o.x), math.min(self.y, o.y)
+        return Geom:new{
+            x = x, y = y,
+            w = math.max(self.x + self.w, o.x + o.w) - x,
+            h = math.max(self.y + self.h, o.y + o.h) - y,
+        }
     end
     return Geom
 end
@@ -250,15 +262,18 @@ Assert.is_true(ReaderHighlight._book_handles_patched)
 
 local fresh = {
     selected_text = { sboxes = { first, last }, text = "词" },
-    highlight_dialog = { id = "menu" },
+    highlight_dialog = { id = "menu", movable = { dimen = { x = 0, y = 146, w = 600, h = 80 } } },
     ui = {},
     dialog = { id = "reader" },
 }
-Selection.attach(fresh)
+Assert.is_true(Selection.attach(fresh))
 Assert.not_nil(fresh._book_handles)
 Assert.eq(#shown, 1)
 Assert.eq(shown[1], fresh._book_handles)
 Assert.eq(fresh._book_handles.anchors.start.edge_x, 40)
+Assert.eq(shown_region.y, 100, "叠层只刷选区横带，不刷整屏")
+Assert.eq(shown_region.h, 44)
+Assert.eq(shown_region.w, 600)
 
 -- 按下末端手柄：固定点是起始端，手指偏移要扣掉
 local drag_calls = {}
@@ -298,6 +313,11 @@ Assert.eq(drag_calls[1].a.x, 40)
 Assert.eq(drag_calls[1].b.x, 300)
 Assert.is_nil(fresh.highlight_dialog, "一开始拖就藏菜单")
 Assert.eq(closed[1], menu_before)
+Assert.eq(closed_mode, "ui", "藏菜单不闪")
+Assert.eq(dirty[#dirty], fresh.dialog)
+Assert.eq(dirty_mode, "ui")
+Assert.eq(dirty_region.y, 100, "拖动只刷选区横带")
+Assert.eq(dirty_region.h, 44)
 Assert.is_true(overlay:onPanRelease())
 Assert.is_nil(overlay.dragging)
 Assert.is_true(fresh.reshown)
@@ -314,15 +334,16 @@ Assert.is_true(overlay:handleEvent({ handler = "onGesture", args = { n = 0 } }))
 Assert.eq(forwarded, "onGesture")
 
 local shown_before_raise = #shown
-Selection.attach(fresh)
+Assert.is_true(Selection.attach(fresh))
 Assert.eq(#shown, shown_before_raise + 1, "菜单重开后叠层抬到栈顶")
 Assert.eq(fresh._book_handles, overlay)
+Assert.not_nil(shown_region, "抬栈也只刷选区横带")
 
 local existing = {
     selected_text = { sboxes = { first, last } },
     highlight_dialog = { id = "menu" },
 }
-Selection.attach(existing, 2)
+Assert.is_false(Selection.attach(existing, 2))
 Assert.is_nil(existing._book_handles)
 
 touch = false
@@ -353,14 +374,16 @@ local closed_n = #closed
 Selection.detach(fresh)
 Assert.eq(#closed, closed_n)
 
--- 补丁：弹菜单后挂上手柄，clear / onClose 拆掉
+-- 补丁：弹菜单挂手柄由 highlight_menu 负责，这里不再包一层；clear / onClose 拆掉
 local instance = {
     selected_text = { sboxes = { first, last }, text = "词" },
+    highlight_dialog = { id = "menu" },
     ui = {},
     dialog = { id = "reader" },
 }
 ReaderHighlight.onShowHighlightMenu(instance)
-Assert.eq(instance.shown_index, nil)
+Assert.is_nil(instance._book_handles, "onShowHighlightMenu 不重复 attach")
+Selection.attach(instance)
 Assert.not_nil(instance._book_handles)
 
 ReaderHighlight.clear(instance)
@@ -374,8 +397,3 @@ ReaderHighlight.onClose(instance)
 Assert.is_true(instance.closed)
 Assert.is_nil(instance._book_handles)
 
-instance.selected_text = { sboxes = { first, last }, text = "词" }
-instance.highlight_dialog = { id = "menu" }
-ReaderHighlight.onShowHighlightMenu(instance, 4)
-Assert.eq(instance.shown_index, 4)
-Assert.is_nil(instance._book_handles, "已有标注不挂手柄")
