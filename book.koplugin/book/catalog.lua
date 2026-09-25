@@ -223,22 +223,6 @@ function Catalog.toInsight(source_id, summary, daily, daily_books, weekly_books)
     }
 end
 
----@param cb function
----@param ... any
----@return { cancel: fun() }
-local function defer(cb, ...)
-    local cancelled = false
-    local args = { ... }
-    require("ui/uimanager"):nextTick(function()
-        if not cancelled then
-            cb(unpack(args))
-        end
-    end)
-    return { cancel = function()
-            cancelled = true
-        end }
-end
-
 ---@param scope string|string[]|nil
 ---@return boolean
 local function validScope(scope)
@@ -246,15 +230,12 @@ local function validScope(scope)
         or type(scope) == "table" and #scope > 0
 end
 
---- 图书馆分页 / 搜索 / 筛选（直查 books 表）。
+--- 下一 tick 解析展示范围再查询：范围无效时 cb(nil, "invalid source_id")，否则 fn(scope)。
 ---@param source_id string
----@param opts BookListOpts|nil
----@param cb fun(data: BookListResult|nil, err: string|nil)
+---@param cb fun(data: any, err: string|nil)
+---@param fn fun(scope: string|string[])
 ---@return { cancel: fun() }
-function Catalog.listLibraryAsync(source_id, opts, cb)
-    opts = opts or {}
-    local page = math.max(1, tonumber(opts.page) or 1)
-    local page_size = math.max(1, tonumber(opts.page_size) or 24)
+local function deferScoped(source_id, cb, fn)
     local cancelled = false
     require("ui/uimanager"):nextTick(function()
         if cancelled then
@@ -266,6 +247,23 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             return
         end
         ---@cast scope string|string[]
+        fn(scope)
+    end)
+    return { cancel = function()
+            cancelled = true
+        end }
+end
+
+--- 图书馆分页 / 搜索 / 筛选（直查 books 表）。
+---@param source_id string
+---@param opts BookListOpts|nil
+---@param cb fun(data: BookListResult|nil, err: string|nil)
+---@return { cancel: fun() }
+function Catalog.listLibraryAsync(source_id, opts, cb)
+    opts = opts or {}
+    local page = math.max(1, tonumber(opts.page) or 1)
+    local page_size = math.max(1, tonumber(opts.page_size) or 24)
+    return deferScoped(source_id, cb, function(scope)
         local rows, count = require("db.book").listBySource(scope, {
             category = opts.category,
             uncategorized = opts.uncategorized,
@@ -281,9 +279,6 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
         })
         cb(Catalog.toList(rows, count, type(scope) == "string" and scope or nil))
     end)
-    return { cancel = function()
-            cancelled = true
-        end }
 end
 
 --- 分类 / 系列 /（混合时）数据源筛选项。
@@ -291,13 +286,7 @@ end
 ---@param cb fun(data: BookFiltersResult|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Catalog.filtersAsync(source_id, cb)
-    return defer(function()
-        local scope = Catalog.libraryScope(source_id)
-        if not validScope(scope) then
-            cb(nil, "invalid source_id")
-            return
-        end
-        ---@cast scope string|string[]
+    return deferScoped(source_id, cb, function(scope)
         local BookDB = require("db.book")
         local data = {
             category = BookDB.categoriesBySource(scope),
@@ -340,7 +329,7 @@ end
 function Catalog.recentShelf(source_id, limit)
     local scope = Catalog.libraryScope(source_id)
     if not validScope(scope) then
-        return nil, {}, require("gettext")("当前数据源不可用")
+        return nil, {}, _("当前数据源不可用")
     end
     ---@cast scope string|string[]
     local rows = Catalog.recentBooks(source_id, limit or 24)
@@ -392,13 +381,7 @@ end
 ---@param cb fun(data: BookListResult|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Catalog.recentBooksAsync(source_id, limit, cb)
-    return defer(function()
-        local scope = Catalog.libraryScope(source_id)
-        if not validScope(scope) then
-            cb(nil, "invalid source_id")
-            return
-        end
-        ---@cast scope string|string[]
+    return deferScoped(source_id, cb, function(scope)
         local rows = Catalog.recentBooks(source_id, limit or 24)
         cb(Catalog.toList(rows, nil, type(scope) == "string" and scope or nil))
     end)
@@ -409,13 +392,7 @@ end
 ---@param cb fun(data: BookInsightResult|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Catalog.readingInsightAsync(source_id, cb)
-    return defer(function()
-        local scope = Catalog.libraryScope(source_id)
-        if not validScope(scope) then
-            cb(nil, "invalid source_id")
-            return
-        end
-        ---@cast scope string|string[]
+    return deferScoped(source_id, cb, function(scope)
         local StatsDB = require("db.stats")
         local weekly = scope == "wechat" and StatsDB.weeklyBooksBySource(scope) or nil
         cb({

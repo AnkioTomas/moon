@@ -104,7 +104,7 @@ end
 local function paragraphsFromLines(lines, reflow)
     local paragraphs = {}
     if not reflow then
-        for _, raw in ipairs(lines or {}) do
+        for _, raw in ipairs(lines) do
             local line = trim(raw)
             if line ~= "" then
                 paragraphs[#paragraphs + 1] = { line }
@@ -120,7 +120,7 @@ local function paragraphsFromLines(lines, reflow)
             current = {}
         end
     end
-    for _, raw in ipairs(lines or {}) do
+    for _, raw in ipairs(lines) do
         local line = Text.rtrim(raw)
         if trim(line) == "" then
             flush()
@@ -227,13 +227,6 @@ local function chapterParts(title, lines, max_chars, reflow)
         parts[1] = "<h1>" .. xmlEscape(title) .. "</h1>"
     end
     return parts
-end
-
----@param title string
----@param lines string[]
----@return string
-local function chapterHtml(title, lines)
-    return chapterParts(title, lines, math.huge, false)[1]
 end
 
 ---@param source string|nil
@@ -412,28 +405,26 @@ function Text2Epub.build(opts, cb)
         error("text2epub.build: cb must be function", 2)
     end
 
+    --- 输入不可用：下一拍回调错误，返回空取消句柄。
+    ---@param err any
+    local function reject(err)
+        UIManager:nextTick(function() cb(nil, err) end)
+        return { cancel = function() end }
+    end
+
     local text = opts.text
     if type(text) ~= "string" and type(opts.source) == "string" then
         local err
         text, err = readText(opts.source)
         if not text then
-            UIManager:nextTick(function()
-                cb(nil, err or _("无法读取文本文件"))
-            end)
-            return { cancel = function() end }
+            return reject(err or _("无法读取文本文件"))
         end
     end
     if type(text) ~= "string" or trim(text) == "" then
-        UIManager:nextTick(function()
-            cb(nil, _("无文本内容"))
-        end)
-        return { cancel = function() end }
+        return reject(_("无文本内容"))
     end
     if not Text.isValidUtf8(text) then
-        UIManager:nextTick(function()
-            cb(nil, _("仅支持 UTF-8 编码的文本"))
-        end)
-        return { cancel = function() end }
+        return reject(_("仅支持 UTF-8 编码的文本"))
     end
 
     local book = Text2Epub.parse(text, opts)
@@ -449,9 +440,5 @@ function Text2Epub.build(opts, cb)
 end
 
 Text2Epub._isChapterTitle = isChapterTitle
-Text2Epub._metadataFromPath = metadataFromPath
-Text2Epub._chapterHtml = chapterHtml
-Text2Epub._paragraphsFromLines = paragraphsFromLines
-Text2Epub._chapterParts = chapterParts
 
 return Text2Epub

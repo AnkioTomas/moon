@@ -43,18 +43,8 @@ function lfs.symlinkattributes(path, name)
 end
 package.preload["libs/libkoreader-lfs"] = function() return lfs end
 
-local abort_self
-local worker_job = {
-    cancel = function(self)
-        abort_self = self
-    end,
-}
 package.preload["workers.job"] = function()
-    return {
-        run = function()
-            return worker_job
-        end,
-    }
+    return { run = function() end }
 end
 
 local Manager = require("dictionary.manager")
@@ -110,9 +100,8 @@ Assert.eq(progress[1][1], "part")
 Assert.eq(progress[1][2], 5)
 Assert.eq(progress[1][3], 5)
 Assert.eq(progress[2][1], "install")
-Manager.cancel()
-Assert.eq(abort_self, worker_job)
-Assert.is_false(Manager.downloading())
+-- 安装 Job 被桩住不回调，手动复位在飞标记供后续用例。
+Manager._downloading = false
 
 -- 未完成分片按实际接收字节上报进度，而不是等整片写完才跳格。
 part_present = false
@@ -144,7 +133,7 @@ stream_handler.on_data("45")
 Assert.eq(progress[2][2], 5)
 stream_handler.on_done(nil)
 io.open, os.rename = original_open, original_rename
-Manager.cancel()
+Manager._downloading = false
 
 target_mode = "link"
 Assert.is_false(Manager.isInstalled("/dict", "xhzd"))

@@ -21,6 +21,7 @@ local logger = require("utils.log")
 local ProgressDB = require("db.progress")
 local Position = require("book.progress.position")
 local Text = require("utils.text")
+local T = require("ffi/util").template
 local _ = require("gettext")
 
 local Progress = {
@@ -80,17 +81,6 @@ local function nextRevision()
     return Progress.last_revision
 end
 
---- 按位置填充翻译串里的 %1、%2… 占位符（每个占位符只替换首次出现）。
----@param fmt string 含 %N 占位符的模板
----@param ... any 依次替换 %1、%2…
----@return string
-local function T(fmt, ...)
-    local s = tostring(fmt)
-    for i = 1, select("#", ...) do
-        s = s:gsub("%%" .. i, tostring(select(i, ...)), 1)
-    end
-    return s
-end
 --- 从阅读快照取得全书阅读比例 0..1（按章源会合成）。
 ---@param snapshot ReaderSessionSnapshot
 ---@return number
@@ -460,6 +450,18 @@ local function localProgressForPull(id, snapshot)
     return pos
 end
 
+--- 由全书比例推算第 idx 章的章内比例；比例落不到该章时返回 nil。
+---@param fraction number
+---@param count integer 目录章数（>0）
+---@param idx integer
+---@return number|nil
+local function withinFromFraction(fraction, count, idx)
+    local p = fraction * count
+    if math.floor(p) + 1 == idx then
+        return p - (idx - 1)
+    end
+end
+
 --- 冲突弹窗用的可读进度标签（按章书优先章序号，整书优先页码，最后才用全书比例）。
 ---@param pos ProgressPosition|nil
 ---@param id BookIdentity
@@ -480,23 +482,15 @@ local function conflictLabel(pos, id, snapshot)
                 title = toc[idx].title or toc[idx].name
             end
             if type(title) == "string" then
-                title = title:match("^%s*(.-)%s*$") or ""
-                local clipped = Text.truncateUtf8(title, 48)
-                if clipped ~= title then
-                    title = clipped .. "…"
-                else
-                    title = clipped
-                end
+                local trimmed = Text.trim(title)
+                local clipped = Text.truncateUtf8(trimmed, 48)
+                title = clipped ~= trimmed and clipped .. "…" or clipped
             else
                 title = ""
             end
             local within = pos.chapter_fraction
-            if within == nil and idx and count > 0 and pos.fraction then
-                local p = pos.fraction * count
-                local expect = math.floor(p) + 1
-                if expect == idx then
-                    within = p - (idx - 1)
-                end
+            if within == nil and count > 0 and pos.fraction then
+                within = withinFromFraction(pos.fraction, count, idx)
             end
             local within_pct = within and math.floor(within * 100 + 0.5) or nil
             if title ~= "" and within_pct and within_pct > 0 then
@@ -541,38 +535,22 @@ local function applyChosenPos(ui, id, pos, pct, show_msg)
                 within = p - (target_idx - 1)
             end
         elseif within == nil then
-            local p = pct * count
-            local expect = math.floor(p) + 1
-            if expect == target_idx then
-                within = p - (target_idx - 1)
-            else
-                within = 0
-            end
+            within = withinFromFraction(pct, count, target_idx) or 0
         end
         if target_idx ~= id.chapter_idx then
-            local started = require("ui.reader.session").gotoChapter(target_idx, { within = within })
-            if not started then
+            if not require("ui.reader.session").gotoChapter(target_idx, { within = within }) then
                 return
             end
-            if show_msg then
-                local UIManager = require("ui/uimanager")
-                local InfoMessage = require("ui/widget/infomessage")
-                UIManager:show(InfoMessage:new{
-                    text = T(_("已跳转到 %1"), conflictLabel(pos, id)),
-                    timeout = 2,
-                })
-            end
-            return
+        else
+            -- 已在目标章内：远端 locator 是这一章的坐标，可以直接用。
+            applyPosition(ui, pos, within)
         end
-        -- 已在目标章内：远端 locator 是这一章的坐标，可以直接用。
-        applyPosition(ui, pos, within)
     else
         applyPosition(ui, pos, pct)
     end
     if show_msg then
-        local UIManager = require("ui/uimanager")
         local InfoMessage = require("ui/widget/infomessage")
-        UIManager:show(InfoMessage:new{
+        require("ui/uimanager"):show(InfoMessage:new{
             text = T(_("已跳转到 %1"), conflictLabel(pos, id)),
             timeout = 2,
         })
@@ -592,13 +570,7 @@ local function remoteWithin(pos, chapter_idx, toc_count)
     if toc_count <= 0 then
         return 0
     end
-    local remote_idx = pos.chapter_idx or chapter_idx
-    local p = pos.fraction * toc_count
-    local expect = math.floor(p) + 1
-    if expect == remote_idx then
-        return p - (expect - 1)
-    end
-    return 0
+    return withinFromFraction(pos.fraction, toc_count, pos.chapter_idx or chapter_idx) or 0
 end
 
 --- 当前阅读位置与 freshly pulled 远端进度是否冲突（≥1%）。
@@ -617,17 +589,14 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot)
     if toc then
         local count = #toc
         local local_idx = local_pos and tonumber(local_pos.chapter_idx)
-        local remote_idx = remote_pos.chapter_idx and tonumber(remote_pos.chapter_idx)
-        if not remote_idx then
-            remote_idx = math.floor(remote_pos.fraction * count) + 1
-        end
-        if local_idx and remote_idx and local_idx ~= remote_idx then
-            return true
-        end
-        if local_idx and remote_idx and local_idx == remote_idx then
-            local local_within = local_pos and local_pos.chapter_fraction or 0
-            local remote_w = remoteWithin(remote_pos, remote_idx, count)
-            return math.abs(local_within - remote_w) >= 0.01
+        local remote_idx = tonumber(remote_pos.chapter_idx)
+            or math.floor(remote_pos.fraction * count) + 1
+        if local_idx then
+            if local_idx ~= remote_idx then
+                return true
+            end
+            local local_within = local_pos.chapter_fraction or 0
+            return math.abs(local_within - remoteWithin(remote_pos, remote_idx, count)) >= 0.01
         end
     end
     local local_frac = local_pos and local_pos.fraction or 0
@@ -662,17 +631,8 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
             if not current or not isSameBook(id) then
                 return
             end
-            local remote = {
-                fraction = remote_pos.fraction,
-                chapter_idx = remote_pos.chapter_idx,
-                chapter_title = remote_pos.chapter_title,
-                chapter_fraction = remote_pos.chapter_fraction,
-                page = remote_pos.page,
-                total_pages = remote_pos.total_pages,
-                locator = remote_pos.locator,
-                extra = remote_pos.extra,
-                updated_at = os.time(),
-            }
+            local remote = rowPosition(remote_pos)
+            remote.updated_at = os.time()
             if not ProgressDB.adoptRemote(id.source_id, id.stable_id, remote) then
                 logger.warn("book.progress adopt remote failed", id.stable_id)
                 return

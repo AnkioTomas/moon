@@ -14,11 +14,7 @@ function Status.route(self, conn, method)
     if method ~= "GET" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    return self:_queueResponse(conn, {
-        code = 200,
-        ctype = "application/json; charset=utf-8",
-        body = JSON.encode(self.handlers.get_status()),
-    })
+    return self:_json(conn, 200, JSON.encode(self.handlers.get_status()))
 end
 
 return Status

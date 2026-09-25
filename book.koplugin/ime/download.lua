@@ -28,7 +28,6 @@ local Job = require("workers.job")
 local BASE_ROOT = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets"
 
 local M = {
-    _job = nil, -- 当前在飞 job（Request job 或 Job）
     _downloading = false,
 }
 
@@ -61,12 +60,6 @@ local function cleanupTmp(method)
         end
     end
     os.remove(dir)
-end
-
---- 临时目录里记录本批分片所属 manifest 版本的文件路径。
----@return string
-local function tmpManifestPath(method)
-    return tmpDir(method) .. "/.manifest.json"
 end
 
 ---@return boolean
@@ -108,7 +101,7 @@ end
 ---@param manifest table 至少含 built_at 与 raw_sha256
 ---@return boolean, string|nil
 local function syncTmpManifest(manifest, method)
-    local path = tmpManifestPath(method)
+    local path = tmpDir(method) .. "/.manifest.json"
     local f = io.open(path, "rb")
     if f then
         local body = f:read("*a")
@@ -240,7 +233,6 @@ function M.ensure(method, cb, on_progress)
         end
         done_called = true
         M._downloading = false
-        M._job = nil
         if ok then
             logger.dbg("book ime dict download done", method, Perf.elapsedMs(started_at), "ms")
         else
@@ -250,7 +242,7 @@ function M.ensure(method, cb, on_progress)
     end
 
     report("manifest")
-    M._job = Request.get(base_url .. "/manifest.json", { timeout = 30 }, function(body, err)
+    Request.get(base_url .. "/manifest.json", { timeout = 30 }, function(body, err)
         if err then
             done(false, err)
             return
@@ -302,7 +294,7 @@ downloadParts = function(method, base_url, manifest, idx, dest, done, report, do
     end
     -- 网络响应尚未返回时也先通知当前分片，避免进度框长时间停在上一阶段。
     report("part", done_bytes, total, idx, #parts)
-    M._job = Request.download({
+    Request.download({
         url = base_url .. "/" .. part.file,
         method = "GET",
         timeout = 300,
@@ -329,7 +321,7 @@ end
 assembleInJob = function(method, manifest, dest, done, report)
     report("assemble")
     local dir = tmpDir(method)
-    M._job = Job.run(function()
+    Job.run(function()
         local err = assemble(manifest, dir, dest)
         if err then
             error(err)
@@ -360,14 +352,4 @@ assembleInJob = function(method, manifest, dest, done, report)
         end,
     })
 end
-
---- 中止当前网络或拼接任务；保留已完成分片供下次继续。
-function M.cancel()
-    if M._job then
-        if M._job.cancel then M._job:cancel() end
-    end
-    M._job = nil
-    M._downloading = false
-end
-
 return M

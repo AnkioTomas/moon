@@ -11,7 +11,6 @@ ReaderChapterSession 跨 switchDocument 保留到真正关书。物理路径解�
 local Store = require("book.store")
 local Mode = require("ui.reader.session.mode")
 local Snapshot = require("ui.reader.session.snapshot")
-local BookMode = require("ui.reader.session.book")
 local ChapterMode = require("ui.reader.session.chapter")
 local Toc = require("ui.reader.session.toc")
 local _ = require("gettext")
@@ -21,11 +20,6 @@ local _ = require("gettext")
 local Session = {
     ---@type ReaderSessionSnapshot|nil
     _snapshot = nil,
-}
-
-local handlers = {
-    book = BookMode,
-    chapter = ChapterMode,
 }
 
 --- 按全书进度收敛已读状态：100% 是事实，99% 仅是用户可选便利规则。
@@ -121,26 +115,6 @@ function Session.chapterTitle(snapshot)
     return current and current.title or nil
 end
 
---- 当前会话是否仍绑定指定身份；用于异步回调丢弃旧文档结果。
----@param identity BookIdentity|nil
----@return boolean
-function Session.isCurrent(identity)
-    local current = Session._snapshot
-    local current_id = current and current.identity
-    return current_id ~= nil and identity ~= nil
-        and current_id.source_id == identity.source_id
-        and current_id.stable_id == identity.stable_id
-        and current_id.chapter_idx == identity.chapter_idx
-end
-
---- 当前会话的进度位置快照。
----@return ProgressPosition|nil
-function Session.position()
-    local current = Session._snapshot
-    if not current then return nil end
-    return require("book.progress").position(current)
-end
-
 --- 全书剩余阅读时间估算（秒）；数据不足或已读完返回 nil。
 ---@return number|nil
 function Session.remainingSeconds()
@@ -168,11 +142,17 @@ function Session.onReaderReady(plugin)
 
     Session._snapshot = Snapshot.new(ui, identity)
     installEndOfBookHandler(plugin, ui)
-    local mode = Mode.resolve(identity)
-    local skip_pull = handlers[mode].onReaderReady(plugin, Session._snapshot)
+    local chapter_mode = Mode.isChapter(identity)
+    local skip_pull
+    if chapter_mode then
+        skip_pull = ChapterMode.onReaderReady(plugin, Session._snapshot)
+    else
+        ChapterMode.clearActiveChapter(Session._snapshot)
+        Snapshot.refresh(Session._snapshot)
+    end
     updateReadState(Session._snapshot)
     bootstrapReading(plugin, Session._snapshot, skip_pull)
-    if mode == "chapter" then
+    if chapter_mode then
         ChapterMode.afterBootstrap(plugin, Session._snapshot)
     end
 end

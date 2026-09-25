@@ -19,13 +19,6 @@ local T = require("ffi/util").template
 
 ---@class BookInsightDay
 local Day = {}
-Day.__index = Day
-
----@return BookInsightDay
-function Day.new()
-    return setmetatable({}, Day)
-end
-
 
 local function weekStart(ymd)
     local year, month, day = tostring(ymd or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")

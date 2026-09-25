@@ -33,18 +33,6 @@ local function currentIdentity()
     return current and current.identity
 end
 
----@param title string
----@param text string
-local function showInfoBox(title, text)
-    local Screen = require("device").screen
-    UIManager:show(require("ui/widget/textviewer"):new{
-        title = title,
-        text = text ~= "" and text or _("（无内容）"),
-        add_default_buttons = true,
-        height = math.floor(Screen:getHeight() * 0.65),
-    })
-end
-
 ---@param entity table
 ---@return string[]
 local function entityLines(entity)
@@ -70,25 +58,17 @@ local function entityLines(entity)
     return lines
 end
 
---- 实体详情的纯文本形式：首行名字，其后是类型/别名/身份/简介。
----@param entity table
----@return string
-local function formatEntity(entity)
-    local lines = { entity.name }
-    for i, line in ipairs(entityLines(entity)) do
-        lines[#lines + 1] = line
-    end
-    return table.concat(lines, "\n")
-end
-
 --- 展示已收录实体详情。
 ---@param entity table
 function UI.showEntity(entity)
-    if not entity then return end
-    showInfoBox(entity.name, table.concat(entityLines(entity), "\n"))
+    local text = table.concat(entityLines(entity), "\n")
+    UIManager:show(require("ui/widget/textviewer"):new{
+        title = entity.name,
+        text = text ~= "" and text or _("（无内容）"),
+        add_default_buttons = true,
+        height = math.floor(require("device").screen:getHeight() * 0.65),
+    })
 end
-
-UI.formatEntity = formatEntity
 
 --- 未配置 AI 时提示并拦下操作。
 ---@return boolean 是否可以继续
@@ -128,16 +108,15 @@ local function rowsForTab(tab_id, identity)
 end
 
 ---@param holder table|nil
----@param opts table|nil
-local function refreshMainTab(holder, opts)
-    opts = opts or {}
+---@param preserve_page boolean|nil
+local function refreshMainTab(holder, preserve_page)
     if not holder or not holder.menu then
         return
     end
     local items = rowsForTab(holder.active, holder.identity)
     Popup.setListItems(holder.menu, _("X-Ray"), items, nil, {
         subtitle = Kinds.label(holder.active),
-        preserve_page = opts.preserve_page == true,
+        preserve_page = preserve_page == true,
     })
     if holder.menu.setBottomTabActive then
         holder.menu:setBottomTabActive(holder.active)
@@ -168,7 +147,7 @@ local function runFetch(ui, identity, force)
             tostring(#result.locations),
             tostring(#result.terms)))
         require("xray.marks").invalidate()
-        refreshMainTab(main_holder, { preserve_page = true })
+        refreshMainTab(main_holder, true)
     end
     Fetch.comprehensive(ui, identity, { force = force == true }, cb)
 end
@@ -228,18 +207,6 @@ function UI.openMain(ui, initial_tab)
             end
         end,
     }
-end
-
----@param ui table|nil
----@param mode "characters"|"locations"|"terms"|nil
-function UI.open(ui, mode)
-    local tab = "character"
-    if mode == "locations" then
-        tab = "location"
-    elseif mode == "terms" then
-        tab = "term"
-    end
-    UI.openMain(ui, tab)
 end
 
 --- 选词查询 / 补全实体（划词菜单入口，不在 X-Ray 主菜单）。

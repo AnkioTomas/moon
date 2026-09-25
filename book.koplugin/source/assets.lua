@@ -12,34 +12,20 @@ local Paths = require("utils.paths")
 
 local Assets = {}
 
+--- 按文件头识别图片扩展名；不是已知图片返回 nil。
 ---@param data string
----@return string mime
-local function mimeFor(data)
+---@return string|nil
+local function imageExt(data)
     if data:sub(1, 8) == "\137PNG\r\n\026\n" then
-        return "image/png"
-    elseif data:sub(1, 3) == "\255\216\255" then
-        return "image/jpeg"
-    elseif data:sub(1, 6) == "GIF87a" or data:sub(1, 6) == "GIF89a" then
-        return "image/gif"
-    elseif data:sub(1, 4) == "RIFF" and data:sub(9, 12) == "WEBP" then
-        return "image/webp"
-    end
-    return "application/octet-stream"
-end
-
----@param mime string
----@return string
-local function extFor(mime)
-    if mime == "image/png" then
         return ".png"
-    elseif mime == "image/jpeg" then
+    elseif data:sub(1, 3) == "\255\216\255" then
         return ".jpg"
-    elseif mime == "image/gif" then
+    elseif data:sub(1, 6) == "GIF87a" or data:sub(1, 6) == "GIF89a" then
         return ".gif"
-    elseif mime == "image/webp" then
+    elseif data:sub(1, 4) == "RIFF" and data:sub(9, 12) == "WEBP" then
         return ".webp"
     end
-    return ""
+    return nil
 end
 
 --- 取路径末段（/ 与 \ 都算分隔符）。
@@ -68,12 +54,12 @@ end
 ---@param data string
 ---@return string|nil
 function Assets.materializeImage(images_dir, data)
-    local mime = mimeFor(data)
-    if not mime:match("^image/") then
+    local ext = imageExt(data)
+    if not ext then
         return nil
     end
     Paths.ensureDir(images_dir)
-    local name = md5(data) .. extFor(mime)
+    local name = md5(data) .. ext
     local path = images_dir .. "/" .. name
     local f = io.open(path, "rb")
     if not f then

@@ -34,7 +34,7 @@ local function installFakes()
     end
     package.preload["scrape.weread"] = function()
         return {
-            searchAsync = function(_, _, cb)
+            searchAsync = function(_, cb)
                 WereadFake.calls = WereadFake.calls + 1
                 WereadFake.pending = cb
                 return {

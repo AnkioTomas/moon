@@ -76,7 +76,7 @@ function Client:coverRequest(filename)
     if not self:configured() then
         return nil, _("未配置服务器或令牌")
     end
-    local req = {
+    return {
         url = self.base_url .. coverPath(filename),
         headers = {
             ["Authorization"] = "Bearer " .. self.token,
@@ -84,7 +84,6 @@ function Client:coverRequest(filename)
             ["Connection"] = "close",
         },
     }
-    return req
 end
 
 --- Nonblocking JSON request.

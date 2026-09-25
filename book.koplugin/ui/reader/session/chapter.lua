@@ -61,15 +61,9 @@ function Chapter.clearActiveChapter(session)
 end
 
 ---@param session ReaderSessionSnapshot|nil
----@return ReaderChapterSession|nil
-function Chapter.activeChapter(session)
-    return session and session.chapter
-end
-
----@param session ReaderSessionSnapshot|nil
 ---@return BookChapter[]|nil
 function Chapter.toc(session)
-    local chapter = Chapter.activeChapter(session)
+    local chapter = session and session.chapter
     return chapter and chapter.toc or nil
 end
 
@@ -220,15 +214,12 @@ local function schedulePrefetch(chapter)
     cancelPrefetch()
     if not chapter or chapter.request or chapter.target or chapter.switching then return end
     local identity = chapter.identity
-    if not identity then return end
-    local source = identity.source
-    local idx = identity.chapter_idx
-    if not source then return end
-    if not idx then return end
-    if type(chapter.toc) ~= "table" or type(source.prefetchChaptersAsync) ~= "function" then
+    local source = identity and identity.source
+    if not source or not identity.chapter_idx
+        or type(chapter.toc) ~= "table" or type(source.prefetchChaptersAsync) ~= "function" then
         return
     end
-    prefetch_job = source:prefetchChaptersAsync(identity, chapter.toc, idx, PREFETCH_AHEAD)
+    prefetch_job = source:prefetchChaptersAsync(identity, chapter.toc, identity.chapter_idx, PREFETCH_AHEAD)
 end
 
 ---@param plugin table
@@ -247,11 +238,7 @@ function Chapter.onReaderReady(plugin, session)
         ---@cast previous ReaderChapterSession
         chapter = previous
         cancelPrefetch()
-        local request = chapter.request
-        if request then
-            local cancel = request.cancel
-            if cancel then cancel() end
-        end
+        if chapter.request and chapter.request.cancel then chapter.request.cancel() end
         chapter.request = nil
         chapter.identity = identity
     else
@@ -286,7 +273,7 @@ end
 ---@param plugin table
 ---@param session ReaderSessionSnapshot
 function Chapter.afterBootstrap(plugin, session)
-    local chapter = Chapter.activeChapter(session)
+    local chapter = session.chapter
     if not chapter then return end
     plugin:emitToSource("chapter_changed", { identity = session.identity }, session.identity.source)
     local identity = chapter.identity
@@ -323,6 +310,15 @@ function Chapter.onCloseDocument(session)
     return false
 end
 
+--- 切章失败：收起提示、报错并恢复预取。
+---@param chapter ReaderChapterSession
+---@param text string
+local function failRequest(chapter, text)
+    closeTransitionNotice()
+    require("ui/uimanager"):show(require("ui/widget/infomessage"):new{ text = text })
+    schedulePrefetch(chapter)
+end
+
 ---@param chapter ReaderChapterSession
 ---@param idx integer
 ---@param opts { within: number|nil, direction: "prev"|"next"|nil }
@@ -337,11 +333,7 @@ local function requestChapter(chapter, idx, opts)
         chapter.request = nil
         if chapter_session ~= chapter then return end
         if not path then
-            closeTransitionNotice()
-            require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
-                text = err or _("章节打开失败"),
-            })
-            schedulePrefetch(chapter)
+            failRequest(chapter, err or _("章节打开失败"))
             return
         end
 
@@ -375,11 +367,7 @@ local function requestChapter(chapter, idx, opts)
             if not ok and chapter_session == chapter then
                 chapter.switching = false
                 chapter.target = nil
-                closeTransitionNotice()
-                require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
-                    text = tostring(switch_err or _("章节打开失败")),
-                })
-                schedulePrefetch(chapter)
+                failRequest(chapter, tostring(switch_err or _("章节打开失败")))
             end
         end)
     end)
@@ -391,7 +379,7 @@ end
 ---@return boolean
 function Chapter.gotoChapter(session, idx, opts)
     if not session then return false end
-    local chapter = Chapter.activeChapter(session)
+    local chapter = session.chapter
     local current_idx = session.identity.chapter_idx
     if not chapter or type(chapter.toc) ~= "table"
         or chapter.request or chapter.target or chapter.switching
@@ -410,7 +398,7 @@ end
 ---@return boolean
 function Chapter.onChapterBoundary(session, delta)
     if not session then return false end
-    local chapter = Chapter.activeChapter(session)
+    local chapter = session.chapter
     if not chapter or type(chapter.toc) ~= "table" then
         return false
     end

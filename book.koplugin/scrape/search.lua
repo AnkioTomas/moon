@@ -31,7 +31,7 @@ function Search.searchAsync(query, cb)
     local function tryWeread()
         if cancelled then return end
         logger.info("scrape: fallback to weread")
-        current_job = Weread.searchAsync(query, nil, function(results, err)
+        current_job = Weread.searchAsync(query, function(results, err)
             if cancelled then return end
             if results and #results > 0 then
                 cb(results, nil, "weread")

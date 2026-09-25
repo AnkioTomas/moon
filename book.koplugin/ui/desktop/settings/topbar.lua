@@ -8,13 +8,6 @@ local _ = require("gettext")
 
 ---@class BookSettingsTopbar
 local TopbarSettings = {}
-TopbarSettings.__index = TopbarSettings
-
----@return BookSettingsTopbar
-function TopbarSettings.new()
-    return setmetatable({}, TopbarSettings)
-end
-
 
 -- 预览样例跟着真顶栏：左时钟/源，右指标。wifi 只有图标。
 local ITEMS = {

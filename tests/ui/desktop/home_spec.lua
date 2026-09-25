@@ -120,9 +120,6 @@ package.preload["ui.desktop.home.widgets"] = function()
         end,
     }
 end
-package.preload["book.cache"] = function()
-    return { cleanupStaleAsync = function() return { cancel = function() end } end }
-end
 package.preload["gettext"] = function() return function(s) return s end end
 package.preload["book.catalog"] = function()
     return {
@@ -196,7 +193,6 @@ end
 package.preload["ui.desktop.home.edit_overlay"] = function()
     return {
         wrap = function(widget) return { edited = true, widget = widget } end,
-        addRow = function() return { add = true } end,
         showMoveDialog = function() end,
         showHeightDialog = function() end,
         showAddDialog = function(candidates, on_pick)

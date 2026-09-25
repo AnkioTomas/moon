@@ -69,13 +69,6 @@ local function patchConnectFail()
 end
 
 --- buffer:len() / 已读字节是 FFI int64。stream 的增量路径会 math.min，cdata 直接炸。
----@return number|nil
-local function luaNumber(value)
-    if value == nil then return nil end
-    if type(value) == "number" then return value end
-    return tonumber(value)
-end
-
 local function patchReadSize()
     local ok, iostream = pcall(require, "turbo.iostream")
     local IOStream = ok and iostream and iostream.IOStream
@@ -87,8 +80,8 @@ local function patchReadSize()
     end
     local orig = IOStream._read_from_buffer
     IOStream._read_from_buffer = function(self)
-        self._read_buffer_size = luaNumber(self._read_buffer_size) or 0
-        self._read_bytes = luaNumber(self._read_bytes)
+        self._read_buffer_size = tonumber(self._read_buffer_size) or 0
+        self._read_bytes = tonumber(self._read_bytes)
         return orig(self)
     end
     IOStream._book_read_size_patched = true

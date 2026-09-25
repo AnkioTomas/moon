@@ -1,7 +1,7 @@
 --[[--
 db.book：books 表 CRUD（listBySource / 分类与系列查询已在 db_spec 覆盖）
 
-重点：路径登记（getByPath / touchPath / clearPath(s) / pathsAll）。
+重点：路径登记（getByPath / touchPath / clearPathsUnder）。
 
 @module tests.db.book_spec
 --]]
@@ -555,21 +555,6 @@ do
     clearMods()
 end
 
--- ── clearPath：清掉指向某文件的 path 登记 ─────────────────
-do
-    local connection, calls = makeConn()
-    local DbBase, BookDB = loadBook(connection)
-
-    Assert.is_true(BookDB.clearPath("/cache/moon/book/x/book.epub"))
-    local q = calls[#calls]
-    Assert.eq(q.sql, "UPDATE books SET path=NULL WHERE path=?;")
-    Assert.eq(q.argc, 1)
-    Assert.eq(q.args[1], "/cache/moon/book/x/book.epub")
-
-    DbBase.close()
-    clearMods()
-end
-
 -- ── clearPathsUnder：LIKE 前缀清目录，通配符转义 ──────────
 do
     local connection, calls = makeConn()
@@ -587,41 +572,6 @@ do
     Assert.is_false(BookDB.clearPathsUnder(nil))
     Assert.eq(#calls, before)
 
-    DbBase.close()
-    clearMods()
-end
-
--- ── pathsAll：全部已登记路径；空库返回 {} ─────────────────
-do
-    local connection, calls = makeConn({
-        exec = function(sql)
-            if sql:find("FROM books WHERE path IS NOT NULL", 1, true) then
-                return {
-                    { "local", "moon" },
-                    { "/a.epub", "b1" },
-                    { "/a.epub", "/cache/moon/book/x/book.epub" },
-                }, 2
-            end
-        end,
-    })
-    local DbBase, BookDB = loadBook(connection)
-
-    local rows = BookDB.pathsAll()
-    Assert.eq(#rows, 2)
-    Assert.eq(rows[1].source_id, "local")
-    Assert.eq(rows[1].stable_id, "/a.epub")
-    Assert.eq(rows[1].path, "/a.epub")
-    Assert.eq(rows[2].source_id, "moon")
-    Assert.eq(rows[2].path, "/cache/moon/book/x/book.epub")
-
-    DbBase.close()
-    clearMods()
-end
-
-do
-    local connection = makeConn()
-    local DbBase, BookDB = loadBook(connection)
-    Assert.eq(#BookDB.pathsAll(), 0)
     DbBase.close()
     clearMods()
 end

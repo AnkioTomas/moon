@@ -8,13 +8,6 @@ local _ = require("gettext")
 
 ---@class BookSettingsDesktop
 local DesktopSettings = {}
-DesktopSettings.__index = DesktopSettings
-
----@return BookSettingsDesktop
-function DesktopSettings.new()
-    return setmetatable({}, DesktopSettings)
-end
-
 
 ---@param desktop table
 ---@param open_on boolean

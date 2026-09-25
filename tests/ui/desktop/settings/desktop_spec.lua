@@ -16,7 +16,7 @@ _G.G_reader_settings = { saveSetting = function(_, key, value) saved = { key, va
 
 local desktop = { updateView = function() end }
 local Settings = require("ui.desktop.settings.desktop")
-local rows = Settings.new():rows(desktop, false)
+local rows = Settings:rows(desktop, false)
 Assert.len(rows, 1)
 Assert.eq(rows[1](600).title, "启动打开桌面")
 Assert.eq(rows[1](600).kind, "toggle")

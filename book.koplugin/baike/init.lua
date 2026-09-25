@@ -7,10 +7,7 @@
 @module koplugin.book.baike.init
 --]]
 
-local l10n = require("l10n")
-if l10n.apply then
-    l10n.apply()
-end
+require("l10n").apply()
 
 local Client = require("baike.client")
 local logger = require("utils.log")

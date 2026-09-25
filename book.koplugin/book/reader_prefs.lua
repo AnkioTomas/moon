@@ -29,13 +29,8 @@ local function copyValue(value)
         return value
     end
     local out = {}
-    for i, v in ipairs(value) do
-        out[i] = v
-    end
     for k, v in pairs(value) do
-        if out[k] == nil then
-            out[k] = v
-        end
+        out[k] = v
     end
     return out
 end
@@ -79,17 +74,10 @@ end
 ---@param ui table|nil
 ---@return table|nil
 function M.capture(ui)
-    if not ui then
-        return nil
-    end
     if not MoonFont.supportsReader(ui) then
         return nil
     end
-    local document = ui.document
-    if not document then
-        return nil
-    end
-    local config = document.configurable
+    local config = ui.document.configurable
     if not config then
         return nil
     end
@@ -103,15 +91,8 @@ function M.capture(ui)
         end
     end
     local doc = ui.doc_settings
-    local font_id
-    if doc then
-        font_id = doc:readSetting("book_reader_font_id")
-    end
-    local font = ui.font
-    local font_face
-    if font then
-        font_face = font.font_face
-    end
+    local font_id = doc and doc:readSetting("book_reader_font_id")
+    local font_face = ui.font.font_face
     if not font_face and doc then
         font_face = doc:readSetting("font_face")
     end

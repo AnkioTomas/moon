@@ -97,13 +97,11 @@ function Highlights.pick(source_id, stable_id, chapter_idx, index, current_items
     if type(chapter) == "string" and chapter ~= "" then
         parts[#parts + 1] = chapter
     end
+    local _ = require("gettext")
     local page = tonumber(picked.pageno) or tonumber(picked.page)
     if page and page > 0 then
-        local T = require("ffi/util").template
-        local _ = require("gettext")
-        parts[#parts + 1] = T(_("第 %1 页"), page)
+        parts[#parts + 1] = require("ffi/util").template(_("第 %1 页"), page)
     end
-    local _ = require("gettext")
     local source = #parts > 0 and table.concat(parts, " · ") or _("来自当前书籍高亮")
     return picked.text, source
 end

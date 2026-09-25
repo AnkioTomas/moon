@@ -4,9 +4,8 @@
 @module koplugin.book.ui.desktop.home.views.recent_list
 --]]
 
-local Blitbuffer = require("ffi/blitbuffer")
-local BookInfo = require("ui.components.bookinfo")
 local Catalog = require("book.catalog")
+local CoverCell = require("ui.desktop.cover_cell")
 local Event = require("ui/event")
 local UIManager = require("ui/uimanager")
 local CenterContainer = require("ui/widget/container/centercontainer")
@@ -89,7 +88,6 @@ end
 function M:showSettings(desktop)
     desktop = desktop or self.desktop or (self.home and self.home.desktop)
     local ButtonDialog = require("ui/widget/buttondialog")
-    local UIManager = require("ui/uimanager")
     local dialog
     --- 保存后走首页刷新，列数变化时高度不变也必须重建网格。
     local function refresh()
@@ -158,7 +156,7 @@ end
 ---@return number height 封面下方标题与间隔高度，单位像素
 local function titleExtra()
     if not M.showTitle() then return 0 end
-    return UI.sz(4) + UI.sz(22)
+    return CoverCell.titleExtra()
 end
 
 --- 按用户列数算封面；固定列时 denseCoverMetrics 不会加列压高，这里自己封顶。
@@ -216,87 +214,6 @@ function M:heightRange(_ctx, opts)
     return { height = h }
 end
 
---- 揭掉上一本封面的「正在打开」条。
----@param list BookHomeRecentList
-local function clearOpening(list)
-    local cover, bar = list._opening_cover, list._opening_bar
-    list._opening_cover, list._opening_bar = nil, nil
-    if not cover or not bar then return end
-    for i = #cover, 1, -1 do
-        if cover[i] == bar then
-            table.remove(cover, i)
-            break
-        end
-    end
-    if bar.free then bar:free() end
-end
-
---- 构建带书籍状态标记的网格封面和标题；点封面打开书，点更多进详情。
----@param ctx BookDesktopCtx 构建上下文，提供尺寸、数据源和桌面宿主
----@param book Book 当前操作或展示的书籍数据
----@param slot_w number 单个封面槽位宽度，单位像素
----@param cw number 封面宽度，单位像素
----@param ch number 封面高度，单位像素
----@param on_open fun(book: Book, cover: table, cw: number, ch: number)
----@return table
-local function coverCell(ctx, book, slot_w, cw, ch, on_open)
-    --- 右下角更多：进详情，不弹动作表。
-    local function openDetail()
-        if ctx.desktop then
-            require("ui.desktop.detail").open(ctx.desktop, "library", book)
-        end
-    end
-    local cover = select(1, BookInfo.cover(ctx.plugin, ctx.source, book, cw, ch, {
-        badge = true,
-        ribbon = true,
-        download = true,
-        more = true,
-        show_parent = ctx.desktop,
-    }))
-    local extra = titleExtra()
-    local tap = BookInfo.tappable(slot_w, ch + extra, function()
-        on_open(book, cover, cw, ch)
-    end)
-    --- 一个手势容器完成分流，避免封面与更多按钮嵌套后争抢同名事件。
-    ---@param _ table
-    ---@param ges table|nil
-    ---@return boolean
-    tap.onTapBookInfo = function(_, _arg, ges)
-        local pos, dimen = ges and ges.pos, tap.dimen
-        if pos and dimen then
-            local size, inset = UI.sz(18), UI.sz(4)
-            local cover_x = dimen.x + math.floor((slot_w - cw) / 2)
-            if pos.x >= cover_x + cw - size - inset
-                and pos.x < cover_x + cw - inset
-                and pos.y >= dimen.y + ch - size - inset
-                and pos.y < dimen.y + ch - inset then
-                openDetail()
-                return true
-            end
-        end
-        on_open(book, cover, cw, ch)
-        return true
-    end
-    local kids = {
-        align = "center",
-        CenterContainer:new{
-            dimen = Geom:new{ w = slot_w, h = ch },
-            cover,
-        },
-    }
-    if extra > 0 then
-        kids[#kids + 1] = VerticalSpan:new{ width = UI.sz(4) }
-        kids[#kids + 1] = TextWidget:new{
-            text = BookInfo.title(book),
-            face = UI.face("xx_smallinfofont", 13),
-            max_width = slot_w,
-            fgcolor = Blitbuffer.COLOR_BLACK,
-        }
-    end
-    tap[1] = VerticalGroup:new(kids)
-    return tap
-end
-
 --- 按当前分页选取书籍并组装封面网格，返回布局和分页信息。
 ---@param ctx BookDesktopCtx 构建上下文，提供尺寸、数据源和桌面宿主
 ---@param books Book[] 按展示顺序排列的书籍列表
@@ -342,7 +259,7 @@ local function buildGrid(ctx, books, width, grid_h, page, on_open)
         if col > 0 then
             table.insert(row, HorizontalSpan:new{ width = gap })
         end
-        table.insert(row, coverCell(ctx, books[i], slot_w, cw, ch, on_open))
+        table.insert(row, (CoverCell.build(ctx, books[i], slot_w, cw, ch, on_open, true, M.showTitle())))
         col = col + 1
         if col == cols then flushRow() end
     end
@@ -376,39 +293,9 @@ function M:createWidget()
     local content
     local content_h = 0
 
-    --- 点封面打开书：封面盖「正在打开」条。
-    ---@param book Book 当前操作或展示的书籍数据
-    ---@param cover table 封面包围盒，用于叠打开中条
-    ---@param cw number 封面宽度
-    ---@param ch number 封面高度
-    local function onOpen(book, cover, cw, ch)
-        local desktop = ctx.desktop
-        local plugin = ctx.plugin or (desktop and desktop.plugin)
-        if not plugin then return end
-        clearOpening(self)
-        local bar = BookInfo.openingBar(cw, ch)
-        cover[#cover + 1] = bar
-        self._opening_cover = cover
-        self._opening_bar = bar
-        local token = {}
-        self._open_token = token
-        if desktop then
-            UIManager:setDirty(desktop, "ui")
-        end
-        UIManager:nextTick(function()
-            if self._open_token ~= token then return end
-            require("book.open").book(plugin, book, function()
-                if self._open_token ~= token then return end
-                self._open_token = nil
-                clearOpening(self)
-                if desktop then UIManager:setDirty(desktop, "ui") end
-            end)
-        end)
-    end
-
     if #books > 0 then
         content, content_h, page, pages = buildGrid(
-            ctx, books, w, grid_h, current, onOpen
+            ctx, books, w, grid_h, current, CoverCell.opener(self, ctx)
         )
     else
         content_h = grid_h

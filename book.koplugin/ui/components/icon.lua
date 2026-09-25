@@ -143,26 +143,16 @@ function Icon.label(opts)
         fgcolor = opts.text_color or color,
         max_width = opts.max_width,
     }
-    if opts.direction == "column" then
-        local col = VerticalGroup:new{ align = "center" }
-        if icon then
-            table.insert(col, icon)
-            table.insert(col, VerticalSpan:new{ width = gap })
-        end
-        table.insert(col, label)
-        col.icon = icon
-        col.label = label
-        return col
-    end
-    local row = HorizontalGroup:new{ align = "center" }
+    local column = opts.direction == "column"
+    local group = (column and VerticalGroup or HorizontalGroup):new{ align = "center" }
     if icon then
-        table.insert(row, icon)
-        table.insert(row, HorizontalSpan:new{ width = gap })
+        table.insert(group, icon)
+        table.insert(group, (column and VerticalSpan or HorizontalSpan):new{ width = gap })
     end
-    table.insert(row, label)
-    row.icon = icon
-    row.label = label
-    return row
+    table.insert(group, label)
+    group.icon = icon
+    group.label = label
+    return group
 end
 
 return Icon

@@ -38,25 +38,15 @@ function UI.pluginRoot()
     if _plugin_root then
         return _plugin_root
     end
-    local info = debug.getinfo(UI.pluginRoot, "S")
-    local src = info and info.source
-    if src and src:sub(1, 1) == "@" then
-        -- …/book.koplugin/ui/components/bookui.lua
-        local root = src:sub(2):match("(.*/)ui/components/[^/]+$")
-        if root then
-            _plugin_root = root
-            return _plugin_root
-        end
+    -- …/book.koplugin/ui/components/bookui.lua
+    local pattern = "(.*/)ui/components/[^/]+$"
+    local src = debug.getinfo(UI.pluginRoot, "S").source
+    local root = src:sub(1, 1) == "@" and src:sub(2):match(pattern)
+    if not root then
+        local searched = package.searchpath("ui.components.bookui", package.path)
+        root = searched and searched:match(pattern)
     end
-    local searched = package.searchpath and package.searchpath("ui.components.bookui", package.path)
-    if type(searched) == "string" then
-        local root = searched:match("(.*/)ui/components/[^/]+$")
-        if root then
-            _plugin_root = root
-            return _plugin_root
-        end
-    end
-    _plugin_root = ""
+    _plugin_root = root or ""
     return _plugin_root
 end
 
@@ -361,20 +351,13 @@ function UI.denseCoverMetrics(avail_w, budget_h, opts)
     return slot_w, cw, ch, cols, gap, row_gap, cell_h
 end
 
---- 最近阅读主角封面最大高度。
----@return number
-function UI.coverMaxH()
-    local screen_h = Screen:getHeight()
-    return math.max(UI.sz(104), math.min(UI.sz(172), math.floor(screen_h * 0.26)))
-end
-
---- 主角封面：超高则压高度并回缩宽度，保持约 2:3。
+--- 主角封面：超过最近阅读主角封面最大高度则压高度并回缩宽度，保持约 2:3。
 ---@param cw number
 ---@return number, number
 function UI.coverDim(cw)
     cw = math.max(1, math.floor(tonumber(cw) or 1))
     local ch = math.floor(cw * 3 / 2)
-    local max_h = UI.coverMaxH()
+    local max_h = math.max(UI.sz(104), math.min(UI.sz(172), math.floor(Screen:getHeight() * 0.26)))
     if ch > max_h then
         ch = max_h
         cw = math.max(1, math.floor(ch * 2 / 3))
@@ -394,9 +377,6 @@ function UI.progressBar(width, height, percent)
     local Widget = require("ui/widget/widget")
     width = math.max(1, math.floor(tonumber(width) or 1))
     height = math.max(1, math.floor(tonumber(height) or UI.sz(8)))
-    percent = tonumber(percent) or 0
-    if percent < 0 then percent = 0 end
-    if percent > 100 then percent = 100 end
 
     local radius = UI.pillRadius(height)
     --- 造一段定高的圆角色块，用作进度条的轨道或填充。
@@ -430,8 +410,6 @@ function UI.progressBar(width, height, percent)
         if value < 0 then value = 0 end
         if value > 100 then value = 100 end
         local w = math.floor(width * value / 100 + 0.5)
-        if w < 0 then w = 0 end
-        if w > width then w = width end
         self[2] = w > 0 and bar(w, Blitbuffer.COLOR_BLACK) or nil
         self._size = nil
         self:getSize()

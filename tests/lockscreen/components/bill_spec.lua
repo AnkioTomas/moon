@@ -41,12 +41,10 @@ package.preload["lockscreen.components.library"] = function()
 end
 
 package.preload["lockscreen.components.util"] = function()
-    return {
-        dayStart = function() return 100000 end,
-        MUTED = 1,
-        DIM = 2,
-        RULE = 3,
-    }
+    local U = dofile(package.searchpath("lockscreen.components.util", package.path))
+    U.dayStart = function() return 100000 end
+    U.MUTED, U.DIM, U.RULE = 1, 2, 3
+    return U
 end
 
 package.preload["utils.settings"] = function()

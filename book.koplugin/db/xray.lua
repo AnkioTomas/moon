@@ -12,7 +12,7 @@ local XrayDB = {}
 --- 仅在 Base.open() 的一次性 schema 初始化阶段调用。
 ---@return boolean 成功返回 true，SQL 失败返回 false
 function XrayDB.ensureSchema()
-    if not Base.exec([[
+    return Base.exec([[
 CREATE TABLE IF NOT EXISTS xray_entities (
   source_id TEXT NOT NULL, stable_id TEXT NOT NULL, kind TEXT NOT NULL,
   name TEXT NOT NULL, aliases TEXT NOT NULL DEFAULT '',
@@ -23,12 +23,7 @@ CREATE TABLE IF NOT EXISTS xray_entities (
 );
 CREATE INDEX IF NOT EXISTS idx_xray_entities_book
   ON xray_entities(source_id, stable_id, kind);
-]]) then return false end
-    return true
-end
-
-local function joinAliases(aliases)
-    return table.concat(aliases, "、")
+]]) ~= nil
 end
 
 local function splitAliases(encoded)
@@ -54,7 +49,7 @@ end
 ---@param updated_at integer|nil
 ---@return boolean
 function XrayDB.upsert(source_id, stable_id, entity, updated_at)
-    local aliases = joinAliases(entity.aliases)
+    local aliases = table.concat(entity.aliases, "、")
     return Base.exec([[
         INSERT INTO xray_entities
           (source_id, stable_id, kind, name, aliases, role, description,
@@ -78,24 +73,17 @@ end
 ---@param kind string|nil
 ---@return table[]
 function XrayDB.list(source_id, stable_id, kind)
+    local sql = [[
+            SELECT kind, name, aliases, role, description, gender, occupation, updated_at
+            FROM xray_entities
+            WHERE source_id=? AND stable_id=?]]
     local result, nrows
     if kind and kind ~= "" then
-        result, nrows = Base.query([[
-            SELECT kind, name, aliases, role, description, gender, occupation, updated_at
-            FROM xray_entities
-            WHERE source_id=? AND stable_id=? AND kind=?
-            ORDER BY name COLLATE NOCASE ASC;
-        ]], source_id, stable_id, kind)
+        result, nrows = Base.query(sql .. " AND kind=? ORDER BY name COLLATE NOCASE ASC;", source_id, stable_id, kind)
     else
-        result, nrows = Base.query([[
-            SELECT kind, name, aliases, role, description, gender, occupation, updated_at
-            FROM xray_entities
-            WHERE source_id=? AND stable_id=?
-            ORDER BY kind ASC, name COLLATE NOCASE ASC;
-        ]], source_id, stable_id)
+        result, nrows = Base.query(sql .. " ORDER BY kind ASC, name COLLATE NOCASE ASC;", source_id, stable_id)
     end
     local out = {}
-    if not result then return out end
     for i = 1, nrows do
         out[#out + 1] = {
             kind = result[1][i],

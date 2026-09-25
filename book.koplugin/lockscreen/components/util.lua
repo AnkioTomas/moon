@@ -18,6 +18,8 @@ U.MUTED = Blitbuffer.COLOR_GRAY_3
 U.DIM = Blitbuffer.COLOR_GRAY_4
 U.RULE = Blitbuffer.COLOR_GRAY_5
 U.FALLBACK_MESSAGE = "读书不觉已春深，一寸光阴一寸金。"
+--- 插件根目录下的 logo.png（账单 / 票根页眉共用）。
+U.LOGO_PATH = (debug.getinfo(1, "S").source:match("^@(.*/)lockscreen/components/[^/]+$") or "") .. "logo.png"
 
 --- 取所在自然日 00:00:00 的时间戳（本地时区）。
 ---@param ts number|nil 缺省用当前时间
@@ -93,6 +95,69 @@ function U.progress(book)
     local pages = total > 0 and string.format("%d / %d 页", tonumber(book.page) or 0, total)
         or _("页数暂无")
     return percent, pages
+end
+
+--- 追加票据式虚线。
+---@param blocks table[]
+---@param x number
+---@param y number
+---@param width number
+---@param dash number 单段长度
+---@param step number 段起点间距（含间隙）
+function U.appendDashes(blocks, x, y, width, dash, step)
+    local right = x + width
+    while x < right do
+        blocks[#blocks + 1] = {
+            kind = "rule", x = x, y = y, width = math.min(dash, right - x),
+            height = 1, color = U.DIM,
+        }
+        x = x + step
+    end
+end
+
+--- 按种子串生成纯装饰条码，不冒充可扫描编码。
+---@param blocks table[]
+---@param x number
+---@param y number
+---@param width number
+---@param height number
+---@param seed string 空串时按字节 1 处理
+---@param gap_every number 每隔几根留一次空
+function U.appendBarcode(blocks, x, y, width, height, seed, gap_every)
+    local right, i = x + width, 1
+    while x < right do
+        local byte = seed:byte((i - 1) % #seed + 1) or 1
+        local bar = 1 + byte % 3
+        if i % gap_every ~= 0 then
+            blocks[#blocks + 1] = {
+                kind = "vbar", x = x, y = y, width = math.min(bar, right - x),
+                height = height, value = 1, color = Blitbuffer.COLOR_BLACK,
+            }
+        end
+        x = x + bar + 1 + byte % 2
+        i = i + 1
+    end
+end
+
+--- 在票面上下边缘切出连续齿口。
+---@param blocks table[]
+---@param x number
+---@param y number
+---@param width number
+---@param height number
+---@param radius number
+function U.appendCutouts(blocks, x, y, width, height, radius)
+    local step = radius * 3
+    local center = x + step
+    while center <= x + width - step do
+        blocks[#blocks + 1] = {
+            kind = "cutout_circle", x = center, y = y, radius = radius,
+        }
+        blocks[#blocks + 1] = {
+            kind = "cutout_circle", x = center, y = y + height, radius = radius,
+        }
+        center = center + step
+    end
 end
 
 --- 生成主体没有数据时使用的空态白卡（纯 DSL，不拉 UI 树）。

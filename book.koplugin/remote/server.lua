@@ -88,7 +88,6 @@ Server._routeSettings = SettingsRoute.settings
 ---@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil }
 ---@return table
 function Server.new(o)
-    o = o or {}
     assert(type(o.handlers) == "table", "remote.server: handlers required")
     assert(type(o.root) == "string", "remote.server: root required")
     return setmetatable({
@@ -99,7 +98,7 @@ function Server.new(o)
         roots = o.roots or { o.root },
         home = o.home or o.root, -- 页面默认路径
         shortcuts = o.shortcuts or {},
-        slice = tonumber(o.slice) or 0.025,
+        slice = o.slice or 0.025,
         _conns = {},
     }, Server)
 end
@@ -355,10 +354,8 @@ end
 ---@param path string
 ---@return string|nil
 function Server:_parent(path)
-    for _, root in ipairs(self.roots) do
-        if path == root then
-            return nil
-        end
+    if self:_isRoot(path) then
+        return nil
     end
     local parent = path:match("^(.*)/[^/]+$")
     if parent == "" then
@@ -458,15 +455,11 @@ function Server:_route(conn, head)
         if method ~= "GET" then
             return self:_fail(conn, 405, "Method Not Allowed")
         end
-        return self:_queueResponse(conn, {
-            code = 200,
-            ctype = "application/json; charset=utf-8",
-            body = JSON.encode({
-                root = self.root,
-                home = self.home,
-                shortcuts = self.shortcuts,
-            }),
-        })
+        return self:_json(conn, 200, JSON.encode({
+            root = self.root,
+            home = self.home,
+            shortcuts = self.shortcuts,
+        }))
     elseif path == "/api/list" then
         return self:_routeList(conn, method, query.path)
     elseif path == "/download" then
@@ -538,15 +531,7 @@ function Server:_writeContinue(conn)
         conn.state = "body"
         return true
     end
-    local sent, err, last = conn.sock:send(conn.out, conn.out_off)
-    local upto = sent or last
-    if upto then
-        conn.out_off = upto + 1
-        conn.touched = socket.gettime()
-        return true
-    end
-    if err == "closed" then self:_kill(conn) end
-    return false
+    return self:_send(conn)
 end
 
 --- 收 body：文本通道攒内存，上传通道流式写盘。
@@ -626,13 +611,8 @@ function Server:_readBody(conn)
         if conn.dead then
             return
         end
-        conn.resp = ok
-            and { code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}' }
-            or {
-                code = 500,
-                ctype = "application/json; charset=utf-8",
-                body = JSON.encode({ error = "Save failed: " .. tostring(err) }),
-            }
+        conn.resp = ok and Server.jsonResp(200, '{"ok":true}')
+            or Server.errorResp(500, "Save failed: " .. tostring(err))
     end, conflict)
     return true
 end
@@ -652,16 +632,34 @@ end
 
 -- ── respond ──────────────────────────────────────────
 
---- 错误响应：一律 JSON {"error": msg}（页面据此显示真实原因）。
----@param conn table
+--- JSON 响应表；pending 回调直接赋给 conn.resp，同步路径交给 _queueResponse。
+---@param code number
+---@param body string 已编码的 JSON 串
+---@return table
+function Server.jsonResp(code, body)
+    return { code = code, ctype = "application/json; charset=utf-8", body = body }
+end
+
+--- 错误响应表：一律 JSON {"error": msg}（页面据此显示真实原因）。
 ---@param code number HTTP 状态码（需在 STATUS 表内，否则原因短语为 Unknown）
 ---@param msg any 错误说明，tostring 后进 JSON
+---@return table
+function Server.errorResp(code, msg)
+    return Server.jsonResp(code, JSON.encode({ error = tostring(msg) }))
+end
+
+---@param conn table
+---@param code number
+---@param body string 已编码的 JSON 串
+function Server:_json(conn, code, body)
+    return self:_queueResponse(conn, Server.jsonResp(code, body))
+end
+
+---@param conn table
+---@param code number
+---@param msg any
 function Server:_fail(conn, code, msg)
-    return self:_queueResponse(conn, {
-        code = code,
-        ctype = "application/json; charset=utf-8",
-        body = JSON.encode({ error = tostring(msg) }),
-    })
+    return self:_queueResponse(conn, Server.errorResp(code, msg))
 end
 
 --- 拼响应头并转 respond 状态；带 file 时只发头，body 由 _write 分块读发。
@@ -712,6 +710,13 @@ function Server:_write(conn)
             return true
         end
     end
+    return self:_send(conn)
+end
+
+--- 非阻塞发出 conn.out 的剩余部分（部分写续传）；对端关闭即 kill。
+---@param conn table
+---@return boolean 本轮是否有进展
+function Server:_send(conn)
     local sent, err, last = conn.sock:send(conn.out, conn.out_off)
     local upto = sent or last
     if upto then

@@ -199,25 +199,17 @@ function Weather:parse(body)
     local desc, icon, image = look(code, current.lang_zh, current.weatherDesc)
     local area = payload.nearest_area
     area = type(area) == "table" and area[1] or nil
+    local weather = type(payload.weather) == "table" and payload.weather or {}
     local days = {}
-    for _, day in ipairs(type(payload.weather) == "table" and payload.weather or {}) do
+    for _, day in ipairs(weather) do
         if type(day) == "table" then
             days[#days + 1] = dayRow(day)
         end
         if #days >= 3 then break end
     end
     local today = days[1] or {}
-    local astro
-    local weather = payload.weather
-    if type(weather) == "table" then
-        local day1 = weather[1]
-        if type(day1) == "table" then
-            local astronomy = day1.astronomy
-            if type(astronomy) == "table" then
-                astro = astronomy[1]
-            end
-        end
-    end
+    local day1 = weather[1]
+    local astro = type(day1) == "table" and type(day1.astronomy) == "table" and day1.astronomy[1] or nil
     return {
         temp = numberish(current.temp_C),
         feels = numberish(current.FeelsLikeC),

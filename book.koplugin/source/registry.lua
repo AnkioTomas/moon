@@ -12,12 +12,8 @@ local _ = require("gettext")
 --- 简易模板替换（避免测试环境依赖 string.pack）。
 ---@param fmt string
 ---@return string
-local function T(fmt, a1, a2, a3)
-    local s = tostring(fmt)
-    if a1 ~= nil then s = s:gsub("%%1", tostring(a1), 1) end
-    if a2 ~= nil then s = s:gsub("%%2", tostring(a2), 1) end
-    if a3 ~= nil then s = s:gsub("%%3", tostring(a3), 1) end
-    return s
+local function T(fmt, a1)
+    return (fmt:gsub("%%1", tostring(a1), 1))
 end
 
 local Registry = {}
@@ -104,7 +100,7 @@ end
 ---@return boolean ok, string|nil err
 function Registry.setEnabled(id, on)
     if not FACTORIES[id] then
-        return false, T(_("未知数据源: %1"), tostring(id))
+        return false, T(_("未知数据源: %1"), id)
     end
     if not on and id == MoonSettings.activeSourceId() then
         return false, _("不能禁用当前使用的数据源")
@@ -135,18 +131,17 @@ end
 function Registry.create(id)
     local fac = FACTORIES[id]
     if not fac then
-        return nil, T(_("未知数据源: %1"), tostring(id))
+        return nil, T(_("未知数据源: %1"), id)
     end
     local ok, mod = pcall(fac)
     if not ok then
         logger.warn("book.source require failed", id, mod)
-        return nil, T(_("数据源加载失败: %1"), tostring(id))
+        return nil, T(_("数据源加载失败: %1"), id)
     end
     if not mod or not mod.new then
-        return nil, T(_("数据源加载失败: %1"), tostring(id))
+        return nil, T(_("数据源加载失败: %1"), id)
     end
-    local source = mod.new()
-    return source
+    return mod.new()
 end
 
 --- 安全关闭源实例（忽略 close 异常）。
@@ -197,6 +192,18 @@ function Registry.activate(source, id)
     end
 end
 
+--- 取走非活跃缓存实例（交给调用方激活）；没有则新建。
+---@param id SourceId
+---@return BookSource|nil, string|nil
+local function takeOrCreate(id)
+    local cached = _resolved[id]
+    _resolved[id] = nil
+    if cached then
+        return cached
+    end
+    return Registry.create(id)
+end
+
 --- 当前活跃源；不做 fallback。未加载则按配置创建一次。
 ---@return BookSource|nil, string|nil
 function Registry.current()
@@ -204,16 +211,9 @@ function Registry.current()
     if _active and _active_id == id then
         return _active
     end
-    local src = _resolved[id]
-    local err
-    _resolved[id] = nil
+    local src, err = takeOrCreate(id)
     if not src then
-        local created
-        created, err = Registry.create(id)
-        if not created then
-            return nil, err
-        end
-        src = created
+        return nil, err
     end
     Registry.activate(src, id)
     return _active
@@ -241,18 +241,11 @@ end
 ---@return BookSource|nil, string|nil
 function Registry.setActive(id)
     if not FACTORIES[id] then
-        return nil, T(_("未知数据源: %1"), tostring(id))
+        return nil, T(_("未知数据源: %1"), id)
     end
-    local candidate = _resolved[id]
-    local err
-    _resolved[id] = nil
+    local candidate, err = takeOrCreate(id)
     if not candidate then
-        local created
-        created, err = Registry.create(id)
-        if not created then
-            return nil, err
-        end
-        candidate = created
+        return nil, err
     end
     local common = MoonSettings.get()
     common.active_source = id

@@ -15,13 +15,6 @@ local T = require("ffi/util").template
 
 ---@class BookSettingsAI
 local AI = {}
-AI.__index = AI
-
----@return BookSettingsAI
-function AI.new()
-    return setmetatable({}, AI)
-end
-
 
 --- 弹输入框编辑一项 AI 配置，保存后写入 ai 分区并重建桌面。
 ---@param desktop table 桌面实例

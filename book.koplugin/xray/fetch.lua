@@ -243,15 +243,8 @@ function Fetch.lookupWord(ui, identity, word, cb)
             cb(nil, Text.trim(decoded.error_message) ~= "" and decoded.error_message or "not an entity")
             return
         end
-        local item = decoded.item
-        local row
-        if decoded.type == "location" then
-            row = cleanEntity("location", item)
-        elseif decoded.type == "term" then
-            row = cleanEntity("term", item)
-        else
-            row = cleanEntity("character", item)
-        end
+        local kind = (decoded.type == "location" or decoded.type == "term") and decoded.type or "character"
+        local row = cleanEntity(kind, decoded.item)
         if not row then
             cb(nil, "invalid entity")
             return

@@ -70,7 +70,7 @@ package.preload["zlib.setting"] = function() return {} end
 
 package.loaded["ui.desktop.settings.source"] = nil
 local Source = require("ui.desktop.settings.source")
-local src = Source.new()
+local src = Source
 local desktop = { updateView = function() end, onEvent = function() end }
 
 Assert.eq(Source.displayName("微信读书"), "微信读书")

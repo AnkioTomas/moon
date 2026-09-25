@@ -270,7 +270,7 @@ local function syncDesktopBooks(self, desktop, opts)
         desktop._books_sync_pending = false
         if desktop.lifecycle.state == "Destroy" or desktop.source ~= self then return end
         if not result then
-            require("utils.log").warn("book shelf sync failed", self.id, err)
+            logger.warn("book shelf sync failed", self.id, err)
             desktop:onEvent("home_refresh", "shelf_sync_failed")
             if desktop.tab == "library" and desktop.library then
                 desktop.library.state = { books = {}, err = err or _("同步失败") }
@@ -346,7 +346,6 @@ local function syncDesktopStats(self, desktop, opts)
     end
 end
 
----   network_connected — 网络恢复（脏重试由 book.sync.retryDirtyAsync 负责，基类不重复推）
 ---@param event string 事件名
 ---@param payload table|nil 事件载荷，含义随事件而定
 function SourceBase:onEvent(event, payload)
@@ -373,33 +372,20 @@ function SourceBase:onEvent(event, payload)
     syncDesktopBooks(self, desktop)
 end
 
----@param cb function
----@param result table
----@return { cancel: fun() }
-local function defer(cb, result)
-    local cancelled = false
-    require("ui/uimanager"):nextTick(function()
-        if not cancelled then cb(result) end
-    end)
-    return { cancel = function() cancelled = true end }
-end
-
---- 异步回报一个「跳过」的同步结果，供不支持某方向同步的源直接复用。
----@param cb fun(result: SyncResult)
----@return { cancel: fun() }
-local function unsupported(cb)
-    return defer(cb, {
-        pulled = 0, pushed = 0, hidden = 0, conflicts = 0,
-        skipped = true, reason = "unsupported",
-    })
-end
-
 --- 默认书架同步：无远端书架。远端源覆盖，local 覆盖为扫盘。
 ---@param _opts { force?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }
 function SourceBase:syncBooksAsync(_opts, cb)
-    return unsupported(cb)
+    local cancelled = false
+    require("ui/uimanager"):nextTick(function()
+        if cancelled then return end
+        cb({
+            pulled = 0, pushed = 0, hidden = 0, conflicts = 0,
+            skipped = true, reason = "unsupported",
+        })
+    end)
+    return { cancel = function() cancelled = true end }
 end
 
 ---@param opts { identity?: BookIdentity }|nil

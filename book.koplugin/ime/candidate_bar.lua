@@ -112,12 +112,12 @@ local function syncRow(want, columns)
     if type(keys) ~= "table" then
         return
     end
-    local has_row = keys[1] and keys[1]._ime_bar == true
+    if keys[1] and keys[1]._ime_bar == true then
+        table.remove(keys, 1)
+    end
     if not want then
-        if has_row then table.remove(keys, 1) end
         return
     end
-    if has_row then table.remove(keys, 1) end
     local row = { _ime_bar = true }
     for i = 1, columns do
         row[i] = { label = "", width = 1.0 }
@@ -164,10 +164,10 @@ local function applyKeyboardLabels(profile)
     local restored = util.tableDeepCopy(keyboard_baseline)
     for key in pairs(layout.keys) do layout.keys[key] = nil end
     for key, value in pairs(restored) do layout.keys[key] = value end
-    if profile and profile.id == "zhuyin" then
+    if not profile then return end
+    if profile.id == "zhuyin" then
         applyZhuyinKeys(layout.keys)
     end
-    if not profile then return end
     local labels = profile.labels
     if type(labels) ~= "table" then return end
     for _, row in ipairs(layout.keys) do
@@ -175,22 +175,20 @@ local function applyKeyboardLabels(profile)
             if type(key) == "table" then
                 for layer = 1, 2 do
                     local raw = primaryChar(key[layer])
-                    if type(raw) == "string" then
-                        local code = raw:lower()
-                        local label = labels[code]
-                        if label then
-                            local value = key[layer]
-                            local alt = profile.show_codes and code:upper() or nil
-                            if type(value) == "table" then
-                                value.label = label
-                                value.alt_label = alt
-                            else
-                                key[layer] = {
-                                    label = label,
-                                    alt_label = alt,
-                                    value,
-                                }
-                            end
+                    local code = raw and raw:lower()
+                    local label = code and labels[code]
+                    if label then
+                        local value = key[layer]
+                        local alt = profile.show_codes and code:upper() or nil
+                        if type(value) == "table" then
+                            value.label = label
+                            value.alt_label = alt
+                        else
+                            key[layer] = {
+                                label = label,
+                                alt_label = alt,
+                                value,
+                            }
                         end
                     end
                 end
@@ -481,13 +479,12 @@ local function wrappedAddChar(self, key)
     end
     if Bar._profile.commit_space and key == " " and Bar.lookup.code ~= "" then
         local first = Bar.lookup.pages[1] and Bar.lookup.pages[1][1]
-        if first and commit(first) then
-            refresh()
-            redraw()
-            return
-        end
+        local committed = first and commit(first)
         refresh()
         redraw()
+        if committed then
+            return
+        end
         return orig_addChar(self, key)
     end
     if Bar.lookup.code ~= "" then

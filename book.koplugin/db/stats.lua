@@ -112,20 +112,30 @@ function StatsDB.deleteSyntheticInRange(source_id, from_ts, to_ts, prefix)
     if not from_n or not to_n then
         return false
     end
-    if prefix ~= nil then
-        return Base.exec(
-            [[DELETE FROM reading_stats
-              WHERE source_id=? AND record_type IN ('day','book','total')
-                AND start_time>=? AND start_time<=? AND stable_id LIKE ?;]],
-            source_id, from_n, to_n, prefix .. "%"
-        ) ~= nil
-    end
-    return Base.exec(
-        [[DELETE FROM reading_stats
+    local sql = [[DELETE FROM reading_stats
           WHERE source_id=? AND record_type IN ('day','book','total')
-            AND start_time>=? AND start_time<=?;]],
-        source_id, from_n, to_n
-    ) ~= nil
+            AND start_time>=? AND start_time<=?]]
+    if prefix ~= nil then
+        return Base.exec(sql .. " AND stable_id LIKE ?;", source_id, from_n, to_n, prefix .. "%") ~= nil
+    end
+    return Base.exec(sql .. ";", source_id, from_n, to_n) ~= nil
+end
+
+--- 按 500 一批执行 `<prefix> WHERE id IN (…)`；任一批失败即返回 false（事务由调用方管）。
+---@param prefix string
+---@param ids number[]
+---@return boolean
+local function execByIds(prefix, ids)
+    for start = 1, #ids, 500 do
+        local batch = { unpack(ids, start, math.min(start + 499, #ids)) }
+        if not Base.exec(
+            prefix .. " WHERE id IN (" .. string.rep("?", #batch, ",") .. ");",
+            unpack(batch)
+        ) then
+            return false
+        end
+    end
+    return true
 end
 
 --- 云端日桶/书桶是合成行：按书、按小时统计里必须排掉，否则同一天既算云端整天
@@ -149,26 +159,24 @@ local function mergedDailyRowsOne(source_id, start_ts, end_ts)
         [[SELECT date(start_time,'unixepoch','localtime') AS day,
                  stable_id, record_type, COALESCE(SUM(duration),0),
                  COALESCE(SUM(event_count),0)
-          FROM reading_stats WHERE source_id=]] .. "?" .. range .. [[
+          FROM reading_stats WHERE source_id=?]] .. range .. [[
           GROUP BY day, stable_id, record_type ORDER BY day;]],
-        unpack(args, 1, #args)
+        unpack(args)
     )
     local cloud, local_days, pages = {}, {}, {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            local day = result[1][i]
-            local record_type = result[3][i]
-            local seconds = tonumber(result[4][i]) or 0
-            local count = tonumber(result[5][i]) or 0
-            if record_type == BOOK_RECORD or record_type == TOTAL_RECORD then
-                -- 周期书单排行和权威累计值不参与日历总时长
-            elseif record_type == DAY_RECORD then
-                cloud[day] = seconds
-                pages[day] = (pages[day] or 0) + count
-            else
-                local_days[day] = (local_days[day] or 0) + seconds
-                pages[day] = (pages[day] or 0) + count
-            end
+    for i = 1, nrows do
+        local day = result[1][i]
+        local record_type = result[3][i]
+        local seconds = tonumber(result[4][i]) or 0
+        local count = tonumber(result[5][i]) or 0
+        if record_type == BOOK_RECORD or record_type == TOTAL_RECORD then
+            -- 周期书单排行和权威累计值不参与日历总时长
+        elseif record_type == DAY_RECORD then
+            cloud[day] = seconds
+            pages[day] = (pages[day] or 0) + count
+        else
+            local_days[day] = (local_days[day] or 0) + seconds
+            pages[day] = (pages[day] or 0) + count
         end
     end
     local seen, rows = {}, {}
@@ -194,23 +202,13 @@ local function mergedDailyRows(source_id, start_ts, end_ts)
     if type(source_id) ~= "table" then
         return mergedDailyRowsOne(source_id, start_ts, end_ts)
     end
-    if #source_id <= 1 then
-        return mergedDailyRowsOne(source_id[1], start_ts, end_ts)
-    end
     local by_day = {}
     for _, id in ipairs(source_id) do
         for _, row in ipairs(mergedDailyRowsOne(id, start_ts, end_ts)) do
-            local cur = by_day[row.ymd]
-            if cur then
-                cur.seconds = cur.seconds + row.seconds
-                cur.pages = cur.pages + row.pages
-            else
-                by_day[row.ymd] = {
-                    ymd = row.ymd,
-                    seconds = row.seconds,
-                    pages = row.pages,
-                }
-            end
+            local cur = by_day[row.ymd] or { ymd = row.ymd, seconds = 0, pages = 0 }
+            cur.seconds = cur.seconds + row.seconds
+            cur.pages = cur.pages + row.pages
+            by_day[row.ymd] = cur
         end
     end
     local rows = {}
@@ -267,20 +265,18 @@ function StatsDB.unsyncedBySource(source_id, limit)
         source_id, math.max(1, tonumber(limit) or 500)
     )
     local rows = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            rows[#rows + 1] = {
-                id = tonumber(result[1][i]) or 0,
-                stable_id = result[2][i],
-                page = tonumber(result[3][i]) or 0,
-                start_time = tonumber(result[4][i]) or 0,
-                duration = tonumber(result[5][i]) or 0,
-                total_pages = tonumber(result[6][i]) or 0,
-                chapter_idx = tonumber(result[7][i]),
-                chapter_fraction = tonumber(result[8][i]),
-                sync_status = tonumber(result[9][i]) or 0,
-            }
-        end
+    for i = 1, nrows do
+        rows[#rows + 1] = {
+            id = tonumber(result[1][i]) or 0,
+            stable_id = result[2][i],
+            page = tonumber(result[3][i]) or 0,
+            start_time = tonumber(result[4][i]) or 0,
+            duration = tonumber(result[5][i]) or 0,
+            total_pages = tonumber(result[6][i]) or 0,
+            chapter_idx = tonumber(result[7][i]),
+            chapter_fraction = tonumber(result[8][i]),
+            sync_status = tonumber(result[9][i]) or 0,
+        }
     end
     return rows
 end
@@ -447,14 +443,12 @@ function StatsDB.dailyByBook(source_id, stable_id, limit)
         tonumber(limit) or 5
     )
     local rows = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            rows[#rows + 1] = {
-                ymd = result[1][i],
-                seconds = tonumber(result[2][i]) or 0,
-                pages = tonumber(result[3][i]) or 0,
-            }
-        end
+    for i = 1, nrows do
+        rows[#rows + 1] = {
+            ymd = result[1][i],
+            seconds = tonumber(result[2][i]) or 0,
+            pages = tonumber(result[3][i]) or 0,
+        }
     end
     return rows
 end
@@ -481,17 +475,15 @@ function StatsDB.dailyBooksBySource(source_id)
         unpack(args)
     )
     local rows = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            rows[#rows + 1] = {
-                ymd = result[1][i],
-                source_id = result[2][i],
-                stable_id = result[3][i],
-                seconds = tonumber(result[4][i]) or 0,
-                max_page = tonumber(result[5][i]) or 0,
-                max_total_pages = tonumber(result[6][i]) or 0,
-            }
-        end
+    for i = 1, nrows do
+        rows[#rows + 1] = {
+            ymd = result[1][i],
+            source_id = result[2][i],
+            stable_id = result[3][i],
+            seconds = tonumber(result[4][i]) or 0,
+            max_page = tonumber(result[5][i]) or 0,
+            max_total_pages = tonumber(result[6][i]) or 0,
+        }
     end
     return rows
 end
@@ -509,16 +501,14 @@ function StatsDB.weeklyBooksBySource(source_id)
         source_id
     )
     local rows = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            local stable_id = tostring(result[2][i] or ""):match("^__wr:week:%d+:(.+)$")
-            if stable_id and stable_id ~= "" then
-                rows[#rows + 1] = {
-                    week_ymd = result[1][i],
-                    stable_id = stable_id,
-                    seconds = tonumber(result[3][i]) or 0,
-                }
-            end
+    for i = 1, nrows do
+        local stable_id = result[2][i]:match("^__wr:week:%d+:(.+)$")
+        if stable_id then
+            rows[#rows + 1] = {
+                week_ymd = result[1][i],
+                stable_id = stable_id,
+                seconds = tonumber(result[3][i]) or 0,
+            }
         end
     end
     return rows
@@ -577,18 +567,16 @@ function StatsDB.periodBooks(source_id, start_ts, end_ts, limit)
         unpack(args)
     )
     local rows = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            rows[#rows + 1] = {
-                source_id = result[1][i],
-                stable_id = result[2][i],
-                title = result[3][i],
-                authors = result[4][i],
-                percent = tonumber(result[5][i]) or 0,
-                seconds = tonumber(result[6][i]) or 0,
-                pages = tonumber(result[7][i]) or 0,
-            }
-        end
+    for i = 1, nrows do
+        rows[#rows + 1] = {
+            source_id = result[1][i],
+            stable_id = result[2][i],
+            title = result[3][i],
+            authors = result[4][i],
+            percent = tonumber(result[5][i]) or 0,
+            seconds = tonumber(result[6][i]) or 0,
+            pages = tonumber(result[7][i]) or 0,
+        }
     end
     return rows
 end
@@ -607,7 +595,7 @@ function StatsDB.compactSynced(source_id, before_ts, limit)
           ORDER BY start_time ASC, id ASC LIMIT ?;]],
         source_id, tonumber(before_ts) or 0, math.max(1, tonumber(limit) or 1000)
     )
-    if not result or nrows == 0 then return 0 end
+    if nrows == 0 then return 0 end
 
     local groups, order, ids = {}, {}, {}
     for i = 1, nrows do
@@ -661,24 +649,7 @@ function StatsDB.compactSynced(source_id, before_ts, limit)
             break
         end
     end
-    if ok then
-        for start = 1, #ids, 500 do
-            local finish = math.min(start + 499, #ids)
-            local placeholders, args = {}, {}
-            for i = start, finish do
-                placeholders[#placeholders + 1] = "?"
-                args[#args + 1] = ids[i]
-            end
-            if not Base.exec(
-                "DELETE FROM reading_stats WHERE id IN ("
-                    .. table.concat(placeholders, ",") .. ");",
-                unpack(args)
-            ) then
-                ok = false
-                break
-            end
-        end
-    end
+    ok = ok and execByIds("DELETE FROM reading_stats", ids)
     if ok and Base.exec("COMMIT;") then return #ids end
     Base.exec("ROLLBACK;")
     return nil
@@ -694,27 +665,11 @@ function StatsDB.markSynced(ids)
     if not Base.exec("BEGIN IMMEDIATE;") then
         return false
     end
-    for start = 1, #ids, 500 do
-        local finish = math.min(start + 499, #ids)
-        local placeholders, args = {}, {}
-        for i = start, finish do
-            placeholders[#placeholders + 1] = "?"
-            args[#args + 1] = ids[i]
-        end
-        if not Base.exec(
-            "UPDATE reading_stats SET sync_status=1 WHERE id IN ("
-                .. table.concat(placeholders, ",") .. ");",
-            unpack(args)
-        ) then
-            Base.exec("ROLLBACK;")
-            return false
-        end
+    if execByIds("UPDATE reading_stats SET sync_status=1", ids) and Base.exec("COMMIT;") then
+        return true
     end
-    if not Base.exec("COMMIT;") then
-        Base.exec("ROLLBACK;")
-        return false
-    end
-    return true
+    Base.exec("ROLLBACK;")
+    return false
 end
 
 return StatsDB

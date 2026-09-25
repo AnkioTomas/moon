@@ -80,7 +80,7 @@ for _, name in ipairs({
     "ui.desktop.insight.records",
 }) do
     package.preload[name] = function()
-        return { new = function() return {} end }
+        return {}
     end
 end
 

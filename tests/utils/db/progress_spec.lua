@@ -243,61 +243,6 @@ do
     clearMods()
 end
 
--- ── all(source_id)：带过滤走 prepare 绑定，行映射正确 ────
-do
-    local connection, calls = makeConn({
-        resultset = function()
-            return {
-                { "moon", "moon" },
-                { "a.epub", "b.epub" },
-                { 0.5, "0.75" },
-                { 3, nil },
-                { "第三章", nil },
-                { 0.25, nil },
-                { 12, nil },
-                { 300, nil },
-                { "/loc/1", nil },
-                { '{"chapter_uid":42}', "not json" },
-                { 1000, 2000 },
-                { 0, 1 },
-            }, 2
-        end,
-    })
-    local DbBase, ProgressDB = loadProgress(connection)
-
-    local rows = ProgressDB.all("moon")
-    Assert.eq(#rows, 2)
-    Assert.eq(rows[1].source_id, "moon")
-    Assert.eq(rows[1].stable_id, "a.epub")
-    Assert.eq(rows[1].fraction, 0.5)
-    Assert.eq(rows[1].chapter_idx, 3)
-    Assert.eq(rows[1].chapter_title, "第三章")
-    Assert.eq(rows[1].chapter_fraction, 0.25)
-    Assert.eq(rows[1].page, 12)
-    Assert.eq(rows[1].total_pages, 300)
-    Assert.eq(rows[1].locator, "/loc/1")
-    Assert.eq(rows[1].extra.chapter_uid, 42)
-    Assert.eq(rows[1].updated_at, 1000)
-    Assert.eq(rows[1].sync_status, 0)
-    Assert.eq(rows[2].fraction, 0.75) -- 字符串 fraction 被 tonumber
-    Assert.is_nil(rows[2].chapter_idx) -- NULL 保持 nil，不变成 0
-    Assert.is_nil(rows[2].chapter_title)
-    Assert.is_nil(rows[2].chapter_fraction)
-    Assert.is_nil(rows[2].page)
-    Assert.is_nil(rows[2].total_pages)
-    Assert.is_nil(rows[2].locator)
-    Assert.is_nil(rows[2].extra) -- 损坏的 JSON 不抛错，降级为 nil
-    Assert.eq(rows[2].sync_status, 1)
-    local q = calls[#calls]
-    Assert.is_true(q.sql:find("WHERE source_id=?", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("ORDER BY updated_at ASC", 1, true) ~= nil)
-    Assert.eq(q.argc, 1)
-    Assert.eq(q.args[1], "moon")
-
-    DbBase.close()
-    clearMods()
-end
-
 -- ── recent：仅由 pending_progress 决定准入与顺序 ─────────
 do
     local connection, calls = makeConn({
@@ -332,22 +277,6 @@ do
     clearMods()
 end
 
--- ── all()：按 source_id 查询，空结果返回 {} ──────────────
-do
-    local connection, calls = makeConn()
-    local DbBase, ProgressDB = loadProgress(connection)
-
-    local rows = ProgressDB.all("moon")
-    Assert.eq(#rows, 0)
-    local q = calls[#calls]
-    Assert.is_true(q.sql:find("FROM pending_progress", 1, true) ~= nil)
-    Assert.is_true(q.sql:find("WHERE source_id=?", 1, true) ~= nil)
-    Assert.eq(q.argc, 1)
-
-    DbBase.close()
-    clearMods()
-end
-
 -- ── markSynced：版本键绑定；非法输入拒绝且不碰 DB ─────────
 do
     local connection, calls = makeConn()
@@ -376,6 +305,61 @@ do
     local DbBase, ProgressDB = loadProgress(connection)
 
     Assert.is_false(ProgressDB.markSynced("moon", "a.epub", 1234))
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── 行解码：NULL 保持 nil、字符串数值 tonumber、损坏 extra 降级为 nil ──
+do
+    local connection, calls = makeConn({
+        resultset = function()
+            return {
+                { "moon", "moon" },
+                { "a.epub", "b.epub" },
+                { 0.5, "0.75" },
+                { 3, nil },
+                { "第三章", nil },
+                { 0.25, nil },
+                { 12, nil },
+                { 300, nil },
+                { "/loc/1", nil },
+                { '{"chapter_uid":42}', "not json" },
+                { 1000, 2000 },
+                { 0, 1 },
+            }, 2
+        end,
+    })
+    local DbBase, ProgressDB = loadProgress(connection)
+
+    local rows = ProgressDB.unsynced("moon")
+    Assert.eq(#rows, 2)
+    Assert.eq(rows[1].source_id, "moon")
+    Assert.eq(rows[1].stable_id, "a.epub")
+    Assert.eq(rows[1].fraction, 0.5)
+    Assert.eq(rows[1].chapter_idx, 3)
+    Assert.eq(rows[1].chapter_title, "第三章")
+    Assert.eq(rows[1].chapter_fraction, 0.25)
+    Assert.eq(rows[1].page, 12)
+    Assert.eq(rows[1].total_pages, 300)
+    Assert.eq(rows[1].locator, "/loc/1")
+    Assert.eq(rows[1].extra.chapter_uid, 42)
+    Assert.eq(rows[1].updated_at, 1000)
+    Assert.eq(rows[1].sync_status, 0)
+    Assert.eq(rows[2].fraction, 0.75) -- 字符串 fraction 被 tonumber
+    Assert.is_nil(rows[2].chapter_idx) -- NULL 保持 nil，不变成 0
+    Assert.is_nil(rows[2].chapter_title)
+    Assert.is_nil(rows[2].chapter_fraction)
+    Assert.is_nil(rows[2].page)
+    Assert.is_nil(rows[2].total_pages)
+    Assert.is_nil(rows[2].locator)
+    Assert.is_nil(rows[2].extra) -- 损坏的 JSON 不抛错，降级为 nil
+    Assert.eq(rows[2].sync_status, 1)
+    local q = calls[#calls]
+    Assert.is_true(q.sql:find("WHERE sync_status=0 AND source_id=?", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("ORDER BY updated_at ASC", 1, true) ~= nil)
+    Assert.eq(q.argc, 1)
+    Assert.eq(q.args[1], "moon")
 
     DbBase.close()
     clearMods()

@@ -47,7 +47,7 @@ end
 
 local AI = require("ui.desktop.settings.ai")
 local desktop = { updateView = function() end, lifecycle = { state = "Resume" } }
-local rows = AI.new():rows(desktop)
+local rows = AI:rows(desktop)
 Assert.len(rows, 4)
 
 -- 第 4 行是测试连接

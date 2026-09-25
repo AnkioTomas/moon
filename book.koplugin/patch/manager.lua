@@ -23,12 +23,6 @@ local function lfs()
     return require("libs/libkoreader-lfs")
 end
 
---- 延迟取 DataStorage。
----@return table
-local function dataStorage()
-    return require("datastorage")
-end
-
 --- 延迟取 utils.paths。
 ---@return table
 local function paths()
@@ -85,7 +79,7 @@ end
 ---@return string|nil err
 local function copyFile(src, dst)
     local content, err = readFile(src)
-    if content == nil then return nil, err or ("cannot read " .. src) end
+    if content == nil then return nil, err end
     return writeFile(dst, content)
 end
 
@@ -132,7 +126,7 @@ end
 --- KOReader 运行时补丁目录（静态补丁文件分发到这里）。
 ---@return string
 local function patchesDir()
-    return _patches_dir or dataStorage():getPatchesDir()
+    return _patches_dir or require("datastorage"):getPatchesDir()
 end
 
 --- 功能目录：<plugin_root>/patches/<feature>

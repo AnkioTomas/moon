@@ -106,10 +106,8 @@ function M.blocks(rect)
         + chart_label_h
         + inset_v
     local chart_h = math.max(0, rect.h - fixed_h)
-    local card_h = rect.h
-    local card_y = rect.y + math.floor((rect.h - card_h) / 2)
 
-    local y = card_y + inset_v
+    local y = rect.y + inset_v
     local hero_y = y
     y = y + hero_h + gap
     local progress_y = y
@@ -131,7 +129,7 @@ function M.blocks(rect)
     local label_dy = 4
     local blocks = {
         {
-            kind = "panel", x = rect.x, y = card_y, width = rect.w, height = card_h,
+            kind = "panel", x = rect.x, y = rect.y, width = rect.w, height = rect.h,
             radius = rect.radius, shadow = 2, color = Blitbuffer.COLOR_WHITE,
         },
         {

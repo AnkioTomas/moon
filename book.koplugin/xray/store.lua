@@ -68,7 +68,7 @@ function Store.mergeEntities(existing, incoming)
                     if hit then break end
                 end
             end
-            if hit and by_key[hit] then
+            if hit then
                 local cur = by_key[hit]
                 local seen = {}
                 for index, alias in ipairs(cur.aliases) do seen[normName(alias)] = true end

@@ -43,4 +43,36 @@ function Base:onEvent(event)
     end
 end
 
+--- 空书架入口：整块可点，进入图书馆并清除旧的筛选和分页状态。
+---@param ctx table 构建上下文；离屏视图没有桌面时点击不跳转
+---@param w number 目标宽度，单位像素
+---@param h number 目标高度，单位像素
+---@param err string|nil 读取书架失败的原因，替代默认提示
+---@return table
+function Base.libraryPrompt(ctx, w, h, err)
+    local Geom = require("ui/geometry")
+    local UI = require("ui.components.bookui")
+    local _ = require("gettext")
+    local tap = require("ui.components.bookinfo").tappable(w, h, function()
+        local desktop = ctx.desktop
+        if not desktop or not desktop.switchTab then return end
+        local library = desktop.library
+        if library then
+            library.filter = {}
+            library.page = 1
+            library.state = nil
+        end
+        desktop:switchTab("library")
+    end)
+    tap[1] = require("ui/widget/container/centercontainer"):new{
+        dimen = Geom:new{ w = w, h = h },
+        require("ui/widget/textwidget"):new{
+            text = err or _("去图书馆挑一本 ›"),
+            face = UI.face("cfont", 14),
+            fgcolor = UI.muted(),
+        },
+    }
+    return tap
+end
+
 return Base

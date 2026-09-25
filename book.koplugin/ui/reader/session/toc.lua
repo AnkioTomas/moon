@@ -26,8 +26,7 @@ end
 function Toc.current(session)
     if not session then return nil end
     if Mode.isChapter(session.identity) then
-        local idx = session.identity and session.identity.chapter_idx
-        idx = idx and tonumber(idx)
+        local idx = tonumber(session.identity.chapter_idx)
         if not idx then return nil end
         local title = Chapter.chapterTitle(session)
         if not title then return nil end

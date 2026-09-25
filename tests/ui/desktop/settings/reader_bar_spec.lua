@@ -53,7 +53,7 @@ end
 
 local ReaderBar = require("ui.desktop.settings.reader_bar")
 local desktop = { updateView = function() end, settings = {} }
-local page = ReaderBar.new():page(desktop, "top")
+local page = ReaderBar:page(desktop, "top")
 Assert.eq(page.preview(600).kind, "preview")
 Assert.eq(page.preview(600).which, "top")
 Assert.eq(#page.sections, 2)
@@ -65,7 +65,7 @@ Assert.eq(page.sections[2].title, "组件")
 Assert.eq(page.sections[2].rows[1](600).title, "章节")
 Assert.eq(page.sections[2].rows[1](600).status, "左 · 第 1 位")
 
-local bottom = ReaderBar.new():page(desktop, "bottom")
+local bottom = ReaderBar:page(desktop, "bottom")
 Assert.eq(bottom.sections[1].rows[1](600).title, "替代系统底栏")
 Assert.eq(bottom.sections[1].rows[2](600).title, "开启底栏")
 Assert.is_false(bottom.sections[1].rows[2](600).status_on)

@@ -17,43 +17,57 @@ local function cancel(job)
     if job and job.cancel then job:cancel() end
 end
 
+--- 逐本调用 ``source._client[method]`` 串行上行；on_ok 返回真才计入 pushed，失败只记日志继续下一本。
+---@param source SourceBase
+---@param ids string[]
+---@param method string client 方法名
+---@param on_ok fun(stable_id: string): boolean
+---@param fail_log string 失败日志后缀
+---@param cb fun(pushed: integer)
+---@return { cancel: fun() }|nil
+local function pushEach(source, ids, method, on_ok, fail_log, cb)
+    if #ids == 0 then
+        cb(0)
+        return nil
+    end
+    local cancelled, job, pushed, index = false, nil, 0, 0
+    local function nextId()
+        if cancelled then return end
+        index = index + 1
+        if index > #ids then
+            cb(pushed)
+            return
+        end
+        local stable_id = ids[index]
+        job = source._client[method](source._client, stable_id, function(wire, err)
+            if cancelled then return end
+            if wire then
+                if on_ok(stable_id) then
+                    pushed = pushed + 1
+                end
+            elseif err then
+                logger.warn(source.id .. fail_log, stable_id, err)
+            end
+            nextId()
+        end)
+    end
+    nextId()
+    return { cancel = function()
+        cancelled = true
+        cancel(job)
+    end }
+end
+
 --- 本地已标删的书：推云端 remove，成功则撕墓碑。
 ---@param source SourceBase
 ---@param cb fun(pushed: integer)
 ---@return { cancel: fun() }|nil
 local function pushDeleted(source, cb)
     local Store = require("book.store")
-    local pending = require("db.book").pendingDeleteIds(source.id)
-    if #pending == 0 then
-        cb(0)
-        return nil
-    end
-    local cancelled, job, pushed, index = false, nil, 0, 0
-    local function nextDelete()
-        if cancelled then return end
-        index = index + 1
-        if index > #pending then
-            cb(pushed)
-            return
-        end
-        local stable_id = pending[index]
-        job = source._client:removeFromShelfAsync(stable_id, function(wire, err)
-            if cancelled then return end
-            if wire then
-                if Store.finalizeDeleted(source.id, stable_id) then
-                    pushed = pushed + 1
-                end
-            elseif err then
-                logger.warn(source.id .. " shelf delete push failed", stable_id, err)
-            end
-            nextDelete()
-        end)
-    end
-    nextDelete()
-    return { cancel = function()
-        cancelled = true
-        cancel(job)
-    end }
+    return pushEach(source, require("db.book").pendingDeleteIds(source.id), "removeFromShelfAsync",
+        function(stable_id)
+            return Store.finalizeDeleted(source.id, stable_id)
+        end, " shelf delete push failed", cb)
 end
 
 --- 本地新加架（脏行）上行。remote_ids 里已有的直接标已同步，不再发请求。
@@ -71,37 +85,12 @@ local function pushAdded(source, remote_ids, cb)
             missing[#missing + 1] = stable_id
         end
     end
-    if #missing == 0 then
-        cb(0)
-        return nil
-    end
-    local cancelled, job, pushed, index = false, nil, 0, 0
-    local function nextMissing()
-        if cancelled then return end
-        index = index + 1
-        if index > #missing then
-            cb(pushed)
-            return
+    return pushEach(source, missing, "addToShelfAsync", function(stable_id)
+        if not BookDB.markSynced(source.id, stable_id) then
+            logger.warn(source.id .. " shelf mark synced failed", stable_id)
         end
-        local stable_id = missing[index]
-        job = source._client:addToShelfAsync(stable_id, function(wire, err)
-            if cancelled then return end
-            if wire then
-                pushed = pushed + 1
-                if not BookDB.markSynced(source.id, stable_id) then
-                    logger.warn(source.id .. " shelf mark synced failed", stable_id)
-                end
-            elseif err then
-                logger.warn(source.id .. " shelf push failed", stable_id, err)
-            end
-            nextMissing()
-        end)
-    end
-    nextMissing()
-    return { cancel = function()
-        cancelled = true
-        cancel(job)
-    end }
+        return true
+    end, " shelf push failed", cb)
 end
 
 --- 书架同步。dirty_only：只推本地删/加，不拉书架、不对账；

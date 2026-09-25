@@ -31,7 +31,7 @@ local desktop = {
 }
 local Settings = require("ui.desktop.settings.topbar")
 
-local rows = Settings.new():rows(desktop)
+local rows = Settings:rows(desktop)
 Assert.len(rows, 8)
 local memory = rows[3](600)
 Assert.eq(memory.title, "剩余内存")
@@ -43,7 +43,7 @@ Assert.eq(events[1], "topbar_changed")
 Assert.len(events, 1)
 Assert.eq(views, 1)
 
-rows = Settings.new():rows(desktop)
+rows = Settings:rows(desktop)
 Assert.eq(rows[3](600).status, "关")
 
 return true

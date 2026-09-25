@@ -26,14 +26,6 @@ local function ensureUI()
     if not BookInfo then BookInfo = require("ui.components.bookinfo") end
 end
 
-local function logoPath()
-    local info = debug.getinfo(logoPath, "S")
-    local source = info and info.source
-    local root = source and source:sub(1, 1) == "@"
-        and source:sub(2):match("(.*/)lockscreen/components/[^/]+$")
-    return (root or "") .. "logo.png"
-end
-
 --- 找出当前书今天的统计桶。
 ---@param book table
 ---@return table
@@ -72,73 +64,20 @@ local function remaining(book)
     return U.duration(elapsed * (100 - math.min(percent, 100)) / percent)
 end
 
---- 追加票据式虚线。
----@param blocks table[]
----@param x number
----@param y number
----@param width number
-local function appendDashes(blocks, x, y, width)
-    local dash, gap = 7, 5
-    local right = x + width
-    while x < right do
-        blocks[#blocks + 1] = {
-            kind = "rule", x = x, y = y, width = math.min(dash, right - x),
-            height = 1, color = U.DIM,
-        }
-        x = x + dash + gap
-    end
-end
-
 --- 在票面上下打齿孔，并在撕线两端切出半圆缺口。
 ---@param blocks table[]
 ---@param rect table
 ---@param tear_y number
 local function appendCutouts(blocks, rect, tear_y)
     local radius = math.max(7, math.floor(rect.pad * 0.45))
-    local step = radius * 3
-    local left, right = rect.x, rect.x + rect.w
-    local center = left + step
-    while center <= right - step do
-        blocks[#blocks + 1] = {
-            kind = "cutout_circle", x = center, y = rect.y, radius = radius,
-        }
-        blocks[#blocks + 1] = {
-            kind = "cutout_circle", x = center, y = rect.y + rect.h, radius = radius,
-        }
-        center = center + step
-    end
+    U.appendCutouts(blocks, rect.x, rect.y, rect.w, rect.h, radius)
     local tear_radius = math.floor(radius * 1.5)
     blocks[#blocks + 1] = {
-        kind = "cutout_circle", x = left, y = tear_y, radius = tear_radius,
+        kind = "cutout_circle", x = rect.x, y = tear_y, radius = tear_radius,
     }
     blocks[#blocks + 1] = {
-        kind = "cutout_circle", x = right, y = tear_y, radius = tear_radius,
+        kind = "cutout_circle", x = rect.x + rect.w, y = tear_y, radius = tear_radius,
     }
-end
-
---- 用稳定书籍身份生成纯装饰条码，不冒充可扫描编码。
----@param blocks table[]
----@param book table
----@param x number
----@param y number
----@param width number
----@param height number
-local function appendBarcode(blocks, book, x, y, width, height)
-    local seed = tostring(book.source_id or "") .. ":" .. tostring(book.stable_id or "")
-    if seed == ":" then seed = tostring(book.title or "moon") end
-    local right, i = x + width, 1
-    while x < right do
-        local byte = seed:byte((i - 1) % #seed + 1) or 1
-        local bar = 1 + byte % 3
-        if i % 3 ~= 0 then
-            blocks[#blocks + 1] = {
-                kind = "vbar", x = x, y = y, width = math.min(bar, right - x),
-                height = height, value = 1, color = Blitbuffer.COLOR_BLACK,
-            }
-        end
-        x = x + bar + 1 + byte % 2
-        i = i + 1
-    end
 end
 
 --- 阅读票根：日期 → 当前书 → 进度/时长 → 今日摘要 → 装饰条码。
@@ -182,7 +121,7 @@ function M.blocks(rect)
             radius = 2, shadow = 2, color = Blitbuffer.COLOR_WHITE,
         },
         {
-            kind = "image", file = logoPath(),
+            kind = "image", file = U.LOGO_PATH,
             x = x, y = logo_y, width = logo_size, height = logo_size,
             scale_factor = 0, alpha = false,
         },
@@ -254,7 +193,7 @@ function M.blocks(rect)
         },
     }
 
-    appendDashes(blocks, x, y + math.floor(height * 0.625), width)
+    U.appendDashes(blocks, x, y + math.floor(height * 0.625), width, 7, 12)
     blocks[#blocks + 1] = {
         text = _("今日摘要") .. "  SUMMARY", x = x, y = y + math.floor(height * 0.65),
         width = width, size = 19, bold = true, box = false,
@@ -288,8 +227,11 @@ function M.blocks(rect)
         width = 1, height = math.floor(height * 0.10), color = U.RULE,
     }
 
-    appendDashes(blocks, x, y + math.floor(height * 0.835), width)
-    appendBarcode(blocks, book, x, y + math.floor(height * 0.865), width, math.max(24, math.floor(height * 0.04)))
+    U.appendDashes(blocks, x, y + math.floor(height * 0.835), width, 7, 12)
+    -- 条码种子取稳定书籍身份，身份缺失时退回书名。
+    local seed = tostring(book.source_id or "") .. ":" .. tostring(book.stable_id or "")
+    if seed == ":" then seed = tostring(book.title or "moon") end
+    U.appendBarcode(blocks, x, y + math.floor(height * 0.865), width, math.max(24, math.floor(height * 0.04)), seed, 3)
     blocks[#blocks + 1] = {
         text = _("阅读记录") .. "  ·  READING LOG  ·  " .. os.date("%Y%m%d"),
         x = x, y = y + math.floor(height * 0.92),

@@ -1,5 +1,5 @@
 --[[--
-可复用 AI 能力门面：chat / chatStream / jsonExtract。
+可复用 AI 能力门面：chat / jsonExtract。
 
 其它模块统一 require("ai")，不要直连 client。
 
@@ -12,10 +12,7 @@ local Client = require("ai.client")
 local AI = {}
 
 --- AI 端点、密钥、模型是否已配置齐全。
----@return boolean
-function AI.isConfigured()
-    return Client.isConfigured()
-end
+AI.isConfigured = Client.isConfigured
 
 --- 非流式聊天；cb(content, err)。
 ---@param messages table[]
@@ -28,15 +25,6 @@ function AI.chat(messages, opts, cb)
         opts = nil
     end
     return Client.chat(messages, opts, cb)
-end
-
---- SSE 流式聊天；opts.on_delta(chunk)；结束 cb(full, err)。
----@param messages table[]
----@param opts { on_delta?: fun(chunk: string), temperature?: number, max_tokens?: number, model?: string, timeout?: number }
----@param cb fun(content: string|nil, err: any)
----@return table|nil
-function AI.chatStream(messages, opts, cb)
-    return Client.chatStream(messages, opts, cb)
 end
 
 --- 非流式 JSON 抽取；cb(table|nil, err)。

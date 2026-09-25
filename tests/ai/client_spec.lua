@@ -23,11 +23,6 @@ package.preload["http.request"] = function()
             cb('{"choices":[{"message":{"content":"ok"}}]}', nil, {})
             return { cancel = function() end }
         end,
-        stream = function(opts, handlers)
-            sent = { url = opts.url, opts = opts }
-            handlers.on_done(nil)
-            return { cancel = function() end }
-        end,
     }
 end
 
@@ -65,11 +60,13 @@ local missing, err = Client.decodeResponse('{"error":{"message":"bad key"}}')
 Assert.is_nil(missing)
 Assert.eq(err, "bad key")
 
--- 流式路径同样带默认 UA
-settings.ai_api_key = " secret "
-Client.chatStream({ { role = "user", content = "hi" } }, {}, function() end)
-Assert.eq(sent.opts.headers["User-Agent"],
-    "opencode/1.2.3 ai-sdk/amazon-bedrock/3.0.73 ai-sdk/provider-utils/3.0.20 runtime/bun/1.3.5")
+-- 只取 content，不回退到 reasoning 字段
+Assert.eq(Client.decodeResponse('{"choices":[{"message":{"content":"hello"}}]}'), "hello")
+Assert.eq(Client.decodeResponse('{"choices":[{"message":{"content":"out","reasoning_content":"think"}}]}'), "out")
+local empty, empty_err = Client.decodeResponse('{"choices":[{"message":{"content":"","reasoning_content":"think"}}]}')
+Assert.is_nil(empty)
+Assert.eq(empty_err, "empty AI response")
+Assert.is_nil(Client.decodeResponse('{"choices":[{"message":{"reasoning_details":[{"text":"via details"}]}}]}'))
 
 settings.ai_api_key = ""
 Assert.is_false(Client.isConfigured())

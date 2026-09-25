@@ -138,11 +138,12 @@ function Edit.wrap(widget, meta, handlers)
     return overlay
 end
 
---- 「完成」行：退出现场编辑。
+--- 编辑态底部文字行（「完成」/「添加动作」）。
+---@param text string 行内文字
 ---@param width number 行宽，单位像素
 ---@param on_tap fun() 点击回调
 ---@return table InputContainer
-function Edit.doneRow(width, on_tap)
+local function textRow(text, width, on_tap)
     local h = UI.sz(40)
     local tap = InputContainer:new{ dimen = Geom:new{ w = width, h = h } }
     tap[1] = FrameContainer:new{
@@ -155,21 +156,29 @@ function Edit.doneRow(width, on_tap)
         CenterContainer:new{
             dimen = Geom:new{ w = width, h = h - UI.sz(16) },
             TextWidget:new{
-                text = _("完成"),
+                text = text,
                 face = UI.face("cfont", 14),
             },
         },
     }
     tap.ges_events = {
-        TapPanelEditDone = {
+        TapPanelEditRow = {
             GestureRange:new{ ges = "tap", range = function() return tap:getSize() end },
         },
     }
-    tap.onTapPanelEditDone = function()
+    tap.onTapPanelEditRow = function()
         on_tap()
         return true
     end
     return tap
+end
+
+--- 「完成」行：退出现场编辑。
+---@param width number 行宽，单位像素
+---@param on_tap fun() 点击回调
+---@return table InputContainer
+function Edit.doneRow(width, on_tap)
+    return textRow(_("完成"), width, on_tap)
 end
 
 --- 「添加动作」行：打开未启用动作列表。
@@ -177,33 +186,7 @@ end
 ---@param on_tap fun() 点击回调
 ---@return table InputContainer
 function Edit.addRow(width, on_tap)
-    local h = UI.sz(40)
-    local tap = InputContainer:new{ dimen = Geom:new{ w = width, h = h } }
-    tap[1] = FrameContainer:new{
-        bordersize = 1,
-        padding = UI.sz(8),
-        background = Blitbuffer.COLOR_WHITE,
-        width = width,
-        height = h,
-        dimen = Geom:new{ w = width, h = h },
-        CenterContainer:new{
-            dimen = Geom:new{ w = width, h = h - UI.sz(16) },
-            TextWidget:new{
-                text = _("添加动作"),
-                face = UI.face("cfont", 14),
-            },
-        },
-    }
-    tap.ges_events = {
-        TapPanelEditAdd = {
-            GestureRange:new{ ges = "tap", range = function() return tap:getSize() end },
-        },
-    }
-    tap.onTapPanelEditAdd = function()
-        on_tap()
-        return true
-    end
-    return tap
+    return textRow(_("添加动作"), width, on_tap)
 end
 
 --- 从未启用动作里挑选要添加的项。

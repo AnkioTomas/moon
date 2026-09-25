@@ -52,19 +52,8 @@ function ReaderPanel.enabledCount()
     return #list.ids()
 end
 
---- 启用或停用某个阅读页动作。
----@param id string
----@param enabled boolean
-function ReaderPanel.setEnabled(id, enabled)
-    list.setEnabled(id, enabled)
-end
-
---- 上移或下移某个阅读页动作。
----@param id string
----@param delta number
-function ReaderPanel.move(id, delta)
-    list.move(id, delta)
-end
+ReaderPanel.setEnabled = list.setEnabled
+ReaderPanel.move = list.move
 
 --- 生成阅读页动作列表，并计算可用和激活态。
 ---@param ui table|nil

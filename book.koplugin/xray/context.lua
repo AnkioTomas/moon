@@ -62,7 +62,6 @@ end
 ---@param max_bytes integer
 ---@return string
 local function tailUtf8(s, max_bytes)
-    s = tostring(s or "")
     if #s <= max_bytes then
         return s
     end
@@ -89,11 +88,8 @@ function Context.visibleText(ui)
     if ui.rolling and document.getTextFromPositions then
         local view = ui.view
         local dimen = view and view.dimen
-        local width, height
-        if dimen then
-            width = dimen.w
-            height = dimen.h
-        end
+        local width = dimen and dimen.w
+        local height = dimen and dimen.h
         if not width or not height then
             local ok, Device = pcall(require, "device")
             local screen = ok and Device and Device.screen
@@ -111,14 +107,12 @@ function Context.visibleText(ui)
     return Text.truncateUtf8(text, VISIBLE_TEXT_LIMIT), page
 end
 
---- 当前页之前的正文（不含当前页），最多 limit 字节。
+--- 当前页之前的正文（不含当前页），最多 PRIOR_TEXT_LIMIT 字节。
 ---@param ui table
----@param end_page integer|nil
----@param limit integer|nil
+---@param end_page integer
 ---@return string
-function Context.priorText(ui, end_page, limit)
-    limit = limit or PRIOR_TEXT_LIMIT
-    end_page = end_page or currentPage()
+function Context.priorText(ui, end_page)
+    local limit = PRIOR_TEXT_LIMIT
     if end_page <= 1 then
         return ""
     end
@@ -154,7 +148,7 @@ function Context.forAnalysis(ui)
     end
     return {
         current_page = visible or pageText(ui, page),
-        prior_text = Context.priorText(ui, page, PRIOR_TEXT_LIMIT),
+        prior_text = Context.priorText(ui, page),
         page = page,
     }
 end

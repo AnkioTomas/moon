@@ -62,12 +62,8 @@ local function saveRemoteBuckets(source, stable_id, annotations, authoritative, 
     for _, item in ipairs(annotations or {}) do
         if type(item) == "table" then
             local key = Normalize.bucketKey(item)
-            local bucket = buckets[key]
-            if not bucket then
-                bucket = {}
-                buckets[key] = bucket
-            end
-            bucket[#bucket + 1] = item
+            buckets[key] = buckets[key] or {}
+            table.insert(buckets[key], item)
         end
     end
     if authoritative then

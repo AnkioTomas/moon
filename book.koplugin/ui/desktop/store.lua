@@ -14,14 +14,11 @@ Z-Library Tab：浏览 / 搜索目录，下载后导入本地书库。
 @module koplugin.book.ui.store
 --]]
 
-local Device = require("device")
 local Library = require("ui.desktop.library")
 local BookStore = require("book.store")
-local UI = require("ui.components.bookui")
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 local View = require("ui.view")
-local Screen = Device.screen
 
 ---@class BookStorePage : View
 ---@field desktop BookDesktop
@@ -65,17 +62,9 @@ function Store:reset()
     self.total = 0
 end
 
-function Store:onCancel()
-    self:cancel()
-end
-
-function Store:onPause()
-    self:cancel()
-end
-
-function Store:onDestroy()
-    self:cancel()
-end
+Store.onCancel = Store.cancel
+Store.onPause = Store.cancel
+Store.onDestroy = Store.cancel
 
 ---@param event string
 ---@param payload table|nil
@@ -86,18 +75,18 @@ function Store:onEvent(event, payload)
     end
     if event ~= "swipe" or type(payload) ~= "table" then return end
     if payload.direction == "west" then
-        self:gotoPage((self.page or 1) + 1)
+        self:gotoPage(self.page + 1)
     elseif payload.direction == "east" then
-        self:gotoPage((self.page or 1) - 1)
+        self:gotoPage(self.page - 1)
     end
 end
 
 --- 从已加载结果中切出当前 UI 页。
 ---@return table
 function Store:pageBooks()
-    local all = self.books or {}
-    local page_size = self.page_size or 1
-    local first = ((self.page or 1) - 1) * page_size + 1
+    local all = self.books
+    local page_size = self.page_size
+    local first = (self.page - 1) * page_size + 1
     local books = {}
     for i = first, math.min(#all, first + page_size - 1) do
         books[#books + 1] = all[i]
@@ -108,18 +97,16 @@ end
 --- 复用图书馆网格构建 Z-Library 页。
 ---@param ctx table
 ---@param state table
----@param opts table|nil
+---@param opts table
 ---@return table
 function Store:build(ctx, state, opts)
-    opts = opts or {}
-    opts.loading_text = opts.loading_text or _("加载中…")
-    opts.empty_text = opts.empty_text or _("Z站暂无内容")
+    opts.empty_text = _("Z站暂无内容")
     opts.search_only = true
     opts.show_status = false
-    opts.on_search = opts.on_search or function()
+    opts.on_search = function()
         self:showSearch()
     end
-    opts.on_clear = opts.on_clear or function()
+    opts.on_clear = function()
         self:applySearch("")
     end
     local library = ctx.desktop and ctx.desktop.library or Library:new{ desktop = ctx.desktop, name = "library" }
@@ -129,14 +116,13 @@ end
 --- 应用搜索；与图书馆筛选状态分开保存。
 ---@param query string|nil
 function Store:applySearch(query)
-    local desktop = self.desktop
     self:cancel()
     self.search = query and query ~= "" and query or nil
     self.page = 1
     self.total = 0
     self.books = nil
     self.state = nil
-    desktop.tab = "store"
+    self.desktop.tab = "store"
     self.desktop:updateView()
 end
 
@@ -148,33 +134,29 @@ function Store:showSearch()
     end, self.search)
 end
 
---- 同步 page_size（与图书馆同网格公式；不碰图书馆实例）。
+--- 同步 page_size（与图书馆同网格公式；不碰图书馆实例）；容量变化时丢弃当前页切片。
 ---@return number
 function Store:syncPageSize()
     local desktop = self.desktop
-    local width = (desktop.dimen and desktop.dimen.w) or Screen:getWidth()
-    local height = type(desktop.contentHeight) == "function"
-        and desktop:contentHeight()
-        or math.max(1, Screen:getHeight() - UI.barH() - UI.topBarH())
-    local m = Library.gridMetrics(width, height)
-    self.page_size = math.max(1, m.page_size or 1)
-    return self.page_size
+    local n = Library.gridMetrics(desktop.dimen.w, desktop:contentHeight()).page_size
+    if self.page_size ~= n then
+        self.page_size = n
+        self.state = nil
+        self.page = math.min(self.page, self:pages())
+    end
+    return n
 end
 
 --- 计算总页数。
 ---@return number
 function Store:pages()
-    local ps = self.page_size or 1
-    return math.max(1, math.ceil((self.total or 0) / ps))
+    return math.max(1, math.ceil(self.total / self.page_size))
 end
 
 --- 跳转到指定页并重建。
 ---@param page number
 function Store:gotoPage(page)
-    page = tonumber(page) or 1
-    local pages = self:pages()
-    if page < 1 then page = 1 end
-    if page > pages then page = pages end
+    page = math.max(1, math.min(self:pages(), page))
     if page == self.page and self.state then
         return
     end
@@ -224,8 +206,7 @@ function Store:fetch()
         BookStore.rememberMany(books)
         self.books = books
         self.total = #books
-        local pages = self:pages()
-        if (self.page or 1) > pages then self.page = pages end
+        self.page = math.min(self.page, self:pages())
         self.state = { books = self:pageBooks() }
         self.desktop:updateView()
     end)
@@ -235,15 +216,7 @@ end
 ---@return table
 function Store:updateView()
     local desktop = self.desktop
-    local prev_ps = self.page_size
     self:syncPageSize()
-    if prev_ps and prev_ps ~= self.page_size then
-        self.state = nil
-        local pages = self:pages()
-        if (self.page or 1) > pages then
-            self.page = pages
-        end
-    end
     local state = self.state
     if not state and self.books then
         state = { books = self:pageBooks() }
@@ -258,14 +231,12 @@ function Store:updateView()
     self.widget = self:build(desktop:ctx(), state or {}, {
         page = self.page,
         pages = self:pages(),
-        total = self.total or 0,
-        loading_text = _("加载中…"),
-        empty_text = _("Z站暂无内容"),
+        total = self.total,
         on_prev = function()
-            self:gotoPage((self.page or 1) - 1)
+            self:gotoPage(self.page - 1)
         end,
         on_next = function()
-            self:gotoPage((self.page or 1) + 1)
+            self:gotoPage(self.page + 1)
         end,
         on_first = function()
             self:gotoPage(1)

@@ -27,6 +27,13 @@ local BOOK_EXTENSIONS = {
 ---@type table<string, function[]>
 local opening = {}
 
+--- 传输层错误可能是带 message 的表（Turbo），统一成可展示文案。
+---@param err any
+---@return any
+local function errText(err)
+    return (type(err) == "table" and err.message) or err
+end
+
 ---@param identity BookIdentity
 ---@return string
 local function bookPath(identity)
@@ -243,7 +250,7 @@ function Source:openBookAsync(identity, _opts, cb)
                 closeDialog()
                 if not ok then
                     os.remove(temp_path)
-                    done(false, nil, (type(err) == "table" and err.message) or err)
+                    done(false, nil, errText(err))
                     return
                 end
                 if not validBook(temp_path, path) then
@@ -275,20 +282,6 @@ function Source:openBookAsync(identity, _opts, cb)
         end }
 end
 
---- 把 BookListOpts 转成 Moon list API 的 query 表。
----@param opts BookListOpts|nil
----@return table
-local function listQuery(opts)
-    opts = opts or {}
-    return {
-        page = opts.page or 1,
-        pageSize = opts.page_size or 50,
-        search = opts.search or "",
-        series = opts.series or "",
-        category = opts.category or "",
-    }
-end
-
 --- 清空 Moon 书库/统计相关 HTTP 缓存。
 function Source:clearCaches()
     local Request = require("http.request")
@@ -302,7 +295,7 @@ end
 function Source:coverRequest(identity)
     local req, err = self._client:coverRequest(identity.stable_id)
     if not req then
-        return nil, (type(err) == "table" and err.message) or err
+        return nil, errText(err)
     end
     return req
 end
@@ -377,10 +370,11 @@ function Source:syncBooksAsync(opts, cb)
     local books = {}
     local function pullPages()
         if cancelled then return end
-        job = self._client:listBooksAsync(listQuery({ page = page, page_size = page_size }), function(wire, err)
+        local query = { page = page, pageSize = page_size, search = "", series = "", category = "" }
+        job = self._client:listBooksAsync(query, function(wire, err)
             job = nil
             if cancelled then return end
-            if not wire then cb(nil, (type(err) == "table" and err.message) or err); return end
+            if not wire then cb(nil, errText(err)); return end
             local mapped = Mapper.list(wire)
             for _, book in ipairs(mapped.data or {}) do books[#books + 1] = book end
             local count = tonumber(mapped.count) or #books
@@ -449,7 +443,7 @@ end
 function Source:pullStatsAsync(cb)
     return self._client:getStatsAsync(function(wire, err)
         if not wire then
-            cb(nil, (type(err) == "table" and err.message) or err)
+            cb(nil, errText(err))
             return
         end
         local data = wire.data or wire
@@ -495,7 +489,7 @@ function Source:pushNotesAsync(identity, annotations, cb)
         if wire then
             cb(wire)
         else
-            cb(nil, (type(err) == "table" and err.message) or err)
+            cb(nil, errText(err))
         end
     end)
 end
@@ -507,7 +501,7 @@ end
 function Source:pullNotesAsync(identity, cb)
     return self._client:getAnnotationsAsync(identity.stable_id, function(wire, err)
         if not wire then
-            cb(nil, (type(err) == "table" and err.message) or err)
+            cb(nil, errText(err))
             return
         end
         local data = wire.data or wire
@@ -523,7 +517,7 @@ end
 function Source:getProgressAsync(identity, cb)
     return self._client:getProgressAsync(identity.stable_id, function(wire, err)
         if not wire then
-            cb(nil, (type(err) == "table" and err.message) or err)
+            cb(nil, errText(err))
             return
         end
         if type(wire) == "table"
@@ -563,7 +557,7 @@ function Source:putProgressAsync(identity, pos, cb)
         if wire then
             cb(true)
         else
-            cb(nil, (type(err) == "table" and err.message) or err)
+            cb(nil, errText(err))
         end
     end)
 end

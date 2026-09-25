@@ -56,15 +56,14 @@ local function restoreFullRefresh()
     local prev = G_reader_settings:readSetting(PREV_REFRESH_KEY)
     if prev == nil then return end
     -- 只恢复仍保持旧版本强制值 0 的一侧；用户后来手动修改过就不能覆盖。
-    if prev.day ~= nil and G_reader_settings:readSetting("full_refresh_count") == 0 then
-        G_reader_settings:saveSetting("full_refresh_count", prev.day)
-    elseif prev.day == nil and G_reader_settings:readSetting("full_refresh_count") == 0 then
-        G_reader_settings:delSetting("full_refresh_count")
-    end
-    if prev.night ~= nil and G_reader_settings:readSetting("night_full_refresh_count") == 0 then
-        G_reader_settings:saveSetting("night_full_refresh_count", prev.night)
-    elseif prev.night == nil and G_reader_settings:readSetting("night_full_refresh_count") == 0 then
-        G_reader_settings:delSetting("night_full_refresh_count")
+    for side, key in pairs({ day = "full_refresh_count", night = "night_full_refresh_count" }) do
+        if G_reader_settings:readSetting(key) == 0 then
+            if prev[side] ~= nil then
+                G_reader_settings:saveSetting(key, prev[side])
+            else
+                G_reader_settings:delSetting(key)
+            end
+        end
     end
     G_reader_settings:delSetting(PREV_REFRESH_KEY)
 end

@@ -96,18 +96,11 @@ local function broadcast(self, method, ...)
     for _, key in ipairs(CHILDREN) do notify(self[key], method, ...) end
 end
 
---- 当前底栏 Tab 对应的页对象。
----@param self BookDesktop 当前桌面实例
----@return table|nil
-local function tabPage(self)
-    return self[self.tab]
-end
-
 --- 取当前页内容 widget。页实现了 updateView 则走它，否则用已有 widget / build。
 ---@param self BookDesktop 当前桌面实例
 ---@return table
 local function tabContent(self)
-    local page = tabPage(self)
+    local page = self[self.tab]
     if not page then return {} end
     if page.updateView then return page:updateView() end
     return page.widget or page:build()
@@ -233,7 +226,6 @@ function Desktop:init()
     self.view = View.attach(self)
     self._tabs = desktopTabs(self.source)
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
-    self.tab = self.tab or "home"
     self.home = Home:new{ desktop = self, name = "home" }
     self.library = Library:new{ desktop = self, name = "library" }
     self.store = StorePage:new{ desktop = self, name = "store" }
@@ -260,7 +252,7 @@ end
 
 function Desktop:onResume()
     notify(self.topbar, "onResume")
-    notify(tabPage(self), "onResume")
+    notify(self[self.tab], "onResume")
     -- 插件更新检查走桌面 Resume，不在插件 init / 网络回调里抢跑。
     local root = self.plugin and self.plugin.path
     if root then
@@ -342,7 +334,7 @@ end
 function Desktop:onSwipe(_, ges_ev)
     if type(ges_ev) ~= "table" or not ges_ev.direction then return true end
     if ges_ev.pos and ges_ev.pos.y >= self.dimen.h - UI.barH() then return true end
-    notify(tabPage(self), "onEvent", "swipe", {
+    notify(self[self.tab], "onEvent", "swipe", {
         direction = BD.flipDirectionIfMirroredUILayout(ges_ev.direction),
     })
     return true
@@ -353,9 +345,9 @@ end
 function Desktop:switchTab(id)
     if not PAGES[id] then return end
     local changed = self.tab ~= id
-    if changed then notify(tabPage(self), "onPause") end
+    if changed then notify(self[self.tab], "onPause") end
     self.tab = id
-    notify(tabPage(self), "onResume", changed)
+    notify(self[self.tab], "onResume", changed)
     self:updateView()
 end
 

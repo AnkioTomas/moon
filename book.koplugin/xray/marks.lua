@@ -203,11 +203,7 @@ local function scanVisibleMarks(ui, entities)
                 if view and view.pageToScreenTransform then
                     local transformed_ok, transformed = pcall(
                         view.pageToScreenTransform, view, page, page_box)
-                    if transformed_ok and transformed then
-                        screen_box = transformed
-                    else
-                        screen_box = nil
-                    end
+                    screen_box = transformed_ok and transformed or nil
                 end
                 if screen_box and intersectsScreen(screen_box, width, height) then
                     addMark(item.entity, screen_box)
@@ -218,10 +214,9 @@ local function scanVisibleMarks(ui, entities)
     return out
 end
 
---- 清空当前屏幕标记并取消待执行或正在运行的扫描。
+--- 取消待执行的扫描计时器与正在运行的扫描 Job。
 ---@param self table
-local function resetMarks(self)
-    self._scan_token = nil
+local function cancelScan(self)
     if self._scan_timer then
         UIManager:unschedule(self._scan_timer)
         self._scan_timer = nil
@@ -230,6 +225,13 @@ local function resetMarks(self)
         self._scan_job:cancel()
         self._scan_job = nil
     end
+end
+
+--- 清空当前屏幕标记并取消待执行或正在运行的扫描。
+---@param self table
+local function resetMarks(self)
+    self._scan_token = nil
+    cancelScan(self)
     self._marks = {}
     self._render_key = nil
     self._scan_pending = nil
@@ -265,14 +267,7 @@ local function scheduleScan(self, key, entities)
     if self._scan_pending == key then
         return
     end
-    if self._scan_timer then
-        UIManager:unschedule(self._scan_timer)
-        self._scan_timer = nil
-    end
-    if self._scan_job then
-        self._scan_job:cancel()
-        self._scan_job = nil
-    end
+    cancelScan(self)
     self._scan_pending = key
     local ui = self.ui
     local token = {}
@@ -323,13 +318,10 @@ local function scheduleScan(self, key, entities)
     UIManager:scheduleIn(SCAN_DEBOUNCE, timer)
 end
 
----@param pos table|nil
----@param box table|nil
+---@param pos table
+---@param box table
 ---@return boolean
 local function hitScreenBox(pos, box)
-    if not pos or not box then
-        return false
-    end
     local pad = math.max(8, math.floor((box.h or 0) * 0.5))
     return pos.x >= box.x and pos.x <= box.x + box.w
         and pos.y >= box.y - pad and pos.y <= box.y + box.h + 2
@@ -370,28 +362,18 @@ function Marks:updateView()
 end
 
 ---@param rect table
-local function paintDashedUnderscore(bb, rect)
+local function paintUnderscore(bb, rect)
     local Blitbuffer = require("ffi/blitbuffer")
     local Size = require("ui/size")
     local color = Blitbuffer.COLOR_DARK_GRAY
     local line_y = rect.y + rect.h - 1
-    local x0 = rect.x
-    local x1 = x0 + rect.w
-    for i = x0, x1 - 8, 10 do
-        bb:paintRect(i, line_y, 6, Size.line.thick, color)
-    end
-end
-
-local function paintUnderscore(bb, rect)
-    local style = require("utils.settings").get().book_xray_mark_style
-    if style == "solid" then
-        local Blitbuffer = require("ffi/blitbuffer")
-        local Size = require("ui/size")
-        bb:paintRect(rect.x, rect.y + rect.h - 1, rect.w, Size.line.thick,
-            Blitbuffer.COLOR_DARK_GRAY)
+    if require("utils.settings").get().book_xray_mark_style == "solid" then
+        bb:paintRect(rect.x, line_y, rect.w, Size.line.thick, color)
         return
     end
-    paintDashedUnderscore(bb, rect)
+    for i = rect.x, rect.x + rect.w - 8, 10 do
+        bb:paintRect(i, line_y, 6, Size.line.thick, color)
+    end
 end
 
 --- 作为 view module 被调用：先刷新标记框，再给每个命中画虚线下划线。

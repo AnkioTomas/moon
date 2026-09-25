@@ -21,13 +21,6 @@ local T = require("ffi/util").template
 
 ---@class BookInsightOverview
 local Overview = {}
-Overview.__index = Overview
-
----@return BookInsightOverview
-function Overview.new()
-    return setmetatable({}, Overview)
-end
-
 local DOW = { _("日"), _("一"), _("二"), _("三"), _("四"), _("五"), _("六") }
 
 --- 年月字符串按月偏移。

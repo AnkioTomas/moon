@@ -17,7 +17,7 @@ local Menu = require("ui.panel.menu")
 local NativeSettings = require("ui.panel.native_settings")
 
 ---@class BookQuickPanelNative
----@field show fun(mode: "desktop"|"reader"|nil): boolean
+---@field show fun(mode: "desktop"|"reader"): boolean
 ---@field install fun(host_ui: table|nil, opts: table|nil)
 
 local Native = {}
@@ -81,29 +81,22 @@ local function ensureWidgets()
     return Widgets
 end
 
---- 关闭文档后回到月读桌面，而不是 KOReader 原生文件管理器。
-local function openBookDesktop()
-    local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
-    if not ok or not FileManager then return end
-    -- 打开书时 ReaderUI 会关掉 FileManager；这里先重建，否则关闭文档后窗口栈为空直接退出。
-    if not FileManager.instance then
-        FileManager:showFiles()
-    end
-    local fm = FileManager.instance
-    local plugin = fm and fm.book
-    if plugin and type(plugin.openDesktop) == "function" then
-        plugin:openDesktop()
-    end
-end
-
---- 退出阅读会话并回到月读桌面。
+--- 下一 tick 关闭文档并回到月读桌面，而不是 KOReader 原生文件管理器。
 ---@param ui table|nil
----@param menu table|nil
-local function exitReading(ui, menu)
-    Menu.close(menu)
+local function closeToDesktop(ui)
     UIManager:nextTick(function()
         if ui and ui.onClose then ui:onClose() end
-        openBookDesktop()
+        local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
+        if not ok or not FileManager then return end
+        -- 打开书时 ReaderUI 会关掉 FileManager；这里先重建，否则关闭文档后窗口栈为空直接退出。
+        if not FileManager.instance then
+            FileManager:showFiles()
+        end
+        local fm = FileManager.instance
+        local plugin = fm and fm.book
+        if plugin and type(plugin.openDesktop) == "function" then
+            plugin:openDesktop()
+        end
     end)
 end
 
@@ -185,7 +178,10 @@ local function buildPanel(menu, W)
             width = content_w,
             height = W.UI.sz(52),
             ui = ui,
-            on_exit = function() exitReading(ui, menu) end,
+            on_exit = function()
+                Menu.close(menu)
+                closeToDesktop(ui)
+            end,
         }
         body_opts.actions = W.ReaderPanel.actions(ui)
     else
@@ -301,31 +297,21 @@ end
 ---@field _book_panel_editing boolean|nil 现场编辑态；关菜单时清掉
 ---@field callback fun()|nil 非触屏设备填充原生 menu item
 
---- 创建并预填充桌面面板 Tab。
+--- 创建并预填充面板 Tab。
+---@param marker string DESKTOP_MARKER / READER_MARKER
+---@param icon string Tab 栏图标资源名
+---@param populate fun(tab: table)
+---@param ui table|nil 阅读面板绑定的 ReaderUI
 ---@return BookQuickPanelNativeTab
-local function newDesktopTab()
+local function newTab(marker, icon, populate, ui)
     local tab = {
-        icon = DESKTOP_TAB_ICON,
-        remember = false,
-        [DESKTOP_MARKER] = true,
-    }
-    tab.callback = function() populateDesktop(tab) end
-    populateDesktop(tab)
-    return tab
-end
-
---- 创建并预填充阅读面板 Tab。
----@param ui table|nil
----@return BookQuickPanelNativeTab
-local function newReaderTab(ui)
-    local tab = {
-        icon = READER_TAB_ICON,
+        icon = icon,
         remember = false,
         _book_ui = ui,
-        [READER_MARKER] = true,
+        [marker] = true,
     }
-    tab.callback = function() populateReader(tab) end
-    populateReader(tab)
+    tab.callback = function() populate(tab) end
+    populate(tab)
     return tab
 end
 
@@ -337,7 +323,7 @@ local function injectDesktopTab(menu)
     for _, tab in ipairs(tabs) do
         if tab[DESKTOP_MARKER] then return end
     end
-    table.insert(tabs, 1, newDesktopTab())
+    table.insert(tabs, 1, newTab(DESKTOP_MARKER, DESKTOP_TAB_ICON, populateDesktop))
 end
 
 --- 若不存在则注入阅读面板 Tab，并同步当前 ReaderUI。
@@ -352,7 +338,7 @@ local function injectReaderTab(menu)
             return
         end
     end
-    table.insert(tabs, 1, newReaderTab(menu.ui))
+    table.insert(tabs, 1, newTab(READER_MARKER, READER_TAB_ICON, populateReader, menu.ui))
 end
 
 --- 一次性 patch 文件管理器菜单，注入桌面面板 Tab。
@@ -394,11 +380,7 @@ local function patchFileBrowserButton(ReaderMenu)
         if fm and type(fm.callback) == "function" then
             fm.callback = function()
                 self:onTapCloseMenu()
-                local ui = self.ui
-                UIManager:nextTick(function()
-                    if ui and ui.onClose then ui:onClose() end
-                    openBookDesktop()
-                end)
+                closeToDesktop(self.ui)
             end
         end
         return buttons
@@ -477,33 +459,20 @@ local function switchToTab(menu, tab_index)
     return false
 end
 
----@param mode "desktop"|"reader"|nil
+---@param mode "desktop"|"reader"
 ---@return boolean
 function Native.show(mode)
     local menu = activeMenu()
     if not menu then return false end
-
+    -- 桌面（FileManager）菜单不注入阅读面板，阅读面板只在阅读菜单里出现。
+    if mode == "reader" and not isReaderMenu(menu) then return false end
+    if not menu.tab_item_table and menu.setUpdateItemTable then menu:setUpdateItemTable() end
+    injectDesktopTab(menu)
     if mode == "reader" then
-        -- 桌面（FileManager）菜单不注入阅读面板，阅读面板只在阅读菜单里出现。
-        if not isReaderMenu(menu) then return false end
-        if not menu.tab_item_table and menu.setUpdateItemTable then menu:setUpdateItemTable() end
-        injectDesktopTab(menu)
         injectReaderTab(menu)
         return switchToTab(menu, tabIndex(menu, READER_MARKER))
     end
-
-    if mode == "desktop" or mode == nil then
-        if not menu.tab_item_table and menu.setUpdateItemTable then menu:setUpdateItemTable() end
-        injectDesktopTab(menu)
-        local reader_idx = tabIndex(menu, READER_MARKER)
-        local desktop_idx = tabIndex(menu, DESKTOP_MARKER)
-        if mode == nil and reader_idx then
-            return switchToTab(menu, reader_idx)
-        end
-        return switchToTab(menu, desktop_idx)
-    end
-
-    return false
+    return switchToTab(menu, tabIndex(menu, DESKTOP_MARKER))
 end
 
 ---@param host_ui table|nil

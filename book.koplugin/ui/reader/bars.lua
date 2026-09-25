@@ -11,6 +11,7 @@
 local Device = require("device")
 local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
+local Layout = require("ui.reader.bars.layout")
 local _ = require("gettext")
 local Screen = Device.screen
 
@@ -62,25 +63,6 @@ function Bars.timeText(now)
     return text
 end
 
---- 当前章节名称：session 目录里的 title。
----@param cur ReaderSessionSnapshot|table|nil
----@param toc BookChapter[]|nil 测试用目录
----@return string
-function Bars.chapterTitle(cur, toc)
-    if type(cur) ~= "table" then
-        return ""
-    end
-    local snapshot = cur
-    if not cur.ui and not cur.chapter and toc then
-        snapshot = {
-            identity = cur.identity or cur,
-            chapter = { toc = toc },
-            ui = cur.ui,
-        }
-    end
-    return require("ui.reader.session").chapterTitle(snapshot) or ""
-end
-
 --- 剩余阅读时间文案；不足一分钟时为空。
 ---@param remaining_seconds number|nil
 ---@return string
@@ -95,36 +77,6 @@ function Bars.remainingText(remaining_seconds)
         return string.format(_("约 %d 小时 %d 分"), hours, minutes)
     end
     return string.format(_("约 %d 分钟"), minutes)
-end
-
---- 底条进度文案：百分比 · 章号 · 剩余时间（取得到的才拼）。
----@param cur ReaderSessionSnapshot|nil
----@param toc BookChapter[]|nil
----@param remaining_seconds number|nil
----@return string
-function Bars.progressText(cur, toc, remaining_seconds)
-    if type(cur) ~= "table" then
-        return ""
-    end
-    local parts = {}
-    local pct = tonumber(cur.percent) or 0
-    if pct < 0 then
-        pct = 0
-    elseif pct > 100 then
-        pct = 100
-    end
-    parts[#parts + 1] = string.format("%.0f%%", pct)
-    local identity = cur.identity
-    local idx = tonumber(cur.reading_chapter_idx) or (identity and tonumber(identity.chapter_idx))
-    local count = toc and #toc or nil
-    if idx and count and count > 0 then
-        parts[#parts + 1] = string.format(_("第 %d/%d 章"), idx, count)
-    end
-    local remaining = Bars.remainingText(remaining_seconds)
-    if remaining ~= "" then
-        parts[#parts + 1] = remaining
-    end
-    return table.concat(parts, " · ")
 end
 
 --- 设置系统顶栏开/关（同步 configurable + crengine，与 Aa 菜单一致）。
@@ -228,18 +180,6 @@ function Bars.setBottomBarPreference(enabled, ui)
     end
 end
 
---- 是否用月读顶栏盖住系统顶栏。
----@return boolean
-function Bars.replaceTopBar()
-    return require("ui.reader.bars.layout").replace("top")
-end
-
---- 是否用月读底栏盖住系统底栏。
----@return boolean
-function Bars.replaceBottomBar()
-    return require("ui.reader.bars.layout").replace("bottom")
-end
-
 --- 按 Book 设置同步系统顶底栏。
 ---@param ui table|nil
 function Bars.applyPreferences(ui)
@@ -274,78 +214,29 @@ function Bars.bottomVisible(ui)
     return view and view.footer_visible
 end
 
---- 顶栏 overlay 在 ReaderView paintTo 坐标下的 y / 高度。
---- ReaderView.state.offset 属于文档可视区，不是状态栏几何，不能混进来。
----@param ui table|nil
----@param paint_y number
----@return number|nil band_y
----@return number|nil band_h
-local function topBandGeometry(ui, paint_y)
-    ui = ui or Bars.ui
-    if not Bars.topVisible(ui) then
-        return nil, nil
-    end
-    return paint_y, ui.document:getHeaderHeight() + topBarExtraHeight()
-end
-
 --- 底栏 overlay 在 ReaderView paintTo 坐标下的 y / 高度（对齐 BottomContainer 内容区）。
----@param view table|nil
----@param ui table|nil
+--- 背景向下补到物理屏底。
+---@param view table ReaderView
+---@param footer table ReaderFooter
 ---@param paint_y number
 ---@return number|nil band_y
 ---@return number|nil band_h
-local function bottomBandGeometry(view, ui, paint_y)
-    if not Bars.bottomVisible(ui) then
-        return nil, nil
-    end
-    ui = ui or Bars.ui
-    view = view or Bars.view
-    if not ui then
-        return nil, nil
-    end
-    local reader_view = ui.view
-    if not reader_view then
-        return nil, nil
-    end
-    local footer = reader_view.footer
-    if not footer then
-        return nil, nil
-    end
+local function bottomBandGeometry(view, footer, paint_y)
     local pos = footer.footer_positioner
     local screen_h = Screen:getHeight()
-    local view_h = view and view.dimen and view.dimen.h or screen_h
+    local view_h = view.dimen and view.dimen.h or screen_h
+    local band_y, band_h
     if pos and pos.contentRange then
-        local range = pos:contentRange()
-        local pos_h = pos.dimen and pos.dimen.h or view_h
-        local band_h = range.h
-        local band_y = paint_y + (pos.dimen and pos.dimen.y or 0) + pos_h - band_h
-        local physical_bottom = paint_y + screen_h
-        if band_y + band_h < physical_bottom then
-            band_h = physical_bottom - band_y
+        band_h = pos:contentRange().h
+        band_y = paint_y + (pos.dimen and pos.dimen.y or 0) + (pos.dimen and pos.dimen.h or view_h) - band_h
+    else
+        band_h = footer:getHeight()
+        if not band_h or band_h <= 0 then
+            return nil, nil
         end
-        return band_y, band_h
+        band_y = paint_y + view_h - band_h
     end
-    local band_h = footer:getHeight()
-    if not band_h or band_h <= 0 then
-        return nil, nil
-    end
-    local band_y = paint_y + view_h - band_h
-    local physical_bottom = paint_y + screen_h
-    if band_y + band_h < physical_bottom then
-        band_h = physical_bottom - band_y
-    end
-    return band_y, band_h
-end
-
---- Book 顶栏整体高度（像素）；overlay 未启用时为 0。
----@param ui table|nil
----@return number
-function Bars.topHeight(ui)
-    if not Bars.topVisible(ui) then
-        return 0
-    end
-    ui = ui or Bars.ui
-    return ui.document:getHeaderHeight() + topBarExtraHeight()
+    return band_y, math.max(band_h, paint_y + screen_h - band_y)
 end
 
 --- 顶栏固定水平内边距（左、右）。
@@ -356,14 +247,9 @@ local function topMargins()
 end
 
 --- 底栏水平内边距（左、右），跟 ReaderFooter 一致。
----@param ui table|nil
+---@param footer table ReaderFooter
 ---@return number, number
-local function bottomMargins(ui)
-    ui = ui or Bars.ui
-    local footer = ui and ui.view and ui.view.footer
-    if not footer then
-        return 0, 0
-    end
+local function bottomMargins(footer)
     local margin = footer.horizontal_margin or 0
     local inner = Screen:scaleBySize(footer.settings and footer.settings.progress_margin_width or 0)
     return margin + inner, margin + inner
@@ -385,34 +271,6 @@ local function topTextFace(ui, bar_h)
     return Font:getFace("xx_smallinfofont", unscaled)
 end
 
---- 底栏文字 face（跟 ReaderFooter）。
----@param ui table|nil
----@return table
-local function bottomTextFace(ui)
-    local Font = require("ui/font")
-    ui = ui or Bars.ui
-    local footer = ui and ui.view and ui.view.footer
-    if footer and footer.footer_text_face then
-        return footer.footer_text_face
-    end
-    local settings = footer and footer.settings
-    local face_name = settings and settings.text_font_face or "xx_smallinfofont"
-    local size = settings and settings.text_font_size or 14
-    return Font:getFace(face_name, size)
-end
-
---- 底栏文字颜色（跟 footer_text）。
----@param ui table|nil
-local function bottomTextColor(ui)
-    ui = ui or Bars.ui
-    local footer = ui and ui.view and ui.view.footer
-    local text = footer and footer.footer_text
-    if text and text.fgcolor then
-        return text.fgcolor
-    end
-    return Blitbuffer.COLOR_BLACK
-end
-
 --- 包装 ReaderFooter：底栏可见时禁止切换模式；短按继续交给原生翻页区，
 --- 兼容把蓝牙按钮转换为屏幕点击的翻页器。
 ---@param ui table
@@ -423,14 +281,14 @@ local function hijackFooter(ui)
     end
     local orig_tap = footer.TapFooter
     footer.TapFooter = function(self, ges)
-        if Bars.bottomVisible(self.ui) and Bars.replaceBottomBar() then
+        if Bars.bottomVisible(self.ui) and Layout.replace("bottom") then
             return false
         end
         return orig_tap(self, ges)
     end
     local orig_hold = footer.onHoldFooter
     footer.onHoldFooter = function(self, ges)
-        if Bars.bottomVisible(self.ui) and Bars.replaceBottomBar() then
+        if Bars.bottomVisible(self.ui) and Layout.replace("bottom") then
             return true
         end
         return orig_hold(self, ges)
@@ -472,31 +330,16 @@ function Bars:startClock()
     end
     --- 刷一次顶条并把自己排到下一个整分；换书或退出阅读后不再续排。
     local function tick()
-        if not ui then
-            return
-        end
         if require("apps/reader/readerui").instance ~= ui then
             return
         end
-        if Bars.topVisible(ui) and Bars.replaceTopBar() and require("ui.reader.session").current() then
-            local view = ui.view
-            local dimen
-            if view then
-                dimen = view.dimen
-            end
-            local document = ui.document
-            local header_h
-            if document then
-                header_h = document:getHeaderHeight()
-            end
-            if dimen and header_h and header_h > 0 then
-                UIManager:setDirty(ui.dialog, "ui", Geom:new{
-                    x = 0,
-                    y = 0,
-                    w = dimen.w,
-                    h = header_h + topBarExtraHeight(),
-                })
-            end
+        if Bars.topVisible(ui) and Layout.replace("top") and require("ui.reader.session").current() then
+            UIManager:setDirty(ui.dialog, "ui", Geom:new{
+                x = 0,
+                y = 0,
+                w = ui.view.dimen.w,
+                h = ui.document:getHeaderHeight() + topBarExtraHeight(),
+            })
         end
         UIManager:scheduleIn(61 - tonumber(os.date("%S")), tick)
     end
@@ -516,7 +359,7 @@ local function liveContext()
     local book = identity.book or {}
     local toc = Session.toc()
     return {
-        chapter = Bars.chapterTitle(cur),
+        chapter = Session.chapterTitle(cur) or "",
         title = book.title or "",
         clock = Bars.timeText(),
         percent = cur.percent,
@@ -538,50 +381,45 @@ function Bars:paintTo(bb, x, y)
         return
     end
     local ui = self.ui
-    if not ui then
-        return
-    end
     local dimen = self.view and self.view.dimen or Screen:getSize()
     local w = dimen.w
-    local Layout = require("ui.reader.bars.layout")
     local Items = require("ui.reader.bars.items")
     local bg = Blitbuffer.COLOR_WHITE
     local cache = { widgets = Bars._paint_widgets, keys = Bars._paint_widget_keys }
 
     if Bars.topVisible(ui) and Layout.replace("top") then
-        local bar_y, bar_h = topBandGeometry(ui, y)
-        if bar_y and bar_h then
-            bb:paintRect(x, bar_y, w, bar_h, bg)
-            local margin_l, margin_r = topMargins()
-            Items.paint(
-                bb, x + margin_l, bar_y, math.max(1, w - margin_l - margin_r), bar_h,
-                Layout.get("top"), ctx, {
-                    face = topTextFace(ui, ui.document:getHeaderHeight()),
-                    fgcolor = Blitbuffer.COLOR_BLACK,
-                    cache = cache,
-                    prefix = "top:",
-                }
-            )
-        end
+        -- ReaderView.state.offset 属于文档可视区，不是状态栏几何，不能混进来。
+        local header_h = ui.document:getHeaderHeight()
+        local bar_h = header_h + topBarExtraHeight()
+        bb:paintRect(x, y, w, bar_h, bg)
+        local margin_l, margin_r = topMargins()
+        Items.paint(
+            bb, x + margin_l, y, math.max(1, w - margin_l - margin_r), bar_h,
+            Layout.get("top"), ctx, {
+                face = topTextFace(ui, header_h),
+                fgcolor = Blitbuffer.COLOR_BLACK,
+                cache = cache,
+                prefix = "top:",
+            }
+        )
     end
 
     if Bars.bottomVisible(ui) and Layout.replace("bottom") then
-        local bottom_y, bar_h = bottomBandGeometry(self.view, ui, y)
+        local footer = ui.view.footer
+        local bottom_y, bar_h = bottomBandGeometry(self.view, footer, y)
         if bottom_y and bar_h then
             local bottom_inset = Screen:scaleBySize(BOTTOM_CONTENT_INSET)
             -- 内容上移时同时向内扩背景，不能让文字或进度条漏到正文上。
             bottom_y = bottom_y - bottom_inset
             bb:paintRect(x, bottom_y, w, bar_h + bottom_inset, bg)
-            local margin_l, margin_r = bottomMargins(ui)
-            local footer = ui.view and ui.view.footer
-            local prog_h = footer and footer.progress_bar and footer.progress_bar.height
+            local margin_l, margin_r = bottomMargins(footer)
             Items.paint(
                 bb, x + margin_l, bottom_y, math.max(1, w - margin_l - margin_r), bar_h,
                 Layout.get("bottom"), ctx, {
-                    face = bottomTextFace(ui),
-                    fgcolor = bottomTextColor(ui),
+                    face = footer.footer_text_face,
+                    fgcolor = footer.footer_text.fgcolor,
                     cache = cache,
-                    bar_h = prog_h,
+                    bar_h = footer.progress_bar and footer.progress_bar.height,
                     prefix = "bottom:",
                 }
             )

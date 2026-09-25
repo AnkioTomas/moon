@@ -229,39 +229,3 @@ do
     DbBase.close()
     clearMods()
 end
-
--- ── all：全量登记映射；空库返回 {} ───────────────────────
-do
-    local connection, calls = makeConn({
-        exec = function(sql)
-            if sql:find("FROM chapters;", 1, true) then
-                return {
-                    { "/cache/moon/book/x/1.html", "/cache/moon/book/x/2.html" },
-                    { "moon", "moon" },
-                    { "b1", "b1" },
-                    { 1, 2 },
-                }, 2
-            end
-        end,
-    })
-    local DbBase, ChapterDB = loadChapter(connection)
-
-    local rows = ChapterDB.all()
-    Assert.eq(#rows, 2)
-    Assert.eq(rows[1].path, "/cache/moon/book/x/1.html")
-    Assert.eq(rows[1].source_id, "moon")
-    Assert.eq(rows[1].stable_id, "b1")
-    Assert.eq(rows[1].chapter_idx, 1)
-    Assert.eq(rows[2].chapter_idx, 2)
-
-    DbBase.close()
-    clearMods()
-end
-
-do
-    local connection = makeConn()
-    local DbBase, ChapterDB = loadChapter(connection)
-    Assert.eq(#ChapterDB.all(), 0)
-    DbBase.close()
-    clearMods()
-end

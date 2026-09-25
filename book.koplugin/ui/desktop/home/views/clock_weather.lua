@@ -178,8 +178,8 @@ end
 --- 恢复时钟与天气子视图的显示及周期工作。
 function M:onResume()
     ensureKids(self)
-    if self.clock then self.clock:onResume() end
-    if self.weather then self.weather:onResume() end
+    self.clock:onResume()
+    self.weather:onResume()
 end
 
 --- 把刷新交给天气子视图，再按当前左右序重建。

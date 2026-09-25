@@ -38,6 +38,13 @@ function Text.rtrimSlashes(s)
     return (tostring(s or ""):gsub("/+$", ""))
 end
 
+--- 路径末段（/ 与 \ 都算分隔符）；没有分隔符时原样返回。
+---@param path string
+---@return string
+function Text.basename(path)
+    return path:match("([^/\\]+)$") or path
+end
+
 --- path 是否等于 root 或位于 root 之内（纯字符串前缀判定，不做 realpath；root="/" 恒真）。
 ---@param root string
 ---@param path string

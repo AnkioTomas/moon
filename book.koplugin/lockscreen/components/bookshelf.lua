@@ -54,29 +54,8 @@ local M = {
 function M.data()
     local source_id = Library.activeSourceId()
     local recent = Catalog.recentBooks(source_id, 64)
-    local reading, covers, seen = {}, {}, {}
-
-    --- 按 stable_id 去重后追加到目标列表，满 limit 即停。
-    ---@param target table[]
-    ---@param rows table[]|nil
-    ---@param limit number
-    ---@param accept (fun(row: table): boolean)|nil 额外过滤条件
-    local function append(target, rows, limit, accept)
-        for _, row in ipairs(rows or {}) do
-            if #target >= limit then return end
-            local id = row.stable_id
-            if type(id) ~= "string" or id == "" then
-                -- skip
-            else
-                local key = tostring(row.source_id or source_id) .. "\0" .. id
-                if not seen[key] and (not accept or accept(row)) then
-                    target[#target + 1] = Library.shelfBook(row, source_id)
-                    seen[key] = true
-                end
-            end
-        end
-    end
-
+    local reading, covers = {}, {}
+    local append = Library.shelfCollector(source_id)
     append(reading, recent, 12, function(row)
         return (tonumber(row.percent) or 0) < 100
     end)

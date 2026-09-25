@@ -130,30 +130,24 @@ function Pager.widget(page, pages, handlers, width)
 
     --- 构建翻页箭头按钮。
     ---@param icon string
-    ---@param cb fun()|nil
+    ---@param key "on_first"|"on_prev"|"on_next"|"on_last" handlers 里的回调名
     ---@return table
-    local function chev(icon, cb)
+    local function chev(icon, key)
         return Button:new{
             icon = icon,
             icon_width = icon_sz,
             icon_height = icon_sz,
             bordersize = 0,
             padding = pad,
-            callback = cb,
+            callback = function()
+                if handlers[key] then handlers[key]() end
+            end,
         }
     end
-    local first = chev(chevron_first, function()
-        if handlers.on_first then handlers.on_first() end
-    end)
-    local left = chev(chevron_left, function()
-        if handlers.on_prev then handlers.on_prev() end
-    end)
-    local right = chev(chevron_right, function()
-        if handlers.on_next then handlers.on_next() end
-    end)
-    local last = chev(chevron_last, function()
-        if handlers.on_last then handlers.on_last() end
-    end)
+    local first = chev(chevron_first, "on_first")
+    local left = chev(chevron_left, "on_prev")
+    local right = chev(chevron_right, "on_next")
+    local last = chev(chevron_last, "on_last")
     first:enableDisable(page > 1)
     left:enableDisable(page > 1)
     right:enableDisable(page < pages)

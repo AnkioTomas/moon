@@ -128,17 +128,10 @@ KEY_SECTION.home_widgets = "home"
 -- These are runtime/cache values, not user-facing defaults, but belong beside
 -- the lockscreen settings rather than in common.lua.
 for _, key in ipairs({
-    "lock_screen_day", "lock_screen_bill_period", "lock_screen_quote_cache",
+    "lock_screen_day", "lock_screen_quote_cache",
     "lock_screen_quote_source_cache", "lock_screen_quote_index",
-    "lock_screen_component", "lock_screen_position", "lock_screen_wide",
-    "lock_screen_custom_message", "lock_screen_asset_cache",
 }) do
     KEY_SECTION[key] = "lockscreen"
-end
-for _, key in ipairs({
-    "ime_layout", "ime_dict_built_at", "ime_dict_sha256",
-}) do
-    KEY_SECTION[key] = "pinyin"
 end
 KEY_SECTION.enabled_sources = "common"
 

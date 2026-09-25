@@ -217,26 +217,18 @@ end
 
 --- 只保证 settings 树存在。打开配置文件必须走这里，不能调 ensureLayout。
 function P.ensureSettings()
-    P.ensureDir(P.root())
     P.ensureDir(P.settingsDir())
 end
 
---- 补丁备份根目录：$DATA/.moon/backups/patches
----@return string
-function P.patchBackupsDir()
-    return P.root() .. "/backups/patches"
-end
-
---- 某功能的补丁备份目录：backups/patches/<feature>/
+--- 某功能的补丁备份目录：$DATA/.moon/backups/patches/<feature>/
 ---@param feature string
 ---@return string
 function P.patchBackupDir(feature)
-    return P.patchBackupsDir() .. "/" .. tostring(feature)
+    return P.root() .. "/backups/patches/" .. tostring(feature)
 end
 
 --- 保证 fonts 目录存在
 function P.ensureFonts()
-    P.ensureDir(P.root())
     P.ensureDir(P.fontsDir())
 end
 
@@ -263,8 +255,6 @@ end
 ---@param id string
 function P.ensureLayout(id)
     P.ensureCacheRoot()
-    id = P.sanitizeSourceId(id)
-    P.ensureDir(P.sourceCacheDir(id))
     P.ensureDir(P.bookDir(id))
     P.ensureDir(P.imageDir(id))
 end
@@ -275,8 +265,7 @@ end
 ---@param id string
 function P.ensureBookWork(stable_id, id)
     P.ensureLayout(id)
-    local dir = P.bookWorkDir(stable_id, id)
-    P.ensureDir(dir)
+    P.ensureDir(P.bookWorkDir(stable_id, id))
 end
 
 return P

@@ -121,15 +121,6 @@ local function textButton(title, width, on_tap)
     return tap
 end
 
---- 构建翻页条中央标题；提供回调时将标题包装为点击区域。
----@param title string 显示标题
----@param width number 目标宽度，单位像素
----@param on_tap fun()|nil 点击命中区域时执行的回调
----@return table
-local function titleCenter(title, width, on_tap)
-    return textButton(title, width, on_tap)
-end
-
 --- 中央并排图标按钮（编辑态：添加 / 完成）。
 ---@param actions { icon: string, on_tap: fun()|nil }[]
 ---@param width number 目标宽度，单位像素
@@ -172,7 +163,7 @@ function PageStrip.widget(opts)
         if type(opts.actions) == "table" and #opts.actions > 0 then
             center = actionsCenter(opts.actions, mid_w)
         else
-            center = titleCenter(opts.title or _("完成"), mid_w, opts.on_center)
+            center = textButton(opts.title or _("完成"), mid_w, opts.on_center)
         end
     else
         center = dotsCenter(page, pages, mid_w)

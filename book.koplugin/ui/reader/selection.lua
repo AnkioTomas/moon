@@ -96,26 +96,16 @@ end
 ---@return BookSelectionAnchors
 function Selection.anchors(first, last, screen_h, radius, stem)
     local function place(edge_x, box)
-        local mid_y = box.y + box.h * 0.5
         local bottom = box.y + box.h
         local below_y = bottom + stem + radius
-        if below_y + radius <= screen_h then
-            return {
-                x = edge_x,
-                y = below_y,
-                ax = edge_x,
-                ay = bottom,
-                edge_x = edge_x,
-                edge_y = mid_y,
-            }
-        end
+        local below = below_y + radius <= screen_h
         return {
             x = edge_x,
-            y = box.y - stem - radius,
+            y = below and below_y or box.y - stem - radius,
             ax = edge_x,
-            ay = box.y,
+            ay = below and bottom or box.y,
             edge_x = edge_x,
-            edge_y = mid_y,
+            edge_y = box.y + box.h * 0.5,
         }
     end
     return {
@@ -186,15 +176,10 @@ function Selection.hit(anchors, pos, radius)
     local r2 = radius * radius
     local start_d = dist2(anchors.start.x, anchors.start.y, pos.x, pos.y)
     local finish_d = dist2(anchors.finish.x, anchors.finish.y, pos.x, pos.y)
-    local start_hit = start_d <= r2
-    local finish_hit = finish_d <= r2
-    if start_hit and finish_hit then
-        return start_d <= finish_d and "start" or "finish"
-    end
-    if start_hit then
+    if start_d <= r2 and start_d <= finish_d then
         return "start"
     end
-    if finish_hit then
+    if finish_d <= r2 then
         return "finish"
     end
     return nil
@@ -401,12 +386,8 @@ function Handles:paintTo(bb)
         if h > 0 then
             bb:paintRect(math.floor(ax - sw / 2), y0, sw, h, fill)
         end
-        if bb.paintCircle then
-            bb:paintCircle(cx, cy, m.radius, ring)
-            bb:paintCircle(cx, cy, math.max(1, m.radius - m.ring), fill)
-        else
-            bb:paintRect(cx - m.radius, cy - m.radius, m.radius * 2, m.radius * 2, fill)
-        end
+        bb:paintCircle(cx, cy, m.radius, ring)
+        bb:paintCircle(cx, cy, math.max(1, m.radius - m.ring), fill)
     end
     paint(self.anchors.start)
     paint(self.anchors.finish)

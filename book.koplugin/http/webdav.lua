@@ -107,31 +107,19 @@ local function parseList(xml, folder_url, folder_path)
                 or item:find("<[^:]*:resourcetype>%s*</[^:]*:resourcetype>")
             local is_collection = item:find("<[^:]*:collection[^<]*/>")
                 or item:find("<[^:]*:collection>%s*</[^:]*:collection>")
-            local is_dir = (not is_empty_type) and is_collection
+            local is_dir = not is_empty_type and is_collection ~= nil
 
-            local child_path = folder_path ~= "" and (folder_path .. "/" .. name) or name
-            if is_dir then
-                if trimSlashes(full) ~= folder_href then
-                    table.insert(entries, {
-                        name = name,
-                        path = child_path,
-                        href = full,
-                        is_dir = true,
-                        size = 0,
-                        mtime = nil,
-                    })
-                end
-            else
-                local size = tonumber(item:match("<[^:]*:getcontentlength[^>]*>(%d+)</[^:]*:getcontentlength>")) or 0
-                local mtime = item:match("<[^:]*:getlastmodified[^>]*>(.-)</[^:]*:getlastmodified>")
-                table.insert(entries, {
+            -- Depth:1 回包里第一条是被列目录自身，跳过。
+            if not is_dir or trimSlashes(full) ~= folder_href then
+                entries[#entries + 1] = {
                     name = name,
-                    path = child_path,
+                    path = folder_path ~= "" and (folder_path .. "/" .. name) or name,
                     href = full,
-                    is_dir = false,
-                    size = size,
-                    mtime = mtime,
-                })
+                    is_dir = is_dir,
+                    size = is_dir and 0
+                        or tonumber(item:match("<[^:]*:getcontentlength[^>]*>(%d+)</[^:]*:getcontentlength>")) or 0,
+                    mtime = not is_dir and item:match("<[^:]*:getlastmodified[^>]*>(.-)</[^:]*:getlastmodified>") or nil,
+                }
             end
         end
     end
@@ -167,12 +155,8 @@ function Webdav:listAsync(path, cb)
             cb(nil, err)
             return
         end
-        if not res then
-            cb(nil, statusErr(nil))
-            return
-        end
-        if not Request.ok(res.code) then
-            cb(nil, statusErr(res.code))
+        if not res or not Request.ok(res.code) then
+            cb(nil, statusErr(res and res.code))
             return
         end
         local xml = res.body or ""

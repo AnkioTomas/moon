@@ -50,12 +50,6 @@ end
 package.preload["utils.task"] = function()
     return { spawn = function(_, fn) fn(); return { abort = function() end } end }
 end
-package.preload["utils.text"] = function()
-    return {
-        stripWhitespace = function(v) return v end,
-        trim = function(v) return v end,
-    }
-end
 package.preload["libs/libkoreader-lfs"] = function()
     return {
         attributes = function(path, key)

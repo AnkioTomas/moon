@@ -102,17 +102,13 @@ local function isHttp(src)
 end
 
 --- 截断占位文案。
----@param fb any 图片不可用时显示的占位内容
+---@param fb string 图片不可用时显示的占位内容
 ---@return string
 local function truncFallback(fb)
-    local label = fb or "?"
-    if type(label) ~= "string" then
-        label = tostring(label)
+    if #fb > 24 then
+        return fb:sub(1, 24) .. "…"
     end
-    if #label > 24 then
-        label = label:sub(1, 24) .. "…"
-    end
-    return label
+    return fb
 end
 
 --- 居中并可选加边框包裹子控件。
@@ -148,8 +144,6 @@ end
 ---@param border boolean|nil 是否绘制边框
 ---@return table
 local function placeholder(w, h, fb, border)
-    w = math.max(1, tonumber(w) or 1)
-    h = math.max(1, tonumber(h) or 1)
     local child
     if type(fb) == "string" and fb ~= "" then
         child = TextWidget:new{
@@ -329,7 +323,6 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     end
 
     --- 暂停时保留已绘制内容，但取消下载并拒绝后到的图片结果。
-    -- 首页暂停时保留已绘制的图片，但停止任务并拒绝晚到结果。
     function box:onHomePause()
         self._alive = false
         self:cancel()
@@ -401,7 +394,7 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     local path = resolve(src)
     if path then
         box:_showFile(path)
-    elseif type(src) == "string" and isHttp(src) then
+    elseif isHttp(src) then
         box._download = Download.new(src, headers, function(downloaded, err)
             box._download = nil
             if not box._alive then

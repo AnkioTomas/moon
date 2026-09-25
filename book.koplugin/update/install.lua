@@ -158,31 +158,23 @@ function Install.run(archive, plugin_root, version, expected_sha256)
     local ok, err = removeTree(staging)
     if not ok then return nil, err end
     if not lfs.mkdir(staging) then return nil, "cannot create update staging directory" end
+    local function abort(reason)
+        removeTree(staging)
+        return nil, reason
+    end
 
     ok, err = extractArchive(archive, staging)
     if not ok then return nil, err end
     local packaged_version
     packaged_version, err = readPackagedVersion(staged_plugin)
-    if packaged_version ~= version then
-        removeTree(staging)
-        return nil, err or "update version mismatch"
-    end
+    if packaged_version ~= version then return abort(err or "update version mismatch") end
     ok, err = validateLuaTree(staged_plugin)
-    if not ok then
-        removeTree(staging)
-        return nil, err
-    end
+    if not ok then return abort(err) end
 
     ok, err = removeTree(backup)
-    if not ok then
-        removeTree(staging)
-        return nil, err
-    end
+    if not ok then return abort(err) end
     ok, err = os.rename(plugin_root, backup)
-    if not ok then
-        removeTree(staging)
-        return nil, err or "cannot back up current plugin"
-    end
+    if not ok then return abort(err or "cannot back up current plugin") end
     ok, err = os.rename(staged_plugin, plugin_root)
     if not ok then
         local restored, restore_err = os.rename(backup, plugin_root)
