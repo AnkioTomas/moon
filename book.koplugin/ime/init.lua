@@ -111,7 +111,7 @@ function IME.dictStatus()
     local settings = Settings.get()
     local versions = type(settings.ime_dict_built_at) == "table" and settings.ime_dict_built_at or {}
     local built_at = Registry.builtAt(method)
-        or versions[method.id] or "?"
+        or versions[method.dictionary] or "?"
     return string.format("%s · %s", entries, built_at)
 end
 
@@ -125,7 +125,7 @@ function IME.downloadDict(cb, on_progress)
         cb(false, _("网络不可用，请先连接 Wi-Fi"))
         return
     end
-    require("ime.download").ensure(Registry.current().id, cb, on_progress)
+    require("ime.download").ensure(Registry.current().dictionary, cb, on_progress)
 end
 
 return IME

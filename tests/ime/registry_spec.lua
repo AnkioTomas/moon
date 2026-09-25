@@ -14,11 +14,39 @@ end
 
 local Registry = require("ime.registry")
 local methods = Registry.list()
-Assert.len(methods, 4)
+Assert.len(methods, 5)
 Assert.eq(methods[1].id, "pinyin")
-Assert.eq(methods[2].id, "wubi")
-Assert.eq(methods[3].id, "cangjie")
-Assert.eq(methods[4].id, "zhuyin")
+Assert.eq(methods[2].id, "xiaohe")
+Assert.eq(methods[3].id, "wubi")
+Assert.eq(methods[4].id, "cangjie")
+Assert.eq(methods[5].id, "zhuyin")
+for _, method in ipairs(methods) do
+    Assert.is_true(type(method.dictionary) == "string")
+end
+
+local xiaohe = Registry.get("xiaohe")
+Assert.eq(xiaohe.dictionary, "pinyin")
+Assert.eq(xiaohe.labels.v, "zh")
+Assert.eq(xiaohe.labels.l, "iang")
+Assert.is_nil(xiaohe.labels.a)
+Assert.eq(xiaohe.mapKey("H"), "h")
+
+-- 双拼查词先翻译成全拼再走拼音词库；其余方法原样透传。
+local looked_up = {}
+package.loaded["ime.pinyin.dictionary"] = nil
+package.preload["ime.pinyin.dictionary"] = function()
+    return {
+        SYLLABLES = { "ni", "hao" },
+        lookup = function(_, code)
+            looked_up[#looked_up + 1] = code
+            return { "你好" }
+        end,
+    }
+end
+Assert.eq(Registry.lookup(xiaohe, "nihc")[1], "你好")
+Registry.lookup("pinyin", "nihao")
+Assert.eq(looked_up[1], "nihao")
+Assert.eq(looked_up[2], "nihao")
 
 local token, display = Registry.get("pinyin").mapKey("N")
 Assert.eq(token, "n")

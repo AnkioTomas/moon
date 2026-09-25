@@ -36,6 +36,13 @@ local ZHUYIN = {
     ["6"] = "ˊ", ["3"] = "ˇ", ["4"] = "ˋ", ["7"] = "˙",
 }
 
+-- 声母键标 zh/ch/sh，其余标韵母；a/e 与字母同形不标。
+local XIAOHE = {
+    q = "iu", w = "ei", r = "uan", t = "ue", y = "un", u = "sh", i = "ch", o = "uo", p = "ie",
+    s = "ong", d = "ai", f = "en", g = "eng", h = "ang", j = "an", k = "ing", l = "iang",
+    z = "ou", x = "ia", c = "ao", v = "zh", b = "in", n = "iao", m = "ian",
+}
+
 local function letterKey(key)
     if type(key) ~= "string" or not key:match("^%a$") then return nil end
     key = key:lower()
@@ -53,12 +60,24 @@ end
 local METHODS = {
     pinyin = {
         id = "pinyin",
+        dictionary = "pinyin",
         label = _("拼音"),
         commit_space = true,
         mapKey = letterKey,
     },
+    xiaohe = {
+        id = "xiaohe",
+        dictionary = "pinyin",
+        label = _("小鹤双拼"),
+        commit_space = true,
+        labels = XIAOHE,
+        show_codes = true,
+        mapKey = letterKey,
+        toCode = function(code) return require("ime.xiaohe").toPinyin(code) end,
+    },
     wubi = {
         id = "wubi",
+        dictionary = "wubi",
         label = _("五笔"),
         commit_space = true,
         labels = WUBI,
@@ -67,6 +86,7 @@ local METHODS = {
     },
     cangjie = {
         id = "cangjie",
+        dictionary = "cangjie",
         label = _("仓颉"),
         commit_space = true,
         labels = CANGJIE,
@@ -75,6 +95,7 @@ local METHODS = {
     },
     zhuyin = {
         id = "zhuyin",
+        dictionary = "zhuyin",
         label = _("注音"),
         commit_space = true,
         labels = ZHUYIN,
@@ -82,7 +103,7 @@ local METHODS = {
     },
 }
 
-local ORDER = { "pinyin", "wubi", "cangjie", "zhuyin" }
+local ORDER = { "pinyin", "xiaohe", "wubi", "cangjie", "zhuyin" }
 
 local M = {}
 
@@ -105,10 +126,15 @@ function M.current()
 end
 
 -- M.isAvailable/fileExists/lookup/entries/builtAt/reset(method, ...)：method 为 profile 或 id，
--- 转发到该方法的 table_dictionary 实例。
+-- 转发到该方法所用词库（profile.dictionary）的 table_dictionary 实例。
+-- 声明了 toCode 的方法（双拼）查词前先把键码翻译成词库码。
 for _, name in ipairs({ "isAvailable", "fileExists", "lookup", "entries", "builtAt", "reset" }) do
     M[name] = function(method, ...)
-        local dictionary = require("ime." .. M.get(type(method) == "table" and method.id or method).id .. ".dictionary")
+        local profile = M.get(type(method) == "table" and method.id or method)
+        local dictionary = require("ime." .. profile.dictionary .. ".dictionary")
+        if name == "lookup" and profile.toCode then
+            return dictionary:lookup(profile.toCode((...)))
+        end
         return dictionary[name](dictionary, ...)
     end
 end
