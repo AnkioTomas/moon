@@ -81,15 +81,6 @@ local function nextRevision()
     return Progress.last_revision
 end
 
---- 从阅读快照取得全书阅读比例 0..1（按章源会合成）。
----@param snapshot ReaderSessionSnapshot
----@return number
-function Progress.fraction(snapshot)
-    if not snapshot then return 0 end
-    local toc = require("ui.reader.session.toc").list(snapshot)
-    return Position.fraction(snapshot, toc)
-end
-
 --- 当前 ProgressPosition；位置完全来自 ReaderSession 快照。
 ---@param snapshot ReaderSessionSnapshot
 ---@return ProgressPosition
@@ -364,7 +355,7 @@ function Progress.syncAsync(source, opts, cb)
     opts = opts or {}
     local identity = opts.identity
     local key = table.concat({
-        tostring(source),
+        source.id,
         tostring(identity and identity.stable_id or "all"),
         tostring(identity and identity.chapter_idx or 0),
         opts.dirty_only and "dirty" or "full",

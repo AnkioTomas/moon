@@ -6,6 +6,7 @@ local Stubs = require("support.stubs")
 -- 虚拟目录树：.moon（插件配置/缓存）与 .hidden 都不该被扫进书库
 -- sub 是第 2 层（分类）；sub/deep 是第 3 层（系列）；x4 是第 4 层，按约定不识别；bad.epub 模拟引擎解析失败
 -- a.epub.sdr 模拟 KOReader 边车目录：扫盘不当下钻，moveBook 时跟随书籍迁移
+local DENIED_DIRS = {}
 local TREE = {
     ["/books"] = { "a.epub", "a.epub.sdr", ".moon", ".hidden", "sub", "note.md", "old.cbr", "x.azw3" },
     ["/books/a.epub.sdr"] = { "metadata.epub.lua" },
@@ -32,6 +33,7 @@ package.preload["libs/libkoreader-lfs"] = function()
     return {
         dir = function(path)
             dirs_scanned[#dirs_scanned + 1] = path
+            if DENIED_DIRS[path] then error("cannot open " .. path .. ": Permission denied") end
             local entries = TREE[path] or {}
             local i = 0
             return function()
@@ -292,6 +294,23 @@ local function reset()
     props_read = 0
     dirs_scanned = {}
     removed_files = {}
+end
+
+-- ── 子目录列不出来：整次扫盘失败，不按残缺快照 reconcile 软删其中的书 ──────
+do
+    reset()
+    db_rows[rowKey("local", "/books/sub/c.pdf")] = {
+        source_id = "local", stable_id = "/books/sub/c.pdf", title = "c", path = "/books/sub/c.pdf",
+    }
+    DENIED_DIRS["/books/sub"] = true
+    local ok, err
+    Client.new({ path = "/books" }):scanAsync(function(o, e) ok, err = o, e end)
+    Stubs.flush()
+    DENIED_DIRS["/books/sub"] = nil
+    Assert.is_false(ok)
+    Assert.matches(tostring(err), "Permission denied")
+    Assert.len(removed, 0)
+    Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].path, "/books/sub/c.pdf")
 end
 
 -- ── 扫盘 → 解析写库（失败回退文件名）→ 清失效 ──────
@@ -592,6 +611,33 @@ do
     new_id, err = Client.new({}):moveBook("/books/a.epub", "科幻", nil)
     Assert.is_nil(new_id)
     Assert.not_nil(err)
+
+    -- 身份迁移失败：书移回原处，报错而不是返回新路径
+    -- （虚拟目录树不随 os.rename 变化，新位置的 .sdr 在桩里不存在，回迁只剩书本身）
+    local BookDB = require("db.book")
+    local real_rename_id = BookDB.renameStableId
+    BookDB.renameStableId = function() return false end
+    new_id, err = c:moveBook("/books/a.epub", "科幻", nil)
+    Assert.is_nil(new_id)
+    Assert.eq(err, "更新书籍身份失败")
+    Assert.eq(renamed[#renamed][1], "/books/科幻/a.epub")
+    Assert.eq(renamed[#renamed][2], "/books/a.epub")
+    BookDB.renameStableId = real_rename_id
+
+    -- .sdr 移动失败：书移回原处，不改库
+    local before_renames_id = #renames
+    before_files = #renamed
+    os.rename = function(from, to)
+        renamed[#renamed + 1] = { from, to }
+        if from:sub(-4) == ".sdr" then return nil, "busy" end
+        return true
+    end
+    new_id, err = c:moveBook("/books/a.epub", "科幻", nil)
+    Assert.is_nil(new_id)
+    Assert.matches(err, "busy")
+    Assert.eq(#renames, before_renames_id)
+    Assert.eq(renamed[#renamed][1], "/books/科幻/a.epub")
+    Assert.eq(renamed[#renamed][2], "/books/a.epub")
 
     os.rename = real_rename
 end

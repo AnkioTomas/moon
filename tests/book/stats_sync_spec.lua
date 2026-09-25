@@ -53,6 +53,45 @@ source_callback({ ok = true })
 Assert.is_false(done_ok)
 Assert.not_nil(done_result)
 
+-- 同源在飞时第二次推送不再读行上报，回 busy；回调后释放。
+confirm_ok = true
+local calls = 0
+local counting = {
+    id = "moon",
+    pushStatsAsync = function(_, rows, cb)
+        calls = calls + 1
+        source_callback = cb
+        return { cancel = function() end }
+    end,
+}
+local first_callback
+Stats.push(counting, function() end)
+first_callback = source_callback
+done_ok, done_result = nil, nil
+Assert.is_nil(Stats.push(counting, function(ok, result) done_ok, done_result = ok, result end))
+Assert.eq(calls, 1)
+Assert.is_true(done_ok)
+Assert.eq(done_result, "busy")
+first_callback({ ok = true })
+Stats.push(counting, function() end)
+Assert.eq(calls, 2)
+
+-- 取消释放令牌；被取消那轮的迟到回调不能清掉新一轮的令牌。
+source_callback({ ok = true })
+local job2 = Stats.push(counting, function() end)
+Assert.eq(calls, 3)
+local stale = source_callback
+job2:cancel()
+Assert.not_nil(Stats.push(counting, function() end))
+Assert.eq(calls, 4)
+local fresh_callback = source_callback
+stale({ ok = true })
+done_result = nil
+Stats.push(counting, function(_, result) done_result = result end)
+Assert.eq(done_result, "busy")
+Assert.eq(calls, 4)
+fresh_callback({ ok = true })
+
 pending_rows = {}
 done_ok, done_result = nil, nil
 Assert.is_nil(Stats.push(source, function(ok, result) done_ok, done_result = ok, result end))

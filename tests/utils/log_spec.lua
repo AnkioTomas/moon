@@ -52,7 +52,6 @@ package.loaded["utils.log"] = nil
 local Log = require("utils.log")
 local log_path = require("utils.paths").logPath()
 os.remove(log_path)
-Log.start()
 Log.info("hello", 7)
 Log.dbg("hidden")
 Log.warn("careful")

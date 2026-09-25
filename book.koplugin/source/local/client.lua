@@ -235,17 +235,27 @@ local function coverPath(stable_id)
 end
 
 --- 把书籍附属资源从旧路径迁移到新路径。
+--- 封面只是缓存，失败仅记日志；.sdr 装着 KOReader 进度与高亮，失败要报给调用方。
 ---@param old_path string
 ---@param new_path string
+---@return boolean ok, string|nil err
 local function moveBookArtifacts(old_path, new_path)
     local old_cover = coverPath(old_path)
     if lfs.attributes(old_cover, "mode") == "file" then
-        os.rename(old_cover, coverPath(new_path))
+        local ok, err = os.rename(old_cover, coverPath(new_path))
+        if not ok then
+            require("utils.log").warn("book local cover move failed", old_cover, err)
+        end
     end
     local old_sdr = old_path .. ".sdr"
     if lfs.attributes(old_sdr, "mode") == "directory" then
-        os.rename(old_sdr, new_path .. ".sdr")
+        local ok, err = os.rename(old_sdr, new_path .. ".sdr")
+        if not ok then
+            require("utils.log").warn("book local sdr move failed", old_sdr, err)
+            return false, err
+        end
     end
+    return true
 end
 
 --- 从已打开的文档提取封面并落盘为 PNG；封面缓存独立于 books 元数据缓存。
@@ -342,6 +352,7 @@ end
 --- 目录遍历（最多 3 层），产出按路径排序的书籍文件列表。
 --- 根目录直属文件无分类无系列；一级子目录名 = 分类；二级子目录名 = 系列；更深忽略。
 --- 同步阻塞，只在子进程里跑。
+--- 任一目录列不出来就抛错：扫盘结果要按全量快照 reconcile，漏一个目录等于软删其中所有书。
 ---@param root string
 ---@return table[]
 local function scanFiles(root)
@@ -353,11 +364,7 @@ local function scanFiles(root)
     ---@param series string|nil 继承的系列（二级子目录名）
     ---@param depth number 当前层级，根为 1
     local function walk(dir, category, series, depth)
-        local iter_ok, iter, state = pcall(lfs.dir, dir)
-        if not (iter_ok and iter) then
-            return
-        end
-        for name in iter, state do
+        for name in lfs.dir(dir) do
             -- 跳过 . .. 及一切 . 前缀项（.moon 等隐藏目录/文件）
             if name:sub(1, 1) ~= "." then
                 local path = dir .. "/" .. name
@@ -654,8 +661,17 @@ function Client:moveBook(stable_id, category, series)
     if not moved then
         return nil, _("移动失败：") .. tostring(move_err)
     end
-    moveBookArtifacts(stable_id, new_path)
-    require("db.book").renameStableId(SOURCE_ID, stable_id, new_path, cat, ser)
+    local artifacts_ok, artifacts_err = moveBookArtifacts(stable_id, new_path)
+    if not artifacts_ok then
+        moveBookArtifacts(new_path, stable_id)
+        os.rename(new_path, stable_id)
+        return nil, _("移动失败：") .. tostring(artifacts_err)
+    end
+    if not require("db.book").renameStableId(SOURCE_ID, stable_id, new_path, cat, ser) then
+        moveBookArtifacts(new_path, stable_id)
+        os.rename(new_path, stable_id)
+        return nil, _("更新书籍身份失败")
+    end
     return new_path
 end
 
@@ -878,8 +894,9 @@ function Client:scanWebdavAsync(cb)
             local temp = self:webdavCacheRoot() .. "/.books.sync.upload"
             ensureParent(temp)
             local out = io.open(temp, "wb")
-            if not out then done(); return end
-            out:write(compressed); out:close()
+            local written = out and out:write(compressed)
+            local closed = out and out:close()
+            if not (written and closed) then os.remove(temp); done(); return end
             self.dav:ensurePathAsync(self:webdavPath() .. "/.Moon+", function(ok_dir)
                 if not ok_dir then os.remove(temp); done(); return end
                 self.dav:putFileAsync(self:webdavPath() .. "/.Moon+/books.sync", temp, function()
@@ -1110,8 +1127,13 @@ function Client:syncWebdavProgressAsync(identity, cb)
         local temp = self:webdavCacheRoot() .. "/.progress.upload"
         ensureParent(temp)
         local file = io.open(temp, "wb")
-        if not file then cb(false, "无法保存 WebDAV 阅读进度"); return end
-        file:write(encodeProgress(pos)); file:close()
+        local written = file and file:write(encodeProgress(pos))
+        local closed = file and file:close()
+        if not (written and closed) then
+            os.remove(temp)
+            cb(false, "无法保存 WebDAV 阅读进度")
+            return
+        end
         local path = self:webdavPath() .. "/.Moon+/Cache/" .. progressFileName(rel)
         active = self.dav:ensurePathAsync(self:webdavPath() .. "/.Moon+/Cache", function(ok_dir, dir_err)
             if not ok_dir then os.remove(temp); cb(false, dir_err); return end
@@ -1135,8 +1157,9 @@ end
 ---@param cb fun(scanned: boolean, err: string|nil, skipped: boolean|nil)
 ---@return { cancel: fun() }|nil
 function Client:autoScanAsync(cb)
-    if not self:validatePath() then
-        cb(false, "invalid local library path")
+    local path_ok, path_err = self:validatePath()
+    if not path_ok then
+        cb(false, path_err)
         return nil
     end
     if self:isWebdav() then

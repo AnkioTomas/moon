@@ -165,12 +165,6 @@ function P.logPath()
     return P.root() .. "/book.log"
 end
 
---- 拼音词库 SQLite 路径（文件名固定为 dictionary.sqlite3）。
----@return string
-function P.pinyinDictPath()
-    return P.imeDictPath("pinyin")
-end
-
 --- 中文输入法词库路径；拼音用 dictionary.sqlite3，其余 dictionary-<id>.sqlite3。
 ---@param id "pinyin"|"wubi"|"cangjie"|"zhuyin"
 ---@return string

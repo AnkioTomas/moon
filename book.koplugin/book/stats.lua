@@ -130,17 +130,27 @@ function Stats.onPage(snapshot)
     current.started_at = os.time()
 end
 
+--- 在飞推送令牌，键为 source.id。读行到 markSynced 之间没有占位，
+--- 关书推送与联网重推重叠会把同一批行各报一遍（微信时长直接翻倍）。
+---@type table<string, table>
+local pushing = {}
+
 --- 把本地待同步统计交给 Source，成功后只确认对应本地记录。
 --- 网络、节流、重试和上传时机全部由 Source 决定。
 --- 默认按本次读取的行 id 标记 sync_status=1；Source 若在结果里带 ``synced_ids``
 --- 则只确认这些行，其余保持待上传，等下一次重试——逐条上报的源部分失败时，
 --- 已上报的段不会被重复计时，未上报的段也不会被误确认。不删除历史统计。
+--- 同一源已有一批在飞时回 ``busy``，调用方按“本轮无可推”处理；在飞那一轮会循环推到空。
 ---@param source BookSource
----@param done fun(ok: boolean, result: any, confirmed: integer|nil)|nil result 为 Source 结果、empty 或错误
----@return table|nil job Source 返回的可取消任务；无待同步记录时为 nil
+---@param done fun(ok: boolean, result: any, confirmed: integer|nil)|nil result 为 Source 结果、empty、busy 或错误
+---@return table|nil job 可取消任务；无待同步记录或已有在飞时为 nil
 function Stats.push(source, done)
     if not source or type(source.pushStatsAsync) ~= "function" then
         if done then done(false, "unsupported") end
+        return
+    end
+    if pushing[source.id] then
+        if done then done(true, "busy") end
         return
     end
     local rows = StatsDB.unsyncedBySource(source.id, PUSH_BATCH)
@@ -150,9 +160,14 @@ function Stats.push(source, done)
     end
     local ids = {}
     for _, row in ipairs(rows) do ids[#ids + 1] = row.id end
+    local token = {}
+    local function release()
+        if pushing[source.id] == token then pushing[source.id] = nil end
+    end
 
     --- 处理 Source 上传结果；远端确认后再确认本地版本。
     local function onResult(result, err)
+        release()
         if not result then
             if done then done(false, err) end
             return
@@ -170,7 +185,12 @@ function Stats.push(source, done)
             if done then done(false, "failed to confirm reading stats") end
         end
     end
-    return source:pushStatsAsync(rows, onResult)
+    pushing[source.id] = token
+    local job = source:pushStatsAsync(rows, onResult)
+    return { cancel = function()
+        release()
+        if job and job.cancel then job:cancel() end
+    end }
 end
 
 --- 判断一条领域统计记录是否具备可持久化的最小字段。
