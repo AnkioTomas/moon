@@ -99,6 +99,7 @@ function Client:_getJson(path, cb)
         headers = Client.headers(self.token),
         allow_redirects = true,
         block_timeout = 60,
+        connect_timeout = 30,
     }, function(raw, err)
         cb(decodeWire(raw, err))
     end)
@@ -215,6 +216,7 @@ function Client:setCollectAsync(comic_id, collect, cb)
             headers = Client.headers(self.token),
             content_type = "application/x-www-form-urlencoded;charset=utf-8",
             timeout = 30,
+            connect_timeout = 30,
         },
         function(raw, err)
             cb(decodeWire(raw, err))
