@@ -52,6 +52,7 @@ local UI_FACES = {
 
 local _defaults = nil
 local _weread_cache = nil
+local _weread_fetched_at = 0
 local _registered_fonts = {}
 local findInstalledFont
 
@@ -230,7 +231,7 @@ local function normalizeWeread(raw_items)
     return out
 end
 
----@return MoonFontItem[]|nil
+---@return MoonFontItem[]|nil, integer|nil fetched_at
 local function readDiskWeread()
     local f = io.open(listCachePath(), "r")
     if not f then return nil end
@@ -245,7 +246,14 @@ local function readDiskWeread()
     if fetched > 0 and (os.time() - fetched) > LIST_TTL then
         return nil
     end
-    return normalizeWeread(data.items)
+    return normalizeWeread(data.items), fetched
+end
+
+---@param items MoonFontItem[]|nil
+---@param fetched_at integer|nil
+local function setMemoryWeread(items, fetched_at)
+    _weread_cache = items
+    _weread_fetched_at = fetched_at or os.time()
 end
 
 ---@param items MoonFontItem[]
@@ -279,16 +287,16 @@ end
 
 ---@param items MoonFontItem[]
 local function rememberWeread(items)
-    _weread_cache = items
+    setMemoryWeread(items)
     writeDiskWeread(items)
-    Cache.set(LIST_CACHE_KEY, { items = items }, LIST_TTL)
+    Cache.set(LIST_CACHE_KEY, { items = items, fetched_at = _weread_fetched_at }, LIST_TTL)
 end
 
 --- 同步列表：微信 + 设置目录 + 系统（不联网）。
 ---@return MoonFontItem[]
 function MoonFont.list()
     if not _weread_cache then
-        _weread_cache = readDiskWeread()
+        setMemoryWeread(readDiskWeread())
     end
     local settings, system = scanInstalledFonts()
     return merge(_weread_cache, settings, system)
@@ -375,20 +383,20 @@ function MoonFont.listAsync(force, cb)
 
     if force then
         fetchNet()
-    elseif _weread_cache then
+    elseif _weread_cache and os.time() - _weread_fetched_at <= LIST_TTL then
         finishWeread(_weread_cache)
     else
         cache_job = Cache.getAsync(LIST_CACHE_KEY, function(hit)
             if cancelled then return end
             if type(hit) == "table" and type(hit.items) == "table" then
-                _weread_cache = normalizeWeread(hit.items)
+                setMemoryWeread(normalizeWeread(hit.items), tonumber(hit.fetched_at))
                 writeDiskWeread(_weread_cache)
                 finishWeread(_weread_cache)
                 return
             end
-            local disk = readDiskWeread()
+            local disk, fetched_at = readDiskWeread()
             if disk then
-                _weread_cache = disk
+                setMemoryWeread(disk, fetched_at)
                 finishWeread(disk)
                 return
             end

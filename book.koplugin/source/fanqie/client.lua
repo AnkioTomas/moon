@@ -311,8 +311,9 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
                     detail_list[#detail_list + 1] = row
                 end
             end
-            if #detail_list == 0 then
-                cb(nil, "番茄书架详情失败")
+            -- 残缺列表交给 reconcile 会把缺席的在架书软删，只能整体失败。
+            if #detail_list < #shelf_book_ids then
+                cb(nil, "番茄书架详情不完整")
                 return
             end
             local result = { code = 0, data = { detail_list = detail_list } }

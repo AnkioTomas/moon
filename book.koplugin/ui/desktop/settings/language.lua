@@ -110,6 +110,7 @@ local function download(desktop, enable_after)
             timeout = 2,
         })
         if ok and enable_after then IME.setEnabled(true) end
+        if desktop.lifecycle.state == "Destroy" then return end
         desktop:updateView()
     end, function(stage, done_bytes, total, _idx, count)
         if stage == "assemble" then

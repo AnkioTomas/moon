@@ -539,6 +539,10 @@ local function applyChosenPos(ui, id, pos, pct, show_msg)
         end
         if target_idx ~= id.chapter_idx then
             if not require("ui.reader.session").gotoChapter(target_idx, { within = within }) then
+                require("ui/uimanager"):show(require("ui/widget/infomessage"):new{
+                    text = T(_("跳转到 %1 失败"), conflictLabel(pos, id)),
+                    timeout = 3,
+                })
                 return
             end
         else

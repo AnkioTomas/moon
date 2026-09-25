@@ -47,10 +47,11 @@ function Registry.meta(id)
         return nil
     end
     local ok, mod = pcall(fac)
-    if ok and mod and mod.meta then
-        return mod.meta()
+    if not ok then
+        logger.warn("book.source require failed", id, mod)
+        return nil
     end
-    return { id = id, name = id }
+    return mod.meta()
 end
 
 --- 列出数据源元信息。

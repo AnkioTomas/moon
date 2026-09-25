@@ -219,6 +219,17 @@ do
     Registry.create = original_create
 end
 
+-- 源模块加载失败：meta 不伪造，列表里不出现坏源。
+do
+    package.loaded["source.jdread"] = nil
+    package.preload["source.jdread"] = function() error("boom") end
+    Assert.is_nil(Registry.meta("jdread"))
+    for _, m in ipairs(Registry.list()) do
+        Assert.is_true(m.id ~= "jdread")
+    end
+    package.preload["source.jdread"] = nil
+end
+
 -- 清理 preload，避免污染后续用例
 for _, k in ipairs({
     "utils.settings",

@@ -42,7 +42,7 @@ local function cleanText(value)
     text = text:gsub("<%s*[bB][rR][^>]*>", "\n")
         :gsub("</%s*[pP]%s*>", "\n")
         :gsub("<[^>]->", "")
-    text = text:gsub("\r\n?", "\n")
+    text = Text.normalizeNewlines(text)
     local lines = {}
     for line in text:gmatch("[^\n]+") do
         line = Text.trim(line)

@@ -100,7 +100,7 @@ local function tocTitle(entry)
     if type(title) ~= "string" then
         return nil
     end
-    title = title:match("^%s*(.-)%s*$")
+    title = require("utils.text").trim(title)
     if title == "" then
         return nil
     end

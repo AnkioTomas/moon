@@ -14,6 +14,7 @@ local T = require("ffi/util").template
 ---@class BookSettingsReader
 local ReaderSettings = {}
 
+--- 设置页列表顺序；实际弹窗顺序以 HighlightMenu.order() 为准。
 ---@type { id: string, title: string, icon: string }[]
 local POPUP_BUTTONS = {
     { id = "select", title = _("选择"), icon = "highlight" },
@@ -61,23 +62,6 @@ local function readerToggle(desktop, reader, key, on, row)
     end
 end
 
----@param reader table
----@return string[]
-local function popupOrder(reader)
-    local out, seen = {}, {}
-    for _, key in ipairs(reader.reader_popup_button_order or {}) do
-        if not seen[key] then
-            out[#out + 1], seen[key] = key, true
-        end
-    end
-    for _, item in ipairs(POPUP_BUTTONS) do
-        if not seen[item.id] then
-            out[#out + 1], seen[item.id] = item.id, true
-        end
-    end
-    return out
-end
-
 ---@param desktop table
 ---@param item { id: string, title: string, icon: string }
 ---@return fun(width: number): table
@@ -85,7 +69,7 @@ local function popupConfigureRow(desktop, item)
     return function(iw)
         local reader = MoonSettings.get("reader")
         local buttons = reader.reader_popup_buttons or {}
-        local order = popupOrder(reader)
+        local order = require("ui.reader.highlight_menu").order()
         local position
         for i, key in ipairs(order) do
             if key == item.id then position = i break end
