@@ -257,6 +257,17 @@ function Handles:layout()
     self.hit_radius = m.hit
 end
 
+--- 选区到手柄的整宽横带，刷新只落在这里。
+---@return table|nil
+function Handles:region()
+    local first, last = Selection.screenBoxes(self.highlight)
+    if not first or not last or not self.anchors then
+        return nil
+    end
+    local top, bottom = Selection.band(first, last, self.anchors, metrics().radius)
+    return Geom:new{ x = 0, y = top, w = self.dimen.w, h = bottom - top }
+end
+
 function Handles:which(pos)
     return Selection.hit(self.anchors, pos, self.hit_radius)
 end
@@ -278,6 +289,7 @@ function Handles:drag(pos)
         self.menu_hidden = true
         Selection.hideMenu(self.highlight)
     end
+    local before = self:region()
     local moved = Selection.move(self.highlight, self.dragging, {
         x = pos.x + self.grab_dx,
         y = pos.y + self.grab_dy,
@@ -286,8 +298,9 @@ function Handles:drag(pos)
         return
     end
     self:layout()
-    UIManager:setDirty(self.highlight.dialog, "ui")
-    UIManager:setDirty(self, "ui")
+    local after = self:region()
+    -- 重绘阅读页会连带重绘上层叠层；只刷新旧/新选区横带的并集。
+    UIManager:setDirty(self.highlight.dialog, "ui", before and after and before:combine(after))
 end
 
 function Handles:endDrag()
@@ -296,8 +309,6 @@ function Handles:endDrag()
     self.fixed = nil
     self.menu_hidden = nil
     self.grab_dx, self.grab_dy = nil, nil
-    self:layout()
-    UIManager:setDirty(self, "ui")
     if hidden then
         Selection.showMenu(self.highlight)
     end
@@ -401,9 +412,11 @@ function Selection.hideMenu(highlight)
         return
     end
     dialog.tap_close_callback = nil
+    -- ButtonDialog 关闭默认 flashui，拖动起手会闪一下；拖动中改成普通 ui。
+    dialog.onCloseWidget = function() end
     highlight.highlight_dialog = nil
     highlight._book_menu_hidden = true
-    UIManager:close(dialog)
+    UIManager:close(dialog, "ui", dialog.movable.dimen)
 end
 
 --- 拖完后按新手柄位置重开菜单。
@@ -429,31 +442,34 @@ function Selection.raise(highlight)
     overlay._keep = true
     UIManager:close(overlay)
     overlay._keep = false
-    UIManager:show(overlay, "ui")
+    UIManager:show(overlay, "ui", overlay:region())
 end
 
 --- 划词菜单弹出后挂上手柄。已有标注或非触摸设备不挂。
+--- 挂上时负责刷新选区横带，调用方据此决定菜单是否只刷自身区域。
 ---@param highlight table|nil
 ---@param index number|nil
+---@return boolean attached
 function Selection.attach(highlight, index)
     if not highlight or index or not Device:isTouchDevice() or not Selection.enabled() then
-        return
+        return false
     end
     if not highlight.selected_text or not highlight.highlight_dialog then
-        return
+        return false
     end
     highlight._book_menu_index = index
     if highlight._book_handles then
         highlight._book_handles:layout()
         Selection.raise(highlight)
-        return
+        return true
     end
     local overlay = Handles:new{ highlight = highlight }
     if not overlay.anchors then
-        return
+        return false
     end
     highlight._book_handles = overlay
-    UIManager:show(overlay, "ui")
+    UIManager:show(overlay, "ui", overlay:region())
+    return true
 end
 
 --- 关掉手柄叠层。重复调用无副作用。
@@ -473,13 +489,6 @@ local function patchHighlight()
         return
     end
     ReaderHighlight._book_handles_patched = true
-
-    local orig_show = ReaderHighlight.onShowHighlightMenu
-    function ReaderHighlight:onShowHighlightMenu(index)
-        local result = orig_show(self, index)
-        Selection.attach(self, index)
-        return result
-    end
 
     local orig_clear = ReaderHighlight.clear
     function ReaderHighlight:clear(...)

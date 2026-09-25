@@ -179,8 +179,15 @@ local function patchShowMenu()
                 end
             end,
         }
-        UIManager:show(self.highlight_dialog, "[ui]")
-        require("ui.reader.selection").attach(self, index)
+        local dialog = self.highlight_dialog
+        -- 原生 "[ui]" 不带区域 = 整屏刷新；这里只刷菜单自身，"[ui]" 仍禁止合并（Sage 内核 alpha 混合 bug）。
+        UIManager:show(dialog, function()
+            return "[ui]", dialog.movable.dimen
+        end)
+        -- 没挂手柄时选区可能刚变（原生 extendSelection 不自刷），按原生刷整屏。
+        if not require("ui.reader.selection").attach(self, index) then
+            UIManager:setDirty(nil, "[ui]")
+        end
         return true
     end
 end
