@@ -311,6 +311,25 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(refreshed)
     Assert.is_true(render_writes > 0)
 
+    -- 在飞生成期间改配置：旧任务作废，新请求必须重开，不能被 already_running 吞掉。
+    local Image = require("ui.components.image")
+    local sync_await = Image.await
+    Image.await = function(_, cb)
+        require("ui/uimanager"):nextTick(cb)
+        return { cancel = function() end }
+    end
+    local first, second
+    Settings.setBackgroundMode("bing")
+    LockScreen.refresh(function(ok) first = ok end)
+    Settings.setBackgroundMode("cover")
+    Assert.eq(saved.screensaver_type, "cover", "改配置先撤下旧图")
+    LockScreen.refresh(function(ok) second = ok end)
+    Stubs.flush()
+    Image.await = sync_await
+    Assert.is_nil(first, "过期任务已被取消，不再回调")
+    Assert.is_true(second)
+    Assert.eq(saved.screensaver_type, "document_cover")
+
     online = false
     last_download.url = nil
     LockScreen.refresh()

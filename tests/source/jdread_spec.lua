@@ -226,6 +226,25 @@ do
     pending_adds = {}
 end
 
+-- dirty_only：云端加架成功但本地 markSynced 失败，不得计 pushed
+do
+    warnings = {}
+    pending_deletes = {}
+    pending_adds = { "99" }
+    package.loaded["db.book"].markSynced = function() return false end
+    fake_client.addToShelfAsync = function(_, _, cb)
+        cb({ ok = true })
+        return { cancel = function() end }
+    end
+    local src = Jdread.new()
+    local result
+    src:syncBooksAsync({ dirty_only = true }, function(r) result = r end)
+    Assert.eq(result.pushed, 0)
+    Assert.eq(warnings[1][1], "jdread shelf mark synced failed")
+    package.loaded["db.book"].markSynced = function() return true end
+    pending_adds = {}
+end
+
 do
     local prefetch_opts
     package.loaded["source.chapter"] = nil

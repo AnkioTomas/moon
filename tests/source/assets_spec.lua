@@ -80,3 +80,28 @@ do
     end)
     Assert.eq(html_out, sample)
 end
+
+-- 写盘失败：不返回 href、不留目标文件，下次同图仍会重写而不是复用半截文件。
+do
+    local md5 = require("ffi/sha2").md5
+    local data = "\137PNG\r\n\026\n" .. string.rep("w", 40)
+    local target = images_dir .. "/" .. md5(data) .. ".png"
+    os.remove(target)
+    local real_open = io.open
+    io.open = function(path, mode)
+        if mode == "wb" then
+            return { write = function() return nil, "disk full" end, close = function() return true end }
+        end
+        return real_open(path, mode)
+    end
+    local href = Assets.materializeImage(images_dir, data)
+    io.open = real_open
+    Assert.is_nil(href)
+    Assert.is_nil(io.open(target, "rb"))
+    Assert.is_nil(io.open(target .. ".part", "rb"))
+
+    Assert.eq(Assets.materializeImage(images_dir, data), "images/" .. md5(data) .. ".png")
+    local f = assert(io.open(target, "rb"))
+    Assert.eq(f:read("*a"), data)
+    f:close()
+end

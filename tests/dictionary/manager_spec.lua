@@ -3,11 +3,11 @@
 local Assert = require("support.assert")
 
 package.preload["json"] = function() return {} end
-local stream_handler
+local download_call
 package.preload["http.request"] = function()
     return {
-        stream = function(_, handlers)
-            stream_handler = handlers
+        download = function(opts, dest, cb)
+            download_call = { opts = opts, dest = dest, cb = cb }
             return { cancel = function() end }
         end,
     }
@@ -94,7 +94,7 @@ Manager.install(item, "/dict", function(ok, err)
 end, function(...)
     progress[#progress + 1] = { ... }
 end)
-Assert.is_true(Manager.downloading())
+Assert.is_true(Manager._downloading)
 Assert.is_nil(install_result)
 Assert.eq(progress[1][1], "part")
 Assert.eq(progress[1][2], 5)
@@ -103,37 +103,37 @@ Assert.eq(progress[2][1], "install")
 -- 安装 Job 被桩住不回调，手动复位在飞标记供后续用例。
 Manager._downloading = false
 
--- 未完成分片按实际接收字节上报进度，而不是等整片写完才跳格。
+-- 未完成分片走 Request.download，按实际接收字节上报进度，而不是等整片写完才跳格。
 part_present = false
 progress = {}
-local original_open, original_rename = io.open, os.rename
-io.open = function(path, mode)
-    if path == "/tmp/dict-xhzd.dl/xhzd.part.001.part" and mode == "wb" then
-        return {
-            write = function(_, data) return #data end,
-            close = function() return true end,
-        }
-    end
-    return original_open(path, mode)
-end
-os.rename = function(from, to)
-    if from == "/tmp/dict-xhzd.dl/xhzd.part.001.part"
-        and to == "/tmp/dict-xhzd.dl/xhzd.part.001" then
-        part_present = true
-        return true
-    end
-    return original_rename(from, to)
-end
 Manager.install(item, "/dict", function() end, function(...)
     progress[#progress + 1] = { ... }
 end)
-stream_handler.on_data("123")
+Assert.eq(download_call.dest, "/tmp/dict-xhzd.dl/xhzd.part.001")
+Assert.matches(download_call.opts.url, "/xhzd%.part%.001$")
+download_call.opts.on_progress(3)
 Assert.eq(progress[1][2], 3)
-stream_handler.on_data("45")
+download_call.opts.on_progress(5)
 Assert.eq(progress[2][2], 5)
-stream_handler.on_done(nil)
-io.open, os.rename = original_open, original_rename
+part_present = true
+download_call.cb(true)
+Assert.eq(progress[3][1], "part")
+Assert.eq(progress[4][1], "install")
 Manager._downloading = false
+
+-- 下载失败：删坏片、复位在飞标记并回调失败。
+part_present = false
+local failed
+local original_remove = os.remove
+local removed_part
+os.remove = function(path) removed_part = path; return true end
+Manager.install(item, "/dict", function(ok, err) failed = { ok, err } end)
+download_call.cb(false, "HTTP 404")
+os.remove = original_remove
+Assert.is_false(failed[1])
+Assert.eq(failed[2], "HTTP 404")
+Assert.eq(removed_part, "/tmp/dict-xhzd.dl/xhzd.part.001")
+Assert.is_false(Manager._downloading)
 
 target_mode = "link"
 Assert.is_false(Manager.isInstalled("/dict", "xhzd"))
@@ -152,7 +152,6 @@ Assert.eq(invalid_install[2], "invalid download directory")
 tmp_mode = "directory"
 target_mode = "directory"
 local removed_paths = {}
-local original_remove = os.remove
 os.remove = function(path)
     removed_paths[#removed_paths + 1] = path
     return true

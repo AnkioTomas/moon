@@ -68,6 +68,7 @@ end
 do
     local added = {}
     local opened
+    local fail_path
     local saved = {
         archiver_loaded = package.loaded["ffi/archiver"],
         archiver_preload = package.preload["ffi/archiver"],
@@ -89,7 +90,7 @@ do
                         setZipCompression = function() return true end,
                         addFileFromMemory = function(_, path, content)
                             added[#added + 1] = { path = path, content = tostring(content) }
-                            return true
+                            return path ~= fail_path
                         end,
                         close = function() end,
                         err = nil,
@@ -180,6 +181,25 @@ do
     end
     Assert.is_true(saw_chapter)
     Assert.is_true(saw_pack)
+
+    -- 关键条目写失败：必须报错，不能 rename 成品。
+    for _, path in ipairs({ "META-INF/container.xml", "OEBPS/content.opf", "OEBPS/toc.ncx" }) do
+        fail_path = path
+        local renamed = false
+        os.rename = function() renamed = true; return true end
+        got_ok, got_err = nil, nil
+        M.build({
+            dest = "/tmp/moon-test-html2epub.epub",
+            title = "测试书",
+            chapters = { { title = "第一章", html = "<p>x</p>" } },
+        }, function(ok, err)
+            got_ok, got_err = ok, err
+        end)
+        Stubs.flush()
+        Assert.is_nil(got_ok, path)
+        Assert.matches(tostring(got_err), "写入 epub 失败")
+        Assert.is_false(renamed, path)
+    end
 
     os.rename = old_rename
     os.remove = old_remove

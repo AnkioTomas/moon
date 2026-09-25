@@ -21,17 +21,7 @@ local T = require("ffi/util").template
 ---@class BookInsightRecords
 local Records = {}
 
---- 将秒数格式化为统计页短时长文案。
----@param seconds number|nil 阅读秒数。
----@return string
-local function formatSeconds(seconds)
-    local sec = math.floor(tonumber(seconds) or 0)
-    if sec <= 0 then return T(_("%1分钟"), 0) end
-    local hours = math.floor(sec / 3600)
-    local minutes = math.floor((sec % 3600) / 60)
-    if hours > 0 then return T(_("%1小时%2分钟"), hours, minutes) end
-    return T(_("%1分钟"), math.max(1, minutes))
-end
+local Catalog = require("book.catalog")
 
 --- 解析日历日期键。
 ---@param ymd string|nil YYYY-MM-DD 日期键。
@@ -222,7 +212,7 @@ function Records:build(state, width, avail_h)
     end
 
     local year_row, year_h = recordRow({
-        { value = formatSeconds(stats.year_seconds), label = _("今年总阅读时长") },
+        { value = Catalog.formatDuration(stats.year_seconds), label = _("今年总阅读时长") },
         { value = T(_("%1天"), stats.year_streak), label = _("今年连续阅读天数") },
     }, width, gap)
     push(year_row, year_h)
@@ -234,8 +224,8 @@ function Records:build(state, width, avail_h)
     push(streak_row, streak_h)
     push(VerticalSpan:new{ width = gap }, gap)
     local record_row, record_h = recordRow({
-        { value = formatSeconds(stats.week_record), label = _("每周记录") },
-        { value = formatSeconds(stats.day_record), label = _("每日记录") },
+        { value = Catalog.formatDuration(stats.week_record), label = _("每周记录") },
+        { value = Catalog.formatDuration(stats.day_record), label = _("每日记录") },
     }, width, gap)
     push(record_row, record_h)
     push(VerticalSpan:new{ width = gap }, gap)

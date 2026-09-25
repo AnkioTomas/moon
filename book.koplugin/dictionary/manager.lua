@@ -143,27 +143,34 @@ local function assembleAndExtract(item, dir, target)
     local archive = dir .. "/archive.part"
     local output = assert(io.open(archive, "wb"))
     local total = 0
+    local full_hash = sha256()
     for _, part in ipairs(item.parts) do
         local part_path = dir .. "/" .. part.file
         local file = assert(io.open(part_path, "rb"))
-        local data = file:read("*a")
+        local part_hash, part_size = sha256(), 0
+        while true do
+            local data, read_err = file:read(256 * 1024)
+            if not data then
+                assert(not read_err, read_err)
+                break
+            end
+            part_hash(data)
+            full_hash(data)
+            assert(output:write(data))
+            part_size = part_size + #data
+        end
         file:close()
-        if #data ~= tonumber(part.size) or sha256(data) ~= part.sha256 then
+        if part_size ~= tonumber(part.size) or part_hash() ~= part.sha256:lower() then
             output:close()
             os.remove(part_path)
             error("part sha256 mismatch: " .. part.file)
         end
-        assert(output:write(data))
-        total = total + #data
+        total = total + part_size
     end
     assert(output:close())
-    local archive_file = assert(io.open(archive, "rb"))
-    local archive_data = assert(archive_file:read("*a"))
-    archive_file:close()
-    if total ~= tonumber(item.size) or sha256(archive_data) ~= item.sha256 then
+    if total ~= tonumber(item.size) or full_hash() ~= item.sha256:lower() then
         error("dictionary sha256 mismatch")
     end
-    archive_data = nil
 
     local staging = target .. ".part"
     purge(staging)
@@ -200,54 +207,6 @@ local function assembleAndExtract(item, dir, target)
     if not has_ifo then purge(staging); error("archive contains no StarDict dictionary") end
     if lfs.symlinkattributes(target) then purge(staging); error("dictionary already installed") end
     assert(os.rename(staging, target))
-end
-
---- 把 HTTP body 增量写入临时文件，成功后原子改名；进度来自实际接收字节。
----@param url string
----@param dest string
----@param on_progress fun(bytes: number)
----@param cb fun(ok: boolean, err: any)
-local function downloadPart(url, dest, on_progress, cb)
-    local temp = dest .. ".part"
-    local file, open_err = io.open(temp, "wb")
-    if not file then
-        cb(false, open_err or "cannot open dictionary part")
-        return
-    end
-    local received, write_err = 0, nil
-    Request.stream({
-        url = url,
-        method = "GET",
-        timeout = 300,
-        allow_redirects = true,
-    }, {
-        on_data = function(chunk)
-            if write_err then return end
-            local wrote, err = file:write(chunk)
-            if not wrote then
-                write_err = err or "dictionary part write failed"
-                return
-            end
-            received = received + #chunk
-            on_progress(received)
-        end,
-        on_done = function(err)
-            local closed, close_err = file:close()
-            if err or write_err or not closed then
-                os.remove(temp)
-                cb(false, err or write_err or close_err or "dictionary part close failed")
-                return
-            end
-            os.remove(dest)
-            local moved, rename_err = os.rename(temp, dest)
-            if not moved then
-                os.remove(temp)
-                cb(false, rename_err or "dictionary part rename failed")
-                return
-            end
-            cb(true)
-        end,
-    })
 end
 
 --- 逐片下载（递归推进，串行；已完整的片直接跳过 = 续传），全部到位后转入解压安装。
@@ -289,13 +248,15 @@ local function downloadParts(item, dir, idx, completed, done, report)
         downloadParts(item, dir, idx + 1, completed, done, report)
         return
     end
-    downloadPart(
-        BASE_URL .. "/" .. part.file,
-        dir .. "/" .. part.file,
-        function(bytes)
+    Request.download({
+        url = BASE_URL .. "/" .. part.file,
+        method = "GET",
+        timeout = 300,
+        allow_redirects = true,
+        on_progress = function(bytes)
             report("part", completed + bytes, item.size, idx, #item.parts)
         end,
-        function(ok, err)
+    }, dir .. "/" .. part.file, function(ok, err)
         if not ok or not partComplete(dir, part) then
             os.remove(dir .. "/" .. part.file)
             Manager._downloading = false
@@ -333,12 +294,6 @@ function Manager.install(item, data_dir, cb, on_progress)
     Manager._downloading = true
     local report = on_progress or function() end
     downloadParts(item, dir, 1, 0, { data_dir = data_dir, callback = cb }, report)
-end
-
---- 当前是否有下载/安装任务在跑。
----@return boolean
-function Manager.downloading()
-    return Manager._downloading
 end
 
 --- 递归收集 `.ifo` 路径（StarDict 词典的标识文件）。跳过 `res`（词典自带资源目录，里面没有 .ifo）。

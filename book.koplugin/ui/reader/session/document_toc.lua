@@ -167,13 +167,7 @@ function DocumentToc.gotoIndex(ui, idx, opts)
         local page = math.max(start_page, math.min(end_page,
             math.floor(start_page + (end_page - start_page) * within + 0.5)))
         if type(document.getXPointerFromProportion) == "function" then
-            local ok, xptr = pcall(function()
-                local end_xptr = next_entry and next_entry.xpointer
-                if entry.xpointer and end_xptr and type(document.compareXPointers) == "function" then
-                    return entry.xpointer
-                end
-                return document:getPageXPointer(page)
-            end)
+            local ok, xptr = pcall(document.getPageXPointer, document, page)
             if ok and xptr and ui.rolling then
                 ui.rolling:onGotoXPointer(xptr)
                 return true

@@ -18,8 +18,7 @@ local T = require("ffi/util").template
 local ReaderBar = {}
 ---@return table|nil
 local function readerUi()
-    local ok, ReaderUI = pcall(require, "apps/reader/readerui")
-    return ok and ReaderUI.instance or nil
+    return require("apps/reader/readerui").instance
 end
 
 local function refreshReaderUi()

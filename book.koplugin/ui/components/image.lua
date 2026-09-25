@@ -42,6 +42,7 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("utils.log")
+local Text = require("utils.text")
 local UI = require("ui.components.bookui")
 local Download = require("ui.components.image.download")
 local ImageWidget = require("ui/widget/imagewidget")
@@ -106,7 +107,7 @@ end
 ---@return string
 local function truncFallback(fb)
     if #fb > 24 then
-        return fb:sub(1, 24) .. "…"
+        return Text.truncateUtf8(fb, 24) .. "…"
     end
     return fb
 end

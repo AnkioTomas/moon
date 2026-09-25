@@ -223,6 +223,33 @@ do
     pcall(real_remove, dest .. ".part")
 end
 
+-- max_bytes：超限立即断流（不再拉剩余 body），错误仍是超限而不是 cancelled。
+do
+    local original_stream = Request.stream
+    local dest = Config.dir() .. "/.moon/test_download_abort.bin"
+    local handlers, stream_cancelled
+    Request.stream = function(_, h)
+        handlers = h
+        return { cancel = function()
+            stream_cancelled = true
+            h.on_done("cancelled")
+        end }
+    end
+    local ok_d, err_d
+    Request.download({ url = "https://example.test/file", max_bytes = 6 }, dest, function(ok, err)
+        ok_d, err_d = ok, err
+    end)
+    handlers.on_headers(200, {})
+    handlers.on_data("payload")
+    Request.stream = original_stream
+
+    Assert.is_true(stream_cancelled)
+    Assert.is_false(ok_d)
+    Assert.eq(err_d, "download too large")
+    Assert.is_nil(io.open(dest, "rb"))
+    Assert.is_nil(io.open(dest .. ".part", "rb"))
+end
+
 -- ── SNI 补丁：turbo 握手前对域名补 SNI（无 SNI 时 Cloudflare 类主机直接挂起到超时）──
 do
     local UIManager = require("ui/uimanager")

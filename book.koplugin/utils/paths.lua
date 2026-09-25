@@ -32,18 +32,20 @@ local KIND_IMAGE = "image"
 
 --- 递归创建目录（已存在则跳过）
 ---@param path string|nil
+---@return boolean|nil ok, string|nil err 目录可用时为 true；创建失败返回 nil 与原因
 function P.ensureDir(path)
     if not path or path == "" then
-        return
+        return nil, "empty path"
     end
     if lfs.attributes(path, "mode") == "directory" then
-        return
+        return true
     end
     local parent = path:match("(.+)/[^/]+/?$")
     if parent and parent ~= "" and parent ~= path then
-        P.ensureDir(parent)
+        local ok, err = P.ensureDir(parent)
+        if not ok then return nil, err end
     end
-    lfs.mkdir(path)
+    return lfs.mkdir(path)
 end
 
 --- 源 id 用作目录名：只留安全字符；缺参直接失败（禁止猜活跃源）

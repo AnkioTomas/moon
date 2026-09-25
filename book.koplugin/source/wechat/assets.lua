@@ -7,6 +7,7 @@
 local Auth = require("source.wechat.auth")
 local Shared = require("source.assets")
 local Paths = require("utils.paths")
+local Text = require("utils.text")
 local logger = require("utils.log")
 
 local Assets = {}
@@ -98,7 +99,7 @@ local function downloadTarAsync(tar, referer, images_dir, cb)
         for _, entry in ipairs(tarEntries(raw)) do
             local href = Shared.materializeImage(images_dir, entry.data)
             if href then
-                local name = Shared.basename(entry.name)
+                local name = Text.basename(entry.name)
                 src_map[name] = href
                 local stem = name:gsub("%.[^%.]+$", "")
                 if stem ~= "" and stem ~= name then

@@ -23,18 +23,23 @@ local function le64(n)
     return table.concat(out)
 end
 
-local function uuid_iv()
+--- n 字节随机数：优先 /dev/urandom，读不到或不足 n 字节时退回 math.random。
+---@param n integer
+---@return string
+function Crypto.urandom(n)
     local f = io.open("/dev/urandom", "rb")
-    local raw
     if f then
-        raw = f:read(16)
+        local d = f:read(n)
         f:close()
+        if d and #d == n then return d end
     end
-    if not raw or #raw < 16 then
-        raw = ""
-        for _ = 1, 16 do raw = raw .. string.char(math.random(0, 255)) end
-    end
-    return (Aes.to_hex(raw):sub(1, 16))
+    local t = {}
+    for i = 1, n do t[i] = string.char(math.random(0, 255)) end
+    return table.concat(t)
+end
+
+local function uuid_iv()
+    return (Aes.to_hex(Crypto.urandom(16)):sub(1, 16))
 end
 
 ---@param device_id string|number

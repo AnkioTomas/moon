@@ -76,7 +76,7 @@ end
 
 --- 源私有定位字段序列化为 JSON；空表与非表一律存 NULL。
 ---@param extra table|nil
----@return string|nil
+---@return string|nil payload, any err 编码失败时 payload 为 nil、err 非空
 local function encodeExtra(extra)
     if not extra or next(extra) == nil then
         return nil
@@ -84,7 +84,7 @@ local function encodeExtra(extra)
     local ok, payload = pcall(JSON.encode, extra)
     if not ok then
         logger.warn("book.db progress extra encode failed", payload)
-        return nil
+        return nil, payload
     end
     return payload
 end
@@ -113,6 +113,11 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
             source_id, stable_id)) == 0 then
         return true
     end
+    -- extra 是源私有定位，丢了会让下次恢复落到错误位置，不能静默写 NULL 当成功。
+    local extra, extra_err = encodeExtra(pos.extra)
+    if extra_err then
+        return false
+    end
     if not Base.exec(
         [[INSERT INTO pending_progress
             (source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction,
@@ -131,7 +136,7 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
             sync_status=excluded.sync_status;]],
         source_id, stable_id, fraction, pos.chapter_idx, pos.chapter_title, pos.chapter_fraction,
         positiveInt(pos.page), positiveInt(pos.total_pages),
-        pos.locator, encodeExtra(pos.extra),
+        pos.locator, extra,
         tonumber(pos.updated_at) or (status == 0 and os.time() or 0), status
     ) then
         return false

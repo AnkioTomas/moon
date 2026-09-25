@@ -99,8 +99,8 @@ end
 
 ---@return string
 local function liveBattery()
-    local ok, Device = pcall(require, "device")
-    if not ok or not Device or not Device.hasBattery or not Device:hasBattery() or not Device.powerd then
+    local Device = require("device")
+    if not Device:hasBattery() then
         return ""
     end
     local pct = Device.powerd:getCapacity()
@@ -112,24 +112,16 @@ end
 
 ---@return string
 local function liveWifi()
-    local ok, NetworkMgr = pcall(require, "ui/network/manager")
-    if not ok or not NetworkMgr or not NetworkMgr.isWifiOn then
-        return ""
-    end
-    return NetworkMgr:isWifiOn() and _("Wi-Fi") or _("离线")
+    return require("ui/network/manager"):isWifiOn() and _("Wi-Fi") or _("离线")
 end
 
 ---@return string
 local function liveBrightness()
-    local ok, Device = pcall(require, "device")
-    if not ok or not Device or not Device.hasFrontlight or not Device:hasFrontlight() then
+    local Device = require("device")
+    if not Device:hasFrontlight() then
         return ""
     end
-    local powerd = Device.powerd
-    if not powerd or not powerd.frontlightIntensity then
-        return ""
-    end
-    local lvl = powerd:frontlightIntensity()
+    local lvl = Device.powerd:frontlightIntensity()
     if type(lvl) ~= "number" then
         return ""
     end

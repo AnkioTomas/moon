@@ -86,10 +86,11 @@ local function pushAdded(source, remote_ids, cb)
         end
     end
     return pushEach(source, missing, "addToShelfAsync", function(stable_id)
-        if not BookDB.markSynced(source.id, stable_id) then
-            logger.warn(source.id .. " shelf mark synced failed", stable_id)
+        if BookDB.markSynced(source.id, stable_id) then
+            return true
         end
-        return true
+        logger.warn(source.id .. " shelf mark synced failed", stable_id)
+        return false
     end, " shelf push failed", cb)
 end
 

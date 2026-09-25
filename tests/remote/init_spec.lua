@@ -10,6 +10,8 @@ local dirs = {
     [book] = true,
 }
 local files = {}
+--- 软链表：前缀 → 真实目标，realpath 按最长前缀替换。
+local links = {}
 
 package.preload["datastorage"] = function()
     return {
@@ -20,7 +22,13 @@ end
 package.preload["ffi/util"] = function()
     return {
         realpath = function(path)
-            return path ~= "" and path or nil
+            if path == "" then return nil end
+            for link, target in pairs(links) do
+                if path == link or path:sub(1, #link + 1) == link .. "/" then
+                    return target .. path:sub(#link + 1)
+                end
+            end
+            return path
         end,
         dirname = function(path)
             return path:match("(.+)/[^/]+$") or "/"
@@ -209,6 +217,16 @@ Assert.is_true(saved)
 Assert.is_nil(save_err)
 Assert.is_true(published)
 io.open, os.rename = original_open, original_rename
+
+-- .moon 软链到书籍根内（如外置卡）：realpath 后的凭证路径仍须被挡。
+Remote.stop()
+links[data .. "/.moon"] = book .. "/moon-sd"
+dirs[book .. "/moon-sd"] = true
+files[book .. "/moon-sd/settings/moon.lua"] = true
+Assert.is_true(Remote.start())
+Assert.is_nil(server_opts.handlers.resolve_download(data .. "/.moon/settings/moon.lua"))
+Assert.is_nil(server_opts.handlers.resolve_download(book .. "/moon-sd/settings/moon.lua"))
+links = {}
 
 Remote.stop()
 

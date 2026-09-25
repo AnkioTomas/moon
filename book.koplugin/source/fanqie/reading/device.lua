@@ -33,17 +33,7 @@ local PROFILE_TEMPLATE = {
     rom_version = "S643.217451.03386707",
 }
 
-local function urandom(n)
-    local f = io.open("/dev/urandom", "rb")
-    if f then
-        local d = f:read(n)
-        f:close()
-        if d and #d == n then return d end
-    end
-    local t = {}
-    for i = 1, n do t[i] = string.char(math.random(0, 255)) end
-    return table.concat(t)
-end
+local urandom = require("source.fanqie.reading.crypto").urandom
 
 local function uuid4()
     local raw = urandom(16)
