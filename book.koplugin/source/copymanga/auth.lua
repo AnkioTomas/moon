@@ -116,7 +116,7 @@ function Auth.loginAsync(username, password, cb)
         body = body,
         headers = headers,
         timeout = 30,
-        connect_timeout = 10,
+        connect_timeout = 30,
     }, function(res, err)
         if err then
             cb(nil, err)
