@@ -51,7 +51,6 @@ end
 
 local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, extra, updated_at, sync_status"
 
----@param value any
 ---@return integer|nil
 local function positiveInt(value)
     local n = tonumber(value)
@@ -90,7 +89,6 @@ local function encodeExtra(extra)
     return payload
 end
 
----@param payload any
 ---@return table|nil
 local function decodeExtra(payload)
     local ok, extra = pcall(JSON.decode, payload)
@@ -224,15 +222,6 @@ local function rows(result, nrows)
         }
     end
     return out
-end
-
----@param source_id string
----@return PendingProgress[]
-function ProgressDB.all(source_id)
-    return rows(Base.query(
-        "SELECT " .. COLUMNS .. " FROM pending_progress WHERE source_id=? ORDER BY updated_at ASC;",
-        source_id
-    ))
 end
 
 ---@param source_id string

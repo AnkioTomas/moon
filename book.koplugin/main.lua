@@ -51,7 +51,6 @@ local BookPlugin = WidgetContainer:extend {
 -- ── 生命周期事件 ─────────────────────────────────────
 
 --- 插件初始化：挂接 Host（菜单 / 开机打开等）与各增强模块
----@return nil
 function BookPlugin:init()
     if not require("ko_version").check() then
         return
@@ -73,7 +72,6 @@ function BookPlugin:init()
 end
 
 --- FM 显示时同步接管（避免 FileManager 先闪一帧）
----@return nil
 function BookPlugin:onShow()
     logger.dbg("book lifecycle show")
     Host.onShow(self)
@@ -101,7 +99,6 @@ end
 
 --- 主菜单回调（由 Host.registerMenu → registerToMainMenu 挂上）
 ---@param menu_items table KOReader 主菜单项表（就地写入）
----@return nil
 function BookPlugin:addToMainMenu(menu_items)
     menu_items.book_library = {
         text = _("月读"),
@@ -115,19 +112,16 @@ end
 --- 读 sidecar 前：把全书排版偏好写进本章 sidecar，由原生模块加载
 ---@param doc_settings table
 ---@param document table
----@return nil
 function BookPlugin:onDocSettingsLoad(doc_settings, document)
     require("book.reader_prefs").inject(doc_settings, document)
 end
 
 --- 阅读器就绪：建阅读会话；统计计时；拉进度；按章落点；挂阅读页
----@return nil
 function BookPlugin:onReaderReady()
     require("ui.reader.session").onReaderReady(self)
 end
 
 --- 关文档：推进度；结清统计；通知源；切章则保留会话，真关书才清
----@return nil
 function BookPlugin:onCloseDocument()
     logger.info("book lifecycle close_document")
     require("ui.reader.session").onCloseDocument(self)
@@ -148,7 +142,6 @@ function BookPlugin:onStartOfBook()
 end
 
 --- 休眠前：结清阅读状态，生成锁屏图，停远程服务，暂停桌面。
----@return nil
 function BookPlugin:onSuspend()
     logger.info("book lifecycle suspend")
     require("ui.reader.session").onPause(self)
@@ -159,7 +152,6 @@ function BookPlugin:onSuspend()
 end
 
 --- 唤醒：恢复阅读统计与后台服务；桌面在窗口栈上时自行收 Resume。
----@return nil
 function BookPlugin:onResume()
     logger.info("book lifecycle resume")
     require("ui.reader.session").onResume(self)
@@ -168,7 +160,6 @@ function BookPlugin:onResume()
 end
 
 --- 退出：停更新任务、远程服务，并销毁仍打开的桌面。
----@return nil
 function BookPlugin:onExit()
     logger.info("book plugin exit")
     require("update.init").onDestroy()
@@ -178,7 +169,6 @@ function BookPlugin:onExit()
 end
 
 --- 网络恢复：重试脏数据、通知源、刷新锁屏。
----@return nil
 function BookPlugin:onNetworkConnected()
     logger.info("book lifecycle network_connected")
     require("book.sync").retryDirtyAsync()
@@ -189,16 +179,13 @@ end
 
 --- 翻页（分页视图）：统计换页；分发 page_changed
 ---@param page number
----@return nil
 function BookPlugin:onPageUpdate(page)
     logger.dbg("book lifecycle page_update", page)
     require("ui.reader.session").onPageChanged(self, page)
 end
 
 --- 翻页（滚动视图）：统计换页；分发 page_changed
----@param _pos any
 ---@param page number|nil
----@return nil
 function BookPlugin:onPosUpdate(_pos, page)
     logger.dbg("book lifecycle pos_update", page)
     require("ui.reader.session").onPageChanged(self, page)
@@ -223,7 +210,6 @@ end
 ---@param event string
 ---@param payload table|nil
 ---@param source BookSource|nil 指定属主源；缺省取当前活跃源
----@return nil
 function BookPlugin:emitToSource(event, payload, source)
     source = source or self:getSource()
     if not source then
@@ -239,13 +225,11 @@ end
 
 --- 下载（如需）并打开书籍
 ---@param book Book
----@return nil
 function BookPlugin:openBook(book)
     Open.book(self, book)
 end
 
 --- 数据源切换后：通知桌面并让新源做桌面打开维护。
----@return nil
 function BookPlugin:onSourceChanged()
     local source = SourceRegistry.current()
     logger.info("book source changed", source and source.id or "unavailable")
@@ -256,7 +240,6 @@ function BookPlugin:onSourceChanged()
 end
 
 --- 打开月读全屏桌面
----@return nil
 function BookPlugin:openDesktop()
     -- 阅读中桌面宿主是 FileManager 实例：先退出阅读面板，再委托 FM 打开，
     -- 避免把全屏桌面叠在未关闭的阅读器上。

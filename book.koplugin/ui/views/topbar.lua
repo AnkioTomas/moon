@@ -65,7 +65,6 @@ setmetatable(TopBar, View)
 
 
 --- 按设置对齐孩子：该显示的创建，不该显示的拆掉。always 槽位必建。
----@return nil
 function TopBar:sync()
     if self.lifecycle.state == "Destroy" then return end
     for i = 1, #SLOTS do
@@ -93,7 +92,6 @@ end
 ---@param child BookTopBarItem|nil 要包装或接收事件的子控件
 ---@param method string 子组件上的方法名
 ---@param ... any 原样传给目标方法的参数
----@return nil
 local function notify(child, method, ...)
     if child and child[method] then child[method](child, ...) end
 end
@@ -102,7 +100,6 @@ end
 ---@param self BookTopBar 当前视图或布局实例
 ---@param method string 子组件上的方法名
 ---@param ... any 原样传给目标方法的参数
----@return nil
 local function broadcast(self, method, ...)
     for i = 1, #SLOTS do
         notify(self[SLOTS[i].id], method, ...)
@@ -125,7 +122,6 @@ end
 ---@param widget table|nil 参与布局或绘制的 Widget
 ---@param x number 目标区域左上角横坐标，单位像素
 ---@param th number 顶栏总高度，单位像素
----@return nil
 local function place(child, widget, x, th)
     child.rect = nil
     if not widget then return end
@@ -221,7 +217,6 @@ end
 
 --- 有壳就换自己那一槽；没壳等 Desktop:build。
 ---@param self BookTopBar 当前视图或布局实例
----@return nil
 local function install(self)
     local desktop = self.desktop
     if self.lifecycle.state == "Destroy" or not desktop or not desktop.lifecycle
@@ -262,20 +257,17 @@ function TopBar:updateView()
 end
 
 --- 创建：按设置建孩子并排好 UI。
----@return nil
 function TopBar:onCreate()
     self.host = not self.offscreen and self.desktop or nil
     self:build()
 end
 
 --- 恢复：通知孩子原地刷新（updateView）。
----@return nil
 function TopBar:onResume()
     broadcast(self, "onResume")
 end
 
 --- 暂停：只停正在 Resume 的孩子。
----@return nil
 function TopBar:onPause()
     for i = 1, #SLOTS do
         local child = self[SLOTS[i].id]
@@ -286,7 +278,6 @@ function TopBar:onPause()
 end
 
 --- 销毁：通知孩子释放引用。
----@return nil
 function TopBar:onDestroy()
     broadcast(self, "onDestroy")
     self.widget = nil
@@ -295,7 +286,6 @@ end
 --- 设置改顶栏项 / 换源：updateView（源名文案随活跃源变）。
 ---@param event string|table 父组件转发的事件名称或事件对象
 ---@param payload any 与事件一起传入的数据
----@return nil
 function TopBar:onEvent(event, payload)
     if self.lifecycle.state == "Destroy" then return end
     if event == "topbar_changed" or event == "source_changed" then

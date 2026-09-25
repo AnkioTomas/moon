@@ -53,10 +53,10 @@ Assert.eq(first.state, "Destroy")
 Assert.errors(function() first:onResume() end)
 Assert.eq(first.state, "Destroy")
 
--- 第二实例互不影响；dispatch 走同一套补全。
+-- 第二实例互不影响。
 Assert.eq(second.state, "new")
 calls = {}
-second:dispatch("Destroy")
+second:onDestroy()
 Assert.eq(table.concat(calls, ","), "Destroy")
 Assert.eq(second.state, "Destroy")
 
@@ -86,13 +86,10 @@ function owner:onCreate()
     count = count + 1
 end
 owner.lifecycle = Lifecycle.attach(owner)
-owner.lifecycle:dispatch("Create")
+owner:onCreate()
 Assert.eq(count, 1)
 Assert.eq(owner.state, data)
 Assert.is_true(owner.marker)
-owner.onResume = function() error("handler failure") end
-Assert.errors(function() owner.lifecycle:dispatch("Resume") end)
-Assert.eq(owner.lifecycle.state, "Resume")
 
 -- 直接调用覆写方法同样记录状态，保留参数、返回值与 owner 身份。
 local Direct = setmetatable({}, Lifecycle)
@@ -145,17 +142,13 @@ for _, stage in ipairs({ "new", "Create", "Resume", "Pause", "Destroy" }) do
     end
 end
 
--- Pause 取消 jobs / http；表被清空。
-local job_cancelled, http_cancelled = 0, 0
+-- Pause 取消 http；表被清空。
+local http_cancelled = 0
 local worker = Lifecycle:new()
-worker:addJob({ cancel = function() job_cancelled = job_cancelled + 1 end })
 worker:addHttp({ cancel = function() http_cancelled = http_cancelled + 1 end })
-Assert.eq(#worker.jobs, 1)
 Assert.eq(#worker.http, 1)
 worker:onPause()
-Assert.eq(job_cancelled, 1)
 Assert.eq(http_cancelled, 1)
-Assert.eq(#worker.jobs, 0)
 Assert.eq(#worker.http, 0)
 
 -- 组合模式：owner:onPause 取消的是 lifecycle 上的表。
@@ -184,21 +177,20 @@ named:onResume()
 Assert.eq(named.state, "Resume")
 
 -- new(init)：拷贝业务字段，不改写调用方表；框架字段覆盖 init 同名键。
-local seed = { desktop = "desk", state = "bogus", jobs = { "leak" }, http = { "leak" }, tag = 1 }
+local seed = { desktop = "desk", state = "bogus", http = { "leak" }, tag = 1 }
 local seeded = Lifecycle:new(seed)
 Assert.eq(seeded.desktop, "desk")
 Assert.eq(seeded.tag, 1)
 Assert.eq(seeded.state, "new")
-Assert.eq(#seeded.jobs, 0)
 Assert.eq(#seeded.http, 0)
 Assert.eq(seed.state, "bogus")
-Assert.eq(seed.jobs[1], "leak")
+Assert.eq(seed.http[1], "leak")
 Assert.is_nil(getmetatable(seed))
 
 -- 未走 bind 的实例自己 abortWork。
-local loose = setmetatable({ jobs = {}, http = {} }, Lifecycle)
-local loose_jobs = 0
-loose:addJob({ cancel = function() loose_jobs = loose_jobs + 1 end })
+local loose = setmetatable({ http = {} }, Lifecycle)
+local loose_http = 0
+loose:addHttp({ cancel = function() loose_http = loose_http + 1 end })
 loose:abortWork()
-Assert.eq(loose_jobs, 1)
-Assert.eq(#loose.jobs, 0)
+Assert.eq(loose_http, 1)
+Assert.eq(#loose.http, 0)

@@ -69,7 +69,6 @@ local function patchConnectFail()
 end
 
 --- buffer:len() / 已读字节是 FFI int64。stream 的增量路径会 math.min，cdata 直接炸。
----@param value any
 ---@return number|nil
 local function luaNumber(value)
     if value == nil then return nil end

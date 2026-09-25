@@ -11,7 +11,6 @@ local Mapper = {}
 
 local SOURCE_ID = "moon"
 
----@param value any
 ---@return number|nil
 local function percentNumber(value)
     if type(value) == "string" then
@@ -122,7 +121,6 @@ function Mapper.list(wire)
 end
 
 --- Moon 进度 wire → ProgressPosition
----@param wire any
 ---@return ProgressPosition|nil
 function Mapper.progress(wire)
     if wire == nil then

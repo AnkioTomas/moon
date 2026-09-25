@@ -75,7 +75,6 @@ local function cookieFrom(map, keys)
     local parts = {}
     --- 追加单个 Cookie 键值。
     ---@param k string
-    ---@param v any
     local function add(k, v)
         if type(v) == "string" and v ~= "" then
             parts[#parts + 1] = k .. "=" .. v
@@ -169,7 +168,6 @@ end
 
 --- 有效 vid：wr_vid 优先；空串在 Lua 里为真，不能让它遮蔽 user_id
 ---@param c table
----@return any
 local function vidOf(c)
     local vid = c.wr_vid
     if vid == nil or vid == "" then

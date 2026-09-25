@@ -45,7 +45,6 @@ local function candidates(lang)
 end
 
 --- 按 KOReader 当前语言加载翻译并合并进 gettext（同语言只做一次）
----@return nil
 function M.apply()
     local lang = GetText.current_lang or "C"
     if applied_for == lang then

@@ -29,32 +29,6 @@ do
 end
 
 do
-    local cover_id, cover_url
-    local result = Mapper.storeList({
-        data = {
-            total_count = 1,
-            product_search_infos = {{
-                product_id = 30533530,
-                product_name = "计算机网络",
-                author = "陈虹",
-                content_info = "简介",
-                logo = "https://example.test/store.jpg.dpg",
-                cate_third_names = { "网络通信", "教材" },
-            }},
-        },
-    }, function(id, url)
-        cover_id, cover_url = id, url
-    end)
-    Assert.eq(result.count, 1)
-    Assert.eq(result.data[1].stable_id, "30533530")
-    Assert.eq(result.data[1].title, "计算机网络")
-    Assert.eq(result.data[1].intro, "简介")
-    Assert.eq(result.data[1].category, "网络通信, 教材")
-    Assert.eq(cover_id, "30533530")
-    Assert.eq(cover_url, "https://example.test/store.jpg")
-end
-
-do
     local result = Mapper.shelfList({
         data = {
             books = {{

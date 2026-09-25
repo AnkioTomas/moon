@@ -126,25 +126,3 @@ do
     Assert.eq(pos.fraction, 0.77)
     Assert.is_true(math.abs(pos.chapter_fraction - 0.5) < 0.001)
 end
-
-do
-    local list = Mapper.searchList({
-        books = {
-            {
-                searchIdx = 1,
-                bookInfo = {
-                    bookId = "22946457",
-                    title = "围城",
-                    author = "钱钟书",
-                    cover = "http://x/c.jpg",
-                },
-            },
-        },
-        totalCount = 40,
-        hasMore = 1,
-    })
-    Assert.eq(#list.data, 1)
-    Assert.eq(list.data[1].stable_id, "22946457")
-    Assert.eq(list.data[1].title, "围城")
-    Assert.eq(list.data[1].authors, "钱钟书")
-end

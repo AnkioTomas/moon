@@ -63,7 +63,6 @@ end
 
 --- 居中显示 popout。
 ---@param widget table
----@return nil
 local function showCentered(widget)
     local size = widget.dimen or widget:getSize()
     UIManager:show(widget, nil, nil,
@@ -73,7 +72,6 @@ end
 
 --- 刷新语言按钮与译文。
 ---@param self BookTranslatePopup
----@return nil
 function TranslatePopup:refreshView()
     if self.source_btn then
         self.source_btn:setText(langButtonText(self, _("源语言"), self.source_lang, true))
@@ -95,7 +93,6 @@ end
 ---@param include_auto boolean
 ---@param current string|nil
 ---@param on_pick fun(code: string)
----@return nil
 function TranslatePopup:pickLanguage(title, include_auto, current, on_pick)
     --- 展示单选列表；常用语言页选中「全部语言」时递归展开完整列表。
     ---@param all_languages boolean 是否展示完整语言表
@@ -122,7 +119,6 @@ end
 
 --- 发起 Edge 翻译；重复调用会取消在途请求。
 ---@param self BookTranslatePopup
----@return nil
 function TranslatePopup:requestTranslate()
     if self.job and self.job.cancel then
         self.job.cancel()
@@ -233,7 +229,6 @@ function TranslatePopup:actionButtons()
 end
 
 ---@param self BookTranslatePopup
----@return nil
 function TranslatePopup:init()
     self.width = math.floor(math.min(Screen:getWidth(), Screen:getHeight()) * 0.88)
     local pad = Size.padding.default
@@ -357,7 +352,6 @@ end
 
 --- 关窗时取消在途翻译：不取消的话回调仍会往已关闭的 widget 上 setDirty，
 --- 并把整个弹窗（含原文与译文）挂在请求闭包里活到响应返回。
----@return nil
 function TranslatePopup:onCloseWidget()
     if self.job and self.job.cancel then
         self.job.cancel()

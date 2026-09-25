@@ -226,45 +226,6 @@ function Mapper.shelfList(shelf, on_cover)
     return Catalog.listResult(books)
 end
 
---- 搜索结果 wire → BookListResult。
----@param data table
----@param on_cover fun(stable_id: string, url: string)|nil
----@return BookListResult
-function Mapper.searchList(data, on_cover)
-    local books = {}
-    local list = data.books or data.list or data.parts
-        or (data.data and (data.data.books or data.data.list))
-        or {}
-    if #list == 0 and type(data.parts) == "table" then
-        for _, part in ipairs(data.parts) do
-            if type(part) == "table" and type(part.cards) == "table" then
-                for _, card in ipairs(part.cards) do
-                    list[#list + 1] = card
-                end
-            end
-        end
-    end
-    if #list == 0 and type(data.results) == "table" then
-        for _, group in ipairs(data.results) do
-            if type(group) == "table" and type(group.books) == "table" then
-                for _, row in ipairs(group.books) do
-                    list[#list + 1] = (type(row) == "table" and (row.bookInfo or row.book or row)) or row
-                end
-            end
-        end
-    end
-    for _, row in ipairs(list) do
-        local b, cover = Mapper.book(type(row) == "table" and (row.book or row) or row)
-        if b then
-            if cover and on_cover then
-                on_cover(b.stable_id, cover)
-            end
-            books[#books + 1] = b
-        end
-    end
-    return Catalog.listResult(books)
-end
-
 --- 章节列表 wire → BookChapter[]。
 ---@param data table
 ---@param bookId string
@@ -343,7 +304,6 @@ function Mapper.chapters(data, bookId)
 end
 
 --- 章内偏移：微信 wire 为 0..10000，其它源可能已是 0..1。
----@param raw any
 ---@return number|nil
 local function normalizeChapterOffset(raw)
     local n = tonumber(raw)

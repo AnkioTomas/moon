@@ -122,15 +122,6 @@ end
 
 do
     local wire, err
-    client:recommendAsync("30451107", function(value, e) wire, err = value, e end)
-    local req = requests[#requests]
-    Assert.is_nil(err)
-    Assert.eq(wire.data[1].ebook_id, 4)
-    Assert.matches(req.url, "/jdread/api/ebook/30451107/recommend%?")
-end
-
-do
-    local wire, err
     client:addToShelfAsync("30533530", function(value, e) wire, err = value, e end)
     local req = requests[#requests]
     Assert.is_nil(err)

@@ -133,7 +133,6 @@ end
 
 --- 应用书名搜索。
 ---@param value string|nil 当前设置项的值
----@return nil
 function Library:applySearch(value)
     self.filter = value and value ~= "" and { search = value } or {}
     self.page = 1
@@ -145,7 +144,6 @@ end
 --- 打开书籍详情。
 ---@param ctx table 构建上下文
 ---@param book Book
----@return nil
 local function openDetail(ctx, book)
     if ctx.desktop then
         require("ui.desktop.detail").open(ctx.desktop, ctx.desktop.tab == "store" and "store" or "library", book)
@@ -154,7 +152,6 @@ end
 
 --- 清除当前封面的打开中条。
 ---@param library BookLibrary
----@return nil
 local function clearOpening(library)
     local cover, bar = library._opening_cover, library._opening_bar
     library._opening_cover, library._opening_bar = nil, nil
@@ -282,7 +279,6 @@ local function buildGrid(ctx, books, m, on_open, show_status)
     local grid_used = 0
 
     --- 冲刷当前行进网格。
-    ---@return nil
     local function flushRow()
         if row_n > 0 then
             table.insert(grid, VerticalSpan:new{ width = row_gap })
@@ -434,7 +430,6 @@ function Library:build(ctx, state, opts)
 
     --- 空态/加载占位。
     ---@param msg string 需要显示的提示文字
-    ---@return nil
     local function placeholder(msg)
         local ph = math.max(1, h - band_h - used)
         table.insert(kids, CenterContainer:new{
@@ -475,12 +470,10 @@ function Library:build(ctx, state, opts)
 end
 
 --- 异步拉取图书馆列表。
----@return nil
 function Library:fetch()
     --- 写入图书馆状态并重建。
     ---@param books table|nil 按展示顺序排列的书籍列表
     ---@param err string|nil 操作失败的原因
-    ---@return nil
     local function done(books, err)
         if self.desktop.lifecycle.state == "Destroy" or self.desktop.tab ~= "library" then
             return
@@ -573,7 +566,6 @@ end
 
 --- 跳转到指定页并重建。
 ---@param page number 当前页码，从 1 开始
----@return nil
 function Library:gotoPage(page)
     local pages = self:pages()
     page = math.max(1, math.min(pages, tonumber(page) or 1))
@@ -588,7 +580,6 @@ function Library:gotoPage(page)
 end
 
 --- 手动强制刷新书库；具体动作由当前源决定（本地源扫盘，远端源拉全量）。
----@return nil
 function Library:rescan()
     local source = self.desktop.source
     if not source or not source.syncBooksAsync then return end
@@ -598,7 +589,6 @@ function Library:rescan()
 end
 
 --- 清除全部筛选条件。
----@return nil
 function Library:clearFilters()
     self.filter = {}
     self.page = 1
@@ -610,11 +600,9 @@ end
 --- 弹出搜索输入框。
 ---@param on_apply fun(query: string)|nil
 ---@param initial_query string|nil 搜索框初始文字
----@return nil
 function Library:showSearch(on_apply, initial_query)
     --- 提交搜索词；调用方没给 on_apply 时落到书库的独占搜索筛选。
     ---@param query string 搜索词，空串表示清除
-    ---@return nil
     local function apply(query)
         if on_apply then
             on_apply(query)
@@ -688,7 +676,6 @@ function Library:updateView()
 end
 
 --- 仅取消本实例当前的列表查询，并清空请求句柄。
----@return nil
 function Library:cancel()
     if self.fetch_cancel then
         self.fetch_cancel:cancel()
@@ -701,7 +688,6 @@ function Library:cancel()
 end
 
 --- 取消旧查询并清除筛选、分页及列表缓存。
----@return nil
 function Library:reset()
     self:cancel()
     self.filter = {}
@@ -711,19 +697,16 @@ function Library:reset()
 end
 
 --- 取消图书馆实例的在飞查询，避免离开页面后旧结果继续更新界面。
----@return nil
 function Library:onCancel()
     self:cancel()
 end
 
 --- 取消图书馆实例的在飞查询，避免离开页面后旧结果继续更新界面。
----@return nil
 function Library:onPause()
     self:cancel()
 end
 
 --- 取消图书馆实例的在飞查询，避免离开页面后旧结果继续更新界面。
----@return nil
 function Library:onDestroy()
     self:cancel()
 end
@@ -731,7 +714,6 @@ end
 --- 处理换源重置和左右滑动分页，忽略不属于图书馆的事件。
 ---@param event string 父组件转发的事件名称或事件对象
 ---@param payload table|nil 与事件一起传入的数据
----@return nil
 function Library:onEvent(event, payload)
     if event == "source_changed" then
         self:reset()

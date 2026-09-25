@@ -473,16 +473,6 @@ function BookDB.markReadComplete(source_id, stable_id)
         source_id, stable_id) ~= nil
 end
 
---- 清掉指向某文件的 path 登记
----@param path string
----@return boolean
-function BookDB.clearPath(path)
-    return Base.exec(
-        [[UPDATE books SET path=NULL WHERE path=?;]],
-        path
-    ) ~= nil
-end
-
 --- 清掉某目录下全部 path 登记
 ---@param dir string
 ---@return boolean
@@ -494,23 +484,6 @@ function BookDB.clearPathsUnder(dir)
         [[UPDATE books SET path=NULL WHERE path LIKE ? ESCAPE '\';]],
         dir:gsub("([%%_\\])", "\\%1") .. "/%"
     ) ~= nil
-end
-
---- 全部已登记路径
----@return { source_id: string, stable_id: string, path: string }[]
-function BookDB.pathsAll()
-    local result, nrows = Base.query([[SELECT source_id, stable_id, path FROM books WHERE path IS NOT NULL;]])
-    local out = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            out[#out + 1] = {
-                source_id = result[1][i],
-                stable_id = result[2][i],
-                path = result[3][i],
-            }
-        end
-    end
-    return out
 end
 
 --- 按 (source_id, md5) 找已入库的行
@@ -899,18 +872,6 @@ function BookDB.setToc(source_id, stable_id, payload)
             toc=excluded.toc,
             toc_fetched_at=excluded.toc_fetched_at;]],
         source_id, stable_id, payload, os.time()
-    ) ~= nil
-end
-
---- 删除书籍目录缓存。
----@param source_id string
----@param stable_id string
----@return boolean
-function BookDB.clearToc(source_id, stable_id)
-    return Base.exec(
-        [[UPDATE books SET toc=NULL, toc_fetched_at=0
-          WHERE source_id=? AND stable_id=?;]],
-        source_id, stable_id
     ) ~= nil
 end
 

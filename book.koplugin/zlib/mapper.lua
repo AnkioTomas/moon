@@ -31,7 +31,6 @@ function Mapper.parse(stable_id)
 end
 
 --- 只接受可直接请求的 HTTP(S) 封面地址。
----@param value any
 ---@return string|nil
 local function coverUrl(value)
     return type(value) == "string" and value:match("^https?://") and value or nil

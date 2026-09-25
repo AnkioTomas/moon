@@ -126,7 +126,6 @@ local CHALLENGE_MARKERS = {
 }
 
 --- 判断响应体是否为 WAF 或浏览器验证页，而非 eAPI JSON。
----@param body any
 ---@return boolean
 local function looksLikeChallenge(body)
     if type(body) ~= "string" or body == "" then return false end
@@ -140,7 +139,6 @@ end
 
 --- 传输层错误分类（Turbo res.error.code / message）
 ---@param res table|nil
----@param err any
 ---@return string
 local function classifyTransportError(res, err)
     local err_obj = res and res.error
@@ -201,7 +199,6 @@ function Client:headers(with_session)
 end
 
 --- 解码 eAPI JSON 响应。
----@param body any
 ---@return table|nil data
 ---@return string|nil err
 local function decode(body)

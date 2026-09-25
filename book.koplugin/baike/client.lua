@@ -26,7 +26,6 @@ function Client.url(word)
         .. Text.urlEncode(Text.trim(word))
 end
 
----@param value any
 ---@return string
 local function cleanText(value)
     if type(value) == "table" then

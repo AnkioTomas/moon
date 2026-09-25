@@ -35,7 +35,6 @@ function Sync.runAsync(source, opts, cb)
         opts.dirty_only and "dirty_only" or "full")
     --- 终结整次编排并回调汇总；已取消时静默丢弃。
     ---@param value table|nil nil 表示某个域失败
-    ---@param err any
     local function finish(value, err)
         logger.dbg("book.perf sync", sync_id, Perf.elapsedMs(started_at), "ms",
             source and source.id or "unavailable")
@@ -107,7 +106,6 @@ end
 
 --- 网络恢复时只重试有本地脏数据的源：本地优先 push，不做全量 pull。
 --- 书架 dirty_only = 只推删/加；进度/笔记由编排层强制 dirty_only；统计 dirty_only 只推。
----@return nil
 function Sync.retryDirtyAsync()
     local Registry = require("source.registry")
     local BookDB = require("db.book")

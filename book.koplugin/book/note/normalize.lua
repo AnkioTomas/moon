@@ -34,7 +34,6 @@ function Normalize.clean(items, total_pages)
 end
 
 --- 解包持久化快照：权威快照为 `{ items, authoritative }`，否则为裸数组。
----@param value any
 ---@return table[]
 ---@return boolean
 function Normalize.unpack(value)

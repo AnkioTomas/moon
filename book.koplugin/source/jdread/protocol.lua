@@ -122,7 +122,6 @@ local function hexDecode(hex)
     end))
 end
 
----@param value any
 ---@return string
 local function scalar(value)
     if value == nil then return "" end

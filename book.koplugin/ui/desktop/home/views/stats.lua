@@ -195,7 +195,6 @@ function M:createWidget()
 end
 
 --- 重新查询所属源统计，原地更新三个数值并刷新内容区域。
----@return nil
 function M:updateView()
     if not self.values then return end
     local source = self.ctx and self.ctx.source
@@ -207,13 +206,11 @@ function M:updateView()
 end
 
 --- 恢复显示时刷新阅读统计数值。
----@return nil
 function M:onResume()
     self:updateView()
 end
 
 --- 清除统计文字控件及桌面引用。
----@return nil
 function M:onDestroy()
     self.desktop = nil
     self.region = nil

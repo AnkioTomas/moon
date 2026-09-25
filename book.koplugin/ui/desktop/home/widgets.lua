@@ -30,7 +30,6 @@ function M.defaults()
     return out
 end
 
----@param height any
 ---@return "default"|"fill"|number
 local function normalizeHeight(height)
     if height == "fill" or height == "default" then return height end
@@ -40,7 +39,6 @@ local function normalizeHeight(height)
 end
 
 --- 净化放置表：合法 id、去重、页/序规范化。
----@param raw any
 ---@param find fun(id: string): any
 ---@return BookHomeWidgetPlacement[]
 function M.sanitize(raw, find)

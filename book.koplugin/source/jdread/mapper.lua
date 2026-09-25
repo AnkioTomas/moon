@@ -11,7 +11,6 @@ local Text = require("utils.text")
 local Mapper = {}
 local SOURCE_ID = "jdread"
 
----@param value any
 ---@return string|nil
 local function coverUrl(value)
     if type(value) ~= "string" or value == "" then return nil end
@@ -65,24 +64,6 @@ function Mapper.shelfList(wire, on_cover)
         end
     end
     return Catalog.listResult(books, root.total or root.total_count)
-end
-
---- 京东书城搜索 / 推荐 wire → BookListResult。
----@param wire table
----@param on_cover fun(stable_id: string, url: string)|nil
----@return BookListResult
-function Mapper.storeList(wire, on_cover)
-    local root = type(wire.data) == "table" and wire.data or wire
-    local rows = root.product_search_infos or root.items or root
-    local books = {}
-    for _, row in ipairs(rows) do
-        local book, cover = Mapper.book(row)
-        if book then
-            if cover and on_cover then on_cover(book.stable_id, cover) end
-            books[#books + 1] = book
-        end
-    end
-    return Catalog.listResult(books, root.total_count)
 end
 
 --- 新阅读器目录 /jdread/api/ebook/catalog/{id} → BookChapter[]。

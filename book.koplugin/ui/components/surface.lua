@@ -34,7 +34,6 @@ end
 ---@param bb table 目标 Blitbuffer
 ---@param x number 左上角横坐标
 ---@param y number 左上角纵坐标
----@return nil
 function RoundedClip:paintTo(bb, x, y)
     self[1]:paintTo(bb, x, y)
     local w, h, r = self.dimen.w, self.dimen.h, self.radius

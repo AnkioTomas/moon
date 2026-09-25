@@ -24,8 +24,6 @@ local function isChapter(identity)
     return identity ~= nil and identity.chapter_idx ~= nil
 end
 
----@param value any
----@return any
 local function copyValue(value)
     if type(value) ~= "table" then
         return value
@@ -59,8 +57,6 @@ local function decode(raw)
     return ok and type(value) == "table" and value or nil
 end
 
----@param id any
----@param face any
 ---@return boolean
 local function idMatchesFace(id, face)
     if type(id) ~= "string" or id == "" or type(face) ~= "string" or face == "" then

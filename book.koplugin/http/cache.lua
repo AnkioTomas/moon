@@ -91,9 +91,7 @@ end
 
 --- 写入缓存；ttl<=0 或 value 无法 JSON 编码则跳过。
 ---@param key string
----@param value any
 ---@param ttl number 存活秒数
----@return nil
 function Cache.set(key, value, ttl)
     ttl = tonumber(ttl) or 0
     if ttl <= 0 or value == nil or key == nil or key == "" then
@@ -114,7 +112,6 @@ end
 
 --- 清空全部缓存；传 url_substr 则只失效 key 含该子串的条目。
 ---@param url_substr string|nil
----@return nil
 function Cache.clear(url_substr)
     local HttpDB = require("db.http")
     local ok, err = HttpDB.clear(url_substr)

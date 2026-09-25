@@ -29,7 +29,6 @@ local function readerUi()
     return ok and ReaderUI.instance or nil
 end
 
----@return nil
 local function refreshReaderUi()
     local ui = readerUi()
     if ui and ui.dialog then
@@ -38,7 +37,6 @@ local function refreshReaderUi()
 end
 
 ---@param desktop table
----@return nil
 local function refresh(desktop)
     refreshReaderUi()
     desktop:updateView()

@@ -67,7 +67,6 @@ local Perspective = WidgetContainer:extend{}
 ---@param bb BlitBuffer 目标画布
 ---@param x integer 目标左上角横坐标
 ---@param y integer 目标左上角纵坐标
----@return nil
 function Perspective:paintTo(bb, x, y)
     self[1]:paintTo(bb, x, y)
     bb:lightenRect(x, y, self.dimen.w, self.dimen.h)
@@ -82,7 +81,6 @@ end
 
 --- 空书架点击后进入图书馆，同时清除旧筛选和分页状态。
 ---@param desktop BookDesktop|nil 所属桌面；离屏视图没有桌面时不执行跳转
----@return nil
 local function openLibrary(desktop)
     if not desktop or not desktop.switchTab then return end
     if desktop.library then
@@ -96,7 +94,6 @@ end
 --- 有插件实例时直接打开书籍，否则通过桌面展示书籍详情。
 ---@param ctx BookDesktopCtx 构建上下文，提供插件或桌面入口
 ---@param book Book 要打开的书籍
----@return nil
 local function openBook(ctx, book)
     local plugin = ctx.plugin or (ctx.desktop and ctx.desktop.plugin)
     if plugin then
@@ -276,7 +273,6 @@ end
 --- 移动焦点并重建内容区域；无书或单本时不触发刷新。
 ---@param self BookHomeRecentCards 拥有焦点与布局上下文的视图实例
 ---@param delta integer -1 上一本，1 下一本；首尾循环
----@return nil
 local function shiftFocus(self, delta)
     local n = self._book_n or 0
     if n <= 1 or not self.ctx or not self.opts then return end
@@ -447,13 +443,11 @@ function M:createWidget()
 end
 
 --- 恢复显示时更新最近阅读数据和封面布局。
----@return nil
 function M:onResume()
     if self.widget then self:rebuild() end
 end
 
 --- 通知封面子树暂停在飞图片任务。
----@return nil
 function M:onPause()
     if self.content_widget then
         self.content_widget:handleEvent(Event:new("HomePause"))
@@ -462,7 +456,6 @@ function M:onPause()
 end
 
 --- 清除内容引用，Widget 的释放由 View 负责。
----@return nil
 function M:onDestroy()
     self.content_widget = nil
     self.region = nil

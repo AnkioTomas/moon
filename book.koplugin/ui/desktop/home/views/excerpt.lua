@@ -76,7 +76,6 @@ function M:createWidget()
 end
 
 --- 恢复显示时重新抽取书摘并更新引言区域。
----@return nil
 function M:onResume()
     if not self.parts then return end
     self.parts:updateView(self:sample())
@@ -84,7 +83,6 @@ function M:onResume()
 end
 
 --- 清除引言实例、书籍身份及桌面引用。
----@return nil
 function M:onDestroy()
     self.parts = nil
     self.desktop = nil

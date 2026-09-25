@@ -43,25 +43,6 @@ local function toRunes(str)
     return runes
 end
 
----@param range_str string
----@return integer|nil start 1-based inclusive
----@return integer|nil stop 1-based inclusive
-local function parseRange(range_str)
-    if type(range_str) ~= "string" then
-        return nil
-    end
-    local a, b = range_str:match("^(%d+)%-(%d+)$")
-    if not a then
-        return nil
-    end
-    local start_pos = tonumber(a) + 1
-    local end_exclusive = tonumber(b) + 1
-    if not start_pos or not end_exclusive or end_exclusive <= start_pos then
-        return nil
-    end
-    return start_pos, end_exclusive - 1
-end
-
 local BLOCK_TAGS = {
     address = true, article = true, aside = true, blockquote = true,
     div = true, dl = true, fieldset = true, figcaption = true, figure = true,
@@ -620,63 +601,6 @@ function Annotations.toWireRange(wire_html, local_html, needle, pos0, pos1)
         return nil, "wire highlight verification failed"
     end
     return string.format("%d-%d", wire.starts[wire_head], wire.ends[wire_tail])
-end
-
---- 取 wire range 覆盖的规范化可见文本，供请求发送前后验证。
----@param html string
----@param range_str string
----@return string|nil
-function Annotations.textAtWireRange(html, range_str)
-    local start_pos, stop_pos = parseRange(range_str)
-    if not start_pos then
-        return nil
-    end
-    local mapping = Annotations.wireMapping(html)
-    local out = {}
-    local start_zero, end_exclusive = start_pos - 1, stop_pos
-    for i = 1, mapping.count do
-        if mapping.starts[i] >= start_zero and mapping.ends[i] <= end_exclusive then
-            out[#out + 1] = mapping.runes[i]
-        end
-    end
-    return #out > 0 and table.concat(out) or nil
-end
-
---- 在章节可见正文中定位高亮原文，返回可见文本 0-based 半开区间偏移。
--- 仅用于上传统计时给本地划线补一个近似 ``range``；与微信原始 HTML 索引不同。
----@param html string
----@param needle string
----@return string|nil
-function Annotations.findRange(html, needle)
-    needle = tostring(needle or "")
-    if needle == "" then
-        return nil
-    end
-    local haystack = Annotations.plainBodyRunes(html)
-    local want = countRunes(needle)
-    if want == 0 or want > #haystack then
-        return nil
-    end
-    -- 可见文本里按 rune 计偏移：拼成整串交给 find，命中后换算 rune 序号。
-    local rune_at_byte = {}
-    local byte_pos = 1
-    for i = 1, #haystack do
-        rune_at_byte[byte_pos] = i
-        byte_pos = byte_pos + #haystack[i]
-    end
-    local text = table.concat(haystack)
-    local at = 1
-    while true do
-        local hit = text:find(needle, at, true)
-        if not hit then
-            return nil
-        end
-        local head = rune_at_byte[hit]
-        if head and head + want - 1 <= #haystack then
-            return string.format("%d-%d", head - 1, head - 1 + want)
-        end
-        at = hit + 1
-    end
 end
 
 return Annotations

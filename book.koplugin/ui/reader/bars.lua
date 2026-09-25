@@ -130,7 +130,6 @@ end
 --- 设置系统顶栏开/关（同步 configurable + crengine，与 Aa 菜单一致）。
 ---@param ui table|nil
 ---@param enabled boolean
----@return nil
 function Bars.setSystemTop(ui, enabled)
     ui = ui or Bars.ui
     if not ui or not ui.rolling or not ui.document or not ui.handleEvent then
@@ -204,7 +203,6 @@ end
 --- 写入顶栏偏好，并在阅读中时立即应用。
 ---@param enabled boolean
 ---@param ui table|nil
----@return nil
 function Bars.setTopBarPreference(enabled, ui)
     local MoonSettings = require("utils.settings")
     local settings = MoonSettings.get()
@@ -219,7 +217,6 @@ end
 --- 写入底栏偏好，并在阅读中时立即应用。
 ---@param enabled boolean
 ---@param ui table|nil
----@return nil
 function Bars.setBottomBarPreference(enabled, ui)
     local MoonSettings = require("utils.settings")
     local settings = MoonSettings.get()
@@ -243,23 +240,8 @@ function Bars.replaceBottomBar()
     return require("ui.reader.bars.layout").replace("bottom")
 end
 
---- 写入顶栏替代开关。
----@param on boolean
----@return nil
-function Bars.setReplaceTopBar(on)
-    require("ui.reader.bars.layout").setReplace("top", on)
-end
-
---- 写入底栏替代开关。
----@param on boolean
----@return nil
-function Bars.setReplaceBottomBar(on)
-    require("ui.reader.bars.layout").setReplace("bottom", on)
-end
-
 --- 按 Book 设置同步系统顶底栏。
 ---@param ui table|nil
----@return nil
 function Bars.applyPreferences(ui)
     ui = ui or Bars.ui
     if not ui then
@@ -421,7 +403,6 @@ end
 
 --- 底栏文字颜色（跟 footer_text）。
 ---@param ui table|nil
----@return any
 local function bottomTextColor(ui)
     ui = ui or Bars.ui
     local footer = ui and ui.view and ui.view.footer
@@ -435,7 +416,6 @@ end
 --- 包装 ReaderFooter：底栏可见时禁止切换模式；短按继续交给原生翻页区，
 --- 兼容把蓝牙按钮转换为屏幕点击的翻页器。
 ---@param ui table
----@return nil
 local function hijackFooter(ui)
     local footer = ui.view and ui.view.footer
     if not footer or footer._book_bars_hijacked then
@@ -460,7 +440,6 @@ end
 
 --- 安装底栏模式保护。
 ---@param ui table
----@return nil
 function Bars.install(ui)
     if not ui or ui._book_bars_installed or not Device:isTouchDevice() then
         return
@@ -478,7 +457,6 @@ function Bars.install(ui)
 end
 
 --- 每分钟顶条时钟；ReaderUI 销毁后自动停摆。
----@return nil
 function Bars:startClock()
     local UIManager = require("ui/uimanager")
     -- Bars 是单例，registerViewModule 每次开书都把 self.ui 覆写成新的 ReaderUI：
@@ -554,7 +532,6 @@ end
 ---@param bb any blitbuffer
 ---@param x number ReaderView 原点
 ---@param y number
----@return nil
 function Bars:paintTo(bb, x, y)
     local ctx = liveContext()
     if not ctx then

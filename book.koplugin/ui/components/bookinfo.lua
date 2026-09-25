@@ -48,7 +48,6 @@ local _ = require("gettext")
 local BookInfo = {}
 
 --- Kindle 状态叠层用近黑灰，和封面拉开对比。
----@return any
 local function statusInk()
     return Blitbuffer.COLOR_GRAY_3 or Blitbuffer.COLOR_BLACK
 end
@@ -60,7 +59,6 @@ end
 ---@param size number 绘制区域边长，单位像素
 ---@param band number 斜角缎带宽度，单位像素
 ---@param color any Blitbuffer 使用的颜色值
----@return nil
 local function paintSash(bb, x, y, size, band, color)
     for dy = 0, size - 1 do
         local x0 = dy
@@ -132,7 +130,6 @@ end
 --- 锁屏离屏渲染不发网络请求，因此仍需要稳定的本地文件路径。
 ---@param book table|nil 当前操作或展示的书籍数据
 ---@param path string|nil 图片或书籍的本地文件路径
----@return nil
 local function persistCover(book, path)
     if type(book) ~= "table" or type(path) ~= "string" or path == "" then return end
     local source_id, stable_id = book.source_id, book.stable_id
@@ -318,7 +315,6 @@ function BookInfo.readRibbon(cw)
     ---@param bb BlitBuffer 用于绘制的 Blitbuffer 画布
     ---@param x number 目标区域左上角横坐标，单位像素
     ---@param y number 目标区域左上角纵坐标，单位像素
-    ---@return nil
     function ribbon:paintTo(bb, x, y)
         local ink = statusInk()
         paintSash(bb, x, y, size, self.band, ink)
@@ -337,7 +333,6 @@ function BookInfo.readRibbon(cw)
         src:free()
     end
     --- 释放缎带拥有的文字控件。
-    ---@return nil
     function ribbon:free()
         self.text:free()
     end
@@ -374,7 +369,6 @@ local function circleMark(name, ox, oy)
     ---@param bb BlitBuffer 用于绘制的 Blitbuffer 画布
     ---@param x number 目标区域左上角横坐标，单位像素
     ---@param y number 目标区域左上角纵坐标，单位像素
-    ---@return nil
     function mark:paintTo(bb, x, y)
         local r = math.floor(size / 2)
         local cx, cy = x + r, y + r
@@ -399,7 +393,6 @@ local function circleMark(name, ox, oy)
         end
     end
     --- 释放圆形角标拥有的图标控件。
-    ---@return nil
     function mark:free()
         if self.icon and self.icon.free then
             self.icon:free()
@@ -454,7 +447,6 @@ function BookInfo.openingBar(cw, ch)
     ---@param bb BlitBuffer 用于绘制的 Blitbuffer 画布
     ---@param x number 目标区域左上角横坐标，单位像素
     ---@param y number 目标区域左上角纵坐标，单位像素
-    ---@return nil
     function bar:paintTo(bb, x, y)
         bb:paintRect(x, y, cw, bar_h, Blitbuffer.COLOR_BLACK)
         if not self.text then return end
@@ -466,7 +458,6 @@ function BookInfo.openingBar(cw, ch)
         )
     end
     --- 释放条带拥有的文字控件。
-    ---@return nil
     function bar:free()
         if self.text and self.text.free then
             self.text:free()

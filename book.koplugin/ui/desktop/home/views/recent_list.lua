@@ -46,7 +46,6 @@ end
 
 --- 规范化并保存最近阅读网格行数。
 ---@param n number|nil
----@return nil
 function M.saveRows(n)
     n = math.floor(tonumber(n) or DEFAULT_ROWS)
     if n ~= MIN_ROWS then n = MAX_ROWS end
@@ -64,7 +63,6 @@ end
 
 --- 规范化并保存最近阅读网格列数。
 ---@param n number|nil
----@return nil
 function M.saveCols(n)
     n = math.max(MIN_COLS, math.min(MAX_COLS, math.floor(tonumber(n) or DEFAULT_COLS)))
     local home = MoonSettings.get("home")
@@ -80,7 +78,6 @@ end
 
 --- 规范化并保存封面下是否显示书名。
 ---@param on boolean|nil
----@return nil
 function M.saveShowTitle(on)
     local home = MoonSettings.get("home")
     home.home_recent_list_show_title = on ~= false
@@ -89,20 +86,17 @@ end
 
 --- 编辑态设置：行数 1/2，列数 3–8，封面下标题开关。
 ---@param desktop table|nil
----@return nil
 function M:showSettings(desktop)
     desktop = desktop or self.desktop or (self.home and self.home.desktop)
     local ButtonDialog = require("ui/widget/buttondialog")
     local UIManager = require("ui/uimanager")
     local dialog
     --- 保存后走首页刷新，列数变化时高度不变也必须重建网格。
-    ---@return nil
     local function refresh()
         if desktop and desktop.onEvent then desktop:onEvent("home_refresh") end
     end
     --- 选定行数；与当前相同则只关对话框。
     ---@param n number
-    ---@return nil
     local function pickRows(n)
         UIManager:close(dialog)
         if M.rows() == n then return end
@@ -224,7 +218,6 @@ end
 
 --- 揭掉上一本封面的「正在打开」条。
 ---@param list BookHomeRecentList
----@return nil
 local function clearOpening(list)
     local cover, bar = list._opening_cover, list._opening_bar
     list._opening_cover, list._opening_bar = nil, nil
@@ -248,7 +241,6 @@ end
 ---@return table
 local function coverCell(ctx, book, slot_w, cw, ch, on_open)
     --- 右下角更多：进详情，不弹动作表。
-    ---@return nil
     local function openDetail()
         if ctx.desktop then
             require("ui.desktop.detail").open(ctx.desktop, "library", book)
@@ -330,7 +322,6 @@ local function buildGrid(ctx, books, width, grid_h, page, on_open)
     local used = 0
 
     --- 把当前累计的网格单元打包为一行并清空行缓冲。
-    ---@return nil
     local function flushRow()
         if used > 0 then
             table.insert(grid, VerticalSpan:new{ width = row_gap })
@@ -362,7 +353,6 @@ end
 --- 切换最近阅读网格页码并重建内容区域。
 ---@param self BookHomeRecentList 当前视图或布局实例
 ---@param page number 当前页码，从 1 开始
----@return nil
 local function turn(self, page)
     self.page = page
     if not self.ctx then return end
@@ -391,7 +381,6 @@ function M:createWidget()
     ---@param cover table 封面包围盒，用于叠打开中条
     ---@param cw number 封面宽度
     ---@param ch number 封面高度
-    ---@return nil
     local function onOpen(book, cover, cw, ch)
         local desktop = ctx.desktop
         local plugin = ctx.plugin or (desktop and desktop.plugin)
@@ -480,20 +469,17 @@ end
 
 --- 转交组件事件给首页基类，由基类处理需要重建的变化。
 ---@param event string|table 从父视图转发的事件标识或事件对象
----@return nil
 function M:onEvent(event)
     if event == "source_changed" then self.page = nil end
     require("ui.desktop.home.views.base").onEvent(self, event)
 end
 
 --- 恢复显示时重建网格内容以同步最近阅读记录。
----@return nil
 function M:onResume()
     if self.widget then self:rebuild() end
 end
 
 --- 向当前内容树发送 HomePause，取消封面请求后清除内容引用。
----@return nil
 function M:onPause()
     if self.content_widget then
         self.content_widget:handleEvent(Event:new("HomePause"))

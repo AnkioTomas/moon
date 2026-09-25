@@ -19,14 +19,12 @@ Protocol.USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537
 Protocol.DEFAULT_READER_TOKEN = "3c5c8717f3daf09iop3423zafeqoi"
 
 --- 判断字符串是否全为数字。
----@param s any
 ---@return boolean
 local function isDigitString(s)
     return tostring(s):match("^%d+$") ~= nil
 end
 
 --- 对参数值做 URL 编码（微信侧布尔/nil 字面量 coercion 保留在本层）。
----@param value any
 ---@return string
 local function urlencode(value)
     if value == true then
@@ -51,7 +49,6 @@ local function byteHex(s)
 end
 
 --- 微信读书 ID/时间戳混淆（reader URL、正文参数 b/c/pc）。
----@param value any
 ---@return string
 function Protocol.encode(value)
     local s = tostring(value)
@@ -285,7 +282,6 @@ function Protocol.webAppId(user_agent)
 end
 
 --- UTF-8 前缀截断（最多 max_chars 个码点）。
----@param value any
 ---@param max_chars number|nil
 ---@return string
 function Protocol.utf8Substr(value, max_chars)

@@ -176,7 +176,6 @@ function UI.iconSz()
 end
 
 --- 弱化文字色（深灰接近黑）。
----@return any
 function UI.muted()
     return Blitbuffer.COLOR_GRAY_3 -- 0x33，深灰接近黑
 end
@@ -197,31 +196,26 @@ function UI.mutedText(text, width, size)
 end
 
 --- 更淡的弱化色。
----@return any
 function UI.dim()
     return Blitbuffer.COLOR_GRAY_4 -- 0x44
 end
 
 --- 分割线颜色。
----@return any
 function UI.rule()
     return Blitbuffer.COLOR_GRAY_5 -- 0x55，分割线可见
 end
 
 --- 进度条空轨颜色。
----@return any
 function UI.track()
     return Blitbuffer.COLOR_GRAY_E -- 0xEE，空轨保持轻量对比
 end
 
 --- 卡片浅背景；比页面白底低一个层级。
----@return any
 function UI.surface()
     return Blitbuffer.COLOR_GRAY_E
 end
 
 --- 按钮激活态背景；保留对比度但避免纯黑块破坏整体层次。
----@return any
 function UI.actionSurface()
     return Blitbuffer.COLOR_GRAY_D
 end

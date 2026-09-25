@@ -157,31 +157,10 @@ local function collectPagesAsync(limit, fetchPage, cb)
 end
 
 --- 单次请求上限：微信读书每页最多 20 条。
----@param count any
 ---@return integer limit, integer page_size
 local function pageBounds(count)
     local limit = math.max(1, math.min(tonumber(count) or 20, 200))
     return limit, math.min(limit, 20)
-end
-
---- 书城分类榜单（无关键词浏览）；自动翻页直到凑满 limit 或无更多。
----@param opts { limit: number|nil, category: string|nil, rank: number|nil }|nil
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Client:storeCatalogAsync(opts, cb)
-    opts = opts or {}
-    local limit = pageBounds(opts.limit)
-    local category = tostring(opts.category or "all")
-    if category == "" then
-        category = "all"
-    end
-    local rank = tonumber(opts.rank) or 1
-    return collectPagesAsync(limit, function(cursor, on_page)
-        return Auth.webApiGetAsync("/web/bookListInCategory/" .. category .. "?" .. Text.formEncode({
-            maxIndex = cursor,
-            rank = rank,
-        }), on_page)
-    end, cb)
 end
 
 --- 全站搜索；自动翻页直到凑满 count 或无更多。关键词为空直接回空结果。

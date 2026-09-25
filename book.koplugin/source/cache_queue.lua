@@ -45,7 +45,6 @@ local function keyFor(source, identity)
     return tostring(source.id) .. "\0" .. tostring(identity.stable_id)
 end
 
----@param err any
 ---@return boolean
 local function retryable(err)
     local text = tostring(err or "")

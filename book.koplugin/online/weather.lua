@@ -107,7 +107,6 @@ local Weather = setmetatable({
 }, Online)
 Weather.__index = Weather
 
----@param node any
 ---@return string|nil
 local function firstValue(node)
     if type(node) ~= "table" then return Online.nonempty(node) end
@@ -116,7 +115,6 @@ local function firstValue(node)
     return Online.nonempty(first)
 end
 
----@param value any
 ---@return string|nil
 local function numberish(value)
     if type(value) == "number" then return tostring(value) end
@@ -147,8 +145,6 @@ function Weather.iconUrl(key)
 end
 
 ---@param code string|nil
----@param zh any
----@param en any
 ---@return string|nil
 ---@return string
 ---@return string

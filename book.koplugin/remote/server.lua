@@ -141,7 +141,6 @@ function Server:stop()
 end
 
 --- UIManager 轮询入口：一小片工作，nil=本轮结束。
----@return nil
 function Server:waitEvent()
     if not self._sock then
         return nil
@@ -316,7 +315,6 @@ local function parseQuery(qs)
 end
 
 --- 规范绝对路径，消掉重复斜杠、. 与 ..。
----@param p any
 ---@return string|nil
 local function cleanPath(p)
     if type(p) ~= "string" or p:sub(1, 1) ~= "/" then
@@ -339,7 +337,6 @@ end
 -- 路由模块（remote.file）以 self.cleanPath 使用
 Server.cleanPath = cleanPath
 
----@param p any
 ---@return string|nil
 function Server:_safePath(p)
     local path = cleanPath(p)

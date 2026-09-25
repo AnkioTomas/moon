@@ -46,7 +46,6 @@ end
 
 --- 首次安装（尚未种过）时强制 start_with=月读，不跟系统默认 filemanager。
 --- 只跑一次；之后设置里「启动打开桌面」或系统启动项由用户自己改。
----@return nil
 local function seedStartWithOnInstall()
     local Settings = require("utils.settings")
     if Settings.get().start_with_seeded then
@@ -72,7 +71,6 @@ end
 
 --- Dispatcher 全局注册一次；主菜单按 FM/Reader 实例各挂一次
 ---@param plugin table
----@return nil
 local function registerMenu(plugin)
     if not dispatcher_registered then
         dispatcher_registered = true
@@ -96,7 +94,6 @@ local function registerMenu(plugin)
 end
 
 --- 设置菜单里把「月读」置顶（只做一次）
----@return nil
 local function pinSettingsMenu()
     for _, modname in ipairs({
         "ui/elements/filemanager_menu_order",
@@ -116,7 +113,6 @@ local function pinSettingsMenu()
 end
 
 --- 系统「启动时打开」插入月读，并修补 text_func（否则选中后标题为 nil）
----@return nil
 local function patchStartWithMenu()
     local ok, FMMenu = pcall(require, "apps/filemanager/filemanagermenu")
     if not ok or not FMMenu or not FMMenu.getStartWithMenuTable then
@@ -164,15 +160,8 @@ local function patchStartWithMenu()
     end
 end
 
---- KOReader 的「启动时打开」是否设为本插件桌面。
----@return boolean
-function Host.openOnStart()
-    return isOpenOnStart()
-end
-
 --- 插件 init：挂钩菜单；FM 侧按 start_with 决定是否自动开桌面
 ---@param plugin table
----@return nil
 function Host.onCreate(plugin)
     pcall(function()
         require("utils.font").applyCurrent()

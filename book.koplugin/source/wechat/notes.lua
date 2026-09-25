@@ -291,7 +291,6 @@ function Notes.mergeAnnotations(remote, local_items, paging, authoritative)
 end
 
 --- bookmarklist 的 markText 可能是 base64。
----@param value any
 ---@return string
 function Notes.decodeMarkText(value)
     local raw = tostring(value or "")
@@ -316,7 +315,6 @@ function Notes.colorStyle(color)
     return COLOR_STYLE[color] or 5
 end
 
----@param style any
 ---@return string|nil
 function Notes.localColor(style)
     return LOCAL_COLOR[tonumber(style)]

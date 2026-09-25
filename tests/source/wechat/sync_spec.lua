@@ -191,11 +191,11 @@ do
         wire, shell, "重复", "/html/body/p[3]/text().0", "/html/body/p[3]/text().2"
     )
     Assert.is_nil(err)
-    Assert.eq(Annotations.textAtWireRange(wire, range), "重复")
+    Assert.eq(range, "59-61")
     local first = Annotations.toWireRange(
         wire, shell, "A&B", "/html/body/p[1]/text().0", "/html/body/p[1]/text().3"
     )
-    Assert.eq(Annotations.textAtWireRange(wire, first), "A&B")
+    Assert.eq(first, "3-10")
     local ambiguous, ambiguous_err = Annotations.toWireRange(wire, shell, "重复")
     Assert.is_nil(ambiguous)
     Assert.eq(ambiguous_err, "ambiguous local highlight")
@@ -247,9 +247,6 @@ end
 do
     Assert.eq(Notes.decodeMarkText("5L2c6ICF77ya572X6LSv"), "作者：罗贯")
     Assert.eq(require("utils.text").base64Encode("作者：罗贯"), "5L2c6ICF77ya572X6LSv")
-    Assert.eq(Annotations.findRange("0123456789", "234"), "2-5")
-    local html = '<body><h1>指婚</h1><p>莫问毕竟是六星炼丹师</p></body>'
-    Assert.eq(Annotations.findRange(html, "莫问毕"), "0-3")
     local body = Notes.toBookmarkBody("1", 9, 2, 395275575, {
         text = "hello",
         drawer = "lighten",

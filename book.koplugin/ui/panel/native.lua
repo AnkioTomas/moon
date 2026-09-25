@@ -82,7 +82,6 @@ local function ensureWidgets()
 end
 
 --- 关闭文档后回到月读桌面，而不是 KOReader 原生文件管理器。
----@return nil
 local function openBookDesktop()
     local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
     if not ok or not FileManager then return end
@@ -100,7 +99,6 @@ end
 --- 退出阅读会话并回到月读桌面。
 ---@param ui table|nil
 ---@param menu table|nil
----@return nil
 local function exitReading(ui, menu)
     Menu.close(menu)
     UIManager:nextTick(function()
@@ -204,7 +202,6 @@ end
 
 --- 临时 noop switchMenuTab 后触发 tab.callback，让 Tab 栏分割线按当前内容重算。
 ---@param menu table
----@return nil
 local function syncBarSeparator(menu)
     local k = menu.cur_tab
     local ib = menu.bar and menu.bar.icon_widgets and k and menu.bar.icon_widgets[k]
@@ -218,7 +215,6 @@ end
 
 --- 替换 TouchMenu 的 item 列表为月读面板自绘内容。
 ---@param menu table
----@return nil
 local function renderPanelContent(menu)
     local W = ensureWidgets()
     syncBarSeparator(menu)
@@ -248,7 +244,6 @@ local function renderPanelContent(menu)
 end
 
 --- 一次性 patch TouchMenu.updateItems，触屏设备命中面板 Tab 时改走自绘渲染。
----@return nil
 local function patchTouchMenu()
     local ok, TouchMenu = pcall(require, "ui/widget/touchmenu")
     if not ok or TouchMenu._book_panel_patched then return end
@@ -266,7 +261,6 @@ end
 ---@param tab table
 ---@param actions table[]
 ---@param on_execute fun(id: string, menu: table)
----@return nil
 local function populateTab(tab, actions, on_execute)
     -- 触屏设备走 renderPanelContent 自绘，不必填充原生 menu item。
     if Device:isTouchDevice() then return end
@@ -283,7 +277,6 @@ end
 
 --- 用桌面动作填充原生 Tab。
 ---@param tab table
----@return nil
 local function populateDesktop(tab)
     local Panel = require("ui.panel.desktop")
     populateTab(tab, Panel.menuActions(), function(id, menu)
@@ -293,7 +286,6 @@ end
 
 --- 用阅读动作填充原生 Tab。
 ---@param tab table
----@return nil
 local function populateReader(tab)
     local ReaderPanel = require("ui.panel.reader")
     local ui = tab._book_ui
@@ -339,7 +331,6 @@ end
 
 --- 若不存在则向菜单注入桌面面板 Tab。
 ---@param menu table|nil
----@return nil
 local function injectDesktopTab(menu)
     local tabs = menu and menu.tab_item_table
     if type(tabs) ~= "table" then return end
@@ -351,7 +342,6 @@ end
 
 --- 若不存在则注入阅读面板 Tab，并同步当前 ReaderUI。
 ---@param menu table|nil
----@return nil
 local function injectReaderTab(menu)
     if not menu then return end
     local tabs = menu.tab_item_table
@@ -366,7 +356,6 @@ local function injectReaderTab(menu)
 end
 
 --- 一次性 patch 文件管理器菜单，注入桌面面板 Tab。
----@return nil
 local function installFileManagerMenu()
     local ok, Menu = pcall(require, "apps/filemanager/filemanagermenu")
     if not ok or type(Menu) ~= "table" or Menu._book_desktop_panel_patched then return end
@@ -394,7 +383,6 @@ end
 
 --- 阅读模式下把 filemanager Tab 重定向到月读桌面。
 ---@param ReaderMenu table
----@return nil
 local function patchFileBrowserButton(ReaderMenu)
     if ReaderMenu._book_filebrowser_patched then return end
     ReaderMenu._book_filebrowser_patched = true
@@ -418,7 +406,6 @@ local function patchFileBrowserButton(ReaderMenu)
 end
 
 --- 一次性 patch 阅读菜单，注入桌面/阅读面板 Tab 与原生设置项。
----@return nil
 local function installReaderMenu()
     local ok, ReaderMenu = pcall(require, "apps/reader/modules/readermenu")
     if not ok or type(ReaderMenu) ~= "table" or ReaderMenu._book_reader_panel_patched

@@ -17,7 +17,6 @@ local NativeSettings = {}
 
 --- 刷新阅读视图并在后台更新锁屏。
 ---@param ui table|nil
----@return nil
 local function refreshReader(ui)
     if ui then UIManager:setDirty(ui.dialog, "ui") end
     require("lockscreen.init").refresh(nil, nil, "reader_settings")
@@ -26,7 +25,6 @@ end
 --- 保存当前文档配置为默认并刷新。
 ---@param ui table|nil
 ---@param menu table|nil
----@return nil
 local function saveDefault(ui, menu)
     Menu.close(menu)
     if ui and ui.menu and ui.menu.saveDocumentSettingsAsDefault then

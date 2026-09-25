@@ -139,7 +139,6 @@ end
 ---@param container table 持有区域子控件的容器
 ---@param index integer 子控件数组中的槽位索引，从 1 开始
 ---@param rect ViewRect 屏幕绝对矩形，或返回该矩形的函数
----@return nil
 function View:registerRegion(name, container, index, rect)
     self.regions[name] = { container = container, index = index, rect = rect }
 end
@@ -157,7 +156,6 @@ end
 
 --- 仅刷新挂载且 Resume 的视图。区域矩形必须包含受影响的布局范围。
 ---@param name string 区域、组件或图标名称
----@return nil
 function View:dirty(name)
     if not self.host or not self.lifecycle:uiReady() then return end
     local region = assert(self.regions[name], "unknown view region: " .. name)
@@ -173,12 +171,10 @@ end
 ---@param old table 即将释放的旧布局子树
 ---@param replacement table 接替旧内容的新布局子树
 ---@param children table<string, View>|nil 仍由父视图拥有的子实例，隐藏时也必须保留
----@return nil
 local function detachShared(old, replacement, children)
     local retained = {}
     --- 收集新布局保留的所有数字索引子节点，避免释放复用控件。
     ---@param widget table 参与布局或绘制的 Widget
-    ---@return nil
     local function collect(widget)
         if retained[widget] then return end
         retained[widget] = true
@@ -188,7 +184,6 @@ local function detachShared(old, replacement, children)
     end
     --- 从旧布局摘除仍被新布局或父视图拥有的节点，再交由旧容器释放。
     ---@param widget table 参与布局或绘制的 Widget
-    ---@return nil
     local function detach(widget)
         for i = #widget, 1, -1 do
             local child = widget[i]
@@ -259,7 +254,6 @@ function View:load(cb)
     local finished, cancelled, handle = false, false, nil
     local operation
     --- 从本实例及 Lifecycle 的 HTTP 列表移除已结束的加载操作。
-    ---@return nil
     local function forget()
         if self._load == operation then self._load = nil end
         local handles = self.lifecycle.http
@@ -278,7 +272,6 @@ function View:load(cb)
     --- 记录加载结束，移除取消句柄并向调用者交付结果。
     ---@param data any 加载得到的视图数据
     ---@param err any 操作失败的原因
-    ---@return nil
     local function done(data, err)
         if finished then return end
         finished = true
@@ -299,33 +292,28 @@ end
 
 --- 创建阶段扩展点；默认不分配额外资源。
 ---@param self View 视图实例
----@return nil
 function View:onCreate()
 end
 
 --- 恢复显示时把当前数据写入已存在的内容树。
 ---@param self View 视图实例
----@return nil
 function View:onResume()
     if self.widget then self:updateView(self.data) end
 end
 
 --- 暂停阶段扩展点；异步句柄的取消由已绑定的 Lifecycle 处理。
 ---@param self View 视图实例
----@return nil
 function View:onPause()
 end
 
 --- 销毁阶段扩展点；根 Widget 和子视图由构造器安装的清理逻辑释放。
 ---@param self View 视图实例
----@return nil
 function View:onDestroy()
 end
 
 --- 静态视图无需更新；动态视图覆写并保留根骨架。
 ---@param self View 视图实例
 ---@param data any 加载得到的视图数据
----@return nil
 function View:updateView(data)
     self.data = data
 end
@@ -350,7 +338,6 @@ function View:renderToImage(opts, cb)
     local view = self:new(args)
     local finished, image_wait = false, nil
     --- 取消图片等待并销毁离屏视图；清理异常在释放后继续传播。
-    ---@return nil
     local function dispose()
         if image_wait then image_wait:cancel() end
         local destroyed, destroy_error = pcall(view.onDestroy, view)
@@ -359,7 +346,6 @@ function View:renderToImage(opts, cb)
     --- 仅完成一次导出，释放离屏资源后交付成功路径或失败原因。
     ---@param ok boolean 本次操作是否成功
     ---@param err any 操作失败的原因
-    ---@return nil
     local function finish(ok, err)
         if finished then return end
         finished = true
@@ -369,7 +355,6 @@ function View:renderToImage(opts, cb)
     end
     --- 保护离屏构建或绘制步骤，失败时完成清理并报告错误。
     ---@param work fun() 需要执行并捕获异常的导出步骤
-    ---@return nil
     local function guard(work)
         local ok, err = xpcall(work, debug.traceback)
         if not ok then
@@ -380,7 +365,6 @@ function View:renderToImage(opts, cb)
     --- 数据加载结束后构建离屏树，等待图片落定再绘制并保存 PNG。
     ---@param ok boolean 本次操作是否成功
     ---@param err any 操作失败的原因
-    ---@return nil
     local function loaded(ok, err)
         if finished then return end
         guard(function()

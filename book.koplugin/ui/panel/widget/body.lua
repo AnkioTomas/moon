@@ -67,7 +67,6 @@ local Body = InputContainer:extend{
 
 --- 初始化间距和按钮高度，并构建首屏内容。
 ---@param self BookQuickPanelBody
----@return nil
 function Body:init()
     self.gap = UI.sz(6)
     self.tile_h = UI.sz(64)
@@ -76,7 +75,6 @@ end
 
 --- 重新计算网格列数并重建完整纵向布局。
 ---@param self BookQuickPanelBody
----@return nil
 function Body:updateView()
     local actions = self.actions or {}
     local sliders = self.sliders or {}

@@ -119,7 +119,6 @@ end
 ---@param method table|string
 ---@param name string
 ---@param ... any
----@return any
 local function callDictionary(method, name, ...)
     local profile
     if type(method) == "table" then

@@ -45,7 +45,6 @@ local trimSlashes = Text.trimSlashes
 local rtrimSlashes = Text.rtrimSlashes
 
 --- HTTP 状态码转用户可读错误文案
----@param code any
 ---@param detail string|nil
 ---@return string
 local function statusErr(code, detail)

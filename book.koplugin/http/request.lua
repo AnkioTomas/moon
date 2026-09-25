@@ -77,7 +77,6 @@ local Request = {}
 local request_seq = 0
 
 --- 日志只保留 scheme/host/path；query、fragment、userinfo 可能带令牌，禁止落盘。
----@param url any
 ---@return string
 local function safeUrl(url)
     local value = tostring(url or "")
@@ -86,7 +85,6 @@ local function safeUrl(url)
 end
 
 --- 日志用文件名，只要最后一段。
----@param path any
 ---@return string
 local function fileName(path)
     return tostring(path or ""):match("([^/]+)$") or "<unknown>"
@@ -120,7 +118,6 @@ local TURBO_SKIP_HEADERS = {
 --- 普通 table 头，大小写不敏感。
 ---@param values table|nil
 ---@param name string
----@return any
 local function getHeader(values, name)
     name = name:lower()
     for key, value in pairs(values or {}) do
@@ -244,7 +241,6 @@ end
 
 --- 拼 turbo HTTPClient:fetch 的 kwargs。timeout 是未传 opts.timeout 时的默认秒。
 ---@param opts HttpRequest
----@param user_agent any
 ---@param timeout number
 ---@return table
 local function fetchOpts(opts, user_agent, timeout)
@@ -274,7 +270,6 @@ function Request.clearCache(url_substr)
 end
 
 --- HTTP 2xx（含 WebDAV 207）
----@param code any
 ---@return boolean
 function Request.ok(code)
     local n = tonumber(code)
@@ -284,7 +279,6 @@ end
 --- 读单个响应头。兼容 Turbo HTTPHeaders 与普通 table。
 ---@param res table|nil
 ---@param name string
----@return any
 function Request.header(res, name)
     local headers = res and res.headers
     if not headers then
@@ -320,7 +314,6 @@ function Request.request(opts, cb)
     logger.dbg("book.http start", request_id, method, url)
 
     ---@param res table|nil
-    ---@param err any
     local function deliver(res, err)
         logger.dbg("book.http done", request_id, method, url,
             "status", res and res.code or "-", "ms",
@@ -339,7 +332,6 @@ function Request.request(opts, cb)
 
     --- 先回调再 release，连环请求不会把泵拆了又装。
     ---@param res table|nil
-    ---@param err any
     local function settle(res, err)
         if state.done then
             return
@@ -700,7 +692,6 @@ function Request.download(opts, dest, cb)
     logger.dbg("book.http download start", target, safeUrl(opts and opts.url))
 
     ---@param ok boolean
-    ---@param err any
     ---@param res table|nil
     local function done(ok, err, res)
         if state.cancelled then return end

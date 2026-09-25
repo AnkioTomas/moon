@@ -110,7 +110,6 @@ end
 ---@param y number
 ---@param width number
 ---@param height number
----@param color any
 ---@param radius number|nil
 local function paintRect(bb, x, y, width, height, color, radius)
     radius = math.max(0, math.floor(tonumber(radius) or 0))

@@ -149,7 +149,6 @@ function M.build(plan, cb)
 
     --- 回调一次即封口：已取消或已回调过都不再触发 cb。
     ---@param ok boolean
-    ---@param err any
     ---@param output_path string|nil direct 资源时为原图路径，否则 nil（用 compose.png）
     local function finish(ok, err, output_path)
         if cancelled or finished then return end
@@ -194,7 +193,6 @@ function M.build(plan, cb)
 
     --- 背景资源就绪后，直接检查是否已具备生成条件。
     ---@param path string|nil 背景图本地路径
-    ---@param err any
     local function onAsset(path, err)
         if cancelled then return end
         asset_error = err

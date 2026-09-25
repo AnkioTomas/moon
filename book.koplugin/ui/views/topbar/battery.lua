@@ -16,7 +16,6 @@ Battery.interval = 600
 
 --- 充电状态变化时立即更新电量文案和图标。
 ---@param event string|table 父组件转发的事件名称或事件对象
----@return nil
 function Battery:onEvent(event)
     if event == "Charging" or event == "NotCharging" then
         self:updateView()

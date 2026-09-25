@@ -34,7 +34,6 @@ local function maskValue(value, secret)
     return tostring(value)
 end
 
----@param value any
 ---@return boolean
 local function unchangedSecret(value)
     return value == SettingsApi.MASK
@@ -42,7 +41,6 @@ end
 
 ---@param cfg table
 ---@param key string
----@param incoming any
 ---@param normalize fun(string): string
 ---@return boolean changed
 local function applyField(cfg, key, incoming, normalize)
@@ -61,7 +59,6 @@ local function applyField(cfg, key, incoming, normalize)
     return false
 end
 
----@param value any
 ---@return string
 local function asStr(value)
     if value == nil then

@@ -30,7 +30,6 @@ local API = "https://e.m.jd.com"
 local READER = "https://cread.jd.com"
 
 ---@param raw string|nil
----@param err any
 ---@return table|nil, string|nil
 local function decodeApi(raw, err)
     if not raw then return nil, err end
@@ -205,15 +204,6 @@ function Client:searchAsync(keyword, page, page_size, cb)
             cancelled = true
             if active and active.cancel then active.cancel() end
         end }
-end
-
---- 拉取指定书籍的相关推荐。
----@param book_id string|number
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }
-function Client:recommendAsync(book_id, cb)
-    local path = "/jdread/api/ebook/" .. tostring(book_id) .. "/recommend"
-    return self:apiGetAsync(path, nil, cb)
 end
 
 --- 将书城书籍加入京东书架。

@@ -13,14 +13,6 @@ end
 
 package.preload["db.stats"] = function()
     return {
-        periodDays = function(source_id)
-            record(source_id)
-            return {}
-        end,
-        periodHours = function(source_id)
-            record(source_id)
-            return {}
-        end,
         periodSummary = function(source_id)
             record(source_id)
             return {}

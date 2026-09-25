@@ -81,10 +81,6 @@ function Client:new(settings)
     return setmetatable({ settings = settings }, self)
 end
 
-function Client:clear_shelf_cache()
-    SHELF_CACHE = {}
-end
-
 ---@param cookies table
 ---@return string
 local function cookieHash(cookies)

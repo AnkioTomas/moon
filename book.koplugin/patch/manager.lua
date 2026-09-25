@@ -96,7 +96,6 @@ end
 ---   - install_dir string|nil KOReader 安装目录，缺省 lfs.currentdir()
 ---   - backups_root string|nil 补丁备份根，缺省 $DATA/.moon/backups/patches
 ---   - patches_dir string|nil 运行时补丁目录，缺省 DataStorage:getPatchesDir()
----@return nil
 function Manager.onCreate(opts)
     opts = opts or {}
     _plugin_root = opts.plugin_root

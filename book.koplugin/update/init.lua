@@ -59,7 +59,6 @@ local function findAsset(assets, name)
 end
 
 --- 把 GitHub Release body 收成可读纯文本：优先「更新内容」段，丢掉安装说明与对比链接。
----@param body any
 ---@return string|nil
 local function formatNotes(body)
     if type(body) ~= "string" then return nil end

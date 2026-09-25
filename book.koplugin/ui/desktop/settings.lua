@@ -81,7 +81,6 @@ end
 
 --- 由 Tab 切换恢复时关掉叠层；系统唤醒时保留。
 ---@param changed boolean|nil TAB 点击时传 boolean；桌面唤醒时不重置
----@return nil
 function Settings:onResume(changed)
     if changed == nil then return end
     self:reset()
@@ -89,7 +88,6 @@ function Settings:onResume(changed)
 end
 
 --- 回到设置根页并关闭功能叠层。
----@return nil
 function Settings:reset()
     self.page = 1
     Overlay.close(self.desktop)
@@ -97,7 +95,6 @@ end
 
 --- 换源后关掉叠层，避免停在过期的来源页。
 ---@param event string 父组件转发的事件名称或事件对象
----@return nil
 function Settings:onEvent(event)
     if event == "source_changed" then
         self:reset()
@@ -268,7 +265,6 @@ end
 
 --- 打开指定功能叠层。
 ---@param id string
----@return nil
 function Settings:open(id)
     local spec = self:spec(id)
     if spec then Overlay.open(self.desktop, spec) end

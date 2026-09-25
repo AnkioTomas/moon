@@ -10,7 +10,6 @@ local Render = {}
 ---@param block table 包含 widget 与目标 x/y 坐标的绘制块
 ---@param canvas_w number 目标画布宽度，单位像素
 ---@param canvas_h number 目标画布高度，单位像素
----@return nil
 function Render.paintWidget(bb, block, canvas_w, canvas_h)
     local widget = block.widget
     if not widget or type(widget.paintTo) ~= "function" then

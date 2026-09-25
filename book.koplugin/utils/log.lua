@@ -132,13 +132,11 @@ local function mirrorKo(method, ...)
     end
 end
 
----@return nil
 function Log.start()
     start()
 end
 
 --- 提交当前尾批；实际写盘仍在下一次 UI tick 完成。
----@return nil
 function Log.flush()
     scheduleFlush(true)
 end

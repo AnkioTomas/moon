@@ -157,7 +157,6 @@ local function runFetch(ui, identity, force)
     UIManager:show(loading)
     --- 拉取回调：关掉进行中提示，成功报三类数量，失败提示原因。
     ---@param result table|nil
-    ---@param err any
     local cb = function(result, err)
         UIManager:close(loading)
         if not result then

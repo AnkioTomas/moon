@@ -68,7 +68,6 @@ end
 function Open.book(plugin, book, on_done)
     --- 只在本代打开仍有效时通知调用方。
     ---@param ok boolean
-    ---@return nil
     local function done(ok)
         if on_done then on_done(ok) end
     end

@@ -53,8 +53,6 @@ end
 
 --- 简易模板替换（离线测试的 LuaJIT 无 table.pack，不能依赖 ffi/util.template）。
 ---@param fmt string
----@param a1 any
----@param a2 any
 ---@return string
 local function T(fmt, a1, a2)
     local s = tostring(fmt)

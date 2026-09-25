@@ -49,18 +49,8 @@ function M.order()
     return ORDER_WEATHER
 end
 
---- 把当前左右顺序转换为设置文案。
----@return string
-function M.orderLabel()
-    if M.order() == ORDER_CLOCK then
-        return _("时间在左")
-    end
-    return _("天气在左")
-end
-
 --- 规范化并保存时间天气组件的左右顺序。
 ---@param value string 当前设置项的值
----@return nil
 function M.saveOrder(value)
     local home = MoonSettings.get("home")
     home.home_clock_weather_order = value == ORDER_CLOCK and ORDER_CLOCK or ORDER_WEATHER
@@ -69,7 +59,6 @@ end
 
 --- 编辑态设置：天气地点 + 左右顺序。
 ---@param desktop table|nil
----@return nil
 function M:showSettings(desktop)
     desktop = desktop or self.desktop or (self.home and self.home.desktop)
     local ButtonDialog = require("ui/widget/buttondialog")
@@ -109,7 +98,6 @@ end
 
 --- 惰性创建时钟和天气子视图，登记到父视图拥有的 children 映射。
 ---@param self BookHomeClockWeather 当前视图或布局实例
----@return nil
 local function ensureKids(self)
     if not self.clock then
         self.clock = Clock:new()
@@ -124,7 +112,6 @@ local function ensureKids(self)
 end
 
 --- 创建并登记时钟、天气子视图，再分别进入创建阶段。
----@return nil
 function M:onCreate()
     ensureKids(self)
     self.clock:onCreate()
@@ -171,14 +158,12 @@ end
 
 --- 离屏：并行 load 子视图。
 ---@param done fun(data:any, err:any)
----@return nil
 function M:loadData(done)
     ensureKids(self)
     local remaining, failure = 2, nil
     --- 记录一个子任务结束，所有子任务完成后通知调用者。
     ---@param ok boolean 本次操作是否成功
     ---@param err any 操作失败的原因
-    ---@return nil
     local function finish(ok, err)
         if not ok then failure = failure or err end
         remaining = remaining - 1
@@ -191,7 +176,6 @@ function M:loadData(done)
 end
 
 --- 恢复时钟与天气子视图的显示及周期工作。
----@return nil
 function M:onResume()
     ensureKids(self)
     if self.clock then self.clock:onResume() end
@@ -200,21 +184,18 @@ end
 
 --- 把刷新交给天气子视图，再按当前左右序重建。
 ---@param event string
----@return nil
 function M:onEvent(event)
     if self.weather then self.weather:onEvent(event) end
     require("ui.desktop.home.views.base").onEvent(self, event)
 end
 
 --- 暂停两个子视图的周期工作和在飞请求。
----@return nil
 function M:onPause()
     if self.clock then self.clock:onPause() end
     if self.weather then self.weather:onPause() end
 end
 
 --- 销毁两个子视图并清除父视图保存的引用。
----@return nil
 function M:onDestroy()
     if self.clock then self.clock:onDestroy() end
     if self.weather then self.weather:onDestroy() end

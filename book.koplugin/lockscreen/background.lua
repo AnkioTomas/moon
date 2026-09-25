@@ -231,7 +231,6 @@ end
 
 --- 清除资源日期标记，让下一次准备重新尝试下载。
 ---@param asset table|nil
----@return nil
 function M.invalidate(asset)
     if type(asset) ~= "table" or not asset.daily then return end
     local cache = assetCache()

@@ -63,7 +63,6 @@ local function handle()
     return h
 end
 
----@param err any
 ---@return string
 local function errMsg(err)
     if type(err) == "table" then

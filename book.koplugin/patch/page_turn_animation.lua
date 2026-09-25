@@ -41,7 +41,6 @@ local PREV_REFRESH_KEY = "swipe_animations_prev_refresh_rate"
 
 --- 动画首次开启时把完全刷新率改成「从不」，避免全刷闪烁打断动画。
 --- 只改一次并备份原值；用户之后可以自行改回，Moon 不再反复覆盖。
----@return nil
 local function forceFullRefreshNever()
     if G_reader_settings:has(PREV_REFRESH_KEY) then return end
     G_reader_settings:saveSetting(PREV_REFRESH_KEY, {
@@ -53,7 +52,6 @@ local function forceFullRefreshNever()
 end
 
 --- 关闭动画时恢复用户原先的完全刷新率。
----@return nil
 local function restoreFullRefresh()
     local prev = G_reader_settings:readSetting(PREV_REFRESH_KEY)
     if prev == nil then return end
@@ -96,7 +94,6 @@ function PageTurnAnimation.setEnabled(on)
 end
 
 --- 补丁改动后提示重启（补丁与 uimanager.lua 只在启动时加载）。
----@return nil
 function PageTurnAnimation.promptRestart()
     local dialog
     dialog = ConfirmBox:new{
@@ -112,7 +109,6 @@ function PageTurnAnimation.promptRestart()
 end
 
 --- 启动检测：设置开启但补丁失效（如 KOReader 升级覆盖核心文件）时提示重装。
----@return nil
 function PageTurnAnimation.checkStartup()
     if _startup_checked then return end
     _startup_checked = true

@@ -19,14 +19,12 @@ local Manager = {
 local BASE_URL = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/dict"
 --- 校验字典 id：清单来自网络，id 会拼进目录名与分片文件名，
 --- 只放行 `[%w_-]`，否则 `../` 之类能写到数据目录外。
----@param value any
 ---@return string|nil 合法时返回原值
 local function safeId(value)
     return type(value) == "string" and value:match("^[%w_%-]+$") and value or nil
 end
 
 --- 是否为 sha256 十六进制串（64 位）。
----@param value any
 ---@return boolean
 local function validHash(value)
     return type(value) == "string" and #value == 64 and value:match("^%x+$") ~= nil

@@ -82,6 +82,14 @@ package.preload["book.catalog"] = function()
     }
 end
 
+local daily = {
+    history = { { year = "1990", title = "旧事" } },
+    news = { "旧闻" },
+}
+package.preload["online.myrl"] = function()
+    return { fetch = function(_, _, cb) cb(daily) return nil end }
+end
+
 local ctx = { desktop = {}, source = { id = "owner" } }
 local opts = { width = 400, height = 180, y = 30 }
 for _, name in ipairs({ "hitokoto", "excerpt", "stats" }) do
@@ -130,6 +138,28 @@ for _, name in ipairs({ "hitokoto", "excerpt", "stats" }) do
     before = paints
     Assert.errors(function() component:onResume() end)
     Assert.eq(paints, before)
+end
+
+do -- 历史上的今天 / 热点新闻：固定行数，空数据首行占位，resume 原地更新文字
+    local function shown()
+        local out = {}
+        for _, text in ipairs(texts) do out[#out + 1] = text.text end
+        return table.concat(out, "|")
+    end
+    for _, case in ipairs({
+        { name = "history", before = "历史上的今天||--||||", after = "1990|旧事" },
+        { name = "news", before = "热点新闻|01|--|02||03||04|", after = "01|旧闻" },
+    }) do
+        texts = {}
+        local component = require("ui.desktop.home.views." .. case.name):new()
+        component:build(ctx, opts)
+        Assert.eq(shown(), case.before, case.name .. " placeholder rows")
+        Assert.eq(#component.items, case.name == "history" and 3 or 4)
+        component:onResume()
+        Assert.eq(component.marks[1].text .. "|" .. component.items[1].text, case.after)
+        Assert.eq(component.items[2].text, "")
+        component:onDestroy()
+    end
 end
 
 do -- 库空时复用一言回退池，不造「暂无书摘」

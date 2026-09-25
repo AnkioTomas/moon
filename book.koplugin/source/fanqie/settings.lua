@@ -23,8 +23,6 @@ function Settings:new()
 end
 
 ---@param key string
----@param default any
----@return any
 function Settings:get(key, default)
     local value = self.cfg[key]
     if value == nil then return default end
@@ -32,7 +30,6 @@ function Settings:get(key, default)
 end
 
 ---@param key string
----@param value any
 function Settings:set(key, value)
     self.cfg[key] = value
 end

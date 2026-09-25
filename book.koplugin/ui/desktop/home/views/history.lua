@@ -1,5 +1,6 @@
 --[[--
 主体：历史上的今天。年份是列，事件是正文。自己读 online.myrl（http.cache）。
+热点新闻（news.lua）继承本模块，只换行数、标记列与数据字段。
 
 @module koplugin.book.ui.desktop.home.views.history
 --]]
@@ -17,63 +18,64 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local _ = require("gettext")
 
-local LINES = 3
-local YEAR_W = 40
 local ROW_GAP = 4
 
 ---@class BookHomeHistory : BookHomeComponent
----@field data { year: string, title: string }[]|nil
+---@field data table[]|nil
+---@field lines integer 固定行数
+---@field mark_w number 标记列宽（未缩放像素）
+---@field field string 摸鱼日报里的数据字段
 local M = {
     id = "history",
     label = _("历史上的今天"),
     icon = "history_edu",
+    lines = 3,
+    mark_w = 40,
+    field = "history",
 }
 setmetatable(M, require("ui.desktop.home.views.base"))
 M.__index = M
 
---- 从历史事件数据提取年份和标题，供固定行数布局使用。
----@param history { year: string, title: string }[]|nil
----@return { year: string, title: string }[]
-local function rows(history)
-    local out = {}
-    if type(history) == "table" then
-        for i = 1, math.min(LINES, #history) do
-            local row = history[i]
-            out[i] = { year = row.year, title = row.title }
-        end
-    end
-    if #out == 0 then out[1] = { year = "", title = "--" } end
-    return out
+--- 第 i 行的标记与标题；数据不足时首行显示占位。
+---@param i integer
+---@return string mark
+---@return string title
+function M:row(i)
+    local data = type(self.data) == "table" and self.data or {}
+    local row = data[i]
+    if row then return row.year, row.title end
+    if i == 1 and #data == 0 then return "", "--" end
+    return "", ""
 end
 
---- 构建带序号或年份的单行内容，并返回可原地更新的文字控件。
----@param year string 历史事件发生年份的显示文字
+--- 构建标记列 + 标题的单行内容，并返回可原地更新的文字控件。
+---@param mark_text string
 ---@param title string 显示标题
 ---@param inner_w number 扣除左右留白后的内容宽度，单位像素
----@return table
----@return table
----@return table
----@return number
-local function line(year, title, inner_w)
-    local year_w = UI.sz(YEAR_W)
+---@return table group
+---@return table mark
+---@return table body
+---@return number h
+function M:line(mark_text, title, inner_w)
+    local mark_w = UI.sz(self.mark_w)
     local gap = UI.sz(8)
     local mark = TextWidget:new{
-        text = year,
+        text = mark_text,
         face = UI.face("cfont", 12),
-        max_width = year_w,
-        fgcolor = UI.muted(),
+        max_width = mark_w,
+        fgcolor = self.markColor(),
     }
     local body = TextWidget:new{
         text = title,
         face = UI.face("cfont", 13),
-        max_width = math.max(1, inner_w - year_w - gap),
+        max_width = math.max(1, inner_w - mark_w - gap),
         fgcolor = Blitbuffer.COLOR_BLACK,
     }
     local h = math.max(mark:getSize().h, body:getSize().h)
     return HorizontalGroup:new{
         align = "center",
         RightContainer:new{
-            dimen = Geom:new{ w = year_w, h = h },
+            dimen = Geom:new{ w = mark_w, h = h },
             mark,
         },
         HorizontalSpan:new{ width = gap },
@@ -81,27 +83,29 @@ local function line(year, title, inner_w)
     }, mark, body, h
 end
 
---- 返回历史上的今天内容高度；不吃剩余空间。
+M.markColor = UI.muted
+
+--- 返回内容高度；不吃剩余空间。
 ---@param _ctx table|nil
 ---@param opts table|nil
 ---@return BookHomeHeightSpec
 function M:heightRange(_ctx, opts)
     local inner_w = math.max(1, opts and opts.width or UI.sz(300))
     local title = TextWidget:new{
-        text = _("历史上的今天"),
+        text = self.label,
         face = UI.face("cfont", 12),
         bold = true,
         max_width = inner_w,
     }
-    local probe, _mark, _body, row_h = line("0000", "--", inner_w)
+    local probe, _mark, _body, row_h = self:line("0000", "--", inner_w)
     local gap = UI.sz(ROW_GAP)
-    local total = title:getSize().h + gap + LINES * row_h + (LINES - 1) * gap
+    local total = title:getSize().h + gap + self.lines * row_h + (self.lines - 1) * gap
     if title.free then title:free() end
     if probe.free then probe:free() end
     return { height = total }
 end
 
---- 构建历史上的今天列表，保存年份和标题控件供原地更新。
+--- 构建固定行列表，保存标记和标题控件供原地更新。
 ---@return table
 function M:createWidget()
     local ctx, opts = self.ctx, self.opts
@@ -110,7 +114,7 @@ function M:createWidget()
     local pad_x = 0
     local inner_w = w
     local title = TextWidget:new{
-        text = _("历史上的今天"),
+        text = self.label,
         face = UI.face("cfont", 12),
         bold = true,
         max_width = inner_w,
@@ -118,14 +122,13 @@ function M:createWidget()
     }
     local kids = { align = "left", title, VerticalSpan:new{ width = UI.sz(ROW_GAP) } }
     local marks, items = {}, {}
-    local data = rows(self.data)
     local row_h = 0
-    for i = 1, LINES do
+    for i = 1, self.lines do
         if i > 1 then
             table.insert(kids, VerticalSpan:new{ width = UI.sz(ROW_GAP) })
         end
-        local row = data[i] or { year = "", title = "" }
-        local group, mark, body, h = line(row.year, row.title, inner_w)
+        local mark_text, title_text = self:row(i)
+        local group, mark, body, h = self:line(mark_text, title_text, inner_w)
         row_h = h
         marks[i] = mark
         items[i] = body
@@ -133,7 +136,7 @@ function M:createWidget()
     end
     local col = VerticalGroup:new(kids)
     local inner_h = title:getSize().h + UI.sz(ROW_GAP)
-        + LINES * row_h + (LINES - 1) * UI.sz(ROW_GAP)
+        + self.lines * row_h + (self.lines - 1) * UI.sz(ROW_GAP)
     local extra = math.max(0, total_h - inner_h)
     local pad_top = math.floor(extra / 2)
     local widget = FrameContainer:new{
@@ -153,30 +156,27 @@ function M:createWidget()
     return widget
 end
 
---- 把当前历史事件写入已有年份和标题行并刷新内容区域。
----@return nil
+--- 把当前数据写入已有行并刷新内容区域。
 function M:updateView()
     if not self.items then return end
-    local data = rows(self.data)
-    for i = 1, LINES do
-        local row = data[i] or { year = "", title = "" }
-        self.marks[i]:setText(row.year)
-        self.items[i]:setText(row.title)
+    for i = 1, self.lines do
+        local mark, title = self:row(i)
+        self.marks[i]:setText(mark)
+        self.items[i]:setText(title)
     end
     self:dirty("content")
 end
 
---- 异步取得摸鱼日报中的历史事件，失败时保留已有数据。
+--- 异步取得摸鱼日报中的本组件字段，失败时保留已有数据。
 ---@param done fun(data:any, err:any) 数据加载回调；失败回退旧数据时仍按成功交付
 ---@return table|nil request 在线接口返回的取消句柄；同步缓存命中可能无句柄
 function M:loadData(done)
     return Myrl:fetch({}, function(data, err)
-        done(not err and data.history or self.data)
+        done(not err and data[self.field] or self.data)
     end)
 end
 
 --- 仅在 Resume 阶段发起数据加载；数据变化后更新内容，取消的旧回调不再改写视图。
----@return nil
 function M:pull()
     if not self.lifecycle:uiReady() then return end
     local previous = self.data
@@ -187,14 +187,12 @@ function M:pull()
     end)
 end
 
---- 恢复显示时拉取历史事件。
----@return nil
+--- 恢复显示时拉取数据。
 function M:onResume()
     self:pull()
 end
 
---- 清除历史事件的年份、标题控件和桌面引用。
----@return nil
+--- 清除标记、标题控件和桌面引用。
 function M:onDestroy()
     self.marks = nil
     self.items = nil

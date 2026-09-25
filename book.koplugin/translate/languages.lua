@@ -95,7 +95,6 @@ end
 
 --- 写入常用语言。
 ---@param codes string[]
----@return nil
 function Languages.saveFavorites(codes)
     local reader = MoonSettings.get("reader")
     reader.translate_languages = codes
@@ -124,7 +123,6 @@ end
 --- 打开设置页：常用翻译语言多选。
 ---@param translator table
 ---@param desktop table|nil
----@return nil
 function Languages.openSettingsPicker(translator, desktop)
     local items = Languages.settingsItems(translator)
     require("ui.views.popup").multi{
@@ -224,7 +222,6 @@ end
 
 --- 写入 KOReader 源语言设置。
 ---@param code string
----@return nil
 function Languages.applySource(code)
     if code == "auto" then
         G_reader_settings:saveSetting("translator_from_auto_detect", true)
@@ -236,7 +233,6 @@ end
 
 --- 写入 KOReader 目标语言设置。
 ---@param code string
----@return nil
 function Languages.applyTarget(code)
     G_reader_settings:saveSetting("translator_to_language", code)
 end

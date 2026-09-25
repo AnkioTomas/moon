@@ -125,7 +125,6 @@ end
 
 --- 取消当前天气图标的在飞请求并清除图标引用。
 ---@param self BookHomeWeather 当前视图或布局实例
----@return nil
 local function dropPicture(self)
     if self.picture and self.picture.cancel then
         self.picture:cancel()
@@ -173,7 +172,6 @@ end
 
 --- 取消本实例保存的定时回调并清除句柄。
 ---@param self BookHomeWeather 当前视图或布局实例
----@return nil
 local function stopTick(self)
     if self._tick then UIManager:unschedule(self._tick) end
     self._tick = nil
@@ -240,7 +238,6 @@ function M:createWidget()
 end
 
 --- 将最新天气写入已有文字和图标行，然后刷新内容区域。
----@return nil
 function M:paint()
     if not self.temp then return end
     local temp, detail, extra = texts(self.wx)
@@ -263,7 +260,6 @@ function M:loadData(done)
 end
 
 --- 仅在 Resume 阶段发起数据加载；数据变化后更新内容，取消的旧回调不再改写视图。
----@return nil
 function M:pull()
     if not self.lifecycle:uiReady() then return end
     local previous = self.data
@@ -276,7 +272,6 @@ function M:pull()
 end
 
 --- 取消旧定时器并安排下一次天气拉取，只在 Resume 阶段续订。
----@return nil
 function M:scheduleHourly()
     stopTick(self)
     if not self.lifecycle:uiReady() then return end
@@ -290,7 +285,6 @@ end
 
 --- 换源或首页刷新后重建，并按当前地点重拉天气。
 ---@param event string
----@return nil
 function M:onEvent(event)
     require("ui.desktop.home.views.base").onEvent(self, event)
     if event == "home_refresh" or event == "source_changed" then
@@ -299,7 +293,6 @@ function M:onEvent(event)
 end
 
 --- 绘制已有天气，立即拉取新数据并启动周期刷新。
----@return nil
 function M:onResume()
     self:paint()
     self:pull()
@@ -307,14 +300,12 @@ function M:onResume()
 end
 
 --- 取消天气定时器和图标请求。
----@return nil
 function M:onPause()
     stopTick(self)
     dropPicture(self)
 end
 
 --- 清除天气图标行、文字控件及桌面引用。
----@return nil
 function M:onDestroy()
     self.hero = nil
     self.temp = nil
@@ -333,7 +324,6 @@ end
 
 --- 编辑态设置：天气地点输入框。
 ---@param desktop table|nil
----@return nil
 function M:showSettings(desktop)
     desktop = desktop or self.desktop or (self.home and self.home.desktop)
     local InfoMessage = require("ui/widget/infomessage")

@@ -15,7 +15,6 @@ Brightness.id = "brightness"
 
 --- 前光状态变化时立即刷新亮度百分比。
 ---@param event string|table 父组件转发的事件名称或事件对象
----@return nil
 function Brightness:onEvent(event)
     if event == "FrontlightStateChanged" then
         self:updateView()

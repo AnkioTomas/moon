@@ -62,7 +62,6 @@ local PUSH_BATCH = 200
 --- 停留不足 1 秒时直接丢弃；数据库错误通过 done 返回。
 ---@param current ReadingStatsSession
 ---@param done fun(err: any|nil)|nil
----@return nil
 local function settle(current, done)
     local duration = os.time() - current.started_at
     if duration < 1 or current.page < 1 then
@@ -90,7 +89,6 @@ end
 --- 移除当前内存会话，并在存在活动计时段时结清它。
 --- 先清空 session，避免重复结算同一计时段。
 ---@param done fun(err: any|nil)|nil
----@return nil
 local function stopSession(done)
     local current = Stats.session
     Stats.session = nil
@@ -104,7 +102,6 @@ end
 --- 开始或恢复当前页计时。
 --- 启动新会话前会先结清遗留会话，防止异常生命周期丢失统计。
 ---@param snapshot ReaderSessionSnapshot
----@return nil
 function Stats.start(snapshot)
     stopSession()
     if not snapshot or not snapshot.identity then return end
@@ -135,7 +132,6 @@ end
 
 --- 停止计时；最后一段落库后调用 done。
 ---@param done fun(err: any|nil)|nil
----@return nil
 function Stats.stop(done)
     stopSession(done)
 end
@@ -162,9 +158,6 @@ function Stats.push(source, done)
     for _, row in ipairs(rows) do ids[#ids + 1] = row.id end
 
     --- 处理 Source 上传结果；远端确认后再确认本地版本。
-    ---@param result any
-    ---@param err any
-    ---@return nil
     local function onResult(result, err)
         if not result then
             if done then done(false, err) end
@@ -261,7 +254,6 @@ function Stats.syncAsync(source, _opts, cb)
     local push_error
     --- 终结整次同步并回调；已取消时静默丢弃。
     ---@param value SyncResult|nil nil 表示失败
-    ---@param err any
     local function finish(value, err)
         if cancelled then return end
         if value and source and source.id then
