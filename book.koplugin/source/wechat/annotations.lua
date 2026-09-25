@@ -60,40 +60,89 @@ local IGNORED_RUNES = {
     ["\239\187\191"] = true, -- U+FEFF
 }
 
----@param runes string[]
----@param starts integer[]
----@param ends integer[]
+--- 可见 rune 累加器：连续空白折叠成一个空格；块边界不制造字符，并吞掉两侧空白
+--- （与本地 rune 流逐段剥首尾空白后首尾相接的规则一致）。
+---@class WechatVisibleBuilder
+---@field runes string[]
+---@field starts integer[]
+---@field ends integer[]
+---@field boundary boolean 位于块边界之后、尚未遇到非空白 rune
+
+---@return WechatVisibleBuilder
+local function newBuilder()
+    return { runes = {}, starts = {}, ends = {}, boundary = true }
+end
+
+---@param b WechatVisibleBuilder
 ---@param rune string
 ---@param start_pos integer 0-based inclusive
 ---@param end_pos integer 0-based exclusive
-local function appendVisible(runes, starts, ends, rune, start_pos, end_pos)
+local function appendVisible(b, rune, start_pos, end_pos)
     if IGNORED_RUNES[rune] then
         return
     end
     if rune == "　" or rune:match("^%s$") then
+        if b.boundary then return end
         rune = " "
     end
-    if rune == " " and runes[#runes] == " " then
-        ends[#ends] = end_pos
+    local n = #b.runes
+    if rune == " " and b.runes[n] == " " then
+        b.ends[n] = end_pos
         return
     end
-    runes[#runes + 1] = rune
-    starts[#starts + 1] = start_pos
-    ends[#ends + 1] = end_pos
+    b.boundary = false
+    b.runes[n + 1] = rune
+    b.starts[n + 1] = start_pos
+    b.ends[n + 1] = end_pos
 end
 
-local function trimVisible(runes, starts, ends)
-    while runes[1] == " " do
-        table.remove(runes, 1)
-        table.remove(starts, 1)
-        table.remove(ends, 1)
+---@param b WechatVisibleBuilder
+local function blockBoundary(b)
+    local n = #b.runes
+    if b.runes[n] == " " then
+        b.runes[n], b.starts[n], b.ends[n] = nil, nil, nil
     end
-    while runes[#runes] == " " do
-        table.remove(runes)
-        table.remove(starts)
-        table.remove(ends)
-    end
+    b.boundary = true
 end
+
+---@param b WechatVisibleBuilder
+---@return WechatWireMapping
+local function finishMapping(b)
+    blockBoundary(b)
+    local rune_at_byte, byte_pos = {}, 1
+    for index, rune in ipairs(b.runes) do
+        rune_at_byte[byte_pos] = index
+        byte_pos = byte_pos + #rune
+    end
+    ---@type WechatWireMapping
+    return {
+        text = table.concat(b.runes),
+        runes = b.runes,
+        starts = b.starts,
+        ends = b.ends,
+        rune_at_byte = rune_at_byte,
+        count = #b.runes,
+    }
+end
+
+--- 纯文本（TXT 章节原文、划线文本）→ 规范化可见文本及每个 rune 的 0-based 原文坐标。
+--- 换行即段落边界：不制造字符，并吞掉两侧空白。
+---@param text string
+---@return WechatWireMapping
+function Annotations.plainMapping(text)
+    local b = newBuilder()
+    for i, rune in ipairs(toRunes(Text.stripBom(text))) do
+        if rune == "\n" then
+            blockBoundary(b)
+        else
+            appendVisible(b, rune, i - 1, i)
+        end
+    end
+    return finishMapping(b)
+end
+
+--- 标签内文字不属于正文：脚本、样式与 head（含 title，微信正文 body 内也可能出现）。
+local SKIPPED_TAGS = { script = true, style = true, head = true, title = true }
 
 --- 将微信章节 HTML 转成规范化可见文本，并保存每个文本 rune 对应的 wire 坐标。
 --- 块标签边界不制造字符；只清掉边界空白，因此跨段 markText 仍能直接匹配。
@@ -102,7 +151,7 @@ end
 function Annotations.wireMapping(html)
     html = Text.stripBom(html)
     local source = toRunes(html)
-    local runes, starts, ends = {}, {}, {}
+    local b = newBuilder()
     local i, skip_tag = 1, nil
     while i <= #source do
         local rune = source[i]
@@ -115,7 +164,7 @@ function Annotations.wireMapping(html)
                 end
             end
             if not close_pos then
-                appendVisible(runes, starts, ends, rune, i - 1, i)
+                appendVisible(b, rune, i - 1, i)
                 i = i + 1
             else
                 local tag = table.concat(source, "", i + 1, close_pos - 1)
@@ -125,10 +174,10 @@ function Annotations.wireMapping(html)
                     if closing == "/" and name == skip_tag then
                         skip_tag = nil
                     end
-                elseif (name == "script" or name == "style") and closing ~= "/" then
+                elseif name and SKIPPED_TAGS[name] and closing ~= "/" and not tag:match("/%s*$") then
                     skip_tag = name
                 elseif name and BLOCK_TAGS[name] then
-                    trimVisible(runes, starts, ends)
+                    blockBoundary(b)
                 end
                 i = close_pos + 1
             end
@@ -148,33 +197,19 @@ function Annotations.wireMapping(html)
             local decoded = encoded and Text.xmlDecode(encoded) or nil
             if decoded and decoded ~= encoded then
                 for _, value in ipairs(toRunes(decoded)) do
-                    appendVisible(runes, starts, ends, value, i - 1, entity_end)
+                    appendVisible(b, value, i - 1, entity_end)
                 end
                 i = entity_end + 1
             else
-                appendVisible(runes, starts, ends, rune, i - 1, i)
+                appendVisible(b, rune, i - 1, i)
                 i = i + 1
             end
         else
-            appendVisible(runes, starts, ends, rune, i - 1, i)
+            appendVisible(b, rune, i - 1, i)
             i = i + 1
         end
     end
-    trimVisible(runes, starts, ends)
-    local rune_at_byte, byte_pos = {}, 1
-    for index, rune in ipairs(runes) do
-        rune_at_byte[byte_pos] = index
-        byte_pos = byte_pos + #rune
-    end
-    ---@type WechatWireMapping
-    return {
-        text = table.concat(runes),
-        runes = runes,
-        starts = starts,
-        ends = ends,
-        rune_at_byte = rune_at_byte,
-        count = #runes,
-    }
+    return finishMapping(b)
 end
 
 -- 双引号/单引号两种 class 写法；不带属性的窄形式已被这两条覆盖，无需另列。
@@ -228,7 +263,7 @@ function Annotations.paragraphs(html)
     end
     local body = html:match("<body[^>]*>(.*)</body>") or html
     local index = 0
-    for inner in body:gmatch("<p[^>]*>(.-)</p>") do
+    for inner in body:gmatch("<p%f[%s>][^>]*>(.-)</p>") do
         index = index + 1
         local text = inner:gsub("<[^>]*>", "")
         text = Text.xmlDecode(text)
@@ -304,11 +339,11 @@ function Annotations.flow(html)
     return buildFlow(Annotations.paragraphs(html))
 end
 
+--- 划线文本规范化；KOReader 跨段选区在段间带换行，按段落边界处理后才能与 rune 流对齐。
 ---@param text string
 ---@return string
 local function normalizeText(text)
-    local mapping = Annotations.wireMapping(Text.xmlEscape(Text.stripBom(text)))
-    return mapping.text
+    return Annotations.plainMapping(text).text
 end
 
 ---@param flow WechatRuneFlow|WechatWireMapping
@@ -432,23 +467,32 @@ function Annotations.locateBatch(source, items)
     return out
 end
 
---- 把本地原生 xpointer 映射为当前微信章节 HTML 的 wire range。
+--- 章节 range 坐标原文 → wire 映射：EPUB 按 HTML 解析，TXT 按纯文本逐 rune 计。
+---@param source string
+---@param format '"html"'|'"txt"'|nil 缺省按 html
+---@return WechatWireMapping
+function Annotations.rangeMapping(source, format)
+    if format == "txt" then
+        return Annotations.plainMapping(source)
+    end
+    return Annotations.wireMapping(source)
+end
+
+--- 把本地原生 xpointer 映射为当前微信章节的 wire range。
 --- 两份正文规范化文本完全一致时直接按全局 rune 位置映射；否则只接受两边候选数一致的
 --- occurrence 映射。任何歧义或反向校验失败都返回 nil。
----@param wire_html string
----@param local_html string
+---@param wire WechatWireMapping Annotations.rangeMapping 的结果；同章多条划线复用
+---@param local_flow WechatRuneFlow Annotations.flow(本地章节 HTML)
 ---@param needle string
 ---@param pos0 string|nil
 ---@param pos1 string|nil
 ---@return string|nil range
 ---@return string|nil err
-function Annotations.toWireRange(wire_html, local_html, needle, pos0, pos1)
+function Annotations.toWireRange(wire, local_flow, needle, pos0, pos1)
     needle = normalizeText(tostring(needle or ""))
     if needle == "" then
         return nil, "empty highlight"
     end
-    local local_flow = Annotations.flow(local_html)
-    local wire = Annotations.wireMapping(wire_html)
     local local_heads = matchingHeads(local_flow, needle)
     local wire_heads = matchingHeads(wire, needle)
     if #local_heads == 0 or #wire_heads == 0 then
@@ -463,19 +507,22 @@ function Annotations.toWireRange(wire_html, local_html, needle, pos0, pos1)
             break
         end
     end
-    if not ordinal then
+    local want = countRunes(needle)
+    if ordinal then
+        -- 起点由 xpointer 命中时，终点必须落在同一坐标系里；
+        -- 起点靠唯一文本兜底时 xpointer 形态（嵌套、内联节点）不可比，不做终点校验。
+        local local_tail = local_head + want - 1
+        local end_paragraph, end_offset = parseXPointer(pos1)
+        if end_paragraph and (local_flow.para[local_tail] ~= end_paragraph
+                or local_flow.offset[local_tail] + 1 ~= end_offset) then
+            return nil, "local highlight range mismatch"
+        end
+    else
         if #local_heads ~= 1 then
             return nil, "ambiguous local highlight"
         end
         ordinal = 1
         local_head = local_heads[1]
-    end
-    local want = countRunes(needle)
-    local local_tail = local_head + want - 1
-    local end_paragraph, end_offset = parseXPointer(pos1)
-    if end_paragraph and (local_flow.para[local_tail] ~= end_paragraph
-            or local_flow.offset[local_tail] + 1 ~= end_offset) then
-        return nil, "local highlight range mismatch"
     end
 
     local wire_head

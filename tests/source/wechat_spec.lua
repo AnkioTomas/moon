@@ -106,13 +106,19 @@ stub("source.wechat.client", function()
 end)
 stub("source.wechat.chapter", function()
     return {
-        ensurePsvtsAsync = function(_, _, cb)
+        ensurePsvtsAsync = function(book_id, uid, cb)
+            local Context = require("source.wechat.context")
+            if not Context.psvts(book_id, uid) then
+                Context.rememberReader(book_id, uid, {
+                    psvts = "ps-" .. tostring(uid), pclts = "pc", token = "tk",
+                })
+            end
             cb(true)
             return { cancel = function() end }
         end,
         fetchHtmlAsync = function(_, _, cb)
             chapter_fetches = chapter_fetches + 1
-            cb(chapter_range_html, nil, chapter_range_html)
+            cb(chapter_range_html, nil, chapter_range_html, "html")
             return { cancel = function() end }
         end,
     }
@@ -257,31 +263,54 @@ do
         { idx = 1, source_idx = 3, uid = "u1", title = "一" },
         { idx = 2, source_idx = 5, uid = "u2", title = "二" },
     })
-    local reported = 0
+    require("source.wechat.context").clear()
     local reported_payloads = {}
     fake_client.reportReadAsync = function(_, raw, _, cb)
-        reported = reported + 1
         reported_payloads[#reported_payloads + 1] = require("json").decode(raw)
-        if reported == 1 then
-            cb({ ok = true })
+        -- 第一章 enter + 时长成功，第二章 enter 失败
+        if #reported_payloads <= 2 then
+            cb({ succ = 1 })
         else
             cb(nil, "boom")
         end
         return { cancel = function() end }
     end
     local data, err
+    -- 第二章更早读过、第一章是最近回翻重读的：最近读的最后报，位置取该章最后一段。
     src:pushStatsAsync({
-        { id = 11, stable_id = "bp", chapter_idx = 1, duration = 10 },
-        { id = 12, stable_id = "bp", chapter_idx = 2, duration = 20 },
+        { id = 12, stable_id = "bp", chapter_idx = 2, duration = 20, start_time = 100, chapter_fraction = 0.9 },
+        { id = 11, stable_id = "bp", chapter_idx = 1, duration = 10, start_time = 300, chapter_fraction = 0.2 },
+        { id = 14, stable_id = "bp", chapter_idx = 1, duration = 7, start_time = 200, chapter_fraction = 0.8 },
         { id = 13, stable_id = "bp", duration = 5 },
     }, function(value, e) data, err = value, e end)
     fake_client.reportReadAsync = nil
-    Assert.eq(reported, 2)
+    Assert.eq(#reported_payloads, 3)
     Assert.is_nil(err)
-    Assert.len(data.synced_ids, 2, "只确认无坐标行与已上报成功的第一章")
+    local enter, time = reported_payloads[1], reported_payloads[2]
+    Assert.is_nil(enter.rt, "每个 reader 会话先发进入阅读，不带 rt")
+    Assert.eq(time.rt, 20)
+    Assert.eq(time.ci, 5, "时长上报必须使用微信原始 chapterIdx")
+    Assert.eq(time.pr, 95, "时长上报带真实全书进度，填 0 会把云端进度打回开头")
+    Assert.eq(time.co, 9000, "章内位置 = 章内进度 × 10000")
+    Assert.eq(time.sm, "二")
+    Assert.eq(time.pc, "pc", "pc 用阅读页的 pclts")
+    Assert.len(data.synced_ids, 2, "只确认无坐标行与已上报成功的那一章")
     Assert.eq(data.synced_ids[1], 13)
-    Assert.eq(data.synced_ids[2], 11)
-    Assert.eq(reported_payloads[1].ci, 3, "时长上报必须使用微信原始 chapterIdx")
+    Assert.eq(data.synced_ids[2], 12)
+
+    -- 同一 reader 会话不再重复 enter
+    reported_payloads = {}
+    fake_client.reportReadAsync = function(_, raw, _, cb)
+        reported_payloads[#reported_payloads + 1] = require("json").decode(raw)
+        cb({ succ = 1 })
+        return { cancel = function() end }
+    end
+    src:pushStatsAsync({
+        { id = 15, stable_id = "bp", chapter_idx = 2, duration = 30, start_time = 400, chapter_fraction = 0.5 },
+    }, function(value, e) data, err = value, e end)
+    fake_client.reportReadAsync = nil
+    Assert.eq(#reported_payloads, 1)
+    Assert.eq(reported_payloads[1].rt, 30)
 end
 
 -- 全部章节都上报失败时不能报成功：一行都没确认就该让调用方看到错误并重试。
@@ -300,7 +329,7 @@ do
     Assert.eq(err, "boom")
 end
 
--- 翻页不得上报阅读时长：微信侧时长唯一来源是 pushStatsAsync（本地采集补报）。
+-- 翻页不得直接上报阅读时长：微信侧时长唯一来源是 pushStatsAsync（本地采集补报）。
 -- 一旦这里又开一路心跳，同一段阅读时间会被微信计两遍。
 do
     local src = WeChat.new()
@@ -317,6 +346,29 @@ do
     src:onEvent("document_close", nil)
     Assert.eq(reported, 0, "翻页/关书不得直接上报时长")
     fake_client.reportReadAsync = nil
+end
+
+-- 阅读中按 30 秒节流冲刷本地脏统计：只走 syncStatsAsync(dirty_only)，窗口内翻页不重复触发。
+do
+    local src = WeChat.new()
+    src.configured = function() return true end
+    local flushes = {}
+    src.syncStatsAsync = function(_, opts, cb)
+        flushes[#flushes + 1] = opts
+        cb({})
+    end
+    src:onEvent("page_changed", {})
+    src:onEvent("page_changed", {})
+    Assert.len(flushes, 1, "30 秒内翻页只冲刷一次")
+    Assert.is_true(flushes[1].dirty_only)
+    src._stats_flushed_at = os.time() - 30
+    src:onEvent("page_changed", {})
+    Assert.len(flushes, 2, "过了节流窗口再冲刷")
+
+    local idle = WeChat.new()
+    idle.configured = function() return false end
+    idle.syncStatsAsync = function() error("未登录不应冲刷") end
+    idle:onEvent("page_changed", {})
 end
 
 -- getDetailAsync：wire 经 mapper 转 Book，并把封面 URL 记进缓存供 coverRequest 用
@@ -910,6 +962,16 @@ do
     Assert.eq(#calls, 1)
     Assert.eq(retry_first.wr_bookmark_id, "bm-part1")
     Assert.eq(retry_second.wr_bookmark_id, "bm-part2")
+
+    -- 章内定位不到的划线只跳过自己：不能让一条坏数据卡住整章，每次重试都停在它身上。
+    local ghost = { drawer = "lighten", text = "正文里没有这句" }
+    local located = { drawer = "lighten", text = "新划线" }
+    ok, err = push({ ghost, located })
+    Assert.is_true(ok, tostring(err))
+    Assert.eq(#calls, 1)
+    Assert.eq(calls[1].api, "addBookmark")
+    Assert.eq(located.wr_bookmark_id, "bm-new")
+    Assert.is_nil(ghost.wr_bookmark_id)
 
     -- 无划线也无想法：不发请求
     ok = push({ { drawer = "lighten", text = "旧划线", wr_bookmark_id = "bm1", wr_range = "0-3" } })

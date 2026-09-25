@@ -19,32 +19,38 @@ local _ = require("gettext")
 
 local Chapter = {}
 
---- 从 reader HTML 抽 psvts（优先 __INITIAL_STATE__）。
+--- 从 reader HTML 抽 reader 状态（优先 __INITIAL_STATE__，缺字段再按正则兜底）。
 ---@param html string|nil
----@return string|nil
-local function extractPsvts(html)
+---@return { psvts: string|nil, pclts: string|nil, token: string|nil }
+local function extractReaderState(html)
     if type(html) ~= "string" or html == "" then
-        return nil
+        return {}
     end
+    local reader = {}
     local encoded = html:match([[window%.__INITIAL_STATE__%s*=%s*(.-)%s*;%s*%(function]])
     if encoded then
         local ok, state = pcall(JSON.decode, encoded)
         if ok and type(state) == "table" and type(state.reader) == "table" then
-            local p = state.reader.psvts
-            if type(p) == "string" and p ~= "" then
-                return p
-            end
+            reader = state.reader
         end
     end
-    return html:match([["psvts"%s*:%s*"([^"]+)"]])
+    local out = {}
+    for _, field in ipairs({ "psvts", "pclts", "token" }) do
+        local value = reader[field]
+        if type(value) ~= "string" or value == "" then
+            value = html:match('"' .. field .. [["%s*:%s*"([^"]+)"]])
+        end
+        out[field] = value
+    end
+    return out
 end
 
---- 读 reader 页抽取 psvts；缓存由调用方在未取消时写入。
+--- 读 reader 页抽取 reader 状态；缓存由调用方在未取消时写入。
 ---@param bookId string
 ---@param chapter_uid string
----@param cb fun(psvts: string|nil, err: any)
+---@param cb fun(state: { psvts: string, pclts: string|nil, token: string|nil }|nil, err: any)
 ---@return { cancel: fun() }|nil
-local function readerPsvtsAsync(bookId, chapter_uid, cb)
+local function readerStateAsync(bookId, chapter_uid, cb)
     local reader_url = Protocol.readerUrl(bookId, chapter_uid)
     return Auth.webGetAsync(reader_url, {
         accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -55,16 +61,16 @@ local function readerPsvtsAsync(bookId, chapter_uid, cb)
             cb(nil, err or _("无法打开阅读页"))
             return
         end
-        local psvts = extractPsvts(html)
-        if not psvts or psvts == "" then
+        local state = extractReaderState(html)
+        if not state.psvts then
             cb(nil, _("阅读页缺少 psvts"))
             return
         end
-        cb(psvts)
+        cb(state)
     end)
 end
 
---- 确保章节 psvts 已缓存（进度/时长上报依赖）。
+--- 确保章节 reader 状态已缓存且未过期（进度/时长上报依赖）。
 ---@param bookId string
 ---@param chapter_uid string|number
 ---@param cb fun(ok: boolean|nil, err: any)
@@ -81,13 +87,13 @@ function Chapter.ensurePsvtsAsync(bookId, chapter_uid, cb)
         return nil
     end
     local cancelled = false
-    local job = readerPsvtsAsync(bookId, chapter_uid, function(psvts, err)
+    local job = readerStateAsync(bookId, chapter_uid, function(state, err)
         if cancelled then return end
-        if not psvts then
+        if not state then
             cb(nil, err)
             return
         end
-        Context.rememberPsvts(bookId, chapter_uid, psvts)
+        Context.rememberReader(bookId, chapter_uid, state)
         cb(true)
     end)
     return { cancel = function()
@@ -97,9 +103,11 @@ function Chapter.ensurePsvtsAsync(bookId, chapter_uid, cb)
 end
 
 --- 异步拉取章节 HTML 正文。
+--- 第三个回调参数是划线 range 的坐标原文：EPUB 为解码后的完整 xhtml，TXT 为解码后的纯文本
+--- （format 分别为 "html" / "txt"）；不能用清理或段落化后的正文，否则 range 整体偏移。
 ---@param bookId string
 ---@param chapter BookChapter
----@param cb fun(html: string|nil, err: any, range_html: string|nil)
+---@param cb fun(html: string|nil, err: any, range_source: string|nil, format: '"html"'|'"txt"'|nil)
 ---@return { cancel: fun() }
 function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     bookId = tostring(bookId or "")
@@ -153,14 +161,14 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
             end
         )
     end
-    active_job = readerPsvtsAsync(bookId, uid, function(value, err)
+    active_job = readerStateAsync(bookId, uid, function(state, err)
         if cancelled then return end
-        if not value then
+        if not state then
             fail(err)
             return
         end
-        psvts = value
-        Context.rememberPsvts(bookId, uid, psvts)
+        psvts = state.psvts
+        Context.rememberReader(bookId, uid, state)
         requestShard("/web/book/chapter/e_0", function(e0, e0err)
             if not e0 then
                 fail(e0err)
@@ -178,8 +186,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                         if not plain then
                             fail(decode_err or _("txt 章节解码失败"))
                         else
-                            local body = Text.textToBody(plain)
-                            cb(body, nil, body)
+                            cb(Text.textToBody(plain), nil, plain, "txt")
                         end
                     end)
                 end)
@@ -201,10 +208,9 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                     else
                         local fragment = Text.htmlBodyFragment(xhtml)
                         if Text.looksLikeHtml(fragment) then
-                            cb(Annotations.cleanChapterHtml(fragment), nil, fragment)
+                            cb(Annotations.cleanChapterHtml(fragment), nil, xhtml, "html")
                         else
-                            local body = Text.textToBody(fragment)
-                            cb(body, nil, body)
+                            cb(Text.textToBody(fragment), nil, xhtml, "html")
                         end
                     end
                 end)

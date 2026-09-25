@@ -82,6 +82,24 @@ end
 --- 删除：本地先标 deleted（书架立刻消失），能上网时再推云端真删。
 Source.deleteBookAsync = Shelf.deleteAsync
 
+--- 阅读中时长推送间隔（秒），对齐网页端 / weread 的上报节奏。
+local STATS_FLUSH_INTERVAL = 30
+
+--- 翻页时按间隔推送已落盘的阅读时长；其余事件交给基类。
+---@param event string
+---@param payload table|nil
+function Source:onEvent(event, payload)
+    if event == "page_changed" then
+        local now = os.time()
+        if self:configured() and now - (self._stats_flushed_at or 0) >= STATS_FLUSH_INTERVAL then
+            self._stats_flushed_at = now
+            self:syncStatsAsync({ dirty_only = true }, function() end)
+        end
+        return
+    end
+    return SourceBase.onEvent(self, event, payload)
+end
+
 --- 清空封面 URL、阅读上下文与目录缓存。
 function Source:clearCaches()
     self._covers = {}
@@ -411,11 +429,14 @@ function Source:putProgressAsync(identity, pos, cb)
         end }
 end
 
---- 补报阅读时长：对每章现拉 psvts 后发 web/book/read。
+--- 补报阅读时长：对每章补齐 reader 状态后发 web/book/read。
 ---
 --- 这是微信侧时长的**唯一**来源。本地行带 chapter_idx/chapter_fraction（book.stats
---- 采集时落库），关书时经 syncStatsAsync 触发。翻页时不要再另开一路心跳上报，
---- 否则同一段时间会被计两遍。
+--- 采集时落库），阅读中按 STATS_FLUSH_INTERVAL 节流、关书时各经 syncStatsAsync 推送
+--- 同一批待同步行；不要另开一路心跳，否则同一段时间会被计两遍。
+---
+--- 对齐网页端：rt 是距上次上报的秒数，所以要在阅读中持续小批推送；每条都带真实位置
+--- （这个接口同时更新云端进度，填 0 会把进度打回开头），最近读的章最后报。
 ---@param rows table[]|nil
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
@@ -443,14 +464,16 @@ function Source:pushStatsAsync(rows, cb)
             local bucket = buckets[key]
             if not bucket then
                 bucket = { stable_id = stable_id, chapter_idx = chapter_idx,
-                    duration = 0, chapter_fraction = 0, ids = {} }
+                    duration = 0, chapter_fraction = 0, last_at = 0, ids = {} }
                 buckets[key] = bucket
             end
             bucket.ids[#bucket.ids + 1] = row.id
             bucket.duration = bucket.duration + (tonumber(row.duration) or 0)
-            local frac = tonumber(row.chapter_fraction)
-            if frac and frac > bucket.chapter_fraction then
-                bucket.chapter_fraction = frac
+            -- 位置取该章最后一段的章内进度，而不是最大值：回翻重读时要报读者真实所在处。
+            local at = tonumber(row.start_time) or 0
+            if at >= bucket.last_at then
+                bucket.last_at = at
+                bucket.chapter_fraction = tonumber(row.chapter_fraction) or bucket.chapter_fraction
             end
         end
     end
@@ -463,6 +486,9 @@ function Source:pushStatsAsync(rows, cb)
         work[#work + 1] = bucket
     end
     table.sort(work, function(a, b)
+        if a.last_at ~= b.last_at then
+            return a.last_at < b.last_at
+        end
         if a.stable_id ~= b.stable_id then
             return a.stable_id < b.stable_id
         end
@@ -491,31 +517,57 @@ function Source:pushStatsAsync(rows, cb)
     end
 
     --- 上报一个章节桶的阅读时长；成功则确认桶内全部行 id 并处理下一个。
-    ---@param bucket table 形如 { stable_id, chapter_idx, duration, chapter_fraction, ids }
+    --- reader 会话首次上报前先发一次进入阅读（与网页端 / weread 一致，否则时长不计）。
+    ---@param bucket table 形如 { stable_id, chapter_idx, duration, chapter_fraction, last_at, ids }
     ---@param chapter_uid string 章节 uid
     local function report(bucket, chapter_uid)
-        local psvts = require("source.wechat.context").psvts(bucket.stable_id, chapter_uid)
-        local payload = Protocol.makeReadPayload({
+        local reader = require("source.wechat.context").reader(bucket.stable_id, chapter_uid)
+        if not reader then
+            fail(_("无法打开章节"))
+            return
+        end
+        local toc = Toc.read(self.id, bucket.stable_id)
+        local chapter = toc and toc[bucket.chapter_idx]
+        local whole = Toc.wholeFraction(self.id, bucket.stable_id, bucket.chapter_idx, bucket.chapter_fraction)
+        local position = {
             book_id = bucket.stable_id,
             chapter_uid = chapter_uid,
             chapter_idx = Toc.sourceIndex(self.id, bucket.stable_id, bucket.chapter_idx)
                 or bucket.chapter_idx,
             chapter_offset = math.floor(Progress.clampFraction(bucket.chapter_fraction) * 10000),
-            summary = "",
-            progress = 0,
-            psvts = psvts or "",
-            elapsed_seconds = bucket.duration,
-        })
-        job = self._client:reportReadAsync(JSON.encode(payload), Protocol.readerUrl(bucket.stable_id, chapter_uid), function(data, rerr)
+            summary = chapter and chapter.title or "",
+            progress = math.floor((whole or 0) * 100 + 0.5),
+            psvts = reader.psvts,
+            pclts = reader.pclts,
+            token = reader.token,
+        }
+        local referer = Protocol.readerUrl(bucket.stable_id, chapter_uid)
+        local function sendTime()
+            position.elapsed_seconds = bucket.duration
+            job = self._client:reportReadAsync(JSON.encode(Protocol.makeReadPayload(position)), referer, function(data, rerr)
+                if cancelled then return end
+                if not data then
+                    fail(rerr or _("阅读时长上报失败"))
+                    return
+                end
+                for _, id in ipairs(bucket.ids) do
+                    confirmed[#confirmed + 1] = id
+                end
+                nextItem()
+            end)
+        end
+        if reader.entered then
+            sendTime()
+            return
+        end
+        job = self._client:reportReadAsync(JSON.encode(Protocol.makeEnterReadPayload(position)), referer, function(data, rerr)
             if cancelled then return end
             if not data then
                 fail(rerr or _("阅读时长上报失败"))
                 return
             end
-            for _, id in ipairs(bucket.ids) do
-                confirmed[#confirmed + 1] = id
-            end
-            nextItem()
+            reader.entered = true
+            sendTime()
         end)
     end
 
@@ -979,26 +1031,32 @@ function Source:pushNotesAsync(identity, annotations, cb)
             finish(nil, _("缺少章节信息"))
             return
         end
-        current_job = WChapter.fetchHtmlAsync(book_id, chapter, function(_html, err, range_html)
+        current_job = WChapter.fetchHtmlAsync(book_id, chapter, function(_html, err, range_source, format)
             current_job = nil
             if cancelled then return end
-            if not range_html then
+            if not range_source then
                 finish(nil, err or _("无法获取章节坐标"))
                 return
             end
+            local wire = Annotations.rangeMapping(range_source, format)
+            local flow = Annotations.flow(local_html)
+            -- 定位不了的条目只跳过它自己：失败不落库，整章中止会让同一条每轮都卡住其余划线。
             for _, item in ipairs(range_items) do
                 local range, range_err = Annotations.toWireRange(
-                    range_html, local_html, item.text, item.pos0, item.pos1
+                    wire, flow, item.text, item.pos0, item.pos1
                 )
-                if not range then
-                    finish(nil, range_err or _("无法定位划线范围"))
-                    return
+                if range then
+                    item.wr_range = range
+                else
+                    logger.warn("wechat highlight range skipped", book_id, chapter_idx, range_err)
                 end
-                item.wr_range = range
             end
             local _, seen = Notes.reconcileBookmarks(annotations, preflight_wire, chapter_uid)
             for item in pairs(seen) do confirmed[item] = true end
-            candidates = Notes.pushCandidates(annotations)
+            candidates = {}
+            for _, item in ipairs(Notes.pushCandidates(annotations)) do
+                if item.wr_range then candidates[#candidates + 1] = item end
+            end
             if #candidates == 0 then
                 pushReviews(chapter_uid)
                 return

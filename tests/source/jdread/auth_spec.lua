@@ -30,6 +30,7 @@ package.preload["utils.paths"] = function()
 end
 
 local calls = 0
+local ticket_reply = '{"returnCode":0,"url":"https://e.m.jd.com/"}'
 package.preload["http.request"] = function()
     local Request = {}
     function Request.randomUA() return "test-agent" end
@@ -56,7 +57,7 @@ package.preload["http.request"] = function()
                 "thor=session; Domain=.jd.com",
                 "pin=tester; Domain=.jd.com",
             }
-            cb('{"returnCode":0,"url":"https://e.m.jd.com/"}', nil, res)
+            cb(ticket_reply, nil, res)
         end
         return { cancel = function() end }
     end
@@ -105,4 +106,21 @@ do
     Auth.clearSession()
     Assert.is_false(Auth.hasSession())
     Assert.eq(cfg.uuid, uuid)
+end
+
+-- ticket 校验失败：按官方 returnCode 语义提示并附原始码，不写会话。
+for reply, expected in pairs({
+    ['{"returnCode":80}'] = "京东判定本次扫码存在风险，请稍后重试 (80)",
+    ['{"returnCode":58}'] = "二维码已失效，请重新登录 (58)",
+    ['{"returnCode":85}'] = "京东登录校验失败 (85)",
+    ["<html>"] = "京东登录校验失败",
+}) do
+    ticket_reply = reply
+    local user, err
+    Auth.completeQrLoginAsync({ ticket = "ticket" }, function(value, e)
+        user, err = value, e
+    end)
+    Assert.is_nil(user)
+    Assert.eq(err, expected)
+    Assert.is_false(Auth.hasSession())
 end

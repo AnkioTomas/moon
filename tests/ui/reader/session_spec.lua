@@ -552,14 +552,16 @@ do
     local emitted_before_close = #emitted
     Session.onCloseDocument(plugin)
     Assert.eq(#emitted, emitted_before_close, "最后一段统计落库前不通知源")
+    Assert.eq(calls.progress[#calls.progress][1], "clearConflicts")
+    Assert.is_true(calls.progress[#calls.progress - 1][1] ~= "sync",
+        "时长推完之前不推进度：微信时长上报会写云端位置")
     tracker_stop_done()
     tracker_stop_done = nil
     defer_tracker_stop = false
     Assert.is_nil(Session.current(), "关书清会话")
-    Assert.eq(calls.progress[#calls.progress - 1][1], "sync")
-    Assert.is_true(calls.progress[#calls.progress - 1][3],
+    Assert.eq(calls.progress[#calls.progress][1], "sync")
+    Assert.is_true(calls.progress[#calls.progress][3],
         "关书进度只能上传，不能立即回拉旧云端值")
-    Assert.eq(calls.progress[#calls.progress][1], "clearConflicts")
     Assert.eq(calls.tracker[#calls.tracker][1], "stop")
     Assert.eq(emitted[#emitted].ev, "document_close")
     Assert.eq(calls.notes[#calls.notes][1].stable_id, "b1", "注解同步复用阅读身份")

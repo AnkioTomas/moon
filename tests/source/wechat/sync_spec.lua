@@ -190,19 +190,65 @@ do
         .. '<p><img src="https://remote/a.jpg"/>重复</p><p>重复</p>'
     local shell = "<html><body><h1>标题</h1><p>A&amp;B</p>"
         .. '<p><img src="/tmp/a.jpg"/>重复</p><p>重复</p></body></html>'
+    local mapping, flow = Annotations.rangeMapping(wire), Annotations.flow(shell)
     local range, err = Annotations.toWireRange(
-        wire, shell, "重复", "/html/body/p[3]/text().0", "/html/body/p[3]/text().2"
+        mapping, flow, "重复", "/html/body/p[3]/text().0", "/html/body/p[3]/text().2"
     )
     Assert.is_nil(err)
     Assert.eq(range, "59-61")
     local first = Annotations.toWireRange(
-        wire, shell, "A&B", "/html/body/p[1]/text().0", "/html/body/p[1]/text().3"
+        mapping, flow, "A&B", "/html/body/p[1]/text().0", "/html/body/p[1]/text().3"
     )
     Assert.eq(first, "3-10")
-    local ambiguous, ambiguous_err = Annotations.toWireRange(wire, shell, "重复")
+    local ambiguous, ambiguous_err = Annotations.toWireRange(mapping, flow, "重复")
     Assert.is_nil(ambiguous)
     Assert.eq(ambiguous_err, "ambiguous local highlight")
     Assert.eq(Annotations.wireMapping("<p>x</p><style>bad</style><p>y</p>").text, "xy")
+end
+
+do
+    -- range 基准是完整解码 xhtml：head 与 xml 声明计入偏移，但其中文字不参与匹配。
+    local wire = '<?xml version="1.0"?><html><head><title>正文</title></head><body><p>正文</p></body></html>'
+    local shell = "<html><body><p>正文</p></body></html>"
+    local prefix = wire:sub(1, wire:find("<p>正文", 1, true) + 2)
+    local start = select(2, prefix:gsub("[^\128-\191]", ""))
+    local range = Annotations.toWireRange(Annotations.rangeMapping(wire, "html"),
+        Annotations.flow(shell), "正文", "/html/body/p[1]/text().0", "/html/body/p[1]/text().2")
+    Assert.eq(range, string.format("%d-%d", start, start + 2))
+end
+
+do
+    -- TXT：range 对纯文本逐 rune 计（BOM 不计，"<" 不是标签），与 weread 的 Source.plain 一致。
+    local plain = "\239\187\191甲<&乙\n  丙丁"
+    local shell = "<html><body>" .. require("utils.text").textToBody(plain:sub(4)) .. "</body></html>"
+    local flow = Annotations.flow(shell)
+    Assert.eq(Annotations.toWireRange(Annotations.rangeMapping(plain, "txt"), flow,
+        "<&", "/html/body/p[1]/text().1", "/html/body/p[1]/text().3"), "1-3")
+    Assert.eq(Annotations.toWireRange(Annotations.rangeMapping(plain, "txt"), flow,
+        "丙丁", "/html/body/p[2]/text().0", "/html/body/p[2]/text().2"), "7-9")
+end
+
+do
+    -- KOReader 跨段选区在段间带换行与缩进；微信正文段间也有缩进空白。都必须能定位。
+    local wire = "<body><p>  第一段结尾</p>\n<p>  第二段开头</p></body>"
+    local shell = "<html><body><p>  第一段结尾</p><p>  第二段开头</p></body></html>"
+    local range, err = Annotations.toWireRange(Annotations.rangeMapping(wire), Annotations.flow(shell),
+        "结尾\n  第二", "/html/body/p[1]/text().5", "/html/body/p[2]/text().4")
+    Assert.is_nil(err)
+    local head = wire:find("结尾", 1, true)
+    local runes_before = select(2, wire:sub(1, head - 1):gsub("[^\128-\191]", ""))
+    Assert.eq(range:match("^(%d+)"), tostring(runes_before))
+
+    -- 起点 xpointer 不在扁平段落坐标里（嵌套 / 内联节点）时靠唯一文本定位，不拿终点去比。
+    Assert.eq(Annotations.toWireRange(Annotations.rangeMapping(wire), Annotations.flow(shell),
+        "第二段", "/html/body/div/p[9]/span/text().0", "/html/body/div/p[9]/text().3") ~= nil, true)
+end
+
+do
+    -- crengine 的 p[N] 只数 <p>，<pre>/<param> 不能占段号。
+    local paragraphs = Annotations.paragraphs("<body><pre>x</pre><p>a</p><p class='c'>b</p></body>")
+    Assert.len(paragraphs, 2)
+    Assert.eq(paragraphs[2].runes[1], "b")
 end
 
 do

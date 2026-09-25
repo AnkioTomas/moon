@@ -237,8 +237,8 @@ function Client:putProgressAsync(bookId, opts, cb)
         cb(nil, _("缺少章节信息"))
         return nil
     end
-    local psvts = Context.psvts(bookId, chapter_uid)
-    if not psvts then
+    local reader = Context.reader(bookId, chapter_uid)
+    if not reader then
         cb(nil, _("请先打开该章节后再同步进度"))
         return nil
     end
@@ -250,10 +250,12 @@ function Client:putProgressAsync(bookId, opts, cb)
         chapter_offset = opts.chapter_offset,
         summary = opts.summary,
         progress = opts.progress,
-        psvts = psvts,
+        psvts = reader.psvts,
+        pclts = reader.pclts,
     })
     return self:reportReadAsync(JSON.encode(payload), referer, function(data, err)
         if data then
+            reader.entered = true
             cb({ ok = true })
         else
             logger.warn("weread putProgress", err)
@@ -289,6 +291,12 @@ function Client:reportReadAsync(body, referer, cb)
         if not acceptWebWire(data, nil, cb) then
             logger.warn("weread report read rejected",
                 tostring(data.errcode or data.errCode), tostring(data.errmsg or data.errMsg))
+            return
+        end
+        -- 服务端受理的回包带 succ=1 或 synckey；两者都没有是「收下但没记账」，同样按失败留待重试。
+        if not (data.succ == true or tonumber(data.succ) == 1 or data.synckey ~= nil) then
+            logger.warn("weread report read not accepted", tostring(raw):sub(1, 200))
+            cb(nil, _("上报响应异常"))
             return
         end
         cb(data)

@@ -48,6 +48,9 @@ local Stats = {
     session = nil,
 }
 local PUSH_BATCH = 200
+--- 单页停留计时上限（秒），与 KOReader 统计插件默认 max_sec 一致：
+--- 设备不休眠（充电、关闭自动休眠）时停在一页上不能把几小时都算成阅读。
+local MAX_PAGE_SECONDS = 120
 
 --- 当前阅读页的内存计时会话。
 ---@class ReadingStatsSession
@@ -59,11 +62,11 @@ local PUSH_BATCH = 200
 ---@field started_at integer 当前页开始计时的 Unix 时间戳
 
 --- 结清一个页面计时段并写入待同步统计。
---- 停留不足 1 秒时直接丢弃；数据库错误通过 done 返回。
+--- 停留不足 1 秒时直接丢弃，超过 MAX_PAGE_SECONDS 按上限计；数据库错误通过 done 返回。
 ---@param current ReadingStatsSession
 ---@param done fun(err: any|nil)|nil
 local function settle(current, done)
-    local duration = os.time() - current.started_at
+    local duration = math.min(os.time() - current.started_at, MAX_PAGE_SECONDS)
     if duration < 1 or current.page < 1 then
         if done then done() end
         return

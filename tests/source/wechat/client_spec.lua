@@ -226,11 +226,12 @@ do
 end
 
 do
+    local entered_payload
     package.preload["source.wechat.context"] = function()
         return {
-            psvts = function(book_id, chapter_uid)
+            reader = function(book_id, chapter_uid)
                 if book_id == "99" and tostring(chapter_uid) == "8" then
-                    return "psvts-token"
+                    return { psvts = "psvts-token", pclts = "pclts-token" }
                 end
                 return nil
             end,
@@ -242,6 +243,7 @@ do
                 return "https://weread.qq.com/web/reader/" .. book_id .. "?c=" .. chapter_uid
             end,
             makeEnterReadPayload = function(opts)
+                entered_payload = opts
                 return {
                     book_id = opts.book_id,
                     chapter_uid = opts.chapter_uid,
@@ -255,13 +257,14 @@ do
     package.loaded["source.wechat.context"] = nil
     package.loaded["source.wechat.protocol"] = nil
     package.loaded["source.wechat.client"] = nil
+    local read_reply = { succ = 1 }
     package.preload["json"] = function()
         return {
             encode = function()
                 return '{"signed":"signed"}'
             end,
             decode = function()
-                return {}
+                return read_reply
             end,
         }
     end
@@ -274,6 +277,19 @@ do
     Assert.is_true(posted.url:find("/web/book/read", 1, true) ~= nil)
     Assert.is_true(posted.raw:find("signed", 1, true) ~= nil)
     Assert.not_nil(ok)
+    Assert.eq(entered_payload.pclts, "pclts-token", "进度上报必须带阅读页的 pclts")
+
+    -- 没有 succ / synckey 的回包是「收下但没记账」：不能当成功确认，否则数据静默丢失。
+    read_reply = {}
+    ok, err = nil, nil
+    progress_client:putProgressAsync("99", { progress = 50, chapter_uid = 8 }, function(data, e) ok, err = data, e end)
+    Assert.is_nil(ok)
+    Assert.not_nil(err)
+    read_reply = { synckey = 123 }
+    ok, err = nil, nil
+    progress_client:putProgressAsync("99", { progress = 50, chapter_uid = 8 }, function(data, e) ok, err = data, e end)
+    Assert.not_nil(ok)
+    read_reply = { succ = 1 }
 
     ok, err = nil, nil
     progress_client:putProgressAsync("99", { progress = 50 }, function(data, e) ok, err = data, e end)

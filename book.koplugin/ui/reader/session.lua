@@ -163,16 +163,22 @@ end
 local function syncReading(plugin, event)
     local identity = Session._snapshot and Session._snapshot.identity
     local source = identity and identity.source
+    -- 进度要在时长之后推：微信时长上报也会写云端位置，最后落地的必须是精确进度。
+    local waiting, progress_saved = 2, false
+    local function pushProgress()
+        waiting = waiting - 1
+        if waiting > 0 or not progress_saved or not source.syncProgressAsync then return end
+        -- 关书只负责把本地新版本推上去。立即回拉可能读到微信尚未收敛的
+        -- 旧值，再把刚上传的进度覆盖掉；远端拉取统一留给下次 ReaderReady。
+        source:syncProgressAsync({
+            identity = identity,
+            dirty_only = true,
+        }, function() end)
+    end
     if source and identity then
         require("book.progress").save(Session._snapshot, function(ok)
-            if ok and source.syncProgressAsync then
-                -- 关书只负责把本地新版本推上去。立即回拉可能读到微信尚未收敛的
-                -- 旧值，再把刚上传的进度覆盖掉；远端拉取统一留给下次 ReaderReady。
-                source:syncProgressAsync({
-                    identity = identity,
-                    dirty_only = true,
-                }, function() end)
-            end
+            progress_saved = ok
+            pushProgress()
         end)
         require("book.note").save(plugin.ui, identity, function(ok)
             if ok and source.syncNotesAsync then
@@ -187,9 +193,11 @@ local function syncReading(plugin, event)
     require("book.stats").stop(function()
         if source and source.syncStatsAsync then
             source:syncStatsAsync({ dirty_only = true }, function()
+                if identity then pushProgress() end
                 plugin:emitToSource(event, nil, source)
             end)
         elseif source then
+            if identity then pushProgress() end
             plugin:emitToSource(event, nil, source)
         end
     end)
