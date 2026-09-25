@@ -287,6 +287,7 @@ local function pumpIO()
 
     local job = require("workers.job").run(item.worker, {
         name = item.name,
+        kind = "light",
         timeout = 30 * 60,
         on_done = function(result) finish(result) end,
         on_failed = function(err)
