@@ -230,6 +230,23 @@ Stubs.flush()
 Assert.eq(#image_widgets, before_large + 3, "大图在后续帧解码")
 for i = 1, #large do large[i]:free() end
 
+-- 续排若 0 延迟，UIManager 会在读输入前把整个队列解完，切页卡死。
+local delays = {}
+local schedule_in = UIManager.scheduleIn
+function UIManager:scheduleIn(delay, fn)
+    delays[#delays + 1] = delay
+    return schedule_in(self, delay, fn)
+end
+local yielding = {
+    Image.widget{ src = image_path, width = 200, height = 200 },
+    Image.widget{ src = image_path, width = 200, height = 200 },
+}
+Stubs.flush()
+UIManager.scheduleIn = schedule_in
+Assert.len(delays, 1)
+Assert.is_true(delays[1] > 0, "续排解码必须让出输入轮询")
+for i = 1, #yielding do yielding[i]:free() end
+
 local large_done = false
 Image.await(Image.widget{ src = image_path, width = 200, height = 200 }, function()
     large_done = true

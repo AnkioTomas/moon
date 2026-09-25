@@ -27,7 +27,7 @@ UI 图标请用 ui.components.icon（Material Icons 字体），不要走本组�
   box:cancel()  -- 只取消这一张的下载
 
 下载单独限流。解码走 ImageWidget（file=，自带 BB 缓存），不 fork。
-小图（目标面积且文件都小）当场解；封面这种大图 nextTick 排队，一帧一张。
+小图（目标面积且文件都小）当场解；封面这种大图排队，解一张让出一次输入轮询。
 
 @module koplugin.book.ui.components.image
 --]]
@@ -191,6 +191,8 @@ end
 -- 小图：天气图标级别。超过任一阈值就排队，避免图书馆一页 12 张封面卡死拼页。
 local SMALL_PIXELS = 80 * 80
 local SMALL_BYTES = 32 * 1024
+-- UIManager 在任务队列变脏时会反复跑任务、不去读输入；续排必须晚于一次重绘，才能让出输入轮询。
+local YIELD_S = 0.1
 
 local wait = {}
 local pumping = false
@@ -222,7 +224,7 @@ local function pump()
             box:_settle()
             if wait[1] then
                 pumping = true
-                UIManager:nextTick(pump)
+                UIManager:scheduleIn(YIELD_S, pump)
             end
             return
         end

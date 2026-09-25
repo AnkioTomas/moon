@@ -32,14 +32,25 @@ do
             end,
         }
     end
+    local lookups = {}
+    package.preload["socket"] = function()
+        return { dns = { getaddrinfo = function(host)
+            lookups[#lookups + 1] = host
+            if host == "nx.invalid" then return nil, "host not found" end
+            return { { family = "inet", addr = "10.0.0." .. #lookups } }
+        end } }
+    end
     package.preload["turbo.iostream"] = function()
         local IOStream = {}
         function IOStream:_handle_connect_fail(err)
             self.fail_self = self
             self.fail_err = err
         end
-        function IOStream:connect()
-            self._handle_connect_fail("Network is unreachable")
+        function IOStream:connect(address)
+            self.connected_to = address
+            if self.should_fail then
+                self._handle_connect_fail("Network is unreachable")
+            end
         end
         function IOStream:_read_from_buffer()
             return self._read_buffer_size, self._read_bytes
@@ -66,10 +77,30 @@ do
     Assert.eq(handshake_calls, 4)
 
     local iostream = require("turbo.iostream")
-    local fail_stream = {}
+    local fail_stream = { should_fail = true }
     iostream.IOStream.connect(fail_stream, "example.com", 443)
     Assert.eq(fail_stream.fail_err, "Network is unreachable")
     Assert.eq(fail_stream.fail_self, fail_stream)
+
+    -- 同一主机只在 UI 线程解析一次；IP 字面量不解析；连接失败丢缓存重解析。
+    lookups = {}
+    local a, b = {}, {}
+    iostream.IOStream.connect(a, "cdn.example.com", 443)
+    iostream.IOStream.connect(b, "cdn.example.com", 443)
+    Assert.eq(#lookups, 1, "同主机第二次连接必须命中缓存")
+    Assert.eq(a.connected_to, "10.0.0.1")
+    Assert.eq(b.connected_to, "10.0.0.1")
+    iostream.IOStream.connect({}, "1.2.3.4", 443)
+    iostream.IOStream.connect({}, "2001:db8::1", 443)
+    Assert.eq(#lookups, 1, "IP 字面量不得解析")
+    iostream.IOStream.connect({ should_fail = true }, "cdn.example.com", 443)
+    local c = {}
+    iostream.IOStream.connect(c, "cdn.example.com", 443)
+    Assert.eq(#lookups, 2, "连接失败后必须重新解析")
+    Assert.eq(c.connected_to, "10.0.0.2")
+    local nx = {}
+    iostream.IOStream.connect(nx, "nx.invalid", 443)
+    Assert.eq(nx.connected_to, "nx.invalid", "解析失败交回 connect 报真实错误")
     local ffi = require("ffi")
     local sized = {
         _read_buffer_size = ffi.new("int64_t", 16),
@@ -82,7 +113,7 @@ do
     Assert.eq(type(got_bytes), "number")
     Turbo.release()
 
-    for _, name in ipairs({ "turbo", "turbo.crypto", "turbo.iostream" }) do
+    for _, name in ipairs({ "turbo", "turbo.crypto", "turbo.iostream", "socket" }) do
         package.preload[name] = nil
         package.loaded[name] = nil
     end
