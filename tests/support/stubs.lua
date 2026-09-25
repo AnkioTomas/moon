@@ -295,6 +295,41 @@ local function installLeafStubs()
         end
         return Event
     end)
+    installIfMissing("ui/widget/widget", function()
+        local Widget = {}
+        Widget.__index = Widget
+        function Widget:new(options)
+            return setmetatable(options or {}, self)
+        end
+        function Widget:getSize()
+            return self.dimen
+        end
+        return Widget
+    end)
+    installIfMissing("ui/widget/container/widgetcontainer", function()
+        local WidgetContainer = {}
+        WidgetContainer.__index = WidgetContainer
+        function WidgetContainer:extend(subclass)
+            subclass = subclass or {}
+            subclass.__index = subclass
+            return setmetatable(subclass, self)
+        end
+        function WidgetContainer:new(options)
+            return setmetatable(options or {}, self)
+        end
+        function WidgetContainer:getSize()
+            return self.dimen or (self[1] and self[1]:getSize()) or { x = 0, y = 0, w = 0, h = 0 }
+        end
+        function WidgetContainer:paintTo(bb, x, y)
+            if self[1] and self[1].paintTo then self[1]:paintTo(bb, x, y) end
+        end
+        function WidgetContainer:free(full)
+            for _, widget in ipairs(self) do
+                if widget.free then widget:free(full) end
+            end
+        end
+        return WidgetContainer
+    end)
     installIfMissing("ui/widget/verticalspan", function()
         local VerticalSpan = {}
         function VerticalSpan:new(options)

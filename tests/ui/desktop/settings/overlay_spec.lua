@@ -19,7 +19,7 @@ for _, name in ipairs({
     "ui/widget/verticalgroup",
     "ui/widget/verticalspan",
     "ui/widget/linewidget",
-    "ui/widget/container/overlapgroup",
+    "ui/widget/overlapgroup",
     "ui/widget/container/rightcontainer",
     "ui/widget/container/centercontainer",
     "ui/widget/container/inputcontainer",
