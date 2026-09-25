@@ -250,6 +250,7 @@ return {
     ["左斜边"] = "Tilted left",
     ["右斜边"] = "Tilted right",
     ["竖屏排版"] = "Portrait stagger",
+    ["小鹤双拼"] = "Xiaohe Shuangpin",
     ["尚未安装字典"] = "No dictionaries installed",
     ["居中"] = "Center",
     ["示例书名"] = "Sample title",

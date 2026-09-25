@@ -73,6 +73,7 @@ local SYLLABLES = {
     "zha", "zhai", "zhan", "zhang", "zhao", "zhe", "zhei", "zhen", "zheng", "zhi", "zhong", "zhou", "zhu", "zhua",
     "zhuai", "zhuan", "zhuang", "zhui", "zhun", "zhuo",
 }
+M.SYLLABLES = SYLLABLES
 -- 按长度索引，供最长音节优先的贪心匹配。
 local SYL_BY_LEN = {}
 local MAX_SYL_LEN = 0
