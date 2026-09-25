@@ -177,29 +177,6 @@ function Annotations.wireMapping(html)
     }
 end
 
---- 跳过标签或取一个 UTF-8 rune。
----@param html string
----@param i integer
----@return string|nil kind '"tag"'|'"rune"'
----@return string chunk
----@return integer next_i
-local function nextToken(html, i)
-    local len = #html
-    if i > len then
-        return nil, "", i
-    end
-    if html:sub(i, i) == "<" then
-        local close = html:find(">", i, true)
-        if not close then
-            return "rune", html:sub(i), i + 1
-        end
-        return "tag", html:sub(i, close), close + 1
-    end
-    local byte = html:byte(i)
-    local width = byte < 0x80 and 1 or byte < 0xe0 and 2 or byte < 0xf0 and 3 or 4
-    return "rune", html:sub(i, i + width - 1), i + width
-end
-
 -- 双引号/单引号两种 class 写法；不带属性的窄形式已被这两条覆盖，无需另列。
 local UNDERLINE_PATTERNS = {
     '<span[^>]-class="[^"]-wr%-underline[^"]-"[^>]*>(.-)</span>',
@@ -236,45 +213,6 @@ function Annotations.cleanChapterHtml(html)
     end
     html = html:gsub("<title[^>]*>.-</title>", "")
     return Text.trim(html)
-end
-
---- 取可见正文的搜索范围；章节壳带 ``<h1>`` 标题时跳过标题区。
----@param html string
----@return string
-function Annotations.rangeHtml(html)
-    if type(html) ~= "string" or html == "" then
-        return html or ""
-    end
-    local body = html:match("<body[^>]*>(.*)</body>") or html
-    return body:gsub("^%s*<h1[^>]*>.-</h1>%s*", "", 1)
-end
-
---- 提取 HTML 可见文本 rune 序列（不含标签，非 ``range`` 的 HTML 坐标系）。
----@param html string
----@return string[]
-function Annotations.plainRunes(html)
-    local runes, i = {}, 1
-    if type(html) ~= "string" or html == "" then
-        return runes
-    end
-    while true do
-        local kind, chunk, next_i = nextToken(html, i)
-        if not kind then
-            break
-        end
-        if kind == "rune" then
-            runes[#runes + 1] = chunk
-        end
-        i = next_i
-    end
-    return runes
-end
-
---- 可见正文 rune 序列（跳过章节壳 ``<h1>``；用于本地文本匹配，不用于切片 ``range``）。
----@param html string
----@return string[]
-function Annotations.plainBodyRunes(html)
-    return Annotations.plainRunes(Annotations.rangeHtml(html))
 end
 
 --- 章节壳里的顶层段落文本，索引即 crengine xpointer 里的 ``p[N]``。
@@ -419,59 +357,16 @@ local function headAtXPointer(flow, pos)
     return nil
 end
 
---- 在本地章节 HTML 内定位划线原文，返回 crengine xpointer（支持跨段划线）。
----
---- 不用 ``document:findText``：那是跨页模糊搜索，命中与否取决于渲染状态，而段落偏移是
---- 确定的。wire ``range`` 与本地 HTML 不是同一坐标系，不能拿它猜本地段落；重复文本若
---- 没有已保存的 xpointer 就拒绝定位，避免把高亮画到错误位置。
----@param source string|WechatRuneFlow 本地章节 HTML 或已建好的 rune 流
----@param needle string 划线原文
----@param range_str string|nil 保留参数位；不参与本地坐标计算
----@return string|nil pos0
----@return string|nil pos1
----@return string|nil err
-function Annotations.locate(source, needle, range_str)
-    needle = normalizeText(tostring(needle or ""))
-    if needle == "" then
-        return nil, nil
-    end
-    local flow
-    if type(source) == "string" then
-        flow = Annotations.flow(source)
-    else
-        flow = source
-    end
-    local want = countRunes(needle)
-    if want == 0 or want > flow.count then
-        return nil, nil
-    end
-
-    local heads = matchingHeads(flow, needle)
-    if #heads == 0 then
-        return nil, nil
-    end
-    if #heads > 1 then
-        return nil, nil, "ambiguous"
-    end
-    local head = heads[1]
-    local tail = head + want - 1
-    -- pos1 是半开区间上界（实测对齐 KOReader 自己写出的 xpointer）。
-    return string.format("/html/body/p[%d]/text().%d", flow.para[head], flow.offset[head]),
-        string.format("/html/body/p[%d]/text().%d", flow.para[tail], flow.offset[tail] + 1)
-end
-
 --- 同章批量定位：先确定唯一文本，再利用远端 range 顺序约束重复短句。
 --- HTML 改写会改变绝对 range，但不会改变正文顺序；只有约束后剩唯一候选才返回。
+---
+--- 不用 ``document:findText``：那是跨页模糊搜索，命中与否取决于渲染状态，而段落偏移是
+--- 确定的。仍然歧义的重复文本拒绝定位，避免把高亮画到错误位置。
 ---@param source string|WechatRuneFlow
 ---@param items table[]
 ---@return table<table, { pos0: string, pos1: string }>
 function Annotations.locateBatch(source, items)
-    local flow
-    if type(source) == "string" then
-        flow = Annotations.flow(source)
-    else
-        flow = source
-    end
+    local flow = type(source) == "string" and Annotations.flow(source) or source
     local entries = {}
     for ordinal, item in ipairs(items or {}) do
         local needle = type(item) == "table" and normalizeText(item.text or "") or ""
@@ -527,6 +422,7 @@ function Annotations.locateBatch(source, items)
         local head = entry.chosen
         if head then
             local tail = head + countRunes(entry.needle) - 1
+            -- pos1 是半开区间上界（实测对齐 KOReader 自己写出的 xpointer）。
             out[entry.item] = {
                 pos0 = string.format("/html/body/p[%d]/text().%d", flow.para[head], flow.offset[head]),
                 pos1 = string.format("/html/body/p[%d]/text().%d", flow.para[tail], flow.offset[tail] + 1),
@@ -587,8 +483,6 @@ function Annotations.toWireRange(wire_html, local_html, needle, pos0, pos1)
         wire_head = local_head
     elseif #local_heads == #wire_heads then
         wire_head = wire_heads[ordinal]
-    elseif #wire_heads == 1 and #local_heads == 1 then
-        wire_head = wire_heads[1]
     else
         return nil, "ambiguous wire highlight"
     end

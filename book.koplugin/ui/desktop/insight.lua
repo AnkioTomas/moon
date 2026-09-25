@@ -35,22 +35,15 @@ local View = require("ui.view")
 ---@field fetching boolean
 ---@field fetch_cancel table|nil
 ---@field ui_page number
----@field overview BookInsightOverview
----@field day BookInsightDay
----@field records BookInsightRecords
 local Insight = {}
 Insight.__index = Insight
 setmetatable(Insight, View)
 
 function Insight:new(opts)
     opts = opts or {}
-    opts.state = opts.state
     opts.loaded = opts.loaded or false
     opts.fetching = opts.fetching or false
     opts.ui_page = opts.ui_page or 1
-    opts.overview = opts.overview or require("ui.desktop.insight.overview").new()
-    opts.day = opts.day or require("ui.desktop.insight.day").new()
-    opts.records = opts.records or require("ui.desktop.insight.records").new()
     return View.new(self, opts)
 end
 
@@ -69,17 +62,9 @@ function Insight:reset()
     self.ui_page = 1
 end
 
-function Insight:onPause()
-    self:cancel()
-end
-
-function Insight:onDestroy()
-    self:cancel()
-end
-
-function Insight:onCancel()
-    self:cancel()
-end
+Insight.onPause = Insight.cancel
+Insight.onDestroy = Insight.cancel
+Insight.onCancel = Insight.cancel
 
 ---@param event string
 function Insight:onEvent(event)
@@ -122,14 +107,14 @@ end
 local function buildPage(insight, page, state, width, height)
     local desktop = insight.desktop
     if page == 1 then
-        return insight.overview:build(desktop, state, width, height)
+        return require("ui.desktop.insight.overview"):build(desktop, state, width, height)
     elseif page == 2 then
-        return insight.day:build(
+        return require("ui.desktop.insight.day"):build(
             desktop, state, width, height,
             function(book) insight:openBookDetail(book) end
         )
     end
-    return insight.records:build(state, width, height)
+    return require("ui.desktop.insight.records"):build(state, width, height)
 end
 
 --- 构建统计 Tab 整页 UI。

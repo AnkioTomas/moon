@@ -42,26 +42,32 @@ local function handle(invoke, cancel)
     })
 end
 
+--- 校验 debounce/throttle 入参；错误归到调用 Timing.<name> 的那一层。
+---@param name string
+---@param fn any
+---@param wait any
+---@return number delay
+local function checkArgs(name, fn, wait)
+    if type(fn) ~= "function" then
+        error("Timing." .. name .. ": fn must be function", 3)
+    end
+    local delay = tonumber(wait)
+    if not delay or delay < 0 then
+        error("Timing." .. name .. ": wait must be >= 0", 3)
+    end
+    return delay
+end
+
 --- 防抖（trailing）：wait 秒内多次调用，只执行最后一次参数。
 ---@param fn function
 ---@param wait number 秒（>= 0）
 ---@return TimingHandle
 function Timing.debounce(fn, wait)
-    if type(fn) ~= "function" then
-        error("Timing.debounce: fn must be function", 2)
-    end
-    local delay = tonumber(wait)
-    if type(delay) ~= "number" then
-        error("Timing.debounce: wait must be >= 0", 2)
-    end
-    if delay < 0 then
-        error("Timing.debounce: wait must be >= 0", 2)
-    end
+    local delay = checkArgs("debounce", fn, wait)
 
     local n_args
     local args
-    local fire
-    fire = function()
+    local function fire()
         local n = n_args
         local a = args
         n_args = nil
@@ -89,16 +95,7 @@ end
 ---@param wait number 秒（>= 0）
 ---@return TimingHandle
 function Timing.throttle(fn, wait)
-    if type(fn) ~= "function" then
-        error("Timing.throttle: fn must be function", 2)
-    end
-    local delay = tonumber(wait)
-    if type(delay) ~= "number" then
-        error("Timing.throttle: wait must be >= 0", 2)
-    end
-    if delay < 0 then
-        error("Timing.throttle: wait must be >= 0", 2)
-    end
+    local delay = checkArgs("throttle", fn, wait)
 
     local last_at = nil
 

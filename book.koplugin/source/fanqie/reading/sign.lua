@@ -367,8 +367,6 @@ function Sign.sign_headers(query_string, device_id, opts)
     }
 end
 
-Sign.AID = AID
-Sign.LICENSE_ID = LICENSE_ID
 Sign.derive_inner_key = derive_inner_key
 
 return Sign

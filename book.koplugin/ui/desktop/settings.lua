@@ -40,42 +40,19 @@ local View = require("ui.view")
 ---@class BookSettings : View
 ---@field desktop BookDesktop
 ---@field page number
----@field source BookSettingsSource
----@field display BookSettingsDisplay
----@field lockscreen BookSettingsLockscreen
----@field desktop_settings BookSettingsDesktop
----@field topbar_settings BookSettingsTopbar
----@field language BookSettingsLanguage
----@field maintenance BookSettingsMaintenance
----@field ai BookSettingsAI
----@field reader BookSettingsReader
----@field reader_bar BookSettingsReaderBar
+---@field source BookSettingsSource 顶栏点源名经此换源
 local Settings = {}
 Settings.__index = Settings
 setmetatable(Settings, View)
 
---- 创建设置页及其子设置对象；离屏实例不绑定屏幕刷新宿主。
+--- 创建设置页；离屏实例不绑定屏幕刷新宿主。
 ---@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
 ---@return BookSettings
 function Settings:new(opts)
     local view = View.new(self, opts)
     view.host = not view.offscreen and view.desktop or nil
-    local defaults = {
-        page = 1,
-        source = Source.new(),
-        display = Display.new(),
-        lockscreen = Lockscreen.new(),
-        desktop_settings = DesktopSettings.new(),
-        topbar_settings = TopbarSettings.new(),
-        language = Language.new(),
-        maintenance = Maintenance.new(),
-        ai = AISettings.new(),
-        reader = ReaderSettings.new(),
-        reader_bar = ReaderBarSettings.new(),
-    }
-    for key, value in pairs(defaults) do
-        if view[key] == nil then view[key] = value end
-    end
+    view.page = view.page or 1
+    view.source = view.source or Source
     return view
 end
 
@@ -125,7 +102,7 @@ function Settings:spec(id)
             id = id,
             title = _("书籍来源"),
             sections = function()
-                return self.source:scopeSections{
+                return Source:scopeSections{
                     desktop = desktop, plugin = plugin, active_id = active_id, active_name = active_name,
                 }
             end,
@@ -136,7 +113,7 @@ function Settings:spec(id)
             id = id,
             title = _("账号"),
             sections = function()
-                return self.source:configSections{ desktop = desktop, plugin = plugin }
+                return Source:configSections{ desktop = desktop, plugin = plugin }
             end,
         }
     end
@@ -146,15 +123,15 @@ function Settings:spec(id)
             id = id,
             title = which == "top" and _("顶栏") or _("底栏"),
             preview = function(width)
-                return self.reader_bar:page(desktop, which).preview(width)
+                return ReaderBarSettings:page(desktop, which).preview(width)
             end,
             sections = function()
                 local out = {}
-                for _i, section in ipairs(self.reader_bar:page(desktop, which).sections) do
+                for _i, section in ipairs(ReaderBarSettings:page(desktop, which).sections) do
                     out[#out + 1] = section
                 end
                 if which == "bottom" then
-                    for _j, section in ipairs(self.reader:sections(desktop)) do
+                    for _j, section in ipairs(ReaderSettings:sections(desktop)) do
                         out[#out + 1] = section
                     end
                 end
@@ -167,8 +144,8 @@ function Settings:spec(id)
             id = id,
             title = _("划词"),
             sections = function()
-                local sections = self.reader:lookupSections(desktop)
-                sections[#sections + 1] = { title = _("菜单"), rows = self.reader:popupRows(desktop) }
+                local sections = ReaderSettings:lookupSections(desktop)
+                sections[#sections + 1] = { title = _("菜单"), rows = ReaderSettings:popupRows(desktop) }
                 return sections
             end,
         }
@@ -197,7 +174,7 @@ function Settings:spec(id)
                 return TopbarSettings.preview(width)
             end,
             sections = function()
-                return {{ title = _("顶栏"), rows = self.topbar_settings:rows(desktop) }}
+                return {{ title = _("顶栏"), rows = TopbarSettings:rows(desktop) }}
             end,
         }
     end
@@ -210,10 +187,10 @@ function Settings:spec(id)
                 local font_name = MoonFont.currentName()
                 local open_on = G_reader_settings:readSetting("start_with") == Host.OPEN_ON_START_ID
                 return {
-                    { title = _("启动"), rows = self.desktop_settings:rows(desktop, open_on) },
+                    { title = _("启动"), rows = DesktopSettings:rows(desktop, open_on) },
                     {
                         title = _("显示"),
-                        rows = self.display:rows{
+                        rows = Display:rows{
                             desktop = desktop, font_name = font_name, scale = scale, grid_max_cols = grid_max_cols,
                         },
                     },
@@ -229,7 +206,7 @@ function Settings:spec(id)
                 return Lockscreen.preview(width)
             end,
             sections = function()
-                return {{ title = _("锁屏"), rows = self.lockscreen:rows(desktop) }}
+                return {{ title = _("锁屏"), rows = Lockscreen:rows(desktop) }}
             end,
         }
     end
@@ -238,7 +215,7 @@ function Settings:spec(id)
             id = id,
             title = _("语言"),
             sections = function()
-                return self.language:sections(desktop)
+                return Language:sections(desktop)
             end,
         }
     end
@@ -247,7 +224,7 @@ function Settings:spec(id)
             id = id,
             title = _("AI"),
             sections = function()
-                return {{ title = _("AI"), rows = self.ai:rows(desktop) }}
+                return {{ title = _("AI"), rows = AISettings:rows(desktop) }}
             end,
         }
     end
@@ -363,13 +340,13 @@ function Settings:createWidget()
         }),
     })
     Overlay.appendSection(packed, card_w, _("维护"), {
-        self.maintenance:cacheRow(desktop),
-        self.maintenance:clearStatsRow(desktop),
-        self.maintenance:debugLogRow(desktop),
-        self.maintenance:autoUpdateRow(desktop),
-        self.maintenance:updateRow(desktop),
-        self.maintenance:aboutRow(),
-        self.maintenance:closeRow(desktop),
+        Maintenance:cacheRow(desktop),
+        Maintenance:clearStatsRow(desktop),
+        Maintenance:debugLogRow(desktop),
+        Maintenance:autoUpdateRow(desktop),
+        Maintenance:updateRow(desktop),
+        Maintenance:aboutRow(),
+        Maintenance:closeRow(desktop),
     })
 
     local pages_kids = Pager.pack(packed, pack_h)

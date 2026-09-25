@@ -78,18 +78,10 @@ function M.blocks(text, source, position, wide)
     })
 
     local inner_h = math.max(1, rect.h - rect.pad * 2)
-    local parts = Quote:new{
-        data = { text = text, source = source },
-        width = text_w,
-        height = inner_h,
-        body_size = quote_opts.body_size,
-        attr_size = quote_opts.attr_size,
-        lines = quote_opts.lines,
-        line_em = quote_opts.line_em,
-        pad_x = 0,
-        gap_attr = quote_opts.gap_attr,
-    }
-    local widget = parts:build()
+    quote_opts.data = { text = text, source = source }
+    quote_opts.width = text_w
+    quote_opts.height = inner_h
+    local widget = Quote:new(quote_opts):build()
 
     return {
         {

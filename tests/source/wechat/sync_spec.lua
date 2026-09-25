@@ -129,6 +129,13 @@ do
     }, nil, nil, "wechat", "1")[1].chapter_idx, 9)
 end
 
+--- 单条划线走 locateBatch，返回 pos0, pos1；定位不到返回 nil。
+local function locate(html, text, range)
+    local item = { text = text, wr_range = range }
+    local hit = Annotations.locateBatch(html, { item })[item]
+    if hit then return hit.pos0, hit.pos1 end
+end
+
 do
     -- 章节壳：<h1> 不占 p 编号；段首缩进折叠为 1 空格，故 p[2] 从 offset 1 起。
     -- 期望值取自 KOReader 自己写出的 xpointer（pos1 是半开上界）。
@@ -142,27 +149,23 @@ do
     })
     Assert.eq(#Annotations.paragraphs(shell), 4)
 
-    local pos0, pos1 = Annotations.locate(shell, "莫问毕竟是六星炼丹师。")
+    local pos0, pos1 = locate(shell, "莫问毕竟是六星炼丹师。")
     Assert.eq(pos0, "/html/body/p[1]/text().0")
     Assert.eq(pos1, "/html/body/p[1]/text().11")
 
-    pos0, pos1 = Annotations.locate(shell, "要是牧钱反应过来。")
+    pos0, pos1 = locate(shell, "要是牧钱反应过来。")
     Assert.eq(pos0, "/html/body/p[2]/text().1")
     Assert.eq(pos1, "/html/body/p[2]/text().10")
 
     -- markText 带换行/多空格时按 crengine 规则折叠后再比
-    Assert.eq(Annotations.locate(shell, "  莫问毕竟是六星炼丹师。\n"), "/html/body/p[1]/text().0")
+    Assert.eq(locate(shell, "  莫问毕竟是六星炼丹师。\n"), "/html/body/p[1]/text().0")
 
     -- wire range 与本地壳不是同一坐标系；重复文本不能靠 range 猜，宁可不画错位置。
-    local duplicate, _, duplicate_err = Annotations.locate(shell, "重复段落文本。")
-    Assert.is_nil(duplicate)
-    Assert.eq(duplicate_err, "ambiguous")
-    local runes = #Annotations.plainBodyRunes(shell)
-    Assert.is_true(runes > 0)
-    Assert.is_nil(Annotations.locate(shell, "重复段落文本。", "34-41"))
+    Assert.is_nil(locate(shell, "重复段落文本。"))
+    Assert.is_nil(locate(shell, "重复段落文本。", "34-41"))
 
-    Assert.is_nil(Annotations.locate(shell, "正文里不存在的句子"))
-    Assert.is_nil(Annotations.locate(shell, ""))
+    Assert.is_nil(locate(shell, "正文里不存在的句子"))
+    Assert.is_nil(locate(shell, ""))
 
     -- 已同步条目即使文本重复，也按 bookmarkId 复用原生坐标并接受远端笔记更新。
     local path = os.tmpname()
@@ -210,12 +213,12 @@ do
         "<p>    几乎是下意识的，牧云开口回应道。</p>",
         "</body></html>",
     })
-    local pos0, pos1 = Annotations.locate(shell, "“当然不是！”几乎是下意识的，牧云开口回应道。")
+    local pos0, pos1 = locate(shell, "“当然不是！”几乎是下意识的，牧云开口回应道。")
     Assert.eq(pos0, "/html/body/p[1]/text().1")
     Assert.eq(pos1, "/html/body/p[2]/text().17")
 
     -- 单段仍按原样定位，不受跨段流影响
-    Assert.eq(Annotations.locate(shell, "牧云开口回应道。"), "/html/body/p[2]/text().9")
+    Assert.eq(locate(shell, "牧云开口回应道。"), "/html/body/p[2]/text().9")
 end
 
 do

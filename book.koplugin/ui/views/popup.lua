@@ -136,7 +136,6 @@ end
 ---@return table
 function Popup.spin(opts)
     opts = opts or {}
-    local holder = { spin = nil }
     local spin = SpinWidget:new{
         title_text = opts.title or "",
         info_text = opts.info_text,
@@ -155,20 +154,10 @@ function Popup.spin(opts)
         default_text = opts.default_text,
         cancel_text = opts.cancel_text,
         ok_text = opts.ok_text,
-        callback = function(widget)
-            if opts.callback then
-                opts.callback(widget)
-            end
-        end,
+        callback = opts.callback,
         cancel_callback = opts.cancel_callback,
-        close_callback = function()
-            holder.spin = nil
-            if opts.close_callback then
-                opts.close_callback()
-            end
-        end,
+        close_callback = opts.close_callback,
     }
-    holder.spin = spin
     UIManager:show(spin)
     return spin
 end

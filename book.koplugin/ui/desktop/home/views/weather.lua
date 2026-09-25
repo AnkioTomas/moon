@@ -5,9 +5,7 @@
 --]]
 
 local Blitbuffer = require("ffi/blitbuffer")
-local CenterContainer = require("ui/widget/container/centercontainer")
-local FrameContainer = require("ui/widget/container/framecontainer")
-local Geom = require("ui/geometry")
+local Clock = require("ui.desktop.home.views.clock")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local Image = require("ui.components.image")
@@ -17,15 +15,11 @@ local Text = require("utils.text")
 local TextWidget = require("ui/widget/textwidget")
 local UI = require("ui.components.bookui")
 local UIManager = require("ui/uimanager")
-local VerticalGroup = require("ui/widget/verticalgroup")
-local VerticalSpan = require("ui/widget/verticalspan")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
 local INTERVAL = 3600
 local PICTURE = 36
-local GAP = 4
-local SUB_H = 18
 --- 空态占位：多云图，比 unknown 看着不像出错。
 local EMPTY_ICON = "cloud"
 
@@ -47,16 +41,10 @@ local M = {
 setmetatable(M, require("ui.desktop.home.views.base"))
 M.__index = M
 
---- 温度 + 两行辅文的内容高度，与时钟同构。
----@return number
-function M.contentHeight()
-    return UI.sz(36) + UI.sz(GAP) * 2 + UI.sz(SUB_H) * 2
-end
-
---- 返回天气内容高度；不吃剩余空间。
+--- 返回天气内容高度；温度 + 两行辅文，与时钟同构，不吃剩余空间。
 ---@return BookHomeHeightSpec
 function M:heightRange()
-    return { height = M.contentHeight() }
+    return { height = Clock.contentHeight() }
 end
 
 --- 辅文第一行：天气 · 地点 · 温差。
@@ -180,61 +168,16 @@ end
 --- 构建主天气图标、温度和辅助信息行，旧图标请求先取消。
 ---@return table
 function M:createWidget()
-    local ctx, opts = self.ctx, self.opts
     self.wx = self.data or self.wx
     dropPicture(self)
     self.hero = nil
-    local w = opts.width
-    local total_h = opts.height
-    local gap = UI.sz(GAP)
-    local sub_h = math.min(UI.sz(SUB_H), math.max(1, math.floor((total_h - UI.sz(36) - gap * 2) / 2)))
-    local temp_h = math.max(1, total_h - sub_h * 2 - gap * 2)
-    local y = opts.y or 0
     local temp, detail, extra = texts(self.wx)
-    local max_w = w
     self.temp = TextWidget:new{
         text = temp,
         face = UI.face("cfont", 36),
         fgcolor = Blitbuffer.COLOR_BLACK,
     }
-    self.detail = TextWidget:new{
-        text = detail,
-        face = UI.face("xx_smallinfofont", 13),
-        max_width = max_w,
-        fgcolor = UI.muted(),
-    }
-    self.extra = TextWidget:new{
-        text = extra,
-        face = UI.face("xx_smallinfofont", 12),
-        max_width = max_w,
-        fgcolor = UI.dim(),
-    }
-    local hero = putHero(self, ctx.desktop)
-    self.desktop = ctx.desktop
-    self.region = Geom:new{ x = 0, y = y, w = w, h = total_h }
-    return FrameContainer:new{
-            bordersize = 0,
-            padding = 0,
-            margin = 0,
-            dimen = Geom:new{ w = w, h = total_h },
-            VerticalGroup:new{
-                align = "center",
-                CenterContainer:new{
-                    dimen = Geom:new{ w = w, h = temp_h },
-                    hero,
-                },
-                VerticalSpan:new{ width = gap },
-                CenterContainer:new{
-                    dimen = Geom:new{ w = w, h = sub_h },
-                    self.detail,
-                },
-                VerticalSpan:new{ width = gap },
-                CenterContainer:new{
-                    dimen = Geom:new{ w = w, h = sub_h },
-                    self.extra,
-                },
-            },
-        }
+    return Clock.stack(self, putHero(self, self.ctx.desktop), detail, extra)
 end
 
 --- 将最新天气写入已有文字和图标行，然后刷新内容区域。
@@ -315,11 +258,16 @@ function M:onDestroy()
     self.desktop = nil
 end
 
---- 地名必须是英文字母（接口不吃中文）。
+--- 地名必须是英文字母（接口不吃中文）；不合规时提示并返回 true。
 ---@param city string
 ---@return boolean
-local function latinPlace(city)
-    return city:find("[A-Za-z]") ~= nil
+local function rejectPlace(city)
+    if city == "" or city:find("[A-Za-z]") then return false end
+    UIManager:show(require("ui/widget/infomessage"):new{
+        text = _("请用英文字母填写地名，例如 Shanghai"),
+        timeout = 3,
+    })
+    return true
 end
 
 --- 编辑态设置：天气地点输入框。
@@ -334,13 +282,7 @@ function M:showSettings(desktop)
     local function probe()
         if testing then return end
         local city = Text.trim(dialog:getInputText())
-        if city ~= "" and not latinPlace(city) then
-            UIManager:show(InfoMessage:new{
-                text = _("请用英文字母填写地名，例如 Shanghai"),
-                timeout = 3,
-            })
-            return
-        end
+        if rejectPlace(city) then return end
         testing = true
         local loading = InfoMessage:new{ text = _("正在测试…") }
         UIManager:show(loading)
@@ -383,13 +325,7 @@ function M:showSettings(desktop)
                 is_enter_default = true,
                 callback = function()
                     local city = Text.trim(dialog:getInputText())
-                    if city ~= "" and not latinPlace(city) then
-                        UIManager:show(InfoMessage:new{
-                            text = _("请用英文字母填写地名，例如 Shanghai"),
-                            timeout = 3,
-                        })
-                        return
-                    end
+                    if rejectPlace(city) then return end
                     home.home_weather_city = city
                     MoonSettings.saveSection("home", home)
                     UIManager:close(dialog)

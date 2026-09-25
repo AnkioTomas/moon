@@ -252,7 +252,7 @@ local BODY = [[{
 do
     fake.res, fake.err, fake.url = nil, nil, nil
     local got_res, got_err
-    local job = Weread.searchAsync("  ", nil, function(res, err)
+    local job = Weread.searchAsync("  ", function(res, err)
         got_res, got_err = res, err
     end)
     Assert.is_nil(job)
@@ -265,7 +265,7 @@ end
 do
     fake.res, fake.err = nil, "连接超时"
     local got_res, got_err
-    Weread.searchAsync("活着", nil, function(res, err)
+    Weread.searchAsync("活着", function(res, err)
         got_res, got_err = res, err
     end)
     Assert.is_nil(got_res)
@@ -276,7 +276,7 @@ end
 do
     fake.res, fake.err = { code = 500, body = "{}" }, nil
     local got_res, got_err
-    Weread.searchAsync("活着", nil, function(res, err)
+    Weread.searchAsync("活着", function(res, err)
         got_res, got_err = res, err
     end)
     Assert.is_nil(got_res)
@@ -287,7 +287,7 @@ end
 do
     fake.res, fake.err = { code = 200, body = "not json at all" }, nil
     local got_res, got_err
-    Weread.searchAsync("活着", nil, function(res, err)
+    Weread.searchAsync("活着", function(res, err)
         got_res, got_err = res, err
     end)
     Assert.is_nil(got_res)
@@ -298,7 +298,7 @@ end
 do
     fake.res, fake.err = { code = 200, body = '{"total":0}' }, nil
     local got_res, got_err
-    Weread.searchAsync("活着", nil, function(res, err)
+    Weread.searchAsync("活着", function(res, err)
         got_res, got_err = res, err
     end)
     Assert.len(got_res, 0)
@@ -309,7 +309,7 @@ end
 do
     fake.res, fake.err = { code = 200, body = BODY }, nil
     local results
-    Weread.searchAsync("活着", nil, function(res)
+    Weread.searchAsync("活着", function(res)
         results = res
     end)
 
@@ -371,7 +371,7 @@ do
     local body = '{"books":[{"bookInfo":{"title":"字节切分","category":"文学-小说","bookId":"1"}}]}'
     fake.res, fake.err = { code = 200, body = body }, nil
     local results
-    Weread.searchAsync("x", nil, function(res)
+    Weread.searchAsync("x", function(res)
         results = res
     end)
     Assert.len(results, 1)
@@ -385,7 +385,7 @@ do
     local body = '{"books":[{"bookInfo":{"title":"全角分隔","category":"科幻／架空、热血，冒险","bookId":"2"}}]}'
     fake.res, fake.err = { code = 200, body = body }, nil
     local results
-    Weread.searchAsync("x", nil, function(res)
+    Weread.searchAsync("x", function(res)
         results = res
     end)
     Assert.len(results, 1)
@@ -404,7 +404,7 @@ do
     }}]}]]
     fake.res, fake.err = { code = 200, body = body }, nil
     local results
-    Weread.searchAsync("x", nil, function(res)
+    Weread.searchAsync("x", function(res)
         results = res
     end)
     Assert.len(results, 1)
@@ -414,21 +414,11 @@ do
     Assert.eq(results[1].tags[1], "文学")
 end
 
--- ── count 参数钳制：默认 10，<=0 回默认，>20 封顶 20 ──
+-- ── 固定每次取 10 条 ──
 do
     fake.res, fake.err = { code = 200, body = '{"books":[]}' }, nil
-
-    Weread.searchAsync("活着", nil, function() end)
+    Weread.searchAsync("活着", function() end)
     Assert.is_true(fake.url:find("count=10", 1, true) ~= nil)
-
-    Weread.searchAsync("活着", -5, function() end)
-    Assert.is_true(fake.url:find("count=10", 1, true) ~= nil)
-
-    Weread.searchAsync("活着", 99, function() end)
-    Assert.is_true(fake.url:find("count=20", 1, true) ~= nil)
-
-    Weread.searchAsync("活着", 5, function() end)
-    Assert.is_true(fake.url:find("count=5", 1, true) ~= nil)
 end
 
 cleanup()

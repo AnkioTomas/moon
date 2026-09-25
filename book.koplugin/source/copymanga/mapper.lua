@@ -21,6 +21,14 @@ local function names(rows)
     return #list > 0 and table.concat(list, ", ") or nil
 end
 
+--- 回包的 results 表；wire 或 results 不是表时给空表。
+---@param wire table|nil
+---@return table
+local function resultsOf(wire)
+    local results = type(wire) == "table" and wire.results
+    return type(results) == "table" and results or {}
+end
+
 ---@param row table|nil
 ---@return table|nil
 local function comicOf(row)
@@ -53,7 +61,7 @@ end
 ---@param wire table
 ---@return BookListResult
 function Mapper.search(wire)
-    local root = type(wire.results) == "table" and wire.results or {}
+    local root = resultsOf(wire)
     local books = {}
     for _, row in ipairs(root.list or {}) do
         local book = Mapper.book(row)
@@ -78,8 +86,7 @@ end
 ---@param wire table
 ---@return Book|nil
 function Mapper.detail(stable_id, wire)
-    local results = type(wire) == "table" and wire.results or nil
-    local comic = type(results) == "table" and results.comic or nil
+    local comic = resultsOf(wire).comic
     if type(comic) ~= "table" then return nil end
     return Mapper.book({
         path_word = (type(comic.path_word) == "string" and comic.path_word ~= "")
@@ -98,8 +105,7 @@ end
 ---@param wire table|nil
 ---@return string|nil
 function Mapper.comicId(wire)
-    local results = type(wire) == "table" and wire.results or nil
-    local comic = type(results) == "table" and results.comic or nil
+    local comic = resultsOf(wire).comic
     local uuid = type(comic) == "table" and comic.uuid or nil
     if type(uuid) == "string" and uuid ~= "" then return uuid end
     return nil
@@ -109,13 +115,7 @@ end
 ---@param wire table|nil
 ---@return { path_word: string, name: string }[]
 function Mapper.groups(wire)
-    local raw
-    if type(wire) == "table" then
-        local results = wire.results
-        if type(results) == "table" then
-            raw = results.groups
-        end
-    end
+    local raw = resultsOf(wire).groups
     local list = {}
     if type(raw) == "table" then
         for _, group in pairs(raw) do
@@ -173,8 +173,7 @@ end
 ---@param wire table|nil
 ---@return ProgressPosition|nil, string|nil
 function Mapper.progress(wire)
-    local results = type(wire) == "table" and wire.results or nil
-    local browse = type(results) == "table" and results.browse or nil
+    local browse = resultsOf(wire).browse
     if type(browse) ~= "table" then return nil end
     local uid = browse.chapter_uuid or browse.chapter_id
     if type(uid) ~= "string" or uid == "" then return nil end

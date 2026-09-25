@@ -212,15 +212,12 @@ function Detail:onCancel()
     self._install_job = nil
 end
 
+-- 句柄已由 lifecycle 在 Pause / Destroy 前取消，这里只丢引用。
 function Detail:onPause()
     self._store_detail_job = nil
     self._install_job = nil
 end
-
-function Detail:onDestroy()
-    self._store_detail_job = nil
-    self._install_job = nil
-end
+Detail.onDestroy = Detail.onPause
 
 --- 关闭详情并强制重绘下层桌面。
 ---@return boolean

@@ -19,13 +19,6 @@ local T = require("ffi/util").template
 
 ---@class BookSettingsLanguage
 local Language = {}
-Language.__index = Language
-
----@return BookSettingsLanguage
-function Language.new()
-    return setmetatable({}, Language)
-end
-
 local RELEASES_URL = "https://github.com/AnkioTomas/moon/releases"
 
 --- 造一行小字灰色提示，高度按文本实测撑开。

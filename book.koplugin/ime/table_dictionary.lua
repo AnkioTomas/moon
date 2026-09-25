@@ -10,16 +10,17 @@ local lfs = require("libs/libkoreader-lfs")
 local Paths = require("utils.paths")
 
 local MAX_CANDIDATES = 21
-local SCHEMA_VERSION = "1"
 
 local Dictionary = {}
 Dictionary.__index = Dictionary
 
----@param id "wubi"|"cangjie"|"zhuyin"
+---@param id "pinyin"|"wubi"|"cangjie"|"zhuyin"
+---@param schema_version string|nil 形码词库为 "1"
 ---@return table
-function Dictionary:new(id)
+function Dictionary:new(id, schema_version)
     return setmetatable({
         id = id,
+        schema_version = schema_version or "1",
         conn = nil,
         meta = nil,
         statements = nil,
@@ -40,7 +41,7 @@ function Dictionary:open()
         local stmt = assert(conn:prepare("SELECT v FROM meta WHERE k = 'schema_version'"))
         local row = stmt:step()
         stmt:close()
-        assert(row and row[1] == SCHEMA_VERSION)
+        assert(row and row[1] == self.schema_version)
     end)
     if not valid then
         pcall(function() conn:close() end)

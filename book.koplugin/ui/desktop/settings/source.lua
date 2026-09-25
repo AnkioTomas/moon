@@ -16,13 +16,6 @@ local MIXED = "__mixed__"
 
 ---@class BookSettingsSource
 local Source = {}
-Source.__index = Source
-
----@return BookSettingsSource
-function Source.new()
-    return setmetatable({}, Source)
-end
-
 --- 当前数据源状态文案：混合开启时显示「混合模式」，否则为活跃源名。
 ---@param active_name string|nil
 ---@return string

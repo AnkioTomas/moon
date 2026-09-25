@@ -55,7 +55,7 @@ _G.G_reader_settings = {
 
 package.loaded["ui.desktop.settings.display"] = nil
 local Display = require("ui.desktop.settings.display")
-local rows = Display.new():rows{
+local rows = Display:rows{
     desktop = {}, font_name = "Noto", scale = 120, grid_max_cols = 4,
 }
 Assert.eq(rows[1](600).title, "界面字体")
@@ -70,7 +70,7 @@ eink, color_screen = false, false
 package.loaded["device"] = nil
 package.loaded["ui.desktop.settings.display"] = nil
 Display = require("ui.desktop.settings.display")
-rows = Display.new():rows{
+rows = Display:rows{
     desktop = {}, font_name = "Noto", scale = 120, grid_max_cols = 4,
 }
 Assert.eq(#rows, 3, "无墨水屏/彩屏时不展示刷新与彩色项")

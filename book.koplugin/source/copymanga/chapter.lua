@@ -59,10 +59,15 @@ local function buildArchive(paths, archive_path, state, cb)
     local tmp = archive_path .. ".part"
     pcall(os.remove, tmp)
     local writer = Archiver.Writer:new()
-    if not writer:open(tmp, "zip") or not writer:setZipCompression("store") then
+    --- 打包中途失败：关 writer、删半截文件后回调错误。
+    local function fail(err)
         writer:close()
+        state.writer = nil
         pcall(os.remove, tmp)
-        cb(nil, writer.err or _("无法创建漫画文件"))
+        cb(nil, err)
+    end
+    if not writer:open(tmp, "zip") or not writer:setZipCompression("store") then
+        fail(writer.err or _("无法创建漫画文件"))
         return
     end
     state.writer = writer
@@ -85,21 +90,14 @@ local function buildArchive(paths, archive_path, state, cb)
         end
         local file, err = io.open(path, "rb")
         if not file then
-            writer:close()
-            state.writer = nil
-            pcall(os.remove, tmp)
-            cb(nil, err or _("无法读取漫画图片"))
+            fail(err or _("无法读取漫画图片"))
             return
         end
         local data = file:read("*a")
         file:close()
         local name = path:match("([^/\\]+)$") or tostring(index)
         if not writer:addFileFromMemory(name, data) then
-            local write_err = writer.err
-            writer:close()
-            state.writer = nil
-            pcall(os.remove, tmp)
-            cb(nil, write_err or _("无法写入漫画文件"))
+            fail(writer.err or _("无法写入漫画文件"))
             return
         end
         index = index + 1
@@ -214,22 +212,8 @@ function Chapter.prefetchAsync(client, identity, toc, from_idx, count, ops, cb)
 
     local pos = 1
     local interval = math.max(0, tonumber(ops.interval_seconds) or 0)
-    local step
-    local function report()
-        if ops.progress then
-            ops.progress(cached_count + failed_count, #indices)
-        end
-    end
-    local function continueNext()
-        local UIManager = require("ui/uimanager")
-        if interval > 0 then
-            UIManager:scheduleIn(interval, step)
-        else
-            UIManager:nextTick(step)
-        end
-    end
-
-    step = function()
+    local UIManager = require("ui/uimanager")
+    local function step()
         if cancelled then return end
         local idx = indices[pos]
         pos = pos + 1
@@ -246,12 +230,18 @@ function Chapter.prefetchAsync(client, identity, toc, from_idx, count, ops, cb)
                 failed_count = failed_count + 1
                 last_error = err or last_error
             end
-            report()
-            continueNext()
+            if ops.progress then
+                ops.progress(cached_count + failed_count, #indices)
+            end
+            if interval > 0 then
+                UIManager:scheduleIn(interval, step)
+            else
+                UIManager:nextTick(step)
+            end
         end)
     end
 
-    require("ui/uimanager"):nextTick(step)
+    UIManager:nextTick(step)
     return { cancel = function()
             cancelled = true
             if active and active.cancel then active.cancel() end

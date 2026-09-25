@@ -75,8 +75,7 @@ function Client:apiGetAsync(path, extra, cb)
     return Request.get(API .. path .. "?" .. query, {
         headers = self:headers(API .. "/"),
     }, function(raw, err)
-        local wire, decode_err = decodeApi(raw, err)
-        cb(wire, decode_err)
+        cb(decodeApi(raw, err))
     end)
 end
 
@@ -90,8 +89,7 @@ function Client:apiPostAsync(path, body, cb)
         headers = self:headers(API .. "/reader/"),
         content_type = "application/json",
     }, function(raw, err)
-        local wire, decode_err = decodeApi(raw, err)
-        cb(wire, decode_err)
+        cb(decodeApi(raw, err))
     end)
 end
 
@@ -206,32 +204,36 @@ function Client:searchAsync(keyword, page, page_size, cb)
         end }
 end
 
+--- 书架同步协议：action=0 加入，action=1 移除（与官方客户端一致）。
+---@param client JdreadClient
+---@param book_id string|number
+---@param action integer
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }
+local function shelfActionAsync(client, book_id, action, cb)
+    return client:apiPostAsync("/jdread/api/bookshelf/book/sync", {
+        version = os.time() * 1000,
+        first_sync = 1,
+        items = {
+            { action = action, ebook_id = tonumber(book_id) or tostring(book_id) },
+        },
+    }, cb)
+end
+
 --- 将书城书籍加入京东书架。
 ---@param book_id string|number
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:addToShelfAsync(book_id, cb)
-    return self:apiPostAsync("/jdread/api/bookshelf/book/sync", {
-        version = os.time() * 1000,
-        first_sync = 1,
-        items = {
-            { action = 0, ebook_id = tonumber(book_id) or tostring(book_id) },
-        },
-    }, cb)
+    return shelfActionAsync(self, book_id, 0, cb)
 end
 
---- 从京东书架移除。action=0 加入，action=1 移除（与官方客户端同步协议一致）。
+--- 从京东书架移除。
 ---@param book_id string|number
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:removeFromShelfAsync(book_id, cb)
-    return self:apiPostAsync("/jdread/api/bookshelf/book/sync", {
-        version = os.time() * 1000,
-        first_sync = 1,
-        items = {
-            { action = 1, ebook_id = tonumber(book_id) or tostring(book_id) },
-        },
-    }, cb)
+    return shelfActionAsync(self, book_id, 1, cb)
 end
 
 ---@param endpoint string

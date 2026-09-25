@@ -90,13 +90,6 @@ local function wereadPath(id)
     return Paths.fontsDir() .. "/" .. id .. ".woff"
 end
 
---- 取路径最后一段（同时兼容 / 与 \ 分隔）。
----@param path any 非字符串按 tostring 处理
----@return string
-local function basename(path)
-    return (tostring(path or ""):match("([^/\\]+)$")) or tostring(path or "")
-end
-
 --- 微信读书字体列表的磁盘备份路径（http.Cache 失效时的冷启动来源）。
 ---@return string
 local function listCachePath()
@@ -148,6 +141,26 @@ function MoonFont.isInstalled(id_or_item)
     return findInstalledFont(id) ~= nil
 end
 
+local function byName(a, b) return (a.name or "") < (b.name or "") end
+
+--- 扩展名可选且 basename 未出现过时追加一项；返回是否追加。
+---@param out MoonFontItem[]
+---@param seen table<string, boolean> 按 basename 去重
+---@return boolean
+local function addFont(out, seen, path, file, kind)
+    local ext = file:lower():match("%.([^.]+)$") or ""
+    if not LOCAL_EXT[ext] or seen[file] then return false end
+    seen[file] = true
+    out[#out + 1] = {
+        id = file,
+        name = file:gsub("%.[^%.]+$", ""),
+        kind = kind,
+        path = path,
+        zip_size = 0,
+    }
+    return true
+end
+
 --- 递归扫描目录内字体；seen 按 basename 去重。
 ---@param dir string
 ---@param kind string
@@ -160,20 +173,11 @@ local function scanDirFonts(dir, kind, seen, seen_paths)
         return out
     end
     util.findFiles(dir, function(path, file)
-        if file:sub(1, 1) == "." then return end
-        local ext = file:lower():match("%.([^.]+)$") or ""
-        if not LOCAL_EXT[ext] or seen[file] then return end
-        seen[file] = true
-        seen_paths[path] = true
-        out[#out + 1] = {
-            id = file,
-            name = file:gsub("%.[^%.]+$", ""),
-            kind = kind,
-            path = path,
-            zip_size = 0,
-        }
+        if file:sub(1, 1) ~= "." and addFont(out, seen, path, file, kind) then
+            seen_paths[path] = true
+        end
     end)
-    table.sort(out, function(a, b) return (a.name or "") < (b.name or "") end)
+    table.sort(out, byName)
     return out
 end
 
@@ -186,23 +190,10 @@ local function scanSystemFonts(seen, seen_paths)
     FontList:getFontList()
     for _, path in ipairs(FontList.fontlist or {}) do
         if not seen_paths[path] then
-            local file = basename(path)
-            if file ~= "" and not seen[file] then
-                local ext = file:lower():match("%.([^.]+)$") or ""
-                if LOCAL_EXT[ext] then
-                    seen[file] = true
-                    out[#out + 1] = {
-                        id = file,
-                        name = file:gsub("%.[^%.]+$", ""),
-                        kind = "system",
-                        path = path,
-                        zip_size = 0,
-                    }
-                end
-            end
+            addFont(out, seen, path, Text.basename(path), "system")
         end
     end
-    table.sort(out, function(a, b) return (a.name or "") < (b.name or "") end)
+    table.sort(out, byName)
     return out
 end
 
@@ -235,7 +226,7 @@ local function normalizeWeread(raw_items)
             end
         end
     end
-    table.sort(out, function(a, b) return (a.name or "") < (b.name or "") end)
+    table.sort(out, byName)
     return out
 end
 
@@ -341,13 +332,9 @@ function MoonFont.listAsync(force, cb)
         kind = "medium",
         on_done = function(data)
             if cancelled then return end
-            local settings, system = {}, {}
-            if type(data) == "table" then
-                settings = data.settings or {}
-                system = data.system or {}
-            end
-            settings_result = settings
-            system_result = system
+            data = type(data) == "table" and data or {}
+            settings_result = data.settings or {}
+            system_result = data.system or {}
             scan_done = true
             try_finish()
         end,
@@ -371,19 +358,8 @@ function MoonFont.listAsync(force, cb)
             timeout = 30,
         }, function(res, err)
             if cancelled then return end
-            if err then
-                local fallback = _weread_cache or readDiskWeread()
-                finishWeread(fallback, err or _("获取字体列表失败"))
-                return
-            end
-            if not res then
-                local fallback = _weread_cache or readDiskWeread()
-                finishWeread(fallback, _("获取字体列表失败"))
-                return
-            end
-            if not Request.ok(res.code) then
-                local fallback = _weread_cache or readDiskWeread()
-                finishWeread(fallback, _("获取字体列表失败"))
+            if err or not res or not Request.ok(res.code) then
+                finishWeread(_weread_cache or readDiskWeread(), err or _("获取字体列表失败"))
                 return
             end
             local ok, data = pcall(JSON.decode, res.body or "")
@@ -464,7 +440,7 @@ findInstalledFont = function(id)
     if path then return path end
     FontList:getFontList()
     for _, p in ipairs(FontList.fontlist or {}) do
-        if basename(p) == id then return p end
+        if Text.basename(p) == id then return p end
     end
     return nil
 end
@@ -505,44 +481,10 @@ local function resolvePath(id)
     return nil, _("字体文件不存在")
 end
 
+--- 字体 id → CRE 字体名与字体文件路径（不触发 CRE 注册）。
 ---@param id string|nil
----@return string|nil, string|nil
-function MoonFont.faceForId(id)
-    local path, err = resolvePath(id)
-    if not path then
-        return nil, err
-    end
-    if path == "" then
-        return nil, _("字体文件不存在")
-    end
-    local info = ensureFontInfo(path)
-    if not info or not info[1] or not info[1].name then
-        return nil, _("应用字体失败")
-    end
-    if _registered_fonts[path] then
-        return info[1].name
-    end
-    local cre = require("document/credocument"):engineInit()
-    local registered, register_err = pcall(cre.registerFont, path)
-    logger.dbg(
-        "book font register",
-        "id=" .. tostring(id),
-        "path=" .. path,
-        "face=" .. info[1].name,
-        "registered=" .. tostring(registered),
-        "error=" .. tostring(register_err)
-    )
-    if not registered then
-        return nil, _("应用字体失败")
-    end
-    _registered_fonts[path] = true
-    return info[1].name
-end
-
---- 只解析字体名，不触发 CRE 注册；用于偏好比较和保存。
----@param id string|nil
----@return string|nil, string|nil
-function MoonFont.faceNameForId(id)
+---@return string|nil face, string|nil err, string|nil path
+local function resolveFace(id)
     local path, err = resolvePath(id)
     if not path or path == "" then
         return nil, err or _("字体文件不存在")
@@ -551,7 +493,39 @@ function MoonFont.faceNameForId(id)
     if not info or not info[1] or not info[1].name then
         return nil, _("应用字体失败")
     end
-    return info[1].name
+    return info[1].name, nil, path
+end
+
+---@param id string|nil
+---@return string|nil, string|nil
+function MoonFont.faceForId(id)
+    local face, err, path = resolveFace(id)
+    if not face or _registered_fonts[path] then
+        return face, err
+    end
+    local cre = require("document/credocument"):engineInit()
+    local registered, register_err = pcall(cre.registerFont, path)
+    logger.dbg(
+        "book font register",
+        "id=" .. tostring(id),
+        "path=" .. path,
+        "face=" .. face,
+        "registered=" .. tostring(registered),
+        "error=" .. tostring(register_err)
+    )
+    if not registered then
+        return nil, _("应用字体失败")
+    end
+    _registered_fonts[path] = true
+    return face
+end
+
+--- 只解析字体名，不触发 CRE 注册；用于偏好比较和保存。
+---@param id string|nil
+---@return string|nil, string|nil
+function MoonFont.faceNameForId(id)
+    local face, err = resolveFace(id)
+    return face, err
 end
 
 ---@param ui table|nil
@@ -606,9 +580,6 @@ end
 ---@param name string|nil
 ---@return boolean
 function MoonFont.applyFaceToReader(ui, face, id, name)
-    if not ui then
-        return false
-    end
     if not MoonFont.supportsReader(ui) or not setReaderFontFace(ui, face) then
         return false
     end
@@ -624,9 +595,6 @@ end
 ---@param name string|nil
 ---@return boolean|nil, string|nil
 function MoonFont.applyToReader(ui, id, name)
-    if not ui then
-        return nil, _("当前文档不支持字体与排版调整")
-    end
     if not MoonFont.supportsReader(ui) then
         return nil, _("当前文档不支持字体与排版调整")
     end
@@ -639,17 +607,9 @@ function MoonFont.applyToReader(ui, id, name)
         logger.warn("book font apply failed", "id=" .. tostring(id), "face=" .. face)
         return nil, _("应用字体失败")
     end
-    local file = ""
-    local document = ui.document
-    if type(document) == "table" then
-        local name = document.file
-        if type(name) == "string" then
-            file = name
-        end
-    end
     logger.dbg(
         "book font applied",
-        file,
+        ui.document.file or "",
         "id=" .. tostring(id),
         "face=" .. face
     )
@@ -673,7 +633,7 @@ local function apply(id)
     end
     local path, err = resolvePath(id)
     if not path then return nil, err end
-    local base = basename(path)
+    local base = Text.basename(path)
     for _, key in ipairs(UI_FACES) do
         Font.fontmap[key] = base
     end
@@ -763,15 +723,7 @@ function MoonFont.ensureInstalledAsync(item, on_progress, cb)
         cb(nil, path_err)
         return { cancel = function() end }
     end
-    if type(dest) ~= "string" then
-        cb(true)
-        return { cancel = function() end }
-    end
-    if dest == "" then
-        cb(true)
-        return { cancel = function() end }
-    end
-    if type(zip_path) ~= "string" then
+    if type(dest) ~= "string" or dest == "" or type(zip_path) ~= "string" then
         cb(true)
         return { cancel = function() end }
     end

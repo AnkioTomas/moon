@@ -80,12 +80,7 @@ function Source:configured()
 end
 
 --- 删除：本地先标 deleted（书架立刻消失），能上网时再推云端真删。
----@param identity BookIdentity
----@param cb fun(ok: boolean, err: string|nil)
----@return table
-function Source:deleteBookAsync(identity, cb)
-    return Shelf.deleteAsync(self, identity, cb)
-end
+Source.deleteBookAsync = Shelf.deleteAsync
 
 --- 清空封面 URL、阅读上下文与目录缓存。
 function Source:clearCaches()
@@ -165,6 +160,7 @@ function Source:isTocCurrent(toc)
     return Toc.isCurrent(toc)
 end
 
+--- 强制拉取目录并写回缓存；失败时调用方继续使用旧缓存。
 ---@param self WechatSource
 ---@param identity BookIdentity
 ---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
@@ -205,13 +201,7 @@ function Source:loadTocAsync(identity, cb)
     return fetchTocAsync(self, identity, cb)
 end
 
---- 强制刷新目录格式；失败时调用方继续使用旧缓存。
----@param identity BookIdentity
----@param cb fun(toc: BookChapter[]|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Source:refreshTocAsync(identity, cb)
-    return fetchTocAsync(self, identity, cb)
-end
+Source.refreshTocAsync = fetchTocAsync
 
 --- 目录缓存缺失时先拉 toc，再解析 chapter_uid。
 ---@param self WechatSource
@@ -292,27 +282,7 @@ end
 ---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
 ---@return { cancel: fun() }
 function Source:cacheAllChaptersAsync(identity, on_progress, cb)
-    local cancelled, active = false, nil
-    active = self:loadTocAsync(identity, function(toc, err)
-        if cancelled then return end
-        if not toc then cb(false, 0, err or _("章节列表为空"), 0, 0); return end
-        active = require("source.chapter").prefetchAsync(identity, nil, toc, 0, #toc, {
-            fetchContent = fetchContent,
-            persist_toc = false,
-            persist_book = false,
-            progress = on_progress,
-            -- 全本缓存让服务端有喘息时间；阅读期预取仍保持无间隔。
-            interval_seconds = 1.5,
-        }, function(cached, total, failed, last_err)
-            if not cancelled then
-                cb(failed == 0, cached, last_err, total, failed)
-            end
-        end)
-    end)
-    return { cancel = function()
-            cancelled = true
-            if active and active.cancel then active.cancel() end
-        end }
+    return require("source.chapter").cacheAllAsync(self, identity, fetchContent, on_progress, cb)
 end
 
 --- 拉取云端进度并补齐本地需要的坐标。
@@ -797,8 +767,6 @@ function Source:pushNotesAsync(identity, annotations, cb)
         end
     end
 
-    local pushReviews
-
     --- 串行推送想法。
     ---@param chapter_uid string
     local function pushReviewItems(chapter_uid)
@@ -862,7 +830,7 @@ function Source:pushNotesAsync(identity, annotations, cb)
 
     --- 已确认的远端划线先同步样式和颜色，再推送想法。
     ---@param chapter_uid string
-    pushReviews = function(chapter_uid)
+    local function pushReviews(chapter_uid)
         local updates = {}
         for _, item in ipairs(Notes.bookmarkUpdateCandidates(annotations)) do
             if confirmed[item] then updates[#updates + 1] = item end

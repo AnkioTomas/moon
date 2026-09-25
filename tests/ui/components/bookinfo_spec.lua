@@ -140,11 +140,12 @@ Assert.eq(ribbon.overlap_offset[2], 0)
 local marks = {}
 local mark = BookInfo.downloadMark(120)
 mark:paintTo({
-    paintRect = function(_, x, y, w, h)
-        marks[#marks + 1] = { x = x, y = y, w = w, h = h }
+    paintCircle = function(_, cx, cy, r)
+        marks[#marks + 1] = { cx = cx, cy = cy, r = r }
     end,
 }, 0, 0)
-Assert.is_true(#marks > 0)
+Assert.len(marks, 1)
+Assert.eq(marks[1].r, 9)
 Assert.eq(mark.overlap_offset[1], 4)
 Assert.eq(mark.overlap_offset[2], 120 - 18 - 4)
 

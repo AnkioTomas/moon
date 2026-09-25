@@ -13,8 +13,6 @@ local Assets = {}
 
 local WEB = "https://weread.qq.com"
 
-Assets.rewriteImageSources = Shared.rewriteImageSources
-
 ---@param value string|nil
 ---@return string
 local function trimNulls(value)
@@ -51,7 +49,6 @@ end
 ---@param tar string
 ---@return string
 local function absTarUrl(tar)
-    tar = tostring(tar or "")
     if tar:match("^//") then
         return "https:" .. tar
     end
@@ -92,12 +89,7 @@ end
 ---@param cb fun(src_map: table|nil, err: any)
 ---@return table|nil
 local function downloadTarAsync(tar, referer, images_dir, cb)
-    local url = absTarUrl(tar)
-    if url == "" then
-        cb({})
-        return nil
-    end
-    return downloadBinaryAsync(url, referer, function(raw, err)
+    return downloadBinaryAsync(absTarUrl(tar), referer, function(raw, err)
         if not raw then
             cb(nil, err)
             return
@@ -137,10 +129,10 @@ function Assets.localizeAsync(book_id, chapter, html, referer, cb)
     end
 
     --- tar 资源包处理完后，先按包内映射改写 src，再补下仍指向 http(s) 的图片。
-    ---@param src_map table<string, string>|nil 原始 src → 本地相对路径
+    ---@param src_map table<string, string> 原始 src → 本地相对路径
     local function afterTar(src_map)
         if cancelled then return end
-        local rewritten = Shared.rewriteImageSources(html, src_map or {})
+        local rewritten = Shared.rewriteImageSources(html, src_map)
         local job = Shared.localizeAsync(rewritten, images_dir, function(url, done)
             return downloadBinaryAsync(url, WEB .. "/", done)
         end, finish)

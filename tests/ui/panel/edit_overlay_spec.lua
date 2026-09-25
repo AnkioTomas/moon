@@ -91,12 +91,12 @@ Assert.is_nil(lone[3][1][5].onTapPanelEdit)
 
 local done_tapped = false
 local done = Edit.doneRow(200, function() done_tapped = true end)
-Assert.is_true(done.onTapPanelEditDone())
+Assert.is_true(done.onTapPanelEditRow())
 Assert.is_true(done_tapped)
 
 local add_tapped = false
 local add = Edit.addRow(200, function() add_tapped = true end)
-Assert.is_true(add.onTapPanelEditAdd())
+Assert.is_true(add.onTapPanelEditRow())
 Assert.is_true(add_tapped)
 
 return true

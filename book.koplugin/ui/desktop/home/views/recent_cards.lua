@@ -79,18 +79,6 @@ function M:heightRange()
     return { height = PREFERRED_H }
 end
 
---- 空书架点击后进入图书馆，同时清除旧筛选和分页状态。
----@param desktop BookDesktop|nil 所属桌面；离屏视图没有桌面时不执行跳转
-local function openLibrary(desktop)
-    if not desktop or not desktop.switchTab then return end
-    if desktop.library then
-        desktop.library.filter = {}
-        desktop.library.page = 1
-        desktop.library.state = nil
-    end
-    desktop:switchTab("library")
-end
-
 --- 有插件实例时直接打开书籍，否则通过桌面展示书籍详情。
 ---@param ctx BookDesktopCtx 构建上下文，提供插件或桌面入口
 ---@param book Book 要打开的书籍
@@ -292,19 +280,8 @@ function M:createWidget()
     reading = reading or {}
 
     if not recent then
-        local tap = BookInfo.tappable(w, h, function()
-            openLibrary(ctx.desktop)
-        end)
-        tap[1] = CenterContainer:new{
-            dimen = Geom:new{ w = w, h = h },
-            TextWidget:new{
-                text = err or _("去图书馆挑一本 ›"),
-                face = UI.face("cfont", 14),
-                fgcolor = UI.muted(),
-            },
-        }
-        self.content_widget = tap
-        return tap
+        self.content_widget = M.libraryPrompt(ctx, w, h, err)
+        return self.content_widget
     end
 
     local books = { recent }
@@ -318,14 +295,13 @@ function M:createWidget()
     books = rotateBooks(books, self.focus)
     local center_book = books[1]
 
-    local pad = 0
     local gap_cap = UI.sz(8)
     local avail_w = w
     local caption_w = math.min(avail_w, UI.sz(220))
     local caption, caption_h = captionBlock(center_book, caption_w, function()
         openBook(ctx, center_book)
     end)
-    local avail_h = math.max(1, h - pad * 2 - caption_h - gap_cap)
+    local avail_h = math.max(1, h - caption_h - gap_cap)
     local arrow_w = #books > 1 and math.min(UI.sz(28), math.floor(avail_w / 8)) or 0
     local fan_w = math.max(1, avail_w - arrow_w * 2)
     local main_cw = math.max(1, math.floor(math.min(UI.sz(120), fan_w * 0.38, avail_h * 2 / 3)))
@@ -400,7 +376,7 @@ function M:createWidget()
         },
     }
     local host = InputContainer:new{
-        dimen = Geom:new{ w = avail_w, h = math.max(1, h - pad * 2) },
+        dimen = Geom:new{ w = avail_w, h = math.max(1, h) },
         body,
     }
     host.ges_events = {
@@ -427,11 +403,11 @@ function M:createWidget()
     end
     local widget = FrameContainer:new{
         bordersize = 0,
-        padding = pad,
+        padding = 0,
         margin = 0,
         dimen = Geom:new{ w = w, h = h },
         CenterContainer:new{
-            dimen = Geom:new{ w = avail_w, h = math.max(1, h - pad * 2) },
+            dimen = Geom:new{ w = avail_w, h = math.max(1, h) },
             host,
         },
     }

@@ -16,13 +16,6 @@ local T = require("ffi/util").template
 
 ---@class BookSettingsReaderBar
 local ReaderBar = {}
-ReaderBar.__index = ReaderBar
-
----@return BookSettingsReaderBar
-function ReaderBar.new()
-    return setmetatable({}, ReaderBar)
-end
-
 ---@return table|nil
 local function readerUi()
     local ok, ReaderUI = pcall(require, "apps/reader/readerui")

@@ -47,18 +47,16 @@ package.preload["ui.components.bookinfo"] = function()
 end
 
 package.preload["lockscreen.components.util"] = function()
-    return {
-        MUTED = 3,
-        DIM = 4,
-        RULE = 5,
-        duration = function(seconds) return tostring(math.floor(seconds / 60)) .. "m" end,
-        progress = function(book)
-            return book.percent, string.format("%d / %d 页", book.page, book.total_pages)
-        end,
-        emptyBlocks = function(_, title, message)
-            return { { text = title }, { text = message } }
-        end,
-    }
+    local U = dofile(package.searchpath("lockscreen.components.util", package.path))
+    U.MUTED, U.DIM, U.RULE = 3, 4, 5
+    U.duration = function(seconds) return tostring(math.floor(seconds / 60)) .. "m" end
+    U.progress = function(book)
+        return book.percent, string.format("%d / %d 页", book.page, book.total_pages)
+    end
+    U.emptyBlocks = function(_, title, message)
+        return { { text = title }, { text = message } }
+    end
+    return U
 end
 
 package.preload["lockscreen.render"] = function()

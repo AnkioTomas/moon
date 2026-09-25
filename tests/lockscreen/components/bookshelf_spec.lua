@@ -45,17 +45,17 @@ package.preload["book.catalog"] = function()
 end
 
 package.preload["lockscreen.components.library"] = function()
-    return {
-        activeSourceId = function() return "moon" end,
-        shelfBook = function(row, source_id)
-            return {
-                source_id = source_id,
-                stable_id = row.stable_id,
-                title = row.title,
-                percent = row.percent,
-            }
-        end,
-    }
+    local Library = dofile(package.searchpath("lockscreen.components.library", package.path))
+    Library.activeSourceId = function() return "moon" end
+    Library.shelfBook = function(row, source_id)
+        return {
+            source_id = source_id,
+            stable_id = row.stable_id,
+            title = row.title,
+            percent = row.percent,
+        }
+    end
+    return Library
 end
 
 local function widgetClass(name)

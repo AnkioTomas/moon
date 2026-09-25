@@ -35,7 +35,7 @@ function M.open(plugin)
         require("source.registry").afterAuthChanged(plugin)
     end
     require("ui/network/manager"):runWhenOnline(function()
-        require("source.fanqie.qrlogin"):new(nil, settings, owner):start()
+        require("source.fanqie.qrlogin"):new(settings, owner):start()
     end)
 end
 

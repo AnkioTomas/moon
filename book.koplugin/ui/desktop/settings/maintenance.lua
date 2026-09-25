@@ -21,13 +21,6 @@ local T = require("ffi/util").template
 
 ---@class BookSettingsMaintenance
 local Maintenance = {}
-Maintenance.__index = Maintenance
-
----@return BookSettingsMaintenance
-function Maintenance.new()
-    return setmetatable({}, Maintenance)
-end
-
 local REPO_URL = "https://github.com/AnkioTomas/moon"
 local REPO_HOST = "github.com/AnkioTomas/moon"
 

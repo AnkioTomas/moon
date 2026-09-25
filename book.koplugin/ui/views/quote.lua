@@ -47,7 +47,7 @@ local function resolve(opts)
         mark_size = math.max(1, math.floor(tonumber(opts.mark_size) or DEFAULTS.mark_size)),
         gap_mark = math.max(0, math.floor(tonumber(opts.gap_mark) or DEFAULTS.gap_mark)),
         gap_attr = math.max(0, math.floor(tonumber(opts.gap_attr) or DEFAULTS.gap_attr)),
-        pad_x = opts.pad_x ~= nil and math.max(0, math.floor(tonumber(opts.pad_x) or 0)) or 0,
+        pad_x = math.max(0, math.floor(tonumber(opts.pad_x) or 0)),
         width = math.max(1, math.floor(tonumber(opts.width) or UI.sz(300))),
     }
 end

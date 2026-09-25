@@ -42,61 +42,11 @@ package.preload["ui.reader.bars.layout"] = function()
         setReplace = function() end,
     }
 end
-package.preload["ui.reader.session"] = function()
-    return {
-        chapterTitle = function(snapshot)
-            if not snapshot then return nil end
-            local id = snapshot.identity
-            local toc = snapshot.chapter and snapshot.chapter.toc
-            if toc and id and id.chapter_idx then
-                local entry = toc[tonumber(id.chapter_idx)]
-                return entry and entry.title
-            end
-            return nil
-        end,
-    }
-end
-
 local Bars = require("ui.reader.bars")
 
 -- timeText：HH:MM
 Assert.is_true(Bars.timeText(0):match("^%d%d:%d%d$") ~= nil)
 Assert.is_true(Bars.timeText():match("^%d%d:%d%d$") ~= nil)
-
--- chapterTitle：按章书籍取目录 title，整本书无目录为空
-local toc = {}
-for i = 1, 10 do toc[i] = { idx = i, title = "第 " .. i .. " 章" } end
-Assert.eq(Bars.chapterTitle(nil, toc), "")
-Assert.eq(Bars.chapterTitle({}, toc), "")
-Assert.eq(Bars.chapterTitle({ identity = { chapter_idx = 3 } }, toc), "第 3 章")
-Assert.eq(Bars.chapterTitle({ identity = { book = { title = "书名" } } }, toc), "")
-Assert.eq(
-    Bars.chapterTitle({ identity = { book = { title = "书名" } } }),
-    ""
-)
-
--- progressText：空输入
-Assert.eq(Bars.progressText(nil), "")
-Assert.eq(Bars.progressText({}), "0%")
-
--- progressText：百分比夹紧
-Assert.eq(Bars.progressText({ percent = 42 }), "42%")
-Assert.eq(Bars.progressText({ percent = 150 }), "100%")
-Assert.eq(Bars.progressText({ percent = -3 }), "0%")
-
--- progressText：章号拼接（不显示页码）
-Assert.eq(Bars.progressText({ percent = 42, page = 7, total_pages = 100 }), "42%")
-Assert.eq(Bars.progressText({ percent = 5, reading_chapter_idx = 3 }, toc), "5% · 第 3/10 章")
-Assert.eq(
-    Bars.progressText({ percent = 5, page = 1, total_pages = 2, reading_chapter_idx = 3 }, toc),
-    "5% · 第 3/10 章"
-)
-
--- progressText：剩余阅读时间拼接在末尾
-Assert.eq(
-    Bars.progressText({ percent = 42, page = 7, total_pages = 100 }, nil, 3600 + 1800),
-    "42% · 约 1 小时 30 分"
-)
 
 -- remainingText：不足一分钟为空；分钟 / 小时 + 分钟
 Assert.eq(Bars.remainingText(nil), "")
@@ -138,14 +88,9 @@ local ui_top = {
 ui_top.view.footer.ui = ui_top
 Assert.is_true(Bars.topVisible(ui_top))
 Assert.is_true(Bars.bottomVisible(ui_top))
-Assert.eq(Bars.topHeight(ui_top), 40)
--- 文档可视区 offset 会受页面布局影响，不能改变顶栏位置或高度。
-ui_top.view.state.offset.y = 30
-Assert.eq(Bars.topHeight(ui_top), 40)
 
 ui_top.document.getHeaderHeight = function() return 0 end
 Assert.is_false(Bars.topVisible(ui_top))
-Assert.eq(Bars.topHeight(ui_top), 0)
 
 ui_top.document.getHeaderHeight = function() return 28 end
 ui_top.view.view_mode = "scroll"

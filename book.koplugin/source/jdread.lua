@@ -6,7 +6,7 @@
 
 local Client = require("source.jdread.client")
 local Mapper = require("source.jdread.mapper")
-local Toc = require("source.jdread.toc")
+local Toc = require("source.toc")
 local Assets = require("source.assets")
 local Paths = require("utils.paths")
 local Request = require("http.request")
@@ -69,12 +69,7 @@ function Source:close()
 end
 
 --- 删除：本地先标 deleted，能上网时再推云端真删。
----@param identity BookIdentity
----@param cb fun(ok: boolean, err: string|nil)
----@return table
-function Source:deleteBookAsync(identity, cb)
-    return Shelf.deleteAsync(self, identity, cb)
-end
+Source.deleteBookAsync = Shelf.deleteAsync
 
 ---@param identity BookIdentity
 ---@return BookCoverRequest|nil, string|nil
@@ -209,6 +204,15 @@ local function fetchContent(self, identity, chapter, cb)
         end }
 end
 
+--- 绑定实例的正文下载函数，供 source.chapter 调用。
+---@param self JdreadSource
+---@return ChapterFetchContent
+local function contentFetcher(self)
+    return function(ref, chapter, done)
+        return fetchContent(self, ref, chapter, done)
+    end
+end
+
 ---@param identity BookIdentity
 ---@param opts table|nil
 ---@param cb fun(path: string|nil, err: string|nil)
@@ -216,9 +220,7 @@ end
 function Source:openBookAsync(identity, opts, cb)
     return require("source.chapter").openWithUi(self, identity, identity.book, opts, {
         loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
-        fetchContent = function(ref, chapter, done)
-            return fetchContent(self, ref, chapter, done)
-        end,
+        fetchContent = contentFetcher(self),
     }, cb)
 end
 
@@ -230,9 +232,7 @@ end
 ---@return { cancel: fun() }
 function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
     return require("source.chapter").prefetchAsync(identity, identity.book, toc, from_idx, count, {
-        fetchContent = function(ref, chapter, done)
-            return fetchContent(self, ref, chapter, done)
-        end,
+        fetchContent = contentFetcher(self),
     }, cb)
 end
 
@@ -242,28 +242,7 @@ end
 ---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
 ---@return { cancel: fun() }
 function Source:cacheAllChaptersAsync(identity, on_progress, cb)
-    local cancelled, active = false, nil
-    active = self:loadTocAsync(identity, function(toc, err)
-        if cancelled then return end
-        if not toc then cb(false, 0, err or _("章节列表为空"), 0, 0); return end
-        active = require("source.chapter").prefetchAsync(identity, nil, toc, 0, #toc, {
-            fetchContent = function(ref, chapter, done)
-                return fetchContent(self, ref, chapter, done)
-            end,
-            persist_toc = false,
-            persist_book = false,
-            progress = on_progress,
-            interval_seconds = 1.5,
-        }, function(cached, total, failed, last_err)
-            if not cancelled then
-                cb(failed == 0, cached, last_err, total, failed)
-            end
-        end)
-    end)
-    return { cancel = function()
-            cancelled = true
-            if active and active.cancel then active.cancel() end
-        end }
+    return require("source.chapter").cacheAllAsync(self, identity, contentFetcher(self), on_progress, cb)
 end
 
 --- 拉取云端进度，以 catalogId 映射本地连续章节号。

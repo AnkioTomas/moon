@@ -16,82 +16,14 @@ local _ = require("gettext")
 local Weread = {}
 
 local SEARCH_URL = "https://weread.qq.com/web/search/global"
-local DEFAULT_COUNT = 10
 
 local trim = Text.trim
-
-local mapBook
-
---- 搜索微信读书
----@param query string
----@param count number|nil
----@param cb fun(results: table[]|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Weread.searchAsync(query, count, cb)
-    query = trim(query)
-    if query == "" then
-        cb(nil, _("搜索关键词为空"))
-        return nil
-    end
-    count = tonumber(count) or DEFAULT_COUNT
-    if count <= 0 then count = DEFAULT_COUNT end
-    if count > 20 then count = 20 end
-
-    local url = SEARCH_URL .. "?keyword=" .. Text.urlEncode(query)
-        .. "&maxIdx=0&count=" .. tostring(count)
-
-    return Request.request({
-        url = url,
-        method = "GET",
-        headers = {
-            ["User-Agent"] = Request.randomUA(),
-            ["Accept"] = "application/json, text/plain, */*",
-            ["Accept-Language"] = "zh-CN,zh;q=0.9,en;q=0.8",
-            ["Referer"] = "https://weread.qq.com/",
-            ["Origin"] = "https://weread.qq.com",
-        },
-        timeout = 30,
-    }, function(res, err)
-        if err then
-            logger.warn("weread search error:", err)
-            cb(nil, err)
-            return
-        end
-        local code = tonumber(res and res.code)
-        if not code or code ~= 200 then
-            cb(nil, _("网络请求失败"))
-            return
-        end
-        local response = assert(res)
-        local body = response.body or ""
-        local ok, data = pcall(JSON.decode, body)
-        if not ok or type(data) ~= "table" then
-            cb(nil, _("响应格式错误"))
-            return
-        end
-        if not data.books or type(data.books) ~= "table" then
-            cb({})
-            return
-        end
-        local results = {}
-        for _, row in ipairs(data.books) do
-            local info = row.bookInfo
-            if type(info) == "table" and tonumber(info.soldout) ~= 1 then
-                local mapped = mapBook(info, row)
-                if mapped then
-                    results[#results + 1] = mapped
-                end
-            end
-        end
-        cb(results)
-    end)
-end
 
 --- 映射微信读书响应到统一格式
 ---@param info table
 ---@param row table
 ---@return table|nil
-function mapBook(info, row)
+local function mapBook(info, row)
     local title = trim(info.title)
     if title == "" then return nil end
 
@@ -147,6 +79,66 @@ function mapBook(info, row)
         source = "weread",
         bookId = bookId,
     }
+end
+
+--- 搜索微信读书
+---@param query string
+---@param cb fun(results: table[]|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Weread.searchAsync(query, cb)
+    query = trim(query)
+    if query == "" then
+        cb(nil, _("搜索关键词为空"))
+        return nil
+    end
+    local url = SEARCH_URL .. "?keyword=" .. Text.urlEncode(query)
+        .. "&maxIdx=0&count=10"
+
+    return Request.request({
+        url = url,
+        method = "GET",
+        headers = {
+            ["User-Agent"] = Request.randomUA(),
+            ["Accept"] = "application/json, text/plain, */*",
+            ["Accept-Language"] = "zh-CN,zh;q=0.9,en;q=0.8",
+            ["Referer"] = "https://weread.qq.com/",
+            ["Origin"] = "https://weread.qq.com",
+        },
+        timeout = 30,
+    }, function(res, err)
+        if err then
+            logger.warn("weread search error:", err)
+            cb(nil, err)
+            return
+        end
+        local code = tonumber(res and res.code)
+        if not code or code ~= 200 then
+            cb(nil, _("网络请求失败"))
+            return
+        end
+        local response = assert(res)
+        local body = response.body or ""
+        local ok, data = pcall(JSON.decode, body)
+        if not ok or type(data) ~= "table" then
+            cb(nil, _("响应格式错误"))
+            return
+        end
+        if not data.books or type(data.books) ~= "table" then
+            cb({})
+            return
+        end
+        local results = {}
+        for _, row in ipairs(data.books) do
+            local info = row.bookInfo
+            if type(info) == "table" and tonumber(info.soldout) ~= 1 then
+                local mapped = mapBook(info, row)
+                if mapped then
+                    results[#results + 1] = mapped
+                end
+            end
+        end
+        cb(results)
+    end)
 end
 
 return Weread

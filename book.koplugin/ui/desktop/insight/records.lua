@@ -20,14 +20,6 @@ local T = require("ffi/util").template
 
 ---@class BookInsightRecords
 local Records = {}
-Records.__index = Records
-
---- 创建阅读记录页的独立分页和查询状态。
----@return BookInsightRecords
-function Records.new()
-    return setmetatable({}, Records)
-end
-
 
 --- 将秒数格式化为统计页短时长文案。
 ---@param seconds number|nil 阅读秒数。

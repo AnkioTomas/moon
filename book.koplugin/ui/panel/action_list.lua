@@ -7,7 +7,6 @@ local Registry = require("ui.panel.actions.registry")
 
 ---@class BookQuickPanelActionList
 ---@field ids fun(): string[]
----@field save fun(ids: string[])
 ---@field setEnabled fun(id: string, enabled: boolean)
 ---@field move fun(id: string, delta: number)
 ---@field options fun(order_fn: fun(): string[]): BookQuickPanelOption[]
@@ -15,14 +14,13 @@ local Registry = require("ui.panel.actions.registry")
 ---@param scope "desktop"|"reader"
 ---@param settings_key string
 ---@param default_ids string[]|fun(): string[]
----@param opts { before_read: (fun())|nil, can_enable: (fun(action: BookQuickPanelAction): boolean)|nil, settings_available: (fun(action: BookQuickPanelAction): boolean)|nil }|nil
+---@param opts { can_enable: (fun(action: BookQuickPanelAction): boolean)|nil, settings_available: (fun(action: BookQuickPanelAction): boolean)|nil }|nil
 ---@return BookQuickPanelActionList
 local function create(scope, settings_key, default_ids, opts)
     opts = opts or {}
 
     ---@return string[]
     local function ids()
-        if opts.before_read then opts.before_read() end
         local raw = MoonSettings.get()[settings_key]
         if type(raw) ~= "table" then
             raw = type(default_ids) == "function" and default_ids() or default_ids
@@ -115,7 +113,6 @@ local function create(scope, settings_key, default_ids, opts)
 
     return {
         ids = ids,
-        save = save,
         setEnabled = setEnabled,
         move = move,
         options = options,

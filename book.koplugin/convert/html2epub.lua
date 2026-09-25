@@ -76,7 +76,7 @@ local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 ---@param data string
 ---@return string|nil
 local function b64decode(data)
-    data = tostring(data or ""):gsub("[^" .. B64 .. "=]", "")
+    data = data:gsub("[^" .. B64 .. "=]", "")
     if data == "" then
         return nil
     end
@@ -141,44 +141,30 @@ local function sniffImage(bytes)
     return nil
 end
 
+local MIME_BY_EXT = {
+    [".jpg"] = "image/jpeg",
+    [".png"] = "image/png",
+    [".gif"] = "image/gif",
+    [".webp"] = "image/webp",
+    [".svg"] = "image/svg+xml",
+}
+local EXT_BY_MIME = {}
+for ext, mime in pairs(MIME_BY_EXT) do
+    EXT_BY_MIME[mime] = ext
+end
+
 ---@param url string
 ---@return string|nil
 local function extFromUrl(url)
-    local path = (url or ""):match("^[^%?#]+") or url or ""
-    local ext = path:match("%.([%w]+)$")
+    local ext = (url:match("^[^%?#]+") or url):match("%.([%w]+)$")
     if not ext then
         return nil
     end
     ext = "." .. ext:lower()
-    local ok = {
-        [".jpg"] = true,
-        [".jpeg"] = true,
-        [".png"] = true,
-        [".gif"] = true,
-        [".webp"] = true,
-        [".svg"] = true,
-    }
-    if not ok[ext] then
-        return nil
-    end
     if ext == ".jpeg" then
-        return ".jpg"
+        ext = ".jpg"
     end
-    return ext
-end
-
----@param ext string|nil
----@return string
-local function mimeForExt(ext)
-    local map = {
-        [".jpg"] = "image/jpeg",
-        [".jpeg"] = "image/jpeg",
-        [".png"] = "image/png",
-        [".gif"] = "image/gif",
-        [".webp"] = "image/webp",
-        [".svg"] = "image/svg+xml",
-    }
-    return map[ext or ""] or "application/octet-stream"
+    return MIME_BY_EXT[ext] and ext or nil
 end
 
 --- 收集 HTML 中的 img src（去重、保序）。
@@ -213,17 +199,11 @@ end
 ---@param map table<string, string>
 ---@return string
 local function rewriteImageSrcs(html, map)
-    --- 查表替换单个 src；不在映射表里的原样保留。
-    ---@param src string
-    ---@return string
-    local function repl(src)
-        return map[src] or src
-    end
     html = html:gsub([[(<img%s+[^>]-src%s*=%s*)(["'])(.-)%2]], function(pre, q, src)
-        return pre .. q .. repl(src) .. q
+        return pre .. q .. (map[src] or src) .. q
     end)
     html = html:gsub([[(<img%s+[^>]-src%s*=%s*)([^%s"'=<>`]+)]], function(pre, src)
-        return pre .. repl(src)
+        return pre .. (map[src] or src)
     end)
     return html
 end
@@ -244,16 +224,12 @@ end
 ---@return boolean|nil, string|nil
 local function writeEpubPackage(opts, dest)
     local Archiver = require("ffi/archiver")
-    local title = opts.title or _("未命名")
+    local title = opts.title
     local author = opts.author or ""
     local language = opts.language or "zh"
     local identifier = opts.identifier or ("moon-html2epub-" .. tostring(os.time()))
-    local chapters = opts.chapters or {}
-    local images = opts.images or {}
-
-    if #chapters == 0 then
-        return nil, _("无章节内容")
-    end
+    local chapters = opts.chapters
+    local images = opts.images
 
     local tmp = dest .. ".part"
     pcall(os.remove, tmp)
@@ -262,12 +238,18 @@ local function writeEpubPackage(opts, dest)
         return nil, epub.err or _("无法创建 epub")
     end
 
+    --- 关闭并丢弃半成品；返回 nil, err 供调用方直接 return。
+    ---@param msg string
+    local function abort(msg)
+        epub:close()
+        pcall(os.remove, tmp)
+        return nil, epub.err or msg
+    end
+
     local mtime = os.time()
     epub:setZipCompression("store")
     if not epub:addFileFromMemory("mimetype", "application/epub+zip", mtime) then
-        epub:close()
-        pcall(os.remove, tmp)
-        return nil, epub.err or _("写入 mimetype 失败")
+        return abort(_("写入 mimetype 失败"))
     end
     epub:setZipCompression("deflate")
 
@@ -347,16 +329,12 @@ local function writeEpubPackage(opts, dest)
 
     for _i, ch in ipairs(chapters) do
         if not epub:addFileFromMemory("OEBPS/" .. ch.href, ch.xhtml, mtime) then
-            epub:close()
-            pcall(os.remove, tmp)
-            return nil, epub.err or _("写入章节失败")
+            return abort(_("写入章节失败"))
         end
     end
     for _i, img in ipairs(images) do
         if not epub:addFileFromMemory("OEBPS/" .. img.href, img.bytes, mtime) then
-            epub:close()
-            pcall(os.remove, tmp)
-            return nil, epub.err or _("写入图片失败")
+            return abort(_("写入图片失败"))
         end
     end
 
@@ -414,7 +392,6 @@ function Html2Epub.build(opts, cb)
     local started_at = Perf.now()
     local active_job
     local pack_task
-    local book_title = opts.title or _("未命名")
     local total = #chapters_meta
     local out_chapters = {}
     ---@type table<string, { href: string, mime: string, bytes: string }>
@@ -469,12 +446,8 @@ function Html2Epub.build(opts, cb)
         end
         local ext, mime = sniffImage(bytes)
         if not ext then
-            ext = prefer_ext or extFromUrl(key)
-            mime = mimeForExt(ext)
-        end
-        if not ext then
-            ext = ".bin"
-            mime = "application/octet-stream"
+            ext = prefer_ext or extFromUrl(key) or ".bin"
+            mime = MIME_BY_EXT[ext] or "application/octet-stream"
         end
         img_seq = img_seq + 1
         local href = string.format("images/img_%03d%s", img_seq, ext)
@@ -508,14 +481,7 @@ function Html2Epub.build(opts, cb)
                 done(nil)
                 return
             end
-            local prefer
-            if mime == "image/jpeg" then prefer = ".jpg"
-            elseif mime == "image/png" then prefer = ".png"
-            elseif mime == "image/gif" then prefer = ".gif"
-            elseif mime == "image/webp" then prefer = ".webp"
-            elseif mime == "image/svg+xml" then prefer = ".svg"
-            end
-            done(rememberImage(src, bytes, prefer))
+            done(rememberImage(src, bytes, EXT_BY_MIME[mime]))
             return
         end
 
@@ -594,15 +560,13 @@ function Html2Epub.build(opts, cb)
             return
         end
         emit({ phase = "pack", index = total, total = total })
-        local images = image_order
-        local chapters = out_chapters
         local pack_opts = {
-            title = book_title,
+            title = opts.title or _("未命名"),
             author = opts.author,
             language = opts.language,
             identifier = opts.identifier,
-            chapters = chapters,
-            images = images,
+            chapters = out_chapters,
+            images = image_order,
         }
         local Job = require("workers.job")
         pack_task = Job.run(function()
@@ -618,7 +582,7 @@ function Html2Epub.build(opts, cb)
                 end
                 if result == "ok" then
                     logger.dbg("book.html2epub done", dest, total, "chapters",
-                        #images, "images", Perf.elapsedMs(started_at), "ms")
+                        #image_order, "images", Perf.elapsedMs(started_at), "ms")
                     cb(true)
                     return
                 end
@@ -645,7 +609,7 @@ function Html2Epub.build(opts, cb)
             return
         end
 
-        local meta = chapters_meta[index] or {}
+        local meta = chapters_meta[index]
         local title = meta.title or string.format(_("第 %d 章"), index)
         emit({ phase = "chapter", index = index, total = total, title = title })
 
@@ -712,7 +676,7 @@ function Html2Epub.build(opts, cb)
                 return
             end
             cancelled = true
-            if active_job and active_job.cancel then
+            if active_job then
                 active_job.cancel()
             end
             if pack_task then
@@ -725,7 +689,6 @@ end
 Html2Epub._collectImageSrcs = collectImageSrcs
 Html2Epub._rewriteImageSrcs = rewriteImageSrcs
 Html2Epub._ensureHtmlBody = ensureHtmlBody
-Html2Epub._writeEpubPackage = writeEpubPackage
 Html2Epub._sniffImage = sniffImage
 
 return Html2Epub

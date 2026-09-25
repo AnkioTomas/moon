@@ -159,20 +159,20 @@ function DocumentToc.gotoIndex(ui, idx, opts)
     if not entry or not ui or not ui.handleEvent then return false end
     if opts and opts.within ~= nil and entry.page and ui.document then
         local within = require("book.progress").clampFraction(opts.within)
-        if type(ui.document.getXPointerFromProportion) == "function" then
+        local document = ui.document
+        local next_entry = list[idx + 1]
+        local total = document.getPageCount and document:getPageCount() or 1
+        local start_page = entry.page
+        local end_page = next_entry and next_entry.page or total
+        local page = math.max(start_page, math.min(end_page,
+            math.floor(start_page + (end_page - start_page) * within + 0.5)))
+        if type(document.getXPointerFromProportion) == "function" then
             local ok, xptr = pcall(function()
-                local start = entry.xpointer
-                local next_entry = list[idx + 1]
                 local end_xptr = next_entry and next_entry.xpointer
-                if start and end_xptr and type(ui.document.compareXPointers) == "function" then
-                    return start
+                if entry.xpointer and end_xptr and type(document.compareXPointers) == "function" then
+                    return entry.xpointer
                 end
-                local total = ui.document:getPageCount() or 1
-                local start_page = entry.page or 1
-                local end_page = next_entry and next_entry.page or total
-                local page = math.max(start_page, math.min(end_page,
-                    math.floor(start_page + (end_page - start_page) * within + 0.5)))
-                return ui.document:getPageXPointer(page)
+                return document:getPageXPointer(page)
             end)
             if ok and xptr and ui.rolling then
                 ui.rolling:onGotoXPointer(xptr)
@@ -182,12 +182,6 @@ function DocumentToc.gotoIndex(ui, idx, opts)
                 return true
             end
         end
-        local total = ui.document.getPageCount and ui.document:getPageCount() or 1
-        local start_page = entry.page or 1
-        local next_entry = list[idx + 1]
-        local end_page = next_entry and next_entry.page or total
-        local page = math.max(start_page, math.min(end_page,
-            math.floor(start_page + (end_page - start_page) * within + 0.5)))
         ui:handleEvent(Event:new("GotoPage", page))
         return true
     end

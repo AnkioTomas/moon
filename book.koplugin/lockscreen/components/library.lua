@@ -46,4 +46,25 @@ function M.shelfBook(book, source_id)
     }
 end
 
+--- 书架格子收集器：跨多次调用按 (source_id, stable_id) 去重。
+--- 返回的 append 把 rows 转成 shelfBook 追加进 target，target 满 limit 即停。
+---@param source_id string|string[]|nil
+---@return fun(target: table[], rows: table[]|nil, limit: number, accept: (fun(row: table): boolean)|nil)
+function M.shelfCollector(source_id)
+    local seen = {}
+    return function(target, rows, limit, accept)
+        for _, row in ipairs(rows or {}) do
+            if #target >= limit then return end
+            local id = row.stable_id
+            if type(id) == "string" and id ~= "" then
+                local key = tostring(row.source_id or source_id) .. "\0" .. id
+                if not seen[key] and (not accept or accept(row)) then
+                    seen[key] = true
+                    target[#target + 1] = M.shelfBook(row, source_id)
+                end
+            end
+        end
+    end
+end
+
 return M

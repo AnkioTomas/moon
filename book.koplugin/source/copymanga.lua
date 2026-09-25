@@ -165,7 +165,7 @@ function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
     local Auth = require("source.copymanga.auth")
     if not Auth.hasSession() then
-        return require("source.base").syncBooksAsync(self, opts, cb)
+        return SourceBase.syncBooksAsync(self, opts, cb)
     end
     local cancelled, job, delete_job = false, nil, nil
     if opts.dirty_only then
@@ -219,7 +219,7 @@ end
 ---@return string|nil, integer|nil
 local function existingChapter(identity, opts)
     local idx = tonumber(opts and opts.chapter_idx)
-    local book = identity and identity.book
+    local book = identity.book
     if not book then
         book = require("db.book").get(identity.source_id, identity.stable_id)
     end
@@ -469,20 +469,16 @@ function Source:putProgressAsync(identity, pos, cb)
         end)
     end
 
-    local function resolve()
-        local uid = cached_uid or Toc.uid(identity.source_id, identity.stable_id, chapter_idx)
-        if uid then
-            push(uid)
-            return
-        end
+    local uid = cached_uid or Toc.uid(identity.source_id, identity.stable_id, chapter_idx)
+    if uid then
+        push(uid)
+    else
         toc_job = self:loadTocAsync(identity, function(toc, err)
             if cancelled then return end
             if not toc then cb(nil, err); return end
             push(Toc.uid(identity.source_id, identity.stable_id, chapter_idx))
         end)
     end
-
-    resolve()
     return { cancel = function()
             cancelled = true
             if toc_job and toc_job.cancel then toc_job.cancel() end

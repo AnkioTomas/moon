@@ -7,7 +7,6 @@
 require("l10n").apply()
 local _ = require("gettext")
 
-local SOURCE_ID = "jdread"
 local Setting = {}
 
 ---@return string, boolean

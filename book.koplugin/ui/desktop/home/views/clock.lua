@@ -26,8 +26,6 @@ local DOW = { _("日"), _("一"), _("二"), _("三"), _("四"), _("五"), _("六
 ---@field time_widget table|nil
 ---@field detail table|nil
 ---@field extra table|nil
----@field lunar string|nil
----@field holiday string|nil
 ---@field _tick fun()|nil
 local M = {
     id = "clock",
@@ -57,10 +55,10 @@ local function dateLine()
 end
 
 --- 组合农历与节日名称；两项均缺失时显示占位符。
----@param lunar string|nil 农历日期文字
----@param holiday string|nil 节日名称文字
+---@param data table|nil 日报数据，含 lunar / holiday 文字
 ---@return string
-local function lunarLine(lunar, holiday)
+local function lunarLine(data)
+    local lunar, holiday = data and data.lunar, data and data.holiday
     local parts = {}
     if type(lunar) == "string" and lunar ~= "" then
         parts[#parts + 1] = lunar
@@ -78,37 +76,34 @@ local function stopTick(self)
     self._tick = nil
 end
 
---- 按指定宽高构建时间、日期和农历节日三行内容。
+--- 居中主行 + 两行辅文的同构排版（时钟、天气共用）。
+--- 两行辅文控件写回 view.detail / view.extra，供 paint 原地 setText。
+---@param view BookHomeComponent 已保存 ctx / opts 的组件实例
+---@param hero table 主行控件
+---@param detail string 第一行辅文
+---@param extra string 第二行辅文
 ---@return table
-function M:createWidget()
-    local ctx, opts = self.ctx, self.opts
-    if self.data then self.lunar, self.holiday = self.data.lunar, self.data.holiday end
+function M.stack(view, hero, detail, extra)
+    local opts = view.opts
     local w = opts.width
     local total_h = opts.height
     local gap = UI.sz(GAP)
     local sub_h = math.min(UI.sz(SUB_H), math.max(1, math.floor((total_h - UI.sz(36) - gap * 2) / 2)))
-    local time_h = math.max(1, total_h - sub_h * 2 - gap * 2)
-    local y = opts.y or 0
-    local max_w = w
-    self.time_widget = TextWidget:new{
-        text = os.date("%H:%M"),
-        face = UI.face("cfont", 36),
-        fgcolor = Blitbuffer.COLOR_BLACK,
-    }
-    self.detail = TextWidget:new{
-        text = dateLine(),
+    local hero_h = math.max(1, total_h - sub_h * 2 - gap * 2)
+    view.detail = TextWidget:new{
+        text = detail,
         face = UI.face("xx_smallinfofont", 13),
-        max_width = max_w,
+        max_width = w,
         fgcolor = UI.muted(),
     }
-    self.extra = TextWidget:new{
-        text = lunarLine(self.lunar, self.holiday),
+    view.extra = TextWidget:new{
+        text = extra,
         face = UI.face("xx_smallinfofont", 12),
-        max_width = max_w,
+        max_width = w,
         fgcolor = UI.dim(),
     }
-    self.desktop = ctx.desktop
-    self.region = Geom:new{ x = 0, y = y, w = w, h = total_h }
+    view.desktop = view.ctx.desktop
+    view.region = Geom:new{ x = 0, y = opts.y or 0, w = w, h = total_h }
     return FrameContainer:new{
             bordersize = 0,
             padding = 0,
@@ -117,21 +112,32 @@ function M:createWidget()
             VerticalGroup:new{
                 align = "center",
                 CenterContainer:new{
-                    dimen = Geom:new{ w = w, h = time_h },
-                    self.time_widget,
+                    dimen = Geom:new{ w = w, h = hero_h },
+                    hero,
                 },
                 VerticalSpan:new{ width = gap },
                 CenterContainer:new{
                     dimen = Geom:new{ w = w, h = sub_h },
-                    self.detail,
+                    view.detail,
                 },
                 VerticalSpan:new{ width = gap },
                 CenterContainer:new{
                     dimen = Geom:new{ w = w, h = sub_h },
-                    self.extra,
+                    view.extra,
                 },
             },
         }
+end
+
+--- 按指定宽高构建时间、日期和农历节日三行内容。
+---@return table
+function M:createWidget()
+    self.time_widget = TextWidget:new{
+        text = os.date("%H:%M"),
+        face = UI.face("cfont", 36),
+        fgcolor = Blitbuffer.COLOR_BLACK,
+    }
+    return M.stack(self, self.time_widget, dateLine(), lunarLine(self.data))
 end
 
 --- 更新当前时间、日期及农历节日文字，并请求内容区域刷新。
@@ -139,7 +145,7 @@ function M:paint()
     if not self.time_widget then return end
     self.time_widget:setText(os.date("%H:%M"))
     if self.detail then self.detail:setText(dateLine()) end
-    if self.extra then self.extra:setText(lunarLine(self.lunar, self.holiday)) end
+    if self.extra then self.extra:setText(lunarLine(self.data)) end
     self:dirty("content")
 end
 
@@ -170,8 +176,6 @@ function M:pull()
     local previous = self.data
     self:load(function(ok)
         if ok and self.data ~= previous then
-            self.lunar = self.data and self.data.lunar
-            self.holiday = self.data and self.data.holiday
             self:paint()
         end
     end)

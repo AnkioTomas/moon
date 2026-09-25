@@ -15,7 +15,7 @@ local Assets = require("source.wechat.assets")
 
 do
     local html = '<img src="foo.jpg"/><img src="https://cdn/x.png?w=1"/>'
-    local out = Assets.rewriteImageSources(html, {
+    local out = require("source.assets").rewriteImageSources(html, {
         ["foo.jpg"] = "images/aaa.png",
         ["https://cdn/x.png"] = "images/bbb.png",
     })

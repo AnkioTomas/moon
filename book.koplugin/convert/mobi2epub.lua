@@ -238,10 +238,10 @@ function Mobi2Epub.build(opts, cb)
     local job = {}
     --- 中止转换：文本提取和 epub 打包两阶段任一在途都会被取消。
     function job.cancel()
-        if extract_job and extract_job.cancel then
+        if extract_job then
             extract_job.cancel()
         end
-        if active_job and active_job.cancel then
+        if active_job then
             active_job.cancel()
         end
         extract_job, active_job = nil, nil

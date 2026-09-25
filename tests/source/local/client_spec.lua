@@ -1,4 +1,4 @@
---[[-- source.local.client：扫描写库 / 直查 DB 分页筛选 / force 清理 / 单本入库 / 自动扫描节流 / 封面 / 最近阅读 / 统计 --]]
+--[[-- source.local.client：扫描写库 / 清失效 / 单本入库 / 导入 / 移动 / 替换 / 自动扫描节流 / 封面 --]]
 
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
@@ -132,52 +132,6 @@ local upserts = {}
 local removed = {}
 local renames = {}
 
---- 模拟 BookDB.listBySource 的 SQL 语义：deleted=0 / category/series 精确 / search 包含 / stable_id 排序 / 分页。
-local function stubListBySource(source_id, opts)
-    opts = opts or {}
-    local matched = {}
-    for _, row in pairs(db_rows) do
-        if row.source_id == source_id and (tonumber(row.deleted) or 0) == 0 then
-            local keep = true
-            if type(opts.category) == "string" and opts.category ~= "" and row.category ~= opts.category then
-                keep = false
-            end
-            if type(opts.series) == "string" and opts.series ~= "" and row.series ~= opts.series then
-                keep = false
-            end
-            if keep and type(opts.search) == "string" and opts.search ~= "" then
-                local hit = false
-                for _, v in ipairs({ row.title, row.authors, row.stable_id }) do
-                    if type(v) == "string" and v:find(opts.search, 1, true) then
-                        hit = true
-                        break
-                    end
-                end
-                if not hit then
-                    keep = false
-                end
-            end
-            if keep then
-                matched[#matched + 1] = row
-            end
-        end
-    end
-    table.sort(matched, function(a, b)
-        return tostring(a.stable_id) < tostring(b.stable_id)
-    end)
-    local count = #matched
-    local limit = tonumber(opts.limit) or 0
-    local offset = tonumber(opts.offset) or 0
-    if limit > 0 then
-        local sliced = {}
-        for i = offset + 1, math.min(count, offset + limit) do
-            sliced[#sliced + 1] = matched[i]
-        end
-        matched = sliced
-    end
-    return matched, count
-end
-
 -- 扫描走子进程（workers.job）：离线测试不 fork，worker 就地同步跑，
 -- ctx.post 直接转给 on_progress，结果经 nextTick 交 on_done 保持异步语义。
 -- 子进程不碰 sqlite 的约束由 db.base 在真机上强制，这里的 db.book 全是内存假实现。
@@ -290,83 +244,6 @@ package.preload["db.book"] = function()
             end
             return true
         end,
-        listBySource = stubListBySource,
-        categoriesBySource = function(source_id)
-            local seen, out = {}, {}
-            for _, row in pairs(db_rows) do
-                local c = row.category
-                if row.source_id == source_id and (tonumber(row.deleted) or 0) == 0
-                    and type(c) == "string" and c ~= "" and not seen[c] then
-                    seen[c] = true
-                    out[#out + 1] = c
-                end
-            end
-            table.sort(out)
-            return out
-        end,
-        categoryCountsBySource = function(source_id)
-            local counts = {}
-            for _, row in pairs(db_rows) do
-                if row.source_id == source_id and (tonumber(row.deleted) or 0) == 0 then
-                    local category = row.category or ""
-                    counts[category] = (counts[category] or 0) + 1
-                end
-            end
-            local keys, out = {}, {}
-            for category in pairs(counts) do keys[#keys + 1] = category end
-            table.sort(keys)
-            for _, category in ipairs(keys) do
-                out[#out + 1] = { category = category, count = counts[category] }
-            end
-            return out
-        end,
-        seriesCountsBySource = function(source_id)
-            local counts = {}
-            for _, row in pairs(db_rows) do
-                if row.source_id == source_id and (tonumber(row.deleted) or 0) == 0 then
-                    local series = row.series or ""
-                    counts[series] = (counts[series] or 0) + 1
-                end
-            end
-            local out = {}
-            for series, count in pairs(counts) do
-                out[#out + 1] = { series = series, count = count }
-            end
-            return out
-        end,
-        readStatusCountsBySource = function()
-            return {
-                { status = "read", count = 0 },
-                { status = "unread", count = 4 },
-            }
-        end,
-        seriesBySource = function(source_id)
-            local seen, out = {}, {}
-            for _, row in pairs(db_rows) do
-                local series = row.series
-                if row.source_id == source_id and (tonumber(row.deleted) or 0) == 0
-                    and type(series) == "string"
-                    and series ~= "" and not seen[series] then
-                    seen[series] = true
-                    out[#out + 1] = series
-                end
-            end
-            table.sort(out)
-            return out
-        end,
-    }
-end
-package.preload["db.stats"] = function()
-    return {
-        summaryBySource = function()
-            return { total_seconds = 3600, total_pages = 42, last7_seconds = 600, longest_day_seconds = 1200 }
-        end,
-        dailyBySource = function()
-            return { { ymd = "2026-08-15", seconds = 600, pages = 10 } }
-        end,
-        dailyBooksBySource = function()
-            return { { ymd = "2026-08-15", stable_id = "/books/a.epub", seconds = 600, max_page = 10, max_total_pages = 20 } }
-        end,
     }
 end
 for _, name in ipairs({
@@ -375,7 +252,6 @@ for _, name in ipairs({
     "document/documentregistry",
     "utils.task",
     "db.book",
-    "db.stats",
     "source.local.client",
 }) do
     package.loaded[name] = nil
@@ -418,103 +294,20 @@ local function reset()
     removed_files = {}
 end
 
--- ── 直查数据库：不扫盘，分页 / 筛选 / 搜索都走 DB ──────
-do
-    reset()
-    -- 预置 5 本书
-    for i = 1, 5 do
-        local path = string.format("/books/b%d.epub", i)
-        db_rows[rowKey("local", path)] = {
-            source_id = "local",
-            stable_id = path,
-            title = "书" .. i,
-            authors = i == 3 and "鲁迅" or "别人",
-            category = i <= 3 and "sub" or "other",
-            series = i <= 2 and "第一辑" or "第二辑",
-        }
-    end
-    local c = Client.new({ path = "/books" })
-
-    -- 第 1 页（page_size=2）
-    local rows, count
-    c:listAsync({ page = 1, page_size = 2 }, function(r, n)
-        rows, count = r, n
-    end)
-    Stubs.flush()
-    Assert.len(dirs_scanned, 0)
-    Assert.eq(count, 5)
-    Assert.len(rows, 2)
-    Assert.eq(rows[1].stable_id, "/books/b1.epub")
-
-    -- 第 2 页
-    rows, count = nil, nil
-    c:listAsync({ page = 2, page_size = 2 }, function(r, n)
-        rows, count = r, n
-    end)
-    Stubs.flush()
-    Assert.eq(count, 5)
-    Assert.len(rows, 2)
-    Assert.eq(rows[1].stable_id, "/books/b3.epub")
-
-    -- 第 3 页（不足一页）
-    rows = nil
-    c:listAsync({ page = 3, page_size = 2 }, function(r)
-        rows = r
-    end)
-    Stubs.flush()
-    Assert.len(rows, 1)
-    Assert.eq(rows[1].stable_id, "/books/b5.epub")
-
-    -- 分类筛选
-    rows, count = nil, nil
-    c:listAsync({ category = "sub" }, function(r, n)
-        rows, count = r, n
-    end)
-    Stubs.flush()
-    Assert.eq(count, 3)
-    Assert.len(rows, 3)
-
-    -- 系列筛选
-    rows, count = nil, nil
-    c:listAsync({ series = "第一辑" }, function(r, n)
-        rows, count = r, n
-    end)
-    Stubs.flush()
-    Assert.eq(count, 2)
-    Assert.len(rows, 2)
-
-    -- 搜索：命中作者
-    rows, count = nil, nil
-    c:listAsync({ search = "鲁迅" }, function(r, n)
-        rows, count = r, n
-    end)
-    Stubs.flush()
-    Assert.eq(count, 1)
-    Assert.eq(rows[1].stable_id, "/books/b3.epub")
-
-    -- 搜索：无命中
-    c:listAsync({ search = "不存在" }, function(r, n)
-        rows, count = r, n
-    end)
-    Stubs.flush()
-    Assert.eq(count, 0)
-    Assert.len(rows, 0)
-end
-
--- ── force：真实扫盘 → 解析写库（失败回退文件名）→ 清失效 → 返回 DB 页 ──────
+-- ── 扫盘 → 解析写库（失败回退文件名）→ 清失效 ──────
 do
     reset()
     db_rows[rowKey("local", "/books/gone.epub")] = { source_id = "local", stable_id = "/books/gone.epub", title = "gone" }
 
-    local rows, count, err
-    Client.new({ path = "/books" }):listAsync({ force = true }, function(r, n, e)
-        rows, count, err = r, n, e
+    local ok, err
+    Client.new({ path = "/books" }):scanAsync(function(o, e)
+        ok, err = o, e
     end)
     Stubs.flush()
+    Assert.is_true(ok)
     Assert.is_nil(err)
-    -- 白名单内 6 本：a.epub / note.md / c.pdf / d.djvu / bad.epub / e.epub（第 3 层）
-    Assert.eq(count, 6)
-    Assert.len(rows, 6)
+    -- 白名单内 6 本进完整快照：a.epub / note.md / c.pdf / d.djvu / bad.epub / e.epub（第 3 层）
+    Assert.len(upserts, 6)
     Assert.is_true(#dirs_scanned > 0)
     -- 第 4 层不识别
     Assert.is_nil(db_rows[rowKey("local", "/books/sub/deep/x4/f.epub")])
@@ -561,7 +354,7 @@ do
     db_rows[rowKey("local", "/books/a.epub")] = {
         source_id = "local", stable_id = "/books/a.epub", title = "旧书名",
     }
-    Client.new({ path = "/books" }):listAsync({ force = true }, function() end)
+    Client.new({ path = "/books" }):scanAsync(function() end)
     Stubs.flush()
     local a = db_rows[rowKey("local", "/books/a.epub")]
     Assert.eq(a.title, "T:/books/a.epub")
@@ -591,11 +384,11 @@ do
     Assert.eq(#renames, 1)
 end
 
--- ── 元数据缓存命中：force 也跳过解析；非 force 永不扫盘 ──────
+-- ── 元数据缓存命中：重扫跳过解析 ──────
 do
     reset()
     local c = Client.new({ path = "/books" })
-    c:listAsync({ force = true }, function() end)
+    c:scanAsync(function() end)
     Stubs.flush()
     Assert.len(opened, 5)
     Assert.eq(props_read, 5)
@@ -605,7 +398,7 @@ do
     upserts = {}
     dirs_scanned = {}
     covers_saved = {}
-    c:listAsync({ force = true }, function() end)
+    c:scanAsync(function() end)
     Stubs.flush()
     Assert.is_true(#dirs_scanned > 0)
     Assert.len(opened, 5)
@@ -613,16 +406,6 @@ do
     Assert.len(covers_saved, 5)
     Assert.len(upserts, 6) -- 缓存命中不重解析，但完整快照仍批量恢复书架成员
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].percent, 42)
-
-    -- 非 force 纯查库
-    dirs_scanned = {}
-    local rows
-    c:listAsync(nil, function(r)
-        rows = r
-    end)
-    Stubs.flush()
-    Assert.len(rows, 6)
-    Assert.len(dirs_scanned, 0)
 end
 
 -- ── 单本入库：只解析目标文件，不扫盘、不清失效 ──────
@@ -915,41 +698,6 @@ do
     Assert.is_true(#dirs_scanned > 0)
 end
 
--- ── filtersAsync：分类/系列 DISTINCT 直查 DB ───────
-do
-    reset()
-    package.loaded["utils.settings"] = nil
-    package.preload["utils.settings"] = function()
-        return { libraryMixed = function() return false end }
-    end
-    package.loaded["book.catalog"] = nil
-    for i, cat in ipairs({ "sub", "zeta", "sub", "" }) do
-        local path = string.format("/books/f%d.epub", i)
-        db_rows[rowKey("local", path)] = {
-            source_id = "local",
-            stable_id = path,
-            title = "f" .. i,
-            category = cat,
-            series = i <= 2 and "系列 A" or "系列 B",
-        }
-    end
-    local res
-    Client.new({ path = "/books" }):filtersAsync(function(data)
-        res = data
-    end)
-    Stubs.flush()
-    Assert.not_nil(res)
-    Assert.len(res.data.category, 2)
-    Assert.len(res.data.category_counts, 3)
-    Assert.not_nil(res.data.series_counts)
-    Assert.len(res.data.read_counts, 2)
-    Assert.eq(res.data.category[1], "sub")
-    Assert.eq(res.data.category[2], "zeta")
-    Assert.len(res.data.series, 2)
-    Assert.eq(res.data.series[1], "系列 A")
-    Assert.eq(res.data.series[2], "系列 B")
-end
-
 -- ── cachedCoverPath：冒号调用约定（源门面以 self._client:cachedCoverPath 调用）──
 do
     reset()
@@ -963,21 +711,12 @@ end
 -- ── 书库目录不得落在插件数据目录内 ────────────────────
 do
     reset()
-    local rows, count, err
-    Client.new({ path = "/data/.moon" }):listAsync(nil, function(r, n, e)
-        rows, count, err = r, n, e
-    end)
-    Stubs.flush()
-    Assert.is_nil(rows)
-    Assert.eq(count, 0)
+    local ok, err = Client.new({ path = "/data/.moon" }):validatePath()
+    Assert.is_false(ok)
     Assert.eq(err, "书库目录不能是插件数据目录")
 
-    rows, err = nil, nil
-    Client.new({ path = "/data/.moon/cache" }):listAsync(nil, function(r, n, e)
-        rows, err = r, e
-    end)
-    Stubs.flush()
-    Assert.is_nil(rows)
+    ok, err = Client.new({ path = "/data/.moon/cache" }):validatePath()
+    Assert.is_false(ok)
     Assert.eq(err, "书库目录不能是插件数据目录")
 end
 
@@ -990,7 +729,6 @@ for _, name in ipairs({
     "document/documentregistry",
     "utils.task",
     "db.book",
-    "db.stats",
     "source.local.client",
 }) do
     package.preload[name] = nil

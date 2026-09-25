@@ -98,25 +98,16 @@ local function parseRelease(body)
     local zip_name = "book.koplugin-" .. tag .. ".zip"
     local zip = findAsset(release.assets, zip_name)
     if not zip then return nil, "release has no plugin archive" end
-    local digest
-    if type(zip.digest) == "string" then
-        local matched = zip.digest:match("^sha256:([%da-fA-F]+)$")
-        if type(matched) == "string" and #matched == 64 then
-            digest = matched
-        end
-    end
+    local digest = type(zip.digest) == "string" and zip.digest:match("^sha256:([%da-fA-F]+)$")
+    if digest and #digest ~= 64 then digest = nil end
     local checksum = findAsset(release.assets, zip_name .. ".sha256")
     if not digest and not checksum then return nil, "release has no plugin checksum" end
-        local sha256
-        if digest then
-            sha256 = digest:lower()
-        end
-        return {
+    return {
         version = version,
         tag = tag,
         url = zip.browser_download_url,
         size = tonumber(zip.size),
-        sha256 = sha256,
+        sha256 = digest and digest:lower() or nil,
         checksum_url = checksum and checksum.browser_download_url or nil,
         notes = formatNotes(release.body),
         available = newer(version, require("bookversion")),
@@ -156,6 +147,14 @@ function Update.check(cb)
     return Update._job
 end
 
+--- 安装流程收尾：清掉在途状态再回调。
+---@param cb fun(ok: boolean, err: any)
+local function finishInstall(cb, ok, err)
+    Update._installing = false
+    Update._job = nil
+    cb(ok, err)
+end
+
 local function installWithChecksum(release, plugin_root, checksum, cb, on_progress)
     Paths.ensureSettings()
     local archive = Paths.root() .. "/plugin-update.zip"
@@ -169,9 +168,7 @@ local function installWithChecksum(release, plugin_root, checksum, cb, on_progre
         on_progress = on_progress,
     }, archive, function(ok, err)
         if not ok then
-            Update._installing = false
-            Update._job = nil
-            cb(false, err)
+            finishInstall(cb, false, err)
             return
         end
         Update._job = Job.run(function()
@@ -183,15 +180,11 @@ local function installWithChecksum(release, plugin_root, checksum, cb, on_progre
             timeout = 120,
             on_done = function()
                 os.remove(archive)
-                Update._installing = false
-                Update._job = nil
-                cb(true)
+                finishInstall(cb, true)
             end,
             on_failed = function(install_err)
                 os.remove(archive)
-                Update._installing = false
-                Update._job = nil
-                cb(false, install_err)
+                finishInstall(cb, false, install_err)
             end,
         })
     end)
@@ -217,16 +210,12 @@ function Update.install(release, plugin_root, cb, on_progress)
         allow_redirects = true,
     }, function(body, err)
         if err then
-            Update._installing = false
-            Update._job = nil
-            cb(false, err)
+            finishInstall(cb, false, err)
             return
         end
         local checksum = type(body) == "string" and body:match("^%s*([%da-fA-F]+)")
         if not checksum or #checksum ~= 64 then
-            Update._installing = false
-            Update._job = nil
-            cb(false, "invalid update checksum")
+            finishInstall(cb, false, "invalid update checksum")
             return
         end
         installWithChecksum(release, plugin_root, checksum:lower(), cb, on_progress)

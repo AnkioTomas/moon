@@ -32,28 +32,17 @@ local FALLBACK = {
     ru = "Russian",
 }
 
+-- 键一律小写，查表前先 lower。
 local DETECTED_ALIASES = {
-    ["zh-Hans"] = "zh",
     ["zh-hans"] = "zh",
-    ["zh-Hant"] = "zh_TW",
     ["zh-hant"] = "zh_TW",
 }
 
 --- Edge / API 语言码 → KOReader 语言码。
----@param code string|nil
----@return string|nil
+---@param code string
+---@return string
 local function normalizeCode(code)
-    if type(code) ~= "string" or code == "" then
-        return code
-    end
-    if DETECTED_ALIASES[code] then
-        return DETECTED_ALIASES[code]
-    end
-    local lower = code:lower()
-    if DETECTED_ALIASES[lower] then
-        return DETECTED_ALIASES[lower]
-    end
-    return code
+    return DETECTED_ALIASES[code:lower()] or code
 end
 
 ---@param translator table
@@ -74,7 +63,7 @@ end
 --- 语言展示名。
 ---@param translator table
 ---@param code string
----@return string|nil
+---@return string
 local function languageName(translator, code)
     local map = supportedMap(translator)
     if map[code] then
@@ -101,10 +90,10 @@ function Languages.saveFavorites(codes)
     MoonSettings.saveSection("reader", reader)
 end
 
---- 完整语言列表（设置页多选用）。
+--- 打开设置页：常用翻译语言多选（完整语言列表，已选中常用语言）。
 ---@param translator table
----@return table[]
-function Languages.settingsItems(translator)
+---@param desktop table|nil
+function Languages.openSettingsPicker(translator, desktop)
     local favorites = {}
     for _, code in ipairs(Languages.favoriteCodes()) do
         favorites[code] = true
@@ -117,14 +106,6 @@ function Languages.settingsItems(translator)
             checked = favorites[code] == true,
         }
     end
-    return items
-end
-
---- 打开设置页：常用翻译语言多选。
----@param translator table
----@param desktop table|nil
-function Languages.openSettingsPicker(translator, desktop)
-    local items = Languages.settingsItems(translator)
     require("ui.views.popup").multi{
         title = _("常用翻译语言"),
         subtitle = _("划词翻译时优先显示这些语言"),
@@ -203,21 +184,12 @@ function Languages.displayName(translator, code, detected)
         if type(detected) ~= "string" then
             return _("自动检测")
         end
-        local norm = normalizeCode(detected)
-        if type(norm) ~= "string" then
-            return _("自动检测")
-        end
-        return languageName(translator, norm) or translator:getLanguageName(norm, detected)
+        return languageName(translator, normalizeCode(detected))
     end
-    local norm = normalizeCode(code)
-    if type(norm) ~= "string" then
+    if type(code) ~= "string" then
         return "?"
     end
-    local shown = code
-    if type(shown) ~= "string" then
-        shown = "?"
-    end
-    return languageName(translator, norm) or translator:getLanguageName(norm, shown)
+    return languageName(translator, normalizeCode(code))
 end
 
 --- 写入 KOReader 源语言设置。

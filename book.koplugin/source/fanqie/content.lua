@@ -69,35 +69,22 @@ function Content.decode_pua_content(content)
 end
 
 
+--- 大整数 ID 按 %.0f 输出，避免 tostring 给出科学计数法。
 local function to_precise_id(value)
-    if value == nil then return nil end
-    if type(value) == "string" then return value, false, false end
     if type(value) == "number" then
-        local s = string.format("%.0f", value)
-        -- 检查是否精度丢失: 转回数字再转回字符串，看是否一致
-        if tonumber(s) ~= value then
-            return s, true, true
-        end
-        return s, true, false
+        return string.format("%.0f", value)
     end
-    return tostring(value), false, false
+    return tostring(value)
 end
+
+local ID_KEYS = { itemId = true, item_id = true, bookId = true, book_id = true }
 
 -- 递归处理chapter中的ID字段，转为字符串
 local function fix_chapter_ids(chapter)
     if type(chapter) ~= "table" then return chapter end
     local fixed = {}
     for k, v in pairs(chapter) do
-        if k == "itemId" or k == "item_id" or k == "bookId" or k == "book_id" then
-            local sid = to_precise_id(v)
-            if sid then
-                fixed[k] = sid
-            else
-                fixed[k] = v
-            end
-        else
-            fixed[k] = v
-        end
+        fixed[k] = ID_KEYS[k] and to_precise_id(v) or v
     end
     return fixed
 end
@@ -140,9 +127,8 @@ function Content.normalize_chapters(payload, book_id)
     if type(records.allItemIds) == "table" and #records.allItemIds > 0 then
         local chapters = {}
         for i, item_id in ipairs(records.allItemIds) do
-            local sid = to_precise_id(item_id) or tostring(item_id)
             table.insert(chapters, {
-                itemId = sid,
+                itemId = to_precise_id(item_id),
                 title = "第" .. tostring(i) .. "章",
                 index = i - 1,
             })
@@ -152,7 +138,7 @@ function Content.normalize_chapters(payload, book_id)
     if records.bookId or records.updated then
         records = { records }
     end
-    for record_index, record in ipairs(records) do
+    for _, record in ipairs(records) do
         if tostring(record.bookId or "") == tostring(book_id) then
             local list = record.updated or record.chapterInfos or record.chapters
                 or record.item_list or record.list or record.chapterList or {}

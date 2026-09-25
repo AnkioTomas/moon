@@ -319,7 +319,6 @@ function Crypto.build_unsigned_headers(device, ts_ms)
     }
 end
 
-Crypto.AID = AID
 Crypto.HARDCODED_KEY_HEX = "ac25c67ddd8f38c1b37a2348828e222e"
 Crypto.HOST = "api5-normal-sinfonlinec.fqnovel.com"
 Crypto.BATCH_FULL_PATH = "/reading/reader/batch_full/v"

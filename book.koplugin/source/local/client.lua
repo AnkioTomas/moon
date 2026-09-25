@@ -16,13 +16,14 @@ local Job = require("workers.job")
 local Webdav = require("http.webdav")
 local Paths = require("utils.paths")
 
--- 源模块顶部不许 require KOReader UI 模块（离线测试直接 require 源文件）
-local _uimanager
---- 延迟取 UIManager 并缓存；顶层 require UI 模块会让离线测试直接炸。
----@return table
-local function uiManager()
-    _uimanager = _uimanager or require("ui/uimanager")
-    return _uimanager
+--- 下一帧调 cb(...)。源模块顶部不许 require KOReader UI 模块（离线测试直接 require 源文件），
+--- UIManager 在这里延迟加载。
+---@param cb function
+local function defer(cb, ...)
+    local args = { n = select("#", ...), ... }
+    require("ui/uimanager"):nextTick(function()
+        cb(unpack(args, 1, args.n))
+    end)
 end
 
 ---@class LocalClient
@@ -101,7 +102,13 @@ end
 
 ---@return string
 function Client:webdavCacheRoot()
-    return require("utils.paths").bookDir(SOURCE_ID) .. "/webdav"
+    return Paths.bookDir(SOURCE_ID) .. "/webdav"
+end
+
+--- 确保文件所在目录存在。
+---@param path string
+local function ensureParent(path)
+    Paths.ensureDir(path:match("(.+)/[^/]+$") or path)
 end
 
 ---@param rel string
@@ -145,6 +152,48 @@ local function decodeProgress(raw)
     }
 end
 
+--- 解析 .Moon+/books.sync：明文 JSON，或 zlib 压缩的 JSON（解压尺寸未知，逐级试缓冲区）。
+---@param raw string
+---@return any|nil
+local function decodeBooksSync(raw)
+    local JSON = require("json")
+    local ok_json, decoded = pcall(JSON.decode, raw)
+    if ok_json then
+        return decoded
+    end
+    local ok_zlib, Zlib = pcall(require, "ffi/zlib")
+    if not ok_zlib then
+        return nil
+    end
+    for _, size in ipairs({ 65536, 262144, 1048576, 4194304, 16777216 }) do
+        local inflated_ok, inflated = pcall(Zlib.zlib_uncompress, raw, size)
+        if inflated_ok then
+            ok_json, decoded = pcall(JSON.decode, inflated)
+            if ok_json then
+                return decoded
+            end
+        end
+    end
+    return nil
+end
+
+--- 逐项串行异步遍历：step(item, next) 处理完一项调 next()，全部处理完调 done()。
+---@param list any[]
+---@param step fun(item: any, next: fun())
+---@param done fun()
+local function eachAsync(list, step, done)
+    local index = 0
+    local function next_item()
+        index = index + 1
+        local item = list[index]
+        if item == nil then
+            return done()
+        end
+        step(item, next_item)
+    end
+    next_item()
+end
+
 --- 是否已配置本地路径。
 ---@return boolean
 function Client:configured()
@@ -164,7 +213,7 @@ function Client:validatePath()
     if path == "" then
         return false, _("未配置本地路径")
     end
-    local moon_root = require("utils.paths").root()
+    local moon_root = Paths.root()
     if path == moon_root or path:sub(1, #moon_root + 1) == moon_root .. "/" then
         return false, _("书库目录不能是插件数据目录")
     end
@@ -182,7 +231,7 @@ end
 ---@param stable_id string
 ---@return string
 local function coverPath(stable_id)
-    return require("utils.paths").coverPath(stable_id, SOURCE_ID)
+    return Paths.coverPath(stable_id, SOURCE_ID)
 end
 
 --- 把书籍附属资源从旧路径迁移到新路径。
@@ -199,59 +248,62 @@ local function moveBookArtifacts(old_path, new_path)
     end
 end
 
---- 把封面 blitbuffer 落盘为 PNG（os.remove/os.rename 不抛异常，无需 pcall）。
----@param stable_id string
-local function saveCover(bb, stable_id)
-    if not bb then
+--- 从已打开的文档提取封面并落盘为 PNG；封面缓存独立于 books 元数据缓存。
+--- os.remove/os.rename 不抛异常，无需 pcall。
+---@param doc table
+---@param path string
+local function saveDocumentCover(doc, path)
+    local target = coverPath(path)
+    if lfs.attributes(target, "mode") == "file" then
         return
     end
-    local path = coverPath(stable_id)
-    local tmp = path .. ".part"
+    local ok_cover, bb = pcall(function()
+        return doc:getCoverPageImage()
+    end)
+    if not (ok_cover and bb) then
+        return
+    end
+    local tmp = target .. ".part"
     local ok = pcall(function() bb:writePNG(tmp) end)
     pcall(function() bb:free() end)
     if not ok then
         os.remove(tmp)
         return
     end
-    os.remove(path)
-    if not os.rename(tmp, path) then
+    os.remove(target)
+    if not os.rename(tmp, target) then
         os.remove(tmp)
     end
 end
 
---- 从已打开的文档提取封面；封面缓存独立于 books 元数据缓存。
----@param doc table
+--- 打开文档调 fn(doc) 并返回其结果；无引擎 / 打开失败返回 nil。异常不在这里吞，由调用方 pcall。
+--- crengine 需 loadDocument(false) 仅载元数据；close 后注册表引用归零自动清。
 ---@param path string
-local function saveDocumentCover(doc, path)
-    if lfs.attributes(coverPath(path), "mode") == "file" then
-        return
+---@param fn fun(doc: table): any
+local function withDocument(path, fn)
+    local DocumentRegistry = require("document/documentregistry")
+    if not DocumentRegistry:hasProvider(path) then
+        return nil
     end
-    local ok_cover, cover_bb = pcall(function()
-        return doc:getCoverPageImage()
-    end)
-    if ok_cover and cover_bb then
-        saveCover(cover_bb, path)
+    local doc = DocumentRegistry:openDocument(path)
+    if not doc then
+        return nil
     end
+    if doc.loadDocument and not doc:loadDocument(false) then
+        -- crengine 加载失败后调其它方法会 segfault，必须直接 close
+        pcall(function() doc:close() end)
+        return nil
+    end
+    local result = fn(doc)
+    pcall(function() doc:close() end)
+    return result
 end
 
 --- 打开文档并补齐缺失封面；不读取或更新元数据。
 ---@param path string
 local function ensureCover(path)
-    local ok, err = pcall(function()
-        local DocumentRegistry = require("document/documentregistry")
-        if not DocumentRegistry:hasProvider(path) then
-            return
-        end
-        local doc = DocumentRegistry:openDocument(path)
-        if not doc then
-            return
-        end
-        if doc.loadDocument and not doc:loadDocument(false) then
-            pcall(function() doc:close() end)
-            return
-        end
+    local ok, err = pcall(withDocument, path, function(doc)
         saveDocumentCover(doc, path)
-        pcall(function() doc:close() end)
     end)
     if not ok then
         require("utils.log").warn("book local cover extraction failed", path, err)
@@ -259,28 +311,13 @@ local function ensureCover(path)
 end
 
 --- 解析单本书元数据 + 封面；失败返回 nil（损坏 / 无引擎）。
---- crengine 需 loadDocument(false) 仅载元数据；close 后注册表引用归零自动清。
 ---@param path string 书路径，即 stable_id
 ---@return { title: string|nil, authors: string|nil, intro: string|nil }|nil
 local function parseBookProps(path)
-    local ok, props = pcall(function()
-        local DocumentRegistry = require("document/documentregistry")
-        if not DocumentRegistry:hasProvider(path) then
-            return nil
-        end
-        local doc = DocumentRegistry:openDocument(path)
-        if not doc then
-            return nil
-        end
-        if doc.loadDocument and not doc:loadDocument(false) then
-            -- crengine 加载失败后调其它方法会 segfault，必须直接 close
-            pcall(function() doc:close() end)
-            return nil
-        end
+    local ok, props = pcall(withDocument, path, function(doc)
         local p = doc:getProps()
         -- 封面：与元数据同会话提取（无封面的格式返回 nil）
         saveDocumentCover(doc, path)
-        pcall(function() doc:close() end)
         return p
     end)
     if not ok or type(props) ~= "table" then
@@ -428,19 +465,17 @@ local function commitFiles(files, known, full_snapshot)
     local BookDB = require("db.book")
     for _, f in ipairs(files) do
         local cached = known[f.path]
-        local existing = cached
-        local renamed = false
+        local moved
         if not cached then
             local by_md5 = f.md5 and BookDB.getByMd5(SOURCE_ID, f.md5)
             if by_md5 and by_md5.stable_id ~= f.path then
-                existing = by_md5
                 if not BookDB.renameStableId(
                     SOURCE_ID, by_md5.stable_id, f.path, f.category, f.series
                 ) then
                     return false
                 end
                 moveBookArtifacts(by_md5.stable_id, f.path)
-                renamed = true
+                moved = by_md5
             end
         end
         if full_snapshot then
@@ -452,22 +487,13 @@ local function commitFiles(files, known, full_snapshot)
                 and not BookDB.setLibraryMembership(SOURCE_ID, f.path, true) then
                 return false
             end
-        elseif existing then
-            -- knownBooks 只把元数据完整的行交给 worker；缺字段的旧行会
-            -- 在这里用本次解析结果补齐。不要把“已存在”误当成“无需更新”。
-            if not BookDB.upsert({
-                source_id = SOURCE_ID, stable_id = f.path, md5 = f.md5,
-                title = f.title, authors = f.authors, intro = f.intro,
-                category = f.category, series = f.series,
-                inserted_at = existing.inserted_at, path = f.path,
-            }) then
-                return false
-            end
-        elseif not renamed and not BookDB.upsert({
+        -- knownBooks 只把元数据完整的行交给 worker；移动过来的旧行也会
+        -- 在这里用本次解析结果补齐。不要把“已存在”误当成“无需更新”。
+        elseif not BookDB.upsert({
             source_id = SOURCE_ID, stable_id = f.path, md5 = f.md5,
             title = f.title, authors = f.authors, intro = f.intro,
             category = f.category, series = f.series,
-            inserted_at = os.time(), path = f.path,
+            inserted_at = moved and moved.inserted_at or os.time(), path = f.path,
         }) then
             return false
         end
@@ -477,11 +503,11 @@ local function commitFiles(files, known, full_snapshot)
 end
 
 --- 扫盘任务：遍历与解析在子进程，落库在主进程，cancel 杀子进程。
---- 扫描成败都调 on_done：子进程崩溃/启动失败时库里是旧数据，照查，不让 UI 空转。
+--- 扫描成败都调 cb：子进程崩溃/启动失败时库里是旧数据，照查，不让 UI 空转。
 ---@param root string
----@param on_done fun(err: string|nil)
+---@param cb fun(ok: boolean, err: string|nil)
 ---@return { cancel: fun() }
-local function scanJob(root, on_done)
+local function scanJob(root, cb)
     local known = knownBooks()
     local job = Job.run(function()
         local files = scanFiles(root)
@@ -494,40 +520,20 @@ local function scanJob(root, on_done)
         kind = "medium",
         on_done = function(files)
             if commitFiles(files or {}, known, true) then
-                on_done()
+                cb(true)
             else
                 require("utils.log").warn("book local scan commit failed")
-                on_done("failed to commit local scan")
+                cb(false, "failed to commit local scan")
             end
         end,
         on_failed = function(err)
             require("utils.log").warn("book local scan failed", err)
-            on_done(err or "local scan failed")
+            cb(false, err or "local scan failed")
         end,
     })
     return { cancel = function()
             job:cancel()
         end }
-end
-
---- 直查 books 表（图书馆分页/分类/系列/搜索）。
----@param opts table|nil { page, page_size, category, series, search }
----@param cb fun(rows: table[]|nil, count: number, err: any)
-local function queryDb(opts, cb)
-    opts = opts or {}
-    local page = math.max(1, tonumber(opts.page) or 1)
-    local page_size = math.max(1, tonumber(opts.page_size) or 24)
-    uiManager():nextTick(function()
-        local BookDB = require("db.book")
-        local rows, count = BookDB.listBySource(SOURCE_ID, {
-            category = opts.category,
-            series = opts.series,
-            search = opts.search,
-            limit = page_size,
-            offset = (page - 1) * page_size,
-        })
-        cb(rows, count)
-    end)
 end
 
 --- 把外部文件收进书库根目录并单本入库（不重扫）。
@@ -677,11 +683,10 @@ function Client:replaceBook(temp_path, stable_id)
     if new_path == stable_id then
         return nil, _("原书已经是 EPUB")
     end
-    if lfs.attributes(new_path) then
-        return nil, _("目标位置已有同名文件：") .. (new_path:match("([^/]+)$") or new_path)
-    end
-    if lfs.attributes(new_path .. ".sdr") then
-        return nil, _("目标位置已有同名文件：") .. (new_path:match("([^/]+)$") or new_path) .. ".sdr"
+    local taken = lfs.attributes(new_path) and new_path
+        or lfs.attributes(new_path .. ".sdr") and new_path .. ".sdr"
+    if taken then
+        return nil, _("目标位置已有同名文件：") .. taken:match("([^/]+)$")
     end
 
     local backup = stable_id .. ".moon-reflow-backup"
@@ -700,27 +705,15 @@ function Client:replaceBook(temp_path, stable_id)
 
     local BookDB = require("db.book")
     local row = BookDB.get(SOURCE_ID, stable_id)
-    local renamed = BookDB.renameStableId(
-        SOURCE_ID,
-        stable_id,
-        new_path,
-        row and row.category or nil,
-        row and row.series or nil
-    )
-    if not renamed then
+    local category, series = row and row.category, row and row.series
+    if not BookDB.renameStableId(SOURCE_ID, stable_id, new_path, category, series) then
         os.remove(new_path)
         os.rename(backup, stable_id)
         return nil, _("更新书籍身份失败")
     end
 
     if not os.remove(backup) then
-        BookDB.renameStableId(
-            SOURCE_ID,
-            new_path,
-            stable_id,
-            row and row.category or nil,
-            row and row.series or nil
-        )
+        BookDB.renameStableId(SOURCE_ID, new_path, stable_id, category, series)
         os.remove(new_path)
         os.rename(backup, stable_id)
         return nil, _("删除原书失败")
@@ -746,17 +739,11 @@ end
 ---@return { cancel: fun() }|nil
 function Client:indexOneAsync(path, cb)
     if type(path) ~= "string" or path == "" then
-        uiManager():nextTick(function()
-            cb(nil, _("无效路径"))
-        end)
-        return nil
+        return defer(cb, nil, _("无效路径"))
     end
     local name = path:match("([^/]+)$") or path
     if not isBookFile(name) then
-        uiManager():nextTick(function()
-            cb(nil, _("不支持的文件格式"))
-        end)
-        return nil
+        return defer(cb, nil, _("不支持的文件格式"))
     end
     local known = knownBooks()
     local job = Job.run(function()
@@ -790,15 +777,9 @@ function Client:scanAsync(cb)
     end
     local ok, err = self:validatePath()
     if not ok then
-        uiManager():nextTick(function()
-            cb(false, err)
-        end)
-        return nil
+        return defer(cb, false, err)
     end
-    local root = rootPath(self.cfg)
-    return scanJob(root, function(scan_err)
-        cb(scan_err == nil, scan_err)
-    end)
+    return scanJob(rootPath(self.cfg), cb)
 end
 
 --- WebDAV 只同步书目，不下载正文；正文由 openAsync 按需拉取。
@@ -807,13 +788,12 @@ end
 function Client:scanWebdavAsync(cb)
     local ok, err = self:validatePath()
     if not ok then
-        uiManager():nextTick(function() cb(false, err) end)
-        return nil
+        return defer(cb, false, err)
     end
     local files = {}
     local progress_files = {}
     local cover_files = {}
-    local meta_entry
+    local has_meta = false
     local cancelled = false
     local active
     local function walk(path, prefix, done)
@@ -821,34 +801,28 @@ function Client:scanWebdavAsync(cb)
         active = self.dav:listAsync(path, function(entries, list_err)
             if cancelled then return end
             if list_err then done(nil, list_err); return end
-            local index = 0
-            local function next_entry()
+            eachAsync(entries, function(entry, next_entry)
                 if cancelled then return end
-                index = index + 1
-                local entry = entries[index]
-                if not entry then done(true); return end
                 local rel = prefix ~= "" and prefix .. "/" .. entry.name or entry.name
                 if entry.is_dir then
                     walk(entry.path, rel, function(ok_walk, walk_err)
                         if not ok_walk then done(nil, walk_err); return end
                         next_entry()
                     end)
-                else
-                    local name = entry.name or ""
-                    if rel == ".Moon+/books.sync" then
-                        meta_entry = entry
-                    end
-                    if isBookFile(name) then
-                        files[#files + 1] = { rel = rel, entry = entry }
-                    elseif rel:match("^%.Moon%+/Cache/[^/]+%.po$") then
-                        progress_files[#progress_files + 1] = rel
-                    elseif rel:match("^%.Moon%+/Cover/[^/]+%.png$") then
-                        cover_files[#cover_files + 1] = rel
-                    end
-                    next_entry()
+                    return
                 end
-            end
-            next_entry()
+                if rel == ".Moon+/books.sync" then
+                    has_meta = true
+                end
+                if isBookFile(entry.name) then
+                    files[#files + 1] = rel
+                elseif rel:match("^%.Moon%+/Cache/[^/]+%.po$") then
+                    progress_files[#progress_files + 1] = rel
+                elseif rel:match("^%.Moon%+/Cover/[^/]+%.png$") then
+                    cover_files[#cover_files + 1] = rel
+                end
+                next_entry()
+            end, function() done(true) end)
         end)
     end
     walk(self:webdavPath(), "", function(walk_ok, walk_err)
@@ -857,37 +831,24 @@ function Client:scanWebdavAsync(cb)
         local BookDB = require("db.book")
         local metadata = {}
         local remote_by_rel = {}
-        for _, item in ipairs(files) do remote_by_rel[item.rel] = item end
+        local by_name = {}
+        for _, rel in ipairs(files) do
+            remote_by_rel[rel] = true
+            by_name[progressFileName(rel)] = remoteStableId(rel)
+        end
         local function saveBooksSync(done)
-            if not meta_entry then done(); return end
+            if not has_meta then done(); return end
             local temp = self:webdavCacheRoot() .. "/.books.sync"
-            Paths.ensureDir(temp:match("(.+)/[^/]+$") or temp)
+            ensureParent(temp)
             self.dav:getAsync(self:webdavPath() .. "/.Moon+/books.sync", temp, nil, function(ok_meta)
-                if ok_meta then
-                    local file = io.open(temp, "rb")
-                    local raw = file and file:read("*a")
-                    if file then file:close() end
-                    if raw then
-                        local JSON = require("json")
-                        local ok_json, decoded = pcall(JSON.decode, raw)
-                        if not ok_json then
-                            local ok_zlib, Zlib = pcall(require, "ffi/zlib")
-                            if ok_zlib then
-                                for _, size in ipairs({ 65536, 262144, 1048576, 4194304, 16777216 }) do
-                                    local inflated_ok, inflated = pcall(Zlib.zlib_uncompress, raw, size)
-                                    if inflated_ok then
-                                        ok_json, decoded = pcall(JSON.decode, inflated)
-                                        if ok_json then break end
-                                    end
-                                end
-                            end
-                        end
-                        if ok_json and type(decoded) == "table" then
-                            for _, row in ipairs(decoded) do
-                                if type(row) == "table" and type(row.filename) == "string" then
-                                    metadata[row.filename] = row
-                                end
-                            end
+                local file = ok_meta and io.open(temp, "rb")
+                local raw = file and file:read("*a")
+                if file then file:close() end
+                local decoded = raw and decodeBooksSync(raw)
+                if type(decoded) == "table" then
+                    for _, row in ipairs(decoded) do
+                        if type(row) == "table" and type(row.filename) == "string" then
+                            metadata[row.filename] = row
                         end
                     end
                 end
@@ -896,12 +857,11 @@ function Client:scanWebdavAsync(cb)
         end
         local function uploadBooksSync(done)
             local rows = {}
-            for _, item in ipairs(files) do
-                local stable_id = remoteStableId(item.rel)
-                local row = BookDB.get(SOURCE_ID, stable_id)
+            for _, rel in ipairs(files) do
+                local row = BookDB.get(SOURCE_ID, remoteStableId(rel))
                 if row then
                     rows[#rows + 1] = {
-                        filename = item.rel, bookName = row.title,
+                        filename = rel, bookName = row.title,
                         authors = row.authors, category = row.category,
                         series = row.series, intro = row.intro,
                         coverUrl = row.cover,
@@ -916,7 +876,7 @@ function Client:scanWebdavAsync(cb)
             local ok_compress, compressed = pcall(Zlib.zlib_compress, encoded)
             if not ok_compress then done(); return end
             local temp = self:webdavCacheRoot() .. "/.books.sync.upload"
-            Paths.ensureDir(temp:match("(.+)/[^/]+$") or temp)
+            ensureParent(temp)
             local out = io.open(temp, "wb")
             if not out then done(); return end
             out:write(compressed); out:close()
@@ -930,34 +890,28 @@ function Client:scanWebdavAsync(cb)
         end
         local function uploadLocalCovers(done)
             local pending = {}
-            for _, item in ipairs(files) do
-                local local_cover = coverPath(remoteStableId(item.rel))
+            for _, rel in ipairs(files) do
+                local local_cover = coverPath(remoteStableId(rel))
                 if lfs.attributes(local_cover, "mode") == "file" then
-                    pending[#pending + 1] = { rel = item.rel, path = local_cover }
+                    pending[#pending + 1] = { rel = rel, path = local_cover }
                 end
             end
             if #pending == 0 then done(); return end
             self.dav:ensurePathAsync(self:webdavPath() .. "/.Moon+/Cover", function(ok_dir)
                 if not ok_dir then done(); return end
-                local index = 0
-                local function next_cover()
-                    index = index + 1
-                    local item = pending[index]
-                    if not item then done(); return end
-                    local key = progressFileName(item.rel)
+                eachAsync(pending, function(item, next_cover)
                     self.dav:putFileAsync(
-                        self:webdavPath() .. "/.Moon+/Cover/" .. key .. "_2.png",
+                        self:webdavPath() .. "/.Moon+/Cover/" .. progressFileName(item.rel) .. "_2.png",
                         item.path,
                         function() next_cover() end
                     )
-                end
-                next_cover()
+                end, done)
             end)
         end
         local function uploadLocalFiles(done)
             local root = rootPath(self.cfg)
             if root == "" or not lfs.attributes(root, "mode") then done(); return end
-            local job = Job.run(function()
+            Job.run(function()
                 return scanFiles(root)
             end, {
                 name = "local.webdav.upload",
@@ -965,20 +919,13 @@ function Client:scanWebdavAsync(cb)
                 on_done = function(local_files)
                     local pending = {}
                     for _, item in ipairs(local_files or {}) do
-                        local rel = item.name
-                        if item.category and item.category ~= "" then rel = item.category .. "/" .. rel end
-                        if item.series and item.series ~= "" then
-                            rel = item.category .. "/" .. item.series .. "/" .. item.name
-                        end
+                        -- scanFiles 的 path 恒为 root/[分类/[系列/]]文件名，去掉 root 即远端相对路径
+                        local rel = item.path:sub(#root + 2)
                         if not remote_by_rel[rel] then
                             pending[#pending + 1] = { item = item, rel = rel }
                         end
                     end
-                    local index = 0
-                    local function next_file()
-                        index = index + 1
-                        local pending_item = pending[index]
-                        if not pending_item then done(); return end
+                    eachAsync(pending, function(pending_item, next_file)
                         local item, rel = pending_item.item, pending_item.rel
                         local parent = rel:match("(.+)/[^/]+$")
                         local function upload()
@@ -986,11 +933,9 @@ function Client:scanWebdavAsync(cb)
                                 function(ok_upload)
                                     if ok_upload then
                                         local title, authors = parseFilename(item.name)
-                                        local stable_id = remoteStableId(rel)
-                                        remote_by_rel[rel] = { rel = rel }
-                                        files[#files + 1] = { rel = rel, entry = { name = item.name } }
+                                        files[#files + 1] = rel
                                         BookDB.upsertRemote({
-                                            source_id = SOURCE_ID, stable_id = stable_id,
+                                            source_id = SOURCE_ID, stable_id = remoteStableId(rel),
                                             title = title, authors = authors,
                                             category = item.category, series = item.series,
                                             deleted = 0,
@@ -1007,18 +952,58 @@ function Client:scanWebdavAsync(cb)
                         else
                             upload()
                         end
-                    end
-                    next_file()
+                    end, done)
                 end,
                 on_failed = function()
                     done()
                 end,
             })
         end
+        local function syncRemoteProgress(done)
+            local ProgressDB = require("db.progress")
+            local temp = self:webdavCacheRoot() .. "/.progress"
+            eachAsync(progress_files, function(rel, next_progress)
+                ensureParent(temp)
+                self.dav:getAsync(self:webdavPath() .. "/" .. rel, temp, nil, function(ok_progress)
+                    local file = ok_progress and io.open(temp, "rb")
+                    local raw = file and file:read("*a")
+                    if file then file:close() end
+                    local pos = decodeProgress(raw)
+                    local stable_id = by_name[progressFileName(rel)]
+                    if pos and stable_id then
+                        local local_pos = ProgressDB.get(SOURCE_ID, stable_id)
+                        if not local_pos or (local_pos.sync_status ~= 0 and
+                                pos.updated_at > (local_pos.updated_at or 0)) then
+                            ProgressDB.upsertRemote(SOURCE_ID, stable_id, pos)
+                        end
+                    end
+                    os.remove(temp)
+                    next_progress()
+                end)
+            end, done)
+        end
+        local function syncRemoteCovers(done)
+            eachAsync(cover_files, function(rel, next_cover)
+                -- cover_files 已按 Cover/<书名>[_2].png 过滤，文件名必然存在
+                local stable_id = by_name[(rel:match("([^/]+)%.png$"):gsub("_2$", ""))]
+                if not stable_id then next_cover(); return end
+                local target = coverPath(stable_id)
+                if lfs.attributes(target, "mode") == "file" then next_cover(); return end
+                ensureParent(target)
+                self.dav:getAsync(self:webdavPath() .. "/" .. rel, target .. ".part", nil, function(ok_cover)
+                    if ok_cover then
+                        os.remove(target)
+                        os.rename(target .. ".part", target)
+                    else
+                        os.remove(target .. ".part")
+                    end
+                    next_cover()
+                end)
+            end, done)
+        end
         saveBooksSync(function()
             local seen = {}
-            for _, item in ipairs(files) do
-                local rel = item.rel
+            for _, rel in ipairs(files) do
                 local stable_id = remoteStableId(rel)
                 seen[stable_id] = true
                 local remote = metadata[rel] or {}
@@ -1039,80 +1024,15 @@ function Client:scanWebdavAsync(cb)
                     BookDB.setLibraryMembership(SOURCE_ID, stable_id, false, false)
                 end
             end
-        local function syncRemoteProgress(done)
-            if #progress_files == 0 then done(); return end
-            local ProgressDB = require("db.progress")
-            local by_name = {}
-            for _, item in ipairs(files) do
-                by_name[progressFileName(item.rel)] = remoteStableId(item.rel)
-            end
-            local index = 0
-            local function next_progress()
-                index = index + 1
-                local rel = progress_files[index]
-                if not rel then done(); return end
-                local temp = self:webdavCacheRoot() .. "/.progress"
-                Paths.ensureDir(temp:match("(.+)/[^/]+$") or temp)
-                self.dav:getAsync(self:webdavPath() .. "/" .. rel, temp, nil, function(ok_progress)
-                    if ok_progress then
-                        local file = io.open(temp, "rb")
-                        local raw = file and file:read("*a")
-                        if file then file:close() end
-                        local pos = decodeProgress(raw)
-                        local stable_id = by_name[progressFileName(rel)]
-                        if pos and stable_id then
-                            local local_pos = ProgressDB.get(SOURCE_ID, stable_id)
-                            if not local_pos or (local_pos.sync_status ~= 0 and
-                                    pos.updated_at > (local_pos.updated_at or 0)) then
-                                ProgressDB.upsertRemote(SOURCE_ID, stable_id, pos)
-                            end
-                        end
-                    end
-                    os.remove(temp)
-                    next_progress()
-                end)
-            end
-            next_progress()
-        end
-        local function syncRemoteCovers(done)
-            if #cover_files == 0 then done(); return end
-            local by_name = {}
-            for _, item in ipairs(files) do
-                by_name[progressFileName(item.rel)] = remoteStableId(item.rel)
-            end
-            local index = 0
-            local function next_cover()
-                index = index + 1
-                local rel = cover_files[index]
-                if not rel then done(); return end
-                local key = rel:match("([^/]+)%.png$")
-                key = key and key:gsub("_2$", "")
-                local stable_id = key and by_name[key]
-                if not stable_id then next_cover(); return end
-                local target = coverPath(stable_id)
-                if lfs.attributes(target, "mode") == "file" then next_cover(); return end
-                Paths.ensureDir(target:match("(.+)/[^/]+$") or target)
-                self.dav:getAsync(self:webdavPath() .. "/" .. rel, target .. ".part", nil, function(ok_cover)
-                    if ok_cover then
-                        os.remove(target)
-                        os.rename(target .. ".part", target)
-                    else
-                        os.remove(target .. ".part")
-                    end
-                    next_cover()
-                end)
-            end
-            next_cover()
-        end
-        syncRemoteProgress(function()
-            syncRemoteCovers(function()
-                uploadLocalFiles(function()
-                    uploadLocalCovers(function()
-                        uploadBooksSync(function() cb(true) end)
+            syncRemoteProgress(function()
+                syncRemoteCovers(function()
+                    uploadLocalFiles(function()
+                        uploadLocalCovers(function()
+                            uploadBooksSync(function() cb(true) end)
+                        end)
                     end)
                 end)
             end)
-        end)
         end)
     end)
     return { cancel = function()
@@ -1131,10 +1051,10 @@ function Client:openWebdavAsync(stable_id, cb)
     local target = root .. "/" .. rel
     local attr = lfs.attributes(target, "mode")
     if attr == "file" then
-        uiManager():nextTick(function() cb(target) end)
+        defer(cb, target)
         return { cancel = function() end }
     end
-    Paths.ensureDir(target:match("(.+)/[^/]+$") or target)
+    ensureParent(target)
     local part = target .. ".part"
     local cancelled = false
     local job = self.dav:getAsync(self:webdavPath() .. "/" .. rel, part, nil, function(ok, get_err)
@@ -1181,23 +1101,18 @@ function Client:syncWebdavProgressAsync(identity, cb)
     else
         pending = ProgressDB.unsynced(SOURCE_ID)
     end
-    local index = 0
     local cancelled = false
     local active
-    local function next_progress()
+    eachAsync(pending, function(pos, next_progress)
         if cancelled then return end
-        index = index + 1
-        local pos = pending[index]
-        if not pos then cb(true); return end
         local rel = remoteRelativePath(pos.stable_id)
         if not rel then next_progress(); return end
-        local filename = progressFileName(rel)
         local temp = self:webdavCacheRoot() .. "/.progress.upload"
-        Paths.ensureDir(temp:match("(.+)/[^/]+$") or temp)
+        ensureParent(temp)
         local file = io.open(temp, "wb")
         if not file then cb(false, "无法保存 WebDAV 阅读进度"); return end
         file:write(encodeProgress(pos)); file:close()
-        local path = self:webdavPath() .. "/.Moon+/Cache/" .. filename
+        local path = self:webdavPath() .. "/.Moon+/Cache/" .. progressFileName(rel)
         active = self.dav:ensurePathAsync(self:webdavPath() .. "/.Moon+/Cache", function(ok_dir, dir_err)
             if not ok_dir then os.remove(temp); cb(false, dir_err); return end
             active = self.dav:putFileAsync(path, temp, function(ok_put, put_err)
@@ -1207,39 +1122,13 @@ function Client:syncWebdavProgressAsync(identity, cb)
                 next_progress()
             end)
         end)
-    end
-    next_progress()
+    end, function()
+        if not cancelled then cb(true) end
+    end)
     return { cancel = function()
         cancelled = true
         if active and active.cancel then active:cancel() end
     end }
-end
-
---- 书库查询（异步）：默认直查数据库；opts.force 先真实扫盘写库再查。
----@param opts table|nil { force, page, page_size, category, series, search }
----@param cb fun(rows: table[]|nil, count: number, err: any)
----@return { cancel: fun() }|nil
-function Client:listAsync(opts, cb)
-    local ok, err = self:validatePath()
-    if not ok then
-        uiManager():nextTick(function()
-            cb(nil, 0, err)
-        end)
-        return nil
-    end
-
-    if not (type(opts) == "table" and opts.force == true) then
-        queryDb(opts, cb)
-        return nil
-    end
-
-    return self:scanAsync(function(scan_ok, scan_err)
-        if not scan_ok then
-            cb(nil, 0, scan_err)
-            return
-        end
-        queryDb(opts, cb)
-    end)
 end
 
 --- 打开桌面时的自动扫描（节流 AUTO_SCAN_INTERVAL 秒）：扫盘写库 + 清失效。
@@ -1263,24 +1152,7 @@ function Client:autoScanAsync(cb)
         cb(false, nil, true)
         return nil
     end
-    local root = rootPath(self.cfg)
-    return scanJob(root, function(scan_err)
-        cb(scan_err == nil, scan_err)
-    end)
-end
-
---- 分类和系列列表（DISTINCT 直查数据库；混合模式走 Catalog 跨源）。
----@param cb fun(data: BookFiltersResult|nil, err: any)
----@return { cancel: fun() }|nil
-function Client:filtersAsync(cb)
-    local ok, err = self:validatePath()
-    if not ok then
-        uiManager():nextTick(function()
-            cb(nil, err)
-        end)
-        return nil
-    end
-    return require("book.catalog").filtersAsync(SOURCE_ID, cb)
+    return scanJob(rootPath(self.cfg), cb)
 end
 
 --- 封面缓存路径（已存在才返回；绝不现提取，coverRequest 在 UI 线程同步调用）。

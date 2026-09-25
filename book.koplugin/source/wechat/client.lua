@@ -37,6 +37,17 @@ local function acceptWebWire(data, err, cb)
     return true
 end
 
+--- 包装回调：errCode 校验通过才回传 wire。
+---@param cb fun(data: table|nil, err: string|nil)
+---@return fun(data: table|nil, err: string|nil)
+local function webWire(cb)
+    return function(data, err)
+        if acceptWebWire(data, err, cb) then
+            cb(data)
+        end
+    end
+end
+
 --- 构造微信读书客户端实例。
 ---@param o table|nil
 ---@return WechatClient
@@ -53,11 +64,7 @@ function Client:shelfSyncAsync(cb)
     return Auth.webApiGetAsync("/web/shelf/sync?" .. Text.formEncode({
         synckey = 0,
         teenmode = 0,
-    }), function(data, err)
-        if acceptWebWire(data, err, cb) then
-            cb(data)
-        end
-    end)
+    }), webWire(cb))
 end
 
 --- 加入微信读书书架。
@@ -72,11 +79,7 @@ function Client:addToShelfAsync(bookId, cb)
     end
     return Auth.webApiPostAsync("/web/shelf/add", {
         bookIds = { bookId },
-    }, function(data, err)
-        if acceptWebWire(data, err, cb) then
-            cb(data)
-        end
-    end)
+    }, webWire(cb))
 end
 
 --- 从微信读书书架删除。
@@ -93,11 +96,7 @@ function Client:removeFromShelfAsync(bookId, cb)
         bookIds = { bookId },
         albumIds = {},
         archiveIds = {},
-    }, function(data, err)
-        if acceptWebWire(data, err, cb) then
-            cb(data)
-        end
-    end)
+    }, webWire(cb))
 end
 
 --- 逐页拉取并合并 ``books``，直到凑满 limit 或服务端说没有更多。
@@ -201,11 +200,7 @@ end
 ---@return { cancel: fun() }|nil
 function Client:bookInfoAsync(bookId, cb)
     bookId = tostring(bookId or "")
-    return Auth.webApiGetAsync("/web/book/info?" .. Text.formEncode({ bookId = bookId }), function(data, err)
-        if acceptWebWire(data, err, cb) then
-            cb(data)
-        end
-    end)
+    return Auth.webApiGetAsync("/web/book/info?" .. Text.formEncode({ bookId = bookId }), webWire(cb))
 end
 
 --- 拉取整本书的章节目录。
@@ -216,11 +211,7 @@ function Client:chapterInfosAsync(bookId, cb)
     bookId = tostring(bookId or "")
     return Auth.webApiPostAsync("/web/book/chapterInfos", {
         bookIds = { bookId },
-    }, function(data, err)
-        if acceptWebWire(data, err, cb) then
-            cb(data)
-        end
-    end)
+    }, webWire(cb))
 end
 
 --- 拉取云端阅读进度；带毫秒时间戳参数避开中间层缓存。
@@ -232,11 +223,7 @@ function Client:getProgressAsync(bookId, cb)
     return Auth.webApiGetAsync("/web/book/getProgress?" .. Text.formEncode({
         bookId = bookId,
         _ = tostring(os.time() * 1000),
-    }), function(data, err)
-        if acceptWebWire(data, err, cb) then
-            cb(data)
-        end
-    end)
+    }), webWire(cb))
 end
 
 ---@param bookId string
@@ -318,13 +305,7 @@ function Client:readStatsAsync(mode, base_time, cb)
     if base_time and tonumber(base_time) and tonumber(base_time) > 0 then
         params.baseTime = tonumber(base_time)
     end
-    return Auth.agentGatewayAsync("/readdata/detail", params, function(data, err)
-        if data then
-            cb(data)
-        else
-            cb(nil, err)
-        end
-    end)
+    return Auth.agentGatewayAsync("/readdata/detail", params, cb)
 end
 
 --- 个人划线列表。
@@ -337,13 +318,7 @@ end
 function Client:bookmarkListAsync(bookId, cb)
     return Auth.agentGatewayAsync("/book/bookmarklist", {
         bookId = tostring(bookId or ""),
-    }, function(data, err)
-        if data then
-            cb(data)
-        else
-            cb(nil, err)
-        end
-    end)
+    }, cb)
 end
 
 --- 本人在该书的想法与点评（含划线想法的 ``range``）。
@@ -355,23 +330,19 @@ function Client:myReviewsAsync(bookId, cb)
         bookid = tostring(bookId or ""),
         count = 100,
         synckey = 0,
-    }, function(data, err)
-        if data then
-            cb(data)
-        else
-            cb(nil, err)
-        end
-    end)
+    }, cb)
 end
 
 --- Web 写接口；Agent Skills 网关是只读通道，写请求会返回 HTTP 499。
 ---@param path string
 ---@param body table
 ---@param cb fun(data: table|nil, err: any)
+---@param referer string|nil 缺省用站点首页
+---@param invalid_msg string|nil 回包非 JSON 时的错误，缺省「想法上传失败」
 ---@return { cancel: fun() }|nil
-local function postWebWriteAsync(path, body, cb)
+local function postWebWriteAsync(path, body, cb, referer, invalid_msg)
     return Auth.webPostAsync("https://weread.qq.com/web" .. path, JSON.encode(body), {
-        headers = { ["Referer"] = "https://weread.qq.com/" },
+        headers = { ["Referer"] = referer or "https://weread.qq.com/" },
     }, function(raw, err)
         if not raw then
             cb(nil, err)
@@ -379,7 +350,7 @@ local function postWebWriteAsync(path, body, cb)
         end
         local ok, data = pcall(JSON.decode, raw)
         if not ok or type(data) ~= "table" then
-            cb(nil, _("想法上传失败"))
+            cb(nil, invalid_msg or _("想法上传失败"))
             return
         end
         if acceptWebWire(data, err, cb) then cb(data) end
@@ -461,23 +432,8 @@ function Client:addBookmarkAsync(bookId, chapter_uid, body, cb)
         cb(nil, _("无效的划线数据"))
         return nil
     end
-    local referer = Protocol.readerUrl(bookId, chapter_uid)
-    return Auth.webPostAsync("https://weread.qq.com/web/book/addBookmark", JSON.encode(body), {
-        headers = { ["Referer"] = referer },
-    }, function(raw, err)
-        if not raw then
-            cb(nil, err)
-            return
-        end
-        local ok, data = pcall(JSON.decode, raw)
-        if not ok or type(data) ~= "table" then
-            cb(nil, _("划线上传失败"))
-            return
-        end
-        if acceptWebWire(data, err, cb) then
-            cb(data)
-        end
-    end)
+    return postWebWriteAsync("/book/addBookmark", body, cb,
+        Protocol.readerUrl(bookId, chapter_uid), _("划线上传失败"))
 end
 
 return Client

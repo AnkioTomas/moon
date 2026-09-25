@@ -97,19 +97,8 @@ function Panel.enabledCount()
     return #list.ids()
 end
 
---- 启用或停用某个桌面动作。
----@param id string
----@param enabled boolean
-function Panel.setEnabled(id, enabled)
-    list.setEnabled(id, enabled)
-end
-
---- 上移或下移某个桌面动作。
----@param id string
----@param delta number
-function Panel.move(id, delta)
-    list.move(id, delta)
-end
+Panel.setEnabled = list.setEnabled
+Panel.move = list.move
 
 --- 生成快捷面板灯光滑杆；按设备能力过滤。
 ---@return BookQuickPanelSlider[]

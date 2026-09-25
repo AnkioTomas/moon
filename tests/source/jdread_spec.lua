@@ -228,22 +228,18 @@ end
 
 do
     local prefetch_opts
-    package.preload["source.chapter"] = function()
-        return {
-            prefetchAsync = function(identity, _, toc, from_idx, count, opts, cb)
-                prefetch_opts = opts
-                Assert.eq(from_idx, 0)
-                Assert.eq(count, #toc)
-                opts.progress(1, #toc)
-                opts.fetchContent(identity, toc[1], function(payload)
-                    Assert.matches(payload.html, "正文")
-                    cb(2, 2, 0)
-                end)
-                return { cancel = function() end }
-            end,
-        }
-    end
     package.loaded["source.chapter"] = nil
+    require("source.chapter").prefetchAsync = function(identity, _, toc, from_idx, count, opts, cb)
+        prefetch_opts = opts
+        Assert.eq(from_idx, 0)
+        Assert.eq(count, #toc)
+        opts.progress(1, #toc)
+        opts.fetchContent(identity, toc[1], function(payload)
+            Assert.matches(payload.html, "正文")
+            cb(2, 2, 0)
+        end)
+        return { cancel = function() end }
+    end
     package.loaded["source.jdread"] = nil
     local Jd = require("source.jdread")
     fake_client.chapterContentAsync = function(_, _, _, cb)

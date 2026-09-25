@@ -133,6 +133,10 @@ Assert.eq(Selection.hit({
     start = { x = 10, y = 10 },
     finish = { x = 12, y = 10 },
 }, { x = 11, y = 10 }, 8), "start")
+Assert.eq(Selection.hit({
+    start = { x = 10, y = 10 },
+    finish = { x = 12, y = 10 },
+}, { x = 12, y = 10 }, 8), "finish")
 
 -- 菜单锚点：手柄下方优先，贴底时翻到上方
 local band_top, band_bottom = Selection.band(first, last, anchors, 7)

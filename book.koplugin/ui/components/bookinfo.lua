@@ -48,9 +48,7 @@ local _ = require("gettext")
 local BookInfo = {}
 
 --- Kindle 状态叠层用近黑灰，和封面拉开对比。
-local function statusInk()
-    return Blitbuffer.COLOR_GRAY_3 or Blitbuffer.COLOR_BLACK
-end
+local STATUS_INK = Blitbuffer.COLOR_GRAY_3
 
 --- Kindle 缎带：沿 \ 从顶边接到右边，定宽，角尖不填。
 ---@param bb BlitBuffer 用于绘制的 Blitbuffer 画布
@@ -70,6 +68,15 @@ local function paintSash(bb, x, y, size, band, color)
     end
 end
 
+--- 源画布该像素是否为白字墨水。
+---@param src table 参与像素读取的源画布
+---@param x number 像素横坐标
+---@param y number 像素纵坐标
+---@return boolean
+local function inked(src, x, y)
+    return src:getPixel(x, y):getColor8().a > 128
+end
+
 --- 白像素外接盒；旋转按墨水中心，不按字体框。
 ---@param src table 图片来源地址或参与像素读取的源画布，具体形式由参数类型限定
 ---@return number, number, number, number
@@ -78,9 +85,7 @@ local function inkRect(src)
     local x0, y0, x1, y1 = sw, sh, -1, -1
     for j = 0, sh - 1 do
         for i = 0, sw - 1 do
-            local pix = src:getPixel(i, j)
-            local lum = pix.getColor8 and pix:getColor8().a or pix.a
-            if lum and lum > 128 then
+            if inked(src, i, j) then
                 if i < x0 then x0 = i end
                 if j < y0 then y0 = j end
                 if i > x1 then x1 = i end
@@ -114,12 +119,8 @@ local function blitInk45(dst, src, dx, dy, ox, oy, sw, sh)
             local fx, fy = i - dcx, j - dcx
             local sx = math.floor(fx * k + fy * k + scx + 0.5) + ox
             local sy = math.floor(-fx * k + fy * k + scy + 0.5) + oy
-            if sx >= ox and sy >= oy and sx < ox + sw and sy < oy + sh then
-                local pix = src:getPixel(sx, sy)
-                local lum = pix.getColor8 and pix:getColor8().a or pix.a
-                if lum and lum > 128 then
-                    dst:setPixelClamped(dx + i, dy + j, Blitbuffer.COLOR_WHITE)
-                end
+            if sx >= ox and sy >= oy and sx < ox + sw and sy < oy + sh and inked(src, sx, sy) then
+                dst:setPixelClamped(dx + i, dy + j, Blitbuffer.COLOR_WHITE)
             end
         end
     end
@@ -159,22 +160,11 @@ local function persistCover(book, path)
     os.rename(tmp, target)
 end
 
---- 取书籍 stable_id（文件身份）。
----@param book Book|table|nil 当前操作或展示的书籍数据
----@return string|nil
-function BookInfo.file(book)
-    if type(book) ~= "table" then return nil end
-    if type(book.stable_id) == "string" then
-        return book.stable_id
-    end
-    return nil
-end
-
 --- 取书名；缺省回退文件 id 或「?」。
 ---@param book Book|table|nil 当前操作或展示的书籍数据
 ---@return string
 function BookInfo.title(book)
-    return (book and book.title) or BookInfo.file(book) or "?"
+    return book and (book.title or book.stable_id) or "?"
 end
 
 --- 取作者。
@@ -276,7 +266,7 @@ function BookInfo.progressBadge(cw, pct)
             padding_bottom = UI.sz(1),
             width = nil,
             height = UI.sz(16),
-            background = statusInk(),
+            background = STATUS_INK,
             shadow = false,
         }, kind = "pill" }
     local bz = badge:getSize()
@@ -316,7 +306,7 @@ function BookInfo.readRibbon(cw)
     ---@param x number 目标区域左上角横坐标，单位像素
     ---@param y number 目标区域左上角纵坐标，单位像素
     function ribbon:paintTo(bb, x, y)
-        local ink = statusInk()
+        local ink = STATUS_INK
         paintSash(bb, x, y, size, self.band, ink)
         if type(Blitbuffer.new) ~= "function" then
             return
@@ -372,17 +362,7 @@ local function circleMark(name, ox, oy)
     function mark:paintTo(bb, x, y)
         local r = math.floor(size / 2)
         local cx, cy = x + r, y + r
-        local ink = statusInk()
-        if bb.paintCircle then
-            bb:paintCircle(cx, cy, r, ink)
-        else
-            for dy = -r, r do
-                local span = math.floor(math.sqrt(math.max(0, r * r - dy * dy)) + 0.5)
-                if span > 0 then
-                    bb:paintRect(cx - span, cy + dy, span * 2, 1, ink)
-                end
-            end
-        end
+        bb:paintCircle(cx, cy, r, STATUS_INK)
         if self.icon then
             local iz = self.icon:getSize()
             self.icon:paintTo(
@@ -449,7 +429,6 @@ function BookInfo.openingBar(cw, ch)
     ---@param y number 目标区域左上角纵坐标，单位像素
     function bar:paintTo(bb, x, y)
         bb:paintRect(x, y, cw, bar_h, Blitbuffer.COLOR_BLACK)
-        if not self.text then return end
         local tz = self.text:getSize()
         self.text:paintTo(
             bb,
@@ -459,9 +438,7 @@ function BookInfo.openingBar(cw, ch)
     end
     --- 释放条带拥有的文字控件。
     function bar:free()
-        if self.text and self.text.free then
-            self.text:free()
-        end
+        self.text:free()
     end
     bar.overlap_offset = {
         0,
@@ -535,14 +512,12 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
     end
     if not req and type(book) == "table" and type(book.stable_id) == "string" then
         local sid = book.source_id
-        if not req then
-            local owner = source
-            if type(sid) == "string" and sid ~= "" and (not source or source.id ~= sid) then
-                owner = require("source.registry").resolve(sid)
-            end
-            if owner and type(owner.coverRequest) == "function" then
-                req = select(1, owner:coverRequest(book))
-            end
+        local owner = source
+        if type(sid) == "string" and sid ~= "" and (not source or source.id ~= sid) then
+            owner = require("source.registry").resolve(sid)
+        end
+        if owner and type(owner.coverRequest) == "function" then
+            req = select(1, owner:coverRequest(book))
         end
     end
     local cover_pad = UI.sz(2)

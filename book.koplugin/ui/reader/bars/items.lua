@@ -191,17 +191,15 @@ end
 ---@param cache table|nil
 ---@return table
 local function cachedTextWidget(slot, key, opts, cache)
+    local TextWidget = require("ui/widget/textwidget")
     if not cache then
-        local TextWidget = require("ui/widget/textwidget")
         return TextWidget:new(opts)
     end
-    local old_key = cache.keys[slot]
     local widget = cache.widgets[slot]
-    if not widget or old_key ~= key then
+    if not widget or cache.keys[slot] ~= key then
         if widget and widget.free then
             widget:free()
         end
-        local TextWidget = require("ui/widget/textwidget")
         widget = TextWidget:new(opts)
         cache.widgets[slot] = widget
         cache.keys[slot] = key
@@ -271,9 +269,7 @@ function Items.paint(bb, x, y, w, h, layout, ctx, opts)
                     entry.widget = widget
                     entry.w = widget:getSize().w
                     intrinsic = intrinsic + entry.w
-                    if cache then
-                        seen[prefix .. slot.id] = true
-                    end
+                    seen[prefix .. slot.id] = true
                 end
             end
         end
@@ -298,41 +294,36 @@ function Items.paint(bb, x, y, w, h, layout, ctx, opts)
                     cache
                 )
                 entry.widget = widget
-                if cache then
-                    seen[prefix .. entry.id] = true
-                end
+                seen[prefix .. entry.id] = true
             end
         end
     end
 
-    local cursor = { left = x, right = x + w }
+    --- 在 px 处画一个条目：进度条临时建、画完即释放；文字用已准备的控件。
+    local function paintEntry(entry, px)
+        if entry.kind == "bar" then
+            local bar_h = opts.bar_h or UI.sz(6)
+            local bar = UI.progressBar(entry.w, bar_h, clampPercent(ctx.percent))
+            bar:paintTo(bb, px, y + math.floor((h - bar_h) / 2))
+            bar:free()
+        else
+            paintCentered(entry.widget, bb, px, y, h)
+        end
+    end
+    local left, right = x, x + w
     for i = 1, #prepared do
         local entry = prepared[i]
         if entry.align == "left" then
-            if entry.kind == "bar" then
-                local bar_h = opts.bar_h or UI.sz(6)
-                local bar = UI.progressBar(entry.w, bar_h, clampPercent(ctx.percent))
-                bar:paintTo(bb, cursor.left, y + math.floor((h - bar_h) / 2))
-                bar:free()
-            else
-                paintCentered(entry.widget, bb, cursor.left, y, h)
-            end
-            cursor.left = cursor.left + entry.w + gap
+            paintEntry(entry, left)
+            left = left + entry.w + gap
         end
     end
     for i = #prepared, 1, -1 do
         local entry = prepared[i]
         if entry.align == "right" then
-            cursor.right = cursor.right - entry.w
-            if entry.kind == "bar" then
-                local bar_h = opts.bar_h or UI.sz(6)
-                local bar = UI.progressBar(entry.w, bar_h, clampPercent(ctx.percent))
-                bar:paintTo(bb, cursor.right, y + math.floor((h - bar_h) / 2))
-                bar:free()
-            else
-                paintCentered(entry.widget, bb, cursor.right, y, h)
-            end
-            cursor.right = cursor.right - gap
+            right = right - entry.w
+            paintEntry(entry, right)
+            right = right - gap
         end
     end
 

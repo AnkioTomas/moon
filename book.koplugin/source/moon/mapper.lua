@@ -20,40 +20,24 @@ local function percentNumber(value)
 end
 
 --- 从列表行提取稳定书 ID（filename 优先）。
----@param row table|nil
+---@param row table
 ---@return string|nil
 local function stableId(row)
-    if type(row) ~= "table" then
-        return nil
-    end
     local id = row.filename or row.fileName or row.file or row.id or row.bookId
     if id == nil then
         return nil
     end
     id = tostring(id)
-    if id == "" then
-        return nil
-    end
-    return id
+    return id ~= "" and id or nil
 end
 
 --- 判断用户是否已读完该书。
----@param row table|nil
+---@param row table
 ---@return boolean
 local function userFinished(row)
-    if type(row) ~= "table" then
-        return false
-    end
-    if row.finished == true then
-        return true
-    end
-    if row.finishReading == 1 or row.finishReading == true then
-        return true
-    end
-    if row.hasReadTag == 1 or row.hasReadTag == true then
-        return true
-    end
-    return false
+    return row.finished == true
+        or row.finishReading == 1 or row.finishReading == true
+        or row.hasReadTag == 1 or row.hasReadTag == true
 end
 
 --- 列表行 wire → Book。
@@ -83,21 +67,6 @@ function Mapper.book(row)
     local intro = row.description or row.intro or row.summary
     if type(intro) == "string" and intro ~= "" then out.intro = intro end
     return out
-end
-
---- 详情行 wire → BookDetail。
----@param row table|nil
----@return Book|nil
-function Mapper.detail(row)
-    local book = Mapper.book(row)
-    if not book then
-        return nil
-    end
-    local intro = row and (row.intro or row.description or row.summary)
-    if type(intro) == "string" and intro ~= "" then
-        book.intro = intro
-    end
-    return book
 end
 
 --- 列表 wire → BookListResult。

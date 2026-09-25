@@ -260,7 +260,7 @@ end
 ---@param cb fun(device: table|nil, err: string|nil)
 ---@return CancelHandle
 function Device.ensureAsync(settings, cb)
-    local cached = Device.normalize(settings:get("reading_device", nil))
+    local cached = Device.get(settings)
     if cached then
         cb(cached)
         return { cancel = function() end }
@@ -274,8 +274,5 @@ end
 function Device.get(settings)
     return Device.normalize(settings:get("reading_device", nil))
 end
-
-Device.PROFILE_TEMPLATE = PROFILE_TEMPLATE
-Device.REGISTER_HOST = REGISTER_HOST
 
 return Device

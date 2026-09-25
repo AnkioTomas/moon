@@ -71,12 +71,8 @@ local function chapterReady(path)
     if cached and cached.signature == signature then
         return cached.ready
     end
-    local has_remote = Text.hasRemoteImageSrcInFile(path)
-    if has_remote == nil then
-        cacheReady(path, { signature = signature, ready = false })
-        return false
-    end
-    local ready = not has_remote
+    -- nil 表示读文件失败，同样按未就绪处理。
+    local ready = Text.hasRemoteImageSrcInFile(path) == false
     cacheReady(path, { signature = signature, ready = ready })
     return ready
 end
@@ -109,11 +105,10 @@ end
 
 --- 本地已有章节文件时返回路径，供快开；否则 nil。
 ---@param identity BookIdentity
----@param opts table|nil
+---@param opts table
 ---@return string|nil
 ---@return number|nil
 local function existingLocalPath(identity, opts)
-    opts = opts or {}
     local idx = tonumber(opts.chapter_idx)
     if idx then
         local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
@@ -557,6 +552,37 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
             local job = active
             active = nil
             if job and job.cancel then job.cancel() end
+        end }
+end
+
+--- 缓存整本章节正文；目录只拉一次，正文按序下载并返回部分成功统计。
+---@param source BookSource 提供 loadTocAsync
+---@param identity BookIdentity
+---@param fetchContent ChapterFetchContent
+---@param on_progress fun(done: integer, total: integer)|nil
+---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
+---@return { cancel: fun() }
+function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb)
+    local cancelled, active = false, nil
+    active = source:loadTocAsync(identity, function(toc, err)
+        if cancelled then return end
+        if not toc then cb(false, 0, err or _("章节列表为空"), 0, 0); return end
+        active = Chapter.prefetchAsync(identity, nil, toc, 0, #toc, {
+            fetchContent = fetchContent,
+            persist_toc = false,
+            persist_book = false,
+            progress = on_progress,
+            -- 全本缓存让服务端有喘息时间；阅读期预取仍保持无间隔。
+            interval_seconds = 1.5,
+        }, function(cached, total, failed, last_err)
+            if not cancelled then
+                cb(failed == 0, cached, last_err, total, failed)
+            end
+        end)
+    end)
+    return { cancel = function()
+            cancelled = true
+            if active and active.cancel then active.cancel() end
         end }
 end
 

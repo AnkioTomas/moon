@@ -10,10 +10,12 @@ package.preload["ffi/util"] = function()
         end,
     }
 end
+local reader_section = {}
+local saved_section
 package.preload["utils.settings"] = function()
     return {
-        get = function() return {} end,
-        saveSection = function() end,
+        get = function() return reader_section end,
+        saveSection = function(name, values) saved_section = { name = name, values = values } end,
     }
 end
 package.preload["ui.components.settingrow"] = function()
@@ -32,17 +34,27 @@ _G.G_reader_settings = {
 }
 
 local Settings = require("ui.desktop.settings.reader")
-local desktop = {}
+local updates = 0
+local desktop = { updateView = function() updates = updates + 1 end }
 
-local sections = Settings.new():sections(desktop)
+local sections = Settings:sections(desktop)
 Assert.eq(#sections, 1)
 Assert.eq(sections[1].title, "行为")
 Assert.eq(sections[1].rows[1](600).title, "脚注弹窗")
 Assert.is_false(sections[1].rows[1](600).status_on)
 Assert.eq(sections[1].rows[2](600).title, "翻页动画")
-Assert.eq(sections[1].rows[3](600).title, "读到 99% 自动标记已读")
+local auto_mark = sections[1].rows[3](600)
+Assert.eq(auto_mark.title, "读到 99% 自动标记已读")
+Assert.eq(auto_mark.kind, "toggle")
+Assert.eq(auto_mark.status, "关")
+Assert.is_false(auto_mark.status_on)
+auto_mark.callback()
+Assert.is_true(reader_section.auto_mark_read_at_99)
+Assert.eq(saved_section.name, "reader")
+Assert.eq(updates, 1)
+reader_section = {}
 
-local lookup = Settings.new():lookupSections(desktop)
+local lookup = Settings:lookupSections(desktop)
 local titles = {}
 for _, section in ipairs(lookup) do
     titles[#titles + 1] = section.title
@@ -57,7 +69,7 @@ Assert.is_true(lookup[1].rows[1](600).status_on)
 Assert.eq(lookup[5].rows[3](600).title, "X-Ray 下划线样式")
 Assert.eq(lookup[5].rows[3](600).status, "虚线")
 
-local popup_rows = Settings.new():popupRows(desktop)
+local popup_rows = Settings:popupRows(desktop)
 Assert.len(popup_rows, 11)
 Assert.eq(popup_rows[1](600).title, "选择")
 Assert.eq(popup_rows[11](600).title, "搜索")

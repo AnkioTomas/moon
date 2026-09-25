@@ -36,7 +36,6 @@ local function similarity(s1, s2)
 
     local len1, len2 = #s1, #s2
     local maxLen = math.max(len1, len2)
-    if maxLen == 0 then return 1.0 end
 
     local matches = 0
     local i, j = 1, 1

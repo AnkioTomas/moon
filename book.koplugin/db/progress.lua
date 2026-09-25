@@ -167,16 +167,10 @@ function ProgressDB.adoptRemote(source_id, stable_id, pos)
     return write(source_id, stable_id, pos, 1)
 end
 
----@param source_id string
----@param stable_id string
+--- COLUMNS 顺序的位置参数 → PendingProgress
 ---@return PendingProgress|nil
-function ProgressDB.get(source_id, stable_id)
-    local source, stable, fraction, chapter_idx, chapter_title, chapter_fraction,
-        page, total_pages, locator, extra, updated_at, sync_status = Base.rowexec(
-        "SELECT " .. COLUMNS .. " FROM pending_progress WHERE source_id=? AND stable_id=? LIMIT 1;",
-        source_id,
-        stable_id
-    )
+local function toProgress(source, stable, fraction, chapter_idx, chapter_title, chapter_fraction,
+                          page, total_pages, locator, extra, updated_at, sync_status)
     if not source then
         return nil
     end
@@ -184,11 +178,11 @@ function ProgressDB.get(source_id, stable_id)
         source_id = source,
         stable_id = stable,
         fraction = tonumber(fraction) or 0,
-        chapter_idx = chapter_idx ~= nil and tonumber(chapter_idx) or nil,
+        chapter_idx = tonumber(chapter_idx),
         chapter_title = chapter_title ~= "" and chapter_title or nil,
-        chapter_fraction = chapter_fraction ~= nil and tonumber(chapter_fraction) or nil,
-        page = page ~= nil and tonumber(page) or nil,
-        total_pages = total_pages ~= nil and tonumber(total_pages) or nil,
+        chapter_fraction = tonumber(chapter_fraction),
+        page = tonumber(page),
+        total_pages = tonumber(total_pages),
         locator = locator,
         extra = decodeExtra(extra),
         updated_at = tonumber(updated_at) or 0,
@@ -196,30 +190,26 @@ function ProgressDB.get(source_id, stable_id)
     }
 end
 
+---@param source_id string
+---@param stable_id string
+---@return PendingProgress|nil
+function ProgressDB.get(source_id, stable_id)
+    return toProgress(Base.rowexec(
+        "SELECT " .. COLUMNS .. " FROM pending_progress WHERE source_id=? AND stable_id=? LIMIT 1;",
+        source_id,
+        stable_id
+    ))
+end
+
 ---@param result table|nil
----@param nrows integer|nil
+---@param nrows integer
 ---@return PendingProgress[]
 local function rows(result, nrows)
     local out = {}
-    if not result or not nrows or nrows <= 0 then
-        return out
-    end
     for i = 1, nrows do
-        local title = result[5][i]
-        out[#out + 1] = {
-            source_id = result[1][i],
-            stable_id = result[2][i],
-            fraction = tonumber(result[3][i]) or 0,
-            chapter_idx = result[4][i] ~= nil and tonumber(result[4][i]) or nil,
-            chapter_title = title ~= "" and title or nil,
-            chapter_fraction = result[6][i] ~= nil and tonumber(result[6][i]) or nil,
-            page = result[7][i] ~= nil and tonumber(result[7][i]) or nil,
-            total_pages = result[8][i] ~= nil and tonumber(result[8][i]) or nil,
-            locator = result[9][i],
-            extra = decodeExtra(result[10][i]),
-            updated_at = tonumber(result[11][i]) or 0,
-            sync_status = tonumber(result[12] and result[12][i]) or 0,
-        }
+        local row = {}
+        for c = 1, 12 do row[c] = result[c][i] end
+        out[i] = toProgress(unpack(row, 1, 12))
     end
     return out
 end

@@ -25,9 +25,7 @@ function Input.finishAppend(self, conn, text)
     if not ok then
         return self:_fail(conn, 409, err)
     end
-    return self:_queueResponse(conn, {
-        code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
-    })
+    return self:_json(conn, 200, '{"ok":true}')
 end
 
 --- /api/input：GET 回 { active, text }；POST 收文本走 finishAppend 光标处追加。
@@ -38,15 +36,11 @@ end
 ---@return true|nil true=已进 body 状态，等收齐后回调
 function Input.route(self, conn, method, headers, _query)
     if method == "GET" then
-        local st = self.handlers.get_input() or {}
-        return self:_queueResponse(conn, {
-            code = 200,
-            ctype = "application/json; charset=utf-8",
-            body = JSON.encode({
-                active = st.active and true or false,
-                text = st.active and st.text or nil,
-            }),
-        })
+        local st = self.handlers.get_input()
+        return self:_json(conn, 200, JSON.encode({
+            active = st.active,
+            text = st.active and st.text or nil,
+        }))
     end
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
@@ -59,9 +53,7 @@ function Input.route(self, conn, method, headers, _query)
         return true
     end
     -- 空 body = 无操作（追加空串本就无意义，直接 ok）
-    return self:_queueResponse(conn, {
-        code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
-    })
+    return self:_json(conn, 200, '{"ok":true}')
 end
 
 return Input

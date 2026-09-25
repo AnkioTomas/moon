@@ -142,11 +142,7 @@ end
 ---@param id string 未注册的 ID 直接忽略
 function M.setComponent(id)
     local Components = require("lockscreen.components.base")
-    if not Components.find(id) then return end
-    invalidate()
-    local c = MoonSettings.get()
-    c.lock_screen_component = id
-    MoonSettings.save()
+    if Components.find(id) then save("lock_screen_component", id) end
 end
 
 --- 切换背景；非法值忽略。

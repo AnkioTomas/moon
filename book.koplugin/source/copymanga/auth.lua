@@ -63,15 +63,6 @@ function Auth.userLabel()
     return nil
 end
 
----@return string|nil
-function Auth.token()
-    local token = cfg().token
-    if type(token) == "string" and token ~= "" then
-        return token
-    end
-    return nil
-end
-
 --- 本地保存的账号密码；缺任一端则没有可自动重登的凭据。
 ---@return string|nil, string|nil
 function Auth.credentials()

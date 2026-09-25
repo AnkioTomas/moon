@@ -1,5 +1,5 @@
 --[[--
-ui.components.chart：柱状图 / 折线图锁屏图元。
+ui.components.chart：柱状图锁屏图元。
 
 @module tests.ui.components.chart_spec
 --]]

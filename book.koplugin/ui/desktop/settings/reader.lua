@@ -13,13 +13,6 @@ local T = require("ffi/util").template
 
 ---@class BookSettingsReader
 local ReaderSettings = {}
-ReaderSettings.__index = ReaderSettings
-
----@return BookSettingsReader
-function ReaderSettings.new()
-    return setmetatable({}, ReaderSettings)
-end
-
 
 ---@type { id: string, title: string, icon: string }[]
 local POPUP_BUTTONS = {
@@ -47,6 +40,25 @@ local function refreshReaderUi()
     local ui = readerUi()
     if ui and ui.dialog then
         UIManager:setDirty(ui.dialog, "ui")
+    end
+end
+
+--- reader 段布尔开关行：翻转后落盘并重建桌面。
+---@param desktop table
+---@param reader table MoonSettings 的 reader 段
+---@param key string 设置键
+---@param on boolean 当前状态
+---@param row table 图标、标题等其余 SettingRow 字段
+---@return fun(iw: number): table
+local function readerToggle(desktop, reader, key, on, row)
+    return function(iw)
+        row.kind, row.status, row.status_on = "toggle", on and _("开") or _("关"), on
+        row.callback = function()
+            reader[key] = not on
+            MoonSettings.saveSection("reader", reader)
+            desktop:updateView()
+        end
+        return SettingRow.build(iw, row)
     end
 end
 
@@ -176,17 +188,9 @@ function ReaderSettings:sections(desktop)
                         end,
                     })
                 end,
-                function(iw)
-                    return SettingRow.build(iw, {
-                        kind = "toggle", icon = "done_all", title = _("读到 99% 自动标记已读"),
-                        status = auto_mark_read and _("开") or _("关"), status_on = auto_mark_read,
-                        callback = function()
-                            reader.auto_mark_read_at_99 = not auto_mark_read
-                            MoonSettings.saveSection("reader", reader)
-                            desktop:updateView()
-                        end,
-                    })
-                end,
+                readerToggle(desktop, reader, "auto_mark_read_at_99", auto_mark_read, {
+                    icon = "done_all", title = _("读到 99% 自动标记已读"),
+                }),
             },
         },
     }
@@ -205,17 +209,9 @@ function ReaderSettings:lookupSections(desktop)
     local dictionary_on = reader.dictionary_enabled ~= false
 
     local translation_rows = {
-        function(iw)
-            return SettingRow.build(iw, {
-                kind = "toggle", icon = "translate", title = _("Edge 翻译"),
-                status = edge_translation_on and _("开") or _("关"), status_on = edge_translation_on,
-                callback = function()
-                    reader.edge_translation_enabled = not edge_translation_on
-                    MoonSettings.saveSection("reader", reader)
-                    desktop:updateView()
-                end,
-            })
-        end,
+        readerToggle(desktop, reader, "edge_translation_enabled", edge_translation_on, {
+            icon = "translate", title = _("Edge 翻译"),
+        }),
     }
     if edge_translation_on then
         translation_rows[#translation_rows + 1] = function(iw)
@@ -233,17 +229,9 @@ function ReaderSettings:lookupSections(desktop)
         end
     end
     local dictionary_rows = {
-        function(iw)
-            return SettingRow.build(iw, {
-                kind = "toggle", icon = "book", title = _("月读词典"),
-                status = dictionary_on and _("开") or _("关"), status_on = dictionary_on,
-                callback = function()
-                    reader.dictionary_enabled = not dictionary_on
-                    MoonSettings.saveSection("reader", reader)
-                    desktop:updateView()
-                end,
-            })
-        end,
+        readerToggle(desktop, reader, "dictionary_enabled", dictionary_on, {
+            icon = "book", title = _("月读词典"),
+        }),
     }
     if dictionary_on then
         dictionary_rows[#dictionary_rows + 1] = function(iw)
@@ -301,17 +289,9 @@ function ReaderSettings:lookupSections(desktop)
         {
             title = _("百科"),
             rows = {
-                function(iw)
-                    return SettingRow.build(iw, {
-                        kind = "toggle", icon = "language", title = _("百度百科"),
-                        status = baike_on and _("开") or _("关"), status_on = baike_on,
-                        callback = function()
-                            reader.baike_enabled = not baike_on
-                            MoonSettings.saveSection("reader", reader)
-                            desktop:updateView()
-                        end,
-                    })
-                end,
+                readerToggle(desktop, reader, "baike_enabled", baike_on, {
+                    icon = "language", title = _("百度百科"),
+                }),
             },
         },
         {

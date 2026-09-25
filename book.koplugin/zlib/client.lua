@@ -256,8 +256,17 @@ function Client:_jsonAsync(method, path, opts, cb)
     local current_base
 
     local issue
+    local tryNextBase
+    --- 当前镜像不可用：记下错误并换下一个候选。
+    ---@param err string
+    local function failover(err, ...)
+        last_err = err
+        logger.dbg("book.zlib failover", method, path, current_base, ...)
+        tryNextBase()
+    end
+
     --- 请求下一个候选镜像；候选耗尽时只回调一次最终错误。
-    local function tryNextBase()
+    tryNextBase = function()
         if cancelled then return end
         bi = bi + 1
         if bi > #bases then
@@ -295,11 +304,8 @@ function Client:_jsonAsync(method, path, opts, cb)
             -- 传输层失败：换下一个候选镜像
             if not code then
                 if originOf(url) == pinned_base then pinned_base = nil end
-                last_err = classifyTransportError(res, err)
-                logger.dbg("book.zlib failover", method, path,
-                    current_base, "transport", last_err)
-                tryNextBase()
-                return
+                local transport_err = classifyTransportError(res, err)
+                return failover(transport_err, "transport", transport_err)
             end
             ---@cast res table
 
@@ -307,11 +313,7 @@ function Client:_jsonAsync(method, path, opts, cb)
             if REDIRECT_CODES[code] then
                 local target = absoluteUrl(url, Request.header(res, "location"))
                 if not target then
-                    last_err = T(_("HTTP %1"), code)
-                    logger.dbg("book.zlib failover", method, path,
-                        current_base, "invalid_redirect", code)
-                    tryNextBase()
-                    return
+                    return failover(T(_("HTTP %1"), code), "invalid_redirect", code)
                 end
                 if seen[target] or hops + 1 > MAX_REDIRECT_HOPS then
                     logger.dbg("book.zlib request stopped", method, path,
@@ -325,10 +327,8 @@ function Client:_jsonAsync(method, path, opts, cb)
                 local new_origin = originOf(target)
                 local is_mirror_move = new_origin and new_origin ~= originOf(url)
                 logger.dbg("book.zlib redirect", code, originOf(url), new_origin or target)
-                if is_mirror_move and m ~= "GET" then
-                    -- 镜像迁移：保持 POST 和 body，但跟随完整的 Location。
-                    issue(target, m, req_body, headers, seen, hops + 1)
-                elseif code ~= 307 and code ~= 308 and m ~= "GET" then
+                -- 镜像迁移与 307/308：保持 POST 和 body，跟随完整的 Location。
+                if not is_mirror_move and code ~= 307 and code ~= 308 and m ~= "GET" then
                     -- 站内 301/302/303：转 GET 丢 body 及 Content-* 头
                     local kept = {}
                     for k, v in pairs(headers) do
@@ -346,20 +346,12 @@ function Client:_jsonAsync(method, path, opts, cb)
 
             -- 5xx 是镜像自己病了：换下一个
             if code >= 500 then
-                last_err = T(_("HTTP %1"), code)
-                logger.dbg("book.zlib failover", method, path,
-                    current_base, "status", code)
-                tryNextBase()
-                return
+                return failover(T(_("HTTP %1"), code), "status", code)
             end
 
             -- bot 挑战页：不是 JSON，是拦截页；换镜像才可能有用
             if looksLikeChallenge(res.body) then
-                last_err = _("服务器拒绝自动访问，正在尝试其它镜像")
-                logger.dbg("book.zlib failover", method, path,
-                    current_base, "bot_challenge")
-                tryNextBase()
-                return
+                return failover(_("服务器拒绝自动访问，正在尝试其它镜像"), "bot_challenge")
             end
 
             -- 这个 base 能用：钉住（故障转移选中的镜像，下次直接用）

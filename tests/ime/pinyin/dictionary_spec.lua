@@ -19,7 +19,7 @@ package.preload["libs/libkoreader-lfs"] = function()
     }
 end
 package.preload["utils.paths"] = function()
-    return { pinyinDictPath = function() return "/mock/dictionary.sqlite3" end }
+    return { imeDictPath = function() return "/mock/dictionary.sqlite3" end }
 end
 
 local captured = {}
@@ -149,11 +149,11 @@ Assert.eq(p, "n")
 Assert.is_false(complete)
 
 -- ── 查询：短码直接命中构建期索引；长码才走 words 索引 ──
-Assert.is_true(Dict.isAvailable())
-Assert.eq(Dict.entries(), "3")
-Assert.eq(Dict.builtAt(), "2026-08-19 13:17:06")
+Assert.is_true(Dict:isAvailable())
+Assert.eq(Dict:entries(), "3")
+Assert.eq(Dict:builtAt(), "2026-08-19 13:17:06")
 
-local words = Dict.lookup("nihao")
+local words = Dict:lookup("nihao")
 Assert.eq(captured[#captured], "nihao", "六位以内的直接拼音必须等值命中 quick")
 Assert.eq(words[1], "你好")
 Assert.eq(words[2], "你好吗")
@@ -161,16 +161,16 @@ Assert.eq(#words, 2, "nihao 不得命中 niu")
 
 -- 高频输入复用已编译语句，避免每次按键都解析同一段 SQL。
 local prepared_after_first_lookup = prepare_count
-Dict.lookup("nihao")
+Dict:lookup("nihao")
 Assert.eq(prepare_count, prepared_after_first_lookup, "重复查同一码不得重新 prepare SQL")
 
 -- 超过预计算范围才走原始 code 前缀索引。
-local long = Dict.lookup("nihaom")
+local long = Dict:lookup("nihaom")
 Assert.eq(long[1], "你好吗")
 Assert.eq(captured[#captured], "nihaom*", "长码直接用无空格 code 前缀")
 Assert.matches(captured[#captured - 1], "code GLOB %?", "长码只查询 code 索引")
 
-local ni = Dict.lookup("ni")
+local ni = Dict:lookup("ni")
 local have = {}
 for _, w in ipairs(ni) do
     have[w] = true
@@ -179,15 +179,15 @@ Assert.is_true(have["你"], "完整 ni 命中单字")
 Assert.is_nil(have["你好"], "单音节只做 code 精确查询")
 Assert.is_nil(have["牛奶"], "ni 不得命中 niu")
 
-Assert.len(Dict.lookup("n"), 0, "单字母半截不查库")
+Assert.len(Dict:lookup("n"), 0, "单字母半截不查库")
 
-local nih = Dict.lookup("nih")
+local nih = Dict:lookup("nih")
 Assert.eq(nih[1], "你好")
 Assert.eq(nih[2], "你好吗")
 Assert.eq(captured[#captured], "nih", "三位直接拼音必须等值命中 quick")
 
 -- 简拼：切不成音节 → 等值命中 quick，运行期不再构造 n* h*。
-local nh = Dict.lookup("nh")
+local nh = Dict:lookup("nh")
 Assert.eq(captured[#captured], "nh")
 Assert.eq(nh[1], "你好")
 Assert.eq(nh[2], "你好吗")
@@ -200,32 +200,32 @@ Assert.is_nil((function()
 end)(), "nh 不得命中 niu nai")
 
 -- 长句简拼每个音节只取一个首字母。
-local poem = Dict.lookup("jfyhdcm")
+local poem = Dict:lookup("jfyhdcm")
 Assert.eq(poem[1], "江枫渔火对愁眠")
-local poem_with_initial = Dict.lookup("jfyhdchm")
+local poem_with_initial = Dict:lookup("jfyhdchm")
 Assert.eq(poem_with_initial[1], "江枫渔火对愁眠", "ch 声母展开简拼必须归一到标准首字母")
 
 -- 非字母输入直接空
-Assert.len(Dict.lookup("ni3"), 0)
-Assert.len(Dict.lookup(""), 0)
+Assert.len(Dict:lookup("ni3"), 0)
+Assert.len(Dict:lookup(""), 0)
 
 -- ── 降级：库打不开 → 空结果，不报错 ───────────────────
 open_ok = false
 package.loaded["ime.pinyin.dictionary"] = nil
 local Dict2 = require("ime.pinyin.dictionary")
-Assert.is_false(Dict2.isAvailable())
-Assert.eq(Dict2.entries(), nil)
-Assert.len(Dict2.lookup("nihao"), 0)
+Assert.is_false(Dict2:isAvailable())
+Assert.eq(Dict2:entries(), nil)
+Assert.len(Dict2:lookup("nihao"), 0)
 
 -- ── 手动落盘：失败不负缓存；reset 只负责关闭旧连接 ──
 do
     local before = open_count
     open_ok = true -- 模拟用户手动放入可用词库
-    Assert.is_true(Dict2.isAvailable(), "手动落盘后不得要求重启或显式 reset")
+    Assert.is_true(Dict2:isAvailable(), "手动落盘后不得要求重启或显式 reset")
     Assert.eq(open_count, before + 1)
     -- reset：连接已开，close 后下次访问重开
-    Dict2.reset()
-    Assert.is_true(Dict2.isAvailable())
+    Dict2:reset()
+    Assert.is_true(Dict2:isAvailable())
     Assert.eq(open_count, before + 2)
 end
 

@@ -137,18 +137,24 @@ function Layout.setReplace(which, on)
     MoonSettings.saveSection("reader", reader)
 end
 
+--- 组件在布局里的下标；不在返回 nil。
+---@param layout table
+---@param id string
+---@return integer|nil
+local function indexOf(layout, id)
+    for i = 1, #layout do
+        if layout[i].id == id then
+            return i
+        end
+    end
+end
+
 --- 组件是否在布局里。
 ---@param which string
 ---@param id string
 ---@return boolean
 function Layout.enabled(which, id)
-    local layout = Layout.get(which)
-    for i = 1, #layout do
-        if layout[i].id == id then
-            return true
-        end
-    end
-    return false
+    return indexOf(Layout.get(which), id) ~= nil
 end
 
 --- 组件位置与对齐；未启用返回 nil。
@@ -158,12 +164,11 @@ end
 ---@return string|nil align
 function Layout.slot(which, id)
     local layout = Layout.get(which)
-    for i = 1, #layout do
-        if layout[i].id == id then
-            return i, layout[i].align
-        end
+    local index = indexOf(layout, id)
+    if not index then
+        return nil, nil
     end
-    return nil, nil
+    return index, layout[index].align
 end
 
 --- 开关组件：打开时追加到末尾。
@@ -171,12 +176,11 @@ end
 ---@param id string
 function Layout.toggle(which, id)
     local layout = Layout.get(which)
-    for i = 1, #layout do
-        if layout[i].id == id then
-            table.remove(layout, i)
-            Layout.set(which, layout)
-            return
-        end
+    local index = indexOf(layout, id)
+    if index then
+        table.remove(layout, index)
+        Layout.set(which, layout)
+        return
     end
     if not allowedIds(which)[id] then
         return
@@ -191,13 +195,7 @@ end
 ---@param delta number
 function Layout.move(which, id, delta)
     local layout = Layout.get(which)
-    local index
-    for i = 1, #layout do
-        if layout[i].id == id then
-            index = i
-            break
-        end
-    end
+    local index = indexOf(layout, id)
     if not index then
         return
     end
@@ -218,12 +216,10 @@ function Layout.setAlign(which, id, align)
         return
     end
     local layout = Layout.get(which)
-    for i = 1, #layout do
-        if layout[i].id == id then
-            layout[i].align = align
-            Layout.set(which, layout)
-            return
-        end
+    local index = indexOf(layout, id)
+    if index then
+        layout[index].align = align
+        Layout.set(which, layout)
     end
 end
 

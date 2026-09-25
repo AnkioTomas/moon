@@ -86,10 +86,10 @@ local function settle(current, done)
     if done then done(not ok and "failed to record reading stats" or nil) end
 end
 
---- 移除当前内存会话，并在存在活动计时段时结清它。
+--- 停止计时：移除当前内存会话，结清活动计时段；最后一段落库后调用 done。
 --- 先清空 session，避免重复结算同一计时段。
 ---@param done fun(err: any|nil)|nil
-local function stopSession(done)
+function Stats.stop(done)
     local current = Stats.session
     Stats.session = nil
     if current then
@@ -103,7 +103,7 @@ end
 --- 启动新会话前会先结清遗留会话，防止异常生命周期丢失统计。
 ---@param snapshot ReaderSessionSnapshot
 function Stats.start(snapshot)
-    stopSession()
+    Stats.stop()
     if not snapshot or not snapshot.identity then return end
     Stats.session = {
         identity = snapshot.identity,
@@ -128,12 +128,6 @@ function Stats.onPage(snapshot)
     current.total_pages = tonumber(snapshot.total_pages) or 0
     current.chapter_fraction = snapshot.chapter_fraction
     current.started_at = os.time()
-end
-
---- 停止计时；最后一段落库后调用 done。
----@param done fun(err: any|nil)|nil
-function Stats.stop(done)
-    stopSession(done)
 end
 
 --- 把本地待同步统计交给 Source，成功后只确认对应本地记录。

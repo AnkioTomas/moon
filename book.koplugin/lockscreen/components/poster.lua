@@ -37,33 +37,16 @@ local function books(limit)
     limit = math.max(1, math.floor(tonumber(limit) or 1))
     local source_id = Library.activeSourceId()
     local recent = Catalog.recentBooks(source_id, limit * 2)
-    local result, seen = {}, {}
-
-    --- 按 stable_id 去重后追加到结果，总数达 cap 即停。
-    ---@param rows table[]|nil
-    ---@param cap number
-    local function append(rows, cap)
-        for _, row in ipairs(rows or {}) do
-            if #result >= cap then return end
-            local id = row.stable_id
-            if type(id) == "string" and id ~= "" then
-                local key = tostring(row.source_id or source_id) .. "\0" .. id
-                if not seen[key] then
-                    seen[key] = true
-                    result[#result + 1] = Library.shelfBook(row, source_id)
-                end
-            end
-        end
-    end
-
-    append(recent, limit)
+    local result = {}
+    local append = Library.shelfCollector(source_id)
+    append(result, recent, limit)
     if #result < limit and (type(source_id) == "string" and source_id ~= "" or type(source_id) == "table" and #source_id > 0) then
         ---@cast source_id string|string[]
         local rows = select(1, BookDB.listBySource(source_id, {
             limit = limit * 2,
             offset = 0,
         }))
-        append(rows, limit)
+        append(result, rows, limit)
     end
     return result
 end

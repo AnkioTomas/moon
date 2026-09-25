@@ -770,8 +770,8 @@ end
 ---@param text string
 local function setClipboard(text)
     Remote._clip = text or ""
-    local ok, Device = pcall(require, "device")
-    if ok and Device:hasClipboard() and Device.input then
+    local Device = require("device")
+    if Device:hasClipboard() and Device.input then
         pcall(Device.input.setClipboardText, text)
     end
     local widget = activeInputWidget()
@@ -958,11 +958,7 @@ end
 --- 不能用 dns.toip(gethostname())：多数设备 /etc/hosts 把主机名映射到 127.0.0.1。
 ---@return string|nil
 local function localIP()
-    local ok, socket = pcall(require, "socket")
-    if not ok or not socket.udp then
-        return nil
-    end
-    local s = socket.udp()
+    local s = require("socket").udp()
     if not s then
         return nil
     end
@@ -1001,19 +997,13 @@ function Remote.shareUrl(path)
     return string.format("http://%s:%d/download?path=%s", ip, Remote.port(), Text.urlEncode(real))
 end
 
---- 状态行文案：运行中给可访问地址（IP 尽力而为），否则「未运行」。
+--- 运行状态文案：运行中给可访问地址（IP 尽力而为），否则「未运行」。
 ---@return string status, boolean running
-local function statusLabel()
+function Remote.status()
     if not Remote.isRunning() then
         return _("未运行"), false
     end
     return string.format("http://%s:%d/", localIP() or _("本机IP"), Remote.port()), true
-end
-
---- 运行状态文案：运行中给可访问地址，否则「未运行」。
----@return string status, boolean running
-function Remote.status()
-    return statusLabel()
 end
 
 return Remote

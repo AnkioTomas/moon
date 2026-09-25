@@ -139,7 +139,7 @@ end
 ---@param p table|nil
 ---@return Book
 function Mapper.applyProgress(book, p)
-    if type(book) ~= "table" or type(p) ~= "table" then
+    if type(p) ~= "table" then
         return book
     end
     local prog = tonumber(p.progress)
@@ -251,7 +251,7 @@ function Mapper.chapters(data, bookId)
         return nil, "empty"
     end
     local chapters_raw = entry.updated or entry.chapterInfos or entry.chapters or {}
-    local staged = {}
+    local chapters = {}
     for _, ch in ipairs(chapters_raw) do
         local wc = tonumber(ch.wordCount or 0) or 0
         local title = tostring(ch.title or "")
@@ -267,34 +267,26 @@ function Mapper.chapters(data, bookId)
                     }
                 end
             end
-            staged[#staged + 1] = {
-                source_idx = ch.chapterIdx or ch.idx,
-                uid = ch.chapterUid or ch.uid,
-                title = title,
-                tar = type(ch.tar) == "string" and ch.tar or nil,
+            local source_idx = ch.chapterIdx or ch.idx
+            local uid = ch.chapterUid or ch.uid
+            chapters[#chapters + 1] = {
                 depth = depth,
                 anchors = #anchors > 0 and anchors or nil,
+                source_idx = source_idx ~= nil and tostring(source_idx) or nil,
+                uid = uid ~= nil and tostring(uid) or nil,
+                title = title,
+                tar = type(ch.tar) == "string" and ch.tar ~= "" and ch.tar or nil,
             }
         end
     end
-    table.sort(staged, function(a, b)
+    table.sort(chapters, function(a, b)
         return (tonumber(a.source_idx) or 0) < (tonumber(b.source_idx) or 0)
     end)
-    local chapters = {}
-    for i, ch in ipairs(staged) do
-        local title = ch.title
-        if not title or title == "" then
-            title = "第" .. tostring(ch.source_idx or i) .. "章"
+    for i, ch in ipairs(chapters) do
+        ch.idx = i
+        if ch.title == "" then
+            ch.title = "第" .. (ch.source_idx or tostring(i)) .. "章"
         end
-        chapters[#chapters + 1] = {
-            idx = i,
-            depth = ch.depth,
-            anchors = ch.anchors,
-            source_idx = ch.source_idx ~= nil and tostring(ch.source_idx) or nil,
-            uid = ch.uid ~= nil and tostring(ch.uid) or nil,
-            title = title,
-            tar = type(ch.tar) == "string" and ch.tar ~= "" and ch.tar or nil,
-        }
     end
     if #chapters == 0 then
         return nil, "empty"

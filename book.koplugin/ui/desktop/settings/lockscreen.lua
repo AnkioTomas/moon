@@ -21,13 +21,6 @@ local T = require("ffi/util").template
 
 ---@class BookSettingsLockscreen
 local Lockscreen = {}
-Lockscreen.__index = Lockscreen
-
----@return BookSettingsLockscreen
-function Lockscreen.new()
-    return setmetatable({}, Lockscreen)
-end
-
 
 --- 设置项变更后重建设置页，并重新合成锁屏图。
 --- 只有当前配置能离线出图时才直接生成，否则等联网——不然壁纸源拉不到会白跑一次。

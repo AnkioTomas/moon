@@ -69,14 +69,12 @@ function List.baseItem(raw, image_only)
     local item = {
         text = image_only and "" or (raw.text or tostring(raw.value or "")),
         select_enabled = raw.enabled ~= false,
-        bold = nil,
         dim = raw.dim or raw.enabled == false,
         mandatory = raw.mandatory,
         keep_menu_open = raw.keep_menu_open,
     }
     if raw.enabled == false then
         item.enabled = false
-        item.select_enabled = false
     end
     return item
 end

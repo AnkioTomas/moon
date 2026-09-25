@@ -111,13 +111,11 @@ function M:createWidget()
     local ctx, opts = self.ctx, self.opts
     local w = opts.width
     local total_h = opts.height
-    local pad_x = 0
-    local inner_w = w
     local title = TextWidget:new{
         text = self.label,
         face = UI.face("cfont", 12),
         bold = true,
-        max_width = inner_w,
+        max_width = w,
         fgcolor = UI.muted(),
     }
     local kids = { align = "left", title, VerticalSpan:new{ width = UI.sz(ROW_GAP) } }
@@ -128,7 +126,7 @@ function M:createWidget()
             table.insert(kids, VerticalSpan:new{ width = UI.sz(ROW_GAP) })
         end
         local mark_text, title_text = self:row(i)
-        local group, mark, body, h = self:line(mark_text, title_text, inner_w)
+        local group, mark, body, h = self:line(mark_text, title_text, w)
         row_h = h
         marks[i] = mark
         items[i] = body
@@ -142,8 +140,6 @@ function M:createWidget()
     local widget = FrameContainer:new{
         bordersize = 0,
         padding = 0,
-        padding_left = pad_x,
-        padding_right = pad_x,
         padding_top = pad_top,
         padding_bottom = extra - pad_top,
         margin = 0,

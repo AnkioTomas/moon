@@ -1,12 +1,12 @@
 --[[--
-图表公共组件：柱状图 / 折线图。
+图表公共组件：柱状图。
 
 两路输出，共用同一套归一化与刻度约定：
 
-  1. `appendBars` / `appendLines` → 锁屏 `render` 图元块
-  2. `bars` / `lines` → 桌面 KOReader Widget（按需懒加载）
+  1. `appendBars` → 锁屏 `render` 图元块
+  2. `bars` → 桌面 KOReader Widget（按需懒加载）
 
-DESIGN：底对齐、黑填充、灰标签、空档不画柱；折线 1px + 端点方点。
+DESIGN：底对齐、黑填充、灰标签、空档不画柱。
 
 @module koplugin.book.ui.components.chart
 --]]
@@ -205,95 +205,6 @@ function Chart.bars(opts)
         end
     end
     return row
-end
-
---- 桌面折线图 Widget（自定义 paint，Bresenham）。
----@param opts table width,height,points/values
----@return table widget
-function Chart.lines(opts)
-    opts = opts or {}
-    local Widget = require("ui/widget/widget")
-    local Geom = require("ui/geometry")
-    local points = normalizePoints(opts)
-    local width = opts.width or 0
-    local height = opts.height or 80
-    local peak = maxValue(points)
-    local color = opts.color or Blitbuffer.COLOR_BLACK
-    local dot_size = opts.dot_size or 4
-
-    local LineChart = Widget:extend{
-        width = width,
-        height = height,
-        points = points,
-        peak = peak,
-        color = color,
-        dot_size = dot_size,
-    }
-
-    --- 返回固定尺寸并同步写回 self.dimen，供 paintTo 定位使用。
-    ---@return table Geom
-    function LineChart:getSize()
-        self.dimen = Geom:new{ w = self.width, h = self.height }
-        return self.dimen
-    end
-
-    --- 画基线、折线和数据点；单点时居中，多点按等距横向铺满。
-    --- 纵向以 peak 为满高归一化，无数据点时直接不画。
-    ---@param bb table 目标 Blitbuffer
-    ---@param x number 左上角横坐标
-    ---@param y number 左上角纵坐标
-    function LineChart:paintTo(bb, x, y)
-        local n = #self.points
-        if n == 0 then
-            return
-        end
-        local w, h = self.width, self.height
-        bb:paintRect(x, y + h - 1, w, 1, Blitbuffer.COLOR_GRAY_5)
-        local coords = {}
-        for i, point in ipairs(self.points) do
-            local cx = n == 1 and (x + math.floor(w / 2))
-                or (x + math.floor((i - 1) * (w - 1) / (n - 1)))
-            local ratio = (point.value or 0) / self.peak
-            local cy = y + h - math.floor(h * ratio + 0.5)
-            coords[#coords + 1] = { x = cx, y = cy }
-        end
-        --- 用 Bresenham 逐像素连接两点（Blitbuffer 没有画线原语）。
-        ---@param x1 number 起点横坐标
-        ---@param y1 number 起点纵坐标
-        ---@param x2 number 终点横坐标
-        ---@param y2 number 终点纵坐标
-        local function paintSegment(x1, y1, x2, y2)
-            local dx = math.abs(x2 - x1)
-            local dy = math.abs(y2 - y1)
-            local sx = x1 < x2 and 1 or -1
-            local sy = y1 < y2 and 1 or -1
-            local err = dx - dy
-            while true do
-                bb:paintRect(x1, y1, 1, 1, self.color)
-                if x1 == x2 and y1 == y2 then
-                    break
-                end
-                local e2 = err * 2
-                if e2 > -dy then
-                    err = err - dy
-                    x1 = x1 + sx
-                end
-                if e2 < dx then
-                    err = err + dx
-                    y1 = y1 + sy
-                end
-            end
-        end
-        for i = 1, #coords - 1 do
-            paintSegment(coords[i].x, coords[i].y, coords[i + 1].x, coords[i + 1].y)
-        end
-        local half = math.floor(self.dot_size / 2)
-        for _, c in ipairs(coords) do
-            bb:paintRect(c.x - half, c.y - half, self.dot_size, self.dot_size, self.color)
-        end
-    end
-
-    return LineChart:new{}
 end
 
 return Chart

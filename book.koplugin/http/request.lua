@@ -166,16 +166,8 @@ local function makeJob(state, on_cancel)
     }
 end
 
---- 占泵。失败不要 release。
----@return table|nil ioloop
----@return string|nil err
-local function open()
-    local ioloop = Turbo.acquire()
-    if not ioloop then
-        return nil, "turbo looper unavailable"
-    end
-    return ioloop
-end
+--- Turbo.acquire 占泵失败（失败不要 release）时回给调用方的错误。
+local LOOP_UNAVAILABLE = "turbo looper unavailable"
 
 --- 丢掉属于这次请求的已入队回调。写完成回调已经进 _callbacks 时，
 --- 关 socket 拦不住它，下次泵会在已关闭的流上 read。
@@ -323,10 +315,10 @@ function Request.request(opts, cb)
         cb(res, err)
     end
 
-    local ioloop, err = open()
+    local ioloop = Turbo.acquire()
     if not ioloop then
-        logger.dbg("book.http skip", request_id, method, url, err)
-        deliver(nil, err)
+        logger.dbg("book.http skip", request_id, method, url, LOOP_UNAVAILABLE)
+        deliver(nil, LOOP_UNAVAILABLE)
         return { cancel = function() end }
     end
 
@@ -423,12 +415,8 @@ local function send(method, url, body, opts, cb)
                 cb(nil, err, res)
                 return
             end
-            if not res then
-                cb(nil, T(_("HTTP %1"), "nil"), res)
-                return
-            end
-            if not Request.ok(res.code) then
-                cb(nil, T(_("HTTP %1"), tostring(res.code)), res)
+            if not res or not Request.ok(res.code) then
+                cb(nil, T(_("HTTP %1"), tostring(res and res.code)), res)
                 return
             end
             local payload = res.body or ""
@@ -445,7 +433,7 @@ local function send(method, url, body, opts, cb)
                 return
             end
             if hit ~= nil then
-                cb(type(hit) == "string" and hit or tostring(hit))
+                cb(tostring(hit))
                 return
             end
             doRequest()
@@ -540,10 +528,10 @@ function Request.stream(opts, handlers)
         end
     end
 
-    local ioloop, err = open()
+    local ioloop = Turbo.acquire()
     if not ioloop then
-        logger.dbg("book.http stream skip", request_id, method, url, err)
-        if handlers.on_done then handlers.on_done(err) end
+        logger.dbg("book.http stream skip", request_id, method, url, LOOP_UNAVAILABLE)
+        if handlers.on_done then handlers.on_done(LOOP_UNAVAILABLE) end
         return { cancel = function() end }
     end
 
@@ -684,6 +672,7 @@ function Request.download(opts, dest, cb)
     local stream_job
     local tmp = dest .. ".part"
     local target = fileName(dest)
+    local max_bytes = tonumber(opts and opts.max_bytes)
 
     local file, open_err = io.open(tmp, "wb")
     local written = 0
@@ -709,7 +698,6 @@ function Request.download(opts, dest, cb)
         on_headers = function(code, headers)
             response.code = code
             response.headers = headers
-            local max_bytes = tonumber(opts and opts.max_bytes)
             local content_length = headers and headers.get and headers:get("Content-Length", true)
             if max_bytes and tonumber(content_length) and tonumber(content_length) > max_bytes then
                 write_err = "download too large"
@@ -717,7 +705,6 @@ function Request.download(opts, dest, cb)
         end,
         on_data = function(chunk)
             if write_err or not Request.ok(response.code) then return end
-            local max_bytes = tonumber(opts and opts.max_bytes)
             if max_bytes and written + #chunk > max_bytes then
                 write_err = "download too large"
                 return

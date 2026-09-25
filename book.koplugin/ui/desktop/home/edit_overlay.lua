@@ -15,7 +15,6 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local OverlapGroup = require("ui/widget/overlapgroup")
 local SpinWidget = require("ui/widget/spinwidget")
-local TextWidget = require("ui/widget/textwidget")
 local UIManager = require("ui/uimanager")
 local UI = require("ui.components.bookui")
 local Icon = require("ui.components.icon")
@@ -37,14 +36,12 @@ end
 --- 在命中范围内吞掉手势，不让底层组件收到。
 ---@param host table
 ---@param prefix string
----@return table
 local function swallowEvents(host, prefix)
-    return {
-        [prefix .. "Tap"] = { dimenRange(host, "tap") },
-        [prefix .. "Hold"] = { dimenRange(host, "hold") },
-        [prefix .. "Swipe"] = { dimenRange(host, "swipe") },
-        [prefix .. "Pan"] = { dimenRange(host, "pan") },
-    }
+    host.ges_events = {}
+    for _i, ges in ipairs({ "Tap", "Hold", "Swipe", "Pan" }) do
+        host.ges_events[prefix .. ges] = { dimenRange(host, ges:lower()) }
+        host["on" .. prefix .. ges] = function() return true end
+    end
 end
 
 --- 构建编辑工具按钮，并把命中范围内的点击交给操作回调。
@@ -106,11 +103,7 @@ function Edit.wrap(widget, meta, handlers)
         dimen = Geom:new{ w = size.w, h = size.h },
     }
     tools[1] = frame
-    tools.ges_events = swallowEvents(tools, "HomeEditBar")
-    tools.onHomeEditBarTap = function() return true end
-    tools.onHomeEditBarHold = function() return true end
-    tools.onHomeEditBarSwipe = function() return true end
-    tools.onHomeEditBarPan = function() return true end
+    swallowEvents(tools, "HomeEditBar")
 
     local shield = InputContainer:new{
         dimen = Geom:new{ w = w, h = h },
@@ -128,11 +121,7 @@ function Edit.wrap(widget, meta, handlers)
             height = math.max(0, h - 2),
         },
     }
-    shield.ges_events = swallowEvents(shield, "HomeEditShield")
-    shield.onHomeEditShieldTap = function() return true end
-    shield.onHomeEditShieldHold = function() return true end
-    shield.onHomeEditShieldSwipe = function() return true end
-    shield.onHomeEditShieldPan = function() return true end
+    swallowEvents(shield, "HomeEditShield")
 
     local overlay = OverlapGroup:new{
         allow_mirroring = false,
@@ -151,40 +140,6 @@ function Edit.wrap(widget, meta, handlers)
         return false
     end
     return overlay
-end
-
---- 「添加组件」行。
----@param width number 目标宽度，单位像素
----@param on_tap fun() 点击命中区域时执行的回调
----@return table
-function Edit.addRow(width, on_tap)
-    local h = UI.sz(44)
-    local tap = InputContainer:new{ dimen = Geom:new{ w = width, h = h } }
-    tap[1] = FrameContainer:new{
-        bordersize = 1,
-        padding = UI.sz(8),
-        background = Blitbuffer.COLOR_WHITE,
-        width = width,
-        height = h,
-        dimen = Geom:new{ w = width, h = h },
-        CenterContainer:new{
-            dimen = Geom:new{ w = width, h = h - UI.sz(16) },
-            TextWidget:new{
-                text = _("添加组件"),
-                face = UI.face("cfont", 14),
-            },
-        },
-    }
-    tap.ges_events = {
-        TapHomeAdd = {
-            GestureRange:new{ ges = "tap", range = function() return tap:getSize() end },
-        },
-    }
-    tap.onTapHomeAdd = function()
-        on_tap()
-        return true
-    end
-    return tap
 end
 
 --- 移动菜单。

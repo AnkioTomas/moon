@@ -180,7 +180,6 @@ end
 ---@param c table|nil
 ---@return table
 local function sessionMap(c)
-    c = c or cfg()
     local ql = c.wr_ql
     if (ql == nil or ql == "") and type(c.wr_skey) == "string" and c.wr_skey ~= "" then
         ql = "0"
@@ -273,27 +272,16 @@ end
 ---@param skey string|nil
 ---@param rt string|nil
 ---@param name string|nil
----@param extras table|nil
+---@param extras table
 local function applySession(vid, skey, rt, name, extras)
-    extras = extras or {}
     vid = tostring(vid or "")
-    skey = tostring(skey or "")
-    rt = tostring(rt or "")
-    local map = {
+    saveCfg({
+        wr_vid = vid,
+        wr_skey = tostring(skey or ""),
+        wr_rt = tostring(rt or ""),
         wr_gid = extras.wr_gid or login_jar.wr_gid or "",
         wr_fp = extras.wr_fp or login_jar.wr_fp or "",
-        wr_vid = vid,
-        wr_skey = skey,
         wr_ql = tostring(extras.wr_ql or login_jar.wr_ql or "0"),
-        wr_rt = rt,
-    }
-    saveCfg({
-        wr_vid = map.wr_vid,
-        wr_skey = map.wr_skey,
-        wr_rt = map.wr_rt,
-        wr_gid = map.wr_gid,
-        wr_fp = map.wr_fp,
-        wr_ql = map.wr_ql,
         user_id = vid,
         user_name = name or "",
     })
@@ -348,10 +336,9 @@ end
 
 --- 判断响应是否属于会话失效（应尝试 renewal）。
 ---@param data table|nil
----@param err string|nil
 ---@param http_code number|nil
 ---@return boolean
-local function isAuthFailure(data, err, http_code)
+local function isAuthFailure(data, http_code)
     if type(data) == "table" then
         local code = tonumber(data.errcode or data.errCode)
         if code and AUTH_ERRCODES[code] then
@@ -362,18 +349,8 @@ local function isAuthFailure(data, err, http_code)
             return true
         end
     end
-    if type(err) == "string" and (err:find("登录", 1, true) or err:find("超时", 1, true)) then
-        return true
-    end
     local code = tonumber(http_code)
     return code == 401 or code == 403
-end
-
---- renewal 接口 succ 判定。
----@param data table|nil
----@return boolean
-local function isRenewSuccess(data)
-    return type(data) == "table" and (data.succ == 1 or data.succ == true)
 end
 
 --- 尝试 renewal；冷却内跳过；并发请求合并为一次 renewal。
@@ -406,7 +383,6 @@ end
 ---@param cb fun(raw: string|nil, err: string|nil, res: table|nil)
 ---@return { cancel: fun() }|nil
 local function sessionRequest(opts, cb)
-    opts = opts or {}
     if not Auth.hasSession() then
         cb(nil, _("请先扫码登录微信读书"))
         return nil
@@ -436,7 +412,7 @@ local function sessionRequest(opts, cb)
         local raw = res and res.body or ""
         if not opts.skip_auth_retry and not retried then
             local data = mayCarryErrCode(raw) and decodeJson(raw) or nil
-            if isAuthFailure(data, nil, code) then
+            if isAuthFailure(data, code) then
                 tryRenewAsync(function(renewed)
                     if renewed then
                         sessionRequest(setmetatable({ _auth_retried = true }, { __index = opts }), cb)
@@ -493,19 +469,17 @@ function Auth.webPostAsync(url, body, opts, cb)
     }, cb)
 end
 
---- Async JSON GET helper.
----@param base string
----@param path_query string
+--- 包装回调：原始响应解码成 JSON 表再回传。
 ---@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }|nil
-local function jsonGetAsync(base, path_query, cb)
-    return Auth.webGetAsync(absUrl(base, path_query), nil, function(raw, err)
+---@return fun(raw: string|nil, err: string|nil)
+local function jsonCallback(cb)
+    return function(raw, err)
         if not raw then
             cb(nil, err)
             return
         end
         cb(decodeJson(raw))
-    end)
+    end
 end
 
 --- Web API JSON GET；errcode 校验由 client 层的 acceptWebWire 决定。
@@ -513,7 +487,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Auth.webApiGetAsync(path_query, cb)
-    return jsonGetAsync(WEB, path_query, cb)
+    return Auth.webGetAsync(absUrl(WEB, path_query), nil, jsonCallback(cb))
 end
 
 --- Web API JSON POST；body 以 JSON 发出，回包解码成表。
@@ -523,13 +497,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Auth.webApiPostAsync(path, body_tbl, cb)
-    return Auth.webPostAsync(absUrl(WEB, path), JSON.encode(body_tbl or {}), nil, function(raw, err)
-        if not raw then
-            cb(nil, err)
-            return
-        end
-        cb(decodeJson(raw))
-    end)
+    return Auth.webPostAsync(absUrl(WEB, path), JSON.encode(body_tbl or {}), nil, jsonCallback(cb))
 end
 
 --- 移动端 API JSON POST（``i.weread.qq.com``）；复用 Web 会话 Cookie + X-Vid/X-Skey。
@@ -538,13 +506,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Auth.apiPostAsync(path, body_tbl, cb)
-    return Auth.webPostAsync(absUrl(API, path), JSON.encode(body_tbl or {}), nil, function(raw, err)
-        if not raw then
-            cb(nil, err)
-            return
-        end
-        cb(decodeJson(raw))
-    end)
+    return Auth.webPostAsync(absUrl(API, path), JSON.encode(body_tbl or {}), nil, jsonCallback(cb))
 end
 
 --- 用 Web 会话拉取 Skills API Key 并落盘（``GET /api/skills/apikeyGet``）。
@@ -646,6 +608,15 @@ function Auth.agentGatewayAsync(api_name, params, cb)
     end)
 end
 
+--- 后台刷新 Skills API Key；取不到只记日志，会话本身仍可用。
+local function refreshAgentKey()
+    Auth.fetchAgentKeyAsync(function(key, fetch_err)
+        if not key then
+            logger.dbg("weread skills api key fetch failed", fetch_err)
+        end
+    end)
+end
+
 --- 访客 Cookie：重置登录 jar，访问首页拿 wr_fp/wr_gid，缺失则本地随机补齐。
 ---@param cb fun(ok: boolean)
 ---@return { cancel: fun() }
@@ -692,11 +663,7 @@ function Auth.beginQrLoginAsync(cb)
                 cb(nil, err)
                 return
             end
-            if not res then
-                cb(nil, _("获取登录 uid 失败"))
-                return
-            end
-            if not Request.ok(res.code) then
+            if not res or not Request.ok(res.code) then
                 cb(nil, _("获取登录 uid 失败"))
                 return
             end
@@ -752,14 +719,10 @@ function Auth.waitQrLoginAsync(uid, cb)
                 return
             end
             if err then
-                cb(nil, err or _("二维码已失效，请重新登录"), "error")
+                cb(nil, err, "error")
                 return
             end
-            if not res then
-                cb(nil, _("二维码已失效，请重新登录"), "error")
-                return
-            end
-            if not Request.ok(res.code) then
+            if not res or not Request.ok(res.code) then
                 cb(nil, _("二维码已失效，请重新登录"), "error")
                 return
             end
@@ -829,11 +792,7 @@ function Auth.completeQrLoginAsync(info, cb)
             end
         end
         logger.info("weread login ok", vid, name)
-        Auth.fetchAgentKeyAsync(function(key, fetch_err)
-            if not key then
-                logger.dbg("weread skills api key fetch failed", fetch_err)
-            end
-        end)
+        refreshAgentKey()
         cb({ user_id = vid, user_name = name })
     end)
 end
@@ -860,7 +819,7 @@ function Auth.renewCookieAsync(cb)
         end
         local raw = res and res.body or ""
         local data = decodeJson(raw)
-        if not isRenewSuccess(data) then
+        if not data or (data.succ ~= 1 and data.succ ~= true) then
             cb(nil, _("续期失败"))
             return
         end
@@ -879,11 +838,7 @@ function Auth.renewCookieAsync(cb)
                 }
             )
             logger.info("weread cookie renewed")
-            Auth.fetchAgentKeyAsync(function(key, fetch_err)
-                if not key then
-                    logger.dbg("weread skills api key fetch failed", fetch_err)
-                end
-            end)
+            refreshAgentKey()
             cb(true)
             return
         end

@@ -39,35 +39,30 @@ end
 local function configure(desktop, option)
     local panel = panelFor(option)
     local dialog
+    --- 执行配置变更后关闭对话框并刷新设置页。
+    ---@param change fun()
+    ---@return fun()
+    local function apply(change)
+        return function()
+            change()
+            UIManager:close(dialog)
+            desktop:updateView()
+        end
+    end
     local buttons = {}
     buttons[#buttons + 1] = {{
         text = option.enabled and _("停用") or _("启用"),
-        --- 切换动作启用状态后刷新设置页。
-        callback = function()
-            panel.setEnabled(option.id, not option.enabled)
-            UIManager:close(dialog)
-            desktop:updateView()
-        end,
+        callback = apply(function() panel.setEnabled(option.id, not option.enabled) end),
     }}
     if option.enabled then
         buttons[#buttons + 1] = {
             {
                 text = _("上移"), enabled = option.position and option.position > 1,
-                --- 把动作向前移动一位后刷新设置页。
-                callback = function()
-                    panel.move(option.id, -1)
-                    UIManager:close(dialog)
-                    desktop:updateView()
-                end,
+                callback = apply(function() panel.move(option.id, -1) end),
             },
             {
                 text = _("下移"), enabled = option.position and option.position < panel.enabledCount(),
-                --- 把动作向后移动一位后刷新设置页。
-                callback = function()
-                    panel.move(option.id, 1)
-                    UIManager:close(dialog)
-                    desktop:updateView()
-                end,
+                callback = apply(function() panel.move(option.id, 1) end),
             },
         }
     end

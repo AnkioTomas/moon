@@ -24,13 +24,6 @@ local Store = {}
 --- 源目录缓存 TTL（秒）。阅读会话 bootstrap 用这个值；下载完成判断不传 max_age。
 Store.TOC_MAX_AGE = require("source.toc").TTL
 
---- 路径末段文件名
----@param path string
----@return string
-local function basename(path)
-    return path:match("([^/\\]+)$") or path
-end
-
 --- 保存列表中的书籍元数据；没有身份列的临时条目跳过。
 ---@param books table
 function Store.rememberMany(books)
@@ -151,19 +144,13 @@ end
 ---@return string|nil err
 function Store.touch(path, identity, opts)
     local source_id, stable_id = identity.source_id, identity.stable_id
-    if not opts then
+    if not (opts and opts.chapter_idx) then
         if not BookDB.touchPath(source_id, stable_id, path) then
             return false, "failed to register book path"
         end
         return true
     end
     local chapter_idx = opts.chapter_idx
-    if not chapter_idx then
-        if not BookDB.touchPath(source_id, stable_id, path) then
-            return false, "failed to register book path"
-        end
-        return true
-    end
 
     local toc_payload
     if opts.toc then
@@ -299,7 +286,7 @@ function Store.ensureIdentity(path)
         source_id = "local",
         stable_id = path,
         md5 = require("util").partialMD5(path),
-        title = basename(path):gsub("%.[^%.]+$", ""),
+        title = require("utils.text").basename(path):gsub("%.[^%.]+$", ""),
         inserted_at = os.time(),
         path = path,
     }

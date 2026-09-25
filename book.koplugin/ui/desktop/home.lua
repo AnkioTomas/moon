@@ -142,19 +142,27 @@ local function deleteWidget(self, id)
     self:updateView()
 end
 
+--- 定位组件的摆放记录、所在页的有序记录及其页内序号。
+---@param list table 组件摆放记录
+---@param id string 组件标识
+---@return table|nil item, table page_items, integer|nil pos
+local function locate(list, id)
+    local item = Widgets.find(list, id)
+    if not item then return nil, {}, nil end
+    local page_items = Widgets.onPage(list, item.page)
+    for i, row in ipairs(page_items) do
+        if row.id == id then return item, page_items, i end
+    end
+    return item, page_items, nil
+end
+
 --- 在当前页内移动指定组件，保存顺序并重新排版。
 ---@param self BookHome 当前视图或布局实例
 ---@param id string 组件、分页或数据源的标识
 ---@param delta number 相对于当前位置的偏移量
 local function moveInPage(self, id, delta)
     local list = Components.widgets()
-    local item = Widgets.find(list, id)
-    if not item then return end
-    local page_items = Widgets.onPage(list, item.page)
-    local pos
-    for i, row in ipairs(page_items) do
-        if row.id == id then pos = i break end
-    end
+    local _item, page_items, pos = locate(list, id)
     if not pos then return end
     local next_pos = pos + delta
     if next_pos < 1 or next_pos > #page_items then return end
@@ -187,14 +195,8 @@ end
 ---@param self BookHome 当前视图或布局实例
 ---@param id string 组件、分页或数据源的标识
 local function showMove(self, id)
-    local list = Components.widgets()
-    local item = Widgets.find(list, id)
+    local item, page_items, pos = locate(Components.widgets(), id)
     if not item then return end
-    local page_items = Widgets.onPage(list, item.page)
-    local pos
-    for i, row in ipairs(page_items) do
-        if row.id == id then pos = i break end
-    end
     Edit.showMoveDialog({
         can_up = pos and pos > 1,
         can_down = pos and pos < #page_items,
@@ -229,20 +231,26 @@ local function showHeight(self, id, range, placement)
     })
 end
 
---- 未上屏的组件均可添加；当前页放不下则落到新页。
----@param self BookHome 当前视图或布局实例
----@param body_h number 扣除固定控件后的正文高度，单位像素
----@param width number 目标宽度，单位像素
-local function showAdd(self, body_h, width)
-    local list = Components.widgets()
+--- 尚未摆上首页的已注册组件。
+---@return table[] candidates { id, label } 列表，按注册顺序
+local function unplaced()
     local placed = {}
-    for _i, item in ipairs(list) do placed[item.id] = true end
+    for _i, item in ipairs(Components.widgets()) do placed[item.id] = true end
     local candidates = {}
     for _i, comp in ipairs(Components.components) do
         if not placed[comp.id] then
             candidates[#candidates + 1] = { id = comp.id, label = comp.label }
         end
     end
+    return candidates
+end
+
+--- 未上屏的组件均可添加；当前页放不下则落到新页。
+---@param self BookHome 当前视图或布局实例
+---@param body_h number 扣除固定控件后的正文高度，单位像素
+---@param width number 目标宽度，单位像素
+local function showAdd(self, body_h, width)
+    local candidates = unplaced()
     if #candidates == 0 then return end
     Edit.showAddDialog(candidates, function(id)
         local next_list = Components.widgets()
@@ -290,20 +298,7 @@ local function assemble(self)
 
     if self.desktop and not self.offscreen then ensureLayout(self, ctx, body_h) end
 
-    local can_add = false
-    if self.editing then
-        local list = Components.widgets()
-        local placed = {}
-        for _i, item in ipairs(list) do placed[item.id] = true end
-        for _i, comp in ipairs(Components.components) do
-            if not placed[comp.id] then
-                can_add = true
-                break
-            end
-        end
-    end
-
-    local widget_h = body_h
+    local can_add = self.editing and #unplaced() > 0
 
     local wrap
     if self.editing then
@@ -324,7 +319,7 @@ local function assemble(self)
     end
 
     local body, page, pages, visible = self.layout:build(ctx, self.components, self.page, {
-        body_height = widget_h,
+        body_height = body_h,
         wrap = wrap,
     })
     self.page = page or 1
@@ -337,7 +332,7 @@ local function assemble(self)
         if can_add then
             actions[#actions + 1] = {
                 icon = "add",
-                on_tap = function() showAdd(self, widget_h, w) end,
+                on_tap = function() showAdd(self, body_h, w) end,
             }
         end
         actions[#actions + 1] = {

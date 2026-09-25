@@ -2,8 +2,8 @@
 文件管理路由：列表 / 下载 / 上传 / mkdir / delete / rename + 页面片段。
 
 函数签名对齐 Server 方法（首参 self=server），由 remote.server 装配到
-Server._route* 上；只依赖 server 暴露的 _fail/_queueResponse/_safePath/
-_isRoot/cleanPath/handlers，不反向 require server（防循环）。
+Server._route* 上；只依赖 server 暴露的 _fail/_queueResponse/jsonResp/errorResp/
+_safePath/_isRoot/cleanPath/handlers，不反向 require server（防循环）。
 
 @module koplugin.book.remote.file
 --]]
@@ -51,6 +51,41 @@ local function listBody(path, parent, entries)
         .. "}"
 end
 
+--- 查询串路径 → managed roots 内的规范路径；非法已排 400、越界已排 403，返回 nil。
+---@param conn table
+---@param path string|nil
+---@param bad string 400 的错误说明
+---@return string|nil
+local function resolveTarget(self, conn, path, bad)
+    local target = self.cleanPath(path)
+    if not target then
+        return self:_fail(conn, 400, bad)
+    end
+    target = self:_safePath(target)
+    if not target then
+        return self:_fail(conn, 403, "Path outside managed roots")
+    end
+    return target
+end
+
+--- 变更类 handler 的回调：连接已死丢弃；失败按错误语义映射状态码；
+--- 成功回 ok（handler 给出产物路径时一并带上）。
+---@param conn table
+---@param op string 日志用操作描述
+---@return fun(ok: boolean|nil, err: any, output: string|nil)
+local function mutationDone(self, conn, op)
+    return function(ok, err, output)
+        if conn.dead then return end
+        if not ok then
+            logger.warn("book remote mutate failed", op, err)
+            conn.resp = self.errorResp(mutationErrorCode(err), err)
+            return
+        end
+        logger.dbg("book remote mutate done", op)
+        conn.resp = self.jsonResp(200, output and JSON.encode({ ok = true, path = output }) or '{"ok":true}')
+    end
+end
+
 -- ── 路由 ─────────────────────────────────────────────
 
 --- GET /api/list?path=：列目录，逐项标注 protected。
@@ -75,21 +110,13 @@ function File.list(self, conn, method, path)
     self.handlers.list_dir(dir, function(entries, err)
         if conn.dead then return end
         if not entries then
-            conn.resp = {
-                code = 404,
-                ctype = "application/json; charset=utf-8",
-                body = JSON.encode({ error = tostring(err) }),
-            }
+            conn.resp = self.errorResp(404, err)
             return
         end
         for _, entry in ipairs(entries) do
             entry.protected = self.handlers.is_protected(dir .. "/" .. entry.name)
         end
-        conn.resp = {
-            code = 200,
-            ctype = "application/json; charset=utf-8",
-            body = listBody(dir, self:_parent(dir), entries),
-        }
+        conn.resp = self.jsonResp(200, listBody(dir, self:_parent(dir), entries))
     end)
     return true
 end
@@ -104,13 +131,9 @@ function File.download(self, conn, method, path, inline)
     if method ~= "GET" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    local target = self.cleanPath(path)
+    local target = resolveTarget(self, conn, path, "Bad path")
     if not target then
-        return self:_fail(conn, 400, "Bad path")
-    end
-    target = self:_safePath(target)
-    if not target then
-        return self:_fail(conn, 403, "Path outside managed roots")
+        return
     end
     local real = self.handlers.resolve_download(target)
     if not real then
@@ -155,13 +178,9 @@ function File.upload(self, conn, method, headers, dir, name, conflict)
     if method ~= "PUT" and method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    dir = self.cleanPath(dir)
+    dir = resolveTarget(self, conn, dir, "Bad dir")
     if not dir then
-        return self:_fail(conn, 400, "Bad dir")
-    end
-    dir = self:_safePath(dir)
-    if not dir then
-        return self:_fail(conn, 403, "Path outside managed roots")
+        return
     end
     if not self.handlers.is_dir(dir) then
         return self:_fail(conn, 400, "Bad dir")
@@ -227,13 +246,9 @@ function File.mutate(self, conn, method, path, fn)
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    local target = self.cleanPath(path)
+    local target = resolveTarget(self, conn, path, "Bad path")
     if not target then
-        return self:_fail(conn, 400, "Bad path")
-    end
-    target = self:_safePath(target)
-    if not target then
-        return self:_fail(conn, 403, "Path outside managed roots")
+        return
     end
     if fn == self.handlers.delete
         and (self:_isRoot(target) or self.handlers.is_protected(target)) then
@@ -241,22 +256,7 @@ function File.mutate(self, conn, method, path, fn)
     end
     local op = fn == self.handlers.delete and "delete" or "mkdir"
     conn.state = "pending"
-    fn(target, function(ok, err)
-        if conn.dead then return end
-        if not ok then
-            logger.warn("book remote mutate failed", op, target, err)
-            conn.resp = {
-                code = mutationErrorCode(err),
-                ctype = "application/json; charset=utf-8",
-                body = JSON.encode({ error = tostring(err) }),
-            }
-            return
-        end
-        logger.dbg("book remote mutate done", op, target)
-        conn.resp = {
-            code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
-        }
-    end)
+    fn(target, mutationDone(self, conn, op .. " " .. target))
     return true
 end
 
@@ -282,22 +282,7 @@ function File.rename(self, conn, method, query)
         return self:_fail(conn, 403, "Protected path")
     end
     conn.state = "pending"
-    self.handlers.rename(from, to, function(ok, err)
-        if conn.dead then return end
-        if not ok then
-            logger.warn("book remote mutate failed", "rename", from, to, err)
-            conn.resp = {
-                code = mutationErrorCode(err),
-                ctype = "application/json; charset=utf-8",
-                body = JSON.encode({ error = tostring(err) }),
-            }
-            return
-        end
-        logger.dbg("book remote mutate done", "rename", from, to)
-        conn.resp = {
-            code = 200, ctype = "application/json; charset=utf-8", body = '{"ok":true}',
-        }
-    end)
+    self.handlers.rename(from, to, mutationDone(self, conn, "rename " .. from .. " " .. to))
     return true
 end
 
@@ -309,32 +294,12 @@ function File.extract(self, conn, method, path)
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    local target = self.cleanPath(path)
+    local target = resolveTarget(self, conn, path, "Bad path")
     if not target then
-        return self:_fail(conn, 400, "Bad path")
-    end
-    target = self:_safePath(target)
-    if not target then
-        return self:_fail(conn, 403, "Path outside managed roots")
+        return
     end
     conn.state = "pending"
-    self.handlers.extract(target, function(ok, err, output)
-        if conn.dead then return end
-        if not ok then
-            logger.warn("book remote extract failed", target, err)
-            conn.resp = {
-                code = mutationErrorCode(err),
-                ctype = "application/json; charset=utf-8",
-                body = JSON.encode({ error = tostring(err) }),
-            }
-            return
-        end
-        conn.resp = {
-            code = 200,
-            ctype = "application/json; charset=utf-8",
-            body = JSON.encode({ ok = true, path = output }),
-        }
-    end)
+    self.handlers.extract(target, mutationDone(self, conn, "extract " .. target))
     return true
 end
 

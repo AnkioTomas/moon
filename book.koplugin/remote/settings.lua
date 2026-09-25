@@ -21,22 +21,14 @@ local SECRET_KEYS = {
     password = true,
 }
 
+--- 密钥脱敏：空值回空串，否则一律占位符。
 ---@param value string|nil
----@param secret boolean
 ---@return string
-local function maskValue(value, secret)
+local function maskValue(value)
     if value == nil or value == "" then
         return ""
     end
-    if secret then
-        return SettingsApi.MASK
-    end
-    return tostring(value)
-end
-
----@return boolean
-local function unchangedSecret(value)
-    return value == SettingsApi.MASK
+    return SettingsApi.MASK
 end
 
 ---@param cfg table
@@ -48,7 +40,7 @@ local function applyField(cfg, key, incoming, normalize)
     if incoming == nil then
         return false
     end
-    if SECRET_KEYS[key] and unchangedSecret(incoming) then
+    if SECRET_KEYS[key] and incoming == SettingsApi.MASK then
         return false
     end
     local next = normalize(tostring(incoming))
@@ -77,30 +69,24 @@ function SettingsApi.snapshot()
     return {
         ai = {
             ai_endpoint = asStr(ai.ai_endpoint),
-            ai_api_key = maskValue(ai.ai_api_key, true),
+            ai_api_key = maskValue(ai.ai_api_key),
             ai_model = asStr(ai.ai_model),
         },
         moon = {
             base_url = asStr(moon.base_url),
-            token = maskValue(moon.token, true),
+            token = maskValue(moon.token),
         },
         copymanga = {
             base_url = asStr(copymanga.base_url),
             username = asStr(copymanga.username),
-            password = maskValue(copymanga.password, true),
+            password = maskValue(copymanga.password),
         },
         zlib = {
             email = asStr(zlib.email),
-            password = maskValue(zlib.password, true),
+            password = maskValue(zlib.password),
             base_url = asStr(zlib.base_url),
         },
     }
-end
-
----@param group table|nil
----@return boolean
-local function hasGroup(group)
-    return type(group) == "table"
 end
 
 ---@param payload table
@@ -113,37 +99,25 @@ function SettingsApi.apply(payload)
     local Settings = require("utils.settings")
     local changed = false
 
-    if hasGroup(payload.ai) then
+    if type(payload.ai) == "table" then
         local cfg = Settings.get("ai")
         local g = payload.ai
-        local ai_changed = false
-        if applyField(cfg, "ai_endpoint", g.ai_endpoint, function(v)
+        local ai_changed = applyField(cfg, "ai_endpoint", g.ai_endpoint, function(v)
             return Text.rtrimSlashes(Text.trim(v))
-        end) then
-            ai_changed = true
-        end
-        if applyField(cfg, "ai_api_key", g.ai_api_key, Text.trim) then
-            ai_changed = true
-        end
-        if applyField(cfg, "ai_model", g.ai_model, Text.trim) then
-            ai_changed = true
-        end
+        end)
+        ai_changed = applyField(cfg, "ai_api_key", g.ai_api_key, Text.trim) or ai_changed
+        ai_changed = applyField(cfg, "ai_model", g.ai_model, Text.trim) or ai_changed
         if ai_changed then
             Settings.saveSection("ai", cfg)
             changed = true
         end
     end
 
-    if hasGroup(payload.moon) then
+    if type(payload.moon) == "table" then
         local cfg = Settings.getSource("moon")
         local g = payload.moon
-        local moon_changed = false
-        if applyField(cfg, "base_url", g.base_url, Text.stripWhitespace) then
-            moon_changed = true
-        end
-        if applyField(cfg, "token", g.token, Text.stripWhitespace) then
-            moon_changed = true
-        end
+        local moon_changed = applyField(cfg, "base_url", g.base_url, Text.stripWhitespace)
+        moon_changed = applyField(cfg, "token", g.token, Text.stripWhitespace) or moon_changed
         if moon_changed then
             Settings.saveSource("moon", cfg)
             require("source.registry").invalidate()
@@ -151,17 +125,13 @@ function SettingsApi.apply(payload)
         end
     end
 
-    if hasGroup(payload.zlib) then
+    if type(payload.zlib) == "table" then
         local cfg = Settings.getSource("zlib")
         local g = payload.zlib
-        local zlib_changed = false
-        if applyField(cfg, "email", g.email, Text.trim) then
+        local zlib_changed = applyField(cfg, "email", g.email, Text.trim)
+        zlib_changed = applyField(cfg, "password", g.password, tostring) or zlib_changed
+        if zlib_changed then
             cfg.user_id, cfg.user_key = nil, nil
-            zlib_changed = true
-        end
-        if applyField(cfg, "password", g.password, function(v) return v or "" end) then
-            cfg.user_id, cfg.user_key = nil, nil
-            zlib_changed = true
         end
         if g.base_url ~= nil then
             local base = Text.trim(tostring(g.base_url))
@@ -177,13 +147,12 @@ function SettingsApi.apply(payload)
         end
     end
 
-    if hasGroup(payload.copymanga) then
+    if type(payload.copymanga) == "table" then
         local cfg = Settings.getSource("copymanga") or {}
         local g = payload.copymanga
-        local changed_group = false
-        if applyField(cfg, "base_url", g.base_url, Text.rtrimSlashes) then changed_group = true end
-        if applyField(cfg, "username", g.username, Text.trim) then changed_group = true end
-        if applyField(cfg, "password", g.password, tostring) then changed_group = true end
+        local changed_group = applyField(cfg, "base_url", g.base_url, Text.rtrimSlashes)
+        changed_group = applyField(cfg, "username", g.username, Text.trim) or changed_group
+        changed_group = applyField(cfg, "password", g.password, tostring) or changed_group
         if changed_group then
             -- Credentials and endpoint affect the active client/session.
             Settings.saveSource("copymanga", cfg)

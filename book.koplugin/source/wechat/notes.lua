@@ -441,6 +441,25 @@ function Notes.toAnnotations(wire, chapter_uid, reviews, source_id, stable_id)
             end
         end
     end
+    --- 划线行与想法条目共用的注解骨架。
+    --- bookmarklist 的 chapterIdx 是微信原始序号；本地目录过滤过封面和空章，
+    --- 必须优先按 uid 映射，不能把原始序号直接当本地章节号。
+    --- page/pos0/pos1 留空：开章后由 localizeAnnotations 按 wr_range 补
+    --- xpointer。数字占位会让 KOReader 误判整份注解为 mupdf 格式。
+    local function skeleton(row, uid)
+        local idx = source_id and stable_id
+            and Toc.index(source_id, stable_id, row.chapterUid or row.chapter_uid)
+            or nil
+        local ts = tonumber(row.createTime or row.updateTime) or os.time()
+        return {
+            datetime = os.date("%Y-%m-%d %H:%M:%S", ts),
+            datetime_updated = os.date("%Y-%m-%d %H:%M:%S", ts),
+            drawer = "lighten",
+            color = Notes.localColor(row.colorStyle),
+            chapter = row.chapterTitle or "",
+            chapter_idx = idx or tonumber(row.chapterIdx or row.chapter_idx) or chapter_idx_by_uid[uid],
+        }
+    end
     local review_by_range = Notes.reviewsByRange(reviews)
     local matched_reviews = {}
     local out = {}
@@ -449,34 +468,15 @@ function Notes.toAnnotations(wire, chapter_uid, reviews, source_id, stable_id)
             local uid = tostring(row.chapterUid or row.chapter_uid or "")
             if not chapter_uid or uid == tostring(chapter_uid) then
                 local range = tostring(row.range or "")
-                local text = Notes.decodeMarkText(row.markText or row.bookmarkText or row.text or "")
                 local review = review_by_range[range]
                 if review then matched_reviews[review] = true end
-                local note = review and review.content or nil
-                local wr_review_id = review and review.reviewId or nil
-                local ts = tonumber(row.createTime or row.updateTime) or os.time()
-                -- bookmarklist 的 chapterIdx 是微信原始序号；本地目录过滤过封面和空章，
-                -- 必须优先按 uid 映射，不能把原始序号直接当本地章节号。
-                local idx = source_id and stable_id
-                    and Toc.index(source_id, stable_id, row.chapterUid or row.chapter_uid)
-                    or nil
-                idx = idx or tonumber(row.chapterIdx or row.chapter_idx)
-                    or chapter_idx_by_uid[uid]
-                -- page/pos0/pos1 留空：开章后由 localizeAnnotations 按 wr_range 补
-                -- xpointer。数字占位会让 KOReader 误判整份注解为 mupdf 格式。
-                out[#out + 1] = {
-                    datetime = os.date("%Y-%m-%d %H:%M:%S", ts),
-                    datetime_updated = os.date("%Y-%m-%d %H:%M:%S", ts),
-                    drawer = "lighten",
-                    color = Notes.localColor(row.colorStyle),
-                    text = text,
-                    note = note,
-                    chapter = row.chapterTitle or "",
-                    chapter_idx = idx,
-                    wr_range = range ~= "" and range or nil,
-                    wr_bookmark_id = row.bookmarkId or row.id,
-                    wr_review_id = wr_review_id,
-                }
+                local ann = skeleton(row, uid)
+                ann.text = Notes.decodeMarkText(row.markText or row.bookmarkText or row.text or "")
+                ann.note = review and review.content or nil
+                ann.wr_range = range ~= "" and range or nil
+                ann.wr_bookmark_id = row.bookmarkId or row.id
+                ann.wr_review_id = review and review.reviewId or nil
+                out[#out + 1] = ann
             end
         end
     end
@@ -492,25 +492,13 @@ function Notes.toAnnotations(wire, chapter_uid, reviews, source_id, stable_id)
             if range ~= "" and type(text) == "string" and text ~= ""
                     and type(content) == "string" and content ~= ""
                     and (not chapter_uid or uid == tostring(chapter_uid)) then
-                local idx = source_id and stable_id
-                    and Toc.index(source_id, stable_id, review.chapterUid or review.chapter_uid)
-                    or nil
-                idx = idx or tonumber(review.chapterIdx or review.chapter_idx)
-                    or chapter_idx_by_uid[uid]
-                local ts = tonumber(review.createTime or review.updateTime) or os.time()
-                out[#out + 1] = {
-                    datetime = os.date("%Y-%m-%d %H:%M:%S", ts),
-                    datetime_updated = os.date("%Y-%m-%d %H:%M:%S", ts),
-                    drawer = "lighten",
-                    color = Notes.localColor(review.colorStyle),
-                    text = text,
-                    note = content,
-                    chapter = review.chapterTitle or "",
-                    chapter_idx = idx,
-                    wr_range = range,
-                    wr_review_id = review.reviewId or entry.reviewId,
-                    wr_review_only = true,
-                }
+                local ann = skeleton(review, uid)
+                ann.text = text
+                ann.note = content
+                ann.wr_range = range
+                ann.wr_review_id = review.reviewId or entry.reviewId
+                ann.wr_review_only = true
+                out[#out + 1] = ann
             end
         end
     end

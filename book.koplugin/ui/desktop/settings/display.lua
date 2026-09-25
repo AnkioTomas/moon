@@ -15,13 +15,6 @@ local T = require("ffi/util").template
 
 ---@class BookSettingsDisplay
 local Display = {}
-Display.__index = Display
-
----@return BookSettingsDisplay
-function Display.new()
-    return setmetatable({}, Display)
-end
-
 local REFRESH_PRESETS = {
     { value = 0, text = _("从不") },
     { value = 1, text = _("每页") },

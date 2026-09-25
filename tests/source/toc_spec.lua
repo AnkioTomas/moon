@@ -1,7 +1,7 @@
 --[[--
-京东/番茄共用目录缓存：持久化、TTL 与源隔离。
+章节源共用目录缓存：持久化、TTL 与源隔离。
 
-@module tests.source.jdread.toc_spec
+@module tests.source.toc_spec
 --]]
 
 local Assert = require("support.assert")
@@ -31,9 +31,9 @@ package.preload["json"] = function()
     return require("support.json_stub")
 end
 
-package.loaded["source.jdread.toc"] = nil
+package.loaded["source.toc"] = nil
 package.loaded["source.fanqie.toc"] = nil
-local Toc = require("source.jdread.toc")
+local Toc = require("source.toc")
 local FanqieToc = require("source.fanqie.toc")
 Assert.eq(Toc, FanqieToc)
 

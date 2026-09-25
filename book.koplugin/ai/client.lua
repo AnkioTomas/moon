@@ -5,10 +5,8 @@ OpenAI 兼容 Chat Completions 客户端。只负责协议，不拥有阅读上�
 --]]
 
 local JSON = require("json")
-local Content = require("ai.content")
 local Request = require("http.request")
 local Settings = require("utils.settings")
-local SSE = require("ai.sse")
 local Text = require("utils.text")
 local logger = require("utils.log")
 
@@ -30,13 +28,22 @@ function Client.endpoint(base)
     return base .. "/chat/completions"
 end
 
+---@return string|nil, string|nil, string|nil, string|nil
+local function credentials()
+    local settings = Settings.get()
+    local endpoint = Client.endpoint(settings.ai_endpoint)
+    local api_key = Text.trim(settings.ai_api_key)
+    local model = Text.trim(settings.ai_model)
+    if not endpoint or api_key == "" or model == "" then
+        return nil, nil, nil, "AI is not configured"
+    end
+    return endpoint, api_key, model
+end
+
 --- 端点、密钥、模型三者齐全才视为已配置。
 ---@return boolean
 function Client.isConfigured()
-    local settings = Settings.get()
-    return Client.endpoint(settings.ai_endpoint) ~= nil
-        and Text.trim(settings.ai_api_key) ~= ""
-        and Text.trim(settings.ai_model) ~= ""
+    return credentials() ~= nil
 end
 
 --- 截断响应体便于日志（首尾截断，控制长度）。
@@ -51,6 +58,31 @@ local function snip(s, n)
     return s:sub(1, n) .. ("…(" .. #s .. "B)")
 end
 
+--- 提取 message 中用户可见正文（仅 content，不含 reasoning）；数组形式按行拼接。
+---@param message table|nil
+---@return string|nil
+local function messageContent(message)
+    local value = type(message) == "table" and message.content
+    if type(value) == "string" then
+        return value ~= "" and value or nil
+    end
+    if type(value) ~= "table" then
+        return nil
+    end
+    local parts = {}
+    for _, part in ipairs(value) do
+        if type(part) == "string" and part ~= "" then
+            parts[#parts + 1] = part
+        elseif type(part) == "table" then
+            local text = part.text or part.content
+            if type(text) == "string" and text ~= "" then
+                parts[#parts + 1] = text
+            end
+        end
+    end
+    return #parts > 0 and table.concat(parts, "\n") or nil
+end
+
 --- 解析非流式响应体，返回 choices[1].message 正文。
 ---@param body string|nil
 ---@return string|nil, string|nil
@@ -60,8 +92,8 @@ function Client.decodeResponse(body)
         return nil, "invalid AI response"
     end
     local choice = decoded.choices and decoded.choices[1]
-    local content = Content.fromMessage(choice and choice.message)
-    if not content or content == "" then
+    local content = messageContent(choice and choice.message)
+    if not content then
         local err = decoded.error
         if type(err) == "table" then
             return nil, tostring(err.message or err.code)
@@ -76,51 +108,6 @@ function Client.decodeResponse(body)
     return content
 end
 
----@return string|nil, string|nil, string|nil, string|nil
-local function credentials()
-    local settings = Settings.get()
-    local endpoint = Client.endpoint(settings.ai_endpoint)
-    local api_key = Text.trim(settings.ai_api_key)
-    local model = Text.trim(settings.ai_model)
-    if not endpoint or api_key == "" or model == "" then
-        return nil, nil, nil, "AI is not configured"
-    end
-    return endpoint, api_key, model
-end
-
----@param model string|nil
----@param messages table[]
----@param opts table|nil
----@param stream boolean
----@return string|nil, any
-local function encodeBody(model, messages, opts, stream)
-    opts = opts or {}
-    local payload = {
-        model = opts.model or model,
-        messages = messages,
-        temperature = opts.temperature or 0.2,
-        max_tokens = opts.max_tokens or 2000,
-    }
-    if stream then
-        payload.stream = true
-    end
-    local ok, body = pcall(JSON.encode, payload)
-    if not ok then
-        return nil, body
-    end
-    return body
-end
-
---- AI 请求超时：连接与整包共用同一预算（默认 120s）。
----@param opts table|nil
----@return integer timeout, integer connect_timeout
-local function httpTimeouts(opts)
-    opts = opts or {}
-    local timeout = opts.timeout or Client.DEFAULT_TIMEOUT
-    local connect = opts.connect_timeout or timeout
-    return timeout, connect
-end
-
 --- 非流式 Chat Completions；cb(content, err)。
 ---@param messages table[]
 ---@param opts table|nil
@@ -133,17 +120,23 @@ function Client.chat(messages, opts, cb)
         cb(nil, conf_err)
         return nil
     end
-    local body, enc_err = encodeBody(model, messages, opts, false)
-    if not body then
-        cb(nil, enc_err)
+    local encoded, body = pcall(JSON.encode, {
+        model = opts.model or model,
+        messages = messages,
+        temperature = opts.temperature or 0.2,
+        max_tokens = opts.max_tokens or 2000,
+    })
+    if not encoded then
+        cb(nil, body)
         return nil
     end
-    local timeout, connect_timeout = httpTimeouts(opts)
+    -- 连接与整包共用同一预算；推理模型首包可能较慢。
+    local timeout = opts.timeout or Client.DEFAULT_TIMEOUT
     return Request.post(endpoint, body, {
         content_type = "application/json",
         accept = "application/json",
         timeout = timeout,
-        connect_timeout = connect_timeout,
+        connect_timeout = opts.connect_timeout or timeout,
         headers = { Authorization = "Bearer " .. api_key, ["User-Agent"] = DEFAULT_UA },
     }, function(response, err, raw)
         if not response then
@@ -166,62 +159,6 @@ function Client.chat(messages, opts, cb)
         end
         cb(content, decode_err)
     end)
-end
-
---- SSE 流式聊天；opts.on_delta 收增量，结束 cb(full, err)。
----@param messages table[]
----@param opts { on_delta?: fun(chunk: string), temperature?: number, max_tokens?: number, model?: string, timeout?: number }
----@param cb fun(content: string|nil, err: any)
----@return table|nil
-function Client.chatStream(messages, opts, cb)
-    opts = opts or {}
-    local endpoint, api_key, model, conf_err = credentials()
-    if not endpoint then
-        cb(nil, conf_err)
-        return nil
-    end
-    local body, enc_err = encodeBody(model, messages, opts, true)
-    if not body then
-        cb(nil, enc_err)
-        return nil
-    end
-    local parser = SSE.parser()
-    local timeout, connect_timeout = httpTimeouts(opts)
-    return Request.stream({
-        url = endpoint,
-        method = "POST",
-        body = body,
-        timeout = timeout,
-        connect_timeout = connect_timeout,
-        headers = {
-            Authorization = "Bearer " .. api_key,
-            ["User-Agent"] = DEFAULT_UA,
-            ["Content-Type"] = "application/json",
-            Accept = "text/event-stream",
-        },
-    }, {
-        on_data = function(chunk)
-            local delta = parser.feed(chunk)
-            if delta and opts.on_delta then
-                opts.on_delta(delta)
-            end
-        end,
-        on_done = function(err)
-            local full = parser.finish()
-            if err then
-                logger.warn("ai.client: stream failed err=", err,
-                    "partial_len=", #full)
-                cb(full ~= "" and full or nil, err)
-                return
-            end
-            if full == "" then
-                logger.warn("ai.client: stream empty")
-                cb(nil, "empty AI response")
-                return
-            end
-            cb(full)
-        end,
-    })
 end
 
 return Client

@@ -9,8 +9,6 @@ local SettingsApi = require("remote.settings")
 
 local Route = {}
 
-Route.BODY_LIMIT = SettingsApi.BODY_LIMIT
-
 --- /api/settings body 收尾：解析 JSON 后做部分更新，回写实际生效的字段。
 --- JSON 非法或 apply 拒绝都回 400（带原因）。
 ---@param conn table
@@ -25,11 +23,7 @@ function Route.finishSettings(self, conn, text)
     if not applied then
         return self:_fail(conn, 400, err)
     end
-    return self:_queueResponse(conn, {
-        code = 200,
-        ctype = "application/json; charset=utf-8",
-        body = JSON.encode(applied),
-    })
+    return self:_json(conn, 200, JSON.encode(applied))
 end
 
 --- GET /api/settings 回配置快照；POST 收 JSON 走 finishSettings 做部分更新。
@@ -40,16 +34,12 @@ end
 ---@return true|nil true=已进 body 状态，等收齐后回调
 function Route.settings(self, conn, method, headers, _query)
     if method == "GET" then
-        return self:_queueResponse(conn, {
-            code = 200,
-            ctype = "application/json; charset=utf-8",
-            body = JSON.encode(SettingsApi.snapshot()),
-        })
+        return self:_json(conn, 200, JSON.encode(SettingsApi.snapshot()))
     end
     if method ~= "POST" then
         return self:_fail(conn, 405, "Method Not Allowed")
     end
-    local st = self:_acceptText(conn, headers, Route.BODY_LIMIT, Route.finishSettings)
+    local st = self:_acceptText(conn, headers, SettingsApi.BODY_LIMIT, Route.finishSettings)
     if st == nil then
         return
     end

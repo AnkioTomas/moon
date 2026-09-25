@@ -114,11 +114,7 @@ end
 ---@param cb fun(ok: boolean|nil, err: string|nil, filename: string|nil)
 ---@return { cancel: fun() }|nil
 function Zlib.installAsync(source, book, on_progress, cb)
-    if not source then
-        cb(nil, _("当前数据源不支持导入书籍"))
-        return nil
-    end
-    if type(source.importBookAsync) ~= "function" then
+    if not (source and type(source.importBookAsync) == "function") then
         cb(nil, _("当前数据源不支持导入书籍"))
         return nil
     end
@@ -162,11 +158,9 @@ function Zlib.installAsync(source, book, on_progress, cb)
     end
     local format = book.format
     if type(format) == "string" and format ~= "" then run(book) else
-        job = api:detailAsync(id, hash, function(row, err)
+        job = Zlib.getDetailAsync(book, function(detail, err)
             if cancelled then return end
-            if not row then cb(nil, err); return end
-            local detail = Mapper.book(row)
-            if not detail then cb(nil, _("详情为空")); return end
+            if not detail then cb(nil, err); return end
             run(detail)
         end)
     end

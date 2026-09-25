@@ -21,33 +21,28 @@ local function field(wire, key)
     return type(wire.data) == "table" and wire.data[key] or nil
 end
 
+--- 合成 reading_stats 行；云端没有页坐标，page/total_pages 恒为 0。
+local function statsRow(source_id, stable_id, record_type, start_time, duration)
+    return {
+        source_id = source_id,
+        stable_id = stable_id,
+        record_type = record_type,
+        page = 0,
+        start_time = start_time,
+        duration = duration,
+        total_pages = 0,
+    }
+end
+
 local function appendTimes(rows, source_id, read_times)
     if type(read_times) ~= "table" then return end
     for ts_str, seconds in pairs(read_times) do
         local ts = tonumber(ts_str)
         local duration = tonumber(seconds)
         if ts and duration and duration > 0 then
-            rows[#rows + 1] = {
-                source_id = source_id,
-                stable_id = DAY_PREFIX .. tostring(ts),
-                record_type = "day",
-                page = 0,
-                start_time = ts,
-                duration = duration,
-                total_pages = 0,
-            }
+            rows[#rows + 1] = statsRow(source_id, DAY_PREFIX .. tostring(ts), "day", ts, duration)
         end
     end
-end
-
---- 年度回包有真实日明细时直接使用；没有时由月度请求补齐。
-local function appendAnnualDaily(rows, source_id, wire)
-    appendTimes(rows, source_id, field(wire, "dailyReadTimes"))
-end
-
---- 月度 ``readTimes`` 的粒度是日，可以直接落日桶。
-local function appendMonthlyDaily(rows, source_id, wire)
-    appendTimes(rows, source_id, field(wire, "readTimes"))
 end
 
 local function appendWeeklyBooks(rows, source_id, wire)
@@ -59,15 +54,8 @@ local function appendWeeklyBooks(rows, source_id, wire)
         local id = type(book) == "table" and (book.bookId or book.id) or nil
         local duration = type(item) == "table" and tonumber(item.readTime) or nil
         if id and duration and duration > 0 then
-            rows[#rows + 1] = {
-                source_id = source_id,
-                stable_id = WEEK_PREFIX .. tostring(anchor) .. ":" .. tostring(id),
-                record_type = "book",
-                page = 0,
-                start_time = anchor,
-                duration = duration,
-                total_pages = 0,
-            }
+            local stable_id = WEEK_PREFIX .. tostring(anchor) .. ":" .. tostring(id)
+            rows[#rows + 1] = statsRow(source_id, stable_id, "book", anchor, duration)
         end
     end
 end
@@ -191,28 +179,22 @@ function Stats.fromWires(source_id, overall, annuals, monthlies, weeklies)
     local rows = {}
     local total = tonumber(field(overall, "totalReadTime"))
     if total and total > 0 then
-        rows[#rows + 1] = {
-            source_id = source_id,
-            stable_id = TOTAL_ID,
-            record_type = "total",
-            page = 0,
-            start_time = 0,
-            duration = total,
-            total_pages = 0,
-        }
+        rows[#rows + 1] = statsRow(source_id, TOTAL_ID, "total", 0, total)
     end
     local ranges = {
         { stable_prefix = TOTAL_ID, from_ts = 0, to_ts = 0 },
     }
     for _, annual in ipairs(annuals or {}) do
-        appendAnnualDaily(rows, source_id, annual)
+        -- 年度回包有真实日明细时直接使用；没有时由月度请求补齐。
+        appendTimes(rows, source_id, field(annual, "dailyReadTimes"))
         local from_ts, to_ts = yearRange(annual)
         ranges[#ranges + 1] = {
             stable_prefix = DAY_PREFIX, from_ts = from_ts, to_ts = to_ts,
         }
     end
     for _, monthly in ipairs(monthlies or {}) do
-        appendMonthlyDaily(rows, source_id, monthly)
+        -- 月度 ``readTimes`` 的粒度是日，可以直接落日桶。
+        appendTimes(rows, source_id, field(monthly, "readTimes"))
     end
     for _, weekly in ipairs(weeklies or {}) do
         appendWeeklyBooks(rows, source_id, weekly)
@@ -234,8 +216,6 @@ function Stats.fromWires(source_id, overall, annuals, monthlies, weeklies)
     }
 end
 
-Stats.DAY_PREFIX = DAY_PREFIX
-Stats.WEEK_PREFIX = WEEK_PREFIX
 Stats.TOTAL_ID = TOTAL_ID
 
 return Stats

@@ -23,14 +23,6 @@ local M = {
     end,
 }
 
-local function logoPath()
-    local info = debug.getinfo(logoPath, "S")
-    local source = info and info.source
-    local root = source and source:sub(1, 1) == "@"
-        and source:sub(2):match("(.*/)lockscreen/components/[^/]+$")
-    return (root or "") .. "logo.png"
-end
-
 local PERIODS = {
     { id = "today", label = _("今日") },
     { id = "7d", label = _("最近 7 天") },
@@ -118,66 +110,6 @@ local function duration(seconds)
         or T(_("%1分钟"), minutes)
 end
 
---- 追加热敏小票常见的虚线分隔。
----@param blocks table[]
----@param x number
----@param y number
----@param width number
-local function appendDashes(blocks, x, y, width)
-    local right = x + width
-    while x < right do
-        blocks[#blocks + 1] = {
-            kind = "rule", x = x, y = y, width = math.min(6, right - x),
-            height = 1, color = U.DIM,
-        }
-        x = x + 10
-    end
-end
-
---- 生成装饰条码；账单号仍以文字显示，不把装饰冒充可扫码编码。
----@param blocks table[]
----@param x number
----@param y number
----@param width number
----@param height number
----@param seed string
-local function appendBarcode(blocks, x, y, width, height, seed)
-    local right, i = x + width, 1
-    while x < right do
-        local byte = seed:byte((i - 1) % #seed + 1)
-        local bar = 1 + byte % 3
-        if i % 4 ~= 0 then
-            blocks[#blocks + 1] = {
-                kind = "vbar", x = x, y = y, width = math.min(bar, right - x),
-                height = height, value = 1, color = Blitbuffer.COLOR_BLACK,
-            }
-        end
-        x = x + bar + 1 + byte % 2
-        i = i + 1
-    end
-end
-
---- 在热敏纸上下边缘切出连续齿口。
----@param blocks table[]
----@param x number
----@param y number
----@param width number
----@param height number
----@param radius number
-local function appendCutouts(blocks, x, y, width, height, radius)
-    local step = radius * 3
-    local center = x + step
-    while center <= x + width - step do
-        blocks[#blocks + 1] = {
-            kind = "cutout_circle", x = center, y = y, radius = radius,
-        }
-        blocks[#blocks + 1] = {
-            kind = "cutout_circle", x = center, y = y + height, radius = radius,
-        }
-        center = center + step
-    end
-end
-
 --- 账单主体：窄长热敏纸、消费明细、合计与条码。
 ---@param rect table
 ---@return table[]
@@ -213,7 +145,7 @@ function M.blocks(rect)
             radius = 1, shadow = 2, color = Blitbuffer.COLOR_WHITE,
         },
         {
-            kind = "image", file = logoPath(),
+            kind = "image", file = U.LOGO_PATH,
             x = inner_x, y = logo_y,
             width = logo_size, height = logo_size, scale_factor = 0, alpha = false,
         },
@@ -257,8 +189,8 @@ function M.blocks(rect)
         },
     }
 
-    appendDashes(blocks, inner_x, paper_y + math.floor(paper_h * 0.215), inner_w)
-    appendDashes(blocks, inner_x, paper_y + math.floor(paper_h * 0.27), inner_w)
+    U.appendDashes(blocks, inner_x, paper_y + math.floor(paper_h * 0.215), inner_w, 6, 10)
+    U.appendDashes(blocks, inner_x, paper_y + math.floor(paper_h * 0.27), inner_w, 6, 10)
 
     local row_y = paper_y + math.floor(paper_h * 0.29)
     local row_h = math.floor(paper_h * 0.073)
@@ -302,7 +234,7 @@ function M.blocks(rect)
         end
     end
 
-    appendDashes(blocks, inner_x, paper_y + math.floor(paper_h * 0.675), inner_w)
+    U.appendDashes(blocks, inner_x, paper_y + math.floor(paper_h * 0.675), inner_w, 6, 10)
     blocks[#blocks + 1] = {
         text = _("书籍"), x = inner_x, y = paper_y + math.floor(paper_h * 0.70),
         width = math.floor(inner_w * 0.5), size = 13, box = false,
@@ -321,7 +253,7 @@ function M.blocks(rect)
         x = inner_x + math.floor(inner_w * 0.5), y = paper_y + math.floor(paper_h * 0.735),
         width = math.floor(inner_w * 0.5), size = 13, align = "right", box = false,
     }
-    appendDashes(blocks, inner_x, paper_y + math.floor(paper_h * 0.775), inner_w)
+    U.appendDashes(blocks, inner_x, paper_y + math.floor(paper_h * 0.775), inner_w, 6, 10)
     blocks[#blocks + 1] = {
         text = "TOTAL", x = inner_x, y = paper_y + math.floor(paper_h * 0.795),
         width = math.floor(inner_w * 0.35), size = 18, bold = true, box = false,
@@ -335,13 +267,13 @@ function M.blocks(rect)
         text = _("谢谢阅读"), x = inner_x, y = paper_y + math.floor(paper_h * 0.845),
         width = inner_w, size = 13, align = "center", box = false, color = U.MUTED,
     }
-    appendBarcode(blocks, inner_x, paper_y + math.floor(paper_h * 0.88),
-        inner_w, math.max(24, math.floor(paper_h * 0.04)), number)
+    U.appendBarcode(blocks, inner_x, paper_y + math.floor(paper_h * 0.88),
+        inner_w, math.max(24, math.floor(paper_h * 0.04)), number, 4)
     blocks[#blocks + 1] = {
         text = "NO." .. number, x = inner_x, y = paper_y + math.floor(paper_h * 0.935),
         width = inner_w, size = 10, align = "center", box = false, color = U.MUTED,
     }
-    appendCutouts(blocks, paper_x, paper_y, paper_w, paper_h,
+    U.appendCutouts(blocks, paper_x, paper_y, paper_w, paper_h,
         math.max(7, math.floor(pad * 0.4)))
     return blocks
 end

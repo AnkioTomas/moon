@@ -61,29 +61,14 @@ local function langButtonText(self, label, code, use_detected)
     return T(_("%1：%2 ▼"), label, name)
 end
 
---- 居中显示 popout。
----@param widget table
-local function showCentered(widget)
-    local size = widget.dimen or widget:getSize()
-    UIManager:show(widget, nil, nil,
-        math.floor((Screen:getWidth() - size.w) / 2),
-        math.floor((Screen:getHeight() - size.h) / 2))
-end
-
 --- 刷新语言按钮与译文。
 ---@param self BookTranslatePopup
 function TranslatePopup:refreshView()
-    if self.source_btn then
-        self.source_btn:setText(langButtonText(self, _("源语言"), self.source_lang, true))
-    end
-    if self.target_btn then
-        self.target_btn:setText(langButtonText(self, _("目标语言"), self.target_lang, false))
-    end
-    if self.text_box then
-        self.text_box.text_widget:setText(self.translated or "")
-        self.text_box:resetScroll()
-        self.text_box:scrollToTop()
-    end
+    self.source_btn:setText(langButtonText(self, _("源语言"), self.source_lang, true))
+    self.target_btn:setText(langButtonText(self, _("目标语言"), self.target_lang, false))
+    self.text_box.text_widget:setText(self.translated or "")
+    self.text_box:resetScroll()
+    self.text_box:scrollToTop()
     UIManager:setDirty(self, "ui")
 end
 
@@ -120,7 +105,7 @@ end
 --- 发起 Edge 翻译；重复调用会取消在途请求。
 ---@param self BookTranslatePopup
 function TranslatePopup:requestTranslate()
-    if self.job and self.job.cancel then
+    if self.job then
         self.job.cancel()
     end
     self.translated = _("正在翻译…")
@@ -353,7 +338,7 @@ end
 --- 关窗时取消在途翻译：不取消的话回调仍会往已关闭的 widget 上 setDirty，
 --- 并把整个弹窗（含原文与译文）挂在请求闭包里活到响应返回。
 function TranslatePopup:onCloseWidget()
-    if self.job and self.job.cancel then
+    if self.job then
         self.job.cancel()
     end
     self.job = nil
@@ -363,7 +348,6 @@ end
 ---@param opts table
 ---@return BookTranslatePopup
 local function open(opts)
-    opts = opts or {}
     local popup = TranslatePopup:new{
         translator = opts.translator,
         text = opts.text,
@@ -374,7 +358,9 @@ local function open(opts)
         note_index = opts.index,
         translated = "",
     }
-    showCentered(popup)
+    UIManager:show(popup, nil, nil,
+        math.floor((Screen:getWidth() - popup.dimen.w) / 2),
+        math.floor((Screen:getHeight() - popup.dimen.h) / 2))
     popup:requestTranslate()
     return popup
 end

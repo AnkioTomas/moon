@@ -41,10 +41,7 @@ end
 
 --- 一个 fork 结束（成功/失败/取消），让出槽位。
 function System:release()
-    self.running = self.running - 1
-    if self.running < 0 then
-        self.running = 0
-    end
+    self.running = math.max(0, self.running - 1)
     self:pump()
 end
 
@@ -76,14 +73,7 @@ function System:concurrency()
     if not mem then
         return 4
     end
-    local slots = math.floor(mem / 32)
-    if slots < 1 then
-        return 1
-    end
-    if slots > 20 then
-        return 20
-    end
-    return slots
+    return math.max(1, math.min(20, math.floor(mem / 32)))
 end
 
 return System

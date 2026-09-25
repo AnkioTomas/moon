@@ -196,7 +196,6 @@ end
 ---@param rows table[]
 ---@return boolean
 function BookDB.upsertRemoteMany(rows)
-    if #rows == 0 then return true end
     for _, row in ipairs(rows) do
         if not BookDB.upsertRemote(row) then return false end
     end
@@ -279,42 +278,35 @@ function BookDB.markDeleted(source_id, stable_id)
     return BookDB.setLibraryMembership(source_id, stable_id, false, true)
 end
 
+--- 单列字符串查询 → string[]
+---@param sql string
+---@param ... any
+---@return string[]
+local function stringColumn(sql, ...)
+    local result, nrows = Base.query(sql, ...)
+    local out = {}
+    for i = 1, nrows do
+        out[i] = result[1][i]
+    end
+    return out
+end
+
 --- 待推送到云端删除的 stable_id（deleted=1 且脏）。
 ---@param source_id string
 ---@return string[]
 function BookDB.pendingDeleteIds(source_id)
-    local result, nrows = Base.query(
-        [[SELECT stable_id FROM books
+    return stringColumn([[SELECT stable_id FROM books
           WHERE source_id=? AND deleted=1 AND sync_status=0
-          ORDER BY inserted_at ASC;]],
-        source_id
-    )
-    local out = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            out[i] = result[1][i]
-        end
-    end
-    return out
+          ORDER BY inserted_at ASC;]], source_id)
 end
 
 --- 待推送到云端加架的 stable_id（deleted=0 且脏）。
 ---@param source_id string
 ---@return string[]
 function BookDB.pendingShelfAddIds(source_id)
-    local result, nrows = Base.query(
-        [[SELECT stable_id FROM books
+    return stringColumn([[SELECT stable_id FROM books
           WHERE source_id=? AND deleted=0 AND sync_status=0
-          ORDER BY inserted_at ASC;]],
-        source_id
-    )
-    local out = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            out[i] = result[1][i]
-        end
-    end
-    return out
+          ORDER BY inserted_at ASC;]], source_id)
 end
 
 local COLUMNS =
@@ -346,6 +338,14 @@ local function rowToBook(source_id_r, stable_id_r, digest, title, authors, categ
     }
 end
 
+--- Base.query 列式结果的第 i 行 → Book
+---@return Book|nil
+local function bookAt(result, i)
+    local row = {}
+    for c = 1, #result do row[c] = result[c][i] end
+    return rowToBook(unpack(row, 1, #result))
+end
+
 --- 按 (source_id, stable_id) 取 books 行
 ---@param source_id string
 ---@param stable_id string
@@ -375,22 +375,14 @@ function BookDB.getMany(source_id, stable_ids)
     local out = {}
     for start = 1, #ids, 500 do
         local finish = math.min(start + 499, #ids)
-        local placeholders = {}
-        for _ = start, finish do placeholders[#placeholders + 1] = "?" end
-        local args = { source_id }
-        for i = start, finish do args[#args + 1] = ids[i] end
         local result, nrows = Base.query(
             "SELECT " .. COLUMNS .. " FROM books WHERE source_id=? AND stable_id IN ("
-                .. table.concat(placeholders, ",") .. ");",
-            unpack(args)
+                .. string.rep("?", finish - start + 1, ",") .. ");",
+            source_id, unpack(ids, start, finish)
         )
-        if result and nrows and nrows > 0 then
-            for i = 1, nrows do
-                local row = {}
-                for c = 1, #result do row[c] = result[c][i] end
-                local book = rowToBook(unpack(row, 1, #result))
-                if book then out[book.stable_id] = book end
-            end
+        for i = 1, nrows do
+            local book = bookAt(result, i)
+            out[book.stable_id] = book
         end
     end
     return out
@@ -538,21 +530,6 @@ function BookDB.renameStableId(source_id, old_stable_id, new_stable_id, category
     return false
 end
 
---- 单列字符串查询 → string[]
----@param sql string
----@param ... any
----@return string[]
-local function stringColumn(sql, ...)
-    local result, nrows = Base.query(sql, ...)
-    local out = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            out[i] = result[1][i]
-        end
-    end
-    return out
-end
-
 --- 取某源全部 stable_id
 ---@param source_id string
 ---@return string[]
@@ -577,13 +554,8 @@ function BookDB.unsynced(source_id)
         source_id
     )
     local out = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            local row = {}
-            for c = 1, #result do row[c] = result[c][i] end
-            local book = rowToBook(unpack(row, 1, #result))
-            if book then out[#out + 1] = book end
-        end
+    for i = 1, nrows do
+        out[i] = bookAt(result, i)
     end
     return out
 end
@@ -649,14 +621,8 @@ function BookDB.listBySource(source_id, opts)
         recent_read = "COALESCE(p.updated_at, 0) DESC, b.stable_id ASC",
         recent_added = "b.inserted_at DESC, b.stable_id ASC",
     }
-    local sort = opts.sort or "recent_added"
-    local order = sort_sql[sort] or sort_sql.recent_added
-    if sort == "title" then
-        order = string.format(order, opts.sort_desc and "DESC" or "ASC")
-    elseif sort == "author" then
-        local direction = opts.sort_desc and "DESC" or "ASC"
-        order = string.format(order, direction, direction)
-    end
+    local order = (sort_sql[opts.sort] or sort_sql.recent_added)
+        :gsub("%%s", opts.sort_desc and "DESC" or "ASC")
     local sel = [[SELECT b.source_id, b.stable_id, b.title, b.authors,
                         COALESCE(p.fraction * 100, 0),
                         b.category, b.series, b.intro, b.cover, b.inserted_at,
@@ -671,106 +637,86 @@ function BookDB.listBySource(source_id, opts)
     end
     local result, nrows = Base.query(sel .. ";", unpack(args))
     local rows = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            rows[#rows + 1] = {
-                source_id = result[1][i],
-                stable_id = result[2][i],
-                title = result[3][i],
-                authors = result[4][i],
-                percent = tonumber(result[5][i]) or 0,
-                category = result[6][i],
-                series = result[7][i],
-                intro = result[8][i],
-                cover = result[9][i],
-                inserted_at = tonumber(result[10][i]) or 0,
-                read_state = tonumber(result[11][i]) or 0,
-                path = result[12][i],
-                deleted = 0,
-            }
-        end
+    for i = 1, nrows do
+        rows[i] = {
+            source_id = result[1][i],
+            stable_id = result[2][i],
+            title = result[3][i],
+            authors = result[4][i],
+            percent = tonumber(result[5][i]) or 0,
+            category = result[6][i],
+            series = result[7][i],
+            intro = result[8][i],
+            cover = result[9][i],
+            inserted_at = tonumber(result[10][i]) or 0,
+            read_state = tonumber(result[11][i]) or 0,
+            path = result[12][i],
+            deleted = 0,
+        }
     end
     return rows, total
+end
+
+--- 书架内某文本列（category / series）的非空去重值
+---@param column string 可信列名
+---@param source_id string|string[]
+---@return string[]
+local function distinctValues(column, source_id)
+    local where, args = Base.sourceClause("source_id", source_id)
+    return stringColumn(
+        "SELECT DISTINCT " .. column .. " FROM books WHERE " .. where .. " AND deleted=0 AND "
+            .. column .. " IS NOT NULL AND " .. column .. "<>'' ORDER BY " .. column .. ";",
+        unpack(args)
+    )
+end
+
+--- 书架按某文本列（category / series）聚合册数；空值归到 ''，排在最后
+---@param column string 可信列名，同时是返回行的键
+---@param source_id string|string[]
+---@return table[]
+local function countsBy(column, source_id)
+    local where, args = Base.sourceClause("source_id", source_id)
+    local bucket = "CASE WHEN " .. column .. " IS NULL OR " .. column .. "='' THEN '' ELSE " .. column .. " END"
+    local result, nrows = Base.query(
+        "SELECT " .. bucket .. ", COUNT(*) FROM books WHERE " .. where .. " AND deleted=0"
+            .. " GROUP BY " .. bucket
+            .. " ORDER BY CASE WHEN " .. column .. " IS NULL OR " .. column .. "='' THEN 1 ELSE 0 END, "
+            .. column .. ";",
+        unpack(args)
+    )
+    local rows = {}
+    for i = 1, nrows do
+        rows[i] = { [column] = result[1][i] or "", count = tonumber(result[2][i]) or 0 }
+    end
+    return rows
 end
 
 --- 某源的书库分类列表
 ---@param source_id string|string[]
 ---@return string[]
 function BookDB.categoriesBySource(source_id)
-    local where, args = Base.sourceClause("source_id", source_id)
-    return stringColumn(
-        [[SELECT DISTINCT category FROM books
-          WHERE ]] .. where .. [[ AND deleted=0 AND category IS NOT NULL AND category<>''
-          ORDER BY category;]],
-        unpack(args)
-    )
+    return distinctValues("category", source_id)
 end
 
 --- 某源书架按分类聚合
 ---@param source_id string|string[]
 ---@return { category: string, count: integer }[]
 function BookDB.categoryCountsBySource(source_id)
-    local where, args = Base.sourceClause("source_id", source_id)
-    local result, nrows = Base.query(
-        [[SELECT CASE WHEN category IS NULL OR category='' THEN '' ELSE category END,
-                 COUNT(*)
-          FROM books
-          WHERE ]] .. where .. [[ AND deleted=0
-          GROUP BY CASE WHEN category IS NULL OR category='' THEN '' ELSE category END
-          ORDER BY CASE WHEN category IS NULL OR category='' THEN 1 ELSE 0 END,
-                   category;]],
-        unpack(args)
-    )
-    local rows = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            rows[#rows + 1] = {
-                category = result[1][i] or "",
-                count = tonumber(result[2][i]) or 0,
-            }
-        end
-    end
-    return rows
+    return countsBy("category", source_id)
 end
 
 --- 某源的书库系列列表
 ---@param source_id string|string[]
 ---@return string[]
 function BookDB.seriesBySource(source_id)
-    local where, args = Base.sourceClause("source_id", source_id)
-    return stringColumn(
-        [[SELECT DISTINCT series FROM books
-          WHERE ]] .. where .. [[ AND deleted=0 AND series IS NOT NULL AND series<>''
-          ORDER BY series;]],
-        unpack(args)
-    )
+    return distinctValues("series", source_id)
 end
 
 --- 某源书架按系列聚合
 ---@param source_id string|string[]
 ---@return { series: string, count: integer }[]
 function BookDB.seriesCountsBySource(source_id)
-    local where, args = Base.sourceClause("source_id", source_id)
-    local result, nrows = Base.query(
-        [[SELECT CASE WHEN series IS NULL OR series='' THEN '' ELSE series END,
-                 COUNT(*)
-          FROM books
-          WHERE ]] .. where .. [[ AND deleted=0
-          GROUP BY CASE WHEN series IS NULL OR series='' THEN '' ELSE series END
-          ORDER BY CASE WHEN series IS NULL OR series='' THEN 1 ELSE 0 END,
-                   series;]],
-        unpack(args)
-    )
-    local rows = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            rows[#rows + 1] = {
-                series = result[1][i] or "",
-                count = tonumber(result[2][i]) or 0,
-            }
-        end
-    end
-    return rows
+    return countsBy("series", source_id)
 end
 
 --- 范围内按 source_id 聚合册数
@@ -787,13 +733,8 @@ function BookDB.sourceCountsBySource(source_id)
         unpack(args)
     )
     local rows = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            rows[#rows + 1] = {
-                source_id = result[1][i],
-                count = tonumber(result[2][i]) or 0,
-            }
-        end
+    for i = 1, nrows do
+        rows[i] = { source_id = result[1][i], count = tonumber(result[2][i]) or 0 }
     end
     return rows
 end
@@ -818,10 +759,8 @@ function BookDB.readStatusCountsBySource(source_id)
         unpack(args)
     )
     local counts = { read = 0, unread = 0 }
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            counts[result[1][i]] = tonumber(result[2][i]) or 0
-        end
+    for i = 1, nrows do
+        counts[result[1][i]] = tonumber(result[2][i]) or 0
     end
     return {
         { status = "read", count = counts.read },
@@ -880,12 +819,11 @@ end
 ---@param stable_id string
 ---@return string|nil
 function BookDB.getReaderPrefs(source_id, stable_id)
-    local payload = Base.rowexec(
+    return (Base.rowexec(
         [[SELECT reader_prefs FROM books WHERE source_id=? AND stable_id=? LIMIT 1;]],
         source_id,
         stable_id
-    )
-    return payload
+    ))
 end
 
 --- 写入全书阅读排版偏好（JSON 串）。

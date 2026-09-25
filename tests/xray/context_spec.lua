@@ -42,7 +42,7 @@ Assert.is_nil(empty)
 
 Assert.eq(Context.currentPage(), 3)
 
-local prior = Context.priorText(paging, 3, 2000)
+local prior = Context.priorText(paging, 3)
 Assert.matches(prior, "page1")
 Assert.matches(prior, "page2")
 Assert.is_false(prior:find("page3", 1, true) ~= nil)

@@ -78,9 +78,6 @@ local COLUMNS = "source_id, stable_id, chapter_idx, payload, updated_at, sync_st
 ---@return table[]
 local function rows(result, nrows)
     local out = {}
-    if not result or not nrows or nrows <= 0 then
-        return out
-    end
     for i = 1, nrows do
         out[#out + 1] = {
             source_id = result[1][i],

@@ -94,22 +94,4 @@ function ChapterDB.delete(path)
     return Base.exec([[DELETE FROM chapters WHERE path=?;]], path) ~= nil
 end
 
---- 全部章节登记（清缓存对账）
----@return { path: string, source_id: string, stable_id: string, chapter_idx: integer }[]
-function ChapterDB.all()
-    local result, nrows = Base.query([[SELECT path, source_id, stable_id, chapter_idx FROM chapters;]])
-    local out = {}
-    if result and nrows and nrows > 0 then
-        for i = 1, nrows do
-            out[#out + 1] = {
-                path = result[1][i],
-                source_id = result[2][i],
-                stable_id = result[3][i],
-                chapter_idx = tonumber(result[4][i]),
-            }
-        end
-    end
-    return out
-end
-
 return ChapterDB

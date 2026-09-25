@@ -56,8 +56,6 @@ local function writeBatch(batch)
     return ok and wrote ~= nil and closed ~= nil, close_err
 end
 
-local scheduleFlush
-
 ---@param batch string[]
 local function restoreBatch(batch)
     local queued = buffer
@@ -66,7 +64,7 @@ local function restoreBatch(batch)
     for i = 1, #queued do buffer[#buffer + 1] = queued[i] end
 end
 
-scheduleFlush = function(force)
+local function scheduleFlush(force)
     if flush_pending then
         if force then flush_requested = true end
         return

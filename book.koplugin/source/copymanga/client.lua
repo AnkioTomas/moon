@@ -100,23 +100,8 @@ function Client:_getJson(path, cb)
         allow_redirects = true,
         block_timeout = 60,
     }, function(raw, err)
-        local wire, decode_err = decodeWire(raw, err)
-        cb(wire, decode_err)
+        cb(decodeWire(raw, err))
     end)
-end
-
----@param keyword string
----@param page number|nil
----@param page_size number|nil
----@param cb fun(wire: table|nil, err: string|nil)
----@return { cancel: fun() }
-function Client:searchAsync(keyword, page, page_size, cb)
-    page = math.max(1, math.floor(tonumber(page) or 1))
-    page_size = math.max(1, math.min(50, math.floor(tonumber(page_size) or 20)))
-    local offset = (page - 1) * page_size
-    local path = "/api/v3/search/comic?platform=1&q_type=&offset="
-        .. offset .. "&limit=" .. page_size .. "&q=" .. Text.urlEncode(keyword)
-    return self:_getJson(path, cb)
 end
 
 ---@param stable_id string
@@ -150,11 +135,6 @@ function Client:chaptersAsync(stable_id, groups, cb)
     local rows, gi = {}, 1
     local offset, limit = 0, 100
 
-    local function fail(err)
-        active = nil
-        if not cancelled then cb(nil, err) end
-    end
-
     local function step()
         if cancelled then return end
         local group = groups[gi]
@@ -168,7 +148,7 @@ function Client:chaptersAsync(stable_id, groups, cb)
         active = self:_getJson(path, function(wire, err)
             active = nil
             if cancelled then return end
-            if not wire then fail(err); return end
+            if not wire then cb(nil, err); return end
             local root = type(wire.results) == "table" and wire.results or {}
             local list = root.list or {}
             for _, row in ipairs(list) do
@@ -237,8 +217,7 @@ function Client:setCollectAsync(comic_id, collect, cb)
             timeout = 30,
         },
         function(raw, err)
-            local wire, decode_err = decodeWire(raw, err)
-            cb(wire, decode_err)
+            cb(decodeWire(raw, err))
         end
     )
 end
@@ -269,17 +248,12 @@ function Client:collectAllAsync(cb)
     local books = {}
     local offset, limit = 0, 50
 
-    local function fail(err)
-        active = nil
-        if not cancelled then cb(nil, err) end
-    end
-
     local function step()
         if cancelled then return end
         active = self:collectAsync(offset, limit, function(wire, err)
             active = nil
             if cancelled then return end
-            if not wire then fail(err); return end
+            if not wire then cb(nil, err); return end
             local root = type(wire.results) == "table" and wire.results or {}
             local list = root.list or {}
             for _, row in ipairs(list) do

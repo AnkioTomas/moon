@@ -39,6 +39,31 @@ local function extractPsvts(html)
     return html:match([["psvts"%s*:%s*"([^"]+)"]])
 end
 
+--- 读 reader 页抽取 psvts；缓存由调用方在未取消时写入。
+---@param bookId string
+---@param chapter_uid string
+---@param cb fun(psvts: string|nil, err: any)
+---@return { cancel: fun() }|nil
+local function readerPsvtsAsync(bookId, chapter_uid, cb)
+    local reader_url = Protocol.readerUrl(bookId, chapter_uid)
+    return Auth.webGetAsync(reader_url, {
+        accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        headers = { ["Referer"] = reader_url },
+        block_timeout = 60,
+    }, function(html, err)
+        if not html then
+            cb(nil, err or _("无法打开阅读页"))
+            return
+        end
+        local psvts = extractPsvts(html)
+        if not psvts or psvts == "" then
+            cb(nil, _("阅读页缺少 psvts"))
+            return
+        end
+        cb(psvts)
+    end)
+end
+
 --- 确保章节 psvts 已缓存（进度/时长上报依赖）。
 ---@param bookId string
 ---@param chapter_uid string|number
@@ -56,20 +81,10 @@ function Chapter.ensurePsvtsAsync(bookId, chapter_uid, cb)
         return nil
     end
     local cancelled = false
-    local reader_url = Protocol.readerUrl(bookId, chapter_uid)
-    local job = Auth.webGetAsync(reader_url, {
-        accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        headers = { ["Referer"] = reader_url },
-        block_timeout = 60,
-    }, function(html, err)
+    local job = readerPsvtsAsync(bookId, chapter_uid, function(psvts, err)
         if cancelled then return end
-        if not html then
-            cb(nil, err or _("无法打开阅读页"))
-            return
-        end
-        local psvts = extractPsvts(html)
-        if not psvts or psvts == "" then
-            cb(nil, _("阅读页缺少 psvts"))
+        if not psvts then
+            cb(nil, err)
             return
         end
         Context.rememberPsvts(bookId, chapter_uid, psvts)
@@ -94,7 +109,8 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
         return { cancel = function() end }
     end
     local cancelled = false
-    local active_job
+    local active_job, psvts
+    local reader_url = Protocol.readerUrl(bookId, uid)
     --- 中止取正文：置位取消标记并终止在途请求。
     local function cancel()
         cancelled = true
@@ -106,16 +122,12 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
         if not cancelled then cb(nil, err) end
     end
     --- 请求一个正文分片端点；空对象回包（"{}"）按失败处理，交由调用方换端点重试。
-    ---@param uid string 章节 uid
-    ---@param psvts string 阅读页里提取的签名参数
     ---@param endpoint string 正文接口路径
-    ---@param referer string Referer 头，需为对应阅读页 URL
-    ---@param style boolean|nil 是否请求带样式的正文
     ---@param done fun(raw: string|nil, err: any) 原始 JSON 串
-    local function requestShard(uid, psvts, endpoint, referer, style, done)
+    local function requestShard(endpoint, done)
         local params = Protocol.contentParams(bookId, uid, psvts, {
             sc = 1,
-            style = style == true,
+            style = false,
         })
         active_job = Auth.webPostAsync(
             "https://weread.qq.com" .. endpoint,
@@ -125,7 +137,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                 content_type = "application/json;charset=UTF-8",
                 headers = {
                     ["Origin"] = "https://weread.qq.com",
-                    ["Referer"] = referer,
+                    ["Referer"] = reader_url,
                 },
                 block_timeout = 90,
             },
@@ -141,35 +153,26 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
             end
         )
     end
-    local reader_url = Protocol.readerUrl(bookId, uid)
-    active_job = Auth.webGetAsync(reader_url, {
-        accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        headers = { ["Referer"] = reader_url },
-        block_timeout = 60,
-    }, function(html, err)
+    active_job = readerPsvtsAsync(bookId, uid, function(value, err)
         if cancelled then return end
-        if not html then
-            fail(err or _("无法打开阅读页"))
+        if not value then
+            fail(err)
             return
         end
-        local psvts = extractPsvts(html)
-        if type(psvts) ~= "string" or psvts == "" then
-            fail(_("阅读页缺少 psvts"))
-            return
-        end
+        psvts = value
         Context.rememberPsvts(bookId, uid, psvts)
-        requestShard(uid, psvts, "/web/book/chapter/e_0", reader_url, false, function(e0, e0err)
+        requestShard("/web/book/chapter/e_0", function(e0, e0err)
             if not e0 then
                 fail(e0err)
                 return
             end
             if e0:sub(1, 1) == "{" and e0:find('"bookId"', 1, true) then
-                requestShard(uid, psvts, "/web/book/chapter/t_0", reader_url, false, function(t0, t0err)
+                requestShard("/web/book/chapter/t_0", function(t0, t0err)
                     if not t0 then
                         fail(t0err)
                         return
                     end
-                    requestShard(uid, psvts, "/web/book/chapter/t_1", reader_url, false, function(t1)
+                    requestShard("/web/book/chapter/t_1", function(t1)
                         if cancelled then return end
                         local plain, decode_err = Protocol.decodeShards(t0, t1 or "")
                         if not plain then
@@ -182,12 +185,12 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                 end)
                 return
             end
-            requestShard(uid, psvts, "/web/book/chapter/e_1", reader_url, false, function(e1, e1err)
+            requestShard("/web/book/chapter/e_1", function(e1, e1err)
                 if not e1 then
                     fail(e1err)
                     return
                 end
-                requestShard(uid, psvts, "/web/book/chapter/e_3", reader_url, false, function(e3, e3err)
+                requestShard("/web/book/chapter/e_3", function(e3, e3err)
                     if not e3 then
                         fail(e3err)
                         return
@@ -215,18 +218,12 @@ end
 ---@param path string
 ---@return boolean rewritten
 local function rewriteCachedHtml(path)
-    if type(path) ~= "string" or path == "" then
-        return false
-    end
     local f = io.open(path, "rb")
     if not f then
         return false
     end
     local html = f:read("*a")
     f:close()
-    if type(html) ~= "string" or html == "" then
-        return false
-    end
     local cleaned = Annotations.cleanChapterHtml(html)
     if cleaned == html then
         return false

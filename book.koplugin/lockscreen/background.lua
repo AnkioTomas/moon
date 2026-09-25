@@ -53,10 +53,9 @@ function M.isValidImage(path)
 end
 
 --- 解析资源描述中的路径；path 可以是字符串或无参函数。
----@param asset table|nil
+---@param asset table
 ---@return string|nil
 function M.resolve(asset)
-    if type(asset) ~= "table" then return nil end
     if type(asset.path) == "function" then return asset.path() end
     return asset.path
 end
@@ -219,10 +218,10 @@ function M.hint(mode)
 end
 
 --- 判断每日资源是否已经拿到今天的有效图片。
----@param asset table|nil
+---@param asset table
 ---@return boolean
 function M.isFresh(asset)
-    if type(asset) ~= "table" or not asset.daily then return true end
+    if not asset.daily then return true end
     local cache = assetCache()
     local entry = cache[asset.id]
     return type(entry) == "table" and entry.day == M.dayKey()
@@ -230,9 +229,9 @@ function M.isFresh(asset)
 end
 
 --- 清除资源日期标记，让下一次准备重新尝试下载。
----@param asset table|nil
+---@param asset table
 function M.invalidate(asset)
-    if type(asset) ~= "table" or not asset.daily then return end
+    if not asset.daily then return end
     local cache = assetCache()
     if cache[asset.id] ~= nil then
         cache[asset.id] = nil
@@ -295,11 +294,11 @@ local function ensureDaily(asset, cb)
 end
 
 --- 准备任意资源；每日下载和本地资源共用同一入口。
----@param asset table|nil
+---@param asset table
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return table|nil
 function M.ensure(asset, cb)
-    if type(asset) ~= "table" or asset.id == "none" then
+    if asset.id == "none" then
         cb(nil)
         return nil
     end

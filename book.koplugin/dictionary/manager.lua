@@ -13,7 +13,6 @@ local Job = require("workers.job")
 local lfs = require("libs/libkoreader-lfs")
 
 local Manager = {
-    _job = nil,
     _downloading = false,
 }
 local BASE_URL = "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/dict"
@@ -208,16 +207,15 @@ end
 ---@param dest string
 ---@param on_progress fun(bytes: number)
 ---@param cb fun(ok: boolean, err: any)
----@return table
 local function downloadPart(url, dest, on_progress, cb)
     local temp = dest .. ".part"
     local file, open_err = io.open(temp, "wb")
     if not file then
         cb(false, open_err or "cannot open dictionary part")
-        return { cancel = function() end }
+        return
     end
     local received, write_err = 0, nil
-    return Request.stream({
+    Request.stream({
         url = url,
         method = "GET",
         timeout = 300,
@@ -265,12 +263,12 @@ local function downloadParts(item, dir, idx, completed, done, report)
     if not part then
         report("install", item.size, item.size, #item.parts, #item.parts)
         local target = installTarget(done.data_dir, item.id)
-        Manager._job = Job.run(function() assembleAndExtract(item, dir, target) end, {
+        Job.run(function() assembleAndExtract(item, dir, target) end, {
             name = "dictionary.install",
             kind = "heavy",
             timeout = 300,
             on_done = function()
-                Manager._downloading, Manager._job = false, nil
+                Manager._downloading = false
                 if lfs.attributes(target, "mode") ~= "directory" then
                     done.callback(false, "dictionary installation failed")
                     return
@@ -279,7 +277,7 @@ local function downloadParts(item, dir, idx, completed, done, report)
                 done.callback(true)
             end,
             on_failed = function(err)
-                Manager._downloading, Manager._job = false, nil
+                Manager._downloading = false
                 done.callback(false, err)
             end,
         })
@@ -291,7 +289,7 @@ local function downloadParts(item, dir, idx, completed, done, report)
         downloadParts(item, dir, idx + 1, completed, done, report)
         return
     end
-    Manager._job = downloadPart(
+    downloadPart(
         BASE_URL .. "/" .. part.file,
         dir .. "/" .. part.file,
         function(bytes)
@@ -300,7 +298,7 @@ local function downloadParts(item, dir, idx, completed, done, report)
         function(ok, err)
         if not ok or not partComplete(dir, part) then
             os.remove(dir .. "/" .. part.file)
-            Manager._downloading, Manager._job = false, nil
+            Manager._downloading = false
             done.callback(false, err or "part size mismatch")
             return
         end
@@ -343,20 +341,12 @@ function Manager.downloading()
     return Manager._downloading
 end
 
---- 取消进行中的下载或安装任务。
-function Manager.cancel()
-    if Manager._job then
-        if Manager._job.cancel then Manager._job:cancel() end
-    end
-    Manager._job, Manager._downloading = nil, false
-end
-
 --- 递归收集 `.ifo` 路径（StarDict 词典的标识文件）。跳过 `res`（词典自带资源目录，里面没有 .ifo）。
 --- 目录不可读时静默返回已收集的结果：用户可能手工放了权限不对的目录，不该让整个词典列表崩掉。
 ---@param path string
 ---@param out string[]|nil 累积结果
 ---@return string[]
-local function scanIfos(path, out)
+function Manager.installed(path, out)
     out = out or {}
     local ok, iter, dir_obj = pcall(lfs.dir, path)
     if not ok then return out end
@@ -364,18 +354,11 @@ local function scanIfos(path, out)
         if name ~= "." and name ~= ".." and name ~= "res" then
             local full = path .. "/" .. name
             local mode = lfs.attributes(full, "mode")
-            if mode == "directory" then scanIfos(full, out)
+            if mode == "directory" then Manager.installed(full, out)
             elseif mode == "file" and name:lower():match("%.ifo$") then out[#out + 1] = full end
         end
     end
     return out
-end
-
---- 扫描 data_dir 下全部 .ifo 路径。
----@param data_dir string
----@return string[]
-function Manager.installed(data_dir)
-    return scanIfos(data_dir)
 end
 
 --- 重建 KOReader 的模块级 .ifo 缓存。ReaderDictionary 没有公开刷新 API；
@@ -399,7 +382,7 @@ end
 ---@param ifo_path string
 function Manager.activate(dictionary, ifo_path)
     dictionary.dicts_disabled = dictionary.dicts_disabled or {}
-    for _, path in ipairs(scanIfos(dictionary.data_dir)) do dictionary.dicts_disabled[path] = true end
+    for _, path in ipairs(Manager.installed(dictionary.data_dir)) do dictionary.dicts_disabled[path] = true end
     dictionary.dicts_disabled[ifo_path] = nil
     if G_reader_settings then G_reader_settings:saveSetting("dicts_disabled", dictionary.dicts_disabled) end
     if dictionary.updateSdcvDictNamesOptions then dictionary:updateSdcvDictNamesOptions() end
@@ -410,7 +393,7 @@ end
 ---@param id string
 ---@return boolean, string|nil
 function Manager.remove(dictionary, id)
-    if not dictionary or type(dictionary.data_dir) ~= "string" or not safeId(id) then
+    if not safeId(id) then
         return false, "invalid dictionary"
     end
     local target = installTarget(dictionary.data_dir, id)

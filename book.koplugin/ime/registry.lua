@@ -104,57 +104,13 @@ function M.current()
     return M.get(Settings.get().ime_layout)
 end
 
----@param method table|string
----@return table
-function M.dictionary(method)
-    local id
-    if type(method) == "table" then
-        id = method.id
-    else
-        id = method
+-- M.isAvailable/fileExists/lookup/entries/builtAt/reset(method, ...)：method 为 profile 或 id，
+-- 转发到该方法的 table_dictionary 实例。
+for _, name in ipairs({ "isAvailable", "fileExists", "lookup", "entries", "builtAt", "reset" }) do
+    M[name] = function(method, ...)
+        local dictionary = require("ime." .. M.get(type(method) == "table" and method.id or method).id .. ".dictionary")
+        return dictionary[name](dictionary, ...)
     end
-    return require("ime." .. M.get(id).id .. ".dictionary")
-end
-
----@param method table|string
----@param name string
----@param ... any
-local function callDictionary(method, name, ...)
-    local profile
-    if type(method) == "table" then
-        profile = method
-    else
-        profile = M.get(method)
-    end
-    local dictionary = M.dictionary(profile)
-    if profile.id == "pinyin" then
-        return dictionary[name](...)
-    end
-    return dictionary[name](dictionary, ...)
-end
-
-function M.isAvailable(method)
-    return callDictionary(method, "isAvailable")
-end
-
-function M.fileExists(method)
-    return callDictionary(method, "fileExists")
-end
-
-function M.lookup(method, code)
-    return callDictionary(method, "lookup", code)
-end
-
-function M.entries(method)
-    return callDictionary(method, "entries")
-end
-
-function M.builtAt(method)
-    return callDictionary(method, "builtAt")
-end
-
-function M.reset(method)
-    return callDictionary(method, "reset")
 end
 
 return M

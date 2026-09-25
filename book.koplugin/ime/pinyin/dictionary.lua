@@ -15,16 +15,14 @@ schema（tools/build_pinyin_dict.py 生成）：
 `mode + code` 的等值读取。长码命中集合已足够小，才退回 `code GLOB 'nihao*'`
 或 `initials GLOB 'nhg*'`。输入码只允许小写 ASCII；单字母半截不查。
 
+连接、meta 与语句缓存复用 ime.table_dictionary，这里只覆写 lookup。
+
 @module koplugin.book.ime.pinyin.dictionary
 --]]
 
-local lfs = require("libs/libkoreader-lfs")
-local Paths = require("utils.paths")
-
-local M = {}
+local M = require("ime.table_dictionary"):new("pinyin", "2")
 
 local MAX_CANDI = 21 -- 候选栏约 3 页，多了也翻不到
-local SCHEMA_VERSION = "2"
 local QUICK_DIRECT_MAX = 6
 local QUICK_ABBREV_MAX = 5
 local SQL_QUICK = "SELECT words.word FROM quick JOIN words ON words.rowid = quick.word_id"
@@ -91,133 +89,6 @@ for _, s in ipairs(SYLLABLES) do
     for i = 1, #s do
         SYL_PREFIX[s:sub(1, i)] = true
     end
-end
-
-local _conn -- lua-ljsqlite3 连接
-local _meta -- meta 缓存
-local _statements -- 高频查询的预编译语句，跟连接同生命周期
-
---- 跑一条候选查询，最多取 MAX_CANDI 条；预编译语句按 name 缓存复用。
----@param conn table
----@param name string 语句缓存键
----@param sql string
----@param ... any 绑定参数（按序 bind1）
----@return string[]
-local function fetch(conn, name, sql, ...)
-    local stmt = _statements[name]
-    if not stmt then
-        stmt = conn:prepare(sql)
-        _statements[name] = stmt
-    end
-    stmt:clearbind():reset()
-    for i = 1, select("#", ...) do
-        stmt:bind1(i, select(i, ...))
-    end
-    local rows = {}
-    for row in stmt:rows() do
-        rows[#rows + 1] = row[1]
-        if #rows >= MAX_CANDI then break end
-    end
-    -- rows() 只有迭代到 SQLITE_DONE 才会自动 reset；LIMIT 恰好命中时循环
-    -- 会提前结束，下一次查询必须显式清理游标和绑定值。
-    stmt:clearbind():reset()
-    return rows
-end
-
--- 只缓存成功连接。手动落盘或替换词库后，下次检查必须能直接重试。
-local function ensureOpen()
-    if _conn then return _conn end
-    local path = Paths.pinyinDictPath()
-    local attr = lfs.attributes(path)
-    if not attr or attr.mode ~= "file" or (attr.size or 0) == 0 then
-        return nil
-    end
-    local ok, SQ3 = pcall(require, "lua-ljsqlite3/init")
-    if not ok or not SQ3 then
-        return nil
-    end
-    local ok2, c = pcall(SQ3.open, path, "ro")
-    if not ok2 or not c then
-        return nil
-    end
-    local schema_ok = pcall(function()
-        local stmt = c:prepare("SELECT v FROM meta WHERE k = 'schema_version'")
-        local row = stmt:step()
-        stmt:close()
-        assert(row and row[1] == SCHEMA_VERSION)
-    end)
-    if not schema_ok then
-        pcall(function()
-            c:close()
-        end)
-        return nil
-    end
-    _conn = c
-    _statements = {}
-    return _conn
-end
-
---- 词库是否可用（文件存在且可打开）。
-function M.isAvailable()
-    return ensureOpen() ~= nil
-end
-
---- 词库文件是否已落盘，供设置页区分未下载与不可用。
-function M.fileExists()
-    local attr = lfs.attributes(Paths.pinyinDictPath())
-    return attr ~= nil and attr.mode == "file" and (attr.size or 0) > 0
-end
-
---- 下载或更新落盘后调用，使旧连接失效。
-function M.reset()
-    if _conn then
-        pcall(function()
-            _conn:close()
-        end)
-    end
-    _conn = nil
-    _meta = nil
-    _statements = nil
-end
-
---- 读 meta 表里的一项。
---- 首次读取时缓存完整 meta 表；词库不可用或查询失败时返回 nil。
----@param k string 键名
----@return string|nil
-local function metaValue(k)
-    if _meta then
-        return _meta[k]
-    end
-    local conn = ensureOpen()
-    if not conn then
-        return nil
-    end
-    _meta = {}
-    local ok = pcall(function()
-        local stmt = conn:prepare("SELECT k, v FROM meta")
-        if not stmt then
-            return
-        end
-        for row in stmt:rows() do
-            _meta[row[1]] = row[2]
-        end
-        stmt:close()
-    end)
-    if not ok then
-        _meta = nil
-        return nil
-    end
-    return _meta[k]
-end
-
---- 词条总数，词库不可用时返回 nil。
-function M.entries()
-    return metaValue("entries")
-end
-
---- 词库构建版本（manifest.built_at），词库不可用时返回 nil。
-function M.builtAt()
-    return metaValue("built_at")
 end
 
 --- 连写码 → 空格分隔前缀（贪心最长匹配音节）。
@@ -292,12 +163,11 @@ end
 --- 高频短码走构建期排序结果；长码才走原始索引前缀查询。
 ---@param code string 连写拼音（纯小写）
 ---@return string[]
-function M.lookup(code)
+function M:lookup(code)
     if type(code) ~= "string" or not code:match("^[a-z]+$") then
         return {}
     end
-    local conn = ensureOpen()
-    if not conn then
+    if not self:open() then
         return {}
     end
     local kind = lookupKind(code)
@@ -308,28 +178,28 @@ function M.lookup(code)
     local out = {}
     local ok = pcall(function()
         if kind == "exact" then
-            out = fetch(conn, "exact", SQL_EXACT, code)
+            out = self:fetch("exact", SQL_EXACT, code)
             return
         end
 
         local quick_mode = kind == "direct" and "direct" or "abbrev"
         local quick_limit = kind == "direct" and QUICK_DIRECT_MAX or QUICK_ABBREV_MAX
         if #code <= quick_limit then
-            out = fetch(conn, "quick", SQL_QUICK, quick_mode, code)
+            out = self:fetch("quick", SQL_QUICK, quick_mode, code)
             if #out > 0 then
                 return
             end
         end
 
         if kind == "direct" then
-            out = fetch(conn, "direct", SQL_DIRECT, code .. "*")
+            out = self:fetch("direct", SQL_DIRECT, code .. "*")
         else
-            out = fetch(conn, "abbrev", SQL_ABBREV, abbrevCode(code) .. "*")
+            out = self:fetch("abbrev", SQL_ABBREV, abbrevCode(code) .. "*")
         end
     end)
     if not ok then
         -- 查询异常后语句可能停在 SQLITE_ROW；重置缓存语句，下一次输入仍可正常查词。
-        for _, stmt in pairs(_statements or {}) do
+        for _, stmt in pairs(self.statements or {}) do
             pcall(function()
                 stmt:clearbind():reset()
             end)

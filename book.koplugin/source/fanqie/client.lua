@@ -16,11 +16,6 @@ Client.__index = Client
 
 ---@class FanqieClient
 ---@field settings FanqieSettings
----@field clear_shelf_cache fun(self: FanqieClient)
----@field requestAsync fun(self: FanqieClient, opts: table, cb: function): CancelHandle|nil
----@field getJsonAsync fun(self: FanqieClient, url: string, opts: table|nil, cb: function): CancelHandle|nil
----@field postJsonAsync fun(self: FanqieClient, url: string, data: table, opts: table|nil, cb: function): CancelHandle|nil
----@field fetchShelfInfoAsync fun(self: FanqieClient, cb: function): CancelHandle|nil
 ---@field fetchReadProgressAsync fun(self: FanqieClient, cb: function): CancelHandle|nil
 ---@field updateReadProgressAsync fun(self: FanqieClient, book_id: string, item_id: string, index: number, progress: number, cb: function): CancelHandle|nil
 ---@field fetchChapterDirectoryAsync fun(self: FanqieClient, book_id: string, cb: function): CancelHandle|nil
@@ -113,7 +108,7 @@ local function isAuthError(code, body, res)
     local looks_json = content_type:lower():find("json", 1, true)
         or body:match("^%s*{") ~= nil
     if not looks_json or #body > 65536 then return false end
-    local data = select(1, decodeJson(body))
+    local data = decodeJson(body)
     if type(data) ~= "table" then return false end
     local err_code = data.errCode or data.errcode or data.code
     if AUTH_ERROR_CODES[tonumber(err_code)] then return true end
@@ -135,7 +130,7 @@ local function httpError(method, url, code, body, res)
     if isAuthError(code, body, res) then
         parts[#parts + 1] = "auth_expired=true"
     end
-    local data = select(1, decodeJson(body))
+    local data = decodeJson(body)
     if type(data) == "table" then
         local err_code = data.errCode or data.errcode or data.code
         local err_message = data.errMsg or data.errmsg or data.message or data.msg
@@ -170,109 +165,42 @@ local function sessionHeaders(self, extra)
     return headers
 end
 
---- 底层请求。allow_redirects 默认 false。
----@param opts { url: string, method?: string, body?: string, headers?: table, timeout?: number, allow_redirects?: boolean }
----@param cb fun(res: table|nil, err: string|nil)
+--- 带会话 Cookie 的 JSON 请求（跟随重定向）；回包 Set-Cookie 并入会话。
+--- 传输失败、非 2xx 与非 JSON 都归一成 cb(nil, err)。
+---@param self FanqieClient
+---@param method string
+---@param url string
+---@param extra_headers table|nil
+---@param body string|nil
+---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
-function Client:requestAsync(opts, cb)
+local function jsonAsync(self, method, url, extra_headers, body, cb)
     return Request.request({
-        url = opts.url,
-        method = opts.method or (opts.body and "POST" or "GET"),
-        body = opts.body,
-        headers = opts.headers,
-        timeout = opts.timeout or DEFAULT_TIMEOUT,
-        allow_redirects = opts.allow_redirects == true,
+        url = url,
+        method = method,
+        body = body,
+        headers = sessionHeaders(self, extra_headers),
+        timeout = DEFAULT_TIMEOUT,
+        allow_redirects = true,
     }, function(res, err)
-        if err then
-            cb(nil, tostring(err))
+        if err or not res then
+            cb(nil, err and tostring(err))
             return
         end
         absorbCookies(self, res)
-        cb(res)
-    end)
-end
-
----@param url string
----@param opts { referer?: string, headers?: table, timeout?: number }|nil
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }
-function Client:getJsonAsync(url, opts, cb)
-    opts = opts or {}
-    local headers = sessionHeaders(self, {
-        ["Accept"] = "application/json, text/plain, */*",
-        ["Referer"] = opts.referer or (FanQie.BASE_URL .. "/"),
-    })
-    for k, v in pairs(opts.headers or {}) do
-        headers[k] = v
-    end
-    return self:requestAsync({
-        url = url,
-        method = "GET",
-        headers = headers,
-        timeout = opts.timeout,
-        allow_redirects = true,
-    }, function(res, err)
-        if not res then cb(nil, err); return end
         local code = tonumber(res.code)
-        local body = res.body
         if not Request.ok(code) then
-            cb(nil, httpError("GET", url, code, body, res))
+            cb(nil, httpError(method, url, code, res.body, res))
             return
         end
-        local data, decode_err = decodeJson(body)
-        if not data then cb(nil, decode_err or "invalid json"); return end
-        cb(data)
+        cb(decodeJson(res.body))
     end)
-end
-
----@param url string
----@param data table
----@param opts { referer?: string, headers?: table, timeout?: number }|nil
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }
-function Client:postJsonAsync(url, data, opts, cb)
-    opts = opts or {}
-    local headers = sessionHeaders(self, {
-        ["Content-Type"] = "application/json;charset=UTF-8",
-        ["Origin"] = FanQie.BASE_URL,
-        ["Referer"] = opts.referer or (FanQie.BASE_URL .. "/"),
-    })
-    for k, v in pairs(opts.headers or {}) do
-        headers[k] = v
-    end
-    return self:requestAsync({
-        url = url,
-        method = "POST",
-        headers = headers,
-        body = JSON.encode(data),
-        timeout = opts.timeout,
-        allow_redirects = true,
-    }, function(res, err)
-        if not res then cb(nil, err); return end
-        local code = tonumber(res.code)
-        local body = res.body
-        if not Request.ok(code) then
-            cb(nil, httpError("POST", url, code, body, res))
-            return
-        end
-        local decoded, decode_err = decodeJson(body)
-        if not decoded then cb(nil, decode_err or "invalid json"); return end
-        cb(decoded)
-    end)
-end
-
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }
-function Client:fetchShelfInfoAsync(cb)
-    return self:getJsonAsync(
-        FanQie.shelf_url() .. "?" .. Text.formEncode(FanQie.make_shelf_params()),
-        nil, cb)
 end
 
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:fetchReadProgressAsync(cb)
-    return self:getJsonAsync(FanQie.progress_url(), nil, cb)
+    return jsonAsync(self, "GET", FanQie.BASE_URL .. "/api/reader/book/progress", nil, nil, cb)
 end
 
 ---@param book_id string
@@ -282,21 +210,25 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:updateReadProgressAsync(book_id, item_id, index, progress, cb)
-    return self:postJsonAsync(FanQie.update_progress_url(), {
+    return jsonAsync(self, "POST", FanQie.BASE_URL .. "/api/reader/book/update_progress", {
+        ["Content-Type"] = "application/json;charset=UTF-8",
+        ["Origin"] = FanQie.BASE_URL,
+    }, JSON.encode({
         book_id = book_id,
         item_id = item_id,
         read_progress = progress or 0,
         index = index,
         read_timestamp = tostring(math.floor(os.time())),
         genre_type = 0,
-    }, nil, cb)
+    }), cb)
 end
 
 ---@param book_id string
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:fetchChapterDirectoryAsync(book_id, cb)
-    return self:getJsonAsync(FanQie.directory_url(book_id), nil, function(data, err)
+    local url = FanQie.BASE_URL .. "/api/reader/directory/detail?bookId=" .. Text.urlEncode(book_id)
+    return jsonAsync(self, "GET", url, nil, nil, function(data, err)
         if not data then
             cb(nil, err or "官方 API 获取目录失败")
             return
@@ -336,7 +268,13 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
         end,
     }
 
-    shelf_job = self:fetchShelfInfoAsync(function(shelf_info, err)
+    local shelf_url = FanQie.BASE_URL .. "/reading/bookapi/bookshelf/info/v:version/?" .. Text.formEncode({
+        aid = 1967,
+        iid = 0,
+        version_code = 57700,
+        update_version_code = 57700,
+    })
+    shelf_job = jsonAsync(self, "GET", shelf_url, nil, nil, function(shelf_info, err)
         if cancelled then return end
         if type(shelf_info) ~= "table"
             or (shelf_info.code ~= nil and tonumber(shelf_info.code) ~= 0)
@@ -348,15 +286,8 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
         local book_shelf_info = shelf_info.data.book_shelf_info
             or shelf_info.data.bookShelfInfo
             or shelf_info.data
-        if type(book_shelf_info) ~= "table" or #book_shelf_info == 0 then
-            local empty = { code = 0, data = { detail_list = {} } }
-            SHELF_CACHE[cache_key] = { timestamp = os.time(), data = empty }
-            cb(empty)
-            return
-        end
-
         local shelf_book_ids = {}
-        for _, item in ipairs(book_shelf_info) do
+        for _, item in ipairs(type(book_shelf_info) == "table" and book_shelf_info or {}) do
             if item.book_id then
                 shelf_book_ids[#shelf_book_ids + 1] = tostring(item.book_id)
             end
@@ -390,7 +321,7 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
         end
 
         for _, book_id in ipairs(shelf_book_ids) do
-            detail_jobs[book_id] = self:getJsonAsync(FanQie.book_info_url(book_id), nil, function(info, info_err)
+            detail_jobs[book_id] = jsonAsync(self, "GET", FanQie.book_info_url(book_id), nil, nil, function(info, info_err)
                 if cancelled then return end
                 if type(info) == "table" and type(info.data) == "table"
                     and (info.code == nil or tonumber(info.code) == 0)

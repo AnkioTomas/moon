@@ -16,24 +16,6 @@ local Reflow = {}
 ---@type table<string, { text: string|nil, parsed: table }>
 local preview_cache = {}
 
----@param identity BookIdentity|nil
----@return boolean
-function Reflow.canReflow(identity)
-    if not identity or identity.source_id ~= "local" then
-        return false
-    end
-    local source = identity.source
-    if not source or type(source.replaceBook) ~= "function" then
-        return false
-    end
-    local path = identity.stable_id
-    if type(path) ~= "string" then
-        return false
-    end
-    local lower = path:lower()
-    return lower:match("%.txt$") ~= nil or lower:match("%.mobi$") ~= nil
-end
-
 ---@param path string
 ---@return "txt"|"mobi"|nil
 local function fileKind(path)
@@ -45,6 +27,31 @@ local function fileKind(path)
         return "mobi"
     end
     return nil
+end
+
+---@param identity BookIdentity|nil
+---@return boolean
+function Reflow.canReflow(identity)
+    if not identity or identity.source_id ~= "local" then
+        return false
+    end
+    local source = identity.source
+    if not source or type(source.replaceBook) ~= "function" then
+        return false
+    end
+    local path = identity.stable_id
+    return type(path) == "string" and fileKind(path) ~= nil
+end
+
+--- 下一 tick 回调失败；返回空取消句柄。
+---@param cb fun(value: nil, err: string)
+---@param err string
+---@return { cancel: fun() }
+local function failLater(cb, err)
+    require("ui/uimanager"):nextTick(function()
+        cb(nil, err)
+    end)
+    return { cancel = function() end }
 end
 
 ---@param parsed { chapters: { title: string, toc: boolean|nil }[] }
@@ -93,10 +100,7 @@ function Reflow.analyzeAsync(identity, cb)
     local path = identity.stable_id
     local kind = fileKind(path)
     if not kind then
-        require("ui/uimanager"):nextTick(function()
-            cb(nil, _("无效路径"))
-        end)
-        return { cancel = function() end }
+        return failLater(cb, _("无效路径"))
     end
 
     local parse_opts = buildOpts(path, identity)
@@ -145,18 +149,12 @@ function Reflow.applyAsync(identity, cb)
     local path = identity.stable_id
     local kind = fileKind(path)
     if not kind then
-        require("ui/uimanager"):nextTick(function()
-            cb(nil, _("无效路径"))
-        end)
-        return { cancel = function() end }
+        return failLater(cb, _("无效路径"))
     end
 
     local source = identity.source
     if not source or type(source.replaceBook) ~= "function" then
-        require("ui/uimanager"):nextTick(function()
-            cb(nil, _("当前书籍不支持排版"))
-        end)
-        return { cancel = function() end }
+        return failLater(cb, _("当前书籍不支持排版"))
     end
 
     local parse_opts = buildOpts(path, identity)
@@ -196,26 +194,11 @@ function Reflow.applyAsync(identity, cb)
         cb(replaced)
     end
 
-    if kind == "txt" then
-        local text = cached and cached.text
-        local build_opts = {
-            dest = dest,
-            source = path,
-            title = parse_opts.title,
-            author = parse_opts.author,
-            identifier = parse_opts.identifier,
-            reflow = true,
-        }
-        if text then
-            build_opts.text = text
-        end
-        return Text2Epub.build(build_opts, finishReplace)
-    end
-
-    if cached and cached.text then
+    -- txt 未预览时 text 为 nil，由 Text2Epub 自己读 source。
+    if kind == "txt" or (cached and cached.text) then
         return Text2Epub.build({
             dest = dest,
-            text = cached.text,
+            text = cached and cached.text,
             source = path,
             title = parse_opts.title,
             author = parse_opts.author,
@@ -345,9 +328,7 @@ function Reflow.startFromReader(ui, identity)
             text = _("转换后的 EPUB 会替换原书；只保留文字并重新识别章节，图片、脚注和原排版会丢失。继续？"),
             ok_text = _("继续"),
             ok_callback = runAnalyze,
-            cancel_callback = function()
-                cancelJobs()
-            end,
+            cancel_callback = cancelJobs,
         })
         return
     end
