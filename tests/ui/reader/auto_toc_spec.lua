@@ -58,19 +58,45 @@ local function mkDocument(lines)
     }
 end
 
+--- opts.headings：文档中的 h1–h6 标题，buildAlternativeToc 后 getToc 返回它们。
 local function mkSession(lines, opts)
     opts = opts or {}
     local settings = { moon_auto_toc = opts.scanned }
     local footer_updates = 0
+    local document = mkDocument(lines)
+    local alternative = opts.alternative == true
+    document.isTocAlternativeToc = function() return alternative end
+    document.buildAlternativeToc = function(self)
+        alternative = true
+        self.alt_builds = (self.alt_builds or 0) + 1
+    end
+    document.getToc = function()
+        if not alternative then return opts.toc or {} end
+        local out = {}
+        for i, title in ipairs(opts.headings or {}) do
+            out[i] = { title = title, page = i * 10 }
+        end
+        return out
+    end
     local ui = {
         rolling = not opts.paging and {} or nil,
-        document = mkDocument(lines),
+        document = document,
+        events = {},
+        handleEvent = function(self, ev) self.events[#self.events + 1] = ev.name end,
         doc_settings = {
             isTrue = function(_, key) return settings[key] == true end,
+            makeTrue = function(_, key) settings[key] = true end,
             saveSetting = function(_, key, value) settings[key] = value end,
         },
         view = { footer = { maybeUpdateFooter = function() footer_updates = footer_updates + 1 end } },
-        toc = { toc = opts.toc },
+    }
+    ui.toc = {
+        toc = opts.toc,
+        resetToc = function(self) self.toc = nil end,
+        fillToc = function(self)
+            if self.toc then return end
+            self.toc = ui.document:getToc()
+        end,
     }
     ui.handmade = {
         toc = {},
@@ -115,6 +141,39 @@ do
     Assert.is_true(settings.moon_auto_toc)
     Assert.is_nil(session.auto_toc_job)
     Assert.len(shown, 1)
+end
+
+-- h 标签足够：用备用目录，不扫描、不碰自定义目录
+do
+    jobs = {}
+    local session, settings, footer = mkSession(BOOK, { headings = { "雨夜", "归途", "尾声" } })
+    AutoToc.start(session)
+    Assert.len(jobs, 0)
+    Assert.eq(session.ui.document.alt_builds, 1)
+    Assert.is_true(settings.alternative_toc)
+    Assert.is_true(settings.moon_auto_toc)
+    Assert.contains(session.ui.events, "UpdateToc")
+    Assert.eq(footer(), 1)
+    Assert.is_false(session.ui.handmade.toc_enabled)
+end
+
+-- h 标签不足两项：退回文字扫描，不开备用目录
+do
+    jobs = {}
+    local session, settings = mkSession(BOOK, { headings = { "封面" } })
+    AutoToc.start(session)
+    Assert.eq(session.ui.document.alt_builds, 1)
+    Assert.is_nil(settings.alternative_toc)
+    Assert.len(jobs, 1)
+end
+
+-- 已是备用目录（用户手动开过）：不重建，直接扫描
+do
+    jobs = {}
+    local session = mkSession(BOOK, { alternative = true })
+    AutoToc.start(session)
+    Assert.is_nil(session.ui.document.alt_builds)
+    Assert.len(jobs, 1)
 end
 
 -- 已扫描过 / 已有自定义目录 / 文档自带目录 ≥2 / 分页文档：都不扫描
