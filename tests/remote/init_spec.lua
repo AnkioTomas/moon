@@ -64,7 +64,7 @@ package.preload["libs/libkoreader-lfs"] = function()
 end
 package.preload["utils.settings"] = function()
     return {
-        get = function() return { remote_port = 9528 } end,
+        get = function() return { remote_port = 9528, remote_idle_stop = true } end,
         getSource = function() return { path = book } end,
     }
 end
@@ -108,6 +108,11 @@ package.loaded["remote.init"] = nil
 package.loaded["utils.paths"] = nil
 local Remote = require("remote.init")
 Assert.is_true(Remote.start())
+
+-- 空闲自动关闭开启时，把超时与停服回调交给 server。
+Assert.is_true(Remote.idleStopOn())
+Assert.eq(server_opts.idle_timeout, Remote.IDLE_STOP)
+Assert.eq(server_opts.on_idle, Remote.stop)
 
 local wallpapers = data .. "/.moon/screensaver"
 Assert.is_true(dirs[wallpapers], "启动远程管理时应创建锁屏壁纸目录")
