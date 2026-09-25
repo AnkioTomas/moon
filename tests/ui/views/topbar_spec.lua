@@ -59,6 +59,7 @@ package.preload["device"] = function()
             getWidth = function() return 800 end,
         },
         powerd = powerd,
+        getPowerDevice = function() return powerd end,
         hasBattery = function() return true end,
         hasFrontlight = function() return true end,
     }
@@ -424,6 +425,12 @@ Assert.eq(bar.battery.metric_widget.label.text, "20%")
 powerd.light = 12
 bar:onEvent("FrontlightStateChanged")
 Assert.eq(bar.brightness.metric_widget.label.text, "12%")
+
+-- Kindle 前光是 0..24 级：12 级是 50%，与快捷面板滑杆一致。
+powerd.fl_min, powerd.fl_max = 0, 24
+bar:onEvent("FrontlightStateChanged")
+Assert.eq(bar.brightness.metric_widget.label.text, "50%")
+powerd.fl_min, powerd.fl_max = nil, nil
 
 bar:onPause()
 Assert.eq(cache_watch_cancel, 2, "Pause 取消一次，Resume 重订后 Pause 再取消")

@@ -27,14 +27,11 @@ function Brightness:read()
     if not Base.visible("brightness") then
         return nil
     end
-    if not (Device:hasFrontlight() and Device.powerd and Device.powerd.frontlightIntensity) then
+    if not Device:hasFrontlight() then
         return nil
     end
-    local lvl = Device.powerd:frontlightIntensity()
-    if type(lvl) ~= "number" then
-        return nil
-    end
-    return string.format("%d%%", lvl)
+    -- frontlightIntensity 是设备原生级数（Kindle 0..24），百分比与快捷面板同一换算。
+    return string.format("%d%%", require("ui.panel.desktop").lightPercent("brightness"))
 end
 
 --- 构建前光亮度百分比对应的指标控件；隐藏时返回零尺寸占位 Widget。

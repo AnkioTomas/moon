@@ -17,6 +17,9 @@ package.preload["db.note"] = function()
                     payload = '[{"drawer":"lighten","text":"划线句子","chapter":"序章","pageno":3}]',
                 }
             end
+            if stable_id == "book-3" then
+                return { payload = '{"authoritative":true,"items":[权威快照]}' }
+            end
             return nil
         end,
         all = function()
@@ -51,6 +54,9 @@ package.preload["json"] = function()
             if s:find("划线") then
                 return { { drawer = "lighten", text = "划线句子", chapter = "序章", pageno = 3 } }
             end
+            if s:find("权威快照") then
+                return { authoritative = true, items = { { drawer = "lighten", text = "权威句子" } } }
+            end
             if s:find("另一句") then
                 return { { drawer = "lighten", text = "另一句", chapter = "尾声" } }
             end
@@ -72,6 +78,11 @@ Assert.eq(items[1].text, "划线句子")
 local text, source = Highlights.pick("moon", "book-1", 0, 1)
 Assert.eq(text, "划线句子")
 Assert.is_true(source and source:find("序章"))
+
+-- 权威快照 { items, authoritative } 与裸数组同样能取出条目。
+local authoritative = Highlights.collect("moon", "book-3", 0)
+Assert.len(authoritative, 1)
+Assert.eq(authoritative[1].text, "权威句子")
 
 local all = Highlights.collectAll()
 Assert.len(all, 2)

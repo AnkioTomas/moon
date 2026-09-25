@@ -169,15 +169,15 @@ function Reflow.applyAsync(identity, cb)
     local function finishReplace(ok, err)
         preview_cache[path] = nil
         if not ok then
-            pcall(os.remove, dest)
-            pcall(os.remove, dest .. ".part")
+            os.remove(dest)
+            os.remove(dest .. ".part")
             cb(nil, err or _("排版失败"))
             return
         end
         local replaced, replace_err = source:replaceBook(dest, path)
         if not replaced then
-            pcall(os.remove, dest)
-            pcall(os.remove, dest .. ".part")
+            os.remove(dest)
+            os.remove(dest .. ".part")
             cb(nil, replace_err or _("替换原书失败"))
             return
         end
@@ -190,6 +190,8 @@ function Reflow.applyAsync(identity, cb)
         local touched, touch_err = require("book.store").touch(replaced, touch_identity)
         if not touched then
             require("utils.log").warn("book reflow path registration failed", replaced, touch_err)
+            cb(nil, touch_err)
+            return
         end
         cb(replaced)
     end

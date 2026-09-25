@@ -180,21 +180,26 @@ function Source:syncBooksAsync(opts, cb)
             if delete_job and delete_job.cancel then delete_job:cancel() end
         end }
     end
-    job = self._client:collectAllAsync(function(wire, err)
+    delete_job = pushDeletedCollects(self, function(pushed)
         if cancelled then return end
-        if not wire then
-            cb(nil, err)
-            return
-        end
-        local list = Mapper.collect(wire)
-        for _, book in ipairs(list.data or {}) do
-            rememberCover(self, book)
-        end
-        local result, rerr = require("book.store").reconcile(self.id, list.data or {})
-        cb(result, rerr)
+        job = self._client:collectAllAsync(function(wire, err)
+            if cancelled then return end
+            if not wire then
+                cb(nil, err)
+                return
+            end
+            local list = Mapper.collect(wire)
+            for _, book in ipairs(list.data or {}) do
+                rememberCover(self, book)
+            end
+            local result, rerr = require("book.store").reconcile(self.id, list.data or {})
+            if result then result.pushed = (result.pushed or 0) + (pushed or 0) end
+            cb(result, rerr)
+        end)
     end)
     return { cancel = function()
             cancelled = true
+            if delete_job and delete_job.cancel then delete_job:cancel() end
             if job and job.cancel then job.cancel() end
         end }
 end

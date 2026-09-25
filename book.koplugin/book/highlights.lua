@@ -15,17 +15,18 @@
 
 local Highlights = {}
 local JSON = require("json")
+local Normalize = require("book.note.normalize")
 local NoteDB = require("db.note")
 local BookDB = require("db.book")
 
---- 注解快照是 JSON 数组；坏数据当空，不把解码失败吞成业务空以外的东西。
+--- 注解快照：裸数组或权威快照 `{ items, authoritative }`，统一经 Normalize 解包；坏数据当空。
 ---@param payload string|nil
 ---@return table[]
 local function decodePayload(payload)
     if type(payload) ~= "string" or payload == "" then return {} end
     local dok, data = pcall(JSON.decode, payload)
     if not dok or type(data) ~= "table" then return {} end
-    return data
+    return (Normalize.unpack(data))
 end
 
 --- 算高亮条目的去重键：有 id 就用 id，否则用文本+章节+页码+起止位置拼串。

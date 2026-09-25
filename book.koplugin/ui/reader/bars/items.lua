@@ -121,11 +121,7 @@ local function liveBrightness()
     if not Device:hasFrontlight() then
         return ""
     end
-    local lvl = Device.powerd:frontlightIntensity()
-    if type(lvl) ~= "number" then
-        return ""
-    end
-    return string.format("%d%%", math.floor(clampPercent(lvl) + 0.5))
+    return string.format("%d%%", require("ui.panel.desktop").lightPercent("brightness"))
 end
 
 --- 组件文案；进度条返回空串。

@@ -71,6 +71,9 @@ package.preload["utils.font"] = function()
             resolved_font_ids[#resolved_font_ids + 1] = id
             if id == "demo.ttf" then return "Demo Face" end
         end,
+        faceNameForId = function(id)
+            if id == "demo.ttf" then return "Demo Face" end
+        end,
         applyFaceToReader = function() return true end,
     }
 end

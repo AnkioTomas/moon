@@ -160,11 +160,18 @@ local function existingPath(path)
     logger.warn("book remote reject:", path, "→", real)
 end
 
---- 目标尚不存在时，以真实父目录校验范围。
+--- 以真实父目录校验范围、基名原样保留：新建目标与删除/改名的源都用它，
+--- 软链接本身才是被操作对象，不能解析成它指向的文件。
 ---@param path string
 ---@return string|nil 真实父目录 + 原基名
 local function newPath(path)
     local ffiUtil = require("ffi/util")
+    path = path:gsub("/+$", "")
+    local name = ffiUtil.basename(path)
+    if name == "" or name == "." or name == ".." then
+        logger.warn("book remote reject name:", path)
+        return nil
+    end
     local parent = ffiUtil.realpath(ffiUtil.dirname(path))
     if not parent or not allowed(parent) then
         logger.warn("book remote reject new:", path, "→", parent)
@@ -448,7 +455,7 @@ local function saveUpload(temp, dir, name, cb, conflict)
         conflict = "rename"
     end
     if conflict == "skip" and existing then
-        pcall(os.remove, temp)
+        os.remove(temp)
         cb(true)
         return
     end
@@ -458,13 +465,13 @@ local function saveUpload(temp, dir, name, cb, conflict)
             n = n + 1
         end
     elseif existing and existing.mode ~= "file" then
-        pcall(os.remove, temp)
+        os.remove(temp)
         cb(nil, "target is not a file")
         return
     end
     -- 覆盖写与删除、改名同样会毁掉配置/凭证，必须和它们一起挡住。
     if isProtected(target) or isSecret(target) then
-        pcall(os.remove, temp)
+        os.remove(temp)
         cb(nil, "protected path")
         return
     end
@@ -481,16 +488,16 @@ local function saveUpload(temp, dir, name, cb, conflict)
         if copy_ok then
             copy_ok, copy_err = os.rename(staging, target)
         end
-        pcall(os.remove, staging)
-        pcall(os.remove, temp)
+        os.remove(staging)
+        os.remove(temp)
         if copy_ok then
             cb(true)
         else
             cb(nil, copy_err or err)
         end
     end, function()
-        pcall(os.remove, temp)
-        pcall(os.remove, staging)
+        os.remove(temp)
+        os.remove(staging)
     end)
 end
 
@@ -524,42 +531,47 @@ local function mkdirOne(path)
     return lfs.mkdir(path)
 end
 
---- 递归删除（文件直接删；目录先清内容）。
----@param path string
+--- 递归删除，不跟随软链接：链接只删链接本身。
+---@param path string 已校验范围的条目路径
 ---@return boolean|nil, any
-local function deleteRecursive(path)
+local function purge(path)
     local lfs = require("libs/libkoreader-lfs")
-    if isProtected(path) then
-        return nil, "protected path"
-    end
-    local resolved = existingPath(path)
-    if not resolved then
-        return nil, "path outside managed roots"
-    end
-    if isSecret(resolved) then
-        return nil, "protected path"
-    end
-    path = resolved
-    local attr = lfs.attributes(path)
+    local attr = lfs.symlinkattributes(path)
     if not attr then
         return nil, "not found"
     end
-    if attr.mode == "directory" then
-        local ok, iter, state = pcall(lfs.dir, path)
-        if not ok or not iter then
-            return nil, "cannot open"
-        end
-        for name in iter, state do
-            if name ~= "." and name ~= ".." then
-                local d_ok, d_err = deleteRecursive(path .. "/" .. name)
-                if not d_ok then
-                    return nil, d_err
-                end
+    if attr.mode ~= "directory" then
+        return os.remove(path)
+    end
+    local ok, iter, state = pcall(lfs.dir, path)
+    if not ok or not iter then
+        return nil, "cannot open"
+    end
+    for name in iter, state do
+        if name ~= "." and name ~= ".." then
+            local d_ok, d_err = purge(path .. "/" .. name)
+            if not d_ok then
+                return nil, d_err
             end
         end
-        return lfs.rmdir(path)
     end
-    return os.remove(path)
+    return lfs.rmdir(path)
+end
+
+---@param path string
+---@return boolean|nil, any
+local function deleteRecursive(path)
+    if isProtected(path) then
+        return nil, "protected path"
+    end
+    local entry = newPath(path)
+    if not entry then
+        return nil, "path outside managed roots"
+    end
+    if isSecret(entry) then
+        return nil, "protected path"
+    end
+    return purge(entry)
 end
 
 ---@param path string
@@ -671,7 +683,7 @@ local function renameTo(path, to)
     if isProtected(path) or isProtected(to) then
         return nil, "protected path"
     end
-    local src, dst = existingPath(path), newPath(to)
+    local src, dst = newPath(path), newPath(to)
     if not src or not dst then
         return nil, "path outside managed roots"
     end
@@ -682,10 +694,10 @@ local function renameTo(path, to)
         logger.warn("book remote reject rename of config file:", path, "→", to)
         return nil, "protected path"
     end
-    if not lfs.attributes(path) then
+    if not lfs.symlinkattributes(path) then
         return nil, "not found"
     end
-    if lfs.attributes(to) then
+    if lfs.symlinkattributes(to) then
         return nil, "target exists"
     end
     return os.rename(path, to)
