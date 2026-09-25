@@ -316,10 +316,7 @@ function Client:_jsonAsync(method, path, opts, cb)
                     return failover(T(_("HTTP %1"), code), "invalid_redirect", code)
                 end
                 if seen[target] or hops + 1 > MAX_REDIRECT_HOPS then
-                    logger.dbg("book.zlib request stopped", method, path,
-                        current_base, "redirect_loop", target, "hops", hops + 1)
-                    cb(nil, _("重定向过多"))
-                    return
+                    return failover(_("重定向过多"), "redirect_loop", target)
                 end
                 seen[target] = true
                 -- 跨主机 = 镜像迁移；成功后按实际请求 URL 钉住新 origin。

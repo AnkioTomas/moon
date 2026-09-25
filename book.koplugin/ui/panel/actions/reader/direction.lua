@@ -2,7 +2,6 @@
 @module koplugin.book.ui.panel.actions.reader.direction
 --]]
 
-local ButtonDialog = require("ui/widget/buttondialog")
 local Event = require("ui/event")
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
@@ -42,7 +41,7 @@ local function showMenu(ui)
         text = _("取消"),
         callback = function() UIManager:close(dialog) end,
     }
-    dialog = ButtonDialog:new{
+    dialog = require("ui/widget/buttondialog"):new{
         title = _("阅读方向"),
         title_align = "center",
         buttons = buttons,

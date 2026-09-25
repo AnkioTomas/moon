@@ -112,7 +112,7 @@ function Display:rows(ctx)
                 status = font_name, status_on = true,
                 callback = function()
                     FontPicker.open{ title = _("界面字体"), on_done = function()
-                        pcall(function() require("utils.font").applyCurrent() end)
+                        require("utils.font").applyCurrent()
                         desktop:updateView()
                     end }
                 end,
@@ -131,7 +131,7 @@ function Display:rows(ctx)
                         callback = function(spin)
                             local n = UI.setScale(spin.value)
                             UIManager:show(InfoMessage:new{ text = string.format("%d%%", n), timeout = 1.5 })
-                            pcall(function() require("utils.font").applyCurrent() end)
+                            require("utils.font").applyCurrent()
                             desktop:updateView()
                         end,
                     }

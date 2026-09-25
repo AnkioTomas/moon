@@ -61,7 +61,7 @@ package.preload["ui.reader.session"] = function()
         chapterTitle = function() return "" end,
         gotoChapter = function(idx, opts)
             goto_calls[#goto_calls + 1] = { idx = idx, opts = opts }
-            return true
+            return not goto_calls.fail
         end,
     }
 end
@@ -254,6 +254,19 @@ Stubs.flush()
 Assert.len(goto_calls, 1, "缺失 chapter_idx 时仍应按全书比例切章")
 Assert.eq(goto_calls[1].idx, 4)
 Assert.eq(goto_calls[1].opts.within, 0.25)
+
+-- 选云端但切章失败：库已采纳云端，必须告诉用户没跳过去，不能静默停在原处。
+Progress.clearConflicts()
+shown = {}
+goto_calls = { fail = true }
+Progress.pull(snapshot())
+Stubs.flush()
+Assert.len(shown, 1)
+shown[1].ok_callback()
+Stubs.flush()
+Assert.len(goto_calls, 1)
+Assert.len(shown, 2, "切章失败应弹提示")
+Assert.matches(shown[2].text, "失败")
 
 -- 拉失败只记日志，不弹窗：离线开缓存书必须能继续读
 Progress.clearConflicts()

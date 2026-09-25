@@ -273,6 +273,7 @@ return {
     ["已读 %1%"] = "Read %1%",
     ["已读页数"] = "Pages read",
     ["已跳转到 %1"] = "Jumped to %1",
+    ["跳转到 %1 失败"] = "Failed to jump to %1",
     ["已达下载限额或返回了网页"] = "Download limit reached or the server returned a web page",
     ["已达下载限额，请稍后再试"] = "Download limit reached; try again later",
     ["已退出"] = "Signed out",

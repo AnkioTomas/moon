@@ -3,6 +3,7 @@
 local Assert = require("support.assert")
 
 package.preload["gettext"] = function() return function(text) return text end end
+package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["ffi/util"] = function()
     return {
         template = function(text, value)
@@ -73,5 +74,15 @@ local popup_rows = Settings:popupRows(desktop)
 Assert.len(popup_rows, 11)
 Assert.eq(popup_rows[1](600).title, "选择")
 Assert.eq(popup_rows[11](600).title, "搜索")
+
+-- 旧配置缺键：设置页显示的位次必须和实际弹窗顺序（HighlightMenu.order）一致。
+reader_section = { reader_popup_button_order = { "copy" } }
+local order = require("ui.reader.highlight_menu").order()
+local dictionary_pos
+for i, key in ipairs(order) do
+    if key == "dictionary" then dictionary_pos = i end
+end
+Assert.eq(popup_rows[6](600).title, "词典")
+Assert.eq(popup_rows[6](600).status, "第 " .. dictionary_pos .. " 位")
 
 return true
