@@ -12,6 +12,7 @@ end
 package.preload["ui/widget/buttondialog"] = function()
     return { new = function(_, o) return o end }
 end
+package.preload["ui.views.popup"] = function() return {} end
 package.preload["ui/uimanager"] = function()
     return { show = function() end, close = function() end, setDirty = function() end }
 end
