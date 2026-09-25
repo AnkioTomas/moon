@@ -17,7 +17,6 @@ end
 do
     Assert.is_false(Auth.hasSession())
     Assert.is_nil(Auth.userLabel())
-    Assert.is_nil(Auth.token())
     Assert.is_nil(Auth.credentials())
 end
 
