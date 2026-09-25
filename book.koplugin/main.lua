@@ -55,7 +55,6 @@ function BookPlugin:init()
     if not require("ko_version").check() then
         return
     end
-    logger.start()
     logger.info("book plugin init", self.ui and self.ui.document and "reader" or "filemanager")
     Host.onCreate(self)
     require("translate.init").onCreate()

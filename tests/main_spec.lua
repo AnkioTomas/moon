@@ -36,7 +36,6 @@ stub("version", {
     getShortVersion = function() return version_current >= 202607000000 and "2026.07" or "2026.06" end,
 })
 stub("utils.log", {
-    start = function() end,
     info = function() end,
     dbg = function() end,
     error = function() end,
