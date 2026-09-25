@@ -75,6 +75,12 @@ function M.refresh(cb, force, reason)
     job, job_revision = build, generation
 end
 
+--- 是否有生成任务在飞；设置页预览据此区分「生成中」和「未生成」。
+---@return boolean
+function M.running()
+    return job ~= nil
+end
+
 --- 唤醒后补一次刷新（跨天或书籍变化时换图）。
 function M.onResume()
     Job.run(function() M.refresh(nil, false, "resume") end, {

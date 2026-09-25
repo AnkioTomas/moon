@@ -22,21 +22,32 @@ local T = require("ffi/util").template
 ---@class BookSettingsLockscreen
 local Lockscreen = {}
 
+--- 只重建锁屏设置叠层（含预览）；叠层已关则无事可做。
+---@param desktop table 桌面实例
+local function updateOverlay(desktop)
+    if desktop.settings_overlay then desktop.settings_overlay:updateView() end
+end
+
 --- 设置项变更后重建设置页，并重新合成锁屏图。
 --- 只有当前配置能离线出图时才直接生成，否则等联网——不然壁纸源拉不到会白跑一次。
 ---@param desktop table 桌面实例
 local function refreshAfterChange(desktop)
     desktop:updateView()
-    --- 合成一次锁屏图并提示结果。
+    --- 合成一次锁屏图并提示结果，完成后刷新预览。
     local function refresh()
         UIManager:show(InfoMessage:new{ text = _("正在生成锁屏图…"), timeout = 2 })
-        LockScreen.refresh(function(ok, err)
-            UIManager:show(InfoMessage:new{
-                text = ok and _("锁屏图已更新")
-                    or T(_("生成失败: %1"), tostring(err or "")),
-                timeout = 2,
-            })
-        end, nil, "settings")
+        -- 合成在主线程同步绘制；nextTick 仍排在重绘之前，必须隔一帧才能先把选中态和提示画出来。
+        UIManager:tickAfterNext(function()
+            LockScreen.refresh(function(ok, err)
+                updateOverlay(desktop)
+                UIManager:show(InfoMessage:new{
+                    text = ok and _("锁屏图已更新")
+                        or T(_("生成失败: %1"), tostring(err or "")),
+                    timeout = 2,
+                })
+            end, nil, "settings")
+            if LockScreen.running() then updateOverlay(desktop) end
+        end)
     end
     if Compose.plan().offline then
         refresh()
@@ -229,7 +240,8 @@ function Lockscreen:rows(desktop)
     return rows
 end
 
---- 已合成图缩略居中；关 / 未生成走同一高度空框。
+--- 已合成图缩略居中；关 / 生成中 / 未生成走同一高度空框。
+--- 改配置会清空 lock_screen_day，成功生成才写回；为空时盘上的图属于旧配置，不能当预览。
 ---@param width number
 ---@return table
 function Lockscreen.preview(width)
@@ -239,10 +251,14 @@ function Lockscreen.preview(width)
     if not Settings.isCompose() then
         return Overlay.previewPlaceholder(width, preview_h, _("关"))
     end
+    if LockScreen.running() then
+        return Overlay.previewPlaceholder(width, preview_h, _("生成中…"))
+    end
     local lfs = require("libs/libkoreader-lfs")
     local path = Compose.plan().output_path
     local attr = type(path) == "string" and path ~= "" and lfs.attributes(path)
-    if not attr or attr.mode ~= "file" or (attr.size or 0) < 8 then
+    if not require("utils.settings").get().lock_screen_day
+        or not attr or attr.mode ~= "file" or (attr.size or 0) < 8 then
         return Overlay.previewPlaceholder(width, preview_h, _("未生成"))
     end
     local Geom = require("ui/geometry")
@@ -257,6 +273,8 @@ function Lockscreen.preview(width)
             width = inner_w,
             height = inner_h,
             scale_factor = 0,
+            -- compose.png 原地覆写，ImageCache 按路径命中会一直显示旧图。
+            file_do_cache = false,
         },
     }, preview_h)
 end
