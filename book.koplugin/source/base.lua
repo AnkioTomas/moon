@@ -45,7 +45,7 @@
 ---@field conflicts integer
 ---@field skipped boolean
 ---@field reason string|nil
----@field push_error any|nil 拉取成功但本地统计上报失败时保留错误
+---@field push_error any|nil 本域整体未失败但有本地脏数据上报失败（脏标记保留待重试）
 
 --- 单条阅读会话统计（落盘 reading_stats 后上报）。
 ---@class BookStatsRow

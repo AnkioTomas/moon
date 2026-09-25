@@ -119,7 +119,8 @@ local ui = {
 local plugin = { ui = ui }
 
 local Reader = require("ui.reader")
-local actions = Reader.actions(ui)
+local PanelReader = require("ui.panel.reader")
+local actions = PanelReader.actions(ui)
 Assert.len(actions, 4)
 Assert.eq(actions[1].id, "toc")
 Assert.eq(actions[1].icon, "menu_book")
@@ -127,7 +128,7 @@ Assert.eq(actions[2].id, "highlights")
 Assert.eq(actions[3].id, "xray")
 Assert.eq(actions[4].id, "xray_refresh")
 
-Assert.is_false(Reader.executeAction("missing", ui))
+Assert.is_false(PanelReader.executeAction("missing", ui))
 
 Reader.onCreate(plugin)
 Assert.eq(native_ui, ui)

@@ -25,37 +25,44 @@ local ScrapeUI = {}
 --- 原样复制文件（先写 .part 再改名，避免半截封面被读到）。
 ---@param from string
 ---@param to string
----@return boolean
+---@return boolean|nil ok
+---@return string|nil err
 local function copyFile(from, to)
-    local src = io.open(from, "rb")
+    local src, oerr = io.open(from, "rb")
     if not src then
-        return false
+        return nil, oerr
     end
     local tmp = to .. ".part"
     pcall(os.remove, tmp)
-    local dst = io.open(tmp, "wb")
+    local dst, derr = io.open(tmp, "wb")
     if not dst then
         src:close()
-        return false
+        return nil, derr
     end
 
-    local ok = true
+    local err
     while true do
-        local chunk, err = src:read(64 * 1024)
+        local chunk, rerr = src:read(64 * 1024)
         if not chunk then
-            ok = err == nil
+            err = rerr
             break
         end
-        if not dst:write(chunk) then
-            ok = false
+        local wok, werr = dst:write(chunk)
+        if not wok then
+            err = werr or "write failed"
             break
         end
     end
     src:close()
-    if not dst:close() then ok = false end
-    if ok and os.rename(tmp, to) then return true end
+    local cok, cerr = dst:close()
+    if not cok and not err then err = cerr or "close failed" end
+    if not err then
+        local rok, mverr = os.rename(tmp, to)
+        if rok then return true end
+        err = mverr or "rename failed"
+    end
     os.remove(tmp)
-    return false
+    return nil, err
 end
 
 --- 下载封面并落进本源封面缓存；books 表不存链接，UI 只认本地文件。
@@ -70,8 +77,9 @@ local function saveCover(identity, url, headers, done)
     end
     Image.fetchAsync(url, headers, function(path, err)
         if path then
-            if not copyFile(path, Paths.coverPath(identity.stable_id, identity.source_id)) then
-                logger.warn("scrape cover save failed:", path)
+            local ok, cerr = copyFile(path, Paths.coverPath(identity.stable_id, identity.source_id))
+            if not ok then
+                logger.warn("scrape cover save failed:", path, cerr)
             end
         else
             logger.warn("scrape cover download failed:", url, err)

@@ -458,6 +458,12 @@ local function saveUpload(temp, dir, name, cb, conflict)
         cb(nil, "target is not a file")
         return
     end
+    -- 覆盖写与删除、改名同样会毁掉配置/凭证，必须和它们一起挡住。
+    if isProtected(target) or isSecret(target) then
+        pcall(os.remove, temp)
+        cb(nil, "protected path")
+        return
+    end
     local ok, err = os.rename(temp, target)
     if ok then
         cb(true)
@@ -525,6 +531,9 @@ local function deleteRecursive(path)
     local resolved = existingPath(path)
     if not resolved then
         return nil, "path outside managed roots"
+    end
+    if isSecret(resolved) then
+        return nil, "protected path"
     end
     path = resolved
     local attr = lfs.attributes(path)

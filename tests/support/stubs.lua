@@ -479,6 +479,7 @@ function Stubs.install()
     installIfMissing("ui/network/manager", function()
         return {
             isOnline = function() return true end,
+            isConnected = function() return true end,
             runWhenOnline = function(_, fn)
                 if fn then fn() end
             end,

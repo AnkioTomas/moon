@@ -42,9 +42,10 @@ local function extFor(mime)
     return ""
 end
 
+--- 取路径末段（/ 与 \ 都算分隔符）。
 ---@param path string|nil
 ---@return string
-local function basename(path)
+function Assets.basename(path)
     path = tostring(path or "")
     return path:match("([^/\\]+)$") or path
 end
@@ -103,7 +104,7 @@ function Assets.rewriteImageSources(xhtml, src_map)
         end
         local clean = src:gsub("&amp;", "&")
         local bare = clean:match("^[^%?#]+") or clean
-        local href = src_map[clean] or src_map[bare] or src_map[basename(bare)]
+        local href = src_map[clean] or src_map[bare] or src_map[Assets.basename(bare)]
         if not href then
             return tag
         end

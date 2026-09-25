@@ -132,11 +132,6 @@ local function mirrorKo(method, ...)
     end
 end
 
----@return string
-function Log.path()
-    return Paths.logPath()
-end
-
 ---@return nil
 function Log.start()
     start()

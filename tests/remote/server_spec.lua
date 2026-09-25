@@ -589,6 +589,34 @@ do
     Assert.eq(body, '{"ok":true}')
 end
 
+-- ── 上传：close 刷盘失败不能交给 save 当成功 ──────────
+
+do
+    local handlers, calls = fakeHandlers({ ["/inbox"] = {} })
+    local original_open = io.open
+    local temp_path
+    io.open = function(path, mode)
+        local f, err = original_open(path, mode)
+        if mode ~= "wb" or not f then return f, err end
+        temp_path = path
+        return {
+            write = function(_, data) return f:write(data) end,
+            close = function()
+                f:close()
+                return nil, "flush failed"
+            end,
+        }
+    end
+    local client = newClient({
+        "PUT /upload?dir=/inbox&name=x.bin HTTP/1.1\r\nContent-Length: 3\r\n\r\nabc",
+    })
+    drain(serve(client, handlers))
+    io.open = original_open
+    Assert.is_nil(calls.save)
+    Assert.eq((parseResponse(client:output())), 500)
+    Assert.is_nil(original_open(temp_path, "rb"), "失败的临时文件必须删除")
+end
+
 -- ── 上传：错误分支 ────────────────────────────────────
 
 do

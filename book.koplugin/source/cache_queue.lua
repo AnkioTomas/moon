@@ -99,11 +99,9 @@ local function retryOrFinish(job, result)
         job.retry_tick = function()
             job.retry_tick = nil
             if waiting_retry == job then waiting_retry = nil end
-            if not job.cancelled then
-                table.insert(pending, 1, job)
-                changed()
-                startNext()
-            end
+            table.insert(pending, 1, job)
+            changed()
+            startNext()
         end
         UIManager:scheduleIn(delay, job.retry_tick)
         changed()
@@ -118,10 +116,6 @@ end
 startNext = function()
     if active or waiting_retry then return end
     local job = table.remove(pending, 1)
-    while job and job.cancelled do
-        by_key[job.key] = nil
-        job = table.remove(pending, 1)
-    end
     if not job then return end
     active = job
     job.state = "running"
@@ -129,12 +123,10 @@ startNext = function()
     changed()
     job.handle = job.source:cacheAllChaptersAsync(job.identity,
         function(cached, total)
-            if job.cancelled then return end
             job.cached = tonumber(cached) or 0
             job.total = tonumber(total) or 0
             changed()
         end, function(success, cached, err, total, failed)
-            if job.cancelled then return end
             retryOrFinish(job, {
                 ok = success and true or false,
                 cached = tonumber(cached) or 0,

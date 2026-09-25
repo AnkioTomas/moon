@@ -45,7 +45,10 @@ end
 
 ---@param callback function|nil
 local function notify(callback, ...)
-    if callback then pcall(callback, ...) end
+    if not callback then return end
+    -- 回调异常不能打断调度器的槽位释放，但必须留下栈，不能静默吞掉。
+    local ok, err = xpcall(callback, debug.traceback, ...)
+    if not ok then logger.warn("workers.job callback failed", err) end
 end
 
 ---@param fd number

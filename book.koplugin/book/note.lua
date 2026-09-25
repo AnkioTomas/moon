@@ -276,10 +276,14 @@ local function runSyncAsync(source, opts, cb)
                 current_job = nil
                 if cancelled then return end
                 if not value then
-                    result.conflicts = result.conflicts + 1
                     if opts.dirty_only then
+                        result.push_error = err or "notes push failed"
+                        logger.warn("book.note push failed; keep dirty", source.id, identity.stable_id, result.push_error)
                         nextIdentity()
-                    elseif can_pull then
+                        return
+                    end
+                    result.conflicts = result.conflicts + 1
+                    if can_pull then
                         pullRemote()
                     else
                         finish(nil, err or "notes push failed")

@@ -156,6 +156,45 @@ do
     Assert.is_nil(read(paths.backups .. "/frontend/ui/uimanager.lua"))
 end
 
+-- 补丁分发失败触发回滚；回滚写回也失败时，错误必须点名需要手动恢复的文件
+do
+    local paths = setup(FAKE_TARGET)
+    local real_open = io.open
+    local target_writes = 0
+    io.open = function(path, mode)
+        if mode == "wb" and path:sub(1, #paths.patches) == paths.patches then
+            return nil, "patches dir denied"
+        end
+        if mode == "wb" and path == paths.target .. ".tmp" then
+            target_writes = target_writes + 1
+            if target_writes > 1 then return nil, "target denied" end
+        end
+        return real_open(path, mode)
+    end
+    local res = Manager.install("page_turn_animation")
+    io.open = real_open
+    Assert.is_false(res.ok)
+    Assert.eq(target_writes, 2)
+    Assert.is_true(res.err:find("copy failed: patches dir denied", 1, true) ~= nil, res.err)
+    Assert.is_true(res.err:find("rollback failed, restore manually: frontend/ui/uimanager.lua (target denied)", 1, true) ~= nil, res.err)
+end
+
+-- 回滚成功时错误只保留原因，目标回到原样
+do
+    local paths = setup(FAKE_TARGET)
+    local real_open = io.open
+    io.open = function(path, mode)
+        if mode == "wb" and path:sub(1, #paths.patches) == paths.patches then
+            return nil, "patches dir denied"
+        end
+        return real_open(path, mode)
+    end
+    local res = Manager.install("page_turn_animation")
+    io.open = real_open
+    Assert.eq(res.err, "copy failed: patches dir denied")
+    Assert.eq(read(paths.target), FAKE_TARGET)
+end
+
 -- 目标文件缺失：失败
 do
     local paths = setup(nil)

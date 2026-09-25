@@ -130,15 +130,6 @@ end
 local keyboard_baseline
 
 ---@param value any
----@return any
-local function copyValue(value)
-    if type(value) ~= "table" then return value end
-    local out = {}
-    for key, nested in pairs(value) do out[key] = copyValue(nested) end
-    return out
-end
-
----@param value any
 ---@return string|nil
 local function primaryChar(value)
     if type(value) == "string" then return #value == 1 and value or nil end
@@ -154,7 +145,7 @@ end
 ---@param keys table
 local function applyZhuyinKeys(keys)
     keys[1][11] = { "-", "-", "-", "-" }
-    keys[3][10][2] = copyValue(keys[3][10][1])
+    keys[3][10][2] = util.tableDeepCopy(keys[3][10][1])
 
     local row = keys[4]
     if row[1] and row[1].label then table.remove(row, 1) end
@@ -169,9 +160,9 @@ end
 local function applyKeyboardLabels(profile)
     local layout = require(ZH_MODULE)
     if not keyboard_baseline then
-        keyboard_baseline = copyValue(layout.keys)
+        keyboard_baseline = util.tableDeepCopy(layout.keys)
     end
-    local restored = copyValue(keyboard_baseline)
+    local restored = util.tableDeepCopy(keyboard_baseline)
     for key in pairs(layout.keys) do layout.keys[key] = nil end
     for key, value in pairs(restored) do layout.keys[key] = value end
     if profile and profile.id == "zhuyin" then
