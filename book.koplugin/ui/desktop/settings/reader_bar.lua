@@ -4,8 +4,8 @@
 @module koplugin.book.ui.desktop.settings.reader_bar
 --]]
 
-local ButtonDialog = require("ui/widget/buttondialog")
 local UIManager = require("ui/uimanager")
+local Popup = require("ui.views.popup")
 local SettingRow = require("ui.components.settingrow")
 local Bars = require("ui.reader.bars")
 local Items = require("ui.reader.bars.items")
@@ -50,73 +50,40 @@ local function itemRow(desktop, item, which)
             status = enabled and (side .. " · " .. T(_("第 %1 位"), index)) or _("关闭"),
             status_on = enabled,
             callback = function()
-                local dialog
-                local actions = {
-                    {
-                        {
-                            text = enabled and _("停用") or _("启用"),
-                            callback = function()
-                                Layout.toggle(which, item.id)
-                                UIManager:close(dialog)
-                                refresh(desktop)
-                            end,
-                        },
-                    },
-                }
+                --- 执行布局变更后刷新阅读页与设置页。
+                ---@param change fun()
+                ---@return fun()
+                local function apply(change)
+                    return function()
+                        change()
+                        refresh(desktop)
+                    end
+                end
+                local actions = {{
+                    text = enabled and _("停用") or _("启用"),
+                    callback = apply(function() Layout.toggle(which, item.id) end),
+                }}
                 if enabled then
-                    actions[#actions + 1] = {
-                        {
-                            text = _("靠左"),
-                            enabled = align ~= "left",
-                            callback = function()
-                                Layout.setAlign(which, item.id, "left")
-                                UIManager:close(dialog)
-                                refresh(desktop)
-                            end,
-                        },
-                        {
-                            text = _("靠右"),
-                            enabled = align ~= "right",
-                            callback = function()
-                                Layout.setAlign(which, item.id, "right")
-                                UIManager:close(dialog)
-                                refresh(desktop)
-                            end,
-                        },
-                    }
                     local count = #Layout.get(which)
                     actions[#actions + 1] = {
-                        {
-                            text = _("上移"),
-                            enabled = index > 1,
-                            callback = function()
-                                Layout.move(which, item.id, -1)
-                                UIManager:close(dialog)
-                                refresh(desktop)
-                            end,
-                        },
-                        {
-                            text = _("下移"),
-                            enabled = index < count,
-                            callback = function()
-                                Layout.move(which, item.id, 1)
-                                UIManager:close(dialog)
-                                refresh(desktop)
-                            end,
-                        },
+                        text = _("靠左"), enabled = align ~= "left",
+                        callback = apply(function() Layout.setAlign(which, item.id, "left") end),
+                    }
+                    actions[#actions + 1] = {
+                        text = _("靠右"), enabled = align ~= "right",
+                        callback = apply(function() Layout.setAlign(which, item.id, "right") end),
+                    }
+                    actions[#actions + 1] = {
+                        text = _("上移"), enabled = index > 1,
+                        callback = apply(function() Layout.move(which, item.id, -1) end),
+                    }
+                    actions[#actions + 1] = {
+                        text = _("下移"), enabled = index < count,
+                        callback = apply(function() Layout.move(which, item.id, 1) end),
                     }
                 end
-                actions[#actions + 1] = {{
-                    text = _("关闭"),
-                    callback = function() UIManager:close(dialog) end,
-                }}
-                dialog = ButtonDialog:new{
-                    title = item.label,
-                    title_align = "center",
-                    use_info_style = false,
-                    buttons = actions,
-                }
-                UIManager:show(dialog)
+                actions[#actions + 1] = { text = _("关闭") }
+                Popup.sheet{ title = item.label, items = actions }
             end,
         })
     end

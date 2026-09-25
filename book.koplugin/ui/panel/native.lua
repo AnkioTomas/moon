@@ -239,7 +239,17 @@ local function renderPanelContent(menu)
         end)
 end
 
---- 一次性 patch TouchMenu.updateItems，触屏设备命中面板 Tab 时改走自绘渲染。
+--- 菜单下沿到屏底的高度；菜单占满屏时 <= 0。
+---@param menu table
+---@return number top
+---@return number height
+local function meshSpan(menu)
+    local top = menu.dimen.y + menu.dimen.h
+    return top, menu.screen_size.h - top
+end
+
+--- 一次性 patch TouchMenu：触屏设备命中面板 Tab 时改走自绘渲染；
+--- 菜单下方铺与图书馆筛选同款的 MeshMask，点遮罩由原生 TapCloseAllMenus 关菜单。
 local function patchTouchMenu()
     local ok, TouchMenu = pcall(require, "ui/widget/touchmenu")
     if not ok or TouchMenu._book_panel_patched then return end
@@ -247,9 +257,25 @@ local function patchTouchMenu()
     local original = TouchMenu.updateItems
     TouchMenu.updateItems = function(self, ...)
         if panelMode(self.item_table) and Device:isTouchDevice() then
-            return renderPanelContent(self)
+            renderPanelContent(self)
+        else
+            original(self, ...)
         end
-        return original(self, ...)
+        -- 原生只刷新菜单自身区域，遮罩区域要单独刷。
+        UIManager:setDirty(nil, function()
+            local top, h = meshSpan(self)
+            if h <= 0 then return end
+            local Geom = require("ui/geometry")
+            return "ui", Geom:new{ x = 0, y = top, w = self.screen_size.w, h = h }
+        end)
+    end
+    local original_paint = TouchMenu.paintTo
+    TouchMenu.paintTo = function(self, bb, x, y)
+        original_paint(self, bb, x, y)
+        local top, h = meshSpan(self)
+        if h <= 0 then return end
+        local MeshMask = require("ui.components.meshmask")
+        MeshMask.widget{ width = self.screen_size.w, height = h }:paintTo(bb, x, top)
     end
 end
 

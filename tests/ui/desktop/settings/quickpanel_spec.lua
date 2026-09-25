@@ -5,14 +5,8 @@
 local Assert = require("support.assert")
 
 local captured_dialog
-package.preload["ui/widget/buttondialog"] = function()
-    return { new = function(_, value) captured_dialog = value return value end }
-end
-package.preload["ui/uimanager"] = function()
-    return { show = function() end, close = function() end }
-end
 package.preload["ui.views.popup"] = function()
-    return { list = function() end }
+    return { sheet = function(opts) captured_dialog = opts end }
 end
 
 package.preload["l10n"] = function() return { apply = function() end } end
@@ -96,11 +90,12 @@ Assert.is_true(built.chevron)
 Assert.is_true(type(built.callback) == "function")
 built.callback()
 Assert.not_nil(captured_dialog)
-Assert.eq(#captured_dialog.buttons, 3)
-Assert.eq(captured_dialog.buttons[1][1].text, "停用")
-Assert.eq(captured_dialog.buttons[2][1].text, "上移")
-Assert.eq(captured_dialog.buttons[2][2].text, "下移")
-Assert.eq(captured_dialog.buttons[3][1].text, "关闭")
+Assert.eq(#captured_dialog.items, 4)
+Assert.eq(captured_dialog.items[1].text, "停用")
+Assert.eq(captured_dialog.items[2].text, "上移")
+Assert.is_false(captured_dialog.items[2].enabled, "第 1 位不能上移")
+Assert.eq(captured_dialog.items[3].text, "下移")
+Assert.eq(captured_dialog.items[4].text, "关闭")
 
 desktop_rows[2](400)
 Assert.eq(built.title, "休眠")

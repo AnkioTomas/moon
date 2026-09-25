@@ -123,46 +123,26 @@ local function openAccount(plugin)
     end
 
     local UIManager = require("ui/uimanager")
-    local ButtonDialog = require("ui/widget/buttondialog")
     local InfoMessage = require("ui/widget/infomessage")
-    local dialog
-    dialog = ButtonDialog:new{
+    require("ui.views.popup").sheet{
         title = _("拷贝漫画账号") .. " · " .. (Auth.userLabel() or ""),
-        buttons = {
-            {
-                {
-                    text = _("重新登录"),
-                    callback = function()
-                        UIManager:close(dialog)
-                        local username, password = Auth.credentials()
-                        if type(username) == "string" and type(password) == "string" then
-                            doLogin(plugin, username, password)
-                            return
-                        end
-                        showLogin(plugin)
-                    end,
-                },
-            },
-            {
-                {
-                    text = _("退出登录"),
-                    callback = function()
-                        Auth.clearSession()
-                        UIManager:close(dialog)
-                        UIManager:show(InfoMessage:new{
-                            text = _("已退出登录"),
-                            timeout = 2,
-                        })
-                        require("source.registry").afterAuthChanged(plugin)
-                    end,
-                },
-            },
-            {
-                { text = _("取消"), id = "close" },
-            },
+        items = {
+            { text = _("重新登录"), callback = function()
+                local username, password = Auth.credentials()
+                if type(username) == "string" and type(password) == "string" then
+                    doLogin(plugin, username, password)
+                    return
+                end
+                showLogin(plugin)
+            end },
+            { text = _("退出登录"), callback = function()
+                Auth.clearSession()
+                UIManager:show(InfoMessage:new{ text = _("已退出登录"), timeout = 2 })
+                require("source.registry").afterAuthChanged(plugin)
+            end },
+            { text = _("取消") },
         },
     }
-    UIManager:show(dialog)
 end
 
 ---@param plugin table|nil

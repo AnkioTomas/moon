@@ -3,8 +3,8 @@
 --]]
 
 local InfoMessage = require("ui/widget/infomessage")
-local ButtonDialog = require("ui/widget/buttondialog")
 local UIManager = require("ui/uimanager")
+local Popup = require("ui.views.popup")
 local MoonSettings = require("utils.settings")
 local SettingRow = require("ui.components.settingrow")
 local PageTurnAnimation = require("patch.page_turn_animation")
@@ -79,42 +79,28 @@ local function popupConfigureRow(desktop, item)
             kind = "nav", icon = item.icon, title = item.title,
             status = enabled and T(_("第 %1 位"), position) or _("关闭"), status_on = enabled,
             callback = function()
-                local dialog
-                local actions = {
-                    {
-                        {
-                            text = enabled and _("停用") or _("启用"),
-                            callback = function()
-                                reader.reader_popup_buttons = reader.reader_popup_buttons or {}
-                                reader.reader_popup_buttons[item.id] = not enabled
-                                MoonSettings.saveSection("reader", reader)
-                                UIManager:close(dialog)
-                                desktop:updateView()
-                            end,
-                        },
-                    },
-                }
+                local actions = {{
+                    text = enabled and _("停用") or _("启用"),
+                    callback = function()
+                        reader.reader_popup_buttons = reader.reader_popup_buttons or {}
+                        reader.reader_popup_buttons[item.id] = not enabled
+                        MoonSettings.saveSection("reader", reader)
+                        desktop:updateView()
+                    end,
+                }}
                 if enabled then
                     local function move(delta)
                         local next_pos = position + delta
                         order[position], order[next_pos] = order[next_pos], order[position]
                         reader.reader_popup_button_order = order
                         MoonSettings.saveSection("reader", reader)
-                        UIManager:close(dialog)
                         desktop:updateView()
                     end
-                    actions[#actions + 1] = {
-                        { text = _("上移"), enabled = position > 1, callback = function() move(-1) end },
-                        { text = _("下移"), enabled = position < #order, callback = function() move(1) end },
-                    }
+                    actions[#actions + 1] = { text = _("上移"), enabled = position > 1, callback = function() move(-1) end }
+                    actions[#actions + 1] = { text = _("下移"), enabled = position < #order, callback = function() move(1) end }
                 end
-                actions[#actions + 1] = {{
-                    text = _("关闭"), callback = function() UIManager:close(dialog) end,
-                }}
-                dialog = ButtonDialog:new{
-                    title = item.title, title_align = "center", use_info_style = false, buttons = actions,
-                }
-                UIManager:show(dialog)
+                actions[#actions + 1] = { text = _("关闭") }
+                Popup.sheet{ title = item.title, items = actions }
             end,
         })
     end
