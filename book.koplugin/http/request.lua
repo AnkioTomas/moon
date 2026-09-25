@@ -694,24 +694,31 @@ function Request.download(opts, dest, cb)
         return { cancel = function() end }
     end
 
+    --- 已注定失败（超限/写盘错）就立刻断流，不再白拉剩余 body；on_done 仍会收口。
+    ---@param reason string
+    local function abort(reason)
+        write_err = reason
+        if stream_job then stream_job:cancel() end
+    end
+
     stream_job = Request.stream(opts, {
         on_headers = function(code, headers)
             response.code = code
             response.headers = headers
             local content_length = headers and headers.get and headers:get("Content-Length", true)
             if max_bytes and tonumber(content_length) and tonumber(content_length) > max_bytes then
-                write_err = "download too large"
+                abort("download too large")
             end
         end,
         on_data = function(chunk)
             if write_err or not Request.ok(response.code) then return end
             if max_bytes and written + #chunk > max_bytes then
-                write_err = "download too large"
+                abort("download too large")
                 return
             end
             local ok, err = file:write(chunk)
             if not ok then
-                write_err = err or "write failed"
+                abort(err or "write failed")
                 return
             end
             written = written + #chunk
@@ -720,18 +727,18 @@ function Request.download(opts, dest, cb)
         on_done = function(err)
             local pok, closed, close_err = pcall(function() return file:close() end)
             file = nil
-            if not err and write_err then err = write_err end
+            err = write_err or err
             if not err and (not pok or not closed) then
                 err = close_err or "close failed"
             end
             if err or not Request.ok(response.code) then
-                pcall(os.remove, tmp)
+                os.remove(tmp)
                 done(false, err or ("HTTP " .. tostring(response.code)), response)
                 return
             end
             local moved, rename_err = os.rename(tmp, dest)
             if not moved then
-                pcall(os.remove, tmp)
+                os.remove(tmp)
                 done(false, rename_err or "rename failed", response)
                 return
             end
@@ -743,7 +750,7 @@ function Request.download(opts, dest, cb)
         logger.dbg("book.http download cancel", target)
         if stream_job then stream_job:cancel() end
         if file then pcall(function() file:close() end); file = nil end
-        pcall(os.remove, tmp)
+        os.remove(tmp)
     end)
 end
 

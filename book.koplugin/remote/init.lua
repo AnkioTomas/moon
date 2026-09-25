@@ -65,6 +65,10 @@ local function storageLayout()
     local moon = real(Paths.root())
     local crash_log = real(data .. "/crash.log")
     local plugin_log = real(data .. "/.moon/book.log")
+    -- 凭证路径必须和被校验的目标一样是真实路径，否则 .moon/settings 被软链后前缀比较失效。
+    local settings_dir = real(data .. "/settings")
+    local reader_settings = real(data .. "/settings.reader.lua")
+    local moon_dir = real(data .. "/.moon")
     local roots = {}
     for _, r in ipairs({ root, book, fonts, plugins, plugin_self, screenshot_dir }) do
         local dup = false
@@ -104,17 +108,17 @@ local function storageLayout()
             fonts,
             plugins,
             plugin_self,
-            data .. "/settings",
-            data .. "/settings.reader.lua",
-            data .. "/.moon",
+            settings_dir,
+            reader_settings,
+            moon_dir,
             book,
         },
         -- 凭证所在：protected 只挡删除/改名（判定的是「祖先」），下载读取要另挡
         -- 「这些路径之内」，否则 /download 能把 moon token、zlib 密码、AI key 拉走。
         secret = {
-            data .. "/settings",
-            data .. "/settings.reader.lua",
-            data .. "/.moon",
+            settings_dir,
+            reader_settings,
+            moon_dir,
         },
         public_files = {
             [crash_log] = true,

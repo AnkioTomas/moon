@@ -9,6 +9,7 @@
 
 local md5 = require("ffi/sha2").md5
 local Paths = require("utils.paths")
+local Text = require("utils.text")
 
 local Assets = {}
 
@@ -26,14 +27,6 @@ local function imageExt(data)
         return ".webp"
     end
     return nil
-end
-
---- 取路径末段（/ 与 \ 都算分隔符）。
----@param path string|nil
----@return string
-function Assets.basename(path)
-    path = tostring(path or "")
-    return path:match("([^/\\]+)$") or path
 end
 
 ---@param src string|nil
@@ -62,15 +55,21 @@ function Assets.materializeImage(images_dir, data)
     local name = md5(data) .. ext
     local path = images_dir .. "/" .. name
     local f = io.open(path, "rb")
-    if not f then
-        local w = io.open(path, "wb")
-        if not w then
-            return nil
-        end
-        w:write(data)
-        w:close()
-    else
+    if f then
         f:close()
+        return "images/" .. name
+    end
+    -- 内容寻址：目标名存在即视为完整，所以只能整份写完再 rename 到位。
+    local tmp = path .. ".part"
+    local w = io.open(tmp, "wb")
+    if not w then
+        return nil
+    end
+    local wrote = w:write(data)
+    local closed = w:close()
+    if not wrote or not closed or not os.rename(tmp, path) then
+        os.remove(tmp)
+        return nil
     end
     return "images/" .. name
 end
@@ -90,7 +89,7 @@ function Assets.rewriteImageSources(xhtml, src_map)
         end
         local clean = src:gsub("&amp;", "&")
         local bare = clean:match("^[^%?#]+") or clean
-        local href = src_map[clean] or src_map[bare] or src_map[Assets.basename(bare)]
+        local href = src_map[clean] or src_map[bare] or src_map[Text.basename(bare)]
         if not href then
             return tag
         end

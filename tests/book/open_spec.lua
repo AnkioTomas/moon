@@ -115,12 +115,28 @@ open_callbacks[5]("/broken.epub")
 Stubs.flush()
 Assert.eq(failed_plugin.desktop ~= nil, true)
 
--- 可选 on_done：成功先回调再进 Reader；失败也要回调。
-local done_ok
-Open.book({ desktop = {} }, book, function(ok) done_ok = ok end)
+-- 可选 on_done：真正交给 Reader 时才回调成功（先于 showReader）；失败也要回调。
+local done_ok, shown_at_done
+Open.book({ desktop = {} }, book, function(ok)
+    done_ok, shown_at_done = ok, #shown
+end)
 open_callbacks[6]("/library/book.epub")
+Assert.is_nil(done_ok)
+Stubs.flush()
 Assert.is_true(done_ok)
+Assert.eq(shown_at_done + 1, #shown)
 done_ok = nil
 Open.book({ desktop = {} }, book, function(ok) done_ok = ok end)
 open_callbacks[7](nil, "boom")
 Assert.is_false(done_ok)
+
+-- 用户已在读别的文档：放弃交接，回调失败而不是谎报成功。
+done_ok = nil
+ReaderUI.instance = { document = { file = "/other.epub" } }
+local shown_before = #shown
+Open.book({ desktop = {} }, book, function(ok) done_ok = ok end)
+open_callbacks[8]("/library/book.epub")
+Stubs.flush()
+Assert.is_false(done_ok)
+Assert.len(shown, shown_before)
+ReaderUI.instance = nil

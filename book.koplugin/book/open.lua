@@ -40,17 +40,20 @@ end
 ---@param plugin table
 ---@param path string
 ---@param generation integer
-local function showReader(plugin, path, generation)
+---@param done fun(ok: boolean) 交接给 ReaderUI 时 true，因用户已在读别的文档而放弃时 false
+local function showReader(plugin, path, generation, done)
     local ReaderUI = require("apps/reader/readerui")
     UIManager:nextTick(function()
         if generation ~= Open.generation then return end
         local ui = ReaderUI.instance
         if ui and ui.document and ui.document.file ~= path then
             logger.dbg("book.open showReader skip: user reading other doc")
+            done(false)
             return
         end
         local desktop = plugin and plugin.desktop
         logger.info("book.open reader", path)
+        done(true)
         ReaderUI:showReader(path, nil, nil, nil, function()
             -- KOReader 在此回调返回后才把 ReaderUI 放入窗口栈；再排一拍，
             -- 避免先关全屏桌面导致底层 FileManager 被重绘出来。
@@ -106,8 +109,7 @@ function Open.book(plugin, book, on_done)
             done(false)
             return
         end
-        done(true)
-        showReader(plugin, path, generation)
+        showReader(plugin, path, generation, done)
     end)
 end
 

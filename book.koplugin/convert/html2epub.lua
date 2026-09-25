@@ -71,12 +71,11 @@ img{max-width:100%%;}
 ]], Text.xmlEscape(title), body)
 end
 
-local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
+--- data: URI 图片解码；LuaSocket 的 mime 是可选原生快路径（大图纯 Lua 解码很慢）。
 ---@param data string
 ---@return string|nil
 local function b64decode(data)
-    data = data:gsub("[^" .. B64 .. "=]", "")
+    data = data:gsub("[^%w+/=]", "")
     if data == "" then
         return nil
     end
@@ -87,33 +86,8 @@ local function b64decode(data)
             return out
         end
     end
-    local bits = data:gsub(".", function(x)
-        if x == "=" then
-            return ""
-        end
-        local f = B64:find(x, 1, true)
-        if not f then
-            return ""
-        end
-        f = f - 1
-        local r = ""
-        for i = 6, 1, -1 do
-            r = r .. (f % 2 ^ i - f % 2 ^ (i - 1) > 0 and "1" or "0")
-        end
-        return r
-    end)
-    return (bits:gsub("%d%d%d?%d?%d?%d?%d?%d?", function(x)
-        if #x ~= 8 then
-            return ""
-        end
-        local c = 0
-        for i = 1, 8 do
-            if x:sub(i, i) == "1" then
-                c = c + 2 ^ (8 - i)
-            end
-        end
-        return string.char(c)
-    end))
+    local out = Text.base64Decode(data)
+    return out ~= "" and out or nil
 end
 
 ---@param bytes string
@@ -232,7 +206,7 @@ local function writeEpubPackage(opts, dest)
     local images = opts.images
 
     local tmp = dest .. ".part"
-    pcall(os.remove, tmp)
+    os.remove(tmp)
     local epub = Archiver.Writer:new{}
     if not epub:open(tmp, "epub") then
         return nil, epub.err or _("无法创建 epub")
@@ -242,7 +216,7 @@ local function writeEpubPackage(opts, dest)
     ---@param msg string
     local function abort(msg)
         epub:close()
-        pcall(os.remove, tmp)
+        os.remove(tmp)
         return nil, epub.err or msg
     end
 
@@ -261,7 +235,9 @@ local function writeEpubPackage(opts, dest)
   </rootfiles>
 </container>
 ]]
-    epub:addFileFromMemory("META-INF/container.xml", container, mtime)
+    if not epub:addFileFromMemory("META-INF/container.xml", container, mtime) then
+        return abort(_("写入 epub 失败"))
+    end
 
     local manifest = {
         '    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>',
@@ -313,7 +289,9 @@ local function writeEpubPackage(opts, dest)
 </package>
 ]], Text.xmlEscape(title), creator, Text.xmlEscape(language), Text.xmlEscape(identifier),
         table.concat(manifest, "\n"), table.concat(spine, "\n"))
-    epub:addFileFromMemory("OEBPS/content.opf", opf, mtime)
+    if not epub:addFileFromMemory("OEBPS/content.opf", opf, mtime) then
+        return abort(_("写入 epub 失败"))
+    end
 
     local ncx = string.format([[
 <?xml version="1.0" encoding="UTF-8"?>
@@ -325,7 +303,9 @@ local function writeEpubPackage(opts, dest)
   </navMap>
 </ncx>
 ]], Text.xmlEscape(identifier), Text.xmlEscape(title), table.concat(nav, "\n"))
-    epub:addFileFromMemory("OEBPS/toc.ncx", ncx, mtime)
+    if not epub:addFileFromMemory("OEBPS/toc.ncx", ncx, mtime) then
+        return abort(_("写入 epub 失败"))
+    end
 
     for _i, ch in ipairs(chapters) do
         if not epub:addFileFromMemory("OEBPS/" .. ch.href, ch.xhtml, mtime) then
@@ -339,9 +319,9 @@ local function writeEpubPackage(opts, dest)
     end
 
     epub:close()
-    pcall(os.remove, dest)
+    os.remove(dest)
     if not os.rename(tmp, dest) then
-        pcall(os.remove, tmp)
+        os.remove(tmp)
         return nil, _("写入 epub 失败")
     end
     return true

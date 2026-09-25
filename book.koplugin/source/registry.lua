@@ -144,13 +144,14 @@ function Registry.create(id)
     return mod.new()
 end
 
---- 安全关闭源实例（忽略 close 异常）。
+--- 关闭源实例；close 抛错只记日志，不能打断替换/失效流程。
 ---@param src BookSource|nil
 local function closeSource(src)
     if src and src.close then
-        pcall(function()
-            src:close()
-        end)
+        local ok, err = pcall(src.close, src)
+        if not ok then
+            logger.warn("source close failed", src.id, err)
+        end
     end
 end
 
