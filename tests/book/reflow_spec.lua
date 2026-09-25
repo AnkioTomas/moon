@@ -48,3 +48,20 @@ end)
 Stubs.flush()
 Assert.is_true(analyze_done)
 os.remove(preview_path)
+
+-- 原书已替换但路径登记失败：不能把新路径当成功交出去（重开会被当成另一本书）。
+do
+    local original_build = Text2Epub.build
+    Text2Epub.build = function(_opts, cb)
+        cb(true)
+        return { cancel = function() end }
+    end
+    package.loaded["book.store"] = { touch = function() return nil, "db locked" end }
+    local book = identity("/books/b.txt")
+    book.source.replaceBook = function() return "/books/b.epub" end
+    local new_path, err
+    Reflow.applyAsync(book, function(p, e) new_path, err = p, e end)
+    Text2Epub.build = original_build
+    Assert.is_nil(new_path)
+    Assert.eq(err, "db locked")
+end

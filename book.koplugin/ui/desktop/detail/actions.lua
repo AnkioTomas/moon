@@ -154,15 +154,16 @@ function Detail:deleteBook()
                     })
                     return
                 end
-                if not self.lifecycle:uiReady() then
-                    return
-                end
-                self._dirty = true
+                -- 书已删：书架缓存无论详情页是否还开着都要失效。
                 local desk = self.desktop
                 if desk and desk.library then
                     desk.library.state = nil
                     desk.library.page = 1
                 end
+                if not self.lifecycle:uiReady() then
+                    return
+                end
+                self._dirty = true
                 self:onClose()
             end)
         end,

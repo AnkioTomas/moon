@@ -57,8 +57,7 @@ local function idMatchesFace(id, face)
     if type(id) ~= "string" or id == "" or type(face) ~= "string" or face == "" then
         return false
     end
-    local resolve = MoonFont.faceNameForId or MoonFont.faceForId
-    return resolve(id) == face
+    return MoonFont.faceNameForId(id) == face
 end
 
 ---@param ui table|nil

@@ -38,16 +38,23 @@ package.preload["ffi/util"] = function()
         end,
     }
 end
+local function attributes(path, key)
+    local attr
+    if dirs[path] then
+        attr = { mode = "directory" }
+    elseif files[path] then
+        attr = { mode = "file", size = 1 }
+    end
+    return key and attr and attr[key] or attr
+end
 package.preload["libs/libkoreader-lfs"] = function()
     return {
-        attributes = function(path, key)
-            local attr
-            if dirs[path] then
-                attr = { mode = "directory" }
-            elseif files[path] then
-                attr = { mode = "file", size = 1 }
+        attributes = attributes,
+        symlinkattributes = function(path, key)
+            if links[path] then
+                return key and "link" or { mode = "link" }
             end
-            return key and attr and attr[key] or attr
+            return attributes(path, key)
         end,
         mkdir = function(path)
             dirs[path] = true
@@ -227,6 +234,38 @@ Assert.is_true(Remote.start())
 Assert.is_nil(server_opts.handlers.resolve_download(data .. "/.moon/settings/moon.lua"))
 Assert.is_nil(server_opts.handlers.resolve_download(book .. "/moon-sd/settings/moon.lua"))
 links = {}
+
+-- 软链接只操作链接本身：删除/改名不能落到链接指向的书上，指向范围外的链接也能删。
+do
+    local target = book .. "/shelf/precious.epub"
+    local link = book .. "/link.epub"
+    dirs[book .. "/shelf"] = true
+    files[target] = true
+    local original_remove = os.remove
+    for _, dest in ipairs({ target, "/outside/secret.epub" }) do
+        links[link] = dest
+        local removed, ok, err
+        os.remove = function(path) removed = path; return true end
+        server_opts.handlers.delete(link, function(a, b) ok, err = a, b end)
+        os.remove = original_remove
+        Assert.is_true(ok, err)
+        Assert.eq(removed, link)
+    end
+
+    links[link] = target
+    local from, to, ok, err
+    os.rename = function(a, b) from, to = a, b; return true end
+    server_opts.handlers.rename(link, book .. "/renamed.epub", function(a, b) ok, err = a, b end)
+    os.rename = original_rename
+    Assert.is_true(ok, err)
+    Assert.eq(from, link)
+    Assert.eq(to, book .. "/renamed.epub")
+
+    local escaped
+    server_opts.handlers.delete(book .. "/shelf/..", function(_, e) escaped = e end)
+    Assert.eq(escaped, "path outside managed roots")
+    links = {}
+end
 
 Remote.stop()
 

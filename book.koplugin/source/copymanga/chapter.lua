@@ -46,11 +46,6 @@ local function imageReady(path)
         or (magic:sub(1, 4) == "RIFF" and magic:sub(9, 12) == "WEBP")
 end
 
----@param dir string
-local function ensureDir(dir)
-    if lfs.attributes(dir, "mode") ~= "directory" then lfs.mkdir(dir) end
-end
-
 ---@param paths string[]
 ---@param archive_path string
 ---@param state table
@@ -135,7 +130,7 @@ function Chapter.materializeAsync(client, identity, chapter, chapter_idx, on_pro
         if not urls then cb(nil, decode_err or _("章节图片解析失败")); return end
 
         local image_dir = work_dir .. "/chapter-" .. chapter_idx
-        ensureDir(image_dir)
+        Paths.ensureDir(image_dir)
         local paths, current = {}, 1
         for i, url in ipairs(urls) do
             paths[i] = image_dir .. "/" .. string.format("%04d%s", i, imageExtension(url))
