@@ -251,8 +251,8 @@ function Manager.install(feature)
             local new_content = t.content:sub(1, pos - 1) .. t.f.content .. "\n" .. t.content:sub(pos)
             local ok, werr = writeFile(t.path, new_content)
             if not ok then
-                Manager._rollbackInstall(feature, def, targets)
-                return { ok = false, err = "write failed: " .. tostring(werr) }
+                return { ok = false, err = "write failed: " .. tostring(werr)
+                    .. Manager._rollbackInstall(feature, def, targets) }
             end
         end
     end
@@ -260,8 +260,8 @@ function Manager.install(feature)
     for _, name in ipairs(def.patches) do
         local ok, cerr = copyFile(featureDir(feature) .. "/" .. name, patchesDir() .. "/" .. name)
         if not ok then
-            Manager._rollbackInstall(feature, def, targets)
-            return { ok = false, err = "copy failed: " .. tostring(cerr) }
+            return { ok = false, err = "copy failed: " .. tostring(cerr)
+                .. Manager._rollbackInstall(feature, def, targets) }
         end
     end
 
@@ -272,19 +272,22 @@ end
 ---@param feature string
 ---@param def table
 ---@param targets table
----@return nil
+---@return string suffix 拼在安装错误后；回滚全部成功时为空串，否则列出需手动恢复的文件
 function Manager._rollbackInstall(feature, def, targets)
+    local failed = {}
     for _, t in ipairs(targets) do
         if t.needs then
             local backup = readFile(backupDir(feature) .. "/" .. t.f.path)
-            if backup ~= nil then
-                writeFile(t.path, backup)
-            end
+            local ok, werr = backup ~= nil, "backup missing"
+            if ok then ok, werr = writeFile(t.path, backup) end
+            if not ok then failed[#failed + 1] = t.f.path .. " (" .. tostring(werr) .. ")" end
         end
     end
     for _, name in ipairs(def.patches) do
         os.remove(patchesDir() .. "/" .. name)
     end
+    if #failed == 0 then return "" end
+    return "; rollback failed, restore manually: " .. table.concat(failed, ", ")
 end
 
 --- 恢复补丁：仅当目标仍带补丁标记时从备份回写；已失效（如升级被覆盖）则不

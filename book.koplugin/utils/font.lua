@@ -260,13 +260,18 @@ end
 ---@param items MoonFontItem[]
 local function writeDiskWeread(items)
     Paths.ensureFonts()
-    local f = io.open(listCachePath(), "w")
-    if not f then return end
     local ok, encoded = pcall(JSON.encode, { items = items, fetched_at = os.time() })
-    if ok and type(encoded) == "string" then
-        f:write(encoded)
+    if not ok or type(encoded) ~= "string" then return end
+    local path = listCachePath()
+    local part = path .. ".part"
+    local f = io.open(part, "w")
+    if not f then return end
+    local wok = f:write(encoded)
+    local cok = f:close()
+    if not (wok and cok and os.rename(part, path)) then
+        os.remove(part)
+        logger.warn("font list cache write failed", path)
     end
-    f:close()
 end
 
 ---@param weread MoonFontItem[]|nil

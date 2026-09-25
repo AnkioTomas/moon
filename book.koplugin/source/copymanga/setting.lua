@@ -12,14 +12,6 @@ local SOURCE_ID = "copymanga"
 local Setting = {}
 
 ---@param plugin table|nil
-local function afterChanged(plugin)
-    require("source.registry").invalidate()
-    if plugin and plugin.onSourceChanged then
-        plugin:onSourceChanged()
-    end
-end
-
----@param plugin table|nil
 local function editBaseUrl(plugin)
     local UIManager = require("ui/uimanager")
     local InputDialog = require("ui/widget/inputdialog")
@@ -37,7 +29,7 @@ local function editBaseUrl(plugin)
                 callback = function()
                     cfg.base_url = Client.normalizeBaseUrl(dialog:getInputText())
                     settings.saveSource(SOURCE_ID, cfg)
-                    afterChanged(plugin)
+                    require("source.registry").afterAuthChanged(plugin)
                     UIManager:close(dialog)
                 end,
             },
@@ -71,7 +63,7 @@ local function doLogin(plugin, username, password)
                 text = _("登录成功"),
                 timeout = 2,
             })
-            afterChanged(plugin)
+            require("source.registry").afterAuthChanged(plugin)
         end)
     end)
 end
@@ -161,7 +153,7 @@ local function openAccount(plugin)
                             text = _("已退出登录"),
                             timeout = 2,
                         })
-                        afterChanged(plugin)
+                        require("source.registry").afterAuthChanged(plugin)
                     end,
                 },
             },

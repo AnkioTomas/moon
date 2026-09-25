@@ -11,6 +11,7 @@ local Assets = require("source.assets")
 local Paths = require("utils.paths")
 local Request = require("http.request")
 local SourceBase = require("source.base")
+local Shelf = require("source.shelf")
 local Progress = require("book.progress")
 local logger = require("utils.log")
 local _ = require("gettext")
@@ -72,28 +73,7 @@ end
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return table
 function Source:deleteBookAsync(identity, cb)
-    local Store = require("book.store")
-    if not Store.markDeleted(self.id, identity.stable_id) then
-        require("ui/uimanager"):nextTick(function()
-            cb(false, _("删除本书失败"))
-        end)
-        return { cancel = function() end }
-    end
-    local cancelled, job = false, nil
-    require("ui/uimanager"):nextTick(function()
-        if not cancelled then cb(true) end
-    end)
-    require("ui/network/manager"):runWhenOnline(function()
-        if cancelled then return end
-        job = self._client:removeFromShelfAsync(identity.stable_id, function(wire)
-            if cancelled then return end
-            if wire then Store.finalizeDeleted(self.id, identity.stable_id) end
-        end)
-    end)
-    return { cancel = function()
-        cancelled = true
-        if job and job.cancel then job.cancel() end
-    end }
+    return Shelf.deleteAsync(self, identity, cb)
 end
 
 ---@param identity BookIdentity
@@ -107,165 +87,13 @@ function Source:coverRequest(identity)
     return { url = url }
 end
 
---- 本地已标删：推云端 remove，成功则撕墓碑。
----@param self JdreadSource
----@param cb fun(pushed: integer)
----@return { cancel: fun() }|nil
-local function pushDeletedMembers(self, cb)
-    local Store = require("book.store")
-    local pending = require("db.book").pendingDeleteIds(self.id)
-    if #pending == 0 then
-        cb(0)
-        return nil
-    end
-    local cancelled, job, pushed, index = false, nil, 0, 0
-    local function nextDelete()
-        if cancelled then return end
-        index = index + 1
-        if index > #pending then
-            cb(pushed)
-            return
-        end
-        local stable_id = pending[index]
-        job = self._client:removeFromShelfAsync(stable_id, function(wire, err)
-            if cancelled then return end
-            if wire then
-                if Store.finalizeDeleted(self.id, stable_id) then
-                    pushed = pushed + 1
-                end
-            elseif err then
-                logger.warn("jdread shelf delete push failed", stable_id, err)
-            end
-            nextDelete()
-        end)
-    end
-    nextDelete()
-    return { cancel = function()
-        cancelled = true
-        if job and job.cancel then job:cancel() end
-    end }
-end
-
---- 书架成员上行：remote_ids 非 nil 时推「本地有、远端无」；nil 时推全部脏加架行。
----@param self JdreadSource
----@param remote_ids table<string, boolean>|nil
----@param cb fun(pushed: integer)
----@return { cancel: fun() }|nil
-local function pushMissingShelfMembers(self, remote_ids, cb)
-    local BookDB = require("db.book")
-    local missing = {}
-    if remote_ids then
-        for _, stable_id in ipairs(BookDB.libraryStableIdsBySource(self.id)) do
-            if not remote_ids[stable_id] then
-                missing[#missing + 1] = stable_id
-            end
-        end
-    else
-        missing = BookDB.pendingShelfAddIds(self.id)
-    end
-    if #missing == 0 then
-        cb(0)
-        return nil
-    end
-    local cancelled, job, pushed, index = false, nil, 0, 0
-    local function nextMissing()
-        if cancelled then return end
-        index = index + 1
-        if index > #missing then
-            cb(pushed)
-            return
-        end
-        local stable_id = missing[index]
-        job = self._client:addToShelfAsync(stable_id, function(wire, err)
-            if cancelled then return end
-            if wire then
-                pushed = pushed + 1
-                if remote_ids then remote_ids[stable_id] = true end
-                BookDB.markSynced(self.id, stable_id)
-            elseif err then
-                logger.warn("jdread shelf push failed", stable_id, err)
-            end
-            nextMissing()
-        end)
-    end
-    nextMissing()
-    return { cancel = function()
-        cancelled = true
-        if job and job.cancel then job:cancel() end
-    end }
-end
-
 ---@param opts { dirty_only?: boolean, force?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:syncBooksAsync(opts, cb)
-    opts = opts or {}
-    local cancelled, job, push_job, delete_job = false, nil, nil, nil
-    if opts.dirty_only then
-        delete_job = pushDeletedMembers(self, function(deleted_n)
-            if cancelled then return end
-            push_job = pushMissingShelfMembers(self, nil, function(pushed)
-                if cancelled then return end
-                cb({
-                    pulled = 0,
-                    pushed = (deleted_n or 0) + (pushed or 0),
-                    hidden = 0,
-                    conflicts = 0,
-                    skipped = false,
-                })
-            end)
-        end)
-        return { cancel = function()
-            cancelled = true
-            if push_job and push_job.cancel then push_job:cancel() end
-            if delete_job and delete_job.cancel then delete_job:cancel() end
-        end }
-    end
-    local function pullAndReconcile(pushed)
-        if cancelled then return end
-        job = self._client:shelfSyncAsync(function(wire, err)
-            if cancelled then return end
-            if not wire then cb(nil, err); return end
-            local list = Mapper.shelfList(wire, function(id, url)
-                self._covers[id] = url
-            end)
-            local result, reconcile_err = require("book.store").reconcile(self.id, list.data or {})
-            if result then result.pushed = pushed or 0 end
-            cb(result, reconcile_err)
-        end)
-    end
-    local function afterDeletes(deleted_n)
-        if cancelled then return end
-        job = self._client:shelfSyncAsync(function(wire, err)
-            if cancelled then return end
-            if not wire then cb(nil, err); return end
-            local list = Mapper.shelfList(wire, function(id, url)
-                self._covers[id] = url
-            end)
-            local remote_ids = {}
-            for _, book in ipairs(list.data or {}) do
-                if book.stable_id then remote_ids[tostring(book.stable_id)] = true end
-            end
-            push_job = pushMissingShelfMembers(self, remote_ids, function(pushed)
-                if cancelled then return end
-                local total = (deleted_n or 0) + (pushed or 0)
-                if pushed > 0 then
-                    pullAndReconcile(total)
-                    return
-                end
-                local result, reconcile_err = require("book.store").reconcile(self.id, list.data or {})
-                if result then result.pushed = total end
-                cb(result, reconcile_err)
-            end)
-        end)
-    end
-    delete_job = pushDeletedMembers(self, afterDeletes)
-    return { cancel = function()
-        cancelled = true
-        if job and job.cancel then job:cancel() end
-        if push_job and push_job.cancel then push_job:cancel() end
-        if delete_job and delete_job.cancel then delete_job:cancel() end
-    end }
+    return Shelf.syncAsync(self, opts, cb, function(id, url)
+        self._covers[id] = url
+    end, Mapper.shelfList)
 end
 
 ---@param identity BookIdentity

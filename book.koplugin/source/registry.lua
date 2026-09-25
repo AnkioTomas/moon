@@ -174,6 +174,15 @@ function Registry.invalidate()
     end
 end
 
+--- 登录态变更后作废源实例，并通知插件刷新桌面。
+---@param plugin table|nil
+function Registry.afterAuthChanged(plugin)
+    Registry.invalidate()
+    if plugin and plugin.onSourceChanged then
+        plugin:onSourceChanged()
+    end
+end
+
 --- 原子替换活跃源
 ---@param source BookSource
 ---@param id SourceId

@@ -80,7 +80,7 @@ function Library:showFilter()
     local generation = self.desktop.source_generation or 0
     self.filter_cancel = source:filtersAsync(function(res)
         self.filter_cancel = nil
-        if self.desktop._closed or self.desktop.tab ~= "library"
+        if self.desktop.lifecycle.state == "Destroy" or self.desktop.tab ~= "library"
             or self.desktop.source ~= source
             or (self.desktop.source_generation or 0) ~= generation then return end
         require("ui.desktop.library_filter").open{
@@ -482,7 +482,7 @@ function Library:fetch()
     ---@param err string|nil 操作失败的原因
     ---@return nil
     local function done(books, err)
-        if self.desktop._closed or self.desktop.tab ~= "library" then
+        if self.desktop.lifecycle.state == "Destroy" or self.desktop.tab ~= "library" then
             return
         end
         self.state = {
@@ -527,7 +527,7 @@ function Library:fetch()
         source_id = filter_source,
         sort = self.sort,
     }, function(res, err)
-        if self.desktop._closed or self.desktop.tab ~= "library"
+        if self.desktop.lifecycle.state == "Destroy" or self.desktop.tab ~= "library"
             or self.desktop.source ~= source or (self.desktop.source_generation or 0) ~= generation then
             return
         end
@@ -662,7 +662,7 @@ function Library:updateView()
     local state = self.state
     if not state then
         UIManager:nextTick(function()
-            if self.desktop._closed or self.desktop.tab ~= "library" then return end
+            if self.desktop.lifecycle.state == "Destroy" or self.desktop.tab ~= "library" then return end
             self:fetch()
         end)
     end

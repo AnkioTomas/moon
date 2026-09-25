@@ -606,8 +606,17 @@ function Server:_readBody(conn)
         finish(self, conn, text)
         return true
     end
-    conn.file:close()
+    -- 缓冲写的磁盘满错误常在 close 刷盘时才报出来，不判就会把截断文件当成功。
+    local closed, cerr = conn.file:close()
     conn.file = nil
+    if not closed then
+        if conn.temp then
+            pcall(os.remove, conn.temp)
+            conn.temp = nil
+        end
+        self:_fail(conn, 500, tostring(cerr or "close failed"))
+        return true
+    end
     local temp, dir, name, conflict = conn.temp, conn.dir, conn.name, conn.conflict
     conn.temp = nil -- 所有权移交 save（kill 不许再删）
     conn.state = "pending"

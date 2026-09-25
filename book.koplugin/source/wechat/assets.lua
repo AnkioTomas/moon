@@ -21,13 +21,6 @@ local function trimNulls(value)
     return (tostring(value or ""):gsub("%z.*$", ""):gsub("%s+$", ""))
 end
 
----@param path string|nil
----@return string
-local function basename(path)
-    path = tostring(path or "")
-    return path:match("([^/\\]+)$") or path
-end
-
 ---@param data string
 ---@return table[]
 local function tarEntries(data)
@@ -113,7 +106,7 @@ local function downloadTarAsync(tar, referer, images_dir, cb)
         for _, entry in ipairs(tarEntries(raw)) do
             local href = Shared.materializeImage(images_dir, entry.data)
             if href then
-                local name = basename(entry.name)
+                local name = Shared.basename(entry.name)
                 src_map[name] = href
                 local stem = name:gsub("%.[^%.]+$", "")
                 if stem ~= "" and stem ~= name then

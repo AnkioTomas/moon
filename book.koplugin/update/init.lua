@@ -30,11 +30,6 @@ local Update = {
 
 local API_URL = "https://api.github.com/repos/AnkioTomas/moon/releases/latest"
 local CHECK_INTERVAL = 24 * 60 * 60
-local function currentVersion()
-    local ok, version = pcall(require, "bookversion")
-    if ok and type(version) == "string" then return version end
-    return "0.0.0-dev"
-end
 
 local function versionParts(version)
     local major, minor, patch = tostring(version or ""):match("^(%d+)%.(%d+)%.(%d+)")
@@ -125,7 +120,7 @@ local function parseRelease(body)
         sha256 = sha256,
         checksum_url = checksum and checksum.browser_download_url or nil,
         notes = formatNotes(release.body),
-        available = newer(version, currentVersion()),
+        available = newer(version, require("bookversion")),
     }
 end
 
@@ -282,7 +277,7 @@ local function promptInstall(release, plugin_root)
     if Update._offered_version == release.version then return end
     Update._offered_version = release.version
     local header = T(_("发现月读 %1（当前 %2）。下载并完整替换插件目录？"),
-        release.version, currentVersion())
+        release.version, require("bookversion"))
     local text = release.notes and (header .. "\n\n" .. release.notes) or header
     local Screen = require("device").screen
     local dialog
@@ -327,7 +322,7 @@ function Update.manualCheck(plugin_root)
                 promptInstall(release, plugin_root)
             else
                 UIManager:show(InfoMessage:new{
-                    text = T(_("已是最新版本（%1）"), currentVersion()),
+                    text = T(_("已是最新版本（%1）"), require("bookversion")),
                     timeout = 3,
                 })
             end

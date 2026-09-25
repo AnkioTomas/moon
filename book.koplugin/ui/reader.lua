@@ -13,22 +13,6 @@ local UIManager = require("ui/uimanager")
 ---@class BookReader
 local Reader = {}
 
---- 当前阅读页的图标动作；原生 Tab 每次重绘都重新取状态。
----@param ui table|nil
----@return table[]
-function Reader.actions(ui)
-    return require("ui.panel.reader").actions(ui)
-end
-
---- 执行顶部图标动作。
----@param id string
----@param ui table|nil
----@param opts table|nil
----@return boolean
-function Reader.executeAction(id, ui, opts)
-    return require("ui.panel.reader").executeAction(id, ui, opts)
-end
-
 --- 阅读页 Create：挂原生菜单注入与阅读状态条。
 ---@param plugin table
 function Reader.onCreate(plugin)

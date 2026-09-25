@@ -117,17 +117,41 @@ do
         list_calls = list_calls + 1
         return { data = { { stable_id = "10", title = "远端" } } }
     end
-    local_library = { "10", "99" }
+    -- 10 已在远端：只标已同步不再请求；99 是本地新加架，上行。
+    pending_adds = { "10", "99" }
+    local synced = {}
+    local db = require("db.book")
+    local orig_mark = db.markSynced
+    db.markSynced = function(_, stable_id)
+        synced[#synced + 1] = stable_id
+        return true
+    end
     local src = Jdread.new()
     local result, err
     src:syncBooksAsync(nil, function(r, e) result, err = r, e end)
-    real_mapper.shelfList = orig_shelf
     Assert.is_nil(err)
     Assert.not_nil(result)
     Assert.eq(result.pushed, 1)
+    Assert.eq(#added, 1)
     Assert.eq(added[1], "99")
+    Assert.eq(table.concat(synced, ","), "10,99")
     Assert.eq(shelf_calls, 2)
     Assert.eq(list_calls, 2)
+
+    -- 已同步的本地书云端已移除：不得加回云端，交给 reconcile 软删。
+    added, shelf_calls, list_calls = {}, 0, 0
+    pending_adds = {}
+    local_library = { "10", "77" }
+    remembered = nil
+    src:syncBooksAsync(nil, function(r, e) result, err = r, e end)
+    Assert.is_nil(err)
+    Assert.eq(#added, 0)
+    Assert.eq(result.pushed, 0)
+    Assert.eq(shelf_calls, 1)
+    Assert.eq(#remembered, 1)
+    Assert.eq(remembered[1].stable_id, "10")
+    real_mapper.shelfList = orig_shelf
+    db.markSynced = orig_mark
     local_library = {}
 end
 

@@ -12,6 +12,7 @@ local Notes = require("source.wechat.notes")
 local Annotations = require("source.wechat.annotations")
 local Toc = require("source.wechat.toc")
 local SourceBase = require("source.base")
+local Shelf = require("source.shelf")
 local Progress = require("book.progress")
 local JSON = require("json")
 local Protocol = require("source.wechat.protocol")
@@ -83,28 +84,7 @@ end
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return table
 function Source:deleteBookAsync(identity, cb)
-    local Store = require("book.store")
-    if not Store.markDeleted(self.id, identity.stable_id) then
-        require("ui/uimanager"):nextTick(function()
-            cb(false, _("删除本书失败"))
-        end)
-        return { cancel = function() end }
-    end
-    local cancelled, job = false, nil
-    require("ui/uimanager"):nextTick(function()
-        if not cancelled then cb(true) end
-    end)
-    require("ui/network/manager"):runWhenOnline(function()
-        if cancelled then return end
-        job = self._client:removeFromShelfAsync(identity.stable_id, function(wire)
-            if cancelled then return end
-            if wire then Store.finalizeDeleted(self.id, identity.stable_id) end
-        end)
-    end)
-    return { cancel = function()
-        cancelled = true
-        if job and job.cancel then job.cancel() end
-    end }
+    return Shelf.deleteAsync(self, identity, cb)
 end
 
 --- 清空封面 URL、阅读上下文与目录缓存。
@@ -133,189 +113,19 @@ function Source:coverRequest(identity)
         end
         url = cover
     end
-    if type(url) ~= "string" or url == "" then
-        return nil, _("无封面")
-    end
     return {
         url = url,
         headers = Auth.sessionHeaders(),
     }
 end
 
---- 本地已标删的书：推云端 remove，成功则撕墓碑。
----@param self WechatSource
----@param cb fun(pushed: integer)
----@return { cancel: fun() }|nil
-local function pushDeletedMembers(self, cb)
-    local Store = require("book.store")
-    local pending = require("db.book").pendingDeleteIds(self.id)
-    if #pending == 0 then
-        cb(0)
-        return nil
-    end
-    local cancelled, job, pushed, index = false, nil, 0, 0
-    local function nextDelete()
-        if cancelled then return end
-        index = index + 1
-        if index > #pending then
-            cb(pushed)
-            return
-        end
-        local stable_id = pending[index]
-        job = self._client:removeFromShelfAsync(stable_id, function(wire, err)
-            if cancelled then return end
-            if wire then
-                if Store.finalizeDeleted(self.id, stable_id) then
-                    pushed = pushed + 1
-                end
-            elseif err then
-                logger.warn("wechat shelf delete push failed", stable_id, err)
-            end
-            nextDelete()
-        end)
-    end
-    nextDelete()
-    return { cancel = function()
-        cancelled = true
-        if job and job.cancel then job:cancel() end
-    end }
-end
-
---- 书架成员上行：remote_ids 非 nil 时推「本地有、远端无」；nil 时推全部脏加架行。
----@param self WechatSource
----@param remote_ids table<string, boolean>|nil
----@param cb fun(pushed: integer)
----@return { cancel: fun() }|nil
-local function pushMissingShelfMembers(self, remote_ids, cb)
-    local BookDB = require("db.book")
-    local missing = {}
-    if remote_ids then
-        for _, stable_id in ipairs(BookDB.libraryStableIdsBySource(self.id)) do
-            if not remote_ids[stable_id] then
-                missing[#missing + 1] = stable_id
-            end
-        end
-    else
-        missing = BookDB.pendingShelfAddIds(self.id)
-    end
-    if #missing == 0 then
-        cb(0)
-        return nil
-    end
-    local cancelled, job, pushed, index = false, nil, 0, 0
-    local function nextMissing()
-        if cancelled then return end
-        index = index + 1
-        if index > #missing then
-            cb(pushed)
-            return
-        end
-        local stable_id = missing[index]
-        job = self._client:addToShelfAsync(stable_id, function(wire, err)
-            if cancelled then return end
-            if wire then
-                pushed = pushed + 1
-                if remote_ids then remote_ids[stable_id] = true end
-                BookDB.markSynced(self.id, stable_id)
-            elseif err then
-                logger.warn("wechat shelf push failed", stable_id, err)
-            end
-            nextMissing()
-        end)
-    end
-    nextMissing()
-    return { cancel = function()
-        cancelled = true
-        if job and job.cancel then job:cancel() end
-    end }
-end
-
 ---@param opts { dirty_only?: boolean, force?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return table
 function Source:syncBooksAsync(opts, cb)
-    opts = opts or {}
-    local cancelled, job, push_job, delete_job = false, nil, nil, nil
-    local function finishPushed(pushed)
-        if cancelled then return end
-        cb({
-            pulled = 0, pushed = pushed or 0, hidden = 0, conflicts = 0, skipped = false,
-        })
-    end
-    --- dirty_only：只推本地删/加，不拉书架、不对账。
-    if opts.dirty_only then
-        delete_job = pushDeletedMembers(self, function(deleted_n)
-            if cancelled then return end
-            push_job = pushMissingShelfMembers(self, nil, function(pushed)
-                finishPushed((deleted_n or 0) + (pushed or 0))
-            end)
-        end)
-        return { cancel = function()
-            cancelled = true
-            if push_job and push_job.cancel then push_job:cancel() end
-            if delete_job and delete_job.cancel then delete_job:cancel() end
-        end }
-    end
-    --- 全量：先推删 → 拉远端 → 推本地独有 →（有推送则再拉）→ reconcile。
-    local function pullAndReconcile(pushed)
-        if cancelled then return end
-        job = self._client:shelfSyncAsync(function(wire, err)
-            if cancelled then return end
-            if not wire then
-                cb(nil, err)
-                return
-            end
-            local list = Mapper.shelfList(wire, function(id, url)
-                rememberCover(self, id, url)
-            end)
-            local result, rerr = require("book.store").reconcile(self.id, list.data or {})
-            if not result then
-                cb(nil, rerr)
-                return
-            end
-            result.pushed = pushed or 0
-            if not cancelled then cb(result) end
-        end)
-    end
-    local function afterDeletes(deleted_n)
-        if cancelled then return end
-        job = self._client:shelfSyncAsync(function(wire, err)
-            if cancelled then return end
-            if not wire then
-                cb(nil, err)
-                return
-            end
-            local list = Mapper.shelfList(wire, function(id, url)
-                rememberCover(self, id, url)
-            end)
-            local remote_ids = {}
-            for _, book in ipairs(list.data or {}) do
-                if book.stable_id then remote_ids[tostring(book.stable_id)] = true end
-            end
-            push_job = pushMissingShelfMembers(self, remote_ids, function(pushed)
-                if cancelled then return end
-                local total = (deleted_n or 0) + (pushed or 0)
-                if pushed > 0 then
-                    pullAndReconcile(total)
-                    return
-                end
-                local result, rerr = require("book.store").reconcile(self.id, list.data or {})
-                if not result then
-                    cb(nil, rerr)
-                    return
-                end
-                result.pushed = total
-                if not cancelled then cb(result) end
-            end)
-        end)
-    end
-    delete_job = pushDeletedMembers(self, afterDeletes)
-    return { cancel = function()
-        cancelled = true
-        if job and job.cancel then job:cancel() end
-        if push_job and push_job.cancel then push_job:cancel() end
-        if delete_job and delete_job.cancel then delete_job:cancel() end
-    end }
+    return Shelf.syncAsync(self, opts, cb, function(id, url)
+        rememberCover(self, id, url)
+    end, Mapper.shelfList)
 end
 
 --- 拉取书籍详情并缓存封面 URL；映射不出书籍时按「详情为空」失败。

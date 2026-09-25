@@ -74,6 +74,19 @@ do
     Assert.eq(Toc.uid("jdread", "drop", 1), "new")
 end
 
+do
+    -- 进程内缓存超限淘汰不得淘汰刚写入的条目：库里有合法目录就必须读得到。
+    for i = 1, 80 do
+        local id = "many-" .. i
+        rows["fanqie:" .. id] = {
+            payload = require("json").encode({ { idx = 1, uid = id } }),
+            at = now,
+        }
+        Assert.eq(Toc.uid("fanqie", id, 1), id)
+        Assert.eq(Toc.index("fanqie", id, id), 1)
+    end
+end
+
 now = now + 6 * 60 * 60
 Assert.is_nil(Toc.read("jdread", "book-1"))
 Assert.is_true(reads > before)

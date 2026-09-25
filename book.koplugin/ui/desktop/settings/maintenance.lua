@@ -31,19 +31,11 @@ end
 local REPO_URL = "https://github.com/AnkioTomas/moon"
 local REPO_HOST = "github.com/AnkioTomas/moon"
 
---- 读取插件版本号。
---- bookversion 由 CI 打 tag 时注入，源码树里可能没有，此时退化为 dev 版本号。
----@return string
-local function pluginVersion()
-    local ok, ver = pcall(require, "bookversion")
-    if ok and type(ver) == "string" and ver ~= "" then return ver end
-    return "0.0.0-dev"
-end
-
 --- 弹出「关于」对话框：图标、名称、版本、简介、作者与许可证。
 --- 仅设备支持外部链接时才给「打开 GitHub」按钮。
 local function showAbout()
-    local ver, dialog = pluginVersion()
+    local ver = require("bookversion")
+    local dialog
     local buttons = {}
     if Device:canOpenLink() then
         buttons[#buttons + 1] = {{ text = _("打开 GitHub"), callback = function() Device:openLink(REPO_URL) end }}
@@ -197,7 +189,7 @@ function Maintenance:updateRow(desktop)
     return function(iw)
         return SettingRow.build(iw, {
             kind = "action", icon = "system_update", title = _("检查更新"),
-            status = pluginVersion(), status_on = true,
+            status = require("bookversion"), status_on = true,
             callback = function()
                 require("update.init").manualCheck(desktop.plugin.path)
             end,
@@ -209,7 +201,7 @@ end
 ---@return fun(iw: number): table
 function Maintenance:aboutRow()
     return function(iw)
-        return SettingRow.build(iw, { kind = "nav", icon = "info", title = _("关于"), status = pluginVersion(), status_on = true, callback = showAbout })
+        return SettingRow.build(iw, { kind = "nav", icon = "info", title = _("关于"), status = require("bookversion"), status_on = true, callback = showAbout })
     end
 end
 

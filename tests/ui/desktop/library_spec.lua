@@ -152,6 +152,7 @@ local desktop = {
     tab = "library",
     source = source,
     source_generation = 0,
+    lifecycle = { state = "Create" },
     contentHeight = function() return 200 end,
     updateView = function() view_updates = view_updates + 1 end,
 }
@@ -219,5 +220,13 @@ Assert.eq(requested.category, "科幻")
 Assert.eq(requested.series, "系列一")
 Assert.eq(requested.read_status, "unread")
 Assert.eq(requested.sort, "recent_added")
+
+-- 桌面已销毁：updateView 排队的补拉不能再发请求。
+requested = nil
+library.state = nil
+desktop.lifecycle.state = "Destroy"
+library:updateView()
+Assert.is_nil(requested)
+desktop.lifecycle.state = "Create"
 
 package.loaded["ui.desktop.library"] = nil

@@ -12,7 +12,7 @@ end)
 Stubs.install()
 
 package.preload["utils.log"] = function()
-    return { dbg = function() end }
+    return { dbg = function() end, warn = function() end }
 end
 package.loaded["utils.log"] = nil
 

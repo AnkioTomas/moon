@@ -49,8 +49,15 @@ package.preload["book.store"] = function()
         return true
     end }
 end
+local network = { online = true, connected = true, waited = 0 }
 package.preload["ui/network/manager"] = function()
-    return { runWhenOnline = function(_, fn) fn() end }
+    return {
+        isOnline = function() return network.online end,
+        isConnected = function() return network.connected end,
+        runWhenOnline = function(_, fn)
+            if network.online then fn() else network.waited = network.waited + 1 end
+        end,
+    }
 end
 local progress_ui = { shown = 0 }
 package.preload["ui/widget/progressbardialog"] = function()
@@ -248,6 +255,20 @@ Stubs.flush()
 Assert.is_nil(failed_path)
 Assert.eq(failed_err, "register failed")
 touch_error = nil
+
+-- 已连接但不在线：runWhenOnline 不会回调，必须直接失败给出提示而不是静默挂起。
+network.online = false
+progress_ui.shown = 0
+os.remove(tmp .. "/2.html")
+local offline_path, offline_err
+Chapter.openWithUi({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops,
+    function(p, err) offline_path, offline_err = p, err end)
+Stubs.flush()
+Assert.is_nil(offline_path)
+Assert.not_nil(offline_err)
+Assert.eq(network.waited, 0)
+Assert.eq(progress_ui.shown, 0)
+network.online = true
 
 -- 预取：已有文件跳过，只拉取缺失章。
 os.remove(tmp .. "/2.html")

@@ -564,22 +564,18 @@ end
 -- ── touch 写 toc 后必须丢掉源进程内缓存 ────────────────
 do
     local dropped = {}
-    package.preload["source.wechat.toc"] = function()
-        return {
-            invalidate = function(source_id, stable_id)
-                dropped[#dropped + 1] = source_id .. "\0" .. stable_id
-            end,
-        }
+    local SourceToc = require("source.toc")
+    local original_invalidate = SourceToc.invalidate
+    SourceToc.invalidate = function(source_id, stable_id)
+        dropped[#dropped + 1] = source_id .. "\0" .. stable_id
     end
-    package.loaded["source.wechat.toc"] = nil
     local identity = { source_id = "wechat", stable_id = "s-toc" }
     Assert.is_true(Store.touch("/cache/wechat/1.html", identity, {
         chapter_idx = 1,
         toc = { { idx = 1, title = "一" } },
     }))
     Assert.eq(dropped[1], "wechat\0s-toc")
-    package.preload["source.wechat.toc"] = nil
-    package.loaded["source.wechat.toc"] = nil
+    SourceToc.invalidate = original_invalidate
     toc_upserts = {}
     chapter_upserts = {}
     touch_calls = {}

@@ -23,15 +23,6 @@ function Setting.rowStatus()
     return _("未登录 · 点此扫码"), false
 end
 
---- 认证状态变更后失效活跃源并通知插件刷新。
----@param plugin table|nil
-local function afterAuthChanged(plugin)
-    require("source.registry").invalidate()
-    if plugin and plugin.onSourceChanged then
-        plugin:onSourceChanged()
-    end
-end
-
 --- 展示微信读书扫码登录流程。
 ---@param plugin table|nil
 local function showQrLogin(plugin)
@@ -158,7 +149,7 @@ local function showQrLogin(plugin)
                         text = T(_("已登录：%1"), user.user_name ~= "" and user.user_name or user.user_id),
                         timeout = 2,
                     })
-                    afterAuthChanged(plugin)
+                    require("source.registry").afterAuthChanged(plugin)
                 end)
             end)
         end
@@ -194,7 +185,7 @@ local function refreshAgentKey(plugin)
                 timeout = 2,
             })
             if key then
-                afterAuthChanged(plugin)
+                require("source.registry").afterAuthChanged(plugin)
             end
         end)
     end)
@@ -260,7 +251,7 @@ function Setting.open(plugin)
                         UIManager:close(dialog)
                         Auth.clearSession()
                         UIManager:show(InfoMessage:new{ text = _("已退出"), timeout = 2 })
-                        afterAuthChanged(plugin)
+                        require("source.registry").afterAuthChanged(plugin)
                     end,
                 },
             },

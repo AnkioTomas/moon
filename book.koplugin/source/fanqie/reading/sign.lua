@@ -184,10 +184,6 @@ function Sign.encrypt_ladon(khronos, random4)
     return Text.base64Encode(random4 .. table.concat(enc))
 end
 
-function Sign.encrypt_helios(khronos, random4)
-    return Sign.encrypt_ladon(khronos, random4)
-end
-
 -- ---------------------------------------------------------------------------
 -- Argus
 -- ---------------------------------------------------------------------------
@@ -360,7 +356,8 @@ function Sign.sign_headers(query_string, device_id, opts)
     return {
         ["X-Khronos"] = tostring(khronos),
         ["X-Ladon"] = Sign.encrypt_ladon(khronos, opts.ladon_random4),
-        ["X-Helios"] = opts.helios or Sign.encrypt_helios(khronos, opts.helios_random4),
+        -- X-Helios 与 X-Ladon 同一算法，只是随机数独立。
+        ["X-Helios"] = opts.helios or Sign.encrypt_ladon(khronos, opts.helios_random4),
         ["X-Argus"] = Sign.encrypt_argus(query_string, khronos, device_id, {
             version_name = opts.version_name,
             device_type = opts.device_type,

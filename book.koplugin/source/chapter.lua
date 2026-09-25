@@ -387,7 +387,15 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
         current.dismiss_callback = nil
         current:close()
     end
-    require("ui/network/manager"):runWhenOnline(function()
+    local NetworkMgr = require("ui/network/manager")
+    -- 已连接但不在线时 runWhenOnline 永远不回调，这里直接失败给出提示。
+    if not NetworkMgr:isOnline() and NetworkMgr:isConnected() then
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled then cb(nil, _("网络不可用，请先连接 Wi-Fi")) end
+        end)
+        return { cancel = function() cancelled = true end }
+    end
+    NetworkMgr:runWhenOnline(function()
         if cancelled then
             return
         end

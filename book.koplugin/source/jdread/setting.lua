@@ -23,12 +23,6 @@ function Setting.rowTitle()
 end
 
 ---@param plugin table|nil
-local function afterAuthChanged(plugin)
-    require("source.registry").invalidate()
-    if plugin and plugin.onSourceChanged then plugin:onSourceChanged() end
-end
-
----@param plugin table|nil
 local function showQrLogin(plugin)
     local Auth = require("source.jdread.auth")
     local NetworkMgr = require("ui/network/manager")
@@ -107,7 +101,7 @@ local function showQrLogin(plugin)
                         return
                     end
                     UIManager:show(InfoMessage:new{ text = _("登录成功"), timeout = 2 })
-                    afterAuthChanged(plugin)
+                    require("source.registry").afterAuthChanged(plugin)
                 end)
             end)
         end)
@@ -143,7 +137,7 @@ function Setting.open(plugin)
                     callback = function()
                         Auth.clearSession()
                         UIManager:close(dialog)
-                        afterAuthChanged(plugin)
+                        require("source.registry").afterAuthChanged(plugin)
                     end,
                 },
             },

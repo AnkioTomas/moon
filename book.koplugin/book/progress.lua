@@ -341,8 +341,9 @@ local function syncOnce(source, opts, cb)
                 current_job = nil
                 if cancelled then return end
                 if ok ~= true then
-                    result.conflicts = result.conflicts + 1
                     if opts.dirty_only then
+                        result.push_error = err or "progress push failed"
+                        logger.warn("book.progress push failed; keep dirty", source.id, identity.stable_id, result.push_error)
                         nextIdentity()
                         return
                     end

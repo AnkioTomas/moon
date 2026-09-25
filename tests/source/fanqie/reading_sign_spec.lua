@@ -21,7 +21,7 @@ Assert.eq(Aes.to_hex(Sign.derive_inner_key()):sub(1, 32), "fc78e0a9657a0c748ce51
 local ladon = Sign.encrypt_ladon(1789957197, Aes.from_hex("1b98ce68"))
 Assert.eq(ladon, "G5jOaLRVvJuv4+NwKK5O28l5Otk8CtR/oS5UUASQ16HNqKIl")
 
-local helios = Sign.encrypt_helios(1789957197, Aes.from_hex("9af455f3"))
+local helios = Sign.encrypt_ladon(1789957197, Aes.from_hex("9af455f3"))
 Assert.eq(helios, "mvRV81hWfK8mji4oDqkBUaKNIcydz7kADrxZKHO7vEnxeFQ/")
 
 local argus = Sign.encrypt_argus(

@@ -22,23 +22,7 @@ local logger = require("utils.log")
 local Store = {}
 
 --- 源目录缓存 TTL（秒）。阅读会话 bootstrap 用这个值；下载完成判断不传 max_age。
-Store.TOC_MAX_AGE = 6 * 60 * 60
-
-local TOC_MEMORY = {
-    wechat = "source.wechat.toc",
-    jdread = "source.jdread.toc",
-    fanqie = "source.jdread.toc",
-    copymanga = "source.jdread.toc",
-}
-
---- Store.touch 直写 books.toc 后丢掉源进程内缓存，避免 Toc.read 仍返回旧快照。
----@param source_id string
----@param stable_id string
-local function dropTocMemory(source_id, stable_id)
-    local modname = TOC_MEMORY[source_id]
-    if not modname then return end
-    require(modname).invalidate(source_id, stable_id)
-end
+Store.TOC_MAX_AGE = require("source.toc").TTL
 
 --- 路径末段文件名
 ---@param path string
@@ -144,7 +128,8 @@ local function registerChapter(path, source_id, stable_id, opts)
         return "failed to save chapter toc"
     end
     if opts.toc_payload then
-        dropTocMemory(source_id, stable_id)
+        -- 直写 books.toc 后丢掉进程内缓存，避免 Toc.read 仍返回旧快照。
+        require("source.toc").invalidate(source_id, stable_id)
     end
     if not ChapterDB.upsert({
         path = path,

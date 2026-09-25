@@ -99,7 +99,15 @@ function Config.installUtilStub()
         return
     end
     package.preload["util"] = function()
+        local function tableDeepCopy(value)
+            if type(value) ~= "table" then return value end
+            local out = {}
+            for key, nested in pairs(value) do out[key] = tableDeepCopy(nested) end
+            return setmetatable(out, getmetatable(value))
+        end
         return {
+            -- 与 frontend/util.lua 同语义（输入法候选栏拷贝键盘布局用）
+            tableDeepCopy = tableDeepCopy,
             -- 与 frontend/util.lua 同语义（输入框 charlist 按 UTF-8 字符存储）
             splitToChars = function(text)
                 local chars = {}

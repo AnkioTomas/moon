@@ -47,6 +47,9 @@ stub("db.book", function()
             return remembered_stats_books.local_library or {}
         end,
         pendingDeleteIds = function() return {} end,
+        pendingShelfAddIds = function()
+            return remembered_stats_books.pending_adds or {}
+        end,
         markSynced = function() return true end,
         setRead = function(source_id, stable_id, is_read)
             remembered_stats_books.set_read = {
@@ -602,7 +605,8 @@ do
     Assert.is_nil(req4)
 end
 
--- syncBooksAsync：本地独有成员经 addToShelf 上行，SyncResult.pushed 填实
+-- syncBooksAsync：本地新加架经 addToShelf 上行，SyncResult.pushed 填实；
+-- 已同步但云端已移除的书不加回。
 do
     local added = {}
     local shelf_calls = 0
@@ -620,15 +624,18 @@ do
         cb({ ok = true })
         return { cancel = function() end }
     end
-    remembered_stats_books.local_library = { "remote1", "local_only" }
+    remembered_stats_books.local_library = { "remote1", "local_only", "removed_on_phone" }
+    remembered_stats_books.pending_adds = { "local_only" }
     local src = WeChat.new()
     local result
     src:syncBooksAsync(nil, function(r) result = r end)
     Assert.not_nil(result)
     Assert.eq(result.pushed, 1)
+    Assert.eq(#added, 1)
     Assert.eq(added[1], "local_only")
     Assert.eq(shelf_calls, 2, "有上行后应再拉一次书架再 reconcile")
     remembered_stats_books.local_library = nil
+    remembered_stats_books.pending_adds = nil
 end
 
 -- pullNotesAsync：微信原始 chapterIdx 必须按 uid 映射成本地过滤后的章节序号。
