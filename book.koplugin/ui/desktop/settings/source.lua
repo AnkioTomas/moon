@@ -134,7 +134,7 @@ function Source:scopeSections(ctx)
                 return SettingRow.build(iw, {
                     kind = "nav", icon = "source", title = _("当前数据源"),
                     status = Source.displayName(active_name), status_on = true,
-                    callback = function() Source.pickActive(desktop, plugin) end,
+                    callback = function() Source:pickActive(desktop, plugin) end,
                 })
             end,
             function(iw)
