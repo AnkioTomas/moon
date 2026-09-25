@@ -13,8 +13,10 @@ local function clampFraction(raw)
     return n
 end
 
-local function wholeFraction(doc_frac, identity, toc, reading_idx)
-    local idx = identity and identity.chapter_idx or reading_idx
+--- 只有按章会话才折算：整书文档的 doc_frac 已是全书比例，
+--- 目录章序号只标位置，再按章数折算会把进度算歪。
+local function wholeFraction(doc_frac, identity, toc)
+    local idx = identity and identity.chapter_idx
     if not idx then return clampFraction(doc_frac) end
     local count = toc and #toc or 0
     if count <= 0 then return clampFraction(doc_frac) end
@@ -27,7 +29,7 @@ end
 ---@return number
 function Position.fraction(snapshot, toc)
     if not snapshot then return 0 end
-    return wholeFraction(snapshot.doc_fraction, snapshot.identity, toc, snapshot.reading_chapter_idx)
+    return wholeFraction(snapshot.doc_fraction, snapshot.identity, toc)
 end
 
 ---@param snapshot table|nil

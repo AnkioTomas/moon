@@ -129,26 +129,23 @@ local function progressFileName(rel)
     return rel:match("([^/]+)$")
 end
 
+--- Moon+ Reader 位置文件：`毫秒时间戳*章@分卷#字符偏移:全书百分比%`，如 `1703297605115*21@0#4826:11.1%`。
 local function encodeProgress(pos)
     local ts = tonumber(pos.updated_at) or os.time()
-    local pct = math.floor((tonumber(pos.fraction) or 0) * 100 + 0.5)
-    if pos.chapter_idx ~= nil then
-        return string.format("{%d}*%d@%d#0:%d%%", ts,
-            tonumber(pos.chapter_idx) or 0, tonumber(pos.page) or 1, pct)
-    end
-    return string.format("{%d}*%d:%d%%", ts, tonumber(pos.page) or 1, pct)
+    return string.format("%d*%d@0#0:%.1f%%", ts * 1000,
+        tonumber(pos.chapter_idx) or 0, (tonumber(pos.fraction) or 0) * 100)
 end
 
+--- 兼容旧版写出的 `{秒}*...` 花括号格式与省略 `@分卷#偏移` 的短格式；时间戳统一换算成秒。
 local function decodeProgress(raw)
     if type(raw) ~= "string" then return nil end
-    local ts, chapter, page, pct = raw:match("{%s*(%d+)%s*}%*(%-?%d+)@(%d+)[^:]*:(%d+)%%")
-    if not ts then
-        ts, page, pct = raw:match("{%s*(%d+)%s*}%*(%d+):(%d+)%%")
-    end
+    local ts, chapter, pct = raw:match("^%s*{?%s*(%d+)%s*}?%*(%-?%d+)[^:]*:([%d%.]+)%%")
     if not ts then return nil end
+    ts = tonumber(ts)
+    if ts > 1e12 then ts = math.floor(ts / 1000) end
     return {
-        updated_at = tonumber(ts), chapter_idx = chapter and tonumber(chapter) or nil,
-        page = tonumber(page), fraction = math.min(100, tonumber(pct) or 0) / 100,
+        updated_at = ts, chapter_idx = tonumber(chapter),
+        fraction = math.min(100, tonumber(pct) or 0) / 100,
     }
 end
 
@@ -986,7 +983,7 @@ function Client:scanWebdavAsync(cb)
                     local raw = file and file:read("*a")
                     if file then file:close() end
                     local pos = decodeProgress(raw)
-                    local stable_id = by_name[progressFileName(rel)]
+                    local stable_id = by_name[(progressFileName(rel):gsub("%.po$", ""))]
                     if pos and stable_id then
                         local local_pos = ProgressDB.get(SOURCE_ID, stable_id)
                         if not local_pos or (local_pos.sync_status ~= 0 and
@@ -1134,7 +1131,7 @@ function Client:syncWebdavProgressAsync(identity, cb)
             cb(false, "无法保存 WebDAV 阅读进度")
             return
         end
-        local path = self:webdavPath() .. "/.Moon+/Cache/" .. progressFileName(rel)
+        local path = self:webdavPath() .. "/.Moon+/Cache/" .. progressFileName(rel) .. ".po"
         active = self.dav:ensurePathAsync(self:webdavPath() .. "/.Moon+/Cache", function(ok_dir, dir_err)
             if not ok_dir then os.remove(temp); cb(false, dir_err); return end
             active = self.dav:putFileAsync(path, temp, function(ok_put, put_err)
