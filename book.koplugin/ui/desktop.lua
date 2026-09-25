@@ -12,7 +12,7 @@
   |-----------------------------------------------|
   | BottomBar  首页|图书馆|[Z站]|[统计]|设置       |
   +-----------------------------------------------+
-  手势：底栏 tap 切 Tab；内容区左右滑转给当前页；顶栏点源名换源、点其他区域或下滑开快捷面板。
+  手势：文件管理器里已配置的 gestures 手势优先；底栏 tap 切 Tab；内容区左右滑转给当前页；顶栏点源名换源、点其他区域或下滑开快捷面板。
   Lifecycle：Create → Resume ↔ Pause → Destroy；Resume 只打 topbar+当前 Tab；详情浮层自挂 Lifecycle。
 
 @module koplugin.book.ui.desktop
@@ -162,6 +162,26 @@ local function gesRange(ges, y, h)
     }
 end
 
+--- 交给 FileManager 上 gestures 插件已配置动作的 touch zone（multiswipe 是总入口，按方向再查动作）。
+--- 经 InputContainer.onGesture 调用，「禁用触摸」时它被换成过滤版，常驻手势白名单照常生效。
+---@param self BookDesktop 当前桌面实例
+---@param ev table KOReader 手势数据
+---@return boolean|nil handled
+local function fmGesture(self, ev)
+    local fm = self.plugin and self.plugin.ui
+    local gestures = fm and fm.gestures
+    if not gestures then return false end
+    local zones = {}
+    for _, zone in ipairs(fm._ordered_touch_zones) do
+        local id = zone.def.id
+        if id == "multiswipe" or gestures.gestures[id] ~= nil then
+            zones[#zones + 1] = zone
+        end
+    end
+    local proxy = setmetatable({ _ordered_touch_zones = zones, ges_events = {} }, { __index = InputContainer })
+    return InputContainer.onGesture(proxy, ev)
+end
+
 --- 把 widget 放到 OverlapGroup 指定偏移；传入 w 时同时写入 dimen。
 ---@param widget table 参与叠层的子控件
 ---@param x number 相对 OverlapGroup 的 x 偏移
@@ -277,6 +297,14 @@ function Desktop:onDestroy()
     if plugin and plugin.desktop == self then
         plugin.desktop = nil
     end
+end
+
+--- 桌面盖住 FileManager 后 UIManager 只把手势发给栈顶，用户在文件管理器配置的手势须先于桌面控件执行。
+---@param event table KOReader 事件
+---@return boolean|nil
+function Desktop:handleEvent(event)
+    if event.handler == "onGesture" and fmGesture(self, event.args[1]) then return true end
+    return InputContainer.handleEvent(self, event)
 end
 
 --- 顶栏向下滑：打开 KOReader 原生菜单的 Book 快捷 Tab。
