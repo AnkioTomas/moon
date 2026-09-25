@@ -111,7 +111,12 @@ Assert.eq(#image_widgets, 6, "本地图直接 ImageWidget")
 Assert.eq(image_widgets[1].file, image_path)
 Assert.eq(image_widgets[1].width, 40)
 Assert.eq(image_widgets[1].height, 60)
+Assert.is_true(image_widgets[1].original_in_nightmode, "默认夜间保持原色")
 Assert.eq(dirty_count, 0, "未上屏不得自己刷屏")
+
+local glyph = Image.widget{ src = image_path, width = 40, height = 60, invert_in_night = true }
+Assert.is_false(image_widgets[#image_widgets].original_in_nightmode, "字形图夜间随屏反色")
+glyph:free()
 
 local_widgets[6]:free()
 for i = 1, #local_widgets do local_widgets[i]:free() end

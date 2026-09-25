@@ -14,6 +14,7 @@
     headers = { Authorization = "Bearer …" },  -- 仅网络请求
     width = n, height = n,
     alpha = true,
+    invert_in_night = false,  -- 单色字形图随夜间模式反色；默认保持原色
     border = false,           -- 是否画边框
     fallback = "…",           -- 未就绪/失败文案；空/省略则空白占位
     show_parent = desk,       -- 窗口级父；嵌套 setDirty 必须靠它
@@ -272,8 +273,9 @@ end
 ---@param show_parent table|nil 异步图片就绪时请求刷新的屏幕宿主
 ---@param on_ready fun(path: string|nil)|nil
 ---@param fallback_src string|nil 远程下载失败时使用的本地图片
+---@param invert_in_night boolean|nil 夜间模式下是否随屏幕反色
 ---@return table
-local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_ready, fallback_src)
+local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_ready, fallback_src, invert_in_night)
     local box = WidgetContainer:new{
         dimen = Geom:new{ x = 0, y = 0, w = w, h = h },
         align = "center",
@@ -307,6 +309,7 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     box._inner_w = inner_w
     box._inner_h = inner_h
     box._alpha = alpha
+    box._invert_in_night = invert_in_night
 
     --- 把本张图片标记为落定，并且仅一次通知等待该图片的批次。
     function box:_settle()
@@ -372,6 +375,7 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
                 width = self._inner_w,
                 height = self._inner_h,
                 alpha = self._alpha and true or false,
+                original_in_nightmode = not self._invert_in_night,
             }
             widget:getSize()
         end)
@@ -437,7 +441,7 @@ function Image.widget(opts)
     local border = opts.border and true or false
     return asyncBox(
         src, headers, w, h, alpha, border, opts.fallback, opts.show_parent,
-        opts.on_ready, opts.fallback_src
+        opts.on_ready, opts.fallback_src, opts.invert_in_night == true
     )
 end
 
