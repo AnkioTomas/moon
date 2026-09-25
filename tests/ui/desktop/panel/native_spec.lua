@@ -14,7 +14,7 @@ package.preload["device"] = function()
         isTouchDevice = function() return false end,
     }
 end
-package.preload["ui/uimanager"] = function() return { show = function() end } end
+package.preload["ui/uimanager"] = function() return { show = function() end, setDirty = function() end } end
 
 local native_update_calls = 0
 local TouchMenu = {}

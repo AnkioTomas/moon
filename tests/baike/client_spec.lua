@@ -66,7 +66,6 @@ local job = Client.lookupAsync("电子阅读器", function(value, failure)
     result, err = value, failure
 end)
 Assert.eq(last_options.accept, "application/json")
-Assert.eq(last_options.connect_timeout, 10)
 Assert.eq(last_options.timeout, 20)
 Assert.eq(result.title, "电子阅读器")
 Assert.eq(result.definition, "一种用于阅读\n电子书的设备。\n\n别名：电子书阅读器\n用途：阅读、学习")

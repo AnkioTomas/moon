@@ -112,7 +112,6 @@ function Client.lookupAsync(word, callback)
     local Request = require("http.request")
     return Request.get(Client.url(query), {
         accept = "application/json",
-        connect_timeout = 10,
         timeout = 20,
     }, function(content, err)
         if err then

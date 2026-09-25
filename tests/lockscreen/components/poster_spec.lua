@@ -66,6 +66,8 @@ end
 package.loaded["lockscreen.components.poster"] = nil
 
 local Poster = require("lockscreen.components.poster")
+local conf = require("utils.settings").get()
+conf.lock_screen_poster_style = nil
 
 local function widgetBlocks(blocks)
     local widgets = {}
@@ -122,8 +124,6 @@ for _, block in ipairs(single) do Assert.eq(block.widget.stable_id, "a") end
 db_rows = all_rows
 
 -- 未设置风格即竖屏排版（升级前的唯一样式）。
-local MoonSettings = require("utils.settings")
-local conf = MoonSettings.get()
 Assert.eq(Poster.style(), "vertical")
 conf.lock_screen_poster_style = "bogus"
 Assert.eq(Poster.style(), "vertical")

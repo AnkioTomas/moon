@@ -34,7 +34,7 @@ HTTP 请求原语（Turbo，非阻塞，唯一网络栈）
 ---@field headers table|nil
 ---@field timeout number|nil 请求超时秒；get/post 也认 block_timeout
 ---@field block_timeout number|nil timeout 别名（get/post）
----@field connect_timeout number|nil 默认 10
+---@field connect_timeout number|nil 默认 20
 ---@field allow_redirects boolean|nil 显式 true 才跟 301/302
 ---@field auth_username string|nil
 ---@field auth_password string|nil
@@ -403,7 +403,7 @@ local function send(method, url, body, opts, cb)
             body = body,
             headers = headers,
             timeout = opts.timeout or opts.block_timeout or 30,
-            connect_timeout = opts.connect_timeout or 10,
+            connect_timeout = opts.connect_timeout or 20,
             allow_redirects = opts.allow_redirects,
             auth_username = opts.user or opts.auth_username,
             auth_password = opts.password or opts.auth_password,

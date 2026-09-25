@@ -27,6 +27,7 @@ package.preload["patch.page_turn_animation"] = function()
 end
 package.preload["ui/widget/infomessage"] = function() return {} end
 package.preload["ui/widget/buttondialog"] = function() return {} end
+package.preload["ui.views.popup"] = function() return {} end
 package.preload["ui/uimanager"] = function() return {} end
 
 _G.G_reader_settings = {

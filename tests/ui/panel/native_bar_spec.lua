@@ -40,7 +40,7 @@ package.preload["ui/widget/container/framecontainer"] = function()
     return { new = function(o) return o end }
 end
 package.preload["ui/geometry"] = function()
-    return { new = function(o) return o end }
+    return { new = function(_, o) return o end }
 end
 package.preload["ui.components.bookui"] = function()
     return { sz = function(value) return value end }

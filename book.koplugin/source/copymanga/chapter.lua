@@ -154,7 +154,6 @@ function Chapter.materializeAsync(client, identity, chapter, chapter_idx, on_pro
                 url = url,
                 headers = Client.headers(client.token),
                 timeout = 90,
-                connect_timeout = 15,
                 max_bytes = 32 * 1024 * 1024,
             }, path, function(ok, download_err)
                 state.active = nil
