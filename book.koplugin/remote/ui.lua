@@ -101,6 +101,18 @@ function M.menuRows(desktop)
             end,
         })
     end
+
+    rows[#rows + 1] = function(iw)
+        local on = Remote.idleStopOn()
+        return SettingRow.build(iw, {
+            kind = "toggle", icon = "schedule", title = _("空闲自动关闭"),
+            status = on and _("开") or _("关"), status_on = on,
+            callback = function()
+                Remote.setIdleStop(not on)
+                rebuild()
+            end,
+        })
+    end
     return rows
 end
 

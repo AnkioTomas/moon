@@ -888,6 +888,48 @@ do
     Assert.eq(#server._conns, 0)
 end
 
+-- ── 空闲自动关闭：在途连接续期，无连接满时长才回调 ──────────
+
+do
+    local idle = 0
+    bind_queue = {}
+    local server = Server.new({
+        port = 9528, handlers = fakeHandlers({}), root = "/",
+        idle_timeout = 60, on_idle = function() idle = idle + 1 end,
+    })
+    Assert.is_true(server:start())
+    fake_now = fake_now + 59
+    server:waitEvent()
+    Assert.eq(idle, 0, "未满时长不回调")
+
+    -- 慢连接挂着期间一直算活跃
+    bind_queue = { newClient({ "GET / HTTP/1.1\r\n" }) }
+    server:waitEvent()
+    fake_now = fake_now + 100
+    server:waitEvent()
+    Assert.eq(idle, 0, "有在途连接不算空闲")
+    fake_now = fake_now + 30 -- 连接被 IDLE_TIMEOUT 回收
+    server:waitEvent()
+    Assert.eq(#server._conns, 0)
+    Assert.eq(idle, 0, "空闲从最后一个连接结束起算")
+    fake_now = fake_now + 60
+    server:waitEvent()
+    Assert.eq(idle, 1)
+
+    -- 运行中重新开启：重新计时，不能因为早已空闲立刻回调
+    server:setIdleTimeout(nil)
+    fake_now = fake_now + 1000
+    server:waitEvent()
+    Assert.eq(idle, 1, "关闭检测后不回调")
+    server:setIdleTimeout(60)
+    server:waitEvent()
+    Assert.eq(idle, 1, "开启时重新计时")
+    fake_now = fake_now + 60
+    server:waitEvent()
+    Assert.eq(idle, 2)
+    server:stop()
+end
+
 
 -- ── 首页设备状态 ───────────────────────────────────────
 

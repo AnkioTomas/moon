@@ -243,6 +243,24 @@ function Remote.setAutostart(on)
     Settings.save(c)
 end
 
+--- 空闲自动关闭的时长（秒）：无任何网页/客户端连接持续这么久就停服。
+Remote.IDLE_STOP = 5 * 60
+
+---@return boolean
+function Remote.idleStopOn()
+    return Settings.get().remote_idle_stop == true
+end
+
+---@param on boolean
+function Remote.setIdleStop(on)
+    local c = Settings.get()
+    c.remote_idle_stop = on and true or false
+    Settings.save(c)
+    if Remote._server then
+        Remote._server:setIdleTimeout(on and Remote.IDLE_STOP or nil)
+    end
+end
+
 ---@param port number
 function Remote.setPort(port)
     local c = Settings.get()
@@ -877,6 +895,8 @@ function Remote.start()
         roots = Remote._layout.roots,
         home = Remote._layout.home,
         shortcuts = Remote._layout.shortcuts,
+        idle_timeout = Remote.idleStopOn() and Remote.IDLE_STOP or nil,
+        on_idle = Remote.stop,
         handlers = {
             list_dir = listDirAsync,
             is_dir = isDir,

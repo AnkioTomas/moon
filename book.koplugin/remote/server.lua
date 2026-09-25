@@ -85,11 +85,13 @@ Server._routeClipboard = Clipboard.route
 Server._routeStatus = Status.route
 Server._routeSettings = SettingsRoute.settings
 
----@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil }
+--- idle_timeout：连续这么多秒没有任何在途连接就调一次 on_idle（nil = 不检测）。
+---@param o { host: string|nil, port: number, handlers: RemoteHandlers, root: string, roots: string[]|nil, home: string|nil, shortcuts: table[]|nil, slice: number|nil, idle_timeout: number|nil, on_idle: fun()|nil }
 ---@return table
 function Server.new(o)
     assert(type(o.handlers) == "table", "remote.server: handlers required")
     assert(type(o.root) == "string", "remote.server: root required")
+    assert(not o.idle_timeout or o.on_idle, "remote.server: on_idle required with idle_timeout")
     return setmetatable({
         host = o.host or "*",
         port = o.port,
@@ -99,8 +101,18 @@ function Server.new(o)
         home = o.home or o.root, -- 页面默认路径
         shortcuts = o.shortcuts or {},
         slice = o.slice or 0.025,
+        idle_timeout = o.idle_timeout,
+        on_idle = o.on_idle,
         _conns = {},
+        _active_at = socket.gettime(),
     }, Server)
+end
+
+--- 运行中切换空闲超时并重新计时：否则刚打开开关就可能因为早已空闲而立刻停服。
+---@param seconds number|nil nil = 关闭空闲检测
+function Server:setIdleTimeout(seconds)
+    self.idle_timeout = seconds
+    self._active_at = socket.gettime()
 end
 
 --- 原子替换文件管理范围；运行中的连接后续路由立即使用新布局。
@@ -123,6 +135,7 @@ function Server:start()
     end
     sock:settimeout(0)
     self._sock = sock
+    self._active_at = socket.gettime()
     logger.info("book remote listening on", self.host, self.port)
     return true
 end
@@ -163,6 +176,14 @@ function Server:waitEvent()
         end
     end
     self:_reapIdle()
+    -- 在途连接（含等文件系统回调的 pending）都算活跃；网页开着会定时轮询，自然续期。
+    local now = socket.gettime()
+    if #self._conns > 0 then
+        self._active_at = now
+    elseif self.idle_timeout and now - self._active_at >= self.idle_timeout then
+        logger.info("book remote idle for", self.idle_timeout, "s")
+        self.on_idle()
+    end
     return nil
 end
 
