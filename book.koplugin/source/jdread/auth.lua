@@ -15,6 +15,15 @@ local LOGIN_PAGE = "https://passport.jd.com/new/login.aspx?ReturnUrl=https%3A%2F
 local LOGIN_UA = Request.randomUA()
 local login_jar = {}
 
+-- qrCodeTicketValidation 的 returnCode 语义，取自官方 login.qrcode.2024.js。
+local TICKET_ERRORS = {
+    [58] = "二维码已失效，请重新登录",
+    [59] = "二维码已失效，请重新登录",
+    [60] = "京东登录失败",
+    [70] = "京东登录失败",
+    [80] = "京东判定本次扫码存在风险，请稍后重试",
+}
+
 ---@return table
 local function cfg()
     return require("utils.settings").getSource("jdread")
@@ -223,9 +232,11 @@ function Auth.completeQrLoginAsync(info, cb)
             return
         end
         local ok, data = pcall(JSON.decode, raw)
-        if not ok or type(data) ~= "table" or tonumber(data.returnCode) ~= 0 then
+        local code = ok and type(data) == "table" and tonumber(data.returnCode) or nil
+        if code ~= 0 then
             pcall(os.remove, qrPath())
-            cb(nil, _("京东登录校验失败"))
+            local msg = _(TICKET_ERRORS[code] or "京东登录校验失败")
+            cb(nil, code and (msg .. " (" .. code .. ")") or msg)
             return
         end
         login_jar.QRCodeKey = nil
