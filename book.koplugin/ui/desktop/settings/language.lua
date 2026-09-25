@@ -149,7 +149,7 @@ function Language:sections(desktop)
     local lang = G_reader_settings:readSetting("language") or "C"
     local LanguageApi = require("ui/language")
     local method = Registry.current()
-    local dict_path = Paths.imeDictPath(method.id)
+    local dict_path = Paths.imeDictPath(method.dictionary)
     return {
         {
             title = _("语言"),
