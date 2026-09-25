@@ -48,6 +48,16 @@ Assert.eq(Settings.get().active_source, active)
 common.lock_screen = original_lock_screen
 Settings.save(common)
 
+-- 远程空闲自动关闭默认开，且关掉能落盘（未登记进 DEFAULTS 的键 save 会被丢弃）。
+Assert.is_true(Settings.get("remote").remote_idle_stop)
+common = Settings.get()
+common.remote_idle_stop = false
+Settings.save(common)
+Assert.is_false(Settings.get().remote_idle_stop)
+Assert.is_false(Settings.get("remote").remote_idle_stop)
+common.remote_idle_stop = true
+Settings.save(common)
+
 local src = Settings.getSource(active)
 Assert.not_nil(src)
 Assert.eq(type(src), "table")

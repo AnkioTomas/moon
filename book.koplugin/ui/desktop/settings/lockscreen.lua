@@ -15,6 +15,7 @@ local Background = require("lockscreen.background")
 local Components = require("lockscreen.components.base")
 local Layout = require("lockscreen.layout")
 local Bill = require("lockscreen.components.bill")
+local Poster = require("lockscreen.components.poster")
 local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -224,6 +225,28 @@ function Lockscreen:rows(desktop)
         end
     end
 
+    if component == "poster" then
+        rows[#rows + 1] = function(iw)
+            local style = Poster.style()
+            return SettingRow.build(iw, {
+                kind = "nav", icon = "view_module", title = _("海报风格"),
+                status = Poster.styleLabel(style),
+                callback = function()
+                    Popup.list{
+                        title = _("海报风格"),
+                        items = Poster.styleOptions(),
+                        current = style, choice_icons = true, centered = true,
+                        on_select = function(value)
+                            if not value or value == style then return end
+                            Settings.setPosterStyle(value)
+                            refreshAfterChange(desktop)
+                        end,
+                    }
+                end,
+            })
+        end
+    end
+
     if component == "message" then
         rows[#rows + 1] = function(iw)
             local text = Settings.customMessage()
@@ -240,7 +263,44 @@ function Lockscreen:rows(desktop)
     return rows
 end
 
---- 已合成图缩略居中；关 / 生成中 / 未生成走同一高度空框。
+--- 全屏看锁屏图；点任意处（或返回键）退出。
+---@param path string
+local function showFullscreen(path)
+    local Device = require("device")
+    local Geom = require("ui/geometry")
+    local Blitbuffer = require("ffi/blitbuffer")
+    local FrameContainer = require("ui/widget/container/framecontainer")
+    local CenterContainer = require("ui/widget/container/centercontainer")
+    local ImageWidget = require("ui/widget/imagewidget")
+    local BookInfo = require("ui.components.bookinfo")
+    local w, h = Device.screen:getWidth(), Device.screen:getHeight()
+    local viewer
+    local function close()
+        UIManager:close(viewer, "full")
+        return true
+    end
+    viewer = BookInfo.tappable(w, h, close)
+    viewer.covers_fullscreen = true
+    viewer.onClose = close
+    if Device:hasKeys() then
+        viewer.key_events = { Close = { { Device.input.group.Back } } }
+    end
+    viewer[1] = FrameContainer:new{
+        bordersize = 0, padding = 0, margin = 0,
+        background = Blitbuffer.COLOR_WHITE,
+        dimen = Geom:new{ w = w, h = h },
+        CenterContainer:new{
+            dimen = Geom:new{ w = w, h = h },
+            ImageWidget:new{
+                file = path, width = w, height = h,
+                scale_factor = 0, file_do_cache = false,
+            },
+        },
+    }
+    UIManager:show(viewer, "full")
+end
+
+--- 已合成图缩略居中，点击全屏查看；关 / 生成中 / 未生成走同一高度空框。
 --- 改配置会清空 lock_screen_day，成功生成才写回；为空时盘上的图属于旧配置，不能当预览。
 ---@param width number
 ---@return table
@@ -266,7 +326,10 @@ function Lockscreen.preview(width)
     local ImageWidget = require("ui/widget/imagewidget")
     local inner_w = math.max(1, width - 2)
     local inner_h = math.max(1, preview_h - 2)
-    return Overlay.previewBox(width, CenterContainer:new{
+    local tap = require("ui.components.bookinfo").tappable(width, preview_h, function()
+        showFullscreen(path)
+    end)
+    tap[1] = Overlay.previewBox(width, CenterContainer:new{
         dimen = Geom:new{ w = inner_w, h = inner_h },
         ImageWidget:new{
             file = path,
@@ -277,6 +340,7 @@ function Lockscreen.preview(width)
             file_do_cache = false,
         },
     }, preview_h)
+    return tap
 end
 
 return Lockscreen

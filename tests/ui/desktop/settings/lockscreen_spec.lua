@@ -42,12 +42,21 @@ package.preload["lockscreen.settings"] = function()
     return {
         isCompose = function() return true end,
         setBackgroundMode = function(value) log[#log + 1] = "set:" .. value end,
+        setPosterStyle = function(value) log[#log + 1] = "poster:" .. value end,
+    }
+end
+local component_id = "current"
+package.preload["lockscreen.components.poster"] = function()
+    return {
+        style = function() return "vertical" end,
+        styleLabel = function() return "竖屏排版" end,
+        styleOptions = function() return {} end,
     }
 end
 package.preload["lockscreen.compose"] = function()
     return { plan = function()
         return {
-            component = { id = "current" }, background_mode = "bing",
+            component = { id = component_id, supports_position = false }, background_mode = "bing",
             position = "center-center", wide = true, offline = true,
         }
     end }
@@ -77,6 +86,7 @@ local desktop = {
 }
 
 local rows = Lockscreen:rows(desktop)
+Assert.len(rows, 3, "非海报主体没有「海报风格」行")
 rows[2]({}).callback()
 Assert.is_true(popup ~= nil)
 popup.on_select("folder")
@@ -98,5 +108,21 @@ Assert.eq(log[#log], "show:锁屏图已更新")
 desktop.settings_overlay = nil
 refresh_cb(false, "boom")
 Assert.eq(log[#log], "show:生成失败: boom")
+
+-- 海报墙主体：多一行「海报风格」，选中后写配置并走同一条刷新链路。
+component_id = "poster"
+local poster_rows = Lockscreen:rows(desktop)
+Assert.len(poster_rows, 4)
+local style_row = poster_rows[4]({})
+Assert.eq(style_row.title, "海报风格")
+Assert.eq(style_row.status, "竖屏排版")
+style_row.callback()
+Assert.eq(popup.current, "vertical")
+ticks = {}
+popup.on_select("vertical")
+Assert.len(ticks, 0, "选中当前值不重出图")
+popup.on_select("standard")
+Assert.eq(log[#log - 2], "poster:standard")
+Assert.len(ticks, 1)
 
 return true

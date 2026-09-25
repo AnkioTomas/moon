@@ -70,6 +70,21 @@ local ok_run, err_run = pcall(function()
     saved.screensaver_type = "random_image"
     Settings.clearCover()
     Assert.eq(saved.screensaver_type, "random_image")
+
+    -- 海报风格：非法值不落盘；合法值清掉旧图标记并推进版本号
+    local MoonSettings = require("utils.settings")
+    local previous_style = MoonSettings.get().lock_screen_poster_style
+    MoonSettings.get().lock_screen_day = "stale"
+    local rev = Settings.revision()
+    Settings.setPosterStyle("bogus")
+    Assert.eq(MoonSettings.get().lock_screen_poster_style, previous_style)
+    Assert.eq(Settings.revision(), rev)
+    Settings.setPosterStyle("slant_left")
+    Assert.eq(MoonSettings.get().lock_screen_poster_style, "slant_left")
+    Assert.is_nil(MoonSettings.get().lock_screen_day)
+    Assert.eq(Settings.revision(), rev + 1)
+    MoonSettings.get().lock_screen_poster_style = previous_style
+    MoonSettings.save()
 end)
 
 _G.G_reader_settings = previous_settings
