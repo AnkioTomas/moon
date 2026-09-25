@@ -141,6 +141,9 @@ Assert.is_nil(server_opts.handlers.resolve_download(secret))
 package.preload["workers.job"] = function()
     return {
         run = function(work, opts)
+            assert(type(opts.name) == "string" and opts.name ~= "", "workers.job.run: opts.name required")
+            assert(({ instant = true, light = true, medium = true, heavy = true })[opts.kind],
+                "workers.job.run: kind must be instant|light|medium|heavy")
             opts.on_done(work())
             return { cancel = function() end }
         end,
