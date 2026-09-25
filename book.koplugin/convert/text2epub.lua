@@ -439,6 +439,7 @@ function Text2Epub.build(opts, cb)
     }, cb)
 end
 
+Text2Epub.chapterTitle = chapterTitle
 Text2Epub._isChapterTitle = isChapterTitle
 
 return Text2Epub
