@@ -2,8 +2,7 @@
 @module koplugin.book.ui.panel.settings
 --]]
 
-local ButtonDialog = require("ui/widget/buttondialog")
-local UIManager = require("ui/uimanager")
+local Popup = require("ui.views.popup")
 local SettingRow = require("ui.components.settingrow")
 local DesktopPanel = require("ui.panel.desktop")
 local ReaderPanel = require("ui.panel.reader")
@@ -38,42 +37,31 @@ end
 ---@param option BookQuickPanelOption
 local function configure(desktop, option)
     local panel = panelFor(option)
-    local dialog
-    --- 执行配置变更后关闭对话框并刷新设置页。
+    --- 执行配置变更后刷新设置页。
     ---@param change fun()
     ---@return fun()
     local function apply(change)
         return function()
             change()
-            UIManager:close(dialog)
             desktop:updateView()
         end
     end
-    local buttons = {}
-    buttons[#buttons + 1] = {{
+    local items = {{
         text = option.enabled and _("停用") or _("启用"),
         callback = apply(function() panel.setEnabled(option.id, not option.enabled) end),
     }}
     if option.enabled then
-        buttons[#buttons + 1] = {
-            {
-                text = _("上移"), enabled = option.position and option.position > 1,
-                callback = apply(function() panel.move(option.id, -1) end),
-            },
-            {
-                text = _("下移"), enabled = option.position and option.position < panel.enabledCount(),
-                callback = apply(function() panel.move(option.id, 1) end),
-            },
+        items[#items + 1] = {
+            text = _("上移"), enabled = option.position ~= nil and option.position > 1,
+            callback = apply(function() panel.move(option.id, -1) end),
+        }
+        items[#items + 1] = {
+            text = _("下移"), enabled = option.position ~= nil and option.position < panel.enabledCount(),
+            callback = apply(function() panel.move(option.id, 1) end),
         }
     end
-    buttons[#buttons + 1] = {{
-        --- 关闭动作配置对话框。
-        text = _("关闭"), callback = function() UIManager:close(dialog) end,
-    }}
-    dialog = ButtonDialog:new{
-        title = option.title, title_align = "center", use_info_style = false, buttons = buttons,
-    }
-    UIManager:show(dialog)
+    items[#items + 1] = { text = _("关闭") }
+    Popup.sheet{ title = option.title, items = items }
 end
 
 --- 把动作选项转成设置行工厂。

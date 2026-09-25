@@ -115,37 +115,17 @@ function Setting.open(plugin)
         return
     end
 
-    local UIManager = require("ui/uimanager")
-    local ButtonDialog = require("ui/widget/buttondialog")
-    local dialog
-    dialog = ButtonDialog:new{
+    require("ui.views.popup").sheet{
         title = _("京东读书账号"),
-        buttons = {
-            {
-                {
-                    text = _("重新扫码登录"),
-                    callback = function()
-                        UIManager:close(dialog)
-                        showQrLogin(plugin)
-                    end,
-                },
-            },
-            {
-                {
-                    text = _("退出登录"),
-                    callback = function()
-                        Auth.clearSession()
-                        UIManager:close(dialog)
-                        require("source.registry").afterAuthChanged(plugin)
-                    end,
-                },
-            },
-            {
-                { text = _("取消"), id = "close" },
-            },
+        items = {
+            { text = _("重新扫码登录"), callback = function() showQrLogin(plugin) end },
+            { text = _("退出登录"), callback = function()
+                Auth.clearSession()
+                require("source.registry").afterAuthChanged(plugin)
+            end },
+            { text = _("取消") },
         },
     }
-    UIManager:show(dialog)
 end
 
 return Setting

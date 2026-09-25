@@ -114,7 +114,7 @@ local function pickEnabledSources(desktop)
         }
     end
     Popup.list{
-        title = _("启用源"), select_mode = "multi", items = items,
+        title = _("启用源"), select_mode = "multi", items = items, centered = true,
         on_toggle = function(id, on) SourceRegistry.setEnabled(id, on) end,
         close_callback = function() desktop:updateView() end,
     }

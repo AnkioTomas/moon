@@ -48,14 +48,12 @@ local function refreshRow(desktop)
                 local items = {}
                 for _, preset in ipairs(REFRESH_PRESETS) do
                     items[#items + 1] = {
-                        text = preset.text,
+                        text = day == preset.value and "✓ " .. preset.text or preset.text,
                         value = preset.value,
-                        checked = day == preset.value,
                     }
                 end
-                Popup.list{
+                Popup.sheet{
                     title = _("屏幕刷新"),
-                    current = day,
                     items = items,
                     on_select = function(value)
                         UIManager:setRefreshRate(value, value)

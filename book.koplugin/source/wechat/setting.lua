@@ -203,69 +203,30 @@ function Setting.open(plugin)
     local NetworkMgr = require("ui/network/manager")
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
-    local ButtonDialog = require("ui/widget/buttondialog")
-    local dialog
     local cfg = require("utils.settings").getSource(SOURCE_ID)
-    local title = _("微信读书账号") .. " · " .. (Auth.userLabel() or cfg.user_id or "")
-    dialog = ButtonDialog:new{
-        title = title,
-        buttons = {
-            {
-                {
-                    text = _("重新扫码登录"),
-                    callback = function()
-                        UIManager:close(dialog)
-                        showQrLogin(plugin)
-                    end,
-                },
-            },
-            {
-                {
-                    text = _("刷新 Skills 密钥"),
-                    callback = function()
-                        UIManager:close(dialog)
-                        refreshAgentKey(plugin)
-                    end,
-                },
-            },
-            {
-                {
-                    text = _("续期会话"),
-                    callback = function()
-                        UIManager:close(dialog)
-                        NetworkMgr:runWhenOnline(function()
-                            Auth.renewCookieAsync(function(ok, err)
-                            UIManager:show(InfoMessage:new{
-                                text = ok and _("已续期") or (err or _("续期失败")),
-                                timeout = 2,
-                            })
-                            end)
-                        end)
-                    end,
-                },
-            },
-            {
-                {
-                    text = _("退出登录"),
-                    callback = function()
-                        UIManager:close(dialog)
-                        Auth.clearSession()
-                        UIManager:show(InfoMessage:new{ text = _("已退出"), timeout = 2 })
-                        require("source.registry").afterAuthChanged(plugin)
-                    end,
-                },
-            },
-            {
-                {
-                    text = _("取消"),
-                    callback = function()
-                        UIManager:close(dialog)
-                    end,
-                },
-            },
+    require("ui.views.popup").sheet{
+        title = _("微信读书账号") .. " · " .. (Auth.userLabel() or cfg.user_id or ""),
+        items = {
+            { text = _("重新扫码登录"), callback = function() showQrLogin(plugin) end },
+            { text = _("刷新 Skills 密钥"), callback = function() refreshAgentKey(plugin) end },
+            { text = _("续期会话"), callback = function()
+                NetworkMgr:runWhenOnline(function()
+                    Auth.renewCookieAsync(function(ok, err)
+                        UIManager:show(InfoMessage:new{
+                            text = ok and _("已续期") or (err or _("续期失败")),
+                            timeout = 2,
+                        })
+                    end)
+                end)
+            end },
+            { text = _("退出登录"), callback = function()
+                Auth.clearSession()
+                UIManager:show(InfoMessage:new{ text = _("已退出"), timeout = 2 })
+                require("source.registry").afterAuthChanged(plugin)
+            end },
+            { text = _("取消") },
         },
     }
-    UIManager:show(dialog)
 end
 
 return Setting

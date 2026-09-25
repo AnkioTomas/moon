@@ -14,8 +14,24 @@ package.preload["logger"] = function() return { err = function() end } end
 package.preload["device"] = function()
     return { isTouchDevice = function() return true end }
 end
+local dirty_funcs = {}
 package.preload["ui/uimanager"] = function()
-    return { show = function() end, setDirty = function() end }
+    return {
+        show = function() end,
+        setDirty = function(_, _, arg)
+            if type(arg) == "function" then dirty_funcs[#dirty_funcs + 1] = arg end
+        end,
+    }
+end
+local mesh_calls = {}
+package.preload["ui.components.meshmask"] = function()
+    return {
+        widget = function(opts)
+            return { paintTo = function(_, _, x, y)
+                mesh_calls[#mesh_calls + 1] = { x = x, y = y, w = opts.width, h = opts.height }
+            end }
+        end,
+    }
 end
 
 -- buildPanel 依赖的轻量桩，只验证分割线同步，不渲染真实面板。
@@ -105,6 +121,8 @@ TouchMenu.bar = {
 }
 
 function TouchMenu:updateItems() end
+local native_painted
+function TouchMenu:paintTo() native_painted = true end
 
 local switch_calls = 0
 local native_switch = function() switch_calls = switch_calls + 1 end
@@ -157,3 +175,22 @@ TouchMenu.bar.icon_widgets = nil
 TouchMenu.cur_tab = 1
 TouchMenu:updateItems()
 Assert.eq(TouchMenu.switchMenuTab, native_switch)
+
+-- 菜单下方铺网状遮罩：从菜单下沿画到屏底，并单独刷新该区域
+TouchMenu.screen_size = { w = 800, h = 1200 }
+TouchMenu.dimen.y, TouchMenu.dimen.h = 0, 300
+TouchMenu:paintTo({}, 0, 0)
+Assert.is_true(native_painted, "原生菜单必须照常绘制")
+Assert.eq(mesh_calls[1].y, 300)
+Assert.eq(mesh_calls[1].h, 900)
+Assert.eq(mesh_calls[1].w, 800)
+local refresh, region = dirty_funcs[#dirty_funcs]()
+Assert.eq(refresh, "ui")
+Assert.eq(region.y, 300)
+Assert.eq(region.h, 900)
+
+-- 菜单占满屏：不画遮罩，也不产生刷新（"ui" + nil 区域会变成全屏刷新）
+TouchMenu.dimen.h = 1200
+TouchMenu:paintTo({}, 0, 0)
+Assert.len(mesh_calls, 1)
+Assert.is_nil(dirty_funcs[#dirty_funcs]())
