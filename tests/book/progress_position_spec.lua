@@ -27,5 +27,17 @@ do
     Assert.eq(pos.locator, "xp")
 end
 
+-- 整书文档：目录章序号只标位置，全书比例就是文档比例，不能再按章数折算。
+do
+    local toc = { {}, {}, {}, {}, {}, {}, {}, {}, {}, {} }
+    local pos = Position.position({
+        doc_fraction = 0.8, chapter_fraction = 0.3,
+        identity = {}, reading_chapter_idx = 5,
+    }, toc, "第五章")
+    Assert.eq(pos.fraction, 0.8)
+    Assert.eq(pos.chapter_idx, 5)
+    Assert.eq(pos.chapter_fraction, 0.3)
+end
+
 Assert.eq(Position.fraction({ doc_fraction = -1 }, nil), 0)
 Assert.eq(Position.fraction({ doc_fraction = 2 }, nil), 1)

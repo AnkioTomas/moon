@@ -102,6 +102,15 @@ do
     Tracker.stop()
 end
 
+-- 单页停留封顶 120 秒：离开设备/忘关书的空闲时间不能算成阅读时长。
+do
+    added = {}
+    Tracker.start(ui("/book.epub", 1, 300))
+    now = now + 3600
+    Tracker.stop()
+    Assert.eq(added[1].duration, 120)
+end
+
 os.time = real_time
 
 for _, name in ipairs({
