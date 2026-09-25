@@ -49,7 +49,6 @@ function M:createWidget()
 end
 
 --- 恢复显示时重新抽取一言，更新引言并刷新内容区域。
----@return nil
 function M:onResume()
     if not self.parts then return end
     self.parts:updateView(self:sample())
@@ -57,7 +56,6 @@ function M:onResume()
 end
 
 --- 清除引言实例、桌面引用和上一次文本。
----@return nil
 function M:onDestroy()
     self.parts = nil
     self.desktop = nil

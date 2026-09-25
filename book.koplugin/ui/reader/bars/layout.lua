@@ -74,7 +74,6 @@ end
 
 --- 清洗用户布局：已知 id、不重复、align 只有 left/right。
 ---@param which string
----@param raw any
 ---@return table
 local function sanitize(which, raw)
     if type(raw) ~= "table" then
@@ -116,7 +115,6 @@ end
 --- 写入布局。
 ---@param which string
 ---@param layout table
----@return nil
 function Layout.set(which, layout)
     local reader = MoonSettings.get("reader")
     reader[KEY[which]] = sanitize(which, layout)
@@ -133,7 +131,6 @@ end
 --- 写入替代系统栏开关。
 ---@param which string
 ---@param on boolean
----@return nil
 function Layout.setReplace(which, on)
     local reader = MoonSettings.get("reader")
     reader[REPLACE_KEY[which]] = on ~= false
@@ -172,7 +169,6 @@ end
 --- 开关组件：打开时追加到末尾。
 ---@param which string
 ---@param id string
----@return nil
 function Layout.toggle(which, id)
     local layout = Layout.get(which)
     for i = 1, #layout do
@@ -193,7 +189,6 @@ end
 ---@param which string
 ---@param id string
 ---@param delta number
----@return nil
 function Layout.move(which, id, delta)
     local layout = Layout.get(which)
     local index
@@ -218,7 +213,6 @@ end
 ---@param which string
 ---@param id string
 ---@param align string
----@return nil
 function Layout.setAlign(which, id, align)
     if align ~= "left" and align ~= "right" then
         return

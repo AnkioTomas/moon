@@ -73,7 +73,6 @@ end
 
 --- 取消本实例保存的定时回调并清除句柄。
 ---@param self BookHomeClock 当前视图或布局实例
----@return nil
 local function stopTick(self)
     if self._tick then UIManager:unschedule(self._tick) end
     self._tick = nil
@@ -136,7 +135,6 @@ function M:createWidget()
 end
 
 --- 更新当前时间、日期及农历节日文字，并请求内容区域刷新。
----@return nil
 function M:paint()
     if not self.time_widget then return end
     self.time_widget:setText(os.date("%H:%M"))
@@ -146,7 +144,6 @@ function M:paint()
 end
 
 --- 取消旧计时回调，立即刷新一次后按下一分钟边界继续调度。
----@return nil
 function M:tick()
     if not self.time_widget then return end
     stopTick(self)
@@ -168,7 +165,6 @@ function M:loadData(done)
 end
 
 --- 仅在 Resume 阶段发起数据加载；数据变化后更新内容，取消的旧回调不再改写视图。
----@return nil
 function M:pull()
     if not self.lifecycle:uiReady() then return end
     local previous = self.data
@@ -182,7 +178,6 @@ function M:pull()
 end
 
 --- 刷新时间文字，启动分钟计时器并拉取农历节日。
----@return nil
 function M:onResume()
     self:paint()
     self:tick()
@@ -190,13 +185,11 @@ function M:onResume()
 end
 
 --- 取消分钟计时器，保留已有显示数据。
----@return nil
 function M:onPause()
     stopTick(self)
 end
 
 --- 取消计时器并清除文字控件及桌面引用。
----@return nil
 function M:onDestroy()
     stopTick(self)
     self.time_widget = nil

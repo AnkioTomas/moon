@@ -39,7 +39,6 @@ local function pageText(ui, page)
     end
     local parts = {}
     --- 递归收集词框里的文本（word / text 字段优先），最多下探 5 层防环。
-    ---@param value any
     ---@param depth integer
     local function walk(value, depth)
         if depth > 5 then return end

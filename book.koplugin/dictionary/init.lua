@@ -15,7 +15,6 @@ local DictInit = {}
 local DOWNLOAD_ITEM_ID = "dictionary_download"
 
 --- 把下载入口排在查词之后；菜单项本身由 ReaderDictionary.addToMainMenu 提供。
----@return nil
 local function placeDownloadMenu()
     for _, module in ipairs({
         "ui/elements/reader_menu_order",
@@ -44,7 +43,6 @@ function DictInit.isEnabled()
 end
 
 --- 安装一次；只修改入口方法，不触碰 KOReader 源码。
----@return nil
 function DictInit.onCreate()
     local ReaderDictionary = require("apps/reader/modules/readerdictionary")
     if ReaderDictionary._book_dict_installed then

@@ -43,7 +43,6 @@ local function readerUi()
     return ok and ReaderUI.instance or nil
 end
 
----@return nil
 local function refreshReaderUi()
     local ui = readerUi()
     if ui and ui.dialog then

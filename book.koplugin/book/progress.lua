@@ -30,7 +30,6 @@ local Progress = {
 }
 
 --- fraction 钳制到 0..1。
----@param raw any
 ---@return number
 function Progress.clampFraction(raw)
     local n = tonumber(raw)
@@ -280,7 +279,6 @@ local function syncOnce(source, opts, cb)
         opts.dirty_only and "dirty_only" or "full")
     --- 终结整次同步并回调；已取消时静默丢弃。
     ---@param value SyncResult|nil nil 表示失败
-    ---@param err any
     local function finish(value, err)
         if cancelled then return end
         if value then

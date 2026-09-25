@@ -84,7 +84,6 @@ local CHILDREN = { "topbar", "bottombar", "home", "library", "store", "insight",
 ---@param child table|nil 接收事件的子视图；nil 时跳过
 ---@param method string 子视图上的方法名
 ---@param ... any 原样传给接收方法的参数
----@return nil
 local function notify(child, method, ...)
     if child and child[method] then child[method](child, ...) end
 end
@@ -93,7 +92,6 @@ end
 ---@param self BookDesktop 拥有子视图的父实例
 ---@param method string 子视图上的方法名
 ---@param ... any 原样传给接收方法的参数
----@return nil
 local function broadcast(self, method, ...)
     for _, key in ipairs(CHILDREN) do notify(self[key], method, ...) end
 end
@@ -136,7 +134,6 @@ end
 
 --- 当前 tab 不在 tabs 列表中则回退 home（换源 / 能力变化后调用）。
 ---@param self BookDesktop 当前视图或布局实例
----@return nil
 local function clampTab(self)
     for _, t in ipairs(self._tabs) do
         if t.id == self.tab then
@@ -149,7 +146,6 @@ end
 --- 换源：更新 Tab，广播给各页自己复位，再回到首页。
 ---@param self BookDesktop 当前视图或布局实例
 ---@param source BookSource|nil 书籍所属数据源实例
----@return nil
 local function applySource(self, source)
     self.source = source
     self._tabs = desktopTabs(source)
@@ -195,7 +191,6 @@ end
 --- 只广播。换源改的是 Desktop 自己的 source/tab，不是替孩子分流。
 ---@param event string|table 父组件转发的事件名称或事件对象
 ---@param payload any 与事件一起传入的数据
----@return nil
 function Desktop:onEvent(event, payload)
     if self.lifecycle.state == "Destroy" then return end
     if event == "source_changed" then
@@ -206,40 +201,33 @@ function Desktop:onEvent(event, payload)
 end
 
 --- KOReader 电源 / 网络 / 前光事件 → 统一 onEvent 名。
----@return nil
 function Desktop:onCharging()
     self:onEvent("Charging")
 end
 --- 将停止充电事件转发给桌面子组件。
----@return nil
 function Desktop:onNotCharging()
     self:onEvent("NotCharging")
 end
 --- 将网络连接成功事件转发给桌面子组件。
----@return nil
 function Desktop:onNetworkConnected()
     self:onEvent("NetworkConnected")
 end
 --- 将网络断开事件转发给桌面子组件。
----@return nil
 function Desktop:onNetworkDisconnected()
     self:onEvent("NetworkDisconnected")
 end
 --- 将前光状态变化事件转发给桌面子组件。
----@return nil
 function Desktop:onFrontlightStateChanged()
     self:onEvent("FrontlightStateChanged")
 end
 
 --- 系统 Resume 广播进桌面（窗口在栈上时）。
----@return nil
 function Desktop:onResumeEvent()
     if self.lifecycle.state == "Destroy" then return end
     self:onResume()
 end
 
 --- 初始化手势区与默认分页状态，再 onCreate 画出第一帧。
----@return nil
 function Desktop:init()
     self.lifecycle = Lifecycle.attach(self)
     self.view = View.attach(self)
@@ -362,7 +350,6 @@ end
 
 --- 切换底栏 Tab。页数据跟着页对象走；壳用 updateView 换槽。
 ---@param id string 底栏 Tab 标识，须在 PAGES 内
----@return nil
 function Desktop:switchTab(id)
     if not PAGES[id] then return end
     local changed = self.tab ~= id
@@ -453,7 +440,6 @@ function Desktop:onClose()
 end
 
 --- Widget 关闭回调：若尚未销毁，走 Destroy（含停止系列补全）。
----@return nil
 function Desktop:onCloseWidget()
     if self.lifecycle.state == "Destroy" then return end
     self:onDestroy()

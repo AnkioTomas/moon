@@ -76,7 +76,6 @@ local Detail = InputContainer:extend{
 ---@param desktop BookDesktop 所属桌面实例
 ---@param origin "store"|"library" 详情来源
 ---@param book table 当前操作或展示的书籍数据
----@return nil
 function Detail.open(desktop, origin, book)
     if origin ~= "store" and origin ~= "library" then return end
     if type(book) ~= "table" then return end
@@ -119,7 +118,6 @@ end
 local storeKind = require("ui.desktop.detail.common").storeKind
 
 --- 初始化全屏尺寸、返回键，挂生命周期后 rebuild 并拉本机阅读统计。
----@return nil
 function Detail:init()
     self.lifecycle = Lifecycle.attach(self)
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
@@ -191,7 +189,6 @@ end
 
 --- 异步拉本机阅读统计（汇总 + 最近 N 天），完成后重建阅读情况区。
 --- Z-Library 预览书未读过，无本机数据可查，直接跳过。
----@return nil
 function Detail:fetchStats()
     local book = self.book
     if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
@@ -209,7 +206,6 @@ function Detail:fetchStats()
 end
 
 --- 取消详情页尚未结束的数据加载和相关异步工作。
----@return nil
 function Detail:onCancel()
     self.lifecycle:abortWork()
     self._store_detail_job = nil
@@ -249,7 +245,6 @@ end
 --- 刮削/编辑结束后重读 books 行并重绘：元数据与封面都只在 rebuild 时取，
 --- 光 setDirty 只会把旧数据再画一遍。
 --- 走到这说明底层数据已变，打脏标记，关闭详情时桌面要清缓存重建而不是纯重绘。
----@return nil
 function Detail:reload()
     self._dirty = true
     if self.desktop and self.desktop.library then
@@ -268,7 +263,6 @@ function Detail:reload()
 end
 
 --- Widget 关闭时走 Destroy（若尚未销毁）并触发 close_callback。
----@return nil
 function Detail:onCloseWidget()
     if self.lifecycle.state ~= "Destroy" then
         self:onDestroy()

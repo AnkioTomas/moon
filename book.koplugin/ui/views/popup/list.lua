@@ -109,13 +109,11 @@ end
 --- title_shrink_font_to_fit 下 setTitle 会 clear+init，左侧按钮须每次重挂。
 ---@param title_bar table 安装左侧操作按钮的标题栏
 ---@param opts table 布局尺寸、样式及行为选项；缺省项使用组件默认值
----@return nil
 local function attachMaterialLeftAction(title_bar, opts)
     if not opts.title_material_icon then
         return
     end
     --- 往标题栏左侧预留区叠一个胶囊图标按钮（直接 table.insert 进 TitleBar 的重叠组）。
-    ---@return nil
     local function insertLeft()
         local btn_w = UI.sz(44)
         local bar_h = title_bar:getHeight()
@@ -165,7 +163,6 @@ end
 --- 给 menu 挂 setBottomTabActive(id) 供调用方切选中态。
 ---@param menu table 需要安装底部 Tab 的菜单实例
 ---@param bt table 底部 Tab 的项目、选中值和切换回调
----@return nil
 local function attachBottomTabs(menu, bt)
     local BottomBar = require("ui.views.bottombar")
     local view = BottomBar:new{ host = menu, data = {
@@ -225,7 +222,6 @@ function List.openList(opts, normalize)
     ---@type { menu: Menu|nil }
     local holder = { menu = nil }
     --- 关闭当前 list 菜单（仅关闭，不触发回调——Menu 的 close_callback 会处理）。
-    ---@return nil
     local function close()
         if holder.menu then
             UIManager:close(holder.menu)
@@ -233,7 +229,6 @@ function List.openList(opts, normalize)
         end
     end
     --- 重绘当前页（多选勾选切换用）。
-    ---@return nil
     local function refresh()
         if holder.menu then
             holder.menu:updateItems(nil, true)

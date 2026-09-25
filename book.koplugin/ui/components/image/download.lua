@@ -153,7 +153,6 @@ function Download.new(url, headers, cb)
 end
 
 ---@param path string|nil
----@param err any
 function Download:_complete(path, err)
     if not path then
         pcall(os.remove, self.tmp)
@@ -166,7 +165,6 @@ function Download:_complete(path, err)
 end
 
 ---@param ok boolean
----@param err any
 function Download:_onHttp(ok, err)
     if self.settled then
         return

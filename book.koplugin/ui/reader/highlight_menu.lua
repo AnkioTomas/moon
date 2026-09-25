@@ -118,7 +118,6 @@ end
 
 --- 给当前 ReaderHighlight 实例挂上显隐门控（含晚注册的插件按钮）。
 ---@param highlight table|nil
----@return nil
 function HighlightMenu.ensureWrapped(highlight)
     if not highlight or not highlight._highlight_buttons then
         return
@@ -188,7 +187,6 @@ end
 
 --- 安装划词弹窗显隐门控；重复调用无副作用。
 ---@param ui table|nil
----@return nil
 function HighlightMenu.install(ui)
     patchShowMenu()
     if not ui or not ui.highlight then

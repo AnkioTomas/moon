@@ -56,24 +56,6 @@ for _, b in ipairs(long) do
 end
 Assert.eq(long_labels, 2)
 
--- 折线图：线段 + 点
-local lines = {}
-Chart.appendLines(lines, {
-    values = { 10, 30, 20 },
-    labels = { "a", "b", "c" },
-    x = 0, y = 0, width = 100, height = 40,
-    label_mode = "none",
-})
-local line_n, dot_n = 0, 0
-for _, b in ipairs(lines) do
-    if b.kind == "line" then line_n = line_n + 1 end
-    if b.kind == "dot" then dot_n = dot_n + 1 end
-end
-Assert.eq(line_n, 2)
-Assert.eq(dot_n, 3)
-Assert.eq(lines[2].x1, 0)
-Assert.eq(lines[2].x2, 49)
-
 -- 统计卡的 7 根柱应铺满绘图区，而不是被默认柱宽上限缩在中间。
 local full = {}
 local seven = {}

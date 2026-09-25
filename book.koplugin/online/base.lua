@@ -35,7 +35,6 @@ function Online.untilMidnight()
     return left
 end
 
----@param value any
 ---@return string|nil
 function Online.nonempty(value)
     if type(value) ~= "string" then return nil end

@@ -59,7 +59,6 @@ function Image.await(root, cb)
     local subscriptions = {}
     local seen = {}
     --- 记录一个子任务结束，所有子任务完成后通知调用者。
-    ---@return nil
     local function done()
         pending = pending - 1
         if closed and pending == 0 and not finished then
@@ -69,7 +68,6 @@ function Image.await(root, cb)
     end
     --- 遍历 Widget 数字索引子树，订阅未落定的图片，同一节点只访问一次。
     ---@param widget table 参与布局或绘制的 Widget
-    ---@return nil
     local function visit(widget)
         if seen[widget] then return end
         seen[widget] = true
@@ -217,7 +215,6 @@ local function cheap(path, w, h)
 end
 
 --- 跳过失效图片任务，每个 UI tick 最多解码一张仍存活的排队图片。
----@return nil
 local function pump()
     pumping = false
     while wait[1] do
@@ -240,7 +237,6 @@ end
 --- 将图片解码加入队列，尚未调度时安排下一个 UI tick。
 ---@param box table 持有图片状态与取消句柄的占位容器
 ---@param path string 图片或书籍的本地文件路径
----@return nil
 local function enqueue(box, path)
     wait[#wait + 1] = { box = box, path = path }
     if pumping then
@@ -252,7 +248,6 @@ end
 
 --- 没上过屏就不 setDirty，否则会为尚未显示的占位额外刷新。
 ---@param box table 持有图片状态与取消句柄的占位容器
----@return nil
 local function requestPaint(box)
     if not box._screen then
         return
@@ -293,7 +288,6 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     ---@param bb any 用于绘制的 Blitbuffer 画布
     ---@param x number 目标区域左上角横坐标，单位像素
     ---@param y number 目标区域左上角纵坐标，单位像素
-    ---@return nil
     function box:paintTo(bb, x, y)
         self._screen = Geom:new{ x = x, y = y, w = self.dimen.w, h = self.dimen.h }
         WidgetContainer.paintTo(self, bb, x, y)
@@ -318,7 +312,6 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     box._alpha = alpha
 
     --- 把本张图片标记为落定，并且仅一次通知等待该图片的批次。
-    ---@return nil
     function box:_settle()
         if self._settled then return end
         self._settled = true
@@ -328,7 +321,6 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     end
 
     --- 只取消这一张的下载。
-    ---@return nil
     function box:cancel()
         if self._download then
             self._download:cancel()
@@ -338,7 +330,6 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
 
     --- 暂停时保留已绘制内容，但取消下载并拒绝后到的图片结果。
     -- 首页暂停时保留已绘制的图片，但停止任务并拒绝晚到结果。
-    ---@return nil
     function box:onHomePause()
         self._alive = false
         self:cancel()
@@ -348,7 +339,6 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     --- 换成已落地的图片。
     ---@param widget table|nil 参与布局或绘制的 Widget
     ---@param path string|nil 图片或书籍的本地文件路径
-    ---@return nil
     function box:_apply(widget, path)
         if not widget then
             return
@@ -369,7 +359,6 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
 
     --- 释放占位并取消在飞下载。
     ---@param full any 原样传给子控件 free 的释放选项
-    ---@return nil
     function box:free(full)
         self._alive = false
         self:cancel()
@@ -379,7 +368,6 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
 
     --- 解这一张。getSize 会触发 ImageWidget:_render。
     ---@param path string 图片或书籍的本地文件路径
-    ---@return nil
     function box:_applyFile(path)
         local widget
         local ok, err = pcall(function()
@@ -401,7 +389,6 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
 
     --- 小图当场解；大图进队，一帧一张。
     ---@param path string 图片或书籍的本地文件路径
-    ---@return nil
     function box:_showFile(path)
         if cheap(path, self._inner_w, self._inner_h) then
             self:_applyFile(path)

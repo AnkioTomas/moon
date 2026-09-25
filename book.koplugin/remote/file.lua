@@ -17,7 +17,6 @@ local File = {}
 -- FAT32 单文件上限以下留出余量；更大的文件不适合经阅读器缓存中转。
 File.MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
----@param err any
 ---@return number
 local function mutationErrorCode(err)
     err = tostring(err or "")

@@ -37,7 +37,6 @@ end
 
 --- 换源、首页刷新或书籍详情变化时重建已存在的内容树。
 ---@param event string|table 父组件转发的事件名称或事件对象
----@return nil
 function Base:onEvent(event)
     if self.widget and (event == "source_changed" or event == "home_refresh" or event == "detail_dirty") then
         self:rebuild()

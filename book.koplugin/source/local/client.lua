@@ -200,7 +200,6 @@ local function moveBookArtifacts(old_path, new_path)
 end
 
 --- 把封面 blitbuffer 落盘为 PNG（os.remove/os.rename 不抛异常，无需 pcall）。
----@param bb any
 ---@param stable_id string
 local function saveCover(bb, stable_id)
     if not bb then
@@ -288,7 +287,6 @@ local function parseBookProps(path)
         return nil
     end
     --- 元数据字段归一：非字符串或去空白后为空一律当作缺失。
-    ---@param s any
     ---@return string|nil
     local function clean(s)
         if type(s) ~= "string" then
@@ -606,7 +604,6 @@ function Client:moveBook(stable_id, category, series)
         return nil, _("无效路径")
     end
     --- 单级目录名：去空白；含路径分隔符或以 . 开头（隐藏目录/逃逸书库根）拒绝。
-    ---@param s any
     ---@return string|nil, boolean|nil
     local function dirName(s)
         s = Text.trim(type(s) == "string" and s or "")

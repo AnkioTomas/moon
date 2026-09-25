@@ -101,7 +101,6 @@ end
 ---@param ui table
 ---@param identity BookIdentity 当前 ReaderSession 身份
 ---@param done fun(ok: boolean, updated_at: number|nil)|nil
----@return nil
 function Note.save(ui, identity, done)
     if not ui or not ui.doc_settings then
         if done then done(false) end
@@ -177,7 +176,6 @@ local function runSyncAsync(source, opts, cb)
         opts.dirty_only and "dirty_only" or "full")
     --- 终结整次同步并回调；已取消时静默丢弃。
     ---@param value SyncResult|nil nil 表示失败
-    ---@param err any
     local function finish(value, err)
         if cancelled then return end
         if value then

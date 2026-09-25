@@ -8,7 +8,6 @@ local _ = require("gettext")
 
 return function(Detail)
 --- 编辑元信息对话框（书名/作者/分类/系列）。
----@return nil
 function Detail:openEditor()
     local book = self.book or {}
     if type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
@@ -59,7 +58,6 @@ end
 --- 本地源：分类/系列即目录层级，改动会移动文件、stable_id 跟着变
 ---（opens/reading_stats/pending_progress 由 moveBook 里的 renameStableId 迁移）。
 ---@param fields table 对话框字段值：书名/作者/分类/系列
----@return nil
 function Detail:saveMeta(fields)
     local book = self.book
     if type(book) ~= "table" or type(fields) ~= "table" then

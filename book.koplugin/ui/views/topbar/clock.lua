@@ -40,7 +40,6 @@ function Clock:createWidget()
 end
 
 --- 按下一分钟边界安排时钟刷新，仅在 Resume 阶段继续调度。
----@return nil
 function Clock:scheduleTick()
     if not self.lifecycle:uiReady() then return end
     self:unschedule()
@@ -54,14 +53,12 @@ function Clock:scheduleTick()
 end
 
 --- 刷新当前时间并启动分钟对齐的定时器。
----@return nil
 function Clock:onResume()
     self:updateView()
     self:scheduleTick()
 end
 
 --- 取消时钟定时器并清除指标及屏幕矩形引用。
----@return nil
 function Clock:onDestroy()
     self:unschedule()
     self.metric_widget = nil

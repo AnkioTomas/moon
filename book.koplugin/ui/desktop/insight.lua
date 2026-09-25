@@ -54,7 +54,6 @@ function Insight:new(opts)
     return View.new(self, opts)
 end
 
----@return nil
 function Insight:cancel()
     if self.fetch_cancel then
         self.fetch_cancel:cancel()

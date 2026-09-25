@@ -32,7 +32,6 @@ local KIND_IMAGE = "image"
 
 --- 递归创建目录（已存在则跳过）
 ---@param path string|nil
----@return nil
 function P.ensureDir(path)
     if not path or path == "" then
         return
@@ -87,7 +86,6 @@ function P.screensaverDir()
     return P.root() .. "/screensaver"
 end
 
----@return nil
 function P.ensureScreensaverDir()
     P.ensureDir(P.screensaverDir())
 end
@@ -218,7 +216,6 @@ function P.sourcePath(id)
 end
 
 --- 只保证 settings 树存在。打开配置文件必须走这里，不能调 ensureLayout。
----@return nil
 function P.ensureSettings()
     P.ensureDir(P.root())
     P.ensureDir(P.settingsDir())
@@ -237,22 +234,13 @@ function P.patchBackupDir(feature)
     return P.patchBackupsDir() .. "/" .. tostring(feature)
 end
 
---- 保证某功能的补丁备份目录存在。
----@param feature string
----@return nil
-function P.ensurePatchBackupDir(feature)
-    P.ensureDir(P.patchBackupDir(feature))
-end
-
 --- 保证 fonts 目录存在
----@return nil
 function P.ensureFonts()
     P.ensureDir(P.root())
     P.ensureDir(P.fontsDir())
 end
 
 --- 只保证共享缓存根存在；清理流程不能凭空猜测活跃 source_id。
----@return nil
 function P.ensureCacheRoot()
     P.ensureSettings()
     P.ensureDir(P.cacheDir())
@@ -266,7 +254,6 @@ function P.imageRootDir()
 end
 
 --- 确保通用网络图片目录存在。
----@return nil
 function P.ensureImageRoot()
     P.ensureCacheRoot()
     P.ensureDir(P.imageRootDir())
@@ -274,7 +261,6 @@ end
 
 --- 确保 .moon 与指定源的 cache/book/image 目录存在
 ---@param id string
----@return nil
 function P.ensureLayout(id)
     P.ensureCacheRoot()
     id = P.sanitizeSourceId(id)
@@ -287,7 +273,6 @@ end
 --- slug 是 md5(stable_id)，阅读时通过 books 表反查，不落额外身份文件。
 ---@param stable_id string
 ---@param id string
----@return nil
 function P.ensureBookWork(stable_id, id)
     P.ensureLayout(id)
     local dir = P.bookWorkDir(stable_id, id)

@@ -69,13 +69,11 @@ local function tmpManifestPath(method)
     return tmpDir(method) .. "/.manifest.json"
 end
 
----@param value any
 ---@return boolean
 local function isSha256(value)
     return type(value) == "string" and #value == 64 and value:match("^[%da-fA-F]+$") ~= nil
 end
 
----@param value any
 ---@return boolean
 local function isPositiveInteger(value)
     local n = tonumber(value)
@@ -83,7 +81,6 @@ local function isPositiveInteger(value)
 end
 
 --- 验证不受本地控制的远程 manifest，避免路径逃逸和坏数据把下载状态机卡死。
----@param manifest any
 ---@return boolean, string|nil, number|nil
 local function validateManifest(manifest)
     if type(manifest) ~= "table" or type(manifest.built_at) ~= "string" or manifest.built_at == ""
@@ -237,7 +234,6 @@ function M.ensure(method, cb, on_progress)
     local done_called = false
     --- 收尾：解掉在飞标记并回调，只生效一次（多条失败路径可能都调到）。
     ---@param ok boolean
-    ---@param err any
     local function done(ok, err)
         if done_called then
             return

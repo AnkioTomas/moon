@@ -95,12 +95,10 @@ end
 
 local ClockWeather = require("ui.desktop.home.views.clock_weather")
 Assert.eq(ClockWeather.order(), "weather_left")
-Assert.eq(ClockWeather.orderLabel(), "天气在左")
 
 ClockWeather.saveOrder(ClockWeather.ORDER_CLOCK)
 Assert.eq(home.home_clock_weather_order, "clock_left")
 Assert.eq(ClockWeather.order(), "clock_left")
-Assert.eq(ClockWeather.orderLabel(), "时间在左")
 
 ClockWeather.saveOrder(ClockWeather.ORDER_WEATHER)
 Assert.eq(ClockWeather.order(), "weather_left")

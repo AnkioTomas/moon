@@ -11,9 +11,6 @@ local _ = require("gettext")
 
 --- 简易模板替换（避免测试环境依赖 string.pack）。
 ---@param fmt string
----@param a1 any
----@param a2 any
----@param a3 any
 ---@return string
 local function T(fmt, a1, a2, a3)
     local s = tostring(fmt)
@@ -239,16 +236,6 @@ function Registry.resolve(id)
     return source, create_err or err
 end
 
---- 必须拿到活跃源；失败抛错给调用方处理（不再静默换 Moon）
----@return BookSource
-function Registry.requireActive()
-    local src, err = Registry.current()
-    if not src then
-        error(err or "no active source")
-    end
-    return src
-end
-
 --- 切换并激活指定数据源。
 ---@param id SourceId
 ---@return BookSource|nil, string|nil
@@ -273,11 +260,6 @@ function Registry.setActive(id)
     Registry.activate(candidate, id)
     logger.info("book.source setActive", id)
     return candidate
-end
-
---- 插件关闭时释放活跃源。
-function Registry.shutdown()
-    Registry.invalidate()
 end
 
 return Registry

@@ -189,7 +189,6 @@ end
 
 --- 移动菜单。
 ---@param opts { can_up: boolean, can_down: boolean, can_prev_page: boolean, can_next_page: boolean, on_up: fun(), on_down: fun(), on_prev_page: fun(), on_next_page: fun() }
----@return nil
 function Edit.showMoveDialog(opts)
     local dialog
     dialog = ButtonDialog:new{
@@ -247,7 +246,6 @@ end
 ---   current: "default"|"fill"|number,
 ---   on_apply: fun(height: "default"|"fill"|number),
 --- }
----@return nil
 function Edit.showHeightDialog(opts)
     local range = opts.range or {}
     local natural = math.max(1, math.floor(tonumber(range.height) or 1))
@@ -255,7 +253,6 @@ function Edit.showHeightDialog(opts)
     local dialog
     --- 关闭高度菜单并调用组件高度应用回调。
     ---@param height number|string 目标高度，单位像素
-    ---@return nil
     local function apply(height)
         UIManager:close(dialog)
         opts.on_apply(height)
@@ -306,7 +303,6 @@ end
 --- 添加组件列表。
 ---@param candidates { id: string, label: string }[]
 ---@param on_pick fun(id: string)
----@return nil
 function Edit.showAddDialog(candidates, on_pick)
     local dialog
     local buttons = {}

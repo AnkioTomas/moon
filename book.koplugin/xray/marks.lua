@@ -369,7 +369,6 @@ function Marks:updateView()
     scheduleScan(self, key, entities)
 end
 
----@param bb any
 ---@param rect table
 local function paintDashedUnderscore(bb, rect)
     local Blitbuffer = require("ffi/blitbuffer")

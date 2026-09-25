@@ -135,7 +135,6 @@ function Detail:buildRecent(w, avail_h)
     if show_pager then
         --- 翻页：改页码重建。
         ---@param p number 目标页码
-        ---@return nil
         local function goto2(p)
             self._daily_page = p
             self:updateView()

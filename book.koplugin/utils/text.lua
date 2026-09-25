@@ -9,35 +9,30 @@
 local Text = {}
 
 --- 去首尾空白；nil 视为空字符串。
----@param s any
 ---@return string
 function Text.trim(s)
     return (tostring(s or ""):match("^%s*(.-)%s*$"))
 end
 
 --- 只去尾部空白（保留行首缩进的场景用）。
----@param s any
 ---@return string
 function Text.rtrim(s)
     return (tostring(s or ""):match("^(.-)%s*$"))
 end
 
 --- 去除全部空白（URL / 令牌等配置值里的粘贴残渣）。
----@param s any
 ---@return string
 function Text.stripWhitespace(s)
     return (tostring(s or ""):gsub("%s+", ""))
 end
 
 --- 去首尾斜杠。
----@param s any
 ---@return string
 function Text.trimSlashes(s)
     return (tostring(s or ""):gsub("^/+", ""):gsub("/+$", ""))
 end
 
 --- 只去尾部斜杠。
----@param s any
 ---@return string
 function Text.rtrimSlashes(s)
     return (tostring(s or ""):gsub("/+$", ""))
@@ -55,7 +50,6 @@ function Text.pathContains(root, path)
 end
 
 --- 去 UTF-8 BOM。
----@param s any
 ---@return string
 function Text.stripBom(s)
     return (tostring(s or ""):gsub("^\239\187\191", ""))
@@ -106,7 +100,6 @@ function Text.isValidUtf8(s)
 end
 
 --- 按字节上限截取 UTF-8 字符串，不切断多字节字符。
----@param s any
 ---@param max_bytes number
 ---@return string
 function Text.truncateUtf8(s, max_bytes)
@@ -141,14 +134,12 @@ function Text.truncateUtf8(s, max_bytes)
 end
 
 --- 换行符规范化：\r\n / \r → \n。
----@param s any
 ---@return string
 function Text.normalizeNewlines(s)
     return (tostring(s or ""):gsub("\r\n", "\n"):gsub("\r", "\n"))
 end
 
 --- XML/HTML 特殊字符转义（& < > "）。
----@param s any
 ---@return string
 function Text.xmlEscape(s)
     return (tostring(s or "")
@@ -182,7 +173,6 @@ local function utf8char(cp)
 end
 
 --- XML/HTML 实体解码：命名实体（lt/gt/quot/apos/amp）+ 十/十六进制数字实体。
----@param s any
 ---@return string
 function Text.xmlDecode(s)
     s = tostring(s or "")
@@ -200,7 +190,6 @@ function Text.xmlDecode(s)
 end
 
 --- URL 编码（RFC 3986 unreserved 保留，其余 %XX 大写）。
----@param value any
 ---@return string
 function Text.urlEncode(value)
     return (tostring(value):gsub("([^%w%-_%.~])", function(c)

@@ -224,7 +224,6 @@ function Records:build(state, width, avail_h)
     --- 追加控件并累计高度。
     ---@param widget table 子控件。
     ---@param widget_h number 控件高度。
-    ---@return nil
     local function push(widget, widget_h)
         table.insert(col, widget)
         used = used + (widget_h or 0)

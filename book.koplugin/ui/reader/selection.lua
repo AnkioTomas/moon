@@ -414,7 +414,6 @@ end
 
 --- 关掉划词菜单但不清选区。拖动手柄时用。
 ---@param highlight table|nil
----@return nil
 function Selection.hideMenu(highlight)
     local dialog = highlight and highlight.highlight_dialog
     if not dialog then
@@ -428,7 +427,6 @@ end
 
 --- 拖完后按新手柄位置重开菜单。
 ---@param highlight table|nil
----@return nil
 function Selection.showMenu(highlight)
     if not highlight or not highlight.selected_text or not highlight._book_menu_hidden then
         return
@@ -442,7 +440,6 @@ end
 
 --- 菜单重开后叠层会被压到下面，关再开一次抬到栈顶。
 ---@param highlight table
----@return nil
 function Selection.raise(highlight)
     local overlay = highlight._book_handles
     if not overlay then
@@ -457,7 +454,6 @@ end
 --- 划词菜单弹出后挂上手柄。已有标注或非触摸设备不挂。
 ---@param highlight table|nil
 ---@param index number|nil
----@return nil
 function Selection.attach(highlight, index)
     if not highlight or index or not Device:isTouchDevice() or not Selection.enabled() then
         return
@@ -481,7 +477,6 @@ end
 
 --- 关掉手柄叠层。重复调用无副作用。
 ---@param highlight table|nil
----@return nil
 function Selection.detach(highlight)
     local overlay = highlight and highlight._book_handles
     if not overlay then
@@ -520,7 +515,6 @@ end
 
 --- 安装划词手柄。重复调用无副作用。
 ---@param _ui table|nil
----@return nil
 function Selection.install(_ui)
     patchHighlight()
 end

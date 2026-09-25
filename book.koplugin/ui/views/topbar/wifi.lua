@@ -44,7 +44,6 @@ function Wifi:createWidget()
 end
 
 --- 原地更新 Wi-Fi 图标；显隐状态变化时请求整条顶栏重排。
----@return nil
 function Wifi:updateView()
     if not self.lifecycle:uiReady() then return end
     local name = self:read()
@@ -64,14 +63,12 @@ function Wifi:updateView()
 end
 
 --- 恢复显示时立即同步当前 Wi-Fi 状态。
----@return nil
 function Wifi:onResume()
     self:updateView()
 end
 
 --- 接收网络连接状态事件并刷新图标。
 ---@param event string|table 父组件转发的事件名称或事件对象
----@return nil
 function Wifi:onEvent(event)
     if NETWORK_EVENTS[event] then
         self:updateView()

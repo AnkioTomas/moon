@@ -21,7 +21,6 @@ function Detail:openBook()
 end
 
 --- 缓存章节模式整本正文。
----@return nil
 function Detail:cacheAllChapters()
     if self._cache_job and not self._cache_job.done then return end
     if not self.lifecycle:uiReady() then return end
@@ -47,7 +46,6 @@ function Detail:cacheAllChapters()
 end
 
 --- Z-Library 书：下载后导入本地书库。
----@return nil
 function Detail:installStoreBook()
     local book = self.book or {}
     if self._install_job then
@@ -107,7 +105,6 @@ function Detail:installStoreBook()
 end
 
 --- 手动切换已读 / 未读（语义与图书馆长按菜单相同）。
----@return nil
 function Detail:toggleRead()
     local book = self.book
     if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then
@@ -128,7 +125,6 @@ function Detail:toggleRead()
 end
 
 --- 删除本书：确认后走属主源 deleteBookAsync，成功则关详情并刷新桌面。
----@return nil
 function Detail:deleteBook()
     local book = self.book
     if type(book) ~= "table" or type(book.source_id) ~= "string" or type(book.stable_id) ~= "string" then

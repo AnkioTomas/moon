@@ -20,7 +20,6 @@ Desktop 生命周期：Create / Resume / Pause / Destroy。
 ---@class Lifecycle : LifecycleOwner
 ---@field state LifecycleState 当前进入的阶段，处理异常不会回滚状态
 ---@field owner? LifecycleOwner 组合模式的处理对象，其业务状态保持独立
----@field jobs table[] Job.run 返回的任务
 ---@field http CancelHandle[] HTTP / 源异步返回的 { cancel }
 local Lifecycle = {}
 
@@ -29,7 +28,6 @@ Lifecycle.__index = Lifecycle
 local logger = require("utils.log")
 
 local ABORT_STAGES = { Pause = true, Destroy = true }
-local BOUND = setmetatable({}, { __mode = "k" })
 
 -- 补齐进入目标阶段所必需的边界阶段，保证生命周期顺序连续。
 ---@param lifecycle Lifecycle
@@ -59,7 +57,7 @@ local function subject(owner)
     return tostring(owner)
 end
 
---- 取消单个句柄。Job 是 :cancel()，HTTP 是 .cancel()，两种都能走这一下。
+--- 取消单个句柄；cancel 失败不能阻断其它句柄的取消。
 ---@param handle table|nil
 local function cancelOne(handle)
     if type(handle) ~= "table" then return end
@@ -69,15 +67,8 @@ local function cancelOne(handle)
     end
 end
 
---- 取消并清空 jobs / http。Pause 由 bind 先调；未走 bind 的实例自己调。
+--- 取消并清空 http。Pause 由 bind 先调；未走 bind 的实例自己调。
 function Lifecycle:abortWork()
-    local jobs = self.jobs
-    self.jobs = {}
-    if jobs then
-        for i = 1, #jobs do
-            cancelOne(jobs[i])
-        end
-    end
     local http = self.http
     self.http = {}
     if http then
@@ -85,20 +76,6 @@ function Lifecycle:abortWork()
             cancelOne(http[i])
         end
     end
-end
-
---- 登记 Job。Pause / Destroy 时取消。
----@param job table|nil
----@return table|nil
-function Lifecycle:addJob(job)
-    if type(job) ~= "table" then return job end
-    local jobs = self.jobs
-    if not jobs then
-        jobs = {}
-        self.jobs = jobs
-    end
-    jobs[#jobs + 1] = job
-    return job
 end
 
 --- 登记 HTTP / 源异步句柄。Pause / Destroy 时取消。
@@ -133,7 +110,6 @@ local function bind(lifecycle, owner)
             end
             if handler then return handler(self, ...) end
         end
-        BOUND[wrapped] = true
         owner[name] = wrapped
     end
 end
@@ -142,7 +118,7 @@ end
 --- 创建一个 Lifecycle 实例。
 ---
 --- 子类：`Subclass:new()` 或 `Subclass:new({ field = value })`。
---- init 可选；拷贝字段到新表，不改写调用方。state / jobs / http 始终由框架写入。
+--- init 可选；拷贝字段到新表，不改写调用方。state / http 始终由框架写入。
 ---
 ---@generic T : Lifecycle
 ---@param self T
@@ -156,7 +132,6 @@ function Lifecycle:new(init)
         end
     end
     instance.state = "new"
-    instance.jobs = {}
     instance.http = {}
     setmetatable(instance, self)
     bind(instance, instance)
@@ -167,7 +142,7 @@ end
 ---@param owner LifecycleOwner
 ---@return Lifecycle
 function Lifecycle.attach(owner)
-    local lifecycle = setmetatable({ owner = owner, state = "new", jobs = {}, http = {} }, Lifecycle)
+    local lifecycle = setmetatable({ owner = owner, state = "new", http = {} }, Lifecycle)
     bind(lifecycle, owner)
     return lifecycle
 end
@@ -177,23 +152,6 @@ end
 function Lifecycle:uiReady()
     return self.state == "Resume"
 end
-
---- 按名称分发；Resume/Destroy 自动补齐必需阶段，非法恢复终态时抛错。
----@param event LifecycleStage
----@param ... any 阶段处理参数
----@return any ... 阶段处理函数的返回值
-function Lifecycle:dispatch(event, ...)
-    local owner = self.owner or self
-    local handler = owner["on" .. event]
-    if not handler then return end
-    if BOUND[handler] then
-        return handler(owner, ...)
-    end
-    if not completeBefore(self, owner, event) then return end
-    self.state = event
-    return handler(owner, ...)
-end
-
 
 function Lifecycle:onCreate()
 end

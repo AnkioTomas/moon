@@ -50,7 +50,6 @@ function Base:desktop()
 end
 
 --- 只脏自己那一块。Resume 以外不改屏。
----@return nil
 function Base:dirty()
     if not self.lifecycle:uiReady() then return end
     local desktop = self:desktop()
@@ -89,7 +88,6 @@ end
 --- 原地改图标/文案。显隐变化才整条重排。
 ---@param icon_name string|nil 图标名称；nil 时按纯文字处理
 ---@param text string|nil 需要展示的文字
----@return nil
 function Base:updateMetric(icon_name, text)
     if not self.lifecycle:uiReady() then return end
     local show = text ~= nil and text ~= ""
@@ -123,14 +121,12 @@ function Base:updateMetric(icon_name, text)
 end
 
 --- 按 read() 原地改 UI。Resume 以外不改屏。
----@return nil
 function Base:updateView()
     local text, icon = self:read()
     self:updateMetric(icon, text)
 end
 
 --- 取消顶栏项目的定时刷新回调并清除句柄。
----@return nil
 function Base:unschedule()
     if self._tick then
         UIManager:unschedule(self._tick)
@@ -140,7 +136,6 @@ end
 
 --- 固定间隔刷新。Clock 的分钟对齐心跳不走这里。
 ---@param seconds number 刷新周期，单位秒
----@return nil
 function Base:scheduleEvery(seconds)
     self:unschedule()
     if not self.lifecycle:uiReady() then return end
@@ -153,7 +148,6 @@ function Base:scheduleEvery(seconds)
 end
 
 --- 立即更新指标，并为配置了周期的项目启动定时刷新。
----@return nil
 function Base:onResume()
     self:updateView()
     if self.interval then
@@ -162,7 +156,6 @@ function Base:onResume()
 end
 
 --- 暂停顶栏项目时取消定时刷新。
----@return nil
 function Base:onPause()
     self:unschedule()
 end
@@ -183,7 +176,6 @@ function Base:build(ctx)
 end
 
 --- 取消定时刷新并清除指标 Widget 和屏幕矩形引用。
----@return nil
 function Base:onDestroy()
     self:unschedule()
     self.metric_widget = nil

@@ -22,7 +22,6 @@ local KEYS = { "screensaver_type", "screensaver_document_cover", "screensaver_sh
 
 --- 首次接管时记下用户原本的 screensaver 配置。
 --- 已有快照就不动：接管期间的中间值不是用户的选择。
----@return nil
 local function snapshot()
     if G_reader_settings:readSetting(PREVIOUS_KEY) ~= nil then
         return
@@ -37,7 +36,6 @@ end
 
 --- 将有效锁屏图片交给 KOReader 的 document_cover screensaver。
 ---@param path string|nil
----@return nil
 function M.applyCover(path)
     -- 快照必须在任何写入之前：下面两条早退路径也会改 screensaver_show_message，
     -- 不先记就等于改了用户配置又没留还原的依据。
@@ -56,7 +54,6 @@ end
 ---
 --- 以前是无条件写 `screensaver_type="disable"`：用户原本设的封面/书签/随机图锁屏
 --- 会被永久改成「关闭」，关掉本插件功能也回不来。
----@return nil
 function M.clearCover()
     local saved = G_reader_settings:readSetting(PREVIOUS_KEY)
     if type(saved) == "table" then
@@ -83,7 +80,6 @@ end
 
 --- 写一项配置：先撤下旧图再落盘，避免旧图继续显示。
 ---@param key string
----@param value any
 local function save(key, value)
     invalidate()
     MoonSettings.get()[key] = value

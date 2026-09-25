@@ -36,7 +36,6 @@ setmetatable(Home, View)
 
 --- 初始化首页持有的组件映射、布局和分页状态，保留已有状态。
 ---@param self BookHome 当前视图或布局实例
----@return nil
 local function ensure(self)
     if not self.components then self.components = self.children end
     if not self.layout then self.layout = Layout.new() end
@@ -49,7 +48,6 @@ end
 ---@param self BookHome 当前视图或布局实例
 ---@param method string 子组件上的方法名
 ---@param ... any 原样传给目标方法的参数
----@return nil
 local function broadcast(self, method, ...)
     for _i, id in ipairs(Components.enabledLayout()) do
         local child = self.components[id]
@@ -59,7 +57,6 @@ end
 
 --- 暂停离开当前页的组件，仅恢复当前首页中可见的组件。
 ---@param self BookHome 当前视图或布局实例
----@return nil
 local function applyVisible(self)
     local visible = self.visible or {}
     local active = self.lifecycle.state == "Resume" and self.desktop and self.desktop.tab == "home"
@@ -82,7 +79,6 @@ local function applyVisible(self)
 end
 
 --- 按启用配置创建缺失组件，按生命周期退役不再需要的实例。
----@return nil
 function Home:sync()
     if self.lifecycle.state == "Destroy" then return end
     ensure(self)
@@ -111,7 +107,6 @@ end
 ---@param self BookHome 当前视图或布局实例
 ---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
 ---@param body_h number 扣除固定控件后的正文高度，单位像素
----@return nil
 local function ensureLayout(self, ctx, body_h)
     if not Components.needsLayout() then return end
     local placements = Components.widgets()
@@ -136,7 +131,6 @@ end
 --- 移除指定组件的摆放记录并刷新首页布局。
 ---@param self BookHome 当前视图或布局实例
 ---@param id string 组件、分页或数据源的标识
----@return nil
 local function deleteWidget(self, id)
     local list = Components.widgets()
     if #list <= 1 then return end
@@ -152,7 +146,6 @@ end
 ---@param self BookHome 当前视图或布局实例
 ---@param id string 组件、分页或数据源的标识
 ---@param delta number 相对于当前位置的偏移量
----@return nil
 local function moveInPage(self, id, delta)
     local list = Components.widgets()
     local item = Widgets.find(list, id)
@@ -175,7 +168,6 @@ end
 ---@param self BookHome 当前视图或布局实例
 ---@param id string 组件、分页或数据源的标识
 ---@param delta_page number 目标页相对于当前页的偏移量
----@return nil
 local function movePage(self, id, delta_page)
     local list = Components.widgets()
     local item = Widgets.find(list, id)
@@ -194,7 +186,6 @@ end
 --- 根据当前组件位置生成可用的页内移动和跨页移动操作。
 ---@param self BookHome 当前视图或布局实例
 ---@param id string 组件、分页或数据源的标识
----@return nil
 local function showMove(self, id)
     local list = Components.widgets()
     local item = Widgets.find(list, id)
@@ -221,7 +212,6 @@ end
 ---@param id string 组件、分页或数据源的标识
 ---@param range BookHomeHeightSpec 组件内容高度
 ---@param placement table 当前组件保存的页码、顺序和高度记录
----@return nil
 local function showHeight(self, id, range, placement)
     local comp = Components.find(id)
     Edit.showHeightDialog({
@@ -243,7 +233,6 @@ end
 ---@param self BookHome 当前视图或布局实例
 ---@param body_h number 扣除固定控件后的正文高度，单位像素
 ---@param width number 目标宽度，单位像素
----@return nil
 local function showAdd(self, body_h, width)
     local list = Components.widgets()
     local placed = {}
@@ -408,7 +397,6 @@ end
 
 --- 把首页页码限制在有效范围内，页码变化时刷新布局。
 ---@param delta number 相对于当前位置的偏移量
----@return nil
 function Home:turn(delta)
     local next_page = math.max(1, math.min(self.pages or 1, (self.page or 1) + delta))
     if next_page == self.page then return end
@@ -417,7 +405,6 @@ function Home:turn(delta)
 end
 
 --- 进入首页组件编辑模式，重复进入时不重建。
----@return nil
 function Home:enterEdit()
     if self.editing then return end
     self.editing = true
@@ -425,7 +412,6 @@ function Home:enterEdit()
 end
 
 --- 退出编辑模式并保存组件布局，然后恢复普通首页内容。
----@return nil
 function Home:exitEdit()
     if not self.editing then return end
     self.editing = false
@@ -445,7 +431,6 @@ function Home:updateView()
 end
 
 --- 为普通首页绑定桌面刷新宿主并构建根骨架；离屏首页不绑定宿主。
----@return nil
 function Home:onCreate()
     self.host = not self.offscreen and self.desktop or nil
     self:build()
@@ -480,13 +465,11 @@ function Home:loadData(done)
 end
 
 --- 首页 Tab 活跃时恢复可见组件。
----@return nil
 function Home:onResume()
     applyVisible(self)
 end
 
 --- 保存并退出编辑态，然后暂停当前仍在运行的组件。
----@return nil
 function Home:onPause()
     if self.editing then
         self.editing = false
@@ -501,7 +484,6 @@ function Home:onPause()
 end
 
 --- 销毁首页组件并清除桌面、内容树和编辑状态引用。
----@return nil
 function Home:onDestroy()
     broadcast(self, "onDestroy")
     self.widget = nil
@@ -513,7 +495,6 @@ end
 --- 处理布局设置、编辑、换源和滑动事件，其余事件继续分发给子组件。
 ---@param event string|table 父组件转发的事件名称或事件对象
 ---@param payload any 与事件一起传入的数据
----@return nil
 function Home:onEvent(event, payload)
     if self.lifecycle.state == "Destroy" then return end
     if event == "home_changed" then

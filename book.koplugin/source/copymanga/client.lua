@@ -28,7 +28,6 @@ local DEFAULT_BASE_URL = "https://api.copy202601.com"
 
 Client.DEFAULT_BASE_URL = DEFAULT_BASE_URL
 
----@param url any
 ---@return string
 function Client.normalizeBaseUrl(url)
     url = Text.rtrimSlashes(Text.stripWhitespace(url))
@@ -117,19 +116,6 @@ function Client:searchAsync(keyword, page, page_size, cb)
     local offset = (page - 1) * page_size
     local path = "/api/v3/search/comic?platform=1&q_type=&offset="
         .. offset .. "&limit=" .. page_size .. "&q=" .. Text.urlEncode(keyword)
-    return self:_getJson(path, cb)
-end
-
----@param page number|nil
----@param page_size number|nil
----@param cb fun(wire: table|nil, err: string|nil)
----@return { cancel: fun() }
-function Client:discoverAsync(page, page_size, cb)
-    page = math.max(1, math.floor(tonumber(page) or 1))
-    page_size = math.max(1, math.min(50, math.floor(tonumber(page_size) or 20)))
-    local offset = (page - 1) * page_size
-    local path = "/api/v3/comics?free_type=1&ordering=-datetime_updated&offset="
-        .. offset .. "&limit=" .. page_size .. "&platform=1"
     return self:_getJson(path, cb)
 end
 

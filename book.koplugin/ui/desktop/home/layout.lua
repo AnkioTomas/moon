@@ -136,7 +136,6 @@ function Layout:paginate(ranges, available, gap)
     local used = 0
 
     --- 把当前累积的组件提交为一页，开始下一页的布局。
-    ---@return nil
     local function flush()
         pages[#pages + 1] = cur
         cur, used = {}, 0

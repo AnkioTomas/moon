@@ -94,7 +94,6 @@ function Job:_release()
 end
 
 ---@param state "done"|"failed"|"cancelled"
----@param result any
 ---@param err string|nil
 function Job:_teardown(state, result, err)
     self.state = state
@@ -118,7 +117,6 @@ function Job:_teardown(state, result, err)
 end
 
 ---@param state "done"|"failed"|"cancelled"
----@param result any
 ---@param err string|nil
 function Job:_finish(state, result, err)
     if self.settled then return end

@@ -129,7 +129,6 @@ end
 
 local keyboard_baseline
 
----@param value any
 ---@return string|nil
 local function primaryChar(value)
     if type(value) == "string" then return #value == 1 and value or nil end

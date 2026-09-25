@@ -85,7 +85,6 @@ end
 ---@param width number
 ---@param title string
 ---@param row_builders table
----@return nil
 function Overlay.appendSection(out, width, title, row_builders)
     if #out > 0 then table.insert(out, VerticalSpan:new{ width = UI.sectionGap() }) end
     table.insert(out, LeftContainer:new{
@@ -102,7 +101,6 @@ end
 --- 打开功能叠层；已有叠层先关。
 ---@param desktop BookDesktop
 ---@param spec BookSettingsOverlaySpec
----@return nil
 function Overlay.open(desktop, spec)
     Overlay.close(desktop)
     if type(spec) ~= "table" or type(spec.title) ~= "string" then return end
@@ -125,7 +123,6 @@ end
 
 --- 关掉当前设置叠层。
 ---@param desktop BookDesktop|nil
----@return nil
 function Overlay.close(desktop)
     local page = desktop and desktop.settings_overlay
     if not page then return end

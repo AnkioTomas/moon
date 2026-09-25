@@ -21,7 +21,6 @@ local MoonSettings = require("utils.settings")
 local Baike = {}
 
 ---@param self table ReaderWikipedia 实例
----@return nil
 local function cancelLookup(self)
     local state = self._book_baike_job
     self._book_baike_job = nil
@@ -43,7 +42,6 @@ end
 ---@param err string|nil
 ---@param box table|nil
 ---@param dict_close_callback function|nil
----@return nil
 local function showResult(self, word, result, err, box, dict_close_callback)
     -- ReaderWikipedia 继承 ReaderDictionary。仅在构造弹窗的同步片刻切为普通
     -- 词典，便可复用它完整的样式、关闭和高亮行为，而不会带出 Wiki 专用按钮。
@@ -80,7 +78,6 @@ end
 ---@param _forced_lang string|nil
 ---@param dict_close_callback function|nil
 ---@param state table|nil
----@return nil
 local function lookup(self, word, is_sane, box, _get_fullpage, _forced_lang, dict_close_callback, state)
     if not state then
         cancelLookup(self)
@@ -115,7 +112,6 @@ local function lookup(self, word, is_sane, box, _get_fullpage, _forced_lang, dic
 end
 
 ---@param self table ReaderWikipedia 实例
----@return nil
 local function lookupInput(self)
     local InputDialog = require("ui/widget/inputdialog")
     local UIManager = require("ui/uimanager")
@@ -152,7 +148,6 @@ local function lookupInput(self)
 end
 
 --- 安装一次；只修改 KOReader 的入口方法，不触碰其源码。
----@return nil
 function Baike.onCreate()
     local ReaderWikipedia = require("apps/reader/modules/readerwikipedia")
     if ReaderWikipedia._book_baike_installed then

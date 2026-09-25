@@ -30,7 +30,6 @@ end
 
 --- 进入桌面图书馆并清除旧的筛选及分页状态。
 ---@param desktop table|nil 所属桌面实例
----@return nil
 local function openLibrary(desktop)
     if not desktop or not desktop.switchTab then return end
     local library = desktop.library
@@ -45,7 +44,6 @@ end
 --- 优先通过插件打开书籍；无插件实例时使用桌面详情入口。
 ---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
 ---@param book Book 当前操作或展示的书籍数据
----@return nil
 local function openBook(ctx, book)
     local plugin = ctx.plugin or (ctx.desktop and ctx.desktop.plugin)
     if plugin and plugin.openBook then
@@ -110,7 +108,6 @@ function M:createWidget()
 end
 
 --- 返回首页时重读最近书架，避免继续显示阅读前的主角书籍和进度。
----@return nil
 function M:onResume()
     if self.widget then self:rebuild() end
 end

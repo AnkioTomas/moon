@@ -194,9 +194,9 @@ do
     Assert.is_false(Registry.setEnabled("nope", true))
 end
 
--- 非活跃属主源复用，并在注册表关闭时恰好释放一次。
+-- 非活跃属主源复用，并在注册表作废时恰好释放一次。
 do
-    Registry.shutdown()
+    Registry.invalidate()
     local original_create = Registry.create
     local created, closed = {}, {}
     Registry.create = function(id)
@@ -213,7 +213,7 @@ do
     local second = Registry.resolve("wechat")
     Assert.eq(first, second)
     Assert.eq(created.wechat, 1)
-    Registry.shutdown()
+    Registry.invalidate()
     Assert.eq(closed.wechat, 1)
     Assert.eq(closed.moon, 1)
     Registry.create = original_create

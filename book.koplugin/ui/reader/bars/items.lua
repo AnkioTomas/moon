@@ -210,7 +210,6 @@ local function cachedTextWidget(slot, key, opts, cache)
 end
 
 ---@param widget table
----@param bb any
 ---@param px number
 ---@param band_y number
 ---@param band_h number
@@ -220,7 +219,6 @@ local function paintCentered(widget, bb, px, band_y, band_h)
 end
 
 --- 按左右对齐把布局画进条带。
----@param bb any
 ---@param x number
 ---@param y number
 ---@param w number
@@ -228,7 +226,6 @@ end
 ---@param layout table
 ---@param ctx table
 ---@param opts table
----@return nil
 function Items.paint(bb, x, y, w, h, layout, ctx, opts)
     opts = opts or {}
     local Device = require("device")

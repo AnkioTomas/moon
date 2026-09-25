@@ -15,7 +15,6 @@ setmetatable(Cache, Base)
 Cache.id = "cache"
 
 --- 订阅缓存队列变化并立即刷新进度；订阅句柄由 Lifecycle 拥有。
----@return nil
 function Cache:onResume()
     if not self._watch then
         self._watch = self.lifecycle:addHttp(CacheQueue.watch(function()
@@ -54,13 +53,11 @@ function Cache:createWidget()
 end
 
 --- 清除已由 Lifecycle 取消的缓存队列订阅引用。
----@return nil
 function Cache:onPause()
     self._watch = nil
 end
 
 --- 打开全本缓存任务快照；队列本身继续在后台运行。
----@return nil
 function Cache:show()
     local tasks = CacheQueue.tasks()
     local ButtonDialog = require("ui/widget/buttondialog")

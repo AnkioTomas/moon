@@ -147,8 +147,6 @@ local _merged
 local _initialized = false
 
 --- 复制默认值，递归拷贝表，避免嵌套配置共享 DEFAULTS 的子表。
----@param value any
----@return any
 local function copyValue(value)
     if type(value) ~= "table" then return value end
     local out = {}

@@ -270,7 +270,6 @@ function Base.open()
 end
 
 --- 关闭全局连接
----@return nil
 function Base.close()
     if conn then
         conn:close()

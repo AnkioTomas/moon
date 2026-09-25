@@ -209,7 +209,6 @@ end
 --- 从未启用动作里挑选要添加的项。
 ---@param options BookQuickPanelEditAddOption[] 可添加的动作选项
 ---@param on_pick fun(id: string) 选中后的回调
----@return nil
 function Edit.showAddDialog(options, on_pick)
     local dialog
     local buttons = {}

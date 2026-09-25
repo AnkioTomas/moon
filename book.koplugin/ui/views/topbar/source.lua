@@ -19,7 +19,6 @@ Source.align = "left"
 
 --- 数据源切换后刷新当前源名称。
 ---@param event string|table 父组件转发的事件名称或事件对象
----@return nil
 function Source:onEvent(event)
     if event == "source_changed" then
         self:updateView()

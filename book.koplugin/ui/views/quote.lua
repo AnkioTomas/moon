@@ -182,7 +182,6 @@ end
 
 --- 替换引言数据并原地更新正文、署名。
 ---@param quote table
----@return nil
 function M:updateView(quote)
     self.data = quote
     if not self.body then return end
