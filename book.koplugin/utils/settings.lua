@@ -32,10 +32,11 @@ local DEFAULTS = {
         lock_screen_position = "center-center",
         lock_screen_wide = true,
         lock_screen_bill_period = "7d",
+        lock_screen_poster_style = "vertical",
         lock_screen_custom_message = "读书不觉已春深，一寸光阴一寸金。",
         lock_screen_asset_cache = {},
     },
-    remote = { remote_port = 9528, remote_autostart = false },
+    remote = { remote_port = 9528, remote_autostart = false, remote_idle_stop = true },
     maintenance = {
         auto_update_check = false,
         update_last_checked_at = 0,

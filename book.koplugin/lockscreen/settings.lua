@@ -173,6 +173,12 @@ function M.setBillPeriod(period)
     if require("lockscreen.components.bill").validPeriod(period) then save("lock_screen_bill_period", period) end
 end
 
+--- 设置海报墙风格；非法值忽略。
+---@param style string
+function M.setPosterStyle(style)
+    if require("lockscreen.components.poster").validStyle(style) then save("lock_screen_poster_style", style) end
+end
+
 --- 设置自定义留言；去空白后为空则清除，回到默认句子。
 ---@param message string
 function M.setCustomMessage(message)
