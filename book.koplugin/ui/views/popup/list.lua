@@ -271,14 +271,19 @@ function List.openList(opts, normalize)
         title_shrink_font_to_fit = true,
         state_w = (state_w and state_w > 0) and state_w or nil,
         items_per_page = opts.centered and math.max(1, #items) or nil,
+        -- Menu:onMenuSelect 每次选中后都会调 close_callback；菜单仍开着（多选 / keep_menu_open）不算关闭
         close_callback = function()
-            holder.menu = nil
+            if holder.menu then return end
             if opts.close_callback then
                 opts.close_callback()
             end
         end,
     }
     holder.menu = menu
+    function menu:onCloseWidget()
+        holder.menu = nil
+        return Menu.onCloseWidget(self)
+    end
 
     if opts.title_material_icon and menu.title_bar then
         attachMaterialLeftAction(menu.title_bar, opts)

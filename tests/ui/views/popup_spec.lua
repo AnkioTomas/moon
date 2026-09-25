@@ -172,6 +172,7 @@ package.preload["ui/widget/menu"] = function()
         return o
     end
     function Menu:_recalculateDimen() end
+    function Menu:onCloseWidget() end
     function Menu:getPageNumber(n)
         if #self.item_table == 0 or not n or n == 0 then return 1 end
         return math.ceil(math.min(n, #self.item_table) / self.perpage)
@@ -209,6 +210,7 @@ local UIManager = require("ui/uimanager")
 local closed_widgets = {}
 UIManager.close = function(_, w)
     closed_widgets[#closed_widgets + 1] = w
+    if w.onCloseWidget then w:onCloseWidget() end
 end
 
 local Popup = require("ui.views.popup")
@@ -315,6 +317,48 @@ do
     menu.item_table[1].callback() -- 再点取消
     Assert.eq(menu.item_table[1].state._icon, "check_box_outline_blank")
     Assert.eq(toggles[2].n, 1)
+end
+
+-- 多选：Menu:onMenuSelect 每次点选后都会调 close_callback，菜单开着时不能丢掉句柄
+do
+    closed_widgets = {}
+    local closes = 0
+    local menu = Popup.list{
+        select_mode = "multi",
+        items = { { text = "A", value = "a" }, { text = "B", value = "b" } },
+        close_callback = function() closes = closes + 1 end,
+    }
+    --- 模拟 KOReader Menu:onMenuSelect：先执行项回调，再调 close_callback。
+    ---@param idx number
+    local function tap(idx)
+        menu.item_table[idx].callback()
+        menu.close_callback()
+    end
+    local before = menu._updates
+    tap(1)
+    tap(2)
+    tap(1)
+    Assert.eq(menu._updates, before + 3, "每次切换都要重绘")
+    Assert.eq(menu.item_table[1].state._icon, "check_box_outline_blank")
+    Assert.eq(menu.item_table[2].state._icon, "check_box")
+    Assert.eq(closes, 0, "点选不是关闭")
+    -- 标题栏关闭：Menu:onCloseAllMenus = UIManager:close + close_callback
+    UIManager:close(menu)
+    menu.close_callback()
+    Assert.eq(closes, 1)
+end
+
+-- 单选：关闭回调在 on_select 之后触发一次
+do
+    local order = {}
+    local menu = Popup.list{
+        items = { { text = "A", value = 1 } },
+        on_select = function() order[#order + 1] = "select" end,
+        close_callback = function() order[#order + 1] = "close" end,
+    }
+    menu.item_table[1].callback()
+    menu.close_callback()
+    Assert.eq(table.concat(order, ","), "select,close")
 end
 
 -- 多选：禁用项不可切换，勾选框同样禁用
