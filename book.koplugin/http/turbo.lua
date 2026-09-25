@@ -42,7 +42,34 @@ local function patchSni(crypto)
     end
 end
 
+-- LuaSocket connect 按主机名在 UI 线程同步 getaddrinfo，SSL 握手前还会再 connect 一次。
+-- 设备上没有系统 DNS 缓存，10 路封面下载就是 20 次阻塞解析；这里按主机名缓存结果。
+local DNS_TTL = 10 * 60
+local dns = {}
+
+--- 主机名换成缓存地址；IP 字面量原样返回，解析失败交回 connect 报真实错误。
+---@param host string
+---@return string
+local function resolve(host)
+    if host:match("^[%d%.]+$") or host:find(":", 1, true) then
+        return host
+    end
+    local now = os.time()
+    local hit = dns[host]
+    if hit and hit.expires > now then
+        return hit.addr
+    end
+    local list = require("socket").dns.getaddrinfo(host)
+    local addr = list and list[1] and list[1].addr
+    if not addr then
+        return host
+    end
+    dns[host] = { addr = addr, expires = now + DNS_TTL }
+    return addr
+end
+
 --- `self._handle_connect_fail(err)` 点号调用会把 self 变成错误字符串。
+--- 同时把主机名解析收口到 resolve；连接失败丢弃该主机缓存。
 local function patchConnectFail()
     local ok, iostream = pcall(require, "turbo.iostream")
     local IOStream = ok and iostream and iostream.IOStream
@@ -58,12 +85,13 @@ local function patchConnectFail()
     end
     IOStream.connect = function(self, address, port, family, callback, fail_callback, arg)
         self._handle_connect_fail = function(first, second)
+            dns[address] = nil
             if type(first) ~= "table" then
                 return orig_fail(self, first)
             end
             return orig_fail(first, second)
         end
-        return orig_connect(self, address, port, family, callback, fail_callback, arg)
+        return orig_connect(self, resolve(address), port, family, callback, fail_callback, arg)
     end
     IOStream._book_connect_fail_patched = true
 end

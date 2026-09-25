@@ -329,6 +329,11 @@ do
             end,
         }
     end
+    package.preload["socket"] = function()
+        return { dns = { getaddrinfo = function()
+            return { { family = "inet", addr = "10.0.0.1" } }
+        end } }
+    end
     -- 复现 turbo LuaSocket 路径：connect 立刻失败时用点号调用 _handle_connect_fail。
     package.preload["turbo.iostream"] = function()
         local IOStream = {}
