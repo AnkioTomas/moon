@@ -1,6 +1,8 @@
 --[[--
-整书模式自动目录：文档自带目录不足两项时，全文扫描章节标题，写入 KOReader 自定义目录。
+整书模式自动目录：文档自带目录不足两项时补一份目录。
 
+先用 crengine 按 h1–h6 生成备用目录（与 KOReader 菜单「备用目录」同一状态，用户可切回）；
+不足两项再全文扫描章节标题，写入 KOReader 自定义目录。
 扫描在 fork 子进程里跑（大 TXT 的 findAllText 要数秒）；结果交给 ReaderHandMade，
 由它负责落 sidecar、重排后按 xpointer 重算页码、以及用户编辑/清除。
 每本书只自动扫描一次（doc_settings.moon_auto_toc），用户清掉自定义目录后不会被再次覆盖。
@@ -10,6 +12,7 @@
 
 require("l10n").apply()
 
+local Event = require("ui/event")
 local Job = require("workers.job")
 local Text2Epub = require("convert.text2epub")
 local DocumentToc = require("ui.reader.session.document_toc")
@@ -75,6 +78,20 @@ function AutoToc.start(session)
     if toc and #toc >= 2 then return end
 
     local document = ui.document
+    if not document:isTocAlternativeToc() then
+        -- 不足两项时备用目录留在 crengine 缓存里也无害：下面的自定义目录会接管 getToc。
+        ui.toc:resetToc()
+        document:buildAlternativeToc()
+        ui.toc:fillToc()
+        if #ui.toc.toc >= 2 then
+            ui.doc_settings:makeTrue("alternative_toc")
+            ui.doc_settings:saveSetting(SCANNED_KEY, true)
+            ui:handleEvent(Event:new("UpdateToc"))
+            ui.view.footer:maybeUpdateFooter()
+            return
+        end
+    end
+
     session.auto_toc_job = Job.run(function()
         return AutoToc.scan(document)
     end, {
