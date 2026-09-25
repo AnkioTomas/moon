@@ -375,8 +375,8 @@ function Handles:paintTo(bb)
         return
     end
     local m = metrics()
-    local fill = Screen.night_mode and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
-    local ring = Screen.night_mode and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE
+    local fill = Blitbuffer.COLOR_BLACK
+    local ring = Blitbuffer.COLOR_WHITE
     local function paint(handle)
         local cx, cy = math.floor(handle.x), math.floor(handle.y)
         local ax, ay = math.floor(handle.ax), math.floor(handle.ay)

@@ -69,6 +69,7 @@ local function wereadPreview(it, pw, ph, menu)
         width = pw,
         height = ph,
         alpha = true,
+        invert_in_night = true,
         fallback = it.name,
         show_parent = menu,
     }
