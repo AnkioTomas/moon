@@ -11,7 +11,7 @@
 - 不解析 multipart；上传 body 由 file 路由处理落盘
 - 认证/端口等来自 settings，经 init 注入
 
-路由表由 init 在 start 时挂上：`_routeFile`、`_routeInput`、`_routeClipboard`、`_routeStatus`、`_routeSettings`、静态资源等。
+路由在 `server.lua` 加载时挂到 `Server` 上（init 只注入 handlers）：文件侧 `_routeList` / `_routeDownload` / `_routeUpload` / `_routeMutate` / `_routeRename` / `_routeExtract`，以及 `_routeInput`、`_routeClipboard`、`_routeStatus`、`_routeSettings`、静态资源等。
 
 ---
 
@@ -23,18 +23,20 @@
 
 ```lua
 local Server = require("remote.server")
-local srv = Server:new({
+local srv = Server.new({
     port = 8080,
-    -- handlers: 目录列表、读文件、写文件、mkdir、rename、删除…
+    root = "/mnt/onboard",  -- 必填
+    handlers = { … },       -- 必填：目录列表、读文件、写文件、mkdir、rename、删除…
 })
+srv:start()
 -- 由 UIManager insertZMQ 泵事件
 srv:stop()
 ```
 
 新增 API：
 
-1. 在 `file.lua` / `input.lua` / 新模块写 `function M.routeXxx(self, req, res)`
-2. init 里装配到 server 实例
+1. 在 `file.lua` / `input.lua` / 新模块写路由函数（首参即 server 实例 self）
+2. 在 `server.lua` 顶部 `Server._routeXxx = M.fn` 挂上，并在 `Server:_route` 里分派
 3. 前端静态页或 `/api/…` 调用
 4. 权限：路径必须落在受管根内（init 的 containment 检查）
 

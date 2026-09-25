@@ -9,7 +9,7 @@ UI 选中的是带 `source_id/stable_id` 的书记录，不是「当前活跃源
 ```text
 Open.book(plugin, book)
   → Registry.resolve(book.source_id)     -- 属主源，可非活跃
-  → source:openBookAsync(identity, opts, cb)
+  → source:openBookAsync(identity, nil, cb)（章号等由源自己决定）
   → 源侧准备文件并 Store.touch
   → ReaderUI:showReader(path)
   → nextTick 关闭桌面（避免 FileManager 闪一帧）
@@ -27,7 +27,7 @@ Open.book(plugin, book)
 local Open = require("book.open")
 
 -- 桌面 / 详情「开始阅读」
-Open.book(plugin, book, function(ok, err)
+Open.book(plugin, book, function(ok)  -- 错误已由 InfoMessage 提示，回调不带 err；被更新一代打开取消时不回调
     if not ok then
         -- Open 内部已 InfoMessage；此处可选做 UI 收尾
     end

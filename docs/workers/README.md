@@ -33,7 +33,7 @@ end, {
     timeout = 30,
 })
 
-job:cancel()  -- 新代码只写 cancel（abort 是别名）
+job:cancel()
 ```
 
-UI 组件里登记到 Lifecycle：`self:addJob(job)`，Pause 时自动取消。
+UI 组件里登记到 Lifecycle：`lifecycle:addHttp(job)`（接受任何带 `cancel` 方法的句柄），Pause / Destroy 时自动取消。

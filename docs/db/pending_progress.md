@@ -28,7 +28,7 @@
 | `page` / `total_pages` | 页码定位 | upsert* | 整本模式 | 正整数或空 |
 | `locator` | 文档定位串 | upsert* | 恢复阅读位置 | 可空 |
 | `extra` | 源私有 JSON | upsert*（encode） | get 时 decode | 如 wechat `chapter_uid` |
-| `updated_at` | 修订时间 | 本地写常用 `os.time()`；远端可能带时间 | 乐观锁 / 排序 | CONFLICT 时 `MAX(excluded, existing)` |
+| `updated_at` | 修订时间 | 阅读落盘用 `Progress.nextRevision()`（同秒递增）；旁路写入或缺省时回落 `os.time()`；远端可能带时间 | 乐观锁 / 排序 | CONFLICT 时 `MAX(excluded, existing)` |
 | `sync_status` | 0 待上传 / 1 已同步 | upsert=0；upsertRemote/adopt/markSynced=1 | unsynced / sync | |
 
 ## 数据流

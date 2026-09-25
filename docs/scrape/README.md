@@ -26,10 +26,10 @@
 local ScrapeUI = require("scrape.ui")
 
 if SourceCapabilities.supportsScrape(source) then
-    ScrapeUI.start(book, function(ok)
-        -- 刷新详情/列表
+    ScrapeUI.start(identity, default_title, function()
+        -- 对话框关闭：刷新详情/列表
     end)
 end
 ```
 
-写库用 `upsertLocal`（`deleted=0`，`sync_status=0`），不要走远端 upsert 路径盖掉本地脏元数据语义。
+写库用 `upsertLocal`：新行 `deleted=0`、`sync_status=0`；已有行置 `deleted=0`，仅原本软删（`deleted=1`）时把 `sync_status` 置 0，否则保留原值。不要走远端 upsert 路径盖掉本地脏元数据语义。

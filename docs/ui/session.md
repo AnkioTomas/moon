@@ -1,6 +1,6 @@
 # ui.reader.session — 阅读会话
 
-代码：[`ui/reader/session.lua`](../../book.koplugin/ui/reader/session.lua) 及 `session/{book,chapter,snapshot,mode,toc}.lua`。
+代码：[`ui/reader/session.lua`](../../book.koplugin/ui/reader/session.lua) 及 `session/{chapter,snapshot,mode,toc,document_toc}.lua`。
 
 ## 设计
 
@@ -71,12 +71,10 @@ end
 local Session = require("ui.reader.session")
 
 local snap = Session.current()          -- 只读，别改字段
-Session.isChapterMode()
-Session.isCurrent(identity)            -- 异步回调丢弃
+Session.isChapterMode(identity)
 Session.toc()
-Session.chapterIndex()
-Session.chapterTitle()
-Session.position()
+Session.chapterIndex(snap)
+Session.chapterTitle(snap)
 Session.remainingSeconds()
 
 Session.gotoChapter(idx, { within = 0.0 })
@@ -87,7 +85,7 @@ Session.onChapterBoundary(1)           -- 页尾下一章；-1 上一章
 
 ```text
 Stats.start
-ui.reader.attach
+ui.reader.onCreate
 Note.applyLocal          -- 同步，首绘前
 若非 skip_pull:
   Progress.pull
@@ -111,4 +109,4 @@ emitToSource(event, nil, identity.source)
 
 - 所有源事件第三参传 `identity.source`。
 - 切章不是真关书：快照会重建，章会话与冲突记忆策略不同。
-- 异步回调用 `Session.isCurrent(identity)` 或 `Store.isCurrentDocument` 丢弃旧结果。
+- 异步回调用 `Store.isCurrentDocument` 丢弃旧结果。

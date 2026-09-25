@@ -12,9 +12,9 @@
 
 ```lua
 local Zlib = require("zlib")
-Zlib.listStoreAsync(opts, cb)      -- 有关键词或语言 → search，否则 popular
-Zlib.getDetailAsync(stable_id, cb)
-Zlib.downloadAsync(item, cb)       -- 完成后按当前源 import
+Zlib:listStoreAsync(opts, cb)      -- 冒号调用；有关键词或语言 → search，否则 popular
+Zlib.getDetailAsync(book, cb)      -- book.stable_id
+Zlib.installAsync(source, book, on_progress, cb)  -- 下载后 source:importBookAsync；cb(ok, err, filename)
 ```
 
 桌面「书城」Tab 挂这里；不要给 zlib 伪造 Source 能力表。

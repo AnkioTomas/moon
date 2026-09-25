@@ -15,7 +15,7 @@ BookPlugin:init
 ├── Host.onCreate   ← 字体图标、主菜单、Dispatcher、start_with 种入
 ├── translate / baike / dictionary / panel.native  → onCreate
 ├── lockscreen / remote / ime → onCreate
-├── patch.manager.onCreate（内含补丁启动自检）；FM 侧 update.onCreate
+├── patch.manager.onCreate（内含补丁启动自检）；更新检查在 Desktop:onResume → Update.autoCheck
 └── Reader → emitToSource("reader_open")
 ```
 
@@ -58,7 +58,7 @@ end
 function BookPlugin:onNetworkConnected()
     require("book.sync").retryDirtyAsync()
     self:emitToSource("network_connected")
-    require("lockscreen").refresh(nil, false, "network_connected")
+    require("lockscreen.init").refresh(nil, true, "network_connected")  -- 强制刷新
 end
 
 -- 旧书事件必须带属主源

@@ -22,20 +22,18 @@ for _, meta in ipairs(Registry.listEnabled()) do
     -- meta.id / name / type ("book"|"chapter")
 end
 
-local ok, err = Registry.setActive("wechat")
-Registry.setEnabled("jdread", false)  -- 若正好是活跃源会失败或被忽略为 true
+local source, err = Registry.setActive("wechat")  -- 成功返回新活跃实例
+local ok, err = Registry.setEnabled("jdread", false)  -- 正好是活跃源时返回 false 和错误文案
 
 -- 打开书、同步旧书
 local source = Registry.resolve(book.source_id)
 source:openBookAsync(identity, opts, cb)
 
--- 桌面当前源
+-- 桌面当前源（是否已配置由调用方看 current:configured()）
 local current = Registry.current()
--- 必须已配置时
-local current = Registry.requireActive()
 
-Registry.invalidate()  -- 配置变更后丢掉缓存实例
-Registry.shutdown()    -- 退出时 close 全部
+Registry.invalidate()               -- 丢掉并 close 活跃实例与全部属主实例
+Registry.afterAuthChanged(plugin)   -- 登录态变更：invalidate + plugin:onSourceChanged()
 ```
 
 ### API
@@ -45,14 +43,14 @@ Registry.shutdown()    -- 退出时 close 全部
 | `meta(id)` / `list()` | 只取 meta，不构造实例 |
 | `listEnabled()` | picker 与设置页用这个 |
 | `isEnabled(id)` | 活跃源恒 true |
-| `setEnabled(id, on)` | 首次写入时用「当前全部启用」初始化集合 |
+| `setEnabled(id, on)` | 首次写入时用「当前全部启用」初始化集合；禁用活跃源返回 `false, err` |
 | `create(id)` | 构造新实例（不激活） |
 | `current()` | 活跃实例 |
-| `requireActive()` | 未配置则 error/明确失败 |
 | `resolve(id)` | 属主实例（可非活跃） |
-| `setActive(id)` | 候选创建 + 原子切换 |
+| `setActive(id)` | 候选创建 + 原子切换；返回实例或 `nil, err` |
 | `activate(source, id)` | 底层替换（一般用 setActive） |
-| `invalidate()` / `shutdown()` | 清缓存 / 关停 |
+| `invalidate()` | 清空并 close 全部缓存实例（活跃 + 属主） |
+| `afterAuthChanged(plugin)` | 登录态变更后 invalidate 并通知桌面刷新 |
 
 ### 注意
 

@@ -7,9 +7,9 @@
 一书一条本地进度真源，带 `sync_status`。传输层 `ProgressPosition` **不含**脏标记——脏只属于落库行。
 
 ```text
-阅读中  → Progress.save → ProgressDB.upsert(sync_status=0) → 有网则 push
-开书    → Progress.pull → 源 getProgressAsync → 对比 → 冲突 ConfirmBox
-关书/脏 → syncAsync(dirty_only) 只推；禁止立刻回拉（远端收敛延迟会盖新值）
+关书/suspend → Progress.save → ProgressDB.upsert(sync_status=0) → 源 syncProgressAsync(dirty_only)
+开书        → Progress.pull → 源 getProgressAsync（不预判在线，失败只记日志）→ 对比 → 冲突 ConfirmBox
+关书/脏     → 只推；禁止立刻回拉（远端收敛延迟会盖新值）
 ```
 
 `updated_at` 用进程内 `nextRevision()`（`max(os.time(), last+1)`），避免同一秒多次写入撞号。`markSynced` 带乐观锁：推送期间若本地又更新，不会被误标已同步。
@@ -26,6 +26,8 @@
 
 冲突：会话级 `asked_conflicts`，同一本书一次会话只问一次；真关书 `clearConflicts()`。
 
+重入合并：`syncAsync` 以 `source.id` + `stable_id`（整源为 `all`）+ `chapter_idx` + 模式（`dirty` / `full`）为键，完全相同的并发请求共用一次执行、各自收到回调；不同书或不同模式各自执行。
+
 ---
 
 ## 用法
@@ -35,14 +37,13 @@ local Progress = require("book.progress")
 
 -- 从会话快照取当前位置（上报 / 顶栏）
 local pos = Progress.position(snapshot)
-local frac = Progress.fraction(snapshot)
 
 -- 开书（Session 调用）
 Progress.pull(snapshot)
--- 内部：有网 → getProgressAsync → 与本地比
+-- 内部：getProgressAsync → 与本地比（离线失败只记日志）
 -- 差 ≥1% → ConfirmBox：用云端 / 用本地（本地则 dirty push）
 
--- 阅读中或关书前落盘
+-- 关书 / suspend 落盘（Session.syncReading 调用；翻页不 save）
 Progress.save(snapshot, function(ok) end)
 
 -- 源侧编排入口（book.sync / 面板）
@@ -55,7 +56,7 @@ Progress.clearConflicts()
 定位：
 
 ```lua
--- rolling：先 isXPointerInDocument，再 gotoXPointer
+-- rolling：先 isXPointerInDocument，再 ui.rolling:onGotoXPointer
 -- paging：总页数一致才 gotoPage
 -- 成功后 saveDocSettings(ui, pct) 写 sidecar
 ```

@@ -6,12 +6,13 @@
 
 ```text
 Compose.plan()
-  → Background.ensure
-  → 可选压暗
-  → components/<id>.blocks(...)
-  → layout.panel
+  → Background.ensure（与主体的 ensureText 并行）
+  → Layout.panel 算面板矩形 → components/<id>.blocks(rect)
+    （quote 主体自带动态高度，full_screen 主体用整屏矩形，二者不走 Layout.panel）
   → render → output_path（通常 compose.png）
 ```
+
+direct 资源直接返回原图路径，不经 compose.png。
 
 计划轴：`component × background × position × wide` → 决定输出路径与是否可 direct 出原图。
 
@@ -31,11 +32,11 @@ Compose.plan()
 1. lockscreen/components/foo.lua
    - 导出 blocks(plan, …) 或注册表要求的接口
    - 可选 cache_key()
-2. components/base.lua（或 registry）注册一行
-3. 设置页自动出现在 componentOptions
+2. components/base.lua 的 COMPONENT_MODULES 注册一行
+3. 设置页经 Components.options() 自动出现
 ```
 
-背景新增同理：`background` 选项表加一项 + 实现 ensure。
+背景新增同理：`background` 选项表加一项 + 实现 ensure，设置页经 `Background.options()` 自动出现。
 
 ```lua
 local Compose = require("lockscreen.compose")
@@ -49,5 +50,5 @@ end
 
 ### 注意
 
-- 非 force 时 `init.refresh` 不打断已在跑的 job。
+- 非 force 且设置 `revision` 未变时，`init.refresh` 不打断已在跑的 job；revision 已变则取消旧 job 重跑。
 - 回调里检查 `Settings.isCompose()` 与 `revision`，用户中途改设置则丢弃。

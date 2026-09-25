@@ -10,7 +10,8 @@
 |---|---|
 | `fetch.lua` | 综合拉取 / 选词补全（调 `ai`） |
 | `prompts.lua` / `context.lua` | 提示词与阅读上下文拼装 |
-| `store.lua` | 读写 `xray_entities` |
+| `store.lua` | 实体合并（`mergeEntities`）与 prompt 快照（`promptSnapshot`），不碰库 |
+| `db/xray.lua` | 读写 `xray_entities`（`list` / `upsert` / `replace`） |
 | `marks.lua` | 文中标记 |
 | `kinds.lua` | character / location / term |
 | `ui.lua` | 阅读侧入口 |
@@ -21,16 +22,15 @@
 
 ```lua
 local Fetch = require("xray.fetch")
-local Store = require("xray.store")
 
--- 综合拉取当前页上下文
-Fetch.pull(identity, ui, function(ok, err) end)
+-- 综合拉取；已有数据且非 force 时直接回缓存
+Fetch.comprehensive(ui, identity, { force = false }, function(result, err) end)
 
--- 选词补全某个实体
-Fetch.complete(identity, { kind = "character", name = "…" }, cb)
+-- 选词查实体：本地别名命中免请求，否则 AI 补全并落库
+Fetch.lookupWord(ui, identity, "…", function(item, err) end)
 
 -- 查询已存实体
-local rows = Store.list(source_id, stable_id, kind?)
+local rows = require("db.xray").list(source_id, stable_id, kind)  -- kind 可省略
 ```
 
 阅读 UI 经 `xray.ui` / marks 展示；需先配置 AI。依赖表见 db 文档。

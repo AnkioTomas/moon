@@ -21,7 +21,7 @@
 ```lua
 local Update = require("update")
 
-Update.checkAsync({ interactive = true })  -- 设置页「检查更新」
+Update.manualCheck(plugin_root)  -- 设置页「检查更新」
 -- 静默检查：Desktop:onResume → Update.autoCheck（仅有新版本才提示）
 
 -- 用户确认后内部走 download + Install

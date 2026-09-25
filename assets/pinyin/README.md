@@ -13,8 +13,8 @@
   python3 tools/build_pinyin_dict.py
   python3 tools/build_pinyin_dict.py --assemble-only   # 仅从分片拼整库（Release CI 用）
 
-设备端不读这里的文件——插件（pinyin/download.lua）经 jsdelivr 按
-仓库 main 拉取切片、逐片校验 SHA-256 后拼接成
+设备端不读这里的文件——插件（ime/download.lua）经 jsdelivr 按
+仓库 main 拉取 assets/pinyin/ 切片、逐片校验 SHA-256 后拼接成
 $DATA/.moon/dictionary.sqlite3。切片是因为单片超 jsdelivr
 ~20MB 单文件上限。
 
