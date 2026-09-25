@@ -10,11 +10,16 @@ local Turbo = require("http.turbo")
 
 -- SNI / 点号 connect_fail 必须在第一次 acquire 时装上（补丁只打一次）。
 do
+    local client_fail_msgs = {}
+    local HTTPClient = {}
+    function HTTPClient:_handle_connect_fail(strerr)
+        client_fail_msgs[#client_fail_msgs + 1] = "Could not connect: " .. tostring(strerr or "")
+    end
     package.loaded["turbo"] = nil
     package.preload["turbo"] = function()
         return {
             log = { categories = {} },
-            async = { HTTPClient = function() end },
+            async = { HTTPClient = HTTPClient },
             ioloop = {
                 IOLoop = function()
                     return { add_callback = function() end }
@@ -93,11 +98,20 @@ do
     iostream.IOStream.connect({}, "1.2.3.4", 443)
     iostream.IOStream.connect({}, "2001:db8::1", 443)
     Assert.eq(#lookups, 1, "IP 字面量不得解析")
-    iostream.IOStream.connect({ should_fail = true }, "cdn.example.com", 443)
+    -- 同步失败：iostream 经 run_callback 调 HTTPClient:_handle_connect_fail(client, err)
+    HTTPClient._handle_connect_fail({ hostname = "cdn.example.com" }, "Network is unreachable")
+    Assert.eq(client_fail_msgs[1], "Could not connect: Network is unreachable")
     local c = {}
     iostream.IOStream.connect(c, "cdn.example.com", 443)
     Assert.eq(#lookups, 2, "连接失败后必须重新解析")
     Assert.eq(c.connected_to, "10.0.0.2")
+    -- LuaSocket 异步失败回调 (client, -1, err)：用真实错误，同样丢缓存
+    HTTPClient._handle_connect_fail({ hostname = "cdn.example.com" }, -1, "connection refused")
+    Assert.eq(client_fail_msgs[2], "Could not connect: connection refused")
+    iostream.IOStream.connect({}, "cdn.example.com", 443)
+    Assert.eq(#lookups, 3, "异步连接失败后也必须重新解析")
+    HTTPClient._handle_connect_fail({ hostname = "cdn.example.com" }, -1)
+    Assert.eq(client_fail_msgs[3], "Could not connect: -1", "无真实错误时保留原样")
     local nx = {}
     iostream.IOStream.connect(nx, "nx.invalid", 443)
     Assert.eq(nx.connected_to, "nx.invalid", "解析失败交回 connect 报真实错误")

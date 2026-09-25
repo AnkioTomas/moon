@@ -69,7 +69,7 @@ local function resolve(host)
 end
 
 --- `self._handle_connect_fail(err)` 点号调用会把 self 变成错误字符串。
---- 同时把主机名解析收口到 resolve；连接失败丢弃该主机缓存。
+--- 同时把主机名解析收口到 resolve。
 local function patchConnectFail()
     local ok, iostream = pcall(require, "turbo.iostream")
     local IOStream = ok and iostream and iostream.IOStream
@@ -85,7 +85,6 @@ local function patchConnectFail()
     end
     IOStream.connect = function(self, address, port, family, callback, fail_callback, arg)
         self._handle_connect_fail = function(first, second)
-            dns[address] = nil
             if type(first) ~= "table" then
                 return orig_fail(self, first)
             end
@@ -94,6 +93,29 @@ local function patchConnectFail()
         return orig_connect(self, resolve(address), port, family, callback, fail_callback, arg)
     end
     IOStream._book_connect_fail_patched = true
+end
+
+--- 所有连接失败（同步/异步、HTTP/HTTPS）最终都汇到 HTTPClient:_handle_connect_fail，
+--- 在这里丢弃该主机的 DNS 缓存，坏 IP 不会卡满 TTL。
+--- LuaSocket 异步 connect 失败回调是 (client, -1, err)，官方只取第二参，提示成「Could not connect: -1」。
+local function patchClientConnectFail()
+    local ok, turbo = pcall(require, "turbo")
+    local HTTPClient = ok and turbo.async and turbo.async.HTTPClient
+    if type(HTTPClient) ~= "table" or type(HTTPClient._handle_connect_fail) ~= "function" then
+        return
+    end
+    if HTTPClient._book_connect_fail_patched then
+        return
+    end
+    local orig = HTTPClient._handle_connect_fail
+    HTTPClient._handle_connect_fail = function(self, rc, err)
+        dns[self.hostname] = nil
+        if rc == -1 and err ~= nil then
+            rc = err
+        end
+        return orig(self, rc)
+    end
+    HTTPClient._book_connect_fail_patched = true
 end
 
 --- buffer:len() / 已读字节是 FFI int64。stream 的增量路径会 math.min，cdata 直接炸。
@@ -146,6 +168,7 @@ local function patch()
         end
     end
     patchConnectFail()
+    patchClientConnectFail()
     patchReadSize()
 end
 
