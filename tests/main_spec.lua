@@ -106,6 +106,7 @@ stub("lockscreen.init", noop_mod({
     onPause = function() calls.lock_refresh = (calls.lock_refresh or 0) + 1 end,
 }))
 stub("remote.init", noop_mod())
+stub("nightmode", noop_mod())
 stub("ime.init", noop_mod())
 stub("patch.manager", noop_mod({
     onCreate = function()

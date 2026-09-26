@@ -96,6 +96,8 @@ local KEYWORDS = {
 ---@field low string|nil
 ---@field sunrise string|nil
 ---@field sunset string|nil
+---@field latitude number|nil
+---@field longitude number|nil
 ---@field icon string
 ---@field image string
 ---@field days BookWeatherDay[]
@@ -230,6 +232,8 @@ function Weather:parse(body)
         low = today.low,
         sunrise = astro and Online.nonempty(astro.sunrise) or nil,
         sunset = astro and Online.nonempty(astro.sunset) or nil,
+        latitude = type(area) == "table" and tonumber(area.latitude) or nil,
+        longitude = type(area) == "table" and tonumber(area.longitude) or nil,
         icon = icon,
         image = image,
         days = days,
