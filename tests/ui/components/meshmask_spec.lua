@@ -19,8 +19,10 @@ package.preload["ui/widget/widget"] = function()
     }
 end
 package.preload["ffi/blitbuffer"] = function()
-    return { COLOR_BLACK = 0 }
+    return { COLOR_BLACK = 0, COLOR_WHITE = 255 }
 end
+local screen = { night_mode = false }
+package.loaded["device"] = { screen = screen }
 
 package.loaded["ui.components.meshmask"] = nil
 local MeshMask = require("ui.components.meshmask")
@@ -39,3 +41,11 @@ Assert.eq(painted[1].x, 0)
 Assert.eq(painted[1].y, 0)
 Assert.eq(painted[3].x, 1)
 Assert.eq(painted[3].y, 1)
+Assert.eq(painted[1].color, 0, "日间画黑点")
+
+-- 夜间模式整屏反色：画白点才显示为压暗
+painted = {}
+screen.night_mode = true
+mask:paintTo(bb, 0, 0)
+Assert.eq(#painted, 4)
+Assert.eq(painted[1].color, 255, "夜间画白点")
