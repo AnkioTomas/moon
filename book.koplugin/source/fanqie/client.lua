@@ -303,6 +303,7 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
         -- 用 /api/book/info 拿书名/作者，封面走手机 CDN（thumb_uri 稳定、不签名过期）。
         local pending = #shelf_book_ids
         local by_id = {}
+        -- 拿不到详情的书（下架/失效）不进列表：reconcile 软删不标脏，不会推云端删除，恢复后重新上架。
         local function finish()
             local detail_list = {}
             for _, book_id in ipairs(shelf_book_ids) do
@@ -310,11 +311,6 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
                 if row then
                     detail_list[#detail_list + 1] = row
                 end
-            end
-            -- 残缺列表交给 reconcile 会把缺席的在架书软删，只能整体失败。
-            if #detail_list < #shelf_book_ids then
-                cb(nil, "番茄书架详情不完整")
-                return
             end
             local result = { code = 0, data = { detail_list = detail_list } }
             SHELF_CACHE[cache_key] = { timestamp = os.time(), data = result }
@@ -335,8 +331,8 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
                         abstract = d.abstract or d.description or "",
                         thumb_url = FanQie.mobileCover(d.thumbUri or d.thumb_uri or d.thumbUrl),
                     }
-                elseif info_err then
-                    logger.warn("fanqie book info", book_id, info_err)
+                else
+                    logger.warn("fanqie book info", book_id, info_err or businessError(info, "invalid"))
                 end
                 pending = pending - 1
                 if pending <= 0 then

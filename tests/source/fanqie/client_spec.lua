@@ -1,5 +1,5 @@
 --[[--
-番茄书架详情：部分 book_info 失败必须整体失败且不写缓存。
+番茄书架详情：拿不到详情的书（网络失败/下架）直接剔除，其余照常返回。
 
 @module tests.source.fanqie.client_spec
 --]]
@@ -12,6 +12,7 @@ package.preload["json"] = function()
 end
 
 local fail_ids = {}
+local gone_ids = {}
 local requests = 0
 package.loaded["http.request"] = nil
 package.preload["http.request"] = function()
@@ -22,20 +23,28 @@ package.preload["http.request"] = function()
             requests = requests + 1
             local body
             if opts.url:find("/bookshelf/info/", 1, true) then
-                body = '{"code":0,"data":{"book_shelf_info":[{"book_id":"1"},{"book_id":"2"}]}}'
+                body = '{"code":0,"data":{"book_shelf_info":[{"book_id":"1"},{"book_id":"2"},{"book_id":"3"}]}}'
             else
                 local id = opts.url:match("bookId=(%d+)")
                 if fail_ids[id] then
                     cb(nil, "timeout")
                     return { cancel = function() end }
                 end
-                body = '{"code":0,"data":{"bookName":"书' .. id .. '","thumbUri":"x"}}'
+                if gone_ids[id] then
+                    body = '{"code":-1,"message":"book not found"}'
+                else
+                    body = '{"code":0,"data":{"bookName":"书' .. id .. '","thumbUri":"x"}}'
+                end
             end
             cb({ code = 200, body = body })
             return { cancel = function() end }
         end,
     }
 end
+package.preload["ui/uimanager"] = function()
+    return { nextTick = function(_, f) f() end }
+end
+package.loaded["ui/uimanager"] = nil
 
 package.loaded["source.fanqie.client"] = nil
 local Client = require("source.fanqie.client")
@@ -46,29 +55,37 @@ local settings = {
 }
 local client = Client:new(settings)
 
--- 两本里一本详情失败：整体失败，不能把残缺书架交出去。
+-- 一本超时、一本下架：剔除两本，剩下的照常返回，不报错。
 fail_ids["2"] = true
+gone_ids["3"] = true
 local data, err
 client:fetchShelfDetailAsync(false, function(d, e) data, err = d, e end)
-Assert.is_nil(data)
-Assert.matches(err, "不完整")
-
--- 残缺结果不得进缓存：恢复后再拉必须重新请求并拿到完整书架。
-fail_ids["2"] = nil
-requests = 0
-client:fetchShelfDetailAsync(false, function(d, e) data, err = d, e end)
-Assert.eq(requests, 3)
 Assert.is_nil(err)
-Assert.len(data.data.detail_list, 2)
+Assert.len(data.data.detail_list, 1)
+Assert.eq(data.data.detail_list[1].book_id, "1")
+Assert.eq(data.data.detail_list[1].book_name, "书1")
 
--- 完整结果才缓存：再拉直接命中，不再发请求。
-package.preload["ui/uimanager"] = function()
-    return { nextTick = function(_, f) f() end }
-end
-package.loaded["ui/uimanager"] = nil
+-- 结果进缓存：再拉直接命中，不再发请求。
 requests = 0
 client:fetchShelfDetailAsync(false, function(d) data = d end)
 Assert.eq(requests, 0)
-Assert.len(data.data.detail_list, 2)
+Assert.len(data.data.detail_list, 1)
+
+-- 强制刷新绕过缓存：恢复后按书架顺序拿全。
+fail_ids["2"] = nil
+gone_ids["3"] = nil
+requests = 0
+client:fetchShelfDetailAsync(true, function(d, e) data, err = d, e end)
+Assert.eq(requests, 4)
+Assert.is_nil(err)
+Assert.len(data.data.detail_list, 3)
+Assert.eq(data.data.detail_list[2].book_id, "2")
+Assert.eq(data.data.detail_list[3].book_id, "3")
+
+-- 全部失效：空书架，不报错。
+fail_ids = { ["1"] = true, ["2"] = true, ["3"] = true }
+client:fetchShelfDetailAsync(true, function(d, e) data, err = d, e end)
+Assert.is_nil(err)
+Assert.len(data.data.detail_list, 0)
 
 return true
