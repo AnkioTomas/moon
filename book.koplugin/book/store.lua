@@ -71,6 +71,24 @@ function Store.reconcile(source_id, books)
     return { pulled = #books, pushed = 0, hidden = hidden, conflicts = 0, skipped = false }
 end
 
+--- 删单书工作目录（整本/章节/图片）与封面文件，并撤掉目录下的章节登记。
+---@param source_id string
+---@param stable_id string
+---@return boolean ok 章节登记是否撤掉
+---@return string|nil leftover purge 失败时为 "partial"
+local function purgeBookFiles(source_id, stable_id)
+    local dir = Paths.bookWorkDir(stable_id, source_id)
+    local leftover
+    if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory" then
+        if not require("ffi/util").purgeDir(dir) then
+            logger.warn("book cache purge failed", dir)
+            leftover = "partial"
+        end
+    end
+    os.remove(Paths.coverPath(stable_id, source_id))
+    return ChapterDB.deleteUnder(dir), leftover
+end
+
 --- 本地删除：标 deleted 待同步，并清章节缓存/封面。书架列表立刻看不到。
 ---@param source_id string
 ---@param stable_id string
@@ -80,18 +98,28 @@ function Store.markDeleted(source_id, stable_id)
     if not BookDB.markDeleted(source_id, stable_id) then
         return false
     end
-    local Util = require("ffi/util")
-    local dir = Paths.bookWorkDir(stable_id, source_id)
-    local leftover
-    if require("libs/libkoreader-lfs").attributes(dir, "mode") == "directory" then
-        if not Util.purgeDir(dir) then
-            logger.warn("book delete purge failed", dir)
-            leftover = "partial"
-        end
-    end
-    ChapterDB.deleteUnder(dir)
-    os.remove(Paths.coverPath(stable_id, source_id))
+    local _, leftover = purgeBookFiles(source_id, stable_id)
     return true, leftover
+end
+
+--- 清单书本地缓存：工作目录、封面、封面网络图，以及 .moon/cache 内的 books.path。
+--- 元数据、目录、进度、统计保留；.moon/cache 外的原书（本地源）不动。
+---@param source_id string
+---@param stable_id string
+---@return boolean ok 路径登记是否清干净
+---@return string|nil leftover purge 失败时为 "partial"
+function Store.clearCache(source_id, stable_id)
+    local ok, leftover = purgeBookFiles(source_id, stable_id)
+    local row = BookDB.get(source_id, stable_id)
+    if not row then return ok, leftover end
+    local cached_cover = require("ui.components.image.download").cached(row.cover)
+    if cached_cover then os.remove(cached_cover) end
+    local cache_root = Paths.cacheDir() .. "/"
+    if type(row.path) == "string" and row.path:sub(1, #cache_root) == cache_root then
+        os.remove(row.path)
+        ok = BookDB.touchPath(source_id, stable_id, nil) and ok
+    end
+    return ok, leftover
 end
 
 --- 云端删除已确认：撕掉本地墓碑行。

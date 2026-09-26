@@ -23,6 +23,7 @@ reading_stats 提供统计。
 ---@field uncategorized boolean|nil 只查询 category 为 NULL/空串的未分类桶
 ---@field unseries boolean|nil 只查询 series 为 NULL/空串的无系列桶
 ---@field read_status "read"|"unread"|nil 按独立阅读状态筛选
+---@field downloaded boolean|nil 只查询已下载到本地的书（口径同 Store.isDownloaded）
 ---@field source_id string|nil 混合模式下按书行所属源筛选
 ---@field force boolean|nil 强制重扫、忽略扫描缓存（本地源手动刷新）
 ---@field sort "title"|"author"|"recent_read"|"recent_added"|nil 排序字段
@@ -254,6 +255,16 @@ local function deferScoped(source_id, cb, fn)
         end }
 end
 
+--- 章节型源 id（已下载要按章节登齐判定）。
+---@return string[]
+local function chapterSources()
+    local ids = {}
+    for _, meta in ipairs(require("source.registry").list()) do
+        if meta.type == "chapter" then ids[#ids + 1] = meta.id end
+    end
+    return ids
+end
+
 --- 图书馆分页 / 搜索 / 筛选（直查 books 表）。
 ---@param source_id string
 ---@param opts BookListOpts|nil
@@ -271,6 +282,8 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             unseries = opts.unseries,
             search = opts.search,
             read_status = opts.read_status,
+            downloaded = opts.downloaded,
+            chapter_sources = opts.downloaded and chapterSources() or nil,
             source_id = opts.source_id,
             sort = opts.sort,
             sort_desc = opts.sort_desc,
@@ -294,6 +307,7 @@ function Catalog.filtersAsync(source_id, cb)
             series = BookDB.seriesBySource(scope),
             series_counts = BookDB.seriesCountsBySource(scope),
             read_counts = BookDB.readStatusCountsBySource(scope),
+            downloaded_count = BookDB.downloadedCountBySource(scope, chapterSources()),
         }
         -- 仅多源混合时给出源分组；顺序跟已启用列表，册数来自聚合。
         if type(scope) == "table" then

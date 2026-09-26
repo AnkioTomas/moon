@@ -167,6 +167,9 @@ function Filter.open(opts)
     groups[#groups + 1] = { kind = "category", title = _("分类"), values = values(data.category_counts, "category", _("未分类")) }
     groups[#groups + 1] = { kind = "series", title = _("系列"), values = values(data.series_counts, "series", _("无系列")) }
     groups[#groups + 1] = { kind = "read_status", title = _("阅读状态"), values = status }
+    groups[#groups + 1] = { kind = "downloaded", title = _("本地"), values = {
+        { value = true, text = _("已下载"), count = data.downloaded_count or 0 },
+    } }
     groups[#groups + 1] = { kind = "sort", title = _("排序"), values = {
         { value = "recent_added", text = _("最近添加") },
         { value = "recent_read", text = _("最近阅读") },

@@ -381,6 +381,7 @@ function Library:fetch()
         series = f.series or "",
         unseries = not not f.unseries,
         read_status = f.read_status,
+        downloaded = f.downloaded,
         source_id = f.source_id or "",
         sort = self.sort,
     }, function(res, err)

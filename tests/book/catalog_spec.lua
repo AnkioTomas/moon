@@ -33,6 +33,12 @@ package.preload["utils.settings"] = function()
 end
 package.preload["source.registry"] = function()
     return {
+        list = function()
+            return {
+                { id = "local", name = "本地书籍", type = "book" },
+                { id = "wechat", name = "微信读书", type = "chapter" },
+            }
+        end,
         listEnabled = function()
             return {
                 { id = "local", name = "本地书籍" },
@@ -52,6 +58,10 @@ package.preload["db.book"] = function()
         categoryCountsBySource = function() return FakeBooks.category_counts end,
         seriesCountsBySource = function() return FakeBooks.series_counts end,
         readStatusCountsBySource = function() return FakeBooks.read_counts end,
+        downloadedCountBySource = function(_, chapter_sources)
+            FakeBooks.count_chapter_sources = chapter_sources
+            return 3
+        end,
         seriesBySource = function() return FakeBooks.series end,
         sourceCountsBySource = function() return FakeBooks.source_counts end,
         get = function(source_id, stable_id)
@@ -104,7 +114,14 @@ do -- listLibraryAsync 读假库
     Assert.eq(got.res.data[1].source_id, "local")
     Assert.eq(got.res.data[1].title, "B")
     Assert.eq(FakeBooks.list_opts.read_status, "unread")
+    Assert.is_nil(FakeBooks.list_opts.chapter_sources)
     Assert.eq(seen_scope, "local")
+
+    Catalog.listLibraryAsync("local", { downloaded = true }, function() end)
+    Stubs.flush()
+    Assert.is_true(FakeBooks.list_opts.downloaded)
+    Assert.eq(#FakeBooks.list_opts.chapter_sources, 1)
+    Assert.eq(FakeBooks.list_opts.chapter_sources[1], "wechat")
 end
 
 do -- filtersAsync
@@ -123,6 +140,8 @@ do -- filtersAsync
     Assert.eq(got.data.series_counts[1].series, "三体")
     Assert.eq(got.data.read_counts[1].status, "read")
     Assert.eq(got.data.series[1], "三体")
+    Assert.eq(got.data.downloaded_count, 3)
+    Assert.eq(FakeBooks.count_chapter_sources[1], "wechat")
     Assert.is_nil(got.data.source_counts)
 end
 

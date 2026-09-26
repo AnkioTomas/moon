@@ -22,6 +22,18 @@ package.preload["utils.paths"] = function()
         coverPath = function(stable_id, source_id)
             return "/cache/" .. source_id .. "/" .. stable_id .. ".jpg"
         end,
+        cacheDir = function()
+            return "/cache"
+        end,
+    }
+end
+
+local cached_images = {} -- url → 本地网络图缓存路径
+package.preload["ui.components.image.download"] = function()
+    return {
+        cached = function(url)
+            return url and cached_images[url] or nil
+        end,
     }
 end
 
@@ -441,9 +453,59 @@ do
     local ok, leftover = Store.markDeleted("wechat", "gone")
     Assert.is_true(ok)
     Assert.eq(leftover, "partial")
-    Assert.eq(warnings[1][1], "book delete purge failed")
+    Assert.eq(warnings[1][1], "book cache purge failed")
     purge_ok = true
     warnings = {}
+end
+
+-- ── clearCache：删工作目录/封面/封面网络图；cache 内 path 清空，cache 外原书不动 ──
+do
+    local removed = {}
+    local original_remove = os.remove
+    os.remove = function(path)
+        removed[#removed + 1] = path
+        return true
+    end
+    cached_images["https://img.test/c.jpg"] = "/cache/image/abc.jpg"
+    book_rows_by_id["local\0dav/a.epub"] = {
+        source_id = "local", stable_id = "dav/a.epub",
+        path = "/cache/local/book/webdav/a.epub", cover = "https://img.test/c.jpg",
+    }
+    local ok, leftover = Store.clearCache("local", "dav/a.epub")
+    Assert.is_true(ok)
+    Assert.is_nil(leftover)
+    Assert.contains(removed, "/cache/local/dav/a.epub.jpg")
+    Assert.contains(removed, "/cache/image/abc.jpg")
+    Assert.contains(removed, "/cache/local/book/webdav/a.epub")
+    Assert.eq(#touch_calls, 1)
+    Assert.is_nil(touch_calls[1].path)
+
+    removed = {}
+    touch_calls = {}
+    book_rows_by_id["local\0/lib/x.epub"] = {
+        source_id = "local", stable_id = "/lib/x.epub", path = "/lib/x.epub",
+    }
+    Assert.is_true(Store.clearCache("local", "/lib/x.epub"))
+    Assert.eq(#touch_calls, 0)
+    for _, p in ipairs(removed) do Assert.is_true(p ~= "/lib/x.epub") end
+
+    -- 前缀相似但不在 cache 目录内的路径不算缓存
+    book_rows_by_id["local\0/cache2/y.epub"] = {
+        source_id = "local", stable_id = "/cache2/y.epub", path = "/cache2/y.epub",
+    }
+    Assert.is_true(Store.clearCache("local", "/cache2/y.epub"))
+    Assert.eq(#touch_calls, 0)
+
+    touch_ok = false
+    Assert.is_false(Store.clearCache("local", "dav/a.epub"))
+    touch_ok = true
+
+    os.remove = original_remove
+    cached_images = {}
+    book_rows_by_id["local\0dav/a.epub"] = nil
+    book_rows_by_id["local\0/lib/x.epub"] = nil
+    book_rows_by_id["local\0/cache2/y.epub"] = nil
+    touch_calls = {}
 end
 
 -- ── touch：章节详情、目录和路径在同一事务登记 ──
@@ -597,6 +659,7 @@ for _, k in ipairs({
     "db.chapter",
 
     "source.registry",
+    "ui.components.image.download",
     "book.store",
     "util",
 }) do

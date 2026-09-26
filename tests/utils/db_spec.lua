@@ -433,6 +433,19 @@ do
     Assert.eq(calls[1].args[1], "local")
     Assert.eq(calls[1].args[2], "wechat")
     Assert.eq(calls[1].args[3], "wechat")
+    calls = {}
+    BookDB.listBySource("local", { downloaded = true, chapter_sources = { "wechat", "jdread" } })
+    Assert.is_true(calls[1].sql:find("CASE WHEN b.source_id IN (?,?) THEN", 1, true) ~= nil)
+    Assert.is_true(calls[1].sql:find("json_valid(b.toc)", 1, true) ~= nil)
+    Assert.is_true(calls[1].sql:find("FROM chapters c", 1, true) ~= nil)
+    Assert.is_true(calls[1].sql:find("COALESCE(b.path, '')<>''", 1, true) ~= nil)
+    Assert.eq(calls[1].args[1], "local")
+    Assert.eq(calls[1].args[2], "wechat")
+    Assert.eq(calls[1].args[3], "jdread")
+    calls = {}
+    Assert.eq(BookDB.downloadedCountBySource({ "local", "wechat" }, { "wechat" }), 7)
+    Assert.is_true(calls[1].sql:find("b.deleted=0 AND (CASE WHEN b.source_id=? THEN", 1, true) ~= nil)
+    Assert.eq(calls[1].args[3], "wechat")
 
     -- 分类列表
     local cats = BookDB.categoriesBySource("local")
