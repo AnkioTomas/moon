@@ -150,12 +150,15 @@ end
 ---@param manifest table 含 parts / raw_size
 ---@param dir string 分片所在目录
 ---@param dest string 目标词库路径
+---@param progress fun(bytes: number) 已处理字节；每变化 1% 调一次（经管道回主进程，不能每块都发）
 ---@return string|nil 出错信息，成功为 nil
-local function assemble(manifest, dir, dest)
+local function assemble(manifest, dir, dest, progress)
     local out_tmp = dest .. ".part"
     local ok, err = pcall(function()
         local out = assert(io.open(out_tmp, "wb"))
         local total = 0
+        local step = math.max(1, math.floor(tonumber(manifest.raw_size) / 100))
+        local next_report = step
         local sha256 = require("ffi/sha2").sha256
         local full_hash = sha256()
         for _, part in ipairs(manifest.parts) do
@@ -171,6 +174,10 @@ local function assemble(manifest, dir, dest)
                 full_hash(data)
                 assert(out:write(data))
                 total = total + #data
+                if total >= next_report then
+                    progress(total)
+                    next_report = total + step
+                end
             end
             assert(f:close())
             if part_hash() ~= part.sha256:lower() then
@@ -319,17 +326,22 @@ downloadParts = function(method, base_url, manifest, idx, dest, done, report, do
 end
 
 assembleInJob = function(method, manifest, dest, done, report)
-    report("assemble")
+    local size, count = tonumber(manifest.raw_size), #manifest.parts
+    report("assemble", 0, size, nil, count)
     local dir = tmpDir(method)
-    Job.run(function()
-        local err = assemble(manifest, dir, dest)
+    Job.run(function(progress)
+        local err = assemble(manifest, dir, dest, progress)
         if err then
             error(err)
         end
     end, {
         name = "ime." .. method .. ".assemble",
-        kind = "heavy",
+        -- medium 每 2s 收一次管道：进度条要能看出在动，heavy 的 5s 太钝。
+        kind = "medium",
         timeout = 300,
+        on_progress = function(bytes)
+            report("assemble", bytes, size, nil, count)
+        end,
         on_done = function()
             cleanupTmp(method)
             local attr = lfs.attributes(dest)
