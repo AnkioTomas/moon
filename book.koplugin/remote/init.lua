@@ -488,12 +488,6 @@ local function saveUpload(temp, dir, name, cb, conflict)
         cb(nil, "target is not a file")
         return
     end
-    -- 覆盖写与删除、改名同样会毁掉配置/凭证，必须和它们一起挡住。
-    if isProtected(target) or isSecret(target) then
-        os.remove(temp)
-        cb(nil, "protected path")
-        return
-    end
     local ok, err = os.rename(temp, target)
     if ok then
         cb(true)

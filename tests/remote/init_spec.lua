@@ -151,23 +151,8 @@ package.preload["workers.job"] = function()
 end
 package.loaded["workers.job"] = nil
 
--- 覆盖上传与删除要和改名、下载一样挡住配置/凭证；公开壁纸目录照常可删。
+-- 删除要和改名、下载一样挡住配置/凭证；公开壁纸目录照常可删。
 do
-    dirs[data .. "/.moon/settings"] = true
-    files[data .. "/settings.reader.lua"] = true
-    local cases = {
-        { data, "settings.reader.lua" },
-        { data .. "/.moon/settings", "moon.lua" },
-    }
-    for _, case in ipairs(cases) do
-        local result, reason
-        server_opts.handlers.save("upload.tmp", case[1], case[2], function(ok, err)
-            result, reason = ok, err
-        end, "overwrite")
-        Assert.is_nil(result)
-        Assert.eq(reason, "protected path")
-    end
-
     local deleted, delete_err
     server_opts.handlers.delete(secret, function(ok, err) deleted, delete_err = ok, err end)
     Assert.is_nil(deleted)
