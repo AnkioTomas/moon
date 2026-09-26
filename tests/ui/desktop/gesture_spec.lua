@@ -1,4 +1,4 @@
---[[-- 桌面把手势先交给文件管理器里已配置的 gestures touch zone。 --]]
+--[[-- 桌面手势先走月读控件，未消费的再交给文件管理器里已配置的 gestures touch zone。 --]]
 
 local Assert = require("support.assert")
 
@@ -29,7 +29,7 @@ package.preload["gettext"] = function()
     return function(text) return text end
 end
 
-local base_calls = 0
+local base_calls, base_result = 0, false
 local InputContainer = {}
 function InputContainer:extend(value)
     return setmetatable(value, { __index = self })
@@ -41,7 +41,7 @@ function InputContainer:onGesture(ev)
 end
 function InputContainer:handleEvent()
     base_calls = base_calls + 1
-    return "base"
+    return base_result
 end
 package.preload["ui/widget/container/inputcontainer"] = function() return InputContainer end
 
@@ -65,44 +65,27 @@ local fm = {
         zone("tap_left_bottom_corner", true),
     },
 }
-local BAR_Y = 90
-local bar_taps = 0
-local desktop = setmetatable({
-    plugin = { ui = fm },
-    ges_events = { TapBar = { {
-        match = function(_, ev) return ev.ges == "tap" and ev.pos.y >= BAR_Y end,
-    } } },
-    onTapBar = function()
-        bar_taps = bar_taps + 1
-        return true
-    end,
-}, { __index = Desktop })
-local function gesture(ges, y)
-    return { handler = "onGesture", args = { { ges = ges or "tap", pos = { x = 0, y = y or 0 } } } }
-end
+local desktop = setmetatable({ plugin = { ui = fm } }, { __index = Desktop })
+local function gesture() return { handler = "onGesture", args = { { ges = "tap" } } } end
 
--- 已配置手势命中：消费事件，不再走桌面控件；FM 自身 zone 与 pan 占位 zone 不转发。
+-- 月读控件消费了（如左下角的「首页」Tab）：文件管理器手势不得覆盖。
+base_result = true
 Assert.is_true(desktop:handleEvent(gesture()))
-Assert.eq(base_calls, 0)
+Assert.eq(base_calls, 1)
+Assert.eq(#hits, 0)
+
+-- 月读没消费：只转发已配置 zone；FM 自身 zone 与 pan 占位 zone 不转发。
+base_result = false
+Assert.is_true(desktop:handleEvent(gesture()))
+Assert.eq(base_calls, 2)
 Assert.eq(#hits, 2)
 Assert.eq(hits[1], "hold_top_right_corner")
 Assert.eq(hits[2], "tap_left_bottom_corner")
 
--- 底栏点按归 Tab：左下角默认绑了开关前光，不能吞掉「首页」。
-hits = {}
-Assert.is_true(desktop:handleEvent(gesture("tap", BAR_Y)))
-Assert.eq(bar_taps, 1)
-Assert.eq(#hits, 0)
--- 底栏里的非点按手势照常交给文件管理器。
-Assert.is_true(desktop:handleEvent(gesture("hold", BAR_Y)))
-Assert.eq(bar_taps, 1)
-Assert.eq(#hits, 2)
-
--- 已配置但 handler 不处理（方向不符等）：落回桌面。
+-- 已配置但 handler 不处理（方向不符等）：未消费。
 hits = {}
 fm._ordered_touch_zones = { zone("filemanager_tap", true), zone("hold_top_right_corner", nil) }
-Assert.eq(desktop:handleEvent(gesture()), "base")
-Assert.eq(base_calls, 1)
+Assert.is_nil(desktop:handleEvent(gesture()))
 Assert.eq(#hits, 1)
 
 -- multiswipe 总入口始终转发，动作由 gestures 插件按方向查。
@@ -111,11 +94,11 @@ fm._ordered_touch_zones = { zone("multiswipe", true) }
 Assert.is_true(desktop:handleEvent(gesture()))
 Assert.eq(hits[1], "multiswipe")
 
--- 非手势事件、无 gestures 插件、无 plugin：直接走桌面。
+-- 非手势事件、无 gestures 插件、无 plugin：只走桌面。
 hits = {}
-Assert.eq(desktop:handleEvent({ handler = "onResume", args = {} }), "base")
+Assert.eq(desktop:handleEvent({ handler = "onResume", args = {} }), false)
 fm.gestures = nil
-Assert.eq(desktop:handleEvent(gesture()), "base")
-Assert.eq(setmetatable({ ges_events = desktop.ges_events }, { __index = Desktop }):handleEvent(gesture()), "base")
+Assert.eq(desktop:handleEvent(gesture()), false)
+Assert.eq(setmetatable({}, { __index = Desktop }):handleEvent(gesture()), false)
 Assert.eq(#hits, 0)
-Assert.eq(base_calls, 4)
+Assert.eq(base_calls, 7)
