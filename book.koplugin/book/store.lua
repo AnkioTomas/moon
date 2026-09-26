@@ -71,6 +71,13 @@ function Store.reconcile(source_id, books)
     return { pulled = #books, pushed = 0, hidden = hidden, conflicts = 0, skipped = false }
 end
 
+---@param path string|nil
+---@return boolean
+local function inCache(path)
+    local root = Paths.cacheDir() .. "/"
+    return type(path) == "string" and path:sub(1, #root) == root
+end
+
 --- 删单书工作目录（整本/章节/图片）与封面文件，并撤掉目录下的章节登记。
 ---@param source_id string
 ---@param stable_id string
@@ -114,8 +121,7 @@ function Store.clearCache(source_id, stable_id)
     if not row then return ok, leftover end
     local cached_cover = require("ui.components.image.download").cached(row.cover)
     if cached_cover then os.remove(cached_cover) end
-    local cache_root = Paths.cacheDir() .. "/"
-    if type(row.path) == "string" and row.path:sub(1, #cache_root) == cache_root then
+    if inCache(row.path) then
         os.remove(row.path)
         ok = BookDB.touchPath(source_id, stable_id, nil) and ok
     end
@@ -243,6 +249,16 @@ function Store.isDownloaded(book)
         })
     end
     return type(book.path) == "string" and book.path ~= ""
+end
+
+--- 在线书是否已完整离线到 .moon/cache（可清理）：章节源看全本缓存，整本源看 path 落在 cache 内。
+--- 本地源原书在 cache 外，恒为 false。
+---@param book Book|table|nil
+---@return boolean
+function Store.isCached(book)
+    if not Store.isDownloaded(book) then return false end
+    local meta = require("source.registry").meta(book.source_id)
+    return (meta ~= nil and meta.type == "chapter") or inCache(book.path)
 end
 
 --- 进度/面板用身份：BookIdentity（含 source_id/stable_id）。

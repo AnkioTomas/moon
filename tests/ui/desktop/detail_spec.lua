@@ -137,7 +137,7 @@ local clear_result = { true }
 package.preload["book.store"] = function()
     return {
         rememberMany = function() end,
-        isDownloaded = function(book) return book and book.downloaded == true end,
+        isCached = function(book) return book and book.cached == true end,
         clearCache = function(source_id, stable_id)
             cleared = { source_id, stable_id }
             return clear_result[1], clear_result[2]
@@ -225,7 +225,7 @@ local unread = {
     percent = 12,
 }
 local tools, primary = Detail.actionPlan(unread, local_src, "library")
-Assert.eq(ids(tools), "edit,scrape,read,clear_cache,delete")
+Assert.eq(ids(tools), "edit,scrape,read,delete")
 Assert.eq(primary.id, "open")
 Assert.eq(primary.text, "继续阅读")
 
@@ -241,12 +241,21 @@ local read_book = {
     percent = 100,
 }
 tools, primary = Detail.actionPlan(read_book, chapter_src, "library")
-Assert.eq(ids(tools), "download,unread,clear_cache,delete")
+Assert.eq(ids(tools), "download,unread,delete")
 Assert.eq(primary.text, "开始阅读")
 
-read_book.downloaded = true
+read_book.cached = true
 tools = Detail.actionPlan(read_book, chapter_src, "library")
-Assert.eq(ids(tools), "unread,clear_cache,delete")
+Assert.eq(ids(tools), "clear_cache,unread,delete")
+
+-- 整本在线源：无下载入口，离线副本在 cache 内才给清理
+local online_book_src = { id = "moon", type = "book" }
+local moon_book = { source_id = "moon", stable_id = "m1", read_state = 0 }
+tools = Detail.actionPlan(moon_book, online_book_src, "library")
+Assert.eq(ids(tools), "read,delete")
+moon_book.cached = true
+tools = Detail.actionPlan(moon_book, online_book_src, "library")
+Assert.eq(ids(tools), "clear_cache,read,delete")
 
 local page = setmetatable({
     book = {
