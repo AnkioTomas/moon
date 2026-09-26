@@ -300,10 +300,15 @@ function Desktop:onDestroy()
 end
 
 --- 桌面盖住 FileManager 后 UIManager 只把手势发给栈顶，用户在文件管理器配置的手势须先于桌面控件执行。
+--- 底栏除外：它整条都是 Tab，而 KOReader 默认把左下角点按绑成开关前光，会吞掉「首页」。
 ---@param event table KOReader 事件
 ---@return boolean|nil
 function Desktop:handleEvent(event)
-    if event.handler == "onGesture" and fmGesture(self, event.args[1]) then return true end
+    if event.handler == "onGesture" then
+        local ev = event.args[1]
+        if self.ges_events.TapBar[1]:match(ev) and self:onTapBar(nil, ev) then return true end
+        if fmGesture(self, ev) then return true end
+    end
     return InputContainer.handleEvent(self, event)
 end
 
