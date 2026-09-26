@@ -10,9 +10,22 @@ Stubs.reset()
 
 local fontinfo = {
     ["/tmp/reader-font.ttf"] = { { name = "Reader Demo" } },
+    ["/tmp/fonts/wr.ttf"] = { { name = "WeRead Demo" } },
+    ["/tmp/fonts/bad.woff"] = { { name = "Bad Woff" } },
 }
+local files = { ["/tmp/reader-font.ttf"] = true }
 local registered = {}
 local register_calls = 0
+local woff_calls = {}
+
+package.preload["utils.woff"] = function()
+    return { toSfnt = function(src, dest)
+        woff_calls[#woff_calls + 1] = { src, dest }
+        if src:match("bad") then return nil, "corrupt" end
+        files[src], files[dest] = nil, true
+        return true
+    end }
+end
 
 package.preload["ffi/archiver"] = function()
     return { Reader = { new = function() return { open = function() end } end } }
@@ -53,7 +66,7 @@ end
 package.preload["libs/libkoreader-lfs"] = function()
     return {
         attributes = function(path, key)
-            if path == "/tmp/reader-font.ttf" and (not key or key == "mode") then
+            if files[path] and (not key or key == "mode") then
                 return "file"
             end
             if path == "/tmp/fonts" and (not key or key == "mode") then
@@ -139,6 +152,23 @@ Assert.is_true(MoonFont.isInstalled("reader-font.ttf"), "字符串 ID 应识别�
 Assert.is_false(MoonFont.isInstalled({
     id = "missing.ttf", kind = "local", path = "/tmp/missing.ttf",
 }), "列表项路径失效后不能继续报告已安装")
+
+-- 旧版微信读书 .woff：列表只判存在不转换；解析时转成 .ttf 并注册 sfnt 路径
+files["/tmp/fonts/wr.woff"] = true
+Assert.is_true(MoonFont.isInstalled("wr"))
+Assert.len(woff_calls, 0, "isInstalled 不应触发转换")
+Assert.eq(MoonFont.faceForId("wr"), "WeRead Demo")
+Assert.eq(woff_calls[1][1], "/tmp/fonts/wr.woff")
+Assert.eq(woff_calls[1][2], "/tmp/fonts/wr.ttf")
+Assert.is_true(registered["/tmp/fonts/wr.ttf"])
+Assert.is_nil(registered["/tmp/fonts/wr.woff"])
+Assert.eq(MoonFont.faceForId("wr"), "WeRead Demo")
+Assert.len(woff_calls, 1, "已转换的字体不再重复转换")
+
+-- 转换失败且改名也失败：退回原 WOFF，字体仍可用
+files["/tmp/fonts/bad.woff"] = true
+Assert.eq(MoonFont.faceForId("bad"), "Bad Woff")
+Assert.is_true(registered["/tmp/fonts/bad.woff"])
 
 local ok, apply_err = MoonFont.applyToReader(ui, "reader-font.ttf", "Demo")
 Assert.is_true(ok)
