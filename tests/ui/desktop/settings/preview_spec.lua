@@ -124,7 +124,9 @@ package.preload["lockscreen.init"] = function()
 end
 package.preload["lockscreen.background"] = function() return {} end
 package.preload["lockscreen.components.base"] = function() return {} end
-package.preload["lockscreen.layout"] = function() return {} end
+package.preload["lockscreen.layout"] = function()
+    return { portraitSize = function() return 600, 800 end }
+end
 package.preload["lockscreen.components.bill"] = function() return {} end
 package.preload["utils.text"] = function() return {} end
 package.preload["ui/widget/infomessage"] = function() return {} end
@@ -178,6 +180,10 @@ Assert.eq(thumb.dimen.h, 144)
 Assert.eq(thumb[1].kind, "box")
 Assert.eq(captured.file, "/tmp/missing.png")
 Assert.eq(captured.file_do_cache, false)
+-- 控件只有图片大小（不拿整框），夜间模式整框反色才不会把两侧留白变白。
+Assert.is_nil(captured.width)
+Assert.is_nil(captured.height)
+Assert.eq(captured.scale_factor, 142 / 800)
 
 -- 点缩略图：全屏显示同一张图；再点（或返回键）关闭。
 thumb.tap()
@@ -188,9 +194,10 @@ Assert.is_true(viewer.covers_fullscreen)
 Assert.eq(viewer.dimen.w, 600)
 Assert.eq(viewer.dimen.h, 800)
 Assert.eq(captured.file, "/tmp/missing.png")
-Assert.eq(captured.width, 600)
-Assert.eq(captured.height, 800)
-Assert.eq(captured.scale_factor, 0)
+Assert.is_nil(captured.width)
+Assert.is_nil(captured.height)
+Assert.eq(captured.scale_factor, 1)
+Assert.eq(captured.file_do_cache, false)
 Assert.is_true(viewer.key_events.Close ~= nil)
 Assert.is_true(viewer.tap())
 Assert.len(closed, 1)
