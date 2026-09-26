@@ -1,5 +1,5 @@
 --[[--
-插件在线更新：查询 GitHub Release、下载校验包并完整替换插件目录。
+插件在线更新：查询 GitHub Release、直连与公益镜像竞速下载、校验包并完整替换插件目录。
 
 自动检查只提示可用版本，不会自动下载或安装。
 
@@ -11,6 +11,7 @@ local InfoMessage = require("ui/widget/infomessage")
 local ProgressbarDialog = require("ui/widget/progressbardialog")
 local TextViewer = require("ui/widget/textviewer")
 local UIManager = require("ui/uimanager")
+local logger = require("logger")
 local JSON = require("json")
 local Request = require("http.request")
 local Paths = require("utils.paths")
@@ -30,6 +31,44 @@ local Update = {
 
 local API_URL = "https://api.github.com/repos/AnkioTomas/moon/releases/latest"
 local CHECK_INTERVAL = 24 * 60 * 60
+local GITHUB = "https://github.com"
+
+--- Release 公益加速前缀（同步自 XIU2/UserScript「Github 增强 - 高速下载」），前缀 + github.com 之后的路径即加速地址。
+--- 镜像不可信：包体只靠 api.github.com 给的 sha256 把关，校验值绝不走镜像。
+local MIRRORS = {
+    "https://gh.h233.eu.org/https://github.com",
+    "https://gh.ddlc.top/https://github.com",
+    "https://gh-proxy.org/https://github.com",
+    "https://cdn.gh-proxy.org/https://github.com",
+    "https://edgeone.gh-proxy.org/https://github.com",
+    "https://cors.isteed.cc/github.com",
+    "https://ghproxy.it/https://github.com",
+    "https://github.boki.moe/https://github.com",
+    "https://gh.jasonzeng.dev/https://github.com",
+    "https://gh.monlor.com/https://github.com",
+    "https://github.geekery.cn/https://github.com",
+    "https://github.ednovas.xyz/https://github.com",
+    "https://ghfile.geekertao.top/https://github.com",
+    "https://ghp.keleyaa.com/https://github.com",
+    "https://gh.chjina.com/https://github.com",
+    "https://ghpxy.hwinzniej.top/https://github.com",
+    "https://cdn.crashmc.com/https://github.com",
+    "https://git.yylx.win/https://github.com",
+    "https://gitproxy.mrhjx.cn/https://github.com",
+    "https://ghproxy.cxkpro.top/https://github.com",
+    "https://gh.xxooo.cf/https://github.com",
+    "https://gh.idayer.com/https://github.com",
+    "https://down.npee.cn/?https://github.com",
+    "https://raw.ihtw.moe/github.com",
+    "https://xget.xi-xu.me/gh",
+    "https://gh.zwy.one/https://github.com",
+    "https://ghproxy.monkeyray.net/https://github.com",
+    "https://ghproxy.net/https://github.com",
+    "https://ghfast.top/https://github.com",
+    "https://wget.la/https://github.com",
+}
+local PROBE_MIRRORS = 5
+local PROBE_TIMEOUT = 10
 
 local function versionParts(version)
     local major, minor, patch = tostring(version or ""):match("^(%d+)%.(%d+)%.(%d+)")
@@ -155,12 +194,63 @@ local function finishInstall(cb, ok, err)
     cb(ok, err)
 end
 
-local function installWithChecksum(release, plugin_root, checksum, cb, on_progress)
+--- 并发探测直连与随机几个镜像：最先回 200 且长度对得上的胜出，全部失败回落直连。
+--- 选中结果一律 nextTick 回调，不在 turbo 回调栈里取消自己那条流。
+---@param release table
+---@param cb fun(url: string)
+---@return table handle { cancel }
+local function pickDownloadUrl(release, cb)
+    local path = release.url:sub(#GITHUB + 1)
+    local pool = { unpack(MIRRORS) }
+    local prefixes = { GITHUB }
+    for i = 1, math.min(PROBE_MIRRORS, #pool) do
+        local j = math.random(i, #pool)
+        pool[i], pool[j] = pool[j], pool[i]
+        prefixes[#prefixes + 1] = pool[i]
+    end
+    local jobs, pending, settled = {}, #prefixes, false
+    local function cancelAll()
+        settled = true
+        for _, job in ipairs(jobs) do job:cancel() end
+    end
+    local function settle(url)
+        if settled then return end
+        cancelAll()
+        logger.dbg("book.update download from", url)
+        cb(url)
+    end
+    for i, prefix in ipairs(prefixes) do
+        local url = prefix .. path
+        jobs[i] = Request.stream({ url = url, timeout = PROBE_TIMEOUT, allow_redirects = true }, {
+            on_headers = function(code, headers)
+                if code ~= 200 then return end
+                local length = tonumber((headers:get("Content-Length", true)))
+                if length and release.size and length ~= release.size then return end
+                UIManager:nextTick(function() settle(url) end)
+            end,
+            on_done = function()
+                pending = pending - 1
+                if pending == 0 then UIManager:nextTick(function() settle(release.url) end) end
+            end,
+        })
+    end
+    return { cancel = cancelAll }
+end
+
+local function installFrom(url, release, plugin_root, checksum, cb, on_progress)
+    local function fallback(err)
+        if url == release.url then
+            finishInstall(cb, false, err)
+        else
+            logger.warn("book.update mirror failed", url, err)
+            installFrom(release.url, release, plugin_root, checksum, cb, on_progress)
+        end
+    end
     Paths.ensureSettings()
     local archive = Paths.root() .. "/plugin-update.zip"
     os.remove(archive)
     Update._job = Request.download({
-        url = release.url,
+        url = url,
         method = "GET",
         timeout = 300,
         allow_redirects = true,
@@ -168,7 +258,7 @@ local function installWithChecksum(release, plugin_root, checksum, cb, on_progre
         on_progress = on_progress,
     }, archive, function(ok, err)
         if not ok then
-            finishInstall(cb, false, err)
+            fallback(err)
             return
         end
         Update._job = Job.run(function()
@@ -184,9 +274,19 @@ local function installWithChecksum(release, plugin_root, checksum, cb, on_progre
             end,
             on_failed = function(install_err)
                 os.remove(archive)
-                finishInstall(cb, false, install_err)
+                if tostring(install_err):find("update checksum mismatch", 1, true) then
+                    fallback(install_err)
+                else
+                    finishInstall(cb, false, install_err)
+                end
             end,
         })
+    end)
+end
+
+local function installWithChecksum(release, plugin_root, checksum, cb, on_progress)
+    Update._job = pickDownloadUrl(release, function(url)
+        installFrom(url, release, plugin_root, checksum, cb, on_progress)
     end)
 end
 
