@@ -58,6 +58,11 @@ function Render.write(path, width, height, paint)
     assert(height > 0 and height == math.floor(height), "invalid image height")
     local bb
     local tmp = path .. ".part"
+    -- 画的是文件不是屏幕：ImageWidget 等在夜间模式会预先反色去抵消整屏反色，
+    -- 离屏写 PNG 时照做就存成底片。绘制期间关掉 night_mode，结束（含出错）恢复。
+    local Screen = require("device").screen
+    local night = Screen.night_mode
+    Screen.night_mode = false
     local ok, err = xpcall(function()
         bb = Blitbuffer.new(width, height, Blitbuffer.TYPE_BBRGB32)
         bb:fill(Blitbuffer.COLOR_WHITE)
@@ -66,6 +71,7 @@ function Render.write(path, width, height, paint)
         local renamed, reason = os.rename(tmp, path)
         if not renamed then error(reason or "rename failed") end
     end, debug.traceback)
+    Screen.night_mode = night
     if bb then bb:free() end
     if not ok then os.remove(tmp) end
     return ok, err
