@@ -126,6 +126,16 @@ package.preload["source.chapter"] = function()
             Assert.eq(ops.interval_seconds, 6)
             cb()
         end,
+        cacheAllAsync = function(source, identity, fetchContent, on_progress, cb, interval)
+            Assert.eq(source.id, "fanqie")
+            Assert.eq(interval, 6)
+            on_progress(1, 1)
+            fetchContent(identity, { idx = 1, uid = "9876543210987654321", title = "第一章" }, function(payload)
+                Assert.eq(payload.html, "<p>测试正文</p>")
+                cb(true, 1, nil, 1, 0)
+            end)
+            return { cancel = function() end }
+        end,
     }
 end
 
@@ -166,6 +176,17 @@ src:prefetchChaptersAsync(ref, {}, 1, 3, function()
     count = count + 1
 end)
 Assert.eq(count, 3)
+
+-- 整本下载：走公共 cacheAllAsync，正文用番茄接口，间隔与预取一致（风控）
+do
+    local progressed, ok, cached
+    src:cacheAllChaptersAsync(ref, function(done, total) progressed = { done, total } end,
+        function(success, n) ok, cached = success, n end)
+    drain()
+    Assert.eq(progressed[1], 1)
+    Assert.is_true(ok)
+    Assert.eq(cached, 1)
+end
 
 do
     toc = nil
