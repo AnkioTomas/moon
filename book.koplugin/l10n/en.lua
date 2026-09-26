@@ -315,6 +315,7 @@ return {
     ["当前阅读"] = "Current reading",
     ["当前阅读书籍封面"] = "Current book cover",
     ["待上传文件为空"] = "File to upload is empty",
+    ["全书笔记（%1）"] = "Book notes (%1)",
     ["微信扫码登录"] = "WeChat QR login",
     ["微信读书"] = "WeChat Read",
     ["微信读书账号"] = "WeChat Read account",

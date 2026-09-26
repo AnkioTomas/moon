@@ -284,7 +284,7 @@ end
 
 --- 从目录或其他阅读 UI 切换到指定章节。
 ---@param idx integer 目标章节序号
----@param opts { within: number|nil, direction: "prev"|"next"|nil }|nil
+---@param opts { within: number|nil, direction: "prev"|"next"|nil, xpointer: string|nil }|nil
 ---@return boolean started
 function Session.gotoChapter(idx, opts)
     return Toc.gotoChapter(Session._snapshot, idx, opts)
