@@ -309,6 +309,16 @@ function Desktop:handleEvent(event)
     return fmGesture(self, event.args[1])
 end
 
+--- 墨水屏控制器异步读帧缓冲：上一次刷新还没读完就整页重画，会被读成半帧（封面连续落定时满屏错乱）。
+--- 先等上一次刷新结束再画；同一刷新只等一次，非墨水屏平台为空操作。
+---@param bb BlitBuffer
+---@param x number
+---@param y number
+function Desktop:paintTo(bb, x, y)
+    Screen:refreshWaitForLast()
+    return InputContainer.paintTo(self, bb, x, y)
+end
+
 --- 顶栏向下滑：打开 KOReader 原生菜单的 Book 快捷 Tab。
 ---@param _ any 事件框架传入但本实现不使用的参数
 ---@param ges_ev table|nil KOReader 手势数据，含方向和位置
