@@ -200,7 +200,7 @@ function Detail:clearCache()
 end
 
 --- 库内书底栏动作：工具行 + 最后一行阅读主按钮。
---- 编辑/刮削/下载按属主源能力出现；已读切换与删除只要身份完整就给。
+--- 编辑/刮削/下载/清理缓存按属主源能力出现；已读切换与删除只要身份完整就给。
 ---@param book table 当前书籍
 ---@param owner table|nil 属主源
 ---@return table tools, table|nil primary
@@ -215,15 +215,11 @@ function Detail.actionPlan(book, owner, origin)
     if bookSupportsScrape(book, owner) then
         tools[#tools + 1] = { id = "scrape", icon = "search", text = _("刮削") }
     end
-    local can_read = false
-    local can_cache = false
-    if owner then
-        can_read = owner.type == "book" or owner.type == "chapter"
-        can_cache = can_read and owner.type == "chapter"
-            and type(owner.cacheAllChaptersAsync) == "function"
-            and not Store.isDownloaded(book)
-    end
-    if can_cache then
+    local can_read = owner ~= nil and (owner.type == "book" or owner.type == "chapter")
+    -- 下载与清理缓存互斥：已离线到 cache 只给清理，章节源未下完只给下载；本地原书两者都没有
+    if can_read and Store.isCached(book) then
+        tools[#tools + 1] = { id = "clear_cache", icon = "cleaning_services", text = _("清理缓存") }
+    elseif can_read and owner.type == "chapter" and type(owner.cacheAllChaptersAsync) == "function" then
         tools[#tools + 1] = { id = "download", icon = "download", text = _("下载") }
     end
     if type(book) == "table" and type(book.source_id) == "string" and type(book.stable_id) == "string" then
@@ -232,7 +228,6 @@ function Detail.actionPlan(book, owner, origin)
         else
             tools[#tools + 1] = { id = "read", icon = "done_all", text = _("标记已读") }
         end
-        tools[#tools + 1] = { id = "clear_cache", icon = "cleaning_services", text = _("清理缓存") }
         tools[#tools + 1] = { id = "delete", icon = "delete", text = _("删除") }
     end
     local primary

@@ -252,6 +252,25 @@ do
     Assert.is_false(Store.isDownloaded(nil))
 end
 
+-- ── isCached：章节源全本缓存；整本源 path 须在 cache 内（本地原书恒 false）──
+do
+    toc_rows["wechat\0cached-book"] = "toc:cached"
+    json_values["toc:cached"] = { { idx = 1 } }
+    chapter_counts["wechat\0cached-book"] = 1
+    Assert.is_true(Store.isCached({ source_id = "wechat", stable_id = "cached-book" }))
+    chapter_counts["wechat\0cached-book"] = 0
+    Assert.is_false(Store.isCached({ source_id = "wechat", stable_id = "cached-book" }))
+    toc_rows["wechat\0cached-book"] = nil
+    chapter_counts["wechat\0cached-book"] = nil
+
+    Assert.is_true(Store.isCached({ source_id = "moon", path = "/cache/moon/book/x/a.epub" }))
+    Assert.is_true(Store.isCached({ source_id = "local", path = "/cache/local/book/webdav/a.epub" }))
+    Assert.is_false(Store.isCached({ source_id = "local", path = "/books/a.epub" }))
+    Assert.is_false(Store.isCached({ source_id = "local", path = "/cache2/a.epub" }))
+    Assert.is_false(Store.isCached({ source_id = "moon" }))
+    Assert.is_false(Store.isCached(nil))
+end
+
 -- ── identityFor：chapters 命中 → 章节身份（优先于 books.path）──
 do
     local path = "/cache/moon/book/slug/3.html"
