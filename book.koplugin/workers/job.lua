@@ -139,7 +139,9 @@ function Job:cancel()
 end
 
 function Job:_dispatch(message)
-    if message.type == "done" then
+    if message.type == "progress" then
+        notify(self.on_progress, message.value)
+    elseif message.type == "done" then
         self:_finish("done", message.result)
     elseif message.type == "failed" then
         self:_finish("failed", nil, message.error or "job failed")
@@ -188,7 +190,9 @@ local function runInstant(self, worker)
     self.poll_fn = function()
         if self.settled then return end
         self.state = "running"
-        local ok, result = xpcall(worker, debug.traceback)
+        local ok, result = xpcall(worker, debug.traceback, function(value)
+            notify(self.on_progress, value)
+        end)
         if self.settled then return end
         if ok then
             self:_finish("done", result)
@@ -209,7 +213,9 @@ function Job:_start()
     local pid, read_fd = ffiUtil.runInSubProcess(function(_, write_fd)
         in_child = true
         local function send(message) return writeFrame(write_fd, message) end
-        local ok, result = xpcall(worker, debug.traceback)
+        local ok, result = xpcall(worker, debug.traceback, function(value)
+            send({ type = "progress", value = value })
+        end)
         if ok then
             local sent, err = send({ type = "done", result = result })
             if not sent then send({ type = "failed", error = err }) end
@@ -236,8 +242,10 @@ function Job:_start()
     end
 end
 
----@param worker fun(): any
----@param opts { name: string, kind: "instant"|"light"|"medium"|"heavy", on_done: function|nil, on_failed: function|nil, on_cancelled: function|nil, timeout: number|nil }
+--- worker 收到 progress(value)：子进程里每次调用写一帧（管道有容量上限，调用方自行节流），
+--- 父进程轮询时转给 opts.on_progress。
+---@param worker fun(progress: fun(value: any)): any
+---@param opts { name: string, kind: "instant"|"light"|"medium"|"heavy", on_done: function|nil, on_failed: function|nil, on_cancelled: function|nil, on_progress: fun(value: any)|nil, timeout: number|nil }
 ---@return table
 function Job.run(worker, opts)
     assert(type(worker) == "function", "workers.job.run: worker must be function")
@@ -255,6 +263,7 @@ function Job.run(worker, opts)
         on_done = opts.on_done,
         on_failed = opts.on_failed,
         on_cancelled = opts.on_cancelled,
+        on_progress = opts.on_progress,
     }, Job)
     logger.dbg("book.worker queued", self.name, self.kind)
 

@@ -111,7 +111,9 @@ end
 package.preload["workers.job"] = function()
     return {
         run = function(worker, opts)
-            local ok, err = pcall(worker)
+            local ok, err = pcall(worker, function(value)
+                opts.on_progress(value)
+            end)
             require("ui/uimanager"):nextTick(function()
                 if ok then
                     opts.on_done()
@@ -211,7 +213,16 @@ local ok_run, err_run = pcall(function()
     Assert.eq(progress_events[5][1], "part")
     Assert.eq(progress_events[5][2], total, "第二片完成后累计=总量")
     Assert.eq(progress_events[5][4], 2)
+    -- 拼接校验同样按字节回报（带分片数），进度条从 0 走到 raw_size。
     Assert.eq(progress_events[6][1], "assemble")
+    Assert.eq(progress_events[6][2], 0)
+    Assert.eq(progress_events[6][3], total)
+    Assert.eq(progress_events[6][5], 2)
+    Assert.eq(progress_events[7][1], "assemble")
+    Assert.eq(progress_events[7][2], #part1)
+    Assert.eq(progress_events[8][1], "assemble")
+    Assert.eq(progress_events[8][2], total, "拼接完成时进度=总量")
+    Assert.len(progress_events, 8)
 
     -- 落位文件 = 解压拼接结果
     local f = assert(io.open(dest, "rb"))
