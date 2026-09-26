@@ -16,14 +16,19 @@ package.preload["ui.views.popup"] = function() return {} end
 package.preload["ui/uimanager"] = function()
     return { show = function() end, close = function() end, setDirty = function() end }
 end
+local bottom_calls = {}
 package.preload["ui.reader.bars"] = function()
     return {
         topBarPreference = function() return true end,
         bottomBarPreference = function() return false end,
         setTopBarPreference = function() end,
-        setBottomBarPreference = function() end,
+        setBottomBarPreference = function(enabled, ui)
+            bottom_calls[#bottom_calls + 1] = { enabled = enabled, ui = ui }
+        end,
     }
 end
+local ReaderUIStub = { instance = nil }
+package.preload["apps/reader/readerui"] = function() return ReaderUIStub end
 package.preload["ui.reader.bars.items"] = function()
     return {
         catalog = function(which)
@@ -70,5 +75,18 @@ local bottom = ReaderBar:page(desktop, "bottom")
 Assert.eq(bottom.sections[1].rows[1](600).title, "替代系统底栏")
 Assert.eq(bottom.sections[1].rows[2](600).title, "开启底栏")
 Assert.is_false(bottom.sections[1].rows[2](600).status_on)
+
+-- 关书时 closeDocument 已清 document、instance 尚未清：不得把半死的 ReaderUI 交给底栏
+-- （否则 ReaderFooter:genFooterText 索引 ui.document 崩溃）；偏好仍照常写入
+ReaderUIStub.instance = { document = nil, dialog = {} }
+bottom.sections[1].rows[2](600).callback()
+Assert.len(bottom_calls, 1)
+Assert.is_true(bottom_calls[1].enabled)
+Assert.is_nil(bottom_calls[1].ui)
+
+local live = { document = {}, dialog = {} }
+ReaderUIStub.instance = live
+bottom.sections[1].rows[2](600).callback()
+Assert.eq(bottom_calls[2].ui, live)
 
 return true
