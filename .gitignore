@@ -14,6 +14,8 @@
 # 离线测试沙箱数据目录（tests/run.sh 自建：配置、sqlite、缓存全落这里）
 /test/
 .env
+# 项目级 MCP 配置（含 token）
+/.cursor/mcp.json
 
 # Agent instructions (local only)
 AGENTS.md
