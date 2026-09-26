@@ -90,7 +90,14 @@ package.preload["source.wechat.eink"] = function()
                     chapters = { { chapterUid = 4, chapterIdx = 4 } },
                 })
             elseif path == "/review/list" then
-                cb({ reviews = {}, totalCount = 0 })
+                cb({
+                    totalCount = 3,
+                    reviews = {
+                        { review = { bookId = "99", range = "1-2", content = "本书" } },
+                        { review = { bookId = "3300107657", range = "464-466", content = "别的书" } },
+                        { review = { range = "5-6", content = "无 bookId 保留" } },
+                    },
+                })
             else
                 cb({
                     readLongest = {
@@ -209,6 +216,11 @@ do
     Assert.eq(posted.eink.query.bookId, "99")
     Assert.eq(posted.eink.query.mine, 1)
     Assert.eq(posted.eink.query.listType, 1)
+    -- 别的书的想法剔掉，否则会按 range 挂进这本书（串书）
+    Assert.eq(#wire.reviews, 2)
+    Assert.eq(wire.reviews[1].review.content, "本书")
+    Assert.eq(wire.reviews[2].review.content, "无 bookId 保留")
+    Assert.eq(wire.totalCount, 3, "全量判定保留服务端口径")
     Assert.not_nil(wire)
 end
 

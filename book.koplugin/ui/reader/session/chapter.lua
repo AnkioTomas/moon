@@ -12,7 +12,7 @@ local _ = require("gettext")
 ---@field identity BookIdentity|nil 书籍身份与属主源
 ---@field toc BookChapter[] 从 books.toc 恢复的目录快照
 ---@field request { cancel: fun() }|nil 在途章节打开任务
----@field target { path: string, within: number|nil, direction: "prev"|"next"|nil }|nil 已下载、等待 ReaderReady 的目标
+---@field target { path: string, within: number|nil, direction: "prev"|"next"|nil, xpointer: string|nil }|nil 已下载、等待 ReaderReady 的目标
 ---@field toc_job { cancel: fun() }|nil 目录恢复任务
 ---@field switching boolean|nil 已进入 switchDocument，同步 CloseDocument 应保留本书会话
 
@@ -128,11 +128,15 @@ local function applyChapterTarget(chapter, ui)
     chapter.target = nil
     chapter.switching = false
     if not target then return end
-    if target.within == nil and target.direction == nil then return end
+    if target.within == nil and target.direction == nil and target.xpointer == nil then return end
     local within, direction = target.within, target.direction
 
     require("ui/uimanager"):nextTick(function()
         if chapter_session ~= chapter or ui.document.file ~= target.path then return end
+        if target.xpointer then
+            ui:handleEvent(require("ui/event"):new("GotoXPointer", target.xpointer, target.xpointer))
+            return
+        end
         local page
         if within ~= nil then
             within = require("book.progress").clampFraction(within)
@@ -324,7 +328,7 @@ end
 
 ---@param chapter ReaderChapterSession
 ---@param idx integer
----@param opts { within: number|nil, direction: "prev"|"next"|nil }
+---@param opts { within: number|nil, direction: "prev"|"next"|nil, xpointer: string|nil }
 local function requestChapter(chapter, idx, opts)
     cancelPrefetch()
     showTransitionNotice()
@@ -347,6 +351,7 @@ local function requestChapter(chapter, idx, opts)
             path = path,
             within = within,
             direction = direction,
+            xpointer = opts.xpointer,
         }
 
         local ReaderUI = require("apps/reader/readerui")
@@ -378,7 +383,7 @@ end
 
 ---@param session ReaderSessionSnapshot|nil
 ---@param idx integer
----@param opts { within: number|nil, direction: "prev"|"next"|nil }|nil
+---@param opts { within: number|nil, direction: "prev"|"next"|nil, xpointer: string|nil }|nil
 ---@return boolean
 function Chapter.gotoChapter(session, idx, opts)
     if not session then return false end

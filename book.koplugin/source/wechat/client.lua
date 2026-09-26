@@ -330,20 +330,36 @@ function Client:bookmarkListAsync(bookId, cb)
 end
 
 --- 本人在该书的想法与点评（含划线想法的 ``range``）。
+---
+--- Eink ``/review/list`` 会混入别的书的想法（实测按 range 挂进当前书造成串书），
+--- 回包里 ``bookId`` 不是这本书的条目剔掉；totalCount / hasMore 保持原值，
+--- 全量判定仍按服务端口径。
 ---@param bookId string
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:myReviewsAsync(bookId, cb)
+    bookId = tostring(bookId or "")
     return Eink.callAsync("GET", "/review/list", {
         query = {
-            bookId = tostring(bookId or ""),
+            bookId = bookId,
             listType = 1,
             listMode = 0,
             mine = 1,
             synckey = 0,
             count = 100,
         },
-    }, cb)
+    }, function(data, err)
+        if type(data) == "table" and type(data.reviews) == "table" then
+            local own = {}
+            for _, entry in ipairs(data.reviews) do
+                local review = type(entry) == "table" and (entry.review or entry) or nil
+                local owner = type(review) == "table" and review.bookId
+                if owner == nil or tostring(owner) == bookId then own[#own + 1] = entry end
+            end
+            data.reviews = own
+        end
+        cb(data, err)
+    end)
 end
 
 --- Web 写接口（想法、划线的增删改）。
