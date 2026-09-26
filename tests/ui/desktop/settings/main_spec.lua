@@ -197,24 +197,25 @@ Assert.len(built_rows, 21)
 
 local expected = {
     { title = "书籍来源", id = "sources" },
-    { title = "账号", id = "source_config" },
-    { title = "显示", id = "display" },
-    { title = "顶栏", id = "topbar" },
-    { title = "锁屏", id = "lockscreen" },
-    { title = "快捷", id = "quickpanel_desktop" },
-    { title = "顶栏", id = "reader_top" },
-    { title = "底栏", id = "reader_bottom" },
-    { title = "行为", id = "reader_behavior" },
-    { title = "划词", id = "lookup" },
-    { title = "快捷", id = "quickpanel_reader" },
-    { title = "语言", id = "language" },
-    { title = "AI", id = "ai" },
-    { title = "远程", id = "remote" },
+    { title = "账号与登录", id = "source_config" },
+    { title = "界面显示", id = "display" },
+    { title = "桌面顶栏", id = "topbar" },
+    { title = "锁屏壁纸", id = "lockscreen" },
+    { title = "桌面快捷面板", id = "quickpanel_desktop" },
+    { title = "阅读页顶栏", id = "reader_top" },
+    { title = "阅读页底栏", id = "reader_bottom" },
+    { title = "阅读行为", id = "reader_behavior" },
+    { title = "划词与查询", id = "lookup" },
+    { title = "阅读快捷面板", id = "quickpanel_reader" },
+    { title = "语言与输入法", id = "language" },
+    { title = "AI 接口", id = "ai" },
+    { title = "远程管理", id = "remote" },
 }
 local nav = 1
 for _, row in ipairs(built_rows) do
     local item = expected[nav]
     if item and row.title == item.title and row.kind == "nav" then
+        Assert.is_true(type(row.subtitle) == "string" and row.subtitle ~= "", item.title .. " 缺副标题")
         row.callback()
         Assert.eq(opened, item.id)
         nav = nav + 1
@@ -233,7 +234,7 @@ for _, title in ipairs({
 end
 
 local spec = settings:spec("reader_top")
-Assert.eq(spec.title, "顶栏")
+Assert.eq(spec.title, "阅读页顶栏")
 Assert.not_nil(spec.preview)
 Assert.not_nil(spec.sections)
 Assert.eq(#spec.sections(), 0)
@@ -241,17 +242,17 @@ Assert.eq(#spec.sections(), 0)
 -- 行为设置独立成页，底栏页只剩底栏自身配置
 Assert.eq(#settings:spec("reader_bottom").sections(), 0)
 local behavior = settings:spec("reader_behavior")
-Assert.eq(behavior.title, "行为")
+Assert.eq(behavior.title, "阅读行为")
 Assert.is_nil(behavior.preview)
 Assert.eq(#behavior.sections(), 1)
 
 local lookup = settings:spec("lookup")
-Assert.eq(lookup.title, "划词")
+Assert.eq(lookup.title, "划词与查询")
 Assert.is_nil(lookup.preview)
 Assert.eq(#lookup.sections(), 1)
 
 local display = settings:spec("display")
-Assert.eq(display.title, "显示")
+Assert.eq(display.title, "界面显示")
 Assert.is_nil(display.preview)
 
 _G.G_reader_settings = previous_settings

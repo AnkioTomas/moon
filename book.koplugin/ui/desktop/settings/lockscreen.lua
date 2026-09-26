@@ -263,6 +263,23 @@ function Lockscreen:rows(desktop)
     return rows
 end
 
+--- 按比例缩进 w×h 的图片控件；解码失败返回 nil。
+--- 自己缩好再交给 ImageWidget：给了 width/height 时它的尺寸是整框，
+--- 夜间模式为保原色会把整框反色，图片两侧留白跟着变成白条。
+--- 直接读文件也绕开 ImageCache（compose.png 原地覆写，按路径缓存会一直显示旧图）。
+---@param path string
+---@param w number
+---@param h number
+---@return table|nil
+local function fitImage(path, w, h)
+    local RenderImage = require("ui/renderimage")
+    local bb = RenderImage:renderImageFile(path, false)
+    if not bb then return nil end
+    local scale = math.min(w / bb:getWidth(), h / bb:getHeight())
+    bb = RenderImage:scaleBlitBuffer(bb, math.max(1, bb:getWidth() * scale), math.max(1, bb:getHeight() * scale))
+    return require("ui/widget/imagewidget"):new{ image = bb }
+end
+
 --- 全屏看锁屏图；点任意处（或返回键）退出。
 ---@param path string
 local function showFullscreen(path)
@@ -271,9 +288,10 @@ local function showFullscreen(path)
     local Blitbuffer = require("ffi/blitbuffer")
     local FrameContainer = require("ui/widget/container/framecontainer")
     local CenterContainer = require("ui/widget/container/centercontainer")
-    local ImageWidget = require("ui/widget/imagewidget")
     local BookInfo = require("ui.components.bookinfo")
     local w, h = Device.screen:getWidth(), Device.screen:getHeight()
+    local image = fitImage(path, w, h)
+    if not image then return end
     local viewer
     local function close()
         UIManager:close(viewer, "full")
@@ -291,10 +309,7 @@ local function showFullscreen(path)
         dimen = Geom:new{ w = w, h = h },
         CenterContainer:new{
             dimen = Geom:new{ w = w, h = h },
-            ImageWidget:new{
-                file = path, width = w, height = h,
-                scale_factor = 0, file_do_cache = false,
-            },
+            image,
         },
     }
     UIManager:show(viewer, "full")
@@ -323,22 +338,18 @@ function Lockscreen.preview(width)
     end
     local Geom = require("ui/geometry")
     local CenterContainer = require("ui/widget/container/centercontainer")
-    local ImageWidget = require("ui/widget/imagewidget")
     local inner_w = math.max(1, width - 2)
     local inner_h = math.max(1, preview_h - 2)
+    local image = fitImage(path, inner_w, inner_h)
+    if not image then
+        return Overlay.previewPlaceholder(width, preview_h, _("未生成"))
+    end
     local tap = require("ui.components.bookinfo").tappable(width, preview_h, function()
         showFullscreen(path)
     end)
     tap[1] = Overlay.previewBox(width, CenterContainer:new{
         dimen = Geom:new{ w = inner_w, h = inner_h },
-        ImageWidget:new{
-            file = path,
-            width = inner_w,
-            height = inner_h,
-            scale_factor = 0,
-            -- compose.png 原地覆写，ImageCache 按路径命中会一直显示旧图。
-            file_do_cache = false,
-        },
+        image,
     }, preview_h)
     return tap
 end

@@ -111,7 +111,7 @@ function Settings:spec(id)
     if id == "source_config" then
         return {
             id = id,
-            title = _("账号"),
+            title = _("账号与登录"),
             sections = function()
                 return Source:configSections{ desktop = desktop, plugin = plugin }
             end,
@@ -121,7 +121,7 @@ function Settings:spec(id)
         local which = id == "reader_top" and "top" or "bottom"
         return {
             id = id,
-            title = which == "top" and _("顶栏") or _("底栏"),
+            title = which == "top" and _("阅读页顶栏") or _("阅读页底栏"),
             preview = function(width)
                 return ReaderBarSettings:page(desktop, which).preview(width)
             end,
@@ -133,7 +133,7 @@ function Settings:spec(id)
     if id == "reader_behavior" then
         return {
             id = id,
-            title = _("行为"),
+            title = _("阅读行为"),
             sections = function()
                 return ReaderSettings:sections(desktop)
             end,
@@ -142,7 +142,7 @@ function Settings:spec(id)
     if id == "lookup" then
         return {
             id = id,
-            title = _("划词"),
+            title = _("划词与查询"),
             sections = function()
                 local sections = ReaderSettings:lookupSections(desktop)
                 sections[#sections + 1] = { title = _("菜单"), rows = ReaderSettings:popupRows(desktop) }
@@ -154,7 +154,7 @@ function Settings:spec(id)
         local scope = id == "quickpanel_reader" and "reader" or "desktop"
         return {
             id = id,
-            title = _("快捷"),
+            title = scope == "reader" and _("阅读快捷面板") or _("桌面快捷面板"),
             preview = function(width)
                 return QuickPanel.preview(scope, width)
             end,
@@ -169,7 +169,7 @@ function Settings:spec(id)
     if id == "topbar" then
         return {
             id = id,
-            title = _("顶栏"),
+            title = _("桌面顶栏"),
             preview = function(width)
                 return TopbarSettings.preview(width)
             end,
@@ -181,7 +181,7 @@ function Settings:spec(id)
     if id == "display" then
         return {
             id = id,
-            title = _("显示"),
+            title = _("界面显示"),
             sections = function()
                 local scale, grid_max_cols = UI.getScale(), UI.getGridMaxCols()
                 local font_name = MoonFont.currentName()
@@ -201,7 +201,7 @@ function Settings:spec(id)
     if id == "lockscreen" then
         return {
             id = id,
-            title = _("锁屏"),
+            title = _("锁屏壁纸"),
             preview = function(width)
                 return Lockscreen.preview(width)
             end,
@@ -213,7 +213,7 @@ function Settings:spec(id)
     if id == "language" then
         return {
             id = id,
-            title = _("语言"),
+            title = _("语言与输入法"),
             sections = function()
                 return Language:sections(desktop)
             end,
@@ -222,7 +222,7 @@ function Settings:spec(id)
     if id == "ai" then
         return {
             id = id,
-            title = _("AI"),
+            title = _("AI 接口"),
             sections = function()
                 return {{ title = _("AI"), rows = AISettings:rows(desktop) }}
             end,
@@ -231,7 +231,7 @@ function Settings:spec(id)
     if id == "remote" then
         return {
             id = id,
-            title = _("远程"),
+            title = _("远程管理"),
             sections = function()
                 return {{ title = _("远程"), rows = RemoteUI.menuRows(desktop) }}
             end,
@@ -283,61 +283,75 @@ function Settings:createWidget()
     Overlay.appendSection(packed, card_w, _("书库"), {
         featureRow(desktop, {
             id = "sources", icon = "source", title = _("书籍来源"),
+            subtitle = _("切换和启用书源"),
             status = active_name, status_on = true,
         }),
         featureRow(desktop, {
-            id = "source_config", icon = "tune", title = _("账号"),
+            id = "source_config", icon = "tune", title = _("账号与登录"),
+            subtitle = _("书源账号、本地书籍目录"),
         }),
     })
     Overlay.appendSection(packed, card_w, _("桌面"), {
         featureRow(desktop, {
-            id = "display", icon = "display_settings", title = _("显示"),
+            id = "display", icon = "display_settings", title = _("界面显示"),
+            subtitle = _("字体缩放、夜间、亮度"),
             status = string.format("%d%%", scale), status_on = true,
         }),
         featureRow(desktop, {
-            id = "topbar", icon = "toolbar", title = _("顶栏"),
+            id = "topbar", icon = "toolbar", title = _("桌面顶栏"),
+            subtitle = _("时钟、电量等状态项"),
         }),
         featureRow(desktop, {
-            id = "lockscreen", icon = "wallpaper", title = _("锁屏"),
+            id = "lockscreen", icon = "wallpaper", title = _("锁屏壁纸"),
+            subtitle = _("替代系统锁屏"),
             status = LockSettings.isCompose() and _("开") or _("关"),
             status_on = LockSettings.isCompose(),
         }),
         featureRow(desktop, {
-            id = "quickpanel_desktop", icon = "dashboard_customize", title = _("快捷"),
+            id = "quickpanel_desktop", icon = "dashboard_customize", title = _("桌面快捷面板"),
+            subtitle = _("面板开关与顺序"),
             status = T(_("已启用 %1 项"), QuickPanel.desktopEnabledCount()),
             status_on = true,
         }),
     })
     Overlay.appendSection(packed, card_w, _("阅读"), {
         featureRow(desktop, {
-            id = "reader_top", icon = "vertical_align_top", title = _("顶栏"),
+            id = "reader_top", icon = "vertical_align_top", title = _("阅读页顶栏"),
+            subtitle = _("页面顶部的信息组件"),
         }),
         featureRow(desktop, {
-            id = "reader_bottom", icon = "horizontal_rule", title = _("底栏"),
+            id = "reader_bottom", icon = "horizontal_rule", title = _("阅读页底栏"),
+            subtitle = _("进度条、百分比等"),
         }),
         featureRow(desktop, {
-            id = "reader_behavior", icon = "touch_app", title = _("行为"),
+            id = "reader_behavior", icon = "touch_app", title = _("阅读行为"),
+            subtitle = _("脚注弹窗、翻页动画、自动标记已读"),
         }),
         featureRow(desktop, {
-            id = "lookup", icon = "format_ink_highlighter", title = _("划词"),
+            id = "lookup", icon = "format_ink_highlighter", title = _("划词与查询"),
+            subtitle = _("翻译、词典、百科、X-Ray、划词菜单"),
         }),
         featureRow(desktop, {
-            id = "quickpanel_reader", icon = "dashboard_customize", title = _("快捷"),
+            id = "quickpanel_reader", icon = "dashboard_customize", title = _("阅读快捷面板"),
+            subtitle = _("面板按钮与顺序"),
             status = T(_("已启用 %1 项"), QuickPanel.readerEnabledCount()),
             status_on = true,
         }),
     })
     Overlay.appendSection(packed, card_w, _("系统"), {
         featureRow(desktop, {
-            id = "language", icon = "language", title = _("语言"),
+            id = "language", icon = "language", title = _("语言与输入法"),
+            subtitle = _("界面语言、中文输入法"),
             status = require("ui/language"):getLanguageName(G_reader_settings:readSetting("language") or "C"),
             status_on = true,
         }),
         featureRow(desktop, {
-            id = "ai", icon = "psychology", title = _("AI"),
+            id = "ai", icon = "psychology", title = _("AI 接口"),
+            subtitle = _("X-Ray 使用的大模型接口"),
         }),
         featureRow(desktop, {
-            id = "remote", icon = "dns", title = _("远程"),
+            id = "remote", icon = "dns", title = _("远程管理"),
+            subtitle = _("浏览器管理文件、输入"),
             status = Remote.isRunning() and _("运行中") or nil,
             status_on = Remote.isRunning(),
         }),
