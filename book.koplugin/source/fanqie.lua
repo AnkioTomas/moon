@@ -204,20 +204,38 @@ local function fetch(self, identity, chapter, cb)
     return h
 end
 
+-- 番茄正文接口有设备风控，预取与整本下载都按这个间隔逐章请求。
+local FETCH_INTERVAL = 6
+
+---@return ChapterFetchContent
+local function contentFetcher(self)
+    return function(ref, ch, done) return fetch(self, ref, ch, done) end
+end
+
 function Source:openBookAsync(identity, opts, cb)
     local Chapter = require("source.chapter")
     local open = opts and opts.chapter_idx and Chapter.openAsync or Chapter.openWithUi
     return open(self, identity, identity.book, opts, {
         loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
-        fetchContent = function(ref, ch, done) return fetch(self, ref, ch, done) end,
+        fetchContent = contentFetcher(self),
     }, cb)
 end
 
 function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
     return require("source.chapter").prefetchAsync(identity, identity.book, toc, from_idx, count, {
-        fetchContent = function(ref, ch, done) return fetch(self, ref, ch, done) end,
-        interval_seconds = 6,
+        fetchContent = contentFetcher(self),
+        interval_seconds = FETCH_INTERVAL,
     }, cb)
+end
+
+--- 缓存整本章节正文；已落盘章节由公共实现自动跳过。
+---@param identity BookIdentity
+---@param on_progress fun(done: integer, total: integer)|nil
+---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
+---@return { cancel: fun() }
+function Source:cacheAllChaptersAsync(identity, on_progress, cb)
+    return require("source.chapter").cacheAllAsync(self, identity, contentFetcher(self), on_progress, cb,
+        FETCH_INTERVAL)
 end
 
 function Source:getProgressAsync(identity, cb)
