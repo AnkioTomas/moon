@@ -51,7 +51,7 @@ package.preload["ui/uimanager"] = function()
 end
 local night_window
 package.preload["utils.settings"] = function()
-    return { get = function() return { auto_night = night_window and "schedule" or "off", auto_light = false } end }
+    return { get = function() return { auto_night = night_window and "schedule" or "off", auto_light = false, mesh_mask = true } end }
 end
 package.preload["nightmode"] = function()
     return {
@@ -72,20 +72,23 @@ local rows = Display:rows{
 Assert.eq(rows[1](600).title, "界面字体")
 Assert.eq(rows[2](600).title, "界面缩放")
 Assert.eq(rows[3](600).title, "书架每行数量")
-Assert.eq(rows[4](600).title, "自动夜间模式")
-Assert.eq(rows[4](600).status, "关")
-Assert.is_false(rows[4](600).status_on)
-night_window = { 22 * 60, 7 * 60 }
-Assert.eq(rows[4](600).status, "22:00–07:00")
+Assert.eq(rows[4](600).title, "背景遮罩")
+Assert.eq(rows[4](600).status, "开")
 Assert.is_true(rows[4](600).status_on)
-Assert.eq(rows[5](600).title, "自动亮度")
+Assert.eq(rows[5](600).title, "自动夜间模式")
 Assert.eq(rows[5](600).status, "关")
 Assert.is_false(rows[5](600).status_on)
-Assert.eq(rows[5](600).subtitle, "跟随自动夜间模式的昼夜时间切换")
-Assert.eq(rows[6](600).title, "屏幕刷新")
-Assert.eq(rows[6](600).status, "每 6 页")
-Assert.eq(rows[7](600).title, "彩色屏幕支持")
-Assert.is_false(rows[7](600).status_on)
+night_window = { 22 * 60, 7 * 60 }
+Assert.eq(rows[5](600).status, "22:00–07:00")
+Assert.is_true(rows[5](600).status_on)
+Assert.eq(rows[6](600).title, "自动亮度")
+Assert.eq(rows[6](600).status, "关")
+Assert.is_false(rows[6](600).status_on)
+Assert.eq(rows[6](600).subtitle, "跟随自动夜间模式的昼夜时间切换")
+Assert.eq(rows[7](600).title, "屏幕刷新")
+Assert.eq(rows[7](600).status, "每 6 页")
+Assert.eq(rows[8](600).title, "彩色屏幕支持")
+Assert.is_false(rows[8](600).status_on)
 
 eink, color_screen, frontlight = false, false, false
 package.loaded["device"] = nil
@@ -94,4 +97,4 @@ Display = require("ui.desktop.settings.display")
 rows = Display:rows{
     desktop = {}, font_name = "Noto", scale = 120, grid_max_cols = 4,
 }
-Assert.eq(#rows, 4, "无墨水屏/彩屏/前光时不展示刷新、彩色与自动亮度项")
+Assert.eq(#rows, 5, "无墨水屏/彩屏/前光时不展示刷新、彩色与自动亮度项")
