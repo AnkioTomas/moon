@@ -3,7 +3,12 @@ set -eo pipefail
 
 cd "$(dirname "$0")/koreader"
 
-# 确保插件软链接存在
+# 确保插件软链接存在；真实目录会让 ln 把链接建进目录里，模拟器继续加载旧拷贝
+if [ -d plugins/book.koplugin ] && [ ! -L plugins/book.koplugin ]; then
+    stale="$(mktemp -d /tmp/book.koplugin.stale.XXXXXX)"
+    mv plugins/book.koplugin "$stale/"
+    echo "run.sh: 旧插件拷贝已移到 $stale，改为软链到仓库" >&2
+fi
 ln -sfn "$(pwd)/../book.koplugin" "$(pwd)/plugins/book.koplugin"
 
 # 注入 GNU 工具链（kodev 要求 bash >= 4 + GNU make/findutils 等）
