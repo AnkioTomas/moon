@@ -134,6 +134,21 @@ Bars.setSystemBottom(ui_top, true)
 Assert.eq(ui_top.view.footer.mode, 1)
 Assert.is_true(ui_top.view.footer_visible)
 
+-- injectStatusLine：渲染前按偏好写 sidecar；非 CRE 文档不碰
+local sidecar = {}
+local doc_settings = { saveSetting = function(_, k, v) sidecar[k] = v end }
+local cre = { setStatusLineProp = function() end }
+Bars.setTopBarPreference(true)
+Bars.injectStatusLine(doc_settings, cre)
+Assert.eq(sidecar.copt_status_line, 0)
+Bars.setTopBarPreference(false)
+Bars.injectStatusLine(doc_settings, cre)
+Assert.eq(sidecar.copt_status_line, 1)
+sidecar = {}
+Bars.injectStatusLine(doc_settings, {})
+Assert.is_nil(sidecar.copt_status_line)
+Bars.setTopBarPreference(true)
+
 -- hijackFooter：底栏可见时短按透传给翻页区，长按阻止切换模式
 local footer = {
     ui = ui_top,

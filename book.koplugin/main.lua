@@ -113,6 +113,7 @@ end
 ---@param document table
 function BookPlugin:onDocSettingsLoad(doc_settings, document)
     require("book.reader_prefs").inject(doc_settings, document)
+    require("ui.reader.bars").injectStatusLine(doc_settings, document)
 end
 
 --- 阅读器就绪：建阅读会话；统计计时；拉进度；按章落点；挂阅读页
