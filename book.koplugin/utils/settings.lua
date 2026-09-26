@@ -26,6 +26,10 @@ local DEFAULTS = {
         library_sort = "recent_added",
         -- off / schedule / sun；时间是当天分钟数，sun 模式另存 auto_night_lat / auto_night_lon。
         auto_night = "off", auto_night_from = 22 * 60, auto_night_to = 7 * 60,
+        -- 亮度百分比，0 = 关灯。有光线传感器按 ambientBrightnessLevel 0..4 查 levels，否则跟昼夜切换用 day / night。
+        -- 昏暗最需要补光；黑暗眼睛已适应，低一档即可；中性少量；明亮起墨水屏不需要前光。
+        auto_light = false, auto_light_levels = { 25, 50, 35, 0, 0 },
+        auto_light_day = 50, auto_light_night = 25,
     },
     lockscreen = {
         lock_screen = "ko",
@@ -52,7 +56,7 @@ local DEFAULTS = {
     quickpanel = {
         -- 新安装默认启用注册表中的全部动作；已有配置仍保持用户选择。
         quick_panel_actions = {
-            "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "suspend",
+            "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "autolight", "suspend",
         },
         quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "bookorbit", "xray" },
     },

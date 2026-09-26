@@ -15,7 +15,7 @@ local logger = require("utils.log")
 local Registry = {}
 
 local DESKTOP_ORDER = {
-    "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "suspend",
+    "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "autolight", "suspend",
 }
 local READER_ORDER = {
     "toc", "font", "reflow", "highlights", "bookorbit", "xray", "xray_refresh",

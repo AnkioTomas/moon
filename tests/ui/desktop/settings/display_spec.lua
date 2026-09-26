@@ -27,10 +27,11 @@ end
 package.preload["ui/widget/infomessage"] = function() return { new = function(_, o) return o end } end
 package.preload["ui/event"] = function() return { new = function(_, name) return { name = name } end } end
 
-local eink, color_screen = true, true
+local eink, color_screen, frontlight = true, true, true
 package.preload["device"] = function()
     return {
         hasEinkScreen = function() return eink end,
+        hasFrontlight = function() return frontlight end,
         hasColorScreen = function() return color_screen end,
         isKobo = function() return false end,
         screen = {
@@ -50,10 +51,13 @@ package.preload["ui/uimanager"] = function()
 end
 local night_window
 package.preload["utils.settings"] = function()
-    return { get = function() return { auto_night = night_window and "schedule" or "off" } end }
+    return { get = function() return { auto_night = night_window and "schedule" or "off", auto_light = false } end }
 end
 package.preload["nightmode"] = function()
-    return { window = function() if night_window then return night_window[1], night_window[2] end end }
+    return {
+        window = function() if night_window then return night_window[1], night_window[2] end end,
+        hasSensor = function() return false end,
+    }
 end
 _G.G_reader_settings = {
     isTrue = function() return false end,
@@ -74,16 +78,20 @@ Assert.is_false(rows[4](600).status_on)
 night_window = { 22 * 60, 7 * 60 }
 Assert.eq(rows[4](600).status, "22:00–07:00")
 Assert.is_true(rows[4](600).status_on)
-Assert.eq(rows[5](600).title, "屏幕刷新")
-Assert.eq(rows[5](600).status, "每 6 页")
-Assert.eq(rows[6](600).title, "彩色屏幕支持")
-Assert.is_false(rows[6](600).status_on)
+Assert.eq(rows[5](600).title, "自动亮度")
+Assert.eq(rows[5](600).status, "关")
+Assert.is_false(rows[5](600).status_on)
+Assert.eq(rows[5](600).subtitle, "跟随自动夜间模式的昼夜时间切换")
+Assert.eq(rows[6](600).title, "屏幕刷新")
+Assert.eq(rows[6](600).status, "每 6 页")
+Assert.eq(rows[7](600).title, "彩色屏幕支持")
+Assert.is_false(rows[7](600).status_on)
 
-eink, color_screen = false, false
+eink, color_screen, frontlight = false, false, false
 package.loaded["device"] = nil
 package.loaded["ui.desktop.settings.display"] = nil
 Display = require("ui.desktop.settings.display")
 rows = Display:rows{
     desktop = {}, font_name = "Noto", scale = 120, grid_max_cols = 4,
 }
-Assert.eq(#rows, 4, "无墨水屏/彩屏时不展示刷新与彩色项")
+Assert.eq(#rows, 4, "无墨水屏/彩屏/前光时不展示刷新、彩色与自动亮度项")
