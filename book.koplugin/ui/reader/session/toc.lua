@@ -47,7 +47,7 @@ end
 
 ---@param session ReaderSessionSnapshot|nil
 ---@param idx integer
----@param opts { within: number|nil, direction: "prev"|"next"|nil }|nil
+---@param opts { within: number|nil, direction: "prev"|"next"|nil, xpointer: string|nil }|nil
 ---@return boolean
 function Toc.gotoChapter(session, idx, opts)
     if not session then return false end
