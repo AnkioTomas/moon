@@ -14,7 +14,7 @@ Moon 目录布局（$DATA/.moon）
       moon.lua / wechat.lua
     backups/
       patches/<feature>/      核心补丁安装前的原始文件备份
-    fonts/               UI 字体（.woff）
+    fonts/               微信读书字体（.ttf，由下载的 .woff 转换）
 
 注意：打开 settings 只能 ensureSettings，禁止 ensureLayout（会与 settings 读活跃源形成环）。
 
