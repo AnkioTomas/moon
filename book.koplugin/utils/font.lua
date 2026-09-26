@@ -512,7 +512,7 @@ end
 ---@param id string|nil
 ---@return string|nil, string|nil
 local function resolvePath(id)
-    id = sanitizeId(id or "")
+    id = id or ""
     if id == "" then
         return ""
     end
@@ -561,7 +561,9 @@ function MoonFont.faceForId(id)
         "registered=" .. tostring(registered),
         "error=" .. tostring(register_err)
     )
-    if not registered then
+    -- engineInit 已注册 FontList 里的全部字体，crengine 拒绝同一路径重复注册；
+    -- 所以注册失败时只要该字体名已可用就算成功。
+    if not registered and not util.arrayContains(cre.getFontFaces(), face) then
         return nil, _("应用字体失败")
     end
     _registered_fonts[path] = true
@@ -631,7 +633,7 @@ function MoonFont.applyFaceToReader(ui, face, id, name)
     if not MoonFont.supportsReader(ui) or not setReaderFontFace(ui, face) then
         return false
     end
-    id = sanitizeId(id or "")
+    id = id or ""
     ui.doc_settings:saveSetting("book_reader_font_id", id)
     ui.doc_settings:saveSetting("book_reader_font_name", name or id)
     ui.doc_settings:flush()
@@ -671,7 +673,7 @@ end
 local function apply(id)
     saveFontmapDefaults()
     ---@cast _defaults table
-    id = sanitizeId(id or "")
+    id = id or ""
     if id == "" then
         for key, val in pairs(_defaults) do
             Font.fontmap[key] = val
@@ -822,7 +824,7 @@ end
 ---@param name string|nil
 ---@return boolean
 function MoonFont.set(id, name)
-    id = sanitizeId(id or "")
+    id = id or ""
     local s = MoonSettings.get()
     s.ui_font = id
     s.ui_font_name = (id ~= "" and name) and tostring(name) or ""
