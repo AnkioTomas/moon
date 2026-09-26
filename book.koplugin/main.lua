@@ -63,6 +63,7 @@ function BookPlugin:init()
     require("ui.panel.native").onCreate(self.ui)
     require("lockscreen.init").onCreate()
     require("remote.init").onCreate()
+    require("nightmode").onCreate()
     require("ime.init").onCreate()
     require("patch.manager").onCreate({ plugin_root = self.path })
     if self.ui and self.ui.document then
@@ -147,6 +148,7 @@ function BookPlugin:onSuspend()
     require("ui.reader.session").onPause(self)
     require("lockscreen.init").onPause()
     require("remote.init").onPause()
+    require("nightmode").onPause()
     desktopLife(self, "onPause")
     logger.flush()
 end
@@ -157,6 +159,7 @@ function BookPlugin:onResume()
     require("ui.reader.session").onResume(self)
     require("lockscreen.init").onResume()
     require("remote.init").onResume()
+    require("nightmode").onResume()
 end
 
 --- 退出：停更新任务、远程服务，并销毁仍打开的桌面。

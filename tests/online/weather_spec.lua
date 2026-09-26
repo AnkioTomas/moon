@@ -35,7 +35,8 @@ do -- 有城市 + 默认 TTL + 丰富字段
             "cloudcover":"100",
             "weatherDesc":[{"value":"Overcast "}],
             "lang_zh":[{"value":"阴"}]}],
-        "nearest_area":[{"areaName":[{"value":"Pootung"}],"region":[{"value":"Shanghai"}]}],
+        "nearest_area":[{"areaName":[{"value":"Pootung"}],"region":[{"value":"Shanghai"}],
+            "latitude":"31.239","longitude":"121.504"}],
         "weather":[{
             "date":"2026-09-09","maxtempC":"30","mintempC":"22",
             "astronomy":[{"sunrise":"05:48 AM","sunset":"06:12 PM"}],
@@ -57,6 +58,8 @@ do -- 有城市 + 默认 TTL + 丰富字段
     Assert.eq(got.high, "30")
     Assert.eq(got.low, "22")
     Assert.eq(got.sunrise, "05:48 AM")
+    Assert.eq(got.latitude, 31.239)
+    Assert.eq(got.longitude, 121.504)
     Assert.eq(got.icon, "overcast")
     Assert.eq(got.image, "https://cdn.jsdelivr.net/gh/AnkioTomas/moon@main/assets/weather/yin.png")
     Assert.len(got.days, 2)

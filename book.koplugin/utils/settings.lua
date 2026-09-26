@@ -24,6 +24,8 @@ local DEFAULTS = {
     display = {
         ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,
         library_sort = "recent_added",
+        -- off / schedule / sun；时间是当天分钟数，sun 模式另存 auto_night_lat / auto_night_lon。
+        auto_night = "off", auto_night_from = 22 * 60, auto_night_to = 7 * 60,
     },
     lockscreen = {
         lock_screen = "ko",
@@ -126,6 +128,8 @@ for section, defaults in pairs(DEFAULTS) do
     for key in pairs(defaults) do KEY_SECTION[key] = section end
 end
 KEY_SECTION.home_widgets = "home"
+KEY_SECTION.auto_night_lat = "display"
+KEY_SECTION.auto_night_lon = "display"
 -- These are runtime/cache values, not user-facing defaults, but belong beside
 -- the lockscreen settings rather than in common.lua.
 for _, key in ipairs({

@@ -10,6 +10,8 @@ local Popup = require("ui.views.popup")
 local SettingRow = require("ui.components.settingrow")
 local FontPicker = require("ui.components.fontpicker")
 local UI = require("ui.components.bookui")
+local MoonSettings = require("utils.settings")
+local NightMode = require("nightmode")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -97,6 +99,100 @@ local function colorRow(desktop)
     end
 end
 
+---@param minute number
+---@return string
+local function clock(minute)
+    return string.format("%02d:%02d", math.floor(minute / 60), minute % 60)
+end
+
+--- 应用模式并报今天的开关时间；KOReader 自带的自动夜间模式也开着时提醒，两者会互相覆盖。
+---@param desktop table
+---@param mode "off"|"schedule"|"sun"
+---@param head string|nil 首行提示
+local function applyNight(desktop, mode, head)
+    NightMode.setMode(mode)
+    desktop:updateView()
+    if mode == "off" then return end
+    local from, to = NightMode.window()
+    local lines = { head }
+    lines[#lines + 1] = T(_("夜间模式将在 %1 开启，%2 关闭"), clock(from), clock(to))
+    if (G_reader_settings:readSetting("autowarmth_activate") or 0) ~= 0 then
+        lines[#lines + 1] = _("KOReader 自带的自动夜间模式也开着，两者会互相覆盖，建议关掉其中一个。")
+    end
+    UIManager:show(InfoMessage:new{ text = table.concat(lines, "\n\n") })
+end
+
+--- 依次选夜间开始、结束时间。
+---@param desktop table
+local function pickSchedule(desktop)
+    local DateTimeWidget = require("ui/widget/datetimewidget")
+    local conf = MoonSettings.get("display")
+    local function pick(title, minute, ok_text, done)
+        UIManager:show(DateTimeWidget:new{
+            title_text = title, ok_text = ok_text,
+            hour = math.floor(minute / 60), min = minute % 60,
+            callback = function(t) done(t.hour * 60 + t.min) end,
+        })
+    end
+    pick(_("夜间开始"), conf.auto_night_from, _("下一步"), function(from)
+        pick(_("夜间结束"), conf.auto_night_to, _("保存"), function(to)
+            conf.auto_night_from, conf.auto_night_to = from, to
+            applyNight(desktop, "schedule")
+        end)
+    end)
+end
+
+--- 定位成功才切到日出日落；失败保持原模式。
+---@param desktop table
+local function pickSun(desktop)
+    local loading = InfoMessage:new{ text = _("正在定位…") }
+    UIManager:show(loading)
+    NightMode.locate(function(ok, city)
+        UIManager:close(loading)
+        if not ok then
+            UIManager:show(InfoMessage:new{ text = _("定位失败，请联网后重试"), timeout = 3 })
+            return
+        end
+        applyNight(desktop, "sun", T(_("已定位：%1"), city or _("当前位置")))
+    end)
+end
+
+---@param desktop table
+---@return fun(width: number): table
+local function nightRow(desktop)
+    return function(iw)
+        local mode = MoonSettings.get("display").auto_night
+        local from, to = NightMode.window()
+        return SettingRow.build(iw, {
+            kind = "nav", icon = "dark_mode", title = _("自动夜间模式"),
+            subtitle = _("定时或按日出日落切换；中途手动切换不会被立刻改回"),
+            status = from and clock(from) .. "–" .. clock(to) or _("关"), status_on = from ~= nil,
+            callback = function()
+                local items = {}
+                for _, preset in ipairs({
+                    { value = "off", text = _("关闭") },
+                    { value = "schedule", text = _("定时") },
+                    { value = "sun", text = _("日出日落") },
+                }) do
+                    items[#items + 1] = {
+                        text = mode == preset.value and "✓ " .. preset.text or preset.text,
+                        value = preset.value,
+                    }
+                end
+                Popup.sheet{
+                    title = _("自动夜间模式"),
+                    items = items,
+                    on_select = function(value)
+                        if value == "schedule" then return pickSchedule(desktop) end
+                        if value == "sun" then return pickSun(desktop) end
+                        applyNight(desktop, "off")
+                    end,
+                }
+            end,
+        })
+    end
+end
+
 ---@param ctx table
 ---@return table
 function Display:rows(ctx)
@@ -156,6 +252,7 @@ function Display:rows(ctx)
                 end,
             })
         end,
+        nightRow(desktop),
     }
     local refresh = refreshRow(desktop)
     if refresh then rows[#rows + 1] = refresh end
