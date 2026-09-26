@@ -126,16 +126,16 @@ function Settings:spec(id)
                 return ReaderBarSettings:page(desktop, which).preview(width)
             end,
             sections = function()
-                local out = {}
-                for _i, section in ipairs(ReaderBarSettings:page(desktop, which).sections) do
-                    out[#out + 1] = section
-                end
-                if which == "bottom" then
-                    for _j, section in ipairs(ReaderSettings:sections(desktop)) do
-                        out[#out + 1] = section
-                    end
-                end
-                return out
+                return ReaderBarSettings:page(desktop, which).sections
+            end,
+        }
+    end
+    if id == "reader_behavior" then
+        return {
+            id = id,
+            title = _("行为"),
+            sections = function()
+                return ReaderSettings:sections(desktop)
             end,
         }
     end
@@ -314,6 +314,9 @@ function Settings:createWidget()
         }),
         featureRow(desktop, {
             id = "reader_bottom", icon = "horizontal_rule", title = _("底栏"),
+        }),
+        featureRow(desktop, {
+            id = "reader_behavior", icon = "touch_app", title = _("行为"),
         }),
         featureRow(desktop, {
             id = "lookup", icon = "format_ink_highlighter", title = _("划词"),

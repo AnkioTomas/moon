@@ -135,7 +135,7 @@ package.preload["ui.desktop.settings.ai"] = function()
 end
 package.preload["ui.desktop.settings.reader"] = function()
     return {
-        sections = function() return {} end,
+        sections = function() return { { title = "行为", rows = {} } } end,
         lookupSections = function() return {} end,
         popupRows = function() return {} end,
     }
@@ -193,7 +193,7 @@ local desktop = {
 local settings = require("ui.desktop.settings"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
-Assert.len(built_rows, 20)
+Assert.len(built_rows, 21)
 
 local expected = {
     { title = "书籍来源", id = "sources" },
@@ -204,6 +204,7 @@ local expected = {
     { title = "快捷", id = "quickpanel_desktop" },
     { title = "顶栏", id = "reader_top" },
     { title = "底栏", id = "reader_bottom" },
+    { title = "行为", id = "reader_behavior" },
     { title = "划词", id = "lookup" },
     { title = "快捷", id = "quickpanel_reader" },
     { title = "语言", id = "language" },
@@ -236,6 +237,13 @@ Assert.eq(spec.title, "顶栏")
 Assert.not_nil(spec.preview)
 Assert.not_nil(spec.sections)
 Assert.eq(#spec.sections(), 0)
+
+-- 行为设置独立成页，底栏页只剩底栏自身配置
+Assert.eq(#settings:spec("reader_bottom").sections(), 0)
+local behavior = settings:spec("reader_behavior")
+Assert.eq(behavior.title, "行为")
+Assert.is_nil(behavior.preview)
+Assert.eq(#behavior.sections(), 1)
 
 local lookup = settings:spec("lookup")
 Assert.eq(lookup.title, "划词")
