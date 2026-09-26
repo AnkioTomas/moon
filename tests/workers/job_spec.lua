@@ -227,6 +227,23 @@ Assert.eq(done_job.state, "done")
 Assert.eq(result.files, 10)
 Assert.is_nil(done_job.poll_fn)
 
+-- 子进程 progress 帧按序转给 on_progress，之后 done 照常收尾。
+util.alive = false
+util.pending = Protocol.encode({ type = "progress", value = 3 })
+    .. Protocol.encode({ type = "progress", value = 7 })
+    .. Protocol.encode({ type = "done", result = { files = 1 } })
+local seen_progress = {}
+local progress_job = Job.run(function() end, {
+    name = "test.progress",
+    kind = "light",
+    on_progress = function(value) seen_progress[#seen_progress + 1] = value end,
+})
+Stubs.flush()
+Assert.eq(progress_job.state, "done")
+Assert.eq(seen_progress[1], 3)
+Assert.eq(seen_progress[2], 7)
+Assert.len(seen_progress, 2)
+
 util.alive = true
 util.pending = Protocol.encode({ type = "done", result = { files = 9 } })
 local cancelled_seen
@@ -245,15 +262,21 @@ Stubs.flush()
 Assert.eq(live.state, "cancelled")
 
 local instant_value
-local instant = Job.run(function() return 42 end, {
+local instant_progress
+local instant = Job.run(function(progress)
+    progress(5)
+    return 42
+end, {
     name = "test.instant",
     kind = "instant",
     on_done = function(value) instant_value = value end,
+    on_progress = function(value) instant_progress = value end,
 })
 Assert.eq(instant.state, "queued")
 Assert.is_nil(instant.pid)
 Stubs.flush()
 Assert.eq(instant_value, 42)
+Assert.eq(instant_progress, 5)
 Assert.eq(instant.state, "done")
 
 local called = false
