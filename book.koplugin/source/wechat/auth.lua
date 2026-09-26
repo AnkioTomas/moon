@@ -1,12 +1,9 @@
 --[[--
-微信读书认证：Web 扫码长连接登录，会话 Cookie 自动落盘。
-Skills API Key 经 ``GET /api/skills/apikeyGet`` 自动获取，供 Agent 网关使用。
+微信读书会话：Eink 扫码拿到的 vid/accessToken 即网页会话（wr_vid/wr_skey Cookie）。
 
-流程：
-  GET /api/auth/getLoginUid
-  → 本地 QR（confirm?uid=）
-  → GET /api/auth/getLoginInfo?uid=&otp  长挂起
-  → GET /api/userInfo?userVid=
+登录与续期在 ``source.wechat.eink``；这里只负责把会话拼成网页请求头，
+以及带鉴权失效自动续期 + 单次重试的网页请求。
+只有网页会话、没有 Eink refresh_token 的旧登录视为未登录，需要重新扫码。
 
 网络仅异步：Request.request。
 
@@ -17,24 +14,19 @@ local JSON = require("json")
 local logger = require("utils.log")
 local Request = require("http.request")
 local Header = require("http.header")
-local Text = require("utils.text")
 local Protocol = require("source.wechat.protocol")
+local Eink = require("source.wechat.eink")
 local _ = require("gettext")
 
 local Auth = {}
 
 local WEB = "https://weread.qq.com"
 local API = "https://i.weread.qq.com"
-local AGENT_GATEWAY = API .. "/api/agent/gateway"
-local DEFAULT_SKILL_VERSION = "1.0.4"
 
 --- 浏览器 UA 与 protocol.webAppId 保持一致（阅读时长上报 appId 依赖 UA）。
 local BROWSER_UA = Protocol.USER_AGENT
 
 local SESSION_COOKIE_KEYS = { "wr_gid", "wr_fp", "wr_vid", "wr_skey", "wr_ql", "wr_rt" }
-
---- 扫码会话 guest cookie（仅内存，不落盘）
-local login_jar = {}
 
 --- 上次续期时间戳；续期冷却内不重复打 renewal。
 local last_renew_at = 0
@@ -64,89 +56,27 @@ local function browserHeaders(extra)
     })
 end
 
---- 按 keys 顺序拼 Cookie；keys 为 nil 时：优先 wr_gid/wr_fp，再其余。
+--- 按 keys 顺序拼 Cookie；空串与缺失跳过，全空返回 nil。
 ---@param map table|nil
----@param keys string[]|nil
+---@param keys string[]
 ---@return string|nil
 local function cookieFrom(map, keys)
     if type(map) ~= "table" then
         return nil
     end
     local parts = {}
-    --- 追加单个 Cookie 键值。
-    ---@param k string
-    local function add(k, v)
+    for _i, k in ipairs(keys) do
+        local v = map[k]
         if type(v) == "string" and v ~= "" then
             parts[#parts + 1] = k .. "=" .. v
         elseif type(v) == "number" then
             parts[#parts + 1] = k .. "=" .. tostring(v)
         end
     end
-    if keys then
-        for _i, k in ipairs(keys) do
-            add(k, map[k])
-        end
-    else
-        add("wr_gid", map.wr_gid)
-        add("wr_fp", map.wr_fp)
-        for k, v in pairs(map) do
-            if k ~= "wr_gid" and k ~= "wr_fp" then
-                add(k, v)
-            end
-        end
-    end
     if #parts == 0 then
         return nil
     end
     return table.concat(parts, "; ")
-end
-
---- 从响应头解析 Set-Cookie 为键值表。
----@param headers table|nil
----@return table<string, string>
-local function parseSetCookie(headers)
-    local out = {}
-    if type(headers) ~= "table" then
-        return out
-    end
-    local sc = headers["set-cookie"] or headers["Set-Cookie"]
-    if type(sc) == "string" then
-        sc = { sc }
-    end
-    if type(sc) ~= "table" then
-        return out
-    end
-    for _i, line in ipairs(sc) do
-        local k, v = line:match("^%s*([^=]+)=([^;]*)")
-        if k and v then
-            out[k] = v
-        end
-    end
-    return out
-end
-
---- Normalize Turbo response headers for the cookie parser.
----@param res table|nil
----@return table
-local function asyncHeaders(res)
-    return { ["set-cookie"] = Request.header(res, "Set-Cookie") }
-end
-
---- 把响应 Set-Cookie 合并进扫码 guest jar。
----@param headers table|nil
-local function jarMerge(headers)
-    for k, v in pairs(parseSetCookie(headers)) do
-        login_jar[k] = v
-    end
-end
-
---- 扫码登录请求头（浏览器头 + guest Cookie）。
----@param extra table|nil
----@return table
-local function loginRequestHeaders(extra)
-    return browserHeaders(Header.merge(extra, {
-        ["Cookie"] = cookieFrom(login_jar),
-    }))
 end
 
 --- 读取微信读书源配置。
@@ -214,27 +144,10 @@ function Auth.sessionHeaders(extra)
     }))
 end
 
---- 是否已有可用会话（wr_skey 非空）。
+--- 是否已登录：必须是 Eink 扫码会话（能续期）；旧网页会话不算。
 ---@return boolean
 function Auth.hasSession()
-    local skey = cfg().wr_skey
-    return type(skey) == "string" and skey ~= ""
-end
-
---- Skills Agent 网关是否已配置 API Key（``wrk-…``）。
----@return boolean
-function Auth.hasAgentKey()
-    return Text.trim(cfg().api_key or "") ~= ""
-end
-
---- 当前 Skills 版本号（随 ``upgrade_info`` 自动更新）。
----@return string
-function Auth.skillVersion()
-    local version = Text.trim(cfg().skill_version or "")
-    if version ~= "" then
-        return version
-    end
-    return DEFAULT_SKILL_VERSION
+    return Eink.hasSession()
 end
 
 --- 展示用用户标签（昵称优先，否则 user_id）。
@@ -250,7 +163,7 @@ function Auth.userLabel()
     return nil
 end
 
---- 清除本地会话与派生 Cookie 字段。
+--- 清除本地会话与派生 Cookie 字段；api_key/skill_version 是已废弃 Skills 网关的残留，一并清掉。
 function Auth.clearSession()
     saveCfg({
         wr_vid = "",
@@ -265,26 +178,7 @@ function Auth.clearSession()
         api_key = "",
         skill_version = "",
     })
-end
-
---- 会话以字段落盘；Cookie 头按需由字段拼装。
----@param vid string|number|nil
----@param skey string|nil
----@param rt string|nil
----@param name string|nil
----@param extras table
-local function applySession(vid, skey, rt, name, extras)
-    vid = tostring(vid or "")
-    saveCfg({
-        wr_vid = vid,
-        wr_skey = tostring(skey or ""),
-        wr_rt = tostring(rt or ""),
-        wr_gid = extras.wr_gid or login_jar.wr_gid or "",
-        wr_fp = extras.wr_fp or login_jar.wr_fp or "",
-        wr_ql = tostring(extras.wr_ql or login_jar.wr_ql or "0"),
-        user_id = vid,
-        user_name = name or "",
-    })
+    Eink.clearSession()
 end
 
 --- 相对路径拼到 base；已是绝对 URL 则原样返回。
@@ -319,17 +213,6 @@ local function decodeJson(raw)
     local ok, data = pcall(JSON.decode, raw)
     if not ok or type(data) ~= "table" then
         return nil, _("返回非 JSON")
-    end
-    return data
-end
-
---- 检查微信读书 errcode；非 0 则返回错误信息。
----@param data table
----@return table|nil, string|nil
-local function checkWereadErr(data)
-    local errcode = tonumber(data.errcode or data.errCode)
-    if errcode and errcode ~= 0 then
-        return nil, data.errmsg or data.errMsg or (_("微信读书错误 ") .. tostring(errcode))
     end
     return data
 end
@@ -509,345 +392,28 @@ function Auth.apiPostAsync(path, body_tbl, cb)
     return Auth.webPostAsync(absUrl(API, path), JSON.encode(body_tbl or {}), nil, jsonCallback(cb))
 end
 
---- 用 Web 会话拉取 Skills API Key 并落盘（``GET /api/skills/apikeyGet``）。
----@param cb fun(key: string|nil, err: string|nil)
+--- 扫码登录后补拉昵称；取不到不算失败，会话本身已可用。
+---@param cb fun(user: { user_id: string, user_name: string })
 ---@return { cancel: fun() }|nil
-function Auth.fetchAgentKeyAsync(cb)
-    if not Auth.hasSession() then
-        cb(nil, _("请先扫码登录微信读书"))
-        return nil
-    end
-    return Auth.webGetAsync(WEB .. "/api/skills/apikeyGet?only_show=1", {
-        headers = { ["Referer"] = WEB .. "/r/weread-skills" },
-    }, function(raw, err)
-        if not raw then
-            cb(nil, err)
-            return
-        end
-        local data, decode_err = decodeJson(raw)
-        if not data then
-            cb(nil, decode_err)
-            return
-        end
-        local key = Text.trim(data.apikey or data.api_key or "")
-        if key == "" then
-            cb(nil, _("未获取到 Skills API Key"))
-            return
-        end
-        saveCfg({ api_key = key })
-        logger.info("weread skills api key ok")
-        cb(key)
-    end)
-end
-
---- Skills Agent 网关：``POST i.weread.qq.com/api/agent/gateway``。
---- Bearer ``wrk-…``；缺省时经 Web 会话自动 ``GET /api/skills/apikeyGet`` 获取。
----@param api_name string 如 ``/readdata/detail``
----@param params table|nil 业务参数平铺在 body 顶层（禁止包在 params 内）
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Auth.agentGatewayAsync(api_name, params, cb)
-    --- 用已有 API Key 调网关；回包里带 upgrade_info 时顺手记住新的 skill_version。
-    ---@return { cancel: fun() }|nil
-    local function invoke()
-        local key = Text.trim(cfg().api_key or "")
-        if key == "" then
-            cb(nil, _("未获取到 Skills API Key"))
-            return
-        end
-        local body = {
-            api_name = api_name,
-            skill_version = Auth.skillVersion(),
-        }
-        if type(params) == "table" then
-            for k, v in pairs(params) do
-                body[k] = v
-            end
-        end
-        return Request.request({
-            url = AGENT_GATEWAY,
-            method = "POST",
-            body = JSON.encode(body),
-            headers = browserHeaders({
-                ["Content-Type"] = "application/json",
-                ["Authorization"] = "Bearer " .. key,
-            }),
-            timeout = 45,
-        }, function(res, err)
-            if err then
-                cb(nil, err)
-                return
-            end
-            local code = res and res.code
-            local raw = res and res.body or ""
-            if not Request.ok(code) then
-                cb(nil, "HTTP " .. tostring(code))
-                return
-            end
-            local data, decode_err = decodeJson(raw)
-            if not data then
-                cb(nil, decode_err)
-                return
-            end
-            local upgrade = data.upgrade_info
-            if type(upgrade) == "table" and upgrade.version then
-                saveCfg({ skill_version = tostring(upgrade.version) })
-            end
-            cb(checkWereadErr(data))
-        end)
-    end
-    if Auth.hasAgentKey() then
-        return invoke()
-    end
-    return Auth.fetchAgentKeyAsync(function(key, err)
-        if not key then
-            cb(nil, err)
-            return
-        end
-        invoke()
-    end)
-end
-
---- 后台刷新 Skills API Key；取不到只记日志，会话本身仍可用。
-local function refreshAgentKey()
-    Auth.fetchAgentKeyAsync(function(key, fetch_err)
-        if not key then
-            logger.dbg("weread skills api key fetch failed", fetch_err)
-        end
-    end)
-end
-
---- 访客 Cookie：重置登录 jar，访问首页拿 wr_fp/wr_gid，缺失则本地随机补齐。
----@param cb fun(ok: boolean)
----@return { cancel: fun() }
-local function ensureGuestCookiesAsync(cb)
-    login_jar = {}
-    return Request.request({
-        url = WEB .. "/",
-        method = "GET",
-        headers = browserHeaders(),
-        timeout = 30,
-    }, function(res, _err)
-        jarMerge(asyncHeaders(res))
-        if type(login_jar.wr_fp) ~= "string" or login_jar.wr_fp == "" then
-            login_jar.wr_fp = tostring(math.random(100000000, 2147483647))
-        end
-        if type(login_jar.wr_gid) ~= "string" or login_jar.wr_gid == "" then
-            login_jar.wr_gid = tostring(math.random(100000000, 999999999))
-        end
-        cb(true)
-    end)
-end
-
---- 发起扫码登录：先拿访客 Cookie，再申请登录 uid 并拼出二维码内容。
----@param cb fun(info: { uid: string, qr_payload: string }|nil, err: string|nil)
----@return { cancel: fun() }
-function Auth.beginQrLoginAsync(cb)
-    local cancelled = false
-    local first, second
-    first = ensureGuestCookiesAsync(function()
-        if cancelled then
-            return
-        end
-        second = Request.request({
-            url = WEB .. "/api/auth/getLoginUid",
-            method = "GET",
-            headers = loginRequestHeaders(),
-            timeout = 30,
-        }, function(res, err)
-            if cancelled then
-                return
-            end
-            jarMerge(asyncHeaders(res))
-            if err then
-                cb(nil, err)
-                return
-            end
-            if not res or not Request.ok(res.code) then
-                cb(nil, _("获取登录 uid 失败"))
-                return
-            end
-            local data, decode_err = decodeJson(res.body or "")
-            if not data or not data.uid then
-                cb(nil, decode_err or _("获取登录 uid 失败"))
-                return
-            end
-            local uid = tostring(data.uid)
-            cb({ uid = uid, qr_payload = WEB .. "/web/confirm?pf=2&uid=" .. uid })
-        end)
-    end)
-    return { cancel = function()
-            cancelled = true
-            if first then first.cancel() end
-            if second then second.cancel() end
-        end }
-end
-
---- 长轮询等待扫码确认，最多等 90 秒。
---- 成功回调带会话密钥（vid/accessToken/refreshToken 与几个 Cookie 字段）与状态 "ok"，
---- 失败或超时回调 (nil, err, "error")。
----@param uid string beginQrLoginAsync 拿到的登录 uid
----@param cb fun(session: table|nil, err: string|nil, status: string)
----@return { cancel: fun() }
-function Auth.waitQrLoginAsync(uid, cb)
-    if not uid or uid == "" then
-        cb(nil, _("无效 uid"), "error")
-        return { cancel = function() end }
-    end
-    local cancelled = false
-    local deadline = os.time() + 90
-    local request_job
-    local url = WEB .. "/api/auth/getLoginInfo?uid=" .. tostring(uid) .. "&otp"
-    --- 发一轮长轮询；截止时间前的网络错误延迟 3 秒重试，其余情况直接定论。
-    local function poll()
-        if cancelled then
-            return
-        end
-        request_job = Request.request({
-            url = url,
-            method = "GET",
-            headers = loginRequestHeaders(),
-            timeout = math.max(1, math.min(20, deadline - os.time())),
-        }, function(res, err)
-            if cancelled then
-                return
-            end
-            if err and os.time() < deadline then
-                -- 网络错误：延迟 3 秒再重试，避免轰炸服务器
-                -- 源模块顶部不许 require UI 模块（离线测试直接 require 源文件）
-                require("ui/uimanager"):scheduleIn(3, poll)
-                return
-            end
-            if err then
-                cb(nil, err, "error")
-                return
-            end
-            if not res or not Request.ok(res.code) then
-                cb(nil, _("二维码已失效，请重新登录"), "error")
-                return
-            end
-            jarMerge(asyncHeaders(res))
-            local data, decode_err = decodeJson(res.body or "")
-            if not data then
-                cb(nil, decode_err or _("长连接等待返回异常"), "error")
-                return
-            end
-            if data.succeed ~= true and data.logicCode ~= "LOGIN_SUCCESS" then
-                cb(nil, data.errmsg or _("二维码已失效，请重新登录"), "error")
-                return
-            end
-            local headers = asyncHeaders(res)
-            local set = parseSetCookie(headers)
-            local vid = set.wr_vid or data.webLoginVid or data.vid
-            local skey = set.wr_skey or data.accessToken
-            local rt = data.refreshToken or Text.urlDecode(set.wr_rt or "")
-            if not vid or not skey or tostring(skey) == "" then
-                cb(nil, _("登录未拿到会话密钥"), "error")
-                return
-            end
-            cb({
-                vid = tostring(vid),
-                accessToken = tostring(skey),
-                refreshToken = tostring(rt or ""),
-                wr_ql = set.wr_ql or "0",
-                wr_gid = login_jar.wr_gid,
-                wr_fp = login_jar.wr_fp,
-            }, nil, "ok")
-        end)
-    end
-    poll()
-    return { cancel = function()
-            cancelled = true
-            if request_job then request_job.cancel() end
-        end }
-end
-
---- 落盘扫码得到的会话，并补拉用户昵称与 Skills API Key。
---- 昵称和 API Key 取不到都不算失败：会话本身已经可用。
----@param info table|nil waitQrLoginAsync 回调给的会话表
----@param cb fun(user: { user_id: string, user_name: string }|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Auth.completeQrLoginAsync(info, cb)
-    if type(info) ~= "table" then
-        cb(nil, _("无登录信息"))
-        return nil
-    end
-    local vid = tostring(info.vid or "")
-    local skey = tostring(info.accessToken or info.skey or "")
-    local rt = tostring(info.refreshToken or "")
-    if vid == "" or skey == "" then
-        cb(nil, _("无登录信息"))
-        return nil
-    end
-    local extras = { wr_gid = info.wr_gid, wr_fp = info.wr_fp, wr_ql = info.wr_ql }
-    applySession(vid, skey, rt, "", extras)
-    login_jar = {}
+function Auth.fetchUserAsync(cb)
+    local vid = tostring(vidOf(cfg()) or "")
     return Auth.webGetAsync(WEB .. "/api/userInfo?userVid=" .. vid, nil, function(raw)
-        local name = ""
-        if raw then
-            local data = decodeJson(raw)
-            if data and type(data.name) == "string" then
-                name = data.name
-                applySession(vid, skey, rt, name, extras)
-            end
+        local data = raw and decodeJson(raw)
+        local name = data and type(data.name) == "string" and data.name or ""
+        if name ~= "" then
+            saveCfg({ user_name = name })
         end
         logger.info("weread login ok", vid, name)
-        refreshAgentKey()
         cb({ user_id = vid, user_name = name })
     end)
 end
 
---- 续期会话 Cookie；成功时把新的 wr_skey/wr_rt 落盘并顺带刷新 Skills API Key。
---- 未登录直接失败；响应未判定为续期成功也按「续期失败」回调。
+--- 续期会话：Eink refreshToken 换新 accessToken（即新 wr_skey）。
 ---@param cb fun(ok: boolean|nil, err: string|nil)
----@return { cancel: fun() }|nil
 function Auth.renewCookieAsync(cb)
-    if not Auth.hasSession() then
-        cb(nil, _("请先扫码登录微信读书"))
-        return nil
-    end
-    return Request.request({
-        url = WEB .. "/web/login/renewal",
-        method = "POST",
-        body = JSON.encode({ rq = "%2Fweb%2Fbook%2Fread", ql = false }),
-        headers = Auth.sessionHeaders({ ["Content-Type"] = "application/json" }),
-        timeout = 20,
-    }, function(res, err)
-        if err then
-            cb(nil, err)
-            return
-        end
-        local raw = res and res.body or ""
-        local data = decodeJson(raw)
-        if not data or (data.succ ~= 1 and data.succ ~= true) then
-            cb(nil, _("续期失败"))
-            return
-        end
-        local set = parseSetCookie(asyncHeaders(res))
-        if set.wr_skey or set.wr_rt then
-            local c = cfg()
-            applySession(
-                set.wr_vid or c.wr_vid or c.user_id,
-                set.wr_skey or c.wr_skey,
-                Text.urlDecode(set.wr_rt or c.wr_rt or ""),
-                c.user_name,
-                {
-                    wr_gid = set.wr_gid or c.wr_gid,
-                    wr_fp = set.wr_fp or c.wr_fp,
-                    wr_ql = set.wr_ql or c.wr_ql,
-                }
-            )
-            logger.info("weread cookie renewed")
-            refreshAgentKey()
-            cb(true)
-            return
-        end
-        if not Request.ok(res and res.code) then
-            cb(nil, _("续期失败 HTTP ") .. tostring(res and res.code))
-        else
-            -- succ=1 但无 Set-Cookie：会话仍有效
-            cb(true)
-        end
+    Eink.refreshAsync(function(ok, err)
+        if not ok then return cb(nil, err or _("续期失败")) end
+        cb(true)
     end)
 end
 

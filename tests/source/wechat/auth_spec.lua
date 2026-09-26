@@ -1,10 +1,9 @@
 --[[--
-source.wechat.auth 离线用例：cookie 解析 / 会话字段 / 错误码映射。
+source.wechat.auth 离线用例：会话字段 / Cookie 拼装 / 登录门禁 / 自动续期重试。
 
-parseSetCookie、cookieFrom、jarMerge、sessionMap、absUrl、checkWereadErr
-均为模块内 local 函数，经 debug.getupvalue 从引用它们的导出函数上取出，
-不改插件源码。login_jar 是包级状态：每个用例用 freshAuth() 重 require 隔离。
-QR 登录三步与 renewCookieAsync 需要真实网络流程，不在本文件覆盖。
+cookieFrom、sessionMap、absUrl 为模块内 local 函数，经 debug.getupvalue 从引用它们的
+导出函数上取出，不改插件源码。续期计时是包级状态：每个用例用 freshAuth() 重 require 隔离。
+登录态 = Eink 会话（wr_skey + eink.refresh_token），扫码与续期细节见 eink_spec。
 
 @module tests.wechat_auth_spec
 --]]
@@ -76,14 +75,25 @@ for _, name in ipairs({ "json", "http.request", "utils.settings" }) do
     package.loaded[name] = nil
 end
 
---- 重 require auth，重置包级 login_jar。
+--- 重 require auth，重置包级续期状态；eink 为 nil 时用真实 source.wechat.eink。
 ---@param cfg table|nil
+---@param eink table|nil
 ---@return table
-local function freshAuth(cfg)
+local function freshAuth(cfg, eink)
     state.cfg = cfg or {}
     state.saved = nil
     package.loaded["source.wechat.auth"] = nil
+    package.loaded["source.wechat.eink"] = eink
     return require("source.wechat.auth")
+end
+
+--- Eink 扫码会话：wr_skey + refresh_token 才算登录。
+---@param extra table|nil
+---@return table
+local function loggedIn(extra)
+    local cfg = { wr_vid = "1", wr_skey = "s", eink = { refresh_token = "rt", device_id = "dev" } }
+    for k, v in pairs(extra or {}) do cfg[k] = v end
+    return cfg
 end
 
 --- 按名字取函数的 upvalue（模块内 local 函数 / 表）。
@@ -105,47 +115,6 @@ local function upvalue(fn, name)
 end
 
 ------------------------------------------------------------------------
--- parseSetCookie
-------------------------------------------------------------------------
-
-do
-    local auth = freshAuth()
-    local parseSetCookie = upvalue(auth.renewCookieAsync, "parseSetCookie")
-    Assert.not_nil(parseSetCookie)
-
-    -- 非 table 输入 → 空表
-    Assert.eq(type(parseSetCookie(nil)), "table")
-    Assert.eq(type(parseSetCookie("junk")), "table")
-
-    -- 单字符串头 + 属性剥离
-    local one = parseSetCookie({ ["set-cookie"] = "wr_gid=288279; Path=/; HttpOnly" })
-    Assert.eq(one.wr_gid, "288279")
-
-    -- 数组多 cookie；值内允许 '='；Expires 属性不影响首个键值
-    local multi = parseSetCookie({
-        ["set-cookie"] = {
-            "wr_skey=abc==; Expires=Thu, 01-Jan-1970 00:00:00 GMT; Path=/",
-            "wr_vid=123456; Domain=.weread.qq.com",
-            "garbage-line-without-equals",
-        },
-    })
-    Assert.eq(multi.wr_skey, "abc==")
-    Assert.eq(multi.wr_vid, "123456")
-    Assert.is_nil(multi["garbage-line-without-equals"])
-
-    -- 大写 Set-Cookie 键
-    local upper = parseSetCookie({ ["Set-Cookie"] = "wr_rt=refresh-token" })
-    Assert.eq(upper.wr_rt, "refresh-token")
-
-    -- 过期 cookie：空值保留为空串（由 cookieFrom 负责丢弃）
-    local expired = parseSetCookie({ ["set-cookie"] = "wr_skey=; Expires=Thu, 01-Jan-1970 00:00:00 GMT" })
-    Assert.eq(expired.wr_skey, "")
-
-    -- set-cookie 类型非法 → 空表
-    Assert.eq(next(parseSetCookie({ ["set-cookie"] = 42 })), nil)
-end
-
-------------------------------------------------------------------------
 -- cookieFrom
 ------------------------------------------------------------------------
 
@@ -154,7 +123,7 @@ do
     local cookieFrom = upvalue(auth.cookieHeader, "cookieFrom")
     Assert.not_nil(cookieFrom)
 
-    Assert.is_nil(cookieFrom(nil))
+    Assert.is_nil(cookieFrom(nil, { "wr_gid" }))
 
     -- keys 顺序输出；缺失/空串跳过；数字转字符串
     local s = cookieFrom(
@@ -163,41 +132,9 @@ do
     )
     Assert.eq(s, "wr_gid=g; wr_vid=123; wr_skey=s")
 
-    -- keys 为 nil：wr_gid/wr_fp 优先，其余随后
-    local def = cookieFrom({ wr_fp = "f", wr_x = "1", wr_gid = "g" })
-    Assert.is_true(def:find("^wr_gid=g; wr_fp=f; ") ~= nil)
-    Assert.is_true(def:find("wr_x=1", 1, true) ~= nil)
-
     -- 全空 → nil
-    Assert.is_nil(cookieFrom({}))
-    Assert.is_nil(cookieFrom({ wr_gid = "" }))
-end
-
-------------------------------------------------------------------------
--- jarMerge 合并语义（login_jar 包级状态）
-------------------------------------------------------------------------
-
-do
-    local auth = freshAuth()
-    local jarMerge = upvalue(auth.waitQrLoginAsync, "jarMerge")
-    Assert.not_nil(jarMerge)
-    local jar = upvalue(auth.waitQrLoginAsync, "login_jar")
-    Assert.eq(next(jar), nil)
-
-    -- 新键写入
-    jarMerge({ ["set-cookie"] = { "wr_a=1; Path=/", "wr_b=2" } })
-    Assert.eq(jar.wr_a, "1")
-    Assert.eq(jar.wr_b, "2")
-
-    -- 已有键覆盖，其它键保留
-    jarMerge({ ["set-cookie"] = "wr_a=9" })
-    Assert.eq(jar.wr_a, "9")
-    Assert.eq(jar.wr_b, "2")
-
-    -- 重 require 后 jar 重置
-    local auth2 = freshAuth()
-    local jar2 = upvalue(auth2.waitQrLoginAsync, "login_jar")
-    Assert.eq(next(jar2), nil)
+    Assert.is_nil(cookieFrom({}, { "wr_gid" }))
+    Assert.is_nil(cookieFrom({ wr_gid = "" }, { "wr_gid" }))
 end
 
 ------------------------------------------------------------------------
@@ -288,8 +225,10 @@ end
 ------------------------------------------------------------------------
 
 do
-    Assert.is_true(freshAuth({ wr_skey = "s" }).hasSession())
-    Assert.is_false(freshAuth({ wr_skey = "" }).hasSession())
+    Assert.is_true(freshAuth(loggedIn()).hasSession())
+    -- 只有网页会话（旧网页扫码登录）不算：必须重新 Eink 扫码
+    Assert.is_false(freshAuth({ wr_skey = "s", wr_vid = "1" }).hasSession(), "旧网页会话需重新登录")
+    Assert.is_false(freshAuth(loggedIn({ wr_skey = "" })).hasSession())
     Assert.is_false(freshAuth({ cookie = "wr_gid=1; wr_skey=abc" }).hasSession(), "整段 cookie 串不算会话")
     Assert.is_false(freshAuth({}).hasSession())
 
@@ -325,6 +264,39 @@ do
     Assert.eq(state.saved, cfg)
 end
 
+-- Eink 扫码会话：退出同时清 refresh_token，设备 ID 保留（重登沿用同一设备）
+do
+    local cfg = loggedIn()
+    freshAuth(cfg).clearSession()
+    Assert.is_nil(cfg.eink.refresh_token)
+    Assert.eq(cfg.eink.device_id, "dev")
+end
+
+------------------------------------------------------------------------
+-- renewCookieAsync：走 Eink refreshToken 续期
+------------------------------------------------------------------------
+
+do
+    local refresh_ok, refreshed = true, 0
+    local auth = freshAuth(loggedIn(), {
+        hasSession = function() return true end,
+        refreshAsync = function(cb)
+            refreshed = refreshed + 1
+            cb(refresh_ok, not refresh_ok and "bad" or nil)
+        end,
+    })
+    local ok, err
+    auth.renewCookieAsync(function(o, e) ok, err = o, e end)
+    Assert.eq(refreshed, 1)
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+
+    refresh_ok = false
+    auth.renewCookieAsync(function(o, e) ok, err = o, e end)
+    Assert.is_nil(ok)
+    Assert.eq(err, "bad")
+end
+
 ------------------------------------------------------------------------
 -- absUrl
 ------------------------------------------------------------------------
@@ -337,42 +309,6 @@ do
     Assert.eq(absUrl("https://i.weread.qq.com", "/a/b?x=1"), "https://i.weread.qq.com/a/b?x=1")
     Assert.eq(absUrl("https://base", "https://other.com/x"), "https://other.com/x")
     Assert.eq(absUrl("https://base", "http://other.com/x"), "http://other.com/x")
-end
-
-------------------------------------------------------------------------
--- checkWereadErr
-------------------------------------------------------------------------
-
-do
-    local auth = freshAuth()
-    local checkWereadErr = upvalue(auth.agentGatewayAsync, "checkWereadErr")
-    Assert.not_nil(checkWereadErr)
-
-    -- errcode 缺失 / 0 → 原样返回 data
-    local d0 = {}
-    Assert.eq(checkWereadErr(d0), d0)
-    local d1 = { errcode = 0, data = 1 }
-    Assert.eq(checkWereadErr(d1), d1)
-
-    -- 非 0 + errmsg → 文案直通
-    local d2, e2 = checkWereadErr({ errcode = -2012, errmsg = "登录过期" })
-    Assert.is_nil(d2)
-    Assert.eq(e2, "登录过期")
-
-    -- 驼峰 errCode / errMsg
-    local d3, e3 = checkWereadErr({ errCode = 100, errMsg = "bad" })
-    Assert.is_nil(d3)
-    Assert.eq(e3, "bad")
-
-    -- 无文案 → 默认「微信读书错误 <code>」
-    local d4, e4 = checkWereadErr({ errcode = 7 })
-    Assert.is_nil(d4)
-    Assert.eq(e4, "微信读书错误 7")
-
-    -- 字符串数字 errcode 也能识别
-    local d5, e5 = checkWereadErr({ errcode = "12" })
-    Assert.is_nil(d5)
-    Assert.eq(e5, "微信读书错误 12")
 end
 
 ------------------------------------------------------------------------
@@ -396,7 +332,7 @@ do
     Assert.eq(err, "请先扫码登录微信读书")
 
     -- 已登录：URL 拼接 + JSON 成功
-    auth = freshAuth({ wr_skey = "s", wr_vid = "1" })
+    auth = freshAuth(loggedIn())
     local got_url
     state.json_map = { ['{"errcode":0,"ok":1}'] = { errcode = 0, ok = 1 } }
     state.request_impl = function(opts, cb)
@@ -455,7 +391,7 @@ end
 ------------------------------------------------------------------------
 
 do
-    local auth = freshAuth({ wr_skey = "s" })
+    local auth = freshAuth(loggedIn())
     local got_opts
     state.json_map = { ['{"errcode":0}'] = { errcode = 0 } }
     state.request_impl = function(opts, cb)
@@ -475,33 +411,27 @@ do
 end
 
 ------------------------------------------------------------------------
--- 会话失效自动 renewal + 重试
+-- 会话失效自动续期（Eink refreshToken）+ 重试一次，重试用新 Cookie
 ------------------------------------------------------------------------
 
 do
-    local auth = freshAuth({ wr_skey = "old", wr_vid = "1" })
-    local calls = {}
+    local refreshed = 0
+    local auth = freshAuth(loggedIn({ wr_skey = "old" }), {
+        hasSession = function() return true end,
+        refreshAsync = function(cb)
+            refreshed = refreshed + 1
+            state.cfg.wr_skey = "newkey"
+            cb(true)
+        end,
+    })
+    local cookies = {}
     state.json_map = {
         ['{"errcode":-2012,"errmsg":"登录态失效"}'] = { errcode = -2012, errmsg = "登录态失效" },
-        ['{"succ":1}'] = { succ = 1 },
-        ['{"apikey":"wrk-renewed"}'] = { apikey = "wrk-renewed" },
         ['{"errcode":0,"ok":1}'] = { errcode = 0, ok = 1 },
     }
     state.request_impl = function(opts, cb)
-        calls[#calls + 1] = opts.url
-        if opts.url:find("/web/login/renewal", 1, true) then
-            cb({
-                code = 200,
-                body = '{"succ":1}',
-                headers = { ["set-cookie"] = "wr_skey=newkey; Path=/" },
-            })
-            return { cancel = function() end }
-        end
-        if opts.url:find("/api/skills/apikeyGet", 1, true) then
-            cb({ code = 200, body = '{"apikey":"wrk-renewed"}' })
-            return { cancel = function() end }
-        end
-        if #calls == 1 then
+        cookies[#cookies + 1] = opts.headers["Cookie"]
+        if #cookies == 1 then
             cb({ code = 200, body = '{"errcode":-2012,"errmsg":"登录态失效"}' })
         else
             cb({ code = 200, body = '{"errcode":0,"ok":1}' })
@@ -514,72 +444,17 @@ do
     end)
     Assert.is_nil(err)
     Assert.eq(data.ok, 1)
-    Assert.eq(#calls, 4)
-    Assert.is_true(calls[2]:find("/web/login/renewal", 1, true) ~= nil)
-    Assert.is_true(calls[3]:find("/api/skills/apikeyGet", 1, true) ~= nil)
-    Assert.eq(require("utils.settings").getSource("wechat").wr_skey, "newkey")
-    Assert.eq(require("utils.settings").getSource("wechat").api_key, "wrk-renewed")
-end
-
-------------------------------------------------------------------------
--- agentGatewayAsync：Skills API Key 门禁 / 网关请求体
-------------------------------------------------------------------------
-
-do
-    local auth = freshAuth({})
-    local data, err
-    auth.agentGatewayAsync("/readdata/detail", { mode = "monthly" }, function(d, e)
-        data, err = d, e
-    end)
-    Assert.is_nil(data)
-    Assert.is_true((err or ""):find("请先扫码登录", 1, true) ~= nil)
-
-    auth = freshAuth({ wr_skey = "s", wr_vid = "1" })
-    state.json_map['{"apikey":"wrk-auto"}'] = { apikey = "wrk-auto" }
-    state.json_map['{"errcode":0,"totalReadTime":3600}'] = { errcode = 0, totalReadTime = 3600 }
-    local calls = 0
-    state.request_impl = function(opts, cb)
-        calls = calls + 1
-        if opts.url:find("/api/skills/apikeyGet", 1, true) then
-            cb({ code = 200, body = '{"apikey":"wrk-auto"}' })
-        else
-            cb({ code = 200, body = '{"errcode":0,"totalReadTime":3600}' })
-        end
-        return { cancel = function() end }
-    end
-    data, err = nil, nil
-    auth.agentGatewayAsync("/readdata/detail", { mode = "monthly" }, function(d, e)
-        data, err = d, e
-    end)
-    Assert.is_nil(err)
-    Assert.eq(calls, 2)
-    Assert.eq(require("utils.settings").getSource("wechat").api_key, "wrk-auto")
-    Assert.eq(data.totalReadTime, 3600)
-
-    auth = freshAuth({ api_key = "wrk-test", skill_version = "1.0.4" })
-    local got
-    state.json_map["{\"errcode\":0,\"totalReadTime\":3600}"] = { errcode = 0, totalReadTime = 3600 }
-    state.request_impl = function(opts, cb)
-        got = opts
-        cb({ code = 200, body = '{"errcode":0,"totalReadTime":3600}' })
-        return { cancel = function() end }
-    end
-    data, err = nil, nil
-    auth.agentGatewayAsync("/readdata/detail", { mode = "monthly" }, function(d, e)
-        data, err = d, e
-    end)
-    Assert.is_nil(err)
-    Assert.eq(got.url, "https://i.weread.qq.com/api/agent/gateway")
-    Assert.eq(got.headers["Authorization"], "Bearer wrk-test")
-    Assert.not_nil(got.body)
-    Assert.eq(data.totalReadTime, 3600)
+    Assert.eq(refreshed, 1)
+    Assert.eq(#cookies, 2)
+    Assert.is_true(cookies[1]:find("wr_skey=old", 1, true) ~= nil)
+    Assert.is_true(cookies[2]:find("wr_skey=newkey", 1, true) ~= nil)
 end
 
 ------------------------------------------------------------------------
 -- 清理：恢复本文件改动的 preload / loaded，避免污染同进程后续用例
 ------------------------------------------------------------------------
 
-for _, name in ipairs({ "utils.settings", "http.request", "json", "source.wechat.auth" }) do
+for _, name in ipairs({ "utils.settings", "http.request", "json", "source.wechat.auth", "source.wechat.eink" }) do
     package.preload[name] = nil
     package.loaded[name] = nil
 end
