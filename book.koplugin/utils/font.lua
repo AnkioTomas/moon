@@ -7,7 +7,7 @@
 
 字源：
   id == ""                         恢复首次备份的 fontmap（配置空值；选择器不提供此项）
-  .moon/fonts/<id>.woff            微信读书已下载
+  .moon/fonts/<id>.ttf             微信读书已下载（旧版 <id>.woff 解析时就地转换）
   $DATA/fonts/<basename>           KOReader 设置目录字库
   FontList 其余路径                 系统字库（basename == id）
 
@@ -31,6 +31,7 @@ local Paths = require("utils.paths")
 local MoonSettings = require("utils.settings")
 local Job = require("workers.job")
 local Text = require("utils.text")
+local Woff = require("utils.woff")
 local _ = require("gettext")
 
 local MoonFont = {}
@@ -82,13 +83,52 @@ local function sanitizeId(id)
     return (Text.stripWhitespace(id):gsub("[^%w%._%-]", "_"))
 end
 
---- 微信读书字体在 .moon/fonts 下的落盘路径。
+--- 微信读书字体在 .moon/fonts 下的落盘路径（sfnt）。
 ---@param id string 字体 id（内部会 sanitize）
 ---@return string|nil nil 表示 id 规范化后为空
 local function wereadPath(id)
     id = sanitizeId(id)
     if id == "" then return nil end
-    return Paths.fontsDir() .. "/" .. id .. ".woff"
+    return Paths.fontsDir() .. "/" .. id .. ".ttf"
+end
+
+--- 旧版直接落盘的 WOFF 路径。
+---@param path string wereadPath 结果
+---@return string
+local function legacyWoffPath(path)
+    return (path:gsub("%.ttf$", ".woff"))
+end
+
+---@param path string|nil
+---@return boolean
+local function isFile(path)
+    return path ~= nil and lfs.attributes(path, "mode") == "file"
+end
+
+--- WOFF 落成 path 处的 sfnt；WOFF2 或损坏时原样改名（FreeType 按内容识别），不再重复尝试。
+---@param woff string
+---@param path string
+---@return boolean
+local function finalizeWoff(woff, path)
+    local ok, err = Woff.toSfnt(woff, path)
+    if ok then
+        os.remove(woff)
+        return true
+    end
+    logger.warn("book.font woff convert failed", woff, err)
+    return os.rename(woff, path) == true
+end
+
+--- 已装的微信读书字体路径；旧版 .woff 在这里就地迁移。
+---@param id string
+---@return string|nil
+local function installedWereadPath(id)
+    local path = wereadPath(id)
+    if not path then return nil end
+    if isFile(path) then return path end
+    local woff = legacyWoffPath(path)
+    if not isFile(woff) then return nil end
+    return finalizeWoff(woff, path) and path or woff
 end
 
 --- 微信读书字体列表的磁盘备份路径（http.Cache 失效时的冷启动来源）。
@@ -121,7 +161,7 @@ function MoonFont.currentName()
 end
 
 --- 字体是否已可用。
---- local / system 字源本来就在盘上，恒为 true；只有微信读书字体需要检查 .woff 是否落盘。
+--- local / system 字源本来就在盘上，恒为 true；只有微信读书字体需要检查是否落盘（含旧版 .woff）。
 ---@param id_or_item string|MoonFontItem 字体 id 或列表项
 ---@return boolean
 function MoonFont.isInstalled(id_or_item)
@@ -138,7 +178,7 @@ function MoonFont.isInstalled(id_or_item)
     end
     if type(id) ~= "string" then return false end
     local path = wereadPath(id)
-    if path and lfs.attributes(path, "mode") == "file" then return true end
+    if path and (isFile(path) or isFile(legacyWoffPath(path))) then return true end
     return findInstalledFont(id) ~= nil
 end
 
@@ -476,10 +516,10 @@ local function resolvePath(id)
     if id == "" then
         return ""
     end
-    local woff = wereadPath(id)
-    if woff and lfs.attributes(woff, "mode") == "file" then
-        registerFontPath(woff)
-        return woff
+    local weread = installedWereadPath(id)
+    if weread then
+        registerFontPath(weread)
+        return weread
     end
     local path = findInstalledFont(id)
     if path then
@@ -661,7 +701,7 @@ function MoonFont.applyCurrent()
     return apply(id)
 end
 
---- 从下载的 zip 里抽出第一个 .woff/.woff2 落到 dest。
+--- 从下载的 zip 里抽出第一个 .woff/.woff2，转成 sfnt 落到 dest。
 --- 无论成功失败都删掉 zip_path；失败时连 dest 一起删，不留半截字体文件。
 --- 在 Job 子进程里执行（会阻塞地解压）。
 ---@param zip_path string
@@ -685,12 +725,15 @@ local function extractInstalledFont(zip_path, dest)
         os.remove(zip_path)
         return nil, _("压缩包内无字体文件")
     end
+    local woff = legacyWoffPath(dest)
     os.remove(dest)
-    local extracted = arc:extractToPath(entry_path, dest)
+    os.remove(woff)
+    local extracted = arc:extractToPath(entry_path, woff)
     local extract_err = arc.err
     arc:close()
     os.remove(zip_path)
-    if not extracted or lfs.attributes(dest, "mode") ~= "file" then
+    if not extracted or not isFile(woff) or not finalizeWoff(woff, dest) then
+        os.remove(woff)
         os.remove(dest)
         return nil, extract_err or _("字体解压失败")
     end
@@ -713,7 +756,7 @@ local function installPaths(item)
     local id = sanitizeId(item.id)
     Paths.ensureFonts()
     local dest = wereadPath(id)
-    if dest and lfs.attributes(dest, "mode") == "file" then
+    if dest and (isFile(dest) or isFile(legacyWoffPath(dest))) then
         return dest, nil, nil
     end
     return dest, Paths.fontsDir() .. "/" .. id .. ".zip", nil
