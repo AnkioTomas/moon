@@ -1,7 +1,7 @@
 --[[-- library_filter：底栏面板、分组标题与清除动作。 --]]
 
 local Assert = require("support.assert")
-local shown
+local shown, shown_refresh
 package.preload["ui/widget/container/inputcontainer"] = function()
     return { new = function(_, opts) opts = opts or {}; return opts end }
 end
@@ -44,6 +44,14 @@ package.preload["ui.components.pagecontainer"] = function()
         wrap = function(opts) return opts.child end,
     }
 end
+package.preload["ui/widget/container/centercontainer"] = function()
+    return { new = function(_, opts) return opts end }
+end
+package.preload["ui.components.pager"] = function()
+    return { widget = function(page, pages, handlers)
+        return { page = page, pages = pages, handlers = handlers, getSize = function() return { w = 200, h = 30 } end }
+    end }
+end
 package.preload["ui.components.bookui"] = function() return {
     sz = function(v) return v end, face = function() return {} end,
     muted = function() return 90 end, surface = function() return 220 end,
@@ -71,7 +79,7 @@ end
 package.preload["ffi/blitbuffer"] = function() return { COLOR_WHITE=255, COLOR_BLACK=0 } end
 package.preload["ui/uimanager"] = function()
     return {
-        show = function(_, w) shown = w end,
+        show = function(_, w, refresh) shown, shown_refresh = w, refresh end,
         close = function() end,
     }
 end
@@ -116,20 +124,34 @@ Assert.eq(body[1][2][1][1].text, "全部清除")
 Assert.eq(body[5][1].text, "数据源")
 Assert.eq(body[7][1].text, "分类")
 Assert.eq(body[9][1].text, "系列")
-Assert.eq(body[11][1].text, "阅读状态")
-Assert.eq(body[13][1].text, "本地")
-Assert.eq(body[15][1].text, "排序")
+-- 第一页末尾是分页条，阅读状态/本地/排序在第二页
+local pager = body[11][1]
+Assert.eq(pager.page, 1)
+Assert.eq(pager.pages, 2)
+Assert.len(body, 11)
+pager.handlers.on_next()
+body = shown[1][2][1][2][1]
+Assert.eq(body[5][1].text, "阅读状态")
+Assert.eq(body[7][1].text, "本地")
+Assert.eq(body[9][1].text, "排序")
+Assert.eq(body[11][1].page, 2)
+-- 翻页后面板变矮，必须整屏刷新，否则旧页残影留在屏上
+Assert.eq(shown_refresh, "ui")
 -- 已下载：单个开关，点一次选中、再点取消
-local downloaded_pill = body[13][3][1][1]
+local downloaded_pill = body[7][3][1][1]
 Assert.eq(downloaded_pill[1].text, "已下载（2）")
 downloaded_pill.callback()
 Assert.is_true(applied.downloaded)
 body = shown[1][2][1][2][1]
-body[13][3][1][1].callback()
+Assert.eq(body[11][1].page, 2)
+body[7][3][1][1].callback()
 Assert.is_nil(applied.downloaded)
 body[1][2][1].callback()
 Assert.not_nil(applied)
 Assert.eq(applied_sort, "recent_added")
+body = shown[1][2][1][2][1]
+body[11][1].handlers.on_prev()
+Assert.eq(shown[1][2][1][2][1][5][1].text, "数据源")
 
 -- 无 source_counts：不出现数据源组
 shown = nil

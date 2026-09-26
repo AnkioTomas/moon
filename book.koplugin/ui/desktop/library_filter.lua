@@ -1,9 +1,10 @@
 --[[--
-Kindle 风格图书馆筛选：底栏全宽面板、网状遮罩、同屏分组、组内左右翻页。
+Kindle 风格图书馆筛选：底栏全宽面板、网状遮罩、分组分两页（底部 Pager）、组内左右翻页。
 @module koplugin.book.ui.desktop.library_filter
 --]]
 local Blitbuffer = require("ffi/blitbuffer")
 local BottomContainer = require("ui/widget/container/bottomcontainer")
+local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local GestureRange = require("ui/gesturerange")
@@ -22,6 +23,7 @@ local UIManager = require("ui/uimanager")
 local BookInfo = require("ui.components.bookinfo")
 local MeshMask = require("ui.components.meshmask")
 local PageContainer = require("ui.components.pagecontainer")
+local Pager = require("ui.components.pager")
 local Surface = require("ui.components.surface")
 local UI = require("ui.components.bookui")
 local _ = require("gettext")
@@ -146,7 +148,8 @@ function Filter.open(opts)
             if item.value == row.status then item.count = tonumber(row.count) or 0 end
         end
     end
-    local groups = {}
+    local groups, extra = {}, {}
+    local sheets, sheet = { groups, extra }, 1
     -- 混合模式才有 source_counts；单源不显示源组。
     if data.source_counts and #data.source_counts > 0 then
         local src = {}
@@ -166,11 +169,11 @@ function Filter.open(opts)
     end
     groups[#groups + 1] = { kind = "category", title = _("分类"), values = values(data.category_counts, "category", _("未分类")) }
     groups[#groups + 1] = { kind = "series", title = _("系列"), values = values(data.series_counts, "series", _("无系列")) }
-    groups[#groups + 1] = { kind = "read_status", title = _("阅读状态"), values = status }
-    groups[#groups + 1] = { kind = "downloaded", title = _("本地"), values = {
+    extra[#extra + 1] = { kind = "read_status", title = _("阅读状态"), values = status }
+    extra[#extra + 1] = { kind = "downloaded", title = _("本地"), values = {
         { value = true, text = _("已下载"), count = data.downloaded_count or 0 },
     } }
-    groups[#groups + 1] = { kind = "sort", title = _("排序"), values = {
+    extra[#extra + 1] = { kind = "sort", title = _("排序"), values = {
         { value = "recent_added", text = _("最近添加") },
         { value = "recent_read", text = _("最近阅读") },
         { value = "title", text = _("书名") },
@@ -182,8 +185,9 @@ function Filter.open(opts)
         filter.sort = nil
         opts.on_apply(filter, sort)
     end
-    local function close()
-        if dialog then UIManager:close(dialog); dialog = nil end
+    ---@param refresh string|nil 真关闭传 "ui"；重渲染由随后的 show 统一刷新
+    local function close(refresh)
+        if dialog then UIManager:close(dialog, refresh); dialog = nil end
     end
     local function render()
         close()
@@ -217,13 +221,25 @@ function Filter.open(opts)
             LineWidget:new{ dimen = Geom:new{ w = inner, h = UI.line() }, background = UI.rule() },
             VerticalSpan:new{ width = UI.sz(12) },
         }
-        for i, group in ipairs(groups) do
+        for i, group in ipairs(sheets[sheet]) do
             if i > 1 then body[#body + 1] = VerticalSpan:new{ width = UI.sz(12) } end
             body[#body + 1] = groupWidget(group, inner, draft, page[group.kind], function(v)
                 page[group.kind] = v
                 render()
             end, function() apply(); render() end)
         end
+        local function goSheet(v) sheet = v; render() end
+        local pager = Pager.widget(sheet, #sheets, {
+            on_first = function() goSheet(1) end,
+            on_prev = function() goSheet(sheet - 1) end,
+            on_next = function() goSheet(sheet + 1) end,
+            on_last = function() goSheet(#sheets) end,
+        }, inner)
+        body[#body + 1] = VerticalSpan:new{ width = UI.sz(12) }
+        body[#body + 1] = CenterContainer:new{
+            dimen = Geom:new{ w = inner, h = pager:getSize().h },
+            pager,
+        }
         local panel = VerticalGroup:new{
             LineWidget:new{ dimen = Geom:new{ w = width, h = edge }, background = Blitbuffer.COLOR_BLACK },
             FrameContainer:new{
@@ -253,14 +269,15 @@ function Filter.open(opts)
         local panel_h = panel:getSize().h
         dialog.onTapFilterClose = function(_, _arg, ges)
             if ges and ges.pos and ges.pos.y >= screen.h - panel_h then return true end
-            close()
+            close("ui")
             return true
         end
         if Device:hasKeys() then
             dialog.key_events = { Close = { { Device.input.group.Back } } }
-            dialog.onClose = function() close(); return true end
+            dialog.onClose = function() close("ui"); return true end
         end
-        UIManager:show(dialog)
+        -- 不带刷新类型的 show 只重绘不上屏；全屏刷新才能盖掉面板变矮后留下的旧区域。
+        UIManager:show(dialog, "ui")
     end
     render()
     return dialog
