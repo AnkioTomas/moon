@@ -131,11 +131,16 @@ package.preload["ui.components.icon"] = function()
                     end,
                 },
             }
+            -- 与 KOReader HorizontalGroup 一致：尺寸缓存到 resetLayout。
             return {
                 icon = icon,
                 label = label,
-                getSize = function()
-                    return { w = #tostring(label.text or "") * 8 + 20, h = 14 }
+                getSize = function(self)
+                    self._size = self._size or { w = #tostring(label.text or "") * 8 + 20, h = 14 }
+                    return self._size
+                end,
+                resetLayout = function(self)
+                    self._size = nil
                 end,
             }
         end,
@@ -421,6 +426,14 @@ powerd.capacity = 20
 powerd.charging = false
 bar:onEvent("NotCharging")
 Assert.eq(bar.battery.metric_widget.label.text, "20%")
+
+-- 文案变宽必须整条重排：只脏旧矩形会让溢出部分不上屏。
+powerd.capacity = 100
+bar:onEvent("Charging")
+Assert.eq(bar.battery.metric_widget.label.text, "100%")
+Assert.eq(bar.battery.rect.w, #"100%" * 8 + 20)
+powerd.capacity = 20
+bar:onEvent("NotCharging")
 
 powerd.light = 12
 bar:onEvent("FrontlightStateChanged")

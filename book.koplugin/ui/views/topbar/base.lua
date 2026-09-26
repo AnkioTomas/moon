@@ -112,6 +112,8 @@ function Base:updateMetric(icon_name, text)
     elseif self.metric_widget.setText then
         self.metric_widget:setText(text)
     end
+    -- Icon.label 是 HorizontalGroup，不 reset 会返回缓存的旧宽度。
+    if self.metric_widget.resetLayout then self.metric_widget:resetLayout() end
     local size = self.metric_widget.getSize and self.metric_widget:getSize()
     if size and self.rect and size.w ~= self.rect.w and self.topbar then
         self.topbar:updateView()
