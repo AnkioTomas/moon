@@ -137,11 +137,17 @@ function Source:loadTocAsync(identity, cb)
     end)
 end
 
+--- 目录版本 → download/chapter 查询参数（见 Mapper.chapters）；版本 1 是旧 cread 目录。
+local DOWNLOAD_QUERY = {
+    [2] = function(uid) return { indexes = uid } end,
+    [3] = function(uid) return { type = 1, ids = uid } end,
+}
+
 ---@param identity BookIdentity
----@return boolean
-local function useDownload(identity)
+---@return (fun(uid: string): table)|nil
+local function downloadQuery(identity)
     local toc = Toc.read(identity.source_id, identity.stable_id)
-    return toc ~= nil and toc[1] ~= nil and toc[1].toc_version == 2
+    return toc ~= nil and toc[1] ~= nil and DOWNLOAD_QUERY[toc[1].toc_version] or nil
 end
 
 ---@param url string
@@ -192,8 +198,9 @@ local function fetchContent(self, identity, chapter, cb)
         )
     end
     local fetch_job
-    if useDownload(identity) then
-        fetch_job = self._client:downloadChapterAsync(identity.stable_id, chapter.uid, done)
+    local query = downloadQuery(identity)
+    if query then
+        fetch_job = self._client:downloadChapterAsync(identity.stable_id, query(chapter.uid), done)
     else
         fetch_job = self._client:chapterContentAsync(identity.stable_id, chapter.uid, done)
     end

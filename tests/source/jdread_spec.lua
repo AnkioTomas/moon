@@ -292,3 +292,38 @@ do
     Assert.eq(total, 2)
     Assert.eq(failed, 0)
 end
+
+-- 目录版本 3（txt 网文）正文按网页阅读器协议 { type = 1, ids = chapter_id } 下载
+do
+    local Toc = require("source.toc")
+    local orig_read = Toc.read
+    Toc.read = function()
+        return { { idx = 1, uid = "15001647875062768", title = "第一章", toc_version = 3 } }
+    end
+    local asked
+    fake_client.downloadChapterAsync = function(_, book_id, query, cb)
+        asked = { book_id = book_id, query = query }
+        cb({ data = { content_type = "net", chapter = {{ content = "　　正文一\r\n正文二" }} } })
+        return { cancel = function() end }
+    end
+    fake_client.chapterContentAsync = function()
+        error("txt 网文不应走 cread")
+    end
+    local html
+    require("source.chapter").prefetchAsync = function(identity, _, toc, _, _, opts, cb)
+        opts.fetchContent(identity, toc[1], function(payload) html = payload.html; cb() end)
+        return { cancel = function() end }
+    end
+    local src = Jdread.new()
+    src:prefetchChaptersAsync(
+        { source_id = "jdread", stable_id = "34028897", book = { stable_id = "34028897" } },
+        { { idx = 1, uid = "15001647875062768", title = "第一章" } },
+        1, 1, function() end
+    )
+    Assert.eq(asked.book_id, "34028897")
+    Assert.eq(asked.query.type, 1)
+    Assert.eq(asked.query.ids, "15001647875062768")
+    Assert.is_nil(asked.query.indexes)
+    Assert.eq(html, "<p>正文一</p>\n<p>正文二</p>")
+    Toc.read = orig_read
+end

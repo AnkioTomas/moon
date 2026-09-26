@@ -102,6 +102,55 @@ do
     }, "锁章"))
 end
 
+-- txt 网文 v2 目录：卷标题（type 0，无 chapter_id）不成章，uid = chapter_id
+do
+    local toc = Mapper.chapters({
+        data = {
+            format = "txt",
+            chapter_info = {
+                { chapter_name = "庆安才子", type = 0, volume_id = "v1", is_try = true },
+                { chapter_id = "15001647875062768", chapter_name = "第一章 俊俏少年", type = 1 },
+                { chapter_id = "15017997720337259", chapter_name = "", type = 1 },
+                { chapter_name = "第二卷", type = 0, volume_id = "v2" },
+                { chapter_id = "15039236894456722", chapter_name = "第三章 压寨相公！", type = 1 },
+            },
+        },
+    })
+    Assert.len(toc, 3)
+    Assert.eq(toc[1].toc_version, 3)
+    Assert.eq(toc[1].uid, "15001647875062768")
+    Assert.eq(toc[1].title, "第一章 俊俏少年")
+    Assert.eq(toc[2].title, "第2章")
+    Assert.eq(toc[3].idx, 3)
+    Assert.eq(toc[3].uid, "15039236894456722")
+end
+
+do
+    Assert.is_nil(Mapper.chapters({
+        data = { format = "txt", chapter_info = {{ chapter_name = "卷", type = 0, volume_id = "v" }} },
+    }))
+end
+
+-- txt 网文正文 content_type=net：\r\n 纯文本分段、转义；
+-- 京东原文首段无缩进、后续段带全角缩进，统一剥掉交给模板 text-indent
+do
+    local payload = Mapper.content({
+        data = {
+            ebook_id = 34265072,
+            content_type = "net",
+            chapter = {{
+                chapter_index = -1,
+                chapter_id = "503000000013072393",
+                content = "辽人入京<关我>鸟事。\r\n\r\n　　旁边一个中年胖子眼睛一亮。\r\n　 石小凡有些挠头。",
+                can_read = true,
+            }},
+        },
+    }, "第一章 楔子")
+    Assert.eq(payload.title, "第一章 楔子")
+    Assert.eq(payload.html,
+        "<p>辽人入京&lt;关我&gt;鸟事。</p>\n<p>旁边一个中年胖子眼睛一亮。</p>\n<p>石小凡有些挠头。</p>")
+end
+
 do
     local payload = Mapper.content({
         data = {

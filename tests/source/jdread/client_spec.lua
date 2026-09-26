@@ -25,10 +25,15 @@ package.preload["http.request"] = function()
                     .. '"total_count":1},"result_code":0}')
             elseif url:find("/recommend", 1, true) then
                 cb('{"data":[{"ebook_id":4,"name":"推荐书"}],"result_code":0}')
-            elseif url:find("/jdread/api/ebook/catalog/30394360", 1, true) then
-                cb('{"data":{"format":"epub","chapter_info":[{"chapter_index":0,"chapter_name":"封面"}]},"result_code":0}')
+            elseif url:find("/jdread/api/ebook/catalog/v2/30394360", 1, true) then
+                cb('{"data":{"format":"epub","has_more":false,'
+                    .. '"chapter_info":[{"chapter_index":0,"chapter_name":"封面"}]},"result_code":0}')
+            elseif url:find("/jdread/api/ebook/catalog/v2/30451107", 1, true) then
+                cb('{"data":{"format":"txt","has_more":false,"chapter_info":[]},"result_code":0}')
             elseif url:find("/jdread/api/download/chapter/30394360", 1, true) then
                 cb('{"result_code":1,"message":"UNKNOWN_ERROR"}')
+            elseif url:find("/jdread/api/download/chapter/34028897", 1, true) then
+                cb('{"result_code":101,"message":"can not download"}')
             else
                 cb('{"code":"-1","msg":"stop"}')
             end
@@ -147,7 +152,9 @@ do
     local _, err
     local first = #requests + 1
     client:chapterInfosAsync("30451107", function(value, e) _, err = value, e end)
-    Assert.matches(requests[first].url, "^https://e%.m%.jd%.com/jdread/api/ebook/catalog/30451107%?")
+    Assert.matches(requests[first].url, "^https://e%.m%.jd%.com/jdread/api/ebook/catalog/v2/30451107%?")
+    Assert.matches(requests[first].url, "[?&]index=0")
+    Assert.matches(requests[first].url, "[?&]page_size=2000")
     local req = requests[first + 1]
     Assert.matches(req.url, "^https://cread%.jd%.com/read/lC%.action%?")
     Assert.matches(req.url, "[?&]readType=3")
@@ -176,6 +183,46 @@ do
     Assert.matches(req.url, "[?&]indexes=0")
     Assert.matches(req.url, "[?&]params=")
     Assert.eq(err, "UNKNOWN_ERROR")
+end
+
+-- txt 网文：网页阅读器协议 type + ids；101 = 未购买且非试读，给出权限文案而非英文原文
+do
+    local wire, err
+    local first = #requests + 1
+    client:downloadChapterAsync("34028897", { type = 1, ids = "15001647875062768" }, function(value, e)
+        wire, err = value, e
+    end)
+    local req = requests[first]
+    Assert.matches(req.url, "^https://e%.m%.jd%.com/jdread/api/download/chapter/34028897%?")
+    Assert.matches(req.url, "[?&]type=1")
+    Assert.matches(req.url, "[?&]ids=15001647875062768")
+    Assert.is_nil(req.url:find("indexes=", 1, true))
+    Assert.is_nil(wire)
+    Assert.eq(err, "京东读书无可用阅读权限")
+end
+
+-- v2 目录按行偏移分页，直到 has_more=false，合并成一份 chapter_info
+do
+    local paged = Client:new{ cookie = "thor=test", uuid = "h5-test" }
+    local calls = {}
+    function paged:apiGetAsync(path, params, cb)
+        calls[#calls + 1] = { path = path, index = params.index, size = params.page_size }
+        local rows = {}
+        local count = params.index == 0 and 2 or 1
+        for i = 1, count do rows[i] = { chapter_id = tostring(params.index + i), type = 1 } end
+        cb({ data = { format = "txt", has_more = params.index == 0, chapter_info = rows }, result_code = 0 })
+        return { cancel = function() end }
+    end
+    local wire
+    paged:catalogAsync("34028897", function(value) wire = value end)
+    Assert.len(calls, 2)
+    Assert.eq(calls[1].path, "/jdread/api/ebook/catalog/v2/34028897")
+    Assert.eq(calls[1].index, 0)
+    Assert.eq(calls[2].index, 2)
+    Assert.eq(calls[1].size, 2000)
+    Assert.len(wire.data.chapter_info, 3)
+    Assert.eq(wire.data.chapter_info[3].chapter_id, "3")
+    Assert.eq(wire.data.format, "txt")
 end
 
 do

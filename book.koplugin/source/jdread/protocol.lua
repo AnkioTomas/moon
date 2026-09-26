@@ -201,10 +201,20 @@ function Protocol.encryptQuery(query, tm)
     return (Text.base64Encode(raw):gsub("+", "-"):gsub("/", "_"))
 end
 
---- 解开 /jdread/api/download/chapter 的 AES 正文。
+---@param envelope table
+---@return table|nil, string|nil, integer|nil
+local function checkDownload(envelope)
+    local code = tonumber(envelope.result_code)
+    if code ~= 0 then
+        return nil, envelope.message or ("JD error " .. tostring(envelope.result_code)), code
+    end
+    return envelope
+end
+
+--- 解开 /jdread/api/download/chapter 的 AES 正文。明文和密文都可能是错误信封。
 ---@param raw string
 ---@param tm integer
----@return table|nil, string|nil
+---@return table|nil, string|nil, integer|nil result_code
 function Protocol.decodeDownload(raw, tm)
     if type(raw) ~= "string" or raw == "" then
         return nil, "empty JD download"
@@ -212,10 +222,7 @@ function Protocol.decodeDownload(raw, tm)
     if raw:sub(1, 1) == "{" then
         local ok, envelope = pcall(JSON.decode, raw)
         if ok and type(envelope) == "table" then
-            if tonumber(envelope.result_code) ~= 0 then
-                return nil, envelope.message or ("JD error " .. tostring(envelope.result_code))
-            end
-            return envelope
+            return checkDownload(envelope)
         end
     end
     local ok, text = pcall(Aes.ecb_decrypt, Text.base64Decode(raw), md5bin(tostring(tm) .. APP))
@@ -226,7 +233,7 @@ function Protocol.decodeDownload(raw, tm)
     if not decoded_ok or type(decoded) ~= "table" then
         return nil, "invalid JD download payload"
     end
-    return decoded
+    return checkDownload(decoded)
 end
 
 --- 解开 cread 外层响应及 PC1 content。

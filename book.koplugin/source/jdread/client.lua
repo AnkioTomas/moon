@@ -28,6 +28,9 @@ Client.__index = Client
 
 local API = "https://e.m.jd.com"
 local READER = "https://cread.jd.com"
+local CATALOG_PAGE_SIZE = 2000
+-- download/chapter 对未购买且非试读章节返回 {"result_code":101,"message":"can not download"}。
+local DOWNLOAD_DENIED = 101
 
 ---@param raw string|nil
 ---@return table|nil, string|nil
@@ -298,35 +301,61 @@ function Client:readerAutoAsync(endpoint, book_id, key, extra, cb)
         end }
 end
 
---- 拉取新阅读器目录。EPUB / 会员书走这条，不经过 cread。
+--- 拉取新阅读器完整目录（与网页阅读器同一 v2 接口，index 为行偏移分页）。
+--- EPUB / 会员书 / txt 网文都走这条，不经过 cread。
 ---@param book_id string|number
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client:catalogAsync(book_id, cb)
-    return self:apiGetAsync("/jdread/api/ebook/catalog/" .. tostring(book_id), nil, cb)
+    local path = "/jdread/api/ebook/catalog/v2/" .. tostring(book_id)
+    local cancelled, active = false, nil
+    local rows = {}
+
+    local function nextPage()
+        active = self:apiGetAsync(path, { page_size = CATALOG_PAGE_SIZE, index = #rows }, function(wire, err)
+            if cancelled then return end
+            if not wire then cb(nil, err); return end
+            local data = type(wire.data) == "table" and wire.data or {}
+            local page = type(data.chapter_info) == "table" and data.chapter_info or {}
+            for _, row in ipairs(page) do rows[#rows + 1] = row end
+            if data.has_more and #page > 0 then
+                nextPage()
+                return
+            end
+            data.chapter_info = rows
+            wire.data = data
+            cb(wire)
+        end)
+    end
+    nextPage()
+    return { cancel = function()
+            cancelled = true
+            if active and active.cancel then active.cancel() end
+        end }
 end
 
---- 拉取新阅读器章节正文。indexes 是 0-based。
+--- 拉取新阅读器章节正文。EPUB 传 { indexes = 0-based 序号 }，txt 网文传 { type = 1, ids = chapter_id }。
 ---@param book_id string|number
----@param index string|number
+---@param query table
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
-function Client:downloadChapterAsync(book_id, index, cb)
+function Client:downloadChapterAsync(book_id, query, cb)
     local path = "/jdread/api/download/chapter/" .. tostring(book_id)
     local tm = Protocol.evenTime()
     local signed = Protocol.signedParams(path, self.uuid, nil, tm)
-    local url = API .. path .. "?" .. Text.formEncode({
+    local params = {
         enc = 1,
         app = "jdread-m",
         tm = tm,
         params = Protocol.encryptQuery(Text.formEncode(signed), tm),
-        indexes = index,
-    })
-    return Request.get(url, {
+    }
+    for key, value in pairs(query) do params[key] = value end
+    return Request.get(API .. path .. "?" .. Text.formEncode(params), {
         headers = self:headers(API .. "/reader/"),
     }, function(raw, err)
         if not raw then cb(nil, err); return end
-        local wire, decode_err = Protocol.decodeDownload(raw, tm)
+        local wire, decode_err, code = Protocol.decodeDownload(raw, tm)
+        if code == DOWNLOAD_DENIED then decode_err = _("京东读书无可用阅读权限") end
         cb(wire, decode_err)
     end)
 end
@@ -365,7 +394,7 @@ end
 function Client:chapterContentAsync(book_id, chapter_id, cb)
     book_id = tostring(book_id)
     if self._read_types[book_id] == "download" then
-        return self:downloadChapterAsync(book_id, chapter_id, cb)
+        return self:downloadChapterAsync(book_id, { indexes = chapter_id }, cb)
     end
     return self:readerAutoAsync(
         "/read/gC.action",

@@ -389,6 +389,28 @@ function Text.base64Decode(data)
     end))
 end
 
+--- 剥掉每行行首的排版缩进（ASCII 空白、全角空格 U+3000、不换行空格 U+00A0），并规范化换行。
+--- 章节模板已用 CSS text-indent 统一首行缩进，正文自带的缩进会叠加成双倍。
+---@param text string|nil
+---@return string
+function Text.stripLineIndent(text)
+    return (Text.normalizeNewlines(text):gsub("[^\n]+", function(line)
+        local i = 1
+        while true do
+            local b = line:byte(i)
+            if b == 32 or b == 9 then
+                i = i + 1
+            elseif line:sub(i, i + 2) == "\227\128\128" then
+                i = i + 3
+            elseif line:sub(i, i + 1) == "\194\160" then
+                i = i + 2
+            else
+                return line:sub(i)
+            end
+        end
+    end))
+end
+
 --- 纯文本按行包成 <p> 段落（规范化换行；行尾空白剥除；空行跳过；内容转义）。
 ---@param text string|nil
 ---@return string

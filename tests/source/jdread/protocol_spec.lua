@@ -70,23 +70,36 @@ do
     Assert.is_true(enc:find("[-_A-Za-z0-9]+") ~= nil)
     Assert.is_nil(enc:find("+", 1, true))
     Assert.is_nil(enc:find("/", 1, true))
-    local wire, err = Protocol.decodeDownload(
-        require("utils.text").base64Encode(
+    local function encrypted(json)
+        return require("utils.text").base64Encode(
             require("crypto.aes").ecb_encrypt(
-                '{"data":{"chapter":[{"content":"<p>一</p>"}]}}',
+                json,
                 (require("ffi/sha2").md5(tostring(tm) .. "jdread-m"):gsub("(%x%x)", function(pair)
                     return string.char(tonumber(pair, 16))
                 end))
             )
-        ),
+        )
+    end
+    local wire, err = Protocol.decodeDownload(
+        encrypted('{"data":{"chapter":[{"content":"<p>一</p>"}]},"result_code":0,"message":"SUCCESS"}'),
         tm
     )
     Assert.is_nil(err)
     Assert.eq(wire.data.chapter[1].content, "<p>一</p>")
+
+    -- 网页阅读器实测：未购买章节的错误信封同样被加密
+    local denied, denied_err, code = Protocol.decodeDownload(
+        encrypted('{"result_code":101,"message":"can not download"}'),
+        tm
+    )
+    Assert.is_nil(denied)
+    Assert.eq(denied_err, "can not download")
+    Assert.eq(code, 101)
 end
 
 do
-    local wire, err = Protocol.decodeDownload('{"result_code":1,"message":"UNKNOWN_ERROR"}', 1)
+    local wire, err, code = Protocol.decodeDownload('{"result_code":1,"message":"UNKNOWN_ERROR"}', 1)
     Assert.is_nil(wire)
     Assert.eq(err, "UNKNOWN_ERROR")
+    Assert.eq(code, 1)
 end

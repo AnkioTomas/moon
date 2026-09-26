@@ -153,6 +153,13 @@ do
     -- CRLF 规范化
     Assert.eq(Text.textToBody("a\r\nb"), "<p>a</p>\n<p>b</p>")
     Assert.eq(Text.textToBody(nil), "")
+
+    -- stripLineIndent：逐行剥 ASCII 空白 / 全角空格 / NBSP，行中与行尾不动，空行保留
+    Assert.eq(Text.stripLineIndent("　　甲　乙\r\n\t 丙 \n\194\160　丁\n\n"), "甲　乙\n丙 \n丁\n\n")
+    Assert.eq(Text.stripLineIndent("无缩进"), "无缩进")
+    Assert.eq(Text.stripLineIndent("　　"), "")
+    Assert.eq(Text.stripLineIndent(""), "")
+    Assert.eq(Text.stripLineIndent(nil), "")
 end
 
 -- base64 编解码：空串、单字节、双字节、三字节尾、多字节 UTF-8 与 URL-safe 解码
