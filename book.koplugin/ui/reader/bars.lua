@@ -180,6 +180,17 @@ function Bars.setBottomBarPreference(enabled, ui)
     end
 end
 
+--- DocSettingsLoad：首次渲染前把顶栏偏好写进 sidecar。
+--- 页眉高度变化会让 crengine 整本重排，拖到 ReaderReady 再切，新书就要排两遍。
+---@param doc_settings table
+---@param document table
+function Bars.injectStatusLine(doc_settings, document)
+    if not Device:isTouchDevice() or type(document.setStatusLineProp) ~= "function" then
+        return
+    end
+    doc_settings:saveSetting("copt_status_line", Bars.topBarPreference() and 0 or 1)
+end
+
 --- 按 Book 设置同步系统顶底栏。
 ---@param ui table|nil
 function Bars.applyPreferences(ui)
