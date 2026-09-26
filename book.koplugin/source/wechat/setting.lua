@@ -23,10 +23,11 @@ function Setting.rowStatus()
     return _("未登录 · 点此扫码"), false
 end
 
---- 展示微信读书扫码登录流程。
+--- 展示扫码登录流程（Eink 扫码；换到的 accessToken 同时是网页会话，再经网页接口补拉昵称）。
 ---@param plugin table|nil
 local function showQrLogin(plugin)
     local Auth = require("source.wechat.auth")
+    local Eink = require("source.wechat.eink")
     local NetworkMgr = require("ui/network/manager")
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
@@ -124,7 +125,7 @@ local function showQrLogin(plugin)
             end
             UIManager:show(dialog)
 
-            wait_job = Auth.waitQrLoginAsync(uid, function(info, err, status)
+            wait_job = Eink.waitQrLoginAsync(uid, function(info, err, status)
                 wait_job = nil
                 if cancelled then
                     return
@@ -137,24 +138,26 @@ local function showQrLogin(plugin)
                     return
                 end
                 closeDialog()
-                Auth.completeQrLoginAsync(info, function(user, e2)
+                Eink.completeQrLoginAsync(info, function(ok, e2)
                     if cancelled then
                         return
                     end
-                    if not user then
+                    if not ok then
                         UIManager:show(InfoMessage:new{ text = e2 or _("登录失败") })
                         return
                     end
-                    UIManager:show(InfoMessage:new{
-                        text = T(_("已登录：%1"), user.user_name ~= "" and user.user_name or user.user_id),
-                        timeout = 2,
-                    })
-                    require("source.registry").afterAuthChanged(plugin)
+                    Auth.fetchUserAsync(function(user)
+                        UIManager:show(InfoMessage:new{
+                            text = T(_("已登录：%1"), user.user_name ~= "" and user.user_name or user.user_id),
+                            timeout = 2,
+                        })
+                        require("source.registry").afterAuthChanged(plugin)
+                    end)
                 end)
             end)
         end
 
-        begin_job = Auth.beginQrLoginAsync(function(started, err)
+        begin_job = Eink.beginQrLoginAsync(function(started, err)
             begin_job = nil
             if cancelled then
                 return
@@ -167,26 +170,6 @@ local function showQrLogin(plugin)
             UIManager:show(InfoMessage:new{
                 text = err or _("无法开始登录"),
             })
-        end)
-    end)
-end
-
---- 刷新 Skills API Key（Web 会话自动获取）。
----@param plugin table|nil
-local function refreshAgentKey(plugin)
-    local Auth = require("source.wechat.auth")
-    local NetworkMgr = require("ui/network/manager")
-    local UIManager = require("ui/uimanager")
-    local InfoMessage = require("ui/widget/infomessage")
-    NetworkMgr:runWhenOnline(function()
-        Auth.fetchAgentKeyAsync(function(key, err)
-            UIManager:show(InfoMessage:new{
-                text = key and _("Skills 密钥已更新") or (err or _("获取失败")),
-                timeout = 2,
-            })
-            if key then
-                require("source.registry").afterAuthChanged(plugin)
-            end
         end)
     end)
 end
@@ -208,7 +191,6 @@ function Setting.open(plugin)
         title = _("微信读书账号") .. " · " .. (Auth.userLabel() or cfg.user_id or ""),
         items = {
             { text = _("重新扫码登录"), callback = function() showQrLogin(plugin) end },
-            { text = _("刷新 Skills 密钥"), callback = function() refreshAgentKey(plugin) end },
             { text = _("续期会话"), callback = function()
                 NetworkMgr:runWhenOnline(function()
                     Auth.renewCookieAsync(function(ok, err)

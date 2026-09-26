@@ -7,6 +7,8 @@ reader 状态属于一次网页阅读会话，服务端会过期；超过 TTL �
 @module koplugin.book.source.wechat.context
 --]]
 
+local Protocol = require("source.wechat.protocol")
+
 local Context = {}
 
 local READER_TTL = 15 * 60
@@ -28,6 +30,8 @@ local function key(book_id, chapter_uid)
 end
 
 --- 记住阅读页 reader 状态；缺 psvts 的状态不可用，直接忽略。
+--- 阅读页 HTML 通常不带 pclts（网页端在页面初始化时才生成），此时在这里固定一次：
+--- 进入阅读与后续时长上报必须共用同一个 pc，每次现算会让服务端不认 rt。
 ---@param book_id string
 ---@param chapter_uid string|number
 ---@param state { psvts: string|nil, pclts: string|nil, token: string|nil }|nil
@@ -35,7 +39,7 @@ function Context.rememberReader(book_id, chapter_uid, state)
     if type(state) ~= "table" or type(state.psvts) ~= "string" or state.psvts == "" then return end
     readers[key(book_id, chapter_uid)] = {
         psvts = state.psvts,
-        pclts = state.pclts,
+        pclts = state.pclts or Protocol.encode(os.time()),
         token = state.token,
         at = os.time(),
     }

@@ -1,8 +1,8 @@
 --[[--
 微信读书协议客户端：只返回 wire，不做领域转换（仅异步）。
 
-Web 扫码会话（Cookie + X-Vid + X-Skey）用于网页接口；
-官方 Agent 网关只承担读能力，写想法走 ``weread.qq.com/web/review/*``。
+会话（Cookie + X-Vid + X-Skey）用于网页接口；Web 读不到的划线、想法、阅读统计
+走 Eink ``i.weread.qq.com``；写想法 / 划线走 ``weread.qq.com/web/*``。
 
 @module koplugin.book.source.wechat.client
 --]]
@@ -10,6 +10,7 @@ Web 扫码会话（Cookie + X-Vid + X-Skey）用于网页接口；
 local JSON = require("json")
 local logger = require("utils.log")
 local Auth = require("source.wechat.auth")
+local Eink = require("source.wechat.eink")
 local Context = require("source.wechat.context")
 local Protocol = require("source.wechat.protocol")
 local Text = require("utils.text")
@@ -303,29 +304,28 @@ function Client:reportReadAsync(body, referer, cb)
     end)
 end
 
---- 经 Agent 网关拉取阅读统计明细。
+--- 拉取阅读统计明细（Eink ``/readdata/detail``）。
 ---@param mode string|nil 统计口径，缺省 "monthly"
 ---@param base_time number|nil 基准时间戳（秒），大于 0 才带上
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
 function Client:readStatsAsync(mode, base_time, cb)
-    local params = { mode = mode or "monthly" }
+    local query = { mode = mode or "monthly" }
     if base_time and tonumber(base_time) and tonumber(base_time) > 0 then
-        params.baseTime = tonumber(base_time)
+        query.baseTime = tonumber(base_time)
     end
-    return Auth.agentGatewayAsync("/readdata/detail", params, cb)
+    return Eink.callAsync("GET", "/readdata/detail", { query = query }, cb)
 end
 
---- 个人划线列表。
+--- 个人划线列表（Eink ``/book/bookmarklist``，回 ``updated`` + ``chapters``）。
 ---
---- 必须走 Agent 网关：Web 会话打 ``/web/book/bookmarklist`` 恒返回 ``{}``（无 errcode），
---- 而网关 ``/book/bookmarklist`` 返回 ``updated`` + ``chapters``（含 chapterIdx）。
+--- 不能走 Web：Web 会话打 ``/web/book/bookmarklist`` 恒返回 ``{}``（无 errcode）。
 ---@param bookId string
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:bookmarkListAsync(bookId, cb)
-    return Auth.agentGatewayAsync("/book/bookmarklist", {
-        bookId = tostring(bookId or ""),
+    return Eink.callAsync("GET", "/book/bookmarklist", {
+        query = { bookId = tostring(bookId or ""), synckey = 0 },
     }, cb)
 end
 
@@ -334,14 +334,19 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:myReviewsAsync(bookId, cb)
-    return Auth.agentGatewayAsync("/review/list/mine", {
-        bookid = tostring(bookId or ""),
-        count = 100,
-        synckey = 0,
+    return Eink.callAsync("GET", "/review/list", {
+        query = {
+            bookId = tostring(bookId or ""),
+            listType = 1,
+            listMode = 0,
+            mine = 1,
+            synckey = 0,
+            count = 100,
+        },
     }, cb)
 end
 
---- Web 写接口；Agent Skills 网关是只读通道，写请求会返回 HTTP 499。
+--- Web 写接口（想法、划线的增删改）。
 ---@param path string
 ---@param body table
 ---@param cb fun(data: table|nil, err: any)

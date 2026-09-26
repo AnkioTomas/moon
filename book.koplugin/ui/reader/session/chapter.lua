@@ -275,7 +275,10 @@ end
 function Chapter.afterBootstrap(plugin, session)
     local chapter = session.chapter
     if not chapter then return end
-    plugin:emitToSource("chapter_changed", { identity = session.identity }, session.identity.source)
+    plugin:emitToSource("chapter_changed", {
+        identity = session.identity,
+        position = require("book.progress").position(session),
+    }, session.identity.source)
     local identity = chapter.identity
     if not identity then return end
     local source = identity.source

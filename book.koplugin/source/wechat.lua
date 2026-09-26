@@ -85,10 +85,31 @@ Source.deleteBookAsync = Shelf.deleteAsync
 --- 阅读中时长推送间隔（秒），对齐网页端 / weread 的上报节奏。
 local STATS_FLUSH_INTERVAL = 30
 
---- 翻页时按间隔推送已落盘的阅读时长；其余事件交给基类。
+--- 章节开读即发「进入阅读」（putProgressAsync 就是 enter 上报）。
+--- 服务端只认距本会话上次上报的真实间隔：拖到推时长时才 enter，紧跟的 rt 会被当成 0 秒。
+---@param self WechatSource
+---@param payload { identity: BookIdentity, position: ProgressPosition|nil }
+local function enterReading(self, payload)
+    if not self:configured() then return end
+    self:putProgressAsync(payload.identity, payload.position, function(ok, err)
+        if not ok then logger.warn("wechat enter reading failed", err) end
+    end)
+end
+
+--- 开读章节时进入阅读会话，翻页时按间隔推送已落盘的阅读时长；其余事件交给基类。
 ---@param event string
 ---@param payload table|nil
 function Source:onEvent(event, payload)
+    if event == "chapter_changed" then
+        -- enter 会写云端位置：开书拉进度期间先挂起，抢在拉取前落地会吞掉进度冲突。
+        local pull = self._progress_pull
+        if pull and pull.stable_id == payload.identity.stable_id then
+            pull.enter = payload
+        else
+            enterReading(self, payload)
+        end
+        return
+    end
     if event == "page_changed" then
         local now = os.time()
         if self:configured() and now - (self._stats_flushed_at or 0) >= STATS_FLUSH_INTERVAL then
@@ -310,6 +331,14 @@ end
 ---@param cb fun(pos: ProgressPosition|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Source:getProgressAsync(identity, cb)
+    local pull = { stable_id = identity.stable_id }
+    self._progress_pull = pull
+    local reply = cb
+    cb = function(pos, err)
+        if self._progress_pull == pull then self._progress_pull = nil end
+        reply(pos, err)
+        if pull.enter then enterReading(self, pull.enter) end
+    end
     local cancelled = false
     local first, second
     first = self._client:getProgressAsync(identity.stable_id, function(wire, err)
@@ -359,6 +388,7 @@ function Source:getProgressAsync(identity, cb)
     end)
     return { cancel = function()
             cancelled = true
+            if self._progress_pull == pull then self._progress_pull = nil end
             if first then first.cancel() end
             if second then second.cancel() end
         end }

@@ -236,7 +236,7 @@ end
 --- 事件清单：
 ---   reader_open     — Reader 实例创建（Reader 侧插件 init）
 ---   document_close  — 关闭文档
----   chapter_changed — 按章会话切换章节，payload = { identity }
+---   chapter_changed — 按章会话开读章节（含首章），payload = { identity, position }
 ---   fm_open         — FileManager 主界面显示
 ---   desktop_open    — 月读桌面打开并可见，payload = Desktop 实例
 ---   desktop_resume  — 月读桌面从休眠恢复，payload = Desktop 实例

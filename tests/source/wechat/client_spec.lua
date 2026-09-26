@@ -75,9 +75,13 @@ package.preload["source.wechat.auth"] = function()
             end
             return { cancel = function() end }
         end,
-        agentGatewayAsync = function(api_name, params, cb)
-            posted.gateway = { api_name = api_name, params = params }
-            if api_name == "/book/bookmarklist" then
+    }
+end
+package.preload["source.wechat.eink"] = function()
+    return {
+        callAsync = function(method, path, opts, cb)
+            posted.eink = { method = method, path = path, query = opts.query }
+            if path == "/book/bookmarklist" then
                 cb({
                     synckey = 1,
                     updated = {
@@ -85,10 +89,8 @@ package.preload["source.wechat.auth"] = function()
                     },
                     chapters = { { chapterUid = 4, chapterIdx = 4 } },
                 })
-            elseif api_name == "/review/list/mine" then
+            elseif path == "/review/list" then
                 cb({ reviews = {}, totalCount = 0 })
-            elseif api_name == "/review/add" then
-                cb({ reviewId = "rv-1" })
             else
                 cb({
                     readLongest = {
@@ -100,6 +102,7 @@ package.preload["source.wechat.auth"] = function()
         end,
     }
 end
+package.loaded["source.wechat.eink"] = nil
 package.preload["source.wechat.client"] = nil
 package.loaded["source.wechat.client"] = nil
 
@@ -184,14 +187,16 @@ do
 end
 
 do
-    -- 个人划线必须走 Agent 网关：Web 会话打 /web/book/bookmarklist 恒返回 {}
+    -- 个人划线走 Eink：Web 会话打 /web/book/bookmarklist 恒返回 {}
     captured = {}
     posted = {}
     local wire
     client:bookmarkListAsync("99", function(data) wire = data end)
     Assert.eq(#captured, 0)
-    Assert.eq(posted.gateway.api_name, "/book/bookmarklist")
-    Assert.eq(posted.gateway.params.bookId, "99")
+    Assert.eq(posted.eink.method, "GET")
+    Assert.eq(posted.eink.path, "/book/bookmarklist")
+    Assert.eq(posted.eink.query.bookId, "99")
+    Assert.eq(posted.eink.query.synckey, 0)
     Assert.eq(#wire.updated, 1)
     Assert.eq(wire.chapters[1].chapterIdx, 4)
 end
@@ -200,8 +205,10 @@ do
     posted = {}
     local wire
     client:myReviewsAsync("99", function(data) wire = data end)
-    Assert.eq(posted.gateway.api_name, "/review/list/mine")
-    Assert.eq(posted.gateway.params.bookid, "99")
+    Assert.eq(posted.eink.path, "/review/list")
+    Assert.eq(posted.eink.query.bookId, "99")
+    Assert.eq(posted.eink.query.mine, 1)
+    Assert.eq(posted.eink.query.listType, 1)
     Assert.not_nil(wire)
 end
 
@@ -220,8 +227,9 @@ do
     local wire, err
     client:readStatsAsync("monthly", nil, function(data, e) wire, err = data, e end)
     Assert.is_nil(err)
-    Assert.eq(posted.gateway.api_name, "/readdata/detail")
-    Assert.eq(posted.gateway.params.mode, "monthly")
+    Assert.eq(posted.eink.path, "/readdata/detail")
+    Assert.eq(posted.eink.query.mode, "monthly")
+    Assert.is_nil(posted.eink.query.baseTime)
     Assert.eq(#(wire.readLongest or {}), 1)
 end
 

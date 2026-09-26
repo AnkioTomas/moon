@@ -313,6 +313,59 @@ do
     Assert.eq(reported_payloads[1].rt, 30)
 end
 
+-- 章节开读立即 enter：服务端按距上次上报的真实间隔认 rt，
+-- 推时长时才 enter 会让紧随的 rt 被计成 0（用户看到永远 1 分钟）。
+do
+    local src = WeChat.new()
+    require("source.wechat.context").clear()
+    local entered = {}
+    fake_client.putProgressAsync = function(_, book_id, opts, cb)
+        entered[#entered + 1] = opts
+        require("source.wechat.context").reader(book_id, opts.chapter_uid).entered = true
+        cb({ ok = true })
+    end
+    local reported = {}
+    fake_client.reportReadAsync = function(_, raw, _, cb)
+        reported[#reported + 1] = require("json").decode(raw)
+        cb({ succ = 1, synckey = 1 })
+        return { cancel = function() end }
+    end
+    local identity = { source_id = "wechat", stable_id = "bp", chapter_idx = 1 }
+    src:onEvent("chapter_changed", {
+        identity = identity,
+        position = { fraction = 0.1, chapter_idx = 1, chapter_fraction = 0.2 },
+    })
+    require("support.stubs").flush()
+    Assert.len(entered, 1, "开读章节立即进入阅读")
+    Assert.eq(entered[1].chapter_uid, "u1")
+    src:pushStatsAsync({
+        { id = 31, stable_id = "bp", chapter_idx = 1, duration = 40, start_time = 500, chapter_fraction = 0.3 },
+    }, function() end)
+    Assert.len(reported, 1, "已进入的会话推时长只发 rt，不再补 enter")
+    Assert.eq(reported[1].rt, 40)
+
+    -- 开书拉云端进度期间挂起 enter，拉取回调之后再发，避免 enter 写的位置吞掉进度冲突。
+    local pull_cb
+    fake_client.getProgressAsync = function(_, _, cb)
+        pull_cb = cb
+        return { cancel = function() end }
+    end
+    require("source.wechat.context").clear()
+    entered = {}
+    local pulled
+    src:getProgressAsync(identity, function(_, err) pulled = err end)
+    src:onEvent("chapter_changed", { identity = identity, position = { chapter_idx = 1 } })
+    require("support.stubs").flush()
+    Assert.len(entered, 0, "拉取未返回前不 enter")
+    pull_cb(nil, "offline")
+    require("support.stubs").flush()
+    Assert.eq(pulled, "offline")
+    Assert.len(entered, 1, "拉取返回后补发 enter")
+    fake_client.putProgressAsync = nil
+    fake_client.reportReadAsync = nil
+    fake_client.getProgressAsync = nil
+end
+
 -- 全部章节都上报失败时不能报成功：一行都没确认就该让调用方看到错误并重试。
 do
     local src = WeChat.new()
