@@ -561,8 +561,9 @@ end
 ---@param fetchContent ChapterFetchContent
 ---@param on_progress fun(done: integer, total: integer)|nil
 ---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
+---@param interval_seconds number|nil 两次正文请求的间隔，缺省 1.5；风控严的源传更大值
 ---@return { cancel: fun() }
-function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb)
+function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb, interval_seconds)
     local cancelled, active = false, nil
     active = source:loadTocAsync(identity, function(toc, err)
         if cancelled then return end
@@ -573,7 +574,7 @@ function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb)
             persist_book = false,
             progress = on_progress,
             -- 全本缓存让服务端有喘息时间；阅读期预取仍保持无间隔。
-            interval_seconds = 1.5,
+            interval_seconds = interval_seconds or 1.5,
         }, function(cached, total, failed, last_err)
             if not cancelled then
                 cb(failed == 0, cached, last_err, total, failed)
