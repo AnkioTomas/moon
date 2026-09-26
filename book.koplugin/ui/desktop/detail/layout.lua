@@ -50,6 +50,7 @@ function Detail:updateView()
             download = function() self:cacheAllChapters() end,
             read = function() self:toggleRead() end,
             unread = function() self:toggleRead() end,
+            clear_cache = function() self:clearCache() end,
             delete = function() self:deleteBook() end,
         }
         local tool_chips = {}

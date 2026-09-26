@@ -170,6 +170,35 @@ function Detail:deleteBook()
     })
 end
 
+--- 清理本书本地缓存：正文、章节、图片、封面需重新下载；书籍元数据与进度保留。
+--- 本书在后台缓存队列里时拒绝，避免边写边删。
+function Detail:clearCache()
+    local book = self.book
+    local UIManager = require("ui/uimanager")
+    local InfoMessage = require("ui/widget/infomessage")
+    UIManager:show(require("ui/widget/confirmbox"):new{
+        text = T(_("清理《%1》的本地缓存？\n正文、章节与图片需重新下载。"), BookInfo.title(book)),
+        ok_text = _("清理"),
+        ok_callback = function()
+            for _i, task in ipairs(require("source.cache_queue").tasks()) do
+                if task.source_id == book.source_id and task.stable_id == book.stable_id then
+                    UIManager:show(InfoMessage:new{ text = _("本书正在后台缓存，请稍后再试"), timeout = 3 })
+                    return
+                end
+            end
+            local ok, leftover = Store.clearCache(book.source_id, book.stable_id)
+            local text = _("缓存已清理")
+            if not ok then
+                text = _("清理缓存失败")
+            elseif leftover then
+                text = _("部分缓存文件未能删除")
+            end
+            UIManager:show(InfoMessage:new{ text = text, timeout = 3 })
+            if self.lifecycle:uiReady() then self:reload() end
+        end,
+    })
+end
+
 --- 库内书底栏动作：工具行 + 最后一行阅读主按钮。
 --- 编辑/刮削/下载按属主源能力出现；已读切换与删除只要身份完整就给。
 ---@param book table 当前书籍
@@ -203,6 +232,7 @@ function Detail.actionPlan(book, owner, origin)
         else
             tools[#tools + 1] = { id = "read", icon = "done_all", text = _("标记已读") }
         end
+        tools[#tools + 1] = { id = "clear_cache", icon = "cleaning_services", text = _("清理缓存") }
         tools[#tools + 1] = { id = "delete", icon = "delete", text = _("删除") }
     end
     local primary

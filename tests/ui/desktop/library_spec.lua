@@ -212,13 +212,14 @@ library:fetch()
 Assert.eq(requested.search, "书")
 Assert.eq(requested.sort, "recent_added")
 
-library.filter = { search = "书", category = "科幻", series = "系列一", read_status = "unread" }
+library.filter = { search = "书", category = "科幻", series = "系列一", read_status = "unread", downloaded = true }
 library.state = nil
 library:fetch()
 Assert.eq(requested.search, "书")
 Assert.eq(requested.category, "科幻")
 Assert.eq(requested.series, "系列一")
 Assert.eq(requested.read_status, "unread")
+Assert.is_true(requested.downloaded)
 Assert.eq(requested.sort, "recent_added")
 
 -- 桌面已销毁：updateView 排队的补拉不能再发请求。

@@ -569,6 +569,18 @@ function BookDB.markSynced(source_id, stable_id)
         WHERE source_id=? AND stable_id=?;]], source_id, stable_id) ~= nil
 end
 
+--- 已下载条件，与 Store.isDownloaded 同义：章节源目录非空且章文件登齐；其余源有 path。
+---@param chapter_sources string[] 章节型源 id
+---@param args table 追加绑定参数
+---@return string
+local function downloadedClause(chapter_sources, args)
+    local is_chapter = Base.sourceClause("b.source_id", chapter_sources, args)
+    local toc_len = "(CASE WHEN json_valid(b.toc) THEN json_array_length(b.toc) ELSE 0 END)"
+    return "(CASE WHEN " .. is_chapter .. " THEN " .. toc_len .. " > 0 AND " .. toc_len
+        .. " = (SELECT COUNT(*) FROM chapters c WHERE c.source_id=b.source_id AND c.stable_id=b.stable_id)"
+        .. " ELSE COALESCE(b.path, '')<>'' END)"
+end
+
 --- 按源分页查询书库。
 ---@param source_id string|string[]
 ---@param opts table|nil
@@ -604,6 +616,9 @@ function BookDB.listBySource(source_id, opts)
         where = where .. " AND b.read_state=1"
     elseif opts.read_status == "unread" then
         where = where .. " AND b.read_state<>1"
+    end
+    if opts.downloaded then
+        where = where .. " AND " .. downloadedClause(opts.chapter_sources, args)
     end
     local total = Base.rowexec(
         "SELECT COUNT(*) FROM books b WHERE " .. where .. ";",
@@ -766,6 +781,16 @@ function BookDB.readStatusCountsBySource(source_id)
         { status = "read", count = counts.read },
         { status = "unread", count = counts.unread },
     }
+end
+
+--- 某源书架已下载册数。
+---@param source_id string|string[]
+---@param chapter_sources string[] 章节型源 id
+---@return integer
+function BookDB.downloadedCountBySource(source_id, chapter_sources)
+    local where, args = Base.sourceClause("b.source_id", source_id)
+    where = where .. " AND b.deleted=0 AND " .. downloadedClause(chapter_sources, args)
+    return tonumber(Base.rowexec("SELECT COUNT(*) FROM books b WHERE " .. where .. ";", unpack(args))) or 0
 end
 
 --- 按 (source_id, stable_id) 删除 books 行

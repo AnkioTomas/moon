@@ -36,7 +36,7 @@
 
 --- 图书馆筛选项与分类索引。
 ---@class BookFiltersResult
----@field data { category: string[]|nil, category_counts: { category: string, count: integer }[]|nil, series: string[]|nil, series_counts: { series: string, count: integer }[]|nil, read_counts: { status: string, count: integer }[]|nil, source_counts: { source_id: string, name: string, count: integer }[]|nil }|nil
+---@field data { category: string[]|nil, category_counts: { category: string, count: integer }[]|nil, series: string[]|nil, series_counts: { series: string, count: integer }[]|nil, read_counts: { status: string, count: integer }[]|nil, downloaded_count: integer|nil, source_counts: { source_id: string, name: string, count: integer }[]|nil }|nil
 
 ---@class SyncResult
 ---@field pulled integer

@@ -94,6 +94,7 @@ Filter.open{
         category_counts = { { category = "科幻", count = 2 } },
         series_counts = { { series = "系列一", count = 1 }, { series = "", count = 3 } },
         read_counts = { { status = "read", count = 4 } },
+        downloaded_count = 2,
     },
     current = {},
     on_apply = function(value, sort) applied, applied_sort = value, sort end,
@@ -116,7 +117,16 @@ Assert.eq(body[5][1].text, "数据源")
 Assert.eq(body[7][1].text, "分类")
 Assert.eq(body[9][1].text, "系列")
 Assert.eq(body[11][1].text, "阅读状态")
-Assert.eq(body[13][1].text, "排序")
+Assert.eq(body[13][1].text, "本地")
+Assert.eq(body[15][1].text, "排序")
+-- 已下载：单个开关，点一次选中、再点取消
+local downloaded_pill = body[13][3][1][1]
+Assert.eq(downloaded_pill[1].text, "已下载（2）")
+downloaded_pill.callback()
+Assert.is_true(applied.downloaded)
+body = shown[1][2][1][2][1]
+body[13][3][1][1].callback()
+Assert.is_nil(applied.downloaded)
 body[1][2][1].callback()
 Assert.not_nil(applied)
 Assert.eq(applied_sort, "recent_added")

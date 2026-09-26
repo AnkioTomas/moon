@@ -132,11 +132,21 @@ end
 package.preload["utils.text"] = function()
     return { trim = function(s) return s end }
 end
+local cleared
+local clear_result = { true }
 package.preload["book.store"] = function()
     return {
         rememberMany = function() end,
         isDownloaded = function(book) return book and book.downloaded == true end,
+        clearCache = function(source_id, stable_id)
+            cleared = { source_id, stable_id }
+            return clear_result[1], clear_result[2]
+        end,
     }
+end
+local queue_tasks = {}
+package.preload["source.cache_queue"] = function()
+    return { tasks = function() return queue_tasks end }
 end
 package.preload["gettext"] = function() return function(s) return s end end
 package.preload["ffi/util"] = function()
@@ -215,7 +225,7 @@ local unread = {
     percent = 12,
 }
 local tools, primary = Detail.actionPlan(unread, local_src, "library")
-Assert.eq(ids(tools), "edit,scrape,read,delete")
+Assert.eq(ids(tools), "edit,scrape,read,clear_cache,delete")
 Assert.eq(primary.id, "open")
 Assert.eq(primary.text, "继续阅读")
 
@@ -231,12 +241,12 @@ local read_book = {
     percent = 100,
 }
 tools, primary = Detail.actionPlan(read_book, chapter_src, "library")
-Assert.eq(ids(tools), "download,unread,delete")
+Assert.eq(ids(tools), "download,unread,clear_cache,delete")
 Assert.eq(primary.text, "开始阅读")
 
 read_book.downloaded = true
 tools = Detail.actionPlan(read_book, chapter_src, "library")
-Assert.eq(ids(tools), "unread,delete")
+Assert.eq(ids(tools), "unread,clear_cache,delete")
 
 local page = setmetatable({
     book = {
@@ -270,6 +280,36 @@ page.desktop.library.state = { stale = true }
 page:toggleRead()
 Assert.is_false(set_read[3])
 Assert.is_true(page._dirty)
+
+-- 清理缓存：确认后按身份清，成功重读并打脏；本书在后台缓存队列时拒绝
+shown = nil
+page._dirty = nil
+page:clearCache()
+Assert.eq(shown.text, "清理《书一》的本地缓存？\n正文、章节与图片需重新下载。")
+shown.ok_callback()
+Assert.eq(cleared[1], "wechat")
+Assert.eq(cleared[2], "w2")
+Assert.eq(shown.text, "缓存已清理")
+Assert.is_true(page._dirty)
+
+clear_result = { true, "partial" }
+page:clearCache()
+shown.ok_callback()
+Assert.eq(shown.text, "部分缓存文件未能删除")
+
+clear_result = { false }
+page:clearCache()
+shown.ok_callback()
+Assert.eq(shown.text, "清理缓存失败")
+clear_result = { true }
+
+cleared = nil
+queue_tasks = { { source_id = "wechat", stable_id = "w2" } }
+page:clearCache()
+shown.ok_callback()
+Assert.is_nil(cleared)
+Assert.eq(shown.text, "本书正在后台缓存，请稍后再试")
+queue_tasks = {}
 
 shown = nil
 local deleted
