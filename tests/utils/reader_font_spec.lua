@@ -12,8 +12,19 @@ local fontinfo = {
     ["/tmp/reader-font.ttf"] = { { name = "Reader Demo" } },
     ["/tmp/fonts/wr.ttf"] = { { name = "WeRead Demo" } },
     ["/tmp/fonts/bad.woff"] = { { name = "Bad Woff" } },
+    ["/tmp/sys.ttf"] = { { name = "System Demo" } },
+    ["/tmp/broken.ttf"] = { { name = "Broken Demo" } },
+    ["/tmp/霞鹜 文楷.ttf"] = { { name = "LXGW WenKai" } },
 }
-local files = { ["/tmp/reader-font.ttf"] = true }
+local files = {
+    ["/tmp/reader-font.ttf"] = true,
+    ["/tmp/sys.ttf"] = true,
+    ["/tmp/broken.ttf"] = true,
+    ["/tmp/霞鹜 文楷.ttf"] = true,
+}
+-- engineInit 已注册过的路径：crengine 拒绝重复注册（luaL_error）
+local engine_registered = { ["/tmp/sys.ttf"] = true, ["/tmp/broken.ttf"] = true }
+local engine_faces = { "System Demo" }
 local registered = {}
 local register_calls = 0
 local woff_calls = {}
@@ -40,9 +51,15 @@ package.preload["json"] = function() return { decode = function() end } end
 package.preload["ffi/util"] = function() return { md5 = function() return "" end } end
 package.preload["logger"] = function() return { info = function() end, warn = function() end } end
 package.preload["util"] = function()
-    return { findFiles = function(_dir, fn)
-        fn("/tmp/reader-font.ttf", "reader-font.ttf", { mode = "file" })
-    end }
+    return {
+        findFiles = function(_dir, fn)
+            fn("/tmp/reader-font.ttf", "reader-font.ttf", { mode = "file" })
+        end,
+        arrayContains = function(t, v)
+            for i, x in ipairs(t) do if x == v then return i end end
+            return false
+        end,
+    }
 end
 package.preload["http.cache"] = function()
     return { key = function() return "" end, get = function() end }
@@ -57,8 +74,9 @@ package.preload["utils.paths"] = function()
         slugFor = function(v) return v end,
     }
 end
+local moon_settings = {}
 package.preload["utils.settings"] = function()
-    return { get = function() return {} end, save = function() end }
+    return { get = function() return moon_settings end, save = function() end }
 end
 package.preload["utils.task"] = function()
     return { spawn = function(_, fn) fn(); return { abort = function() end } end }
@@ -77,7 +95,7 @@ package.preload["libs/libkoreader-lfs"] = function()
 end
 package.preload["fontlist"] = function()
     local FontList = {
-        fontlist = { "/tmp/reader-font.ttf" },
+        fontlist = { "/tmp/reader-font.ttf", "/tmp/sys.ttf", "/tmp/broken.ttf", "/tmp/霞鹜 文楷.ttf" },
         fontinfo = fontinfo,
         getFontList = function(self) return self.fontlist end,
         _readList = function() end,
@@ -87,10 +105,16 @@ end
 package.preload["document/credocument"] = function()
     return {
         engineInit = function()
-            return { registerFont = function(path)
-                register_calls = register_calls + 1
-                registered[path] = true
-            end }
+            return {
+                registerFont = function(path)
+                    register_calls = register_calls + 1
+                    if engine_registered[path] then
+                        error("cannot register font <" .. path .. ">")
+                    end
+                    registered[path] = true
+                end,
+                getFontFaces = function() return engine_faces end,
+            }
         end,
     }
 end
@@ -152,6 +176,31 @@ Assert.is_true(MoonFont.isInstalled("reader-font.ttf"), "字符串 ID 应识别�
 Assert.is_false(MoonFont.isInstalled({
     id = "missing.ttf", kind = "local", path = "/tmp/missing.ttf",
 }), "列表项路径失效后不能继续报告已安装")
+
+-- engineInit 已注册的系统字体：重复注册被拒不算失败
+Assert.eq(MoonFont.faceForId("sys.ttf"), "System Demo")
+-- 注册失败且 crengine 不认识该字体名：仍报应用失败
+local broken_face, broken_err = MoonFont.faceForId("broken.ttf")
+Assert.is_nil(broken_face)
+Assert.eq(broken_err, "应用字体失败")
+-- 含空格/中文的文件名按原样匹配，不能被 sanitize 成下划线
+Assert.eq(MoonFont.faceForId("霞鹜 文楷.ttf"), "LXGW WenKai")
+Assert.is_true(MoonFont.applyToReader(ui, "霞鹜 文楷.ttf", "霞鹜文楷"))
+Assert.eq(ui.doc_settings.data.book_reader_font_id, "霞鹜 文楷.ttf")
+Assert.eq(MoonFont.readerCurrentId(ui), "霞鹜 文楷.ttf")
+
+-- 先作桌面字体（路径插进 FontList），首次开书 engineInit 按 FontList 注册，
+-- 再在阅读页选同一字体：重复注册被拒不能报失败
+fontinfo["/tmp/fonts/desk.ttf"] = { { name = "Desk Demo" } }
+files["/tmp/fonts/desk.ttf"] = true
+MoonFont.set("desk", "Desk")
+Assert.is_true(MoonFont.applyCurrent())
+local FontList = require("fontlist")
+Assert.eq(FontList.fontlist[1], "/tmp/fonts/desk.ttf")
+for _, path in ipairs(FontList.fontlist) do engine_registered[path] = true end
+engine_faces[#engine_faces + 1] = "Desk Demo"
+Assert.is_true(MoonFont.applyToReader(ui, "desk", "Desk"))
+Assert.eq(ui.font.font_face, "Desk Demo")
 
 -- 旧版微信读书 .woff：列表只判存在不转换；解析时转成 .ttf 并注册 sfnt 路径
 files["/tmp/fonts/wr.woff"] = true
