@@ -1,5 +1,5 @@
 --[[--
-微信读书章节正文：读 reader 页拿 psvts → 拉 e_0/e_1/e_3（或 t_0/t_1）→ 解码。
+微信读书章节正文：本地生成 psvts → 拉 e_0/e_1/e_3（或 t_0/t_1）→ 解码。
 
 对齐 weread 网页端通道。只返回标准正文，不写盘、不打 EPUB。
 个人划线通过 bookmarklist 同步为 KOReader 原生注解，不在 HTML 里注入社区热度线。
@@ -19,89 +19,6 @@ local _ = require("gettext")
 
 local Chapter = {}
 
---- 从 reader HTML 抽 reader 状态（优先 __INITIAL_STATE__，缺字段再按正则兜底）。
----@param html string|nil
----@return { psvts: string|nil, pclts: string|nil, token: string|nil }
-local function extractReaderState(html)
-    if type(html) ~= "string" or html == "" then
-        return {}
-    end
-    local reader = {}
-    local encoded = html:match([[window%.__INITIAL_STATE__%s*=%s*(.-)%s*;%s*%(function]])
-    if encoded then
-        local ok, state = pcall(JSON.decode, encoded)
-        if ok and type(state) == "table" and type(state.reader) == "table" then
-            reader = state.reader
-        end
-    end
-    local out = {}
-    for _, field in ipairs({ "psvts", "pclts", "token" }) do
-        local value = reader[field]
-        if type(value) ~= "string" or value == "" then
-            value = html:match('"' .. field .. [["%s*:%s*"([^"]+)"]])
-        end
-        out[field] = value
-    end
-    return out
-end
-
---- 读 reader 页抽取 reader 状态；缓存由调用方在未取消时写入。
----@param bookId string
----@param chapter_uid string
----@param cb fun(state: { psvts: string, pclts: string|nil, token: string|nil }|nil, err: any)
----@return { cancel: fun() }|nil
-local function readerStateAsync(bookId, chapter_uid, cb)
-    local reader_url = Protocol.readerUrl(bookId, chapter_uid)
-    return Auth.webGetAsync(reader_url, {
-        accept = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        headers = { ["Referer"] = reader_url },
-        block_timeout = 60,
-    }, function(html, err)
-        if not html then
-            cb(nil, err or _("无法打开阅读页"))
-            return
-        end
-        local state = extractReaderState(html)
-        if not state.psvts then
-            cb(nil, _("阅读页缺少 psvts"))
-            return
-        end
-        cb(state)
-    end)
-end
-
---- 确保章节 reader 状态已缓存且未过期（进度/时长上报依赖）。
----@param bookId string
----@param chapter_uid string|number
----@param cb fun(ok: boolean|nil, err: any)
----@return { cancel: fun() }|nil
-function Chapter.ensurePsvtsAsync(bookId, chapter_uid, cb)
-    bookId = tostring(bookId or "")
-    chapter_uid = chapter_uid and tostring(chapter_uid) or nil
-    if bookId == "" or not chapter_uid then
-        cb(nil, _("缺少章节信息"))
-        return { cancel = function() end }
-    end
-    if Context.psvts(bookId, chapter_uid) then
-        cb(true)
-        return nil
-    end
-    local cancelled = false
-    local job = readerStateAsync(bookId, chapter_uid, function(state, err)
-        if cancelled then return end
-        if not state then
-            cb(nil, err)
-            return
-        end
-        Context.rememberReader(bookId, chapter_uid, state)
-        cb(true)
-    end)
-    return { cancel = function()
-            cancelled = true
-            if job and job.cancel then job.cancel() end
-        end }
-end
-
 --- 异步拉取章节 HTML 正文。
 --- 第三个回调参数是划线 range 的坐标原文：EPUB 为解码后的完整 xhtml，TXT 为解码后的纯文本
 --- （format 分别为 "html" / "txt"）；不能用清理或段落化后的正文，否则 range 整体偏移。
@@ -117,7 +34,8 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
         return { cancel = function() end }
     end
     local cancelled = false
-    local active_job, psvts
+    local active_job
+    local psvts = Context.reader(bookId, uid).psvts
     local reader_url = Protocol.readerUrl(bookId, uid)
     --- 中止取正文：置位取消标记并终止在途请求。
     local function cancel()
@@ -161,59 +79,50 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
             end
         )
     end
-    active_job = readerStateAsync(bookId, uid, function(state, err)
-        if cancelled then return end
-        if not state then
-            fail(err)
+    requestShard("/web/book/chapter/e_0", function(e0, e0err)
+        if not e0 then
+            fail(e0err)
             return
         end
-        psvts = state.psvts
-        Context.rememberReader(bookId, uid, state)
-        requestShard("/web/book/chapter/e_0", function(e0, e0err)
-            if not e0 then
-                fail(e0err)
-                return
-            end
-            if e0:sub(1, 1) == "{" and e0:find('"bookId"', 1, true) then
-                requestShard("/web/book/chapter/t_0", function(t0, t0err)
-                    if not t0 then
-                        fail(t0err)
-                        return
-                    end
-                    requestShard("/web/book/chapter/t_1", function(t1)
-                        if cancelled then return end
-                        local plain, decode_err = Protocol.decodeShards(t0, t1 or "")
-                        if not plain then
-                            fail(decode_err or _("txt 章节解码失败"))
-                        else
-                            cb(Text.textToBody(plain), nil, plain, "txt")
-                        end
-                    end)
-                end)
-                return
-            end
-            requestShard("/web/book/chapter/e_1", function(e1, e1err)
-                if not e1 then
-                    fail(e1err)
+        if e0:sub(1, 1) == "{" and e0:find('"bookId"', 1, true) then
+            requestShard("/web/book/chapter/t_0", function(t0, t0err)
+                if not t0 then
+                    fail(t0err)
                     return
                 end
-                requestShard("/web/book/chapter/e_3", function(e3, e3err)
-                    if not e3 then
-                        fail(e3err)
-                        return
-                    end
-                    local xhtml, decode_err = Protocol.decodeShards(e0, e1, e3)
-                    if not xhtml then
-                        fail(decode_err or _("章节解码失败"))
+                requestShard("/web/book/chapter/t_1", function(t1)
+                    if cancelled then return end
+                    local plain, decode_err = Protocol.decodeShards(t0, t1 or "")
+                    if not plain then
+                        fail(decode_err or _("txt 章节解码失败"))
                     else
-                        local fragment = Text.htmlBodyFragment(xhtml)
-                        if Text.looksLikeHtml(fragment) then
-                            cb(Annotations.cleanChapterHtml(fragment), nil, xhtml, "html")
-                        else
-                            cb(Text.textToBody(fragment), nil, xhtml, "html")
-                        end
+                        cb(Text.textToBody(plain), nil, plain, "txt")
                     end
                 end)
+            end)
+            return
+        end
+        requestShard("/web/book/chapter/e_1", function(e1, e1err)
+            if not e1 then
+                fail(e1err)
+                return
+            end
+            requestShard("/web/book/chapter/e_3", function(e3, e3err)
+                if not e3 then
+                    fail(e3err)
+                    return
+                end
+                local xhtml, decode_err = Protocol.decodeShards(e0, e1, e3)
+                if not xhtml then
+                    fail(decode_err or _("章节解码失败"))
+                else
+                    local fragment = Text.htmlBodyFragment(xhtml)
+                    if Text.looksLikeHtml(fragment) then
+                        cb(Annotations.cleanChapterHtml(fragment), nil, xhtml, "html")
+                    else
+                        cb(Text.textToBody(fragment), nil, xhtml, "html")
+                    end
+                end
             end)
         end)
     end)

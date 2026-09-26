@@ -1,8 +1,9 @@
 --[[--
-微信读书阅读上下文缓存：读阅读页时记住 reader 状态（psvts / pclts / token），
-供正文拉取、进度与时长上报复用。
+微信读书阅读上下文缓存：按章记住 reader 状态（psvts / pclts），供正文拉取、进度与时长上报复用。
 
-reader 状态属于一次网页阅读会话，服务端会过期；超过 TTL 视为未缓存，调用方重读阅读页。
+网页阅读页里的 psvts 只是出页时间的 encode，token 是固定默认值、pclts 为 0，
+所以本地按当前时间生成，不再下载阅读页（大书阅读页内嵌全书目录，可达数 MB）。
+reader 状态模拟一次网页阅读会话；超过 TTL 重新生成，并重新发进入阅读上报。
 
 @module koplugin.book.source.wechat.context
 --]]
@@ -15,9 +16,8 @@ local READER_TTL = 15 * 60
 
 ---@class WechatReaderState
 ---@field psvts string
----@field pclts string|nil
----@field token string|nil
----@field at integer 读到阅读页的时间
+---@field pclts string
+---@field at integer 生成时间
 ---@field entered boolean|nil 本会话已发过进入阅读上报
 
 ---@type table<string, WechatReaderState>
@@ -29,39 +29,19 @@ local function key(book_id, chapter_uid)
     return tostring(book_id) .. "\31" .. tostring(chapter_uid)
 end
 
---- 记住阅读页 reader 状态；缺 psvts 的状态不可用，直接忽略。
---- 阅读页 HTML 通常不带 pclts（网页端在页面初始化时才生成），此时在这里固定一次：
---- 进入阅读与后续时长上报必须共用同一个 pc，每次现算会让服务端不认 rt。
+--- 该章未过期的 reader 状态，缺失或过期就地生成。
+--- psvts 模拟服务端出页时间，pclts 模拟稍后的页面初始化时间；两者在会话内固定：进入阅读与后续时长上报必须共用同一个 pc，每次现算会让服务端不认 rt。
 ---@param book_id string
 ---@param chapter_uid string|number
----@param state { psvts: string|nil, pclts: string|nil, token: string|nil }|nil
-function Context.rememberReader(book_id, chapter_uid, state)
-    if type(state) ~= "table" or type(state.psvts) ~= "string" or state.psvts == "" then return end
-    readers[key(book_id, chapter_uid)] = {
-        psvts = state.psvts,
-        pclts = state.pclts or Protocol.encode(os.time()),
-        token = state.token,
-        at = os.time(),
-    }
-end
-
---- 未过期的 reader 状态。
----@param book_id string
----@param chapter_uid string|number|nil
----@return WechatReaderState|nil
+---@return WechatReaderState
 function Context.reader(book_id, chapter_uid)
-    if not chapter_uid then return nil end
-    local state = readers[key(book_id, chapter_uid)]
-    if state and os.time() - state.at < READER_TTL then return state end
-    return nil
-end
-
----@param book_id string
----@param chapter_uid string|number|nil
----@return string|nil
-function Context.psvts(book_id, chapter_uid)
-    local state = Context.reader(book_id, chapter_uid)
-    return state and state.psvts
+    local k = key(book_id, chapter_uid)
+    local state = readers[k]
+    local now = os.time()
+    if state and now - state.at < READER_TTL then return state end
+    state = { psvts = Protocol.encode(now - 1), pclts = Protocol.encode(now), at = now }
+    readers[k] = state
+    return state
 end
 
 ---@param book_id string

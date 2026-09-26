@@ -249,11 +249,8 @@ do
     local entered_payload
     package.preload["source.wechat.context"] = function()
         return {
-            reader = function(book_id, chapter_uid)
-                if book_id == "99" and tostring(chapter_uid) == "8" then
-                    return { psvts = "psvts-token", pclts = "pclts-token" }
-                end
-                return nil
+            reader = function()
+                return { psvts = "psvts-token", pclts = "pclts-token" }
             end,
         }
     end
@@ -297,7 +294,7 @@ do
     Assert.is_true(posted.url:find("/web/book/read", 1, true) ~= nil)
     Assert.is_true(posted.raw:find("signed", 1, true) ~= nil)
     Assert.not_nil(ok)
-    Assert.eq(entered_payload.pclts, "pclts-token", "进度上报必须带阅读页的 pclts")
+    Assert.eq(entered_payload.pclts, "pclts-token", "进度上报必须带 reader 状态的 pclts")
 
     -- 没有 succ / synckey 的回包是「收下但没记账」：不能当成功确认，否则数据静默丢失。
     read_reply = {}
@@ -313,11 +310,6 @@ do
 
     ok, err = nil, nil
     progress_client:putProgressAsync("99", { progress = 50 }, function(data, e) ok, err = data, e end)
-    Assert.is_nil(ok)
-    Assert.not_nil(err)
-
-    ok, err = nil, nil
-    progress_client:putProgressAsync("99", { progress = 50, chapter_uid = 7 }, function(data, e) ok, err = data, e end)
     Assert.is_nil(ok)
     Assert.not_nil(err)
 end

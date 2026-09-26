@@ -106,16 +106,6 @@ stub("source.wechat.client", function()
 end)
 stub("source.wechat.chapter", function()
     return {
-        ensurePsvtsAsync = function(book_id, uid, cb)
-            local Context = require("source.wechat.context")
-            if not Context.psvts(book_id, uid) then
-                Context.rememberReader(book_id, uid, {
-                    psvts = "ps-" .. tostring(uid), pclts = "pc", token = "tk",
-                })
-            end
-            cb(true)
-            return { cancel = function() end }
-        end,
         fetchHtmlAsync = function(_, _, cb)
             chapter_fetches = chapter_fetches + 1
             cb(chapter_range_html, nil, chapter_range_html, "html")
@@ -293,7 +283,8 @@ do
     Assert.eq(time.pr, 95, "时长上报带真实全书进度，填 0 会把云端进度打回开头")
     Assert.eq(time.co, 9000, "章内位置 = 章内进度 × 10000")
     Assert.eq(time.sm, "二")
-    Assert.eq(time.pc, "pc", "pc 用阅读页的 pclts")
+    Assert.eq(time.pc, enter.pc, "时长上报与进入阅读共用同一个 pc")
+    Assert.is_true(time.ps ~= "" and time.ps ~= time.pc, "ps 本地生成且不同于 pc")
     Assert.len(data.synced_ids, 2, "只确认无坐标行与已上报成功的那一章")
     Assert.eq(data.synced_ids[1], 13)
     Assert.eq(data.synced_ids[2], 12)

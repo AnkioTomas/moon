@@ -13,14 +13,14 @@ package.preload["json"] = function()
     }
 end
 
-local reader_html = [[window.__INITIAL_STATE__ = {"reader":{"psvts":"ps-1","pclts":"pc-1","token":"tk-1"}};(function]]
 local txt = false
+local gets = 0
 
 package.preload["source.wechat.auth"] = function()
     return {
         hasSession = function() return true end,
-        webGetAsync = function(_, _, cb)
-            cb(reader_html)
+        webGetAsync = function()
+            gets = gets + 1
             return { cancel = function() end }
         end,
         webPostAsync = function(url, _, _, cb)
@@ -37,20 +37,19 @@ end
 local FULL = '<?xml version="1.0"?><html><head><title>t</title></head><body><title>重复标题</title>'
     .. '<p><span class="wr-underline">正文</span></p></body></html>'
 local PLAIN = "\239\187\191第一行 <b>\n  第二行"
+local signed_with = {}
 
 package.preload["source.wechat.protocol"] = function()
     return {
         readerUrl = function() return "https://weread.qq.com/web/reader/id" end,
-        contentParams = function() return {} end,
+        contentParams = function(_, _, psvts) signed_with[#signed_with + 1] = psvts return {} end,
         decodeShards = function() return txt and PLAIN or FULL end,
     }
 end
 
-local remembered = {}
 package.preload["source.wechat.context"] = function()
     return {
-        rememberReader = function(book_id, uid, state) remembered[book_id .. ":" .. uid] = state end,
-        psvts = function() return nil end,
+        reader = function(book_id, uid) return { psvts = "ps-" .. book_id .. ":" .. uid } end,
     }
 end
 
@@ -71,10 +70,10 @@ do
     Assert.eq(cleaned, "<p>正文</p>")
     Assert.eq(range_source, FULL)
     Assert.eq(format, "html")
-    local state = remembered["book:chapter"]
-    Assert.eq(state.psvts, "ps-1")
-    Assert.eq(state.pclts, "pc-1")
-    Assert.eq(state.token, "tk-1")
+    -- 不下载阅读页：分片直接用 Context 本地生成的 psvts 签名。
+    Assert.eq(gets, 0, "不再请求阅读页")
+    Assert.len(signed_with, 3)
+    for _, ps in ipairs(signed_with) do Assert.eq(ps, "ps-book:chapter") end
 end
 
 do
@@ -89,22 +88,5 @@ do
     Assert.eq(range_source, PLAIN)
     Assert.eq(format, "txt")
     Assert.is_true(body:find("<p>", 1, true) ~= nil)
-end
-
-do
-    -- reader 状态缺字段时按正则兜底；没有 psvts 视为阅读页异常。
-    reader_html = [[<script>{"psvts":"ps-2","token":"tk-2"}</script>]]
-    local ok, err
-    Chapter.ensurePsvtsAsync("book", "c3", function(value, e) ok, err = value, e end)
-    Assert.is_true(ok)
-    Assert.is_nil(err)
-    Assert.eq(remembered["book:c3"].psvts, "ps-2")
-    Assert.eq(remembered["book:c3"].token, "tk-2")
-    Assert.is_nil(remembered["book:c3"].pclts)
-
-    reader_html = "<html>login</html>"
-    ok, err = nil, nil
-    Chapter.ensurePsvtsAsync("book", "c4", function(value, e) ok, err = value, e end)
-    Assert.is_nil(ok)
-    Assert.not_nil(err)
+    Assert.eq(gets, 0)
 end

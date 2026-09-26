@@ -408,35 +408,27 @@ function Source:putProgressAsync(identity, pos, cb)
     local offset = chapter_frac and math.floor(Progress.clampFraction(chapter_frac) * 10000) or 0
     local summary = pos.chapter_title or ""
     local cancelled = false
-    local resolve_job, ensure_job, push_job
+    local resolve_job, push_job
     -- 只有 extra 记录的章与本次上报的章一致时才复用 uid，避免翻章后报错位置。
     local extra = pos.extra
     local chapter_uid = extra and tonumber(extra.chapter_idx) == chapter_idx
         and extra.chapter_uid or nil
-    --- 拿到章节 uid 后先补齐 psvts 签名参数，再上报进度。
     ---@param uid string 章节 uid
     local function startPush(uid)
         local source_idx = Toc.sourceIndex(identity.source_id, identity.stable_id, chapter_idx)
             or chapter_idx
-        ensure_job = WChapter.ensurePsvtsAsync(identity.stable_id, uid, function(ok, err)
-            if cancelled then return end
-            if not ok then
-                cb(nil, err)
-                return
+        push_job = self._client:putProgressAsync(identity.stable_id, {
+            progress = progress,
+            chapter_uid = uid,
+            chapter_idx = source_idx,
+            chapter_offset = offset,
+            summary = summary,
+        }, function(wire, push_err)
+            if wire then
+                cb(true)
+            else
+                cb(nil, push_err)
             end
-            push_job = self._client:putProgressAsync(identity.stable_id, {
-                progress = progress,
-                chapter_uid = uid,
-                chapter_idx = source_idx,
-                chapter_offset = offset,
-                summary = summary,
-            }, function(wire, push_err)
-                if wire then
-                    cb(true)
-                else
-                    cb(nil, push_err)
-                end
-            end)
         end)
     end
     if chapter_uid then
@@ -454,7 +446,6 @@ function Source:putProgressAsync(identity, pos, cb)
     return { cancel = function()
             cancelled = true
             if resolve_job and resolve_job.cancel then resolve_job.cancel() end
-            if ensure_job and ensure_job.cancel then ensure_job.cancel() end
             if push_job and push_job.cancel then push_job.cancel() end
         end }
 end
@@ -552,10 +543,6 @@ function Source:pushStatsAsync(rows, cb)
     ---@param chapter_uid string 章节 uid
     local function report(bucket, chapter_uid)
         local reader = require("source.wechat.context").reader(bucket.stable_id, chapter_uid)
-        if not reader then
-            fail(_("无法打开章节"))
-            return
-        end
         local toc = Toc.read(self.id, bucket.stable_id)
         local chapter = toc and toc[bucket.chapter_idx]
         local whole = Toc.wholeFraction(self.id, bucket.stable_id, bucket.chapter_idx, bucket.chapter_fraction)
@@ -569,7 +556,6 @@ function Source:pushStatsAsync(rows, cb)
             progress = math.floor((whole or 0) * 100 + 0.5),
             psvts = reader.psvts,
             pclts = reader.pclts,
-            token = reader.token,
         }
         local referer = Protocol.readerUrl(bucket.stable_id, chapter_uid)
         local function sendTime()
@@ -601,26 +587,12 @@ function Source:pushStatsAsync(rows, cb)
         end)
     end
 
-    --- 先补齐该章的 psvts 签名参数，再上报时长；补不上视为本轮失败。
-    ---@param bucket table 章节聚合桶
-    ---@param chapter_uid string 章节 uid
-    local function ensureAndReport(bucket, chapter_uid)
-        job = WChapter.ensurePsvtsAsync(bucket.stable_id, chapter_uid, function(ok, err)
-            if cancelled then return end
-            if not ok then
-                fail(err or _("无法打开章节"))
-                return
-            end
-            report(bucket, chapter_uid)
-        end)
-    end
-
     --- 把桶的章节序号解析成 uid 后上报；缓存没有就拉一次目录，仍解析不出视为失败。
     ---@param bucket table 章节聚合桶
     local function resolveAndReport(bucket)
         local chapter_uid = Toc.uid(self.id, bucket.stable_id, bucket.chapter_idx)
         if chapter_uid then
-            ensureAndReport(bucket, chapter_uid)
+            report(bucket, chapter_uid)
             return
         end
         job = self:loadTocAsync({ source_id = self.id, stable_id = bucket.stable_id }, function()
@@ -630,7 +602,7 @@ function Source:pushStatsAsync(rows, cb)
                 fail(_("缺少章节信息"))
                 return
             end
-            ensureAndReport(bucket, chapter_uid)
+            report(bucket, chapter_uid)
         end)
     end
 

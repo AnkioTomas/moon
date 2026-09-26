@@ -239,10 +239,6 @@ function Client:putProgressAsync(bookId, opts, cb)
         return nil
     end
     local reader = Context.reader(bookId, chapter_uid)
-    if not reader then
-        cb(nil, _("请先打开该章节后再同步进度"))
-        return nil
-    end
     local referer = Protocol.readerUrl(bookId, chapter_uid)
     local payload = Protocol.makeEnterReadPayload({
         book_id = bookId,
