@@ -14,15 +14,31 @@ package.loaded["utils.settings"] = {
     saveSection = function() saved = saved + 1 end,
 }
 
-local events, delay = {}, nil
+local events, scheduled = {}, {}
 package.loaded["ui/event"] = {
     new = function(_, name, arg) return { name = name, arg = arg } end,
 }
 package.loaded["ui/uimanager"] = {
     broadcastEvent = function(_, ev) events[#events + 1] = ev end,
-    scheduleIn = function(_, d) delay = d end,
-    unschedule = function() delay = nil end,
+    scheduleIn = function(_, d, fn) scheduled[fn] = d end,
+    unschedule = function(_, fn) scheduled[fn] = nil end,
     nextTick = function(_, fn) fn() end,
+}
+
+local sensor_level = 0
+local Device = {
+    hasFrontlight = function() return true end,
+    hasLightSensor = function() return true end,
+    ambientBrightnessLevel = function() return sensor_level end,
+}
+package.loaded["device"] = Device
+
+local lights = {}
+package.loaded["ui.panel.desktop"] = {
+    setLevel = function(kind, fraction)
+        Assert.eq(kind, "brightness")
+        lights[#lights + 1] = fraction
+    end,
 }
 
 local weather_reply
@@ -75,7 +91,7 @@ end
 do -- 关闭：不切、不排程
     NightMode.tick()
     Assert.len(events, 0)
-    Assert.is_nil(delay)
+    Assert.is_nil(scheduled[NightMode.tick])
     Assert.is_nil(NightMode.window())
 end
 
@@ -86,11 +102,11 @@ do -- 定时全天是夜：首次必切，同一状态不再切（保留用户�
     Assert.len(events, 1)
     Assert.eq(events[1].name, "SetNightMode")
     Assert.is_true(events[1].arg)
-    Assert.not_nil(delay)
+    Assert.not_nil(scheduled[NightMode.tick])
     NightMode.onResume()
     Assert.len(events, 1, "昼夜没交替不重复切")
     NightMode.onPause()
-    Assert.is_nil(delay)
+    Assert.is_nil(scheduled[NightMode.tick])
 end
 
 do -- 改规则后立即按新规则切
@@ -134,6 +150,85 @@ do -- 日出日落模式按落盘经纬度出窗口
     local from, to = NightMode.window()
     Assert.not_nil(from)
     Assert.not_nil(to)
-    Assert.not_nil(delay)
+    Assert.not_nil(scheduled[NightMode.tick])
     NightMode.setMode("off")
+end
+
+do -- 自动亮度关闭：不读传感器、不设亮度
+    NightMode.sense()
+    Assert.is_nil(NightMode.lightSource())
+    Assert.len(lights, 0)
+    Assert.is_nil(scheduled[NightMode.sense])
+end
+
+do -- 有传感器：按档位查表，档位不变不重设（保留手动调节），30 秒轮询
+    display.auto_light = true
+    display.auto_light_levels = { 15, 35, 20, 0, 0 }
+    display.auto_light_day, display.auto_light_night = 30, 10
+    Assert.eq(NightMode.lightSource(), "sensor")
+    sensor_level = 1
+    NightMode.sense()
+    Assert.len(lights, 1)
+    Assert.eq(lights[1], 0.35)
+    Assert.eq(scheduled[NightMode.sense], 30)
+    NightMode.onResume()
+    Assert.len(lights, 1, "档位没变不重设")
+    sensor_level = 3
+    NightMode.sense()
+    Assert.eq(lights[2], 0, "明亮关灯")
+    NightMode.applyLight()
+    Assert.len(lights, 3, "改了设置立刻按当前档位重设")
+    display.auto_night_from, display.auto_night_to = 0, DAY
+    NightMode.setMode("schedule")
+    Assert.len(lights, 3, "有传感器时昼夜切换不管亮度")
+    NightMode.onPause()
+    Assert.is_nil(scheduled[NightMode.sense])
+    Assert.is_nil(scheduled[NightMode.tick])
+    NightMode.setMode("off")
+end
+
+do -- 无传感器（Kobo 等没有 hasLightSensor 方法）：昼夜交替时设白天 / 夜间亮度
+    lights = {}
+    Device.hasLightSensor = nil
+    Assert.is_false(NightMode.hasSensor())
+    Assert.eq(NightMode.lightSource(), "phase")
+    NightMode.setMode("schedule")
+    Assert.len(lights, 1)
+    Assert.eq(lights[1], 0.1, "全天是夜用夜间亮度")
+    NightMode.sense()
+    Assert.is_nil(scheduled[NightMode.sense], "无传感器不轮询")
+    display.auto_light_night = 20
+    NightMode.applyLight()
+    Assert.eq(lights[2], 0.2, "改了设置立刻按当前昼夜重设")
+    local switches = #events
+    NightMode.applyLight()
+    Assert.len(events, switches, "改亮度不重切夜间模式")
+    display.auto_light = false
+    NightMode.applyLight()
+    Assert.len(lights, 3, "关闭后不设亮度")
+    NightMode.setMode("off")
+end
+
+do -- 开关自动亮度：落盘并立即生效；无传感器又没开自动夜间模式时判定为不会生效
+    lights, saved = {}, 0
+    NightMode.setLight(true)
+    Assert.is_true(display.auto_light)
+    Assert.eq(saved, 1)
+    Assert.is_true(NightMode.lightIdle(), "自动夜间模式关着，亮度无昼夜可跟")
+    display.auto_night_from, display.auto_night_to = 0, DAY
+    NightMode.setMode("schedule")
+    Assert.is_false(NightMode.lightIdle())
+    Assert.eq(lights[#lights], 0.2, "开启后跟随当前昼夜")
+    local count = #lights
+    NightMode.setLight(false)
+    Assert.is_false(display.auto_light)
+    Assert.len(lights, count, "关闭不设亮度")
+    Assert.is_false(NightMode.lightIdle())
+    NightMode.setMode("off")
+end
+
+do -- 没有前光：不做任何亮度动作
+    display.auto_light = true
+    Device.hasFrontlight = function() return false end
+    Assert.is_nil(NightMode.lightSource())
 end

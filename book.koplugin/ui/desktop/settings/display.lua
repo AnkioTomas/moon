@@ -193,6 +193,76 @@ local function nightRow(desktop)
     end
 end
 
+-- 与 Device:ambientBrightnessLevel() 的 0..4 一一对应。
+local LEVEL_NAMES = { _("黑暗"), _("昏暗"), _("中性"), _("明亮"), _("刺眼") }
+
+---@param percent number
+---@return string
+local function lightLabel(percent)
+    return percent > 0 and percent .. "%" or _("关灯")
+end
+
+--- 自动亮度菜单：开关 + 各档（有传感器）或白天 / 夜间（无传感器）亮度。
+---@param desktop table
+local function openLight(desktop)
+    local conf = MoonSettings.get("display")
+    local function save()
+        MoonSettings.saveSection("display", conf)
+        NightMode.applyLight()
+        desktop:updateView()
+    end
+    local items = { { text = conf.auto_light and _("关闭") or _("开启"), value = "toggle" } }
+    local function add(name, tbl, key)
+        items[#items + 1] = { text = name .. "  " .. lightLabel(tbl[key]), value = "edit", name = name, tbl = tbl, key = key }
+    end
+    if NightMode.hasSensor() then
+        for i, name in ipairs(LEVEL_NAMES) do add(name, conf.auto_light_levels, i) end
+    else
+        add(_("白天"), conf, "auto_light_day")
+        add(_("夜间"), conf, "auto_light_night")
+    end
+    Popup.sheet{
+        title = _("自动亮度"),
+        items = items,
+        on_select = function(value, item)
+            if value == "edit" then
+                return Popup.spin{
+                    title = item.name, value = item.tbl[item.key],
+                    value_min = 0, value_max = 100, value_step = 1, value_hold_step = 5,
+                    unit = "%", ok_always_enabled = true,
+                    callback = function(spin)
+                        item.tbl[item.key] = spin.value
+                        save()
+                    end,
+                }
+            end
+            NightMode.setLight(not conf.auto_light)
+            desktop:updateView()
+            if NightMode.lightIdle() then
+                UIManager:show(InfoMessage:new{
+                    text = _("没有光线传感器，亮度跟随自动夜间模式的昼夜时间切换，请同时开启自动夜间模式。"),
+                })
+            end
+        end,
+    }
+end
+
+---@param desktop table
+---@return (fun(width: number): table)|nil
+local function lightRow(desktop)
+    if not Device:hasFrontlight() then return nil end
+    return function(iw)
+        local on = MoonSettings.get("display").auto_light
+        return SettingRow.build(iw, {
+            kind = "nav", icon = "brightness_auto", title = _("自动亮度"),
+            subtitle = NightMode.hasSensor() and _("按环境光调节；光线变化时才会覆盖手动调节")
+                or _("跟随自动夜间模式的昼夜时间切换"),
+            status = on and _("开") or _("关"), status_on = on,
+            callback = function() openLight(desktop) end,
+        })
+    end
+end
+
 ---@param ctx table
 ---@return table
 function Display:rows(ctx)
@@ -254,6 +324,8 @@ function Display:rows(ctx)
         end,
         nightRow(desktop),
     }
+    local light = lightRow(desktop)
+    if light then rows[#rows + 1] = light end
     local refresh = refreshRow(desktop)
     if refresh then rows[#rows + 1] = refresh end
     local color = colorRow(desktop)

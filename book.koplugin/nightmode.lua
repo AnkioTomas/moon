@@ -1,8 +1,11 @@
 --[[--
-自动夜间模式：定时或日出日落。
+自动夜间模式（定时或日出日落）与自动亮度。
 
 只在昼夜交替那一刻切换，用户中途手动切的夜间模式不会被立刻改回。
 日出日落离线计算（NOAA 简化算法，误差一两分钟）；经纬度在选模式时经天气接口按 IP / 天气地点取一次落盘。
+
+自动亮度：有光线传感器（仅部分 Kindle）按环境光档位查表，档位变了才改；
+否则在昼夜交替时设白天 / 夜间亮度。两条路都不覆盖用户在同一档位 / 同一昼夜里的手动调节。
 
 @module koplugin.book.nightmode
 --]]
@@ -13,8 +16,11 @@ local Text = require("utils.text")
 local NightMode = {}
 
 local DAY = 24 * 60
+local SENSOR_INTERVAL = 30
 -- 上次应用的昼夜状态；nil 表示本进程还没应用过，下次 tick 必切。
 local last
+-- 上次应用的环境光档位；nil 表示下次 sense 必设。
+local last_level
 
 ---@param d number
 ---@return number
@@ -113,6 +119,70 @@ function NightMode.window(now)
     end
 end
 
+--- 设备有光线传感器。只有 Kindle 定义了 hasLightSensor，其他设备没有这个方法。
+---@return boolean
+function NightMode.hasSensor()
+    local Device = require("device")
+    return Device.hasLightSensor ~= nil and Device:hasLightSensor()
+end
+
+--- 自动亮度的来源；关闭或没有前光时返回 nil。
+---@return "sensor"|"phase"|nil
+function NightMode.lightSource()
+    if not MoonSettings.get("display").auto_light then return nil end
+    if not require("device"):hasFrontlight() then return nil end
+    return NightMode.hasSensor() and "sensor" or "phase"
+end
+
+---@param percent number 0 = 关灯
+local function setBrightness(percent)
+    require("ui.panel.desktop").setLevel("brightness", percent / 100)
+end
+
+---@param night boolean
+local function phaseLight(night)
+    local conf = MoonSettings.get("display")
+    setBrightness(night and conf.auto_light_night or conf.auto_light_day)
+end
+
+--- 读环境光档位，档位变了才设亮度，然后排下一次读取。
+function NightMode.sense()
+    local UIManager = require("ui/uimanager")
+    UIManager:unschedule(NightMode.sense)
+    if NightMode.lightSource() ~= "sensor" then
+        last_level = nil
+        return
+    end
+    local level = require("device"):ambientBrightnessLevel()
+    if level ~= last_level then
+        last_level = level
+        setBrightness(MoonSettings.get("display").auto_light_levels[level + 1])
+    end
+    UIManager:scheduleIn(SENSOR_INTERVAL, NightMode.sense)
+end
+
+--- 亮度设置改了：立刻按当前档位 / 昼夜重设一次亮度，不碰夜间模式。
+function NightMode.applyLight()
+    last_level = nil
+    NightMode.sense()
+    if last ~= nil and NightMode.lightSource() == "phase" then phaseLight(last) end
+end
+
+--- 开关自动亮度并立即生效。
+---@param on boolean
+function NightMode.setLight(on)
+    local conf = MoonSettings.get("display")
+    conf.auto_light = on
+    MoonSettings.saveSection("display", conf)
+    NightMode.applyLight()
+end
+
+--- 自动亮度开着却不会生效：没有传感器，又没开自动夜间模式提供昼夜时间。
+---@return boolean
+function NightMode.lightIdle()
+    return NightMode.lightSource() == "phase" and MoonSettings.get("display").auto_night == "off"
+end
+
 --- 按当前时刻判定昼夜，状态变了才切，然后排到下一个切换点。
 function NightMode.tick()
     local UIManager = require("ui/uimanager")
@@ -129,6 +199,7 @@ function NightMode.tick()
     if night ~= last then
         last = night
         UIManager:broadcastEvent(require("ui/event"):new("SetNightMode", night))
+        if NightMode.lightSource() == "phase" then phaseLight(night) end
     end
     UIManager:scheduleIn(NightMode.nextDelay(minute, t.sec, from, to), NightMode.tick)
 end
@@ -161,16 +232,21 @@ end
 
 --- 插件 onCreate：FM / Reader 两个实例都会调，tick 幂等。
 function NightMode.onCreate()
-    require("ui/uimanager"):nextTick(NightMode.tick)
+    local UIManager = require("ui/uimanager")
+    UIManager:nextTick(NightMode.tick)
+    UIManager:nextTick(NightMode.sense)
 end
 
 function NightMode.onPause()
-    require("ui/uimanager"):unschedule(NightMode.tick)
+    local UIManager = require("ui/uimanager")
+    UIManager:unschedule(NightMode.tick)
+    UIManager:unschedule(NightMode.sense)
 end
 
---- 唤醒：睡眠期间跨过切换点就补切，没跨过不动。
+--- 唤醒：睡眠期间跨过切换点就补切，环境光换了档就调亮度，都没变不动。
 function NightMode.onResume()
     NightMode.tick()
+    NightMode.sense()
 end
 
 return NightMode
