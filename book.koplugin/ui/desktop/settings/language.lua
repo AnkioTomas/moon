@@ -80,11 +80,16 @@ end
 local function download(desktop, enable_after)
     if require("ime.download").downloading() then return end
     local dialog
-    local dialog_has_bar = false
+    -- 当前对话框对应的带进度条阶段；nil = 无进度条的等待提示。
+    local dialog_stage
+    local bar_titles = {
+        part = _("正在下载输入法词库…"),
+        assemble = _("拼接校验词库…"),
+    }
     --- 关掉当前进度对话框（若有）。
     local function closeDialog()
         if dialog then dialog:close(); dialog = nil end
-        dialog_has_bar = false
+        dialog_stage = nil
     end
     --- 换一个进度对话框；总量未知时退化成无进度条的等待提示。
     ---@param opts table ProgressbarDialog 参数
@@ -93,7 +98,6 @@ local function download(desktop, enable_after)
         local ok, ProgressbarDialog = pcall(require, "ui/widget/progressbardialog")
         if not ok then return end
         dialog = ProgressbarDialog:new(opts)
-        dialog_has_bar = opts.progress_max ~= nil and opts.progress_max > 0
         dialog:show()
     end
     -- manifest 拉取前无总量，先给即时反馈，避免确认框关闭后长时间空白。
@@ -113,23 +117,17 @@ local function download(desktop, enable_after)
         if desktop.lifecycle.state == "Destroy" then return end
         desktop:updateView()
     end, function(stage, done_bytes, total, _idx, count)
-        if stage == "assemble" then
-            closeDialog()
-            UIManager:show(InfoMessage:new{ text = _("拼接校验词库…"), timeout = 2 })
-            return
+        local title = bar_titles[stage]
+        if not title or not total or total <= 0 then return end
+        if dialog_stage ~= stage then
+            openDialog{
+                title = title,
+                subtitle = T(_("共 %1 片"), count) .. string.format(" · %.1f MB", total / 1048576),
+                progress_max = total, refresh_time_seconds = 1, dismissable = false,
+            }
+            dialog_stage = stage
         end
-        if (stage == "manifest" or stage == "part") and total and total > 0 then
-            if not dialog_has_bar then
-                openDialog{
-                    title = stage == "manifest"
-                        and _("正在准备下载输入法词库…") or _("正在下载输入法词库…"),
-                    subtitle = T(_("共 %1 片"), count) .. string.format(" · %.1f MB", total / 1048576),
-                    progress_max = total, refresh_time_seconds = 1, dismissable = false,
-                }
-            elseif stage == "part" then
-                dialog:reportProgress(done_bytes)
-            end
-        end
+        if dialog then dialog:reportProgress(done_bytes) end
     end)
 end
 
