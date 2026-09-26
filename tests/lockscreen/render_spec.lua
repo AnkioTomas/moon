@@ -53,6 +53,7 @@ package.preload["ffi/blitbuffer"] = function()
     }
 end
 
+package.loaded["device"] = { screen = { night_mode = false } }
 package.preload["ui/font"] = function()
     return { getFace = function() return {} end }
 end
