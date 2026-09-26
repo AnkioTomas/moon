@@ -17,8 +17,11 @@ local T = require("ffi/util").template
 ---@class BookSettingsReaderBar
 local ReaderBar = {}
 ---@return table|nil
+--- 正在阅读的 ReaderUI。关书时 closeDocument 先清 document，onCloseWidget 才清 instance，
+--- 中间这段 instance 已不可用；偏好照常落盘，下次开书由 Bars.applyPreferences 应用。
 local function readerUi()
-    return require("apps/reader/readerui").instance
+    local ui = require("apps/reader/readerui").instance
+    return ui and ui.document and ui or nil
 end
 
 local function refreshReaderUi()
