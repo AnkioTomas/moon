@@ -24,6 +24,7 @@ local DEFAULTS = {
     display = {
         ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,
         library_sort = "recent_added",
+        mesh_mask = true,
         -- off / schedule / sun；时间是当天分钟数，sun 模式另存 auto_night_lat / auto_night_lon。
         auto_night = "off", auto_night_from = 22 * 60, auto_night_to = 7 * 60,
         -- 亮度百分比，0 = 关灯。有光线传感器按 ambientBrightnessLevel 0..4 查 levels，否则跟昼夜切换用 day / night。

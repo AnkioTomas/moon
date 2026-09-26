@@ -322,6 +322,19 @@ function Display:rows(ctx)
                 end,
             })
         end,
+        function(iw)
+            local conf = MoonSettings.get("display")
+            return SettingRow.build(iw, {
+                kind = "toggle", icon = "texture", title = _("背景遮罩"),
+                subtitle = _("弹出面板和菜单时用网点压暗背景"),
+                status = conf.mesh_mask and _("开") or _("关"), status_on = conf.mesh_mask,
+                callback = function()
+                    conf.mesh_mask = not conf.mesh_mask
+                    MoonSettings.saveSection("display", conf)
+                    desktop:updateView()
+                end,
+            })
+        end,
         nightRow(desktop),
     }
     local light = lightRow(desktop)

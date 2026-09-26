@@ -23,6 +23,8 @@ package.preload["ffi/blitbuffer"] = function()
 end
 local screen = { night_mode = false }
 package.loaded["device"] = { screen = screen }
+local display = { mesh_mask = true }
+package.loaded["utils.settings"] = { get = function() return display end }
 
 package.loaded["ui.components.meshmask"] = nil
 local MeshMask = require("ui.components.meshmask")
@@ -49,3 +51,9 @@ screen.night_mode = true
 mask:paintTo(bb, 0, 0)
 Assert.eq(#painted, 4)
 Assert.eq(painted[1].color, 255, "夜间画白点")
+
+-- 设置关闭遮罩：一个点都不画
+painted = {}
+display.mesh_mask = false
+mask:paintTo(bb, 0, 0)
+Assert.eq(#painted, 0, "关闭后不画")
