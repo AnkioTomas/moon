@@ -135,7 +135,7 @@ Assert.eq(server_opts.handlers.resolve_download(wallpaper), wallpaper)
 
 local secret = data .. "/.moon/settings/moon.lua"
 files[secret] = true
-Assert.is_nil(server_opts.handlers.resolve_download(secret))
+Assert.eq(server_opts.handlers.resolve_download(secret), secret)
 
 -- 跨设备上传：读错或刷盘失败不能将临时文件改名成正式文件。
 package.preload["workers.job"] = function()
@@ -151,7 +151,7 @@ package.preload["workers.job"] = function()
 end
 package.loaded["workers.job"] = nil
 
--- 删除要和改名、下载一样挡住配置/凭证；公开壁纸目录照常可删。
+-- 删除要和改名一样挡住配置/凭证；公开壁纸目录照常可删。
 do
     local deleted, delete_err
     server_opts.handlers.delete(secret, function(ok, err) deleted, delete_err = ok, err end)
@@ -218,14 +218,17 @@ Assert.is_nil(save_err)
 Assert.is_true(published)
 io.open, os.rename = original_open, original_rename
 
--- .moon 软链到书籍根内（如外置卡）：realpath 后的凭证路径仍须被挡。
+-- .moon 软链到书籍根内（如外置卡）：realpath 后的凭证路径仍须挡删除。
 Remote.stop()
 links[data .. "/.moon"] = book .. "/moon-sd"
 dirs[book .. "/moon-sd"] = true
 files[book .. "/moon-sd/settings/moon.lua"] = true
 Assert.is_true(Remote.start())
-Assert.is_nil(server_opts.handlers.resolve_download(data .. "/.moon/settings/moon.lua"))
-Assert.is_nil(server_opts.handlers.resolve_download(book .. "/moon-sd/settings/moon.lua"))
+do
+    local delete_err
+    server_opts.handlers.delete(book .. "/moon-sd/settings/moon.lua", function(_, err) delete_err = err end)
+    Assert.eq(delete_err, "protected path")
+end
 links = {}
 
 -- 软链接只操作链接本身：删除/改名不能落到链接指向的书上，指向范围外的链接也能删。

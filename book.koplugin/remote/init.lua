@@ -113,8 +113,8 @@ local function storageLayout()
             moon_dir,
             book,
         },
-        -- 凭证所在：protected 只挡删除/改名（判定的是「祖先」），下载读取要另挡
-        -- 「这些路径之内」，否则 /download 能把 moon token、zlib 密码、AI key 拉走。
+        -- 配置所在：protected 只挡重要路径本身及其祖先，目录内的单个配置文件
+        -- 还要另挡删除/改名/解压，否则误操作会弄坏登录态和设置。
         secret = {
             settings_dir,
             reader_settings,
@@ -393,23 +393,15 @@ local function listDirAsync(path, cb)
     end, cb)
 end
 
---- 下载解析：存在、是普通文件、且不是配置/凭证。
+--- 下载解析：存在且是普通文件。
 ---@param path string
 ---@return string|nil
 local function resolveDownload(path)
     local resolved = existingPath(path)
-    if not resolved then
+    if not resolved or require("libs/libkoreader-lfs").attributes(resolved, "mode") ~= "file" then
         return nil
     end
-    path = resolved
-    if require("libs/libkoreader-lfs").attributes(path, "mode") ~= "file" then
-        return nil
-    end
-    if isSecret(path) then
-        logger.warn("book remote reject download of config file:", path)
-        return nil
-    end
-    return path
+    return resolved
 end
 
 --- 流式复制（os.rename 跨设备失败时的退路）；失败不留半截目标。
@@ -701,8 +693,7 @@ local function renameTo(path, to)
         return nil, "path outside managed roots"
     end
     path, to = src, dst
-    -- isProtected 只挡凭证目录本身及其祖先，挡不住目录里的单个文件：
-    -- 把 settings/moon.lua 改名搬出去，再 /download 就能拿到 token。
+    -- isProtected 只挡配置目录本身及其祖先，挡不住目录里的单个文件。
     if isSecret(path) or isSecret(to) then
         logger.warn("book remote reject rename of config file:", path, "→", to)
         return nil, "protected path"
