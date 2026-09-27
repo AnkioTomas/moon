@@ -74,6 +74,43 @@ function Crypto.decrypt_content(encrypted_content_b64, v1_key_hex)
     return Aes.cbc_decrypt(raw:sub(17), key, raw:sub(1, 16), true)
 end
 
+local libz_cache
+
+--- libz 句柄；加载失败返回 false。
+---@return table|false
+local function loadLibz()
+    if libz_cache ~= nil then return libz_cache end
+    local ffi = require("ffi")
+    -- 逐条 cdef：同名函数可能已被其他模块声明，重复声明报错不能连带丢掉其余声明。
+    -- 参数用 void * 才能兼容他人以 z_stream * 声明的同名函数。
+    for _, decl in ipairs({
+        [[typedef struct {
+            const unsigned char *next_in;
+            unsigned int avail_in;
+            unsigned long total_in;
+            unsigned char *next_out;
+            unsigned int avail_out;
+            unsigned long total_out;
+            const char *msg;
+            void *state;
+            void *(*zalloc)(void *, unsigned int, unsigned int);
+            void (*zfree)(void *, void *);
+            void *opaque;
+            int data_type;
+            unsigned long adler;
+            unsigned long reserved;
+        } moon_z_stream;]],
+        "int inflateInit2_(void *, int, const char *, int);",
+        "int inflate(void *, int);",
+        "int inflateEnd(void *);",
+    }) do
+        pcall(ffi.cdef, decl)
+    end
+    local ok, lib = pcall(ffi.load, "z")
+    libz_cache = ok and lib or false
+    return libz_cache
+end
+
 --- 尽量解压 gzip/zlib；失败则原样返回。
 ---@param data string
 ---@param compress_status number|nil
@@ -86,40 +123,8 @@ function Crypto.maybe_decompress(data, compress_status)
     if not need then return data end
 
     local ffi = require("ffi")
-    if not Crypto._inflate_ready then
-        local ok_cdef = pcall(function()
-            ffi.cdef[[
-                typedef struct z_stream_s {
-                    const unsigned char *next_in;
-                    unsigned int avail_in;
-                    unsigned long total_in;
-                    unsigned char *next_out;
-                    unsigned int avail_out;
-                    unsigned long total_out;
-                    const char *msg;
-                    void *state;
-                    void *(*zalloc)(void *, unsigned int, unsigned int);
-                    void (*zfree)(void *, void *);
-                    void *opaque;
-                    int data_type;
-                    unsigned long adler;
-                    unsigned long reserved;
-                } z_stream;
-                int inflateInit2_(z_stream *strm, int windowBits, const char *version, int stream_size);
-                int inflate(z_stream *strm, int flush);
-                int inflateEnd(z_stream *strm);
-                const char *zlibVersion(void);
-            ]]
-        end)
-        if ok_cdef then
-            Crypto._inflate_ready = true
-        end
-    end
-
-    local ok_lib, libz = pcall(function()
-        return ffi.load("z")
-    end)
-    if not ok_lib or not libz then
+    local libz = loadLibz()
+    if not libz then
         local ok2, zlib = pcall(require, "ffi/zlib")
         if ok2 and zlib and is_zlib then
             local buflen = math.max(#data * 8, 64)
@@ -133,12 +138,9 @@ function Crypto.maybe_decompress(data, compress_status)
     end
 
     local function inflate(blob, window_bits)
-        local strm = ffi.new("z_stream")
-        local ver = "1.2.11"
-        if libz.zlibVersion then
-            ver = ffi.string(libz.zlibVersion())
-        end
-        local rc = libz.inflateInit2_(strm, window_bits, ver, ffi.sizeof("z_stream"))
+        local strm = ffi.new("moon_z_stream")
+        local zs = ffi.cast("void *", strm)
+        local rc = libz.inflateInit2_(zs, window_bits, "1.2.11", ffi.sizeof(strm))
         if rc ~= 0 then
             return nil
         end
@@ -152,21 +154,21 @@ function Crypto.maybe_decompress(data, compress_status)
             local buf = ffi.new("unsigned char[?]", out_cap)
             strm.next_out = buf
             strm.avail_out = out_cap
-            local ret = libz.inflate(strm, 0)
+            local ret = libz.inflate(zs, 0)
             local produced = out_cap - strm.avail_out
             if produced > 0 then
                 chunks[#chunks + 1] = ffi.string(buf, produced)
             end
             if ret == 1 then
-                libz.inflateEnd(strm)
+                libz.inflateEnd(zs)
                 return table.concat(chunks)
             end
             if ret ~= 0 then
-                libz.inflateEnd(strm)
+                libz.inflateEnd(zs)
                 return nil
             end
             if strm.avail_in == 0 and strm.avail_out ~= 0 then
-                libz.inflateEnd(strm)
+                libz.inflateEnd(zs)
                 return table.concat(chunks)
             end
         end
