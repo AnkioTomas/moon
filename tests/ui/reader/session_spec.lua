@@ -454,6 +454,26 @@ do
     Session.onCloseDocument(plugin)
 end
 
+-- 注解事件离线：只落盘，不 push，也不走 runWhenOnline 弹联网提示。
+do
+    local NetworkMgr = require("ui/network/manager")
+    local old_online, old_run = NetworkMgr.isOnline, NetworkMgr.runWhenOnline
+    local prompted = false
+    NetworkMgr.isOnline = function() return false end
+    NetworkMgr.runWhenOnline = function() prompted = true end
+    local plugin = mkPlugin("/x/book.epub")
+    plugin.ui.annotation = { annotations = { { text = "高亮" } } }
+    Session.onReaderReady(plugin)
+    local notes_before = #(calls.notes or {})
+    Session.onAnnotationsModified(plugin, { { text = "变更描述" } })
+    Stubs.flush()
+    Assert.eq(calls.notes[notes_before + 1][2], plugin.ui)
+    Assert.is_nil(calls.notes[notes_before + 2], "离线不 push")
+    Assert.is_false(prompted, "离线不弹联网提示")
+    NetworkMgr.isOnline, NetworkMgr.runWhenOnline = old_online, old_run
+    Session.onCloseDocument(plugin)
+end
+
 -- ReaderReady 遇到整本书必须立即丢弃残留的章节会话。
 do
     stored_toc.chapters = { { idx = 1 }, { idx = 2 } }

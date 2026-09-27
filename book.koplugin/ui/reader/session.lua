@@ -257,7 +257,7 @@ function Session.onPageChanged(plugin, page)
     end
 end
 
---- 注解变化：落盘后有网即 dirty push；完整 pull 留给开书 Note.pull。
+--- 注解变化：落盘后已在线才 dirty push；离线留脏给 Sync.retryDirtyAsync，不弹联网提示。
 ---@param plugin table Book 插件实例
 ---@param _items table KOReader 变更描述；完整数据从 annotation.annotations 读取
 function Session.onAnnotationsModified(plugin, _items)
@@ -267,9 +267,8 @@ function Session.onAnnotationsModified(plugin, _items)
         if not ok then return end
         local source = identity and identity.source
         if not source or not source.syncNotesAsync then return end
-        require("ui/network/manager"):runWhenOnline(function()
-            source:syncNotesAsync({ identity = identity, dirty_only = true }, function() end)
-        end)
+        if not require("ui/network/manager"):isOnline() then return end
+        source:syncNotesAsync({ identity = identity, dirty_only = true }, function() end)
     end)
 end
 
