@@ -180,10 +180,14 @@ function M:createWidget()
     return Clock.stack(self, putHero(self, self.ctx.desktop), detail, extra)
 end
 
---- 将最新天气写入已有文字和图标行，然后刷新内容区域。
+--- 将最新天气写入已有文字和图标行；文字和图标都未变时不刷新。
 function M:paint()
     if not self.temp then return end
     local temp, detail, extra = texts(self.wx)
+    if self.temp.text == temp and self.detail.text == detail and self.extra.text == extra
+        and self.picture and self.picture.src == imageSrc(self.wx) then
+        return
+    end
     self.temp:setText(temp)
     self.detail:setText(detail)
     self.extra:setText(extra)

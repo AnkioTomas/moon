@@ -152,15 +152,19 @@ function M:createWidget()
     return widget
 end
 
---- 把当前数据写入已有行并刷新内容区域。
+--- 把当前数据写入已有行；所有行都未变时不刷新。
 function M:updateView()
     if not self.items then return end
+    local changed = false
     for i = 1, self.lines do
         local mark, title = self:row(i)
-        self.marks[i]:setText(mark)
-        self.items[i]:setText(title)
+        if self.marks[i].text ~= mark or self.items[i].text ~= title then
+            changed = true
+            self.marks[i]:setText(mark)
+            self.items[i]:setText(title)
+        end
     end
-    self:dirty("content")
+    if changed then self:dirty("content") end
 end
 
 --- 异步取得摸鱼日报中的本组件字段，失败时保留已有数据。

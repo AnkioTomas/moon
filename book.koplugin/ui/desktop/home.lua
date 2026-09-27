@@ -504,7 +504,8 @@ function Home:onEvent(event, payload)
             end
         end
         broadcast(self, "onEvent", event, payload)
-        self:updateView()
+        -- 换源后 Desktop 必然 switchTab("home") 重建首页，这里再建一次是白做。
+        if event ~= "source_changed" then self:updateView() end
         return
     end
     if event == "swipe" then

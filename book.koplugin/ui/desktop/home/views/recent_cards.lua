@@ -277,6 +277,7 @@ function M:createWidget()
     local h = opts.height
     local source = ctx.source or (ctx.desktop and ctx.desktop.source)
     local recent, reading, err = Catalog.recentShelf(source and source.id, 24)
+    self.shelf_key = M.shelfKey(recent, reading, err)
     reading = reading or {}
 
     if not recent then

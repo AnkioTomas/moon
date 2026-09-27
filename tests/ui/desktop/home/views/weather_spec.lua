@@ -146,7 +146,7 @@ do -- 默认空态：多云占位 + --°；失败不改字
     Assert.len(images, 1, "空占位同 src 复用")
     fetch_cb({}, "network")
     Assert.eq(weather.temp.text, "--°")
-    Assert.eq(paints, 1, "Resume 脏一次，失败不再加")
+    Assert.eq(paints, 0, "内容与图标未变，Resume 与失败都不刷新")
     weather:onPause()
     Assert.eq(cancelled, 0, "已完成请求不应再登记为在飞任务")
     weather:onDestroy()
@@ -179,8 +179,17 @@ do -- 成功才补温度和彩图；同 URL 复用框；两行辅文
     Assert.eq(weather.picture.src, "https://cdn.example/w.png")
     Assert.eq(weather.hero[3], weather.temp, "有图时温度在主行右侧")
     local first = weather.picture
+    local painted = paints
     weather:paint()
     Assert.eq(weather.picture, first, "同 URL 复用当前框")
+    Assert.eq(paints, painted, "内容未变不刷新")
+    weather:pull()
+    fetch_cb({
+        temp = "26", desc = "阴", city = "上海", low = "18", high = "28",
+        feels = "25", humidity = "62", wind = "北", wind_kmph = "12",
+        icon = "overcast", image = "https://cdn.example/w.png",
+    })
+    Assert.eq(paints, painted, "缓存命中返回同内容的新表，不得再刷一次")
     Assert.eq(#scheduled, 1)
 
     weather:onPause()

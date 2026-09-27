@@ -194,15 +194,27 @@ function M:createWidget()
     return widget
 end
 
---- 重新查询所属源统计，原地更新三个数值并刷新内容区域。
+--- 重新查询所属源统计，原地更新三个数值；全未变时不刷新。
 function M:updateView()
     if not self.values then return end
     local source = self.ctx and self.ctx.source
     local latest = source and summarize(source.id) or {}
-    self.values[1]:setText(T(_("%1天"), latest.streak or 0))
-    self.values[2]:setText(latest.total_text or "—")
-    self.values[3]:setText(latest.today_text or "—")
-    self:dirty("content")
+    local texts = { T(_("%1天"), latest.streak or 0), latest.total_text or "—", latest.today_text or "—" }
+    local changed = false
+    for i, text in ipairs(texts) do
+        if self.values[i].text ~= text then
+            changed = true
+            self.values[i]:setText(text)
+        end
+    end
+    if changed then self:dirty("content") end
+end
+
+--- 统计同步落库后只原地更新数值，不重建首页。
+---@param event string|table 父组件转发的事件名称或事件对象
+function M:onEvent(event)
+    if event == "stats_changed" then return self:updateView() end
+    require("ui.desktop.home.views.base").onEvent(self, event)
 end
 
 --- 恢复显示时刷新阅读统计数值。
