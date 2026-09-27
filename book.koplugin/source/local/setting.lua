@@ -46,14 +46,16 @@ function Setting.rows(plugin)
         local dialog
         dialog = InputDialog:new{ title = title, input = tostring(cfg[key] or ""),
             text_type = password and "password" or nil,
-            buttons = {{ text = _("取消"), id = "close", callback = function() UIManager:close(dialog) end },
-                { text = _("保存"), callback = function()
+            buttons = {{
+                { text = _("取消"), id = "close", callback = function() UIManager:close(dialog) end },
+                { text = _("保存"), is_enter_default = true, callback = function()
                     cfg[key] = Text.trim(dialog:getInputText())
                     require("utils.settings").saveSource(SOURCE_ID, cfg)
                     require("source.registry").invalidate()
                     UIManager:close(dialog)
                     if plugin and plugin.desktop then plugin.desktop:updateView() end
-                end }}}
+                end },
+            }}}
         UIManager:show(dialog); dialog:onShowKeyboard()
     end
     local function row(key, title, password, icon)
