@@ -1,5 +1,5 @@
 --[[--
-X-Ray 阅读上下文：当前可见页 + 其前最多 2000 字节正文。
+X-Ray 阅读上下文：当前可见页 + 本章开头到当前页之前的正文（过长保留末尾）。
 
 @module koplugin.book.xray.context
 --]]
@@ -8,7 +8,7 @@ local Text = require("utils.text")
 
 local Context = {}
 
-local PRIOR_TEXT_LIMIT = 2000
+local PRIOR_TEXT_LIMIT = 24000
 local VISIBLE_TEXT_LIMIT = 12000
 
 --- 取阅读会话维护的当前页码。
@@ -78,12 +78,13 @@ end
 
 --- 当前可见页正文与页码；滚动文档按屏幕坐标取字。
 ---@param ui table|nil
+---@param page integer|nil 分页文档的页码，缺省取阅读会话页码
 ---@return string|nil, integer
-function Context.visibleText(ui)
+function Context.visibleText(ui, page)
     if not ui then return nil, 0 end
     local document = ui.document
     if not document then return nil, 0 end
-    local page = currentPage()
+    page = page or currentPage()
     local text
     if ui.rolling and document.getTextFromPositions then
         local view = ui.view
@@ -107,18 +108,41 @@ function Context.visibleText(ui)
     return Text.truncateUtf8(text, VISIBLE_TEXT_LIMIT), page
 end
 
---- 当前页之前的正文（不含当前页），最多 PRIOR_TEXT_LIMIT 字节。
+--- 本章起始页；没有目录（如单章文件）时为 1。
+---@param ui table
+---@param page integer
+---@return integer
+local function chapterStart(ui, page)
+    local toc = ui.toc
+    if not toc or not toc.getPreviousChapter then return 1 end
+    if toc:isChapterStart(page) then return page end
+    return toc:getPreviousChapter(page) or 1
+end
+
+--- 本章开头到当前页之前的正文（不含当前页），超过 limit 字节保留末尾。
 ---@param ui table
 ---@param end_page integer
+---@param limit integer|nil 缺省 PRIOR_TEXT_LIMIT
 ---@return string
-function Context.priorText(ui, end_page)
-    local limit = PRIOR_TEXT_LIMIT
-    if end_page <= 1 then
+function Context.priorText(ui, end_page, limit)
+    limit = limit or PRIOR_TEXT_LIMIT
+    local start_page = chapterStart(ui, end_page)
+    if end_page <= start_page then
         return ""
+    end
+    local document = ui.document
+    -- CRE 没有逐页取字接口，只能按两页起点的 xpointer 取区间文本。
+    if ui.rolling and document.getPageXPointer then
+        local ok, text = pcall(function()
+            return document:getTextFromXPointers(
+                document:getPageXPointer(start_page), document:getPageXPointer(end_page))
+        end)
+        text = ok and Text.trim(Text.normalizeNewlines(text)) or ""
+        return tailUtf8(text, limit)
     end
     local parts = {}
     local total = 0
-    for page = end_page - 1, 1, -1 do
+    for page = end_page - 1, start_page, -1 do
         local text = pageText(ui, page)
         if text ~= "" then
             local room = limit - total
@@ -139,8 +163,9 @@ end
 
 --- 组装 X-Ray 分析上下文。
 ---@param ui table
+---@param prior_limit integer|nil 前文字节上限，缺省 PRIOR_TEXT_LIMIT
 ---@return { current_page: string, prior_text: string, page: integer }
-function Context.forAnalysis(ui)
+function Context.forAnalysis(ui, prior_limit)
     local page = currentPage()
     local visible, visible_page = Context.visibleText(ui)
     if visible_page and visible_page > 0 then
@@ -148,7 +173,7 @@ function Context.forAnalysis(ui)
     end
     return {
         current_page = visible or pageText(ui, page),
-        prior_text = Context.priorText(ui, page),
+        prior_text = Context.priorText(ui, page, prior_limit),
         page = page,
     }
 end

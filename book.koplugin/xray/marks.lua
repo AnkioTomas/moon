@@ -128,6 +128,29 @@ local function collectNames(entities)
     return names
 end
 
+---@param s string
+---@return string
+local function squash(s)
+    return (s:lower():gsub("%s+", ""))
+end
+
+--- 用一次取到的屏幕文字粗筛名字，只让真正出现的名字去做逐个定位；
+--- 去空白比较，兼容 PDF 词框按空格拼接的中文。取不到文字时不筛。
+---@param names table[]
+---@param text string|nil
+---@return table[]
+local function namesOnScreen(names, text)
+    if not text then return names end
+    local haystack = squash(text)
+    local out = {}
+    for index, item in ipairs(names) do
+        if haystack:find(squash(item.name), 1, true) then
+            out[#out + 1] = item
+        end
+    end
+    return out
+end
+
 ---@param box table|nil
 ---@param width number|nil
 ---@param height number|nil
@@ -158,7 +181,8 @@ local function scanVisibleMarks(ui, entities)
         }
     end
 
-    local names = collectNames(entities)
+    local page = currentPage(ui)
+    local names = namesOnScreen(collectNames(entities), require("xray.context").visibleText(ui, page))
     if document.getScreenBoxesFromPositions and document.findText then
         for _, item in ipairs(names) do
             -- CRE 的 findText 只搜索当前视口附近有限高度；结果仍按屏幕相交严格裁剪。
@@ -189,7 +213,6 @@ local function scanVisibleMarks(ui, entities)
         return out
     end
 
-    local page = currentPage(ui)
     local kopt = document.koptinterface
     if page < 1 or not kopt or not kopt.findAllMatches then
         return out

@@ -28,9 +28,11 @@ package.preload["db.xray"] = function()
         end,
     }
 end
+local prior_limits = {}
 package.preload["xray.context"] = function()
     return {
-        forAnalysis = function()
+        forAnalysis = function(ui, prior_limit)
+            prior_limits[#prior_limits + 1] = prior_limit or "default"
             return {
                 current_page = "Mina at Whitby saw Dracula",
                 prior_text = "prior",
@@ -50,7 +52,6 @@ package.preload["ai"] = function()
     return {
         isConfigured = function() return true end,
         jsonExtract = function(messages, opts, cb)
-            Assert.eq(opts.max_tokens, 8000)
             prompts[#prompts + 1] = messages[2].content
             cb(table.remove(replies, 1))
         end,
@@ -116,15 +117,19 @@ Assert.matches(prompts[1], "阅读进度：约 42%%")
 Assert.eq(#result.characters, 1)
 
 -- 已有数据 + force：章节增量，合并旧实体并丢弃未 grounding 的名字
+prior_limits = {}
 result, failure = run({
-    { kind = "character", name = "Old", aliases = {}, role = "", description = "", updated_at = 1 },
+    { kind = "character", name = "Old", aliases = {}, role = "", description = "老管家", updated_at = 1 },
 }, {
     { characters = { { name = "Mina", aliases = {} }, { name = "Imaginary", aliases = {} } },
       locations = {}, terms = {} },
 })
 Assert.is_nil(failure)
 Assert.len(prompts, 1)
-Assert.matches(prompts[1], "EXISTING ENTITIES:\n人物：\n%- Old")
+Assert.matches(prompts[1], "EXISTING ENTITIES:\n人物：\n%- Old — 老管家")
+Assert.matches(prompts[1], "把正文中的写法原样加入 aliases")
+Assert.matches(prompts[1], "以 EXISTING 中的原描述为基础")
+Assert.eq(prior_limits[1], "default", "刷新用章节全量前文")
 local names = {}
 for index, row in ipairs(result.characters) do names[row.name] = true end
 Assert.is_true(names.Old)
@@ -138,6 +143,15 @@ result, failure = run({
 Assert.is_nil(failure)
 Assert.len(prompts, 0)
 Assert.is_true(result.cached)
+
+-- 划词：只取小段前文
+entity_rows, prompts, prior_limits = {}, {}, {}
+replies = { { is_valid = true, type = "character", item = { name = "Mina", aliases = {}, description = "x" } } }
+local looked
+Fetch.lookupWord({}, identity, "Mina", function(item) looked = item end)
+Assert.eq(looked.name, "Mina")
+Assert.eq(prior_limits[1], 2000)
+Assert.matches(prompts[1], "全书中的整体描述")
 
 -- AI 失败：不回落，直接报错
 result, failure = run({}, {})

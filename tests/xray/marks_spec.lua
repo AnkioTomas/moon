@@ -129,6 +129,21 @@ Assert.eq(job_runs, 4)
 Assert.eq(find_calls[5].pos, 300)
 Assert.eq(find_calls[6].pos, 300)
 
+-- 能取到屏幕文字时先本地粗筛：只对屏上出现的名字调用 findText。
+Marks.ui.rolling = {}
+Marks.ui.document.getTextFromPositions = function()
+    return { text = "John walked in." }
+end
+find_calls = {}
+current_pos = 400
+Marks:updateView()
+Stubs.flush()
+Assert.len(find_calls, 1)
+Assert.eq(find_calls[1].pattern, "John")
+Assert.len(Marks._marks, 1)
+Marks.ui.rolling = nil
+Marks.ui.document.getTextFromPositions = nil
+
 -- 分页文档（PDF/DJVU）：koptinterface 只接收 ReaderUI 的实时当前页。
 package.loaded["xray.marks"] = nil
 Marks = require("xray.marks")
@@ -164,7 +179,7 @@ Marks._render_key = nil
 Marks:updateView()
 Assert.len(searched_pages, 0)
 Stubs.flush()
-Assert.eq(job_runs, 5)
+Assert.eq(job_runs, 6)
 Assert.eq(searched_pages[1], 3, "不能使用滞后的 session.page=0")
 Assert.len(Marks._marks, 1)
 Assert.eq(Marks._marks[1].box.x, 20)
