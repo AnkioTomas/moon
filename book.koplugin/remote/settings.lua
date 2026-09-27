@@ -19,6 +19,7 @@ local SECRET_KEYS = {
     ai_api_key = true,
     token = true,
     password = true,
+    webdav_password = true,
 }
 
 --- 密钥脱敏：空值回空串，否则一律占位符。
@@ -66,6 +67,7 @@ function SettingsApi.snapshot()
     local moon = Settings.getSource("moon")
     local copymanga = Settings.getSource("copymanga") or {}
     local zlib = Settings.getSource("zlib")
+    local localSource = Settings.getSource("local")
     return {
         ai = {
             ai_endpoint = asStr(ai.ai_endpoint),
@@ -85,6 +87,12 @@ function SettingsApi.snapshot()
             email = asStr(zlib.email),
             password = maskValue(zlib.password),
             base_url = asStr(zlib.base_url),
+        },
+        ["local"] = {
+            webdav_url = asStr(localSource.webdav_url),
+            webdav_username = asStr(localSource.webdav_username),
+            webdav_password = maskValue(localSource.webdav_password),
+            webdav_path = asStr(localSource.webdav_path),
         },
     }
 end
@@ -156,6 +164,20 @@ function SettingsApi.apply(payload)
         if changed_group then
             -- Credentials and endpoint affect the active client/session.
             Settings.saveSource("copymanga", cfg)
+            require("source.registry").invalidate()
+            changed = true
+        end
+    end
+
+    if type(payload["local"]) == "table" then
+        local cfg = Settings.getSource("local")
+        local g = payload["local"]
+        local local_changed = false
+        for _, key in ipairs({ "webdav_url", "webdav_username", "webdav_password", "webdav_path" }) do
+            local_changed = applyField(cfg, key, g[key], Text.trim) or local_changed
+        end
+        if local_changed then
+            Settings.saveSource("local", cfg)
             require("source.registry").invalidate()
             changed = true
         end

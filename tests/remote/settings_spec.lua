@@ -10,6 +10,7 @@ local store = {
     ai = { ai_endpoint = "", ai_api_key = "", ai_model = "" },
     moon = { base_url = "", token = "" },
     zlib = { email = "", password = "", base_url = nil },
+    ["local"] = { path = "/mnt/books" },
 }
 local invalidated = 0
 
@@ -90,8 +91,36 @@ do
     Assert.eq(store.zlib.password, "keep-password")
     Assert.eq(store.zlib.base_url, "https://keep.zlib")
 
-    result = SettingsApi.apply({ ai = {}, moon = {}, zlib = {} })
+    result = SettingsApi.apply({ ai = {}, moon = {}, zlib = {}, ["local"] = {} })
     Assert.is_false(result.changed)
+end
+
+-- 本地源 WebDAV：trim 落盘、密码脱敏、占位符不覆盖、不碰 path。
+do
+    invalidated = 0
+    local result = SettingsApi.apply({ ["local"] = {
+        webdav_url = " https://dav.test/dav ",
+        webdav_username = "u",
+        webdav_password = "dav-secret",
+        webdav_path = "/books",
+    } })
+    Assert.is_true(result.changed)
+    Assert.eq(invalidated, 1)
+    local cfg = store["local"]
+    Assert.eq(cfg.webdav_url, "https://dav.test/dav")
+    Assert.eq(cfg.webdav_password, "dav-secret")
+    Assert.eq(cfg.path, "/mnt/books")
+    Assert.eq(result.settings["local"].webdav_password, SettingsApi.MASK)
+    Assert.eq(result.settings["local"].webdav_path, "/books")
+
+    result = SettingsApi.apply({ ["local"] = { webdav_password = SettingsApi.MASK, webdav_path = "" } })
+    Assert.eq(cfg.webdav_password, "dav-secret")
+    Assert.eq(cfg.webdav_path, "")
+    Assert.eq(invalidated, 2)
+
+    result = SettingsApi.apply({ ["local"] = { webdav_url = "https://dav.test/dav" } })
+    Assert.is_false(result.changed)
+    Assert.eq(invalidated, 2)
 end
 
 for _, name in ipairs({

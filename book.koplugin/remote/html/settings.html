@@ -96,6 +96,30 @@
 </div>
 <div class="form-state" id="state-zlib" role="status" aria-live="polite"></div>
 </form>
+
+<form id="form-local" class="panel cfg-form" autocomplete="off">
+<h2>本地书库 WebDAV</h2>
+<div class="field">
+<label for="webdav_url">WebDAV 地址</label>
+<input id="webdav_url" name="webdav_url" type="url" inputmode="url" placeholder="https://dav.example.com/dav">
+</div>
+<div class="field">
+<label for="webdav_username">用户名</label>
+<input id="webdav_username" name="webdav_username" type="text" autocomplete="username">
+</div>
+<div class="field">
+<label for="webdav_password">密码</label>
+<input id="webdav_password" name="webdav_password" type="password" autocomplete="current-password">
+</div>
+<div class="field">
+<label for="webdav_path">目录</label>
+<input id="webdav_path" name="webdav_path" type="text">
+</div>
+<div class="btns">
+<button type="submit" class="primary">保存 WebDAV 配置</button>
+</div>
+<div class="form-state" id="state-local" role="status" aria-live="polite"></div>
+</form>
 </div>
 </main>
 
