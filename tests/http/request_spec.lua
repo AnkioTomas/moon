@@ -454,5 +454,33 @@ do
     Assert.is_nil(stream._write_callback)
     Assert.eq(#ioloop._callbacks, 1)
     Assert.eq(ioloop._callbacks[1][1], keeper)
+
+    -- Basic 认证：turbo 不认 auth_username，必须自己写 Authorization 头（WebDAV 401 回归）。
+    ioloop.add_callback = function(_, fn)
+        local co = coroutine.create(fn)
+        local _, res = coroutine.resume(co)
+        if coroutine.status(co) == "suspended" then
+            coroutine.resume(co, res)
+        end
+    end
+    local sent
+    turbo.async.HTTPClient = function()
+        return {
+            fetch = function(_, _url, opts)
+                sent = {}
+                opts.on_headers({
+                    get = function(_, name) return sent[name] end,
+                    set = function(_, name, value) sent[name] = value end,
+                    add = function(_, name, value) sent[name] = value end,
+                })
+                return { code = 207, body = "" }
+            end,
+        }
+    end
+    Request.request({ url = "http://127.0.0.1:8088/books/", method = "PROPFIND",
+        auth_username = "moon", auth_password = "moon" }, function() end)
+    Assert.eq(sent.Authorization, "Basic bW9vbjptb29u")
+    Request.request({ url = "http://127.0.0.1:8088/books/", auth_username = "" }, function() end)
+    Assert.is_nil(sent.Authorization)
 end
 
