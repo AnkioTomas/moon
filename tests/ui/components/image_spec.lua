@@ -53,10 +53,18 @@ package.preload["ffi/blitbuffer"] = function()
     return { COLOR_WHITE = 0 }
 end
 
+-- 假时钟：每次解码推进 decode_ms，模拟设备上的解码耗时。
+local now_ms, decode_ms = 0, 0
+package.preload["utils.perf"] = function()
+    return { now = function() return now_ms end }
+end
+package.loaded["utils.perf"] = nil
+
 local image_widgets = {}
 package.preload["ui/widget/imagewidget"] = function()
     return {
         new = function(_, opts)
+            now_ms = now_ms + decode_ms
             image_widgets[#image_widgets + 1] = opts
             opts.free = function() end
             opts.getSize = function()
@@ -235,18 +243,30 @@ Stubs.flush()
 Assert.eq(#image_widgets, before_large + 3, "大图在后续帧解码")
 for i = 1, #large do large[i]:free() end
 
--- 续排若 0 延迟，UIManager 会在读输入前把整个队列解完，切页卡死。
 local delays = {}
 local schedule_in = UIManager.scheduleIn
 function UIManager:scheduleIn(delay, fn)
     delays[#delays + 1] = delay
     return schedule_in(self, delay, fn)
 end
+
+-- 预算内（缓存命中/快解码）一拍出齐，不得每张图空等一次续排。
+local page = {}
+for i = 1, 12 do
+    page[i] = Image.widget{ src = image_path, width = 200, height = 200 }
+end
+Stubs.flush()
+Assert.len(delays, 0, "预算内整页封面一拍解完")
+for i = 1, #page do page[i]:free() end
+
+-- 超预算必须续排；续排若 0 延迟，UIManager 会在读输入前把整个队列解完，切页卡死。
+decode_ms = 60
 local yielding = {
     Image.widget{ src = image_path, width = 200, height = 200 },
     Image.widget{ src = image_path, width = 200, height = 200 },
 }
 Stubs.flush()
+decode_ms = 0
 UIManager.scheduleIn = schedule_in
 Assert.len(delays, 1)
 Assert.is_true(delays[1] > 0, "续排解码必须让出输入轮询")
@@ -291,6 +311,8 @@ b:free()
 os.remove(image_path)
 os.remove(cached_file)
 
+package.preload["utils.perf"] = nil
+package.loaded["utils.perf"] = nil
 package.preload["http.request"] = nil
 package.loaded["http.request"] = nil
 package.loaded["ui.components.image"] = nil

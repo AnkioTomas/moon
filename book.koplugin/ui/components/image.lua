@@ -28,7 +28,7 @@ UI 图标请用 ui.components.icon（Material Icons 字体），不要走本组�
   box:cancel()  -- 只取消这一张的下载
 
 下载单独限流。解码走 ImageWidget（file=，自带 BB 缓存），不 fork。
-小图（目标面积且文件都小）当场解；封面这种大图排队，解一张让出一次输入轮询。
+小图（目标面积且文件都小）当场解；封面这种大图排队，每拍按时间预算连续解，超预算才让出输入轮询。
 
 @module koplugin.book.ui.components.image
 --]]
@@ -43,6 +43,7 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local TextWidget = require("ui/widget/textwidget")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("utils.log")
+local Perf = require("utils.perf")
 local Text = require("utils.text")
 local UI = require("ui.components.bookui")
 local Download = require("ui.components.image.download")
@@ -192,6 +193,8 @@ end
 -- 小图：天气图标级别。超过任一阈值就排队，避免图书馆一页 12 张封面卡死拼页。
 local SMALL_PIXELS = 80 * 80
 local SMALL_BYTES = 32 * 1024
+-- 每拍解码预算：预算内连续解（ImageCache 命中几乎零耗时，一拍出齐），超了才让出。
+local BUDGET_MS = 50
 -- UIManager 在任务队列变脏时会反复跑任务、不去读输入；续排必须晚于一次重绘，才能让出输入轮询。
 local YIELD_S = 0.1
 
@@ -212,21 +215,20 @@ local function cheap(path, w, h)
     return size <= SMALL_BYTES
 end
 
---- 跳过失效图片任务，每个 UI tick 最多解码一张仍存活的排队图片。
+--- 跳过失效图片任务；一个 UI tick 内按 BUDGET_MS 连续解码，超预算再续排。
 local function pump()
     pumping = false
+    local started = Perf.now()
     while wait[1] do
         local item = table.remove(wait, 1)
         local box = item.box
-        if not box._alive then
-            box:_settle()
-        else
+        if box._alive then
             box:_applyFile(item.path)
-            box:_settle()
-            if wait[1] then
-                pumping = true
-                UIManager:scheduleIn(YIELD_S, pump)
-            end
+        end
+        box:_settle()
+        if wait[1] and Perf.now() - started >= BUDGET_MS then
+            pumping = true
+            UIManager:scheduleIn(YIELD_S, pump)
             return
         end
     end
