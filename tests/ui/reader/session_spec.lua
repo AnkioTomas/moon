@@ -228,6 +228,13 @@ package.preload["ui.reader.end_dialog"] = function()
     }
 end
 
+local cover_saves = {}
+package.preload["book.cover"] = function()
+    return {
+        save = function(doc, target) cover_saves[#cover_saves + 1] = { doc = doc, target = target } end,
+    }
+end
+
 package.preload["db.stats"] = function()
     return {
         summaryByBook = function(source_id, stable_id)
@@ -751,10 +758,43 @@ do
     Session.onCloseDocument(plugin)
 end
 
+-- 整书打开：下一拍用已打开的文档补本地封面（云端没封面的书靠它）；章节文件没有封面可取，不碰。
+do
+    resolved_source = default_source
+    local Paths = require("utils.paths")
+    Stubs.flush()
+    cover_saves = {}
+    local plugin = mkPlugin("/x/book.epub")
+    Session.onReaderReady(plugin)
+    Stubs.flush()
+    Assert.len(cover_saves, 1)
+    Assert.eq(cover_saves[1].doc, plugin.ui.document)
+    Assert.eq(cover_saves[1].target, Paths.coverPath("b1", "moon"))
+    Session.onCloseDocument(plugin)
+
+    -- 下一拍前文档已换掉：放弃，不对着旧文档取图。
+    cover_saves = {}
+    plugin = mkPlugin("/x/book.epub")
+    Session.onReaderReady(plugin)
+    plugin.ui.document = { file = "/x/other.epub" }
+    Stubs.flush()
+    Assert.len(cover_saves, 0)
+    plugin.ui.document = { file = "/x/book.epub", getPageCount = function() return 200 end }
+    Session.onCloseDocument(plugin)
+
+    cover_saves = {}
+    stored_toc.chapters = { { idx = 1 }, { idx = 2 } }
+    plugin = mkPlugin("/cache/1.html")
+    Session.onReaderReady(plugin)
+    Stubs.flush()
+    Assert.len(cover_saves, 0)
+    Session.onCloseDocument(plugin)
+end
+
 -- 清理：fake 经 package.preload 安装，runner 只清 package.loaded。
 for _, name in ipairs({
     "book.store", "book.stats", "book.progress",
-    "book.note",
+    "book.note", "book.cover",
     "ui.reader",
     "db.book",
     "utils.settings",

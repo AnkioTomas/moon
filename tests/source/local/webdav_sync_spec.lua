@@ -523,6 +523,48 @@ do
     books = {}
 end
 
+-- 已下载的裸文件：阅读时已补过封面，书名还只是文件名，同步照样解析一次补书名。
+do
+    local L = require("support.config").dir() .. "/webdav-enrich"
+    Paths.ensureDir(L)
+    local f = assert(io.open(L .. "/裸.epub", "wb"))
+    f:write("x")
+    f:close()
+    Paths.ensureLayout("local")
+    local cover = Paths.coverPath("webdav://裸.epub", "local")
+    f = assert(io.open(cover, "wb"))
+    f:write("png")
+    f:close()
+    local opened = 0
+    package.preload["document/documentregistry"] = function()
+        return {
+            hasProvider = function() return true end,
+            openDocument = function()
+                opened = opened + 1
+                return { getProps = function() return { title = "真书名", authors = "某人" } end,
+                    getCoverPageImage = function() return nil end, close = function() end }
+            end,
+        }
+    end
+    package.loaded["document/documentregistry"] = nil
+    local dav = fakeDav()
+    dav:put(ROOT .. "/裸.epub", "x")
+    putSync(dav, { { filename = "裸.epub" } })
+    local c = Client.new({ webdav_url = "https://dav.example", path = L })
+    c.dav = dav
+    Assert.is_true(scan(c))
+    Assert.eq(opened, 1)
+    Assert.eq(books["webdav://裸.epub"].title, "真书名")
+    Assert.eq(remoteEntries(dav)["裸.epub"].bookName, "真书名")
+    Assert.is_true(scan(c))
+    Assert.eq(opened, 1, "解析过的书不再打开")
+    package.preload["document/documentregistry"] = nil
+    package.loaded["document/documentregistry"] = nil
+    os.remove(cover)
+    os.remove(L .. "/裸.epub")
+    books = {}
+end
+
 -- 排版替换：新 EPUB 传到同目录，书目条目原位改名（其余字段保留），本地文件/身份/.sdr 跟着换，
 -- 远端原书与边车删掉。书目写成之前失败，撤掉已传的新文件，两边保持原样。
 do

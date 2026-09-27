@@ -370,31 +370,10 @@ local function moveBookArtifacts(old_path, new_path)
 end
 
 --- 从已打开的文档提取封面并落盘为 PNG；封面缓存独立于 books 元数据缓存。
---- os.remove/os.rename 不抛异常，无需 pcall。
 ---@param doc table
----@param path string
+---@param path string 封面缓存键（stable_id）
 local function saveDocumentCover(doc, path)
-    local target = coverPath(path)
-    if lfs.attributes(target, "mode") == "file" then
-        return
-    end
-    local ok_cover, bb = pcall(function()
-        return doc:getCoverPageImage()
-    end)
-    if not (ok_cover and bb) then
-        return
-    end
-    local tmp = target .. ".part"
-    local ok = pcall(function() bb:writePNG(tmp) end)
-    pcall(function() bb:free() end)
-    if not ok then
-        os.remove(tmp)
-        return
-    end
-    os.remove(target)
-    if not os.rename(tmp, target) then
-        os.remove(tmp)
-    end
+    require("book.cover").save(doc, coverPath(path))
 end
 
 --- 打开文档调 fn(doc) 并返回其结果；无引擎 / 打开失败返回 nil。异常不在这里吞，由调用方 pcall。
@@ -1187,7 +1166,8 @@ local function pullCovers(self, run, next)
     end)
 end
 
---- 同步步骤：已下载到本地、却还没封面的书，解析一次元数据和封面（子进程）。
+--- 同步步骤：已下载到本地、却还没封面或书名还只是文件名的书，解析一次元数据和封面（子进程）。
+--- （阅读时会话会先从已打开的文档补封面，所以不能只拿“缺封面”当没解析过。）
 --- 解析结果只补空字段，已有值（远端书目或用户编辑）优先；每本书每个会话只试一次，
 --- 本身没有封面的书不会每轮都重新打开。
 ---@param self LocalClient
@@ -1195,12 +1175,16 @@ end
 ---@param next fun(err: string|nil)
 local function enrichCached(self, run, next)
     self._enriched = self._enriched or {}
+    local ids = {}
+    for i, rel in ipairs(run.files) do ids[i] = remoteStableId(rel) end
+    local rows = require("db.book").getMany(SOURCE_ID, ids)
     local pending = {}
-    for _, rel in ipairs(run.files) do
-        local stable_id = remoteStableId(rel)
+    for i, rel in ipairs(run.files) do
+        local stable_id, row = ids[i], rows[ids[i]]
         local path = self:webdavBookRoot() .. "/" .. rel
-        if not self._enriched[stable_id] and lfs.attributes(coverPath(stable_id), "mode") ~= "file"
-            and lfs.attributes(path, "mode") == "file" then
+        local bare = not (row and row.title) or row.title == stem(rel)
+        if not self._enriched[stable_id] and lfs.attributes(path, "mode") == "file"
+            and (bare or lfs.attributes(coverPath(stable_id), "mode") ~= "file") then
             self._enriched[stable_id] = true
             pending[#pending + 1] = { rel = rel, stable_id = stable_id, path = path }
         end
