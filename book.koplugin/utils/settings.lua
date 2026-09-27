@@ -25,7 +25,7 @@ local DEFAULTS = {
         ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,
         library_sort = "recent_added",
         mesh_mask = true,
-        -- off / schedule / sun；时间是当天分钟数，sun 模式另存 auto_night_lat / auto_night_lon。
+        -- off / schedule / sun；时间是当天分钟数，sun 模式另存 auto_night_lat / auto_night_lon / auto_night_tz（当地时区分钟偏移，缺省用设备时区）。
         auto_night = "off", auto_night_from = 22 * 60, auto_night_to = 7 * 60,
         -- 亮度百分比，0 = 关灯。有光线传感器按 ambientBrightnessLevel 0..4 查 levels，否则按 NightMode.PERIOD_STARTS 时段查 periods。
         -- 昏暗最需要补光；黑暗眼睛已适应，低一档即可；中性少量；明亮起墨水屏不需要前光。
@@ -136,6 +136,7 @@ end
 KEY_SECTION.home_widgets = "home"
 KEY_SECTION.auto_night_lat = "display"
 KEY_SECTION.auto_night_lon = "display"
+KEY_SECTION.auto_night_tz = "display"
 -- These are runtime/cache values, not user-facing defaults, but belong beside
 -- the lockscreen settings rather than in common.lua.
 for _, key in ipairs({
