@@ -66,10 +66,10 @@ end
 
 --- 当前源最近打开的书，优先取未读完的那本。
 --- 元数据来自 books，阅读位置来自 pending_progress。
+--- 混合模式下 scope 是源 id 列表，书的源必须取行内 source_id。
 ---@return table|nil 书库为空时 nil
 local function currentBook()
-    local source_id = Library.activeSourceId()
-    local recent = Catalog.recentBooks(source_id, 16)
+    local recent = Catalog.recentBooks(Library.activeSourceId(), 16)
     if #recent == 0 then return nil end
     local row
     for _, book in ipairs(recent) do
@@ -80,7 +80,7 @@ local function currentBook()
     end
     row = row or recent[1]
     return buildBook{
-        source_id = source_id,
+        source_id = row.source_id,
         stable_id = row.stable_id,
         title = row.title,
         authors = row.authors,
