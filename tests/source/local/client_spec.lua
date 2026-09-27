@@ -186,6 +186,8 @@ package.preload["db.book"] = function()
         end,
         renameStableId = function(source_id, old_stable_id, new_stable_id, category, series)
             renames[#renames + 1] = { source_id, old_stable_id, new_stable_id }
+            -- 与真实 sqlite 一致：新 stable_id 已有行（含墓碑）时主键冲突，整笔回滚
+            if db_rows[rowKey(source_id, new_stable_id)] then return false end
             local row = db_rows[rowKey(source_id, old_stable_id)]
             if row then
                 db_rows[rowKey(source_id, old_stable_id)] = nil
@@ -401,6 +403,65 @@ do
     Assert.eq(renamed.category, "sub")
     Assert.eq(renamed.series, "deep")
     Assert.eq(#renames, 1)
+end
+
+-- ── 扫盘内的 md5 改名识别：只有旧文件已消失且新路径无任何行才改名 ──────
+do
+    local util = require("util")
+    local real_md5 = util.partialMD5
+    local digests = {}
+    util.partialMD5 = function(path) return digests[path] end
+
+    --- 跑一次全量扫描，返回 ok, err
+    local function scan()
+        local ok, err
+        Client.new({ path = "/books" }):scanAsync(function(o, e) ok, err = o, e end)
+        Stubs.flush()
+        return ok, err
+    end
+
+    -- 真移动：旧路径已不在盘上，新路径无行 → 原地改名，继承旧行
+    reset()
+    digests = { ["/books/a.epub"] = "m" }
+    db_rows[rowKey("local", "/books/gone.epub")] = {
+        source_id = "local", stable_id = "/books/gone.epub", md5 = "m", title = "旧", inserted_at = 7,
+    }
+    Assert.is_true(scan())
+    Assert.len(renames, 1)
+    Assert.is_nil(db_rows[rowKey("local", "/books/gone.epub")])
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].inserted_at, 7)
+
+    -- 同内容副本并存且其一元数据残缺（不在 known）：不能把另一本改名过来撞主键
+    reset()
+    digests = { ["/books/a.epub"] = "dup", ["/books/sub/c.pdf"] = "dup" }
+    db_rows[rowKey("local", "/books/a.epub")] = {
+        source_id = "local", stable_id = "/books/a.epub", md5 = "dup",
+        title = "a", authors = "x", intro = "y", deleted = 0,
+    }
+    db_rows[rowKey("local", "/books/sub/c.pdf")] = {
+        source_id = "local", stable_id = "/books/sub/c.pdf", md5 = "dup", title = "c", deleted = 0,
+    }
+    local ok, err = scan()
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.len(renames, 0)
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 0)
+    Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].deleted, 0)
+
+    -- 新路径是墓碑：旧文件虽已消失，也不改名，墓碑由快照复活
+    reset()
+    digests = { ["/books/a.epub"] = "m" }
+    db_rows[rowKey("local", "/books/gone.epub")] = {
+        source_id = "local", stable_id = "/books/gone.epub", md5 = "m", title = "旧",
+    }
+    db_rows[rowKey("local", "/books/a.epub")] = {
+        source_id = "local", stable_id = "/books/a.epub", md5 = "m", title = "a", deleted = 1,
+    }
+    Assert.is_true(scan())
+    Assert.len(renames, 0)
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 0)
+
+    util.partialMD5 = real_md5
 end
 
 -- ── 元数据缓存命中：重扫跳过解析 ──────

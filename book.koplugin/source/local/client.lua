@@ -552,9 +552,9 @@ local function parseFile(f, known)
 end
 
 --- 主进程：把子进程解析结果写入 books 表。
---- 已入库行只恢复书架成员；未命中时按内容 md5 找旧行——命中说明文件被移动/改名，
---- 原地换 stable_id（身份以 md5 为准，不当新书），category/series 随新位置刷新；
---- 否则才是真新书。
+--- 已入库行只恢复书架成员；未命中时按内容 md5 找旧行——旧文件已不在盘上且新路径无任何行
+--- （known 不含元数据残缺行与墓碑）才算移动/改名，原地换 stable_id（身份以 md5 为准，不当新书），
+--- category/series 随新位置刷新；同内容副本并存时各自成书，否则改名会撞主键让整次扫盘失败。
 ---@param files table[] parseFile 产物
 ---@param known table<string, Book>
 ---@param full_snapshot boolean|nil
@@ -566,7 +566,9 @@ local function commitFiles(files, known, full_snapshot)
         local moved
         if not cached then
             local by_md5 = f.md5 and BookDB.getByMd5(SOURCE_ID, f.md5)
-            if by_md5 and by_md5.stable_id ~= f.path then
+            if by_md5 and by_md5.stable_id ~= f.path
+                and not lfs.attributes(by_md5.stable_id, "mode")
+                and not BookDB.get(SOURCE_ID, f.path) then
                 if not BookDB.renameStableId(
                     SOURCE_ID, by_md5.stable_id, f.path, f.category, f.series
                 ) then
