@@ -101,6 +101,13 @@ function M.book(with_stats)
     return with_stats and withStats(book) or book
 end
 
+--- 指定书的带统计快照（阅读页侧栏票根用：书跟阅读身份走，不取「当前源最近在读」）。
+---@param fields table source_id/stable_id/title/authors/percent/page/total_pages/chapter_*
+---@return table
+function M.snapshot(fields)
+    return withStats(buildBook(fields))
+end
+
 --- 当前阅读主体：白卡贴合 BookInfo.hero 高度（封面 / 书名 / 作者 / 章节 / 进度）。
 ---@param rect table
 ---@return table[]

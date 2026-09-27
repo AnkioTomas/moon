@@ -99,6 +99,7 @@ local function closeToDesktop(ui)
         end
     end)
 end
+Native.closeToDesktop = closeToDesktop
 
 --- 用白底 FrameContainer 包裹面板主体。
 ---@param body table

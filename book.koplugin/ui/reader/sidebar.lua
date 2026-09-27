@@ -1,5 +1,6 @@
 --[[--
-阅读页左侧栏：书籍 / 目录 / 书摘 / X-Ray 四页，右侧网状遮罩压暗正文。
+阅读页左侧栏：书籍 / 目录 / 书摘 / X-Ray / 阅读票根，右侧网状遮罩压暗正文。
+书籍页右上角关闭按钮退出本书；票根页复用锁屏票根并可分享。
 
 目录、书摘、X-Ray 不自己画：借用各自原有入口弹出的全屏 Menu（KOReader 原生目录的折叠/搜索、
 原生书签列表、连续章节全书笔记、X-Ray 分栏菜单），把尺寸压进侧栏、改挂到侧栏窗口上。
@@ -45,6 +46,7 @@ local PANEL_RATIO = 0.85
 ---@field menus table<string, table|false> 借来的 Menu；false = 入口没弹 Menu
 ---@field native_closes fun()[] 借来菜单的原 close_callback，侧栏关闭时各调一次做原生清理
 ---@field panel_w integer
+---@field ticket BookSidebarTicket|nil 首次进入票根页时生成，关侧栏取消
 local Sidebar = InputContainer:extend{}
 
 local TITLES = {
@@ -52,6 +54,7 @@ local TITLES = {
     toc = _("目录"),
     notes = _("书摘"),
     xray = _("X-Ray"),
+    ticket = _("阅读票根"),
 }
 
 --- 各列表页的原有入口（与快捷面板同一条路径，整书 / 连续章节的分流都在入口内部）。
@@ -132,6 +135,7 @@ function Sidebar:init()
     if MoonSettings.get("reader").book_xray_enabled ~= false then
         self.tabs[#self.tabs + 1] = "xray"
     end
+    self.tabs[#self.tabs + 1] = "ticket"
     self.tab = 1
     self.menus = {}
     self.native_closes = {}
@@ -164,6 +168,30 @@ function Sidebar:menuFor(id, width, height)
     return self.menus[id] or nil
 end
 
+--- 票根首次进入时生成（每次打开侧栏重画一张，进度和今日统计跟着变）；出图后刷新本页。
+---@return BookSidebarTicket
+function Sidebar:ticketFor()
+    if not self.ticket then
+        local ticket
+        ticket = require("ui.reader.sidebar.ticket").new(self.snapshot, function()
+            -- 可能在 new 里同步回调，推迟到下一 tick，别在 render 里嵌套 render
+            UIManager:nextTick(function()
+                if self.ticket ~= ticket or self.tabs[self.tab] ~= "ticket" then return end
+                self:render()
+                UIManager:setDirty(self, "ui")
+            end)
+        end)
+        self.ticket = ticket
+    end
+    return self.ticket
+end
+
+--- 书籍页关闭按钮：先关侧栏，再关书回月读桌面。
+function Sidebar:exitBook()
+    self:onClose()
+    require("ui.panel.native").closeToDesktop(self.ui)
+end
+
 function Sidebar:render()
     local h = self.dimen.h
     local id = self.tabs[self.tab]
@@ -181,7 +209,18 @@ function Sidebar:render()
             background = Blitbuffer.COLOR_WHITE,
             OverlapGroup:new{
                 dimen = Geom:new{ w = inner_w, h = inner_h },
-                require("ui.reader.sidebar.info").build(self.snapshot, inner_w, inner_h, self),
+                require("ui.reader.sidebar.info").build(self.snapshot, inner_w, inner_h, self,
+                    function() self:exitBook() end),
+            },
+        }
+    elseif id == "ticket" then
+        body = FrameContainer:new{
+            bordersize = 0,
+            padding = 0,
+            background = Blitbuffer.COLOR_WHITE,
+            OverlapGroup:new{
+                dimen = Geom:new{ w = self.panel_w, h = body_h },
+                self:ticketFor():widget(self.panel_w, body_h),
             },
         }
     else
@@ -264,6 +303,10 @@ function Sidebar:onCloseWidget()
     local closes = self.native_closes
     self.native_closes = {}
     for _, close in ipairs(closes) do close() end
+    if self.ticket then
+        self.ticket:cancel()
+        self.ticket = nil
+    end
 end
 
 --- 打开侧栏；没有阅读会话（书还没就绪）时不接手。
