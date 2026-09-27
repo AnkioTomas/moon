@@ -530,6 +530,55 @@ function BookDB.renameStableId(source_id, old_stable_id, new_stable_id, category
     return false
 end
 
+--- 把旧身份并入新身份，并登记新身份的物理路径（WebDAV 镜像收编本地目录里的绝对路径身份）。
+--- 新身份不存在或只是删除墓碑：旧行整行改名（带走元数据与书架状态）；新身份已在书架：丢弃旧行。
+--- 附属表 UPDATE OR IGNORE 迁移，主键冲突时保留新身份的数据，旧身份残留随后删除；
+--- 例外：旧身份的进度/笔记还没推（sync_status=0）时它比新身份的已同步副本新，先清掉新身份那份。
+---@param source_id string
+---@param old_stable_id string
+---@param new_stable_id string
+---@param path string
+---@return boolean
+function BookDB.adoptStableId(source_id, old_stable_id, new_stable_id, path)
+    if not Base.exec([[BEGIN IMMEDIATE;]]) then
+        return false
+    end
+    local ok = Base.exec(
+        [[DELETE FROM books WHERE source_id=? AND stable_id=? AND deleted=1;]],
+        source_id, new_stable_id
+    ) and Base.exec(
+        [[UPDATE OR IGNORE books SET stable_id=? WHERE source_id=? AND stable_id=?;]],
+        new_stable_id, source_id, old_stable_id
+    ) and Base.exec(
+        [[DELETE FROM books WHERE source_id=? AND stable_id=?;]],
+        source_id, old_stable_id
+    ) and Base.exec(
+        [[UPDATE books SET path=? WHERE source_id=? AND stable_id=?;]],
+        path, source_id, new_stable_id
+    )
+    for _, tbl in ipairs({ "notes", "pending_progress" }) do
+        ok = ok and Base.exec(
+            "DELETE FROM " .. tbl .. " WHERE source_id=? AND stable_id=? AND EXISTS (SELECT 1 FROM " .. tbl
+                .. " WHERE source_id=? AND stable_id=? AND sync_status=0);",
+            source_id, new_stable_id, source_id, old_stable_id
+        )
+    end
+    for _, tbl in ipairs({ "chapters", "reading_stats", "notes", "pending_progress", "xray_entities" }) do
+        ok = ok and Base.exec(
+            "UPDATE OR IGNORE " .. tbl .. " SET stable_id=? WHERE source_id=? AND stable_id=?;",
+            new_stable_id, source_id, old_stable_id
+        ) and Base.exec(
+            "DELETE FROM " .. tbl .. " WHERE source_id=? AND stable_id=?;",
+            source_id, old_stable_id
+        )
+    end
+    if ok and Base.exec([[COMMIT;]]) then
+        return true
+    end
+    Base.exec([[ROLLBACK;]])
+    return false
+end
+
 --- 取某源全部 stable_id
 ---@param source_id string
 ---@return string[]

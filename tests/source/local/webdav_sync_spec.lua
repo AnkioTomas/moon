@@ -72,6 +72,30 @@ function BookDB.setLibraryMembership(_, id, on_shelf)
     books[id].deleted, books[id].sync_status = on_shelf and 0 or 1, 0
     return true
 end
+function BookDB.touchPath(_, id, path)
+    books[id] = books[id] or { stable_id = id, deleted = 1, sync_status = 1 }
+    books[id].path = path
+    return true
+end
+function BookDB.markDeleted(_, id)
+    books[id].deleted, books[id].sync_status, books[id].path = 1, 0, nil
+    return true
+end
+function BookDB.adoptStableId(_, old, new, path)
+    if books[new] and books[new].deleted == 1 then books[new] = nil end
+    if not books[new] then
+        books[new] = books[old]
+        books[new].stable_id = new
+    end
+    books[old] = nil
+    books[new].path = path
+    return true
+end
+function BookDB.unsynced()
+    local out = {}
+    for _, b in pairs(books) do if b.sync_status == 0 then out[#out + 1] = copy(b) end end
+    return out
+end
 function BookDB.libraryStableIdsBySource()
     local out = {}
     for id, b in pairs(books) do if b.deleted == 0 then out[#out + 1] = id end end
@@ -93,8 +117,21 @@ package.preload["db.progress"] = function()
     }
 end
 
+-- 子进程任务（本地目录扫描）就地同步跑，结果经 nextTick 回交保持异步语义。
+package.preload["workers.job"] = function()
+    return {
+        run = function(worker, opts)
+            local ok, result = pcall(worker, {})
+            require("ui/uimanager"):nextTick(function()
+                if ok then opts.on_done(result) else opts.on_failed(result) end
+            end)
+            return { cancel = function() end }
+        end,
+    }
+end
+
 for _, name in ipairs({ "db.book", "db.progress", "json", "ffi/zlib", "utils.settings", "utils.log",
-    "source.local.client" }) do
+    "workers.job", "source.local.client" }) do
     package.loaded[name] = nil
 end
 local Client = require("source.local.client")
@@ -148,7 +185,7 @@ local function fakeDav()
         self.calls[#self.calls + 1] = "DELETE " .. path
         local existed = self.files[path] ~= nil
         self.files[path] = nil
-        cb(existed or nil, not existed and "HTTP 404" or nil)
+        cb(existed or nil, not existed and "HTTP 404" or nil, not existed and 404 or nil)
     end
     function dav:count(prefix)
         local n = 0
@@ -167,18 +204,23 @@ local function client(dav)
     return c
 end
 
-local function scan(c)
+local function run(c, opts)
     local ok, err
-    c:scanWebdavAsync(function(v, e) ok, err = v, e end)
+    c:scanWebdavAsync(function(v, e) ok, err = v, e end, opts)
     Stubs.flush()
     return ok, err
 end
+--- 日常同步：只认 books.sync。
+local function scan(c) return run(c) end
+--- 刷新按钮：另扫远端文件与本地目录合并。
+local function refresh(c) return run(c, { refresh = true }) end
 
 local function remoteEntries(dav)
     local out = {}
     for _, e in ipairs(Json.decode(dav.files[SYNC].data:sub(2))) do out[e.filename] = e end
     return out
 end
+local function putSync(dav, list) dav:put(SYNC, "Z" .. Json.encode(list)) end
 
 local STRANGER = { -- 静读天下写出的条目：评分、分组、添加时间都不归本插件管
     filename = "局外人.epub", bookName = "局外人", author = "阿尔贝•加缪", description = "荒诞",
@@ -186,25 +228,27 @@ local STRANGER = { -- 静读天下写出的条目：评分、分组、添加时�
     addTime = "1761286619609", deviceId = "1745487877136", groupName = "",
 }
 
--- 拉取：books.sync 按契约映射（favorite=分类、category 首部=系列）；裸文件用文件名兜底并收录进书目。
+-- 书架只靠 books.sync：日常同步不列目录；刷新才把书目外的远端文件补进来。
 do
     local dav = fakeDav()
     dav:put(ROOT .. "/局外人.epub", "x")
     dav:put(ROOT .. "/小说/裸书 - 某人.epub", "x")
     dav:put(ROOT .. "/.hidden.epub", "x")
-    dav:put(SYNC, Json.encode({ STRANGER }))
+    putSync(dav, { STRANGER })
     local c = client(dav)
     Assert.is_true(scan(c))
-
     local stranger = books["webdav://局外人.epub"]
     Assert.eq(stranger.title, "局外人")
     Assert.eq(stranger.authors, "阿尔贝•加缪")
     Assert.eq(stranger.intro, "荒诞")
     Assert.eq(stranger.category, "哲学")
     Assert.eq(stranger.series, "荒诞三部曲")
+    Assert.is_nil(books["webdav://小说/裸书 - 某人.epub"], "日常同步不扫远端目录")
+    Assert.eq(dav:count("PROPFIND " .. ROOT .. "/小说"), 0)
+
+    Assert.is_true(refresh(c))
     Assert.eq(books["webdav://小说/裸书 - 某人.epub"].title, "裸书 - 某人", "不按“作者 - 书名”猜")
     Assert.is_nil(books["webdav://.hidden.epub"], ". 前缀文件不是书")
-
     local entries = remoteEntries(dav)
     Assert.eq(entries["局外人.epub"].rate, "5", "保留远端字段")
     Assert.eq(entries["局外人.epub"].addTime, "1761286619609")
@@ -216,10 +260,9 @@ do
     Assert.eq(bare.downloadUrl, "[WebDav]/Apps/Books/小说/裸书 - 某人.epub")
     Assert.is_nil(bare.authors, "不写契约外的 authors 键")
 
-    -- 再同步一轮：内容没变就不回写 books.sync。
     local puts = dav:count("PUT " .. SYNC)
     Assert.is_true(scan(c))
-    Assert.eq(dav:count("PUT " .. SYNC), puts)
+    Assert.eq(dav:count("PUT " .. SYNC), puts, "内容没变就不回写")
 
     -- 本地编辑（脏行）推上去并清脏；远端书目不能把它覆盖回去。
     books["webdav://局外人.epub"].title = "异乡人"
@@ -229,39 +272,50 @@ do
     Assert.eq(books["webdav://局外人.epub"].sync_status, 1)
     Assert.eq(books["webdav://局外人.epub"].title, "异乡人")
 
-    -- 远端删文件：下架，条目从书目里剔除。
+    -- 远端文件没了但书目还在：日常同步照旧在书架；刷新才剔掉（本地也没有）。
     dav.files[ROOT .. "/小说/裸书 - 某人.epub"] = nil
     Assert.is_true(scan(c))
+    Assert.eq(books["webdav://小说/裸书 - 某人.epub"].deleted, 0)
+    Assert.is_true(refresh(c))
     Assert.eq(books["webdav://小说/裸书 - 某人.epub"].deleted, 1)
     Assert.is_nil(remoteEntries(dav)["小说/裸书 - 某人.epub"])
 
-    -- 远端书库整个空了（目录填错 / 服务端异常）：不下架、不回写。
-    dav.files[ROOT .. "/局外人.epub"] = nil
+    -- 别的设备把书从书目里删了：日常同步即下架（文件还在也不算）。
+    books["webdav://别的.epub"] = { stable_id = "webdav://别的.epub", deleted = 0, sync_status = 1 }
+    putSync(dav, { { filename = "别的.epub", bookName = "别的" } })
+    Assert.is_true(scan(c))
+    Assert.eq(books["webdav://局外人.epub"].deleted, 1)
+    Assert.eq(books["webdav://别的.epub"].deleted, 0)
+
+    -- 书目整个空了（目录填错 / 服务端异常）：不下架、不回写。
+    putSync(dav, {})
     puts = dav:count("PUT " .. SYNC)
     Assert.is_true(scan(c))
-    Assert.eq(books["webdav://局外人.epub"].deleted, 0)
+    Assert.eq(books["webdav://别的.epub"].deleted, 0)
     Assert.eq(dav:count("PUT " .. SYNC), puts)
     books = {}
 end
 
--- books.sync 存在却读不出来：绝不回写覆盖别的设备的书目。
+-- books.sync 存在却读不出来：不 reconcile、绝不回写覆盖别的设备的书目。
 do
     local dav = fakeDav()
     dav:put(ROOT .. "/a.epub", "x")
     dav:put(SYNC, "garbage")
+    books["webdav://keep.epub"] = { stable_id = "webdav://keep.epub", deleted = 0, sync_status = 1 }
     local c = client(dav)
     Assert.is_true(scan(c))
+    Assert.is_true(refresh(c))
     Assert.eq(dav.files[SYNC].data, "garbage")
-    Assert.eq(books["webdav://a.epub"].title, "a")
+    Assert.eq(books["webdav://keep.epub"].deleted, 0)
     books = {}
 end
 
--- 列目录失败：整轮中止，不动书架。
+-- 刷新时列目录失败：整轮中止，不动书架。
 do
     local dav = fakeDav()
     books["webdav://keep.epub"] = { stable_id = "webdav://keep.epub", deleted = 0, sync_status = 1 }
     function dav:listAsync(_, cb) cb(nil, "HTTP 500") end
-    local ok, err = scan(client(dav))
+    local ok, err = refresh(client(dav))
     Assert.is_false(ok)
     Assert.eq(err, "HTTP 500")
     Assert.eq(books["webdav://keep.epub"].deleted, 0)
@@ -271,7 +325,7 @@ end
 -- 进度：以 .po 的 mtime 为版本，只拉比本地新的；本地脏行不被覆盖。
 do
     local dav = fakeDav()
-    for _, name in ipairs({ "new.epub", "old.epub", "dirty.epub" }) do dav:put(ROOT .. "/" .. name, "x") end
+    putSync(dav, { { filename = "new.epub" }, { filename = "old.epub" }, { filename = "dirty.epub" } })
     -- 静读天下写 .po 不更新串内时间戳：串里是很久以前，mtime 才是真实版本
     dav:put(ROOT .. "/.Moon+/Cache/new.epub.po", "1590486119266*21@0#4826:11.1%", 1800000000)
     dav:put(ROOT .. "/.Moon+/Cache/old.epub.po", "1590486119266*3@7#0:42%", 1700000000)
@@ -313,11 +367,12 @@ do
     Assert.eq(pos.chapter_idx, 4)
 end
 
--- 封面：远端有、本地缺 → 下载；本地有、远端缺 → 上传；两边都有不重复传。
+-- 封面：远端有、本地缺 → 下载；刷新时本地有、远端缺 → 上传；两边都有不重复传。
 do
     local dav = fakeDav()
     dav:put(ROOT .. "/down.epub", "x")
     dav:put(ROOT .. "/up.epub", "x")
+    putSync(dav, { { filename = "down.epub" }, { filename = "up.epub" } })
     dav:put(ROOT .. "/.Moon+/Cover/down.epub_2.png", "PNG-down")
     local down, up = Paths.coverPath("webdav://down.epub", "local"), Paths.coverPath("webdav://up.epub", "local")
     os.remove(down)
@@ -326,29 +381,146 @@ do
     f:write("PNG-up")
     f:close()
     local c = client(dav)
-    Assert.is_true(scan(c))
+    Assert.is_true(refresh(c))
     Assert.eq(readFile(down), "PNG-down")
     Assert.eq(dav.files[ROOT .. "/.Moon+/Cover/up.epub_2.png"].data, "PNG-up")
     local puts = dav:count("PUT " .. ROOT .. "/.Moon+/Cover/")
-    Assert.is_true(scan(c))
+    Assert.is_true(refresh(c))
     Assert.eq(dav:count("PUT " .. ROOT .. "/.Moon+/Cover/"), puts)
     os.remove(down)
     os.remove(up)
     books = {}
 end
 
--- 删除：书文件和封面、进度边车一起删；边车本来没有也算成功。
+-- 本地书库目录：刷新时合并（本地新书上传进书目、收编绝对路径身份）；远端书按需下载到这里。
+do
+    local L = require("support.config").dir() .. "/webdav-mirror"
+    local function put(rel, data)
+        Paths.ensureDir((L .. "/" .. rel):match("(.+)/[^/]+$"))
+        local f = assert(io.open(L .. "/" .. rel, "wb"))
+        f:write(data)
+        f:close()
+    end
+    local function exists(rel) return readFile(L .. "/" .. rel) ~= nil end
+    for _, rel in ipairs({ "both.epub", "新书.epub", "分类/旧.epub", "远端.epub", "A/B/深.txt", "恢复.epub" }) do
+        os.remove(L .. "/" .. rel)
+    end
+    put("both.epub", "both")
+    put("新书.epub", "new")
+    put("分类/旧.epub", "old")
+    put("A/B/深.txt", "deep")
+    put("恢复.epub", "restore")
+    -- 以前按绝对路径登记过（扫盘/从文件管理器打开）且改过书名；远端曾删过同名书（墓碑）。
+    books[L .. "/分类/旧.epub"] = { stable_id = L .. "/分类/旧.epub", title = "旧书", deleted = 0, sync_status = 0 }
+    books["webdav://分类/旧.epub"] = { stable_id = "webdav://分类/旧.epub", title = "旧", deleted = 1, sync_status = 1 }
+    local dav = fakeDav()
+    dav:put(ROOT .. "/both.epub", "both")
+    dav:put(ROOT .. "/远端.epub", "remote")
+    putSync(dav, {
+        { filename = "both.epub", bookName = "both" },
+        { filename = "远端.epub", bookName = "远端" },
+        { filename = "恢复.epub", bookName = "恢复" }, -- 书目有、远端文件丢了、本地还有
+        { filename = "失踪.epub", bookName = "失踪" }, -- 书目有、两边都没有文件
+    })
+    local c = Client.new({ webdav_url = "https://dav.example", path = L })
+    c.dav = dav
+
+    -- 日常同步：只对齐书目，不扫本地、不上传。
+    Assert.is_true(scan(c))
+    Assert.is_nil(dav.files[ROOT .. "/新书.epub"])
+    Assert.eq(books["webdav://失踪.epub"].deleted, 0, "书目是唯一依据")
+
+    Assert.is_true(refresh(c))
+    Assert.eq(dav.files[ROOT .. "/新书.epub"].data, "new", "本地新书 → 上传")
+    Assert.eq(dav.files[ROOT .. "/分类/旧.epub"].data, "old", "墓碑 + 本地仍有 = 用户重新放进来 → 上传")
+    Assert.eq(dav.files[ROOT .. "/A/B/深.txt"].data, "deep", "相对路径原样，不压平目录")
+    Assert.eq(dav.files[ROOT .. "/恢复.epub"].data, "restore", "书目条目的文件丢了，本地有就补传")
+    Assert.is_false(exists("远端.epub"), "远端书不自动下载")
+    Assert.eq(books["webdav://失踪.epub"].deleted, 1)
+    local entries = remoteEntries(dav)
+    Assert.is_nil(entries["失踪.epub"], "两边都没文件的条目剔除")
+    for _, rel in ipairs({ "both.epub", "远端.epub", "恢复.epub", "新书.epub", "分类/旧.epub", "A/B/深.txt" }) do
+        Assert.not_nil(entries[rel], rel)
+    end
+    Assert.eq(entries["分类/旧.epub"].bookName, "旧书")
+    Assert.is_nil(books[L .. "/分类/旧.epub"], "绝对路径身份被收编")
+    Assert.eq(books["webdav://分类/旧.epub"].deleted, 0)
+    for _, rel in ipairs({ "both.epub", "新书.epub", "分类/旧.epub", "A/B/深.txt", "恢复.epub" }) do
+        Assert.eq(books["webdav://" .. rel].path, L .. "/" .. rel, rel)
+    end
+
+    -- 打开远端书：按需下载到本地目录（book.open 随后 Store.touch 登记 path）。
+    local opened
+    c:openWebdavAsync("webdav://远端.epub", function(p) opened = p end)
+    Stubs.flush()
+    Assert.eq(opened, L .. "/远端.epub")
+    Assert.eq(readFile(opened), "remote")
+
+    -- 别的设备删了新书（书目条目 + 文件）：日常同步下架，本地已下载的那份跟着删，刷新也不会传回去。
+    local list = {}
+    for rel, e in pairs(remoteEntries(dav)) do if rel ~= "新书.epub" then list[#list + 1] = e end end
+    putSync(dav, list)
+    dav.files[ROOT .. "/新书.epub"] = nil
+    Assert.is_true(scan(c))
+    Assert.eq(books["webdav://新书.epub"].deleted, 1)
+    Assert.is_false(exists("新书.epub"))
+    Assert.is_true(refresh(c))
+    Assert.is_nil(remoteEntries(dav)["新书.epub"])
+    Assert.is_nil(dav.files[ROOT .. "/新书.epub"])
+
+    -- 在 KOReader 里删书：远端文件、本地文件、书目条目一起删。
+    local ok, listed
+    c:deleteWebdavAsync("webdav://both.epub", function(v, _, l) ok, listed = v, l end)
+    Assert.is_true(ok)
+    Assert.is_true(listed)
+    Assert.is_nil(dav.files[ROOT .. "/both.epub"])
+    Assert.is_false(exists("both.epub"))
+    Assert.is_nil(remoteEntries(dav)["both.epub"])
+    Assert.not_nil(remoteEntries(dav)["远端.epub"])
+    books = {}
+end
+
+-- 删除：书文件、封面/进度/笔记边车、书目条目一起删；书文件本来就没了（404）也算删成功。
 do
     local dav = fakeDav()
     dav:put(ROOT .. "/分类/gone.epub", "x")
     dav:put(ROOT .. "/.Moon+/Cache/gone.epub.po", "1*0:1%")
-    local ok
-    client(dav):deleteWebdavAsync("webdav://分类/gone.epub", function(v) ok = v end)
+    putSync(dav, { { filename = "分类/gone.epub" }, { filename = "ghost.epub" }, { filename = "keep.epub" } })
+    local c = client(dav)
+    local ok, listed
+    c:deleteWebdavAsync("webdav://分类/gone.epub", function(v, _, l) ok, listed = v, l end)
     Assert.is_true(ok)
+    Assert.is_true(listed)
     Assert.is_nil(dav.files[ROOT .. "/分类/gone.epub"])
     Assert.is_nil(dav.files[ROOT .. "/.Moon+/Cache/gone.epub.po"])
     Assert.eq(dav:count("DELETE " .. ROOT .. "/.Moon+/Cover/gone.epub_2.png"), 1)
     Assert.eq(dav:count("DELETE " .. ROOT .. "/.Moon+/Notes/gone.epub.json"), 1)
+    Assert.is_nil(remoteEntries(dav)["分类/gone.epub"])
+
+    c:deleteWebdavAsync("webdav://ghost.epub", function(v, _, l) ok, listed = v, l end)
+    Assert.is_true(ok, "只剩书目条目的书也删得掉")
+    Assert.is_true(listed)
+    Assert.is_nil(remoteEntries(dav)["ghost.epub"])
+    Assert.not_nil(remoteEntries(dav)["keep.epub"])
+
+    -- 书目写失败：删除仍算成功但 listed=false；调用方留脏墓碑，下一轮同步把条目剔掉并清脏。
+    dav:put(ROOT .. "/keep.epub", "x")
+    local put = dav.putFileAsync
+    function dav:putFileAsync(path, local_path, cb)
+        if path == SYNC then return cb(nil, "HTTP 507") end
+        return put(self, path, local_path, cb)
+    end
+    c:deleteWebdavAsync("webdav://keep.epub", function(v, _, l) ok, listed = v, l end)
+    Assert.is_true(ok)
+    Assert.is_false(listed)
+    Assert.not_nil(remoteEntries(dav)["keep.epub"])
+    dav.putFileAsync = put
+    books["webdav://keep.epub"] = { stable_id = "webdav://keep.epub", deleted = 1, sync_status = 0 }
+    Assert.is_true(scan(c))
+    Assert.is_nil(remoteEntries(dav)["keep.epub"])
+    Assert.eq(books["webdav://keep.epub"].sync_status, 1)
+    Assert.eq(books["webdav://keep.epub"].deleted, 1, "脏墓碑不被远端旧条目复活")
+    books = {}
 end
 
 -- 笔记：`.Moon+/Notes/<文件名>.json` 按设备存完整快照；推送只换本设备那份，拉取取并集。
