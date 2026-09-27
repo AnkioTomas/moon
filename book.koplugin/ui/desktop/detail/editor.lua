@@ -96,7 +96,7 @@ function Detail:saveMeta(fields)
         local sid = new_stable_id or book.stable_id
         local BookDB = require("db.book")
         local existing = BookDB.get(book.source_id, sid)
-        BookDB.upsertLocal({
+        if BookDB.upsertLocal({
             source_id = book.source_id,
             stable_id = sid,
             title = title,
@@ -105,7 +105,12 @@ function Detail:saveMeta(fields)
             series = series,
             intro = existing and existing.intro or nil,
             md5 = existing and existing.md5 or nil,
-        })
+        }) then
+            Common.bookOwnerSource(book, self.source):onEvent("book_meta_changed", {
+                identity = { source_id = book.source_id, stable_id = sid },
+                cover = false,
+            })
+        end
     end
     if not self.lifecycle:uiReady() then
         return
