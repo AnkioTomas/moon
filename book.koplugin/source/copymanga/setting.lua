@@ -115,40 +115,10 @@ local function showLogin(plugin)
 end
 
 ---@param plugin table|nil
-local function openAccount(plugin)
-    local Auth = require("source.copymanga.auth")
-    if not Auth.hasSession() then
-        showLogin(plugin)
-        return
-    end
-
-    local UIManager = require("ui/uimanager")
-    local InfoMessage = require("ui/widget/infomessage")
-    require("ui.views.popup").sheet{
-        title = _("拷贝漫画账号") .. " · " .. (Auth.userLabel() or ""),
-        items = {
-            { text = _("重新登录"), callback = function()
-                local username, password = Auth.credentials()
-                if type(username) == "string" and type(password) == "string" then
-                    doLogin(plugin, username, password)
-                    return
-                end
-                showLogin(plugin)
-            end },
-            { text = _("退出登录"), callback = function()
-                Auth.clearSession()
-                UIManager:show(InfoMessage:new{ text = _("已退出登录"), timeout = 2 })
-                require("source.registry").afterAuthChanged(plugin)
-            end },
-            { text = _("取消") },
-        },
-    }
-end
-
----@param plugin table|nil
 ---@return table[]
 function Setting.rows(plugin)
-    return {
+    local Auth = require("source.copymanga.auth")
+    local rows = {
         function(iw)
             local cfg = require("utils.settings").getSource(SOURCE_ID)
             return require("ui.components.settingrow").build(iw, {
@@ -161,7 +131,6 @@ function Setting.rows(plugin)
             })
         end,
         function(iw)
-            local Auth = require("source.copymanga.auth")
             local status, status_on
             if Auth.hasSession() then
                 status, status_on = Auth.userLabel() or _("已登录"), true
@@ -174,10 +143,31 @@ function Setting.rows(plugin)
                 title = _("拷贝漫画账号"),
                 status = status,
                 status_on = status_on,
-                callback = function() openAccount(plugin) end,
+                callback = function() showLogin(plugin) end,
             })
         end,
     }
+    if not Auth.hasSession() then return rows end
+    rows[#rows + 1] = function(iw)
+        return require("ui.components.settingrow").build(iw, {
+            kind = "action",
+            icon = "logout",
+            title = _("退出登录"),
+            callback = function()
+                local UIManager = require("ui/uimanager")
+                UIManager:show(require("ui/widget/confirmbox"):new{
+                    text = _("确定退出拷贝漫画账号？"),
+                    ok_text = _("退出登录"),
+                    ok_callback = function()
+                        Auth.clearSession()
+                        UIManager:show(require("ui/widget/infomessage"):new{ text = _("已退出登录"), timeout = 2 })
+                        require("source.registry").afterAuthChanged(plugin)
+                    end,
+                })
+            end,
+        })
+    end
+    return rows
 end
 
 ---@return string, boolean
