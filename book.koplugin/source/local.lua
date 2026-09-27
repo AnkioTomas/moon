@@ -48,6 +48,7 @@ function Source:capabilities()
         scrape = true,
         edit = true,
         insight = true,
+        stats_pull = self._client:isWebdav(),
     }
 end
 
@@ -84,7 +85,11 @@ function Source:deleteBookAsync(identity, cb)
     if self._client:isWebdav() then
         return self._client:deleteWebdavAsync(identity.stable_id, function(ok, err)
             if ok then
-                require("db.book").remove(self.id, identity.stable_id)
+                -- 留墓碑（已下架且已同步）而不是删行：本地书库目录里的同名书靠它判断
+                -- “远端删过”，否则下一轮同步会把它重新上传回去。
+                local BookDB = require("db.book")
+                BookDB.markDeleted(self.id, identity.stable_id)
+                BookDB.markSynced(self.id, identity.stable_id)
                 cb(true)
             else
                 cb(false, err or _("删除 WebDAV 书籍失败"))
@@ -185,15 +190,71 @@ function Source:syncBooksAsync(opts, cb)
     end)
 end
 
---- 关书时推送 WebDAV 阅读进度；远端拉取在下次书库同步时完成。
+--- 纯本地目录没有远端：进度域直接 skipped；WebDAV 走通用 book.progress（开书拉取 + 冲突弹窗，关书推脏）。
 function Source:syncProgressAsync(opts, cb)
     if not self._client:isWebdav() then
         cb({ skipped = true, reason = "local source" })
         return { cancel = function() end }
     end
-    return self._client:syncWebdavProgressAsync(opts and opts.identity, function(ok, err)
-        cb(ok and { pushed = 1 } or nil, err)
-    end)
+    return SourceBase.syncProgressAsync(self, opts, cb)
+end
+
+--- 拉 WebDAV 进度（Moon+ `.Moon+/Cache/<文件名>.po`）；纯本地目录按“远端无记录”处理。
+---@param identity BookIdentity
+---@param cb fun(pos: ProgressPosition|nil, err: string|nil, meta: table|nil)
+function Source:getProgressAsync(identity, cb)
+    if not self._client:isWebdav() then
+        require("ui/uimanager"):nextTick(function() cb(nil, nil, { empty = true }) end)
+        return nil
+    end
+    return self._client:getProgressAsync(identity.stable_id, cb)
+end
+
+---@param identity BookIdentity
+---@param pos ProgressPosition
+---@param cb fun(ok: boolean|nil, err: string|nil)
+function Source:putProgressAsync(identity, pos, cb)
+    return self._client:putProgressAsync(identity.stable_id, pos, cb)
+end
+
+--- 上报阅读统计到 `.Moon+/Stats/stats.json`。纯本地目录没有远端，整批确认零行，
+--- book.stats 按“本轮无可推”收尾，不刷失败日志。
+---@param rows BookStatsRow[]
+---@param cb fun(result: BookStatsPushResult|nil, err: string|nil)
+function Source:pushStatsAsync(rows, cb)
+    if not self._client:isWebdav() then
+        require("ui/uimanager"):nextTick(function() cb({ synced_ids = {} }) end)
+        return nil
+    end
+    return self._client:pushStatsAsync(rows, cb)
+end
+
+--- 纯本地目录没有远端：笔记域直接 skipped；WebDAV 走通用 book.note（每设备每书一份快照，拉取取并集）。
+function Source:syncNotesAsync(opts, cb)
+    if not self._client:isWebdav() then
+        cb({ skipped = true, reason = "local source" })
+        return { cancel = function() end }
+    end
+    return SourceBase.syncNotesAsync(self, opts, cb)
+end
+
+---@param identity BookIdentity
+---@param annotations table[]
+---@param cb fun(value: table|nil, err: string|nil)
+function Source:pushNotesAsync(identity, annotations, cb)
+    return self._client:pushNotesAsync(identity.stable_id, annotations, cb)
+end
+
+---@param identity BookIdentity
+---@param cb fun(annotations: table[]|nil, err: string|nil, meta: table|nil)
+function Source:pullNotesAsync(identity, cb)
+    return self._client:pullNotesAsync(identity.stable_id, cb)
+end
+
+--- 仅 WebDAV（capabilities.stats_pull）时由 book.stats 调用。
+---@param cb fun(result: BookStatsRow[]|BookStatsPullResult|nil, err: string|nil)
+function Source:pullStatsAsync(cb)
+    return self._client:pullStatsAsync(cb)
 end
 
 --- 把书城下载文件移入本地书库根目录，并单本入库（不重扫）。
@@ -231,6 +292,12 @@ end
 ---@param series string|nil
 ---@return string|nil new_stable_id, string|nil err
 function Source:moveBook(stable_id, category, series)
+    if self._client:isWebdav() then
+        -- WebDAV 下分类/系列只是 books.sync 元数据，不移动文件。编辑框随后 upsertLocal 写字段；
+        -- 这里先标脏，否则下一轮同步会用远端书目把这次编辑覆盖回去。
+        require("db.book").setLibraryMembership(self.id, stable_id, true)
+        return stable_id
+    end
     return self._client:moveBook(stable_id, category, series)
 end
 

@@ -23,7 +23,7 @@ local T = require("ffi/util").template
 ---@field href string 原始 href
 ---@field is_dir boolean 是否目录
 ---@field size number|nil 字节数
----@field mtime string|nil Last-Modified 原文
+---@field mtime number|nil Last-Modified 换算的 UTC 秒；目录或无法解析时为 nil
 
 ---@class WebdavClient
 ---@field url string 根 URL（已去尾斜杠）
@@ -31,7 +31,7 @@ local T = require("ffi/util").template
 ---@field password string
 ---@field join fun(self: WebdavClient, path: string|nil, as_dir: boolean|nil): string 拼接 URL
 ---@field listAsync fun(self: WebdavClient, path: string|nil, cb: fun(entries: WebdavEntry[]|nil, err: string|nil)): { cancel: fun() }
----@field getAsync fun(self: WebdavClient, path: string, dest: string, opts: table|nil, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }
+---@field getAsync fun(self: WebdavClient, path: string, dest: string, opts: table|nil, cb: fun(ok: boolean|nil, err: string|nil, code: number|nil)): { cancel: fun() }
 ---@field putFileAsync fun(self: WebdavClient, path: string, local_path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
 ---@field makeCollectionAsync fun(self: WebdavClient, path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
 ---@field ensurePathAsync fun(self: WebdavClient, path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
@@ -89,6 +89,22 @@ function Webdav:join(path, as_dir)
     return url
 end
 
+local MONTHS = { Jan = 1, Feb = 2, Mar = 3, Apr = 4, May = 5, Jun = 6,
+    Jul = 7, Aug = 8, Sep = 9, Oct = 10, Nov = 11, Dec = 12 }
+
+--- RFC 1123 日期（`Tue, 02 Jan 2024 03:04:05 GMT`）→ UTC 秒。
+---@param value string|nil
+---@return number|nil
+local function httpDate(value)
+    local d, mon, y, h, mi, s = tostring(value or ""):match("(%d+) (%a+) (%d+) (%d+):(%d+):(%d+)")
+    if not MONTHS[mon or ""] then return nil end
+    local t = os.time({ year = tonumber(y), month = MONTHS[mon], day = tonumber(d),
+        hour = tonumber(h), min = tonumber(mi), sec = tonumber(s), isdst = false })
+    -- os.time 按本地时区解释表，补回本地与 UTC 的差。
+    local now = os.time()
+    return t + os.difftime(now, os.time(os.date("!*t", now)))
+end
+
 --- 解析 PROPFIND 207 响应
 ---@param xml string
 ---@param folder_url string
@@ -118,7 +134,8 @@ local function parseList(xml, folder_url, folder_path)
                     is_dir = is_dir,
                     size = is_dir and 0
                         or tonumber(item:match("<[^:]*:getcontentlength[^>]*>(%d+)</[^:]*:getcontentlength>")) or 0,
-                    mtime = not is_dir and item:match("<[^:]*:getlastmodified[^>]*>(.-)</[^:]*:getlastmodified>") or nil,
+                    mtime = not is_dir
+                        and httpDate(item:match("<[^:]*:getlastmodified[^>]*>(.-)</[^:]*:getlastmodified>")) or nil,
                 }
             end
         end
@@ -168,7 +185,7 @@ end
 ---@param path string
 ---@param dest string
 ---@param opts table|nil
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, code: number|nil) code 仅 HTTP 非 2xx 时给出
 ---@return { cancel: fun() }
 function Webdav:getAsync(path, dest, opts, cb)
     opts = opts or {}
@@ -185,7 +202,7 @@ function Webdav:getAsync(path, dest, opts, cb)
             cb(true)
         elseif res and res.code and not Request.ok(res.code) then
             local body_msg = type(res.body) == "string" and res.body:sub(1, 200) or nil
-            cb(nil, statusErr(res.code, body_msg))
+            cb(nil, statusErr(res.code, body_msg), tonumber(res.code))
         else
             cb(nil, err)
         end
