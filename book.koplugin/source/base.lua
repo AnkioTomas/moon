@@ -245,6 +245,8 @@ end
 ---   suspend         — 设备休眠前（有打开文档时）
 ---   network_connected — 网络恢复（脏重试由 Sync.retryDirtyAsync 负责，基类不重复推）
 ---   page_changed    — 翻页（仅源身份书籍），payload = { identity, page, total_pages, percent }
+---   book_meta_changed — 编辑 / 刮削已写库，payload = { identity, cover }（cover=封面换过）；
+---     有远端的源立即上行这本书（local WebDAV 写书目条目 + 传封面），基类空操作
 ---   book_info_request — 阅读面板详情页请求书籍信息，payload = { identity, book, refresh }
 ---     （源可拉最新详情写 Store.rememberMany 后调 refresh() 重绘面板；基类空操作即可）
 local function syncDesktopBooks(self, desktop, opts)

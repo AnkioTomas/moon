@@ -92,8 +92,15 @@ package.preload["source.base"] = function()
         },
     }
 end
+local events = {}
 package.preload["source.registry"] = function()
-    return { resolve = function() return {} end }
+    return { resolve = function()
+        return { onEvent = function(_, event, payload)
+            local f = io.open(cover_path, "rb")
+            if f then f:close() end
+            events[#events + 1] = { event = event, payload = payload, cover_ready = f ~= nil }
+        end }
+    end }
 end
 
 for _, name in ipairs({
@@ -157,6 +164,11 @@ Assert.eq(read(cover_path), "new-cover")
 Assert.is_false(exists(image_path), "下载缓存的图要移走，不留副本")
 Assert.eq(invalidated[#invalidated], cover_path, "换封面必须让位图缓存失效")
 Assert.eq(shown[#shown].text, "元数据已更新")
+Assert.len(events, 1, "落库与封面完成后通知属主源上行")
+Assert.eq(events[1].event, "book_meta_changed")
+Assert.eq(events[1].payload.identity, identity)
+Assert.is_true(events[1].payload.cover)
+Assert.is_true(events[1].cover_ready, "上行时新封面已经落地")
 
 -- 数据库失败不能继续下载封面，更不能谎报更新成功。
 db_ok = false
@@ -164,6 +176,7 @@ fetch_calls = 0
 startAndPick()
 Assert.eq(fetch_calls, 0)
 Assert.eq(shown[#shown].text, "元数据更新失败")
+Assert.len(events, 1, "落库失败不得上行")
 
 -- 下载失败：旧封面照样删掉，不能继续展示和元数据不符的图，也不谎报失败。
 db_ok = true

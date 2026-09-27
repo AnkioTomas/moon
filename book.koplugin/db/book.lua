@@ -202,7 +202,8 @@ function BookDB.upsertRemoteMany(rows)
     return true
 end
 
---- 用户编辑/刮削写入展示元数据，标脏待上传。
+--- 用户编辑/刮削写入展示元数据。新行与复活的墓碑标脏；已有行保留 sync_status
+--- （纯本地扫盘 reconcile 只下架已同步行），有远端的源自己标脏上行（local WebDAV 见 pushBookAsync）。
 ---@param row table
 ---@return boolean
 function BookDB.upsertLocal(row)

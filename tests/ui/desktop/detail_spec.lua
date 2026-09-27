@@ -176,6 +176,8 @@ end
 
 local set_read
 local db_row
+local upserted
+local upsert_ok = true
 package.preload["db.book"] = function()
     return {
         setRead = function(source_id, stable_id, value)
@@ -184,6 +186,10 @@ package.preload["db.book"] = function()
         end,
         get = function()
             return db_row
+        end,
+        upsertLocal = function(row)
+            upserted = row
+            return upsert_ok
         end,
     }
 end
@@ -370,6 +376,41 @@ page2:deleteBook()
 shown.ok_callback()
 Assert.eq(shown.text, "云端拒绝")
 Assert.eq(page2.lifecycle.state, "Resume")
+
+-- 编辑保存：写库成功后通知属主源上行（WebDAV 由 local 源推书目），写库失败不上行。
+local meta_events = {}
+resolved = {
+    id = "local",
+    capabilities = function() return { edit = true } end,
+    onEvent = function(_, event, payload) meta_events[#meta_events + 1] = { event = event, payload = payload } end,
+}
+local edit_page = setmetatable({
+    book = { source_id = "local", stable_id = "webdav://a.epub", title = "旧名" },
+    source = {
+        id = "local",
+        capabilities = local_src.capabilities,
+        moveBook = function(_, stable_id) return stable_id end,
+    },
+    desktop = { library = {}, lifecycle = { state = "Resume" } },
+    updateView = function() end,
+    reload = function() end,
+}, { __index = Detail })
+edit_page.lifecycle = Lifecycle.attach(edit_page)
+edit_page:onCreate()
+edit_page:onResume()
+db_row = { intro = "简介" }
+edit_page:saveMeta({ "新名", "作者", "分类", "" })
+Assert.eq(upserted.title, "新名")
+Assert.eq(upserted.intro, "简介")
+Assert.len(meta_events, 1)
+Assert.eq(meta_events[1].event, "book_meta_changed")
+Assert.eq(meta_events[1].payload.identity.stable_id, "webdav://a.epub")
+Assert.is_false(meta_events[1].payload.cover)
+upsert_ok = false
+edit_page:saveMeta({ "又改", "", "", "" })
+Assert.len(meta_events, 1, "写库失败不上行")
+upsert_ok = true
+db_row = nil
 
 local recent = setmetatable({
     _daily = {

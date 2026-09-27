@@ -523,6 +523,71 @@ do
     books = {}
 end
 
+-- 编辑 / 刮削后单本上行：条目原位改（静读天下字段保留）、换过的封面覆盖远端、写成才清脏。
+do
+    local dav = fakeDav()
+    local stranger = copy(STRANGER)
+    putSync(dav, { { filename = "other.epub", bookName = "别的" }, stranger })
+    dav:put(ROOT .. "/.Moon+/Cover/局外人.epub_2.png", "old-cover")
+    local id = "webdav://局外人.epub"
+    books[id] = { stable_id = id, title = "局外人（刮削）", authors = "加缪", intro = "新简介",
+        category = "小说", deleted = 0, sync_status = 1 }
+    Paths.ensureLayout("local")
+    local cover = Paths.coverPath(id, "local")
+    local f = assert(io.open(cover, "wb"))
+    f:write("new-cover")
+    f:close()
+    local c = client(dav)
+
+    local ok
+    c:pushBookAsync(id, true, function(v) ok = v end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.eq(dav.files[ROOT .. "/.Moon+/Cover/局外人.epub_2.png"].data, "new-cover")
+    local entries = remoteEntries(dav)
+    Assert.eq(entries["局外人.epub"].bookName, "局外人（刮削）")
+    Assert.eq(entries["局外人.epub"].favorite, "小说")
+    Assert.eq(entries["局外人.epub"].rate, "5", "静读天下字段原样保留")
+    Assert.eq(entries["other.epub"].bookName, "别的", "其它条目不动")
+    Assert.eq(books[id].sync_status, 1)
+
+    -- 刮削删了旧封面、新图没下成：远端旧封面也删，否则下一轮 pullCovers 拉回旧图。
+    os.remove(cover)
+    c:pushBookAsync(id, true, function(v) ok = v end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.is_nil(dav.files[ROOT .. "/.Moon+/Cover/局外人.epub_2.png"])
+
+    -- 只改元数据不碰封面；书目写失败保留脏标记，下一轮 pushBooksSync 重试。
+    local put = dav.putFileAsync
+    function dav:putFileAsync(path, local_path, cb)
+        if path == SYNC then return cb(nil, "HTTP 507") end
+        return put(self, path, local_path, cb)
+    end
+    local covers_before = dav:count("PUT " .. ROOT .. "/.Moon+/Cover/")
+    books[id].title = "再改"
+    c:pushBookAsync(id, false, function(v) ok = v end)
+    Stubs.flush()
+    dav.putFileAsync = put
+    Assert.is_false(ok)
+    Assert.eq(dav:count("PUT " .. ROOT .. "/.Moon+/Cover/"), covers_before)
+    Assert.eq(books[id].sync_status, 0)
+    Assert.eq(books[id].title, "再改")
+    Assert.is_true(scan(c))
+    Assert.eq(remoteEntries(dav)["局外人.epub"].bookName, "再改", "脏行不被远端书目盖回")
+    Assert.eq(books[id].sync_status, 1)
+
+    -- 纯本地身份没有远端：直接成功，不发请求、不标脏。
+    local calls = #dav.calls
+    books["/books/x.epub"] = { stable_id = "/books/x.epub", deleted = 0, sync_status = 1 }
+    c:pushBookAsync("/books/x.epub", true, function(v) ok = v end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.eq(#dav.calls, calls)
+    Assert.eq(books["/books/x.epub"].sync_status, 1)
+    books = {}
+end
+
 -- 已下载的裸文件：阅读时已补过封面，书名还只是文件名，同步照样解析一次补书名。
 do
     local L = require("support.config").dir() .. "/webdav-enrich"
