@@ -533,17 +533,31 @@ local function knownBooks()
     return rows
 end
 
---- 子进程：已入库的书只补封面；否则算 md5 并解析元数据（引擎失败回退文件名）。
+--- 子进程：已入库的书只补缺失封面；否则算 md5 并解析元数据（引擎失败回退文件名）。
+--- 引擎段错误 pcall 接不住，子进程直接死：打开文档前后各报一次 progress（path / false），
+--- 父进程据此认出致死的书，下一轮放进 skip 只按文件名入库。
 ---@param f table 扫描产物 { name, path, category, series }
 ---@param known table<string, Book>
+---@param skip table<string, boolean> 曾让子进程崩溃的书，不再打开
+---@param progress fun(value: string|false)
 ---@return table f 原表，未入库时补上 md5/title/authors/intro
-local function parseFile(f, known)
+local function parseFile(f, known, skip, progress)
+    local open = not skip[f.path]
     if known[f.path] then
-        ensureCover(f.path)
+        if open and lfs.attributes(coverPath(f.path), "mode") ~= "file" then
+            progress(f.path)
+            ensureCover(f.path)
+            progress(false)
+        end
         return f
     end
     f.md5 = util.partialMD5(f.path)
-    local props = parseBookProps(f.path) or {}
+    local props = {}
+    if open then
+        progress(f.path)
+        props = parseBookProps(f.path) or {}
+        progress(false)
+    end
     f.title, f.authors, f.intro = props.title, props.authors, props.intro
     if not f.title or f.title == "" then
         f.title, f.authors = parseFilename(f.name)
@@ -603,34 +617,46 @@ local function commitFiles(files, known, full_snapshot)
 end
 
 --- 扫盘任务：遍历与解析在子进程，落库在主进程，cancel 杀子进程。
---- 扫描成败都调 cb：子进程崩溃/启动失败时库里是旧数据，照查，不让 UI 空转。
+--- 子进程死在某本书的引擎里时跳过它重扫（每轮至少多跳一本，必然收敛）；
+--- 其余失败照常回调，库里是旧数据，照查，不让 UI 空转。
 ---@param root string
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return { cancel: fun() }
 local function scanJob(root, cb)
     local known = knownBooks()
-    local job = Job.run(function()
-        local files = scanFiles(root)
-        for i = 1, #files do
-            files[i] = parseFile(files[i], known)
-        end
-        return files
-    end, {
-        name = "local.scan",
-        kind = "medium",
-        on_done = function(files)
-            if commitFiles(files or {}, known, true) then
-                cb(true)
-            else
-                require("utils.log").warn("book local scan commit failed")
-                cb(false, "failed to commit local scan")
+    local skip, job = {}, nil
+    local function start()
+        local opening
+        job = Job.run(function(progress)
+            local files = scanFiles(root)
+            for i = 1, #files do
+                files[i] = parseFile(files[i], known, skip, progress)
             end
-        end,
-        on_failed = function(err)
-            require("utils.log").warn("book local scan failed", err)
-            cb(false, err or "local scan failed")
-        end,
-    })
+            return files
+        end, {
+            name = "local.scan",
+            kind = "medium",
+            on_progress = function(path) opening = path or nil end,
+            on_done = function(files)
+                if commitFiles(files or {}, known, true) then
+                    cb(true)
+                else
+                    require("utils.log").warn("book local scan commit failed")
+                    cb(false, "failed to commit local scan")
+                end
+            end,
+            on_failed = function(err)
+                if opening and not skip[opening] then
+                    require("utils.log").warn("book local scan crashed; skip", opening, err)
+                    skip[opening] = true
+                    return start()
+                end
+                require("utils.log").warn("book local scan failed", err)
+                cb(false, err or "local scan failed")
+            end,
+        })
+    end
+    start()
     return { cancel = function()
             job:cancel()
         end }
@@ -855,8 +881,8 @@ function Client:indexOneAsync(path, cb)
         return defer(cb, nil, _("不支持的文件格式"))
     end
     local known = knownBooks()
-    local job = Job.run(function()
-        return parseFile({ name = name, path = path }, known)
+    local job = Job.run(function(progress)
+        return parseFile({ name = name, path = path }, known, {}, progress)
     end, {
         name = "local.index",
         kind = "light",
