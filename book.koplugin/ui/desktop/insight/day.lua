@@ -20,22 +20,6 @@ local T = require("ffi/util").template
 ---@class BookInsightDay
 local Day = {}
 
-local function weekStart(ymd)
-    local year, month, day = tostring(ymd or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
-    if not year then return nil end
-    local y = assert(tonumber(year))
-    local mo = assert(tonumber(month))
-    local d = assert(tonumber(day))
-    ---@cast y integer
-    ---@cast mo integer
-    ---@cast d integer
-    local noon = os.time({
-        year = y, month = mo, day = d, hour = 12,
-    })
-    local date = os.date("*t", noon)
-    return os.date("%Y-%m-%d", noon - ((date.wday + 5) % 7) * 86400)
-end
-
 --- 构建日期标题，可附带该日阅读时长。
 ---@param ymd string YYYY-MM-DD 日期键。
 ---@param duration_text string|nil 时长文案。
@@ -62,13 +46,7 @@ function Day:build(desktop, state, width, avail_h, open_book)
     local calendar = state.calendar or {}
     local days = calendar.days or {}
     local info = selected ~= "" and days[selected] or nil
-    local week_scope = calendar.book_scope == "week"
     local books = info and info.books or {}
-    if week_scope then
-        local week = weekStart(selected)
-        books = week and calendar.weeks and calendar.weeks[week]
-            and calendar.weeks[week].books or {}
-    end
     local col = VerticalGroup:new{ align = "left" }
     local used = 0
     --- 追加控件并累计高度，用于在可用区域内截断书单。
@@ -88,18 +66,10 @@ function Day:build(desktop, state, width, avail_h, open_book)
         fgcolor = Blitbuffer.COLOR_BLACK,
     }
     push(title_widget, title_widget:getSize().h)
-    if week_scope then
-        push(VerticalSpan:new{ width = UI.sz(4) }, UI.sz(4))
-        local scope = UI.mutedText(_("本周阅读书目"), width, 12)
-        push(scope, scope:getSize().h)
-    end
     push(VerticalSpan:new{ width = UI.sz(10) }, UI.sz(10))
 
     if #books == 0 then
-        local empty = UI.mutedText(
-            week_scope and _("本周没有阅读书目") or _("这一天没有阅读记录"),
-            width
-        )
+        local empty = UI.mutedText(_("这一天没有阅读记录"), width)
         push(empty, empty:getSize().h)
         return col
     end

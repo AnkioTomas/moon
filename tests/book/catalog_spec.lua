@@ -82,7 +82,6 @@ package.preload["db.stats"] = function()
         summaryBySource = function() return FakeStats.summary end,
         dailyBySource = function() return FakeStats.daily end,
         dailyBooksBySource = function() return FakeStats.daily_books end,
-        weeklyBooksBySource = function() return {} end,
     }
 end
 package.loaded["book.catalog"] = nil

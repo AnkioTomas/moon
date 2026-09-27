@@ -14,9 +14,8 @@ local logger = require("utils.log")
 local StatsDB = {}
 
 local DAY_RECORD = "day"
-local BOOK_RECORD = "book"
-local TOTAL_RECORD = "total"
 local ROLLUP_RECORD = "page_rollup"
+local LOCAL_RECORDS = { page = true, [ROLLUP_RECORD] = true }
 
 --- 创建阅读统计表及聚合查询索引。
 --- 仅在 Base.open() 的一次性 schema 初始化阶段调用。
@@ -138,51 +137,56 @@ local function execByIds(prefix, ids)
     return true
 end
 
---- 云端日桶/书桶是合成行：按书、按小时统计里必须排掉，否则同一天既算云端整天
---- 时长又算本地逐页时长，账单直接翻倍。
-local NOT_SYNTHETIC = " AND record_type IN ('page','page_rollup') "
+--- 本地记录是否已含在拉取时间为 at 的云端快照之外：未上传，或快照之后才读。
+--- at=0（旧版拉取未记时间）只认未上传，宁可少算也不双计。两个 ? 都绑 at。
+local FRESH_LOCAL = "(sync_status=0 OR (?>0 AND start_time>=?))"
 
---- 按天合并云端日桶与本地页记录：有云端日桶的日期以云端为准。
+--- 按天合并云端日桶与本地页记录：有云端日桶的日期 = 云端 + 拉取后本地新读的。
 ---@param source_id string
 ---@param start_ts number|nil 可选时间范围（含）
 ---@param end_ts number|nil 可选时间范围（不含）
 ---@return table[] rows { ymd, seconds, pages }
 local function mergedDailyRowsOne(source_id, start_ts, end_ts)
+    local fetched_at = tonumber(Base.rowexec(
+        "SELECT MAX(last_time) FROM reading_stats WHERE source_id=? AND record_type='day';",
+        source_id
+    )) or 0
     local range = ""
-    local args = { source_id }
+    local args = { fetched_at, fetched_at, source_id }
     if start_ts and end_ts then
         range = " AND start_time>=? AND start_time<?"
-        args[2] = tonumber(start_ts) or 0
-        args[3] = tonumber(end_ts) or 0
+        args[4] = tonumber(start_ts) or 0
+        args[5] = tonumber(end_ts) or 0
     end
     local result, nrows = Base.query(
         [[SELECT date(start_time,'unixepoch','localtime') AS day,
                  stable_id, record_type, COALESCE(SUM(duration),0),
-                 COALESCE(SUM(event_count),0)
+                 COALESCE(SUM(event_count),0),
+                 COALESCE(SUM(CASE WHEN ]] .. FRESH_LOCAL .. [[ THEN duration ELSE 0 END),0)
           FROM reading_stats WHERE source_id=?]] .. range .. [[
           GROUP BY day, stable_id, record_type ORDER BY day;]],
         unpack(args)
     )
-    local cloud, local_days, pages = {}, {}, {}
+    local cloud, local_days, fresh, pages = {}, {}, {}, {}
     for i = 1, nrows do
         local day = result[1][i]
         local record_type = result[3][i]
         local seconds = tonumber(result[4][i]) or 0
         local count = tonumber(result[5][i]) or 0
-        if record_type == BOOK_RECORD or record_type == TOTAL_RECORD then
-            -- 周期书单排行和权威累计值不参与日历总时长
-        elseif record_type == DAY_RECORD then
+        -- 周期书单、累计值、单书明细（book / total / book_total / book_day）都不参与日历总时长
+        if record_type == DAY_RECORD then
             cloud[day] = seconds
             pages[day] = (pages[day] or 0) + count
-        else
+        elseif LOCAL_RECORDS[record_type] then
             local_days[day] = (local_days[day] or 0) + seconds
+            fresh[day] = (fresh[day] or 0) + (tonumber(result[6][i]) or 0)
             pages[day] = (pages[day] or 0) + count
         end
     end
     local seen, rows = {}, {}
     for day, seconds in pairs(cloud) do
         seen[day] = true
-        rows[#rows + 1] = { ymd = day, seconds = seconds, pages = pages[day] or 0 }
+        rows[#rows + 1] = { ymd = day, seconds = seconds + (fresh[day] or 0), pages = pages[day] or 0 }
     end
     for day, seconds in pairs(local_days) do
         if not seen[day] then
@@ -349,7 +353,17 @@ function StatsDB.replaceSynced(source_id, replace, rows)
         return nil
     end
     local result = { imported = 0, skipped = 0 }
-    local ok = clearRange()
+    local ok = true
+    -- 单书明细按 stable_id 精确整本替换：不走前缀，书 id 可能互为前缀
+    for _, stable_id in ipairs(replace and replace.books or {}) do
+        ok = Base.exec(
+            [[DELETE FROM reading_stats WHERE source_id=? AND stable_id=?
+                AND record_type IN ('book_day','book_total');]],
+            source_id, stable_id
+        ) ~= nil
+        if not ok then break end
+    end
+    ok = ok and clearRange()
     for _, row in ipairs(rows) do
         if not ok then break end
         local duplicate = StatsDB.exists(row)
@@ -404,43 +418,114 @@ function StatsDB.summaryBySource(source_id)
 end
 
 --- 汇总单本书阅读统计：总时长/已读页数/上次阅读时间（详情页用）。
---- 已上传和远端拉取记录仍保留，详情聚合始终读取完整本地历史。
+--- 有云端单书快照（book_total）时，总时长 = 快照 + 快照后读的 + 仍未上传的本地时长；
+--- 快照前已上传的本地时长已含在快照里，不能再加。没有快照时就是本地累计。
 ---@param source_id string
 ---@param stable_id string
 ---@return { total_seconds: number, pages: number, last_read: number }
 function StatsDB.summaryByBook(source_id, stable_id)
-    local total_seconds, pages, last_read = Base.rowexec(
-        [[SELECT COALESCE(SUM(duration),0), COALESCE(SUM(event_count),0),
+    local snapshot, fetched_at = Base.rowexec(
+        [[SELECT duration, start_time FROM reading_stats
+          WHERE source_id=? AND stable_id=? AND record_type='book_total' LIMIT 1;]],
+        source_id,
+        stable_id
+    )
+    local local_seconds, fresh_seconds, pages, last_read = Base.rowexec(
+        [[SELECT COALESCE(SUM(duration),0),
+                 COALESCE(SUM(CASE WHEN sync_status=0 OR start_time>=? THEN duration ELSE 0 END),0),
+                 COALESCE(SUM(event_count),0),
                  COALESCE(MAX(CASE WHEN record_type='page_rollup'
                     THEN last_time ELSE start_time END),0)
           FROM reading_stats WHERE source_id=? AND stable_id=?
             AND record_type IN ('page','page_rollup');]],
+        tonumber(fetched_at) or 0,
         source_id,
         stable_id
     )
+    local total_seconds = tonumber(local_seconds) or 0
+    if snapshot then
+        total_seconds = tonumber(snapshot) + (tonumber(fresh_seconds) or 0)
+    end
     return {
-        total_seconds = tonumber(total_seconds) or 0,
+        total_seconds = total_seconds,
         pages = tonumber(pages) or 0,
         last_read = tonumber(last_read) or 0,
     }
 end
 
---- 单本书按天聚合（详情页「最近几天」卡片用，最近在前）。
---- 已上传和远端拉取记录仍保留，详情聚合始终读取完整本地历史。
+--- 云端单书累计快照：stable_id → 秒（判断哪些书需要重拉按日明细）。
+---@param source_id string
+---@return table<string, number>
+function StatsDB.bookTotals(source_id)
+    local result, nrows = Base.query(
+        "SELECT stable_id, duration FROM reading_stats WHERE source_id=? AND record_type='book_total';",
+        source_id
+    )
+    local out = {}
+    for i = 1, nrows do
+        out[result[1][i]] = tonumber(result[2][i]) or 0
+    end
+    return out
+end
+
+--- 按（书，天）合并云端 book_day 与本地逐页记录，产出 CTE
+--- ``bd(source_id, stable_id, day, seconds, pages, max_page, max_total_pages)``：
+--- 某书某天有云端值 = 云端 + 这本书拉取后本地新读 / 未上传的；否则只有本地。
+---@param source_id string|string[]
+---@param filter string 追加到 WHERE 的片段，列名用 ``r.`` 前缀；作用于云端与本地两侧
+---@param filter_args any[]
+---@return string sql 以 WITH 开头，调用方接 SELECT … FROM bd
+---@return any[] args
+local function bookDays(source_id, filter, filter_args)
+    local src, src_args = Base.sourceClause("r.source_id", source_id)
+    local args = {}
+    for _, list in ipairs({ src_args, filter_args, src_args, src_args, filter_args }) do
+        for _, v in ipairs(list) do args[#args + 1] = v end
+    end
+    return [[WITH cloud AS (
+          SELECT r.source_id, r.stable_id, date(r.start_time,'unixepoch','localtime') AS day,
+                 SUM(r.duration) AS seconds
+          FROM reading_stats r WHERE ]] .. src .. [[ AND r.record_type='book_day']] .. filter .. [[
+          GROUP BY 1, 2, 3),
+        fetched AS (
+          SELECT r.source_id, r.stable_id, MAX(r.last_time) AS at
+          FROM reading_stats r WHERE ]] .. src .. [[ AND r.record_type='book_day'
+          GROUP BY 1, 2),
+        loc AS (
+          SELECT r.source_id, r.stable_id, date(r.start_time,'unixepoch','localtime') AS day,
+                 SUM(r.duration) AS seconds,
+                 SUM(CASE WHEN r.sync_status=0 OR r.start_time>=f.at THEN r.duration ELSE 0 END) AS fresh,
+                 SUM(r.event_count) AS pages, MAX(r.page) AS max_page,
+                 MAX(r.total_pages) AS max_total_pages
+          FROM reading_stats r LEFT JOIN fetched f
+            ON f.source_id=r.source_id AND f.stable_id=r.stable_id
+          WHERE ]] .. src .. [[ AND r.record_type IN ('page','page_rollup')]] .. filter .. [[
+          GROUP BY 1, 2, 3),
+        bd AS (
+          SELECT l.source_id, l.stable_id, l.day,
+                 CASE WHEN c.seconds IS NULL THEN l.seconds ELSE c.seconds + l.fresh END AS seconds,
+                 l.pages, l.max_page, l.max_total_pages
+          FROM loc l LEFT JOIN cloud c
+            ON c.source_id=l.source_id AND c.stable_id=l.stable_id AND c.day=l.day
+          UNION ALL
+          SELECT c.source_id, c.stable_id, c.day, c.seconds, 0, 0, 0
+          FROM cloud c LEFT JOIN loc l
+            ON l.source_id=c.source_id AND l.stable_id=c.stable_id AND l.day=c.day
+          WHERE l.day IS NULL)
+        ]], args
+end
+
+--- 单本书按天聚合（详情页「最近几天」、锁屏日桶用，最近在前），含云端其他设备的按日时长。
 ---@param source_id string
 ---@param stable_id string
 ---@param limit number|nil 最多返回天数，默认 5
 ---@return table[] rows { ymd, seconds, pages }（日期倒序）
 function StatsDB.dailyByBook(source_id, stable_id, limit)
+    local cte, args = bookDays(source_id, " AND r.stable_id=?", { stable_id })
+    args[#args + 1] = tonumber(limit) or 5
     local result, nrows = Base.query(
-        [[SELECT date(start_time,'unixepoch','localtime') AS day,
-                 SUM(duration), SUM(event_count)
-          FROM reading_stats WHERE source_id=? AND stable_id=?
-            AND record_type IN ('page','page_rollup')
-          GROUP BY day ORDER BY day DESC LIMIT ?;]],
-        source_id,
-        stable_id,
-        tonumber(limit) or 5
+        cte .. "SELECT day, seconds, pages FROM bd ORDER BY day DESC LIMIT ?;",
+        unpack(args)
     )
     local rows = {}
     for i = 1, nrows do
@@ -460,18 +545,15 @@ function StatsDB.dailyBySource(source_id)
     return mergedDailyRows(source_id)
 end
 
---- 按天按书聚合某源阅读统计（本地洞察当日书单用）。
---- 进度近似 = 当日读到最深页 / 当时总页数。
+--- 按天按书聚合某源阅读统计（本地洞察当日书单用），含云端单书按日时长。
+--- 进度近似 = 当日读到最深页 / 当时总页数；只有云端时长的那天没有页坐标，两者为 0。
 ---@param source_id string|string[]
 ---@return table[] rows { ymd, source_id, stable_id, seconds, max_page, max_total_pages }（日期升序、时长降序）
 function StatsDB.dailyBooksBySource(source_id)
-    local where, args = Base.sourceClause("source_id", source_id)
+    local cte, args = bookDays(source_id, "", {})
     local result, nrows = Base.query(
-        [[SELECT date(start_time,'unixepoch','localtime') AS day,
-                 source_id, stable_id, SUM(duration), MAX(page), MAX(total_pages)
-          FROM reading_stats WHERE ]] .. where .. [[
-            AND record_type IN ('page','page_rollup')
-          GROUP BY day, source_id, stable_id ORDER BY day, 4 DESC;]],
+        cte .. [[SELECT day, source_id, stable_id, seconds, max_page, max_total_pages
+          FROM bd ORDER BY day, seconds DESC;]],
         unpack(args)
     )
     local rows = {}
@@ -488,47 +570,19 @@ function StatsDB.dailyBooksBySource(source_id)
     return rows
 end
 
---- 微信周排行书单；stable_id 去掉合成前缀后恢复真实书籍身份。
----@param source_id string
----@return table[] rows { week_ymd, stable_id, seconds }
-function StatsDB.weeklyBooksBySource(source_id)
-    local result, nrows = Base.query(
-        [[SELECT date(start_time,'unixepoch','localtime'), stable_id, duration
-          FROM reading_stats
-          WHERE source_id=? AND record_type='book'
-            AND stable_id LIKE '__wr:week:%'
-          ORDER BY start_time, duration DESC;]],
-        source_id
-    )
-    local rows = {}
-    for i = 1, nrows do
-        local stable_id = result[2][i]:match("^__wr:week:%d+:(.+)$")
-        if stable_id then
-            rows[#rows + 1] = {
-                week_ymd = result[1][i],
-                stable_id = stable_id,
-                seconds = tonumber(result[3][i]) or 0,
-            }
-        end
-    end
-    return rows
-end
-
 --- 指定时间范围内某源的账单汇总。
 ---@param source_id string|string[]
 ---@param start_ts number
 ---@param end_ts number
 ---@return { total_seconds: number, book_count: number, pages: number }
 function StatsDB.periodSummary(source_id, start_ts, end_ts)
-    -- 书数/页数只看真实书的记录；总时长按天走「云端日桶优先」的合并口径，
-    -- 与洞察日历保持一致，也避免同一天双重计数。
-    local where, args = Base.sourceClause("source_id", source_id)
-    args[#args + 1] = tonumber(start_ts) or 0
-    args[#args + 1] = tonumber(end_ts) or 0
-    local _, books, pages = Base.rowexec(
-        [[SELECT 0, COUNT(DISTINCT source_id || '\0' || stable_id), COALESCE(SUM(event_count),0)
-          FROM reading_stats WHERE ]] .. where .. [[ AND start_time>=? AND start_time<?]]
-        .. NOT_SYNTHETIC .. ";",
+    -- 书数按（书，天）合并口径（含其他设备读过的书），页数只有本地记录；
+    -- 总时长按天走账户日桶合并口径，与洞察日历保持一致。
+    local cte, args = bookDays(source_id, " AND r.start_time>=? AND r.start_time<?",
+        { tonumber(start_ts) or 0, tonumber(end_ts) or 0 })
+    local books, pages = Base.rowexec(
+        cte .. [[SELECT COUNT(DISTINCT source_id || '\0' || stable_id), COALESCE(SUM(pages),0)
+          FROM bd;]],
         unpack(args)
     )
     local total = 0
@@ -549,21 +603,18 @@ end
 ---@param limit number|nil
 ---@return table[] rows { source_id, stable_id, title, authors, percent, seconds, pages }
 function StatsDB.periodBooks(source_id, start_ts, end_ts, limit)
-    local where, args = Base.sourceClause("r.source_id", source_id)
-    args[#args + 1] = tonumber(start_ts) or 0
-    args[#args + 1] = tonumber(end_ts) or 0
+    local cte, args = bookDays(source_id, " AND r.start_time>=? AND r.start_time<?",
+        { tonumber(start_ts) or 0, tonumber(end_ts) or 0 })
     args[#args + 1] = math.max(1, tonumber(limit) or 5)
     local result, nrows = Base.query(
-        [[SELECT r.source_id, r.stable_id, b.title, b.authors,
+        cte .. [[SELECT bd.source_id, bd.stable_id, b.title, b.authors,
                  COALESCE(p.fraction * 100, 0),
-                 SUM(r.duration), SUM(r.event_count)
-          FROM reading_stats r LEFT JOIN books b
-            ON b.source_id=r.source_id AND b.stable_id=r.stable_id
+                 SUM(bd.seconds), SUM(bd.pages)
+          FROM bd LEFT JOIN books b
+            ON b.source_id=bd.source_id AND b.stable_id=bd.stable_id
           LEFT JOIN pending_progress p
-            ON p.source_id=r.source_id AND p.stable_id=r.stable_id
-          WHERE ]] .. where .. [[ AND r.start_time>=? AND r.start_time<?
-            AND r.record_type IN ('page','page_rollup')
-          GROUP BY r.source_id, r.stable_id ORDER BY 6 DESC LIMIT ?;]],
+            ON p.source_id=bd.source_id AND p.stable_id=bd.stable_id
+          GROUP BY bd.source_id, bd.stable_id ORDER BY 6 DESC LIMIT ?;]],
         unpack(args)
     )
     local rows = {}

@@ -72,6 +72,7 @@
 ---@field mode '"synced"'|'"all_synced"'|'"prefix"'|'"ranges"' all_synced=全量快照，删除该源全部已同步行
 ---@field stable_prefixes string[]|nil mode=prefix 时生效
 ---@field ranges BookStatsPullReplaceRange[]|nil mode=ranges 时按各前缀的独立时间窗口清理
+---@field books string[]|nil 按 stable_id 精确整本替换 book_day / book_total（与 mode 无关）
 
 --- pullStatsAsync 回包：纯数组为追加去重；带 replace 为云端优先覆盖入库。
 ---@class BookStatsPullResult
