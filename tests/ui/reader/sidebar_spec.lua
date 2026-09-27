@@ -70,6 +70,8 @@ function Menu:new(o)
     o.page_num = o.page_num or 1
     o.page_info_spacer = { width = 32 }
     o.page_info_text = part(200)
+    o.page_info_text.text = "第 1 页，共 1 页"
+    o.page_info_text.setText = function(self, text) self.text = text end
     o.page_info_left_chev, o.page_info_right_chev = part(40), part(40)
     o.page_info_first_chev, o.page_info_last_chev = part(40), part(40)
     local menu = o
@@ -219,12 +221,12 @@ Assert.is_nil(Menu.width, "Menu 缺省宽高已还原")
 Assert.eq(UIManager.show, original_show, "UIManager.show 已还原")
 
 -- 页脚：单页整行藏起；多页时 200 + 160 + 4×32 = 488 ≤ 510 保持原间隔。
-Assert.is_false(toc_menu.page_info_text.shown)
+Assert.eq(toc_menu.page_info_text.text, "", "文字按钮 hide 无效，单页清空页码")
 Assert.is_false(toc_menu.page_info_left_chev.shown)
 toc_menu.page_num = 3
 toc_menu:updatePageInfo()
 Assert.eq(toc_menu.page_info_updates, 1, "原生 updatePageInfo 照常执行")
-Assert.is_true(toc_menu.page_info_text.shown, "变成多页后页脚恢复")
+Assert.is_true(toc_menu.page_info_left_chev.shown, "变成多页后页脚恢复")
 Assert.eq(toc_menu.page_info_spacer.width, 32)
 -- 页码文案变长（放不下）：四个间隔等量收窄到刚好放下。
 toc_menu.page_info_text.w = 260

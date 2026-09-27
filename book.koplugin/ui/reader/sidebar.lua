@@ -100,13 +100,15 @@ local function fitPager(menu)
     local update = menu.updatePageInfo
     local spacer = menu.page_info_spacer
     local full = spacer.width
-    local parts = {
-        menu.page_info_text, menu.page_info_left_chev, menu.page_info_right_chev,
+    local chevs = {
+        menu.page_info_left_chev, menu.page_info_right_chev,
         menu.page_info_first_chev, menu.page_info_last_chev,
     }
     local function fit()
         local single = menu.page_num <= 1
-        for _, part in ipairs(parts) do part:showHide(not single) end
+        for _, chev in ipairs(chevs) do chev:showHide(not single) end
+        -- Button:hide 只对图标按钮生效，页码文字只能清空；多页时原生 updatePageInfo 会写回
+        if single then menu.page_info_text:setText("") end
         spacer.width = full
         menu.page_info:resetLayout()
         local over = menu.page_info:getSize().w - menu.inner_dimen.w
