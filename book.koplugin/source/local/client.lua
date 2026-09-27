@@ -1490,11 +1490,75 @@ function Client:openWebdavAsync(stable_id, cb)
     end }
 end
 
---- 删除远端书文件，再顺手删它的封面、进度和笔记边车，以及本地镜像 / 缓存里的这本书。
+--- 删远端书文件，再顺手删它的封面、进度和笔记边车。
 --- 边车删不掉（多半是本来就没有，404）不影响结果：书文件没了，边车就再也不会被引用。
---- 书文件已经不在（404）照样算删成功：云端的书只靠 books.sync 存活，要删的是书目条目。
---- 最后把条目从 books.sync 里删掉；listed=false 表示书目没写成（读不出/写失败），调用方留脏墓碑，
---- 下一轮 pushBooksSync 补删。
+--- 书文件已经不在（404）照样算删成功。
+---@param self LocalClient
+---@param rel string
+---@param cb fun(ok: boolean, err: string|nil)
+---@return { cancel: fun() }
+local function deleteRemoteBook(self, rel, cb)
+    local cancelled, active = false, nil
+    active = self.dav:deleteAsync(self:webdavPath() .. "/" .. rel, function(ok, err, code)
+        if cancelled then return end
+        if not ok and code ~= 404 then return cb(false, err) end
+        local sidecars = { coverRemotePath(self, rel), progressRemotePath(self, rel), notesRemotePath(self, rel) }
+        eachAsync(sidecars, function(path, next_item)
+            active = self.dav:deleteAsync(path, function()
+                if not cancelled then next_item() end
+            end)
+        end, function() cb(true) end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if active and active.cancel then active:cancel() end
+    end }
+end
+
+--- 读改写 books.sync 里 filename=rel 的条目：edit(原条目|nil) 返回新条目（原位替换，原来没有则追加），
+--- 返回 nil 即删除；原来没有且 edit 也不给时不回写。书目不存在（404）按空书目处理。
+--- cb(false) 表示书目没写成（读不出 / 写失败）。
+---@param self LocalClient
+---@param rel string
+---@param edit fun(entry: table|nil): table|nil
+---@param cb fun(listed: boolean)
+---@return { cancel: fun() }
+local function editBooksSync(self, rel, edit, cb)
+    local temp = self:webdavCacheRoot() .. "/.books.sync.edit"
+    ensureParent(temp)
+    local cancelled, active = false, nil
+    active = self.dav:getAsync(moonPath(self, "books.sync"), temp, nil, function(ok, _, code)
+        if cancelled then return end
+        local raw = ok and readFile(temp)
+        os.remove(temp)
+        if not ok and code ~= 404 then return cb(false) end
+        local decoded = {}
+        if ok then decoded = raw and decodeBooksSync(raw) end
+        if type(decoded) ~= "table" then return cb(false) end
+        local list, old, at = {}, nil, nil
+        for _, entry in ipairs(decoded) do
+            if type(entry) == "table" and entry.filename == rel then
+                old, at = old or entry, at or #list + 1
+            else
+                list[#list + 1] = entry
+            end
+        end
+        local entry = edit(old)
+        if not old and not entry then return cb(true) end
+        if entry then table.insert(list, at or #list + 1, entry) end
+        active = writeBooksSync(self, list, function(written)
+            if not cancelled then cb(written) end
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if active and active.cancel then active:cancel() end
+    end }
+end
+
+--- 删除 WebDAV 书：远端书文件与边车、本地镜像 / 缓存里的这本书，最后把条目从 books.sync 里删掉。
+--- 云端的书只靠 books.sync 存活，远端文件已经不在也照样删书目条目。
+--- listed=false 表示书目没写成（读不出/写失败），调用方留脏墓碑，下一轮 pushBooksSync 补删。
 ---@param stable_id string
 ---@param cb fun(ok: boolean, err: string|nil, listed: boolean|nil)
 ---@return { cancel: fun() }|nil
@@ -1502,40 +1566,89 @@ function Client:deleteWebdavAsync(stable_id, cb)
     local rel = remoteRelativePath(stable_id)
     if not rel then cb(false, _("无效的 WebDAV 书籍路径")); return nil end
     local cancelled, active = false, nil
-    local function unlist()
-        local temp = self:webdavCacheRoot() .. "/.books.sync.delete"
-        ensureParent(temp)
-        active = self.dav:getAsync(moonPath(self, "books.sync"), temp, nil, function(ok, _, code)
-            if cancelled then return end
-            local raw = ok and readFile(temp)
-            os.remove(temp)
-            if not ok then return cb(true, nil, code == 404) end
-            local decoded = raw and decodeBooksSync(raw)
-            if type(decoded) ~= "table" then return cb(true, nil, false) end
-            local list, found = {}, false
-            for _, entry in ipairs(decoded) do
-                if type(entry) == "table" and entry.filename == rel then
-                    found = true
-                else
-                    list[#list + 1] = entry
-                end
-            end
-            if not found then return cb(true, nil, true) end
-            active = writeBooksSync(self, list, function(written)
-                if not cancelled then cb(true, nil, written) end
-            end)
-        end)
-    end
-    active = self.dav:deleteAsync(self:webdavPath() .. "/" .. rel, function(ok, err, code)
+    active = deleteRemoteBook(self, rel, function(ok, err)
         if cancelled then return end
-        if not ok and code ~= 404 then return cb(false, err) end
+        if not ok then return cb(false, err) end
         os.remove(self:webdavBookRoot() .. "/" .. rel)
-        active = self.dav:deleteAsync(coverRemotePath(self, rel), function()
+        active = editBooksSync(self, rel, function() return nil end, function(listed)
+            if not cancelled then cb(true, nil, listed) end
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if active and active.cancel then active:cancel() end
+    end }
+end
+
+--- 用转换后的临时 EPUB 替换 WebDAV 书（同目录同名 .epub）。
+--- 顺序：查远端重名 → 传新文件 → 书目条目改名（其余字段原样保留）→ 换本地文件、迁移身份与 .sdr/封面 →
+--- 删远端原书及其边车。书目写成之前失败都撤掉已传的新文件，远端与本地保持原样；
+--- 之后的远端清理失败只记日志（新书已生效）。临时文件失败时留给调用方清理。
+---@param temp_path string
+---@param stable_id string webdav://rel
+---@param cb fun(new_path: string|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:replaceWebdavAsync(temp_path, stable_id, cb)
+    local rel = remoteRelativePath(stable_id)
+    if not rel then return defer(cb, nil, _("无效的 WebDAV 书籍路径")) end
+    local new_rel = rel:gsub("%.[^./]+$", ".epub")
+    if new_rel == rel then return defer(cb, nil, _("原书已经是 EPUB")) end
+    local BookDB = require("db.book")
+    local new_id, name = remoteStableId(new_rel), sidecarKey(new_rel)
+    local root = self:webdavBookRoot()
+    local old_path, new_path = root .. "/" .. rel, root .. "/" .. new_rel
+    local taken = BookDB.get(SOURCE_ID, new_id)
+    if lfs.attributes(new_path) or (taken and taken.deleted ~= 1) then
+        return defer(cb, nil, _("目标位置已有同名文件：") .. name)
+    end
+    local parent = rel:match("^(.+)/[^/]+$")
+    local remote_new = self:webdavPath() .. "/" .. new_rel
+    local cancelled, active = false, nil
+
+    local function swapLocal()
+        ensureParent(new_path)
+        local placed, place_err = os.rename(temp_path, new_path)
+        if not placed then return _("放置转换文件失败：") .. tostring(place_err) end
+        if not BookDB.adoptStableId(SOURCE_ID, stable_id, new_id, new_path) then
+            os.rename(new_path, temp_path)
+            return _("更新书籍身份失败")
+        end
+        os.remove(old_path)
+        -- 封面缓存按身份寻址，.sdr 按物理路径寻址。
+        moveBookArtifacts(stable_id, new_id)
+        moveBookArtifacts(old_path, new_path)
+    end
+
+    active = self.dav:listAsync(self:webdavPath() .. (parent and "/" .. parent or ""), function(entries, list_err)
+        if cancelled then return end
+        if not entries then return cb(nil, list_err) end
+        for i = 1, #entries do
+            if not entries[i].is_dir and entries[i].name == name then
+                return cb(nil, _("目标位置已有同名文件：") .. name)
+            end
+        end
+        active = self.dav:putFileAsync(remote_new, temp_path, function(ok, put_err)
             if cancelled then return end
-            active = self.dav:deleteAsync(progressRemotePath(self, rel), function()
+            if not ok then return cb(nil, put_err) end
+            active = editBooksSync(self, rel, function(entry)
+                local renamed = {}
+                for k, v in pairs(entry or {}) do renamed[k] = v end
+                renamed.filename = new_rel
+                if renamed.downloadUrl then renamed.downloadUrl = "[WebDav]/" .. remote_new end
+                return renamed
+            end, function(listed)
                 if cancelled then return end
-                active = self.dav:deleteAsync(notesRemotePath(self, rel), function()
-                    if not cancelled then unlist() end
+                if not listed then
+                    self.dav:deleteAsync(remote_new, function() end)
+                    return cb(nil, _("更新书目失败"))
+                end
+                local swap_err = swapLocal()
+                if swap_err then return cb(nil, swap_err) end
+                active = deleteRemoteBook(self, rel, function(deleted, del_err)
+                    if not deleted then
+                        require("utils.log").warn("book webdav replace cleanup failed", rel, del_err)
+                    end
+                    if not cancelled then cb(new_path) end
                 end)
             end)
         end)
@@ -1544,6 +1657,18 @@ function Client:deleteWebdavAsync(stable_id, cb)
         cancelled = true
         if active and active.cancel then active:cancel() end
     end }
+end
+
+--- 用转换后的临时 EPUB 替换原书，按身份分派：webdav:// 走远端替换，其余是本地文件替换。
+---@param temp_path string
+---@param stable_id string
+---@param cb fun(new_path: string|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:replaceBookAsync(temp_path, stable_id, cb)
+    if remoteRelativePath(stable_id) then
+        return self:replaceWebdavAsync(temp_path, stable_id, cb)
+    end
+    return defer(cb, self:replaceBook(temp_path, stable_id))
 end
 
 --- 连通性测试：在书库目录写入探针文件、读回比对、再删除。

@@ -29,6 +29,13 @@ local function fileKind(path)
     return nil
 end
 
+--- 排版读写的是本地物理文件（books.path）：普通本地书即 stable_id，WebDAV 书是下载到本地的那份。
+---@param identity BookIdentity
+---@return string|nil
+local function bookFile(identity)
+    return identity.book and identity.book.path
+end
+
 ---@param identity BookIdentity|nil
 ---@return boolean
 function Reflow.canReflow(identity)
@@ -36,10 +43,10 @@ function Reflow.canReflow(identity)
         return false
     end
     local source = identity.source
-    if not source or type(source.replaceBook) ~= "function" then
+    if not source or type(source.replaceBookAsync) ~= "function" then
         return false
     end
-    local path = identity.stable_id
+    local path = bookFile(identity)
     return type(path) == "string" and fileKind(path) ~= nil
 end
 
@@ -97,8 +104,8 @@ end
 ---@param cb fun(titles: string[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Reflow.analyzeAsync(identity, cb)
-    local path = identity.stable_id
-    local kind = fileKind(path)
+    local path = bookFile(identity)
+    local kind = path and fileKind(path)
     if not kind then
         return failLater(cb, _("无效路径"))
     end
@@ -146,14 +153,14 @@ end
 ---@param cb fun(new_path: string|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Reflow.applyAsync(identity, cb)
-    local path = identity.stable_id
-    local kind = fileKind(path)
+    local path = bookFile(identity)
+    local kind = path and fileKind(path)
     if not kind then
         return failLater(cb, _("无效路径"))
     end
 
     local source = identity.source
-    if not source or type(source.replaceBook) ~= "function" then
+    if not source or type(source.replaceBookAsync) ~= "function" then
         return failLater(cb, _("当前书籍不支持排版"))
     end
 
@@ -161,44 +168,30 @@ function Reflow.applyAsync(identity, cb)
     local target = path:gsub("%.[^./]+$", ".epub")
     local dest = target .. ".moon-reflow"
     local cached = preview_cache[path]
+    local active
 
-    --- 转换收尾：成功则用产物替换原书并登记新路径，失败清掉临时文件。
+    local function fail(err)
+        os.remove(dest)
+        os.remove(dest .. ".part")
+        cb(nil, err)
+    end
+
+    --- 转换收尾：成功则交给源替换原书（身份与 books.path 由源迁移），失败清掉临时文件。
     --- 任何一步失败都保证 dest 与 dest.part 不残留，且不改动原书。
     ---@param ok boolean 转换是否成功
     ---@param err string|nil 转换失败原因
     local function finishReplace(ok, err)
         preview_cache[path] = nil
-        if not ok then
-            os.remove(dest)
-            os.remove(dest .. ".part")
-            cb(nil, err or _("排版失败"))
-            return
-        end
-        local replaced, replace_err = source:replaceBook(dest, path)
-        if not replaced then
-            os.remove(dest)
-            os.remove(dest .. ".part")
-            cb(nil, replace_err or _("替换原书失败"))
-            return
-        end
-        local touch_identity = {}
-        for key, value in pairs(identity) do
-            touch_identity[key] = value
-        end
-        touch_identity.stable_id = replaced
-        touch_identity.path = replaced
-        local touched, touch_err = require("book.store").touch(replaced, touch_identity)
-        if not touched then
-            require("utils.log").warn("book reflow path registration failed", replaced, touch_err)
-            cb(nil, touch_err)
-            return
-        end
-        cb(replaced)
+        if not ok then return fail(err or _("排版失败")) end
+        active = source:replaceBookAsync(dest, identity.stable_id, function(new_path, replace_err)
+            if not new_path then return fail(replace_err or _("替换原书失败")) end
+            cb(new_path)
+        end)
     end
 
     -- txt 未预览时 text 为 nil，由 Text2Epub 自己读 source。
     if kind == "txt" or (cached and cached.text) then
-        return Text2Epub.build({
+        active = Text2Epub.build({
             dest = dest,
             text = cached and cached.text,
             source = path,
@@ -207,15 +200,18 @@ function Reflow.applyAsync(identity, cb)
             identifier = parse_opts.identifier,
             reflow = true,
         }, finishReplace)
+    else
+        active = require("convert.mobi2epub").build({
+            dest = dest,
+            source = path,
+            title = parse_opts.title,
+            author = parse_opts.author,
+            identifier = parse_opts.identifier,
+        }, finishReplace)
     end
-
-    return require("convert.mobi2epub").build({
-        dest = dest,
-        source = path,
-        title = parse_opts.title,
-        author = parse_opts.author,
-        identifier = parse_opts.identifier,
-    }, finishReplace)
+    return { cancel = function()
+        if active and active.cancel then active.cancel(active) end
+    end }
 end
 
 --- 阅读页入口：先预览目录，确认后再转换替换并重新打开。
@@ -225,7 +221,7 @@ function Reflow.startFromReader(ui, identity)
     if not Reflow.canReflow(identity) then
         return
     end
-    local path = identity.stable_id
+    local path = bookFile(identity)
     local kind = fileKind(path)
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
