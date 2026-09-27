@@ -60,6 +60,8 @@ end
 function Azw3Document:register(registry)
     if registry:getProviderFromKey(self.provider) then return end
     registry:addProvider("azw3", "application/vnd.amazon.mobi8-ebook", self, 100)
+    -- .azw 可能是 KF8 也可能是 MOBI6；权重需高于 CreDocument 的 90，MOBI6 在 prepare 里原样回落
+    registry:addProvider("azw", "application/vnd.amazon.mobi8-ebook", self, 100)
 end
 
 function Azw3Document:init()

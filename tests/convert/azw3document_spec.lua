@@ -155,8 +155,10 @@ do
     }
     Azw3Document:register(registry)
     Azw3Document:register(registry)
-    Assert.len(added, 1)
+    Assert.len(added, 2)
     Assert.eq(added[1].ext, "azw3")
+    Assert.eq(added[2].ext, "azw")
+    Assert.is_true(added[2].weight > 90, "azw 需压过 CreDocument 的 90")
 end
 
 Kf8.extract = real_extract

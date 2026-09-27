@@ -20,6 +20,7 @@ local BOOK_EXTENSIONS = {
     cbz = true,
     cbr = true,
     mobi = true,
+    azw = true,
     azw3 = true,
     txt = true,
 }
@@ -61,7 +62,7 @@ local function validBook(path, format_path)
     local ext = (format_path or path):match("%.([^.]+)$")
     ext = ext and string.lower(ext) or nil
     if ext == "txt" then return true end
-    if ext == "mobi" or ext == "azw3" then
+    if ext == "mobi" or ext == "azw" or ext == "azw3" then
         if attr.size < 68 then return false end
         file = io.open(path, "rb")
         if not file then return false end
