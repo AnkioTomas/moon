@@ -77,6 +77,7 @@ package.preload["ui.views.bottombar"] = function()
         new = function(_, opts)
             local data = opts.data
             local widget = {
+                _width = opts.width,
                 _tabs = data.tabs,
                 _active = data.active,
                 _on_tab = data.on_tab,
@@ -429,6 +430,7 @@ do
     local bar = stack[2]
     Assert.eq(#bar._tabs, 3)
     Assert.eq(bar._active, "x")
+    Assert.eq(bar._width, 400, "Tab 栏跟菜单内宽走，不按整屏宽（侧栏里的窄菜单会溢出）")
     Assert.is_true(menu._updates >= 1) -- 挂载后触发全量重算
     bar._on_tab("x") -- 点当前 Tab：不触发
     Assert.is_nil(active)

@@ -93,6 +93,35 @@ local function borrowMenu(open, width, height)
     return nil
 end
 
+--- 窄菜单页脚：KOReader 翻页条四个间隔写死宽度，窄面板里排不下会居中溢出（左侧被裁），
+--- 每次刷新页码后等量收窄；只有一页时整行藏起，少一层底栏。
+---@param menu table
+local function fitPager(menu)
+    local update = menu.updatePageInfo
+    local spacer = menu.page_info_spacer
+    local full = spacer.width
+    local parts = {
+        menu.page_info_text, menu.page_info_left_chev, menu.page_info_right_chev,
+        menu.page_info_first_chev, menu.page_info_last_chev,
+    }
+    local function fit()
+        local single = menu.page_num <= 1
+        for _, part in ipairs(parts) do part:showHide(not single) end
+        spacer.width = full
+        menu.page_info:resetLayout()
+        local over = menu.page_info:getSize().w - menu.inner_dimen.w
+        if over > 0 then
+            spacer.width = math.max(0, full - math.ceil(over / 4))
+            menu.page_info:resetLayout()
+        end
+    end
+    function menu:updatePageInfo(...)
+        update(self, ...)
+        fit()
+    end
+    fit()
+end
+
 function Sidebar:init()
     local screen = Device.screen:getSize()
     self.dimen = Geom:new{ x = 0, y = 0, w = screen.w, h = screen.h }
@@ -126,6 +155,7 @@ function Sidebar:menuFor(id, width, height)
             self.native_closes[#self.native_closes + 1] = menu.close_callback
             menu.close_callback = function() self:onClose() end
             menu.show_parent = self
+            fitPager(menu)
         end
         self.menus[id] = menu or false
     end

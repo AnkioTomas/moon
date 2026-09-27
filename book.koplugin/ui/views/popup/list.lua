@@ -163,7 +163,7 @@ end
 ---@param bt table 底部 Tab 的项目、选中值和切换回调
 local function attachBottomTabs(menu, bt)
     local BottomBar = require("ui.views.bottombar")
-    local view = BottomBar:new{ host = menu, data = {
+    local view = BottomBar:new{ host = menu, width = menu.inner_dimen.w, data = {
         tabs = bt.tabs or {}, active = bt.active,
         on_tab = function(id)
             if id ~= bt.active and bt.on_tab then bt.on_tab(id) end
