@@ -198,7 +198,8 @@ function Popup.setListItems(menu, title, items, on_select, opts)
             itemnumber = math.min((menu.page - 1) * per + 1, math.max(1, #normalized))
         end
         menu:switchItemTable(title or menu.title, normalized, itemnumber, nil, opts.subtitle)
-        UIManager:setDirty(menu, "ui")
+        -- 只有顶层窗口会重画；菜单被嵌进别的窗口（阅读页侧栏）时 show_parent 才是顶层
+        UIManager:setDirty(menu.show_parent, "ui")
     end
 end
 
