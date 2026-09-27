@@ -1103,6 +1103,60 @@ function Client:deleteWebdavAsync(stable_id, cb)
     end)
 end
 
+--- 连通性测试：在书库目录写入探针文件、读回比对、再删除。
+---@param cb fun(ok: boolean, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:testWebdavAsync(cb)
+    if not self:isWebdav() then cb(false, _("未配置 WebDAV 地址")); return nil end
+    local valid, valid_err = self:validatePath()
+    if not valid then cb(false, valid_err); return nil end
+    local remote = self:webdavPath() .. "/.moon-webdav-test"
+    local upload = self:webdavCacheRoot() .. "/.test.upload"
+    local download = self:webdavCacheRoot() .. "/.test.download"
+    local token = "moon-webdav-test " .. os.time() .. " " .. math.random(1e9)
+    ensureParent(upload)
+    local file = io.open(upload, "wb")
+    local written = file and file:write(token)
+    local closed = file and file:close()
+    if not (written and closed) then
+        os.remove(upload)
+        cb(false, _("无法创建测试文件"))
+        return nil
+    end
+    local cancelled, active = false, nil
+    local function finish(ok, stage, err)
+        os.remove(upload)
+        os.remove(download)
+        if cancelled then return end
+        cb(ok, not ok and (stage .. (err or "")) or nil)
+    end
+    local function verify()
+        local f = io.open(download, "rb")
+        local got = f and f:read("*a")
+        if f then f:close() end
+        if got ~= token then finish(false, _("读回内容与写入不一致")); return end
+        active = self.dav:deleteAsync(remote, function(ok, err)
+            finish(ok == true, _("删除失败："), err)
+        end)
+    end
+    active = self.dav:ensurePathAsync(self:webdavPath(), function(ok_dir, dir_err)
+        if not ok_dir then finish(false, _("创建目录失败："), dir_err); return end
+        active = self.dav:putFileAsync(remote, upload, function(ok_put, put_err)
+            if not ok_put then finish(false, _("写入失败："), put_err); return end
+            active = self.dav:getAsync(remote, download, nil, function(ok_get, get_err)
+                if not ok_get then finish(false, _("读取失败："), get_err); return end
+                verify()
+            end)
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if active and active.cancel then active:cancel() end
+        os.remove(upload)
+        os.remove(download)
+    end }
+end
+
 --- 推送本地 WebDAV 书的阅读进度；关书时只推脏行。
 ---@param identity table|nil
 ---@param cb fun(ok: boolean, err: string|nil)
