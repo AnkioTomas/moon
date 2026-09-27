@@ -46,6 +46,9 @@ function loadSettings() {
             zlib_email: data.zlib.email,
             zlib_password: data.zlib.password,
             zlib_base_url: data.zlib.base_url,
+            opds_url: data.opds.url,
+            opds_username: data.opds.username,
+            opds_password: data.opds.password,
             webdav_url: data.local.webdav_url,
             webdav_username: data.local.webdav_username,
             webdav_password: data.local.webdav_password,
@@ -74,6 +77,7 @@ function bindForm(formId, groupName, stateId) {
 bindForm('form-ai', 'ai', 'state-ai');
 bindForm('form-moon', 'moon', 'state-moon');
 bindForm('form-zlib', 'zlib', 'state-zlib');
+bindForm('form-opds', 'opds', 'state-opds');
 bindForm('form-copymanga', 'copymanga', 'state-copymanga');
 bindForm('form-local', 'local', 'state-local');
 

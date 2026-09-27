@@ -1,9 +1,11 @@
 --[[--
-Z-Library Tab：浏览 / 搜索目录，下载后导入本地书库。
+书城 Tab（Z-Library / OPDS）：浏览 / 搜索目录，下载后导入本地书库。
+后端由 store_id 决定（`<store_id>.init` 提供 listStoreAsync / installAsync）；
+OPDS 导航项带 feed，点开压入 trail 下钻，「上级」出栈。
 
 布局（同 Library.build）：
   +-----------------------------------------------+
-  | [🔍搜索] [清除]                     共N       |
+  | [←上级] [🔍搜索] [清除]             共N       |
   | +----+ +----+ +----+ +----+                   |
   | |封面| |封面| |封面| |封面|                   |
   | |书名| |书名| |书名| |书名|                   |
@@ -22,6 +24,9 @@ local View = require("ui.view")
 
 ---@class BookStorePage : View
 ---@field desktop BookDesktop
+---@field store_id "zlib"|"opds" 书城后端
+---@field empty_text string 空结果占位文案
+---@field trail { title: string, feed: string }[] 已下钻的导航项，栈顶即当前 feed
 ---@field state table|nil
 ---@field books table[]|nil
 ---@field fetch_cancel CancelHandle|nil
@@ -43,6 +48,7 @@ function Store:new(opts)
     opts.page = opts.page or 1
     opts.page_size = opts.page_size or 12
     opts.total = opts.total or 0
+    opts.trail = {}
     return View.new(self, opts)
 end
 
@@ -58,6 +64,7 @@ function Store:reset()
     self.state = nil
     self.books = nil
     self.search = nil
+    self.trail = {}
     self.page = 1
     self.total = 0
 end
@@ -94,15 +101,26 @@ function Store:pageBooks()
     return books
 end
 
---- 复用图书馆网格构建 Z-Library 页。
+--- 复用图书馆网格构建书城页。
 ---@param ctx table
 ---@param state table
 ---@param opts table
 ---@return table
 function Store:build(ctx, state, opts)
-    opts.empty_text = _("Z站暂无内容")
+    opts.empty_text = self.empty_text
     opts.search_only = true
     opts.show_status = false
+    opts.on_open = function(item)
+        if item.feed then
+            self.search = nil
+            self:browse(function(trail) trail[#trail + 1] = { title = item.title, feed = item.feed } end)
+        else
+            require("ui.desktop.detail").open(self.desktop, "store", item)
+        end
+    end
+    opts.on_back = #self.trail > 0 and function()
+        self:browse(function(trail) trail[#trail] = nil end)
+    end or nil
     opts.on_search = function()
         self:showSearch()
     end
@@ -113,17 +131,25 @@ function Store:build(ctx, state, opts)
     return library:build(ctx, state, opts)
 end
 
---- 应用搜索；与图书馆筛选状态分开保存。
----@param query string|nil
-function Store:applySearch(query)
+--- 丢弃已加载结果回第一页并重建；change 在清空后改写 trail。
+---@param change fun(trail: table[])|nil
+function Store:browse(change)
     self:cancel()
-    self.search = query and query ~= "" and query or nil
+    if change then change(self.trail) end
     self.page = 1
     self.total = 0
     self.books = nil
     self.state = nil
-    self.desktop.tab = "store"
+    self.desktop.tab = self.name
     self.desktop:updateView()
+end
+
+--- 应用搜索；与图书馆筛选状态分开保存。搜索面向整个目录，搜索与清除都回到目录根。
+---@param query string|nil
+function Store:applySearch(query)
+    self.search = query and query ~= "" and query or nil
+    self.trail = {}
+    self:browse()
 end
 
 --- 弹出搜索框。
@@ -165,33 +191,35 @@ function Store:gotoPage(page)
     self.desktop:updateView()
 end
 
---- 异步拉取 Z-Library 列表。
+--- 异步拉取书城列表（当前 trail 栈顶 feed 或搜索结果）。
 function Store:fetch()
     local desktop = self.desktop
     self:cancel()
     self:syncPageSize()
     local generation = desktop.source_generation or 0
     local search = self.search or ""
+    local top = self.trail[#self.trail]
 
     --- 写入错误状态；失败结果不缓存。
     ---@param err string
     local function fail(err)
-        if desktop.lifecycle.state == "Destroy" or desktop.tab ~= "store" then return end
+        if desktop.lifecycle.state == "Destroy" or desktop.tab ~= self.name then return end
         self.books = nil
         self.total = 0
         self.state = { books = {}, err = err }
         self.desktop:updateView()
     end
 
-    local zlib = require("zlib.init")
-    self.fetch_cancel = zlib:listStoreAsync({
+    self.fetch_cancel = require(self.store_id .. ".init"):listStoreAsync({
         page = 1,
         page_size = MAX_RESULTS,
         search = search,
+        feed = top and top.feed,
     }, function(res, err)
-        if desktop.lifecycle.state == "Destroy" or desktop.tab ~= "store"
+        if desktop.lifecycle.state == "Destroy" or desktop.tab ~= self.name
             or (desktop.source_generation or 0) ~= generation
-            or (self.search or "") ~= search then
+            or (self.search or "") ~= search
+            or self.trail[#self.trail] ~= top then
             return
         end
         self.fetch_cancel = nil
@@ -212,7 +240,7 @@ function Store:fetch()
     end)
 end
 
---- Z-Library widget。
+--- 书城 widget。
 ---@return table
 function Store:updateView()
     local desktop = self.desktop
@@ -224,7 +252,7 @@ function Store:updateView()
     end
     if not state then
         UIManager:nextTick(function()
-            if desktop.lifecycle.state == "Destroy" or desktop.tab ~= "store" then return end
+            if desktop.lifecycle.state == "Destroy" or desktop.tab ~= self.name then return end
             self:fetch()
         end)
     end

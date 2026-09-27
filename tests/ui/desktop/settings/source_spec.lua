@@ -118,7 +118,9 @@ local config = src:configSections{
 }
 Assert.is_true(#config >= 2)
 Assert.eq(config[1].title, "Moon")
-Assert.eq(config[#config].title, "Z-Library")
+Assert.eq(config[#config - 1].title, "Z-Library")
+Assert.eq(config[#config].title, "OPDS")
+Assert.eq(config[#config].rows[1]().status, "未配置")
 for i = 1, #config do
     local first = config[i].rows[1]
     if first then

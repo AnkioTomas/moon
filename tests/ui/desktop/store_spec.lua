@@ -77,7 +77,7 @@ local desktop = {
     updateView = function() view_updates = view_updates + 1 end,
     ctx = function(self) return { desktop = self } end,
 }
-local store = Store:new{ desktop = desktop, name = "store" }
+local store = Store:new{ desktop = desktop, name = "store", store_id = "zlib", empty_text = "Z站暂无内容" }
 Assert.eq(store.name, "store")
 Assert.eq(store.desktop, desktop)
 Assert.eq(store.lifecycle.state, "new")
@@ -148,3 +148,60 @@ Assert.eq(request_opts.search, "Lua")
 store:build({ desktop = desktop }, {}, {})
 build_opts.on_clear()
 Assert.is_nil(store.search)
+-- zlib 没有导航项，不出现「上级」。
+Assert.is_nil(build_opts.on_back)
+
+-- OPDS：同一页类换后端；导航项下钻压栈、书进详情、「上级」出栈，请求带栈顶 feed。
+local opds_requests = {}
+package.preload["opds.init"] = function()
+    return {
+        listStoreAsync = function(_, opts, cb)
+            opds_requests[#opds_requests + 1] = opts
+            cb({ data = {
+                { title = "新书", feed = "http://nas/opds/new" },
+                { source_id = "opds", stable_id = "b1", title = "书" },
+            }, count = 2 })
+            return { cancel = function() end }
+        end,
+    }
+end
+local detail_opened
+package.preload["ui.desktop.detail"] = function()
+    return { open = function(_, origin, book) detail_opened = { origin, book } end }
+end
+desktop.tab = "opds"
+local opds = Store:new{ desktop = desktop, name = "opds", store_id = "opds", empty_text = "目录暂无内容" }
+opds:fetch()
+Assert.is_nil(opds_requests[1].feed)
+Assert.len(opds.books, 2)
+opds:build({ desktop = desktop }, {}, {})
+Assert.eq(build_opts.empty_text, "目录暂无内容")
+Assert.is_nil(build_opts.on_back)
+
+build_opts.on_open(opds.books[2])
+Assert.eq(detail_opened[1], "store")
+Assert.eq(detail_opened[2].stable_id, "b1")
+
+opds.search = "旧搜索"
+build_opts.on_open(opds.books[1])
+Assert.len(opds.trail, 1)
+Assert.is_nil(opds.search)
+Assert.is_nil(opds.books)
+Assert.eq(desktop.tab, "opds")
+opds:fetch()
+Assert.eq(opds_requests[2].feed, "http://nas/opds/new")
+
+opds:build({ desktop = desktop }, {}, {})
+Assert.is_true(type(build_opts.on_back) == "function")
+build_opts.on_back()
+Assert.len(opds.trail, 0)
+opds:fetch()
+Assert.is_nil(opds_requests[3].feed)
+
+-- 搜索回到目录根；换源复位清空 trail。
+opds.trail = { { title = "x", feed = "http://nas/x" } }
+opds:applySearch("lua")
+Assert.len(opds.trail, 0)
+opds.trail = { { title = "x", feed = "http://nas/x" } }
+opds:onEvent("source_changed")
+Assert.len(opds.trail, 0)

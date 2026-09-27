@@ -204,6 +204,35 @@ function Text.urlEncode(value)
     end))
 end
 
+--- 相对引用按 base 解析为绝对 URL（RFC 3986：//、/、?、#、相对路径及 ./ ../）。
+---@param base string|nil 当前文档 URL
+---@param ref string|nil
+---@return string|nil
+function Text.absoluteUrl(base, ref)
+    if type(ref) ~= "string" or ref == "" then return nil end
+    if ref:match("^%a[%w+.-]*:") then return ref end
+    local scheme, authority, path = tostring(base or ""):match("^(%a[%w+.-]*)://([^/?#]*)([^?#]*)")
+    if not scheme then return nil end
+    if ref:sub(1, 2) == "//" then return scheme .. ":" .. ref end
+    local origin = scheme .. "://" .. authority
+    local lead = ref:sub(1, 1)
+    if lead == "#" then return base:match("^[^#]*") .. ref end
+    if lead == "?" then return origin .. path .. ref end
+    local merged = lead == "/" and ref or ((path:match("^(.*/)") or "/") .. ref)
+    local rel, tail = merged:match("^([^?#]*)(.*)$")
+    local segs = {}
+    for seg in rel:gmatch("[^/]+") do
+        if seg == ".." then
+            segs[#segs] = nil
+        elseif seg ~= "." then
+            segs[#segs + 1] = seg
+        end
+    end
+    local out = "/" .. table.concat(segs, "/")
+    if #segs > 0 and (rel:sub(-1) == "/" or rel:match("/%.%.?$")) then out = out .. "/" end
+    return origin .. out .. tail
+end
+
 --- URL 解码（%XX 解码，+ → 空格，form 语义）。
 ---@param s string|nil
 ---@return string|nil

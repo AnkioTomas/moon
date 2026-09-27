@@ -68,24 +68,6 @@ local function originOf(url)
     return origin, scheme:lower(), host
 end
 
---- 30x 的 Location 允许是相对地址（RFC 9110）：相对当前 URL 解析成绝对地址
----@param current_url string
----@param location string|nil
----@return string|nil
-local function absoluteUrl(current_url, location)
-    if type(location) ~= "string" or location == "" then return nil end
-    if location:match("^[hH][tT][tT][pP][sS]?://") then return location end
-    local origin, scheme = originOf(current_url)
-    if not origin then return nil end
-    if location:sub(1, 2) == "//" then return scheme .. ":" .. location end
-    if location:sub(1, 1) == "/" then return origin .. location end
-    if location:sub(1, 1) == "?" then
-        return (current_url:match("^[^?#]*") or current_url) .. location
-    end
-    local dir = current_url:match("^(https?://.*/)") or (origin .. "/")
-    return dir .. location
-end
-
 -- ---------------------------------------------------------------------------
 -- 镜像选择与故障转移
 -- ---------------------------------------------------------------------------
@@ -311,7 +293,8 @@ function Client:_jsonAsync(method, path, opts, cb)
 
             -- 30x：手动跟随（Turbo 默认不跟随）
             if REDIRECT_CODES[code] then
-                local target = absoluteUrl(url, Request.header(res, "location"))
+                -- 30x 的 Location 允许是相对地址（RFC 9110）
+                local target = Text.absoluteUrl(url, Request.header(res, "location"))
                 if not target then
                     return failover(T(_("HTTP %1"), code), "invalid_redirect", code)
                 end

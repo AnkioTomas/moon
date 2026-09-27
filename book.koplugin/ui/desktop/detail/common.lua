@@ -18,11 +18,15 @@ local SourceCapabilities = require("source.base").SourceCapabilities
 
 local M = {}
 
-function M.storeKind(book, _source, _origin)
-    if type(book) == "table" and book.source_id == "zlib" then
-        return "zlib"
-    end
-    return nil
+-- 书城条目的 source_id 即后端模块前缀（`<id>.init` / `<id>.setting`），不是 BookSource。
+local STORES = { zlib = true, opds = true }
+
+--- 书城预览书的后端门面；库内书返回 nil。
+---@param book table|nil
+---@return table|nil
+function M.storeBackend(book)
+    local id = type(book) == "table" and book.source_id
+    return STORES[id] and require(id .. ".init") or nil
 end
 
 --- 书籍属主源：身份匹配当前源则复用，否则按 source_id 解析。

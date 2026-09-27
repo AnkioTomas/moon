@@ -50,7 +50,8 @@ local UI = require("ui.components.bookui")
 ---@field lifecycle Lifecycle
 ---@field home BookHome
 ---@field library BookLibrary
----@field store BookStorePage
+---@field store BookStorePage Z-Library
+---@field opds BookStorePage OPDS 目录
 ---@field insight BookInsight
 ---@field settings BookSettings
 ---@field topbar BookTopBar
@@ -76,8 +77,8 @@ local Desktop = InputContainer:extend{
 ---@field source BookSource|nil
 ---@field desktop BookDesktop
 
-local PAGES = { home = true, library = true, store = true, insight = true, settings = true }
-local CHILDREN = { "topbar", "bottombar", "home", "library", "store", "insight", "settings" }
+local PAGES = { home = true, library = true, store = true, opds = true, insight = true, settings = true }
+local CHILDREN = { "topbar", "bottombar", "home", "library", "store", "opds", "insight", "settings" }
 
 
 --- 调用指定子视图的事件或生命周期方法；不存在的接收者直接跳过。
@@ -106,7 +107,7 @@ local function tabContent(self)
     return page.widget or page:build()
 end
 
---- 按开关生成 Desktop 底栏 Tab（Z-Library 默认关）。
+--- 按开关生成 Desktop 底栏 Tab（Z-Library / OPDS 默认关）。
 ---@param source table|nil 书籍所属数据源实例
 ---@return table
 local function desktopTabs(source)
@@ -114,8 +115,12 @@ local function desktopTabs(source)
         { id = "home", text = _("首页"), icon = "home" },
         { id = "library", text = _("图书馆"), icon = "local_library" },
     }
-    if require("utils.settings").zlibEnabled() then
+    local MoonSettings = require("utils.settings")
+    if MoonSettings.zlibEnabled() then
         tabs[#tabs + 1] = { id = "store", text = _("Z站"), icon = "storefront" }
+    end
+    if MoonSettings.opdsEnabled() then
+        tabs[#tabs + 1] = { id = "opds", text = _("OPDS"), icon = "rss_feed" }
     end
     local caps = source and source.capabilities and source:capabilities() or {}
     if caps.insight then
@@ -248,7 +253,8 @@ function Desktop:init()
     self.dimen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     self.home = Home:new{ desktop = self, name = "home" }
     self.library = Library:new{ desktop = self, name = "library" }
-    self.store = StorePage:new{ desktop = self, name = "store" }
+    self.store = StorePage:new{ desktop = self, name = "store", store_id = "zlib", empty_text = _("Z站暂无内容") }
+    self.opds = StorePage:new{ desktop = self, name = "opds", store_id = "opds", empty_text = _("目录暂无内容") }
     self.insight = Insight:new{ desktop = self, name = "insight" }
     self.settings = Settings:new{ desktop = self }
     self.topbar = TopBar:new{ desktop = self, name = "topbar" }

@@ -60,6 +60,25 @@ do
     Assert.eq(Text.truncateUtf8("中文", 0), "")
 end
 
+-- ── absoluteUrl ───────────────────────────────────────
+do
+    local base = "http://h:8083/opds/new?page=2#top"
+    Assert.eq(Text.absoluteUrl(base, "https://x.org/a"), "https://x.org/a")
+    Assert.eq(Text.absoluteUrl(base, "//cdn.org/c.jpg"), "http://cdn.org/c.jpg")
+    Assert.eq(Text.absoluteUrl(base, "/opds/books"), "http://h:8083/opds/books")
+    Assert.eq(Text.absoluteUrl(base, "?page=3"), "http://h:8083/opds/new?page=3")
+    Assert.eq(Text.absoluteUrl(base, "#x"), "http://h:8083/opds/new?page=2#x")
+    Assert.eq(Text.absoluteUrl(base, "cover/1.jpg"), "http://h:8083/opds/cover/1.jpg")
+    Assert.eq(Text.absoluteUrl(base, "../feed.php?id=1"), "http://h:8083/feed.php?id=1")
+    Assert.eq(Text.absoluteUrl(base, "./a/../b/"), "http://h:8083/opds/b/")
+    -- 查询串里的斜杠不能被当成目录
+    Assert.eq(Text.absoluteUrl("http://h/feed.php?p=/x/y", "fetch.php"), "http://h/fetch.php")
+    Assert.eq(Text.absoluteUrl("http://h", "a"), "http://h/a")
+    Assert.is_nil(Text.absoluteUrl(base, ""))
+    Assert.is_nil(Text.absoluteUrl(base, nil))
+    Assert.is_nil(Text.absoluteUrl("not a url", "a"))
+end
+
 -- ── xmlEscape / xmlDecode ─────────────────────────────
 do
     Assert.eq(Text.xmlEscape([[a<b>"c"&]]), [[a&lt;b&gt;&quot;c&quot;&amp;]])

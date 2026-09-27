@@ -2,7 +2,7 @@
 远程配置：白名单读写（连接类设置在浏览器填写）。
 
 GET 脱敏密钥；POST 里保留占位符 "******" 表示不修改该字段。
-全部经 utils.settings 落盘，副作用（registry.invalidate、zlib 清会话）与设备设置一致。
+全部经 utils.settings 落盘，副作用（registry.invalidate、zlib 清会话、OPDS 重算底栏）与设备设置一致。
 
 @module koplugin.book.remote.settings
 --]]
@@ -67,6 +67,7 @@ function SettingsApi.snapshot()
     local moon = Settings.getSource("moon")
     local copymanga = Settings.getSource("copymanga") or {}
     local zlib = Settings.getSource("zlib")
+    local opds = Settings.getSource("opds")
     local localSource = Settings.getSource("local")
     return {
         ai = {
@@ -87,6 +88,11 @@ function SettingsApi.snapshot()
             email = asStr(zlib.email),
             password = maskValue(zlib.password),
             base_url = asStr(zlib.base_url),
+        },
+        opds = {
+            url = asStr(opds.url),
+            username = asStr(opds.username),
+            password = maskValue(opds.password),
         },
         ["local"] = {
             webdav_url = asStr(localSource.webdav_url),
@@ -151,6 +157,21 @@ function SettingsApi.apply(payload)
         end
         if zlib_changed then
             Settings.saveSource("zlib", cfg)
+            changed = true
+        end
+    end
+
+    if type(payload.opds) == "table" then
+        local cfg = Settings.getSource("opds")
+        local g = payload.opds
+        --- 缺省键保持原值；密码占位符同样表示不改。
+        local function pick(key)
+            if g[key] == nil or (SECRET_KEYS[key] and g[key] == SettingsApi.MASK) then return cfg[key] end
+            return tostring(g[key])
+        end
+        if require("opds.setting").save(pick("url"), pick("username"), pick("password")) then
+            -- 地址空/非空决定底栏有没有 OPDS 页签；与设备对话框一样走 onSourceChanged 重算。
+            require("ui/uimanager"):broadcastEvent(require("ui/event"):new("SourceChanged"))
             changed = true
         end
     end
