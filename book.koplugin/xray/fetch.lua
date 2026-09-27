@@ -15,6 +15,7 @@ local Fetch = {}
 
 local MIN_GROUND_LEN = 2
 local INTRO_LIMIT = 1500
+local LOOKUP_PRIOR_LIMIT = 2000
 
 local payload_sections = {
     { kind = "character", key = "characters" },
@@ -269,7 +270,7 @@ function Fetch.lookupWord(ui, identity, word, cb)
         end
     end
 
-    local ctx = Context.forAnalysis(ui)
+    local ctx = Context.forAnalysis(ui, LOOKUP_PRIOR_LIMIT)
     local title, author = bookMeta(identity)
     local existing = Store.promptSnapshot(entities)
     local messages = {
