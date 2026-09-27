@@ -294,7 +294,7 @@ end
 
 --- 删除远端文件。
 ---@param path string
----@param cb fun(ok: boolean|nil, err: string|nil)
+---@param cb fun(ok: boolean|nil, err: string|nil, code: number|nil) code 仅 HTTP 非 2xx 时给出
 ---@return { cancel: fun() }
 function Webdav:deleteAsync(path, cb)
     return Request.request({
@@ -305,7 +305,7 @@ function Webdav:deleteAsync(path, cb)
     }, function(res, err)
         if err then cb(nil, err); return end
         if not Request.ok(res and res.code) then
-            cb(nil, statusErr(res and res.code))
+            cb(nil, statusErr(res and res.code), tonumber(res and res.code))
             return
         end
         cb(true)

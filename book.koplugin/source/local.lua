@@ -83,13 +83,13 @@ end
 ---@return table
 function Source:deleteBookAsync(identity, cb)
     if self._client:isWebdav() then
-        return self._client:deleteWebdavAsync(identity.stable_id, function(ok, err)
+        return self._client:deleteWebdavAsync(identity.stable_id, function(ok, err, listed)
             if ok then
-                -- 留墓碑（已下架且已同步）而不是删行：本地书库目录里的同名书靠它判断
-                -- “远端删过”，否则下一轮同步会把它重新上传回去。
+                -- 留墓碑而不是删行：books.sync 没写成时它是脏的，reconcile 不会拿远端旧条目把书复活，
+                -- 下一轮 pushBooksSync 把条目删掉再清脏。
                 local BookDB = require("db.book")
                 BookDB.markDeleted(self.id, identity.stable_id)
-                BookDB.markSynced(self.id, identity.stable_id)
+                if listed then BookDB.markSynced(self.id, identity.stable_id) end
                 cb(true)
             else
                 cb(false, err or _("删除 WebDAV 书籍失败"))
