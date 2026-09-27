@@ -54,26 +54,37 @@ local function showQrLogin(plugin)
             end
         end
 
-        dialog = ButtonDialog:new{
-            title = _("微信扫码登录"),
-            buttons = {{
-                {
-                    text = _("取消"),
-                    callback = function()
-                        cancelled = true
-                        if begin_job then
-                            begin_job.cancel()
-                            begin_job = nil
-                        end
-                        if wait_job then
-                            wait_job.cancel()
-                            wait_job = nil
-                        end
-                        closeDialog()
-                    end,
-                },
-            }},
-        }
+        -- 取消按钮、点框外、返回键都走这里，否则后台轮询会一直跑到超时。
+        local function cancel()
+            cancelled = true
+            if begin_job then
+                begin_job.cancel()
+                begin_job = nil
+            end
+            if wait_job then
+                wait_job.cancel()
+                wait_job = nil
+            end
+        end
+
+        ---@return table
+        local function newDialog()
+            return ButtonDialog:new{
+                title = _("微信扫码登录"),
+                tap_close_callback = cancel,
+                buttons = {{
+                    {
+                        text = _("取消"),
+                        callback = function()
+                            cancel()
+                            closeDialog()
+                        end,
+                    },
+                }},
+            }
+        end
+
+        dialog = newDialog()
         if dialog.addWidget then
             dialog:addWidget(CenterContainer:new{
                 dimen = Geom:new{ w = Screen:getWidth() * 0.9, h = qr_size + UI.sz(40) },
@@ -98,22 +109,7 @@ local function showQrLogin(plugin)
                 width = qr_size,
                 height = qr_size,
             }
-            dialog = ButtonDialog:new{
-                title = _("微信扫码登录"),
-                buttons = {{
-                    {
-                        text = _("取消"),
-                        callback = function()
-                            cancelled = true
-                            if wait_job then
-                                wait_job.cancel()
-                                wait_job = nil
-                            end
-                            closeDialog()
-                        end,
-                    },
-                }},
-            }
+            dialog = newDialog()
             if dialog.addWidget then
                 dialog:addWidget(CenterContainer:new{
                     dimen = Geom:new{ w = Screen:getWidth() * 0.9, h = qr_size + UI.sz(40) },
