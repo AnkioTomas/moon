@@ -56,15 +56,30 @@ package.preload["ui/widget/container/inputcontainer"] = function()
     return IC
 end
 
--- 与真身同契约：实例缺宽高时回落到类缺省值。
+-- 与真身同契约：实例缺宽高时回落到类缺省值；页脚 = 4 个共享间隔 + 页码 + 4 个箭头。
+local function part(w)
+    return { w = w, shown = true, showHide = function(self, on) self.shown = on end }
+end
 local Menu = {}
 Menu.__index = Menu
 function Menu:new(o)
     o = setmetatable(o or {}, self)
     o.w, o.h = o.width, o.height
+    o.inner_dimen = { w = o.width, h = o.height }
     o.item_table = o.item_table or {}
+    o.page_num = o.page_num or 1
+    o.page_info_spacer = { width = 32 }
+    o.page_info_text = part(200)
+    o.page_info_left_chev, o.page_info_right_chev = part(40), part(40)
+    o.page_info_first_chev, o.page_info_last_chev = part(40), part(40)
+    local menu = o
+    o.page_info = {
+        resetLayout = function() end,
+        getSize = function() return { w = 200 + 4 * 40 + 4 * menu.page_info_spacer.width } end,
+    }
     return o
 end
+function Menu:updatePageInfo() self.page_info_updates = (self.page_info_updates or 0) + 1 end
 package.loaded["ui/widget/menu"] = Menu
 
 local UIManager = {
@@ -202,6 +217,22 @@ Assert.eq(toc_menu.h, 800 - 40 - 1)
 Assert.eq(toc_menu.show_parent, bar, "刷新改挂到侧栏窗口")
 Assert.is_nil(Menu.width, "Menu 缺省宽高已还原")
 Assert.eq(UIManager.show, original_show, "UIManager.show 已还原")
+
+-- 页脚：单页整行藏起；多页时 200 + 160 + 4×32 = 488 ≤ 510 保持原间隔。
+Assert.is_false(toc_menu.page_info_text.shown)
+Assert.is_false(toc_menu.page_info_left_chev.shown)
+toc_menu.page_num = 3
+toc_menu:updatePageInfo()
+Assert.eq(toc_menu.page_info_updates, 1, "原生 updatePageInfo 照常执行")
+Assert.is_true(toc_menu.page_info_text.shown, "变成多页后页脚恢复")
+Assert.eq(toc_menu.page_info_spacer.width, 32)
+-- 页码文案变长（放不下）：四个间隔等量收窄到刚好放下。
+toc_menu.page_info_text.w = 260
+toc_menu.page_info.getSize = function()
+    return { w = 260 + 160 + 4 * toc_menu.page_info_spacer.width }
+end
+toc_menu:updatePageInfo()
+Assert.eq(toc_menu.page_info_spacer.width, 22, "548 - 510 = 38，每个间隔收 ceil(38/4) = 10")
 
 -- 切走再切回复用同一个菜单（折叠状态保留），不重复打开。
 bar:goTab(1)
