@@ -124,6 +124,7 @@ function Queue:pump()
             url = task.url,
             method = "GET",
             headers = task.headers,
+            allow_redirects = true,
             timeout = 60,
             connect_timeout = 30,
         }, task.tmp, function(ok, err)
