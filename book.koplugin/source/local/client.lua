@@ -41,6 +41,7 @@ local BOOK_EXT = {
     epub = true,
     djvu = true,
     mobi = true,
+    azw = true,
     azw3 = true,
     cbz = true,
     cbt = true,
