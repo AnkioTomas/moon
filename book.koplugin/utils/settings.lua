@@ -31,7 +31,7 @@ local DEFAULTS = {
         -- 昏暗最需要补光；黑暗眼睛已适应，低一档即可；中性少量；明亮起墨水屏不需要前光。
         -- 时段：凌晨 清晨 上午 中午 下午 傍晚 晚上 深夜。
         auto_light = false, auto_light_levels = { 25, 50, 35, 0, 0 },
-        auto_light_periods = { 3, 8, 15, 20, 18, 12, 7, 3 },
+        auto_light_periods = { 5, 12, 22, 30, 27, 18, 10, 5 },
     },
     lockscreen = {
         lock_screen = "ko",
