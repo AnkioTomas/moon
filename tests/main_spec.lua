@@ -118,6 +118,11 @@ stub("patch.manager", noop_mod({
 }))
 stub("patch.page_turn_animation", noop_mod())
 stub("update.init", noop_mod())
+local doc_registry = {}
+stub("document/documentregistry", doc_registry)
+stub("convert.azw3document", {
+    register = function(_, registry) calls.azw3_registry = registry end,
+})
 
 _G.G_reader_settings = {
     isTrue = function() return true end,
@@ -132,6 +137,7 @@ plugin:init()
 Assert.eq(calls.host, 1)
 Assert.is_true((calls.boot or 0) >= 8, "init 应挂上翻译/百科/词典/面板/锁屏/远程/IME/补丁等")
 Assert.eq(calls.animation_check, 1)
+Assert.eq(calls.azw3_registry, doc_registry)
 
 -- emitToSource：缺省用当前源；指定源优先；抛错不打断
 do
