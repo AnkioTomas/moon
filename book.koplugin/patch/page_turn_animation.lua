@@ -25,9 +25,11 @@ PageTurnAnimation.STYLE_KEY = "swipe_animation_style"
 --- 可选风格；value 必须与 2-swipe-animation-core.lua 的 SwipeAnimation.STYLES 键一致。
 PageTurnAnimation.STYLES = {
     { text = _("擦除"), value = "wipe" },
+    { text = _("纵向擦除"), value = "wipe_vertical" },
+    { text = _("分割"), value = "split" },
     { text = _("百叶窗"), value = "blinds" },
-    { text = _("中心展开"), value = "center" },
-    { text = _("覆盖"), value = "cover" },
+    { text = _("随机线条"), value = "random_bars" },
+    { text = _("方框"), value = "box" },
 }
 
 local _startup_checked = false
