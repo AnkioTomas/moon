@@ -279,6 +279,7 @@ end
 local removed_files = {}
 os.remove = function(path)
     removed_files[#removed_files + 1] = path
+    COVERS[path] = nil
     return true
 end
 
@@ -508,6 +509,72 @@ do
     COVERS = {}
     Assert.len(opened, 4)
     Assert.is_false(hasValue(opened, "/books/a.epub"))
+end
+
+-- ── 同路径换了文件（删书后拷入同名新书）：删旧封面重提、刷新元数据、绕过位图缓存 ──────
+do
+    local util = require("util")
+    local real_md5 = util.partialMD5
+    local invalidated = {}
+    package.loaded["ui.components.image"] = {
+        invalidate = function(path) invalidated[#invalidated + 1] = path end,
+    }
+    local cover = "/data/.moon/cache/local/image//books/a.epub.png"
+
+    -- 内容没变：封面已缓存照旧跳过
+    reset()
+    util.partialMD5 = function() return "old" end
+    db_rows[rowKey("local", "/books/a.epub")] = {
+        source_id = "local", stable_id = "/books/a.epub", md5 = "old", deleted = 1, sync_status = 0,
+        title = "旧书", authors = "旧作者", intro = "旧简介", inserted_at = 7,
+    }
+    COVERS[cover] = true
+    Client.new({ path = "/books" }):scanAsync(function() end)
+    Stubs.flush()
+    Assert.is_false(hasValue(opened, "/books/a.epub"))
+    Assert.is_false(hasValue(removed_files, cover))
+    Assert.len(invalidated, 0)
+
+    -- 内容变了：全量扫盘
+    reset()
+    util.partialMD5 = function(path) return path == "/books/a.epub" and "new" or nil end
+    db_rows[rowKey("local", "/books/a.epub")] = {
+        source_id = "local", stable_id = "/books/a.epub", md5 = "old", deleted = 1, sync_status = 0,
+        title = "旧书", authors = "旧作者", intro = "旧简介", inserted_at = 7,
+    }
+    COVERS[cover] = true
+    Client.new({ path = "/books" }):scanAsync(function() end)
+    Stubs.flush()
+    Assert.is_true(hasValue(removed_files, cover))
+    Assert.is_true(hasValue(opened, "/books/a.epub"))
+    Assert.is_true(hasValue(covers_saved, cover .. ".part"))
+    local a = db_rows[rowKey("local", "/books/a.epub")]
+    Assert.eq(a.md5, "new")
+    Assert.eq(a.title, "T:/books/a.epub")
+    Assert.eq(a.deleted, 0)
+    Assert.eq(invalidated[1], cover)
+    Assert.len(renames, 0)
+
+    -- 内容变了：单本入库（导入同名文件）同样重提
+    reset()
+    invalidated = {}
+    db_rows[rowKey("local", "/books/a.epub")] = {
+        source_id = "local", stable_id = "/books/a.epub", md5 = "old", deleted = 1,
+        title = "旧书", authors = "旧作者", intro = "旧简介",
+    }
+    COVERS[cover] = true
+    local ok
+    Client.new({ path = "/books" }):indexOneAsync("/books/a.epub", function(o) ok = o end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.is_true(hasValue(removed_files, cover))
+    Assert.eq(opened[1], "/books/a.epub")
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].title, "T:/books/a.epub")
+    Assert.eq(invalidated[1], cover)
+
+    COVERS = {}
+    package.loaded["ui.components.image"] = nil
+    util.partialMD5 = real_md5
 end
 
 -- ── 子进程死在某本书的引擎里：跳过它重扫，其余书照常入库，坏书按文件名入库 ──────

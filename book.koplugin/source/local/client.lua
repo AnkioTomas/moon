@@ -516,12 +516,15 @@ end
 ---   主进程在 fork 前查好「已入库且标题非空」的行交给子进程判断是否要解析，
 ---   子进程返回扫描产物列表，主进程收齐后落库。
 
---- 主进程：本地源已入库且标题非空的行，按 stable_id（即路径）索引。
----@return table<string, Book>
+--- 主进程：本地源元数据完整的行，按 stable_id（即路径）索引；
+--- 另附全部行（含残缺行与墓碑）的内容 md5，供子进程识别同路径换了文件。
+---@return table<string, Book> known, table<string, string> digests
 local function knownBooks()
     local BookDB = require("db.book")
     local rows = BookDB.getMany(SOURCE_ID, BookDB.stableIdsBySource(SOURCE_ID))
+    local digests = {}
     for stable_id, row in pairs(rows) do
+        digests[stable_id] = row.md5
         -- 任何展示元数据缺失都要允许本次扫描补齐；只看 title 会把
         -- “有书名但没有作者/简介”的旧行永久冻结。
         if (type(row.title) ~= "string" or row.title == "")
@@ -530,20 +533,27 @@ local function knownBooks()
             rows[stable_id] = nil
         end
     end
-    return rows
+    return rows, digests
 end
 
---- 子进程：已入库的书只补缺失封面；否则算 md5 并解析元数据（引擎失败回退文件名）。
+--- 子进程：算 md5；已入库且内容没变的书只补缺失封面，否则解析元数据（引擎失败回退文件名）。
+--- 同路径内容变了（删书后拷入同名新书 / 覆盖上传）标 changed 并删掉旧封面，按新书重新提取。
 --- 引擎段错误 pcall 接不住，子进程直接死：打开文档前后各报一次 progress（path / false），
 --- 父进程据此认出致死的书，下一轮放进 skip 只按文件名入库。
 ---@param f table 扫描产物 { name, path, category, series }
 ---@param known table<string, Book>
+---@param digests table<string, string> 库内各路径的内容 md5
 ---@param skip table<string, boolean> 曾让子进程崩溃的书，不再打开
 ---@param progress fun(value: string|false)
----@return table f 原表，未入库时补上 md5/title/authors/intro
-local function parseFile(f, known, skip, progress)
+---@return table f 原表，补上 md5/changed，需解析时再补 title/authors/intro
+local function parseFile(f, known, digests, skip, progress)
     local open = not skip[f.path]
-    if known[f.path] then
+    f.md5 = util.partialMD5(f.path)
+    local old = digests[f.path]
+    f.changed = f.md5 ~= nil and old ~= nil and old ~= f.md5
+    if f.changed then
+        os.remove(coverPath(f.path))
+    elseif known[f.path] then
         if open and lfs.attributes(coverPath(f.path), "mode") ~= "file" then
             progress(f.path)
             ensureCover(f.path)
@@ -551,7 +561,6 @@ local function parseFile(f, known, skip, progress)
         end
         return f
     end
-    f.md5 = util.partialMD5(f.path)
     local props = {}
     if open then
         progress(f.path)
@@ -566,7 +575,7 @@ local function parseFile(f, known, skip, progress)
 end
 
 --- 主进程：把子进程解析结果写入 books 表。
---- 已入库行只恢复书架成员；未命中时按内容 md5 找旧行——旧文件已不在盘上且新路径无任何行
+--- 已入库且内容未变的行只恢复书架成员（changed 行按新解析结果重写）；未命中时按内容 md5 找旧行——旧文件已不在盘上且新路径无任何行
 --- （known 不含元数据残缺行与墓碑）才算移动/改名，原地换 stable_id（身份以 md5 为准，不当新书），
 --- category/series 随新位置刷新；同内容副本并存时各自成书，否则改名会撞主键让整次扫盘失败。
 ---@param files table[] parseFile 产物
@@ -596,20 +605,25 @@ local function commitFiles(files, known, full_snapshot)
             f.source_id = SOURCE_ID
             f.stable_id = f.path
             f.deleted = 0
-        elseif cached then
-            if (tonumber(cached.deleted) or 0) ~= 0
+        end
+        if cached and not f.changed then
+            if not full_snapshot and (tonumber(cached.deleted) or 0) ~= 0
                 and not BookDB.setLibraryMembership(SOURCE_ID, f.path, true) then
                 return false
             end
         -- knownBooks 只把元数据完整的行交给 worker；移动过来的旧行也会
         -- 在这里用本次解析结果补齐。不要把“已存在”误当成“无需更新”。
-        elseif not BookDB.upsert({
+        -- 换了内容的行即便走快照也要本地可信写入：reconcile 对脏行保留旧书名。
+        elseif (f.changed or not full_snapshot) and not BookDB.upsert({
             source_id = SOURCE_ID, stable_id = f.path, md5 = f.md5,
             title = f.title, authors = f.authors, intro = f.intro,
             category = f.category, series = f.series,
             inserted_at = moved and moved.inserted_at or os.time(), path = f.path,
         }) then
             return false
+        end
+        if f.changed then
+            require("ui.components.image").invalidate(coverPath(f.path))
         end
     end
     return not full_snapshot
@@ -623,14 +637,14 @@ end
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return { cancel: fun() }
 local function scanJob(root, cb)
-    local known = knownBooks()
+    local known, digests = knownBooks()
     local skip, job = {}, nil
     local function start()
         local opening
         job = Job.run(function(progress)
             local files = scanFiles(root)
             for i = 1, #files do
-                files[i] = parseFile(files[i], known, skip, progress)
+                files[i] = parseFile(files[i], known, digests, skip, progress)
             end
             return files
         end, {
@@ -880,9 +894,9 @@ function Client:indexOneAsync(path, cb)
     if not isBookFile(name) then
         return defer(cb, nil, _("不支持的文件格式"))
     end
-    local known = knownBooks()
+    local known, digests = knownBooks()
     local job = Job.run(function(progress)
-        return parseFile({ name = name, path = path }, known, {}, progress)
+        return parseFile({ name = name, path = path }, known, digests, {}, progress)
     end, {
         name = "local.index",
         kind = "light",
