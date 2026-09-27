@@ -357,6 +357,29 @@ do
     fake_client.getProgressAsync = nil
 end
 
+-- 关闭同步阅读时间：不发任何上报，本地行全部确认，重新开启后不补报。
+do
+    local src = WeChat.new()
+    src.cfg.sync_reading_time = false
+    local reported = 0
+    fake_client.reportReadAsync = function(_, _, _, cb)
+        reported = reported + 1
+        cb({ succ = 1 })
+        return { cancel = function() end }
+    end
+    local data, err
+    src:pushStatsAsync({
+        { id = 41, stable_id = "bp", chapter_idx = 1, duration = 10 },
+        { id = 42, stable_id = "bp", duration = 5 },
+    }, function(value, e) data, err = value, e end)
+    fake_client.reportReadAsync = nil
+    Assert.eq(reported, 0, "关闭后不得上报")
+    Assert.is_nil(err)
+    Assert.len(data.synced_ids, 2)
+    Assert.eq(data.synced_ids[1], 41)
+    Assert.eq(data.synced_ids[2], 42)
+end
+
 -- 全部章节都上报失败时不能报成功：一行都没确认就该让调用方看到错误并重试。
 do
     local src = WeChat.new()

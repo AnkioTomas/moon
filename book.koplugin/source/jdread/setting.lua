@@ -16,11 +16,6 @@ function Setting.rowStatus()
         Auth.hasSession()
 end
 
----@return string
-function Setting.rowTitle()
-    return _("京东读书账号")
-end
-
 ---@param plugin table|nil
 local function showQrLogin(plugin)
     local Auth = require("source.jdread.auth")
@@ -107,25 +102,35 @@ local function showQrLogin(plugin)
     end)
 end
 
+--- 设置页行：账号（扫码）；已登录时追加退出。
 ---@param plugin table|nil
-function Setting.open(plugin)
+---@return table[]
+function Setting.rows(plugin)
+    local SettingRow = require("ui.components.settingrow")
     local Auth = require("source.jdread.auth")
-    if not Auth.hasSession() then
-        showQrLogin(plugin)
-        return
-    end
-
-    require("ui.views.popup").sheet{
-        title = _("京东读书账号"),
-        items = {
-            { text = _("重新扫码登录"), callback = function() showQrLogin(plugin) end },
-            { text = _("退出登录"), callback = function()
-                Auth.clearSession()
-                require("source.registry").afterAuthChanged(plugin)
-            end },
-            { text = _("取消") },
-        },
+    local rows = {
+        function(iw)
+            local status, status_on = Setting.rowStatus()
+            return SettingRow.build(iw, { kind = "nav", icon = "account_circle", title = _("京东读书账号"),
+                status = status, status_on = status_on,
+                callback = function() showQrLogin(plugin) end })
+        end,
     }
+    if not Auth.hasSession() then return rows end
+    rows[#rows + 1] = function(iw)
+        return SettingRow.build(iw, { kind = "action", icon = "logout", title = _("退出登录"),
+            callback = function()
+                require("ui/uimanager"):show(require("ui/widget/confirmbox"):new{
+                    text = _("确定退出京东读书账号？"),
+                    ok_text = _("退出登录"),
+                    ok_callback = function()
+                        Auth.clearSession()
+                        require("source.registry").afterAuthChanged(plugin)
+                    end,
+                })
+            end })
+    end
+    return rows
 end
 
 return Setting

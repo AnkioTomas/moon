@@ -462,6 +462,13 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Source:pushStatsAsync(rows, cb)
+    if self.cfg.sync_reading_time == false then
+        -- 关闭同步时直接确认本地行：不留积压，重新开启后不会把关闭期间的时长补报上去。
+        local ids = {}
+        for _, row in ipairs(rows or {}) do ids[#ids + 1] = row.id end
+        cb({ ok = true, synced_ids = ids })
+        return nil
+    end
     if not self:configured() then
         cb(nil, _("请先扫码登录微信读书"))
         return nil

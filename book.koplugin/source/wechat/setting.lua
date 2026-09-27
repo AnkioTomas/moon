@@ -174,25 +174,40 @@ local function showQrLogin(plugin)
     end)
 end
 
---- 自绘账号菜单（未登录直接扫码；已登录：扫码 / 续期 / 退出）
+--- 设置页行：账号（扫码）/ 同步阅读时间；已登录时追加续期、退出。
 ---@param plugin table|nil
-function Setting.open(plugin)
+---@return table[]
+function Setting.rows(plugin)
+    local SettingRow = require("ui.components.settingrow")
     local Auth = require("source.wechat.auth")
-    if not Auth.hasSession() then
-        showQrLogin(plugin)
-        return
-    end
-
-    local NetworkMgr = require("ui/network/manager")
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
-    local cfg = require("utils.settings").getSource(SOURCE_ID)
-    require("ui.views.popup").sheet{
-        title = _("微信读书账号") .. " · " .. (Auth.userLabel() or cfg.user_id or ""),
-        items = {
-            { text = _("重新扫码登录"), callback = function() showQrLogin(plugin) end },
-            { text = _("续期会话"), callback = function()
-                NetworkMgr:runWhenOnline(function()
+    local rows = {
+        function(iw)
+            local status, status_on = Setting.rowStatus()
+            return SettingRow.build(iw, { kind = "nav", icon = "account_circle", title = _("微信读书账号"),
+                status = status, status_on = status_on,
+                callback = function() showQrLogin(plugin) end })
+        end,
+        function(iw)
+            local Settings = require("utils.settings")
+            local on = Settings.getSource(SOURCE_ID).sync_reading_time ~= false
+            return SettingRow.build(iw, { kind = "toggle", icon = "timer", title = _("同步阅读时间"),
+                subtitle = _("阅读时必须联网，微信读书才会计入时长"),
+                status = on and _("开") or _("关"), status_on = on,
+                callback = function()
+                    local cfg = Settings.getSource(SOURCE_ID)
+                    cfg.sync_reading_time = not on
+                    Settings.saveSource(SOURCE_ID, cfg)
+                    if plugin and plugin.desktop then plugin.desktop:updateView() end
+                end })
+        end,
+    }
+    if not Auth.hasSession() then return rows end
+    rows[#rows + 1] = function(iw)
+        return SettingRow.build(iw, { kind = "action", icon = "autorenew", title = _("续期会话"),
+            callback = function()
+                require("ui/network/manager"):runWhenOnline(function()
                     Auth.renewCookieAsync(function(ok, err)
                         UIManager:show(InfoMessage:new{
                             text = ok and _("已续期") or (err or _("续期失败")),
@@ -200,15 +215,23 @@ function Setting.open(plugin)
                         })
                     end)
                 end)
-            end },
-            { text = _("退出登录"), callback = function()
-                Auth.clearSession()
-                UIManager:show(InfoMessage:new{ text = _("已退出"), timeout = 2 })
-                require("source.registry").afterAuthChanged(plugin)
-            end },
-            { text = _("取消") },
-        },
-    }
+            end })
+    end
+    rows[#rows + 1] = function(iw)
+        return SettingRow.build(iw, { kind = "action", icon = "logout", title = _("退出登录"),
+            callback = function()
+                UIManager:show(require("ui/widget/confirmbox"):new{
+                    text = _("确定退出微信读书账号？"),
+                    ok_text = _("退出登录"),
+                    ok_callback = function()
+                        Auth.clearSession()
+                        UIManager:show(InfoMessage:new{ text = _("已退出"), timeout = 2 })
+                        require("source.registry").afterAuthChanged(plugin)
+                    end,
+                })
+            end })
+    end
+    return rows
 end
 
 return Setting
