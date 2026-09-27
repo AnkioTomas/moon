@@ -159,9 +159,10 @@ local function attachLazyPreviews(menu, sources)
     menu:updateItems(nil, true)
 end
 
+--- 列表已就绪时直接弹选择菜单（阅读页侧栏自己拉列表、借走这个菜单）。
 ---@param opts FontPickerOpts|table
 ---@param items MoonFontItem[]|table|nil
-local function showPicker(opts, items)
+function FontPicker.show(opts, items)
     local cur = (opts.current_id and opts.current_id()) or MoonFont.currentId()
     local groups = { weread = {}, ["local"] = {}, system = {} }
     local active = "weread"
@@ -233,7 +234,7 @@ function FontPicker.open(opts)
             UIManager:show(InfoMessage:new{ text = _("字体列表加载失败") })
             return
         end
-        showPicker(opts, items)
+        FontPicker.show(opts, items)
     end)
     loading.dismiss_callback = function()
         cancelled = true
