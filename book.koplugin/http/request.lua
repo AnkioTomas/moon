@@ -68,6 +68,7 @@ local Turbo = require("http.turbo")
 local NetworkMgr = require("ui/network/manager")
 local logger = require("utils.log")
 local Perf = require("utils.perf")
+local Text = require("utils.text")
 local T = require("ffi/util").template
 local _ = require("gettext")
 
@@ -232,21 +233,25 @@ local function closeClient(client)
 end
 
 --- 拼 turbo HTTPClient:fetch 的 kwargs。timeout 是未传 opts.timeout 时的默认秒。
+--- turbo 文档写了 auth_username/auth_password 但从未实现，Basic 头只能自己拼。
 ---@param opts HttpRequest
 ---@param timeout number
 ---@return table
 local function fetchOpts(opts, user_agent, timeout)
+    local user = opts.auth_username
+    local auth = user and user ~= "" and {
+        Authorization = "Basic " .. Text.base64Encode(user .. ":" .. (opts.auth_password or "")),
+    }
     return {
         method = opts.method or "GET",
         body = opts.body,
         request_timeout = opts.timeout or timeout,
         connect_timeout = opts.connect_timeout or 20,
         allow_redirects = opts.allow_redirects,
-        auth_username = opts.auth_username,
-        auth_password = opts.auth_password,
         user_agent = user_agent and tostring(user_agent) or nil,
         on_headers = function(headers)
             addHeaders(headers, opts.headers)
+            addHeaders(headers, auth)
         end,
     }
 end
