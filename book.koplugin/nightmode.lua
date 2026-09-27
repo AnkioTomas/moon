@@ -116,6 +116,24 @@ local function tzMinutes(now)
     return os.difftime(now, os.time(utc)) / 60
 end
 
+--- 由当地日出时刻（"06:06 AM" / "06:06"）反推当地时区偏移（分钟，取整到 15 分钟）；解析不了或极昼极夜返回 nil。
+--- 不用设备时区：不少 Kindle 时区停在出厂的美东、时钟是手动拨成本地的，设备算出的偏移会差半天。
+---@param sunrise string|nil
+---@param yday number
+---@param lat number
+---@param lon number
+---@return number|nil
+function NightMode.siteTz(sunrise, yday, lat, lon)
+    local h, m, ap = (sunrise or ""):match("^(%d+):(%d+)%s*([AP]?M?)$")
+    local utc = h and sunEvent(yday, lat, lon, 0, true)
+    if not utc then return nil end
+    h = tonumber(h)
+    if ap == "AM" or ap == "PM" then h = h % 12 + (ap == "PM" and 12 or 0) end
+    local d = (h * 60 + tonumber(m) - utc) % DAY
+    if d > 14 * 60 then d = d - DAY end
+    return math.floor(d / 15 + 0.5) * 15
+end
+
 --- 今天的夜间窗口；关闭时返回 nil。
 ---@param now number|nil
 ---@return number|nil from
@@ -127,7 +145,8 @@ function NightMode.window(now)
     end
     if conf.auto_night == "sun" then
         now = now or os.time()
-        return NightMode.sunWindow(os.date("*t", now).yday, conf.auto_night_lat, conf.auto_night_lon, tzMinutes(now))
+        return NightMode.sunWindow(os.date("*t", now).yday, conf.auto_night_lat, conf.auto_night_lon,
+            conf.auto_night_tz or tzMinutes(now))
     end
 end
 
@@ -260,7 +279,7 @@ function NightMode.setMode(mode)
     NightMode.tick()
 end
 
---- 经天气接口取经纬度并落盘。天气地点留空时按 IP。
+--- 经天气接口取经纬度与当地时区并落盘（时区取不到时清掉，回落设备时区）。天气地点留空时按 IP。
 ---@param cb fun(ok: boolean, city: string|nil)
 ---@return { cancel: fun() }
 function NightMode.locate(cb)
@@ -269,6 +288,7 @@ function NightMode.locate(cb)
         if not wx.latitude or not wx.longitude then return cb(false) end
         local conf = MoonSettings.get("display")
         conf.auto_night_lat, conf.auto_night_lon = wx.latitude, wx.longitude
+        conf.auto_night_tz = NightMode.siteTz(wx.sunrise, os.date("*t").yday, wx.latitude, wx.longitude)
         MoonSettings.saveSection("display", conf)
         cb(true, wx.city)
     end)
