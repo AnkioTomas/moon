@@ -215,6 +215,8 @@ return {
     ["启动失败：%1"] = "Failed to start: %1",
     ["启动"] = "Startup",
     ["启动打开桌面"] = "Open on start",
+    ["抽屉图标打开桌面"] = "Drawer icon opens desktop",
+    ["启动打开桌面时，点击顶部菜单的抽屉图标回到月读"] = "When opening on start, tapping the drawer icon in the top menu returns to 月读",
     ["启用"] = "Enable",
     ["启用源"] = "Enabled sources",
     ["周连续"] = "Weekly streak",

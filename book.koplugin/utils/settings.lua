@@ -21,6 +21,8 @@ local DEFAULTS = {
         book_debug_enabled = false,
         -- 首次安装已把 KOReader start_with 种成月读；之后尊重用户改动。
         start_with_seeded = false,
+        -- 启动项为月读时，顶部菜单的抽屉（文件浏览器）图标直接回月读桌面。
+        drawer_opens_desktop = true,
     },
     display = {
         ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,

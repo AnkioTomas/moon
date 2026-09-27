@@ -4,6 +4,7 @@
 
 local SettingRow = require("ui.components.settingrow")
 local Host = require("host")
+local Settings = require("utils.settings")
 local _ = require("gettext")
 
 ---@class BookSettingsDesktop
@@ -22,6 +23,18 @@ function DesktopSettings:rows(desktop, open_on)
                 callback = function()
                     if open_on then G_reader_settings:saveSetting("start_with", "filemanager")
                     else G_reader_settings:saveSetting("start_with", Host.OPEN_ON_START_ID) end
+                    desktop:updateView()
+                end,
+            })
+        end,
+        function(iw)
+            local drawer_on = Settings.get().drawer_opens_desktop == true
+            return SettingRow.build(iw, {
+                kind = "toggle", icon = "folder", title = _("抽屉图标打开桌面"),
+                subtitle = _("启动打开桌面时，点击顶部菜单的抽屉图标回到月读"),
+                status = drawer_on and _("开") or _("关"), status_on = drawer_on,
+                callback = function()
+                    Settings.save({ drawer_opens_desktop = not drawer_on })
                     desktop:updateView()
                 end,
             })
