@@ -194,7 +194,10 @@ loadConfig().then(function (config) {
             parentPath = d.parent;
             backBtn.disabled = hist.length === 0;
             parentBtn.disabled = !parentPath;
-            el('path').textContent = cur;
+            var pathNode = el('path');
+            pathNode.textContent = cur;
+            pathNode.title = cur;
+            pathNode.scrollLeft = pathNode.scrollWidth;
             var locations = el('quick').getElementsByTagName('button');
             for (var i = 0; i < locations.length; i++) {
                 var root = locations[i].getAttribute('data-path');
@@ -203,6 +206,9 @@ loadConfig().then(function (config) {
                         || (root !== '/' && cur.indexOf(root + '/') === 0) ? 'active' : '';
                 } else {
                     locations[i].className = '';
+                }
+                if (locations[i].className === 'active') {
+                    locations[i].scrollIntoView({ block: 'nearest', inline: 'nearest' });
                 }
             }
             render(d);
