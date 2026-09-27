@@ -1075,6 +1075,7 @@ do
         ai = { ai_endpoint = "https://old.example/v1", ai_api_key = "sk-real", ai_model = "old" },
         moon = { base_url = "https://moon.test", token = "bk" },
         zlib = { email = "", password = "", base_url = nil },
+        ["local"] = {},
     }
     package.preload["utils.settings"] = function()
         return {

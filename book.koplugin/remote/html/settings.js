@@ -46,6 +46,10 @@ function loadSettings() {
             zlib_email: data.zlib.email,
             zlib_password: data.zlib.password,
             zlib_base_url: data.zlib.base_url,
+            webdav_url: data.local.webdav_url,
+            webdav_username: data.local.webdav_username,
+            webdav_password: data.local.webdav_password,
+            webdav_path: data.local.webdav_path,
         });
         setState(el('loadstate'), '已加载设备配置', 'ok');
     }).catch(function (err) {
@@ -71,5 +75,6 @@ bindForm('form-ai', 'ai', 'state-ai');
 bindForm('form-moon', 'moon', 'state-moon');
 bindForm('form-zlib', 'zlib', 'state-zlib');
 bindForm('form-copymanga', 'copymanga', 'state-copymanga');
+bindForm('form-local', 'local', 'state-local');
 
 loadSettings();
