@@ -938,5 +938,11 @@ Current version: ",
     ["请先扫码登录微信读书墨水屏"] = "Please scan to log in to WeRead e-ink first",
     ["鉴权失败，请求结果未知"] = "Authentication failed; request result unknown",
     ["需要在微信读书官方客户端完成人机验证"] = "Human verification required in the official WeRead app",
+    ["左边缘右滑"] = "Swipe right from left edge",
+    ["任意位置右滑"] = "Swipe right anywhere",
+    ["暂无简介"] = "No description",
+    ["打开月读侧栏"] = "Open Moon sidebar",
+    ["侧栏手势"] = "Sidebar gesture",
+    ["也可在 KOReader 手势管理中绑定「打开月读侧栏」"] = "You can also bind \"Open Moon sidebar\" in KOReader gesture manager",
 
 }

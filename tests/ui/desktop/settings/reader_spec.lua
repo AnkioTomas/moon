@@ -56,6 +56,20 @@ Assert.eq(saved_section.name, "reader")
 Assert.eq(updates, 1)
 reader_section = {}
 
+-- 侧栏手势：缺省左边缘右滑；选中后写 reader.sidebar_gesture 并刷新。
+local sheet
+package.loaded["ui.views.popup"].sheet = function(opts) sheet = opts end
+local gesture_row = Settings:sections(desktop)[1].rows[4](600)
+Assert.eq(gesture_row.title, "侧栏手势")
+Assert.eq(gesture_row.status, "左边缘右滑")
+gesture_row.callback()
+Assert.len(sheet.items, 3)
+sheet.on_select("full")
+Assert.eq(reader_section.sidebar_gesture, "full")
+Assert.eq(saved_section.name, "reader")
+Assert.eq(Settings:sections(desktop)[1].rows[4](600).status, "任意位置右滑")
+reader_section = {}
+
 -- 动画开启时多一行风格选择，显示当前风格名；未设置时显示默认擦除。
 local animation_on = true
 local style = { text = "擦除", value = "wipe" }
@@ -68,7 +82,7 @@ package.loaded["patch.page_turn_animation"] = {
 package.loaded["ui.desktop.settings.reader"] = nil
 Settings = require("ui.desktop.settings.reader")
 local rows = Settings:sections(desktop)[1].rows
-Assert.len(rows, 4)
+Assert.len(rows, 5)
 local style_row = rows[3](600)
 Assert.eq(style_row.title, "翻页动画风格")
 Assert.eq(style_row.status, "擦除")
@@ -80,7 +94,7 @@ style = { text = "方框", value = "box" }
 Assert.eq(Settings:sections(desktop)[1].rows[3](600).status, "方框")
 Assert.eq(rows[4](600).title, "读到 99% 自动标记已读")
 animation_on = false
-Assert.len(Settings:sections(desktop)[1].rows, 3)
+Assert.len(Settings:sections(desktop)[1].rows, 4)
 
 local lookup = Settings:lookupSections(desktop)
 local titles = {}

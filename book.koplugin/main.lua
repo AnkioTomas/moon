@@ -98,6 +98,15 @@ function BookPlugin:onBookXrayRefresh()
     return true
 end
 
+--- Dispatcher 手势：打开阅读页左侧栏。
+---@return boolean
+function BookPlugin:onBookReaderSidebar()
+    if not self.ui or not self.ui.document then
+        return false
+    end
+    return require("ui.reader.sidebar").open(self.ui)
+end
+
 --- 主菜单回调（由 Host.registerMenu → registerToMainMenu 挂上）
 ---@param menu_items table KOReader 主菜单项表（就地写入）
 function BookPlugin:addToMainMenu(menu_items)

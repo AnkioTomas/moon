@@ -36,6 +36,7 @@ function Reader.onCreate(plugin)
     require("ui.reader.highlight_menu").install(ui)
     require("ui.reader.book_notes").install(ui)
     require("ui.reader.selection").install(ui)
+    require("ui.reader.sidebar").install(ui)
 end
 
 ---@param plugin table

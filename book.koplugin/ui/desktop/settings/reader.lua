@@ -31,6 +31,13 @@ local POPUP_BUTTONS = {
     { id = "search", title = _("搜索"), icon = "search" },
 }
 
+--- 阅读页侧栏右滑范围（reader.sidebar_gesture，缺省 edge），语义见 ui.reader.sidebar。
+local SIDEBAR_GESTURES = {
+    { value = "edge", text = _("左边缘右滑") },
+    { value = "full", text = _("任意位置右滑") },
+    { value = "off", text = _("关闭") },
+}
+
 ---@return table|nil
 local function readerUi()
     return require("apps/reader/readerui").instance
@@ -169,6 +176,29 @@ function ReaderSettings:sections(desktop)
     rows[#rows + 1] = readerToggle(desktop, reader, "auto_mark_read_at_99", auto_mark_read, {
         icon = "done_all", title = _("读到 99% 自动标记已读"),
     })
+    rows[#rows + 1] = function(iw)
+        local current = reader.sidebar_gesture or "edge"
+        local status
+        for _, option in ipairs(SIDEBAR_GESTURES) do
+            if option.value == current then status = option.text end
+        end
+        return SettingRow.build(iw, {
+            kind = "nav", icon = "swipe_right", title = _("侧栏手势"),
+            subtitle = _("也可在 KOReader 手势管理中绑定「打开月读侧栏」"),
+            status = status,
+            callback = function()
+                Popup.sheet{
+                    title = _("侧栏手势"),
+                    items = SIDEBAR_GESTURES,
+                    on_select = function(value)
+                        reader.sidebar_gesture = value
+                        MoonSettings.saveSection("reader", reader)
+                        desktop:updateView()
+                    end,
+                }
+            end,
+        })
+    end
     return { { title = _("行为"), rows = rows } }
 end
 

@@ -48,6 +48,10 @@ end
 package.preload["ui.reader.selection"] = function()
     return { install = function() end }
 end
+local sidebar_installed_on
+package.preload["ui.reader.sidebar"] = function()
+    return { install = function(arg) sidebar_installed_on = arg end }
+end
 
 local active = true
 local sync_source = { id = "moon" }
@@ -134,6 +138,7 @@ Reader.onCreate(plugin)
 Assert.eq(native_ui, ui)
 Assert.eq(registered_module.name, "book_bars")
 Assert.eq(bars_installed_on, ui, "install 的首参必须是 ReaderUI，不能是模块自己")
+Assert.eq(sidebar_installed_on, ui, "阅读页必须安装侧栏手势")
 Assert.is_nil(ui._zones, "不应注册覆盖原生菜单的触摸区")
 
 native_ui = nil

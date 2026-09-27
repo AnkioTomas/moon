@@ -87,6 +87,12 @@ local function registerMenu(plugin)
             title = _("刷新 X-Ray"),
             reader = true,
         })
+        Dispatcher:registerAction("book_reader_sidebar", {
+            category = "none",
+            event = "BookReaderSidebar",
+            title = _("打开月读侧栏"),
+            reader = true,
+        })
     end
     if plugin.ui and plugin.ui.menu and plugin.ui.menu.registerToMainMenu then
         plugin.ui.menu:registerToMainMenu(plugin)
