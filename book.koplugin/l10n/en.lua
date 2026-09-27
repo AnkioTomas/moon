@@ -181,6 +181,7 @@ return {
     ["别名：%1"] = "Aliases: %1",
     ["刮削"] = "Scrape",
     ["刷新"] = "Refresh",
+    ["正在刷新书库…"] = "Refreshing library…",
     ["刷新 X-Ray"] = "Refresh X-Ray",
     ["前光开关"] = "Toggle frontlight",
     ["前言"] = "Preface",
