@@ -164,13 +164,15 @@ local function errMsg(data)
     return tostring(data.errMsg or data.errmsg or "")
 end
 
---- POST /login 回包 → 凭据；缺令牌按失败。
+--- POST /login 回包 → 凭据；缺令牌按失败。续期回包可不带 refreshToken，表示沿用旧的。
 ---@param res table|nil
 ---@param err any
+---@param old_refresh string|nil 续期时传入当前 refreshToken
 ---@return table|nil data, string|nil err
-local function loginResult(res, err)
+local function loginResult(res, err, old_refresh)
     if err then return nil, tostring(err) end
     local data = decode(res and res.body)
+    if data and data.refreshToken == nil then data.refreshToken = old_refresh end
     if not res or not Request.ok(res.code) or not data
         or type(data.accessToken) ~= "string" or data.accessToken == ""
         or type(data.refreshToken) ~= "string" or data.refreshToken == "" then
@@ -354,7 +356,7 @@ function Eink.refreshAsync(cb)
         trackId = "",
         deviceType = DEVICE_TYPE,
     }, function(res, err)
-        local data, login_err = loginResult(res, err)
+        local data, login_err = loginResult(res, err, creds.refresh_token)
         if data then
             saveSession(data.vid ~= nil and tostring(data.vid) or creds.vid,
                 data.accessToken, data.refreshToken, creds.device_id)

@@ -148,6 +148,28 @@ do
     Assert.eq(state.cfg.eink.device_id, "dev-1")
 end
 
+-- 续期回包不带 refreshToken（线上常态）：沿用旧 refreshToken，仍算成功。
+do
+    logged_in()
+    state.responder = function() return reply(200, { vid = 42, accessToken = "at-3" }) end
+    local ok, err
+    Eink.refreshAsync(function(o, e) ok, err = o, e end)
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(state.cfg.wr_skey, "at-3")
+    Assert.eq(state.cfg.eink.refresh_token, "rt-1")
+end
+
+-- 扫码登录回包缺 refreshToken 仍按失败。
+do
+    reset({ eink = { device_id = "dev-9" } })
+    state.responder = function() return reply(200, { vid = 1, accessToken = "at" }) end
+    local user
+    Eink.completeQrLoginAsync({ wx_code = "c" }, function(u) user = u end)
+    Assert.is_nil(user)
+    Assert.is_nil(state.cfg.wr_skey)
+end
+
 -- POST 遇 401：只续期不重放（写可能已落地），回调失败。
 do
     logged_in()
