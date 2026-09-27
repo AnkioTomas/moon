@@ -58,18 +58,13 @@ reader_section = {}
 
 -- 动画开启时多一行风格选择，显示当前风格名；未设置时显示默认擦除。
 local animation_on = true
-local style_setting
-local picked
+local style = { text = "擦除", value = "wipe" }
+local on_change
 package.loaded["patch.page_turn_animation"] = {
     isEnabled = function() return animation_on end,
-    STYLE_KEY = "swipe_animation_style",
-    STYLES = { { text = "擦除", value = "wipe" }, { text = "覆盖", value = "cover" } },
+    currentStyle = function() return style end,
+    pickStyle = function(cb) on_change = cb end,
 }
-package.loaded["ui.views.popup"] = { list = function(opts) picked = opts end }
-_G.G_reader_settings.readSetting = function() return style_setting end
-_G.G_reader_settings.saveSetting = function(_, key, value)
-    if key == "swipe_animation_style" then style_setting = value end
-end
 package.loaded["ui.desktop.settings.reader"] = nil
 Settings = require("ui.desktop.settings.reader")
 local rows = Settings:sections(desktop)[1].rows
@@ -78,10 +73,11 @@ local style_row = rows[3](600)
 Assert.eq(style_row.title, "翻页动画风格")
 Assert.eq(style_row.status, "擦除")
 style_row.callback()
-Assert.eq(picked.current, "wipe")
-picked.on_select("cover")
-Assert.eq(style_setting, "cover")
-Assert.eq(Settings:sections(desktop)[1].rows[3](600).status, "覆盖")
+local before = updates
+on_change()
+Assert.eq(updates, before + 1, "选中后刷新设置页")
+style = { text = "方框", value = "box" }
+Assert.eq(Settings:sections(desktop)[1].rows[3](600).status, "方框")
 Assert.eq(rows[4](600).title, "读到 99% 自动标记已读")
 animation_on = false
 Assert.len(Settings:sections(desktop)[1].rows, 3)

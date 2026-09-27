@@ -195,6 +195,8 @@ end
 
 -- 与 Device:ambientBrightnessLevel() 的 0..4 一一对应。
 local LEVEL_NAMES = { _("黑暗"), _("昏暗"), _("中性"), _("明亮"), _("刺眼") }
+-- 与 NightMode.PERIOD_STARTS 一一对应。
+local PERIOD_NAMES = { _("凌晨"), _("清晨"), _("上午"), _("中午"), _("下午"), _("傍晚"), _("晚上"), _("深夜") }
 
 ---@param percent number
 ---@return string
@@ -202,7 +204,7 @@ local function lightLabel(percent)
     return percent > 0 and percent .. "%" or _("关灯")
 end
 
---- 自动亮度菜单：开关 + 各档（有传感器）或白天 / 夜间（无传感器）亮度。
+--- 自动亮度菜单：开关 + 各档（有传感器）或各时段（无传感器）亮度。
 ---@param desktop table
 local function openLight(desktop)
     local conf = MoonSettings.get("display")
@@ -218,8 +220,9 @@ local function openLight(desktop)
     if NightMode.hasSensor() then
         for i, name in ipairs(LEVEL_NAMES) do add(name, conf.auto_light_levels, i) end
     else
-        add(_("白天"), conf, "auto_light_day")
-        add(_("夜间"), conf, "auto_light_night")
+        for i, name in ipairs(PERIOD_NAMES) do
+            add(name .. " " .. clock(NightMode.PERIOD_STARTS[i]), conf.auto_light_periods, i)
+        end
     end
     Popup.sheet{
         title = _("自动亮度"),
@@ -238,11 +241,6 @@ local function openLight(desktop)
             end
             NightMode.setLight(not conf.auto_light)
             desktop:updateView()
-            if NightMode.lightIdle() then
-                UIManager:show(InfoMessage:new{
-                    text = _("没有光线传感器，亮度跟随自动夜间模式的昼夜时间切换，请同时开启自动夜间模式。"),
-                })
-            end
         end,
     }
 end
@@ -255,8 +253,8 @@ local function lightRow(desktop)
         local on = MoonSettings.get("display").auto_light
         return SettingRow.build(iw, {
             kind = "nav", icon = "brightness_auto", title = _("自动亮度"),
-            subtitle = NightMode.hasSensor() and _("按环境光调节；光线变化时才会覆盖手动调节")
-                or _("跟随自动夜间模式的昼夜时间切换"),
+            subtitle = NightMode.hasSensor() and _("按环境光调节；手动调亮度会关闭自动亮度")
+                or _("按时段和天气调节；手动调亮度会关闭自动亮度"),
             status = on and _("开") or _("关"), status_on = on,
             callback = function() openLight(desktop) end,
         })

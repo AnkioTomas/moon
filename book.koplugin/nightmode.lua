@@ -4,8 +4,9 @@
 只在昼夜交替那一刻切换，用户中途手动切的夜间模式不会被立刻改回。
 日出日落离线计算（NOAA 简化算法，误差一两分钟）；经纬度在选模式时经天气接口按 IP / 天气地点取一次落盘。
 
-自动亮度：有光线传感器（仅部分 Kindle）按环境光档位查表，档位变了才改；
-否则在昼夜交替时设白天 / 夜间亮度。两条路都不覆盖用户在同一档位 / 同一昼夜里的手动调节。
+自动亮度：有光线传感器（仅部分 Kindle）按环境光档位查表，否则按一天中的时段查表，与夜间模式无关。
+无传感器时白天时段再乘天气倍率估算环境光（阴雨天更暗，多补光）。
+目标亮度变了才改；用户手动调亮度即关闭自动亮度。
 
 @module koplugin.book.nightmode
 --]]
@@ -17,10 +18,21 @@ local NightMode = {}
 
 local DAY = 24 * 60
 local SENSOR_INTERVAL = 30
+local WEATHER_INTERVAL = 3600
+-- 无传感器时各时段的起始分钟：凌晨、清晨、上午、中午、下午、傍晚、晚上、深夜，与 auto_light_periods 一一对应。
+NightMode.PERIOD_STARTS = { 0, 5 * 60, 8 * 60, 11 * 60, 13 * 60, 17 * 60, 19 * 60, 22 * 60 }
+-- 有天光、天气会影响环境光的时段（清晨到傍晚）。
+local DAYLIGHT = { false, true, true, true, true, true, false, false }
+-- 按 Weather.iconKey 分类的补光倍率；没列出的（晴、大风、未知、离线取不到）为 1。
+local WEATHER_GAIN = { cloud = 1.2, haze = 1.3, snow = 1.4, overcast = 1.5, fog = 1.5, rain = 1.6 }
+-- 当前天气倍率。
+local gain = 1
 -- 上次应用的昼夜状态；nil 表示本进程还没应用过，下次 tick 必切。
 local last
--- 上次应用的环境光档位；nil 表示下次 sense 必设。
-local last_level
+-- 上次设下的目标亮度百分比；nil 表示下次 sense 必设。
+local last_percent
+-- 自动亮度设下后读回的亮度百分比；nil 表示没在管亮度或正在设，此时的亮度变化不算手动调节。
+local applied
 
 ---@param d number
 ---@return number
@@ -127,45 +139,86 @@ function NightMode.hasSensor()
 end
 
 --- 自动亮度的来源；关闭或没有前光时返回 nil。
----@return "sensor"|"phase"|nil
+---@return "sensor"|"clock"|nil
 function NightMode.lightSource()
     if not MoonSettings.get("display").auto_light then return nil end
     if not require("device"):hasFrontlight() then return nil end
-    return NightMode.hasSensor() and "sensor" or "phase"
+    return NightMode.hasSensor() and "sensor" or "clock"
 end
 
----@param percent number 0 = 关灯
-local function setBrightness(percent)
-    require("ui.panel.desktop").setLevel("brightness", percent / 100)
+--- minute 所在时段序号（1 起）与距下一时段起点的分钟数。
+---@param minute number
+---@return number index
+---@return number remain
+function NightMode.period(minute)
+    local starts = NightMode.PERIOD_STARTS
+    local i = #starts
+    while starts[i] > minute do i = i - 1 end
+    return i, (starts[i + 1] or DAY) - minute
 end
 
----@param night boolean
-local function phaseLight(night)
-    local conf = MoonSettings.get("display")
-    setBrightness(night and conf.auto_light_night or conf.auto_light_day)
+--- 按时段（白天再乘天气倍率）算目标亮度与下次检查的秒数；白天至少每小时重看一次天气。
+---@param percents number[]
+---@return number percent
+---@return number delay
+---@return boolean daylight
+local function clockTarget(percents)
+    local t = os.date("*t")
+    local i, remain = NightMode.period(t.hour * 60 + t.min)
+    local delay = remain * 60 - t.sec
+    if not DAYLIGHT[i] then return percents[i], math.max(1, delay), false end
+    return math.min(100, math.floor(percents[i] * gain + 0.5)), math.max(1, math.min(delay, WEATHER_INTERVAL)), true
 end
 
---- 读环境光档位，档位变了才设亮度，然后排下一次读取。
+--- 读环境光档位或按时段估算，目标亮度变了才设，然后排下一次读取（传感器轮询，时段等到下一个起点）。
 function NightMode.sense()
     local UIManager = require("ui/uimanager")
     UIManager:unschedule(NightMode.sense)
-    if NightMode.lightSource() ~= "sensor" then
-        last_level = nil
+    local source = NightMode.lightSource()
+    if not source then
+        last_percent, applied = nil, nil
         return
     end
-    local level = require("device"):ambientBrightnessLevel()
-    if level ~= last_level then
-        last_level = level
-        setBrightness(MoonSettings.get("display").auto_light_levels[level + 1])
+    local conf = MoonSettings.get("display")
+    local percent, delay, daylight
+    if source == "sensor" then
+        percent, delay = conf.auto_light_levels[require("device"):ambientBrightnessLevel() + 1], SENSOR_INTERVAL
+    else
+        percent, delay, daylight = clockTarget(conf.auto_light_periods)
     end
-    UIManager:scheduleIn(SENSOR_INTERVAL, NightMode.sense)
+    if percent ~= last_percent then
+        local Panel = require("ui.panel.desktop")
+        last_percent, applied = percent, nil
+        Panel.setLevel("brightness", percent / 100)
+        applied = Panel.lightPercent("brightness")
+    end
+    UIManager:scheduleIn(delay, NightMode.sense)
+    if daylight then NightMode.refreshWeather() end
 end
 
---- 亮度设置改了：立刻按当前档位 / 昼夜重设一次亮度，不碰夜间模式。
+--- 取当前天气（http 缓存 1 小时；离线且缓存过期时拿到空表，倍率回落到 1），倍率变了就重算亮度。
+function NightMode.refreshWeather()
+    local Weather = require("online.weather")
+    Weather:fetch({ city = Text.trim(MoonSettings.get("home").home_weather_city) }, function(wx)
+        local g = WEATHER_GAIN[Weather.iconKey(wx.code, wx.desc)] or 1
+        if g == gain then return end
+        gain = g
+        NightMode.sense()
+    end)
+end
+
+--- 前光变化（FrontlightStateChanged，同步广播）：灯亮着且亮度不是自动设的值，就是用户手动调了，关掉自动亮度。
+--- 关灯不算：休眠和自动设 0% 都会关灯；改色温不动亮度。
+function NightMode.onFrontlightChanged()
+    if not applied or require("device"):getPowerDevice():isFrontlightOff() then return end
+    if require("ui.panel.desktop").lightPercent("brightness") == applied then return end
+    NightMode.setLight(false)
+end
+
+--- 亮度设置改了：立刻按当前档位 / 时段重设一次亮度，不碰夜间模式。
 function NightMode.applyLight()
-    last_level = nil
+    last_percent = nil
     NightMode.sense()
-    if last ~= nil and NightMode.lightSource() == "phase" then phaseLight(last) end
 end
 
 --- 开关自动亮度并立即生效。
@@ -175,12 +228,6 @@ function NightMode.setLight(on)
     conf.auto_light = on
     MoonSettings.saveSection("display", conf)
     NightMode.applyLight()
-end
-
---- 自动亮度开着却不会生效：没有传感器，又没开自动夜间模式提供昼夜时间。
----@return boolean
-function NightMode.lightIdle()
-    return NightMode.lightSource() == "phase" and MoonSettings.get("display").auto_night == "off"
 end
 
 --- 按当前时刻判定昼夜，状态变了才切，然后排到下一个切换点。
@@ -199,7 +246,6 @@ function NightMode.tick()
     if night ~= last then
         last = night
         UIManager:broadcastEvent(require("ui/event"):new("SetNightMode", night))
-        if NightMode.lightSource() == "phase" then phaseLight(night) end
     end
     UIManager:scheduleIn(NightMode.nextDelay(minute, t.sec, from, to), NightMode.tick)
 end
@@ -243,7 +289,7 @@ function NightMode.onPause()
     UIManager:unschedule(NightMode.sense)
 end
 
---- 唤醒：睡眠期间跨过切换点就补切，环境光换了档就调亮度，都没变不动。
+--- 唤醒：睡眠期间跨过切换点就补切，环境光换档 / 跨时段就调亮度，都没变不动。
 function NightMode.onResume()
     NightMode.tick()
     NightMode.sense()

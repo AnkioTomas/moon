@@ -162,6 +162,11 @@ function BookPlugin:onResume()
     require("nightmode").onResume()
 end
 
+--- 前光变化：手动调亮度时关闭自动亮度。
+function BookPlugin:onFrontlightStateChanged()
+    require("nightmode").onFrontlightChanged()
+end
+
 --- 退出：停更新任务、远程服务，并销毁仍打开的桌面。
 function BookPlugin:onExit()
     logger.info("book plugin exit")
