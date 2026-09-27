@@ -19,9 +19,11 @@ package.preload["gettext"] = function() return function(text) return text end en
 local hero_tap
 local hero_cover_width
 local empty_tap
+local hero_builds = 0
 package.preload["ui.components.bookinfo"] = function()
     return {
         hero = function(_, _, _, opts)
+            hero_builds = hero_builds + 1
             hero_tap = opts.on_tap
             hero_cover_width = opts.cover_width
             return { hero = true }, 150
@@ -77,6 +79,19 @@ Assert.eq(opened, book)
 local before_resume = shelf_calls
 hero:onResume()
 Assert.eq(shelf_calls, before_resume + 1, "resume must refresh the current-reading card")
+
+-- 书架同步：全量对账返回同内容的新表时不重建（封面不再走占位→出图）；内容变了才重建。
+local builds = hero_builds
+shelf_recent = { stable_id = "book" }
+hero:onEvent("shelf_changed")
+Assert.eq(hero_builds, builds, "显示数据未变不得重建")
+shelf_recent = { stable_id = "book", percent = 42 }
+hero:onEvent("shelf_changed")
+Assert.eq(hero_builds, builds + 1, "进度变化必须重建")
+hero:onPause()
+shelf_recent = { stable_id = "other" }
+hero:onEvent("shelf_changed")
+Assert.eq(hero_builds, builds + 1, "暂停中不重建，恢复时 onResume 自会重读")
 
 local switched
 shelf_recent, shelf_err = nil, nil

@@ -132,7 +132,17 @@ for _, name in ipairs({ "hitokoto", "excerpt", "stats" }) do
     Assert.is_nil(component.refresh)
     before = paints
     component:onResume()
-    Assert.eq(paints, before + 1)
+    if name == "stats" then
+        Assert.eq(paints, before, "stats 数值未变不刷新")
+        seconds = 40
+        component:onEvent("stats_changed")
+        Assert.eq(paints, before + 1, "统计同步后原地更新数值")
+        local updated = false
+        for _, text in ipairs(texts) do if text.text == "40" then updated = true end end
+        Assert.is_true(updated)
+    else
+        Assert.eq(paints, before + 1)
+    end
     component:onPause()
     component:onDestroy()
     before = paints

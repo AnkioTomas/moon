@@ -107,7 +107,7 @@ local ok, err = pcall(function()
     local SwipeAnimation = {}
 
     ---------------------------------------------------------------
-    -- 2.1 Whether to skip the animation and perform a clearing refresh
+    -- 2.1 Whether this turn needs a clearing refresh after the animation
     ---------------------------------------------------------------
     function SwipeAnimation.shouldDoClearing(self)
         if not (self.FULL_REFRESH_COUNT and self.FULL_REFRESH_COUNT > 0) then
@@ -268,9 +268,95 @@ local ok, err = pcall(function()
         return edges
     end
 
+    -- A frame is a list of rects { dst_x, src_x, w } (full screen height):
+    -- blit new_bb[src_x, src_x + w) to screen[dst_x, dst_x + w), then refresh
+    -- that screen rect. A style turns strip edges into frames.
+    local BLINDS = 4
+
+    --- 条带交错揭开：第 k 帧揭开每组第 k 条；只有一组时就是普通擦除。
+    ---@param edges number[]
+    ---@param steps number 帧数上限
+    ---@param forward boolean 向前翻时每组从右往左揭
+    ---@return table[] frames
+    local function interleave(edges, steps, forward)
+        local n = #edges - 1
+        local m = math.min(steps, n)
+        local frames = {}
+        for k = 1, m do frames[k] = {} end
+        for j = 1, n do
+            local k = (j - 1) % m + 1
+            if forward then k = m - k + 1 end
+            local f = frames[k]
+            f[#f + 1] = { edges[j], edges[j], edges[j + 1] - edges[j] }
+        end
+        return frames
+    end
+
+    --- 中心展开：向前翻从中间往两边揭，向后翻从两边往中间揭。
+    ---@param edges number[]
+    ---@param forward boolean
+    ---@return table[] frames
+    local function center(edges, forward)
+        local n = #edges - 1
+        local frames = {}
+        for lo = math.ceil(n / 2), 1, -1 do
+            local hi = n - lo + 1
+            local f = { { edges[lo], edges[lo], edges[lo + 1] - edges[lo] } }
+            if hi ~= lo then
+                f[2] = { edges[hi], edges[hi], edges[hi + 1] - edges[hi] }
+            end
+            frames[#frames + 1] = f
+        end
+        if not forward then
+            for i = 1, math.floor(#frames / 2) do
+                local j = #frames - i + 1
+                frames[i], frames[j] = frames[j], frames[i]
+            end
+        end
+        return frames
+    end
+
+    --- 覆盖：新页整体从边缘滑入盖住旧页（向前翻从右侧进，向后翻从左侧进）。
+    ---@param edges number[]
+    ---@param forward boolean
+    ---@param screen_w number
+    ---@return table[] frames
+    local function cover(edges, forward, screen_w)
+        local n = #edges - 1
+        local frames = {}
+        for i = 1, n do
+            if forward then
+                local x = edges[n - i + 1]
+                frames[i] = { { x, 0, screen_w - x } }
+            else
+                local w = edges[i + 1]
+                frames[i] = { { 0, screen_w - w, w } }
+            end
+        end
+        return frames
+    end
+
+    -- Keys are the values of G_reader_settings "swipe_animation_style";
+    -- unknown / unset values fall back to wipe.
+    SwipeAnimation.STYLES = {
+        wipe = function(screen_w, steps, align, forward)
+            return interleave(buildStripEdges(screen_w, steps, align), steps, forward)
+        end,
+        blinds = function(screen_w, steps, align, forward)
+            return interleave(buildStripEdges(screen_w, steps * BLINDS, align), steps, forward)
+        end,
+        center = function(screen_w, steps, align, forward)
+            return center(buildStripEdges(screen_w, steps, align), forward)
+        end,
+        cover = function(screen_w, steps, align, forward)
+            return cover(buildStripEdges(screen_w, steps, align), forward, screen_w)
+        end,
+    }
+
     --- 跑软件翻页动画：把新页按条带逐段揭开覆盖旧页快照。
     --- 由 UIManager:_repaint 在新页画完、排队刷新执行前调用。
-    --- 需要清屏刷新或强制全刷时直接跳过动画改走对应刷新；没有旧页快照也直接返回。
+    --- 清屏页（每 N 页）/ 图片页 / 章节边界照常播动画，播完再补一次全屏刷新。
+    --- 没有旧页快照时不播动画，只做需要的全屏刷新，其余排队刷新照常执行。
     function SwipeAnimation.runSwipeAnimation(self)
         local screen_w = Screen.bb:getWidth()
         local screen_h = Screen.bb:getHeight()
@@ -293,34 +379,27 @@ local ok, err = pcall(function()
             end
         end
 
-        -- ========== Full-refresh decision (early: skip the wipe animation
-        -- when a clearing or forced full refresh is needed) ==========
+        -- Decide before animating: shouldForceFullAfterAnimation reads the
+        -- page state and updates the image-coverage baseline.
         local do_clearing = SwipeAnimation.shouldDoClearing(self)
         local need_force_full = false
         if not do_clearing then
             need_force_full = SwipeAnimation.shouldForceFullAfterAnimation(self, prev_page)
         end
 
+        local function finishRefresh()
+            if need_force_full then
+                SwipeAnimation.forceFullAndReset(self, screen_w, screen_h)
+            elseif do_clearing then
+                SwipeAnimation.performClearing(self, screen_w, screen_h)
+            end
+        end
+
         local saved_bb = Screen.saved_bb
         Screen.saved_bb = nil
 
-        if do_clearing or need_force_full then
-            -- Clearing page / image page / chapter boundary:
-            -- skip the animation and perform the corresponding refresh directly
-            if need_force_full then
-                SwipeAnimation.forceFullAndReset(self, screen_w, screen_h)
-            else
-                SwipeAnimation.performClearing(self, screen_w, screen_h)
-            end
-            if saved_bb then
-                saved_bb:free()
-            end
-            return
-        end
-
         if not saved_bb then
-            -- No pre-paint snapshot (beforePaint did not capture one): nothing
-            -- to animate; the queued refreshes will run normally.
+            finishRefresh()
             return
         end
 
@@ -362,8 +441,10 @@ local ok, err = pcall(function()
             -- default to the forward direction instead of always sweeping one way.
             swipe_forward = true
         end
-        local edges = buildStripEdges(screen_w, steps, Screen.alignment_constraint)
-        local nslots = #edges - 1
+        local style = SwipeAnimation.STYLES[G_reader_settings:readSetting("swipe_animation_style")]
+            or SwipeAnimation.STYLES.wipe
+        local frames = style(screen_w, steps, Screen.alignment_constraint, swipe_forward)
+        local refresh_fn = anim_refresh_mode == "fast" and Screen.refreshFast or Screen.refreshUI
 
         -- Draw the previous page as the starting background
         Screen.bb:blitFrom(saved_bb, 0, 0, 0, 0, screen_w, screen_h)
@@ -383,35 +464,20 @@ local ok, err = pcall(function()
             end
         end
 
-        -- Animate page turn by progressively revealing vertical strips of the new page.
-        for i = 1, nslots do
-            local left, right
-            if swipe_forward then
-                local idx = nslots - i + 1
-                left = edges[idx]
-                right = edges[idx + 1]
-            else
-                left = edges[i]
-                right = edges[i + 1]
+        for i, frame in ipairs(frames) do
+            for _, r in ipairs(frame) do
+                Screen.bb:blitFrom(new_bb, r[1], 0, r[2], 0, r[3], screen_h)
+                refresh_fn(Screen, r[1], 0, r[3], screen_h)
             end
-            local strip_w = right - left
-            local use_fast = anim_refresh_mode == "fast"
-            if strip_w > 0 then
-                Screen.bb:blitFrom(new_bb, left, 0, left, 0, strip_w, screen_h)
-                local refresh_fn = use_fast and Screen.refreshFast or Screen.refreshUI
-                refresh_fn(Screen, left, 0, strip_w, screen_h)
-            end
-            if i < nslots and usleep and delay_ms > 0 then
+            if i < #frames and usleep and delay_ms > 0 then
                 usleep(delay_ms * 1000)
             end
         end
 
-        -- Forced-full decision is no longer performed here on the animation path
-        -- (it was moved earlier; if needed, the animation is skipped entirely)
-
         self._refresh_stack = {}
         new_bb:free()
         saved_bb:free()
+        finishRefresh()
     end
 
     _G.SwipeAnimation = SwipeAnimation

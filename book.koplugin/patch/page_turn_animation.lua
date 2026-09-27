@@ -19,6 +19,17 @@ local PageTurnAnimation = {}
 
 PageTurnAnimation.FEATURE = "page_turn_animation"
 
+--- 动画风格设置键；运行时补丁每次翻页读取，切换无需重启。
+PageTurnAnimation.STYLE_KEY = "swipe_animation_style"
+
+--- 可选风格；value 必须与 2-swipe-animation-core.lua 的 SwipeAnimation.STYLES 键一致。
+PageTurnAnimation.STYLES = {
+    { text = _("擦除"), value = "wipe" },
+    { text = _("百叶窗"), value = "blinds" },
+    { text = _("中心展开"), value = "center" },
+    { text = _("覆盖"), value = "cover" },
+}
+
 local _startup_checked = false
 
 --- fdroid Android 把 userpatch 干成 no-op，补丁写了也不会被加载。
@@ -115,6 +126,16 @@ function PageTurnAnimation.checkStartup()
     if not PageTurnAnimation.isEnabled() then return end
     if Manager.isApplied(PageTurnAnimation.FEATURE) then
         forceFullRefreshNever()
+        -- 插件升级后运行时补丁内容可能已变，isApplied 只看文件在不在；重装是幂等的。
+        local res = Manager.install(PageTurnAnimation.FEATURE)
+        if not res.ok then
+            UIManager:show(InfoMessage:new{
+                text = T(_("翻页动画补丁更新失败：%1"), tostring(res.err or "")),
+                timeout = 3,
+            })
+        elseif res.changed then
+            PageTurnAnimation.promptRestart()
+        end
         return
     end
 
