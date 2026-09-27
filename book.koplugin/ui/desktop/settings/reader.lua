@@ -157,23 +157,11 @@ function ReaderSettings:sections(desktop)
     }
     if animation_on then
         rows[#rows + 1] = function(iw)
-            local current = G_reader_settings:readSetting(PageTurnAnimation.STYLE_KEY) or "wipe"
-            local title = PageTurnAnimation.STYLES[1].text
-            for _, item in ipairs(PageTurnAnimation.STYLES) do
-                if item.value == current then title = item.text end
-            end
             return SettingRow.build(iw, {
-                kind = "nav", icon = "animation", title = _("翻页动画风格"), status = title,
+                kind = "nav", icon = "animation", title = _("翻页动画风格"),
+                status = PageTurnAnimation.currentStyle().text,
                 callback = function()
-                    Popup.list{
-                        title = _("翻页动画风格"), items = PageTurnAnimation.STYLES,
-                        current = current, choice_icons = true, centered = true,
-                        on_select = function(value)
-                            if not value or value == current then return end
-                            G_reader_settings:saveSetting(PageTurnAnimation.STYLE_KEY, value)
-                            desktop:updateView()
-                        end,
-                    }
+                    PageTurnAnimation.pickStyle(function() desktop:updateView() end)
                 end,
             })
         end
