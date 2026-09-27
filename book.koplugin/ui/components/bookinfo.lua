@@ -493,13 +493,6 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
     local pct = BookInfo.pct(book)
     local req
     local cached_cover
-    if type(opts.src) == "string" and opts.src ~= "" then
-        req = { url = opts.src, headers = opts.headers }
-    elseif type(book) == "table" and type(book.cover_url) == "string" and book.cover_url ~= "" then
-        req = { url = book.cover_url, headers = book.cover_headers }
-    elseif type(book) == "table" and type(book.cover) == "string" and book.cover ~= "" then
-        req = { url = book.cover, headers = book.cover_headers }
-    end
     if type(book) == "table" and type(book.stable_id) == "string"
         and type(book.source_id) == "string" and book.source_id ~= "" then
         local cached = Paths.coverPath(book.stable_id, book.source_id)
@@ -507,8 +500,15 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
             cached_cover = cached
         end
     end
-    if not req and cached_cover then
+    -- 显式 src（刮削候选）> 本地封面 > 远程链接：本地已落盘就不再为同一本书走网络。
+    if type(opts.src) == "string" and opts.src ~= "" then
+        req = { url = opts.src, headers = opts.headers }
+    elseif cached_cover then
         req = { url = cached_cover }
+    elseif type(book) == "table" and type(book.cover_url) == "string" and book.cover_url ~= "" then
+        req = { url = book.cover_url, headers = book.cover_headers }
+    elseif type(book) == "table" and type(book.cover) == "string" and book.cover ~= "" then
+        req = { url = book.cover, headers = book.cover_headers }
     end
     if not req and type(book) == "table" and type(book.stable_id) == "string" then
         local sid = book.source_id

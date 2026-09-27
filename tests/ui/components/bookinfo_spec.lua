@@ -75,8 +75,14 @@ package.preload["book.store"] = function()
         end,
     }
 end
+local existing_files = {}
 package.preload["libs/libkoreader-lfs"] = function()
-    return { attributes = function() return nil end }
+    return {
+        attributes = function(path, key)
+            if not existing_files[path] then return nil end
+            return key == "mode" and "file" or { mode = "file" }
+        end,
+    }
 end
 local resolved = {}
 package.preload["source.registry"] = function()
@@ -191,6 +197,37 @@ image = select(1, BookInfo.cover(nil, same, {
 }, 80, 120, {}))
 Assert.len(resolved, 0)
 Assert.eq(image.src, "https://same/book-2")
+
+-- 本地封面已落盘：优先本地，不再走远程链接 / 源 coverRequest。
+local local_cover = "/covers/wechat/book-3"
+existing_files[local_cover] = true
+resolved = {}
+image = select(1, BookInfo.cover(nil, active, {
+    source_id = "wechat",
+    stable_id = "book-3",
+    cover_url = "https://remote/book-3.jpg",
+}, 80, 120, {}))
+Assert.eq(image.src, local_cover, "本地封面优先于远程链接")
+Assert.is_nil(image.headers)
+Assert.is_nil(image.fallback_src)
+Assert.len(resolved, 0)
+
+-- 显式 src（刮削候选）仍压过本地封面，本地只做失败兜底。
+image = select(1, BookInfo.cover(nil, nil, {
+    source_id = "wechat",
+    stable_id = "book-3",
+}, 80, 120, { src = "https://scrape/candidate.jpg" }))
+Assert.eq(image.src, "https://scrape/candidate.jpg")
+Assert.eq(image.fallback_src, local_cover)
+existing_files[local_cover] = nil
+
+-- 本地没有时仍走远程链接。
+image = select(1, BookInfo.cover(nil, nil, {
+    source_id = "wechat",
+    stable_id = "book-3",
+    cover_url = "https://remote/book-3.jpg",
+}, 80, 120, {}))
+Assert.eq(image.src, "https://remote/book-3.jpg")
 
 local with_more = select(1, BookInfo.cover(nil, nil, {}, 80, 120, { more = true }))
 Assert.eq(with_more.dimen.w, 80)
