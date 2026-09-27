@@ -54,14 +54,18 @@ local function showQrLogin(plugin)
                 height = qr_size,
                 scale_factor = 0,
             }
+            local function cancel()
+                cancelled = true
+                if wait_job then wait_job.cancel() end
+            end
             dialog = ButtonDialog:new{
                 title = _("京东扫码登录"),
+                tap_close_callback = cancel,
                 buttons = {{
                     {
                         text = _("取消"),
                         callback = function()
-                            cancelled = true
-                            if wait_job then wait_job.cancel() end
+                            cancel()
                             closeDialog()
                         end,
                     },
@@ -75,7 +79,7 @@ local function showQrLogin(plugin)
             end
             UIManager:show(dialog)
 
-            wait_job = Auth.waitQrLoginAsync(started.token, function(info, wait_err, status)
+            wait_job = Auth.waitQrLoginAsync(started, function(info, wait_err, status)
                 wait_job = nil
                 if cancelled then return end
                 if status ~= "ok" or not info then

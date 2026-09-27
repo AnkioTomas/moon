@@ -31,21 +31,33 @@ end
 
 local calls = 0
 local ticket_reply = '{"returnCode":0,"url":"https://e.m.jd.com/"}'
+-- 配对模式：每张码发不同 token，check 像线上一样校验 token 与 Cookie 里的 wlfstk_smdl 一致。
+local paired, shows = false, 0
 package.preload["http.request"] = function()
     local Request = {}
     function Request.randomUA() return "test-agent" end
     function Request.header(res, name)
         return res and res.headers and (res.headers[name] or res.headers[name:lower()])
     end
-    function Request.get(url, _opts, cb)
+    function Request.get(url, opts, cb)
         calls = calls + 1
         local res = { code = 200, headers = {} }
         if url:find("/show?", 1, true) then
+            shows = shows + 1
+            local token = paired and ("token-" .. shows) or "token"
             res.headers["Set-Cookie"] = {
-                "QRCodeKey=qr-key; HttpOnly",
-                "wlfstk_smdl=token; Domain=.jd.com",
+                "QRCodeKey=qr-" .. token .. "; HttpOnly",
+                "wlfstk_smdl=" .. token .. "; Domain=.jd.com",
             }
             cb("\137PNG\r\n\26\nstub", nil, res)
+        elseif url:find("/check?", 1, true) and paired then
+            local callback = url:match("[?&]callback=([^&]+)")
+            local token = url:match("[?&]token=([^&]+)")
+            local cookie = opts.headers.Cookie or ""
+            local data = cookie:find("wlfstk_smdl=" .. token, 1, true)
+                and ('{"code":200,"ticket":"ticket-' .. token .. '"}')
+                or '{"code":257,"msg":"参数异常，请退出重试"}'
+            cb(callback .. "(" .. data .. ")", nil, res)
         elseif url:find("/check?", 1, true) then
             local callback = url:match("[?&]callback=([^&]+)")
             local code = calls == 2 and 201 or (calls == 3 and 202 or 200)
@@ -79,7 +91,7 @@ do
     Assert.eq(started.token, "token")
 
     local login_info
-    Auth.waitQrLoginAsync(started.token, function(value, err, status)
+    Auth.waitQrLoginAsync(started, function(value, err, status)
         Assert.is_nil(err)
         Assert.eq(status, "ok")
         login_info = value
@@ -117,10 +129,36 @@ for reply, expected in pairs({
 }) do
     ticket_reply = reply
     local user, err
-    Auth.completeQrLoginAsync({ ticket = "ticket" }, function(value, e)
+    Auth.completeQrLoginAsync({ ticket = "ticket", jar = {} }, function(value, e)
         user, err = value, e
     end)
     Assert.is_nil(user)
     Assert.eq(err, expected)
     Assert.is_false(Auth.hasSession())
+end
+
+-- 两次登录并存（点外部关框后重进 / 连点）：旧轮询必须用自己那张码的 Cookie，
+-- 串用新码的 wlfstk_smdl 时京东回 257“参数异常，请退出重试”。
+do
+    paired, shows = true, 0
+    local first, second
+    Auth.beginQrLoginAsync(function(value) first = value end)
+    Auth.beginQrLoginAsync(function(value) second = value end)
+    Assert.eq(first.token, "token-1")
+    Assert.eq(second.token, "token-2")
+
+    local results = {}
+    for _, started in ipairs({ first, second }) do
+        Auth.waitQrLoginAsync(started, function(value, err, status)
+            results[#results + 1] = { info = value, err = err, status = status }
+        end)
+    end
+    Stubs.flush()
+    Assert.len(results, 2)
+    for i, result in ipairs(results) do
+        Assert.is_nil(result.err)
+        Assert.eq(result.status, "ok")
+        Assert.eq(result.info.ticket, "ticket-token-" .. i)
+    end
+    Assert.eq(results[1].info.jar.QRCodeKey, "qr-token-1")
 end

@@ -13,7 +13,6 @@ local Auth = {}
 
 local LOGIN_PAGE = "https://passport.jd.com/new/login.aspx?ReturnUrl=https%3A%2F%2Fe.m.jd.com%2F"
 local LOGIN_UA = Request.randomUA()
-local login_jar = {}
 
 -- qrCodeTicketValidation 的 returnCode 语义，取自官方 login.qrcode.2024.js。
 local TICKET_ERRORS = {
@@ -37,14 +36,15 @@ local function saveCfg(patch)
     Settings.saveSource("jdread", current)
 end
 
+---@param jar table
 ---@param res table|nil
-local function mergeCookies(res)
+local function mergeCookies(jar, res)
     local values = Request.header(res, "Set-Cookie")
     if type(values) == "string" then values = { values } end
     for _, line in ipairs(type(values) == "table" and values or {}) do
         local key, value = line:match("^%s*([^=;]+)=([^;]*)")
         if key then
-            if value == "" then login_jar[key] = nil else login_jar[key] = value end
+            if value == "" then jar[key] = nil else jar[key] = value end
         end
     end
 end
@@ -63,11 +63,12 @@ local function cookieHeader(jar)
     return table.concat(parts, "; ")
 end
 
+---@param jar table
 ---@return table
-local function browserHeaders()
+local function browserHeaders(jar)
     return {
         ["Accept"] = "application/json, text/javascript, */*; q=0.01",
-        ["Cookie"] = cookieHeader(login_jar),
+        ["Cookie"] = cookieHeader(jar),
         ["Referer"] = LOGIN_PAGE,
         ["User-Agent"] = LOGIN_UA,
     }
@@ -106,10 +107,11 @@ function Auth.clearSession()
 end
 
 --- 获取二维码 PNG 及轮询所需 Cookie。
----@param cb fun(data: { qr_path: string, token: string }|nil, err: string|nil)
+--- jar 归本次登录独占：check 要求 token 与同一张码的 wlfstk_smdl/QRCodeKey 配对，串用即 257“参数异常”。
+---@param cb fun(data: { qr_path: string, token: string, jar: table }|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Auth.beginQrLoginAsync(cb)
-    login_jar = {}
+    local jar = {}
     local path = qrPath()
     pcall(os.remove, path)
     local cancelled = false
@@ -119,12 +121,12 @@ function Auth.beginQrLoginAsync(cb)
         t = timestamp(),
     })
     local job = Request.get(url, {
-        headers = browserHeaders(),
+        headers = browserHeaders(jar),
         timeout = 30,
     }, function(body, err, res)
         if cancelled then return end
-        mergeCookies(res)
-        local token = login_jar.wlfstk_smdl
+        mergeCookies(jar, res)
+        local token = jar.wlfstk_smdl
         if not body or body:sub(1, 8) ~= "\137PNG\r\n\26\n"
             or type(token) ~= "string" or token == "" then
             cb(nil, err or _("获取京东登录二维码失败"))
@@ -139,7 +141,7 @@ function Auth.beginQrLoginAsync(cb)
             cb(nil, write_err or _("无法保存登录二维码"))
             return
         end
-        cb({ qr_path = path, token = token })
+        cb({ qr_path = path, token = token, jar = jar })
     end)
     return { cancel = function()
             cancelled = true
@@ -149,10 +151,11 @@ function Auth.beginQrLoginAsync(cb)
 end
 
 --- 轮询京东扫码状态，最多等待 120 秒。
----@param token string
----@param cb fun(data: { ticket: string }|nil, err: string|nil, status: string)
+---@param login { token: string, jar: table } beginQrLoginAsync 的结果
+---@param cb fun(data: { ticket: string, jar: table }|nil, err: string|nil, status: string)
 ---@return { cancel: fun() }
-function Auth.waitQrLoginAsync(token, cb)
+function Auth.waitQrLoginAsync(login, cb)
+    local token, jar = login.token, login.jar
     local cancelled = false
     local deadline = os.time() + 120
     local request_job
@@ -167,11 +170,11 @@ function Auth.waitQrLoginAsync(token, cb)
             _ = timestamp(),
         })
         request_job = Request.get(url, {
-            headers = browserHeaders(),
+            headers = browserHeaders(jar),
             timeout = 20,
         }, function(raw, err, res)
             if cancelled then return end
-            mergeCookies(res)
+            mergeCookies(jar, res)
             if (not raw or err) and os.time() < deadline then
                 require("ui/uimanager"):scheduleIn(3, poll)
                 return
@@ -189,7 +192,7 @@ function Auth.waitQrLoginAsync(token, cb)
             end
             local code = tonumber(data.code)
             if code == 200 and type(data.ticket) == "string" and data.ticket ~= "" then
-                cb({ ticket = data.ticket }, nil, "ok")
+                cb({ ticket = data.ticket, jar = jar }, nil, "ok")
             elseif (code == 201 or code == 202) and os.time() < deadline then
                 require("ui/uimanager"):scheduleIn(3, poll)
             else
@@ -207,7 +210,7 @@ function Auth.waitQrLoginAsync(token, cb)
 end
 
 --- 使用扫码 ticket 换取登录 Cookie 并原子保存源配置。
----@param info { ticket: string }|nil
+---@param info { ticket: string, jar: table }|nil waitQrLoginAsync 的结果
 ---@param cb fun(user: { user_name: string }|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Auth.completeQrLoginAsync(info, cb)
@@ -215,17 +218,18 @@ function Auth.completeQrLoginAsync(info, cb)
         cb(nil, _("无登录信息"))
         return nil
     end
+    local jar = info.jar
     local cancelled = false
     local url = "https://passport.jd.com/uc/qrCodeTicketValidation?" .. Text.formEncode({
         t = info.ticket,
         ReturnUrl = "https://e.m.jd.com/",
     })
     local job = Request.get(url, {
-        headers = browserHeaders(),
+        headers = browserHeaders(jar),
         timeout = 30,
     }, function(raw, err, res)
         if cancelled then return end
-        mergeCookies(res)
+        mergeCookies(jar, res)
         if not raw then
             pcall(os.remove, qrPath())
             cb(nil, err or _("京东登录校验失败"))
@@ -239,10 +243,10 @@ function Auth.completeQrLoginAsync(info, cb)
             cb(nil, code and (msg .. " (" .. code .. ")") or msg)
             return
         end
-        login_jar.QRCodeKey = nil
-        login_jar.wlfstk_smdl = nil
-        login_jar.guid = nil
-        local cookie = cookieHeader(login_jar)
+        jar.QRCodeKey = nil
+        jar.wlfstk_smdl = nil
+        jar.guid = nil
+        local cookie = cookieHeader(jar)
         if not cookie then
             pcall(os.remove, qrPath())
             cb(nil, _("登录未拿到会话 Cookie"))
@@ -250,13 +254,12 @@ function Auth.completeQrLoginAsync(info, cb)
         end
         local Settings = require("utils.settings")
         local current = Settings.getSource("jdread")
-        local name = Text.urlDecode(login_jar.unick or login_jar.pin or "") or ""
+        local name = Text.urlDecode(jar.unick or jar.pin or "") or ""
         current.cookie = cookie
         current.uuid = current.uuid ~= nil and current.uuid ~= ""
             and current.uuid or ("h5" .. require("ffi/sha2").md5(Settings.ensureDeviceId()))
         current.user_name = name
         Settings.saveSource("jdread", current)
-        login_jar = {}
         pcall(os.remove, qrPath())
         cb({ user_name = name })
     end)
