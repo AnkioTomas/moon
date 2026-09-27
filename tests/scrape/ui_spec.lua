@@ -51,13 +51,18 @@ package.preload["scrape.search"] = function()
         end,
     }
 end
+local invalidated = {}
+local cover_at_fetch
 package.preload["ui.components.image"] = function()
     return {
         fetchAsync = function(_, _, cb)
             fetch_calls = fetch_calls + 1
+            cover_at_fetch = io.open(cover_path, "rb")
+            if cover_at_fetch then cover_at_fetch:close() end
             cb(image_path)
             return { cancel = function() end }
         end,
+        invalidate = function(path) invalidated[#invalidated + 1] = path end,
     }
 end
 package.preload["db.book"] = function()
@@ -75,7 +80,10 @@ package.preload["db.book"] = function()
     }
 end
 package.preload["utils.paths"] = function()
-    return { coverPath = function() return cover_path end }
+    return {
+        coverPath = function() return cover_path end,
+        ensureLayout = function() end,
+    }
 end
 package.preload["source.base"] = function()
     return {
@@ -121,9 +129,17 @@ local function startAndPick()
     results.on_pick(results.results[1])
 end
 
--- 成功路径必须写本地元数据，并保留分类、进度和摘要。
+local function exists(path)
+    local f = io.open(path, "rb")
+    if f then f:close() end
+    return f ~= nil
+end
+
+-- 成功路径必须写本地元数据，并保留分类、进度和摘要；
+-- 旧封面在下载前删掉，新图移入封面路径，下载缓存不留副本。
 image_path = Config.dir() .. "/scrape-source.png"
 write(image_path, "new-cover")
+write(cover_path, "old-cover")
 db_ok = true
 db_row = nil
 fetch_calls = 0
@@ -136,7 +152,10 @@ Assert.eq(db_row.category, "原分类")
 Assert.eq(db_row.md5, "digest")
 Assert.is_nil(db_row.percent, "upsertLocal 不再写 percent")
 Assert.eq(fetch_calls, 1)
+Assert.is_nil(cover_at_fetch, "下载前必须先删旧封面")
 Assert.eq(read(cover_path), "new-cover")
+Assert.is_false(exists(image_path), "下载缓存的图要移走，不留副本")
+Assert.eq(invalidated[#invalidated], cover_path, "换封面必须让位图缓存失效")
 Assert.eq(shown[#shown].text, "元数据已更新")
 
 -- 数据库失败不能继续下载封面，更不能谎报更新成功。
@@ -146,16 +165,13 @@ startAndPick()
 Assert.eq(fetch_calls, 0)
 Assert.eq(shown[#shown].text, "元数据更新失败")
 
--- 临时文件改名失败时，旧封面必须仍然完整存在。
+-- 下载失败：旧封面照样删掉，不能继续展示和元数据不符的图，也不谎报失败。
 db_ok = true
 write(cover_path, "old-cover")
-write(image_path, "replacement")
-local real_rename = os.rename
-os.rename = function() return nil, "rename denied" end
+image_path = nil
 startAndPick()
-os.rename = real_rename
-Assert.eq(read(cover_path), "old-cover")
+Assert.is_false(exists(cover_path))
+Assert.eq(shown[#shown].text, "元数据已更新")
 
-pcall(os.remove, image_path)
+pcall(os.remove, Config.dir() .. "/scrape-source.png")
 pcall(os.remove, cover_path)
-pcall(os.remove, cover_path .. ".part")

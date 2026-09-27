@@ -24,6 +24,7 @@
 UI 图标请用 ui.components.icon（Material Icons 字体），不要走本组件。
 
   Image.fetchAsync(url, headers, function(path, err) end)  -- 只下载不显示（刮削封面）
+  Image.invalidate(path)  -- 原地替换过的文件，之后绕过按路径的位图缓存
   Image.await(root, cb)  -- 已构建树内的图片落定后回调（锁屏写 PNG）
   box:cancel()  -- 只取消这一张的下载
 
@@ -51,6 +52,16 @@ local ImageWidget = require("ui/widget/imagewidget")
 
 ---@class BookImage
 local Image = {}
+
+-- 本会话内被原地替换过的文件。ImageWidget 的位图缓存只按路径+尺寸寻址，
+-- 同路径换了内容仍会命中旧图，这些路径必须自己解码绕过缓存。
+local replaced = {}
+
+--- 标记文件内容已被替换（刮削换封面），之后显示该路径不再命中旧位图。
+---@param path string
+function Image.invalidate(path)
+    replaced[path] = true
+end
 
 ---- 等待一棵已构建 Widget 树内的图片落定。批次归调用者，不拦截全局构建。
 --- 取消只移除本批监听；图片任务由拥有 Widget 的视图释放。
@@ -372,8 +383,12 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     function box:_applyFile(path)
         local widget
         local ok, err = pcall(function()
+            local fresh = replaced[path]
+                and assert(require("ui/renderimage"):renderImageFile(path, false, self._inner_w, self._inner_h))
             widget = ImageWidget:new{
-                file = path,
+                file = not fresh and path or nil,
+                image = fresh or nil,
+                image_disposable = true,
                 width = self._inner_w,
                 height = self._inner_h,
                 alpha = self._alpha and true or false,
