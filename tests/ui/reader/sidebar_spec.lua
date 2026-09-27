@@ -16,7 +16,14 @@ local state = {
     dirty = 0,
     opened = {},
     native_closed = {},
+    tickets = {},
+    ticks = {},
 }
+local function flush()
+    local ticks = state.ticks
+    state.ticks = {}
+    for _, fn in ipairs(ticks) do fn() end
+end
 
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(s) return s end end
@@ -91,6 +98,7 @@ local UIManager = {
         if w.onCloseWidget then w:onCloseWidget() end
     end,
     setDirty = function() state.dirty = state.dirty + 1 end,
+    nextTick = function(_, fn) state.ticks[#state.ticks + 1] = fn end,
 }
 package.loaded["ui/uimanager"] = UIManager
 local original_show = UIManager.show
@@ -117,7 +125,23 @@ package.preload["ui.reader.session"] = function()
     return { current = function() return state.snapshot end }
 end
 package.preload["ui.reader.sidebar.info"] = function()
-    return { build = function(_, w, h) return { info = true, w = w, h = h } end }
+    return { build = function(_, w, h, _, on_exit)
+        state.on_exit = on_exit
+        return { info = true, w = w, h = h }
+    end }
+end
+package.preload["ui.panel.native"] = function()
+    return { closeToDesktop = function(ui) state.exited = ui end }
+end
+--- 票根：出图回调由测试手动触发，模拟封面异步落定。
+package.preload["ui.reader.sidebar.ticket"] = function()
+    return { new = function(snapshot, on_ready)
+        local ticket = { snapshot = snapshot, ready = false, on_ready = on_ready }
+        function ticket:widget(w, h) return { ticket = self, ready = self.ready, w = w, h = h } end
+        function ticket:cancel() self.cancelled = true end
+        state.tickets[#state.tickets + 1] = ticket
+        return ticket
+    end }
 end
 
 --- 原生目录：Menu 套在全屏 CenterContainer 里再 show；带状态清理的 close_callback。
@@ -188,13 +212,13 @@ state.reader = { sidebar_gesture = "off" }
 Assert.is_false(swipe("east", 10))
 Assert.len(state.shown, 2)
 
--- X-Ray 关闭时只有三页。
+-- X-Ray 关闭时少一页；票根永远在最后。
 state.reader = { book_xray_enabled = false }
-Assert.len(Sidebar:new{ ui = ui, snapshot = state.snapshot }.tabs, 3)
+Assert.eq(table.concat(Sidebar:new{ ui = ui, snapshot = state.snapshot }.tabs, ","), "info,toc,notes,ticket")
 state.reader = {}
 
 local bar = state.shown[1]
-Assert.eq(#bar.tabs, 4)
+Assert.eq(table.concat(bar.tabs, ","), "info,toc,notes,xray,ticket")
 Assert.eq(bar.panel_w, 510)
 Assert.is_true(bar[1][1].mesh, "底层是网状遮罩")
 local info_box = bar[1][2][1][1][1]
@@ -254,13 +278,48 @@ Assert.is_true(state.shown[#state.shown].info_message)
 Assert.eq(bar[1][2][1][1][1].height, 800 - 40 - 1)
 bar:goTab(4)
 
+-- 票根：首次进入才生成；未出图先显示占位，出图回调推迟一 tick 再刷新本页。
+Assert.len(state.tickets, 0, "没进票根页不生成")
+bar:goTab(5)
+Assert.len(state.tickets, 1)
+local ticket = state.tickets[1]
+Assert.eq(ticket.snapshot, state.snapshot)
+local ticket_body = bar[1][2][1][1][1][1]
+Assert.is_false(ticket_body.ready)
+Assert.eq(ticket_body.w, 510)
+Assert.eq(ticket_body.h, 800 - 40 - 1)
+ticket.ready = true
+dirty = state.dirty
+ticket.on_ready()
+Assert.eq(state.dirty, dirty, "回调里不直接重绘（可能在 render 内同步回调）")
+flush()
+Assert.is_true(bar[1][2][1][1][1][1].ready)
+Assert.eq(state.dirty, dirty + 1)
+-- 切走再回来复用同一张；切走后才出图的回调不重绘别的页。
+bar:goTab(4)
+bar:goTab(5)
+Assert.len(state.tickets, 1)
+bar:goTab(1)
+dirty = state.dirty
+ticket.on_ready()
+flush()
+Assert.eq(state.dirty, dirty)
+
 -- 菜单内选中条目会调 close_callback：关侧栏，并补跑所有借来菜单的原生清理（各一次）。
 toc_menu.close_callback()
 Assert.eq(state.closed[#state.closed], bar)
 Assert.len(state.native_closed, 2)
 Assert.contains(state.native_closed, "notes")
+Assert.is_true(ticket.cancelled, "关侧栏取消票根任务")
+Assert.is_nil(bar.ticket)
 bar:onClose()
 Assert.len(state.native_closed, 2, "重复关闭不重复清理")
+
+-- 书籍页右上角关闭：先关侧栏，再关书回桌面。
+local exiting = Sidebar:new{ ui = ui, snapshot = state.snapshot }
+state.on_exit()
+Assert.eq(state.closed[#state.closed], exiting)
+Assert.eq(state.exited, ui)
 
 -- open() 抛错：全局照样还原，错误原样上抛。
 package.loaded["ui.panel.actions.reader.toc"] = { run = function() error("boom", 0) end }

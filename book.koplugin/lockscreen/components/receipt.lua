@@ -82,9 +82,10 @@ end
 
 --- 阅读票根：日期 → 当前书 → 进度/时长 → 今日摘要 → 装饰条码。
 ---@param rect table
+---@param book table|nil 指定书籍快照（Current.snapshot），缺省取当前源最近在读
 ---@return table[]
-function M.blocks(rect)
-    local book = Current.book(true)
+function M.blocks(rect, book)
+    book = book or Current.book(true)
     if not book then
         return U.emptyBlocks(rect, _("阅读票根"), _("当前没有正在阅读的书籍"))
     end

@@ -37,12 +37,13 @@ end
 
 --- 绘制背景图片；图片缺失时保留纯白底并由调用方决定是否报错。
 ---@param bb BlitBuffer 目标 Blitbuffer
----@param path string|nil 背景图片路径；nil 时使用纯白背景
+---@param path string|nil 背景图片路径；nil 时使用纯色底
 ---@param w number 输出宽度
 ---@param h number 输出高度
+---@param fill table|nil 纯色底颜色，缺省白色
 ---@return boolean, any
-local function paintBackground(bb, path, w, h)
-    bb:fill(Blitbuffer.COLOR_WHITE)
+local function paintBackground(bb, path, w, h, fill)
+    bb:fill(fill or Blitbuffer.COLOR_WHITE)
     if not path then
         return true
     end
@@ -241,13 +242,14 @@ end
 ---@param path string
 ---@param background string|nil
 ---@param blocks table[]
+---@param fill table|nil 无背景图时的底色，缺省白色
 ---@return boolean, any
-function M.write(path, background, blocks)
+function M.write(path, background, blocks, fill)
     Paths.ensureScreensaverDir()
     local w, h = Layout.portraitSize()
     local background_copy
     local ok, err = Canvas.write(path, w, h, function(bb)
-        local bg_ok, bg_err = paintBackground(bb, background, w, h)
+        local bg_ok, bg_err = paintBackground(bb, background, w, h, fill)
         if not bg_ok then error(bg_err) end
         for _, block in ipairs(blocks) do
             if block.kind == "cutout_circle" then
