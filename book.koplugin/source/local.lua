@@ -301,12 +301,13 @@ function Source:moveBook(stable_id, category, series)
     return self._client:moveBook(stable_id, category, series)
 end
 
---- 用转换后的 EPUB 替换本地原书，并迁移书籍身份与附属资源。
+--- 用转换后的 EPUB 替换原书（WebDAV 书连同远端文件与书目），并迁移书籍身份与附属资源。
 ---@param temp_path string
 ---@param stable_id string
----@return string|nil new_stable_id, string|nil err
-function Source:replaceBook(temp_path, stable_id)
-    return self._client:replaceBook(temp_path, stable_id)
+---@param cb fun(new_path: string|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:replaceBookAsync(temp_path, stable_id, cb)
+    return self._client:replaceBookAsync(temp_path, stable_id, cb)
 end
 
 return Local
