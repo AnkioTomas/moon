@@ -123,46 +123,65 @@ function ReaderSettings:sections(desktop)
     local reader = MoonSettings.get("reader")
     local auto_mark_read = reader.auto_mark_read_at_99 == true
     local animation_on = PageTurnAnimation.isEnabled()
-    return {
-        {
-            title = _("行为"),
-            rows = {
-                function(iw)
-                    local footnote_on = G_reader_settings:isTrue("footnote_link_in_popup")
-                    return SettingRow.build(iw, {
-                        kind = "toggle", icon = "article", title = _("脚注弹窗"),
-                        subtitle = _("脚注链接在弹窗中显示，而不是跳转"),
-                        status = footnote_on and _("开") or _("关"), status_on = footnote_on,
-                        callback = function()
-                            G_reader_settings:saveSetting("footnote_link_in_popup", not footnote_on)
-                            desktop:updateView()
-                        end,
-                    })
+    local rows = {
+        function(iw)
+            local footnote_on = G_reader_settings:isTrue("footnote_link_in_popup")
+            return SettingRow.build(iw, {
+                kind = "toggle", icon = "article", title = _("脚注弹窗"),
+                subtitle = _("脚注链接在弹窗中显示，而不是跳转"),
+                status = footnote_on and _("开") or _("关"), status_on = footnote_on,
+                callback = function()
+                    G_reader_settings:saveSetting("footnote_link_in_popup", not footnote_on)
+                    desktop:updateView()
                 end,
-                function(iw)
-                    return SettingRow.build(iw, {
-                        kind = "toggle", icon = "animation", title = _("翻页动画"),
-                        status = animation_on and _("开") or _("关"), status_on = animation_on,
-                        callback = function()
-                            local res = PageTurnAnimation.setEnabled(not animation_on)
-                            if not res.ok then
-                                UIManager:show(InfoMessage:new{
-                                    text = T(_("翻页动画补丁操作失败：%1"), tostring(res.err or "")),
-                                    timeout = 3,
-                                })
-                                return
-                            end
-                            desktop:updateView()
-                            PageTurnAnimation.promptRestart()
-                        end,
-                    })
+            })
+        end,
+        function(iw)
+            return SettingRow.build(iw, {
+                kind = "toggle", icon = "animation", title = _("翻页动画"),
+                status = animation_on and _("开") or _("关"), status_on = animation_on,
+                callback = function()
+                    local res = PageTurnAnimation.setEnabled(not animation_on)
+                    if not res.ok then
+                        UIManager:show(InfoMessage:new{
+                            text = T(_("翻页动画补丁操作失败：%1"), tostring(res.err or "")),
+                            timeout = 3,
+                        })
+                        return
+                    end
+                    desktop:updateView()
+                    PageTurnAnimation.promptRestart()
                 end,
-                readerToggle(desktop, reader, "auto_mark_read_at_99", auto_mark_read, {
-                    icon = "done_all", title = _("读到 99% 自动标记已读"),
-                }),
-            },
-        },
+            })
+        end,
     }
+    if animation_on then
+        rows[#rows + 1] = function(iw)
+            local current = G_reader_settings:readSetting(PageTurnAnimation.STYLE_KEY) or "wipe"
+            local title = PageTurnAnimation.STYLES[1].text
+            for _, item in ipairs(PageTurnAnimation.STYLES) do
+                if item.value == current then title = item.text end
+            end
+            return SettingRow.build(iw, {
+                kind = "nav", icon = "animation", title = _("翻页动画风格"), status = title,
+                callback = function()
+                    Popup.list{
+                        title = _("翻页动画风格"), items = PageTurnAnimation.STYLES,
+                        current = current, choice_icons = true, centered = true,
+                        on_select = function(value)
+                            if not value or value == current then return end
+                            G_reader_settings:saveSetting(PageTurnAnimation.STYLE_KEY, value)
+                            desktop:updateView()
+                        end,
+                    }
+                end,
+            })
+        end
+    end
+    rows[#rows + 1] = readerToggle(desktop, reader, "auto_mark_read_at_99", auto_mark_read, {
+        icon = "done_all", title = _("读到 99% 自动标记已读"),
+    })
+    return { { title = _("行为"), rows = rows } }
 end
 
 --- 划词能力：词典 / 翻译 / 百科 / X-Ray。
