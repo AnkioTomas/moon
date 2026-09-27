@@ -624,7 +624,13 @@ function Request.stream(opts, handlers)
             end
             -- get() 可能多返回值；第二值进 tonumber 会当成进制。
             local content_length = tonumber((self.response_headers:get("Content-Length", true)))
-            if content_length and content_length > 0 then
+            -- 长度为 0 必须当场收尾：keep-alive 连接不会关，read_until_close 会挂到超时。
+            if content_length == 0 then
+                self.payload = ""
+                self:_finalize_request()
+                return
+            end
+            if content_length then
                 self.iostream:read_bytes(content_length, function(self_)
                     self_.payload = ""
                     self_:_finalize_request()

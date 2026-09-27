@@ -64,7 +64,9 @@ do
     local responses = {
         first = { code = 302 },
         second = { code = 200, length = "2" },
+        empty = { code = 302, length = "0" },
     }
+    local first_hop = "first"
     package.preload["turbo.httputil"] = function()
         return {
             hdr_t = { HTTP_RESPONSE = 1 },
@@ -118,7 +120,7 @@ do
             }
             function client:fetch(_, opts)
                 self.kwargs = opts
-                self:_handle_headers("first")
+                self:_handle_headers(first_hop)
                 return { code = 200 }
             end
             return client
@@ -156,6 +158,14 @@ do
     Assert.eq(codes[2], 200)
     Assert.eq(table.concat(chunks), "xx")
     Assert.is_nil(done_err)
+
+    -- 不跟随的 302 + Content-Length: 0：当场收尾，不等 keep-alive 连接关闭。
+    first_hop = "empty"
+    local empty_err = "unset"
+    Request.stream({ url = "https://example.test/cover" }, {
+        on_done = function(err) empty_err = err end,
+    })
+    Assert.eq(empty_err, "HTTP 302")
 
     for _, name in ipairs({ "turbo", "turbo.httputil", "turbo.structs.buffer" }) do
         package.preload[name] = nil

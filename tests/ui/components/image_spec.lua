@@ -166,6 +166,7 @@ local download_limit = #downloads
 Assert.is_true(download_limit < #network, "封面下载必须限制并发请求数")
 Assert.eq(download_limit, 10)
 Assert.eq(downloads[1].opts.connect_timeout, 30)
+Assert.is_true(downloads[1].opts.allow_redirects, "封面 CDN 常 302 到签名地址，必须跟随")
 Assert.eq(#image_widgets, local_images, "下载完成前不得创建图片控件")
 
 -- 取消第一个排队项后，活动项完成只能补进后一个未取消任务。
