@@ -962,5 +962,9 @@ Current version: ",
     ["目录地址，如 http://192.168.1.2:8083/opds"] = "Catalog URL, e.g. http://192.168.1.2:8083/opds",
     ["目录暂无内容"] = "Catalog is empty",
     ["该 OPDS 目录不支持搜索"] = "This OPDS catalog does not support search",
+    ["胶囊卡片"] = "Capsule cards",
+    ["极简"] = "Minimal",
+    ["封面卡片"] = "Cover cards",
+    ["暂无"] = "N/A",
 
 }

@@ -18,13 +18,22 @@ local image_frees = 0
 local warnings = 0
 local writes = 0
 local buffer_types = {}
+local rounded_paints = 0
+local lightens = {}
+local text_log
 
 local function buffer()
     return {
         fill = function() end,
         paintRect = function() end,
-        paintRoundedRect = function() end,
+        paintRoundedRect = function() rounded_paints = rounded_paints + 1 end,
+        lightenRect = function(_, x, y, w, h, by)
+            lightens[#lightens + 1] = { x = x, y = y, w = w, h = h, by = by }
+        end,
         blitFrom = function() cutout_blits = cutout_blits + 1 end,
+        colorblitFrom = function(_, _, x, y, _, _, _, _, color)
+            text_log.blit = { x = x, y = y, color = color }
+        end,
         copy = function()
             return { free = function() snapshot_frees = snapshot_frees + 1 end }
         end,
@@ -70,7 +79,19 @@ package.preload["ui/widget/imagewidget"] = function()
 end
 
 package.preload["ui/widget/textboxwidget"] = function()
-    return { new = function() error("unexpected text block") end }
+    return { new = function(_, opts)
+        text_log.fgcolor = opts.fgcolor
+        return {
+            _bb = {
+                getWidth = function() return opts.width end,
+                getHeight = function() return 12 end,
+                invertRect = function() text_log.inverted = true end,
+            },
+            getSize = function() return { w = opts.width, h = 12 } end,
+            paintTo = function() text_log.opaque = true end,
+            free = function() text_log.freed = true end,
+        }
+    end }
 end
 
 package.preload["utils.paths"] = function()
@@ -166,6 +187,51 @@ local ok_run, err_run = pcall(function()
     Assert.is_nil(err)
     Assert.eq(image_paints, 1)
     Assert.eq(image_frees, 1)
+
+    -- 无框文字不得整块贴 TextBoxWidget 白底：黑字蒙版反相后按块颜色 colorblit。
+    reset()
+    text_log = {}
+    ok, err = Render.write("/tmp/compose.png", nil, {
+        { text = "字", x = 5, y = 7, width = 40, color = 3, box = false },
+    })
+    Assert.is_true(ok, tostring(err))
+    Assert.is_nil(err)
+    Assert.eq(text_log.fgcolor, 1, "蒙版必须用黑字渲染")
+    Assert.is_true(text_log.inverted)
+    Assert.is_nil(text_log.opaque)
+    Assert.eq(text_log.blit.x, 5)
+    Assert.eq(text_log.blit.y, 7)
+    Assert.eq(text_log.blit.color, 3)
+    Assert.is_true(text_log.freed)
+
+    -- 带框文字保持原样：白框 + 原色直接绘制。
+    text_log = {}
+    ok = Render.write("/tmp/compose.png", nil, { { text = "字", x = 5, y = 7, width = 40, color = 3 } })
+    Assert.is_true(ok)
+    Assert.eq(text_log.fgcolor, 3)
+    Assert.is_true(text_log.opaque)
+    Assert.is_nil(text_log.blit)
+
+    -- 半透明卡只混合不填充：不画阴影和实心圆角，行覆盖恰好是整个矩形、圆角行收窄。
+    reset()
+    rounded_paints = 0
+    lightens = {}
+    ok, err = Render.write("/tmp/compose.png", nil, {
+        { kind = "panel", x = 10, y = 20, width = 60, height = 40, radius = 8, shadow = 2, lighten = 0.75 },
+    })
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(rounded_paints, 0)
+    local rows = 0
+    for _, rect in ipairs(lightens) do
+        Assert.eq(rect.by, 0.75)
+        Assert.is_true(rect.x >= 10 and rect.x + rect.w <= 70)
+        Assert.is_true(rect.y >= 20 and rect.y + rect.h <= 60)
+        rows = rows + rect.h
+    end
+    Assert.eq(rows, 40)
+    Assert.is_true(lightens[1].w < 60, "顶行在圆角处收窄")
+    Assert.eq(lightens[#lightens].w, 60, "中段整宽")
 
     -- widget 绘制抛错时仍要释放 widget 和画布，且不得进入文件替换。
     reset()
