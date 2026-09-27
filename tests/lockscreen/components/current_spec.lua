@@ -9,9 +9,9 @@ local Assert = require("support.assert")
 local active_source = "moon"
 local recent_source
 local rows = {
-    { stable_id = "done", title = "Done", authors = "A", percent = 100 },
+    { source_id = "moon", stable_id = "done", title = "Done", authors = "A", percent = 100 },
     {
-        stable_id = "reading", title = "Reading", authors = "B", percent = 55,
+        source_id = "moon", stable_id = "reading", title = "Reading", authors = "B", percent = 55,
     chapter_idx = 7,
     chapter_title = "数据库章节",
     chapter_count = 12,
@@ -91,6 +91,7 @@ Assert.eq(book.buckets[1].key, "today")
 -- 进度没有章节字段时保持为空。
 rows = {
     {
+        source_id = "moon",
         stable_id = "poison",
         title = "Poison",
         percent = 20,
@@ -100,6 +101,21 @@ book = assert(Current.book())
 Assert.eq(book.stable_id, "poison")
 Assert.is_nil(book.chapter_idx)
 Assert.is_nil(book.chapter_title)
+
+-- 混合模式 scope 是源列表：书的源、封面和统计都按行内 source_id。
+active_source = { "moon", "wechat" }
+rows = {
+    {
+        source_id = "wechat", stable_id = "reading", title = "Reading", percent = 30,
+    },
+}
+stats_sources = {}
+book = assert(Current.book(true))
+Assert.eq(recent_source, active_source)
+Assert.eq(book.source_id, "wechat")
+Assert.eq(book.cover, "wechat/reading.png")
+Assert.eq(stats_sources[1], "wechat")
+Assert.eq(stats_sources[2], "wechat")
 
 -- 当前源没有图书时不得回退到其它源或 ReaderSession。
 active_source = "wechat"
