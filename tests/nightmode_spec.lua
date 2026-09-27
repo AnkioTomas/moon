@@ -89,6 +89,17 @@ do -- 上海 2026-09-26（年内第 269 天，UTC+8），wttr.in 给 日出 05:4
     Assert.is_true(math.abs(to - (5 * 60 + 45)) <= 3, "日出 " .. to)
 end
 
+do -- 当地时区由天气给的当地日出反推：北京 +8，纽约 -4（夏令时），24 小时制也认，取不到返回 nil
+    Assert.eq(NightMode.siteTz("06:06 AM", 270, 39.929, 116.388), 480)
+    Assert.eq(NightMode.siteTz("06:06", 270, 39.929, 116.388), 480)
+    Assert.eq(NightMode.siteTz("06:54 AM", 270, 40.71, -74.01), -240)
+    Assert.eq(NightMode.siteTz("05:45 AM", 270, 0, 0), 0)
+    Assert.eq(NightMode.siteTz("05:45 PM", 270, 0, 0), 720, "PM 加 12 小时")
+    Assert.is_nil(NightMode.siteTz(nil, 270, 39.929, 116.388))
+    Assert.is_nil(NightMode.siteTz("No sunrise", 270, 39.929, 116.388))
+    Assert.is_nil(NightMode.siteTz("10:00 AM", 172, 78.2, 15.6), "极昼没有日出")
+end
+
 do -- 极夜整天是夜，极昼没有夜
     local from, to = NightMode.sunWindow(355, 78.2, 15.6, 60)
     Assert.eq(from, 0)
@@ -136,13 +147,28 @@ end
 do -- 定位成功落盘经纬度
     local ok, city
     saved = 0
-    weather_reply = { latitude = 31.239, longitude = 121.504, city = "Pootung" }
+    weather_reply = { latitude = 31.239, longitude = 121.504, city = "Pootung", sunrise = "05:45 AM" }
     NightMode.locate(function(a, b) ok, city = a, b end)
     Assert.is_true(ok)
     Assert.eq(city, "Pootung")
     Assert.eq(display.auto_night_lat, 31.239)
     Assert.eq(display.auto_night_lon, 121.504)
+    Assert.eq(display.auto_night_tz, 480)
     Assert.eq(saved, 1)
+end
+
+do -- 时钟拨成本地、时区停在美东的 Kindle：按当地时区出窗口，不被设备时区带偏半天
+    local real_date = os.date
+    os.date = function(fmt, t)
+        if fmt == "!*t" then return real_date("!*t", (t or os.time()) + 4 * 3600) end
+        return real_date(fmt, t)
+    end
+    display.auto_night = "sun"
+    local from, to = NightMode.window()
+    os.date = real_date
+    display.auto_night = "off"
+    Assert.is_true(from > 16 * 60 and from < 20 * 60, "日落开 " .. from)
+    Assert.is_true(to > 4 * 60 and to < 8 * 60, "日出关 " .. to)
 end
 
 do -- 定位失败不动已有经纬度
