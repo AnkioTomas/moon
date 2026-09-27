@@ -87,21 +87,28 @@ end
 local function paintText(bb, block, w)
     local x = block.x or math.floor(w * 0.08)
     local width = block.width or (w - x * 2)
+    local color = block.color or Blitbuffer.COLOR_BLACK
     local widget = TextBoxWidget:new{
         text = tostring(block.text or ""),
         face = Font:getFace(block.face or "cfont", block.size or 24),
         width = width,
         alignment = block.align or "left",
-        fgcolor = block.color or Blitbuffer.COLOR_BLACK,
+        -- 无框文字取黑字作覆盖度蒙版，着色交给 colorblitFrom
+        fgcolor = block.box == false and Blitbuffer.COLOR_BLACK or color,
         bold = block.bold == true,
     }
     local size = widget:getSize()
+    local y = block.y or 0
     if block.box ~= false then
         local pad = block.padding or 10
-        bb:paintRect(x - pad, (block.y or 0) - pad, width + pad * 2, size.h + pad * 2,
-            Blitbuffer.COLOR_WHITE)
+        bb:paintRect(x - pad, y - pad, width + pad * 2, size.h + pad * 2, Blitbuffer.COLOR_WHITE)
+        widget:paintTo(bb, x, y)
+    else
+        -- TextBoxWidget:paintTo 会连白底整块贴上；反相后按字形覆盖度混合，背景才透得出来。
+        local mask = widget._bb
+        mask:invertRect(0, 0, mask:getWidth(), mask:getHeight())
+        bb:colorblitFrom(mask, x, y, 0, 0, mask:getWidth(), mask:getHeight(), color)
     end
-    widget:paintTo(bb, x, block.y or 0)
     widget:free()
 end
 
@@ -119,6 +126,22 @@ local function paintRect(bb, x, y, width, height, color, radius)
     else
         bb:paintRect(x, y, width, height, color)
     end
+end
+
+--- 在圆角矩形范围内叠一层半透明白：圆角行逐行收窄，中段一次混合。
+---@param bb BlitBuffer
+---@param radius number|nil
+---@param by number 白色不透明度 0..1
+local function lightenRounded(bb, x, y, width, height, radius, by)
+    radius = math.max(0, math.min(math.floor(tonumber(radius) or 0),
+        math.floor(width / 2), math.floor(height / 2)))
+    for row = 0, radius - 1 do
+        local dy = radius - row - 0.5
+        local inset = radius - math.floor(math.sqrt(radius * radius - dy * dy) + 0.5)
+        bb:lightenRect(x + inset, y + row, width - inset * 2, 1, by)
+        bb:lightenRect(x + inset, y + height - 1 - row, width - inset * 2, 1, by)
+    end
+    bb:lightenRect(x, y + radius, width, height - radius * 2, by)
 end
 
 --- 分发非文本图形块：线、柱、卡片、票根缺口、点和离屏 widget。
@@ -140,6 +163,11 @@ local function paintShape(bb, block, w, h, background)
         -- DESIGN：浅卡可带 8px 圆角 + 2px 轻阴影（#DD）
         local height = block.height or 1
         local radius = block.radius or 0
+        if block.lighten then
+            -- 半透明卡：背景透出来，不画阴影
+            lightenRounded(bb, x, y, width, height, radius, block.lighten)
+            return
+        end
         local color = block.color or Blitbuffer.COLOR_WHITE
         if block.shadow then
             local s = type(block.shadow) == "number" and block.shadow or 2

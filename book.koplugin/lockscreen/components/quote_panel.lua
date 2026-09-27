@@ -10,6 +10,35 @@ local Text = require("utils.text")
 
 local M = {}
 
+--- 长文先降字号，最小字号仍超高时按 UTF-8 边界截断加省略号。
+---@param text string
+---@param width number
+---@param size number 起始字号
+---@param min_size number
+---@param max_h number
+---@return string text, number size, number text_h
+function M.fit(text, width, size, min_size, max_h)
+    local Render = require("lockscreen.render")
+    local text_h = Render.measureText(text, width, size, true)
+    while text_h > max_h and size > min_size do
+        size = size - 2
+        text_h = Render.measureText(text, width, size, true)
+    end
+    if text_h <= max_h then return text, size, text_h end
+    local low, high, fitted = 0, #text, ""
+    while low <= high do
+        local mid = math.floor((low + high) / 2)
+        local candidate = Text.truncateUtf8(text, mid) .. "…"
+        local height = Render.measureText(candidate, width, size, true)
+        if height <= max_h then
+            fitted, text_h, low = candidate, height, mid + 1
+        else
+            high = mid - 1
+        end
+    end
+    return fitted, size, text_h
+end
+
 --- 绘制正文和出处（共享 UI 组件）。
 ---@param text string
 ---@param source string
@@ -26,31 +55,10 @@ function M.blocks(text, source, position, wide)
         screen_w = sw,
         screen_h = sh,
     })
-    local font_size = wide and 34 or 30
     local text_w = rect.text_w
-    local max_text_h = math.floor(sh * 0.55)
-    local Render = require("lockscreen.render")
-    local text_h = Render.measureText(text, text_w, font_size, true)
-    while text_h > max_text_h and font_size > 22 do
-        font_size = font_size - 2
-        text_h = Render.measureText(text, text_w, font_size, true)
-    end
-
-    -- 极端长文在最小字号仍放不下时按 UTF-8 边界截断，不能覆盖出处。
-    if text_h > max_text_h then
-        local low, high, fitted = 0, #text, ""
-        while low <= high do
-            local mid = math.floor((low + high) / 2)
-            local candidate = Text.truncateUtf8(text, mid) .. "…"
-            local height = Render.measureText(candidate, text_w, font_size, true)
-            if height <= max_text_h then
-                fitted, text_h, low = candidate, height, mid + 1
-            else
-                high = mid - 1
-            end
-        end
-        text = fitted
-    end
+    -- 极端长文在最小字号仍放不下时截断，不能覆盖出处。
+    local font_size, text_h
+    text, font_size, text_h = M.fit(text, text_w, wide and 34 or 30, 22, math.floor(sh * 0.55))
 
     local line_em = 0.35
     local line_px = math.max(1, math.floor((1 + line_em) * font_size + 0.5))
