@@ -952,7 +952,7 @@ return {
     ["OPDS"] = "OPDS",
     ["OPDS 目录"] = "OPDS 目錄",
     ["OPDS 认证失败，请检查用户名和密码"] = "OPDS 驗證失敗，請檢查使用者名稱和密碼",
-    ["Calibre、Komga、Kavita 等书库；下载后导入本地书库"] = "Calibre、Komga、Kavita 等書庫；下載後匯入本機書庫",
+    ["底栏显示 OPDS；Calibre、Komga、Kavita 等书库，下载后导入本地书库"] = "底欄顯示 OPDS；Calibre、Komga、Kavita 等書庫，下載後匯入本機書庫",
     ["不是有效的 OPDS 目录"] = "不是有效的 OPDS 目錄",
     ["上级"] = "上層",
     ["下载内容不是书籍文件"] = "下載內容不是書籍檔案",

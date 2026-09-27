@@ -17,6 +17,7 @@ local DEFAULTS = {
         active_source = "local",
         library_mixed = false,
         zlib_enabled = false,
+        opds_enabled = false,
         book_debug_enabled = false,
         -- 首次安装已把 KOReader start_with 种成月读；之后尊重用户改动。
         start_with_seeded = false,
@@ -309,6 +310,12 @@ end
 ---@return boolean
 function M.zlibEnabled()
     return M.get("common").zlib_enabled
+end
+
+--- 是否启用 OPDS 底栏入口（默认关）。
+---@return boolean
+function M.opdsEnabled()
+    return M.get("common").opds_enabled
 end
 
 --- 取设备标识，没有就生成一个并立即落盘。

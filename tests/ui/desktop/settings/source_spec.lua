@@ -6,6 +6,7 @@
 local Assert = require("support.assert")
 
 local mixed = false
+local opds_on = false
 local active = "wechat"
 local saved
 local set_active
@@ -22,6 +23,7 @@ package.preload["utils.settings"] = function()
     return {
         libraryMixed = function() return mixed end,
         zlibEnabled = function() return false end,
+        opdsEnabled = function() return opds_on end,
         save = function(patch)
             saved = patch
             if patch.library_mixed ~= nil then mixed = patch.library_mixed end
@@ -120,7 +122,20 @@ Assert.is_true(#config >= 2)
 Assert.eq(config[1].title, "Moon")
 Assert.eq(config[#config - 1].title, "Z-Library")
 Assert.eq(config[#config].title, "OPDS")
-Assert.eq(config[#config].rows[1]().status, "未配置")
+-- 和 Z-Library 一样：开关默认关，关着只有开关一行；打开后才出现目录配置入口。
+Assert.len(config[#config].rows, 1)
+Assert.eq(config[#config].rows[1]().kind, "toggle")
+Assert.eq(config[#config].rows[1]().status, "关")
+config[#config].rows[1]().callback()
+Assert.is_true(saved.opds_enabled)
+opds_on = true
+local opds_rows = src:configSections{ desktop = desktop, plugin = nil }
+opds_rows = opds_rows[#opds_rows].rows
+Assert.len(opds_rows, 2)
+Assert.eq(opds_rows[1]().status, "开")
+Assert.eq(opds_rows[2]().title, "OPDS 目录")
+Assert.eq(opds_rows[2]().status, "未配置")
+opds_on = false
 for i = 1, #config do
     local first = config[i].rows[1]
     if first then
