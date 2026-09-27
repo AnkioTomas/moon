@@ -24,13 +24,41 @@ for _, name in ipairs({
 }) do
     package.preload[name] = widgetModule
 end
+local dialogs = {}
+package.preload["ui/widget/progressbardialog"] = function()
+    return {
+        new = function(_, opts)
+            opts.shown, opts.progress = false, 0
+            function opts:show() self.shown = true end
+            function opts:reportProgress(p) self.progress = p end
+            -- 真实 ProgressbarDialog 在 onCloseWidget 里调 dismiss_callback。
+            function opts:close()
+                self.shown = false
+                if self.dismiss_callback then self.dismiss_callback(); self.dismiss_callback = nil end
+            end
+            dialogs[#dialogs + 1] = opts
+            return opts
+        end,
+    }
+end
 
+local scheduled, dirty = {}, {}
 package.preload["ui/uimanager"] = function()
     return {
         show = function() end,
         nextTick = function(_, cb) cb() end,
-        setDirty = function() end,
+        setDirty = function(_, _, mode, region) dirty[#dirty + 1] = { mode = mode, region = region } end,
+        scheduleIn = function(_, _, cb) scheduled[#scheduled + 1] = cb end,
+        unschedule = function(_, cb)
+            for i = #scheduled, 1, -1 do if scheduled[i] == cb then table.remove(scheduled, i) end end
+        end,
     }
+end
+--- 跑掉当前排队的定时器（跑的过程中新排的留到下一轮）。
+local function runScheduled()
+    local due = scheduled
+    scheduled = {}
+    for _, cb in ipairs(due) do cb() end
 end
 package.preload["ui/widget/confirmbox"] = widgetModule
 package.preload["ui/widget/infomessage"] = widgetModule
@@ -54,9 +82,11 @@ package.preload["ui.components.bookui"] = function()
         end,
     }
 end
+local labels = {}
 package.preload["ui.components.icon"] = function()
     return {
-        label = function()
+        label = function(opts)
+            labels[#labels + 1] = opts.text
             return { getSize = function() return { w = 10, h = 10 } end }
         end,
     }
@@ -229,5 +259,68 @@ desktop.lifecycle.state = "Destroy"
 library:updateView()
 Assert.is_nil(requested)
 desktop.lifecycle.state = "Create"
+
+-- 手动刷新：同步在飞期间弹出假进度弹窗，不动图书馆页面；同步落下自动关窗。
+source.syncBooksAsync = function() end
+local emitted = 0
+desktop.plugin.emitToSource = function(_, event, payload)
+    Assert.eq(event, "library_refresh_request")
+    emitted = emitted + 1
+    payload._books_sync_pending = true
+end
+desktop.updateView = function() view_updates = view_updates + 1 end
+view_updates = 0
+library:rescan()
+Assert.eq(emitted, 1)
+Assert.len(dialogs, 1)
+local dialog = dialogs[1]
+Assert.is_true(dialog.shown)
+Assert.eq(dialog.title, "正在刷新书库…")
+Assert.eq(dialog.progress_max, 100)
+
+library:rescan()
+Assert.eq(emitted, 1, "刷新中重复点击忽略")
+Assert.len(dialogs, 1)
+
+runScheduled()
+runScheduled()
+Assert.eq(dialog.progress, 100 * Library.refreshPercentage(2))
+Assert.is_true(dialog.progress > 20 and dialog.progress < 90)
+Assert.eq(view_updates, 0, "进度跳动不重建页面")
+Assert.is_true(Library.refreshPercentage(1000) <= 0.9, "永不走满")
+
+-- 同步落下：下一跳关窗、停定时器。
+desktop._books_sync_pending = false
+runScheduled()
+Assert.is_false(dialog.shown)
+Assert.is_nil(library._refresh)
+Assert.len(scheduled, 0)
+
+-- 用户点按收起弹窗：定时器停，同步不受影响，之后可以再点刷新。
+library:rescan()
+dialog = dialogs[#dialogs]
+dialog:close()
+Assert.is_nil(library._refresh)
+Assert.len(scheduled, 0)
+Assert.is_true(desktop._books_sync_pending)
+desktop._books_sync_pending = false
+
+-- 源没开跑（本地源未配置目录，只弹引导）：不弹进度。
+local count = #dialogs
+desktop.plugin.emitToSource = function() emitted = emitted + 1 end
+library:rescan()
+Assert.is_nil(library._refresh)
+Assert.len(dialogs, count)
+Assert.len(scheduled, 0)
+
+-- 切走/暂停：关窗。
+desktop.plugin.emitToSource = function(_, _, payload) payload._books_sync_pending = true end
+library:rescan()
+dialog = dialogs[#dialogs]
+library:onPause()
+Assert.is_false(dialog.shown)
+Assert.is_nil(library._refresh)
+Assert.len(scheduled, 0)
+desktop._books_sync_pending = false
 
 package.loaded["ui.desktop.library"] = nil

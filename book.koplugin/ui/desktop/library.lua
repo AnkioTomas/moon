@@ -23,6 +23,7 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local UIManager = require("ui/uimanager")
 local InputDialog = require("ui/widget/inputdialog")
+local ProgressbarDialog = require("ui/widget/progressbardialog")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local TextWidget = require("ui/widget/textwidget")
@@ -49,6 +50,7 @@ local T = require("ffi/util").template
 ---@field _opening_cover table|nil
 ---@field _opening_bar table|nil
 ---@field _open_token table|nil
+---@field _refresh { ticks: integer, tick: fun(), dialog: table }|nil 用户手动刷新的假进度弹窗；真实完成信号是 desktop._books_sync_pending 落下
 ---@field build fun(self: BookLibrary, ctx: table, state: table, opts: table|nil): table
 ---@field showSearch fun(self: BookLibrary, on_apply: fun(query: string)|nil, initial_query: string|nil)
 ---@field cancel fun(self: BookLibrary)
@@ -435,13 +437,48 @@ function Library:gotoPage(page)
     self.desktop:updateView()
 end
 
+local REFRESH_TICK_S = 0.5
+
+--- 假进度：每跳走剩余路程的 15%，逼近 90% 但永不到头（2 秒约 43%，5 秒约 72%）。
+---@param ticks integer
+---@return number
+function Library.refreshPercentage(ticks)
+    return 0.9 * (1 - 0.85 ^ ticks)
+end
+
 --- 手动强制刷新书库；具体动作由当前源决定（本地源扫盘，远端源拉全量）。
+--- 同步期间弹出假进度弹窗，重复点击忽略；同步落下自动关闭，点按弹窗可提前收起（同步继续）。
 function Library:rescan()
-    local source = self.desktop.source
-    if not source or not source.syncBooksAsync then return end
-    if self.desktop.plugin and self.desktop.plugin.emitToSource then
-        self.desktop.plugin:emitToSource("library_refresh_request", self.desktop, source)
+    local desktop = self.desktop
+    local source = desktop.source
+    if self._refresh or not source or not source.syncBooksAsync then return end
+    if not (desktop.plugin and desktop.plugin.emitToSource) then return end
+    desktop.plugin:emitToSource("library_refresh_request", desktop, source)
+    -- 源没真正开跑（本地源未配置目录会改弹引导框）就不演进度。
+    if not desktop._books_sync_pending then return end
+    local refresh = { ticks = 0 }
+    -- 关闭弹窗（同步落下、用户点按、页面取消）统一经 dismiss_callback 收尾。
+    refresh.dialog = ProgressbarDialog:new{
+        title = _("正在刷新书库…"),
+        progress_max = 100,
+        refresh_time_seconds = REFRESH_TICK_S,
+        dismiss_callback = function()
+            UIManager:unschedule(refresh.tick)
+            if self._refresh == refresh then self._refresh = nil end
+        end,
+    }
+    refresh.tick = function()
+        if not desktop._books_sync_pending then
+            refresh.dialog:close()
+            return
+        end
+        refresh.ticks = refresh.ticks + 1
+        refresh.dialog:reportProgress(100 * Library.refreshPercentage(refresh.ticks))
+        UIManager:scheduleIn(REFRESH_TICK_S, refresh.tick)
     end
+    self._refresh = refresh
+    refresh.dialog:show()
+    UIManager:scheduleIn(REFRESH_TICK_S, refresh.tick)
 end
 
 --- 弹出搜索输入框。
@@ -516,8 +553,9 @@ function Library:updateView()
     return widget
 end
 
---- 仅取消本实例当前的列表查询，并清空请求句柄。
+--- 仅取消本实例当前的列表查询，并清空请求句柄；刷新弹窗只关窗，同步本身归源管。
 function Library:cancel()
+    if self._refresh then self._refresh.dialog:close() end
     if self.fetch_cancel then
         self.fetch_cancel:cancel()
         self.fetch_cancel = nil
