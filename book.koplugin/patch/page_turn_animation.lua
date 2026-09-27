@@ -1,5 +1,5 @@
 --[[--
-翻页动画功能门面：把 KOReader 的 `swipe_animations` 设置与补丁安装/恢复绑定。
+翻页动画功能门面：把 Moon 自己的动画开关与补丁安装/恢复绑定。
 
 补丁管理器本身不暴露 UI，这里只负责「设置开关 → 安装/恢复 → 重启提示」的编排，
 供桌面设置页与插件启动检测复用。
@@ -18,6 +18,9 @@ local T = require("ffi/util").template
 local PageTurnAnimation = {}
 
 PageTurnAnimation.FEATURE = "page_turn_animation"
+
+--- 开关键；运行时补丁 2-swipe-animation-enable.lua / 2-pdf-animation.lua 按同名键判断。
+PageTurnAnimation.ENABLED_KEY = "moon_page_turn_animation"
 
 --- 动画风格设置键；运行时补丁每次翻页读取，切换无需重启。
 PageTurnAnimation.STYLE_KEY = "swipe_animation_style"
@@ -77,13 +80,23 @@ local function unsupportedReason()
     return nil
 end
 
---- 动画是否开启（以 KOReader 全局设置为准）。
+local PREV_REFRESH_KEY = "swipe_animations_prev_refresh_rate"
+
+--- 动画是否开启（Moon 自己的开关，不看 KOReader 原生 `swipe_animations`）。
 ---@return boolean
 function PageTurnAnimation.isEnabled()
-    return G_reader_settings:isTrue("swipe_animations")
+    return G_reader_settings:isTrue(PageTurnAnimation.ENABLED_KEY)
 end
 
-local PREV_REFRESH_KEY = "swipe_animations_prev_refresh_rate"
+--- 旧版复用 KOReader 原生 `swipe_animations` 当开关；Moon 开过的痕迹（刷新率备份或补丁在位）
+--- 才迁移，只开了 MTK Kindle 原生硬件动画的不算。
+local function migrateLegacyEnabled()
+    if G_reader_settings:has(PageTurnAnimation.ENABLED_KEY) then return end
+    if not G_reader_settings:isTrue("swipe_animations") then return end
+    if G_reader_settings:has(PREV_REFRESH_KEY) or Manager.isApplied(PageTurnAnimation.FEATURE) then
+        G_reader_settings:saveSetting(PageTurnAnimation.ENABLED_KEY, true)
+    end
+end
 
 --- 动画首次开启时把完全刷新率改成「从不」，避免全刷闪烁打断动画。
 --- 只改一次并备份原值；用户之后可以自行改回，Moon 不再反复覆盖。
@@ -134,7 +147,7 @@ function PageTurnAnimation.setEnabled(on)
     else
         restoreFullRefresh()
     end
-    G_reader_settings:saveSetting("swipe_animations", on)
+    G_reader_settings:saveSetting(PageTurnAnimation.ENABLED_KEY, on)
     return { ok = true }
 end
 
@@ -158,6 +171,7 @@ function PageTurnAnimation.checkStartup()
     if _startup_checked then return end
     _startup_checked = true
     if unsupportedReason() then return end
+    migrateLegacyEnabled()
     if not PageTurnAnimation.isEnabled() then return end
     if Manager.isApplied(PageTurnAnimation.FEATURE) then
         forceFullRefreshNever()
@@ -179,6 +193,12 @@ function PageTurnAnimation.checkStartup()
         text = _("翻页动画补丁已失效（可能因 KOReader 升级）。是否重新安装？"),
         ok_text = _("重新安装"),
         cancel_text = _("取消"),
+        -- 取消即关闭 Moon 动画并交还刷新率，之后不再每次启动追问。
+        cancel_callback = function()
+            G_reader_settings:saveSetting(PageTurnAnimation.ENABLED_KEY, false)
+            restoreFullRefresh()
+        end,
+        dismissable = false,
         ok_callback = function()
             UIManager:close(dialog)
             local res = Manager.install(PageTurnAnimation.FEATURE)
