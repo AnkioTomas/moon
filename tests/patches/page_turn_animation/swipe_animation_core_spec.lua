@@ -1,6 +1,9 @@
 --[[--
 翻页动画运行时补丁：各风格的帧几何与播放循环。
 
+墨水屏约束即测试不变量：所有帧的矩形恰好铺满整屏且互不重叠（每个像素只刷一次），
+内部边界按 alignment_constraint 对齐，不出现驱动会丢弃的 ≤1px 细条，帧数与刷新块数有上限。
+
 @module tests.patches.page_turn_animation.swipe_animation_core_spec
 --]]
 
@@ -14,13 +17,13 @@ _G.G_reader_settings = {
 }
 
 local function newBB(w, h)
-    local bb = { w = w, h = h, blits = {} }
+    local bb = { blits = {} }
     function bb.getWidth() return w end
     function bb.getHeight() return h end
     function bb.copy() return newBB(w, h) end
     function bb.free() end
     function bb.blitFrom(self, src, dx, dy, sx, sy, bw, bh)
-        self.blits[#self.blits + 1] = { src = src, dx = dx, sx = sx, w = bw, h = bh }
+        self.blits[#self.blits + 1] = { src = src, dx = dx, dy = dy, sx = sx, sy = sy, w = bw, h = bh }
     end
     return bb
 end
@@ -28,7 +31,7 @@ end
 local Screen = { refreshes = {} }
 local function recorder(kind)
     return function(self, x, y, w, h)
-        self.refreshes[#self.refreshes + 1] = { kind = kind, x = x, w = w, h = h }
+        self.refreshes[#self.refreshes + 1] = { kind = kind, x = x, y = y, w = w, h = h }
     end
 end
 Screen.refreshUI = recorder("ui")
@@ -51,75 +54,86 @@ dofile(Config.root() .. "/book.koplugin/patches/page_turn_animation/2-swipe-anim
 local SwipeAnimation = _G.SwipeAnimation
 _G.SwipeAnimation = nil
 Assert.is_true(type(SwipeAnimation) == "table", "补丁加载失败")
-
-local W, STEPS, ALIGN = 1072, 8, 16
-
---- 揭开类风格：所有帧的矩形不重叠、src==dst，拼起来正好覆盖整屏宽度。
-local function assertReveal(frames, label)
-    local covered = {}
-    for _, frame in ipairs(frames) do
-        Assert.is_true(#frame > 0, label .. " 空帧")
-        for _, r in ipairs(frame) do
-            Assert.eq(r[1], r[2], label .. " src==dst")
-            Assert.is_true(r[3] > 0, label .. " 宽度为正")
-            covered[#covered + 1] = r
-        end
-    end
-    table.sort(covered, function(a, b) return a[1] < b[1] end)
-    local x = 0
-    for _, r in ipairs(covered) do
-        Assert.eq(r[1], x, label .. " 无缝无重叠")
-        x = r[1] + r[3]
-    end
-    Assert.eq(x, W, label .. " 覆盖整屏")
-end
-
 local S = SwipeAnimation.STYLES
-for _, forward in ipairs({ true, false }) do
-    local wipe = S.wipe(W, STEPS, ALIGN, forward)
-    assertReveal(wipe, "wipe")
-    Assert.len(wipe, STEPS)
-    -- 向前翻从右往左揭，向后翻从左往右揭（与旧实现一致）
-    Assert.eq(wipe[1][1][1] + wipe[1][1][3] == W, forward)
-    Assert.eq(wipe[1][1][1] == 0, not forward)
 
-    local blinds = S.blinds(W, STEPS, ALIGN, forward)
-    assertReveal(blinds, "blinds")
-    Assert.len(blinds, STEPS)
-    Assert.len(blinds[1], 4)
+local NAMES = { "wipe", "wipe_vertical", "split", "blinds", "random_bars", "box" }
 
-    local center = S.center(W, STEPS, ALIGN, forward)
-    assertReveal(center, "center")
-    Assert.len(center, STEPS / 2)
-    local first = center[1]
-    if forward then
-        Assert.eq(first[1][1] + first[1][3], first[2][1], "中心展开首帧两条相邻")
-    else
-        Assert.eq(first[1][1], 0, "向后翻从两边开始")
-    end
-
-    local cover = S.cover(W, STEPS, ALIGN, forward)
-    Assert.len(cover, STEPS)
-    local prev_w = 0
-    for _, frame in ipairs(cover) do
-        local r = frame[1]
-        Assert.len(frame, 1)
-        Assert.is_true(r[3] > prev_w, "覆盖帧逐步变宽")
-        prev_w = r[3]
-        if forward then
-            Assert.eq(r[1] + r[3], W, "向前翻贴右边")
-            Assert.eq(r[2], 0, "新页左缘先入场")
-        else
-            Assert.eq(r[1], 0, "向后翻贴左边")
-            Assert.eq(r[2] + r[3], W, "新页右缘先入场")
+--- 每个风格都必须恰好铺满整屏、互不重叠、边界对齐、不超预算。
+local function assertPartition(frames, w, h, steps, align, label)
+    Assert.is_true(#frames > 0 and #frames <= steps, label .. " 帧数在 1..steps")
+    local rects, area = {}, 0
+    for _, frame in ipairs(frames) do
+        Assert.is_true(#frame > 0, label .. " 无空帧")
+        for _, r in ipairs(frame) do
+            local x, y, rw, rh = r[1], r[2], r[3], r[4]
+            Assert.is_true(rw > 1 and rh > 1, label .. " 无细条")
+            Assert.is_true(x >= 0 and y >= 0 and x + rw <= w and y + rh <= h, label .. " 不越界")
+            if align then
+                for _, e in ipairs({ x, x + rw }) do
+                    Assert.is_true(e == w or e % align == 0, label .. " x 边界对齐")
+                end
+                for _, e in ipairs({ y, y + rh }) do
+                    Assert.is_true(e == h or e % align == 0, label .. " y 边界对齐")
+                end
+            end
+            for _, o in ipairs(rects) do
+                local disjoint = x + rw <= o[1] or o[1] + o[3] <= x or y + rh <= o[2] or o[2] + o[4] <= y
+                Assert.is_true(disjoint, label .. " 互不重叠")
+            end
+            rects[#rects + 1] = r
+            area = area + rw * rh
         end
     end
-    Assert.eq(prev_w, W, "最后一帧整屏")
+    Assert.eq(area, w * h, label .. " 铺满整屏")
+    Assert.is_true(#rects <= 2 * steps, label .. " 刷新块数不超预算")
 end
+
+local SCREENS = {
+    { 1072, 1448, 8, 16 },   -- Kobo MTK 竖屏
+    { 1448, 1072, 6, 16 },   -- 横屏
+    { 1264, 1680, 8, 16 },
+    { 758, 1024, 8, nil },   -- 无对齐约束
+}
+for _, sc in ipairs(SCREENS) do
+    local w, h, steps, align = sc[1], sc[2], sc[3], sc[4]
+    for _, name in ipairs(NAMES) do
+        for _, forward in ipairs({ true, false }) do
+            local label = ("%s %dx%d fwd=%s"):format(name, w, h, tostring(forward))
+            assertPartition(S[name](w, h, steps, align, forward), w, h, steps, align, label)
+        end
+    end
+end
+
+local W, H, STEPS, ALIGN = 1072, 1448, 8, 16
+local function first(name, forward) return S[name](W, H, STEPS, ALIGN, forward)[1] end
+local function touches(frame, pred)
+    for _, r in ipairs(frame) do
+        if pred(r) then return true end
+    end
+    return false
+end
+
+-- 擦除：向前翻从右往左，向后翻从左往右（与旧实现一致）。
+Assert.is_true(touches(first("wipe", true), function(r) return r[1] + r[3] == W end))
+Assert.is_true(touches(first("wipe", false), function(r) return r[1] == 0 end))
+-- 纵向擦除：向前翻自上而下，向后翻自下而上。
+Assert.is_true(touches(first("wipe_vertical", true), function(r) return r[2] == 0 end))
+Assert.is_true(touches(first("wipe_vertical", false), function(r) return r[2] + r[4] == H end))
+-- 分割：向前翻从中线展开，向后翻从两侧合拢。
+Assert.is_true(touches(first("split", true), function(r) return r[1] <= W / 2 and W / 2 < r[1] + r[3] end))
+Assert.is_true(touches(first("split", false), function(r) return r[1] == 0 end))
+Assert.is_true(touches(first("split", false), function(r) return r[1] + r[3] == W end))
+-- 百叶窗：每帧 4 组同时揭。
+Assert.len(first("blinds", true), 4)
+-- 方框：向前翻首帧包含屏幕中心，向后翻首帧是最外圈。
+Assert.is_true(touches(first("box", true), function(r)
+    return r[1] <= W / 2 and W / 2 < r[1] + r[3] and r[2] <= H / 2 and H / 2 < r[2] + r[4]
+end))
+Assert.is_true(touches(first("box", false), function(r) return r[1] == 0 and r[2] == 0 end))
 
 -- 边界：屏宽不足以切满条带时帧数跟着缩，不出现空帧。
-assertReveal(S.wipe(W, 200, 16, true), "wipe narrow")
-Assert.len(S.wipe(W, 200, 16, true), 67)
+assertPartition(S.wipe(W, H, 200, 16, true), W, H, 200, 16, "wipe narrow")
+Assert.len(S.wipe(W, H, 200, 16, true), 67)
 
 --- 以给定风格跑一次动画，返回屏幕刷新记录。
 ---@param style string|nil
@@ -128,8 +142,8 @@ Assert.len(S.wipe(W, 200, 16, true), 67)
 local function run(style, ui, no_snapshot)
     store.swipe_animation_style = style
     store.swipe_animation_delay_ms = 0
-    Screen.bb = newBB(W, 1448)
-    Screen.saved_bb = not no_snapshot and newBB(W, 1448) or nil
+    Screen.bb = newBB(W, H)
+    Screen.saved_bb = not no_snapshot and newBB(W, H) or nil
     Screen.swipe_forward = true
     Screen.refreshes = {}
     ui = ui or { FULL_REFRESH_COUNT = 0 }
@@ -145,6 +159,15 @@ local function kinds(refreshes)
     return table.concat(out, ",")
 end
 
+-- 播放：blit 与刷新同一块区域，且只从新页原位取图（揭开，不搬移内容）。
+local refreshes, blits = run("box")
+Assert.len(blits, #refreshes + 1, "第 1 次 blit 是旧页打底，其后每块一次")
+for i, r in ipairs(refreshes) do
+    local b = blits[i + 1]
+    Assert.eq(b.dx, r.x) Assert.eq(b.dy, r.y) Assert.eq(b.w, r.w) Assert.eq(b.h, r.h)
+    Assert.eq(b.sx, b.dx) Assert.eq(b.sy, b.dy)
+end
+
 -- 每页全刷：每一页都照播动画，播完补一次整屏全刷（回归：以前清屏页整页跳过动画）。
 local every_page = { FULL_REFRESH_COUNT = 1 }
 for _ = 1, 3 do
@@ -156,14 +179,16 @@ end
 
 -- 每 3 页全刷：只有第 3 页在动画后补全刷，前两页只有动画。
 local every_three = { FULL_REFRESH_COUNT = 3 }
-Assert.eq(kinds((run("center", every_three))), "ui,ui,ui,ui,ui,ui,ui,ui")
-Assert.eq(kinds((run("center", every_three))), "ui,ui,ui,ui,ui,ui,ui,ui")
-Assert.eq(kinds((run("center", every_three))), "ui,ui,ui,ui,ui,ui,ui,ui,full")
-Assert.eq(kinds((run("center", every_three))), "ui,ui,ui,ui,ui,ui,ui,ui")
+Assert.eq(kinds((run("split", every_three))), "ui,ui,ui,ui,ui,ui,ui,ui")
+Assert.eq(kinds((run("split", every_three))), "ui,ui,ui,ui,ui,ui,ui,ui")
+Assert.eq(kinds((run("split", every_three))), "ui,ui,ui,ui,ui,ui,ui,ui,full")
+Assert.eq(kinds((run("split", every_three))), "ui,ui,ui,ui,ui,ui,ui,ui")
 
 -- 柔和全刷设置：补的是整屏 partial 而不是闪屏 full。
 store.swipe_animation_mild_global_refresh = true
-Assert.eq(kinds((run("cover", { FULL_REFRESH_COUNT = 1 }))), "ui,ui,ui,ui,ui,ui,ui,ui,partial")
+refreshes = run("wipe_vertical", { FULL_REFRESH_COUNT = 1 })
+Assert.eq(refreshes[#refreshes].kind, "partial")
+Assert.len(refreshes, STEPS + 1)
 store.swipe_animation_mild_global_refresh = nil
 
 -- 没拍到旧页：不播动画，只做清屏；不清屏时排队刷新原样保留。
@@ -174,19 +199,12 @@ r, _, ui = run("wipe", nil, true)
 Assert.len(r, 0)
 Assert.len(ui._refresh_stack, 1)
 
-local refreshes, blits = run("cover")
-Assert.len(refreshes, STEPS)
-Assert.eq(refreshes[#refreshes].x, 0)
-Assert.eq(refreshes[#refreshes].w, W)
--- 第 1 次 blit 是旧页打底，其后每帧一次
-Assert.len(blits, STEPS + 1)
-Assert.eq(blits[2].sx, 0)
-
--- 未知 / 未设置风格回退擦除
-refreshes = run("nope")
-Assert.len(refreshes, STEPS)
-Assert.eq(refreshes[1].x + refreshes[1].w, W)
-refreshes = run(nil)
-Assert.len(refreshes, STEPS)
+-- 未知 / 未设置 / 已删除的旧风格值回退擦除
+for _, style in ipairs({ "nope", "cover", "center" }) do
+    refreshes = run(style)
+    Assert.len(refreshes, STEPS)
+    Assert.eq(refreshes[1].x + refreshes[1].w, W)
+end
+Assert.len((run(nil)), STEPS)
 
 return true
