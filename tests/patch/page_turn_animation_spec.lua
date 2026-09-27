@@ -56,7 +56,8 @@ Assert.eq(store.full_refresh_count, 0)
 Assert.eq(store.night_full_refresh_count, 0)
 Assert.eq(store.swipe_animations_prev_refresh_rate.day, 6)
 Assert.eq(store.swipe_animations_prev_refresh_rate.night, 6)
-Assert.is_true(store.swipe_animations)
+Assert.is_true(store.moon_page_turn_animation)
+Assert.is_nil(store.swipe_animations, "不碰 KOReader 原生开关")
 
 PageTurnAnimation.checkStartup()
 local UIManager = require("ui/uimanager")
@@ -68,7 +69,8 @@ Assert.is_true(PageTurnAnimation.setEnabled(false).ok)
 Assert.eq(store.full_refresh_count, 6)
 Assert.eq(store.night_full_refresh_count, 6)
 Assert.is_nil(store.swipe_animations_prev_refresh_rate)
-Assert.eq(store.swipe_animations, false)
+Assert.eq(store.moon_page_turn_animation, false)
+Assert.is_nil(store.swipe_animations)
 
 -- 再次开启只在没有备份时执行；用户自行改回的值不被重复覆盖。
 store.full_refresh_count = 6
@@ -116,13 +118,58 @@ Assert.eq(store.swipe_animation_style, "wipe", "无回调也能落设置")
 local shown = {}
 UIManager.show = function(_, widget) shown[#shown + 1] = widget end
 local Manager = require("patch.manager")
-local function startup(install_res)
-    Manager.install = function() return install_res end
-    shown = {}
-    store.swipe_animations = true
+local function reload()
     package.loaded["patch.page_turn_animation"] = nil
-    require("patch.page_turn_animation").checkStartup()
+    return require("patch.page_turn_animation")
 end
+
+--- state: 启动前的设置快照（整表替换相关键）；applied: 补丁是否在位。
+local function startup(install_res, applied, state)
+    Manager.install = function() return install_res end
+    Manager.isApplied = function() return applied ~= false end
+    shown = {}
+    state = state or { moon_page_turn_animation = true }
+    for _, key in ipairs({ "moon_page_turn_animation", "swipe_animations", "swipe_animations_prev_refresh_rate" }) do
+        store[key] = state[key]
+    end
+    reload().checkStartup()
+end
+
+-- 只开了 KOReader 原生动画（MTK Kindle 硬件动画），Moon 从未开过：不迁移、不追问。
+startup({ ok = true }, false, { swipe_animations = true })
+Assert.len(shown, 0)
+Assert.is_nil(store.moon_page_turn_animation)
+
+-- 旧版 Moon 用户（原生键 + 刷新率备份）：迁移到 Moon 键；补丁被升级覆盖时追问。
+startup({ ok = true }, false, {
+    swipe_animations = true, swipe_animations_prev_refresh_rate = { day = 6, night = 6 },
+})
+Assert.is_true(store.moon_page_turn_animation)
+Assert.len(shown, 1)
+Assert.eq(shown[1].text, "翻页动画补丁已失效（可能因 KOReader 升级）。是否重新安装？")
+Assert.is_false(shown[1].dismissable)
+
+-- 取消即关闭 Moon 动画、交还刷新率；原生开关不动；下次启动不再追问。
+store.full_refresh_count = 0
+shown[1].cancel_callback()
+Assert.eq(store.moon_page_turn_animation, false)
+Assert.is_nil(store.swipe_animations_prev_refresh_rate)
+Assert.eq(store.full_refresh_count, 6)
+Assert.is_true(store.swipe_animations)
+shown = {}
+reload().checkStartup()
+Assert.len(shown, 0)
+
+-- 旧版更早的用户（没有刷新率备份，但补丁在位）：同样迁移，并补上刷新率备份。
+startup({ ok = true, changed = false }, true, { swipe_animations = true })
+Assert.is_true(store.moon_page_turn_animation)
+Assert.len(shown, 0)
+Assert.not_nil(store.swipe_animations_prev_refresh_rate)
+
+-- Moon 键已显式关闭：即使原生键开着也不迁移。
+startup({ ok = true }, true, { moon_page_turn_animation = false, swipe_animations = true })
+Assert.eq(store.moon_page_turn_animation, false)
+Assert.len(shown, 0)
 
 startup({ ok = true, changed = false })
 Assert.len(shown, 0)

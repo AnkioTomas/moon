@@ -16,6 +16,7 @@ package.preload["source.base"] = function()
 end
 
 local cfg = {}
+local pushes = {}
 package.preload["utils.settings"] = function()
     return { getSource = function() return cfg end }
 end
@@ -25,6 +26,11 @@ package.preload["source.local.client"] = function()
             return {
                 configured = function()
                     return type(client_cfg.path) == "string" and client_cfg.path ~= ""
+                end,
+                isWebdav = function() return client_cfg.webdav_url ~= nil end,
+                pushBookAsync = function(_, stable_id, cover, cb)
+                    pushes[#pushes + 1] = { stable_id = stable_id, cover = cover }
+                    cb(true)
                 end,
             }
         end,
@@ -67,5 +73,18 @@ cfg.path = "/books"
 source:onEvent("library_refresh_request", desktop)
 Assert.len(delegated, 2)
 Assert.eq(delegated[2].event, "library_refresh_request")
+
+-- 编辑/刮削：纯本地目录没有远端，什么都不推；WebDAV 立即上行这本书。
+local identity = { source_id = "local", stable_id = "webdav://a.epub" }
+source:onEvent("book_meta_changed", { identity = identity, cover = true })
+Assert.len(pushes, 0)
+cfg.webdav_url = "https://dav.example"
+source:onEvent("book_meta_changed", { identity = identity, cover = true })
+source:onEvent("book_meta_changed", { identity = identity, cover = false })
+Assert.len(pushes, 2)
+Assert.eq(pushes[1].stable_id, "webdav://a.epub")
+Assert.is_true(pushes[1].cover)
+Assert.is_false(pushes[2].cover)
+Assert.len(delegated, 2, "book_meta_changed 不再交给基类")
 
 return true
