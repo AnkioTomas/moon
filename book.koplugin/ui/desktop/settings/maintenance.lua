@@ -24,11 +24,13 @@ local Maintenance = {}
 local REPO_URL = "https://github.com/AnkioTomas/moon"
 local REPO_HOST = "github.com/AnkioTomas/moon"
 local QQ_GROUP_URL = "https://qm.qq.com/q/Q9FHByplqC"
+local BUG_GROUP_URL = "https://qm.qq.com/q/btmL9F4Cl2"
 
---- 弹出书友交流群二维码，QQ 扫码加群；点按任意处关闭。
-local function showQQGroup()
+--- 弹出 QQ 群二维码，扫码加群；点按任意处关闭。
+---@param url string 加群链接
+local function showQQGroup(url)
     local size = math.floor(math.min(Device.screen:getWidth(), Device.screen:getHeight()) * 0.72)
-    UIManager:show(require("ui/widget/qrmessage"):new{ text = QQ_GROUP_URL, width = size, height = size, scale_factor = 0.9 })
+    UIManager:show(require("ui/widget/qrmessage"):new{ text = url, width = size, height = size, scale_factor = 0.9 })
 end
 
 --- 弹出「关于」对话框：图标、名称、版本、简介、作者与许可证。
@@ -40,7 +42,10 @@ local function showAbout()
     if Device:canOpenLink() then
         buttons[#buttons + 1] = {{ text = _("打开 GitHub"), callback = function() Device:openLink(REPO_URL) end }}
     end
-    buttons[#buttons + 1] = {{ text = _("书友交流群"), callback = showQQGroup }}
+    buttons[#buttons + 1] = {
+        { text = _("书友交流群"), callback = function() showQQGroup(QQ_GROUP_URL) end },
+        { text = _("Bug 反馈群"), callback = function() showQQGroup(BUG_GROUP_URL) end },
+    }
     buttons[#buttons + 1] = {{ text = _("关闭"), callback = function() UIManager:close(dialog) end }}
     dialog = ButtonDialog:new{ title = _("关于"), title_align = "center", use_info_style = false, buttons = buttons }
     local body = VerticalGroup:new{ align = "center" }

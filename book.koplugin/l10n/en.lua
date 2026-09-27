@@ -336,6 +336,7 @@ return {
     ["截屏"] = "Screenshot",
     ["打开 GitHub"] = "Open GitHub",
     ["书友交流群"] = "Reader Group",
+    ["Bug 反馈群"] = "Bug Report Group",
     ["打开月读"] = "Open 月读",
     ["AZW3（月读）"] = "AZW3 (月读)",
     ["找不到服务器地址，镜像可能已失效"] = "Server address not found; the mirror may be dead",
