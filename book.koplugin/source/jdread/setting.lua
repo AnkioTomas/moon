@@ -96,6 +96,7 @@ local function showQrLogin(plugin)
 
             showDialog(ImageWidget:new{
                 file = started.qr_path,
+                file_do_cache = false, -- 同一路径每次重画，缓存会拿到上一张
                 width = qr_size,
                 height = qr_size,
                 scale_factor = 0,
