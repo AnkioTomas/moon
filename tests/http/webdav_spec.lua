@@ -146,7 +146,7 @@ do
     Assert.eq(entries[3].name, "b file.txt")
     Assert.eq(entries[3].href, "/dav/b file.txt")
     Assert.eq(entries[3].size, 123)
-    Assert.eq(entries[3].mtime, "Tue, 02 Jan 2024 03:04:05 GMT")
+    Assert.eq(entries[3].mtime, 1704164645)
 
     -- 请求本身：PROPFIND + Depth:1 + Basic 凭据 + 目录尾斜杠 URL
     Assert.eq(captured[1].method, "PROPFIND")
