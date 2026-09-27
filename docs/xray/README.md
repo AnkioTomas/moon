@@ -16,14 +16,17 @@
 | `kinds.lua` | character / location / term |
 | `ui.lua` | 阅读侧入口 |
 
-抽取结果要能在正文里 grounding（名称至少出现在上下文中），过短或未出现的丢掉。
+两阶段生成：
+
+- **初始化**（本书库里还没有实体）：只给书名 / 作者 / 简介，让模型凭通用知识生成整本书的实体，不看进度、不避剧透、不做 grounding。模型回 `known=false`、没给出实体或书名为空时，回落到章节增量。
+- **增量**（已有实体后刷新）：当前页 + 前文 + 已有实体快照，结果要能在正文里 grounding（名称或别名至少出现在上下文中），过短或未出现的丢掉。
 
 ## 用法
 
 ```lua
 local Fetch = require("xray.fetch")
 
--- 综合拉取；已有数据且非 force 时直接回缓存
+-- 综合拉取；库空走通用知识初始化，已有数据且非 force 时直接回缓存，force 走章节增量
 Fetch.comprehensive(ui, identity, { force = false }, function(result, err) end)
 
 -- 选词查实体：本地别名命中免请求，否则 AI 补全并落库
