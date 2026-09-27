@@ -306,14 +306,12 @@ end
 do
     resetRec()
     rec.list_wire = { data = { { filename = "home.epub", title = "Home" } }, count = 1 }
-    local refreshes = 0
+    local refreshes = {}
     local desktop = {
     lifecycle = { state = "Resume" },
         source = src,
         tab = "home",
-        onEvent = function(_, event)
-            if event == "home_refresh" then refreshes = refreshes + 1 end
-        end,
+        onEvent = function(_, event) refreshes[#refreshes + 1] = event end,
     }
     src:onEvent("home_open", desktop)
     Assert.is_true(rec.query ~= nil)
@@ -323,7 +321,8 @@ do
     Assert.is_nil(rec.query)
     src:onEvent("library_refresh_request", desktop)
     Assert.is_true(rec.query ~= nil)
-    Assert.eq(refreshes, 4)
+    -- 强制刷新拉到空书架且对账无隐藏：本地书架未变，不通知首页。
+    Assert.eq(table.concat(refreshes, ","), "stats_changed,shelf_changed,stats_changed")
     rec.query = first_query
 end
 

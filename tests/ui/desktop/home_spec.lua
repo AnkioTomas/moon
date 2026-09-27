@@ -279,9 +279,13 @@ Assert.eq(table.concat(child_events, ""), "")
 -- 换源必须先更新已构建子组件的上下文，再交给组件重建。
 local next_source = { id = "wechat" }
 home.components.clock.ctx = { source = desktop.source }
+local content_before = home.widget[1]
 home:onEvent("source_changed", next_source)
 Assert.eq(home.source, next_source)
 Assert.eq(home.components.clock.ctx.source, next_source)
+Assert.eq(home.widget[1], content_before, "换源由 Desktop:switchTab 重建首页，onEvent 不得再建一次")
+home:onEvent("home_refresh")
+Assert.is_true(home.widget[1] ~= content_before, "home_refresh 仍须重建首页")
 
 -- PageStrip 翻页；越界不重建。
 layout_pages = 3

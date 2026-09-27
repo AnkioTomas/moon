@@ -33,7 +33,8 @@ local desktop = {
     insight = { state = { has_data = true }, loaded = true },
     updateView = function() view_updates = view_updates + 1 end,
     onEvent = function(_, event)
-        if event == "home_refresh" then refreshes = refreshes + 1 end
+        Assert.is_true(event ~= "home_refresh", "同步不得整页重建首页")
+        if event == "stats_changed" or event == "shelf_changed" then refreshes = refreshes + 1 end
     end,
 }
 source:onEvent("home_open", desktop)
@@ -77,5 +78,38 @@ Assert.eq(stats_calls, 3)
 stats_callbacks[3]({ pulled = 1, pushed = 1 })
 Assert.eq(refreshes, 3)
 Assert.eq(view_updates, 1)
+
+-- 统计无新增也无上报：本地数据未变，首页不重建。
+source._stats_refresh_at = os.time() - 301
+source:onEvent("desktop_open", desktop)
+stats_callbacks[4]({ pulled = 0, pushed = 0 })
+Assert.eq(refreshes, 3)
+
+-- 书架同步失败：首页展示的是本地数据，不因失败重建。
+source._stats_refresh_at = os.time()
+source.syncBooksAsync = function(_, _, cb)
+    cb(nil, "offline")
+    return { cancel = function() end }
+end
+source:onEvent("desktop_open", desktop)
+Assert.eq(refreshes, 3)
+
+-- 书架对账计数全 0：不重建首页。
+source.syncBooksAsync = function(_, _, cb)
+    cb({ pulled = 0, pushed = 0, hidden = 0 })
+    return { cancel = function() end }
+end
+source:onEvent("desktop_open", desktop)
+Assert.eq(refreshes, 3)
+
+-- 书架对账有数据：通知首页比对最近书架，由组件决定是否重建。
+local last_event
+desktop.onEvent = function(_, event) last_event = event end
+source.syncBooksAsync = function(_, _, cb)
+    cb({ pulled = 467, pushed = 0, hidden = 0 })
+    return { cancel = function() end }
+end
+source:onEvent("desktop_open", desktop)
+Assert.eq(last_event, "shelf_changed")
 
 return true

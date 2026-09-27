@@ -283,7 +283,8 @@ function M:createWidget()
     local w = opts.width
     local h = opts.height
     local source = ctx.source or (ctx.desktop and ctx.desktop.source)
-    local _ignored_recent, books = Catalog.recentShelf(source and source.id, 24)
+    local recent, books, err = Catalog.recentShelf(source and source.id, 24)
+    self.shelf_key = M.shelfKey(recent, books, err)
     books = books or {}
     local section_h = UI.sz(22)
     local band_h = PageStrip.bandH()

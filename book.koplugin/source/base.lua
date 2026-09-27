@@ -271,7 +271,6 @@ local function syncDesktopBooks(self, desktop, opts)
         if desktop.lifecycle.state == "Destroy" or desktop.source ~= self then return end
         if not result then
             logger.warn("book shelf sync failed", self.id, err)
-            desktop:onEvent("home_refresh", "shelf_sync_failed")
             if desktop.tab == "library" and desktop.library then
                 desktop.library.state = { books = {}, err = err or _("同步失败") }
                 desktop:updateView()
@@ -289,7 +288,10 @@ local function syncDesktopBooks(self, desktop, opts)
             "hidden", tonumber(result.hidden) or 0)
         self._books_refresh_at = os.time()
         if desktop.library then desktop.library.state = nil end
-        desktop:onEvent("home_refresh", "shelf_sync")
+        -- 计数全 0 = 本地书架未变。非 0 也可能只是全量对账，首页组件自己比对显示数据再决定重建。
+        if (tonumber(result.pulled) or 0) + (tonumber(result.pushed) or 0) + (tonumber(result.hidden) or 0) > 0 then
+            desktop:onEvent("shelf_changed")
+        end
         if desktop.tab == "library" then desktop:updateView() end
     end)
     -- 某些源会同步回调；避免把已完成的 job 句柄残留到桌面状态。
@@ -332,12 +334,12 @@ local function syncDesktopStats(self, desktop, opts)
         logger.dbg("book stats sync done", self.id,
             "pulled", tonumber(result.pulled) or 0,
             "pushed", tonumber(result.pushed) or 0)
-        if not result.skipped then
+        if not result.skipped and (tonumber(result.pulled) or 0) + (tonumber(result.pushed) or 0) > 0 then
             if desktop.insight then
                 desktop.insight.state = nil
                 desktop.insight.loaded = false
             end
-            desktop:onEvent("home_refresh", "stats_sync")
+            desktop:onEvent("stats_changed")
             if desktop.tab == "insight" then desktop:updateView() end
         end
     end)

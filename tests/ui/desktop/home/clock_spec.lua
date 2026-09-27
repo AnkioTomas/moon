@@ -92,6 +92,12 @@ myrl_cb({ lunar = "农历七月廿八", holiday = "中秋" })
 Assert.eq(text_widgets[3].text, "农历七月廿八 · 中秋")
 Assert.is_true(paints >= 1)
 
+-- 同一分钟再次 Resume、缓存返回同内容新表：都不得重复刷新。
+local same = paints
+clock:onResume()
+myrl_cb({ lunar = "农历七月廿八", holiday = "中秋" })
+Assert.eq(paints, same)
+
 now.time = "10:21"
 local before = paints
 clock:onResume()

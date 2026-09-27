@@ -35,6 +35,7 @@ local function loadSourceSetting(id)
 end
 
 --- 换展示范围后通知桌面重拉；混合开关与换源共用。
+--- 重绘由 Desktop 处理 source_changed 时的 switchTab 负责，这里不再 updateView。
 ---@param desktop table
 ---@param plugin table|nil
 local function notifyScopeChanged(desktop, plugin)
@@ -43,7 +44,6 @@ local function notifyScopeChanged(desktop, plugin)
     elseif desktop and desktop.onEvent then
         desktop:onEvent("source_changed", desktop.source)
     end
-    desktop:updateView()
 end
 
 --- 弹出：混合模式（置顶）+ 已启用源。选混合只改 library_mixed；选源则关混合并切活跃源。

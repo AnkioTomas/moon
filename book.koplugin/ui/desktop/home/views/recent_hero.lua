@@ -44,7 +44,8 @@ function M:createWidget()
     local w = opts.width
     local h = opts.height
     local source = ctx.source or (ctx.desktop and ctx.desktop.source)
-    local recent, _ignored_reading, err = Catalog.recentShelf(source and source.id, 24)
+    local recent, reading, err = Catalog.recentShelf(source and source.id, 24)
+    self.shelf_key = M.shelfKey(recent, reading, err)
     local body
 
     if recent then
