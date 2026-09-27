@@ -170,7 +170,7 @@ package.preload["ffi/posix"] = function()
         read = function(_, buffer, size)
             local n = math.min(#util.pending, size)
             if n > 0 then
-                ffi.copy(buffer, util.pending:sub(1, n))
+                ffi.copy(buffer, util.pending, n)
                 util.pending = util.pending:sub(n + 1)
             end
             return n
