@@ -22,7 +22,7 @@ local ok, err = pcall(function()
     function ReaderPaging:_gotoPage(number, orig_mode)
         -- Check if we are turning a page and not in scroll mode
         if self.current_page and self.current_page > 0 and number ~= self.current_page and not self.view.page_scroll then
-            if G_reader_settings:isTrue("swipe_animations") then
+            if G_reader_settings:isTrue("moon_page_turn_animation") then
                 local forward = number > self.current_page
                 self.ui:handleEvent(Event:new("PageChangeAnimation", forward))
             end
