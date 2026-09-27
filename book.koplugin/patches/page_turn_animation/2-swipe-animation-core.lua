@@ -103,6 +103,8 @@ local ok, err = pcall(function()
     local UIManager = require("ui/uimanager")
     -- For the frame delay sleep in the animation loop
     local ffi = require("ffi")
+    -- Gray levels for the page-turn shadow
+    local Blitbuffer = require("ffi/blitbuffer")
 
     local SwipeAnimation = {}
 
@@ -268,9 +270,12 @@ local ok, err = pcall(function()
         return edges
     end
 
-    -- A frame is a list of screen rects { x, y, w, h }; the player blits each
-    -- rect from the new page and refreshes it. Every style is a *reveal*:
-    -- each pixel is blitted and refreshed exactly once. On e-ink a pixel
+    -- A frame is a list of screen rects { x, y, w, h [, fill] }; the player
+    -- blits each rect from the new page (or, with `fill`, paints the listed
+    -- gray levels as equal vertical bands) and refreshes it. Every style is a
+    -- *reveal*: each pixel is revealed and refreshed exactly once; the only
+    -- exception is the narrow shadow fill, which the next frame reveals over.
+    -- On e-ink a pixel
     -- refreshed again costs another waveform pass and leaves ghosting, so
     -- moving-content transitions (push / cover / page curl) and per-frame
     -- full-screen effects (fade / dissolve) are deliberately absent.
@@ -336,25 +341,110 @@ local ok, err = pcall(function()
         return forward and frames or reversed(frames)
     end
 
-    --- 随机线条：横条打乱顺序，每帧揭开若干条（方向无关）。
-    ---@param edges number[]
-    ---@param frames_max number
-    ---@param span number
-    ---@return table[] frames
-    local function randomBars(edges, frames_max, span)
-        local n = #edges - 1
-        local order = {}
-        for j = 1, n do order[j] = j end
-        for j = n, 2, -1 do
-            local r = math.random(j)
-            order[j], order[r] = order[r], order[j]
+    ---@param list table
+    ---@return table list 原地打乱
+    local function shuffle(list)
+        for i = #list, 2, -1 do
+            local j = math.random(i)
+            list[i], list[j] = list[j], list[i]
         end
-        local per = math.ceil(n / math.min(frames_max, n))
+        return list
+    end
+
+    --- 按顺序把矩形平均分进不超过 frames_max 帧。
+    ---@param rects table[]
+    ---@param frames_max number
+    ---@return table[] frames
+    local function chunk(rects, frames_max)
+        local per = math.ceil(#rects / math.min(frames_max, #rects))
         local frames = {}
-        for i, j in ipairs(order) do
+        for i, r in ipairs(rects) do
             local k = math.ceil(i / per)
             frames[k] = frames[k] or {}
-            frames[k][#frames[k] + 1] = slot(edges, j, true, span)
+            frames[k][#frames[k] + 1] = r
+        end
+        return frames
+    end
+
+    --- 网格格子，cells[row][col]，从左上开始。
+    ---@param w number
+    ---@param h number
+    ---@param cols number
+    ---@param rows number
+    ---@param align number|nil
+    ---@return table[][] cells
+    local function grid(w, h, cols, rows, align)
+        local xs, ys = buildStripEdges(w, cols, align), buildStripEdges(h, rows, align)
+        local cells = {}
+        for r = 1, #ys - 1 do
+            cells[r] = {}
+            for c = 1, #xs - 1 do
+                cells[r][c] = { xs[c], ys[r], xs[c + 1] - xs[c], ys[r + 1] - ys[r] }
+            end
+        end
+        return cells
+    end
+
+    --- 行优先展开（阅读顺序）。
+    ---@param cells table[][]
+    ---@return table[] rects
+    local function flatten(cells)
+        local out = {}
+        for _, row in ipairs(cells) do
+            for _, cell in ipairs(row) do out[#out + 1] = cell end
+        end
+        return out
+    end
+
+    --- 顺时针螺旋顺序，由外圈到内圈，从左上角出发。
+    ---@param cells table[][]
+    ---@return table[] rects
+    local function spiral(cells)
+        local top, bottom, left, right = 1, #cells, 1, #cells[1]
+        local out = {}
+        while top <= bottom and left <= right do
+            for c = left, right do out[#out + 1] = cells[top][c] end
+            for r = top + 1, bottom do out[#out + 1] = cells[r][right] end
+            if top < bottom then
+                for c = right - 1, left, -1 do out[#out + 1] = cells[bottom][c] end
+            end
+            if left < right then
+                for r = bottom - 1, top + 1, -1 do out[#out + 1] = cells[r][left] end
+            end
+            top, bottom, left, right = top + 1, bottom - 1, left + 1, right - 1
+        end
+        return out
+    end
+
+    -- Shadow gradient painted on the old page next to the moving edge,
+    -- listed left to right; the darkest band touches the edge.
+    local SHADOW_W = 16
+    local SHADOW = {
+        Blitbuffer.COLOR_LIGHT_GRAY, Blitbuffer.COLOR_GRAY_9,
+        Blitbuffer.COLOR_GRAY_7, Blitbuffer.COLOR_GRAY_4,
+    }
+    local SHADOW_REV = { SHADOW[4], SHADOW[3], SHADOW[2], SHADOW[1] }
+
+    --- 翻页阴影：擦除前沿在旧页一侧涂一条渐变阴影，下一帧揭开时被新页盖掉。
+    --- 阴影条是唯一会被刷两次的区域（窄带，代价可控）；最后一帧没有阴影。
+    ---@param edges number[]
+    ---@param forward boolean
+    ---@param span number
+    ---@return table[] frames
+    local function shadow(edges, forward, span)
+        local n = #edges - 1
+        local frames = {}
+        for i = 1, n do
+            local j = forward and (n - i + 1) or i
+            local f = { slot(edges, j, false, span) }
+            if forward and j > 1 then
+                local x = math.max(edges[j - 1], edges[j] - SHADOW_W)
+                f[2] = { x, 0, edges[j] - x, span, SHADOW }
+            elseif not forward and j < n then
+                local x1 = math.min(edges[j + 2], edges[j + 1] + SHADOW_W)
+                f[2] = { edges[j + 1], 0, x1 - edges[j + 1], span, SHADOW_REV }
+            end
+            frames[i] = f
         end
         return frames
     end
@@ -412,7 +502,10 @@ local ok, err = pcall(function()
 
     -- Keys are the values of G_reader_settings "swipe_animation_style";
     -- unknown / unset values fall back to wipe. Budget: at most `steps`
-    -- frames and about 2 * steps refreshed rects per turn.
+    -- frames and about 2 * steps refreshed rects per turn, hence grid styles
+    -- use a ceil(steps / 2) square grid (4x4 portrait, 3x3 landscape).
+    local function gridSize(steps) return math.ceil(steps / 2) end
+
     SwipeAnimation.STYLES = {
         wipe = function(w, h, steps, align, forward)
             return interleave(buildStripEdges(w, steps, align), steps, forward, false, h)
@@ -428,12 +521,93 @@ local ok, err = pcall(function()
             return interleave(buildStripEdges(w, m * BLINDS, align), m, forward, false, h)
         end,
         random_bars = function(w, h, steps, align)
-            return randomBars(buildStripEdges(h, steps * 2, align), steps, w)
+            local edges, bars = buildStripEdges(h, steps * 2, align), {}
+            for j = 1, #edges - 1 do bars[j] = slot(edges, j, true, w) end
+            return chunk(shuffle(bars), steps)
         end,
         box = function(w, h, steps, align, forward)
-            return box(w, h, math.ceil(steps / 2), align, forward)
+            return box(w, h, gridSize(steps), align, forward)
+        end,
+        shadow = function(w, h, steps, align, forward)
+            return shadow(buildStripEdges(w, steps, align), forward, h)
+        end,
+        -- 逐行：按阅读顺序（行内从左到右）揭开；向后翻倒放。
+        typewriter = function(w, h, steps, align, forward)
+            local g = gridSize(steps)
+            local frames = chunk(flatten(grid(w, h, g, g, align)), steps)
+            return forward and frames or reversed(frames)
+        end,
+        -- 螺旋：向前翻由外圈旋入，向后翻由中心旋出。
+        spiral = function(w, h, steps, align, forward)
+            local g = gridSize(steps)
+            local frames = chunk(spiral(grid(w, h, g, g, align)), steps)
+            return forward and frames or reversed(frames)
+        end,
+        -- 时钟：四象限从 12 点起顺时针（向后翻逆时针）。
+        clock = function(w, h, _, align, forward)
+            local q = grid(w, h, 2, 2, align)
+            local tl, tr, br, bl = q[1][1], q[1][2], q[2][2], q[2][1]
+            if forward then return { { tr }, { br }, { bl }, { tl } } end
+            return { { tl }, { bl }, { br }, { tr } }
+        end,
+        -- 棋盘：两拍，先揭一色格再揭另一色；向后翻两拍互换。
+        checkerboard = function(w, h, steps, align, forward)
+            local g = gridSize(steps)
+            local a, b = {}, {}
+            for r, row in ipairs(grid(w, h, g, g, align)) do
+                for c, cell in ipairs(row) do
+                    local t = (r + c) % 2 == 0 and a or b
+                    t[#t + 1] = cell
+                end
+            end
+            if forward then return { a, b } end
+            return { b, a }
+        end,
+        -- 梳状：横带交替从两侧擦入，向前翻奇数带从右侧开始。
+        comb = function(w, h, steps, align, forward)
+            local g = gridSize(steps)
+            local cells = grid(w, h, g, g, align)
+            local frames = {}
+            for k = 1, #cells[1] do
+                local f = {}
+                for b, row in ipairs(cells) do
+                    local from_right = (b % 2 == 1) == forward
+                    f[#f + 1] = row[from_right and (#row - k + 1) or k]
+                end
+                frames[k] = f
+            end
+            return frames
+        end,
+        -- 斜向擦除：沿对角线推进，向前翻从右上角开始，向后翻从左上角开始。
+        diagonal = function(w, h, steps, align, forward)
+            local g = gridSize(steps)
+            local frames = {}
+            for r, row in ipairs(grid(w, h, g, g, align)) do
+                for c, cell in ipairs(row) do
+                    local k = forward and (#row - c + r) or (c + r - 1)
+                    frames[k] = frames[k] or {}
+                    frames[k][#frames[k] + 1] = cell
+                end
+            end
+            return frames
+        end,
+        random_blocks = function(w, h, steps, align)
+            local g = gridSize(steps)
+            return chunk(shuffle(flatten(grid(w, h, g, g, align))), steps)
         end,
     }
+
+    --- 把 fill 灰阶按等宽竖带涂满矩形（最后一带吃掉余数）。
+    ---@param r table { x, y, w, h, fill }
+    local function paintFill(r)
+        local fill = r[5]
+        local band = math.floor(r[3] / #fill)
+        for b, color in ipairs(fill) do
+            local bx = r[1] + (b - 1) * band
+            local bw = b < #fill and band or r[1] + r[3] - bx
+            Screen.bb:paintRect(bx, r[2], bw, r[4], color)
+        end
+    end
 
     --- 跑软件翻页动画：按所选风格把新页分块揭开，盖住旧页快照。
     --- 由 UIManager:_repaint 在新页画完、排队刷新执行前调用。
@@ -548,7 +722,11 @@ local ok, err = pcall(function()
 
         for i, frame in ipairs(frames) do
             for _, r in ipairs(frame) do
-                Screen.bb:blitFrom(new_bb, r[1], r[2], r[1], r[2], r[3], r[4])
+                if r[5] then
+                    paintFill(r)
+                else
+                    Screen.bb:blitFrom(new_bb, r[1], r[2], r[1], r[2], r[3], r[4])
+                end
                 refresh_fn(Screen, r[1], r[2], r[3], r[4])
             end
             if i < #frames and usleep and delay_ms > 0 then
