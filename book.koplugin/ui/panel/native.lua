@@ -368,6 +368,33 @@ local function injectReaderTab(menu)
     table.insert(tabs, 1, newTab(READER_MARKER, READER_TAB_ICON, populateReader, menu.ui))
 end
 
+--- 文件管理器抽屉 Tab：设置开启且桌面未显示时回月读桌面；桌面已开时保留原生设置页。
+--- remember=false 是必须的：否则下次开菜单会自动落到这个 Tab，立刻又跳桌面。
+---@param menu table FileManagerMenu
+local function patchDrawerTab(menu)
+    for _, tab in ipairs(menu.tab_item_table or {}) do
+        if tab.id == "filemanager_settings" then
+            if tab._book_drawer_patched then return end
+            tab._book_drawer_patched = true
+            tab.remember = false
+            local native = tab.callback
+            tab.callback = function()
+                local plugin = menu.ui and menu.ui.book
+                if plugin and not plugin.desktop and require("host").drawerOpensDesktop() then
+                    -- switchMenuTab 在回调后还要渲染本 Tab，关菜单推迟到下一 tick。
+                    UIManager:nextTick(function()
+                        menu:onCloseFileManagerMenu()
+                        plugin:openDesktop()
+                    end)
+                    return
+                end
+                if native then native() end
+            end
+            return
+        end
+    end
+end
+
 --- 一次性 patch 文件管理器菜单，注入桌面面板 Tab。
 local function installFileManagerMenu()
     local ok, Menu = pcall(require, "apps/filemanager/filemanagermenu")
@@ -378,6 +405,7 @@ local function installFileManagerMenu()
     Menu.setUpdateItemTable = function(self, ...)
         original(self, ...)
         injectDesktopTab(self)
+        patchDrawerTab(self)
     end
 end
 
@@ -394,7 +422,7 @@ local function tabIndex(menu, marker)
     end
 end
 
---- 阅读模式下把 filemanager Tab 重定向到月读桌面。
+--- 阅读模式下抽屉（filemanager）Tab 按设置重定向到月读桌面，否则走原生文件浏览器。
 ---@param ReaderMenu table
 local function patchFileBrowserButton(ReaderMenu)
     if ReaderMenu._book_filebrowser_patched then return end
@@ -405,7 +433,9 @@ local function patchFileBrowserButton(ReaderMenu)
         local buttons = original(self)
         local fm = buttons and buttons.filemanager
         if fm and type(fm.callback) == "function" then
+            local native = fm.callback
             fm.callback = function()
+                if not require("host").drawerOpensDesktop() then return native() end
                 self:onTapCloseMenu()
                 closeToDesktop(self.ui)
             end
@@ -521,6 +551,7 @@ function Native.onCreate(host_ui, opts)
     if not ok then logger.error("book native quick panel install failed for file manager:", err) end
     if host_ui and host_ui.menu and not host_ui.document then
         injectDesktopTab(host_ui.menu)
+        patchDrawerTab(host_ui.menu)
     end
 end
 

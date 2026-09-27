@@ -35,6 +35,7 @@ package.preload["apps/filemanager/filemanager"] = function()
     }
 end
 package.preload["apps/reader/readerui"] = function() return { instance = nil } end
+package.preload["host"] = function() return { drawerOpensDesktop = function() return true end } end
 
 local previous_settings = _G.G_reader_settings
 _G.G_reader_settings = {

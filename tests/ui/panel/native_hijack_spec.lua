@@ -53,7 +53,8 @@ end
 fm_menu:setUpdateItemTable()
 local filebrowser = findTab("filemanager_settings")
 Assert.eq(filebrowser.id, "filemanager_settings")
--- 不劫持 filebrowser Tab，始终保留原生 sub_item_table 与回调。
-Assert.is_nil(filebrowser.callback)
+-- 抽屉 Tab 只包一层回调：原生 sub_item_table 保留（开关关或桌面已开时照常可用），
+-- 且不记忆该 Tab，免得下次开菜单自动落进去又跳桌面。
+Assert.is_true(type(filebrowser.callback) == "function")
 Assert.is_true(filebrowser.sub_item_table ~= nil)
-Assert.is_nil(filebrowser.remember)
+Assert.eq(filebrowser.remember, false)

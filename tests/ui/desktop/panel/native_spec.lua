@@ -14,7 +14,14 @@ package.preload["device"] = function()
         isTouchDevice = function() return false end,
     }
 end
-package.preload["ui/uimanager"] = function() return { show = function() end, setDirty = function() end } end
+package.preload["ui/uimanager"] = function()
+    return { show = function() end, setDirty = function() end, nextTick = function(_, fn) fn() end }
+end
+
+local drawer_enabled = true
+package.preload["host"] = function()
+    return { drawerOpensDesktop = function() return drawer_enabled end }
+end
 
 local native_update_calls = 0
 local TouchMenu = {}
@@ -41,9 +48,16 @@ package.preload["ui.panel.desktop"] = function()
     }
 end
 
+local native_drawer_calls = 0
 local FileManagerMenu = {}
 function FileManagerMenu:setUpdateItemTable()
-    self.tab_item_table = {{ icon = "appbar.menu" }}
+    self.tab_item_table = {
+        { icon = "appbar.menu" },
+        {
+            id = "filemanager_settings", icon = "appbar.filebrowser",
+            callback = function() native_drawer_calls = native_drawer_calls + 1 end,
+        },
+    }
 end
 local ReaderMenu = {}
 function ReaderMenu:setUpdateItemTable()
@@ -69,7 +83,7 @@ Assert.is_true(existing.menu.tab_item_table[1]._book_quick_panel)
 
 local file_menu = setmetatable({}, { __index = FileManagerMenu })
 file_menu:setUpdateItemTable()
-Assert.len(file_menu.tab_item_table, 2)
+Assert.len(file_menu.tab_item_table, 3)
 local tab = file_menu.tab_item_table[1]
 Assert.is_true(tab._book_quick_panel)
 Assert.eq(tab.icon, "appbar.pokeball")
@@ -95,3 +109,57 @@ Assert.eq(refreshed, 1)
 local reader_menu = setmetatable({}, { __index = ReaderMenu })
 reader_menu:setUpdateItemTable()
 Assert.is_nil(reader_menu.tab_item_table[1]._book_quick_panel)
+
+-- 文件管理器抽屉 Tab：开关开且桌面未显示 → 关菜单开桌面；不记忆该 Tab。
+local desktop_opens, fm_menu_closes = 0, 0
+local fm_plugin = { openDesktop = function() desktop_opens = desktop_opens + 1 end }
+local drawer_menu = setmetatable({
+    ui = { book = fm_plugin },
+    onCloseFileManagerMenu = function() fm_menu_closes = fm_menu_closes + 1 end,
+}, { __index = FileManagerMenu })
+drawer_menu:setUpdateItemTable()
+local drawer = drawer_menu.tab_item_table[3]
+Assert.eq(drawer.id, "filemanager_settings")
+Assert.eq(drawer.remember, false)
+drawer.callback()
+Assert.eq(desktop_opens, 1)
+Assert.eq(fm_menu_closes, 1)
+Assert.eq(native_drawer_calls, 0)
+
+-- 桌面已开：保留原生设置页。
+fm_plugin.desktop = {}
+drawer.callback()
+Assert.eq(desktop_opens, 1)
+Assert.eq(native_drawer_calls, 1)
+
+-- 开关关：保留原生设置页。
+fm_plugin.desktop = nil
+drawer_enabled = false
+drawer.callback()
+Assert.eq(desktop_opens, 1)
+Assert.eq(native_drawer_calls, 2)
+
+-- 重复注入不叠包装。
+NativePanel.onCreate({ menu = drawer_menu })
+drawer.callback()
+Assert.eq(native_drawer_calls, 3)
+
+-- 阅读菜单抽屉按钮：开关关走原生文件浏览器，开则回月读桌面。
+local native_reader_fm = 0
+function ReaderMenu:getDefaultMenuButtons()
+    return { filemanager = { callback = function() native_reader_fm = native_reader_fm + 1 end } }
+end
+NativePanel.onCreate(nil, { reader = true })
+local reader_buttons = setmetatable({ ui = {} }, { __index = ReaderMenu }):getDefaultMenuButtons()
+reader_buttons.filemanager.callback()
+Assert.eq(native_reader_fm, 1)
+
+local closed_reader_menu = 0
+drawer_enabled = true
+local tapped = setmetatable({
+    ui = {},
+    onTapCloseMenu = function() closed_reader_menu = closed_reader_menu + 1 end,
+}, { __index = ReaderMenu })
+tapped:getDefaultMenuButtons().filemanager.callback()
+Assert.eq(closed_reader_menu, 1)
+Assert.eq(native_reader_fm, 1)
