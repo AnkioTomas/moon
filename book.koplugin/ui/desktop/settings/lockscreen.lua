@@ -78,6 +78,21 @@ local function editMessage(desktop)
     dialog:onShowKeyboard()
 end
 
+--- 当前配置已合成的锁屏图路径；生成中 / 未生成返回 nil。
+--- 改配置会清空 lock_screen_day，成功生成才写回；为空时盘上的图属于旧配置。
+---@return string|nil
+local function generatedPath()
+    if LockScreen.running() or not require("utils.settings").get().lock_screen_day then
+        return nil
+    end
+    local path = Compose.plan().output_path
+    local attr = type(path) == "string" and path ~= "" and require("libs/libkoreader-lfs").attributes(path)
+    if not attr or attr.mode ~= "file" or attr.size < 8 then
+        return nil
+    end
+    return path
+end
+
 ---@param desktop table
 ---@return table
 function Lockscreen:rows(desktop)
@@ -260,6 +275,16 @@ function Lockscreen:rows(desktop)
         end
     end
 
+    local path = generatedPath()
+    if path then
+        rows[#rows + 1] = function(iw)
+            return SettingRow.build(iw, {
+                kind = "nav", icon = "share", title = _("分享锁屏图"),
+                callback = function() require("remote.screenshot").share(path) end,
+            })
+        end
+    end
+
     return rows
 end
 
@@ -302,7 +327,6 @@ local function showFullscreen(path)
 end
 
 --- 已合成图缩略居中，点击全屏查看；关 / 生成中 / 未生成走同一高度空框。
---- 改配置会清空 lock_screen_day，成功生成才写回；为空时盘上的图属于旧配置，不能当预览。
 ---@param width number
 ---@return table
 function Lockscreen.preview(width)
@@ -315,11 +339,8 @@ function Lockscreen.preview(width)
     if LockScreen.running() then
         return Overlay.previewPlaceholder(width, preview_h, _("生成中…"))
     end
-    local lfs = require("libs/libkoreader-lfs")
-    local path = Compose.plan().output_path
-    local attr = type(path) == "string" and path ~= "" and lfs.attributes(path)
-    if not require("utils.settings").get().lock_screen_day
-        or not attr or attr.mode ~= "file" or (attr.size or 0) < 8 then
+    local path = generatedPath()
+    if not path then
         return Overlay.previewPlaceholder(width, preview_h, _("未生成"))
     end
     local Geom = require("ui/geometry")
