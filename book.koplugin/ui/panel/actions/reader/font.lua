@@ -7,12 +7,37 @@ local MoonFont = require("utils.font")
 local T = require("ffi/util").template
 local _ = require("gettext")
 
+--- 阅读字体选择器参数：勾选当前文档字体，选中即应用到当前阅读文档（阅读页侧栏共用）。
+---@param ui table ReaderUI
+---@return FontPickerOpts
+local function pickerOpts(ui)
+    local InfoMessage = require("ui/widget/infomessage")
+    return {
+        title = _("阅读字体"),
+        current_id = function()
+            return MoonFont.readerCurrentId(ui)
+        end,
+        on_select = function(_item, id, name)
+            local ok, err = MoonFont.applyToReader(ui, id, name)
+            if ok then
+                UIManager:show(InfoMessage:new{
+                    text = T(_("已选择：%1"), name),
+                    timeout = 2,
+                })
+            else
+                UIManager:show(InfoMessage:new{ text = err or _("应用字体失败") })
+            end
+        end,
+    }
+end
+
 ---@type BookQuickPanelAction
 return {
     id = "font",
     title = _("阅读字体"),
     icon = "text_fields",
     scope = "reader",
+    pickerOpts = pickerOpts,
     --- CRengine 文档支持 setFontFace 时显示。
     ---@param ctx BookQuickPanelContext|nil
     ---@return boolean
@@ -36,22 +61,6 @@ return {
             })
             return
         end
-        FontPicker.open{
-            title = _("阅读字体"),
-            current_id = function()
-                return MoonFont.readerCurrentId(ui)
-            end,
-            on_select = function(_item, id, name)
-                local ok, err = MoonFont.applyToReader(ui, id, name)
-                if ok then
-                    UIManager:show(InfoMessage:new{
-                        text = T(_("已选择：%1"), name),
-                        timeout = 2,
-                    })
-                else
-                    UIManager:show(InfoMessage:new{ text = err or _("应用字体失败") })
-                end
-            end,
-        }
+        FontPicker.open(pickerOpts(ui))
     end,
 }
