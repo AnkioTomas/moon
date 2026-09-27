@@ -122,6 +122,30 @@ Assert.eq(image_widgets[1].height, 60)
 Assert.is_true(image_widgets[1].original_in_nightmode, "默认夜间保持原色")
 Assert.eq(dirty_count, 0, "未上屏不得自己刷屏")
 
+-- 原地替换过的文件不能走 ImageWidget 的按路径位图缓存，必须重新解码交给 image=。
+local rendered = {}
+package.loaded["ui/renderimage"] = {
+    renderImageFile = function(_, path, _, w, h)
+        rendered[#rendered + 1] = { path = path, w = w, h = h }
+        return { fake_bb = true }
+    end,
+}
+local replaced_path = Config.dir() .. "/image-replaced-test.png"
+local replaced_file = assert(io.open(replaced_path, "wb"))
+replaced_file:write("replaced")
+replaced_file:close()
+Image.invalidate(replaced_path)
+Image.widget{ src = replaced_path, width = 40, height = 60 }:free()
+Assert.len(rendered, 1)
+Assert.eq(rendered[1].path, replaced_path)
+Assert.eq(rendered[1].w, 40)
+Assert.is_nil(image_widgets[#image_widgets].file, "失效路径不得按 file 命中旧位图")
+Assert.is_true(image_widgets[#image_widgets].image.fake_bb)
+Assert.is_true(image_widgets[#image_widgets].image_disposable)
+Assert.eq(image_widgets[1].file, image_path, "未失效路径仍走 file 缓存")
+os.remove(replaced_path)
+package.loaded["ui/renderimage"] = nil
+
 local glyph = Image.widget{ src = image_path, width = 40, height = 60, invert_in_night = true }
 Assert.is_false(image_widgets[#image_widgets].original_in_nightmode, "字形图夜间随屏反色")
 glyph:free()
