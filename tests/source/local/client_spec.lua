@@ -8,7 +8,7 @@ local Stubs = require("support.stubs")
 -- a.epub.sdr 模拟 KOReader 边车目录：扫盘不当下钻，moveBook 时跟随书籍迁移
 local DENIED_DIRS = {}
 local TREE = {
-    ["/books"] = { "a.epub", "a.epub.sdr", ".moon", ".hidden", "sub", "note.md", "old.cbr", "x.azw3" },
+    ["/books"] = { "a.epub", "a.epub.sdr", ".moon", ".hidden", "sub", "note.md", "old.cbr", "x.lit" },
     ["/books/a.epub.sdr"] = { "metadata.epub.lua" },
     ["/books/.moon"] = { "cache" },
     ["/books/.moon/cache"] = { "cached.epub" },
