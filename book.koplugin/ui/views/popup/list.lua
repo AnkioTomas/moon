@@ -204,7 +204,7 @@ local function attachBottomTabs(menu, bt)
         view.data.active = id
         view:updateView(view.data)
         stack:resetLayout()
-        UIManager:setDirty(self, "ui")
+        UIManager:setDirty(self.show_parent, "ui")
     end
     menu:updateItems() -- 触发一次全量重算，让上面的补扣生效
 end

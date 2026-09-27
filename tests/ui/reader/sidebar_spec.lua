@@ -17,6 +17,7 @@ local state = {
     opened = {},
     native_closed = {},
     tickets = {},
+    font_jobs = {},
     ticks = {},
 }
 local function flush()
@@ -42,7 +43,7 @@ end
 package.preload["ui/geometry"] = function() return { new = function(_, o) return o end } end
 local function plain() return { new = function(_, o) return o or {} end } end
 for _, name in ipairs({
-    "ui/gesturerange", "ui/widget/container/framecontainer", "ui/widget/horizontalgroup",
+    "ui/gesturerange", "ui/widget/container/centercontainer", "ui/widget/container/framecontainer", "ui/widget/horizontalgroup",
     "ui/widget/linewidget", "ui/widget/overlapgroup", "ui/widget/verticalgroup",
 }) do
     package.preload[name] = plain
@@ -116,6 +117,7 @@ package.preload["ui.components.bookui"] = function()
     return {
         pagePad = function() return 10 end,
         line = function() return 1 end,
+        mutedText = function(text) return { muted = text } end,
     }
 end
 package.preload["utils.settings"] = function()
@@ -128,6 +130,29 @@ package.preload["ui.reader.sidebar.info"] = function()
     return { build = function(_, w, h, _, on_exit)
         state.on_exit = on_exit
         return { info = true, w = w, h = h }
+    end }
+end
+--- 字体：listAsync 的回调由测试手动触发，模拟子进程扫盘 / 网络异步返回。
+package.preload["utils.font"] = function()
+    return {
+        supportsReader = function(ui) return ui.font ~= nil end,
+        listAsync = function(_, cb)
+            local job = { cb = cb }
+            job.cancel = function() job.cancelled = true end
+            state.font_jobs[#state.font_jobs + 1] = job
+            return job
+        end,
+    }
+end
+package.preload["ui.panel.actions.reader.font"] = function()
+    return { pickerOpts = function(ui) return { ui = ui } end }
+end
+package.preload["ui.components.fontpicker"] = function()
+    return { show = function(opts, items)
+        local menu = Menu:new{ title = "阅读字体", item_table = items }
+        menu.picker_opts = opts
+        menu.close_callback = function() state.native_closed[#state.native_closed + 1] = "font" end
+        UIManager:show(menu)
     end }
 end
 package.preload["ui.panel.native"] = function()
@@ -327,6 +352,42 @@ local fresh = Sidebar:new{ ui = ui, snapshot = state.snapshot }
 Assert.errors(function() fresh:goTab(2) end)
 Assert.is_nil(Menu.width)
 Assert.eq(UIManager.show, original_show)
+
+-- 阅读字体：文档支持换字体才有这一页，排在目录后。
+local font_ui = { font = {}, bookmark = ui.bookmark }
+local fonted = Sidebar:new{ ui = font_ui, snapshot = state.snapshot }
+Assert.eq(table.concat(fonted.tabs, ","), "info,toc,font,notes,xray,ticket")
+Assert.len(state.font_jobs, 0, "没进字体页不拉列表")
+fonted:goTab(3)
+Assert.len(state.font_jobs, 1)
+local loading = fonted[1][2][1][1][1]
+Assert.eq(loading[1][1].muted, "正在加载字体列表…")
+-- 列表回来：借选择器菜单进侧栏，推迟一 tick 重画；选择器参数来自阅读字体快捷动作。
+local shown_before = #state.shown
+state.font_jobs[1].cb({ { id = "a" } })
+Assert.len(state.shown, shown_before, "选择器菜单被截下，不上屏")
+flush()
+local font_menu = fonted[1][2][1][1][1]
+Assert.eq(font_menu.title, "阅读字体")
+Assert.eq(font_menu.w, 510)
+Assert.eq(font_menu.picker_opts.ui, font_ui)
+Assert.eq(font_menu.show_parent, fonted)
+-- 选中字体后 Menu 调 close_callback：关侧栏，补跑选择器原 close_callback。
+font_menu.close_callback()
+Assert.eq(state.closed[#state.closed], fonted)
+Assert.contains(state.native_closed, "font")
+
+-- 列表加载失败：给文案，不重试；关侧栏时取消还在拉的列表。
+local failing = Sidebar:new{ ui = font_ui, snapshot = state.snapshot }
+failing:goTab(3)
+state.font_jobs[2].cb(nil)
+flush()
+Assert.eq(failing[1][2][1][1][1][1][1].muted, "字体列表加载失败")
+local pending = Sidebar:new{ ui = font_ui, snapshot = state.snapshot }
+pending:goTab(3)
+pending:onClose()
+Assert.is_true(state.font_jobs[3].cancelled)
+Assert.is_nil(pending.font_job)
 
 -- 书籍页左滑切页；遮罩上滑动直接关闭。
 local other = Sidebar:new{ ui = ui, snapshot = state.snapshot }

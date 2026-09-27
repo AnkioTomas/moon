@@ -1,5 +1,6 @@
 --[[--
-阅读页左侧栏：书籍 / 目录 / 书摘 / X-Ray / 阅读票根，右侧网状遮罩压暗正文。
+阅读页左侧栏：书籍 / 目录 / 阅读字体 / 书摘 / X-Ray / 阅读票根，右侧网状遮罩压暗正文。
+阅读字体仅在文档支持换字体时出现，复用字体选择器菜单。
 书籍页右上角关闭按钮退出本书；票根页复用锁屏票根并可分享。
 
 目录、书摘、X-Ray 不自己画：借用各自原有入口弹出的全屏 Menu（KOReader 原生目录的折叠/搜索、
@@ -17,6 +18,7 @@
 require("l10n").apply()
 
 local Blitbuffer = require("ffi/blitbuffer")
+local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -47,11 +49,14 @@ local PANEL_RATIO = 0.85
 ---@field native_closes fun()[] 借来菜单的原 close_callback，侧栏关闭时各调一次做原生清理
 ---@field panel_w integer
 ---@field ticket BookSidebarTicket|nil 首次进入票根页时生成，关侧栏取消
+---@field font_job table|nil 字体列表拉取中（{ cancel }），关侧栏取消
+---@field closed boolean|nil 已关闭：迟到的异步回调不再重画
 local Sidebar = InputContainer:extend{}
 
 local TITLES = {
     info = _("书籍"),
     toc = _("目录"),
+    font = _("阅读字体"),
     notes = _("书摘"),
     xray = _("X-Ray"),
     ticket = _("阅读票根"),
@@ -131,7 +136,11 @@ function Sidebar:init()
     local screen = Device.screen:getSize()
     self.dimen = Geom:new{ x = 0, y = 0, w = screen.w, h = screen.h }
     self.panel_w = math.floor(screen.w * PANEL_RATIO)
-    self.tabs = { "info", "toc", "notes" }
+    self.tabs = { "info", "toc" }
+    if require("utils.font").supportsReader(self.ui) then
+        self.tabs[#self.tabs + 1] = "font"
+    end
+    self.tabs[#self.tabs + 1] = "notes"
     if MoonSettings.get("reader").book_xray_enabled ~= false then
         self.tabs[#self.tabs + 1] = "xray"
     end
@@ -156,16 +165,51 @@ end
 ---@return table|nil
 function Sidebar:menuFor(id, width, height)
     if self.menus[id] == nil then
-        local menu = borrowMenu(function() OPENERS[id](self.ui) end, width, height)
-        if menu then
-            self.native_closes[#self.native_closes + 1] = menu.close_callback
-            menu.close_callback = function() self:onClose() end
-            menu.show_parent = self
-            fitPager(menu)
-        end
-        self.menus[id] = menu or false
+        self:adopt(id, borrowMenu(function() OPENERS[id](self.ui) end, width, height))
     end
     return self.menus[id] or nil
+end
+
+--- 借来的菜单改挂到侧栏：选中条目 / 关闭键都经 close_callback 关侧栏。
+---@param id string
+---@param menu table|nil
+function Sidebar:adopt(id, menu)
+    if menu then
+        self.native_closes[#self.native_closes + 1] = menu.close_callback
+        menu.close_callback = function() self:onClose() end
+        menu.show_parent = self
+        fitPager(menu)
+    end
+    self.menus[id] = menu or false
+end
+
+--- 字体页：选择器自己的入口会先弹加载提示，借不到菜单；这里自己拉列表，拉到后借
+--- FontPicker.show 的菜单并刷新本页。选中字体即应用到当前文档（Menu 选中后关侧栏）。
+---@param width integer
+---@param height integer
+---@return table|nil
+function Sidebar:fontMenu(width, height)
+    if self.menus.font == nil and not self.font_job then
+        local job = require("utils.font").listAsync(false, function(items)
+            self.font_job = nil
+            if items then
+                local opts = require("ui.panel.actions.reader.font").pickerOpts(self.ui)
+                self:adopt("font", borrowMenu(function()
+                    require("ui.components.fontpicker").show(opts, items)
+                end, width, height))
+            else
+                self.menus.font = false
+            end
+            -- 可能同步回调（缓存命中），推迟到下一 tick 再重画
+            UIManager:nextTick(function()
+                if self.closed or self.tabs[self.tab] ~= "font" then return end
+                self:render()
+                UIManager:setDirty(self, "ui")
+            end)
+        end)
+        if self.menus.font == nil then self.font_job = job end
+    end
+    return self.menus.font or nil
 end
 
 --- 票根首次进入时生成（每次打开侧栏重画一张，进度和今日统计跟着变）；出图后刷新本页。
@@ -224,14 +268,24 @@ function Sidebar:render()
             },
         }
     else
+        local menu, status
+        if id == "font" then
+            menu = self:fontMenu(self.panel_w, body_h)
+            status = self.font_job and _("正在加载字体列表…") or _("字体列表加载失败")
+        else
+            menu = self:menuFor(id, self.panel_w, body_h)
+        end
         body = OverlapGroup:new{
             dimen = Geom:new{ w = self.panel_w, h = body_h },
-            self:menuFor(id, self.panel_w, body_h) or FrameContainer:new{
+            menu or FrameContainer:new{
                 bordersize = 0,
                 background = Blitbuffer.COLOR_WHITE,
                 width = self.panel_w,
                 height = body_h,
-                VerticalGroup:new{},
+                status and CenterContainer:new{
+                    dimen = Geom:new{ w = self.panel_w, h = body_h },
+                    UI.mutedText(status, self.panel_w - UI.pagePad() * 2, 14),
+                } or VerticalGroup:new{},
             },
         }
     end
@@ -303,6 +357,11 @@ function Sidebar:onCloseWidget()
     local closes = self.native_closes
     self.native_closes = {}
     for _, close in ipairs(closes) do close() end
+    self.closed = true
+    if self.font_job then
+        self.font_job.cancel()
+        self.font_job = nil
+    end
     if self.ticket then
         self.ticket:cancel()
         self.ticket = nil
