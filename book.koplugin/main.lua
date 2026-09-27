@@ -66,6 +66,7 @@ function BookPlugin:init()
     require("nightmode").onCreate()
     require("ime.init").onCreate()
     require("patch.manager").onCreate({ plugin_root = self.path })
+    require("convert.azw3document"):register(require("document/documentregistry"))
     if self.ui and self.ui.document then
         self:emitToSource("reader_open")
     end

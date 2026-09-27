@@ -329,6 +329,7 @@ return {
     ["打开 GitHub"] = "Open GitHub",
     ["书友交流群"] = "Reader Group",
     ["打开月读"] = "Open 月读",
+    ["AZW3（月读）"] = "AZW3 (月读)",
     ["找不到服务器地址，镜像可能已失效"] = "Server address not found; the mirror may be dead",
     ["拖动或点按调整组件高度"] = "Adjust widget height",
     ["拷贝漫画"] = "CopyManga",
