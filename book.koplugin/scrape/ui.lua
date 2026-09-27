@@ -1,7 +1,7 @@
 --[[--
 刮削 UI 流程
 
-用户确认书名 -> 搜索 -> 选择结果 -> 写 books 表 + 下封面 -> 通知调用方刷新
+用户确认书名 -> 搜索 -> 选择结果 -> 写 books 表 + 下封面 -> 通知属主源上行 -> 通知调用方刷新
 
 @module koplugin.book.scrape.ui
 --]]
@@ -72,7 +72,13 @@ local function applyResult(identity, result, done)
         done(_("元数据更新失败"))
         return
     end
-    saveCover(identity, result.cover_url, result.cover_headers, done)
+    saveCover(identity, result.cover_url, result.cover_headers, function()
+        require("source.registry").resolve(identity.source_id):onEvent("book_meta_changed", {
+            identity = identity,
+            cover = result.cover_url ~= "",
+        })
+        done()
+    end)
 end
 
 --- 显示搜索结果选择页

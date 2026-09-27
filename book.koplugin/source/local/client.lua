@@ -1564,6 +1564,63 @@ function Client:deleteWebdavAsync(stable_id, cb)
     end }
 end
 
+--- 单本书元数据立即上行（编辑 / 刮削后）：cover=true 时先把本地封面传上去，本地没封面就删远端封面
+--- （否则下一轮 pullCovers 会把旧封面拉回来）；再把这本书的条目写进 books.sync，写成才清脏。
+--- 非 webdav:// 身份没有远端，直接成功。书目没写成保留脏标记，下一轮 pushBooksSync 重试。
+---@param stable_id string
+---@param cover boolean 封面是否换过
+---@param cb fun(ok: boolean, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:pushBookAsync(stable_id, cover, cb)
+    local rel = remoteRelativePath(stable_id)
+    if not rel then return defer(cb, true) end
+    local BookDB = require("db.book")
+    -- upsertLocal 不标脏已有行；不标的话推送失败后下一轮 reconcile 会用远端书目把改动盖回去。
+    BookDB.setLibraryMembership(SOURCE_ID, stable_id, true)
+    local cancelled, active = false, nil
+    local function pushEntry()
+        local ctx = {
+            root = self:webdavPath(),
+            device_id = require("utils.settings").ensureDeviceId(),
+            array = require("json").util.InitArray,
+        }
+        active = editBooksSync(self, rel, function(base)
+            local row = BookDB.get(SOURCE_ID, stable_id)
+            return row and rowEntry(row, rel, base, ctx) or base
+        end, function(listed)
+            if cancelled then return end
+            if not listed then return cb(false, _("更新书目失败")) end
+            BookDB.markSynced(SOURCE_ID, stable_id)
+            cb(true)
+        end)
+    end
+    if not cover then
+        pushEntry()
+    else
+        local remote, path = coverRemotePath(self, rel), coverPath(stable_id)
+        local function afterCover(ok, err)
+            if cancelled then return end
+            if not ok then require("utils.log").warn("book webdav cover push failed", rel, err) end
+            pushEntry()
+        end
+        if lfs.attributes(path, "mode") ~= "file" then
+            active = self.dav:deleteAsync(remote, function(ok, err, code)
+                afterCover(ok or code == 404, err)
+            end)
+        else
+            active = self.dav:ensurePathAsync(moonPath(self, "Cover"), function(ok_dir, dir_err)
+                if cancelled then return end
+                if not ok_dir then return afterCover(false, dir_err) end
+                active = self.dav:putFileAsync(remote, path, afterCover)
+            end)
+        end
+    end
+    return { cancel = function()
+        cancelled = true
+        if active and active.cancel then active:cancel() end
+    end }
+end
+
 --- 用转换后的临时 EPUB 替换 WebDAV 书（同目录同名 .epub）。
 --- 顺序：查远端重名 → 传新文件 → 书目条目改名（其余字段原样保留）→ 换本地文件、迁移身份与 .sdr/封面 →
 --- 删远端原书及其边车。书目写成之前失败都撤掉已传的新文件，远端与本地保持原样；

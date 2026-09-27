@@ -62,6 +62,14 @@ end
 ---@param event string
 ---@param payload table|nil
 function Source:onEvent(event, payload)
+    if event == "book_meta_changed" then
+        if not self._client:isWebdav() then return end
+        local stable_id = payload.identity.stable_id
+        self._client:pushBookAsync(stable_id, payload.cover == true, function(ok, err)
+            if not ok then require("utils.log").warn("book webdav meta push failed", stable_id, err) end
+        end)
+        return
+    end
     if event == "library_refresh_request" and not self:configured() then
         local UIManager = require("ui/uimanager")
         local ConfirmBox = require("ui/widget/confirmbox")
