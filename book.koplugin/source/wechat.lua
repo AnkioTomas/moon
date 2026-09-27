@@ -631,15 +631,56 @@ function Source:pushStatsAsync(rows, cb)
         end }
 end
 
---- 拉取累计总量，再按年定位月份、按月拉取真实日明细。
+--- 每次统计同步最多补拉 readinfo 的书数；首次同步整个书架分几轮补齐。
+local READINFO_BATCH = 20
+
+--- 拉取累计总量，再按年定位月份、按月拉取真实日明细；
+--- 最后对书架里云端累计有变化的书逐本拉 readinfo 按日明细。
 ---@param cb fun(result: BookStatsRow[]|BookStatsPullResult|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Source:pullStatsAsync(cb)
     local cancelled, jobs = false, {}
+    local function track(job)
+        jobs[#jobs + 1] = job
+    end
     local function request(mode, base_time, done)
-        local slot = {}
-        jobs[#jobs + 1] = slot
-        slot.job = self._client:readStatsAsync(mode, base_time, done)
+        track(self._client:readStatsAsync(mode, base_time, done))
+    end
+    --- 单书明细是尽力而为：书架或某本书失败只跳过，不连累账户级统计；
+    --- 没拉到的书快照不变，下次同步仍判为有变化而重试。
+    local function collectBooks(done)
+        track(self._client:shelfSyncAsync(function(shelf, err)
+            if cancelled then return end
+            if not shelf then
+                logger.warn("wechat book stats shelf failed", err)
+                done({})
+                return
+            end
+            local pending = require("source.wechat.stats").changedBooks(
+                shelf.bookProgress, require("db.stats").bookTotals(self.id), READINFO_BATCH
+            )
+            local results, index = {}, 1
+            local function nextBook()
+                if cancelled then return end
+                local book = pending[index]
+                index = index + 1
+                if not book then
+                    done(results)
+                    return
+                end
+                track(self._client:readInfoAsync(book.id, function(wire, rerr)
+                    if cancelled then return end
+                    if wire then
+                        book.wire = wire
+                        results[#results + 1] = book
+                    else
+                        logger.warn("wechat readinfo failed", book.id, rerr)
+                    end
+                    nextBook()
+                end))
+            end
+            nextBook()
+        end))
     end
     local function collect(mode, bases, done)
         local results, index = {}, 1
@@ -678,16 +719,9 @@ function Source:pullStatsAsync(cb)
                 end
             end
             collect("monthly", monthly_bases, function(monthlies)
-                local weekly_bases = StatsMapper.weeklyBaseTimes(annuals, monthlies)
-                collect("weekly", weekly_bases, function(weeklies)
-                    local books = {}
-                    for _, wire in ipairs(StatsMapper.weeklyBookWires(weeklies)) do
-                        local book = Mapper.book(wire)
-                        if book then books[#books + 1] = book end
-                    end
-                    require("book.store").rememberMany(books)
+                collectBooks(function(book_details)
                     cb(StatsMapper.fromWires(
-                        self.id, overall, annuals, monthlies, weeklies
+                        self.id, overall, annuals, monthlies, book_details, os.time()
                     ))
                 end)
             end)
@@ -695,9 +729,7 @@ function Source:pullStatsAsync(cb)
     end)
     return { cancel = function()
             cancelled = true
-            for _, slot in ipairs(jobs) do
-                if slot.job and slot.job.cancel then slot.job:cancel() end
-            end
+            for _, job in ipairs(jobs) do job:cancel() end
         end }
 end
 

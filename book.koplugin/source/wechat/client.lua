@@ -313,6 +313,18 @@ function Client:readStatsAsync(mode, base_time, cb)
     return Eink.callAsync("GET", "/readdata/detail", { query = query }, cb)
 end
 
+--- 单书阅读详情（Eink ``/book/readinfo``，``readDetail.data`` 为按日 ``{ readDate, readTime }``）。
+---
+--- 不能走 Web：``/web/book/readinfo`` 对部分书恒回 ``showDetail=0``、不给按日明细。
+---@param bookId string
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:readInfoAsync(bookId, cb)
+    return Eink.callAsync("GET", "/book/readinfo", {
+        query = { bookId = tostring(bookId), readingDetail = 1 },
+    }, cb)
+end
+
 --- 个人划线列表（Eink ``/book/bookmarklist``，回 ``updated`` + ``chapters``）。
 ---
 --- 不能走 Web：Web 会话打 ``/web/book/bookmarklist`` 恒返回 ``{}``（无 errcode）。

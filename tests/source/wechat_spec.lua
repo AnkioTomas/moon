@@ -195,34 +195,73 @@ do
                 baseTime = base_time,
                 dailyReadTimes = { [tostring(base_time)] = 900 },
             })
-        elseif mode == "monthly" then
+        else
             cb({
                 baseTime = base_time,
                 readTimes = { [tostring(base_time + 86400)] = 900 },
             })
-        else
-            cb({
-                baseTime = base_time,
-                readLongest = {
-                    { book = { bookId = "weekly-book", title = "周书" }, readTime = 900 },
-                },
-            })
         end
         return { cancel = function() end }
     end
+    -- 书架：same 云端累计与本地快照一致 → 不拉；新近更新的 fresh 先拉；broken 拉失败只跳过
+    fake_client.shelfSyncAsync = function(_, cb)
+        cb({ bookProgress = {
+            { bookId = "same", readingTime = 500, updateTime = 30 },
+            { bookId = "broken", readingTime = 100, updateTime = 10 },
+            { bookId = 42, readingTime = 2578, updateTime = 20 },
+        } })
+        return { cancel = function() end }
+    end
+    local readinfo = {}
+    fake_client.readInfoAsync = function(_, book_id, cb)
+        readinfo[#readinfo + 1] = book_id
+        if book_id == "broken" then
+            cb(nil, "网络错误")
+        else
+            cb({ readDetail = { totalReadingTime = 2578, data = {
+                { readDate = 1790352000, readTime = 440 },
+                { readDate = 1790438400, readTime = 134 },
+                { readDate = 1790524800, readTime = 0 },
+            } } })
+        end
+        return { cancel = function() end }
+    end
+    local StatsDB = require("db.stats")
+    local real_book_totals = StatsDB.bookTotals
+    StatsDB.bookTotals = function(source_id)
+        Assert.eq(source_id, "wechat")
+        return { same = 500, broken = 90 }
+    end
     local result
     WeChat.new():pullStatsAsync(function(value) result = value end)
+    StatsDB.bookTotals = real_book_totals
+    fake_client.shelfSyncAsync, fake_client.readInfoAsync = nil, nil
+    Assert.eq(readinfo[1], "42", "最近更新的书先拉，数字 bookId 统一为字符串")
+    Assert.eq(readinfo[2], "broken")
+    Assert.len(readinfo, 2, "云端累计没变的书不发 readinfo")
+    Assert.len(result.replace.books, 1, "拉失败的书不替换，快照不变留待下次重试")
+    Assert.eq(result.replace.books[1], "42")
+    local book_days, book_total = {}, nil
+    for _, row in ipairs(result.rows) do
+        if row.stable_id == "42" and row.record_type == "book_day" then
+            book_days[#book_days + 1] = row
+            Assert.is_true(row.last_time > 0, "book_day 记拉取时间")
+        end
+        if row.stable_id == "42" and row.record_type == "book_total" then book_total = row.duration end
+        if row.record_type == "day" then Assert.is_true(row.last_time > 0, "日桶记拉取时间") end
+    end
+    Assert.len(book_days, 2, "0 秒的日子不落行")
+    Assert.eq(book_total, 2578, "快照取书架 readingTime，与触发拉取的值一致才能收敛")
     Assert.eq(requests[1][1], "overall")
     Assert.eq(requests[2][1], "annually")
     Assert.eq(requests[3][1], "annually")
     Assert.eq(requests[4][1], "monthly")
     Assert.eq(requests[4][2], 1735689600)
-    Assert.eq(requests[5][1], "weekly")
-    Assert.eq(requests[6][1], "weekly")
+    Assert.len(requests, 4, "不再按周拉排行")
     Assert.not_nil(requests[2][2])
     Assert.not_nil(requests[3][2])
     Assert.eq(result.replace.mode, "ranges")
-    Assert.len(result.replace.ranges, 5)
+    Assert.len(result.replace.ranges, 4)
     local total, monthly_day
     for _, row in ipairs(result.rows) do
         if row.record_type == "total" then total = row.duration end
@@ -230,7 +269,6 @@ do
     end
     Assert.eq(total, 7200)
     Assert.eq(monthly_day, 900)
-    Assert.eq(remembered_stats_books[1].stable_id, "weekly-book")
     fake_client.readStatsAsync = nil
 end
 

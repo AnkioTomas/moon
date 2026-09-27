@@ -91,6 +91,8 @@ begin_cb({ qr_path = "qr.png", token = "t", jar = {} })
 Assert.len(shown, 2)
 Assert.eq(closed[1], placeholder)
 Assert.eq(shown[2].child.content.file, "qr.png")
+-- 每次登录都复用同一路径，走 ImageCache 会显示上一张已失效的码。
+Assert.eq(shown[2].child.content.file_do_cache, false)
 Assert.not_nil(wait_cb)
 shown[2].tap_close_callback()
 Assert.eq(wait_cancels, 1)

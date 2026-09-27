@@ -1,10 +1,11 @@
 --[[--
-微信读书阅读统计：累计总量、日桶及周书单 wire → reading_stats 领域行。
+微信读书阅读统计：累计总量、账户日桶与单书明细 wire → reading_stats 领域行。
 
-云端只提供账户级日桶 ``__wr:day:<ts>``，不伪造按日书籍归属。
-周排行用 ``__wr:week:<baseTime>:<bookId>``，只作为周书单。
-权威累计时长用 ``__wr:total``，不参与日历分桶求和。
-入库前按各合成前缀的时间窗口替换旧记录，避免重复累计。
+账户级日桶 ``__wr:day:<ts>``；权威累计时长 ``__wr:total``，不参与日历分桶求和。
+单书（stable_id 即 bookId）：``book_total`` 为书架 ``readingTime`` 快照（start_time=拉取时间），
+``book_day`` 为 readinfo 按日明细（start_time=当天零点）。云端按日求和本就不等于累计，两者不互推。
+日桶 / book_day 的 last_time 记拉取时间：展示时补上拉取之后本地新读的时长。
+入库前按各合成前缀的时间窗口、按书精确替换旧记录，避免重复累计。
 
 @module koplugin.book.source.wechat.stats
 --]]
@@ -12,8 +13,9 @@
 local Stats = {}
 
 local DAY_PREFIX = "__wr:day:"
-local WEEK_PREFIX = "__wr:week:"
 local TOTAL_ID = "__wr:total"
+--- 旧版周排行合成行（record_type=book），已由单书按日取代；每次拉取顺手清掉。
+local LEGACY_WEEK_PREFIX = "__wr:week:"
 
 local function field(wire, key)
     if type(wire) ~= "table" then return nil end
@@ -22,7 +24,7 @@ local function field(wire, key)
 end
 
 --- 合成 reading_stats 行；云端没有页坐标，page/total_pages 恒为 0。
-local function statsRow(source_id, stable_id, record_type, start_time, duration)
+local function statsRow(source_id, stable_id, record_type, start_time, duration, last_time)
     return {
         source_id = source_id,
         stable_id = stable_id,
@@ -31,31 +33,17 @@ local function statsRow(source_id, stable_id, record_type, start_time, duration)
         start_time = start_time,
         duration = duration,
         total_pages = 0,
+        last_time = last_time,
     }
 end
 
-local function appendTimes(rows, source_id, read_times)
+local function appendTimes(rows, source_id, read_times, fetched_at)
     if type(read_times) ~= "table" then return end
     for ts_str, seconds in pairs(read_times) do
         local ts = tonumber(ts_str)
         local duration = tonumber(seconds)
         if ts and duration and duration > 0 then
-            rows[#rows + 1] = statsRow(source_id, DAY_PREFIX .. tostring(ts), "day", ts, duration)
-        end
-    end
-end
-
-local function appendWeeklyBooks(rows, source_id, wire)
-    local anchor = tonumber(field(wire, "baseTime"))
-    local longest = field(wire, "readLongest")
-    if not anchor or type(longest) ~= "table" then return end
-    for _, item in ipairs(longest) do
-        local book = type(item) == "table" and item.book or nil
-        local id = type(book) == "table" and (book.bookId or book.id) or nil
-        local duration = type(item) == "table" and tonumber(item.readTime) or nil
-        if id and duration and duration > 0 then
-            local stable_id = WEEK_PREFIX .. tostring(anchor) .. ":" .. tostring(id)
-            rows[#rows + 1] = statsRow(source_id, stable_id, "book", anchor, duration)
+            rows[#rows + 1] = statsRow(source_id, DAY_PREFIX .. tostring(ts), "day", ts, duration, fetched_at)
         end
     end
 end
@@ -115,67 +103,56 @@ function Stats.monthlyBaseTimes(annual)
     return out
 end
 
---- 从真实日桶得到需要拉取的自然周，每周只请求一次。
----@param annuals table[]
----@param monthlies table[]
----@return number[]
-function Stats.weeklyBaseTimes(annuals, monthlies)
-    local by_week = {}
-    local function collect(read_times)
-        if type(read_times) ~= "table" then return end
-        for ts_str, seconds in pairs(read_times) do
-            local ts = tonumber(ts_str)
-            if ts and ts > 0 and (tonumber(seconds) or 0) > 0 then
-                local date = os.date("*t", ts)
-                local noon = os.time({
-                    year = date.year, month = date.month, day = date.day, hour = 12,
-                })
-                local monday = noon - ((date.wday + 5) % 7) * 86400
-                local key = os.date("%Y-%m-%d", monday)
-                if not by_week[key] then by_week[key] = ts end
-            end
+--- 书架 ``bookProgress`` 里云端累计与本地快照不同的书（即某台设备读过），最近更新的在前。
+---@param progresses table[]|nil 书架 wire 的 bookProgress
+---@param stored table<string, number> 本地 book_total 快照：bookId → 秒
+---@param limit integer 本轮最多拉取的书数，其余留给下次同步
+---@return { id: string, reading_time: number }[]
+function Stats.changedBooks(progresses, stored, limit)
+    local changed = {}
+    for _, p in ipairs(type(progresses) == "table" and progresses or {}) do
+        local seconds = tonumber(p.readingTime) or 0
+        local id = p.bookId ~= nil and tostring(p.bookId) or nil
+        if id and seconds ~= (stored[id] or 0) then
+            changed[#changed + 1] = {
+                id = id, reading_time = seconds, updated_at = tonumber(p.updateTime) or 0,
+            }
         end
     end
-    for _, annual in ipairs(annuals or {}) do
-        collect(field(annual, "dailyReadTimes"))
-    end
-    for _, monthly in ipairs(monthlies or {}) do
-        collect(field(monthly, "readTimes"))
-    end
-    local keys = {}
-    for key in pairs(by_week) do keys[#keys + 1] = key end
-    table.sort(keys)
+    table.sort(changed, function(a, b) return a.updated_at > b.updated_at end)
     local out = {}
-    for _, key in ipairs(keys) do out[#out + 1] = by_week[key] end
-    return out
-end
-
---- 提取周排行里的书籍 wire，供调用方持久化元数据。
----@param weeklies table[]
----@return table[]
-function Stats.weeklyBookWires(weeklies)
-    local out = {}
-    for _, weekly in ipairs(weeklies or {}) do
-        local longest = field(weekly, "readLongest")
-        if type(longest) == "table" then
-            for _, item in ipairs(longest) do
-                if type(item) == "table" and type(item.book) == "table" then
-                    out[#out + 1] = item.book
-                end
-            end
-        end
+    for i = 1, math.min(limit, #changed) do
+        out[i] = { id = changed[i].id, reading_time = changed[i].reading_time }
     end
     return out
 end
 
---- 合并总体权威总量、日桶和周书单。
+--- 单书：书架累计快照 + readinfo 按日明细。
+local function appendBook(rows, source_id, book, fetched_at)
+    if book.reading_time > 0 then
+        rows[#rows + 1] = statsRow(source_id, book.id, "book_total", fetched_at, book.reading_time)
+    end
+    local detail = field(book.wire, "readDetail")
+    local days = type(detail) == "table" and detail.data or nil
+    for _, day in ipairs(type(days) == "table" and days or {}) do
+        local ts = tonumber(day.readDate)
+        local seconds = tonumber(day.readTime)
+        if ts and seconds and seconds > 0 then
+            rows[#rows + 1] = statsRow(source_id, book.id, "book_day", ts, seconds, fetched_at)
+        end
+    end
+end
+
+--- 合并总体权威总量、账户日桶与单书明细。
 ---@param source_id string
 ---@param overall table
 ---@param annuals table[]
 ---@param monthlies table[]|nil
----@param weeklies table[]|nil
+---@param books { id: string, reading_time: number, wire: table }[]|nil 已拉到 readinfo 的书
+---@param fetched_at number|nil 拉取时间
 ---@return BookStatsPullResult
-function Stats.fromWires(source_id, overall, annuals, monthlies, weeklies)
+function Stats.fromWires(source_id, overall, annuals, monthlies, books, fetched_at)
+    fetched_at = fetched_at or os.time()
     local rows = {}
     local total = tonumber(field(overall, "totalReadTime"))
     if total and total > 0 then
@@ -183,10 +160,11 @@ function Stats.fromWires(source_id, overall, annuals, monthlies, weeklies)
     end
     local ranges = {
         { stable_prefix = TOTAL_ID, from_ts = 0, to_ts = 0 },
+        { stable_prefix = LEGACY_WEEK_PREFIX, from_ts = 0, to_ts = fetched_at },
     }
     for _, annual in ipairs(annuals or {}) do
         -- 年度回包有真实日明细时直接使用；没有时由月度请求补齐。
-        appendTimes(rows, source_id, field(annual, "dailyReadTimes"))
+        appendTimes(rows, source_id, field(annual, "dailyReadTimes"), fetched_at)
         local from_ts, to_ts = yearRange(annual)
         ranges[#ranges + 1] = {
             stable_prefix = DAY_PREFIX, from_ts = from_ts, to_ts = to_ts,
@@ -194,24 +172,19 @@ function Stats.fromWires(source_id, overall, annuals, monthlies, weeklies)
     end
     for _, monthly in ipairs(monthlies or {}) do
         -- 月度 ``readTimes`` 的粒度是日，可以直接落日桶。
-        appendTimes(rows, source_id, field(monthly, "readTimes"))
+        appendTimes(rows, source_id, field(monthly, "readTimes"), fetched_at)
     end
-    for _, weekly in ipairs(weeklies or {}) do
-        appendWeeklyBooks(rows, source_id, weekly)
-        local anchor = tonumber(field(weekly, "baseTime"))
-        if anchor then
-            ranges[#ranges + 1] = {
-                stable_prefix = WEEK_PREFIX .. tostring(anchor) .. ":",
-                from_ts = anchor,
-                to_ts = anchor,
-            }
-        end
+    local book_ids = {}
+    for _, book in ipairs(books or {}) do
+        appendBook(rows, source_id, book, fetched_at)
+        book_ids[#book_ids + 1] = book.id
     end
     return {
         rows = rows,
         replace = {
             mode = "ranges",
             ranges = ranges,
+            books = book_ids,
         },
     }
 end

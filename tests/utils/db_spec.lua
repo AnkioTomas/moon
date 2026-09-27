@@ -542,19 +542,12 @@ do
                         return nil
                     end
                     if sql:find("MAX(CASE WHEN record_type='page_rollup'", 1, true) then
-                        return { 3660, 3, 2000 }, { "s", "c", "m" }
+                        return { 3660, 0, 3, 2000 }, { "s", "f", "c", "m" }
                     end
                     return nil
                 end,
                 resultset = function()
-                    if sql:find("stable_id LIKE '__wr:week:%'", 1, true) then
-                        return {
-                            { "2026-08-24" },
-                            { "__wr:week:1787529600:book-42" },
-                            { 1800 },
-                        }, 1
-                    end
-                    if sql:find("MAX(page)", 1, true) then
+                    if sql:find("ORDER BY day, seconds DESC", 1, true) then
                         return {
                             { day2 },
                             { "local" },
@@ -571,6 +564,7 @@ do
                             { "page", "page" },
                             { 300, 600 },
                             { 5, 10 },
+                            { 0, 0 },
                         }, 2
                     end
                     if sql:find("ORDER BY day DESC", 1, true) then
@@ -623,19 +617,15 @@ do
     Assert.eq(books[1].stable_id, "/books/a.epub")
     Assert.eq(books[1].max_page, 10)
     Assert.eq(books[1].max_total_pages, 20)
-    local weekly = StatsDB.weeklyBooksBySource("wechat")
-    Assert.eq(#weekly, 1)
-    Assert.eq(weekly[1].week_ymd, "2026-08-24")
-    Assert.eq(weekly[1].stable_id, "book-42")
-    Assert.eq(weekly[1].seconds, 1800)
     local sb = StatsDB.summaryByBook("local", "/books/a.epub")
     Assert.eq(sb.total_seconds, 3660)
     Assert.eq(sb.pages, 3)
     Assert.eq(sb.last_read, 2000)
     local sb_q = calls[#calls]
     Assert.is_true(sb_q.sql:find("AND stable_id=?", 1, true) ~= nil)
-    Assert.eq(sb_q.args[1], "local")
-    Assert.eq(sb_q.args[2], "/books/a.epub")
+    Assert.eq(sb_q.args[1], 0, "无云端快照时快照时间按 0 绑定")
+    Assert.eq(sb_q.args[2], "local")
+    Assert.eq(sb_q.args[3], "/books/a.epub")
 
     -- 按书按天聚合（详情页最近几天卡片）：日期倒序 + LIMIT 绑定
     local bd = StatsDB.dailyByBook("local", "/books/a.epub", 5)
@@ -645,11 +635,11 @@ do
     Assert.eq(bd[1].pages, 10)
     Assert.eq(bd[2].ymd, day1)
     local bd_q = calls[#calls]
-    Assert.is_true(bd_q.sql:find("AND stable_id=?", 1, true) ~= nil)
+    Assert.is_true(bd_q.sql:find("AND r.stable_id=?", 1, true) ~= nil)
     Assert.is_true(bd_q.sql:find("LIMIT ?", 1, true) ~= nil)
     Assert.eq(bd_q.args[1], "local")
     Assert.eq(bd_q.args[2], "/books/a.epub")
-    Assert.eq(bd_q.args[3], 5)
+    Assert.eq(bd_q.args[#bd_q.args], 5, "LIMIT 绑定在最后")
     -- 全部参数化：source_id 绑定，不以字面量拼进 SQL
     for _, c in ipairs(calls) do
         Assert.is_false(c.sql:find("'local'", 1, true) ~= nil)

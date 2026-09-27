@@ -139,13 +139,12 @@ function Catalog.toList(rows, count, source_id)
 end
 
 --- 阅读统计聚合 → StatsInsight。
----@param source_id string|string[] 单源字符串或多源列表；多源一律按日书单（不用微信周桶）
+---@param source_id string|string[] 单源字符串或多源列表
 ---@param summary table|nil
 ---@param daily table[]|nil
 ---@param daily_books table[]|nil
----@param weekly_books table[]|nil
 ---@return StatsInsight
-function Catalog.toInsight(source_id, summary, daily, daily_books, weekly_books)
+function Catalog.toInsight(source_id, summary, daily, daily_books)
     local has_data = (tonumber(summary and summary.total_seconds) or 0) > 0
     local days = {}
     for _, d in ipairs(daily or {}) do
@@ -158,8 +157,6 @@ function Catalog.toInsight(source_id, summary, daily, daily_books, weekly_books)
         end
     end
     local BookDB = require("db.book")
-    local week_scope = source_id == "wechat"
-    local book_rows = week_scope and (weekly_books or {}) or (daily_books or {})
     local function appendBook(day, b)
         if day and type(b.stable_id) == "string" and b.stable_id ~= "" then
             local sid = b.source_id or source_id
@@ -171,7 +168,8 @@ function Catalog.toInsight(source_id, summary, daily, daily_books, weekly_books)
                 if percent > 100 then
                     percent = 100
                 end
-            elseif week_scope and type(sid) == "string" then
+            elseif type(sid) == "string" then
+                -- 只有云端时长的那天没有页坐标，退回当前阅读进度
                 local progress = require("db.progress").get(sid, b.stable_id)
                 if progress then
                     percent = math.floor((tonumber(progress.fraction) or 0) * 100 + 0.5)
@@ -192,18 +190,8 @@ function Catalog.toInsight(source_id, summary, daily, daily_books, weekly_books)
             }
         end
     end
-    local weeks = {}
-    if week_scope then
-        for _, b in ipairs(book_rows) do
-            if type(b.week_ymd) == "string" then
-                weeks[b.week_ymd] = weeks[b.week_ymd] or { books = {} }
-                appendBook(weeks[b.week_ymd], b)
-            end
-        end
-    else
-        for _, b in ipairs(book_rows) do
-            appendBook(type(b.ymd) == "string" and days[b.ymd] or nil, b)
-        end
+    for _, b in ipairs(daily_books or {}) do
+        appendBook(type(b.ymd) == "string" and days[b.ymd] or nil, b)
     end
     local total_seconds = tonumber(summary and summary.total_seconds) or 0
     return {
@@ -218,8 +206,6 @@ function Catalog.toInsight(source_id, summary, daily, daily_books, weekly_books)
         calendar = {
             initial_ym = os.date("%Y-%m"),
             days = days,
-            book_scope = week_scope and "week" or "day",
-            weeks = week_scope and weeks or nil,
         },
     }
 end
@@ -408,14 +394,12 @@ end
 function Catalog.readingInsightAsync(source_id, cb)
     return deferScoped(source_id, cb, function(scope)
         local StatsDB = require("db.stats")
-        local weekly = scope == "wechat" and StatsDB.weeklyBooksBySource(scope) or nil
         cb({
             data = Catalog.toInsight(
                 scope,
                 StatsDB.summaryBySource(scope),
                 StatsDB.dailyBySource(scope),
-                StatsDB.dailyBooksBySource(scope),
-                weekly
+                StatsDB.dailyBooksBySource(scope)
             ),
         })
     end)

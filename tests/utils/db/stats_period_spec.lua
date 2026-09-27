@@ -23,7 +23,8 @@ package.preload["db.base"] = function()
         end,
         rowexec = function(sql, ...)
             calls[#calls + 1] = { sql = sql, args = { ... } }
-            return 3600, 2, 9
+            if sql:find("MAX(last_time)", 1, true) then return 0 end
+            return 2, 9
         end,
         query = function(sql, ...)
             calls[#calls + 1] = { sql = sql, args = { ... } }
@@ -38,6 +39,7 @@ package.preload["db.base"] = function()
                     { "day", "page" },
                     { 3000, 600 },
                     { 1, 2 },
+                    { 0, 0 },
                 }, 2
             end
             return {
@@ -66,8 +68,9 @@ Assert.eq(summary.pages, 9)
 Assert.eq(calls[1].args[1], "moon")
 Assert.eq(calls[1].args[2], 100)
 Assert.eq(calls[1].args[3], 200)
--- 书数/页数只数真实书的记录
+-- 书数按（书，天）合并口径：本地逐页 + 云端单书按日
 Assert.is_true(calls[1].sql:find("record_type IN ('page','page_rollup')", 1, true) ~= nil)
+Assert.is_true(calls[1].sql:find("record_type='book_day'", 1, true) ~= nil)
 
 calls = {}
 local books = Stats.periodBooks("moon", 100, 200, 3)
@@ -76,6 +79,6 @@ Assert.eq(books[1].source_id, "moon")
 Assert.eq(books[1].stable_id, "b1")
 Assert.eq(books[1].seconds, 1800)
 Assert.eq(books[1].percent, 42)
-Assert.eq(calls[1].args[4], 3)
+Assert.eq(calls[1].args[#calls[1].args], 3, "LIMIT 绑定在最后")
 Assert.is_true(calls[1].sql:find("start_time>=?", 1, true) ~= nil)
 Assert.is_true(calls[1].sql:find("record_type IN ('page','page_rollup')", 1, true) ~= nil)
