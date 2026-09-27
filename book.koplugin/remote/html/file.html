@@ -8,16 +8,11 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body class="file-page">
-<header class="explorer-titlebar">
-<a class="explorer-home" href="/" aria-label="返回远程管理">
-<img src="/logo.jpg" alt="" width="28" height="28"><span>月读</span>
-</a>
-<strong>文件管理器</strong>
-<span class="titlebar-credit">Ankio · <a href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net</a></span>
-</header>
-
 <main class="file-main">
 <nav class="explorer-nav" aria-label="目录导航">
+<a class="explorer-home" href="/" aria-label="返回远程管理">
+<img src="/logo.jpg" alt="" width="28" height="28"><span>文件管理</span>
+</a>
 <button type="button" id="back" title="后退" aria-label="后退" disabled>←</button>
 <button type="button" id="parent" title="上一级" aria-label="上一级" disabled>↑</button>
 <button type="button" id="refresh" title="刷新" aria-label="刷新">↻</button>
@@ -25,6 +20,7 @@
 <span aria-hidden="true">▰</span>
 <div id="path" class="path" aria-live="polite"></div>
 </div>
+<span class="titlebar-credit">Ankio · <a href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net</a></span>
 </nav>
 
 <div class="explorer-shell">
