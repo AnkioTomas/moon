@@ -14,6 +14,7 @@ local Text = require("utils.text")
 local Fetch = {}
 
 local MIN_GROUND_LEN = 2
+local INTRO_LIMIT = 1500
 
 local payload_sections = {
     { kind = "character", key = "characters" },
@@ -153,7 +154,66 @@ local function persist(identity, incoming, cb)
     if ok then cb(fetchResult(result)) else cb(nil, result) end
 end
 
---- 综合拉取 X-Ray；已有数据且非 force 时直接回缓存。
+---@return integer 1..100
+local function progressPercent()
+    local session = require("ui.reader.session").current()
+    local percent = session and type(session.percent) == "number" and session.percent or 0
+    return math.max(1, math.floor(percent + 0.5))
+end
+
+--- 章节增量：按当前页 + 前文更新，结果必须在正文中 grounding。
+---@param ui table
+---@param identity BookIdentity
+---@param existing table[]
+---@param cb fun(result: table|nil, err: any)
+---@return table|nil
+local function fromContext(ui, identity, existing, cb)
+    local ctx = Context.forAnalysis(ui)
+    if ctx.current_page == "" and ctx.prior_text == "" then
+        cb(nil, "no text")
+        return nil
+    end
+    local title, author = bookMeta(identity)
+    local messages = {
+        { role = "system", content = Prompts.system },
+        { role = "user", content = Prompts.comprehensive(
+            title, author, progressPercent(), ctx.current_page, ctx.prior_text, Store.promptSnapshot(existing)) },
+    }
+    return AI.jsonExtract(messages, { max_tokens = 8000, timeout = 180 }, function(decoded, err)
+        if not decoded then cb(nil, err); return end
+        persist(identity, filterGrounded(cleanPayload(decoded), readingContext(ctx)), cb)
+    end)
+end
+
+--- 首次初始化：凭书籍基本信息走模型通用知识，不做 grounding；
+--- 模型不认识这本书或没给出实体时回落到章节增量。
+---@param ui table
+---@param identity BookIdentity
+---@param cb fun(result: table|nil, err: any)
+---@return table|nil
+local function fromKnowledge(ui, identity, cb)
+    local title, author = bookMeta(identity)
+    if title == "" then
+        return fromContext(ui, identity, {}, cb)
+    end
+    local intro = Text.truncateUtf8(Text.trim((identity.book or {}).intro), INTRO_LIMIT)
+    local messages = {
+        { role = "system", content = Prompts.system },
+        { role = "user", content = Prompts.knowledge(title, author, intro) },
+    }
+    return AI.jsonExtract(messages, { max_tokens = 8000, timeout = 180 }, function(decoded, err)
+        if not decoded then cb(nil, err); return end
+        local incoming = decoded.known ~= false and cleanPayload(decoded) or {}
+        if #incoming == 0 then
+            fromContext(ui, identity, {}, cb)
+            return
+        end
+        persist(identity, incoming, cb)
+    end)
+end
+
+--- 综合拉取 X-Ray：库里没有实体时凭通用知识初始化，之后按章节上下文增量更新；
+--- 已有数据且非 force 时直接回缓存。
 ---@param ui table
 ---@param identity BookIdentity
 ---@param opts { force?: boolean }|nil
@@ -166,36 +226,16 @@ function Fetch.comprehensive(ui, identity, opts, cb)
         return nil
     end
     local existing = XrayDB.list(identity.source_id, identity.stable_id)
-    if not opts.force and #existing > 0 then
+    if #existing == 0 then
+        return fromKnowledge(ui, identity, cb)
+    end
+    if not opts.force then
         local result = fetchResult(existing)
         result.cached = true
         cb(result)
         return nil
     end
-
-    local ctx = Context.forAnalysis(ui)
-    if ctx.current_page == "" and ctx.prior_text == "" then
-        cb(nil, "no text")
-        return nil
-    end
-    local title, author = bookMeta(identity)
-    local session = require("ui.reader.session").current()
-    local percent = 0
-    if session and type(session.percent) == "number" then
-        percent = session.percent
-    end
-    local progress = math.max(1, math.floor(percent + 0.5))
-    local existing_snapshot = Store.promptSnapshot(existing)
-    local messages = {
-        { role = "system", content = Prompts.system },
-        { role = "user", content = Prompts.comprehensive(
-            title, author, progress, ctx.current_page, ctx.prior_text, existing_snapshot) },
-    }
-    return AI.jsonExtract(messages, { max_tokens = 8000, timeout = 180 }, function(decoded, err)
-        if not decoded then cb(nil, err); return end
-        local context = readingContext(ctx)
-        persist(identity, filterGrounded(cleanPayload(decoded), context), cb)
-    end)
+    return fromContext(ui, identity, existing, cb)
 end
 
 --- 选词查实体：本地别名命中免请求，否则 AI 补全并落库。
