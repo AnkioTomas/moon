@@ -52,7 +52,8 @@ local util = {
     pending = "",
     alive = true,
     run = function()
-        return 7, 3
+        -- Job 收尾会真的 close(read_fd)：用必然未打开的号，别关掉 runner 进程里的真实 fd
+        return 7, 4095
     end,
 }
 package.preload["ffi/util"] = function()
