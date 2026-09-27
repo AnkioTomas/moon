@@ -32,6 +32,31 @@ PageTurnAnimation.STYLES = {
     { text = _("方框"), value = "box" },
 }
 
+--- 当前风格；未设置或已下线的值与运行时补丁一致，回退为第一项（擦除）。
+---@return { text: string, value: string }
+function PageTurnAnimation.currentStyle()
+    local value = G_reader_settings:readSetting(PageTurnAnimation.STYLE_KEY)
+    for _, item in ipairs(PageTurnAnimation.STYLES) do
+        if item.value == value then return item end
+    end
+    return PageTurnAnimation.STYLES[1]
+end
+
+--- 弹出风格单选，选中后落设置；下一次翻页即生效。
+---@param on_change fun()|nil 风格真正改变后回调（刷新调用方界面）
+function PageTurnAnimation.pickStyle(on_change)
+    local current = PageTurnAnimation.currentStyle().value
+    require("ui.views.popup").list{
+        title = _("翻页动画风格"), items = PageTurnAnimation.STYLES,
+        current = current, choice_icons = true, centered = true,
+        on_select = function(value)
+            if not value or value == current then return end
+            G_reader_settings:saveSetting(PageTurnAnimation.STYLE_KEY, value)
+            if on_change then on_change() end
+        end,
+    }
+end
+
 local _startup_checked = false
 
 --- fdroid Android 把 userpatch 干成 no-op，补丁写了也不会被加载。
