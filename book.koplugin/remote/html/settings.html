@@ -97,6 +97,26 @@
 <div class="state" id="state-zlib" role="status" aria-live="polite"></div>
 </form>
 
+<form id="form-opds" class="panel cfg-form" autocomplete="off">
+<h2>OPDS 目录</h2>
+<div class="field">
+<label for="opds_url">目录地址</label>
+<input id="opds_url" name="url" type="url" inputmode="url" placeholder="http://192.168.1.2:8083/opds（留空关闭）">
+</div>
+<div class="field">
+<label for="opds_username">用户名（可选）</label>
+<input id="opds_username" name="username" type="text" autocomplete="username">
+</div>
+<div class="field">
+<label for="opds_password">密码（可选）</label>
+<input id="opds_password" name="password" type="password" autocomplete="current-password">
+</div>
+<div class="btns">
+<button type="submit" class="primary">保存 OPDS 配置</button>
+</div>
+<div class="state" id="state-opds" role="status" aria-live="polite"></div>
+</form>
+
 <form id="form-local" class="panel cfg-form" autocomplete="off">
 <h2>本地书库 WebDAV</h2>
 <div class="field">

@@ -28,6 +28,7 @@ function Detail:buildHero(w, book, origin, can_read)
     local sid = book.source_id
     if type(sid) == "string" and sid ~= "" then
         local name = sid == "zlib" and _("Z站")
+            or sid == "opds" and _("OPDS")
             or (require("source.registry").meta(sid) or {}).name
             or sid
         parts[#parts + 1] = name

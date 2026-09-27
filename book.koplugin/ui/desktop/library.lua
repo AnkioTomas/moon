@@ -237,6 +237,7 @@ end
 ---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
 ---@param state table 当前页面的数据和分页状态
 ---@param opts table|nil 布局尺寸、样式及行为选项；缺省项使用组件默认值
+---   （书城页传 on_open 接管点击，传 on_back 出现「上级」）
 ---@return table
 function Library:build(ctx, state, opts)
     opts = opts or {}
@@ -248,14 +249,13 @@ function Library:build(ctx, state, opts)
     local pages = opts.pages or 1
     local total = opts.total or 0
     local books = state.books
-    local on_open = CoverCell.opener(self, ctx)
-    if opts.show_status == false then
-        on_open = function(book)
-            CoverCell.openDetail(ctx, book)
-        end
-    end
+    local on_open = opts.on_open or CoverCell.opener(self, ctx)
 
     local tools_kids = { align = "center" }
+    if opts.on_back then
+        table.insert(tools_kids, iconAction("arrow_back", _("上级"), opts.on_back))
+        table.insert(tools_kids, HorizontalSpan:new{ width = UI.sz(8) })
+    end
     local search_only = opts.search_only == true
     if not search_only then
         table.insert(tools_kids, iconAction("refresh", _("刷新"), function()

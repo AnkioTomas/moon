@@ -7,7 +7,7 @@ local T = require("ffi/util").template
 
 
 local Common = require("ui.desktop.detail.common")
-local storeKind = Common.storeKind
+local storeBackend = Common.storeBackend
 local bookOwnerSource = Common.bookOwnerSource
 local bookSupportsScrape = Common.bookSupportsScrape
 local bookSupportsEdit = Common.bookSupportsEdit
@@ -45,17 +45,18 @@ function Detail:cacheAllChapters()
     })
 end
 
---- Z-Library 书：下载后导入本地书库。
+--- 书城书（Z-Library / OPDS）：下载后导入本地书库。
 function Detail:installStoreBook()
     local book = self.book or {}
     if self._install_job then
         return
     end
-    if storeKind(book, self.source, self.origin) ~= "zlib" then
+    local store = storeBackend(book)
+    if not store then
         return
     end
-    if not require("zlib.init").hasCredentials() then
-        require("zlib.setting").open(self.plugin)
+    if store.hasCredentials and not store.hasCredentials() then
+        require(book.source_id .. ".setting").open(self.plugin)
         return
     end
     local local_src = require("source.registry").resolve("local")
@@ -77,7 +78,7 @@ function Detail:installStoreBook()
     dialog:show()
     require("ui/network/manager"):runWhenOnline(function()
         if not self.lifecycle:uiReady() then dialog:close(); return end
-        self._install_job = self.lifecycle:addHttp(require("zlib.init").installAsync(local_src, book, function(bytes)
+        self._install_job = self.lifecycle:addHttp(store.installAsync(local_src, book, function(bytes)
             dialog:reportProgress(bytes)
         end, function(ok, err, filename)
             self._install_job = nil

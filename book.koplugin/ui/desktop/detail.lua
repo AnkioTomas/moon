@@ -43,6 +43,7 @@ local Icon = require("ui.components.icon")
 local UI = require("ui.components.bookui")
 local Lifecycle = require("ui.lifecycle")
 local Store = require("book.store")
+local storeBackend = require("ui.desktop.detail.common").storeBackend
 local _ = require("gettext")
 local Screen = Device.screen
 
@@ -84,7 +85,7 @@ function Detail.open(desktop, origin, book)
         UIManager:close(desktop.detail)
         desktop.detail = nil
     end
-    if book.source_id and book.source_id ~= "zlib" then
+    if book.source_id and not storeBackend(book) then
         Store.rememberMany({ book })
     end
     local desk = desktop
@@ -115,8 +116,6 @@ function Detail.open(desktop, origin, book)
     UIManager:setDirty(desktop.detail, "ui")
 end
 
-local storeKind = require("ui.desktop.detail.common").storeKind
-
 --- 初始化全屏尺寸、返回键，挂生命周期后 rebuild 并拉本机阅读统计。
 function Detail:init()
     self.lifecycle = Lifecycle.attach(self)
@@ -130,9 +129,10 @@ function Detail:init()
     self:onResume()
     self:updateView()
     self:fetchStats()
-    local kind = storeKind(self.book, self.source, self.origin)
-    if kind == "zlib" then
-        self._store_detail_job = self.lifecycle:addHttp(require("zlib.init").getDetailAsync(self.book, function(detail)
+    -- OPDS 条目本身就是完整详情，只有 zlib 需要补拉。
+    local store = storeBackend(self.book)
+    if store and store.getDetailAsync then
+        self._store_detail_job = self.lifecycle:addHttp(store.getDetailAsync(self.book, function(detail)
             self._store_detail_job = nil
             if not self.lifecycle:uiReady() or not detail then return end
             self.book = detail

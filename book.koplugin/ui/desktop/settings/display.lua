@@ -314,6 +314,7 @@ function Display:rows(ctx)
                             UI.setGridMaxCols(spin.value)
                             if desktop.library then desktop.library.state = nil end
                             if desktop.store then desktop.store.state = nil end
+                            if desktop.opds then desktop.opds.state = nil end
                             desktop:updateView()
                         end,
                     }

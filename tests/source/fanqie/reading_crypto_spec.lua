@@ -6,6 +6,12 @@
 
 local Assert = require("support.assert")
 
+-- 设备上 z_stream / inflate 可能已被其他模块以不同签名声明，解压不能因此失效。
+pcall(require("ffi").cdef, [[
+    typedef struct z_stream_s { void *p; } z_stream;
+    int inflate(z_stream *, int);
+]])
+
 package.loaded["source.fanqie.reading.crypto"] = nil
 package.loaded["crypto.aes"] = nil
 
@@ -34,3 +40,10 @@ local qs = Crypto.encode_query(q)
 Assert.matches(qs, "item_ids=7463695105224884760")
 Assert.is_true(not qs:find("%%2C", 1, true))
 Assert.matches(qs, "book_id=7342475219212192830")
+
+local plain = string.rep("番茄正文", 20)
+Assert.eq(Crypto.maybe_decompress(Aes.from_hex(
+    "1f8b08000000000002ff7b3e75d58b9e96676b173f9bd6fe7c04b00161f60cc9f0000000"), 1), plain)
+Assert.eq(Crypto.maybe_decompress(Aes.from_hex(
+    "789c7b3e75d58b9e96676b173f9bd6fe7c04b001a6cea6cd"), 1), plain)
+Assert.eq(Crypto.maybe_decompress("plain", 0), "plain")

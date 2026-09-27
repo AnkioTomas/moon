@@ -222,6 +222,17 @@ function Source:configSections(ctx)
         end
     end
     sections[#sections + 1] = { title = _("Z-Library"), rows = extra_rows }
+
+    local opds_setting = require("opds.setting")
+    local opds_status, opds_on = opds_setting.rowStatus()
+    sections[#sections + 1] = { title = _("OPDS"), rows = { function(iw)
+        return SettingRow.build(iw, {
+            kind = "nav", icon = "rss_feed", title = _("OPDS 目录"),
+            subtitle = _("Calibre、Komga、Kavita 等书库；下载后导入本地书库"),
+            status = opds_status, status_on = opds_on,
+            callback = function() opds_setting.open(plugin) end,
+        })
+    end } }
     return sections
 end
 

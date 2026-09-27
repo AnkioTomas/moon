@@ -22,11 +22,11 @@ function CoverCell.titleExtra()
     return UI.sz(4) + UI.sz(22)
 end
 
---- 打开书籍详情；Z站页进详情时带 store 来源。
+--- 打开书籍详情（书城页自己接管点击，不走这里）。
 ---@param ctx table 构建上下文
 ---@param book Book
 function CoverCell.openDetail(ctx, book)
-    require("ui.desktop.detail").open(ctx.desktop, ctx.desktop.tab == "store" and "store" or "library", book)
+    require("ui.desktop.detail").open(ctx.desktop, "library", book)
 end
 
 --- 揭掉上一本封面的「正在打开」条。
@@ -88,7 +88,7 @@ function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_t
         badge = true,
         ribbon = status,
         download = status,
-        -- 图书馆右下角进详情；Z站整卡即详情，不画「更多」。
+        -- 图书馆右下角进详情；书城整卡即详情，不画「更多」。
         more = status,
         show_parent = ctx.desktop,
     }))
