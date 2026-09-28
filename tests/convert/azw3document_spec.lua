@@ -11,7 +11,10 @@ package.preload["util"] = function()
     return { partialMD5 = function(path) return (path:match("([^/]+)%.azw3$")) end }
 end
 package.preload["ui/renderimage"] = function()
-    return { renderImageFile = function(_, path) return "image:" .. path end }
+    return {
+        renderImageFile = function(_, path) return "image:" .. path end,
+        renderImageData = function(_, data, size) return "data:" .. size .. ":" .. data end,
+    }
 end
 
 local loads, pages = {}, {}
@@ -72,19 +75,33 @@ local calls = 0
 local real_extract = Kf8.extract
 Kf8.extract = function(...) calls = calls + 1; return real_extract(...) end
 
--- 首次打开：解析并落缓存；CREngine 读缓存 HTML
+-- 首次打开只取元数据（扫盘 / 封面浏览）：只探文件头，不重建、不落缓存、不动 CREngine
 do
     local doc = open("kf8", { compression = 2 })
     local dir = cache_root .. "/v1_kf8"
+    Assert.is_true(doc:loadDocument(false))
+    Assert.eq(calls, 0)
+    Assert.len(loads, 0)
+    Assert.is_false(exists(dir))
+    local props = doc:getProps()
+    Assert.eq(props.title, Fixture.TITLE)
+    Assert.eq(props.authors, Fixture.AUTHOR)
+    Assert.eq(doc:getCoverPageImage(), "data:13:\255\216\255\224fake-jpeg")
+    Assert.eq(calls, 0, "取封面不触发重建")
+end
+
+-- 真正打开阅读：重建并落缓存；CREngine 读缓存 HTML
+do
+    local doc = open("kf8")
+    local dir = cache_root .. "/v1_kf8"
+    Assert.is_true(doc:loadDocument())
     Assert.eq(calls, 1)
     Assert.eq(doc.azw.dir, dir)
     Assert.is_true(exists(dir .. "/info.json"))
     Assert.is_true(exists(dir .. "/book.html"))
     Assert.is_false(exists(dir .. ".part"), "临时目录已改名")
-
-    Assert.is_true(doc:loadDocument(false))
     Assert.eq(loads[#loads].path, dir .. "/book.html")
-    Assert.is_true(loads[#loads].only_metadata)
+    Assert.is_false(loads[#loads].only_metadata)
     doc:loadDocument()
     Assert.len(loads, 1, "已加载不重复加载")
 
@@ -96,11 +113,15 @@ do
     Assert.eq(doc:getCoverPageImage(), "image:" .. dir .. "/res0001.jpg")
 end
 
--- 再次打开：命中缓存，不再解析
+-- 再次打开：命中缓存，不再解析；只取元数据时 CREngine 按元数据模式读缓存 HTML
 do
+    loads = {}
     local doc = open("kf8")
     Assert.eq(calls, 1)
     Assert.len(doc.azw.toc, 3)
+    Assert.is_true(doc:loadDocument(false))
+    Assert.eq(loads[1].path, cache_root .. "/v1_kf8/book.html")
+    Assert.is_true(loads[1].only_metadata)
 
     -- 目录：解析不到的锚点沿用上一项页码，页码不回退
     pages = { ["#azwfid0000"] = 3, ["#azwfid0001"] = 2 }
@@ -121,25 +142,39 @@ end
 do
     loads = {}
     local doc = open("mobi6", { version = 6 })
+    Assert.eq(calls, 1, "探头认出非独立 KF8，打开时不解析")
+    doc:loadDocument(false)
     Assert.eq(calls, 2)
     Assert.is_nil(doc.azw.html)
-    doc:loadDocument()
     Assert.eq(loads[1].path, root .. "/mobi6.azw3")
+    Assert.is_true(loads[1].only_metadata)
     Assert.eq(doc:getToc()[1].title, "cre")
     Assert.eq(doc:getProps().title, "cre-title")
     Assert.is_nil(doc:getProps().authors)
     Assert.eq(doc:getCoverPageImage(), "cre-cover")
-    open("mobi6")
+    open("mobi6"):loadDocument()
     Assert.eq(calls, 2, "直读结论同样缓存")
 end
 
--- 解析失败：清掉半成品，原样抛出，下次仍会重试
+-- 重建失败（DRM）：元数据照常可取；完整加载返回 false，清掉半成品，下次仍会重试
 do
-    Assert.errors(function() open("drm", { encryption = 2 }) end, "DRM")
+    local doc = open("drm", { encryption = 2 })
+    Assert.is_true(doc:loadDocument(false))
+    Assert.eq(doc:getProps().title, Fixture.TITLE)
+    Assert.is_false(doc:loadDocument())
     Assert.is_false(exists(cache_root .. "/v1_drm.part"))
     Assert.is_false(exists(cache_root .. "/v1_drm"))
-    Assert.errors(function() open("drm") end, "DRM")
+    Assert.is_false(open("drm"):loadDocument())
     Assert.eq(calls, 4)
+end
+
+-- 结构损坏（不是 BOOKMOBI）：打开即失败，同 DocumentRegistry 的「无法打开」
+do
+    local bad = root .. "/bad.azw3"
+    local f = assert(io.open(bad, "wb"))
+    f:write("not a book")
+    f:close()
+    Assert.errors(function() open("bad") end, "BOOKMOBI")
 end
 
 -- 注册：FM 与 Reader 各调一次，只登记一项
