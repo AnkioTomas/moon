@@ -55,8 +55,9 @@ local Button = class({ w = 0, h = 24 })
 function Button:getSize()
     return { w = self.width or 0, h = 24 }
 end
-function Button:setText(text)
+function Button:setText(text, width)
     self.text = text
+    self.width = width
 end
 
 local Span = class()
@@ -195,3 +196,5 @@ detailed_popup:refreshView()
 Assert.eq(detailed_popup.text_box.text_widget.text, detailed_popup.translated)
 Assert.eq(detailed_popup.text_box.reset_calls, 1)
 Assert.eq(detailed_popup.text_box.top_calls, 1)
+Assert.eq(detailed_popup.source_btn.width, detailed_popup.lang_w, "刷新后源语言按钮保持固定宽度")
+Assert.eq(detailed_popup.target_btn.width, detailed_popup.lang_w, "刷新后目标语言按钮保持固定宽度")
