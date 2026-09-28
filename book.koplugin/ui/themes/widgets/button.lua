@@ -61,7 +61,7 @@ function Button:content(t, ink, max_w)
     if self.icon then
         return Icon.widget{ name = self.icon, size = t.control.icon, color = Blitbuffer.Color8(ink) }
     end
-    return Text.line(t, "body", self.text, { width = max_w, color = ink })
+    return Text.line("body", self.text, { width = max_w, color = ink })
 end
 
 function Button:init()

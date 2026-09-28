@@ -49,9 +49,9 @@ local Modal = InputContainer:extend{
 }
 
 --- 标准弹窗宽度：屏宽留两侧边距，封顶避免横屏过宽。
----@param t table 主题令牌
 ---@return number 物理像素
-function Modal.dialogWidth(t)
+function Modal.dialogWidth()
+    local t = Theme.current()
     return math.min(Screen:getWidth() - Theme.px(t.space.lg) * 4, Theme.px(480))
 end
 
@@ -117,7 +117,7 @@ function Modal:setDialog(opts)
     -- 撑宽占位：面板宽度固定，内容左对齐，不随文案长短变化。
     local group = VerticalGroup:new{ align = "left", HorizontalSpan:new{ width = inner } }
     if opts.title then
-        group[#group + 1] = Text.line(t, "title", opts.title, { width = inner })
+        group[#group + 1] = Text.line("title", opts.title, { width = inner })
         group[#group + 1] = VerticalSpan:new{ width = Theme.px(t.space.md) }
     end
     if opts.body then
@@ -134,7 +134,7 @@ end
 --- 标准面板内容宽度。
 ---@return number 物理像素
 function Modal:innerWidth()
-    return Modal.dialogWidth(self.theme) - Theme.px(self.theme.space.lg) * 2
+    return Modal.dialogWidth() - Theme.px(self.theme.space.lg) * 2
 end
 
 ---@param bb BlitBuffer 目标画布

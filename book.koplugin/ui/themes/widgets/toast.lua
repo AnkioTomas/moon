@@ -26,7 +26,7 @@ local Toast = Modal:extend{
 function Toast:init()
     Modal.init(self)
     local t = self.theme
-    self:setDialog{ body = Text.box(t, "body", self.text, self:innerWidth(), { bg = t.dialog.bg }) }
+    self:setDialog{ body = Text.box("body", self.text, self:innerWidth(), { bg = t.dialog.bg }) }
 end
 
 function Toast:onShow()

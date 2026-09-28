@@ -6,7 +6,7 @@
   |            副标题                   |
   +-------------------------------------+   row.divider > 0 时画线
 
-  TitleBar.widget(theme, { width = w, title = "…", subtitle = "…",
+  TitleBar.widget({ width = w, title = "…", subtitle = "…",
       left_icon = "arrow_back", left_callback = fn, right_icon = "close", right_callback = fn })
 
 @module koplugin.book.ui.themes.widgets.titlebar
@@ -27,18 +27,18 @@ local Text = require("ui.themes.widgets.text")
 local TitleBar = {}
 
 --- 标题栏占用高度（含分割线），供全屏页扣减内容区。
----@param t table 主题令牌
 ---@return number 物理像素
-function TitleBar.height(t)
+function TitleBar.height()
+    local t = Theme.current()
     return Theme.px(t.control.height) + Theme.px(t.space.sm) * 2 + Theme.px(t.row.divider)
 end
 
----@param t table 主题令牌
 ---@param opts table width/title/subtitle/left_icon/left_callback/right_icon/right_callback
 ---@return table
-function TitleBar.widget(t, opts)
+function TitleBar.widget(opts)
+    local t = Theme.current()
     local slot = Theme.px(t.control.height)
-    local bar_h = TitleBar.height(t) - Theme.px(t.row.divider)
+    local bar_h = TitleBar.height() - Theme.px(t.row.divider)
     --- 图标槽位：没有图标时留等宽空位，保持标题居中。
     ---@param icon string|nil
     ---@param callback fun()|nil
@@ -48,9 +48,9 @@ function TitleBar.widget(t, opts)
         return Button:new{ icon = icon, variant = "ghost", width = slot, height = slot, callback = callback }
     end
     local mid_w = math.max(1, opts.width - slot * 2)
-    local title = VerticalGroup:new{ align = "center", Text.line(t, "title", opts.title or "", { width = mid_w }) }
+    local title = VerticalGroup:new{ align = "center", Text.line("title", opts.title or "", { width = mid_w }) }
     if opts.subtitle then
-        title[#title + 1] = Text.line(t, "caption", opts.subtitle, { width = mid_w, color = t.color.muted })
+        title[#title + 1] = Text.line("caption", opts.subtitle, { width = mid_w, color = t.color.muted })
     end
     local bar = VerticalGroup:new{
         align = "left",

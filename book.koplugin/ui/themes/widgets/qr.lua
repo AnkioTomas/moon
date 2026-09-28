@@ -49,7 +49,7 @@ function QR:init()
     }
     if self.caption then
         body[#body + 1] = VerticalSpan:new{ width = Theme.px(t.space.md) }
-        body[#body + 1] = Text.box(t, "caption", self.caption, inner,
+        body[#body + 1] = Text.box("caption", self.caption, inner,
             { align = "center", color = t.color.muted, bg = t.dialog.bg })
     end
     self:setDialog{ title = self.title, body = body }

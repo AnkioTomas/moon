@@ -6,7 +6,7 @@
   |             副标题（可选）                    |
   +-----------------------------------------------+   row.divider > 0 且 divider ~= false 时画线
 
-  Row.widget(theme, {
+  Row.widget({
       width = w, icon = "source", title = "…", subtitle = "…",
       image = "https://…", image_w = 32, image_h = 32,   -- 缩略图（逻辑像素），高度夹到行内
       status = "开", status_on = true,   -- status 也可以直接给控件（字体预览等）
@@ -39,17 +39,17 @@ local Text = require("ui.themes.widgets.text")
 local Row = {}
 
 --- 行高：单行取 row.height，有副标题再加一行说明字。
----@param t table 主题令牌
 ---@param has_subtitle boolean
 ---@return number 物理像素
-function Row.height(t, has_subtitle)
+function Row.height(has_subtitle)
+    local t = Theme.current()
     return Theme.px(t.row.height) + (has_subtitle and Theme.px(t.font.caption + t.space.xs) or 0)
 end
 
----@param t table 主题令牌
 ---@param opts table 见模块头
 ---@return table
-function Row.widget(t, opts)
+function Row.widget(opts)
+    local t = Theme.current()
     local enabled = opts.enabled ~= false
     local sel = opts.selected == true
     local ink = not enabled and t.color.disabled or (sel and t.selected.ink or t.color.ink)
@@ -58,7 +58,7 @@ function Row.widget(t, opts)
     local chevron = opts.chevron
     if chevron == nil then chevron = opts.callback ~= nil end
 
-    local h = Row.height(t, opts.subtitle ~= nil)
+    local h = Row.height(opts.subtitle ~= nil)
     local inner = opts.width - Theme.px(t.space.md) * 2
     local icon_sz = Theme.px(t.control.icon)
     local gap = Theme.px(t.space.sm)
@@ -81,21 +81,21 @@ function Row.widget(t, opts)
     if opts.image then
         content[#content + 1] = LeftContainer:new{
             dimen = Geom:new{ w = image_w + gap, h = h },
-            Image.widget(t, { src = opts.image, width = image_w, height = image_h }),
+            Image.widget({ src = opts.image, width = image_w, height = image_h }),
         }
     end
     local texts = VerticalGroup:new{
         align = "left",
-        Text.line(t, "body", opts.title, { width = text_w, color = ink, bold = sel }),
+        Text.line("body", opts.title, { width = text_w, color = ink, bold = sel }),
     }
     if opts.subtitle then
-        texts[#texts + 1] = Text.line(t, "caption", opts.subtitle, { width = text_w, color = muted })
+        texts[#texts + 1] = Text.line("caption", opts.subtitle, { width = text_w, color = muted })
     end
     content[#content + 1] = LeftContainer:new{ dimen = Geom:new{ w = text_w, h = h }, texts }
     if opts.status then
         content[#content + 1] = RightContainer:new{
             dimen = Geom:new{ w = status_w, h = h },
-            status_widget or Text.line(t, "body", opts.status, { width = status_w, color = opts.status_on and ink or muted }),
+            status_widget or Text.line("body", opts.status, { width = status_w, color = opts.status_on and ink or muted }),
         }
     end
     if chevron then

@@ -8,7 +8,7 @@
   |   ━━━                                   |   selected.mark > 0 才画
   +-----------------------------------------+
 
-  Tabbar.widget(theme, { width = w, tabs = { { id = "home", text = "首页", icon = "home" } },
+  Tabbar.widget({ width = w, tabs = { { id = "home", text = "首页", icon = "home" } },
       active = "home", on_tab = function(id) … end })
 
 未选中格：页面底色 + faint 文字；点当前格不回调。
@@ -30,10 +30,10 @@ local Tap = require("ui.themes.widgets.tap")
 ---@class BookThemeTabbar
 local Tabbar = {}
 
----@param t table 主题令牌
 ---@param opts table width/tabs/active/on_tab/height
 ---@return table
-function Tabbar.widget(t, opts)
+function Tabbar.widget(opts)
+    local t = Theme.current()
     local rule = math.max(1, Theme.px(t.row.divider))
     local cell_h = (opts.height or Theme.px(t.control.height + t.space.lg)) - rule
     local cell_w = math.floor(opts.width / #opts.tabs)

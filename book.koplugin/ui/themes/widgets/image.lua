@@ -6,7 +6,7 @@
   |  封面 / 图  |   外框 width × height（物理像素），图按边框内缩
   +------------+
 
-  local img = Image.widget(theme, {
+  local img = Image.widget({
       width = w, height = h,
       src = "https://…" | "/abs/path.png" | "logo.png"（插件相对）,
       fallback = "书名",     -- 未就绪 / 失败时的文案
@@ -34,14 +34,14 @@ local ThemeImage = {
     await = Core.await,
 }
 
----@param t table 主题令牌
 ---@param opts table 见模块头
 ---@return table Box
-function ThemeImage.widget(t, opts)
+function ThemeImage.widget(opts)
+    local t = Theme.current()
     local style = opts.style or t.image
     local inset = Theme.px(style.border) * 2
     local w, h = opts.width - inset, opts.height - inset
-    local fallback = opts.fallback and opts.fallback ~= "" and Text.line(t, "caption", opts.fallback,
+    local fallback = opts.fallback and opts.fallback ~= "" and Text.line("caption", opts.fallback,
         { width = w - Theme.px(t.space.xs) * 2, color = t.color.muted }) or nil
     return Box:new{
         style = style,

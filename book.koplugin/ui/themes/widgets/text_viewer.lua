@@ -38,12 +38,12 @@ function TextViewer:init()
     local t = self.theme
     local w, h = self.dimen.w, self.dimen.h
     local pad = Theme.px(t.space.lg)
-    self.bar = TitleBar.widget(t, {
+    self.bar = TitleBar.widget({
         width = w, title = self.title,
         right_icon = "close", right_callback = function() self:dismiss() end,
     })
     local body_h = h - self.bar:getSize().h - Theme.px(t.control.height) - pad * 2
-    self.body = Text.box(t, "body", self.text, w - pad * 2, { height = body_h })
+    self.body = Text.box("body", self.text, w - pad * 2, { height = body_h })
     self.pages = math.max(1, math.ceil(self.body:getAllLineCount() / self.body:getVisLineCount()))
     self.page = 1
     self:rebuild()
@@ -60,7 +60,7 @@ function TextViewer:rebuild()
             align = "center",
             self.bar,
             Box:new{ style = {}, padding = Theme.px(t.space.lg), self.body },
-            Pager.widget(t, {
+            Pager.widget({
                 width = w,
                 page = self.page,
                 pages = self.pages,

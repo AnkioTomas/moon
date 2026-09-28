@@ -4,7 +4,7 @@
   [<]        3 / 12        [>]
   [<]      ·  ●  ·  ·      [>]    dots=true（页数少的首页类场景）
 
-  Pager.widget(theme, { width = w, page = 3, pages = 12, on_prev = fn, on_next = fn, dots = false })
+  Pager.widget({ width = w, page = 3, pages = 12, on_prev = fn, on_next = fn, dots = false })
 
 @module koplugin.book.ui.themes.widgets.pager
 --]]
@@ -44,14 +44,14 @@ local function dots(t, page, pages)
     return row
 end
 
----@param t table 主题令牌
 ---@param opts table width/page/pages/on_prev/on_next/dots
 ---@return table
-function Pager.widget(t, opts)
+function Pager.widget(opts)
+    local t = Theme.current()
     local h = Theme.px(t.control.height)
     local mid_w = math.max(1, opts.width - h * 2)
     local center = opts.dots and dots(t, opts.page, opts.pages)
-        or Text.line(t, "body", T(_("%1 / %2"), opts.page, opts.pages), { width = mid_w })
+        or Text.line("body", T(_("%1 / %2"), opts.page, opts.pages), { width = mid_w })
     return HorizontalGroup:new{
         align = "center",
         Button:new{ icon = "chevron_left", variant = "ghost", width = h, height = h,

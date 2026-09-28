@@ -82,10 +82,10 @@ function Spin:init()
     local row = HorizontalGroup:new{ align = "center" }
     for i, field in ipairs(self.fields) do
         self.values[i] = field.value
-        self.labels[i] = Text.line(t, "hero", display(field, field.value), { width = col_w })
+        self.labels[i] = Text.line("hero", display(field, field.value), { width = col_w })
         local col = VerticalGroup:new{ align = "center" }
         if field.label then
-            col[#col + 1] = Text.line(t, "caption", field.label, { width = col_w, color = t.color.muted })
+            col[#col + 1] = Text.line("caption", field.label, { width = col_w, color = t.color.muted })
             col[#col + 1] = VerticalSpan:new{ width = Theme.px(t.space.xs) }
         end
         col[#col + 1] = Button:new{ icon = "add", width = col_w, callback = function() self:step(i, 1) end }

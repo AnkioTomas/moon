@@ -38,7 +38,7 @@ function ProgressDialog:init()
     Modal.init(self)
     local t = self.theme
     local width = self:innerWidth()
-    self.detail = Text.line(t, "body", _("正在准备…"), { width = width, color = t.color.muted })
+    self.detail = Text.line("body", _("正在准备…"), { width = width, color = t.color.muted })
     self.bar = Progress:new{ width = width }
     self:setDialog{
         title = self.title,

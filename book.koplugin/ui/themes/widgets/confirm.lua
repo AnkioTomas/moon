@@ -41,7 +41,7 @@ function Confirm:init()
     local t = self.theme
     self:setDialog{
         title = self.title,
-        body = Text.box(t, "body", self.text, self:innerWidth(), { bg = t.dialog.bg }),
+        body = Text.box("body", self.text, self:innerWidth(), { bg = t.dialog.bg }),
         buttons = {
             { text = self.cancel_text or _("取消"), callback = function() self:dismiss() end },
             { text = self.ok_text or _("确定"), variant = "primary", callback = function() self:confirm() end },

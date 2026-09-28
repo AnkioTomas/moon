@@ -61,10 +61,10 @@ function List:init()
     local t = self.theme
     local pad = Theme.px(t.space.lg)
     self.row_w = self.centered and self:innerWidth() or self.dimen.w
-    self.pitch = Row.height(t, false) + Theme.px(t.row.divider)
+    self.pitch = Row.height(false) + Theme.px(t.row.divider)
     local chrome = Theme.px(t.control.height)                      -- 翻页条
         + (self.centered and pad * 4 + Theme.px(t.font.title * 2)   -- 面板边距 + 标题
-            or TitleBar.height(t))
+            or TitleBar.height())
     self.per_page = math.max(1, math.floor((self.dimen.h - chrome) / self.pitch))
     self.page = 1
     for i, item in ipairs(self.items) do
@@ -111,7 +111,7 @@ function List:rebuild()
     local first = (self.page - 1) * self.per_page
     for i = first + 1, math.min(#self.items, first + self.per_page) do
         local item = self.items[i]
-        rows[#rows + 1] = Row.widget(t, {
+        rows[#rows + 1] = Row.widget({
             width = self.row_w,
             icon = self:markIcon(item),
             image = item.image,
@@ -125,7 +125,7 @@ function List:rebuild()
             callback = function() self:choose(item) end,
         })
     end
-    local pager = pages > 1 and Pager.widget(t, {
+    local pager = pages > 1 and Pager.widget({
         width = self.row_w,
         page = self.page,
         pages = pages,
@@ -139,7 +139,7 @@ function List:rebuild()
         return
     end
     -- 全屏：翻页条钉在底部，行不满一页时中间补空。
-    local bar = TitleBar.widget(t, {
+    local bar = TitleBar.widget({
         width = self.row_w, title = self.title, subtitle = self.subtitle,
         right_icon = "close", right_callback = function() self:dismiss() end,
     })
