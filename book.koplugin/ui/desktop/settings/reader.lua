@@ -26,6 +26,7 @@ local POPUP_BUTTONS = {
     { id = "dictionary", title = _("词典"), icon = "book" },
     { id = "translate", title = _("翻译"), icon = "translate" },
     { id = "xray", title = _("X-Ray 查询"), icon = "person_search" },
+    { id = "ai_explain", title = _("AI 解释"), icon = "auto_awesome" },
     { id = "view_html", title = _("查看HTML"), icon = "code" },
     { id = "qrcode", title = _("生成二维码"), icon = "qr_code" },
     { id = "search", title = _("搜索"), icon = "search" },

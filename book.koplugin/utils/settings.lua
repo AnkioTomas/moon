@@ -91,7 +91,7 @@ local DEFAULTS = {
         -- 划词菜单的显示顺序；关闭状态仍由 reader_popup_buttons 单独保存。
         reader_popup_button_order = {
             "select", "highlight", "copy", "add_note", "dictionary", "translate",
-            "wikipedia", "xray", "search", "view_html", "qrcode",
+            "wikipedia", "xray", "ai_explain", "search", "view_html", "qrcode",
         },
         reader_popup_buttons = {
             select = true,
@@ -102,6 +102,7 @@ local DEFAULTS = {
             dictionary = true,
             translate = true,
             xray = true,
+            ai_explain = true,
             view_html = true,
             qrcode = true,
             search = true,
