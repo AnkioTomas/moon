@@ -602,13 +602,22 @@ do
     reset()
     CRASH_AT["/books/sub/c.pdf"] = true
     local ok, err
-    Client.new({ path = "/books" }):scanAsync(function(o, e) ok, err = o, e end)
+    local c = Client.new({ path = "/books" })
+    c:scanAsync(function(o, e) ok, err = o, e end)
     Stubs.flush()
     Assert.is_true(ok)
     Assert.is_nil(err)
     Assert.eq(job_runs, 2)
     Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].title, "c")
     Assert.eq(db_rows[rowKey("local", "/books/sub/deep/e.epub")].title, "T:/books/sub/deep/e.epub")
+
+    -- 同一会话再扫：不再打开坏书，不再崩溃重来
+    job_runs, opened = 0, {}
+    c:scanAsync(function(o, e) ok, err = o, e end)
+    Stubs.flush()
+    Assert.is_true(ok)
+    Assert.eq(job_runs, 1)
+    Assert.is_false(hasValue(opened, "/books/sub/c.pdf"))
 
     -- 两本坏书：逐本跳过，最终收敛
     reset()
