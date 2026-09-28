@@ -516,7 +516,7 @@ end
 ---   主进程在 fork 前查好「已入库且标题非空」的行交给子进程判断是否要解析，
 ---   子进程返回扫描产物列表，主进程收齐后落库。
 
---- 主进程：本地源元数据完整的行，按 stable_id（即路径）索引；
+--- 主进程：扫盘解析过的行（有 md5 且有书名），按 stable_id（即路径）索引；
 --- 另附全部行（含残缺行与墓碑）的内容 md5，供子进程识别同路径换了文件。
 ---@return table<string, Book> known, table<string, string> digests
 local function knownBooks()
@@ -525,11 +525,9 @@ local function knownBooks()
     local digests = {}
     for stable_id, row in pairs(rows) do
         digests[stable_id] = row.md5
-        -- 任何展示元数据缺失都要允许本次扫描补齐；只看 title 会把
-        -- “有书名但没有作者/简介”的旧行永久冻结。
-        if (type(row.title) ~= "string" or row.title == "")
-            or (type(row.authors) ~= "string" or row.authors == "")
-            or (type(row.intro) ~= "string" or row.intro == "") then
+        -- md5 只由扫盘/入库写入，有它就说明按当前内容解析过；作者/简介缺失多半是书本身没有，
+        -- 按缺字段判定会让每次扫盘重开几乎所有书。无 md5 的身份行（开书时登记）照常解析补齐。
+        if not row.md5 or type(row.title) ~= "string" or row.title == "" then
             rows[stable_id] = nil
         end
     end
@@ -544,9 +542,10 @@ end
 ---@param known table<string, Book>
 ---@param digests table<string, string> 库内各路径的内容 md5
 ---@param skip table<string, boolean> 曾让子进程崩溃的书，不再打开
+---@param tried table<string, boolean> 本会话已为补封面打开过的书（本身没封面的书不必每轮重开）
 ---@param progress fun(value: string|false)
----@return table f 原表，补上 md5/changed，需解析时再补 title/authors/intro
-local function parseFile(f, known, digests, skip, progress)
+---@return table f 原表，补上 md5/changed/cover_tried，需解析时再补 title/authors/intro
+local function parseFile(f, known, digests, skip, tried, progress)
     local open = not skip[f.path]
     f.md5 = util.partialMD5(f.path)
     local old = digests[f.path]
@@ -554,7 +553,8 @@ local function parseFile(f, known, digests, skip, progress)
     if f.changed then
         os.remove(coverPath(f.path))
     elseif known[f.path] then
-        if open and lfs.attributes(coverPath(f.path), "mode") ~= "file" then
+        if open and not tried[f.path] and lfs.attributes(coverPath(f.path), "mode") ~= "file" then
+            f.cover_tried = true
             progress(f.path)
             ensureCover(f.path)
             progress(false)
@@ -563,6 +563,7 @@ local function parseFile(f, known, digests, skip, progress)
     end
     local props = {}
     if open then
+        f.cover_tried = true
         progress(f.path)
         props = parseBookProps(f.path) or {}
         progress(false)
@@ -611,7 +612,7 @@ local function commitFiles(files, known, full_snapshot)
                 and not BookDB.setLibraryMembership(SOURCE_ID, f.path, true) then
                 return false
             end
-        -- knownBooks 只把元数据完整的行交给 worker；移动过来的旧行也会
+        -- knownBooks 只把解析过的行交给 worker；移动过来的旧行也会
         -- 在这里用本次解析结果补齐。不要把“已存在”误当成“无需更新”。
         -- 换了内容的行即便走快照也要本地可信写入：reconcile 对脏行保留旧书名。
         elseif (f.changed or not full_snapshot) and not BookDB.upsert({
@@ -633,18 +634,21 @@ end
 --- 扫盘任务：遍历与解析在子进程，落库在主进程，cancel 杀子进程。
 --- 子进程死在某本书的引擎里时跳过它重扫（每轮至少多跳一本，必然收敛）；
 --- 其余失败照常回调，库里是旧数据，照查，不让 UI 空转。
----@param root string
+---@param self LocalClient
 ---@param cb fun(ok: boolean, err: string|nil)
 ---@return { cancel: fun() }
-local function scanJob(root, cb)
+local function scanJob(self, cb)
+    local root = rootPath(self.cfg)
     local known, digests = knownBooks()
     local skip, job = {}, nil
+    self._cover_tried = self._cover_tried or {}
+    local tried = self._cover_tried
     local function start()
         local opening
         job = Job.run(function(progress)
             local files = scanFiles(root)
             for i = 1, #files do
-                files[i] = parseFile(files[i], known, digests, skip, progress)
+                files[i] = parseFile(files[i], known, digests, skip, tried, progress)
             end
             return files
         end, {
@@ -652,6 +656,9 @@ local function scanJob(root, cb)
             kind = "medium",
             on_progress = function(path) opening = path or nil end,
             on_done = function(files)
+                for _, f in ipairs(files or {}) do
+                    if f.cover_tried then tried[f.path] = true end
+                end
                 if commitFiles(files or {}, known, true) then
                     cb(true)
                 else
@@ -896,7 +903,7 @@ function Client:indexOneAsync(path, cb)
     end
     local known, digests = knownBooks()
     local job = Job.run(function(progress)
-        return parseFile({ name = name, path = path }, known, digests, {}, progress)
+        return parseFile({ name = name, path = path }, known, digests, {}, {}, progress)
     end, {
         name = "local.index",
         kind = "light",
@@ -928,7 +935,7 @@ function Client:scanAsync(cb)
     if not ok then
         return defer(cb, false, err)
     end
-    return scanJob(rootPath(self.cfg), cb)
+    return scanJob(self, cb)
 end
 
 --- 远端 .Moon+ 下的路径。
@@ -2071,7 +2078,7 @@ function Client:autoScanAsync(cb)
         cb(false, nil, true)
         return nil
     end
-    return scanJob(rootPath(self.cfg), cb)
+    return scanJob(self, cb)
 end
 
 --- 封面缓存路径（已存在才返回；绝不现提取，coverRequest 在 UI 线程同步调用）。
