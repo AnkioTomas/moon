@@ -480,6 +480,31 @@ do
     books = {}
 end
 
+-- 首次同步：远端空（无 books.sync），本地书架已有扫盘登记的书。不下架，但刷新要把本地书传上去并写书目。
+do
+    local L = require("support.config").dir() .. "/webdav-first"
+    Paths.ensureDir(L)
+    local f = assert(io.open(L .. "/首.epub", "wb"))
+    f:write("first")
+    f:close()
+    books[L .. "/首.epub"] = { stable_id = L .. "/首.epub", title = "首", deleted = 0, sync_status = 1 }
+    local dav = fakeDav()
+    local c = Client.new({ webdav_url = "https://dav.example", path = L })
+    c.dav = dav
+
+    Assert.is_true(scan(c))
+    Assert.eq(books[L .. "/首.epub"].deleted, 0, "日常同步不因远端空而下架")
+    Assert.is_nil(dav.files[SYNC], "日常同步没东西可写")
+
+    Assert.is_true(refresh(c))
+    Assert.eq(dav.files[ROOT .. "/首.epub"].data, "first")
+    Assert.eq(remoteEntries(dav)["首.epub"].bookName, "首")
+    Assert.eq(books["webdav://首.epub"].deleted, 0)
+    Assert.eq(books["webdav://首.epub"].path, L .. "/首.epub")
+    os.remove(L .. "/首.epub")
+    books = {}
+end
+
 -- 删除：书文件、封面/进度/笔记边车、书目条目一起删；书文件本来就没了（404）也算删成功。
 do
     local dav = fakeDav()
