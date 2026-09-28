@@ -53,6 +53,7 @@ package.preload["ui/uimanager"] = function()
         close = function() end,
         setDirty = function() end,
         nextTick = function(_, cb) cb() end,
+        scheduleIn = function() end,
     }
 end
 package.preload["ffi/blitbuffer"] = function()
@@ -146,7 +147,14 @@ package.preload["book.store"] = function()
 end
 local queue_tasks = {}
 package.preload["source.cache_queue"] = function()
-    return { tasks = function() return queue_tasks end }
+    return {
+        has = function(source_id, stable_id)
+            for _, task in ipairs(queue_tasks) do
+                if task.source_id == source_id and task.stable_id == stable_id then return true end
+            end
+            return false
+        end,
+    }
 end
 package.preload["gettext"] = function() return function(s) return s end end
 package.preload["ffi/util"] = function()
@@ -452,4 +460,55 @@ hero_page:buildHero(400, {
 }, "library", true)
 Assert.eq(hero_opts.opts.subtitle, "微信读书 · 科幻 · 三体")
 Assert.eq(hero_opts.source.id, "wechat")
+resolved = nil
+
+-- 书城加入书库：进后台下载任务，不弹阻塞进度框；重复点复用任务；完成提示并作废图书馆缓存。
+local install_cb, install_progress, installs = nil, nil, 0
+package.preload["zlib.init"] = function()
+    return {
+        installAsync = function(_, _, on_progress, cb)
+            installs = installs + 1
+            install_progress, install_cb = on_progress, cb
+            return { cancel = function() end }
+        end,
+    }
+end
+package.preload["ui/network/manager"] = function()
+    return {
+        runWhenOnline = function(_, cb) cb() end,
+        isConnected = function() return true end,
+    }
+end
+package.preload["util"] = function()
+    return { getFriendlySize = function(n) return tostring(n) .. " B" end }
+end
+resolved = { id = "local", importBookAsync = function() end }
+local store_page = setmetatable({
+    plugin = {},
+    book = { source_id = "zlib", stable_id = "1:abc", title = "书城书", filesize = 100 },
+    desktop = { lifecycle = { state = "Resume" }, tab = "library", library = { state = { stale = true }, page = 3 },
+        updateView = function(self) self.updated = true end },
+}, { __index = Detail })
+store_page:installStoreBook()
+Assert.eq(installs, 1)
+Assert.eq(shown.text, "已加入后台下载任务")
+store_page:installStoreBook()
+Assert.eq(installs, 1)
+Assert.eq(shown.text, "这本书已在下载任务中")
+local Tasks = require("tasks")
+install_progress(40)
+Assert.eq(Tasks.tasks()[1].label, "下载")
+Assert.eq(Tasks.tasks()[1].text, "40 B / 100 B")
+install_cb(true, nil, "书城书.epub")
+Assert.eq(shown.text, "已加入书库：书城书.epub")
+Assert.is_nil(store_page.desktop.library.state)
+Assert.eq(store_page.desktop.library.page, 1)
+Assert.is_true(store_page.desktop.updated)
+Assert.eq(#Tasks.tasks(), 0)
+
+-- 下载失败：提示错误，任务出列，可重新加入。
+store_page:installStoreBook()
+install_cb(nil, "网络错误")
+Assert.eq(shown.text, "网络错误")
+Assert.eq(#Tasks.tasks(), 0)
 resolved = nil

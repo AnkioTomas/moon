@@ -116,7 +116,7 @@
 ---@field configured fun(self: BookSource): boolean 是否已配置到可请求
 ---@field clearCaches fun(self: BookSource) 清空源侧缓存
 ---@field close fun(self: BookSource)|nil 释放资源
----@field syncBooksAsync fun(self: BookSource, opts: { force?: boolean, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛书架；dirty_only 只推本地删/加
+---@field syncBooksAsync fun(self: BookSource, opts: { force?: boolean, dirty_only?: boolean, on_progress?: fun(text: string, done: integer|nil, total: integer|nil) }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛书架；dirty_only 只推本地删/加；on_progress 在真实步骤（拉取/上传/写库…）处上报，done/total 为该步计数
 ---@field syncProgressAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛进度
 ---@field syncNotesAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛笔记
 ---@field cleanAnnotations fun(self: BookSource, items: table[], total_pages: integer|nil): table[]|nil 清洗并透传源私有注解字段
@@ -233,6 +233,47 @@ function SourceBase:deleteBookAsync(_identity, cb)
     return nil
 end
 
+--- 书架同步落地：清桌面在飞标记，按结果刷新图书馆 / 首页。被新一轮取代的旧结果丢弃。
+---@param self SourceBase
+---@param desktop table
+---@param request table 发起时的请求令牌
+---@param result SyncResult|nil
+---@param err any
+local function onBooksSynced(self, desktop, request, result, err)
+    if desktop._books_sync_request ~= request then
+        logger.dbg("book shelf refresh result dropped", self.id, "stale")
+        return
+    end
+    desktop._books_sync_cancel = nil
+    desktop._books_sync_pending = false
+    desktop:onEvent("books_sync_done")
+    if desktop.lifecycle.state == "Destroy" or desktop.source ~= self then return end
+    if not result then
+        logger.warn("book shelf sync failed", self.id, err)
+        if desktop.tab == "library" and desktop.library then
+            desktop.library.state = { books = {}, err = err or _("同步失败") }
+            desktop:updateView()
+        end
+        return
+    end
+    -- 源自己的节流命中表示本地数据未变，不要无意义重建整页。
+    if result.skipped then
+        logger.dbg("book shelf refresh done", self.id, "skipped", result.reason or "")
+        return
+    end
+    logger.dbg("book shelf refresh done", self.id,
+        "pulled", tonumber(result.pulled) or 0,
+        "pushed", tonumber(result.pushed) or 0,
+        "hidden", tonumber(result.hidden) or 0)
+    self._books_refresh_at = os.time()
+    if desktop.library then desktop.library.state = nil end
+    -- 计数全 0 = 本地书架未变。非 0 也可能只是全量对账，首页组件自己比对显示数据再决定重建。
+    if (tonumber(result.pulled) or 0) + (tonumber(result.pushed) or 0) + (tonumber(result.hidden) or 0) > 0 then
+        desktop:onEvent("shelf_changed")
+    end
+    if desktop.tab == "library" then desktop:updateView() end
+end
+
 --- 插件生命周期事件通知。桌面打开默认后台同步书架，各源可追加行为。
 --- 事件清单：
 ---   reader_open     — Reader 实例创建（Reader 侧插件 init）
@@ -264,39 +305,29 @@ local function syncDesktopBooks(self, desktop, opts)
     desktop._books_sync_pending = true
     local request = {}
     desktop._books_sync_request = request
-    local job = self:syncBooksAsync(opts, function(result, err)
-        if desktop._books_sync_request ~= request then
-            logger.dbg("book shelf refresh result dropped", self.id, "stale")
-            return
-        end
-        desktop._books_sync_cancel = nil
-        desktop._books_sync_pending = false
-        if desktop.lifecycle.state == "Destroy" or desktop.source ~= self then return end
-        if not result then
-            logger.warn("book shelf sync failed", self.id, err)
-            if desktop.tab == "library" and desktop.library then
-                desktop.library.state = { books = {}, err = err or _("同步失败") }
-                desktop:updateView()
-            end
-            return
-        end
-        -- 源自己的节流命中表示本地数据未变，不要无意义重建整页。
-        if result.skipped then
-            logger.dbg("book shelf refresh done", self.id, "skipped", result.reason or "")
-            return
-        end
-        logger.dbg("book shelf refresh done", self.id,
-            "pulled", tonumber(result.pulled) or 0,
-            "pushed", tonumber(result.pushed) or 0,
-            "hidden", tonumber(result.hidden) or 0)
-        self._books_refresh_at = os.time()
-        if desktop.library then desktop.library.state = nil end
-        -- 计数全 0 = 本地书架未变。非 0 也可能只是全量对账，首页组件自己比对显示数据再决定重建。
-        if (tonumber(result.pulled) or 0) + (tonumber(result.pushed) or 0) + (tonumber(result.hidden) or 0) > 0 then
-            desktop:onEvent("shelf_changed")
-        end
-        if desktop.tab == "library" then desktop:updateView() end
-    end)
+    local function run(report, finish)
+        return self:syncBooksAsync({
+            force = opts and opts.force,
+            on_progress = function(text, done, total)
+                if desktop._books_sync_request ~= request then return end
+                report(text, done, total)
+                desktop:onEvent("books_sync_progress", { text = text, done = done, total = total })
+            end,
+        }, function(result, err)
+            finish({ ok = result ~= nil, err = err })
+            onBooksSynced(self, desktop, request, result, err)
+        end)
+    end
+    local noop = function() end
+    -- 手动刷新进后台任务列表（可见、离开页面也继续）；自动后台同步不上列表，免得每次回首页顶栏都闪。
+    -- 队列满时退回直接跑。
+    local job = opts and opts.force and require("tasks").enqueue{
+        key = "books\0" .. tostring(self.id),
+        lane = "sync",
+        label = _("同步书架"),
+        title = self.name,
+        run = run,
+    } or run(noop, noop)
     -- 某些源会同步回调；避免把已完成的 job 句柄残留到桌面状态。
     if desktop._books_sync_request == request and desktop._books_sync_pending then
         desktop._books_sync_cancel = job

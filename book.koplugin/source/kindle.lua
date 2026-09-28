@@ -14,6 +14,7 @@ local SourceBase = require("source.base")
 local Client = require("source.kindle.client")
 local Mapper = require("source.kindle.mapper")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Kindle = {}
 
@@ -79,6 +80,8 @@ function Source:syncBooksAsync(opts, cb)
             cb({ pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = true, reason = "kindle dirty_only" })
             return
         end
+        local report = opts and opts.on_progress or function() end
+        report(_("正在扫描 Kindle 书库…"))
         local kbooks, err = self:_scan()
         if not kbooks then
             cb(nil, err)
@@ -88,6 +91,7 @@ function Source:syncBooksAsync(opts, cb)
         for _, kbook in ipairs(kbooks) do
             books[#books + 1] = Mapper.book(kbook, Client.readyPath(kbook))
         end
+        report(T(_("正在写入书架（%1 本）"), #books))
         local result, rec_err = require("book.store").reconcile(self.id, books)
         if result then require("db.book").releaseForeignPaths(self.id) end
         cb(result, rec_err)

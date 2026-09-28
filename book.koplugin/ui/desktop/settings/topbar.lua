@@ -14,7 +14,7 @@ local ITEMS = {
     { id = "clock", label = _("时钟"), icon = "schedule", align = "left", sample = "12:34", bar_icon = false },
     { id = "source", label = _("数据源"), icon = "source", align = "left", sample = _("本地") },
     { id = "memory", label = _("剩余内存"), icon = "memory", sample = "128M" },
-    { id = "cache", label = _("缓存任务"), icon = "download", sample = "1/3" },
+    { id = "cache", label = _("后台任务"), icon = "download", sample = "1/3" },
     { id = "storage", label = _("剩余存储"), icon = "hard_drive", sample = "2.1G" },
     { id = "wifi", label = _("Wi-Fi"), icon = "wifi", icon_only = true },
     { id = "brightness", label = _("亮度"), icon = "brightness_6", sample = "40%" },

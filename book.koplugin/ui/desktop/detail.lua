@@ -59,7 +59,6 @@ local Screen = Device.screen
 ---@field _stats table|nil
 ---@field _daily table|nil
 ---@field _store_detail_job CancelHandle|nil
----@field _install_job CancelHandle|nil
 ---@field updateView fun(self: BookDetailPage)
 ---@field onCancel fun(self: BookDetailPage)
 ---@field onClose fun(self: BookDetailPage): boolean
@@ -209,13 +208,11 @@ end
 function Detail:onCancel()
     self.lifecycle:abortWork()
     self._store_detail_job = nil
-    self._install_job = nil
 end
 
 -- 句柄已由 lifecycle 在 Pause / Destroy 前取消，这里只丢引用。
 function Detail:onPause()
     self._store_detail_job = nil
-    self._install_job = nil
 end
 Detail.onDestroy = Detail.onPause
 

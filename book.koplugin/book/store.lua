@@ -260,6 +260,54 @@ function Store.isCached(book)
     return (meta ~= nil and meta.type == "chapter") or inCache(book.path)
 end
 
+--- 后台校验下载登记：文件被手动删掉的书撤 books.path，章节撤 chapters 行，已下载标记随之消失。
+--- 主进程取路径 → 子进程只 stat → 回主进程复核后写库（子进程禁止碰 sqlite）。
+--- 没有登记路径时不起任务、返回 nil，cb 不会被调用。
+---@param scope string|string[] 书库范围（Catalog.libraryScope）
+---@param cb fun(changed: integer) 撤掉的登记条数
+---@return table|nil job 可 :cancel()
+function Store.verifyDownloadsAsync(scope, cb)
+    local books = BookDB.pathsBySource(scope)
+    local paths = {}
+    for i, row in ipairs(books) do paths[i] = row.path end
+    for _, path in ipairs(ChapterDB.pathsBySource(scope)) do paths[#paths + 1] = path end
+    if #paths == 0 then return nil end
+    local lfs = require("libs/libkoreader-lfs")
+    return require("workers.job").run(function()
+        local missing = {}
+        for i, path in ipairs(paths) do
+            if not lfs.attributes(path, "mode") then missing[#missing + 1] = i end
+        end
+        return missing
+    end, {
+        name = "store.verify_downloads",
+        kind = "light",
+        on_done = function(missing)
+            local gone_books, gone_chapters = {}, {}
+            for _, i in ipairs(missing or {}) do
+                -- 子进程结果可能已过时（期间重新下载），写库前复核
+                local path = paths[i]
+                if not lfs.attributes(path, "mode") then
+                    if books[i] then gone_books[#gone_books + 1] = books[i]
+                    else gone_chapters[#gone_chapters + 1] = path end
+                end
+            end
+            local changed = 0
+            if #gone_books > 0 and BookDB.clearPaths(gone_books) then changed = changed + #gone_books end
+            if #gone_chapters > 0 and ChapterDB.deleteMany(gone_chapters) then
+                changed = changed + #gone_chapters
+            end
+            logger.dbg("book download verify", #paths, "checked", #gone_books, "books",
+                #gone_chapters, "chapters", changed, "cleared")
+            cb(changed)
+        end,
+        on_failed = function(err)
+            logger.warn("book download verify failed", err)
+            cb(0)
+        end,
+    })
+end
+
 --- 进度/面板用身份：BookIdentity（含 source_id/stable_id）。
 --- 唯一规则 = 路径精确查库：chapters（章节文件）→ books.path（整本书）。
 ---@param path string

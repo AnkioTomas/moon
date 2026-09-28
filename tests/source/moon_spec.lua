@@ -311,7 +311,9 @@ do
     lifecycle = { state = "Resume" },
         source = src,
         tab = "home",
-        onEvent = function(_, event) refreshes[#refreshes + 1] = event end,
+        onEvent = function(_, event)
+            if not event:match("^books_sync_") then refreshes[#refreshes + 1] = event end
+        end,
     }
     src:onEvent("home_open", desktop)
     Assert.is_true(rec.query ~= nil)

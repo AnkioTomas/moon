@@ -11,6 +11,7 @@ local Mapper = require("source.moon.mapper")
 local SourceBase = require("source.base")
 local Progress = require("book.progress")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Moon = {}
 
@@ -306,9 +307,10 @@ end
 
 --- 串行推待删：成功撕墓碑才计入。
 ---@param self MoonSource
+---@param report fun(text: string, done: integer|nil, total: integer|nil)
 ---@param on_done fun(deleted_n: integer)
 ---@return { cancel: fun() }|nil
-local function pushPendingDeletes(self, on_done)
+local function pushPendingDeletes(self, report, on_done)
     local Store = require("book.store")
     local pending = require("db.book").pendingDeleteIds(self.id)
     if #pending == 0 then
@@ -322,6 +324,7 @@ local function pushPendingDeletes(self, on_done)
             on_done(deleted_n)
             return
         end
+        report(_("正在同步删除的书"), index, #pending)
         local stable_id = pending[index]
         delete_job = self._client:deleteBooksAsync({ stable_id }, function(wire)
             delete_job = nil
@@ -346,12 +349,13 @@ end
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
     if opts.force then self:clearCaches() end
+    local report = opts.on_progress or function() end
     local cancelled, job, delete_job = false, nil, nil
     local deleted_n = 0
 
     --- dirty_only：只推待删，不拉书架。
     if opts.dirty_only then
-        delete_job = pushPendingDeletes(self, function(n)
+        delete_job = pushPendingDeletes(self, report, function(n)
             if cancelled then return end
             cb({
                 pulled = 0, pushed = n, hidden = 0, conflicts = 0, skipped = false,
@@ -375,6 +379,7 @@ function Source:syncBooksAsync(opts, cb)
     local function pullPages()
         if cancelled then return end
         local query = { page = page, pageSize = page_size, search = "", series = "", category = "" }
+        report(T(_("正在拉取书架（第 %1 页）"), page))
         job = self._client:listBooksAsync(query, function(wire, err)
             job = nil
             if cancelled then return end
@@ -383,16 +388,18 @@ function Source:syncBooksAsync(opts, cb)
             for _, book in ipairs(mapped.data or {}) do books[#books + 1] = book end
             local count = tonumber(mapped.count) or #books
             if #books < count and #(mapped.data or {}) > 0 then
+                report(T(_("正在拉取书架（第 %1 页）"), page), #books, count)
                 page = page + 1
                 pullPages()
                 return
             end
+            report(T(_("正在写入书架（%1 本）"), #books))
             local result, rerr = require("book.store").reconcile(self.id, books)
             if result then result.pushed = deleted_n end
             cb(result, rerr)
         end)
     end
-    delete_job = pushPendingDeletes(self, function(n)
+    delete_job = pushPendingDeletes(self, report, function(n)
         if cancelled then return end
         deleted_n = n
         pullPages()

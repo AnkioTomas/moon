@@ -496,9 +496,15 @@ do
     Assert.eq(books[L .. "/首.epub"].deleted, 0, "日常同步不因远端空而下架")
     Assert.is_nil(dav.files[SYNC], "日常同步没东西可写")
 
-    Assert.is_true(refresh(c))
+    local steps = {}
+    Assert.is_true(run(c, { refresh = true, on_progress = function(text, done, total)
+        steps[#steps + 1] = table.concat({ text, done or "", total or "" }, "|")
+    end }))
     Assert.eq(dav.files[ROOT .. "/首.epub"].data, "first")
     Assert.eq(remoteEntries(dav)["首.epub"].bookName, "首")
+    Assert.contains(steps, "正在检查远端目录…||")
+    Assert.contains(steps, "正在上传 首.epub|1|1", "上传逐本计数")
+    Assert.contains(steps, "正在更新书目（1 本）||")
     Assert.eq(books["webdav://首.epub"].deleted, 0)
     Assert.eq(books["webdav://首.epub"].path, L .. "/首.epub")
     os.remove(L .. "/首.epub")
