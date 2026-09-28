@@ -36,7 +36,9 @@ for _, name in ipairs({
 end
 local Widget = require("ui/widget/widget")
 package.preload["depgraph"] = function() return {} end
-package.preload["device"] = function() return { screen = {} } end
+package.preload["device"] = function()
+    return { screen = {}, hasKeys = function() return false end }
+end
 package.preload["ui/time"] = function() return {} end
 package.preload["ui/event"] = assert(loadfile(frontend .. "ui/event.lua"))
 package.preload["ui/widget/container/inputcontainer"] = assert(loadfile(frontend .. "ui/widget/container/inputcontainer.lua"))
