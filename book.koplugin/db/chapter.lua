@@ -53,6 +53,17 @@ function ChapterDB.countByBook(source_id, stable_id)
     )) or 0
 end
 
+--- 某源（或多源）登记过的全部章节文件路径。
+---@param source_id string|string[]
+---@return string[]
+function ChapterDB.pathsBySource(source_id)
+    local where, args = Base.sourceClause("source_id", source_id)
+    local result, nrows = Base.query("SELECT path FROM chapters WHERE " .. where .. ";", unpack(args))
+    local out = {}
+    for i = 1, nrows do out[i] = result[1][i] end
+    return out
+end
+
 --- 登记章节文件路径 → 书籍身份
 ---@param row { path: string, source_id: string, stable_id: string, chapter_idx: integer }
 ---@return boolean
@@ -92,6 +103,22 @@ end
 ---@return boolean
 function ChapterDB.delete(path)
     return Base.exec([[DELETE FROM chapters WHERE path=?;]], path) ~= nil
+end
+
+--- 一个事务删除多条章节登记（整本缓存被手动删掉时可达上千条，逐条自动提交会卡住界面）。
+---@param paths string[]
+---@return boolean
+function ChapterDB.deleteMany(paths)
+    if not Base.exec("BEGIN IMMEDIATE;") then return false end
+    for _, path in ipairs(paths) do
+        if not ChapterDB.delete(path) then
+            Base.exec("ROLLBACK;")
+            return false
+        end
+    end
+    if Base.exec("COMMIT;") then return true end
+    Base.exec("ROLLBACK;")
+    return false
 end
 
 return ChapterDB
