@@ -6,7 +6,8 @@ ui/themes 组件测试用的最小 KOReader 控件桩。
   - 尺寸：容器按子件累加，Span / Line / Text 给固定可预测尺寸
   - 绘制：容器把坐标传给子件，InputContainer 回写 dimen.x/y（点击命中靠它）
   - UIManager：记录 show / close / setDirty / scheduleIn / unschedule；close 触发 onCloseWidget
-  - 画布：Kit.canvas() 记录 paintRoundedRect / paintBorder 调用
+  - 画布：Kit.canvas() 记录 paintRoundedRect / paintBorder 调用，setPixel 计数
+  - 字体：ui/font 的 getFace 返回 { name, size }，主题图标 / 遮罩走真实实现
 
   local Kit = require("support.widget_stubs")
   Kit.install("bold")          -- 每个 spec 顶部调用；主题 id 写进 display.ui_theme
@@ -176,11 +177,13 @@ function Kit.tap(x, y)
     return { pos = geom{ x = x, y = y, w = 0, h = 0 } }
 end
 
---- 记录绘制调用的假画布。
+--- 记录绘制调用的假画布（setPixel 只计数：遮罩逐像素画）。
 function Kit.canvas()
     local ops = {}
     return {
         ops = ops,
+        pixels = 0,
+        setPixel = function(self) self.pixels = self.pixels + 1 end,
         paintRoundedRect = function(_, x, y, w, h, c, r)
             ops[#ops + 1] = { op = "rect", x = x, y = y, w = w, h = h, c = c, r = r }
         end,
@@ -198,9 +201,9 @@ end
 --- 安装全部桩并清空记录。
 ---@param theme string|nil 主题 id，缺省 paper
 function Kit.install(theme)
-    Kit.display = { ui_theme = theme or "paper" }
+    -- ui_scale = 100 且 scaleBySize 恒等：逻辑像素 = 物理像素，断言可以直接写令牌值。
+    Kit.display = { ui_theme = theme or "paper", ui_scale = 100, mesh_mask = true }
     Kit.shown, Kit.closed, Kit.dirty, Kit.scheduled, Kit.unscheduled = {}, {}, {}, {}, {}
-    Kit.masks = 0
     local modules = {
         ["ffi/blitbuffer"] = { Color8 = function(v) return v end, COLOR_BLACK = 0, COLOR_WHITE = 255 },
         ["ffi/util"] = {
@@ -243,24 +246,19 @@ function Kit.install(theme)
                 Kit.saved = (Kit.saved or 0) + 1
             end,
         },
-        ["ui.components.bookui"] = {
-            sz = function(n) return n end,
-            face = function(name, size) return { name = name, size = size } end,
-            barH = function() return 56 end,
+        ["ui/font"] = {
+            fontmap = {},
+            getFace = function(_, name, size) return { name = name, size = size } end,
         },
-        ["ui.components.icon"] = {
-            widget = function(opts) return Leaf:new{ size = opts.size, name = opts.name, color = opts.color } end,
-            label = function(opts)
-                return Leaf:new{ width = 40, height = 30, name = opts.name, text = opts.text, color = opts.color }
-            end,
-        },
-        ["ui.components.meshmask"] = {
+        ["fontlist"] = { fontlist = {}, getFontList = function() end },
+        -- 图片内核（下载 / 解码）另有 tests/ui/themes/widgets/image/core_spec.lua；这里只记参数。
+        ["ui.themes.widgets.image.core"] = {
             widget = function(opts)
-                return Widget:new{
-                    dimen = geom{ w = opts.width, h = opts.height },
-                    paintTo = function() Kit.masks = Kit.masks + 1 end,
-                }
+                return Widget:new{ dimen = geom{ w = opts.width, h = opts.height }, src = opts.src, image_opts = opts }
             end,
+            fetchAsync = function() end,
+            invalidate = function() end,
+            await = function() end,
         },
         ["ui/widget/widget"] = Widget,
         ["ui/widget/container/widgetcontainer"] = Container,

@@ -6,7 +6,8 @@ main.lua 检测到 demo/ 目录存在才转发 addToMainMenu。
     ├─ 切换主题            居中单选 List → 写 display.ui_theme，重开首页
     ├─ 控件：文字 / 按钮 / 进度条 / 卡片   全屏展示页，可交互
     ├─ 控件：行 / 翻页条 / 底栏            全屏展示页，可交互
-    └─ 提示、确认框、动作表、列表×3、进度弹窗、数值×2、输入×2、文本查看、二维码
+    ├─ 控件：图片 / 锚点弹出 / 多按钮行    全屏展示页，可交互
+    └─ 提示、确认框、动作表、列表×4、进度弹窗、数值×2、输入×2、文本查看、二维码
 
 @module koplugin.book.demo
 --]]
@@ -21,6 +22,7 @@ local Theme = require("ui.themes.init")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
 local Confirm = require("ui.themes.widgets.confirm")
+local Image = require("ui.themes.widgets.image")
 local Input = require("ui.themes.widgets.input")
 local List = require("ui.themes.widgets.list")
 local Modal = require("ui.themes.widgets.modal")
@@ -207,6 +209,50 @@ local function rows(page, t, width)
     })
 end
 
+--- 贴着按钮弹出的菜单（按钮上屏后 dimen 带坐标）。
+local function menuFrom(button)
+    Sheet:new{ anchor = button.dimen, mask = false, items = {
+        { text = "按书名", callback = function() say("按书名") end },
+        { text = "按作者", callback = function() say("按作者") end },
+        { text = "按最近阅读", callback = function() say("按最近阅读") end },
+    } }:show()
+end
+
+--- 控件页三：图片三态、锚点弹出（左上 / 右下，验证翻转与夹边）、多按钮行动作表。
+local function media(_, t, width)
+    local third = math.floor((width - Theme.px(t.space.sm) * 2) / 3)
+    local h = math.floor(third * 4 / 3)
+    local left, right
+    left = Button:new{ icon = "sort", text = "排序", callback = function() menuFrom(left) end }
+    right = Button:new{ icon = "more_horiz", text = "更多", callback = function() menuFrom(right) end }
+    return vstack(t, {
+        Text.line(t, "caption", "图片：本地 / 缺失回落文案 / 卡片表面", { width = width, color = t.color.muted }),
+        hrow(t, {
+            Image.widget(t, { width = third, height = h, src = "logo.png" }),
+            Image.widget(t, { width = third, height = h, src = "missing.png", fallback = "三体" }),
+            Image.widget(t, { width = third, height = h, src = "logo.png", style = t.card }),
+        }),
+        Text.line(t, "caption", "锚点弹出：贴按钮下方，放不下翻到上方", { width = width, color = t.color.muted }),
+        hrow(t, { left, right }),
+        Button:new{ text = "动作表：多按钮行", width = width, callback = function()
+            Sheet:new{ title = "划词", items = {
+                { buttons = {
+                    { icon = "content_copy", callback = function() say("复制") end },
+                    { icon = "border_color", callback = function() say("高亮") end },
+                    { icon = "translate", callback = function() say("翻译") end },
+                    { icon = "search", callback = function() say("查词") end },
+                } },
+                { buttons = {
+                    { text = "笔记", callback = function() say("笔记") end },
+                    { text = "分享", callback = function() say("分享") end },
+                } },
+                { separator = true },
+                { text = "取消" },
+            } }:show()
+        end },
+    })
+end
+
 --- 模拟一个 10 步的后台任务；收起弹窗后停止推进。
 local function fakeProgress()
     local stopped = false
@@ -268,6 +314,9 @@ local function entries()
         { text = "控件：行 / 翻页条 / 底栏", run = function()
             Gallery:new{ title = "列表件", body = rows }:show()
         end },
+        { text = "控件：图片 / 锚点弹出 / 多按钮行", run = function()
+            Gallery:new{ title = "图片与弹出", body = media }:show()
+        end },
         { text = "提示 Toast（点任意处收起）", run = function()
             Toast:new{ text = "已加入书架。点任意处收起。" }:show()
         end },
@@ -306,6 +355,14 @@ local function entries()
                     for _, it in ipairs(items) do if it.checked then on[#on + 1] = it.value end end
                     say("已启用：" .. (#on > 0 and table.concat(on, "、") or "无"))
                 end }:show()
+        end },
+        { text = "列表：缩略图 + 右侧控件", run = function()
+            local items = {}
+            for i, name in ipairs({ "三体", "球状闪电", "流浪地球" }) do
+                items[i] = { text = name, value = name, image = "logo.png", image_w = 28, image_h = 36,
+                    widget = Text.line(Theme.current(), "caption", "预览 Aa") }
+            end
+            List:new{ title = "带缩略图", items = items, on_select = function(v) say("选择：" .. v) end }:show()
         end },
         { text = "列表：60 项分页（第 3 项禁用）", run = function()
             List:new{ title = "长列表", subtitle = "打开即翻到选中的第 33 项", items = numbered(60, 33),
@@ -349,14 +406,26 @@ function Demo.open()
     Hub:new{ title = "主题组件演示", subtitle = "当前：" .. NAMES[Theme.current().id], items = entries() }:show()
 end
 
---- 挂主菜单项（由 BookPlugin:addToMainMenu 转发）。
+local MENU_ID = "book_theme_demo"
+
+--- 挂主菜单项（由 BookPlugin:addToMainMenu 转发）：设置页紧跟「月读」（book_library）。
+--- KOReader 先收集各插件菜单项再按 menu_order 排序，所以在这里改顺序表来得及。
 ---@param menu_items table KOReader 主菜单项表（就地写入）
 function Demo.addToMainMenu(menu_items)
-    menu_items.book_theme_demo = {
+    menu_items[MENU_ID] = {
         text = "主题组件演示",
-        sorting_hint = "more_tools",
+        sorting_hint = "setting",
         callback = Demo.open,
     }
+    for _, modname in ipairs({ "ui/elements/filemanager_menu_order", "ui/elements/reader_menu_order" }) do
+        local order = require(modname).setting
+        local at
+        for i, id in ipairs(order) do
+            if id == MENU_ID then at = nil break end
+            if id == "book_library" then at = i + 1 end
+        end
+        if at then table.insert(order, at, MENU_ID) end
+    end
 end
 
 return Demo

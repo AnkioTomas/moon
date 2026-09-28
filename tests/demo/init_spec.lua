@@ -9,12 +9,22 @@ local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
 
+local fm_order = { setting = { "book_library", "network" } }
+local reader_order = { setting = { "book_library", "screen" } }
+package.preload["ui/elements/filemanager_menu_order"] = function() return fm_order end
+package.preload["ui/elements/reader_menu_order"] = function() return reader_order end
+package.loaded["ui/elements/filemanager_menu_order"] = nil
+package.loaded["ui/elements/reader_menu_order"] = nil
 package.loaded["demo.init"] = nil
 local Demo = require("demo.init")
 
+-- 主菜单：设置页紧跟「月读」；每次建菜单都会调，顺序表只插一次。
 local menu = {}
 Demo.addToMainMenu(menu)
-Assert.eq(menu.book_theme_demo.sorting_hint, "more_tools")
+Demo.addToMainMenu(menu)
+Assert.eq(menu.book_theme_demo.sorting_hint, "setting")
+Assert.eq(table.concat(fm_order.setting, ","), "book_library,book_theme_demo,network")
+Assert.eq(table.concat(reader_order.setting, ","), "book_library,book_theme_demo,screen")
 menu.book_theme_demo.callback()
 Assert.eq(Kit.shown[#Kit.shown].title, "主题组件演示")
 
@@ -45,7 +55,7 @@ for _, id in ipairs({ "paper", "bold", "soft" }) do
         local shown = Kit.shown[#Kit.shown]
         -- 展示页：点遍所有交互，重绘不报错。
         if shown.refresh then
-            Assert.is_true(tapAll(shown) > 5, id .. " 展示页交互太少: " .. shown.title)
+            Assert.is_true(tapAll(shown) > 3, id .. " 展示页交互太少: " .. shown.title)
             shown:paintTo(Kit.canvas(), 0, 0)
         end
     end

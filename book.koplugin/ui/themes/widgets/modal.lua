@@ -4,7 +4,8 @@
   +----------------------------+
   |░░░░░░░░░░░░░░░░░░░░░░░░░░░░|   mask=true 画网状遮罩（受 display.mesh_mask 开关）
   |░░░░ +----------------+ ░░░░|
-  |░░░░ | 标题           | ░░░░|   anchor=center 居中；top 贴顶（给键盘让位）
+  |░░░░ | 标题           | ░░░░|   anchor=center 居中；top 贴顶（给键盘让位）；
+  |░░░░ |                | ░░░░|   给矩形 {x,y,w,h} 则贴其下方弹出，放不下翻到上方，左右夹进屏内
   |░░░░ | 正文           | ░░░░|
   |░░░░ | [取消] [确定]  | ░░░░|
   |░░░░ +----------------+ ░░░░|
@@ -25,18 +26,17 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local MeshMask = require("ui.components.meshmask")
-local UI = require("ui.components.bookui")
 local Theme = require("ui.themes.init")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
+local Mask = require("ui.themes.widgets.mask")
 local Text = require("ui.themes.widgets.text")
 local Screen = Device.screen
 
 ---@class BookThemeModal : InputContainer
 ---@field dismissable boolean 点面板外 / 返回键是否关闭
 ---@field close_on_tap boolean 面板内外任意点按都直接关窗（提示、进度、二维码这类无交互面板）
----@field anchor string center/top
+---@field anchor string|table center/top，或锚点矩形 {x,y,w,h}（物理像素，如按钮 dimen）
 ---@field mask boolean 是否画网状遮罩；全屏页传 false
 ---@field close_callback fun()|nil
 ---@field theme table 构造时的主题令牌
@@ -52,14 +52,14 @@ local Modal = InputContainer:extend{
 ---@param t table 主题令牌
 ---@return number 物理像素
 function Modal.dialogWidth(t)
-    return math.min(Screen:getWidth() - Theme.px(t.space.lg) * 4, UI.sz(480))
+    return math.min(Screen:getWidth() - Theme.px(t.space.lg) * 4, Theme.px(480))
 end
 
 function Modal:init()
     self.theme = Theme.current()
     self.dimen = Screen:getSize()
     if self.mask then
-        self._mask = MeshMask.widget{ width = self.dimen.w, height = self.dimen.h }
+        self._mask = Mask:new{ dimen = self.dimen }
     end
     if Device:hasKeys() then
         self.key_events.Close = { { Device.input.group.Back } }
@@ -74,8 +74,16 @@ end
 function Modal:setPanel(panel)
     self[1] = panel
     local size = panel:getSize()
+    local a = self.anchor
+    if type(a) == "table" then
+        local m = Theme.px(self.theme.space.sm)
+        local below = a.y + a.h
+        self.panel_x = math.max(m, math.min(a.x + math.floor((a.w - size.w) / 2), self.dimen.w - size.w - m))
+        self.panel_y = below + size.h <= self.dimen.h - m and below or math.max(m, a.y - size.h)
+        return
+    end
     self.panel_x = math.floor((self.dimen.w - size.w) / 2)
-    self.panel_y = self.anchor == "top" and Theme.px(self.theme.space.lg)
+    self.panel_y = a == "top" and Theme.px(self.theme.space.lg)
         or math.floor((self.dimen.h - size.h) / 2)
 end
 

@@ -22,8 +22,7 @@ local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local LineWidget = require("ui/widget/linewidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
-local Icon = require("ui.components.icon")
-local UI = require("ui.components.bookui")
+local Icon = require("ui.themes.widgets.icon")
 local Theme = require("ui.themes.init")
 local Box = require("ui.themes.widgets.box")
 local Tap = require("ui.themes.widgets.tap")
@@ -36,7 +35,7 @@ local Tabbar = {}
 ---@return table
 function Tabbar.widget(t, opts)
     local rule = math.max(1, Theme.px(t.row.divider))
-    local cell_h = (opts.height or UI.barH()) - rule
+    local cell_h = (opts.height or Theme.px(t.control.height + t.space.lg)) - rule
     local cell_w = math.floor(opts.width / #opts.tabs)
     local sel = t.selected
     local mark = Theme.px(sel.mark)

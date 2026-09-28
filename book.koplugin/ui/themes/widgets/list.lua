@@ -12,7 +12,8 @@
   +-------------------------------+
 
 subtitle 只在全屏标题栏里显示；居中面板点外面关，全屏点右上角或返回键关。
-items：{ text, value, icon, mandatory（右侧状态字）, enabled, checked }
+items：{ text, value, icon, mandatory（右侧状态字）, widget（右侧控件，优先于 mandatory）,
+         image / image_w / image_h（缩略图，逻辑像素）, enabled, checked }
   checked 为 nil 的项不画选择标记；非 nil 时单选画 radio、多选画 checkbox。
 单选：点按即关窗，再 on_select(value, item)；打开时翻到第一个 checked 项所在页，该项按选中样式画。
 多选：点按就地翻转 item.checked（会改调用方的 items）并 on_toggle(value, checked, item)，不关窗；
@@ -113,8 +114,11 @@ function List:rebuild()
         rows[#rows + 1] = Row.widget(t, {
             width = self.row_w,
             icon = self:markIcon(item),
+            image = item.image,
+            image_w = item.image_w,
+            image_h = item.image_h,
             title = item.text,
-            status = item.mandatory,
+            status = item.widget or item.mandatory,
             chevron = false,
             selected = not self.multi and item.checked == true,
             enabled = item.enabled,

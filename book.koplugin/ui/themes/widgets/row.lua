@@ -2,13 +2,14 @@
 主题列表行：设置页的每一行、弹出列表的每一项共用。
 
   +-----------------------------------------------+
-  | [icon]  标题                        状态  [>] |
-  |         副标题（可选）                        |
+  | [icon][img] 标题                    状态  [>] |
+  |             副标题（可选）                    |
   +-----------------------------------------------+   row.divider > 0 且 divider ~= false 时画线
 
   Row.widget(theme, {
       width = w, icon = "source", title = "…", subtitle = "…",
-      status = "开", status_on = true,
+      image = "https://…", image_w = 32, image_h = 32,   -- 缩略图（逻辑像素），高度夹到行内
+      status = "开", status_on = true,   -- status 也可以直接给控件（字体预览等）
       chevron = true,      -- 缺省：有 callback 就画
       selected = false,    -- 选中项取 selected 令牌（反色主题整行反白）
       enabled = true,      -- false 时置灰、不响应
@@ -27,9 +28,10 @@ local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local RightContainer = require("ui/widget/container/rightcontainer")
 local VerticalGroup = require("ui/widget/verticalgroup")
-local Icon = require("ui.components.icon")
+local Icon = require("ui.themes.widgets.icon")
 local Theme = require("ui.themes.init")
 local Box = require("ui.themes.widgets.box")
+local Image = require("ui.themes.widgets.image")
 local Tap = require("ui.themes.widgets.tap")
 local Text = require("ui.themes.widgets.text")
 
@@ -59,16 +61,27 @@ function Row.widget(t, opts)
     local h = Row.height(t, opts.subtitle ~= nil)
     local inner = opts.width - Theme.px(t.space.md) * 2
     local icon_sz = Theme.px(t.control.icon)
-    local icon_w = opts.icon and icon_sz + Theme.px(t.space.sm) or 0
+    local gap = Theme.px(t.space.sm)
+    local icon_w = opts.icon and icon_sz + gap or 0
+    local image_h = opts.image and math.min(Theme.px(opts.image_h or t.control.icon), h - Theme.px(t.space.xs) * 2)
+    local image_w = opts.image and Theme.px(opts.image_w or opts.image_h or t.control.icon)
     local chev_w = chevron and icon_sz or 0
-    local status_w = opts.status and math.floor(inner * 0.4) or 0
-    local text_w = math.max(1, inner - icon_w - status_w - chev_w)
+    local status_widget = type(opts.status) == "table" and opts.status or nil
+    local status_w = status_widget and status_widget:getSize().w
+        or opts.status and math.floor(inner * 0.4) or 0
+    local text_w = math.max(1, inner - icon_w - (image_w and image_w + gap or 0) - status_w - chev_w)
 
     local content = HorizontalGroup:new{ align = "center" }
     if opts.icon then
         content[#content + 1] = LeftContainer:new{
             dimen = Geom:new{ w = icon_w, h = h },
             Icon.widget{ name = opts.icon, size = t.control.icon, color = Blitbuffer.Color8(ink) },
+        }
+    end
+    if opts.image then
+        content[#content + 1] = LeftContainer:new{
+            dimen = Geom:new{ w = image_w + gap, h = h },
+            Image.widget(t, { src = opts.image, width = image_w, height = image_h }),
         }
     end
     local texts = VerticalGroup:new{
@@ -82,7 +95,7 @@ function Row.widget(t, opts)
     if opts.status then
         content[#content + 1] = RightContainer:new{
             dimen = Geom:new{ w = status_w, h = h },
-            Text.line(t, "body", opts.status, { width = status_w, color = opts.status_on and ink or muted }),
+            status_widget or Text.line(t, "body", opts.status, { width = status_w, color = opts.status_on and ink or muted }),
         }
     end
     if chevron then
