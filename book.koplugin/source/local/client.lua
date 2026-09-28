@@ -1112,11 +1112,11 @@ local function pullBooksSync(self, run, next)
 
         local BookDB = require("db.book")
         run.files = memberFiles(run)
-        -- 书目为空而本地书架非空：多半是目录填错或服务端异常，本轮不下架任何书。
+        -- 书目为空而本地书架非空：首次同步，或目录填错 / 服务端异常。本轮不下架任何书，
+        -- 但照常上传本地书、写书目（meta_failed 只表示书目读不出、不能回写）。
         local live = BookDB.libraryStableIdsBySource(SOURCE_ID)
         if #run.files == 0 and #live > 0 then
             require("utils.log").warn("book webdav remote library empty; skip reconcile")
-            run.meta_failed = true
             return next()
         end
         local before = BookDB.getMany(SOURCE_ID, live)
