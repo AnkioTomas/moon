@@ -43,7 +43,7 @@ local source = {
 }
 
 local Queue = require("source.cache_queue")
-local Tasks = require("tasks")
+local Tasks = require("workers.tasks")
 local ref = { source_id = "wechat", stable_id = "book-1" }
 local job, queued = Queue.enqueue(source, ref)
 Assert.is_true(queued)

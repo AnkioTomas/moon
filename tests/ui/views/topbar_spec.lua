@@ -176,7 +176,7 @@ local cache_watch_cancel = 0
 local scheduled = {}
 local unschedules = 0
 local dirty = {}
-package.preload["tasks"] = function()
+package.preload["workers.tasks"] = function()
     return {
         tasks = function() return { cache_status } end,
         watch = function(cb)

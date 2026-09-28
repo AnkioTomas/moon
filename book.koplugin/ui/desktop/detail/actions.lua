@@ -69,7 +69,7 @@ function Detail:installStoreBook()
     local desk = self.desktop
     local total = tonumber(book.filesize)
     require("ui/network/manager"):runWhenOnline(function()
-        local task, queued = require("tasks").enqueue{
+        local task, queued = require("workers.tasks").enqueue{
             key = "install\0" .. tostring(book.source_id) .. "\0" .. tostring(book.stable_id),
             lane = "download",
             label = _("下载"),

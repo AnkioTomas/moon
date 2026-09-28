@@ -24,7 +24,7 @@ package.preload["ui/network/manager"] = function()
     return { isConnected = function() return connected end }
 end
 
-local Tasks = require("tasks")
+local Tasks = require("workers.tasks")
 
 --- 造一个手动控制完成的任务；runs 记录每次启动的 { report, done, cancelled }。
 local function spec(key, lane, extra)

@@ -5,7 +5,7 @@ id 仍叫 cache：用户的顶栏显示设置按这个键存。
 @module koplugin.book.ui.views.topbar.cache
 --]]
 
-local Tasks = require("tasks")
+local Tasks = require("workers.tasks")
 local _ = require("gettext")
 local T = require("ffi/util").template
 local Base = require("ui.views.topbar.base")
