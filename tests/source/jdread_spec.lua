@@ -371,5 +371,21 @@ do
     Assert.matches(html, "<p>新</p>")
     Assert.eq(stored[1].toc_version, 2)
     Assert.is_true(src:isTocCurrent(stored))
+
+    -- 网页协议判定 can_read=false：提示走 App，不冒充网络/权限错误
+    fake_client.downloadChapterAsync = function(_, _, _, cb)
+        cb({ data = { content_type = "net", chapter = { { chapter_id = "c37", can_read = false } } } })
+        return { cancel = function() end }
+    end
+    local denied
+    require("source.chapter").prefetchAsync = function(identity, _, toc, _, _, opts, cb)
+        opts.fetchContent(identity, toc[1], function(_, err) denied = err; cb() end)
+        return { cancel = function() end }
+    end
+    src:prefetchChaptersAsync(
+        { source_id = "jdread", stable_id = "30451107", book = { stable_id = "30451107" } },
+        stored, 1, 1, function() end
+    )
+    Assert.eq(denied, "京东读书网页协议读不到本章，请在京东读书 App 内阅读")
     Toc.read, Toc.put = orig_read, orig_put
 end

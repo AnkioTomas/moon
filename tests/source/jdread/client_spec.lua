@@ -193,7 +193,7 @@ do
     Assert.matches(req.url, "[?&]ids=15001647875062768")
     Assert.is_nil(req.url:find("indexes=", 1, true))
     Assert.is_nil(wire)
-    Assert.eq(err, "京东读书无可用阅读权限")
+    Assert.eq(err, "京东读书网页协议读不到本章，请在京东读书 App 内阅读")
 end
 
 -- v2 目录按行偏移分页，直到 has_more=false，合并成一份 chapter_info

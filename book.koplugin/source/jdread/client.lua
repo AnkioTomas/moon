@@ -290,7 +290,7 @@ function Client:downloadChapterAsync(book_id, query, cb)
     }, function(raw, err)
         if not raw then cb(nil, err); return end
         local wire, decode_err, code = Protocol.decodeDownload(raw, tm)
-        if code == DOWNLOAD_DENIED then decode_err = _("京东读书无可用阅读权限") end
+        if code == DOWNLOAD_DENIED then decode_err = _("京东读书网页协议读不到本章，请在京东读书 App 内阅读") end
         cb(wire, decode_err)
     end)
 end

@@ -206,7 +206,7 @@ local function fetchContent(self, identity, chapter, cb)
         if not wire then cb(nil, err); return end
         local payload = Mapper.content(wire, chapter.title)
         if not payload then
-            cb(nil, err or _("京东读书无可用阅读权限"))
+            cb(nil, err or _("京东读书网页协议读不到本章，请在京东读书 App 内阅读"))
             return
         end
         asset_job = Assets.localizeAsync(
