@@ -889,6 +889,17 @@ function BookDB.setToc(source_id, stable_id, payload)
     ) ~= nil
 end
 
+--- 清除书籍目录缓存。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function BookDB.clearToc(source_id, stable_id)
+    return Base.exec(
+        [[UPDATE books SET toc=NULL, toc_fetched_at=0 WHERE source_id=? AND stable_id=?;]],
+        source_id, stable_id
+    ) ~= nil
+end
+
 --- 读取全书阅读排版偏好（JSON 串）。
 ---@param source_id string
 ---@param stable_id string

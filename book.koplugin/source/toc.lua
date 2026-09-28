@@ -172,6 +172,14 @@ function Toc.wholeFraction(source_id, stable_id, chapter_idx, chapter_fraction)
     )
 end
 
+--- 作废一本的目录缓存：落库的 books.toc 与进程内缓存一起清掉。
+---@param source_id string
+---@param stable_id string
+function Toc.drop(source_id, stable_id)
+    require("db.book").clearToc(source_id, stable_id)
+    dropCache(keyOf(source_id, stable_id))
+end
+
 --- 丢掉一本的进程内目录缓存；落库的 books.toc 不受影响。
 ---@param source_id string
 ---@param stable_id string
