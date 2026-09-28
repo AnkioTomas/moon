@@ -7,6 +7,7 @@
 local Base = require("source.base")
 require("l10n").apply()
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local M = {}
 
@@ -91,7 +92,9 @@ function Source:syncBooksAsync(opts, cb)
         return { cancel = function() end }
     end
 
+    local report = opts.on_progress or function() end
     local h = handle()
+    report(_("正在拉取书架…"))
     h.job = self.client:fetchShelfDetailAsync(opts.force, function(wire, err)
         if h.cancelled then return end
         if not wire then
@@ -119,6 +122,7 @@ function Source:syncBooksAsync(opts, cb)
                 }
             end
         end
+        report(T(_("正在写入书架（%1 本）"), #books))
         local result, reason = require("book.store").reconcile(self.id, books)
         cb(result, reason)
     end)

@@ -185,7 +185,7 @@ function Source:syncBooksAsync(opts, cb)
             if ok == false then cb(nil, err); return end
             cb({ pulled = 1, pushed = 0, hidden = 0, conflicts = 0,
                 skipped = false, scanned = true })
-        end)
+        end, opts.on_progress)
     end
     return self._client:autoScanAsync(function(scanned, err, skipped)
         if err then
@@ -195,7 +195,7 @@ function Source:syncBooksAsync(opts, cb)
         cb({ pulled = scanned and 1 or 0, pushed = 0, hidden = 0, conflicts = 0,
             skipped = skipped == true, reason = skipped and "throttled" or nil,
             scanned = not not scanned })
-    end)
+    end, opts.on_progress)
 end
 
 --- 纯本地目录没有远端：进度域直接 skipped；WebDAV 走通用 book.progress（开书拉取 + 冲突弹窗，关书推脏）。

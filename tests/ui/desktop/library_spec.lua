@@ -25,13 +25,13 @@ for _, name in ipairs({
     package.preload[name] = widgetModule
 end
 local dialogs = {}
-package.preload["ui/widget/progressbardialog"] = function()
+package.preload["ui.components.progress_dialog"] = function()
     return {
         new = function(_, opts)
-            opts.shown, opts.progress = false, 0
+            opts.shown, opts.steps = false, {}
             function opts:show() self.shown = true end
-            function opts:reportProgress(p) self.progress = p end
-            -- 真实 ProgressbarDialog 在 onCloseWidget 里调 dismiss_callback。
+            function opts:update(text, done, total) self.steps[#self.steps + 1] = { text, done, total } end
+            -- 真实弹窗在 onCloseWidget 里调 dismiss_callback。
             function opts:close()
                 self.shown = false
                 if self.dismiss_callback then self.dismiss_callback(); self.dismiss_callback = nil end
@@ -142,6 +142,18 @@ package.preload["utils.log"] = function()
     return { warn = function() end, dbg = function() end }
 end
 package.preload["gettext"] = function() return function(s) return s end end
+package.preload["book.catalog"] = function()
+    return { libraryScope = function(id) return { id, "extra" } end }
+end
+local verifies = {}
+package.preload["book.store"] = function()
+    return {
+        verifyDownloadsAsync = function(scope, cb)
+            verifies[#verifies + 1] = { scope = scope, cb = cb }
+            return { cancel = function() end }
+        end,
+    }
+end
 local display = { library_sort = "recent_added" }
 package.preload["utils.settings"] = function()
     return {
@@ -166,6 +178,7 @@ local Library = require("ui.desktop.library")
 local view_updates = 0
 local requested
 local source = {
+    id = "moon",
     capabilities = function() return { search = true } end,
     filtersAsync = function(_, cb) cb({ data = { category = {}, series = {} } }) end,
     listLibraryAsync = function(_, opts, cb)
@@ -264,13 +277,15 @@ library:updateView()
 Assert.is_nil(requested)
 desktop.lifecycle.state = "Create"
 
--- 手动刷新：同步在飞期间弹出假进度弹窗，不动图书馆页面；同步落下自动关窗。
+-- 手动刷新：弹窗显示源上报的真实步骤，不动图书馆页面；books_sync_done 关窗。
 source.syncBooksAsync = function() end
 local emitted = 0
 desktop.plugin.emitToSource = function(_, event, payload)
     Assert.eq(event, "library_refresh_request")
     emitted = emitted + 1
     payload._books_sync_pending = true
+    -- 源在请求里同步上报的第一步也要进弹窗。
+    library:onEvent("books_sync_progress", { text = "正在检查远端目录…" })
 end
 desktop.updateView = function() view_updates = view_updates + 1 end
 view_updates = 0
@@ -280,32 +295,55 @@ Assert.len(dialogs, 1)
 local dialog = dialogs[1]
 Assert.is_true(dialog.shown)
 Assert.eq(dialog.title, "正在刷新书库…")
-Assert.eq(dialog.progress_max, 100)
+Assert.eq(dialog.steps[1][1], "正在检查远端目录…")
 
 library:rescan()
 Assert.eq(emitted, 1, "刷新中重复点击忽略")
 Assert.len(dialogs, 1)
 
-runScheduled()
-runScheduled()
-Assert.eq(dialog.progress, 100 * Library.refreshPercentage(2))
-Assert.is_true(dialog.progress > 20 and dialog.progress < 90)
-Assert.eq(view_updates, 0, "进度跳动不重建页面")
-Assert.is_true(Library.refreshPercentage(1000) <= 0.9, "永不走满")
+-- 刷新同时后台校验已下载标记：范围跟书库一致；在飞时不重复起。
+Assert.len(verifies, 1)
+Assert.eq(verifies[1].scope[1], "moon")
+Assert.eq(verifies[1].scope[2], "extra")
+library._refresh = nil
+library:verifyDownloads()
+Assert.len(verifies, 1, "校验在飞不重复起")
+view_updates = 0
+library.state = { books = {} }
+verifies[1].cb(0)
+Assert.eq(view_updates, 0, "没撤掉登记不重建")
+Assert.not_nil(library.state)
+library:verifyDownloads()
+Assert.len(verifies, 2)
+desktop.tab = "home"
+verifies[2].cb(3)
+Assert.eq(view_updates, 0, "已离开图书馆不重建")
+desktop.tab = "library"
+library:verifyDownloads()
+verifies[3].cb(2)
+Assert.is_nil(library.state, "撤掉登记后重拉当前页")
+Assert.eq(view_updates, 1)
+library._refresh = dialog
+view_updates = 0
 
--- 同步落下：下一跳关窗、停定时器。
+library:onEvent("books_sync_progress", { text = "正在上传 a.epub", done = 2, total = 9 })
+Assert.eq(table.concat(dialog.steps[2], "|"), "正在上传 a.epub|2|9")
+Assert.eq(view_updates, 0, "进度更新不重建页面")
+Assert.len(scheduled, 0, "没有假进度定时器")
+
+-- 同步落下：关窗。
 desktop._books_sync_pending = false
-runScheduled()
+library:onEvent("books_sync_done")
 Assert.is_false(dialog.shown)
 Assert.is_nil(library._refresh)
-Assert.len(scheduled, 0)
+library:onEvent("books_sync_progress", { text = "迟到" })
+Assert.len(dialog.steps, 2, "关窗后迟到的进度丢弃")
 
--- 用户点按收起弹窗：定时器停，同步不受影响，之后可以再点刷新。
+-- 用户点按收起弹窗：同步不受影响，之后可以再点刷新。
 library:rescan()
 dialog = dialogs[#dialogs]
 dialog:close()
 Assert.is_nil(library._refresh)
-Assert.len(scheduled, 0)
 Assert.is_true(desktop._books_sync_pending)
 desktop._books_sync_pending = false
 
@@ -314,8 +352,8 @@ local count = #dialogs
 desktop.plugin.emitToSource = function() emitted = emitted + 1 end
 library:rescan()
 Assert.is_nil(library._refresh)
-Assert.len(dialogs, count)
-Assert.len(scheduled, 0)
+Assert.is_false(dialogs[#dialogs].shown)
+Assert.eq(#dialogs, count + 1)
 
 -- 切走/暂停：关窗。
 desktop.plugin.emitToSource = function(_, _, payload) payload._books_sync_pending = true end
@@ -324,7 +362,6 @@ dialog = dialogs[#dialogs]
 library:onPause()
 Assert.is_false(dialog.shown)
 Assert.is_nil(library._refresh)
-Assert.len(scheduled, 0)
 desktop._books_sync_pending = false
 
 package.loaded["ui.desktop.library"] = nil

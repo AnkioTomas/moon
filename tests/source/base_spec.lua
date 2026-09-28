@@ -112,4 +112,37 @@ end
 source:onEvent("desktop_open", desktop)
 Assert.eq(last_event, "shelf_changed")
 
+-- 源上报的真实步骤转成桌面事件；同步落下发 books_sync_done；被新一轮取代的旧请求上报丢弃。
+local events = {}
+desktop.onEvent = function(_, event, payload)
+    events[#events + 1] = payload and table.concat({ event, payload.text, payload.done or "", payload.total or "" }, "|")
+        or event
+end
+local pending = {}
+source.syncBooksAsync = function(_, opts, cb)
+    pending[#pending + 1] = { opts = opts, cb = cb }
+    return { cancel = function() end }
+end
+source:onEvent("library_refresh_request", desktop)
+local first = pending[#pending]
+Assert.is_true(first.opts.force)
+first.opts.on_progress("正在上传 a.epub", 1, 3)
+Assert.eq(events[#events], "books_sync_progress|正在上传 a.epub|1|3")
+-- 手动刷新进后台任务列表，步骤同步到任务快照。
+local Tasks = require("tasks")
+Assert.eq(#Tasks.tasks(), 1)
+Assert.eq(Tasks.tasks()[1].label, "同步书架")
+Assert.eq(Tasks.tasks()[1].text, "正在上传 a.epub")
+source:onEvent("library_refresh_request", desktop)
+local second = pending[#pending]
+Assert.eq(#Tasks.tasks(), 1, "新一轮取代旧任务，不叠加")
+local before = #events
+first.opts.on_progress("旧请求", 2, 3)
+first.cb({ skipped = true })
+Assert.eq(#events, before, "旧请求的进度与完成都不上报")
+second.cb({ skipped = true })
+Assert.eq(events[#events], "books_sync_done")
+Assert.is_false(desktop._books_sync_pending)
+Assert.eq(#Tasks.tasks(), 0)
+
 return true

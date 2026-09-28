@@ -45,12 +45,9 @@ function Detail:cacheAllChapters()
     })
 end
 
---- 书城书（Z-Library / OPDS）：下载后导入本地书库。
+--- 书城书（Z-Library / OPDS）：进后台下载任务，下载后导入本地书库；详情页关了也继续。
 function Detail:installStoreBook()
     local book = self.book or {}
-    if self._install_job then
-        return
-    end
     local store = storeBackend(book)
     if not store then
         return
@@ -66,42 +63,47 @@ function Detail:installStoreBook()
         })
         return
     end
-    local ProgressbarDialog = require("ui/widget/progressbardialog")
     local UIManager = require("ui/uimanager")
     local InfoMessage = require("ui/widget/infomessage")
-    local dialog = ProgressbarDialog:new{
-        title = _("正在加入书库…"),
-        subtitle = book.title,
-        progress_max = tonumber(book.filesize),
-        dismissable = false,
-    }
-    dialog:show()
+    local sizeText = require("util").getFriendlySize
+    local desk = self.desktop
+    local total = tonumber(book.filesize)
     require("ui/network/manager"):runWhenOnline(function()
-        if not self.lifecycle:uiReady() then dialog:close(); return end
-        self._install_job = self.lifecycle:addHttp(store.installAsync(local_src, book, function(bytes)
-            dialog:reportProgress(bytes)
-        end, function(ok, err, filename)
-            self._install_job = nil
-            dialog:close()
-            if not self.lifecycle:uiReady() then return end
-            if not ok then
-                UIManager:show(InfoMessage:new{ text = err or _("下载失败") })
-                return
-            end
-            local desk = self.desktop
-            self:onClose()
-            UIManager:show(InfoMessage:new{
-                text = _("已加入书库：") .. tostring(filename or book.title),
-                timeout = 3,
-            })
-            if desk and desk.lifecycle.state ~= "Destroy" then
-                if desk.library then
+        local task, queued = require("tasks").enqueue{
+            key = "install\0" .. tostring(book.source_id) .. "\0" .. tostring(book.stable_id),
+            lane = "download",
+            label = _("下载"),
+            title = book.title,
+            restartable = true,
+            run = function(report, done)
+                return store.installAsync(local_src, book, function(bytes)
+                    report(total and total > 0 and (sizeText(bytes) .. " / " .. sizeText(total)) or sizeText(bytes))
+                end, function(ok, err, filename)
+                    done({ ok = ok, err = err, filename = filename })
+                end)
+            end,
+            on_done = function(result)
+                if not result.ok then
+                    UIManager:show(InfoMessage:new{ text = result.err or _("下载失败") })
+                    return
+                end
+                UIManager:show(InfoMessage:new{
+                    text = _("已加入书库：") .. tostring(result.filename or book.title),
+                    timeout = 3,
+                })
+                if desk and desk.lifecycle.state ~= "Destroy" and desk.library then
                     desk.library.state = nil
                     desk.library.page = 1
+                    if desk.tab == "library" then desk:updateView() end
                 end
-                desk:switchTab("library")
-            end
-        end))
+            end,
+        }
+        UIManager:show(InfoMessage:new{
+            text = not task and _("任务队列已满")
+                or queued and _("已加入后台下载任务")
+                or _("这本书已在下载任务中"),
+            timeout = 3,
+        })
     end)
 end
 
@@ -181,11 +183,9 @@ function Detail:clearCache()
         text = T(_("清理《%1》的本地缓存？\n正文、章节与图片需重新下载。"), BookInfo.title(book)),
         ok_text = _("清理"),
         ok_callback = function()
-            for _i, task in ipairs(require("source.cache_queue").tasks()) do
-                if task.source_id == book.source_id and task.stable_id == book.stable_id then
-                    UIManager:show(InfoMessage:new{ text = _("本书正在后台缓存，请稍后再试"), timeout = 3 })
-                    return
-                end
+            if require("source.cache_queue").has(book.source_id, book.stable_id) then
+                UIManager:show(InfoMessage:new{ text = _("本书正在后台缓存，请稍后再试"), timeout = 3 })
+                return
             end
             local ok, leftover = Store.clearCache(book.source_id, book.stable_id)
             local text = _("缓存已清理")

@@ -9,8 +9,11 @@
 
 local logger = require("utils.log")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Shelf = {}
+
+---@alias ShelfReport fun(text: string, done: integer|nil, total: integer|nil)
 
 ---@param job { cancel: fun() }|nil
 local function cancel(job)
@@ -23,9 +26,11 @@ end
 ---@param method string client 方法名
 ---@param on_ok fun(stable_id: string): boolean
 ---@param fail_log string 失败日志后缀
+---@param label string 进度文案
+---@param report ShelfReport
 ---@param cb fun(pushed: integer)
 ---@return { cancel: fun() }|nil
-local function pushEach(source, ids, method, on_ok, fail_log, cb)
+local function pushEach(source, ids, method, on_ok, fail_log, label, report, cb)
     if #ids == 0 then
         cb(0)
         return nil
@@ -38,6 +43,7 @@ local function pushEach(source, ids, method, on_ok, fail_log, cb)
             cb(pushed)
             return
         end
+        report(label, index, #ids)
         local stable_id = ids[index]
         job = source._client[method](source._client, stable_id, function(wire, err)
             if cancelled then return end
@@ -60,22 +66,24 @@ end
 
 --- 本地已标删的书：推云端 remove，成功则撕墓碑。
 ---@param source SourceBase
+---@param report ShelfReport
 ---@param cb fun(pushed: integer)
 ---@return { cancel: fun() }|nil
-local function pushDeleted(source, cb)
+local function pushDeleted(source, report, cb)
     local Store = require("book.store")
     return pushEach(source, require("db.book").pendingDeleteIds(source.id), "removeFromShelfAsync",
         function(stable_id)
             return Store.finalizeDeleted(source.id, stable_id)
-        end, " shelf delete push failed", cb)
+        end, " shelf delete push failed", _("正在同步删除的书"), report, cb)
 end
 
 --- 本地新加架（脏行）上行。remote_ids 里已有的直接标已同步，不再发请求。
 ---@param source SourceBase
 ---@param remote_ids table<string, boolean>|nil
+---@param report ShelfReport
 ---@param cb fun(pushed: integer)
 ---@return { cancel: fun() }|nil
-local function pushAdded(source, remote_ids, cb)
+local function pushAdded(source, remote_ids, report, cb)
     local BookDB = require("db.book")
     local missing = {}
     for _, stable_id in ipairs(BookDB.pendingShelfAddIds(source.id)) do
@@ -91,18 +99,19 @@ local function pushAdded(source, remote_ids, cb)
         end
         logger.warn(source.id .. " shelf mark synced failed", stable_id)
         return false
-    end, " shelf push failed", cb)
+    end, " shelf push failed", _("正在同步加入书架的书"), report, cb)
 end
 
 --- 书架同步。dirty_only：只推本地删/加，不拉书架、不对账；
 --- 全量：先推删 → 拉远端 → 推本地新加 →（有推送则再拉）→ reconcile。
 ---@param source SourceBase
----@param opts { dirty_only?: boolean }|nil
+---@param opts { dirty_only?: boolean, on_progress?: ShelfReport }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@param on_cover fun(stable_id: string, url: string) 书架列表里的封面 URL
 ---@param shelf_list fun(wire: table, on_cover: function): BookListResult 书架 wire 映射
 ---@return { cancel: fun() }
 function Shelf.syncAsync(source, opts, cb, on_cover, shelf_list)
+    local report = opts and opts.on_progress or function() end
     local cancelled, job, push_job, delete_job = false, nil, nil, nil
     local handle = { cancel = function()
         cancelled = true
@@ -112,9 +121,9 @@ function Shelf.syncAsync(source, opts, cb, on_cover, shelf_list)
     end }
 
     if opts and opts.dirty_only then
-        delete_job = pushDeleted(source, function(deleted_n)
+        delete_job = pushDeleted(source, report, function(deleted_n)
             if cancelled then return end
-            push_job = pushAdded(source, nil, function(pushed)
+            push_job = pushAdded(source, nil, report, function(pushed)
                 if cancelled then return end
                 cb({ pulled = 0, pushed = deleted_n + pushed, hidden = 0, conflicts = 0, skipped = false })
             end)
@@ -125,6 +134,7 @@ function Shelf.syncAsync(source, opts, cb, on_cover, shelf_list)
     --- 拉远端书架；list 为映射后的书籍列表。
     ---@param next_step fun(books: Book[])
     local function pull(next_step)
+        report(_("正在拉取书架…"))
         job = source._client:shelfSyncAsync(function(wire, err)
             if cancelled then return end
             if not wire then cb(nil, err); return end
@@ -134,20 +144,21 @@ function Shelf.syncAsync(source, opts, cb, on_cover, shelf_list)
     ---@param books Book[]
     ---@param pushed integer
     local function reconcile(books, pushed)
+        report(T(_("正在写入书架（%1 本）"), #books))
         local result, err = require("book.store").reconcile(source.id, books)
         if not result then cb(nil, err); return end
         result.pushed = pushed
         cb(result)
     end
 
-    delete_job = pushDeleted(source, function(deleted_n)
+    delete_job = pushDeleted(source, report, function(deleted_n)
         if cancelled then return end
         pull(function(books)
             local remote_ids = {}
             for _, book in ipairs(books) do
                 if book.stable_id then remote_ids[tostring(book.stable_id)] = true end
             end
-            push_job = pushAdded(source, remote_ids, function(pushed)
+            push_job = pushAdded(source, remote_ids, report, function(pushed)
                 if cancelled then return end
                 local total = deleted_n + pushed
                 if pushed == 0 then

@@ -87,6 +87,7 @@ package.preload["ffi/util"] = function()
         df = function()
             return 64 * 1000 * 1000 * 1000, 12 * 1000 * 1000 * 1000, 10 * 1000 * 1000 * 1000
         end,
+        template = function(s, a) return (s:gsub("%%1", tostring(a))) end,
     }
 end
 package.preload["util"] = function()
@@ -175,9 +176,9 @@ local cache_watch_cancel = 0
 local scheduled = {}
 local unschedules = 0
 local dirty = {}
-package.preload["source.cache_queue"] = function()
+package.preload["tasks"] = function()
     return {
-        status = function() return cache_status end,
+        tasks = function() return { cache_status } end,
         watch = function(cb)
             cache_watch_cb = cb
             return { cancel = function() cache_watch_cancel = cache_watch_cancel + 1 end }
@@ -242,12 +243,16 @@ Assert.eq(icon_calls[6].text, "100%")
 Assert.contains(text_calls, "1:23 PM")
 
 -- 有后台全本缓存任务时，顶栏显示实时进度。
-cache_status = { state = "running", cached = 34, total = 35 }
+cache_status = { state = "running", label = "缓存", count = 34, total = 35 }
 icon_calls = {}
 bar:updateView()
 Assert.eq(icon_calls[3].name, "download")
 Assert.eq(icon_calls[3].text, "缓存 34/35")
 Assert.not_nil(bar.cache.rect)
+cache_status = { state = "retry_wait", label = "缓存", count = 34, total = 35 }
+icon_calls = {}
+bar:updateView()
+Assert.eq(icon_calls[3].text, "缓存重试中")
 cache_status = nil
 
 local normal_levels = {
@@ -348,7 +353,7 @@ local desktop = {
     updateView = function() topbar_paints = topbar_paints + 1 end,
     refreshHomeClock = function() home_paints = home_paints + 1 end,
 }
-cache_status = { state = "running", cached = 1, total = 10 }
+cache_status = { state = "running", label = "缓存", count = 1, total = 10 }
 cache_watch_cb = nil
 bar = TopBar:new()
 bar.desktop = desktop
@@ -375,7 +380,7 @@ Assert.eq(dirty[#dirty].widget, desktop)
 Assert.eq(dirty[#dirty].region, bar.clock.rect)
 Assert.eq(#scheduled, 5)
 
-cache_status = { state = "running", cached = 2, total = 10 }
+cache_status = { state = "running", label = "缓存", count = 2, total = 10 }
 cache_watch_cb()
 Assert.eq(bar.cache.metric_widget.label.text, "缓存 2/10")
 Assert.eq(topbar_paints, 0, "队列进度不得整条重画")

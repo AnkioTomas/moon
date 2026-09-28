@@ -12,6 +12,7 @@ local Paths = require("utils.paths")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("utils.log")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Copymanga = {}
 
@@ -117,9 +118,10 @@ end
 
 --- 本地已标删：推云端取消收藏，成功则撕墓碑。
 ---@param self CopymangaSource
+---@param report fun(text: string, done: integer|nil, total: integer|nil)
 ---@param cb fun(pushed: integer)
 ---@return { cancel: fun() }|nil
-local function pushDeletedCollects(self, cb)
+local function pushDeletedCollects(self, report, cb)
     local Store = require("book.store")
     local pending = require("db.book").pendingDeleteIds(self.id)
     if #pending == 0 then
@@ -134,6 +136,7 @@ local function pushDeletedCollects(self, cb)
             cb(pushed)
             return
         end
+        report(_("正在同步删除的书"), index, #pending)
         local stable_id = pending[index]
         job = self._client:detailAsync(stable_id, function(wire)
             if cancelled then return end
@@ -167,9 +170,10 @@ function Source:syncBooksAsync(opts, cb)
     if not Auth.hasSession() then
         return SourceBase.syncBooksAsync(self, opts, cb)
     end
+    local report = opts.on_progress or function() end
     local cancelled, job, delete_job = false, nil, nil
     if opts.dirty_only then
-        delete_job = pushDeletedCollects(self, function(pushed)
+        delete_job = pushDeletedCollects(self, report, function(pushed)
             if cancelled then return end
             cb({
                 pulled = 0, pushed = pushed or 0, hidden = 0, conflicts = 0, skipped = false,
@@ -180,8 +184,9 @@ function Source:syncBooksAsync(opts, cb)
             if delete_job and delete_job.cancel then delete_job:cancel() end
         end }
     end
-    delete_job = pushDeletedCollects(self, function(pushed)
+    delete_job = pushDeletedCollects(self, report, function(pushed)
         if cancelled then return end
+        report(_("正在拉取书架…"))
         job = self._client:collectAllAsync(function(wire, err)
             if cancelled then return end
             if not wire then
@@ -192,6 +197,7 @@ function Source:syncBooksAsync(opts, cb)
             for _, book in ipairs(list.data or {}) do
                 rememberCover(self, book)
             end
+            report(T(_("正在写入书架（%1 本）"), #(list.data or {})))
             local result, rerr = require("book.store").reconcile(self.id, list.data or {})
             if result then result.pushed = (result.pushed or 0) + (pushed or 0) end
             cb(result, rerr)
