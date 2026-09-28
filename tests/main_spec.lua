@@ -123,6 +123,10 @@ stub("document/documentregistry", doc_registry)
 stub("convert.azw3document", {
     register = function(_, registry) calls.azw3_registry = registry end,
 })
+local feature_hooks = {}
+stub("features.init", {
+    emit = function(hook, host) feature_hooks[#feature_hooks + 1] = hook .. ":" .. host.path end,
+})
 
 _G.G_reader_settings = {
     isTrue = function() return true end,
@@ -138,6 +142,8 @@ Assert.eq(calls.host, 1)
 Assert.is_true((calls.boot or 0) >= 8, "init 应挂上翻译/百科/词典/面板/锁屏/远程/IME/补丁等")
 Assert.eq(calls.animation_check, 1)
 Assert.eq(calls.azw3_registry, doc_registry)
+Assert.eq(table.concat(feature_hooks, ","), "onCreate:book.koplugin")
+feature_hooks = {}
 
 -- emitToSource：缺省用当前源；指定源优先；抛错不打断
 do
@@ -270,6 +276,8 @@ plugin:onExit()
 Assert.eq(calls.desktop_destroy, 1)
 Assert.eq(resumed_desktop.lifecycle.state, "Destroy")
 Assert.is_true(calls.feat_exit >= 2, "退出应停更新/远程")
+Assert.eq(table.concat(feature_hooks, ","),
+    "onResume:book.koplugin,onPause:book.koplugin,onResume:book.koplugin,onDestroy:book.koplugin")
 
 calls.desktop_event = nil
 plugin:onSourceChanged()

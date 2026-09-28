@@ -21,6 +21,7 @@ local SourceRegistry = require("source.registry")
 local Desktop = require("ui.desktop")
 local Host = require("host")
 local Open = require("book.open")
+local Features = require("features.init")
 
 --- 调桌面方法；已 Destroy 则跳过。
 ---@param plugin table
@@ -67,6 +68,7 @@ function BookPlugin:init()
     require("ime.init").onCreate()
     require("patch.manager").onCreate({ plugin_root = self.path })
     require("convert.azw3document"):register(require("document/documentregistry"))
+    Features.emit("onCreate", self)
     if self.ui and self.ui.document then
         self:emitToSource("reader_open")
     end
@@ -160,6 +162,7 @@ function BookPlugin:onSuspend()
     require("lockscreen.init").onPause()
     require("remote.init").onPause()
     require("nightmode").onPause()
+    Features.emit("onPause", self)
     desktopLife(self, "onPause")
     logger.flush()
 end
@@ -172,6 +175,7 @@ function BookPlugin:onResume()
     require("lockscreen.init").onResume()
     require("remote.init").onResume()
     require("nightmode").onResume()
+    Features.emit("onResume", self)
 end
 
 --- 前光变化：手动调亮度时关闭自动亮度。
@@ -184,6 +188,7 @@ function BookPlugin:onExit()
     logger.info("book plugin exit")
     require("update.init").onDestroy()
     require("remote.init").onDestroy()
+    Features.emit("onDestroy", self)
     desktopLife(self, "onDestroy")
     logger.flush()
 end
