@@ -472,8 +472,12 @@ do
     util.partialMD5 = real_md5
 end
 
--- ── 元数据缓存命中：重扫跳过解析 ──────
+-- ── 元数据缓存命中：重扫跳过解析；缺封面的书每个会话只补提一次 ──────
 do
+    local util = require("util")
+    local real_md5 = util.partialMD5
+    util.partialMD5 = function(path) return "md5:" .. path end
+
     reset()
     local c = Client.new({ path = "/books" })
     c:scanAsync(function() end)
@@ -482,33 +486,49 @@ do
     Assert.eq(props_read, 5)
     db_rows[rowKey("local", "/books/a.epub")].percent = 42
 
+    -- 同一会话：解析时已试过封面，不再为补封面重开
     opened = {}
     upserts = {}
     dirs_scanned = {}
-    covers_saved = {}
     c:scanAsync(function() end)
     Stubs.flush()
     Assert.is_true(#dirs_scanned > 0)
-    Assert.len(opened, 5)
+    Assert.len(opened, 0)
     Assert.eq(props_read, 5)
-    Assert.len(covers_saved, 5)
     Assert.len(upserts, 6) -- 缓存命中不重解析，但完整快照仍批量恢复书架成员
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].percent, 42)
-end
 
--- ── 已入库且封面已缓存的书，重扫不再打开文档 ──────
-do
-    reset()
-    local c = Client.new({ path = "/books" })
+    -- 新会话（重启后新实例）：缺封面的已入库书补提一次，不重解析元数据；封面已缓存的不开
+    COVERS["/data/.moon/cache/local/image//books/a.epub.png"] = true
+    c = Client.new({ path = "/books" })
+    opened = {}
+    covers_saved = {}
     c:scanAsync(function() end)
     Stubs.flush()
-    COVERS["/data/.moon/cache/local/image//books/a.epub.png"] = true
+    Assert.len(opened, 4)
+    Assert.is_false(hasValue(opened, "/books/a.epub"))
+    Assert.eq(props_read, 5)
+    Assert.len(covers_saved, 4)
+
     opened = {}
     c:scanAsync(function() end)
     Stubs.flush()
     COVERS = {}
-    Assert.len(opened, 4)
+    Assert.len(opened, 0)
+
+    -- 解析过（有 md5）但书本身没有作者/简介：不因缺字段每轮重解析
+    reset()
+    db_rows[rowKey("local", "/books/a.epub")] = {
+        source_id = "local", stable_id = "/books/a.epub", md5 = "md5:/books/a.epub", title = "只有书名",
+    }
+    COVERS["/data/.moon/cache/local/image//books/a.epub.png"] = true
+    Client.new({ path = "/books" }):scanAsync(function() end)
+    Stubs.flush()
+    COVERS = {}
     Assert.is_false(hasValue(opened, "/books/a.epub"))
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].title, "只有书名")
+
+    util.partialMD5 = real_md5
 end
 
 -- ── 同路径换了文件（删书后拷入同名新书）：删旧封面重提、刷新元数据、绕过位图缓存 ──────
