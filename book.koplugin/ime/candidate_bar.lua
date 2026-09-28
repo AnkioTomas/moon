@@ -4,6 +4,7 @@
 @module koplugin.book.ime.candidate_bar
 --]]
 
+local Geom = require("ui/geometry")
 local Strip = require("ime.strip")
 local Registry = require("ime.registry")
 local util = require("util")
@@ -333,7 +334,7 @@ local function installStrip(kb)
     end
     local size = row:getSize()
     local strip = Strip:new{
-        dimen = { w = size.w, h = size.h },
+        dimen = Geom:new{ w = size.w, h = size.h }, -- 进 kb.layout：FocusManager 按确认键会 dimen:copy()
         gap = kb.key_padding or 2,
         face = row[1].face, -- 与被顶掉的键同款键盘字体（含 keyboard_key_font_size/bold 设置）
         bold = row[1].bold,
