@@ -887,6 +887,18 @@ function BookDB.getToc(source_id, stable_id, max_age)
     return payload, toc_at
 end
 
+--- 目录缓存条数；未缓存或不是 JSON 数组为 0。封面角标逐本调用，不能解码整份目录。
+---@param source_id string
+---@param stable_id string
+---@return integer
+function BookDB.tocLength(source_id, stable_id)
+    return tonumber(Base.rowexec(
+        [[SELECT CASE WHEN json_valid(toc) THEN json_array_length(toc) ELSE 0 END
+          FROM books WHERE source_id=? AND stable_id=? LIMIT 1;]],
+        source_id, stable_id
+    )) or 0
+end
+
 --- 写入书籍目录缓存。
 ---@param source_id string
 ---@param stable_id string

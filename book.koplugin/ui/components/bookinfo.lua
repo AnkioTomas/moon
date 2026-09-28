@@ -238,18 +238,6 @@ function BookInfo.isRead(book)
     return tonumber(book and book.read_state) == 1
 end
 
---- 封面状态：已读与进度互斥，下载独立。
----@param book Book|table|nil 当前操作或展示的书籍数据
----@return { read: boolean, percent: boolean, downloaded: boolean }
-function BookInfo.statusOverlays(book)
-    local read = BookInfo.isRead(book)
-    return {
-        read = read,
-        percent = (not read) and BookInfo.pct(book) > 0,
-        downloaded = require("book.store").isDownloaded(book),
-    }
-end
-
 --- 封面右上角进度角标；pct≤0 返回 nil。Kindle：小圆角胶囊、贴角留缝。
 ---@param cw number 封面宽度，单位像素
 ---@param pct number|nil 阅读进度百分比，范围 0 到 100
@@ -547,10 +535,11 @@ function BookInfo.cover(plugin, source, book, cw, ch, opts)
         clip_background = UI.surface(),
         shadow = opts.shadow,
     }, kind = "card" }
-    local status = BookInfo.statusOverlays(book)
-    local show_read = opts.ribbon and status.read
-    local show_pct = opts.badge and status.percent
-    local show_dl = opts.download and status.downloaded
+    -- 已读与进度互斥；下载状态要查库，没开角标就不查。
+    local read = BookInfo.isRead(book)
+    local show_read = opts.ribbon and read
+    local show_pct = opts.badge and not read and pct > 0
+    local show_dl = opts.download and require("book.store").isDownloaded(book)
     local show_more = opts.more
     if show_read or show_pct or show_dl or show_more then
         local overlays = {
