@@ -155,7 +155,7 @@ end
 --- 休眠前：结清阅读状态，生成锁屏图，停远程服务，暂停后台任务，暂停桌面。
 function BookPlugin:onSuspend()
     logger.info("book lifecycle suspend")
-    require("tasks").suspend()
+    require("workers.tasks").suspend()
     require("ui.reader.session").onPause(self)
     require("lockscreen.init").onPause()
     require("remote.init").onPause()
@@ -167,7 +167,7 @@ end
 --- 唤醒：恢复阅读统计、后台服务与后台任务；桌面在窗口栈上时自行收 Resume。
 function BookPlugin:onResume()
     logger.info("book lifecycle resume")
-    require("tasks").wake()
+    require("workers.tasks").wake()
     require("ui.reader.session").onResume(self)
     require("lockscreen.init").onResume()
     require("remote.init").onResume()
@@ -191,7 +191,7 @@ end
 --- 网络恢复：续跑等网络的后台任务、重试脏数据、通知源、刷新锁屏。
 function BookPlugin:onNetworkConnected()
     logger.info("book lifecycle network_connected")
-    require("tasks").wake()
+    require("workers.tasks").wake()
     require("book.sync").retryDirtyAsync()
     self:emitToSource("network_connected")
     require("lockscreen.init").refresh(nil, true, "network_connected")

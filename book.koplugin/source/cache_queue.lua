@@ -8,7 +8,7 @@
 
 require("l10n").apply()
 
-local Tasks = require("tasks")
+local Tasks = require("workers.tasks")
 local _ = require("gettext")
 
 local CacheQueue = {}

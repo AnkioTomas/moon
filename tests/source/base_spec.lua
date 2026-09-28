@@ -129,7 +129,7 @@ Assert.is_true(first.opts.force)
 first.opts.on_progress("正在上传 a.epub", 1, 3)
 Assert.eq(events[#events], "books_sync_progress|正在上传 a.epub|1|3")
 -- 手动刷新进后台任务列表，步骤同步到任务快照。
-local Tasks = require("tasks")
+local Tasks = require("workers.tasks")
 Assert.eq(#Tasks.tasks(), 1)
 Assert.eq(Tasks.tasks()[1].label, "同步书架")
 Assert.eq(Tasks.tasks()[1].text, "正在上传 a.epub")

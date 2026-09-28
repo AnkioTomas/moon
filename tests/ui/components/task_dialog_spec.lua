@@ -114,7 +114,7 @@ local function flush()
     for _, fn in ipairs(fns) do fn() end
 end
 
-local Tasks = require("tasks")
+local Tasks = require("workers.tasks")
 local runs = {}
 local function spec(key, restartable)
     return {

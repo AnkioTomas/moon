@@ -321,7 +321,7 @@ local function syncDesktopBooks(self, desktop, opts)
     local noop = function() end
     -- 手动刷新进后台任务列表（可见、离开页面也继续）；自动后台同步不上列表，免得每次回首页顶栏都闪。
     -- 队列满时退回直接跑。
-    local job = opts and opts.force and require("tasks").enqueue{
+    local job = opts and opts.force and require("workers.tasks").enqueue{
         key = "books\0" .. tostring(self.id),
         lane = "sync",
         label = _("同步书架"),
