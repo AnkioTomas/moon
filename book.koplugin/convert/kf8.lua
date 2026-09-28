@@ -360,6 +360,47 @@ local function buildParts(text, skels, divs, div_cncx)
     return parts
 end
 
+local function probeFile(f)
+    local pdb = f:read(78) or ""
+    if #pdb < 78 or pdb:sub(61, 68) ~= "BOOKMOBI" then error("not a BOOKMOBI container") end
+    local count = u16(pdb, 76)
+    local table_raw = f:read(count * 8) or ""
+    local offsets = {}
+    for i = 0, count - 1 do
+        offsets[i + 1] = u32(table_raw, i * 8)
+    end
+    offsets[count + 1] = f:seek("end")
+    local function section(sec0)
+        local from, to = offsets[sec0 + 1], offsets[sec0 + 2]
+        if not to then return nil end
+        f:seek("set", from)
+        local data = f:read(to - from) or ""
+        if #data ~= to - from then error("truncated PalmDB section " .. sec0) end
+        return data
+    end
+    local header = section(0) or ""
+    if header:sub(17, 20) ~= "MOBI" then error("missing MOBI header") end
+    if u32(header, 36) ~= 8 then return nil end
+    local metadata = exth(header)
+    local first_image = u32(header, 0x6C)
+    local cover = metadata.cover_offset and first_image ~= NULL_INDEX
+        and section(first_image + metadata.cover_offset)
+    metadata.cover_offset = nil
+    return { metadata = metadata, cover_data = cover and imageExt(cover) and cover or nil }
+end
+
+--- 只读 PalmDB 分节表、MOBI 头（EXTH）与封面记录，不解压正文：书名/作者/简介/封面够用。
+--- DRM / HUFF 等只影响正文，这里不拦，留给 extract。
+---@param path string
+---@return { metadata: table, cover_data: string|nil }|nil 非独立 KF8 时为 nil
+function Kf8.probe(path)
+    local f = assert(io.open(path, "rb"))
+    local ok, result = pcall(probeFile, f)
+    f:close()
+    if not ok then error(result, 0) end
+    return result
+end
+
 --- 解析独立 KF8 并把 HTML / CSS / 图片写进 dir（目录须已存在）。
 ---@param path string
 ---@param dir string

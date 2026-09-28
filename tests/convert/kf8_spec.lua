@@ -102,5 +102,27 @@ do
     Assert.errors(function() Kf8.extract(book, root) end)
 end
 
+-- probe：只读头部与封面记录；正文不支持（HUFF / DRM）也能取元数据，MOBI6 返回 nil，坏文件报错
+do
+    local book = root .. "/probe.azw3"
+    Fixture.write(book, { compression = 2 })
+    local info = Kf8.probe(book)
+    Assert.eq(info.metadata.title, Fixture.TITLE)
+    Assert.eq(info.metadata.author, Fixture.AUTHOR)
+    Assert.is_nil(info.metadata.cover_offset, "内部字段不外泄")
+    Assert.eq(info.cover_data, "\255\216\255\224fake-jpeg")
+
+    Fixture.write(book, { compression = 0x4448 })
+    Assert.eq(Kf8.probe(book).metadata.title, Fixture.TITLE)
+    Assert.errors(function() Kf8.extract(book, root) end, "HUFF")
+    Fixture.write(book, { encryption = 2 })
+    Assert.eq(Kf8.probe(book).metadata.title, Fixture.TITLE)
+
+    Fixture.write(book, { version = 6 })
+    Assert.is_nil(Kf8.probe(book))
+    Assert.errors(function() Kf8.probe(root .. "/junk.azw3") end, "BOOKMOBI")
+    Assert.errors(function() Kf8.probe(root .. "/cut.azw3") end)
+end
+
 os.execute("rm -rf '" .. root .. "'")
 return true
