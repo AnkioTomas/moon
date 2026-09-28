@@ -41,25 +41,21 @@ do
     Assert.eq(result.data[1].cover, "https://img10.360buyimg.com/n12/cover.jpg")
 end
 
+-- 旧 cread wire 不再识别
 do
-    local toc = Mapper.chapters({
-        catalogList = {
-            { sort = 2, catalogId = 12, catalogName = "第二节", level = 1 },
-            { sort = 1, catalogId = 11, catalogName = "第一章", level = 0 },
-        },
-    })
-    Assert.len(toc, 2)
-    Assert.eq(toc[1].uid, "11")
-    Assert.eq(toc[1].depth, 1)
-    Assert.eq(toc[2].idx, 2)
-    Assert.eq(toc[2].depth, 2)
+    Assert.is_nil(Mapper.chapters({
+        catalogList = {{ sort = 1, catalogId = 11, catalogName = "第一章", level = 0 }},
+    }))
+    Assert.is_nil(Mapper.content({ contentList = {{ content = "<p>一</p>" }} }, "标题"))
 end
 
 do
     local payload = Mapper.content({
-        contentList = {
-            { content = "<html><body><p>一</p></body></html>" },
-            { content = "<p>二</p>" },
+        data = {
+            chapter = {
+                { content = "<html><body><p>一</p></body></html>" },
+                { content = "<p>二</p>" },
+            },
         },
     }, "标题")
     Assert.eq(payload.title, "标题")

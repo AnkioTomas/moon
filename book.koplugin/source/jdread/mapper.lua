@@ -117,36 +117,14 @@ local function netChapters(rows)
     return chapters
 end
 
---- cread / 新阅读器目录 wire → BookChapter[]。
+--- 目录 wire → BookChapter[]。
 ---@param wire table
 ---@return BookChapter[]|nil
 function Mapper.chapters(wire)
     local root = type(wire.data) == "table" and wire.data or wire
-    if type(root.chapter_info) == "table" then
-        if root.format == "txt" then return netChapters(root.chapter_info) end
-        return downloadChapters(root.chapter_info)
-    end
-    local rows = wire.catalogList or wire.catalog_list
-    if type(rows) ~= "table" then return nil end
-    table.sort(rows, function(a, b)
-        return (tonumber(a.sort) or 0) < (tonumber(b.sort) or 0)
-    end)
-    local chapters = {}
-    for _, row in ipairs(rows) do
-        local uid = row.catalogId or row.catalog_id
-        if uid ~= nil then
-            chapters[#chapters + 1] = {
-                idx = #chapters + 1,
-                source_idx = tostring(row.sort or (#chapters + 1)),
-                uid = tostring(uid),
-                title = tostring(row.catalogName or row.catalog_name or ("第" .. (#chapters + 1) .. "章")),
-                depth = math.max(1, math.floor(tonumber(row.level) or 0) + 1),
-            }
-        end
-    end
-    if #chapters == 0 then return nil end
-    chapters[1].toc_version = 1
-    return chapters
+    if type(root.chapter_info) ~= "table" then return nil end
+    if root.format == "txt" then return netChapters(root.chapter_info) end
+    return downloadChapters(root.chapter_info)
 end
 
 ---@param content string
@@ -155,15 +133,15 @@ local function netBody(content)
     return Text.textToBody(Text.stripLineIndent(content))
 end
 
---- 正文 wire → 标准章节内容。兼容 cread contentList 与 download/chapter。
---- download/chapter 的 txt 网文正文 content_type = "net"，是 \r\n 分段的纯文本，
+--- download/chapter 正文 wire → 标准章节内容。
+--- txt 网文正文 content_type = "net"，是 \r\n 分段的纯文本，
 --- 行首全角缩进时有时无，统一剥掉交给章节模板的 text-indent。
 ---@param wire table
 ---@param title string|nil
 ---@return ChapterContentPayload|nil
 function Mapper.content(wire, title)
     local data = type(wire.data) == "table" and wire.data or wire
-    local parts = data.chapter or wire.contentList or wire.content_list
+    local parts = data.chapter
     if type(parts) ~= "table" then return nil end
     local toBody = data.content_type == "net" and netBody or Text.htmlBodyFragment
     local html = {}

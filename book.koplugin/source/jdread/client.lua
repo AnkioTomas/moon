@@ -21,13 +21,12 @@ Client.__index = Client
 ---@field bookInfoAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
 ---@field addToShelfAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
 ---@field removeFromShelfAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
----@field chapterInfosAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
----@field chapterContentAsync fun(self: JdreadClient, book_id: string, chapter_id: string, cb: function): CancelHandle|nil
+---@field catalogAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
+---@field downloadChapterAsync fun(self: JdreadClient, book_id: string, query: table, cb: function): CancelHandle|nil
 ---@field getProgressAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
 ---@field putProgressAsync fun(self: JdreadClient, book_id: string, marker: table, cb: function): CancelHandle|nil
 
 local API = "https://e.m.jd.com"
-local READER = "https://cread.jd.com"
 local CATALOG_PAGE_SIZE = 2000
 -- download/chapter 对未购买且非试读章节返回 {"result_code":101,"message":"can not download"}。
 local DOWNLOAD_DENIED = 101
@@ -47,9 +46,7 @@ end
 ---@param o table|nil
 ---@return JdreadClient
 function Client:new(o)
-    o = o or {}
-    o._read_types = {}
-    return setmetatable(o, self)
+    return setmetatable(o or {}, self)
 end
 
 ---@return boolean
@@ -239,70 +236,8 @@ function Client:removeFromShelfAsync(book_id, cb)
     return shelfActionAsync(self, book_id, 1, cb)
 end
 
----@param endpoint string
----@param query table
----@param cb fun(data: table|nil, err: string|nil, retryable: boolean|nil)
----@return { cancel: fun() }
-function Client:readerGetAsync(endpoint, query, cb)
-    return Request.get(READER .. endpoint .. "?" .. Text.formEncode(query), {
-        headers = self:headers(READER .. "/read/index.action"),
-    }, function(raw, err)
-        if not raw then cb(nil, err); return end
-        local wire, decode_err, retryable = Protocol.decodeEnvelope(raw)
-        cb(wire, decode_err, retryable)
-    end)
-end
-
----@param endpoint string
----@param book_id string|number
----@param key string
----@param extra table|nil
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }
-function Client:readerAutoAsync(endpoint, book_id, key, extra, cb)
-    book_id = tostring(book_id)
-    local modes, seen = {}, {}
-    local cached = self._read_types[book_id]
-    local function add(mode)
-        if mode ~= nil and not seen[mode] then
-            seen[mode] = true
-            modes[#modes + 1] = mode
-        end
-    end
-    add(cached)
-    add(3)
-    add(0)
-    add(1)
-
-    local cancelled, active, index = false, nil, 1
-    local function attempt(last_err)
-        if cancelled then return end
-        local mode = modes[index]
-        if mode == nil then cb(nil, last_err or _("京东读书无可用阅读权限")); return end
-        index = index + 1
-        local query = { k = key, readType = mode, orderId = "" }
-        for name, value in pairs(extra or {}) do query[name] = value end
-        active = self:readerGetAsync(endpoint, query, function(wire, err, retryable)
-            if cancelled then return end
-            if wire then
-                self._read_types[book_id] = mode
-                cb(wire)
-            elseif retryable then
-                attempt(err)
-            else
-                cb(nil, err)
-            end
-        end)
-    end
-    attempt()
-    return { cancel = function()
-            cancelled = true
-            if active and active.cancel then active.cancel() end
-        end }
-end
-
---- 拉取新阅读器完整目录（与网页阅读器同一 v2 接口，index 为行偏移分页）。
---- EPUB / 会员书 / txt 网文都走这条，不经过 cread。
+--- 拉取完整目录（与网页阅读器同一 v2 接口，index 为行偏移分页）。
+--- EPUB / 会员书 / txt 网文都走这条。
 ---@param book_id string|number
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -334,7 +269,7 @@ function Client:catalogAsync(book_id, cb)
         end }
 end
 
---- 拉取新阅读器章节正文。EPUB 传 { indexes = 0-based 序号 }，txt 网文传 { type = 1, ids = chapter_id }。
+--- 拉取章节正文。EPUB 传 { indexes = 0-based 序号 }，txt 网文传 { type = 1, ids = chapter_id }。
 ---@param book_id string|number
 ---@param query table
 ---@param cb fun(data: table|nil, err: string|nil)
@@ -358,51 +293,6 @@ function Client:downloadChapterAsync(book_id, query, cb)
         if code == DOWNLOAD_DENIED then decode_err = _("京东读书无可用阅读权限") end
         cb(wire, decode_err)
     end)
-end
-
---- 拉取目录：新接口优先，旧 cread 兜底。
----@param book_id string|number
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }
-function Client:chapterInfosAsync(book_id, cb)
-    local cancelled, active = false, nil
-    book_id = tostring(book_id)
-    active = self:catalogAsync(book_id, function(wire, err)
-        if cancelled then return end
-        local rows = type(wire) == "table" and type(wire.data) == "table"
-            and wire.data.chapter_info
-        if type(rows) == "table" and #rows > 0 then
-            self._read_types[book_id] = "download"
-            cb(wire)
-            return
-        end
-        active = self:readerAutoAsync("/read/lC.action", book_id, Protocol.bookKey(book_id), {
-            bookId = book_id,
-        }, cb)
-    end)
-    return { cancel = function()
-            cancelled = true
-            if active and active.cancel then active.cancel() end
-        end }
-end
-
---- 拉取章节正文：新下载协议或旧 cread。
----@param book_id string|number
----@param chapter_id string|number
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }
-function Client:chapterContentAsync(book_id, chapter_id, cb)
-    book_id = tostring(book_id)
-    if self._read_types[book_id] == "download" then
-        return self:downloadChapterAsync(book_id, { indexes = chapter_id }, cb)
-    end
-    return self:readerAutoAsync(
-        "/read/gC.action",
-        book_id,
-        Protocol.chapterKey(book_id, chapter_id),
-        nil,
-        cb
-    )
 end
 
 --- 拉取云端阅读位置。

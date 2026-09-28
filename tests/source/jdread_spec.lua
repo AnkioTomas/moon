@@ -261,16 +261,17 @@ do
     end
     package.loaded["source.jdread"] = nil
     local Jd = require("source.jdread")
-    fake_client.chapterContentAsync = function(_, _, _, cb)
-        cb({ contentList = { { content = "<p>正文</p>" } } })
+    fake_client.downloadChapterAsync = function(_, _, query, cb)
+        Assert.eq(query.indexes, "0")
+        cb({ data = { chapter = { { content = "<p>正文</p>" } } } })
         return { cancel = function() end }
     end
 
     local source = Jd.new()
     source.loadTocAsync = function(_, _, cb)
         cb({
-            { idx = 1, uid = "c1", title = "第一章" },
-            { idx = 2, uid = "c2", title = "第二章" },
+            { idx = 1, uid = "0", title = "第一章", toc_version = 2 },
+            { idx = 2, uid = "1", title = "第二章" },
         })
         return { cancel = function() end }
     end
@@ -306,9 +307,6 @@ do
         cb({ data = { content_type = "net", chapter = {{ content = "　　正文一\r\n正文二" }} } })
         return { cancel = function() end }
     end
-    fake_client.chapterContentAsync = function()
-        error("txt 网文不应走 cread")
-    end
     local html
     require("source.chapter").prefetchAsync = function(identity, _, toc, _, _, opts, cb)
         opts.fetchContent(identity, toc[1], function(payload) html = payload.html; cb() end)
@@ -326,4 +324,52 @@ do
     Assert.is_nil(asked.query.indexes)
     Assert.eq(html, "<p>正文一</p>\n<p>正文二</p>")
     Toc.read = orig_read
+end
+
+-- 失效目录（旧 cread 版本 1）读到即清库重拉；正文按新目录同 idx 的 uid 下载
+do
+    local Toc = require("source.toc")
+    local orig_read, orig_put = Toc.read, Toc.put
+    local stored = { { idx = 1, uid = "56958326", title = "第一章", toc_version = 1 } }
+    Toc.read = function() return stored end
+    Toc.put = function(_, _, list) stored = list; return true end
+    local cleared = {}
+    package.loaded["db.book"].clearToc = function(_, stable_id)
+        cleared[#cleared + 1] = stable_id
+        stored = nil
+        return true
+    end
+    local catalog_calls = 0
+    fake_client.catalogAsync = function(_, _, cb)
+        catalog_calls = catalog_calls + 1
+        cb({ data = { format = "epub", chapter_info = { { chapter_index = 0, chapter_name = "第一章" } } } })
+        return { cancel = function() end }
+    end
+    local asked
+    fake_client.downloadChapterAsync = function(_, _, query, cb)
+        asked = query
+        cb({ data = { chapter = { { content = "<p>新</p>" } } } })
+        return { cancel = function() end }
+    end
+    local html
+    require("source.chapter").prefetchAsync = function(identity, _, toc, _, _, opts, cb)
+        opts.fetchContent(identity, toc[1], function(payload) html = payload.html; cb() end)
+        return { cancel = function() end }
+    end
+    local src = Jdread.new()
+    local old = stored
+    Assert.is_false(src:isTocCurrent(old))
+    Assert.is_false(src:isTocCurrent({ { idx = 1, uid = "0", title = "无版本" } }))
+    Assert.is_false(src:isTocCurrent({}))
+    src:prefetchChaptersAsync(
+        { source_id = "jdread", stable_id = "30451107", book = { stable_id = "30451107" } },
+        old, 1, 1, function() end
+    )
+    Assert.eq(cleared[1], "30451107")
+    Assert.eq(catalog_calls, 1)
+    Assert.eq(asked.indexes, "0")
+    Assert.matches(html, "<p>新</p>")
+    Assert.eq(stored[1].toc_version, 2)
+    Assert.is_true(src:isTocCurrent(stored))
+    Toc.read, Toc.put = orig_read, orig_put
 end

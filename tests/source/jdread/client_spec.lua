@@ -1,5 +1,5 @@
 --[[--
-京东读书客户端分页与旧阅读接口离线用例。
+京东读书客户端分页与下载接口离线用例。
 
 @module tests.source.jdread.client_spec
 --]]
@@ -148,35 +148,30 @@ do
     Assert.eq(body.items[1].ebook_id, 30533530)
 end
 
+-- 空目录只回空结果，不再落到任何旧接口
 do
-    local _, err
+    local wire, err
     local first = #requests + 1
-    client:chapterInfosAsync("30451107", function(value, e) _, err = value, e end)
+    client:catalogAsync("30451107", function(value, e) wire, err = value, e end)
     Assert.matches(requests[first].url, "^https://e%.m%.jd%.com/jdread/api/ebook/catalog/v2/30451107%?")
     Assert.matches(requests[first].url, "[?&]index=0")
     Assert.matches(requests[first].url, "[?&]page_size=2000")
-    local req = requests[first + 1]
-    Assert.matches(req.url, "^https://cread%.jd%.com/read/lC%.action%?")
-    Assert.matches(req.url, "[?&]readType=3")
-    Assert.matches(req.url, "k=c32bc1eceb889c09")
-    Assert.matches(requests[first + 2].url, "[?&]readType=0")
-    Assert.matches(requests[first + 3].url, "[?&]readType=1")
-    Assert.eq(err, "stop")
+    Assert.len(requests, first)
+    Assert.is_nil(err)
+    Assert.len(wire.data.chapter_info, 0)
 end
 
 do
     local wire, err
-    client:chapterInfosAsync("30394360", function(value, e) wire, err = value, e end)
+    client:catalogAsync("30394360", function(value, e) wire, err = value, e end)
     Assert.is_nil(err)
     Assert.eq(wire.data.chapter_info[1].chapter_name, "封面")
-    Assert.eq(client._read_types["30394360"], "download")
 end
 
 do
     local _, err
     local first = #requests + 1
-    client._read_types["30394360"] = "download"
-    client:chapterContentAsync("30394360", 0, function(value, e) _, err = value, e end)
+    client:downloadChapterAsync("30394360", { indexes = 0 }, function(value, e) _, err = value, e end)
     local req = requests[first]
     Assert.matches(req.url, "^https://e%.m%.jd%.com/jdread/api/download/chapter/30394360%?")
     Assert.matches(req.url, "[?&]enc=1")
@@ -226,29 +221,9 @@ do
 end
 
 do
-    local auto = Client:new{ cookie = "thor=test", uuid = "h5-test" }
-    local modes = {}
-    function auto:readerGetAsync(_, query, cb)
-        modes[#modes + 1] = query.readType
-        if query.readType == 0 then
-            cb({ ok = true })
-        else
-            cb(nil, "denied", true)
-        end
-        return { cancel = function() end }
+    for _, req in ipairs(requests) do
+        Assert.is_nil(req.url:find("cread.jd.com", 1, true))
     end
-
-    local wire
-    auto:chapterInfosAsync("book", function(value) wire = value end)
-    Assert.is_true(wire.ok)
-    Assert.eq(modes[1], 3)
-    Assert.eq(modes[2], 0)
-
-    modes = {}
-    auto:chapterContentAsync("book", "chapter", function(value) wire = value end)
-    Assert.is_true(wire.ok)
-    Assert.eq(modes[1], 0)
-    Assert.len(modes, 1)
 end
 
 do

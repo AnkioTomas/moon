@@ -113,19 +113,38 @@ function Source:getDetailAsync(identity, cb)
     end)
 end
 
+--- 目录版本 → download/chapter 查询参数（见 Mapper.chapters）。
+local DOWNLOAD_QUERY = {
+    [2] = function(uid) return { indexes = uid } end,
+    [3] = function(uid) return { type = 1, ids = uid } end,
+}
+
+--- 只认下载协议目录；旧 cread 目录（版本 1）与无版本目录一律失效。
+---@param toc BookChapter[]|nil
+---@return boolean
+function Source:isTocCurrent(toc)
+    return type(toc) == "table" and type(toc[1]) == "table"
+        and DOWNLOAD_QUERY[toc[1].toc_version] ~= nil
+end
+
+--- 读有效目录缓存；失效格式当场清掉库里那份，交给调用方重新拉取。
+---@param self JdreadSource
+---@param identity BookIdentity
+---@return BookChapter[]|nil
+local function currentToc(self, identity)
+    local toc = Toc.read(identity.source_id, identity.stable_id)
+    if toc == nil or self:isTocCurrent(toc) then return toc end
+    Toc.drop(identity.source_id, identity.stable_id)
+    return nil
+end
+
+--- 强制拉取目录并写回缓存。
+---@param self JdreadSource
 ---@param identity BookIdentity
 ---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Source:loadTocAsync(identity, cb)
-    local cached = Toc.read(identity.source_id, identity.stable_id)
-    if cached and #cached > 0 then
-        local cancelled = false
-        require("ui/uimanager"):nextTick(function()
-            if not cancelled then cb(cached) end
-        end)
-        return { cancel = function() cancelled = true end }
-    end
-    return self._client:chapterInfosAsync(identity.stable_id, function(wire, err)
+---@return { cancel: fun() }
+local function fetchTocAsync(self, identity, cb)
+    return self._client:catalogAsync(identity.stable_id, function(wire, err)
         if not wire then cb(nil, err); return end
         local chapters = Mapper.chapters(wire)
         if not chapters then cb(nil, _("章节列表为空")); return end
@@ -137,18 +156,22 @@ function Source:loadTocAsync(identity, cb)
     end)
 end
 
---- 目录版本 → download/chapter 查询参数（见 Mapper.chapters）；版本 1 是旧 cread 目录。
-local DOWNLOAD_QUERY = {
-    [2] = function(uid) return { indexes = uid } end,
-    [3] = function(uid) return { type = 1, ids = uid } end,
-}
-
 ---@param identity BookIdentity
----@return (fun(uid: string): table)|nil
-local function downloadQuery(identity)
-    local toc = Toc.read(identity.source_id, identity.stable_id)
-    return toc ~= nil and toc[1] ~= nil and DOWNLOAD_QUERY[toc[1].toc_version] or nil
+---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:loadTocAsync(identity, cb)
+    local cached = currentToc(self, identity)
+    if cached then
+        local cancelled = false
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled then cb(cached) end
+        end)
+        return { cancel = function() cancelled = true end }
+    end
+    return fetchTocAsync(self, identity, cb)
 end
+
+Source.refreshTocAsync = fetchTocAsync
 
 ---@param url string
 ---@param cb fun(data: string|nil, err: any)
@@ -177,7 +200,7 @@ end
 ---@param cb fun(payload: ChapterContentPayload|nil, err: string|nil)
 ---@return CancelHandle|nil
 local function fetchContent(self, identity, chapter, cb)
-    local cancelled, asset_job = false, nil
+    local cancelled, fetch_job, asset_job = false, nil, nil
     local done = function(wire, err)
         if cancelled then return end
         if not wire then cb(nil, err); return end
@@ -197,12 +220,22 @@ local function fetchContent(self, identity, chapter, cb)
             end
         )
     end
-    local fetch_job
-    local query = downloadQuery(identity)
-    if query then
-        fetch_job = self._client:downloadChapterAsync(identity.stable_id, query(chapter.uid), done)
+    -- 调用方手里的 chapter 可能来自失效目录，uid 只从有效目录按 idx 取。
+    local function download(toc)
+        local target = toc[chapter.idx]
+        if not target then cb(nil, _("缺少章节信息")); return end
+        local query = DOWNLOAD_QUERY[toc[1].toc_version](target.uid)
+        fetch_job = self._client:downloadChapterAsync(identity.stable_id, query, done)
+    end
+    local toc = currentToc(self, identity)
+    if toc then
+        download(toc)
     else
-        fetch_job = self._client:chapterContentAsync(identity.stable_id, chapter.uid, done)
+        fetch_job = self:loadTocAsync(identity, function(fresh, err)
+            if cancelled then return end
+            if not fresh then cb(nil, err); return end
+            download(fresh)
+        end)
     end
     return { cancel = function()
             cancelled = true
@@ -263,9 +296,9 @@ function Source:getProgressAsync(identity, cb)
         if not wire then cb(nil, err); return end
         local pos, uid = Mapper.progress(wire)
         if not pos then cb(nil, nil, { empty = true }); return end
-        local idx = Toc.index(identity.source_id, identity.stable_id, uid)
+        local toc = currentToc(self, identity)
+        local idx = toc and Toc.index(identity.source_id, identity.stable_id, uid)
         if not idx and pos.chapter_title then
-            local toc = Toc.read(identity.source_id, identity.stable_id)
             for _, chapter in ipairs(toc or {}) do
                 if chapter.title == pos.chapter_title then
                     idx = chapter.idx
@@ -295,7 +328,7 @@ function Source:getProgressAsync(identity, cb)
         end }
 end
 
---- 推送全书比例和当前 catalogId。旧正文协议没有稳定段落坐标，故从章节起点恢复。
+--- 推送全书比例和当前章节 uid。本地章节 HTML 与京东段落坐标不对应，故从章节起点恢复。
 ---@param identity BookIdentity
 ---@param pos ProgressPosition
 ---@param cb fun(ok: boolean|nil, err: string|nil)
@@ -326,7 +359,7 @@ function Source:putProgressAsync(identity, pos, cb)
         end)
     end
 
-    local toc = Toc.read(identity.source_id, identity.stable_id)
+    local toc = currentToc(self, identity)
     if toc then
         push(toc)
     else
