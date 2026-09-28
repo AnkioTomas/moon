@@ -141,6 +141,13 @@ local function remoteRelativePath(stable_id)
     return rel and rel ~= "" and rel or nil
 end
 
+--- 是否 WebDAV 书。配置 WebDAV 后，按绝对路径登记的书（未收编 / 书库外打开）仍是纯本地书。
+---@param stable_id string
+---@return boolean
+function Client.isRemote(stable_id)
+    return remoteRelativePath(stable_id) ~= nil
+end
+
 --- 静读天下的 Cover/Cache 边车按书文件 basename 寻址，不含分类目录。
 ---@param rel string
 ---@return string
@@ -1877,14 +1884,14 @@ function Client:getProgressAsync(stable_id, cb)
         end)
 end
 
---- 推送单本进度（关书 / 网络恢复时由 book.progress 推脏行）。
+--- 推送单本进度（关书 / 网络恢复时由 book.progress 推脏行）。非 webdav:// 身份没有远端，直接成功。
 ---@param stable_id string
 ---@param pos ProgressPosition
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:putProgressAsync(stable_id, pos, cb)
     local rel = remoteRelativePath(stable_id)
-    if not rel then defer(cb, nil, _("无效的 WebDAV 书籍路径")); return nil end
+    if not rel then defer(cb, true); return nil end
     return putText(self, progressRemotePath(self, rel), self:webdavCacheRoot() .. "/.progress.upload",
         encodeProgress(pos), cb)
 end
@@ -2001,13 +2008,14 @@ local function posKey(pos)
 end
 
 --- 上传本设备这本书的完整注解快照；别的设备的快照原样保留（语义同 book 服务端 annotations 接口）。
+--- 非 webdav:// 身份没有远端，直接成功。
 ---@param stable_id string
 ---@param annotations table[]
 ---@param cb fun(value: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:pushNotesAsync(stable_id, annotations, cb)
     local rel = remoteRelativePath(stable_id)
-    if not rel then defer(cb, nil, _("无效的 WebDAV 书籍路径")); return nil end
+    if not rel then defer(cb, {}); return nil end
     local JSON = require("json")
     local device_id = require("utils.settings").ensureDeviceId()
     local cancelled, active = false, nil
