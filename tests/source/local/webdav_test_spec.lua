@@ -116,4 +116,16 @@ do
     Assert.eq(client.dav.calls[1], "MKCOL Apps/Books")
 end
 
+-- 设置页/远程配置原地改共享 cfg：已建好的客户端必须用新地址与账号，不能沿用构造时的空地址。
+do
+    local cfg = {}
+    local client = Client.new(cfg)
+    cfg.webdav_url = "http://dav.example:8088/"
+    cfg.webdav_username = "moon"
+    cfg.webdav_password = "pw"
+    Assert.eq(client.dav:join("books", true), "http://dav.example:8088/books/")
+    Assert.eq(client.dav.username, "moon")
+    Assert.eq(client.dav.password, "pw")
+end
+
 return true

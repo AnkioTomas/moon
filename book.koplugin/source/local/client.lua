@@ -28,8 +28,21 @@ end
 
 ---@class LocalClient
 ---@field cfg table
+---@field dav WebdavClient
 local Client = {}
-Client.__index = Client
+
+--- cfg 是 utils.settings 的共享表，设置页和远程配置会原地改它；dav 每次按 cfg 现造，不存快照。
+Client.__index = function(self, key)
+    if key == "dav" then
+        local cfg = rawget(self, "cfg")
+        return Webdav.new{
+            url = cfg.webdav_url,
+            username = cfg.webdav_username,
+            password = cfg.webdav_password,
+        }
+    end
+    return Client[key]
+end
 
 local SOURCE_ID = "local"
 
@@ -88,15 +101,7 @@ end
 ---@param cfg table|nil
 ---@return LocalClient
 function Client.new(cfg)
-    cfg = cfg or {}
-    return setmetatable({
-        cfg = cfg,
-        dav = Webdav.new{
-            url = cfg.webdav_url,
-            username = cfg.webdav_username,
-            password = cfg.webdav_password,
-        },
-    }, Client)
+    return setmetatable({ cfg = cfg or {} }, Client)
 end
 
 ---@return boolean
