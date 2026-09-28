@@ -329,6 +329,20 @@ decodeOnce(lru_a)
 Assert.len(renders, 5, "A 重解后又命中")
 px_bytes = 1
 
+-- SVG（在线字体预览）不进位图缓存：交给 ImageWidget 按后缀走 NanoSVG 保比例，排队解码。
+local svg_path = Config.dir() .. "/image-preview-test.svg"
+local svg_file = assert(io.open(svg_path, "wb"))
+svg_file:write("<svg xmlns='http://www.w3.org/2000/svg'/>")
+svg_file:close()
+local before_svg_renders, before_svg_widgets = #renders, #image_widgets
+local svg = Image.widget{ src = svg_path, width = 400, height = 36, alpha = true }
+Assert.eq(#image_widgets, before_svg_widgets, "大 SVG 仍排队")
+Stubs.flush()
+Assert.len(renders, before_svg_renders, "SVG 不得走 renderImageFile")
+Assert.eq(image_widgets[#image_widgets].file, svg_path)
+svg:free()
+os.remove(svg_path)
+
 local delays = {}
 local schedule_in = UIManager.scheduleIn
 function UIManager:scheduleIn(delay, fn)
