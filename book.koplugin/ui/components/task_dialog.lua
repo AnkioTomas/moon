@@ -50,7 +50,7 @@ local function statusText(task)
     return task.label .. " · " .. status
 end
 
----@class BookTaskDialog
+---@class BookTaskDialog : InputContainer
 local TaskDialog = InputContainer:extend{}
 
 function TaskDialog:init()

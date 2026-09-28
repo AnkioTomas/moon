@@ -27,7 +27,7 @@ local _ = require("gettext")
 local T = require("ffi/util").template
 local Screen = Device.screen
 
----@class BookProgressDialog
+---@class BookProgressDialog : InputContainer
 ---@field title string
 ---@field dismiss_callback fun()|nil 关窗（完成 / 用户收起）时调用一次
 local ProgressDialog = InputContainer:extend{
