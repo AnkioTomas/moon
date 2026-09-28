@@ -91,7 +91,7 @@ function Gallery:rebuild()
     local t = self.theme
     local w, h = self.dimen.w, self.dimen.h
     local pad = Theme.px(t.space.lg)
-    local bar = TitleBar.widget(t, {
+    local bar = TitleBar.widget({
         width = w, title = self.title, subtitle = NAMES[t.id],
         right_icon = "close", right_callback = function() self:dismiss() end,
     })
@@ -134,16 +134,16 @@ local function controls(page, t, width)
             style = style, width = half, height = Theme.px(56),
             VerticalGroup:new{
                 align = "center",
-                Text.line(t, "title", label),
-                Text.line(t, "caption", "card / raised", { color = t.color.muted }),
+                Text.line("title", label),
+                Text.line("caption", "card / raised", { color = t.color.muted }),
             },
         }
     end
     return vstack(t, {
-        Text.line(t, "hero", "42%", { width = width }),
-        Text.line(t, "title", "标题 title", { width = width }),
-        Text.line(t, "body", "正文 body：月读插件的主题组件演示", { width = width }),
-        Text.line(t, "caption", "说明 caption · muted", { width = width, color = t.color.muted }),
+        Text.line("hero", "42%", { width = width }),
+        Text.line("title", "标题 title", { width = width }),
+        Text.line("body", "正文 body：月读插件的主题组件演示", { width = width }),
+        Text.line("caption", "说明 caption · muted", { width = width, color = t.color.muted }),
         hrow(t, {
             Button:new{ text = "普通", callback = function() say("normal") end },
             Button:new{ text = "主要", variant = "primary", callback = function() say("primary") end },
@@ -155,7 +155,7 @@ local function controls(page, t, width)
             Button:new{ icon = "home", text = "图标+文字", callback = function() say("icon + text") end },
             chips[1], chips[2], chips[3],
         }),
-        Text.line(t, "caption", string.format("进度条 %d%%", page.pct), { color = t.color.muted }),
+        Text.line("caption", string.format("进度条 %d%%", page.pct), { color = t.color.muted }),
         bar,
         hrow(t, {
             Button:new{ text = "-10", callback = function() page.pct = math.max(0, page.pct - 10); page:refresh() end },
@@ -176,26 +176,26 @@ local function rows(page, t, width)
     return vstack(t, {
         VerticalGroup:new{
             align = "left",
-            Row.widget(t, { width = width, icon = "wifi", title = "无线网络",
+            Row.widget({ width = width, icon = "wifi", title = "无线网络",
                 status = page.wifi and "开" or "关", status_on = page.wifi, chevron = false,
                 callback = function() page.wifi = not page.wifi; page:refresh() end }),
-            Row.widget(t, { width = width, icon = "text_fields", title = "字体",
+            Row.widget({ width = width, icon = "text_fields", title = "字体",
                 subtitle = "带副标题的导航行", status = "思源宋体",
                 callback = function() say("进入字体设置") end }),
-            Row.widget(t, { width = width, icon = "radio_button_checked", title = "选中行（selected）",
+            Row.widget({ width = width, icon = "radio_button_checked", title = "选中行（selected）",
                 selected = true, chevron = false }),
-            Row.widget(t, { width = width, icon = "block", title = "禁用行", enabled = false,
+            Row.widget({ width = width, icon = "block", title = "禁用行", enabled = false,
                 callback = function() say("不会出现") end }),
-            Row.widget(t, { width = width, title = "无图标、无分割线", divider = false,
+            Row.widget({ width = width, title = "无图标、无分割线", divider = false,
                 callback = function() say("row") end }),
         },
-        Pager.widget(t, { width = width, page = page.at, pages = 12,
+        Pager.widget({ width = width, page = page.at, pages = 12,
             on_prev = function() page.at = page.at - 1; page:refresh() end,
             on_next = function() page.at = page.at + 1; page:refresh() end }),
-        Pager.widget(t, { width = width, page = page.dot, pages = 4, dots = true,
+        Pager.widget({ width = width, page = page.dot, pages = 4, dots = true,
             on_prev = function() page.dot = page.dot - 1; page:refresh() end,
             on_next = function() page.dot = page.dot + 1; page:refresh() end }),
-        Tabbar.widget(t, {
+        Tabbar.widget({
             width = width,
             active = page.tab,
             tabs = {
@@ -226,13 +226,13 @@ local function media(_, t, width)
     left = Button:new{ icon = "sort", text = "排序", callback = function() menuFrom(left) end }
     right = Button:new{ icon = "more_horiz", text = "更多", callback = function() menuFrom(right) end }
     return vstack(t, {
-        Text.line(t, "caption", "图片：本地 / 缺失回落文案 / 卡片表面", { width = width, color = t.color.muted }),
+        Text.line("caption", "图片：本地 / 缺失回落文案 / 卡片表面", { width = width, color = t.color.muted }),
         hrow(t, {
-            Image.widget(t, { width = third, height = h, src = "logo.png" }),
-            Image.widget(t, { width = third, height = h, src = "missing.png", fallback = "三体" }),
-            Image.widget(t, { width = third, height = h, src = "logo.png", style = t.card }),
+            Image.widget({ width = third, height = h, src = "logo.png" }),
+            Image.widget({ width = third, height = h, src = "missing.png", fallback = "三体" }),
+            Image.widget({ width = third, height = h, src = "logo.png", style = t.card }),
         }),
-        Text.line(t, "caption", "锚点弹出：贴按钮下方，放不下翻到上方", { width = width, color = t.color.muted }),
+        Text.line("caption", "锚点弹出：贴按钮下方，放不下翻到上方", { width = width, color = t.color.muted }),
         hrow(t, { left, right }),
         Button:new{ text = "动作表：多按钮行", width = width, callback = function()
             Sheet:new{ title = "划词", items = {
@@ -360,7 +360,7 @@ local function entries()
             local items = {}
             for i, name in ipairs({ "三体", "球状闪电", "流浪地球" }) do
                 items[i] = { text = name, value = name, image = "logo.png", image_w = 28, image_h = 36,
-                    widget = Text.line(Theme.current(), "caption", "预览 Aa") }
+                    widget = Text.line("caption", "预览 Aa") }
             end
             List:new{ title = "带缩略图", items = items, on_select = function(v) say("选择：" .. v) end }:show()
         end },

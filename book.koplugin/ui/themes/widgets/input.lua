@@ -78,7 +78,7 @@ function Input:init()
     for i, field in ipairs(self.fields) do
         if i > 1 then body[#body + 1] = VerticalSpan:new{ width = Theme.px(t.space.md) } end
         if field.label then
-            body[#body + 1] = Text.line(t, "caption", field.label, { width = inner, color = t.color.muted })
+            body[#body + 1] = Text.line("caption", field.label, { width = inner, color = t.color.muted })
             body[#body + 1] = VerticalSpan:new{ width = Theme.px(t.space.xs) }
         end
         local input = InputText:new{
@@ -89,7 +89,7 @@ function Input:init()
             width = inner - pad * 2,
             height = field.height and Theme.px(field.height),
             scroll = field.height ~= nil,
-            face = Text.face(t, "body"),
+            face = Text.face("body"),
             bordersize = 0,
             padding = 0,
             margin = 0,
