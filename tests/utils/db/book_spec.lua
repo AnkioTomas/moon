@@ -527,6 +527,24 @@ do
     clearMods()
 end
 
+-- ── releaseForeignPaths：本源已登记的路径从其他源行上撤掉，本源行不动 ──
+do
+    local connection, calls = makeConn()
+    local DbBase, BookDB = loadBook(connection)
+
+    Assert.is_true(BookDB.releaseForeignPaths("kindle"))
+    local q = calls[#calls]
+    Assert.is_true(q.sql:find("UPDATE books SET path=NULL", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("WHERE source_id<>? AND path IN", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("SELECT path FROM books WHERE source_id=? AND path IS NOT NULL", 1, true) ~= nil)
+    Assert.eq(q.argc, 2)
+    Assert.eq(q.args[1], "kindle")
+    Assert.eq(q.args[2], "kindle")
+
+    DbBase.close()
+    clearMods()
+end
+
 -- ── 阅读状态：手动已读抬进度；手动未读独立编码，自动规则不得覆盖 ──
 do
     local connection, calls = makeConn()
