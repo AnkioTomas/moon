@@ -2,6 +2,9 @@
 .idea/
 *.iml
 
+# Windows/WSL 解压 zip 留下的「来自 Internet」标记（NTFS ADS 残留，不该提交）
+*:Zone.Identifier
+
 # 备份与本地运行时数据
 *.bak
 # 模拟器 .moon 数据目录软链（指向 koreader-emulator/.../.moon）
@@ -16,9 +19,6 @@
 .env
 # 项目级 MCP 配置（含 token）
 /.cursor/mcp.json
-
-# Agent instructions (local only)
-AGENTS.md
 
 # 拼音整库仅 Release 分发，勿提交（分片在 assets/pinyin/）
 /assets/pinyin/dictionary.sqlite3

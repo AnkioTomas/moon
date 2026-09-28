@@ -5,7 +5,7 @@
 ## 模块索引
 
 | 模块 | 内容 |
-|---|---|
+| --- | --- |
 | [`plugin/`](plugin/README.md) | KOReader 接线、Host、源事件 |
 | [`db/`](db/README.md) | `book.sqlite3` 各表 |
 | [`book/`](book/README.md) | 身份 / 打开 / catalog / 进度 / 笔记 / 统计 / 同步 |
@@ -28,5 +28,6 @@
 | [`update/`](update/README.md) | 插件自更新 |
 | [`patch/`](patch/README.md) | KOReader 核心补丁 |
 | [`utils/`](utils/README.md) | 路径、设置、文字 |
+| [`agents/`](agents/README.md) | agent 约定：issue tracker、triage 标签、domain docs |
 
 依赖单向：`main → ui/book → source → http`；fork 子进程不碰库（`instant` 除外）。
