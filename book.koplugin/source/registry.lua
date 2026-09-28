@@ -26,10 +26,11 @@ local FACTORIES = {
     copymanga = function() return require("source.copymanga") end,
     fanqie = function() return require("source.fanqie") end,
     ["local"] = function() return require("source.local") end,
+    kindle = function() return require("source.kindle") end,
 }
 
--- local 排第二：选择器为「混合 → 本地 → 其余在线源」
-local ORDER = { "local", "moon", "wechat", "jdread", "copymanga", "fanqie" }
+-- local 排第二：选择器为「混合 → 本地 → Kindle → 其余在线源」；kindle 未装 kindle.koplugin 时 meta 为 nil，不出现
+local ORDER = { "local", "kindle", "moon", "wechat", "jdread", "copymanga", "fanqie" }
 
 ---@type BookSource|nil
 local _active = nil

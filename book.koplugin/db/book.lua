@@ -417,6 +417,20 @@ function BookDB.touchPath(source_id, stable_id, path)
     ) ~= nil
 end
 
+--- 物理路径只属于一个身份：本源已登记的路径，从其他源的行上撤掉。
+--- 用于外部插件共管的文件（如 kindle.koplugin 缓存）先被当成 local 书登记、后归属本源的情况。
+---@param source_id string
+---@return boolean
+function BookDB.releaseForeignPaths(source_id)
+    return Base.exec(
+        [[UPDATE books SET path=NULL
+          WHERE source_id<>? AND path IN
+            (SELECT path FROM books WHERE source_id=? AND path IS NOT NULL);]],
+        source_id,
+        source_id
+    ) ~= nil
+end
+
 --- 手动标记已读/未读。
 --- 已读：read_state=1 且进度抬到 100%（脏写 pending_progress）。
 --- 未读：read_state=2；不回退进度。

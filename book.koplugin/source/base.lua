@@ -12,7 +12,7 @@
 @module koplugin.book.source.base
 --]]
 
----@alias SourceId "moon"|"wechat"|"jdread"|"copymanga"|"fanqie"|"local"|string
+---@alias SourceId "moon"|"wechat"|"jdread"|"copymanga"|"fanqie"|"local"|"kindle"|string
 
 ---@alias BookSourceType
 ---| '"book"' # 整本文件
