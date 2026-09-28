@@ -32,6 +32,8 @@ function Widget:getSize() end
 ---@field name string|nil
 ---@field ui table|nil
 ---@field dimen table|nil
+---@field align "top"|"bottom"|"center"|nil
+---@field [integer] Widget
 local WidgetContainer = {}
 
 ---@generic T : WidgetContainer
@@ -44,8 +46,26 @@ function WidgetContainer:extend(o) end
 ---@return T
 function WidgetContainer:new(o) end
 
+--- 先 free 再移除全部子控件；skip_free 为真时只移除。
+---@param skip_free boolean|nil
+function WidgetContainer:clear(skip_free) end
+
+--- 依次交给子控件，任一返回 true 即停止。
+---@param event table
+---@return boolean
+function WidgetContainer:propagateEvent(event) end
+
+--- 子控件都不消费时才调用自身的 on<Event>。
+---@param event table
+---@return boolean|nil
+function WidgetContainer:handleEvent(event) end
+
+---@param full boolean|nil
+function WidgetContainer:free(full) end
+
 --- ui/widget/container/inputcontainer.lua
 ---@class InputContainer : WidgetContainer
+---@field key_events table|nil
 ---@field ges_events table|nil
 ---@field covers_fullscreen boolean|nil
 
