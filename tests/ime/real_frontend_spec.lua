@@ -556,6 +556,15 @@ do
     Assert.is_false(strip:handleEvent(outside), "条外 tap 必须放行")
 end
 
+-- 8. DPad 确认键：焦点默认落在首行候选条，FocusManager 取 dimen:copy() 合成 tap（模拟器崩过）
+do
+    local kb = newKeyboard()
+    local bb = setmetatable({}, { __index = function() return function() end end })
+    kb:paintTo(bb, 0, 0)
+    Assert.eq(kb:getFocusItem(), kb.layout[1][1])
+    Assert.is_true(kb:onPress())
+end
+
 -- ── 清理 ─────────────────────────────────────────────
 
 lfs.chdir(old_cwd)

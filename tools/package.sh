@@ -3,7 +3,7 @@
 # 用法：tools/package.sh [VERSION] [OUT_ZIP]
 #   VERSION  注入 bookversion.lua；省略则保持 0.0.0-dev
 #   OUT_ZIP  输出路径，默认仓库根 book.koplugin.zip
-# 剔除：types/（仅 LuaLS 用）、*.md、.DS_Store、*~；Lua 文档注解经 tools/strip_lua.lua 剥离。
+# 剔除：types/（仅 LuaLS 用）、demo/（主题组件演示）、*.md、.DS_Store、*~；Lua 文档注解经 tools/strip_lua.lua 剥离。
 # 只改临时目录里的副本，源码树不动。
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,6 +16,7 @@ trap 'rm -rf "$STAGE"' EXIT
 
 rsync -a \
     --exclude '/types/' \
+    --exclude '/demo/' \
     --exclude '*.md' \
     --exclude '.DS_Store' \
     --exclude '*~' \

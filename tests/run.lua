@@ -21,7 +21,6 @@ _G.BOOK_TEST_ROOT = ROOT
 
 package.path = table.concat({
     ROOT .. "/book.koplugin/?.lua",
-    ROOT .. "/book.koplugin/?/init.lua",
     ROOT .. "/tests/?.lua",
     ROOT .. "/tests/?/init.lua",
     package.path,

@@ -144,6 +144,24 @@ Assert.eq(calls.azw3_registry, doc_registry)
 Assert.eq(table.concat(feature_hooks, ","), "onCreate:book.koplugin")
 feature_hooks = {}
 
+-- 主菜单：demo/ 目录存在才转发给演示模块（打包剔除 demo/ 后不出现）
+do
+    local modes = {}
+    package.loaded["libs/libkoreader-lfs"] = {
+        attributes = function(path, key) Assert.eq(key, "mode") return modes[path] end,
+    }
+    stub("demo.init", {
+        addToMainMenu = function(items) items.book_theme_demo = { text = "demo" } end,
+    })
+    local items = {}
+    plugin:addToMainMenu(items)
+    Assert.not_nil(items.book_library)
+    Assert.is_nil(items.book_theme_demo)
+    modes["book.koplugin/demo"] = "directory"
+    plugin:addToMainMenu(items)
+    Assert.not_nil(items.book_theme_demo)
+end
+
 -- emitToSource：缺省用当前源；指定源优先；抛错不打断
 do
     local events = {}

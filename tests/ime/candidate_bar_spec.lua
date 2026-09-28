@@ -51,6 +51,13 @@ package.preload["ui/uimanager"] = function()
         end,
     }
 end
+package.preload["ui/geometry"] = function()
+    local Geom = {}
+    Geom.__index = Geom
+    function Geom:new(o) return setmetatable(o, self) end
+    function Geom:copy() return Geom:new{ x = self.x, y = self.y, w = self.w, h = self.h } end
+    return Geom
+end
 package.preload["ui/size"] = function()
     return { padding = { small = 4 } }
 end
@@ -328,6 +335,7 @@ do
     local strip = stripOf(kb)
     Assert.is_true(type(strip.paintTo) == "function", "首行必须是自研候选条")
     Assert.eq(#kb.layout[1], 1, "FocusManager 布局里整行一个部件")
+    Assert.is_true(type(strip.dimen.copy) == "function", "DPad 确认键会 dimen:copy()，必须是 Geom")
     Assert.eq(strip.nav_w, 60, "◀▶ 宽度取自被顶掉的键")
     Assert.eq(strip.budget, 480, "预算 = 7 槽 + 空档的原宽之和")
     Assert.eq(strip.gap, 2, "缝宽取自 keyboard.key_padding")

@@ -1,0 +1,96 @@
+--[[--
+ui.themes.widgets.box / progress：自绘表面与进度条按主题令牌出图。
+
+@module tests.ui.themes.widgets.box_spec
+--]]
+
+local Assert = require("support.assert")
+local Kit = require("support.widget_stubs")
+Kit.install("bold")
+
+local Theme = require("ui.themes.init")
+local Box = require("ui.themes.widgets.box")
+local Progress = require("ui.themes.widgets.progress")
+
+-- bold 卡片：阴影计入尺寸但不挤占宽高；先阴影、再底、再边框；子件在框内居中。
+local bold = Theme.current()
+local painted
+local child = {
+    getSize = function() return { w = 20, h = 10 } end,
+    paintTo = function(_, _bb, x, y) painted = { x = x, y = y } end,
+}
+local card = Box:new{ style = bold.card, width = 100, height = 50, child }
+Assert.eq(card:getSize().w, 103)
+Assert.eq(card:getSize().h, 53)
+local bb = Kit.canvas()
+card:paintTo(bb, 10, 20)
+Assert.eq(#bb.ops, 3)
+Assert.eq(bb.ops[1].op, "rect")
+Assert.eq(bb.ops[1].x, 13, "阴影右下偏移")
+Assert.eq(bb.ops[1].c, 0x00)
+Assert.eq(bb.ops[2].op, "rect")
+Assert.eq(bb.ops[2].x, 10)
+Assert.eq(bb.ops[2].c, 0xFF)
+Assert.eq(bb.ops[3].op, "border")
+Assert.eq(bb.ops[3].bw, 2)
+Assert.eq(painted.x, 10 + 40)
+Assert.eq(painted.y, 20 + 20)
+Assert.eq(card.dimen.x, 10, "绘制回写坐标，供点击命中")
+
+-- 不给宽高：按子件加内边距撑开。
+local auto = Box:new{ style = bold.card, padding = 5, child }
+Assert.eq(auto.box_w, 30)
+Assert.eq(auto.box_h, 20)
+
+-- soft 卡片：无阴影、无边框只画底；圆角夹到短边一半。
+Kit.use("soft")
+local soft = Theme.current()
+local flat = Box:new{ style = soft.card, width = 100, height = 20 }
+bb = Kit.canvas()
+flat:paintTo(bb, 0, 0)
+Assert.eq(#bb.ops, 1)
+Assert.eq(bb.ops[1].c, 0xEE)
+Assert.eq(bb.ops[1].r, 10)
+Assert.eq(flat:getSize().w, 100)
+
+-- 无 bg 的样式什么都不画（透明表面）。
+bb = Kit.canvas()
+Box:new{ style = {}, width = 10, height = 10 }:paintTo(bb, 0, 0)
+Assert.len(bb.ops, 0)
+
+-- 进度条：高度取令牌，百分比夹到 0–100。
+Kit.use("paper")
+local bar = Progress:new{ width = 100, percent = 40 }
+Assert.eq(bar:getSize().h, 4)
+bb = Kit.canvas()
+bar:paintTo(bb, 0, 0)
+Assert.eq(#bb.ops, 2)
+Assert.eq(bb.ops[1].w, 100, "轨道")
+Assert.eq(bb.ops[1].c, 0xDD)
+Assert.eq(bb.ops[2].w, 40, "填充")
+bar:setPercent(150)
+Assert.eq(bar.percent, 100)
+bar:setPercent(-5)
+Assert.eq(bar.percent, 0)
+bar:setPercent(nil)
+Assert.eq(bar.percent, 0)
+bb = Kit.canvas()
+bar:paintTo(bb, 0, 0)
+Assert.eq(#bb.ops, 1, "0% 不画填充")
+
+-- bold：带 2px 边框，填充在框内，边框最后画。
+Kit.use("bold")
+bar = Progress:new{ width = 100, percent = 50 }
+Assert.eq(bar:getSize().h, 10)
+bb = Kit.canvas()
+bar:paintTo(bb, 0, 0)
+Assert.eq(#bb.ops, 3)
+Assert.eq(bb.ops[2].x, 2)
+Assert.eq(bb.ops[2].w, 48)
+Assert.eq(bb.ops[2].h, 6)
+Assert.eq(bb.ops[3].op, "border")
+
+-- 显式高度优先于令牌。
+Assert.eq(Progress:new{ width = 50, height = 18 }:getSize().h, 18)
+
+return true

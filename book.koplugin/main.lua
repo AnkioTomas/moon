@@ -119,6 +119,9 @@ function BookPlugin:addToMainMenu(menu_items)
             self:openDesktop()
         end,
     }
+    if require("libs/libkoreader-lfs").attributes(self.path .. "/demo", "mode") == "directory" then
+        require("demo.init").addToMainMenu(menu_items)
+    end
 end
 
 --- 读 sidecar 前：把全书排版偏好写进本章 sidecar，由原生模块加载
