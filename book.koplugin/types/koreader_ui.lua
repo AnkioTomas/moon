@@ -65,8 +65,8 @@ function WidgetContainer:free(full) end
 
 --- ui/widget/container/inputcontainer.lua
 ---@class InputContainer : WidgetContainer
----@field key_events table|nil
----@field ges_events table|nil
+---@field key_events table _init 保证非空
+---@field ges_events table _init 保证非空
 ---@field covers_fullscreen boolean|nil
 
 --- ui/widget/menu.lua
