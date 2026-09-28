@@ -44,6 +44,7 @@ local Screen = Device.screen
 ---@field job CancelHandle|nil
 ---@field source_btn table|nil
 ---@field target_btn table|nil
+---@field lang_w number|nil 语言按钮固定宽度
 ---@field text_box table|nil
 ---@field width number|nil
 local TranslatePopup = InputContainer:extend{
@@ -64,8 +65,9 @@ end
 --- 刷新语言按钮与译文。
 ---@param self BookTranslatePopup
 function TranslatePopup:refreshView()
-    self.source_btn:setText(langButtonText(self, _("源语言"), self.source_lang, true))
-    self.target_btn:setText(langButtonText(self, _("目标语言"), self.target_lang, false))
+    -- 必须传原宽度：不传时 Button:setText 会清掉固定宽度并整体重建 frame
+    self.source_btn:setText(langButtonText(self, _("源语言"), self.source_lang, true), self.lang_w)
+    self.target_btn:setText(langButtonText(self, _("目标语言"), self.target_lang, false), self.lang_w)
     self.text_box.text_widget:setText(self.translated or "")
     self.text_box:resetScroll()
     self.text_box:scrollToTop()
@@ -218,6 +220,7 @@ function TranslatePopup:init()
     self.width = math.floor(math.min(Screen:getWidth(), Screen:getHeight()) * 0.88)
     local pad = Size.padding.default
     local lang_w = math.floor((self.width - pad * 3) / 2)
+    self.lang_w = lang_w
     local text_h = math.floor(Screen:getHeight() * (self.full_page and 0.62 or 0.26))
     local inner_w = self.width - pad * 2
 
