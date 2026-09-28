@@ -33,6 +33,7 @@ function Reader.onCreate(plugin)
         ui:handleEvent(Event:new("UpdatePos"))
     end
     require("xray.marks").install(ui)
+    require("ui.reader.explain").install(ui)
     require("ui.reader.highlight_menu").install(ui)
     require("ui.reader.book_notes").install(ui)
     require("ui.reader.selection").install(ui)

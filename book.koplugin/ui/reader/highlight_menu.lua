@@ -2,7 +2,7 @@
 划词工具栏：复用 KOReader 原生 ButtonDialog，按 Book 设置裁剪、排序并五列排版。
 
 按钮工厂、回调、锚点和关闭行为全部保持原生；这里只接管收集和分行，含
-qrclipboard 的 12_generate_qr_code 与 Book 的 X-Ray 查询。
+qrclipboard 的 12_generate_qr_code 与 Book 的 X-Ray 查询、AI 解释。
 
 @module koplugin.book.ui.reader.highlight_menu
 --]]
@@ -31,11 +31,12 @@ local INDEX_TO_KEY = {
     ["12_generate_qr_code"] = "qrcode",
     ["12_search"] = "search",
     ["12_xray_lookup"] = "xray",
+    ["12_ai_explain"] = "ai_explain",
 }
 
 local DEFAULT_ORDER = {
     "select", "highlight", "copy", "add_note", "dictionary", "translate",
-    "wikipedia", "xray", "search", "view_html", "qrcode",
+    "wikipedia", "xray", "ai_explain", "search", "view_html", "qrcode",
 }
 
 --- 划词弹窗某项是否应在菜单中显示。

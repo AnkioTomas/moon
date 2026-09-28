@@ -112,9 +112,10 @@ Assert.eq(lookup[5].rows[3](600).title, "X-Ray 下划线样式")
 Assert.eq(lookup[5].rows[3](600).status, "虚线")
 
 local popup_rows = Settings:popupRows(desktop)
-Assert.len(popup_rows, 11)
+Assert.len(popup_rows, 12)
 Assert.eq(popup_rows[1](600).title, "选择")
-Assert.eq(popup_rows[11](600).title, "搜索")
+Assert.eq(popup_rows[9](600).title, "AI 解释")
+Assert.eq(popup_rows[12](600).title, "搜索")
 
 -- 旧配置缺键：设置页显示的位次必须和实际弹窗顺序（HighlightMenu.order）一致。
 reader_section = { reader_popup_button_order = { "copy" } }
