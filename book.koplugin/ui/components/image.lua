@@ -462,11 +462,13 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     end
 
     --- 小图和已缓存的大图当场出图；未缓存的大图进队。
+    --- SVG 不进位图缓存：ImageWidget 按后缀走 NanoSVG（保比例、直通 alpha），renderImageFile 会拉满目标框。
     ---@param path string 图片或书籍的本地文件路径
     function box:_showFile(path)
         local w, h = self._inner_w, self._inner_h
-        self._big = not cheap(path, w, h)
-        if self._big and not bitmaps[bitmapKey(path, w, h)] then
+        local large = not cheap(path, w, h)
+        self._big = large and not path:lower():match("%.svg$")
+        if large and not (self._big and bitmaps[bitmapKey(path, w, h)]) then
             enqueue(self, path)
             return
         end
