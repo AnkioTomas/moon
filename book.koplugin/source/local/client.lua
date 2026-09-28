@@ -632,7 +632,7 @@ local function commitFiles(files, known, full_snapshot)
 end
 
 --- 扫盘任务：遍历与解析在子进程，落库在主进程，cancel 杀子进程。
---- 子进程死在某本书的引擎里时跳过它重扫（每轮至少多跳一本，必然收敛）；
+--- 子进程死在某本书的引擎里时跳过它重扫（每轮至少多跳一本，必然收敛），本会话内不再打开它；
 --- 其余失败照常回调，库里是旧数据，照查，不让 UI 空转。
 ---@param self LocalClient
 ---@param cb fun(ok: boolean, err: string|nil)
@@ -640,9 +640,11 @@ end
 local function scanJob(self, cb)
     local root = rootPath(self.cfg)
     local known, digests = knownBooks()
-    local skip, job = {}, nil
+    local job
+    -- 崩溃记录跨轮保留：入库后缺封面还会被补提，不记住的话每轮扫盘都要再崩一次、整轮重来
+    self._crashed = self._crashed or {}
     self._cover_tried = self._cover_tried or {}
-    local tried = self._cover_tried
+    local skip, tried = self._crashed, self._cover_tried
     local function start()
         local opening
         job = Job.run(function(progress)
