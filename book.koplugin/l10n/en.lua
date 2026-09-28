@@ -110,7 +110,7 @@ return {
     ["京东登录校验失败"] = "JD sign-in validation failed",
     ["京东读书"] = "JD Read",
     ["京东读书响应无效"] = "Invalid JD Read response",
-    ["京东读书无可用阅读权限"] = "No available JD Read access",
+    ["京东读书网页协议读不到本章，请在京东读书 App 内阅读"] = "This chapter is not available via the JD Read web protocol. Please read it in the JD Read app.",
     ["京东读书账号"] = "JD Read account",
     ["京东读书错误 "] = "JD Read error ",
     ["亮度"] = "Brightness",
