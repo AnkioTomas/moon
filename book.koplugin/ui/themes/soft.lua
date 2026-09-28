@@ -18,6 +18,7 @@ return {
     card = { bg = 0xEE, border = 0, border_color = 0xEE, radius = 12, shadow = 0, shadow_color = 0xDD },
     raised = { bg = 0xEE, border = 0, border_color = 0xEE, radius = 12, shadow = 2, shadow_color = 0xDD },
     dialog = { bg = 0xFF, border = 1, border_color = 0xCC, radius = 16, shadow = 3, shadow_color = 0xDD },
+    image = { bg = 0xEE, border = 0, border_color = 0xEE, radius = 0, shadow = 0, shadow_color = 0xDD },
     control = { height = 40, radius = 999, border = 0, icon = 22 },
     button = {
         normal = { bg = 0xEE, ink = 0x00, border_color = 0xEE },

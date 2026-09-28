@@ -12,7 +12,7 @@ opts.color 是灰度令牌（缺省 color.ink）；title / hero 默认加粗，o
 local Blitbuffer = require("ffi/blitbuffer")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
-local UI = require("ui.components.bookui")
+local Theme = require("ui.themes.init")
 
 local FACES = { caption = "xx_smallinfofont", body = "cfont", title = "cfont", hero = "cfont" }
 local BOLD = { title = true, hero = true }
@@ -24,7 +24,7 @@ local Text = {}
 ---@param role string caption/body/title/hero
 ---@return table face
 function Text.face(theme, role)
-    return UI.face(FACES[role], theme.font[role])
+    return Theme.face(FACES[role], theme.font[role])
 end
 
 ---@param opts table

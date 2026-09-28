@@ -4,16 +4,19 @@
   +----------------------+
   | 标题（可选）         |
   | [      动作一      ] |
-  | [      动作二      ] |
+  | [ 复制 ][ 高亮 ][ 查词 ] |   buttons 项：一行等宽按钮（ButtonDialog 的二维 buttons）
   |                      |   separator 项留一段空隙分组
   | [      删除        ] |
   +----------------------+
 
   Sheet:new{ title = "…", items = {
       { text = "打开", callback = fn },
+      { buttons = { { text = "复制", callback = fn }, { icon = "share", callback = fn } } },
       { separator = true },
       { text = "删除", variant = "primary", callback = fn, enabled = true },
   } }:show()
+
+  贴着按钮弹出的菜单：Sheet:new{ anchor = button.dimen, mask = false, items = … }
 
 @module koplugin.book.ui.themes.widgets.sheet
 --]]
@@ -42,6 +45,18 @@ function Sheet:init()
         if #body > 0 then body[#body + 1] = VerticalSpan:new{ width = gap } end
         if item.separator then
             body[#body + 1] = VerticalSpan:new{ width = Theme.px(t.space.md) }
+        elseif item.buttons then
+            local specs = {}
+            for i, spec in ipairs(item.buttons) do
+                specs[i] = {
+                    text = spec.text, icon = spec.icon, variant = spec.variant, enabled = spec.enabled,
+                    callback = function()
+                        self:close()
+                        if spec.callback then spec.callback() end
+                    end,
+                }
+            end
+            body[#body + 1] = self:buttonRow(specs, width)
         else
             body[#body + 1] = Button:new{
                 text = item.text,

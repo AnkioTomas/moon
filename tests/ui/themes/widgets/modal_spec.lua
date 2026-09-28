@@ -35,7 +35,14 @@ local panel = paint(confirm)
 Assert.eq(panel.w, 480, "600 宽屏命中封顶")
 Assert.eq(panel.x, math.floor((600 - panel.w) / 2))
 Assert.eq(panel.y, math.floor((800 - panel.h) / 2))
-Assert.eq(Kit.masks, 1, "居中弹窗画遮罩")
+local bb = Kit.canvas()
+confirm:paintTo(bb, 0, 0)
+Assert.eq(bb.pixels, 600 * 800 / 2, "居中弹窗画网状遮罩：隔点一像素")
+Kit.display.mesh_mask = false
+bb = Kit.canvas()
+confirm:paintTo(bb, 0, 0)
+Assert.eq(bb.pixels, 0, "mesh_mask 关闭不画")
+Kit.display.mesh_mask = true
 local buttons = Kit.buttons(confirm)
 Assert.len(buttons, 2)
 Assert.eq(buttons[1].text, "取消")
@@ -105,6 +112,42 @@ buttons[1]:onTapThemeButton()
 Assert.eq(log[1], "open:true")
 buttons[2]:onTapThemeButton()
 Assert.len(log, 1)
+
+-- 动作表 buttons 行：一行等宽按钮（ButtonDialog 二维 buttons），同样先关窗再执行。
+log = {}
+sheet = Sheet:new{ items = {
+    { buttons = {
+        { text = "复制", callback = function() log[#log + 1] = "copy:" .. tostring(Kit.closed[#Kit.closed] == sheet) end },
+        { icon = "share", callback = function() log[#log + 1] = "share" end },
+        { text = "禁用", enabled = false },
+    } },
+    { text = "通栏" },
+} }
+buttons = Kit.buttons(sheet)
+Assert.len(buttons, 4)
+local gap = 8
+Assert.eq(buttons[1]:getSize().w, math.floor((sheet:innerWidth() - gap * 2) / 3))
+Assert.eq(buttons[4]:getSize().w, sheet:innerWidth())
+Assert.is_false(buttons[3].enabled)
+buttons[1]:onTapThemeButton()
+Assert.eq(log[1], "copy:true")
+
+-- 锚点矩形：贴下方弹出、水平对中并夹进屏内；下方放不下翻到上方。
+local function anchored(rect)
+    local s = Sheet:new{ anchor = rect, mask = false, items = { { text = "a" }, { text = "b" } } }
+    return s, paint(s)
+end
+local s, p = anchored{ x = 100, y = 100, w = 40, h = 30 }
+Assert.eq(p.y, 130, "锚点下方")
+Assert.eq(p.x, 8, "左侧夹到 sm 边距")
+bb = Kit.canvas()
+s:paintTo(bb, 0, 0)
+Assert.eq(bb.pixels, 0, "mask=false 不画遮罩")
+s, p = anchored{ x = 560, y = 760, w = 40, h = 40 }
+Assert.eq(p.y + p.h, 760, "下方放不下：贴锚点上沿")
+Assert.eq(p.x + p.w, 600 - 8, "右侧夹到 sm 边距")
+Assert.is_true(s:onTapModal(nil, Kit.tap(p.x + 1, p.y + 1)))
+Assert.is_false(Kit.closed[#Kit.closed] == s, "面板内点按不关")
 
 -- 进度弹窗：有 total 才动进度条，done 夹到 total；只刷面板区域。
 local progress = ProgressDialog:new{ title = "导入" }

@@ -10,8 +10,11 @@ local display = {}
 package.preload["utils.settings"] = function()
     return { get = function(section) assert(section == "display"); return display end }
 end
-package.preload["ui.components.bookui"] = function()
-    return { sz = function(n) return math.max(1, n * 2) end }
+package.preload["device"] = function()
+    return { screen = { scaleBySize = function(_, n) return n * 2 end } }
+end
+package.preload["ui/font"] = function()
+    return { getFace = function(_, name, size) return { name = name, size = size } end }
 end
 
 local Theme = require("ui.themes.init")
@@ -67,8 +70,21 @@ Assert.eq(Theme.current().id, "soft")
 
 Assert.errors(function() Theme.get("neon") end, "unknown ui theme")
 
--- px：0 不被 UI.sz 抬成 1px。
+-- 缩放：读 display.ui_scale（缺省 130，夹到 100–180）；px = DPI × 缩放，0 保持 0、其余至少 1。
+display.ui_scale = nil
+Assert.eq(Theme.scale(), 130)
+display.ui_scale = 50
+Assert.eq(Theme.scale(), 100)
+display.ui_scale = 300
+Assert.eq(Theme.scale(), 180)
+display.ui_scale = 150
 Assert.eq(Theme.px(0), 0)
-Assert.eq(Theme.px(3), 6)
+Assert.eq(Theme.px(3), 9, "3 × DPI 2 × 150%")
+Assert.eq(Theme.px(0.1), 1, "非零至少 1px")
+-- 字号只乘缩放（DPI 由 Font:getFace 乘），下限 10。
+Assert.eq(Theme.fontSize(14), 21)
+Assert.eq(Theme.fontSize(4), 10)
+Assert.eq(Theme.face("cfont", 14).size, 21)
+Assert.matches(Theme.root(), "/book%.koplugin/$")
 
 return true

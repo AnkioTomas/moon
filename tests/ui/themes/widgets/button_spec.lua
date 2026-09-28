@@ -74,7 +74,9 @@ t = Theme.current()
 bar = Tabbar.widget(t, { width = 200, tabs = tabs, active = "home", on_tab = function() end })
 local active_box = Kit.find(bar, function(w) return w.style ~= nil and w.style.bg == 0x00 end)
 Assert.len(active_box, 1)
-Assert.eq(active_box[1][1].color, 0xFF, "选中格图标文字反白")
+local inks = Kit.find(active_box[1], function(w) return w.fgcolor ~= nil end)
+Assert.len(inks, 2, "图标 + 文字")
+for _, w in ipairs(inks) do Assert.eq(w.fgcolor, 0xFF, "选中格图标文字反白: " .. w.text) end
 
 -- 行：选中反色、副文字跟主文字同色；禁用不可点；bold 画 2px 分割线。
 local row = Row.widget(t, { width = 300, title = "字体", subtitle = "当前", selected = true, callback = function() end })
