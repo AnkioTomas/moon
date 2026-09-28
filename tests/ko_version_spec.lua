@@ -15,7 +15,7 @@ package.preload["ui/uimanager"] = function()
         show = function(_, widget) calls.dialog = widget end,
     }
 end
-package.preload["ui/widget/confirmbox"] = function()
+package.preload["ui/widget/infomessage"] = function()
     return {
         new = function(_, fields) return fields end,
     }
@@ -42,4 +42,9 @@ Assert.is_true(KOVersion.check(), "point release 也必须通过")
 version_current = 202606000000
 short_version = "2026.06"
 Assert.is_true(not KOVersion.check(), "更旧月发必须拒绝")
-Assert.eq(calls.dialog.text, "月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：2026.06 (202606000000)")
+Assert.eq(calls.dialog.text, "月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：2026.06")
+
+version_current = nil
+short_version = "unknown"
+Assert.is_true(not KOVersion.check(), "无 git-rev 必须拒绝")
+Assert.eq(calls.dialog.text, "月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：unknown")

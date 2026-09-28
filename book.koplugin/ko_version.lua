@@ -11,6 +11,7 @@ KOReader 宿主版本门槛（插件 init 本地门禁，非网络更新检查�
 
 local MIN_KOREADER_VERSION = 202607000000
 local UIManager = require("ui/uimanager")
+local Version = require("version")
 local _ = require("gettext")
 
 local M = {}
@@ -18,20 +19,13 @@ local M = {}
 --- 当前 KOReader 是否满足月读最低版本；不满足时弹窗并返回 false。
 ---@return boolean
 function M.check()
-    local ok, Version = pcall(require, "version")
-    local current = ok and Version and Version:getNormalizedCurrentVersion()
-    if type(current) == "number" and current >= MIN_KOREADER_VERSION then
+    local current = Version:getNormalizedCurrentVersion()
+    if current and current >= MIN_KOREADER_VERSION then
         return true
     end
-
-    local ConfirmBox = require("ui/widget/confirmbox")
-    local display = ok and Version and Version.getShortVersion and Version:getShortVersion() or _("未知")
-    if type(current) == "number" then
-        display = tostring(display) .. " (" .. tostring(current) .. ")"
-    end
-    UIManager:show(ConfirmBox:new {
-        text = _("月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：") .. tostring(display),
-        ok_text = _("关闭"),
+    local InfoMessage = require("ui/widget/infomessage")
+    UIManager:show(InfoMessage:new {
+        text = _("月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：") .. Version:getShortVersion(),
     })
     return false
 end

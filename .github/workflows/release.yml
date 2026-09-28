@@ -53,13 +53,7 @@ jobs:
           VERSION="${{ steps.ver.outputs.version }}"
           ASSET="${{ steps.ver.outputs.asset }}"
 
-          # 与 README / bookversion.lua 约定一致：整文件覆盖注入
-          printf 'return "%s"\n' "$VERSION" > book.koplugin/bookversion.lua
-
-          zip -r "$ASSET" book.koplugin \
-            -x "*.DS_Store" \
-            -x "*/.DS_Store" \
-            -x "*~"
+          tools/package.sh "$VERSION" "$ASSET"
           sha256sum "$ASSET" > "${ASSET}.sha256"
 
           echo "Packaged ${ASSET} (version ${VERSION})"

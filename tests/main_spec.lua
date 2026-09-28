@@ -27,8 +27,7 @@ stub("ui/uimanager", {
     setDirty = function() end,
     close = function() end,
 })
-stub("ui/widget/infomessage", {})
-stub("ui/widget/confirmbox", {
+stub("ui/widget/infomessage", {
     new = function(_, fields) calls.version_dialog = fields return fields end,
 })
 stub("version", {
@@ -288,4 +287,4 @@ local attach_count = calls.host
 package.loaded["ko_version"] = nil
 setmetatable({ path = "book.koplugin", ui = {} }, Main):init()
 Assert.eq(calls.host, attach_count, "不支持的 KOReader 版本不得进入插件")
-Assert.eq(calls.version_dialog.text, "月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：2026.06 (202606000000)")
+Assert.eq(calls.version_dialog.text, "月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：2026.06")
