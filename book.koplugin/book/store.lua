@@ -230,9 +230,8 @@ end
 ---@return boolean
 function Store.allChaptersCached(identity)
     if not identity then return false end
-    local toc = Store.toc(identity)
-    if not toc or #toc == 0 then return false end
-    return ChapterDB.countByBook(identity.source_id, identity.stable_id) == #toc
+    local n = BookDB.tocLength(identity.source_id, identity.stable_id)
+    return n > 0 and ChapterDB.countByBook(identity.source_id, identity.stable_id) == n
 end
 
 --- 本地下载：章节源要目录齐且章文件登齐；整本源有 path 即可。

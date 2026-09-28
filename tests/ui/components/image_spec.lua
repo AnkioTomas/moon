@@ -257,16 +257,77 @@ Image.await(Image.widget{ src = image_path, width = 40, height = 60 }, function(
 end)
 Assert.is_true(batch_done, "本地图就绪即可写锁屏")
 
+-- 大图走模块位图缓存：key = 路径 + 尺寸，每个用例换宽度避开前面用例的缓存。
+local renders = {}
+local px_bytes = 1
+package.loaded["ui/renderimage"] = {
+    renderImageFile = function(_, path, _, w, h)
+        renders[#renders + 1] = { path = path, w = w, h = h }
+        return { stride = w * px_bytes, h = h }
+    end,
+}
+local next_w = 200
+local function big()
+    next_w = next_w + 1
+    return next_w
+end
+
 -- 封面尺寸：不在构造时解，等 nextTick。
 local before_large = #image_widgets
 local large = {}
+local large_w = big()
 for _ = 1, 3 do
-    large[#large + 1] = Image.widget{ src = image_path, width = 200, height = 200 }
+    large[#large + 1] = Image.widget{ src = image_path, width = large_w, height = 200 }
 end
 Assert.eq(#image_widgets, before_large, "大图不得在拼页时解码")
 Stubs.flush()
 Assert.eq(#image_widgets, before_large + 3, "大图在后续帧解码")
+Assert.len(renders, 1, "同路径同尺寸只解一次")
+Assert.is_nil(image_widgets[#image_widgets].file, "大图位图由模块给出")
+Assert.eq(image_widgets[#image_widgets].image, image_widgets[#image_widgets - 1].image)
+Assert.is_false(image_widgets[#image_widgets].image_disposable, "共享位图不得被 ImageWidget free")
 for i = 1, #large do large[i]:free() end
+
+-- 缓存命中：重建时拼页当场出图，不排队、不重解。
+local hit = Image.widget{ src = image_path, width = large_w, height = 200 }
+Assert.eq(#image_widgets, before_large + 4, "命中缓存拼页即出图")
+Assert.len(renders, 1)
+local hit_done = false
+Image.await(hit, function() hit_done = true end)
+Assert.is_true(hit_done, "命中即落定")
+hit:free()
+
+-- 原地替换过的文件：丢掉缓存位图，重新排队解码。
+Image.invalidate(image_path)
+local stale = Image.widget{ src = image_path, width = large_w, height = 200 }
+Assert.eq(#image_widgets, before_large + 4, "失效后不得命中旧位图")
+Stubs.flush()
+Assert.len(renders, 2)
+stale:free()
+
+-- 超预算按最久未用淘汰；刚解的那张保留。
+--- 建一张大图并冲刷解码队列，返回后即释放控件（位图仍在缓存）。
+---@param w number
+local function decodeOnce(w)
+    local box = Image.widget{ src = image_path, width = w, height = 200 }
+    Stubs.flush()
+    box:free()
+end
+px_bytes = 300 -- 单张约 12 MiB，两张超 16 MiB 预算
+local lru_a, lru_b = big(), big()
+decodeOnce(lru_a)
+decodeOnce(lru_a)
+Assert.len(renders, 3, "A 已缓存")
+decodeOnce(lru_b)
+Assert.len(renders, 4)
+local before_evicted = #image_widgets
+local evicted = Image.widget{ src = image_path, width = lru_a, height = 200 }
+Assert.eq(#image_widgets, before_evicted, "A 被 B 挤出缓存后须重新排队")
+Stubs.flush()
+evicted:free()
+decodeOnce(lru_a)
+Assert.len(renders, 5, "A 重解后又命中")
+px_bytes = 1
 
 local delays = {}
 local schedule_in = UIManager.scheduleIn
@@ -278,7 +339,7 @@ end
 -- 预算内（缓存命中/快解码）一拍出齐，不得每张图空等一次续排。
 local page = {}
 for i = 1, 12 do
-    page[i] = Image.widget{ src = image_path, width = 200, height = 200 }
+    page[i] = Image.widget{ src = image_path, width = big(), height = 200 }
 end
 Stubs.flush()
 Assert.len(delays, 0, "预算内整页封面一拍解完")
@@ -287,8 +348,8 @@ for i = 1, #page do page[i]:free() end
 -- 超预算必须续排；续排若 0 延迟，UIManager 会在读输入前把整个队列解完，切页卡死。
 decode_ms = 60
 local yielding = {
-    Image.widget{ src = image_path, width = 200, height = 200 },
-    Image.widget{ src = image_path, width = 200, height = 200 },
+    Image.widget{ src = image_path, width = big(), height = 200 },
+    Image.widget{ src = image_path, width = big(), height = 200 },
 }
 Stubs.flush()
 decode_ms = 0
@@ -298,21 +359,21 @@ Assert.is_true(delays[1] > 0, "续排解码必须让出输入轮询")
 for i = 1, #yielding do yielding[i]:free() end
 
 local large_done = false
-Image.await(Image.widget{ src = image_path, width = 200, height = 200 }, function()
+Image.await(Image.widget{ src = image_path, width = big(), height = 200 }, function()
     large_done = true
 end)
 Assert.is_false(large_done, "大图未解码不得写锁屏")
 Stubs.flush()
 Assert.is_true(large_done)
 
-local dropped = Image.widget{ src = image_path, width = 200, height = 200 }
+local dropped = Image.widget{ src = image_path, width = big(), height = 200 }
 local before_drop = #image_widgets
 dropped:free()
 Stubs.flush()
 Assert.eq(#image_widgets, before_drop, "已释放的大图不得再解码")
 
 -- Independent waiters on the same tree do not share cancellation state.
-local waiting = Image.widget{ src = image_path, width = 200, height = 200 }
+local waiting = Image.widget{ src = image_path, width = big(), height = 200 }
 local first_wait, second_wait = 0, 0
 local cancelled_wait = Image.await({ waiting }, function() first_wait = first_wait + 1 end)
 Image.await({ waiting, waiting }, function() second_wait = second_wait + 1 end)
@@ -323,8 +384,8 @@ Assert.eq(second_wait, 1, "duplicate tree references count only once")
 waiting:free()
 
 -- Construction order and nested callers cannot overwrite another batch.
-local a = Image.widget{ src = image_path, width = 200, height = 200 }
-local b = Image.widget{ src = image_path, width = 200, height = 200 }
+local a = Image.widget{ src = image_path, width = big(), height = 200 }
+local b = Image.widget{ src = image_path, width = big(), height = 200 }
 local completed = {}
 Image.await(a, function() completed[#completed + 1] = "a" end)
 Image.await(b, function() completed[#completed + 1] = "b" end)
@@ -335,6 +396,7 @@ b:free()
 
 os.remove(image_path)
 os.remove(cached_file)
+package.loaded["ui/renderimage"] = nil
 
 package.preload["utils.perf"] = nil
 package.loaded["utils.perf"] = nil

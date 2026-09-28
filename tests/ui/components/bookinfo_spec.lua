@@ -68,9 +68,11 @@ package.preload["utils.paths"] = function()
         ensureLayout = function() end,
     }
 end
+local download_checks = 0
 package.preload["book.store"] = function()
     return {
         isDownloaded = function(book)
+            download_checks = download_checks + 1
             return type(book) == "table" and type(book.path) == "string" and book.path ~= ""
         end,
     }
@@ -111,20 +113,25 @@ Assert.is_false(BookInfo.isRead({ read_state = 0 }))
 Assert.is_false(BookInfo.isRead({ read_state = 2 }))
 Assert.is_false(BookInfo.isRead(nil))
 
-local unread = BookInfo.statusOverlays({ read_state = 0, percent = 12, path = "/a" })
-Assert.is_false(unread.read)
-Assert.is_true(unread.percent)
-Assert.is_true(unread.downloaded)
+-- 封面状态叠层：已读与进度互斥，下载独立；没开下载角标不查下载状态。
+local status_opts = { badge = true, ribbon = true, download = true }
+local unread = select(1, BookInfo.cover(nil, nil, { read_state = 0, percent = 12, path = "/a" }, 80, 120, status_opts))
+Assert.len(unread, 3)
+Assert.eq(unread[2].overlap_offset[2], 4, "未读有进度：右上进度角标")
+Assert.eq(unread[3].overlap_offset[1], 4, "已下载：左下勾")
 
-local finished = BookInfo.statusOverlays({ read_state = 1, percent = 100, path = "/a" })
-Assert.is_true(finished.read)
-Assert.is_false(finished.percent)
-Assert.is_true(finished.downloaded)
+local finished = select(1, BookInfo.cover(nil, nil, { read_state = 1, percent = 100, path = "/a" }, 80, 120, status_opts))
+Assert.len(finished, 3)
+Assert.not_nil(finished[2].band, "已读：缎带替代进度角标")
 
-local fresh = BookInfo.statusOverlays({ read_state = 0, percent = 0 })
-Assert.is_false(fresh.read)
-Assert.is_false(fresh.percent)
-Assert.is_false(fresh.downloaded)
+local fresh = select(1, BookInfo.cover(nil, nil, { read_state = 0, percent = 0 }, 80, 120, status_opts))
+Assert.is_nil(fresh.overlap_offset, "无进度未下载：不叠层")
+
+download_checks = 0
+BookInfo.cover(nil, nil, { read_state = 0, percent = 12, path = "/a" }, 80, 120, { badge = true })
+Assert.eq(download_checks, 0, "没开下载角标不查下载状态")
+BookInfo.cover(nil, nil, { path = "/a" }, 80, 120, { download = true })
+Assert.eq(download_checks, 1)
 
 Assert.is_nil(BookInfo.progressBadge(80, 0))
 Assert.not_nil(BookInfo.progressBadge(80, 12))

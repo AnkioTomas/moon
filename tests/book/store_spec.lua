@@ -149,6 +149,12 @@ package.preload["db.book"] = function()
             end
             return row
         end,
+        tocLength = function(source_id, stable_id)
+            local row = toc_rows[source_id .. "\0" .. stable_id]
+            local payload = type(row) == "table" and row.payload or row
+            local toc = payload and json_values[payload]
+            return type(toc) == "table" and #toc or 0
+        end,
         setToc = function(source_id, stable_id, payload)
             toc_upserts[#toc_upserts + 1] = {
                 source_id = source_id, stable_id = stable_id, payload = payload,

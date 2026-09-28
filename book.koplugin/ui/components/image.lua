@@ -28,8 +28,9 @@ UI 图标请用 ui.components.icon（Material Icons 字体），不要走本组�
   Image.await(root, cb)  -- 已构建树内的图片落定后回调（锁屏写 PNG）
   box:cancel()  -- 只取消这一张的下载
 
-下载单独限流。解码走 ImageWidget（file=，自带 BB 缓存），不 fork。
-小图（目标面积且文件都小）当场解；封面这种大图排队，每拍按时间预算连续解，超预算才让出输入轮询。
+下载单独限流，解码不 fork。
+小图（目标面积且文件都小）当场解，走 ImageWidget（file=，自带 BB 缓存）。
+封面这种大图走本模块位图缓存：命中则拼页时直接出图；未命中排队，每拍按时间预算连续解，超预算才让出输入轮询。
 
 @module koplugin.book.ui.components.image
 --]]
@@ -57,10 +58,64 @@ local Image = {}
 -- 同路径换了内容仍会命中旧图，这些路径必须自己解码绕过缓存。
 local replaced = {}
 
+-- 大图位图缓存：key = 路径|宽|高 → { path, bb, bytes, used }，按字节 LRU。
+-- KOReader ImageCache 只有 8 MiB 且全局共用，彩屏或内存告急时装不下一屏封面，
+-- 每次重建都要从文件全尺寸重解，按队列逐张上屏。
+-- 淘汰只丢引用、不 free：仍在显示的 ImageWidget 持有同一张位图，释放交给 Blitbuffer 的 GC 终结器。
+local BITMAP_BUDGET = 16 * 1024 * 1024
+local bitmaps = {}
+local bitmap_bytes, bitmap_tick = 0, 0
+
+---@param path string
+---@param w number
+---@param h number
+---@return string
+local function bitmapKey(path, w, h)
+    return path .. "|" .. w .. "|" .. h
+end
+
+--- 丢掉一条位图缓存。
+---@param key string
+local function dropBitmap(key)
+    bitmap_bytes = bitmap_bytes - bitmaps[key].bytes
+    bitmaps[key] = nil
+end
+
+--- 取缓存位图，未命中就解码入缓存；超预算按最久未用淘汰。
+---@param path string
+---@param w number
+---@param h number
+---@return table bb
+local function bitmap(path, w, h)
+    local key = bitmapKey(path, w, h)
+    bitmap_tick = bitmap_tick + 1
+    local hit = bitmaps[key]
+    if hit then
+        hit.used = bitmap_tick
+        return hit.bb
+    end
+    local bb = assert(require("ui/renderimage"):renderImageFile(path, false, w, h), "render failed")
+    local bytes = tonumber(bb.stride) * bb.h
+    bitmaps[key] = { path = path, bb = bb, bytes = bytes, used = bitmap_tick }
+    bitmap_bytes = bitmap_bytes + bytes
+    while bitmap_bytes > BITMAP_BUDGET do
+        local oldest
+        for k, item in pairs(bitmaps) do
+            if k ~= key and (not oldest or item.used < bitmaps[oldest].used) then oldest = k end
+        end
+        if not oldest then break end
+        dropBitmap(oldest)
+    end
+    return bb
+end
+
 --- 标记文件内容已被替换（刮削换封面），之后显示该路径不再命中旧位图。
 ---@param path string
 function Image.invalidate(path)
     replaced[path] = true
+    for key, item in pairs(bitmaps) do
+        if item.path == path then dropBitmap(key) end
+    end
 end
 
 ---- 等待一棵已构建 Widget 树内的图片落定。批次归调用者，不拦截全局构建。
@@ -204,7 +259,7 @@ end
 -- 小图：天气图标级别。超过任一阈值就排队，避免图书馆一页 12 张封面卡死拼页。
 local SMALL_PIXELS = 80 * 80
 local SMALL_BYTES = 32 * 1024
--- 每拍解码预算：预算内连续解（ImageCache 命中几乎零耗时，一拍出齐），超了才让出。
+-- 每拍解码预算：预算内连续解，超了才让出。
 local BUDGET_MS = 50
 -- UIManager 在任务队列变脏时会反复跑任务、不去读输入；续排必须晚于一次重绘，才能让出输入轮询。
 local YIELD_S = 0.1
@@ -379,16 +434,18 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
     end
 
     --- 解这一张。getSize 会触发 ImageWidget:_render。
+    --- 大图位图归本模块缓存，ImageWidget 不得 free。
     ---@param path string 图片或书籍的本地文件路径
     function box:_applyFile(path)
         local widget
         local ok, err = pcall(function()
-            local fresh = replaced[path]
-                and assert(require("ui/renderimage"):renderImageFile(path, false, self._inner_w, self._inner_h))
+            local w, h = self._inner_w, self._inner_h
+            local image = self._big and bitmap(path, w, h)
+                or replaced[path] and assert(require("ui/renderimage"):renderImageFile(path, false, w, h))
             widget = ImageWidget:new{
-                file = not fresh and path or nil,
-                image = fresh or nil,
-                image_disposable = true,
+                file = not image and path or nil,
+                image = image or nil,
+                image_disposable = not self._big,
                 width = self._inner_w,
                 height = self._inner_h,
                 alpha = self._alpha and true or false,
@@ -404,15 +461,17 @@ local function asyncBox(src, headers, w, h, alpha, border, fb, show_parent, on_r
         self:_apply(widget, path)
     end
 
-    --- 小图当场解；大图进队，一帧一张。
+    --- 小图和已缓存的大图当场出图；未缓存的大图进队。
     ---@param path string 图片或书籍的本地文件路径
     function box:_showFile(path)
-        if cheap(path, self._inner_w, self._inner_h) then
-            self:_applyFile(path)
-            self:_settle()
+        local w, h = self._inner_w, self._inner_h
+        self._big = not cheap(path, w, h)
+        if self._big and not bitmaps[bitmapKey(path, w, h)] then
+            enqueue(self, path)
             return
         end
-        enqueue(self, path)
+        self:_applyFile(path)
+        self:_settle()
     end
 
     local path = resolve(src)
