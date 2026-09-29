@@ -78,7 +78,8 @@ end
 ---@param res table|nil
 ---@param req_err any
 ---@param cb fun(data: table|nil, err: string|nil)
-local function handleResponse(res, req_err, cb)
+---@param empty_ok boolean|nil 2xx 空 body 视为成功（如 progress/标注写接口）
+local function handleResponse(res, req_err, cb, empty_ok)
     if req_err then
         cb(nil, tostring(req_err))
         return
@@ -101,6 +102,10 @@ local function handleResponse(res, req_err, cb)
         return
     end
     local raw = Text.stripBom(res.body or "")
+    if empty_ok and Text.trim(raw) == "" then
+        cb({})
+        return
+    end
     local ok, data = pcall(JSON.decode, raw)
     if not ok or type(data) ~= "table" then
         cb(nil, _("响应不是 JSON"))
@@ -182,6 +187,98 @@ function Client:coverRequest(series_id)
         url = self.base_url .. "/api/Image/series-cover?seriesId=" .. tostring(series_id),
         headers = self:_headers(),
     }
+end
+
+---@param path string
+---@param body table
+---@param cb fun(data: table|nil, err: string|nil)
+---@param empty_ok boolean|nil
+---@return table|nil
+function Client:postJSON(path, body, cb, empty_ok)
+    local url, err = self:_url(path)
+    if not url then cb(nil, err); return nil end
+    local ok, encoded = pcall(JSON.encode, body)
+    if not ok or type(encoded) ~= "string" then
+        cb(nil, _("请求编码失败"))
+        return nil
+    end
+    local headers = self:_headers()
+    headers["Content-Type"] = "application/json"
+    return Request.request({
+        url = url,
+        method = "POST",
+        headers = headers,
+        body = encoded,
+        timeout = 30,
+    }, function(res, req_err)
+        handleResponse(res, req_err, cb, empty_ok)
+    end)
+end
+
+--- 单本 series 的简介/作者（书架骨架 SeriesDto 不带 summary/writers）。
+---@param series_id string|number
+---@param cb fun(data: table|nil, err: string|nil)
+---@return table|nil
+function Client:fetchSeriesMetadataAsync(series_id, cb)
+    return self:getJSON("/api/Series/metadata", { seriesId = tostring(series_id) }, cb)
+end
+
+--- 单本 series 的 SeriesDto（`GET /api/Series/{id}`），取 libraryId 等。
+---@param series_id string|number
+---@param cb fun(data: table|nil, err: string|nil)
+---@return table|nil
+function Client:fetchSeriesAsync(series_id, cb)
+    return self:getJSON("/api/Series/" .. tostring(series_id), nil, cb)
+end
+
+--- series 的卷/章列表（`GET /api/Series/volumes?seriesId=`）。
+---@param series_id string|number
+---@param cb fun(data: table[]|nil, err: string|nil)
+---@return table|nil
+function Client:fetchSeriesVolumesAsync(series_id, cb)
+    return self:getJSON("/api/Series/volumes", { seriesId = tostring(series_id) }, cb)
+end
+
+--- 章节阅读进度（`GET /api/Reader/get-progress?chapterId=`）。
+--- 400/404 = 该章无进度，返回空的成功（cb(nil, nil, true)）。
+---@param chapter_id string|number
+---@param cb fun(data: table|nil, err: string|nil, no_progress: boolean|nil)
+---@return table|nil
+function Client:getProgressAsync(chapter_id, cb)
+    local url, err = self:_url("/api/Reader/get-progress", { chapterId = tostring(chapter_id) })
+    if not url then cb(nil, err); return nil end
+    return Request.request({
+        url = url,
+        method = "GET",
+        headers = self:_headers(),
+        timeout = 30,
+    }, function(res, req_err)
+        if req_err then cb(nil, tostring(req_err)); return end
+        if not res then cb(nil, _("网络不可用，请先连接 Wi-Fi")); return end
+        local code = tonumber(res.code)
+        if code == 400 or code == 404 then cb(nil, nil, true); return end
+        handleResponse(res, req_err, function(data, e) cb(data, e) end)
+    end)
+end
+
+--- 上报阅读进度（`POST /api/Reader/progress`）。
+---@param payload table
+---@param cb fun(ok: boolean, err: string|nil)
+---@return table|nil
+function Client:saveProgressAsync(payload, cb)
+    return self:postJSON("/api/Reader/progress", payload, function(data, err)
+        cb(data ~= nil, err)
+    end, true)
+end
+
+--- 标记章节已读（`POST /api/Reader/mark-chapter-read`，幂等）。
+---@param payload table
+---@param cb fun(ok: boolean, err: string|nil)
+---@return table|nil
+function Client:markChapterReadAsync(payload, cb)
+    return self:postJSON("/api/Reader/mark-chapter-read", payload, function(data, err)
+        cb(data ~= nil, err)
+    end, true)
 end
 
 ---@param cb fun(libraries: table[]|nil, err: string|nil)

@@ -10,7 +10,11 @@ package.preload["json"] = function()
 end
 
 package.preload["ui/uimanager"] = function()
-    return { nextTick = function(_, fn) fn() end }
+    return {
+        nextTick = function(_, fn) fn() end,
+        scheduleIn = function() end,
+        unschedule = function() end,
+    }
 end
 
 local cfg = { base_url = "https://host:port/kavita", api_key = "test-key", libraries = { ["8"] = true } }

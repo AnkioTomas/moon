@@ -10,12 +10,24 @@ package.preload["json"] = function()
 end
 
 package.preload["ui/uimanager"] = function()
-    return { nextTick = function(_, fn) fn() end }
+    return {
+        nextTick = function(_, fn) fn() end,
+        scheduleIn = function() end,
+        unschedule = function() end,
+    }
 end
 
 local cfg = { base_url = "https://host:port/kavita", api_key = "test-key", libraries = { ["8"] = true } }
 package.preload["utils.settings"] = function()
     return { getSource = function() return cfg end }
+end
+
+package.preload["source.toc"] = function()
+    return {
+        read = function() return { { idx = 1, chapterId = 7, volumeId = 3, libraryId = 8, pages = 100 } } end,
+        put = function() return true end,
+        drop = function() end,
+    }
 end
 
 local network = { online = true }
@@ -80,6 +92,7 @@ end)
 Assert.not_nil(open_result)
 Assert.is_nil(open_err)
 Assert.len(download_calls, 1)
+Assert.eq(download_calls[1].opts.url, "https://host:port/kavita/api/Download/chapter?chapterId=7")
 Assert.len(touch_calls, 1)
 Assert.eq(touch_calls[1].path, open_result)
 Assert.eq(touch_calls[1].identity.stable_id, "42")

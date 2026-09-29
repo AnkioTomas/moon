@@ -230,6 +230,24 @@ function Progress.save(snapshot, cb)
     if cb then cb(ok) end
 end
 
+--- 源心跳用：写一条最小进度脏行（无 locator/extra 坐标），保留已有的不透明 extra。
+---@param identity BookIdentity
+---@param pos { fraction?: number, page?: number, total_pages?: number }
+---@return boolean
+function Progress.recordHeartbeat(identity, pos)
+    if not identity or not identity.source_id or not identity.stable_id then return false end
+    pos = pos or {}
+    local row = {
+        fraction = Progress.clampFraction(pos.fraction),
+        page = tonumber(pos.page),
+        total_pages = tonumber(pos.total_pages),
+        updated_at = nextRevision(),
+    }
+    local previous = ProgressDB.get(identity.source_id, identity.stable_id)
+    if previous and previous.extra then row.extra = previous.extra end
+    return ProgressDB.upsert(identity.source_id, identity.stable_id, row)
+end
+
 ---@param row PendingProgress
 ---@return ProgressPosition
 local function rowPosition(row)
