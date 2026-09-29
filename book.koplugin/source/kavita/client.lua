@@ -292,7 +292,8 @@ end
 ---@param cb fun(libraries: table[]|nil, err: string|nil)
 ---@return table|nil
 function Client:listLibrariesAsync(cb)
-    self:getJSON("/api/Library", nil, function(data, err)
+    -- 0.9.1.4 实测 `/api/Library` 返回 204，可用的库列表端点是 `/api/Library/libraries`。
+    self:getJSON("/api/Library/libraries", nil, function(data, err)
         if not data then cb(nil, err); return end
         cb(data)
     end)
