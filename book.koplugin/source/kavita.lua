@@ -87,11 +87,23 @@ local function chapterEntry(identity)
     return list[idx] or list[1]
 end
 
---- books.format（书籍源整本库用 epub/pdf，漫画库 cbz/image）。
+local FORMAT_NAMES = { [0] = "image", [1] = "cbz", [3] = "epub", [4] = "pdf" }
+
+--- Kavita 数字格式 → 领域名（0 image / 1 cbz / 3 epub / 4 pdf）。
+---@param n string|number|nil
+---@return string|nil
+local function formatName(n)
+    return FORMAT_NAMES[tonumber(n)]
+end
+
+--- books.format：优先身份书行，其次 toc 条目（books 表没有 format 列）。
 ---@param identity BookIdentity
 ---@return string|nil
 local function bookFormat(identity)
     local book = identity.book
+    if book and book.format then return book.format end
+    local entry = chapterEntry(identity)
+    if entry and entry.format then return entry.format end
     if not book then
         book = require("db.book").get(identity.source_id, identity.stable_id)
     end
@@ -223,7 +235,7 @@ function Source:syncBooksAsync(opts, cb)
                         title = series.name,
                         category = series.libraryName,
                         series = nil,
-                        format = series.format == 3 and "epub" or series.format == 4 and "pdf" or series.format == 1 and "cbz" or series.format == 0 and "image" or nil,
+                        format = formatName(series.format),
                         cover = tostring(series.id),
                         deleted = 0,
                     }
@@ -311,16 +323,6 @@ function Source:openBookAsync(identity, opts, cb)
 
     local Paths = require("utils.paths")
     local stable_id = identity.stable_id
-    local ext = "epub"
-    local book_format = identity.book and identity.book.format
-    if book_format == "pdf" then
-        ext = "pdf"
-    elseif book_format == "cbz" then
-        ext = "cbz"
-    end
-    Paths.ensureBookWork(stable_id, self.id)
-    local path = Paths.bookWorkDir(stable_id, self.id) .. "/1." .. ext
-    local temp_path = path .. ".part"
 
     local function register(local_path)
         local ok, err = require("book.store").touch(local_path, identity)
@@ -333,12 +335,18 @@ function Source:openBookAsync(identity, opts, cb)
 
     NetworkMgr:runWhenOnline(function()
         if cancelled then return end
-        self:_resolveChapterId(identity, opts, function(chapter_id, resolve_err)
+        self:_resolveChapterId(identity, opts, function(chapter_id, resolve_err, entry)
             if cancelled then return end
             if not chapter_id then
                 cb(nil, resolve_err)
                 return
             end
+            local ext = (entry and entry.format)
+                or (identity.book and identity.book.format)
+                or "epub"
+            Paths.ensureBookWork(stable_id, self.id)
+            local path = Paths.bookWorkDir(stable_id, self.id) .. "/1." .. ext
+            local temp_path = path .. ".part"
             local ProgressbarDialog = require("ui/widget/progressbardialog")
             dialog = ProgressbarDialog:new{
                 title = _("正在下载…"),
@@ -443,7 +451,7 @@ function Source:_resolveChapterId(identity, opts, cb)
             return
         end
         local entry = toc[tonumber(identity.chapter_idx) or 1] or toc[1]
-        cb(tostring(entry.chapterId or entry.uid))
+        cb(tostring(entry.chapterId or entry.uid), nil, entry)
     end)
 end
 
@@ -471,6 +479,7 @@ function Source:_fetchTocAsync(identity, cb)
                         chapterId = chapter.id,
                         volumeId = volume.id or chapter.volumeId,
                         libraryId = series.libraryId,
+                        format = formatName(chapter.format),
                         pages = chapter.pages,
                     }
                 end
@@ -496,7 +505,8 @@ end
 function Source:loadTocAsync(identity, cb)
     local Toc = require("source.toc")
     local cached = Toc.read(identity.source_id, identity.stable_id)
-    if cached and #cached > 0 then
+    -- 旧目录没有 format 字段：当作过期重建（format 决定打开后缀与是否推送注解）。
+    if cached and #cached > 0 and cached[1].format ~= nil then
         local cancelled = false
         require("ui/uimanager"):nextTick(function()
             if not cancelled then cb(cached) end
@@ -644,7 +654,9 @@ function Source:pushNotesAsync(identity, annotations, cb)
         cb(nil, _("未配置服务器地址或 API Key"))
         return nil
     end
-    if bookFormat(identity) ~= "epub" then
+    -- 只在明确已知非 EPUB 时跳过；format 取不到（旧目录/未同步）时按 EPUB 处理。
+    local fmt = bookFormat(identity)
+    if fmt ~= nil and fmt ~= "epub" then
         cb(true)
         return nil
     end

@@ -24,7 +24,7 @@ end
 
 package.preload["source.toc"] = function()
     return {
-        read = function() return { { idx = 1, chapterId = 7, volumeId = 3, libraryId = 8, pages = 100 } } end,
+        read = function() return { { idx = 1, chapterId = 7, volumeId = 3, libraryId = 8, pages = 100, format = "epub" } } end,
         put = function() return true end,
         drop = function() end,
     }

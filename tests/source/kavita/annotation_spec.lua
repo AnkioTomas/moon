@@ -20,7 +20,7 @@ package.preload["utils.settings"] = function()
     return { getSource = function() return cfg end }
 end
 
-local toc_cache = { { idx = 1, chapterId = 11, volumeId = 3, libraryId = 8, pages = 120 } }
+local toc_cache = { { idx = 1, chapterId = 11, volumeId = 3, libraryId = 8, pages = 120, format = "epub" } }
 package.preload["source.toc"] = function()
     return {
         read = function() return toc_cache end,
@@ -129,3 +129,24 @@ local ok4
 source:pushNotesAsync(skip, annotations, function(o) ok4 = o end)
 Assert.is_true(ok4)
 Assert.len(create_calls, 2)
+
+-- 书行无 format 时从 toc 条目取（books 表没有 format 列，曾因此把所有注解误判非 EPUB 跳过）
+toc_cache = { { idx = 1, chapterId = 12, libraryId = 8, pages = 120, format = "epub" } }
+create_calls = {}
+source:pushNotesAsync(
+    { source_id = "kavita", stable_id = "44" },
+    { { drawer = "lighten", text = "Alpha paragraph one", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" } },
+    function() end
+)
+Assert.len(create_calls, 1)
+Assert.eq(create_calls[1].chapterId, 12)
+
+-- toc 条目 format=cbz → 漫画跳过
+toc_cache = { { idx = 1, chapterId = 13, libraryId = 8, pages = 120, format = "cbz" } }
+create_calls = {}
+source:pushNotesAsync(
+    { source_id = "kavita", stable_id = "45" },
+    { { drawer = "lighten", text = "Alpha paragraph one", pos0 = "/body/DocFragment[1]/body/p[1]/text().0" } },
+    function() end
+)
+Assert.len(create_calls, 0)
