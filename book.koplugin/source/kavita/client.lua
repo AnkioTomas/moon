@@ -281,6 +281,14 @@ function Client:markChapterReadAsync(payload, cb)
     end, true)
 end
 
+--- 建注解（`POST /api/Annotation/create`）；成功回传含 `id` 的注解对象。
+---@param payload table
+---@param cb fun(data: table|nil, err: string|nil)
+---@return table|nil
+function Client:createAnnotationAsync(payload, cb)
+    return self:postJSON("/api/Annotation/create", payload, cb)
+end
+
 ---@param cb fun(libraries: table[]|nil, err: string|nil)
 ---@return table|nil
 function Client:listLibrariesAsync(cb)

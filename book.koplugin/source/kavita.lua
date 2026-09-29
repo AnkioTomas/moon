@@ -1,6 +1,7 @@
 local SourceBase = require("source.base")
 local Client = require("source.kavita.client")
 local Backfill = require("source.kavita.backfill")
+local Anchor = require("source.kavita.anchor")
 local JSON = require("json")
 local _ = require("gettext")
 
@@ -12,9 +13,10 @@ local function backfillStatePath()
     return require("utils.paths").root() .. "/" .. BACKFILL_STATE_FILE
 end
 
----@return table<string, string>
-local function loadBackfillState()
-    local file = io.open(backfillStatePath(), "r")
+---@param path string
+---@return table
+local function loadJson(path)
+    local file = io.open(path, "r")
     if not file then return {} end
     local raw = file:read("*a")
     file:close()
@@ -23,11 +25,11 @@ local function loadBackfillState()
     return {}
 end
 
----@param state table<string, string>
-local function saveBackfillState(state)
-    local ok, encoded = pcall(JSON.encode, state)
+---@param path string
+---@param data table
+local function saveJson(path, data)
+    local ok, encoded = pcall(JSON.encode, data)
     if not ok or type(encoded) ~= "string" then return end
-    local path = backfillStatePath()
     local tmp = path .. ".part"
     local file = io.open(tmp, "wb")
     if not file then return end
@@ -38,6 +40,23 @@ local function saveBackfillState(state)
         return
     end
     os.rename(tmp, path)
+end
+
+---@return table<string, string>
+local function loadBackfillState()
+    return loadJson(backfillStatePath())
+end
+
+---@param state table<string, string>
+local function saveBackfillState(state)
+    saveJson(backfillStatePath(), state)
+end
+
+--- 注解幂等映射：`<workdir>/kavita-annotations.json`（键 = pos0）。
+---@param workdir string
+---@return string
+local function annotationMapPath(workdir)
+    return workdir .. "/kavita-annotations.json"
 end
 
 --- PersonDto[] → "a, b"；空/非表返回 nil。
@@ -574,6 +593,106 @@ function Source:onEvent(event, payload)
         return
     end
     return SourceBase.onEvent(self, event, payload)
+end
+
+--- 推送 EPUB 划线到 Kavita（`/api/Annotation/create`），逐条幂等建注解。
+--- 非 EPUB / 缺章元数据跳过；单条失败只记日志，不阻塞本地落库。
+---@param identity BookIdentity
+---@param annotations table[]
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:pushNotesAsync(identity, annotations, cb)
+    if type(identity) ~= "table" or type(identity.stable_id) ~= "string"
+        or identity.stable_id == "" then
+        cb(nil, _("无效的注解数据"))
+        return nil
+    end
+    if not self:configured() then
+        cb(nil, _("未配置服务器地址或 API Key"))
+        return nil
+    end
+    if bookFormat(identity) ~= "epub" then
+        cb(true)
+        return nil
+    end
+    local entry = chapterEntry(identity)
+    if not entry or not entry.chapterId then
+        cb(true)
+        return nil
+    end
+    local Paths = require("utils.paths")
+    local workdir = Paths.bookWorkDir(identity.stable_id, self.id)
+    local epub_path = (identity.book and identity.book.path) or (workdir .. "/1.epub")
+    local map_path = annotationMapPath(workdir)
+    local mapping = loadJson(map_path)
+    local series_id = tonumber(identity.stable_id) or identity.stable_id
+
+    local pending = {}
+    for _, ann in ipairs(annotations or {}) do
+        if type(ann) == "table" and ann.drawer
+            and type(ann.pos0) == "string" and ann.pos0 ~= ""
+            and not mapping[ann.pos0] then
+            pending[#pending + 1] = ann
+        end
+    end
+    if #pending == 0 then
+        cb(true)
+        return nil
+    end
+
+    local cancelled, index, current_job = false, 0, nil
+    local function nextAnn()
+        if cancelled then return end
+        index = index + 1
+        local ann = pending[index]
+        if not ann then cb(true); return end
+        local anchor = Anchor.compute(ann, epub_path)
+        local page_number = anchor and anchor.pageNumber or Anchor.pageNumber(ann.pos0)
+        local highlight_count = #(ann.text or "")
+        if not page_number or highlight_count <= 0 then
+            nextAnn()
+            return
+        end
+        local xpath = anchor and anchor.xPath or ""
+        local ending_xpath = anchor and anchor.endingXPath or ""
+        current_job = self._client:createAnnotationAsync({
+            chapterId = entry.chapterId,
+            seriesId = series_id,
+            volumeId = entry.volumeId,
+            libraryId = entry.libraryId,
+            ownerUserId = 0,
+            xPath = xpath,
+            endingXPath = ending_xpath,
+            selectedText = ann.text or "",
+            comment = ann.note or "",
+            commentHtml = "",
+            selectedSlotIndex = 0,
+            pageNumber = page_number,
+            highlightCount = highlight_count,
+            containsSpoiler = false,
+        }, function(data, err)
+            current_job = nil
+            if cancelled then return end
+            if data then
+                mapping[ann.pos0] = {
+                    annotationId = data.id,
+                    pageNumber = page_number,
+                    xPath = xpath,
+                    endingXPath = ending_xpath,
+                }
+                saveJson(map_path, mapping)
+            else
+                require("utils.log").warn("kavita annotation push failed", identity.stable_id, err)
+            end
+            nextAnn()
+        end)
+    end
+    nextAnn()
+
+    return { cancel = function()
+        cancelled = true
+        if current_job and current_job.cancel then current_job.cancel() end
+    end }
 end
 
 return Kavita
