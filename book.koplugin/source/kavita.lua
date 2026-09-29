@@ -313,6 +313,17 @@ function Source:openBookAsync(identity, opts, cb)
         if dialog then dialog:close(); dialog = nil end
     end
 
+    -- 已下载且文件仍在：直接复用，不再重新下载（openBookAsync 只负责拿到物理文件）。
+    local cached = identity.book and identity.book.path
+    if type(cached) == "string" and cached ~= "" then
+        local file = io.open(cached, "rb")
+        if file then
+            file:close()
+            cb(cached)
+            return { cancel = function() end }
+        end
+    end
+
     local NetworkMgr = require("ui/network/manager")
     if not NetworkMgr:isOnline() then
         require("ui/uimanager"):nextTick(function()
