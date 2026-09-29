@@ -43,7 +43,8 @@ local Icon = require("ui.components.icon")
 local UI = require("ui.components.bookui")
 local Lifecycle = require("ui.lifecycle")
 local Store = require("book.store")
-local storeBackend = require("ui.desktop.detail.common").storeBackend
+local DetailCommon = require("ui.desktop.detail.common")
+local storeBackend = DetailCommon.storeBackend
 local _ = require("gettext")
 local Screen = Device.screen
 
@@ -133,6 +134,24 @@ function Detail:init()
     if store and store.getDetailAsync then
         self._store_detail_job = self.lifecycle:addHttp(store.getDetailAsync(self.book, function(detail)
             self._store_detail_job = nil
+            if not self.lifecycle:uiReady() or not detail then return end
+            self.book = detail
+            self:updateView()
+            require("ui/uimanager"):setDirty(self, "ui")
+        end))
+    end
+    -- 图书馆详情：上架时可能还没补到简介，按需拉一次本册详情后再重绘。
+    local owner = DetailCommon.bookOwnerSource(self.book, self.source)
+    if not store and owner and type(owner.getDetailAsync) == "function"
+        and (self.book.intro == nil or self.book.intro == "") then
+        local identity = {
+            source_id = self.book.source_id,
+            stable_id = self.book.stable_id,
+            book = self.book,
+            source = owner,
+        }
+        self._source_detail_job = self.lifecycle:addHttp(owner:getDetailAsync(identity, function(detail)
+            self._source_detail_job = nil
             if not self.lifecycle:uiReady() or not detail then return end
             self.book = detail
             self:updateView()

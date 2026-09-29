@@ -394,6 +394,39 @@ function Source:openBookAsync(identity, opts, cb)
     end }
 end
 
+--- 详情页按需刷新：拉本 series 的简介/作者写回，返回最新书行。
+---@param identity BookIdentity
+---@param cb fun(data: Book|nil, err: string|nil)
+---@return { cancel: fun() }
+function Source:getDetailAsync(identity, cb)
+    local fallback = function()
+        cb(identity.book or require("db.book").get(self.id, identity.stable_id))
+    end
+    if not self:configured() then
+        fallback()
+        return { cancel = function() end }
+    end
+    local cancelled = false
+    local job = self._client:fetchSeriesMetadataAsync(identity.stable_id, function(data, err)
+        if cancelled then return end
+        if not data then
+            cb(nil, err)
+            return
+        end
+        require("book.store").rememberMany({{
+            source_id = self.id,
+            stable_id = identity.stable_id,
+            intro = data.summary,
+            authors = writersToAuthors(data.writers),
+        }})
+        fallback()
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
+end
+
 --- 下载用章 id：opts.chapter_id 优先，否则从目录取当前章/首章。
 ---@param identity BookIdentity
 ---@param opts { chapter_id?: string|number }|nil
