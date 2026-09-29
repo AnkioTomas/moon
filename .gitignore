@@ -25,3 +25,6 @@
 
 # 宣传海报产物（不进交付物）
 /posters/
+
+# 本地 issue tracker 工单目录（fork-local，见 docs/agents/issue-tracker.md）
+/.scratch/
