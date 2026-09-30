@@ -29,6 +29,7 @@ local InputContainer = require("ui/widget/container/inputcontainer")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local Guard = require("ui.guard")
 local Theme = require("ui.themes.init")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
@@ -147,13 +148,39 @@ function Modal:innerWidth()
     return Modal.dialogWidth() - Theme.px(self.theme.space.lg) * 2
 end
 
+---@param self BookThemeModal
+---@param bb BlitBuffer
+---@param x number
+---@param y number
+---@return true
+local function paint(self, bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
+    if self._mask then self._mask:paintTo(bb, x, y) end
+    self[1]:paintTo(bb, x + self.panel_x, y + self.panel_y)
+    return true
+end
+
+--- 经 guard 隔离。画坏的弹窗不能只停画：它仍在栈顶，会成为吞掉全部点按的隐形窗口，
+--- 所以报告后关掉它；UIManager 正在遍历窗口栈重绘，关窗推到下一 tick。
 ---@param bb BlitBuffer 目标画布
 ---@param x number
 ---@param y number
 function Modal:paintTo(bb, x, y)
-    self.dimen.x, self.dimen.y = x, y
-    if self._mask then self._mask:paintTo(bb, x, y) end
-    self[1]:paintTo(bb, x + self.panel_x, y + self.panel_y)
+    if self._paint_broken then return end
+    if Guard.call("modal paint", paint, self, bb, x, y) then return end
+    self._paint_broken = true
+    UIManager:nextTick(function() self:close() end)
+end
+
+--- 弹窗内全部点按 / 按键的入口，经 guard 隔离；出错这次事件算已处理，不漏到下层窗口。
+---@param event table KOReader 事件
+---@return boolean|nil
+function Modal:handleEvent(event)
+    local ok, handled = Guard.call("modal " .. event.handler, function()
+        return true, InputContainer.handleEvent(self, event)
+    end)
+    if not ok then return true end
+    return handled
 end
 
 function Modal:show()

@@ -2,7 +2,7 @@
 网络图下载：一条任务一个对象。磁盘缓存 + 10 路并行。
 
 只负责落到 md5.ext。解码不在这里。
-abort / cancel 只杀这一条。缓存目录与文件名和 ui.components.image.download 一致，两边互相命中。
+abort / cancel 只杀这一条。
 
 @module koplugin.book.ui.themes.widgets.image.download
 --]]
@@ -237,8 +237,7 @@ function Download:start()
     Paths.ensureImageRoot()
     seq = seq + 1
     self.base = cacheBase(self.url)
-    -- 与 ui.components.image.download 共用缓存目录、各自计数：前缀 t 防两份同时下同一 URL 撞临时文件。
-    self.tmp = string.format("%s.t%d.part", self.base, seq)
+    self.tmp = string.format("%s.%d.part", self.base, seq)
     Queue:publish(self)
     return self
 end
