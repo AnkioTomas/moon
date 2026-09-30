@@ -17,17 +17,16 @@
       "koreader/base",
       "book.koplugin/types"
     ],
+    "useGitIgnore": true,
     "ignoreDir": [
       ".git",
       "screenshots",
-      "koreader/base/thirdparty",
-      "koreader/platform",
-      "koreader/test",
-      "koreader/spec",
-      "koreader/l10n",
-      "koreader/plugins/book.koplugin"
+      "koreader"
     ],
     "checkThirdParty": "Disable"
+  },
+  "type": {
+    "weakNilCheck": true
   },
   "diagnostics": {
     "globals": [
@@ -36,7 +35,8 @@
     ],
     "disable": [
       "lowercase-global",
-      "duplicate-set-field"
+      "duplicate-set-field",
+      "need-check-nil"
     ]
   },
   "completion": {
