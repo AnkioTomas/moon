@@ -6,7 +6,7 @@
 ## 边界
 
 - **自成一体**：只依赖 KOReader 自带模块，以及插件的基础设施 `utils.settings`、`utils.log`、`utils.perf`、`utils.paths`、`http.request`、`l10n` / `gettext`。
-  不依赖 `ui/components` 等其他 UI 组件，删掉它们不影响这里。
+  不依赖 `ui/widgets` 等其他 UI 组件，删掉它们不影响这里。
 - **组件只读令牌键，不判断主题 id**：换主题只换数据，组件代码没有 `if theme == "bold"`。
 - **模块按 `xxx.init` 引用**：KOReader 给插件的 `package.path` 只有 `<plugin>/?.lua`，没有 `?/init.lua`。所以要写成 `require("ui.themes.init")`，不能写成 `require("ui.themes")`。
 
@@ -202,7 +202,7 @@ img[1]:cancel()              -- 只取消这一张的下载
 - 放在 `widgets/`，文件头按 `--[[-- … @module koplugin.book.ui.themes.widgets.xxx --]]` 写，画上布局草图和调用示例。
 - 颜色、尺寸、字号一律从令牌取，经 `Theme.px` / `Theme.face` 转换，不写死像素。
 - 有状态、有生命周期的用 `Widget:extend` + `:new`；无状态的控件工厂写成 `Xxx.widget(opts)`，在函数内部调用 `Theme.current()`，不让调用方传主题。
-- 不引用 `ui/components` 等主题以外的 UI 组件。
+- 不引用 `ui/widgets` 等主题以外的 UI 组件。
 
 **新增或修改令牌**
 - 三套主题要同时加同一个键，否则 `init_spec` 失败。
