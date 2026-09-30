@@ -18,6 +18,21 @@ local Posix = require("ffi/posix")
 local Protocol = require("workers.protocol")
 local logger = require("utils.log")
 
+---@class BookJob
+---@field ui table|nil
+---@field poll number
+---@field poll_fn fun()|nil
+---@field timeout_fn fun()|nil
+---@field read_fd any
+---@field pid any
+---@field name string
+---@field kind string
+---@field state string
+---@field timeout number|nil
+---@field on_done fun(result: any)|nil
+---@field on_failed fun(err: any)|nil
+---@field on_cancelled fun(job: BookJob)|nil
+---@field on_progress fun(value: any)|nil
 local Job = {}
 Job.__index = Job
 
@@ -37,12 +52,6 @@ local KINDS = {
     heavy = 5,
 }
 
----@param fd number|nil
-local function closeFd(fd)
-    if not fd then return end
-    pcall(function() ffi.C.close(fd) end)
-end
-
 ---@param callback function|nil
 local function notify(callback, ...)
     if not callback then return end
@@ -57,28 +66,19 @@ end
 local function writeFrame(fd, message)
     local ok, frame = pcall(Protocol.encode, message)
     if not ok then return nil, tostring(frame) end
-    local wrote_ok, count = pcall(Posix.write, fd, ffi.cast("const char *", frame), #frame, true)
-    if not wrote_ok or count ~= #frame then
-        return nil, "job pipe write failed: " .. tostring(count)
+    local wrote_ok, err = pcall(Posix.write, fd, ffi.cast("const char *", frame), #frame, true)
+    if not wrote_ok then
+        return nil, "job pipe write failed: " .. tostring(err)
     end
     return true
 end
 
----@param ui table|nil
+---@param ui table
 ---@param pid number|nil
 ---@param poll number
 local function reap(ui, pid, poll)
-    if not ui or not pid or ffiUtil.isSubProcessDone(pid) then return end
+    if not pid or ffiUtil.isSubProcessDone(pid) then return end
     ui:scheduleIn(poll, function() reap(ui, pid, poll) end)
-end
-
-function Job:_arm()
-    if not self.poll_fn then
-        self.poll_fn = function() self:_poll() end
-    else
-        self.ui:unschedule(self.poll_fn)
-    end
-    self.ui:scheduleIn(self.poll, self.poll_fn)
 end
 
 function Job:_release()
@@ -86,16 +86,18 @@ function Job:_release()
         if self.timeout_fn then self.ui:unschedule(self.timeout_fn) end
         if self.poll_fn then self.ui:unschedule(self.poll_fn) end
     end
-    closeFd(self.read_fd)
+    if self.read_fd then ffi.C.close(self.read_fd) end
     self.read_fd = nil
     self.poll_fn = nil
     self.timeout_fn = nil
-    reap(self.ui, self.pid, self.poll or KINDS.light)
+    reap(self.ui, self.pid, self.poll)
 end
 
 ---@param state "done"|"failed"|"cancelled"
 ---@param err string|nil
-function Job:_teardown(state, result, err)
+function Job:_finish(state, result, err)
+    if self.settled then return end
+    self.settled = true
     self.state = state
     self.error = err
     if state ~= "done" and self.pid then
@@ -116,25 +118,7 @@ function Job:_teardown(state, result, err)
     end
 end
 
----@param state "done"|"failed"|"cancelled"
----@param err string|nil
-function Job:_finish(state, result, err)
-    if self.settled then return end
-    self.settled = true
-    self:_teardown(state, result, err)
-end
-
 function Job:cancel()
-    if self.settled then
-        return
-    end
-    if self.kind ~= "instant" and not self._slotted then
-        self.settled = true
-        self.state = "cancelled"
-        logger.dbg("book.worker", self.name, self.kind, "cancelled", "")
-        notify(self.on_cancelled, self)
-        return
-    end
     self:_finish("cancelled")
 end
 
@@ -165,7 +149,7 @@ function Job:_read()
             self:_finish("failed", nil, err or "worker protocol failed")
             return
         end
-        for _, message in ipairs(messages) do self:_dispatch(message) end
+        for _idx, message in ipairs(messages) do self:_dispatch(message) end
         if self.settled or count < size then return end
     end
 end
@@ -180,7 +164,7 @@ function Job:_poll()
         self:_finish("failed", nil, ok and "job exited without result" or err)
         return
     end
-    self:_arm()
+    self.ui:scheduleIn(self.poll, self.poll_fn)
 end
 
 ---@param self table
@@ -210,7 +194,7 @@ function Job:_start()
     local worker = self._worker
     self._worker = nil
     self.decoder = Protocol.newDecoder()
-    local pid, read_fd = ffiUtil.runInSubProcess(function(_, write_fd)
+    local pid, read_fd = ffiUtil.runInSubProcess(function(_pid, write_fd)
         in_child = true
         local function send(message) return writeFrame(write_fd, message) end
         local ok, result = xpcall(worker, debug.traceback, function(value)
@@ -232,8 +216,9 @@ function Job:_start()
     self.pid, self.read_fd = pid, read_fd
     self.state = "running"
     self.ui = require("ui/uimanager")
-    self:_arm()
-    local timeout = tonumber(self.timeout)
+    self.poll_fn = function() self:_poll() end
+    self.ui:scheduleIn(self.poll, self.poll_fn)
+    local timeout = self.timeout
     if timeout and timeout > 0 then
         self.timeout_fn = function()
             self:_finish("failed", nil, "timeout")

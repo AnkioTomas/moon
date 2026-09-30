@@ -14,7 +14,7 @@ local System = {
 function System:take()
     while self.wait[1] do
         local job = table.remove(self.wait, 1)
-        if not job.settled and job.state == "queued" then
+        if not job.settled then
             return job
         end
     end
@@ -41,7 +41,7 @@ end
 
 --- 一个 fork 结束（成功/失败/取消），让出槽位。
 function System:release()
-    self.running = math.max(0, self.running - 1)
+    self.running = self.running - 1
     self:pump()
 end
 
