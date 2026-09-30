@@ -21,7 +21,7 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Widget = require("ui/widget/widget")
 local GestureRange = require("ui/gesturerange")
-local Image = require("ui.components.image")
+local Image = require("ui.themes.widgets.image")
 local Icon = require("ui.themes.widgets.icon")
 local Box = require("ui.themes.widgets.box")
 local Text = require("ui.themes.widgets.text")
@@ -474,10 +474,9 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         width = cover_w,
         height = cover_h,
         alpha = false,
-        border = false,
+        style = {},
         fallback = title,
         fallback_src = cached_cover and cached_cover ~= (req and req.url) and cached_cover or nil,
-        show_parent = opts.show_parent,
         on_ready = function(path)
             persistCover(book, path)
             if on_ready then on_ready(path) end
