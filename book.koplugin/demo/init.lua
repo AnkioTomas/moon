@@ -17,11 +17,11 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local MoonSettings = require("utils.settings")
 local Theme = require("ui.themes.init")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
 local Confirm = require("ui.themes.widgets.confirm")
+local IconPicker = require("ui.themes.widgets.icon_picker")
 local Image = require("ui.themes.widgets.image")
 local Input = require("ui.themes.widgets.input")
 local List = require("ui.themes.widgets.list")
@@ -121,7 +121,7 @@ local function controls(page, t, width)
     page.chip = page.chip or "全部"
     local half = math.floor((width - Theme.px(t.space.sm)) / 2)
     local chips = {}
-    for _, name in ipairs({ "全部", "在读", "读完" }) do
+    for _idx, name in ipairs({ "全部", "在读", "读完" }) do
         chips[#chips + 1] = Button:new{
             text = name,
             variant = page.chip == name and "primary" or "normal",
@@ -219,7 +219,7 @@ local function menuFrom(button)
 end
 
 --- 控件页三：图片三态、锚点弹出（左上 / 右下，验证翻转与夹边）、多按钮行动作表。
-local function media(_, t, width)
+local function media(_page, t, width)
     local third = math.floor((width - Theme.px(t.space.sm) * 2) / 3)
     local h = math.floor(third * 4 / 3)
     local left, right
@@ -298,12 +298,11 @@ local function entries()
         { text = "切换主题", mandatory = NAMES[Theme.current().id], run = function(hub)
             local cur = Theme.current().id
             local items = {}
-            for _, id in ipairs(Theme.ids) do
+            for _idx, id in ipairs(Theme.ids) do
                 items[#items + 1] = { text = NAMES[id] .. "  " .. id, value = id, checked = id == cur }
             end
             List:new{ title = "切换主题", items = items, centered = true, on_select = function(id)
-                MoonSettings.get("display").ui_theme = id
-                MoonSettings.saveSection("display")
+                Theme.set(id)
                 hub:close()
                 Demo.open()
             end }:show()
@@ -352,7 +351,7 @@ local function entries()
             List:new{ title = "启用的书源", subtitle = "点按切换，关闭后汇总", items = items, multi = true,
                 close_callback = function()
                     local on = {}
-                    for _, it in ipairs(items) do if it.checked then on[#on + 1] = it.value end end
+                    for _idx, it in ipairs(items) do if it.checked then on[#on + 1] = it.value end end
                     say("已启用：" .. (#on > 0 and table.concat(on, "、") or "无"))
                 end }:show()
         end },
@@ -367,6 +366,9 @@ local function entries()
         { text = "列表：60 项分页（第 3 项禁用）", run = function()
             List:new{ title = "长列表", subtitle = "打开即翻到选中的第 33 项", items = numbered(60, 33),
                 on_select = function(v) say("选择：第 " .. v .. " 项") end }:show()
+        end },
+        { text = "图标选择 IconPicker", run = function()
+            IconPicker:new{ current = "menu_book", on_select = function(name) say("图标：" .. name) end }:show()
         end },
         { text = "进度弹窗 ProgressDialog", run = fakeProgress },
         { text = "数值选择：单列", run = function()
@@ -417,7 +419,7 @@ function Demo.addToMainMenu(menu_items)
         sorting_hint = "setting",
         callback = Demo.open,
     }
-    for _, modname in ipairs({ "ui/elements/filemanager_menu_order", "ui/elements/reader_menu_order" }) do
+    for _idx, modname in ipairs({ "ui/elements/filemanager_menu_order", "ui/elements/reader_menu_order" }) do
         local order = require(modname).setting
         local at
         for i, id in ipairs(order) do
