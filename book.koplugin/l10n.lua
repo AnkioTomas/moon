@@ -51,7 +51,7 @@ function M.apply()
         return
     end
     applied_for = lang
-    for _, cand in ipairs(candidates(lang)) do
+    for _idx, cand in ipairs(candidates(lang)) do
         local ok, catalog = pcall(require, "l10n." .. cand)
         if ok and type(catalog) == "table" then
             for msgid, msgstr in pairs(catalog) do
