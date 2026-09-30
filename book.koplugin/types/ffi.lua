@@ -65,6 +65,45 @@ function BlitBuffer:setPixel(x, y, color) end
 ---@return any
 function BlitBuffer:getPixel(x, y) end
 
+---@return number
+function BlitBuffer:getWidth() end
+
+---@return number
+function BlitBuffer:getHeight() end
+
+function BlitBuffer:free() end
+
+---@param path string
+---@param color any|nil
+---@return boolean|nil
+function BlitBuffer:writePNG(path, color) end
+
+---@param x number
+---@param y number
+---@param w number
+---@param h number
+---@param border number
+---@param color any
+---@param radius number|nil
+function BlitBuffer:paintBorder(x, y, w, h, border, color, radius) end
+
+---@param src BlitBuffer
+---@param dest_x number
+---@param dest_y number
+---@param offs_x number
+---@param offs_y number
+---@param w number
+---@param h number
+---@param color any
+function BlitBuffer:colorblitFrom(src, dest_x, dest_y, offs_x, offs_y, w, h, color) end
+
+--- ffi.new("moon_z_stream")，番茄正文 inflate。
+---@class MoonZStream
+---@field next_in ffi.cdata*
+---@field avail_in integer
+---@field next_out ffi.cdata*
+---@field avail_out integer
+
 --- lua-ljsqlite3
 ---@class SQLiteConnection
 local SQLiteConnection = {}
@@ -98,5 +137,14 @@ function SQLiteStatement:close() end
 --- ffi/archiver Writer（copymanga CBZ 等）
 ---@class ArchiverWriter
 local ArchiverWriter = {}
+
+---@param o table|nil
+---@return ArchiverWriter
+function ArchiverWriter:new(o) end
+
+---@param path string
+---@param format string|nil
+---@return boolean|nil
+function ArchiverWriter:open(path, format) end
 
 function ArchiverWriter:close() end

@@ -5,6 +5,7 @@
 ---@meta
 
 ---@class Widget
+---@field dimen table|nil
 local Widget = {}
 
 ---@generic T : Widget
@@ -62,6 +63,30 @@ function WidgetContainer:handleEvent(event) end
 
 ---@param full boolean|nil
 function WidgetContainer:free(full) end
+
+--- document/document.lua、document/credocument.lua 无 ---@class。
+---@class Document
+local Document = {}
+
+---@generic T
+---@param o T|nil
+---@return T
+function Document:extend(o) end
+
+---@class CreDocument : Document
+---@field file string
+---@field provider string
+---@field _document any
+local CreDocument = {}
+
+---@param xp string
+---@return boolean|nil
+function CreDocument:isXPointerInDocument(xp) end
+---@param xp string
+---@return number|nil
+function CreDocument:getPageFromXPointer(xp) end
+---@param full boolean|nil
+function CreDocument:loadDocument(full) end
 
 --- ui/widget/container/inputcontainer.lua
 ---@class InputContainer : WidgetContainer
