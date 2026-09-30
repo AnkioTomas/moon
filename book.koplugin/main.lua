@@ -4,329 +4,143 @@
 KOReader 会为 FileManager 和 Reader 各建一个插件实例；
 关书后 FM 侧实例才是开桌面的宿主。
 
-本文件只做生命周期转发：桌面 / 阅读会话 / 源事件 / 脏同步重试。
-业务规则在 book/、ui/reader/session、source/。
+本文件只做接线：init 时挂 KOReader 外壳（菜单 / 手势 / 启动项在 menu.lua，开机自动开桌面在
+Desktop.autoOpen），其余是生命周期转发：阅读会话 / 所有启用源 / features / 后台任务 / 脏同步重试。
+业务规则在 book/、reader/session、source/。
 
 @module koplugin.book
 --]]
 
-local WidgetContainer = require("ui/widget/container/widgetcontainer")
-local UIManager = require("ui/uimanager")
-local InfoMessage = require("ui/widget/infomessage")
-local logger = require("utils.log")
-require("l10n")
-local _ = require("gettext")
-
-local SourceRegistry = require("source.registry")
-local Desktop = require("ui.desktop")
-local Host = require("host")
-local Open = require("book.open")
-local Features = require("features.init")
-
---- 调桌面方法；已 Destroy 则跳过。
----@param plugin table
----@param name string
----@param ... any
-local function desktopLife(plugin, name, ...)
-    local desktop = plugin.desktop
-    if not desktop then return end
-    local life = desktop.lifecycle
-    if life and life.state == "Destroy" then return end
-    local fn = desktop[name]
-    if type(fn) == "function" then
-        fn(desktop, ...)
+--- KOReader 只把插件目录的 ?.lua 放进 package.path。目录模块（desktop/init.lua）
+--- 要额外的 ?/init.lua。加载器在 dofile 返回后会重写 path，init 里再补一次。
+---@param root string 插件根目录
+local function allowInitModules(root)
+    local entry = root .. "/?/init.lua"
+    if not package.path:find(entry, 1, true) then
+        package.path = package.path .. ";" .. entry
     end
 end
+allowInitModules(debug.getinfo(1, "S").source:match("^@(.*)/"))
+
+local WidgetContainer = require("ui/widget/container/widgetcontainer")
+local UIManager = require("ui/uimanager")
+local logger = require("utils.log")
+require("l10n")
+
+local SourceRegistry = require("source.registry")
+local Desktop = require("desktop")
+local Features = require("features")
+local Guard = require("ui.guard")
+local Menu = require("menu")
+local Session = require("reader.session")
 
 --- Book 插件实例（FM / Reader 各一份）
 ---@class BookPlugin : WidgetContainer
----@field is_doc_only boolean
 ---@field desktop BookDesktop|nil 当前全屏桌面实例
 ---@field path string 插件根目录
----@field ui table|nil KOReader FileManager / ReaderUI
+---@field ui table KOReader FileManager / ReaderUI
 local BookPlugin = WidgetContainer:extend {
     name = "book",
-    is_doc_only = false,
 }
 
--- ── 生命周期事件 ─────────────────────────────────────
+--- 插件自己没接的事件交给 feature 的 events 表。
+function BookPlugin:handleEvent(event)
+    return WidgetContainer.handleEvent(self, event) or Features.handleEvent(event, self)
+end
 
---- 插件初始化：挂接 Host（菜单 / 开机打开等）与各增强模块
-function BookPlugin:init()
+-- ── 插件生命周期 ─────────────────
+
+--- 插件生命周期转给所有启用源：混合模式下它们都在用，要不要响应由源自己判断；加载失败的源跳过。
+---@param plugin BookPlugin
+---@param hook "onCreate"|"onPause"|"onResume"|"onDestroy"
+local function emitSource(plugin, hook)
+    for _idx, meta in ipairs(SourceRegistry.listEnabled()) do
+        local source = SourceRegistry.resolve(meta.id)
+        if source then Guard.call("source " .. meta.id .. "." .. hook, source[hook], source, plugin) end
+    end
+end
+
+--- 插件初始化：挂接 KOReader 宿主（菜单 / 开机打开等）与各增强模块。
+--- KOReader 的 pcall 只会静默跳过插件，经 guard 才能弹错误页让用户反馈。
+---@param self BookPlugin
+local function init(self)
+    allowInitModules(self.path)
     if not require("ko_version").check() then
         return
     end
-    logger.info("book plugin init", self.ui and self.ui.document and "reader" or "filemanager")
-    Host.onCreate(self)
-    require("translate.init").onCreate()
-    require("baike.init").onCreate()
-    require("dictionary.init").onCreate()
-    require("ui.panel.native").onCreate(self.ui)
-    require("lockscreen.init").onCreate()
-    require("remote.init").onCreate()
-    require("nightmode").onCreate()
-    require("ime.init").onCreate()
-    require("patch.manager").onCreate({ plugin_root = self.path })
-    require("convert.azw3document"):register(require("document/documentregistry"))
+    logger.info("book plugin init", self.ui.document and "reader" or "filemanager")
+    require("ui.fonts").onCreate()
+    Menu.onCreate(self)
+    emitSource(self, "onCreate")
     Features.emit("onCreate", self)
-    if self.ui and self.ui.document then
-        self:emitToSource("reader_open")
-    end
+    -- 兜底：别的插件 onShow 返回 true 会截断 Show，本插件收不到。
+    UIManager:nextTick(function() Guard.call("autoOpen", Desktop.autoOpen, self) end)
 end
+BookPlugin.init = Guard.wrap("init", init)
 
---- FM 显示时同步接管（避免 FileManager 先闪一帧）
-function BookPlugin:onShow()
-    logger.dbg("book lifecycle show")
-    Host.onShow(self)
-    if self.ui and not self.ui.document then
-        self:emitToSource("fm_open")
-    end
-end
-
---- Dispatcher / 手势：打开月读
----@return boolean 已处理
-function BookPlugin:onBookOpenShelf()
-    self:openDesktop()
-    return true
-end
-
---- Dispatcher 手势：强制刷新当前书籍的 X-Ray。
----@return boolean
-function BookPlugin:onBookXrayRefresh()
-    if not self.ui or not self.ui.document then
-        return false
-    end
-    require("xray.ui").refresh(self.ui)
-    return true
-end
-
---- Dispatcher 手势：打开阅读页左侧栏。
----@return boolean
-function BookPlugin:onBookReaderSidebar()
-    if not self.ui or not self.ui.document then
-        return false
-    end
-    return require("ui.reader.sidebar").open(self.ui)
-end
-
---- 主菜单回调（由 Host.registerMenu → registerToMainMenu 挂上）
----@param menu_items table KOReader 主菜单项表（就地写入）
-function BookPlugin:addToMainMenu(menu_items)
-    menu_items.book_library = {
-        text = _("月读"),
-        sorting_hint = "setting",
-        callback = function()
-            self:openDesktop()
-        end,
-    }
-    if require("libs/libkoreader-lfs").attributes(self.path .. "/demo", "mode") == "directory" then
-        require("demo.init").addToMainMenu(menu_items)
-    end
-end
-
---- 读 sidecar 前：把全书排版偏好写进本章 sidecar，由原生模块加载
----@param doc_settings table
----@param document table
-function BookPlugin:onDocSettingsLoad(doc_settings, document)
-    require("book.reader_prefs").inject(doc_settings, document)
-    require("ui.reader.bars").injectStatusLine(doc_settings, document)
-end
-
---- 阅读器就绪：建阅读会话；统计计时；拉进度；按章落点；挂阅读页
-function BookPlugin:onReaderReady()
-    require("ui.reader.session").onReaderReady(self)
-end
-
---- 关文档：推进度；结清统计；通知源；切章则保留会话，真关书才清
-function BookPlugin:onCloseDocument()
-    logger.info("book lifecycle close_document")
-    require("ui.reader.session").onCloseDocument(self)
-end
-
---- 章末：按章会话自动下一章
----@return boolean
-function BookPlugin:onEndOfBook()
-    logger.dbg("book lifecycle end_of_book")
-    return require("ui.reader.session").onChapterBoundary(1)
-end
-
---- 章首：按章会话自动上一章
----@return boolean
-function BookPlugin:onStartOfBook()
-    logger.dbg("book lifecycle start_of_book")
-    return require("ui.reader.session").onChapterBoundary(-1)
-end
-
---- 休眠前：结清阅读状态，生成锁屏图，停远程服务，暂停后台任务，暂停桌面。
+--- 休眠前：结清阅读状态，生成锁屏图，停远程服务，暂停后台任务；桌面在窗口栈上时自行收 Suspend。
 function BookPlugin:onSuspend()
     logger.info("book lifecycle suspend")
-    require("workers.tasks").suspend()
-    require("ui.reader.session").onPause(self)
-    require("lockscreen.init").onPause()
-    require("remote.init").onPause()
-    require("nightmode").onPause()
+    Guard.call("tasks.onSuspend", require("workers.tasks").onSuspend)
+    Guard.call("session.onSuspend", Session.onSuspend, self)
+    emitSource(self, "onPause")
     Features.emit("onPause", self)
-    desktopLife(self, "onPause")
     logger.flush()
 end
 
 --- 唤醒：恢复阅读统计、后台服务与后台任务；桌面在窗口栈上时自行收 Resume。
 function BookPlugin:onResume()
     logger.info("book lifecycle resume")
-    require("workers.tasks").wake()
-    require("ui.reader.session").onResume(self)
-    require("lockscreen.init").onResume()
-    require("remote.init").onResume()
-    require("nightmode").onResume()
+    Guard.call("tasks.onResume", require("workers.tasks").onResume)
+    Guard.call("session.onResume", Session.onResume, self)
+    emitSource(self, "onResume")
     Features.emit("onResume", self)
 end
 
---- 前光变化：手动调亮度时关闭自动亮度。
-function BookPlugin:onFrontlightStateChanged()
-    require("nightmode").onFrontlightChanged()
+--- 网络恢复：续跑等网络的后台任务、重试脏数据、刷新锁屏。
+function BookPlugin:onNetworkConnected()
+    logger.info("book lifecycle network_connected")
+    Guard.call("tasks.onNetworkConnected", require("workers.tasks").onNetworkConnected)
+    Guard.call("sync.onNetworkConnected", require("book.sync").onNetworkConnected)
+    Features.emit("onNetworkConnected", self)
 end
 
---- 退出：停更新任务、远程服务，并销毁仍打开的桌面。
+--- 退出：停更新任务、远程服务；桌面在窗口栈上时自行收 Exit。
 function BookPlugin:onExit()
     logger.info("book plugin exit")
-    require("update.init").onDestroy()
-    require("remote.init").onDestroy()
+    emitSource(self, "onDestroy")
     Features.emit("onDestroy", self)
-    desktopLife(self, "onDestroy")
     logger.flush()
 end
 
---- 网络恢复：续跑等网络的后台任务、重试脏数据、通知源、刷新锁屏。
-function BookPlugin:onNetworkConnected()
-    logger.info("book lifecycle network_connected")
-    require("workers.tasks").wake()
-    require("book.sync").retryDirtyAsync()
-    self:emitToSource("network_connected")
-    require("lockscreen.init").refresh(nil, true, "network_connected")
-    desktopLife(self, "onNetworkConnected")
+-- ── 宿主入口：打开月读 ─────────────────
+
+--- FM 显示时同步接管（避免 FileManager 先闪一帧）
+BookPlugin.onShow = Guard.wrap("onShow", Desktop.autoOpen)
+
+--- Dispatcher / 手势：打开月读
+---@return boolean 已处理
+function BookPlugin:onBookOpenShelf()
+    Guard.call("openShelf", Desktop.open, self)
+    return true
 end
 
---- 翻页（分页视图）：统计换页；分发 page_changed
----@param page number
-function BookPlugin:onPageUpdate(page)
-    logger.dbg("book lifecycle page_update", page)
-    require("ui.reader.session").onPageChanged(self, page)
-end
+BookPlugin.addToMainMenu = Guard.wrap("addToMainMenu", Menu.addToMainMenu)
 
---- 翻页（滚动视图）：统计换页；分发 page_changed
----@param page number|nil
-function BookPlugin:onPosUpdate(_pos, page)
-    logger.dbg("book lifecycle pos_update", page)
-    require("ui.reader.session").onPageChanged(self, page)
-end
-
---- 注解变化：由阅读会话按当前身份持久化。
----@param items table KOReader 变更描述
-function BookPlugin:onAnnotationsModified(items)
-    logger.dbg("book lifecycle annotations_modified", #items)
-    require("ui.reader.session").onAnnotationsModified(self, items)
-end
-
--- ── 对外动作（桌面 / 设置页调用）───────────────────────
-
---- 当前活跃数据源（经 SourceRegistry；失败返回 nil）
----@return BookSource|nil
-function BookPlugin:getSource()
-    return SourceRegistry.current()
-end
-
---- 向源转发生命周期事件；源实现抛错只记日志，不阻断阅读主流程。
----@param event string
----@param payload table|nil
----@param source BookSource|nil 指定属主源；缺省取当前活跃源
-function BookPlugin:emitToSource(event, payload, source)
-    source = source or self:getSource()
-    if not source then
-        logger.dbg("book source event skipped:", event)
-        return
-    end
-    logger.dbg("book source event:", event, source.id)
-    local ok, err = pcall(source.onEvent, source, event, payload)
-    if not ok then
-        logger.error("book source event failed:", event, err)
-    end
-end
-
---- 下载（如需）并打开书籍
----@param book Book
-function BookPlugin:openBook(book)
-    Open.book(self, book)
-end
-
---- 数据源切换后：通知桌面并让新源做桌面打开维护。
-function BookPlugin:onSourceChanged()
-    local source = SourceRegistry.current()
-    logger.info("book source changed", source and source.id or "unavailable")
-    desktopLife(self, "onEvent", "source_changed", source)
-    if self.desktop and source then
-        self:emitToSource("desktop_open", self.desktop, source)
-    end
-end
-
---- 打开月读全屏桌面
-function BookPlugin:openDesktop()
-    -- 阅读中桌面宿主是 FileManager 实例：先退出阅读面板，再委托 FM 打开，
-    -- 避免把全屏桌面叠在未关闭的阅读器上。
-    local from_reader = self.ui and self.ui.document
-    if from_reader then
-        if self.ui.onClose then self.ui:onClose() end
-        local ok, FileManager = pcall(require, "apps/filemanager/filemanager")
-        if ok and FileManager then
-            if not FileManager.instance then FileManager:showFiles() end
-            local fm = FileManager.instance
-            local fm_plugin = fm and fm.book
-            if fm_plugin and type(fm_plugin.openDesktop) == "function" then
-                fm_plugin:openDesktop()
-            end
-        end
-        return
-    end
-
-    local source = SourceRegistry.current()
-    if not source then
-        UIManager:show(InfoMessage:new{ text = _("当前数据源不可用") })
-        return
-    end
-    require("utils.paths").ensureLayout(source.id)
-    logger.info("book openDesktop", source.id)
-    if self.desktop then
-        local old = self.desktop
-        desktopLife(self, "onDestroy")
-        UIManager:close(old)
-        self.desktop = nil
-    end
-
-    logger.info("book openDesktop create desktop begin")
-    local ok, desk = pcall(function()
-        return Desktop:new {
-            plugin = self,
-            source = source,
-        }
-    end)
-    logger.info("book openDesktop create desktop end", ok and "ok" or "failed")
-    if not ok then
-        logger.error("book desktop create failed:", desk)
-        UIManager:show(InfoMessage:new {
-            text = _("桌面打开失败:\n") .. tostring(desk),
-        })
-        return
-    end
-    ---@cast desk BookDesktop
-    self.desktop = desk
-    logger.info("book openDesktop show begin")
-    UIManager:show(self.desktop)
-    logger.info("book openDesktop show end")
-    UIManager:setDirty(self.desktop, "ui")
-    logger.info("book openDesktop onResume begin")
-    desktopLife(self, "onResume")
-    logger.info("book openDesktop onResume end")
-    -- 桌面已可见；源可后台做书架/统计维护（先读本地，成功后再刷新）。
-    self:emitToSource("desktop_open", self.desktop, source)
+-- ── 阅读会话 ─────────────────
+-- KOReader 阅读事件只送到插件实例；会话入口与事件同名同参（首参即插件），经 guard 直接挂上。
+-- 按一本书从打开到关闭的顺序排列。
+for _idx, name in ipairs({
+    "onDocSettingsLoad",
+    "onReaderReady",
+    "onPageUpdate",
+    "onPosUpdate",
+    "onAnnotationsModified",
+    "onEndOfBook",
+    "onStartOfBook",
+    "onCloseDocument",
+}) do
+    BookPlugin[name] = Guard.wrap(name, Session[name])
 end
 
 return BookPlugin
