@@ -49,6 +49,7 @@ end
 ---@param opts table 见模块头
 ---@return table
 function Row.widget(opts)
+    if opts.subtitle == "" then opts.subtitle = nil end
     local t = Theme.current()
     local enabled = opts.enabled ~= false
     local sel = opts.selected == true

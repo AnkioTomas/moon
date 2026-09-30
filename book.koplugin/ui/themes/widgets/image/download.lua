@@ -17,7 +17,7 @@ local FAILED_TTL = 5 * 60
 local seq = 0
 local failed = {}
 
----@class BookImageDownloadQueue
+---@class ThemeImageDownloadQueue
 ---@field wait table[]
 ---@field active number
 ---@field LIMIT number
@@ -27,7 +27,7 @@ local Queue = {
     LIMIT = 10,
 }
 
----@class BookImageDownload
+---@class ThemeImageDownload
 ---@field url string
 ---@field headers table|nil
 ---@field cb fun(path: string|nil, err: string|nil)
@@ -86,7 +86,7 @@ function Download.cached(url)
         return nil
     end
     local base = cacheBase(url)
-    for _, ext in ipairs(EXTS) do
+    for _idx, ext in ipairs(EXTS) do
         local path = base .. ext
         local attr = lfs.attributes(path)
         if attr and attr.mode == "file" and attr.size and attr.size > 0 then
@@ -190,7 +190,7 @@ function Download:_onHttp(ok, err)
         local from_url = path:match("%.([%w]+)$")
         if from_url then
             from_url = "." .. from_url:lower()
-            for _, candidate in ipairs(EXTS) do
+            for _idx, candidate in ipairs(EXTS) do
                 if candidate == from_url then
                     ext = candidate
                     break

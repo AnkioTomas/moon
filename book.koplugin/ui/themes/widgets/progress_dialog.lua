@@ -1,16 +1,24 @@
 --[[--
-主题进度弹窗（替代 ProgressbarDialog / ui.components.progress_dialog）：
-标题 + 当前步骤 + 进度条，随后台事件原地更新。点任意处收起，收起只关窗、不影响后台任务。
+主题进度弹窗（替代 ProgressbarDialog）：
+标题 + 当前步骤 + 进度条，随后台事件原地更新。
 
   +----------------------+
   | 正在导入             |
   | a.epub（3/9）        |
   | [██████·········]    |
+  | [ 取消 ] [后台运行]  |   给了 on_cancel / on_background 才有按钮行
   +----------------------+
+
+没有按钮时点任意处收起；有按钮时点面板内不关，点面板外 / 返回键等同「后台运行」（没给则只关窗）。
+两个按钮都先关窗再回调；关窗本身不影响后台任务，任务归调用方。
 
   local dialog = ProgressDialog:new{ title = "…", close_callback = fn }
   dialog:show()
   dialog:update("正在上传 a.epub", 3, 9)   -- done/total 可省略，省略时进度条不动
+  dialog:bytes(512 * 1024, 2 * 1048576)     -- 下载类：说明行显示「0.5 / 2.0 MB」，进度条按比例
+  dialog:set("已格式化的文案", 40)          -- 文案原样显示；percent 省略时进度条不动
+
+  ProgressDialog:new{ title = "…", on_background = fn, on_cancel = fn }   -- 可转后台 / 可取消
 
 @module koplugin.book.ui.themes.widgets.progress_dialog
 --]]
@@ -29,12 +37,27 @@ local T = require("ffi/util").template
 
 ---@class BookThemeProgressDialog : BookThemeModal
 ---@field title string
+---@field on_background fun()|nil 给了就出「后台运行」按钮；点面板外 / 返回键同此
+---@field on_cancel fun()|nil 给了就出「取消」按钮
 local ProgressDialog = Modal:extend{
     close_on_tap = true,
     title = nil,
+    on_background = nil,
+    on_cancel = nil,
 }
 
 function ProgressDialog:init()
+    local buttons = {}
+    if self.on_cancel then
+        buttons[#buttons + 1] = { text = _("取消"), callback = function()
+            self:close()
+            self.on_cancel()
+        end }
+    end
+    if self.on_background then
+        buttons[#buttons + 1] = { text = _("后台运行"), variant = "primary", callback = function() self:dismiss() end }
+    end
+    if #buttons > 0 then self.close_on_tap = false end
     Modal.init(self)
     local t = self.theme
     local width = self:innerWidth()
@@ -48,7 +71,23 @@ function ProgressDialog:init()
             VerticalSpan:new{ width = Theme.px(t.space.sm) },
             self.bar,
         },
+        buttons = buttons,
     }
+end
+
+--- 点面板外 / 返回键：关窗，给了 on_background 就转后台。
+function ProgressDialog:dismiss()
+    self:close()
+    if self.on_background then self.on_background() end
+end
+
+--- 换文案；给了 percent（0..100）时进度条跟着走，否则保持不动。
+---@param text string
+---@param percent number|nil
+function ProgressDialog:set(text, percent)
+    self.detail:setText(text)
+    if percent then self.bar:setPercent(percent) end
+    UIManager:setDirty(self, function() return "fast", self[1].dimen end)
 end
 
 --- 换成当前步骤；给了 total 时进度条按 done/total 走，否则保持不动。
@@ -58,11 +97,18 @@ end
 function ProgressDialog:update(text, done, total)
     if total and total > 0 then
         done = math.min(done or 0, total)
-        self.detail:setText(T(_("%1（%2/%3）"), text, done, total))
-        self.bar:setPercent(done * 100 / total)
-    else
-        self.detail:setText(text)
+        self:set(T(_("%1（%2/%3）"), text, done, total), done * 100 / total)
+        return
     end
-    UIManager:setDirty(self, function() return "fast", self[1].dimen end)
+    self:set(text)
 end
+
+--- 按字节推进：说明行显示已下 / 总量（MB），进度条按比例。
+---@param done number
+---@param total number 大于 0
+function ProgressDialog:bytes(done, total)
+    done = math.min(done, total)
+    self:set(string.format("%.1f / %.1f MB", done / 1048576, total / 1048576), done * 100 / total)
+end
+
 return ProgressDialog

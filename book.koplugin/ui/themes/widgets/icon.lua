@@ -1,5 +1,5 @@
 --[[--
-主题图标：Material Symbols Outlined 字体图标（fonts/MaterialSymbolsOutlined-Regular.ttf）。
+主题图标：Material Symbols Outlined 字体图标（同名目录 icon/MaterialSymbolsOutlined-Regular.ttf）。
 
   widget（方盒居中）     label row              label column
   +----+                 +----------+           +----+
@@ -9,7 +9,8 @@
 
   Icon.widget{ name = "home", size = 24, color = c }
   Icon.label{ name = "home", text = "首页", direction = "row"|"column",
-              size = 24, color = c, face = "cfont", font_size = 14, gap = px, max_width = px }
+              size = 24, color = c, face = "cfont", font_size = 14, gap = px, max_width = px,
+              dim = bool }  -- dim：图标与文案一起变灰（禁用态）
 
 name 写 Material Icons 原名：字体用 OpenType rlig 把 ASCII 合成字形，所以强制 use_xtext。
 名字写错时显示英文字面，一眼可见。
@@ -41,10 +42,10 @@ local _ensured = false
 --- 把图标字体登记进 FontList，并固定 moon_icon 字面（换 UI 字体不影响图标）。
 local function ensureFont()
     if _ensured then return end
-    local path = Theme.root() .. "fonts/" .. FONT_FILE
+    local path = Theme.root() .. "ui/themes/widgets/icon/" .. FONT_FILE
     FontList:getFontList()
     local listed = false
-    for _, p in ipairs(FontList.fontlist) do
+    for _idx, p in ipairs(FontList.fontlist) do
         if p == path then listed = true break end
     end
     if not listed then table.insert(FontList.fontlist, 1, path) end
@@ -52,26 +53,32 @@ local function ensureFont()
     _ensured = true
 end
 
----@param opts { name: string, size: number, color: table|nil }
----@return table CenterContainer
+---@param opts { name: string, size: number, color: table|nil, box: boolean|nil, dim: boolean|nil }
+---@return table|nil
 function Icon.widget(opts)
+    opts = opts or {}
+    if type(opts.name) ~= "string" or opts.name == "" then return nil end
     ensureFont()
+    local color = opts.color or Blitbuffer.COLOR_BLACK
+    if opts.dim then color = Blitbuffer.COLOR_GRAY end
+    local glyph = TextWidget:new{
+        text = opts.name,
+        face = Font:getFace(FACE, Theme.fontSize(opts.size)),
+        fgcolor = color,
+        use_xtext = true,
+    }
+    if opts.box == false then return glyph end
     local box = Theme.px(opts.size)
     return CenterContainer:new{
         dimen = Geom:new{ w = box, h = box },
-        TextWidget:new{
-            text = opts.name,
-            face = Font:getFace(FACE, Theme.fontSize(opts.size)),
-            fgcolor = opts.color or Blitbuffer.COLOR_BLACK,
-            use_xtext = true,
-        },
+        glyph,
     }
 end
 
 ---@param opts table 见模块头
 ---@return table 横排 / 竖排组
 function Icon.label(opts)
-    local color = opts.color or Blitbuffer.COLOR_BLACK
+    local color = opts.dim and Blitbuffer.COLOR_GRAY or opts.color or Blitbuffer.COLOR_BLACK
     local column = opts.direction == "column"
     local group = (column and VerticalGroup or HorizontalGroup):new{ align = "center" }
     group[1] = Icon.widget{ name = opts.name, size = opts.size, color = color }

@@ -14,11 +14,14 @@
 子类在 init 里先 Modal.init(self)，再 setDialog{...}（标准面板）或 setPanel(box)（自定义）。
 点面板外 / 返回键：dismissable 时走 dismiss()（默认关窗，子类覆盖为「取消」语义），否则只吞事件。
 关窗后 close_callback 调一次。
+给了 width / height 时按该尺寸布局（缺省整屏），可嵌进别的窗口：宿主设 show_parent 为所在顶层窗口，
+子类重画时 setDirty(show_parent)；绘制时记下自身坐标，点击范围跟着走。
 
 @module koplugin.book.ui.themes.widgets.modal
 --]]
 
 local Device = require("device")
+local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
@@ -39,6 +42,9 @@ local Screen = Device.screen
 ---@field anchor string|table center/top，或锚点矩形 {x,y,w,h}（物理像素，如按钮 dimen）
 ---@field mask boolean 是否画网状遮罩；全屏页传 false
 ---@field close_callback fun()|nil
+---@field width number|nil 布局宽度（物理像素）；缺省整屏
+---@field height number|nil 布局高度（物理像素）；缺省整屏
+---@field show_parent table|nil 嵌进别的窗口时所在的顶层窗口
 ---@field theme table 构造时的主题令牌
 local Modal = InputContainer:extend{
     dismissable = true,
@@ -46,6 +52,9 @@ local Modal = InputContainer:extend{
     anchor = "center",
     mask = true,
     close_callback = nil,
+    width = nil,
+    height = nil,
+    show_parent = nil,
 }
 
 --- 标准弹窗宽度：屏宽留两侧边距，封顶避免横屏过宽。
@@ -57,7 +66,8 @@ end
 
 function Modal:init()
     self.theme = Theme.current()
-    self.dimen = Screen:getSize()
+    local screen = Screen:getSize()
+    self.dimen = Geom:new{ x = 0, y = 0, w = self.width or screen.w, h = self.height or screen.h }
     if self.mask then
         self._mask = Mask:new{ dimen = self.dimen }
     end
@@ -141,6 +151,7 @@ end
 ---@param x number
 ---@param y number
 function Modal:paintTo(bb, x, y)
+    self.dimen.x, self.dimen.y = x, y
     if self._mask then self._mask:paintTo(bb, x, y) end
     self[1]:paintTo(bb, x + self.panel_x, y + self.panel_y)
 end
