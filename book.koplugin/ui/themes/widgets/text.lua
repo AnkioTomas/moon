@@ -69,6 +69,7 @@ function Text.box(role, text, width, opts)
         height = opts.height,
         height_adjust = opts.height ~= nil,
         alignment = opts.align or "left",
+        height_overflow_show_ellipsis = opts.ellipsis or nil,
         fgcolor = Blitbuffer.Color8(opts.color or theme.color.ink),
         bgcolor = Blitbuffer.Color8(opts.bg or theme.color.page),
     }

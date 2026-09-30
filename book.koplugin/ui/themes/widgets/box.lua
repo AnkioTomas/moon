@@ -10,7 +10,8 @@
 
 style 取 card / raised / dialog 这类表面令牌（bg/border/border_color/radius/shadow/shadow_color，
 逻辑像素）；缺 bg 不填底。width/height/padding 是物理像素，不给宽高时按子件加内边距撑开，
-子件在框内居中。尺寸在 init 定死：内容变化的调用方重建 Box。
+子件在框内居中。圆角大于 0 时，子件画完后把四角圆外的像素还回去，直角图不会冒出框。
+尺寸在 init 定死：内容变化的调用方重建 Box。
 
 @module koplugin.book.ui.themes.widgets.box
 --]]
@@ -45,6 +46,46 @@ function Box:getSize()
     return self.dimen
 end
 
+--- 圆角方块的角外像素。圆心在 (r, r)，和 paintRoundedRect 的圆角同一套。
+---@param i number 距该角外侧的横向像素
+---@param j number 距该角外侧的纵向像素
+---@param r number
+---@return boolean
+local function outsideCorner(i, j, r)
+    local dx, dy = r - i, r - j
+    return dx * dx + dy * dy > r * r
+end
+
+--- 子件绘制前抄下四角圆外的颜色，画完写回。直角位图就停在圆角里面。
+---@param bb BlitBuffer
+---@param x number
+---@param y number
+---@param w number
+---@param h number
+---@param r number
+---@return table[]|nil
+local function snapshotCorners(bb, x, y, w, h, r)
+    if not bb.getPixel or not bb.getWidth then return nil end
+    local bw, bh = bb:getWidth(), bb:getHeight()
+    local saved = {}
+    local function take(px, py)
+        if px < 0 or py < 0 or px >= bw or py >= bh then return end
+        local color = bb:getPixel(px, py)
+        saved[#saved + 1] = { px, py, color:getColorRGB32() }
+    end
+    for j = 0, r - 1 do
+        for i = 0, r - 1 do
+            if outsideCorner(i, j, r) then
+                take(x + i, y + j)
+                take(x + w - 1 - i, y + j)
+                take(x + i, y + h - 1 - j)
+                take(x + w - 1 - i, y + h - 1 - j)
+            end
+        end
+    end
+    return saved
+end
+
 ---@param bb BlitBuffer 目标画布
 ---@param x number
 ---@param y number
@@ -65,9 +106,13 @@ function Box:paintTo(bb, x, y)
         bb:paintBorder(x, y, w, h, border, Blitbuffer.Color8(s.border_color), r)
     end
     local child = self[1]
-    if child then
-        local cs = child:getSize()
-        child:paintTo(bb, x + math.floor((w - cs.w) / 2), y + math.floor((h - cs.h) / 2))
+    if not child then return end
+    local saved = r > 0 and snapshotCorners(bb, x, y, w, h, r) or nil
+    local cs = child:getSize()
+    child:paintTo(bb, x + math.floor((w - cs.w) / 2), y + math.floor((h - cs.h) / 2))
+    if not saved then return end
+    for _idx, pixel in ipairs(saved) do
+        bb:setPixel(pixel[1], pixel[2], pixel[3])
     end
 end
 

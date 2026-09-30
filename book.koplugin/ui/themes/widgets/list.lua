@@ -9,15 +9,23 @@
   | (•) 选项二                    |    | [<]   1 / 2    [>]  |
   | …                             |    +---------------------+
   | [<]        1 / 3         [>]  |
+  |  [分栏一]  [分栏二]  [分栏三] |   tabs 给了才有（仅全屏）
   +-------------------------------+
 
-subtitle 只在全屏标题栏里显示；居中面板点外面关，全屏点右上角或返回键关。
-items：{ text, value, icon, mandatory（右侧状态字）, widget（右侧控件，优先于 mandatory）,
-         image / image_w / image_h（缩略图，逻辑像素）, enabled, checked }
+subtitle 只在全屏标题栏里显示；居中面板点外面关，全屏点右上角或返回键关；左右滑翻页。
+左上角按钮：left_icon + left_callback（仅全屏）。
+items：{ text, value, icon, mandatory（右侧状态字）, widget（右侧控件，优先于 mandatory；
+         可给函数，翻到该页才构建）, image / image_w / image_h（缩略图，逻辑像素）,
+         enabled, checked, callback, keep_open }
   checked 为 nil 的项不画选择标记；非 nil 时单选画 radio、多选画 checkbox。
-单选：点按即关窗，再 on_select(value, item)；打开时翻到第一个 checked 项所在页，该项按选中样式画。
+  callback：单选时代替 on_select 调 callback()；多选时先 callback(checked, item) 再 on_toggle。
+单选：点按即关窗（keep_open 的项不关），再 callback() 或 on_select(value, item)；
+      打开时翻到第一个 checked 项所在页，该项按选中样式画。
+      给了 current 时不看 checked：value == current 的项选中，每项都画 radio（不改调用方的 items）。
 多选：点按就地翻转 item.checked（会改调用方的 items）并 on_toggle(value, checked, item)，不关窗；
       结果在 close_callback 里读 items。
+分栏：tabs = { tabs = { { id, text, icon } }, active = id, on_tab = fun(id): items }；
+      切栏时 on_tab 返回新项，翻到其 checked 项所在页。
 
   List:new{ title = "排序", items = items, on_select = fn }:show()
   list:setItems(items)   -- 异步加载后替换内容，停留在原页（越界则夹到末页）
@@ -25,6 +33,8 @@ items：{ text, value, icon, mandatory（右侧状态字）, widget（右侧控�
 @module koplugin.book.ui.themes.widgets.list
 --]]
 
+local BD = require("ui/bidi")
+local GestureRange = require("ui/gesturerange")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
@@ -33,7 +43,13 @@ local Box = require("ui.themes.widgets.box")
 local Modal = require("ui.themes.widgets.modal")
 local Pager = require("ui.themes.widgets.pager")
 local Row = require("ui.themes.widgets.row")
+local Tabbar = require("ui.themes.widgets.tabbar")
 local TitleBar = require("ui.themes.widgets.titlebar")
+
+---@class BookThemeListTabs
+---@field tabs table[] { id, text, icon }
+---@field active any
+---@field on_tab fun(id: any): table[]
 
 ---@class BookThemeList : BookThemeModal
 ---@field title string|nil
@@ -41,6 +57,10 @@ local TitleBar = require("ui.themes.widgets.titlebar")
 ---@field items table[]
 ---@field multi boolean
 ---@field centered boolean
+---@field left_icon string|nil
+---@field left_callback fun()|nil
+---@field tabs BookThemeListTabs|nil
+---@field current any 单选当前值；非 nil 时代替各项 checked
 ---@field on_select fun(value: any, item: table)|nil
 ---@field on_toggle fun(value: any, checked: boolean, item: table)|nil
 ---@field page integer
@@ -51,6 +71,10 @@ local List = Modal:extend{
     items = nil,
     multi = false,
     centered = false,
+    left_icon = nil,
+    left_callback = nil,
+    tabs = nil,
+    current = nil,
     on_select = nil,
     on_toggle = nil,
 }
@@ -64,16 +88,32 @@ function List:init()
     self.pitch = Row.height(false) + Theme.px(t.row.divider)
     local chrome = Theme.px(t.control.height)                      -- 翻页条
         + (self.centered and pad * 4 + Theme.px(t.font.title * 2)   -- 面板边距 + 标题
-            or TitleBar.height())
+            or TitleBar.height() + (self.tabs and Tabbar.height() or 0))
     self.per_page = math.max(1, math.floor((self.dimen.h - chrome) / self.pitch))
-    self.page = 1
-    for i, item in ipairs(self.items) do
-        if item.checked then
-            self.page = math.ceil(i / self.per_page)
-            break
-        end
-    end
+    self.page = self:checkedPage()
+    self.ges_events.SwipeList = { GestureRange:new{ ges = "swipe", range = self.dimen } }
     self:rebuild()
+end
+
+---@param _arg any
+---@param ges table
+---@return boolean
+function List:onSwipeList(_arg, ges)
+    local dir = BD.flipDirectionIfMirroredUILayout(ges.direction)
+    if dir == "west" then
+        self:goPage(self.page + 1)
+    elseif dir == "east" then
+        self:goPage(self.page - 1)
+    else
+        return false
+    end
+    return true
+end
+
+--- 重画：嵌在别的窗口里时刷所在窗口。
+function List:refresh()
+    self:rebuild()
+    UIManager:setDirty(self.show_parent or self, "ui")
 end
 
 ---@return integer
@@ -81,26 +121,48 @@ function List:pages()
     return math.max(1, math.ceil(#self.items / self.per_page))
 end
 
---- 选择标记图标；checked 为 nil 时用项自己的 icon。
+--- 项的选中态：给了 current 按值比，否则取 item.checked（nil 表示不画标记）。
+---@param item table
+---@return boolean|nil
+function List:checked(item)
+    if self.current ~= nil then return item.value == self.current end
+    return item.checked
+end
+
+--- 第一个选中项所在页；没有则第 1 页。
+---@return integer
+function List:checkedPage()
+    for i, item in ipairs(self.items) do
+        if self:checked(item) then return math.ceil(i / self.per_page) end
+    end
+    return 1
+end
+
+--- 选择标记图标；未参与选择的项用自己的 icon。
 ---@param item table
 ---@return string|nil
 function List:markIcon(item)
-    if item.checked == nil then return item.icon end
-    if self.multi then return item.checked and "check_box" or "check_box_outline_blank" end
-    return item.checked and "radio_button_checked" or "radio_button_unchecked"
+    local checked = self:checked(item)
+    if checked == nil then return item.icon end
+    if self.multi then return checked and "check_box" or "check_box_outline_blank" end
+    return checked and "radio_button_checked" or "radio_button_unchecked"
 end
 
 ---@param item table
 function List:choose(item)
     if self.multi then
         item.checked = not item.checked
+        if item.callback then item.callback(item.checked, item) end
         if self.on_toggle then self.on_toggle(item.value, item.checked, item) end
-        self:rebuild()
-        UIManager:setDirty(self, "ui")
+        self:refresh()
         return
     end
-    self:close()
-    if self.on_select then self.on_select(item.value, item) end
+    if not item.keep_open then self:close() end
+    if item.callback then
+        item.callback()
+    elseif self.on_select then
+        self.on_select(item.value, item)
+    end
 end
 
 --- 按当前页重建面板。
@@ -111,6 +173,8 @@ function List:rebuild()
     local first = (self.page - 1) * self.per_page
     for i = first + 1, math.min(#self.items, first + self.per_page) do
         local item = self.items[i]
+        local status = item.widget
+        if type(status) == "function" then status = status() end
         rows[#rows + 1] = Row.widget({
             width = self.row_w,
             icon = self:markIcon(item),
@@ -118,9 +182,9 @@ function List:rebuild()
             image_w = item.image_w,
             image_h = item.image_h,
             title = item.text,
-            status = item.widget or item.mandatory,
+            status = status or item.mandatory,
             chevron = false,
-            selected = not self.multi and item.checked == true,
+            selected = not self.multi and self:checked(item) == true,
             enabled = item.enabled,
             callback = function() self:choose(item) end,
         })
@@ -138,12 +202,20 @@ function List:rebuild()
         self:setDialog{ title = self.title, body = body }
         return
     end
-    -- 全屏：翻页条钉在底部，行不满一页时中间补空。
+    -- 全屏：翻页条和分栏钉在底部，行不满一页时中间补空。
     local bar = TitleBar.widget({
         width = self.row_w, title = self.title, subtitle = self.subtitle,
+        left_icon = self.left_icon, left_callback = self.left_callback,
         right_icon = "close", right_callback = function() self:dismiss() end,
     })
-    local used = bar:getSize().h + rows:getSize().h + (pager and pager:getSize().h or 0)
+    local tabbar = self.tabs and Tabbar.widget({
+        width = self.row_w,
+        tabs = self.tabs.tabs,
+        active = self.tabs.active,
+        on_tab = function(id) self:switchTab(id) end,
+    })
+    local used = bar:getSize().h + rows:getSize().h
+        + (pager and pager:getSize().h or 0) + (tabbar and tabbar:getSize().h or 0)
     local page = VerticalGroup:new{
         align = "left",
         bar,
@@ -151,14 +223,14 @@ function List:rebuild()
         VerticalSpan:new{ width = math.max(0, self.dimen.h - used) },
     }
     if pager then page[#page + 1] = pager end
+    if tabbar then page[#page + 1] = tabbar end
     self:setPanel(Box:new{ style = { bg = t.color.page }, width = self.dimen.w, height = self.dimen.h, page })
 end
 
 ---@param page integer
 function List:goPage(page)
     self.page = math.max(1, math.min(self:pages(), page))
-    self:rebuild()
-    UIManager:setDirty(self, "ui")
+    self:refresh()
 end
 
 --- 替换全部项，停在原页（越界夹到末页）。
@@ -166,6 +238,14 @@ end
 function List:setItems(items)
     self.items = items
     self:goPage(self.page)
+end
+
+--- 切分栏：换成 on_tab 返回的项，翻到其 checked 项所在页。
+---@param id any
+function List:switchTab(id)
+    self.tabs.active = id
+    self.items = self.tabs.on_tab(id)
+    self:goPage(self:checkedPage())
 end
 
 return List

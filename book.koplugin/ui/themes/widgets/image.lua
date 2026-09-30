@@ -17,7 +17,7 @@
 
   Image.fetchAsync / invalidate / await 见内核。
 
-圆角令牌统一为 0：位图是方的，圆角框压不住四角。
+image 表面半径保持 0。封面走 raised，圆角由 Box 在绘制后裁掉四角圆外的像素。
 
 @module koplugin.book.ui.themes.widgets.image
 --]]
@@ -39,7 +39,7 @@ local ThemeImage = {
 function ThemeImage.widget(opts)
     local t = Theme.current()
     local style = opts.style or t.image
-    local inset = Theme.px(style.border) * 2
+    local inset = Theme.px(style.border or 0) * 2
     local w, h = opts.width - inset, opts.height - inset
     local fallback = opts.fallback and opts.fallback ~= "" and Text.line("caption", opts.fallback,
         { width = w - Theme.px(t.space.xs) * 2, color = t.color.muted }) or nil

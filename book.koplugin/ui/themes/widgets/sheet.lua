@@ -5,7 +5,7 @@
   | 标题（可选）         |
   | [      动作一      ] |
   | [ 复制 ][ 高亮 ][ 查词 ] |   buttons 项：一行等宽按钮（ButtonDialog 的二维 buttons）
-  |                      |   separator 项留一段空隙分组
+  |                      |   separator 项留一段空隙分组；widget 项放任意正文
   | [      删除        ] |
   +----------------------+
 
@@ -13,6 +13,7 @@
       { text = "打开", callback = fn },
       { buttons = { { text = "复制", callback = fn }, { icon = "share", callback = fn } } },
       { separator = true },
+      { widget = function(width) return Text.box("body", "…", width, { bg = t.dialog.bg }) end },
       { text = "删除", variant = "primary", callback = fn, enabled = true },
   } }:show()
 
@@ -41,10 +42,12 @@ function Sheet:init()
     local width = self:innerWidth()
     local gap = Theme.px(t.space.xs)
     local body = VerticalGroup:new{ align = "left" }
-    for _, item in ipairs(self.items) do
+    for _idx, item in ipairs(self.items) do
         if #body > 0 then body[#body + 1] = VerticalSpan:new{ width = gap } end
         if item.separator then
             body[#body + 1] = VerticalSpan:new{ width = Theme.px(t.space.md) }
+        elseif item.widget then
+            body[#body + 1] = item.widget(width)
         elseif item.buttons then
             local specs = {}
             for i, spec in ipairs(item.buttons) do

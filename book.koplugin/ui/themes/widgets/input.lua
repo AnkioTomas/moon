@@ -21,7 +21,10 @@
           { label = "简介", height = 120 },          -- 给 height（逻辑像素）即多行
       },
       callback = function(account, password, intro) … end,   -- 按字段顺序传文本
+      actions = { { text = "测试", callback = function(account, …) … end } },  -- 可选
   }:show()
+
+actions 插在取消与确定之间，按字段顺序收文本，点了不关窗（测试、预览这类）。
 
 编辑内核仍是 KOReader InputText：虚拟键盘与 ime/ 的中文输入法都挂在它上面，外框和焦点样式由主题接管。
 InputText 的文本区固定铺白底，所以字段框底色用 color.page，并至少描 1px 边（soft 的控件无边）。
@@ -57,6 +60,7 @@ local _ = require("gettext")
 ---@field cancel_text string|nil
 ---@field callback fun(...: string)|nil
 ---@field cancel_callback fun()|nil
+---@field actions { text: string, callback: fun(...: string) }[]|nil 额外按钮，不关窗
 local Input = Modal:extend{
     anchor = "top",
     title = nil,
@@ -65,6 +69,7 @@ local Input = Modal:extend{
     cancel_text = nil,
     callback = nil,
     cancel_callback = nil,
+    actions = nil,
 }
 
 function Input:init()
@@ -110,14 +115,12 @@ function Input:init()
         self.inputs[i], self.frames[i] = input, frame
         body[#body + 1] = frame
     end
-    self:setDialog{
-        title = self.title,
-        body = body,
-        buttons = {
-            { text = self.cancel_text or _("取消"), callback = function() self:dismiss() end },
-            { text = self.ok_text or _("确定"), variant = "primary", callback = function() self:confirm() end },
-        },
-    }
+    local buttons = { { text = self.cancel_text or _("取消"), callback = function() self:dismiss() end } }
+    for _i, action in ipairs(self.actions or {}) do
+        buttons[#buttons + 1] = { text = action.text, callback = function() action.callback(unpack(self:texts())) end }
+    end
+    buttons[#buttons + 1] = { text = self.ok_text or _("确定"), variant = "primary", callback = function() self:confirm() end }
+    self:setDialog{ title = self.title, body = body, buttons = buttons }
 end
 
 function Input:onShow()
@@ -154,9 +157,16 @@ function Input:onTapModal(arg, ges)
     return Modal.onTapModal(self, arg, ges)
 end
 
-function Input:confirm()
+--- 各字段当前文本，按字段顺序。
+---@return string[]
+function Input:texts()
     local texts = {}
     for i, input in ipairs(self.inputs) do texts[i] = input:getText() end
+    return texts
+end
+
+function Input:confirm()
+    local texts = self:texts()
     self:close()
     if self.callback then self.callback(unpack(texts)) end
 end

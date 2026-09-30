@@ -27,8 +27,9 @@ local Theme = {}
 Theme.ids = { "paper", "bold", "soft" }
 
 local DEFAULT = "paper"
+Theme.SCALE_MIN, Theme.SCALE_MAX, Theme.SCALE_STEP = 100, 180, 10
 local known = {}
-for _, id in ipairs(Theme.ids) do known[id] = true end
+for _idx, id in ipairs(Theme.ids) do known[id] = true end
 
 --- 取指定主题的令牌表。
 ---@param id string
@@ -38,18 +39,49 @@ function Theme.get(id)
     return (require("ui.themes." .. id))
 end
 
+--- 当前主题 id。未设或写错回落 paper。
+---@return string
+function Theme.id()
+    local id = MoonSettings.get("display").ui_theme
+    return known[id] and id or DEFAULT
+end
+
+--- 写入主题 id。未知 id 不落盘，返回当前 id。
+---@param id string|nil
+---@return string
+function Theme.set(id)
+    if not known[id] then return Theme.id() end
+    local display = MoonSettings.get("display")
+    display.ui_theme = id
+    MoonSettings.saveSection("display", display)
+    return id
+end
+
 --- 当前主题令牌表。
 ---@return table
 function Theme.current()
-    local id = MoonSettings.get("display").ui_theme
-    return Theme.get(known[id] and id or DEFAULT)
+    return Theme.get(Theme.id())
 end
 
 --- 当前 UI 缩放百分比（夹到 100–180）。
 ---@return number
 function Theme.scale()
     local n = tonumber(MoonSettings.get("display").ui_scale) or 130
-    return math.max(100, math.min(180, n))
+    return math.max(Theme.SCALE_MIN, math.min(Theme.SCALE_MAX, n))
+end
+
+--- 写入 UI 缩放百分比，夹到 100–180 并按 10 取整。
+---@param n number|nil
+---@return number
+function Theme.setScale(n)
+    n = tonumber(n) or 130
+    n = math.max(Theme.SCALE_MIN, math.min(Theme.SCALE_MAX, n))
+    local step = Theme.SCALE_STEP
+    n = math.floor((n + step / 2) / step) * step
+    local display = MoonSettings.get("display")
+    display.ui_scale = n
+    MoonSettings.saveSection("display", display)
+    return n
 end
 
 --- 逻辑像素 → 物理像素（DPI × ui_scale）；0 保持 0，其余至少 1。

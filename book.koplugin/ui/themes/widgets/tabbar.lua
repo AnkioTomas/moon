@@ -11,7 +11,7 @@
   Tabbar.widget({ width = w, tabs = { { id = "home", text = "首页", icon = "home" } },
       active = "home", on_tab = function(id) … end })
 
-未选中格：页面底色 + faint 文字；点当前格不回调。
+未选中格：页面底色 + faint 文字；点当前格不回调，但照样吞掉点按（不漏给下层手势）。
 
 @module koplugin.book.ui.themes.widgets.tabbar
 --]]
@@ -30,17 +30,24 @@ local Tap = require("ui.themes.widgets.tap")
 ---@class BookThemeTabbar
 local Tabbar = {}
 
+--- 缺省底栏高度（含顶部分割线），供全屏页扣减内容区。
+---@return number 物理像素
+function Tabbar.height()
+    local t = Theme.current()
+    return Theme.px(t.control.height + t.space.lg)
+end
+
 ---@param opts table width/tabs/active/on_tab/height
 ---@return table
 function Tabbar.widget(opts)
     local t = Theme.current()
     local rule = math.max(1, Theme.px(t.row.divider))
-    local cell_h = (opts.height or Theme.px(t.control.height + t.space.lg)) - rule
+    local cell_h = (opts.height or Tabbar.height()) - rule
     local cell_w = math.floor(opts.width / #opts.tabs)
     local sel = t.selected
     local mark = Theme.px(sel.mark)
     local row = HorizontalGroup:new{ align = "top" }
-    for _, tab in ipairs(opts.tabs) do
+    for _idx, tab in ipairs(opts.tabs) do
         local active = tab.id == opts.active
         local ink = active and sel.ink or t.color.faint
         local label = Icon.label{
@@ -72,7 +79,9 @@ function Tabbar.widget(opts)
                 },
             }
         end
-        row[#row + 1] = Tap.wrap(cell, (not active and opts.on_tab) and function() opts.on_tab(tab.id) end or nil)
+        row[#row + 1] = Tap.wrap(cell, opts.on_tab and function()
+            if not active then opts.on_tab(tab.id) end
+        end or nil)
     end
     return VerticalGroup:new{
         align = "left",

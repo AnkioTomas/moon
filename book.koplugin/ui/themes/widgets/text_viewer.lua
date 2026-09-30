@@ -10,12 +10,17 @@
   +-------------------------------+
 
   TextViewer:new{ title = "日志", text = long_text }:show()
+  TextViewer:new{ title = "日志", text = long_text, buttons = {
+      { text = "稍后", callback = function() end },
+      { text = "安装", variant = "primary", callback = function() end },
+  } }:show()
 
 @module koplugin.book.ui.themes.widgets.text_viewer
 --]]
 
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
+local VerticalSpan = require("ui/widget/verticalspan")
 local Theme = require("ui.themes.init")
 local Box = require("ui.themes.widgets.box")
 local Modal = require("ui.themes.widgets.modal")
@@ -27,10 +32,12 @@ local TitleBar = require("ui.themes.widgets.titlebar")
 ---@field title string|nil
 ---@field text string
 ---@field page integer
+---@field buttons table[]|nil 底栏按钮 { text, variant, callback }；缺省只有标题栏关闭
 local TextViewer = Modal:extend{
     mask = false,
     title = nil,
     text = nil,
+    buttons = nil,
 }
 
 function TextViewer:init()
@@ -42,7 +49,11 @@ function TextViewer:init()
         width = w, title = self.title,
         right_icon = "close", right_callback = function() self:dismiss() end,
     })
-    local body_h = h - self.bar:getSize().h - Theme.px(t.control.height) - pad * 2
+    local button_h = 0
+    if self.buttons and #self.buttons > 0 then
+        button_h = Theme.px(t.space.lg) + Theme.px(t.control.height)
+    end
+    local body_h = math.max(1, h - self.bar:getSize().h - Theme.px(t.control.height) - pad * 2 - button_h)
     self.body = Text.box("body", self.text, w - pad * 2, { height = body_h })
     self.pages = math.max(1, math.ceil(self.body:getAllLineCount() / self.body:getVisLineCount()))
     self.page = 1
@@ -52,22 +63,28 @@ end
 function TextViewer:rebuild()
     local t = self.theme
     local w, h = self.dimen.w, self.dimen.h
+    local pad = Theme.px(t.space.lg)
+    local kids = {
+        align = "center",
+        self.bar,
+        Box:new{ style = {}, padding = pad, self.body },
+        Pager.widget({
+            width = w,
+            page = self.page,
+            pages = self.pages,
+            on_prev = function() self:turn(-1) end,
+            on_next = function() self:turn(1) end,
+        }),
+    }
+    if self.buttons and #self.buttons > 0 then
+        kids[#kids + 1] = VerticalSpan:new{ width = pad }
+        kids[#kids + 1] = self:buttonRow(self.buttons, w - pad * 2)
+    end
     self:setPanel(Box:new{
         style = { bg = t.color.page },
         width = w,
         height = h,
-        VerticalGroup:new{
-            align = "center",
-            self.bar,
-            Box:new{ style = {}, padding = Theme.px(t.space.lg), self.body },
-            Pager.widget({
-                width = w,
-                page = self.page,
-                pages = self.pages,
-                on_prev = function() self:turn(-1) end,
-                on_next = function() self:turn(1) end,
-            }),
-        },
+        VerticalGroup:new(kids),
     })
 end
 

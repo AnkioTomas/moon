@@ -140,7 +140,7 @@ function Image.await(root, cb)
             widget._image_waiters[done] = true
             subscriptions[#subscriptions + 1] = widget
         end
-        for _, child in ipairs(widget) do
+        for _idx, child in ipairs(widget) do
             if type(child) == "table" then visit(child) end
         end
     end
@@ -152,7 +152,7 @@ function Image.await(root, cb)
     end
     return { cancel = function()
         finished = true
-        for _, widget in ipairs(subscriptions) do
+        for _idx, widget in ipairs(subscriptions) do
             widget._image_waiters[done] = nil
         end
     end }
@@ -276,7 +276,7 @@ end
 ---@param box table 持有图片状态与取消句柄的占位容器
 local function requestPaint(box)
     if not box._screen then return end
-    local shown, _, window = UIManager:isSubwidgetShown(box, 64)
+    local shown, _depth, window = UIManager:isSubwidgetShown(box, 64)
     if not shown then return end
     UIManager:setDirty(window, function()
         return "ui", box._screen

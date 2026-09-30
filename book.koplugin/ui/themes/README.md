@@ -32,7 +32,9 @@ Confirm:new{
 |---|---|
 | `Theme.ids` | `{ "paper", "bold", "soft" }`，顺序即展示顺序 |
 | `Theme.get(id)` | 取指定主题的令牌表；id 不存在直接报错 |
-| `Theme.current()` | 当前主题，读 `display.ui_theme`，未设或写错回落 paper |
+| `Theme.id()` | 当前主题 id，读 `display.ui_theme`，未设或写错回落 paper |
+| `Theme.set(id)` | 写入主题 id 并落盘；未知 id 不写，返回当前 id |
+| `Theme.current()` | 当前主题令牌表 |
 | `Theme.scale()` | 当前缩放百分比，读 `display.ui_scale`，夹到 100–180，缺省 130 |
 | `Theme.px(n)` | 逻辑像素转物理像素（DPI × 缩放）：0 保持 0，其余至少 1 |
 | `Theme.fontSize(size)` | 逻辑字号只乘缩放，下限 10；DPI 由 `Font:getFace` 自己乘 |
@@ -102,8 +104,9 @@ Confirm:new{
 |---|---|---|
 | `row` | `Row.widget({ width, icon, image, title, subtitle, status, selected, enabled, callback })` | 设置页和列表的一行。`status` 可以是文字，也可以直接是控件；缩略图高度夹到行内 |
 | `titlebar` | `TitleBar.widget({ width, title, subtitle, left_icon, right_icon, ... })` | 标题栏，替代 TitleBar |
-| `tabbar` | `Tabbar.widget({ width, tabs, active, on_tab })` | 底栏 Tab；点当前格不回调 |
-| `pager` | `Pager.widget({ width, page, pages, on_prev, on_next, dots })` | 翻页条，到头的一侧按钮置灰 |
+| `tabbar` | `Tabbar.widget({ width, tabs, active, on_tab })` | 底栏 Tab；点当前格不回调但吞掉点按。`Tabbar.height()` 是缺省高度 |
+| `pager` | `Pager.widget({ width, page, pages, on_prev, on_next, dots, title })` | 翻页条，到头的一侧按钮置灰；`title` 代替中间的页码（分页有名字时用）；只给 `title` 不给 `page`/`pages` 即无界翻页，两侧常亮；`center` 放任意控件 |
+| `sections` | `Sections.widget({ width, height, sections, page, on_page })` → `widget, page, pages` | 分组分页的设置页。`sections` 是 `{ title, rows = { fun(width): widget } }` 列表；按实测高度装页，分组标题不会落单在页底；多于一页才画翻页条，`page` 越界会夹回范围 |
 
 ### 弹窗
 
@@ -113,11 +116,11 @@ Confirm:new{
 |---|---|---|
 | `confirm` | ConfirmBox | `Confirm:new{ text, ok_text, ok_callback, cancel_callback }` |
 | `toast` | InfoMessage | `Toast:new{ text, timeout }` |
-| `sheet` | ButtonDialog | `Sheet:new{ title, items }`。`items` 每项可以是按钮、`{ buttons = {...} }` 一行多按钮，或 `{ separator = true }` 分组空隙 |
-| `list` | Menu / Popup.list | `List:new{ title, items, multi, centered, on_select, on_toggle }`，分页不滚动 |
-| `input` | InputDialog / MultiInputDialog | `Input:new{ title, fields, callback }`；编辑内核仍是 KOReader InputText（虚拟键盘和中文输入法挂在它上面） |
+| `sheet` | ButtonDialog | `Sheet:new{ title, items }`。`items` 每项可以是按钮、`{ buttons = {...} }` 一行多按钮、`{ separator = true }` 分组空隙，或 `{ widget = fun(width): widget }` 自定义内容（二维码、说明文字） |
+| `list` | Menu / Popup.list | `List:new{ title, items, multi, centered, on_select, on_toggle }`，分页不滚动，左右滑翻页。见下方「List」 |
+| `input` | InputDialog / MultiInputDialog | `Input:new{ title, fields, callback, actions }`；`actions` 是取消与确定之间的额外按钮（收字段文本、不关窗）；编辑内核仍是 KOReader InputText（虚拟键盘和中文输入法挂在它上面） |
 | `spin` | SpinWidget / DateTimeWidget | `Spin:new{ title, fields, callback }`，一列或多列 |
-| `progress_dialog` | ProgressbarDialog | `ProgressDialog:new{ title }` + `:update(text, done, total)` |
+| `progress_dialog` | ProgressbarDialog | `ProgressDialog:new{ title, on_background, on_cancel }` + `:update(text, done, total)`；按字节显示用 `:bytes(done, total)`（显示 MB）；文案已格式化时用 `:set(text, percent)`。见下方「进度弹窗转后台」 |
 | `qr` | QRMessage | `QR:new{ title, text, caption }` |
 | `text_viewer` | TextViewer | `TextViewer:new{ title, text }`，全屏分页 |
 
@@ -128,6 +131,24 @@ Confirm:new{
 - `anchor = button.dimen`（一个矩形）：贴在它下方弹出，放不下就翻到上方，左右夹进屏内。适合按钮下拉菜单，一般配 `mask = false`。
 - 点面板外或按返回键：`dismissable = true` 时调 `dismiss()`（缺省关窗，确认框这类子类覆盖为“取消”），否则只吞掉事件。
 - `close_on_tap = true`：面板内外任意点按都关窗，用于提示、进度、二维码这类没有交互的面板。
+- 嵌进别的窗口（如阅读页侧栏）：传 `width` / `height` 缩小占位，传 `show_parent` 让刷新落到宿主窗口上（`UIManager:setDirty` 只认顶层窗口）。
+
+#### 进度弹窗转后台
+
+- 不给 `on_background` / `on_cancel`：无按钮，点任意处收起。
+- 给了任一个：底部出按钮行（「取消」「后台运行」），点面板内不关窗；点面板外或按返回键等同「后台运行」。
+- 两个按钮都先关窗再回调。弹窗不拥有后台任务：转后台只是关窗，取消的实际动作由回调完成。
+- 后台任务的前台弹窗不要直接用它，走 `ui/components/task_dialog.follow(task)`（随队列刷新、任务结束自动关窗）。
+
+#### List
+
+- 单选：`current = value` 按值标出当前项，打开时翻到它所在的页；不给 `current` 时看每项的 `checked`。
+- 点一行：先关窗，再调 `item.callback()`，没有 callback 时调 `on_select(value, item)`。`item.keep_open = true` 时不关窗，用于逐层浏览、切子列表。
+- 多选：`multi = true`，点一行翻转 `checked`，然后调 `item.callback(checked, item)` 和 `on_toggle(value, checked, item)`。
+- 行尾：`item.mandatory` 是文字；`item.widget` 是控件，或返回控件的函数（翻到那一页才构建，用于字体预览这类重控件）。
+- 底栏页签：`tabs = { tabs, active, on_tab = function(id) return items end }`，切页签就换成 `on_tab` 返回的列表。
+- 标题栏左键：`left_icon` + `left_callback`（如刷新）。
+- 原地换内容：`list:setItems(items)` 保留当前页；要回到首页，先设 `list.page = 1`。
 
 #### 写一个自定义弹窗
 
