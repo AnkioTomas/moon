@@ -16,32 +16,30 @@
 
 require("l10n").apply()
 
-local Blitbuffer = require("ffi/blitbuffer")
-local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
-local Font = require("ui/font")
-local FrameContainer = require("ui/widget/container/framecontainer")
-local Geom = require("ui/geometry")
-local GestureRange = require("ui/gesturerange")
 local HorizontalSpan = require("ui/widget/horizontalspan")
-local InputContainer = require("ui/widget/container/inputcontainer")
-local ProgressDialog = require("ui.themes.widgets.progress_dialog")
-local ProgressWidget = require("ui/widget/progresswidget")
-local Size = require("ui/size")
 local Tasks = require("workers.tasks")
-local TextWidget = require("ui/widget/textwidget")
-local Toast = require("ui.themes.widgets.toast")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
+local Theme = require("ui.themes.init")
+local Box = require("ui.themes.widgets.box")
+local Confirm = require("ui.themes.widgets.confirm")
+local Modal = require("ui.themes.widgets.modal")
+local Progress = require("ui.themes.widgets.progress")
+local ProgressDialog = require("ui.themes.widgets.progress_dialog")
+local Text = require("ui.themes.widgets.text")
+local Toast = require("ui.themes.widgets.toast")
 local _ = require("gettext")
 local T = require("ffi/util").template
 local Screen = Device.screen
 
 local MAX_ROWS = 6
 
----@class BookTaskDialog : InputContainer
-local TaskDialog = InputContainer:extend{}
+---@class BookTaskDialog : BookThemeModal
+local TaskDialog = Modal:extend{
+    mask = false,
+}
 
 --- 任务类型的显示名。
 ---@param kind BookTaskKind
@@ -139,33 +137,25 @@ function TaskDialog.start(spec)
 end
 
 function TaskDialog:init()
-    self.dimen = Screen:getSize()
+    Modal.init(self)
     if Device:hasKeys() then
         self.key_events.AnyKeyPressed = { { Device.input.group.Any } }
     end
-    if Device:isTouchDevice() then
-        self.ges_events.Tap = {
-            GestureRange:new{
-                ges = "tap",
-                range = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() },
-            },
-        }
-    end
-    self.width = Screen:getWidth() - Screen:scaleBySize(80)
+    self.panel_w = Screen:getWidth() - Screen:scaleBySize(80)
     self:build()
     self.watch = Tasks.watch(function() self:refresh() end)
 end
 
 --- 按当前快照重建内容；行框在绘制后才有 dimen，点按时再比对。
 function TaskDialog:build()
-    local width = self.width
+    local t = self.theme
+    local width = self.panel_w
+    local gap = Theme.px(t.space.sm)
     -- 定宽：文案长短变化不改变弹窗尺寸，进度刷新只需刷原区域。
-    local group = VerticalGroup:new{ align = "left", HorizontalSpan:new{ width = width } }
-    group[2] = TextWidget:new{
-        text = _("后台任务"),
-        face = Font:getFace("ffont"),
-        bold = true,
-        max_width = width,
+    local group = VerticalGroup:new{
+        align = "left",
+        HorizontalSpan:new{ width = width },
+        Text.line("title", _("后台任务"), { width = width }),
     }
     self.rows = {}
     local tasks = Tasks.tasks()
@@ -173,60 +163,26 @@ function TaskDialog:build()
         local task = tasks[i]
         local body = VerticalGroup:new{
             align = "left",
-            TextWidget:new{
-                text = task.title or "",
-                face = Font:getFace("smallffont"),
-                bold = true,
-                max_width = width,
-            },
-            TextWidget:new{
-                text = TaskDialog.label(task.kind) .. " · " .. TaskDialog.status(task),
-                face = Font:getFace("smallffont"),
-                max_width = width,
-            },
+            VerticalSpan:new{ width = gap },
+            Text.line("body", task.title or "", { width = width, bold = true }),
+            Text.line("caption", TaskDialog.label(task.kind) .. " · " .. TaskDialog.status(task), { width = width }),
         }
         if task.total > 0 then
-            body[#body + 1] = ProgressWidget:new{
-                width = width,
-                height = Screen:scaleBySize(8),
-                margin_h = 0,
-                margin_v = Size.margin.tiny,
-                fillcolor = Blitbuffer.COLOR_BLACK,
-                percentage = math.min(task.count / task.total, 1),
-            }
+            body[#body + 1] = VerticalSpan:new{ width = Theme.px(t.space.xs) }
+            body[#body + 1] = Progress:new{ width = width, percent = math.min(task.count / task.total, 1) * 100 }
         end
-        local row = FrameContainer:new{
-            bordersize = 0,
-            padding = 0,
-            padding_top = Size.padding.default,
-            body,
-        }
+        local row = Box:new{ style = {}, body }
         self.rows[#self.rows + 1] = { frame = row, key = task.key, title = task.title, restartable = task.restartable }
         group[#group + 1] = row
     end
-    if #tasks > MAX_ROWS then
-        group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
-        group[#group + 1] = TextWidget:new{
-            text = T(_("还有 %1 个任务"), #tasks - MAX_ROWS),
-            face = Font:getFace("smallffont"),
-            max_width = width,
-        }
-    elseif #tasks == 0 then
-        group[#group + 1] = VerticalSpan:new{ width = Size.padding.default }
-        group[#group + 1] = TextWidget:new{
-            text = _("当前没有后台任务"),
-            face = Font:getFace("smallffont"),
-            max_width = width,
-        }
+    local note = #tasks > MAX_ROWS and T(_("还有 %1 个任务"), #tasks - MAX_ROWS)
+        or #tasks == 0 and _("当前没有后台任务")
+    if note then
+        group[#group + 1] = VerticalSpan:new{ width = gap }
+        group[#group + 1] = Text.line("caption", note, { width = width })
     end
-    self.frame = FrameContainer:new{
-        radius = Size.radius.window,
-        bordersize = Size.border.window,
-        padding = Size.padding.large,
-        background = Blitbuffer.COLOR_WHITE,
-        group,
-    }
-    self[1] = CenterContainer:new{ dimen = Screen:getSize(), self.frame }
+    self.frame = Box:new{ style = t.dialog, padding = Theme.px(t.space.lg), group }
+    self:setPanel(self.frame)
 end
 
 --- 队列变化：重建；尺寸没变只刷弹窗区域，变了（增删任务、出现进度条）连同旧区域一起刷下层。
@@ -244,16 +200,8 @@ function TaskDialog:refresh()
     end)
 end
 
-function TaskDialog:show()
-    UIManager:show(self, "ui")
-end
-
-function TaskDialog:close()
-    UIManager:close(self, "ui")
-end
-
---- 点中可重跑的任务行询问取消，其它位置收起。
-function TaskDialog:onTap(_arg, ges)
+--- 点中可重跑的任务行询问取消，其它位置（含面板内空白）收起。
+function TaskDialog:onTapModal(_arg, ges)
     for _i, row in ipairs(self.rows) do
         if row.frame.dimen and ges.pos:intersectWith(row.frame.dimen) then
             if row.restartable then self:confirmCancel(row) end
@@ -266,7 +214,7 @@ end
 
 ---@param row { key: string, title: string|nil }
 function TaskDialog:confirmCancel(row)
-    UIManager:show(require("ui/widget/confirmbox"):new{
+    Confirm:new{
         text = T(_("取消任务「%1」？"), row.title or ""),
         ok_text = _("取消任务"),
         cancel_text = _("继续"),
@@ -274,7 +222,7 @@ function TaskDialog:confirmCancel(row)
             local task = Tasks.get(row.key)
             if task then task.cancel() end
         end,
-    })
+    }:show()
 end
 
 function TaskDialog:onAnyKeyPressed()
@@ -287,6 +235,7 @@ function TaskDialog:onCloseWidget()
         self.watch.cancel()
         self.watch = nil
     end
+    Modal.onCloseWidget(self)
 end
 
 return TaskDialog
