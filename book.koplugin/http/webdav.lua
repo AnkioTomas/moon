@@ -35,6 +35,7 @@ local T = require("ffi/util").template
 ---@field putFileAsync fun(self: WebdavClient, path: string, local_path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
 ---@field makeCollectionAsync fun(self: WebdavClient, path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
 ---@field ensurePathAsync fun(self: WebdavClient, path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
+---@field deleteAsync fun(self: WebdavClient, path: string, cb: fun(ok: boolean|nil, err: string|nil, code: number|nil)): { cancel: fun() }
 
 local Webdav = {}
 Webdav.__index = Webdav
