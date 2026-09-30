@@ -120,6 +120,7 @@ Confirm:new{
 | `list` | Menu / Popup.list | `List:new{ title, items, multi, centered, on_select, on_toggle }`，分页不滚动，左右滑翻页。见下方「List」 |
 | `input` | InputDialog / MultiInputDialog | `Input:new{ title, fields, callback, actions }`；`actions` 是取消与确定之间的额外按钮（收字段文本、不关窗）；编辑内核仍是 KOReader InputText（虚拟键盘和中文输入法挂在它上面） |
 | `spin` | SpinWidget / DateTimeWidget | `Spin:new{ title, fields, callback }`，一列或多列 |
+| `icon_picker` | — | `IconPicker:new{ title, current, on_select }`：全屏网格列出图标字体里的全部图标，打开翻到 `current`，左上角按英文名子串搜索，点一格关窗后 `on_select(name)`。名字表 `widgets/icon/names.lua` 由 `tools/build_icon_names.py` 从字体生成，换字体后重跑 |
 | `progress_dialog` | ProgressbarDialog | `ProgressDialog:new{ title, on_background, on_cancel }` + `:update(text, done, total)`；按字节显示用 `:bytes(done, total)`（显示 MB）；文案已格式化时用 `:set(text, percent)`。见下方「进度弹窗转后台」 |
 | `qr` | QRMessage | `QR:new{ title, text, caption }` |
 | `text_viewer` | TextViewer | `TextViewer:new{ title, text }`，全屏分页 |
@@ -138,7 +139,7 @@ Confirm:new{
 - 不给 `on_background` / `on_cancel`：无按钮，点任意处收起。
 - 给了任一个：底部出按钮行（「取消」「后台运行」），点面板内不关窗；点面板外或按返回键等同「后台运行」。
 - 两个按钮都先关窗再回调。弹窗不拥有后台任务：转后台只是关窗，取消的实际动作由回调完成。
-- 后台任务的前台弹窗不要直接用它，走 `ui/components/task_dialog.follow(task)`（随队列刷新、任务结束自动关窗）。
+- 后台任务的前台弹窗不要直接用它，走 `workers/ui/task_dialog.follow(task)`（随队列刷新、任务结束自动关窗）。
 
 #### List
 
