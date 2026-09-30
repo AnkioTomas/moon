@@ -130,7 +130,7 @@ end
 
 --- 写入 Turbo HTTPHeaders。已有键 set，新键 add；跳过 Content-Length。
 ---@param headers any Turbo HTTPHeaders
----@param values table|nil
+---@param values table|false|nil
 local function addHeaders(headers, values)
     for name, value in pairs(values or {}) do
         if type(name) == "string" and value ~= nil then
