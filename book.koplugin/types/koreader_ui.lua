@@ -18,7 +18,7 @@ function Widget:extend(o) end
 ---@return T
 function Widget:new(o) end
 
-function Widget:free() end
+-- 基类没有 free：只有 WidgetContainer 与 TextWidget / ImageWidget 等持有资源的子类才有，别在这里补。
 
 ---@param bb BlitBuffer
 ---@param x number
