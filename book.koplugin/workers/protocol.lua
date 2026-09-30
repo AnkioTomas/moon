@@ -12,10 +12,7 @@ Protocol.MAX_FRAME = 4 * 1024 * 1024
 ---@param value table
 ---@return string
 function Protocol.encode(value)
-    local ok, payload = pcall(JSON.encode, value)
-    if not ok or type(payload) ~= "string" then
-        error("worker protocol: encode failed: " .. tostring(payload), 2)
-    end
+    local payload = JSON.encode(value)
     if #payload > Protocol.MAX_FRAME then
         error("worker protocol: frame too large", 2)
     end
@@ -31,9 +28,6 @@ end
 ---@param bytes string
 ---@return table[]|nil messages, string|nil err
 function Protocol.feed(decoder, bytes)
-    if type(bytes) ~= "string" then
-        return nil, "worker protocol: bytes must be string"
-    end
     decoder.buffer = decoder.buffer .. bytes
     local out = {}
     while #decoder.buffer >= 8 do
@@ -51,9 +45,6 @@ function Protocol.feed(decoder, bytes)
             return nil, "worker protocol: invalid JSON payload"
         end
         out[#out + 1] = value
-    end
-    if #decoder.buffer > Protocol.MAX_FRAME + 8 then
-        return nil, "worker protocol: frame too large"
     end
     return out
 end

@@ -1,17 +1,20 @@
 --[[--
-后台任务队列：用户发起、耗时长、不该挡住界面的操作（全本缓存、书城下载、书架同步）。
+后台任务队列：用户发起、耗时长的操作，按 kind 分三类：
+`download` 资源下载（书城、字典、输入法词库）、`sync` 书库同步、`cache` 书籍缓存。
 
-同一 lane 内串行，不同 lane 互不等待；key 去重，重复入队返回在跑的那条。
+同类可以并行，异类互斥：有任务在跑（或退避占位）时只放行同类；队首排队的是异类时后面的同类不插队，
+免得异类饿死。key 必填且唯一：同 key 还在排队的旧任务被新任务替换（旧的按取消处理），已在执行的拒绝新任务。
 任务只活在本进程；断点靠各业务自己的落盘状态（已缓存章节、脏标记），不持久化队列。
-队列不认识业务：进度文案、完成提示、可否重试都由任务自己给。
+队列不认识业务：进度文案、完成提示、可否重试都由任务自己给；download 类的 count/total 是字节数。
+前台弹窗 / 转后台 / 被拒提示由 `workers/ui/task_dialog`（`start` / `follow`）负责，队列本身零 UI。
 
 restartable 的任务归队列所有，队列可以随时中断并从头重跑它：
-休眠（`Tasks.suspend`）时中断、放回 waiting；断网导致的失败（result.ok 为假且设备未连网）
-也放回 waiting，不算失败、不消耗重试次数；`Tasks.wake`（唤醒 / 联网）后按原顺序续跑。
+休眠（`Tasks.onSuspend`）时中断、放回 waiting；断网导致的失败（result.ok 为假且设备未连网）
+也放回 waiting，不算失败、不消耗重试次数；`Tasks.onResume` / `Tasks.onNetworkConnected` 后按原顺序续跑。
 用户也只能取消 restartable 的任务。书架同步归桌面所有，不设 restartable，队列只展示。
 
-  local task, queued, reason = Tasks.enqueue{
-      key = "cache\0wechat\0123", lane = "cache", label = _("缓存"), title = "书名",
+  local task, reason = Tasks.enqueue{       -- 被拒时 task 为 nil，reason = running / queue_full
+      key = "cache\0wechat\0123", kind = "cache", title = "书名",
       restartable = true,
       run = function(report, done)          -- 返回 { cancel } 句柄
           report(text, count, total)         -- 三者皆可省
@@ -22,39 +25,42 @@ restartable 的任务归队列所有，队列可以随时中断并从头重跑�
   }
   task.cancel()
 
-@module koplugin.book.tasks
+@module koplugin.book.workers.tasks
 --]]
 
 local Tasks = {}
 
+---@alias BookTaskKind "download"|"sync"|"cache"
+
 ---@class BookTask
 ---@field key string
----@field lane string
----@field label string
+---@field kind BookTaskKind
 ---@field title string|nil
 ---@field restartable boolean|nil
 ---@field run fun(report: fun(text: string|nil, count: integer|nil, total: integer|nil), done: fun(result: table)): table|nil
----@field retryable fun(result: table): boolean|nil
+---@field retryable (fun(result: table): boolean)|nil
 ---@field on_done fun(result: table)|nil
----@field state "queued"|"running"|"retry_wait"|"waiting"|"finished"|"cancelled"
----@field done boolean
+---@field state "queued"|"running"|"retry_wait"|"waiting"|"finished"|"cancelled"|nil
+---@field done boolean|nil
 ---@field result table|nil
----@field attempt integer
+---@field attempt integer|nil
 ---@field text string|nil
----@field count integer
----@field total integer
----@field cancel fun()
+---@field count integer|nil
+---@field total integer|nil
+---@field cancel fun()|nil
+---@field handle { cancel: fun() }|nil
+---@field token any|nil
+---@field retry_tick fun()|nil
 
 local MAX_ATTEMPTS = 3
 local RETRY_DELAY_SECONDS = 15
 local MAX_PENDING = 64
+local KINDS = { download = true, sync = true, cache = true }
 
 ---@type BookTask[] 未结束任务，入队顺序
 local list = {}
 ---@type table<string, BookTask>
 local by_key = {}
----@type table<string, BookTask> lane → 占槽任务（running / retry_wait）
-local busy = {}
 local watchers = {}
 local change_scheduled = false
 --- 休眠中：restartable 任务不启动。
@@ -83,15 +89,24 @@ local function remove(task)
         end
     end
     by_key[task.key] = nil
-    if busy[task.lane] == task then busy[task.lane] = nil end
 end
 
+--- 占着执行权的类型：有 running / retry_wait 任务时为其类型。
+---@return BookTaskKind|nil
+local function activeKind()
+    for _idx, task in ipairs(list) do
+        if task.state == "running" or task.state == "retry_wait" then return task.kind end
+    end
+end
+
+--- 下一个可启动的排队任务；队首可启动的排队任务是异类时返回 nil（后面的同类不插队）。
 ---@return BookTask|nil
 local function nextQueued()
-    for _, task in ipairs(list) do
-        if task.state == "queued" and not busy[task.lane]
-            and not (suspended and task.restartable) then
-            return task
+    local kind = activeKind()
+    for _idx, task in ipairs(list) do
+        if task.state == "queued" and not (suspended and task.restartable) then
+            if kind == nil or task.kind == kind then return task end
+            return nil
         end
     end
 end
@@ -114,8 +129,7 @@ local function park(task)
     task.token = nil
     if task.state == "running" then task.attempt = task.attempt - 1 end
     task.state = "waiting"
-    if busy[task.lane] == task then busy[task.lane] = nil end
-    if handle and handle.cancel then handle:cancel() end
+    if handle then handle:cancel() end
 end
 
 ---@param task BookTask
@@ -130,12 +144,11 @@ local function settle(task, result)
         return
     end
     if task.retryable and task.attempt < MAX_ATTEMPTS and task.retryable(result) then
-        -- 退避期间继续占 lane，避免排在后面的任务趁窗口开跑。
+        -- 退避期间继续占执行权，避免异类任务趁窗口开跑。
         task.state = "retry_wait"
         task.retry_tick = function()
             task.retry_tick = nil
             task.state = "queued"
-            busy[task.lane] = nil
             changed()
             startNext()
         end
@@ -154,7 +167,6 @@ end
 
 ---@param task BookTask
 start = function(task)
-    busy[task.lane] = task
     task.state = "running"
     task.attempt = task.attempt + 1
     local token = {}
@@ -166,11 +178,11 @@ start = function(task)
     local handle = task.run(function(text, count, total)
         if not live() then return end
         task.text = text
-        task.count = tonumber(count) or task.count
-        task.total = tonumber(total) or task.total
+        task.count = count or task.count
+        task.total = total or task.total
         changed()
     end, function(result)
-        if live() then settle(task, result or {}) end
+        if live() then settle(task, result) end
     end)
     if live() then task.handle = handle end
 end
@@ -187,24 +199,26 @@ local function cancel(task)
     local handle = task.handle
     task.handle = nil
     remove(task)
-    if handle and handle.cancel then handle:cancel() end
+    if handle then handle:cancel() end
     changed()
     startNext()
 end
 
---- 入队。同 key 已在排队或运行时复用既有任务。
----@param spec table 见模块头；表本身即任务对象
----@return BookTask|nil task
----@return boolean queued 是否新入队
----@return string|nil reason 入队失败原因（目前只有 queue_full）
+--- 入队。key 必填且唯一：同 key 旧任务还在排队（queued）就踢掉它（按取消处理，不调 on_done），
+--- 新任务排到队尾；旧任务已在执行（running / retry_wait / waiting）则拒绝。
+---@param spec BookTask 见模块头；表本身即任务对象
+---@return BookTask|nil task 入队的任务；被拒时为 nil
+---@return "running"|"queue_full"|nil reason 被拒原因
 function Tasks.enqueue(spec)
+    assert(KINDS[spec.kind], "unknown task kind")
+    assert(type(spec.key) == "string" and spec.key ~= "", "task key required")
     local existing = by_key[spec.key]
-    if existing then return existing, false end
-    local queued = 0
-    for _, task in ipairs(list) do
-        if task.state == "queued" or task.state == "waiting" then queued = queued + 1 end
+    if existing then
+        if existing.state ~= "queued" then return nil, "running" end
+        cancel(existing)
     end
-    if queued >= MAX_PENDING then return nil, false, "queue_full" end
+    -- 同类并行时在跑的也会无限增长，上限按全部未结束任务算。
+    if #list >= MAX_PENDING then return nil, "queue_full" end
     local task = spec
     task.state = "queued"
     task.done = false
@@ -216,14 +230,14 @@ function Tasks.enqueue(spec)
     list[#list + 1] = task
     changed()
     startNext()
-    return task, true
+    return task
 end
 
 --- 休眠前：中断在跑的 restartable 任务放回 waiting，唤醒前不再启动它们。
 --- 退避中的任务不动：定时器唤醒后才会到点。
-function Tasks.suspend()
+function Tasks.onSuspend()
     suspended = true
-    for _, task in ipairs(list) do
+    for _idx, task in ipairs(list) do
         if task.restartable and task.state == "running" then
             park(task)
             changed()
@@ -231,10 +245,10 @@ function Tasks.suspend()
     end
 end
 
---- 唤醒 / 联网：waiting 放回队列按原顺序续跑。仍未联网时会再次失败回到 waiting，代价是一次立即失败的请求。
-function Tasks.wake()
+--- 唤醒：waiting 放回队列按原顺序续跑。仍未联网时会再次失败回到 waiting，代价是一次立即失败的请求。
+function Tasks.onResume()
     suspended = false
-    for _, task in ipairs(list) do
+    for _idx, task in ipairs(list) do
         if task.state == "waiting" then
             task.state = "queued"
             changed()
@@ -242,6 +256,9 @@ function Tasks.wake()
     end
     startNext()
 end
+
+--- 联网：与唤醒相同，放行等网络的任务。
+Tasks.onNetworkConnected = Tasks.onResume
 
 --- 按 key 取未结束的任务。
 ---@param key string
@@ -253,16 +270,15 @@ end
 local ORDER = { running = 1, retry_wait = 1, waiting = 2, queued = 3 }
 
 --- 任务快照：运行 / 退避中的在前，其次等待网络的，最后排队的；同组按入队顺序。返回副本。
----@return { key: string, lane: string, label: string, title: string|nil, state: string, text: string|nil, count: integer, total: integer, attempt: integer, restartable: boolean }[]
+---@return { key: string, kind: BookTaskKind, title: string|nil, state: string, text: string|nil, count: integer, total: integer, attempt: integer, restartable: boolean }[]
 function Tasks.tasks()
     local out = {}
     for group = 1, 3 do
-        for _, task in ipairs(list) do
+        for _idx, task in ipairs(list) do
             if ORDER[task.state] == group then
                 out[#out + 1] = {
                     key = task.key,
-                    lane = task.lane,
-                    label = task.label,
+                    kind = task.kind,
                     title = task.title,
                     state = task.state,
                     text = task.text,
