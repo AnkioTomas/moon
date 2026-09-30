@@ -203,7 +203,7 @@ function Weather:parse(body)
     area = type(area) == "table" and area[1] or nil
     local weather = type(payload.weather) == "table" and payload.weather or {}
     local days = {}
-    for _, day in ipairs(weather) do
+    for _idx, day in ipairs(weather) do
         if type(day) == "table" then
             days[#days + 1] = dayRow(day)
         end

@@ -45,7 +45,7 @@ function Myrl:parse(body)
         quote_from = Online.nonempty(quote.from),
     }
     local history = {}
-    for _, row in ipairs(type(payload.history) == "table" and payload.history or {}) do
+    for _idx, row in ipairs(type(payload.history) == "table" and payload.history or {}) do
         if type(row) == "table" then
             local year = Online.nonempty(row.year)
             local title = Online.nonempty(row.title)
@@ -57,7 +57,7 @@ function Myrl:parse(body)
     end
     daily.history = history
     local news = {}
-    for _, title in ipairs(type(payload.news) == "table" and payload.news or {}) do
+    for _idx, title in ipairs(type(payload.news) == "table" and payload.news or {}) do
         title = Online.nonempty(title)
         if title then news[#news + 1] = title end
         if #news >= 8 then break end
