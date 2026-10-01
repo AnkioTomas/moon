@@ -18,7 +18,7 @@ local Geom = require("ui/geometry")
 local GestureRange = require("ui/gesturerange")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local Icon = require("ui.themes.widgets.icon")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Text = require("ui.themes.widgets.text")
 

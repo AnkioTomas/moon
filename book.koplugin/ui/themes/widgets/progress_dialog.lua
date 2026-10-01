@@ -9,7 +9,8 @@
   | [ 取消 ] [后台运行]  |   给了 on_cancel / on_background 才有按钮行
   +----------------------+
 
-没有按钮时点任意处收起；有按钮时点面板内不关，点面板外 / 返回键等同「后台运行」（没给则只关窗）。
+点按一律不关窗（面板内外都不关），只能经按钮或返回键离开；返回键等同「后台运行」（没给则只关窗），
+传 dismissable = false 连返回键也吞掉。
 两个按钮都先关窗再回调；关窗本身不影响后台任务，任务归调用方。
 
   local dialog = ProgressDialog:new{ title = "…", close_callback = fn }
@@ -28,7 +29,7 @@ require("l10n").apply()
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Modal = require("ui.themes.widgets.modal")
 local Progress = require("ui.themes.widgets.progress")
 local Text = require("ui.themes.widgets.text")
@@ -37,10 +38,9 @@ local T = require("ffi/util").template
 
 ---@class BookThemeProgressDialog : BookThemeModal
 ---@field title string
----@field on_background fun()|nil 给了就出「后台运行」按钮；点面板外 / 返回键同此
+---@field on_background fun()|nil 给了就出「后台运行」按钮；返回键同此
 ---@field on_cancel fun()|nil 给了就出「取消」按钮
 local ProgressDialog = Modal:extend{
-    close_on_tap = true,
     title = nil,
     on_background = nil,
     on_cancel = nil,
@@ -57,7 +57,6 @@ function ProgressDialog:init()
     if self.on_background then
         buttons[#buttons + 1] = { text = _("后台运行"), variant = "primary", callback = function() self:dismiss() end }
     end
-    if #buttons > 0 then self.close_on_tap = false end
     Modal.init(self)
     local t = self.theme
     local width = self:innerWidth()
@@ -75,10 +74,16 @@ function ProgressDialog:init()
     }
 end
 
---- 点面板外 / 返回键：关窗，给了 on_background 就转后台。
+--- 返回键：关窗，给了 on_background 就转后台。
 function ProgressDialog:dismiss()
     self:close()
     if self.on_background then self.on_background() end
+end
+
+--- 吞掉全部点按：误触遮罩不能关窗（关窗会触发调用方的取消 / 转后台）。按钮先于此处理。
+---@return boolean
+function ProgressDialog:onTapModal()
+    return true
 end
 
 --- 换文案；给了 percent（0..100）时进度条跟着走，否则保持不动。

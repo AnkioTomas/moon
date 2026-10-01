@@ -12,7 +12,7 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
 local Widget = require("ui/widget/widget")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 
 ---@class BookThemeProgress : Widget
 ---@field width number 物理像素

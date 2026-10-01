@@ -34,7 +34,7 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Button = require("ui.themes.widgets.button")
 local Modal = require("ui.themes.widgets.modal")
 local Text = require("ui.themes.widgets.text")
@@ -73,14 +73,27 @@ local function display(field, value)
     return field.format and field.format(value) or tostring(value)
 end
 
+--- 列宽：两个按钮高，且容得下 min / max / 初值里最宽的 hero 数字（"130%" 会超出固定宽而被截成省略号）。
+---@param field BookThemeSpinField
+---@param base number 物理像素
+---@return number
+local function columnWidth(field, base)
+    local w = base
+    for _idx, v in ipairs({ field.min, field.max, field.value }) do
+        w = math.max(w, Text.line("hero", display(field, v)):getSize().w)
+    end
+    return w
+end
+
 function Spin:init()
     Modal.init(self)
     local t = self.theme
-    local col_w = Theme.px(t.control.height) * 2
+    local base_w = Theme.px(t.control.height) * 2
     local gap = Theme.px(t.space.lg)
     self.values, self.labels = {}, {}
     local row = HorizontalGroup:new{ align = "center" }
     for i, field in ipairs(self.fields) do
+        local col_w = columnWidth(field, base_w)
         self.values[i] = field.value
         self.labels[i] = Text.line("hero", display(field, field.value), { width = col_w })
         local col = VerticalGroup:new{ align = "center" }

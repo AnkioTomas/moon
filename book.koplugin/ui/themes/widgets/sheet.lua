@@ -24,7 +24,7 @@
 
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Button = require("ui.themes.widgets.button")
 local Modal = require("ui.themes.widgets.modal")
 

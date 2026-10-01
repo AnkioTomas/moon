@@ -19,7 +19,7 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local LineWidget = require("ui/widget/linewidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Button = require("ui.themes.widgets.button")
 local Text = require("ui.themes.widgets.text")
 

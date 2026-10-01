@@ -42,7 +42,7 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("utils.log")
 local Perf = require("utils.perf")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Download = require("ui.themes.widgets.image.download")
 local ImageWidget = require("ui/widget/imagewidget")
 
