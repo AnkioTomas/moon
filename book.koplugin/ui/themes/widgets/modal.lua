@@ -30,7 +30,7 @@ local UIManager = require("ui/uimanager")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Guard = require("ui.guard")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
 local Mask = require("ui.themes.widgets.mask")
@@ -39,7 +39,7 @@ local Screen = Device.screen
 
 ---@class BookThemeModal : InputContainer
 ---@field dismissable boolean 点面板外 / 返回键是否关闭
----@field close_on_tap boolean 面板内外任意点按都直接关窗（提示、进度、二维码这类无交互面板）
+---@field close_on_tap boolean 面板内外任意点按都直接关窗（提示、二维码这类无交互面板）；dismissable=false 时不生效
 ---@field anchor string|table center/top，或锚点矩形 {x,y,w,h}（物理像素，如按钮 dimen）
 ---@field mask boolean 是否画网状遮罩；全屏页传 false
 ---@field close_callback fun()|nil
@@ -200,7 +200,7 @@ end
 ---@param ges table
 ---@return boolean
 function Modal:onTapModal(_arg, ges)
-    if self.close_on_tap then
+    if self.close_on_tap and self.dismissable then
         self:close()
         return true
     end

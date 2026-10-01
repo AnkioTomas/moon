@@ -29,7 +29,7 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local TextWidget = require("ui/widget/textwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 
 ---@class BookThemeIcon
 local Icon = {}

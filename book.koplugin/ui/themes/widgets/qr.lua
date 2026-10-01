@@ -20,7 +20,7 @@ local Geom = require("ui/geometry")
 local QRWidget = require("ui/widget/qrwidget")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Modal = require("ui.themes.widgets.modal")
 local Text = require("ui.themes.widgets.text")
 

@@ -23,7 +23,7 @@ image 表面半径保持 0。封面走 raised，圆角由 Box 在绘制后裁掉
 --]]
 
 local Core = require("ui.themes.widgets.image.core")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Text = require("ui.themes.widgets.text")
 

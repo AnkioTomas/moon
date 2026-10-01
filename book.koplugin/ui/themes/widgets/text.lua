@@ -12,7 +12,7 @@ opts.color 是灰度令牌（缺省 color.ink）；title / hero 默认加粗，o
 local Blitbuffer = require("ffi/blitbuffer")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 
 local FACES = { caption = "xx_smallinfofont", body = "cfont", title = "cfont", hero = "cfont" }
 local BOLD = { title = true, hero = true }

@@ -8,12 +8,12 @@
 - **自成一体**：只依赖 KOReader 自带模块，以及插件的基础设施 `utils.settings`、`utils.log`、`utils.perf`、`utils.paths`、`http.request`、`l10n` / `gettext`。
   不依赖 `ui/widgets` 等其他 UI 组件，删掉它们不影响这里。
 - **组件只读令牌键，不判断主题 id**：换主题只换数据，组件代码没有 `if theme == "bold"`。
-- **模块按 `xxx.init` 引用**：KOReader 给插件的 `package.path` 只有 `<plugin>/?.lua`，没有 `?/init.lua`。所以要写成 `require("ui.themes.init")`，不能写成 `require("ui.themes")`。
+- **目录模块直接按目录名引用**：KOReader 给插件的 `package.path` 只有 `<plugin>/?.lua`，`main.lua` 的 `allowInitModules` 补上了 `<plugin>/?/init.lua`，所以写 `require("ui.themes")`，不要写 `require("ui.themes.init")`（两种名字会把同一文件加载两次）。
 
 ## 快速上手
 
 ```lua
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Confirm = require("ui.themes.widgets.confirm")
 local Text = require("ui.themes.widgets.text")
 
@@ -131,13 +131,14 @@ Confirm:new{
 - `anchor = "top"`：贴顶，给虚拟键盘让位。
 - `anchor = button.dimen`（一个矩形）：贴在它下方弹出，放不下就翻到上方，左右夹进屏内。适合按钮下拉菜单，一般配 `mask = false`。
 - 点面板外或按返回键：`dismissable = true` 时调 `dismiss()`（缺省关窗，确认框这类子类覆盖为“取消”），否则只吞掉事件。
-- `close_on_tap = true`：面板内外任意点按都关窗，用于提示、进度、二维码这类没有交互的面板。
+- `close_on_tap = true`：面板内外任意点按都关窗，用于提示、二维码这类没有交互的面板（进度弹窗例外，见下）。
 - 嵌进别的窗口（如阅读页侧栏）：传 `width` / `height` 缩小占位，传 `show_parent` 让刷新落到宿主窗口上（`UIManager:setDirty` 只认顶层窗口）。
 
 #### 进度弹窗转后台
 
-- 不给 `on_background` / `on_cancel`：无按钮，点任意处收起。
-- 给了任一个：底部出按钮行（「取消」「后台运行」），点面板内不关窗；点面板外或按返回键等同「后台运行」。
+- 点按一律不关窗（面板内外都不关），防误触取消任务；只能经按钮或返回键离开。
+- 给了 `on_background` / `on_cancel`：底部出按钮行（「取消」「后台运行」）；返回键等同「后台运行」（没给则只关窗）。
+- 传 `dismissable = false` 连返回键也吞掉，只能由调用方 `close()`。
 - 两个按钮都先关窗再回调。弹窗不拥有后台任务：转后台只是关窗，取消的实际动作由回调完成。
 - 后台任务的前台弹窗不要直接用它，走 `workers/ui/task_dialog.follow(task)`（随队列刷新、任务结束自动关窗）。
 

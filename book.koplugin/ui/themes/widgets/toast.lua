@@ -7,6 +7,8 @@
 
   Toast:new{ text = "已加入书架", timeout = 2 }:show()
 
+dismissable = false：点按与返回键都只吞事件，只能等 timeout 或调用方 close()。
+
 @module koplugin.book.ui.themes.widgets.toast
 --]]
 

@@ -19,7 +19,7 @@ style 取 card / raised / dialog 这类表面令牌（bg/border/border_color/rad
 local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 
 ---@class BookThemeBox : WidgetContainer
 ---@field style table 表面令牌
