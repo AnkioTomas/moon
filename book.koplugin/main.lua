@@ -23,7 +23,6 @@ end
 allowInitModules(debug.getinfo(1, "S").source:match("^@(.*)/"))
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
-local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
 require("l10n")
 
@@ -33,6 +32,7 @@ local Features = require("features")
 local Guard = require("ui.guard")
 local Menu = require("menu")
 local Session = require("reader.session")
+local Tasks = require("workers.tasks")
 
 --- Book 插件实例（FM / Reader 各一份）
 ---@class BookPlugin : WidgetContainer
@@ -52,7 +52,7 @@ end
 
 --- 插件生命周期转给所有启用源：混合模式下它们都在用，要不要响应由源自己判断；加载失败的源跳过。
 ---@param plugin BookPlugin
----@param hook "onCreate"|"onPause"|"onResume"|"onDestroy"
+---@param hook "onCreate"|"onSuspend"|"onResume"|"onExit"
 local function emitSource(plugin, hook)
     for _idx, meta in ipairs(SourceRegistry.listEnabled()) do
         local source = SourceRegistry.resolve(meta.id)
@@ -73,25 +73,23 @@ local function init(self)
     Menu.onCreate(self)
     emitSource(self, "onCreate")
     Features.emit("onCreate", self)
-    -- 兜底：别的插件 onShow 返回 true 会截断 Show，本插件收不到。
-    UIManager:nextTick(function() Guard.call("autoOpen", Desktop.autoOpen, self) end)
 end
 BookPlugin.init = Guard.wrap("init", init)
 
 --- 休眠前：结清阅读状态，生成锁屏图，停远程服务，暂停后台任务；桌面在窗口栈上时自行收 Suspend。
 function BookPlugin:onSuspend()
     logger.info("book lifecycle suspend")
-    Guard.call("tasks.onSuspend", require("workers.tasks").onSuspend)
+    Guard.call("tasks.onSuspend", Tasks.onSuspend)
     Guard.call("session.onSuspend", Session.onSuspend, self)
-    emitSource(self, "onPause")
-    Features.emit("onPause", self)
+    emitSource(self, "onSuspend")
+    Features.emit("onSuspend", self)
     logger.flush()
 end
 
 --- 唤醒：恢复阅读统计、后台服务与后台任务；桌面在窗口栈上时自行收 Resume。
 function BookPlugin:onResume()
     logger.info("book lifecycle resume")
-    Guard.call("tasks.onResume", require("workers.tasks").onResume)
+    Guard.call("tasks.onResume", Tasks.onResume)
     Guard.call("session.onResume", Session.onResume, self)
     emitSource(self, "onResume")
     Features.emit("onResume", self)
@@ -100,7 +98,7 @@ end
 --- 网络恢复：续跑等网络的后台任务、重试脏数据、刷新锁屏。
 function BookPlugin:onNetworkConnected()
     logger.info("book lifecycle network_connected")
-    Guard.call("tasks.onNetworkConnected", require("workers.tasks").onNetworkConnected)
+    Guard.call("tasks.onNetworkConnected", Tasks.onNetworkConnected)
     Guard.call("sync.onNetworkConnected", require("book.sync").onNetworkConnected)
     Features.emit("onNetworkConnected", self)
 end
@@ -108,8 +106,8 @@ end
 --- 退出：停更新任务、远程服务；桌面在窗口栈上时自行收 Exit。
 function BookPlugin:onExit()
     logger.info("book plugin exit")
-    emitSource(self, "onDestroy")
-    Features.emit("onDestroy", self)
+    emitSource(self, "onExit")
+    Features.emit("onExit", self)
     logger.flush()
 end
 
