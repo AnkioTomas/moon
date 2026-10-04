@@ -5,6 +5,7 @@ parseList 是 local，经 package.preload 打桩 http.request 喂罐头 207 XML 
 
 @module tests.http.webdav_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 
@@ -52,7 +53,7 @@ local Webdav = require("http.webdav")
 
 -- ── 构造：URL 去尾斜杠、user 回退 ─────────────────────────
 do
-    local dav = Webdav.new({ url = "http://example.com/dav//", user = "u2" })
+    local dav = Webdav.new({ url = "http://example.com/dav//", username = "u2" })
     Assert.eq(dav.url, "http://example.com/dav")
     Assert.eq(dav.username, "u2")
     Assert.eq(dav.password, "")

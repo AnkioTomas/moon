@@ -4,6 +4,7 @@ db.http：http 表 CRUD（HTTP GET 响应缓存）
 
 @module tests.db.http_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 

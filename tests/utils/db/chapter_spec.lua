@@ -3,6 +3,7 @@ db.chapter：chapters 表 CRUD（章节文件路径 → 书籍身份，path 主�
 
 @module tests.db.chapter_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 

@@ -6,6 +6,7 @@ book.store 路径精确查库身份解析离线用例
 
 @module tests.book.store_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 
@@ -29,7 +30,7 @@ package.preload["utils.paths"] = function()
 end
 
 local cached_images = {} -- url → 本地网络图缓存路径
-package.preload["ui.components.image.download"] = function()
+package.preload["ui.themes.widgets.image.download"] = function()
     return {
         cached = function(url)
             return url and cached_images[url] or nil
@@ -684,7 +685,7 @@ for _, k in ipairs({
     "db.chapter",
 
     "source.registry",
-    "ui.components.image.download",
+    "ui.themes.widgets.image.download",
     "book.store",
     "util",
 }) do

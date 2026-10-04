@@ -1,3 +1,5 @@
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
+
 --[[-- source.local.client：扫描写库 / 清失效 / 单本入库 / 导入 / 移动 / 替换 / 自动扫描节流 / 封面 --]]
 
 local Assert = require("support.assert")
@@ -536,7 +538,7 @@ do
     local util = require("util")
     local real_md5 = util.partialMD5
     local invalidated = {}
-    package.loaded["ui.components.image"] = {
+    package.loaded["ui.themes.widgets.image"] = {
         invalidate = function(path) invalidated[#invalidated + 1] = path end,
     }
     local cover = "/data/.moon/cache/local/image//books/a.epub.png"
@@ -593,7 +595,7 @@ do
     Assert.eq(invalidated[1], cover)
 
     COVERS = {}
-    package.loaded["ui.components.image"] = nil
+    package.loaded["ui.themes.widgets.image"] = nil
     util.partialMD5 = real_md5
 end
 

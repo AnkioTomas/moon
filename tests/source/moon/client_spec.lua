@@ -1,3 +1,5 @@
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
+
 --[[-- moon client 的回包判定：HTTP 状态码与业务 code 都要算。 --]]
 
 local Assert = require("support.assert")
@@ -19,8 +21,7 @@ package.preload["http.cache"] = function()
             cache_keys[#cache_keys + 1] = { ... }
             return "cache-" .. #cache_keys
         end,
-        getAsync = function(_k, cb) cb(nil) end,
-        set = function() end,
+        fetch = function(_key, _ttl, load, cb) return load(cb) end,
     }
 end
 -- 环境里的 json 是桩，decode 不真解析：这里按 body 字面量查表返回

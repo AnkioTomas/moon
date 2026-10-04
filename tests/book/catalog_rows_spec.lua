@@ -4,6 +4,7 @@ insight 在 catalog 内 require("db.book")，这里用 package.preload 换成可
 
 @module tests.book.catalog_rows_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 

@@ -79,6 +79,76 @@ list = List:new{ items = items(3), centered = true }
 Assert.is_true(list.mask)
 Assert.eq(list[1]:getSize().w, 480)
 
+-- 项自带 callback：单选代替 on_select；keep_open 的项不关窗。
+local calls, on_select_n = {}, 0
+list = List:new{ items = {
+    { text = "a", callback = function() calls[#calls + 1] = "a" end },
+    { text = "b", keep_open = true, callback = function() calls[#calls + 1] = "b" end },
+}, on_select = function() on_select_n = on_select_n + 1 end }
+closed = #Kit.closed
+Kit.taps(list)[2]:onTapThemeArea()
+Assert.eq(#Kit.closed, closed, "keep_open 不关窗")
+Kit.taps(list)[1]:onTapThemeArea()
+Assert.eq(Kit.closed[#Kit.closed], list)
+Assert.eq(table.concat(calls, ","), "b,a")
+Assert.eq(on_select_n, 0, "有 callback 不再调 on_select")
+
+-- 多选项的 callback 拿到翻转后的状态，on_toggle 照常。
+local got
+multi = { { text = "a", value = "a", checked = false, callback = function(c) got = c end } }
+list = List:new{ items = multi, multi = true, on_toggle = function(_, c) toggled = c end }
+Kit.taps(list)[1]:onTapThemeArea()
+Assert.is_true(got)
+Assert.is_true(toggled)
+
+-- current：按值选中并翻页，每项画 radio，不改调用方的 items。
+local plain = items(30)
+list = List:new{ items = plain, current = 20 }
+Assert.eq(list.page, 2)
+Assert.len(Kit.find(list, function(w) return w.text == "radio_button_checked" end), 1)
+Assert.len(Kit.find(list, function(w) return w.text == "radio_button_unchecked" end), 13)
+Assert.is_nil(plain[20].checked)
+
+-- 左右滑翻页；上下滑不处理。
+list = List:new{ items = items(30) }
+Assert.is_true(list:onSwipeList(nil, { direction = "west" }))
+Assert.eq(list.page, 2)
+list:onSwipeList(nil, { direction = "east" })
+Assert.eq(list.page, 1)
+Assert.is_false(list:onSwipeList(nil, { direction = "north" }))
+
+-- 分栏：底栏占位，每页少一行；切栏换成 on_tab 返回的项并翻到其 checked 项；左上按钮进标题栏。
+local left_n = 0
+list = List:new{
+    items = items(30),
+    left_icon = "sync",
+    left_callback = function() left_n = left_n + 1 end,
+    tabs = { tabs = { { id = "x", text = "X", icon = "home" }, { id = "y", text = "Y", icon = "home" } },
+        active = "x", on_tab = function(id) return id == "y" and items(40, 35) or items(30) end },
+}
+Assert.eq(list.per_page, 13, "底栏 60px 挤掉一行")
+Assert.eq(list[1]:getSize().h, 800, "加底栏仍铺满整屏")
+local sync = Kit.find(list, function(w) return w.icon == "sync" end)
+Assert.len(sync, 1)
+sync[1]:onTapThemeButton()
+Assert.eq(left_n, 1)
+local tab_taps = Kit.taps(list)
+tab_taps[#tab_taps]:onTapThemeArea()
+Assert.eq(list.tabs.active, "y")
+Assert.len(list.items, 40)
+Assert.eq(list.page, 3, "翻到第 35 项所在页")
+
+-- 嵌进别的窗口：按给定尺寸布局，刷新打到宿主窗口；点击范围跟着绘制位置走。
+local host = {}
+list = List:new{ items = items(30), width = 300, height = 400, show_parent = host }
+Assert.eq(list[1]:getSize().w, 300)
+Assert.eq(list[1]:getSize().h, 400)
+list:goPage(2)
+Assert.eq(Kit.dirty[#Kit.dirty].widget, host)
+list:paintTo(Kit.canvas(), 50, 60)
+Assert.eq(list.dimen.x, 50)
+Assert.eq(list.dimen.y, 60)
+
 -- 文本查看：正文区按可见行分页，翻页夹到 [1, pages]。
 local viewer = TextViewer:new{ title = "日志", text = string.rep("字", 2000) }
 Assert.eq(viewer.body:getAllLineCount(), 600)
@@ -94,5 +164,18 @@ Assert.eq(viewer.page, viewer.pages - 1)
 Assert.contains(Kit.texts(viewer), (viewer.pages - 1) .. " / " .. viewer.pages)
 Kit.buttons(viewer)[1]:onTapThemeButton()
 Assert.eq(Kit.closed[#Kit.closed], viewer, "右上角关闭")
+
+local installed
+viewer = TextViewer:new{
+    title = "日志",
+    text = "短",
+    buttons = {
+        { text = "稍后" },
+        { text = "安装", callback = function() installed = true end },
+    },
+}
+local install = Kit.find(viewer, function(w) return w.text == "安装" and w.onTapThemeButton end)[1]
+install:onTapThemeButton()
+Assert.is_true(installed)
 
 return true

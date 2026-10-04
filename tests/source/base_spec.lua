@@ -1,9 +1,18 @@
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
+
 --[[-- source.base：首页同步在后台进行，不阻塞本地首页数据。 --]]
 
 local Assert = require("support.assert")
 
 package.preload["gettext"] = function()
     return function(text) return text end
+end
+local followed, rejected = {}, {}
+package.preload["workers.ui.task_dialog"] = function()
+    return {
+        follow = function(task) followed[#followed + 1] = task end,
+        rejected = function(reason, task) rejected[#rejected + 1] = { reason = reason, task = task } end,
+    }
 end
 
 local SourceBase = require("source.base")
@@ -23,6 +32,13 @@ local source = setmetatable({
         return { cancel = function() end }
     end,
 }, { __index = SourceBase })
+
+-- 插件生命周期钩子默认空操作：不起同步，不碰插件。
+for _, hook in ipairs({ "onCreate", "onSuspend", "onResume", "onExit" }) do
+    Assert.is_nil(source[hook](source, {}))
+end
+Assert.eq(sync_calls, 0)
+Assert.eq(stats_calls, 0)
 
 local view_updates, refreshes = 0, 0
 local desktop = {
@@ -112,36 +128,51 @@ end
 source:onEvent("desktop_open", desktop)
 Assert.eq(last_event, "shelf_changed")
 
--- 源上报的真实步骤转成桌面事件；同步落下发 books_sync_done；被新一轮取代的旧请求上报丢弃。
-local events = {}
-desktop.onEvent = function(_, event, payload)
-    events[#events + 1] = payload and table.concat({ event, payload.text, payload.done or "", payload.total or "" }, "|")
-        or event
-end
-local pending = {}
+-- 手动刷新：进任务队列（sync 类）并前台跟随，源上报的真实步骤进任务快照。
+desktop.onEvent = function() end
+local pending, cancels = {}, 0
 source.syncBooksAsync = function(_, opts, cb)
     pending[#pending + 1] = { opts = opts, cb = cb }
-    return { cancel = function() end }
+    return { cancel = function() cancels = cancels + 1 end }
 end
 source:onEvent("library_refresh_request", desktop)
 local first = pending[#pending]
 Assert.is_true(first.opts.force)
-first.opts.on_progress("正在上传 a.epub", 1, 3)
-Assert.eq(events[#events], "books_sync_progress|正在上传 a.epub|1|3")
--- 手动刷新进后台任务列表，步骤同步到任务快照。
 local Tasks = require("workers.tasks")
 Assert.eq(#Tasks.tasks(), 1)
-Assert.eq(Tasks.tasks()[1].label, "同步书架")
+Assert.eq(Tasks.tasks()[1].kind, "sync")
+Assert.len(followed, 1)
+Assert.eq(followed[1], Tasks.get("books\0test"))
+first.opts.on_progress("正在上传 a.epub", 1, 3)
 Assert.eq(Tasks.tasks()[1].text, "正在上传 a.epub")
+Assert.eq(Tasks.tasks()[1].count, 1)
+
+-- 刷新中再点：拒绝入队并提示，不取消重来、不叠加、不动在飞状态。
 source:onEvent("library_refresh_request", desktop)
-local second = pending[#pending]
-Assert.eq(#Tasks.tasks(), 1, "新一轮取代旧任务，不叠加")
-local before = #events
-first.opts.on_progress("旧请求", 2, 3)
+Assert.len(pending, 1)
+Assert.eq(cancels, 0)
+Assert.len(followed, 1)
+Assert.len(rejected, 1)
+Assert.eq(rejected[1].reason, "running")
+Assert.eq(rejected[1].task, followed[1])
+Assert.is_true(desktop._books_sync_pending)
 first.cb({ skipped = true })
-Assert.eq(#events, before, "旧请求的进度与完成都不上报")
-second.cb({ skipped = true })
-Assert.eq(events[#events], "books_sync_done")
+Assert.is_false(desktop._books_sync_pending)
+Assert.eq(#Tasks.tasks(), 0)
+
+-- 自动后台同步在飞时手动刷新：取代它；旧请求迟到的进度与结果丢弃。
+source:onEvent("desktop_open", desktop)
+local auto = pending[#pending]
+Assert.is_nil(auto.opts.force)
+source:onEvent("library_refresh_request", desktop)
+Assert.eq(cancels, 1)
+local forced = pending[#pending]
+Assert.is_true(forced.opts.force)
+auto.opts.on_progress("旧请求", 2, 3)
+auto.cb({ skipped = true })
+Assert.is_true(desktop._books_sync_pending, "旧请求结果不落地")
+Assert.is_nil(Tasks.tasks()[1].text)
+forced.cb({ skipped = true })
 Assert.is_false(desktop._books_sync_pending)
 Assert.eq(#Tasks.tasks(), 0)
 

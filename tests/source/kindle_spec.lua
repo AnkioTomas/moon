@@ -3,6 +3,7 @@ source.kindle：cc.db 快照入书架、打开时直接给文件或子进程转�
 
 @module tests.source.kindle_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 

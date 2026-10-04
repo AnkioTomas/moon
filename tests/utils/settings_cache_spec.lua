@@ -1,5 +1,5 @@
 --[[--
-配置文件只打开一次：UI.sz/UI.face 每次调用都读 ui_scale，
+配置文件只打开一次：Theme.px 每次调用都读 ui_scale，
 LuaSettings:open 每次都 dofile，重复打开会把页面构建变成几百次磁盘读。
 
 @module tests.utils.settings_cache_spec

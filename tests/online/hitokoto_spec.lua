@@ -15,8 +15,8 @@ local settings = {}
 local saved = 0
 package.preload["utils.settings"] = function()
     return {
-        get = function() return settings end,
-        save = function() saved = saved + 1 end,
+        feature = function(name) assert(name == "lockscreen"); return settings end,
+        saveSection = function(name) assert(name == "lockscreen"); saved = saved + 1 end,
     }
 end
 

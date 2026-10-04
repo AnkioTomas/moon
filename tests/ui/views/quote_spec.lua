@@ -2,6 +2,7 @@
 共享引言块：上方正文，下方署名靠右。
 @module tests.ui.views.quote_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 
@@ -25,19 +26,15 @@ for _, name in ipairs({
     "textwidget", "textboxwidget",
 }) do package.preload["ui/widget/" .. name] = widget end
 package.preload["ui/geometry"] = widget
-package.preload["ffi/blitbuffer"] = function() return { COLOR_BLACK = 0 } end
-package.preload["ui.components.bookui"] = function()
-    return {
-        sz = function(n) return n end,
-        fontSize = function(n) return n end,
-        line = function() return 1 end,
-        face = function(_, size) return { size = size or 15 } end,
-        muted = function() return 1 end,
-        dim = function() return 2 end,
-    }
+package.preload["ffi/blitbuffer"] = function() return { COLOR_BLACK = 0, COLOR_GRAY_3 = 1 } end
+package.preload["device"] = function()
+    return { screen = { scaleBySize = function(_, n) return n end } }
+end
+package.preload["ui/font"] = function()
+    return { getFace = function(_, _, size) return { size = size or 16 } end }
 end
 
-local Quote = require("ui.views.quote")
+local Quote = require("features.lockscreen.components.quote")
 -- 桩：正文 21*2 + 间距 8 + 署名 16；无数据也预留署名行
 local range = Quote.heightRange()
 Assert.eq(range.height, 42 + 8 + 16)
@@ -66,12 +63,7 @@ Assert.eq(Quote.contentHeight({
 }), 42 + 8 + 16)
 Assert.eq(frees, 2)
 
-parts:updateView({ text = "新句", author = "苏轼", title = "题西林壁" })
-Assert.eq(parts.body.text, "新句")
-Assert.eq(parts.attr.text, "—— 苏轼 · 题西林壁")
-
-parts:updateView({ text = "只有作者", author = "朱熹" })
-Assert.eq(parts.attr.text, "—— 朱熹")
+Assert.eq(Quote.attribution({ text = "只有作者", author = "朱熹" }), "—— 朱熹")
 
 local lock = Quote:new{ data = { text = "锁屏句", source = "出处" },
     width = 200,

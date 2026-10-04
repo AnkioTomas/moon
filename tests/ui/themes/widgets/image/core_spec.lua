@@ -1,4 +1,4 @@
---[[-- ui.themes.widgets.image.core（复制自 ui.components.image，用例同源）：下载限流；文件就绪后直接 ImageWidget。 --]]
+--[[-- ui.themes.widgets.image.core：下载限流；文件就绪后直接 ImageWidget。 --]]
 
 local Assert = require("support.assert")
 local Config = require("support.config")

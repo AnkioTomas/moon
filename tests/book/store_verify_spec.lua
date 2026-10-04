@@ -5,6 +5,7 @@ book.store.verifyDownloadsAsync：手动删掉的下载文件，刷新时撤掉�
 
 @module tests.book.store_verify_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 

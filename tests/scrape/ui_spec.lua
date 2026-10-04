@@ -3,6 +3,7 @@ scrape.ui 离线用例：本地元数据写入、失败收口与封面原子替�
 
 @module tests.scrape.ui_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 local Config = require("support.config")
@@ -21,20 +22,16 @@ package.preload["ui/uimanager"] = function()
         setDirty = function() end,
     }
 end
-package.preload["ui/widget/inputdialog"] = function()
+local Themed = require("support.theme_stubs")
+Themed.install()
+Themed.on_show = function(o) shown[#shown + 1] = o end
+package.preload["scrape.results"] = function()
     return {
         new = function(_, o)
-            function o:getInputText() return self.input end
-            function o:onShowKeyboard() end
+            function o:show() shown[#shown + 1] = self end
             return o
         end,
     }
-end
-package.preload["ui/widget/infomessage"] = function()
-    return { new = function(_, o) return o end }
-end
-package.preload["scrape.results"] = function()
-    return { new = function(_, o) return o end }
 end
 package.preload["scrape.search"] = function()
     return {
@@ -53,7 +50,7 @@ package.preload["scrape.search"] = function()
 end
 local invalidated = {}
 local cover_at_fetch
-package.preload["ui.components.image"] = function()
+package.preload["ui.themes.widgets.image"] = function()
     return {
         fetchAsync = function(_, _, cb)
             fetch_calls = fetch_calls + 1
@@ -104,8 +101,8 @@ package.preload["source.registry"] = function()
 end
 
 for _, name in ipairs({
-    "ui/uimanager", "ui/widget/inputdialog", "ui/widget/infomessage",
-    "scrape.results", "scrape.search", "ui.components.image", "db.book",
+    "ui/uimanager",
+    "scrape.results", "scrape.search", "ui.themes.widgets.image", "db.book",
     "utils.paths", "source.base", "source.registry", "scrape.ui",
 }) do
     package.loaded[name] = nil
@@ -131,7 +128,8 @@ local function startAndPick()
     shown = {}
     ScrapeUI.start(identity, "原书名")
     local dialog = shown[#shown]
-    dialog.buttons[1][2].callback()
+    Assert.eq(dialog.fields[1].text, "原书名")
+    dialog.callback(dialog.fields[1].text)
     local results = shown[#shown]
     results.on_pick(results.results[1])
 end

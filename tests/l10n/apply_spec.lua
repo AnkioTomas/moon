@@ -23,7 +23,7 @@ Assert.eq(zh_catalog[EN_KEY], "月讀")
 EN_ONLY_KEY = "下载失败"
 Assert.not_nil(en_catalog[EN_ONLY_KEY])
 for _, key in ipairs({
-    "阅读状态", "已读", "未读", "正在打开",
+    "状态", "已读", "未读", "正在打开",
     "标记已读", "标记未读", "更新阅读状态失败", "确定删除《%1》？",
     "读到 99% 自动标记已读",
     "未分类", "无系列",

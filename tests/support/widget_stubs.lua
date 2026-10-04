@@ -3,9 +3,13 @@ ui/themes 组件测试用的最小 KOReader 控件桩。
 
 只模拟主题组件真实用到的行为：
   - 类：extend / new（new 调 init），InputContainer 每实例一份 key_events / ges_events
-  - 尺寸：容器按子件累加，Span / Line / Text 给固定可预测尺寸
+  - 尺寸：容器按子件累加，Span / Line / Text 给固定可预测尺寸。
+    VerticalGroup / HorizontalGroup 与 KOReader 一样在第一次 getSize 缓存偏移，
+    之后追加子件必须 resetLayout，否则 paintTo 对空偏移取值
   - 绘制：容器把坐标传给子件，InputContainer 回写 dimen.x/y（点击命中靠它）
-  - UIManager：记录 show / close / setDirty / scheduleIn / unschedule；close 触发 onCloseWidget
+  - UIManager：记录 show / close / setDirty（含 region）/ scheduleIn / unschedule；close 触发 onCloseWidget；nextTick 同步执行
+  - 设置：display 段与无段名的合并表即 Kit.display，其余段读 Kit.sections[name]（spec 自己塞），saveSection 回写
+  - 事件：ui/event 给 { handler, args }，控件 handleEvent 先逐子件下发再问自身 handler（同 KOReader）
   - 画布：Kit.canvas() 记录 paintRoundedRect / paintBorder 调用，setPixel 计数
   - 字体：ui/font 的 getFace 返回 { name, size }，主题图标 / 遮罩走真实实现
 
@@ -32,6 +36,10 @@ local function geom(o)
     return setmetatable(o or {}, Rect)
 end
 
+function Rect:copy()
+    return geom{ x = self.x, y = self.y, w = self.w, h = self.h }
+end
+
 --- 最小类：extend 继承，new 调 _prep 再调 init。
 local function class(proto)
     proto.__index = proto
@@ -49,12 +57,24 @@ local function class(proto)
     return proto
 end
 
+--- 事件：同 KOReader WidgetContainer，先按子件顺序下发，没人接再问自己的 handler，任一返回真即停。
+local function handleEvent(self, ev)
+    for _, child in ipairs(self) do
+        if type(child) == "table" and child.handleEvent and child:handleEvent(ev) then return true end
+    end
+    local handler = self[ev.handler]
+    return handler and handler(self, unpack(ev.args)) and true or nil
+end
+
 local Widget = class{
     getSize = function(self) return self.dimen end,
     paintTo = function() end,
+    handleEvent = handleEvent,
 }
 
+-- 同 KOReader：Widget 基类没有 free，WidgetContainer 才有；桩多给会掩盖对自绘控件调 free 的崩溃。
 local Container = Widget:extend{
+    free = function() end,
     getSize = function(self)
         return self.dimen or (self[1] and self[1]:getSize()) or geom{ w = 0, h = 0 }
     end,
@@ -88,20 +108,42 @@ end
 local function group(vertical)
     return Widget:extend{
         getSize = function(self)
-            local w, h = 0, 0
-            for _, c in ipairs(self) do
-                local s = c:getSize()
-                if vertical then w, h = math.max(w, s.w), h + s.h else w, h = w + s.w, math.max(h, s.h) end
+            if not self._size then
+                self._size = { w = 0, h = 0 }
+                self._offsets = {}
+                for i, c in ipairs(self) do
+                    local s = c:getSize()
+                    if vertical then
+                        self._offsets[i] = { y = self._size.h }
+                        self._size.h = self._size.h + s.h
+                        if s.w > self._size.w then self._size.w = s.w end
+                    else
+                        self._offsets[i] = { x = self._size.w, y = s.h }
+                        self._size.w = self._size.w + s.w
+                        if s.h > self._size.h then self._size.h = s.h end
+                    end
+                end
             end
-            return geom{ w = w, h = h }
+            return geom{ w = self._size.w, h = self._size.h }
         end,
         paintTo = function(self, bb, x, y)
-            for _, c in ipairs(self) do
-                c:paintTo(bb, x, y)
-                local s = c:getSize()
-                if vertical then y = y + s.h else x = x + s.w end
+            local size = self:getSize()
+            for i, c in ipairs(self) do
+                local off = self._offsets[i]
+                if vertical then
+                    c:paintTo(bb, x, y + off.y)
+                else
+                    local dy = self.align == "center" and math.floor((size.h - off.y) / 2)
+                        or self.align == "bottom" and size.h - off.y or 0
+                    c:paintTo(bb, x + off.x, y + dy)
+                end
             end
         end,
+        resetLayout = function(self)
+            self._size = nil
+            self._offsets = {}
+        end,
+        free = function() end,
     }
 end
 
@@ -110,6 +152,7 @@ local TextWidget = Widget:extend{
         return geom{ w = math.min(#self.text * 5, self.max_width or math.huge), h = 10 }
     end,
     setText = function(self, text) self.text = text end,
+    free = function() end,
 }
 
 local TextBoxWidget = Widget:extend{
@@ -120,6 +163,7 @@ local TextBoxWidget = Widget:extend{
     end,
     scrollDown = function(self) self.scrolled = (self.scrolled or 0) + 1 end,
     scrollUp = function(self) self.scrolled = (self.scrolled or 0) - 1 end,
+    free = function() end,
 }
 
 local InputText = InputContainer:extend{
@@ -190,6 +234,9 @@ function Kit.canvas()
         paintBorder = function(_, x, y, w, h, bw, c, r)
             ops[#ops + 1] = { op = "border", x = x, y = y, w = w, h = h, bw = bw, c = c, r = r }
         end,
+        lightenRect = function(_, x, y, w, h)
+            ops[#ops + 1] = { op = "lighten", x = x, y = y, w = w, h = h }
+        end,
     }
 end
 
@@ -204,6 +251,7 @@ function Kit.install(theme)
     -- ui_scale = 100 且 scaleBySize 恒等：逻辑像素 = 物理像素，断言可以直接写令牌值。
     Kit.display = { ui_theme = theme or "paper", ui_scale = 100, mesh_mask = true }
     Kit.shown, Kit.closed, Kit.dirty, Kit.scheduled, Kit.unscheduled = {}, {}, {}, {}, {}
+    Kit.sections = {}
     local modules = {
         ["ffi/blitbuffer"] = { Color8 = function(v) return v end, COLOR_BLACK = 0, COLOR_WHITE = 255 },
         ["ffi/util"] = {
@@ -220,11 +268,13 @@ function Kit.install(theme)
                 getWidth = function() return Kit.SCREEN_W end,
                 getHeight = function() return Kit.SCREEN_H end,
                 scaleBySize = function(_, n) return n end,
+                scaleByDPI = function(_, n) return n end,
             },
             hasKeys = function() return false end,
             input = { group = { Back = "Back" } },
         },
         ["ui/geometry"] = { new = function(_, o) return geom(o) end },
+        ["ui/bidi"] = { flipDirectionIfMirroredUILayout = function(d) return d end },
         ["ui/gesturerange"] = { new = function(_, o) return o end },
         ["ui/uimanager"] = {
             show = function(_, w) Kit.shown[#Kit.shown + 1] = w end,
@@ -232,18 +282,31 @@ function Kit.install(theme)
                 Kit.closed[#Kit.closed + 1] = w
                 if w.onCloseWidget then w:onCloseWidget() end
             end,
-            setDirty = function(_, w, mode) Kit.dirty[#Kit.dirty + 1] = { widget = w, mode = mode } end,
+            setDirty = function(_, w, mode, region)
+                Kit.dirty[#Kit.dirty + 1] = { widget = w, mode = mode, region = region }
+            end,
             scheduleIn = function(_, delay, fn) Kit.scheduled[#Kit.scheduled + 1] = { delay = delay, fn = fn } end,
+            nextTick = function(_, fn) fn() end,
             unschedule = function(_, fn) Kit.unscheduled[#Kit.unscheduled + 1] = fn end,
         },
         ["utils.settings"] = {
             get = function(section)
-                assert(section == "display", "only display section stubbed")
-                return Kit.display
+                if section == nil or section == "display" then return Kit.display end
+                return assert(Kit.sections[section], "settings section not stubbed: " .. tostring(section))
             end,
-            saveSection = function(section)
-                assert(section == "display", "only display section stubbed")
+            feature = function(name)
+                return assert(Kit.sections[name], "feature settings not stubbed: " .. name)
+            end,
+            saveSection = function(section, values)
+                if section ~= "display" and values then Kit.sections[section] = values end
                 Kit.saved = (Kit.saved or 0) + 1
+            end,
+            zlibEnabled = function() return (Kit.sections.common or {}).zlib_enabled end,
+            opdsEnabled = function() return (Kit.sections.common or {}).opds_enabled end,
+        },
+        ["ui/event"] = {
+            new = function(_, name, ...)
+                return { name = name, handler = "on" .. name, args = { ... } }
             end,
         },
         ["ui/font"] = {
@@ -254,7 +317,10 @@ function Kit.install(theme)
         -- 图片内核（下载 / 解码）另有 tests/ui/themes/widgets/image/core_spec.lua；这里只记参数。
         ["ui.themes.widgets.image.core"] = {
             widget = function(opts)
-                return Widget:new{ dimen = geom{ w = opts.width, h = opts.height }, src = opts.src, image_opts = opts }
+                return Widget:new{
+                    dimen = geom{ w = opts.width, h = opts.height }, src = opts.src, image_opts = opts,
+                    cancel = function(self) self.cancelled = true end,
+                }
             end,
             fetchAsync = function() end,
             invalidate = function() end,
@@ -266,6 +332,8 @@ function Kit.install(theme)
         ["ui/widget/container/centercontainer"] = aligned("center"),
         ["ui/widget/container/leftcontainer"] = aligned("left"),
         ["ui/widget/container/rightcontainer"] = aligned("right"),
+        ["ui/widget/container/framecontainer"] = Container,
+        ["ui/widget/overlapgroup"] = Container,
         ["ui/widget/verticalgroup"] = group(true),
         ["ui/widget/horizontalgroup"] = group(false),
         ["ui/widget/horizontalspan"] = { new = function(_, o) return Widget:new{ dimen = geom{ w = o.width, h = 0 } } end },

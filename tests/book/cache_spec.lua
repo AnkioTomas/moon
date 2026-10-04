@@ -276,7 +276,7 @@ for _, name in ipairs({
     "utils.paths",
     "db.book",
     "db.chapter",
-    "ui.components.image",
+    "ui.themes.widgets.image",
     "book.cache",
 }) do
     package.preload[name] = nil

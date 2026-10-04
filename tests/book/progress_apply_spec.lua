@@ -23,10 +23,10 @@ end
 package.preload["ui/event"] = function()
     return { new = function(_, name, ...) return { name = name, args = { ... } } end }
 end
-package.preload["ui.reader.session.toc"] = function()
+package.preload["reader.session.toc"] = function()
     return { list = function() return {} end, chapterFraction = function() return 0 end }
 end
-package.preload["ui.reader.session"] = function()
+package.preload["reader.session"] = function()
     return {
         current = function() return nil end,
         chapterTitle = function() return "" end,
@@ -41,7 +41,7 @@ package.preload["db.progress"] = function()
 end
 
 for _, name in ipairs({
-    "ui/uimanager", "ui.reader.session", "ui.reader.session.toc",
+    "ui/uimanager", "reader.session", "reader.session.toc",
     "db.progress", "book.progress",
 }) do
     package.loaded[name] = nil
@@ -159,7 +159,7 @@ end
 
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",
-    "ui.reader.session.toc", "ui.reader.session", "logger",
+    "reader.session.toc", "reader.session", "logger",
     "db.progress", "book.progress",
 }) do
     package.preload[name] = nil

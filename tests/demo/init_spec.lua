@@ -15,8 +15,8 @@ package.preload["ui/elements/filemanager_menu_order"] = function() return fm_ord
 package.preload["ui/elements/reader_menu_order"] = function() return reader_order end
 package.loaded["ui/elements/filemanager_menu_order"] = nil
 package.loaded["ui/elements/reader_menu_order"] = nil
-package.loaded["demo.init"] = nil
-local Demo = require("demo.init")
+package.loaded["demo"] = nil
+local Demo = require("demo")
 
 -- 主菜单：设置页紧跟「月读」；每次建菜单都会调，顺序表只插一次。
 local menu = {}
@@ -54,7 +54,7 @@ for _, id in ipairs({ "paper", "bold", "soft" }) do
         Assert.is_true(#Kit.shown > before or #Kit.scheduled > 0, id .. " 条目无反应: " .. i)
         local shown = Kit.shown[#Kit.shown]
         -- 展示页：点遍所有交互，重绘不报错。
-        if shown.refresh then
+        if type(shown.body) == "function" then
             Assert.is_true(tapAll(shown) > 3, id .. " 展示页交互太少: " .. shown.title)
             shown:paintTo(Kit.canvas(), 0, 0)
         end

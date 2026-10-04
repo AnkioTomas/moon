@@ -10,6 +10,7 @@
 支持对象/数组/字符串（含常见转义）/数字/true/false/null。
 @module tests.support.json_stub
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local JsonStub = {}
 
