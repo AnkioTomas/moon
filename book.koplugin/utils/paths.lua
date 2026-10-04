@@ -2,23 +2,23 @@
 Moon 目录布局（$DATA/.moon）
 
   .moon/
-    book.sqlite3         结构化数据（books/opens/http）
+    book.sqlite3         结构化数据
+    book.log             插件日志
+    dictionary*.sqlite3  输入法词库
     cache/
       <source>/
         book/<slug>/     整本 book.* 或章节 N.html；slug 由 stable_id 派生
         image/           网络图片 / 封面
-    settings/
-      common.lua
-      display.lua / lockscreen.lua / remote.lua / pinyin.lua
-      quickpanel.lua / reader.lua / ai.lua
-      moon.lua / wechat.lua
+      image/             不属于特定源的网络图片
+    settings/            common.lua、<section>.lua、<source>.lua
+    screensaver/         锁屏资源
     backups/
-      patches/<feature>/      核心补丁安装前的原始文件备份
-    fonts/               微信读书字体（.ttf，由下载的 .woff 转换）
+      patches/<feature>/ 核心补丁安装前的原始文件备份
+    fonts/               UI 字体
 
-注意：打开 settings 只能 ensureSettings，禁止 ensureLayout（会与 settings 读活跃源形成环）。
+ensure* 只负责建目录；路径函数只拼路径，没有副作用。
 
-@module koplugin.book.moon.paths
+@module koplugin.book.utils.paths
 --]]
 
 local DataStorage = require("datastorage")
@@ -26,9 +26,6 @@ local lfs = require("libs/libkoreader-lfs")
 local md5 = require("ffi/sha2").md5
 
 local P = {}
-
-local KIND_BOOK = "book"
-local KIND_IMAGE = "image"
 
 --- 递归创建目录（已存在则跳过）
 ---@param path string|nil
@@ -41,7 +38,7 @@ function P.ensureDir(path)
         return true
     end
     local parent = path:match("(.+)/[^/]+/?$")
-    if parent and parent ~= "" and parent ~= path then
+    if parent then
         local ok, err = P.ensureDir(parent)
         if not ok then return nil, err end
     end
@@ -103,14 +100,14 @@ end
 ---@param id string
 ---@return string
 function P.bookDir(id)
-    return P.sourceCacheDir(id) .. "/" .. KIND_BOOK
+    return P.sourceCacheDir(id) .. "/book"
 end
 
 --- 封面/网络图目录：cache/<source>/image/
 ---@param id string
 ---@return string
 function P.imageDir(id)
-    return P.sourceCacheDir(id) .. "/" .. KIND_IMAGE
+    return P.sourceCacheDir(id) .. "/image"
 end
 
 --- stable_id → 文件系统安全的目录/文件名片段。
@@ -123,7 +120,7 @@ function P.slugFor(stable_id)
     if type(stable_id) ~= "string" or stable_id == "" then
         error("slugFor: stable_id required")
     end
-    return md5(stable_id)
+    return md5(stable_id) --[[@as string]]
 end
 
 --- 单书封面缓存：cache/<source>/image/<slug>.png
@@ -145,12 +142,11 @@ end
 
 --- 单章 HTML 路径（在线按章阅读落盘）。
 ---@param stable_id string
----@param idx number|string
+---@param idx integer
 ---@param id string
 ---@return string
 function P.chapterPath(stable_id, idx, id)
-    P.ensureBookWork(stable_id, id)
-    return P.bookWorkDir(stable_id, id) .. "/" .. tostring(tonumber(idx) or 0) .. ".html"
+    return P.bookWorkDir(stable_id, id) .. "/" .. idx .. ".html"
 end
 
 --- 插件 SQLite 路径：$DATA/.moon/book.sqlite3
@@ -200,18 +196,17 @@ end
 ---@param section string
 ---@return string
 function P.sectionPath(section)
-    return P.settingsDir() .. "/" .. tostring(section) .. ".lua"
+    return P.settingsDir() .. "/" .. section .. ".lua"
 end
 
 --- 源专用配置路径：settings/<id>.lua
----@param id string|nil
+---@param id string
 ---@return string
 function P.sourcePath(id)
-    id = tostring(id or "local")
     return P.settingsDir() .. "/" .. id .. ".lua"
 end
 
---- 只保证 settings 树存在。打开配置文件必须走这里，不能调 ensureLayout。
+--- 保证 settings 目录存在。
 function P.ensureSettings()
     P.ensureDir(P.settingsDir())
 end
@@ -220,7 +215,7 @@ end
 ---@param feature string
 ---@return string
 function P.patchBackupDir(feature)
-    return P.root() .. "/backups/patches/" .. tostring(feature)
+    return P.root() .. "/backups/patches/" .. feature
 end
 
 --- 保证 fonts 目录存在
@@ -230,9 +225,7 @@ end
 
 --- 只保证共享缓存根存在；清理流程不能凭空猜测活跃 source_id。
 function P.ensureCacheRoot()
-    P.ensureSettings()
     P.ensureDir(P.cacheDir())
-    P.ensureScreensaverDir()
 end
 
 --- 通用网络图片目录（不属于特定源）：cache/image/
@@ -243,14 +236,12 @@ end
 
 --- 确保通用网络图片目录存在。
 function P.ensureImageRoot()
-    P.ensureCacheRoot()
     P.ensureDir(P.imageRootDir())
 end
 
---- 确保 .moon 与指定源的 cache/book/image 目录存在
+--- 确保指定源的 cache/<source>/book 与 image 目录存在
 ---@param id string
 function P.ensureLayout(id)
-    P.ensureCacheRoot()
     P.ensureDir(P.bookDir(id))
     P.ensureDir(P.imageDir(id))
 end
