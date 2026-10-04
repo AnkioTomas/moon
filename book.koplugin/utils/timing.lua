@@ -36,7 +36,7 @@ local function handle(invoke, cancel)
         cancel()
     end
     return setmetatable(h, {
-        __call = function(_, ...)
+        __call = function(_handle, ...)
             return invoke(...)
         end,
     })
