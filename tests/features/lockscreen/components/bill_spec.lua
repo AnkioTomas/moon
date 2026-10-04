@@ -1,0 +1,98 @@
+--[[--
+lockscreen 阅读账单：所有统计查询绑定当前源。
+
+@module tests.features.lockscreen.components.bill_spec
+--]]
+
+local Assert = require("support.assert")
+
+local sources = {}
+local function record(source_id)
+    sources[#sources + 1] = source_id
+end
+
+package.preload["db.stats"] = function()
+    return {
+        periodSummary = function(source_id)
+            record(source_id)
+            return {}
+        end,
+        periodBooks = function(source_id)
+            record(source_id)
+            return {}
+        end,
+    }
+end
+
+package.preload["ffi/blitbuffer"] = function()
+    return { COLOR_BLACK = 0, COLOR_WHITE = 255 }
+end
+
+package.preload["features.lockscreen.render"] = function()
+    return {
+        measureText = function(_, _, size)
+            return size == 24 and 30 or 20
+        end,
+    }
+end
+
+package.preload["features.lockscreen.components.library"] = function()
+    return { activeSourceId = function() return "moon" end }
+end
+
+package.preload["features.lockscreen.components.util"] = function()
+    local U = dofile(package.searchpath("features.lockscreen.components.util", package.path))
+    U.dayStart = function() return 100000 end
+    U.MUTED, U.DIM, U.RULE = 1, 2, 3
+    return U
+end
+
+package.preload["utils.settings"] = function()
+    return {
+        get = function() return { active_source = "wrong-source" } end,
+        feature = function(name)
+            assert(name == "lockscreen")
+            return { lock_screen_bill_period = "7d" }
+        end,
+    }
+end
+
+package.loaded["features.lockscreen.components.bill"] = nil
+local Bill = require("features.lockscreen.components.bill")
+Bill.data()
+
+Assert.eq(#sources, 2)
+for _, source_id in ipairs(sources) do
+    Assert.eq(source_id, "moon")
+end
+
+sources = {}
+local blocks = Bill.blocks({
+    x = 0, y = 0, w = 500, h = 800,
+    text_x = 20, text_w = 460, pad = 20, radius = 10,
+})
+Assert.eq(#sources, 2)
+
+local barcode, cutouts = 0, 0
+local texts = {}
+local logo_block
+local brand_block
+local brand_subtitle
+for _, block in ipairs(blocks) do
+    if block.kind == "vbar" then barcode = barcode + 1 end
+    if block.kind == "cutout_circle" then cutouts = cutouts + 1 end
+    if block.kind == "image" then logo_block = block end
+    if block.text == "MOON READING" then brand_block = block end
+    if block.text == "阅读账单" then brand_subtitle = block end
+    if block.text then texts[#texts + 1] = block.text end
+end
+Assert.contains(texts, "MOON READING")
+Assert.contains(texts, "TOTAL")
+Assert.is_true(barcode > 20)
+Assert.is_true(cutouts > 4)
+Assert.matches(logo_block.file, "book%.koplugin/logo%.png$")
+Assert.is_true(logo_block.height >= 54)
+Assert.eq(brand_subtitle.y, brand_block.y + 36)
+local logo_center = logo_block.y + logo_block.height / 2
+local brand_center = brand_block.y + (30 + 6 + 20) / 2
+Assert.is_true(math.abs(logo_center - brand_center) <= 1)

@@ -57,9 +57,9 @@ local touched = {}
 package.preload["book.store"] = function()
     return { touch = function(path) touched[#touched + 1] = path; return true end }
 end
-package.preload["ui/widget/confirmbox"] = function()
-    return { new = function(_, opts) return opts end }
-end
+local Themed = require("support.theme_stubs")
+Themed.install()
+Themed.on_show = function(o) shown = o end
 
 local opened_with
 package.preload["source.local.setting"] = function()

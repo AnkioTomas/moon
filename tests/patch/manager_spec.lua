@@ -2,10 +2,11 @@
 patch.manager：锚点插入、备份/恢复、幂等与失败不落盘。
 
 不碰真实 KOReader 安装目录与真实 .moon：install/backups/patches 全指向临时
-目录，插件根复用真实 book.koplugin 里的补丁定义与负载。
+目录，补丁定义与负载复用真实 features/animation/patches。
 
 @module tests.patch.manager_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
@@ -14,14 +15,9 @@ local Config = require("support.config")
 Stubs.install()
 Stubs.reset()
 
--- onCreate 会 nextTick 跑翻页动画自检；本文件只测 install/restore，不跑自检。
-package.preload["ui/uimanager"] = function()
-    return { nextTick = function() end }
-end
-
 local Manager = require("patch.manager")
 
-local PLUGIN_ROOT = Config.root() .. "/book.koplugin"
+local DIR = Config.root() .. "/book.koplugin/features/animation/patches"
 
 local FAKE_TARGET = table.concat({
     'local Device = require("device")',
@@ -63,8 +59,7 @@ local function setup(target)
     if target ~= nil then
         write(install .. "/frontend/ui/uimanager.lua", target)
     end
-    Manager.onCreate({
-        plugin_root = PLUGIN_ROOT,
+    Manager.configure({
         install_dir = install,
         backups_root = base .. "/backups",
         patches_dir = base .. "/patches",
@@ -93,7 +88,7 @@ end
 -- 正常安装：内容插到锚点前，补丁文件分发到位
 do
     local paths = setup(FAKE_TARGET)
-    local res = Manager.install("page_turn_animation")
+    local res = Manager.install(DIR)
     Assert.is_true(res.ok, res.err)
     Assert.eq(res.changed, true)
 
@@ -108,14 +103,14 @@ do
         Assert.is_true(read(paths.patches .. "/" .. name) ~= nil, name .. " should be copied")
     end
 
-    Assert.is_true(Manager.isApplied("page_turn_animation"))
+    Assert.is_true(Manager.isApplied(DIR))
 end
 
 -- 幂等：重复安装不二次插入
 do
     local paths = setup(FAKE_TARGET)
-    Assert.is_true(Manager.install("page_turn_animation").ok)
-    local second = Manager.install("page_turn_animation")
+    Assert.is_true(Manager.install(DIR).ok)
+    local second = Manager.install(DIR)
     Assert.is_true(second.ok, second.err)
     Assert.eq(second.changed, false)
     Assert.eq(count(read(paths.target), "-- Execute the software wipe animation"), 1)
@@ -124,10 +119,10 @@ end
 -- 负载内容变了：重拷运行时补丁，不再插 uimanager
 do
     local paths = setup(FAKE_TARGET)
-    Assert.is_true(Manager.install("page_turn_animation").ok)
+    Assert.is_true(Manager.install(DIR).ok)
     local core = paths.patches .. "/2-swipe-animation-core.lua"
     write(core, "-- stale payload\n")
-    local again = Manager.install("page_turn_animation")
+    local again = Manager.install(DIR)
     Assert.is_true(again.ok, again.err)
     Assert.eq(again.changed, true)
     Assert.is_true(read(core):find("require(\"logger\")", 1, true) ~= nil)
@@ -137,19 +132,19 @@ end
 -- 备份→恢复：文件回到逐字节原样，补丁文件被清掉
 do
     local paths = setup(FAKE_TARGET)
-    Assert.is_true(Manager.install("page_turn_animation").ok)
-    local restore = Manager.restore("page_turn_animation")
+    Assert.is_true(Manager.install(DIR).ok)
+    local restore = Manager.restore(DIR)
     Assert.is_true(restore.ok, restore.err)
     Assert.eq(read(paths.target), FAKE_TARGET)
     Assert.is_nil(read(paths.patches .. "/2-swipe-animation-core.lua"))
-    Assert.is_false(Manager.isApplied("page_turn_animation"))
+    Assert.is_false(Manager.isApplied(DIR))
 end
 
 -- 锚点缺失：失败且不落盘
 do
     local no_anchor = "local Screen = Device.screen\n"
     local paths = setup(no_anchor)
-    local res = Manager.install("page_turn_animation")
+    local res = Manager.install(DIR)
     Assert.is_false(res.ok)
     Assert.is_true((res.err or ""):find("anchor not found", 1, true) ~= nil)
     Assert.eq(read(paths.target), no_anchor)
@@ -171,7 +166,7 @@ do
         end
         return real_open(path, mode)
     end
-    local res = Manager.install("page_turn_animation")
+    local res = Manager.install(DIR)
     io.open = real_open
     Assert.is_false(res.ok)
     Assert.eq(target_writes, 2)
@@ -189,7 +184,7 @@ do
         end
         return real_open(path, mode)
     end
-    local res = Manager.install("page_turn_animation")
+    local res = Manager.install(DIR)
     io.open = real_open
     Assert.eq(res.err, "copy failed: patches dir denied")
     Assert.eq(read(paths.target), FAKE_TARGET)
@@ -198,7 +193,7 @@ end
 -- 目标文件缺失：失败
 do
     local paths = setup(nil)
-    local res = Manager.install("page_turn_animation")
+    local res = Manager.install(DIR)
     Assert.is_false(res.ok)
     Assert.is_true((res.err or ""):find("cannot read", 1, true) ~= nil)
 end
@@ -206,10 +201,10 @@ end
 -- 无备份恢复：失败且不写目标
 do
     local paths = setup(FAKE_TARGET)
-    Assert.is_true(Manager.install("page_turn_animation").ok)
+    Assert.is_true(Manager.install(DIR).ok)
     os.remove(paths.backups .. "/frontend/ui/uimanager.lua")
     local patched = read(paths.target)
-    local res = Manager.restore("page_turn_animation")
+    local res = Manager.restore(DIR)
     Assert.is_false(res.ok)
     Assert.is_true((res.err or ""):find("no backup", 1, true) ~= nil)
     Assert.eq(read(paths.target), patched)
@@ -218,12 +213,23 @@ end
 -- 升级后（目标已不含标记）恢复：不用陈旧备份覆盖新文件，只清理补丁文件
 do
     local paths = setup(FAKE_TARGET)
-    Assert.is_true(Manager.install("page_turn_animation").ok)
+    Assert.is_true(Manager.install(DIR).ok)
     -- 模拟 KOReader 升级：目标被覆盖成无标记的新版本
     local upgraded = FAKE_TARGET .. "\n-- upgraded\n"
     write(paths.target, upgraded)
-    local res = Manager.restore("page_turn_animation")
+    local res = Manager.restore(DIR)
     Assert.is_true(res.ok, res.err)
     Assert.eq(read(paths.target), upgraded)
     Assert.is_nil(read(paths.patches .. "/2-swipe-animation-core.lua"))
+end
+
+-- definition.name 拼进备份路径：路径穿越之类的名字直接拒绝，不落盘。
+do
+    local paths = setup(FAKE_TARGET)
+    local bad = paths.base .. "/bad"
+    write(bad .. "/definition.lua", 'return { name = "../escape", files = {}, patches = {} }')
+    local res = Manager.install(bad)
+    Assert.is_false(res.ok)
+    Assert.matches(res.err, "invalid definition.name")
+    Assert.eq(read(paths.target), FAKE_TARGET)
 end

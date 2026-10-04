@@ -1,3 +1,5 @@
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
+
 --[[-- book.note 从本地未同步快照上传，并在打开时拉取远端快照。 --]]
 
 local Assert = require("support.assert")

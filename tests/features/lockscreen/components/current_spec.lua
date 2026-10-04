@@ -1,0 +1,126 @@
+--[[--
+lockscreen 当前阅读：所有书籍数据只读当前源数据库。
+
+@module tests.features.lockscreen.components.current_spec
+--]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
+
+local Assert = require("support.assert")
+
+local active_source = "moon"
+local recent_source
+local rows = {
+    { source_id = "moon", stable_id = "done", title = "Done", authors = "A", percent = 100 },
+    {
+        source_id = "moon", stable_id = "reading", title = "Reading", authors = "B", percent = 55,
+    chapter_idx = 7,
+    chapter_title = "数据库章节",
+    chapter_count = 12,
+    page = 12,
+    total_pages = 80,
+    },
+}
+local stats_sources = {}
+
+package.preload["book.catalog"] = function()
+    return {
+        recentBooks = function(source_id, limit)
+            recent_source = source_id
+            Assert.eq(limit, 16)
+            return rows
+        end,
+    }
+end
+
+package.preload["db.stats"] = function()
+    return {
+        summaryByBook = function(source_id, stable_id)
+            stats_sources[#stats_sources + 1] = source_id
+            Assert.eq(stable_id, "reading")
+            return { total_seconds = 3600 }
+        end,
+        dailyByBook = function(source_id, stable_id, limit)
+            stats_sources[#stats_sources + 1] = source_id
+            Assert.eq(stable_id, "reading")
+            Assert.eq(limit, 7)
+            return {}
+        end,
+    }
+end
+
+package.preload["features.lockscreen.components.library"] = function()
+    return {
+        activeSourceId = function() return active_source end,
+        coverPath = function(stable_id, source_id)
+            return source_id .. "/" .. stable_id .. ".png"
+        end,
+    }
+end
+
+package.preload["features.lockscreen.components.util"] = function()
+    return {
+        dayStart = function() return 100000 end,
+        dayBuckets = function() return { { key = "today" } } end,
+    }
+end
+
+package.preload["reader.session"] = function()
+    error("lockscreen current must not read ReaderSession")
+end
+
+package.loaded["features.lockscreen.components.current"] = nil
+local Current = require("features.lockscreen.components.current")
+local book = assert(Current.book(true))
+
+Assert.eq(recent_source, "moon")
+Assert.eq(stats_sources[1], "moon")
+Assert.eq(stats_sources[2], "moon")
+Assert.eq(book.source_id, "moon")
+Assert.eq(book.stable_id, "reading")
+Assert.eq(book.title, "Reading")
+Assert.eq(book.authors, "B")
+Assert.eq(math.floor(book.percent + 0.5), 55)
+Assert.eq(book.chapter_idx, 7)
+Assert.eq(book.chapter_title, "数据库章节")
+Assert.eq(book.chapter_count, 12)
+Assert.eq(book.page, 12)
+Assert.eq(book.total_pages, 80)
+Assert.eq(book.cover, "moon/reading.png")
+Assert.eq(book.total_seconds, 3600)
+Assert.eq(book.buckets[1].key, "today")
+
+-- 进度没有章节字段时保持为空。
+rows = {
+    {
+        source_id = "moon",
+        stable_id = "poison",
+        title = "Poison",
+        percent = 20,
+    },
+}
+book = assert(Current.book())
+Assert.eq(book.stable_id, "poison")
+Assert.is_nil(book.chapter_idx)
+Assert.is_nil(book.chapter_title)
+
+-- 混合模式 scope 是源列表：书的源、封面和统计都按行内 source_id。
+active_source = { "moon", "wechat" }
+rows = {
+    {
+        source_id = "wechat", stable_id = "reading", title = "Reading", percent = 30,
+    },
+}
+stats_sources = {}
+book = assert(Current.book(true))
+Assert.eq(recent_source, active_source)
+Assert.eq(book.source_id, "wechat")
+Assert.eq(book.cover, "wechat/reading.png")
+Assert.eq(stats_sources[1], "wechat")
+Assert.eq(stats_sources[2], "wechat")
+
+-- 当前源没有图书时不得回退到其它源或 ReaderSession。
+active_source = "wechat"
+rows = {}
+recent_source = nil
+Assert.is_nil(Current.book())
+Assert.eq(recent_source, "wechat")

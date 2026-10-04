@@ -3,6 +3,7 @@ source.chapter：源侧目录选择、正文落盘与本地文件复用。
 
 @module tests.source.chapter_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 local Config = require("support.config")
@@ -60,17 +61,12 @@ package.preload["ui/network/manager"] = function()
     }
 end
 local progress_ui = { shown = 0 }
-package.preload["ui/widget/progressbardialog"] = function()
-    return { new = function()
-        return {
-            show = function() progress_ui.shown = (progress_ui.shown or 0) + 1 end,
-            close = function() end,
-            reportProgress = function() end,
-        }
-    end }
+local Themed = require("support.theme_stubs")
+Themed.install()
+Themed.on_show = function(o)
+    if o.kind == "progress_dialog" then progress_ui.shown = progress_ui.shown + 1 end
 end
 package.loaded["ui/network/manager"] = nil
-package.loaded["ui/widget/progressbardialog"] = nil
 
 package.loaded["source.chapter"] = nil
 local Chapter = require("source.chapter")
@@ -123,7 +119,7 @@ local remote_ops = {
     loadToc = function(_, cb) cb(toc) end,
     fetchContent = function(_, item, cb)
         remote_n = remote_n + 1
-        cb({ title = item.title, html = '<p><img src="https://cdn/remote.png"/></p>' })
+        cb({ title = item.title, html = '<p><img src="https://cdn/features.remote.png"/></p>' })
     end,
 }
 local remote_stale = io.open(tmp .. "/2.html", "wb")
@@ -231,6 +227,7 @@ ui_job.cancel()
 Stubs.flush()
 Assert.is_nil(ui_path)
 
+
 -- 本地章节已存在时快开，不弹准备框；但必须补登记身份，修复早于 chapters 表的缓存。
 local fast_path
 local touch_before = #touches
@@ -255,6 +252,20 @@ Stubs.flush()
 Assert.is_nil(failed_path)
 Assert.eq(failed_err, "register failed")
 touch_error = nil
+
+-- 用户关掉准备框（取消键 / 点外 / 返回键）：取消源任务并回调「已取消」。
+os.remove(tmp .. "/2.html")
+local user_err, toc_cancelled = nil, 0
+Chapter.openWithUi({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, {
+    loadToc = function() return { cancel = function() toc_cancelled = toc_cancelled + 1 end } end,
+    fetchContent = function() end,
+}, function(_, err) user_err = err end)
+local prep = Themed.last("progress_dialog")
+Assert.not_nil(prep.on_cancel)
+prep:dismiss()
+Assert.eq(toc_cancelled, 1)
+Assert.eq(user_err, "已取消")
+progress_ui.shown = 0
 
 -- 已连接但不在线：runWhenOnline 不会回调，必须直接失败给出提示而不是静默挂起。
 network.online = false
@@ -313,7 +324,7 @@ end
 lfs.rmdir(tmp)
 for _, name in ipairs({
     "utils.paths", "db.progress", "db.book", "book.store", "source.chapter",
-    "ui/network/manager", "ui/widget/progressbardialog",
+    "ui/network/manager",
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil

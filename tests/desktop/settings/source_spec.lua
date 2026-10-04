@@ -1,0 +1,144 @@
+--[[--
+数据源选择：6 个书源 + 置顶的混合模式。
+@module tests.desktop.pages.setting.source_spec
+--]]
+
+local Assert = require("support.assert")
+
+local mixed = false
+local opds_on = false
+local active = "wechat"
+local saved
+local set_active
+local enabled = {
+    { id = "local", name = "本地" },
+    { id = "moon", name = "Moon" },
+    { id = "wechat", name = "微信读书" },
+    { id = "jdread", name = "京东读书" },
+    { id = "copymanga", name = "拷贝漫画" },
+    { id = "fanqie", name = "番茄小说" },
+}
+package.preload["utils.settings"] = function()
+    return {
+        libraryMixed = function() return mixed end,
+        zlibEnabled = function() return false end,
+        opdsEnabled = function() return opds_on end,
+        save = function(patch)
+            saved = patch
+            if patch.library_mixed ~= nil then mixed = patch.library_mixed end
+        end,
+        activeSourceId = function() return active end,
+        getSource = function() return {} end,
+    }
+end
+local notified = 0
+package.preload["source.registry"] = function()
+    return {
+        listEnabled = function() return enabled end,
+        list = function() return enabled end,
+        isEnabled = function() return true end,
+        setEnabled = function() end,
+        setActive = function(id) set_active = id; active = id end,
+        meta = function(id) return { id = id, name = id } end,
+        notifyChanged = function() notified = notified + 1 end,
+    }
+end
+for _, id in ipairs({ "moon", "wechat", "jdread", "copymanga", "fanqie" }) do
+    package.preload["source." .. id .. ".setting"] = function()
+        return { rows = function() return { function() return { id = id .. "-row" } end } end }
+    end
+end
+package.preload["source.local.setting"] = function()
+    return {
+        rowStatus = function() return "ok", true end,
+        rows = function() return { function() return { id = "local-dir" } end } end,
+    }
+end
+package.preload["ui/widget/infomessage"] = function() return { new = function(_, o) return o end } end
+package.preload["ui/uimanager"] = function() return { show = function() end } end
+local Themed = require("support.theme_stubs")
+Themed.install()
+package.preload["ui.themes.widgets.row"] = function()
+    return { widget = function(opts) return opts end }
+end
+package.preload["gettext"] = function() return function(s) return s end end
+package.preload["ffi/util"] = function()
+    return { template = function(fmt, a, b) return fmt:gsub("%%1", tostring(a)):gsub("%%2", tostring(b or "")) end }
+end
+package.preload["store.zlib.setting"] = function() return {} end
+
+package.loaded["desktop.pages.setting.source"] = nil
+local Source = require("desktop.pages.setting.source")
+local src = Source
+local desktop = { updateView = function() end, onEvent = function() end }
+
+Assert.eq(Source.displayName("微信读书"), "微信读书")
+mixed = true
+Assert.eq(Source.displayName("微信读书"), "混合模式")
+mixed = false
+
+src:pickActive()
+local sheet = Themed.last("list")
+Assert.eq(sheet.items[1].value, "__mixed__", "混合模式置顶")
+Assert.eq(sheet.items[2].value, "local", "本地排第二")
+Assert.eq(#sheet.items, 7, "6 源 + 1 混合")
+Assert.eq(sheet.items[4].text, "微信读书")
+Assert.eq(sheet.current, "wechat")
+
+sheet.on_select("__mixed__")
+Assert.eq(saved.library_mixed, true)
+Assert.is_true(mixed)
+Assert.eq(notified, 1, "切混合模式广播 SourceChanged")
+
+src:pickActive()
+sheet = Themed.last("list")
+Assert.eq(sheet.current, "__mixed__", "混合开启时只勾混合")
+
+set_active = nil
+sheet.on_select("moon")
+Assert.eq(saved.library_mixed, false)
+Assert.eq(set_active, "moon")
+Assert.is_false(mixed)
+
+local scope = src:scopeSections{
+    desktop = desktop,
+    plugin = nil,
+    active_id = "wechat",
+    active_name = "微信读书",
+}
+Assert.eq(#scope, 1)
+Assert.eq(scope[1].title, "书籍来源")
+Assert.eq(scope[1].rows[1]().status, "微信读书")
+Assert.eq(scope[1].rows[1]().title, "当前数据源")
+Assert.eq(scope[1].rows[2]().title, "已启用的数据源")
+
+local config = src:configSections{
+    desktop = desktop,
+    plugin = nil,
+}
+Assert.is_true(#config >= 2)
+Assert.eq(config[1].title, "Moon")
+Assert.eq(config[#config - 1].title, "Z-Library")
+Assert.eq(config[#config].title, "OPDS")
+-- 和 Z-Library 一样：开关默认关，关着只有开关一行；打开后才出现目录配置入口。
+Assert.len(config[#config].rows, 1)
+Assert.eq(config[#config].rows[1]().kind, "toggle")
+Assert.eq(config[#config].rows[1]().status, "关")
+config[#config].rows[1]().callback()
+Assert.is_true(saved.opds_enabled)
+opds_on = true
+local opds_rows = src:configSections{ desktop = desktop, plugin = nil }
+opds_rows = opds_rows[#opds_rows].rows
+Assert.len(opds_rows, 2)
+Assert.eq(opds_rows[1]().status, "开")
+Assert.eq(opds_rows[2]().title, "OPDS 目录")
+Assert.eq(opds_rows[2]().status, "未配置")
+opds_on = false
+for i = 1, #config do
+    local first = config[i].rows[1]
+    if first then
+        Assert.is_true(first().title ~= "混合模式", config[i].title)
+    end
+end
+
+return true

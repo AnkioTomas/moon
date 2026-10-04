@@ -3,6 +3,7 @@
 书目 `.Moon+/books.sync`、封面 `.Moon+/Cover/<文件名>_2.png`、进度 `.Moon+/Cache/<文件名>.po`、
 统计 `.Moon+/Stats/stats.json`。WebDAV 与 db.* 都是内存假实现，语义照真实 SQL 写。
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")

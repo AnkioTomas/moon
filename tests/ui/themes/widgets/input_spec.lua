@@ -75,4 +75,19 @@ Assert.eq(got[1], "改过")
 Assert.eq(got[2], "y")
 Assert.is_false(dialog.inputs[1].kb)
 
+-- actions：插在取消与确定之间，收当前文本，不关窗。
+local probed
+dialog = Input:new{
+    fields = { { text = "Shanghai" } },
+    actions = { { text = "测试", callback = function(city) probed = city end } },
+    callback = function() end,
+}
+closed = #Kit.closed
+local row = Kit.buttons(dialog)
+Assert.len(row, 3)
+dialog.inputs[1].text = "Tokyo"
+row[2]:onTapThemeButton()
+Assert.eq(probed, "Tokyo")
+Assert.eq(#Kit.closed, closed, "action 不关窗")
+
 return true

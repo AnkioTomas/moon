@@ -5,47 +5,31 @@
 --]]
 
 local Assert = require("support.assert")
+local Themed = require("support.theme_stubs")
+Themed.install()
 
-local function widget()
-    return { new = function(_, o) return o or {} end }
-end
-
-local shown, closed = {}, {}
-package.preload["ui/uimanager"] = function()
-    return {
-        show = function(_, w) shown[#shown + 1] = w end,
-        close = function(_, w) closed[#closed + 1] = w end,
-    }
-end
-package.preload["ui/widget/buttondialog"] = function()
-    return {
-        new = function(_, o)
-            o.kind = "dialog"
-            o.addWidget = function(self, child) self.child = child end
-            return o
-        end,
-    }
-end
-package.preload["ui/widget/infomessage"] = function()
-    return { new = function(_, o) o.kind = "info"; return o end }
-end
-package.preload["ui/widget/imagewidget"] = widget
-package.preload["ui/widget/textwidget"] = widget
 package.preload["ui/widget/container/centercontainer"] = function()
     return { new = function(_, o) return { content = o[1] } end }
 end
-package.preload["ui/geometry"] = widget
+package.preload["ui/geometry"] = function() return { new = function(_, o) return o end } end
 package.preload["device"] = function()
     return { screen = { getWidth = function() return 600 end, getHeight = function() return 800 end } }
 end
-package.preload["ui.components.bookui"] = function()
-    return { face = function() return "face" end }
+package.preload["ui.themes.widgets.text"] = function()
+    return { line = function(_, text) return { text = text } end }
+end
+local invalidated
+package.preload["ui.themes.widgets.image"] = function()
+    return {
+        widget = function(o) return { src = o.src } end,
+        invalidate = function(path) invalidated = path end,
+    }
 end
 package.preload["ui/network/manager"] = function()
     return { runWhenOnline = function(_, fn) fn() end }
 end
-package.preload["ui.components.settingrow"] = function()
-    return { build = function(_, opts) return opts end }
+package.preload["ui.themes.widgets.row"] = function()
+    return { widget = function(opts) return opts end }
 end
 
 local begin_cb, wait_cb
@@ -65,45 +49,49 @@ package.preload["source.jdread.auth"] = function()
     }
 end
 
+--- 对话框正文（二维码 / 占位字）。
+local function content(sheet)
+    return sheet.items[1].widget(500).content
+end
+
 package.loaded["source.jdread.setting"] = nil
 local Setting = require("source.jdread.setting")
-local login = Setting.rows(nil)[1]().callback
+local login = Setting.rows()[1]().callback
 
 -- 点击即同步出占位框盖住入口，不等取码网络往返。
 login()
-Assert.len(shown, 1)
-Assert.eq(shown[1].kind, "dialog")
-Assert.eq(shown[1].child.content.text, "正在获取二维码…")
+local placeholder = Themed.last("sheet")
+Assert.is_true(placeholder.shown)
+Assert.eq(content(placeholder).text, "正在获取二维码…")
 Assert.not_nil(begin_cb)
 
--- 取码途中点框外 / 返回键：取消取码，回调迟到也不再弹二维码。
-shown[1].tap_close_callback()
+-- 取码途中点框外 / 返回键 / 取消按钮都是关窗：取消取码，回调迟到也不再弹二维码。
+placeholder:close()
 Assert.eq(begin_cancels, 1)
 begin_cb({ qr_path = "qr.png", token = "t", jar = {} })
-Assert.len(shown, 1)
+Assert.len(Themed.all("sheet"), 1)
 Assert.is_nil(wait_cb)
 
--- 二维码出来后换框（旧占位框关掉），关新框取消轮询。
-shown, closed = {}, {}
+-- 二维码出来后换框（旧占位框关掉，不算取消），关新框取消轮询。
 login()
-local placeholder = shown[1]
+placeholder = Themed.last("sheet")
 begin_cb({ qr_path = "qr.png", token = "t", jar = {} })
-Assert.len(shown, 2)
-Assert.eq(closed[1], placeholder)
-Assert.eq(shown[2].child.content.file, "qr.png")
--- 每次登录都复用同一路径，走 ImageCache 会显示上一张已失效的码。
-Assert.eq(shown[2].child.content.file_do_cache, false)
+local qr = Themed.last("sheet")
+Assert.is_true(placeholder.closed)
+Assert.eq(begin_cancels, 1, "代码换框不算用户取消")
+Assert.eq(content(qr).src, "qr.png")
+-- 每次登录都复用同一路径，不作废位图缓存会显示上一张已失效的码。
+Assert.eq(invalidated, "qr.png")
 Assert.not_nil(wait_cb)
-shown[2].tap_close_callback()
+qr:close()
 Assert.eq(wait_cancels, 1)
+local sheets = #Themed.made
 wait_cb(nil, "迟到的失败", "error")
-Assert.len(shown, 2, "已取消的轮询不应再弹提示")
+Assert.eq(#Themed.made, sheets, "已取消的轮询不应再弹提示")
 
 -- 取码失败：关掉占位框再提示。
-shown, closed = {}, {}
 login()
-placeholder = shown[1]
+placeholder = Themed.last("sheet")
 begin_cb(nil, "获取失败")
-Assert.eq(closed[1], placeholder)
-Assert.eq(shown[2].kind, "info")
-Assert.eq(shown[2].text, "获取失败")
+Assert.is_true(placeholder.closed)
+Assert.eq(Themed.last("toast").text, "获取失败")

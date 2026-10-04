@@ -96,6 +96,14 @@ Assert.len(Kit.scheduled, 1)
 panel = paint(toast)
 toast:onTapModal(nil, Kit.tap(panel.x + 1, panel.y + 1))
 Assert.eq(Kit.closed[#Kit.closed], toast)
+-- dismissable=false：面板内外点按、返回键都只吞事件，压过 close_on_tap。
+local closed_count = #Kit.closed
+toast = Toast:new{ text = "x", dismissable = false }
+panel = paint(toast)
+Assert.is_true(toast:onTapModal(nil, Kit.tap(panel.x + 1, panel.y + 1)))
+Assert.is_true(toast:onTapModal(nil, Kit.tap(1, 1)))
+Assert.is_true(toast:onClose())
+Assert.eq(#Kit.closed, closed_count, "dismissable=false 的提示不被点按 / 返回键关闭")
 
 -- 动作表：通栏按钮，separator 只占空隙；点按先关窗再执行；禁用项不回调。
 log = {}
@@ -161,7 +169,54 @@ progress:update("b.epub", 20, 12)
 Assert.eq(progress.bar.percent, 100)
 local mode = Kit.dirty[#Kit.dirty].mode()
 Assert.eq(mode, "fast")
-Assert.is_true(progress.close_on_tap)
+Assert.len(Kit.buttons(progress), 0, "无回调不出按钮行")
+-- 点按一律不关：面板内外都吞掉。
+local progress_panel = paint(progress)
+local progress_closed = #Kit.closed
+Assert.is_true(progress:onTapModal(nil, Kit.tap(progress_panel.x + 1, progress_panel.y + 1)))
+Assert.is_true(progress:onTapModal(nil, Kit.tap(1, 1)))
+Assert.eq(#Kit.closed, progress_closed, "进度弹窗点按不关")
+-- set：文案原样显示，percent 省略时进度条不动。
+progress:set("1.0 / 4.0 MB", 25)
+Assert.eq(progress.detail.text, "1.0 / 4.0 MB")
+Assert.eq(progress.bar.percent, 25)
+progress:set("拼接中")
+Assert.eq(progress.bar.percent, 25)
+
+-- 可转后台 / 可取消：出「取消」「后台运行」，点按不关；按钮先关窗再回调；返回键 = 后台运行。
+log = {}
+local bg
+bg = ProgressDialog:new{
+    title = "下载",
+    on_background = function() log[#log + 1] = "bg:" .. tostring(Kit.closed[#Kit.closed] == bg) end,
+    on_cancel = function() log[#log + 1] = "cancel:" .. tostring(Kit.closed[#Kit.closed] == bg) end,
+}
+buttons = Kit.buttons(bg)
+Assert.len(buttons, 2)
+Assert.eq(buttons[1].text, "取消")
+Assert.eq(buttons[2].text, "后台运行")
+Assert.eq(buttons[2].variant, "primary")
+panel = paint(bg)
+closed = #Kit.closed
+Assert.is_true(bg:onTapModal(nil, Kit.tap(panel.x + 1, panel.y + 1)))
+Assert.eq(#Kit.closed, closed, "面板内点按不关")
+buttons[1]:onTapThemeButton()
+Assert.eq(log[1], "cancel:true")
+buttons[2]:onTapThemeButton()
+Assert.eq(log[2], "bg:true")
+closed = #Kit.closed
+Assert.is_true(bg:onTapModal(nil, Kit.tap(1, 1)))
+Assert.eq(#Kit.closed, closed, "面板外点按不关")
+Assert.len(log, 2, "面板外点按不转后台")
+Assert.is_true(bg:onClose())
+Assert.eq(log[3], "bg:true")
+-- dismissable = false：返回键也吞掉。
+local locked = ProgressDialog:new{ title = "x", dismissable = false }
+closed = #Kit.closed
+Assert.is_true(locked:onClose())
+Assert.eq(#Kit.closed, closed, "dismissable=false 返回键不关")
+-- 只给 on_background：只有「后台运行」一个按钮。
+Assert.len(Kit.buttons(ProgressDialog:new{ title = "x", on_background = function() end }), 1)
 
 -- 二维码：边长取面板内宽与半屏高的较小值；任意点按收起。
 local qr = QR:new{ title = "扫码", text = "https://ankio.net", caption = "用微信扫一扫" }
@@ -170,5 +225,45 @@ Assert.eq(code.width, math.min(qr:innerWidth(), 400))
 paint(qr)
 qr:onTapModal(nil, Kit.tap(1, 1))
 Assert.eq(Kit.closed[#Kit.closed], qr)
+
+-- guard 隔离（错误页本身见 tests/ui/guard_spec.lua）：换记录桩后重载 Modal。
+do
+    local reported = {}
+    package.loaded["ui.guard"] = {
+        call = function(label, fn, ...)
+            local res = { pcall(fn, ...) }
+            if res[1] then return unpack(res, 2) end
+            reported[#reported + 1] = label
+        end,
+    }
+    package.loaded["ui.themes.widgets.modal"] = nil
+    package.loaded["ui.themes.widgets.toast"] = nil
+    local GuardedToast = require("ui.themes.widgets.toast")
+
+    -- 正常：绘制与事件照旧（面板内点按 = close_on_tap 关窗，事件已处理）
+    local ok_toast = GuardedToast:new{ text = "ok" }
+    local ok_panel = paint(ok_toast)
+    Assert.is_true(ok_toast:handleEvent({ handler = "onTapModal", args = { nil, Kit.tap(ok_panel.x + 1, ok_panel.y + 1) } }))
+    Assert.eq(Kit.closed[#Kit.closed], ok_toast)
+    Assert.len(reported, 0)
+
+    -- 事件处理抛错：报告，并算已处理（不漏到下层窗口），窗口留着
+    local bad_event = GuardedToast:new{ text = "x" }
+    function bad_event:onTapModal() error("tap boom") end
+    local closed_before = #Kit.closed
+    Assert.is_true(bad_event:handleEvent({ handler = "onTapModal", args = { nil, Kit.tap(1, 1) } }))
+    Assert.eq(reported[1], "modal onTapModal")
+    Assert.eq(#Kit.closed, closed_before)
+
+    -- 绘制抛错：报告一次并关窗；关窗前的重绘不再画、不再报
+    local bad_paint = GuardedToast:new{ text = "x" }
+    bad_paint[1] = { paintTo = function() error("paint boom") end }
+    bad_paint.panel_x, bad_paint.panel_y = 0, 0
+    bad_paint:paintTo(Kit.canvas(), 0, 0)
+    Assert.eq(reported[2], "modal paint")
+    Assert.eq(Kit.closed[#Kit.closed], bad_paint, "画坏的弹窗被关掉，不留隐形窗口吞点按")
+    bad_paint:paintTo(Kit.canvas(), 0, 0)
+    Assert.len(reported, 2)
+end
 
 return true

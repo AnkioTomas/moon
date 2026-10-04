@@ -1,5 +1,5 @@
 --[[--
-插件入口：Host、源事件分发、阅读会话转发、脏同步重试、桌面生命周期。
+插件入口：宿主接线（启动项 / 菜单 / 手势）、源生命周期、阅读会话转发、脏同步重试、桌面生命周期。
 
 @module tests.main_spec
 --]]
@@ -44,86 +44,123 @@ stub("utils.log", {
 stub("l10n", {})
 stub("gettext", setmetatable({}, { __call = function(_, text) return text end }))
 local current_source
+local source_hooks = {}
+--- 当前源桩：补齐四个生命周期钩子并记录调用。
+---@param fields table
+---@return table
+local function mkSource(fields)
+    for _, hook in ipairs({ "onCreate", "onSuspend", "onResume", "onExit" }) do
+        fields[hook] = function(_, host) source_hooks[#source_hooks + 1] = hook .. ":" .. host.path end
+    end
+    return fields
+end
+--- 除当前源外的其他启用源（混合模式）；值为 false 表示已启用但加载失败。
+local other_sources = {}
 stub("source.registry", {
     current = function() return current_source end,
-})
-local desk_life = {}
-stub("ui.desktop", {
-    new = function()
-        return {
-            lifecycle = { state = "new" },
-            onResume = function() desk_life[#desk_life + 1] = "Resume" end,
-        }
+    listEnabled = function()
+        local out = current_source and { { id = current_source.id } } or {}
+        for _, id in ipairs(other_sources) do out[#out + 1] = { id = id } end
+        return out
+    end,
+    resolve = function(id)
+        if current_source and current_source.id == id then return current_source end
+        return other_sources[id] or nil
     end,
 })
+stub("desktop", {
+    open = function(p)
+        calls.desktop_opened = p
+    end,
+    autoOpen = function(p) calls.auto_open[#calls.auto_open + 1] = p end,
+})
+calls.auto_open = {}
 stub("utils.paths", { ensureLayout = function() end })
-stub("host", {
-    onCreate = function() calls.host = (calls.host or 0) + 1 end,
-    onShow = function() calls.host_show = (calls.host_show or 0) + 1 end,
+local dispatcher_actions = {}
+stub("dispatcher", {
+    registerAction = function(_, id) dispatcher_actions[#dispatcher_actions + 1] = id end,
+})
+stub("ui.fonts", { onCreate = function() calls.attach = (calls.attach or 0) + 1 end })
+stub("ui.themes.widgets.icon", { ensure = function() end })
+local fm_order = { setting = { "filebrowser", "book_library" } }
+stub("ui/elements/filemanager_menu_order", fm_order)
+stub("ui/elements/reader_menu_order", { setting = {} })
+local FMMenu = {
+    getStartWithMenuTable = function()
+        return { sub_item_table = {}, text_func = function() return "Start with: file browser" end }
+    end,
+}
+stub("apps/filemanager/filemanagermenu", FMMenu)
+stub("ffi/util", { template = function(fmt, a) return (fmt:gsub("%%1", a)) end })
+local reader_settings = {}
+local moon_cfg = { start_with_seeded = true }
+stub("utils.settings", {
+    get = function() return moon_cfg end,
+    save = function(values)
+        for k, v in pairs(values) do moon_cfg[k] = v end
+    end,
+    openOnStart = function() return reader_settings.start_with == "bookshelf_book" end,
+    setOpenOnStart = function(on) reader_settings.start_with = on and "bookshelf_book" or "filemanager" end,
 })
 stub("book.open", {
     book = function(_, book) calls.open_book = book end,
 })
-stub("book.reader_prefs", {
-    inject = function() calls.prefs_inject = (calls.prefs_inject or 0) + 1 end,
-})
-stub("ui.reader.session", {
-    onReaderReady = function() calls.session = (calls.session or {}) ; calls.session.ready = true end,
-    onCloseDocument = function() calls.session = calls.session or {} ; calls.session.close = true end,
-    onPageChanged = function(_, page) calls.session = calls.session or {} ; calls.session.page = page end,
-    onAnnotationsModified = function() calls.session = calls.session or {} ; calls.session.notes = true end,
-    onPause = function() calls.session = calls.session or {} ; calls.session.suspend = true end,
+local READING_EVENTS = {
+    "onDocSettingsLoad", "onReaderReady", "onPageUpdate", "onPosUpdate",
+    "onAnnotationsModified", "onEndOfBook", "onStartOfBook", "onCloseDocument",
+}
+local session_stub = {
+    onSuspend = function() calls.session = calls.session or {} ; calls.session.suspend = true end,
     onResume = function() calls.session = calls.session or {} ; calls.session.resume = true end,
-    onChapterBoundary = function(delta)
-        calls.session = calls.session or {}
-        calls.session.boundary = delta
-        return true
-    end,
-})
+}
+local reading = {}
+for _, name in ipairs(READING_EVENTS) do
+    session_stub[name] = function(host, arg)
+        reading[name] = { host, arg }
+        return name
+    end
+end
+stub("reader.session", session_stub)
 stub("book.sync", {
-    retryDirtyAsync = function() calls.retry_dirty = (calls.retry_dirty or 0) + 1 end,
+    onNetworkConnected = function() calls.retry_dirty = (calls.retry_dirty or 0) + 1 end,
 })
 
 local function noop_mod(extra)
     local mod = {
         onCreate = function() calls.boot = (calls.boot or 0) + 1 end,
-        onPause = function() calls.feat_suspend = (calls.feat_suspend or 0) + 1 end,
+        onSuspend = function() calls.feat_suspend = (calls.feat_suspend or 0) + 1 end,
         onResume = function() calls.feat_resume = (calls.feat_resume or 0) + 1 end,
-        onDestroy = function() calls.feat_exit = (calls.feat_exit or 0) + 1 end,
+        onExit = function() calls.feat_exit = (calls.feat_exit or 0) + 1 end,
         refresh = function() calls.lock_refresh = (calls.lock_refresh or 0) + 1 end,
         autoCheck = function() calls.update_check = (calls.update_check or 0) + 1 end,
-        checkStartup = function() calls.animation_check = (calls.animation_check or 0) + 1 end,
     }
     for k, v in pairs(extra or {}) do mod[k] = v end
     return mod
 end
-stub("translate.init", noop_mod())
-stub("baike.init", noop_mod())
-stub("dictionary.init", noop_mod())
-stub("ui.panel.native", noop_mod())
-stub("lockscreen.init", noop_mod({
-    onPause = function() calls.lock_refresh = (calls.lock_refresh or 0) + 1 end,
+stub("features.baike", noop_mod())
+stub("features.dictionary", noop_mod())
+stub("features.lockscreen", noop_mod({
+    onSuspend = function() calls.lock_refresh = (calls.lock_refresh or 0) + 1 end,
 }))
-stub("remote.init", noop_mod())
-stub("nightmode", noop_mod())
-stub("ime.init", noop_mod())
-stub("patch.manager", noop_mod({
-    onCreate = function()
-        calls.boot = (calls.boot or 0) + 1
-        require("ui/uimanager"):nextTick(function()
-            require("patch.page_turn_animation").checkStartup()
-        end)
+stub("features.remote", noop_mod())
+stub("features.nightmode", noop_mod())
+stub("features.ime", noop_mod())
+-- guard 本身在 tests/ui/guard_spec.lua；这里透传并记下经它挂上的入口。
+local guard_labels = {}
+stub("ui.guard", {
+    call = function(label, fn, ...)
+        guard_labels[label] = true
+        return fn(...)
     end,
-}))
-stub("patch.page_turn_animation", noop_mod())
-stub("update.init", noop_mod())
-local doc_registry = {}
-stub("document/documentregistry", doc_registry)
-stub("convert.azw3document", {
-    register = function(_, registry) calls.azw3_registry = registry end,
+    wrap = function(label, fn)
+        return function(...)
+            guard_labels[label] = true
+            return fn(...)
+        end
+    end,
 })
 local feature_hooks = {}
-stub("features.init", {
+stub("features", {
     emit = function(hook, host) feature_hooks[#feature_hooks + 1] = hook .. ":" .. host.path end,
 })
 
@@ -135,12 +172,20 @@ _G.G_reader_settings = {
 
 package.loaded["main"] = nil
 local Main = require("main")
-local plugin = setmetatable({ path = "book.koplugin", ui = {} }, Main)
+local menu = { registerToMainMenu = function() end }
+local plugin = setmetatable({ path = "book.koplugin", ui = { menu = menu } }, Main)
+current_source = mkSource({ id = "moon", onEvent = function() end })
 plugin:init()
-Assert.eq(calls.host, 1)
-Assert.is_true((calls.boot or 0) >= 8, "init 应挂上翻译/百科/词典/面板/锁屏/远程/IME/补丁等")
-Assert.eq(calls.animation_check, 1)
-Assert.eq(calls.azw3_registry, doc_registry)
+Assert.eq(table.concat(fm_order.setting, ","), "book_library,filebrowser", "设置菜单把月读置顶且不重复")
+local start_item = FMMenu.getStartWithMenuTable()
+Assert.eq(#start_item.sub_item_table, 1)
+Assert.eq(start_item.sub_item_table[1].text, "月读")
+start_item.sub_item_table[1].callback()
+Assert.eq(start_item.text_func(), "Start with: 月读", "选中月读后标题不为 nil")
+Assert.eq(table.concat(source_hooks, ","), "onCreate:book.koplugin", "init 转发当前源 onCreate")
+Assert.eq(calls.attach, 1)
+Assert.eq(table.concat(dispatcher_actions, ","), "book_open_shelf", "feature 的手势由各自 onCreate 登记")
+Assert.is_nil(calls.boot, "init 不直接挂功能，全部进 features")
 Assert.eq(table.concat(feature_hooks, ","), "onCreate:book.koplugin")
 feature_hooks = {}
 
@@ -150,7 +195,7 @@ do
     package.loaded["libs/libkoreader-lfs"] = {
         attributes = function(path, key) Assert.eq(key, "mode") return modes[path] end,
     }
-    stub("demo.init", {
+    stub("demo", {
         addToMainMenu = function(items) items.book_theme_demo = { text = "demo" } end,
     })
     local items = {}
@@ -162,42 +207,13 @@ do
     Assert.not_nil(items.book_theme_demo)
 end
 
--- emitToSource：缺省用当前源；指定源优先；抛错不打断
-do
-    local events = {}
-    current_source = {
-        id = "moon",
-        onEvent = function(_, event, payload)
-            events[#events + 1] = { event, payload and payload.id }
-        end,
-    }
-    plugin:emitToSource("fm_open")
-    Assert.eq(events[1][1], "fm_open")
-
-    local other = {
-        id = "wechat",
-        onEvent = function(_, event)
-            events[#events + 1] = { event, "other" }
-        end,
-    }
-    plugin:emitToSource("page_changed", { id = 1 }, other)
-    Assert.eq(events[2][1], "page_changed")
-    Assert.eq(events[2][2], "other")
-
-    current_source = {
-        id = "bad",
-        onEvent = function() error("boom") end,
-    }
-    plugin:emitToSource("network_connected") -- 不得抛出
-end
-
--- 网络恢复：脏重试 + 源事件 + 锁屏刷新；更新检查不在这里（桌面 onResume）
+-- 网络恢复：脏重试 + 源事件 + 锁屏刷新；更新检查不在这里（Desktop:activate）
 do
     local seen = {}
-    current_source = {
+    current_source = mkSource({
         id = "moon",
         onEvent = function(_, event) seen[#seen + 1] = event end,
-    }
+    })
     calls.retry_dirty = 0
     calls.lock_refresh = 0
     calls.update_check = 0
@@ -206,31 +222,29 @@ do
         onNetworkConnected = function() seen[#seen + 1] = "desktop_net" end,
     }
     plugin.desktop = net_desk
-    plugin.ui = {} -- FM
+    plugin.ui = { menu = menu } -- FM
     plugin:onNetworkConnected()
     Assert.eq(calls.retry_dirty, 1)
-    Assert.eq(calls.lock_refresh, 1)
-    Assert.eq(calls.update_check, 0, "自动更新检查只在 Desktop:onResume")
-    Assert.eq(table.concat(seen, ","), "network_connected,desktop_net")
+    Assert.eq(calls.lock_refresh, 0, "锁屏刷新由 feature onNetworkConnected 负责")
+    Assert.eq(feature_hooks[#feature_hooks], "onNetworkConnected:book.koplugin")
+    Assert.eq(calls.update_check, 0, "自动更新检查只在 Desktop:activate")
+    -- 桌面在窗口栈上，自己收 UIManager 的 NetworkConnected 广播；插件再转就重复了。
+    -- 源不收网络事件：脏重试走 book.sync 单通道。
+    Assert.eq(table.concat(seen, ","), "")
 end
 
--- 阅读生命周期一行转发
-do
-    calls.session = nil
-    plugin:onReaderReady()
-    Assert.is_true(calls.session.ready)
-    plugin:onPageUpdate(3)
-    Assert.eq(calls.session.page, 3)
-    plugin:onPosUpdate(nil, 4)
-    Assert.eq(calls.session.page, 4)
-    Assert.is_true(plugin:onEndOfBook())
-    Assert.eq(calls.session.boundary, 1)
+-- 阅读事件经 guard 挂会话入口：参数与返回值透传
+for _, name in ipairs(READING_EVENTS) do
+    Assert.eq(plugin[name](plugin, 7), name, name .. " 返回值透传")
+    Assert.eq(reading[name][1], plugin)
+    Assert.eq(reading[name][2], 7)
+    Assert.is_true(guard_labels[name], name .. " 经 guard")
 end
 
 local resumed_desktop = {
     lifecycle = { state = "Resume" },
     tab = "library",
-    onPause = function()
+    onSuspend = function()
         calls.desktop_pause = (calls.desktop_pause or 0) + 1
     end,
     onResume = function(self)
@@ -240,13 +254,11 @@ local resumed_desktop = {
             calls.library_resume = self
         end
     end,
-    onDestroy = function(self)
+    onExit = function(self)
         calls.desktop_destroy = (calls.desktop_destroy or 0) + 1
         self.lifecycle.state = "Destroy"
-    end,
-    onEvent = function(_, event, payload)
-        calls.desktop_event = event
-        calls.desktop_event_payload = payload
+        -- 与 Desktop:destroy 同契约：销毁即摘掉 plugin.desktop。
+        if plugin.desktop == self then plugin.desktop = nil end
     end,
     onNetworkConnected = function() end,
 }
@@ -256,53 +268,86 @@ plugin:onResume()
 Assert.is_true(calls.session.resume)
 Assert.is_nil(calls.library_resume, "唤醒不经插件再转 Desktop:onResume")
 
-current_source = {
-    id = "local",
-    onEvent = function(_, event)
-        calls.source_open = event
-    end,
-}
+current_source = mkSource({ id = "local" })
 plugin.desktop = nil
-desk_life = {}
-plugin:openDesktop()
-Assert.eq(table.concat(desk_life, ","), "Resume")
-Assert.eq(calls.source_open, "desktop_open")
+Assert.is_true(plugin:onBookOpenShelf())
+Assert.eq(calls.desktop_opened, plugin, "打开桌面整段交给 Desktop.open")
 plugin.desktop = resumed_desktop
 
-plugin:onSourceChanged()
-Assert.eq(calls.desktop_event, "source_changed")
-Assert.eq(calls.desktop_event_payload.id, "local")
-
 calls.session = nil
-calls.feat_suspend = 0
 calls.lock_refresh = 0
 plugin:onSuspend()
 Assert.is_true(calls.session.suspend)
-Assert.eq(calls.desktop_pause, 1)
-Assert.is_true(calls.feat_suspend >= 1, "休眠应通知远程")
-Assert.eq(calls.lock_refresh, 1)
+Assert.is_nil(calls.desktop_pause, "休眠不经插件转，桌面自收 Suspend 广播")
+Assert.eq(feature_hooks[#feature_hooks], "onSuspend:book.koplugin", "休眠经 features 通知夜间模式")
+Assert.eq(source_hooks[#source_hooks], "onSuspend:book.koplugin", "休眠转发当前源 onSuspend")
+Assert.eq(calls.lock_refresh, 0)
 
 calls.session = nil
-calls.feat_resume = 0
 plugin:onResume()
 Assert.is_true(calls.session.resume)
-Assert.is_true(calls.feat_resume >= 2, "唤醒应通知锁屏/远程")
+Assert.eq(feature_hooks[#feature_hooks], "onResume:book.koplugin", "唤醒经 features 通知夜间模式")
+Assert.eq(source_hooks[#source_hooks], "onResume:book.koplugin", "唤醒转发当前源 onResume")
 
-calls.feat_exit = 0
+-- 混合模式：生命周期转给所有启用源，不只当前源；加载失败的源跳过
+do
+    local seen = {}
+    other_sources = { "wechat", "jdread", wechat = mkSource({ id = "wechat" }), jdread = false }
+    other_sources.wechat.onSuspend = function(_, host) seen[#seen + 1] = "wechat:" .. host.path end
+    local before = #source_hooks
+    plugin:onSuspend()
+    Assert.eq(#source_hooks - before, 1, "当前源收到 onSuspend")
+    Assert.eq(table.concat(seen, ","), "wechat:book.koplugin", "非当前的启用源也收到 onSuspend")
+    other_sources = {}
+    feature_hooks[#feature_hooks] = nil
+end
+
 plugin:onExit()
-Assert.eq(calls.desktop_destroy, 1)
-Assert.eq(resumed_desktop.lifecycle.state, "Destroy")
-Assert.is_true(calls.feat_exit >= 2, "退出应停更新/远程")
+Assert.eq(source_hooks[#source_hooks], "onExit:book.koplugin", "退出转发当前源 onExit")
+Assert.is_nil(calls.desktop_destroy, "退出不经插件转，桌面自收 Exit 广播")
+resumed_desktop:onExit()
 Assert.eq(table.concat(feature_hooks, ","),
-    "onResume:book.koplugin,onPause:book.koplugin,onResume:book.koplugin,onDestroy:book.koplugin")
-
-calls.desktop_event = nil
-plugin:onSourceChanged()
-Assert.is_nil(calls.desktop_event, "已销毁的桌面不再收 onEvent")
+    "onNetworkConnected:book.koplugin,onResume:book.koplugin,onSuspend:book.koplugin,onResume:book.koplugin,onExit:book.koplugin")
 
 version_current = 202606000000
-local attach_count = calls.host
+local attach_count = calls.attach
 package.loaded["ko_version"] = nil
-setmetatable({ path = "book.koplugin", ui = {} }, Main):init()
-Assert.eq(calls.host, attach_count, "不支持的 KOReader 版本不得进入插件")
+setmetatable({ path = "book.koplugin", ui = { menu = menu } }, Main):init()
+Assert.eq(calls.attach, attach_count, "不支持的 KOReader 版本不得进入插件")
 Assert.eq(calls.version_dialog.text, "月读需要 KOReader 2026.07 或更高版本。\n\n当前版本：2026.06")
+
+-- 首次安装：强制启动项为月读，只种一次；自动开桌面只由 onShow 同步接管（FileManager 只经 showFiles 新建，init 后必有 Show）。
+version_current = 202607000000
+package.loaded["ko_version"] = nil
+local function boot()
+    package.loaded["main"] = nil
+    local p = setmetatable({ path = "book.koplugin", ui = { menu = menu } }, require("main"))
+    p:init()
+    return p
+end
+current_source = mkSource({ id = "moon", onEvent = function() end })
+moon_cfg.start_with_seeded = false
+reader_settings.start_with = nil
+calls.auto_open = {}
+local fm = boot()
+Assert.eq(reader_settings.start_with, "bookshelf_book")
+Assert.is_true(moon_cfg.start_with_seeded)
+Assert.len(calls.auto_open, 0, "init 不开桌面")
+fm:onShow()
+Assert.len(calls.auto_open, 1)
+Assert.eq(calls.auto_open[1], fm)
+
+-- 用户改回 filemanager：已种过，不再覆盖
+reader_settings.start_with = "filemanager"
+boot()
+Assert.eq(reader_settings.start_with, "filemanager")
+
+-- 宿主入口与生命周期各步都经 guard
+for _, label in ipairs({
+    "init", "onShow", "addToMainMenu", "openShelf",
+    "tasks.onSuspend", "session.onSuspend", "tasks.onResume", "session.onResume",
+    "tasks.onNetworkConnected", "sync.onNetworkConnected",
+    "source moon.onCreate", "source wechat.onSuspend",
+}) do
+    Assert.is_true(guard_labels[label] or false, label .. " 经 guard")
+end

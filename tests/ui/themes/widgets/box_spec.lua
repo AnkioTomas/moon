@@ -8,7 +8,7 @@ local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("bold")
 
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Progress = require("ui.themes.widgets.progress")
 
@@ -52,6 +52,33 @@ Assert.eq(#bb.ops, 1)
 Assert.eq(bb.ops[1].c, 0xEE)
 Assert.eq(bb.ops[1].r, 10)
 Assert.eq(flat:getSize().w, 100)
+
+-- 圆角框裁掉子件冒出四角的像素，角外颜色保持绘制前的底。
+local pixels = {}
+local function pixkey(px, py) return px .. ":" .. py end
+local round_bb = {
+    getWidth = function() return 20 end,
+    getHeight = function() return 20 end,
+    getPixel = function(_, px, py)
+        local value = pixels[pixkey(px, py)] or 9
+        return { getColorRGB32 = function() return value end }
+    end,
+    setPixel = function(_, px, py, color) pixels[pixkey(px, py)] = color end,
+    paintRoundedRect = function() end,
+    paintBorder = function() end,
+}
+local fill = {
+    getSize = function() return { w = 20, h = 20 } end,
+    paintTo = function(_, canvas, px, py)
+        for row = 0, 19 do
+            for col = 0, 19 do canvas:setPixel(px + col, py + row, 0) end
+        end
+    end,
+}
+Box:new{ style = { bg = 1, radius = 8, border = 0, shadow = 0 }, width = 20, height = 20, fill }
+    :paintTo(round_bb, 0, 0)
+Assert.eq(pixels["0:0"], 9, "角外还回底色")
+Assert.eq(pixels["10:10"], 0, "圆内留下子件")
 
 -- 无 bg 的样式什么都不画（透明表面）。
 bb = Kit.canvas()

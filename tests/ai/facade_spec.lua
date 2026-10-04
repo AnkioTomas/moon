@@ -1,3 +1,5 @@
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
+
 --[[-- ai 门面：chat / jsonExtract 契约。 --]]
 
 local Assert = require("support.assert")
@@ -26,7 +28,6 @@ end
 package.loaded["ai.client"] = nil
 package.loaded["ai.json"] = nil
 package.loaded["ai"] = nil
-package.loaded["ai.init"] = nil
 
 -- 真机插件加载器只注入 book.koplugin/?.lua，不提供 ?/init.lua。
 local original_path = package.path

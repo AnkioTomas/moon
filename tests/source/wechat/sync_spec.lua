@@ -3,6 +3,7 @@ source.wechat notes/annotations/mapper 离线用例
 
 @module tests.source.wechat.sync_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 

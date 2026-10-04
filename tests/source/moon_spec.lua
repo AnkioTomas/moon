@@ -6,6 +6,7 @@ onEvent 的 KOReader UI 依赖按约定函数内延迟加载，这里用 preload
 
 @module tests.source.moon_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 
@@ -110,22 +111,10 @@ package.preload["ui/network/manager"] = function()
     }
 end
 
-local dialog = { shown = 0, closed = 0, progress = nil }
-package.preload["ui/widget/progressbardialog"] = function()
-    return {
-        new = function(_, opts)
-            dialog.opts = opts
-            return {
-                show = function() dialog.shown = dialog.shown + 1 end,
-                close = function() dialog.closed = dialog.closed + 1 end,
-                reportProgress = function(_, bytes) dialog.progress = bytes end,
-                opts = opts,
-            }
-        end,
-    }
-end
-package.preload["ui/widget/infomessage"] = function()
-    return { new = function(_, opts) return opts end }
+local Themed = require("support.theme_stubs")
+Themed.install()
+package.preload["workers.ui.task_dialog"] = function()
+    return { follow = function() end }
 end
 
 local touches = {}
@@ -311,9 +300,7 @@ do
     lifecycle = { state = "Resume" },
         source = src,
         tab = "home",
-        onEvent = function(_, event)
-            if not event:match("^books_sync_") then refreshes[#refreshes + 1] = event end
-        end,
+        onEvent = function(_, event) refreshes[#refreshes + 1] = event end,
     }
     src:onEvent("home_open", desktop)
     Assert.is_true(rec.query ~= nil)
@@ -336,7 +323,7 @@ do
     os.remove(path .. ".part")
     resetRec()
     touches = {}
-    dialog.shown, dialog.closed, dialog.progress = 0, 0, nil
+    local made = #Themed.made
     rec.download_total = 8
 
     local opened, open_err
@@ -348,24 +335,28 @@ do
     Assert.eq(rec.download_count, 1)
     Assert.eq(rec.download_id, "library/a.epub")
     Assert.eq(rec.download_path, path .. ".part")
-    -- 先出无进度条的框，Content-Length 到了换成带条的，结束全部关掉。
-    Assert.eq(dialog.shown, 2)
-    Assert.eq(dialog.closed, 2)
-    Assert.eq(dialog.opts.progress_max, 8)
-    Assert.eq(dialog.progress, 8)
+    -- 一个不可关的进度框：标题是书名，按字节推进，结束关掉。
+    Assert.eq(#Themed.made, made + 1)
+    local dialog = Themed.last("progress_dialog")
+    Assert.eq(dialog.title, "A")
+    Assert.is_true(dialog.dismissable == false)
+    Assert.is_true(dialog.shown and dialog.closed)
+    Assert.eq(dialog.progress[1], 8)
+    Assert.eq(dialog.progress[2], 8)
     Assert.eq(opened, path)
     Assert.is_nil(open_err)
     Assert.eq(touches[1].path, path)
 
-    -- 服务端不给 Content-Length：只显示标题框，不重建。
+    -- 服务端不给 Content-Length：进度条不动。
     os.remove(path)
     resetRec()
-    dialog.shown, dialog.closed, dialog.progress = 0, 0, nil
+    made = #Themed.made
     opened = nil
     src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p) opened = p end)
-    Assert.eq(dialog.shown, 1)
-    Assert.eq(dialog.closed, 1)
-    Assert.is_nil(dialog.opts.progress_max)
+    Assert.eq(#Themed.made, made + 1)
+    dialog = Themed.last("progress_dialog")
+    Assert.is_true(dialog.shown and dialog.closed)
+    Assert.is_nil(dialog.progress)
     Assert.eq(opened, path)
 
     local registered_path = open_dir .. "/legacy.epub"
@@ -643,8 +634,7 @@ for _, name in ipairs({
     "ffi/util",
     "source.moon.client",
     "ui/network/manager",
-    "ui/widget/progressbardialog",
-    "ui/widget/infomessage",
+    "workers.ui.task_dialog",
     "book.store",
     "book.stats",
     "source.moon",

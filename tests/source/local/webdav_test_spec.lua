@@ -1,3 +1,5 @@
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
+
 --[[-- source.local.client:testWebdavAsync：写入探针、读回比对、删除 --]]
 
 local Assert = require("support.assert")

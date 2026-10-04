@@ -9,7 +9,7 @@ local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("bold")
 
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Image = require("ui.themes.widgets.image")
 local List = require("ui.themes.widgets.list")
 local Row = require("ui.themes.widgets.row")
@@ -46,6 +46,7 @@ t = Theme.current()
 img = Image.widget({ width = 50, height = 50, src = "x", style = t.card })
 Assert.eq(img.style, t.card)
 Assert.eq(inner(img):getSize().w, 50)
+Assert.eq(inner(Image.widget({ width = 36, height = 36, src = "x", style = {} })):getSize().w, 36, "空表面：无边框不内缩")
 
 -- 三套主题 image 表面都是直角（位图压不住圆角）。
 for _, id in ipairs(Theme.ids) do

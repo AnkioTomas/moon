@@ -55,14 +55,27 @@ local dots = Kit.find(pager, function(w) return w.style ~= nil and w.box_w == 8 
 Assert.len(dots, 3)
 Assert.eq(dots[3].style.bg, 0x00, "当前页圆点 ink")
 Assert.eq(dots[1].style.bg, 0xAA)
+-- title 代替页码，置灰规则不变。
+pager = Pager.widget({ width = 300, page = 2, pages = 3, title = "今日总览" })
+Assert.contains(Kit.texts(pager), "今日总览")
+for _, s in ipairs(Kit.texts(pager)) do Assert.is_true(s ~= "2 / 3") end
+nav = Kit.buttons(pager)
+Assert.is_true(nav[1].enabled and nav[2].enabled)
+nav = Kit.buttons(Pager.widget({ width = 300, title = "2026年9月" }))
+Assert.is_true(nav[1].enabled and nav[2].enabled, "无界翻页两侧常亮")
+pager = Pager.widget({ width = 300, page = 1, pages = 2, dots = true, center = Button:new{ text = "完成" } })
+Assert.contains(Kit.texts(pager), "完成")
+Assert.len(Kit.buttons(pager), 3, "center 代替圆点")
 
--- 底栏：当前 Tab 不可点，其余回调 id；paper 画底部指示条。
+-- 底栏：两格都吞点按；当前格不回调，其余回调 id；paper 画底部指示条。
 local picked
 local tabs = { { id = "home", text = "首页", icon = "home" }, { id = "shelf", text = "书架", icon = "book" } }
 local bar = Tabbar.widget({ width = 200, tabs = tabs, active = "home", on_tab = function(id) picked = id end })
 local cells = Kit.taps(bar)
-Assert.len(cells, 1)
-cells[1]:onTapThemeArea()
+Assert.len(cells, 2)
+Assert.is_true(cells[1]:onTapThemeArea())
+Assert.is_nil(picked, "当前格不回调")
+cells[2]:onTapThemeArea()
 Assert.eq(picked, "shelf")
 Assert.eq(bar:getSize().h, 56)
 

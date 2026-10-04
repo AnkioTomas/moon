@@ -28,22 +28,19 @@ package.preload["ui/uimanager"] = function()
     }
 end
 package.loaded["ui/uimanager"] = nil
-package.preload["ui/widget/infomessage"] = function()
-    return { new = function(_, opts) return opts end }
-end
-package.preload["ui/widget/confirmbox"] = function()
-    return { new = function(_, opts) return opts end }
-end
+local Themed = require("support.theme_stubs")
+Themed.install()
+Themed.on_show = function(o) require("ui/uimanager"):show(o) end
 package.preload["ui/event"] = function()
     return { new = function(_, name, ...) return { name = name, args = { ... } } end }
 end
-package.preload["ui.reader.session.toc"] = function()
+package.preload["reader.session.toc"] = function()
     return {
         list = function() return { {}, {}, {}, {}, {} } end,
         chapterFraction = function() return 0 end,
     }
 end
-package.preload["ui.reader.session"] = function()
+package.preload["reader.session"] = function()
     return {
         isCurrent = function(id)
             return id
@@ -65,8 +62,8 @@ package.preload["ui.reader.session"] = function()
         end,
     }
 end
-package.loaded["ui.reader.session"] = nil
-package.loaded["ui.reader.session.toc"] = nil
+package.loaded["reader.session"] = nil
+package.loaded["reader.session.toc"] = nil
 package.preload["logger"] = function()
     return { dbg = function() end, warn = function() end, info = function() end }
 end
@@ -117,7 +114,7 @@ end
 
 package.loaded["book.progress"] = nil
 local Progress = require("book.progress")
-local Session = require("ui.reader.session")
+local Session = require("reader.session")
 
 Assert.is_true(Session.current().identity.stable_id == "b1", "session stub 应生效")
 local UIManager = require("ui/uimanager")
@@ -143,6 +140,7 @@ Assert.len(synced, 0, "冲突时不应先 sync 推本地")
 -- 选「保留本地」：落回 pending 行那份进度，不能重新采样实时位置（doc_fraction=0 在第 3 章章首）
 do
     local box = shown[1]
+    Assert.is_true(box.dismissable == false, "点空白不能等同选本地（主题 Confirm 点外走 cancel_callback）")
     upserted = {}
     box.cancel_callback()
     Stubs.flush()
@@ -281,7 +279,7 @@ Assert.eq(#shown, 0, "进度拉取失败不应打断阅读")
 
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",
-    "ui.reader.session.toc", "ui.reader.session", "logger",
+    "reader.session.toc", "reader.session", "logger",
     "db.progress", "book.progress",
 }) do
     package.preload[name] = nil

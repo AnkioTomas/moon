@@ -32,13 +32,12 @@ package.preload["source.registry"] = function()
         end,
     }
 end
-package.preload["ui/widget/infomessage"] = function()
-    return { new = function(_, opts) return opts end }
-end
+local Themed = require("support.theme_stubs")
+Themed.install()
 package.preload["book.store"] = function()
     return { rememberMany = function() end }
 end
-package.preload["ui.reader.session"] = function()
+package.preload["reader.session"] = function()
     error("book.open must not load reader session")
 end
 

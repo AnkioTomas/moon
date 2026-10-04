@@ -3,6 +3,7 @@ KOReader 宿主版本门槛：月发号 vYYYY.MM（无 point）必须放行。
 
 @module tests.ko_version_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 

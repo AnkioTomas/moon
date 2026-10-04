@@ -1,0 +1,301 @@
+---@diagnostic disable: missing-fields
+--[[--
+桌面壳：三层（内容 / 顶栏 / 底栏）拼装；active 才刷屏；外壳签名变了整壳重建全刷，
+否则只换内容层与底栏层、只刷顶栏以下；updateTopbar 只换顶栏、只刷顶栏；
+底栏点当前格吞掉点按不切页；换源重算 Tab 回首页；Destroy 补齐 Pause 且只做一次。
+@module tests.desktop_spec
+--]]
+local Assert = require("support.assert")
+local Kit = require("support.widget_stubs")
+Kit.install("paper")
+Kit.sections.common = {}
+
+local Widget = require("ui/widget/widget")
+
+local log, freed = {}, {}
+local function drain() local out = table.concat(log, ","); log = {}; return out end
+
+local function page(name)
+    local P = {}
+    P.__index = P
+    function P:new(o) return setmetatable(o, self) end
+    function P:updateView()
+        local w = Widget:new{ page = self:id() }
+        function w:free() freed[#freed + 1] = self end
+        self.root = w
+        return w
+    end
+    function P:id() return self.name or name end
+    function P:activate(changed) log[#log + 1] = self:id() .. ".resume" .. (changed and "!" or "") end
+    function P:deactivate() log[#log + 1] = self:id() .. ".pause" end
+    function P:destroy() log[#log + 1] = self:id() .. ".destroy" end
+    function P:onEvent(event, payload)
+        log[#log + 1] = self:id() .. ":" .. event
+        self.last_payload = payload
+    end
+    return P
+end
+for _, name in ipairs({ "home", "library", "store", "insight" }) do
+    package.preload["desktop.pages." .. name] = function() return page(name) end
+end
+package.preload["desktop.pages.setting"] = function() return page("settings") end
+
+local top_builds = 0
+package.preload["desktop.topbar"] = function()
+    local T = page("topbar")
+    function T.height() return 30 end
+    function T:build(width)
+        top_builds = top_builds + 1
+        local w = Widget:new{ dimen = { w = width, h = 30 }, top = top_builds }
+        function w:free() freed[#freed + 1] = self end
+        return w
+    end
+    return T
+end
+
+local panels, checks = {}, {}
+package.preload["features.panel.native"] = function()
+    return { show = function(id) panels[#panels + 1] = id end }
+end
+package.preload["features.update"] = function()
+    return { autoCheck = function(root) checks[#checks + 1] = root end }
+end
+package.preload["utils.log"] = function()
+    return { dbg = function() end, info = function() end, error = function() end, flush = function() end }
+end
+
+local Tabbar = require("ui.themes.widgets.tabbar")
+local Desktop = require("desktop")
+
+local plugin = { path = "/plugins/book.koplugin" }
+local desk = Desktop:new{ plugin = plugin }
+plugin.desktop = desk
+local BAR_H = Tabbar.height()
+
+local function tabs() return Kit.taps(desk.layers[3]) end
+local function ids()
+    local out = {}
+    for _, t in ipairs(desk._tabs) do out[#out + 1] = t.id end
+    return table.concat(out, ",")
+end
+
+do -- 首帧：三层就位，未 resume 不刷屏
+    Assert.eq(desk.tab, "home")
+    Assert.eq(ids(), "home,library,settings")
+    Assert.eq(desk.layers[1].page, "home")
+    Assert.eq(desk.layers[1].dimen.w, 600)
+    Assert.eq(desk.layers[1].dimen.h, 800 - 30 - BAR_H)
+    Assert.eq(desk.layers[1].overlap_offset[2], 30)
+    Assert.eq(desk.layers[2].top, 1)
+    Assert.eq(desk.layers[3].overlap_offset[2], 800 - BAR_H)
+    Assert.eq(desk:contentHeight(), 800 - 30 - BAR_H)
+    Assert.eq(desk[1][1], desk.layers)
+    Assert.len(Kit.dirty, 0)
+    Assert.len(tabs(), 3)
+end
+
+do -- Resume：只唤醒顶栏与当前页，触发静默更新检查
+    desk:activate()
+    Assert.is_true(desk.active)
+    Assert.eq(drain(), "topbar.resume,home.resume")
+    Assert.eq(checks[1], "/plugins/book.koplugin")
+end
+
+do -- 点底栏切页：旧页 pause、新页 resume(changed)，只换内容 / 底栏层，只刷顶栏以下
+    local old_content, old_bar = desk.layers[1], desk.layers[3]
+    freed = {}
+    tabs()[2]:onTapThemeArea()
+    Assert.eq(desk.tab, "library")
+    Assert.eq(drain(), "home.pause,library.resume!")
+    Assert.eq(desk.layers[1].page, "library")
+    Assert.is_true(desk.layers[3] ~= old_bar)
+    Assert.eq(freed[1], old_content)
+    Assert.eq(desk.layers[2].top, 1, "切页不重建顶栏")
+    local d = Kit.dirty[#Kit.dirty]
+    Assert.eq(d.widget, desk)
+    Assert.eq(d.region.y, 30)
+    Assert.eq(d.region.h, 800 - 30)
+end
+
+do -- 点当前格：吞掉点按，不回调、不重建
+    local n, before = #Kit.dirty, desk.layers[1]
+    Assert.is_true(tabs()[2]:onTapThemeArea())
+    Assert.eq(desk.tab, "library")
+    Assert.eq(#Kit.dirty, n)
+    Assert.eq(desk.layers[1], before)
+    Assert.eq(drain(), "")
+end
+
+do -- 顶栏读数变化：只换第 2 层，只刷顶栏
+    local old_top, content = desk.layers[2], desk.layers[1]
+    desk:updateTopbar()
+    Assert.eq(desk.layers[2].top, 2)
+    Assert.eq(freed[#freed], old_top)
+    Assert.eq(desk.layers[1], content)
+    local d = Kit.dirty[#Kit.dirty]
+    Assert.eq(d.region.y, 0)
+    Assert.eq(d.region.h, 30)
+end
+
+do -- 外壳签名（主题）变了：整壳重建，全刷
+    local old_root = desk[1]
+    Kit.use("soft")
+    desk:updateView()
+    Assert.not_nil(desk[1])
+    Assert.is_true(desk[1] ~= old_root)
+    Assert.eq(desk.layers[2].top, 3, "整壳重建连顶栏一起")
+    Assert.is_nil(Kit.dirty[#Kit.dirty].region)
+    Kit.use("paper")
+    desk:updateView()
+end
+
+do -- 当前 Tab 被关掉（书城开关）：回退首页
+    Kit.sections.common.zlib_enabled = true
+    desk:switchTab("store")
+    Assert.eq(ids(), "home,library,store,settings")
+    Assert.eq(desk.tab, "store")
+    Kit.sections.common.zlib_enabled = nil
+    desk:updateView()
+    Assert.eq(desk.tab, "home")
+    Assert.eq(desk.layers[1].page, "home")
+    Assert.eq(ids(), "home,library,settings")
+    drain()
+end
+
+do -- 非法 Tab 忽略
+    local n = #Kit.dirty
+    desk:switchTab("nope")
+    Assert.eq(desk.tab, "home")
+    Assert.eq(#Kit.dirty, n)
+end
+
+do -- 换源：广播给各子件，按能力重算 Tab，回首页
+    desk:switchTab("settings")
+    drain()
+    local opened_on
+    local source = {
+        capabilities = function() return { insight = true } end,
+        onEvent = function(_, event, payload) if event == "desktop_open" then opened_on = payload end end,
+    }
+    package.loaded["source.registry"] = { current = function() return source end }
+    desk:onSourceChanged()
+    package.loaded["source.registry"] = nil
+    Assert.eq(desk.source, source)
+    Assert.eq(opened_on, desk, "换源后让新源做桌面打开维护")
+    Assert.eq(ids(), "home,library,insight,settings")
+    Assert.eq(desk.tab, "home")
+    Assert.eq(drain(),
+        "topbar:source_changed,home:source_changed,library:source_changed,store:source_changed,"
+        .. "opds:source_changed,insight:source_changed,settings:source_changed,settings.pause,home.resume!")
+    Assert.eq(desk.opds.last_payload, source)
+end
+
+do -- KOReader 系统事件沿控件树直达顶栏控件，桌面不截留、不转成子页 onEvent
+    local Event = require("ui/event")
+    Assert.is_nil(desk.onCharging)
+    Assert.is_nil(desk.onNetworkDisconnected)
+    desk:handleEvent(Event:new("Charging"))
+    Assert.eq(drain(), "")
+end
+
+do -- 手势：内容区左右滑只给当前页；顶栏下滑开快捷面板；底栏空白吞掉
+    Assert.is_true(desk:onSwipe(nil, { direction = "west" }))
+    Assert.eq(drain(), "home:swipe")
+    Assert.eq(desk.home.last_payload.direction, "west")
+    Assert.is_true(desk:onSwipeTopBar(nil, { direction = "north" }))
+    Assert.len(panels, 0)
+    desk:onSwipeTopBar(nil, { direction = "south" })
+    Assert.eq(panels[1], "desktop")
+    Assert.is_true(desk:onTapBar())
+end
+
+do -- 系统 Suspend 广播直达桌面 → Pause，之后不刷屏
+    desk:handleEvent(require("ui/event"):new("Suspend"))
+    Assert.is_false(desk.active)
+    Assert.eq(drain(), "topbar.pause,home.pause,library.pause,store.pause,opds.pause,insight.pause,settings.pause")
+    local n = #Kit.dirty
+    desk:updateView()
+    desk:updateTopbar()
+    Assert.eq(#Kit.dirty, n)
+end
+
+do -- Destroy：活跃时先补 Pause；关叠层、清 plugin.desktop；只做一次，之后事件与刷新全忽略
+    desk:activate()
+    drain()
+    local overlay_closed = false
+    desk.settings_overlay = { close = function() overlay_closed = true end, updateView = function() end }
+    desk:onClose()
+    Assert.is_true(desk.closed)
+    Assert.is_true(overlay_closed)
+    Assert.is_nil(plugin.desktop)
+    Assert.eq(Kit.closed[#Kit.closed], desk)
+    local out = drain()
+    Assert.matches(out, "^topbar%.pause,home%.pause")
+    Assert.matches(out, "topbar%.destroy,home%.destroy,library%.destroy,store%.destroy,opds%.destroy,insight%.destroy,settings%.destroy$")
+    desk:handleEvent(require("ui/event"):new("Exit"))
+    desk:onEvent("home_changed")
+    desk:activate()
+    desk:updateView()
+    Assert.eq(drain(), "")
+    Assert.is_false(desk.active)
+end
+
+do -- Desktop.open：无源只提示；有源建桌面、显示、Resume、通知源；再开先销毁旧桌面
+    local current, source_events = nil, {}
+    package.loaded["source.registry"] = { current = function() return current end }
+    package.loaded["utils.paths"] = { ensureLayout = function() end }
+    package.loaded["ui/widget/infomessage"] = { new = function(_, o) return o end }
+    local shown_before = #Kit.shown
+    local host = { path = "/plugins/book.koplugin", ui = {} }
+    Desktop.open(host)
+    Assert.is_nil(host.desktop)
+    Assert.eq(#Kit.shown, shown_before + 1)
+    Assert.eq(Kit.shown[#Kit.shown].text, "当前数据源不可用", "无源弹提示")
+
+    current = {
+        id = "local",
+        onEvent = function(_, event, payload) source_events[#source_events + 1] = { event, payload } end,
+    }
+    Desktop.open(host)
+    local first = host.desktop
+    Assert.not_nil(first)
+    Assert.eq(Kit.shown[#Kit.shown], first)
+    Assert.is_true(first.active, "打开即 Resume")
+    Assert.eq(source_events[1][1], "desktop_open")
+    Assert.eq(source_events[1][2], first)
+
+    Desktop.open(host)
+    Assert.is_true(first.closed, "重开先销毁旧桌面")
+    Assert.eq(Kit.closed[#Kit.closed], first)
+    Assert.is_true(host.desktop ~= first)
+    drain()
+end
+
+do -- 开机自动开桌面：按启动项、进程内只开一次；Reader 实例与已有桌面不开。重新 require = 进程重启
+    local Settings = require("utils.settings")
+    local on_start = true
+    Settings.openOnStart = function() return on_start end
+    local function boot()
+        package.loaded["desktop"] = nil
+        local D = require("desktop")
+        local opened = {}
+        D.open = function(p) opened[#opened + 1] = p end
+        return D, opened
+    end
+    local D, opened = boot()
+    D.autoOpen({ ui = { document = {} } })
+    Assert.len(opened, 0, "Reader 实例不自动开")
+    D.autoOpen({ ui = {}, desktop = {} })
+    Assert.len(opened, 0, "已有桌面不重开")
+    local fm = { ui = {} }
+    D.autoOpen(fm)
+    D.autoOpen(fm)
+    Assert.len(opened, 1, "进程内只自动开一次")
+    Assert.eq(opened[1], fm)
+    on_start = false
+    D, opened = boot()
+    D.autoOpen({ ui = {} })
+    Assert.len(opened, 0, "启动项不是月读不自动开")
+end
+
+return true

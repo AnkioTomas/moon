@@ -1,3 +1,5 @@
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
+
 --[[-- book.sync：四域顺序、汇总、同步回调与取消。 --]]
 
 local Assert = require("support.assert")
@@ -93,7 +95,7 @@ do
     Assert.is_nil(seen.stats)
 end
 
--- retryDirtyAsync：有 books 脏行时不得 skip_books，且 books 带 dirty_only。
+-- onNetworkConnected：有 books 脏行时不得 skip_books，且 books 带 dirty_only。
 do
     local calls = {}
     package.preload["source.registry"] = function()
@@ -155,7 +157,7 @@ do
         package.loaded[name] = nil
     end
     local Sync2 = require("book.sync")
-    Sync2.retryDirtyAsync()
+    Sync2.onNetworkConnected()
     Stubs.flush()
     Assert.eq(calls[1][1], "books")
     Assert.is_false(calls[1][2], "books 脏时不得 skip_books")

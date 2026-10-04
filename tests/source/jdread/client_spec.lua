@@ -3,6 +3,7 @@
 
 @module tests.source.jdread.client_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 local JSONStub = require("support.json_stub")

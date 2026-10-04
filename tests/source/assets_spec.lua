@@ -3,6 +3,7 @@ source.assets 离线用例：远程 img 落地由调用方注入 download。
 
 @module tests.source.assets_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 local Assets = require("source.assets")

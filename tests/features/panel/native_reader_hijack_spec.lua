@@ -1,0 +1,87 @@
+--[[-- 阅读模式下 filebrowser Tab 重定向到 Book 桌面的离线用例。 --]]
+
+local Assert = require("support.assert")
+
+package.preload["l10n"] = function() return { apply = function() end } end
+package.preload["gettext"] = function() return function(value) return value end end
+package.preload["logger"] = function() return { err = function() end } end
+package.preload["device"] = function() return { isTouchDevice = function() return true end } end
+
+local next_tick
+package.preload["ui/uimanager"] = function()
+    return {
+        show = function() end,
+        nextTick = function(_, callback) next_tick = callback end,
+    }
+end
+package.preload["features.panel.native_settings"] = function() return { inject = function() end } end
+package.preload["features.panel.desktop"] = function() return { menuActions = function() return {} end } end
+package.preload["features.panel.reader"] = function() return { actions = function() return {} end } end
+package.preload["ui/widget/touchmenu"] = function()
+    return { updateItems = function() end, switchMenuTab = function() end }
+end
+package.preload["apps/filemanager/filemanagermenu"] = function()
+    return { setUpdateItemTable = function() end }
+end
+
+local opened_desktop = 0
+package.preload["desktop"] = function()
+    return { open = function() opened_desktop = opened_desktop + 1 end }
+end
+package.preload["apps/filemanager/filemanager"] = function()
+    return {
+        instance = { book = {} },
+    }
+end
+package.preload["apps/reader/readerui"] = function() return { instance = nil } end
+package.preload["utils.settings"] = function()
+    return {
+        openOnStart = function() return true end,
+        get = function() return { drawer_opens_desktop = true } end,
+    }
+end
+
+local previous_settings = _G.G_reader_settings
+_G.G_reader_settings = {
+    saveSetting = function() end,
+}
+
+local original_filemanager_callback = function() return "native" end
+local ReaderMenu = {}
+function ReaderMenu:getDefaultMenuButtons()
+    return {
+        filemanager = {
+            icon = "appbar.filebrowser",
+            remember = false,
+            callback = original_filemanager_callback,
+        },
+    }
+end
+function ReaderMenu:setUpdateItemTable() end
+function ReaderMenu:onTapCloseMenu() self.closed = true end
+package.preload["apps/reader/modules/readermenu"] = function() return ReaderMenu end
+
+local Native = require("features.panel.native")
+Native.onCreate({}, { reader = true })
+
+local reader_closed = 0
+local menu = setmetatable({
+    ui = { onClose = function() reader_closed = reader_closed + 1 end },
+}, { __index = ReaderMenu })
+local buttons = menu:getDefaultMenuButtons()
+Assert.not_nil(buttons.filemanager)
+Assert.is_true(type(buttons.filemanager.callback) == "function")
+-- 阅读模式下 filebrowser 回调必须被替换为返回 Book 桌面，而不是原生回调。
+Assert.is_false(buttons.filemanager.callback == original_filemanager_callback)
+Assert.is_false(buttons.filemanager.remember)
+
+buttons.filemanager.callback()
+Assert.is_true(menu.closed)
+Assert.eq(reader_closed, 0, "菜单关闭后不得在点击调用栈里同步关闭文档")
+Assert.eq(opened_desktop, 0)
+Assert.not_nil(next_tick)
+next_tick()
+Assert.eq(reader_closed, 1)
+Assert.eq(opened_desktop, 1)
+
+_G.G_reader_settings = previous_settings

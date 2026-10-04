@@ -3,6 +3,7 @@ db.progress：pending_progress 表 CRUD（待上传进度）
 
 @module tests.db.progress_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 

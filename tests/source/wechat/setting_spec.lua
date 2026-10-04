@@ -23,22 +23,31 @@ package.preload["source.wechat.auth"] = function()
         clearSession = function() cleared = true; logged_in = false end,
     }
 end
-local shown = {}
-package.preload["ui/uimanager"] = function()
-    return { show = function(_, w) shown[#shown + 1] = w end }
+local Themed = require("support.theme_stubs")
+Themed.install()
+package.preload["ui/network/manager"] = function()
+    return { runWhenOnline = function(_, fn) fn() end }
 end
-package.preload["ui/widget/confirmbox"] = function()
-    return { new = function(_, o) o.kind = "confirm"; return o end }
+local begin_cb, wait_cb
+local begin_cancels, wait_cancels = 0, 0
+package.preload["source.wechat.eink"] = function()
+    return {
+        beginQrLoginAsync = function(cb)
+            begin_cb = cb
+            return { cancel = function() begin_cancels = begin_cancels + 1 end }
+        end,
+        waitQrLoginAsync = function(_, cb)
+            wait_cb = cb
+            return { cancel = function() wait_cancels = wait_cancels + 1 end }
+        end,
+    }
 end
-package.preload["ui/widget/infomessage"] = function()
-    return { new = function(_, o) return o end }
-end
-package.preload["ui.components.settingrow"] = function()
-    return { build = function(_, opts) return opts end }
+package.preload["ui.themes.widgets.row"] = function()
+    return { widget = function(opts) return opts end }
 end
 local auth_changed = 0
 package.preload["source.registry"] = function()
-    return { afterAuthChanged = function() auth_changed = auth_changed + 1 end }
+    return { reload = function() auth_changed = auth_changed + 1 end }
 end
 
 package.loaded["source.wechat.setting"] = nil
@@ -75,10 +84,32 @@ local logout = rows[4]()
 Assert.eq(logout.title, "退出登录")
 logout.callback()
 Assert.is_false(cleared, "未确认不退出")
-local confirm = shown[#shown]
-Assert.eq(confirm.kind, "confirm")
+local confirm = Themed.last("confirm")
+Assert.is_true(confirm.shown)
 confirm.ok_callback()
 Assert.is_true(cleared)
 Assert.eq(auth_changed, 1)
 
-return true
+-- 扫码：先出等待提示，拿到二维码换成 QR 窗；代码换窗不算取消，用户关窗才取消轮询。
+logged_in = false
+Setting.rows(plugin)[1]().callback()
+local waiting = Themed.last("toast")
+Assert.eq(waiting.text, "正在获取二维码…")
+begin_cb({ uid = "u1", qr_payload = "weread://login?u1" })
+Assert.is_true(waiting.closed)
+Assert.eq(begin_cancels, 0)
+local qr = Themed.last("qr")
+Assert.eq(qr.text, "weread://login?u1")
+qr:close()
+Assert.eq(wait_cancels, 1)
+local made = #Themed.made
+wait_cb(nil, "迟到", "error")
+Assert.eq(#Themed.made, made, "已取消的轮询不再弹提示")
+
+-- 等待中关掉提示：取消取码，迟到的二维码不再弹。
+Setting.rows(plugin)[1]().callback()
+Themed.last("toast"):close()
+Assert.eq(begin_cancels, 1)
+made = #Themed.made
+begin_cb({ uid = "u2", qr_payload = "x" })
+Assert.eq(#Themed.made, made)

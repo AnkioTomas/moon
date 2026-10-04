@@ -1,8 +1,9 @@
 --[[--
-章节全本缓存任务：串行、去重、可恢复错误重试与完成提示。
+章节全本缓存任务：同类并行、同书执行中拒绝、可恢复错误重试与完成提示、未结束任务上限。
 
 @module tests.source.cache_queue_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 
@@ -28,9 +29,9 @@ end
 package.preload["ui/network/manager"] = function()
     return { isConnected = function() return true end }
 end
-package.preload["ui/widget/infomessage"] = function()
-    return { new = function(_, opts) return opts end }
-end
+local Themed = require("support.theme_stubs")
+Themed.install()
+Themed.on_show = function(o) require("ui/uimanager"):show(o) end
 
 local callbacks = {}
 local source = {
@@ -45,28 +46,29 @@ local source = {
 local Queue = require("source.cache_queue")
 local Tasks = require("workers.tasks")
 local ref = { source_id = "wechat", stable_id = "book-1" }
-local job, queued = Queue.enqueue(source, ref)
-Assert.is_true(queued)
+local function enqueue(identity) return Tasks.enqueue(Queue.spec(source, identity)) end
+local job = enqueue(ref)
+Assert.not_nil(job)
 Assert.eq(#callbacks, 1)
 Assert.eq(Tasks.tasks()[1].state, "running")
 Assert.eq(Tasks.tasks()[1].total, 35)
 Assert.eq(Tasks.tasks()[1].title, "book-1")
-Assert.eq(Tasks.tasks()[1].label, "缓存")
+Assert.eq(Tasks.tasks()[1].kind, "cache")
 Assert.is_true(Queue.has("wechat", "book-1"))
 Assert.is_false(Queue.has("wechat", "book-2"))
 
 -- 同一本书不得并发重复缓存。
-local same, queued_again = Queue.enqueue(source, ref)
-Assert.eq(same, job)
-Assert.is_false(queued_again)
+local same, why = enqueue(ref)
+Assert.is_nil(same)
+Assert.eq(why, "running")
 
 -- 425 退避 15 秒后重试；已缓存章节由 source.chapter 自动跳过。
 callbacks[1](false, 34, "HTTP 425", 35, 1)
 Assert.eq(Tasks.tasks()[1].state, "retry_wait")
 Assert.eq(#notices, 0, "可重试失败不提示")
-local other, other_queued = Queue.enqueue(source, { source_id = "wechat", stable_id = "book-2" })
-Assert.is_true(other_queued)
-Assert.eq(#callbacks, 1, "重试等待不得启动第二本书")
+local other = enqueue({ source_id = "wechat", stable_id = "book-2" })
+Assert.not_nil(other)
+Assert.eq(#callbacks, 2, "同类并行：第一本退避中第二本照常开跑")
 Assert.eq(Tasks.tasks()[2].title, "book-2")
 local retry_schedule
 for _, item in ipairs(scheduled) do
@@ -74,36 +76,31 @@ for _, item in ipairs(scheduled) do
 end
 Assert.not_nil(retry_schedule)
 retry_schedule.fn()
-Assert.eq(#callbacks, 2, "退避结束后先续跑第一本")
-Assert.eq(Tasks.tasks()[1].title, "book-1")
-Assert.eq(Tasks.tasks()[1].attempt, 2)
+Assert.eq(#callbacks, 3, "退避结束后第一本续跑")
+Assert.eq(job.attempt, 2)
 
-callbacks[2](true, 35, nil, 35, 0)
+callbacks[3](true, 35, nil, 35, 0)
 Assert.is_true(job.done)
 Assert.eq(job.result.cached, 35)
 Assert.eq(job.result.total, 35)
 Assert.eq(notices[#notices], "全本缓存完成：35 / 35 章")
-Assert.eq(#callbacks, 3, "第一本完成后才跑排队的第二本")
-callbacks[3](true, 10, nil, 10, 0)
+callbacks[2](true, 10, nil, 10, 0)
 Assert.is_true(other.done)
 Assert.eq(#Tasks.tasks(), 0)
 Assert.is_false(Queue.has("wechat", "book-1"))
 
--- pending 满 64 本后拒绝入队，并带 queue_full
+-- 未结束任务满 64 个后拒绝入队，并带 queue_full（同类并行时在跑的也算）
 do
-    local running, queued = Queue.enqueue(source, { stable_id = "fill-1" })
-    Assert.not_nil(running)
-    Assert.is_true(queued)
-    local accepted = 1
+    local accepted = 0
     local reason
-    for i = 2, 80 do
-        local next_job, _, why = Queue.enqueue(source, { stable_id = "fill-" .. i })
+    for i = 1, 80 do
+        local next_job, why = enqueue({ stable_id = "fill-" .. i })
         if not next_job then
             reason = why
             break
         end
         accepted = accepted + 1
     end
-    Assert.eq(accepted, 65)
+    Assert.eq(accepted, 64)
     Assert.eq(reason, "queue_full")
 end

@@ -3,6 +3,7 @@ source.wechat.protocol 离线用例（依赖本机 koreader/base 的 ffi/sha2）
 
 @module tests.wechat_protocol_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 local md5 = require("ffi/sha2").md5

@@ -8,7 +8,10 @@ local Assert = require("support.assert")
 
 local display = {}
 package.preload["utils.settings"] = function()
-    return { get = function(section) assert(section == "display"); return display end }
+    return {
+        get = function(section) assert(section == "display"); return display end,
+        saveSection = function() end,
+    }
 end
 package.preload["device"] = function()
     return { screen = { scaleBySize = function(_, n) return n * 2 end } }
@@ -17,7 +20,7 @@ package.preload["ui/font"] = function()
     return { getFace = function(_, name, size) return { name = name, size = size } end }
 end
 
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 
 --- 递归收集「路径 → 类型」，用来比较两套令牌的形状。
 ---@param t table
@@ -67,6 +70,11 @@ display.ui_theme = "bold"
 Assert.eq(Theme.current().id, "bold")
 display.ui_theme = "soft"
 Assert.eq(Theme.current().id, "soft")
+Assert.eq(Theme.id(), "soft")
+Assert.eq(Theme.set("paper"), "paper")
+Assert.eq(display.ui_theme, "paper")
+Assert.eq(Theme.set("neon"), "paper", "未知主题不落盘")
+Assert.eq(display.ui_theme, "paper")
 
 Assert.errors(function() Theme.get("neon") end, "unknown ui theme")
 
@@ -86,5 +94,8 @@ Assert.eq(Theme.fontSize(14), 21)
 Assert.eq(Theme.fontSize(4), 10)
 Assert.eq(Theme.face("cfont", 14).size, 21)
 Assert.matches(Theme.root(), "/book%.koplugin/$")
+Assert.eq(Theme.setScale(125), 130, "按 10 取整")
+Assert.eq(display.ui_scale, 130)
+Assert.eq(Theme.setScale(50), 100)
 
 return true

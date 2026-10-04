@@ -5,6 +5,7 @@ client/auth/chapter/settings 用 package.preload 打桩；mapper 用真实实现
 
 @module tests.wechat_spec
 --]]
+---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
 
