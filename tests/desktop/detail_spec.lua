@@ -77,9 +77,11 @@ package.preload["workers.ui.task_dialog"] = function()
     }
 end
 local resolved
+-- 真实源都继承 SourceBase:capabilities；假源缺省为不具备任何能力。
+local SourceDefaults = { __index = { capabilities = function() return {} end } }
 package.preload["source.registry"] = function()
     return {
-        resolve = function() return resolved end,
+        resolve = function() return resolved and setmetatable(resolved, SourceDefaults) end,
         meta = function(id)
             if id == "wechat" then return { id = "wechat", name = "微信读书" } end
             return { id = id, name = id }
@@ -141,7 +143,7 @@ tools = Detail.actionPlan(read_book, chapter_src, "library")
 Assert.eq(ids(tools), "clear_cache,unread,delete")
 
 -- 整本在线源：无下载入口，离线副本在 cache 内才给清理
-local online_book_src = { id = "moon", type = "book" }
+local online_book_src = setmetatable({ id = "moon", type = "book" }, SourceDefaults)
 local moon_book = { source_id = "moon", stable_id = "m1", read_state = 0 }
 tools = Detail.actionPlan(moon_book, online_book_src, "library")
 Assert.eq(ids(tools), "read,delete")

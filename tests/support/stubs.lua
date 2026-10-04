@@ -450,6 +450,16 @@ local function installSocketutil()
     end
 end
 
+--- 裸 LuaJIT 没有 LuaSocket；只补业务直接用到的 gettime / unb64。
+local function installLuaSocket()
+    installIfMissing("socket", function()
+        return { gettime = os.clock }
+    end)
+    installIfMissing("mime", function()
+        return { unb64 = function(data) return require("utils.text").base64Decode(data) end }
+    end)
+end
+
 local function installJson()
     -- Api/Auth 顶层 require("json")；离线测用不到真实编解码时顶个空壳即可
     package.preload["json"] = function()
@@ -523,6 +533,7 @@ function Stubs.install()
     installBookLog()
     installGettext()
     installSocketutil()
+    installLuaSocket()
     installJson()
     installDataStorage()
     -- 离线 LuaJIT 无 LUA52COMPAT，缺 table.pack（ffi/util.template 需要）

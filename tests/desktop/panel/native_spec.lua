@@ -153,7 +153,10 @@ local native_reader_fm = 0
 function ReaderMenu:getDefaultMenuButtons()
     return { filemanager = { callback = function() native_reader_fm = native_reader_fm + 1 end } }
 end
+local previous_settings = _G.G_reader_settings
+_G.G_reader_settings = { readSetting = function() return false end }
 NativePanel.onCreate(nil, { reader = true })
+_G.G_reader_settings = previous_settings
 local reader_buttons = setmetatable({ ui = {} }, { __index = ReaderMenu }):getDefaultMenuButtons()
 reader_buttons.filemanager.callback()
 Assert.eq(native_reader_fm, 1)
