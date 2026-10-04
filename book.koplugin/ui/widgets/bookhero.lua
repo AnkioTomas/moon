@@ -21,7 +21,7 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Box = require("ui.themes.widgets.box")
 local Progress = require("ui.themes.widgets.progress")
 local Text = require("ui.themes.widgets.text")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local _ = require("gettext")
 
 local Hero = {}

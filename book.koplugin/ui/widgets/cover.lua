@@ -9,7 +9,7 @@ local Book = require("ui.widgets.book")
 local Device = require("device")
 local MoonSettings = require("utils.settings")
 local UIManager = require("ui/uimanager")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Tap = require("ui.themes.widgets.tap")
 local Text = require("ui.themes.widgets.text")
 

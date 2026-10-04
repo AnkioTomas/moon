@@ -6,7 +6,7 @@
 
 local Blitbuffer = require("ffi/blitbuffer")
 local Text = require("ui.themes.widgets.text")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 
 local Chart = {}
 
