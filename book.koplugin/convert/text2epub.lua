@@ -36,7 +36,7 @@ local function isNumberToken(value)
         return value ~= ""
     end
     local rest = value
-    for _, char in ipairs(CHINESE_NUMBER_CHARS) do
+    for _idx, char in ipairs(CHINESE_NUMBER_CHARS) do
         rest = rest:gsub(char, "")
     end
     return rest == ""
@@ -57,7 +57,7 @@ local function chapterTitle(line)
     end
 
     if line:sub(1, 3) == "第" then
-        for _, marker in ipairs({ "章", "回", "节", "集", "幕", "卷", "部", "篇" }) do
+        for _idx, marker in ipairs({ "章", "回", "节", "集", "幕", "卷", "部", "篇" }) do
             local number, suffix = line:match("^第%s*(.-)%s*" .. marker .. "(.*)$")
             if number and isNumberToken(number) then
                 -- “第一部门/部队”是正文，不是“第一部”章节。
@@ -104,7 +104,7 @@ end
 local function paragraphsFromLines(lines, reflow)
     local paragraphs = {}
     if not reflow then
-        for _, raw in ipairs(lines) do
+        for _idx, raw in ipairs(lines) do
             local line = trim(raw)
             if line ~= "" then
                 paragraphs[#paragraphs + 1] = { line }
@@ -120,7 +120,7 @@ local function paragraphsFromLines(lines, reflow)
             current = {}
         end
     end
-    for _, raw in ipairs(lines) do
+    for _idx, raw in ipairs(lines) do
         local line = Text.rtrim(raw)
         if trim(line) == "" then
             flush()
@@ -196,13 +196,13 @@ local function chapterParts(title, lines, max_chars, reflow)
         if #parts == 0 then
             out[#out + 1] = "<h1>" .. xmlEscape(title) .. "</h1>"
         end
-        for _, p in ipairs(body) do
+        for _idx, p in ipairs(body) do
             out[#out + 1] = "<p>" .. xmlEscape(p) .. "</p>"
         end
         parts[#parts + 1] = table.concat(out, "\n")
         body, body_chars = {}, 0
     end
-    for _, paragraph in ipairs(paragraphs) do
+    for _idx, paragraph in ipairs(paragraphs) do
         local text = paragraphText(paragraph)
         local start = 1
         while #text - start + 1 > limit do
