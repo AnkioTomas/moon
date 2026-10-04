@@ -9,135 +9,87 @@ FreeType 打开 WOFF 时会把整份字体解压到堆上，而 crengine 每个�
 
 local Woff = {}
 
-local HEADER_SIZE = 44
-local ENTRY_SIZE = 20
-
 ---@param s string
 ---@param pos integer 1 起始
+---@param len integer 字节数
 ---@return integer
-local function u32(s, pos)
-    local a, b, c, d = s:byte(pos, pos + 3)
-    return ((a * 256 + b) * 256 + c) * 256 + d
-end
-
----@param s string
----@param pos integer 1 起始
----@return integer
-local function u16(s, pos)
-    local a, b = s:byte(pos, pos + 1)
-    return a * 256 + b
+local function uint(s, pos, len)
+    local n = 0
+    for i = pos, pos + len - 1 do n = n * 256 + s:byte(i) end
+    return n
 end
 
 ---@param n integer
+---@param len integer 字节数
 ---@return string
-local function be32(n)
-    return string.char(math.floor(n / 16777216) % 256, math.floor(n / 65536) % 256,
-        math.floor(n / 256) % 256, n % 256)
+local function be(n, len)
+    local bytes = {}
+    for i = len, 1, -1 do
+        bytes[i] = n % 256
+        n = math.floor(n / 256)
+    end
+    return string.char(unpack(bytes))
 end
 
----@param n integer
----@return string
-local function be16(n)
-    return string.char(math.floor(n / 256) % 256, n % 256)
-end
-
----@param n integer
----@return string
-local function pad4(n)
-    return ("\0"):rep((4 - n % 4) % 4)
-end
-
---- 解析 WOFF 表目录；目录按 tag 升序（规范要求），原样沿用为 sfnt 表记录顺序。
+--- 把 WOFF 内容解包成 sfnt 写进 out；格式错误、解压失败（ffi/zlib 直接 assert）、写盘失败一律抛错。
+--- WOFF 目录按 tag 升序（规范要求），原样沿用为 sfnt 表记录顺序。
+--- 逐表解压写盘，峰值内存 ≈ 源文件 + 2 × 最大单表（解压缓冲区 + 其 Lua 字符串拷贝）。
 ---@param data string
----@return { tag: string, offset: integer, comp_len: integer, orig_len: integer, checksum: integer }[]|nil
----@return string|nil err
-local function readDirectory(data)
-    if #data < HEADER_SIZE or data:sub(1, 4) ~= "wOFF" then
-        return nil, "not a WOFF 1.0 file"
-    end
-    local num = u16(data, 13)
-    if num == 0 or #data < HEADER_SIZE + num * ENTRY_SIZE then
-        return nil, "truncated WOFF directory"
-    end
-    local entries = {}
-    for i = 0, num - 1 do
-        local p = HEADER_SIZE + 1 + i * ENTRY_SIZE
-        local entry = {
-            tag = data:sub(p, p + 3),
-            offset = u32(data, p + 4),
-            comp_len = u32(data, p + 8),
-            orig_len = u32(data, p + 12),
-            checksum = u32(data, p + 16),
-        }
-        if entry.comp_len > entry.orig_len or entry.offset + entry.comp_len > #data then
-            return nil, "invalid WOFF table " .. entry.tag
-        end
-        entries[#entries + 1] = entry
-    end
-    return entries
-end
-
----@param entries table
----@param flavor string sfnt 版本（4 字节）
----@return string
-local function sfntHeader(entries, flavor)
-    local num = #entries
+---@param out file*
+local function writeSfnt(data, out)
+    assert(#data >= 44 and data:sub(1, 4) == "wOFF", "not a WOFF 1.0 file")
+    local num, total = uint(data, 13, 2), uint(data, 17, 4)
+    assert(num > 0 and #data >= 44 + num * 20, "truncated WOFF directory")
     local selector = 0
     while 2 ^ (selector + 1) <= num do selector = selector + 1 end
     local range = 2 ^ selector * 16
-    local out = { flavor, be16(num), be16(range), be16(selector), be16(num * 16 - range) }
+    local header = { data:sub(5, 8), be(num, 2), be(range, 2), be(selector, 2), be(num * 16 - range, 2) }
+    local entries = {}
     local offset = 12 + 16 * num
+    for p = 45, 44 + num * 20, 20 do
+        local e = { tag = data:sub(p, p + 3), offset = uint(data, p + 4, 4),
+            comp_len = uint(data, p + 8, 4), orig_len = uint(data, p + 12, 4) }
+        -- orig_len 决定解压缓冲区大小；用头部 totalSfntSize 封顶，防畸形文件一次分配 4GB。
+        assert(e.comp_len <= e.orig_len and e.orig_len <= total and e.offset + e.comp_len <= #data,
+            "invalid WOFF table " .. e.tag)
+        header[#header + 1] = e.tag .. data:sub(p + 16, p + 19) .. be(offset, 4) .. data:sub(p + 12, p + 15)
+        offset = offset + e.orig_len + -e.orig_len % 4
+        entries[#entries + 1] = e
+    end
+    assert(out:write(table.concat(header)))
     for _idx, e in ipairs(entries) do
-        out[#out + 1] = e.tag .. be32(e.checksum) .. be32(offset) .. be32(e.orig_len)
-        offset = offset + e.orig_len + #pad4(e.orig_len)
+        local chunk = data:sub(e.offset + 1, e.offset + e.comp_len)
+        if e.comp_len < e.orig_len then
+            chunk = require("ffi/zlib").zlib_uncompress(chunk, e.orig_len)
+            assert(#chunk == e.orig_len, "corrupt WOFF table " .. e.tag)
+        end
+        assert(out:write(chunk, ("\0"):rep(-e.orig_len % 4)))
     end
-    return table.concat(out)
-end
-
----@param data string
----@param e table 表目录项
----@return string|nil table_data
----@return string|nil err
-local function tableData(data, e)
-    local raw = data:sub(e.offset + 1, e.offset + e.comp_len)
-    if e.comp_len == e.orig_len then return raw end
-    -- ffi/zlib 解压失败直接 assert；损坏的表要转成错误返回，调用方会退回原 WOFF。
-    local ok, out = pcall(require("ffi/zlib").zlib_uncompress, raw, e.orig_len)
-    if not ok or #out ~= e.orig_len then
-        return nil, "corrupt WOFF table " .. e.tag
-    end
-    return out
+    assert(out:flush())
 end
 
 --- 把 WOFF 1.0 文件转成 sfnt 写到 dest（先写 .part 再改名，失败不留半截文件）。
---- 逐表解压写盘，峰值内存 ≈ 源文件 + 最大单表。
 ---@param src string WOFF 路径
 ---@param dest string 输出路径
 ---@return boolean|nil ok
 ---@return string|nil err
 function Woff.toSfnt(src, dest)
-    local f, open_err = io.open(src, "rb")
-    if not f then return nil, open_err end
+    local f, err = io.open(src, "rb")
+    if not f then return nil, err end
     local data = f:read("*a")
     f:close()
-    local entries, err = readDirectory(data)
-    if not entries then return nil, err end
-
     local part = dest .. ".part"
     local out
     out, err = io.open(part, "wb")
     if not out then return nil, err end
-    local ok = out:write(sfntHeader(entries, data:sub(5, 8)))
-    for _idx, e in ipairs(entries) do
-        if not ok then break end
-        local chunk
-        chunk, err = tableData(data, e)
-        ok = chunk and out:write(chunk, pad4(e.orig_len))
-    end
-    ok = out:close() and ok
-    if not (ok and os.rename(part, dest)) then
+    -- 损坏 / 非 WOFF 1.0 / 磁盘满都转成错误返回，调用方退回原 WOFF。
+    local ok
+    ok, err = pcall(writeSfnt, data, out)
+    out:close()
+    if ok then ok, err = os.rename(part, dest) end
+    if not ok then
         os.remove(part)
-        return nil, err or "failed to write sfnt"
+        return nil, err
     end
     return true
 end

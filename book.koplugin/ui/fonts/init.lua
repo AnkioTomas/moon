@@ -2,7 +2,7 @@
 月读插件字体：id → 文件 → CRE 字体名的解析，以及 UI 字体设置。
 
   set(id, name)       只写 display.ui_font / ui_font_name，绝不碰 Font.fontmap
-  applyCurrent()      唯一改 Font.fontmap 的入口；插件 init 经 onCreate 调一次，设置页换字体后再调
+  applyCurrent()      唯一改 Font.fontmap 的入口；onCreate 每进程只调一次，设置页换字体后再调
   faceForId / faceNameForId  解析字体名（前者顺带注册进 CRE）
 
 字源：
@@ -256,9 +256,11 @@ function Fonts.applyCurrent()
             Font.fontmap[key] = val
         end
     end
-    Font.faces = {}
 end
---- 插件 init：按配置应用一次 UI 字体。
-Fonts.onCreate = Fonts.applyCurrent
+
+--- 插件 init：fontmap 是进程级全局表，FM / Reader 各实例共享，只在首个实例应用一次。
+function Fonts.onCreate()
+    if not _defaults then Fonts.applyCurrent() end
+end
 
 return Fonts
