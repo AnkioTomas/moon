@@ -13,7 +13,7 @@ package.preload["http.request"] = function()
     }
 end
 package.preload["utils.paths"] = function()
-    return { root = function() return "/tmp" end, ensureSettings = function() end }
+    return { root = function() return "/tmp" end, ensureDir = function() return true end }
 end
 package.preload["util"] = function()
     return { makePath = function() return true end }

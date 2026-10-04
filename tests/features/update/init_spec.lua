@@ -71,7 +71,7 @@ package.preload["http.request"] = function()
     }
 end
 package.preload["utils.paths"] = function()
-    return { ensureSettings = function() end, root = function() return "/tmp" end }
+    return { ensureDir = function() return true end, root = function() return "/tmp" end }
 end
 package.preload["utils.settings"] = function()
     local update = { auto_update_check = false, update_last_checked_at = 0 }

@@ -153,6 +153,16 @@ package.preload["ffi/blitbuffer"] = function()
         COLOR_BLACK = 1,
         COLOR_GRAY_3 = 2,
         Color8 = function(c) return c end,
+        new = function(w, h)
+            local blank = { getColor8 = function() return { a = 0 } end }
+            return {
+                fill = function() end,
+                free = function() end,
+                getWidth = function() return w end,
+                getHeight = function() return h end,
+                getPixel = function() return blank end,
+            }
+        end,
     }
 end
 package.preload["gettext"] = function() return function(s) return s end end

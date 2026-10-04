@@ -19,6 +19,7 @@ package.preload["device"] = function()
         screen = {
             getWidth = function() return 480 end,
             getHeight = function() return 800 end,
+            isColorEnabled = function() return false end,
         },
     }
 end

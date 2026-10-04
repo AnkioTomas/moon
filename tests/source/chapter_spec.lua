@@ -27,7 +27,10 @@ end
 local pending
 local book_row
 package.preload["utils.paths"] = function()
-    return { chapterPath = function(_, idx) return tmp .. "/" .. idx .. ".html" end }
+    return {
+        chapterPath = function(_, idx) return tmp .. "/" .. idx .. ".html" end,
+        ensureDir = function() return true end,
+    }
 end
 package.preload["db.progress"] = function()
     return { get = function() return pending end }

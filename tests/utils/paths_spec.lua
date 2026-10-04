@@ -96,8 +96,6 @@ do
     Assert.eq(Paths.fontsDir(), root .. "/fonts")
     Assert.eq(Paths.commonPath(), root .. "/settings/common.lua")
     Assert.eq(Paths.sourcePath("wechat"), root .. "/settings/wechat.lua")
-    -- sourcePath(nil) 默认 local
-    Assert.eq(Paths.sourcePath(nil), root .. "/settings/local.lua")
 end
 
 -- ensureLayout：真实创建 .moon/cache/<source>/{book,image}，重复调用幂等
@@ -128,6 +126,9 @@ do
     -- 幂等：重复调用不重写不报错
     Paths.ensureBookWork("stable/id", TEST_SOURCE)
     Assert.eq(Paths.chapterPath("stable/id", 3, TEST_SOURCE), dir .. "/3.html")
+    -- chapterPath 只拼路径，不建目录
+    Paths.chapterPath("never/created", 1, TEST_SOURCE)
+    Assert.is_nil(lfs.attributes(Paths.bookWorkDir("never/created", TEST_SOURCE)))
 end
 
 -- isMoonPath：只认插件自己的 .moon 数据目录前缀

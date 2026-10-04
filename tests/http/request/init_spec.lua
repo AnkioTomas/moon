@@ -317,7 +317,7 @@ do
         }
     end
     package.preload["socket"] = function()
-        return { dns = { getaddrinfo = function()
+        return { gettime = os.clock, dns = { getaddrinfo = function()
             return { { family = "inet", addr = "10.0.0.1" } }
         end } }
     end

@@ -43,6 +43,7 @@ end
 
 local previous_settings = _G.G_reader_settings
 _G.G_reader_settings = {
+    readSetting = function() end,
     saveSetting = function() end,
 }
 
