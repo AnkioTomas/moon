@@ -36,4 +36,4 @@ end, {
 job:cancel()
 ```
 
-UI 组件里登记到 Lifecycle：`lifecycle:addHttp(job)`（接受任何带 `cancel` 方法的句柄），Pause / Destroy 时自动取消。
+句柄挂在发起它的对象上。Pause / Destroy 时该对象自己 `job:cancel()`，取消只杀这一条。
