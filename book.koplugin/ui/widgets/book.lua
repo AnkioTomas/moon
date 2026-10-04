@@ -25,7 +25,7 @@ local Image = require("ui.themes.widgets.image")
 local Icon = require("ui.themes.widgets.icon")
 local Box = require("ui.themes.widgets.box")
 local Text = require("ui.themes.widgets.text")
-local Theme = require("ui.themes.init")
+local Theme = require("ui.themes")
 local Paths = require("utils.paths")
 local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
@@ -276,9 +276,6 @@ function Book.readRibbon(cw)
     function ribbon:paintTo(bb, x, y)
         local ink = statusInk()
         paintSash(bb, x, y, size, self.band, ink)
-        if type(Blitbuffer.new) ~= "function" then
-            return
-        end
         ---@type BlitBuffer
         ---@diagnostic disable-next-line: assign-type-mismatch
         local src = Blitbuffer.new(ts.w, ts.h)
