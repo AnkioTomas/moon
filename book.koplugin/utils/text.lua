@@ -259,7 +259,7 @@ function Text.formEncode(tbl)
         return tostring(a) < tostring(b)
     end)
     local parts = {}
-    for _, k in ipairs(keys) do
+    for _idx, k in ipairs(keys) do
         local v = form[k]
         if v ~= nil then
             parts[#parts + 1] = Text.urlEncode(k) .. "=" .. Text.urlEncode(v)
