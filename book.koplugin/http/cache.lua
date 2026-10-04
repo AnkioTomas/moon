@@ -1,11 +1,7 @@
 --[[--
 HTTP 响应缓存（键 = METHOD + path + 规范化参数，TTL 秒）。
 
-持久化在 db.http（JSON 文本 + expires）。
-只存成功响应；调用方传入 ttl>0 才写入。
-写操作后应 Request.clearCache() 或 Cache.clear() 失效。
-
-读写均在当前线程同步访问 SQLite。
+持久化在 db.http（JSON 文本 + expires），读写均在 UI 线程同步访问 SQLite；写操作后用 clear 失效。
 
 @module koplugin.book.http.cache
 --]]
@@ -17,16 +13,6 @@ local Text = require("utils.text")
 
 local Cache = {}
 
---- 查询表 → 稳定且无歧义的 query string。
----@param query table|nil
----@return string 无前导 `?`；空表返回 ""
-function Cache.queryString(query)
-    if type(query) ~= "table" or not next(query) then
-        return ""
-    end
-    return Text.formEncode(query)
-end
-
 --- 缓存键：`GET https://host/path?a=1&b=2`
 --- query 表会规范化后拼到 path 上；url 自带的 `?…` 在提供 query 表时会被剥掉，避免双重查询。
 ---@param method string|nil 默认 GET
@@ -35,86 +21,90 @@ end
 ---@param scope string|nil 认证用户等额外隔离维度；不得传入明文凭据
 ---@return string
 function Cache.key(method, url, query, scope)
-    method = string.upper(tostring(method or "GET"))
-    url = tostring(url or "")
-    local qs = Cache.queryString(query)
+    method = string.upper(method or "GET")
     local key
-    if qs ~= "" then
-        local path = url:match("^([^?]*)") or url
-        key = method .. " " .. path .. "?" .. qs
+    if type(query) == "table" and next(query) then
+        key = method .. " " .. url:match("^([^?]*)") .. "?" .. Text.formEncode(query)
     else
         key = method .. " " .. url
     end
     if scope ~= nil then
-        local value = tostring(scope)
-        key = key .. " @" .. #value .. ":" .. value
+        key = key .. " @" .. #scope .. ":" .. scope
     end
     return key
 end
 
---- 读取缓存；过期由 db.http.get 淘汰，JSON 损坏则删行并 cb(nil)
+--- 读缓存；过期由 db.http.get 淘汰，JSON 损坏则删行当未命中。
 ---@param key string
----@param cb fun(value: any|nil)
----@return { cancel: fun() }
-function Cache.getAsync(key, cb)
-    if type(key) ~= "string" or key == "" then
-        UIManager:nextTick(function()
-            cb(nil)
-        end)
-        return { cancel = function() end }
+---@return any|nil
+local function read(key)
+    local HttpDB = require("db.http")
+    local value_json = HttpDB.get(key)
+    if not value_json then
+        return nil
     end
-
-    local cancelled = false
-
-    UIManager:nextTick(function()
-        if cancelled then
-            return
-        end
-        local HttpDB = require("db.http")
-        local value_json = HttpDB.get(key)
-        if value_json then
-            local ok, value = pcall(JSON.decode, value_json)
-            if ok then
-                cb(value)
-                return
-            end
-            -- JSON 损坏，删除
-            HttpDB.delete(key)
-        end
-        cb(nil)
-    end)
-
-    return { cancel = function()
-            cancelled = true
-        end }
+    local ok, value = pcall(JSON.decode, value_json)
+    if ok then
+        return value
+    end
+    HttpDB.delete(key)
 end
 
---- 写入缓存；ttl<=0 或 value 无法 JSON 编码则跳过。
+--- 写缓存。缓存是尽力而为：编码或落库失败只记日志，不影响已成功的请求。
 ---@param key string
 ---@param ttl number 存活秒数
-function Cache.set(key, value, ttl)
-    ttl = tonumber(ttl) or 0
-    if ttl <= 0 or value == nil or key == nil or key == "" then
-        return
-    end
+local function write(key, value, ttl)
     local ok, encoded = pcall(JSON.encode, value)
-    if not ok or type(encoded) ~= "string" then
+    if not ok then
         logger.warn("book.http.cache encode failed", key)
         return
     end
-    local expires = os.time() + ttl
-    local HttpDB = require("db.http")
-    local stored, err = HttpDB.set(key, encoded, expires)
+    local stored, err = require("db.http").set(key, encoded, os.time() + ttl)
     if not stored then
         logger.warn("book.http cache set failed", key, err)
     end
 end
 
+--- 先读缓存，未命中再 load；load 回调 value 非 nil 且无 err 才写入。
+--- key 为 nil 表示不走缓存，直接 load。读缓存推迟一拍，回调永远异步。
+---@param key string|nil
+---@param ttl number 存活秒数
+---@param load fun(done: fun(value: any, err: any, ...)): { cancel: fun() }|nil
+---@param cb fun(value: any, err: any, ...)
+---@return { cancel: fun() }
+function Cache.fetch(key, ttl, load, cb)
+    if not key then
+        return load(cb) or { cancel = function() end }
+    end
+    local cancelled, job = false, nil
+    UIManager:nextTick(function()
+        if cancelled then
+            return
+        end
+        local hit = read(key)
+        if hit ~= nil then
+            cb(hit)
+            return
+        end
+        job = load(function(value, err, ...)
+            if value ~= nil and err == nil then
+                write(key, value, ttl)
+            end
+            cb(value, err, ...)
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job then
+            job.cancel()
+        end
+    end }
+end
+
 --- 清空全部缓存；传 url_substr 则只失效 key 含该子串的条目。
 ---@param url_substr string|nil
 function Cache.clear(url_substr)
-    local HttpDB = require("db.http")
-    local ok, err = HttpDB.clear(url_substr)
+    local ok, err = require("db.http").clear(url_substr)
     if not ok then
         logger.warn("book.http cache clear failed", url_substr, err)
     end

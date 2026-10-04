@@ -1,0 +1,151 @@
+--[[--
+流式 HTTP：body 到达即 on_data，结束时 on_done(err)。用于 SSE / chunked / 下载。
+
+对外经 `Request.stream(opts, handlers) → { cancel }`，不要直接 require。
+
+@module koplugin.book.http.request.stream
+--]]
+
+local Fetch = require("http.request.fetch")
+local Turbo = require("http.turbo")
+local T = require("ffi/util").template
+local _ = require("gettext")
+
+local Stream = {}
+
+--- 官方 turbo 会把整段 body 攒内存（SSE/大文件会炸），这里只改读路径：
+--- 有长度走 iostream 增量回调，chunked 不入 _read_buffer，无长度按连接关闭读；301/302 先收尾再跟下一跳。
+---@param opts HttpRequest
+---@param handlers HttpStreamHandlers
+---@return HttpJob
+function Stream.open(opts, handlers)
+    local ctx, begin_err = Fetch.begin(opts, "book.http stream")
+    if not ctx then
+        if handlers.on_done then handlers.on_done(begin_err) end
+        return Fetch.NOOP
+    end
+    local state = { cancelled = false, done = false }
+    local received = 0
+
+    --- 只回调一次 on_done。on_done 后再 release，方便连环开流。
+    ---@param err any nil 表示正常收完
+    local function finish(err)
+        if state.done then
+            return
+        end
+        state.done = true
+        state.client = nil
+        Fetch.log(ctx, err, "bytes", received)
+        if handlers.on_done then handlers.on_done(err) end
+        Turbo.release()
+    end
+
+    --- 已取消或已结束后一律丢弃；非字符串或空串忽略。
+    local function emit(chunk)
+        if not state.cancelled and not state.done and type(chunk) == "string" and #chunk > 0 then
+            received = received + #chunk
+            if handlers.on_data then handlers.on_data(chunk) end
+        end
+    end
+
+    ctx.loop:add_callback(function()
+        if state.cancelled then
+            return finish("cancelled")
+        end
+        local client, client_err = Turbo.client()
+        if not client then
+            return finish(client_err)
+        end
+        local orig_finalize = client._finalize_request
+        if type(orig_finalize) ~= "function" then
+            return finish("unsupported Turbo HTTPClient")
+        end
+        local errors = require("turbo").async.errors
+        local httputil = require("turbo.httputil")
+        local buffer = require("turbo.structs.buffer")
+        state.client = client
+
+        client._chunked_data = function(self, data)
+            if data and data:len() > 2 then
+                emit(data:sub(1, data:len() - 2))
+            end
+            self.iostream:read_until("\r\n", self._handle_chunked_encoding, self)
+        end
+
+        client._finalize_request = function(self)
+            local redirect_before = self.redirect
+            orig_finalize(self)
+            if self.redirect ~= redirect_before or state.done or state.cancelled then
+                return
+            end
+            local headers = self.response_headers
+            local code = headers and headers.get_status_code and headers:get_status_code()
+            if self.s_error then
+                finish(self.error_str or "network request failed")
+            else
+                finish(not Fetch.ok(code) and T(_("HTTP %1"), tostring(code)) or nil)
+            end
+        end
+
+        --- 读完 body 后统一收尾（payload 置空：数据已经 emit 出去了）。
+        local function complete(self_)
+            self_.payload = ""
+            self_:_finalize_request()
+        end
+
+        client._handle_headers = function(self, data)
+            if not data then
+                return self:_throw_error(errors.NO_HEADERS,
+                    "No data receive after connect. Expected HTTP headers.")
+            end
+            local parsed, headers = xpcall(httputil.HTTPParser, function() end,
+                data, httputil.hdr_t["HTTP_RESPONSE"])
+            if not parsed then
+                return self:_throw_error(errors.PARSE_ERROR_HEADERS,
+                    "Could not parse HTTP response header")
+            end
+            self.response_headers = headers
+            local code = headers:get_status_code()
+            if not state.cancelled and handlers.on_headers then
+                handlers.on_headers(code, headers)
+            end
+            if opts.allow_redirects and (code == 301 or code == 302) then
+                return self:_finalize_request()
+            end
+            local transfer = headers:get("Transfer-Encoding", true)
+            if transfer and tostring(transfer):lower() == "chunked" then
+                self._chunked = true
+                self._read_buffer = buffer()
+                return self.iostream:read_until("\r\n", self._handle_chunked_encoding, self)
+            end
+            -- get() 可能多返回值；第二值进 tonumber 会当成进制。
+            local content_length = tonumber((headers:get("Content-Length", true)))
+            -- 长度为 0 必须当场收尾：keep-alive 连接不会关，read_until_close 会挂到超时。
+            if content_length == 0 then
+                return complete(self)
+            end
+            if content_length then
+                return self.iostream:read_bytes(content_length, complete, self, emit)
+            end
+            self.iostream:read_until_close(function(self_, final_data)
+                emit(final_data)
+                complete(self_)
+            end, self, emit)
+        end
+
+        local fetched, future = pcall(client.fetch, client, opts.url, Fetch.options(opts, 180))
+        if not fetched then
+            return finish(future)
+        end
+        local res = coroutine.yield(future)
+        -- finalize 通常已调 finish；兜底：yield 返回但未 finalize 时仍收口
+        finish(Fetch.responseError(res))
+    end)
+
+    return Fetch.job(state, function()
+        Fetch.close(state.client)
+        finish("cancelled")
+    end)
+end
+
+return Stream
