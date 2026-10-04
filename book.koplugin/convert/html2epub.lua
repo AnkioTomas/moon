@@ -23,7 +23,7 @@ HTML → EPUB（多章节、内嵌图片、元数据）。
 
 local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
-local Header = require("http.header")
+local Header = require("http.request.header")
 local Text = require("utils.text")
 local Perf = require("utils.perf")
 local _ = require("gettext")
@@ -71,7 +71,7 @@ img{max-width:100%%;}
 ]], Text.xmlEscape(title), body)
 end
 
---- data: URI 图片解码；LuaSocket 的 mime 是可选原生快路径（大图纯 Lua 解码很慢）。
+--- data: URI 图片解码；用 LuaSocket 的原生 mime（大图纯 Lua 解码很慢）。
 ---@param data string
 ---@return string|nil
 local function b64decode(data)
@@ -79,14 +79,7 @@ local function b64decode(data)
     if data == "" then
         return nil
     end
-    local ok, mime = pcall(require, "mime")
-    if ok and mime and type(mime.unb64) == "function" then
-        local out = mime.unb64(data)
-        if type(out) == "string" and out ~= "" then
-            return out
-        end
-    end
-    local out = Text.base64Decode(data)
+    local out = require("mime").unb64(data)
     return out ~= "" and out or nil
 end
 
@@ -157,7 +150,7 @@ local function collectImageSrcs(html)
         seen[src] = true
         list[#list + 1] = src
     end
-    for _, src in html:gmatch([[<img%s+[^>]-src%s*=%s*(["'])(.-)%1]]) do
+    for _quote, src in html:gmatch([[<img%s+[^>]-src%s*=%s*(["'])(.-)%1]]) do
         add(src)
     end
     -- 空白类必须写 %s：Lua 模式没有 \s，写成 \s 是「排除反斜杠和字母 s」，
@@ -207,6 +200,7 @@ local function writeEpubPackage(opts, dest)
 
     local tmp = dest .. ".part"
     os.remove(tmp)
+    ---@diagnostic disable-next-line: redundant-parameter
     local epub = Archiver.Writer:new{}
     if not epub:open(tmp, "epub") then
         return nil, epub.err or _("无法创建 epub")
