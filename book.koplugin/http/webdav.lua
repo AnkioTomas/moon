@@ -1,20 +1,16 @@
 --[[--
-WebDAV 客户端（HTTP Basic，仅异步）
-
-  local dav = Webdav.new{ url=, username=, password= }
-  dav:listAsync(path?, cb)           → entries, err
-  dav:getAsync(path, dest, opts?, cb) → true, err
+WebDAV 客户端（HTTP Basic，仅异步）。
 
 @module koplugin.book.http.webdav
 --]]
 
 local util = require("util")
 local ffiUtil = require("ffi/util")
-local Header = require("http.header")
+local Header = require("http.request.header")
 local Request = require("http.request")
 local Text = require("utils.text")
 local _ = require("gettext")
-local T = require("ffi/util").template
+local T = ffiUtil.template
 
 --- PROPFIND 列表项
 ---@class WebdavEntry
@@ -29,26 +25,16 @@ local T = require("ffi/util").template
 ---@field url string 根 URL（已去尾斜杠）
 ---@field username string
 ---@field password string
----@field join fun(self: WebdavClient, path: string|nil, as_dir: boolean|nil): string 拼接 URL
----@field listAsync fun(self: WebdavClient, path: string|nil, cb: fun(entries: WebdavEntry[]|nil, err: string|nil)): { cancel: fun() }
----@field getAsync fun(self: WebdavClient, path: string, dest: string, opts: table|nil, cb: fun(ok: boolean|nil, err: string|nil, code: number|nil)): { cancel: fun() }
----@field putFileAsync fun(self: WebdavClient, path: string, local_path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
----@field makeCollectionAsync fun(self: WebdavClient, path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
----@field ensurePathAsync fun(self: WebdavClient, path: string, cb: fun(ok: boolean|nil, err: string|nil)): { cancel: fun() }|nil
----@field deleteAsync fun(self: WebdavClient, path: string, cb: fun(ok: boolean|nil, err: string|nil, code: number|nil)): { cancel: fun() }
-
 local Webdav = {}
 Webdav.__index = Webdav
 
 local PROPFIND_LIST = [[<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/></d:prop></d:propfind>]]
 
 local trimSlashes = Text.trimSlashes
-local rtrimSlashes = Text.rtrimSlashes
 
 --- HTTP 状态码转用户可读错误文案
----@param detail string|nil
 ---@return string
-local function statusErr(code, detail)
+local function statusErr(code)
     local n = tonumber(code)
     if not n then
         return T(_("请求失败: %1"), tostring(code))
@@ -56,21 +42,16 @@ local function statusErr(code, detail)
     if n == 401 or n == 403 then
         return _("认证失败，请检查用户名或密码")
     end
-    local base = T(_("HTTP %1"), tostring(n))
-    if type(detail) == "string" and detail ~= "" then
-        return base .. ": " .. detail
-    end
-    return base
+    return T(_("HTTP %1"), tostring(n))
 end
 
 --- 构造 WebDAV 客户端
----@param cfg { url: string, username: string|nil, password: string|nil, user: string|nil }|nil
+---@param cfg { url: string, username: string|nil, password: string|nil }
 ---@return WebdavClient
 function Webdav.new(cfg)
-    cfg = cfg or {}
     local self = setmetatable({}, Webdav)
-    self.url = rtrimSlashes(cfg.url or "")
-    self.username = cfg.username or cfg.user or ""
+    self.url = Text.rtrimSlashes(cfg.url or "")
+    self.username = cfg.username or ""
     self.password = cfg.password or ""
     return self
 end
@@ -80,14 +61,30 @@ end
 ---@param as_dir boolean|nil 目录 URL 强制尾斜杠
 ---@return string
 function Webdav:join(path, as_dir)
-    local base = rtrimSlashes(self.url)
     path = trimSlashes(path or "")
-    local encoded = path ~= "" and (util.urlEncode(path, "/") or path) or ""
-    local url = encoded ~= "" and (base .. "/" .. encoded) or base
+    local url = path ~= "" and (self.url .. "/" .. (util.urlEncode(path, "/") or path)) or self.url
     if as_dir and url:sub(-1) ~= "/" then
         url = url .. "/"
     end
     return url
+end
+
+--- 带 Basic 凭据发请求：成功 cb(res)；非 2xx cb(nil, 文案, code)；网络错误 cb(nil, err)。
+---@param opts HttpRequest
+---@param cb fun(res: table|nil, err: string|nil, code: number|nil)
+---@return HttpJob
+function Webdav:_request(opts, cb)
+    opts.auth_username = self.username
+    opts.auth_password = self.password
+    return Request.request(opts, function(res, err)
+        if err then
+            cb(nil, err)
+        elseif not Request.ok(res.code) then
+            cb(nil, statusErr(res.code), tonumber(res.code))
+        else
+            cb(res)
+        end
+    end)
 end
 
 local MONTHS = { Jan = 1, Feb = 2, Mar = 3, Apr = 4, May = 5, Jun = 6,
@@ -145,7 +142,7 @@ local function parseList(xml, folder_url, folder_path)
         if a.is_dir ~= b.is_dir then
             return a.is_dir
         end
-        return (a.name or "") < (b.name or "")
+        return a.name < b.name
     end)
     return entries
 end
@@ -153,28 +150,21 @@ end
 --- Nonblocking Depth:1 directory listing.
 ---@param path string|nil
 ---@param cb fun(entries: WebdavEntry[]|nil, err: string|nil)
----@return { cancel: fun() }
+---@return HttpJob
 function Webdav:listAsync(path, cb)
     path = trimSlashes(path or "")
     local url = self:join(path, true)
-    return Request.request({
+    return self:_request({
         url = url,
         method = "PROPFIND",
         headers = {
             ["Content-Type"] = "application/xml; charset=utf-8",
             ["Depth"] = "1",
-            ["Content-Length"] = tostring(#PROPFIND_LIST),
         },
         body = PROPFIND_LIST,
-        auth_username = self.username,
-        auth_password = self.password,
     }, function(res, err)
-        if err then
+        if not res then
             cb(nil, err)
-            return
-        end
-        if not res or not Request.ok(res.code) then
-            cb(nil, statusErr(res and res.code))
             return
         end
         local xml = res.body or ""
@@ -187,12 +177,11 @@ end
 ---@param dest string
 ---@param opts table|nil
 ---@param cb fun(ok: boolean|nil, err: string|nil, code: number|nil) code 仅 HTTP 非 2xx 时给出
----@return { cancel: fun() }
+---@return HttpJob
 function Webdav:getAsync(path, dest, opts, cb)
     opts = opts or {}
     return Request.download({
         url = self:join(path, false),
-        method = "GET",
         headers = Header.forDownload(opts.headers),
         auth_username = self.username,
         auth_password = self.password,
@@ -202,8 +191,7 @@ function Webdav:getAsync(path, dest, opts, cb)
         if ok then
             cb(true)
         elseif res and res.code and not Request.ok(res.code) then
-            local body_msg = type(res.body) == "string" and res.body:sub(1, 200) or nil
-            cb(nil, statusErr(res.code, body_msg), tonumber(res.code))
+            cb(nil, statusErr(res.code), tonumber(res.code))
         else
             cb(nil, err)
         end
@@ -214,7 +202,7 @@ end
 ---@param path string
 ---@param local_path string
 ---@param cb fun(ok: boolean|nil, err: string|nil)
----@return { cancel: fun() }|nil
+---@return HttpJob|nil
 function Webdav:putFileAsync(path, local_path, cb)
     local file, open_err = io.open(local_path, "rb")
     if not file then
@@ -227,47 +215,35 @@ function Webdav:putFileAsync(path, local_path, cb)
         cb(nil, _("待上传文件为空"))
         return nil
     end
-    return Request.request({
+    return self:_request({
         url = self:join(path, false),
         method = "PUT",
-        headers = Header.forRequest({
-            ["Content-Type"] = "application/octet-stream",
-            ["Content-Length"] = tostring(#body),
-        }),
+        headers = Header.forRequest({ ["Content-Type"] = "application/octet-stream" }),
         body = body,
-        auth_username = self.username,
-        auth_password = self.password,
         timeout = 300,
     }, function(res, err)
-        if err then
-            cb(nil, err)
-        elseif not Request.ok(res and res.code) then
-            cb(nil, statusErr(res and res.code))
-        else
-            cb(true)
-        end
+        cb(res and true, err)
     end)
 end
 
 --- 创建目录。WebDAV 对已存在目录通常返回 405/409，这两种结果都视为成功。
+---@param path string
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return HttpJob
 function Webdav:makeCollectionAsync(path, cb)
-    return Request.request({
-        url = self:join(path, true),
-        method = "MKCOL",
-        auth_username = self.username,
-        auth_password = self.password,
-    }, function(res, err)
-        if err then cb(nil, err); return end
-        local code = tonumber(res and res.code)
-        if Request.ok(code) or code == 405 or code == 409 then
+    return self:_request({ url = self:join(path, true), method = "MKCOL" }, function(res, err, code)
+        if res or code == 405 or code == 409 then
             cb(true)
         else
-            cb(nil, statusErr(code))
+            cb(nil, err)
         end
     end)
 end
 
 --- 按层创建目录，上传前调用一次即可。
+---@param path string
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return CancelHandle|nil
 function Webdav:ensurePathAsync(path, cb)
     local clean = trimSlashes(path or "")
     if clean == "" then cb(true); return nil end
@@ -289,27 +265,17 @@ function Webdav:ensurePathAsync(path, cb)
     next_part()
     return { cancel = function()
         cancelled = true
-        if active and active.cancel then active:cancel() end
+        if active then active:cancel() end
     end }
 end
 
 --- 删除远端文件。
 ---@param path string
 ---@param cb fun(ok: boolean|nil, err: string|nil, code: number|nil) code 仅 HTTP 非 2xx 时给出
----@return { cancel: fun() }
+---@return HttpJob
 function Webdav:deleteAsync(path, cb)
-    return Request.request({
-        url = self:join(path, false),
-        method = "DELETE",
-        auth_username = self.username,
-        auth_password = self.password,
-    }, function(res, err)
-        if err then cb(nil, err); return end
-        if not Request.ok(res and res.code) then
-            cb(nil, statusErr(res and res.code), tonumber(res and res.code))
-            return
-        end
-        cb(true)
+    return self:_request({ url = self:join(path, false), method = "DELETE" }, function(res, err, code)
+        cb(res and true, err, code)
     end)
 end
 
