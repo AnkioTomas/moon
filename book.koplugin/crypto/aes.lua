@@ -1,14 +1,23 @@
 --[[--
-AES-128（ECB/CBC）+ PKCS7。纯 LuaJIT。
+AES-128/192/256（ECB/CBC）+ PKCS7。纯 LuaJIT。
+密钥 16/24/32 字节。ECB 加密默认填充；`pad == false` 表示数据已对齐。
 
 @module koplugin.book.crypto.aes
 --]]
 
 local bit = require("bit")
-local band, bor, bxor, bnot = bit.band, bit.bor, bit.bxor, bit.bnot
-local lshift, rshift, ror = bit.lshift, bit.rshift, bit.ror
+local band, bxor = bit.band, bit.bxor
+local lshift, rshift = bit.lshift, bit.rshift
+
+local Hex = require("crypto.hex")
+local Pad = require("crypto.pad")
 
 local Aes = {}
+
+Aes.pkcs7_pad = Pad.pkcs7_pad
+Aes.pkcs7_unpad = Pad.pkcs7_unpad
+Aes.from_hex = Hex.from_hex
+Aes.to_hex = Hex.to_hex
 
 local SBOX = {
     0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,
@@ -100,34 +109,33 @@ local function add_round_key(s, rk, round)
 end
 
 local function expand_key(key)
-    assert(#key == 16)
+    local nk = #key / 4
+    if nk ~= 4 and nk ~= 6 and nk ~= 8 then error("aes: bad key length") end
+    local nr = nk + 6
+    local nwords = 4 * (nr + 1)
     local w = {}
-    for i = 1, 16 do w[i] = key:byte(i) end
-    for i = 4, 43 do
+    for i = 1, #key do w[i] = key:byte(i) end
+    for i = nk, nwords - 1 do
         local t0 = w[(i - 1) * 4 + 1]
         local t1 = w[(i - 1) * 4 + 2]
         local t2 = w[(i - 1) * 4 + 3]
         local t3 = w[(i - 1) * 4 + 4]
-        if i % 4 == 0 then
-            local a = SBOX[t1 + 1]
+        if i % nk == 0 then
+            local a = bxor(SBOX[t1 + 1], RCON[math.floor(i / nk)])
             local b = SBOX[t2 + 1]
             local c = SBOX[t3 + 1]
             local d = SBOX[t0 + 1]
-            a = bxor(a, RCON[i / 4])
             t0, t1, t2, t3 = a, b, c, d
+        elseif nk > 6 and i % nk == 4 then
+            t0, t1, t2, t3 = SBOX[t0 + 1], SBOX[t1 + 1], SBOX[t2 + 1], SBOX[t3 + 1]
         end
-        w[i * 4 + 1] = bxor(w[(i - 4) * 4 + 1], t0)
-        w[i * 4 + 2] = bxor(w[(i - 4) * 4 + 2], t1)
-        w[i * 4 + 3] = bxor(w[(i - 4) * 4 + 3], t2)
-        w[i * 4 + 4] = bxor(w[(i - 4) * 4 + 4], t3)
+        local prev = i - nk
+        w[i * 4 + 1] = bxor(w[prev * 4 + 1], t0)
+        w[i * 4 + 2] = bxor(w[prev * 4 + 2], t1)
+        w[i * 4 + 3] = bxor(w[prev * 4 + 3], t2)
+        w[i * 4 + 4] = bxor(w[prev * 4 + 4], t3)
     end
-    local rk = {}
-    for i = 0, 43 do
-        for j = 1, 4 do
-            rk[i * 4 + j] = w[i * 4 + j]
-        end
-    end
-    return rk
+    return w, nr
 end
 
 local function block_to_state(block)
@@ -142,90 +150,79 @@ local function state_to_block(s)
     return table.concat(t)
 end
 
-local function encrypt_block(block, rk)
+local function encrypt_block(block, rk, nr)
     local s = block_to_state(block)
     add_round_key(s, rk, 0)
-    for round = 1, 9 do
+    for round = 1, nr - 1 do
         sub_bytes(s); shift_rows(s); mix_columns(s); add_round_key(s, rk, round)
     end
-    sub_bytes(s); shift_rows(s); add_round_key(s, rk, 10)
+    sub_bytes(s); shift_rows(s); add_round_key(s, rk, nr)
     return state_to_block(s)
 end
 
-local function decrypt_block(block, rk)
+local function decrypt_block(block, rk, nr)
     local s = block_to_state(block)
-    add_round_key(s, rk, 10)
-    for round = 9, 1, -1 do
+    add_round_key(s, rk, nr)
+    for round = nr - 1, 1, -1 do
         inv_shift_rows(s); inv_sub_bytes(s); add_round_key(s, rk, round); inv_mix_columns(s)
     end
     inv_shift_rows(s); inv_sub_bytes(s); add_round_key(s, rk, 0)
     return state_to_block(s)
 end
 
-function Aes.pkcs7_pad(data, block)
-    block = block or 16
-    local n = block - (#data % block)
-    return data .. string.rep(string.char(n), n)
-end
-
-function Aes.pkcs7_unpad(data, block)
-    block = block or 16
-    if #data == 0 or (#data % block) ~= 0 then
-        error("bad pkcs7 length")
+local function xor_block(a, b)
+    local t = {}
+    for i = 1, 16 do
+        t[i] = string.char(bxor(a:byte(i), b:byte(i)))
     end
-    local n = data:byte(#data)
-    if n < 1 or n > block then error("bad pkcs7 padding") end
-    return data:sub(1, #data - n)
+    return table.concat(t)
 end
 
 ---@param data string
----@param key string 16 bytes
+---@param key string 16/24/32 字节
+---@param pad boolean|nil 默认 PKCS#7；false 要求长度已对齐
 ---@return string
-function Aes.ecb_encrypt(data, key)
-    local rk = expand_key(key)
-    local padded = Aes.pkcs7_pad(data, 16)
+function Aes.ecb_encrypt(data, key, pad)
+    local rk, nr = expand_key(key)
+    local buf = pad == false and data or Aes.pkcs7_pad(data, 16)
+    if #buf % 16 ~= 0 then error("aes: bad length") end
     local out = {}
-    for i = 1, #padded, 16 do
-        out[#out + 1] = encrypt_block(padded:sub(i, i + 15), rk)
+    for i = 1, #buf, 16 do
+        out[#out + 1] = encrypt_block(buf:sub(i, i + 15), rk, nr)
     end
     return table.concat(out)
 end
 
 ---@param data string
----@param key string 16 bytes
----@param pad boolean|nil default true (strip pkcs7)
+---@param key string 16/24/32 字节
+---@param pad boolean|nil 默认去掉 PKCS#7
 ---@return string
 function Aes.ecb_decrypt(data, key, pad)
-    assert(#key == 16 and #data % 16 == 0)
-    local rk = expand_key(key)
+    if #data % 16 ~= 0 then error("aes: bad length") end
+    local rk, nr = expand_key(key)
     local out = {}
     for i = 1, #data, 16 do
-        out[#out + 1] = decrypt_block(data:sub(i, i + 15), rk)
+        out[#out + 1] = decrypt_block(data:sub(i, i + 15), rk, nr)
     end
     local raw = table.concat(out)
     if pad == false then return raw end
     return Aes.pkcs7_unpad(raw, 16)
 end
 
----@param data string already multiple of 16, no padding expected if nopad
+---@param data string
 ---@param key string
----@param iv string 16 bytes
----@param pad boolean|nil default true
+---@param iv string 16 字节
+---@param pad boolean|nil 默认 PKCS#7
 ---@return string
 function Aes.cbc_encrypt(data, key, iv, pad)
-    assert(#key == 16 and #iv == 16)
-    local rk = expand_key(key)
+    if #iv ~= 16 then error("aes: bad iv") end
+    local rk, nr = expand_key(key)
     local buf = pad == false and data or Aes.pkcs7_pad(data, 16)
-    assert(#buf % 16 == 0)
+    if #buf % 16 ~= 0 then error("aes: bad length") end
     local prev = iv
     local out = {}
     for i = 1, #buf, 16 do
-        local block = buf:sub(i, i + 15)
-        local xored = {}
-        for j = 1, 16 do
-            xored[j] = string.char(bxor(block:byte(j), prev:byte(j)))
-        end
-        local enc = encrypt_block(table.concat(xored), rk)
+        local enc = encrypt_block(xor_block(buf:sub(i, i + 15), prev), rk, nr)
         out[#out + 1] = enc
         prev = enc
     end
@@ -235,42 +232,21 @@ end
 ---@param data string
 ---@param key string
 ---@param iv string
----@param pad boolean|nil default true (strip pkcs7)
+---@param pad boolean|nil 默认去掉 PKCS#7
 ---@return string
 function Aes.cbc_decrypt(data, key, iv, pad)
-    assert(#key == 16 and #iv == 16 and #data % 16 == 0)
-    local rk = expand_key(key)
+    if #iv ~= 16 or #data % 16 ~= 0 then error("aes: bad length") end
+    local rk, nr = expand_key(key)
     local prev = iv
     local out = {}
     for i = 1, #data, 16 do
         local block = data:sub(i, i + 15)
-        local dec = decrypt_block(block, rk)
-        local plain = {}
-        for j = 1, 16 do
-            plain[j] = string.char(bxor(dec:byte(j), prev:byte(j)))
-        end
-        out[#out + 1] = table.concat(plain)
+        out[#out + 1] = xor_block(decrypt_block(block, rk, nr), prev)
         prev = block
     end
     local raw = table.concat(out)
     if pad == false then return raw end
     return Aes.pkcs7_unpad(raw, 16)
-end
-
----@param hex string
----@return string
-function Aes.from_hex(hex)
-    return (hex:gsub("%s+", ""):gsub("..", function(cc)
-        return string.char(tonumber(cc, 16))
-    end))
-end
-
----@param bin string
----@return string
-function Aes.to_hex(bin)
-    return (bin:gsub(".", function(c)
-        return string.format("%02x", c:byte())
-    end))
 end
 
 return Aes
