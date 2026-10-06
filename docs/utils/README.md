@@ -8,7 +8,6 @@
 | `settings` | common / 分源 / 分功能配置 |
 | `text` | trim、路径、BOM/换行、XML、URL/form、段落化 |
 | `log` / `perf` / `timing` | 日志与计时 |
-| `font` | 字体辅助 |
 
 ```lua
 local Paths = require("utils.paths")
