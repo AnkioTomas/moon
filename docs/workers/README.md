@@ -4,7 +4,7 @@
 
 ## 设计
 
-`Job.run` 发一次性任务。`instant` 主线程 `nextTick`（可碰 SQLite）；其余 fork，结果回主进程再写库。子进程里 `Job.inSubProcess()` 为真，`db.base` 拒库。
+`Job.run` 发一次性任务。`instant` 主线程 `nextTick`（可碰 SQLite）；其余 fork，结果回主进程再写库。子进程里 `Job.inSubProcess()` 为真，`utils.db` 拒库。
 
 | kind | 怎么跑 | 收结果间隔 | 典型用途 |
 |---|---|---|---|
