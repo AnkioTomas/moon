@@ -52,7 +52,7 @@ end
 
 --- 插件生命周期转给所有启用源：混合模式下它们都在用，要不要响应由源自己判断；加载失败的源跳过。
 ---@param plugin BookPlugin
----@param hook "onCreate"|"onSuspend"|"onResume"|"onExit"
+---@param hook "onCreate"|"onSuspend"|"onResume"|"onNetworkConnected"|"onExit"
 local function emitSource(plugin, hook)
     for _idx, meta in ipairs(SourceRegistry.listEnabled()) do
         local source = SourceRegistry.resolve(meta.id)
@@ -99,7 +99,7 @@ end
 function BookPlugin:onNetworkConnected()
     logger.info("book lifecycle network_connected")
     Guard.call("tasks.onNetworkConnected", Tasks.onNetworkConnected)
-    Guard.call("sync.onNetworkConnected", require("book.sync").onNetworkConnected)
+    emitSource(self, "onNetworkConnected")
     Features.emit("onNetworkConnected", self)
 end
 
