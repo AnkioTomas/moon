@@ -49,7 +49,7 @@ local source_hooks = {}
 ---@param fields table
 ---@return table
 local function mkSource(fields)
-    for _, hook in ipairs({ "onCreate", "onSuspend", "onResume", "onExit" }) do
+    for _, hook in ipairs({ "onCreate", "onSuspend", "onResume", "onNetworkConnected", "onExit" }) do
         fields[hook] = function(_, host) source_hooks[#source_hooks + 1] = hook .. ":" .. host.path end
     end
     return fields
@@ -102,7 +102,7 @@ stub("utils.settings", {
     openOnStart = function() return reader_settings.start_with == "bookshelf_book" end,
     setOpenOnStart = function(on) reader_settings.start_with = on and "bookshelf_book" or "filemanager" end,
 })
-stub("book.open", {
+stub("desktop.open", {
     book = function(_, book) calls.open_book = book end,
 })
 local READING_EVENTS = {
@@ -121,10 +121,6 @@ for _, name in ipairs(READING_EVENTS) do
     end
 end
 stub("reader.session", session_stub)
-stub("book.sync", {
-    onNetworkConnected = function() calls.retry_dirty = (calls.retry_dirty or 0) + 1 end,
-})
-
 local function noop_mod(extra)
     local mod = {
         onCreate = function() calls.boot = (calls.boot or 0) + 1 end,
@@ -214,7 +210,6 @@ do
         id = "moon",
         onEvent = function(_, event) seen[#seen + 1] = event end,
     })
-    calls.retry_dirty = 0
     calls.lock_refresh = 0
     calls.update_check = 0
     local net_desk = {
@@ -223,13 +218,15 @@ do
     }
     plugin.desktop = net_desk
     plugin.ui = { menu = menu } -- FM
+    local before = #source_hooks
     plugin:onNetworkConnected()
-    Assert.eq(calls.retry_dirty, 1)
+    Assert.eq(source_hooks[#source_hooks], "onNetworkConnected:book.koplugin")
+    Assert.eq(#source_hooks - before, 1, "启用源自己收联网")
     Assert.eq(calls.lock_refresh, 0, "锁屏刷新由 feature onNetworkConnected 负责")
     Assert.eq(feature_hooks[#feature_hooks], "onNetworkConnected:book.koplugin")
     Assert.eq(calls.update_check, 0, "自动更新检查只在 Desktop:activate")
     -- 桌面在窗口栈上，自己收 UIManager 的 NetworkConnected 广播；插件再转就重复了。
-    -- 源不收网络事件：脏重试走 book.sync 单通道。
+    -- 联网是源生命周期，不走 onEvent。
     Assert.eq(table.concat(seen, ","), "")
 end
 
@@ -346,7 +343,7 @@ Assert.eq(reader_settings.start_with, "filemanager")
 for _, label in ipairs({
     "init", "onShow", "addToMainMenu", "openShelf",
     "tasks.onSuspend", "session.onSuspend", "tasks.onResume", "session.onResume",
-    "tasks.onNetworkConnected", "sync.onNetworkConnected",
+    "tasks.onNetworkConnected", "source moon.onNetworkConnected",
     "source moon.onCreate", "source wechat.onSuspend",
 }) do
     Assert.is_true(guard_labels[label] or false, label .. " 经 guard")

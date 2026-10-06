@@ -1,7 +1,7 @@
 --[[--
-db.chapter：chapters 表 CRUD（章节文件路径 → 书籍身份，path 主键）
+book.chapters_db：chapters 表 CRUD（章节文件路径 → 书籍身份，path 主键）
 
-@module tests.db.chapter_spec
+@module tests.book.chapters_db_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
@@ -37,14 +37,14 @@ local function clearMods()
         "utils.task",
         "lua-ljsqlite3/init",
         "ffi/sha2",
-        "db.base",
-        "db.book",
-        "db.chapter",
-        "db.http",
-        "db.note",
-        "db.progress",
-        "db.stats",
-        "db.xray",
+        "utils.db",
+        "book.books_db",
+        "book.chapters_db",
+        "http.cache", "utils.event",
+        "book.note_db",
+        "book.progress_db",
+        "book.stats_db",
+        "features.xray.db",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -97,10 +97,10 @@ local function loadChapter(connection)
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["db.base"] = nil
-    package.loaded["db.chapter"] = nil
-    local DbBase = require("db.base")
-    local ChapterDB = require("db.chapter")
+    package.loaded["utils.db"] = nil
+    package.loaded["book.chapters_db"] = nil
+    local DbBase = require("utils.db")
+    local ChapterDB = require("book.chapters_db")
     DbBase.open()
     return DbBase, ChapterDB
 end
@@ -172,25 +172,6 @@ do
 
     Assert.is_nil(ChapterDB.get("/cache/moon/book/x/missing.html"))
 
-    DbBase.close()
-    clearMods()
-end
-
--- ── countByBook：按身份统计，参数化查询 ──────────────────
-do
-    local connection, calls = makeConn({
-        step = function()
-            return { "35" }, { "COUNT(*)" }
-        end,
-    })
-    local DbBase, ChapterDB = loadChapter(connection)
-
-    Assert.eq(ChapterDB.countByBook("wechat", "book'1"), 35)
-    local q = calls[#calls]
-    Assert.eq(q.sql, "SELECT COUNT(*) FROM chapters WHERE source_id=? AND stable_id=?;")
-    Assert.eq(q.argc, 2)
-    Assert.eq(q.args[1], "wechat")
-    Assert.eq(q.args[2], "book'1")
     DbBase.close()
     clearMods()
 end

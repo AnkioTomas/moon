@@ -6,7 +6,7 @@ local Json = require("support.json_stub")
 package.preload["json"] = function()
     return { decode = Json.decode, encode = Json.encode }
 end
-package.preload["db.xray"] = function()
+package.preload["features.xray.db"] = function()
     return {}
 end
 

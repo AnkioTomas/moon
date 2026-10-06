@@ -24,8 +24,9 @@ function Comp:createWidget()
     return w
 end
 
-local desktop = { library = { filter = { q = 1 }, page = 3, state = "x" } }
+local desktop = { library = {} }
 function desktop:switchTab(tab) self.switched = tab end
+function desktop.library:reset() self.was_reset = true end
 local ctx = { desktop = desktop, source = { id = "s" } }
 
 do -- build 新建固定尺寸槽；未绘制 / 不活跃时 refresh 只换内容不刷屏
@@ -135,8 +136,6 @@ do -- 空书架入口：点按清掉图书馆筛选 / 分页并切页签
     prompt:paintTo(Kit.canvas(), 0, 0)
     Kit.taps(prompt)[1]:onTapThemeArea(nil, { pos = { x = 5, y = 5 } })
     Assert.eq(desktop.switched, "library")
-    Assert.eq(desktop.library.page, 1)
-    Assert.is_nil(desktop.library.state)
-    Assert.is_nil(next(desktop.library.filter))
+    Assert.is_true(desktop.library.was_reset)
     Assert.contains(Kit.texts(Base.libraryPrompt({}, 200, 60, "读取失败")), "读取失败")
 end

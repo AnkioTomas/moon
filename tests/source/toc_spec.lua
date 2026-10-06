@@ -13,7 +13,7 @@ os.time = function() return now end
 local rows = {}
 local writes = true
 local reads = 0
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
         getToc = function(source_id, stable_id, max_age)
             reads = reads + 1
@@ -33,10 +33,7 @@ package.preload["json"] = function()
 end
 
 package.loaded["source.toc"] = nil
-package.loaded["source.fanqie.toc"] = nil
 local Toc = require("source.toc")
-local FanqieToc = require("source.fanqie.toc")
-Assert.eq(Toc, FanqieToc)
 
 local list = { { idx = 1, uid = "chapter-1" } }
 writes = false
@@ -45,8 +42,8 @@ Assert.is_nil(Toc.read("jdread", "book-1"))
 
 writes = true
 Assert.is_true(Toc.put("jdread", "book-1", list))
-Assert.eq(FanqieToc.uid("jdread", "book-1", 1), "chapter-1")
-Assert.is_nil(FanqieToc.read("fanqie", "book-1"))
+Assert.eq(Toc.uid("jdread", "book-1", 1), "chapter-1")
+Assert.is_nil(Toc.read("fanqie", "book-1"))
 local before = reads
 Assert.eq(Toc.index("jdread", "book-1", "chapter-1"), 1)
 Assert.eq(reads, before)
@@ -71,12 +68,12 @@ do
         payload = require("json").encode({ { idx = 1, uid = "new" } }),
         at = now,
     }
-    Toc.invalidate("jdread", "drop")
+    Toc.clear()
     Assert.eq(Toc.uid("jdread", "drop", 1), "new")
 end
 
 do
-    -- 进程内缓存超限淘汰不得淘汰刚写入的条目：库里有合法目录就必须读得到。
+    -- 进程内缓存超限清空后仍要放入新条目：库里有合法目录就必须读得到。
     for i = 1, 80 do
         local id = "many-" .. i
         rows["fanqie:" .. id] = {

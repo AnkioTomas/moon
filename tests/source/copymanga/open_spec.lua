@@ -20,7 +20,7 @@ stub("gettext", function()
 end)
 stub("source.base", function() return {} end)
 stub("source.copymanga.mapper", function() return {} end)
-stub("source.copymanga.toc", function() return {} end)
+stub("source.toc", function() return {} end)
 stub("utils.settings", function()
     return { getSource = function() return {} end }
 end)
@@ -53,10 +53,10 @@ stub("libs/libkoreader-lfs", function()
         end,
     }
 end)
-stub("db.book", function()
+stub("book.books_db", function()
     return { get = function() return nil end }
 end)
-stub("db.progress", function()
+stub("book.progress_db", function()
     return { get = function() return nil end }
 end)
 stub("ui/uimanager", function()

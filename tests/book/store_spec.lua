@@ -65,12 +65,18 @@ package.preload["ffi/util"] = function()
 end
 
 local db_sql = {}
-package.preload["db.base"] = function()
+package.preload["utils.db"] = function()
     return {
         ensure = function() return true end,
         exec = function(sql)
             db_sql[#db_sql + 1] = sql
             return true
+        end,
+        transaction = function(fn)
+            db_sql[#db_sql + 1] = "BEGIN IMMEDIATE;"
+            local result = fn()
+            db_sql[#db_sql + 1] = result and "COMMIT;" or "ROLLBACK;"
+            return result
         end,
     }
 end
@@ -78,8 +84,8 @@ end
 local chapter_rows = {} -- path → chapters 行
 local chapter_upserts = {}
 local chapter_upsert_ok = true
-local chapter_counts = {}
-package.preload["db.chapter"] = function()
+local downloaded, downloaded_asks = {}, {}
+package.preload["book.chapters_db"] = function()
     return {
         get = function(path)
             return chapter_rows[path]
@@ -88,27 +94,11 @@ package.preload["db.chapter"] = function()
             chapter_upserts[#chapter_upserts + 1] = row
             return chapter_upsert_ok
         end,
-        countByBook = function(source_id, stable_id)
-            return chapter_counts[source_id .. "\0" .. stable_id] or 0
-        end,
         deleteUnder = function() return true end,
     }
 end
 
-local toc_rows = {}
 local toc_upserts = {}
-
-local json_values = {}
-package.preload["json"] = function()
-    return {
-        encode = function(value)
-            local payload = "toc:" .. tostring(#toc_upserts + 1)
-            json_values[payload] = value
-            return payload
-        end,
-        decode = function(payload) return json_values[payload] end,
-    }
-end
 
 local book_rows_by_path = {} -- path → books 行
 local book_rows_by_id = {} -- "sid\0stid" → books 行
@@ -118,7 +108,7 @@ local book_batch_calls = 0
 local touch_calls = {} -- { source_id, stable_id, path, chapter_idx }
 local touch_ok = true
 local mark_deleted_ok = true
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
         getByPath = function(path)
             return book_rows_by_path[path]
@@ -142,25 +132,14 @@ package.preload["db.book"] = function()
             for _, row in ipairs(rows) do book_upserts[#book_upserts + 1] = row end
             return true
         end,
-        getToc = function(source_id, stable_id, max_age)
-            local row = toc_rows[source_id .. "\0" .. stable_id]
-            if type(row) == "table" then
-                if max_age and os.time() - (row.at or 0) >= max_age then return nil end
-                return row.payload, row.at
-            end
-            return row
-        end,
-        tocLength = function(source_id, stable_id)
-            local row = toc_rows[source_id .. "\0" .. stable_id]
-            local payload = type(row) == "table" and row.payload or row
-            local toc = payload and json_values[payload]
-            return type(toc) == "table" and #toc or 0
+        isDownloaded = function(source_id, stable_id, chapter)
+            downloaded_asks[#downloaded_asks + 1] = { source_id, stable_id, chapter }
+            return downloaded[source_id .. "\0" .. stable_id] == true
         end,
         setToc = function(source_id, stable_id, payload)
             toc_upserts[#toc_upserts + 1] = {
                 source_id = source_id, stable_id = stable_id, payload = payload,
             }
-            toc_rows[source_id .. "\0" .. stable_id] = payload
             return true
         end,
         libraryStableIdsBySource = function() return {} end,
@@ -221,61 +200,24 @@ end
 
 local Store = require("book.store")
 
--- ── allChaptersCached：目录数量与本地章节登记数必须一致 ──
+-- ── isCached：章节源按库里口径（BookDB.isDownloaded）；整本源 path 须在 cache 内（本地原书恒 false）──
 do
-    local identity = { source_id = "wechat", stable_id = "cached-book" }
-    toc_rows["wechat\0cached-book"] = "toc:cached"
-    json_values["toc:cached"] = { { idx = 1 }, { idx = 2 } }
-    chapter_counts["wechat\0cached-book"] = 2
-    Assert.is_true(Store.allChaptersCached(identity))
-    chapter_counts["wechat\0cached-book"] = 1
-    Assert.is_false(Store.allChaptersCached(identity))
-    Assert.is_false(Store.allChaptersCached({ source_id = "wechat", stable_id = "no-toc" }))
-    toc_rows["wechat\0cached-book"] = nil
-    chapter_counts["wechat\0cached-book"] = nil
-end
-
--- ── isDownloaded：章节源看全本缓存，整本源看 path ──
-do
-    local identity = { source_id = "wechat", stable_id = "cached-book" }
-    toc_rows["wechat\0cached-book"] = "toc:cached"
-    json_values["toc:cached"] = { { idx = 1 }, { idx = 2 } }
-    chapter_counts["wechat\0cached-book"] = 2
-    Assert.is_true(Store.isDownloaded({
-        source_id = "wechat", stable_id = "cached-book", path = "/ch/1.html",
-    }))
-    chapter_counts["wechat\0cached-book"] = 1
-    Assert.is_false(Store.isDownloaded({
-        source_id = "wechat", stable_id = "cached-book", path = "/ch/1.html",
-    }))
-    Assert.is_false(Store.isDownloaded(identity))
-    toc_rows["wechat\0cached-book"] = nil
-    chapter_counts["wechat\0cached-book"] = nil
-
-    Assert.is_true(Store.isDownloaded({ source_id = "local", path = "/books/a.epub" }))
-    Assert.is_true(Store.isDownloaded({ source_id = "moon", path = "/cache/a.epub" }))
-    Assert.is_false(Store.isDownloaded({ source_id = "local", path = "" }))
-    Assert.is_false(Store.isDownloaded({ source_id = "moon" }))
-    Assert.is_false(Store.isDownloaded(nil))
-end
-
--- ── isCached：章节源全本缓存；整本源 path 须在 cache 内（本地原书恒 false）──
-do
-    toc_rows["wechat\0cached-book"] = "toc:cached"
-    json_values["toc:cached"] = { { idx = 1 } }
-    chapter_counts["wechat\0cached-book"] = 1
+    downloaded["wechat\0cached-book"] = true
     Assert.is_true(Store.isCached({ source_id = "wechat", stable_id = "cached-book" }))
-    chapter_counts["wechat\0cached-book"] = 0
+    local ask = downloaded_asks[#downloaded_asks]
+    Assert.eq(ask[1], "wechat")
+    Assert.eq(ask[2], "cached-book")
+    Assert.is_true(ask[3])
+    downloaded["wechat\0cached-book"] = nil
     Assert.is_false(Store.isCached({ source_id = "wechat", stable_id = "cached-book" }))
-    toc_rows["wechat\0cached-book"] = nil
-    chapter_counts["wechat\0cached-book"] = nil
 
+    local asks = #downloaded_asks
     Assert.is_true(Store.isCached({ source_id = "moon", path = "/cache/moon/book/x/a.epub" }))
     Assert.is_true(Store.isCached({ source_id = "local", path = "/cache/local/book/webdav/a.epub" }))
     Assert.is_false(Store.isCached({ source_id = "local", path = "/books/a.epub" }))
     Assert.is_false(Store.isCached({ source_id = "local", path = "/cache2/a.epub" }))
     Assert.is_false(Store.isCached({ source_id = "moon" }))
-    Assert.is_false(Store.isCached(nil))
+    Assert.eq(#downloaded_asks, asks, "整本源不查库")
 end
 
 -- ── identityFor：chapters 命中 → 章节身份（优先于 books.path）──
@@ -293,20 +235,6 @@ do
     chapter_rows[path] = nil
     book_rows_by_path[path] = nil
     book_rows_by_id["moon\0s1"] = nil
-end
-
--- isCurrentDocument：同一书籍且同一章节才允许异步回调继续
-do
-    local path = "/lib/current.epub"
-    book_rows_by_path[path] = { source_id = "moon", stable_id = "current" }
-    local ui = { document = { file = path } }
-    Assert.is_true(Store.isCurrentDocument(ui, {
-        source_id = "moon", stable_id = "current", chapter_idx = nil,
-    }))
-    Assert.is_false(Store.isCurrentDocument(ui, {
-        source_id = "wechat", stable_id = "current", chapter_idx = nil,
-    }))
-    book_rows_by_path[path] = nil
 end
 
 -- ── identityFor：books.path 命中 → 整本书身份（chapter_idx=nil）──
@@ -534,13 +462,11 @@ do
     touch_calls = {}
 end
 
--- ── touch：章节详情、目录和路径在同一事务登记 ──
+-- ── touch：章节详情和路径在同一事务登记；目录不经这里 ──
 do
     local identity = { source_id = "moon", stable_id = "s9" }
-    local toc = { { idx = 1, title = "一" }, { idx = 2, title = "二" } }
     Assert.is_true(Store.touch("/cache/moon/book/slug/7.html", identity, {
         chapter_idx = 7,
-        toc = toc,
         book = { title = "最新详情" },
     }))
     Assert.eq(#touch_calls, 1)
@@ -550,9 +476,7 @@ do
     Assert.eq(#chapter_upserts, 1)
     Assert.eq(chapter_upserts[1].path, "/cache/moon/book/slug/7.html")
     Assert.eq(chapter_upserts[1].chapter_idx, 7)
-    Assert.eq(toc_upserts[1].source_id, "moon")
-    Assert.eq(toc_upserts[1].stable_id, "s9")
-    Assert.eq(Store.toc(identity), toc)
+    Assert.len(toc_upserts, 0)
     Assert.eq(book_upserts[#book_upserts].source_id, "moon")
     Assert.eq(book_upserts[#book_upserts].stable_id, "s9")
     Assert.eq(book_upserts[#book_upserts].title, "最新详情")
@@ -636,40 +560,6 @@ do
     book_batch_calls = 0
 end
 
--- ── toc：传 max_age 才过期；不传则仍可读旧目录 ──────────
-do
-    local identity = { source_id = "wechat", stable_id = "stale-toc" }
-    toc_rows["wechat\0stale-toc"] = {
-        payload = "toc:stale",
-        at = os.time() - Store.TOC_MAX_AGE - 1,
-    }
-    json_values["toc:stale"] = { { idx = 1, title = "旧" } }
-    Assert.is_nil(Store.toc(identity, Store.TOC_MAX_AGE))
-    Assert.eq(Store.toc(identity)[1].title, "旧")
-    toc_rows["wechat\0stale-toc"] = nil
-end
-
--- ── touch 写 toc 后必须丢掉源进程内缓存 ────────────────
-do
-    local dropped = {}
-    local SourceToc = require("source.toc")
-    local original_invalidate = SourceToc.invalidate
-    SourceToc.invalidate = function(source_id, stable_id)
-        dropped[#dropped + 1] = source_id .. "\0" .. stable_id
-    end
-    local identity = { source_id = "wechat", stable_id = "s-toc" }
-    Assert.is_true(Store.touch("/cache/wechat/1.html", identity, {
-        chapter_idx = 1,
-        toc = { { idx = 1, title = "一" } },
-    }))
-    Assert.eq(dropped[1], "wechat\0s-toc")
-    SourceToc.invalidate = original_invalidate
-    toc_upserts = {}
-    chapter_upserts = {}
-    touch_calls = {}
-    db_sql = {}
-end
-
 -- ── rememberMany：全部无身份 → 一条都不写 ────────────────
 do
     Store.rememberMany({ { title = "x" }, { title = "y" } })
@@ -680,9 +570,9 @@ end
 
 for _, k in ipairs({
     "utils.paths",
-    "db.base",
-    "db.book",
-    "db.chapter",
+    "utils.db",
+    "book.books_db",
+    "book.chapters_db",
 
     "source.registry",
     "ui.themes.widgets.image.download",

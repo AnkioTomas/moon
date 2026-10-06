@@ -1,17 +1,18 @@
 --[[--
-db.stats：账单周期查询必须参数化并正确映射结果。
+book.stats_db：账单周期查询必须参数化并正确映射结果。
 
-@module tests.db.stats_period_spec
+@module tests.book.stats_db_period_spec
 --]]
 
 local Assert = require("support.assert")
 local calls = {}
 local deletes = {}
 
-package.preload["db.base"] = function()
+package.preload["utils.db"] = function()
     return {
         requireSourceId = function(id) return id ~= "" and id or nil end,
         ensure = function() end,
+        schema = function() end,
         exec = function(sql, ...)
             deletes[#deletes + 1] = { sql = sql, args = { ... } }
             return true
@@ -48,9 +49,9 @@ package.preload["db.base"] = function()
         end,
     }
 end
-package.loaded["db.stats"] = nil
+package.loaded["book.stats_db"] = nil
 
-local Stats = require("db.stats")
+local Stats = require("book.stats_db")
 Assert.is_true(Stats.deleteLocal("moon"))
 Assert.eq(deletes[1].args[1], "moon")
 Assert.is_true(deletes[1].sql:find("DELETE FROM reading_stats WHERE source_id=%?", 1) ~= nil)

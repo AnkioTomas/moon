@@ -1,9 +1,9 @@
 --[[--
-book.progress 位置恢复：XPointer > 页码 > 比例的降级顺序。
+reader.session.progress 位置恢复：XPointer > 页码 > 比例的降级顺序。
 
 比例会随字号排版漂移，只能当兜底；精确坐标不可用时才允许退回它。
 
-@module tests.book.progress_apply_spec
+@module tests.reader.session.progress_apply_spec
 --]]
 
 local Assert = require("support.assert")
@@ -36,18 +36,18 @@ end
 package.preload["logger"] = function()
     return { dbg = function() end, warn = function() end, info = function() end }
 end
-package.preload["db.progress"] = function()
+package.preload["book.progress_db"] = function()
     return { get = function() return pending_row end }
 end
 
 for _, name in ipairs({
     "ui/uimanager", "reader.session", "reader.session.toc",
-    "db.progress", "book.progress",
+    "book.progress_db", "book.progress", "reader.session.progress",
 }) do
     package.loaded[name] = nil
 end
 
-local Progress = require("book.progress")
+local Progress = require("reader.session.progress")
 
 --- 造一个 rolling（重排版）文档：xpointer 有效性由 valid 集合决定。
 ---@param valid table<string, boolean>
@@ -160,7 +160,7 @@ end
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",
     "reader.session.toc", "reader.session", "logger",
-    "db.progress", "book.progress",
+    "book.progress_db", "book.progress", "reader.session.progress",
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil

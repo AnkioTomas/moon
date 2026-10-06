@@ -1,6 +1,6 @@
 --[[--
 book.catalog 行映射离线用例：books 行 → Book 列表、统计聚合 → StatsInsight。
-insight 在 catalog 内 require("db.book")，这里用 package.preload 换成可控假库。
+insight 在 catalog 内 require("book.books_db")，这里用 package.preload 换成可控假库。
 
 @module tests.book.catalog_rows_spec
 --]]
@@ -11,14 +11,14 @@ local Assert = require("support.assert")
 -- 可控假 books 表：key = source_id .. "\n" .. stable_id
 local FakeBooks = {}
 local FakeProgress = {}
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
         get = function(source_id, stable_id)
             return FakeBooks[source_id .. "\n" .. tostring(stable_id)]
         end,
     }
 end
-package.preload["db.progress"] = function()
+package.preload["book.progress_db"] = function()
     return {
         get = function(source_id, stable_id)
             return FakeProgress[source_id .. "\n" .. tostring(stable_id)]
@@ -26,7 +26,7 @@ package.preload["db.progress"] = function()
     }
 end
 package.loaded["book.catalog"] = nil
-package.loaded["db.progress"] = nil
+package.loaded["book.progress_db"] = nil
 
 local Catalog = require("book.catalog")
 
@@ -240,8 +240,8 @@ do -- 微信日历按日展示书单：只有云端时长（无页坐标）的�
 end
 
 -- 收尾：不影响同进程内后续用例
-package.preload["db.book"] = nil
-package.loaded["db.book"] = nil
-package.preload["db.progress"] = nil
-package.loaded["db.progress"] = nil
+package.preload["book.books_db"] = nil
+package.loaded["book.books_db"] = nil
+package.preload["book.progress_db"] = nil
+package.loaded["book.progress_db"] = nil
 package.loaded["book.catalog"] = nil

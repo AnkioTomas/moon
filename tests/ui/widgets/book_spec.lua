@@ -63,15 +63,6 @@ package.preload["utils.paths"] = function()
         ensureLayout = function() end,
     }
 end
-local download_checks = 0
-package.preload["book.store"] = function()
-    return {
-        isDownloaded = function(book)
-            download_checks = download_checks + 1
-            return type(book) == "table" and type(book.path) == "string" and book.path ~= ""
-        end,
-    }
-end
 local existing_files = {}
 package.preload["libs/libkoreader-lfs"] = function()
     return {
@@ -175,25 +166,25 @@ Assert.is_false(Book.isRead({ read_state = 0 }))
 Assert.is_false(Book.isRead({ read_state = 2 }))
 Assert.is_false(Book.isRead(nil))
 
--- 封面状态叠层：已读与进度互斥，下载独立；没开下载角标不查下载状态。
+-- 封面状态叠层：已读与进度互斥，下载独立；下载角标只认查询带出的 book.downloaded。
 local status_opts = { badge = true, ribbon = true, download = true }
-local unread = select(1, Book.cover(nil, nil, { read_state = 0, percent = 12, path = "/a" }, 80, 120, status_opts))
+local unread = select(1, Book.cover(nil, nil, { read_state = 0, percent = 12, downloaded = true }, 80, 120, status_opts))
 Assert.len(unread, 3)
 Assert.eq(unread[2].overlap_offset[2], 4, "未读有进度：右上进度角标")
 Assert.eq(unread[3].overlap_offset[1], 4, "已下载：左下勾")
 
-local finished = select(1, Book.cover(nil, nil, { read_state = 1, percent = 100, path = "/a" }, 80, 120, status_opts))
+local finished = select(1, Book.cover(nil, nil, { read_state = 1, percent = 100, downloaded = true }, 80, 120, status_opts))
 Assert.len(finished, 3)
 Assert.not_nil(finished[2].band, "已读：缎带替代进度角标")
 
 local fresh = select(1, Book.cover(nil, nil, { read_state = 0, percent = 0 }, 80, 120, status_opts))
 Assert.is_nil(fresh.overlap_offset, "无进度未下载：不叠层")
 
-download_checks = 0
-Book.cover(nil, nil, { read_state = 0, percent = 12, path = "/a" }, 80, 120, { badge = true })
-Assert.eq(download_checks, 0, "没开下载角标不查下载状态")
-Book.cover(nil, nil, { path = "/a" }, 80, 120, { download = true })
-Assert.eq(download_checks, 1)
+local no_badge = select(1, Book.cover(nil, nil, { read_state = 0, percent = 0, downloaded = true }, 80, 120,
+    { badge = true }))
+Assert.is_nil(no_badge.overlap_offset, "没开下载角标：已下载也不画")
+local has_path = select(1, Book.cover(nil, nil, { path = "/a" }, 80, 120, { download = true }))
+Assert.is_nil(has_path.overlap_offset, "只有 path 不算已下载（口径在库里）")
 
 Assert.is_nil(Book.progressBadge(80, 0))
 Assert.not_nil(Book.progressBadge(80, 12))

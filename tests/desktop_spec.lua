@@ -39,6 +39,10 @@ for _, name in ipairs({ "home", "library", "store", "insight" }) do
     package.preload["desktop.pages." .. name] = function() return page(name) end
 end
 package.preload["desktop.pages.setting"] = function() return page("settings") end
+local synced = {}
+package.preload["desktop.sync"] = function()
+    return { open = function(desk) synced[#synced + 1] = desk end }
+end
 
 local top_builds = 0
 package.preload["desktop.topbar"] = function()
@@ -81,7 +85,7 @@ end
 
 do -- 首帧：三层就位，未 resume 不刷屏
     Assert.eq(desk.tab, "home")
-    Assert.eq(ids(), "home,library,settings")
+    Assert.eq(ids(), "home,library,insight,settings")
     Assert.eq(desk.layers[1].page, "home")
     Assert.eq(desk.layers[1].dimen.w, 600)
     Assert.eq(desk.layers[1].dimen.h, 800 - 30 - BAR_H)
@@ -91,7 +95,7 @@ do -- 首帧：三层就位，未 resume 不刷屏
     Assert.eq(desk:contentHeight(), 800 - 30 - BAR_H)
     Assert.eq(desk[1][1], desk.layers)
     Assert.len(Kit.dirty, 0)
-    Assert.len(tabs(), 3)
+    Assert.len(tabs(), 4)
 end
 
 do -- Resume：只唤醒顶栏与当前页，触发静默更新检查
@@ -152,13 +156,13 @@ end
 do -- 当前 Tab 被关掉（书城开关）：回退首页
     Kit.sections.common.zlib_enabled = true
     desk:switchTab("store")
-    Assert.eq(ids(), "home,library,store,settings")
+    Assert.eq(ids(), "home,library,store,insight,settings")
     Assert.eq(desk.tab, "store")
     Kit.sections.common.zlib_enabled = nil
     desk:updateView()
     Assert.eq(desk.tab, "home")
     Assert.eq(desk.layers[1].page, "home")
-    Assert.eq(ids(), "home,library,settings")
+    Assert.eq(ids(), "home,library,insight,settings")
     drain()
 end
 
@@ -169,19 +173,17 @@ do -- 非法 Tab 忽略
     Assert.eq(#Kit.dirty, n)
 end
 
-do -- 换源：广播给各子件，按能力重算 Tab，回首页
+do -- 换源：广播给各子件，重算 Tab，回首页
     desk:switchTab("settings")
     drain()
-    local opened_on
-    local source = {
-        capabilities = function() return { insight = true } end,
-        onEvent = function(_, event, payload) if event == "desktop_open" then opened_on = payload end end,
-    }
+    local source = { id = "next" }
+    local synced_before = #synced
     package.loaded["source.registry"] = { current = function() return source end }
     desk:onSourceChanged()
     package.loaded["source.registry"] = nil
     Assert.eq(desk.source, source)
-    Assert.eq(opened_on, desk, "换源后让新源做桌面打开维护")
+    Assert.eq(#synced, synced_before + 1)
+    Assert.eq(synced[#synced], desk, "换源后对新源做桌面打开同步")
     Assert.eq(ids(), "home,library,insight,settings")
     Assert.eq(desk.tab, "home")
     Assert.eq(drain(),
@@ -241,7 +243,7 @@ do -- Destroy：活跃时先补 Pause；关叠层、清 plugin.desktop；只做�
 end
 
 do -- Desktop.open：无源只提示；有源建桌面、显示、Resume、通知源；再开先销毁旧桌面
-    local current, source_events = nil, {}
+    local current = nil
     package.loaded["source.registry"] = { current = function() return current end }
     package.loaded["utils.paths"] = { ensureLayout = function() end }
     package.loaded["ui/widget/infomessage"] = { new = function(_, o) return o end }
@@ -252,17 +254,15 @@ do -- Desktop.open：无源只提示；有源建桌面、显示、Resume、通�
     Assert.eq(#Kit.shown, shown_before + 1)
     Assert.eq(Kit.shown[#Kit.shown].text, "当前数据源不可用", "无源弹提示")
 
-    current = {
-        id = "local",
-        onEvent = function(_, event, payload) source_events[#source_events + 1] = { event, payload } end,
-    }
+    current = { id = "local" }
+    local synced_before = #synced
     Desktop.open(host)
     local first = host.desktop
     Assert.not_nil(first)
     Assert.eq(Kit.shown[#Kit.shown], first)
     Assert.is_true(first.active, "打开即 Resume")
-    Assert.eq(source_events[1][1], "desktop_open")
-    Assert.eq(source_events[1][2], first)
+    Assert.eq(#synced, synced_before + 1)
+    Assert.eq(synced[#synced], first, "打开后后台同步")
 
     Desktop.open(host)
     Assert.is_true(first.closed, "重开先销毁旧桌面")

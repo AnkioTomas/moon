@@ -32,10 +32,10 @@ package.preload["utils.paths"] = function()
         ensureDir = function() return true end,
     }
 end
-package.preload["db.progress"] = function()
+package.preload["book.progress_db"] = function()
     return { get = function() return pending end }
 end
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return { get = function() return book_row end }
 end
 local touches = {}
@@ -46,7 +46,6 @@ package.preload["book.store"] = function()
             path = path,
             identity = identity,
             chapter_idx = opts.chapter_idx,
-            toc = opts.toc,
             book = opts.book,
         }
         if touch_error then return false, touch_error end
@@ -95,7 +94,6 @@ end)
 Assert.eq(fetched[1], 2)
 Assert.eq(touches[1].path, path)
 Assert.eq(touches[1].chapter_idx, 2)
-Assert.len(touches[1].toc, 3)
 Assert.eq(touches[1].book.title, "书")
 local f = assert(io.open(path, "rb"))
 local html = f:read("*a")
@@ -243,7 +241,6 @@ Assert.eq(progress_ui.shown, 0)
 Stubs.flush()
 Assert.eq(#touches, touch_before + 1)
 Assert.eq(touches[#touches].chapter_idx, 2)
-Assert.is_nil(touches[#touches].toc)
 
 -- 快开登记失败不能继续把未知 .moon 文件交给 Reader。
 touch_error = "register failed"
@@ -326,7 +323,7 @@ for name in lfs.dir(tmp) do
 end
 lfs.rmdir(tmp)
 for _, name in ipairs({
-    "utils.paths", "db.progress", "db.book", "book.store", "source.chapter",
+    "utils.paths", "book.progress_db", "book.books_db", "book.store", "source.chapter",
     "ui/network/manager",
 }) do
     package.preload[name] = nil

@@ -39,20 +39,20 @@ local pending_adds = {}
 local finalized = {}
 package.preload["book.store"] = function()
     return {
-        reconcile = function(_, books)
-            remembered = books
-            return { pulled = #books, pushed = 0, hidden = 0, conflicts = 0 }
-        end,
         rememberMany = function(books) remembered = books; return true end,
         markDeleted = function() return true end,
-        finalizeDeleted = function(_, stable_id)
+    }
+end
+package.preload["book.books_db"] = function()
+    return {
+        reconcile = function(_, books)
+            remembered = books
+            return true, 0
+        end,
+        remove = function(_, stable_id)
             finalized[#finalized + 1] = stable_id
             return true
         end,
-    }
-end
-package.preload["db.book"] = function()
-    return {
         libraryStableIdsBySource = function() return local_library end,
         pendingDeleteIds = function() return pending_deletes end,
         pendingShelfAddIds = function() return pending_adds end,
@@ -65,7 +65,7 @@ end
 package.loaded["source.jdread.client"] = nil
 package.loaded["utils.settings"] = nil
 package.loaded["book.store"] = nil
-package.loaded["db.book"] = nil
+package.loaded["book.books_db"] = nil
 package.loaded["source.jdread"] = nil
 
 local Jdread = require("source.jdread")
@@ -73,7 +73,6 @@ local Jdread = require("source.jdread")
 do
     local source = Jdread.new()
     local caps = source:capabilities()
-    Assert.is_true(caps.insight)
     Assert.is_false(caps.stats_pull)
     Assert.is_false(type(source.pushStatsAsync) == "function")
 end
@@ -121,7 +120,7 @@ do
     -- 10 已在远端：只标已同步不再请求；99 是本地新加架，上行。
     pending_adds = { "10", "99" }
     local synced = {}
-    local db = require("db.book")
+    local db = require("book.books_db")
     local orig_mark = db.markSynced
     db.markSynced = function(_, stable_id)
         synced[#synced + 1] = stable_id
@@ -182,8 +181,8 @@ do
     finalized = {}
     pending_deletes = { "gone" }
     pending_adds = {}
-    local Store = require("book.store")
-    Store.finalizeDeleted = function(_, stable_id)
+    local BookDB = require("book.books_db")
+    BookDB.remove = function(_, stable_id)
         finalized[#finalized + 1] = stable_id
         return false
     end
@@ -196,7 +195,7 @@ do
     src:syncBooksAsync({ dirty_only = true }, function(r) result = r end)
     Assert.eq(result.pushed, 0)
     Assert.eq(#finalized, 1)
-    Store.finalizeDeleted = function(_, stable_id)
+    BookDB.remove = function(_, stable_id)
         finalized[#finalized + 1] = stable_id
         return true
     end
@@ -209,7 +208,7 @@ do
     pending_deletes = {}
     pending_adds = { "99" }
     local synced = {}
-    package.loaded["db.book"].markSynced = function(_, stable_id)
+    package.loaded["book.books_db"].markSynced = function(_, stable_id)
         synced[#synced + 1] = stable_id
         return true
     end
@@ -232,7 +231,7 @@ do
     warnings = {}
     pending_deletes = {}
     pending_adds = { "99" }
-    package.loaded["db.book"].markSynced = function() return false end
+    package.loaded["book.books_db"].markSynced = function() return false end
     fake_client.addToShelfAsync = function(_, _, cb)
         cb({ ok = true })
         return { cancel = function() end }
@@ -242,7 +241,7 @@ do
     src:syncBooksAsync({ dirty_only = true }, function(r) result = r end)
     Assert.eq(result.pushed, 0)
     Assert.eq(warnings[1][1], "jdread shelf mark synced failed")
-    package.loaded["db.book"].markSynced = function() return true end
+    package.loaded["book.books_db"].markSynced = function() return true end
     pending_adds = {}
 end
 
@@ -286,7 +285,6 @@ do
     )
     Assert.eq(progressed[1], 1)
     Assert.eq(progressed[2], 2)
-    Assert.is_false(prefetch_opts.persist_toc)
     Assert.is_false(prefetch_opts.persist_book)
     Assert.eq(prefetch_opts.interval_seconds, 1.5)
     Assert.is_true(ok)
@@ -335,7 +333,7 @@ do
     Toc.read = function() return stored end
     Toc.put = function(_, _, list) stored = list; return true end
     local cleared = {}
-    package.loaded["db.book"].clearToc = function(_, stable_id)
+    package.loaded["book.books_db"].clearToc = function(_, stable_id)
         cleared[#cleared + 1] = stable_id
         stored = nil
         return true

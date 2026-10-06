@@ -10,7 +10,7 @@ local Assert = require("support.assert")
 package.preload["reader.session"] = function()
     return { current = function() return nil end }
 end
-package.preload["db.note"] = function()
+package.preload["book.note_db"] = function()
     return {
         get = function(_, stable_id, chapter_idx)
             if stable_id == "book-1" and chapter_idx == 0 then
@@ -23,29 +23,23 @@ package.preload["db.note"] = function()
             end
             return nil
         end,
-        all = function()
+        allWithBook = function()
             return {
                 {
                     source_id = "moon",
                     stable_id = "book-1",
                     payload = '[{"drawer":"lighten","text":"划线句子","chapter":"序章","pageno":3}]',
+                    title = "活着",
+                    authors = "余华",
                 },
                 {
                     source_id = "moon",
                     stable_id = "book-2",
                     payload = '[{"drawer":"lighten","text":"另一句","chapter":"尾声"}]',
+                    title = "兄弟",
+                    authors = "余华",
                 },
             }
-        end,
-    }
-end
-package.preload["db.book"] = function()
-    return {
-        get = function(_, stable_id)
-            if stable_id == "book-1" then
-                return { title = "活着", authors = "余华" }
-            end
-            return { title = "兄弟", authors = "余华" }
         end,
     }
 end

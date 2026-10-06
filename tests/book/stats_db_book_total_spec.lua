@@ -1,9 +1,9 @@
 --[[--
-db.stats：云端单书累计 / 单书按日 / 账户日桶与本地逐页记录的合并口径，真实 sqlite 执行。
+book.stats_db：云端单书累计 / 单书按日 / 账户日桶与本地逐页记录的合并口径，真实 sqlite 执行。
 
 规则：有云端值 = 云端 + 本地（未上传 或 拉取之后才读）；否则只有本地。
 
-@module tests.db.stats_book_total_spec
+@module tests.book.stats_db_book_total_spec
 --]]
 
 local Assert = require("support.assert")
@@ -24,10 +24,10 @@ package.preload["utils.paths"] = function()
         sanitizeSourceId = function(id) return id end,
     }
 end
-for _, name in ipairs({ "db.base", "db.stats" }) do package.loaded[name] = nil end
+for _, name in ipairs({ "utils.db", "book.stats_db" }) do package.loaded[name] = nil end
 
-local Base = require("db.base")
-local StatsDB = require("db.stats")
+local Base = require("utils.db")
+local StatsDB = require("book.stats_db")
 local WStats = require("source.wechat.stats")
 Assert.not_nil(Base.open())
 

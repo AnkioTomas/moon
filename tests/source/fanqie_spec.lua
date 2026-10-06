@@ -89,19 +89,19 @@ package.preload["utils.paths"] = function()
 end
 
 local stored
-package.preload["book.store"] = function()
+package.preload["book.books_db"] = function()
     return {
         reconcile = function(id, books)
             Assert.eq(id, "fanqie")
             stored = books
-            return { pulled = #books }
+            return true, 0
         end,
     }
 end
 
 local toc
 local toc_writable = true
-package.preload["source.fanqie.toc"] = function()
+package.preload["source.toc"] = function()
     return {
         read = function() return toc end,
         put = function(_, _, v)

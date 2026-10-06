@@ -38,7 +38,7 @@ package.preload["ui.widgets.book"] = function()
         cover = function(_, _, _, cw, ch) return Container:new{ dimen = Geom:new{ w = cw, h = ch } } end,
     }
 end
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
         get = function(source_id, stable_id)
             if source_id == "wechat" and stable_id == "book-1" then
@@ -77,7 +77,6 @@ local payload = {
 }
 local source = {
     id = "wechat",
-    capabilities = function() return { insight = true } end,
     readingInsightAsync = function(_, cb)
         insight_reads = insight_reads + 1
         cb({ data = payload })
@@ -164,15 +163,15 @@ Assert.len(chart_opts.points, 12)
 nav = Kit.buttons(view)
 Assert.is_false(nav[#nav].enabled)
 
--- 源不支持统计：只剩一页错误提示；换源重置回未加载。
+-- 换源重置回未加载。
 insight:onEvent("source_changed")
 Assert.is_false(insight.loaded)
 Assert.eq(insight.ui_page, 1)
-desktop.source = { capabilities = function() return { insight = false } end }
-insight:updateView()
-view = desktop.view
-Assert.eq(#Kit.find(view, function(w) return w.text == "当前数据源不支持统计" end), 1)
-nav = Kit.buttons(view)
-Assert.is_false(nav[1].enabled or nav[2].enabled, "单页两侧置灰")
+
+-- 统计变化：作废缓存，下次进页重读。
+insight.loaded, insight.state = true, { has_data = true }
+insight:onEvent("stats_changed")
+Assert.is_false(insight.loaded)
+Assert.is_nil(insight.state)
 
 return true

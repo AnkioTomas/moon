@@ -15,7 +15,7 @@ package.preload["json"] = function()
 end
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(s) return s end end
-package.preload["db.note"] = function()
+package.preload["book.note_db"] = function()
     return { all = function() return state.rows end }
 end
 package.preload["reader.session"] = function()
@@ -39,7 +39,7 @@ end
 package.preload["ui/widget/menu"] = function()
     return { new = function(_, o) return o end }
 end
-for _, name in ipairs({ "json", "l10n", "gettext", "db.note", "reader.session", "ui/uimanager",
+for _, name in ipairs({ "json", "l10n", "gettext", "book.note_db", "reader.session", "ui/uimanager",
     "ui/event", "ui/widget/menu", "reader.book_notes" }) do
     package.loaded[name] = nil
 end

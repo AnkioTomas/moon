@@ -1,9 +1,9 @@
 --[[--
-db.book：books 表 CRUD（listBySource / 分类与系列查询已在 db_spec 覆盖）
+book.books_db：books 表 CRUD（分类与系列查询见 db_spec，书库列表见 catalog_list_spec）
 
-重点：路径登记（getByPath / touchPath / clearPathsUnder）。
+重点：路径登记（getByPath / touchPath / clearPathsUnder）、跨表联动只经事件。
 
-@module tests.db.book_spec
+@module tests.book.books_db_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
@@ -43,14 +43,14 @@ local function clearMods()
         "utils.task",
         "lua-ljsqlite3/init",
         "ffi/sha2",
-        "db.base",
-        "db.book",
-        "db.chapter",
-        "db.http",
-        "db.note",
-        "db.progress",
-        "db.stats",
-        "db.xray",
+        "utils.db",
+        "book.books_db",
+        "book.chapters_db",
+        "http.cache", "utils.event",
+        "book.note_db",
+        "book.progress_db",
+        "book.stats_db",
+        "features.xray.db",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -97,16 +97,23 @@ local function makeConn(opts)
     return connection, calls
 end
 
-local function loadBook(connection)
+---@param dependents boolean|nil 同时加载全部按身份挂靠的表模块（订阅 book_identity_changed）
+local function loadBook(connection, dependents)
     stubTask(true)
     stubDbDeps()
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["db.base"] = nil
-    package.loaded["db.book"] = nil
-    local DbBase = require("db.base")
-    local BookDB = require("db.book")
+    package.loaded["utils.db"] = nil
+    package.loaded["utils.event"] = nil
+    package.loaded["book.books_db"] = nil
+    local DbBase = require("utils.db")
+    local BookDB = require("book.books_db")
+    if dependents then
+        for _idx, name in ipairs({ "book.note_db", "book.progress_db", "book.stats_db", "features.xray.db" }) do
+            require(name)
+        end
+    end
     DbBase.open()
     return DbBase, BookDB
 end
@@ -293,12 +300,21 @@ end
 
 -- ── reconcile：先软删已同步在架行，再逐条 upsertRemote(deleted=0) ──
 do
-    local connection, calls = makeConn()
+    local connection, calls = makeConn({
+        resultset = function(sql)
+            if sql:find("SELECT stable_id FROM books", 1, true) then
+                return { { "a.epub", "gone.epub", "old.epub" } }, 3
+            end
+            return nil, 0
+        end,
+    })
     local DbBase, BookDB = loadBook(connection)
-    Assert.is_true(BookDB.reconcile("moon", {
+    local ok, hidden = BookDB.reconcile("moon", {
         { stable_id = "a.epub", title = "A" },
         { source_id = "moon", stable_id = "b.epub", title = "B" },
-    }))
+    })
+    Assert.is_true(ok)
+    Assert.eq(hidden, 2, "原在架、快照缺席的行计入 hidden")
     local deactivate, inserts, commit = 0, 0, false
     local insert_calls = {}
     for _, call in ipairs(calls) do
@@ -546,20 +562,33 @@ do
     clearMods()
 end
 
--- ── 阅读状态：手动已读抬进度；手动未读独立编码，自动规则不得覆盖 ──
+-- ── 阅读状态：手动已读发 book_marked_read（进度由进度表订阅方写）；手动未读独立编码，自动规则不得覆盖 ──
 do
     local connection, calls = makeConn()
+    local marked = {}
+    package.preload["book.progress_db"] = function()
+        return { events = { book_marked_read = function(source_id, stable_id)
+            marked[#marked + 1] = { source_id, stable_id }
+            return true
+        end } }
+    end
+    for _idx, name in ipairs({ "book.note_db", "book.stats_db", "features.xray.db" }) do
+        package.preload[name] = function() return {} end
+    end
     local DbBase, BookDB = loadBook(connection)
 
     Assert.is_true(BookDB.setRead("moon", "b1", true))
-    Assert.is_true(calls[#calls - 1].sql:find("SET read_state=1", 1, true) ~= nil)
-    Assert.is_true(calls[#calls - 1].sql:find("percent", 1, true) == nil,
+    Assert.is_true(calls[#calls].sql:find("SET read_state=1", 1, true) ~= nil)
+    Assert.is_true(calls[#calls].sql:find("percent", 1, true) == nil,
         "已读只改 read_state，不写 books.percent")
-    Assert.is_true(calls[#calls].sql:find("pending_progress", 1, true) ~= nil)
-    Assert.is_true(calls[#calls].sql:find("fraction=1", 1, true) ~= nil)
-    Assert.eq(calls[#calls].args[1], "moon")
-    Assert.eq(calls[#calls].args[2], "b1")
+    for _idx, call in ipairs(calls) do
+        Assert.is_nil(call.sql:find("pending_progress", 1, true), "books_db 不直接写进度表")
+    end
+    Assert.eq(#marked, 1)
+    Assert.eq(marked[1][1], "moon")
+    Assert.eq(marked[1][2], "b1")
     Assert.is_true(BookDB.setRead("moon", "b1", false))
+    Assert.eq(#marked, 1, "标记未读不发已读事件")
     Assert.is_true(calls[#calls].sql:find("read_state=2", 1, true) ~= nil)
     Assert.eq(calls[#calls].args[1], "moon")
     Assert.is_true(calls[#calls].sql:find("percent", 1, true) == nil,
@@ -595,10 +624,29 @@ do
     clearMods()
 end
 
--- ── renameStableId：身份表同步改写，全参数化 ─────────────
+-- ── progress_finished：进度表发出后 books 自动标已读（不覆盖手动未读）──
 do
     local connection, calls = makeConn()
-    local DbBase, BookDB = loadBook(connection)
+    local DbBase = loadBook(connection)
+
+    Assert.is_true(require("utils.event").emit("progress_finished", "moon", "b1"))
+    local update
+    for _idx, call in ipairs(calls) do
+        if call.sql:find("UPDATE books SET read_state=1", 1, true) then update = call end
+    end
+    Assert.is_true(update ~= nil)
+    Assert.is_true(update.sql:find("AND read_state=0", 1, true) ~= nil)
+    Assert.eq(update.args[1], "moon")
+    Assert.eq(update.args[2], "b1")
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── renameStableId：books 自己改，依附表经 book_identity_changed 各自改写，全参数化 ──
+do
+    local connection, calls = makeConn()
+    local DbBase, BookDB = loadBook(connection, true)
 
     Assert.is_true(BookDB.renameStableId("local", "/old.a'epub", "/new.epub", "小说", "第一辑"))
     -- 身份更新包在事务里：BEGIN 在首个 UPDATE 之前，末条是 COMMIT
@@ -620,10 +668,11 @@ do
     end
     Assert.eq(#updates, 6)
     Assert.is_true(updates[1].sql:find("UPDATE books SET stable_id=?, category=?, series=?, path=?", 1, true) ~= nil)
+    -- 订阅顺序 = 表模块加载顺序
     Assert.is_true(updates[2].sql:find("UPDATE chapters SET stable_id=?", 1, true) ~= nil)
-    Assert.is_true(updates[3].sql:find("UPDATE reading_stats SET stable_id=?", 1, true) ~= nil)
-    Assert.is_true(updates[4].sql:find("UPDATE notes SET stable_id=?", 1, true) ~= nil)
-    Assert.is_true(updates[5].sql:find("UPDATE pending_progress SET stable_id=?", 1, true) ~= nil)
+    Assert.is_true(updates[3].sql:find("UPDATE notes SET stable_id=?", 1, true) ~= nil)
+    Assert.is_true(updates[4].sql:find("UPDATE pending_progress SET stable_id=?", 1, true) ~= nil)
+    Assert.is_true(updates[5].sql:find("UPDATE reading_stats SET stable_id=?", 1, true) ~= nil)
     Assert.is_true(updates[6].sql:find("UPDATE xray_entities SET stable_id=?", 1, true) ~= nil)
     -- books 更新带 category/series（位置派生字段随新路径刷新）+ path（本地源 path==stable_id），其余五表只改 stable_id
     Assert.eq(updates[1].argc, 6)
@@ -657,11 +706,11 @@ do
             end
         end,
     })
-    local DbBase, BookDB = loadBook(connection)
+    local DbBase, BookDB = loadBook(connection, true)
 
     Assert.is_false(BookDB.renameStableId("local", "/old.epub", "/new.epub"))
     Assert.eq(calls[#calls].sql, "ROLLBACK;")
-    -- reading_stats 炸在第三步：pending_progress 不再执行
+    -- reading_stats 炸在第五步（books/chapters/notes/pending_progress 之后）：xray_entities 不再执行
     local updates = 0
     local begin
     for i, c in ipairs(calls) do
@@ -673,7 +722,7 @@ do
             updates = updates + 1
         end
     end
-    Assert.eq(updates, 3)
+    Assert.eq(updates, 5)
 
     DbBase.close()
     clearMods()
@@ -757,6 +806,25 @@ do
 
     Assert.is_true(BookDB.remove("moon", "b'1"))
     Assert.eq(calls[#calls].sql, "DELETE FROM books WHERE source_id=? AND stable_id=?;")
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── Base.transaction：真值提交、假值回滚、抛错先回滚再原样抛出 ──
+do
+    local connection, calls = makeConn()
+    local DbBase = loadBook(connection)
+    local function last() return calls[#calls].sql end
+
+    Assert.eq(DbBase.transaction(function() return 7 end), 7)
+    Assert.eq(last(), "COMMIT;")
+    Assert.is_nil(DbBase.transaction(function() return false end))
+    Assert.eq(last(), "ROLLBACK;")
+    Assert.errors(function()
+        DbBase.transaction(function() error("boom") end)
+    end)
+    Assert.eq(last(), "ROLLBACK;", "抛错也要回滚，否则连接停在事务里")
 
     DbBase.close()
     clearMods()

@@ -32,7 +32,7 @@ package.preload["book.catalog"] = function()
     }
 end
 
-package.preload["db.stats"] = function()
+package.preload["book.stats_db"] = function()
     return {
         summaryByBook = function(source_id, stable_id)
             stats_sources[#stats_sources + 1] = source_id

@@ -27,7 +27,7 @@ package.preload["book.catalog"] = function()
     return { recentShelf = function() return recent, reading, nil end }
 end
 local opened
-package.preload["book.open"] = function() return { book = function(_, book) opened = book end } end
+package.preload["desktop.open"] = function() return { book = function(_, book) opened = book end } end
 
 local Cards = require("desktop.pages.home.recent_cards")
 Assert.eq(Cards:heightRange().height, 220)
@@ -94,7 +94,7 @@ end
 
 do -- 空书架：图书馆入口
     recent = nil
-    local desktop = { library = { filter = {}, page = 1 } }
+    local desktop = { library = { reset = function() end } }
     function desktop:switchTab(tab) self.switched = tab end
     local slot = Cards:new():build({ desktop = desktop }, { width = 600, height = 220 })
     Assert.eq(Kit.texts(slot)[1], "去图书馆挑一本 ›")

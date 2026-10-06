@@ -1,5 +1,5 @@
 --[[--
-book.open：按 Book 身份解析属主源，只消费源返回的物理文档。
+desktop.open：按 Book 身份解析属主源，只消费源返回的物理文档。
 
 @module tests.book.open_spec
 --]]
@@ -38,7 +38,7 @@ package.preload["book.store"] = function()
     return { rememberMany = function() end }
 end
 package.preload["reader.session"] = function()
-    error("book.open must not load reader session")
+    error("desktop.open must not load reader session")
 end
 
 local UIManager = require("ui/uimanager")
@@ -58,7 +58,7 @@ package.preload["apps/reader/readerui"] = function()
     return ReaderUI
 end
 
-local Open = require("book.open")
+local Open = require("desktop.open")
 local book = {
     source_id = "moon",
     stable_id = "book-1",

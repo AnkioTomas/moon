@@ -47,13 +47,8 @@ package.preload["source.registry"] = function()
         end,
     }
 end
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
-        listBySource = function(scope, opts)
-            seen_scope = scope
-            FakeBooks.list_opts = opts
-            return FakeBooks.list_rows, FakeBooks.list_count
-        end,
         categoriesBySource = function() return FakeBooks.categories end,
         categoryCountsBySource = function() return FakeBooks.category_counts end,
         seriesCountsBySource = function() return FakeBooks.series_counts end,
@@ -67,9 +62,14 @@ package.preload["db.book"] = function()
         get = function(source_id, stable_id)
             return FakeBooks.meta and FakeBooks.meta[source_id .. "\n" .. tostring(stable_id)]
         end,
+        isDownloaded = function(source_id, stable_id, chapter)
+            FakeBooks.downloaded_asks = FakeBooks.downloaded_asks or {}
+            FakeBooks.downloaded_asks[#FakeBooks.downloaded_asks + 1] = { source_id, stable_id, chapter }
+            return source_id == "local"
+        end,
     }
 end
-package.preload["db.progress"] = function()
+package.preload["book.progress_db"] = function()
     return {
         recent = function(scope)
             seen_scope = scope
@@ -77,7 +77,7 @@ package.preload["db.progress"] = function()
         end,
     }
 end
-package.preload["db.stats"] = function()
+package.preload["book.stats_db"] = function()
     return {
         summaryBySource = function() return FakeStats.summary end,
         dailyBySource = function() return FakeStats.daily end,
@@ -87,6 +87,12 @@ end
 package.loaded["book.catalog"] = nil
 
 local Catalog = require("book.catalog")
+-- 书库 SQL 本身见 catalog_list_spec；这里只验证异步包装传参。
+Catalog.listBooks = function(scope, opts)
+    seen_scope = scope
+    FakeBooks.list_opts = opts
+    return FakeBooks.list_rows, FakeBooks.list_count
+end
 
 do -- toList 带 source_id
     local list = Catalog.toList({
@@ -113,7 +119,7 @@ do -- listLibraryAsync 读假库
     Assert.eq(got.res.data[1].source_id, "local")
     Assert.eq(got.res.data[1].title, "B")
     Assert.eq(FakeBooks.list_opts.read_status, "unread")
-    Assert.is_nil(FakeBooks.list_opts.chapter_sources)
+    Assert.eq(FakeBooks.list_opts.chapter_sources[1], "wechat", "每行都要算 downloaded，章节源总是传")
     Assert.eq(seen_scope, "local")
 
     Catalog.listLibraryAsync("local", { downloaded = true }, function() end)
@@ -144,24 +150,27 @@ do -- filtersAsync
     Assert.is_nil(got.data.source_counts)
 end
 
-do -- recentBooksAsync：进度定顺序和位置，books 只补元数据
+do -- recentBooks：进度定顺序和位置，books 只补元数据；已下载按属主源类型查库
     FakeBooks.recent = {
         { source_id = "local", stable_id = "b.epub", fraction = 0.75,
             chapter_idx = 3, chapter_title = "第三章", updated_at = 200 },
-        { source_id = "local", stable_id = "a.epub", fraction = 0.25, updated_at = 100 },
+        { source_id = "wechat", stable_id = "w1", fraction = 0.25, updated_at = 100 },
     }
     FakeBooks.meta = {
         ["local\nb.epub"] = { stable_id = "b.epub", title = "B", percent = 1 },
-        ["local\na.epub"] = { stable_id = "a.epub", title = "A", percent = 99 },
+        ["wechat\nw1"] = { stable_id = "w1", title = "W", percent = 99 },
     }
-    local got
-    Catalog.recentBooksAsync("local", 24, function(res) got = res end)
-    Stubs.flush()
-    Assert.eq(got.data[1].stable_id, "b.epub")
-    Assert.eq(got.data[1].percent, 75)
-    Assert.eq(got.data[1].chapter_idx, 3)
-    Assert.eq(got.data[1].chapter_title, "第三章")
-    Assert.eq(got.data[2].stable_id, "a.epub")
+    FakeBooks.downloaded_asks = {}
+    local got = Catalog.recentBooks("local", 24)
+    Assert.eq(got[1].stable_id, "b.epub")
+    Assert.eq(got[1].percent, 75)
+    Assert.eq(got[1].chapter_idx, 3)
+    Assert.eq(got[1].chapter_title, "第三章")
+    Assert.is_true(got[1].downloaded)
+    Assert.eq(got[2].stable_id, "w1")
+    Assert.is_false(got[2].downloaded)
+    Assert.is_false(FakeBooks.downloaded_asks[1][3], "local 是整本源")
+    Assert.is_true(FakeBooks.downloaded_asks[2][3], "wechat 是章节源")
 end
 
 do -- readingInsightAsync

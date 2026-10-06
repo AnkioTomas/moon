@@ -11,7 +11,7 @@ local saved_payload
 local fail_write
 local warnings = {}
 local resolved_font_ids = {}
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
         getReaderPrefs = function(source_id, stable_id)
             Assert.eq(source_id, "moon")
@@ -123,7 +123,7 @@ package.loaded["json"] = nil
 package.loaded["ffi/util"] = nil
 package.loaded["ui.fonts"] = nil
 package.loaded["ui.fonts.reader"] = nil
-package.loaded["db.book"] = nil
+package.loaded["book.books_db"] = nil
 package.loaded["book.store"] = nil
 local ReaderPrefs = require("reader.prefs")
 

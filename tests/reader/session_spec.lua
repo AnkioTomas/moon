@@ -103,9 +103,13 @@ package.preload["book.store"] = function()
             end
             return nil
         end,
-        toc = function(identity)
+    }
+end
+package.preload["source.toc"] = function()
+    return {
+        read = function(_source_id, stable_id)
             toc_reads = toc_reads + 1
-            return stored_toc[identity.stable_id]
+            return stored_toc[stable_id]
         end,
     }
 end
@@ -119,7 +123,7 @@ package.preload["reader.prefs"] = function()
     }
 end
 
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
         markReadAutomatically = function(source_id, stable_id)
             calls.book[#calls.book + 1] = { "auto_read", source_id, stable_id }
@@ -139,7 +143,7 @@ package.preload["utils.settings"] = function()
     }
 end
 
-package.preload["book.stats"] = function()
+package.preload["reader.session.stats"] = function()
     return {
         start = function(ui, identity)
             calls.tracker[#calls.tracker + 1] = { "start", ui, identity }
@@ -158,7 +162,7 @@ package.preload["book.stats"] = function()
     }
 end
 
-package.preload["book.note"] = function()
+package.preload["reader.session.note"] = function()
     return {
         save = function(ui, identity, cb)
             calls.notes = calls.notes or {}
@@ -174,14 +178,10 @@ package.preload["book.note"] = function()
             calls.notes = calls.notes or {}
             calls.notes[#calls.notes + 1] = { identity, "pull" }
         end,
-        push = function(ui, identity)
-            calls.notes = calls.notes or {}
-            calls.notes[#calls.notes + 1] = { identity, "push", ui }
-        end,
     }
 end
 
-package.preload["book.progress"] = function()
+package.preload["reader.session.progress"] = function()
     return {
         save = function(_, cb) if cb then cb(true) end end,
         pull = function(snapshot)
@@ -250,7 +250,7 @@ package.preload["book.cover"] = function()
     }
 end
 
-package.preload["db.stats"] = function()
+package.preload["book.stats_db"] = function()
     return {
         summaryByBook = function(source_id, stable_id)
             if source_id == "moon" and (stable_id == "b1" or stable_id == "chapters") then
@@ -823,12 +823,12 @@ Assert.eq(table.concat(injected, ","), "prefs:doc,bars:doc")
 
 -- 清理：fake 经 package.preload 安装，runner 只清 package.loaded。
 for _, name in ipairs({
-    "book.store", "book.stats", "book.progress",
-    "book.note", "book.cover",
+    "book.store", "reader.session.stats", "reader.session.progress",
+    "reader.session.note", "book.cover",
     "reader.page",
-    "db.book",
+    "book.books_db",
     "utils.settings",
-    "db.stats",
+    "book.stats_db",
     "ui/widget/confirmbox",
     "ui/widget/infomessage",
     "reader.end_dialog",

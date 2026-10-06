@@ -8,10 +8,10 @@ local Assert = require("support.assert")
 
 package.loaded["source.fanqie.reading.sign"] = nil
 package.loaded["crypto.aes"] = nil
-package.loaded["source.fanqie.reading.sm3"] = nil
+package.loaded["crypto.sm3"] = nil
 
 local Aes = require("crypto.aes")
-local Sm3 = require("source.fanqie.reading.sm3")
+local Sm3 = require("crypto.sm3")
 local Sign = require("source.fanqie.reading.sign")
 
 Assert.eq(Sm3.hex(""), "1ab21d8355cfa17f8e61194831e81a8f22bec8c728fefb747ed035eb5082aa2b")

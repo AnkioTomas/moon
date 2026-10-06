@@ -2,7 +2,7 @@
 book.note.normalize 纯计算测试：注解形态按文档类型分派 + 跨端去重。
 
 回归背景：renderable 曾只认字符串 page，于是分页文档（PDF/CBZ/DjVu）的划线
-全被判成不可渲染；而 Note.applyLocal 拿合并结果整体覆盖 doc_settings，
+全被判成不可渲染；而 SessionNote.applyLocal 拿合并结果整体覆盖 doc_settings，
 等于每次开书就把用户自己的划线删掉。
 
 @module tests.book.note_normalize_spec
@@ -107,11 +107,20 @@ end
 -- ── payload：权威快照带外层元数据；非权威为裸数组 ──
 do
     local items = { { page = "/body/a" } }
-    local packed = Normalize.pack(items, true)
-    local unpacked, authoritative = Normalize.unpack(packed)
+    local wire = { packed = Normalize.pack(items, true), bare = Normalize.pack(items), num = 5 }
+    package.loaded["json"] = {
+        decode = function(s)
+            if wire[s] == nil then error("bad json") end
+            return wire[s]
+        end,
+    }
+    local unpacked, authoritative = Normalize.decode("packed")
     Assert.eq(unpacked, items)
     Assert.is_true(authoritative)
-    local bare, bare_authoritative = Normalize.unpack(items)
+    local bare, bare_authoritative = Normalize.decode("bare")
     Assert.eq(bare, items)
     Assert.is_false(bare_authoritative)
+    Assert.is_nil(Normalize.decode("broken"), "非法 JSON 返回 nil")
+    Assert.is_nil(Normalize.decode("num"), "非表返回 nil")
+    package.loaded["json"] = nil
 end

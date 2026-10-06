@@ -56,10 +56,10 @@ local entity = { kind = "character", name = "John Doe", aliases = { "John" } }
 local list_calls = 0
 
 -- 滚动文档（CreDocument）：下一 tick 只调用视口 findText，不碰全书 findAllText。
-package.preload["db.xray"] = function()
+package.preload["features.xray.db"] = function()
     return { list = function() list_calls = list_calls + 1; return { entity } end }
 end
-package.loaded["db.xray"] = nil
+package.loaded["features.xray.db"] = nil
 
 local current_pos = 0
 local find_calls = {}
@@ -172,10 +172,10 @@ Marks.ui = {
     },
 }
 Marks.view = Marks.ui.view
-package.preload["db.xray"] = function()
+package.preload["features.xray.db"] = function()
     return { list = function() return { { kind = "term", name = "Whitby", aliases = {} } } end }
 end
-package.loaded["db.xray"] = nil
+package.loaded["features.xray.db"] = nil
 Marks._render_key = nil
 Marks:updateView()
 Assert.len(searched_pages, 0)

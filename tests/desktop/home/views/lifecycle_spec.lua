@@ -16,7 +16,7 @@ package.preload["book.highlights"] = function()
     return { random = function() return excerpt end }
 end
 local seconds, scope = 10, nil
-package.preload["db.stats"] = function()
+package.preload["book.stats_db"] = function()
     return {
         summaryBySource = function(id) scope = id; return { total_seconds = seconds } end,
         dailyBySource = function() return {} end,
@@ -33,8 +33,8 @@ package.preload["online.myrl"] = function()
     return { fetch = function(_, _, cb) fetches = fetches + 1; cb(daily) end }
 end
 local opened
-package.preload["db.book"] = function() return { get = function() return nil end } end
-package.preload["book.open"] = function() return { book = function(_, book) opened = book end } end
+package.preload["book.books_db"] = function() return { get = function() return nil end } end
+package.preload["desktop.open"] = function() return { book = function(_, book) opened = book end } end
 
 --- 树里所有带 text 的控件文案（含 TextBoxWidget）。
 local function texts(root)

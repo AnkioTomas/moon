@@ -1,7 +1,7 @@
 --[[--
-db.progress：pending_progress 表 CRUD（待上传进度）
+book.progress_db：pending_progress 表 CRUD（待上传进度）
 
-@module tests.db.progress_spec
+@module tests.book.progress_db_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
@@ -53,14 +53,14 @@ local function clearMods()
         "utils.task",
         "lua-ljsqlite3/init",
         "ffi/sha2",
-        "db.base",
-        "db.book",
-        "db.chapter",
-        "db.http",
-        "db.note",
-        "db.progress",
-        "db.stats",
-        "db.xray",
+        "utils.db",
+        "book.books_db",
+        "book.chapters_db",
+        "http.cache", "utils.event",
+        "book.note_db",
+        "book.progress_db",
+        "book.stats_db",
+        "features.xray.db",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -73,10 +73,6 @@ local function makeConn(opts)
     opts = opts or {}
     local calls = {}
     local connection = {
-        rowexec = function()
-            if opts.changes then return opts.changes() end
-            return 1
-        end,
         exec = function(_, sql)
             calls[#calls + 1] = { sql = sql, argc = 0, args = {} }
             if opts.exec then
@@ -94,6 +90,9 @@ local function makeConn(opts)
                     return self
                 end,
                 step = function()
+                    if sql == "SELECT changes();" then
+                        return { opts.changes and opts.changes() or 1 }, { "changes()" }
+                    end
                     if opts.step then
                         return opts.step(sql)
                     end
@@ -118,10 +117,10 @@ local function loadProgress(connection)
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["db.base"] = nil
-    package.loaded["db.progress"] = nil
-    local DbBase = require("db.base")
-    local ProgressDB = require("db.progress")
+    package.loaded["utils.db"] = nil
+    package.loaded["book.progress_db"] = nil
+    local DbBase = require("utils.db")
+    local ProgressDB = require("book.progress_db")
     DbBase.open()
     return DbBase, ProgressDB
 end
@@ -169,8 +168,11 @@ do
 
     -- fraction>=1 才抬 read_state
     Assert.is_true(ProgressDB.upsert("moon", "done", { fraction = 1 }))
-    local sync = calls[#calls]
-    Assert.is_true(sync.sql:find("UPDATE books SET read_state=1", 1, true) ~= nil)
+    local sync
+    for _idx, call in ipairs(calls) do
+        if call.sql:find("UPDATE books SET read_state=1", 1, true) then sync = call end
+    end
+    Assert.is_true(sync ~= nil)
     Assert.eq(sync.args[1], "moon")
     Assert.eq(sync.args[2], "done")
     Assert.is_true(sync.sql:find("percent", 1, true) == nil)
@@ -284,7 +286,8 @@ do
     local DbBase, ProgressDB = loadProgress(connection)
 
     Assert.is_true(ProgressDB.markSynced("moon", "a'); DROP TABLE pending_progress;--", 1234))
-    local q = calls[#calls]
+    Assert.eq(calls[#calls].sql, "SELECT changes();")
+    local q = calls[#calls - 1]
     Assert.is_true(q.sql:find("UPDATE pending_progress SET sync_status=1", 1, true) ~= nil)
     Assert.is_true(q.sql:find("source_id=? AND stable_id=? AND updated_at=?", 1, true) ~= nil)
     Assert.eq(q.argc, 3)
@@ -386,6 +389,59 @@ do
     local q = calls[#calls]
     Assert.is_true(q.sql:find("sync_status=0", 1, true) ~= nil)
     Assert.eq(q.args[1], "moon")
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── 订阅 book_marked_read：补一条 100% 的待上传进度 ──
+do
+    local connection, calls = makeConn()
+    local DbBase = loadProgress(connection)
+
+    Assert.is_true(require("utils.event").emit("book_marked_read", "moon", "b1"))
+    local q
+    for _idx, call in ipairs(calls) do
+        if call.sql:find("INSERT INTO pending_progress", 1, true) then q = call end
+    end
+    Assert.is_true(q ~= nil)
+    Assert.is_true(q.sql:find("fraction=1", 1, true) ~= nil)
+    Assert.is_true(q.sql:find("sync_status=0", 1, true) ~= nil)
+    Assert.eq(q.args[1], "moon")
+    Assert.eq(q.args[2], "b1")
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── 订阅 book_identity_changed：改名只迁身份；收编先清掉被旧身份脏行盖过的新身份副本 ──
+do
+    local connection, calls = makeConn()
+    local DbBase = loadProgress(connection)
+    local Event = require("utils.event")
+
+    local mark = #calls
+    Assert.is_true(Event.emit("book_identity_changed", "local", "/old.epub", "/new.epub", false))
+    local own = {}
+    for i = mark + 1, #calls do
+        if calls[i].sql:find("pending_progress", 1, true) then own[#own + 1] = calls[i] end
+    end
+    Assert.len(own, 1)
+    Assert.eq(own[1].sql, "UPDATE pending_progress SET stable_id=? WHERE source_id=? AND stable_id=?;")
+
+    mark = #calls
+    Assert.is_true(Event.emit("book_identity_changed", "local", "/old.epub", "/new.epub", true))
+    own = {}
+    for i = mark + 1, #calls do
+        if calls[i].sql:find("pending_progress", 1, true) then own[#own + 1] = calls[i] end
+    end
+    Assert.len(own, 3)
+    Assert.is_true(own[1].sql:find("DELETE FROM pending_progress WHERE source_id=? AND stable_id=? AND EXISTS", 1, true) ~= nil)
+    Assert.is_true(own[1].sql:find("sync_status=0", 1, true) ~= nil)
+    Assert.eq(own[1].args[2], "/new.epub")
+    Assert.eq(own[1].args[4], "/old.epub")
+    Assert.is_true(own[2].sql:find("UPDATE OR IGNORE pending_progress", 1, true) ~= nil)
+    Assert.eq(own[3].sql, "DELETE FROM pending_progress WHERE source_id=? AND stable_id=?;")
 
     DbBase.close()
     clearMods()

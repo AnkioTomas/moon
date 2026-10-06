@@ -1,7 +1,7 @@
 --[[--
-book.progress pull：开书后先拉远端再对比，冲突时不应先推脏本地。
+reader.session.progress pull：开书后先拉远端再对比，冲突时不应先推脏本地。
 
-@module tests.book.progress_pull_spec
+@module tests.reader.session.progress_pull_spec
 --]]
 
 local Assert = require("support.assert")
@@ -67,7 +67,7 @@ package.loaded["reader.session.toc"] = nil
 package.preload["logger"] = function()
     return { dbg = function() end, warn = function() end, info = function() end }
 end
-package.preload["db.progress"] = function()
+package.preload["book.progress_db"] = function()
     return {
         get = function(_, stable_id)
             if stable_id == "b1" then
@@ -112,8 +112,8 @@ local function snapshot()
     }
 end
 
-package.loaded["book.progress"] = nil
-local Progress = require("book.progress")
+package.loaded["reader.session.progress"] = nil
+local Progress = require("reader.session.progress")
 local Session = require("reader.session")
 
 Assert.is_true(Session.current().identity.stable_id == "b1", "session stub 应生效")
@@ -280,7 +280,7 @@ Assert.eq(#shown, 0, "进度拉取失败不应打断阅读")
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",
     "reader.session.toc", "reader.session", "logger",
-    "db.progress", "book.progress",
+    "book.progress_db", "book.progress", "reader.session.progress",
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil

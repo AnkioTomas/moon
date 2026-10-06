@@ -10,7 +10,7 @@ local store = {}
 local now = 1000
 local original_time = os.time
 os.time = function() return now end
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
         getToc = function(source_id, stable_id, max_age)
             local row = store[source_id .. "\31" .. stable_id]
@@ -30,8 +30,8 @@ package.preload["json"] = function()
     }
 end
 
-package.loaded["source.copymanga.toc"] = nil
-local Toc = require("source.copymanga.toc")
+package.loaded["source.toc"] = nil
+local Toc = require("source.toc")
 
 local list = {
     { idx = 1, uid = "u1", title = "第一话" },

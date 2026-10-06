@@ -1,15 +1,15 @@
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
---[[-- db.note：notes 表完整快照写入。 --]]
+--[[-- book.note_db：notes 表完整快照写入。 --]]
 
 local Assert = require("support.assert")
 
 local function clearMods()
     for _, name in ipairs({
         "utils.paths", "utils.task", "lua-ljsqlite3/init", "ffi/sha2",
-        "db.base", "db.note",
-        "db.book", "db.chapter", "db.http", "db.progress",
-        "db.stats", "db.xray",
+        "utils.db", "book.note_db",
+        "book.books_db", "book.chapters_db", "http.cache", "utils.event", "book.progress_db",
+        "book.stats_db", "features.xray.db",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -50,8 +50,8 @@ package.preload["lua-ljsqlite3/init"] = function()
     return { open = function() return connection end }
 end
 
-local Base = require("db.base")
-local NoteDB = require("db.note")
+local Base = require("utils.db")
+local NoteDB = require("book.note_db")
 Base.open()
 
 Assert.is_true(NoteDB.upsert("moon", "book'1", nil, "[{}]"))

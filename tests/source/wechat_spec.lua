@@ -36,8 +36,9 @@ end)
 
 -- 目录缓存：按 stable_id 供给 payload，未登记的书一律未命中
 local toc_payload = {}
-stub("db.book", function()
+stub("book.books_db", function()
     return {
+        reconcile = function() return true, 0 end,
         get = function() return existing_book end,
         getToc = function(_, stable_id) return toc_payload[stable_id] end,
         setToc = function(_, stable_id, payload)
@@ -65,13 +66,13 @@ stub("db.book", function()
     }
 end)
 local existing_progress
-stub("db.progress", function()
+stub("book.progress_db", function()
     return {
         get = function() return existing_progress end,
         upsertRemote = function() return true end,
     }
 end)
-stub("db.chapter", function()
+stub("book.chapters_db", function()
     return {
         deleteUnder = function(dir)
             remembered_stats_books.chapter_deleted_under = dir
@@ -147,15 +148,8 @@ end)
 stub("book.store", function()
     return {
         rememberMany = function(books) remembered_stats_books = books end,
-        reconcile = function(_, books)
-            return { pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
-        end,
         markDeleted = function(source_id, stable_id)
             remembered_stats_books.marked_deleted = { source_id = source_id, stable_id = stable_id }
-            return true
-        end,
-        finalizeDeleted = function(source_id, stable_id)
-            remembered_stats_books.removed = { source_id = source_id, stable_id = stable_id }
             return true
         end,
     }
@@ -227,7 +221,7 @@ do
         end
         return { cancel = function() end }
     end
-    local StatsDB = require("db.stats")
+    local StatsDB = require("book.stats_db")
     local real_book_totals = StatsDB.bookTotals
     StatsDB.bookTotals = function(source_id)
         Assert.eq(source_id, "wechat")

@@ -49,10 +49,6 @@ local reconciled, touched, released = {}, {}, 0
 local touch_ok = true
 package.preload["book.store"] = function()
     return {
-        reconcile = function(source_id, books)
-            reconciled[#reconciled + 1] = { source_id = source_id, books = books }
-            return { pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
-        end,
         touch = function(path, identity)
             touched[#touched + 1] = { path = path, identity = identity }
             if not touch_ok then return false, "failed to register book path" end
@@ -60,8 +56,11 @@ package.preload["book.store"] = function()
         end,
     }
 end
-package.preload["db.book"] = function()
-    return { releaseForeignPaths = function(source_id)
+package.preload["book.books_db"] = function()
+    return { reconcile = function(source_id, books)
+        reconciled[#reconciled + 1] = { source_id = source_id, books = books }
+        return true, 0
+    end, releaseForeignPaths = function(source_id)
         Assert.eq(source_id, "kindle")
         released = released + 1
         return true
@@ -90,7 +89,6 @@ Assert.eq(Kindle.meta().type, "book")
 
 local source = Kindle.new()
 Assert.is_true(source:configured())
-Assert.is_true(source:capabilities().search)
 Assert.is_false(source:capabilities().scrape)
 -- 无远端：进度 / 笔记 / 统计的协议方法都不提供，各域由 book.* 判 unsupported。
 Assert.is_nil(source.getProgressAsync)

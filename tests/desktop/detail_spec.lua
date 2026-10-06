@@ -61,7 +61,7 @@ package.preload["source.cache_queue"] = function()
     }
 end
 local stats = { summary = nil, daily = {} }
-package.preload["db.stats"] = function()
+package.preload["book.stats_db"] = function()
     return {
         summaryByBook = function() return stats.summary end,
         dailyByBook = function() return stats.daily end,
@@ -90,7 +90,7 @@ package.preload["source.registry"] = function()
 end
 local set_read, db_row, upserted
 local upsert_ok = true
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
         setRead = function(source_id, stable_id, value)
             set_read = { source_id, stable_id, value }
@@ -189,7 +189,7 @@ Assert.is_nil(desktop.detail)
 Assert.eq(desktop.updates, 0)
 Assert.is_true(dirtied(desktop))
 
--- 标记已读：写库、打脏、作废书库缓存；关窗时桌面重建。
+-- 标记已读：写库、打脏、通知书架已变；关窗时桌面重建。
 Detail.open(desktop, "library", { source_id = "wechat", stable_id = "w2", title = "书一", read_state = 0 })
 page = desktop.detail
 page:toggleRead()
@@ -197,10 +197,11 @@ Assert.eq(set_read[1], "wechat")
 Assert.eq(set_read[2], "w2")
 Assert.is_true(set_read[3])
 Assert.is_true(page._dirty)
-Assert.is_nil(desktop.library.state)
+Assert.eq(desktop.events[1], "shelf_changed")
 page.book.read_state = 1
 page:toggleRead()
 Assert.is_false(set_read[3])
+desktop.events = {}
 page:close()
 Assert.eq(desktop.events[1], "detail_dirty")
 Assert.eq(desktop.updates, 1)
@@ -250,7 +251,7 @@ Assert.eq(cache_runs, 1)
 require("workers.tasks").get("cache-w2").cancel()
 resolved = nil
 
--- 删除：确认后走属主源，成功关详情、书库回第一页。
+-- 删除：确认后走属主源，成功关详情、通知书架已变。
 local deleted
 resolved = {
     id = "wechat",
@@ -260,7 +261,7 @@ resolved = {
         cb(true)
     end,
 }
-desktop.library.page = 4
+desktop.events = {}
 page:deleteBook()
 Assert.eq(Themed.last("confirm").text, "确定删除《书一》？")
 Themed.last("confirm").ok_callback()
@@ -269,7 +270,7 @@ Assert.eq(deleted.stable_id, "w2")
 Assert.eq(deleted.source, resolved)
 Assert.is_true(page.closed)
 Assert.is_nil(desktop.detail)
-Assert.eq(desktop.library.page, 1)
+Assert.eq(desktop.events[1], "shelf_changed")
 
 -- 删除失败：提示错误，页面不关。
 resolved = { deleteBookAsync = function(_, _, cb) cb(false, "云端拒绝") end }
@@ -378,14 +379,14 @@ Detail.open(desktop, "store", { source_id = "zlib", stable_id = "1:abc", title =
 desktop.detail:close()
 Assert.is_true(detail_cancelled)
 
--- 加入书库：进下载任务并前台跟随，下载中重复点被拒绝；进度按字节；完成提示并作废图书馆缓存。
+-- 加入书库：进下载任务并前台跟随，下载中重复点被拒绝；进度按字节；完成提示并通知书架已变。
 package.preload["ui/network/manager"] = function()
     return { runWhenOnline = function(_, cb) cb() end, isConnected = function() return true end }
 end
 resolved = { id = "local", importBookAsync = function() end }
 Detail.open(desktop, "store", { source_id = "zlib", stable_id = "1:abc", title = "书城书", filesize = 100 })
 page = desktop.detail
-desktop.library = { state = { stale = true }, page = 3 }
+desktop.events = {}
 desktop.updates = 0
 local follows = #followed
 page:installStoreBook()
@@ -402,8 +403,7 @@ Assert.eq(Tasks.tasks()[1].count, 40)
 Assert.eq(Tasks.tasks()[1].total, 100)
 install_cb(true, nil, "书城书.epub")
 Assert.eq(Themed.last("toast").text, "已加入书库：书城书.epub")
-Assert.is_nil(desktop.library.state)
-Assert.eq(desktop.library.page, 1)
+Assert.eq(desktop.events[1], "shelf_changed")
 Assert.eq(desktop.updates, 1)
 Assert.eq(#Tasks.tasks(), 0)
 

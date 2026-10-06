@@ -38,8 +38,13 @@ package.preload["utils.paths"] = function()
     }
 end
 
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
+        reconcile = function(source_id, books)
+            rec.reconciled_source = source_id
+            rec.reconciled_books = books
+            return true, 0
+        end,
         libraryStableIdsBySource = function() return { "a.epub", "b.epub" } end,
         pendingDeleteIds = function() return {} end,
         markSynced = function() return true end,
@@ -54,7 +59,7 @@ package.preload["db.book"] = function()
         end,
     }
 end
-package.preload["db.chapter"] = function()
+package.preload["book.chapters_db"] = function()
     return {
         deleteUnder = function(dir)
             rec.chapter_deleted_under = dir
@@ -68,7 +73,7 @@ package.preload["ffi/util"] = function()
         template = function(s) return s end,
     }
 end
-package.preload["db.progress"] = function()
+package.preload["book.progress_db"] = function()
     return {
         upsertRemote = function(source_id, stable_id, pos)
             rec.remote_progress = rec.remote_progress or {}
@@ -97,11 +102,6 @@ package.preload["book.catalog"] = function()
             cb({ data = { category = { "小说", "技术" }, series = { "第一辑" } } })
             return { cancel = function() end }
         end,
-        recentBooksAsync = function(source_id, limit, cb)
-            rec.recent_fallback = { source_id = source_id, limit = limit }
-            cb({ data = { { stable_id = "cached.epub" } }, count = 1 })
-            return { cancel = function() end }
-        end,
     }
 end
 
@@ -124,20 +124,11 @@ package.preload["book.store"] = function()
             touches[#touches + 1] = { path = path, identity = identity }
             return true
         end,
-        reconcile = function(source_id, books)
-            rec.reconciled_source = source_id
-            rec.reconciled_books = books
-            return { pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
-        end,
         rememberMany = function(books)
             rec.remembered_books = books
         end,
         markDeleted = function(source_id, stable_id)
             rec.marked_deleted = { source_id = source_id, stable_id = stable_id }
-            return true
-        end,
-        finalizeDeleted = function(source_id, stable_id)
-            rec.removed = { source_id = source_id, stable_id = stable_id }
             return true
         end,
     }
@@ -279,42 +270,6 @@ do
     Assert.eq(rec.reconciled_books[1].stable_id, "a.epub")
     Assert.eq(result.pulled, 1)
 end
-
--- 最近阅读统一读取本地 pending_progress；Moon 不得为首页另开远端协议。
-do
-    resetRec()
-    local result
-    src:recentBooksAsync(8, function(value) result = value end)
-    Assert.eq(rec.recent_fallback.source_id, "moon")
-    Assert.eq(rec.recent_fallback.limit, 8)
-    Assert.eq(result.data[1].stable_id, "cached.epub")
-end
-
--- 首页进入按 5 分钟节流检查书架；统计按相同生命周期双向同步；
--- 图书馆手动刷新同时触发两者并强制请求书架。
-do
-    resetRec()
-    rec.list_wire = { data = { { filename = "home.epub", title = "Home" } }, count = 1 }
-    local refreshes = {}
-    local desktop = {
-    lifecycle = { state = "Resume" },
-        source = src,
-        tab = "home",
-        onEvent = function(_, event) refreshes[#refreshes + 1] = event end,
-    }
-    src:onEvent("home_open", desktop)
-    Assert.is_true(rec.query ~= nil)
-    local first_query = rec.query
-    resetRec()
-    src:onEvent("home_open", desktop)
-    Assert.is_nil(rec.query)
-    src:onEvent("library_refresh_request", desktop)
-    Assert.is_true(rec.query ~= nil)
-    -- 强制刷新拉到空书架且对账无隐藏：本地书架未变，不通知首页。
-    Assert.eq(table.concat(refreshes, ","), "stats_changed,shelf_changed,stats_changed")
-    rec.query = first_query
-end
-
 
 -- openBookAsync：Moon 自己完成缓存、下载、校验、并发合并和落库。
 do
@@ -628,9 +583,9 @@ end
 for _, name in ipairs({
     "utils.settings",
     "utils.paths",
-    "db.book",
-    "db.chapter",
-    "db.progress",
+    "book.books_db",
+    "book.chapters_db",
+    "book.progress_db",
     "ffi/util",
     "source.moon.client",
     "ui/network/manager",

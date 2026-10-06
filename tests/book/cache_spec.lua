@@ -87,7 +87,7 @@ end
 package.loaded["utils.log"] = nil
 
 -- 假 BookDB：clearPathsUnder 只把行从登记表里摘掉（真实实现是 path 置 NULL）
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     local function removeWhere(pred)
         for i = #book_rows, 1, -1 do
             if pred(book_rows[i]) then
@@ -107,7 +107,7 @@ package.preload["db.book"] = function()
     }
 end
 
-package.preload["db.chapter"] = function()
+package.preload["book.chapters_db"] = function()
     return {
         deleteUnder = function(dir)
             db_log.chapter_delete_under[#db_log.chapter_delete_under + 1] = dir
@@ -274,8 +274,8 @@ if lfs.attributes(BASE) then
 end
 for _, name in ipairs({
     "utils.paths",
-    "db.book",
-    "db.chapter",
+    "book.books_db",
+    "book.chapters_db",
     "ui.themes.widgets.image",
     "book.cache",
 }) do

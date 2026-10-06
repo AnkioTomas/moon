@@ -10,7 +10,7 @@ local now = 1000
 local original_time = os.time
 os.time = function() return now end
 local writes = true
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
         getToc = function(_source_id, stable_id, max_age)
             reads = reads + 1
@@ -96,9 +96,9 @@ do
     local cached_reads = reads
     Assert.eq(Toc.uid("wechat", "b3", 1), "p1")
     Assert.eq(reads, cached_reads)
-    Toc.invalidate("wechat", "b3")
+    Toc.clear()
     Toc.read("wechat", "b3")
-    Assert.is_true(reads > cached_reads, "invalidate 后必须回库")
+    Assert.is_true(reads > cached_reads, "clear 后必须回库")
 end
 
 do

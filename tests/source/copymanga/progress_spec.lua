@@ -23,7 +23,7 @@ stub("json", function()
         encode = require("support.json_stub").encode,
     }
 end)
-stub("db.book", function()
+stub("book.books_db", function()
     return {
         getToc = function(source_id, stable_id)
             return toc_store[source_id .. "\31" .. stable_id]
@@ -52,10 +52,10 @@ stub("source.copymanga.client", function()
     }
 end)
 
-package.loaded["source.copymanga.toc"] = nil
+package.loaded["source.toc"] = nil
 package.loaded["source.copymanga"] = nil
 local Copymanga = require("source.copymanga")
-local Toc = require("source.copymanga.toc")
+local Toc = require("source.toc")
 local src = Copymanga.new()
 
 local IDENTITY = {
