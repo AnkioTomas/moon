@@ -71,4 +71,33 @@ repair_stale_thirdparty() {
 }
 repair_stale_thirdparty
 
-./kodev run "$@"
+if [ "$1" != "--watch" ]; then
+    exec ./kodev run "$@"
+fi
+shift
+
+# --watch：插件目录有改动就重启模拟器。Lua 模块与 features 补丁不支持进程内卸载，只能整进程重启。
+./kodev build
+stamp="$(mktemp -t book.koplugin.watch)"
+pid=
+killtree() {
+    local child
+    for child in $(pgrep -P "$1"); do killtree "$child"; done
+    kill -TERM "$1" 2>/dev/null || true
+}
+stop() {
+    [ -n "$pid" ] || return 0
+    killtree "$pid"
+    wait "$pid" 2>/dev/null || true
+    pid=
+}
+trap 'stop; rm -f "$stamp"; exit 0' INT TERM
+while :; do
+    touch "$stamp"
+    ./kodev run -b "$@" &
+    pid=$!
+    until [ -n "$(find ../book.koplugin -newer "$stamp" -print -quit)" ]; do sleep 1; done
+    sleep 0.3
+    echo "run.sh: 插件有改动，重启模拟器" >&2
+    stop
+done
