@@ -38,7 +38,7 @@ package.preload["desktop.detail"] = function()
     return { open = function(_, origin, book) opened_origin, opened_detail = origin, book end }
 end
 local opened_book, open_done
-package.preload["book.open"] = function()
+package.preload["desktop.open"] = function()
     return { book = function(_, book, done) opened_book, open_done = book, done end }
 end
 package.preload["book.catalog"] = function()
@@ -191,6 +191,33 @@ Assert.eq(Themed.last("input").fields[1].text, "初始")
 Themed.last("input").callback("x")
 Assert.eq(custom, "x")
 
+-- 书架变化：只作废缓存，不动页码（越界由 fetch 钳回）；同步失败只在图书馆页显示。
+library.state = { books = {} }
+library.page = 3
+library:onEvent("shelf_changed")
+Assert.is_nil(library.state)
+Assert.eq(library.page, 3)
+library:onEvent("shelf_sync_failed", "离线")
+Assert.eq(library.state.err, "离线")
+desktop.tab = "home"
+library.state = nil
+library:onEvent("shelf_sync_failed", "离线")
+Assert.is_nil(library.state)
+desktop.tab = "library"
+local real_list = source.listLibraryAsync
+local pages_asked = {}
+source.listLibraryAsync = function(_, opts, cb)
+    pages_asked[#pages_asked + 1] = opts.page
+    cb({ data = {}, count = 1 })
+    return { cancel = function() end }
+end
+library.page = 5
+library:fetch()
+Assert.eq(library.page, 1)
+Assert.eq(pages_asked[1], 5)
+Assert.eq(pages_asked[2], 1)
+source.listLibraryAsync = real_list
+
 -- 桌面已销毁：updateView 排队的补拉不能再发请求。
 requested = nil
 library.state = nil
@@ -199,14 +226,15 @@ library:updateView()
 Assert.is_nil(requested)
 desktop.closed = nil
 
--- 手动刷新：只向源发刷新请求（进度弹窗归任务队列，由源前台跟随），自己不弹窗。
+-- 手动刷新：交给 desktop.sync（进度弹窗归任务队列，由它前台跟随），自己不弹窗。
 source.syncBooksAsync = function() end
 local emitted = 0
-source.onEvent = function(_, event, payload)
-    Assert.eq(event, "library_refresh_request")
-    Assert.eq(payload, desktop)
-    emitted = emitted + 1
-end
+package.loaded["desktop.sync"] = {
+    refresh = function(desk)
+        Assert.eq(desk, desktop)
+        emitted = emitted + 1
+    end,
+}
 view_updates = 0
 library:rescan()
 Assert.eq(emitted, 1)

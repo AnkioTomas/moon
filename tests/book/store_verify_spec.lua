@@ -22,14 +22,12 @@ package.preload["utils.paths"] = function() return {} end
 package.preload["utils.log"] = function()
     return { warn = function() end, dbg = function() end, info = function() end }
 end
-package.preload["db.base"] = function() return {} end
-package.preload["source.toc"] = function() return { TTL = 3600 } end
-
+package.preload["utils.db"] = function() return {} end
 local book_rows, chapter_paths = {}, {}
 local cleared, deleted = nil, nil
 local write_ok = true
 local scopes = {}
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
         pathsBySource = function(scope)
             scopes[#scopes + 1] = scope
@@ -38,7 +36,7 @@ package.preload["db.book"] = function()
         clearPaths = function(rows) cleared = rows; return write_ok end,
     }
 end
-package.preload["db.chapter"] = function()
+package.preload["book.chapters_db"] = function()
     return {
         pathsBySource = function() return chapter_paths end,
         deleteMany = function(paths) deleted = paths; return true end,

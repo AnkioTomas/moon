@@ -1,7 +1,7 @@
 --[[--
-db：open、schema 与 reading_stats CRUD
+utils.db：open、子进程禁用、参数绑定、建表登记与身份迁移原语
 
-@module tests.db_spec
+@module tests.utils.db_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
@@ -26,14 +26,14 @@ local function clearMods()
         "workers.job",
         "lua-ljsqlite3/init",
         "ffi/sha2",
-        "db.base",
-        "db.book",
-        "db.chapter",
-        "db.http",
-        "db.note",
-        "db.progress",
-        "db.stats",
-        "db.xray",
+        "utils.db",
+        "book.books_db",
+        "book.chapters_db",
+        "http.cache", "utils.event",
+        "book.note_db",
+        "book.progress_db",
+        "book.stats_db",
+        "features.xray.db",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -46,9 +46,9 @@ do
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return { exec = function() end, close = function() end } end }
     end
-    package.loaded["db.base"] = nil
+    package.loaded["utils.db"] = nil
 
-    local DbBase = require("db.base")
+    local DbBase = require("utils.db")
     local ok, conn = pcall(DbBase.open)
     Assert.is_true(ok)
     Assert.is_true(conn ~= nil)
@@ -83,9 +83,9 @@ do
             end,
         }
     end
-    package.loaded["db.base"] = nil
+    package.loaded["utils.db"] = nil
 
-    local DbBase = require("db.base")
+    local DbBase = require("utils.db")
     Assert.errors(function()
         DbBase.exec("DELETE FROM books;")
     end, "database access is forbidden in subprocess")
@@ -123,9 +123,9 @@ do
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["db.base"] = nil
+    package.loaded["utils.db"] = nil
 
-    local DbBase = require("db.base")
+    local DbBase = require("utils.db")
     DbBase.open()
     -- 建表走无参 conn:exec，不进 prepare；首个 prepare 就是下面这条 INSERT
     local text = "line1\nline2's"
@@ -156,149 +156,90 @@ do
     clearMods()
 end
 
--- ── reading_stats：add / count / exists / replaceSynced 全参数化 ──
-do
-    local calls = {}
+--- 只记 SQL 文本的假连接；fail_on 命中的语句抛错（模拟 SQLite 失败）。
+---@param fail_on string|nil
+local function loadRecording(fail_on)
+    local execs = {}
     local connection = {
-        exec = function(_, sql) calls[#calls + 1] = { sql = sql } end,
+        exec = function(_, sql)
+            execs[#execs + 1] = sql
+            if fail_on and sql:find(fail_on, 1, true) then error("boom") end
+        end,
         close = function() end,
         prepare = function(_, sql)
-            local call = { sql = sql }
-            calls[#calls + 1] = call
+            execs[#execs + 1] = sql
             return {
-                bind = function(self, ...)
-                    call.argc = select("#", ...)
-                    call.args = { ... }
-                    return self
-                end,
-                step = function(_, ...)
-                    if sql:find("COUNT", 1, true) then
-                        return { 2 }, { "COUNT(*)" }
-                    end
-                    -- exists：只有 a.epub 那条算命中
-                    if sql:find("SELECT 1 FROM reading_stats", 1, true) then
-                        if call.args and call.args[2] == "a.epub" then
-                            return { 1 }, { "1" }
-                        end
-                        return nil
-                    end
+                bind = function(self) return self end,
+                step = function()
+                    if fail_on and sql:find(fail_on, 1, true) then error("boom") end
                     return nil
-                end,
-                resultset = function()
-                    if sql:find("chapter_idx", 1, true) then
-                        return {
-                            { 7, 8 },
-                            { "a.epub", "b.epub" },
-                            { 3, 4 },
-                            { 1000, 2000 },
-                            { 30, 45 },
-                            { 300, 400 },
-                            { 1, 2 },
-                            { 0.5, 0.75 },
-                            { 0, 1 },
-                        }, 2
-                    end
-                    return {
-                        { 7, 8 },
-                        { "a.epub", "b.epub" },
-                        { 3, 4 },
-                        { 1000, 2000 },
-                        { 30, 45 },
-                        { 300, 400 },
-                        { 0, 1 },
-                    }, 2
                 end,
                 close = function() end,
             }
         end,
     }
-
     stubDbDeps()
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["db.base"] = nil
-    package.loaded["db.stats"] = nil
+    package.loaded["utils.db"] = nil
+    return require("utils.db"), execs
+end
 
-    local DbBase = require("db.base")
-    local StatsDB = require("db.stats")
-    DbBase.open()
+-- ── schema：open 时按登记顺序在一个事务里建表；已打开后登记的表立即建 ──
+do
+    local DbBase, execs = loadRecording()
+    local order = {}
+    DbBase.schema("a", function()
+        order[#order + 1] = "a"
+        return DbBase.exec("CREATE TABLE IF NOT EXISTS a (x);") ~= nil
+    end)
+    DbBase.schema("b", function()
+        order[#order + 1] = "b"
+        return DbBase.exec("CREATE TABLE IF NOT EXISTS b (x);") ~= nil
+    end)
+    Assert.eq(#order, 0, "未打开连接时只登记不执行")
 
-    Assert.is_true(StatsDB.add({
-        source_id = "moon",
-        stable_id = "a.epub",
-        record_type = "page",
-        page = 3,
-        start_time = 1000,
-        duration = 30,
-        total_pages = 300,
-    }))
-    local insert = calls[#calls]
-    Assert.is_true(insert.sql:find("INSERT INTO reading_stats", 1, true) ~= nil)
-    Assert.eq(insert.argc, 12)
-    Assert.eq(insert.args[1], "moon")
-    Assert.eq(insert.args[2], "a.epub")
-    Assert.eq(insert.args[4], 3)
-    Assert.eq(insert.args[10], 0)
-    Assert.eq(insert.args[11], 1)
-    Assert.eq(insert.args[12], 0)
+    Assert.not_nil(DbBase.open())
+    Assert.eq(table.concat(order, ","), "a,b")
+    local joined = table.concat(execs, "\n")
+    local begin_at = joined:find("BEGIN IMMEDIATE;", 1, true)
+    Assert.is_true(begin_at ~= nil and begin_at < joined:find("CREATE TABLE IF NOT EXISTS a", 1, true))
+    Assert.is_true(joined:find("CREATE TABLE IF NOT EXISTS b", 1, true) < joined:find("COMMIT;", 1, true))
 
-    -- 非法时长仍拒绝
-    Assert.is_false(StatsDB.add({ source_id = "moon", stable_id = "a", start_time = 1, duration = 0 }))
+    DbBase.schema("late", function()
+        order[#order + 1] = "late"
+        return DbBase.exec("CREATE TABLE IF NOT EXISTS late (x);") ~= nil
+    end)
+    Assert.eq(order[#order], "late", "已打开连接时晚到的表立即建")
 
-    local hit = { source_id = "moon", stable_id = "a.epub", record_type = "page", page = 3,
-        start_time = 1000, duration = 30, total_pages = 300 }
-    local miss = { source_id = "moon", stable_id = "b.epub", record_type = "page", page = 4,
-        start_time = 2000, duration = 45, total_pages = 400 }
-    Assert.is_true(StatsDB.exists(hit))
-    Assert.is_false(StatsDB.exists(miss))
-    local probe = calls[#calls]
-    Assert.is_true(probe.sql:find("SELECT 1 FROM reading_stats", 1, true) ~= nil)
-    Assert.eq(probe.argc, 6, "exists 必须走参数化唯一索引查询")
-
-    -- replaceSynced：清理 + 写入同事务；命中的算 skipped，未命中的算 imported
-    local mark = #calls
-    local saved = StatsDB.replaceSynced("moon", { mode = "synced" }, { hit, miss })
-    Assert.eq(saved.imported, 1)
-    Assert.eq(saved.skipped, 1)
-    local begun, deleted, committed = 0, 0, 0
-    for i = mark + 1, #calls do
-        local c = calls[i]
-        if c.sql:find("BEGIN IMMEDIATE", 1, true) then begun = begun + 1 end
-        if c.sql:find("DELETE FROM reading_stats", 1, true) then deleted = deleted + 1 end
-        if c.sql:find("COMMIT", 1, true) then committed = committed + 1 end
-    end
-    Assert.eq(begun, 1)
-    Assert.eq(deleted, 1)
-    Assert.eq(committed, 1)
-
-    local full_mark = #calls
-    local emptied = StatsDB.replaceSynced("moon", { mode = "all_synced" }, {})
-    Assert.eq(emptied.imported, 0)
-    local full_delete
-    for i = full_mark + 1, #calls do
-        if calls[i].sql:find("sync_status=1", 1, true) then full_delete = calls[i] end
-    end
-    Assert.not_nil(full_delete, "空的全量快照也必须清掉旧远端记录")
-    Assert.eq(full_delete.args[1], "moon")
-
-    local pending = StatsDB.unsyncedBySource("moon")
-    Assert.eq(#pending, 2)
-    Assert.is_true(StatsDB.markSynced({ 7, 8 }))
-    local updates = 0
-    for _, c in ipairs(calls) do
-        if c.sql:find("UPDATE reading_stats SET sync_status=1", 1, true) then
-            updates = updates + 1
-        end
-    end
-    Assert.eq(updates, 1)
-    Assert.eq(calls[#calls - 1].argc, 2)
+    -- 重开连接时全部登记重新执行（幂等建表）
+    DbBase.close()
+    order = {}
+    Assert.not_nil(DbBase.open())
+    Assert.eq(table.concat(order, ","), "a,b,late")
 
     DbBase.close()
     clearMods()
 end
 
--- ── books 表：listBySource 分页/筛选/搜索 + 分类/系列列表 ──
+-- ── schema：任一建表失败整体回滚，open 返回错误且不留连接 ──
+do
+    local DbBase, execs = loadRecording("CREATE TABLE IF NOT EXISTS bad")
+    DbBase.schema("good", function()
+        return DbBase.exec("CREATE TABLE IF NOT EXISTS good (x);") ~= nil
+    end)
+    DbBase.schema("bad", function()
+        return DbBase.exec("CREATE TABLE IF NOT EXISTS bad (x);") ~= nil
+    end)
+    local conn, err = DbBase.open()
+    Assert.is_nil(conn)
+    Assert.matches(err, "create schema failed: bad")
+    Assert.eq(execs[#execs], "ROLLBACK;")
+    clearMods()
+end
+
+-- ── moveIdentity：普通改名直接 UPDATE；收编 UPDATE OR IGNORE 后删旧身份残留，全参数化 ──
 do
     local calls = {}
     local connection = {
@@ -309,188 +250,9 @@ do
             calls[#calls + 1] = call
             return {
                 bind = function(self, ...)
-                    call.argc = select("#", ...)
                     call.args = { ... }
                     return self
                 end,
-                step = function()
-                    if sql:find("COUNT", 1, true) then
-                        return { 7 }, { "COUNT(*)" }
-                    end
-                    return nil
-                end,
-                resultset = function()
-                    if sql:find("DISTINCT category", 1, true) then
-                        return { { "sub", "zeta" } }, 2
-                    end
-                    if sql:find("DISTINCT series", 1, true) then
-                        return { { "第一辑", "第二辑" } }, 2
-                    end
-                    if sql:find("COUNT(*)", 1, true) and sql:find("GROUP BY", 1, true) then
-                        if sql:find("WHEN read_state=1 THEN 'read'", 1, true) then
-                            return { { "read", "unread" }, { 2, 4 } }, 2
-                        end
-                        if sql:find("GROUP BY source_id", 1, true) then
-                            return { { "local", "wechat" }, { 3, 5 } }, 2
-                        end
-                        if sql:find("CASE WHEN series", 1, true) then
-                            return { { "第一辑", "" }, { 5, 2 } }, 2
-                        end
-                        return { { "sub", "" }, { 3, 2 } }, 2
-                    end
-                    return {
-                        { "local" },
-                        { "/books/a.epub" },
-                        { "书名" },
-                        { "作者" },
-                        { 42 },
-                        { "sub" },
-                        { "第一辑" },
-                        { "介绍" },
-                        { "https://img.test/a.jpg" },
-                        { 1000 },
-                        { 1 },
-                        { "/cache/a.epub" },
-                    }, 1
-                end,
-                close = function() end,
-            }
-        end,
-    }
-
-    stubDbDeps()
-    package.preload["lua-ljsqlite3/init"] = function()
-        return { open = function() return connection end }
-    end
-    package.loaded["db.base"] = nil
-    package.loaded["db.book"] = nil
-
-    local DbBase = require("db.base")
-    local BookDB = require("db.book")
-    DbBase.open()
-
-    -- 无筛选：仅 source_id；LIMIT/OFFSET 绑定
-    local rows, count = BookDB.listBySource("local", { limit = 24, offset = 48 })
-    Assert.eq(count, 7)
-    Assert.eq(#rows, 1)
-    Assert.eq(rows[1].source_id, "local")
-    Assert.eq(rows[1].stable_id, "/books/a.epub")
-    Assert.eq(rows[1].title, "书名")
-    Assert.eq(rows[1].percent, 42)
-    Assert.eq(rows[1].series, "第一辑")
-    Assert.eq(rows[1].cover, "https://img.test/a.jpg")
-    Assert.eq(rows[1].inserted_at, 1000)
-    Assert.eq(rows[1].read_state, 1)
-    Assert.eq(rows[1].path, "/cache/a.epub")
-    Assert.eq(rows[1].deleted, 0)
-    local count_q = calls[#calls - 1]
-    Assert.is_true(count_q.sql:find("WHERE source_id=%?", 1) ~= nil or count_q.sql:find("source_id=?", 1, true) ~= nil)
-    Assert.is_true(count_q.sql:find("b.deleted=0", 1, true) ~= nil)
-    Assert.is_false(count_q.sql:find("category=", 1, true) ~= nil)
-    local list_q = calls[#calls]
-    Assert.is_true(list_q.sql:find("b.inserted_at", 1, true) ~= nil)
-    Assert.is_true(list_q.sql:find("is_new", 1, true) == nil)
-    Assert.is_true(list_q.sql:find("LIMIT ? OFFSET ?", 1, true) ~= nil)
-    Assert.eq(list_q.args[#list_q.args - 1], 24)
-    Assert.eq(list_q.args[#list_q.args], 48)
-
-    -- 分类 + 系列 + 搜索：AND 条件与 LIKE 参数
-    calls = {}
-    rows, count = BookDB.listBySource("local", {
-        category = "sub",
-        series = "第一辑",
-        search = "鲁",
-        limit = 10,
-        offset = 0,
-    })
-    Assert.eq(count, 7)
-    count_q = calls[1]
-    Assert.is_true(count_q.sql:find("AND b.category=?", 1, true) ~= nil)
-    Assert.is_true(count_q.sql:find("AND b.series=?", 1, true) ~= nil)
-    Assert.is_true(count_q.sql:find("b.title LIKE ?", 1, true) ~= nil)
-    Assert.eq(count_q.args[1], "local")
-    Assert.eq(count_q.args[2], "sub")
-    Assert.eq(count_q.args[3], "第一辑")
-    Assert.eq(count_q.args[4], "%鲁%")
-    Assert.eq(count_q.args[5], "%鲁%")
-    Assert.eq(count_q.args[6], "%鲁%")
-
-    calls = {}
-    BookDB.listBySource("local", { read_status = "unread" })
-    Assert.is_true(calls[1].sql:find("b.read_state<>1", 1, true) ~= nil)
-    calls = {}
-    BookDB.listBySource("local", { read_status = "read" })
-    Assert.is_true(calls[1].sql:find("b.read_state=1", 1, true) ~= nil)
-    calls = {}
-    BookDB.listBySource("local", { uncategorized = true })
-    Assert.is_true(calls[1].sql:find("b.category IS NULL OR b.category=''", 1, true) ~= nil)
-    calls = {}
-    BookDB.listBySource("local", { unseries = true })
-    Assert.is_true(calls[1].sql:find("b.series IS NULL OR b.series=''", 1, true) ~= nil)
-    calls = {}
-    BookDB.listBySource({ "local", "wechat" }, { source_id = "wechat" })
-    Assert.is_true(calls[1].sql:find("b.source_id IN (?,?)", 1, true) ~= nil)
-    Assert.is_true(calls[1].sql:find("AND b.source_id=?", 1, true) ~= nil)
-    Assert.eq(calls[1].args[1], "local")
-    Assert.eq(calls[1].args[2], "wechat")
-    Assert.eq(calls[1].args[3], "wechat")
-    calls = {}
-    BookDB.listBySource("local", { downloaded = true, chapter_sources = { "wechat", "jdread" } })
-    Assert.is_true(calls[1].sql:find("CASE WHEN b.source_id IN (?,?) THEN", 1, true) ~= nil)
-    Assert.is_true(calls[1].sql:find("json_valid(b.toc)", 1, true) ~= nil)
-    Assert.is_true(calls[1].sql:find("FROM chapters c", 1, true) ~= nil)
-    Assert.is_true(calls[1].sql:find("COALESCE(b.path, '')<>''", 1, true) ~= nil)
-    Assert.eq(calls[1].args[1], "local")
-    Assert.eq(calls[1].args[2], "wechat")
-    Assert.eq(calls[1].args[3], "jdread")
-    calls = {}
-    Assert.eq(BookDB.downloadedCountBySource({ "local", "wechat" }, { "wechat" }), 7)
-    Assert.is_true(calls[1].sql:find("b.deleted=0 AND (CASE WHEN b.source_id=? THEN", 1, true) ~= nil)
-    Assert.eq(calls[1].args[3], "wechat")
-
-    -- 分类列表
-    local cats = BookDB.categoriesBySource("local")
-    Assert.eq(#cats, 2)
-    Assert.eq(cats[1], "sub")
-    local series = BookDB.seriesBySource("local")
-    Assert.eq(#series, 2)
-    Assert.eq(series[1], "第一辑")
-    local category_counts = BookDB.categoryCountsBySource("local")
-    Assert.eq(category_counts[1].category, "sub")
-    Assert.eq(category_counts[1].count, 3)
-    Assert.eq(category_counts[2].category, "")
-    Assert.eq(category_counts[2].count, 2)
-    local source_counts = BookDB.sourceCountsBySource({ "local", "wechat" })
-    Assert.eq(source_counts[1].source_id, "local")
-    Assert.eq(source_counts[1].count, 3)
-    Assert.eq(source_counts[2].source_id, "wechat")
-    Assert.eq(source_counts[2].count, 5)
-    local series_counts = BookDB.seriesCountsBySource("local")
-    Assert.eq(series_counts[1].series, "第一辑")
-    Assert.eq(series_counts[1].count, 5)
-    Assert.eq(series_counts[2].series, "")
-    local read_counts = BookDB.readStatusCountsBySource("local")
-    Assert.eq(#read_counts, 2)
-    Assert.eq(read_counts[1].status, "read")
-    Assert.eq(read_counts[1].count, 2)
-    Assert.eq(read_counts[2].status, "unread")
-    Assert.eq(read_counts[2].count, 4)
-
-    DbBase.close()
-    clearMods()
-end
-
--- ── schema：各模块一次性建表，无迁移、无版本号，且从不 DROP ─
-do
-    local execs = {}
-    local connection = {
-        exec = function(_, sql)
-            execs[#execs + 1] = sql
-        end,
-        close = function() end,
-        prepare = function()
-            return {
-                bind = function(self) return self end,
                 step = function() return nil end,
                 close = function() end,
             }
@@ -500,8 +262,38 @@ do
     package.preload["lua-ljsqlite3/init"] = function()
         return { open = function() return connection end }
     end
-    package.loaded["db.base"] = nil
-    local DbBase = require("db.base")
+    package.loaded["utils.db"] = nil
+    local DbBase = require("utils.db")
+    DbBase.open()
+
+    Assert.is_true(DbBase.moveIdentity("notes", "local", "/old'.epub", "/new.epub"))
+    Assert.eq(#calls, 1)
+    Assert.eq(calls[1].sql, "UPDATE notes SET stable_id=? WHERE source_id=? AND stable_id=?;")
+    Assert.eq(calls[1].args[1], "/new.epub")
+    Assert.eq(calls[1].args[2], "local")
+    Assert.eq(calls[1].args[3], "/old'.epub")
+
+    calls = {}
+    Assert.is_true(DbBase.moveIdentity("notes", "local", "/old.epub", "/new.epub", true))
+    Assert.eq(#calls, 2)
+    Assert.eq(calls[1].sql, "UPDATE OR IGNORE notes SET stable_id=? WHERE source_id=? AND stable_id=?;")
+    Assert.eq(calls[2].sql, "DELETE FROM notes WHERE source_id=? AND stable_id=?;")
+    Assert.eq(calls[2].args[1], "local")
+    Assert.eq(calls[2].args[2], "/old.epub")
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── 全部表模块：各自登记建表，建表语句自带全部列，从不 DROP TABLE ──
+do
+    local DbBase, execs = loadRecording()
+    for _idx, name in ipairs({
+        "book.books_db", "book.chapters_db", "book.note_db", "book.progress_db",
+        "book.stats_db", "features.xray.db",
+    }) do
+        require(name)
+    end
     local opened, open_err = DbBase.open()
     DbBase.close()
     clearMods()
@@ -509,143 +301,14 @@ do
     Assert.not_nil(opened)
     Assert.is_nil(open_err)
     local schema = table.concat(execs, "\n")
-    Assert.is_true(schema:find("CREATE TABLE IF NOT EXISTS notes", 1, true) ~= nil)
-    -- 建表语句必须自带全部列，不做旧库迁移。
+    for _idx, tbl in ipairs({ "books", "chapters", "notes", "pending_progress", "reading_stats", "xray_entities" }) do
+        Assert.is_true(schema:find("CREATE TABLE IF NOT EXISTS " .. tbl, 1, true) ~= nil, tbl)
+    end
     Assert.is_true(schema:find("reader_prefs TEXT", 1, true) ~= nil)
     Assert.is_true(schema:find("extra TEXT", 1, true) ~= nil)
     Assert.is_true(schema:find("idx_reading_stats_identity", 1, true) ~= nil)
     Assert.is_false(schema:find("PRAGMA user_version", 1, true) ~= nil)
     Assert.is_true(schema:find("record_type TEXT NOT NULL", 1, true) ~= nil)
     Assert.is_false(schema:find("DROP TABLE", 1, true) ~= nil)
-end
-
--- ── reading_stats 聚合查询（本地洞察）──
-do
-    local day1 = os.date("%Y-%m-%d", os.time() - 86400)
-    local day2 = os.date("%Y-%m-%d")
-    local calls = {}
-    local connection = {
-        exec = function() end,
-        close = function() end,
-        prepare = function(_, sql)
-            local call = { sql = sql }
-            calls[#calls + 1] = call
-            return {
-                bind = function(self, ...)
-                    call.args = { ... }
-                    return self
-                end,
-                step = function()
-                    if sql:find("record_type='total'", 1, true) then
-                        if call.args and call.args[1] == "wechat" then
-                            return { 7200 }, { "total" }
-                        end
-                        return nil
-                    end
-                    if sql:find("MAX(CASE WHEN record_type='page_rollup'", 1, true) then
-                        return { 3660, 0, 3, 2000 }, { "s", "f", "c", "m" }
-                    end
-                    return nil
-                end,
-                resultset = function()
-                    if sql:find("ORDER BY day, seconds DESC", 1, true) then
-                        return {
-                            { day2 },
-                            { "local" },
-                            { "/books/a.epub" },
-                            { 600 },
-                            { 10 },
-                            { 20 },
-                        }, 1
-                    end
-                    if sql:find("GROUP BY day, stable_id, record_type", 1, true) then
-                        return {
-                            { day1, day2 },
-                            { "/books/a.epub", "/books/a.epub" },
-                            { "page", "page" },
-                            { 300, 600 },
-                            { 5, 10 },
-                            { 0, 0 },
-                        }, 2
-                    end
-                    if sql:find("ORDER BY day DESC", 1, true) then
-                        return {
-                            { day2, day1 },
-                            { 600, 300 },
-                            { 10, 5 },
-                        }, 2
-                    end
-                    return {
-                        { day1, day2 },
-                        { 300, 600 },
-                        { 5, 10 },
-                    }, 2
-                end,
-                close = function() end,
-            }
-        end,
-    }
-
-    stubDbDeps()
-    package.preload["lua-ljsqlite3/init"] = function()
-        return { open = function() return connection end }
-    end
-    package.loaded["db.base"] = nil
-    package.loaded["db.stats"] = nil
-
-    local DbBase = require("db.base")
-    local StatsDB = require("db.stats")
-    DbBase.open()
-
-    local s = StatsDB.summaryBySource("local")
-    Assert.eq(s.total_seconds, 900)
-    Assert.eq(s.total_pages, 15)
-    Assert.eq(s.last7_seconds, 900)
-    Assert.eq(s.longest_day_seconds, 600)
-
-    local remote = StatsDB.summaryBySource("wechat")
-    Assert.eq(remote.total_seconds, 7200,
-        "微信累计总量必须覆盖不完整的明细桶求和")
-
-    local daily = StatsDB.dailyBySource("local")
-    Assert.eq(#daily, 2)
-    Assert.eq(daily[1].ymd, day1)
-    Assert.eq(daily[2].seconds, 600)
-
-    local books = StatsDB.dailyBooksBySource("local")
-    Assert.eq(#books, 1)
-    Assert.eq(books[1].source_id, "local")
-    Assert.eq(books[1].stable_id, "/books/a.epub")
-    Assert.eq(books[1].max_page, 10)
-    Assert.eq(books[1].max_total_pages, 20)
-    local sb = StatsDB.summaryByBook("local", "/books/a.epub")
-    Assert.eq(sb.total_seconds, 3660)
-    Assert.eq(sb.pages, 3)
-    Assert.eq(sb.last_read, 2000)
-    local sb_q = calls[#calls]
-    Assert.is_true(sb_q.sql:find("AND stable_id=?", 1, true) ~= nil)
-    Assert.eq(sb_q.args[1], 0, "无云端快照时快照时间按 0 绑定")
-    Assert.eq(sb_q.args[2], "local")
-    Assert.eq(sb_q.args[3], "/books/a.epub")
-
-    -- 按书按天聚合（详情页最近几天卡片）：日期倒序 + LIMIT 绑定
-    local bd = StatsDB.dailyByBook("local", "/books/a.epub", 5)
-    Assert.eq(#bd, 2)
-    Assert.eq(bd[1].ymd, day2)
-    Assert.eq(bd[1].seconds, 600)
-    Assert.eq(bd[1].pages, 10)
-    Assert.eq(bd[2].ymd, day1)
-    local bd_q = calls[#calls]
-    Assert.is_true(bd_q.sql:find("AND r.stable_id=?", 1, true) ~= nil)
-    Assert.is_true(bd_q.sql:find("LIMIT ?", 1, true) ~= nil)
-    Assert.eq(bd_q.args[1], "local")
-    Assert.eq(bd_q.args[2], "/books/a.epub")
-    Assert.eq(bd_q.args[#bd_q.args], 5, "LIMIT 绑定在最后")
-    -- 全部参数化：source_id 绑定，不以字面量拼进 SQL
-    for _, c in ipairs(calls) do
-        Assert.is_false(c.sql:find("'local'", 1, true) ~= nil)
-    end
-
-    DbBase.close()
-    clearMods()
+    Assert.is_false(schema:find("UPDATE books", 1, true) ~= nil, "进度表建表不直接改 books")
 end

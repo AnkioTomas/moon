@@ -1,4 +1,4 @@
---[[-- db.xray：参数化写入。 --]]
+--[[-- features.xray.db：参数化写入。 --]]
 
 local Assert = require("support.assert")
 
@@ -35,8 +35,8 @@ package.preload["lua-ljsqlite3/init"] = function()
     return { open = function() return connection end }
 end
 
-local Base = require("db.base")
-local XrayDB = require("db.xray")
+local Base = require("utils.db")
+local XrayDB = require("features.xray.db")
 Base.open()
 
 Assert.is_true(XrayDB.upsert("moon", "b1", {

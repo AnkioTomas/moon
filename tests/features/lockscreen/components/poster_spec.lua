@@ -24,16 +24,12 @@ end
 
 local db_rows = {}
 local db_sources = {}
-package.preload["db.book"] = function()
+package.preload["book.catalog"] = function()
     return {
-        listBySource = function(source_id)
+        listBooks = function(source_id)
             db_sources[#db_sources + 1] = source_id
             return db_rows, #db_rows
         end,
-    }
-end
-package.preload["book.catalog"] = function()
-    return {
         recentBooks = function(source_id, limit)
             db_sources[#db_sources + 1] = source_id
             local rows = {}

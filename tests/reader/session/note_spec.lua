@@ -1,4 +1,4 @@
---[[-- book.note：注解快照在事件时 JSON 编码后同步落库。 --]]
+--[[-- reader.session.note：注解快照在事件时 JSON 编码后同步落库。 --]]
 
 local Assert = require("support.assert")
 
@@ -15,7 +15,7 @@ package.preload["json"] = function()
         end,
     }
 end
-package.preload["db.note"] = function()
+package.preload["book.note_db"] = function()
     return {
         get = function() return nil end,
         upsert = function(source_id, stable_id, chapter_idx, payload)
@@ -31,8 +31,9 @@ package.preload["logger"] = function()
     return { warn = function() end }
 end
 package.loaded["book.note"] = nil
+package.loaded["reader.session.note"] = nil
 
-local Note = require("book.note")
+local SessionNote = require("reader.session.note")
 local annotations = { { datetime = "2026-08-20", text = "高亮", page = 3 } }
 local ui = {
     document = { getPageCount = function() return 100 end },
@@ -47,7 +48,7 @@ local ui = {
     },
 }
 local identity = { source_id = "moon", stable_id = "b'1", chapter_idx = 2 }
-Note.save(ui, identity)
+SessionNote.save(ui, identity)
 Assert.eq(encoded[1].text, "高亮", "必须编码 ReaderAnnotation 当前内存快照")
 Assert.eq(encoded[1].total_pages, 100)
 annotations[1].text = "已修改"
@@ -58,10 +59,10 @@ Assert.eq(writes[1][3], 2)
 Assert.eq(writes[1][4], "[snapshot]")
 
 fail_encode = true
-Note.save(ui, { source_id = "moon", stable_id = "b2" })
+SessionNote.save(ui, { source_id = "moon", stable_id = "b2" })
 Assert.len(writes, 1, "编码失败不能写入不完整快照")
 
-for _, name in ipairs({ "json", "db.note", "logger", "book.store", "book.note" }) do
+for _, name in ipairs({ "json", "book.note_db", "logger", "book.store", "book.note", "reader.session.note" }) do
     package.preload[name] = nil
     package.loaded[name] = nil
 end

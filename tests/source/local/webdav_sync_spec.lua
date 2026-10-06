@@ -22,7 +22,7 @@ package.preload["utils.log"] = function()
     return { dbg = function() end, warn = function() end, info = function() end }
 end
 
--- ── db.book：只实现本流程用到的语义（reconcile 只下架已同步行、upsertRemote 不碰脏行）──
+-- ── book.books_db：只实现本流程用到的语义（reconcile 只下架已同步行、upsertRemote 不碰脏行）──
 local books = {}
 local function copy(t)
     local out = {}
@@ -102,10 +102,10 @@ function BookDB.libraryStableIdsBySource()
     for id, b in pairs(books) do if b.deleted == 0 then out[#out + 1] = id end end
     return out
 end
-package.preload["db.book"] = function() return BookDB end
+package.preload["book.books_db"] = function() return BookDB end
 
 local progress = {}
-package.preload["db.progress"] = function()
+package.preload["book.progress_db"] = function()
     return {
         get = function(_, id) return progress[id] end,
         upsertRemote = function(_, id, pos)
@@ -131,7 +131,7 @@ package.preload["workers.job"] = function()
     }
 end
 
-for _, name in ipairs({ "db.book", "db.progress", "json", "ffi/zlib", "utils.settings", "utils.log",
+for _, name in ipairs({ "book.books_db", "book.progress_db", "json", "ffi/zlib", "utils.settings", "utils.log",
     "workers.job", "source.local.client" }) do
     package.loaded[name] = nil
 end
@@ -450,7 +450,7 @@ do
         Assert.eq(books["webdav://" .. rel].path, L .. "/" .. rel, rel)
     end
 
-    -- 打开远端书：按需下载到本地目录（book.open 随后 Store.touch 登记 path）。
+    -- 打开远端书：按需下载到本地目录（desktop.open 随后 Store.touch 登记 path）。
     local opened
     c:openWebdavAsync("webdav://远端.epub", function(p) opened = p end)
     Stubs.flush()

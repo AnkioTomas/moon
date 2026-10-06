@@ -15,21 +15,17 @@ local function stub(name, factory)
     package.loaded[name] = nil
 end
 
-stub("db.book", function()
+stub("book.books_db", function()
     return {
         pendingDeleteIds = function() return { "gone-comic" } end,
         get = function() return nil end,
-    }
-end)
-stub("book.store", function()
-    return {
-        finalizeDeleted = function(_, stable_id)
+        remove = function(_, stable_id)
             finalized[#finalized + 1] = stable_id
             return true
         end,
-        reconcile = function(_, books)
+        reconcile = function()
             calls[#calls + 1] = "reconcile"
-            return { pulled = #books, pushed = 0, hidden = 0, conflicts = 0, skipped = false }
+            return true, 0
         end,
     }
 end)

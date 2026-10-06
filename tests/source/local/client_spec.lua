@@ -141,7 +141,7 @@ local renames = {}
 
 -- 扫描走子进程（workers.job）：离线测试不 fork，worker 就地同步跑，
 -- progress 直接转给 on_progress，结果经 nextTick 交 on_done 保持异步语义。
--- 子进程不碰 sqlite 的约束由 db.base 在真机上强制，这里的 db.book 全是内存假实现。
+-- 子进程不碰 sqlite 的约束由 utils.db 在真机上强制，这里的 book.books_db 全是内存假实现。
 -- CRASH_AT 里的书一开打就模拟引擎段错误：子进程死亡，父进程只收到 "job exited without result"。
 local CRASH_AT = {}
 local job_runs = 0
@@ -167,7 +167,7 @@ package.preload["workers.job"] = function()
         end,
     }
 end
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
         get = function(source_id, stable_id)
             return db_rows[rowKey(source_id, stable_id)]
@@ -262,7 +262,7 @@ for _, name in ipairs({
     "utils.paths",
     "document/documentregistry",
     "utils.task",
-    "db.book",
+    "book.books_db",
     "source.local.client",
 }) do
     package.loaded[name] = nil
@@ -399,7 +399,7 @@ do
     db_rows[rowKey("local", "/books/old_name.epub")] = {
         source_id = "local", stable_id = "/books/old_name.epub", md5 = "digest-a", title = "已有元数据",
     }
-    local BookDB = require("db.book")
+    local BookDB = require("book.books_db")
     -- 模拟扫描发现同 md5 的新路径（partialMD5 在此测试环境恒为 nil，直接调用 DB 层验证原地改名的效果）
     local by_md5 = BookDB.getByMd5("local", "digest-a")
     Assert.not_nil(by_md5)
@@ -828,7 +828,7 @@ do
 
     -- 身份迁移失败：书移回原处，报错而不是返回新路径
     -- （虚拟目录树不随 os.rename 变化，新位置的 .sdr 在桩里不存在，回迁只剩书本身）
-    local BookDB = require("db.book")
+    local BookDB = require("book.books_db")
     local real_rename_id = BookDB.renameStableId
     BookDB.renameStableId = function() return false end
     new_id, err = c:moveBook("/books/a.epub", "科幻", nil)
@@ -988,7 +988,7 @@ for _, name in ipairs({
     "utils.paths",
     "document/documentregistry",
     "utils.task",
-    "db.book",
+    "book.books_db",
     "source.local.client",
 }) do
     package.preload[name] = nil

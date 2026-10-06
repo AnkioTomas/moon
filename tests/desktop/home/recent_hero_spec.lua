@@ -29,7 +29,7 @@ Assert.eq(range.height, 148)
 Assert.is_nil(range.fill)
 
 local opened
-package.loaded["book.open"] = { book = function(_, book) opened = book end }
+package.loaded["desktop.open"] = { book = function(_, book) opened = book end }
 local ctx = { plugin = {}, source = { id = "local" }, desktop = {} }
 local hero = Hero:new()
 local slot = hero:build(ctx, { width = 600, height = 160 })
@@ -52,7 +52,7 @@ Assert.eq(hero_builds, builds + 1, "进度变化重建")
 hero:destroy()
 
 shelf_recent, shelf_err = nil, "读取失败"
-local desktop = { library = { filter = {}, page = 2 } }
+local desktop = { library = { reset = function() end } }
 function desktop:switchTab(tab) self.switched = tab end
 slot = Hero:new():build({ desktop = desktop }, { width = 600, height = 160 })
 Assert.contains(Kit.texts(slot), "读取失败")

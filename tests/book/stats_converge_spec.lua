@@ -16,7 +16,7 @@ local pending = {
         total_pages = 10,
     },
 }
-package.preload["db.stats"] = function()
+package.preload["book.stats_db"] = function()
     return {
         unsyncedBySource = function(_, limit)
             local rows = {}

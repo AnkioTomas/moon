@@ -10,7 +10,7 @@ local Catalog = require("book.catalog")
 do
     local c = SourceCapabilities.defaults()
     Assert.is_false(c.store)
-    Assert.is_false(c.insight)
+    Assert.is_nil(c.insight)
     Assert.is_false(c.stats_pull)
     Assert.is_false(c.scrape)
     Assert.is_false(c.edit)

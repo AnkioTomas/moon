@@ -15,7 +15,7 @@ _G.G_reader_settings = {
 }
 
 local rows = {}
-package.preload["db.note"] = function()
+package.preload["book.note_db"] = function()
     return {
         upsert = function(source_id, stable_id, chapter_idx, payload, updated_at, synced)
             rows[source_id .. ":" .. stable_id .. ":" .. (chapter_idx or 0)] = {
@@ -75,9 +75,6 @@ end
 package.preload["source.registry"] = function()
     return { resolve = function() return source end }
 end
-package.preload["book.store"] = function()
-    return { isCurrentDocument = function() return true end }
-end
 package.preload["json"] = function()
     local payloads = {}
     local revision = 0
@@ -91,11 +88,20 @@ package.preload["json"] = function()
         decode = function(payload) return payloads[payload] end,
     }
 end
-package.loaded["db.note"] = nil
+package.loaded["book.note_db"] = nil
 package.loaded["json"] = nil
 package.loaded["source.registry"] = nil
-package.loaded["book.store"] = nil
 package.loaded["book.note"] = nil
+package.loaded["reader.session.note"] = nil
+local open_files = {
+    ["/a.epub"] = { source_id = "moon", stable_id = "小说.epub" },
+    ["/b2.epub"] = { source_id = "unlocated", stable_id = "book2.epub" },
+    ["/b3.epub"] = { source_id = "authoritative", stable_id = "book.epub", chapter_idx = 2 },
+}
+package.preload["book.store"] = function()
+    return { identityFor = function(file) return open_files[file] end }
+end
+package.loaded["book.store"] = nil
 
 local sent = {}
 local pull_count = 0
@@ -128,6 +134,7 @@ local annotations = {
 }
 local ui = {
     document = {
+        file = "/a.epub",
         getPageCount = function()
             return 100
         end,
@@ -150,11 +157,12 @@ local identity = {
     source = source,
 }
 local Note = require("book.note")
+local SessionNote = require("reader.session.note")
 source.syncNotesAsync = function(self, opts, cb)
     return Note.syncAsync(self, opts, cb)
 end
 
-Note.save(ui, identity, function(ok)
+SessionNote.save(ui, identity, function(ok)
     if ok then Note.syncAsync(source, { identity = identity }, function() end) end
 end)
 Stubs.flush()
@@ -167,7 +175,7 @@ Assert.eq(sent[1].annotations[1].text, "高亮文字")
 Assert.eq(sent[1].annotations[1].ignored, nil)
 
 annotations = {}
-Note.save(ui, identity, function(ok)
+SessionNote.save(ui, identity, function(ok)
     if ok then Note.syncAsync(source, { identity = identity }, function() end) end
 end)
 Stubs.flush()
@@ -176,14 +184,14 @@ Assert.eq(#sent[2].annotations, 0, "空快照必须上报以传播删除")
 
 -- 网络恢复只重试本地脏快照，不顺手拉远端。
 annotations = { { datetime = "2026-08-21", page = "/local-new" } }
-Note.save(ui, identity, function(ok)
+SessionNote.save(ui, identity, function(ok)
     if ok then Note.syncAsync(source, { identity = identity, dirty_only = true }, function() end) end
 end)
 Stubs.flush()
 Assert.eq(#sent, 3)
 Assert.eq(pull_count, 2)
 
-Note.pull(ui, identity)
+SessionNote.pull(ui, identity)
 Stubs.flush()
 Assert.eq(annotations[1].page, "/remote", "pull 必须在保存当前快照后应用远端快照")
 Assert.eq(rows["moon:小说.epub:0"].sync_status, 1, "拉取结果必须先作为已同步快照写入 SQLite")
@@ -246,7 +254,7 @@ do
     end
     annotations = {}
     local ui2 = {
-        document = { getPageCount = function() return 10 end },
+        document = { file = "/b2.epub", getPageCount = function() return 10 end },
         doc_settings = {
             flush = function() end,
             readSetting = function(_, key)
@@ -257,7 +265,7 @@ do
             end,
         },
     }
-    Note.pull(ui2, {
+    SessionNote.pull(ui2, {
         source_id = "unlocated", stable_id = "book2.epub", source = unlocated,
     })
     Stubs.flush()
@@ -334,6 +342,7 @@ do
         },
     }
     local ui3 = {
+        document = { file = "/b3.epub" },
         doc_settings = {
             readSetting = function(_, key)
                 if key == "annotations" then return annotations end
@@ -344,12 +353,22 @@ do
             flush = function() end,
         },
     }
-    Note.applyLocal(ui3, {
+    SessionNote.applyLocal(ui3, {
         source_id = "authoritative", stable_id = "book.epub", chapter_idx = 2,
         source = authoritative,
     })
     Assert.eq(#annotations, 0, "权威远端删除不能被本地防丢保护挡住")
     Assert.is_true(merge_authoritative)
+
+    -- 回调回来时阅读器已换了章：不得把别章快照写进当前文档
+    Assert.eq(SessionNote.applyLocal(ui3, {
+        source_id = "authoritative", stable_id = "book.epub", chapter_idx = 3,
+        source = authoritative,
+    }), 0)
+    Assert.eq(SessionNote.applyLocal({ doc_settings = ui3.doc_settings }, {
+        source_id = "authoritative", stable_id = "book.epub", chapter_idx = 2,
+        source = authoritative,
+    }), 0, "没有打开文档时不应用")
 end
 
 -- 上传窗口内用户又划了线：不能用上传时那份快照 + 旧修订号覆盖回去。

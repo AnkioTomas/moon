@@ -8,14 +8,19 @@ local Assert = require("support.assert")
 local Stubs = require("support.stubs")
 
 local rows = {}
-package.preload["db.http"] = function()
+-- http 表的内存替身：http.cache 只用到按 key 读、upsert、按 key 删。
+package.preload["utils.db"] = function()
     return {
-        get = function(key) return rows[key] end,
-        set = function(key, value)
-            rows[key] = value
+        schema = function() end,
+        rowexec = function(_sql, key) return rows[key] end,
+        exec = function(sql, key, value)
+            if sql:find("INSERT INTO http", 1, true) then
+                rows[key] = value
+            elseif sql:find("WHERE key=?", 1, true) then
+                rows[key] = nil
+            end
             return true
         end,
-        delete = function(key) rows[key] = nil end,
     }
 end
 package.preload["json"] = function()

@@ -1,11 +1,11 @@
 --[[--
-book.progress.position 纯计算测试。
+reader.session.position 纯计算测试。
 
 @module tests.book.progress_position_spec
 --]]
 
 local Assert = require("support.assert")
-local Position = require("book.progress.position")
+local Position = require("reader.session.position")
 
 do
     local snapshot = {

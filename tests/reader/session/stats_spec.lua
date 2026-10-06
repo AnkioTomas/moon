@@ -1,9 +1,9 @@
---[[-- book.stats：会话计时 / 翻页结清 --]]
+--[[-- reader.session.stats：会话计时 / 翻页结清 --]]
 
 local Assert = require("support.assert")
 
 local added = {}
-package.preload["db.stats"] = function()
+package.preload["book.stats_db"] = function()
     return {
         add = function(row)
             added[#added + 1] = row
@@ -11,7 +11,7 @@ package.preload["db.stats"] = function()
         end,
     }
 end
-package.loaded["book.stats"] = nil
+package.loaded["reader.session.stats"] = nil
 
 -- 可控时钟（os.time 秒级精度，必须 mock 才能测 duration）
 local real_time = os.time
@@ -20,7 +20,7 @@ os.time = function()
     return now
 end
 
-local Tracker = require("book.stats")
+local Tracker = require("reader.session.stats")
 local identity = { source_id = "moon", stable_id = "a.epub" }
 
 local function ui(file, page, pages)
@@ -114,9 +114,8 @@ end
 os.time = real_time
 
 for _, name in ipairs({
-    "db.stats",
-
-    "book.stats",
+    "book.stats_db",
+    "reader.session.stats",
 }) do
     package.preload[name] = nil
     package.loaded[name] = nil

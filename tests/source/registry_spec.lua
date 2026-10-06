@@ -72,7 +72,7 @@ package.preload["workers.job"] = function()
     }
 end
 package.preload["source.fanqie.content"] = function() return {} end
-package.preload["source.fanqie.toc"] = function()
+package.preload["source.toc"] = function()
     return { read = function() return nil end, put = function() end, index = function() end }
 end
 
@@ -108,7 +108,7 @@ do
     Assert.is_true(caps.scrape)
     Assert.is_true(caps.edit)
     Assert.is_nil(caps.whole_book)
-    Assert.is_true(type(src.recentBooksAsync) == "function")
+    Assert.is_true(type(src.listLibraryAsync) == "function")
     Assert.is_true(type(src.coverRequest) == "function")
     Assert.is_false(src:configured())
 end
@@ -119,7 +119,6 @@ do
     Assert.eq(src.id, "moon")
     Assert.eq(src.type, "book")
     local caps = src:capabilities()
-    Assert.is_true(caps.insight)
     Assert.is_true(caps.stats_pull)
     Assert.is_false(caps.scrape)
     Assert.is_false(caps.edit)
@@ -136,7 +135,6 @@ do
     local src, err = Registry.create("jdread")
     Assert.is_true(src ~= nil, err)
     local caps = src:capabilities()
-    Assert.is_true(caps.insight)
     Assert.is_false(caps.stats_pull)
     Assert.is_false(type(src.pushStatsAsync) == "function")
 end
@@ -152,14 +150,14 @@ do
     local src, err = Registry.create("fanqie")
     Assert.is_true(src ~= nil, err)
     Assert.eq(src.id, "fanqie")
-    Assert.is_true(src:capabilities().refresh)
+    Assert.is_false(src:capabilities().stats_pull)
 end
 
 do
     local src, err = Registry.create("copymanga")
     Assert.is_true(src ~= nil, err)
     Assert.is_true(src:configured())
-    Assert.is_true(src:capabilities().search)
+    Assert.is_false(src:capabilities().stats_pull)
 end
 
 do

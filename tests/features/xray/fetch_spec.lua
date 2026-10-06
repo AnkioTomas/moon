@@ -8,7 +8,7 @@ package.preload["json"] = function()
 end
 
 local entity_rows = {}
-package.preload["db.xray"] = function()
+package.preload["features.xray.db"] = function()
     return {
         list = function(source_id, stable_id, kind)
             local out = {}

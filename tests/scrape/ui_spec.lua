@@ -62,7 +62,7 @@ package.preload["ui.themes.widgets.image"] = function()
         invalidate = function(path) invalidated[#invalidated + 1] = path end,
     }
 end
-package.preload["db.book"] = function()
+package.preload["book.books_db"] = function()
     return {
         get = function()
             return { category = "原分类", percent = 37, md5 = "digest" }
@@ -102,7 +102,7 @@ end
 
 for _, name in ipairs({
     "ui/uimanager",
-    "scrape.results", "scrape.search", "ui.themes.widgets.image", "db.book",
+    "scrape.results", "scrape.search", "ui.themes.widgets.image", "book.books_db",
     "utils.paths", "source.base", "source.registry", "scrape.ui",
 }) do
     package.loaded[name] = nil

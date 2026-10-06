@@ -9,7 +9,7 @@ local pending_rows = {
 }
 local confirmed
 local confirm_ok = true
-package.preload["db.stats"] = function()
+package.preload["book.stats_db"] = function()
     return {
         unsyncedBySource = function() return pending_rows end,
         markSynced = function(ids)
@@ -21,7 +21,7 @@ end
 package.preload["ui/network/manager"] = function()
     error("book.stats 不得加载 NetworkMgr")
 end
-package.loaded["db.stats"] = nil
+package.loaded["book.stats_db"] = nil
 package.loaded["book.stats"] = nil
 
 local Stats = require("book.stats")

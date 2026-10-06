@@ -11,7 +11,7 @@ local function record(source_id)
     sources[#sources + 1] = source_id
 end
 
-package.preload["db.stats"] = function()
+package.preload["book.stats_db"] = function()
     return {
         periodSummary = function(source_id)
             record(source_id)
