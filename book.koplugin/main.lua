@@ -68,6 +68,7 @@ local function init(self)
     if not require("ko_version").check() then
         return
     end
+    require("utils.event").init()
     logger.info("book plugin init", self.ui.document and "reader" or "filemanager")
     require("ui.fonts").onCreate()
     Menu.onCreate(self)
