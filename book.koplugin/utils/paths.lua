@@ -10,7 +10,7 @@ Moon 目录布局（$DATA/.moon）
         book/<slug>/     整本 book.* 或章节 N.html；slug 由 stable_id 派生
         image/           网络图片 / 封面
       image/             不属于特定源的网络图片
-    settings/            common.lua、<section>.lua、<source>.lua
+    settings/            <拥有者末段>.lua、<源 id>.lua；common.lua 等拆分前的旧分区只作迁移来源
     screensaver/         锁屏资源
     backups/
       patches/<feature>/ 核心补丁安装前的原始文件备份
@@ -192,7 +192,7 @@ function P.commonPath()
     return P.settingsDir() .. "/common.lua"
 end
 
---- 功能配置路径：settings/<section>.lua
+--- 拥有者配置路径：settings/<section>.lua（section = 拥有者模块路径末段，或旧分区名）
 ---@param section string
 ---@return string
 function P.sectionPath(section)
