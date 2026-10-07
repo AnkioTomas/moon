@@ -1,6 +1,6 @@
  # http/ — 唯一网络栈
 
-禁止 `socket.http` / luasocket 超时路径。缓存表见 [`docs/db/http.md`](../../docs/db/http.md)。
+禁止 `socket.http` / luasocket 超时路径。缓存表在 [`cache.lua`](cache.lua)。
 
 ## 设计
 

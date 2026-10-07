@@ -132,19 +132,19 @@ local function toggle(desktop)
     use(desktop, proxy.url)
 end
 
---- 设置根页「系统」组的入口（featureRow 规格）。
+--- 设置根页的导航条目（BookSettingEntry，group 与 order 由设置页填）。
 ---@param desktop BookDesktop
 ---@return table
 function Setting.entry(desktop)
     local proxy, on = saved(), enabled()
     return {
+        id = "network",
         icon = "lan",
         title = _("网络"),
         subtitle = _("HTTP 代理"),
         status = on and proxy and (proxy.host .. ":" .. proxy.port) or _("直连"),
         status_on = on and proxy ~= nil,
         page = {
-            id = "network",
             title = _("网络"),
             sections = function()
                 return { { title = _("HTTP 代理"), rows = Setting.rows(desktop) } }
