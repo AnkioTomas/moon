@@ -1,161 +1,29 @@
 --[[--
-配置存储。
+配置存储框架：只管分区文件、默认值、迁移与落盘，不认识任何具体设置项。
 
-common.lua 只保存跨功能的全局状态；功能配置分别保存到
-settings/<section>.lua。统一提供 get()/save() 外观，避免调用方感知存储布局。
+每个分区归一个拥有者，拥有者用模块路径标识（`reader`、`desktop.pages.home`、`features.nightmode`）：
+  - 默认值声明在 `<拥有者>/setting.lua` 的 `defaults`，`keys` 列出无默认值但要持久的键；
+    声明文件各侧都会加载（阅读器、离线测试），顶层别 require 界面模块。
+  - 落盘到 settings/<路径末段>.lua；末段重名直接报错（与源配置 settings/<源 id>.lua 同目录，也别撞源 id）。
+  - 读 `get(owner)`（返回表可就地改），写 `save(owner)`。
+  - 每个进程首次打开时：先经 `utils.settings_legacy` 从拆分前的旧分区搬键（键名不变），再补默认值。
+
+源 / 书城的独立配置走 getSource / saveSource（settings/<id>.lua，无默认值）。
 
 @module koplugin.book.utils.settings
 --]]
 
 local LuaSettings = require("luasettings")
+local Legacy = require("utils.settings_legacy")
 local Paths = require("utils.paths")
 
 local M = {}
 
-local DEFAULTS = {
-    common = {
-        active_source = "local",
-        library_mixed = false,
-        zlib_enabled = false,
-        opds_enabled = false,
-        book_debug_enabled = false,
-        -- 首次安装已把 KOReader start_with 种成月读；之后尊重用户改动。
-        start_with_seeded = false,
-        -- 启动项为月读时，顶部菜单的抽屉（文件浏览器）图标直接回月读桌面。
-        drawer_opens_desktop = true,
-    },
-    display = {
-        ui_scale = 130, ui_font = "", ui_font_name = "", grid_max_cols = 4,
-        library_sort = "recent_added",
-        mesh_mask = true,
-        -- off / schedule / sun；时间是当天分钟数，sun 模式另存 auto_night_lat / auto_night_lon / auto_night_tz（当地时区分钟偏移，缺省用设备时区）。
-        auto_night = "off", auto_night_from = 22 * 60, auto_night_to = 7 * 60,
-        -- 亮度百分比，0 = 关灯。有光线传感器按 ambientBrightnessLevel 0..4 查 levels，否则按 NightMode.PERIOD_STARTS 时段查 periods。
-        -- 昏暗最需要补光；黑暗眼睛已适应，低一档即可；中性少量；明亮起墨水屏不需要前光。
-        -- 时段：凌晨 清晨 上午 中午 下午 傍晚 晚上 深夜。
-        auto_light = false, auto_light_levels = { 25, 50, 35, 0, 0 },
-        auto_light_periods = { 5, 12, 22, 30, 27, 18, 10, 5 },
-    },
-    lockscreen = {
-        lock_screen = "ko",
-        lock_screen_background = "bing",
-        lock_screen_component = "current",
-        lock_screen_position = "center-center",
-        lock_screen_wide = true,
-        lock_screen_bill_period = "7d",
-        lock_screen_poster_style = "vertical",
-        lock_screen_custom_message = "读书不觉已春深，一寸光阴一寸金。",
-        lock_screen_asset_cache = {},
-    },
-    remote = { remote_port = 9528, remote_autostart = false, remote_idle_stop = true },
-    maintenance = {
-        auto_update_check = false,
-        update_last_checked_at = 0,
-    },
-    pinyin = {
-        pinyin_enabled = false,
-        ime_layout = "pinyin",
-        ime_dict_built_at = {},
-        ime_dict_sha256 = {},
-    },
-    quickpanel = {
-        -- 新安装默认启用注册表中的全部动作；已有配置仍保持用户选择。
-        quick_panel_actions = {
-            "night", "wifi", "remote", "rotate", "refresh", "screenshot", "frontlight", "autolight", "suspend",
-        },
-        quick_panel_reader_actions = { "toc", "font", "reflow", "highlights", "bookorbit", "xray", "page_turn" },
-    },
-    reader = {
-        book_xray_enabled = true,
-        book_xray_show_marks = true,
-        book_xray_mark_style = "dashed",
-        book_reader_top_bar = true,
-        book_reader_bottom_bar = true,
-        book_reader_replace_top_bar = true,
-        book_reader_replace_bottom_bar = true,
-        book_reader_top_bar_layout = {
-            { id = "chapter", align = "left" },
-            { id = "clock", align = "right" },
-        },
-        book_reader_bottom_bar_layout = {
-            { id = "progress_bar", align = "left" },
-            { id = "percent", align = "right" },
-            { id = "chapter_idx", align = "right" },
-            { id = "remaining", align = "right" },
-        },
-        auto_mark_read_at_99 = false,
-        edge_translation_enabled = true,
-        baike_enabled = true,
-        dictionary_enabled = true,
-        selection_handles_enabled = true,
-        -- 划词菜单的显示顺序；关闭状态仍由 reader_popup_buttons 单独保存。
-        reader_popup_button_order = {
-            "select", "highlight", "copy", "add_note", "dictionary", "translate",
-            "wikipedia", "xray", "ai_explain", "search", "view_html", "qrcode",
-        },
-        reader_popup_buttons = {
-            select = true,
-            highlight = true,
-            copy = true,
-            add_note = true,
-            wikipedia = true,
-            dictionary = true,
-            translate = true,
-            xray = true,
-            ai_explain = true,
-            view_html = true,
-            qrcode = true,
-            search = true,
-        },
-        translate_languages = { "en", "zh", "ja", "fr", "de", "ko", "es", "ru", "zh_TW" },
-    },
-    home = {
-        home_topbar_items = {
-            clock = true,
-            source = true,
-            memory = true,
-            cache = true,
-            storage = true,
-            wifi = true,
-            brightness = true,
-            battery = true,
-        },
-        home_weather_city = "",
-        home_clock_weather_order = "weather_left",
-        home_recent_list_rows = 2,
-        home_recent_list_cols = 4,
-        home_recent_list_show_title = true,
-    },
-    ai = { ai_endpoint = "", ai_api_key = "", ai_model = "" },
-}
-
-local SECTIONS = {
-    "common", "display", "lockscreen", "remote", "maintenance",
-    "pinyin", "quickpanel", "reader", "home", "ai",
-}
-local KEY_SECTION = {}
-for section, defaults in pairs(DEFAULTS) do
-    for key in pairs(defaults) do KEY_SECTION[key] = section end
-end
-KEY_SECTION.home_widgets = "home"
-KEY_SECTION.auto_night_lat = "display"
-KEY_SECTION.auto_night_lon = "display"
-KEY_SECTION.auto_night_tz = "display"
--- These are runtime/cache values, not user-facing defaults, but belong beside
--- the lockscreen settings rather than in common.lua.
-for _, key in ipairs({
-    "lock_screen_day", "lock_screen_quote_cache",
-    "lock_screen_quote_source_cache", "lock_screen_quote_index",
-}) do
-    KEY_SECTION[key] = "lockscreen"
-end
-KEY_SECTION.enabled_sources = "common"
-
 local _files = {}
-local _merged
-local _initialized = false
+---@type table<string, string> 文件名 → 已打开它的拥有者
+local _owners = {}
 
---- 复制默认值，递归拷贝表，避免嵌套配置共享 DEFAULTS 的子表。
+--- 复制默认值，递归拷贝表，避免嵌套配置共享声明里的子表。
 local function copyValue(value)
     if type(value) ~= "table" then return value end
     local out = {}
@@ -191,159 +59,59 @@ local function openFile(path)
     return ls
 end
 
---- 取某个配置分区的 LuaSettings；common 落 common.lua，其余落 settings/<section>.lua。
----@param section string
----@return table LuaSettings
-local function sectionFile(section)
-    return openFile(section == "common" and Paths.commonPath() or Paths.sectionPath(section))
+--- 首次打开：登记文件名归属，从旧分区搬键，补默认值。
+---@param owner string
+---@param name string 文件名（路径末段）
+---@param file table LuaSettings
+local function adopt(owner, name, file)
+    _owners[name] = owner
+    local spec = require(owner .. ".setting")
+    local keys = {}
+    for key in pairs(spec.defaults or {}) do keys[#keys + 1] = key end
+    for _idx, key in ipairs(spec.keys or {}) do keys[#keys + 1] = key end
+    local touched = Legacy.migrate(file, keys, openFile)
+    if fillDefaults(file.data, spec.defaults) or #touched > 0 then file:flush() end
+    for _idx, legacy in ipairs(touched) do legacy:flush() end
 end
 
---- 首次访问配置时补默认，只跑一遍。
-local function initialize()
-    if _initialized then return end
-    _initialized = true
-    for _, section in ipairs(SECTIONS) do
-        local file = sectionFile(section)
-        if fillDefaults(file.data, DEFAULTS[section]) then
-            file:flush()
-        end
-    end
-end
-
---- 把所有分区平铺成一张表，供 get() 的无参形态返回。
---- 键跨分区重名时按 SECTIONS 顺序后者胜出（实际不存在重名）。
+--- 某个拥有者的配置表（可就地修改，改完 save(owner) 落盘）。
+---@param owner string 拥有者模块路径，声明在 `<owner>.setting`
 ---@return table
-local function buildMerged()
-    local merged = {}
-    for _, section in ipairs(SECTIONS) do
-        for key, value in pairs(sectionFile(section).data) do merged[key] = value end
-    end
-    return merged
+function M.get(owner)
+    local name = owner:match("[^.]+$")
+    local file = openFile(Paths.sectionPath(name))
+    local current = _owners[name]
+    if current == owner then return file.data end
+    if current then error("settings file " .. name .. ".lua owned by both " .. current .. " and " .. owner) end
+    adopt(owner, name, file)
+    return file.data
 end
 
---- 用磁盘最新内容刷新平铺表，就地清空再填。
---- 必须复用同一个表对象：调用方普遍长期持着 get() 的返回值，换新表会让它们读到旧快照。
-local function refreshMerged()
-    local fresh = buildMerged()
-    if not _merged then
-        _merged = fresh
-        return
-    end
-    for key in pairs(_merged) do _merged[key] = nil end
-    for key, value in pairs(fresh) do _merged[key] = value end
-end
-
---- Return all functional settings, or one section when named.
----@param section string|nil
----@return table
-function M.get(section)
-    initialize()
-    if section then return sectionFile(section).data end
-    if not _merged then _merged = buildMerged() end
-    return _merged
-end
-
---- 把平铺表按 KEY_SECTION 回写到各分区文件并全部 flush。
---- 默认只写入 values 中出现的键；replace=true 时缺键才会被清除。
----@param values table 平铺的配置值
----@param replace boolean|nil
-local function saveMerged(values, replace)
-    for key, section in pairs(KEY_SECTION) do
-        local file = sectionFile(section)
-        if replace or values[key] ~= nil then
-            file.data[key] = values[key]
-        end
-    end
-    for _, section in ipairs(SECTIONS) do sectionFile(section):flush() end
-end
-
---- Persist settings. Partial tables are merged; get()'s live merged table keeps
---- the historical full-replacement behavior so clearing a key remains possible.
----@param values table|nil
-function M.save(values)
-    initialize()
-    local replacement = values == nil or values == _merged
-    saveMerged(values or _merged or buildMerged(), replacement)
-    refreshMerged()
-end
-
---- Persist one functional section without merging unrelated settings.
----@param section string
----@param values table|nil
-function M.saveSection(section, values)
-    initialize()
-    local file = sectionFile(section)
-    if type(values) == "table" and values ~= file.data then file:reset(values) end
+--- 落盘某个拥有者的配置。传入的表若不是 get 返回的那张，则整体 reset 覆盖（未出现的键被丢弃）。
+---@param owner string
+---@param values table|nil nil 表示只 flush 现有内容
+function M.save(owner, values)
+    local data = M.get(owner)
+    local file = openFile(Paths.sectionPath(owner:match("[^.]+$")))
+    if values and values ~= data then file:reset(values) end
     file:flush()
-    refreshMerged()
 end
 
---- 取某个源的独立配置表（可直接就地修改，改完调 saveSource 落盘）。
----@param id string|nil 省略时用当前活跃源
+--- 取某个源 / 书城的独立配置表 settings/<id>.lua（可就地修改，改完调 saveSource 落盘）。
+---@param id string
 ---@return table
 function M.getSource(id)
-    initialize()
-    return openFile(Paths.sourcePath(id or M.activeSourceId())).data
+    return openFile(Paths.sourcePath(id)).data
 end
 
 --- 落盘某个源的配置。
 --- 传入的表若不是 getSource 返回的那张，则整体 reset 覆盖（未出现的键被丢弃）。
----@param id string|nil 省略时用当前活跃源
+---@param id string
 ---@param values table|nil nil 表示只 flush 现有内容
 function M.saveSource(id, values)
-    initialize()
-    local file = openFile(Paths.sourcePath(id or M.activeSourceId()))
-    if type(values) == "table" and values ~= file.data then file:reset(values) end
+    local file = openFile(Paths.sourcePath(id))
+    if values and values ~= file.data then file:reset(values) end
     file:flush()
-end
-
---- 当前活跃源 id；未配置时为 "local"。
----@return string
-function M.activeSourceId()
-    return M.get("common").active_source or "local"
-end
-
---- 书库/首页/统计等展示是否跨已启用源混合（阅读仍按书的 source_id）。
----@return boolean
-function M.libraryMixed()
-    return M.get("common").library_mixed
-end
-
---- 是否启用 Z-Library 底栏入口（默认关）。
----@return boolean
-function M.zlibEnabled()
-    return M.get("common").zlib_enabled
-end
-
---- 是否启用 OPDS 底栏入口（默认关）。
----@return boolean
-function M.opdsEnabled()
-    return M.get("common").opds_enabled
-end
-
---- 取设备标识，没有就生成一个并立即落盘。
---- 存在 KOReader 全局设置而非本插件配置里：多源共用同一设备身份，且卸载插件后仍稳定。
----@return string
-function M.ensureDeviceId()
-    local id = G_reader_settings:readSetting("device_id")
-    if type(id) == "string" and id ~= "" then return id end
-    -- 随机段必须来自 urandom：math.random 未播种时 LuaJIT 每次启动都是同一序列，
-    -- 同一天开机的两台设备会拿到完全相同的 device_id，云端按设备隔离的数据会互相踩。
-    local rand
-    local f = io.open("/dev/urandom", "rb")
-    if f then
-        rand = f:read(4)
-        f:close()
-    end
-    if type(rand) == "string" and #rand == 4 then
-        rand = rand:gsub(".", function(ch) return string.format("%02x", ch:byte()) end)
-    else
-        math.randomseed(os.time() + tonumber(tostring({}):match("0x(%x+)") or "0", 16))
-        rand = string.format("%08x", math.floor(math.random() * 0xffffffff))
-    end
-    id = string.format("book-%s%08x", rand, os.time() % 0xffffffff)
-    G_reader_settings:saveSetting("device_id", id)
-    return id
 end
 
 return M
