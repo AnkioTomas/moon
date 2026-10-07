@@ -1,7 +1,7 @@
 --[[--
 月读插件字体：id → 文件 → CRE 字体名的解析，以及 UI 字体设置。
 
-  set(id, name)       只写 display.ui_font / ui_font_name，绝不碰 Font.fontmap
+  set(id, name)       只写 ui.ui_font / ui_font_name，绝不碰 Font.fontmap
   applyCurrent()      唯一改 Font.fontmap 的入口；onCreate 每进程只调一次，设置页换字体后再调
   faceForId / faceNameForId  解析字体名（前者顺带注册进 CRE）
 
@@ -211,13 +211,13 @@ end
 --- 当前配置的 UI 字体 id；空串表示用系统默认 fontmap。
 ---@return string
 function Fonts.currentId()
-    return MoonSettings.get().ui_font or ""
+    return MoonSettings.get("ui").ui_font or ""
 end
 
 --- 当前 UI 字体的显示名：优先用配置里记的中文名，退回 id，都没有显示「系统默认」。
 ---@return string
 function Fonts.currentName()
-    local s = MoonSettings.get()
+    local s = MoonSettings.get("ui")
     if s.ui_font_name and s.ui_font_name ~= "" then return s.ui_font_name end
     if s.ui_font and s.ui_font ~= "" then return s.ui_font end
     return _("系统默认")
@@ -226,10 +226,10 @@ end
 ---@param id string 空=恢复默认 fontmap
 ---@param name string|nil
 function Fonts.set(id, name)
-    local s = MoonSettings.get()
+    local s = MoonSettings.get("ui")
     s.ui_font = id
     s.ui_font_name = id ~= "" and name or ""
-    MoonSettings.save(s)
+    MoonSettings.save("ui")
     logger.info("book.font set", id, s.ui_font_name)
 end
 

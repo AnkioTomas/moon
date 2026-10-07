@@ -7,10 +7,10 @@
   字号  逻辑字号，组件里经 Theme.face（Font:getFace 自带 DPI，这里只乘 ui_scale）
 
 三套主题的键集合完全一致（tests/ui/themes 校验），组件只读键、不判断主题 id。
-当前主题读 display.ui_theme，未设或写错回落 paper。
+当前主题读 ui.ui_theme，未设或写错回落 paper。
 
 ui/themes 自成一体：除 KOReader 自带模块与 utils.settings / l10n 外不依赖插件其他 UI 组件。
-缩放沿用设置 display.ui_scale（百分比，100–180，缺省 130），与旧桌面同一个键。
+缩放沿用设置 ui.ui_scale（百分比，100–180，缺省 130），与旧桌面同一个键。
 
 @module koplugin.book.ui.themes
 --]]
@@ -42,7 +42,7 @@ end
 --- 当前主题 id。未设或写错回落 paper。
 ---@return string
 function Theme.id()
-    local id = MoonSettings.get("display").ui_theme
+    local id = MoonSettings.get("ui").ui_theme
     return known[id] and id or DEFAULT
 end
 
@@ -51,9 +51,9 @@ end
 ---@return string
 function Theme.set(id)
     if not known[id] then return Theme.id() end
-    local display = MoonSettings.get("display")
+    local display = MoonSettings.get("ui")
     display.ui_theme = id
-    MoonSettings.saveSection("display", display)
+    MoonSettings.save("ui", display)
     return id
 end
 
@@ -66,7 +66,7 @@ end
 --- 当前 UI 缩放百分比（夹到 100–180）。
 ---@return number
 function Theme.scale()
-    local n = tonumber(MoonSettings.get("display").ui_scale) or 130
+    local n = tonumber(MoonSettings.get("ui").ui_scale) or 130
     return math.max(Theme.SCALE_MIN, math.min(Theme.SCALE_MAX, n))
 end
 
@@ -78,9 +78,9 @@ function Theme.setScale(n)
     n = math.max(Theme.SCALE_MIN, math.min(Theme.SCALE_MAX, n))
     local step = Theme.SCALE_STEP
     n = math.floor((n + step / 2) / step) * step
-    local display = MoonSettings.get("display")
+    local display = MoonSettings.get("ui")
     display.ui_scale = n
-    MoonSettings.saveSection("display", display)
+    MoonSettings.save("ui", display)
     return n
 end
 
