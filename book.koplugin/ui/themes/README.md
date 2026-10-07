@@ -32,10 +32,10 @@ Confirm:new{
 |---|---|
 | `Theme.ids` | `{ "paper", "bold", "soft" }`，顺序即展示顺序 |
 | `Theme.get(id)` | 取指定主题的令牌表；id 不存在直接报错 |
-| `Theme.id()` | 当前主题 id，读 `display.ui_theme`，未设或写错回落 paper |
+| `Theme.id()` | 当前主题 id，读 `ui.ui_theme`，未设或写错回落 paper |
 | `Theme.set(id)` | 写入主题 id 并落盘；未知 id 不写，返回当前 id |
 | `Theme.current()` | 当前主题令牌表 |
-| `Theme.scale()` | 当前缩放百分比，读 `display.ui_scale`，夹到 100–180，缺省 130 |
+| `Theme.scale()` | 当前缩放百分比，读 `ui.ui_scale`，夹到 100–180，缺省 130 |
 | `Theme.px(n)` | 逻辑像素转物理像素（DPI × 缩放）：0 保持 0，其余至少 1 |
 | `Theme.fontSize(size)` | 逻辑字号只乘缩放，下限 10；DPI 由 `Font:getFace` 自己乘 |
 | `Theme.face(name, size)` | 等于 `Font:getFace(name, Theme.fontSize(size))` |
