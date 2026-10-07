@@ -97,7 +97,7 @@ local function write(level, ...)
 end
 
 local function debugEnabled()
-    return Settings.get("common").book_debug_enabled == true
+    return Settings.get("utils").book_debug_enabled == true
 end
 
 --- 调试模式下镜像到 KOReader logger。
