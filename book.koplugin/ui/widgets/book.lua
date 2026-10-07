@@ -415,7 +415,7 @@ end
 --- 封面 widget。
 --- opts.badge: 未读且有进度时叠右上角百分比
 --- opts.ribbon: 已读时叠右上角「已读」绑带
---- opts.download: 已本地下载时叠左下角勾（章节源看全本缓存，整本源看 path）
+--- opts.download: 已本地下载时叠左下角勾（口径见 BookDB.downloadedClause）
 --- opts.more: 叠右下角「更多」；true 只画，function 同时可点
 --- opts.show_parent: 窗口级父（Desktop / Detail）
 --- opts.on_ready: 图片就绪回调
@@ -485,11 +485,11 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         padding = cover_pad,
         image,
     }
-    -- 已读与进度互斥；下载状态要查库，没开角标就不查。
+    -- 已读与进度互斥；下载状态由查询时带出（book.downloaded）。
     local read = Book.isRead(book)
     local show_read = opts.ribbon and read
     local show_pct = opts.badge and not read and pct > 0
-    local show_dl = opts.download and require("book.store").isDownloaded(book)
+    local show_dl = opts.download and book.downloaded
     local show_more = opts.more
     if show_read or show_pct or show_dl or show_more then
         local overlays = {
