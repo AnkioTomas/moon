@@ -60,7 +60,7 @@ function CoverCell.opener(owner, ctx)
         if desktop then UIManager:setDirty(desktop, "ui") end
         UIManager:nextTick(function()
             if owner._open_token ~= token then return end
-            require("book.open").book(plugin, book, function()
+            require("desktop.open").book(plugin, book, function()
                 if owner._open_token ~= token then return end
                 owner._open_token = nil
                 clearOpening(owner)
@@ -128,7 +128,7 @@ end
 --- 书架每行封面数，夹在 3–8。
 ---@return number
 function CoverCell.gridCols()
-    local n = math.floor(tonumber(MoonSettings.get("display").grid_max_cols) or GRID_DEFAULT)
+    local n = math.floor(tonumber(MoonSettings.get("ui").grid_max_cols) or GRID_DEFAULT)
     return math.max(GRID_MIN, math.min(GRID_MAX, n))
 end
 
@@ -138,9 +138,9 @@ end
 function CoverCell.setGridCols(n)
     n = math.floor(tonumber(n) or GRID_DEFAULT)
     n = math.max(GRID_MIN, math.min(GRID_MAX, n))
-    local display = MoonSettings.get("display")
+    local display = MoonSettings.get("ui")
     display.grid_max_cols = n
-    MoonSettings.saveSection("display", display)
+    MoonSettings.save("ui", display)
     return n
 end
 
