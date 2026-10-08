@@ -28,6 +28,7 @@ package.preload["ui.components.bookinfo"] = function()
             hero_cover_width = opts.cover_width
             return { hero = true }, 150
         end,
+        chapter = function(book) return book.chapter_title or "" end,
         tappable = function(_, _, callback)
             empty_tap = callback
             return {}

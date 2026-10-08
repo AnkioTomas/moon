@@ -385,6 +385,7 @@ do
     local count_q = calls[#calls - 1]
     Assert.is_true(count_q.sql:find("WHERE source_id=%?", 1) ~= nil or count_q.sql:find("source_id=?", 1, true) ~= nil)
     Assert.is_true(count_q.sql:find("b.deleted=0", 1, true) ~= nil)
+    Assert.is_true(count_q.sql:find("b.internal=0", 1, true) ~= nil)
     Assert.is_false(count_q.sql:find("category=", 1, true) ~= nil)
     local list_q = calls[#calls]
     Assert.is_true(list_q.sql:find("b.inserted_at", 1, true) ~= nil)
@@ -444,7 +445,7 @@ do
     Assert.eq(calls[1].args[3], "jdread")
     calls = {}
     Assert.eq(BookDB.downloadedCountBySource({ "local", "wechat" }, { "wechat" }), 7)
-    Assert.is_true(calls[1].sql:find("b.deleted=0 AND (CASE WHEN b.source_id=? THEN", 1, true) ~= nil)
+    Assert.is_true(calls[1].sql:find("b.deleted=0 AND b.internal=0 AND (CASE WHEN b.source_id=? THEN", 1, true) ~= nil)
     Assert.eq(calls[1].args[3], "wechat")
 
     -- 分类列表

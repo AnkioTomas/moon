@@ -19,6 +19,7 @@ local DESKTOP_ORDER = {
 }
 local READER_ORDER = {
     "toc", "font", "reflow", "highlights", "bookorbit", "xray", "xray_refresh", "page_turn",
+    "push_progress", "pull_progress",
 }
 
 local builtins = {}
@@ -35,6 +36,7 @@ local loaded = false
 ---@field icon string
 ---@field active_icon string|nil
 ---@field fixed boolean|nil
+---@field always_visible boolean|nil 阅读页恒常显示（不受「阅读快捷面板」勾选影响），可用性仍按 available 过滤
 ---@field scope "desktop"|"reader"
 ---@field event string|nil
 ---@field keep_open boolean|nil

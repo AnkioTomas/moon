@@ -11,6 +11,7 @@ local store = {
     moon = { base_url = "", token = "" },
     zlib = { email = "", password = "", base_url = nil },
     opds = {},
+    kavita = {},
     ["local"] = { path = "/mnt/books" },
 }
 local invalidated = 0
@@ -134,6 +135,28 @@ do
 
     package.preload["ui/uimanager"], package.preload["ui/event"], package.preload["http.request"] = nil, nil, nil
     package.loaded["ui/uimanager"], package.loaded["ui/event"], package.loaded["http.request"] = nil, nil, nil
+end
+
+-- Kavita：地址去尾斜杠、API Key 脱敏、占位符与缺省键不覆盖。
+do
+    invalidated = 0
+    store.kavita = { libraries = { ["8"] = true } }
+    local result = SettingsApi.apply({ kavita = {
+        base_url = " https://kavita.test/kavita/ ",
+        api_key = " secret-key ",
+    } })
+    Assert.is_true(result.changed)
+    Assert.eq(invalidated, 1)
+    Assert.eq(store.kavita.base_url, "https://kavita.test/kavita")
+    Assert.eq(store.kavita.api_key, "secret-key")
+    Assert.is_true(store.kavita.libraries["8"])
+    Assert.eq(result.settings.kavita.api_key, SettingsApi.MASK)
+    Assert.eq(result.settings.kavita.base_url, "https://kavita.test/kavita")
+
+    result = SettingsApi.apply({ kavita = { api_key = SettingsApi.MASK } })
+    Assert.is_false(result.changed)
+    Assert.eq(store.kavita.api_key, "secret-key")
+    Assert.eq(invalidated, 1)
 end
 
 -- 本地源 WebDAV：trim 落盘、密码脱敏、占位符不覆盖、不碰 path。

@@ -202,7 +202,9 @@ end
 ---@param done fun(ok: boolean)
 local function confirm(source_id, stable_id, revision, done)
     local ok = ProgressDB.markSynced(source_id, stable_id, revision)
-    if not ok then logger.warn("book.progress confirm failed", stable_id) end
+    -- 未命中说明推送期间又写了更新的版本（心跳/再翻页）或行已不在：不是错误，
+    -- 新版本留给下次推送即可，降级为 dbg。
+    if not ok then logger.dbg("book.progress confirm superseded", stable_id) end
     done(ok)
 end
 
@@ -230,24 +232,6 @@ function Progress.save(snapshot, cb)
     if cb then cb(ok) end
 end
 
---- 源心跳用：写一条最小进度脏行（无 locator/extra 坐标），保留已有的不透明 extra。
----@param identity BookIdentity
----@param pos { fraction?: number, page?: number, total_pages?: number }
----@return boolean
-function Progress.recordHeartbeat(identity, pos)
-    if not identity or not identity.source_id or not identity.stable_id then return false end
-    pos = pos or {}
-    local row = {
-        fraction = Progress.clampFraction(pos.fraction),
-        page = tonumber(pos.page),
-        total_pages = tonumber(pos.total_pages),
-        updated_at = nextRevision(),
-    }
-    local previous = ProgressDB.get(identity.source_id, identity.stable_id)
-    if previous and previous.extra then row.extra = previous.extra end
-    return ProgressDB.upsert(identity.source_id, identity.stable_id, row)
-end
-
 ---@param row PendingProgress
 ---@return ProgressPosition
 local function rowPosition(row)
@@ -265,9 +249,13 @@ end
 
 --- 将一个 Source 的本地脏进度推到远端。Pull 只走 Progress.pull（开书冲突 UI）。
 ---@param source BookSource
----@param opts { identity?: BookIdentity, dirty_only?: boolean }|nil
+---@param opts { identity?: BookIdentity, dirty_only?: boolean, force?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)|nil
 ---@return { cancel: fun() }
+local progressDiffers -- 前向声明：定义在文件后段，syncOnce 的重连冲突检查要用
+local isSameBook -- 前向声明：同上，判断是否「当前正在阅读的书」
+local spineCmp -- 前向声明：同上，页级源按 spine/元素路径比较方向
+local docFragmentIndex -- 前向声明：同上，取 xpointer 里的 spine 序号
 local function syncOnce(source, opts, cb)
     opts = opts or {}
     local target = opts.identity and opts.identity.stable_id or "all"
@@ -325,8 +313,131 @@ local function syncOnce(source, opts, cb)
     end
 
     local index = 1
-    --- 处理队列里的下一个身份：本地脏行先推；队列空即 finish。从不 pull。
-    local function nextIdentity()
+    local nextIdentity
+    -- 批量重连一轮里最多只弹一次冲突：避免离线读多本后联网时弹一屏 ConfirmBox。
+    local conflict_asked = false
+    --- 推送一条脏进度（本地优先落地）。
+    ---@param identity table
+    ---@param row table
+    local function doPush(identity, row)
+        current_job = source:putProgressAsync(identity, rowPosition(row), function(ok, err)
+            current_job = nil
+            if cancelled then return end
+            if ok ~= true then
+                if opts.dirty_only then
+                    result.push_error = err or "progress push failed"
+                    logger.warn("book.progress push failed; keep dirty", source.id, identity.stable_id, result.push_error)
+                    nextIdentity()
+                    return
+                end
+                finish(nil, err or "progress push failed")
+                return
+            end
+            confirm(source.id, identity.stable_id, row.updated_at, function(confirmed)
+                -- 未命中只说明本地又有更新版本，不是失败：本轮不计数，新版本下次再推。
+                if confirmed then result.pushed = result.pushed + 1 end
+                nextIdentity()
+            end)
+        end)
+    end
+
+    --- 推之前先拉云端比对；冲突时**不静默覆盖云端，也不静默改本地**。
+    --- silent（关书/suspend 推送）：云端更靠后/已读完 → **当场弹窗**让用户选（本地/云端）；
+    --- 本地不落后 → 推本地。
+    --- 非 silent（批量重连）：只对「当前正在阅读的那本」弹一次；其余留脏，等用户读到再谈。
+    ---@param identity table
+    ---@param row table
+    ---@param silent boolean|nil
+    local function pushChecked(identity, row, silent)
+        local local_pos = rowPosition(row)
+        local settled = false
+        local function proceed()
+            if settled then return end
+            settled = true
+            doPush(identity, row)
+        end
+        local job = source:getProgressAsync(identity, function(remote, _err, meta)
+            if cancelled or settled then return end
+            local empty = type(meta) == "table" and meta.empty
+            local page_level = type(meta) == "table" and meta.page_level == true
+            -- 页级源只比 spine/元素路径（不用百分比）；取不到 spine 才退回通用判定。
+            local cmp
+            if remote and not empty and page_level then
+                cmp = spineCmp(local_pos, remote)
+            end
+            local conflict
+            if cmp ~= nil then
+                conflict = cmp ~= 0
+            else
+                conflict = remote and not empty
+                    and progressDiffers(local_pos, remote, identity, nil, page_level)
+            end
+            if not conflict then
+                proceed()
+                return
+            end
+            settled = true
+            if silent then
+                -- 关书/suspend 推送：本地不落后 → 直接推（推进云端，安全）。
+                -- 云端更靠后/已读完 → 冲突，**当场弹窗**让用户选，不推本地也不静默采纳、
+                -- 更不留到下次开书。关书时 Session 可能已清空，不能再依赖 isSameBook。
+                --
+                -- 页级源的「更靠后」按 spine 判定：同 spine 内元素级的先后只是视口取整
+                -- 噪声（Kavita 的 pageNum 本就是 spine 级），若拿来判冲突，用户刚选云端
+                -- 跳转、立刻关书时会因取整再弹一次假冲突。与开书 pull 的同 spine 处理一致。
+                local remote_ahead
+                if page_level then
+                    local local_spine = docFragmentIndex(local_pos and local_pos.locator)
+                    local remote_spine = docFragmentIndex(remote and remote.locator)
+                    if local_spine and remote_spine then
+                        remote_ahead = remote_spine > local_spine
+                            or (tonumber(remote and remote.fraction) or 0) >= 1
+                    else
+                        remote_ahead = cmp == 1 or (tonumber(remote and remote.fraction) or 0) >= 1
+                    end
+                else
+                    remote_ahead = cmp == 1 or (tonumber(remote and remote.fraction) or 0) >= 1
+                end
+                if not remote_ahead then
+                    doPush(identity, row)
+                    nextIdentity()
+                    return
+                end
+                logger.dbg("book.progress push conflict prompt (remote ahead)", identity.stable_id)
+                Progress.askReconnectConflict(source, identity, local_pos, remote, function(choice)
+                    if cancelled then return end
+                    if choice == "cloud" then
+                        ProgressDB.adoptRemote(source.id, identity.stable_id, rowPosition(remote))
+                        nextIdentity()
+                    else
+                        doPush(identity, row)
+                    end
+                end)
+                return
+            end
+            if conflict_asked or not isSameBook(identity) then
+                -- 本轮已问过，或冲突的不是当前在读的书：不弹、也不推（否则会覆盖云端），
+                -- 行保持脏，等用户真的去读它时由 Progress.pull 再谈。
+                logger.dbg("book.progress reconnect conflict deferred", identity.stable_id)
+                nextIdentity()
+                return
+            end
+            conflict_asked = true
+            Progress.askReconnectConflict(source, identity, local_pos, remote, function(choice)
+                if cancelled then return end
+                if choice == "cloud" then
+                    ProgressDB.adoptRemote(source.id, identity.stable_id, rowPosition(remote))
+                    nextIdentity()
+                else
+                    doPush(identity, row)
+                end
+            end)
+        end)
+        if not job then proceed() end
+    end
+
+    --- 处理队列里的下一个身份：本地脏行先做冲突检查再推；队列空即 finish。从不全量 pull。
+    nextIdentity = function()
         if cancelled then return end
         local identity = identities[index]
         index = index + 1
@@ -334,25 +445,13 @@ local function syncOnce(source, opts, cb)
 
         local row = ProgressDB.get(source.id, identity.stable_id)
         if row and row.sync_status == 0 then
-            current_job = source:putProgressAsync(identity, rowPosition(row), function(ok, err)
-                current_job = nil
-                if cancelled then return end
-                if ok ~= true then
-                    if opts.dirty_only then
-                        result.push_error = err or "progress push failed"
-                        logger.warn("book.progress push failed; keep dirty", source.id, identity.stable_id, result.push_error)
-                        nextIdentity()
-                        return
-                    end
-                    finish(nil, err or "progress push failed")
-                    return
-                end
-                confirm(source.id, identity.stable_id, row.updated_at, function(confirmed)
-                    if not confirmed then finish(nil, "progress confirm failed"); return end
-                    result.pushed = result.pushed + 1
-                    nextIdentity()
-                end)
-            end)
+            if opts.force or type(source.getProgressAsync) ~= "function" then
+                -- force：用户在冲突弹窗里明确选了「本地」，本地位置直接盖云端，不再比对。
+                doPush(identity, row)
+            else
+                -- identity（关书/开书推送）走 silent：冲突留脏不弹；批量重连才弹/延后。
+                pushChecked(identity, row, opts.identity ~= nil)
+            end
             return
         end
         nextIdentity()
@@ -366,7 +465,7 @@ end
 
 --- 合并完全相同的重入同步；不同书籍/模式仍各自执行，不能混用结果。
 ---@param source BookSource
----@param opts { identity?: BookIdentity, dirty_only?: boolean }|nil
+---@param opts { identity?: BookIdentity, dirty_only?: boolean, force?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)|nil
 ---@return { cancel: fun() }
 function Progress.syncAsync(source, opts, cb)
@@ -377,6 +476,7 @@ function Progress.syncAsync(source, opts, cb)
         tostring(identity and identity.stable_id or "all"),
         tostring(identity and identity.chapter_idx or 0),
         opts.dirty_only and "dirty" or "full",
+        opts.force and "force" or "push",
     }, "\31")
     local subscriber = { active = true, cb = cb }
     local run = Progress.sync_runs[key]
@@ -408,7 +508,7 @@ end
 --- 异步进度回调是否仍对同一本书有效（不比 chapter_idx，避免切章后丢弃拉取结果）。
 ---@param id BookIdentity|nil
 ---@return boolean
-local function isSameBook(id)
+isSameBook = function(id)
     local current = require("ui.reader.session").current()
     local cur = current and current.identity
     return cur ~= nil and id ~= nil
@@ -417,11 +517,12 @@ local function isSameBook(id)
 end
 
 --- 当前会话可用的章节目录（优先阅读快照，不依赖 Store.toc 是否已落库）。
+--- 阅读形态由物理身份决定：带 ``chapter_idx`` 才算按章（book 源的多卷系列也适用）。
 ---@param id BookIdentity
 ---@param snapshot ReaderSessionSnapshot|nil
 ---@return BookChapter[]|nil
 local function chapterToc(id, snapshot)
-    if not id or not id.source or id.source.type ~= "chapter" then
+    if not id or not id.chapter_idx then
         return nil
     end
     local Session = require("ui.reader.session")
@@ -439,7 +540,79 @@ local function chapterToc(id, snapshot)
     return nil
 end
 
---- 开书对比用的本地进度：pending_progress 为准，同章时章内比例优先于章首快照。
+--- xpointer 里的 `DocFragment[D]`（= spine+1）；无返回 nil。
+--- 页级源（Kavita）用它把本地位置与远端 pageNum 对齐到同一 spine。
+---@param locator string|nil
+---@return integer|nil
+docFragmentIndex = function(locator)
+    if type(locator) ~= "string" then return nil end
+    local d = locator:match("DocFragment%[(%d+)%]")
+    return d and tonumber(d)
+end
+
+--- xpointer 里 `DocFragment/body` 之后的元素路径（忽略 `text()` 与文本偏移）；取不到返回 nil。
+---@param locator string|nil
+---@return string|nil
+local function locatorElementPath(locator)
+    if type(locator) ~= "string" then return nil end
+    local rest = locator:match("DocFragment%[%d+%]/body%[%d+%](.*)$")
+        or locator:match("DocFragment%[%d+%]/body(.*)$")
+        or locator:match("DocFragment/body(.*)$")
+    if not rest or rest == "" then return nil end
+    local parts = {}
+    for seg in rest:gmatch("([^/]+)") do
+        if not seg:match("^text%(") then
+            local name, index = seg:match("^([%w:_%-]+)%[(%d+)%]$")
+            if not name then name = seg:match("^([%w:_%-]+)") end
+            if name then parts[#parts + 1] = name .. "[" .. (index or "1") .. "]" end
+        end
+    end
+    if #parts == 0 then return nil end
+    return table.concat(parts, "/")
+end
+
+--- 元素路径 a 是否在 b 之后（逐段比较：同名同级按下标数值；前缀相同则更长者更靠后）。
+---@param a string|nil
+---@param b string|nil
+---@return boolean
+local function elementPathAfter(a, b)
+    if not a or not b then return false end
+    local sa, sb = {}, {}
+    for seg in a:gmatch("[^/]+") do sa[#sa + 1] = seg end
+    for seg in b:gmatch("[^/]+") do sb[#sb + 1] = seg end
+    local n = math.min(#sa, #sb)
+    for i = 1, n do
+        if sa[i] ~= sb[i] then
+            local na, ia = sa[i]:match("^([%w:_%-]+)%[(%d+)%]$")
+            local nb, ib = sb[i]:match("^([%w:_%-]+)%[(%d+)%]$")
+            if na and na == nb and ia and ib then
+                return tonumber(ia) > tonumber(ib)
+            end
+            return false
+        end
+    end
+    return #sa > #sb
+end
+
+--- 页级源位置比较（**只按 spine + spine 内元素路径**，Kavita 的百分比按 spine 算、进入 spine 就跳变，
+--- 不能作依据）。返回 1=远端更靠后，-1=本地更靠后，0=同位，nil=无法判定（缺 spine）。
+---@param local_pos ProgressPosition|nil
+---@param remote_pos ProgressPosition|nil
+---@return integer|nil
+spineCmp = function(local_pos, remote_pos)
+    local ls = docFragmentIndex(local_pos and local_pos.locator)
+    local rs = docFragmentIndex(remote_pos and remote_pos.locator)
+    if not ls or not rs then return nil end
+    if rs ~= ls then return rs > ls and 1 or -1 end
+    local le = locatorElementPath(local_pos.locator)
+    local re = locatorElementPath(remote_pos.locator)
+    if elementPathAfter(re, le) then return 1 end
+    if elementPathAfter(le, re) then return -1 end
+    return 0
+end
+
+--- 开书对比用的本地进度：位置（locator）以阅读器实时值为准，章信息（chapter_idx/fraction）
+--- 取 pending_progress，同章时章内比例优先于章首快照。
 ---@param id BookIdentity
 ---@param snapshot ReaderSessionSnapshot
 ---@return ProgressPosition
@@ -450,6 +623,13 @@ local function localProgressForPull(id, snapshot)
         return live
     end
     local pos = rowPosition(row)
+    -- 本机实际读到哪，以阅读器（sidecar 恢复）的实时 locator 为准，而不是 pending 行：
+    -- 关书推送在「远端更靠后」时会静默把行改写成远端位置（为了书架即时反映），但阅读器
+    -- 并未跳转；若这里仍以行的 locator 为准，开书时会把「本机落后」误判成同位置而永不收敛，
+    -- 也就没有同步、没有冲突提示。行只在实时位置缺失时兜底。
+    if live.locator ~= nil then
+        pos.locator = live.locator
+    end
     if pos.chapter_idx and live.chapter_idx
         and tonumber(pos.chapter_idx) == tonumber(live.chapter_idx) then
         if pos.chapter_fraction == nil and live.chapter_fraction ~= nil then
@@ -475,8 +655,9 @@ end
 ---@param pos ProgressPosition|nil
 ---@param id BookIdentity
 ---@param snapshot ReaderSessionSnapshot|nil
+---@param force_percent boolean|nil 两侧页数单位不同（Kavita spine vs 内容页）时强制用百分比
 ---@return string
-local function conflictLabel(pos, id, snapshot)
+local function conflictLabel(pos, id, snapshot, force_percent)
     pos = pos or {}
     local toc = chapterToc(id, snapshot)
     if toc then
@@ -514,12 +695,52 @@ local function conflictLabel(pos, id, snapshot)
             return T(_("第 %1 章"), idx)
         end
     end
-    local page = tonumber(pos.page)
-    local total = tonumber(pos.total_pages)
-    if page and total and total > 0 then
-        return T(_("第 %1 / %2 页"), math.floor(page), math.floor(total))
+    if not force_percent then
+        local page = tonumber(pos.page)
+        local total = tonumber(pos.total_pages)
+        if page and total and total > 0 then
+            return T(_("第 %1 / %2 页"), math.floor(page), math.floor(total))
+        end
     end
     return T(_("%1%"), string.format("%.1f", (tonumber(pos.fraction) or 0) * 100))
+end
+
+--- Kavita 页级（page = spine / HTML 文件，不是内容页）的冲突标签：两侧都用
+--- `DocFragment[D]` 序号表达，单位一致。`total` 用远端 spine 总数。
+---@param pos ProgressPosition|nil
+---@param total number|nil spine 总数
+---@return string
+local function spineConflictLabel(pos, total)
+    local d = docFragmentIndex(pos and pos.locator)
+    if not d then
+        return T(_("%1%"), string.format("%.1f", (tonumber(pos and pos.fraction) or 0) * 100))
+    end
+    local n = tonumber(total)
+    if n and n > 0 then
+        return T(_("第 %1 / %2 页"), d, n)
+    end
+    return T(_("第 %1 页"), d)
+end
+
+--- 冲突两侧的展示标签：两侧总页数一致才用页码（同单位）；否则按 spine 对齐
+--- （Kavita 的页是 HTML 文件级，本地 total_pages 是内容页，直接并列会误导）。
+---@param local_pos ProgressPosition|nil
+---@param remote_pos ProgressPosition|nil
+---@param id BookIdentity
+---@param snapshot ReaderSessionSnapshot|nil
+---@return string local_desc
+---@return string remote_desc
+local function conflictLabels(local_pos, remote_pos, id, snapshot)
+    local lt = tonumber(local_pos and local_pos.total_pages)
+    local rt = tonumber(remote_pos and remote_pos.total_pages)
+    if lt and rt and lt > 0 and rt > 0 and lt == rt then
+        return conflictLabel(local_pos, id, snapshot), conflictLabel(remote_pos, id, snapshot)
+    end
+    -- 页数单位不同：若能取到 spine 序号（DocFragment），两侧都用它表达，单位一致。
+    if docFragmentIndex(local_pos and local_pos.locator) or docFragmentIndex(remote_pos and remote_pos.locator) then
+        return spineConflictLabel(local_pos, rt), spineConflictLabel(remote_pos, rt)
+    end
+    return conflictLabel(local_pos, id, snapshot, true), conflictLabel(remote_pos, id, snapshot, true)
 end
 
 --- 把选定的进度应用到当前文档（按章书跳章，整本书跳比例）。
@@ -586,13 +807,14 @@ local function remoteWithin(pos, chapter_idx, toc_count)
     return withinFromFraction(pos.fraction, toc_count, pos.chapter_idx or chapter_idx) or 0
 end
 
---- 当前阅读位置与 freshly pulled 远端进度是否冲突（≥1%）。
+--- 当前阅读位置与 freshly pulled 远端进度是否冲突。
 ---@param local_pos ProgressPosition|nil
 ---@param remote_pos ProgressPosition
 ---@param id BookIdentity
 ---@param snapshot ReaderSessionSnapshot
+---@param page_level boolean|nil 远端是页级/spine 级（Kavita），比例不参与内容比对
 ---@return boolean
-local function progressDiffers(local_pos, remote_pos, id, snapshot)
+progressDiffers = function(local_pos, remote_pos, id, snapshot, page_level)
     -- 精确坐标一致就是同一个位置，不必再拿会漂移的比例去比。
     local here = local_pos and local_pos.locator
     if here and here == remote_pos.locator then
@@ -612,6 +834,21 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot)
             return math.abs(local_within - remoteWithin(remote_pos, remote_idx, count)) >= 0.01
         end
     end
+    -- 页级源（Kavita）：比例按 spine 算，进入 spine 就跳变，绝不能拿比例比。
+    -- 只要两端都能取到 spine，就按 spine 序号判等；同 spine 视为同一位置，不判冲突。
+    if page_level then
+        local local_spine = docFragmentIndex(here)
+        local remote_spine = docFragmentIndex(remote_pos.locator)
+        if local_spine and remote_spine then
+            return local_spine ~= remote_spine
+        end
+        -- 取不到 spine（无定位/单文档）才退回比例，用「一页」容差。
+        local local_frac = local_pos and local_pos.fraction or 0
+        local tol = 0.01
+        local total = tonumber(remote_pos.total_pages)
+        if total and total > 0 then tol = math.max(tol, 1 / total) end
+        return math.abs(local_frac - remote_pos.fraction) >= tol
+    end
     local local_frac = local_pos and local_pos.fraction or 0
     return math.abs(local_frac - remote_pos.fraction) >= 0.01
 end
@@ -627,8 +864,7 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
     if Progress.asked_conflicts[key] then return end
     local UIManager = require("ui/uimanager")
     local ConfirmBox = require("ui/widget/confirmbox")
-    local local_desc = conflictLabel(local_pos, id, snapshot)
-    local remote_desc = conflictLabel(remote_pos, id, snapshot)
+    local local_desc, remote_desc = conflictLabels(local_pos, remote_pos, id, snapshot)
     local local_btn = T(_("本地：%1"), local_desc)
     local remote_btn = T(_("云端：%1"), remote_desc)
     UIManager:show(ConfirmBox:new{
@@ -675,21 +911,101 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
                 applyChosenPos(live.ui, live.identity, adopt, adopt.fraction, false)
             end
             if id.source and id.source.syncProgressAsync then
-                id.source:syncProgressAsync({ identity = id, dirty_only = true }, function() end)
+                -- 用户明确保留本地：本地位置权威，force 跳过「远端更靠后就不推」的比对，
+                -- 直接把本地推上去收敛，否则下次开书还会再弹同一次。
+                id.source:syncProgressAsync({ identity = id, dirty_only = true, force = true },
+                    function() end)
             end
         end,
     })
 end
 
---- 开书后拉远端进度并与当前阅读位置对比；冲突时弹窗，一致则直接收敛。
---- syncProgressAsync 只推不拉；本函数是进度 pull 的唯一入口。
+--- 重连/后台同步发现本地脏进度与云端不一致：让用户选保留哪份并据此收敛。
+--- 选云端 → 采纳云端（覆盖本地，置干净）；选本地 → 回推本地（覆盖云端）。
+--- 点空白关闭则两个回调都不跑，脏行保留，下次重连再问。
+---@param source BookSource
+---@param id BookIdentity
+---@param local_pos ProgressPosition
+---@param remote_pos ProgressPosition
+---@param on_choice fun(choice: "local"|"cloud")
+function Progress.askReconnectConflict(source, id, local_pos, remote_pos, on_choice)
+    local UIManager = require("ui/uimanager")
+    local ConfirmBox = require("ui/widget/confirmbox")
+    local local_desc, remote_desc = conflictLabels(local_pos, remote_pos, id)
+    UIManager:show(ConfirmBox:new{
+        text = T(_("本地与云端进度不一致（%1 / %2），保留哪个？"), local_desc, remote_desc),
+        ok_text = T(_("云端：%1"), remote_desc),
+        cancel_text = T(_("本地：%1"), local_desc),
+        ok_callback = function() on_choice("cloud") end,
+        cancel_callback = function() on_choice("local") end,
+    })
+end
+
+--- 远端进度是否代表「确实读过」：全 0 / 首页/首章视为无进度，不触发首次打开跳转。
+--- 部分源（微信）对没读过的书也会回一个零值进度，不能据此改写本地并弹「已跳转」。
+---@param pos ProgressPosition|nil
+---@return boolean
+local function hasRemoteProgress(pos)
+    if not pos then return false end
+    if (tonumber(pos.fraction) or 0) > 0 then return true end
+    if (tonumber(pos.chapter_idx) or 1) > 1 then return true end
+    if (tonumber(pos.chapter_fraction) or 0) > 0 then return true end
+    if (tonumber(pos.page) or 1) > 1 then return true end
+    return false
+end
+
+--- 采纳远端进度落库（干净状态，带当前时间戳）；成功返回 true。
+---@param id BookIdentity
+---@param remote_pos ProgressPosition
+---@return boolean
+local function adoptRemoteNow(id, remote_pos)
+    local remote = rowPosition(remote_pos)
+    remote.updated_at = os.time()
+    return ProgressDB.adoptRemote(id.source_id, id.stable_id, remote)
+end
+
+--- 首次打开（本地无进度行）：云端有进度就直接采纳并跳转，不走冲突询问。
+--- 本地既无进度可冲突，也不必保留；按云端位置落库让读完状态与书架进度一致。
+---@param id BookIdentity
+---@param remote_pos ProgressPosition
+local function adoptFirstOpen(id, remote_pos)
+    local Session = require("ui.reader.session")
+    local live = Session.current()
+    if not live or not isSameBook(id) then return end
+    if not adoptRemoteNow(id, remote_pos) then
+        logger.warn("book.progress first-open adopt remote failed", id.stable_id)
+        return
+    end
+    logger.dbg("book.progress reader pull first-open adopt", id.source_id, id.stable_id)
+    applyChosenPos(live.ui, live.identity, remote_pos, remote_pos.fraction, true)
+end
+
+--- 拉远端进度并与当前阅读位置收敛：冲突弹窗、同 spine 远端更靠后采纳、无冲突落库。
+--- syncProgressAsync 只推不拉；本函数是进度 pull 的唯一入口（开书 + 手动「拉取进度」）。
 ---@param snapshot ReaderSessionSnapshot
-function Progress.pull(snapshot)
+---@param opts { manual?: boolean }|nil manual=true 时：无视会话去重、离线/无远端/已一致都给提示
+function Progress.pull(snapshot, opts)
+    opts = opts or {}
+    local manual = opts.manual == true
     local id = snapshot and snapshot.identity
     if not id then return end
     local source = id.source
+    local UIManager = require("ui/uimanager")
+    local InfoMessage = require("ui/widget/infomessage")
+    local function tell(text)
+        UIManager:show(InfoMessage:new{ text = text, timeout = 2 })
+    end
     if not source or type(source.getProgressAsync) ~= "function" then
+        if manual then tell(_("此数据源不支持云端进度")) end
         return
+    end
+    if manual then
+        if not require("ui/network/manager"):isOnline() then
+            tell(_("网络不可用，请先连接 Wi-Fi"))
+            return
+        end
+        -- 手动触发：清掉本次会话的「已问过」记忆，保证一定会重新弹。
+        Progress.asked_conflicts[id.source_id .. "\31" .. id.stable_id] = nil
     end
     logger.dbg("book.progress reader pull start", id.source_id, id.stable_id,
         id.chapter_idx or "book")
@@ -700,21 +1016,70 @@ function Progress.pull(snapshot)
         end
         if type(meta) == "table" and meta.empty then
             logger.dbg("book.progress reader pull empty", id.source_id, id.stable_id)
+            if manual then tell(_("云端暂无这本书的进度")) end
             return
         end
         if not remote_pos then
             -- 离线开缓存书是正常路径；拉不到云端进度只记日志，不能打断阅读。
             logger.warn("book.progress reader pull failed", id.source_id, id.stable_id, err)
+            if manual then tell(_("无法获取云端进度")) end
             return
         end
+        local page_level = type(meta) == "table" and meta.page_level == true
         local local_position = localProgressForPull(id, snapshot)
-        if progressDiffers(local_position, remote_pos, id, snapshot) then
+        local row = ProgressDB.get(id.source_id, id.stable_id)
+        if not row then
+            -- 首次打开/无本地进度：没有可冲突的进度，云端确有进度就直接采纳并跳转，不弹窗。
+            if hasRemoteProgress(remote_pos) then
+                adoptFirstOpen(id, remote_pos)
+            else
+                logger.dbg("book.progress reader pull first-open no remote progress",
+                    id.source_id, id.stable_id)
+                if manual then tell(_("云端暂无这本书的进度")) end
+            end
+            return
+        end
+        -- 页级源只比 spine 序号 + spine 内元素路径（**绝不用百分比**）。
+        -- 跨 spine 分歧（多设备停在不同章节）：弹窗让用户选，绝不静默把本机拉走；
+        -- 同 spine 才做细粒度收敛：远端元素更靠后/已读完 → 采纳远端；否则保留本地（脏则推）。
+        if page_level then
+            local local_spine = docFragmentIndex(local_position and local_position.locator)
+            local remote_spine = docFragmentIndex(remote_pos.locator)
+            if local_spine and remote_spine then
+                if local_spine ~= remote_spine then
+                    logger.dbg("book.progress reader pull spine conflict", id.source_id, id.stable_id)
+                    askProgressConflict(id, snapshot, local_position, remote_pos)
+                    return
+                end
+                local cmp = spineCmp(local_position, remote_pos)
+                if cmp == 1 or (tonumber(remote_pos.fraction) or 0) >= 1 then
+                    logger.dbg("book.progress reader pull remote-ahead adopt", id.source_id, id.stable_id)
+                    if adoptRemoteNow(id, remote_pos) then
+                        local Session = require("ui.reader.session")
+                        local live = Session.current()
+                        if live and isSameBook(id) then
+                            applyChosenPos(live.ui, live.identity, remote_pos, remote_pos.fraction, manual)
+                        end
+                    else
+                        logger.warn("book.progress save remote failed", id.stable_id)
+                    end
+                    return
+                end
+                if row.sync_status == 0 and source.syncProgressAsync then
+                    source:syncProgressAsync({ identity = id, dirty_only = true }, function() end)
+                end
+                logger.dbg("book.progress reader pull keep-local", id.source_id, id.stable_id)
+                if manual then tell(_("进度已是最新")) end
+                return
+            end
+            -- 取不到 spine → 退回通用判定（可能弹窗）
+        end
+        if progressDiffers(local_position, remote_pos, id, snapshot, page_level) then
             logger.dbg("book.progress reader pull conflict", id.source_id, id.stable_id)
             askProgressConflict(id, snapshot, local_position, remote_pos)
             return
         end
-        local row = ProgressDB.get(id.source_id, id.stable_id)
-        if row and row.sync_status == 0 then
+        if row.sync_status == 0 then
             -- 本地脏版本与云端基本一致时只推不拉；上面已经拿到了最新远端，
             -- 再跑完整同步只会产生第二次相同的 getProgress。
             if source.syncProgressAsync then
@@ -725,6 +1090,46 @@ function Progress.pull(snapshot)
             return
         end
         logger.dbg("book.progress reader pull done", id.source_id, id.stable_id, "matched")
+        if manual then tell(_("进度已是最新")) end
+    end)
+end
+
+--- 手动把当前阅读进度推到云端（覆盖远端，不回拉比对）。阅读页「Kavita：同步进度」用。
+--- 阅读中 pending 行可能还停在开书位置，所以先 `Progress.save` 落盘当前阅读位置，再 force 推。
+---@param snapshot ReaderSessionSnapshot
+function Progress.push(snapshot)
+    local id = snapshot and snapshot.identity
+    if not id then return end
+    local UIManager = require("ui/uimanager")
+    local InfoMessage = require("ui/widget/infomessage")
+    local function tell(text)
+        UIManager:show(InfoMessage:new{ text = text, timeout = 2 })
+    end
+    local source = id.source
+    if not source or type(source.syncProgressAsync) ~= "function" then
+        tell(_("此数据源不支持云端进度"))
+        return
+    end
+    if not require("ui/network/manager"):isOnline() then
+        tell(_("网络不可用，请先连接 Wi-Fi"))
+        return
+    end
+    Progress.save(snapshot, function(ok)
+        if not ok then
+            logger.warn("book.progress manual push save failed", id.stable_id)
+            tell(_("进度保存失败"))
+            return
+        end
+        logger.dbg("book.progress manual push start", id.source_id, id.stable_id)
+        source:syncProgressAsync({ identity = id, dirty_only = true, force = true }, function(result, err)
+            if result and not result.push_error then
+                tell(_("已同步到云端"))
+            else
+                logger.warn("book.progress manual push failed", id.source_id, id.stable_id,
+                    err or (result and result.push_error))
+                tell(_("同步失败"))
+            end
+        end)
     end)
 end
 

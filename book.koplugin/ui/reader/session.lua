@@ -253,6 +253,7 @@ function Session.onPageChanged(plugin, page)
             page = session.page,
             total_pages = session.total_pages,
             percent = session.percent,
+            locator = session.locator,
         }, source)
     end
 end

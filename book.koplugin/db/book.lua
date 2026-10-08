@@ -4,6 +4,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 列职责：
   身份：source_id + stable_id（PK）、md5、path、inserted_at（0=仅身份行）
   成员：deleted（0=在架有效，1=软删/非成员）；sync_status（0 待上传，1 已同步）
+  内部：internal（1=册行等内部记录：持有进度/划线，但不进书架列表与计数）
   展示：title/authors/category/series/intro/cover
   本地-only：reader_prefs、toc、toc_fetched_at、read_state
   进度真源在 pending_progress；本表不存 percent。
@@ -75,6 +76,7 @@ CREATE TABLE IF NOT EXISTS books (
   deleted INTEGER NOT NULL DEFAULT 1, sync_status INTEGER NOT NULL DEFAULT 1,
   reader_prefs TEXT, toc TEXT, toc_fetched_at INTEGER NOT NULL DEFAULT 0,
   read_state INTEGER NOT NULL DEFAULT 0,
+  internal INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (source_id, stable_id)
 );
 ]]) then return false end
@@ -89,6 +91,7 @@ CREATE TABLE IF NOT EXISTS books (
         { "toc", "toc TEXT" },
         { "toc_fetched_at", "toc_fetched_at INTEGER NOT NULL DEFAULT 0" },
         { "read_state", "read_state INTEGER NOT NULL DEFAULT 0" },
+        { "internal", "internal INTEGER NOT NULL DEFAULT 0" },
     }
     if columns then
         for i = 1, nrows do
@@ -101,6 +104,10 @@ CREATE TABLE IF NOT EXISTS books (
             end
         end
     end
+    -- 旧数据回填：Kavita 册行（stable_id = 纯数字:纯数字）是内部行，不进书架列表。
+    -- 只认「仅由数字与冒号组成」的 id，避免误伤 webdav:// 等含冒号的身份。
+    Base.exec([[UPDATE books SET internal=1
+        WHERE internal=0 AND stable_id LIKE '%:%' AND stable_id NOT GLOB '*[^0-9:]*';]])
     return Base.exec([[
 CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(source_id, md5);
 CREATE INDEX IF NOT EXISTS idx_books_path ON books(path);
@@ -213,16 +220,19 @@ function BookDB.upsertLocal(row)
     return Base.exec(
         [[INSERT INTO books (
             source_id, stable_id, title, authors, category,
-            series, intro, inserted_at, deleted, sync_status
-          ) VALUES (?,?,?,?,?,?,?,?,0,0)
+            series, intro, cover, inserted_at, deleted, sync_status, internal
+          ) VALUES (?,?,?,?,?,?,?,?,?,0,0,?)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             title=excluded.title, authors=excluded.authors,
             category=excluded.category,
             series=excluded.series, intro=excluded.intro,
+            cover=COALESCE(excluded.cover, books.cover),
             deleted=0,
-            sync_status=CASE WHEN books.deleted=1 THEN 0 ELSE books.sync_status END;]],
+            sync_status=CASE WHEN books.deleted=1 THEN 0 ELSE books.sync_status END,
+            internal=excluded.internal;]],
         source_id, stable_id, row.title, row.authors,
-        row.category, row.series, row.intro, now
+        row.category, row.series, row.intro, row.cover, now,
+        row.internal and 1 or 0
     ) ~= nil
 end
 
@@ -249,6 +259,43 @@ function BookDB.reconcile(source_id, books, opts)
         batch[#batch + 1] = copy
     end
     if ok then ok = BookDB.upsertRemoteMany(batch) end
+    if ok and Base.exec("COMMIT;") then return true end
+    Base.exec("ROLLBACK;")
+    return false
+end
+
+--- 增量对账：只 upsert 变更/新增行、只软删远端消失的行。
+--- 未变的行完全不动，避免每次刷新重写整表；本地脏行/墓碑仍由 upsertRemote 保护。
+---@param source_id string
+---@param changed table[] 新增/变更的行（deleted=0）
+---@param removed string[] 远端已消失的 stable_id
+---@return boolean
+function BookDB.reconcileDelta(source_id, changed, removed)
+    if not Base.exec("BEGIN IMMEDIATE;") then return false end
+    local ok = true
+    if type(removed) == "table" and #removed > 0 then
+        local ph, args = {}, { source_id }
+        for i, sid in ipairs(removed) do
+            ph[i] = "?"
+            args[#args + 1] = sid
+        end
+        ok = Base.exec(
+            "UPDATE books SET deleted=1 WHERE source_id=? AND deleted=0 AND sync_status=1"
+                .. " AND stable_id IN (" .. table.concat(ph, ",") .. ");",
+            unpack(args)) ~= nil
+    end
+    if ok and type(changed) == "table" then
+        for _, row in ipairs(changed) do
+            local copy = {}
+            for k, v in pairs(row) do copy[k] = v end
+            copy.source_id = source_id
+            copy.deleted = 0
+            if not BookDB.upsertRemote(copy) then
+                ok = false
+                break
+            end
+        end
+    end
     if ok and Base.exec("COMMIT;") then return true end
     Base.exec("ROLLBACK;")
     return false
@@ -639,10 +686,14 @@ end
 
 --- 取某源当前书架内全部 stable_id。
 ---@param source_id string
+---@param opts { exclude_internal: boolean|nil }|nil exclude_internal=true 时排除内部册行（internal=1）
 ---@return string[]
-function BookDB.libraryStableIdsBySource(source_id)
+function BookDB.libraryStableIdsBySource(source_id, opts)
+    opts = opts or {}
+    local where = "source_id=? AND deleted=0"
+    if opts.exclude_internal then where = where .. " AND internal=0" end
     return stringColumn([[SELECT stable_id FROM books
-        WHERE source_id=? AND deleted=0 ORDER BY stable_id;]], source_id)
+        WHERE ]] .. where .. [[ ORDER BY stable_id;]], source_id)
 end
 
 --- 某源待上传书架行。
@@ -688,7 +739,7 @@ end
 function BookDB.listBySource(source_id, opts)
     opts = opts or {}
     local where, args = Base.sourceClause("b.source_id", source_id)
-    where = where .. " AND b.deleted=0"
+    where = where .. " AND b.deleted=0 AND b.internal=0"
     if type(opts.source_id) == "string" and opts.source_id ~= "" then
         where = where .. " AND b.source_id=?"
         args[#args + 1] = opts.source_id
@@ -779,7 +830,7 @@ end
 local function distinctValues(column, source_id)
     local where, args = Base.sourceClause("source_id", source_id)
     return stringColumn(
-        "SELECT DISTINCT " .. column .. " FROM books WHERE " .. where .. " AND deleted=0 AND "
+        "SELECT DISTINCT " .. column .. " FROM books WHERE " .. where .. " AND deleted=0 AND internal=0 AND "
             .. column .. " IS NOT NULL AND " .. column .. "<>'' ORDER BY " .. column .. ";",
         unpack(args)
     )
@@ -793,7 +844,7 @@ local function countsBy(column, source_id)
     local where, args = Base.sourceClause("source_id", source_id)
     local bucket = "CASE WHEN " .. column .. " IS NULL OR " .. column .. "='' THEN '' ELSE " .. column .. " END"
     local result, nrows = Base.query(
-        "SELECT " .. bucket .. ", COUNT(*) FROM books WHERE " .. where .. " AND deleted=0"
+        "SELECT " .. bucket .. ", COUNT(*) FROM books WHERE " .. where .. " AND deleted=0 AND internal=0"
             .. " GROUP BY " .. bucket
             .. " ORDER BY CASE WHEN " .. column .. " IS NULL OR " .. column .. "='' THEN 1 ELSE 0 END, "
             .. column .. ";",
@@ -842,7 +893,7 @@ function BookDB.sourceCountsBySource(source_id)
     local result, nrows = Base.query(
         [[SELECT source_id, COUNT(*)
           FROM books
-          WHERE ]] .. where .. [[ AND deleted=0
+          WHERE ]] .. where .. [[ AND deleted=0 AND internal=0
           GROUP BY source_id
           ORDER BY source_id;]],
         unpack(args)
@@ -866,7 +917,7 @@ function BookDB.readStatusCountsBySource(source_id)
                  END,
                  COUNT(*)
           FROM books
-          WHERE ]] .. where .. [[ AND deleted=0
+          WHERE ]] .. where .. [[ AND deleted=0 AND internal=0
           GROUP BY CASE
                      WHEN read_state=1 THEN 'read'
                      ELSE 'unread'
@@ -889,7 +940,7 @@ end
 ---@return integer
 function BookDB.downloadedCountBySource(source_id, chapter_sources)
     local where, args = Base.sourceClause("b.source_id", source_id)
-    where = where .. " AND b.deleted=0 AND " .. downloadedClause(chapter_sources, args)
+    where = where .. " AND b.deleted=0 AND b.internal=0 AND " .. downloadedClause(chapter_sources, args)
     return tonumber(Base.rowexec("SELECT COUNT(*) FROM books b WHERE " .. where .. ";", unpack(args))) or 0
 end
 

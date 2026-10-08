@@ -62,6 +62,7 @@ for _, id in ipairs({
     "clock", "weather", "clock_weather", "stats", "hitokoto", "excerpt",
     "history", "news",
     "recent_hero", "recent_list", "recent_cards",
+    "kavita_recent",
 }) do
     package.preload["ui.desktop.home.views." .. id] = function()
         return stubComponent(id)
@@ -72,7 +73,7 @@ local Base = require("ui.desktop.home.registry")
 local Layout = require("ui.desktop.home.layout")
 local Widgets = require("ui.desktop.home.widgets")
 
-Assert.len(Base.components, 11)
+Assert.len(Base.components, 12)
 local defaults = Base.enabledLayout()
 Assert.len(defaults, 2)
 Assert.eq(defaults[1], "recent_hero")

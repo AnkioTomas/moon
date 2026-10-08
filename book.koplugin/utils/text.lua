@@ -140,6 +140,32 @@ function Text.truncateUtf8(s, max_bytes)
     return s:sub(1, last)
 end
 
+--- UTF-16 码元个数，对齐 JS `String.length`（Kavita `highlightCount` 的语义）。
+--- BMP 字符算 1，星平面字符（emoji 等）算 2；游离/非法字节按 1 容错计。
+---@param s string|nil
+---@return integer
+function Text.utf16Length(s)
+    s = tostring(s or "")
+    local n, i, len = 0, 1, #s
+    while i <= len do
+        local b = string.byte(s, i)
+        if b < 0xE0 then -- ASCII 或 2 字节
+            i = i + (b < 0x80 and 1 or 2)
+            n = n + 1
+        elseif b < 0xF0 then -- 3 字节（BMP）
+            i = i + 3
+            n = n + 1
+        elseif b < 0xF8 then -- 4 字节（星平面，UTF-16 代理对 = 2）
+            i = i + 4
+            n = n + 2
+        else
+            i = i + 1
+            n = n + 1
+        end
+    end
+    return n
+end
+
 --- 换行符规范化：\r\n / \r → \n。
 ---@return string
 function Text.normalizeNewlines(s)

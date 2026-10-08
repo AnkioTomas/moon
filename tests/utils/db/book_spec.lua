@@ -127,7 +127,7 @@ do
     end
     for _, name in ipairs({
         "cover", "inserted_at", "deleted", "sync_status",
-        "reader_prefs", "toc", "toc_fetched_at", "read_state",
+        "reader_prefs", "toc", "toc_fetched_at", "read_state", "internal",
     }) do
         Assert.is_true(alters[name], "旧库必须补列: " .. name)
     end
@@ -327,6 +327,48 @@ do
     clearMods()
 end
 
+-- ── reconcileDelta：只写 changed、只软删 removed ──
+do
+    local connection, calls = makeConn()
+    local DbBase, BookDB = loadBook(connection)
+    Assert.is_true(BookDB.reconcileDelta("kavita", {
+        { source_id = "kavita", stable_id = "1", title = "A" },
+    }, { "9", "8" }))
+    local update, inserts, commit = nil, 0, false
+    for _, call in ipairs(calls) do
+        if call.sql:find("UPDATE books SET deleted=1", 1, true)
+            and call.sql:find("stable_id IN (?,?)", 1, true) then
+            update = call
+        end
+        if call.sql:find("INSERT INTO books", 1, true) then inserts = inserts + 1 end
+        if call.sql == "COMMIT;" then commit = true end
+    end
+    Assert.not_nil(update, "removed 走定向 IN 软删")
+    Assert.eq(update.args[1], "kavita")
+    Assert.eq(update.args[2], "9")
+    Assert.eq(update.args[3], "8")
+    Assert.eq(inserts, 1, "只 upsert changed 行")
+    Assert.is_true(commit)
+    DbBase.close()
+    clearMods()
+end
+
+-- ── reconcileDelta：空变更不发多余写 ──
+do
+    local connection, calls = makeConn()
+    local DbBase, BookDB = loadBook(connection)
+    Assert.is_true(BookDB.reconcileDelta("kavita", {}, {}))
+    local update, inserts = 0, 0
+    for _, call in ipairs(calls) do
+        if call.sql:find("UPDATE books SET deleted=1", 1, true) then update = update + 1 end
+        if call.sql:find("INSERT INTO books", 1, true) then inserts = inserts + 1 end
+    end
+    Assert.eq(update, 0)
+    Assert.eq(inserts, 0)
+    DbBase.close()
+    clearMods()
+end
+
 -- ── markDeleted / pendingDeleteIds：本地软删入脏队列 ──
 do
     local connection, calls = makeConn({
@@ -378,6 +420,30 @@ do
     Assert.eq(pending[2], "add2")
     local q = calls[#calls]
     Assert.is_true(q.sql:find("deleted=0 AND sync_status=0", 1, true) ~= nil)
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── libraryStableIdsBySource：exclude_internal 过滤内部册行 ──
+do
+    local captured_sql
+    local connection = makeConn({
+        resultset = function(sql)
+            captured_sql = sql
+            return { { "s1" } }, 1
+        end,
+    })
+    local DbBase, BookDB = loadBook(connection)
+
+    BookDB.libraryStableIdsBySource("kavita")
+    Assert.is_true(captured_sql:find("deleted=0", 1, true) ~= nil)
+    Assert.is_nil(captured_sql:find("internal=0", 1, true), "默认包含内部册行")
+
+    local rows = BookDB.libraryStableIdsBySource("kavita", { exclude_internal = true })
+    Assert.is_true(captured_sql:find("deleted=0 AND internal=0", 1, true) ~= nil,
+        "exclude_internal 必须过滤 internal=0")
+    Assert.eq(#rows, 1)
 
     DbBase.close()
     clearMods()

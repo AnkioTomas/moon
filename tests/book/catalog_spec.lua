@@ -164,6 +164,39 @@ do -- recentBooksAsync：进度定顺序和位置，books 只补元数据
     Assert.eq(got.data[2].stable_id, "a.epub")
 end
 
+do -- 册行缺作者/简介 → 从容器行继承（「当前阅读」展示面）
+    FakeBooks.recent = {
+        { source_id = "local", stable_id = "42:77", fraction = 0.5, updated_at = 200 },
+    }
+    FakeBooks.meta = {
+        ["local\n42"] = { source_id = "local", stable_id = "42", title = "系列", authors = "作者A", intro = "简介A" },
+        ["local\n42:77"] = { source_id = "local", stable_id = "42:77", title = "第一册" },
+    }
+    local got
+    Catalog.recentBooksAsync("local", 24, function(res) got = res end)
+    Stubs.flush()
+    Assert.eq(#got.data, 1)
+    Assert.eq(got.data[1].stable_id, "42:77")
+    Assert.eq(got.data[1].authors, "作者A")
+    Assert.eq(got.data[1].intro, "简介A")
+end
+
+do -- 容器与册行同在最近阅读 → 只保留容器（册行是内部记录）
+    FakeBooks.recent = {
+        { source_id = "local", stable_id = "42", fraction = 0.1, updated_at = 300 },
+        { source_id = "local", stable_id = "42:77", fraction = 0.5, updated_at = 200 },
+    }
+    FakeBooks.meta = {
+        ["local\n42"] = { source_id = "local", stable_id = "42", title = "系列" },
+        ["local\n42:77"] = { source_id = "local", stable_id = "42:77", title = "第一册" },
+    }
+    local got
+    Catalog.recentBooksAsync("local", 24, function(res) got = res end)
+    Stubs.flush()
+    Assert.eq(#got.data, 1)
+    Assert.eq(got.data[1].stable_id, "42")
+end
+
 do -- readingInsightAsync
     FakeStats.summary = { total_seconds = 120, total_pages = 3 }
     FakeStats.daily = { { ymd = "2026-08-21", seconds = 120 } }

@@ -175,6 +175,14 @@ function BookInfo.author(book)
     return book.authors or ""
 end
 
+--- 取当前章/卷标题（最近阅读里显示"看到第几卷"用）。
+---@param book Book|table|nil 当前操作或展示的书籍数据
+---@return string
+function BookInfo.chapter(book)
+    if type(book) ~= "table" then return "" end
+    return book.chapter_title or ""
+end
+
 --- 取简介。
 ---@param book Book|BookDetail|table|nil 当前操作或展示的书籍数据
 ---@return string

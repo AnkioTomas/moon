@@ -24,7 +24,7 @@ end
 
 package.preload["source.toc"] = function()
     return {
-        read = function() return { { idx = 1, chapterId = 7, volumeId = 3, libraryId = 8, pages = 100, format = "epub" } } end,
+        read = function() return { { idx = 1, chapterId = 7, volumeId = 3, libraryId = 8, pages = 100, format = "epub", toc_version = 3 } } end,
         put = function() return true end,
         drop = function() end,
     }
@@ -82,6 +82,12 @@ end
 local Kavita = require("source.kavita")
 local source = Kavita.new()
 
+-- 沙箱 test/ 跨次运行会残留上一轮下载的册文件；文件复用逻辑会把它们当成已缓存。
+-- 清掉本轮用到的册文件，保证下载路径被真正走到。
+local Paths = require("utils.paths")
+os.remove(Paths.bookWorkDir("42", "kavita") .. "/1.epub")
+os.remove(Paths.bookWorkDir("43", "kavita") .. "/1.epub")
+
 local open_result
 local open_err
 source:openBookAsync({ source_id = "kavita", stable_id = "42", book = { title = "Test Book", format = "epub" } }, {}, function(path, err)
@@ -105,7 +111,7 @@ source = Kavita.new()
 
 local offline_result
 local offline_err
-source:openBookAsync({ source_id = "kavita", stable_id = "42", book = { title = "Test Book", format = "epub" } }, {}, function(path, err)
+source:openBookAsync({ source_id = "kavita", stable_id = "43", book = { title = "Test Book", format = "epub" } }, {}, function(path, err)
     offline_result = path
     offline_err = err
 end)
@@ -113,3 +119,21 @@ end)
 Assert.is_nil(offline_result)
 Assert.not_nil(offline_err)
 Assert.eq(offline_err, "网络不可用，请先连接 Wi-Fi")
+
+-- 已下载书籍离线：直接复用本地文件，不发网络请求、不报错。
+network.online = false
+source = Kavita.new()
+local downloaded = Paths.bookWorkDir("42", "kavita") .. "/1.epub"
+local fh = io.open(downloaded, "wb")
+fh:write("PK\003\004fake epub content")
+fh:close()
+local downloads_before = #download_calls
+local reuse_result, reuse_err
+source:openBookAsync(
+    { source_id = "kavita", stable_id = "42", book = { title = "Test Book", format = "epub", path = downloaded } },
+    {},
+    function(path, err) reuse_result, reuse_err = path, err end
+)
+Assert.eq(reuse_result, downloaded)
+Assert.is_nil(reuse_err)
+Assert.eq(#download_calls, downloads_before)

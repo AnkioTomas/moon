@@ -96,6 +96,25 @@ function Catalog.libraryScope(preferred_id)
     return ids
 end
 
+--- 册行（stable_id = "父:子"）在服务端只在 series 级有简介/作者；册行缺元数据时
+--- 从容器行继承，避免「当前阅读」等展示面出现空作者/空简介。
+---@param row table|nil
+---@param source_id string|nil 行内缺 source_id 时使用
+---@return table|nil
+local function inheritVolumeMeta(row, source_id)
+    if type(row) ~= "table" or type(row.stable_id) ~= "string" then return row end
+    local has_author = row.authors and row.authors ~= ""
+    local has_intro = row.intro and row.intro ~= ""
+    if has_author and has_intro then return row end
+    local parent_id = row.stable_id:match("^(.-):")
+    if not parent_id then return row end
+    local parent = require("db.book").get(row.source_id or source_id, parent_id)
+    if not parent then return row end
+    if not has_author then row.authors = parent.authors end
+    if not has_intro then row.intro = parent.intro end
+    return row
+end
+
 --- books 表行 → Book。
 ---@param row table|nil
 ---@param source_id string|nil 行内缺 source_id 时使用
@@ -104,6 +123,7 @@ local function toBook(row, source_id)
     if type(row) ~= "table" or type(row.stable_id) ~= "string" or row.stable_id == "" then
         return nil
     end
+    row = inheritVolumeMeta(row, source_id)
     return {
         source_id = row.source_id or source_id,
         stable_id = row.stable_id,
@@ -359,17 +379,29 @@ function Catalog.recentBooks(source_id, limit)
     local progress_rows = require("db.progress").recent(scope, limit)
     local books = {}
     local BookDB = require("db.book")
+    -- 本批次里出现过的「容器」身份（无 ':'），用于把同一 series 的册行折叠掉：
+    -- 漫画进度同时写在容器（回填）与旧册行上时，最近阅读只保留容器一条。
+    local containers = {}
+    for _, progress in ipairs(progress_rows) do
+        local sid = progress.stable_id
+        if type(sid) == "string" and not sid:find(":", 1, true) then
+            containers[progress.source_id .. "\31" .. sid] = true
+        end
+    end
     for _, progress in ipairs(progress_rows) do
         -- 按 (source_id, stable_id) 取元数据，避免跨源 stable_id 碰撞。
         local meta = BookDB.get(progress.source_id, progress.stable_id)
         local book = toBook(meta, progress.source_id)
         if book then
-            book.percent = math.floor((tonumber(progress.fraction) or 0) * 100 + 0.5)
-            book.chapter_idx = progress.chapter_idx
-            book.chapter_title = progress.chapter_title
-            book.page = progress.page
-            book.total_pages = progress.total_pages
-            books[#books + 1] = book
+            local parent = book.stable_id:match("^(.-):")
+            if not (parent and containers[book.source_id .. "\31" .. parent]) then
+                book.percent = math.floor((tonumber(progress.fraction) or 0) * 100 + 0.5)
+                book.chapter_idx = progress.chapter_idx
+                book.chapter_title = progress.chapter_title
+                book.page = progress.page
+                book.total_pages = progress.total_pages
+                books[#books + 1] = book
+            end
         end
     end
     return books

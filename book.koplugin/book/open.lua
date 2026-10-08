@@ -101,9 +101,14 @@ function Open.book(plugin, book, on_done)
         source = source,
         book = book,
     }
-    Open.pending_job = source:openBookAsync(identity, nil, function(path, open_err)
+    Open.pending_job = source:openBookAsync(identity, nil, function(path, open_err, open_opts)
         if generation ~= Open.generation then return end
         Open.pending_job = nil
+        -- 源已自行接管展示（如漫画交给外部 kamare 阅读器）：跳过 ReaderUI。
+        if open_opts and open_opts.handled then
+            done(true)
+            return
+        end
         if not path then
             UIManager:show(InfoMessage:new{ text = open_err or _("无法打开书籍") })
             done(false)

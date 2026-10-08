@@ -58,6 +58,15 @@ do
     Assert.eq(Text.truncateUtf8("中文abc", 4), "中")
     Assert.eq(Text.truncateUtf8("中文", 6), "中文")
     Assert.eq(Text.truncateUtf8("中文", 0), "")
+
+    -- utf16Length 对齐 JS String.length（Kavita highlightCount 语义）
+    Assert.eq(Text.utf16Length("abc"), 3)
+    Assert.eq(Text.utf16Length("中文"), 2)
+    Assert.eq(Text.utf16Length("看见报纸那天，我晚上失眠了。"), 14)
+    Assert.eq(Text.utf16Length("a中"), 2) -- 字节是 4，码元是 2
+    Assert.eq(Text.utf16Length("\240\159\152\128"), 2) -- 星平面 emoji = 代理对
+    Assert.eq(Text.utf16Length(""), 0)
+    Assert.eq(Text.utf16Length(nil), 0)
 end
 
 -- ── absoluteUrl ───────────────────────────────────────

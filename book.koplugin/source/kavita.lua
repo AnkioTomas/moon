@@ -2,8 +2,11 @@ local SourceBase = require("source.base")
 local Client = require("source.kavita.client")
 local Backfill = require("source.kavita.backfill")
 local Anchor = require("source.kavita.anchor")
+local Kamare = require("source.kavita.kamare")
 local JSON = require("json")
+local Text = require("utils.text")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local BACKFILL_STATE_FILE = "kavita-backfill.json"
 
@@ -52,6 +55,49 @@ local function saveBackfillState(state)
     saveJson(backfillStatePath(), state)
 end
 
+--- 书架快照：上次成功对账的库集合 + 每本 series 的变更指纹。
+--- 对账前比对，全无变化就跳过整表重写与首页重建（增量刷新）。
+local SHELF_STATE_FILE = "kavita-shelf.json"
+
+---@return string
+local function shelfStatePath()
+    return require("utils.paths").root() .. "/" .. SHELF_STATE_FILE
+end
+
+--- 单本 series 的变更指纹：展示字段 + 漫画进度字段，任一变化都需要重跑对账/回填。
+--- 进度字段只对漫画（Archive/Image）生效——书籍进度走本地 pending_progress，
+--- 若把书籍 pagesRead 也算进指纹，读完一次就会让整个书架快照失效。
+---@param series table
+---@return string
+local function seriesFingerprint(series)
+    local parts = {
+        tostring(series.lastChapterAddedUtc or ""),
+        tostring(series.name or ""),
+        tostring(series.format or ""),
+        tostring(series.pages or 0),
+    }
+    local fmt = tostring(series.format or "")
+    if fmt == "0" or fmt == "1" then
+        parts[#parts + 1] = tostring(series.pagesRead or 0)
+        parts[#parts + 1] = tostring(series.latestReadDate or "")
+    end
+    return table.concat(parts, "\31")
+end
+
+--- 两个 id 列表是否同集合（忽略顺序）。
+---@param a table|nil
+---@param b table
+---@return boolean
+local function sameIdSet(a, b)
+    if type(a) ~= "table" or #a ~= #b then return false end
+    local set = {}
+    for _, v in ipairs(a) do set[tostring(v)] = true end
+    for _, v in ipairs(b) do
+        if not set[tostring(v)] then return false end
+    end
+    return true
+end
+
 --- 注解幂等映射：`<workdir>/kavita-annotations.json`（键 = pos0）。
 ---@param workdir string
 ---@return string
@@ -75,13 +121,45 @@ local function writersToAuthors(writers)
     return table.concat(names, ", ")
 end
 
-local DEFAULT_HEARTBEAT = 30
+--- 补全状态落盘节流：整份 JSON 重写，逐条落盘会随条目增长变成 O(n²)（越到后面越慢）。
+local BACKFILL_SAVE_INTERVAL = 10
+
+--- 册行 stable_id = ``seriesId:chapterId``；容器/单册不带分隔。
+---@param stable_id string|nil
+---@return string|nil series_id
+---@return string|nil chapter_id
+local function splitVolumeStable(stable_id)
+    local series, chapter = tostring(stable_id or ""):match("^(%d+):(%d+)$")
+    return series, chapter
+end
+
+---@param series_id string|number
+---@param chapter_id string|number
+---@return string
+local function volumeStableId(series_id, chapter_id)
+    return tostring(series_id) .. ":" .. tostring(chapter_id)
+end
+
+--- 取 Kavita seriesId：容器即 stable_id；册行从 ``seriesId:chapterId`` 解析。
+---@param stable_id string|nil
+---@return number|string|nil
+local function seriesIdOf(stable_id)
+    local series = splitVolumeStable(stable_id)
+    if series then return tonumber(series) or series end
+    return tonumber(stable_id) or stable_id
+end
 
 --- 当前章目录条目（identity.chapter_idx 或首章）；目录缺失返回 nil。
+--- 册行目录是静态单条，不走 TTL；容器目录（多册/旧章节模式）走 source.toc 缓存。
 ---@param identity BookIdentity
 ---@return BookChapter|nil
 local function chapterEntry(identity)
-    local list = require("source.toc").read(identity.source_id, identity.stable_id)
+    local list
+    if splitVolumeStable(identity.stable_id) then
+        list = require("book.store").toc(identity)
+    else
+        list = require("source.toc").read(identity.source_id, identity.stable_id)
+    end
     if not list or #list == 0 then return nil end
     local idx = tonumber(identity.chapter_idx) or 1
     return list[idx] or list[1]
@@ -94,6 +172,95 @@ local FORMAT_NAMES = { [0] = "image", [1] = "cbz", [3] = "epub", [4] = "pdf" }
 ---@return string|nil
 local function formatName(n)
     return FORMAT_NAMES[tonumber(n)]
+end
+
+--- Kavita ISO 时间（``2026-09-29T20:07:19.193``）→ epoch；无法解析返回 0。
+--- 仅用于「最近阅读」排序，时区偏差不影响相对顺序。
+---@param s string|nil
+---@return integer
+local function parseUtcIso(s)
+    if type(s) ~= "string" then return 0 end
+    local y, mo, d, h, mi, se = s:match("^(%d%d%d%d)-(%d%d)-(%d%d)T(%d%d):(%d%d):(%d%d)")
+    if not y then return 0 end
+    return os.time({
+        year = tonumber(y), month = tonumber(mo), day = tonumber(d),
+        hour = tonumber(h), min = tonumber(mi), sec = tonumber(se),
+    }) or 0
+end
+
+--- On Deck SeriesDto[] → 首页展示用 Book[]：书籍与漫画都保留（漫画由 kamare 在线读）。
+--- 进度取 series 级 pagesRead/pages；格式未知或 id 缺失的脏行跳过。
+---@param source_id string
+---@param series table[]
+---@return Book[]
+local function onDeckBooks(source_id, series)
+    local books = {}
+    for _, s in ipairs(series or {}) do
+        local fmt = formatName(s.format)
+        if fmt ~= nil and s.id ~= nil then
+            local total = tonumber(s.pages) or 0
+            local read = tonumber(s.pagesRead) or 0
+            local percent = 0
+            if total > 0 then
+                percent = math.floor(read * 100 / total + 0.5)
+                if percent > 100 then percent = 100 end
+            end
+            books[#books + 1] = {
+                source_id = source_id,
+                stable_id = tostring(s.id),
+                title = s.name,
+                format = fmt,
+                percent = percent,
+            }
+        end
+    end
+    return books
+end
+
+--- 目录缓存格式版本：标题抽取逻辑变化时 +1，旧目录按过期重建。
+--- v2：章元数据缺失时不再用纯数字卷号，退回文件名（漫画）。
+--- v3：带 pagesRead，供选册预选/标「在读·已读」，也供最近阅读显示当前卷。
+local TOC_VERSION = 3
+
+--- 清洗 Kavita 标题：去空白；`-100000`（number 哨兵）与纯负数标题视为未命名。
+---@param value any
+---@return string|nil
+local function cleanTitle(value)
+    if type(value) ~= "string" then return nil end
+    local s = Text.trim(value)
+    if s == "" or s:match("^%-%d+$") then return nil end
+    return s
+end
+
+--- 卷名当标题用：纯数字卷号（``"1"``）不是名称，返回 nil 让位给文件名。
+---@param value any
+---@return string|nil
+local function volumeNameTitle(value)
+    local name = cleanTitle(value)
+    if name and name:match("^%d+$") then return nil end
+    return name
+end
+
+--- 章节文件末段（去扩展名）；无文件信息返回 nil。
+---@param chapter table
+---@return string|nil
+local function chapterFileName(chapter)
+    local file_path = chapter.files and chapter.files[1] and chapter.files[1].filePath
+    if type(file_path) ~= "string" or file_path == "" then return nil end
+    return Text.basename(file_path):gsub("%.[^%.]+$", "")
+end
+
+--- 章节展示标题：优先章元数据（titleName/title），其次有意义的卷名，最后文件名。
+--- 书籍（EPUB/PDF）章元数据齐全；漫画在 Kavita 侧无章元数据（title 恒为
+--- `-100000` 哨兵、卷名恒为数字卷号）→ 落到文件名（如 `AKIRA Vol.01`）。
+---@param chapter table
+---@param volume table
+---@return string|nil
+local function chapterDisplayTitle(chapter, volume)
+    return cleanTitle(chapter.titleName)
+        or cleanTitle(chapter.title)
+        or volumeNameTitle(volume and volume.name)
+        or cleanTitle(chapterFileName(chapter))
 end
 
 --- books.format：优先身份书行，其次 toc 条目（books 表没有 format 列）。
@@ -110,6 +277,20 @@ local function bookFormat(identity)
     return book and book.format
 end
 
+--- 本地 epub 物理路径；未下载/未登记返回 nil。
+--- 用于把 Kavita 网页端进度里的 `id("...")` bookScrollId 解析成 spine 内位置。
+---@param identity BookIdentity
+---@return string|nil
+local function bookFilePath(identity)
+    local book = identity.book
+    if not (book and type(book.path) == "string" and book.path ~= "") then
+        book = require("db.book").get(identity.source_id, identity.stable_id) or book
+    end
+    local path = book and book.path
+    if type(path) == "string" and path ~= "" then return path end
+    return nil
+end
+
 --- 漫画（format 0/1 → cbz/image）不参与 SourceUI 进度推送（kamare 自推）。
 ---@param identity BookIdentity
 ---@return boolean
@@ -118,14 +299,29 @@ local function isComic(identity)
     return format == "cbz" or format == "image"
 end
 
---- KOReader xpointer → Kavita `//body/p[N]`；无法解析返回 nil。
----@param locator string|nil
----@return string|nil
-local function scrollIdFromLocator(locator)
-    if type(locator) ~= "string" then return nil end
-    local n = locator:match("p%[(%d+)%]")
-    if not n then return nil end
-    return "//body/p[" .. n .. "]"
+--- Kavita 进度是 spine 页级：`pageNum` 是 0-based spine 序号、`pages` 是 spine 数
+--- （EPUB 实测与 `<spine>` 条目数一一对应）。KOReader 的 `DocFragment[D]` 就是
+--- spine `D-1`（注解锚点已钉死），因此 pageNum 取 xpointer 的 spine，而不是
+--- 「内容比例 × 页数」——后者会因各 spine 长度悬殊而漂移。
+---@param pos ProgressPosition
+---@param pages integer
+---@param frac number 章内/spine 内比例（无 locator 时的回退依据）
+---@return integer
+local function pageNumOf(pos, pages, frac)
+    frac = require("book.progress").clampFraction(frac)
+    local spine = Anchor.pageNumber(pos.locator)
+    if spine and pages > 0 then
+        if spine < 0 then spine = 0 elseif spine > pages - 1 then spine = pages - 1 end
+        -- Kavita 用 pageNum == pages 表示「已读完」；最后一屏读完时发 pages。
+        if frac >= 1 and spine == pages - 1 then return pages end
+        return spine
+    end
+    local estimate = math.floor(frac * pages + 0.5)
+    -- 没有 locator 时用比例估算，但绝不能在真正读完前凑到 pages：
+    -- Kavita 把 pageNum == pages 当「本章已读完」，提前到达会把书从「正在阅读」移除。
+    if frac < 1 and estimate >= pages then estimate = pages - 1 end
+    if estimate < 0 then estimate = 0 end
+    return estimate
 end
 
 local Kavita = {}
@@ -165,13 +361,49 @@ function Source:configured()
     return self._client:configured()
 end
 
+--- 首页「Kavita 最近阅读」：服务端 On Deck 列表，书籍与漫画都保留
+--- （漫画由 kamare 在线读，进度也由 kamare 推给 Kavita）。
+--- 不落本地库；未配置时异步回错误，调用方显示空态。
+---@param cb fun(books: Book[]|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Source:onDeckAsync(cb)
+    if not self:configured() then
+        require("ui/uimanager"):nextTick(function()
+            cb(nil, _("未配置服务器地址或 API Key"))
+        end)
+        return { cancel = function() end }
+    end
+    local cancelled = false
+    local job = self._client:onDeckAsync(function(data, err)
+        if cancelled then return end
+        if not data then cb(nil, err); return end
+        cb(onDeckBooks(self.id, data))
+    end)
+    return { cancel = function()
+        cancelled = true
+        if job and job.cancel then job.cancel() end
+    end }
+end
+
 function Source:coverRequest(identity)
     local stable_id = identity and identity.stable_id
-    return self._client:coverRequest(stable_id)
+    -- 册行的 stable_id 是 `seriesId:chapterId`，封面仍取 series 的。
+    return self._client:coverRequest(seriesIdOf(stable_id))
 end
 
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
+    local started_at = os.time()
+    --- 刷新耗时埋点：正常走 dbg，≥3s 升 warn（无需开调试模式也能排查慢刷新）。
+    local function shelfLog(msg, ...)
+        local elapsed = os.time() - started_at
+        local logger = require("utils.log")
+        if elapsed >= 3 then
+            logger.warn(msg, elapsed .. "s", ...)
+        else
+            logger.dbg(msg, elapsed .. "s", ...)
+        end
+    end
     if opts.dirty_only then
         require("ui/uimanager"):nextTick(function()
             cb({
@@ -197,59 +429,217 @@ function Source:syncBooksAsync(opts, cb)
     end
     local all_books = {}
     local series_ts = {}
+    local series_fp = {}
+    local comic_progress = {}
     local cancelled = false
     local pending = #lib_ids
     local has_error = false
-    local function fetchLibrary(lib_id)
-        local page = 1
-        local function fetchPage()
-            if cancelled then return end
-            self._client:fetchSeriesPage(lib_id, page, 1000, function(data, err)
-                if cancelled then return end
-                if err then
-                    if not has_error then
-                        has_error = true
-                        cb(nil, err)
-                    end
-                    return
-                end
-                if not data or #data == 0 then
-                    pending = pending - 1
-                    if pending == 0 and not has_error then
-                        local Store = require("book.store")
-                        local result, rerr = Store.reconcile(self.id, all_books)
-                        if result then
-                            self:_startBackfill(series_ts)
-                            cb(result, rerr)
-                        else
-                            cb(nil, rerr)
-                        end
-                    end
-                    return
-                end
-                for _, series in ipairs(data) do
-                    series_ts[tostring(series.id)] = series.lastChapterAddedUtc or ""
-                    all_books[#all_books + 1] = {
-                        source_id = self.id,
-                        stable_id = tostring(series.id),
-                        title = series.name,
-                        category = series.libraryName,
-                        series = nil,
-                        format = formatName(series.format),
-                        cover = tostring(series.id),
-                        deleted = 0,
-                    }
-                end
-                page = page + 1
-                fetchPage()
-            end)
+    local PAGE_SIZE = 1000
+    -- 每库一次并行取 2 页：整库列表拉取从「页数 × RTT」压到「ceil(页数/2) × RTT」。
+    local PAGE_STRIDE = 2
+
+    --- 收下一条 series：骨架行 + 指纹 + 漫画进度。
+    ---@param series table
+    local function addSeries(series)
+        series_ts[tostring(series.id)] = series.lastChapterAddedUtc or ""
+        series_fp[tostring(series.id)] = seriesFingerprint(series)
+        local fmt = formatName(series.format)
+        all_books[#all_books + 1] = {
+            source_id = self.id,
+            stable_id = tostring(series.id),
+            title = series.name,
+            category = series.libraryName,
+            series = nil,
+            format = fmt,
+            cover = tostring(series.id),
+            deleted = 0,
+        }
+        -- 漫画进度回填：series 级 pagesRead/pages 即 Kavita 的阅读比例
+        -- （与「Kavita 最近阅读」On Deck 用的一致），写进 pending_progress
+        -- 供书架/最近阅读跨设备显示；sync_status=1 不回推，updated_at 取服务端。
+        if (fmt == "cbz" or fmt == "image") and series.id ~= nil then
+            local pages = tonumber(series.pages) or 0
+            local read = tonumber(series.pagesRead) or 0
+            if pages > 0 and read > 0 then
+                comic_progress[#comic_progress + 1] = {
+                    stable_id = tostring(series.id),
+                    fraction = math.min(1, read / pages),
+                    page = read,
+                    total_pages = pages,
+                    updated_at = parseUtcIso(series.latestReadDate),
+                }
+            end
         end
-        fetchPage()
+    end
+
+    --- 全部库拉完：增量判定 → 对账 → 回调。
+    local function finishFetch()
+        local Store = require("book.store")
+        shelfLog("kavita.shelf fetched", #all_books, "series")
+        -- 增量判定：库集合 + 每本指纹都一致，且本地书架集合与远端一致 → 跳过对账。
+        local prev = loadJson(shelfStatePath())
+        local prev_series = type(prev.series) == "table" and prev.series or nil
+        local changed, changed_ids = false, nil
+        if not prev_series or not sameIdSet(prev.libs, lib_ids) then
+            changed = true
+        else
+            changed_ids = {}
+            for id, fp in pairs(series_fp) do
+                if prev_series[id] ~= fp then
+                    changed = true
+                    changed_ids[id] = true
+                end
+            end
+            for id in pairs(prev_series) do
+                if series_fp[id] == nil then
+                    changed = true
+                    changed_ids[id] = true
+                end
+            end
+            -- 本地书架自校验：与「上次对账后的本地数量」比对，而不是远端数量——
+            -- 本地软删的墓碑仍在远端集合里，拿远端数量比会永远不相等、每次刷新都全量。
+            if not changed and type(Store.shelfStableIds) == "function" then
+                local local_ids = Store.shelfStableIds(self.id)
+                if type(local_ids) ~= "table" or #local_ids ~= tonumber(prev.local_count) then
+                    changed, changed_ids = true, nil
+                end
+            elseif not changed then
+                changed, changed_ids = true, nil -- 无法校验本地集合 → 稳妥走全量
+            end
+        end
+        if not changed then
+            -- 远端书架没变，但本地进度可能刚变（关书落 pending_progress）。不能当 skipped：
+            -- 调用方要据此重建书架视图并广播 shelf_changed，让首页/书库卡片重读本地进度。
+            shelfLog("kavita.shelf sync unchanged", #all_books, "series")
+            cb({
+                pulled = 0, pushed = 0, hidden = 0, conflicts = 0,
+                skipped = false, unchanged = true,
+            })
+            return
+        end
+        -- 漫画进度只回填本次变更的 series（首次/库变更时 changed_ids=nil → 全量）。
+        local comics = comic_progress
+        if changed_ids ~= nil then
+            comics = {}
+            for _, row in ipairs(comic_progress) do
+                if changed_ids[row.stable_id] then comics[#comics + 1] = row end
+            end
+        end
+        local result, rerr
+        if changed_ids ~= nil and type(Store.reconcileDelta) == "function" then
+            -- 只写变更/新增行、只软删消失行，未变的行不重写。
+            local changed_rows = {}
+            for _, b in ipairs(all_books) do
+                if changed_ids[b.stable_id] then
+                    changed_rows[#changed_rows + 1] = b
+                end
+            end
+            local removed_ids = {}
+            for id in pairs(prev_series) do
+                if series_fp[id] == nil then removed_ids[#removed_ids + 1] = id end
+            end
+            result, rerr = Store.reconcileDelta(self.id, changed_rows, removed_ids)
+        else
+            result, rerr = Store.reconcile(self.id, all_books)
+        end
+        if result then
+            self:_backfillComicProgress(comics)
+            self:_startBackfill(series_ts)
+            -- 记下对账后的本地书架数量，供下次增量判定（含本地软删，故不等于远端数量）。
+            local local_count
+            if type(Store.shelfStableIds) == "function" then
+                local ids = Store.shelfStableIds(self.id)
+                if type(ids) == "table" then local_count = #ids end
+            end
+            saveJson(shelfStatePath(), {
+                libs = lib_ids, series = series_fp, local_count = local_count,
+            })
+            shelfLog("kavita.shelf sync done", "pulled", result.pulled,
+                "hidden", result.hidden, "of", #all_books)
+            cb(result, rerr)
+        else
+            cb(nil, rerr)
+        end
+    end
+
+    local function fetchLibrary(lib_id)
+        local finished = false
+        local function finishLibrary()
+            if finished then return end
+            finished = true
+            pending = pending - 1
+            if pending == 0 and not has_error then finishFetch() end
+        end
+        --- 并行取 [from, from+count-1]；整组都满页才继续下一组，否则本库结束。
+        local function fetchGroup(from, count, on_full)
+            if cancelled or finished then return end
+            local remaining, full_pages = count, 0
+            local errored = false
+            for p = from, from + count - 1 do
+                self._client:fetchSeriesPage(lib_id, p, PAGE_SIZE, function(data, err)
+                    if cancelled or finished then return end
+                    remaining = remaining - 1
+                    if err then
+                        errored = true
+                        if not has_error then
+                            has_error = true
+                            cb(nil, err)
+                        end
+                    elseif data and #data > 0 then
+                        for _, series in ipairs(data) do addSeries(series) end
+                        if #data >= PAGE_SIZE then full_pages = full_pages + 1 end
+                    end
+                    if remaining == 0 and not errored then
+                        if full_pages == count then on_full() else finishLibrary() end
+                    end
+                end)
+            end
+        end
+        local fetchPair
+        fetchPair = function(from)
+            fetchGroup(from, PAGE_STRIDE, function() fetchPair(from + PAGE_STRIDE) end)
+        end
+        -- 首屏单独取：小库（≤1 页）只发一次请求；满页再按 2 页一组并行。
+        fetchGroup(1, 1, function() fetchPair(2) end)
     end
     for _, lib_id in ipairs(lib_ids) do
         fetchLibrary(lib_id)
     end
     return { cancel = function() cancelled = true end }
+end
+
+--- 漫画进度回填：把书架同步拿到的 series 级 pagesRead/pages 写进 pending_progress，
+--- 让书架/最近阅读在换设备或重装后仍显示服务端进度。干净行（sync_status=1）不回推。
+---@param rows { stable_id: string, fraction: number, page: integer, total_pages: integer, updated_at: integer }[]
+function Source:_backfillComicProgress(rows)
+    if type(rows) ~= "table" or #rows == 0 then return end
+    local ProgressDB = require("db.progress")
+    for _, row in ipairs(rows) do
+        -- 显式取局部量，避免闭包捕获循环变量（continue-point 回调异步执行）。
+        local series_id = row.stable_id
+        local fraction, page, total_pages, updated_at = row.fraction, row.page, row.total_pages, row.updated_at
+        ProgressDB.upsertRemote(self.id, series_id, {
+            fraction = fraction,
+            page = page,
+            total_pages = total_pages,
+            updated_at = updated_at,
+        })
+        -- 再拉「继续阅读点」补当前章/卷标题，最近阅读才能显示"看到第几卷"（跨设备也准）。
+        if type(self._client.continuePointAsync) == "function" then
+            self._client:continuePointAsync(series_id, function(chapter)
+                if type(chapter) ~= "table" or chapter.id == nil then return end
+                local title = chapterDisplayTitle(chapter, nil)
+                if not title then return end
+                ProgressDB.upsertRemote(self.id, series_id, {
+                    fraction = fraction,
+                    page = page,
+                    total_pages = total_pages,
+                    updated_at = updated_at,
+                    chapter_title = title,
+                })
+            end)
+        end
+    end
 end
 
 --- reconcile 完成后后台补全简介/作者；只补没见过的或 lastChapterAddedUtc 变过的。
@@ -264,6 +654,15 @@ function Source:_startBackfill(series_ts)
     local state = loadBackfillState()
     local items = Backfill.plan(series_ts, state)
     if #items == 0 then return end
+    -- 状态文件整份重写，逐条存会随条目增长越写越慢；节流到 10s 一次，跑完再落一次。
+    local dirty, last_save = false, 0
+    local function persist(force)
+        if not dirty then return end
+        local now = os.time()
+        if not force and now - last_save < BACKFILL_SAVE_INTERVAL then return end
+        saveBackfillState(state)
+        dirty, last_save = false, now
+    end
     self._backfill = Backfill.new{
         fetch = function(item, cb)
             return self._client:fetchSeriesMetadataAsync(item.stable_id, cb)
@@ -276,8 +675,10 @@ function Source:_startBackfill(series_ts)
                 authors = writersToAuthors(data.writers),
             }})
             state[item.stable_id] = item.ts
-            saveBackfillState(state)
+            dirty = true
+            persist(false)
         end,
+        on_done = function() persist(true) end,
     }
     self._backfill:run(items)
 end
@@ -304,111 +705,463 @@ function Source:deleteBookAsync(identity, cb)
     return { cancel = function() end }
 end
 
+--- identity 已下载的容器整本文件名 ``<idx>.<ext>``（旧模型兼容，用于预选）。
+---@param identity BookIdentity
+---@return integer|nil
+local function downloadedChapterIdx(identity)
+    local path = identity.book and identity.book.path
+    if type(path) ~= "string" then return nil end
+    local name = path:match("([^/]+)$")
+    return name and tonumber(name:match("^(%d+)%.")) or nil
+end
+
+--- 选册列表项标题：清洗后的章标题/卷名/文件名，最后“第 N 卷”。
+---@param entry BookChapter|table
+---@return string
+local function chapterLabel(entry)
+    local title = cleanTitle(entry.title)
+        or volumeNameTitle(entry.volume_name)
+        or cleanTitle(entry.file_name)
+    if title then return title end
+    return T(_("第 %1 卷"), tostring(entry.idx or ""))
+end
+
+--- 选册预选：优先「在读」（0<pagesRead<pages）的最后一册；否则第一册未读；否则 nil。
+--- 旧目录没有 pagesRead → 返回 nil，调用方回退原逻辑。
+---@param toc table[]
+---@return integer|nil
+local function readingChapterIdx(toc)
+    local in_progress, first_unread
+    for i = 1, #toc do
+        local pages = tonumber(toc[i].pages) or 0
+        local read = tonumber(toc[i].pagesRead) or 0
+        if read > 0 and (pages == 0 or read < pages) then in_progress = i end
+        if first_unread == nil and (pages == 0 or read < pages) then first_unread = i end
+    end
+    return in_progress or first_unread
+end
+
+--- 打开书籍：单册 series 整本打开（原生目录）；多册 series 弹选册，
+--- 选中后把该册物化成独立册行（``seriesId:chapterId``）并以整书模式打开，
+--- 从而每册有自己的书目、原生目录与进度。已下载册文件直接复用。
+---@param identity BookIdentity
+---@param opts { chapter_idx?: number|string, chapter_id?: number|string }|nil
+---@param cb fun(path: string|nil, err: string|nil)
+---@return { cancel: fun() }
 function Source:openBookAsync(identity, opts, cb)
     opts = opts or {}
     local cancelled = false
     local dialog
+    local picker
 
     local function closeDialog()
         if dialog then dialog:close(); dialog = nil end
     end
-
-    -- 已下载且文件仍在：直接复用，不再重新下载（openBookAsync 只负责拿到物理文件）。
-    local cached = identity.book and identity.book.path
-    if type(cached) == "string" and cached ~= "" then
-        local file = io.open(cached, "rb")
-        if file then
-            file:close()
-            cb(cached)
-            return { cancel = function() end }
+    local function closePicker()
+        if picker then
+            require("ui/uimanager"):close(picker)
+            picker = nil
         end
     end
-
-    local NetworkMgr = require("ui/network/manager")
-    if not NetworkMgr:isOnline() then
-        require("ui/uimanager"):nextTick(function()
-            if not cancelled then cb(nil, _("网络不可用，请先连接 Wi-Fi")) end
-        end)
-        return { cancel = function() cancelled = true end }
+    --- 结束本次打开；取消后一律不回调。``opts.handled`` 表示源已自行接管
+    --- （漫画交给 kamare 阅读器），open.lua 据此跳过 ReaderUI。
+    ---@param path string|nil
+    ---@param err string|nil
+    ---@param opts table|nil
+    local function finish(path, err, opts)
+        if cancelled then return end
+        closeDialog()
+        if path then cb(path) else cb(nil, err, opts) end
     end
 
     local Paths = require("utils.paths")
-    local stable_id = identity.stable_id
+    local Store = require("book.store")
+    local Toc = require("source.toc")
 
-    local function register(local_path)
-        local ok, err = require("book.store").touch(local_path, identity)
-        if ok then
-            cb(local_path)
+    ---@param path string
+    ---@return boolean
+    local function fileExists(path)
+        local file = io.open(path, "rb")
+        if file then file:close(); return true end
+        return false
+    end
+
+    --- 下载/复用某一册到 target_stable 的工作目录，登记后回调。
+    ---@param entry BookChapter|table
+    ---@param target_stable string 承载该册的 books.stable_id
+    ---@param target_identity BookIdentity
+    local function downloadEntry(entry, target_stable, target_identity)
+        local ext = (entry and entry.format) or "epub"
+        local path = Paths.bookWorkDir(target_stable, self.id) .. "/1." .. ext
+        if fileExists(path) then
+            local ok, err = Store.touch(path, target_identity)
+            if not ok then finish(nil, err); return end
+            finish(path)
+            return
+        end
+        if not require("ui/network/manager"):isOnline() then
+            finish(nil, _("网络不可用，请先连接 Wi-Fi"))
+            return
+        end
+
+        Paths.ensureBookWork(target_stable, self.id)
+        local temp_path = path .. ".part"
+        local ProgressbarDialog = require("ui/widget/progressbardialog")
+        dialog = ProgressbarDialog:new{
+            title = _("正在下载…"),
+            subtitle = (entry and entry.title)
+                or (identity.book and identity.book.title) or target_stable,
+            progress_max = 100,
+            refresh_time_seconds = 1,
+            dismissable = false,
+        }
+        dialog:show()
+
+        self._client:downloadChapterAsync(entry.chapterId or entry.uid, temp_path, function(bytes, total)
+            if dialog and total and total > 0 then
+                dialog:reportProgress(bytes * 100 / total)
+            end
+        end, function(ok, err)
+            closeDialog()
+            if cancelled then return end
+            if not ok then
+                os.remove(temp_path)
+                finish(nil, err)
+                return
+            end
+            local file = io.open(temp_path, "rb")
+            local head = file and file:read(4) or ""
+            if file then file:close() end
+            local valid = false
+            if ext == "epub" then
+                valid = head == "PK\003\004" or head == "PK\005\006"
+            elseif ext == "pdf" then
+                valid = head == "%PDF"
+            else
+                valid = true
+            end
+            if not valid then
+                os.remove(temp_path)
+                finish(nil, _("下载文件校验失败"))
+                return
+            end
+            os.remove(path)
+            if not os.rename(temp_path, path) then
+                os.remove(temp_path)
+                finish(nil, _("无法保存文件"))
+                return
+            end
+            local touched, touch_err = Store.touch(path, target_identity)
+            if not touched then finish(nil, touch_err); return end
+            finish(path)
+        end)
+    end
+
+    --- 漫画条目？（cbz / image 走 kamare 在线阅读，不下载。）
+    ---@param entry table|nil
+    ---@return boolean
+    local function isComicEntry(entry)
+        local f = entry and entry.format
+        return f == "cbz" or f == "image"
+    end
+
+    --- kamare 打开失败后的原生回落：下载 cbz 交内置阅读器打开（image 无原生可读，维持报错）。
+    ---@param entry table
+    ---@param target_stable string 承载该册的 books.stable_id
+    ---@param target_identity BookIdentity
+    ---@param cause string|nil kamare 侧错误信息
+    local function downloadNativeFallback(entry, target_stable, target_identity, cause)
+        if (entry and entry.format) ~= "cbz" then
+            finish(nil, cause or _("打开漫画失败"))
+            return
+        end
+        require("utils.log").warn("kavita.kamare fallback to native", cause or "")
+        downloadEntry(entry, target_stable, target_identity)
+    end
+
+    --- 漫画：交给外部 kamare 阅读器在线阅读；成功即「源已自行接管」。
+    ---@param entry table
+    ---@param series_toc table[] 本 series 章列表（章末续章按此顺序找下一章）
+    ---@param on_fail fun(err: string|nil)|nil kamare 打开失败时的回落；nil 则直接上报错误
+    local function launchKamare(entry, series_toc, on_fail)
+        -- 漫画是在线流式阅读，离线无法打开：给友好提示，别把 kamare 拉起来再报错。
+        if not require("ui/network/manager"):isOnline() then
+            finish(nil, _("网络不可用，请先连接 Wi-Fi"))
+            return
+        end
+        local series_name = identity.book and identity.book.title
+        series_toc = series_toc or { entry }
+
+        --- 关书回写：kamare 已把进度推给 Kavita，这里本地补一条干净（sync_status=1）
+        --- 行并刷新桌面，让书架立刻反映新位置（远端拉取见工单 06）。
+        ---@param e table 当前打开的册
+        local function onKamareClose(e, current_page, total_pages)
+            local ok, err = pcall(function()
+                local count = #series_toc
+                if count < 1 then count = 1 end
+                local idx = 1
+                for i = 1, #series_toc do
+                    if series_toc[i] == e then idx = i; break end
+                end
+                local total = tonumber(total_pages) or tonumber(e.pages) or 0
+                local page = tonumber(current_page) or 1
+                local chapter_fraction = total > 0 and math.min(1, math.max(0, page / total)) or 0
+                require("db.progress").upsertRemote(self.id, identity.stable_id, {
+                    fraction = ((idx - 1) + chapter_fraction) / count,
+                    chapter_idx = idx,
+                    chapter_title = chapterLabel(e),
+                    chapter_fraction = chapter_fraction,
+                    page = page,
+                    total_pages = total,
+                    updated_at = os.time(),
+                })
+                local fm_ok, FileManager = pcall(require, "apps/filemanager/filemanager")
+                local plugin = fm_ok and FileManager.instance and FileManager.instance.book
+                local desktop = plugin and plugin.desktop
+                if desktop and type(desktop.updateView) == "function" then
+                    desktop:updateView()
+                    require("ui/uimanager"):setDirty(desktop, "ui")
+                end
+            end)
+            if not ok then
+                require("utils.log").warn("kavita.kamare on_close failed", err)
+            end
+        end
+
+        --- 打开一册：先拉该章云端进度算出续读页，再交给 kamare。
+        --- kamare 独立运行时由浏览页把 chapter.pagesRead 换算成 startPage；
+        --- moon 自己拉起时必须补这一步，否则每次从第 1 页开始。
+        ---@param e table
+        ---@param on_done fun(viewer: table|nil, err: string|nil)
+        local function openChapter(e, on_done)
+            local started = false
+            local function launch(start_page)
+                if started then return end
+                started = true
+                -- kamare 是外部非公开契约：整体 pcall，抛错也回落到 on_fail（原生下载）。
+                local ok, viewer, err = pcall(Kamare.open, {
+                    chapter = e,
+                    title = series_name,
+                    start_page = start_page,
+                    on_close = function(current_page, total_pages)
+                        onKamareClose(e, current_page, total_pages)
+                    end,
+                    on_next_chapter = function(next_id)
+                        for _, cand in ipairs(series_toc) do
+                            if tostring(cand.chapterId or cand.uid) == tostring(next_id) then
+                                openChapter(cand, function(v, oerr)
+                                    if not v then
+                                        require("utils.log").warn("kavita.kamare next chapter failed", oerr)
+                                    end
+                                end)
+                                return
+                            end
+                        end
+                    end,
+                })
+                if not ok then viewer, err = nil, tostring(viewer) end
+                on_done(viewer, err)
+            end
+
+            if e.chapterId == nil then
+                launch(1)
+                return
+            end
+            local job = self._client:getProgressAsync(e.chapterId, function(data)
+                local start_page = 1
+                local pages_read = data and tonumber(data.pageNum)
+                local pages = tonumber(e.pages) or 0
+                if pages_read and pages_read >= 0 then
+                    start_page = pages_read + 1
+                    if pages > 0 and start_page > pages then start_page = pages end
+                end
+                launch(start_page)
+            end)
+            if not job then launch(1) end
+        end
+
+        openChapter(entry, function(viewer, err)
+            if cancelled then return end
+            if not viewer then
+                if on_fail then on_fail(err) else finish(nil, err or _("打开漫画失败")) end
+                return
+            end
+            finish(nil, nil, { handled = true })
+        end)
+    end
+
+    --- 把选中的一册物化成独立册行：books 行（sync_status=0，reconcile 不动）+ 单条 toc。
+    ---@param container BookIdentity series 容器身份
+    ---@param entry BookChapter|table
+    ---@return string|nil vol_stable
+    local function ensureVolume(container, entry)
+        local series_id = tostring(container.stable_id)
+        local chapter_id = tostring(entry.chapterId or entry.uid)
+        local vol_stable = volumeStableId(series_id, chapter_id)
+        if not require("db.book").upsertLocal({
+            source_id = self.id,
+            stable_id = vol_stable,
+            title = chapterLabel(entry),
+            category = container.book and container.book.category,
+            -- 册行继承容器的系列元数据：册自身没有简介/作者（服务端只在 series 级提供）。
+            authors = container.book and container.book.authors,
+            intro = container.book and container.book.intro,
+            cover = series_id,
+            deleted = 0,
+            internal = 1, -- 册行是内部记录，不进书架列表
+        }) then
+            return nil
+        end
+        local stored = Toc.put(self.id, vol_stable, {{
+            idx = 1,
+            uid = tostring(entry.uid or chapter_id),
+            source_idx = tostring(entry.source_idx or chapter_id),
+            title = chapterLabel(entry),
+            volume_name = entry.volume_name,
+            file_name = entry.file_name,
+            chapterId = entry.chapterId,
+            volumeId = entry.volumeId,
+            libraryId = entry.libraryId,
+            seriesId = tonumber(series_id) or series_id,
+            format = entry.format,
+            pages = entry.pages,
+            toc_version = TOC_VERSION,
+        }})
+        if not stored then return nil end
+        -- 旧模型可能给容器下过整本：清掉容器缓存/路径，避免它伪装成已下载。
+        if container.book and container.book.path then
+            require("book.store").clearCache(self.id, series_id)
+        end
+        return vol_stable
+    end
+
+    --- 从容器目录取一册：漫画交 kamare，其余物化后下载。
+    ---@param container BookIdentity
+    ---@param entry BookChapter|table
+    ---@param series_toc table[]
+    local function openAsVolume(container, entry, series_toc)
+        if isComicEntry(entry) and Kamare.available() then
+            launchKamare(entry, series_toc, function(err)
+                local vol_stable = ensureVolume(container, entry)
+                if not vol_stable then
+                    finish(nil, _("册信息保存失败"))
+                    return
+                end
+                downloadNativeFallback(entry, vol_stable, { source_id = self.id, stable_id = vol_stable }, err)
+            end)
+            return
+        end
+        local vol_stable = ensureVolume(container, entry)
+        if not vol_stable then
+            finish(nil, _("册信息保存失败"))
+            return
+        end
+        downloadEntry(entry, vol_stable, { source_id = self.id, stable_id = vol_stable })
+    end
+
+    local series_id = splitVolumeStable(identity.stable_id)
+    if series_id then
+        -- 已是册行：目录只有一条，直接打开/下载这一册（整书模式）。
+        local entry = (Store.toc(identity) or {})[1]
+        if not entry then
+            finish(nil, _("章节目录缺失"))
+            return { cancel = function() end }
+        end
+        if isComicEntry(entry) and Kamare.available() then
+            launchKamare(entry, { entry }, function(err)
+                downloadNativeFallback(entry, identity.stable_id, identity, err)
+            end)
         else
-            cb(nil, err)
+            downloadEntry(entry, identity.stable_id, identity)
+        end
+        return { cancel = function()
+            cancelled = true
+            closeDialog()
+        end }
+    end
+
+    local forced_idx = tonumber(opts.chapter_idx)
+    if not forced_idx and opts.chapter_id ~= nil then
+        forced_idx = Toc.index(identity.source_id, identity.stable_id, opts.chapter_id)
+    end
+
+    local cached_toc = Toc.read(identity.source_id, identity.stable_id)
+
+    -- 单册 series 已下载整本：直接复用（离线也能开）；多册继续走选册。
+    if not forced_idx then
+        local path = identity.book and identity.book.path
+        if type(path) == "string" and path ~= "" and fileExists(path) then
+            local online = require("ui/network/manager"):isOnline()
+            if (cached_toc and #cached_toc == 1) or (not cached_toc and not online) then
+                cb(path)
+                return { cancel = function() end }
+            end
         end
     end
 
-    NetworkMgr:runWhenOnline(function()
+    self:loadTocAsync(identity, function(toc, err)
         if cancelled then return end
-        self:_resolveChapterId(identity, opts, function(chapter_id, resolve_err, entry)
-            if cancelled then return end
-            if not chapter_id then
-                cb(nil, resolve_err)
-                return
-            end
-            local ext = (entry and entry.format)
-                or (identity.book and identity.book.format)
-                or "epub"
-            Paths.ensureBookWork(stable_id, self.id)
-            local path = Paths.bookWorkDir(stable_id, self.id) .. "/1." .. ext
-            local temp_path = path .. ".part"
-            local ProgressbarDialog = require("ui/widget/progressbardialog")
-            dialog = ProgressbarDialog:new{
-                title = _("正在下载…"),
-                subtitle = identity.book and identity.book.title or stable_id,
-                progress_max = 100,
-                refresh_time_seconds = 1,
-                dismissable = false,
-            }
-            dialog:show()
+        if not toc or #toc == 0 then
+            finish(nil, err or _("章节列表为空"))
+            return
+        end
 
-            self._client:downloadChapterAsync(chapter_id, temp_path, function(bytes, total)
-                if dialog and total and total > 0 then
-                    dialog:reportProgress(bytes * 100 / total)
-                end
-            end, function(ok, err)
-                closeDialog()
+        -- 章节模式显式指定册：直接物化，不再弹窗（连续阅读翻卷路径）。
+        if forced_idx then
+            openAsVolume(identity, toc[forced_idx] or toc[1], toc)
+            return
+        end
+        -- 单册 series：整本打开，stable_id 仍是 seriesId。
+        if #toc == 1 then
+            if isComicEntry(toc[1]) and Kamare.available() then
+                launchKamare(toc[1], toc, function(err)
+                    downloadNativeFallback(toc[1], identity.stable_id, identity, err)
+                end)
+            else
+                downloadEntry(toc[1], identity.stable_id, identity)
+            end
+            return
+        end
+
+        -- 多册 series：弹选册，标记已下载的册。
+        local BookDB = require("db.book")
+        local items = {}
+        -- 不能用 `for _, entry`：`_` 是 gettext，会被循环变量遮蔽，下面 `_("已下载")` 会炸。
+        for i = 1, #toc do
+            local entry = toc[i]
+            local vol_stable = volumeStableId(identity.stable_id, entry.chapterId or entry.uid)
+            local row = BookDB.get(self.id, vol_stable)
+            local downloaded = row and type(row.path) == "string" and row.path ~= ""
+                and fileExists(row.path)
+            local pages = tonumber(entry.pages) or 0
+            local read = tonumber(entry.pagesRead) or 0
+            local state
+            if pages > 0 and read >= pages then state = _("已读")
+            elseif read > 0 then state = _("在读") end
+            items[#items + 1] = {
+                text = chapterLabel(entry),
+                value = entry.idx,
+                mandatory = downloaded and _("已下载") or state,
+            }
+        end
+        picker = require("ui.views.popup").single{
+            title = _("选择要阅读的卷册"),
+            subtitle = identity.book and identity.book.title or nil,
+            items = items,
+            current = downloadedChapterIdx(identity) or readingChapterIdx(toc),
+            choice_icons = true,
+            on_select = function(value)
+                picker = nil
                 if cancelled then return end
-                if not ok then
-                    os.remove(temp_path)
-                    cb(nil, err)
-                    return
-                end
-                local file = io.open(temp_path, "rb")
-                local head = file and file:read(4) or ""
-                if file then file:close() end
-                local valid = false
-                if ext == "epub" then
-                    valid = head == "PK\003\004" or head == "PK\005\006"
-                elseif ext == "pdf" then
-                    valid = head == "%PDF"
-                else
-                    valid = true
-                end
-                if not valid then
-                    os.remove(temp_path)
-                    cb(nil, _("下载文件校验失败"))
-                    return
-                end
-                os.remove(path)
-                if not os.rename(temp_path, path) then
-                    os.remove(temp_path)
-                    cb(nil, _("无法保存文件"))
-                    return
-                end
-                register(path)
-            end)
-        end)
+                local idx = tonumber(value)
+                openAsVolume(identity, (idx and toc[idx]) or toc[1], toc)
+            end,
+        }
     end)
 
     return { cancel = function()
         cancelled = true
+        closePicker()
         closeDialog()
     end }
 end
@@ -426,7 +1179,7 @@ function Source:getDetailAsync(identity, cb)
         return { cancel = function() end }
     end
     local cancelled = false
-    local job = self._client:fetchSeriesMetadataAsync(identity.stable_id, function(data, err)
+    local job = self._client:fetchSeriesMetadataAsync(seriesIdOf(identity.stable_id), function(data, err)
         if cancelled then return end
         if not data then
             cb(nil, err)
@@ -444,26 +1197,6 @@ function Source:getDetailAsync(identity, cb)
         cancelled = true
         if job and job.cancel then job.cancel() end
     end }
-end
-
---- 下载用章 id：opts.chapter_id 优先，否则从目录取当前章/首章。
----@param identity BookIdentity
----@param opts { chapter_id?: string|number }|nil
----@param cb fun(chapter_id: string|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Source:_resolveChapterId(identity, opts, cb)
-    if opts and opts.chapter_id then
-        cb(tostring(opts.chapter_id))
-        return { cancel = function() end }
-    end
-    return self:loadTocAsync(identity, function(toc, err)
-        if not toc or #toc == 0 then
-            cb(nil, err or _("章节列表为空"))
-            return
-        end
-        local entry = toc[tonumber(identity.chapter_idx) or 1] or toc[1]
-        cb(tostring(entry.chapterId or entry.uid), nil, entry)
-    end)
 end
 
 --- 拉取 series 卷/章并写入 toc 缓存（含 chapterId/volumeId/libraryId/pages）。
@@ -486,16 +1219,21 @@ function Source:_fetchTocAsync(identity, cb)
                         idx = #list + 1,
                         uid = tostring(chapter.id),
                         source_idx = tostring(chapter.id),
-                        title = chapter.title or chapter.titleName or (volume.name or ""),
+                        title = chapterDisplayTitle(chapter, volume) or "",
+                        volume_name = cleanTitle(volume.name),
+                        file_name = chapterFileName(chapter),
                         chapterId = chapter.id,
                         volumeId = volume.id or chapter.volumeId,
                         libraryId = series.libraryId,
+                        seriesId = series.id,
                         format = formatName(chapter.format),
                         pages = chapter.pages,
+                        pagesRead = chapter.pagesRead,
                     }
                 end
             end
             if #list == 0 then cb(nil, _("章节列表为空")); return end
+            list[1].toc_version = TOC_VERSION
             if not require("source.toc").put(identity.source_id, identity.stable_id, list) then
                 cb(nil, _("章节目录保存失败"))
                 return
@@ -516,8 +1254,9 @@ end
 function Source:loadTocAsync(identity, cb)
     local Toc = require("source.toc")
     local cached = Toc.read(identity.source_id, identity.stable_id)
-    -- 旧目录没有 format 字段：当作过期重建（format 决定打开后缀与是否推送注解）。
-    if cached and #cached > 0 and cached[1].format ~= nil then
+    -- 旧目录缺 format（决定打开后缀/注解）或 toc_version（标题抽取规则）→ 过期重建。
+    if cached and #cached > 0 and cached[1].format ~= nil
+        and tonumber(cached[1].toc_version) == TOC_VERSION then
         local cancelled = false
         require("ui/uimanager"):nextTick(function()
             if not cancelled then cb(cached) end
@@ -559,11 +1298,31 @@ function Source:getProgressAsync(identity, cb)
         end
         local pages = tonumber(entry.pages) or 0
         local page_num = tonumber(data.pageNum) or 0
+        -- Kavita 只给 spine 页级：pageNum 是 0-based spine，比例是「第几个 spine」，
+        -- 不是内容比例。用 spine 造 xpointer 精确定位，bookScrollId 补页内锚点；
+        -- 远端 percentage 不再反推成内容比例。
+        local chapter_fraction = require("book.progress").clampFraction(
+            pages > 0 and (page_num / pages) or 0)
+        local idx = tonumber(identity.chapter_idx) or tonumber(entry.idx)
+        local toc = require("source.toc").read(identity.source_id, identity.stable_id)
+        local count = toc and #toc or 0
+        local fraction = chapter_fraction
+        if idx and count > 1 then
+            fraction = ((idx - 1) + chapter_fraction) / count
+        end
+        local page = page_num + 1
+        if pages > 0 and page > pages then page = pages end
+        -- 网页端 bookScrollId 是 `id("X")`（元素 id），解析成 spine 内路径后才能与本地
+        -- xpointer 比方向、跳转才精准；解析不到就退回「只到 spine」。
+        local scroll_id = Anchor.resolveScrollId(bookFilePath(identity), page_num, data.bookScrollId)
         cb({
-            fraction = require("book.progress").clampFraction(pages > 0 and (page_num / pages) or 0),
-            page = page_num,
+            fraction = require("book.progress").clampFraction(fraction),
+            chapter_idx = idx,
+            chapter_fraction = chapter_fraction,
+            page = page,
             total_pages = pages,
-        })
+            locator = Anchor.toXPointer(page_num, scroll_id, pages),
+        }, nil, { page_level = true })
     end)
     return { cancel = function()
         cancelled = true
@@ -584,12 +1343,31 @@ function Source:putProgressAsync(identity, pos, cb)
         return { cancel = function() end }
     end
     local entry = chapterEntry(identity)
-    local frac = require("book.progress").clampFraction(pos.fraction)
     local pages = entry and tonumber(entry.pages) or 0
-    local page_num = math.max(0, math.floor(frac * pages + 0.5))
-    local series_id = tonumber(identity.stable_id) or identity.stable_id
+    -- pageNum 的回退依据是「当前 spine 内的比例」：有 chapter_fraction 用它，
+    -- 否则把全书比例折回当前册（心跳脏行只有全书比例）。
+    local Progress = require("book.progress")
+    local frac = pos.chapter_fraction
+    if frac ~= nil then
+        frac = Progress.clampFraction(frac)
+    else
+        local whole = Progress.clampFraction(pos.fraction)
+        local toc = require("source.toc").read(identity.source_id, identity.stable_id)
+        local idx = tonumber(identity.chapter_idx)
+        local count = toc and #toc or 0
+        if idx and count > 1 then
+            frac = whole * count - (idx - 1)
+            if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
+        else
+            frac = whole
+        end
+    end
+    -- pageNum 用真实 spine（`DocFragment`），不是内容比例×页数；心跳脏行也带
+    -- locator，所以阅读期上报同样落到正确的 spine。缺 locator 才退回比例估算。
+    local page_num = pageNumOf(pos, pages, frac)
+    local series_id = (entry and entry.seriesId) or seriesIdOf(identity.stable_id)
     local payload = { pageNum = page_num }
-    local scroll_id = scrollIdFromLocator(pos.locator)
+    local scroll_id = Anchor.toScrollId(pos.locator)
     if scroll_id then payload.bookScrollId = scroll_id end
     if entry and entry.chapterId then
         payload.chapterId = entry.chapterId
@@ -614,39 +1392,6 @@ function Source:putProgressAsync(identity, pos, cb)
         cancelled = true
         if job and job.cancel then job.cancel() end
     end }
-end
-
---- 翻页心跳：heartbeat_interval 秒节流（0=关），只推位置变过的。
----@param payload { identity: BookIdentity, page: number|nil, total_pages: number|nil, percent: number|nil }
-function Source:_onPageChanged(payload)
-    if type(payload) ~= "table" or type(payload.identity) ~= "table" then return end
-    if not self:configured() or isComic(payload.identity) then return end
-    local interval = tonumber(self.cfg.heartbeat_interval)
-    if interval == nil then interval = DEFAULT_HEARTBEAT end
-    if interval <= 0 then return end
-    local fraction = require("book.progress").clampFraction((tonumber(payload.percent) or 0) / 100)
-    local page = tonumber(payload.page)
-    local last = self._heartbeat
-    if last and last.fraction == fraction and last.page == page then return end
-    local now = os.time()
-    if last and now - last.at < interval then return end
-    self._heartbeat = { fraction = fraction, page = page, at = now }
-    require("book.progress").recordHeartbeat(payload.identity, {
-        fraction = fraction,
-        page = page,
-        total_pages = payload.total_pages,
-    })
-    self:syncProgressAsync({ identity = payload.identity, dirty_only = true }, function() end)
-end
-
----@param event string
----@param payload table|nil
-function Source:onEvent(event, payload)
-    if event == "page_changed" then
-        self:_onPageChanged(payload)
-        return
-    end
-    return SourceBase.onEvent(self, event, payload)
 end
 
 --- 推送 EPUB 划线到 Kavita（`/api/Annotation/create`），逐条幂等建注解。
@@ -681,14 +1426,19 @@ function Source:pushNotesAsync(identity, annotations, cb)
     local epub_path = (identity.book and identity.book.path) or (workdir .. "/1.epub")
     local map_path = annotationMapPath(workdir)
     local mapping = loadJson(map_path)
-    local series_id = tonumber(identity.stable_id) or identity.stable_id
+    local series_id = (entry and entry.seriesId) or seriesIdOf(identity.stable_id)
 
     local pending = {}
     for _, ann in ipairs(annotations or {}) do
         if type(ann) == "table" and ann.drawer
-            and type(ann.pos0) == "string" and ann.pos0 ~= ""
-            and not mapping[ann.pos0] then
-            pending[#pending + 1] = ann
+            and type(ann.pos0) == "string" and ann.pos0 ~= "" then
+            local mapped = mapping[ann.pos0]
+            if not mapped then
+                pending[#pending + 1] = { ann = ann, op = "create" }
+            elseif mapped.annotationId and (mapped.comment or "") ~= (ann.note or "") then
+                -- 已建注解的备注变更走 update；Kavita 的 update 只改 comment/slot/spoiler。
+                pending[#pending + 1] = { ann = ann, op = "update", mapped = mapped }
+            end
         end
     end
     if #pending == 0 then
@@ -700,11 +1450,45 @@ function Source:pushNotesAsync(identity, annotations, cb)
     local function nextAnn()
         if cancelled then return end
         index = index + 1
-        local ann = pending[index]
-        if not ann then cb(true); return end
+        local item = pending[index]
+        if not item then cb(true); return end
+        local ann = item.ann
+
+        if item.op == "update" then
+            local mapped = item.mapped
+            current_job = self._client:updateAnnotationAsync({
+                id = mapped.annotationId,
+                chapterId = entry.chapterId,
+                seriesId = series_id,
+                volumeId = entry.volumeId,
+                libraryId = entry.libraryId,
+                ownerUserId = 0,
+                xPath = mapped.xPath or "",
+                endingXPath = mapped.endingXPath or "",
+                selectedText = ann.text or "",
+                comment = ann.note or "",
+                commentHtml = "",
+                selectedSlotIndex = 0,
+                pageNumber = mapped.pageNumber or Anchor.pageNumber(ann.pos0) or 0,
+                highlightCount = Text.utf16Length(ann.text),
+                containsSpoiler = false,
+            }, function(data, err)
+                current_job = nil
+                if cancelled then return end
+                if data then
+                    mapped.comment = ann.note or ""
+                    saveJson(map_path, mapping)
+                else
+                    require("utils.log").warn("kavita annotation update failed", identity.stable_id, err)
+                end
+                nextAnn()
+            end)
+            return
+        end
+
         local anchor = Anchor.compute(ann, epub_path)
         local page_number = anchor and anchor.pageNumber or Anchor.pageNumber(ann.pos0)
-        local highlight_count = #(ann.text or "")
+        local highlight_count = Text.utf16Length(ann.text)
         if not page_number or highlight_count <= 0 then
             nextAnn()
             return
@@ -735,6 +1519,7 @@ function Source:pushNotesAsync(identity, annotations, cb)
                     pageNumber = page_number,
                     xPath = xpath,
                     endingXPath = ending_xpath,
+                    comment = ann.note or "",
                 }
                 saveJson(map_path, mapping)
             else

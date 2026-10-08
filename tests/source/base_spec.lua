@@ -144,5 +144,14 @@ second.cb({ skipped = true })
 Assert.eq(events[#events], "books_sync_done")
 Assert.is_false(desktop._books_sync_pending)
 Assert.eq(#Tasks.tasks(), 0)
+-- 远端未变但本地进度可能刚变（unchanged）：仍要通知首页重读本地数据。
+last_event = nil
+desktop.onEvent = function(_, event) last_event = event end
+source.syncBooksAsync = function(_, _, cb)
+    cb({ pulled = 0, pushed = 0, hidden = 0, unchanged = true })
+    return { cancel = function() end }
+end
+source:onEvent("desktop_open", desktop)
+Assert.eq(last_event, "shelf_changed")
 
 return true

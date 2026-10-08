@@ -7,6 +7,7 @@ Kavita 源设置 UI
 
 local Text = require("utils.text")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local SOURCE_ID = "kavita"
 
@@ -79,7 +80,7 @@ local function libraryRow(plugin)
                 local Popup = require("ui.views.popup")
                 local waiting = InfoMessage:new{ text = _("正在加载书库列表…") }
                 UIManager:show(waiting)
-                local client = require("source.kavita.client").new(cfg)
+                local client = require("source.kavita.client"):new(cfg)
                 client:listLibrariesAsync(function(data, err)
                     UIManager:close(waiting)
                     if not data then
@@ -116,25 +117,6 @@ local function libraryRow(plugin)
 end
 
 ---@param plugin table|nil
-local function heartbeatRow(plugin)
-    return function(iw)
-        local cfg = require("utils.settings").getSource(SOURCE_ID)
-        local interval = tonumber(cfg.heartbeat_interval) or 30
-        return require("ui.components.settingrow").build(iw, {
-            kind = "nav", icon = "timer", title = _("心跳间隔"),
-            status = interval > 0 and tostring(interval) or _("关"),
-            status_on = interval > 0, callback = function()
-                field(plugin, "heartbeat_interval", _("心跳间隔"), "30", false, function(v)
-                    local n = tonumber(Text.trim(v))
-                    if not n or n < 0 then return "30" end
-                    return tostring(math.floor(n))
-                end, "timer")
-            end,
-        })
-    end
-end
-
----@param plugin table|nil
 local function testRow(plugin)
     return function(iw)
         return require("ui.components.settingrow").build(iw, {
@@ -145,7 +127,7 @@ local function testRow(plugin)
                 local waiting = InfoMessage:new{ text = _("正在测试连接…") }
                 UIManager:show(waiting)
                 local cfg = require("utils.settings").getSource(SOURCE_ID)
-                local client = require("source.kavita.client").new(cfg)
+                local client = require("source.kavita.client"):new(cfg)
                 client:testVersionAsync(function(ok, version, err)
                     UIManager:close(waiting)
                     if ok then
@@ -158,7 +140,7 @@ local function testRow(plugin)
                             })
                         else
                             UIManager:show(InfoMessage:new{
-                                text = _("连接正常，版本 %1"):format(version),
+                                text = T(_("连接正常，版本 %1"), version),
                                 timeout = 2,
                             })
                         end
@@ -174,6 +156,32 @@ local function testRow(plugin)
     end
 end
 
+--- 漫画阅读器说明：漫画在线阅读依赖外部 kamare 插件，未装则回落内置阅读器。
+---@param plugin table|nil
+local function mangaReaderRow(plugin)
+    return function(iw)
+        local installed = require("source.kavita.kamare").available()
+        return require("ui.components.settingrow").build(iw, {
+            kind = "nav", icon = "auto_stories", title = _("漫画阅读器"),
+            subtitle = installed and _("已安装 kamare，漫画在线阅读")
+                or _("未安装 kamare，漫画将下载后用内置阅读器打开"),
+            status = installed and _("已安装") or _("未安装"),
+            status_on = installed,
+            callback = function()
+                local UIManager = require("ui/uimanager")
+                local text = installed
+                    and _("漫画由 kamare 插件在线阅读。\n更新或卸载请直接管理 KOReader 的 plugins 目录。")
+                    or _("漫画在线阅读依赖 kamare 插件：\n1. 下载 kamare.koplugin（GitHub 项目 fpammer/kamare.koplugin）；\n2. 放入 KOReader 的 plugins 目录；\n3. 重启 KOReader。\n未安装时漫画仍可下载后用内置阅读器打开（仅 cbz 可用）。")
+                UIManager:show(require("ui/widget/textviewer"):new{
+                    title = _("漫画阅读器"),
+                    text = text,
+                    add_default_buttons = true,
+                })
+            end,
+        })
+    end
+end
+
 ---@param plugin table|nil
 ---@return table[]
 function Setting.rows(plugin)
@@ -181,8 +189,8 @@ function Setting.rows(plugin)
         fieldRow(plugin, "base_url", _("服务器地址"), "https://host:port/kavita", false, Text.rtrimSlashes, "dns"),
         fieldRow(plugin, "api_key", _("API Key"), "", true, Text.stripWhitespace, "key"),
         libraryRow(plugin),
-        heartbeatRow(plugin),
         testRow(plugin),
+        mangaReaderRow(plugin),
     }
 end
 

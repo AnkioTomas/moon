@@ -31,7 +31,7 @@ package.preload["http.request"] = function()
             if url:match("/api/Series/all%-v2") then
                 local page = tonumber(url:match("pageNumber=(%d+)")) or 1
                 if page == 1 then
-                    cb({ code = 200, body = '[{"id":1,"name":"Book A","libraryName":"书籍","format":3},{"id":2,"name":"Book B","libraryName":"书籍","format":4}]' })
+                    cb({ code = 200, body = '[{"id":1,"name":"Book A","libraryName":"书籍","format":3},{"id":2,"name":"Book B","libraryName":"书籍","format":4},{"id":3,"name":"Comic C","libraryName":"漫画","format":1,"pages":100,"pagesRead":25,"latestReadDate":"2026-09-29T20:07:19.193"}]' })
                 else
                     cb({ code = 200, body = '[]' })
                 end
@@ -59,23 +59,43 @@ end
 local Kavita = require("source.kavita")
 local source = Kavita.new()
 
+local progress_writes = {}
+package.preload["db.progress"] = function()
+    return {
+        upsertRemote = function(source_id, stable_id, pos)
+            progress_writes[#progress_writes + 1] = { source_id = source_id, stable_id = stable_id, pos = pos }
+            return true
+        end,
+    }
+end
+
 local result
 source:syncBooksAsync({}, function(res, err)
     result = res
 end)
 
 Assert.not_nil(result)
-Assert.eq(result.pulled, 2)
+Assert.eq(result.pulled, 3)
 Assert.eq(result.skipped, false)
 Assert.len(reconcile_calls, 1)
 Assert.eq(reconcile_calls[1].source_id, "kavita")
-Assert.eq(#reconcile_calls[1].books, 2)
+Assert.eq(#reconcile_calls[1].books, 3)
 Assert.eq(reconcile_calls[1].books[1].stable_id, "1")
 Assert.eq(reconcile_calls[1].books[1].title, "Book A")
 Assert.eq(reconcile_calls[1].books[1].category, "书籍")
 Assert.eq(reconcile_calls[1].books[1].format, "epub")
 Assert.eq(reconcile_calls[1].books[2].stable_id, "2")
 Assert.eq(reconcile_calls[1].books[2].format, "pdf")
+Assert.eq(reconcile_calls[1].books[3].stable_id, "3")
+Assert.eq(reconcile_calls[1].books[3].format, "cbz")
+
+-- 漫画进度回填：series 级 pagesRead/pages → pending_progress（干净行，带服务端时间）。
+Assert.len(progress_writes, 1)
+Assert.eq(progress_writes[1].stable_id, "3")
+Assert.eq(progress_writes[1].pos.fraction, 0.25)
+Assert.eq(progress_writes[1].pos.page, 25)
+Assert.eq(progress_writes[1].pos.total_pages, 100)
+Assert.is_true(progress_writes[1].pos.updated_at > 0)
 
 local delete_result
 source:deleteBookAsync({ source_id = "kavita", stable_id = "1" }, function(ok, err)

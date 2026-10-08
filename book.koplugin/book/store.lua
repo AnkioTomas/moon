@@ -50,6 +50,14 @@ function Store.rememberMany(books)
     BookDB.upsertRemoteMany(payload)
 end
 
+--- 当前书架内的 stable_id（排除内部册行）。
+--- 源可用它与远端快照集合比对，判定是否需要重跑对账（增量刷新前置校验）。
+---@param source_id string
+---@return string[]
+function Store.shelfStableIds(source_id)
+    return BookDB.libraryStableIdsBySource(source_id, { exclude_internal = true })
+end
+
 --- 用远端书架快照对账 books 表。
 --- pulled/hidden 在此计算；pushed 由源在 add/delete 上行后自行累加。
 ---@param source_id string
@@ -62,13 +70,33 @@ function Store.reconcile(source_id, books)
         if book.stable_id ~= nil then incoming[tostring(book.stable_id)] = true end
     end
     local hidden = 0
-    for _, stable_id in ipairs(BookDB.libraryStableIdsBySource(source_id)) do
+    -- 内部册行（internal=1）是打开时物化的进度/划线载体，不属于远端书架，不计入 hidden。
+    for _, stable_id in ipairs(BookDB.libraryStableIdsBySource(source_id, { exclude_internal = true })) do
         if not incoming[stable_id] then hidden = hidden + 1 end
     end
     if not BookDB.reconcile(source_id, books) then
         return nil, "failed to reconcile books"
     end
     return { pulled = #books, pushed = 0, hidden = hidden, conflicts = 0, skipped = false }
+end
+
+--- 增量对账：只写变更/新增行、只软删消失行，未变的行不动。
+---@param source_id string
+---@param changed Book[] 新增/变更的行
+---@param removed string[] 远端已消失的 stable_id
+---@return SyncResult|nil result
+---@return string|nil err
+function Store.reconcileDelta(source_id, changed, removed)
+    if not BookDB.reconcileDelta(source_id, changed, removed) then
+        return nil, "failed to reconcile books"
+    end
+    return {
+        pulled = type(changed) == "table" and #changed or 0,
+        pushed = 0,
+        hidden = type(removed) == "table" and #removed or 0,
+        conflicts = 0,
+        skipped = false,
+    }
 end
 
 ---@param path string|nil

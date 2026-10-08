@@ -28,3 +28,8 @@
 
 # 本地 issue tracker 工单目录（fork-local，见 docs/agents/issue-tracker.md）
 /.scratch/
+
+# Release 打包产物与测试遗留（勿提交）
+/*.zip
+/*.zip.sha256
+metadata.epub.lua

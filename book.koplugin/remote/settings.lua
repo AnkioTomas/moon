@@ -20,6 +20,7 @@ local SECRET_KEYS = {
     token = true,
     password = true,
     webdav_password = true,
+    api_key = true,
 }
 
 --- 密钥脱敏：空值回空串，否则一律占位符。
@@ -66,6 +67,7 @@ function SettingsApi.snapshot()
     local ai = Settings.get("ai")
     local moon = Settings.getSource("moon")
     local copymanga = Settings.getSource("copymanga") or {}
+    local kavita = Settings.getSource("kavita") or {}
     local zlib = Settings.getSource("zlib")
     local opds = Settings.getSource("opds")
     local localSource = Settings.getSource("local")
@@ -83,6 +85,10 @@ function SettingsApi.snapshot()
             base_url = asStr(copymanga.base_url),
             username = asStr(copymanga.username),
             password = maskValue(copymanga.password),
+        },
+        kavita = {
+            base_url = asStr(kavita.base_url),
+            api_key = maskValue(kavita.api_key),
         },
         zlib = {
             email = asStr(zlib.email),
@@ -185,6 +191,20 @@ function SettingsApi.apply(payload)
         if changed_group then
             -- Credentials and endpoint affect the active client/session.
             Settings.saveSource("copymanga", cfg)
+            require("source.registry").invalidate()
+            changed = true
+        end
+    end
+
+    if type(payload.kavita) == "table" then
+        local cfg = Settings.getSource("kavita") or {}
+        local g = payload.kavita
+        local kavita_changed = applyField(cfg, "base_url", g.base_url, function(v)
+            return Text.rtrimSlashes(Text.trim(v))
+        end)
+        kavita_changed = applyField(cfg, "api_key", g.api_key, Text.stripWhitespace) or kavita_changed
+        if kavita_changed then
+            Settings.saveSource("kavita", cfg)
             require("source.registry").invalidate()
             changed = true
         end

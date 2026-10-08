@@ -233,9 +233,20 @@ local function captionBlock(book, width, on_tap)
         title,
         VerticalSpan:new{ width = UI.sz(2) },
         author_w,
-        VerticalSpan:new{ width = UI.sz(6) },
-        progress,
     }
+    -- 当前章/卷（漫画显示"看到第几卷"，如"镖人 Vol.01"）。
+    local chapter = BookInfo.chapter(book)
+    if chapter ~= "" then
+        table.insert(col, VerticalSpan:new{ width = UI.sz(2) })
+        table.insert(col, TextWidget:new{
+            text = chapter,
+            face = UI.face("xx_smallinfofont", 11),
+            max_width = width,
+            fgcolor = UI.muted(),
+        })
+    end
+    table.insert(col, VerticalSpan:new{ width = UI.sz(6) })
+    table.insert(col, progress)
     local h = col:getSize().h
     local tap = BookInfo.tappable(width, h, on_tap)
     tap[1] = col

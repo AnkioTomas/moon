@@ -43,6 +43,8 @@ function loadSettings() {
             copymanga_base_url: data.copymanga.base_url,
             copymanga_username: data.copymanga.username,
             copymanga_password: data.copymanga.password,
+            kavita_base_url: data.kavita.base_url,
+            kavita_api_key: data.kavita.api_key,
             zlib_email: data.zlib.email,
             zlib_password: data.zlib.password,
             zlib_base_url: data.zlib.base_url,
@@ -79,6 +81,7 @@ bindForm('form-moon', 'moon', 'state-moon');
 bindForm('form-zlib', 'zlib', 'state-zlib');
 bindForm('form-opds', 'opds', 'state-opds');
 bindForm('form-copymanga', 'copymanga', 'state-copymanga');
+bindForm('form-kavita', 'kavita', 'state-kavita');
 bindForm('form-local', 'local', 'state-local');
 
 loadSettings();

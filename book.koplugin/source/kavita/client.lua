@@ -18,6 +18,20 @@ local Client = {}
 
 local MIN_VERSION = { major = 0, minor = 9, patch = 0 }
 
+--- Kavita 靠 User-Agent 识别客户端与平台（ClientInfoMiddleware/DeviceTrackingMiddleware）。
+--- 不带 UA 时会落到 turbo 库默认的 "Turbo Client v2.0.0"，Kavita 里就显示成
+--- "Unknown Client on Unknown"。带上 KOReader 与平台串，识别为 KOReader + Android/Linux。
+---@return string
+local function userAgent()
+    local platform = "Linux"
+    -- KOReader 启动时就 require 过 device；直接读缓存，避免在测试/无设备环境触发加载。
+    local device = package.loaded["device"]
+    if type(device) == "table" and device.isAndroid then
+        platform = "Android"
+    end
+    return "KOReader/MoonBook (" .. platform .. ")"
+end
+
 ---@param version string|nil
 ---@return table|nil
 local function parseVersion(version)
@@ -72,7 +86,7 @@ end
 
 ---@return table
 function Client:_headers()
-    return { ["x-api-key"] = self.api_key }
+    return { ["x-api-key"] = self.api_key, ["User-Agent"] = userAgent() }
 end
 
 ---@param res table|nil
@@ -261,6 +275,15 @@ function Client:getProgressAsync(chapter_id, cb)
     end)
 end
 
+--- 继续阅读点：`GET /api/Reader/continue-point?seriesId=` → 当前章 ChapterDto
+--- （用于显示"看到第几卷"、跨设备补齐章信息）。
+---@param series_id string|number
+---@param cb fun(data: table|nil, err: string|nil)
+---@return table|nil
+function Client:continuePointAsync(series_id, cb)
+    return self:getJSON("/api/Reader/continue-point", { seriesId = tostring(series_id) }, cb)
+end
+
 --- 上报阅读进度（`POST /api/Reader/progress`）。
 ---@param payload table
 ---@param cb fun(ok: boolean, err: string|nil)
@@ -287,6 +310,15 @@ end
 ---@return table|nil
 function Client:createAnnotationAsync(payload, cb)
     return self:postJSON("/api/Annotation/create", payload, cb)
+end
+
+--- 改注解的可修改字段（`POST /api/Annotation/update`：comment / slot / spoiler）。
+--- 需带 `id` 与 DTO 的 required 字段（xPath/chapterId/seriesId/volumeId/libraryId/ownerUserId）。
+---@param payload table
+---@param cb fun(data: table|nil, err: string|nil)
+---@return table|nil
+function Client:updateAnnotationAsync(payload, cb)
+    return self:postJSON("/api/Annotation/update", payload, cb)
 end
 
 ---@param cb fun(libraries: table[]|nil, err: string|nil)
@@ -355,10 +387,12 @@ function Client:fetchSeriesPage(library_id, page_number, page_size, cb)
         cb(nil, _("未配置服务器地址或 API Key"))
         return nil
     end
+    local headers = self:_headers()
+    headers["Content-Type"] = "application/json"
     return Request.request({
         url = url,
         method = "POST",
-        headers = { ["x-api-key"] = self.api_key, ["Content-Type"] = "application/json" },
+        headers = headers,
         body = encoded,
         timeout = 30,
     }, function(res, req_err)
@@ -391,6 +425,14 @@ function Client:fetchSeriesPage(library_id, page_number, page_size, cb)
         end
         cb(data)
     end)
+end
+
+--- 最近阅读「On Deck」：`POST /api/Series/on-deck`（空 body），返回最近在读的 SeriesDto[]
+--- （服务端按 latestReadDate 倒序，含漫画；格式过滤由源层负责）。
+---@param cb fun(data: table[]|nil, err: string|nil)
+---@return table|nil
+function Client:onDeckAsync(cb)
+    return self:postJSON("/api/Series/on-deck", {}, cb)
 end
 
 Client.MIN_VERSION = MIN_VERSION

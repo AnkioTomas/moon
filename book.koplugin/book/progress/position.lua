@@ -53,7 +53,9 @@ function Position.position(snapshot, toc, chapter_title)
         chapter_fraction = chapter_fraction,
         page = page and page > 0 and math.floor(page) or nil,
         total_pages = total_pages and total_pages > 0 and math.floor(total_pages) or nil,
-        locator = snapshot.ui and snapshot.ui.rolling and snapshot.ui.rolling.xpointer or nil,
+        locator = snapshot.locator
+            or (snapshot.ui and snapshot.ui.rolling and snapshot.ui.rolling.xpointer)
+            or nil,
     }
 end
 

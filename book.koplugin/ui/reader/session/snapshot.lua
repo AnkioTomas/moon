@@ -12,6 +12,7 @@
 ---@field doc_fraction number|nil 当前文档阅读比例（0..1）
 ---@field fraction number|nil 全书阅读比例（0..1）
 ---@field chapter_fraction number|nil 当前章节阅读比例（0..1）
+---@field locator string|nil 当前文档 xpointer（页级源据此定位 spine）
 ---@field percent number|nil 全书阅读百分比（0..100）
 ---@field reading_chapter_idx integer|nil 当前目录章序号（两种模式 toc 可用时）
 ---@field chapter ReaderChapterSession|nil 当前文档的章节上下文
@@ -80,6 +81,18 @@ local function readTotalPages(ui, previous)
     return previous or 0
 end
 
+--- 当前文档 xpointer（仅 rolling 文档有）；取不到返回 nil。
+---@param ui table|nil
+---@return string|nil
+local function readLocator(ui)
+    local document = ui and ui.document
+    if document and type(document.getXPointer) == "function" then
+        local ok, xp = pcall(document.getXPointer, document)
+        if ok and type(xp) == "string" and xp ~= "" then return xp end
+    end
+    return nil
+end
+
 ---@param ui table|nil
 ---@param page number
 ---@param total number
@@ -107,6 +120,7 @@ function Snapshot.refresh(session, page)
     session.page = readPage(ui, page, session.page)
     session.total_pages = readTotalPages(ui, session.total_pages)
     session.doc_fraction = readDocumentFraction(ui, session.page, session.total_pages)
+    session.locator = readLocator(ui) or session.locator
     local Toc = require("ui.reader.session.toc")
     local current = Toc.current(session)
     session.reading_chapter_idx = current and current.idx or nil

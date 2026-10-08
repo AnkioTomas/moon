@@ -95,6 +95,7 @@ package.preload["ui.components.bookinfo"] = function()
         end,
         title = function(book) return book.title or book.stable_id or "?" end,
         author = function(book) return book.authors or "" end,
+        chapter = function(book) return book.chapter_title or "" end,
         pct = function(book) return book.percent or 0 end,
         tappable = function(w, h, callback)
             empty_tap = callback

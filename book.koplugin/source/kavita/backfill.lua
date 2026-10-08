@@ -38,12 +38,13 @@ function Backfill.plan(series, stored)
     return items
 end
 
----@param opts { fetch: fun(item: table, cb: fun(data: table|nil, err: string|nil)):table|nil, on_success: fun(item: table, data: table), schedule: fun(delay: number, fn: fun()):table|nil|nil, interval: number|nil, retry_base: number|nil, max_attempts: number|nil }
+---@param opts { fetch: fun(item: table, cb: fun(data: table|nil, err: string|nil)):table|nil, on_success: fun(item: table, data: table), on_done: fun()|nil, schedule: fun(delay: number, fn: fun()):table|nil|nil, interval: number|nil, retry_base: number|nil, max_attempts: number|nil }
 ---@return Backfill
 function Backfill.new(opts)
     return setmetatable({
         _fetch = opts.fetch,
         _on_success = opts.on_success,
+        _on_done = opts.on_done,
         _schedule = opts.schedule or function(delay, fn)
             local UIManager = require("ui/uimanager")
             UIManager:scheduleIn(delay, fn)
@@ -72,13 +73,17 @@ function Backfill:run(items)
     return self
 end
 
---- 前进到下一本；队列走完即停。
+--- 前进到下一本；队列走完即停（回调 on_done）。
 function Backfill:_advance()
     if self._cancelled then return end
     self._index = self._index + 1
     self._attempt = 0
     local item = self._items[self._index]
-    if item then self:_request(item) end
+    if item then
+        self:_request(item)
+    elseif self._on_done then
+        self._on_done()
+    end
 end
 
 --- 拉一本的 metadata；成功写回并前进，失败退避重试或放弃。

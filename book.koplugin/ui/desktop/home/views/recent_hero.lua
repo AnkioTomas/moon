@@ -55,6 +55,7 @@ function M:createWidget()
             pad = UI.sz(10),
             cover_width = cover_w,
             show_parent = ctx.desktop,
+            subtitle = BookInfo.chapter(recent),
             on_tap = function() openBook(ctx, recent) end,
         })
         body = CenterContainer:new{

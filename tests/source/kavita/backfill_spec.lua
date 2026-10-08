@@ -81,6 +81,23 @@ Assert.eq(attempts, 3)
 Assert.eq(ok_n, 1)
 Assert.eq(retry_fake.delays[3], 0.3)
 
+-- on_done：队列走完回调一次（供一次性落盘状态用）
+local done_fake = newFake()
+local done_n = 0
+local done_bf = Backfill.new{
+    schedule = done_fake.schedule,
+    fetch = function(_, cb)
+        cb({})
+        return { cancel = function() end }
+    end,
+    on_success = function() end,
+    on_done = function() done_n = done_n + 1 end,
+}
+done_bf:run({ { stable_id = "1", ts = "t" } })
+Assert.eq(done_n, 0, "队列未走完不回调")
+done_fake.step()
+Assert.eq(done_n, 1, "队列走完回调一次")
+
 -- cancel 后不再前进
 local cancel_fake = newFake()
 local cancel_fetched = 0

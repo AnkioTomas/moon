@@ -125,8 +125,8 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(source_id, stable_id) DO UPDATE SET
             fraction=excluded.fraction,
-            chapter_idx=excluded.chapter_idx,
-            chapter_title=excluded.chapter_title,
+            chapter_idx=COALESCE(excluded.chapter_idx, pending_progress.chapter_idx),
+            chapter_title=COALESCE(excluded.chapter_title, pending_progress.chapter_title),
             chapter_fraction=excluded.chapter_fraction,
             page=excluded.page,
             total_pages=excluded.total_pages,

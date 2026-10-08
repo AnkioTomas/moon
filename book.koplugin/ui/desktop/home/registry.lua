@@ -15,6 +15,7 @@ local COMPONENT_MODULES = {
     "clock", "weather", "clock_weather", "stats", "hitokoto", "excerpt",
     "history", "news",
     "recent_hero", "recent_list", "recent_cards",
+    "kavita_recent",
 }
 
 M.components = {}

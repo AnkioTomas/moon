@@ -117,7 +117,7 @@
 ---@field clearCaches fun(self: BookSource) 清空源侧缓存
 ---@field close fun(self: BookSource)|nil 释放资源
 ---@field syncBooksAsync fun(self: BookSource, opts: { force?: boolean, dirty_only?: boolean, on_progress?: fun(text: string, done: integer|nil, total: integer|nil) }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛书架；dirty_only 只推本地删/加；on_progress 在真实步骤（拉取/上传/写库…）处上报，done/total 为该步计数
----@field syncProgressAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛进度
+---@field syncProgressAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean, force?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛进度
 ---@field syncNotesAsync fun(self: BookSource, opts: { identity?: BookIdentity, dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛笔记
 ---@field cleanAnnotations fun(self: BookSource, items: table[], total_pages: integer|nil): table[]|nil 清洗并透传源私有注解字段
 ---@field prepareLocalAnnotations fun(self: BookSource, previous: table[], current: table[]): table[]|nil 根据源协议生成更新/删除状态
@@ -129,7 +129,7 @@
 ---@field filtersAsync fun(self: BookSource, cb: fun(data: BookFiltersResult|nil, err: string|nil)): table|nil 筛选项
 ---@field readingInsightAsync fun(self: BookSource, cb: fun(data: BookInsightResult|nil, err: string|nil)): table|nil 阅读洞察
 ---@field getDetailAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: Book|nil, err: string|nil)): table|nil 书籍详情
----@field openBookAsync fun(self: BookSource, identity: BookIdentity, opts: table|nil, cb: fun(path: string|nil, err: string|nil)): table|nil 根据书籍身份解析、落盘并登记物理文档；按章源通过 opts.chapter_idx 指定章节；取消后不回调
+---@field openBookAsync fun(self: BookSource, identity: BookIdentity, opts: table|nil, cb: fun(path: string|nil, err: string|nil, opts: table|nil)): table|nil 根据书籍身份解析、落盘并登记物理文档；按章源通过 opts.chapter_idx 指定章节；取消后不回调；cb 第三参 opts.handled=true 表示源已自行接管展示（不走 ReaderUI）
 ---@field loadTocAsync fun(self: BookSource, identity: BookIdentity, cb: fun(toc: BookChapter[]|nil, err: string|nil)): table|nil 拉取并持久化章节目录
 ---@field prefetchChaptersAsync fun(self: BookSource, identity: BookIdentity, toc: BookChapter[], from_idx: integer, count: integer, cb: fun(cached: integer, total: integer, failed: integer, err: any)|nil): table|nil 阅读期预取后续章节
 ---@field getProgressAsync fun(self: BookSource, identity: BookIdentity, cb: fun(data: ProgressPosition|nil, err: string|nil, meta: table|nil)): table|nil 拉取远端进度；meta.empty 表示远端无记录
@@ -268,7 +268,9 @@ local function onBooksSynced(self, desktop, request, result, err)
     self._books_refresh_at = os.time()
     if desktop.library then desktop.library.state = nil end
     -- 计数全 0 = 本地书架未变。非 0 也可能只是全量对账，首页组件自己比对显示数据再决定重建。
-    if (tonumber(result.pulled) or 0) + (tonumber(result.pushed) or 0) + (tonumber(result.hidden) or 0) > 0 then
+    -- unchanged：远端没变但本地进度可能刚变，也要广播让卡片重读本地数据。
+    if result.unchanged
+        or (tonumber(result.pulled) or 0) + (tonumber(result.pushed) or 0) + (tonumber(result.hidden) or 0) > 0 then
         desktop:onEvent("shelf_changed")
     end
     if desktop.tab == "library" then desktop:updateView() end
@@ -424,7 +426,7 @@ function SourceBase:syncBooksAsync(_opts, cb)
     return { cancel = function() cancelled = true end }
 end
 
----@param opts { identity?: BookIdentity }|nil
+---@param opts { identity?: BookIdentity, dirty_only?: boolean, force?: boolean }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return table
 function SourceBase:syncProgressAsync(opts, cb)

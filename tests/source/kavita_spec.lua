@@ -46,6 +46,8 @@ local cover, err = source:coverRequest({ source_id = "kavita", stable_id = "42" 
 Assert.is_nil(err)
 Assert.eq(cover.url, "https://host:port/kavita/api/Image/series-cover?seriesId=42")
 Assert.eq(cover.headers["x-api-key"], "test-key")
+-- Kavita 靠 UA 识别客户端：必须带 KOReader，否则显示成 Unknown Client。
+Assert.is_true(tostring(cover.headers["User-Agent"]):find("KOReader/MoonBook", 1, true) ~= nil)
 
 cfg = { base_url = "", api_key = "" }
 source = Kavita.new()

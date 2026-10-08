@@ -58,10 +58,36 @@ ReaderPanel.move = list.move
 --- 生成阅读页动作列表，并计算可用和激活态。
 ---@param ui table|nil
 ---@return BookQuickPanelReaderAction[]
+--- 追加一个恒常显示的动作按钮（`action.always_visible`），不受面板列表勾选影响。
+---@param result BookQuickPanelReaderAction[]
+---@param seen table<string, boolean>
+---@param ctx BookQuickPanelContext
+local function appendAlwaysVisible(result, seen, ctx)
+    for _, id in ipairs(Registry.readerOrder()) do
+        if not seen[id] then
+            local action = Registry.get(id)
+            if action and action.always_visible and Registry.available(action, ctx) then
+                result[#result + 1] = {
+                    id = id,
+                    title = action.title,
+                    icon = action.icon,
+                    active = Registry.active(id, action, ctx),
+                    enabled = true,
+                    keep_open = action.keep_open == true,
+                }
+            end
+        end
+    end
+end
+
+---@param ui table|nil
+---@return BookQuickPanelReaderAction[]
 function ReaderPanel.actions(ui)
     local ctx = { ui = ui }
     local result = {}
+    local seen = {}
     for _, id in ipairs(list.ids()) do
+        seen[id] = true
         local action = Registry.get(id)
         if action and Registry.available(action, ctx) then
             local active = Registry.active(id, action, ctx)
@@ -75,6 +101,7 @@ function ReaderPanel.actions(ui)
             }
         end
     end
+    appendAlwaysVisible(result, seen, ctx)
     return result
 end
 
