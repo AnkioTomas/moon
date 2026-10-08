@@ -30,7 +30,7 @@ end
 
 ---@return string|nil, string|nil, string|nil, string|nil
 local function credentials()
-    local settings = Settings.get()
+    local settings = Settings.get("ai")
     local endpoint = Client.endpoint(settings.ai_endpoint)
     local api_key = Text.trim(settings.ai_api_key)
     local model = Text.trim(settings.ai_model)
@@ -70,7 +70,7 @@ local function messageContent(message)
         return nil
     end
     local parts = {}
-    for _, part in ipairs(value) do
+    for _idx, part in ipairs(value) do
         if type(part) == "string" and part ~= "" then
             parts[#parts + 1] = part
         elseif type(part) == "table" then
