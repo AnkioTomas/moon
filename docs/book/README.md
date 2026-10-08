@@ -1,13 +1,13 @@
 # book/ — 书籍领域
 
-路径：[`book.koplugin/book/`](../../book.koplugin/book/)。编排身份、打开、目录查询、进度、笔记、统计和同步。表结构见 [`../db/`](../db/README.md)。
+路径：[`book.koplugin/book/`](../../book.koplugin/book/)。数据源适配器在 [`source/`](../source/README.md)。编排身份、目录查询、进度、笔记、统计和同步（打开在 [`desktop.open`](../ui/open.md)，阅读期编排在 [`reader.session`](../ui/session.md)）。表模块与领域模块同目录（`*_db.lua`），连接原语在 [`utils/db.lua`](../../book.koplugin/utils/db.lua)，表间联动走 [`utils/event.lua`](../../book.koplugin/utils/event.lua)。
 
 ## 设计总览
 
 ```text
 UI / Session
     ↓
-book.open / progress / note / stats / catalog / sync
+store / progress / note / stats / catalog
     ↓
 source（属主实例） + db（SQLite）
 ```
@@ -21,12 +21,11 @@ source（属主实例） + db（SQLite）
 
 | 文档 | 讲什么 |
 |---|---|
-| [`store`](store.md) | 路径→身份、`touch` 登记、书架 reconcile |
-| [`open`](open.md) | 按属主源打开物理文档 |
+| [`store`](store.md) | 路径→身份、`touch` 登记 |
 | [`catalog`](catalog.md) | 图书馆 / 最近阅读 / 筛选 / 洞察（只读库） |
 | [`progress`](progress.md) | 进度落盘、开书冲突、推送 |
-| [`note`](note.md) | 注解快照、分片、merge |
-| [`stats`](stats.md) | 阅读计时与上报 |
-| [`sync`](sync.md) | 四域编排与脏重试 |
+| [`note`](note.md) | 注解快照同步、分片、merge |
+| [`stats`](stats.md) | 阅读统计上报与拉取 |
+| [`sync`](sync.md) | 联网后各源自己推脏 |
 
-同目录还有 `reader_prefs`（全书排版 sidecar）、`highlights`、`reflow`、`cache`——接口见各文件头注释。
+同目录还有 `reader_prefs`（全书排版 sidecar）、`highlights`、`cache`（重新排版在 `features/reflow/`）——接口见各文件头注释。

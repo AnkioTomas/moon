@@ -18,8 +18,10 @@ package.preload["utils.settings"] = function()
     return {
         getSource = function() return cfg end,
         saveSource = function(_, value) cfg = value end,
-        ensureDeviceId = function() return "test-device" end,
     }
+end
+package.preload["utils.device_id"] = function()
+    return { ensure = function() return "test-device" end }
 end
 
 package.preload["utils.paths"] = function()

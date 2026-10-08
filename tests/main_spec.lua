@@ -96,11 +96,7 @@ local reader_settings = {}
 local moon_cfg = { start_with_seeded = true }
 stub("utils.settings", {
     get = function() return moon_cfg end,
-    save = function(values)
-        for k, v in pairs(values) do moon_cfg[k] = v end
-    end,
-    openOnStart = function() return reader_settings.start_with == "bookshelf_book" end,
-    setOpenOnStart = function(on) reader_settings.start_with = on and "bookshelf_book" or "filemanager" end,
+    save = function() end,
 })
 stub("desktop.open", {
     book = function(_, book) calls.open_book = book end,
@@ -158,12 +154,16 @@ stub("ui.guard", {
 local feature_hooks = {}
 stub("features", {
     emit = function(hook, host) feature_hooks[#feature_hooks + 1] = hook .. ":" .. host.path end,
+    scan = function() return {} end,
 })
 
 _G.G_reader_settings = {
     isTrue = function() return true end,
-    saveSetting = function() end,
-    readSetting = function(_, _, default) return default end,
+    saveSetting = function(_, key, value) reader_settings[key] = value end,
+    readSetting = function(_, key, default)
+        if reader_settings[key] == nil then return default end
+        return reader_settings[key]
+    end,
 }
 
 package.loaded["main"] = nil
@@ -338,6 +338,11 @@ Assert.eq(calls.auto_open[1], fm)
 reader_settings.start_with = "filemanager"
 boot()
 Assert.eq(reader_settings.start_with, "filemanager")
+Assert.is_false(require("menu").openOnStart())
+require("menu").setOpenOnStart(true)
+Assert.eq(reader_settings.start_with, "bookshelf_book", "已持久化的取值不能改")
+require("menu").setOpenOnStart(false)
+Assert.eq(reader_settings.start_with, "filemanager", "取消即回到文件管理器")
 
 -- 宿主入口与生命周期各步都经 guard
 for _, label in ipairs({

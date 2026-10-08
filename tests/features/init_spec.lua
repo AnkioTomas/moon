@@ -135,3 +135,13 @@ Assert.is_false(Features.handleEvent(event("Unknown"), plugin))
 guarded = {}
 Assert.is_false(Features.handleEvent(event("Boom"), plugin))
 Assert.eq(guarded[1].label, "feature e1.events.Boom")
+
+-- scan：扫真实 features/ 目录，返回提供某约定文件的目录名（按名字排序，不看 list），同一文件只扫一次
+Assert.eq(table.concat(Features.scan("events"), ","), "xray")
+Assert.eq(table.concat(Features.scan("panel"), ","), "animation,reflow,remote,tpl")
+local settings = Features.scan("setting")
+Assert.contains(settings, "nightmode")
+Assert.contains(settings, "xray")
+for i = 2, #settings do Assert.is_true(settings[i - 1] < settings[i], "按目录名排序") end
+Assert.len(Features.scan("no_such_file"), 0)
+Assert.eq(Features.scan("events"), Features.scan("events"), "同一文件只扫一次，返回同一张表")

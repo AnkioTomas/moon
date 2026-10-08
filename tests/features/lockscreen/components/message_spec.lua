@@ -8,8 +8,8 @@ local Assert = require("support.assert")
 
 package.preload["utils.settings"] = function()
     return {
-        feature = function(name)
-            assert(name == "lockscreen")
+        get = function(name)
+            assert(name == "features.lockscreen")
             return { lock_screen_custom_message = "自定义测试留言" }
         end,
     }

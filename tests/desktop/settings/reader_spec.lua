@@ -1,4 +1,4 @@
---[[-- 阅读设置：行为一组，划词能力一组。 --]]
+--[[-- 阅读设置：行为一组，划词页只有「选区」（翻译、X-Ray 由 feature 追加）。 --]]
 
 local Assert = require("support.assert")
 
@@ -16,13 +16,7 @@ local saved_section
 package.preload["utils.settings"] = function()
     return {
         get = function() return reader_section end,
-        feature = function(name)
-            return ({
-                xray = { book_xray_enabled = true, book_xray_show_marks = true, book_xray_mark_style = "dashed" },
-                translate = { edge_translation_enabled = true },
-            })[name]
-        end,
-        saveSection = function(name, values) saved_section = { name = name, values = values } end,
+        save = function(name, values) saved_section = { name = name, values = values } end,
     }
 end
 package.preload["ui.themes.widgets.row"] = function()
@@ -64,11 +58,9 @@ local titles = {}
 for _, section in ipairs(lookup) do
     titles[#titles + 1] = section.title
 end
-Assert.eq(table.concat(titles, ","), "选区,翻译,X-Ray")
+Assert.eq(table.concat(titles, ","), "选区")
 Assert.eq(lookup[1].rows[1](600).title, "划词手柄")
 Assert.is_true(lookup[1].rows[1](600).status_on)
-Assert.eq(lookup[3].rows[3](600).title, "X-Ray 下划线样式")
-Assert.eq(lookup[3].rows[3](600).status, "虚线")
 
 local popup_rows = Settings:popupRows(desktop)
 Assert.len(popup_rows, 12)

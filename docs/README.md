@@ -1,17 +1,16 @@
 # 设计文档
 
-`book.koplugin/` 的实现契约：每个模块写清**怎么设计的、怎么用**。表结构见 [`db/`](db/README.md)。
+`book.koplugin/` 的实现契约：每个模块写清**怎么设计的、怎么用**。表结构写在各表模块头注释里（表模块与使用方同目录，连接原语在 `utils/db.lua`）。
 
 ## 模块索引
 
 | 模块 | 内容 |
 |---|---|
-| [`plugin/`](plugin/README.md) | KOReader 接线、Host、源事件 |
-| [`db/`](db/README.md) | `book.sqlite3` 各表 |
+| [`plugin/`](plugin/README.md) | KOReader 接线、启动项、源生命周期 |
 | [`book/`](book/README.md) | 身份 / 打开 / catalog / 进度 / 笔记 / 统计 / 同步 |
 | [`source/`](source/README.md) | 注册表、基类、按章、各源 |
-| [`ui/`](ui/README.md) | Lifecycle、桌面、阅读会话 |
-| [`http/`](http/README.md) | Turbo 请求 |
+| [`ui/`](ui/README.md) | 桌面、阅读会话 |
+| [`http/`](../book.koplugin/http/README.md) | Turbo 请求 |
 | [`workers/`](workers/README.md) | Job |
 | [`remote/`](remote/README.md) | 远程管理 |
 | [`lockscreen/`](lockscreen/README.md) | 组合锁屏 |
@@ -25,7 +24,7 @@
 | [`baike/`](baike/README.md) | 百度百科 |
 | [`scrape/`](scrape/README.md) | 元数据刮削 |
 | [`convert/`](convert/README.md) | TXT/HTML/MOBI → EPUB |
-| [`update/`](update/README.md) | 插件自更新 |
+| [`update/`](update/README.md) | 插件自更新（`features/update/`） |
 | [`patch/`](patch/README.md) | KOReader 核心补丁 |
 | [`utils/`](utils/README.md) | 路径、设置、文字 |
 

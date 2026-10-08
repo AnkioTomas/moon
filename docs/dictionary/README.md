@@ -1,6 +1,6 @@
 # dictionary/ — StarDict 词典
 
-路径：[`book.koplugin/dictionary/`](../../book.koplugin/dictionary/)。
+路径：[`book.koplugin/features/dictionary/`](../../book.koplugin/features/dictionary/)。
 
 接管 KOReader「管理词典 / 下载词典」，保留查词事件与划词按钮。关闭后完整回退原生。
 

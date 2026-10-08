@@ -8,7 +8,7 @@
 local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
-Kit.sections.common = {}
+Kit.sections.store = {}
 
 local Widget = require("ui/widget/widget")
 
@@ -154,11 +154,11 @@ do -- 外壳签名（主题）变了：整壳重建，全刷
 end
 
 do -- 当前 Tab 被关掉（书城开关）：回退首页
-    Kit.sections.common.zlib_enabled = true
+    Kit.sections.store.zlib_enabled = true
     desk:switchTab("store")
     Assert.eq(ids(), "home,library,store,insight,settings")
     Assert.eq(desk.tab, "store")
-    Kit.sections.common.zlib_enabled = nil
+    Kit.sections.store.zlib_enabled = nil
     desk:updateView()
     Assert.eq(desk.tab, "home")
     Assert.eq(desk.layers[1].page, "home")
@@ -272,9 +272,8 @@ do -- Desktop.open：无源只提示；有源建桌面、显示、Resume、通�
 end
 
 do -- 开机自动开桌面：按启动项、进程内只开一次；Reader 实例与已有桌面不开。重新 require = 进程重启
-    local Settings = require("utils.settings")
     local on_start = true
-    Settings.openOnStart = function() return on_start end
+    package.loaded["menu"] = { openOnStart = function() return on_start end }
     local function boot()
         package.loaded["desktop"] = nil
         local D = require("desktop")

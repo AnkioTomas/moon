@@ -12,8 +12,8 @@ local sidebar = { sidebar_gesture = "edge" }
 local saved
 package.preload["utils.settings"] = function()
     return {
-        feature = function(name) assert(name == "sidebar"); return sidebar end,
-        saveSection = function(name, values) saved = { name = name, values = values } end,
+        get = function(name) assert(name == "features.sidebar"); return sidebar end,
+        save = function(name, values) saved = { name = name, values = values } end,
     }
 end
 package.preload["ui.themes.widgets.row"] = function()
@@ -40,6 +40,6 @@ Assert.len(picker.items, 3)
 Assert.eq(picker.current, "edge")
 picker.on_select("full")
 Assert.eq(sidebar.sidebar_gesture, "full")
-Assert.eq(saved.name, "sidebar")
+Assert.eq(saved.name, "features.sidebar")
 Assert.eq(updates, 1)
 Assert.eq(row().status, "任意位置右滑")

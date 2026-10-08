@@ -1,6 +1,6 @@
-# lockscreen.compose — 合成流水线
+# features.lockscreen.compose — 合成流水线
 
-代码：[`lockscreen/compose.lua`](../../book.koplugin/lockscreen/compose.lua) + `background` / `layout` / `render` / `components/`。
+代码：[`features/lockscreen/compose.lua`](../../book.koplugin/features/lockscreen/compose.lua) + `background` / `layout` / `render` / `components/`。
 
 ## 设计
 
@@ -39,7 +39,7 @@ direct 资源直接返回原图路径，不经 compose.png。
 背景新增同理：`background` 选项表加一项 + 实现 ensure，设置页经 `Background.options()` 自动出现。
 
 ```lua
-local Compose = require("lockscreen.compose")
+local Compose = require("features.lockscreen.compose")
 local plan = Compose.plan()
 if Compose.cacheValid(plan, force) then
     -- 复用

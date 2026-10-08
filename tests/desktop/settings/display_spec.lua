@@ -1,4 +1,4 @@
---[[-- 显示设置：字体缩放 + 屏幕刷新/彩色渲染条件行。 --]]
+--[[-- 显示设置：字体缩放 + 屏幕刷新/彩色渲染条件行；夜间与亮度在 nightmode feature。 --]]
 
 local Assert = require("support.assert")
 
@@ -47,21 +47,8 @@ package.preload["ui/uimanager"] = function()
         askForRestart = function() end,
     }
 end
-local night_window
 package.preload["utils.settings"] = function()
-    return {
-        get = function() return { mesh_mask = true } end,
-        feature = function(name)
-            assert(name == "nightmode")
-            return { auto_night = night_window and "schedule" or "off", auto_light = false }
-        end,
-    }
-end
-package.preload["features.nightmode"] = function()
-    return {
-        window = function() if night_window then return night_window[1], night_window[2] end end,
-        hasSensor = function() return false end,
-    }
+    return { get = function() return { mesh_mask = true } end }
 end
 _G.G_reader_settings = {
     isTrue = function() return false end,
@@ -81,20 +68,11 @@ Assert.eq(rows[4](600).title, "书架每行数量")
 Assert.eq(rows[5](600).title, "背景遮罩")
 Assert.eq(rows[5](600).status, "开")
 Assert.is_true(rows[5](600).status_on)
-Assert.eq(rows[6](600).title, "自动夜间模式")
-Assert.eq(rows[6](600).status, "关")
-Assert.is_false(rows[6](600).status_on)
-night_window = { 22 * 60, 7 * 60 }
-Assert.eq(rows[6](600).status, "22:00–07:00")
-Assert.is_true(rows[6](600).status_on)
-Assert.eq(rows[7](600).title, "自动亮度")
-Assert.eq(rows[7](600).status, "关")
+Assert.len(rows, 7, "夜间与亮度不在显示分节")
+Assert.eq(rows[6](600).title, "屏幕刷新")
+Assert.eq(rows[6](600).status, "每 6 页")
+Assert.eq(rows[7](600).title, "彩色屏幕支持")
 Assert.is_false(rows[7](600).status_on)
-Assert.eq(rows[7](600).subtitle, "按时段和天气调节；手动调亮度会关闭自动亮度")
-Assert.eq(rows[8](600).title, "屏幕刷新")
-Assert.eq(rows[8](600).status, "每 6 页")
-Assert.eq(rows[9](600).title, "彩色屏幕支持")
-Assert.is_false(rows[9](600).status_on)
 
 eink, color_screen, frontlight = false, false, false
 package.loaded["device"] = nil
@@ -103,4 +81,4 @@ Display = require("desktop.pages.setting.display")
 rows = Display:rows{
     desktop = {}, font_name = "Noto", scale = 120, grid_max_cols = 4,
 }
-Assert.eq(#rows, 6, "无墨水屏/彩屏/前光时不展示刷新、彩色与自动亮度项")
+Assert.eq(#rows, 5, "无墨水屏/彩屏时不展示刷新与彩色项")

@@ -15,8 +15,8 @@ end
 package.preload["ffi/zlib"] = function()
     return { zlib_compress = function(s) return "Z" .. s end, zlib_uncompress = function(s) return s:sub(2) end }
 end
-package.preload["utils.settings"] = function()
-    return { ensureDeviceId = function() return "dev-A" end }
+package.preload["utils.device_id"] = function()
+    return { ensure = function() return "dev-A" end }
 end
 package.preload["utils.log"] = function()
     return { dbg = function() end, warn = function() end, info = function() end }

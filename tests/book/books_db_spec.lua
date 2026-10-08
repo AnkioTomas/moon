@@ -50,7 +50,7 @@ local function clearMods()
         "book.note_db",
         "book.progress_db",
         "book.stats_db",
-        "features.xray.db",
+        "features.xray.db", "features.xray.events",
     }) do
         package.preload[name] = nil
         package.loaded[name] = nil
@@ -97,7 +97,7 @@ local function makeConn(opts)
     return connection, calls
 end
 
----@param dependents boolean|nil 同时加载全部按身份挂靠的表模块（订阅 book_identity_changed）
+---@param dependents boolean|nil 扫描真实 features 目录登记数据事件订阅方（xray 迁身份）
 local function loadBook(connection, dependents)
     stubTask(true)
     stubDbDeps()
@@ -110,9 +110,7 @@ local function loadBook(connection, dependents)
     local DbBase = require("utils.db")
     local BookDB = require("book.books_db")
     if dependents then
-        for _idx, name in ipairs({ "book.note_db", "book.progress_db", "book.stats_db", "features.xray.db" }) do
-            require(name)
-        end
+        require("utils.event").init()
     end
     DbBase.open()
     return DbBase, BookDB
@@ -562,15 +560,15 @@ do
     clearMods()
 end
 
--- ── 阅读状态：手动已读发 book_marked_read（进度由进度表订阅方写）；手动未读独立编码，自动规则不得覆盖 ──
+-- ── 阅读状态：手动已读同一事务调 ProgressDB.markFinished；手动未读独立编码，自动规则不得覆盖 ──
 do
     local connection, calls = makeConn()
     local marked = {}
     package.preload["book.progress_db"] = function()
-        return { events = { book_marked_read = function(source_id, stable_id)
+        return { markFinished = function(source_id, stable_id)
             marked[#marked + 1] = { source_id, stable_id }
             return true
-        end } }
+        end }
     end
     for _idx, name in ipairs({ "book.note_db", "book.stats_db", "features.xray.db" }) do
         package.preload[name] = function() return {} end
@@ -578,8 +576,9 @@ do
     local DbBase, BookDB = loadBook(connection)
 
     Assert.is_true(BookDB.setRead("moon", "b1", true))
-    Assert.is_true(calls[#calls].sql:find("SET read_state=1", 1, true) ~= nil)
-    Assert.is_true(calls[#calls].sql:find("percent", 1, true) == nil,
+    Assert.eq(calls[#calls].sql, "COMMIT;", "已读与补进度同一事务")
+    Assert.is_true(calls[#calls - 1].sql:find("SET read_state=1", 1, true) ~= nil)
+    Assert.is_true(calls[#calls - 1].sql:find("percent", 1, true) == nil,
         "已读只改 read_state，不写 books.percent")
     for _idx, call in ipairs(calls) do
         Assert.is_nil(call.sql:find("pending_progress", 1, true), "books_db 不直接写进度表")
@@ -588,7 +587,7 @@ do
     Assert.eq(marked[1][1], "moon")
     Assert.eq(marked[1][2], "b1")
     Assert.is_true(BookDB.setRead("moon", "b1", false))
-    Assert.eq(#marked, 1, "标记未读不发已读事件")
+    Assert.eq(#marked, 1, "标记未读不补进度")
     Assert.is_true(calls[#calls].sql:find("read_state=2", 1, true) ~= nil)
     Assert.eq(calls[#calls].args[1], "moon")
     Assert.is_true(calls[#calls].sql:find("percent", 1, true) == nil,
@@ -624,26 +623,7 @@ do
     clearMods()
 end
 
--- ── progress_finished：进度表发出后 books 自动标已读（不覆盖手动未读）──
-do
-    local connection, calls = makeConn()
-    local DbBase = loadBook(connection)
-
-    Assert.is_true(require("utils.event").emit("progress_finished", "moon", "b1"))
-    local update
-    for _idx, call in ipairs(calls) do
-        if call.sql:find("UPDATE books SET read_state=1", 1, true) then update = call end
-    end
-    Assert.is_true(update ~= nil)
-    Assert.is_true(update.sql:find("AND read_state=0", 1, true) ~= nil)
-    Assert.eq(update.args[1], "moon")
-    Assert.eq(update.args[2], "b1")
-
-    DbBase.close()
-    clearMods()
-end
-
--- ── renameStableId：books 自己改，依附表经 book_identity_changed 各自改写，全参数化 ──
+-- ── renameStableId：books 自己改，核心依附表按 IDENTITY_MODULES 顺序、feature 表经事件改写，全参数化 ──
 do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection, true)
@@ -668,7 +648,7 @@ do
     end
     Assert.eq(#updates, 6)
     Assert.is_true(updates[1].sql:find("UPDATE books SET stable_id=?, category=?, series=?, path=?", 1, true) ~= nil)
-    -- 订阅顺序 = 表模块加载顺序
+    -- 核心表按 IDENTITY_MODULES 顺序，最后是事件订阅方 xray
     Assert.is_true(updates[2].sql:find("UPDATE chapters SET stable_id=?", 1, true) ~= nil)
     Assert.is_true(updates[3].sql:find("UPDATE notes SET stable_id=?", 1, true) ~= nil)
     Assert.is_true(updates[4].sql:find("UPDATE pending_progress SET stable_id=?", 1, true) ~= nil)

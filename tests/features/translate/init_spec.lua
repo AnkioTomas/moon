@@ -18,7 +18,7 @@ package.preload["features.translate.edge"] = function()
 end
 local reader = { edge_translation_enabled = true }
 package.preload["utils.settings"] = function()
-    return { feature = function(name) assert(name == "translate"); return reader end }
+    return { get = function(name) assert(name == "features.translate"); return reader end }
 end
 package.preload["device"] = function()
     return { hasClipboard = function() return false end }

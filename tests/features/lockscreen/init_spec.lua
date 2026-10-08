@@ -148,7 +148,7 @@ local Settings = require("features.lockscreen.settings")
 local Compose = require("features.lockscreen.compose")
 local compose_path = Paths.screensaverDir() .. "/compose.png"
 
-local conf = MoonSettings.feature("lockscreen")
+local conf = MoonSettings.get("features.lockscreen")
 local previous_asset_cache = {}
 for key, value in pairs(conf.lock_screen_asset_cache or {}) do
     if type(value) == "table" then
@@ -172,7 +172,7 @@ local prev = {
 
 local function cleanup()
     for k, v in pairs(prev) do conf[k] = v end
-    MoonSettings.saveSection("lockscreen")
+    MoonSettings.save("features.lockscreen")
     pcall(os.remove, compose_path)
     pcall(os.remove, require("utils.paths").screensaverDir() .. "/myrl.png")
     pcall(os.remove, cover_a)
@@ -185,7 +185,7 @@ local ok_run, err_run = pcall(function()
     conf.lock_screen_day = nil
     conf.lock_screen_background = "bing"
     conf.lock_screen_component = "current"
-    MoonSettings.saveSection("lockscreen")
+    MoonSettings.save("features.lockscreen")
     pcall(os.remove, compose_path)
 
     Assert.is_false(Settings.isCompose())
@@ -212,7 +212,7 @@ local ok_run, err_run = pcall(function()
     conf.lock_screen_wide = false
     Settings.setComponent("bill")
     conf.lock_screen_position = "top-left"
-    MoonSettings.saveSection("lockscreen")
+    MoonSettings.save("features.lockscreen")
     Assert.eq(Compose.plan().position, "center-center")
     Assert.is_true(Compose.plan().wide)
     Assert.is_false(conf.lock_screen_wide)
@@ -226,7 +226,7 @@ local ok_run, err_run = pcall(function()
     Settings.setComponent("bill")
     conf.lock_screen_position = previous_position
     conf.lock_screen_wide = previous_wide
-    MoonSettings.saveSection("lockscreen")
+    MoonSettings.save("features.lockscreen")
     local done, ok_dl
     LockScreen.refresh(function(ok)
         done = true
@@ -263,7 +263,7 @@ local ok_run, err_run = pcall(function()
     Assert.eq(Compose.plan().background_mode, "bing")
     Assert.eq(Compose.plan().asset.id, "myrl")
     conf.lock_screen_asset_cache.myrl = nil
-    MoonSettings.saveSection("lockscreen")
+    MoonSettings.save("features.lockscreen")
     pcall(os.remove, require("utils.paths").screensaverDir() .. "/myrl.png")
     last_download.url = nil
     LockScreen.refresh(function(ok) refreshed = ok end)
@@ -277,7 +277,7 @@ local ok_run, err_run = pcall(function()
 
     -- 即使组合图已经是当天版本，日报下载标记过期也必须再次请求。
     conf.lock_screen_asset_cache.myrl = { day = "1999-01-01" }
-    MoonSettings.saveSection("lockscreen")
+    MoonSettings.save("features.lockscreen")
     last_download.url = nil
     LockScreen.refresh(function(ok) refreshed = ok end)
     Stubs.flush()

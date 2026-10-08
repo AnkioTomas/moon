@@ -49,9 +49,8 @@ end
 
 package.preload["utils.settings"] = function()
     return {
-        get = function() return { active_source = "wrong-source" } end,
-        feature = function(name)
-            assert(name == "lockscreen")
+        get = function(name)
+            assert(name == "features.lockscreen")
             return { lock_screen_bill_period = "7d" }
         end,
     }

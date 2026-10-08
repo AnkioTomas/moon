@@ -10,6 +10,7 @@ local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
 Kit.sections.home = {}
+Kit.sections.desktop = {}
 
 local powerd = { capacity = 100, charging = false }
 function powerd:getCapacity() return self.capacity end
@@ -21,8 +22,11 @@ function Device:hasFrontlight() return true end
 
 local MoonSettings = require("utils.settings")
 local mixed = false
-MoonSettings.libraryMixed = function() return mixed end
-MoonSettings.activeSourceId = function() return "moon" end
+local real_get = MoonSettings.get
+MoonSettings.get = function(section)
+    if section ~= "source" then return real_get(section) end
+    return { library_mixed = mixed }
+end
 
 local avail_disk = 10 * 1000 * 1000 * 1000
 require("ffi/util").df = function() return 0, 0, avail_disk end
@@ -39,7 +43,10 @@ package.preload["util"] = function()
     }
 end
 package.preload["source.registry"] = function()
-    return { meta = function(id) return { id = id, name = "书库" } end }
+    return {
+        activeId = function() return "moon" end,
+        meta = function(id) return { id = id, name = "书库" } end,
+    }
 end
 package.preload["features.panel.desktop"] = function() return { lightPercent = function() return 37 end } end
 local panels = {}
@@ -154,12 +161,12 @@ do -- 混合模式源名
 end
 
 do -- 用户关掉的项不画、不留点击区；读不到的项（存储）省略
-    Kit.sections.home.home_topbar_items = { source = false, memory = false, battery = false }
+    Kit.sections.desktop.home_topbar_items = { source = false, memory = false, battery = false }
     avail_disk = nil
     desktop:updateTopbar()
     Assert.eq(texts(), "1:23 PM|download|wifi_off|brightness_6|37%")
     Assert.len(Kit.taps(desktop.root), 2, "外层整条 + 后台任务")
-    Kit.sections.home.home_topbar_items = nil
+    Kit.sections.desktop.home_topbar_items = nil
     avail_disk = 10 * 1000 * 1000 * 1000
     desktop:updateTopbar()
 end
@@ -211,7 +218,7 @@ end
 
 do -- 设置变化：拆掉重挂（关掉的项不再挂定时）
     local before = #Kit.scheduled
-    Kit.sections.home.home_topbar_items = { memory = false, cache = false }
+    Kit.sections.desktop.home_topbar_items = { memory = false, cache = false }
     bar:onEvent("topbar_changed")
     Assert.len(Kit.unscheduled, 4)
     Assert.eq(watch_cancels, 1)

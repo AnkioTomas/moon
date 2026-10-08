@@ -39,7 +39,7 @@ local Client = require("store.zlib.client")
 local client = Client.new({ base_url = "https://bad.example" })
 
 local data, err
-client:_jsonAsync("GET", "/eapi/info/ok", nil, function(d, e) data, err = d, e end)
+client:_jsonAsync("GET", "/eapi/info/ok", {}, function(d, e) data, err = d, e end)
 
 Assert.is_nil(err)
 Assert.eq(data.success, 1)

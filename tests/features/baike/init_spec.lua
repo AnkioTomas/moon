@@ -49,7 +49,7 @@ end
 
 local settings = { baike_enabled = true }
 package.preload["utils.settings"] = function()
-    return { feature = function(name) assert(name == "baike"); return settings end }
+    return { get = function(name) assert(name == "features.baike"); return settings end }
 end
 
 local native_lookup_calls = 0

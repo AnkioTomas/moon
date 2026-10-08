@@ -10,8 +10,8 @@ local settings = { quick_panel_actions = { "night", "wifi" } }
 local saved = 0
 package.preload["utils.settings"] = function()
     return {
-        feature = function(name) assert(name == "panel"); return settings end,
-        saveSection = function(name) assert(name == "panel"); saved = saved + 1 end,
+        get = function(name) assert(name == "features.panel"); return settings end,
+        save = function(name) assert(name == "features.panel"); saved = saved + 1 end,
     }
 end
 

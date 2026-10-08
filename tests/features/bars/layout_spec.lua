@@ -19,8 +19,8 @@ local store = {
 
 package.preload["utils.settings"] = function()
     return {
-        feature = function(name) assert(name == "bars"); return store end,
-        saveSection = function(name) assert(name == "bars") end,
+        get = function(name) assert(name == "features.bars"); return store end,
+        save = function(name) assert(name == "features.bars") end,
     }
 end
 package.preload["features.bars.items"] = function()

@@ -1,6 +1,6 @@
-# remote.server — HTTP 核心
+# features.remote.server — HTTP 核心
 
-代码：[`remote/server.lua`](../../book.koplugin/remote/server.lua)。
+代码：[`features/remote/server.lua`](../../book.koplugin/features/remote/server.lua)。
 
 ## 设计
 
@@ -22,7 +22,7 @@
 测试或嵌入时：
 
 ```lua
-local Server = require("remote.server")
+local Server = require("features.remote.server")
 local srv = Server.new({
     port = 8080,
     root = "/mnt/onboard",  -- 必填

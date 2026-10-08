@@ -11,9 +11,11 @@ local home = { home_topbar_items = { memory = false } }
 local lockscreen = {}
 package.preload["utils.settings"] = function()
     return {
-        get = function() return home end,
-        feature = function(name) assert(name == "lockscreen"); return lockscreen end,
-        saveSection = function() end,
+        get = function(name)
+            if name == "features.lockscreen" then return lockscreen end
+            return home
+        end,
+        save = function() end,
     }
 end
 package.preload["ui.themes.widgets.row"] = function()

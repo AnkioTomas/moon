@@ -5,13 +5,13 @@
 ## 设计
 
 这里的逻辑属于**源侧落地**：目录缓存、章节正文落盘、本地进度选章、预取。  
-阅读会话（`ui/reader/session`）只编排切章与生命周期，不下载文件。
+阅读会话（`reader/session`）只编排切章与生命周期，不下载文件。
 
 起始章（未指定 `chapter_idx` 时）：
 
 1. 读 `pending_progress`（有 `chapter_idx`，或仅有 `fraction>0` 时用 fraction×toc 折算）
 2. 否则第 1 章  
-夹到 `[1, #toc]`。远端进度不参与选章，由开书后 `Progress.pull` 收敛（不一致时弹冲突框，可跳章）。已无 `books.last_chapter_idx`。
+夹到 `[1, #toc]`。远端进度不参与选章，由开书后 `ReaderProgress.pull` 收敛（不一致时弹冲突框，可跳章）。已无 `books.last_chapter_idx`。
 
 目录：优先 `books.toc` / `toc_fetched_at`；TTL 由调用方解释（如 wechat ~6h）。wechat 拉进度时若 `chapter_uid` 不在缓存目录里，会走一次 `loadTocAsync`，但缓存仍在 TTL 内时直接复用缓存，不强制重拉。
 
@@ -36,12 +36,12 @@ function Source:openBookAsync(identity, opts, cb)
 end
 
 function Source:loadTocAsync(identity, cb)
-    local cached = Store.toc(identity)  -- 或源自己的 Toc.read + TTL
+    local cached = Toc.read(identity.source_id, identity.stable_id)  -- source.toc，带 TTL
     if cached then
         UIManager:nextTick(function() cb(cached) end)
         return nil
     end
-    return self._client:tocAsync(…, function(chapters, err)
+    return fetchTocAsync(identity.stable_id, function(chapters, err)  -- 源自己的协议实现
         -- setToc 后 cb(chapters)
     end)
 end
@@ -55,7 +55,7 @@ Session 切章：
 
 ```lua
 Session.gotoChapter(idx, opts)
-Session.onChapterBoundary(1)  -- 页尾 → 下一章
+Session.onEndOfBook()  -- 页尾 → 下一章
 -- 内部：源打开邻章 path → switchDocument → 新 ReaderReady（skip_pull）
 ```
 

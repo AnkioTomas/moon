@@ -1,6 +1,6 @@
 # book.note — 注解快照
 
-代码：[`book/note.lua`](../../book.koplugin/book/note.lua)。表：[`notes`](../db/notes.md)。
+代码：同步在 [`book/note.lua`](../../book.koplugin/book/note.lua)，阅读器侧保存 / 应用在 [`reader/session/note.lua`](../../book.koplugin/reader/session/note.lua)。表：[`book/note_db.lua`](../../book.koplugin/book/note_db.lua)。
 
 ## 设计
 
@@ -12,8 +12,8 @@
 | 正整数 | 该章分片 |
 
 ```text
-划线变更 → Note.save → 落库 sync_status=0 → 有网 dirty push
-开书     → Note.applyLocal（首绘前同步）→ Note.pull
+划线变更 → SessionNote.save → 落库 sync_status=0 → 有网 dirty push
+开书     → SessionNote.applyLocal（首绘前同步）→ SessionNote.pull
 切章     → 必须再 applyLocal（注解按章分片）
 关书     → 只推脏；完整 pull 留给下次开书
 ```
@@ -31,15 +31,16 @@ Merge 策略：远端「空列表」与「字段缺失」在 wire 上无法区�
 
 ```lua
 local Note = require("book.note")
+local SessionNote = require("reader.session.note")
 
--- Session.onReaderReady / 切章后
-Note.applyLocal(ui, identity)
+-- Session.onReaderReady / 切章后（回调时文档已换则跳过）
+SessionNote.applyLocal(ui, identity)
 
 -- 有网时开书拉取
-Note.pull(ui, identity)
+SessionNote.pull(ui, identity)
 
 -- onAnnotationsModified
-Note.save(ui, identity, function(ok)
+SessionNote.save(ui, identity, function(ok)
     if not ok then return end
     identity.source:syncNotesAsync({
         identity = identity,

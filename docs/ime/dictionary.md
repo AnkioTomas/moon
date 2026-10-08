@@ -1,6 +1,6 @@
 # ime 词库
 
-代码：[`ime/download.lua`](../../book.koplugin/ime/download.lua)、`ime/<method>/dictionary.lua`、`table_dictionary.lua`。
+代码：[`features/ime/download.lua`](../../book.koplugin/features/ime/download.lua)、`features/ime/<method>/dictionary.lua`、`table_dictionary.lua`。
 
 ## 设计
 
@@ -19,7 +19,7 @@
 ## 用法
 
 ```lua
-local Download = require("ime.download")
+local Download = require("features.ime.download")
 
 -- method: "pinyin" | "wubi" | "cangjie" | "zhuyin"；已在下载时 cb(false, "already downloading")
 Download.ensure(method, function(ok, err)

@@ -10,12 +10,12 @@ local book_settings = { drawer_opens_desktop = true }
 local open_on_start
 package.preload["utils.settings"] = function()
     return {
-        setOpenOnStart = function(on) open_on_start = on end,
         get = function() return book_settings end,
-        save = function(values)
-            for key, value in pairs(values) do book_settings[key] = value end
-        end,
+        save = function() end,
     }
+end
+package.preload["menu"] = function()
+    return { setOpenOnStart = function(on) open_on_start = on end }
 end
 
 local desktop = { updateView = function() end }

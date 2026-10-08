@@ -42,7 +42,7 @@ end
 package.loaded["features.lockscreen.components.poster"] = nil
 
 local Poster = require("features.lockscreen.components.poster")
-local conf = require("utils.settings").feature("lockscreen")
+local conf = require("utils.settings").get("features.lockscreen")
 conf.lock_screen_poster_style = nil
 
 local function placed(blocks, kind)

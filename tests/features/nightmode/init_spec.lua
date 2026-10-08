@@ -10,9 +10,12 @@ local night = { auto_night = "off", auto_night_from = 22 * 60, auto_night_to = 7
 local home = { home_weather_city = " Shanghai " }
 local saved = 0
 package.loaded["utils.settings"] = {
-    get = function(section) assert(section == "home"); return home end,
-    feature = function(name) assert(name == "nightmode"); return night end,
-    saveSection = function(name) assert(name == "nightmode"); saved = saved + 1 end,
+    get = function(owner)
+        if owner == "desktop.pages.home" then return home end
+        assert(owner == "features.nightmode")
+        return night
+    end,
+    save = function(name) assert(name == "features.nightmode"); saved = saved + 1 end,
 }
 
 local events, scheduled = {}, {}

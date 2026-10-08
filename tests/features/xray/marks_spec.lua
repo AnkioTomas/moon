@@ -7,7 +7,7 @@ package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
 package.preload["utils.settings"] = function()
     local xray = { book_xray_enabled = true, book_xray_show_marks = true }
-    return { feature = function(name) assert(name == "xray"); return xray end }
+    return { get = function(name) assert(name == "features.xray"); return xray end }
 end
 local job_runs, job_cancels = 0, 0
 local hold_jobs = false
@@ -201,8 +201,8 @@ Assert.eq(searched_pages[2], 4)
 package.preload["utils.settings"] = function()
     local xray = { book_xray_enabled = true, book_xray_show_marks = true }
     return {
-        feature = function(name) assert(name == "xray"); return xray end,
-        saveSection = function(name) assert(name == "xray") end,
+        get = function(name) assert(name == "features.xray"); return xray end,
+        save = function(name) assert(name == "features.xray") end,
     }
 end
 package.loaded["utils.settings"] = nil

@@ -1,6 +1,6 @@
-# ui.reader.session — 阅读会话
+# reader.session — 阅读会话
 
-代码：[`ui/reader/session.lua`](../../book.koplugin/ui/reader/session.lua) 及 `session/{chapter,snapshot,mode,toc,document_toc}.lua`。
+代码：[`reader/session.lua`](../../book.koplugin/reader/session.lua) 及 `session/{chapter,snapshot,mode,toc,document_toc}.lua`。
 
 ## 设计
 
@@ -30,7 +30,7 @@ sequenceDiagram
   Dom->>Src: dirty_only push
 ```
 
-关书路径（`document_close` / `suspend`）对 progress、notes、stats **一律只推不拉**——远端收敛延迟会用旧值盖掉刚上传的新值。完整 pull 留给下次开书。
+关书与休眠路径（`onCloseDocument` / `onPause`）对 progress、notes、stats **一律只推不拉**——远端收敛延迟会用旧值盖掉刚上传的新值。完整 pull 留给下次开书。
 
 切章导航带 `skip_pull`，避免每章都拉云端。
 
@@ -42,33 +42,28 @@ sequenceDiagram
 
 ## 用法
 
-`main.lua` 接线（不要在 main 里写业务）：
+`main.lua` 接线：会话的 `on*` 入口与 KOReader 阅读事件同名同参（首参即插件实例），
+直接挂到插件上，main 不包一层。新增阅读事件 = 会话里加同名函数 + main 挂一行。
 
 ```lua
-function BookPlugin:onReaderReady()
-    require("ui.reader.session").onReaderReady(self)
-end
-function BookPlugin:onCloseDocument()
-    require("ui.reader.session").onCloseDocument(self)
-end
-function BookPlugin:onPageUpdate(page)
-    require("ui.reader.session").onPageChanged(self, page)
-end
-function BookPlugin:onAnnotationsModified(items)
-    require("ui.reader.session").onAnnotationsModified(self, items)
-end
-function BookPlugin:onSuspend()
-    require("ui.reader.session").onPause(self)
-end
-function BookPlugin:onResume()
-    require("ui.reader.session").onResume(self)
-end
+BookPlugin.onDocSettingsLoad = Session.onDocSettingsLoad  -- 全书排版 + 状态栏偏好写 sidecar
+BookPlugin.onReaderReady = Session.onReaderReady
+BookPlugin.onPageUpdate = Session.onPageUpdate            -- 分页视图
+BookPlugin.onPosUpdate = Session.onPosUpdate              -- 滚动视图
+BookPlugin.onAnnotationsModified = Session.onAnnotationsModified
+BookPlugin.onEndOfBook = Session.onEndOfBook              -- 按章：下一章
+BookPlugin.onStartOfBook = Session.onStartOfBook          -- 按章：上一章
+BookPlugin.onCloseDocument = Session.onCloseDocument
+
+-- 休眠 / 唤醒要和源、features、后台任务一起编排，main 里显式调用：
+Session.onSuspend(plugin)
+Session.onResume(plugin)
 ```
 
 会话内查询与切章：
 
 ```lua
-local Session = require("ui.reader.session")
+local Session = require("reader.session")
 
 local snap = Session.current()          -- 只读，别改字段
 Session.isChapterMode(identity)
@@ -78,35 +73,34 @@ Session.chapterTitle(snap)
 Session.remainingSeconds()
 
 Session.gotoChapter(idx, { within = 0.0 })
-Session.onChapterBoundary(1)           -- 页尾下一章；-1 上一章
+Session.onEndOfBook()                  -- 页尾下一章；onStartOfBook() 上一章
 ```
 
 开书 bootstrap（内部）：
 
 ```text
-Stats.start
-ui.reader.onCreate
-Note.applyLocal          -- 同步，首绘前
+SessionStats.start
+reader.page.onCreate
+SessionNote.applyLocal   -- 同步，首绘前
 若非 skip_pull:
-  Progress.pull
-  Note.pull
+  ReaderProgress.pull
+  SessionNote.pull
 章模式: ChapterMode.afterBootstrap（预取等）
 ```
 
 关书结清（内部 `syncReading`）：
 
 ```text
-Progress.save → source:syncProgressAsync(dirty_only)
-Note.save → source:syncNotesAsync(dirty_only)
-Stats.stop → source:syncStatsAsync(dirty_only)
-emitToSource(event, nil, identity.source)
-真关书: Progress.clearConflicts()；清章节会话
+ReaderProgress.save → source:syncProgressAsync(dirty_only)
+SessionNote.save → source:syncNotesAsync(dirty_only)
+SessionStats.stop → source:syncStatsAsync(dirty_only)
+真关书: ReaderProgress.clearConflicts()；清章节会话
 ```
 
-阅读 UI：[`ui/reader.lua`](../../book.koplugin/ui/reader.lua)（panel / bars，仅会话活跃时注册触控区）。
+阅读 UI：[`reader/page.lua`](../../book.koplugin/reader/page.lua)（panel / bars，仅会话活跃时注册触控区）。
 
 ### 注意
 
-- 所有源事件第三参传 `identity.source`。
+- 源事件直接发给 `identity.source`（`source:onEvent`），不回落 current。
 - 切章不是真关书：快照会重建，章会话与冲突记忆策略不同。
-- 异步回调用 `Store.isCurrentDocument` 丢弃旧结果。
+- 注解异步回调在 `SessionNote.applyLocal` 里按当前文档身份丢弃旧结果。

@@ -1,6 +1,6 @@
 # baike/ — 百度百科
 
-路径：[`book.koplugin/baike/`](../../book.koplugin/baike/)。
+路径：[`book.koplugin/features/baike/`](../../book.koplugin/features/baike/)。
 
 把 KOReader Wikipedia 查询入口换成百度百科卡片。保留原事件名和按钮 id，已有手势/划词菜单显隐配置仍有效。  
 **不**把百科硬包装成可切语言、可导 EPUB 的维基百科。

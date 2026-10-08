@@ -64,8 +64,8 @@ package.preload["libs/libkoreader-lfs"] = function()
 end
 package.preload["utils.settings"] = function()
     return {
-        feature = function(name)
-            assert(name == "remote")
+        get = function(name)
+            assert(name == "features.remote")
             return { remote_port = 9528, remote_autostart = false, remote_idle_stop = true }
         end,
         getSource = function() return { path = book } end,

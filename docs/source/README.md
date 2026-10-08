@@ -5,7 +5,7 @@
 ## 设计总览
 
 数据源适配外部书库。查询默认读本地；远端只负责把变更写回 SQLite。  
-新增源 = `source/<id>.lua` 门面 + `source/<id>/{client,mapper,setting}.lua` + `registry` 注册。
+新增源 = `source/<id>/init.lua` 门面（必需）+ 可选 `source/<id>/setting.lua`（设置入口）+ `registry` 注册。其余文件怎么拆由源自己决定，源外代码不依赖。
 
 顶层禁止 require KOReader UI 模块（离线测试直接 load 源文件）；`NetworkMgr` / 弹窗等延迟到函数内。
 

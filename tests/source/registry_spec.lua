@@ -10,15 +10,10 @@ local Assert = require("support.assert")
 package.preload["utils.settings"] = function()
     local common = { active_source = "moon" }
     return {
-        activeSourceId = function()
-            return common.active_source
-        end,
         get = function()
             return common
         end,
-        save = function(s)
-            common = s
-        end,
+        save = function() end,
         getSource = function()
             return { url = "http://x", token = "t", username = "u", password = "p" }
         end,

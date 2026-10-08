@@ -28,7 +28,6 @@ Catalog.listLibraryAsync(source_id, {
     -- data: BookListResult { data = Book[], … }
 end)
 
-Catalog.recentBooksAsync(source_id, 12, cb)
 Catalog.filtersAsync(source_id, cb)           -- 分类/系列/已读计数
 Catalog.readingInsightAsync(source_id, cb)    -- 统计页
 
@@ -45,7 +44,7 @@ UI 侧：
 ```lua
 -- 先画本地结果
 Catalog.listLibraryAsync(id, opts, function(data, err)
-    if desktop.lifecycle.state == "Destroy" then return end
+    if desktop.closed then return end
     if desktop.source.id ~= expected_id then return end  -- 或用请求代次
     self:render(data)
 end)
@@ -57,7 +56,7 @@ end)
 | API | 说明 |
 |---|---|
 | `libraryScope(preferred_id)` | mixed → 启用源 id 列表；单源 → 字符串（SQL `=`） |
-| `toList(rows, count, source_id)` | DB 行 → `BookListResult` |
+| `toList(rows, count, source_id)` | DB 行 → `BookListResult`（导出供映射用例直测） |
 | `toInsight(...)` | 统计汇总 → 洞察结构 |
 | `formatDuration(seconds)` | 纯 Lua 模板，不依赖 `ffi/util.template`（测试兼容） |
 

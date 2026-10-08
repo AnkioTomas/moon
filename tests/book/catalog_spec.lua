@@ -29,7 +29,7 @@ local FakeStats = {
 }
 
 package.preload["utils.settings"] = function()
-    return { libraryMixed = function() return mixed_on end }
+    return { get = function() return { library_mixed = mixed_on } end }
 end
 package.preload["source.registry"] = function()
     return {
