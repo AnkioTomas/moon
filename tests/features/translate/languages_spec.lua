@@ -17,13 +17,13 @@ G_reader_settings = {
 
 package.preload["utils.settings"] = function()
     local data = {
-        translate = {
+        ["features.translate"] = {
             translate_languages = { "en", "zh", "ja" },
         },
     }
     return {
-        feature = function(name) return data[name] end,
-        saveSection = function(section, value)
+        get = function(name) return data[name] end,
+        save = function(section, value)
             data[section] = value
         end,
     }

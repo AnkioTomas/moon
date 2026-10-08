@@ -24,21 +24,19 @@ LuaSettings.open = function(self, path)
     return real_open(self, path)
 end
 
--- 先跑一次把已有实例算进基线之外
-Settings.get()
+-- 先跑一次把已有实例（含迁移扫过的旧分区）算进基线之外
+Settings.get("ui")
 opens = 0
 
 for _ = 1, 200 do
-    Settings.get()
+    Settings.get("ui")
 end
-Settings.activeSourceId()
 Assert.eq(opens, 0)
 
-local active = Settings.activeSourceId()
-Settings.getSource(active)
+Settings.getSource("local")
 local after_source = opens
 for _ = 1, 50 do
-    Settings.getSource(active)
+    Settings.getSource("local")
 end
 Assert.eq(opens, after_source)
 

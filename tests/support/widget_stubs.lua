@@ -8,7 +8,7 @@ ui/themes 组件测试用的最小 KOReader 控件桩。
     之后追加子件必须 resetLayout，否则 paintTo 对空偏移取值
   - 绘制：容器把坐标传给子件，InputContainer 回写 dimen.x/y（点击命中靠它）
   - UIManager：记录 show / close / setDirty（含 region）/ scheduleIn / unschedule；close 触发 onCloseWidget；nextTick 同步执行
-  - 设置：display 段与无段名的合并表即 Kit.display，其余段读 Kit.sections[name]（spec 自己塞），saveSection 回写
+  - 设置：拥有者 ui 即 Kit.display，其余按文件名（拥有者路径末段）读 Kit.sections[name]（spec 自己塞），save 回写
   - 事件：ui/event 给 { handler, args }，控件 handleEvent 先逐子件下发再问自身 handler（同 KOReader）
   - 画布：Kit.canvas() 记录 paintRoundedRect / paintBorder 调用，setPixel 计数
   - 字体：ui/font 的 getFace 返回 { name, size }，主题图标 / 遮罩走真实实现
@@ -290,19 +290,16 @@ function Kit.install(theme)
             unschedule = function(_, fn) Kit.unscheduled[#Kit.unscheduled + 1] = fn end,
         },
         ["utils.settings"] = {
-            get = function(section)
-                if section == nil or section == "display" then return Kit.display end
-                return assert(Kit.sections[section], "settings section not stubbed: " .. tostring(section))
+            get = function(owner)
+                local name = owner:match("[^.]+$")
+                if name == "ui" then return Kit.display end
+                return assert(Kit.sections[name], "settings section not stubbed: " .. name)
             end,
-            feature = function(name)
-                return assert(Kit.sections[name], "feature settings not stubbed: " .. name)
-            end,
-            saveSection = function(section, values)
-                if section ~= "display" and values then Kit.sections[section] = values end
+            save = function(owner, values)
+                local name = owner:match("[^.]+$")
+                if name ~= "ui" and values then Kit.sections[name] = values end
                 Kit.saved = (Kit.saved or 0) + 1
             end,
-            zlibEnabled = function() return (Kit.sections.common or {}).zlib_enabled end,
-            opdsEnabled = function() return (Kit.sections.common or {}).opds_enabled end,
         },
         ["ui/event"] = {
             new = function(_, name, ...)

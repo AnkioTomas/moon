@@ -1,6 +1,6 @@
 # lockscreen/ — 组合锁屏
 
-路径：[`book.koplugin/lockscreen/`](../../book.koplugin/lockscreen/)。
+路径：[`book.koplugin/features/lockscreen/`](../../book.koplugin/features/lockscreen/)。
 
 | 文档 | 讲什么 |
 |---|---|

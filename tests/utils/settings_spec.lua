@@ -1,7 +1,8 @@
 --[[--
-配置接线：DataStorage → 测试沙箱数据目录，读配置走 moon.settings
+配置框架：拥有者声明默认值（<owner>/setting.lua），落盘 settings/<末段>.lua，
+首次打开从拆分前的旧分区搬键；末段重名报错。数据目录是测试沙箱。
 
-@module tests.config_spec
+@module tests.utils.settings_spec
 --]]
 
 local Assert = require("support.assert")
@@ -21,105 +22,128 @@ if not Config.available() then
     Assert.skip("沙箱数据目录未就绪，请用 ./tests/run.sh 运行")
 end
 
+local LuaSettings = require("luasettings")
+local Paths = require("utils.paths")
 local Settings = Config.settings()
-local common = Settings.get()
-Assert.not_nil(common)
-Assert.not_nil(common.active_source)
-local common_file = Settings.get("common")
-Assert.is_nil(common_file.ui_scale)
-Assert.is_nil(common_file.lock_screen)
-Assert.eq(type(Settings.get("display").ui_scale), "number")
-Assert.eq(type(Settings.get("display").library_sort), "string")
-Assert.eq(type(Settings.feature("lockscreen").lock_screen), "string")
-Assert.eq(type(Settings.feature("panel").quick_panel_reader_actions), "table")
-Assert.is_true(Settings.feature("translate").edge_translation_enabled)
-Assert.is_true(Settings.feature("baike").baike_enabled)
+
+local function reload()
+    package.loaded["utils.settings"] = nil
+    Settings = require("utils.settings")
+end
+
+--- 直接写旧分区文件（绕过框架），模拟拆分前留下的配置。
+local function legacy(name, values)
+    local ls = LuaSettings:open(name == "common" and Paths.commonPath() or Paths.sectionPath(name))
+    for key, value in pairs(values) do ls.data[key] = value end
+    ls:flush()
+    return ls
+end
+
+local function legacyData(name)
+    return LuaSettings:open(name == "common" and Paths.commonPath() or Paths.sectionPath(name)).data
+end
+
+-- 默认值来自各拥有者的 setting.lua
+Assert.eq(type(Settings.get("source").active_source), "string")
+Assert.eq(type(Settings.get("store").zlib_enabled), "boolean")
+Assert.eq(type(Settings.get("ui").ui_scale), "number")
+Assert.eq(type(Settings.get("desktop").library_sort), "string")
+Assert.eq(type(Settings.get("desktop").home_topbar_items), "table")
+Assert.eq(type(Settings.get("desktop.pages.home").home_recent_list_rows), "number")
+Assert.eq(type(Settings.get("utils").book_debug_enabled), "boolean")
+Assert.eq(type(Settings.get("ai").ai_model), "string")
 Assert.is_true(Settings.get("reader").selection_handles_enabled)
 Assert.is_false(Settings.get("reader").auto_mark_read_at_99)
+Assert.eq(type(Settings.get("features.lockscreen").lock_screen), "string")
+Assert.eq(type(Settings.get("features.panel").quick_panel_reader_actions), "table")
+Assert.is_true(Settings.get("features.translate").edge_translation_enabled)
+Assert.is_true(Settings.get("features.baike").baike_enabled)
+-- 每个拥有者只拿到自己的键
+Assert.is_nil(Settings.get("ui").library_sort)
+Assert.is_nil(Settings.get("desktop.pages.home").home_topbar_items)
 
-local active = Settings.activeSourceId()
-Assert.eq(active, common.active_source)
+-- 文件名 = 拥有者路径末段；两个拥有者撞同一个文件直接报错
+Assert.errors(function() Settings.get("features.reader") end, "owned by both reader and features.reader")
 
--- 传入部分平铺表只更新指定键，不应清掉其他分区的配置。
-local original_sort = common.library_sort
-Settings.save({ library_sort = "title" })
-Assert.eq(Settings.get().library_sort, "title")
-Assert.eq(Settings.get().active_source, active)
-Settings.save({ library_sort = original_sort })
-
--- feature 配置不进平铺表；就地改 + saveSection 落盘。
-Assert.is_nil(common.remote_idle_stop)
-local remote = Settings.feature("remote")
+-- 就地改 + save 落盘，新进程读得到
+local remote = Settings.get("features.remote")
 Assert.is_true(remote.remote_idle_stop)
 remote.remote_idle_stop = false
-Settings.saveSection("remote")
-package.loaded["utils.settings"] = nil
-Settings = require("utils.settings")
-Assert.is_false(Settings.feature("remote").remote_idle_stop)
-Settings.feature("remote").remote_idle_stop = true
-Settings.saveSection("remote")
+Settings.save("features.remote")
+reload()
+Assert.is_false(Settings.get("features.remote").remote_idle_stop)
+Settings.get("features.remote").remote_idle_stop = true
+Settings.save("features.remote")
 
--- 旧分区迁移：新进程首次 feature(name) 时把键搬进 settings/<name>.lua 并从旧分区删掉。
+-- 核心拥有者的旧分区迁移：common / display / home 里属于别人的键搬走，自己文件里的不动
 do
+    Settings.save("source", {})
+    Settings.save("ui", {})
+    Settings.save("desktop", {})
+    legacy("common", { active_source = "moon", enabled_sources = { moon = true } })
+    legacy("display", { ui_scale = 150, ui_theme = "ink", library_sort = "title" })
+    legacy("home", { home_topbar_items = { clock = false }, home_recent_list_rows = 3 })
+
+    reload()
+    Assert.eq(Settings.get("source").active_source, "moon")
+    Assert.is_true(Settings.get("source").enabled_sources.moon, "keys 声明的无默认值键也要搬")
+    Assert.eq(Settings.get("ui").ui_scale, 150)
+    Assert.eq(Settings.get("ui").ui_theme, "ink")
+    Assert.is_true(Settings.get("ui").mesh_mask, "缺的键补默认值")
+    Assert.eq(Settings.get("desktop").library_sort, "title")
+    Assert.is_false(Settings.get("desktop").home_topbar_items.clock)
+    Assert.eq(Settings.get("desktop.pages.home").home_recent_list_rows, 3, "自己的文件不当旧分区搬")
+
+    reload()
+    Assert.is_nil(legacyData("common").active_source, "旧分区删除已落盘")
+    Assert.is_nil(legacyData("common").enabled_sources)
+    Assert.is_nil(legacyData("display").ui_scale)
+    Assert.is_nil(legacyData("display").library_sort)
+    Assert.is_nil(legacyData("home").home_topbar_items)
+    Assert.eq(legacyData("home").home_recent_list_rows, 3)
+    Assert.eq(Settings.get("source").active_source, "moon", "迁移结果已落盘")
+
+    Settings.save("source", {})
+    Settings.save("ui", {})
+    Settings.save("desktop", {})
+    Settings.get("desktop.pages.home").home_recent_list_rows = 2
+    Settings.save("desktop.pages.home")
+    reload()
+end
+
+-- feature 的旧分区迁移同一规则：新文件已有的值优先
+do
+    -- save(owner, values) 会先完成迁移再覆盖，所以先清空新文件、再往旧分区写值
+    Settings.save("features.baike", {})
+    Settings.save("features.dictionary", { dictionary_enabled = true })
+    Settings.save("features.nightmode", {})
     local reader = Settings.get("reader")
     reader.baike_enabled = false
     reader.dictionary_enabled = false
-    Settings.saveSection("reader", reader)
-    local display = Settings.get("display")
-    display.auto_night_lat = 31.2
-    Settings.saveSection("display", display)
-    Settings.saveSection("baike", {})
-    Settings.saveSection("dictionary", { dictionary_enabled = true })
-    Settings.saveSection("nightmode", {})
+    Settings.save("reader")
+    legacy("display", { auto_night_lat = 31.2 })
 
-    package.loaded["utils.settings"] = nil
-    Settings = require("utils.settings")
-    Assert.is_false(Settings.feature("baike").baike_enabled, "旧值搬过来")
-    Assert.is_true(Settings.feature("dictionary").dictionary_enabled, "新文件已有的值优先")
-    local night = Settings.feature("nightmode")
+    reload()
+    Assert.is_false(Settings.get("features.baike").baike_enabled, "旧值搬过来")
+    Assert.is_true(Settings.get("features.dictionary").dictionary_enabled, "新文件已有的值优先")
+    local night = Settings.get("features.nightmode")
     Assert.eq(night.auto_night_lat, 31.2, "keys 声明的无默认值键也要搬")
     Assert.eq(night.auto_night, "off", "缺的键补默认值")
 
-    package.loaded["utils.settings"] = nil
-    Settings = require("utils.settings")
+    reload()
     Assert.is_nil(Settings.get("reader").baike_enabled, "旧分区删除已落盘")
     Assert.is_nil(Settings.get("reader").dictionary_enabled)
-    Assert.is_nil(Settings.get("display").auto_night_lat)
-    Assert.is_false(Settings.feature("baike").baike_enabled, "迁移结果已落盘")
-    Assert.eq(Settings.feature("nightmode").auto_night_lat, 31.2)
+    Assert.is_nil(legacyData("display").auto_night_lat)
+    Assert.eq(Settings.get("features.nightmode").auto_night_lat, 31.2)
 
-    Settings.saveSection("baike", { baike_enabled = true })
-    Settings.saveSection("nightmode", {})
+    Settings.save("features.baike", { baike_enabled = true })
+    Settings.save("features.nightmode", {})
 end
 
-local src = Settings.getSource(active)
-Assert.not_nil(src)
-Assert.eq(type(src), "table")
+Assert.eq(type(Settings.getSource("local")), "table")
 
 -- 路径也应落在沙箱 .moon/settings
-local Paths = require("utils.paths")
 Assert.eq(Paths.root(), Config.dir() .. "/.moon")
 Assert.eq(Paths.commonPath(), Config.dir() .. "/.moon/settings/common.lua")
-Assert.eq(Paths.sectionPath("display"), Config.dir() .. "/.moon/settings/display.lua")
+Assert.eq(Paths.sectionPath("ui"), Config.dir() .. "/.moon/settings/ui.lua")
 Assert.eq(Paths.logPath(), Config.dir() .. "/.moon/book.log")
-
--- 启动项：月读的取值落在 KOReader 的 start_with；取消回到 filemanager
-do
-    local previous = _G.G_reader_settings
-    local store = {}
-    _G.G_reader_settings = {
-        readSetting = function(_, key, default)
-            if store[key] == nil then return default end
-            return store[key]
-        end,
-        saveSetting = function(_, key, value) store[key] = value end,
-    }
-    Assert.is_false(Settings.openOnStart(), "未设置时是 KOReader 默认 filemanager")
-    Settings.setOpenOnStart(true)
-    Assert.eq(store.start_with, "bookshelf_book", "已持久化的取值不能改")
-    Assert.is_true(Settings.openOnStart())
-    Settings.setOpenOnStart(false)
-    Assert.eq(store.start_with, "filemanager")
-    Assert.is_false(Settings.openOnStart())
-    _G.G_reader_settings = previous
-end

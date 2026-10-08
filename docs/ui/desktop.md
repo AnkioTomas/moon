@@ -1,10 +1,10 @@
-# ui.desktop — 月读桌面
+# desktop — 月读桌面
 
-代码：[`ui/desktop.lua`](../../book.koplugin/ui/desktop.lua) + `ui/desktop/*.lua`。
+代码：[`desktop/init.lua`](../../book.koplugin/desktop/init.lua) + `desktop/pages/`。顶栏是 `desktop/topbar/`，不是页签。
 
 ## 设计
 
-全屏壳只负责顶栏、内容槽、底栏和手势；页面内容在子模块。保留 `InputContainer:extend`，经 `Lifecycle.attach` 管阶段。
+全屏壳只负责顶栏、内容槽、底栏和手势；页面内容在子模块。壳是 `InputContainer`，自己记 `active` / `closed`。
 
 ```text
 ┌────────────────────────────────────────────┐
@@ -16,8 +16,8 @@
 └────────────────────────────────────────────┘
 ```
 
-- 首页 / 图书馆 / 设置：始终存在
-- Z站：由 Z-Library 开关（`zlibEnabled()`）决定；统计：由当前源能力 `insight` 决定（不要页面自己伪造 Tab）
+- 首页 / 图书馆 / 统计 / 设置：始终存在
+- Z站：由开关 `common.zlib_enabled` 决定；OPDS 由 `common.opds_enabled` 决定（不要页面自己伪造 Tab）
 - 页内溢出用 `Pager`；桌面页不用全屏 `ScrollableContainer`
 - 加载/空态/错误占位几何尽量稳定，避免底栏跳动
 
@@ -35,19 +35,20 @@ KOReader 宿主版本门槛在 `ko_version`，与桌面无关。
 ### 打开与生命周期
 
 ```lua
--- plugin.openDesktop → 创建/显示 Desktop
+-- Desktop.open(plugin) → 创建/显示 Desktop
 desktop:onResume()   -- 显示
 desktop:onPause()    -- 休眠或被遮挡
 desktop:onDestroy()  -- 关闭
 ```
 
-切 Tab：Pause 离开的页，Resume 进入的页；TopBar 不 Pause。
+切 Tab：Pause 离开的页，Resume 进入的页。顶栏跟桌面一起 Pause / Resume，不跟 Tab 走。关桌面先置 `desktop.closed`。
 
 ### 换源
 
 ```lua
-desktop.source = Registry.setActive(id)  -- 或先 setActive 再赋引用
-desktop:onEvent("source_changed")
+Registry.setActive(id)
+Registry.notifyChanged()  -- 广播 SourceChanged → Desktop:onSourceChanged
+-- 桌面取 Registry.current()，向各页广播 source_changed 并回首页，再 `desktop.sync` 的 `Sync.open` 对新源后台同步书架与统计；
 -- 各页自行丢弃旧请求、按新源重拉本地 catalog
 ```
 
@@ -58,12 +59,12 @@ desktop:onEvent("source_changed")
 
 ```text
 新增组件：
-  1. ui/desktop/home/views/foo.lua
-  2. home/registry.lua 注册一行
-  3. 可复用画面放 ui/components/，组件只做 Lifecycle + 拉数 + 高度预算
+  1. desktop/pages/home/foo.lua
+  2. desktop/pages/home/registry.lua 注册一行
+  3. 组件实现 onResume / onPause / onDestroy，自己取消自己的请求
 ```
 
-长按进入编辑态（删/移/调高）；PageStrip「完成」保存。左右滑翻页；编辑态禁用左右滑。
+长按进入编辑态（删/移/调高）；底部翻页条「完成」保存。左右滑翻页；编辑态禁用左右滑。
 
 ### 同步刷新
 
@@ -71,7 +72,7 @@ desktop:onEvent("source_changed")
 -- 源 sync 完成后
 desktop:onEvent("home_refresh", "shelf_sync")
 -- 回调里必须：
-if desktop.lifecycle.state == "Destroy" then return end
+if desktop.closed then return end
 if desktop.source.id ~= expected then return end
 ```
 

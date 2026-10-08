@@ -9,7 +9,7 @@ end
 
 local settings = { dictionary_enabled = true }
 package.preload["utils.settings"] = function()
-    return { feature = function(name) assert(name == "dictionary"); return settings end }
+    return { get = function(name) assert(name == "features.dictionary"); return settings end }
 end
 local reader_order = { search = { "dictionary_lookup", "wikipedia_lookup" } }
 local filemanager_order = { search = { "dictionary_lookup", "wikipedia_lookup" } }

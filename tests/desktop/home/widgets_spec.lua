@@ -5,7 +5,7 @@ local Assert = require("support.assert")
 package.preload["utils.settings"] = function()
     return {
         get = function() return { home_widgets = {} } end,
-        saveSection = function() end,
+        save = function() end,
     }
 end
 

@@ -1,6 +1,6 @@
 # xray/ — 阅读实体
 
-路径：[`book.koplugin/xray/`](../../book.koplugin/xray/)。表：[`../db/xray_entities.md`](../db/xray_entities.md)。
+路径：[`book.koplugin/features/xray/`](../../book.koplugin/features/xray/)。表：[`features/xray/db.lua`](../../book.koplugin/features/xray/db.lua)。
 
 从当前阅读上下文用 AI 抽人物 / 地点 / 专有名词，落本地库，阅读页标记与查询。**仅本地，不进四域同步。**
 
@@ -11,7 +11,7 @@
 | `fetch.lua` | 综合拉取 / 选词补全（调 `ai`） |
 | `prompts.lua` / `context.lua` | 提示词与阅读上下文拼装 |
 | `store.lua` | 实体合并（`mergeEntities`）与 prompt 快照（`promptSnapshot`），不碰库 |
-| `db/xray.lua` | 读写 `xray_entities`（`list` / `upsert` / `replace`） |
+| `db.lua` | 读写 `xray_entities`（`list` / `upsert` / `replace`） |
 | `marks.lua` | 文中标记 |
 | `kinds.lua` | character / location / term |
 | `ui.lua` | 阅读侧入口 |
@@ -38,7 +38,7 @@ Fetch.comprehensive(ui, identity, { force = false }, function(result, err) end)
 Fetch.lookupWord(ui, identity, "…", function(item, err) end)
 
 -- 查询已存实体
-local rows = require("db.xray").list(source_id, stable_id, kind)  -- kind 可省略
+local rows = require("features.xray.db").list(source_id, stable_id, kind)  -- kind 可省略
 ```
 
 阅读 UI 经 `xray.ui` / marks 展示；需先配置 AI。依赖表见 db 文档。

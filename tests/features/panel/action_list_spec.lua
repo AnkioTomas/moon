@@ -23,8 +23,8 @@ end
 local saved = {}
 package.preload["utils.settings"] = function()
     return {
-        feature = function(name) assert(name == "panel"); return saved end,
-        saveSection = function(name, values) assert(name == "panel"); saved = values end,
+        get = function(name) assert(name == "features.panel"); return saved end,
+        save = function(name, values) assert(name == "features.panel"); saved = values end,
     }
 end
 

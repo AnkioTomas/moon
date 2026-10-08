@@ -1,6 +1,6 @@
-# book.open — 打开文档
+# desktop.open — 打开文档
 
-代码：[`book/open.lua`](../../book.koplugin/book/open.lua)。
+代码：[`desktop/open.lua`](../../book.koplugin/desktop/open.lua)。
 
 ## 设计
 
@@ -24,7 +24,7 @@ Open.book(plugin, book)
 ## 用法
 
 ```lua
-local Open = require("book.open")
+local Open = require("desktop.open")
 
 -- 桌面 / 详情「开始阅读」
 Open.book(plugin, book, function(ok)  -- 错误已由 InfoMessage 提示，回调不带 err；被更新一代打开取消时不回调

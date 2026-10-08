@@ -76,8 +76,8 @@ end
 package.preload["utils.settings"] = function()
     local update = { auto_update_check = false, update_last_checked_at = 0 }
     return {
-        feature = function(name) assert(name == "update"); return update end,
-        saveSection = function(name) assert(name == "update") end,
+        get = function(name) assert(name == "features.update"); return update end,
+        save = function(name) assert(name == "features.update") end,
     }
 end
 local job_opts

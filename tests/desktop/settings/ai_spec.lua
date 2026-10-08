@@ -23,7 +23,7 @@ end
 
 local settings = { ai_endpoint = "", ai_api_key = "", ai_model = "" }
 package.preload["utils.settings"] = function()
-    return { get = function() return settings end, saveSection = function() end }
+    return { get = function() return settings end, save = function() end }
 end
 
 package.preload["ffi/util"] = function()

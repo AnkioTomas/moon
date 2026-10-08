@@ -33,7 +33,8 @@ source:openBookAsync(identity, opts, cb)
 local current = Registry.current()
 
 Registry.invalidate()               -- 丢掉并 close 活跃实例与全部属主实例
-Registry.afterAuthChanged(plugin)   -- 登录态变更：invalidate + plugin:onSourceChanged()
+Registry.notifyChanged()            -- 源配置变了：广播 KOReader 事件 SourceChanged，桌面 onSourceChanged 重建
+Registry.reload()                   -- 登录态 / 连接配置变了：invalidate + notifyChanged
 ```
 
 ### API
@@ -50,9 +51,10 @@ Registry.afterAuthChanged(plugin)   -- 登录态变更：invalidate + plugin:onS
 | `setActive(id)` | 候选创建 + 原子切换；返回实例或 `nil, err` |
 | `activate(source, id)` | 底层替换（一般用 setActive） |
 | `invalidate()` | 清空并 close 全部缓存实例（活跃 + 属主） |
-| `afterAuthChanged(plugin)` | 登录态变更后 invalidate 并通知桌面刷新 |
+| `notifyChanged()` | 同步广播 `SourceChanged`（换源、混合模式、书城开关、OPDS 配置）；桌面不在窗口栈上时无人处理 |
+| `reload()` | 登录态或连接配置变更：`invalidate()` 后 `notifyChanged()` |
 
 ### 注意
 
 - UI「当前源」和书「属主源」是两件事；同步进度用后者。
-- `resolve` 禁止副作用改 `activeSourceId`。
+- `resolve` 禁止副作用改活跃源（`Registry.activeId()`）。

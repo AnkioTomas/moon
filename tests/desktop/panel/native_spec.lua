@@ -20,10 +20,10 @@ end
 
 local drawer_enabled = true
 package.preload["utils.settings"] = function()
-    return {
-        openOnStart = function() return drawer_enabled end,
-        get = function() return { drawer_opens_desktop = true } end,
-    }
+    return { get = function() return { drawer_opens_desktop = true } end }
+end
+package.preload["menu"] = function()
+    return { openOnStart = function() return drawer_enabled end }
 end
 
 local native_update_calls = 0

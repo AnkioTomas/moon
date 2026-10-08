@@ -53,7 +53,7 @@ end
 -- 未设置：入口显示直连；开关打开时先去填地址
 local entry = Setting.entry(desktop)
 Assert.eq(entry.status, "直连")
-Assert.eq(entry.page.id, "network")
+Assert.eq(entry.id, "network")
 Assert.eq(#entry.page.sections()[1].rows, 2)
 local r = rows()
 Assert.eq(r[1].status, "关")

@@ -5,8 +5,8 @@
 local Assert = require("support.assert")
 local Mapper = require("store.zlib.mapper")
 
-Assert.eq(Mapper.identity(12, "abc"), "12:abc")
-Assert.is_nil(Mapper.identity(nil, "abc"))
+Assert.is_nil(Mapper.book({ hash = "abc", title = "缺 id" }))
+Assert.is_nil(Mapper.book({ id = 12, hash = "", title = "空 hash" }))
 local id, hash = Mapper.parse("12:abc")
 Assert.eq(id, "12")
 Assert.eq(hash, "abc")

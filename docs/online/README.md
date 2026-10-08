@@ -10,7 +10,7 @@
 |---|---|
 | `weather` | 天气；图标 URL 走 jsDelivr（`assets/weather/`，不进插件包） |
 | `hitokoto` | 一言（可落设置）；**无图片接口** |
-| `bing` / `myrl` | 壁纸 URL；落盘在 lockscreen.background |
+| `bing` / `myrl` | 壁纸 URL；落盘在 features.lockscreen.background |
 
 ## 用法
 

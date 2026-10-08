@@ -117,7 +117,7 @@ package.preload["ui.themes.widgets.pager"] = function()
     return { widget = function(o) return { strip = o } end }
 end
 package.preload["utils.settings"] = function()
-    return { feature = function(name) return state[name] end }
+    return { get = function(owner) return state[owner:match("[^.]+$")] end }
 end
 package.preload["reader.session"] = function()
     return { current = function() return state.snapshot end }

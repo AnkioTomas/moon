@@ -6,7 +6,7 @@ package.preload["gettext"] = function() return function(value) return value end 
 
 local settings = {}
 package.preload["utils.settings"] = function()
-    return { feature = function(name) assert(name == "xray"); return settings end }
+    return { get = function(name) assert(name == "features.xray"); return settings end }
 end
 
 local refreshed_ui

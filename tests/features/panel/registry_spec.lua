@@ -35,8 +35,8 @@ Assert.eq(desktop[#desktop], "remote")
 Assert.eq(table.concat(desktop, ",", 1, #DESKTOP), table.concat(DESKTOP, ","))
 Assert.eq(Registry.get("remote").scope, "desktop")
 Assert.eq(Registry.get("remote").icon, "dns")
--- reflow / page_turn 由 feature 追加在内置项之后，按 Features.list 顺序。
-Assert.eq(table.concat(reader, ","), table.concat(READER, ",") .. ",reflow,page_turn")
+-- page_turn（animation）/ reflow 由 feature 追加在内置项之后，按目录名顺序。
+Assert.eq(table.concat(reader, ","), table.concat(READER, ",") .. ",page_turn,reflow")
 Assert.eq(Registry.get("page_turn").scope, "reader")
 Assert.is_nil(Registry.get("missing"))
 
@@ -52,3 +52,29 @@ package.preload["features.remote.panel"] = function()
 end
 Registry = require("features.panel.actions.registry")
 Assert.errors(function() Registry.desktopOrder() end, "already registered")
+
+-- feature 开关校验：经 Features.scan 收集，非法条目直接报错
+local function withPanel(actions)
+    package.loaded["features.panel.actions.registry"] = nil
+    package.loaded["features"] = nil
+    package.preload["features"] = function() return { scan = function() return { "fake" } end } end
+    package.loaded["features.fake.panel"] = nil
+    package.preload["features.fake.panel"] = function() return { actions = function() return actions end } end
+    return require("features.panel.actions.registry")
+end
+Assert.errors(function()
+    withPanel({ id = "bare", title = "裸", icon = "tune", scope = "desktop" }).desktopOrder()
+end, "must return a list")
+Assert.errors(function()
+    withPanel({ { id = "x", title = "x", icon = "tune", scope = "library" } }).desktopOrder()
+end, "unknown scope")
+Assert.errors(function() withPanel({ { id = "x", title = "x", scope = "reader" } }).desktopOrder() end, "title and icon")
+Assert.errors(function() withPanel({ { title = "x", icon = "tune", scope = "reader" } }).desktopOrder() end, "needs id")
+Assert.errors(function()
+    withPanel({
+        { id = "same", title = "甲", icon = "tune", scope = "desktop" },
+        { id = "same", title = "乙", icon = "tune", scope = "reader" },
+    }).desktopOrder()
+end, "already registered")
+local ok = withPanel({ { id = "extra", title = "额外", icon = "tune", scope = "reader" } })
+Assert.eq(ok.readerOrder()[#READER + 1], "extra")

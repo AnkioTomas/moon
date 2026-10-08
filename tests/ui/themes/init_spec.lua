@@ -9,8 +9,8 @@ local Assert = require("support.assert")
 local display = {}
 package.preload["utils.settings"] = function()
     return {
-        get = function(section) assert(section == "display"); return display end,
-        saveSection = function() end,
+        get = function(section) assert(section == "ui"); return display end,
+        save = function() end,
     }
 end
 package.preload["device"] = function()

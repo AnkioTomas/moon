@@ -2,7 +2,7 @@
 
 路径：[`book.koplugin/convert/`](../../book.koplugin/convert/)。
 
-把 TXT / HTML / MOBI 转成 EPUB，供 local 源入库。重活走 Job，结果只经 `cb(ok, err)` 回到主进程；本模块不写库也不扫盘，登记路径由调用方负责（如 `book/reflow.lua` 成功后调 `Store.touch`）。
+把 TXT / HTML / MOBI 转成 EPUB，供 local 源入库。重活走 Job，结果只经 `cb(ok, err)` 回到主进程；本模块不写库也不扫盘，登记路径由调用方负责（如 `features/reflow/init.lua` 成功后调 `Store.touch`）。
 
 ## 设计
 

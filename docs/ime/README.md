@@ -1,6 +1,6 @@
 # ime/ — 中文输入法增强
 
-路径：[`book.koplugin/ime/`](../../book.koplugin/ime/)。
+路径：[`book.koplugin/features/ime/`](../../book.koplugin/features/ime/)。
 
 | 文档 | 讲什么 |
 |---|---|
@@ -34,7 +34,7 @@ IME.layout()
 IME.layouts()              -- 供设置页
 
 -- main 初始化
-require("ime.candidate_bar").install({ enabled = IME.isEnabled })  -- 由 IME.onCreate / setEnabled(true) 调用
+require("features.ime.candidate_bar").install({ enabled = IME.isEnabled })  -- 由 IME.onCreate / setEnabled(true) 调用
 ```
 
 设置页：总开关 + 当前方案选择 + 词库下载入口（见 [`dictionary`](dictionary.md)）。

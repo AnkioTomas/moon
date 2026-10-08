@@ -1,6 +1,6 @@
 # book.store — 身份与登记
 
-代码：[`book/store.lua`](../../book.koplugin/book/store.lua)。表：[`books`](../db/books.md)、[`chapters`](../db/chapters.md)。
+代码：[`book/store.lua`](../../book.koplugin/book/store.lua)。表：[`book/books_db.lua`](../../book.koplugin/book/books_db.lua)、[`book/chapters_db.lua`](../../book.koplugin/book/chapters_db.lua)。
 
 ## 设计
 
@@ -52,15 +52,8 @@ local ok, err = Store.touch(path, identity, {
 if not ok then cb(nil, err); return end
 cb(path)
 
--- 远端书架快照对账
-local result, err = Store.reconcile(source.id, remote_books)
--- result: { pulled, pushed=0, hidden, conflicts=0, skipped }
-
 -- 列表/详情里临时记一批元数据（不改变书架成员逻辑的远端 upsert）
 Store.rememberMany(books)
-
--- 异步回调：用户是否还在看同一本（含同一章）
-if not Store.isCurrentDocument(ui, identity) then return end
 ```
 
 ### API
@@ -69,15 +62,11 @@ if not Store.isCurrentDocument(ui, identity) then return end
 |---|---|---|
 | `identityFor(path)` | `BookIdentity?` | 只查库，不 resolve 源、不登记 |
 | `ensureIdentity(path)` | `BookIdentity?` | 查库 + resolve 源；必要时登记 local |
-| `touch(path, identity, opts?)` | `ok, err` | 整本写 `books.path`；按章事务写 path + chapters + 可选 toc |
+| `touch(path, identity, opts?)` | `ok, err` | 整本写 `books.path`；按章事务写 path + chapters（目录由源经 `source.toc` 落库，不经这里） |
 | `toc(identity)` | `BookChapter[]?` | 解码 `books.toc` |
-| `allChaptersCached(identity)` | bool | toc 长度 == chapters 行数；toc 未知则 false |
-| `isDownloaded(book)` | bool | 章源看全章缓存；整本看 `path` |
-| `reconcile(source_id, books)` | `SyncResult?, err` | 远端快照对账 |
+| `isCached(book)` | bool | 章源看全章缓存（`BookDB.isDownloaded`）；整本看缓存目录下的 `path` |
 | `rememberMany(books)` | — | `upsertRemoteMany` |
 | `markDeleted(source_id, stable_id)` | `ok, leftover?` | 软删 + 清工作目录/章缓存；清理不完整时 `leftover="partial"` |
-| `finalizeDeleted(...)` | — | 云端真删成功后撕墓碑 |
-| `isCurrentDocument(ui, identity)` | bool | 比 source/stable/chapter |
 
 ### 注意
 

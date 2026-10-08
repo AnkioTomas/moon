@@ -58,7 +58,7 @@ display.library_sort = "recent_added"
 package.preload["utils.settings"] = function()
     return {
         get = function() return display end,
-        saveSection = function(_, values) display = values end,
+        save = function(_, values) display = values end,
     }
 end
 

@@ -7,7 +7,7 @@
 
   local Config = require("support.config")
   local Settings = require("moon.settings")  -- 或 Config.settings()
-  Settings.get()
+  Settings.get("ui")
   Settings.getSource("wechat")
 
 禁止再手写 koreader-emulator-… 路径，也禁止 loadfile 配置文件。

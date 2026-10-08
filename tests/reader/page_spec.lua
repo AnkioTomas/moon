@@ -79,7 +79,6 @@ local moon_settings = { book_xray_enabled = true }
 package.preload["utils.settings"] = function()
     return {
         get = function() return moon_settings end,
-        feature = function() return moon_settings end,
         save = function() end,
     }
 end

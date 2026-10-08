@@ -6,11 +6,8 @@ lockscreen 书库辅助：范围走 Catalog.libraryScope；封面用行内 sourc
 
 local Assert = require("support.assert")
 
-package.preload["utils.settings"] = function()
-    return {
-        activeSourceId = function() return "moon" end,
-        libraryMixed = function() return false end,
-    }
+package.preload["source.registry"] = function()
+    return { activeId = function() return "moon" end }
 end
 package.preload["book.catalog"] = function()
     return { libraryScope = function(id) return id end }

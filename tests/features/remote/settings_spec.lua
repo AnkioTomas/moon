@@ -24,7 +24,7 @@ package.preload["utils.settings"] = function()
         getSource = function(id)
             return store[id]
         end,
-        saveSection = function(section, cfg)
+        save = function(section, cfg)
             store[section] = cfg
         end,
         saveSource = function(id, cfg)

@@ -1,6 +1,6 @@
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
---[[-- 设置根页按功能分组，点击打开叠层。 --]]
+--[[-- 设置根页：核心条目 + 扫描到的 feature 条目按层级合并，点击打开叠层。 --]]
 
 local Assert = require("support.assert")
 
@@ -44,11 +44,14 @@ package.preload["ui.themes.widgets.row"] = function()
 end
 package.preload["utils.settings"] = function()
     return {
-        activeSourceId = function() return "local" end,
-        get = function() return { reader_popup_buttons = {}, ai_model = "" } end,
-        feature = function(name) return require("features." .. name .. ".setting").defaults end,
-        openOnStart = function() return false end,
+        get = function(owner)
+            if owner:match("^features%.") then return require(owner .. ".setting").defaults end
+            return { reader_popup_buttons = {}, ai_model = "" }
+        end,
     }
+end
+package.preload["menu"] = function()
+    return { openOnStart = function() return false end }
 end
 package.preload["ui.fonts"] = function()
     return { currentName = function() return "Noto Sans" end }
@@ -61,6 +64,7 @@ package.preload["features.remote"] = function()
 end
 package.preload["source.registry"] = function()
     return {
+        activeId = function() return "local" end,
         list = function() return { { id = "local", name = "本地" } } end,
         listEnabled = function() return { { id = "local", name = "本地" } } end,
     }
@@ -76,7 +80,7 @@ package.preload["desktop.pages.setting.overlay"] = function()
             end
         end,
         open = function(_, spec)
-            opened = spec and spec.id
+            opened = spec
         end,
         close = function() end,
         previewBox = function() return { dimen = { h = 20 } } end,
@@ -95,6 +99,9 @@ package.preload["desktop.pages.setting.source"] = function()
     }
 end
 package.preload["desktop.pages.setting.display"] = function()
+    return { rows = function() return {} end }
+end
+package.preload["features.nightmode.page"] = function()
     return { rows = function() return {} end }
 end
 package.preload["features.lockscreen.page"] = function()
@@ -122,8 +129,8 @@ package.preload["http.proxy.setting"] = function()
     return {
         entry = function()
             return {
-                icon = "lan", title = "网络", subtitle = "HTTP 代理", status = "直连",
-                page = { id = "network", title = "网络", sections = function() return {} end },
+                id = "network", icon = "lan", title = "网络", subtitle = "HTTP 代理", status = "直连",
+                page = { title = "网络", sections = function() return {} end },
             }
         end,
     }
@@ -131,7 +138,7 @@ end
 package.preload["desktop.pages.setting.reader"] = function()
     return {
         sections = function() return { { title = "行为", rows = {} } } end,
-        lookupSections = function() return {} end,
+        lookupSections = function() return { { title = "选区", rows = {} } } end,
         popupRows = function() return {} end,
     }
 end
@@ -170,8 +177,6 @@ package.preload["desktop.pages.setting.maintenance"] = function()
         cacheRow = function() return row("清理缓存") end,
         clearStatsRow = function() return row("清除当前源统计") end,
         debugLogRow = function() return row("调试日志") end,
-        autoUpdateRow = function() return row("自动检查更新") end,
-        updateRow = function() return row("检查更新") end,
         aboutRow = function() return row("关于") end,
         closeRow = function() return row("关闭桌面") end,
     }
@@ -186,7 +191,7 @@ _G.G_reader_settings = {
 }
 
 local desktop = {
-    plugin = {},
+    plugin = { path = _G.BOOK_TEST_ROOT .. "/book.koplugin" },
     dimen = { w = 600 },
     contentHeight = function() return 800 end,
     updateView = function() end,
@@ -202,11 +207,11 @@ local expected = {
     { title = "账号与登录", id = "source_config" },
     { title = "界面显示", id = "display" },
     { title = "桌面顶栏", id = "topbar" },
-    { title = "桌面快捷面板", id = "quickpanel_desktop" },
+    { title = "桌面快捷面板", id = "feature:panel:desktop" },
     { title = "锁屏壁纸", id = "feature:lockscreen:main" },
     { title = "阅读行为", id = "reader_behavior" },
     { title = "划词与查询", id = "lookup" },
-    { title = "阅读快捷面板", id = "quickpanel_reader" },
+    { title = "阅读快捷面板", id = "feature:panel:reader" },
     { title = "阅读页顶栏", id = "feature:bars:top" },
     { title = "阅读页底栏", id = "feature:bars:bottom" },
     { title = "侧栏手势", id = "feature:sidebar:main" },
@@ -219,13 +224,15 @@ local expected = {
     { title = "中文输入法增强", id = "feature:ime:main" },
     { title = "远程管理", id = "feature:remote:main" },
 }
+local pages = {}
 local nav = 1
 for _, row in ipairs(built_rows) do
     local item = expected[nav]
     if item and row.title == item.title and row.kind == "nav" then
         Assert.is_true(type(row.subtitle) == "string" and row.subtitle ~= "", item.title .. " 缺副标题")
         row.callback()
-        Assert.eq(opened, item.id)
+        Assert.eq(opened.id, item.id)
+        pages[item.id] = opened
         nav = nav + 1
     end
 end
@@ -241,19 +248,26 @@ for _, title in ipairs({
     Assert.is_true(found)
 end
 
-local behavior = settings:spec("reader_behavior")
+local behavior = pages.reader_behavior
 Assert.eq(behavior.title, "阅读行为")
 Assert.is_nil(behavior.preview)
 Assert.eq(#behavior.sections(), 1)
 
-local lookup = settings:spec("lookup")
-Assert.eq(lookup.title, "划词与查询")
-Assert.is_nil(lookup.preview)
-Assert.eq(#lookup.sections(), 1)
+-- 第三层：feature 往核心页面追加分节，按 order 排在核心分节之间 / 之后
+local function sectionTitles(page)
+    local titles = {}
+    for _, section in ipairs(page.sections()) do titles[#titles + 1] = section.title end
+    return table.concat(titles, ",")
+end
+Assert.eq(sectionTitles(pages.lookup), "选区,翻译,X-Ray,菜单")
+Assert.eq(sectionTitles(pages.display), "启动,显示,夜间与亮度")
 
-local display = settings:spec("display")
-Assert.eq(display.title, "界面显示")
-Assert.is_nil(display.preview)
+-- 维护组：update feature 的两行按 order 插在调试日志与关于之间
+local maintenance = {}
+for _, row in ipairs(built_rows) do
+    if row.kind == "action" or row.kind == "toggle" then maintenance[#maintenance + 1] = row.title end
+end
+Assert.eq(table.concat(maintenance, ","), "清理缓存,清除当前源统计,调试日志,自动检查更新,检查更新,关于,关闭桌面")
 
 _G.G_reader_settings = previous_settings
 

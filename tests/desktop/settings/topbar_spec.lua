@@ -9,7 +9,7 @@ package.preload["gettext"] = function() return function(text) return text end en
 package.preload["utils.settings"] = function()
     return {
         get = function() return home end,
-        saveSection = function(_, values)
+        save = function(_, values)
             home = values
             saves = saves + 1
         end,

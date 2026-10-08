@@ -28,11 +28,11 @@ end
 local fake_settings = { ime_dict_built_at = {}, ime_dict_sha256 = {} }
 package.preload["utils.settings"] = function()
     return {
-        feature = function(name)
-            assert(name == "ime")
+        get = function(name)
+            assert(name == "features.ime")
             return fake_settings
         end,
-        saveSection = function(name) assert(name == "ime") end,
+        save = function(name) assert(name == "features.ime") end,
     }
 end
 
@@ -231,8 +231,8 @@ local ok_run, err_run = pcall(function()
     f:close()
 
     -- manifest built_at 是本地词库版本，供下次更新比较。
-    Assert.eq(MoonSettings.feature("ime").ime_dict_built_at.pinyin, manifest.built_at)
-    Assert.eq(MoonSettings.feature("ime").ime_dict_sha256.pinyin, raw_sha)
+    Assert.eq(MoonSettings.get("features.ime").ime_dict_built_at.pinyin, manifest.built_at)
+    Assert.eq(MoonSettings.get("features.ime").ime_dict_sha256.pinyin, raw_sha)
 
     -- 临时目录已清理
     Assert.is_nil(require("libs/libkoreader-lfs").attributes(Paths.root() .. "/ime_pinyin_dict.dl"))

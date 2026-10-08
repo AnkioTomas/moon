@@ -37,8 +37,8 @@ end
 
 package.preload["utils.settings"] = function()
     return {
-        feature = function(name) assert(name == "lockscreen"); return settings end,
-        saveSection = function(name) assert(name == "lockscreen") end,
+        get = function(name) assert(name == "features.lockscreen"); return settings end,
+        save = function(name) assert(name == "features.lockscreen") end,
     }
 end
 

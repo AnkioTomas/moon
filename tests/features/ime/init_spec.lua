@@ -14,11 +14,11 @@ local Stubs = require("support.stubs")
 local fake_settings = {}
 package.preload["utils.settings"] = function()
     return {
-        feature = function(name)
-            assert(name == "ime")
+        get = function(name)
+            assert(name == "features.ime")
             return fake_settings
         end,
-        saveSection = function(name) assert(name == "ime") end,
+        save = function(name) assert(name == "features.ime") end,
     }
 end
 

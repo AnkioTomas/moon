@@ -35,10 +35,10 @@ package.preload["apps/filemanager/filemanager"] = function()
 end
 package.preload["apps/reader/readerui"] = function() return { instance = nil } end
 package.preload["utils.settings"] = function()
-    return {
-        openOnStart = function() return true end,
-        get = function() return { drawer_opens_desktop = true } end,
-    }
+    return { get = function() return { drawer_opens_desktop = true } end }
+end
+package.preload["menu"] = function()
+    return { openOnStart = function() return true end }
 end
 
 local previous_settings = _G.G_reader_settings

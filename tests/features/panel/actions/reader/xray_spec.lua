@@ -8,7 +8,7 @@ package.preload["gettext"] = function() return function(value) return value end 
 -- 必须打桩：available 读的是真实配置文件，否则开发者在模拟器里关掉 X-Ray 就会让本用例变红。
 local settings = {}
 package.preload["utils.settings"] = function()
-    return { feature = function(name) assert(name == "xray"); return settings end }
+    return { get = function(name) assert(name == "features.xray"); return settings end }
 end
 
 package.loaded["features.panel.actions.reader.xray"] = nil

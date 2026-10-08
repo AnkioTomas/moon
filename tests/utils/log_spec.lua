@@ -13,8 +13,8 @@ if not Config.available() then
 end
 
 local Settings = Config.settings()
-local original_debug = Settings.get("common").book_debug_enabled
-Settings.save({ book_debug_enabled = false })
+local original_debug = Settings.get("utils").book_debug_enabled
+Settings.get("utils").book_debug_enabled = false; Settings.save("utils")
 
 local ko_lines = {}
 package.preload["logger"] = function()
@@ -89,7 +89,7 @@ Assert.not_nil(content:find("[WARN] batch 10", 1, true))
 Assert.not_nil(content:find("[WARN] tail 11", 1, true))
 Assert.eq(#ko_lines, 0)
 
-Settings.save({ book_debug_enabled = true })
+Settings.get("utils").book_debug_enabled = true; Settings.save("utils")
 ko_lines = {}
 Log.dbg("visible")
 Log.info("hello", 7)
@@ -139,4 +139,4 @@ file:close()
 Assert.not_nil(content:find("[WARN] new day", 1, true))
 Assert.is_nil(content:find("visible", 1, true))
 
-Settings.save({ book_debug_enabled = original_debug })
+Settings.get("utils").book_debug_enabled = original_debug; Settings.save("utils")

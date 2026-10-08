@@ -5,10 +5,10 @@
 
 local Assert = require("support.assert")
 
-local mixed = false
-local opds_on = false
+local source_cfg = { library_mixed = false }
+local store_cfg = { zlib_enabled = false, opds_enabled = false }
 local active = "wechat"
-local saved
+local saved = {}
 local set_active
 local enabled = {
     { id = "local", name = "本地" },
@@ -20,20 +20,15 @@ local enabled = {
 }
 package.preload["utils.settings"] = function()
     return {
-        libraryMixed = function() return mixed end,
-        zlibEnabled = function() return false end,
-        opdsEnabled = function() return opds_on end,
-        save = function(patch)
-            saved = patch
-            if patch.library_mixed ~= nil then mixed = patch.library_mixed end
-        end,
-        activeSourceId = function() return active end,
+        get = function(owner) return owner == "source" and source_cfg or store_cfg end,
+        save = function(owner) saved[#saved + 1] = owner end,
         getSource = function() return {} end,
     }
 end
 local notified = 0
 package.preload["source.registry"] = function()
     return {
+        activeId = function() return active end,
         listEnabled = function() return enabled end,
         list = function() return enabled end,
         isEnabled = function() return true end,
@@ -73,9 +68,9 @@ local src = Source
 local desktop = { updateView = function() end, onEvent = function() end }
 
 Assert.eq(Source.displayName("微信读书"), "微信读书")
-mixed = true
+source_cfg.library_mixed = true
 Assert.eq(Source.displayName("微信读书"), "混合模式")
-mixed = false
+source_cfg.library_mixed = false
 
 src:pickActive()
 local sheet = Themed.last("list")
@@ -86,8 +81,8 @@ Assert.eq(sheet.items[4].text, "微信读书")
 Assert.eq(sheet.current, "wechat")
 
 sheet.on_select("__mixed__")
-Assert.eq(saved.library_mixed, true)
-Assert.is_true(mixed)
+Assert.eq(saved[#saved], "source")
+Assert.is_true(source_cfg.library_mixed)
 Assert.eq(notified, 1, "切混合模式广播 SourceChanged")
 
 src:pickActive()
@@ -96,9 +91,9 @@ Assert.eq(sheet.current, "__mixed__", "混合开启时只勾混合")
 
 set_active = nil
 sheet.on_select("moon")
-Assert.eq(saved.library_mixed, false)
+Assert.eq(saved[#saved], "source")
 Assert.eq(set_active, "moon")
-Assert.is_false(mixed)
+Assert.is_false(source_cfg.library_mixed)
 
 local scope = src:scopeSections{
     desktop = desktop,
@@ -125,15 +120,15 @@ Assert.len(config[#config].rows, 1)
 Assert.eq(config[#config].rows[1]().kind, "toggle")
 Assert.eq(config[#config].rows[1]().status, "关")
 config[#config].rows[1]().callback()
-Assert.is_true(saved.opds_enabled)
-opds_on = true
+Assert.eq(saved[#saved], "store")
+Assert.is_true(store_cfg.opds_enabled)
 local opds_rows = src:configSections{ desktop = desktop, plugin = nil }
 opds_rows = opds_rows[#opds_rows].rows
 Assert.len(opds_rows, 2)
 Assert.eq(opds_rows[1]().status, "开")
 Assert.eq(opds_rows[2]().title, "OPDS 目录")
 Assert.eq(opds_rows[2]().status, "未配置")
-opds_on = false
+store_cfg.opds_enabled = false
 for i = 1, #config do
     local first = config[i].rows[1]
     if first then

@@ -6,7 +6,7 @@ local Assert = require("support.assert")
 
 local settings = { ime_layout = "pinyin" }
 package.preload["utils.settings"] = function()
-    return { feature = function(name) assert(name == "ime"); return settings end }
+    return { get = function(name) assert(name == "features.ime"); return settings end }
 end
 package.preload["gettext"] = function()
     return setmetatable({}, { __call = function(_, text) return text end })

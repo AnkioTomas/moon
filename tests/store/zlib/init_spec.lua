@@ -132,7 +132,7 @@ fake.download_cb(true)
 install_job.cancel()
 Assert.is_true(import_cancelled)
 Assert.eq(removed, fake.download[3])
-Assert.matches(removed, "%.part$")
+Assert.matches(removed, "/待取消%.epub$")
 os.remove = original_remove
 
 for _, name in ipairs({ "store.zlib.client", "utils.settings", "utils.paths" }) do

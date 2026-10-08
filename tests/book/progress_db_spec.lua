@@ -394,12 +394,12 @@ do
     clearMods()
 end
 
--- ── 订阅 book_marked_read：补一条 100% 的待上传进度 ──
+-- ── markFinished：手动已读补一条 100% 的待上传进度 ──
 do
     local connection, calls = makeConn()
     local DbBase = loadProgress(connection)
 
-    Assert.is_true(require("utils.event").emit("book_marked_read", "moon", "b1"))
+    Assert.is_true(require("book.progress_db").markFinished("moon", "b1"))
     local q
     for _idx, call in ipairs(calls) do
         if call.sql:find("INSERT INTO pending_progress", 1, true) then q = call end
@@ -414,14 +414,14 @@ do
     clearMods()
 end
 
--- ── 订阅 book_identity_changed：改名只迁身份；收编先清掉被旧身份脏行盖过的新身份副本 ──
+-- ── moveIdentity：改名只迁身份；收编先清掉被旧身份脏行盖过的新身份副本 ──
 do
     local connection, calls = makeConn()
     local DbBase = loadProgress(connection)
-    local Event = require("utils.event")
+    local ProgressDB = require("book.progress_db")
 
     local mark = #calls
-    Assert.is_true(Event.emit("book_identity_changed", "local", "/old.epub", "/new.epub", false))
+    Assert.is_true(ProgressDB.moveIdentity("local", "/old.epub", "/new.epub", false))
     local own = {}
     for i = mark + 1, #calls do
         if calls[i].sql:find("pending_progress", 1, true) then own[#own + 1] = calls[i] end
@@ -430,7 +430,7 @@ do
     Assert.eq(own[1].sql, "UPDATE pending_progress SET stable_id=? WHERE source_id=? AND stable_id=?;")
 
     mark = #calls
-    Assert.is_true(Event.emit("book_identity_changed", "local", "/old.epub", "/new.epub", true))
+    Assert.is_true(ProgressDB.moveIdentity("local", "/old.epub", "/new.epub", true))
     own = {}
     for i = mark + 1, #calls do
         if calls[i].sql:find("pending_progress", 1, true) then own[#own + 1] = calls[i] end
