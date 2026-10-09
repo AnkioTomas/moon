@@ -6,6 +6,7 @@
 
 local Archiver = require("ffi/archiver")
 local Client = require("source.copymanga.client")
+local Image = require("utils.image")
 local Paths = require("utils.paths")
 local Protocol = require("source.copymanga.protocol")
 local lfs = require("libs/libkoreader-lfs")
@@ -18,32 +19,6 @@ local Chapter = {}
 local function fileReady(path)
     local attr = lfs.attributes(path)
     return attr ~= nil and attr.mode == "file" and (tonumber(attr.size) or 0) > 0
-end
-
----@param url string
----@return string
-local function imageExtension(url)
-    local path = url:lower():match("^[^%?#]+") or ""
-    return path:match("%.webp$") and ".webp"
-        or path:match("%.png$") and ".png"
-        or path:match("%.gif$") and ".gif"
-        or path:match("%.jpe?g$") and ".jpg"
-        or ".jpg"
-end
-
----@param path string
----@return boolean
-local function imageReady(path)
-    if not fileReady(path) then return false end
-    local file = io.open(path, "rb")
-    if not file then return false end
-    local magic = file:read(12) or ""
-    file:close()
-    return magic:sub(1, 3) == "\255\216\255"
-        or magic:sub(1, 8) == "\137PNG\r\n\026\n"
-        or magic:sub(1, 6) == "GIF87a"
-        or magic:sub(1, 6) == "GIF89a"
-        or (magic:sub(1, 4) == "RIFF" and magic:sub(9, 12) == "WEBP")
 end
 
 ---@param paths string[]
@@ -79,7 +54,7 @@ local function buildArchive(paths, archive_path, state, cb)
                 cb(nil, err or _("无法保存漫画文件"))
                 return
             end
-            for _, image_path in ipairs(paths) do pcall(os.remove, image_path) end
+            for _idx, image_path in ipairs(paths) do pcall(os.remove, image_path) end
             cb(archive_path)
             return
         end
@@ -133,7 +108,7 @@ function Chapter.materializeAsync(client, identity, chapter, chapter_idx, on_pro
         Paths.ensureDir(image_dir)
         local paths, current = {}, 1
         for i, url in ipairs(urls) do
-            paths[i] = image_dir .. "/" .. string.format("%04d%s", i, imageExtension(url))
+            paths[i] = image_dir .. "/" .. string.format("%04d%s", i, Image.suffix(url) or ".jpg")
         end
 
         local function nextImage()
@@ -144,7 +119,7 @@ function Chapter.materializeAsync(client, identity, chapter, chapter_idx, on_pro
                 return
             end
             local path = paths[current]
-            if imageReady(path) then
+            if Image.ok(path) then
                 if on_progress then on_progress(current, #urls) end
                 current = current + 1
                 require("ui/uimanager"):nextTick(nextImage)
@@ -158,7 +133,7 @@ function Chapter.materializeAsync(client, identity, chapter, chapter_idx, on_pro
             }, path, function(ok, download_err)
                 state.active = nil
                 if state.cancelled then return end
-                if not ok or not imageReady(path) then
+                if not ok or not Image.ok(path) then
                     pcall(os.remove, path)
                     cb(nil, download_err or _("漫画图片下载失败"))
                     return

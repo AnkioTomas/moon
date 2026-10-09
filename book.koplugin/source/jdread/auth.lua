@@ -6,6 +6,7 @@
 
 local JSON = require("json")
 local Request = require("http.request")
+local Image = require("utils.image")
 local Text = require("utils.text")
 local _ = require("gettext")
 
@@ -41,7 +42,7 @@ end
 local function mergeCookies(jar, res)
     local values = Request.header(res, "Set-Cookie")
     if type(values) == "string" then values = { values } end
-    for _, line in ipairs(type(values) == "table" and values or {}) do
+    for _idx, line in ipairs(type(values) == "table" and values or {}) do
         local key, value = line:match("^%s*([^=;]+)=([^;]*)")
         if key then
             if value == "" then jar[key] = nil else jar[key] = value end
@@ -59,7 +60,7 @@ local function cookieHeader(jar)
     table.sort(keys)
     if #keys == 0 then return nil end
     local parts = {}
-    for _, key in ipairs(keys) do parts[#parts + 1] = key .. "=" .. jar[key] end
+    for _idx, key in ipairs(keys) do parts[#parts + 1] = key .. "=" .. jar[key] end
     return table.concat(parts, "; ")
 end
 
@@ -127,7 +128,7 @@ function Auth.beginQrLoginAsync(cb)
         if cancelled then return end
         mergeCookies(jar, res)
         local token = jar.wlfstk_smdl
-        if not body or body:sub(1, 8) ~= "\137PNG\r\n\26\n"
+        if not body or Image.ext(body) ~= ".png"
             or type(token) ~= "string" or token == "" then
             cb(nil, err or _("获取京东登录二维码失败"))
             return
@@ -257,7 +258,7 @@ function Auth.completeQrLoginAsync(info, cb)
         local name = Text.urlDecode(jar.unick or jar.pin or "") or ""
         current.cookie = cookie
         current.uuid = current.uuid ~= nil and current.uuid ~= ""
-            and current.uuid or ("h5" .. require("ffi/sha2").md5(Settings.ensureDeviceId()))
+            and current.uuid or ("h5" .. require("ffi/sha2").md5(require("utils.device_id").ensure()))
         current.user_name = name
         Settings.saveSource("jdread", current)
         pcall(os.remove, qrPath())

@@ -59,7 +59,7 @@ end
 
 -- sniff jpeg
 do
-    local ext, mime = Html2Epub._sniffImage("\255\216\255" .. "xxxx")
+    local ext, mime = require("utils.image").ext("\255\216\255" .. "xxxx")
     Assert.eq(ext, ".jpg")
     Assert.eq(mime, "image/jpeg")
 end
