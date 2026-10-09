@@ -10,6 +10,7 @@ Moon 目录布局（$DATA/.moon）
         book/<slug>/     整本 book.* 或章节 N.html；slug 由 stable_id 派生
         image/           网络图片 / 封面
       image/             不属于特定源的网络图片
+      online/            ankio.net 接口 JSON；必应 / 摸鱼日报图同目录
     settings/            <拥有者末段>.lua、<源 id>.lua；common.lua 等拆分前的旧分区只作迁移来源
     screensaver/         锁屏资源
     backups/
@@ -226,6 +227,16 @@ end
 --- 只保证共享缓存根存在；清理流程不能凭空猜测活跃 source_id。
 function P.ensureCacheRoot()
     P.ensureDir(P.cacheDir())
+end
+
+--- ankio.net 接口缓存：cache/online/<name>.json
+---@return string
+function P.onlineCacheDir()
+    return P.cacheDir() .. "/online"
+end
+
+function P.ensureOnlineCache()
+    P.ensureDir(P.onlineCacheDir())
 end
 
 --- 通用网络图片目录（不属于特定源）：cache/image/
