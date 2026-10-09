@@ -6,9 +6,12 @@ online.myrl：摊平摸鱼日报 JSON，TTL 算到当天结束。
 local Assert = require("support.assert")
 
 local color = false
+local screen_w, screen_h = 720, 960
 package.preload["device"] = function()
     return {
         screen = {
+            getWidth = function() return screen_w end,
+            getHeight = function() return screen_h end,
             isColorEnabled = function() return color end,
         },
     }
@@ -27,14 +30,16 @@ package.preload["http.request"] = function()
     }
 end
 
+local Online = require("online.base")
 local Myrl = require("online.myrl")
+Assert.eq(Myrl.ttl, Online.untilMidnight)
 
 do
     requests = {}
     local got
     Myrl:fetch({}, function(data) got = data end)
     Assert.eq(requests[1].url, "https://api.ankio.net/myrl?type=json")
-    Assert.is_true(math.abs(requests[1].opts.cache_ttl - require("online.base").untilMidnight()) <= 1)
+    Assert.eq(requests[1].opts.cache_ttl, 0)
     requests[1].cb([[{
         "code":200,
         "data":{
@@ -53,11 +58,19 @@ do
     Assert.len(got.news, 2)
 end
 
-do -- 水墨屏带 ink；彩屏不带
+do -- 空对象 / 错误外壳不是日报，不能缓存到午夜
+    Assert.is_nil(Myrl:parse('{"code":200,"data":{}}'))
+    Assert.is_nil(Myrl:parse('{"code":500}'))
+end
+
+do -- 水墨屏带 ink；彩屏不带；横屏对调成竖屏
     color = false
-    Assert.eq(Myrl:imageUrl(720, 960), "https://api.ankio.net/myrl?width=720&height=960&ink=1")
+    Assert.eq(Myrl.image_ext, "png")
+    Assert.eq(Myrl:imageUrl(), "https://api.ankio.net/myrl?width=720&height=960&ink=1")
     color = true
-    Assert.eq(Myrl:imageUrl(720, 960), "https://api.ankio.net/myrl?width=720&height=960")
+    Assert.eq(Myrl:imageUrl(), "https://api.ankio.net/myrl?width=720&height=960")
+    screen_w, screen_h = 960, 720
+    Assert.eq(Myrl:imageUrl(), "https://api.ankio.net/myrl?width=720&height=960")
 end
 
 return true

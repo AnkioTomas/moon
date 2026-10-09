@@ -20,13 +20,15 @@ package.preload["http.request"] = function()
 end
 
 local Weather = require("online.weather")
+Assert.eq(Weather.ttl, 4 * 3600)
 
 do -- 有城市 + 默认 TTL + 丰富字段
     requests = {}
     local got
     Weather:fetch({ city = "Shanghai" }, function(data) got = data end)
     Assert.eq(requests[1].url, "https://api.ankio.net/weather?city=Shanghai")
-    Assert.eq(requests[1].opts.cache_ttl, 3600)
+    Assert.is_nil(Weather.city, "试查不写回 city")
+    Assert.eq(requests[1].opts.cache_ttl, 0)
     Assert.is_true(requests[1].opts.allow_redirects)
     requests[1].cb([[{
         "current_condition":[{"temp_C":"26","FeelsLikeC":"25","weatherCode":"122",
@@ -83,6 +85,10 @@ do -- 空城市 + 测试不走缓存；无 lang_zh 时用码表
     Assert.eq(got.desc, "晴")
     Assert.eq(got.icon, "sunny")
     Assert.eq(got.image, Weather.iconUrl("sunny"))
+end
+
+do -- 无 current_condition 不是天气
+    Assert.is_nil(Weather:parse('{"nearest_area":[]}'))
 end
 
 do -- 关键词兜底

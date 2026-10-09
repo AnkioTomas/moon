@@ -1,5 +1,6 @@
 --[[--
-摸鱼日报 JSON：农历 / 节日 / 新闻 / 历史 / 一言。
+摸鱼日报：JSON 落 cache/online/myrl.json，图落 myrl.png，到午夜过期。
+JSON 给首页农历 / 节日 / 新闻 / 历史；图给锁屏。
 
 @module koplugin.book.online.myrl
 --]]
@@ -8,23 +9,28 @@ local Online = require("online.base")
 
 ---@class BookOnlineMyrl : BookOnline
 local Myrl = setmetatable({
+    name = "myrl",
+    title = "摸鱼日报",
+    image_ext = "png",
     ttl = Online.untilMidnight,
 }, Online)
 Myrl.__index = Myrl
 
----@param _args table|nil
 ---@return string
-function Myrl:url(_args)
+function Myrl:url()
     return self.host .. "/myrl?type=json"
 end
 
---- 锁屏日报图。彩屏不带 ink；水墨屏 ink=1。
----@param w number
----@param h number
+--- 锁屏日报图：竖屏尺寸。彩屏不带 ink；水墨屏 ink=1。
 ---@return string
-function Myrl:imageUrl(w, h)
-    local q = string.format("width=%d&height=%d", tonumber(w) or 0, tonumber(h) or 0)
-    if Online.useInk() then
+function Myrl:imageUrl()
+    local Device = require("device")
+    local w, h = Device.screen:getWidth(), Device.screen:getHeight()
+    if w > h then
+        w, h = h, w
+    end
+    local q = string.format("width=%d&height=%d", w, h)
+    if not Device.screen:isColorEnabled() then
         q = q .. "&ink=1"
     end
     return self.host .. "/myrl?" .. q
@@ -34,7 +40,7 @@ end
 ---@return table|nil
 function Myrl:parse(body)
     local payload = Online.decode(body)
-    if type(payload) ~= "table" then return nil end
+    if not payload then return nil end
     local date = type(payload.date) == "table" and payload.date or {}
     local holiday = type(payload.holiday) == "table" and payload.holiday or {}
     local quote = type(payload.quote) == "table" and payload.quote or {}
@@ -55,13 +61,16 @@ function Myrl:parse(body)
         end
         if #history >= 8 then break end
     end
-    daily.history = history
     local news = {}
     for _idx, title in ipairs(type(payload.news) == "table" and payload.news or {}) do
         title = Online.nonempty(title)
         if title then news[#news + 1] = title end
         if #news >= 8 then break end
     end
+    if not (daily.lunar or daily.holiday or daily.quote_text or history[1] or news[1]) then
+        return nil
+    end
+    daily.history = history
     daily.news = news
     return daily
 end
