@@ -9,10 +9,9 @@ abort / cancel 只杀这一条。
 
 local lfs = require("libs/libkoreader-lfs")
 local md5 = require("ffi/sha2").md5
+local Image = require("utils.image")
 local Paths = require("utils.paths")
 local Request = require("http.request")
-
-local EXTS = { ".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg" }
 local FAILED_TTL = 5 * 60
 local seq = 0
 local failed = {}
@@ -38,25 +37,6 @@ local Queue = {
 ---@field request table|nil
 local Download = {}
 Download.__index = Download
-
---- 按文件头嗅探图片扩展名。
----@param path string
----@return string|nil
-local function sniffExt(path)
-    local f = io.open(path, "rb")
-    if not f then return nil end
-    local head = f:read(16) or ""
-    f:close()
-    if head:sub(1, 3) == "\255\216\255" then return ".jpg" end
-    if head:sub(1, 8) == "\137PNG\r\n\26\n" then return ".png" end
-    if head:sub(1, 4) == "RIFF" and head:sub(9, 12) == "WEBP" then return ".webp" end
-    if head:sub(1, 6) == "GIF87a" or head:sub(1, 6) == "GIF89a" then return ".gif" end
-    local lower = head:lower()
-    if lower:find("<svg", 1, true) or lower:find("<?xml", 1, true) then
-        return ".svg"
-    end
-    return nil
-end
 
 ---@param url string
 ---@return string
@@ -86,7 +66,7 @@ function Download.cached(url)
         return nil
     end
     local base = cacheBase(url)
-    for _idx, ext in ipairs(EXTS) do
+    for _idx, ext in ipairs(Image.SUFFIXES) do
         local path = base .. ext
         local attr = lfs.attributes(path)
         if attr and attr.mode == "file" and attr.size and attr.size > 0 then
@@ -184,20 +164,7 @@ function Download:_onHttp(ok, err)
     if not attr or not attr.size or attr.size < 1 then
         return self:_complete(nil, "empty")
     end
-    local ext = sniffExt(self.tmp)
-    if not ext then
-        local path = self.url:match("^[^%?#]+") or self.url
-        local from_url = path:match("%.([%w]+)$")
-        if from_url then
-            from_url = "." .. from_url:lower()
-            for _idx, candidate in ipairs(EXTS) do
-                if candidate == from_url then
-                    ext = candidate
-                    break
-                end
-            end
-        end
-    end
+    local ext = Image.file(self.tmp) or Image.suffix(self.url)
     if not ext then
         return self:_complete(nil, "unknown type")
     end

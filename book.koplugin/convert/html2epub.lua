@@ -24,6 +24,7 @@ HTML → EPUB（多章节、内嵌图片、元数据）。
 local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
 local Header = require("http.request.header")
+local Image = require("utils.image")
 local Text = require("utils.text")
 local Perf = require("utils.perf")
 local _ = require("gettext")
@@ -83,56 +84,13 @@ local function b64decode(data)
     return out ~= "" and out or nil
 end
 
----@param bytes string
----@return string|nil ext, string|nil mime
-local function sniffImage(bytes)
-    if type(bytes) ~= "string" or #bytes < 3 then
-        return nil
-    end
-    if bytes:sub(1, 3) == "\255\216\255" then
-        return ".jpg", "image/jpeg"
-    end
-    if bytes:sub(1, 8) == "\137PNG\r\n\26\n" then
-        return ".png", "image/png"
-    end
-    if bytes:sub(1, 6) == "GIF87a" or bytes:sub(1, 6) == "GIF89a" then
-        return ".gif", "image/gif"
-    end
-    if bytes:sub(1, 4) == "RIFF" and bytes:sub(9, 12) == "WEBP" then
-        return ".webp", "image/webp"
-    end
-    local lower = bytes:sub(1, 256):lower()
-    if lower:find("<svg", 1, true) or lower:find("<?xml", 1, true) then
-        return ".svg", "image/svg+xml"
-    end
-    return nil
-end
-
-local MIME_BY_EXT = {
-    [".jpg"] = "image/jpeg",
-    [".png"] = "image/png",
-    [".gif"] = "image/gif",
-    [".webp"] = "image/webp",
-    [".svg"] = "image/svg+xml",
+local EXT_BY_MIME = {
+    ["image/jpeg"] = ".jpg",
+    ["image/png"] = ".png",
+    ["image/gif"] = ".gif",
+    ["image/webp"] = ".webp",
+    ["image/svg+xml"] = ".svg",
 }
-local EXT_BY_MIME = {}
-for ext, mime in pairs(MIME_BY_EXT) do
-    EXT_BY_MIME[mime] = ext
-end
-
----@param url string
----@return string|nil
-local function extFromUrl(url)
-    local ext = (url:match("^[^%?#]+") or url):match("%.([%w]+)$")
-    if not ext then
-        return nil
-    end
-    ext = "." .. ext:lower()
-    if ext == ".jpeg" then
-        ext = ".jpg"
-    end
-    return MIME_BY_EXT[ext] and ext or nil
-end
 
 --- 收集 HTML 中的 img src（去重、保序）。
 ---@param html string
@@ -418,10 +376,10 @@ function Html2Epub.build(opts, cb)
         if existing then
             return existing.href
         end
-        local ext, mime = sniffImage(bytes)
+        local ext, mime = Image.ext(bytes)
         if not ext then
-            ext = prefer_ext or extFromUrl(key) or ".bin"
-            mime = MIME_BY_EXT[ext] or "application/octet-stream"
+            ext = prefer_ext or Image.suffix(key) or ".bin"
+            mime = Image.mime(ext) or "application/octet-stream"
         end
         img_seq = img_seq + 1
         local href = string.format("images/img_%03d%s", img_seq, ext)
@@ -472,7 +430,7 @@ function Html2Epub.build(opts, cb)
                 done(nil)
                 return
             end
-            done(rememberImage(src, bytes, extFromUrl(src)))
+            done(rememberImage(src, bytes, Image.suffix(src)))
             return
         end
 
@@ -492,7 +450,7 @@ function Html2Epub.build(opts, cb)
                 done(nil)
                 return
             end
-            done(rememberImage(src, body, extFromUrl(src)))
+            done(rememberImage(src, body, Image.suffix(src)))
         end)
     end
 
@@ -663,6 +621,5 @@ end
 Html2Epub._collectImageSrcs = collectImageSrcs
 Html2Epub._rewriteImageSrcs = rewriteImageSrcs
 Html2Epub._ensureHtmlBody = ensureHtmlBody
-Html2Epub._sniffImage = sniffImage
 
 return Html2Epub

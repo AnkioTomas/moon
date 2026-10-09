@@ -8,26 +8,11 @@
 --]]
 
 local md5 = require("ffi/sha2").md5
+local Image = require("utils.image")
 local Paths = require("utils.paths")
 local Text = require("utils.text")
 
 local Assets = {}
-
---- 按文件头识别图片扩展名；不是已知图片返回 nil。
----@param data string
----@return string|nil
-local function imageExt(data)
-    if data:sub(1, 8) == "\137PNG\r\n\026\n" then
-        return ".png"
-    elseif data:sub(1, 3) == "\255\216\255" then
-        return ".jpg"
-    elseif data:sub(1, 6) == "GIF87a" or data:sub(1, 6) == "GIF89a" then
-        return ".gif"
-    elseif data:sub(1, 4) == "RIFF" and data:sub(9, 12) == "WEBP" then
-        return ".webp"
-    end
-    return nil
-end
 
 ---@param src string|nil
 ---@return string|nil
@@ -47,7 +32,7 @@ end
 ---@param data string
 ---@return string|nil
 function Assets.materializeImage(images_dir, data)
-    local ext = imageExt(data)
+    local ext = Image.ext(data)
     if not ext then
         return nil
     end
@@ -83,7 +68,7 @@ function Assets.rewriteImageSources(xhtml, src_map)
         return xhtml
     end
     return (xhtml:gsub("<img%s+[^>]*>", function(tag)
-        local _, src = tag:match("src=(['\"])(.-)%1")
+        local _quote, src = tag:match("src=(['\"])(.-)%1")
         if not src then
             return tag
         end
@@ -114,7 +99,7 @@ end
 function Assets.localizeAsync(html, images_dir, download, cb)
     html = tostring(html or "")
     local urls, seen = {}, {}
-    html:gsub('src=(["\'])(.-)%1', function(_, src)
+    html:gsub('src=(["\'])(.-)%1', function(_quote, src)
         local url = remoteUrl(src)
         if url and not seen[url] then
             seen[url] = true
