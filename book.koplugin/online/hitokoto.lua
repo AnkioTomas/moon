@@ -1,11 +1,10 @@
 --[[--
-一言。成功写入设置；失败或离线读设置。
+一言。成功写入 cache/online/hitokoto.json，1 分钟过期。current() 过期就是空。
 
 @module koplugin.book.online.hitokoto
 --]]
 
 require("l10n").apply()
-local MoonSettings = require("utils.settings")
 local Online = require("online.base")
 local _ = require("gettext")
 
@@ -24,23 +23,23 @@ local FALLBACKS = {
 
 ---@class BookOnlineHitokoto : BookOnline
 local Hitokoto = setmetatable({
-    ttl = 5 * 60,
+    name = "hitokoto",
+    title = "一言",
+    ttl = 60,
 }, Online)
 Hitokoto.__index = Hitokoto
 
----@param payload table|nil
+---@param payload table
 ---@return string|nil
 local function attribution(payload)
-    if type(payload) ~= "table" then return nil end
     local who = Online.nonempty(payload.from_who)
     local work = Online.nonempty(payload.from)
     if who and work then return who .. " · " .. work end
     return who or work
 end
 
----@param _args table|nil
 ---@return string
-function Hitokoto:url(_args)
+function Hitokoto:url()
     return self.host .. "/hitokoto"
 end
 
@@ -48,30 +47,9 @@ end
 ---@return table|nil
 function Hitokoto:parse(body)
     local payload = Online.decode(body)
-    if type(payload) == "table" then
-        local text = Online.nonempty(payload.hitokoto)
-            or Online.nonempty(payload.content)
-            or Online.nonempty(payload.text)
-        if text then
-            return {
-                text = text,
-                source = attribution(payload) or _("一言"),
-            }
-        end
-    end
-    local raw = Online.nonempty(body)
-    if raw and raw:sub(1, 1) ~= "{" then
-        return { text = raw, source = _("一言") }
-    end
-    return nil
-end
-
----@param data { text: string, source: string }
-function Hitokoto:store(data)
-    local settings = MoonSettings.get()
-    settings.lock_screen_quote_cache = data.text
-    settings.lock_screen_quote_source_cache = data.source
-    MoonSettings.save()
+    local text = payload and Online.nonempty(payload.hitokoto)
+    if not text then return nil end
+    return { text = text, source = attribution(payload) or _("一言") }
 end
 
 --- 无缓存时按年积日取一句，当天不变，避免墨水屏闪来闪去。
@@ -80,19 +58,6 @@ function Hitokoto.fallback()
     local n = #FALLBACKS
     local i = ((tonumber(os.date("%j")) or 1) - 1) % n + 1
     return FALLBACKS[i]
-end
-
----@return { text: string, source: string }
-function Hitokoto:load()
-    local settings = MoonSettings.get()
-    local text = settings.lock_screen_quote_cache
-    if type(text) == "string" and text ~= "" then
-        return {
-            text = text,
-            source = settings.lock_screen_quote_source_cache or _("一言"),
-        }
-    end
-    return Hitokoto.fallback()
 end
 
 --- 「作者 · 作品」拆成右侧两行；拆不开就整段当作者。
@@ -119,7 +84,7 @@ local function choose(pool, avoid)
     return pool[i]
 end
 
---- 首页一言：回退句 + 设置缓存，resume 随机抽。日报一句由 myrl 缓存另走。
+--- 首页一言：回退句 + 文件缓存，resume 随机抽。日报一句由 myrl 缓存另走。
 ---@param avoid string|nil
 ---@return BookExcerptQuote
 function Hitokoto.random(avoid)
@@ -133,8 +98,8 @@ function Hitokoto.random(avoid)
     for i = 1, #FALLBACKS do
         push(FALLBACKS[i].text, FALLBACKS[i].source)
     end
-    local settings = MoonSettings.get()
-    push(settings.lock_screen_quote_cache, settings.lock_screen_quote_source_cache)
+    local cached = Hitokoto:current()
+    if cached then push(cached.text, cached.source) end
     return choose(pool, avoid)
 end
 

@@ -103,9 +103,11 @@ local KEYWORDS = {
 ---@field days BookWeatherDay[]
 
 ---@class BookOnlineWeather : BookOnline
+---@field city string|nil 由首页 / 夜间模式写入，这里不读设置
 local Weather = setmetatable({
-    ttl = 3600,
-    allow_redirects = true,
+    name = "weather",
+    title = "天气",
+    ttl = 4 * 3600,
 }, Online)
 Weather.__index = Weather
 
@@ -182,10 +184,9 @@ local function dayRow(day)
     }
 end
 
----@param args table|nil
 ---@return string
-function Weather:url(args)
-    local city = Text.trim(args and args.city or "")
+function Weather:url()
+    local city = Text.trim(self.city or "")
     return self.host .. "/weather?city=" .. Text.urlEncode(city)
 end
 
@@ -193,7 +194,7 @@ end
 ---@return BookWeather|nil
 function Weather:parse(body)
     local payload = Online.decode(body)
-    if type(payload) ~= "table" then return nil end
+    if not payload then return nil end
     local current = payload.current_condition
     current = type(current) == "table" and current[1] or nil
     if type(current) ~= "table" then return nil end
