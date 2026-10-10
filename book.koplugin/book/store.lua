@@ -14,21 +14,18 @@ books/chapters → db.*（book.sqlite3）
 --]]
 
 local Paths = require("utils.paths")
-local DbBase = require("db.base")
-local BookDB = require("db.book")
-local ChapterDB = require("db.chapter")
+local DB = require("utils.db")
+local BookDB = require("book.books_db")
+local ChapterDB = require("book.chapters_db")
 local logger = require("utils.log")
 
 local Store = {}
-
---- 源目录缓存 TTL（秒）。阅读会话 bootstrap 用这个值；下载完成判断不传 max_age。
-Store.TOC_MAX_AGE = require("source.toc").TTL
 
 --- 保存列表中的书籍元数据；没有身份列的临时条目跳过。
 ---@param books table
 function Store.rememberMany(books)
     local payload = {}
-    for _, book in ipairs(books) do
+    for _idx, book in ipairs(books) do
         if book.source_id and book.stable_id then
             payload[#payload + 1] = {
                 source_id = book.source_id,
@@ -48,27 +45,6 @@ function Store.rememberMany(books)
         return
     end
     BookDB.upsertRemoteMany(payload)
-end
-
---- 用远端书架快照对账 books 表。
---- pulled/hidden 在此计算；pushed 由源在 add/delete 上行后自行累加。
----@param source_id string
----@param books Book[]
----@return SyncResult|nil result
----@return string|nil err
-function Store.reconcile(source_id, books)
-    local incoming = {}
-    for _, book in ipairs(books) do
-        if book.stable_id ~= nil then incoming[tostring(book.stable_id)] = true end
-    end
-    local hidden = 0
-    for _, stable_id in ipairs(BookDB.libraryStableIdsBySource(source_id)) do
-        if not incoming[stable_id] then hidden = hidden + 1 end
-    end
-    if not BookDB.reconcile(source_id, books) then
-        return nil, "failed to reconcile books"
-    end
-    return { pulled = #books, pushed = 0, hidden = hidden, conflicts = 0, skipped = false }
 end
 
 ---@param path string|nil
@@ -105,7 +81,7 @@ function Store.markDeleted(source_id, stable_id)
     if not BookDB.markDeleted(source_id, stable_id) then
         return false
     end
-    local _, leftover = purgeBookFiles(source_id, stable_id)
+    local _unregistered, leftover = purgeBookFiles(source_id, stable_id)
     return true, leftover
 end
 
@@ -119,7 +95,7 @@ function Store.clearCache(source_id, stable_id)
     local ok, leftover = purgeBookFiles(source_id, stable_id)
     local row = BookDB.get(source_id, stable_id)
     if not row then return ok, leftover end
-    local cached_cover = require("ui.components.image.download").cached(row.cover)
+    local cached_cover = require("ui.themes.widgets.image.download").cached(row.cover)
     if cached_cover then os.remove(cached_cover) end
     if inCache(row.path) then
         os.remove(row.path)
@@ -128,19 +104,11 @@ function Store.clearCache(source_id, stable_id)
     return ok, leftover
 end
 
---- 云端删除已确认：撕掉本地墓碑行。
----@param source_id string
----@param stable_id string
----@return boolean
-function Store.finalizeDeleted(source_id, stable_id)
-    return BookDB.remove(source_id, stable_id)
-end
-
---- 章节登记事务体：最新元数据、books.path、toc、chapters 四步任一失败即返回错误。
+--- 章节登记事务体：最新元数据、books.path、chapters 任一失败即返回错误。
 ---@param path string
 ---@param source_id string
 ---@param stable_id string
----@param opts { chapter_idx: number, toc_payload: string|nil, book: Book|nil }
+---@param opts { chapter_idx: number, book: Book|nil }
 ---@return string|nil err
 local function registerChapter(path, source_id, stable_id, opts)
     if opts.book then
@@ -151,13 +119,6 @@ local function registerChapter(path, source_id, stable_id, opts)
         if not BookDB.upsertRemote(row) then return "failed to save book metadata" end
     end
     if not BookDB.touchPath(source_id, stable_id, path) then return "failed to register book path" end
-    if opts.toc_payload and not BookDB.setToc(source_id, stable_id, opts.toc_payload) then
-        return "failed to save chapter toc"
-    end
-    if opts.toc_payload then
-        -- 直写 books.toc 后丢掉进程内缓存，避免 Toc.read 仍返回旧快照。
-        require("source.toc").invalidate(source_id, stable_id)
-    end
     if not ChapterDB.upsert({
         path = path,
         source_id = source_id,
@@ -170,10 +131,11 @@ local function registerChapter(path, source_id, stable_id, opts)
 end
 
 --- 打开/下载后登记物理路径。
---- 整本写 books.path；章节在同一事务写最新元数据、toc、books.path 和 chapters。
+--- 整本写 books.path；章节在同一事务写最新元数据、books.path 和 chapters。
+--- 目录不经这里：源的 loadTocAsync 拿到目录即经 source.toc 落库。
 ---@param path string 本地 epub/html 路径
 ---@param identity BookIdentity
----@param opts { chapter_idx: number|nil, toc: BookChapter[]|nil, book: Book|nil }|nil
+---@param opts { chapter_idx: number|nil, book: Book|nil }|nil
 ---@return boolean ok
 ---@return string|nil err
 function Store.touch(path, identity, opts)
@@ -184,80 +146,29 @@ function Store.touch(path, identity, opts)
         end
         return true
     end
-    local chapter_idx = opts.chapter_idx
-
-    local toc_payload
-    if opts.toc then
-        local ok, payload = pcall(require("json").encode, opts.toc)
-        if not ok or type(payload) ~= "string" or payload == "" then
-            return false, payload or "failed to encode chapter toc"
-        end
-        toc_payload = payload
-    end
-    if not DbBase.ensure() then return false, "failed to open book database" end
-    if not DbBase.exec("BEGIN IMMEDIATE;") then return false, "failed to begin path registration" end
-    local err = registerChapter(path, source_id, stable_id, {
-        chapter_idx = chapter_idx,
-        toc_payload = toc_payload,
-        book = opts.book,
-    })
-    if not err and not DbBase.exec("COMMIT;") then
-        err = "failed to commit path registration"
-    end
-    if err then
-        DbBase.exec("ROLLBACK;")
-        return false, err
-    end
+    if not DB.ensure() then return false, "failed to open book database" end
+    local err
+    local ok = DB.transaction(function()
+        err = registerChapter(path, source_id, stable_id, {
+            chapter_idx = opts.chapter_idx,
+            book = opts.book,
+        })
+        return err == nil
+    end)
+    if not ok then return false, err or "failed to commit path registration" end
     return true
 end
 
---- 从数据库读取书籍目录；目录缺失、损坏或超出 max_age 返回 nil。
---- 不传 max_age 则不过期（下载完成判断仍要旧目录）。
----@param identity BookIdentity
----@param max_age number|nil
----@return BookChapter[]|nil
-function Store.toc(identity, max_age)
-    if not identity or not identity.source_id or not identity.stable_id then return nil end
-    local payload = BookDB.getToc(identity.source_id, identity.stable_id, max_age)
-    if not payload then return nil end
-    local ok, toc = pcall(require("json").decode, payload)
-    if not ok or type(toc) ~= "table" or #toc == 0 then return nil end
-    return toc
-end
-
---- 本地目录与已缓存章节数是否完全一致；目录未知时不能宣称缓存完成。
----@param identity BookIdentity|nil
----@return boolean
-function Store.allChaptersCached(identity)
-    if not identity then return false end
-    local n = BookDB.tocLength(identity.source_id, identity.stable_id)
-    return n > 0 and ChapterDB.countByBook(identity.source_id, identity.stable_id) == n
-end
-
---- 本地下载：章节源要目录齐且章文件登齐；整本源有 path 即可。
----@param book Book|table|nil
----@return boolean
-function Store.isDownloaded(book)
-    if type(book) ~= "table" then return false end
-    local source_id = book.source_id
-    local meta = type(source_id) == "string" and require("source.registry").meta(source_id) or nil
-    if meta and meta.type == "chapter" then
-        return Store.allChaptersCached({
-            source_id = source_id,
-            stable_id = book.stable_id,
-        })
-    end
-    return type(book.path) == "string" and book.path ~= ""
-end
-
---- 在线书是否已完整离线到 .moon/cache（可清理）：章节源看全本缓存，整本源看 path 落在 cache 内。
+--- 在线书是否已离线到 .moon/cache（可清理）：章节源看已下载口径（BookDB.downloadedClause），整本源看 path 落在 cache 内。
 --- 本地源原书在 cache 外，恒为 false。
----@param book Book|table|nil
+---@param book Book
 ---@return boolean
 function Store.isCached(book)
-    if not Store.isDownloaded(book) then return false end
     local meta = require("source.registry").meta(book.source_id)
-    return (meta ~= nil and meta.type == "chapter") or inCache(book.path)
+    if meta and meta.type == "chapter" then
+        return BookDB.isDownloaded(book.source_id, book.stable_id, true)
+    end
+    return inCache(book.path)
 end
 
 --- 后台校验下载登记：文件被手动删掉的书撤 books.path，章节撤 chapters 行，已下载标记随之消失。
@@ -270,7 +181,7 @@ function Store.verifyDownloadsAsync(scope, cb)
     local books = BookDB.pathsBySource(scope)
     local paths = {}
     for i, row in ipairs(books) do paths[i] = row.path end
-    for _, path in ipairs(ChapterDB.pathsBySource(scope)) do paths[#paths + 1] = path end
+    for _idx, path in ipairs(ChapterDB.pathsBySource(scope)) do paths[#paths + 1] = path end
     if #paths == 0 then return nil end
     local lfs = require("libs/libkoreader-lfs")
     return require("workers.job").run(function()
@@ -284,7 +195,7 @@ function Store.verifyDownloadsAsync(scope, cb)
         kind = "light",
         on_done = function(missing)
             local gone_books, gone_chapters = {}, {}
-            for _, i in ipairs(missing or {}) do
+            for _idx, i in ipairs(missing or {}) do
                 -- 子进程结果可能已过时（期间重新下载），写库前复核
                 local path = paths[i]
                 if not lfs.attributes(path, "mode") then
@@ -332,21 +243,6 @@ function Store.identityFor(path)
         }
     end
     return nil
-end
-
---- 判断异步操作发起后，ReaderUI 是否仍打开同一物理文档。
----@param ui table|nil ReaderUI 实例
----@param identity BookIdentity|nil 发起操作时的文档身份
----@return boolean
-function Store.isCurrentDocument(ui, identity)
-    if not ui or not ui.document or not ui.document.file or not identity then
-        return false
-    end
-    local current = Store.identityFor(ui.document.file)
-    return current ~= nil
-        and current.source_id == identity.source_id
-        and current.stable_id == identity.stable_id
-        and current.chapter_idx == identity.chapter_idx
 end
 
 --- 打开时确保身份：能解析则补登记打开记录；

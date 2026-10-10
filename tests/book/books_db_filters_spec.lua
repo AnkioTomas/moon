@@ -61,12 +61,6 @@ do
                     return nil
                 end,
                 resultset = function()
-                    if sql:find("DISTINCT category", 1, true) then
-                        return { { "sub", "zeta" } }, 2
-                    end
-                    if sql:find("DISTINCT series", 1, true) then
-                        return { { "第一辑", "第二辑" } }, 2
-                    end
                     if sql:find("COUNT(*)", 1, true) and sql:find("GROUP BY", 1, true) then
                         if sql:find("WHEN read_state=1 THEN 'read'", 1, true) then
                             return { { "read", "unread" }, { 2, 4 } }, 2
@@ -116,14 +110,7 @@ do
     Assert.is_true(calls[1].sql:find("b.deleted=0 AND (CASE WHEN b.source_id=? THEN", 1, true) ~= nil)
     Assert.eq(calls[1].args[3], "wechat")
 
-    -- 分类列表
-    local cats = BookDB.categoriesBySource("local")
-    Assert.eq(#cats, 2)
-    Assert.eq(cats[1], "sub")
-    local series = BookDB.seriesBySource("local")
-    Assert.eq(#series, 2)
-    Assert.eq(series[1], "第一辑")
-    local category_counts = BookDB.categoryCountsBySource("local")
+    local category_counts = BookDB.countsBy("category", "local")
     Assert.eq(category_counts[1].category, "sub")
     Assert.eq(category_counts[1].count, 3)
     Assert.eq(category_counts[2].category, "")
@@ -133,7 +120,7 @@ do
     Assert.eq(source_counts[1].count, 3)
     Assert.eq(source_counts[2].source_id, "wechat")
     Assert.eq(source_counts[2].count, 5)
-    local series_counts = BookDB.seriesCountsBySource("local")
+    local series_counts = BookDB.countsBy("series", "local")
     Assert.eq(series_counts[1].series, "第一辑")
     Assert.eq(series_counts[1].count, 5)
     Assert.eq(series_counts[2].series, "")

@@ -8,7 +8,7 @@ reading_stats 提供统计。
   - library_mixed 打开时，列表/筛选/最近/洞察跨已启用源聚合；
     每本书仍带真实 source_id，阅读打开走属主源
 
-@module koplugin.book.catalog
+@module koplugin.book.book.catalog
 --]]
 
 --- 图书馆 / 书城列表查询参数。
@@ -23,11 +23,40 @@ reading_stats 提供统计。
 ---@field uncategorized boolean|nil 只查询 category 为 NULL/空串的未分类桶
 ---@field unseries boolean|nil 只查询 series 为 NULL/空串的无系列桶
 ---@field read_status "read"|"unread"|nil 按独立阅读状态筛选
----@field downloaded boolean|nil 只查询已下载到本地的书（口径同 Store.isDownloaded）
+---@field downloaded boolean|nil 只查询已下载到本地的书（口径同 BookDB.isDownloaded）
 ---@field source_id string|nil 混合模式下按书行所属源筛选
 ---@field force boolean|nil 强制重扫、忽略扫描缓存（本地源手动刷新）
 ---@field sort "title"|"author"|"recent_read"|"recent_added"|nil 排序字段
 ---@field sort_desc boolean|nil 是否降序
+
+--- 日历某一天的阅读摘要。
+---@class StatsCalendarDay
+---@field duration_seconds number|nil 当日阅读秒数（>0 则日历格高亮）
+---@field duration_text string|nil 当日时长文案（日详情标题）
+---@field books Book[]|nil 日详情书单（含云端单书按日时长）
+
+--- 阅读日历（insight 页月历）。
+---@class StatsCalendar
+---@field initial_ym string 初始年月，格式 YYYY-MM
+---@field days table<string, StatsCalendarDay> 键为 YYYY-MM-DD
+
+--- 阅读统计总览 KPI（insight 页英雄区 + 次级指标）。
+---@class StatsTotal
+---@field has_data boolean 是否有可展示的统计数据
+---@field total_pages number|nil 累计阅读页数
+---@field total_text string|nil 总阅读时长文案（英雄区大字）
+---@field last7_text string|nil 近 7 天阅读时长文案
+---@field longest_day_text string|nil 单日最长阅读时长文案
+
+--- 阅读洞察整页数据（总览 KPI + 日历），由 Catalog.toInsight 从 reading_stats 聚合产出。
+---@class StatsInsight
+---@field has_data boolean 是否有统计；false 时 insight 页显示空态
+---@field total StatsTotal 总览 KPI
+---@field calendar StatsCalendar 月历与日书单
+
+--- readingInsight 返回包装；失败走第二返回值 err。
+---@class BookInsightResult
+---@field data StatsInsight|nil
 
 --- 列表响应（图书馆 / 书城 / 最近阅读）。
 ---@class BookListResult
@@ -83,11 +112,11 @@ end
 ---@param preferred_id string|string[]|nil
 ---@return string|string[]|nil
 function Catalog.libraryScope(preferred_id)
-    if not require("utils.settings").libraryMixed() then
+    if not require("utils.settings").get("source").library_mixed then
         return preferred_id
     end
     local ids = {}
-    for _, meta in ipairs(require("source.registry").listEnabled()) do
+    for _idx, meta in ipairs(require("source.registry").listEnabled()) do
         ids[#ids + 1] = meta.id
     end
     if #ids == 1 then
@@ -115,6 +144,7 @@ local function toBook(row, source_id)
         percent = tonumber(row.percent) or 0,
         read_state = tonumber(row.read_state) or 0,
         path = row.path,
+        downloaded = row.downloaded,
         chapter_idx = row.chapter_idx,
         chapter_title = row.chapter_title,
         page = row.page,
@@ -129,7 +159,7 @@ end
 ---@return BookListResult
 function Catalog.toList(rows, count, source_id)
     local books = {}
-    for _, row in ipairs(rows or {}) do
+    for _idx, row in ipairs(rows or {}) do
         local book = toBook(row, source_id)
         if book then
             books[#books + 1] = book
@@ -147,7 +177,7 @@ end
 function Catalog.toInsight(source_id, summary, daily, daily_books)
     local has_data = (tonumber(summary and summary.total_seconds) or 0) > 0
     local days = {}
-    for _, d in ipairs(daily or {}) do
+    for _idx, d in ipairs(daily or {}) do
         if type(d.ymd) == "string" then
             days[d.ymd] = {
                 duration_seconds = tonumber(d.seconds) or 0,
@@ -156,7 +186,7 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
             }
         end
     end
-    local BookDB = require("db.book")
+    local BookDB = require("book.books_db")
     local function appendBook(day, b)
         if day and type(b.stable_id) == "string" and b.stable_id ~= "" then
             local sid = b.source_id or source_id
@@ -170,7 +200,7 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
                 end
             elseif type(sid) == "string" then
                 -- 只有云端时长的那天没有页坐标，退回当前阅读进度
-                local progress = require("db.progress").get(sid, b.stable_id)
+                local progress = require("book.progress_db").get(sid, b.stable_id)
                 if progress then
                     percent = math.floor((tonumber(progress.fraction) or 0) * 100 + 0.5)
                 end
@@ -190,7 +220,7 @@ function Catalog.toInsight(source_id, summary, daily, daily_books)
             }
         end
     end
-    for _, b in ipairs(daily_books or {}) do
+    for _idx, b in ipairs(daily_books or {}) do
         appendBook(type(b.ymd) == "string" and days[b.ymd] or nil, b)
     end
     local total_seconds = tonumber(summary and summary.total_seconds) or 0
@@ -245,13 +275,108 @@ end
 ---@return string[]
 local function chapterSources()
     local ids = {}
-    for _, meta in ipairs(require("source.registry").list()) do
+    for _idx, meta in ipairs(require("source.registry").list()) do
         if meta.type == "chapter" then ids[#ids + 1] = meta.id end
     end
     return ids
 end
 
---- 图书馆分页 / 搜索 / 筛选（直查 books 表）。
+--- 书库分页查询：books 筛选 + LEFT JOIN pending_progress 取进度与最近阅读排序；每行带 downloaded。
+---@param source_id string|string[]
+---@param opts table|nil limit/offset/sort/sort_desc/chapter_sources 及 BookListOpts 的筛选项
+---@return table[] rows, number count
+function Catalog.listBooks(source_id, opts)
+    opts = opts or {}
+    local DB = require("utils.db")
+    local BookDB = require("book.books_db")
+    require("book.progress_db")
+    local where, args = DB.sourceClause("b.source_id", source_id)
+    where = where .. " AND b.deleted=0"
+    if type(opts.source_id) == "string" and opts.source_id ~= "" then
+        where = where .. " AND b.source_id=?"
+        args[#args + 1] = opts.source_id
+    end
+    if opts.uncategorized then
+        where = where .. " AND (b.category IS NULL OR b.category='')"
+    elseif opts.category and opts.category ~= "" then
+        where = where .. " AND b.category=?"
+        args[#args + 1] = opts.category
+    end
+    if opts.unseries then
+        where = where .. " AND (b.series IS NULL OR b.series='')"
+    elseif opts.series and opts.series ~= "" then
+        where = where .. " AND b.series=?"
+        args[#args + 1] = opts.series
+    end
+    if opts.search and opts.search ~= "" then
+        where = where .. [[ AND (b.title LIKE ? ESCAPE '\' OR b.authors LIKE ? ESCAPE '\' OR b.stable_id LIKE ? ESCAPE '\')]]
+        local like = "%" .. opts.search:gsub("([%%_\\])", "\\%1") .. "%"
+        args[#args + 1] = like
+        args[#args + 1] = like
+        args[#args + 1] = like
+    end
+    if opts.read_status == "read" then
+        where = where .. " AND b.read_state=1"
+    elseif opts.read_status == "unread" then
+        where = where .. " AND b.read_state<>1"
+    end
+    if opts.downloaded then
+        where = where .. " AND " .. BookDB.downloadedClause(opts.chapter_sources, args)
+    end
+    local total = tonumber(DB.rowexec("SELECT COUNT(*) FROM books b WHERE " .. where .. ";", unpack(args))) or 0
+    if total == 0 then
+        return {}, 0
+    end
+    local limit = tonumber(opts.limit) or 0
+    local offset = tonumber(opts.offset) or 0
+    local sort_sql = {
+        title = "COALESCE(b.title, '') COLLATE NOCASE %s, b.stable_id ASC",
+        author = "COALESCE(b.authors, '') COLLATE NOCASE %s, COALESCE(b.title, '') COLLATE NOCASE %s, b.stable_id ASC",
+        recent_read = "COALESCE(p.updated_at, 0) DESC, b.stable_id ASC",
+        recent_added = "b.inserted_at DESC, b.stable_id ASC",
+    }
+    local order = (sort_sql[opts.sort] or sort_sql.recent_added)
+        :gsub("%%s", opts.sort_desc and "DESC" or "ASC")
+    -- SELECT 里的占位符排在 WHERE 之前，绑定参数也要按这个顺序拼。
+    local sel_args = {}
+    local downloaded = BookDB.downloadedClause(opts.chapter_sources or {}, sel_args)
+    local sel = [[SELECT b.source_id, b.stable_id, b.title, b.authors,
+                        COALESCE(p.fraction * 100, 0),
+                        b.category, b.series, b.intro, b.cover, b.inserted_at,
+                        b.read_state, b.path, ]] .. downloaded .. [[
+                   FROM books b LEFT JOIN pending_progress p
+                     ON p.source_id=b.source_id AND p.stable_id=b.stable_id
+                   WHERE ]] .. where .. " ORDER BY " .. order
+    for _idx, v in ipairs(args) do sel_args[#sel_args + 1] = v end
+    if limit > 0 then
+        sel = sel .. " LIMIT ? OFFSET ?"
+        sel_args[#sel_args + 1] = limit
+        sel_args[#sel_args + 1] = math.max(0, offset)
+    end
+    local result, nrows = DB.query(sel .. ";", unpack(sel_args))
+    local rows = {}
+    for i = 1, nrows do
+        rows[i] = {
+            source_id = result[1][i],
+            stable_id = result[2][i],
+            title = result[3][i],
+            authors = result[4][i],
+            percent = tonumber(result[5][i]) or 0,
+            category = result[6][i],
+            series = result[7][i],
+            intro = result[8][i],
+            cover = result[9][i],
+            inserted_at = tonumber(result[10][i]) or 0,
+            read_state = tonumber(result[11][i]) or 0,
+            path = result[12][i],
+            downloaded = tonumber(result[13][i]) == 1,
+            deleted = 0,
+        }
+    end
+    return rows, total
+end
+
+--- 图书馆分页 / 搜索 / 筛选。
 ---@param source_id string
 ---@param opts BookListOpts|nil
 ---@param cb fun(data: BookListResult|nil, err: string|nil)
@@ -261,7 +386,7 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
     local page = math.max(1, tonumber(opts.page) or 1)
     local page_size = math.max(1, tonumber(opts.page_size) or 24)
     return deferScoped(source_id, cb, function(scope)
-        local rows, count = require("db.book").listBySource(scope, {
+        local rows, count = Catalog.listBooks(scope, {
             category = opts.category,
             uncategorized = opts.uncategorized,
             series = opts.series,
@@ -269,7 +394,7 @@ function Catalog.listLibraryAsync(source_id, opts, cb)
             search = opts.search,
             read_status = opts.read_status,
             downloaded = opts.downloaded,
-            chapter_sources = opts.downloaded and chapterSources() or nil,
+            chapter_sources = chapterSources(),
             source_id = opts.source_id,
             sort = opts.sort,
             sort_desc = opts.sort_desc,
@@ -286,24 +411,22 @@ end
 ---@return { cancel: fun() }
 function Catalog.filtersAsync(source_id, cb)
     return deferScoped(source_id, cb, function(scope)
-        local BookDB = require("db.book")
+        local BookDB = require("book.books_db")
         local data = {
-            category = BookDB.categoriesBySource(scope),
-            category_counts = BookDB.categoryCountsBySource(scope),
-            series = BookDB.seriesBySource(scope),
-            series_counts = BookDB.seriesCountsBySource(scope),
+            category_counts = BookDB.countsBy("category", scope),
+            series_counts = BookDB.countsBy("series", scope),
             read_counts = BookDB.readStatusCountsBySource(scope),
             downloaded_count = BookDB.downloadedCountBySource(scope, chapterSources()),
         }
         -- 仅多源混合时给出源分组；顺序跟已启用列表，册数来自聚合。
         if type(scope) == "table" then
             local by_id = {}
-            for _, row in ipairs(BookDB.sourceCountsBySource(scope)) do
+            for _idx, row in ipairs(BookDB.sourceCountsBySource(scope)) do
                 by_id[row.source_id] = row.count
             end
             local Registry = require("source.registry")
             local source_counts = {}
-            for _, meta in ipairs(Registry.listEnabled()) do
+            for _idx, meta in ipairs(Registry.listEnabled()) do
                 local name = meta.name
                 if type(name) ~= "string" or name == "" then
                     name = meta.id
@@ -327,23 +450,12 @@ end
 ---@return Book[]
 ---@return string|nil
 function Catalog.recentShelf(source_id, limit)
-    local scope = Catalog.libraryScope(source_id)
-    if not validScope(scope) then
+    if not validScope(Catalog.libraryScope(source_id)) then
         return nil, {}, _("当前数据源不可用")
     end
-    ---@cast scope string|string[]
+    -- pending_progress 主键是 (source_id, stable_id)，行不重复，第一本之后即其余在读
     local rows = Catalog.recentBooks(source_id, limit or 24)
-    local recent = rows[1]
-    local skip_source = recent and recent.source_id
-    local skip = recent and recent.stable_id
-    local reading = {}
-    for i = 1, #rows do
-        local book = rows[i]
-        if not (book.stable_id == skip and book.source_id == skip_source) then
-            reading[#reading + 1] = book
-        end
-    end
-    return recent, reading, nil
+    return rows[1], { unpack(rows, 2) }, nil
 end
 
 --- 最近阅读同步快照：进度决定准入、顺序和阅读位置，books 只补书库元数据。
@@ -356,14 +468,17 @@ function Catalog.recentBooks(source_id, limit)
         return {}
     end
     ---@cast scope string|string[]
-    local progress_rows = require("db.progress").recent(scope, limit)
+    local progress_rows = require("book.progress_db").recent(scope, limit)
     local books = {}
-    local BookDB = require("db.book")
-    for _, progress in ipairs(progress_rows) do
+    local BookDB = require("book.books_db")
+    local chapter = {}
+    for _idx, id in ipairs(chapterSources()) do chapter[id] = true end
+    for _idx, progress in ipairs(progress_rows) do
         -- 按 (source_id, stable_id) 取元数据，避免跨源 stable_id 碰撞。
         local meta = BookDB.get(progress.source_id, progress.stable_id)
         local book = toBook(meta, progress.source_id)
         if book then
+            book.downloaded = BookDB.isDownloaded(book.source_id, book.stable_id, chapter[book.source_id] == true)
             book.percent = math.floor((tonumber(progress.fraction) or 0) * 100 + 0.5)
             book.chapter_idx = progress.chapter_idx
             book.chapter_title = progress.chapter_title
@@ -375,25 +490,13 @@ function Catalog.recentBooks(source_id, limit)
     return books
 end
 
---- 最近阅读（仅按 pending_progress.updated_at 倒序）。
----@param source_id string
----@param limit number|nil
----@param cb fun(data: BookListResult|nil, err: string|nil)
----@return { cancel: fun() }
-function Catalog.recentBooksAsync(source_id, limit, cb)
-    return deferScoped(source_id, cb, function(scope)
-        local rows = Catalog.recentBooks(source_id, limit or 24)
-        cb(Catalog.toList(rows, nil, type(scope) == "string" and scope or nil))
-    end)
-end
-
 --- 阅读洞察（reading_stats 聚合）。
 ---@param source_id string
 ---@param cb fun(data: BookInsightResult|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Catalog.readingInsightAsync(source_id, cb)
     return deferScoped(source_id, cb, function(scope)
-        local StatsDB = require("db.stats")
+        local StatsDB = require("book.stats_db")
         cb({
             data = Catalog.toInsight(
                 scope,

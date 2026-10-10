@@ -11,8 +11,8 @@ local lfs = require("libs/libkoreader-lfs")
 local logger = require("utils.log")
 local UIManager = require("ui/uimanager")
 local Paths = require("utils.paths")
-local BookDB = require("db.book")
-local ChapterDB = require("db.chapter")
+local BookDB = require("book.books_db")
+local ChapterDB = require("book.chapters_db")
 
 local Cache = {}
 
@@ -78,7 +78,7 @@ end
 ---@return { cancel: fun() }
 function Cache.sizeBytesAsync(cb)
     local total = 0
-    return walkAsync(Paths.cacheDir(), function(_, attr)
+    return walkAsync(Paths.cacheDir(), function(_path, attr)
         if attr.mode == "file" then total = total + (tonumber(attr.size) or 0) end
         return true
     end, function()

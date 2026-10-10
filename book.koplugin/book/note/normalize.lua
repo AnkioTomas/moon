@@ -1,7 +1,7 @@
 --[[--
 阅读注解的纯数据归一化与合并，不访问 UI、数据库或网络。
 
-@module koplugin.book.note.normalize
+@module koplugin.book.book.note.normalize
 --]]
 
 local Normalize = {}
@@ -11,7 +11,7 @@ local Normalize = {}
 ---@return table[]
 function Normalize.clean(items, total_pages)
     local result = {}
-    for _, item in ipairs(items or {}) do
+    for _idx, item in ipairs(items or {}) do
         if type(item) == "table" and item.datetime and (item.page or item.pageref) then
             result[#result + 1] = {
                 datetime = item.datetime,
@@ -33,14 +33,17 @@ function Normalize.clean(items, total_pages)
     return result
 end
 
---- 解包持久化快照：权威快照为 `{ items, authoritative }`，否则为裸数组。
----@return table[]
----@return boolean
-function Normalize.unpack(value)
-    if type(value) == "table" and type(value.items) == "table" then
+--- 解码 notes.payload：权威快照为 `{ items, authoritative }`，否则为裸数组；非法 JSON / 非表返回 nil。
+---@param payload string|nil
+---@return table[]|nil
+---@return boolean authoritative
+function Normalize.decode(payload)
+    local ok, value = pcall(require("json").decode, payload or "[]")
+    if not ok or type(value) ~= "table" then return nil, false end
+    if type(value.items) == "table" then
         return value.items, value.authoritative == true
     end
-    return type(value) == "table" and value or {}, false
+    return value, false
 end
 
 ---@param items table[]
@@ -51,13 +54,6 @@ function Normalize.pack(items, authoritative)
         return { items = items, authoritative = true }
     end
     return items
-end
-
----@param item table
----@return integer
-function Normalize.bucketKey(item)
-    local idx = tonumber(item.chapter_idx)
-    return idx and idx > 0 and idx or 0
 end
 
 --- 这条注解能否交给 ReaderView 绘制。
@@ -104,14 +100,14 @@ function Normalize.merge(remote, local_items, paging)
         }, "\31")
     end
     local merged, seen = {}, {}
-    for _, item in ipairs(remote or {}) do
+    for _idx, item in ipairs(remote or {}) do
         if type(item) == "table" and Normalize.renderable(item, paging) then
             local item_key = key(item)
             if item_key then seen[item_key] = true end
             merged[#merged + 1] = item
         end
     end
-    for _, item in ipairs(local_items or {}) do
+    for _idx, item in ipairs(local_items or {}) do
         local item_key = type(item) == "table" and key(item) or nil
         if type(item) == "table" and not (item_key and seen[item_key])
                 and Normalize.renderable(item, paging) then

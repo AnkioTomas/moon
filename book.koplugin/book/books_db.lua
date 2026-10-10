@@ -686,24 +686,11 @@ function BookDB.isDownloaded(source_id, stable_id, chapter)
     )) == 1
 end
 
---- 书架内某文本列（category / series）的非空去重值
----@param column string 可信列名
----@param source_id string|string[]
----@return string[]
-local function distinctValues(column, source_id)
-    local where, args = DB.sourceClause("source_id", source_id)
-    return stringColumn(
-        "SELECT DISTINCT " .. column .. " FROM books WHERE " .. where .. " AND deleted=0 AND "
-            .. column .. " IS NOT NULL AND " .. column .. "<>'' ORDER BY " .. column .. ";",
-        unpack(args)
-    )
-end
-
 --- 书架按某文本列（category / series）聚合册数；空值归到 ''，排在最后
----@param column string 可信列名，同时是返回行的键
+---@param column "category"|"series" 同时是返回行的键
 ---@param source_id string|string[]
 ---@return table[]
-local function countsBy(column, source_id)
+function BookDB.countsBy(column, source_id)
     local where, args = DB.sourceClause("source_id", source_id)
     local bucket = "CASE WHEN " .. column .. " IS NULL OR " .. column .. "='' THEN '' ELSE " .. column .. " END"
     local result, nrows = DB.query(
@@ -718,34 +705,6 @@ local function countsBy(column, source_id)
         rows[i] = { [column] = result[1][i] or "", count = tonumber(result[2][i]) or 0 }
     end
     return rows
-end
-
---- 某源的书库分类列表
----@param source_id string|string[]
----@return string[]
-function BookDB.categoriesBySource(source_id)
-    return distinctValues("category", source_id)
-end
-
---- 某源书架按分类聚合
----@param source_id string|string[]
----@return { category: string, count: integer }[]
-function BookDB.categoryCountsBySource(source_id)
-    return countsBy("category", source_id)
-end
-
---- 某源的书库系列列表
----@param source_id string|string[]
----@return string[]
-function BookDB.seriesBySource(source_id)
-    return distinctValues("series", source_id)
-end
-
---- 某源书架按系列聚合
----@param source_id string|string[]
----@return { series: string, count: integer }[]
-function BookDB.seriesCountsBySource(source_id)
-    return countsBy("series", source_id)
 end
 
 --- 范围内按 source_id 聚合册数
