@@ -53,16 +53,28 @@ package.loaded["features.panel.desktop"] = {
     lightPercent = function() return powerd.percent end,
 }
 
-local weather_reply, weather_fetches = nil, 0
+local weather_reply, weather_current, weather_fetches, weather_watchers = nil, nil, 0, {}
 package.loaded["online.weather"] = {
     iconKey = function(code) return code or "unknown" end,
-    fetch = function(_, args, cb)
+    current = function() return weather_current end,
+    watch = function(_, cb)
+        weather_watchers[#weather_watchers + 1] = cb
+    end,
+    unwatch = function(_, cb)
+        for i = #weather_watchers, 1, -1 do
+            if weather_watchers[i] == cb then table.remove(weather_watchers, i) end
+        end
+    end,
+    ensure = function()
         weather_fetches = weather_fetches + 1
-        Assert.eq(args.city, "Shanghai", "天气地点要 trim 后传")
-        cb(weather_reply)
-        return { cancel = function() end }
+        for i = 1, #weather_watchers do
+            weather_watchers[i](weather_reply)
+        end
     end,
 }
+
+local connected = true
+package.loaded["ui/network/manager"] = { isConnected = function() return connected end }
 
 package.loaded["features.nightmode"] = nil
 local NightMode = require("features.nightmode")
@@ -152,7 +164,14 @@ do -- 定位成功落盘经纬度
     local ok, city
     saved = 0
     weather_reply = { latitude = 31.239, longitude = 121.504, city = "Pootung", sunrise = "05:45 AM" }
+    -- 日出 05:45 只在春秋分前后对得上 UTC+8，日期必须钉死。
+    local real_date = os.date
+    os.date = function(fmt, t)
+        if fmt == "*t" and not t then return { year = 2026, month = 9, day = 27, yday = 270 } end
+        return real_date(fmt, t)
+    end
     NightMode.locate(function(a, b) ok, city = a, b end)
+    os.date = real_date
     Assert.is_true(ok)
     Assert.eq(city, "Pootung")
     Assert.eq(night.auto_night_lat, 31.239)
@@ -183,6 +202,30 @@ do -- 定位失败不动已有经纬度
     Assert.is_false(ok)
     Assert.eq(night.auto_night_lat, 31.239)
     Assert.eq(saved, 0)
+end
+
+do -- 离线且没缓存：当场失败，不挂在 watch 上干等（离线任务只排队不通知）
+    local ok
+    local fetches, watchers = weather_fetches, #weather_watchers
+    connected = false
+    NightMode.locate(function(a) ok = a end)
+    connected = true
+    Assert.is_false(ok)
+    Assert.eq(weather_fetches, fetches)
+    Assert.len(weather_watchers, watchers)
+end
+
+do -- 有缓存但无坐标：当场失败，不干等 ensure
+    local ok
+    saved = 0
+    weather_fetches = 0
+    weather_current = { temp = "1" }
+    NightMode.locate(function(a) ok = a end)
+    Assert.is_false(ok)
+    Assert.eq(weather_fetches, 0)
+    Assert.eq(night.auto_night_lat, 31.239)
+    Assert.eq(saved, 0)
+    weather_current = nil
 end
 
 do -- 日出日落模式按落盘经纬度出窗口
