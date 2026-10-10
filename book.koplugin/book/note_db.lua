@@ -222,19 +222,4 @@ function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at, payloa
     ) ~= nil
 end
 
---- 删除指定书籍或章节的注解快照。
----@param source_id string
----@param stable_id string
----@param chapter_idx integer|nil
----@return boolean
-function NoteDB.delete(source_id, stable_id, chapter_idx)
-    chapter_idx = tonumber(chapter_idx) or 0
-    return DB.exec(
-        "DELETE FROM notes WHERE source_id=? AND stable_id=? AND chapter_idx=?;",
-        source_id,
-        stable_id,
-        chapter_idx
-    ) ~= nil
-end
-
 return NoteDB

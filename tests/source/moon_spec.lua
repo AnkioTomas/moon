@@ -46,7 +46,9 @@ package.preload["book.books_db"] = function()
             return true, 0
         end,
         libraryStableIdsBySource = function() return { "a.epub", "b.epub" } end,
-        pendingDeleteIds = function() return {} end,
+        pendingDeleteIds = function()
+            return rec.marked_deleted and not rec.removed and { rec.marked_deleted.stable_id } or {}
+        end,
         markSynced = function() return true end,
         get = function() return rec.stored_book end,
         setRead = function(source_id, stable_id, is_read)
@@ -99,7 +101,7 @@ package.preload["book.catalog"] = function()
         end,
         filtersAsync = function(source_id, cb)
             rec.catalog_source = source_id
-            cb({ data = { category = { "小说", "技术" }, series = { "第一辑" } } })
+            cb({ data = { category_counts = { { category = "小说", count = 2 } } } })
             return { cancel = function() end }
         end,
     }
@@ -108,6 +110,7 @@ end
 package.preload["ui/network/manager"] = function()
     return {
         runWhenOnline = function(_, fn) fn() end,
+        isConnected = function() return not rec.offline end,
     }
 end
 
@@ -287,6 +290,7 @@ do
         stable_id = "library/a.epub",
         book = { title = "A" },
     }, nil, function(p, err) opened, open_err = p, err end)
+    require("support.stubs").flush()
     Assert.eq(rec.download_count, 1)
     Assert.eq(rec.download_id, "library/a.epub")
     Assert.eq(rec.download_path, path .. ".part")
@@ -308,6 +312,7 @@ do
     made = #Themed.made
     opened = nil
     src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p) opened = p end)
+    require("support.stubs").flush()
     Assert.eq(#Themed.made, made + 1)
     dialog = Themed.last("progress_dialog")
     Assert.is_true(dialog.shown and dialog.closed)
@@ -344,6 +349,7 @@ do
     local first, second
     src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p) first = p end)
     src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p) second = p end)
+    require("support.stubs").flush()
     Assert.eq(rec.download_count, 1)
     local file = assert(io.open(path .. ".part", "wb"))
     file:write("PK\003\004book")
@@ -354,10 +360,12 @@ do
 
     os.remove(path)
     resetRec()
+    opened = nil
     rec.download_body = "XXXX"
     src:openBookAsync({ source_id = "moon", stable_id = "library/a.epub" }, nil, function(p, err)
         opened, open_err = p, err
     end)
+    require("support.stubs").flush()
     Assert.is_nil(opened)
     Assert.eq(open_err, "下载文件校验失败")
     Assert.is_nil(lfs.attributes(path .. ".part"))
@@ -390,10 +398,7 @@ do
     src:filtersAsync(function(r) result = r end)
     Assert.is_nil(rec.filters_wire)
     Assert.eq(rec.catalog_source, "moon")
-    Assert.len(result.data.category, 2)
-    Assert.eq(result.data.category[1], "小说")
-    Assert.len(result.data.series, 1)
-    Assert.eq(result.data.series[1], "第一辑")
+    Assert.eq(result.data.category_counts[1].category, "小说")
 end
 
 -- onEvent：阅读生命周期由 session 处理；这里只响应用户统计同步请求
@@ -564,7 +569,7 @@ do
     Assert.eq(rows.rows[2].duration, 30)
 end
 
--- 长按删除：本地先标删，在线时推云端真删并撕墓碑
+-- 长按删除：本地先标删，已连网时顺手跑 dirty_only 同步推云端真删并撕墓碑
 do
     resetRec()
     local ok, err
@@ -577,6 +582,19 @@ do
     Assert.eq(rec.marked_deleted.stable_id, "a.epub")
     Assert.eq(rec.delete_books[1], "a.epub")
     Assert.eq(rec.removed.stable_id, "a.epub")
+end
+
+-- 离线删除：只落本地墓碑并立即回调成功，不发请求、不撕墓碑
+do
+    resetRec()
+    rec.offline = true
+    local ok
+    src:deleteBookAsync({ source_id = "moon", stable_id = "a.epub" }, function(success) ok = success end)
+    require("support.stubs").flush()
+    Assert.is_true(ok)
+    Assert.eq(rec.marked_deleted.stable_id, "a.epub")
+    Assert.is_nil(rec.delete_books)
+    Assert.is_nil(rec.removed)
 end
 
 -- 还原 preload/loaded，避免影响本文件之后的用例
