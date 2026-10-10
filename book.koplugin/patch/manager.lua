@@ -1,10 +1,11 @@
 --[[--
 核心文件补丁管理器（纯 Lua，零 UI 依赖）。
 
-按功能组织补丁：`patches/<feature>/definition.lua` 描述要改哪些文件、在哪个
-锚点前插入什么，以及要随运行时补丁目录一起分发的静态文件。
+补丁目录由调用方给出（如 `features/animation/patches`）：其中 `definition.lua`
+描述要改哪些文件、在哪个锚点前插入什么，以及要随运行时补丁目录一起分发的静态文件，
+静态文件与 definition.lua 同目录。
 
-安装前先备份原文件到 `$DATA/.moon/backups/patches/<feature>/`，恢复时从备份
+安装前先备份原文件到 `$DATA/.moon/backups/patches/<definition.name>/`，恢复时从备份
 回写。锚点匹配不到或备份缺失时直接失败，绝不猜测写入。
 
 @module koplugin.book.patch.manager
@@ -12,7 +13,6 @@
 
 local Manager = {}
 
-local _plugin_root
 local _install_dir
 local _backups_root
 local _patches_dir
@@ -83,28 +83,15 @@ local function copyFile(src, dst)
     return writeFile(dst, content)
 end
 
---- 初始化路径来源。生产环境只传 plugin_root，其余走 KOReader 默认路径；
---- 测试可注入临时目录隔离副作用。
----@param opts table|nil
----   - plugin_root string 插件根目录（含 patches/<feature>/）
+--- 覆盖默认路径，仅供测试注入临时目录隔离副作用；生产环境不调用。
+---@param opts table
 ---   - install_dir string|nil KOReader 安装目录，缺省 lfs.currentdir()
 ---   - backups_root string|nil 补丁备份根，缺省 $DATA/.moon/backups/patches
 ---   - patches_dir string|nil 运行时补丁目录，缺省 DataStorage:getPatchesDir()
-function Manager.onCreate(opts)
-    opts = opts or {}
-    _plugin_root = opts.plugin_root
+function Manager.configure(opts)
     _install_dir = opts.install_dir
     _backups_root = opts.backups_root
     _patches_dir = opts.patches_dir
-    -- 功能门面启动自检（延迟 require，离线只测 install/restore 时不碰 UI）
-    require("ui/uimanager"):nextTick(function()
-        local ok, err = pcall(function()
-            require("patch.page_turn_animation").checkStartup()
-        end)
-        if not ok then
-            require("utils.log").warn("book patch page_turn_animation check failed:", err)
-        end
-    end)
 end
 
 --- KOReader 安装目录（被补丁的核心文件所在），未注入时取当前工作目录。
@@ -113,14 +100,14 @@ local function installDir()
     return _install_dir or lfs().currentdir()
 end
 
---- 某功能的原文件备份目录。
----@param feature string 功能名（patches/ 下的子目录名）
+--- 某补丁的原文件备份目录。改 definition.name 会找不到已有备份。
+---@param name string definition.name
 ---@return string
-local function backupDir(feature)
+local function backupDir(name)
     if _backups_root then
-        return _backups_root .. "/" .. feature
+        return _backups_root .. "/" .. name
     end
-    return paths().patchBackupDir(feature)
+    return paths().patchBackupDir(name)
 end
 
 --- KOReader 运行时补丁目录（静态补丁文件分发到这里）。
@@ -129,25 +116,12 @@ local function patchesDir()
     return _patches_dir or require("datastorage"):getPatchesDir()
 end
 
---- 功能目录：<plugin_root>/patches/<feature>
----@param feature string
----@return string
-local function featureDir(feature)
-    if not _plugin_root then
-        error("patch.manager: plugin_root not initialized", 2)
-    end
-    return _plugin_root .. "/patches/" .. feature
-end
-
---- 加载并校验功能定义。
----@param feature string
+--- 加载并校验补丁定义。
+---@param dir string 补丁目录（含 definition.lua）
 ---@return table|nil def
 ---@return string|nil err
-function Manager.loadDefinition(feature)
-    if type(feature) ~= "string" or feature == "" or feature:find("[^%w%._%-]") then
-        return nil, "invalid feature name: " .. tostring(feature)
-    end
-    local path = featureDir(feature) .. "/definition.lua"
+function Manager.loadDefinition(dir)
+    local path = dir .. "/definition.lua"
     local chunk, lerr = loadfile(path)
     if not chunk then
         return nil, "cannot load " .. path .. ": " .. tostring(lerr)
@@ -159,15 +133,13 @@ function Manager.loadDefinition(feature)
     if type(def) ~= "table" then
         return nil, "definition must return a table"
     end
-    if type(def.name) ~= "string" or def.name == "" then
-        return nil, "definition.name required"
-    end
-    if def.name ~= feature then
-        return nil, "definition.name mismatch: " .. def.name .. " ~= " .. feature
+    -- name 拼进备份路径，只许安全字符。
+    if type(def.name) ~= "string" or def.name == "" or def.name:find("[^%w%._%-]") then
+        return nil, "invalid definition.name: " .. tostring(def.name)
     end
     def.files = type(def.files) == "table" and def.files or {}
     def.patches = type(def.patches) == "table" and def.patches or {}
-    for _, f in ipairs(def.files) do
+    for _idx, f in ipairs(def.files) do
         if type(f.path) ~= "string" or f.path == "" then
             return nil, "file.path required"
         end
@@ -185,16 +157,16 @@ function Manager.loadDefinition(feature)
 end
 
 --- 安装补丁：先备份，再按锚点插入，最后分发运行时补丁文件。
----@param feature string
+---@param dir string 补丁目录（含 definition.lua）
 ---@return table { ok = true, changed = boolean } | { ok = false, err = string }
-function Manager.install(feature)
-    local def, derr = Manager.loadDefinition(feature)
+function Manager.install(dir)
+    local def, derr = Manager.loadDefinition(dir)
     if not def then return { ok = false, err = derr } end
 
     -- 先只读校验，任何一处不满足都不落盘。
     local targets = {}
     local changed = false
-    for _, f in ipairs(def.files) do
+    for _idx, f in ipairs(def.files) do
         local path = installDir() .. "/" .. f.path
         local content, rerr = readFile(path)
         if content == nil then
@@ -210,10 +182,10 @@ function Manager.install(feature)
         targets[#targets + 1] = { f = f, path = path, content = content, needs = needs }
     end
 
-    for _, name in ipairs(def.patches) do
-        local src = featureDir(feature) .. "/" .. name
+    for _idx, name in ipairs(def.patches) do
+        local src = dir .. "/" .. name
         if not fileExists(src) then
-            return { ok = false, err = "missing patch payload: " .. feature .. "/" .. name }
+            return { ok = false, err = "missing patch payload: " .. dir .. "/" .. name }
         end
         -- 只看存在会把旧负载冻死：源文件改过也永远不重拷。
         if readFile(src) ~= readFile(patchesDir() .. "/" .. name) then
@@ -225,11 +197,11 @@ function Manager.install(feature)
         return { ok = true, changed = false }
     end
 
-    local bdir = backupDir(feature)
+    local bdir = backupDir(def.name)
 
     -- 备份永远是「未打补丁时的基线」；目标当前未打补丁就刷新为当前内容，
     -- 这样 KOReader 升级覆盖后重新安装时，备份跟随新基线。
-    for _, t in ipairs(targets) do
+    for _idx, t in ipairs(targets) do
         if t.needs then
             local ok, berr = writeFile(bdir .. "/" .. t.f.path, t.content)
             if not ok then
@@ -238,23 +210,23 @@ function Manager.install(feature)
         end
     end
 
-    for _, t in ipairs(targets) do
+    for _idx, t in ipairs(targets) do
         if t.needs then
             local pos = t.content:find(t.f.anchor, 1, true)
             local new_content = t.content:sub(1, pos - 1) .. t.f.content .. "\n" .. t.content:sub(pos)
             local ok, werr = writeFile(t.path, new_content)
             if not ok then
                 return { ok = false, err = "write failed: " .. tostring(werr)
-                    .. Manager._rollbackInstall(feature, def, targets) }
+                    .. Manager._rollbackInstall(def, targets) }
             end
         end
     end
 
-    for _, name in ipairs(def.patches) do
-        local ok, cerr = copyFile(featureDir(feature) .. "/" .. name, patchesDir() .. "/" .. name)
+    for _idx, name in ipairs(def.patches) do
+        local ok, cerr = copyFile(dir .. "/" .. name, patchesDir() .. "/" .. name)
         if not ok then
             return { ok = false, err = "copy failed: " .. tostring(cerr)
-                .. Manager._rollbackInstall(feature, def, targets) }
+                .. Manager._rollbackInstall(def, targets) }
         end
     end
 
@@ -262,21 +234,20 @@ function Manager.install(feature)
 end
 
 --- 安装中途失败时尽力回滚：恢复文件基线并清掉已分发的补丁文件。
----@param feature string
 ---@param def table
 ---@param targets table
 ---@return string suffix 拼在安装错误后；回滚全部成功时为空串，否则列出需手动恢复的文件
-function Manager._rollbackInstall(feature, def, targets)
+function Manager._rollbackInstall(def, targets)
     local failed = {}
-    for _, t in ipairs(targets) do
+    for _idx, t in ipairs(targets) do
         if t.needs then
-            local backup = readFile(backupDir(feature) .. "/" .. t.f.path)
+            local backup = readFile(backupDir(def.name) .. "/" .. t.f.path)
             local ok, werr = backup ~= nil, "backup missing"
             if ok then ok, werr = writeFile(t.path, backup) end
             if not ok then failed[#failed + 1] = t.f.path .. " (" .. tostring(werr) .. ")" end
         end
     end
-    for _, name in ipairs(def.patches) do
+    for _idx, name in ipairs(def.patches) do
         os.remove(patchesDir() .. "/" .. name)
     end
     if #failed == 0 then return "" end
@@ -285,14 +256,14 @@ end
 
 --- 恢复补丁：仅当目标仍带补丁标记时从备份回写；已失效（如升级被覆盖）则不
 --- 用陈旧备份覆盖新文件，只清理运行时补丁文件。
----@param feature string
+---@param dir string 补丁目录（含 definition.lua）
 ---@return table { ok = true } | { ok = false, err = string }
-function Manager.restore(feature)
-    local def, derr = Manager.loadDefinition(feature)
+function Manager.restore(dir)
+    local def, derr = Manager.loadDefinition(dir)
     if not def then return { ok = false, err = derr } end
 
-    local bdir = backupDir(feature)
-    for _, f in ipairs(def.files) do
+    local bdir = backupDir(def.name)
+    for _idx, f in ipairs(def.files) do
         local path = installDir() .. "/" .. f.path
         local content, rerr = readFile(path)
         if content == nil then
@@ -310,7 +281,7 @@ function Manager.restore(feature)
         end
     end
 
-    for _, name in ipairs(def.patches) do
+    for _idx, name in ipairs(def.patches) do
         os.remove(patchesDir() .. "/" .. name)
     end
 
@@ -318,18 +289,18 @@ function Manager.restore(feature)
 end
 
 --- 补丁当前是否完整安装。
----@param feature string
+---@param dir string 补丁目录（含 definition.lua）
 ---@return boolean
-function Manager.isApplied(feature)
-    local def = Manager.loadDefinition(feature)
+function Manager.isApplied(dir)
+    local def = Manager.loadDefinition(dir)
     if not def then return false end
-    for _, f in ipairs(def.files) do
+    for _idx, f in ipairs(def.files) do
         local content = readFile(installDir() .. "/" .. f.path)
         if content == nil or not content:find(f.sentinel, 1, true) then
             return false
         end
     end
-    for _, name in ipairs(def.patches) do
+    for _idx, name in ipairs(def.patches) do
         if not fileExists(patchesDir() .. "/" .. name) then
             return false
         end

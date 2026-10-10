@@ -22,7 +22,7 @@
 | [`dictionary/`](dictionary/README.md) | StarDict 接管 |
 | [`translate/`](translate/README.md) | Edge 翻译 |
 | [`baike/`](baike/README.md) | 百度百科 |
-| [`scrape/`](scrape/README.md) | 元数据刮削 |
+| [`scrape/`](scrape/README.md) | 元数据刮削（`desktop/detail/scrape/`） |
 | [`convert/`](convert/README.md) | TXT/HTML/MOBI → EPUB |
 | [`update/`](update/README.md) | 插件自更新（`features/update/`） |
 | [`patch/`](patch/README.md) | KOReader 核心补丁 |
