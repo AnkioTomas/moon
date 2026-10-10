@@ -1,18 +1,15 @@
 --[[--
 X-Ray 书级实体。
 
-@module koplugin.book.db.xray
+@module koplugin.book.features.xray.db
 --]]
 
-local Base = require("db.base")
+local DB = require("utils.db")
 
 local XrayDB = {}
 
---- 创建 X-Ray 实体表及按书籍身份查询的索引。
---- 仅在 Base.open() 的一次性 schema 初始化阶段调用。
----@return boolean 成功返回 true，SQL 失败返回 false
-function XrayDB.ensureSchema()
-    return Base.exec([[
+DB.schema("xray_entities", function()
+    return DB.exec([[
 CREATE TABLE IF NOT EXISTS xray_entities (
   source_id TEXT NOT NULL, stable_id TEXT NOT NULL, kind TEXT NOT NULL,
   name TEXT NOT NULL, aliases TEXT NOT NULL DEFAULT '',
@@ -24,7 +21,7 @@ CREATE TABLE IF NOT EXISTS xray_entities (
 CREATE INDEX IF NOT EXISTS idx_xray_entities_book
   ON xray_entities(source_id, stable_id, kind);
 ]]) ~= nil
-end
+end)
 
 local function splitAliases(encoded)
     local aliases = {}
@@ -50,7 +47,7 @@ end
 ---@return boolean
 function XrayDB.upsert(source_id, stable_id, entity, updated_at)
     local aliases = table.concat(entity.aliases, "、")
-    return Base.exec([[
+    return DB.exec([[
         INSERT INTO xray_entities
           (source_id, stable_id, kind, name, aliases, role, description,
            gender, occupation, updated_at)
@@ -79,9 +76,9 @@ function XrayDB.list(source_id, stable_id, kind)
             WHERE source_id=? AND stable_id=?]]
     local result, nrows
     if kind and kind ~= "" then
-        result, nrows = Base.query(sql .. " AND kind=? ORDER BY name COLLATE NOCASE ASC;", source_id, stable_id, kind)
+        result, nrows = DB.query(sql .. " AND kind=? ORDER BY name COLLATE NOCASE ASC;", source_id, stable_id, kind)
     else
-        result, nrows = Base.query(sql .. " ORDER BY kind ASC, name COLLATE NOCASE ASC;", source_id, stable_id)
+        result, nrows = DB.query(sql .. " ORDER BY kind ASC, name COLLATE NOCASE ASC;", source_id, stable_id)
     end
     local out = {}
     for i = 1, nrows do
@@ -106,25 +103,17 @@ end
 ---@param updated_at integer|nil
 ---@return boolean
 function XrayDB.replace(source_id, stable_id, entities, updated_at)
-    if not Base.exec("BEGIN IMMEDIATE;") then return false end
-    local ok = Base.exec(
-        [[DELETE FROM xray_entities WHERE source_id=? AND stable_id=?;]],
-        source_id, stable_id
-    ) ~= nil
-    if ok then
-        local stamp = tonumber(updated_at) or os.time()
-        for index, entity in ipairs(entities) do
-            if not XrayDB.upsert(source_id, stable_id, entity, stamp) then
-                ok = false
-                break
-            end
+    return DB.transaction(function()
+        if not DB.exec([[DELETE FROM xray_entities WHERE source_id=? AND stable_id=?;]],
+                source_id, stable_id) then
+            return false
         end
-    end
-    if ok and Base.exec("COMMIT;") then
+        local stamp = updated_at or os.time()
+        for _idx, entity in ipairs(entities) do
+            if not XrayDB.upsert(source_id, stable_id, entity, stamp) then return false end
+        end
         return true
-    end
-    Base.exec("ROLLBACK;")
-    return false
+    end) == true
 end
 
 return XrayDB

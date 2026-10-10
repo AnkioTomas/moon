@@ -5,18 +5,23 @@ sync_status=0 表示待上传，1 表示已同步。
 
 chapter_idx = 0 表示整本文件；正数表示章节文件。
 
-@module koplugin.book.db.note
+不变量：
+  - upsertRemote 只覆盖已同步行，本地脏快照不被远端盖掉。
+  - markSynced 必须把清脏与 payload 回填放在同一语句（WHERE 带 updated_at），
+    否则会吃掉上传期间的新划线。
+  - 合并 / 冲突策略在 book.note，本表只保证脏保护；完整 pull 仅开书。
+书改名 / 收编时由 books_db 调 moveIdentity 迁身份。
+
+@module koplugin.book.book.note_db
 --]]
 
-local Base = require("db.base")
+local DB = require("utils.db")
+require("book.books_db")
 
 local NoteDB = {}
 
---- 创建 notes 表。
---- 仅在 Base.open() 的一次性 schema 初始化阶段调用。
----@return boolean 成功返回 true，SQL 失败返回 false
-function NoteDB.ensureSchema()
-    return Base.exec([[
+DB.schema("notes", function()
+    return DB.exec([[
 CREATE TABLE IF NOT EXISTS notes (
   source_id TEXT NOT NULL, stable_id TEXT NOT NULL,
   chapter_idx INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL,
@@ -24,6 +29,21 @@ CREATE TABLE IF NOT EXISTS notes (
   PRIMARY KEY (source_id, stable_id, chapter_idx)
 );
 ]]) ~= nil
+end)
+
+--- 书改名 / 收编时由 books_db 调用。
+--- 收编（merge）时旧身份的笔记还没推就比新身份的已同步副本新，先清掉新身份那份。
+function NoteDB.moveIdentity(source_id, old_stable_id, new_stable_id, merge)
+    return (not merge or DB.exec(
+        [[DELETE FROM notes WHERE source_id=? AND stable_id=? AND EXISTS (
+            SELECT 1 FROM notes WHERE source_id=? AND stable_id=? AND sync_status=0);]],
+        source_id, new_stable_id, source_id, old_stable_id) ~= nil)
+        and DB.moveIdentity("notes", source_id, old_stable_id, new_stable_id, merge)
+end
+
+--- 书被删（墓碑撕掉）时由 books_db 调用。
+function NoteDB.removeIdentity(source_id, stable_id)
+    return DB.removeIdentity("notes", source_id, stable_id)
 end
 
 --- 覆盖指定书籍或章节的注解快照。
@@ -36,7 +56,7 @@ end
 ---@return boolean
 function NoteDB.upsert(source_id, stable_id, chapter_idx, payload, updated_at, synced)
     chapter_idx = tonumber(chapter_idx) or 0
-    return Base.exec(
+    return DB.exec(
         [[INSERT INTO notes (source_id, stable_id, chapter_idx, payload, updated_at, sync_status)
           VALUES (?,?,?,?,?,?)
           ON CONFLICT(source_id, stable_id, chapter_idx) DO UPDATE SET
@@ -61,7 +81,7 @@ end
 ---@return boolean
 function NoteDB.upsertRemote(source_id, stable_id, chapter_idx, payload, updated_at)
     chapter_idx = tonumber(chapter_idx) or 0
-    return Base.exec(
+    return DB.exec(
         [[INSERT INTO notes (source_id, stable_id, chapter_idx, payload, updated_at, sync_status)
           VALUES (?,?,?,?,?,1)
           ON CONFLICT(source_id, stable_id, chapter_idx) DO UPDATE SET
@@ -98,7 +118,7 @@ end
 ---@return table|nil
 function NoteDB.get(source_id, stable_id, chapter_idx)
     chapter_idx = tonumber(chapter_idx) or 0
-    local source, stable, chapter, payload, updated_at, sync_status = Base.rowexec(
+    local source, stable, chapter, payload, updated_at, sync_status = DB.rowexec(
         "SELECT " .. COLUMNS .. " FROM notes WHERE source_id=? AND stable_id=? AND chapter_idx=? LIMIT 1;",
         source_id,
         stable_id,
@@ -117,15 +137,40 @@ function NoteDB.get(source_id, stable_id, chapter_idx)
     }
 end
 
---- 列出指定源的本地注解快照。
+--- 列出指定源（再给 stable_id 则只取这本书各章）的本地注解快照。
 ---@param source_id string|nil
+---@param stable_id string|nil
 ---@return table[]
-function NoteDB.all(source_id)
+function NoteDB.all(source_id, stable_id)
     local sql = "SELECT " .. COLUMNS .. " FROM notes"
-    if source_id ~= nil then
-        return rows(Base.query(sql .. " WHERE source_id=? ORDER BY updated_at ASC;", source_id))
+    if stable_id ~= nil then
+        return rows(DB.query(sql .. " WHERE source_id=? AND stable_id=? ORDER BY updated_at ASC;",
+            source_id, stable_id))
     end
-    return rows(Base.query(sql .. " ORDER BY updated_at ASC;"))
+    if source_id ~= nil then
+        return rows(DB.query(sql .. " WHERE source_id=? ORDER BY updated_at ASC;", source_id))
+    end
+    return rows(DB.query(sql .. " ORDER BY updated_at ASC;"))
+end
+
+--- 全部注解快照连同书名作者（书行缺失时为空串）。
+---@return { source_id: string, stable_id: string, payload: string, title: string, authors: string }[]
+function NoteDB.allWithBook()
+    local result, nrows = DB.query([[SELECT n.source_id, n.stable_id, n.payload,
+        COALESCE(b.title, ''), COALESCE(b.authors, '')
+        FROM notes n LEFT JOIN books b ON b.source_id=n.source_id AND b.stable_id=n.stable_id
+        ORDER BY n.updated_at ASC;]])
+    local out = {}
+    for i = 1, nrows do
+        out[i] = {
+            source_id = result[1][i],
+            stable_id = result[2][i],
+            payload = result[3][i],
+            title = result[4][i],
+            authors = result[5][i],
+        }
+    end
+    return out
 end
 
 --- 列出未同步的本地注解快照。
@@ -134,9 +179,9 @@ end
 function NoteDB.unsynced(source_id)
     local sql = "SELECT " .. COLUMNS .. " FROM notes WHERE sync_status=0"
     if source_id ~= nil then
-        return rows(Base.query(sql .. " AND source_id=? ORDER BY updated_at ASC;", source_id))
+        return rows(DB.query(sql .. " AND source_id=? ORDER BY updated_at ASC;", source_id))
     end
-    return rows(Base.query(sql .. " ORDER BY updated_at ASC;"))
+    return rows(DB.query(sql .. " ORDER BY updated_at ASC;"))
 end
 
 --- 上传成功后落定这一版快照：写回 payload 并标记已同步，一条语句完成。
@@ -161,13 +206,13 @@ function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at, payloa
     end
     local ts = tonumber(updated_at)
     if payload ~= nil then
-        return Base.exec(
+        return DB.exec(
             [[UPDATE notes SET sync_status=1, payload=?
               WHERE source_id=? AND stable_id=? AND chapter_idx=? AND updated_at=?;]],
             payload, source_id, stable_id, idx, ts
         ) ~= nil
     end
-    return Base.exec(
+    return DB.exec(
         [[UPDATE notes SET sync_status=1
           WHERE source_id=? AND stable_id=? AND chapter_idx=? AND updated_at=?;]],
         source_id,
@@ -184,7 +229,7 @@ end
 ---@return boolean
 function NoteDB.delete(source_id, stable_id, chapter_idx)
     chapter_idx = tonumber(chapter_idx) or 0
-    return Base.exec(
+    return DB.exec(
         "DELETE FROM notes WHERE source_id=? AND stable_id=? AND chapter_idx=?;",
         source_id,
         stable_id,

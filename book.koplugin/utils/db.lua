@@ -270,6 +270,15 @@ function DB.moveIdentity(tbl, source_id, old_stable_id, new_stable_id, merge)
             source_id, old_stable_id) ~= nil
 end
 
+--- 删掉表里 (source_id, stable_id) 的全部行（以 source_id/stable_id 为身份列的表通用）。
+---@param tbl string 表名（调用方保证可信，不含用户输入）
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function DB.removeIdentity(tbl, source_id, stable_id)
+    return DB.exec("DELETE FROM " .. tbl .. " WHERE source_id=? AND stable_id=?;", source_id, stable_id) ~= nil
+end
+
 --- 把 source_id（单源字符串或多源表）收成 `col=?` / `col IN (…)`，并追加绑定参数。
 ---@param column string SQL 列名（调用方保证可信，不含用户输入）
 ---@param source_id string|string[]
