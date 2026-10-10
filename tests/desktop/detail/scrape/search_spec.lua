@@ -1,7 +1,7 @@
 --[[--
-scrape.search 离线用例：假 scrape.douban / scrape.weread，测多源编排与 cancel 语义
+desktop.detail.scrape.search 离线用例：假 douban / weread，测多源编排与 cancel 语义
 
-@module tests.scrape.search_spec
+@module tests.desktop.detail.scrape.search_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
@@ -20,7 +20,7 @@ local DoubanFake = makeFake()
 local WereadFake = makeFake()
 
 local function installFakes()
-    package.preload["scrape.douban"] = function()
+    package.preload["desktop.detail.scrape.douban"] = function()
         return {
             searchAsync = function(_, cb)
                 DoubanFake.calls = DoubanFake.calls + 1
@@ -33,7 +33,7 @@ local function installFakes()
             end,
         }
     end
-    package.preload["scrape.weread"] = function()
+    package.preload["desktop.detail.scrape.weread"] = function()
         return {
             searchAsync = function(_, cb)
                 WereadFake.calls = WereadFake.calls + 1
@@ -46,7 +46,7 @@ local function installFakes()
             end,
         }
     end
-    for _, name in ipairs({ "scrape.douban", "scrape.weread", "scrape.search" }) do
+    for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.weread", "desktop.detail.scrape.search" }) do
         package.loaded[name] = nil
     end
 end
@@ -57,14 +57,14 @@ local function resetFakes()
 end
 
 local function cleanup()
-    for _, name in ipairs({ "scrape.douban", "scrape.weread", "scrape.search" }) do
+    for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.weread", "desktop.detail.scrape.search" }) do
         package.preload[name] = nil
         package.loaded[name] = nil
     end
 end
 
 installFakes()
-local Search = require("scrape.search")
+local Search = require("desktop.detail.scrape.search")
 
 --- 收集 cb 调用
 local function recorder()

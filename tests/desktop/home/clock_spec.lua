@@ -6,9 +6,14 @@ local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
 
-local myrl_cb
+local myrl_cb, myrl_ensures = nil, 0
 package.preload["online.myrl"] = function()
-    return { fetch = function(_, _, cb) myrl_cb = cb; return { cancel = function() end } end }
+    return {
+        current = function() return nil end,
+        watch = function(_, cb) myrl_cb = cb end,
+        ensure = function() myrl_ensures = myrl_ensures + 1 end,
+        unwatch = function() end,
+    }
 end
 
 local old_date = os.date
@@ -25,7 +30,7 @@ local Clock = require("desktop.pages.home.clock")
 local clock = Clock:new()
 local slot = clock:build({ desktop = {} }, { width = 320, height = 96 })
 Assert.eq(table.concat(Kit.texts(slot), "|"), "10:20|2026-09-10 星期四|--")
-Assert.is_nil(myrl_cb, "构建不拉网")
+Assert.is_nil(myrl_cb, "构建不挂订阅")
 Assert.is_true(Clock:heightRange().height > 0)
 
 slot:paintTo(Kit.canvas(), 0, 10)
@@ -38,7 +43,6 @@ Assert.eq(clock.extra.text, "农历七月廿八 · 中秋")
 Assert.len(Kit.dirty, 1)
 Assert.eq(Kit.dirty[1].region.y, 10, "只刷自己的矩形")
 
-clock:pull()
 myrl_cb({ lunar = "农历七月廿八", holiday = "中秋" })
 Assert.len(Kit.dirty, 1, "缓存返回同内容新表也不刷新")
 

@@ -1,7 +1,7 @@
 --[[--
-scrape.ui 离线用例：本地元数据写入、失败收口与封面原子替换。
+desktop.detail.scrape.ui 离线用例：本地元数据写入、失败收口与封面原子替换。
 
-@module tests.scrape.ui_spec
+@module tests.desktop.detail.scrape.ui_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
@@ -25,7 +25,7 @@ end
 local Themed = require("support.theme_stubs")
 Themed.install()
 Themed.on_show = function(o) shown[#shown + 1] = o end
-package.preload["scrape.results"] = function()
+package.preload["desktop.detail.scrape.results"] = function()
     return {
         new = function(_, o)
             function o:show() shown[#shown + 1] = self end
@@ -33,9 +33,14 @@ package.preload["scrape.results"] = function()
         end,
     }
 end
-package.preload["scrape.search"] = function()
+local search_pending
+package.preload["desktop.detail.scrape.search"] = function()
     return {
         searchAsync = function(_, cb)
+            if search_pending then
+                search_pending.cb = cb
+                return { cancel = function() search_pending.cancelled = true end }
+            end
             cb({ {
                 title = "刮削标题",
                 author = "刮削作者",
@@ -102,13 +107,13 @@ end
 
 for _, name in ipairs({
     "ui/uimanager",
-    "scrape.results", "scrape.search", "ui.themes.widgets.image", "book.books_db",
-    "utils.paths", "source.base", "source.registry", "scrape.ui",
+    "desktop.detail.scrape.results", "desktop.detail.scrape.search", "ui.themes.widgets.image", "book.books_db",
+    "utils.paths", "source.base", "source.registry", "desktop.detail.scrape.ui",
 }) do
     package.loaded[name] = nil
 end
 
-local ScrapeUI = require("scrape.ui")
+local ScrapeUI = require("desktop.detail.scrape.ui")
 local identity = { source_id = "local", stable_id = "/books/a.epub" }
 
 local function write(path, data)
@@ -124,14 +129,17 @@ local function read(path)
     return data
 end
 
+local owner = {}
+
 local function startAndPick()
     shown = {}
-    ScrapeUI.start(identity, "原书名")
+    ScrapeUI.start(identity, "原书名", nil, owner)
     local dialog = shown[#shown]
     Assert.eq(dialog.fields[1].text, "原书名")
     dialog.callback(dialog.fields[1].text)
     local results = shown[#shown]
     results.on_pick(results.results[1])
+    Assert.is_nil(owner.scrape_job, "同步完成的搜索不留句柄")
 end
 
 local function exists(path)
@@ -183,6 +191,18 @@ image_path = nil
 startAndPick()
 Assert.is_false(exists(cover_path))
 Assert.eq(shown[#shown].text, "元数据已更新")
+
+-- 搜索在飞时详情页关闭：取消搜索并收起「搜索中」提示，之后不再弹结果页。
+search_pending = {}
+shown = {}
+ScrapeUI.start(identity, "原书名", nil, owner)
+shown[#shown].callback("原书名")
+local searching = shown[#shown]
+Assert.eq(searching.text, "搜索中...")
+owner.scrape_job.cancel()
+Assert.is_true(search_pending.cancelled)
+Assert.is_true(searching.closed)
+search_pending = nil
 
 pcall(os.remove, Config.dir() .. "/scrape-source.png")
 pcall(os.remove, cover_path)

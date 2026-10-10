@@ -100,8 +100,8 @@ end
 -- 首帧是加载占位；nextTick 里经源读洞察并重建（Kit 的 nextTick 同步，重建先于占位返回）。
 Assert.is_true(has(insight:updateView(), "加载统计…"))
 Assert.eq(insight_reads, 1)
-Assert.is_true(insight.loaded)
-Assert.is_false(insight.fetching)
+Assert.is_true(insight.state ~= nil)
+Assert.is_nil(insight.fetch_cancel, "同步回调不留句柄")
 Assert.eq(view_updates, 1)
 Assert.eq(insight.state.selected, today, "有记录的今天默认选中")
 
@@ -165,13 +165,15 @@ Assert.is_false(nav[#nav].enabled)
 
 -- 换源重置回未加载。
 insight:onEvent("source_changed")
-Assert.is_false(insight.loaded)
+Assert.is_nil(insight.state)
 Assert.eq(insight.ui_page, 1)
 
 -- 统计变化：作废缓存，下次进页重读。
-insight.loaded, insight.state = true, { has_data = true }
+insight.state = { has_data = true }
 insight:onEvent("stats_changed")
-Assert.is_false(insight.loaded)
 Assert.is_nil(insight.state)
+local reads_before = insight_reads
+insight:updateView()
+Assert.eq(insight_reads, reads_before + 1, "作废后进页重读")
 
 return true

@@ -1,0 +1,174 @@
+--[[-- 阅读设置：阅读行为、划词选区、划词菜单项。
+@module koplugin.book.desktop.pages.setting.reader
+--]]
+
+local Sheet = require("ui.themes.widgets.sheet")
+local MoonSettings = require("utils.settings")
+local Row = require("ui.themes.widgets.row")
+local _ = require("gettext")
+local T = require("ffi/util").template
+
+---@class BookSettingsReader
+local ReaderSettings = {}
+
+--- 设置页列表顺序；实际弹窗顺序以 HighlightMenu.order() 为准。
+---@type { id: string, title: string, icon: string }[]
+local POPUP_BUTTONS = {
+    { id = "select", title = _("选择"), icon = "highlight" },
+    { id = "highlight", title = _("高亮"), icon = "format_ink_highlighter" },
+    { id = "copy", title = _("复制"), icon = "content_copy" },
+    { id = "add_note", title = _("添加笔记"), icon = "note_add" },
+    -- 保持 wikipedia id，兼容已保存的划词菜单显示设置。
+    { id = "wikipedia", title = _("百度百科"), icon = "language" },
+    { id = "dictionary", title = _("词典"), icon = "book" },
+    { id = "translate", title = _("翻译"), icon = "translate" },
+    { id = "xray", title = _("X-Ray 查询"), icon = "person_search" },
+    { id = "ai_explain", title = _("AI 解释"), icon = "auto_awesome" },
+    { id = "view_html", title = _("查看HTML"), icon = "code" },
+    { id = "qrcode", title = _("生成二维码"), icon = "qr_code" },
+    { id = "search", title = _("搜索"), icon = "search" },
+}
+
+---@return table|nil
+local function readerUi()
+    return require("apps/reader/readerui").instance
+end
+
+--- 布尔开关行：翻转后落盘并重建桌面。
+---@param desktop table
+---@param section string 配置分区
+---@param data table 该分区的配置表
+---@param key string 设置键
+---@param on boolean 当前状态
+---@param row table 图标、标题等其余 SettingRow 字段
+---@return fun(iw: number): table
+local function toggleRow(desktop, section, data, key, on, row)
+    return function(iw)
+        row.toggle = on
+        row.callback = function()
+            data[key] = not on
+            MoonSettings.save(section, data)
+            desktop:updateView()
+        end
+        row.width = iw
+        return Row.widget(row)
+    end
+end
+
+---@param desktop table
+---@param item { id: string, title: string, icon: string }
+---@return fun(width: number): table
+local function popupConfigureRow(desktop, item)
+    return function(iw)
+        local reader = MoonSettings.get("reader")
+        local buttons = reader.reader_popup_buttons or {}
+        local order = require("reader.highlight_menu").order()
+        local position
+        for i, key in ipairs(order) do
+            if key == item.id then position = i break end
+        end
+        local enabled = buttons[item.id] ~= false
+        return Row.widget({
+            width = iw,
+            kind = "nav", icon = item.icon, title = item.title,
+            status = enabled and T(_("第 %1 位"), position) or _("关闭"), status_on = enabled,
+            callback = function()
+                local actions = {{
+                    text = enabled and _("停用") or _("启用"),
+                    callback = function()
+                        reader.reader_popup_buttons = reader.reader_popup_buttons or {}
+                        reader.reader_popup_buttons[item.id] = not enabled
+                        MoonSettings.save("reader", reader)
+                        desktop:updateView()
+                    end,
+                }}
+                if enabled then
+                    local function move(delta)
+                        local next_pos = position + delta
+                        order[position], order[next_pos] = order[next_pos], order[position]
+                        reader.reader_popup_button_order = order
+                        MoonSettings.save("reader", reader)
+                        desktop:updateView()
+                    end
+                    actions[#actions + 1] = { text = _("上移"), enabled = position > 1, callback = function() move(-1) end }
+                    actions[#actions + 1] = { text = _("下移"), enabled = position < #order, callback = function() move(1) end }
+                end
+                actions[#actions + 1] = { text = _("关闭") }
+                Sheet:new{ title = item.title, items = actions }:show()
+            end,
+        })
+    end
+end
+
+--- 构建划词菜单操作列表。
+---@param desktop table
+---@return function[]
+function ReaderSettings:popupRows(desktop)
+    local rows = {}
+    for _idx, item in ipairs(POPUP_BUTTONS) do
+        rows[#rows + 1] = popupConfigureRow(desktop, item)
+    end
+    return rows
+end
+
+---@param desktop table
+---@return BookQuickPanelSettingSection[]
+function ReaderSettings:sections(desktop)
+    local reader = MoonSettings.get("reader")
+    local auto_mark_read = reader.auto_mark_read_at_99 == true
+    local rows = {
+        function(iw)
+            local footnote_on = G_reader_settings:isTrue("footnote_link_in_popup")
+            return Row.widget({
+                width = iw,
+                icon = "article", title = _("脚注弹窗"),
+                subtitle = _("脚注链接在弹窗中显示，而不是跳转"),
+                toggle = footnote_on,
+                callback = function()
+                    G_reader_settings:saveSetting("footnote_link_in_popup", not footnote_on)
+                    desktop:updateView()
+                end,
+            })
+        end,
+    }
+    rows[#rows + 1] = toggleRow(desktop, "reader", reader, "auto_mark_read_at_99", auto_mark_read, {
+        icon = "done_all", title = _("读到 99% 自动标记已读"),
+    })
+    return { { title = _("行为"), rows = rows } }
+end
+
+--- 划词页「选区」分节；翻译、X-Ray 由各自 feature 追加到同一页，词典和百科有自己的页面。
+---@param desktop table
+---@return BookQuickPanelSettingSection[]
+function ReaderSettings:lookupSections(desktop)
+    local reader = MoonSettings.get("reader")
+    local handles_on = reader.selection_handles_enabled ~= false
+    return {
+        {
+            title = _("选区"),
+            rows = {
+                function(iw)
+                    return Row.widget({
+                        width = iw,
+                        icon = "swipe", title = _("划词手柄"),
+                        subtitle = _("选区两端可拖指示器"),
+                        toggle = handles_on,
+                        callback = function()
+                            reader.selection_handles_enabled = not handles_on
+                            MoonSettings.save("reader", reader)
+                            if handles_on then
+                                local ui = readerUi()
+                                if ui and ui.highlight then
+                                    require("reader.selection").detach(ui.highlight)
+                                end
+                            end
+                            desktop:updateView()
+                        end,
+                    })
+                end,
+            },
+        },
+    }
+end
+
+return ReaderSettings

@@ -48,14 +48,13 @@ local desktop = {
     onEvent = function(self, event, payload)
         Assert.is_true(event ~= "home_refresh", "同步不得整页重建首页")
         if event == "stats_changed" or event == "shelf_changed" then refreshes = refreshes + 1 end
-        if event == "shelf_sync_failed" then self.sync_err = payload end
     end,
 }
 
 -- 桌面可见：书架与统计都在后台同步，不重建页面。
 Sync.open(desktop)
 Assert.eq(view_updates, 0)
-Assert.is_false(desktop._books_sync_pending)
+Assert.is_nil(desktop._books_sync_request)
 Assert.eq(sync_calls, 1)
 Assert.eq(stats_calls, 1)
 Assert.is_true(desktop._stats_sync_pending)
@@ -101,10 +100,15 @@ end
 Sync.open(desktop)
 Assert.eq(refreshes, 2)
 
--- 书架同步失败：错误以事件广播，由图书馆自己决定是否显示。
+-- 书架同步失败：本地书架不动；后台同步不提示，手动刷新才提示。
 desktop.tab = "library"
+Themed.made = {}
+local updates_before = view_updates
 Sync.open(desktop)
-Assert.eq(desktop.sync_err, "offline")
+Assert.is_nil(Themed.last("toast"), "后台同步离线失败不打扰")
+Assert.eq(view_updates, updates_before, "失败不重建图书馆")
+Sync.refresh(desktop)
+Assert.eq(Themed.last("toast").text, "offline")
 desktop.tab = "home"
 
 -- 书架对账计数全 0：不重建首页。
@@ -153,9 +157,9 @@ Assert.len(followed, 1)
 Assert.len(rejected, 1)
 Assert.eq(rejected[1].reason, "running")
 Assert.eq(rejected[1].task, followed[1])
-Assert.is_true(desktop._books_sync_pending)
+Assert.is_true(desktop._books_sync_request ~= nil)
 first.cb({ skipped = true })
-Assert.is_false(desktop._books_sync_pending)
+Assert.is_nil(desktop._books_sync_request)
 Assert.eq(#Tasks.tasks(), 0)
 
 -- 自动后台同步在飞时手动刷新：取代它；旧请求迟到的进度与结果丢弃。
@@ -168,10 +172,10 @@ local forced = pending[#pending]
 Assert.is_true(forced.opts.force)
 auto.opts.on_progress("旧请求", 2, 3)
 auto.cb({ skipped = true })
-Assert.is_true(desktop._books_sync_pending, "旧请求结果不落地")
+Assert.is_true(desktop._books_sync_request ~= nil, "旧请求结果不落地")
 Assert.is_nil(Tasks.tasks()[1].text)
 forced.cb({ skipped = true })
-Assert.is_false(desktop._books_sync_pending)
+Assert.is_nil(desktop._books_sync_request)
 Assert.eq(#Tasks.tasks(), 0)
 
 -- 换源后旧源的结果不落到新源的页面上。
@@ -182,7 +186,7 @@ desktop.source = other
 local stale_events = 0
 desktop.onEvent = function() stale_events = stale_events + 1 end
 stale.cb({ pulled = 1, pushed = 0, hidden = 0 })
-Assert.is_false(desktop._books_sync_pending)
+Assert.is_nil(desktop._books_sync_request)
 Assert.eq(stale_events, 0)
 desktop.source = source
 

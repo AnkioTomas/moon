@@ -66,13 +66,12 @@ Assert.eq(rows[2](600).title, "界面字体")
 Assert.eq(rows[3](600).title, "界面缩放")
 Assert.eq(rows[4](600).title, "书架每行数量")
 Assert.eq(rows[5](600).title, "背景遮罩")
-Assert.eq(rows[5](600).status, "开")
-Assert.is_true(rows[5](600).status_on)
+Assert.is_true(rows[5](600).toggle)
 Assert.len(rows, 7, "夜间与亮度不在显示分节")
 Assert.eq(rows[6](600).title, "屏幕刷新")
 Assert.eq(rows[6](600).status, "每 6 页")
 Assert.eq(rows[7](600).title, "彩色屏幕支持")
-Assert.is_false(rows[7](600).status_on)
+Assert.is_false(rows[7](600).toggle)
 
 eink, color_screen, frontlight = false, false, false
 package.loaded["device"] = nil

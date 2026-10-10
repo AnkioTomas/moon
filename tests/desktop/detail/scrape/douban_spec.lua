@@ -1,7 +1,7 @@
 --[[--
-scrape.douban 离线用例：打桩 http.request / socket.url，经 searchAsync 驱动 HTML 解析
+desktop.detail.scrape.douban 离线用例：打桩 http.request / socket.url，经 searchAsync 驱动 HTML 解析
 
-@module tests.scrape.douban_spec
+@module tests.desktop.detail.scrape.douban_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
@@ -9,7 +9,7 @@ local Assert = require("support.assert")
 local Config = require("support.config")
 
 local function readFixture(name)
-    local path = Config.root() .. "/tests/scrape/fixtures/" .. name
+    local path = Config.root() .. "/tests/desktop/detail/scrape/fixtures/" .. name
     local f = assert(io.open(path, "r"))
     local data = f:read("*a")
     f:close()
@@ -55,13 +55,13 @@ package.preload["socket.url"] = function()
 end
 
 -- runner 会跨文件保留 socket.* 的 package.loaded，先清掉再吃自己的 preload
-for _, name in ipairs({ "http.request", "socket.url", "scrape.douban" }) do
+for _, name in ipairs({ "http.request", "socket.url", "desktop.detail.scrape.douban" }) do
     package.loaded[name] = nil
 end
-local Douban = require("scrape.douban")
+local Douban = require("desktop.detail.scrape.douban")
 
 local function cleanup()
-    for _, name in ipairs({ "http.request", "socket.url", "scrape.douban" }) do
+    for _, name in ipairs({ "http.request", "socket.url", "desktop.detail.scrape.douban" }) do
         package.preload[name] = nil
         package.loaded[name] = nil
     end
