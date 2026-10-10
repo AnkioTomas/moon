@@ -165,4 +165,3 @@ native_ui = nil
 Reader.onCreate(plugin)
 Assert.is_nil(native_ui, "同一 ReaderUI 不应重复安装")
 
-Reader.refresh(plugin)

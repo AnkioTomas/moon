@@ -16,7 +16,15 @@ end
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(s) return s end end
 package.preload["book.note_db"] = function()
-    return { all = function() return state.rows end }
+    return {
+        all = function(source_id, stable_id)
+            local out = {}
+            for _, row in ipairs(state.rows) do
+                if row.source_id == source_id and row.stable_id == stable_id then out[#out + 1] = row end
+            end
+            return out
+        end,
+    }
 end
 package.preload["reader.session"] = function()
     return {

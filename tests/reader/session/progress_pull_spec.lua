@@ -51,7 +51,8 @@ package.preload["reader.session"] = function()
         current = function()
             return {
                 identity = current_identity,
-                ui = {},
+                ui = { document = { getPageCount = function() return 10 end }, handleEvent = function() end },
+                chapter = { toc = { {}, {}, {}, {}, {} } },
                 doc_fraction = 0,
             }
         end,
@@ -107,7 +108,8 @@ current_identity.source = source
 local function snapshot()
     return {
         identity = current_identity,
-        ui = {},
+        ui = { document = { getPageCount = function() return 10 end }, handleEvent = function() end },
+        chapter = { toc = { {}, {}, {}, {}, {} } },
         doc_fraction = 0,
     }
 end
@@ -151,7 +153,7 @@ do
     Assert.eq(synced[1], "b1", "选本地后应推上去收敛")
 end
 
--- 点空白关闭（两个 callback 都不跑）不应算已决议：同一本书还要能再问
+-- 弹窗还没答时再 pull（换章 / 唤醒）不能叠第二个窗
 do
     Progress.clearConflicts()
     shown = {}
@@ -159,10 +161,10 @@ do
     Progress.pull(snapshot())
     Stubs.flush()
     Assert.len(shown, 1)
-    Progress.pull(snapshot()) -- 未决议 → 允许再问
+    Progress.pull(snapshot())
     Stubs.flush()
-    Assert.len(shown, 2, "弹窗被忽略时不应把本次会话标记为已问过")
-    shown[2].ok_callback()
+    Assert.len(shown, 1, "未答的冲突框不能叠窗")
+    shown[1].ok_callback()
     Stubs.flush()
     shown = {}
     Progress.pull(snapshot())

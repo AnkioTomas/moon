@@ -10,25 +10,11 @@ local Stubs = require("support.stubs")
 Stubs.install()
 Stubs.reset()
 
-package.preload["ui/event"] = function()
-    return {
-        new = function(_, name, ...)
-            return { name = name, args = { ... } }
-        end,
-    }
-end
-
 local DocumentToc = require("reader.session.document_toc")
 
-local state = {
-    last_event = nil,
-    page = 12,
-}
+local state = { page = 12 }
 local ui = {
     getCurrentPage = function() return state.page end,
-    handleEvent = function(_, ev)
-        state.last_event = ev
-    end,
     document = {
         getToc = function()
             return {
@@ -54,10 +40,6 @@ local ui = {
             if page >= 10 then return "第一章" end
             return "序"
         end,
-        getNextChapter = function(_, page)
-            if page < 10 then return 10 end
-            if page < 20 then return 20 end
-        end,
         ui = nil,
     },
 }
@@ -71,8 +53,12 @@ Assert.not_nil(current)
 Assert.eq(current.idx, 2)
 Assert.eq(current.title, "第一章")
 
-Assert.is_true(DocumentToc.gotoIndex(ui, 3))
-Assert.eq(state.last_event.name, "GotoXPointer")
-
-Assert.is_true(DocumentToc.onBoundary(ui, 1))
-Assert.eq(state.last_event.name, "GotoPage")
+-- 流式文档（有 xpointer）：章内比例仍按页码算，ReaderToc 的章内页数接口不认 xpointer。
+do
+    ui.document.getXPointer = function() return "/body/DocFragment[3]/p[2]" end
+    ui.toc.getChapterPagesDone = function(_, page) return type(page) == "number" and page - 10 or nil end
+    ui.toc.getChapterPagesLeft = function(_, page) return type(page) == "number" and 19 - page or nil end
+    state.page = 15
+    Assert.eq(DocumentToc.chapterFraction(ui), 5 / 9)
+    ui.document.getXPointer = nil
+end

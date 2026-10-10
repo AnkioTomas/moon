@@ -215,9 +215,6 @@ package.preload["reader.page"] = function()
         onCreate = function(plugin)
             calls.reader[#calls.reader + 1] = { "onCreate" }
         end,
-        refresh = function(plugin)
-            calls.reader[#calls.reader + 1] = { "refresh" }
-        end,
     }
 end
 local bar_apply_count = 0
@@ -341,11 +338,12 @@ do
     Assert.eq(calls.prefetch.from_idx, 1)
     Assert.eq(calls.prefetch.count, 3)
 
-    Assert.is_false(Session.onStartOfBook(), "首章不能继续向前")
-    Assert.is_true(Session.onEndOfBook(), "章末触发下一章")
+    local ChapterMode = require("reader.session.chapter")
+    Assert.is_false(ChapterMode.onChapterBoundary(Session.current(), -1), "首章不能继续向前")
+    Assert.is_true(ChapterMode.onChapterBoundary(Session.current(), 1), "章末触发下一章")
     Assert.eq(opened, 1)
     -- 在途期间重复边界事件仍算「已处理」（吞掉原生 EndOfBook 弹窗），但不再发起第二次请求
-    Assert.is_true(Session.onEndOfBook(), "请求在途时锁住重复边界事件")
+    Assert.is_true(ChapterMode.onChapterBoundary(Session.current(), 1), "请求在途时锁住重复边界事件")
     Assert.eq(opened, 1, "在途时不得重复发起切章请求")
     callback(nil, "download failed")
     Assert.is_true(Session.gotoChapter(2), "失败后允许再次切章")
@@ -469,9 +467,9 @@ end
 -- 注解事件离线：只落盘，不 push，也不走 runWhenOnline 弹联网提示。
 do
     local NetworkMgr = require("ui/network/manager")
-    local old_online, old_run = NetworkMgr.isOnline, NetworkMgr.runWhenOnline
+    local old_connected, old_run = NetworkMgr.isConnected, NetworkMgr.runWhenOnline
     local prompted = false
-    NetworkMgr.isOnline = function() return false end
+    NetworkMgr.isConnected = function() return false end
     NetworkMgr.runWhenOnline = function() prompted = true end
     local plugin = mkPlugin("/x/book.epub")
     plugin.ui.annotation = { annotations = { { text = "高亮" } } }
@@ -482,7 +480,7 @@ do
     Assert.eq(calls.notes[notes_before + 1][2], plugin.ui)
     Assert.is_nil(calls.notes[notes_before + 2], "离线不 push")
     Assert.is_false(prompted, "离线不弹联网提示")
-    NetworkMgr.isOnline, NetworkMgr.runWhenOnline = old_online, old_run
+    NetworkMgr.isConnected, NetworkMgr.runWhenOnline = old_connected, old_run
     Session.onCloseDocument(plugin)
 end
 
@@ -546,9 +544,14 @@ do
     Assert.eq(start_call[2].identity.stable_id, "b1")
 
     -- 翻页：更新快照 + 刷新 + 分发 page_changed
+    local UIManager = require("ui/uimanager")
+    local old_dirty, dirtied = UIManager.setDirty, nil
+    plugin.ui.dialog = {}
+    UIManager.setDirty = function(_self, widget) dirtied = widget end
     Session.onPageUpdate(plugin, 6)
+    UIManager.setDirty = old_dirty
     Assert.eq(Session.current().page, 6)
-    Assert.eq(calls.reader[#calls.reader][1], "refresh")
+    Assert.is_true(dirtied == plugin.ui.dialog, "翻页刷新阅读窗口")
     local ev = emitted[#emitted]
     Assert.eq(ev.ev, "page_changed")
     Assert.eq(ev.payload.identity.stable_id, "b1")
