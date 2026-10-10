@@ -126,29 +126,29 @@ local chapter_src = {
 
 -- 底栏动作规划。
 local unread = { source_id = "local", stable_id = "b1", title = "书一", read_state = 0, percent = 12 }
-local tools, primary = Detail.actionPlan(unread, local_src, "library")
+local tools, primary = Detail.actionPlan(unread, local_src)
 Assert.eq(ids(tools), "edit,scrape,read,delete")
 Assert.eq(primary.id, "open")
 Assert.eq(primary.text, "继续阅读")
 unread.percent = 0
-_, primary = Detail.actionPlan(unread, local_src, "library")
+_, primary = Detail.actionPlan(unread, local_src)
 Assert.eq(primary.text, "开始阅读")
 
 local read_book = { source_id = "wechat", stable_id = "w1", title = "微信书", read_state = 1, percent = 100 }
-tools, primary = Detail.actionPlan(read_book, chapter_src, "library")
+tools, primary = Detail.actionPlan(read_book, chapter_src)
 Assert.eq(ids(tools), "download,unread,delete")
 Assert.eq(primary.text, "开始阅读")
 read_book.cached = true
-tools = Detail.actionPlan(read_book, chapter_src, "library")
+tools = Detail.actionPlan(read_book, chapter_src)
 Assert.eq(ids(tools), "clear_cache,unread,delete")
 
 -- 整本在线源：无下载入口，离线副本在 cache 内才给清理
 local online_book_src = setmetatable({ id = "moon", type = "book" }, SourceDefaults)
 local moon_book = { source_id = "moon", stable_id = "m1", read_state = 0 }
-tools = Detail.actionPlan(moon_book, online_book_src, "library")
+tools = Detail.actionPlan(moon_book, online_book_src)
 Assert.eq(ids(tools), "read,delete")
 moon_book.cached = true
-tools = Detail.actionPlan(moon_book, online_book_src, "library")
+tools = Detail.actionPlan(moon_book, online_book_src)
 Assert.eq(ids(tools), "clear_cache,read,delete")
 
 --- 模拟桌面：记录 updateView / onEvent。
@@ -282,18 +282,18 @@ Assert.eq(Themed.last("toast").text, "云端拒绝")
 Assert.is_nil(page.closed)
 page:close()
 
--- 编辑：主题 Input 四个字段，保存写库并通知属主源；写库失败不上行。
-local meta_events = {}
+-- 编辑：主题 Input 四个字段，保存写库并通知属主源；移动走属主源（不看当前活跃源）；写库失败不上行并提示。
+local meta_events, moved = {}, {}
 resolved = {
     id = "local",
     capabilities = function() return { edit = true } end,
     onEvent = function(_, event, payload) meta_events[#meta_events + 1] = { event = event, payload = payload } end,
+    moveBook = function(_, stable_id, category)
+        moved[#moved + 1] = category
+        return stable_id
+    end,
 }
-desktop.source = {
-    id = "local",
-    capabilities = local_src.capabilities,
-    moveBook = function(_, stable_id) return stable_id end,
-}
+desktop.source = { id = "wechat", capabilities = local_src.capabilities }
 Detail.open(desktop, "library", { source_id = "local", stable_id = "webdav://a.epub", title = "旧名" })
 page = desktop.detail
 page:openEditor()
@@ -309,9 +309,11 @@ Assert.eq(meta_events[1].event, "book_meta_changed")
 Assert.eq(meta_events[1].payload.identity.stable_id, "webdav://a.epub")
 Assert.is_false(meta_events[1].payload.cover)
 Assert.eq(Themed.last("toast").text, "元数据已更新")
+Assert.eq(moved[1], "分类")
 upsert_ok = false
 page:saveMeta({ "又改", "", "", "" })
 Assert.len(meta_events, 1, "写库失败不上行")
+Assert.eq(Themed.last("toast").text, "保存元信息失败")
 upsert_ok = true
 db_row = nil
 page:close()

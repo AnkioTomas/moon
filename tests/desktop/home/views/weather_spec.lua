@@ -1,5 +1,5 @@
 --[[--
-天气：自己拉网，成功才刷；同 URL 复用图标框；暂停撤定时并取消图标下载；设置框地名只收英文。
+天气：读 online.weather，成功才刷；同 URL 复用图标框；暂停撤定时并丢掉图标；设置框地名只收英文。
 @module tests.desktop.pages.home.weather_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
@@ -14,11 +14,15 @@ Kit.sections.home = { home_weather_city = "Shanghai" }
 package.preload["utils.text"] = function()
     return { trim = function(s) return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")) end }
 end
-local fetch_cb, fetch_args, cancelled = nil, nil, 0
+local fetch_cb, fetch_args, watch_cb, unwatched, cancelled, ensures = nil, nil, nil, 0, 0, 0
 local ICON_URL = "https://cdn.example/weather/"
 package.preload["online.weather"] = function()
     return {
         iconUrl = function(key) return ICON_URL .. key .. ".png" end,
+        current = function() return nil end,
+        watch = function(_, cb) watch_cb = cb end,
+        ensure = function() ensures = ensures + 1 end,
+        unwatch = function() unwatched = unwatched + 1 end,
         fetch = function(_, args, cb)
             fetch_args, fetch_cb = args, cb
             return { cancel = function() cancelled = cancelled + 1 end }
@@ -40,26 +44,28 @@ do -- 空态：多云占位 + --°；失败不改字也不刷新
     local slot = weather:build(ctx, opts)
     Assert.eq(table.concat(Kit.texts(slot), "|"), "--°|--|--")
     Assert.eq(weather.picture.src, ICON_URL .. "cloud.png")
-    Assert.is_nil(fetch_cb, "构建不拉网")
+    Assert.is_nil(watch_cb, "构建不挂订阅")
     slot:paintTo(Kit.canvas(), 0, 10)
     weather:activate()
-    Assert.eq(fetch_args.city, "Shanghai")
+    Assert.not_nil(watch_cb)
+    Assert.eq(ensures, 1)
     Assert.len(Kit.scheduled, 1, "恢复起整点定时")
-    fetch_cb({}, "network")
+    watch_cb({}, "network")
     Assert.eq(weather.temp.text, "--°")
     Assert.len(Kit.dirty, 0, "内容与图标未变，恢复与失败都不刷新")
     weather:deactivate()
-    Assert.eq(cancelled, 0, "已完成请求不再取消")
+    Assert.eq(unwatched, 1, "暂停摘等待")
+    Assert.eq(cancelled, 0, "暂停不取消 online 刷新")
     weather:destroy()
 end
 
 do -- 成功补温度和图；同内容新表不刷新；暂停丢图标框；有温度没图按 icon 回退 CDN
-    Kit.dirty = {}
+    Kit.dirty, watch_cb, unwatched, cancelled, ensures = {}, nil, 0, 0, 0
     local weather = Weather:new()
     local slot = weather:build(ctx, opts)
     slot:paintTo(Kit.canvas(), 0, 10)
     weather:activate()
-    fetch_cb(copy(FULL))
+    watch_cb(copy(FULL))
     Assert.eq(weather.temp.text, "26°")
     Assert.eq(weather.detail.text, "阴 · 上海 · 18–28°")
     Assert.eq(weather.extra.text, "体感 25° · 湿度 62% · 北风 12km/h")
@@ -69,19 +75,20 @@ do -- 成功补温度和图；同内容新表不刷新；暂停丢图标框；�
     Assert.len(Kit.dirty, 1)
     local first = weather.picture
     weather:pull()
-    fetch_cb(copy(FULL))
+    Assert.eq(ensures, 2, "pull 只 ensure，不强制刷")
+    watch_cb(copy(FULL))
     Assert.eq(weather.picture, first, "同 URL 复用当前框")
     Assert.len(Kit.dirty, 1, "缓存命中同内容新表不刷新")
     weather:onEvent("home_refresh")
-    Assert.eq(fetch_args.city, "Shanghai", "首页刷新按当前地点重拉")
+    Assert.eq(ensures, 3, "首页刷新再 ensure")
     weather:deactivate()
     Assert.is_nil(weather.picture, "暂停丢掉图标引用")
     Assert.is_true(first[1].cancelled)
-    Assert.eq(cancelled, 1, "暂停取消在飞请求")
+    Assert.eq(cancelled, 0, "暂停不取消 online 刷新")
     weather:activate()
     Assert.not_nil(weather.picture, "恢复重新挂图标")
     Assert.is_true(weather.picture ~= first)
-    fetch_cb({ temp = "18", icon = "sunny", sunrise = "06:12 AM", sunset = "06:40 PM" })
+    watch_cb({ temp = "18", icon = "sunny", sunrise = "06:12 AM", sunset = "06:40 PM" })
     Assert.eq(weather.picture.src, ICON_URL .. "sunny.png")
     Assert.eq(weather.extra.text, "日出 06:12 AM · 日落 06:40 PM")
     local tick = weather._tick
@@ -119,6 +126,9 @@ do -- 设置：中文地名拒绝后带原输入重开；测试按钮试查不�
     reopened.actions[1].callback("Beijing")
     Assert.eq(fetch_args.city, "Beijing", "试查结束可再测")
     fetch_cb({})
+    Assert.eq(Themed.last("toast").text, "测试失败：没有查到天气")
+    reopened.actions[1].callback("Xiamen")
+    fetch_cb(nil)
     Assert.eq(Themed.last("toast").text, "测试失败：没有查到天气")
     Assert.eq(Kit.sections.home.home_weather_city, "", "测试不保存")
 

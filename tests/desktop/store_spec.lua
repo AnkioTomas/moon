@@ -64,12 +64,13 @@ local Store = require("desktop.pages.store")
 local view_updates = 0
 local desktop = {
     filter = { category = "历史" },
-    tab = "library",
+    tab = "store",
     dimen = { w = 600, h = 800 },
     contentHeight = function() return 716 end,
     updateView = function() view_updates = view_updates + 1 end,
     ctx = function(self) return { desktop = self } end,
 }
+desktop.library = require("desktop.pages.library"):new{ desktop = desktop }
 local store = Store:new{ desktop = desktop, name = "store", store_id = "zlib", empty_text = "Z站暂无内容" }
 Assert.eq(store.name, "store")
 Assert.eq(store.desktop, desktop)
@@ -91,7 +92,6 @@ Assert.eq(store.search, "Lua")
 Assert.eq(desktop.filter.category, "历史")
 Assert.eq(store.page, 1)
 Assert.is_nil(store.state)
-Assert.eq(desktop.tab, "store")
 Assert.eq(view_updates, 1)
 
 search_apply("")
@@ -177,7 +177,6 @@ build_opts.on_open(opds.books[1])
 Assert.len(opds.trail, 1)
 Assert.is_nil(opds.search)
 Assert.is_nil(opds.books)
-Assert.eq(desktop.tab, "opds")
 opds:fetch()
 Assert.eq(opds_requests[2].feed, "http://nas/opds/new")
 

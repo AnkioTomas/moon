@@ -265,7 +265,7 @@ Assert.eq(sectionTitles(pages.display), "启动,显示,夜间与亮度")
 -- 维护组：update feature 的两行按 order 插在调试日志与关于之间
 local maintenance = {}
 for _, row in ipairs(built_rows) do
-    if row.kind == "action" or row.kind == "toggle" then maintenance[#maintenance + 1] = row.title end
+    if row.kind == "action" or row.kind == "toggle" or row.toggle ~= nil then maintenance[#maintenance + 1] = row.title end
 end
 Assert.eq(table.concat(maintenance, ","), "清理缓存,清除当前源统计,调试日志,自动检查更新,检查更新,关于,关闭桌面")
 

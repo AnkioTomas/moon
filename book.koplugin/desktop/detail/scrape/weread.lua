@@ -4,7 +4,7 @@
 走公开接口 weread.qq.com/web/search/global（无需登录）
 返回字段对齐统一格式，便于 UI 复用
 
-@module koplugin.book.scrape.weread
+@module koplugin.book.desktop.detail.scrape.weread
 --]]
 
 local JSON = require("json")
@@ -128,7 +128,7 @@ function Weread.searchAsync(query, cb)
             return
         end
         local results = {}
-        for _, row in ipairs(data.books) do
+        for _idx, row in ipairs(data.books) do
             local info = row.bookInfo
             if type(info) == "table" and tonumber(info.soldout) ~= 1 then
                 local mapped = mapBook(info, row)

@@ -1,0 +1,206 @@
+--[[-- 书籍详情子模块。 @module desktop.detail --]]
+
+local Book = require("ui.widgets.book")
+local Confirm = require("ui.themes.widgets.confirm")
+local Toast = require("ui.themes.widgets.toast")
+local Store = require("book.store")
+local _ = require("gettext")
+local T = require("ffi/util").template
+
+
+local Common = require("desktop.detail.common")
+local storeBackend = Common.storeBackend
+local bookOwnerSource = Common.bookOwnerSource
+local bookSupportsScrape = Common.bookSupportsScrape
+local bookSupportsEdit = Common.bookSupportsEdit
+
+return function(Detail)
+function Detail:openBook()
+    local plugin = self.plugin
+    local b = self.book
+    self:close()
+    if plugin then require("desktop.open").book(plugin, b) end
+end
+
+--- 缓存章节模式整本正文：入队并前台显示进度（同一本书已在缓存时拒绝并提示）。
+function Detail:cacheAllChapters()
+    if self.closed then return end
+    local book = self.book
+    local source = bookOwnerSource(book, self.source)
+    if not source or type(source.cacheAllChaptersAsync) ~= "function" then return end
+    require("workers.ui.task_dialog").start(require("source.cache_queue").spec(source, {
+        source_id = book.source_id,
+        stable_id = book.stable_id,
+        book = book,
+    }))
+end
+
+--- 书城书（Z-Library / OPDS）：进后台下载任务，下载后导入本地书库；详情页关了也继续。
+function Detail:installStoreBook()
+    local book = self.book
+    local store = storeBackend(book)
+    if not store then
+        return
+    end
+    if store.hasCredentials and not store.hasCredentials() then
+        require("store." .. book.source_id .. ".setting").open(self.plugin)
+        return
+    end
+    local local_src = require("source.registry").resolve("local")
+    if not local_src or type(local_src.importBookAsync) ~= "function" then
+        Toast:new{ text = _("当前数据源不支持导入书籍") }:show()
+        return
+    end
+    local desk = self.desktop
+    local total = tonumber(book.filesize)
+    require("workers.ui.task_dialog").start{
+        key = "install\0" .. tostring(book.source_id) .. "\0" .. tostring(book.stable_id),
+        kind = "download",
+        title = book.title,
+        restartable = true,
+        run = function(report, done)
+            return store.installAsync(local_src, book, function(bytes)
+                report(nil, bytes, total)
+            end, function(ok, err, filename)
+                done({ ok = ok, err = err, filename = filename })
+            end)
+        end,
+        on_done = function(result)
+            if not result.ok then
+                Toast:new{ text = result.err or _("下载失败") }:show()
+                return
+            end
+            Toast:new{
+                text = _("已加入书库：") .. tostring(result.filename or book.title),
+                timeout = 3,
+            }:show()
+            if desk and not desk.closed then
+                desk:onEvent("shelf_changed")
+                if desk.tab == "library" then desk:updateView() end
+            end
+        end,
+    }
+end
+
+--- 手动切换已读 / 未读（语义与图书馆长按菜单相同）。
+function Detail:toggleRead()
+    local book = self.book
+    local is_read = tonumber(book.read_state) == 1
+    if not require("book.books_db").setRead(book.source_id, book.stable_id, not is_read) then
+        Toast:new{ text = _("更新阅读状态失败"), timeout = 2 }:show()
+        return
+    end
+    self:reload()
+end
+
+--- 删除本书：确认后走属主源 deleteBookAsync，成功则关详情并刷新桌面。
+function Detail:deleteBook()
+    local book = self.book
+    Confirm:new{
+        text = T(_("确定删除《%1》？"), Book.title(book)),
+        ok_text = _("删除"),
+        ok_callback = function()
+            local source = bookOwnerSource(book, self.source)
+            if not source then
+                Toast:new{ text = _("当前数据源不支持删除本书") }:show()
+                return
+            end
+            source:deleteBookAsync({
+                source_id = book.source_id,
+                stable_id = book.stable_id,
+                book = book,
+                source = source,
+            }, function(ok, err)
+                if not ok then
+                    Toast:new{ text = err or _("删除本书失败") }:show()
+                    return
+                end
+                -- 书已删：书架缓存无论详情页是否还开着都要失效。
+                if self.desktop then self.desktop:onEvent("shelf_changed") end
+                if self.closed then return end
+                self._dirty = true
+                self:close()
+            end)
+        end,
+    }:show()
+end
+
+--- 清理本书本地缓存：正文、章节、图片、封面需重新下载；书籍元数据与进度保留。
+--- 本书在后台缓存队列里时拒绝，避免边写边删。
+function Detail:clearCache()
+    local book = self.book
+    Confirm:new{
+        text = T(_("清理《%1》的本地缓存？\n正文、章节与图片需重新下载。"), Book.title(book)),
+        ok_text = _("清理"),
+        ok_callback = function()
+            if require("source.cache_queue").has(book.source_id, book.stable_id) then
+                Toast:new{ text = _("本书正在后台缓存，请稍后再试"), timeout = 3 }:show()
+                return
+            end
+            local ok, leftover = Store.clearCache(book.source_id, book.stable_id)
+            local text = _("缓存已清理")
+            if not ok then
+                text = _("清理缓存失败")
+            elseif leftover then
+                text = _("部分缓存文件未能删除")
+            end
+            Toast:new{ text = text, timeout = 3 }:show()
+            self:reload()
+        end,
+    }:show()
+end
+
+--- 库内书底栏动作：工具行 + 最后一行阅读主按钮。
+--- 编辑/刮削/下载/清理缓存按属主源能力出现；已读切换与删除只要身份完整就给。
+---@param book table 当前书籍
+---@param owner table|nil 属主源
+---@return table tools, table|nil primary
+function Detail.actionPlan(book, owner)
+    local tools = {}
+    if bookSupportsEdit(book, owner) then
+        tools[#tools + 1] = { id = "edit", icon = "edit", text = _("编辑") }
+    end
+    if bookSupportsScrape(book, owner) then
+        tools[#tools + 1] = { id = "scrape", icon = "search", text = _("刮削") }
+    end
+    local can_read = owner ~= nil and (owner.type == "book" or owner.type == "chapter")
+    -- 下载与清理缓存互斥：已离线到 cache 只给清理，章节源未下完只给下载；本地原书两者都没有
+    if can_read and Store.isCached(book) then
+        tools[#tools + 1] = { id = "clear_cache", icon = "cleaning_services", text = _("清理缓存") }
+    elseif can_read and owner.type == "chapter" and type(owner.cacheAllChaptersAsync) == "function" then
+        tools[#tools + 1] = { id = "download", icon = "download", text = _("下载") }
+    end
+    if book.source_id and book.stable_id then
+        if tonumber(book.read_state) == 1 then
+            tools[#tools + 1] = { id = "unread", icon = "undo", text = _("标记未读") }
+        else
+            tools[#tools + 1] = { id = "read", icon = "done_all", text = _("标记已读") }
+        end
+        tools[#tools + 1] = { id = "delete", icon = "delete", text = _("删除") }
+    end
+    local primary
+    if can_read then
+        local pct = Book.pct(book)
+        primary = {
+            id = "open",
+            icon = "play_arrow",
+            text = pct > 0 and pct < 100 and _("继续阅读") or _("开始阅读"),
+        }
+    end
+    return tools, primary
+end
+
+function Detail:startScrape()
+    local book = self.book
+    if not bookSupportsScrape(book, self.source) then
+        Toast:new{ text = _("当前数据源不支持刮削"), timeout = 2 }:show()
+        return
+    end
+    require("desktop.detail.scrape.ui").start(book, book.title, function()
+        if not self.closed then self:reload() end
+    end, self)
+end
+
+
+
+end

@@ -3,11 +3,11 @@
 
 豆瓣优先，失败或无结果 fallback 微信读书
 
-@module koplugin.book.scrape.search
+@module koplugin.book.desktop.detail.scrape.search
 --]]
 
-local Douban = require("scrape.douban")
-local Weread = require("scrape.weread")
+local Douban = require("desktop.detail.scrape.douban")
+local Weread = require("desktop.detail.scrape.weread")
 local logger = require("utils.log")
 local Text = require("utils.text")
 local _ = require("gettext")
@@ -36,7 +36,7 @@ function Search.searchAsync(query, cb)
             if results and #results > 0 then
                 cb(results, nil, "weread")
             else
-                cb(nil, err or "无搜索结果", nil)
+                cb(nil, err or _("无搜索结果"), nil)
             end
         end)
     end

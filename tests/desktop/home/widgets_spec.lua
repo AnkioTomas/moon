@@ -10,21 +10,30 @@ package.preload["utils.settings"] = function()
 end
 
 local Widgets = require("desktop.pages.home.placements")
-local find = function(id)
-    return id == "clock" or id == "stats" or id == "weather"
-end
+local components = { { id = "clock" }, { id = "stats" }, { id = "weather" } }
 
 local list = Widgets.sanitize({
     { id = "stats", page = 2, order = 2, height = "fill" },
     { id = "clock", page = 2, order = 1, height = "default" },
     { id = "nope", page = 1, order = 1, height = "default" },
     { id = "clock", page = 9, order = 9, height = "default" },
-}, find)
+}, components)
 Assert.len(list, 2)
 Assert.eq(list[1].id, "clock")
 Assert.eq(list[1].order, 1)
 Assert.eq(list[2].id, "stats")
 Assert.eq(list[2].page, 2)
+
+-- 没有可用记录：按注册顺序全部放第 1 页。
+for _, raw in ipairs({ "broken", {}, { { id = "nope" } } }) do
+    local fallback = Widgets.sanitize(raw, components)
+    Assert.len(fallback, 3)
+    Assert.eq(fallback[1].id, "clock")
+    Assert.eq(fallback[3].id, "weather")
+    Assert.eq(fallback[3].page, 1)
+    Assert.eq(fallback[3].order, 3)
+end
+Assert.len(Widgets.compactPages({}), 0)
 
 local compacted = Widgets.compactPages({
     { id = "clock", page = 3, order = 1, height = "default" },

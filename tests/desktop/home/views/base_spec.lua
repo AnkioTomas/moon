@@ -1,5 +1,5 @@
 --[[--
-首页组件基类：槽固定尺寸、refresh 只刷画过的矩形、一个在飞请求可顶替可取消、书架签名变了才重建。
+首页组件基类：槽固定尺寸、refresh 只刷画过的矩形、暂停下发 HomePause、书架签名变了才重建。
 @module tests.desktop.pages.home.base_spec
 --]]
 local Assert = require("support.assert")
@@ -55,41 +55,15 @@ do -- build 新建固定尺寸槽；未绘制 / 不活跃时 refresh 只换内�
     comp:refresh()
 end
 
-do -- request：只在活跃时发；新请求顶掉旧请求；pause 取消在飞请求；同步完成不留句柄
+do -- deactivate 向槽内下发 HomePause（封面取消在飞下载）
     local comp = Comp:new()
     comp:build(ctx, { width = 10, height = 10 })
-    local started, cancelled, applied = 0, 0, {}
-    local pending = {}
-    local function start(done)
-        started = started + 1
-        pending[#pending + 1] = done
-        return { cancel = function() cancelled = cancelled + 1 end }
-    end
-    local function apply(v) applied[#applied + 1] = v end
-    comp:request(start, apply)
-    Assert.eq(started, 0, "不活跃不发请求")
+    local paused = 0
+    comp.slot[1].onHomePause = function() paused = paused + 1 end
     comp:activate()
-    comp:request(start, apply)
-    comp:request(start, apply)
-    Assert.eq(started, 2)
-    Assert.eq(cancelled, 1, "旧请求被顶掉")
-    pending[1]("stale")
-    Assert.len(applied, 0, "被顶掉的回调不落地")
-    pending[2]("fresh")
-    Assert.eq(applied[1], "fresh")
     comp:deactivate()
-    Assert.eq(cancelled, 1, "已完成的请求不再取消")
-    comp:activate()
-    comp:request(start, apply)
     comp:deactivate()
-    Assert.eq(cancelled, 2, "pause 取消在飞请求")
-    pending[3]("late")
-    Assert.len(applied, 1)
-    comp:activate()
-    comp:request(function(done) done("sync") return { cancel = function() cancelled = cancelled + 1 end } end, apply)
-    comp:deactivate()
-    Assert.eq(applied[2], "sync")
-    Assert.eq(cancelled, 2, "同步完成的请求不登记句柄")
+    Assert.eq(paused, 1, "只在翻转时下发")
     comp:destroy()
 end
 

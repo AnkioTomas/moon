@@ -61,7 +61,7 @@ package.preload["ui.themes"] = function()
 end
 
 require("support.modal_stub").install()
-local Results = require("scrape.results")
+local Results = require("desktop.detail.scrape.results")
 local Pager = { pack = Results.pack }
 
 local function box(id, h)

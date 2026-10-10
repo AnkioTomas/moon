@@ -1,7 +1,7 @@
 --[[--
-scrape.weread 离线用例：打桩 json（真实 decode）/ http.request / socket.url，经 searchAsync 驱动 mapBook
+desktop.detail.scrape.weread 离线用例：打桩 json（真实 decode）/ http.request / socket.url，经 searchAsync 驱动 mapBook
 
-@module tests.scrape.weread_spec
+@module tests.desktop.detail.scrape.weread_spec
 --]]
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
@@ -179,13 +179,13 @@ package.preload["socket.url"] = function()
 end
 
 -- runner 会跨文件保留 socket.* 的 package.loaded，先清掉再吃自己的 preload
-for _, name in ipairs({ "json", "http.request", "socket.url", "scrape.weread" }) do
+for _, name in ipairs({ "json", "http.request", "socket.url", "desktop.detail.scrape.weread" }) do
     package.loaded[name] = nil
 end
-local Weread = require("scrape.weread")
+local Weread = require("desktop.detail.scrape.weread")
 
 local function cleanup()
-    for _, name in ipairs({ "json", "http.request", "socket.url", "scrape.weread" }) do
+    for _, name in ipairs({ "json", "http.request", "socket.url", "desktop.detail.scrape.weread" }) do
         package.preload[name] = nil
         package.loaded[name] = nil
     end

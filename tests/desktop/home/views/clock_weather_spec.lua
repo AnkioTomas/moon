@@ -2,6 +2,7 @@
 时间天气：左右两栏各占一半，顺序可配；生命周期原样转给两个子组件；设置 Sheet 改顺序后通知首页刷新。
 @module tests.desktop.pages.home.clock_weather_spec
 --]]
+---@diagnostic disable: missing-fields
 local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
@@ -12,11 +13,19 @@ Kit.sections.home = { home_clock_weather_order = "weather_left", home_weather_ci
 package.preload["utils.text"] = function() return { trim = function(s) return s or "" end } end
 local myrl, weather_fetches = 0, 0
 package.preload["online.myrl"] = function()
-    return { fetch = function() myrl = myrl + 1; return { cancel = function() end } end }
+    return {
+        current = function() return nil end,
+        watch = function() end,
+        ensure = function() myrl = myrl + 1 end,
+        unwatch = function() end,
+    }
 end
 package.preload["online.weather"] = function()
     return {
-        fetch = function() weather_fetches = weather_fetches + 1; return { cancel = function() end } end,
+        current = function() return nil end,
+        watch = function() end,
+        ensure = function() weather_fetches = weather_fetches + 1 end,
+        unwatch = function() end,
         iconUrl = function(key) return key end,
     }
 end

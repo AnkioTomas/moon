@@ -4,7 +4,7 @@
 爬取 douban.com/search HTML，正则提取关键字段
 不做完整 DOM 解析，只提取核心信息
 
-@module koplugin.book.scrape.douban
+@module koplugin.book.desktop.detail.scrape.douban
 --]]
 
 local Request = require("http.request")

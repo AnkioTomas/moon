@@ -171,26 +171,23 @@ do -- 用户关掉的项不画、不留点击区；读不到的项（存储）�
     desktop:updateTopbar()
 end
 
-do -- Resume：按项挂定时与订阅；读数没变不换顶栏
+do -- Resume：轮询项共用一个分钟对齐心跳，外加订阅；读数没变不换顶栏
     swaps = 0
     bar:activate()
     Assert.is_true(bar.active)
-    Assert.len(Kit.scheduled, 4, "时钟 + 内存 120s + 存储 600s + 电池 600s")
+    Assert.len(Kit.scheduled, 1, "时钟 / 内存 / 存储 / 电池共用一个心跳")
     Assert.is_true(Kit.scheduled[1].delay >= 1 and Kit.scheduled[1].delay <= 61)
-    Assert.eq(Kit.scheduled[2].delay, 120)
-    Assert.eq(Kit.scheduled[3].delay, 600)
-    Assert.eq(Kit.scheduled[4].delay, 600)
     Assert.eq(type(watch_cb), "function")
     Assert.eq(swaps, 0)
     bar:activate()
-    Assert.len(Kit.scheduled, 4, "重复 Resume 不重挂")
+    Assert.len(Kit.scheduled, 1, "重复 Resume 不重挂")
 end
 
 do -- 心跳：读数变了才换顶栏，并续约下一跳
-    local tick = Kit.scheduled[4]
+    local tick = Kit.scheduled[1]
     tick.fn()
     Assert.eq(swaps, 0)
-    Assert.len(Kit.scheduled, 5)
+    Assert.len(Kit.scheduled, 2)
     powerd.capacity = 80
     tick.fn()
     Assert.eq(swaps, 1)
@@ -216,24 +213,36 @@ do -- KOReader 广播沿树到顶栏控件：电源 / 网络 / 前光重读且�
     Assert.eq(swaps, 3, "onEvent 只管应用事件")
 end
 
-do -- 设置变化：拆掉重挂（关掉的项不再挂定时）
+do -- 设置变化：拆掉重挂（关掉的项不再订阅）
     local before = #Kit.scheduled
     Kit.sections.desktop.home_topbar_items = { memory = false, cache = false }
     bar:onEvent("topbar_changed")
-    Assert.len(Kit.unscheduled, 4)
+    Assert.len(Kit.unscheduled, 1)
     Assert.eq(watch_cancels, 1)
-    Assert.eq(#Kit.scheduled - before, 3, "时钟 + 存储 + 电池")
+    Assert.eq(#Kit.scheduled - before, 1, "仍有轮询项，重挂一个心跳")
     Assert.eq(swaps, 4, "内存与任务项消失，签名变化")
+end
+
+do -- 轮询项全关：不挂心跳
+    local before = #Kit.scheduled
+    Kit.sections.desktop.home_topbar_items = { clock = false, memory = false, storage = false, battery = false }
+    bar:onEvent("topbar_changed")
+    Assert.len(Kit.unscheduled, 2)
+    Assert.eq(#Kit.scheduled, before, "只剩事件驱动的项")
+    Kit.sections.desktop.home_topbar_items = { memory = false, cache = false }
+    bar:onEvent("topbar_changed")
+    Assert.eq(#Kit.scheduled - before, 1)
 end
 
 do -- Pause：全部拆掉；之后心跳 / 事件不换顶栏
     bar:deactivate()
     Assert.is_false(bar.active)
-    Assert.len(Kit.unscheduled, 7)
+    Assert.len(Kit.unscheduled, 3)
+    local swaps_before = swaps
     powerd.capacity = 20
     broadcast("Charging")
     bar:refresh()
-    Assert.eq(swaps, 4)
+    Assert.eq(swaps, swaps_before)
     bar:onEvent("topbar_changed")
     Assert.is_false(bar.active, "暂停中改设置不重挂")
 end

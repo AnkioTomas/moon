@@ -95,7 +95,12 @@ Assert.is_false(list.items[2].checked)
 
 -- 单源：没有 source_counts 就没有数据源栏，首栏是分类。
 local single = Filter.open{
-    data = { category_counts = { { category = "科幻", count = 2 } } },
+    data = {
+        category_counts = { { category = "科幻", count = 2 } },
+        series_counts = {},
+        read_counts = {},
+        downloaded_count = 0,
+    },
     current = {},
     on_apply = function() end,
 }

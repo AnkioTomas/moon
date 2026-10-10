@@ -3,22 +3,21 @@
 
 用户确认书名 -> 搜索 -> 选择结果 -> 写 books 表 + 下封面 -> 通知属主源上行 -> 通知调用方刷新
 
-@module koplugin.book.scrape.ui
+@module koplugin.book.desktop.detail.scrape.ui
 --]]
 
 local UIManager = require("ui/uimanager")
-local InputDialog = require("ui/widget/inputdialog")
-local InfoMessage = require("ui/widget/infomessage")
-local Results = require("scrape.results")
-local Search = require("scrape.search")
-local Image = require("ui.components.image")
-local BookDB = require("db.book")
+local Results = require("desktop.detail.scrape.results")
+local Search = require("desktop.detail.scrape.search")
+local Image = require("ui.themes.widgets.image")
+local BookDB = require("book.books_db")
 local Paths = require("utils.paths")
 local Text = require("utils.text")
-local SourceCapabilities = require("source.base").SourceCapabilities
 local logger = require("utils.log")
 local _ = require("gettext")
 local T = require("ffi/util").template
+local Input = require("ui.themes.widgets.input")
+local Toast = require("ui.themes.widgets.toast")
 
 local ScrapeUI = {}
 
@@ -93,37 +92,41 @@ local function showResults(identity, results, source, on_close)
         -- 选中后落库与下封面都完成才通知调用方刷新
         on_pick = function(result)
             applyResult(identity, result, function(err)
-                UIManager:show(InfoMessage:new{
+                Toast:new{
                     text = err or _("元数据已更新"),
                     timeout = 1.5,
-                })
+                }:show()
                 if on_close then on_close() end
             end)
         end,
         close_callback = on_close,
     }
-    UIManager:show(page)
+    page:show()
     -- 全屏页盖住详情页：不强制整屏刷新，只会有零星区域被重画
     UIManager:setDirty(page, "full")
 end
 
---- 执行搜索
+--- 执行搜索。在飞句柄挂在 owner.scrape_job 上，owner 关闭时取消（连同「搜索中」提示）。
 ---@param identity BookIdentity
 ---@param query string
 ---@param on_close fun()|nil
-local function performSearch(identity, query, on_close)
-    local info = InfoMessage:new{ text = _("搜索中...") }
-    UIManager:show(info)
+---@param owner table
+local function performSearch(identity, query, on_close, owner)
+    local info = Toast:new{ text = _("搜索中...") }
+    info:show()
 
-    Search.searchAsync(query, function(results, err, source)
-        UIManager:close(info)
+    local done = false
+    local job = Search.searchAsync(query, function(results, err, source)
+        done = true
+        owner.scrape_job = nil
+        info:close()
 
         if err then
             logger.warn("scrape search failed:", err)
-            UIManager:show(InfoMessage:new{
+            Toast:new{
                 text = T(_("搜索失败: %1"), err),
                 timeout = 2,
-            })
+            }:show()
             if on_close then on_close() end
             return
         end
@@ -131,65 +134,38 @@ local function performSearch(identity, query, on_close)
         logger.info("scrape: got results from", source)
         showResults(identity, assert(results), assert(source), on_close)
     end)
+    if job and not done then
+        owner.scrape_job = { cancel = function()
+            info:close()
+            job.cancel()
+        end }
+    end
 end
 
---- 启动刮削流程
+--- 启动刮削流程（调用方已按属主源确认可刮削）
 ---@param identity BookIdentity
 ---@param default_title string|nil 默认书名
 ---@param on_close fun()|nil 完成回调
-function ScrapeUI.start(identity, default_title, on_close)
-    if not identity or type(identity.source_id) ~= "string" or type(identity.stable_id) ~= "string" then
-        logger.warn("scrape: invalid book identity")
-        return
-    end
-    local src = require("source.registry").resolve(identity.source_id)
-    if not SourceCapabilities.supportsScrape(src) then
-        UIManager:show(InfoMessage:new{
-            text = _("当前数据源不支持刮削"),
-            timeout = 2,
-        })
-        if on_close then
-            on_close()
-        end
-        return
-    end
-
-    local dialog
-    dialog = InputDialog:new{
+---@param owner table 搜索句柄的持有者（详情页），关闭时调 owner.scrape_job.cancel()
+function ScrapeUI.start(identity, default_title, on_close, owner)
+    Input:new{
         title = _("确认书名"),
-        input = default_title or "",
-        input_hint = _("请输入要搜索的书名"),
-        buttons = {{
-            {
-                text = _("取消"),
-                id = "close",
-                callback = function()
-                    UIManager:close(dialog)
-                    if on_close then on_close() end
-                end,
-            },
-            {
-                text = _("搜索"),
-                is_enter_default = true,
-                callback = function()
-                    local query = Text.trim(dialog:getInputText())
-                    UIManager:close(dialog)
-                    if query == "" then
-                        UIManager:show(InfoMessage:new{
-                            text = _("书名不能为空"),
-                            timeout = 2,
-                        })
-                        if on_close then on_close() end
-                        return
-                    end
-                    performSearch(identity, query, on_close)
-                end,
-            },
-        }},
-    }
-
-    UIManager:show(dialog)
-    dialog:onShowKeyboard()
+        fields = { { text = default_title or "", hint = _("请输入要搜索的书名") } },
+        ok_text = _("搜索"),
+        cancel_callback = on_close,
+        callback = function(text)
+            local query = Text.trim(text)
+            if query == "" then
+                Toast:new{
+                    text = _("书名不能为空"),
+                    timeout = 2,
+                }:show()
+                if on_close then on_close() end
+                return
+            end
+            performSearch(identity, query, on_close, owner)
+        end,
+    }:show()
 end
 
 return ScrapeUI

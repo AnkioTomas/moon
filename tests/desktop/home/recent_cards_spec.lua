@@ -68,8 +68,9 @@ do -- 九本：底边对齐、不出框；侧封面在两边
         Assert.is_true(cell.overlap_offset[1] >= 0)
         Assert.is_true(cell.overlap_offset[1] + size.w <= stack.dimen.w)
     end
-    Assert.is_true(stack[1][1].side < 0)
-    Assert.is_true(stack[2][1].side > 0)
+    -- 绘制顺序 PAINT 从最外两侧开始：第 1 个是最左槽，第 2 个是最右槽，第 9 个是中间。
+    Assert.is_true(stack[1].overlap_offset[1] < stack[9].overlap_offset[1], "最外左封面在中间封面左侧")
+    Assert.is_true(stack[2].overlap_offset[1] > stack[9].overlap_offset[1], "最外右封面在中间封面右侧")
     Assert.eq(stack[9][1].book, recent, "中间封面最后画")
 
     cards:activate()

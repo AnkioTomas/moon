@@ -28,9 +28,14 @@ package.preload["book.catalog"] = function()
         libraryScope = function(id) return id end,
     }
 end
-local daily, fetches = {}, 0
+local daily, fetches, myrl_cb = {}, 0, nil
 package.preload["online.myrl"] = function()
-    return { fetch = function(_, _, cb) fetches = fetches + 1; cb(daily) end }
+    return {
+        current = function() return nil end,
+        watch = function(_, cb) myrl_cb = cb end,
+        ensure = function() fetches = fetches + 1; if myrl_cb then myrl_cb(daily) end end,
+        unwatch = function() end,
+    }
 end
 local opened
 package.preload["book.books_db"] = function() return { get = function() return nil end } end
@@ -123,7 +128,7 @@ do -- 历史 / 新闻：固定行数；空数据首行占位；恢复时拉日�
         Assert.len(comp.items, case.lines)
         local before, dirty = fetches, #Kit.dirty
         comp:activate()
-        Assert.eq(fetches, before + 1, "恢复才拉日报")
+        Assert.eq(fetches, before + 1, "恢复才挂日报刷新")
         Assert.eq(#Kit.dirty, dirty, "日报无本字段不刷新")
         comp:deactivate()
         daily = case.data

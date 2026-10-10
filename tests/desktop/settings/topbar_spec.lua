@@ -35,7 +35,7 @@ local rows = Settings:rows(desktop)
 Assert.len(rows, 8)
 local memory = rows[3](600)
 Assert.eq(memory.title, "剩余内存")
-Assert.eq(memory.status, "开")
+Assert.is_true(memory.toggle)
 memory.callback()
 Assert.is_false(home.home_topbar_items.memory)
 Assert.eq(saves, 1)
@@ -44,6 +44,6 @@ Assert.len(events, 1)
 Assert.eq(views, 1)
 
 rows = Settings:rows(desktop)
-Assert.eq(rows[3](600).status, "关")
+Assert.is_false(rows[3](600).toggle)
 
 return true

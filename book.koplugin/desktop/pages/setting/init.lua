@@ -1,0 +1,228 @@
+--[[--
+设置页编排：根页功能目录，子页走详情叠层。
+
+根页与各页面由「条目」按层级（分组 → 页面 → 分节）合并而成，规则见 tree.lua。
+本文件只声明核心条目；feature 的条目在各自的 setting.lua，扫描得到。各设置项实现位于 desktop/pages/setting/。
+
+@module koplugin.book.desktop.pages.setting
+--]]
+
+local Sections = require("ui.themes.widgets.sections")
+local Theme = require("ui.themes")
+local Row = require("ui.themes.widgets.row")
+local Fonts = require("ui.fonts")
+local SourceRegistry = require("source.registry")
+local Overlay = require("desktop.pages.setting.overlay")
+local _ = require("gettext")
+
+local Tree = require("desktop.pages.setting.tree")
+local Source = require("desktop.pages.setting.source")
+local Display = require("desktop.pages.setting.display")
+local DesktopSettings = require("desktop.pages.setting.desktop")
+local TopbarSettings = require("desktop.pages.setting.topbar")
+local Language = require("desktop.pages.setting.language")
+local Maintenance = require("desktop.pages.setting.maintenance")
+local AISettings = require("desktop.pages.setting.ai")
+local ReaderSettings = require("desktop.pages.setting.reader")
+local HttpSetting = require("http.proxy.setting")
+
+---@class BookSettings
+---@field desktop BookDesktop
+---@field page integer
+---@field source BookSettingsSource 顶栏点源名经此换源
+---@field cache_size_label string|nil 缓存体积文案；nil 时维护行重新测量
+---@field cache_size_job { cancel: fun() }|nil 缓存体积测量任务
+---@field cache_clear_job { cancel: fun() }|nil 清理缓存任务（不随页面取消，清理必须落地）
+local Settings = {}
+Settings.__index = Settings
+
+---@param opts { desktop: BookDesktop }
+---@return BookSettings
+function Settings:new(opts)
+    return setmetatable({ desktop = opts.desktop, page = 1, source = Source }, self)
+end
+
+--- 由 Tab 切换恢复时关掉叠层；系统唤醒时保留。
+---@param changed boolean|nil TAB 点击时传 boolean；桌面唤醒时不重置
+function Settings:activate(changed)
+    if changed == nil then return end
+    self:reset()
+    self.cache_size_label = nil
+end
+
+function Settings:destroy()
+    if self.cache_size_job then
+        self.cache_size_job.cancel()
+        self.cache_size_job = nil
+    end
+end
+
+--- 回到设置根页并关闭功能叠层。
+function Settings:reset()
+    self.page = 1
+    local overlay = self.desktop.settings_overlay
+    if overlay then overlay:close() end
+end
+
+--- 换源后关掉叠层，避免停在过期的来源页。
+---@param event string 父组件转发的事件名称或事件对象
+function Settings:onEvent(event)
+    if event == "source_changed" then
+        self:reset()
+    end
+end
+
+---@return string, string
+local function activeSource()
+    local active_id = SourceRegistry.activeId()
+    local active_name = active_id
+    for _idx, meta in ipairs(SourceRegistry.list()) do
+        if meta.id == active_id then active_name = meta.name or meta.id break end
+    end
+    return active_id, Source.displayName(active_name)
+end
+
+--- 核心条目：根页分组里的行、核心页面与它们自带 / 追加的分节（格式见 tree.lua）。
+---@param desktop BookDesktop
+---@return BookSettingEntry[]
+local function coreEntries(desktop)
+    local plugin = desktop.plugin
+    local active_id, active_name = activeSource()
+    local network = HttpSetting.entry(desktop)
+    network.group, network.order = "system", 30
+    return {
+        {
+            group = "library", order = 10, id = "sources", icon = "source", title = _("书籍来源"),
+            subtitle = _("切换和启用书源"), status = active_name, status_on = true,
+            page = {
+                title = _("书籍来源"),
+                sections = function()
+                    return Source:scopeSections{
+                        desktop = desktop, plugin = plugin, active_id = active_id, active_name = active_name,
+                    }
+                end,
+            },
+        },
+        {
+            group = "library", order = 20, id = "source_config", icon = "tune", title = _("账号与登录"),
+            subtitle = _("书源账号、本地书籍目录"),
+            page = {
+                title = _("账号与登录"),
+                sections = function() return Source:configSections{ desktop = desktop, plugin = plugin } end,
+            },
+        },
+        {
+            group = "desktop", order = 10, id = "display", icon = "display_settings", title = _("界面显示"),
+            subtitle = _("字体缩放、夜间、亮度"),
+            status = string.format("%d%%", Theme.scale()), status_on = true,
+            page = {
+                title = _("界面显示"),
+                sections = function()
+                    return {
+                        { title = _("启动"), rows = DesktopSettings:rows(desktop, require("menu").openOnStart()) },
+                        {
+                            title = _("显示"),
+                            rows = Display:rows{
+                                desktop = desktop, font_name = Fonts.currentName(), scale = Theme.scale(),
+                                grid_max_cols = require("ui.widgets.cover").gridCols(),
+                            },
+                        },
+                    }
+                end,
+            },
+        },
+        {
+            group = "desktop", order = 20, id = "topbar", icon = "toolbar", title = _("桌面顶栏"),
+            subtitle = _("时钟、电量等状态项"),
+            page = {
+                title = _("桌面顶栏"),
+                preview = function(width) return TopbarSettings.preview(width) end,
+                sections = function() return {{ title = _("顶栏"), rows = TopbarSettings:rows(desktop) }} end,
+            },
+        },
+        {
+            group = "reader", order = 10, id = "reader_behavior", icon = "touch_app", title = _("阅读行为"),
+            subtitle = _("脚注弹窗、自动标记已读"),
+            page = { title = _("阅读行为"), sections = function() return ReaderSettings:sections(desktop) end },
+        },
+        {
+            group = "reader", order = 20, id = "lookup", icon = "format_ink_highlighter", title = _("划词与查询"),
+            subtitle = _("翻译、X-Ray、划词菜单"),
+            page = { title = _("划词与查询") },
+        },
+        { parent = "lookup", order = 10, sections = function() return ReaderSettings:lookupSections(desktop) end },
+        {
+            parent = "lookup", order = 90,
+            sections = function() return {{ title = _("菜单"), rows = ReaderSettings:popupRows(desktop) }} end,
+        },
+        {
+            group = "system", order = 10, id = "language", icon = "language", title = _("语言"),
+            subtitle = _("界面语言"),
+            status = require("ui/language"):getLanguageName(G_reader_settings:readSetting("language") or "C"),
+            status_on = true,
+            page = { title = _("语言"), sections = function() return Language:sections(desktop) end },
+        },
+        {
+            group = "system", order = 20, id = "ai", icon = "psychology", title = _("AI 接口"),
+            subtitle = _("X-Ray 使用的大模型接口"),
+            page = { title = _("AI 接口"), sections = function() return {{ title = _("AI"), rows = AISettings:rows(desktop) }} end },
+        },
+        network,
+        { group = "maintenance", order = 10, row = Maintenance:cacheRow(desktop) },
+        { group = "maintenance", order = 20, row = Maintenance:clearStatsRow(desktop) },
+        { group = "maintenance", order = 30, row = Maintenance:debugLogRow(desktop) },
+        { group = "maintenance", order = 60, row = Maintenance:aboutRow() },
+        { group = "maintenance", order = 70, row = Maintenance:closeRow(desktop) },
+    }
+end
+
+--- 根页导航行：点开条目的页面叠层。
+---@param desktop BookDesktop
+---@param entry BookSettingNode
+---@return fun(iw: number): table
+local function navRow(desktop, entry)
+    return function(iw)
+        return Row.widget({
+            width = iw,
+            kind = "nav",
+            icon = entry.icon,
+            title = entry.title,
+            subtitle = entry.subtitle,
+            status = entry.status,
+            status_on = entry.status_on,
+            callback = function() Overlay.open(desktop, entry.page) end,
+        })
+    end
+end
+
+--- 构建设置根页：核心条目 + 扫描到的 feature 条目按层级合并；按内容区尺寸现建，翻页经桌面 updateView 重建。
+---@return table
+function Settings:updateView()
+    local desktop = self.desktop
+    local entries = coreEntries(desktop)
+    for _idx, entry in ipairs(Tree.features(desktop)) do entries[#entries + 1] = entry end
+    local groups = Tree.build({
+        { id = "library", title = _("书库") },
+        { id = "desktop", title = _("桌面") },
+        { id = "reader", title = _("阅读") },
+        { id = "system", title = _("系统") },
+        { id = "maintenance", title = _("维护") },
+    }, entries)
+    local sections = {}
+    for _idx, group in ipairs(groups) do
+        local rows = {}
+        for _i, entry in ipairs(group.entries) do rows[#rows + 1] = entry.row or navRow(desktop, entry) end
+        sections[#sections + 1] = { title = group.title, rows = rows }
+    end
+    local body
+    body, self.page = Sections.widget({
+        width = desktop.dimen.w,
+        height = desktop:contentHeight(),
+        page = self.page,
+        on_page = function(page) self.page = page; desktop:updateView() end,
+        sections = sections,
+    })
+    return body
+end
+
+return Settings

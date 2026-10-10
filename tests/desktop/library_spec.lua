@@ -191,19 +191,12 @@ Assert.eq(Themed.last("input").fields[1].text, "初始")
 Themed.last("input").callback("x")
 Assert.eq(custom, "x")
 
--- 书架变化：只作废缓存，不动页码（越界由 fetch 钳回）；同步失败只在图书馆页显示。
+-- 书架变化：只作废缓存，不动页码（越界由 fetch 钳回）。
 library.state = { books = {} }
 library.page = 3
 library:onEvent("shelf_changed")
 Assert.is_nil(library.state)
 Assert.eq(library.page, 3)
-library:onEvent("shelf_sync_failed", "离线")
-Assert.eq(library.state.err, "离线")
-desktop.tab = "home"
-library.state = nil
-library:onEvent("shelf_sync_failed", "离线")
-Assert.is_nil(library.state)
-desktop.tab = "library"
 local real_list = source.listLibraryAsync
 local pages_asked = {}
 source.listLibraryAsync = function(_, opts, cb)

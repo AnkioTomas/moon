@@ -52,12 +52,11 @@ Assert.len(defaults, 2)
 Assert.eq(defaults[1], "recent_hero")
 Assert.eq(defaults[2], "recent_list")
 
-local layout = Layout.new()
 local components = {}
 for _, class in ipairs(Base.components) do components[class.id] = class.new() end
 
 -- fill 吃剩余；default 用内容高度。
-local selected, heights, unused = layout:allocate({
+local selected, heights, unused = Layout.allocate({
     { id = "a", height = 30, placement = { height = "default" } },
     { id = "b", height = 30, fill = true, placement = { height = "fill" } },
 }, 100, 0)
@@ -66,7 +65,7 @@ Assert.eq(heights[2], 70)
 Assert.eq(unused, 0)
 
 -- default 只用内容高；组件声明 fill 不能偷偷吃剩余。
-selected, heights, unused = layout:allocate({
+selected, heights, unused = Layout.allocate({
     { id = "a", height = 20, placement = { height = "default" } },
     { id = "b", height = 40, fill = true, placement = { height = "default" } },
 }, 100, 0)
@@ -75,14 +74,14 @@ Assert.eq(heights[2], 40)
 Assert.eq(unused, 40)
 
 -- 自定义高度不夹内容高，也不吃剩余。
-selected, heights, unused = layout:allocate({
+selected, heights, unused = Layout.allocate({
     { id = "a", height = 20, fill = true, placement = { height = 99 } },
 }, 120, 0)
 Assert.eq(heights[1], 99)
 Assert.eq(unused, 21)
 
 -- 超高不跨页，整体压回 available。
-selected, heights, unused = layout:allocate({
+selected, heights, unused = Layout.allocate({
     { id = "a", height = 40, placement = { height = "default" } },
     { id = "b", height = 40, placement = { height = "default" } },
 }, 50, 0)
@@ -99,7 +98,7 @@ ranges.clock = { height = 30 }
 ranges.stats = { height = 30 }
 ranges.recent_list = { height = 60, fill = true }
 build_log = {}
-local _, page, pages, visible = layout:build({ width = 320, height = 140 }, components, 1, { body_height = 140 })
+local _, page, pages, visible = Layout.build({ width = 320, height = 140 }, components, 1, { body_height = 140 })
 Assert.eq(page, 1)
 Assert.eq(pages, 2)
 Assert.len(build_log, 1)
@@ -108,7 +107,7 @@ Assert.is_true(visible.clock)
 Assert.is_nil(visible.stats)
 
 build_log = {}
-_, page, pages, visible = layout:build({ width = 320, height = 140 }, components, 2, { body_height = 140 })
+_, page, pages, visible = Layout.build({ width = 320, height = 140 }, components, 2, { body_height = 140 })
 Assert.eq(page, 2)
 Assert.len(build_log, 2)
 Assert.is_true(visible.stats)
@@ -122,7 +121,7 @@ Assert.eq(inner_h, 116)
 Assert.eq(inner_gap, 8)
 
 -- 迁移用 paginate 仍可用。
-local packs = layout:paginate({
+local packs = Layout.paginate({
     { id = "a", height = 30 },
     { id = "b", height = 50 },
 }, 50, 8)

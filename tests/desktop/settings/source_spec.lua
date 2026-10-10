@@ -117,15 +117,14 @@ Assert.eq(config[#config - 1].title, "Z-Library")
 Assert.eq(config[#config].title, "OPDS")
 -- 和 Z-Library 一样：开关默认关，关着只有开关一行；打开后才出现目录配置入口。
 Assert.len(config[#config].rows, 1)
-Assert.eq(config[#config].rows[1]().kind, "toggle")
-Assert.eq(config[#config].rows[1]().status, "关")
+Assert.is_false(config[#config].rows[1]().toggle)
 config[#config].rows[1]().callback()
 Assert.eq(saved[#saved], "store")
 Assert.is_true(store_cfg.opds_enabled)
 local opds_rows = src:configSections{ desktop = desktop, plugin = nil }
 opds_rows = opds_rows[#opds_rows].rows
 Assert.len(opds_rows, 2)
-Assert.eq(opds_rows[1]().status, "开")
+Assert.is_true(opds_rows[1]().toggle)
 Assert.eq(opds_rows[2]().title, "OPDS 目录")
 Assert.eq(opds_rows[2]().status, "未配置")
 store_cfg.opds_enabled = false
@@ -135,5 +134,10 @@ for i = 1, #config do
         Assert.is_true(first().title ~= "混合模式", config[i].title)
     end
 end
+
+-- 源设置模块：没有文件即没有；模块自身抛错必须冒出来。
+Assert.is_nil(src.loadSetting("kindle"))
+package.preload["source.broken.setting"] = function() error("boom") end
+Assert.errors(function() src.loadSetting("broken") end, "boom")
 
 return true

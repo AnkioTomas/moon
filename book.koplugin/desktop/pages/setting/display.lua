@@ -1,0 +1,208 @@
+--[[-- 显示设置项。
+@module koplugin.book.desktop.pages.setting.display
+--]]
+
+local Device = require("device")
+local Event = require("ui/event")
+local UIManager = require("ui/uimanager")
+local List = require("ui.themes.widgets.list")
+local Spin = require("ui.themes.widgets.spin")
+local Toast = require("ui.themes.widgets.toast")
+local Row = require("ui.themes.widgets.row")
+local FontPicker = require("ui.widgets.fontpicker")
+local Theme = require("ui.themes")
+local MoonSettings = require("utils.settings")
+local _ = require("gettext")
+local T = require("ffi/util").template
+
+---@class BookSettingsDisplay
+local Display = {}
+local STYLE_NAMES = {
+    paper = _("纸本"),
+    bold = _("高对比"),
+    soft = _("柔和"),
+}
+local REFRESH_PRESETS = {
+    { value = 0, text = _("从不") },
+    { value = 1, text = _("每页") },
+    { value = 6, text = _("每 6 页") },
+    { value = -1, text = _("每章") },
+}
+
+---@param rate number|nil
+---@return string
+local function refreshRateLabel(rate)
+    rate = tonumber(rate)
+    if rate == nil then return _("每 6 页") end
+    for _idx, item in ipairs(REFRESH_PRESETS) do
+        if item.value == rate then return item.text end
+    end
+    if rate < 0 then return _("每章") end
+    return T(_("每 %1 页"), rate)
+end
+
+---@param desktop table
+---@return (fun(width: number): table|nil)|nil
+local function refreshRow(desktop)
+    if not Device:hasEinkScreen() then return nil end
+    return function(iw)
+        local day = select(1, UIManager:getRefreshRate())
+        return Row.widget({
+            width = iw,
+            kind = "nav", icon = "autorenew", title = _("屏幕刷新"),
+            subtitle = _("墨水屏全刷间隔；翻页动画开启时默认改为从不"),
+            status = refreshRateLabel(day), status_on = true,
+            callback = function()
+                List:new{
+                    title = _("屏幕刷新"),
+                    items = REFRESH_PRESETS,
+                    current = day,
+                    centered = true,
+                    on_select = function(value)
+                        UIManager:setRefreshRate(value, value)
+                        desktop:updateView()
+                    end,
+                }:show()
+            end,
+        })
+    end
+end
+
+---@param desktop table
+---@return (fun(width: number): table|nil)|nil
+local function colorRow(desktop)
+    local Screen = Device.screen
+    local can_color = Screen.isColorScreen and Screen:isColorScreen()
+        or Device.hasColorScreen and Device:hasColorScreen()
+        or Screen.isColorEnabled and Screen:isColorEnabled()
+    if not can_color then return nil end
+    return function(iw)
+        local color_on = Screen.isColorEnabled and Screen:isColorEnabled()
+            or G_reader_settings:isTrue("color_rendering")
+        return Row.widget({
+            width = iw,
+            icon = "palette", title = _("彩色屏幕支持"),
+            subtitle = _("在彩屏上启用彩色渲染"),
+            toggle = color_on,
+            callback = function()
+                local new_val = not color_on
+                G_reader_settings:saveSetting("color_rendering", new_val)
+                require("document/canvascontext"):setColorRenderingEnabled(new_val)
+                UIManager:broadcastEvent(Event:new("ColorRenderingUpdate"))
+                desktop:updateView()
+                if Device:isKobo() and Device:hasColorScreen() then
+                    UIManager:askForRestart()
+                end
+            end,
+        })
+    end
+end
+
+---@param ctx table
+---@return table
+function Display:rows(ctx)
+    local desktop = ctx.desktop
+    local font_name, scale, grid_max_cols = ctx.font_name, ctx.scale, ctx.grid_max_cols
+    local rows = {
+        function(iw)
+            local id = Theme.id()
+            return Row.widget({
+                width = iw,
+                kind = "nav", icon = "style", title = _("界面风格"),
+                subtitle = _("纸本细线、高对比粗边，或柔和圆角"),
+                status = STYLE_NAMES[id], status_on = true,
+                callback = function()
+                    local items = {}
+                    for _idx, style_id in ipairs(Theme.ids) do
+                        items[#items + 1] = { value = style_id, text = STYLE_NAMES[style_id] }
+                    end
+                    List:new{
+                        title = _("界面风格"),
+                        items = items,
+                        current = id,
+                        centered = true,
+                        on_select = function(value)
+                            Theme.set(value)
+                            desktop:updateView()
+                        end,
+                    }:show()
+                end,
+            })
+        end,
+        function(iw)
+            return Row.widget({
+                width = iw,
+                kind = "nav", icon = "text_fields", title = _("界面字体"),
+                subtitle = _("替换 KOReader 界面字体，不影响书籍正文"),
+                status = font_name, status_on = true,
+                callback = function()
+                    FontPicker.open{ title = _("界面字体"), on_done = function()
+                        require("ui.fonts").applyCurrent()
+                        desktop:updateView()
+                    end }
+                end,
+            })
+        end,
+        function(iw)
+            return Row.widget({
+                width = iw,
+                kind = "nav", icon = "format_size", title = _("界面缩放"),
+                subtitle = _("调整月读界面的整体大小"),
+                status = string.format("%d%%", scale), status_on = true,
+                callback = function()
+                    Spin:new{
+                        title = _("界面缩放"),
+                        fields = { { value = Theme.scale(), min = Theme.SCALE_MIN, max = Theme.SCALE_MAX,
+                            step = Theme.SCALE_STEP, format = function(v) return v .. "%" end } },
+                        callback = function(v)
+                            local n = Theme.setScale(v)
+                            Toast:new{ text = string.format("%d%%", n), timeout = 1.5 }:show()
+                            desktop:updateView()
+                        end,
+                    }:show()
+                end,
+            })
+        end,
+        function(iw)
+            return Row.widget({
+                width = iw,
+                kind = "nav", icon = "grid_view", title = _("书架每行数量"),
+                subtitle = _("调整书库和 Z站 每行显示的卡片数"),
+                status = tostring(grid_max_cols), status_on = true,
+                callback = function()
+                    local CoverCell = require("ui.widgets.cover")
+                    Spin:new{
+                        title = _("书架每行数量"),
+                        fields = { { value = CoverCell.gridCols(), min = CoverCell.gridColsMin(),
+                            max = CoverCell.gridColsMax() } },
+                        callback = function(v)
+                            CoverCell.setGridCols(v)
+                            desktop:updateView()
+                        end,
+                    }:show()
+                end,
+            })
+        end,
+        function(iw)
+            local conf = MoonSettings.get("ui")
+            return Row.widget({
+                width = iw,
+                icon = "texture", title = _("背景遮罩"),
+                subtitle = _("弹出面板和菜单时用网点压暗背景"),
+                toggle = conf.mesh_mask,
+                callback = function()
+                    conf.mesh_mask = not conf.mesh_mask
+                    MoonSettings.save("ui", conf)
+                    desktop:updateView()
+                end,
+            })
+        end,
+    }
+    local refresh = refreshRow(desktop)
+    if refresh then rows[#rows + 1] = refresh end
+    local color = colorRow(desktop)
+    if color then rows[#rows + 1] = color end
+    return rows
+end
+
+return Display

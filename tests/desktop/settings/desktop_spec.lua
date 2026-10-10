@@ -23,7 +23,7 @@ local Settings = require("desktop.pages.setting.desktop")
 local rows = Settings:rows(desktop, false)
 Assert.len(rows, 2)
 Assert.eq(rows[1](600).title, "启动打开桌面")
-Assert.eq(rows[1](600).kind, "toggle")
+Assert.is_false(rows[1](600).toggle)
 
 rows[1](600).callback()
 Assert.is_true(open_on_start, "关着时点开 = 设为启动项")
@@ -32,10 +32,10 @@ Assert.is_false(open_on_start, "开着时点关 = 取消启动项")
 
 local drawer = rows[2](600)
 Assert.eq(drawer.title, "抽屉图标打开桌面")
-Assert.is_true(drawer.status_on)
+Assert.is_true(drawer.toggle)
 drawer.callback()
 Assert.eq(book_settings.drawer_opens_desktop, false)
-Assert.is_false(rows[2](600).status_on)
+Assert.is_false(rows[2](600).toggle)
 
 
 return true
