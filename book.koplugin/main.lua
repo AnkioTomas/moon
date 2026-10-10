@@ -138,8 +138,6 @@ for _idx, name in ipairs({
     "onPageUpdate",
     "onPosUpdate",
     "onAnnotationsModified",
-    "onEndOfBook",
-    "onStartOfBook",
     "onCloseDocument",
 }) do
     BookPlugin[name] = Guard.wrap(name, Session[name])

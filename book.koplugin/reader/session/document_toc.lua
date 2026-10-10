@@ -1,0 +1,154 @@
+--[[--
+整书模式：KOReader 文档内目录（crengine / ReaderToc）。
+
+@module koplugin.book.reader.session.document_toc
+--]]
+
+---@class ReaderDocumentToc
+local DocumentToc = {}
+local list_cache = setmetatable({}, { __mode = "k" })
+
+---@param ui table|nil
+---@return table|nil
+local function rawToc(ui)
+    if not ui then return nil end
+    local document = ui.document
+    local toc_mod = ui.toc
+    if not toc_mod or not document then
+        return nil
+    end
+    -- ReaderToc.fillToc 可能触发文档解析；TOC 在同一 ReaderUI 生命周期内是
+    -- 稳定的，已有结果时不要每次绘制都再次填充。
+    if type(toc_mod.toc) == "table" and #toc_mod.toc > 0 then
+        return toc_mod.toc
+    elseif type(toc_mod.fillToc) == "function" then
+        pcall(toc_mod.fillToc, toc_mod)
+    elseif type(document.getToc) == "function" then
+        local ok, items = pcall(document.getToc, document)
+        if ok and type(items) == "table" then
+            toc_mod.toc = items
+        end
+    end
+    local items = toc_mod.toc
+    if type(items) ~= "table" or #items == 0 then
+        if type(document.getToc) == "function" then
+            local ok, fallback = pcall(document.getToc, document)
+            items = ok and fallback or nil
+        end
+    end
+    if type(items) ~= "table" or #items == 0 then
+        return nil
+    end
+    return items
+end
+
+---@param ui table|nil
+---@return BookChapter[]|nil
+function DocumentToc.list(ui)
+    local items = rawToc(ui)
+    if not items then return nil end
+    local cached = ui and list_cache[ui]
+    if cached and cached.items == items and cached.count == #items then
+        return cached.out
+    end
+    local out = {}
+    for i, entry in ipairs(items) do
+        if type(entry) == "table" then
+            local title = entry.title
+            if type(title) ~= "string" or title == "" then
+                title = "#" .. i
+            end
+            out[#out + 1] = {
+                idx = i,
+                title = title,
+                page = entry.page,
+                xpointer = entry.xpointer,
+            }
+        end
+    end
+    if #out == 0 then return nil end
+    if ui then
+        list_cache[ui] = { items = items, count = #items, out = out }
+    end
+    return out
+end
+
+--- 页码；ReaderToc 的章内页数 / 上下章接口只认页码，不认 xpointer。
+---@param ui table|nil
+---@return number|nil
+local function currentPage(ui)
+    if not ui or type(ui.getCurrentPage) ~= "function" then return nil end
+    local ok, page = pcall(ui.getCurrentPage, ui)
+    return ok and tonumber(page) or nil
+end
+
+---@param ui table|nil
+---@return number|string|nil
+local function currentLocator(ui)
+    if not ui or not ui.document then return nil end
+    if type(ui.document.getXPointer) == "function" then
+        local ok, xptr = pcall(ui.document.getXPointer, ui.document)
+        if ok and type(xptr) == "string" and xptr ~= "" then
+            return xptr
+        end
+    end
+    return currentPage(ui)
+end
+
+---@param ui table|nil
+---@return integer|nil
+local function currentIndex(ui)
+    local toc_mod = ui and ui.toc
+    local locator = currentLocator(ui)
+    if not toc_mod or locator == nil then return nil end
+    if type(toc_mod.getTocIndexByPage) == "function" then
+        local ok, idx = pcall(toc_mod.getTocIndexByPage, toc_mod, locator)
+        idx = ok and tonumber(idx) or nil
+        if idx and idx > 0 then return idx end
+    end
+    local page = currentPage(ui)
+    local items = rawToc(ui)
+    if not page or not items then return nil end
+    local prev = 0
+    for i, entry in ipairs(items) do
+        local entry_page = tonumber(entry.page)
+        if entry_page and entry_page <= page then
+            prev = i
+        elseif entry_page and entry_page > page then
+            break
+        end
+    end
+    return prev > 0 and prev or nil
+end
+
+---@param ui table|nil
+---@return { idx: integer, title: string }|nil
+function DocumentToc.current(ui)
+    local idx = currentIndex(ui)
+    if not idx then return nil end
+    local list = DocumentToc.list(ui)
+    local entry = list and list[idx]
+    if not entry then return nil end
+    return { idx = idx, title = entry.title }
+end
+
+---@param ui table|nil
+---@return number|nil
+function DocumentToc.chapterFraction(ui)
+    local toc_mod = ui and ui.toc
+    local page = currentPage(ui)
+    if not toc_mod or not page then return nil end
+    if type(toc_mod.getChapterPagesDone) == "function"
+        and type(toc_mod.getChapterPagesLeft) == "function" then
+        local ok_done, done = pcall(toc_mod.getChapterPagesDone, toc_mod, page)
+        local ok_left, left = pcall(toc_mod.getChapterPagesLeft, toc_mod, page)
+        done = ok_done and tonumber(done)
+        left = ok_left and tonumber(left)
+        if done and left and (done + left) > 0 then
+            return math.max(0, math.min(1, done / (done + left)))
+        end
+    end
+    return nil
+end
+
+return DocumentToc
