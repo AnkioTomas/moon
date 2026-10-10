@@ -1,7 +1,14 @@
 --[[--
-本地阅读进度（一书一条）。sync_status=0 表示待上传，1 表示已同步。
+本地阅读进度（一书一条），阅读进度真源。sync_status=0 表示待上传，1 表示已同步。
+表名带 pending_，但行同时表示已同步状态。
 
-@module koplugin.book.db.progress
+不变量：
+  - upsertRemote 的 keep_dirty 必须在落库前判定，本地脏行整行跳过；冲突交给开书时用户选择，禁止静默抹平。
+  - markSynced 靠 updated_at 乐观锁，推送期间又更新过的行不会被误标已同步。
+  - 进度写到 100% 调 BookDB.markReadAutomatically（books 自动标已读）；建表时对已读完的行回填一次。
+books_db 调用：markFinished（手动已读补 100% 待上传进度）、moveIdentity（迁身份）。
+
+@module koplugin.book.book.progress_db
 --]]
 
 --- 对应表 pending_progress：待上传进度（一书一条）
@@ -19,17 +26,15 @@
 ---@field updated_at integer 更新时间戳
 ---@field sync_status integer 0=待同步，1=已同步
 
-local Base = require("db.base")
+local DB = require("utils.db")
 local JSON = require("json")
 local logger = require("utils.log")
+local BookDB = require("book.books_db")
 
 local ProgressDB = {}
 
---- 创建本地阅读进度表。
---- 仅在 Base.open() 的一次性 schema 初始化阶段调用。
----@return boolean 成功返回 true，SQL 失败返回 false
-function ProgressDB.ensureSchema()
-    if not Base.exec([[
+DB.schema("pending_progress", function()
+    if not DB.exec([[
 CREATE TABLE IF NOT EXISTS pending_progress (
   source_id TEXT NOT NULL, stable_id TEXT NOT NULL, fraction REAL NOT NULL,
   chapter_idx INTEGER, chapter_title TEXT, chapter_fraction REAL,
@@ -40,14 +45,13 @@ CREATE TABLE IF NOT EXISTS pending_progress (
 CREATE INDEX IF NOT EXISTS idx_pending_progress_recent
   ON pending_progress(source_id, updated_at DESC);
 ]]) then return false end
-    return Base.exec([[UPDATE books SET read_state=1
-        WHERE read_state=0 AND EXISTS (
-            SELECT 1 FROM pending_progress p
-            WHERE p.source_id=books.source_id
-              AND p.stable_id=books.stable_id
-              AND p.fraction>=1
-        );]]) ~= nil
-end
+    -- 旧库回填：read_state 列加入前已读完的书。
+    local result, nrows = DB.query("SELECT source_id, stable_id FROM pending_progress WHERE fraction>=1;")
+    for i = 1, nrows do
+        if not BookDB.markReadAutomatically(result[1][i], result[2][i]) then return false end
+    end
+    return true
+end)
 
 local COLUMNS = "source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction, page, total_pages, locator, extra, updated_at, sync_status"
 
@@ -58,20 +62,6 @@ local function positiveInt(value)
         return nil
     end
     return math.floor(n)
-end
-
---- 进度满时抬 books.read_state（进度真源在本表，不再写 books.percent）。
----@param source_id string
----@param stable_id string
----@param fraction number|nil
-local function syncReadState(source_id, stable_id, fraction)
-    if (tonumber(fraction) or 0) < 1 then return end
-    Base.exec(
-        [[UPDATE books SET read_state=1
-          WHERE source_id=? AND stable_id=? AND read_state=0;]],
-        source_id,
-        stable_id
-    )
 end
 
 --- 源私有定位字段序列化为 JSON；空表与非表一律存 NULL。
@@ -108,7 +98,7 @@ end
 local function write(source_id, stable_id, pos, status, keep_dirty)
     local fraction = tonumber(pos.fraction)
     -- keep_dirty：本地脏行整行跳过，避免远端覆盖。
-    if keep_dirty and tonumber(Base.rowexec(
+    if keep_dirty and tonumber(DB.rowexec(
             "SELECT sync_status FROM pending_progress WHERE source_id=? AND stable_id=?;",
             source_id, stable_id)) == 0 then
         return true
@@ -118,7 +108,7 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
     if extra_err then
         return false
     end
-    if not Base.exec(
+    if not DB.exec(
         [[INSERT INTO pending_progress
             (source_id, stable_id, fraction, chapter_idx, chapter_title, chapter_fraction,
              page, total_pages, locator, extra, updated_at, sync_status)
@@ -141,7 +131,8 @@ local function write(source_id, stable_id, pos, status, keep_dirty)
     ) then
         return false
     end
-    syncReadState(source_id, stable_id, fraction)
+    -- 进度真源在本表；books.read_state 失败不影响进度落库。
+    if (fraction or 0) >= 1 then BookDB.markReadAutomatically(source_id, stable_id) end
     return true
 end
 
@@ -199,7 +190,7 @@ end
 ---@param stable_id string
 ---@return PendingProgress|nil
 function ProgressDB.get(source_id, stable_id)
-    return toProgress(Base.rowexec(
+    return toProgress(DB.rowexec(
         "SELECT " .. COLUMNS .. " FROM pending_progress WHERE source_id=? AND stable_id=? LIMIT 1;",
         source_id,
         stable_id
@@ -222,7 +213,7 @@ end
 ---@param source_id string
 ---@return PendingProgress[]
 function ProgressDB.unsynced(source_id)
-    return rows(Base.query(
+    return rows(DB.query(
         "SELECT " .. COLUMNS .. " FROM pending_progress WHERE sync_status=0 AND source_id=? ORDER BY updated_at ASC;",
         source_id
     ))
@@ -235,9 +226,9 @@ end
 ---@param limit number|nil
 ---@return PendingProgress[]
 function ProgressDB.recent(source_id, limit)
-    local where, args = Base.sourceClause("p.source_id", source_id)
+    local where, args = DB.sourceClause("p.source_id", source_id)
     args[#args + 1] = math.max(1, tonumber(limit) or 24)
-    return rows(Base.query(
+    return rows(DB.query(
         [[SELECT ]] .. COLUMNS .. [[ FROM pending_progress p
           WHERE ]] .. where .. [[ AND p.updated_at>0
             AND EXISTS (
@@ -253,16 +244,46 @@ end
 ---@param source_id string
 ---@param stable_id string
 ---@param updated_at number
----@return boolean
+---@return boolean 命中该修订号的行才算确认；期间被改写过返回 false
 function ProgressDB.markSynced(source_id, stable_id, updated_at)
-    local ts = tonumber(updated_at)
-    return Base.execChanged(
+    return DB.exec(
         [[UPDATE pending_progress SET sync_status=1
           WHERE source_id=? AND stable_id=? AND updated_at=?;]],
         source_id,
         stable_id,
-        ts
-    )
+        updated_at
+    ) ~= nil and (tonumber(DB.rowexec("SELECT changes();")) or 0) > 0
+end
+
+--- 手动标已读（BookDB.setRead）：补一条 100% 的待上传进度。
+---@param source_id string
+---@param stable_id string
+---@return boolean
+function ProgressDB.markFinished(source_id, stable_id)
+    return DB.exec([[
+INSERT INTO pending_progress
+  (source_id, stable_id, fraction, updated_at, sync_status)
+VALUES (?,?,1,?,0)
+ON CONFLICT(source_id, stable_id) DO UPDATE SET
+  fraction=1,
+  sync_status=0,
+  updated_at=excluded.updated_at;]],
+        source_id, stable_id, os.time()) ~= nil
+end
+
+--- 书改名 / 收编时由 books_db 调用。
+--- 收编（merge）时旧身份的进度还没推就比新身份的已同步副本新，先清掉新身份那份。
+function ProgressDB.moveIdentity(source_id, old_stable_id, new_stable_id, merge)
+    return (not merge or DB.exec(
+        [[DELETE FROM pending_progress WHERE source_id=? AND stable_id=? AND EXISTS (
+            SELECT 1 FROM pending_progress WHERE source_id=? AND stable_id=? AND sync_status=0);]],
+        source_id, new_stable_id, source_id, old_stable_id) ~= nil)
+        and DB.moveIdentity("pending_progress", source_id, old_stable_id, new_stable_id, merge)
+end
+
+--- 书被删（墓碑撕掉）时由 books_db 调用。
+function ProgressDB.removeIdentity(source_id, stable_id)
+    return DB.removeIdentity("pending_progress", source_id, stable_id)
 end
 
 return ProgressDB

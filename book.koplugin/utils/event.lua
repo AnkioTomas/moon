@@ -9,6 +9,7 @@ init 之前 emit 没有订阅方（离线测试未 init 时只跑核心逻辑）
 
 已有事件：
 - `book_identity_changed(source_id, old_stable_id, new_stable_id, merge)`：books 改名 / 收编，核心表迁完后发出
+- `book_removed(source_id, stable_id)`：远端确认删除、撕墓碑，核心表清完后发出
 
 @module koplugin.book.utils.event
 --]]

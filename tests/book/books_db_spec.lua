@@ -762,30 +762,65 @@ do
     clearMods()
 end
 
--- ── remove：双键绑定删除；非法输入拒绝 ───────────────────
+-- ── remove：只撕墓碑（deleted=1），双键绑定；非法输入不拼进 SQL ──
 do
     local connection, calls = makeConn()
     local DbBase, BookDB = loadBook(connection)
 
     Assert.is_true(BookDB.remove("local", "/a'); DROP TABLE books;--"))
-    local q = calls[#calls]
-    Assert.eq(q.sql, "DELETE FROM books WHERE source_id=? AND stable_id=?;")
+    local q
+    for _, call in ipairs(calls) do
+        if call.sql:find("^DELETE FROM books") then q = call end
+    end
+    Assert.eq(q.sql, "DELETE FROM books WHERE source_id=? AND stable_id=? AND deleted=1;")
     Assert.eq(q.argc, 2)
     Assert.eq(q.args[1], "local")
     Assert.eq(q.args[2], "/a'); DROP TABLE books;--")
     Assert.is_false(q.sql:find("DROP TABLE", 1, true) ~= nil)
+    Assert.eq(calls[#calls].sql, "COMMIT;")
 
     DbBase.close()
     clearMods()
 end
 
--- ── remove：删除 books 行 ───────────────────────────────
+-- ── remove：没撕到墓碑（不存在 / 未标删）不碰依附表 ──
 do
-    local connection, calls = makeConn()
-    local DbBase, BookDB = loadBook(connection)
+    local connection, calls = makeConn({
+        step = function(sql) if sql == "SELECT changes();" then return { 0 } end end,
+    })
+    local DbBase, BookDB = loadBook(connection, true)
+
+    Assert.is_true(BookDB.remove("moon", "live"))
+    for _, call in ipairs(calls) do
+        Assert.is_false(call.sql:find("DELETE FROM", 1, true) ~= nil and not call.sql:find("^DELETE FROM books"),
+            "未撕墓碑不应级联: " .. call.sql)
+    end
+
+    DbBase.close()
+    clearMods()
+end
+
+-- ── remove：撕掉墓碑后同一事务级联清依附表（含 feature 的 xray） ──
+do
+    local connection, calls = makeConn({
+        step = function(sql) if sql == "SELECT changes();" then return { 1 } end end,
+    })
+    local DbBase, BookDB = loadBook(connection, true)
 
     Assert.is_true(BookDB.remove("moon", "b'1"))
-    Assert.eq(calls[#calls].sql, "DELETE FROM books WHERE source_id=? AND stable_id=?;")
+    local deleted = {}
+    for _, call in ipairs(calls) do
+        local tbl = call.sql:match("^DELETE FROM ([%w_]+) WHERE source_id=%? AND stable_id=%?;$")
+        if tbl then
+            deleted[tbl] = true
+            Assert.eq(call.args[1], "moon")
+            Assert.eq(call.args[2], "b'1")
+        end
+    end
+    for _, tbl in ipairs({ "chapters", "notes", "pending_progress", "reading_stats", "xray_entities" }) do
+        Assert.is_true(deleted[tbl], "删书须清依附表: " .. tbl)
+    end
+    Assert.eq(calls[#calls].sql, "COMMIT;")
 
     DbBase.close()
     clearMods()
