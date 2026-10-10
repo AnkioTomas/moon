@@ -45,8 +45,11 @@ local function spec(key, kind, extra)
     return t
 end
 
--- 类型只有 download / sync / cache。
+-- 类型只有 download / sync / cache / online。
 Assert.errors(function() Tasks.enqueue(spec("bad", "other")) end, "unknown task kind")
+local online_ok = Tasks.enqueue(spec("online-ok", "online"))
+Assert.eq(online_ok.kind, "online")
+online_ok.runs[1].done({ ok = true })
 Assert.eq(#Tasks.tasks(), 0)
 
 -- 同类并行；异类等执行权；队首是异类时后面的同类不插队。

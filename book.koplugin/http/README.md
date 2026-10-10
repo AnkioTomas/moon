@@ -4,7 +4,7 @@
 
 ## 设计
 
-全部外部 HTTP 经 Turbo 非阻塞回调。可取消句柄统一 `{ cancel }`。GET 的 `cache_ttl>0` 走 `http` 表（带 `auth_username` 时按用户隔离）；业务层（含 `online/`）不自己判新鲜度。
+全部外部 HTTP 经 Turbo 非阻塞回调。可取消句柄统一 `{ cancel }`。GET 的 `cache_ttl>0` 走 `http` 表（带 `auth_username` 时按用户隔离）。`online/` 自己管文件 TTL（`cache/online/`），请求一律 `cache_ttl = 0`。
 
 入口只检查网卡状态（`NetworkMgr:isConnected`），禁用 `isOnline`：它在 UI 线程同步解析 DNS。
 

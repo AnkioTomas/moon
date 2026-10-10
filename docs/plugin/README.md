@@ -14,7 +14,7 @@ BookPlugin:init
 ├── logger / Turbo（须在 UIManager:run 前由别处启用）
 ├── Fonts.onCreate（= applyCurrent，按配置应用 UI 字体）
 ├── Menu.onCreate（menu.lua：主菜单 / 设置置顶 / 启动项菜单 / book_open_shelf 手势 / start_with 种入）
-├── 当前源 onCreate → Features.emit("onCreate")（面板 / 锁屏 / 远程 / IME 等都是 feature）
+├── 当前源 onCreate → Online.onNetworkConnected → Features.emit("onCreate")（面板 / 锁屏 / 远程 / IME 等都是 feature）
 └── nextTick Desktop.autoOpen（兜底；正常由 onShow = Desktop.autoOpen 同步接管）
 更新检查在 Desktop:onResume → Update.autoCheck
 ```
@@ -42,7 +42,7 @@ KOReader 宿主事件仍叫 `onSuspend` / `onExit`（契约），内部再转发
 
 ### 源生命周期与事件
 
-main 经 `emitSource` 把 init / 休眠 / 唤醒 / 联网 / 退出转给**所有启用源**的 `onCreate` / `onSuspend` / `onResume` / `onNetworkConnected` / `onExit`（参数为插件实例；除 `onNetworkConnected` 只推本源脏行外，`SourceBase` 默认空操作），紧挨在 `Features.emit` 之前，每个源经 guard 隔离。
+main 经 `emitSource` 把 init / 休眠 / 唤醒 / 联网 / 退出转给**所有启用源**的 `onCreate` / `onSuspend` / `onResume` / `onNetworkConnected` / `onExit`（参数为插件实例；除 `onNetworkConnected` 只推本源脏行外，`SourceBase` 默认空操作），随后 `Online.onNetworkConnected`（启动时若已联网会刷一次），再 `Features.emit`，每个源 / 接口经 guard 隔离。
 
 业务事件由持有属主源的调用方直接 `source:onEvent(event, payload)`：阅读会话发 `page_changed` / `chapter_changed`（源取 `identity.source`，不回落 current），详情编辑发 `book_meta_changed`。桌面打开 / 换源 / 图书馆刷新的书架与统计同步不走源事件，由 `desktop/sync.lua` 的 `Sync.open` / `Sync.refresh` 直接调源的 `syncBooksAsync` / `syncStatsAsync`。
 
@@ -58,10 +58,11 @@ require("desktop.open").book(self, book)
 BookPlugin.onReaderReady = Session.onReaderReady
 -- DocSettingsLoad / PageUpdate / PosUpdate / AnnotationsModified / EndOfBook / StartOfBook / CloseDocument 同理
 
--- 网络恢复：启用源自己推脏，feature 自己刷新
+-- 网络恢复：启用源自己推脏，online 补拉离线没刷的，feature 自己刷新。
 function BookPlugin:onNetworkConnected()
     emitSource(self, "onNetworkConnected")
-    require("features.init").emit("onNetworkConnected", self)
+    require("online").onNetworkConnected(self)
+    require("features").emit("onNetworkConnected", self)
 end
 
 -- 旧书事件直接发给属主源
@@ -73,9 +74,9 @@ identity.source:onEvent("page_changed", payload)
 | `onShow` | `= Desktop.autoOpen`：FM 显示且启动项为月读时开桌面（进程内一次） |
 | `onDocSettingsLoad` / `onReaderReady` / 翻页 / 注解 / 章界 / `onCloseDocument` | 直接是 `Session` 的同名函数 |
 | `onSuspend` | → 后台任务 / Session `onSuspend`，启用源 / features `onSuspend`（桌面在栈上自收 Suspend） |
-| `onResume` | → 各模块 `onResume`（Session / 启用源 / features；桌面在栈上自收 Resume） |
-| `onExit` | → 更新任务 / 启用源 `onExit` / features；桌面在栈上自收 Exit |
-| `onNetworkConnected` | 后台任务续跑 + 启用源推本源脏行 + features（锁屏等）；桌面自收 |
+| `onResume` | → 各模块 `onResume`（Session / 启用源 / features；桌面在栈上自收 Resume）。online 不跟唤醒 |
+| `onExit` | → 启用源 `onExit` / features；桌面在栈上自收 Exit |
+| `onNetworkConnected` | 后台任务续跑 + 启用源推本源脏行 + online 补拉 + features（锁屏等）；桌面自收 |
 
 | 源事件 | 含义 |
 |---|---|

@@ -45,7 +45,7 @@ local TaskDialog = Modal:extend{
 ---@param kind BookTaskKind
 ---@return string
 function TaskDialog.label(kind)
-    return ({ download = _("下载"), sync = _("同步书架"), cache = _("缓存") })[kind]
+    return ({ download = _("下载"), sync = _("同步书架"), cache = _("缓存"), online = _("在线") })[kind]
 end
 
 --- 数值进度：download 按字节（MB），其余按条数；没有则 nil。

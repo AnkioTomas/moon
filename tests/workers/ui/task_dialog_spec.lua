@@ -179,6 +179,7 @@ empty:onCloseWidget()
 
 -- 共用文案：download 按字节，其余按条数；brief 省掉步骤文案。
 Assert.eq(TaskDialog.label("sync"), "同步书架")
+Assert.eq(TaskDialog.label("online"), "在线")
 local snap = { kind = "download", state = "running", count = 1048576, total = 4 * 1048576, attempt = 1 }
 Assert.eq(TaskDialog.status(snap), "1.0 / 4.0 MB")
 snap.total = 0

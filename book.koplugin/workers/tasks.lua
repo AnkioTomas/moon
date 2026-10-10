@@ -1,6 +1,7 @@
 --[[--
-后台任务队列：用户发起、耗时长的操作，按 kind 分三类：
-`download` 资源下载（书城、字典、输入法词库）、`sync` 书库同步、`cache` 书籍缓存。
+后台任务队列：用户发起、耗时长的操作，按 kind 分四类：
+`download` 资源下载（书城、字典、输入法词库）、`sync` 书库同步、`cache` 书籍缓存、
+`online` ankio.net 公共接口（天气 / 一言 / 摸鱼日报 / 必应；自动入队，不弹进度窗）。
 
 同类可以并行，异类互斥：有任务在跑（或退避占位）时只放行同类；队首排队的是异类时后面的同类不插队，
 免得异类饿死。key 必填且唯一：同 key 还在排队的旧任务被新任务替换（旧的按取消处理），已在执行的拒绝新任务。
@@ -30,7 +31,7 @@ restartable 的任务归队列所有，队列可以随时中断并从头重跑�
 
 local Tasks = {}
 
----@alias BookTaskKind "download"|"sync"|"cache"
+---@alias BookTaskKind "download"|"sync"|"cache"|"online"
 
 ---@class BookTask
 ---@field key string
@@ -51,11 +52,12 @@ local Tasks = {}
 ---@field handle { cancel: fun() }|nil
 ---@field token any|nil
 ---@field retry_tick fun()|nil
+---@field _online_url string|nil
 
 local MAX_ATTEMPTS = 3
 local RETRY_DELAY_SECONDS = 15
 local MAX_PENDING = 64
-local KINDS = { download = true, sync = true, cache = true }
+local KINDS = { download = true, sync = true, cache = true, online = true }
 
 ---@type BookTask[] 未结束任务，入队顺序
 local list = {}

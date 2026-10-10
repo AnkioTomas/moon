@@ -1,6 +1,6 @@
 # scrape/ — 元数据刮削
 
-路径：[`book.koplugin/scrape/`](../../book.koplugin/scrape/)。
+路径：[`book.koplugin/desktop/detail/scrape/`](../../book.koplugin/desktop/detail/scrape/)。
 
 给**允许刮削的源**（通常仅 `local`，`capabilities.scrape`）搜豆瓣/微信读书元数据，写回 books 并下封面。
 
@@ -23,7 +23,7 @@
 ## 用法
 
 ```lua
-local ScrapeUI = require("scrape.ui")
+local ScrapeUI = require("desktop.detail.scrape.ui")
 
 if SourceCapabilities.supportsScrape(source) then
     ScrapeUI.start(identity, default_title, function()
