@@ -10,6 +10,7 @@
       width = w, icon = "source", title = "…", subtitle = "…",
       image = "https://…", image_w = 32, image_h = 32,   -- 缩略图（逻辑像素），高度夹到行内
       status = "开", status_on = true,   -- status 也可以直接给控件（字体预览等）
+      toggle = true,       -- 开关行：等于 status「开/关」+ status_on，缺省不画箭头
       chevron = true,      -- 缺省：有 callback 就画
       selected = false,    -- 选中项取 selected 令牌（反色主题整行反白）
       enabled = true,      -- false 时置灰、不响应
@@ -34,6 +35,7 @@ local Box = require("ui.themes.widgets.box")
 local Image = require("ui.themes.widgets.image")
 local Tap = require("ui.themes.widgets.tap")
 local Text = require("ui.themes.widgets.text")
+local _ = require("gettext")
 
 ---@class BookThemeRow
 local Row = {}
@@ -50,6 +52,10 @@ end
 ---@return table
 function Row.widget(opts)
     if opts.subtitle == "" then opts.subtitle = nil end
+    if opts.toggle ~= nil then
+        opts.status, opts.status_on = opts.toggle and _("开") or _("关"), opts.toggle
+        if opts.chevron == nil then opts.chevron = false end
+    end
     local t = Theme.current()
     local enabled = opts.enabled ~= false
     local sel = opts.selected == true
