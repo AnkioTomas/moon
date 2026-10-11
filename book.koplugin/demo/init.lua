@@ -394,8 +394,18 @@ local function entries()
                 { label = "备注", height = 80 },
             }, ok_text = "登录", callback = function(account) say("账号：" .. account) end }:show()
         end },
-        { text = "文本查看 TextViewer", run = function()
+        { text = "文本查看 TextViewer · 全屏", run = function()
             TextViewer:new{ title = "关于月读", text = LONG_TEXT }:show()
+        end },
+        { text = "文本查看 TextViewer · 卡片（随内容高）", run = function()
+            TextViewer:new{
+                title = "李善德",
+                text = "类型：人物\n身份：主角/九品小吏\n\n本书主人公，在故事中是一名负责将鲜荔枝从岭南运抵长安的底层官吏。",
+                fullscreen = false,
+            }:show()
+        end },
+        { text = "文本查看 TextViewer · 卡片（最高 90% 分页）", run = function()
+            TextViewer:new{ title = "关于月读", text = LONG_TEXT, fullscreen = false }:show()
         end },
         { text = "二维码 QR", run = function()
             QR:new{ title = "扫码打开", text = "https://github.com/", caption = "点任意处收起" }:show()
