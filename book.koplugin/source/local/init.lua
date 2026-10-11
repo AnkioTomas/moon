@@ -1,7 +1,7 @@
 --[[--
 本地数据源门面：扫盘同步写库 + 查询走 book.catalog（本地唯一读入口）。
 
-syncBooksAsync = 扫盘（force 强制 / 否则节流自动扫）。查询继承 SourceBase。
+syncBooksAsync = 扫盘或 WebDAV 同步（force 强制 / 否则节流自动同步）。查询继承 SourceBase。
 
 @module koplugin.book.source.local
 --]]
@@ -21,6 +21,7 @@ end
 ---@class LocalSource : SourceBase
 ---@field cfg table
 ---@field _client table
+---@field _auto_sync_at number|nil 上次自动同步开始时间（失败清掉）
 local Source = setmetatable({}, { __index = SourceBase })
 Source.__index = Source
 
@@ -66,40 +67,32 @@ function Source:onEvent(event, payload)
     end)
 end
 
---- 删除本地原书及其本地登记。
+--- 纯本地目录没有远端：书库外开过的书、进度、统计会一直是脏行，入队只会每次唤醒空跑一轮。
+function Source:pushDirty()
+    if self._client:isWebdav() then SourceBase.pushDirty(self) end
+end
+
+--- 删除。WebDAV 书：删本地镜像后走基类本地优先删除，远端文件与书目条目由下一轮同步的 pushDeletes 推删。
+--- 纯本地书：原书文件就是“远端”，删掉它即确认，随后标删并立即撕墓碑。
 ---@param identity BookIdentity
 ---@param cb fun(ok: boolean, err: string|nil)
----@return table
+---@return { cancel: fun() }
 function Source:deleteBookAsync(identity, cb)
-    if Client.isRemote(identity.stable_id) then
-        return self._client:deleteWebdavAsync(identity.stable_id, function(ok, err, listed)
-            if ok then
-                -- 留墓碑而不是删行：books.sync 没写成时它是脏的，reconcile 不会拿远端旧条目把书复活，
-                -- 下一轮 pushBooksSync 把条目删掉再清脏。
-                local BookDB = require("book.books_db")
-                BookDB.markDeleted(self.id, identity.stable_id)
-                if listed then BookDB.markSynced(self.id, identity.stable_id) end
-                cb(true)
-            else
-                cb(false, err or _("删除 WebDAV 书籍失败"))
-            end
-        end)
+    local stable_id = identity.stable_id
+    if Client.isRemote(stable_id) then
+        os.remove(self._client:webdavBookRoot() .. "/" .. require("source.local.common").remoteRelativePath(stable_id))
+        return SourceBase.deleteBookAsync(self, identity, cb)
     end
-    local cancelled = false
-    require("ui/uimanager"):nextTick(function()
-        if cancelled then return end
-        local path = identity and identity.stable_id
-        if type(path) ~= "string" or path == "" or not os.remove(path) then
-            cb(false, _("删除本书失败"))
-            return
-        end
-        require("book.books_db").remove(self.id, identity.stable_id)
-        require("book.chapters_db").delete(path)
-        local Paths = require("utils.paths")
-        os.remove(Paths.coverPath(identity.stable_id, self.id))
-        cb(true)
-    end)
-    return { cancel = function() cancelled = true end }
+    -- 文件已被外部删掉同样算确认，否则这本书永远删不掉。
+    if not os.remove(stable_id) and require("libs/libkoreader-lfs").attributes(stable_id, "mode")
+        or not require("book.store").markDeleted(self.id, stable_id) then
+        return SourceBase.defer(cb, false, _("删除本书失败"))
+    end
+    -- 原书已删、书已从书架消失，对用户就是删成了；撕不掉的墓碑只是库里残留，不报失败。
+    if not require("book.books_db").remove(self.id, stable_id) then
+        require("utils.log").warn("book local tombstone remove failed", stable_id)
+    end
+    return SourceBase.defer(cb, true)
 end
 
 --- 本地文件直接登记并返回，不下载不复制。
@@ -115,23 +108,12 @@ function Source:openBookAsync(identity, _opts, cb)
             if ok then cb(path) else cb(nil, store_err) end
         end)
     end
-    local cancelled = false
-    require("ui/uimanager"):nextTick(function()
-        if cancelled then return end
-        local path = identity.stable_id
-        if type(path) ~= "string"
-            or require("libs/libkoreader-lfs").attributes(path, "mode") ~= "file" then
-            cb(nil, _("本地书籍文件不存在"))
-            return
-        end
-        local ok, err = require("book.store").touch(path, identity)
-        if ok then
-            cb(path)
-        else
-            cb(nil, err)
-        end
-    end)
-    return { cancel = function() cancelled = true end }
+    local path = identity.stable_id
+    if require("libs/libkoreader-lfs").attributes(path, "mode") ~= "file" then
+        return SourceBase.defer(cb, nil, _("本地书籍文件不存在"))
+    end
+    local ok, err = require("book.store").touch(path, identity)
+    return SourceBase.defer(cb, ok and path or nil, err)
 end
 
 --- 封面：扫描时已提取到 image 缓存目录，这里只查缓存（同步，禁止现解析）。
@@ -145,46 +127,47 @@ function Source:coverRequest(identity)
     return nil, _("无封面")
 end
 
---- 扫盘写 books：force 立即扫；否则走节流自动扫。
+local skipped = SourceBase.skipped
+
+--- 桌面打开触发的自动同步节流（秒）：反复开桌面不重复扫盘、不重复跑整轮 WebDAV。
+local AUTO_SYNC_INTERVAL = 60
+
+--- 书架同步。WebDAV：force=刷新（另列远端目录）、dirty_only=只推本地删除与书目改动、否则日常同步；
+--- 有本地改动没推上去时整轮仍算成功，原因放在 push_error。纯本地目录：扫盘，dirty_only 无事可做。
+--- 不带 force / dirty_only 的自动同步按 AUTO_SYNC_INTERVAL 节流；失败不占节流窗口，下次打开桌面就重试。
 ---@param opts { force?: boolean, dirty_only?: boolean, on_progress?: fun(text: string|nil, done: integer|nil, total: integer|nil) }|nil
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
-    -- local 无远端书架；dirty_only 跳过扫盘。
-    if opts.dirty_only then
-        require("ui/uimanager"):nextTick(function()
-            cb({
-                pulled = 0, pushed = 0, hidden = 0, conflicts = 0,
-                skipped = true, reason = "local dirty_only",
-            })
-        end)
-        return { cancel = function() end }
-    end
-    if opts.force then
-        return self._client:scanAsync(function(ok, err)
-            if ok == false then cb(nil, err); return end
-            cb({ pulled = 1, pushed = 0, hidden = 0, conflicts = 0,
-                skipped = false, scanned = true })
-        end, opts.on_progress)
-    end
-    return self._client:autoScanAsync(function(scanned, err, skipped)
-        if err then
-            cb(nil, err)
-            return
+    local webdav = self._client:isWebdav()
+    if opts.dirty_only and not webdav then return skipped(cb, "local dirty_only") end
+    local auto = not opts.force and not opts.dirty_only
+    if auto then
+        if self._auto_sync_at and os.time() - self._auto_sync_at < AUTO_SYNC_INTERVAL then
+            return skipped(cb, "throttled")
         end
-        cb({ pulled = scanned and 1 or 0, pushed = 0, hidden = 0, conflicts = 0,
-            skipped = skipped == true, reason = skipped and "throttled" or nil,
-            scanned = not not scanned })
-    end, opts.on_progress)
+        self._auto_sync_at = os.time()
+    end
+    local function done(ok, err, push_error)
+        if not ok then
+            if auto then self._auto_sync_at = nil end
+            return cb(nil, err)
+        end
+        -- 扫盘 / WebDAV 同步不统计变更本数：pulled 非 0 只是让桌面按“可能有变”刷新。
+        cb({ pulled = opts.dirty_only and 0 or 1, pushed = 0, hidden = 0, conflicts = 0,
+            skipped = false, push_error = push_error })
+    end
+    if webdav then
+        return self._client:scanWebdavAsync(done,
+            { refresh = opts.force, dirty_only = opts.dirty_only, on_progress = opts.on_progress })
+    end
+    return self._client:scanAsync(done, opts.on_progress)
 end
 
 --- 纯本地目录没有远端：进度域直接 skipped；WebDAV 走通用 book.progress（开书拉取 + 冲突弹窗，关书推脏）。
 function Source:syncProgressAsync(opts, cb)
-    if not self._client:isWebdav() then
-        cb({ skipped = true, reason = "local source", pulled = 0, pushed = 0, hidden = 0, conflicts = 0 })
-        return { cancel = function() end }
-    end
+    if not self._client:isWebdav() then return skipped(cb, "local source") end
     return SourceBase.syncProgressAsync(self, opts, cb)
 end
 
@@ -192,10 +175,7 @@ end
 ---@param identity BookIdentity
 ---@param cb fun(pos: ProgressPosition|nil, err: string|nil, meta: table|nil)
 function Source:getProgressAsync(identity, cb)
-    if not self._client:isWebdav() then
-        require("ui/uimanager"):nextTick(function() cb(nil, nil, { empty = true }) end)
-        return nil
-    end
+    if not self._client:isWebdav() then return SourceBase.defer(cb, nil, nil, { empty = true }) end
     return self._client:getProgressAsync(identity.stable_id, cb)
 end
 
@@ -206,24 +186,22 @@ function Source:putProgressAsync(identity, pos, cb)
     return self._client:putProgressAsync(identity.stable_id, pos, cb)
 end
 
---- 上报阅读统计到 `.Moon+/Stats/stats.json`。纯本地目录没有远端，整批确认零行，
---- book.stats 按“本轮无可推”收尾，不刷失败日志。
+--- 纯本地目录没有远端：统计域直接 skipped；WebDAV 走通用 book.stats。
+function Source:syncStatsAsync(opts, cb)
+    if not self._client:isWebdav() then return skipped(cb, "local source") end
+    return SourceBase.syncStatsAsync(self, opts, cb)
+end
+
+--- 上报阅读统计到 `.Moon+/Stats/`（按书文件 + 总表），仅 WebDAV（见 syncStatsAsync）。
 ---@param rows BookStatsRow[]
 ---@param cb fun(result: BookStatsPushResult|nil, err: string|nil)
 function Source:pushStatsAsync(rows, cb)
-    if not self._client:isWebdav() then
-        require("ui/uimanager"):nextTick(function() cb({ synced_ids = {} }) end)
-        return nil
-    end
     return self._client:pushStatsAsync(rows, cb)
 end
 
 --- 纯本地目录没有远端：笔记域直接 skipped；WebDAV 走通用 book.note（每设备每书一份快照，拉取取并集）。
 function Source:syncNotesAsync(opts, cb)
-    if not self._client:isWebdav() then
-        cb({ skipped = true, reason = "local source", pulled = 0, pushed = 0, hidden = 0, conflicts = 0 })
-        return { cancel = function() end }
-    end
+    if not self._client:isWebdav() then return skipped(cb, "local source") end
     return SourceBase.syncNotesAsync(self, opts, cb)
 end
 
@@ -253,24 +231,7 @@ end
 ---@return table|nil
 function Source:importBookAsync(temp_path, filename, cb)
     if self._client:isWebdav() then
-        filename = tostring(filename or ""):gsub("[/\\]", "_")
-        if filename == "" then
-            cb(nil, _("无效文件名"))
-            return nil
-        end
-        local job
-        job = self._client.dav:ensurePathAsync(self._client:webdavPath(), function(ok_dir, dir_err)
-            if not ok_dir then cb(nil, dir_err); return end
-            job = self._client.dav:putFileAsync(
-                self._client:webdavPath() .. "/" .. filename,
-                temp_path,
-                function(ok, err)
-                    if not ok then cb(nil, err); return end
-                    cb(true)
-                end
-            )
-        end)
-        return job
+        return self._client:importWebdavAsync(temp_path, filename, cb)
     end
     return self._client:importAsync(temp_path, filename, cb)
 end

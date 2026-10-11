@@ -30,14 +30,10 @@ function Setting.rows(plugin)
     local Row = require("ui.themes.widgets.row")
     local Text = require("utils.text")
     local function localPathRow(iw)
-        local status, on = Setting.rowStatus()
-        local cfg = require("utils.settings").getSource(SOURCE_ID)
-        if cfg.webdav_url and cfg.webdav_url ~= "" then
-            status, on = cfg.path or _("未设置"), cfg.path ~= nil and cfg.path ~= ""
-        end
+        local path = require("utils.settings").getSource(SOURCE_ID).path or ""
         return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "folder",
-            title = _("本地书库目录"), status = status, status_on = on,
-            callback = function() Setting.open(plugin) end })
+            title = _("本地书库目录"), status = path ~= "" and path or _("未设置"), status_on = path ~= "",
+            callback = Setting.open })
     end
     local function edit(key, title, password)
         local cfg = require("utils.settings").getSource(SOURCE_ID)
@@ -85,8 +81,7 @@ function Setting.rows(plugin)
 end
 
 --- 目录选择列表：逐层浏览（原地换项），首行「使用此目录」确认当前目录。
----@param plugin table|nil
-function Setting.open(plugin)
+function Setting.open()
     local lfs = require("libs/libkoreader-lfs")
     local List = require("ui.themes.widgets.list")
     local MoonSettings = require("utils.settings")

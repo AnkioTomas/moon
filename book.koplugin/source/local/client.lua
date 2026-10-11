@@ -28,9 +28,8 @@ local remoteRelativePath, coverPath = Common.remoteRelativePath, Common.coverPat
 ---@field cfg table
 ---@field dav WebdavClient
 ---@field _crashed table<string, boolean>|nil
----@field _cover_tried table<string, boolean>|nil
 ---@field _enriched table<string, boolean>|nil
----@field _auto_scan TimingHandle|nil 自动扫盘节流门闩
+---@field _stats_seen table<string, string>|nil 统计按书已入库版本（stats_index.json 的内存副本）
 local Client = {}
 
 --- cfg 是 utils.settings 的共享表，设置页和远程配置会原地改它；dav 每次按 cfg 现造，不存快照。
@@ -143,12 +142,11 @@ Client.moveBook = Scan.moveBook
 Client.replaceBook = Scan.replaceBook
 Client.indexOneAsync = Scan.indexOneAsync
 Client.scanAsync = Scan.scanAsync
-Client.autoScanAsync = Scan.autoScanAsync
 
 Client.scanWebdavAsync = LocalWebdav.scanWebdavAsync
 Client.openWebdavAsync = LocalWebdav.openWebdavAsync
-Client.deleteWebdavAsync = LocalWebdav.deleteWebdavAsync
 Client.pushBookAsync = LocalWebdav.pushBookAsync
+Client.importWebdavAsync = LocalWebdav.importWebdavAsync
 Client.replaceWebdavAsync = LocalWebdav.replaceWebdavAsync
 Client.testWebdavAsync = LocalWebdav.testWebdavAsync
 
