@@ -17,7 +17,6 @@ local Guard = require("ui.guard")
 ---@class PageMark
 ---@field boxes table[] 屏幕框（每行一段）
 ---@field solid boolean|nil 实线下划线（缺省虚线）
----@field count integer|nil 末框右上角角标数字
 ---@field tap fun() 点按回调
 
 --- 标记图层：每帧调用 ``marks``，返回当前屏上标记（无则空表）。
@@ -197,22 +196,6 @@ local function underline(bb, rect, solid)
     end
 end
 
---- 末框右上角角标，右缘对齐、压在行间距里。
----@param bb any Blitbuffer
----@param box table
----@param count integer
-local function badge(bb, box, count)
-    local TextWidget = require("ui/widget/textwidget")
-    local widget = TextWidget:new{
-        text = tostring(count),
-        face = require("ui/font"):getFace("xx_smallinfofont"),
-        fgcolor = require("ffi/blitbuffer").COLOR_DARK_GRAY,
-    }
-    local size = widget:getSize()
-    widget:paintTo(bb, box.x + box.w - size.w, box.y - math.floor(size.h * 0.6))
-    widget:free()
-end
-
 --- 画一个图层：逐条占位，画剩余段，记入本帧已画列表。
 ---@param entry { layer: PageMarkLayer }
 ---@param bb any Blitbuffer
@@ -223,7 +206,6 @@ local function paintLayer(entry, bb, taken, painted)
         local pieces = claim(mark, taken)
         if #pieces > 0 then
             for _piece_idx, piece in ipairs(pieces) do underline(bb, piece, mark.solid) end
-            if mark.count then badge(bb, mark.boxes[#mark.boxes], mark.count) end
             painted[#painted + 1] = { mark = mark, pieces = pieces }
         end
     end

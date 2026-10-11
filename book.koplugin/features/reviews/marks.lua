@@ -1,5 +1,5 @@
 --[[--
-页内段评标记：本章他人段评的句子画虚线下划线，句末上标段评数，点按弹出段评列表。
+页内段评标记：本章他人段评的句子画虚线下划线，点按弹出段评列表。
 
 只认会话属主源提供的 ``paragraphReviewsEnabled`` / ``paragraphReviewsAsync`` / ``paragraphReviewPageAsync``
 （目前只有微信读书），只在章节会话里生效。热点每章拉一次（未联网时不拉，下次绘制再试）；
@@ -104,7 +104,6 @@ function ReviewMarks:updateView()
             marks[#marks + 1] = {
                 spot = spot,
                 boxes = boxes,
-                count = spot.total,
                 tap = function() require("features.reviews.sheet").open(identity, spot) end,
             }
         end
@@ -112,7 +111,7 @@ function ReviewMarks:updateView()
     self.current = marks
 end
 
---- 标记图层：刷新视口后交出屏上句子（句末角标段评数，点按开段评）。
+--- 标记图层：刷新视口后交出屏上句子（点按开段评）。
 ---@return PageMark[]
 function ReviewMarks:marks()
     self:updateView()
