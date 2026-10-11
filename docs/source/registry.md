@@ -4,10 +4,11 @@
 
 ## 设计
 
-- 工厂表 `FACTORIES` + 展示顺序 `ORDER`（local 排前：混合 → 本地 → 在线）。
-- **同一时间一个活跃实例**（`_active`）。`current()` 严格按配置创建，不做静默 fallback。
-- `resolve(id)`：与 current 同 id 则复用；否则在 `_resolved` 里建/取**非活跃**属主实例，**不改**用户选择的活跃源。这是「打开旧书不串源」的关键。
-- 切换：先 `create` 候选 → 成功再 `activate` 原子替换 → `close` 旧实例。
+- 源 id 清单 `IDS` 即展示顺序（local 排前：混合 → 本地 → 在线），模块固定为 `source.<id>`。
+- **每个 id 一个实例**，缓存在同一张表里。活跃源只是配置里的 id：`current()` = `resolve(activeId())`，不做静默 fallback。
+- `resolve(id)`：按 id 建/取实例，**不改**用户选择的活跃源。这是「打开旧书不串源」的关键。
+- 切换：`resolve` 成功后才写配置；旧实例不关（可能仍是打开中书籍的属主源），统一由 `invalidate` 释放。
+- 源模块加载失败是代码缺陷，`meta` / `list` / `create` 直接抛出，不从列表里悄悄藏掉。
 - `enabled_sources`：`nil` = 全部启用；活跃源恒视为启用（不能关自己）。
 
 ---
@@ -45,12 +46,11 @@ Registry.reload()                   -- 登录态 / 连接配置变了：invalida
 | `listEnabled()` | picker 与设置页用这个 |
 | `isEnabled(id)` | 活跃源恒 true |
 | `setEnabled(id, on)` | 首次写入时用「当前全部启用」初始化集合；禁用活跃源返回 `false, err` |
-| `create(id)` | 构造新实例（不激活） |
-| `current()` | 活跃实例 |
-| `resolve(id)` | 属主实例（可非活跃） |
-| `setActive(id)` | 候选创建 + 原子切换；返回实例或 `nil, err` |
-| `activate(source, id)` | 底层替换（一般用 setActive） |
-| `invalidate()` | 清空并 close 全部缓存实例（活跃 + 属主） |
+| `create(id)` | 构造新实例（不进缓存） |
+| `current()` | 活跃实例（`resolve(activeId())`） |
+| `resolve(id)` | 属主实例（缓存复用，可非活跃） |
+| `setActive(id)` | 实例就绪后写配置；返回实例或 `nil, err` |
+| `invalidate()` | 清空并 close 全部缓存实例 |
 | `notifyChanged()` | 同步广播 `SourceChanged`（换源、混合模式、书城开关、OPDS 配置）；桌面不在窗口栈上时无人处理 |
 | `reload()` | 登录态或连接配置变更：`invalidate()` 后 `notifyChanged()` |
 
