@@ -37,7 +37,7 @@ Assert.eq(panel.x, math.floor((600 - panel.w) / 2))
 Assert.eq(panel.y, math.floor((800 - panel.h) / 2))
 local bb = Kit.canvas()
 confirm:paintTo(bb, 0, 0)
-Assert.eq(bb.pixels, 600 * 800 / 2, "居中弹窗画网状遮罩：隔点一像素")
+Assert.eq(bb.pixels, 600 * 800 / 4, "居中弹窗画网状遮罩：每 4 像素一点")
 Kit.display.mesh_mask = false
 bb = Kit.canvas()
 confirm:paintTo(bb, 0, 0)
