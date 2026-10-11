@@ -9,6 +9,7 @@ Book (moon) 数据源门面
 local Client = require("source.moon.client")
 local Mapper = require("source.moon.mapper")
 local SourceBase = require("source.base")
+local Shelf = require("source.shelf")
 local Progress = require("book.progress")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -28,13 +29,6 @@ local BOOK_EXTENSIONS = {
 
 ---@type table<string, function[]>
 local opening = {}
-
---- 传输层错误可能是带 message 的表（Turbo），统一成可展示文案。
----@param err any
----@return any
-local function errText(err)
-    return (type(err) == "table" and err.message) or err
-end
 
 ---@param identity BookIdentity
 ---@return string
@@ -146,35 +140,6 @@ function Source:configured()
     return self._client:configured()
 end
 
---- 删除：本地先标 deleted，能上网时再推云端真删。
----@param identity BookIdentity
----@param cb fun(ok: boolean, err: string|nil)
----@return table
-function Source:deleteBookAsync(identity, cb)
-    local Store = require("book.store")
-    if not Store.markDeleted(self.id, identity.stable_id) then
-        require("ui/uimanager"):nextTick(function()
-            cb(false, _("删除本书失败"))
-        end)
-        return { cancel = function() end }
-    end
-    local cancelled, job = false, nil
-    require("ui/uimanager"):nextTick(function()
-        if not cancelled then cb(true) end
-    end)
-    require("ui/network/manager"):runWhenOnline(function()
-        if cancelled then return end
-        job = self._client:deleteBooksAsync({ identity.stable_id }, function(wire)
-            if cancelled then return end
-            if wire then require("book.books_db").remove(self.id, identity.stable_id) end
-        end)
-    end)
-    return { cancel = function()
-        cancelled = true
-        if job and job.cancel then job.cancel() end
-    end }
-end
-
 --- 打开 Moon 整本书：缓存命中直开，否则下载、校验并登记物理路径。
 ---@param identity BookIdentity
 ---@param _opts table|nil
@@ -204,26 +169,38 @@ function Source:openBookAsync(identity, _opts, cb)
         end
     end
 
+    --- 缓存命中也在下一拍回调：调用方拿到句柄之后才会收到结果。
+    ---@param local_path string
+    local function registerLater(local_path)
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled then register(local_path) end
+        end)
+        return { cancel = function() cancelled = true end }
+    end
+
     local book = identity.book
     if not book or not book.path then
         book = require("book.books_db").get(identity.source_id, identity.stable_id) or book
     end
     local registered_path = book and book.path
     if registered_path and validBook(registered_path, identity.stable_id) then
-        register(registered_path)
-        return { cancel = function() cancelled = true end }
+        return registerLater(registered_path)
     end
     if validBook(path) then
-        register(path)
-        return { cancel = function() cancelled = true end }
+        return registerLater(path)
     end
     os.remove(path)
 
-    require("ui/network/manager"):runWhenOnline(function()
+    if not require("ui/network/manager"):isConnected() then
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled then cb(nil, _("网络不可用，请先连接 Wi-Fi")) end
+        end)
+        return { cancel = function() cancelled = true end }
+    end
+    require("ui/uimanager"):nextTick(function()
         if cancelled then return end
         shareOpening(identity.stable_id, function(done)
-            local book = identity.book or {}
-            local title = book.title
+            local title = book and book.title
                 or (identity.stable_id:match("([^/\\]+)$") or identity.stable_id)
             dialog = require("ui.themes.widgets.progress_dialog"):new{
                 title = title,
@@ -232,25 +209,18 @@ function Source:openBookAsync(identity, _opts, cb)
             dialog:show()
             dialog:set(_("正在下载…"))
 
-            local temp_path = path .. ".part"
-            self._client:downloadBookAsync(identity.stable_id, temp_path, function(bytes, total)
+            -- Request.download 自己写 .part 再原子改名，path 只会是完整文件。
+            self._client:downloadBookAsync(identity.stable_id, path, function(bytes, total)
                 if dialog and total and total > 0 then dialog:bytes(bytes, total) end
             end, function(ok, err)
                 closeDialog()
                 if not ok then
-                    os.remove(temp_path)
-                    done(false, nil, errText(err))
+                    done(false, nil, err)
                     return
                 end
-                if not validBook(temp_path, path) then
-                    os.remove(temp_path)
+                if not validBook(path) then
+                    os.remove(path)
                     done(false, nil, _("下载文件校验失败"))
-                    return
-                end
-                os.remove(path)
-                if not os.rename(temp_path, path) then
-                    os.remove(temp_path)
-                    done(false, nil, _("无法保存文件"))
                     return
                 end
                 done(true, path)
@@ -272,7 +242,7 @@ function Source:openBookAsync(identity, _opts, cb)
 end
 
 --- 清空 Moon 书库/统计相关 HTTP 缓存。
-function Source:clearCaches()
+local function clearCaches()
     local Cache = require("http.cache")
     Cache.clear("/index/book/")
     Cache.clear("/index/stats/")
@@ -282,48 +252,7 @@ end
 ---@param identity BookIdentity
 ---@return BookCoverRequest|nil, string|nil
 function Source:coverRequest(identity)
-    local req, err = self._client:coverRequest(identity.stable_id)
-    if not req then
-        return nil, errText(err)
-    end
-    return req
-end
-
---- 串行推待删：成功撕墓碑才计入。
----@param self MoonSource
----@param report fun(text: string, done: integer|nil, total: integer|nil)
----@param on_done fun(deleted_n: integer)
----@return { cancel: fun() }|nil
-local function pushPendingDeletes(self, report, on_done)
-    local BookDB = require("book.books_db")
-    local pending = BookDB.pendingDeleteIds(self.id)
-    if #pending == 0 then
-        return nil
-    end
-    local cancelled, delete_job, deleted_n, index = false, nil, 0, 0
-    local function nextDelete()
-        if cancelled then return end
-        index = index + 1
-        if index > #pending then
-            on_done(deleted_n)
-            return
-        end
-        report(_("正在同步删除的书"), index, #pending)
-        local stable_id = pending[index]
-        delete_job = self._client:deleteBooksAsync({ stable_id }, function(wire)
-            delete_job = nil
-            if cancelled then return end
-            if wire and BookDB.remove(self.id, stable_id) then
-                deleted_n = deleted_n + 1
-            end
-            nextDelete()
-        end)
-    end
-    nextDelete()
-    return { cancel = function()
-        cancelled = true
-        if delete_job and delete_job.cancel then delete_job:cancel() end
-    end }
+    return self._client:coverRequest(identity.stable_id)
 end
 
 --- 分页拉取完整 Moon 书架；先推本地待删，再对账。
@@ -332,32 +261,21 @@ end
 ---@return { cancel: fun() }
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
-    if opts.force then self:clearCaches() end
+    if opts.force then clearCaches() end
     local report = opts.on_progress or function(...) end
-    local cancelled, job, delete_job = false, nil, nil
-    local deleted_n = 0
+    local function removeOne(stable_id, done)
+        return self._client:deleteBooksAsync({ stable_id }, done)
+    end
 
     --- dirty_only：只推待删，不拉书架。
     if opts.dirty_only then
-        delete_job = pushPendingDeletes(self, report, function(n)
-            if cancelled then return end
-            cb({
-                pulled = 0, pushed = n, hidden = 0, conflicts = 0, skipped = false,
-            })
+        return Shelf.pushDeletes(self.id, removeOne, report, function(n)
+            cb({ pulled = 0, pushed = n, hidden = 0, conflicts = 0, skipped = false })
         end)
-        if not delete_job then
-            require("ui/uimanager"):nextTick(function()
-                if not cancelled then
-                    cb({ pulled = 0, pushed = 0, hidden = 0, conflicts = 0, skipped = false })
-                end
-            end)
-        end
-        return { cancel = function()
-            cancelled = true
-            if delete_job and delete_job.cancel then delete_job:cancel() end
-        end }
     end
 
+    local cancelled, job, delete_job = false, nil, nil
+    local deleted_n = 0
     local page, page_size = 1, 200
     local books = {}
     local function pullPages()
@@ -367,34 +285,30 @@ function Source:syncBooksAsync(opts, cb)
         job = self._client:listBooksAsync(query, function(wire, err)
             job = nil
             if cancelled then return end
-            if not wire then cb(nil, errText(err)); return end
+            if not wire then cb(nil, err); return end
             local mapped = Mapper.list(wire)
-            for _idx, book in ipairs(mapped.data or {}) do books[#books + 1] = book end
-            local count = tonumber(mapped.count) or #books
-            if #books < count and #(mapped.data or {}) > 0 then
-                report(T(_("正在拉取书架（第 %1 页）"), page), #books, count)
+            for _idx, book in ipairs(mapped.data) do books[#books + 1] = book end
+            if #books < mapped.count and #wire.data > 0 then
+                report(T(_("正在拉取书架（第 %1 页）"), page), #books, mapped.count)
                 page = page + 1
                 pullPages()
                 return
             end
             report(T(_("正在写入书架（%1 本）"), #books))
-            local result, rerr = require("source.shelf").reconcile(self.id, books)
+            local result, rerr = Shelf.reconcile(self.id, books)
             if result then result.pushed = deleted_n end
             cb(result, rerr)
         end)
     end
-    delete_job = pushPendingDeletes(self, report, function(n)
+    delete_job = Shelf.pushDeletes(self.id, removeOne, report, function(n)
         if cancelled then return end
         deleted_n = n
         pullPages()
     end)
-    if not delete_job then
-        pullPages()
-    end
     return { cancel = function()
         cancelled = true
-        if job and job.cancel then job:cancel() end
-        if delete_job and delete_job.cancel then delete_job:cancel() end
+        if job then job:cancel() end
+        delete_job:cancel()
     end }
 end
 
@@ -404,26 +318,19 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return table|nil
 function Source:pushStatsAsync(rows, cb)
-    rows = rows or {}
     local books, stats, seen = {}, {}, {}
     for _idx, row in ipairs(rows) do
-        if type(row.stable_id) == "string" and row.stable_id ~= "" then
-            if not seen[row.stable_id] then
-                seen[row.stable_id] = true
-                books[#books + 1] = { filename = row.stable_id }
-            end
-            stats[#stats + 1] = {
-                filename = row.stable_id,
-                page = row.page,
-                start_time = row.start_time,
-                duration = row.duration,
-                total_pages = row.total_pages,
-            }
+        if not seen[row.stable_id] then
+            seen[row.stable_id] = true
+            books[#books + 1] = { filename = row.stable_id }
         end
-    end
-    if #stats == 0 then
-        cb(nil, _("无阅读统计数据"))
-        return nil
+        stats[#stats + 1] = {
+            filename = row.stable_id,
+            page = row.page,
+            start_time = row.start_time,
+            duration = row.duration,
+            total_pages = row.total_pages,
+        }
     end
     return self._client:syncStatsAsync({
         books = books,
@@ -438,25 +345,21 @@ end
 function Source:pullStatsAsync(cb)
     return self._client:getStatsAsync(function(wire, err)
         if not wire then
-            cb(nil, errText(err))
+            cb(nil, err)
             return
         end
-        local data = wire.data or wire
-        local stats = data.stats or data.records or {}
         local rows = {}
-        for _idx, item in ipairs(type(stats) == "table" and stats or {}) do
-            local stable_id = item.book_filename or item.filename
-            local start_time = tonumber(item.start_time or item.startTime)
-            local duration = tonumber(item.duration)
-            if stable_id and stable_id ~= "" and start_time and duration and duration > 0 then
+        -- data.stats[] = { book_filename, start_time, duration, page, total_pages }，按书按天聚合
+        for _idx, item in ipairs(wire.data.stats) do
+            if item.duration > 0 then
                 rows[#rows + 1] = {
                     source_id = self.id,
-                    stable_id = stable_id,
+                    stable_id = item.book_filename,
                     record_type = "page",
-                    page = tonumber(item.page) or 0,
-                    start_time = start_time,
-                    duration = duration,
-                    total_pages = tonumber(item.total_pages or item.totalPages or item.pages) or 0,
+                    page = item.page,
+                    start_time = item.start_time,
+                    duration = item.duration,
+                    total_pages = item.total_pages,
                 }
             end
         end
@@ -471,61 +374,42 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return table|nil
 function Source:pushNotesAsync(identity, annotations, cb)
-    if type(identity) ~= "table" or type(identity.stable_id) ~= "string"
-        or identity.stable_id == "" or type(annotations) ~= "table" then
-        cb(nil, _("无效的注解数据"))
-        return nil
-    end
     return self._client:syncAnnotationsAsync({
         filename = identity.stable_id,
         device_id = "koreader",
         annotations = annotations,
-    }, function(wire, err)
-        if wire then
-            cb(wire)
-        else
-            cb(nil, errText(err))
-        end
-    end)
+    }, cb)
 end
 
---- 拉取某本书的划线/书签；远端没有注解字段时按空数组处理。
+--- 拉取某本书的划线/书签（服务端是该书的完整快照）。
 ---@param identity BookIdentity
 ---@param cb fun(annotations: table[]|nil, err: string|nil, meta: table|nil)
 ---@return table|nil
 function Source:pullNotesAsync(identity, cb)
     return self._client:getAnnotationsAsync(identity.stable_id, function(wire, err)
         if not wire then
-            cb(nil, errText(err))
+            cb(nil, err)
             return
         end
-        local data = wire.data or wire
-        local annotations = data.annotations
-        cb(type(annotations) == "table" and annotations or {}, nil, { authoritative = true })
+        cb(wire.data.annotations, nil, { authoritative = true })
     end)
 end
 
---- 拉取云端阅读进度；wire 映射不出有效位置时按「进度为空」失败。
+--- 拉取云端阅读进度；云端没有进度时按 meta.empty 回调。
 ---@param identity BookIdentity
 ---@param cb fun(pos: ProgressPosition|nil, err: string|nil, meta: table|nil)
 ---@return table|nil
 function Source:getProgressAsync(identity, cb)
     return self._client:getProgressAsync(identity.stable_id, function(wire, err)
         if not wire then
-            cb(nil, errText(err))
-            return
-        end
-        if type(wire) == "table"
-            and ((wire.code ~= nil and wire.data == nil)
-                or (type(wire.data) == "table" and next(wire.data) == nil)) then
-            cb(nil, nil, { empty = true })
+            cb(nil, err)
             return
         end
         local pos = Mapper.progress(wire)
         if pos then
             cb(pos)
         else
-            cb(nil, _("进度为空"))
+            cb(nil, nil, { empty = true })
         end
     end)
 end
@@ -549,11 +433,7 @@ function Source:putProgressAsync(identity, pos, cb)
         percent = string.format("%.2f", frac * 100) .. "%",
         locator = pos.locator,
     }, function(wire, err)
-        if wire then
-            cb(true)
-        else
-            cb(nil, errText(err))
-        end
+        cb(wire and true or nil, err)
     end)
 end
 
