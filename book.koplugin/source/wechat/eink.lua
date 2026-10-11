@@ -320,6 +320,8 @@ function Eink.completeQrLoginAsync(info, cb)
         end
         local vid = tostring(data.vid)
         saveSession(vid, data.accessToken, data.refreshToken, device_id)
+        -- 可能换了账号：上一个账号的 entered 状态留着，新账号的时长会因缺「进入阅读」不计。
+        require("source.wechat.context").clear()
         logger.info("weread eink login ok", vid)
         cb({ user_id = vid, user_name = "" })
     end)

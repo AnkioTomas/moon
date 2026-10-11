@@ -48,7 +48,10 @@ stub("book.books_db", function()
         libraryStableIdsBySource = function()
             return remembered_stats_books.local_library or {}
         end,
-        pendingDeleteIds = function() return {} end,
+        pendingDeleteIds = function()
+            local m = remembered_stats_books.marked_deleted
+            return m and not remembered_stats_books.removed and { m.stable_id } or {}
+        end,
         pendingShelfAddIds = function()
             return remembered_stats_books.pending_adds or {}
         end,
@@ -93,18 +96,12 @@ stub("source.wechat.auth", function()
         sessionHeaders = function() return { Cookie = "wr_skey=stub" } end,
     }
 end)
+fake_client.addToShelfAsync = function(_, _, cb)
+    if cb then cb({ ok = true }) end
+    return { cancel = function() end }
+end
 stub("source.wechat.client", function()
-    return {
-        new = function()
-            if not fake_client.addToShelfAsync then
-                fake_client.addToShelfAsync = function(_, _, cb)
-                    if cb then cb({ ok = true }) end
-                    return { cancel = function() end }
-                end
-            end
-            return fake_client
-        end,
-    }
+    return fake_client
 end)
 stub("source.wechat.chapter", function()
     return {
@@ -116,7 +113,7 @@ stub("source.wechat.chapter", function()
     }
 end)
 stub("ui/network/manager", function()
-    return { runWhenOnline = function(_, fn) fn() end }
+    return { runWhenOnline = function(_, fn) fn() end, isConnected = function() return true end }
 end)
 stub("ui/widget/progressbardialog", function()
     return {
@@ -607,6 +604,16 @@ do
     Assert.eq(captured.summary, "序章")
     -- extra 记的是别的章：不复用旧 uid，回落到目录解析（此处目录拉取失败 → 不上传）
     Assert.is_nil(put({ fraction = 0.5, chapter_idx = 7, extra = { chapter_uid = 42, chapter_idx = 3 } }))
+    -- 目标章不在目录里：不能回退成当前打开章的 uid，否则进度报到错误章节
+    require("support.stubs").flush()
+    captured = nil
+    local in_chapter = setmetatable({ chapter_idx = 1 }, { __index = REF })
+    local ok, err
+    src:putProgressAsync(in_chapter, { fraction = 0.5, chapter_idx = 9 }, function(v, e) ok, err = v, e end)
+    require("support.stubs").flush()
+    Assert.is_nil(ok)
+    Assert.eq(err, "缺少章节信息")
+    Assert.is_nil(captured, "不得用当前章 uid 40 上报")
     toc_payload["b1"] = nil
     require("source.wechat.toc").clear()
 end
@@ -713,6 +720,7 @@ do
     local src = WeChat.new()
     local result
     src:syncBooksAsync(nil, function(r) result = r end)
+    require("support.stubs").flush()
     Assert.not_nil(result)
 
     -- 合法 http(s) 封面入缓存，coverRequest 带回会话头
@@ -748,11 +756,12 @@ do
         return { cancel = function() end }
     end
     src:syncBooksAsync(nil, function() end)
+    require("support.stubs").flush()
     Assert.eq(src:coverRequest({ source_id = "wechat", stable_id = "b1" }).url,
         "https://cdn.example.com/a2.jpg")
 
-    -- clearCaches 清空封面缓存
-    src:clearCaches()
+    -- close 清空实例的封面缓存
+    src:close()
     local req4 = src:coverRequest({ source_id = "wechat", stable_id = "b1" })
     Assert.is_nil(req4)
 end
@@ -781,6 +790,7 @@ do
     local src = WeChat.new()
     local result
     src:syncBooksAsync(nil, function(r) result = r end)
+    require("support.stubs").flush()
     Assert.not_nil(result)
     Assert.eq(result.pushed, 1)
     Assert.eq(#added, 1)
@@ -813,7 +823,23 @@ do
     WeChat.new():pullNotesAsync({
         source_id = "wechat", stable_id = "bpull", chapter_idx = 5,
     }, function(value) annotations = value end)
+    require("support.stubs").flush()
     Assert.eq(annotations[1].chapter_idx, 5)
+
+    -- 目录缓存没有、也拉不到：章节号留空，绝不回退成原始序号 6（本地第 6 章是别的章）。
+    toc_payload["bpull"] = nil
+    require("source.toc").clear()
+    fake_client.chapterInfosAsync = function(_, _, cb)
+        cb(nil, "目录拉取失败")
+        return { cancel = function() end }
+    end
+    annotations = nil
+    WeChat.new():pullNotesAsync({
+        source_id = "wechat", stable_id = "bpull", chapter_idx = 5,
+    }, function(value) annotations = value end)
+    require("support.stubs").flush()
+    Assert.len(annotations, 1)
+    Assert.is_nil(annotations[1].chapter_idx)
 end
 
 -- pushNotesAsync：划线与想法两段队列必须串起来
@@ -836,7 +862,9 @@ do
     }
     chapter_range_html = "<p>旧划线</p><p>新划线</p><p>补偿划线</p>"
         .. "<p>部分一</p><p>部分二</p>"
-    local chapter_path = require("utils.paths").chapterPath("bpush", 2, "wechat")
+    local Paths = require("utils.paths")
+    local chapter_path = Paths.chapterPath("bpush", 2, "wechat")
+    assert(Paths.ensureDir(Paths.bookWorkDir("bpush", "wechat")))
     local chapter_file = assert(io.open(chapter_path, "wb"))
     chapter_file:write("<html><body><h1>微信书</h1><p>旧划线</p><p>新划线</p>"
         .. "<p>补偿划线</p><p>部分一</p><p>部分二</p></body></html>")
@@ -1080,14 +1108,17 @@ do
     os.remove(chapter_path)
 end
 
--- 长按删除：本地先标删，在线时推云端真删并撕墓碑
+-- 长按删除：本地先标删，已连网时顺手入队推脏；推脏的书架域推云端真删并撕墓碑
 do
+    remembered_stats_books.marked_deleted, remembered_stats_books.removed = nil, nil
     local removed
     fake_client.removeFromShelfAsync = function(_, bookId, cb)
         removed = bookId
         cb({ ok = true })
         return { cancel = function() end }
     end
+    local enqueued = {}
+    package.loaded["workers.tasks"] = { enqueue = function(spec) enqueued[#enqueued + 1] = spec.key; return spec end }
     local src = WeChat.new()
     local ok
     src:deleteBookAsync({ source_id = "wechat", stable_id = "del1" }, function(success)
@@ -1096,8 +1127,12 @@ do
     require("support.stubs").flush()
     Assert.is_true(ok)
     Assert.eq(remembered_stats_books.marked_deleted.stable_id, "del1")
+    Assert.eq(enqueued[1], "dirty\0wechat")
+    src:syncBooksAsync({ dirty_only = true }, function() end)
+    require("support.stubs").flush()
     Assert.eq(removed, "del1")
     Assert.eq(remembered_stats_books.removed.stable_id, "del1")
+    package.loaded["workers.tasks"] = nil
 end
 
 -- 还原打桩，避免影响本文件之后的其它用例

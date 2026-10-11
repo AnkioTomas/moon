@@ -16,6 +16,7 @@ local Request = require("http.request")
 local Header = require("http.request.header")
 local Protocol = require("source.wechat.protocol")
 local Eink = require("source.wechat.eink")
+local Context = require("source.wechat.context")
 local _ = require("gettext")
 
 local Auth = {}
@@ -26,20 +27,16 @@ local API = "https://i.weread.qq.com"
 --- 浏览器 UA 与 protocol.webAppId 保持一致（阅读时长上报 appId 依赖 UA）。
 local BROWSER_UA = Protocol.USER_AGENT
 
-local SESSION_COOKIE_KEYS = { "wr_gid", "wr_fp", "wr_vid", "wr_skey", "wr_ql", "wr_rt" }
-
---- 上次续期时间戳；续期冷却内不重复打 renewal。
-local last_renew_at = 0
-local RENEW_COOLDOWN = 600
-
---- 续期进行中的等待队列（合并并发 renewal）。
-local renew_waiters = nil
-
 --- 微信会话失效 errcode（对齐 weread.koplugin）。
 local AUTH_ERRCODES = {
     [-2012] = true,
     [-2041] = true,
 }
+
+--- 自动续期冷却（秒）：WAF 403 / 误判的失效回包不能每个请求都打一次 /login。
+local RENEW_COOLDOWN = 600
+--- 上次自动续期的发起时间（不论成败）。
+local renewed_at = 0
 
 --- 合并浏览器默认请求头。
 ---@param extra table|nil
@@ -54,29 +51,6 @@ local function browserHeaders(extra)
         ["Sec-Ch-Ua-Mobile"] = "?0",
         ["Sec-Ch-Ua-Platform"] = '"Windows"',
     })
-end
-
---- 按 keys 顺序拼 Cookie；空串与缺失跳过，全空返回 nil。
----@param map table|nil
----@param keys string[]
----@return string|nil
-local function cookieFrom(map, keys)
-    if type(map) ~= "table" then
-        return nil
-    end
-    local parts = {}
-    for _i, k in ipairs(keys) do
-        local v = map[k]
-        if type(v) == "string" and v ~= "" then
-            parts[#parts + 1] = k .. "=" .. v
-        elseif type(v) == "number" then
-            parts[#parts + 1] = k .. "=" .. tostring(v)
-        end
-    end
-    if #parts == 0 then
-        return nil
-    end
-    return table.concat(parts, "; ")
 end
 
 --- 读取微信读书源配置。
@@ -96,59 +70,25 @@ local function saveCfg(patch)
     MoonSettings.saveSource("wechat", c)
 end
 
---- 有效 vid：wr_vid 优先；空串在 Lua 里为真，不能让它遮蔽 user_id
----@param c table
-local function vidOf(c)
-    local vid = c.wr_vid
-    if vid == nil or vid == "" then
-        vid = c.user_id
-    end
-    return vid
-end
-
---- 从配置构造会话 Cookie 字段映射。
----@param c table|nil
----@return table
-local function sessionMap(c)
-    local ql = c.wr_ql
-    if (ql == nil or ql == "") and type(c.wr_skey) == "string" and c.wr_skey ~= "" then
-        ql = "0"
-    end
-    return {
-        wr_gid = c.wr_gid,
-        wr_fp = c.wr_fp,
-        wr_vid = vidOf(c),
-        wr_skey = c.wr_skey,
-        wr_ql = ql,
-        wr_rt = c.wr_rt,
-    }
-end
-
---- Cookie 由会话字段拼装；无有效字段返回 nil。
----@return string|nil
-function Auth.cookieHeader()
-    return cookieFrom(sessionMap(cfg()), SESSION_COOKIE_KEYS)
-end
-
---- 已登录请求头：Cookie + X-Vid + X-Skey。
+--- 会话请求头：Eink 令牌即网页会话，Cookie 只需 wr_vid / wr_skey。
+--- 旧网页登录残留的 wr_gid / wr_fp / wr_rt 属于已失效会话，不再发送。
+--- 未登录（封面等匿名请求）只带浏览器头。
 ---@param extra table|nil
 ---@return table
 function Auth.sessionHeaders(extra)
-    local c = cfg()
-    local vid = vidOf(c)
-    local skey = c.wr_skey
+    local creds = Eink.credentials()
+    if not creds then
+        return browserHeaders(extra)
+    end
     return browserHeaders(Header.merge(extra, {
-        ["Cookie"] = Auth.cookieHeader(),
-        ["X-Vid"] = (vid ~= nil and vid ~= "") and tostring(vid) or nil,
-        ["X-Skey"] = (type(skey) == "string" and skey ~= "") and skey or nil,
+        ["Cookie"] = "wr_vid=" .. creds.vid .. "; wr_skey=" .. creds.access_token .. "; wr_ql=0",
+        ["X-Vid"] = creds.vid,
+        ["X-Skey"] = creds.access_token,
     }))
 end
 
 --- 是否已登录：必须是 Eink 扫码会话（能续期）；旧网页会话不算。
----@return boolean
-function Auth.hasSession()
-    return Eink.hasSession()
-end
+Auth.hasSession = Eink.hasSession
 
 --- 展示用用户标签（昵称优先，否则 user_id）。
 ---@return string|nil
@@ -163,9 +103,11 @@ function Auth.userLabel()
     return nil
 end
 
---- 清除本地会话与派生 Cookie 字段；api_key/skill_version 是已废弃 Skills 网关的残留，一并清掉。
+--- 清除本地会话；wr_gid/wr_fp/wr_rt/cookie 是旧网页登录、api_key/skill_version 是已废弃
+--- Skills 网关的残留，一并清掉。
 function Auth.clearSession()
     saveCfg({
+        cookie = "",
         wr_vid = "",
         wr_skey = "",
         wr_rt = "",
@@ -179,6 +121,7 @@ function Auth.clearSession()
         skill_version = "",
     })
     Eink.clearSession()
+    Context.clear()
 end
 
 --- 相对路径拼到 base；已是绝对 URL 则原样返回。
@@ -228,7 +171,7 @@ local function isAuthFailure(data, http_code)
             return true
         end
         local msg = tostring(data.errmsg or data.errMsg or "")
-        if msg:find("登录", 1, true) or msg:find("超时", 1, true) then
+        if msg:find("登录", 1, true) then
             return true
         end
     end
@@ -236,29 +179,16 @@ local function isAuthFailure(data, http_code)
     return code == 401 or code == 403
 end
 
---- 尝试 renewal；冷却内跳过；并发请求合并为一次 renewal。
----@param cb fun(ok: boolean|nil, err: string|nil)
-local function tryRenewAsync(cb)
-    if renew_waiters then
-        renew_waiters[#renew_waiters + 1] = cb
-        return
-    end
-    if os.time() - last_renew_at < RENEW_COOLDOWN then
-        -- 冷却内不再打 renewal，但仍允许上层用现有 Cookie 重试一次。
+--- 自动续期；冷却内不再打 /login，直接让调用方用现有令牌重试一次。
+---@param cb fun(ok: boolean, err: string|nil)
+local function renewAsync(cb)
+    local now = os.time()
+    if now - renewed_at < RENEW_COOLDOWN then
         cb(true)
         return
     end
-    renew_waiters = { cb }
-    Auth.renewCookieAsync(function(ok, err)
-        local waiters = renew_waiters
-        renew_waiters = nil
-        if ok then
-            last_renew_at = os.time()
-        end
-        for _idx, waiter in ipairs(waiters or {}) do
-            waiter(ok, err)
-        end
-    end)
+    renewed_at = now
+    Eink.refreshAsync(cb)
 end
 
 --- 带会话失效自动 renewal + 单次重试的 HTTP 请求。
@@ -270,49 +200,57 @@ local function sessionRequest(opts, cb)
         cb(nil, _("请先扫码登录微信读书"))
         return nil
     end
-    local retried = opts._auth_retried
-    opts._auth_retried = nil
-    local headers = Auth.sessionHeaders(opts.headers)
-    if opts.accept then
-        headers["Accept"] = opts.accept
-    end
-    if opts.content_type then
-        headers["Content-Type"] = opts.content_type
-    end
-    return Request.request({
-        url = opts.url,
-        method = opts.method or "GET",
-        body = opts.body,
-        headers = headers,
-        timeout = opts.timeout or 45,
-        allow_redirects = opts.allow_redirects,
-    }, function(res, err)
-        if err then
-            cb(nil, err, res)
-            return
+    -- 续期后重试换了请求：句柄跟着换，取消要能杀掉当前这一次。
+    local cancelled, job = false, nil
+    local function attempt(retried)
+        local headers = Auth.sessionHeaders(opts.headers)
+        if opts.accept then
+            headers["Accept"] = opts.accept
         end
-        local code = res and res.code
-        local raw = res and res.body or ""
-        if not opts.skip_auth_retry and not retried then
-            local data = mayCarryErrCode(raw) and decodeJson(raw) or nil
-            if isAuthFailure(data, code) then
-                tryRenewAsync(function(renewed)
-                    if renewed then
-                        sessionRequest(setmetatable({ _auth_retried = true }, { __index = opts }), cb)
-                    else
-                        cb(nil, (type(data) == "table" and (data.errmsg or data.errMsg))
-                            or _("续期失败"), res)
-                    end
-                end)
+        if opts.content_type then
+            headers["Content-Type"] = opts.content_type
+        end
+        job = Request.request({
+            url = opts.url,
+            method = opts.method or "GET",
+            body = opts.body,
+            headers = headers,
+            timeout = opts.timeout or 45,
+            allow_redirects = opts.allow_redirects,
+        }, function(res, err)
+            if cancelled then return end
+            if err then
+                cb(nil, err, res)
                 return
             end
-        end
-        if not Request.ok(code) then
-            cb(nil, "HTTP " .. tostring(code), res)
-            return
-        end
-        cb(raw, nil, res)
-    end)
+            local code = res and res.code
+            local raw = res and res.body or ""
+            if not opts.skip_auth_retry and not retried then
+                local data = mayCarryErrCode(raw) and decodeJson(raw) or nil
+                if isAuthFailure(data, code) then
+                    renewAsync(function(renewed, renew_err)
+                        if cancelled then return end
+                        if renewed then
+                            attempt(true)
+                        else
+                            cb(nil, renew_err, res)
+                        end
+                    end)
+                    return
+                end
+            end
+            if not Request.ok(code) then
+                cb(nil, "HTTP " .. tostring(code), res)
+                return
+            end
+            cb(raw, nil, res)
+        end)
+    end
+    attempt(false)
+    return { cancel = function()
+        cancelled = true
+        if job then job:cancel() end
+    end }
 end
 
 --- 带会话 Cookie 的异步 GET；遇鉴权失效会自动续期后重试一次。
@@ -396,7 +334,7 @@ end
 ---@param cb fun(user: { user_id: string, user_name: string })
 ---@return { cancel: fun() }|nil
 function Auth.fetchUserAsync(cb)
-    local vid = tostring(vidOf(cfg()) or "")
+    local vid = cfg().wr_vid
     return Auth.webGetAsync(WEB .. "/api/userInfo?userVid=" .. vid, nil, function(raw)
         local data = raw and decodeJson(raw)
         local name = data and type(data.name) == "string" and data.name or ""
@@ -407,14 +345,4 @@ function Auth.fetchUserAsync(cb)
         cb({ user_id = vid, user_name = name })
     end)
 end
-
---- 续期会话：Eink refreshToken 换新 accessToken（即新 wr_skey）。
----@param cb fun(ok: boolean|nil, err: string|nil)
-function Auth.renewCookieAsync(cb)
-    Eink.refreshAsync(function(ok, err)
-        if not ok then return cb(nil, err or _("续期失败")) end
-        cb(true)
-    end)
-end
-
 return Auth

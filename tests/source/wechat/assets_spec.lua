@@ -14,6 +14,10 @@ package.loaded["source.wechat.auth"] = nil
 
 local Assets = require("source.wechat.assets")
 
+local function noStyle()
+    error("不该拉样式表")
+end
+
 do
     local html = '<img src="foo.jpg"/><img src="https://cdn/x.png?w=1"/>'
     local out = require("source.assets").rewriteImageSources(html, {
@@ -69,7 +73,7 @@ do
     Assets.localizeAsync("book-1", {
         uid = "u1",
         tar = "/web/book/chapter/tar/abc",
-    }, '<img src="pic.png"/>', "https://weread.qq.com/web/reader/1/u1", function(html)
+    }, '<img src="pic.png"/>', "https://weread.qq.com/web/reader/1/u1", noStyle, function(html)
         done = true
         html_out = html
     end)
@@ -100,11 +104,60 @@ do
         remote
     )
     local done, html_out = false, nil
-    Assets.localizeAsync("book-2", { uid = "u2" }, sample, "https://weread.qq.com/web/reader/2/u2", function(html)
-        done = true
-        html_out = html
-    end)
+    Assets.localizeAsync("book-2", { uid = "u2" }, sample, "https://weread.qq.com/web/reader/2/u2", noStyle,
+        function(html)
+            done = true
+            html_out = html
+        end)
     Assert.is_true(done)
     Assert.matches(html_out, 'src="images/[0-9a-f]+%.png"')
     Assert.is_false(require("utils.text").hasRemoteImageSrc(html_out))
+end
+
+-- 脚注图标 + 整书样式表：只改 src / href，其余字节原样；样式表每本书只拉一次，拉不到保留原 link。
+do
+    local Paths = require("utils.paths")
+    local work_dir = Paths.bookWorkDir("book-3", "wechat")
+    os.remove(work_dir .. "/stylesheets.css")
+    local head = '<?xml version="1.0"?><html><head><title></title>'
+    local link = '<link href="../Styles/stylesheets.css" rel="stylesheet" type="text/css" />'
+    local abs = '<link href="https://cdn/x.css" rel="stylesheet" />'
+    local body = '</head><body><p class="content">正文<img class="qqreader-footnote" alt="注文" '
+        .. 'src="../Images/note.png" /></p></body></html>'
+    local sample = head .. link .. abs .. body
+
+    local fetches = 0
+    local function fetchStyle(css)
+        return function(done)
+            fetches = fetches + 1
+            done(css)
+            return { cancel = function() end }
+        end
+    end
+    local function run(fetch)
+        local out
+        Assets.localizeAsync("book-3", { uid = "u3" }, sample, nil, fetch, function(html) out = html end)
+        return out
+    end
+
+    local failed = run(fetchStyle(nil))
+    Assert.eq(fetches, 1)
+    Assert.is_true(failed:find(link, 1, true) ~= nil, "拉不到样式表保留原 link")
+    Assert.is_nil(io.open(work_dir .. "/stylesheets.css", "rb"))
+
+    local out = run(fetchStyle(".content{text-indent:2em}"))
+    Assert.eq(fetches, 2)
+    local icon = out:match('src="(images/[0-9a-f]+%.png)"')
+    Assert.is_true(icon ~= nil, "脚注图标落地")
+    local f = assert(io.open(work_dir .. "/" .. icon, "rb"))
+    Assert.eq(f:read(4), "\137PNG")
+    f:close()
+    Assert.eq(out, head .. '<link href="stylesheets.css" rel="stylesheet" type="text/css" />' .. abs
+        .. body:gsub("%.%./Images/note%.png", icon))
+    f = assert(io.open(work_dir .. "/stylesheets.css", "rb"))
+    Assert.eq(f:read("*a"), ".content{text-indent:2em}")
+    f:close()
+
+    Assert.eq(run(fetchStyle("不该再拉")), out, "已缓存直接改链接")
+    Assert.eq(fetches, 2)
 end

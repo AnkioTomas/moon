@@ -151,31 +151,40 @@ local function body(payload)
     return title, content
 end
 
---- 把章节正文包成完整 HTML 落盘，先写 .part 再 rename，避免读到半截文件。
----@param path string 目标章节文件路径
----@param payload ChapterContentPayload|string|nil 源交来的正文
----@param cb fun(path: string|nil, err: string|nil) 成功回传落盘路径
----@return { cancel: fun() }|nil
 local DEFAULT_CSS = "body{margin:5%;line-height:1.8;text-align:justify;}p{text-indent:2em;margin:.45em 0;}img{max-width:100%;}"
-    .. "sup a{text-decoration:none;}aside.footnote,div.footnotes{font-size:.9em;text-indent:0;text-align:left;}"
 
-local function write(path, payload, cb, opts)
-    local title, content = body(payload)
-    if content == "" then
-        cb(nil, _("章节内容为空"))
-        return
+--- 源交来的完整文档原样返回；片段 / 纯文本套上宿主外壳。
+---@param payload ChapterContentPayload|string|nil
+---@param opts table|nil
+---@return string html 无内容为空串
+local function render(payload, opts)
+    if type(payload) == "table" and payload.document then
+        return payload.document
     end
+    local title, content = body(payload)
+    if content == "" then return "" end
     -- <title> 必须是书名：KOReader doc_props 和第三方划线插件都认这个，章名写进去会变成「夏.夏」。
     local book_title = (opts and opts.book_title)
         or (type(payload) == "table" and payload.book_title)
     if type(book_title) ~= "string" or book_title == "" then
         book_title = title
     end
-    local extra_css = type(payload) == "table" and payload.css or ""
-    if type(extra_css) ~= "string" then extra_css = "" end
-    local html = "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\"/><title>"
-        .. Text.xmlEscape(book_title) .. "</title><style>" .. DEFAULT_CSS .. extra_css
+    return "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\"/><title>"
+        .. Text.xmlEscape(book_title) .. "</title><style>" .. DEFAULT_CSS
         .. "</style></head><body>" .. content .. "</body></html>"
+end
+
+--- 把章节正文落盘，先写 .part 再 rename，避免读到半截文件。
+---@param path string 目标章节文件路径
+---@param payload ChapterContentPayload|string|nil 源交来的正文
+---@param cb fun(path: string|nil, err: string|nil) 成功回传落盘路径
+---@return { cancel: fun() }|nil
+local function write(path, payload, cb, opts)
+    local html = render(payload, opts)
+    if html == "" then
+        cb(nil, _("章节内容为空"))
+        return
+    end
     local dir_ok, dir_err = Paths.ensureDir(path:match("(.+)/[^/]+$"))
     if not dir_ok then cb(nil, dir_err); return end
     local tmp = path .. ".part"
@@ -244,21 +253,16 @@ local function write(path, payload, cb, opts)
         end }
 end
 
---- 确保第 idx 章正文已在本地：已就绪则直接用（源提供 refreshCached 时交它决定是否刷新），
---- 否则拉正文并落盘。
+--- 确保第 idx 章正文已在本地：已就绪则直接用，否则拉正文并落盘。
 ---@param identity BookIdentity
 ---@param toc BookChapter[] 完整目录
 ---@param idx number 章节序号，必须落在 toc 范围内
----@param ops table 至少含 fetchContent，可选 refreshCached/persist_book
+---@param ops table 至少含 fetchContent，可选 persist_book
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 local function ensure(identity, toc, idx, ops, cb)
     local path = Paths.chapterPath(identity.stable_id, idx, identity.source_id)
     if chapterReady(path) then
-        if ops.refreshCached then
-            local item = toc[idx]
-            return ops.refreshCached(identity, item, path, cb)
-        end
         cb(path)
         return
     end

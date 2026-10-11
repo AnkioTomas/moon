@@ -70,8 +70,11 @@ do
     state.responder = function()
         return reply(200, { vid = 1001, accessToken = "at", refreshToken = "rt" })
     end
+    local Context = require("source.wechat.context")
+    Context.reader("b1", "c1").entered = true
     local user
     Eink.completeQrLoginAsync({ wx_code = "code-1" }, function(u) user = u end)
+    Assert.is_nil(Context.reader("b1", "c1").entered, "登录可能换号：清掉上个账号的进入阅读状态")
     local req = state.requests[1]
     Assert.eq(req.url, "https://i.weread.qq.com/login")
     Assert.eq(req.method, "POST")

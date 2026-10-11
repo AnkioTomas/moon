@@ -45,7 +45,7 @@ function WeChat.new()
         name = meta.name,
         type = meta.type,
         cfg = cfg,
-        _client = Client:new(cfg),
+        _client = Client,
         _covers = {},
     }, Source)
 end
@@ -74,14 +74,6 @@ end
 ---@return boolean
 function Source:configured()
     return Auth.hasSession()
-end
-
---- 删除：本地先标 deleted（书架立刻消失），能上网时再推云端真删。
----@param identity BookIdentity
----@param cb fun(ok: boolean, err: string|nil)
----@return { cancel: fun() }
-function Source:deleteBookAsync(identity, cb)
-    return Shelf.deleteAsync(self, self._client, identity, cb)
 end
 
 --- 阅读中时长推送间隔（秒），对齐网页端 / weread 的上报节奏。
@@ -123,13 +115,6 @@ function Source:onEvent(event, payload)
     return SourceBase.onEvent(self, event, payload)
 end
 
---- 清空封面 URL、阅读上下文与目录缓存。
-function Source:clearCaches()
-    self._covers = {}
-    require("source.wechat.context").clear()
-    Toc.clear()
-end
-
 --- 关闭这个实例。只清实例自己的封面表：Context（psvts）与 Toc 是进程级的，
 --- 换源时关旧实例若把它们一起清了，正在阅读那本书的上报会报「请先打开该章节」。
 function Source:close()
@@ -159,9 +144,9 @@ end
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return table
 function Source:syncBooksAsync(opts, cb)
-    return Shelf.syncAsync(self, self._client, opts, cb, function(id, url)
-        rememberCover(self, id, url)
-    end, Mapper.shelfList)
+    return Shelf.syncAsync(self.id, self._client, function(wire)
+        return Mapper.shelfList(wire, function(id, url) rememberCover(self, id, url) end).data
+    end, opts, cb)
 end
 
 --- 拉取书籍详情并缓存封面 URL；映射不出书籍时按「详情为空」失败。
@@ -257,9 +242,8 @@ local function resolveChapterUidAsync(self, identity, chapter_idx, cb)
     if idx and idx < 1 then
         idx = nil
     end
-    local uid = (idx and Toc.uid(identity.source_id, identity.stable_id, idx))
-        or (identity.chapter_idx
-            and Toc.uid(identity.source_id, identity.stable_id, identity.chapter_idx))
+    -- 查不到不能回退到当前章的 uid：会配上目标章的 ci/co 把进度报到错误章节。
+    local uid = idx and Toc.uid(identity.source_id, identity.stable_id, idx)
     if uid then
         require("ui/uimanager"):nextTick(function() cb(uid) end)
         return nil
@@ -289,7 +273,7 @@ local function fetchContent(r, chapter, done)
     return WChapter.fetchContentAsync(r.stable_id, chapter, done)
 end
 
---- 按章打开：目录、正文与缓存刷新都交给 source.chapter 的带 UI 流程。
+--- 按章打开：目录与正文都交给 source.chapter 的带 UI 流程。
 ---@param identity BookIdentity
 ---@param opts table|nil 可含 chapter_idx 指定章节
 ---@param cb fun(path: string|nil, err: string|nil)
@@ -298,9 +282,6 @@ function Source:openBookAsync(identity, opts, cb)
     return require("source.chapter").openWithUi(self, identity, identity.book, opts, {
         loadToc = function(r, done) return self:loadTocAsync(r, done) end,
         fetchContent = fetchContent,
-        refreshCached = function(_r, chapter, path, done)
-            return WChapter.refreshCached(path, done)
-        end,
     }, cb)
 end
 
@@ -757,27 +738,32 @@ function Source:pullNotesAsync(identity, cb)
     end
     local cancelled = false
     local job
-    job = self._client:bookmarkListAsync(identity.stable_id, function(wire, err)
+    -- 章节号按 uid 查本地目录，缓存过期时查不到：先确保目录在。目录拉不到照样拉笔记，章节号留空。
+    local toc_job = self:loadTocAsync(identity, function()
         if cancelled then return end
-        if not wire then
-            cb(nil, err)
-            return
-        end
-        -- 想法拉不到不算失败：划线本身已经可用。
-        job = self._client:myReviewsAsync(identity.stable_id, function(reviews, rerr)
+        job = self._client:bookmarkListAsync(identity.stable_id, function(wire, err)
             if cancelled then return end
-            if not reviews then
-                logger.warn("wechat my reviews failed", identity.stable_id, rerr)
+            if not wire then
+                cb(nil, err)
+                return
             end
-            local annotations = Notes.toAnnotations(
-                wire, nil, reviews, identity.source_id, identity.stable_id
-            )
-            cb(annotations, nil, { authoritative = reviewsComplete(reviews) })
+            -- 想法拉不到不算失败：划线本身已经可用。
+            job = self._client:myReviewsAsync(identity.stable_id, function(reviews, rerr)
+                if cancelled then return end
+                if not reviews then
+                    logger.warn("wechat my reviews failed", identity.stable_id, rerr)
+                end
+                local annotations = Notes.toAnnotations(
+                    wire, nil, reviews, identity.source_id, identity.stable_id
+                )
+                cb(annotations, nil, { authoritative = reviewsComplete(reviews) })
+            end)
         end)
     end)
     return { cancel = function()
             cancelled = true
-            if job and job.cancel then job.cancel() end
+            if toc_job then toc_job.cancel() end
+            if job then job.cancel() end
         end }
 end
 
@@ -813,10 +799,6 @@ end
 function Source:pushNotesAsync(identity, annotations, cb)
     if not self:configured() then
         cb(nil, _("请先扫码登录微信读书"))
-        return nil
-    end
-    if type(identity) ~= "table" or type(identity.stable_id) ~= "string" or identity.stable_id == "" then
-        cb(nil, _("无效书籍"))
         return nil
     end
     local has_work = false
@@ -972,7 +954,7 @@ function Source:pushNotesAsync(identity, annotations, cb)
                 finish(nil, err or _("无法确认划线上传结果"))
                 return
             end
-            local _matched, seen = Notes.reconcileBookmarks(annotations, wire, chapter_uid)
+            local seen = Notes.reconcileBookmarks(annotations, wire, chapter_uid)
             for item in pairs(seen) do confirmed[item] = true end
             for _idx, item in ipairs(submitted) do
                 if not item.wr_bookmark_id or not confirmed[item] then
@@ -1094,7 +1076,7 @@ function Source:pushNotesAsync(identity, annotations, cb)
                     logger.warn("wechat highlight range skipped", book_id, chapter_idx, range_err)
                 end
             end
-            local _matched, seen = Notes.reconcileBookmarks(annotations, preflight_wire, chapter_uid)
+            local seen = Notes.reconcileBookmarks(annotations, preflight_wire, chapter_uid)
             for item in pairs(seen) do confirmed[item] = true end
             candidates = {}
             for _idx, item in ipairs(Notes.pushCandidates(annotations)) do
@@ -1191,7 +1173,7 @@ function Source:pushNotesAsync(identity, annotations, cb)
                     item.wr_bookmark_id = nil
                 end
             end
-            local _matched, seen = Notes.reconcileBookmarks(annotations, wire, chapter_uid)
+            local seen = Notes.reconcileBookmarks(annotations, wire, chapter_uid)
             for item in pairs(seen) do confirmed[item] = true end
             current_job = self._client:myReviewsAsync(book_id, function(reviews, review_err)
                 current_job = nil

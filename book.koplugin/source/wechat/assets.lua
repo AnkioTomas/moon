@@ -1,5 +1,7 @@
 --[[--
-微信读书章节插图：tar 资源包解出后，远程 img 走 source.assets 落地。
+微信读书章节资源本地化：插图（tar 资源包 + 远程 img）、脚注图标、整书样式表。
+
+只改资源引用（img src、link href），正文其余字节不动。
 
 @module koplugin.book.source.wechat.assets
 --]]
@@ -13,6 +15,79 @@ local logger = require("utils.log")
 local Assets = {}
 
 local WEB = "https://weread.qq.com"
+local DIR = debug.getinfo(1, "S").source:match("^@(.*)/[^/]+$")
+-- 原书脚注图只在 EPUB 里，服务端不给；网页端换成「注」图标，这里用插件自带的同一张。
+local FOOTNOTE_SRC = "../Images/note.png"
+local STYLE_NAME = "stylesheets.css"
+
+--- 脚注图标落到 images/，返回相对 href。
+---@param images_dir string
+---@return string|nil
+local function footnoteHref(images_dir)
+    local f = assert(io.open(DIR .. "/note.png", "rb"))
+    local data = f:read("*a")
+    f:close()
+    return Shared.materializeImage(images_dir, data)
+end
+
+--- 整份写完再 rename，避免半截文件被当成已缓存。
+---@param path string
+---@param data string
+---@return boolean
+local function writeFile(path, data)
+    local tmp = path .. ".part"
+    local w = io.open(tmp, "wb")
+    if not w then return false end
+    local wrote = w:write(data)
+    local closed = w:close()
+    if not wrote or not closed or not os.rename(tmp, path) then
+        os.remove(tmp)
+        return false
+    end
+    return true
+end
+
+--- 相对路径的 css link 一律指向工作目录里的整书样式表（e_2 st=1 回的就是全部样式）。
+---@param html string
+---@return string rewritten
+---@return integer count
+local function rewriteStyleLinks(html)
+    local count = 0
+    local out = html:gsub("(<link%s[^>]-href=)([\"'])([^\"']-%.css)%2", function(prefix, quote, href)
+        if href:match("^%a[%w+.-]*:") or href:match("^//") then return nil end
+        count = count + 1
+        return prefix .. quote .. STYLE_NAME .. quote
+    end)
+    return out, count
+end
+
+--- 样式表每本书只拉一次；拉不到就保留原 link，下一章再试。
+---@param work_dir string
+---@param html string
+---@param fetch_style fun(done: fun(css: string|nil)): { cancel: fun() }|nil
+---@param cb fun(html: string)
+---@return { cancel: fun() }|nil
+local function localizeStyleAsync(work_dir, html, fetch_style, cb)
+    local rewritten, count = rewriteStyleLinks(html)
+    if count == 0 then
+        cb(html)
+        return nil
+    end
+    local path = work_dir .. "/" .. STYLE_NAME
+    local f = io.open(path, "rb")
+    if f then
+        f:close()
+        cb(rewritten)
+        return nil
+    end
+    return fetch_style(function(css)
+        if css and writeFile(path, css) then
+            cb(rewritten)
+        else
+            cb(html)
+        end
+    end)
+end
 
 ---@param value string|nil
 ---@return string
@@ -111,32 +186,41 @@ local function downloadTarAsync(tar, referer, images_dir, cb)
     end)
 end
 
---- 把章节 HTML 内图片下载到章节工作目录并改写为相对路径。
+--- 把章节引用的插图、脚注图标、样式表落到书籍工作目录，并把引用改写为相对路径。
 ---@param book_id string
 ---@param chapter BookChapter
 ---@param html string
 ---@param referer string|nil
+---@param fetch_style fun(done: fun(css: string|nil)): { cancel: fun() }|nil 拉整书样式表
 ---@param cb fun(html: string)
 ---@return { cancel: fun() }
-function Assets.localizeAsync(book_id, chapter, html, referer, cb)
+function Assets.localizeAsync(book_id, chapter, html, referer, fetch_style, cb)
     local cancelled = false
     local jobs = {}
-    local images_dir = Paths.bookWorkDir(book_id, "wechat") .. "/images"
+    local work_dir = Paths.bookWorkDir(book_id, "wechat")
+    local images_dir = work_dir .. "/images"
 
-    --- 交付改写后的 HTML；已取消则丢弃。
+    --- 图片落地后再补样式表；已取消则丢弃。
     ---@param out string
-    local function finish(out)
-        if not cancelled then cb(out) end
+    local function afterImages(out)
+        if cancelled then return end
+        local job = localizeStyleAsync(work_dir, out, fetch_style, function(final)
+            if not cancelled then cb(final) end
+        end)
+        if job then jobs[#jobs + 1] = job end
     end
 
     --- tar 资源包处理完后，先按包内映射改写 src，再补下仍指向 http(s) 的图片。
     ---@param src_map table<string, string> 原始 src → 本地相对路径
     local function afterTar(src_map)
         if cancelled then return end
+        if not src_map["note.png"] and html:find(FOOTNOTE_SRC, 1, true) then
+            src_map[FOOTNOTE_SRC] = footnoteHref(images_dir)
+        end
         local rewritten = Shared.rewriteImageSources(html, src_map)
         local job = Shared.localizeAsync(rewritten, images_dir, function(url, done)
             return downloadBinaryAsync(url, WEB .. "/", done)
-        end, finish)
+        end, afterImages)
         jobs[#jobs + 1] = job
     end
 

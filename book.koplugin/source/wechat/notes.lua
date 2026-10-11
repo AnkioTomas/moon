@@ -429,27 +429,13 @@ end
 ---@return table[]
 function Notes.toAnnotations(wire, chapter_uid, reviews, source_id, stable_id)
     local items = (type(wire) == "table" and wire.updated) or {}
-    local chapter_idx_by_uid = {}
-    if type(wire) == "table" and type(wire.chapters) == "table" then
-        for _idx, ch in ipairs(wire.chapters) do
-            if type(ch) == "table" then
-                local uid = tostring(ch.chapterUid or ch.chapter_uid or "")
-                local idx = tonumber(ch.chapterIdx or ch.chapter_idx)
-                if uid ~= "" and idx then
-                    chapter_idx_by_uid[uid] = idx
-                end
-            end
-        end
-    end
     --- 划线行与想法条目共用的注解骨架。
     --- bookmarklist 的 chapterIdx 是微信原始序号；本地目录过滤过封面和空章，
-    --- 必须优先按 uid 映射，不能把原始序号直接当本地章节号。
+    --- 只能按 uid 映射，映射不到就留空，不能把原始序号当本地章节号。
     --- page/pos0/pos1 留空：开章后由 localizeAnnotations 按 wr_range 补
     --- xpointer。数字占位会让 KOReader 误判整份注解为 mupdf 格式。
     local function skeleton(row, uid)
-        local idx = source_id and stable_id
-            and Toc.index(source_id, stable_id, row.chapterUid or row.chapter_uid)
-            or nil
+        local idx = source_id and stable_id and Toc.index(source_id, stable_id, uid) or nil
         local ts = tonumber(row.createTime or row.updateTime) or os.time()
         return {
             datetime = os.date("%Y-%m-%d %H:%M:%S", ts),
@@ -457,7 +443,7 @@ function Notes.toAnnotations(wire, chapter_uid, reviews, source_id, stable_id)
             drawer = "lighten",
             color = Notes.localColor(row.colorStyle),
             chapter = row.chapterTitle or "",
-            chapter_idx = idx or tonumber(row.chapterIdx or row.chapter_idx) or chapter_idx_by_uid[uid],
+            chapter_idx = idx,
         }
     end
     local review_by_range = Notes.reviewsByRange(reviews)
@@ -630,13 +616,12 @@ end
 ---@param annotations table[]
 ---@param wire table|nil
 ---@param chapter_uid string|number
----@return integer matched
 ---@return table<table, boolean> confirmed
 function Notes.reconcileBookmarks(annotations, wire, chapter_uid)
     local by_id, by_key = {}, {}
     for _idx, row in ipairs(type(wire) == "table" and wire.updated or {}) do
         local uid = tostring(row.chapterUid or row.chapter_uid or "")
-        if type(row) == "table" and uid == tostring(chapter_uid) and Notes.isHighlightRow(row) then
+        if uid == tostring(chapter_uid) and Notes.isHighlightRow(row) then
             local id = row.bookmarkId or row.id
             local range = tostring(row.range or "")
             local text = Notes.decodeMarkText(row.markText or row.bookmarkText or row.text or "")
@@ -651,7 +636,7 @@ function Notes.reconcileBookmarks(annotations, wire, chapter_uid)
             end
         end
     end
-    local matched, confirmed = 0, {}
+    local confirmed = {}
     for _idx, item in ipairs(annotations or {}) do
         if type(item) == "table" then
             local row = item.wr_bookmark_id and by_id[tostring(item.wr_bookmark_id)] or nil
@@ -661,12 +646,11 @@ function Notes.reconcileBookmarks(annotations, wire, chapter_uid)
             if row then
                 item.wr_bookmark_id = row.bookmarkId or row.id
                 item.wr_range = tostring(row.range)
-                matched = matched + 1
                 confirmed[item] = true
             end
         end
     end
-    return matched, confirmed
+    return confirmed
 end
 
 --- KOReader 注解 → addBookmark 请求体。

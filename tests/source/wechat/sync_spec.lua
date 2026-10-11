@@ -377,29 +377,3 @@ do
     local version = Mapper.bookVersion({ book = { version = 123 } })
     Assert.eq(version, 123)
 end
-
-do
-    local function assertStripped(input, needle)
-        local stripped = Annotations.stripInjected(input)
-        Assert.is_true(stripped:find("wr%-underline", 1) == nil, input)
-        if needle then
-            Assert.is_true(stripped:find(needle, 1, true) ~= nil, input)
-        end
-    end
-    assertStripped('<p><span class="wr-underline">ab</span></p>', "ab")
-    assertStripped('<p><span class="content wr-underline hot">x</span></p>', "x")
-    assertStripped("<p><span class='wr-underline'>y</span></p>", "y")
-    assertStripped('<p><span class="wr-underline" data-id="1">z</span></p>', "z")
-    assertStripped('<p>a<span class="wr-underline">b</span>c<span class="wr-underline">d</span></p>', "abcd")
-    Assert.eq(Annotations.cleanChapterHtml('<title>第六章</title><p>正文</p>'), "<p>正文</p>")
-    Assert.eq(Annotations.cleanChapterHtml('<title>第六章</title>\n<p>正文</p>'), "<p>正文</p>")
-    local foot = Annotations.cleanChapterHtml(
-        '<p>柳大郎<img class="qqreader-footnote" alt="李逵原注" src="note.png"/>回家</p>')
-    Assert.is_true(foot:find('<sup><a href="#fn1" id="fnref1">1</a></sup>', 1, true) ~= nil)
-    Assert.is_true(foot:find('id="fn1"', 1, true) ~= nil)
-    Assert.is_true(foot:find("李逵原注", 1, true) ~= nil)
-    Assert.is_nil(foot:find("note.png", 1, true))
-    Assert.eq(Annotations.chapterStyles(
-        '<html><head><style>.poem{text-align:center}</style><style>.wr-underline{border:0}</style></head><body></body></html>'),
-        ".poem{text-align:center}")
-end

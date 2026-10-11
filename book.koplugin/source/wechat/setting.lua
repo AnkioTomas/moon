@@ -24,8 +24,7 @@ function Setting.rowStatus()
 end
 
 --- 展示扫码登录流程（Eink 扫码；换到的 accessToken 同时是网页会话，再经网页接口补拉昵称）。
----@param plugin table|nil
-local function showQrLogin(plugin)
+local function showQrLogin()
     local Auth = require("source.wechat.auth")
     local Eink = require("source.wechat.eink")
     local NetworkMgr = require("ui/network/manager")
@@ -133,7 +132,7 @@ function Setting.rows(plugin)
             local status, status_on = Setting.rowStatus()
             return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "account_circle", title = _("微信读书账号"),
                 status = status, status_on = status_on,
-                callback = function() showQrLogin(plugin) end })
+                callback = showQrLogin })
         end,
         function(iw)
             local Settings = require("utils.settings")
@@ -154,7 +153,7 @@ function Setting.rows(plugin)
         return Row.widget({ width = iw, chevron = false, kind = "action", icon = "autorenew", title = _("续期会话"),
             callback = function()
                 require("ui/network/manager"):runWhenOnline(function()
-                    Auth.renewCookieAsync(function(ok, err)
+                    require("source.wechat.eink").refreshAsync(function(ok, err)
                         Toast:new{ text = ok and _("已续期") or (err or _("续期失败")), timeout = 2 }:show()
                     end)
                 end)

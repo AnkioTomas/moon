@@ -1,8 +1,8 @@
 --[[--
-source.wechat.auth 离线用例：会话字段 / Cookie 拼装 / 登录门禁 / 自动续期重试。
+source.wechat.auth 离线用例：会话请求头 / 登录门禁 / 自动续期重试。
 
-cookieFrom、sessionMap、absUrl 为模块内 local 函数，经 debug.getupvalue 从引用它们的
-导出函数上取出，不改插件源码。续期计时是包级状态：每个用例用 freshAuth() 重 require 隔离。
+absUrl 为模块内 local 函数，经 debug.getupvalue 从引用它的导出函数上取出，不改插件源码。
+每个用例用 freshAuth() 重 require 隔离。
 登录态 = Eink 会话（wr_skey + eink.refresh_token），扫码与续期细节见 eink_spec。
 
 @module tests.wechat_auth_spec
@@ -116,87 +116,16 @@ local function upvalue(fn, name)
 end
 
 ------------------------------------------------------------------------
--- cookieFrom
+-- Auth.sessionHeaders：Cookie 只拼 Eink 会话的 wr_vid / wr_skey；旧网页残留字段不发
 ------------------------------------------------------------------------
 
 do
-    local auth = freshAuth()
-    local cookieFrom = upvalue(auth.cookieHeader, "cookieFrom")
-    Assert.not_nil(cookieFrom)
-
-    Assert.is_nil(cookieFrom(nil, { "wr_gid" }))
-
-    -- keys 顺序输出；缺失/空串跳过；数字转字符串
-    local s = cookieFrom(
-        { wr_gid = "g", wr_skey = "s", wr_vid = 123, wr_fp = "" },
-        { "wr_gid", "wr_fp", "wr_vid", "wr_skey" }
-    )
-    Assert.eq(s, "wr_gid=g; wr_vid=123; wr_skey=s")
-
-    -- 全空 → nil
-    Assert.is_nil(cookieFrom({}, { "wr_gid" }))
-    Assert.is_nil(cookieFrom({ wr_gid = "" }, { "wr_gid" }))
-end
-
-------------------------------------------------------------------------
--- sessionMap
-------------------------------------------------------------------------
-
-do
-    local auth = freshAuth()
-    local sessionMap = upvalue(auth.cookieHeader, "sessionMap")
-    Assert.not_nil(sessionMap)
-
-    -- 字段直通
-    local m = sessionMap({
-        wr_gid = "g", wr_fp = "f", wr_vid = "7", wr_skey = "s",
-        wr_ql = "1", wr_rt = "r",
-    })
-    Assert.eq(m.wr_gid, "g")
-    Assert.eq(m.wr_fp, "f")
-    Assert.eq(m.wr_vid, "7")
-    Assert.eq(m.wr_skey, "s")
-    Assert.eq(m.wr_ql, "1")
-    Assert.eq(m.wr_rt, "r")
-
-    -- wr_vid 回退 user_id
-    Assert.eq(sessionMap({ user_id = 42 }).wr_vid, 42)
-
-    -- 有 skey 且 ql 空 → ql 默认 "0"
-    Assert.eq(sessionMap({ wr_skey = "s" }).wr_ql, "0")
-    Assert.eq(sessionMap({ wr_skey = "s", wr_ql = "" }).wr_ql, "0")
-
-    -- 无 skey 时 ql 不补默认
-    Assert.is_nil(sessionMap({}).wr_ql)
-end
-
-------------------------------------------------------------------------
--- Auth.cookieHeader（settings 驱动）
-------------------------------------------------------------------------
-
-do
-    local auth = freshAuth({
-        wr_gid = "g", wr_fp = "f", wr_vid = "1", wr_skey = "s",
-        wr_ql = "0", wr_rt = "r",
-    })
-    Assert.eq(auth.cookieHeader(), "wr_gid=g; wr_fp=f; wr_vid=1; wr_skey=s; wr_ql=0; wr_rt=r")
-
-    -- 字段全空 → nil；整段 cookie 串不再是配置项，不读
-    Assert.is_nil(freshAuth({ wr_skey = "", cookie = "wr_skey=x" }).cookieHeader())
-    Assert.is_nil(freshAuth({}).cookieHeader())
-end
-
-------------------------------------------------------------------------
--- Auth.sessionHeaders（真实 Header.merge：extra 覆盖默认）
-------------------------------------------------------------------------
-
-do
-    local auth = freshAuth({ wr_vid = "88", wr_skey = "sk", wr_gid = "g" })
+    local auth = freshAuth(loggedIn({ wr_vid = "88", wr_skey = "sk", wr_gid = "g", wr_fp = "f", wr_rt = "r" }))
     local h = auth.sessionHeaders({ ["X-Custom"] = "c" })
+    Assert.eq(h["Cookie"], "wr_vid=88; wr_skey=sk; wr_ql=0")
     Assert.eq(h["X-Vid"], "88")
     Assert.eq(h["X-Skey"], "sk")
     Assert.eq(h["X-Custom"], "c")
-    Assert.is_true(h["Cookie"]:find("wr_skey=sk", 1, true) ~= nil)
     -- 浏览器默认头
     Assert.eq(h["Referer"], "https://weread.qq.com/")
     Assert.not_nil(h["User-Agent"])
@@ -205,20 +134,14 @@ do
     local h2 = auth.sessionHeaders({ ["Referer"] = "https://example.com/" })
     Assert.eq(h2["Referer"], "https://example.com/")
 
-    -- 无会话：Cookie / X-Vid / X-Skey 均不出现
-    local h3 = freshAuth({}).sessionHeaders()
-    Assert.is_nil(h3["Cookie"])
-    Assert.is_nil(h3["X-Vid"])
-    Assert.is_nil(h3["X-Skey"])
-
-    -- vid 为数字 → tostring
-    local h4 = freshAuth({ user_id = 7, wr_skey = "s" }).sessionHeaders()
-    Assert.eq(h4["X-Vid"], "7")
-
-    -- wr_vid 空串不遮蔽有效的 user_id（空串在 Lua 里为真值）
-    local h5 = freshAuth({ wr_vid = "", user_id = "v2", wr_skey = "s" }).sessionHeaders()
-    Assert.eq(h5["X-Vid"], "v2")
-    Assert.is_nil(freshAuth({ wr_vid = "", wr_skey = "s" }).sessionHeaders()["X-Vid"])
+    -- 无 Eink 会话（含旧网页会话）：只有浏览器头
+    for _, cfg in ipairs({ {}, { wr_vid = "1", wr_skey = "s", wr_gid = "g" } }) do
+        local h3 = freshAuth(cfg).sessionHeaders()
+        Assert.is_nil(h3["Cookie"])
+        Assert.is_nil(h3["X-Vid"])
+        Assert.is_nil(h3["X-Skey"])
+        Assert.not_nil(h3["User-Agent"])
+    end
 end
 
 ------------------------------------------------------------------------
@@ -248,14 +171,14 @@ do
         wr_vid = "v", wr_skey = "s", wr_rt = "r",
         wr_gid = "g", wr_fp = "f", wr_ql = "1",
         user_id = "u", user_name = "n",
-        api_key = "k", skill_version = "sv", other = "keep",
+        api_key = "k", skill_version = "sv", cookie = "c", other = "keep",
     }
     local auth = freshAuth(cfg)
     auth.clearSession()
     for _, k in ipairs({
         "wr_vid", "wr_skey", "wr_rt",
         "wr_gid", "wr_fp", "wr_ql", "user_id", "user_name",
-        "api_key", "skill_version",
+        "api_key", "skill_version", "cookie",
     }) do
         Assert.eq(cfg[k], "")
     end
@@ -273,29 +196,13 @@ do
     Assert.eq(cfg.eink.device_id, "dev")
 end
 
-------------------------------------------------------------------------
--- renewCookieAsync：走 Eink refreshToken 续期
-------------------------------------------------------------------------
-
+-- 退出清掉进程内 reader 状态：否则换号后同章不再发进入阅读，时长不计。
 do
-    local refresh_ok, refreshed = true, 0
-    local auth = freshAuth(loggedIn(), {
-        hasSession = function() return true end,
-        refreshAsync = function(cb)
-            refreshed = refreshed + 1
-            cb(refresh_ok, not refresh_ok and "bad" or nil)
-        end,
-    })
-    local ok, err
-    auth.renewCookieAsync(function(o, e) ok, err = o, e end)
-    Assert.eq(refreshed, 1)
-    Assert.is_true(ok)
-    Assert.is_nil(err)
-
-    refresh_ok = false
-    auth.renewCookieAsync(function(o, e) ok, err = o, e end)
-    Assert.is_nil(ok)
-    Assert.eq(err, "bad")
+    local auth = freshAuth(loggedIn())
+    local Context = require("source.wechat.context")
+    Context.reader("b1", "c1").entered = true
+    auth.clearSession()
+    Assert.is_nil(Context.reader("b1", "c1").entered)
 end
 
 ------------------------------------------------------------------------
@@ -419,6 +326,7 @@ do
     local refreshed = 0
     local auth = freshAuth(loggedIn({ wr_skey = "old" }), {
         hasSession = function() return true end,
+        credentials = function() return { vid = state.cfg.wr_vid, access_token = state.cfg.wr_skey } end,
         refreshAsync = function(cb)
             refreshed = refreshed + 1
             state.cfg.wr_skey = "newkey"
@@ -449,6 +357,101 @@ do
     Assert.eq(#cookies, 2)
     Assert.is_true(cookies[1]:find("wr_skey=old", 1, true) ~= nil)
     Assert.is_true(cookies[2]:find("wr_skey=newkey", 1, true) ~= nil)
+end
+
+-- 续期冷却：冷却内再遇失效回包（如 WAF 403）不再打 /login，只用现有令牌重试一次。
+do
+    local refreshed = 0
+    local auth = freshAuth(loggedIn(), {
+        hasSession = function() return true end,
+        credentials = function() return { vid = state.cfg.wr_vid, access_token = state.cfg.wr_skey } end,
+        refreshAsync = function(cb)
+            refreshed = refreshed + 1
+            cb(true)
+        end,
+    })
+    local requests = 0
+    state.json_map = {}
+    state.request_impl = function(_opts, cb)
+        requests = requests + 1
+        cb({ code = 403, body = "<html>blocked</html>" })
+        return { cancel = function() end }
+    end
+    local errs = {}
+    for _i = 1, 3 do
+        auth.webGetAsync("https://weread.qq.com/web/x", nil, function(_raw, e) errs[#errs + 1] = e end)
+    end
+    Assert.eq(refreshed, 1, "冷却内只续期一次")
+    Assert.eq(requests, 6, "每个请求仍各重试一次")
+    Assert.eq(errs[3], "HTTP 403")
+end
+
+-- 错误信息只含「超时」不是会话失效，不续期。
+do
+    local refreshed = 0
+    local auth = freshAuth(loggedIn(), {
+        hasSession = function() return true end,
+        credentials = function() return { vid = state.cfg.wr_vid, access_token = state.cfg.wr_skey } end,
+        refreshAsync = function(cb)
+            refreshed = refreshed + 1
+            cb(true)
+        end,
+    })
+    state.json_map = { ['{"errcode":-1,"errmsg":"请求超时"}'] = { errcode = -1, errmsg = "请求超时" } }
+    state.request_impl = function(_opts, cb)
+        cb({ code = 200, body = '{"errcode":-1,"errmsg":"请求超时"}' })
+        return { cancel = function() end }
+    end
+    auth.webApiGetAsync("/web/t", function() end)
+    Assert.eq(refreshed, 0)
+end
+
+-- 续期等待中取消：不再发重试请求，也不回调；取消落到当前这次请求上。
+do
+    local finish_refresh
+    local auth = freshAuth(loggedIn({ wr_skey = "old" }), {
+        hasSession = function() return true end,
+        credentials = function() return { vid = state.cfg.wr_vid, access_token = state.cfg.wr_skey } end,
+        refreshAsync = function(cb) finish_refresh = cb end,
+    })
+    state.json_map = {
+        ['{"errcode":-2012,"errmsg":"登录态失效"}'] = { errcode = -2012, errmsg = "登录态失效" },
+    }
+    local requests = 0
+    state.request_impl = function(_opts, cb)
+        requests = requests + 1
+        cb({ code = 200, body = '{"errcode":-2012,"errmsg":"登录态失效"}' })
+        return { cancel = function() end }
+    end
+    local called = false
+    local job = auth.webApiGetAsync("/web/cancel", function() called = true end)
+    job.cancel()
+    finish_refresh(true)
+    Assert.eq(requests, 1)
+    Assert.is_false(called)
+end
+
+-- 续期失败：不重试，Eink 的续期错误原样回给调用方。
+do
+    local auth = freshAuth(loggedIn(), {
+        hasSession = function() return true end,
+        credentials = function() return { vid = state.cfg.wr_vid, access_token = state.cfg.wr_skey } end,
+        refreshAsync = function(cb) cb(false, "登录失败 -2013") end,
+    })
+    state.json_map = {
+        ['{"errcode":-2012,"errmsg":"登录态失效"}'] = { errcode = -2012, errmsg = "登录态失效" },
+    }
+    local requests = 0
+    state.request_impl = function(_opts, cb)
+        requests = requests + 1
+        cb({ code = 200, body = '{"errcode":-2012,"errmsg":"登录态失效"}' })
+        return { cancel = function() end }
+    end
+    local data, err
+    auth.webApiGetAsync("/web/fail", function(d, e) data, err = d, e end)
+    Assert.eq(requests, 1)
+    Assert.is_nil(data)
+    Assert.eq(err, "登录失败 -2013")
 end
 
 ------------------------------------------------------------------------

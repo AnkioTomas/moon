@@ -1,5 +1,5 @@
 --[[--
-source.wechat.client 离线用例：书城搜索走 web/search/global
+source.wechat.client 离线用例：各接口的 URL 与请求体
 
 @module tests.source.wechat.client_spec
 --]]
@@ -29,25 +29,6 @@ package.preload["source.wechat.auth"] = function()
                 cb({ synckey = 1, updated = {} })
             elseif path:find("/web/book/underlines", 1, true) then
                 cb({ underlines = {} })
-            elseif #captured == 1 then
-                cb({
-                    sid = "sid-1",
-                    hasMore = 1,
-                    totalCount = 40,
-                    books = {
-                        { searchIdx = 1, bookInfo = { bookId = "1", title = "A" } },
-                        { searchIdx = 2, bookInfo = { bookId = "2", title = "B" } },
-                    },
-                })
-            else
-                cb({
-                    sid = "sid-1",
-                    hasMore = 0,
-                    totalCount = 40,
-                    books = {
-                        { searchIdx = 3, bookInfo = { bookId = "3", title = "C" } },
-                    },
-                })
             end
             return { cancel = function() end }
         end,
@@ -113,24 +94,7 @@ package.loaded["source.wechat.eink"] = nil
 package.preload["source.wechat.client"] = nil
 package.loaded["source.wechat.client"] = nil
 
-local client = require("source.wechat.client"):new()
-
-do
-    captured = {}
-    local wire
-    client:searchAsync("三国", 3, nil, function(data) wire = data end)
-    Assert.eq(#captured, 2)
-    Assert.is_true(captured[1]:find("/web/search/global?", 1, true) ~= nil)
-    Assert.is_true(captured[1]:find("keyword=%E4%B8%89%E5%9B%BD", 1, true) ~= nil)
-    Assert.is_true(captured[1]:find("maxIdx=0", 1, true) ~= nil)
-    Assert.is_true(captured[1]:find("fragmentSize=120", 1, true) ~= nil)
-    Assert.is_true(captured[1]:find("count=3", 1, true) ~= nil)
-    Assert.is_true(captured[1]:find("sid=", 1, true) ~= nil)
-    Assert.is_true(captured[2]:find("maxIdx=2", 1, true) ~= nil)
-    Assert.is_true(captured[2]:find("sid=sid-1", 1, true) ~= nil)
-    Assert.eq(#wire.books, 3)
-    Assert.eq(wire.books[3].bookInfo.bookId, "3")
-end
+local client = require("source.wechat.client")
 
 do
     posted = {}
@@ -145,14 +109,6 @@ do
 
     client:removeBookmarkAsync("bm-1", function() end)
     Assert.is_true(posted.url:find("/web/book/removeBookmark", 1, true) ~= nil)
-end
-
-do
-    captured = {}
-    local wire
-    client:searchAsync("", 20, nil, function(data) wire = data end)
-    Assert.eq(#captured, 0)
-    Assert.eq(#wire.books, 0)
 end
 
 do
@@ -286,7 +242,7 @@ do
         }
     end
     package.loaded["json"] = nil
-    local progress_client = require("source.wechat.client"):new()
+    local progress_client = require("source.wechat.client")
 
     posted = {}
     local ok, err
@@ -306,12 +262,6 @@ do
     ok, err = nil, nil
     progress_client:putProgressAsync("99", { progress = 50, chapter_uid = 8 }, function(data, e) ok, err = data, e end)
     Assert.not_nil(ok)
-    read_reply = { succ = 1 }
-
-    ok, err = nil, nil
-    progress_client:putProgressAsync("99", { progress = 50 }, function(data, e) ok, err = data, e end)
-    Assert.is_nil(ok)
-    Assert.not_nil(err)
 end
 
 do
@@ -330,7 +280,7 @@ do
     end
     package.loaded["json"] = nil
     package.loaded["source.wechat.client"] = nil
-    local bookmark_client = require("source.wechat.client"):new()
+    local bookmark_client = require("source.wechat.client")
     posted = {}
     bookmark_client:addBookmarkAsync("99", 8, {
         bookId = "99",

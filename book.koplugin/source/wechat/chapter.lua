@@ -1,8 +1,9 @@
 --[[--
 微信读书章节正文：本地生成 psvts → 拉 e_0/e_1/e_3（或 t_0/t_1）→ 解码。
 
-对齐 weread 网页端通道。只返回标准正文，不写盘、不打 EPUB。
-个人划线通过 bookmarklist 同步为 KOReader 原生注解，不在 HTML 里注入社区热度线。
+对齐 weread 网页端通道。EPUB 章节交出服务端 XHTML 原文，除资源本地化（插图、脚注图标、
+整书样式表）和脚注接弹窗外不改一个字节；
+不写盘、不打 EPUB。个人划线通过 bookmarklist 同步为 KOReader 原生注解。
 
 @module koplugin.book.source.wechat.chapter
 --]]
@@ -12,12 +13,64 @@ local logger = require("utils.log")
 local Auth = require("source.wechat.auth")
 local Protocol = require("source.wechat.protocol")
 local Context = require("source.wechat.context")
-local Annotations = require("source.wechat.annotations")
 local Assets = require("source.wechat.assets")
 local Text = require("utils.text")
 local _ = require("gettext")
 
 local Chapter = {}
+
+--- 请求一个正文分片端点；空对象回包（"{}"）按失败处理，交由调用方换端点重试。
+--- st=0 回正文；st=1 回整书样式表（e_0/e_1/e_3 拼起来、或单独 e_2 都是同一份），实测。
+---@param bookId string
+---@param uid string
+---@param psvts string
+---@param endpoint string 正文接口路径
+---@param style boolean
+---@param done fun(raw: string|nil, err: any) 原始 JSON 串
+---@return { cancel: fun() }|nil
+local function requestShard(bookId, uid, psvts, endpoint, style, done)
+    local params = Protocol.contentParams(bookId, uid, psvts, { sc = 1, style = style })
+    return Auth.webPostAsync(
+        "https://weread.qq.com" .. endpoint,
+        JSON.encode(params),
+        {
+            accept = "application/json, text/plain, */*",
+            content_type = "application/json;charset=UTF-8",
+            headers = {
+                ["Origin"] = "https://weread.qq.com",
+                ["Referer"] = Protocol.readerUrl(bookId, uid),
+            },
+            timeout = 90,
+        },
+        function(raw, err)
+            if not raw then
+                done(nil, err or (endpoint .. " failed"))
+            elseif raw == "{}" then
+                done(nil, endpoint .. " empty")
+            else
+                done(raw)
+            end
+        end
+    )
+end
+
+--- 整书样式表（章节 link 指向的 ../Styles/stylesheets.css）；失败回 nil，由调用方保留原 link。
+---@param bookId string
+---@param uid string
+---@param done fun(css: string|nil)
+---@return { cancel: fun() }|nil
+local function fetchStyleAsync(bookId, uid, done)
+    return requestShard(bookId, uid, Context.reader(bookId, uid).psvts, "/web/book/chapter/e_2", true,
+        function(raw, err)
+            local css = raw and Protocol.decodeShards(raw)
+            if not css or css:find("^%s*<") then
+                logger.warn("weread stylesheet fetch", bookId, uid, err)
+                done(nil)
+                return
+            end
+            done(css)
+        end)
+end
 
 --- 异步拉取章节 HTML 正文。
 --- 第三个回调参数是划线 range 的坐标原文：EPUB 为解码后的完整 xhtml，TXT 为解码后的纯文本
@@ -36,7 +89,6 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     local cancelled = false
     local active_job
     local psvts = Context.reader(bookId, uid).psvts
-    local reader_url = Protocol.readerUrl(bookId, uid)
     --- 中止取正文：置位取消标记并终止在途请求。
     local function cancel()
         cancelled = true
@@ -47,51 +99,26 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     local function fail(err)
         if not cancelled then cb(nil, err) end
     end
-    --- 请求一个正文分片端点；空对象回包（"{}"）按失败处理，交由调用方换端点重试。
+    --- 取一个正文分片（st=0）；已取消则丢弃回包。
     ---@param endpoint string 正文接口路径
     ---@param done fun(raw: string|nil, err: any) 原始 JSON 串
-    local function requestShard(endpoint, done)
-        local params = Protocol.contentParams(bookId, uid, psvts, {
-            sc = 1,
-            style = true,
-        })
-        active_job = Auth.webPostAsync(
-            "https://weread.qq.com" .. endpoint,
-            JSON.encode(params),
-            {
-                accept = "application/json, text/plain, */*",
-                content_type = "application/json;charset=UTF-8",
-                headers = {
-                    ["Origin"] = "https://weread.qq.com",
-                    ["Referer"] = reader_url,
-                },
-                timeout = 90,
-            },
-            function(raw, err)
-                if cancelled then return end
-                if not raw then
-                    done(nil, err or (endpoint .. " failed"))
-                elseif raw == "{}" then
-                    done(nil, endpoint .. " empty")
-                else
-                    done(raw)
-                end
-            end
-        )
+    local function shard(endpoint, done)
+        active_job = requestShard(bookId, uid, psvts, endpoint, false, function(raw, err)
+            if not cancelled then done(raw, err) end
+        end)
     end
-    requestShard("/web/book/chapter/e_0", function(e0, e0err)
+    shard("/web/book/chapter/e_0", function(e0, e0err)
         if not e0 then
             fail(e0err)
             return
         end
         if e0:sub(1, 1) == "{" and e0:find('"bookId"', 1, true) then
-            requestShard("/web/book/chapter/t_0", function(t0, t0err)
+            shard("/web/book/chapter/t_0", function(t0, t0err)
                 if not t0 then
                     fail(t0err)
                     return
                 end
-                requestShard("/web/book/chapter/t_1", function(t1)
-                    if cancelled then return end
+                shard("/web/book/chapter/t_1", function(t1)
                     local plain, decode_err = Protocol.decodeShards(t0, t1 or "")
                     if not plain then
                         fail(decode_err or _("txt 章节解码失败"))
@@ -102,12 +129,12 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
             end)
             return
         end
-        requestShard("/web/book/chapter/e_1", function(e1, e1err)
+        shard("/web/book/chapter/e_1", function(e1, e1err)
             if not e1 then
                 fail(e1err)
                 return
             end
-            requestShard("/web/book/chapter/e_3", function(e3, e3err)
+            shard("/web/book/chapter/e_3", function(e3, e3err)
                 if not e3 then
                     fail(e3err)
                     return
@@ -116,12 +143,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                 if not xhtml then
                     fail(decode_err or _("章节解码失败"))
                 else
-                    local fragment = Text.htmlBodyFragment(xhtml)
-                    if Text.looksLikeHtml(fragment) then
-                        cb(Annotations.cleanChapterHtml(fragment), nil, xhtml, "html")
-                    else
-                        cb(Text.textToBody(fragment), nil, xhtml, "html")
-                    end
+                    cb(xhtml, nil, xhtml, "html")
                 end
             end)
         end)
@@ -129,40 +151,35 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     return { cancel = cancel }
 end
 
---- 原地清理缓存章节 HTML；无需改写时不碰磁盘。
----@param path string
----@return boolean rewritten
-local function rewriteCachedHtml(path)
-    local f = io.open(path, "rb")
-    if not f then
-        return false
+--- 原书脚注是 ``<img class="qqreader-footnote" alt="注文">``，注文只在 alt 里，点了没东西可弹。
+--- 图标原样包进 noteref 链接，注文放进 body 末尾的 footnote aside，交给 KOReader 脚注弹窗。
+--- 不加 ``<p>``、不动正文文字：段落序号与字偏移不变，划线 range 照旧对得上。
+---@param html string
+---@return string
+local function linkFootnotes(html)
+    if not html:find("qqreader-footnote", 1, true) then return html end
+    local notes = {}
+    html = html:gsub("<img%s[^>]*>", function(tag)
+        local class = tag:match('class="([^"]*)"') or ""
+        local alt = tag:match('alt="([^"]*)"') or ""
+        if not class:find("qqreader-footnote", 1, true) or alt == "" then return nil end
+        notes[#notes + 1] = alt
+        local n = #notes
+        return string.format('<a href="#wr-fn%d" id="wr-fnref%d" epub:type="noteref">%s</a>', n, n, tag)
+    end)
+    if #notes == 0 then return html end
+    local asides = {}
+    for i, alt in ipairs(notes) do
+        -- alt 已是属性转义过的文本，直接当元素内容合法。
+        asides[i] = string.format('<aside id="wr-fn%d" epub:type="footnote">%s</aside>', i, alt)
     end
-    local html = f:read("*a")
-    f:close()
-    local cleaned = Annotations.cleanChapterHtml(html)
-    if cleaned == html then
-        return false
-    end
-    local tmp = path .. ".part"
-    os.remove(tmp)
-    local out = io.open(tmp, "wb")
-    if not out then
-        return false
-    end
-    local wrote = out:write(cleaned)
-    local closed = out:close()
-    if not wrote or not closed then
-        os.remove(tmp)
-        return false
-    end
-    if os.rename(tmp, path) then
-        return true
-    end
-    os.remove(tmp)
-    return false
+    local block = table.concat(asides, "\n") .. "\n"
+    local last = html:match(".*()</body>")
+    if not last then return html .. block end
+    return html:sub(1, last - 1) .. block .. html:sub(last)
 end
 
---- 标准章节内容：{ title, html }。
+--- 章节载荷：EPUB 是服务端 XHTML 原文（只把图片 / 样式表引用换成本地文件、脚注接上弹窗），TXT 是段落化正文。
 ---@param bookId string
 ---@param chapter BookChapter
 ---@param cb fun(payload: ChapterContentPayload|nil, err: any)
@@ -176,17 +193,22 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
         or string.format(_("第 %d 章"), tonumber(chapter and chapter.idx) or 0)
     local cancelled, asset_job = false, nil
     local reader_url = Protocol.readerUrl(bookId, chapter and chapter.uid)
-    local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter or {}, function(html, err, xhtml)
+    local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter or {}, function(html, err, _source, format)
         if cancelled then return end
         if not html then
             logger.warn("weread chapter fetch", bookId, chapter and chapter.idx, err)
             cb(nil, err)
             return
         end
-        local css = Annotations.chapterStyles(xhtml)
-        asset_job = Assets.localizeAsync(bookId, chapter or {}, html, reader_url, function(localized)
+        if format == "txt" then
+            cb({ title = title, html = html })
+            return
+        end
+        asset_job = Assets.localizeAsync(bookId, chapter, html, reader_url, function(done)
+            return fetchStyleAsync(bookId, chapter.uid, done)
+        end, function(localized)
             if cancelled then return end
-            cb({ title = title, html = localized, css = css })
+            cb({ title = title, document = linkFootnotes(localized) })
         end)
     end)
     return { cancel = function()
@@ -194,19 +216,6 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
             if fetch_job and fetch_job.cancel then fetch_job:cancel() end
             if asset_job and asset_job.cancel then asset_job:cancel() end
         end }
-end
-
---- 已缓存章节：清除社区热度虚线。
----
---- 纯本地文件操作，同步完成；无论清理成败都回原路径，调用方照常开章。
----@param path string
----@param cb fun(path: string|nil)
-function Chapter.refreshCached(path, cb)
-    local cleaned = rewriteCachedHtml(path)
-    if cleaned then
-        logger.dbg("weread stripped injected underlines", path)
-    end
-    cb(path)
 end
 
 return Chapter
