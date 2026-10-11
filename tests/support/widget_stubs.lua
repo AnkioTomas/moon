@@ -158,6 +158,7 @@ local TextWidget = Widget:extend{
 local TextBoxWidget = Widget:extend{
     getSize = function(self) return geom{ w = self.width, h = self.height or 20 } end,
     getAllLineCount = function(self) return math.ceil(#self.text / 10) end,
+    getLineHeight = function() return 10 end,
     getVisLineCount = function(self)
         return self.height and math.floor(self.height / 10) or self:getAllLineCount()
     end,

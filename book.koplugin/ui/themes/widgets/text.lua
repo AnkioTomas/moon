@@ -52,27 +52,37 @@ function Text.line(role, text, opts)
 end
 
 --- 多行文字；给 height 时超出部分可经 TextBoxWidget:scrollDown 翻页。
+--- max_lines：高度随内容、最多这么多行，超出以省略号收尾。
 --- TextBoxWidget 会用底色铺满自身，放在非白表面上必须传 opts.bg。
 ---@param role string caption/body/title/hero
 ---@param text string
 ---@param width number 物理像素
----@param opts table|nil color/bg/bold/align/height
----@return table TextBoxWidget
+---@param opts table|nil color/bg/bold/align/height/ellipsis/max_lines
+---@return table TextBoxWidget 放没放下看 getAllLineCount() > getVisLineCount()
 function Text.box(role, text, width, opts)
     opts = opts or {}
     local theme = Theme.current()
-    return TextBoxWidget:new{
-        text = text,
-        face = Text.face(role),
-        bold = bold(opts, role),
-        width = width,
-        height = opts.height,
-        height_adjust = opts.height ~= nil,
-        alignment = opts.align or "left",
-        height_overflow_show_ellipsis = opts.ellipsis or nil,
-        fgcolor = Blitbuffer.Color8(opts.color or theme.color.ink),
-        bgcolor = Blitbuffer.Color8(opts.bg or theme.color.page),
-    }
+    local function build(height)
+        return TextBoxWidget:new{
+            text = text,
+            face = Text.face(role),
+            bold = bold(opts, role),
+            width = width,
+            height = height,
+            height_adjust = height ~= nil,
+            alignment = opts.align or "left",
+            height_overflow_show_ellipsis = (opts.ellipsis or opts.max_lines) and true or nil,
+            fgcolor = Blitbuffer.Color8(opts.color or theme.color.ink),
+            bgcolor = Blitbuffer.Color8(opts.bg or theme.color.page),
+        }
+    end
+    local box = build(opts.height)
+    if opts.max_lines and box:getAllLineCount() > opts.max_lines then
+        local height = opts.max_lines * box:getLineHeight()
+        box:free()
+        box = build(height)
+    end
+    return box
 end
 
 return Text

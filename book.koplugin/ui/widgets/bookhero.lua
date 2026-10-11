@@ -1,5 +1,5 @@
 --[[--
-英雄卡：左封面，右栏与封面等高。作者行始终在。进度条和简介可关。
+英雄卡：左封面，右栏至少与封面等高。作者行始终在。进度条和简介可关。
 
   +------+  +---------------------------+
   |cover |  | 书名                      |
@@ -45,8 +45,9 @@ local function progressRow(width, pct)
     return row, math.max(label:getSize().h, bar:getSize().h)
 end
 
---- opts: width, pad, cover_width, on_tap, show_progress, show_desc, subtitle, src, headers。
+--- opts: width, pad, cover_width, title_lines, on_tap, on_info_tap, show_progress, show_desc, subtitle, src, headers。
 --- show_progress / show_desc 缺省显示。show_desc=false 时全文留给下方简介区。
+--- title_lines 缺省 1（单行截断）；on_info_tap 缺省同 on_tap（点封面与右栏同一动作）。
 ---@param plugin table|nil
 ---@param source table|nil
 ---@param book table|nil
@@ -99,7 +100,9 @@ function Hero.widget(plugin, source, book, opts)
     local gap_desc = Theme.px(3)
     local gap_foot = show_progress and Theme.px(t.space.xs) or 0
 
-    local title_w = Text.line("title", title, { width = info_w })
+    local title_w = (opts.title_lines or 1) > 1
+        and Text.box("title", title, info_w, { max_lines = opts.title_lines })
+        or Text.line("title", title, { width = info_w })
     local author_w = Text.line("caption", author ~= "" and author or _("未知作者"), {
         width = info_w, color = t.color.muted,
     })
@@ -117,8 +120,10 @@ function Hero.widget(plugin, source, book, opts)
         table.insert(top_kids, sub_w)
         head_h = head_h + gap_head + sub_w:getSize().h
     end
+    -- 多行书名可能比封面高：右栏随内容长高，不压缩
+    local row_h = math.max(ch, head_h + gap_foot + progress_h)
 
-    local mid_budget = math.max(0, ch - head_h - gap_foot - progress_h)
+    local mid_budget = math.max(0, row_h - head_h - gap_foot - progress_h)
     if desc ~= "" and mid_budget > gap_desc then
         table.insert(top_kids, VerticalSpan:new{ width = gap_desc })
         table.insert(top_kids, Text.box("caption", desc, info_w, {
@@ -129,7 +134,7 @@ function Hero.widget(plugin, source, book, opts)
         head_h = head_h + mid_budget
     end
 
-    local filler = math.max(0, ch - head_h - gap_foot - progress_h)
+    local filler = math.max(0, row_h - head_h - gap_foot - progress_h)
     local info_kids = {
         align = "left",
         VerticalGroup:new(top_kids),
@@ -141,8 +146,9 @@ function Hero.widget(plugin, source, book, opts)
     end
     local info = VerticalGroup:new(info_kids)
 
-    if opts.on_tap then
-        local tap = Book.tappable(info_w, ch, opts.on_tap)
+    local on_info_tap = opts.on_info_tap or opts.on_tap
+    if on_info_tap then
+        local tap = Book.tappable(info_w, row_h, on_info_tap)
         tap[1] = info
         info = tap
     end
@@ -155,7 +161,7 @@ function Hero.widget(plugin, source, book, opts)
             cover_box,
             HorizontalSpan:new{ width = gap },
             LeftContainer:new{
-                dimen = Geom:new{ w = info_w, h = ch },
+                dimen = Geom:new{ w = info_w, h = row_h },
                 info,
             },
         },

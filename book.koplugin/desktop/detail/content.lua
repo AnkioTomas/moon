@@ -1,5 +1,6 @@
---[[-- 书籍详情：Hero 与内容区（书城简介 / 本机阅读统计）。 @module desktop.detail --]]
+--[[-- 书籍详情：Hero（图书馆含简介）与内容区（零碎信息 + 书城简介 / 本机阅读统计）。 @module desktop.detail --]]
 
+local Blitbuffer = require("ffi/blitbuffer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
@@ -10,58 +11,110 @@ local Catalog = require("book.catalog")
 local Book = require("ui.widgets.book")
 local Hero = require("ui.widgets.bookhero")
 local Theme = require("ui.themes")
+local Icon = require("ui.themes.widgets.icon")
 local Pager = require("ui.themes.widgets.pager")
 local Progress = require("ui.themes.widgets.progress")
 local Text = require("ui.themes.widgets.text")
+local TextViewer = require("ui.themes.widgets.text_viewer")
 local _ = require("gettext")
 
 local Common = require("desktop.detail.common")
 
+--- Hero 下方的零碎信息，按显示优先级排：{ 图标, 文字 }。
+--- 格式、大小、文件名只有整本书文件（或书城条目）才有。
+---@return table[]
+local function infoItems(book, owner)
+    local sid = book.source_id
+    local path = owner and owner.type == "book" and book.path or nil
+    local name = path and path:match("[^/]+$")
+    local format = book.format or (name and name:match("%.(%w+)$"))
+    local size = tonumber(book.filesize) or (path and require("libs/libkoreader-lfs").attributes(path, "size"))
+    local added = tonumber(book.inserted_at) or 0
+    local items = {}
+    for _idx, item in ipairs({
+        { "source", sid == "zlib" and _("Z站") or sid == "opds" and _("OPDS")
+            or sid and ((require("source.registry").meta(sid) or {}).name or sid) },
+        { "article", format and format:upper() },
+        { "hard_drive", size and size > 0 and require("util").getFriendlySize(size) },
+        { "date_range", added > 0 and string.format(_("%s 加入"), os.date("%Y-%m-%d", added)) },
+        { "category", book.category and (book.category:gsub("[,\n]+", " · ")) },
+        { "collections_bookmark", book.series },
+        { "folder", name },
+    }) do
+        if item[2] and item[2] ~= "" then items[#items + 1] = item end
+    end
+    return items
+end
+
+--- 一行排开，放不下的项连同其后各项整项隐藏。
+---@param items table[]
+---@param w number 物理像素
+---@return table
+local function infoStrip(items, w)
+    local t = Theme.current()
+    local color = Blitbuffer.Color8(t.color.muted)
+    local gap = Theme.px(t.space.md)
+    local row = HorizontalGroup:new{ align = "center" }
+    local used = 0
+    for _idx, item in ipairs(items) do
+        local label = Icon.label{
+            name = item[1], text = item[2], color = color,
+            size = t.font.caption, font_size = t.font.caption, gap = Theme.px(t.space.xs),
+        }
+        local need = label:getSize().w + (#row > 0 and gap or 0)
+        if used + need > w then break end
+        if #row > 0 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
+        row[#row + 1] = label
+        used = used + need
+    end
+    return row
+end
+
 return function(Detail)
 function Detail:buildHero(w, book, origin, can_read)
-    local category = book.category
-    if category and category ~= "" then category = category:gsub("[,\n]+", " · ") else category = nil end
-    local parts = {}
-    local sid = book.source_id
-    if sid then
-        local name = sid == "zlib" and _("Z站")
-            or sid == "opds" and _("OPDS")
-            or (require("source.registry").meta(sid) or {}).name
-            or sid
-        parts[#parts + 1] = name
-    end
-    if category then parts[#parts + 1] = category end
-    if book.series and book.series ~= "" then parts[#parts + 1] = book.series end
+    local desc = Book.desc(book)
     return Hero.widget(self.plugin, Common.bookOwnerSource(book, self.source), book, {
         width = w, pad = 0,
-        subtitle = #parts > 0 and table.concat(parts, " · ") or nil,
+        cover_width = math.floor(w * 0.24),
+        title_lines = 3,
         on_tap = can_read and function() self:openBook() end or nil,
+        on_info_tap = origin ~= "store" and desc ~= "" and function()
+            TextViewer:new{ title = Book.title(book), text = desc }:show()
+        end or nil,
         show_parent = self,
         show_progress = origin ~= "store",
         show_desc = origin ~= "store",
     })
 end
 
---- 内容区：书城显示简介，图书馆显示阅读统计。
+--- 内容区：零碎信息行，下接书城简介（吃满剩余高度）或本机阅读统计。
 ---@param w number 物理像素
 ---@param avail_h number 内容区可用高度
----@return table|nil
+---@return table
 function Detail:buildContent(w, avail_h)
-    if self.origin ~= "store" then return self:buildStatsArea(w, avail_h) end
-    local desc = Book.desc(self.book)
-    if desc == "" then return nil end
     local t = Theme.current()
+    local gap = Theme.px(t.space.md)
+    local info = VerticalGroup:new{ align = "left" }
+    local strip = infoStrip(infoItems(self.book, Common.bookOwnerSource(self.book, self.source)), w)
+    if #strip > 0 then info[1], info[2] = strip, VerticalSpan:new{ width = gap } end
+    -- VerticalGroup:getSize 会缓存子控件偏移，量过高度的组不能再追加子控件
+    local rest = avail_h - info:getSize().h
+    local kids = VerticalGroup:new{ align = "left", info }
+    if self.origin ~= "store" then
+        kids[#kids + 1] = self:buildStatsArea(w, rest)
+        return kids
+    end
+    local desc = Book.desc(self.book)
+    if desc == "" then return kids end
     local title = Common.sectionTitle(_("简介"), w)
-    local gap = Theme.px(t.space.xs)
-    return VerticalGroup:new{
-        align = "left",
-        title,
-        VerticalSpan:new{ width = gap },
-        Text.box("body", desc, w, {
-            color = t.color.muted,
-            height = math.max(1, avail_h - title:getSize().h - gap),
-        }),
-    }
+    local title_gap = Theme.px(t.space.xs)
+    kids[#kids + 1] = title
+    kids[#kids + 1] = VerticalSpan:new{ width = title_gap }
+    kids[#kids + 1] = Text.box("body", desc, w, {
+        color = t.color.muted,
+        height = math.max(1, rest - title:getSize().h - title_gap),
+    })
+    return kids
 end
 
 --- 最近几天：日期 + 时长条 + 时长，放不下时分页。

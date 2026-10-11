@@ -1034,4 +1034,5 @@ Current version: ",
     ["代理不可用：%1"] = "Proxy failed: %1",
     ["代理不可用：%1\n仍要保存并启用吗？"] = "Proxy failed: %1\nSave and enable anyway?",
     ["仍然保存"] = "Save anyway",
+    ["%s 加入"] = "Added %s",
 }

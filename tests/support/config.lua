@@ -106,6 +106,11 @@ function Config.installUtilStub()
             return setmetatable(out, getmetatable(value))
         end
         return {
+            -- 与 frontend/util.lua 同形（不含 B / kB 等单位翻译）
+            getFriendlySize = function(size)
+                if size < 1024 then return string.format("%d B", size) end
+                return string.format("%.1f kB", size / 1024)
+            end,
             -- 与 frontend/util.lua 同语义（输入法候选栏拷贝键盘布局用）
             tableDeepCopy = tableDeepCopy,
             -- 与 frontend/util.lua 同语义（输入框 charlist 按 UTF-8 字符存储）
