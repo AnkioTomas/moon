@@ -19,18 +19,13 @@ local function unwrapBookRow(row)
     if type(row) ~= "table" then
         return nil
     end
-    if type(row.book) == "table" and (row.book.bookId or row.book.title or row.book.id) then
-        local inner = row.book
-        if row.progress ~= nil and inner.progress == nil then
-            inner = setmetatable({ progress = row.progress }, { __index = inner })
-        end
-        if row.finishReading ~= nil and inner.finishReading == nil then
-            inner = setmetatable({
-                progress = inner.progress,
-                finishReading = row.finishReading,
-            }, { __index = inner })
-        end
-        return inner
+    local inner = row.book
+    if type(inner) == "table" and (inner.bookId or inner.title or inner.id) then
+        -- 进度与已读标记可能挂在外层，内层没有时补上。
+        local patch = {}
+        if inner.progress == nil then patch.progress = row.progress end
+        if inner.finishReading == nil then patch.finishReading = row.finishReading end
+        return next(patch) and setmetatable(patch, { __index = inner }) or inner
     end
     if type(row.bookInfo) == "table" and (row.bookInfo.bookId or row.bookInfo.title) then
         return row.bookInfo
@@ -292,60 +287,27 @@ function Mapper.chapters(data, bookId)
     if #chapters == 0 then
         return nil, "empty"
     end
-    chapters[1].toc_version = 2
+    chapters[1].toc_version = require("source.wechat.toc").FORMAT_VERSION
     return chapters
 end
 
---- 章内偏移：微信 wire 为 0..10000，其它源可能已是 0..1。
----@return number|nil
-local function normalizeChapterOffset(raw)
-    local n = tonumber(raw)
-    if n == nil then
-        return nil
-    end
-    if n > 1 then
-        return Progress.clampFraction(n / 10000)
-    end
-    return Progress.clampFraction(n)
-end
-
---- 进度 wire 解包：getProgress 进度在 book 子对象里。
----@param root table
----@return table
-local function progressNode(root)
-    local node = unwrapBookRow(root)
-    if node and node ~= root then
-        return node
-    end
-    if type(root.book) == "table" then
-        return root.book
-    end
-    return root
-end
-
---- 进度 wire → ProgressPosition。
----@param data table|nil
----@return ProgressPosition|nil, string|nil chapter_uid
+--- 进度 wire → ProgressPosition（getProgress 的进度在 book 子对象里）。
+---@param data table
+---@return ProgressPosition, string|nil chapter_uid
 function Mapper.progress(data)
-    if type(data) ~= "table" then
-        return nil
-    end
-    local root = data
-    if type(data.data) == "table" then
-        root = data.data
-    end
-    local node = progressNode(root)
+    local root = type(data.data) == "table" and data.data or data
+    local node = unwrapBookRow(root)
+    if node == root and type(root.book) == "table" then node = root.book end
     local finished = userFinished(node) or userFinished(root)
     local chapter_idx = tonumber(node.chapter_idx or node.chapterIdx)
-    local chapter_fraction = normalizeChapterOffset(node.chapter_fraction or node.chapterOffset)
+    -- chapterOffset 是 0..10000 的整数，按量级猜单位会把 1 当成章末。
+    local offset = tonumber(node.chapterOffset)
+    local chapter_fraction = tonumber(node.chapter_fraction) or (offset and offset / 10000)
+    if chapter_fraction then chapter_fraction = Progress.clampFraction(chapter_fraction) end
     local percent = tonumber(node.percent or node.progress or node.progressPercent or node.readingProgress)
-    local fraction
+    local fraction = 0
     if percent and (percent > 0 or not chapter_idx) then
-        fraction = Progress.clampFraction(
-            Progress.clampPercent(percent, finished) / 100
-        )
-    else
-        fraction = 0
+        fraction = Progress.clampFraction(Progress.clampPercent(percent, finished) / 100)
     end
     local chapter_uid = node.chapter_uid or node.chapterUid
     return {

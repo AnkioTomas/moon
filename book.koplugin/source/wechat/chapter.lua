@@ -80,8 +80,7 @@ end
 ---@param cb fun(html: string|nil, err: any, range_source: string|nil, format: '"html"'|'"txt"'|nil)
 ---@return { cancel: fun() }
 function Chapter.fetchHtmlAsync(bookId, chapter, cb)
-    bookId = tostring(bookId or "")
-    local uid = chapter and chapter.uid
+    local uid = chapter.uid
     if type(uid) ~= "string" or uid == "" then
         cb(nil, _("章节缺少 uid"))
         return { cancel = function() end }
@@ -142,6 +141,9 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                 local xhtml, decode_err = Protocol.decodeShards(e0, e1, e3)
                 if not xhtml then
                     fail(decode_err or _("章节解码失败"))
+                elseif not xhtml:find("^%s*<") then
+                    -- 无权阅读的付费章：服务端照样 200，回几百字纯文本试读片段（以「...」结尾）。
+                    fail(_("该章需购买或付费会员卡，微信读书只返回了试读片段"))
                 else
                     cb(xhtml, nil, xhtml, "html")
                 end
@@ -189,14 +191,13 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
         cb(nil, _("请先扫码登录微信读书"))
         return { cancel = function() end }
     end
-    local title = (chapter and chapter.title)
-        or string.format(_("第 %d 章"), tonumber(chapter and chapter.idx) or 0)
+    local title = chapter.title or string.format(_("第 %d 章"), tonumber(chapter.idx) or 0)
     local cancelled, asset_job = false, nil
-    local reader_url = Protocol.readerUrl(bookId, chapter and chapter.uid)
-    local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter or {}, function(html, err, _source, format)
+    local reader_url = Protocol.readerUrl(bookId, chapter.uid)
+    local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter, function(html, err, _source, format)
         if cancelled then return end
         if not html then
-            logger.warn("weread chapter fetch", bookId, chapter and chapter.idx, err)
+            logger.warn("weread chapter fetch", bookId, chapter.idx, err)
             cb(nil, err)
             return
         end
@@ -213,8 +214,8 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
     end)
     return { cancel = function()
             cancelled = true
-            if fetch_job and fetch_job.cancel then fetch_job:cancel() end
-            if asset_job and asset_job.cancel then asset_job:cancel() end
+            fetch_job:cancel()
+            if asset_job then asset_job:cancel() end
         end }
 end
 

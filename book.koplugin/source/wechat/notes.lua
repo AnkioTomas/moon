@@ -52,6 +52,29 @@ local WR_FIELDS = {
 ---@field datetime string|nil
 ---@field [any] any
 
+--- 删除墓碑：只留远端 id，等上行删掉远端后出列。
+---@param item table 被删的注解
+---@param bookmark_id string|number|nil
+---@param review_id string|number|nil
+---@return table
+local function tombstone(item, bookmark_id, review_id)
+    return {
+        datetime = item.datetime or os.date("%Y-%m-%d %H:%M:%S"),
+        chapter_idx = item.chapter_idx,
+        wr_bookmark_id = bookmark_id,
+        wr_review_id = review_id,
+        wr_deleted = true,
+    }
+end
+
+--- 想法列表条目有的包一层 ``review``，有的直接是想法本身。
+---@param entry any
+---@return table|nil
+local function unwrapReview(entry)
+    local review = type(entry) == "table" and (entry.review or entry) or nil
+    return type(review) == "table" and review or nil
+end
+
 ---@param items table[]|nil
 ---@param total_pages integer|nil
 ---@return table[]
@@ -60,13 +83,7 @@ function Notes.cleanAnnotations(items, total_pages)
     for _idx, item in ipairs(items or {}) do
         if type(item) == "table" and item.wr_deleted
                 and (item.wr_bookmark_id or item.wr_review_id) then
-            out[#out + 1] = {
-                datetime = item.datetime or os.date("%Y-%m-%d %H:%M:%S"),
-                chapter_idx = item.chapter_idx,
-                wr_bookmark_id = item.wr_bookmark_id,
-                wr_review_id = item.wr_review_id,
-                wr_deleted = true,
-            }
+            out[#out + 1] = tombstone(item, item.wr_bookmark_id, item.wr_review_id)
         elseif type(item) == "table" then
             local placeholder = not item.page and not item.pageref and item.wr_range
             local source = item
@@ -90,40 +107,28 @@ end
 ---@param current table[]
 ---@return table[]
 function Notes.prepareLocalAnnotations(previous, current)
-    local bookmarks, reviews, current_by_bookmark, current_by_review = {}, {}, {}, {}
+    local by_bookmark, by_review = {}, {}
     for _idx, item in ipairs(current) do
-        if item.wr_bookmark_id then
-            local id = tostring(item.wr_bookmark_id)
-            bookmarks[id] = true
-            current_by_bookmark[id] = item
-        end
-        if item.wr_review_id then
-            local id = tostring(item.wr_review_id)
-            reviews[id] = true
-            current_by_review[id] = item
-        end
+        if item.wr_bookmark_id then by_bookmark[tostring(item.wr_bookmark_id)] = item end
+        if item.wr_review_id then by_review[tostring(item.wr_review_id)] = item end
     end
     for _idx, old in ipairs(previous or {}) do
         if type(old) == "table" and old.wr_deleted then
             local keep_bookmark = old.wr_bookmark_id
-                and not bookmarks[tostring(old.wr_bookmark_id)]
+                and not by_bookmark[tostring(old.wr_bookmark_id)]
             local keep_review = old.wr_review_id
-                and not reviews[tostring(old.wr_review_id)]
+                and not by_review[tostring(old.wr_review_id)]
             if keep_bookmark or keep_review then
-                current[#current + 1] = {
-                    datetime = old.datetime,
-                    chapter_idx = old.chapter_idx,
-                    wr_bookmark_id = keep_bookmark and old.wr_bookmark_id or nil,
-                    wr_review_id = keep_review and old.wr_review_id or nil,
-                    wr_deleted = true,
-                }
+                current[#current + 1] = tombstone(old,
+                    keep_bookmark and old.wr_bookmark_id or nil,
+                    keep_review and old.wr_review_id or nil)
             end
         elseif type(old) == "table" then
             local bookmark_id, review_id = old.wr_bookmark_id, old.wr_review_id
             local current_item = bookmark_id
-                and current_by_bookmark[tostring(bookmark_id)] or nil
+                and by_bookmark[tostring(bookmark_id)] or nil
             current_item = current_item or (review_id
-                and current_by_review[tostring(review_id)] or nil)
+                and by_review[tostring(review_id)] or nil)
             if current_item and (old.color ~= current_item.color
                     or old.drawer ~= current_item.drawer) then
                 current_item.wr_update_bookmark = true
@@ -139,17 +144,13 @@ function Notes.prepareLocalAnnotations(previous, current)
                 current_item.wr_delete_review = true
             else
                 local delete_bookmark = bookmark_id
-                    and not bookmarks[tostring(bookmark_id)]
+                    and not by_bookmark[tostring(bookmark_id)]
                 local delete_review = review_id
-                    and not reviews[tostring(review_id)]
+                    and not by_review[tostring(review_id)]
                 if delete_bookmark or delete_review then
-                    current[#current + 1] = {
-                        datetime = old.datetime,
-                        chapter_idx = old.chapter_idx,
-                        wr_bookmark_id = delete_bookmark and bookmark_id or nil,
-                        wr_review_id = delete_review and review_id or nil,
-                        wr_deleted = true,
-                    }
+                    current[#current + 1] = tombstone(old,
+                        delete_bookmark and bookmark_id or nil,
+                        delete_review and review_id or nil)
                 end
             end
         end
@@ -309,9 +310,6 @@ end
 ---@param color string|nil
 ---@return integer
 function Notes.colorStyle(color)
-    if type(color) ~= "string" then
-        return 5
-    end
     return COLOR_STYLE[color] or 5
 end
 
@@ -332,8 +330,8 @@ function Notes.reviewsByRange(wire)
         return out
     end
     for _idx, entry in ipairs(wire.reviews or {}) do
-        local review = type(entry) == "table" and (entry.review or entry) or nil
-        if type(review) == "table" then
+        local review = unwrapReview(entry)
+        if review then
             local range = tostring(review.range or "")
             local content = review.content
             if range ~= "" and type(content) == "string" and content ~= "" then
@@ -349,8 +347,8 @@ end
 function Notes.reviewIds(wire)
     local out = {}
     for _idx, entry in ipairs(type(wire) == "table" and wire.reviews or {}) do
-        local review = type(entry) == "table" and (entry.review or entry) or nil
-        local id = type(review) == "table" and (review.reviewId or entry.reviewId) or nil
+        local review = unwrapReview(entry)
+        local id = review and (review.reviewId or entry.reviewId) or nil
         if id then out[tostring(id)] = true end
     end
     return out
@@ -363,8 +361,8 @@ end
 function Notes.reconcileReviews(annotations, wire)
     local by_id, by_key, by_semantic = {}, {}, {}
     for _idx, entry in ipairs(type(wire) == "table" and wire.reviews or {}) do
-        local review = type(entry) == "table" and (entry.review or entry) or nil
-        if type(review) == "table" then
+        local review = unwrapReview(entry)
+        if review then
             local id = review.reviewId or entry.reviewId
             if id then by_id[tostring(id)] = review end
             local range = tostring(review.range or "")
@@ -469,8 +467,8 @@ function Notes.toAnnotations(wire, chapter_uid, reviews, source_id, stable_id)
     -- 有想法不等于 bookmarklist 必有同 range 划线。微信允许直接发表选中文本想法；
     -- 这种条目也必须映射为 KOReader 原生高亮+笔记，不能静默丢掉。
     for _idx, entry in ipairs(type(reviews) == "table" and reviews.reviews or {}) do
-        local review = type(entry) == "table" and (entry.review or entry) or nil
-        if type(review) == "table" and not matched_reviews[review] then
+        local review = unwrapReview(entry)
+        if review and not matched_reviews[review] then
             local uid = tostring(review.chapterUid or review.chapter_uid or "")
             local range = tostring(review.range or "")
             local text = review.abstract or review.contextAbstract
@@ -491,13 +489,64 @@ function Notes.toAnnotations(wire, chapter_uid, reviews, source_id, stable_id)
     return out
 end
 
+---@param item table
+---@return boolean
+local function hasNote(item)
+    return type(item.note) == "string" and item.note ~= ""
+end
+
+--- 上行前整理：KOReader 原生 note 对应微信想法，标 wr_review_only，不先制造一条远端 bookmark。
+--- 返回有没有要推的（删除、改样式、改想法、新划线、新想法）。
+---@param annotations table[] 就地改写
+---@return boolean
+function Notes.preparePush(annotations)
+    local has_work = false
+    for _idx, item in ipairs(annotations) do
+        local note = hasNote(item)
+        if note and not item.wr_bookmark_id and not item.wr_review_id then
+            item.wr_review_only = true
+        end
+        if item.wr_deleted or item.wr_delete_review or item.wr_update_bookmark or item.wr_update_review
+                or (item.drawer and not item.wr_bookmark_id and not note)
+                or (note and not item.wr_review_id) then
+            has_work = true
+        end
+    end
+    return has_work
+end
+
+--- 需要取章节坐标的条目：待传新划线，加上还没确认远端划线的待传想法。
+---@param annotations table[]
+---@param confirmed table<table, boolean> 本轮已在远端确认的条目
+---@return table[]
+function Notes.rangeItems(annotations, confirmed)
+    local out = Notes.pushCandidates(annotations)
+    for _idx, item in ipairs(annotations) do
+        if hasNote(item) and not item.wr_review_id
+                and (item.wr_review_only or (item.wr_bookmark_id and not confirmed[item])) then
+            out[#out + 1] = item
+        end
+    end
+    return out
+end
+
+--- 想法列表只取一页；只有确认是全量时，“不在列表里”才等于“云端已删”。
+---@param reviews table|nil
+---@return boolean
+function Notes.reviewsComplete(reviews)
+    if type(reviews) ~= "table" then return false end
+    local total_count = tonumber(reviews.totalCount)
+    return tonumber(reviews.hasMore or 0) ~= 1
+        and (not total_count or total_count <= #(reviews.reviews or {}))
+end
+
 --- 待上传的划线想法（划线已登记远端 id）。
----@param annotations table[]|nil
+---@param annotations table[]
 ---@return table[]
 function Notes.notePushCandidates(annotations)
     local out = {}
-    for _idx, item in ipairs(annotations or {}) do
-        if type(item) == "table" and type(item.note) == "string" and item.note ~= ""
+    for _idx, item in ipairs(annotations) do
+        if hasNote(item)
                 and ((item.wr_review_id and item.wr_update_review)
                     or (not item.wr_review_id
                         and (item.wr_bookmark_id or item.wr_review_only)
@@ -508,25 +557,24 @@ function Notes.notePushCandidates(annotations)
     return out
 end
 
----@param annotations table[]|nil
+---@param annotations table[]
 ---@return table[]
 function Notes.deleteCandidates(annotations)
     local out = {}
-    for _idx, item in ipairs(annotations or {}) do
-        if type(item) == "table" and (item.wr_deleted or item.wr_delete_review) then
+    for _idx, item in ipairs(annotations) do
+        if item.wr_deleted or item.wr_delete_review then
             out[#out + 1] = item
         end
     end
     return out
 end
 
----@param annotations table[]|nil
+---@param annotations table[]
 ---@return table[]
 function Notes.bookmarkUpdateCandidates(annotations)
     local out = {}
-    for _idx, item in ipairs(annotations or {}) do
-        if type(item) == "table" and not item.wr_deleted
-                and item.wr_bookmark_id and item.wr_update_bookmark then
+    for _idx, item in ipairs(annotations) do
+        if not item.wr_deleted and item.wr_bookmark_id and item.wr_update_bookmark then
             out[#out + 1] = item
         end
     end
@@ -550,9 +598,6 @@ end
 ---@return table|nil body
 ---@return string|nil err
 function Notes.toReviewBody(book_id, chapter_uid, annotation)
-    if type(annotation) ~= "table" then
-        return nil, "invalid annotation"
-    end
     local content = annotation.note
     if type(content) ~= "string" or content == "" then
         return nil, "empty note"
@@ -582,9 +627,6 @@ end
 ---@return table|nil body
 ---@return string|nil err
 function Notes.toReviewEditBody(book_id, chapter_uid, annotation)
-    if type(annotation) ~= "table" then
-        return nil, "invalid annotation"
-    end
     local review_id = annotation.wr_review_id
     if type(review_id) ~= "string" and type(review_id) ~= "number" then
         return nil, "missing review id"
@@ -596,14 +638,12 @@ function Notes.toReviewEditBody(book_id, chapter_uid, annotation)
 end
 
 --- 待上传的本地划线（跳过已登记远端 id）。
----@param annotations table[]|nil
+---@param annotations table[]
 ---@return table[]
 function Notes.pushCandidates(annotations)
     local out = {}
-    for _idx, item in ipairs(annotations or {}) do
-        if type(item) == "table" and item.drawer
-                and type(item.text) == "string" and item.text ~= ""
-                and (type(item.note) ~= "string" or item.note == "")
+    for _idx, item in ipairs(annotations) do
+        if item.drawer and type(item.text) == "string" and item.text ~= "" and not hasNote(item)
                 and not item.wr_bookmark_id and not item.wr_review_id then
             out[#out + 1] = item
         end
@@ -662,9 +702,6 @@ end
 ---@return table|nil body
 ---@return string|nil err
 function Notes.toBookmarkBody(book_id, chapter_uid, chapter_idx, book_version, annotation)
-    if type(annotation) ~= "table" then
-        return nil, "invalid annotation"
-    end
     local text = annotation.text
     if type(text) ~= "string" or text == "" then
         return nil, "empty highlight"

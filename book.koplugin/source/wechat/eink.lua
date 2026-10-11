@@ -14,6 +14,7 @@
 local JSON = require("json")
 local logger = require("utils.log")
 local Request = require("http.request")
+local Header = require("http.request.header")
 local Text = require("utils.text")
 local sha256 = require("ffi/sha2").sha256
 local _ = require("gettext")
@@ -44,13 +45,14 @@ local VERSION_HEADERS = {
 ---@field refresh_token string
 ---@field device_id string
 
+--- wechat 源配置（会话字段与用户信息都在这里）。
 ---@return table
-local function cfg()
+function Eink.config()
     return require("utils.settings").getSource("wechat")
 end
 
----@param patch table 合并进 wechat 源配置
-local function save(patch)
+---@param patch table 合并进 wechat 源配置并落盘
+function Eink.save(patch)
     local MoonSettings = require("utils.settings")
     local c = MoonSettings.getSource("wechat")
     for k, v in pairs(patch) do c[k] = v end
@@ -63,7 +65,7 @@ end
 ---@param refresh_token string
 ---@param device_id string
 local function saveSession(vid, access_token, refresh_token, device_id)
-    save({
+    Eink.save({
         wr_vid = vid,
         wr_skey = access_token,
         user_id = vid,
@@ -88,12 +90,12 @@ end
 --- 已落盘设备 ID；没有就生成并落盘。重新登录沿用同一设备，避免在账号里堆设备。
 ---@return string
 function Eink.deviceId()
-    local eink = cfg().eink or {}
+    local eink = Eink.config().eink or {}
     if type(eink.device_id) == "string" and eink.device_id ~= "" then
         return eink.device_id
     end
     eink.device_id = Eink.newDeviceId()
-    save({ eink = eink })
+    Eink.save({ eink = eink })
     return eink.device_id
 end
 
@@ -113,7 +115,7 @@ end
 
 ---@return WechatEinkCredentials|nil
 function Eink.credentials()
-    local c = cfg()
+    local c = Eink.config()
     local eink = c.eink
     if type(eink) ~= "table" or type(eink.refresh_token) ~= "string" or eink.refresh_token == ""
         or type(c.wr_skey) ~= "string" or c.wr_skey == "" then
@@ -129,16 +131,13 @@ end
 
 --- 清除续期令牌，保留设备 ID；网页会话字段由 Auth.clearSession 负责。
 function Eink.clearSession()
-    save({ eink = { device_id = (cfg().eink or {}).device_id } })
+    Eink.save({ eink = { device_id = (Eink.config().eink or {}).device_id } })
 end
 
 ---@param extra table|nil
 ---@return table
 local function versionHeaders(extra)
-    local h = {}
-    for k, v in pairs(VERSION_HEADERS) do h[k] = v end
-    for k, v in pairs(extra or {}) do h[k] = v end
-    return h
+    return Header.merge(extra, VERSION_HEADERS)
 end
 
 ---@param raw string|nil

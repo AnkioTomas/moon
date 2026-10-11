@@ -22,10 +22,6 @@ local _ = require("gettext")
 local Auth = {}
 
 local WEB = "https://weread.qq.com"
-local API = "https://i.weread.qq.com"
-
---- 浏览器 UA 与 protocol.webAppId 保持一致（阅读时长上报 appId 依赖 UA）。
-local BROWSER_UA = Protocol.USER_AGENT
 
 --- 微信会话失效 errcode（对齐 weread.koplugin）。
 local AUTH_ERRCODES = {
@@ -38,12 +34,12 @@ local RENEW_COOLDOWN = 600
 --- 上次自动续期的发起时间（不论成败）。
 local renewed_at = 0
 
---- 合并浏览器默认请求头。
+--- 合并浏览器默认请求头（UA 与 protocol.webAppId 保持一致，阅读时长上报 appId 依赖 UA）。
 ---@param extra table|nil
 ---@return table
 local function browserHeaders(extra)
     return Header.merge(extra, {
-        ["User-Agent"] = BROWSER_UA,
+        ["User-Agent"] = Protocol.USER_AGENT,
         ["Accept-Language"] = "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6",
         ["Referer"] = WEB .. "/",
         ["Origin"] = WEB,
@@ -51,23 +47,6 @@ local function browserHeaders(extra)
         ["Sec-Ch-Ua-Mobile"] = "?0",
         ["Sec-Ch-Ua-Platform"] = '"Windows"',
     })
-end
-
---- 读取微信读书源配置。
----@return table
-local function cfg()
-    return require("utils.settings").getSource("wechat")
-end
-
---- 合并 patch 并落盘微信读书源配置。
----@param patch table
-local function saveCfg(patch)
-    local MoonSettings = require("utils.settings")
-    local c = MoonSettings.getSource("wechat")
-    for k, v in pairs(patch) do
-        c[k] = v
-    end
-    MoonSettings.saveSource("wechat", c)
 end
 
 --- 会话请求头：Eink 令牌即网页会话，Cookie 只需 wr_vid / wr_skey。
@@ -93,7 +72,7 @@ Auth.hasSession = Eink.hasSession
 --- 展示用用户标签（昵称优先，否则 user_id）。
 ---@return string|nil
 function Auth.userLabel()
-    local c = cfg()
+    local c = Eink.config()
     if c.user_name and c.user_name ~= "" then
         return c.user_name
     end
@@ -106,7 +85,7 @@ end
 --- 清除本地会话；wr_gid/wr_fp/wr_rt/cookie 是旧网页登录、api_key/skill_version 是已废弃
 --- Skills 网关的残留，一并清掉。
 function Auth.clearSession()
-    saveCfg({
+    Eink.save({
         cookie = "",
         wr_vid = "",
         wr_skey = "",
@@ -124,17 +103,6 @@ function Auth.clearSession()
     Context.clear()
 end
 
---- 相对路径拼到 base；已是绝对 URL 则原样返回。
----@param base string
----@param path_query string
----@return string
-local function absUrl(base, path_query)
-    if path_query:find("^https?://") then
-        return path_query
-    end
-    return base .. path_query
-end
-
 --- 会话失效探针：只有带 errcode/errmsg 的 JSON 才值得解码。
 ---
 --- 章节正文分片、reader 页 HTML 与图片都会走同一条请求路径，动辄几百 KB 且必然不是
@@ -149,15 +117,12 @@ local function mayCarryErrCode(raw)
         or raw:find("errmsg", 1, true) ~= nil or raw:find("errMsg", 1, true) ~= nil
 end
 
---- 解码 JSON 文本为 table。
+--- 解码 JSON 文本为 table；不是 JSON 对象返回 nil。
 ---@param raw string
----@return table|nil, string|nil
+---@return table|nil
 local function decodeJson(raw)
     local ok, data = pcall(JSON.decode, raw)
-    if not ok or type(data) ~= "table" then
-        return nil, _("返回非 JSON")
-    end
-    return data
+    return ok and type(data) == "table" and data or nil
 end
 
 --- 判断响应是否属于会话失效（应尝试 renewal）。
@@ -191,11 +156,23 @@ local function renewAsync(cb)
     Eink.refreshAsync(cb)
 end
 
+---@class WechatRequestOpts
+---@field headers table|nil
+---@field accept string|nil
+---@field content_type string|nil POST 缺省 application/json
+---@field timeout number|nil 缺省 45 秒
+---@field allow_redirects boolean|nil
+---@field skip_auth_retry boolean|nil 不把 401/403 当会话失效（CDN 图片等）
+
 --- 带会话失效自动 renewal + 单次重试的 HTTP 请求。
----@param opts table Turbo request opts（含 skip_auth_retry）
----@param cb fun(raw: string|nil, err: string|nil, res: table|nil)
+---@param method string
+---@param url string 完整 URL
+---@param body string|nil
+---@param opts WechatRequestOpts|nil
+---@param cb fun(raw: string|nil, err: string|nil, res: table|nil) 失败时 raw 为 nil，res 是原始响应
 ---@return { cancel: fun() }|nil
-local function sessionRequest(opts, cb)
+local function sessionRequest(method, url, body, opts, cb)
+    opts = opts or {}
     if not Auth.hasSession() then
         cb(nil, _("请先扫码登录微信读书"))
         return nil
@@ -207,13 +184,13 @@ local function sessionRequest(opts, cb)
         if opts.accept then
             headers["Accept"] = opts.accept
         end
-        if opts.content_type then
-            headers["Content-Type"] = opts.content_type
+        if method == "POST" then
+            headers["Content-Type"] = opts.content_type or "application/json"
         end
         job = Request.request({
-            url = opts.url,
-            method = opts.method or "GET",
-            body = opts.body,
+            url = url,
+            method = method,
+            body = body,
             headers = headers,
             timeout = opts.timeout or 45,
             allow_redirects = opts.allow_redirects,
@@ -225,19 +202,17 @@ local function sessionRequest(opts, cb)
             end
             local code = res and res.code
             local raw = res and res.body or ""
-            if not opts.skip_auth_retry and not retried then
-                local data = mayCarryErrCode(raw) and decodeJson(raw) or nil
-                if isAuthFailure(data, code) then
-                    renewAsync(function(renewed, renew_err)
-                        if cancelled then return end
-                        if renewed then
-                            attempt(true)
-                        else
-                            cb(nil, renew_err, res)
-                        end
-                    end)
-                    return
-                end
+            if not opts.skip_auth_retry and not retried
+                    and isAuthFailure(mayCarryErrCode(raw) and decodeJson(raw) or nil, code) then
+                renewAsync(function(renewed, renew_err)
+                    if cancelled then return end
+                    if renewed then
+                        attempt(true)
+                    else
+                        cb(nil, renew_err, res)
+                    end
+                end)
+                return
             end
             if not Request.ok(code) then
                 cb(nil, "HTTP " .. tostring(code), res)
@@ -255,94 +230,37 @@ end
 
 --- 带会话 Cookie 的异步 GET；遇鉴权失效会自动续期后重试一次。
 ---@param url string 完整 URL
----@param opts table|nil headers / accept / timeout / allow_redirects / skip_auth_retry
----@param cb fun(raw: string|nil, err: string|nil, res: table|nil) 失败时 raw 为 nil，res 是原始响应
+---@param opts WechatRequestOpts|nil
+---@param cb fun(raw: string|nil, err: string|nil, res: table|nil)
 ---@return { cancel: fun() }|nil
 function Auth.webGetAsync(url, opts, cb)
-    opts = opts or {}
-    return sessionRequest({
-        url = url,
-        method = "GET",
-        headers = opts.headers,
-        accept = opts.accept,
-        timeout = opts.timeout,
-        allow_redirects = opts.allow_redirects,
-        skip_auth_retry = opts.skip_auth_retry,
-    }, cb)
+    return sessionRequest("GET", url, nil, opts, cb)
 end
 
---- Nonblocking authenticated POST.
----@param url string
----@param body string|nil
----@param opts table|nil
+--- 带会话 Cookie 的异步 POST；同 webGetAsync。
+---@param url string 完整 URL
+---@param body string|nil 已编码的请求体
+---@param opts WechatRequestOpts|nil
 ---@param cb fun(raw: string|nil, err: string|nil, res: table|nil)
 ---@return { cancel: fun() }|nil
 function Auth.webPostAsync(url, body, opts, cb)
-    opts = opts or {}
-    return sessionRequest({
-        url = url,
-        method = "POST",
-        body = body,
-        headers = opts.headers,
-        content_type = opts.content_type or "application/json",
-        timeout = opts.timeout,
-        skip_auth_retry = opts.skip_auth_retry,
-    }, cb)
-end
-
---- 包装回调：原始响应解码成 JSON 表再回传。
----@param cb fun(data: table|nil, err: string|nil)
----@return fun(raw: string|nil, err: string|nil)
-local function jsonCallback(cb)
-    return function(raw, err)
-        if not raw then
-            cb(nil, err)
-            return
-        end
-        cb(decodeJson(raw))
-    end
-end
-
---- Web API JSON GET；errcode 校验由 client 层的 acceptWebWire 决定。
----@param path_query string 相对 Web 站点的路径（可带 query）
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Auth.webApiGetAsync(path_query, cb)
-    return Auth.webGetAsync(absUrl(WEB, path_query), nil, jsonCallback(cb))
-end
-
---- Web API JSON POST；body 以 JSON 发出，回包解码成表。
---- 同 webApiGetAsync，errcode 校验留给 client 层。
----@param path string 相对 Web 站点的路径
----@param body_tbl table|nil 请求体，缺省发空对象
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Auth.webApiPostAsync(path, body_tbl, cb)
-    return Auth.webPostAsync(absUrl(WEB, path), JSON.encode(body_tbl or {}), nil, jsonCallback(cb))
-end
-
---- 移动端 API JSON POST（``i.weread.qq.com``）；复用 Web 会话 Cookie + X-Vid/X-Skey。
----@param path string 相对 i.weread 的路径，如 ``/shelf/delete``
----@param body_tbl table|nil
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }|nil
-function Auth.apiPostAsync(path, body_tbl, cb)
-    return Auth.webPostAsync(absUrl(API, path), JSON.encode(body_tbl or {}), nil, jsonCallback(cb))
+    return sessionRequest("POST", url, body, opts, cb)
 end
 
 --- 扫码登录后补拉昵称；取不到不算失败，会话本身已可用。
 ---@param cb fun(user: { user_id: string, user_name: string })
 ---@return { cancel: fun() }|nil
 function Auth.fetchUserAsync(cb)
-    local vid = cfg().wr_vid
+    local vid = Eink.config().wr_vid
     return Auth.webGetAsync(WEB .. "/api/userInfo?userVid=" .. vid, nil, function(raw)
         local data = raw and decodeJson(raw)
         local name = data and type(data.name) == "string" and data.name or ""
         if name ~= "" then
-            saveCfg({ user_name = name })
+            Eink.save({ user_name = name })
         end
         logger.info("weread login ok", vid, name)
         cb({ user_id = vid, user_name = name })
     end)
 end
+
 return Auth

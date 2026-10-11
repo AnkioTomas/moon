@@ -20,15 +20,9 @@ local Text = require("utils.text")
 ---@field rune_at_byte table<integer, integer> 字节偏移 → rune 下标
 ---@field count integer rune 数
 
---- 本地章节 HTML 的跨段 rune 流（定位划线用）。
----@class WechatRuneFlow
----@field text string 剥空白后拼接的可见正文
----@field para integer[] 每个 rune 所属段落号（1-based）
----@field offset integer[] 每个 rune 在段内的 0-based 偏移
----@field rune_at_byte table<integer, integer>
----@field para_first_byte table<integer, integer>
----@field count integer
----@field paragraphs { index: integer, runes: string[] }[]
+--- 本地章节 HTML 的可见 rune 流（定位划线用），见 ``Annotations.flow``。
+---@class WechatRuneFlow: WechatWireMapping
+---@field paths string[] 文本节点序号 → crengine xpointer（``starts[i]`` 即该序号，``ends[i]`` 为节点内偏移 + 1）
 
 ---@param str string
 ---@return string[]
@@ -212,29 +206,6 @@ function Annotations.wireMapping(html)
     return finishMapping(b)
 end
 
---- 章节壳里的顶层段落文本，索引即 crengine xpointer 里的 ``p[N]``。
----
---- 文本按 crengine 规则折叠连续空白为单个空格且**不 trim**：微信正文段首带缩进空格，
---- 折叠后仍占 1 个字符，这正是本地划线 ``pos0`` 从 1 而不是 0 开始的原因。
----@param html string
----@return { index: integer, runes: string[] }[]
-function Annotations.paragraphs(html)
-    local out = {}
-    if type(html) ~= "string" or html == "" then
-        return out
-    end
-    local body = html:match("<body[^>]*>(.*)</body>") or html
-    local index = 0
-    for inner in body:gmatch("<p%f[%s>][^>]*>(.-)</p>") do
-        index = index + 1
-        local text = inner:gsub("<[^>]*>", "")
-        text = Text.xmlDecode(text)
-        text = text:gsub("[ \t\r\n]+", " ")
-        out[#out + 1] = { index = index, runes = toRunes(text) }
-    end
-    return out
-end
-
 --- 统计 UTF-8 rune 数（不建中间数组）。
 ---@param str string
 ---@return integer
@@ -248,64 +219,132 @@ local function countRunes(str)
     return count
 end
 
---- 跨段可匹配的 rune 流：逐段剥掉首尾空白后首尾相接，拼成一条可直接 ``find`` 的文本，
---- 并为每个 rune 记住来源段与段内偏移。
----
---- 段间不插分隔符：微信 ``markText`` 跨段时两段正文是直接相连的（本地正文里的段首缩进
---- 与段间换行都不在 markText 内），剥掉首尾空白后才能对齐。段内偏移仍按**未剥离**的
---- 折叠文本计，这样算出的 xpointer 才和 crengine 一致。
----
---- 用平行数组而非「每个 rune 一个 table」：一章上万 rune，逐条划线重建对象会打爆 GC。
----@param paragraphs { index: integer, runes: string[] }[]
----@return WechatRuneFlow
-local function buildFlow(paragraphs)
-    local runes, para, offset, rune_at_byte, para_first_byte = {}, {}, {}, {}, {}
-    local count, byte_pos = 0, 1
-    for _idx, item in ipairs(paragraphs) do
-        local first, last = 1, #item.runes
-        while first <= last and item.runes[first]:match("^%s$") do
-            first = first + 1
-        end
-        while last >= first and item.runes[last]:match("^%s$") do
-            last = last - 1
-        end
-        for i = first, last do
-            local rune = item.runes[i]
-            count = count + 1
-            runes[count] = rune
-            para[count] = item.index
-            offset[count] = i - 1
-            rune_at_byte[byte_pos] = count
-            if para_first_byte[item.index] == nil then
-                para_first_byte[item.index] = byte_pos
-            end
-            byte_pos = byte_pos + #rune
-        end
+local VOID_TAGS = {
+    area = true, base = true, br = true, col = true, embed = true, hr = true, img = true,
+    input = true, link = true, meta = true, param = true, source = true, track = true, wbr = true,
+}
+
+--- crengine 不为这些元素保留纯空白文本节点（不计入 ``text()[k]`` 序号）。
+local NO_SPACE_TEXT = {
+    html = true, head = true, body = true, div = true, section = true, article = true,
+    blockquote = true, table = true, tbody = true, thead = true, tr = true,
+    ul = true, ol = true, dl = true, figure = true, aside = true, nav = true,
+    header = true, footer = true, main = true,
+}
+
+---@class WechatDomNode
+---@field parent WechatDomNode|nil 根为 nil
+---@field name string
+---@field ord integer 在父节点同名兄弟里的 1-based 序号（文本节点为同级文本序号）
+---@field counts table<string, integer> 子元素按名计数
+---@field texts integer 文本子节点数
+---@field skip boolean 子树不算正文
+
+---@param node WechatDomNode
+---@return string
+local function elementPath(node)
+    if not node.parent then return "" end
+    local step = node.name
+    if node.parent.counts[node.name] > 1 then
+        step = step .. "[" .. node.ord .. "]"
     end
-    ---@type WechatRuneFlow
-    return {
-        text = table.concat(runes),
-        para = para,
-        offset = offset,
-        rune_at_byte = rune_at_byte,
-        para_first_byte = para_first_byte,
-        count = count,
-        paragraphs = paragraphs,
-    }
+    return elementPath(node.parent) .. "/" .. step
 end
 
---- 建一次章节 rune 流，供同章多条划线复用。
+--- 本地章节 HTML → 可见 rune 流，每个 rune 记住所在文本节点的 crengine xpointer 与节点内偏移。
+---
+--- 按真实 DOM 遍历（嵌套、行内元素拆开的多个文本节点、多份拼接文档的 ``html[k]`` 都照算），
+--- 路径规则同 crengine ``ldomXPointer::toStringV2``：同名兄弟多于一个才带 ``[k]``。
+--- 节点内偏移按 crengine 规则折叠连续空白为单个空格且**不 trim**（段首缩进占 1 个字符）。
+--- 可见文本规则与 ``wireMapping`` 相同（块边界吞空白、不制造字符），同一份正文两边 text 一致。
+--- 宿主追加的脚注 aside（``epub:type="footnote"``）不算正文。
+---
+--- 结构与 WechatWireMapping 相同：``starts[i]`` 是文本节点序号，``ends[i]`` 是节点内偏移 + 1。
 ---@param html string
 ---@return WechatRuneFlow
 function Annotations.flow(html)
-    return buildFlow(Annotations.paragraphs(html))
+    html = Text.stripBom(tostring(html or ""))
+    local b = newBuilder()
+    ---@type WechatDomNode
+    local root = { name = "", ord = 1, counts = {}, texts = 0, skip = false }
+    local top = root
+    local text_nodes = {}
+
+    local function onText(raw)
+        if top.skip then return end
+        local text = Text.xmlDecode(raw)
+        if NO_SPACE_TEXT[top.name] or top == root then
+            if not text:find("[^%s]") then return end
+        end
+        top.texts = top.texts + 1
+        local id = #text_nodes + 1
+        text_nodes[id] = { parent = top, ord = top.texts }
+        local offset, prev_space = 0, false
+        for _idx, rune in ipairs(toRunes(text)) do
+            local space = rune:match("^%s$") ~= nil
+            if not (space and prev_space) then
+                appendVisible(b, rune, id, offset + 1)
+                offset = offset + 1
+            end
+            prev_space = space
+        end
+    end
+
+    local pos, len = 1, #html
+    while pos <= len do
+        local lt = html:find("<", pos, true)
+        if not lt then
+            onText(html:sub(pos))
+            break
+        end
+        if lt > pos then onText(html:sub(pos, lt - 1)) end
+        if html:sub(lt, lt + 3) == "<!--" then
+            local close = html:find("-->", lt + 4, true)
+            pos = close and close + 3 or len + 1
+        else
+            local gt = html:find(">", lt + 1, true) or len
+            local tag = html:sub(lt + 1, gt - 1)
+            pos = gt + 1
+            local closing, name = tag:match("^%s*(/?)%s*([%w:]+)")
+            name = name and name:lower()
+            if name and closing == "/" then
+                local node = top
+                while node ~= root and node.name ~= name do node = node.parent end
+                if node ~= root then
+                    top = node.parent
+                    if BLOCK_TAGS[name] then blockBoundary(b) end
+                end
+            elseif name and tag:sub(1, 1) ~= "!" and tag:sub(1, 1) ~= "?" then
+                top.counts[name] = (top.counts[name] or 0) + 1
+                ---@type WechatDomNode
+                local node = {
+                    parent = top, name = name, ord = top.counts[name], counts = {}, texts = 0,
+                    skip = top.skip or SKIPPED_TAGS[name] or tag:find('epub:type="footnote"', 1, true) ~= nil,
+                }
+                if BLOCK_TAGS[name] then blockBoundary(b) end
+                if not VOID_TAGS[name] and not tag:match("/%s*$") then top = node end
+            end
+        end
+    end
+
+    local mapping = finishMapping(b) --[[@as WechatRuneFlow]]
+    local paths = {}
+    for id, node in ipairs(text_nodes) do
+        local step = node.parent.texts > 1 and ("/text()[" .. node.ord .. "]") or "/text()"
+        paths[id] = elementPath(node.parent) .. step
+    end
+    mapping.paths = paths
+    return mapping
 end
 
---- 划线文本规范化；KOReader 跨段选区在段间带换行，按段落边界处理后才能与 rune 流对齐。
----@param text string
+--- 第 i 个 rune 起点 / 终点（半开）的 xpointer。
+---@param flow WechatRuneFlow
+---@param i integer
+---@param after boolean|nil true 取该 rune 之后的位置
 ---@return string
-local function normalizeText(text)
-    return Annotations.plainMapping(text).text
+local function xpointerAt(flow, i, after)
+    local offset = flow.ends[i] - (after and 0 or 1)
+    return flow.paths[flow.starts[i]] .. "." .. offset
 end
 
 ---@param flow WechatRuneFlow|WechatWireMapping
@@ -327,27 +366,15 @@ local function matchingHeads(flow, needle)
     return heads
 end
 
----@param pos string|nil
----@return integer|nil
----@return integer|nil
-local function parseXPointer(pos)
-    if type(pos) ~= "string" then
-        return nil
-    end
-    local paragraph, offset = pos:match("/p%[(%d+)%]/text%(%)%.(%d+)$")
-    return tonumber(paragraph), tonumber(offset)
-end
-
 ---@param flow WechatRuneFlow
 ---@param pos string|nil
 ---@return integer|nil
 local function headAtXPointer(flow, pos)
-    local paragraph, offset = parseXPointer(pos)
-    if not paragraph then
+    if type(pos) ~= "string" then
         return nil
     end
     for i = 1, flow.count do
-        if flow.para[i] == paragraph and flow.offset[i] == offset then
+        if xpointerAt(flow, i) == pos then
             return i
         end
     end
@@ -371,7 +398,7 @@ function Annotations.locateBatch(source, items)
     end
     local entries = {}
     for ordinal, item in ipairs(items or {}) do
-        local needle = type(item) == "table" and normalizeText(item.text or "") or ""
+        local needle = Annotations.plainMapping(item.text or "").text
         if needle ~= "" then
             local range_start = tonumber(tostring(item.wr_range or ""):match("^(%d+)"))
             entries[#entries + 1] = {
@@ -425,10 +452,7 @@ function Annotations.locateBatch(source, items)
         if head then
             local tail = head + countRunes(entry.needle) - 1
             -- pos1 是半开区间上界（实测对齐 KOReader 自己写出的 xpointer）。
-            out[entry.item] = {
-                pos0 = string.format("/html/body/p[%d]/text().%d", flow.para[head], flow.offset[head]),
-                pos1 = string.format("/html/body/p[%d]/text().%d", flow.para[tail], flow.offset[tail] + 1),
-            }
+            out[entry.item] = { pos0 = xpointerAt(flow, head), pos1 = xpointerAt(flow, tail, true) }
         end
     end
     return out
@@ -456,7 +480,8 @@ end
 ---@return string|nil range
 ---@return string|nil err
 function Annotations.toWireRange(wire, local_flow, needle, pos0, pos1)
-    needle = normalizeText(tostring(needle or ""))
+    -- KOReader 跨段选区在段间带换行，按段落边界规范化后才能与 rune 流对齐。
+    needle = Annotations.plainMapping(needle or "").text
     if needle == "" then
         return nil, "empty highlight"
     end
@@ -476,12 +501,8 @@ function Annotations.toWireRange(wire, local_flow, needle, pos0, pos1)
     end
     local want = countRunes(needle)
     if ordinal then
-        -- 起点由 xpointer 命中时，终点必须落在同一坐标系里；
-        -- 起点靠唯一文本兜底时 xpointer 形态（嵌套、内联节点）不可比，不做终点校验。
-        local local_tail = local_head + want - 1
-        local end_paragraph, end_offset = parseXPointer(pos1)
-        if end_paragraph and (local_flow.para[local_tail] ~= end_paragraph
-                or local_flow.offset[local_tail] + 1 ~= end_offset) then
+        -- 起点由 xpointer 命中时，终点必须落在同一坐标系里。
+        if pos1 and xpointerAt(local_flow, local_head + want - 1, true) ~= pos1 then
             return nil, "local highlight range mismatch"
         end
     else

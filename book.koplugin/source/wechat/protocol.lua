@@ -131,11 +131,11 @@ end
 ---@param book_id string|number
 ---@param chapter_uid string|number
 ---@param psvts string
----@param opts { ct: number|nil, sc: number|nil, style: boolean|nil }|nil
+---@param opts { sc: number|nil, style: boolean|nil }|nil
 ---@return table
 function Protocol.contentParams(book_id, chapter_uid, psvts, opts)
     opts = opts or {}
-    local ct = opts.ct or os.time()
+    local ct = os.time()
     if Protocol.encode(ct) == psvts then
         ct = ct + 1
     end
@@ -263,10 +263,9 @@ local function decodeEncodedBody(body)
 end
 
 --- 从 UA 推导 Web appId（阅读时长上报用）。
----@param user_agent string|nil
+---@param user_agent string
 ---@return string
 function Protocol.webAppId(user_agent)
-    user_agent = user_agent or Protocol.USER_AGENT
     local prefix = {}
     local count = 0
     for part in user_agent:gmatch("%S+") do
@@ -281,68 +280,44 @@ function Protocol.webAppId(user_agent)
     return "wb" .. table.concat(prefix) .. "h" .. tostring(hash)
 end
 
---- UTF-8 前缀截断（最多 max_chars 个码点）。
----@param max_chars number|nil
+--- UTF-8 前缀截断（最多 max_chars 个码点，遇非法首字节即止）。
+---@param value string|nil
+---@param max_chars integer
 ---@return string
-function Protocol.utf8Substr(value, max_chars)
-    local text = tostring(value or "")
-    local limit = math.max(0, math.floor(tonumber(max_chars) or 0))
-    local index, count = 1, 0
-    while index <= #text and count < limit do
-        local first = text:byte(index)
-        local width = 0
-        local second = text:byte(index + 1)
-        if first <= 0x7f then
-            width = 1
-        elseif first >= 0xc2 and first <= 0xdf
-            and second and second >= 0x80 and second <= 0xbf then
-            width = 2
-        elseif (first >= 0xe1 and first <= 0xec or first == 0xe0 or first == 0xee or first == 0xef)
-            and second and second >= 0x80 and second <= 0xbf then
-            width = 3
-        elseif (first >= 0xf0 and first <= 0xf4)
-            and second and second >= 0x80 and second <= 0xbf then
-            width = 4
-        else
-            break
-        end
-        for offset = 2, width - 1 do
-            local cont = text:byte(index + offset)
-            if not cont or cont < 0x80 or cont > 0xbf then
-                width = 0
-                break
-            end
-        end
-        if width == 0 then break end
-        index = index + width
-        count = count + 1
+local function utf8Prefix(value, max_chars)
+    local text = value or ""
+    local pos = 1
+    for _i = 1, max_chars do
+        local _start, stop = text:find("^[%z\1-\127\194-\244][\128-\191]*", pos)
+        if not stop then break end
+        pos = stop + 1
     end
-    return text:sub(1, index - 1)
+    return text:sub(1, pos - 1)
 end
 
 --- 组装 web/book/read 的位置字段（进入阅读与时长上报共用的基础部分）。
 --- 书籍 id 与章节 uid 走 Protocol.encode 混淆，摘要截到 20 个字符，进度夹到 0..100；
 --- pc 缺失时用当前时间编码兜底。返回的表尚未签名，由调用方补 s 字段。
----@param opts table 含 book_id / chapter_uid / chapter_idx / chapter_offset / summary / progress / psvts / now
+---@param opts table 含 book_id / chapter_uid / chapter_idx / chapter_offset / summary / progress / psvts / pclts
 ---@return table
 local function readPositionPayload(opts)
-    local now = opts.now or os.time()
-    local pc = opts.pclts or opts.pc
+    local now = os.time()
+    local pc = opts.pclts
     if pc == nil or pc == "" or tonumber(pc) == 0 then
         pc = Protocol.encode(now)
     end
     local progress = math.floor(tonumber(opts.progress) or 0)
     progress = math.max(0, math.min(100, progress))
     return {
-        appId = opts.app_id or Protocol.webAppId(opts.user_agent),
+        appId = Protocol.webAppId(Protocol.USER_AGENT),
         b = Protocol.encode(opts.book_id),
         c = Protocol.encode(opts.chapter_uid or 0),
         ci = math.floor(tonumber(opts.chapter_idx) or 0),
         co = math.max(0, math.floor(tonumber(opts.chapter_offset) or 0)),
-        sm = Protocol.utf8Substr(opts.summary, 20),
+        sm = utf8Prefix(opts.summary, 20),
         pr = progress,
         ct = now,
-        ps = opts.psvts or opts.ps or "",
+        ps = opts.psvts or "",
         pc = pc,
     }
 end
@@ -363,17 +338,12 @@ end
 function Protocol.makeReadPayload(opts)
     opts = opts or {}
     local params = readPositionPayload(opts)
-    local now = params.ct
-    local ts = opts.ts or (now * 1000 + math.random(0, 999))
-    local rn = opts.rn or math.random(0, 999)
-    local token = opts.token
-    if token == nil or token == "" then
-        token = Protocol.DEFAULT_READER_TOKEN
-    end
+    local ts = params.ct * 1000 + math.random(0, 999)
+    local rn = math.random(0, 999)
     params.rt = math.max(0, math.floor(tonumber(opts.elapsed_seconds) or 0))
     params.ts = ts
     params.rn = rn
-    params.sg = sha256_hex(tostring(ts) .. tostring(rn) .. token)
+    params.sg = sha256_hex(tostring(ts) .. tostring(rn) .. Protocol.DEFAULT_READER_TOKEN)
     params.s = Protocol.sign(Protocol.sortedQuery(params))
     return params
 end

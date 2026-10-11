@@ -16,9 +16,8 @@ local Setting = {}
 ---@return string status, boolean status_on
 function Setting.rowStatus()
     local Auth = require("source.wechat.auth")
-    local cfg = require("utils.settings").getSource(SOURCE_ID)
     if Auth.hasSession() then
-        return Auth.userLabel() or cfg.user_id or _("已登录"), true
+        return Auth.userLabel() or _("已登录"), true
     end
     return _("未登录 · 点此扫码"), false
 end
@@ -134,20 +133,24 @@ function Setting.rows(plugin)
                 status = status, status_on = status_on,
                 callback = showQrLogin })
         end,
-        function(iw)
-            local Settings = require("utils.settings")
-            local on = Settings.getSource(SOURCE_ID).sync_reading_time ~= false
-            return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = "timer", title = _("同步阅读时间"),
-                subtitle = _("阅读时必须联网，微信读书才会计入时长"),
-                status = on and _("开") or _("关"), status_on = on,
+    }
+    local Settings = require("utils.settings")
+    --- 布尔开关行；default 为未设置时的取值。
+    local function toggle(key, default, icon, title, subtitle)
+        rows[#rows + 1] = function(iw)
+            local cfg = Settings.getSource(SOURCE_ID)
+            local on = cfg[key] == nil and default or cfg[key] == true
+            return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = icon, title = title,
+                subtitle = subtitle, status = on and _("开") or _("关"), status_on = on,
                 callback = function()
-                    local cfg = Settings.getSource(SOURCE_ID)
-                    cfg.sync_reading_time = not on
+                    cfg[key] = not on
                     Settings.saveSource(SOURCE_ID, cfg)
                     if plugin and plugin.desktop then plugin.desktop:updateView() end
                 end })
-        end,
-    }
+        end
+    end
+    toggle("sync_reading_time", true, "timer", _("同步阅读时间"), _("阅读时必须联网，微信读书才会计入时长"))
+    toggle("show_paragraph_reviews", false, "forum", _("显示段评"), _("阅读时给有他人段评的句子画虚线，点按查看；需联网"))
     if not Auth.hasSession() then return rows end
     rows[#rows + 1] = function(iw)
         return Row.widget({ width = iw, chevron = false, kind = "action", icon = "autorenew", title = _("续期会话"),

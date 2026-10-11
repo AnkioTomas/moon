@@ -22,68 +22,57 @@ local WEB = "https://weread.qq.com"
 ---@class WechatClient
 local Client = {}
 
---- Web API wire：errCode 非 0 视为失败（webApiGetAsync 不自动校验）。
----@param data table|nil
----@param err string|nil
+--- 回包解码并校验 errcode。
+--- 不是 JSON 一律按失败：登录页 HTML 与 WAF 拦截页都长这样，当成功会静默丢数据。
+---@param url string 仅用于日志
 ---@param cb fun(data: table|nil, err: string|nil)
----@return boolean
-local function acceptWebWire(data, err, cb)
-    if not data then
-        cb(nil, err)
-        return false
-    end
-    local errcode = tonumber(data.errcode or data.errCode)
-    if errcode and errcode ~= 0 then
-        cb(nil, data.errmsg or data.errMsg or (_("微信读书错误 ") .. tostring(errcode)))
-        return false
-    end
-    return true
-end
-
---- 包装回调：errCode 校验通过才回传 wire。
----@param cb fun(data: table|nil, err: string|nil)
----@return fun(data: table|nil, err: string|nil)
-local function webWire(cb)
-    return function(data, err)
-        if acceptWebWire(data, err, cb) then
-            cb(data)
-        end
-    end
-end
-
---- Web 写接口（/web/book/read、想法、划线）：POST 已编码的 JSON，回包解码并校验 errcode。
---- 回包不是 JSON 一律按失败：登录页 HTML 与 WAF 拦截页都长这样，当成功会静默丢数据。
----@param path string 相对站点，以 /web 开头
----@param body string 已编码的 JSON 请求体
----@param referer string|nil 缺省用站点首页
----@param cb fun(data: table|nil, err: string|nil)
----@return { cancel: fun() }|nil
-local function postWebAsync(path, body, referer, cb)
-    return Auth.webPostAsync(WEB .. path, body, {
-        headers = { ["Referer"] = referer or (WEB .. "/") },
-    }, function(raw, err)
+---@return fun(raw: string|nil, err: string|nil)
+local function webWire(url, cb)
+    return function(raw, err)
         if not raw then
             cb(nil, err)
             return
         end
         local ok, data = pcall(JSON.decode, raw)
         if not ok or type(data) ~= "table" then
-            logger.warn("weread web post: unexpected response", path, raw:sub(1, 120))
+            logger.warn("weread web: unexpected response", url, raw:sub(1, 120))
             cb(nil, _("返回非 JSON"))
             return
         end
-        if acceptWebWire(data, nil, cb) then cb(data) end
-    end)
+        local errcode = tonumber(data.errcode or data.errCode)
+        if errcode and errcode ~= 0 then
+            cb(nil, data.errmsg or data.errMsg or (_("微信读书错误 ") .. tostring(errcode)))
+            return
+        end
+        cb(data)
+    end
+end
+
+---@param path string 以 /web 开头
+---@param query table
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+local function getWebAsync(path, query, cb)
+    local url = WEB .. path .. "?" .. Text.formEncode(query)
+    return Auth.webGetAsync(url, nil, webWire(url, cb))
+end
+
+---@param path string 以 /web 开头
+---@param body table 请求体，以 JSON 发出
+---@param referer string|nil 缺省用站点首页
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+local function postWebAsync(path, body, referer, cb)
+    local url = WEB .. path
+    return Auth.webPostAsync(url, JSON.encode(body), referer and { headers = { Referer = referer } } or nil,
+        webWire(url, cb))
 end
 
 --- 全量拉取书架（synckey=0 表示不做增量）。
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
 function Client:shelfSyncAsync(cb)
-    return Auth.webApiGetAsync("/web/shelf/sync?" .. Text.formEncode({
-        synckey = 0,
-        teenmode = 0,
-    }), webWire(cb))
+    return getWebAsync("/web/shelf/sync", { synckey = 0, teenmode = 0 }, cb)
 end
 
 --- 加入微信读书书架。
@@ -91,21 +80,17 @@ end
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:addToShelfAsync(bookId, cb)
-    return Auth.webApiPostAsync("/web/shelf/add", {
-        bookIds = { bookId },
-    }, webWire(cb))
+    return postWebAsync("/web/shelf/add", { bookIds = { bookId } }, nil, cb)
 end
 
---- 从微信读书书架删除。
+--- 从微信读书书架删除（移动端接口，带网页会话）。
 ---@param bookId string
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 function Client:removeFromShelfAsync(bookId, cb)
-    return Auth.apiPostAsync("/shelf/delete", {
-        bookIds = { bookId },
-        albumIds = {},
-        archiveIds = {},
-    }, webWire(cb))
+    local url = "https://i.weread.qq.com/shelf/delete"
+    return Auth.webPostAsync(url, JSON.encode({ bookIds = { bookId }, albumIds = {}, archiveIds = {} }), nil,
+        webWire(url, cb))
 end
 
 --- 拉取书籍详情（含书籍版本号）。
@@ -113,7 +98,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
 function Client:bookInfoAsync(bookId, cb)
-    return Auth.webApiGetAsync("/web/book/info?" .. Text.formEncode({ bookId = bookId }), webWire(cb))
+    return getWebAsync("/web/book/info", { bookId = bookId }, cb)
 end
 
 --- 拉取整本书的章节目录。
@@ -121,9 +106,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
 function Client:chapterInfosAsync(bookId, cb)
-    return Auth.webApiPostAsync("/web/book/chapterInfos", {
-        bookIds = { bookId },
-    }, webWire(cb))
+    return postWebAsync("/web/book/chapterInfos", { bookIds = { bookId } }, nil, cb)
 end
 
 --- 拉取云端阅读进度；带毫秒时间戳参数避开中间层缓存。
@@ -131,10 +114,7 @@ end
 ---@param cb fun(data: table|nil, err: string|nil) 原始 wire 数据
 ---@return { cancel: fun() }|nil
 function Client:getProgressAsync(bookId, cb)
-    return Auth.webApiGetAsync("/web/book/getProgress?" .. Text.formEncode({
-        bookId = bookId,
-        _ = tostring(os.time() * 1000),
-    }), webWire(cb))
+    return getWebAsync("/web/book/getProgress", { bookId = bookId, _ = tostring(os.time() * 1000) }, cb)
 end
 
 ---@param bookId string
@@ -153,7 +133,7 @@ function Client:putProgressAsync(bookId, opts, cb)
         psvts = reader.psvts,
         pclts = reader.pclts,
     })
-    return self:reportReadAsync(JSON.encode(payload), Protocol.readerUrl(bookId, chapter_uid), function(data, err)
+    return self:reportReadAsync(payload, Protocol.readerUrl(bookId, chapter_uid), function(data, err)
         if data then
             reader.entered = true
             cb({ ok = true })
@@ -165,7 +145,7 @@ function Client:putProgressAsync(bookId, opts, cb)
 end
 
 --- 上报阅读行为（进度与时长共用的 /web/book/read 接口）。
----@param body string 已编码好的 JSON 请求体
+---@param body table 已签名的请求体
 ---@param referer string|nil Referer 头，缺省用站点首页
 ---@param cb fun(data: table|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
@@ -193,8 +173,8 @@ end
 ---@return { cancel: fun() }|nil
 function Client:readStatsAsync(mode, base_time, cb)
     local query = { mode = mode or "monthly" }
-    if base_time and tonumber(base_time) and tonumber(base_time) > 0 then
-        query.baseTime = tonumber(base_time)
+    if base_time and base_time > 0 then
+        query.baseTime = base_time
     end
     return Eink.callAsync("GET", "/readdata/detail", { query = query }, cb)
 end
@@ -260,7 +240,7 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:addReviewAsync(body, cb)
-    return postWebAsync("/web/review/add", JSON.encode(body), nil, cb)
+    return postWebAsync("/web/review/add", body, nil, cb)
 end
 
 --- 修改划线下想法。
@@ -268,7 +248,7 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:editReviewAsync(body, cb)
-    return postWebAsync("/web/review/edit", JSON.encode(body), nil, cb)
+    return postWebAsync("/web/review/edit", body, nil, cb)
 end
 
 --- 删除想法。
@@ -276,7 +256,7 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:deleteReviewAsync(review_id, cb)
-    return postWebAsync("/web/review/delete", JSON.encode({ reviewId = tostring(review_id) }), nil, cb)
+    return postWebAsync("/web/review/delete", { reviewId = tostring(review_id) }, nil, cb)
 end
 
 --- 更新划线样式和颜色。
@@ -284,7 +264,7 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:updateBookmarkAsync(body, cb)
-    return postWebAsync("/web/book/updateBookmark", JSON.encode(body), nil, cb)
+    return postWebAsync("/web/book/updateBookmark", body, nil, cb)
 end
 
 --- 删除划线。
@@ -292,9 +272,7 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:removeBookmarkAsync(bookmark_id, cb)
-    return postWebAsync("/web/book/removeBookmark", JSON.encode({
-        bookmarkId = tostring(bookmark_id),
-    }), nil, cb)
+    return postWebAsync("/web/book/removeBookmark", { bookmarkId = tostring(bookmark_id) }, nil, cb)
 end
 
 --- 上传单条划线。
@@ -304,8 +282,31 @@ end
 ---@param cb fun(data: table|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Client:addBookmarkAsync(bookId, chapter_uid, body, cb)
-    return postWebAsync("/web/book/addBookmark", JSON.encode(body),
-        Protocol.readerUrl(bookId, chapter_uid), cb)
+    return postWebAsync("/web/book/addBookmark", body, Protocol.readerUrl(bookId, chapter_uid), cb)
+end
+
+--- 本章热门划线与段评锚点：``underlines[]`` 每条 ``{ range, count, type }``（type 0 = 只有段评）。
+---@param bookId string
+---@param chapter_uid string|number
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:underlinesAsync(bookId, chapter_uid, cb)
+    return getWebAsync("/web/book/underlines", { bookId = bookId, chapterUid = chapter_uid }, cb)
+end
+
+--- 按 range 批量拉段评：``reviews[]`` 每条 ``{ range, totalCount, maxIdx, hasMore, pageReviews[] }``。
+--- 分页把上一页回包的 ``maxIdx`` 原样带回。
+---@param bookId string
+---@param chapter_uid string|number
+---@param reviews { range: string, maxIdx: integer, count: integer, synckey: integer }[]
+---@param cb fun(data: table|nil, err: string|nil)
+---@return { cancel: fun() }|nil
+function Client:readReviewsAsync(bookId, chapter_uid, reviews, cb)
+    return postWebAsync("/web/book/readReviews", {
+        bookId = bookId,
+        chapterUid = tonumber(chapter_uid) or chapter_uid,
+        reviews = reviews,
+    }, nil, cb)
 end
 
 return Client

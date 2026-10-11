@@ -49,14 +49,14 @@ end
 function Context.rememberBookVersion(book_id, version)
     version = tonumber(version)
     if version then
-        book_version_by_id[tostring(book_id)] = version
+        book_version_by_id[book_id] = version
     end
 end
 
 ---@param book_id string
 ---@return number|nil
 function Context.bookVersion(book_id)
-    return book_version_by_id[tostring(book_id)]
+    return book_version_by_id[book_id]
 end
 
 --- 清空进程内缓存的 reader 状态与书籍版本号（换账号或登出后必须调）。
