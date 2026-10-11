@@ -4,12 +4,12 @@
   +-------------------------------+
   |      段评 · 共 321 条    [×]  |
   |-------------------------------|
-  | ┃ 圣人对节帅的品位……          |
+  | ❝ 圣人对节帅的品位……          |
   |                               |
-  | 悠闲               赞 992 · … |
+  | 👤 悠闲        👍 992 2025-… |
   | 学习了，先说别人想听的……      |
   | ----------------------------- |
-  | 包子铺             赞 403 · … |
+  | 👤 包子铺      👍 403 2024-… |
   | ……                            |
   | [<]          2 / 5+       [>] |
   +-------------------------------+
@@ -30,6 +30,7 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
+local Icon = require("ui.themes.widgets.icon")
 local Modal = require("ui.themes.widgets.modal")
 local Pager = require("ui.themes.widgets.pager")
 local Text = require("ui.themes.widgets.text")
@@ -87,14 +88,15 @@ end
 function Sheet:quote()
     if self.quote_widget then return self.quote_widget end
     local t = self.theme
-    local bar_w, gap = Theme.px(t.space.xs) - 1, Theme.px(t.space.md)
-    local text = Text.box("body", self.spot.text, self.inner_w - bar_w - gap,
+    local gap = Theme.px(t.space.sm)
+    local mark = Icon.widget{ name = "format_quote", size = t.control.icon, color = Blitbuffer.Color8(t.color.faint) }
+    local text = Text.box("body", self.spot.text, self.inner_w - mark:getSize().w - gap,
         { color = t.color.muted, max_lines = QUOTE_LINES })
     self.quote_widget = VerticalGroup:new{
         align = "left",
         HorizontalGroup:new{
             align = "top",
-            rule(bar_w, text:getSize().h, t.color.rule),
+            mark,
             HorizontalSpan:new{ width = gap },
             text,
         },
@@ -110,21 +112,32 @@ function Sheet:gap()
     return Theme.px(t.space.md) * 2 + Theme.px(t.row.divider)
 end
 
---- 第 i 条段评的卡片：作者（粗）+ 右侧「赞 · 日期」+ 正文；正文过长截到一页内。
+--- 第 i 条段评的卡片：头像图标 + 作者（粗）+ 右侧「点赞图标 赞数 日期」+ 正文；正文过长截到一页内。
 ---@param i integer
 ---@return table
 function Sheet:card(i)
     if self.cards[i] then return self.cards[i] end
     local t, w = self.theme, self.inner_w
     local item = self.items[i]
-    local meta = Text.line("caption", T(_("赞 %1 · %2"), item.likes, os.date("%Y-%m-%d", item.time)),
-        { color = t.color.faint })
+    local faint = Blitbuffer.Color8(t.color.faint)
     local gap = Theme.px(t.space.sm)
-    local author = Text.line("body", item.author, { bold = true, width = w - meta:getSize().w - gap })
+    local meta = HorizontalGroup:new{
+        align = "center",
+        Icon.label{ name = "thumb_up", text = tostring(item.likes), size = t.font.body,
+            color = faint, font_size = t.font.caption },
+        HorizontalSpan:new{ width = gap },
+        Text.line("caption", os.date("%Y-%m-%d", item.time) --[[@as string]], { color = t.color.faint }),
+    }
+    local avatar = Icon.widget{ name = "account_circle", size = t.font.title + 3,
+        color = Blitbuffer.Color8(t.color.muted) }
+    local fixed = avatar:getSize().w + gap + meta:getSize().w + gap
+    local author = Text.line("body", item.author, { bold = true, width = w - fixed })
     local head = HorizontalGroup:new{
         align = "center",
+        avatar,
+        HorizontalSpan:new{ width = gap },
         author,
-        HorizontalSpan:new{ width = w - author:getSize().w - meta:getSize().w },
+        HorizontalSpan:new{ width = w - fixed + gap - author:getSize().w },
         meta,
     }
     local space = Theme.px(t.space.xs)
@@ -163,8 +176,9 @@ function Sheet:rebuild()
     if self.page == 1 then body[#body + 1] = self:quote() end
     local range = self.pages[self.page]
     if #self.items == 0 then
-        body[#body + 1] = Text.line("body", self.loaded and _("暂无段评") or _("正在加载段评…"),
-            { color = t.color.faint })
+        body[#body + 1] = Icon.label{ name = "forum", text = self.loaded and _("暂无段评") or _("正在加载段评…"),
+            size = t.control.icon, color = Blitbuffer.Color8(t.color.faint),
+            face = "cfont", font_size = t.font.body, gap = Theme.px(t.space.sm) }
     end
     for i = range[1], range[2] do
         if i > range[1] then
