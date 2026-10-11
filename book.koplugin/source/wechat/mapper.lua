@@ -6,6 +6,7 @@
 
 local Progress = require("book.progress")
 local Catalog = require("book.catalog")
+local Text = require("utils.text")
 
 local Mapper = {}
 
@@ -89,7 +90,7 @@ function Mapper.book(row)
     }
     local intro = book.intro or book.description or book.summary
     if type(intro) == "string" and intro ~= "" then
-        out.intro = intro
+        out.intro = Text.stripHtml(intro)
     end
     return out, cover
 end

@@ -287,7 +287,7 @@ local function parseBookProps(path, cover_key)
     return {
         title = field(props.title),
         authors = field(props.authors),
-        intro = field(props.description),
+        intro = field(Text.stripHtml(props.description)),
     }
 end
 

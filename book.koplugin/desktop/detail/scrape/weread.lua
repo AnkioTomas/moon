@@ -30,7 +30,7 @@ local function mapBook(info, row)
     local rawRating = tonumber(info.newRating or row.newRating) or 0
     local rating10 = rawRating > 0 and (math.floor(rawRating / 10 + 0.5) / 10) or 0
 
-    local intro = trim(info.intro)
+    local intro = Text.stripHtml(info.intro)
     local category = trim(info.category)
     local tags, seen = {}, {}
     if category ~= "" then

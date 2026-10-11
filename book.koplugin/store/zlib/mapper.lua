@@ -46,7 +46,7 @@ function Mapper.book(row)
     local cover = coverUrl(row.cover)
     local description = row.description or row.intro
     if type(description) == "string" then
-        description = Text.trim(description:gsub("<[^>]+>", " "):gsub("%s+", " "))
+        description = Text.stripHtml(description)
     end
     return {
         source_id = "zlib", stable_id = stable_id,

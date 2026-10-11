@@ -32,6 +32,7 @@ function Mapper.book(row)
     )
     local percent = row.percent or row.progress or row.read_progress or row.readProgress
     local category = row.category
+    local intro = row.intro or row.info or row.content_info or row.description or row.summary
     if category == nil and type(row.cate_third_names) == "table" then
         category = table.concat(row.cate_third_names, ", ")
     end
@@ -43,7 +44,7 @@ function Mapper.book(row)
         authors = row.author or row.authors,
         percent = Progress.clampPercent(percent),
         category = category,
-        intro = row.intro or row.info or row.content_info or row.description or row.summary,
+        intro = intro and Text.stripHtml(intro),
         cover = cover,
     }, cover
 end
