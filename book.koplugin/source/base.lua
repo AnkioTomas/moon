@@ -88,7 +88,7 @@
 ---@field book_title string|nil 书名（写入 HTML <title>，供阅读器/第三方插件认书）
 ---@field html string|nil HTML/XHTML 正文片段（优先）
 ---@field text string|nil 纯文本（无 html 时由宿主转段落）
----@field css string|nil 原书 <style>，写入章节 <head>，供 CRE 内嵌样式/字体生效
+---@field document string|nil 完整 HTML/XHTML 文档：宿主原样落盘，不套外壳、不改内容（优先于 html/text）
 
 --- 统一数据源实例接口。
 --- IO 方法一律异步：XxxAsync(...) 经 cb(data, err) 回传，返回值是可取消 job 或 nil；

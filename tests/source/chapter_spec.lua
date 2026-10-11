@@ -103,16 +103,17 @@ Assert.is_nil(html:find("<title>二</title>", 1, true))
 Assert.is_nil(html:find("<h1", 1, true))
 Assert.is_true(html:find("<p>正文2</p>", 1, true) ~= nil)
 
--- 原书 CSS 原样进 <head>；不能走 string.format，百分号会被当成格式符。
+-- 完整文档原样落盘：不套外壳、不改 title、不转段落（含百分号，不能走 string.format）。
+local DOC = '<?xml version="1.0"?>\n<html><head><title></title><style>.poem{width:50%}</style></head>'
+    .. '<body><h2>一</h2><p class="content">诗</p></body></html>\n'
+    .. '<?xml version="1.0"?>\n<html><head><title></title></head><body><p>二</p></body></html>'
 Chapter.openAsync({ type = "chapter" }, identity, { title = "书" }, { chapter_idx = 1 }, {
     loadToc = function(_, cb) cb(toc) end,
     fetchContent = function(_, item, cb)
-        cb({ title = item.title, text = "诗", css = ".poem{width:50%}" })
+        cb({ title = item.title, document = DOC, text = "不该用到" })
     end,
 }, function(p) path = p end)
-local css_html = assert(io.open(path, "rb")):read("*a")
-Assert.is_true(css_html:find("<title>书</title>", 1, true) ~= nil)
-Assert.is_true(css_html:find(".poem{width:50%}", 1, true) ~= nil)
+Assert.eq(assert(io.open(path, "rb")):read("*a"), DOC)
 
 -- 已落盘且无远程 img 时直接复用，不再请求正文。
 Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, function(p) path = p end)
