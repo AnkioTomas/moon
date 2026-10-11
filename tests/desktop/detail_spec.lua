@@ -47,19 +47,6 @@ package.preload["book.store"] = function()
         end,
     }
 end
-local queue_tasks = {}
-local cache_task
-package.preload["source.cache_queue"] = function()
-    return {
-        spec = function() return cache_task end,
-        has = function(source_id, stable_id)
-            for _, task in ipairs(queue_tasks) do
-                if task.source_id == source_id and task.stable_id == stable_id then return true end
-            end
-            return false
-        end,
-    }
-end
 local stats = { summary = nil, daily = {} }
 package.preload["book.stats_db"] = function()
     return {
@@ -90,8 +77,10 @@ package.preload["source.registry"] = function()
 end
 local set_read, db_row, upserted
 local upsert_ok = true
+local downloaded = {} -- stable_id → true
 package.preload["book.books_db"] = function()
     return {
+        isDownloaded = function(_source_id, stable_id) return downloaded[stable_id] == true end,
         setRead = function(source_id, stable_id, value)
             set_read = { source_id, stable_id, value }
             return true
@@ -126,8 +115,9 @@ local chapter_src = {
 
 -- 底栏动作规划。
 local unread = { source_id = "local", stable_id = "b1", title = "书一", read_state = 0, percent = 12 }
+downloaded.b1 = true
 local tools, primary = Detail.actionPlan(unread, local_src)
-Assert.eq(ids(tools), "edit,scrape,read,delete")
+Assert.eq(ids(tools), "edit,scrape,read,delete", "本地原书已有文件：无下载")
 Assert.eq(primary.id, "open")
 Assert.eq(primary.text, "继续阅读")
 unread.percent = 0
@@ -142,14 +132,18 @@ read_book.cached = true
 tools = Detail.actionPlan(read_book, chapter_src)
 Assert.eq(ids(tools), "clear_cache,unread,delete")
 
--- 整本在线源：无下载入口，离线副本在 cache 内才给清理
+-- 整本书源：没登记文件给下载（WebDAV / moon 未下载），离线副本在 cache 内给清理，已在本地书库目录两者都没有
 local online_book_src = setmetatable({ id = "moon", type = "book" }, SourceDefaults)
 local moon_book = { source_id = "moon", stable_id = "m1", read_state = 0 }
 tools = Detail.actionPlan(moon_book, online_book_src)
-Assert.eq(ids(tools), "read,delete")
+Assert.eq(ids(tools), "download_book,read,delete")
 moon_book.cached = true
 tools = Detail.actionPlan(moon_book, online_book_src)
 Assert.eq(ids(tools), "clear_cache,read,delete")
+local dav_book = { source_id = "local", stable_id = "webdav://a.epub", read_state = 0 }
+Assert.eq(ids(Detail.actionPlan(dav_book, local_src)), "edit,scrape,download_book,read,delete")
+downloaded["webdav://a.epub"] = true
+Assert.eq(ids(Detail.actionPlan(dav_book, local_src)), "edit,scrape,read,delete", "已下载到本地书库目录")
 
 --- 模拟桌面：记录 updateView / onEvent。
 local function newDesktop()
@@ -176,7 +170,7 @@ local page = desktop.detail
 Assert.eq(Kit.shown[#Kit.shown], page)
 Assert.eq(page[1]:getSize().h, 800)
 local texts = Kit.texts(page)
-for _, label in ipairs({ "编辑", "刮削", "标记已读", "删除", "开始阅读", "暂无阅读记录" }) do
+for _, label in ipairs({ "编辑", "刮削", "已读", "删除", "开始阅读", "暂无阅读记录" }) do
     Assert.contains(texts, label)
 end
 Assert.eq(Kit.buttons(page)[1].icon, "arrow_back")
@@ -189,13 +183,28 @@ Assert.is_nil(desktop.detail)
 Assert.eq(desktop.updates, 0)
 Assert.is_true(dirtied(desktop))
 
--- 标记已读：写库、打脏、通知书架已变；关窗时桌面重建。
+-- 标记已读：写库、打脏、通知书架已变，在线就当场推这本书的进度；关窗时桌面重建。
+local online = true
+package.loaded["ui/network/manager"] = { isConnected = function() return online end }
+local progress_pushes = {}
+resolved = {
+    id = "wechat",
+    syncProgressAsync = function(_, opts) progress_pushes[#progress_pushes + 1] = opts end,
+}
 Detail.open(desktop, "library", { source_id = "wechat", stable_id = "w2", title = "书一", read_state = 0 })
 page = desktop.detail
 page:toggleRead()
 Assert.eq(set_read[1], "wechat")
 Assert.eq(set_read[2], "w2")
 Assert.is_true(set_read[3])
+Assert.len(progress_pushes, 1)
+Assert.eq(progress_pushes[1].identity.stable_id, "w2")
+Assert.is_true(progress_pushes[1].dirty_only)
+online = false
+page.book.read_state = 0
+page:toggleRead()
+Assert.len(progress_pushes, 1, "离线只写库，等推脏行")
+online = true
 Assert.is_true(page._dirty)
 Assert.eq(desktop.events[1], "shelf_changed")
 page.book.read_state = 1
@@ -205,6 +214,8 @@ desktop.events = {}
 page:close()
 Assert.eq(desktop.events[1], "detail_dirty")
 Assert.eq(desktop.updates, 1)
+package.loaded["ui/network/manager"] = nil
+resolved = local_src
 
 -- 清理缓存：确认后按身份清，成功重读并打脏；本书在后台缓存队列时拒绝
 Detail.open(desktop, "library", { source_id = "wechat", stable_id = "w2", title = "书一", read_state = 0 })
@@ -226,29 +237,78 @@ page:clearCache()
 Themed.last("confirm").ok_callback()
 Assert.eq(Themed.last("toast").text, "清理缓存失败")
 clear_result = { true }
+
+-- 全本缓存：入队跟随，进度来自源回调；同书在缓存时再入队拒绝、清理缓存拒绝。
+resolved = chapter_src
+local cache_calls = {}
+chapter_src.cacheAllChaptersAsync = function(_self, identity, progress, cb)
+    cache_calls[#cache_calls + 1] = { identity = identity, cb = cb }
+    progress(3, 35)
+    return { cancel = function() end }
+end
+page:cacheAllChapters()
+local cache_job = followed[#followed]
+Assert.eq(cache_job.kind, "cache")
+Assert.eq(cache_job.title, "书一")
+Assert.eq(cache_job.total, 35)
+Assert.eq(cache_calls[1].identity.stable_id, "w2")
+page:cacheAllChapters()
+Assert.eq(followed[#followed], "running")
+Assert.len(cache_calls, 1, "同一本书不重复开跑")
 cleared = nil
-queue_tasks = { { source_id = "wechat", stable_id = "w2" } }
 page:clearCache()
 Themed.last("confirm").ok_callback()
 Assert.is_nil(cleared)
 Assert.eq(Themed.last("toast").text, "本书正在后台缓存，请稍后再试")
-queue_tasks = {}
+-- 限流可重试：退避等待、不提示；不可重试的失败按部分完成提示。
+cache_calls[1].cb(false, 34, "HTTP 425", 35, 1)
+Assert.eq(cache_job.state, "retry_wait")
+cache_job.cancel()
+page:cacheAllChapters()
+cache_calls[2].cb(false, 30, "网络错误", 35, 5)
+Assert.eq(Themed.last("toast").text, "全本缓存部分完成：30 / 35 章，5 章失败\n网络错误")
+page:cacheAllChapters()
+cache_calls[3].cb(true, 35, nil, 35, 0)
+Assert.eq(Themed.last("toast").text, "全本缓存完成：35 / 35 章")
+Assert.is_nil(require("workers.tasks").get("cache\0wechat\0w2"))
+page:clearCache()
+Themed.last("confirm").ok_callback()
+Assert.eq(cleared[2], "w2", "缓存结束后可清理")
+resolved = nil
 
--- 全本缓存：CacheQueue 造的任务交给 task_dialog.start 入队跟随。
-resolved = chapter_src
-local cache_runs = 0
-cache_task = {
-    key = "cache-w2", kind = "cache",
-    run = function() cache_runs = cache_runs + 1; return { cancel = function() end } end,
+-- 整本下载：离线直接提示；在线入队，走属主源 openBookAsync 只落盘不开书，成功通知书架已变。
+online = false
+package.loaded["ui/network/manager"] = { isConnected = function() return online end }
+local open_calls = {}
+resolved = {
+    id = "local", type = "book",
+    openBookAsync = function(_self, identity, opts, cb)
+        open_calls[#open_calls + 1] = { identity = identity, opts = opts, cb = cb }
+        return { cancel = function() end }
+    end,
 }
-page:cacheAllChapters()
-Assert.eq(followed[#followed], require("workers.tasks").get("cache-w2"))
-Assert.eq(cache_runs, 1)
--- 同一本书已在缓存：拒绝，不重复开跑。
-page:cacheAllChapters()
-Assert.eq(followed[#followed], "running")
-Assert.eq(cache_runs, 1)
-require("workers.tasks").get("cache-w2").cancel()
+Detail.open(desktop, "library", { source_id = "local", stable_id = "webdav://d.epub", title = "云书" })
+local dl_page = desktop.detail
+dl_page:downloadBook()
+Assert.len(open_calls, 0, "离线不入队")
+Assert.eq(Themed.last("toast").text, "网络不可用，请先连接 Wi-Fi")
+online = true
+local before_followed = #followed
+dl_page:downloadBook()
+Assert.eq(#followed, before_followed + 1)
+Assert.eq(followed[#followed].kind, "cache")
+Assert.eq(open_calls[1].identity.stable_id, "webdav://d.epub")
+Assert.is_nil(open_calls[1].opts)
+desktop.events = {}
+open_calls[1].cb("/lib/d.epub")
+Assert.eq(Themed.last("toast").text, "下载完成")
+Assert.eq(desktop.events[1], "shelf_changed")
+Assert.is_nil(require("workers.tasks").get("cache\0local\0webdav://d.epub"))
+dl_page:downloadBook()
+open_calls[2].cb(nil, "WebDAV 下载失败")
+Assert.eq(Themed.last("toast").text, "WebDAV 下载失败")
+dl_page:close()
+package.loaded["ui/network/manager"] = nil
 resolved = nil
 
 -- 删除：确认后走属主源，成功关详情、通知书架已变。

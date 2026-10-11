@@ -73,6 +73,7 @@ return {
     ["下载 StarDict 字典"] = "Download StarDict dictionaries",
     ["下载中…"] = "Downloading…",
     ["下载失败"] = "Download failed",
+    ["下载完成"] = "Download complete",
     ["下载失败: %1"] = "Download failed: %1",
     ["下载字典 · %1"] = "Download dictionaries · %1",
     ["下载并安装"] = "Download and install",
