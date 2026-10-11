@@ -1,6 +1,7 @@
 --[[--
-Source 注册表：单活跃源，候选创建 + 原子激活。
-不做静默 fallback。
+Source 注册表：源 id 清单、实例缓存（每个 id 一个实例）、活跃源与启用源配置。
+活跃源只是配置里的 id，实例与其它源共用同一张缓存表。
+不做静默 fallback；唯一例外是已下线的源 id（如 kindle），activeId 退回 local。
 
 @module koplugin.book.source.registry
 --]]
@@ -8,68 +9,39 @@ Source 注册表：单活跃源，候选创建 + 原子激活。
 local MoonSettings = require("utils.settings")
 local logger = require("utils.log")
 local _ = require("gettext")
-
---- 简易模板替换（避免测试环境依赖 string.pack）。
----@param fmt string
----@return string
-local function T(fmt, a1)
-    return (fmt:gsub("%%1", tostring(a1), 1))
-end
+local T = require("ffi/util").template
 
 local Registry = {}
 
----@type table<SourceId, fun(): table>
-local FACTORIES = {
-    moon = function() return require("source.moon") end,
-    wechat = function() return require("source.wechat") end,
-    jdread = function() return require("source.jdread") end,
-    copymanga = function() return require("source.copymanga") end,
-    fanqie = function() return require("source.fanqie") end,
-    ["local"] = function() return require("source.local") end,
-    kindle = function() return require("source.kindle") end,
-}
+-- 选择器为「混合 → 本地 → 其余在线源」
+---@type SourceId[]
+local IDS = { "local", "moon", "wechat", "jdread", "copymanga", "fanqie" }
+local KNOWN = {}
+for _idx, id in ipairs(IDS) do KNOWN[id] = true end
 
--- local 排第二：选择器为「混合 → 本地 → Kindle → 其余在线源」；kindle 未装 kindle.koplugin 时 meta 为 nil，不出现
-local ORDER = { "local", "kindle", "moon", "wechat", "jdread", "copymanga", "fanqie" }
-
----@type BookSource|nil
-local _active = nil
----@type SourceId|nil
-local _active_id = nil
 ---@type table<SourceId, BookSource>
-local _resolved = {}
+local instances = {}
 
---- 持久化的活跃源 id（common.active_source）；未配置时为 "local"。
+--- 持久化的活跃源 id（common.active_source）；未配置或该源已下线时为 "local"。
 ---@return SourceId
 function Registry.activeId()
-    return MoonSettings.get("source").active_source or "local"
+    local id = MoonSettings.get("source").active_source
+    return KNOWN[id] and id or "local"
 end
 
 --- 只取 meta，不构造 Source 实例
 ---@param id SourceId
 ---@return BookSourceMeta|nil
 function Registry.meta(id)
-    local fac = FACTORIES[id]
-    if not fac then
-        return nil
-    end
-    local ok, mod = pcall(fac)
-    if not ok then
-        logger.warn("book.source require failed", id, mod)
-        return nil
-    end
-    return mod.meta()
+    return KNOWN[id] and require("source." .. id).meta() or nil
 end
 
 --- 列出数据源元信息。
 ---@return BookSourceMeta[]
 function Registry.list()
     local out = {}
-    for _idx, id in ipairs(ORDER) do
-        local meta = Registry.meta(id)
-        if meta then
-            out[#out + 1] = meta
-        end
+    for i, id in ipairs(IDS) do
+        out[i] = Registry.meta(id)
     end
     return out
 end
@@ -83,10 +55,7 @@ function Registry.isEnabled(id)
         return true
     end
     local enabled = MoonSettings.get("source").enabled_sources
-    if type(enabled) ~= "table" then
-        return true
-    end
-    return enabled[id] == true
+    return enabled == nil or enabled[id] == true
 end
 
 --- 列出启用源元信息（picker 与设置页只显示这些）。
@@ -107,72 +76,39 @@ end
 ---@param on boolean
 ---@return boolean ok, string|nil err
 function Registry.setEnabled(id, on)
-    if not FACTORIES[id] then
+    if not KNOWN[id] then
         return false, T(_("未知数据源: %1"), id)
     end
     if not on and id == Registry.activeId() then
         return false, _("不能禁用当前使用的数据源")
     end
     local common = MoonSettings.get("source")
-    local enabled = common.enabled_sources
-    if type(enabled) ~= "table" then
-        enabled = {}
-        for _idx, known in ipairs(ORDER) do
-            enabled[known] = true
+    if common.enabled_sources == nil then
+        common.enabled_sources = {}
+        for _idx, known in ipairs(IDS) do
+            common.enabled_sources[known] = true
         end
-    else
-        local copy = {}
-        for k, v in pairs(enabled) do
-            copy[k] = v
-        end
-        enabled = copy
     end
-    enabled[id] = on and true or false
-    common.enabled_sources = enabled
+    common.enabled_sources[id] = on
     MoonSettings.save("source")
     return true
 end
 
---- 按 id 创建数据源实例。
+--- 按 id 新建数据源实例（不进缓存）。
 ---@param id SourceId
 ---@return BookSource|nil, string|nil
 function Registry.create(id)
-    local fac = FACTORIES[id]
-    if not fac then
+    if not KNOWN[id] then
         return nil, T(_("未知数据源: %1"), id)
     end
-    local ok, mod = pcall(fac)
-    if not ok then
-        logger.warn("book.source require failed", id, mod)
-        return nil, T(_("数据源加载失败: %1"), id)
-    end
-    if not mod or not mod.new then
-        return nil, T(_("数据源加载失败: %1"), id)
-    end
-    local source = mod.new()
-    return source
+    return require("source." .. id).new()
 end
 
---- 关闭源实例；close 抛错只记日志，不能打断替换/失效流程。
----@param src BookSource|nil
-local function closeSource(src)
-    if src and src.close then
-        local ok, err = pcall(src.close, src)
-        if not ok then
-            logger.warn("source close failed", src.id, err)
-        end
-    end
-end
-
---- 丢弃当前活跃源缓存并关闭旧实例。
+--- 关闭并丢弃全部缓存实例（下次 resolve / current 按新配置重建）。
 function Registry.invalidate()
-    local old = _active
-    _active = nil
-    _active_id = nil
-    closeSource(old)
-    for id, source in pairs(_resolved) do
-        if source ~= old then closeSource(source) end
-        _resolved[id] = nil
+    for id, source in pairs(instances) do
+        instances[id] = nil
+        source:close()
     end
 end
 
@@ -188,84 +124,36 @@ function Registry.reload()
     Registry.notifyChanged()
 end
 
---- 原子替换活跃源
----@param source BookSource
----@param id SourceId
-function Registry.activate(source, id)
-    local old = _active
-    local cached = _resolved[id]
-    _resolved[id] = nil
-    _active = source
-    _active_id = id
-    if cached and cached ~= source and cached ~= old then
-        closeSource(cached)
-    end
-    if old and old ~= source then
-        closeSource(old)
-    end
-end
-
---- 取走非活跃缓存实例（交给调用方激活）；没有则新建。
----@param id SourceId
----@return BookSource|nil, string|nil
-local function takeOrCreate(id)
-    local cached = _resolved[id]
-    _resolved[id] = nil
-    if cached then
-        return cached
-    end
-    return Registry.create(id)
-end
-
---- 当前活跃源；不做 fallback。未加载则按配置创建一次。
----@return BookSource|nil, string|nil
-function Registry.current()
-    local id = Registry.activeId()
-    if _active and _active_id == id then
-        return _active
-    end
-    local src, err = takeOrCreate(id)
-    if not src then
-        return nil, err
-    end
-    Registry.activate(src, id)
-    return _active
-end
-
---- 按书籍身份解析属主源；当前源匹配则复用，否则创建非活跃实例。
---- 不切换用户当前选择的数据源。
+--- 按 id 取源实例（缓存复用，首次创建）。阅读与书籍操作按书的属主源解析，不切换活跃源。
 ---@param id SourceId
 ---@return BookSource|nil, string|nil
 function Registry.resolve(id)
-    local current, err = Registry.current()
-    if current and current.id == id then
-        return current
+    if instances[id] then
+        return instances[id]
     end
-    if _resolved[id] then
-        return _resolved[id]
-    end
-    local source, create_err = Registry.create(id)
-    if source then _resolved[id] = source end
-    return source, create_err or err
+    local source, err = Registry.create(id)
+    instances[id] = source
+    return source, err
+end
+
+--- 当前活跃源。
+---@return BookSource|nil, string|nil
+function Registry.current()
+    return Registry.resolve(Registry.activeId())
 end
 
 --- 切换并激活指定数据源。
 ---@param id SourceId
 ---@return BookSource|nil, string|nil
 function Registry.setActive(id)
-    if not FACTORIES[id] then
-        return nil, T(_("未知数据源: %1"), id)
-    end
-    local candidate, err = takeOrCreate(id)
-    if not candidate then
+    local source, err = Registry.resolve(id)
+    if not source then
         return nil, err
     end
-    local common = MoonSettings.get("source")
-    common.active_source = id
+    MoonSettings.get("source").active_source = id
     MoonSettings.save("source")
-    Registry.activate(candidate, id)
     logger.info("book.source setActive", id)
-    return candidate
+    return source
 end
 
 return Registry
