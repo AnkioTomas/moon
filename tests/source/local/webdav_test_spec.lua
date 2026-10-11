@@ -48,6 +48,7 @@ local function run(cfg, fail)
     client.dav = fakeDav(store, fail)
     local ok, err
     client:testWebdavAsync(function(v, e) ok, err = v, e end)
+    require("support.stubs").flush()
     return ok, err, store, client
 end
 
