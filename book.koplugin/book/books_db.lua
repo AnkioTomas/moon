@@ -11,6 +11,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
 不变量：
   - touchPath / setReaderPrefs / setToc 新建行必须 deleted=1（只登记身份，禁止误上架）；
     upsert / upsertLocal 上架写 deleted=0 + sync_status=0。
+  - inserted_at 只在首次上架时写一次：身份行（0）经 upsert / upsertLocal / 远端在架行上架时补写，之后不改。
   - 本地删除 = deleted=1 + sync_status=0（墓碑），推云端成功后 remove 撕墓碑（连同依附表）；本地上架推 addToShelf 后 markSynced。
   - 远端 upsert 遇本地脏行（sync_status=0）不盖 title/authors/category/series/intro 与 deleted。
   - 书架脏位只在单条 push 成功时清，禁止整源盲清。
@@ -114,6 +115,11 @@ CREATE TABLE IF NOT EXISTS books (
                 return false
             end
         end
+        -- v0.0.8 及更早的加入时间在 fetched_at；v0.0.9 起迁移代码被删，直升的库从没迁过
+        if present.fetched_at and not DB.exec([[UPDATE books SET inserted_at=fetched_at
+            WHERE inserted_at=0 AND fetched_at>0;]]) then
+            return false
+        end
     end
     return DB.exec([[
 CREATE INDEX IF NOT EXISTS idx_books_md5 ON books(source_id, md5);
@@ -144,6 +150,7 @@ function BookDB.upsert(row)
             intro=COALESCE(NULLIF(excluded.intro, ''), books.intro),
             cover=COALESCE(NULLIF(excluded.cover, ''), books.cover),
             path=COALESCE(excluded.path, books.path),
+            inserted_at=CASE WHEN books.inserted_at=0 THEN excluded.inserted_at ELSE books.inserted_at END,
             deleted=0,
             sync_status=0;]],
         source_id,
@@ -191,6 +198,8 @@ function BookDB.upsertRemote(row)
                 THEN books.intro ELSE COALESCE(excluded.intro, books.intro) END,
             cover=COALESCE(NULLIF(excluded.cover, ''), books.cover),
             path=COALESCE(excluded.path, books.path),
+            inserted_at=CASE WHEN books.inserted_at=0 AND excluded.deleted=0
+                THEN excluded.inserted_at ELSE books.inserted_at END,
             deleted=CASE
                 WHEN books.sync_status=0 THEN books.deleted
                 WHEN ?=1 THEN excluded.deleted
@@ -235,6 +244,7 @@ function BookDB.upsertLocal(row)
             title=excluded.title, authors=excluded.authors,
             category=excluded.category,
             series=excluded.series, intro=excluded.intro,
+            inserted_at=CASE WHEN books.inserted_at=0 THEN excluded.inserted_at ELSE books.inserted_at END,
             deleted=0,
             sync_status=CASE WHEN books.deleted=1 THEN 0 ELSE books.sync_status END;]],
         source_id, stable_id, row.title, row.authors,

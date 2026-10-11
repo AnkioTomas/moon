@@ -144,6 +144,7 @@ local function toBook(row, source_id)
         percent = tonumber(row.percent) or 0,
         read_state = tonumber(row.read_state) or 0,
         path = row.path,
+        inserted_at = row.inserted_at,
         downloaded = row.downloaded,
         chapter_idx = row.chapter_idx,
         chapter_title = row.chapter_title,
