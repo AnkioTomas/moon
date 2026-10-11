@@ -12,8 +12,8 @@ package.preload["datastorage"] = function()
     return { getDataDir = function() return Config.dir() end }
 end
 package.preload["ui/font"] = function() return { fontmap = {}, faces = {} } end
--- 系统字库不列；fonts 根目录：本地化名一项、族名一项、只登记 zh-cn 名一项、woff 一项；
--- 子目录：无 fontinfo 一项、与根目录同 basename 一项
+-- fonts 根目录：本地化名一项、族名一项、只登记 zh-cn 名一项、woff 一项；
+-- 子目录：无 fontinfo 一项、与根目录同 basename 一项；系统字库单独成组
 local root = Config.dir() .. "/fonts"
 local GetText = require("gettext")
 local saved_lang = GetText.current_lang
@@ -108,10 +108,10 @@ Assert.is_nil(err)
 Assert.len(cleared, 0)
 Assert.eq(scans, 1)
 
--- 分组：fonts 根目录 = 用户，子目录 = 本地；显示名：本地化名 → 中文界面任一中文名 → 族名 → 文件名；
--- 同 basename 只留先到的；woff、系统字库不列
+-- 分组：fonts 根目录 = 用户，子目录 = 本地，FontList 其余 = 系统；
+-- 显示名：本地化名 → 中文界面任一中文名 → 族名 → 文件名；同 basename 只留先到的；woff 不列
 Assert.eq(installed(), "user:Plain.otf=Plain Sans,user:KaiCN.ttf=简体楷,user:WenKai.ttf=霞鹜文楷,"
-    .. "local:Bare-Font.ttf=Bare-Font")
+    .. "local:Bare-Font.ttf=Bare-Font,system:System.ttf=System Sans")
 
 -- 再次打开：本地扫描会话内复用，不再起子进程；微信列表仍走 http.Cache
 list()
@@ -124,7 +124,7 @@ body = "<html>oops</html>"
 list()
 Assert.len(cleared, 1)
 Assert.eq(cleared[1], gets[3].url)
-Assert.len(items, 4)
+Assert.len(items, 5)
 Assert.eq(items[1].kind, "user")
 Assert.eq(err, "字体列表解析失败")
 
@@ -134,7 +134,7 @@ package.loaded["ui.fonts.catalog"] = nil
 Catalog = require("ui.fonts.catalog")
 list()
 Assert.eq(installed(), "user:KaiCN.ttf=Kai CN,user:Plain.otf=Plain Sans,user:WenKai.ttf=霞鹜文楷,"
-    .. "local:Bare-Font.ttf=Bare-Font")
+    .. "local:Bare-Font.ttf=Bare-Font,system:System.ttf=System Sans")
 
 GetText.current_lang = saved_lang
 return true

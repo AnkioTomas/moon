@@ -97,7 +97,7 @@ end
 ---@param identity BookIdentity
 ---@return PendingProgress|{ chapter_idx: number }|nil
 local function localPosition(identity)
-    local pending = require("db.progress").get(identity.source_id, identity.stable_id)
+    local pending = require("book.progress_db").get(identity.source_id, identity.stable_id)
     if pending and (tonumber(pending.chapter_idx) or (tonumber(pending.fraction) or 0) > 0) then
         return pending
     end
@@ -156,16 +156,30 @@ end
 ---@param payload ChapterContentPayload|string|nil 源交来的正文
 ---@param cb fun(path: string|nil, err: string|nil) 成功回传落盘路径
 ---@return { cancel: fun() }|nil
+local DEFAULT_CSS = "body{margin:5%;line-height:1.8;text-align:justify;}p{text-indent:2em;margin:.45em 0;}img{max-width:100%;}"
+    .. "sup a{text-decoration:none;}aside.footnote,div.footnotes{font-size:.9em;text-indent:0;text-align:left;}"
+
 local function write(path, payload, cb, opts)
     local title, content = body(payload)
     if content == "" then
         cb(nil, _("章节内容为空"))
         return
     end
-    local escaped = Text.xmlEscape(title)
-    local html = string.format([[<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"/><title>%s</title><style>body{margin:5%%;line-height:1.8;text-align:justify;}p{text-indent:2em;margin:.45em 0;}img{max-width:100%%;}</style></head><body>%s</body></html>]], escaped, content)
+    -- <title> 必须是书名：KOReader doc_props 和第三方划线插件都认这个，章名写进去会变成「夏.夏」。
+    local book_title = (opts and opts.book_title)
+        or (type(payload) == "table" and payload.book_title)
+    if type(book_title) ~= "string" or book_title == "" then
+        book_title = title
+    end
+    local extra_css = type(payload) == "table" and payload.css or ""
+    if type(extra_css) ~= "string" then extra_css = "" end
+    local html = "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"utf-8\"/><title>"
+        .. Text.xmlEscape(book_title) .. "</title><style>" .. DEFAULT_CSS .. extra_css
+        .. "</style></head><body>" .. content .. "</body></html>"
+    local dir_ok, dir_err = Paths.ensureDir(path:match("(.+)/[^/]+$"))
+    if not dir_ok then cb(nil, dir_err); return end
     local tmp = path .. ".part"
-    pcall(os.remove, tmp)
+    os.remove(tmp)
     local f, err = io.open(tmp, "wb")
     if not f then cb(nil, err or _("无法写入章节")); return end
     local completed = false
@@ -175,14 +189,14 @@ local function write(path, payload, cb, opts)
         local closed, close_err = f:close()
         if not closed then ok, reason = false, reason or close_err end
         if not ok then
-            pcall(os.remove, tmp)
+            os.remove(tmp)
             cb(nil, reason or _("无法写入章节"))
             return
         end
         -- Same-directory rename replaces the old cache atomically on supported targets.
         -- Deleting path first turns a transient write/rename failure into data loss.
         if not os.rename(tmp, path) then
-            pcall(os.remove, tmp)
+            os.remove(tmp)
             cb(nil, _("无法保存章节文件"))
             return
         end
@@ -226,7 +240,7 @@ local function write(path, payload, cb, opts)
             if completed then return end
             completed = true
             pcall(function() f:close() end)
-            pcall(os.remove, tmp)
+            os.remove(tmp)
         end }
 end
 
@@ -235,7 +249,7 @@ end
 ---@param identity BookIdentity
 ---@param toc BookChapter[] 完整目录
 ---@param idx number 章节序号，必须落在 toc 范围内
----@param ops table 至少含 fetchContent，可选 refreshCached/persist_toc/persist_book
+---@param ops table 至少含 fetchContent，可选 refreshCached/persist_book
 ---@param cb fun(path: string|nil, err: string|nil)
 ---@return { cancel: fun() }|nil
 local function ensure(identity, toc, idx, ops, cb)
@@ -251,7 +265,7 @@ local function ensure(identity, toc, idx, ops, cb)
     local item = assert(toc[idx], "invalid chapter toc")
     return ops.fetchContent(identity, item, function(payload, err)
         if not payload then cb(nil, err or _("章节下载失败")); return end
-        write(path, payload, cb)
+        write(path, payload, cb, { book_title = ops.book_title })
     end)
 end
 
@@ -265,6 +279,7 @@ end
 ---@return { cancel: fun() }
 function Chapter.openAsync(source, identity, book, opts, ops, cb)
     opts = opts or {}
+    ops.book_title = ops.book_title or (book and book.title)
     local cancelled = false
     local active
     local progress = ops.progress or function() end
@@ -311,7 +326,6 @@ function Chapter.openAsync(source, identity, book, opts, ops, cb)
                 progress(3)
                 local ok, db_err = require("book.store").touch(path, identity, {
                     chapter_idx = idx,
-                    toc = toc,
                     book = book,
                 })
                 if not ok then
@@ -374,44 +388,43 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
     end
 
     --- 关掉进度对话框并置空句柄；重复调用无副作用。
-    --- 先摘掉 dismiss_callback，避免正常结束被当成用户取消。
+    --- 先置空句柄，close_callback 据此不把正常结束当成用户取消。
     local function closeDialog()
         if not dialog then return end
         local current = dialog
         dialog = nil
-        current.dismiss_callback = nil
         current:close()
     end
-    local NetworkMgr = require("ui/network/manager")
-    -- 已连接但不在线时 runWhenOnline 永远不回调，这里直接失败给出提示。
-    if not NetworkMgr:isOnline() and NetworkMgr:isConnected() then
+    if not require("ui/network/manager"):isConnected() then
         require("ui/uimanager"):nextTick(function()
             if not cancelled then cb(nil, _("网络不可用，请先连接 Wi-Fi")) end
         end)
         return { cancel = function() cancelled = true end }
     end
-    NetworkMgr:runWhenOnline(function()
+    require("ui/uimanager"):nextTick(function()
         if cancelled then
             return
         end
-        dialog = require("ui/widget/progressbardialog"):new{
-            title = _("正在准备章节…"),
-            subtitle = book.title or identity.stable_id,
-            progress_max = 4,
-            refresh_time_seconds = 0.05,
-            dismissable = true,
-            dismiss_callback = function()
-                if cancelled then return end
-                cancelled = true
-                dialog = nil
-                if job and job.cancel then job.cancel() end
-                cb(nil, _("已取消"))
+        local function userCancel()
+            if cancelled then return end
+            cancelled = true
+            dialog = nil
+            if job and job.cancel then job.cancel() end
+            cb(nil, _("已取消"))
+        end
+        -- closeDialog 先置空句柄再关窗；close_callback 见到句柄仍在即用户关的（取消键 / 点外 / 返回键）。
+        dialog = require("ui.themes.widgets.progress_dialog"):new{
+            title = book.title or identity.stable_id,
+            on_cancel = userCancel,
+            close_callback = function()
+                if dialog then userCancel() end
             end,
         }
         dialog:show()
+        dialog:set(_("正在准备章节…"))
         ops.progress = function(step)
             if dialog then
-                dialog:reportProgress(step)
+                dialog:set(_("正在准备章节…"), step * 25)
             end
         end
         job = Chapter.openAsync(source, identity, book, opts, ops, function(path, err)
@@ -440,7 +453,6 @@ end
 ---   fetchContent: ChapterFetchContent,
 ---   progress: fun(done: integer, total: integer)|nil,
 ---   interval_seconds: number|nil,
----   persist_toc: boolean|nil,
 ---   persist_book: boolean|nil,
 --- }
 ---@param cb fun(cached: integer, total: integer, failed: integer, err: any)|nil 完成统计
@@ -529,7 +541,6 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
                     return
                 end
                 local store_opts = { chapter_idx = idx }
-                if ops.persist_toc ~= false then store_opts.toc = toc end
                 if ops.persist_book ~= false then store_opts.book = book end
                 local touched, touch_err = require("book.store").touch(wpath, identity, store_opts)
                 if not touched then
@@ -539,14 +550,17 @@ function Chapter.prefetchAsync(identity, book, toc, from_idx, count, ops, cb)
                 cached_count = cached_count + 1
                 report()
                 continueNext()
-            end, { yield_write = true })
+            end, { yield_write = true, book_title = book and book.title })
         end)
     end
 
-    require("ui/network/manager"):runWhenOnline(function()
-        if cancelled then return end
-        nextIndex()
-    end)
+    if require("ui/network/manager"):isConnected() then
+        require("ui/uimanager"):nextTick(nextIndex)
+    else
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled and cb then cb(0, #indices, #indices, _("网络不可用，请先连接 Wi-Fi")) end
+        end)
+    end
     return { cancel = function()
             cancelled = true
             local job = active
@@ -570,7 +584,6 @@ function Chapter.cacheAllAsync(source, identity, fetchContent, on_progress, cb, 
         if not toc then cb(false, 0, err or _("章节列表为空"), 0, 0); return end
         active = Chapter.prefetchAsync(identity, nil, toc, 0, #toc, {
             fetchContent = fetchContent,
-            persist_toc = false,
             persist_book = false,
             progress = on_progress,
             -- 全本缓存让服务端有喘息时间；阅读期预取仍保持无间隔。

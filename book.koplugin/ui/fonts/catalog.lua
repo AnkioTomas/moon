@@ -1,7 +1,7 @@
 --[[--
 字体目录：可选字体列表与微信读书字体下载。
 
-列表顺序：微信读书 → 用户（设置目录 fonts 根目录）→ 本地（fonts 子目录）；不列系统字库。
+列表顺序：微信读书 → 用户（设置目录 fonts 根目录）→ 本地（fonts 子目录）→ 系统（FontList 其余路径，含 /mnt/us/fonts）。
 扫描走 Job 子进程；微信列表走 Request.get 的 http.Cache（持久化，TTL 内不联网）。
 
 @module koplugin.book.ui.fonts.catalog
@@ -35,7 +35,7 @@ local scanned
 ---@class MoonFontItem
 ---@field id string 写入 ui_font
 ---@field name string
----@field kind string "weread"|"user"|"local"
+---@field kind string "weread"|"user"|"local"|"system"
 ---@field url string|nil
 ---@field preview string|nil
 ---@field zip_size number|nil
@@ -52,12 +52,12 @@ local function chineseName(names)
     end
 end
 
---- 设置目录 fonts：根目录 = 用户字体 user，子目录 = 本地字体 local（在 listAsync 的子进程里跑）。
+--- 设置目录 fonts：根目录 = 用户 user，子目录 = 本地 local；FontList 其余路径 = 系统 system。
 --- 按 basename 去重；显示名：界面语言的本地化名 → 中文界面退回任一中文名（只登记 zh-cn 的字体在 zh_TW 下
 --- getLocalizedFontName 取不到）→ 字体族名 → 文件名。
 ---@return MoonFontItem[]
 local function scanInstalledFonts()
-    local seen, groups = {}, { user = {}, ["local"] = {} }
+    local seen, groups = {}, { user = {}, ["local"] = {}, system = {} }
     local zh = (_.current_lang or ""):match("^zh")
     local function add(path, kind)
         local file = Text.basename(path)
@@ -78,8 +78,11 @@ local function scanInstalledFonts()
     for i = n + 1, #fontlist do
         add(fontlist[i], fontlist[i]:match("^(.*)/") == root and "user" or "local")
     end
+    for i = 1, n do
+        add(fontlist[i], "system")
+    end
     local out = {}
-    for _idx, kind in ipairs({ "user", "local" }) do
+    for _idx, kind in ipairs({ "user", "local", "system" }) do
         table.sort(groups[kind], byName)
         for _i, it in ipairs(groups[kind]) do out[#out + 1] = it end
     end

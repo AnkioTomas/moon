@@ -133,6 +133,26 @@ function Session.remainingSeconds()
     return Snapshot.remainingSeconds(Session._snapshot)
 end
 
+--- 按章打开时 sidecar / 文档属性用书名，不用章文件 <title>（旧缓存仍是章名）。
+---@param doc_settings table
+---@param document table
+local function applyChapterBookTitle(doc_settings, document)
+    local file = document and document.file
+    if type(file) ~= "string" or file == "" then return end
+    local identity = Store.identityFor(file)
+    local title = identity and identity.chapter_idx and identity.book and identity.book.title
+    if type(title) ~= "string" or title == "" then return end
+    local props = doc_settings:readSetting("doc_props") or {}
+    if props.title == title and props.display_title == title then return end
+    props.title = title
+    props.display_title = title
+    doc_settings:saveSetting("doc_props", props)
+    if type(document.doc_props) == "table" then
+        document.doc_props.title = title
+        document.doc_props.display_title = title
+    end
+end
+
 --- DocSettingsLoad：读 sidecar 前写入全书排版偏好与状态栏偏好，由原生模块加载。
 ---@param _plugin table Book 插件实例
 ---@param doc_settings table
@@ -140,6 +160,7 @@ end
 function Session.onDocSettingsLoad(_plugin, doc_settings, document)
     require("reader.prefs").inject(doc_settings, document)
     require("features.bars").injectStatusLine(doc_settings, document)
+    applyChapterBookTitle(doc_settings, document)
 end
 
 --- ReaderReady：按物理路径重建阅读快照并启动统计、进度和阅读 UI。
