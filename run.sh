@@ -80,14 +80,12 @@ shift
 ./kodev build
 stamp="$(mktemp -t book.koplugin.watch)"
 pid=
-killtree() {
-    local child
-    for child in $(pgrep -P "$1"); do killtree "$child"; done
-    kill -TERM "$1" 2>/dev/null || true
-}
+# 每次 kodev run 自成进程组，重启时整组杀：逐个枚举子进程会漏掉枚举后才拉起的 make/luajit，
+# 漏掉的那个变成孤儿模拟器，两个进程共用数据目录（临时文件、sqlite 互相踩）。
+set -m
 stop() {
     [ -n "$pid" ] || return 0
-    killtree "$pid"
+    kill -TERM -- "-$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
     pid=
 }
@@ -97,7 +95,19 @@ while :; do
     ./kodev run -b "$@" &
     pid=$!
     until [ -n "$(find ../book.koplugin -newer "$stamp" -print -quit)" ]; do sleep 1; done
-    sleep 0.3
-    echo "run.sh: 插件有改动，重启模拟器" >&2
+    # 防抖：连续 5 秒没有新改动才重启，期间每次改动都重新计时。
+    echo "run.sh: 插件有改动，静默 5 秒后重启" >&2
+    quiet=0
+    touch "$stamp"
+    while [ "$quiet" -lt 5 ]; do
+        sleep 1
+        if [ -n "$(find ../book.koplugin -newer "$stamp" -print -quit)" ]; then
+            touch "$stamp"
+            quiet=0
+        else
+            quiet=$((quiet + 1))
+        fi
+    done
+    echo "run.sh: 重启模拟器" >&2
     stop
 done
