@@ -56,10 +56,6 @@ function Stream.open(opts, handlers)
         if not client then
             return finish(client_err)
         end
-        local orig_finalize = client._finalize_request
-        if type(orig_finalize) ~= "function" then
-            return finish("unsupported Turbo HTTPClient")
-        end
         local errors = require("turbo").async.errors
         local httputil = require("turbo.httputil")
         local buffer = require("turbo.structs.buffer")
@@ -70,21 +66,6 @@ function Stream.open(opts, handlers)
                 emit(data:sub(1, data:len() - 2))
             end
             self.iostream:read_until("\r\n", self._handle_chunked_encoding, self)
-        end
-
-        client._finalize_request = function(self)
-            local redirect_before = self.redirect
-            orig_finalize(self)
-            if self.redirect ~= redirect_before or state.done or state.cancelled then
-                return
-            end
-            local headers = self.response_headers
-            local code = headers and headers.get_status_code and headers:get_status_code()
-            if self.s_error then
-                finish(self.error_str or "network request failed")
-            else
-                finish(not Fetch.ok(code) and T(_("HTTP %1"), tostring(code)) or nil)
-            end
         end
 
         --- 读完 body 后统一收尾（payload 置空：数据已经 emit 出去了）。
@@ -137,9 +118,11 @@ function Stream.open(opts, handlers)
         if not fetched then
             return finish(future)
         end
+        -- turbo 的 _finalize_request 在最后一跳收尾时同步唤醒这里；跟随跳转的中间响应不会唤醒。
         local res = coroutine.yield(future)
-        -- finalize 通常已调 finish；兜底：yield 返回但未 finalize 时仍收口
-        finish(Fetch.responseError(res))
+        local err = Fetch.responseError(res)
+        if not err and not Fetch.ok(res.code) then err = T(_("HTTP %1"), tostring(res.code)) end
+        finish(err)
     end)
 
     return Fetch.job(state, function()
