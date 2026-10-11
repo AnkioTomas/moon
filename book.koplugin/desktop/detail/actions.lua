@@ -14,6 +14,28 @@ local bookOwnerSource = Common.bookOwnerSource
 local bookSupportsScrape = Common.bookSupportsScrape
 local bookSupportsEdit = Common.bookSupportsEdit
 
+---@param book table
+---@return string
+local function cacheKey(book)
+    return "cache\0" .. book.source_id .. "\0" .. book.stable_id
+end
+
+--- 全本缓存结果提示：成功 / 部分完成 / 失败。
+---@param result { ok: boolean, cached: integer, total: integer, failed: integer, err: string|nil }
+local function notifyCached(result)
+    local text
+    if result.ok then
+        text = _("全本缓存完成：") .. result.cached .. " / " .. result.total .. _(" 章")
+    elseif result.total > 0 then
+        text = _("全本缓存部分完成：") .. result.cached .. " / " .. result.total .. _(" 章")
+        if result.failed > 0 then text = text .. "，" .. result.failed .. _(" 章失败") end
+        if result.err then text = text .. "\n" .. result.err end
+    else
+        text = result.err or _("全本缓存失败")
+    end
+    Toast:new{ text = text, timeout = 5 }:show()
+end
+
 return function(Detail)
 function Detail:openBook()
     local plugin = self.plugin
@@ -28,11 +50,55 @@ function Detail:cacheAllChapters()
     local book = self.book
     local source = bookOwnerSource(book, self.source)
     if not source or type(source.cacheAllChaptersAsync) ~= "function" then return end
-    require("workers.ui.task_dialog").start(require("source.cache_queue").spec(source, {
-        source_id = book.source_id,
-        stable_id = book.stable_id,
-        book = book,
-    }))
+    local identity = { source_id = book.source_id, stable_id = book.stable_id, book = book }
+    require("workers.ui.task_dialog").start{
+        key = cacheKey(book),
+        kind = "cache",
+        title = book.title or book.stable_id,
+        restartable = true,
+        -- 已落盘章节重试时自动跳过，只重试服务端限流（425）与分片校验失败。
+        retryable = function(result)
+            local err = result.err or ""
+            return err:find("HTTP 425", 1, true) ~= nil or err:find("shard md5 mismatch", 1, true) ~= nil
+        end,
+        on_done = notifyCached,
+        run = function(report, done)
+            return source:cacheAllChaptersAsync(identity, function(cached, total)
+                report(nil, cached, total)
+            end, function(ok, cached, err, total, failed)
+                done({ ok = ok, cached = cached, total = total, failed = failed, err = err })
+            end)
+        end,
+    }
+end
+
+--- 整本书源的未下载书（WebDAV、moon）：入队只落盘不开书，openBookAsync 负责下载并登记路径。
+function Detail:downloadBook()
+    if self.closed then return end
+    if not require("ui/network/manager"):isConnected() then
+        Toast:new{ text = _("网络不可用，请先连接 Wi-Fi"), timeout = 3 }:show()
+        return
+    end
+    local book = self.book
+    local source = bookOwnerSource(book, self.source)
+    if not source then return end
+    local identity = { source_id = book.source_id, stable_id = book.stable_id, source = source, book = book }
+    require("workers.ui.task_dialog").start{
+        key = cacheKey(book),
+        kind = "cache",
+        title = book.title or book.stable_id,
+        on_done = function(result)
+            Toast:new{ text = result.ok and _("下载完成") or (result.err or _("下载失败")), timeout = 3 }:show()
+            if not result.ok then return end
+            if self.desktop then self.desktop:onEvent("shelf_changed") end
+            if not self.closed then self:reload() end
+        end,
+        run = function(_report, done)
+            return source:openBookAsync(identity, nil, function(path, err)
+                done({ ok = path ~= nil, err = err })
+            end)
+        end,
+    }
 end
 
 --- 书城书（Z-Library / OPDS）：进后台下载任务，下载后导入本地书库；详情页关了也继续。
@@ -90,6 +156,14 @@ function Detail:toggleRead()
         Toast:new{ text = _("更新阅读状态失败"), timeout = 2 }:show()
         return
     end
+    -- 标已读会写一条 100% 待上传进度：在线就当场推，不等下一次推脏行。
+    local source = bookOwnerSource(book, self.source)
+    if source and require("ui/network/manager"):isConnected() then
+        source:syncProgressAsync({
+            identity = { source_id = book.source_id, stable_id = book.stable_id, book = book, source = source },
+            dirty_only = true,
+        }, function() end)
+    end
     self:reload()
 end
 
@@ -133,7 +207,7 @@ function Detail:clearCache()
         text = T(_("清理《%1》的本地缓存？\n正文、章节与图片需重新下载。"), Book.title(book)),
         ok_text = _("清理"),
         ok_callback = function()
-            if require("source.cache_queue").has(book.source_id, book.stable_id) then
+            if require("workers.tasks").get(cacheKey(book)) then
                 Toast:new{ text = _("本书正在后台缓存，请稍后再试"), timeout = 3 }:show()
                 return
             end
@@ -164,17 +238,21 @@ function Detail.actionPlan(book, owner)
         tools[#tools + 1] = { id = "scrape", icon = "search", text = _("刮削") }
     end
     local can_read = owner ~= nil and (owner.type == "book" or owner.type == "chapter")
-    -- 下载与清理缓存互斥：已离线到 cache 只给清理，章节源未下完只给下载；本地原书两者都没有
+    -- 下载与清理缓存互斥：已离线到 cache 只给清理，章节源未下完只给下载，整本书源没登记文件给下载；
+    -- 本地原书（path 即文件本身）两者都没有
     if can_read and Store.isCached(book) then
         tools[#tools + 1] = { id = "clear_cache", icon = "cleaning_services", text = _("清理缓存") }
     elseif can_read and owner.type == "chapter" and type(owner.cacheAllChaptersAsync) == "function" then
         tools[#tools + 1] = { id = "download", icon = "download", text = _("下载") }
+    elseif can_read and owner.type == "book" and book.source_id and book.stable_id
+        and not require("book.books_db").isDownloaded(book.source_id, book.stable_id, false) then
+        tools[#tools + 1] = { id = "download_book", icon = "download", text = _("下载") }
     end
     if book.source_id and book.stable_id then
         if tonumber(book.read_state) == 1 then
-            tools[#tools + 1] = { id = "unread", icon = "undo", text = _("标记未读") }
+            tools[#tools + 1] = { id = "unread", icon = "undo", text = _("未读") }
         else
-            tools[#tools + 1] = { id = "read", icon = "done_all", text = _("标记已读") }
+            tools[#tools + 1] = { id = "read", icon = "done_all", text = _("已读") }
         end
         tools[#tools + 1] = { id = "delete", icon = "delete", text = _("删除") }
     end
