@@ -241,13 +241,13 @@ local function conflictLabel(pos, id, snapshot)
                 within = withinFromFraction(pos.fraction, count, idx)
             end
             local within_pct = within and math.floor(within * 100 + 0.5) or nil
-            if title ~= "" and within_pct and within_pct > 0 then
+            if title ~= "" and within_pct then
                 return T(_("第 %1 章 · %2 · 章内 %3%"), idx, title, within_pct)
             end
             if title ~= "" then
                 return T(_("第 %1 章 · %2"), idx, title)
             end
-            if within_pct and within_pct > 0 then
+            if within_pct then
                 return T(_("第 %1 章 · 章内 %2%"), idx, within_pct)
             end
             return T(_("第 %1 章"), idx)
@@ -367,12 +367,10 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
     ReaderProgress.asked_conflicts[key] = true
     local local_desc = conflictLabel(local_pos, id, snapshot)
     local remote_desc = conflictLabel(remote_pos, id, snapshot)
-    local local_btn = T(_("本地：%1"), local_desc)
-    local remote_btn = T(_("云端：%1"), remote_desc)
     require("ui.themes.widgets.confirm"):new{
-        text = T(_("本地与云端进度不一致（%1 / %2），跳转到哪个？"), local_desc, remote_desc),
-        ok_text = remote_btn,
-        cancel_text = local_btn,
+        text = T(_("这本书在本地和云端的阅读位置不同，要从哪里继续读？\n\n本地：%1\n云端：%2"), local_desc, remote_desc),
+        ok_text = _("云端"),
+        cancel_text = _("本地"),
         -- 两个按钮都是选择：主题 Confirm 点空白 / 返回键等同「取消」= 选本地并上推，必须关掉。
         dismissable = false,
         ok_callback = function()
