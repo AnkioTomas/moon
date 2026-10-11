@@ -1,0 +1,385 @@
+--[[--
+锁屏离屏渲染：背景图片 + 文本/图形块写为 PNG。
+
+封面和进度是 image / rule。kind=widget 只留给自绘块（引言、倾斜海报）。
+
+@module koplugin.book.features.lockscreen.render
+--]]
+
+local Blitbuffer = require("ffi/blitbuffer")
+local Font = require("ui/font")
+local ImageWidget = require("ui/widget/imagewidget")
+local TextBoxWidget = require("ui/widget/textboxwidget")
+local Paths = require("utils.paths")
+local Layout = require("features.lockscreen.layout")
+
+local M = {}
+
+--- 将 widget 绘制到画布；越过任一画布边缘时裁剪，避免 blit 越界。借用 widget，不释放。
+---@param bb BlitBuffer 用于绘制的 Blitbuffer 画布
+---@param block table 包含 widget 与目标 x/y 坐标的绘制块
+---@param canvas_w number 目标画布宽度，单位像素
+---@param canvas_h number 目标画布高度，单位像素
+function M.paintWidget(bb, block, canvas_w, canvas_h)
+    local widget = block.widget
+    if not widget or type(widget.paintTo) ~= "function" then
+        error("invalid lockscreen widget block")
+    end
+    local x = math.floor(block.x or 0)
+    local y = math.floor(block.y or 0)
+    if x >= canvas_w or y >= canvas_h then
+        return
+    end
+    local size = widget:getSize()
+    local ww, wh = size.w, size.h
+    local src_x = math.max(0, -x)
+    local src_y = math.max(0, -y)
+    local dst_x = math.max(0, x)
+    local dst_y = math.max(0, y)
+    local visible_w = math.min(ww - src_x, canvas_w - dst_x)
+    local visible_h = math.min(wh - src_y, canvas_h - dst_y)
+    if visible_w <= 0 or visible_h <= 0 then
+        return
+    end
+    if src_x == 0 and src_y == 0 and visible_w == ww and visible_h == wh then
+        widget:paintTo(bb, x, y)
+        return
+    end
+    ---@type BlitBuffer
+    ---@diagnostic disable-next-line: assign-type-mismatch
+    local tmp = Blitbuffer.new(ww, wh, Blitbuffer.TYPE_BBRGB32)
+    tmp:fill(Blitbuffer.COLOR_WHITE)
+    local ok, err = pcall(function()
+        widget:paintTo(tmp, 0, 0)
+        bb:blitFrom(tmp, dst_x, dst_y, src_x, src_y, visible_w, visible_h)
+    end)
+    tmp:free()
+    if not ok then
+        error(err)
+    end
+end
+
+--- 离屏画一张 PNG 并原子替换；画布及临时文件归本次调用，失败保留原文件。
+---@param path string 目标 PNG 路径
+---@param width number 目标宽度，单位像素
+---@param height number 目标高度，单位像素
+---@param paint fun(bb: BlitBuffer)
+---@return boolean, any
+local function writePNG(path, width, height, paint)
+    assert(width > 0 and width == math.floor(width), "invalid image width")
+    assert(height > 0 and height == math.floor(height), "invalid image height")
+    local bb
+    local tmp = path .. ".part"
+    -- 画的是文件不是屏幕：ImageWidget 等在夜间模式会预先反色去抵消整屏反色，
+    -- 离屏写 PNG 时照做就存成底片。绘制期间关掉 night_mode，结束（含出错）恢复。
+    local Screen = require("device").screen
+    local night = Screen.night_mode
+    Screen.night_mode = false
+    local ok, err = xpcall(function()
+        bb = Blitbuffer.new(width, height, Blitbuffer.TYPE_BBRGB32)
+        ---@diagnostic disable-next-line: cast-type-mismatch
+        ---@cast bb BlitBuffer
+        bb:fill(Blitbuffer.COLOR_WHITE)
+        paint(bb)
+        if bb:writePNG(tmp) == false then error("PNG write failed") end
+        local renamed, reason = os.rename(tmp, path)
+        if not renamed then error(reason or "rename failed") end
+    end, debug.traceback)
+    Screen.night_mode = night
+    if bb then bb:free() end
+    if not ok then os.remove(tmp) end
+    return ok, err
+end
+
+--- 按实际渲染参数测量文本高度，供样式计算动态布局。
+---@param text string
+---@param width number
+---@param size number
+---@param bold boolean|nil
+---@return number
+function M.measureText(text, width, size, bold)
+    local widget = TextBoxWidget:new{
+        text = tostring(text or ""),
+        face = Font:getFace("cfont", size),
+        width = width,
+        bold = bold == true,
+    }
+    local height = widget:getSize().h
+    widget:free()
+    return height
+end
+
+--- 绘制背景图片；图片缺失时保留纯白底并由调用方决定是否报错。
+---@param bb BlitBuffer 目标 Blitbuffer
+---@param path string|nil 背景图片路径；nil 时使用纯色底
+---@param w number 输出宽度
+---@param h number 输出高度
+---@param fill table|nil 纯色底颜色，缺省白色
+---@return boolean, any
+local function paintBackground(bb, path, w, h, fill)
+    bb:fill(fill or Blitbuffer.COLOR_WHITE)
+    if not path then
+        return true
+    end
+    -- ImageWidget 解码失败时会换成 checkerboard，不能仅凭 getSize
+    -- 判断成功。先用 RenderImage 解码，再把同一块图交给 ImageWidget
+    -- 做居中裁切，失败时直接让本次组合失败并保留旧封面。
+    local RenderImage = require("ui/renderimage")
+    local source
+    local image
+    local ok, err = pcall(function()
+        source = RenderImage:renderImageFile(path, false)
+        if not source then
+            error("cannot decode background: " .. tostring(path))
+        end
+        local iw, ih = source:getWidth(), source:getHeight()
+        if not iw or not ih or iw <= 0 or ih <= 0 then
+            error("cannot decode background: " .. tostring(path))
+        end
+        image = ImageWidget:new{
+            image = source,
+            image_disposable = true,
+            width = w,
+            height = h,
+            scale_factor = math.max(w / iw, h / ih),
+            alpha = true,
+        }
+        image:paintTo(bb, 0, 0)
+    end)
+    if image then
+        image:free()
+    elseif source and source.free then
+        source:free()
+    end
+    return ok, err
+end
+
+--- 将文本块绘制到离屏缓冲。
+---@param bb BlitBuffer 目标 Blitbuffer
+---@param block table 文本块描述
+---@param w number 输出宽度
+local function paintText(bb, block, w)
+    local x = block.x or math.floor(w * 0.08)
+    local width = block.width or (w - x * 2)
+    local color = block.color or Blitbuffer.COLOR_BLACK
+    local widget = TextBoxWidget:new{
+        text = tostring(block.text or ""),
+        face = Font:getFace(block.face or "cfont", block.size or 24),
+        width = width,
+        alignment = block.align or "left",
+        -- 无框文字取黑字作覆盖度蒙版，着色交给 colorblitFrom
+        fgcolor = block.box == false and Blitbuffer.COLOR_BLACK or color,
+        bold = block.bold == true,
+    }
+    local size = widget:getSize()
+    local y = block.y or 0
+    if block.box ~= false then
+        local pad = block.padding or 10
+        bb:paintRect(x - pad, y - pad, width + pad * 2, size.h + pad * 2, Blitbuffer.COLOR_WHITE)
+        widget:paintTo(bb, x, y)
+    else
+        -- TextBoxWidget:paintTo 会连白底整块贴上；反相后按字形覆盖度混合，背景才透得出来。
+        local mask = widget._bb
+        mask:invertRect(0, 0, mask:getWidth(), mask:getHeight())
+        bb:colorblitFrom(mask, x, y, 0, 0, mask:getWidth(), mask:getHeight(), color)
+    end
+    widget:free()
+end
+
+--- 绘制圆角矩形；radius 为 0/nil 时退化为直角。
+---@param bb BlitBuffer
+---@param x number
+---@param y number
+---@param width number
+---@param height number
+---@param radius number|nil
+local function paintRect(bb, x, y, width, height, color, radius)
+    radius = math.max(0, math.floor(tonumber(radius) or 0))
+    if radius > 0 then
+        bb:paintRoundedRect(x, y, width, height, color, radius)
+    else
+        bb:paintRect(x, y, width, height, color)
+    end
+end
+
+--- 在圆角矩形范围内叠一层半透明白：圆角行逐行收窄，中段一次混合。
+---@param bb BlitBuffer
+---@param radius number|nil
+---@param by number 白色不透明度 0..1
+local function lightenRounded(bb, x, y, width, height, radius, by)
+    radius = math.max(0, math.min(math.floor(tonumber(radius) or 0),
+        math.floor(width / 2), math.floor(height / 2)))
+    for row = 0, radius - 1 do
+        local dy = radius - row - 0.5
+        local inset = radius - math.floor(math.sqrt(radius * radius - dy * dy) + 0.5)
+        bb:lightenRect(x + inset, y + row, width - inset * 2, 1, by)
+        bb:lightenRect(x + inset, y + height - 1 - row, width - inset * 2, 1, by)
+    end
+    bb:lightenRect(x, y + radius, width, height - radius * 2, by)
+end
+
+--- 分发非文本图形块：线、柱、卡片、票根缺口、点和离屏 widget。
+--- 封面 / 进度条不再走 DSL；主体通过 kind=widget 复用 ui.widgets。
+---@param bb BlitBuffer 目标 Blitbuffer
+---@param block table 图形块描述
+---@param w number 输出宽度
+---@param h number 输出高度
+---@param background BlitBuffer|nil 绘制主体前的背景副本
+local function paintShape(bb, block, w, h, background)
+    local x = block.x or math.floor(w * 0.08)
+    local y = block.y or 0
+    local width = block.width or (w - x * 2)
+    if block.kind == "rule" then
+        -- DESIGN：分割线 #55，默认 1px，不抢内容
+        bb:paintRect(x, y, width, block.height or 1,
+            block.color or Blitbuffer.COLOR_GRAY_5)
+    elseif block.kind == "panel" then
+        -- DESIGN：浅卡可带 8px 圆角 + 2px 轻阴影（#DD）
+        local height = block.height or 1
+        local radius = block.radius or 0
+        if block.lighten then
+            -- 半透明卡：背景透出来，不画阴影
+            lightenRounded(bb, x, y, width, height, radius, block.lighten)
+            return
+        end
+        local color = block.color or Blitbuffer.COLOR_WHITE
+        if block.shadow then
+            local s = type(block.shadow) == "number" and block.shadow or 2
+            paintRect(bb, x + s, y + s, width, height, Blitbuffer.COLOR_GRAY_D, radius)
+        end
+        paintRect(bb, x, y, width, height, color, radius)
+    elseif block.kind == "vbar" then
+        -- DESIGN 锁屏日柱：默认无满高浅轨；value 为相对槽高的比例，也可由调用方直接给实心柱高
+        local height = block.height or 1
+        local radius = block.radius or 0
+        local track = block.track
+        if track then
+            paintRect(bb, x, y, width, height, track, radius)
+        end
+        local filled = math.floor(height * math.max(0, math.min(1, block.value or 0)))
+        if filled > 0 then
+            paintRect(bb, x, y + height - filled, width, filled,
+                block.color or Blitbuffer.COLOR_BLACK, radius)
+        end
+    elseif block.kind == "line" then
+        -- 折线段：Bresenham 1px（stroke>1 时画平行粗线）
+        local x1 = math.floor(block.x1 or x)
+        local y1 = math.floor(block.y1 or y)
+        local x2 = math.floor(block.x2 or x1)
+        local y2 = math.floor(block.y2 or y1)
+        local color = block.color or Blitbuffer.COLOR_BLACK
+        local stroke = math.max(1, math.floor(tonumber(block.stroke) or 1))
+        local dx = math.abs(x2 - x1)
+        local dy = math.abs(y2 - y1)
+        local sx = x1 < x2 and 1 or -1
+        local sy = y1 < y2 and 1 or -1
+        local err = dx - dy
+        while true do
+            if stroke <= 1 then
+                bb:paintRect(x1, y1, 1, 1, color)
+            else
+                local half = math.floor(stroke / 2)
+                bb:paintRect(x1 - half, y1 - half, stroke, stroke, color)
+            end
+            if x1 == x2 and y1 == y2 then
+                break
+            end
+            local e2 = err * 2
+            if e2 > -dy then
+                err = err - dy
+                x1 = x1 + sx
+            end
+            if e2 < dx then
+                err = err + dx
+                y1 = y1 + sy
+            end
+        end
+    elseif block.kind == "dot" then
+        local size = math.max(1, math.floor(tonumber(block.size) or 4))
+        paintRect(bb, x, y, size, size, block.color or Blitbuffer.COLOR_BLACK, 0)
+    elseif block.kind == "cutout_circle" then
+        if not background then error("cutout_circle requires background snapshot") end
+        local radius = math.max(1, math.floor(tonumber(block.radius) or 1))
+        local center_x, center_y = math.floor(x), math.floor(y)
+        for dy = -radius, radius do
+            local half = math.floor(math.sqrt(radius * radius - dy * dy))
+            local src_x = math.max(0, center_x - half)
+            local src_y = center_y + dy
+            local span = math.min(w, center_x + half + 1) - src_x
+            if src_y >= 0 and src_y < h and span > 0 then
+                bb:blitFrom(background, src_x, src_y, src_x, src_y, span, 1)
+            end
+        end
+    elseif block.kind == "image" then
+        local image = ImageWidget:new{
+            file = assert(block.file, "image block file required"),
+            width = width,
+            height = block.height,
+            scale_factor = block.scale_factor or 0,
+            alpha = block.alpha == true,
+        }
+        local ok, err = pcall(image.paintTo, image, bb, x, y)
+        image:free()
+        if not ok then error(err) end
+    elseif block.kind == "widget" then
+        M.paintWidget(bb, block, w, h)
+    end
+end
+
+--- 释放主体创建的离屏 widget，避免封面解码缓冲和容器留在内存中。
+---@param blocks table[]
+local function freeWidgets(blocks)
+    local freed = {}
+    for _idx, block in ipairs(blocks or {}) do
+        local widget = block.widget
+        if widget and not freed[widget] and type(widget.free) == "function" then
+            freed[widget] = true
+            pcall(widget.free, widget)
+        end
+    end
+end
+
+--- 画一块主体：有 kind 走图形，否则当文字。
+---@param bb BlitBuffer
+---@param block table
+---@param w number
+---@param h number
+---@param background BlitBuffer|nil
+function M.paintBlock(bb, block, w, h, background)
+    if block.kind then
+        paintShape(bb, block, w, h, background)
+    else
+        paintText(bb, block, w)
+    end
+end
+
+--- 生成 PNG，成功后原子替换。
+--- 原子替换保证 KOReader 不会读到半张 compose.png。
+---@param path string
+---@param background string|nil
+---@param blocks table[]
+---@param fill table|nil 无背景图时的底色，缺省白色
+---@return boolean, any
+function M.write(path, background, blocks, fill)
+    Paths.ensureScreensaverDir()
+    local w, h = Layout.portraitSize()
+    local background_copy
+    local ok, err = writePNG(path, w, h, function(bb)
+        local bg_ok, bg_err = paintBackground(bb, background, w, h, fill)
+        if not bg_ok then error(bg_err) end
+        for _idx, block in ipairs(blocks) do
+            if block.kind == "cutout_circle" then
+                background_copy = bb:copy()
+                break
+            end
+        end
+        for _idx, block in ipairs(blocks) do
+            M.paintBlock(bb, block, w, h, background_copy)
+        end
+    end)
+    freeWidgets(blocks)
+    if background_copy then background_copy:free() end
+    return ok, err
+end
+
+return M

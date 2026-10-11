@@ -262,7 +262,7 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
         cancel = function()
             cancelled = true
             if shelf_job and shelf_job.cancel then shelf_job.cancel() end
-            for _, j in pairs(detail_jobs) do
+            for _job_key, j in pairs(detail_jobs) do
                 if j and j.cancel then j.cancel() end
             end
         end,
@@ -287,7 +287,7 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
             or shelf_info.data.bookShelfInfo
             or shelf_info.data
         local shelf_book_ids = {}
-        for _, item in ipairs(type(book_shelf_info) == "table" and book_shelf_info or {}) do
+        for _idx, item in ipairs(type(book_shelf_info) == "table" and book_shelf_info or {}) do
             if item.book_id then
                 shelf_book_ids[#shelf_book_ids + 1] = tostring(item.book_id)
             end
@@ -306,7 +306,7 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
         -- 拿不到详情的书（下架/失效）不进列表：reconcile 软删不标脏，不会推云端删除，恢复后重新上架。
         local function finish()
             local detail_list = {}
-            for _, book_id in ipairs(shelf_book_ids) do
+            for _idx, book_id in ipairs(shelf_book_ids) do
                 local row = by_id[book_id]
                 if row then
                     detail_list[#detail_list + 1] = row
@@ -317,7 +317,7 @@ function Client:fetchShelfDetailAsync(force_refresh, cb)
             cb(result)
         end
 
-        for _, book_id in ipairs(shelf_book_ids) do
+        for _idx, book_id in ipairs(shelf_book_ids) do
             detail_jobs[book_id] = jsonAsync(self, "GET", FanQie.book_info_url(book_id), nil, nil, function(info, info_err)
                 if cancelled then return end
                 if type(info) == "table" and type(info.data) == "table"

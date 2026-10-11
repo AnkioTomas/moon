@@ -103,7 +103,7 @@ end
 ---@param random integer
 ---@return string
 function Eink.signature(timestamp, device_id, random)
-    return sha256(string.format("%.0f", timestamp) .. device_id .. tostring(random))
+    return sha256(string.format("%.0f", timestamp) .. device_id .. tostring(random)) --[[@as string]]
 end
 
 ---@return number
@@ -365,7 +365,7 @@ function Eink.refreshAsync(cb)
         end
         local waiters = mint_waiters
         mint_waiters = nil
-        for _, waiter in ipairs(waiters) do waiter(data ~= nil, login_err) end
+        for _idx, waiter in ipairs(waiters) do waiter(data ~= nil, login_err) end
     end)
 end
 

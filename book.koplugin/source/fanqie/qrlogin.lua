@@ -12,11 +12,10 @@ allow_redirects=false，手动跟跳以保留中间 Set-Cookie。
 @module koplugin.book.source.fanqie.qrlogin
 --]]
 
-local Device = require("device")
 local UIManager = require("ui/uimanager")
-local QRMessage = require("ui/widget/qrmessage")
-local ButtonDialog = require("ui/widget/buttondialog")
-local InfoMessage = require("ui/widget/infomessage")
+local Confirm = require("ui.themes.widgets.confirm")
+local QR = require("ui.themes.widgets.qr")
+local Toast = require("ui.themes.widgets.toast")
 local Request = require("http.request")
 
 local Cookie = require("source.fanqie.cookie")
@@ -80,14 +79,14 @@ function QRLogin:new(settings, plugin)
 end
 
 function QRLogin:toast(text)
-    UIManager:show(InfoMessage:new{ text = tostring(text) })
+    Toast:new{ text = tostring(text) }:show()
 end
 
 function QRLogin:_close_dialog()
     if self.dialog then
         local d = self.dialog
         self.dialog = nil
-        UIManager:close(d)
+        d:close()
     end
 end
 
@@ -95,7 +94,7 @@ function QRLogin:_close_retry_dialog()
     if self.retry_dialog then
         local d = self.retry_dialog
         self.retry_dialog = nil
-        UIManager:close(d)
+        d:close()
     end
 end
 
@@ -217,14 +216,11 @@ function QRLogin:start()
             end
 
             self.jar = jar
-            local size = math.floor(math.min(Device.screen:getWidth(), Device.screen:getHeight()) * 0.72)
             local dialog
-            dialog = QRMessage:new{
+            dialog = QR:new{
+                title = _("番茄扫码登录"),
                 text = qr_index_url,
-                width = size,
-                height = size,
-                scale_factor = 0.9,
-                dismiss_callback = function()
+                close_callback = function()
                     if self.dialog == dialog then self.dialog = nil end
                     if gen == self.generation and not self.login_completed then
                         self:cancel()
@@ -233,7 +229,7 @@ function QRLogin:start()
                 end,
             }
             self.dialog = dialog
-            UIManager:show(dialog)
+            dialog:show()
             logger.info("[FanQieQR] 二维码已显示，开始轮询 token=", tostring(token):sub(1, 12))
             self:_schedule(gen, token, csrf, tonumber(d.expire_time) or 0)
         end)
@@ -409,32 +405,20 @@ function QRLogin:show_retry(msg)
     self:_cancel_job()
     self:_close_dialog()
     local dialog
-    dialog = ButtonDialog:new{
-        title = tostring(msg),
-        title_align = "center",
-        buttons = {
-            {
-                {
-                    text = _("重新获取"),
-                    callback = function()
-                        if self.retry_dialog == dialog then self.retry_dialog = nil end
-                        UIManager:close(dialog)
-                        self:start()
-                    end,
-                },
-                {
-                    text = _("取消"),
-                    callback = function()
-                        if self.retry_dialog == dialog then self.retry_dialog = nil end
-                        UIManager:close(dialog)
-                        self:cancel()
-                    end,
-                },
-            },
-        },
+    dialog = Confirm:new{
+        text = tostring(msg),
+        ok_text = _("重新获取"),
+        ok_callback = function()
+            if self.retry_dialog == dialog then self.retry_dialog = nil end
+            self:start()
+        end,
+        cancel_callback = function()
+            if self.retry_dialog == dialog then self.retry_dialog = nil end
+            self:cancel()
+        end,
     }
     self.retry_dialog = dialog
-    UIManager:show(dialog)
+    dialog:show()
 end
 
 return QRLogin

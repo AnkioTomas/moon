@@ -1,0 +1,316 @@
+--[[--
+本地 TXT/MOBI 重新排版：章节分析预览与 EPUB 转换替换。
+
+@module koplugin.book.features.reflow
+--]]
+
+require("l10n").apply()
+
+local Text2Epub = require("convert.text2epub")
+local Text = require("utils.text")
+local T = require("ffi/util").template
+local _ = require("gettext")
+
+local Reflow = {}
+
+---@type table<string, { text: string|nil, parsed: table }>
+local preview_cache = {}
+
+---@param path string
+---@return "txt"|"mobi"|nil
+local function fileKind(path)
+    local lower = path:lower()
+    if lower:match("%.txt$") then
+        return "txt"
+    end
+    if lower:match("%.mobi$") then
+        return "mobi"
+    end
+    return nil
+end
+
+--- 排版读写的是本地物理文件（books.path）：普通本地书即 stable_id，WebDAV 书是下载到本地的那份。
+---@param identity BookIdentity
+---@return string|nil
+local function bookFile(identity)
+    return identity.book and identity.book.path
+end
+
+---@param identity BookIdentity|nil
+---@return boolean
+function Reflow.canReflow(identity)
+    if not identity or identity.source_id ~= "local" then
+        return false
+    end
+    local source = identity.source
+    if not source or type(source.replaceBookAsync) ~= "function" then
+        return false
+    end
+    local path = bookFile(identity)
+    return type(path) == "string" and fileKind(path) ~= nil
+end
+
+--- 下一 tick 回调失败；返回空取消句柄。
+---@param cb fun(value: nil, err: string)
+---@param err string
+---@return { cancel: fun() }
+local function failLater(cb, err)
+    require("ui/uimanager"):nextTick(function()
+        cb(nil, err)
+    end)
+    return { cancel = function() end }
+end
+
+---@param parsed { chapters: { title: string, toc: boolean|nil }[] }
+---@return string[]
+local function tocTitles(parsed)
+    local titles = {}
+    for _idx, chapter in ipairs(parsed.chapters or {}) do
+        if chapter.toc ~= false then
+            titles[#titles + 1] = chapter.title ~= "" and chapter.title
+                or ("#" .. (#titles + 1))
+        end
+    end
+    return titles
+end
+
+---@param path string
+---@param identity BookIdentity
+---@return table
+local function buildOpts(path, identity)
+    local book = identity.book or {}
+    local Paths = require("utils.paths")
+    return {
+        source = path,
+        title = book.title,
+        author = book.authors,
+        identifier = "moon-reflow-" .. Paths.slugFor(path),
+        reflow = true,
+    }
+end
+
+---@param path string
+---@param parse_opts table
+---@param text string
+---@return table, string[]
+local function cacheParsed(path, parse_opts, text)
+    local parsed = Text2Epub.parse(text, parse_opts)
+    preview_cache[path] = { text = text, parsed = parsed }
+    return parsed, tocTitles(parsed)
+end
+
+--- 分析章节结构，供预览目录使用。
+---@param identity BookIdentity
+---@param cb fun(titles: string[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Reflow.analyzeAsync(identity, cb)
+    local path = bookFile(identity)
+    local kind = path and fileKind(path)
+    if not kind then
+        return failLater(cb, _("无效路径"))
+    end
+
+    local parse_opts = buildOpts(path, identity)
+    if kind == "txt" then
+        local UIManager = require("ui/uimanager")
+        UIManager:nextTick(function()
+            local file, err = io.open(path, "rb")
+            if not file then
+                cb(nil, err or _("无法读取文本文件"))
+                return
+            end
+            local text = file:read("*a")
+            file:close()
+            if type(text) ~= "string" or Text.trim(text) == "" then
+                cb(nil, _("无文本内容"))
+                return
+            end
+            if not Text.isValidUtf8(text) then
+                cb(nil, _("仅支持 UTF-8 编码的文本"))
+                return
+            end
+            local _parsed, titles = cacheParsed(path, parse_opts, text)
+            cb(titles)
+        end)
+        return { cancel = function() end }
+    end
+
+    return require("convert.mobi2epub").extract({
+        source = path,
+        on_progress = parse_opts.on_progress,
+    }, function(text, err)
+        if not text then
+            cb(nil, err)
+            return
+        end
+        local _parsed, titles = cacheParsed(path, parse_opts, text)
+        cb(titles)
+    end)
+end
+
+--- 转换并替换原书，完成后回调新路径。
+---@param identity BookIdentity
+---@param cb fun(new_path: string|nil, err: string|nil)
+---@return { cancel: fun() }
+function Reflow.applyAsync(identity, cb)
+    local path = bookFile(identity)
+    local kind = path and fileKind(path)
+    if not kind then
+        return failLater(cb, _("无效路径"))
+    end
+
+    local source = identity.source
+    if not source or type(source.replaceBookAsync) ~= "function" then
+        return failLater(cb, _("当前书籍不支持排版"))
+    end
+
+    local parse_opts = buildOpts(path, identity)
+    local target = path:gsub("%.[^./]+$", ".epub")
+    local dest = target .. ".moon-reflow"
+    local cached = preview_cache[path]
+    local active
+
+    local function fail(err)
+        os.remove(dest)
+        os.remove(dest .. ".part")
+        cb(nil, err)
+    end
+
+    --- 转换收尾：成功则交给源替换原书（身份与 books.path 由源迁移），失败清掉临时文件。
+    --- 任何一步失败都保证 dest 与 dest.part 不残留，且不改动原书。
+    ---@param ok boolean 转换是否成功
+    ---@param err string|nil 转换失败原因
+    local function finishReplace(ok, err)
+        preview_cache[path] = nil
+        if not ok then return fail(err or _("排版失败")) end
+        active = source:replaceBookAsync(dest, identity.stable_id, function(new_path, replace_err)
+            if not new_path then return fail(replace_err or _("替换原书失败")) end
+            cb(new_path)
+        end)
+    end
+
+    -- txt 未预览时 text 为 nil，由 Text2Epub 自己读 source。
+    if kind == "txt" or (cached and cached.text) then
+        active = Text2Epub.build({
+            dest = dest,
+            text = cached and cached.text,
+            source = path,
+            title = parse_opts.title,
+            author = parse_opts.author,
+            identifier = parse_opts.identifier,
+            reflow = true,
+        }, finishReplace)
+    else
+        active = require("convert.mobi2epub").build({
+            dest = dest,
+            source = path,
+            title = parse_opts.title,
+            author = parse_opts.author,
+            identifier = parse_opts.identifier,
+        }, finishReplace)
+    end
+    return { cancel = function()
+        if active and active.cancel then active.cancel() end
+    end }
+end
+
+--- 阅读页入口：先预览目录，确认后再转换替换并重新打开。
+---@param ui table|nil
+---@param identity BookIdentity
+function Reflow.startFromReader(ui, identity)
+    if not Reflow.canReflow(identity) then
+        return
+    end
+    local path = bookFile(identity)
+    local kind = fileKind(path)
+    local Confirm = require("ui.themes.widgets.confirm")
+    local List = require("ui.themes.widgets.list")
+    local Toast = require("ui.themes.widgets.toast")
+    local holder = { analyze_job = nil, apply_job = nil }
+
+    --- 取消进行中的分析/转换任务并丢弃该书的预览缓存。
+    local function cancelJobs()
+        if holder.analyze_job and holder.analyze_job.cancel then
+            holder.analyze_job.cancel()
+        end
+        if holder.apply_job and holder.apply_job.cancel then
+            holder.apply_job.cancel()
+        end
+        holder.analyze_job, holder.apply_job = nil, nil
+        preview_cache[path] = nil
+    end
+
+    --- 转换替换并用新书重开阅读器。
+    local function apply()
+        local loading = Toast:new{ text = _("正在优化排版…") }
+        loading:show()
+        holder.apply_job = Reflow.applyAsync(identity, function(new_path, err)
+            holder.apply_job = nil
+            loading:close()
+            if not new_path then
+                Toast:new{ text = err or _("排版失败") }:show()
+                return
+            end
+            require("apps/reader/readerui"):showReader(new_path)
+        end)
+    end
+
+    --- 弹出章节预览列表：首行确认优化，其余章节只读；右上角关闭即放弃。
+    --- 未识别到章节则只提示不弹表。
+    ---@param titles string[]|nil 识别出的章节标题
+    local function showPreview(titles)
+        if not titles or #titles == 0 then
+            Toast:new{ text = _("未识别到章节") }:show()
+            return
+        end
+        local preview, applying
+        -- 先标记再关窗：转换要复用预览解析结果，关窗回调只在放弃时清缓存。
+        local items = { { text = _("确认优化"), icon = "check", keep_open = true, callback = function()
+            applying = true
+            preview:close()
+            apply()
+        end } }
+        for _idx, title in ipairs(titles) do
+            items[#items + 1] = { text = title, enabled = false }
+        end
+        preview = List:new{
+            title = _("排版预览"),
+            subtitle = T(_("识别到 %1 章；确认后将替换原书"), #titles),
+            items = items,
+            close_callback = function()
+                if not applying then preview_cache[path] = nil end
+            end,
+        }
+        preview:show()
+    end
+
+    --- 显示进度提示并异步识别章节，成功后转入预览。
+    local function runAnalyze()
+        local loading = Toast:new{ text = _("正在分析章节…") }
+        loading:show()
+        holder.analyze_job = Reflow.analyzeAsync(identity, function(titles, err)
+            holder.analyze_job = nil
+            loading:close()
+            if not titles then
+                Toast:new{ text = err or _("排版失败") }:show()
+                return
+            end
+            showPreview(titles)
+        end)
+    end
+
+    if kind == "mobi" then
+        Confirm:new{
+            text = _("转换后的 EPUB 会替换原书；只保留文字并重新识别章节，图片、脚注和原排版会丢失。继续？"),
+            ok_text = _("继续"),
+            ok_callback = runAnalyze,
+            cancel_callback = cancelJobs,
+        }:show()
+        return
+    end
+    runAnalyze()
+end
+
+Reflow._tocTitles = tocTitles
+
+return Reflow

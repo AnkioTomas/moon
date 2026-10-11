@@ -18,21 +18,19 @@ function M.rowStatus()
     return ok and _("已登录") or _("未登录 · 点此扫码"), ok
 end
 
----@param plugin table|nil
-function M.open(plugin)
+function M.open()
     local settings = require("source.fanqie.settings"):new()
-    local UI = require("ui/uimanager")
     local owner = {}
     function owner:closeBusy()
-        if self.busy then UI:close(self.busy); self.busy = nil end
+        if self.busy then self.busy:close(); self.busy = nil end
     end
     function owner:showBusy(text)
         self:closeBusy()
-        self.busy = require("ui/widget/infomessage"):new{ text = text }
-        UI:show(self.busy)
+        self.busy = require("ui.themes.widgets.toast"):new{ text = text }
+        self.busy:show()
     end
     function owner:onLoginSuccess()
-        require("source.registry").afterAuthChanged(plugin)
+        require("source.registry").reload()
     end
     require("ui/network/manager"):runWhenOnline(function()
         require("source.fanqie.qrlogin"):new(settings, owner):start()

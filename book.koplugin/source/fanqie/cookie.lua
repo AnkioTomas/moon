@@ -36,7 +36,7 @@ function Cookie.merge_set_cookie(cookies, set_cookie)
     end
     cookies = cookies or {}
     if type(set_cookie) == "table" then
-        for _, value in pairs(set_cookie) do
+        for _key, value in pairs(set_cookie) do
             Cookie.merge_set_cookie(cookies, value)
         end
         return cookies

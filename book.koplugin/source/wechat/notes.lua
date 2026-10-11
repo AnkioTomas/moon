@@ -57,7 +57,7 @@ local WR_FIELDS = {
 ---@return table[]
 function Notes.cleanAnnotations(items, total_pages)
     local out = {}
-    for _, item in ipairs(items or {}) do
+    for _idx, item in ipairs(items or {}) do
         if type(item) == "table" and item.wr_deleted
                 and (item.wr_bookmark_id or item.wr_review_id) then
             out[#out + 1] = {
@@ -78,7 +78,7 @@ function Notes.cleanAnnotations(items, total_pages)
             local clean = Normalize.clean({ source }, total_pages)[1]
             if clean then
                 if placeholder then clean.page = nil end
-                for _, field in ipairs(WR_FIELDS) do clean[field] = item[field] end
+                for _idx, field in ipairs(WR_FIELDS) do clean[field] = item[field] end
                 out[#out + 1] = clean
             end
         end
@@ -91,7 +91,7 @@ end
 ---@return table[]
 function Notes.prepareLocalAnnotations(previous, current)
     local bookmarks, reviews, current_by_bookmark, current_by_review = {}, {}, {}, {}
-    for _, item in ipairs(current) do
+    for _idx, item in ipairs(current) do
         if item.wr_bookmark_id then
             local id = tostring(item.wr_bookmark_id)
             bookmarks[id] = true
@@ -103,7 +103,7 @@ function Notes.prepareLocalAnnotations(previous, current)
             current_by_review[id] = item
         end
     end
-    for _, old in ipairs(previous or {}) do
+    for _idx, old in ipairs(previous or {}) do
         if type(old) == "table" and old.wr_deleted then
             local keep_bookmark = old.wr_bookmark_id
                 and not bookmarks[tostring(old.wr_bookmark_id)]
@@ -196,20 +196,20 @@ function Notes.localizeAnnotations(document, annotations, html_path, current)
     local flow = Annotations.flow(html)
     ---@type table<string, WechatAnnotation>
     local positioned = {}
-    for _, item in ipairs(current or {}) do
+    for _idx, item in ipairs(current or {}) do
         if type(item) == "table" and item.wr_bookmark_id and item.pos0 and item.pos1 then
             positioned[tostring(item.wr_bookmark_id)] = item
         end
     end
     local unresolved = {}
-    for _, item in ipairs(annotations) do
+    for _idx, item in ipairs(annotations) do
         if type(item) == "table" and not item.pos0 then
             unresolved[#unresolved + 1] = item
         end
     end
     local located = Annotations.locateBatch(flow, unresolved)
     local out = {}
-    for _, item in ipairs(annotations) do
+    for _idx, item in ipairs(annotations) do
         local ann = item
         if type(item) == "table" and not item.pos0 then
             ---@type WechatAnnotation|nil
@@ -261,7 +261,7 @@ function Notes.mergeAnnotations(remote, local_items, paging, authoritative)
     end
     authoritative = authoritative == true
     local merged, seen = {}, {}
-    for _, item in ipairs(remote or {}) do
+    for _idx, item in ipairs(remote or {}) do
         if type(item) == "table"
                 and Normalize.renderable(item, paging) then
             if item.wr_bookmark_id then seen["bookmark:" .. tostring(item.wr_bookmark_id)] = true end
@@ -272,7 +272,7 @@ function Notes.mergeAnnotations(remote, local_items, paging, authoritative)
             merged[#merged + 1] = item
         end
     end
-    for _, item in ipairs(local_items or {}) do
+    for _idx, item in ipairs(local_items or {}) do
         if type(item) == "table" then
             local range_key, note_key = rangeKey(item), noteKey(item)
             local duplicate = item.wr_bookmark_id
@@ -331,7 +331,7 @@ function Notes.reviewsByRange(wire)
     if type(wire) ~= "table" then
         return out
     end
-    for _, entry in ipairs(wire.reviews or {}) do
+    for _idx, entry in ipairs(wire.reviews or {}) do
         local review = type(entry) == "table" and (entry.review or entry) or nil
         if type(review) == "table" then
             local range = tostring(review.range or "")
@@ -348,7 +348,7 @@ end
 ---@return table<string, boolean>
 function Notes.reviewIds(wire)
     local out = {}
-    for _, entry in ipairs(type(wire) == "table" and wire.reviews or {}) do
+    for _idx, entry in ipairs(type(wire) == "table" and wire.reviews or {}) do
         local review = type(entry) == "table" and (entry.review or entry) or nil
         local id = type(review) == "table" and (review.reviewId or entry.reviewId) or nil
         if id then out[tostring(id)] = true end
@@ -362,7 +362,7 @@ end
 ---@return table<table, boolean>
 function Notes.reconcileReviews(annotations, wire)
     local by_id, by_key, by_semantic = {}, {}, {}
-    for _, entry in ipairs(type(wire) == "table" and wire.reviews or {}) do
+    for _idx, entry in ipairs(type(wire) == "table" and wire.reviews or {}) do
         local review = type(entry) == "table" and (entry.review or entry) or nil
         if type(review) == "table" then
             local id = review.reviewId or entry.reviewId
@@ -383,7 +383,7 @@ function Notes.reconcileReviews(annotations, wire)
         end
     end
     local confirmed = {}
-    for _, item in ipairs(annotations or {}) do
+    for _idx, item in ipairs(annotations or {}) do
         if type(item) == "table" and not item.wr_deleted
                 and type(item.note) == "string" and item.note ~= "" then
             local review = item.wr_review_id and by_id[tostring(item.wr_review_id)] or nil
@@ -409,7 +409,7 @@ end
 ---@return table<string, boolean>
 function Notes.bookmarkIds(wire, chapter_uid)
     local out = {}
-    for _, row in ipairs(type(wire) == "table" and wire.updated or {}) do
+    for _idx, row in ipairs(type(wire) == "table" and wire.updated or {}) do
         if type(row) == "table"
                 and tostring(row.chapterUid or row.chapter_uid or "") == tostring(chapter_uid)
                 and Notes.isHighlightRow(row) then
@@ -431,7 +431,7 @@ function Notes.toAnnotations(wire, chapter_uid, reviews, source_id, stable_id)
     local items = (type(wire) == "table" and wire.updated) or {}
     local chapter_idx_by_uid = {}
     if type(wire) == "table" and type(wire.chapters) == "table" then
-        for _, ch in ipairs(wire.chapters) do
+        for _idx, ch in ipairs(wire.chapters) do
             if type(ch) == "table" then
                 local uid = tostring(ch.chapterUid or ch.chapter_uid or "")
                 local idx = tonumber(ch.chapterIdx or ch.chapter_idx)
@@ -463,7 +463,7 @@ function Notes.toAnnotations(wire, chapter_uid, reviews, source_id, stable_id)
     local review_by_range = Notes.reviewsByRange(reviews)
     local matched_reviews = {}
     local out = {}
-    for _, row in ipairs(items) do
+    for _idx, row in ipairs(items) do
         if type(row) == "table" and Notes.isHighlightRow(row) then
             local uid = tostring(row.chapterUid or row.chapter_uid or "")
             if not chapter_uid or uid == tostring(chapter_uid) then
@@ -482,7 +482,7 @@ function Notes.toAnnotations(wire, chapter_uid, reviews, source_id, stable_id)
     end
     -- 有想法不等于 bookmarklist 必有同 range 划线。微信允许直接发表选中文本想法；
     -- 这种条目也必须映射为 KOReader 原生高亮+笔记，不能静默丢掉。
-    for _, entry in ipairs(type(reviews) == "table" and reviews.reviews or {}) do
+    for _idx, entry in ipairs(type(reviews) == "table" and reviews.reviews or {}) do
         local review = type(entry) == "table" and (entry.review or entry) or nil
         if type(review) == "table" and not matched_reviews[review] then
             local uid = tostring(review.chapterUid or review.chapter_uid or "")
@@ -510,7 +510,7 @@ end
 ---@return table[]
 function Notes.notePushCandidates(annotations)
     local out = {}
-    for _, item in ipairs(annotations or {}) do
+    for _idx, item in ipairs(annotations or {}) do
         if type(item) == "table" and type(item.note) == "string" and item.note ~= ""
                 and ((item.wr_review_id and item.wr_update_review)
                     or (not item.wr_review_id
@@ -526,7 +526,7 @@ end
 ---@return table[]
 function Notes.deleteCandidates(annotations)
     local out = {}
-    for _, item in ipairs(annotations or {}) do
+    for _idx, item in ipairs(annotations or {}) do
         if type(item) == "table" and (item.wr_deleted or item.wr_delete_review) then
             out[#out + 1] = item
         end
@@ -538,7 +538,7 @@ end
 ---@return table[]
 function Notes.bookmarkUpdateCandidates(annotations)
     local out = {}
-    for _, item in ipairs(annotations or {}) do
+    for _idx, item in ipairs(annotations or {}) do
         if type(item) == "table" and not item.wr_deleted
                 and item.wr_bookmark_id and item.wr_update_bookmark then
             out[#out + 1] = item
@@ -614,7 +614,7 @@ end
 ---@return table[]
 function Notes.pushCandidates(annotations)
     local out = {}
-    for _, item in ipairs(annotations or {}) do
+    for _idx, item in ipairs(annotations or {}) do
         if type(item) == "table" and item.drawer
                 and type(item.text) == "string" and item.text ~= ""
                 and (type(item.note) ~= "string" or item.note == "")
@@ -634,7 +634,7 @@ end
 ---@return table<table, boolean> confirmed
 function Notes.reconcileBookmarks(annotations, wire, chapter_uid)
     local by_id, by_key = {}, {}
-    for _, row in ipairs(type(wire) == "table" and wire.updated or {}) do
+    for _idx, row in ipairs(type(wire) == "table" and wire.updated or {}) do
         local uid = tostring(row.chapterUid or row.chapter_uid or "")
         if type(row) == "table" and uid == tostring(chapter_uid) and Notes.isHighlightRow(row) then
             local id = row.bookmarkId or row.id
@@ -652,7 +652,7 @@ function Notes.reconcileBookmarks(annotations, wire, chapter_uid)
         end
     end
     local matched, confirmed = 0, {}
-    for _, item in ipairs(annotations or {}) do
+    for _idx, item in ipairs(annotations or {}) do
         if type(item) == "table" then
             local row = item.wr_bookmark_id and by_id[tostring(item.wr_bookmark_id)] or nil
             if not row and not item.wr_bookmark_id and item.text and item.wr_range then

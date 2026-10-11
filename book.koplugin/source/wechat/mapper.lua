@@ -160,7 +160,7 @@ function Mapper.progressByBookId(shelf)
     if type(shelf) ~= "table" or type(shelf.bookProgress) ~= "table" then
         return map
     end
-    for _, p in ipairs(shelf.bookProgress) do
+    for _idx, p in ipairs(shelf.bookProgress) do
         local id = p and p.bookId
         if id ~= nil then
             map[tostring(id)] = p
@@ -177,7 +177,7 @@ local function appendShelfRows(into, seen, rows)
     if type(rows) ~= "table" then
         return
     end
-    for _, row in ipairs(rows) do
+    for _idx, row in ipairs(rows) do
         local book = unwrapBookRow(row)
         if type(book) == "table" then
             local id = book.bookId or book.id or book.book_id
@@ -204,7 +204,7 @@ function Mapper.shelfList(shelf, on_cover)
     appendShelfRows(list, seen, shelf.recentBooks)
     appendShelfRows(list, seen, shelf.finishReadBooks)
     appendShelfRows(list, seen, shelf.data and shelf.data.books)
-    for _, row in ipairs(list) do
+    for _idx, row in ipairs(list) do
         local b, cover = Mapper.book(row)
         if b then
             Mapper.applyProgress(b, prog_map[b.stable_id])
@@ -214,7 +214,7 @@ function Mapper.shelfList(shelf, on_cover)
             books[#books + 1] = b
         end
     end
-    for _, album in ipairs(shelf.albums or {}) do
+    for _idx, album in ipairs(shelf.albums or {}) do
         local b, cover = Mapper.albumBook(album)
         if b then
             if cover and on_cover then
@@ -239,7 +239,7 @@ function Mapper.chapters(data, bookId)
         records = { records }
     end
     local entry
-    for _, rec in ipairs(records) do
+    for _idx, rec in ipairs(records) do
         if tostring(rec.bookId or "") == bookId or not entry then
             entry = rec
             if tostring(rec.bookId or "") == bookId then
@@ -252,13 +252,13 @@ function Mapper.chapters(data, bookId)
     end
     local chapters_raw = entry.updated or entry.chapterInfos or entry.chapters or {}
     local chapters = {}
-    for _, ch in ipairs(chapters_raw) do
+    for _idx, ch in ipairs(chapters_raw) do
         local wc = tonumber(ch.wordCount or 0) or 0
         local title = tostring(ch.title or "")
         if wc > 0 and title ~= "封面" then
             local depth = math.max(1, math.floor(tonumber(ch.level) or 1))
             local anchors = {}
-            for _, anchor in ipairs(ch.anchors or {}) do
+            for _idx, anchor in ipairs(ch.anchors or {}) do
                 local anchor_title = tostring(anchor.title or "")
                 if anchor_title ~= "" then
                     anchors[#anchors + 1] = {

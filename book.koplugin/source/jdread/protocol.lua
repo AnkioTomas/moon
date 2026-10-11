@@ -51,7 +51,7 @@ function Protocol.signedParams(path, uuid, extra, tm)
     for key in pairs(params) do keys[#keys + 1] = key end
     table.sort(keys)
     local canonical = {}
-    for _, key in ipairs(keys) do
+    for _idx, key in ipairs(keys) do
         canonical[#canonical + 1] = key .. "=" .. scalar(params[key])
     end
     local inner = md5(APP .. tostring(tm) .. uuid)

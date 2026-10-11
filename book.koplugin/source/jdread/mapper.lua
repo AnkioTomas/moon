@@ -56,7 +56,7 @@ function Mapper.shelfList(wire, on_cover)
     local root = type(wire.data) == "table" and wire.data or wire
     local rows = root.books or root.ebooks or root.list or root.items or {}
     local books = {}
-    for _, row in ipairs(rows) do
+    for _idx, row in ipairs(rows) do
         local book, cover = Mapper.book(row)
         if book then
             if cover and on_cover then on_cover(book.stable_id, cover) end
@@ -72,7 +72,7 @@ end
 ---@return BookChapter[]|nil
 local function downloadChapters(rows)
     local chapters = {}
-    for _, row in ipairs(rows) do
+    for _idx, row in ipairs(rows) do
         local index = tonumber(row.chapter_index)
         if index == nil then index = #chapters end
         local title = row.chapter_name or row.catalogName or row.catalog_name
@@ -98,7 +98,7 @@ end
 ---@return BookChapter[]|nil
 local function netChapters(rows)
     local chapters = {}
-    for _, row in ipairs(rows) do
+    for _idx, row in ipairs(rows) do
         if tonumber(row.type) == 1 and row.chapter_id ~= nil and tostring(row.chapter_id) ~= "" then
             local title = row.chapter_name
             if title == nil or tostring(title) == "" then
@@ -145,7 +145,7 @@ function Mapper.content(wire, title)
     if type(parts) ~= "table" then return nil end
     local toBody = data.content_type == "net" and netBody or Text.htmlBodyFragment
     local html = {}
-    for _, part in ipairs(parts) do
+    for _idx, part in ipairs(parts) do
         if type(part) == "table" and part.can_read == false then
             return nil
         end
@@ -166,7 +166,7 @@ function Mapper.progress(wire)
     local markers = type(groups) == "table" and groups[1] and groups[1].list
     if type(markers) ~= "table" then return nil end
     local current
-    for _, marker in ipairs(markers) do
+    for _idx, marker in ipairs(markers) do
         if type(marker) == "table" and tonumber(marker.data_type) == 0
             and (not current or (tonumber(marker.version) or 0) > (tonumber(current.version) or 0)) then
             current = marker

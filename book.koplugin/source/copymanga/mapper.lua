@@ -13,7 +13,7 @@ local SOURCE_ID = "copymanga"
 ---@return string|nil
 local function names(rows)
     local list = {}
-    for _, row in ipairs(rows or {}) do
+    for _idx, row in ipairs(rows or {}) do
         if type(row) == "table" and type(row.name) == "string" and row.name ~= "" then
             list[#list + 1] = row.name
         end
@@ -63,7 +63,7 @@ end
 function Mapper.search(wire)
     local root = resultsOf(wire)
     local books = {}
-    for _, row in ipairs(root.list or {}) do
+    for _idx, row in ipairs(root.list or {}) do
         local book = Mapper.book(row)
         if book then books[#books + 1] = book end
     end
@@ -75,7 +75,7 @@ end
 ---@return BookListResult
 function Mapper.collect(wire)
     local result = Mapper.search(wire)
-    for _, book in ipairs(result.data) do
+    for _idx, book in ipairs(result.data) do
         book.deleted = 0
     end
     return result
@@ -118,7 +118,7 @@ function Mapper.groups(wire)
     local raw = resultsOf(wire).groups
     local list = {}
     if type(raw) == "table" then
-        for _, group in pairs(raw) do
+        for _group_key, group in pairs(raw) do
             if type(group) == "table"
                 and type(group.path_word) == "string"
                 and group.path_word ~= ""
@@ -147,7 +147,7 @@ end
 ---@return BookChapter[]|nil
 function Mapper.chapters(rows)
     local chapters, seen = {}, {}
-    for _, row in ipairs(rows or {}) do
+    for _idx, row in ipairs(rows or {}) do
         local uid = type(row) == "table" and row.uuid or nil
         if type(uid) == "string" and uid ~= "" and not seen[uid] then
             seen[uid] = true

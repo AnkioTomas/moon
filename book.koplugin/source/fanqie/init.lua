@@ -1,0 +1,315 @@
+--[[--
+番茄小说官方数据源。
+
+@module koplugin.book.source.fanqie
+--]]
+
+local Base = require("source.base")
+require("l10n").apply()
+local _ = require("gettext")
+local T = require("ffi/util").template
+
+local M = {}
+
+---@class FanqieSource : BookSource
+---@field settings FanqieSettings
+---@field client FanqieClient
+
+local Source = setmetatable({}, { __index = Base })
+Source.__index = Source
+
+function M.meta()
+    return { id = "fanqie", name = "番茄小说", type = "chapter" }
+end
+
+function M.new()
+    local Settings = require("source.fanqie.settings")
+    local Client = require("source.fanqie.client")
+    local settings = Settings:new()
+    return setmetatable({
+        id = "fanqie",
+        name = "番茄小说",
+        type = "chapter",
+        settings = settings,
+        client = Client:new(settings),
+    }, Source)
+end
+
+function Source:configured()
+    return self.settings:is_cookie_configured()
+end
+
+---@class FanqieAsyncHandle : CancelHandle
+---@field job CancelHandle|nil
+---@field cancelled boolean
+
+---@return FanqieAsyncHandle
+local function handle()
+    ---@type FanqieAsyncHandle
+    local h
+    h = {
+        job = nil,
+        cancelled = false,
+        cancel = function()
+            h.cancelled = true
+            if h.job and h.job.cancel then
+                h.job.cancel()
+            end
+        end,
+    }
+    return h
+end
+
+---@return string
+local function errMsg(err)
+    if type(err) == "table" then
+        return tostring(err.message or err.err or "番茄请求失败")
+    end
+    return tostring(err or "番茄请求失败")
+end
+
+---@param opts { force?: boolean, dirty_only?: boolean, on_progress?: fun(text: string|nil, done: integer|nil, total: integer|nil) }|nil
+---@param cb fun(result: SyncResult|nil, err: any)
+---@return CancelHandle|nil
+function Source:syncBooksAsync(opts, cb)
+    opts = opts or {}
+    -- 番茄暂无书架删/加推送；dirty_only 不得全量 pull。
+    if opts.dirty_only then
+        require("ui/uimanager"):nextTick(function()
+            cb({
+                pulled = 0, pushed = 0, hidden = 0, conflicts = 0,
+                skipped = true, reason = "no dirty shelf push",
+            })
+        end)
+        return { cancel = function() end }
+    end
+    if not self:configured() then
+        cb(nil, "请在数据源设置中扫码登录番茄小说")
+        return { cancel = function() end }
+    end
+
+    local report = opts.on_progress or function(...) end
+    local h = handle()
+    report(_("正在拉取书架…"))
+    h.job = self.client:fetchShelfDetailAsync(opts.force, function(wire, err)
+        if h.cancelled then return end
+        if not wire then
+            cb(nil, errMsg(err))
+            return
+        end
+        local rows = wire.data and wire.data.detail_list
+        if type(rows) ~= "table" then
+            cb(nil, "番茄书架响应不完整，保留本地书架")
+            return
+        end
+        require("utils.paths").ensureLayout("fanqie")
+        local books = {}
+        for _idx, row in ipairs(rows) do
+            local id = row.book_id or row.bookId or row.id
+            if id then
+                local title = row.book_name or row.title or row.name or "未知"
+                books[#books + 1] = {
+                    source_id = "fanqie",
+                    stable_id = tostring(id),
+                    title = title,
+                    authors = row.author_name or row.author or "",
+                    intro = row.description or row.desc or row.abstract or "",
+                    cover = row.thumb_url or row.coverUrl or row.cover or row.cover_url,
+                }
+            end
+        end
+        report(T(_("正在写入书架（%1 本）"), #books))
+        local result, reason = require("source.shelf").reconcile(self.id, books)
+        cb(result, reason)
+    end)
+    return h
+end
+
+function Source:coverRequest(identity)
+    local book = identity.book or require("book.books_db").get(self.id, identity.stable_id)
+    if book and type(book.cover) == "string" and book.cover:match("^https?://") then
+        return { url = book.cover }
+    end
+    return nil, "暂无封面"
+end
+
+function Source:getDetailAsync(identity, cb)
+    local cancelled = false
+    require("ui/uimanager"):nextTick(function()
+        if not cancelled then
+            cb(identity.book or require("book.books_db").get(self.id, identity.stable_id))
+        end
+    end)
+    return { cancel = function() cancelled = true end }
+end
+
+function Source:loadTocAsync(identity, cb)
+    local Toc = require("source.toc")
+    local Content = require("source.fanqie.content")
+    local cached = Toc.read(self.id, identity.stable_id)
+    if cached and #cached > 0 then
+        local cancelled = false
+        require("ui/uimanager"):nextTick(function()
+            if not cancelled then cb(cached) end
+        end)
+        return { cancel = function() cancelled = true end }
+    end
+    local h = handle()
+    h.job = self.client:fetchChapterDirectoryAsync(identity.stable_id, function(wire, err)
+        if h.cancelled then return end
+        if not wire then
+            cb(nil, errMsg(err))
+            return
+        end
+        local rows = Content.readable_chapters(
+            Content.normalize_chapters(wire, identity.stable_id))
+        local toc = {}
+        for _idx, row in ipairs(rows) do
+            local uid = row.itemId or row.item_id
+            if uid then
+                toc[#toc + 1] = {
+                    idx = #toc + 1,
+                    uid = tostring(uid),
+                    title = row.title or row.item_title or ("第" .. (#toc + 1) .. "章"),
+                }
+            end
+        end
+        if #toc == 0 then
+            cb(nil, "番茄目录为空")
+            return
+        end
+        if not Toc.put(self.id, identity.stable_id, toc) then
+            cb(nil, _("章节目录保存失败"))
+            return
+        end
+        cb(toc)
+    end)
+    return h
+end
+
+local function fetch(self, identity, chapter, cb)
+    local Content = require("source.fanqie.content")
+    local h = handle()
+    h.job = self.client:officialGetContentAsync(identity.stable_id, chapter.uid, function(result, err)
+        if h.cancelled then return end
+        if not result then
+            cb(nil, errMsg(err))
+            return
+        end
+        cb({
+            title = result.title ~= "" and result.title or chapter.title,
+            html = Content.decode_pua_content(result.content),
+        })
+    end)
+    return h
+end
+
+-- 番茄正文接口有设备风控，预取与整本下载都按这个间隔逐章请求。
+local FETCH_INTERVAL = 6
+
+---@return ChapterFetchContent
+local function contentFetcher(self)
+    return function(ref, ch, done) return fetch(self, ref, ch, done) end
+end
+
+function Source:openBookAsync(identity, opts, cb)
+    local Chapter = require("source.chapter")
+    local open = opts and opts.chapter_idx and Chapter.openAsync or Chapter.openWithUi
+    return open(self, identity, identity.book, opts, {
+        loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
+        fetchContent = contentFetcher(self),
+    }, cb)
+end
+
+function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
+    return require("source.chapter").prefetchAsync(identity, identity.book, toc, from_idx, count, {
+        fetchContent = contentFetcher(self),
+        interval_seconds = FETCH_INTERVAL,
+    }, cb)
+end
+
+--- 缓存整本章节正文；已落盘章节由公共实现自动跳过。
+---@param identity BookIdentity
+---@param on_progress fun(done: integer, total: integer)|nil
+---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
+---@return { cancel: fun() }
+function Source:cacheAllChaptersAsync(identity, on_progress, cb)
+    return require("source.chapter").cacheAllAsync(self, identity, contentFetcher(self), on_progress, cb,
+        FETCH_INTERVAL)
+end
+
+function Source:getProgressAsync(identity, cb)
+    local Toc = require("source.toc")
+    local h = handle()
+    h.job = self.client:fetchReadProgressAsync(function(wire, err)
+        if h.cancelled then return end
+        if not wire then
+            cb(nil, errMsg(err))
+            return
+        end
+        local row
+        for _idx, item in ipairs(wire.data or {}) do
+            if tostring(item.book_id) == identity.stable_id then
+                row = item
+                break
+            end
+        end
+        if not row or not row.item_id then
+            cb(nil, nil, { empty = true })
+            return
+        end
+        h.job = self:loadTocAsync(identity, function(toc, reason)
+            if h.cancelled then return end
+            if not toc then
+                cb(nil, reason)
+                return
+            end
+            local idx = Toc.index(self.id, identity.stable_id, row.item_id)
+            if not idx then
+                cb(nil, nil, { empty = true })
+                return
+            end
+            local within = tonumber(row.read_progress) or 0
+            if within > 1 then within = within / 10000 end
+            within = math.max(0, math.min(1, within))
+            cb({
+                chapter_idx = idx,
+                chapter_fraction = within,
+                fraction = (idx - 1 + within) / #toc,
+                extra = { chapter_uid = tostring(row.item_id), chapter_idx = idx },
+            })
+        end)
+    end)
+    return h
+end
+
+function Source:putProgressAsync(identity, pos, cb)
+    local h = handle()
+    h.job = self:loadTocAsync(identity, function(toc, err)
+        if h.cancelled then return end
+        if not toc then
+            cb(nil, err)
+            return
+        end
+        local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
+        local chapter = idx and toc[idx]
+        if not chapter then
+            cb(nil, "缺少番茄章节位置")
+            return
+        end
+        h.job = self.client:updateReadProgressAsync(
+            identity.stable_id, chapter.uid, idx - 1,
+            math.max(0, math.min(1, tonumber(pos.chapter_fraction) or 0)),
+            function(wire, reason)
+                if h.cancelled then return end
+                if not wire or tonumber(wire.code or 0) ~= 0 then
+                    cb(nil, reason and errMsg(reason) or "番茄进度上传失败")
+                    return
+                end
+                cb(true)
+            end)
+    end)
+    return h
+end
+
+return M

@@ -93,7 +93,7 @@ function Protocol.sortedQuery(params)
     end
     table.sort(keys)
     local parts = {}
-    for _, key in ipairs(keys) do
+    for _idx, key in ipairs(keys) do
         parts[#parts + 1] = key .. "=" .. urlencode(params[key])
     end
     return table.concat(parts, "&")
@@ -225,7 +225,7 @@ local function reverseSwaps(encoded, positions)
     end
     table.sort(touched)
     local parts, cursor = {}, 1
-    for _, at in ipairs(touched) do
+    for _idx, at in ipairs(touched) do
         if at > cursor then
             parts[#parts + 1] = encoded:sub(cursor, at - 1)
         end

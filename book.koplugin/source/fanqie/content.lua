@@ -102,9 +102,9 @@ function Content.normalize_chapters(payload, book_id)
     -- Each volume is directly an array of chapters, not an object with chapterList property
     if type(records.chapterListWithVolume) == "table" then
         local flattened = {}
-        for _, volume in ipairs(records.chapterListWithVolume) do
+        for _idx, volume in ipairs(records.chapterListWithVolume) do
             if type(volume) == "table" then
-                for _, ch in ipairs(volume) do
+                for _idx, ch in ipairs(volume) do
                     if type(ch) == "table" and ch.itemId then
                         table.insert(flattened, fix_chapter_ids(ch))
                     end
@@ -118,7 +118,7 @@ function Content.normalize_chapters(payload, book_id)
     -- Direct chapter list fields (official + third-party variants)
     if type(records.chapterList) == "table" then
         local out = {}
-        for _, ch in ipairs(records.chapterList) do
+        for _idx, ch in ipairs(records.chapterList) do
             table.insert(out, fix_chapter_ids(ch))
         end
         return out
@@ -138,12 +138,12 @@ function Content.normalize_chapters(payload, book_id)
     if records.bookId or records.updated then
         records = { records }
     end
-    for _, record in ipairs(records) do
+    for _idx, record in ipairs(records) do
         if tostring(record.bookId or "") == tostring(book_id) then
             local list = record.updated or record.chapterInfos or record.chapters
                 or record.item_list or record.list or record.chapterList or {}
             local out = {}
-            for _, ch in ipairs(list) do
+            for _idx, ch in ipairs(list) do
                 table.insert(out, fix_chapter_ids(ch))
             end
             return out
@@ -154,7 +154,7 @@ end
 
 function Content.readable_chapters(chapters)
     local out = {}
-    for _, chapter in ipairs(chapters or {}) do
+    for _idx, chapter in ipairs(chapters or {}) do
         if tostring(chapter.title or "") ~= "封面" then
             out[#out + 1] = chapter
         end

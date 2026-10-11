@@ -13,7 +13,7 @@
 local JSON = require("json")
 local logger = require("utils.log")
 local Request = require("http.request")
-local Header = require("http.header")
+local Header = require("http.request.header")
 local Protocol = require("source.wechat.protocol")
 local Eink = require("source.wechat.eink")
 local _ = require("gettext")
@@ -255,7 +255,7 @@ local function tryRenewAsync(cb)
         if ok then
             last_renew_at = os.time()
         end
-        for _, waiter in ipairs(waiters or {}) do
+        for _idx, waiter in ipairs(waiters or {}) do
             waiter(ok, err)
         end
     end)
@@ -284,7 +284,7 @@ local function sessionRequest(opts, cb)
         method = opts.method or "GET",
         body = opts.body,
         headers = headers,
-        timeout = opts.block_timeout or opts.timeout or 45,
+        timeout = opts.timeout or 45,
         allow_redirects = opts.allow_redirects,
     }, function(res, err)
         if err then
@@ -317,7 +317,7 @@ end
 
 --- 带会话 Cookie 的异步 GET；遇鉴权失效会自动续期后重试一次。
 ---@param url string 完整 URL
----@param opts table|nil headers / accept / block_timeout / allow_redirects / skip_auth_retry
+---@param opts table|nil headers / accept / timeout / allow_redirects / skip_auth_retry
 ---@param cb fun(raw: string|nil, err: string|nil, res: table|nil) 失败时 raw 为 nil，res 是原始响应
 ---@return { cancel: fun() }|nil
 function Auth.webGetAsync(url, opts, cb)
@@ -327,7 +327,7 @@ function Auth.webGetAsync(url, opts, cb)
         method = "GET",
         headers = opts.headers,
         accept = opts.accept,
-        block_timeout = opts.block_timeout,
+        timeout = opts.timeout,
         allow_redirects = opts.allow_redirects,
         skip_auth_retry = opts.skip_auth_retry,
     }, cb)
@@ -347,7 +347,7 @@ function Auth.webPostAsync(url, body, opts, cb)
         body = body,
         headers = opts.headers,
         content_type = opts.content_type or "application/json",
-        block_timeout = opts.block_timeout,
+        timeout = opts.timeout,
         skip_auth_retry = opts.skip_auth_retry,
     }, cb)
 end

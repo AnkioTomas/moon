@@ -5,8 +5,11 @@
 @module koplugin.book.source.fanqie.reading.sign
 --]]
 
+-- LuaJIT bit 的注解是 32 位 integer；这里传入的是 uint64 cdata 常量。
+---@diagnostic disable: param-type-mismatch
+
 local Aes = require("crypto.aes")
-local Sm3 = require("source.fanqie.reading.sm3")
+local Sm3 = require("crypto.sm3")
 local Text = require("utils.text")
 local md5 = require("ffi/sha2").md5
 local ffi = require("ffi")

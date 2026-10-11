@@ -25,6 +25,7 @@ Client.__index = Client
 ---@field downloadChapterAsync fun(self: JdreadClient, book_id: string, query: table, cb: function): CancelHandle|nil
 ---@field getProgressAsync fun(self: JdreadClient, book_id: string, cb: function): CancelHandle|nil
 ---@field putProgressAsync fun(self: JdreadClient, book_id: string, marker: table, cb: function): CancelHandle|nil
+---@field apiPostAsync fun(self: JdreadClient, path: string, body: table, cb: function): CancelHandle|nil
 
 local API = "https://e.m.jd.com"
 local CATALOG_PAGE_SIZE = 2000
@@ -117,7 +118,7 @@ function Client:shelfSyncAsync(cb)
                 if cancelled then return end
                 if not wire then cb(nil, err); return end
                 local page = type(wire.data) == "table" and wire.data or {}
-                for _, row in ipairs(page) do books[#books + 1] = row end
+                for _idx, row in ipairs(page) do books[#books + 1] = row end
                 nextBatch()
             end
         )
@@ -128,7 +129,7 @@ function Client:shelfSyncAsync(cb)
         if not wire then cb(nil, err); return end
         local data = type(wire.data) == "table" and wire.data or {}
         local seen = {}
-        for _, row in ipairs(data.book_ids or {}) do
+        for _idx, row in ipairs(data.book_ids or {}) do
             local id = type(row) == "table" and row.ebook_id or row
             id = id ~= nil and tostring(id) or nil
             if id and id ~= "" and not seen[id] then
@@ -177,7 +178,7 @@ function Client:searchAsync(keyword, page, page_size, cb)
             if not wire then cb(nil, err); return end
             local data = type(wire.data) == "table" and wire.data or {}
             local rows = data.product_search_infos or {}
-            for _, row in ipairs(rows) do
+            for _idx, row in ipairs(rows) do
                 if #books >= wanted then break end
                 books[#books + 1] = row
             end
@@ -252,7 +253,7 @@ function Client:catalogAsync(book_id, cb)
             if not wire then cb(nil, err); return end
             local data = type(wire.data) == "table" and wire.data or {}
             local page = type(data.chapter_info) == "table" and data.chapter_info or {}
-            for _, row in ipairs(page) do rows[#rows + 1] = row end
+            for _idx, row in ipairs(page) do rows[#rows + 1] = row end
             if data.has_more and #page > 0 then
                 nextPage()
                 return

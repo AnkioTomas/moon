@@ -32,17 +32,30 @@ local PROPFIND_LIST = [[<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop>
 
 local trimSlashes = Text.trimSlashes
 
---- HTTP 状态码转用户可读错误文案
+--- HTTP 状态码转用户可读错误文案；一律点明是 WebDAV，用户才知道该去查哪项设置。
 ---@return string
 local function statusErr(code)
     local n = tonumber(code)
-    if not n then
-        return T(_("请求失败: %1"), tostring(code))
+    if n == 401 then
+        return _("WebDAV 认证失败：用户名或密码错误")
+    elseif n == 403 then
+        return _("WebDAV 没有权限：该账号无法读写这个目录")
+    elseif n == 404 then
+        return _("WebDAV 路径不存在：请检查地址和目录")
+    elseif n == 507 then
+        return _("WebDAV 空间不足")
+    elseif n and n >= 500 then
+        return T(_("WebDAV 服务器出错（HTTP %1）"), n)
+    elseif n then
+        return T(_("WebDAV 请求失败（HTTP %1）"), n)
     end
-    if n == 401 or n == 403 then
-        return _("认证失败，请检查用户名或密码")
-    end
-    return T(_("HTTP %1"), tostring(n))
+    return T(_("WebDAV 请求失败：%1"), tostring(code))
+end
+
+--- 传输层失败（连不上、超时、证书、断网）。
+---@return string
+local function networkErr(err)
+    return T(_("无法连接 WebDAV 服务器：%1"), tostring(err))
 end
 
 --- 构造 WebDAV 客户端
@@ -78,7 +91,7 @@ function Webdav:_request(opts, cb)
     opts.auth_password = self.password
     return Request.request(opts, function(res, err)
         if err then
-            cb(nil, err)
+            cb(nil, networkErr(err))
         elseif not Request.ok(res.code) then
             cb(nil, statusErr(res.code), tonumber(res.code))
         else
@@ -192,7 +205,10 @@ function Webdav:getAsync(path, dest, opts, cb)
             cb(true)
         elseif res and res.code and not Request.ok(res.code) then
             cb(nil, statusErr(res.code), tonumber(res.code))
+        elseif res and not res.code then
+            cb(nil, networkErr(err))
         else
+            -- 没开始请求（res=nil）或已收到 2xx：本地写盘 / 改名失败，不是 WebDAV 的问题
             cb(nil, err)
         end
     end)

@@ -69,7 +69,7 @@ local function downloadBinaryAsync(url, referer, cb)
         headers = {
             ["Referer"] = referer or (WEB .. "/"),
         },
-        block_timeout = 90,
+        timeout = 90,
         allow_redirects = true,
         -- CDN 403 不是会话失效，禁止走 renewal 误判。
         skip_auth_retry = true,
@@ -96,7 +96,7 @@ local function downloadTarAsync(tar, referer, images_dir, cb)
             return
         end
         local src_map = {}
-        for _, entry in ipairs(tarEntries(raw)) do
+        for _idx, entry in ipairs(tarEntries(raw)) do
             local href = Shared.materializeImage(images_dir, entry.data)
             if href then
                 local name = Text.basename(entry.name)
@@ -156,7 +156,7 @@ function Assets.localizeAsync(book_id, chapter, html, referer, cb)
 
     return { cancel = function()
             cancelled = true
-            for _, job in ipairs(jobs) do
+            for _idx, job in ipairs(jobs) do
                 if job.cancel then job:cancel() end
             end
         end }

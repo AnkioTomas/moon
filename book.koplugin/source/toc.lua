@@ -1,7 +1,7 @@
 --[[--
 章节源目录缓存：books.toc（JSON 载荷）的读取、按 idx/uid 定位与进程内缓存。
 
-目录只由本插件 ``Toc.put`` / ``Store.touch`` 写入，写入即失效重建，
+books.toc 只经 ``Toc.put`` 写入（同时接管内存缓存），
 翻页、按章补报统计这些高频路径不必反复查库 + decode 整份目录。
 缓存键含 source_id，各章节源共用这一份。
 
@@ -10,7 +10,7 @@
 
 local Toc = {}
 
---- 目录缓存 TTL（秒），与 Store.TOC_MAX_AGE 同源。
+--- 目录缓存 TTL（秒）。
 Toc.TTL = 6 * 60 * 60
 
 ---@class SourceTocEntry
@@ -24,24 +24,16 @@ local cache = {}
 local count = 0
 local CACHE_LIMIT = 32
 
---- 写入缓存；超限时淘汰任意一条旧条目，绝不淘汰刚写入的这条。
+--- 写入缓存；满了先整表清空再放新条目（活跃的只有在读的几本，清掉的下次查库重建）。
 ---@param key string
 ---@param entry SourceTocEntry
 ---@return SourceTocEntry
 local function putCache(key, entry)
     if cache[key] == nil then
+        if count >= CACHE_LIMIT then cache, count = {}, 0 end
         count = count + 1
     end
     cache[key] = entry
-    if count > CACHE_LIMIT then
-        for cached_key in pairs(cache) do
-            if cached_key ~= key then
-                cache[cached_key] = nil
-                count = count - 1
-                break
-            end
-        end
-    end
     return entry
 end
 
@@ -67,7 +59,7 @@ end
 local function build(list, fetched_at)
     local idx_by_uid = {}
     local source_idx_by_idx = {}
-    for _, chapter in ipairs(list) do
+    for _idx, chapter in ipairs(list) do
         if type(chapter) == "table" then
             local idx = tonumber(chapter.idx)
             if chapter.uid ~= nil then
@@ -93,7 +85,7 @@ local function entry(source_id, stable_id)
         return hit
     end
     dropCache(key)
-    local payload, fetched_at = require("db.book").getToc(source_id, stable_id, Toc.TTL)
+    local payload, fetched_at = require("book.books_db").getToc(source_id, stable_id, Toc.TTL)
     if not payload then
         return nil
     end
@@ -121,7 +113,7 @@ end
 function Toc.put(source_id, stable_id, list)
     local ok, payload = pcall(require("json").encode, list)
     if not ok or type(payload) ~= "string" then return false end
-    if not require("db.book").setToc(source_id, stable_id, payload) then return false end
+    if not require("book.books_db").setToc(source_id, stable_id, payload) then return false end
     putCache(keyOf(source_id, stable_id), build(list, os.time()))
     return true
 end
@@ -176,14 +168,7 @@ end
 ---@param source_id string
 ---@param stable_id string
 function Toc.drop(source_id, stable_id)
-    require("db.book").clearToc(source_id, stable_id)
-    dropCache(keyOf(source_id, stable_id))
-end
-
---- 丢掉一本的进程内目录缓存；落库的 books.toc 不受影响。
----@param source_id string
----@param stable_id string
-function Toc.invalidate(source_id, stable_id)
+    require("book.books_db").clearToc(source_id, stable_id)
     dropCache(keyOf(source_id, stable_id))
 end
 

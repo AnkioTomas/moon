@@ -14,37 +14,26 @@ local Setting = {}
 
 --- 弹出单字段输入框修改 Moon 配置项并落盘。
 --- 保存后作废 registry 缓存的源实例，让新地址/令牌立即生效。
----@param plugin table|nil 保存后回调 onSourceChanged 刷新 UI
 ---@param key string 配置字段名
 ---@param title string 对话框标题
 ---@param hint string 输入框提示
 ---@param password boolean|nil 是否按密码输入
 ---@param normalize fun(value: string|nil): string 存盘前的归一化函数
-local function edit(plugin, key, title, hint, password, normalize)
-    local UIManager = require("ui/uimanager")
-    local InputDialog = require("ui/widget/inputdialog")
+local function edit(key, title, hint, password, normalize)
     local cfg = require("utils.settings").getSource(SOURCE_ID)
-    local dialog
-    dialog = InputDialog:new{
-        title = title, input = tostring(cfg[key] or ""), input_hint = hint,
-        text_type = password and "password" or nil,
-        buttons = {{
-            { text = _("取消"), id = "close", callback = function() UIManager:close(dialog) end },
-            { text = _("保存"), callback = function()
-                cfg[key] = normalize(dialog:getInputText())
-                require("utils.settings").saveSource(SOURCE_ID, cfg)
-                require("source.registry").invalidate()
-                UIManager:close(dialog)
-                if plugin and plugin.onSourceChanged then plugin:onSourceChanged() end
-            end },
-        }},
-    }
-    UIManager:show(dialog)
-    dialog:onShowKeyboard()
+    require("ui.themes.widgets.input"):new{
+        title = title,
+        fields = { { text = tostring(cfg[key] or ""), hint = hint, text_type = password and "password" or nil } },
+        ok_text = _("保存"),
+        callback = function(value)
+            cfg[key] = normalize(value)
+            require("utils.settings").saveSource(SOURCE_ID, cfg)
+            require("source.registry").reload()
+        end,
+    }:show()
 end
 
 --- 生成一行设置项的构造器，点击后打开对应字段的编辑框。
----@param plugin table|nil 保存后回调 onSourceChanged 刷新 UI
 ---@param key string 配置字段名
 ---@param title string 行标题
 ---@param hint string 输入框提示
@@ -52,26 +41,27 @@ end
 ---@param normalize fun(value: string|nil): string 存盘前的归一化函数
 ---@param icon string|nil 行图标名，缺省 edit
 ---@return fun(iw: number): table 设置行构造器
-local function field(plugin, key, title, hint, password, normalize, icon)
+local function field(key, title, hint, password, normalize, icon)
     return function(iw)
         local value = require("utils.settings").getSource(SOURCE_ID)[key] or ""
-        return require("ui.components.settingrow").build(iw, {
+        return require("ui.themes.widgets.row").widget({
+    width = iw,
+    chevron = true,
             kind = "nav", icon = icon or "edit", title = title,
             status = value ~= "" and (password and "******" or value) or _("未设置"),
             status_on = value ~= "", callback = function()
-                edit(plugin, key, title, hint, password, normalize)
+                edit(key, title, hint, password, normalize)
             end,
         })
     end
 end
 
 --- Moon 设置页的行构造器列表：服务器地址、长期令牌。
----@param plugin table|nil 保存后回调 onSourceChanged 刷新 UI
 ---@return table[] 设置行构造器数组，元素为 fun(iw: number): table
-function Setting.rows(plugin)
+function Setting.rows()
     return {
-        field(plugin, "base_url", _("服务器地址"), "https://book.example.com", false, Text.stripWhitespace, "dns"),
-        field(plugin, "token", _("长期令牌"), "bk_...", true, Text.stripWhitespace, "key"),
+        field("base_url", _("服务器地址"), "https://book.example.com", false, Text.stripWhitespace, "dns"),
+        field("token", _("长期令牌"), "bk_...", true, Text.stripWhitespace, "key"),
     }
 end
 
@@ -87,54 +77,24 @@ function Setting.rowStatus()
 end
 
 --- 自绘连接表单。
----@param plugin table|nil
-function Setting.open(plugin)
-    local UIManager = require("ui/uimanager")
-    local InfoMessage = require("ui/widget/infomessage")
-    local MultiInputDialog = require("ui/widget/multiinputdialog")
+function Setting.open()
     local MoonSettings = require("utils.settings")
     local cfg = MoonSettings.getSource(SOURCE_ID)
-    local dialog
-    dialog = MultiInputDialog:new{
+    require("ui.themes.widgets.input"):new{
         title = _("服务器与令牌"),
         fields = {
-            {
-                text = tostring(cfg.base_url or ""),
-                hint = _("https://book.example.com"),
-            },
-            {
-                text = tostring(cfg.token or ""),
-                hint = _("bk_… 长期令牌"),
-                text_type = "password",
-            },
+            { text = tostring(cfg.base_url or ""), hint = _("https://book.example.com") },
+            { text = tostring(cfg.token or ""), hint = _("bk_… 长期令牌"), text_type = "password" },
         },
-        buttons = {{
-            {
-                text = _("取消"),
-                id = "close",
-                callback = function()
-                    UIManager:close(dialog)
-                end,
-            },
-            {
-                text = _("保存"),
-                callback = function()
-                    local values = dialog:getFields()
-                    cfg.base_url = Text.stripWhitespace(values[1])
-                    cfg.token = Text.stripWhitespace(values[2])
-                    MoonSettings.saveSource(SOURCE_ID, cfg)
-                    require("source.registry").invalidate()
-                    UIManager:close(dialog)
-                    UIManager:show(InfoMessage:new{ text = _("已保存"), timeout = 2 })
-                    if plugin and plugin.onSourceChanged then
-                        plugin:onSourceChanged()
-                    end
-                end,
-            },
-        }},
-    }
-    UIManager:show(dialog)
-    dialog:onShowKeyboard()
+        ok_text = _("保存"),
+        callback = function(base_url, token)
+            cfg.base_url = Text.stripWhitespace(base_url)
+            cfg.token = Text.stripWhitespace(token)
+            MoonSettings.saveSource(SOURCE_ID, cfg)
+            require("ui.themes.widgets.toast"):new{ text = _("已保存"), timeout = 2 }:show()
+            require("source.registry").reload()
+        end,
+    }:show()
 end
 
 return Setting

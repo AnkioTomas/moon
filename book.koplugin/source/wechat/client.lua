@@ -130,7 +130,7 @@ local function collectPagesAsync(limit, fetchPage, cb)
                 cb({ books = merged, totalCount = data.totalCount, hasMore = data.hasMore })
                 return
             end
-            for _, row in ipairs(batch) do
+            for _idx, row in ipairs(batch) do
                 merged[#merged + 1] = row
                 if #merged >= limit then
                     break
@@ -359,7 +359,7 @@ function Client:myReviewsAsync(bookId, cb)
     }, function(data, err)
         if type(data) == "table" and type(data.reviews) == "table" then
             local own = {}
-            for _, entry in ipairs(data.reviews) do
+            for _idx, entry in ipairs(data.reviews) do
                 local review = type(entry) == "table" and (entry.review or entry) or nil
                 local owner = type(review) == "table" and review.bookId
                 if owner == nil or tostring(owner) == bookId then own[#own + 1] = entry end

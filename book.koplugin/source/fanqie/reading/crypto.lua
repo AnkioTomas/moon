@@ -83,7 +83,7 @@ local function loadLibz()
     local ffi = require("ffi")
     -- 逐条 cdef：同名函数可能已被其他模块声明，重复声明报错不能连带丢掉其余声明。
     -- 参数用 void * 才能兼容他人以 z_stream * 声明的同名函数。
-    for _, decl in ipairs({
+    for _idx, decl in ipairs({
         [[typedef struct {
             const unsigned char *next_in;
             unsigned int avail_in;
@@ -148,11 +148,15 @@ function Crypto.maybe_decompress(data, compress_status)
         local chunks = {}
         local input = ffi.new("unsigned char[?]", #blob)
         ffi.copy(input, blob, #blob)
+        ---@diagnostic disable-next-line: inject-field
         strm.next_in = input
+        ---@diagnostic disable-next-line: inject-field
         strm.avail_in = #blob
         while true do
             local buf = ffi.new("unsigned char[?]", out_cap)
+            ---@diagnostic disable-next-line: inject-field
             strm.next_out = buf
+            ---@diagnostic disable-next-line: inject-field
             strm.avail_out = out_cap
             local ret = libz.inflate(zs, 0)
             local produced = out_cap - strm.avail_out
@@ -279,7 +283,7 @@ function Crypto.encode_query(params)
         end
         parts[#parts + 1] = ek .. "=" .. ev
     end
-    for _, k in ipairs(order) do
+    for _idx, k in ipairs(order) do
         if params[k] ~= nil then add(k, params[k]) end
     end
     for k, v in pairs(params) do

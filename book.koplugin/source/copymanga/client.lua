@@ -98,7 +98,7 @@ function Client:_getJson(path, cb)
         accept = "application/json",
         headers = Client.headers(self.token),
         allow_redirects = true,
-        block_timeout = 60,
+        timeout = 60,
         connect_timeout = 30,
     }, function(raw, err)
         cb(decodeWire(raw, err))
@@ -152,7 +152,7 @@ function Client:chaptersAsync(stable_id, groups, cb)
             if not wire then cb(nil, err); return end
             local root = type(wire.results) == "table" and wire.results or {}
             local list = root.list or {}
-            for _, row in ipairs(list) do
+            for _idx, row in ipairs(list) do
                 if type(row) == "table" and type(row.uuid) == "string" and row.uuid ~= "" then
                     rows[#rows + 1] = {
                         uuid = row.uuid,
@@ -258,7 +258,7 @@ function Client:collectAllAsync(cb)
             if not wire then cb(nil, err); return end
             local root = type(wire.results) == "table" and wire.results or {}
             local list = root.list or {}
-            for _, row in ipairs(list) do
+            for _idx, row in ipairs(list) do
                 books[#books + 1] = row
             end
             local total = tonumber(root.total) or #books

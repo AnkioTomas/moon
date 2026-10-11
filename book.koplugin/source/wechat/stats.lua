@@ -79,7 +79,7 @@ function Stats.annualBaseTimes(overall)
     for year in pairs(by_year) do years[#years + 1] = year end
     table.sort(years)
     local out = {}
-    for _, year in ipairs(years) do out[#out + 1] = by_year[year] end
+    for _idx, year in ipairs(years) do out[#out + 1] = by_year[year] end
     return out
 end
 
@@ -107,10 +107,10 @@ end
 ---@param progresses table[]|nil 书架 wire 的 bookProgress
 ---@param stored table<string, number> 本地 book_total 快照：bookId → 秒
 ---@param limit integer 本轮最多拉取的书数，其余留给下次同步
----@return { id: string, reading_time: number }[]
+---@return { id: string, reading_time: number, wire: table|nil }[]
 function Stats.changedBooks(progresses, stored, limit)
     local changed = {}
-    for _, p in ipairs(type(progresses) == "table" and progresses or {}) do
+    for _idx, p in ipairs(type(progresses) == "table" and progresses or {}) do
         local seconds = tonumber(p.readingTime) or 0
         local id = p.bookId ~= nil and tostring(p.bookId) or nil
         if id and seconds ~= (stored[id] or 0) then
@@ -134,7 +134,7 @@ local function appendBook(rows, source_id, book, fetched_at)
     end
     local detail = field(book.wire, "readDetail")
     local days = type(detail) == "table" and detail.data or nil
-    for _, day in ipairs(type(days) == "table" and days or {}) do
+    for _idx, day in ipairs(type(days) == "table" and days or {}) do
         local ts = tonumber(day.readDate)
         local seconds = tonumber(day.readTime)
         if ts and seconds and seconds > 0 then
@@ -162,7 +162,7 @@ function Stats.fromWires(source_id, overall, annuals, monthlies, books, fetched_
         { stable_prefix = TOTAL_ID, from_ts = 0, to_ts = 0 },
         { stable_prefix = LEGACY_WEEK_PREFIX, from_ts = 0, to_ts = fetched_at },
     }
-    for _, annual in ipairs(annuals or {}) do
+    for _idx, annual in ipairs(annuals or {}) do
         -- 年度回包有真实日明细时直接使用；没有时由月度请求补齐。
         appendTimes(rows, source_id, field(annual, "dailyReadTimes"), fetched_at)
         local from_ts, to_ts = yearRange(annual)
@@ -170,12 +170,12 @@ function Stats.fromWires(source_id, overall, annuals, monthlies, books, fetched_
             stable_prefix = DAY_PREFIX, from_ts = from_ts, to_ts = to_ts,
         }
     end
-    for _, monthly in ipairs(monthlies or {}) do
+    for _idx, monthly in ipairs(monthlies or {}) do
         -- 月度 ``readTimes`` 的粒度是日，可以直接落日桶。
         appendTimes(rows, source_id, field(monthly, "readTimes"), fetched_at)
     end
     local book_ids = {}
-    for _, book in ipairs(books or {}) do
+    for _idx, book in ipairs(books or {}) do
         appendBook(rows, source_id, book, fetched_at)
         book_ids[#book_ids + 1] = book.id
     end

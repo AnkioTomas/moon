@@ -1,0 +1,237 @@
+--[[--
+主体：单书阅读票根。仅宽屏。
+
+票根只展示已有的当前书、进度与阅读统计；不伪造开始日期或“本次阅读”
+这类当前数据模型无法可靠提供的信息。
+
+@module koplugin.book.features.lockscreen.components.receipt
+--]]
+
+local Blitbuffer = require("ffi/blitbuffer")
+local Current = require("features.lockscreen.components.current")
+local U = require("features.lockscreen.components.util")
+local _ = require("gettext")
+
+local M = {
+    id = "receipt",
+    label = _("阅读票根"),
+    supports_narrow = false,
+    supports_position = false,
+    preferred_height = 0.88,
+}
+
+--- 找出当前书今天的统计桶。
+---@param book table
+---@return table
+local function todayStats(book)
+    local today = os.date("%Y-%m-%d")
+    for _idx, row in ipairs(book.buckets or {}) do
+        if row.key == today then return row end
+    end
+    return { seconds = 0, pages = 0 }
+end
+
+--- 当前书、进度或今日统计变化时使同日组合缓存失效。
+---@return string
+function M.cache_key()
+    local book = Current.book(true)
+    if not book then return "none" end
+    local today = todayStats(book)
+    return table.concat({
+        tostring(book.source_id or ""),
+        tostring(book.stable_id or ""),
+        tostring(book.percent or 0),
+        tostring(book.page or 0),
+        tostring(book.total_seconds or 0),
+        tostring(today.seconds or 0),
+        tostring(today.pages or 0),
+    }, ":")
+end
+
+--- 根据已有累计时长与进度估算剩余时长；样本不足时不显示假精度。
+---@param book table
+---@return string
+local function remaining(book)
+    local percent = tonumber(book.percent) or 0
+    local elapsed = tonumber(book.total_seconds) or 0
+    if percent <= 0 or elapsed <= 0 then return _("暂无估算") end
+    return U.duration(elapsed * (100 - math.min(percent, 100)) / percent)
+end
+
+--- 在票面上下打齿孔，并在撕线两端切出半圆缺口。
+---@param blocks table[]
+---@param rect table
+---@param tear_y number
+local function appendCutouts(blocks, rect, tear_y)
+    local radius = math.max(7, math.floor(rect.pad * 0.45))
+    U.appendCutouts(blocks, rect.x, rect.y, rect.w, rect.h, radius)
+    local tear_radius = math.floor(radius * 1.5)
+    blocks[#blocks + 1] = {
+        kind = "cutout_circle", x = rect.x, y = tear_y, radius = tear_radius,
+    }
+    blocks[#blocks + 1] = {
+        kind = "cutout_circle", x = rect.x + rect.w, y = tear_y, radius = tear_radius,
+    }
+end
+
+--- 阅读票根：日期 → 当前书 → 进度/时长 → 今日摘要 → 装饰条码。
+---@param rect table
+---@param book table|nil 指定书籍快照（Current.snapshot），缺省取当前源最近在读
+---@return table[]
+function M.blocks(rect, book)
+    book = book or Current.book(true)
+    if not book then
+        return U.emptyBlocks(rect, _("阅读票根"), _("当前没有正在阅读的书籍"))
+    end
+    local Render = require("features.lockscreen.render")
+    local Title = require("features.lockscreen.title")
+
+    local today = todayStats(book)
+    local x, width = rect.text_x, rect.text_w
+    local y, height = rect.y, rect.h
+    local pad = rect.pad
+    local percent, page_line = U.progress(book)
+    local cover_h = math.floor(height * 0.27)
+    local cover_w = math.floor(cover_h / 1.5)
+    local cover_x = x + width - cover_w
+    local cover_y = y + math.floor(height * 0.195)
+    local info_w = math.max(1, cover_x - x - pad)
+    local title, title_size = Title.fitSingleLine(
+        book.title or book.stable_id or "", info_w, 30, 18,
+        function(text, width, size)
+            return Render.measureText(text, width, size, true)
+        end
+    )
+    local cover = U.coverBlock(book, cover_x, cover_y, cover_w, cover_h)
+    local logo_size = math.max(34, math.floor(height * 0.045))
+    local logo_y = y + pad
+    local brand_x = x + logo_size + math.floor(pad * 0.6)
+    local brand_y = logo_y + math.floor((logo_size - 16) / 2)
+    -- 标题从 logo 下按像素排，字高随屏幕缩放：轨迹行和分隔线跟着实测字高顺排，不按面板比例，否则互相压字
+    local heading_y = logo_y + logo_size + 5
+    local track_text = _("今日阅读轨迹") .. "  ·  " .. os.date("%Y.%m.%d")
+    local track_y = heading_y + Render.measureText("READ RECEIPT", width, 27, true)
+    local rule_y = math.max(y + math.floor(height * 0.17), track_y + Render.measureText(track_text, width, 14) + 4)
+    local blocks = {
+        {
+            kind = "panel", x = rect.x, y = y, width = rect.w, height = height,
+            radius = 2, shadow = 2, color = Blitbuffer.COLOR_WHITE,
+        },
+        {
+            kind = "image", file = U.LOGO_PATH,
+            x = x, y = logo_y, width = logo_size, height = logo_size,
+            scale_factor = 0, alpha = false,
+        },
+        {
+            text = "MOON READING", x = brand_x, y = brand_y,
+            width = math.floor(width * 0.48), size = 13, bold = true,
+            box = false, color = U.MUTED,
+        },
+        {
+            text = "READ RECEIPT", x = x, y = heading_y,
+            width = width, size = 27, bold = true, box = false,
+        },
+        {
+            text = os.date("NO.%Y%m%d"), x = x + math.floor(width * 0.55), y = brand_y,
+            width = math.floor(width * 0.45), size = 13, align = "right",
+            box = false, color = U.MUTED,
+        },
+        {
+            text = track_text, x = x, y = track_y,
+            width = width, size = 14, box = false, color = U.MUTED,
+        },
+        { kind = "rule", x = x, y = rule_y, width = width, height = 1, color = U.RULE },
+        {
+            text = _("当前阅读"), x = x, y = y + math.floor(height * 0.195),
+            width = info_w, size = 14, bold = true, box = false,
+        },
+        {
+            text = title,
+            x = x, y = y + math.floor(height * 0.235),
+            width = info_w, size = title_size, bold = true, box = false,
+        },
+        {
+            text = book.authors or "", x = x, y = y + math.floor(height * 0.325),
+            width = info_w, size = 15, box = false, color = U.MUTED,
+        },
+        cover,
+        {
+            text = _("阅读进度"), x = x, y = y + math.floor(height * 0.49),
+            width = math.floor(width * 0.55), size = 14, box = false,
+        },
+        {
+            text = string.format("%.0f%%", percent),
+            x = x + math.floor(width * 0.55), y = y + math.floor(height * 0.49),
+            width = math.floor(width * 0.45), size = 18, bold = true,
+            align = "right", box = false,
+        },
+        {
+            kind = "panel", x = x, y = y + math.floor(height * 0.535),
+            width = width, height = 7, radius = 0, color = U.RULE,
+        },
+        {
+            kind = "panel", x = x, y = y + math.floor(height * 0.535),
+            width = math.floor(width * percent / 100), height = 7,
+            radius = 0, color = Blitbuffer.COLOR_BLACK,
+        },
+        {
+            text = page_line, x = x, y = y + math.floor(height * 0.56),
+            width = math.floor(width * 0.5), size = 13, box = false, color = U.MUTED,
+        },
+        {
+            text = _("预计剩余") .. "  " .. remaining(book),
+            x = x + math.floor(width * 0.42), y = y + math.floor(height * 0.56),
+            width = math.floor(width * 0.58), size = 13, align = "right",
+            box = false, color = U.MUTED,
+        },
+    }
+
+    U.appendDashes(blocks, x, y + math.floor(height * 0.625), width, 7, 12)
+    blocks[#blocks + 1] = {
+        text = _("今日摘要") .. "  SUMMARY", x = x, y = y + math.floor(height * 0.65),
+        width = width, size = 19, bold = true, box = false,
+    }
+    blocks[#blocks + 1] = {
+        kind = "rule", x = x, y = y + math.floor(height * 0.70),
+        width = width, height = 1, color = U.RULE,
+    }
+
+    local half = math.floor(width / 2)
+    local column_gap = math.max(12, math.floor(pad * 0.7))
+    blocks[#blocks + 1] = {
+        text = _("今日阅读页数"), x = x, y = y + math.floor(height * 0.725),
+        width = half - column_gap, size = 13, box = false, color = U.MUTED,
+    }
+    blocks[#blocks + 1] = {
+        text = tostring(tonumber(today.pages) or 0) .. " " .. _("页"),
+        x = x, y = y + math.floor(height * 0.765),
+        width = half - column_gap, size = 27, bold = true, box = false,
+    }
+    blocks[#blocks + 1] = {
+        text = _("今日阅读时长"), x = x + half + column_gap, y = y + math.floor(height * 0.725),
+        width = width - half - column_gap, size = 13, box = false, color = U.MUTED,
+    }
+    blocks[#blocks + 1] = {
+        text = U.duration(today.seconds), x = x + half + column_gap, y = y + math.floor(height * 0.765),
+        width = width - half - column_gap, size = 27, bold = true, box = false,
+    }
+    blocks[#blocks + 1] = {
+        kind = "rule", x = x + half, y = y + math.floor(height * 0.72),
+        width = 1, height = math.floor(height * 0.10), color = U.RULE,
+    }
+
+    U.appendDashes(blocks, x, y + math.floor(height * 0.835), width, 7, 12)
+    -- 条码种子取稳定书籍身份，身份缺失时退回书名。
+    local seed = tostring(book.source_id or "") .. ":" .. tostring(book.stable_id or "")
+    if seed == ":" then seed = tostring(book.title or "moon") end
+    U.appendBarcode(blocks, x, y + math.floor(height * 0.865), width, math.max(24, math.floor(height * 0.04)), seed, 3)
+    blocks[#blocks + 1] = {
+        text = _("阅读记录") .. "  ·  READING LOG  ·  " .. os.date("%Y%m%d"),
+        x = x, y = y + math.floor(height * 0.92),
+        width = width, size = 11, align = "center", box = false, color = U.MUTED,
+    }
+    appendCutouts(blocks, rect, y + math.floor(height * 0.625))
+    return blocks
+end
+
+return M
