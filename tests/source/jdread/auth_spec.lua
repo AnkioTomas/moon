@@ -35,6 +35,8 @@ local calls = 0
 local ticket_reply = '{"returnCode":0,"url":"https://e.m.jd.com/"}'
 -- 配对模式：每张码发不同 token，check 像线上一样校验 token 与 Cookie 里的 wlfstk_smdl 一致。
 local paired, shows = false, 0
+-- hop：校验这一跳不带 Set-Cookie，会话在 url / Location 上。
+local hop_mode = nil
 package.preload["http.request"] = function()
     local Request = {}
     function Request.randomUA() return "test-agent" end
@@ -66,12 +68,25 @@ package.preload["http.request"] = function()
             local data = code == 200 and '{"code":200,"ticket":"ticket"}'
                 or ('{"code":' .. code .. ',"msg":"waiting"}')
             cb(callback .. "(" .. data .. ")", nil, res)
+        elseif url:find("qrCodeTicketValidation", 1, true) then
+            if not hop_mode then
+                res.headers["Set-Cookie"] = {
+                    "thor=session; Domain=.jd.com",
+                    "pin=tester; Domain=.jd.com",
+                }
+            end
+            cb(ticket_reply, nil, res)
+        elseif hop_mode == "redirect" and url:find("e.m.jd.com", 1, true) and not url:find("/home", 1, true) then
+            res.code = 302
+            res.headers.Location = "https://e.m.jd.com/home"
+            res.headers["Set-Cookie"] = { "thor=session; Domain=.jd.com" }
+            cb(nil, "HTTP 302", res)
         else
             res.headers["Set-Cookie"] = {
                 "thor=session; Domain=.jd.com",
                 "pin=tester; Domain=.jd.com",
             }
-            cb(ticket_reply, nil, res)
+            cb("<html></html>", nil, res)
         end
         return { cancel = function() end }
     end
@@ -163,4 +178,32 @@ do
         Assert.eq(result.info.ticket, "ticket-token-" .. i)
     end
     Assert.eq(results[1].info.jar.QRCodeKey, "qr-token-1")
+end
+
+-- 校验成功但这一跳没会话 cookie：跟 JSON.url 拿 thor。
+do
+    hop_mode = "url"
+    ticket_reply = '{"returnCode":0,"url":"https://e.m.jd.com/"}'
+    Auth.clearSession()
+    local user, err
+    Auth.completeQrLoginAsync({ ticket = "ticket", jar = { wlfstk_smdl = "token" } }, function(value, e)
+        user, err = value, e
+    end)
+    Assert.is_nil(err)
+    Assert.eq(user.user_name, "tester")
+    Assert.matches(cfg.cookie, "thor=session")
+    Assert.matches(cfg.cookie, "pin=tester")
+    Assert.is_false(cfg.cookie:find("wlfstk_smdl", 1, true) ~= nil)
+end
+
+-- 跳转 302 的 Set-Cookie 也算会话，不能等 turbo 跟完才读头。
+do
+    hop_mode = "redirect"
+    Auth.clearSession()
+    local user, err
+    Auth.completeQrLoginAsync({ ticket = "ticket", jar = {} }, function(value, e)
+        user, err = value, e
+    end)
+    Assert.is_nil(err)
+    Assert.matches(cfg.cookie, "thor=session")
 end

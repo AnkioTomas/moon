@@ -32,19 +32,24 @@ package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
 
-local begin_cb, wait_cb
-local begin_cancels, wait_cancels = 0, 0
+local begin_cb, wait_cb, complete_cb
+local begin_cancels, wait_cancels, begin_count = 0, 0, 0
 package.preload["source.jdread.auth"] = function()
     return {
         hasSession = function() return false end,
         userLabel = function() return nil end,
         beginQrLoginAsync = function(cb)
+            begin_count = begin_count + 1
             begin_cb = cb
             return { cancel = function() begin_cancels = begin_cancels + 1 end }
         end,
         waitQrLoginAsync = function(_, cb)
             wait_cb = cb
             return { cancel = function() wait_cancels = wait_cancels + 1 end }
+        end,
+        completeQrLoginAsync = function(_, cb)
+            complete_cb = cb
+            return { cancel = function() end }
         end,
     }
 end
@@ -95,3 +100,14 @@ placeholder = Themed.last("sheet")
 begin_cb(nil, "获取失败")
 Assert.is_true(placeholder.closed)
 Assert.eq(Themed.last("toast").text, "获取失败")
+
+-- 校验成功但没拿到会话：提示之后立刻换新码，别让用户扫已作废的那张。
+login()
+begin_cb({ qr_path = "qr-old.png", token = "t", jar = {} })
+local begins = begin_count
+wait_cb({ ticket = "ticket", jar = {} }, nil, "ok")
+Assert.not_nil(complete_cb)
+complete_cb(nil, "登录未拿到会话 Cookie")
+Assert.eq(Themed.last("toast").text, "登录未拿到会话 Cookie")
+Assert.eq(begin_count, begins + 1, "失败后自动换新码")
+Assert.eq(content(Themed.last("sheet")).text, "正在获取二维码…")
