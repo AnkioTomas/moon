@@ -138,7 +138,7 @@ end
 ---@param identity BookIdentity
 ---@return BookCoverRequest|nil, string|nil
 function Source:coverRequest(identity)
-    local path = self._client:cachedCoverPath(identity and identity.stable_id)
+    local path = self._client:cachedCoverPath(identity.stable_id)
     if path then
         return { url = path, headers = nil }
     end

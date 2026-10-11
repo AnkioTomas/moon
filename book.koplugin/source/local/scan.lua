@@ -110,10 +110,22 @@ local function parseFile(f, known, digests, skip, tried, progress)
     return f
 end
 
+--- 新路径是不是某本旧书移动/改名而来：新路径库里无任何行（known 不含元数据残缺行与墓碑，要查库），
+--- 且同 md5 的行里有文件已不在盘上的。同内容副本可以并存，必须挑真正被移走的那本，
+--- 不能随便取一行：取到还在盘上的副本就会把移动当成新书，旧书的进度笔记留在下架行上。
+---@param f table parseFile 产物
+---@return Book|nil
+local function movedFrom(f)
+    local BookDB = require("book.books_db")
+    if not f.md5 or BookDB.get(SOURCE_ID, f.path) then return nil end
+    for _idx, stable_id in ipairs(BookDB.stableIdsByMd5(SOURCE_ID, f.md5)) do
+        if not lfs.attributes(stable_id, "mode") then return BookDB.get(SOURCE_ID, stable_id) end
+    end
+end
+
 --- 主进程：把子进程解析结果写入 books 表。
---- 已入库且内容未变的行只恢复书架成员（changed 行按新解析结果重写）；未命中时按内容 md5 找旧行——旧文件已不在盘上且新路径无任何行
---- （known 不含元数据残缺行与墓碑）才算移动/改名，原地换 stable_id（身份以 md5 为准，不当新书），
---- category/series 随新位置刷新；同内容副本并存时各自成书，否则改名会撞主键让整次扫盘失败。
+--- 已入库且内容未变的行只恢复书架成员（changed 行按新解析结果重写）；未命中时按 movedFrom 找移动来源，
+--- 原地换 stable_id（身份以 md5 为准，不当新书），category/series 随新位置刷新；同内容副本并存时各自成书。
 ---@param files table[] parseFile 产物
 ---@param known table<string, Book>
 ---@param full_snapshot boolean|nil
@@ -122,20 +134,12 @@ local function commitFiles(files, known, full_snapshot)
     local BookDB = require("book.books_db")
     for _idx, f in ipairs(files) do
         local cached = known[f.path]
-        local moved
-        if not cached then
-            local by_md5 = f.md5 and BookDB.getByMd5(SOURCE_ID, f.md5)
-            if by_md5 and by_md5.stable_id ~= f.path
-                and not lfs.attributes(by_md5.stable_id, "mode")
-                and not BookDB.get(SOURCE_ID, f.path) then
-                if not BookDB.renameStableId(
-                    SOURCE_ID, by_md5.stable_id, f.path, f.category, f.series
-                ) then
-                    return false
-                end
-                moveBookArtifacts(by_md5.stable_id, f.path)
-                moved = by_md5
+        local moved = not cached and movedFrom(f)
+        if moved then
+            if not BookDB.renameStableId(SOURCE_ID, moved.stable_id, f.path, f.category, f.series) then
+                return false
             end
+            moveBookArtifacts(moved.stable_id, f.path)
         end
         if full_snapshot then
             f.source_id = SOURCE_ID
@@ -277,20 +281,25 @@ function Scan.importAsync(self, temp_path, filename, cb)
             cb(nil, tostring(copy_err))
             return nil
         end
-        while true do
-            local chunk = input:read(64 * 1024)
-            if not chunk then break end
-            local written, write_err = output:write(chunk)
-            if not written then
-                input:close()
-                output:close()
-                pcall(os.remove, target)
-                cb(nil, tostring(write_err))
-                return nil
+        local copy_ok = true
+        while copy_ok do
+            local chunk, read_err = input:read(64 * 1024)
+            if not chunk then
+                copy_ok, copy_err = read_err == nil, read_err
+                break
             end
+            local written
+            written, copy_err = output:write(chunk)
+            copy_ok = written ~= nil
         end
         input:close()
-        output:close()
+        -- 缓冲写的磁盘满 / IO 错误常在 close 刷盘时才报出来。
+        local closed, close_err = output:close()
+        if not copy_ok or not closed then
+            pcall(os.remove, target)
+            cb(nil, tostring(copy_err or close_err))
+            return nil
+        end
     end
     return self:indexOneAsync(target, cb)
 end
@@ -440,9 +449,15 @@ function Scan.replaceBook(self, temp_path, stable_id)
         updated.stable_id = new_path
         updated.path = new_path
         updated.md5 = digest
-        BookDB.upsert(updated)
+        -- 原书已替换、身份已迁：md5 没写上只会让下轮扫盘按内容变化重解析一次，不回滚。
+        if not BookDB.upsert(updated) then
+            require("utils.log").warn("book local replace md5 update failed", new_path)
+        end
     end
-    moveBookArtifacts(stable_id, new_path)
+    local artifacts_ok, artifacts_err = moveBookArtifacts(stable_id, new_path)
+    if not artifacts_ok then
+        require("utils.log").warn("book local replace sdr move failed", stable_id, artifacts_err)
+    end
     return new_path
 end
 

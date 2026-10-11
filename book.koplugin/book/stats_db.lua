@@ -361,12 +361,6 @@ function StatsDB.replaceSynced(source_id, replace, rows)
             return true
         end
         if not (replace and from and to) then return true end
-        if replace.mode == "prefix" and replace.stable_prefixes then
-            for _idx, prefix in ipairs(replace.stable_prefixes) do
-                if not deleteSyntheticInRange(source_id, from, to, prefix) then return false end
-            end
-            return true
-        end
         return deleteSyntheticInRange(source_id, from, to)
     end
 

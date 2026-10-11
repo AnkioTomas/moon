@@ -554,16 +554,15 @@ function BookDB.clearPathsUnder(dir)
     ) ~= nil
 end
 
---- 按 (source_id, md5) 找已入库的行
+--- 按 (source_id, md5) 列出已入库行的 stable_id。
+--- 同内容副本可以并存，由调用方挑真正被移走的那一行。
 ---@param source_id string
 ---@param md5 string
----@return Book|nil
-function BookDB.getByMd5(source_id, md5)
-    return rowToBook(DB.rowexec(
-        "SELECT " .. COLUMNS .. " FROM books WHERE source_id=? AND md5=? LIMIT 1;",
-        source_id,
-        md5
-    ))
+---@return string[]
+function BookDB.stableIdsByMd5(source_id, md5)
+    return stringColumn([[SELECT stable_id FROM books
+          WHERE source_id=? AND md5=?
+          ORDER BY inserted_at ASC, stable_id ASC;]], source_id, md5)
 end
 
 --- 挂在书身份上的核心表模块；note / progress / stats 顶层 require 本模块，只能延迟加载。

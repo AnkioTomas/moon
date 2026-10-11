@@ -80,12 +80,24 @@ local function remoteStableId(rel)
     return "webdav://" .. rel
 end
 
+--- 远端相对路径来自 books.sync，会拼进本地路径读写删：绝对路径、反斜杠、空段、. / .. 段一律拒绝。
+---@param rel string
+---@return boolean
+local function safeRel(rel)
+    if rel:find("\\", 1, true) or rel:find("^/") or rel:find("/$") or rel:find("//", 1, true) then
+        return false
+    end
+    for seg in rel:gmatch("[^/]+") do
+        if seg == "." or seg == ".." then return false end
+    end
+    return true
+end
+
 ---@param stable_id string
 ---@return string|nil
 local function remoteRelativePath(stable_id)
-    if type(stable_id) ~= "string" then return nil end
     local rel = stable_id:match("^webdav://(.+)$")
-    return rel and rel ~= "" and rel or nil
+    return rel and safeRel(rel) and rel or nil
 end
 
 --- 静读天下的 Cover/Cache 边车按书文件 basename 寻址，不含分类目录。
@@ -176,19 +188,24 @@ local function coverPath(stable_id)
     return Paths.coverPath(stable_id, SOURCE_ID)
 end
 
---- 把书籍附属资源从旧路径迁移到新路径。
---- 封面只是缓存，失败仅记日志；.sdr 装着 KOReader 进度与高亮，失败要报给调用方。
----@param old_path string
----@param new_path string
----@return boolean ok, string|nil err
-local function moveBookArtifacts(old_path, new_path)
-    local old_cover = coverPath(old_path)
+--- 封面缓存按 stable_id 寻址，跟着身份迁移；只是缓存，失败仅记日志。
+---@param old_id string
+---@param new_id string
+local function moveCover(old_id, new_id)
+    local old_cover = coverPath(old_id)
     if lfs.attributes(old_cover, "mode") == "file" then
-        local ok, err = os.rename(old_cover, coverPath(new_path))
+        local ok, err = os.rename(old_cover, coverPath(new_id))
         if not ok then
             require("utils.log").warn("book local cover move failed", old_cover, err)
         end
     end
+end
+
+--- .sdr 按物理路径寻址，装着 KOReader 进度与高亮，失败要报给调用方。
+---@param old_path string
+---@param new_path string
+---@return boolean ok, string|nil err
+local function moveSdr(old_path, new_path)
     local old_sdr = old_path .. ".sdr"
     if lfs.attributes(old_sdr, "mode") == "directory" then
         local ok, err = os.rename(old_sdr, new_path .. ".sdr")
@@ -198,6 +215,15 @@ local function moveBookArtifacts(old_path, new_path)
         end
     end
     return true
+end
+
+--- 纯本地书 stable_id 即路径：封面与 .sdr 一起迁。
+---@param old_path string
+---@param new_path string
+---@return boolean ok, string|nil err
+local function moveBookArtifacts(old_path, new_path)
+    moveCover(old_path, new_path)
+    return moveSdr(old_path, new_path)
 end
 
 --- 从已打开的文档提取封面并落盘为 PNG；封面缓存独立于 books 元数据缓存。
@@ -356,6 +382,7 @@ return {
     localRoot = localRoot,
     ensureParent = ensureParent,
     remoteStableId = remoteStableId,
+    safeRel = safeRel,
     remoteRelativePath = remoteRelativePath,
     sidecarKey = sidecarKey,
     stem = stem,
@@ -366,6 +393,8 @@ return {
     decodeProgress = decodeProgress,
     eachAsync = eachAsync,
     coverPath = coverPath,
+    moveCover = moveCover,
+    moveSdr = moveSdr,
     moveBookArtifacts = moveBookArtifacts,
     ensureCover = ensureCover,
     parseBookProps = parseBookProps,

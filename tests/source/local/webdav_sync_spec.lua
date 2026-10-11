@@ -115,6 +115,23 @@ package.preload["book.progress_db"] = function()
             progress[id] = row
             return true
         end,
+        upsert = function(_, id, pos)
+            local row = copy(pos)
+            row.sync_status = 0
+            progress[id] = row
+            return true
+        end,
+    }
+end
+
+local notes = {}
+package.preload["book.note_db"] = function()
+    return {
+        get = function(_, id) return notes[id] end,
+        upsert = function(_, id, _idx, payload, updated_at)
+            notes[id] = { payload = payload, updated_at = updated_at, sync_status = 0 }
+            return true
+        end,
     }
 end
 
@@ -131,7 +148,7 @@ package.preload["workers.job"] = function()
     }
 end
 
-for _, name in ipairs({ "book.books_db", "book.progress_db", "json", "ffi/zlib", "utils.settings", "utils.log",
+for _, name in ipairs({ "book.books_db", "book.progress_db", "book.note_db", "json", "ffi/zlib", "utils.settings", "utils.log",
     "workers.job", "source.local.client" }) do
     package.loaded[name] = nil
 end
@@ -662,6 +679,40 @@ do
     books = {}
 end
 
+-- books.sync 的 filename 会拼进本地路径：越界 / 绝对 / 反斜杠 / 空段的条目丢弃，不进书架。
+do
+    local dav = fakeDav()
+    putSync(dav, {
+        { filename = "../escape.epub", bookName = "x" },
+        { filename = "a/../../escape.epub", bookName = "x" },
+        { filename = "/abs.epub", bookName = "x" },
+        { filename = "a\\b.epub", bookName = "x" },
+        { filename = "a//b.epub", bookName = "x" },
+        { filename = "./dot.epub", bookName = "x" },
+        { filename = "ok/书.epub", bookName = "好书" },
+    })
+    Assert.is_true(scan(client(dav)))
+    local ids = {}
+    for id in pairs(books) do ids[#ids + 1] = id end
+    Assert.eq(table.concat(ids, ","), "webdav://ok/书.epub")
+    Assert.is_false(Client.isRemote("webdav://../escape.epub"))
+    Assert.is_false(Client.isRemote("webdav://a/./b.epub"))
+    Assert.is_true(Client.isRemote("webdav://ok/书.epub"))
+    books = {}
+end
+
+-- 刷新列远端目录与本地 scanFiles 同一层级：根 / 分类 / 系列，更深的不收、也不下钻。
+do
+    local dav = fakeDav()
+    dav:put(ROOT .. "/分类/系列/书.epub", "x")
+    dav:put(ROOT .. "/分类/系列/更深/书.epub", "x")
+    Assert.is_true(refresh(client(dav)))
+    Assert.not_nil(books["webdav://分类/系列/书.epub"])
+    Assert.is_nil(books["webdav://分类/系列/更深/书.epub"])
+    Assert.eq(dav:count("PROPFIND " .. ROOT .. "/分类/系列/更深"), 0)
+    books = {}
+end
+
 -- 排版替换：新 EPUB 传到同目录，书目条目原位改名（其余字段保留），本地文件/身份/.sdr 跟着换，
 -- 远端原书与边车删掉。书目写成之前失败，撤掉已传的新文件，两边保持原样。
 do
@@ -725,9 +776,16 @@ do
     Assert.eq(readFile(old_path), "txt")
     Assert.not_nil(books["webdav://A/书.txt"])
 
-    -- 正常替换。
+    -- 正常替换。旧名的远端进度 / 笔记随原书删掉，新身份的已同步副本要标脏重推。
     reset(dav)
+    progress["webdav://A/书.epub"] = { fraction = 0.5, updated_at = 10, sync_status = 1 }
+    notes["webdav://A/书.epub"] = { payload = "[]", updated_at = 10, sync_status = 1 }
     p, e = replace()
+    Assert.eq(progress["webdav://A/书.epub"].sync_status, 0)
+    Assert.eq(progress["webdav://A/书.epub"].fraction, 0.5)
+    Assert.eq(notes["webdav://A/书.epub"].sync_status, 0)
+    Assert.eq(notes["webdav://A/书.epub"].payload, "[]")
+    progress["webdav://A/书.epub"], notes["webdav://A/书.epub"] = nil, nil
     Assert.is_nil(e)
     Assert.eq(p, new_path)
     Assert.eq(readFile(new_path), "epub")

@@ -180,16 +180,15 @@ package.preload["book.books_db"] = function()
             end
             return out
         end,
-        getByMd5 = function(source_id, md5)
-            if type(md5) ~= "string" or md5 == "" then
-                return nil
-            end
+        stableIdsByMd5 = function(source_id, md5)
+            local out = {}
             for _, row in pairs(db_rows) do
                 if row.source_id == source_id and row.md5 == md5 then
-                    return row
+                    out[#out + 1] = row.stable_id
                 end
             end
-            return nil
+            table.sort(out)
+            return out
         end,
         renameStableId = function(source_id, old_stable_id, new_stable_id, category, series)
             renames[#renames + 1] = { source_id, old_stable_id, new_stable_id }
@@ -401,10 +400,10 @@ do
     }
     local BookDB = require("book.books_db")
     -- 模拟扫描发现同 md5 的新路径（partialMD5 在此测试环境恒为 nil，直接调用 DB 层验证原地改名的效果）
-    local by_md5 = BookDB.getByMd5("local", "digest-a")
-    Assert.not_nil(by_md5)
+    local by_md5 = BookDB.stableIdsByMd5("local", "digest-a")
+    Assert.eq(by_md5[1], "/books/old_name.epub")
     -- 文件移进 sub/deep：category/series 由新位置派生，随 stable_id 一并刷新
-    BookDB.renameStableId("local", by_md5.stable_id, "/books/sub/deep/new_name.epub", "sub", "deep")
+    BookDB.renameStableId("local", by_md5[1], "/books/sub/deep/new_name.epub", "sub", "deep")
     Assert.is_nil(db_rows[rowKey("local", "/books/old_name.epub")])
     local renamed = db_rows[rowKey("local", "/books/sub/deep/new_name.epub")]
     Assert.not_nil(renamed)
@@ -456,6 +455,25 @@ do
     Assert.is_nil(err)
     Assert.len(renames, 0)
     Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 0)
+    Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].deleted, 0)
+
+    -- 同内容副本还在盘上时移走另一本：收编被移走的那本（排序靠前的在盘副本不能挡住它），副本不动
+    reset()
+    digests = { ["/books/a.epub"] = "m", ["/books/sub/c.pdf"] = "m" }
+    db_rows[rowKey("local", "/books/sub/c.pdf")] = {
+        source_id = "local", stable_id = "/books/sub/c.pdf", md5 = "m", title = "副本", deleted = 0,
+    }
+    db_rows[rowKey("local", "/books/zz_gone.epub")] = {
+        source_id = "local", stable_id = "/books/zz_gone.epub", md5 = "m", title = "被移走", deleted = 0,
+        inserted_at = 7,
+    }
+    Assert.is_true(scan())
+    Assert.len(renames, 1)
+    Assert.eq(renames[1][2], "/books/zz_gone.epub")
+    Assert.eq(renames[1][3], "/books/a.epub")
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].inserted_at, 7)
+    Assert.is_nil(db_rows[rowKey("local", "/books/zz_gone.epub")])
+    Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].title, "副本")
     Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].deleted, 0)
 
     -- 新路径是墓碑：旧文件虽已消失，也不改名，墓碑由快照复活
@@ -755,6 +773,35 @@ do
     os.rename = real_rename
 end
 
+-- ── importAsync 跨设备复制：close 刷盘失败（磁盘满）要报错并删掉半截文件，不入库 ──
+do
+    reset()
+    local real_rename, real_open, real_remove = os.rename, io.open, os.remove
+    local removed = {}
+    os.rename = function() return nil, "cross-device" end
+    os.remove = function(p) removed[#removed + 1] = p; return true end
+    io.open = function(path, mode)
+        if path == "/tmp/full.epub" then
+            local sent = false
+            return { read = function() if sent then return nil end sent = true; return "data" end,
+                close = function() return true end }
+        end
+        if path == "/books/full.epub" and mode == "wb" then
+            return { write = function(self) return self end,
+                close = function() return nil, "No space left on device" end }
+        end
+        return real_open(path, mode)
+    end
+    local ok, err = true, nil
+    Client.new({ path = "/books" }):importAsync("/tmp/full.epub", "full.epub", function(o, e) ok, err = o, e end)
+    Stubs.flush()
+    io.open, os.rename, os.remove = real_open, real_rename, real_remove
+    Assert.is_nil(ok)
+    Assert.eq(err, "No space left on device")
+    Assert.contains(removed, "/books/full.epub")
+    Assert.is_nil(db_rows[rowKey("local", "/books/full.epub")])
+end
+
 -- ── moveBook：改分类/系列 = 移动文件；四表迁移 + 重名/非法目录名拒绝 ──────
 do
     reset()
@@ -964,8 +1011,6 @@ do
     local c = Client.new({ path = "/books" })
     -- stub lfs 对封面路径一律返回 nil → 不存在
     Assert.is_nil(c:cachedCoverPath("whatever"))
-    Assert.is_nil(c:cachedCoverPath(nil))
-    Assert.is_nil(c:cachedCoverPath(""))
 end
 
 -- ── 书库目录不得落在插件数据目录内 ────────────────────
