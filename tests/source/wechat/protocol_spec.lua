@@ -190,6 +190,10 @@ do
     math.random = real_random
     Assert.eq(payload.pr, 50)
     Assert.eq(payload.rt, 30)
+    Assert.eq(payload.sm, "章节")
+    -- 摘要按码点截 20 个，不切断多字节字符；非法字节处停住
+    Assert.eq(Protocol.makeReadPayload({ summary = string.rep("书", 25) }).sm, string.rep("书", 20))
+    Assert.eq(Protocol.makeReadPayload({ summary = "ab\255cd" }).sm, "ab")
     Assert.not_nil(payload.sg)
     Assert.not_nil(payload.s)
 end

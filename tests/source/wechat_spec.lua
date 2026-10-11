@@ -285,8 +285,8 @@ do
     })
     require("source.wechat.context").clear()
     local reported_payloads = {}
-    fake_client.reportReadAsync = function(_, raw, _, cb)
-        reported_payloads[#reported_payloads + 1] = require("json").decode(raw)
+    fake_client.reportReadAsync = function(_, payload, _, cb)
+        reported_payloads[#reported_payloads + 1] = payload
         -- 第一章 enter + 时长成功，第二章 enter 失败
         if #reported_payloads <= 2 then
             cb({ succ = 1 })
@@ -321,8 +321,8 @@ do
 
     -- 同一 reader 会话不再重复 enter
     reported_payloads = {}
-    fake_client.reportReadAsync = function(_, raw, _, cb)
-        reported_payloads[#reported_payloads + 1] = require("json").decode(raw)
+    fake_client.reportReadAsync = function(_, payload, _, cb)
+        reported_payloads[#reported_payloads + 1] = payload
         cb({ succ = 1 })
         return { cancel = function() end }
     end
@@ -346,8 +346,8 @@ do
         cb({ ok = true })
     end
     local reported = {}
-    fake_client.reportReadAsync = function(_, raw, _, cb)
-        reported[#reported + 1] = require("json").decode(raw)
+    fake_client.reportReadAsync = function(_, payload, _, cb)
+        reported[#reported + 1] = payload
         cb({ succ = 1, synckey = 1 })
         return { cancel = function() end }
     end
@@ -382,6 +382,23 @@ do
     require("support.stubs").flush()
     Assert.eq(pulled, "offline")
     Assert.len(entered, 1, "拉取返回后补发 enter")
+
+    -- 取消拉取（关书 / 换书）不能吞掉挂起的 enter；回调后再取消也不重复发。
+    entered = {}
+    local job = src:getProgressAsync(identity, function() error("取消后不回调") end)
+    src:onEvent("chapter_changed", { identity = identity, position = { chapter_idx = 1 } })
+    require("support.stubs").flush()
+    Assert.len(entered, 0)
+    job.cancel()
+    require("support.stubs").flush()
+    Assert.len(entered, 1, "取消拉取时补发挂起的 enter")
+    job.cancel()
+    pull_cb(nil, "late")
+    require("support.stubs").flush()
+    Assert.len(entered, 1, "取消后迟到的回包不再触发 enter")
+    src:onEvent("chapter_changed", { identity = identity, position = { chapter_idx = 1 } })
+    require("support.stubs").flush()
+    Assert.len(entered, 2, "取消后章节切换直接 enter，不再挂起")
     fake_client.putProgressAsync = nil
     fake_client.reportReadAsync = nil
     fake_client.getProgressAsync = nil
@@ -1101,6 +1118,18 @@ do
     Assert.eq(located.wr_bookmark_id, "bm-new")
     Assert.is_nil(ghost.wr_bookmark_id)
 
+    -- 带想法的划线在远端已被删：预检清掉 bookmark id 后仍要把想法推上去，不能静默成功。
+    local orphan = {
+        drawer = "lighten", text = "新划线", wr_range = "0-3",
+        wr_bookmark_id = "bm-gone", note = "孤儿想法",
+    }
+    ok, err = push({ orphan })
+    Assert.is_true(ok, tostring(err))
+    Assert.eq(#calls, 1)
+    Assert.eq(calls[1].api, "addReview")
+    Assert.eq(calls[1].content, "孤儿想法")
+    Assert.eq(orphan.wr_review_id, "rv-new")
+
     -- 无划线也无想法：不发请求
     ok = push({ { drawer = "lighten", text = "旧划线", wr_bookmark_id = "bm1", wr_range = "0-3" } })
     Assert.is_true(ok)
@@ -1133,6 +1162,108 @@ do
     Assert.eq(removed, "del1")
     Assert.eq(remembered_stats_books.removed.stable_id, "del1")
     package.loaded["workers.tasks"] = nil
+end
+
+-- 段评：开关读源配置；按目录解析本章 chapter_uid，章节 HTML 读本地文件定位。
+do
+    toc_payload["b1"] = [[ [{"idx":1,"source_idx":2,"uid":"40"}] ]]
+    local Settings = require("utils.settings")
+    local src = WeChat.new()
+    Assert.is_false(src:paragraphReviewsEnabled())
+    local getSource = Settings.getSource
+    Settings.getSource = function() return { show_paragraph_reviews = true } end
+    Assert.is_true(src:paragraphReviewsEnabled())
+    Settings.getSource = getSource
+
+    local path = os.tmpname()
+    local f = assert(io.open(path, "wb"))
+    f:write("<html><body><p>甲乙丙丁。</p></body></html>")
+    f:close()
+    local calls = {}
+    fake_client.underlinesAsync = function(_self, book_id, uid, cb)
+        calls[#calls + 1] = { book_id, uid }
+        cb({ underlines = { { range = "1-5" } } })
+        return { cancel = function() end }
+    end
+    fake_client.readReviewsAsync = function(_self, book_id, uid, reviews, cb)
+        calls[#calls + 1] = { book_id, uid, reviews }
+        cb({ reviews = { {
+            range = "1-5", totalCount = 3, maxIdx = 1, hasMore = 0,
+            pageReviews = { { review = { abstract = "甲乙丙丁。", author = { name = "a" }, content = "c" } } },
+        } } })
+        return { cancel = function() end }
+    end
+    local identity = setmetatable({ chapter_idx = 1 }, { __index = REF })
+    local spots
+    src:paragraphReviewsAsync(identity, path, function(value) spots = value end)
+    require("support.stubs").flush()
+    os.remove(path)
+    Assert.eq(calls[1][1], "b1")
+    Assert.eq(calls[1][2], "40")
+    Assert.len(spots, 1)
+    Assert.eq(spots[1].pos0, "/html/body/p/text().0")
+
+    local page
+    src:paragraphReviewPageAsync(identity, "1-5", 0, function(value) page = value end)
+    require("support.stubs").flush()
+    Assert.eq(calls[3][3][1].count, 30)
+    Assert.eq(page.total, 3)
+    Assert.is_false(page.more)
+
+    -- 本章不在目录且目录拉不到：报错，不发段评请求。
+    fake_client.chapterInfosAsync = function(_self, _book_id, cb)
+        cb(nil, "目录拉取失败")
+        return { cancel = function() end }
+    end
+    local err
+    src:paragraphReviewPageAsync(setmetatable({ chapter_idx = 9 }, { __index = REF }), "1-5", 0,
+        function(_page, e) err = e end)
+    require("support.stubs").flush()
+    Assert.not_nil(err)
+    Assert.len(calls, 3)
+    toc_payload["b1"] = nil
+    require("source.wechat.toc").clear()
+end
+
+-- pushNotesAsync 中途取消：在途请求被取消，迟到回包不回调、不再发后续请求。
+do
+    toc_payload["bcancel"] = '[{"idx":1,"source_idx":1,"uid":"7"}]'
+    local pending, cancelled, requests = nil, 0, 0
+    fake_client.bookmarkListAsync = function(_, _, cb)
+        requests = requests + 1
+        pending = cb
+        return { cancel = function() cancelled = cancelled + 1 end }
+    end
+    fake_client.myReviewsAsync = function()
+        requests = requests + 1
+        error("取消后不应继续请求")
+    end
+    local src = WeChat.new()
+    local called = false
+    local job = src:pushNotesAsync(
+        { source_id = "wechat", stable_id = "bcancel", chapter_idx = 1 },
+        { { drawer = "lighten", text = "甲" } },
+        function() called = true end
+    )
+    require("support.stubs").flush()
+    Assert.eq(requests, 1, "先发预检")
+    job.cancel()
+    Assert.eq(cancelled, 1, "取消在途的预检请求")
+    pending({ updated = {} })
+    require("support.stubs").flush()
+    Assert.is_false(called, "取消后不回调")
+    Assert.eq(requests, 1)
+
+    -- 无事可做直接成功，不发请求。
+    local ok
+    Assert.is_nil(src:pushNotesAsync({ source_id = "wechat", stable_id = "bcancel", chapter_idx = 1 },
+        { { drawer = "lighten", text = "甲", wr_bookmark_id = "b", wr_range = "0-1" } },
+        function(v) ok = v end))
+    Assert.is_true(ok)
+    Assert.eq(requests, 1)
+    toc_payload["bcancel"] = nil
+    fake_client.bookmarkListAsync = nil
+    fake_client.myReviewsAsync = nil
 end
 
 -- 还原打桩，避免影响本文件之后的其它用例

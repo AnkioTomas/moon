@@ -44,6 +44,8 @@ local FULL = '<?xml version="1.0"?><html><head><title></title>'
     .. '<img src="https://res.weread.qq.com/x.png" /></body></html>\n'
     .. '<?xml version="1.0"?><html><head><title></title></head><body><p>第二段文档</p></body></html>'
 local PLAIN = "\239\187\191第一行 <b>\n  第二行"
+local TRIAL = "“第四路，已过浔阳！”\n这是李善德发明的脚程格眼。..."
+local trial = false
 local signed_with = {}
 local styles = {}
 
@@ -57,6 +59,7 @@ package.preload["source.wechat.protocol"] = function()
         end,
         decodeShards = function(first)
             if first == "e2" then return ".content{text-indent:2em}" end
+            if trial then return TRIAL end
             return txt and PLAIN or FULL
         end,
     }
@@ -136,4 +139,14 @@ do
     txt = false
     Assert.is_nil(payload.document)
     Assert.is_true(payload.html:find("<p>", 1, true) ~= nil)
+end
+
+do
+    -- 无权阅读的付费章：EPUB 通道回纯文本试读片段，必须报错，不能当正文落盘。
+    trial = true
+    local payload, err = "untouched", nil
+    Chapter.fetchContentAsync("book", { uid = "paid", title = "第二章" }, function(p, e) payload, err = p, e end)
+    trial = false
+    Assert.is_nil(payload)
+    Assert.matches(err, "试读")
 end

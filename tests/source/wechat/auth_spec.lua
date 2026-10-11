@@ -1,7 +1,6 @@
 --[[--
 source.wechat.auth 离线用例：会话请求头 / 登录门禁 / 自动续期重试。
 
-absUrl 为模块内 local 函数，经 debug.getupvalue 从引用它的导出函数上取出，不改插件源码。
 每个用例用 freshAuth() 重 require 隔离。
 登录态 = Eink 会话（wr_skey + eink.refresh_token），扫码与续期细节见 eink_spec。
 
@@ -97,24 +96,6 @@ local function loggedIn(extra)
     return cfg
 end
 
---- 按名字取函数的 upvalue（模块内 local 函数 / 表）。
----@param fn function
----@param name string
----@return any
-local function upvalue(fn, name)
-    local i = 1
-    while true do
-        local n, v = debug.getupvalue(fn, i)
-        if n == nil then
-            return nil
-        end
-        if n == name then
-            return v
-        end
-        i = i + 1
-    end
-end
-
 ------------------------------------------------------------------------
 -- Auth.sessionHeaders：Cookie 只拼 Eink 会话的 wr_vid / wr_skey；旧网页残留字段不发
 ------------------------------------------------------------------------
@@ -206,24 +187,9 @@ do
 end
 
 ------------------------------------------------------------------------
--- absUrl
-------------------------------------------------------------------------
-
-do
-    local auth = freshAuth()
-    local absUrl = upvalue(auth.webApiPostAsync, "absUrl")
-    Assert.not_nil(absUrl)
-
-    Assert.eq(absUrl("https://i.weread.qq.com", "/a/b?x=1"), "https://i.weread.qq.com/a/b?x=1")
-    Assert.eq(absUrl("https://base", "https://other.com/x"), "https://other.com/x")
-    Assert.eq(absUrl("https://base", "http://other.com/x"), "http://other.com/x")
-end
-
-------------------------------------------------------------------------
--- webApiGetAsync：会话门禁 / URL 拼接 / decodeJson / HTTP 错误
+-- webGetAsync：会话门禁 / 原文透传 / HTTP 错误
 --
--- errcode 非 0 不在此层判定（由 client 的 acceptWebWire 负责），
--- 这里只确认 wire 原样透传。
+-- JSON 解码与 errcode 判定在 client 层，这里只确认回包原样透传。
 ------------------------------------------------------------------------
 
 do
@@ -233,7 +199,7 @@ do
         error("request must not be called")
     end
     local data, err
-    auth.webApiGetAsync("/web/test", function(d, e)
+    auth.webGetAsync("https://weread.qq.com/web/test", nil, function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(data)
@@ -249,25 +215,12 @@ do
         return { cancel = function() end }
     end
     data, err = nil, nil
-    auth.webApiGetAsync("/web/test?x=1", function(d, e)
+    auth.webGetAsync("https://weread.qq.com/web/test?x=1", nil, function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(err)
     Assert.eq(got_url, "https://weread.qq.com/web/test?x=1")
-    Assert.eq(data.ok, 1)
-
-    -- 非法 JSON → 返回非 JSON
-    state.json_map = {}
-    state.request_impl = function(_opts, cb)
-        cb({ code = 200, body = "<html>not json</html>" })
-        return { cancel = function() end }
-    end
-    data, err = nil, nil
-    auth.webApiGetAsync("/web/t", function(d, e)
-        data, err = d, e
-    end)
-    Assert.is_nil(data)
-    Assert.eq(err, "返回非 JSON")
+    Assert.eq(data, '{"errcode":0,"ok":1}')
 
     -- HTTP 非 2xx
     state.request_impl = function(_opts, cb)
@@ -275,7 +228,7 @@ do
         return { cancel = function() end }
     end
     data, err = nil, nil
-    auth.webApiGetAsync("/web/t", function(d, e)
+    auth.webGetAsync("https://weread.qq.com/web/t", nil, function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(data)
@@ -287,7 +240,7 @@ do
         return { cancel = function() end }
     end
     data, err = nil, nil
-    auth.webApiGetAsync("/web/t", function(d, e)
+    auth.webGetAsync("https://weread.qq.com/web/t", nil, function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(data)
@@ -295,7 +248,7 @@ do
 end
 
 ------------------------------------------------------------------------
--- webApiPostAsync：Content-Type 默认与 URL 拼接
+-- webPostAsync：Content-Type 默认
 ------------------------------------------------------------------------
 
 do
@@ -308,7 +261,7 @@ do
         return { cancel = function() end }
     end
     local data, err
-    auth.webApiPostAsync("/web/sync", { a = 1 }, function(d, e)
+    auth.webPostAsync("https://weread.qq.com/web/sync", "{}", nil, function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(err)
@@ -348,11 +301,11 @@ do
         return { cancel = function() end }
     end
     local data, err
-    auth.webApiGetAsync("/web/retry", function(d, e)
+    auth.webGetAsync("https://weread.qq.com/web/retry", nil, function(d, e)
         data, err = d, e
     end)
     Assert.is_nil(err)
-    Assert.eq(data.ok, 1)
+    Assert.eq(data, '{"errcode":0,"ok":1}')
     Assert.eq(refreshed, 1)
     Assert.eq(#cookies, 2)
     Assert.is_true(cookies[1]:find("wr_skey=old", 1, true) ~= nil)
@@ -402,7 +355,7 @@ do
         cb({ code = 200, body = '{"errcode":-1,"errmsg":"请求超时"}' })
         return { cancel = function() end }
     end
-    auth.webApiGetAsync("/web/t", function() end)
+    auth.webGetAsync("https://weread.qq.com/web/t", nil, function() end)
     Assert.eq(refreshed, 0)
 end
 
@@ -424,7 +377,7 @@ do
         return { cancel = function() end }
     end
     local called = false
-    local job = auth.webApiGetAsync("/web/cancel", function() called = true end)
+    local job = auth.webGetAsync("https://weread.qq.com/web/cancel", nil, function() called = true end)
     job.cancel()
     finish_refresh(true)
     Assert.eq(requests, 1)
@@ -448,7 +401,7 @@ do
         return { cancel = function() end }
     end
     local data, err
-    auth.webApiGetAsync("/web/fail", function(d, e) data, err = d, e end)
+    auth.webGetAsync("https://weread.qq.com/web/fail", nil, function(d, e) data, err = d, e end)
     Assert.eq(requests, 1)
     Assert.is_nil(data)
     Assert.eq(err, "登录失败 -2013")

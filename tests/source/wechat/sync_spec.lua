@@ -155,7 +155,6 @@ do
         "<p>重复段落文本。</p>",
         "</body></html>",
     })
-    Assert.eq(#Annotations.paragraphs(shell), 4)
 
     local pos0, pos1 = locate(shell, "莫问毕竟是六星炼丹师。")
     Assert.eq(pos0, "/html/body/p[1]/text().0")
@@ -221,7 +220,7 @@ do
     local prefix = wire:sub(1, wire:find("<p>正文", 1, true) + 2)
     local start = select(2, prefix:gsub("[^\128-\191]", ""))
     local range = Annotations.toWireRange(Annotations.rangeMapping(wire, "html"),
-        Annotations.flow(shell), "正文", "/html/body/p[1]/text().0", "/html/body/p[1]/text().2")
+        Annotations.flow(shell), "正文", "/html/body/p/text().0", "/html/body/p/text().2")
     Assert.eq(range, string.format("%d-%d", start, start + 2))
 end
 
@@ -247,16 +246,38 @@ do
     local runes_before = select(2, wire:sub(1, head - 1):gsub("[^\128-\191]", ""))
     Assert.eq(range:match("^(%d+)"), tostring(runes_before))
 
-    -- 起点 xpointer 不在扁平段落坐标里（嵌套 / 内联节点）时靠唯一文本定位，不拿终点去比。
+    -- 起点 xpointer 对不上（旧版按扁平 p[N] 写出的坐标）时靠唯一文本定位，不拿终点去比。
     Assert.eq(Annotations.toWireRange(Annotations.rangeMapping(wire), Annotations.flow(shell),
         "第二段", "/html/body/div/p[9]/span/text().0", "/html/body/div/p[9]/text().3") ~= nil, true)
 end
 
 do
-    -- crengine 的 p[N] 只数 <p>，<pre>/<param> 不能占段号。
-    local paragraphs = Annotations.paragraphs("<body><pre>x</pre><p>a</p><p class='c'>b</p></body>")
-    Assert.len(paragraphs, 2)
-    Assert.eq(paragraphs[2].runes[1], "b")
+    -- xpointer 与 crengine 写法逐字一致（期望值由 crengine getTextFromXPointers 反查确认）：
+    -- 同名兄弟唯一时不带 [k]，拼接的多份文档是 html[k]，内联元素把文本拆成 text()[k]，脚注正文不参与匹配。
+    local shell = table.concat({
+        '<?xml version="1.0" encoding="utf-8"?><html xmlns:epub="http://www.idpf.org/2007/ops">',
+        '<head><title>a</title></head><body>',
+        '<div class="c"><p>第一段<a epub:type="noteref" href="#n1"><img src="x.png"/></a>注后文字</p>\n<p>第二段</p></div>',
+        '<aside epub:type="footnote" id="n1"><p>脚注正文</p></aside>',
+        '</body></html>',
+        '<?xml version="1.0" encoding="utf-8"?><html><head><title>b</title></head><body>',
+        '<p>次文档首段</p><p>次文档 <b>粗体</b> 尾巴</p>',
+        '</body></html>',
+    })
+    local cases = {
+        { "注后文字", "/html[1]/body/div/p[1]/text()[2].0", "/html[1]/body/div/p[1]/text()[2].4" },
+        { "第二段", "/html[1]/body/div/p[2]/text().0", "/html[1]/body/div/p[2]/text().3" },
+        { "次文档首段", "/html[2]/body/p[1]/text().0", "/html[2]/body/p[1]/text().5" },
+        { "尾巴", "/html[2]/body/p[2]/text()[2].1", "/html[2]/body/p[2]/text()[2].3" },
+        { "粗体", "/html[2]/body/p[2]/b/text().0", "/html[2]/body/p[2]/b/text().2" },
+    }
+    for _idx, case in ipairs(cases) do
+        local pos0, pos1 = locate(shell, case[1])
+        Assert.eq(pos0, case[2])
+        Assert.eq(pos1, case[3])
+    end
+    Assert.is_nil(locate(shell, "脚注正文"))
+    Assert.eq(locate("<html><body><p>正文</p></body></html>", "正文"), "/html/body/p/text().0")
 end
 
 do
@@ -297,8 +318,8 @@ do
     }, path)
     os.remove(path)
     Assert.eq(#localized, 1)
-    Assert.eq(localized[1].pos0, "/html/body/p[1]/text().4")
-    Assert.eq(localized[1].pos1, "/html/body/p[1]/text().9")
+    Assert.eq(localized[1].pos0, "/html/body/p/text().0")
+    Assert.eq(localized[1].pos1, "/html/body/p/text().5")
 end
 
 do

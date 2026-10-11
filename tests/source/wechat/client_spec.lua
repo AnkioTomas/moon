@@ -17,42 +17,38 @@ package.preload["json"] = function()
 end
 package.loaded["json"] = nil
 
+-- 网页接口回原始 JSON 串：解码与 errcode 校验在 client 里真跑
+local web_replies = {}
 package.preload["source.wechat.auth"] = function()
+    local decode = require("support.json_stub").decode
     return {
-        webApiGetAsync = function(path, cb)
-            captured[#captured + 1] = path
-            if path:find("/web/shelf/sync", 1, true) then
-                cb({ pureBookCount = 1, bookCount = 1, synckey = 0 })
-            elseif path:find("/web/book/getProgress", 1, true) then
-                cb({ bookId = "42", book = { chapterUid = 1, progress = 10 } })
-            elseif path:find("/web/book/bookmarklist", 1, true) then
-                cb({ synckey = 1, updated = {} })
-            elseif path:find("/web/book/underlines", 1, true) then
-                cb({ underlines = {} })
+        webGetAsync = function(url, _opts, cb)
+            captured[#captured + 1] = url
+            for pattern, raw in pairs(web_replies) do
+                if url:find(pattern, 1, true) then
+                    cb(raw)
+                    return { cancel = function() end }
+                end
+            end
+            if url:find("/web/shelf/sync", 1, true) then
+                cb('{"pureBookCount":1,"bookCount":1,"synckey":0}')
+            elseif url:find("/web/book/getProgress", 1, true) then
+                cb('{"bookId":"42","book":{"chapterUid":1,"progress":10}}')
+            elseif url:find("/web/book/underlines", 1, true) then
+                cb('{"underlines":[]}')
             end
             return { cancel = function() end }
         end,
-        webApiPostAsync = function(path, body, cb)
-            posted.path = path
-            posted.body = body
-            cb({ succ = 1 })
-            return { cancel = function() end }
-        end,
-        apiPostAsync = function(path, body, cb)
-            posted.api_path = path
-            posted.api_body = body
-            cb({ succ = 1 })
-            return { cancel = function() end }
-        end,
-        webPostAsync = function(url, body, _, cb)
+        webPostAsync = function(url, body, opts, cb)
             posted.url = url
             posted.raw = body
+            posted.referer = opts and opts.headers and opts.headers.Referer
+            local ok, decoded = pcall(decode, body)
+            posted.body = ok and decoded or nil
             if url:find("/review/add", 1, true) then
                 cb('{"reviewId":"rv-1"}')
-            elseif url:find("/review/edit", 1, true) then
-                cb('{"succ":1}')
             else
-                cb("{}")
+                cb('{"succ":1}')
             end
             return { cancel = function() end }
         end,
@@ -115,7 +111,7 @@ do
     posted = {}
     local ok
     client:addToShelfAsync("123", function(data) ok = data end)
-    Assert.is_true(posted.path:find("/web/shelf/add", 1, true) ~= nil)
+    Assert.eq(posted.url, "https://weread.qq.com/web/shelf/add")
     Assert.eq(posted.body.bookIds[1], "123")
     Assert.not_nil(ok)
 end
@@ -124,8 +120,8 @@ do
     posted = {}
     local ok
     client:removeFromShelfAsync("123", function(data) ok = data end)
-    Assert.eq(posted.api_path, "/shelf/delete")
-    Assert.eq(posted.api_body.bookIds[1], "123")
+    Assert.eq(posted.url, "https://i.weread.qq.com/shelf/delete")
+    Assert.eq(posted.body.bookIds[1], "123")
     Assert.not_nil(ok)
 end
 
@@ -136,6 +132,20 @@ do
     Assert.eq(#captured, 1)
     Assert.is_true(captured[1]:find("/web/shelf/sync?", 1, true) ~= nil)
     Assert.eq(wire.bookCount, 1)
+
+    -- 登录页 / WAF 拦截页不是 JSON：按失败，不能当成功静默丢数据。
+    web_replies["/web/book/info"] = "<html>login</html>"
+    local data, err
+    client:bookInfoAsync("1", function(d, e) data, err = d, e end)
+    Assert.is_nil(data)
+    Assert.eq(err, "返回非 JSON")
+
+    -- errcode 非 0 按失败，带服务端错误信息。
+    web_replies["/web/book/info"] = '{"errcode":-2010,"errmsg":"用户不存在"}'
+    client:bookInfoAsync("1", function(d, e) data, err = d, e end)
+    Assert.is_nil(data)
+    Assert.eq(err, "用户不存在")
+    web_replies["/web/book/info"] = nil
 end
 
 do
@@ -295,4 +305,28 @@ do
     }, function() end)
     Assert.is_true(posted.url:find("/web/book/addBookmark", 1, true) ~= nil)
     Assert.is_true(posted.raw:find('"range":"1-6"', 1, true) ~= nil)
+end
+
+do
+    -- 段评：underlines 走 GET 带 bookId/chapterUid；readReviews POST 批量 range，chapterUid 是数字。
+    package.preload["json"] = function()
+        return { encode = require("support.json_stub").encode, decode = require("support.json_stub").decode }
+    end
+    package.loaded["json"] = nil
+    package.loaded["source.wechat.client"] = nil
+    local client = require("source.wechat.client")
+    captured, posted = {}, {}
+    local got
+    client:underlinesAsync("3300055092", "4", function(data) got = data end)
+    Assert.matches(captured[1], "^https://weread%.qq%.com/web/book/underlines%?")
+    Assert.is_true(captured[1]:find("bookId=3300055092", 1, true) ~= nil)
+    Assert.is_true(captured[1]:find("chapterUid=4", 1, true) ~= nil)
+    Assert.eq(#got.underlines, 0)
+
+    local ranges = { { range = "386-407", maxIdx = 0, count = 1, synckey = 0 } }
+    client:readReviewsAsync("3300055092", "4", ranges, function() end)
+    Assert.eq(posted.url, "https://weread.qq.com/web/book/readReviews")
+    Assert.eq(posted.body.bookId, "3300055092")
+    Assert.eq(posted.body.chapterUid, 4)
+    Assert.eq(posted.body.reviews[1].range, "386-407")
 end

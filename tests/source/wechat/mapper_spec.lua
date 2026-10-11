@@ -127,3 +127,12 @@ do
     Assert.eq(pos.fraction, 0.77)
     Assert.is_true(math.abs(pos.chapter_fraction - 0.5) < 0.001)
 end
+
+do
+    local pos = Mapper.progress({ book = { chapterUid = "u7", progress = 1, chapterOffset = 1 } })
+    Assert.eq(pos.chapter_fraction, 0.0001)
+    pos = Mapper.progress({ book = { chapterUid = "u7", progress = 1, chapterOffset = 0 } })
+    Assert.eq(pos.chapter_fraction, 0)
+    pos = Mapper.progress({ book = { chapterUid = "u7", progress = 1 } })
+    Assert.is_nil(pos.chapter_fraction)
+end
