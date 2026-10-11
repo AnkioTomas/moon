@@ -376,6 +376,30 @@ do
     clearMods()
 end
 
+-- ── stableIdsByMd5：同内容副本全部列出（不 LIMIT 1），顺序稳定 ──
+do
+    local connection, calls = makeConn({
+        resultset = function(sql)
+            if sql:find("md5=?", 1, true) then
+                return { { "/books/a.epub", "/books/b.epub" } }, 2
+            end
+            return nil, 0
+        end,
+    })
+    local DbBase, BookDB = loadBook(connection)
+    local ids = BookDB.stableIdsByMd5("local", "m")
+    Assert.eq(#ids, 2)
+    Assert.eq(ids[1], "/books/a.epub")
+    Assert.eq(ids[2], "/books/b.epub")
+    local q = calls[#calls]
+    Assert.is_true(q.sql:find("ORDER BY inserted_at ASC, stable_id ASC", 1, true) ~= nil)
+    Assert.is_nil(q.sql:find("LIMIT", 1, true))
+    Assert.eq(q.args[1], "local")
+    Assert.eq(q.args[2], "m")
+    DbBase.close()
+    clearMods()
+end
+
 -- ── pendingShelfAddIds：脏加架队列 ──
 do
     local connection, calls = makeConn({

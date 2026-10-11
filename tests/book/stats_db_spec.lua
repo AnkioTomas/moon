@@ -142,7 +142,7 @@ do
 
     -- replaceSynced：清理 + 写入同事务；命中的算 skipped，未命中的算 imported
     local mark = #calls
-    local saved = StatsDB.replaceSynced("moon", { mode = "synced" }, { hit, miss })
+    local saved = StatsDB.replaceSynced("moon", {}, { hit, miss })
     Assert.eq(saved.imported, 1)
     Assert.eq(saved.skipped, 1)
     local begun, deleted, committed = 0, 0, 0

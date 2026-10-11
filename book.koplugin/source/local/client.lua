@@ -131,9 +131,6 @@ end
 ---@param stable_id string
 ---@return string|nil
 function Client:cachedCoverPath(stable_id)
-    if type(stable_id) ~= "string" or stable_id == "" then
-        return nil
-    end
     local path = coverPath(stable_id)
     if lfs.attributes(path, "mode") == "file" then
         return path

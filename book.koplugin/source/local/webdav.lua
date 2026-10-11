@@ -18,7 +18,8 @@ local defer, isBookFile, localRoot, ensureParent = Common.defer, Common.isBookFi
 local remoteStableId, remoteRelativePath = Common.remoteStableId, Common.remoteRelativePath
 local sidecarKey, stem, readFile, writeFile, field = Common.sidecarKey, Common.stem, Common.readFile, Common.writeFile, Common.field
 local decodeProgress, eachAsync, coverPath = Common.decodeProgress, Common.eachAsync, Common.coverPath
-local moveBookArtifacts, parseBookProps, scanFiles = Common.moveBookArtifacts, Common.parseBookProps, Common.scanFiles
+local moveCover, moveSdr, safeRel = Common.moveCover, Common.moveSdr, Common.safeRel
+local parseBookProps, scanFiles = Common.parseBookProps, Common.scanFiles
 local moonPath, coverRemotePath = Common.moonPath, Common.coverRemotePath
 local progressRemotePath, notesRemotePath = Common.progressRemotePath, Common.notesRemotePath
 
@@ -126,7 +127,8 @@ end
 ---@param run WebdavRun
 ---@param next fun(err: string|nil)
 local function listBooks(self, run, next)
-    local function walk(path, prefix, done)
+    -- 层级与本地 scanFiles 一致：根 / 分类 / 系列，更深忽略。
+    local function walk(path, prefix, depth, done)
         run.report(T(_("正在列出远端目录 %1"), path))
         run.active = self.dav:listAsync(path, function(entries, err)
             if run.cancelled then return end
@@ -135,7 +137,8 @@ local function listBooks(self, run, next)
                 if entry.name:sub(1, 1) == "." then return next_entry() end
                 local rel = prefix ~= "" and prefix .. "/" .. entry.name or entry.name
                 if entry.is_dir then
-                    return walk(entry.path, rel, function(walk_err)
+                    if depth >= 3 then return next_entry() end
+                    return walk(entry.path, rel, depth + 1, function(walk_err)
                         if walk_err then done(walk_err) else next_entry() end
                     end)
                 end
@@ -152,7 +155,7 @@ local function listBooks(self, run, next)
         run.active = self.dav:ensurePathAsync(moonPath(self, "Cover"), function(ok_cover, cover_err)
             if run.cancelled then return end
             if not ok_cover then return next(cover_err) end
-            walk(self:webdavPath(), "", next)
+            walk(self:webdavPath(), "", 1, next)
         end)
     end)
 end
@@ -233,7 +236,11 @@ local function pullBooksSync(self, run, next)
         if type(decoded) == "table" then
             for _idx, entry in ipairs(decoded) do
                 if type(entry) == "table" and type(entry.filename) == "string" then
-                    run.entries[entry.filename] = entry
+                    if safeRel(entry.filename) then
+                        run.entries[entry.filename] = entry
+                    else
+                        require("utils.log").warn("book webdav books.sync unsafe filename", entry.filename)
+                    end
                 end
             end
         elseif ok or code ~= 404 then
@@ -867,9 +874,15 @@ function Webdav.replaceWebdavAsync(self, temp_path, stable_id, cb)
             return _("更新书籍身份失败")
         end
         os.remove(old_path)
-        -- 封面缓存按身份寻址，.sdr 按物理路径寻址。
-        moveBookArtifacts(stable_id, new_id)
-        moveBookArtifacts(old_path, new_path)
+        moveCover(stable_id, new_id)
+        local sdr_ok, sdr_err = moveSdr(old_path, new_path)
+        if not sdr_ok then require("utils.log").warn("book webdav replace sdr move failed", old_path, sdr_err) end
+        -- 远端进度 / 笔记边车按文件名寻址，旧名的随原书删掉；本地已同步的那份要标脏重推到新名下。
+        local ProgressDB, NoteDB = require("book.progress_db"), require("book.note_db")
+        local pos = ProgressDB.get(SOURCE_ID, new_id)
+        if pos then ProgressDB.upsert(SOURCE_ID, new_id, pos) end
+        local note = NoteDB.get(SOURCE_ID, new_id, 0)
+        if note then NoteDB.upsert(SOURCE_ID, new_id, 0, note.payload, note.updated_at) end
     end
 
     active = self.dav:listAsync(self:webdavPath() .. (parent and "/" .. parent or ""), function(entries, list_err)

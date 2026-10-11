@@ -64,8 +64,7 @@
 ---@field to_ts number
 
 ---@class BookStatsPullReplace
----@field mode '"synced"'|'"all_synced"'|'"prefix"'|'"ranges"' all_synced=全量快照，删除该源全部已同步行
----@field stable_prefixes string[]|nil mode=prefix 时生效
+---@field mode '"all_synced"'|'"ranges"'|nil all_synced=全量快照，删除该源全部已同步行；缺省=按本批时间窗口清理已同步合成行
 ---@field ranges BookStatsPullReplaceRange[]|nil mode=ranges 时按各前缀的独立时间窗口清理
 ---@field books string[]|nil 按 stable_id 精确整本替换 book_day / book_total（与 mode 无关）
 
