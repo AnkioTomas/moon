@@ -54,8 +54,7 @@ local chapter_default_source = {
 }
 
 package.preload["book.store"] = function()
-    return {
-        ensureIdentity = function(path)
+    local function identityFor(path)
             if path == "/x/book.epub" then
                 return {
                     source_id = "moon",
@@ -102,8 +101,11 @@ package.preload["book.store"] = function()
                 }
             end
             return nil
-        end,
-    }
+        end
+        return {
+            identityFor = identityFor,
+            ensureIdentity = identityFor,
+        }
 end
 package.preload["source.toc"] = function()
     return {
@@ -823,6 +825,21 @@ end
 -- DocSettingsLoad：读 sidecar 前先写全书排版，再写状态栏偏好
 Session.onDocSettingsLoad({}, { id = "doc" }, {})
 Assert.eq(table.concat(injected, ","), "prefs:doc,bars:doc")
+
+-- 按章文档把 sidecar / 文档属性改成书名，旧缓存 <title> 是章名也不影响认书
+do
+    local saved
+    local doc_settings = {
+        id = "chapter-title",
+        readSetting = function(_, key) return key == "doc_props" and {} or nil end,
+        saveSetting = function(_, key, value) if key == "doc_props" then saved = value end end,
+    }
+    local document = { file = "/other/3.html", doc_props = { title = "夏" } }
+    Session.onDocSettingsLoad({}, doc_settings, document)
+    Assert.eq(saved.title, "旧章书")
+    Assert.eq(saved.display_title, "旧章书")
+    Assert.eq(document.doc_props.title, "旧章书")
+end
 
 -- 清理：fake 经 package.preload 安装，runner 只清 package.loaded。
 for _, name in ipairs({

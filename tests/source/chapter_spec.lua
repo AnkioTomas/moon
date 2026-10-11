@@ -98,9 +98,21 @@ Assert.eq(touches[1].book.title, "书")
 local f = assert(io.open(path, "rb"))
 local html = f:read("*a")
 f:close()
-Assert.is_true(html:find("<title>二</title>", 1, true) ~= nil)
+Assert.is_true(html:find("<title>书</title>", 1, true) ~= nil, "章节 HTML 的 title 必须是书名")
+Assert.is_nil(html:find("<title>二</title>", 1, true))
 Assert.is_nil(html:find("<h1", 1, true))
 Assert.is_true(html:find("<p>正文2</p>", 1, true) ~= nil)
+
+-- 原书 CSS 原样进 <head>；不能走 string.format，百分号会被当成格式符。
+Chapter.openAsync({ type = "chapter" }, identity, { title = "书" }, { chapter_idx = 1 }, {
+    loadToc = function(_, cb) cb(toc) end,
+    fetchContent = function(_, item, cb)
+        cb({ title = item.title, text = "诗", css = ".poem{width:50%}" })
+    end,
+}, function(p) path = p end)
+local css_html = assert(io.open(path, "rb")):read("*a")
+Assert.is_true(css_html:find("<title>书</title>", 1, true) ~= nil)
+Assert.is_true(css_html:find(".poem{width:50%}", 1, true) ~= nil)
 
 -- 已落盘且无远程 img 时直接复用，不再请求正文。
 Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, function(p) path = p end)
@@ -260,6 +272,7 @@ Chapter.openWithUi({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, {
     loadToc = function() return { cancel = function() toc_cancelled = toc_cancelled + 1 end } end,
     fetchContent = function() end,
 }, function(_, err) user_err = err end)
+Stubs.flush()
 local prep = Themed.last("progress_dialog")
 Assert.not_nil(prep.on_cancel)
 prep:dismiss()
@@ -267,8 +280,8 @@ Assert.eq(toc_cancelled, 1)
 Assert.eq(user_err, "已取消")
 progress_ui.shown = 0
 
--- 已连接但不在线：runWhenOnline 不会回调，必须直接失败给出提示而不是静默挂起。
-network.online = false
+-- 未连网：直接失败给出提示，不走 runWhenOnline（用户拒开 Wi-Fi 时它永不回调）。
+network.connected = false
 progress_ui.shown = 0
 os.remove(tmp .. "/2.html")
 local offline_path, offline_err
@@ -279,7 +292,7 @@ Assert.is_nil(offline_path)
 Assert.not_nil(offline_err)
 Assert.eq(network.waited, 0)
 Assert.eq(progress_ui.shown, 0)
-network.online = true
+network.connected = true
 
 -- 预取：已有文件跳过，只拉取缺失章。
 os.remove(tmp .. "/2.html")
@@ -317,6 +330,22 @@ Assert.eq(cached, 2)
 Assert.eq(total, 3)
 Assert.eq(failed, 1)
 Assert.eq(last_error, "HTTP 425")
+
+-- 未连网预取：不请求正文，整批按失败回报，交给任务队列等网络。
+for i = 1, 3 do os.remove(tmp .. "/" .. i .. ".html") end
+network.connected = false
+local offline_fetches, offline_stats = 0, nil
+Chapter.prefetchAsync(identity, { title = "书" }, toc, 0, 3, {
+    fetchContent = function() offline_fetches = offline_fetches + 1 end,
+}, function(done, all, bad, err) offline_stats = { done, all, bad, err } end)
+Stubs.flush()
+Assert.eq(offline_fetches, 0)
+Assert.eq(offline_stats[1], 0)
+Assert.eq(offline_stats[2], 3)
+Assert.eq(offline_stats[3], 3)
+Assert.not_nil(offline_stats[4])
+Assert.eq(network.waited, 0)
+network.connected = true
 
 for name in lfs.dir(tmp) do
     if name ~= "." and name ~= ".." then os.remove(tmp .. "/" .. name) end

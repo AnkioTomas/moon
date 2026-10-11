@@ -196,7 +196,7 @@ function Annotations.wireMapping(html)
             local encoded = entity_end and table.concat(source, "", i, entity_end) or nil
             local decoded = encoded and Text.xmlDecode(encoded) or nil
             if decoded and decoded ~= encoded then
-                for _, value in ipairs(toRunes(decoded)) do
+                for _idx, value in ipairs(toRunes(decoded)) do
                     appendVisible(b, value, i - 1, entity_end)
                 end
                 i = entity_end + 1
@@ -231,14 +231,62 @@ function Annotations.stripInjected(html)
     local prev
     repeat
         prev = html
-        for _, pat in ipairs(UNDERLINE_PATTERNS) do
+        for _idx, pat in ipairs(UNDERLINE_PATTERNS) do
             html = html:gsub(pat, "%1")
         end
     until html == prev
     return html
 end
 
---- 清理微信章节正文：社区虚线和正文内不应显示的 ``<title>``。
+--- 原书 ``<style>``（去掉社区虚线样式）。抽 body 时 head 会丢，必须单独留下给 CRE 内嵌样式。
+---@param xhtml string|nil
+---@return string
+function Annotations.chapterStyles(xhtml)
+    if type(xhtml) ~= "string" or not xhtml:find("<style", 1, true) then
+        return ""
+    end
+    local parts = {}
+    for css in xhtml:gmatch("<style[^>]*>(.-)</style>") do
+        if css ~= "" and not css:find("wr-underline", 1, true) then
+            parts[#parts + 1] = css
+        end
+    end
+    return table.concat(parts, "\n")
+end
+
+--- 微信原书脚注是 ``<img class="qqreader-footnote" alt="注释正文">``。
+--- 图裂开就是阅读器里的 □；改成可点的数字链接，正文放页末 aside 给 CRE 弹窗。
+---@param html string
+---@return string
+function Annotations.rewriteFootnotes(html)
+    if type(html) ~= "string" or html == "" or not html:find("footnote", 1, true) then
+        return html
+    end
+    local notes = {}
+    local function convert(tag)
+        if not tag:find("footnote", 1, true) then return tag end
+        local class = tag:match('[Cc]lass%s*=%s*"([^"]*)"') or tag:match("[Cc]lass%s*=%s*'([^']*)'")
+        if not class or not class:find("footnote", 1, true) then return tag end
+        local alt = tag:match('[Aa]lt%s*=%s*"([^"]*)"') or tag:match("[Aa]lt%s*=%s*'([^']*)'")
+        alt = alt and Text.trim(Text.xmlDecode(alt)) or ""
+        if alt == "" then return tag end
+        notes[#notes + 1] = alt
+        local n = #notes
+        return string.format('<sup><a href="#fn%d" id="fnref%d">%d</a></sup>', n, n, n)
+    end
+    html = html:gsub("<img%s+[^>]*>", convert)
+    if #notes == 0 then return html end
+    local parts = { html, '\n<div class="footnotes">' }
+    for i, text in ipairs(notes) do
+        parts[#parts + 1] = string.format(
+            '<aside id="fn%d" epub:type="footnote"><p>%d. %s</p></aside>',
+            i, i, Text.xmlEscape(text))
+    end
+    parts[#parts + 1] = "</div>"
+    return table.concat(parts)
+end
+
+--- 清理微信章节正文：社区虚线、正文内不应显示的 ``<title>``、裂开的脚注图。
 ---@param html string
 ---@return string
 function Annotations.cleanChapterHtml(html)
@@ -247,6 +295,7 @@ function Annotations.cleanChapterHtml(html)
         return html
     end
     html = html:gsub("<title[^>]*>.-</title>", "")
+    html = Annotations.rewriteFootnotes(html)
     return Text.trim(html)
 end
 
@@ -299,7 +348,7 @@ end
 local function buildFlow(paragraphs)
     local runes, para, offset, rune_at_byte, para_first_byte = {}, {}, {}, {}, {}
     local count, byte_pos = 0, 1
-    for _, item in ipairs(paragraphs) do
+    for _idx, item in ipairs(paragraphs) do
         local first, last = 1, #item.runes
         while first <= last and item.runes[first]:match("^%s$") do
             first = first + 1
@@ -401,7 +450,12 @@ end
 ---@param items table[]
 ---@return table<table, { pos0: string, pos1: string }>
 function Annotations.locateBatch(source, items)
-    local flow = type(source) == "string" and Annotations.flow(source) or source
+    local flow
+    if type(source) == "string" then
+        flow = Annotations.flow(source)
+    else
+        flow = source
+    end
     local entries = {}
     for ordinal, item in ipairs(items or {}) do
         local needle = type(item) == "table" and normalizeText(item.text or "") or ""
@@ -420,7 +474,7 @@ function Annotations.locateBatch(source, items)
         if a.range_start == b.range_start then return a.ordinal < b.ordinal end
         return a.range_start < b.range_start
     end)
-    for _, entry in ipairs(entries) do
+    for _idx, entry in ipairs(entries) do
         if #entry.heads == 1 then entry.chosen = entry.heads[1] end
     end
     local changed = true
@@ -436,7 +490,7 @@ function Annotations.locateBatch(source, items)
                     if entries[i].chosen then upper = entries[i].chosen; break end
                 end
                 local candidate
-                for _, head in ipairs(entry.heads) do
+                for _idx, head in ipairs(entry.heads) do
                     if (not lower or head >= lower) and (not upper or head <= upper) then
                         if candidate then
                             candidate = nil
@@ -453,7 +507,7 @@ function Annotations.locateBatch(source, items)
         end
     end
     local out = {}
-    for _, entry in ipairs(entries) do
+    for _idx, entry in ipairs(entries) do
         local head = entry.chosen
         if head then
             local tail = head + countRunes(entry.needle) - 1

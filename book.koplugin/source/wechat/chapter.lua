@@ -53,7 +53,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     local function requestShard(endpoint, done)
         local params = Protocol.contentParams(bookId, uid, psvts, {
             sc = 1,
-            style = false,
+            style = true,
         })
         active_job = Auth.webPostAsync(
             "https://weread.qq.com" .. endpoint,
@@ -65,7 +65,7 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
                     ["Origin"] = "https://weread.qq.com",
                     ["Referer"] = reader_url,
                 },
-                block_timeout = 90,
+                timeout = 90,
             },
             function(raw, err)
                 if cancelled then return end
@@ -144,7 +144,7 @@ local function rewriteCachedHtml(path)
         return false
     end
     local tmp = path .. ".part"
-    pcall(os.remove, tmp)
+    os.remove(tmp)
     local out = io.open(tmp, "wb")
     if not out then
         return false
@@ -152,13 +152,13 @@ local function rewriteCachedHtml(path)
     local wrote = out:write(cleaned)
     local closed = out:close()
     if not wrote or not closed then
-        pcall(os.remove, tmp)
+        os.remove(tmp)
         return false
     end
     if os.rename(tmp, path) then
         return true
     end
-    pcall(os.remove, tmp)
+    os.remove(tmp)
     return false
 end
 
@@ -176,16 +176,17 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
         or string.format(_("第 %d 章"), tonumber(chapter and chapter.idx) or 0)
     local cancelled, asset_job = false, nil
     local reader_url = Protocol.readerUrl(bookId, chapter and chapter.uid)
-    local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter or {}, function(html, err)
+    local fetch_job = Chapter.fetchHtmlAsync(bookId, chapter or {}, function(html, err, xhtml)
         if cancelled then return end
         if not html then
             logger.warn("weread chapter fetch", bookId, chapter and chapter.idx, err)
             cb(nil, err)
             return
         end
+        local css = Annotations.chapterStyles(xhtml)
         asset_job = Assets.localizeAsync(bookId, chapter or {}, html, reader_url, function(localized)
             if cancelled then return end
-            cb({ title = title, html = localized })
+            cb({ title = title, html = localized, css = css })
         end)
     end)
     return { cancel = function()

@@ -10,6 +10,12 @@ local Assert = require("support.assert")
 package.loaded["source.wechat.mapper"] = nil
 package.loaded["source.wechat.notes"] = nil
 package.loaded["source.wechat.annotations"] = nil
+-- 本地目录：书 820954 的微信 uid 4 对应本地第 4 章；其余书未缓存。
+package.loaded["source.toc"] = {
+    index = function(_source_id, stable_id, uid)
+        return stable_id == "820954" and uid == "4" and 4 or nil
+    end,
+}
 
 local Mapper = require("source.wechat.mapper")
 local Notes = require("source.wechat.notes")
@@ -117,17 +123,18 @@ do
     }
     Assert.eq(#Notes.toAnnotations(wire, "9"), 1)
     Assert.eq(#Notes.toAnnotations({ items = wire.items }, "9"), 0)
-    Assert.eq(Notes.toAnnotations({
+    -- 本地目录映射不到：原始 chapterIdx / wire.chapters 都不是本地章号，留空。
+    Assert.is_nil(Notes.toAnnotations({
         updated = {
             { chapterUid = "8", chapterIdx = 8, markText = "x", range = "0-1", type = 1, createTime = 1 },
         },
-    }, nil, nil, "wechat", "1")[1].chapter_idx, 8)
-    Assert.eq(Notes.toAnnotations({
+    }, nil, nil, "wechat", "1")[1].chapter_idx)
+    Assert.is_nil(Notes.toAnnotations({
         chapters = { { chapterUid = "9", chapterIdx = 9 } },
         updated = {
             { chapterUid = "9", markText = "x", range = "0-1", type = 1, createTime = 1 },
         },
-    }, nil, nil, "wechat", "1")[1].chapter_idx, 9)
+    }, nil, nil, "wechat", "1")[1].chapter_idx)
 end
 
 --- 单条划线走 locateBatch，返回 pos0, pos1；定位不到返回 nil。
@@ -386,4 +393,13 @@ do
     assertStripped('<p>a<span class="wr-underline">b</span>c<span class="wr-underline">d</span></p>', "abcd")
     Assert.eq(Annotations.cleanChapterHtml('<title>第六章</title><p>正文</p>'), "<p>正文</p>")
     Assert.eq(Annotations.cleanChapterHtml('<title>第六章</title>\n<p>正文</p>'), "<p>正文</p>")
+    local foot = Annotations.cleanChapterHtml(
+        '<p>柳大郎<img class="qqreader-footnote" alt="李逵原注" src="note.png"/>回家</p>')
+    Assert.is_true(foot:find('<sup><a href="#fn1" id="fnref1">1</a></sup>', 1, true) ~= nil)
+    Assert.is_true(foot:find('id="fn1"', 1, true) ~= nil)
+    Assert.is_true(foot:find("李逵原注", 1, true) ~= nil)
+    Assert.is_nil(foot:find("note.png", 1, true))
+    Assert.eq(Annotations.chapterStyles(
+        '<html><head><style>.poem{text-align:center}</style><style>.wr-underline{border:0}</style></head><body></body></html>'),
+        ".poem{text-align:center}")
 end
