@@ -1,7 +1,7 @@
 --[[--
-本地源客户端的共享原语：路径与边车寻址、文件读写、串行异步遍历、Moon+ 进度编解码，
+本地源客户端的共享原语：路径与边车寻址、文件读写、远端小文件读写、串行异步遍历、Moon+ 进度编解码，
 以及扫盘和 WebDAV 都要用的磁盘 / 文档操作（目录遍历、元数据与封面解析、附属资源迁移）。
-零 UI 依赖：UIManager 只在 defer 里延迟加载。
+零 UI 依赖。
 
 @module koplugin.book.source.local.common
 --]]
@@ -9,16 +9,8 @@
 local lfs = require("libs/libkoreader-lfs")
 local Text = require("utils.text")
 local Paths = require("utils.paths")
-
---- 下一帧调 cb(...)。源模块顶部不许 require KOReader UI 模块（离线测试直接 require 源文件），
---- UIManager 在这里延迟加载。
----@param cb function
-local function defer(cb, ...)
-    local args = { n = select("#", ...), ... }
-    require("ui/uimanager"):nextTick(function()
-        cb(unpack(args, 1, args.n))
-    end)
-end
+local _ = require("gettext")
+local defer = require("source.base").defer
 
 local SOURCE_ID = "local"
 
@@ -72,6 +64,15 @@ end
 ---@param path string
 local function ensureParent(path)
     Paths.ensureDir(path:match("(.+)/[^/]+$") or path)
+end
+
+--- 同步、推脏、关书推送会并发读写同一个远端文件，临时文件按次唯一，免得一方删掉另一方正在用的文件。
+local temp_seq = 0
+---@param temp string
+---@return string
+local function uniqueTemp(temp)
+    temp_seq = temp_seq + 1
+    return temp .. "." .. temp_seq
 end
 
 ---@param rel string
@@ -246,7 +247,9 @@ local function withDocument(path, fn)
     if not doc then
         return nil
     end
-    if doc.loadDocument and not doc:loadDocument(false) then
+    -- crengine 读不了时 loadDocument 仍返回 true，换成一份标题为 "ERROR: ..." 的错误文档，格式记为 Unknown format
+    if doc.loadDocument and not doc:loadDocument(false)
+        or doc.getDocumentFormat and doc:getDocumentFormat() == "Unknown format" then
         -- crengine 加载失败后调其它方法会 segfault，必须直接 close
         pcall(function() doc:close() end)
         return nil
@@ -281,19 +284,10 @@ local function parseBookProps(path, cover_key)
     if not ok or type(props) ~= "table" then
         return nil
     end
-    --- 元数据字段归一：非字符串或去空白后为空一律当作缺失。
-    ---@return string|nil
-    local function clean(s)
-        if type(s) ~= "string" then
-            return nil
-        end
-        s = Text.trim(s)
-        return s ~= "" and s or nil
-    end
     return {
-        title = clean(props.title),
-        authors = clean(props.authors),
-        intro = clean(props.description),
+        title = field(props.title),
+        authors = field(props.authors),
+        intro = field(props.description),
     }
 end
 
@@ -301,8 +295,9 @@ end
 --- 根目录直属文件无分类无系列；一级子目录名 = 分类；二级子目录名 = 系列；更深忽略。
 --- 同步阻塞，只在子进程里跑。
 --- 任一目录列不出来就抛错：扫盘结果要按全量快照 reconcile，漏一个目录等于软删其中所有书。
+--- fp = 文件指纹（大小:修改时间），没变就不重算内容 md5。
 ---@param root string
----@return table[]
+---@return { name: string, path: string, category: string|nil, series: string|nil, fp: string }[]
 local function scanFiles(root)
     local files = {}
     --- 递归遍历一层目录，把书籍文件连同继承来的分类/系列收进 files。
@@ -334,6 +329,7 @@ local function scanFiles(root)
                             path = path,
                             category = category,
                             series = series,
+                            fp = attr.size .. ":" .. attr.modification,
                         }
                     end
                 end
@@ -374,6 +370,49 @@ local function notesRemotePath(self, rel)
     return moonPath(self, "Notes/" .. sidecarKey(rel) .. ".json")
 end
 
+--- 下载远端小文件并读出内容；远端不存在时 cb(nil, nil, true)。
+---@param self LocalClient
+---@param remote string
+---@param temp string 临时文件前缀（按次唯一化）
+---@param cb fun(raw: string|nil, err: string|nil, missing: boolean|nil)
+---@return { cancel: fun() }
+local function fetchText(self, remote, temp, cb)
+    temp = uniqueTemp(temp)
+    ensureParent(temp)
+    return self.dav:getAsync(remote, temp, nil, function(ok, err, code)
+        local raw = ok and readFile(temp)
+        os.remove(temp)
+        if raw then return cb(raw) end
+        cb(nil, err or _("读取失败"), code == 404)
+    end)
+end
+
+--- 上传一段内容到远端（先建父目录）。
+---@param self LocalClient
+---@param remote string
+---@param temp string 临时文件前缀（按次唯一化）
+---@param data string
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return { cancel: fun() }
+local function putText(self, remote, temp, data, cb)
+    temp = uniqueTemp(temp)
+    if not writeFile(temp, data) then return defer(cb, nil, _("无法写入临时文件")) end
+    local cancelled, active = false, nil
+    active = self.dav:ensurePathAsync(remote:match("(.+)/[^/]+$"), function(ok_dir, dir_err)
+        if cancelled then return end
+        if not ok_dir then os.remove(temp); return cb(nil, dir_err) end
+        active = self.dav:putFileAsync(remote, temp, function(ok, err)
+            os.remove(temp)
+            if not cancelled then cb(ok, err) end
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if active and active.cancel then active:cancel() end
+        os.remove(temp)
+    end }
+end
+
 return {
     SOURCE_ID = SOURCE_ID,
     defer = defer,
@@ -381,6 +420,7 @@ return {
     rootPath = rootPath,
     localRoot = localRoot,
     ensureParent = ensureParent,
+    uniqueTemp = uniqueTemp,
     remoteStableId = remoteStableId,
     safeRel = safeRel,
     remoteRelativePath = remoteRelativePath,
@@ -403,4 +443,6 @@ return {
     coverRemotePath = coverRemotePath,
     progressRemotePath = progressRemotePath,
     notesRemotePath = notesRemotePath,
+    fetchText = fetchText,
+    putText = putText,
 }
